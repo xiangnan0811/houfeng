@@ -11,6 +11,7 @@ type VPSMonitoringInstanceLinksSectionProps = {
   linkFeedbackIsError: boolean
   onCreateMonitoringInstance: () => void
   onOpenLink: () => void
+  onUpgradeMonitoringInstance: (monitoringInstance: VPSMonitoringInstanceSummary) => void
   onRequestUnlinkMonitoringInstance: (monitoringInstance: VPSMonitoringInstanceSummary) => void
   onCancelUnlinkMonitoringInstance: () => void
   onConfirmUnlinkMonitoringInstance: (monitoringInstance: VPSMonitoringInstanceSummary) => void
@@ -24,11 +25,15 @@ export function VPSMonitoringInstanceLinksSection({
   linkFeedbackIsError,
   onCreateMonitoringInstance,
   onOpenLink,
+  onUpgradeMonitoringInstance,
   onRequestUnlinkMonitoringInstance,
   onCancelUnlinkMonitoringInstance,
   onConfirmUnlinkMonitoringInstance,
 }: VPSMonitoringInstanceLinksSectionProps) {
   const pendingUnlinkName = pendingUnlinkMonitoringInstance?.display_name ?? pendingUnlinkMonitoringInstance?.monitoring_instance_id ?? ''
+  const hasNoActiveLinks = monitoring.length === 0
+  const hasSingleActiveLink = monitoring.length === 1
+  const hasDuplicateActiveLinks = monitoring.length > 1
 
   return (
     <section className="page-panel">
@@ -43,11 +48,22 @@ export function VPSMonitoringInstanceLinksSection({
         <span className="section-heading__meta">
           <MonoDigits>{monitoring.length}</MonoDigits> 个 active link
         </span>
-        <div className="section-heading__actions">
-          <Button variant="primary" size="sm" onClick={onCreateMonitoringInstance}>创建并接入 agent</Button>
-          <Button variant="secondary" size="sm" onClick={onOpenLink}>关联已有监控实例</Button>
-        </div>
+        {hasNoActiveLinks ? (
+          <div className="section-heading__actions">
+            <Button variant="primary" size="sm" onClick={onCreateMonitoringInstance}>创建并接入 agent</Button>
+            <Button variant="secondary" size="sm" onClick={onOpenLink}>关联已有监控实例</Button>
+          </div>
+        ) : hasSingleActiveLink ? (
+          <div className="section-heading__actions">
+            <Button variant="primary" size="sm" onClick={() => onUpgradeMonitoringInstance(monitoring[0])}>升级/重新接入 agent</Button>
+          </div>
+        ) : null}
       </div>
+      {hasDuplicateActiveLinks ? (
+        <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+          检测到 <MonoDigits>{monitoring.length}</MonoDigits> 个 active 监控实例关联。请人工核对要保留的实例，逐个升级/重新接入或解除多余关联。
+        </p>
+      ) : null}
       {linkFeedback ? (
         <p
           className={[
@@ -114,6 +130,14 @@ export function VPSMonitoringInstanceLinksSection({
                 <Timestamp value={monitoringInstance.last_heartbeat_at} />
               </div>
               <div className="vps-monitoring-instance-evidence-strip__actions">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={unlinkingMonitoringInstanceId !== null}
+                  onClick={() => onUpgradeMonitoringInstance(monitoringInstance)}
+                >
+                  升级/重新接入 agent
+                </Button>
                 <Button
                   variant="ghost"
                   size="sm"

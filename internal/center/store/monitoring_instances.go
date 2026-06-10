@@ -469,6 +469,18 @@ func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstance(ct
 		return monitoringinstances.Record{}, assetlinks.Record{}, assetlinks.ErrInvalidVPSMonitoringInstanceLinkInput
 	}
 
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("begin linked monitoring instance transaction for vps %q: %w", vpsID, err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if err := lockVPSAndRejectActiveMonitoringLink(ctx, tx, vpsID); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, err
+	}
+
 	monitoringInstanceID, err := ids.New("mi")
 	if err != nil {
 		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("generate monitoring instance id: %w", err)
@@ -477,14 +489,6 @@ func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstance(ct
 	if err != nil {
 		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("generate vps monitoring instance link id: %w", err)
 	}
-
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("begin linked monitoring instance transaction for vps %q: %w", vpsID, err)
-	}
-	defer func() {
-		_ = tx.Rollback(ctx)
-	}()
 
 	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
 		insert into monitoring_instances (

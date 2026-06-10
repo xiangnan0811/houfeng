@@ -53,6 +53,7 @@ type Props = {
   open: boolean
   onClose: () => void
   returnVPSId?: string | null
+  mode?: 'connect' | 'upgrade'
 }
 
 type IssueState = {
@@ -63,7 +64,7 @@ type IssueState = {
   copyStatus: 'idle' | 'copied' | 'failed'
 }
 
-export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, onClose, returnVPSId }: Props) {
+export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, onClose, returnVPSId, mode = 'connect' }: Props) {
   const navigate = useNavigate()
   const { copy } = useCopyToClipboard()
   const [state, setState] = useState<IssueState>({
@@ -104,12 +105,16 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
   }
 
   const { issue, busy, error, hidden, copyStatus } = state
-  const primaryLabel = issue ? '重新生成安装命令' : '生成一键安装命令'
+  const isUpgrade = mode === 'upgrade'
+  const title = isUpgrade ? '升级/重新接入 agent' : '接入 agent'
+  const primaryLabel = issue
+    ? isUpgrade ? '重新生成升级/重新接入命令' : '重新生成安装命令'
+    : isUpgrade ? '生成升级/重新接入命令' : '生成一键安装命令'
   const canShowCommand = issue !== null && !hidden
   const completeLabel = returnVPSId ? '完成并返回 VPS' : '完成并查看监控实例'
 
   return (
-    <Modal open={open} onClose={onClose} title="接入 agent" ariaLabel="监控实例接入抽屉" size="xl">
+    <Modal open={open} onClose={onClose} title={title} ariaLabel="监控实例接入抽屉" size="xl">
       <div className="onboarding-drawer">
         <Card cardRole="warning" className="onboarding-drawer__brief">
           <p className="onboarding-token__hint onboarding-token__hint--critical">
@@ -118,7 +123,9 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
           <p className="onboarding-steps__hint">
             {issue
               ? '重新生成会立即使上一条命令里的 enrollment token 失效；如果命令过期、丢失或已隐藏，请重新生成。'
-              : '命令由 center 后端生成，使用 HOUFENG_PUBLIC_BASE_URL，不会从浏览器地址猜测生产 URL。'}
+              : isUpgrade
+                ? '命令由 center 后端生成，用于在已接入或已观测的服务器上升级/重新接入 agent，不会新建监控实例。'
+                : '命令由 center 后端生成，使用 HOUFENG_PUBLIC_BASE_URL，不会从浏览器地址猜测生产 URL。'}
           </p>
           <div className="onboarding-token__actions">
             <button type="button" className="btn md primary" disabled={busy} onClick={() => void handleIssue()}>

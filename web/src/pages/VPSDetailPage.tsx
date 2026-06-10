@@ -393,6 +393,15 @@ export function VPSDetailPage() {
         setDomainDraft(INITIAL_DOMAIN_DRAFT)
         setDomainError(null)
         setDomainNotice(null)
+        const initialMonitoringLinks = normalizedDetail.monitoring_instance_links ?? []
+        if (initialDrawerFromQuery === 'monitoring-instance-create' && initialMonitoringLinks.length === 1) {
+          navigate(`/monitoring/${encodeURIComponent(initialMonitoringLinks[0].monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(normalizedDetail.vps_id)}`)
+          return
+        }
+        if (initialDrawerFromQuery === 'monitoring-instance-create' && initialMonitoringLinks.length > 1) {
+          setActiveDrawer('monitoring-instance-evidence')
+          return
+        }
         setActiveDrawer(initialDrawerFromQuery)
       })
       .catch((error: unknown) => {
@@ -647,6 +656,27 @@ export function VPSDetailPage() {
       }
     }
     setActiveDrawer(mode)
+  }
+
+  function openMonitoringAgentWorkbench() {
+    const detail = state.detail
+    if (!detail) return
+    const activeLinks = detail.monitoring_instance_links ?? []
+    if (activeLinks.length === 0) {
+      openDrawer('monitoring-instance-create')
+      return
+    }
+    if (activeLinks.length === 1) {
+      navigate(`/monitoring/${encodeURIComponent(activeLinks[0].monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(detail.vps_id)}`)
+      return
+    }
+    openDrawer('monitoring-instance-evidence')
+  }
+
+  function openMonitoringAgentWorkbenchFor(monitoringInstance: VPSMonitoringInstanceSummary) {
+    const detail = state.detail
+    if (!detail) return
+    navigate(`/monitoring/${encodeURIComponent(monitoringInstance.monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(detail.vps_id)}`)
   }
 
   function closeDrawer() {
@@ -1159,6 +1189,8 @@ export function VPSDetailPage() {
     archiveConfirmationName.trim() === detail.display_name.trim()
   const lifecycleConfirmDisabled = lifecycleSubmitting ||
     (lifecycleConfirmingAction === 'archive' ? !archiveCanConfirm : false)
+  const activeMonitoringLinks = detail.monitoring_instance_links ?? []
+  const monitoringAgentActionLabel = activeMonitoringLinks.length === 0 ? '创建并接入 agent' : '升级/重新接入 agent'
 
   function drawerTitle(): string {
     if (activeDrawer === 'decision') return '续费决策'
@@ -1366,8 +1398,9 @@ export function VPSDetailPage() {
           pendingUnlinkMonitoringInstance={pendingUnlinkMonitoringInstance}
           linkFeedback={linkFeedback}
           linkFeedbackIsError={linkFeedbackIsError}
-          onCreateMonitoringInstance={() => openDrawer('monitoring-instance-create')}
+          onCreateMonitoringInstance={openMonitoringAgentWorkbench}
           onOpenLink={() => openDrawer('monitoring-instance-link')}
+          onUpgradeMonitoringInstance={openMonitoringAgentWorkbenchFor}
           onRequestUnlinkMonitoringInstance={requestUnlinkMonitoringInstance}
           onCancelUnlinkMonitoringInstance={cancelUnlinkMonitoringInstance}
           onConfirmUnlinkMonitoringInstance={(monitoringInstance) => void handleUnlinkMonitoringInstance(monitoringInstance)}
@@ -1417,11 +1450,12 @@ export function VPSDetailPage() {
         isArchived={isArchived}
         showCancellationWorkbench={showCancellationWorkbench}
         lifecycleSubmitting={lifecycleSubmitting}
+        monitoringAgentActionLabel={monitoringAgentActionLabel}
         onDecisionEdit={() => openDrawer('decision')}
         onCancellationOpen={() => openDrawer('cancellation')}
         onFactEdit={() => openFactEdit(detail)}
         onExperienceLog={() => openDrawer('experience')}
-        onMonitoringInstanceCreate={() => openDrawer('monitoring-instance-create')}
+        onMonitoringInstanceCreate={openMonitoringAgentWorkbench}
         onMonitoringInstanceLink={() => openDrawer('monitoring-instance-link')}
         onSubscriptionCreate={() => openDrawer('subscription')}
         onValidityExtend={() => openDrawer('validity-extension')}
@@ -1479,7 +1513,7 @@ export function VPSDetailPage() {
         onCancellationOpen={() => openDrawer('cancellation')}
         onFactEdit={() => openFactEdit(detail)}
         onExperienceLog={() => openDrawer('experience')}
-        onMonitoringInstanceCreate={() => openDrawer('monitoring-instance-create')}
+        onMonitoringInstanceCreate={openMonitoringAgentWorkbench}
         onSubscriptionCreate={() => openDrawer('subscription')}
         onOpenFacts={() => openDrawer('facts-detail')}
         onOpenMonitoringInstanceEvidence={() => openDrawer('monitoring-instance-evidence')}

@@ -18,6 +18,7 @@ var _ assetlinks.Repository = (*PostgresVPSMonitoringInstanceLinkRepository)(nil
 type vpsMonitoringInstanceLinkDB interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
+	BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error)
 }
 
 type PostgresVPSMonitoringInstanceLinkRepository struct {
@@ -55,9 +56,51 @@ func scanVPSMonitoringInstanceLink(row vpsMonitoringInstanceLinkScanner) (assetl
 	return record, nil
 }
 
+func lockVPSAndRejectActiveMonitoringLink(ctx context.Context, tx pgx.Tx, vpsID string) error {
+	var lockedVPSID string
+	if err := tx.QueryRow(ctx, `
+		select vps_id
+		from vps_assets
+		where vps_id = $1
+		for update`,
+		vpsID,
+	).Scan(&lockedVPSID); errors.Is(err, pgx.ErrNoRows) {
+		return assetlinks.ErrVPSMonitoringInstanceLinkNotFound
+	} else if err != nil {
+		return fmt.Errorf("lock vps %q before monitoring instance link write: %w", vpsID, err)
+	}
+
+	var activeLinkCount int
+	if err := tx.QueryRow(ctx, `
+		select count(*)
+		from vps_monitoring_instance_links
+		where vps_id = $1
+		  and unlinked_at is null`,
+		vpsID,
+	).Scan(&activeLinkCount); err != nil {
+		return fmt.Errorf("count active monitoring instance links for vps %q: %w", vpsID, err)
+	}
+	if activeLinkCount > 0 {
+		return assetlinks.ErrVPSActiveMonitoringInstanceExists
+	}
+	return nil
+}
+
 func (r *PostgresVPSMonitoringInstanceLinkRepository) LinkMonitoringInstance(ctx context.Context, vpsID string, input assetlinks.LinkInput) (assetlinks.Record, error) {
 	input = assetlinks.NormalizeLinkInput(input)
 	if err := assetlinks.ValidateLinkInput(input); err != nil {
+		return assetlinks.Record{}, err
+	}
+
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return assetlinks.Record{}, fmt.Errorf("begin vps monitoring instance link transaction for vps %q: %w", vpsID, err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if err := lockVPSAndRejectActiveMonitoringLink(ctx, tx, vpsID); err != nil {
 		return assetlinks.Record{}, err
 	}
 
@@ -66,7 +109,7 @@ func (r *PostgresVPSMonitoringInstanceLinkRepository) LinkMonitoringInstance(ctx
 		return assetlinks.Record{}, fmt.Errorf("generate vps monitoring instance link id: %w", err)
 	}
 
-	record, err := scanVPSMonitoringInstanceLink(r.db.QueryRow(ctx, `
+	record, err := scanVPSMonitoringInstanceLink(tx.QueryRow(ctx, `
 		insert into vps_monitoring_instance_links (
 			link_id,
 			vps_id,
@@ -86,6 +129,9 @@ func (r *PostgresVPSMonitoringInstanceLinkRepository) LinkMonitoringInstance(ctx
 	))
 	if err != nil {
 		return assetlinks.Record{}, mapVPSMonitoringInstanceLinkWriteError(err, "link vps %q to monitoring instance %q", vpsID, input.MonitoringInstanceID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return assetlinks.Record{}, fmt.Errorf("commit vps monitoring instance link transaction for vps %q: %w", vpsID, err)
 	}
 	return record, nil
 }

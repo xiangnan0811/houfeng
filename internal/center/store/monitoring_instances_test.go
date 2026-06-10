@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/monitoringinstances"
@@ -708,6 +709,66 @@ func TestUpdateMonitoringInstanceMetadataMapsPreconditionMissToConflictWhenMonit
 	}
 	if queryCount != 2 {
 		t.Fatalf("QueryRow calls = %d, want 2", queryCount)
+	}
+}
+
+func TestCreateLinkedMonitoringInstanceRejectsExistingActiveLinkBeforeInsert(t *testing.T) {
+	t.Parallel()
+
+	var (
+		queryRows []string
+		committed bool
+	)
+	tx := &fakeMonitoringInstanceTx{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			queryRows = append(queryRows, sql)
+			if len(args) != 1 || args[0] != "vps_001" {
+				t.Fatalf("guard QueryRow args = %#v, want vps id only", args)
+			}
+			switch len(queryRows) {
+			case 1:
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "vps_001"
+					return nil
+				}}
+			case 2:
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+					*(dest[0].(*int)) = 1
+					return nil
+				}}
+			default:
+				t.Fatalf("unexpected QueryRow after active-link guard: %q", sql)
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error { return nil }}
+			}
+		},
+		commit: func(context.Context) error {
+			committed = true
+			return nil
+		},
+	}
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+
+	_, _, err := repo.CreateLinkedMonitoringInstance(context.Background(), "vps_001", monitoringinstances.CreateInput{
+		DisplayName:     "Tokyo Edge",
+		Region:          "Tokyo",
+		City:            "Tokyo",
+		Provider:        "Acme",
+		LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment,
+	}, "created from vps detail")
+	if !errors.Is(err, assetlinks.ErrVPSActiveMonitoringInstanceExists) {
+		t.Fatalf("CreateLinkedMonitoringInstance() error = %v, want ErrVPSActiveMonitoringInstanceExists", err)
+	}
+	if len(queryRows) != 2 {
+		t.Fatalf("QueryRow calls = %d, want lock and active count only; SQL=%#v", len(queryRows), queryRows)
+	}
+	if !strings.Contains(queryRows[0], "from vps_assets") || !strings.Contains(queryRows[0], "for update") {
+		t.Fatalf("first guard SQL = %q, want VPS row lock", queryRows[0])
+	}
+	if !strings.Contains(queryRows[1], "select count(*)") || !strings.Contains(queryRows[1], "from vps_monitoring_instance_links") || !strings.Contains(queryRows[1], "unlinked_at is null") {
+		t.Fatalf("second guard SQL = %q, want active link count", queryRows[1])
+	}
+	if committed {
+		t.Fatal("transaction committed despite active-link conflict")
 	}
 }
 

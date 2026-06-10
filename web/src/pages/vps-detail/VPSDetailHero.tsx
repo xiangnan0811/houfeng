@@ -10,6 +10,7 @@ type VPSDetailHeroProps = {
   isArchived: boolean
   showCancellationWorkbench: boolean
   lifecycleSubmitting: boolean
+  monitoringAgentActionLabel: string
   onDecisionEdit: () => void
   onCancellationOpen: () => void
   onFactEdit: () => void
@@ -29,6 +30,7 @@ export function VPSDetailHero({
   isArchived,
   showCancellationWorkbench,
   lifecycleSubmitting,
+  monitoringAgentActionLabel,
   onDecisionEdit,
   onCancellationOpen,
   onFactEdit,
@@ -64,7 +66,7 @@ export function VPSDetailHero({
             </Link>
             <Button variant="secondary" size="sm" onClick={onSubscriptionCreate}>创建订阅</Button>
             <Button variant="secondary" size="sm" onClick={onValidityExtend}>延长有效期</Button>
-            <Button variant="secondary" size="sm" onClick={onMonitoringInstanceCreate}>接入 agent</Button>
+            <Button variant="secondary" size="sm" onClick={onMonitoringInstanceCreate}>{monitoringAgentActionLabel}</Button>
             <details className="watchtower-actions-menu vps-detail-actions-menu">
               <summary aria-label="VPS 详情操作">…</summary>
               <div className="watchtower-actions-menu__panel">
@@ -72,7 +74,7 @@ export function VPSDetailHero({
                 <button type="button" onClick={onExperienceLog}>记录经验</button>
                 <button type="button" onClick={onSubscriptionCreate}>快速创建订阅</button>
                 <button type="button" onClick={onValidityExtend}>延长有效期</button>
-                <button type="button" onClick={onMonitoringInstanceCreate}>创建并接入 agent</button>
+                <button type="button" onClick={onMonitoringInstanceCreate}>{monitoringAgentActionLabel}</button>
                 <button type="button" onClick={onMonitoringInstanceLink}>关联已有监控实例</button>
                 <button type="button" onClick={onServiceCreate}>新增服务</button>
                 <button type="button" onClick={onDomainCreate}>新增域名</button>
