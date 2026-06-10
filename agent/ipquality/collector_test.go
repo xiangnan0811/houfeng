@@ -182,6 +182,121 @@ func TestHTTPCollectorDefaultSourcesCollectProviderCoverageAndServiceDiagnostics
 	}
 }
 
+func TestHTTPCollectorDefaultSourcesParseProviderFactsForKnownVPSIP(t *testing.T) {
+	t.Parallel()
+
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		body := ""
+		switch request.URL.Host {
+		case "api.ipapi.is":
+			body = `{
+				"ip":"209.33.173.4",
+				"rir":"RIPE",
+				"is_bogon":false,
+				"is_mobile":false,
+				"is_satellite":false,
+				"is_crawler":false,
+				"is_datacenter":true,
+				"is_tor":false,
+				"is_proxy":false,
+				"is_vpn":false,
+				"is_abuser":false,
+				"datacenter":{"datacenter":"BAGE CLOUD LLC","domain":"bage.dev","network":"209.33.173.0 - 209.33.173.255"},
+				"company":{"name":"BAGE CLOUD LLC","abuser_score":"0 (Very Low)","domain":"bage.dev","type":"hosting","network":"209.33.173.0 - 209.33.173.255","netname":"BGAE-JP-202603"},
+				"asn":{"asn":63150,"abuser_score":"0.0128 (Elevated)","route":"209.33.173.0/24","descr":"BAGE - BAGE CLOUD LLC, US","country":"us","active":true,"org":"BAGE CLOUD LLC","domain":"bage.dev","abuse":"abuse@bage.dev","type":"hosting","created":"2024-01-26","updated":"2026-03-05","rir":"ARIN"},
+				"location":{"continent":"AS","country":"Japan","country_code":"JP","state":"Tokyo To","city":"Tokyo","latitude":35.6895,"longitude":139.69171}
+			}`
+		case "api.ipquery.io":
+			body = `{
+				"ip":"209.33.173.4",
+				"isp":{"asn":"AS7029","org":"Windstream Communications LLC","isp":"Windstream Communications LLC"},
+				"location":{"country":"United States","country_code":"US","city":"Little Rock (River Mountain)","state":"Arkansas","latitude":34.75877200530601,"longitude":-92.40399800199567},
+				"risk":{"is_mobile":false,"is_vpn":false,"is_tor":false,"is_proxy":false,"is_datacenter":false,"risk_score":0}
+			}`
+		case "proxycheck.io":
+			body = `{
+				"status":"ok",
+				"209.33.173.4":{
+					"asn":"AS63150",
+					"range":"209.33.173.0/23",
+					"provider":"BAGE CLOUD LLC",
+					"organisation":"Bage Cloud LLC",
+					"continent":"Asia",
+					"continentcode":"AS",
+					"country":"Japan",
+					"isocode":"JP",
+					"region":"Tokyo",
+					"regioncode":"13",
+					"timezone":"Asia/Tokyo",
+					"city":"Akiruno (Ushinuma)",
+					"risk":66,
+					"proxy":"yes",
+					"type":"VPN"
+				}
+			}`
+		case "api.ip2location.io":
+			body = `{"ip":"209.33.173.4","country_code":"JP","country_name":"Japan","region_name":"Tokyo","city_name":"Tokyo","latitude":35.6895,"longitude":139.69232,"asn":"63150","as":"Bage Cloud LLC","is_proxy":false}`
+		case "ipwho.is":
+			body = `{"ip":"209.33.173.4","success":true,"type":"IPv4","continent":"Asia","continent_code":"AS","country":"Japan","country_code":"JP","region":"Tokyo","region_code":"13","city":"Tokyo","latitude":35.7090259,"longitude":139.7319925,"connection":{"asn":63150,"org":"BAGE CLOUD LLC","isp":"BAGE CLOUD LLC","domain":"bage.dev"}}`
+		default:
+			t.Fatalf("unexpected request to %s", request.URL.String())
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    request,
+		}, nil
+	})}
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
+		Client:       client,
+		AgentVersion: "test-agent",
+		Fingerprint:  "fp-001",
+		SyncBatchID:  "sync-001",
+	})
+
+	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+		Enabled:          true,
+		TimeoutSeconds:   5,
+		FrequencySeconds: 86400,
+	}, time.Date(2026, time.June, 10, 5, 0, 0, 0, time.UTC))
+
+	providers := providerResultsByName(report.ProviderResults)
+	ipapi := providers["ipapi.is"]
+	if ipapi.CompanyType != "hosting" || ipapi.RegionCode != "JP" ||
+		ipapi.IsServer == nil || !*ipapi.IsServer ||
+		ipapi.IsProxy == nil || *ipapi.IsProxy ||
+		ipapi.IsVPN == nil || *ipapi.IsVPN ||
+		ipapi.IsTor == nil || *ipapi.IsTor {
+		t.Fatalf("ipapi.is row = %#v, want hosting JP datacenter context and false proxy/vpn/tor", ipapi)
+	}
+	proxycheck := providers["proxycheck.io"]
+	if proxycheck.RiskScore != "66" || proxycheck.RiskLevel != "medium" ||
+		proxycheck.UsageType != "VPN" || proxycheck.RegionCode != "JP" ||
+		proxycheck.IsProxy == nil || !*proxycheck.IsProxy ||
+		proxycheck.IsVPN == nil || !*proxycheck.IsVPN {
+		t.Fatalf("proxycheck.io row = %#v, want risk 66 VPN proxy in JP", proxycheck)
+	}
+	ip2location := providers["ip2location.io"]
+	if ip2location.RegionCode != "JP" || ip2location.RegionName != "Tokyo" ||
+		ip2location.IsProxy == nil || *ip2location.IsProxy ||
+		len(ip2location.ExtraJSON) == 0 || !strings.Contains(string(ip2location.ExtraJSON), `"asn":"63150"`) {
+		t.Fatalf("ip2location.io row = %#v extra=%s, want JP proxy=false and ASN extra", ip2location, ip2location.ExtraJSON)
+	}
+	ipwhois := providers["ipwho.is"]
+	if ipwhois.RegionCode != "JP" || ipwhois.RegionName != "Japan" ||
+		ipwhois.CompanyType != "hosting" && !strings.Contains(string(ipwhois.ExtraJSON), "BAGE CLOUD LLC") {
+		t.Fatalf("ipwho.is row = %#v extra=%s, want JP and connection org context", ipwhois, ipwhois.ExtraJSON)
+	}
+	ipquery := providers["ipquery.io"]
+	if ipquery.RegionCode != "US" || !strings.Contains(string(ipquery.ExtraJSON), "Windstream Communications LLC") {
+		t.Fatalf("ipquery.io row = %#v extra=%s, want conflicting US/Windstream evidence preserved", ipquery, ipquery.ExtraJSON)
+	}
+	if len(report.DiagnosticsJSON) == 0 || !strings.Contains(string(report.DiagnosticsJSON), `"ip_candidates"`) {
+		t.Fatalf("DiagnosticsJSON = %s, want provider candidate diagnostics", report.DiagnosticsJSON)
+	}
+}
+
 func TestHTTPCollectorDefaultSourcesIsolatesProviderTimeouts(t *testing.T) {
 	t.Parallel()
 

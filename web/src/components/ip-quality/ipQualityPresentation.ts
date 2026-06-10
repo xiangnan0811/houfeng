@@ -27,7 +27,13 @@ export type RiskSignalCount = {
 export type UnlockStatusKind = 'unlocked' | 'partial' | 'blocked' | 'unknown'
 
 export type ProviderEvidenceSignal = {
-  key: RiskFlagKey | 'none'
+  key: RiskFlagKey | 'none' | 'failure' | 'skipped' | 'not_configured'
+  label: string
+  tone: BadgeTone
+}
+
+export type ProviderSourceGap = {
+  provider: string
   label: string
   tone: BadgeTone
 }
@@ -89,7 +95,40 @@ export function riskFlags(result: IPQualityProviderResult): RiskFlag[] {
 }
 
 export function providerSucceeded(result: IPQualityProviderResult): boolean {
-  return !result.status || result.status === 'success'
+  return sourceStatusKind(result) === 'success'
+}
+
+function sourceStatusKind(result: IPQualityProviderResult): string {
+  return (result.status ?? 'success').trim().toLowerCase()
+}
+
+function sourceTypeKind(result: IPQualityProviderResult): string {
+  return (result.source_type ?? 'default').trim().toLowerCase()
+}
+
+export function visibleProviderResults(results: IPQualityProviderResult[]): IPQualityProviderResult[] {
+  return results.filter((result) => {
+    const status = sourceStatusKind(result)
+    const sourceType = sourceTypeKind(result)
+    if (sourceType === 'optional' && (status === 'not_configured' || status === 'skipped')) {
+      return false
+    }
+    return true
+  })
+}
+
+export function providerSourceGaps(results: IPQualityProviderResult[]): ProviderSourceGap[] {
+  return results
+    .filter((result) => {
+      const sourceType = sourceTypeKind(result)
+      const status = sourceStatusKind(result)
+      return sourceType === 'optional' && (status === 'not_configured' || status === 'skipped')
+    })
+    .map((result) => ({
+      provider: result.provider,
+      label: result.provider,
+      tone: sourceStatusKind(result) === 'skipped' ? 'notice' : 'neutral',
+    }))
 }
 
 export function activeRiskFlags(result: IPQualityProviderResult): RiskFlag[] {
@@ -111,13 +150,17 @@ export function strongestRiskFlags(report: VPSIPQualityReport, limit = 4): RiskF
 }
 
 export function providerEvidenceSignals(result: IPQualityProviderResult): ProviderEvidenceSignal[] {
+  const status = sourceStatusKind(result)
+  if (status === 'failure') return [{ key: 'failure', label: '采集失败', tone: 'alert' }]
+  if (status === 'skipped') return [{ key: 'skipped', label: '未检测', tone: 'notice' }]
+  if (status === 'not_configured') return [{ key: 'not_configured', label: '未配置', tone: 'neutral' }]
   const signals = activeRiskFlags(result).map((flag) => ({
     key: flag.key,
     label: flag.label,
     tone: flag.negative ? 'alert' : 'notice',
   }) satisfies ProviderEvidenceSignal)
   if (signals.length > 0) return signals
-  return [{ key: 'none', label: '无用户证据', tone: 'neutral' }]
+  return [{ key: 'none', label: '未发现风险信号', tone: 'normal' }]
 }
 
 export function riskSignalCounts(results: IPQualityProviderResult[]): RiskSignalCount[] {
@@ -193,16 +236,33 @@ function safeDiagnosticText(value?: string): string | null {
     lowered.includes('not_configured') ||
     lowered.includes('optional_service_probe') ||
     lowered.includes('optional ip quality source requires configuration') ||
-    lowered.includes('unsupported_default_probe')
+    lowered.includes('unsupported_default_probe') ||
+    lowered.includes('safe default probe is not available without optional service configuration') ||
+    lowered.includes('optional service configuration')
   ) {
     return null
   }
   return normalized
 }
 
+function safeUnlockType(value?: string): string | null {
+  const normalized = safeDiagnosticText(value)
+  if (!normalized || normalized === 'none') return null
+  return normalized
+}
+
+export function serviceUnlockMeta(unlock: IPQualityServiceUnlock): string {
+  const parts: string[] = []
+  const unlockType = safeUnlockType(unlock.unlock_type)
+  if (unlock.region) parts.push(`区域 ${unlock.region}`)
+  if (unlockType) parts.push(`类型 ${unlockType}`)
+  return parts.length > 0 ? parts.join(' · ') : '无可展示区域'
+}
+
 export function serviceCardDescription(unlock: IPQualityServiceUnlock): string {
-  if (unlock.unlock_type && unlock.unlock_type !== 'none') {
-    return `解锁类型 ${unlock.unlock_type}`
+  const unlockType = safeUnlockType(unlock.unlock_type)
+  if (unlockType) {
+    return `解锁类型 ${unlockType}`
   }
   const safeError = safeDiagnosticText(unlock.error_summary)
   if (safeError) return safeError
@@ -210,7 +270,12 @@ export function serviceCardDescription(unlock: IPQualityServiceUnlock): string {
   if (kind === 'unlocked') return unlock.region ? `区域 ${unlock.region} 可用` : '服务可用'
   if (kind === 'partial') return unlock.region ? `区域 ${unlock.region} 部分可用` : '部分内容可用'
   if (kind === 'blocked') return unlock.region ? `区域 ${unlock.region} 受阻` : '服务解锁受阻'
-  return '本轮未形成可靠结论'
+  const probeStatus = (unlock.probe_status ?? '').trim().toLowerCase()
+  const errorCode = (unlock.error_code ?? '').trim().toLowerCase()
+  if (probeStatus === 'skipped' || errorCode === 'unsupported_default_probe') return '默认探测暂不支持该服务'
+  if (probeStatus === 'not_configured' || errorCode === 'not_configured') return '需要可选配置后才能检测'
+  if (probeStatus === 'failure') return '探测失败，未形成可靠结论'
+  return '本轮未形成可靠解锁结论'
 }
 
 export function coveragePercent(observed: number, expected: number): number | null {
