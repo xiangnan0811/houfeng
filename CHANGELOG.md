@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.4](https://github.com/xiangnan0811/houfeng/compare/v0.53.3...v0.53.4) (2026-06-10)
+
+
+### Bug Fixes
+
+* reuse linked monitoring instance for agent upgrade ([3f752c1](https://github.com/xiangnan0811/houfeng/commit/3f752c1c87d17fafd2ab1bf3dfe36cd487e97cc8))
+
 ## [0.53.3](https://github.com/xiangnan0811/houfeng/compare/v0.53.2...v0.53.3) (2026-06-10)
 
 
