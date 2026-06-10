@@ -145,7 +145,7 @@ func TestBuildSyncPlanIncludesIPQualityPlanFromSettings(t *testing.T) {
 				*(dest[3].(*string)) = agentapi.FrequencyTier15m
 				*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{})
 				*(dest[5].(*bool)) = true
-				*(dest[6].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.IPQualitySettings{
+				*(dest[7].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.IPQualitySettings{
 					Enabled:              true,
 					FrequencySeconds:     259200,
 					TimeoutSeconds:       20,
@@ -446,6 +446,7 @@ func TestBuildSyncPlanSuppressesPausedAndRetiredMonitoringInstances(t *testing.T
 		name             string
 		lifecycleStatus  string
 		monitoringStatus string
+		archived         bool
 	}{
 		{
 			name:             "paused monitoringInstance",
@@ -456,6 +457,12 @@ func TestBuildSyncPlanSuppressesPausedAndRetiredMonitoringInstances(t *testing.T
 			name:             "retired monitoringInstance",
 			lifecycleStatus:  monitoringinstances.LifecycleRetired,
 			monitoringStatus: monitoringinstances.MonitoringEnabled,
+		},
+		{
+			name:             "archived monitoringInstance",
+			lifecycleStatus:  monitoringinstances.LifecycleInUse,
+			monitoringStatus: monitoringinstances.MonitoringEnabled,
+			archived:         true,
 		},
 	}
 
@@ -480,6 +487,9 @@ func TestBuildSyncPlanSuppressesPausedAndRetiredMonitoringInstances(t *testing.T
 						*(dest[3].(*string)) = agentapi.FrequencyTier15m
 						*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{})
 						*(dest[5].(*bool)) = true
+						if archived, ok := dest[6].(*bool); ok {
+							*archived = tc.archived
+						}
 						return nil
 					}}
 				},
@@ -650,8 +660,8 @@ func fillDefaultAgentPlanScanFields(dest []any) {
 			*value = []byte(`{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]}`)
 		}
 	}
-	if len(dest) > 6 {
-		if value, ok := dest[6].(*[]byte); ok && len(*value) == 0 {
+	if len(dest) > 7 {
+		if value, ok := dest[7].(*[]byte); ok && len(*value) == 0 {
 			*value = []byte(`{"enabled":false,"frequency_seconds":86400,"timeout_seconds":15,"raw_retention_days":90,"history_retention_days":365,"services":["netflix","chatgpt","youtube-premium","amazon-prime-video","disney-plus","tiktok","reddit"]}`)
 		}
 	}

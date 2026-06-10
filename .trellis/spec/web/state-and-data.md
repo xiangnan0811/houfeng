@@ -189,6 +189,80 @@ setMonitoringInstance({
 })
 ```
 
+### MonitoringInstance 管理入口与归档工作集
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `MonitoringPage` 列表范围、监控实例批量操作、`MonitoringDetailPage` 详情管理入口、归档实例详情行为、或 `lib/api.ts` 中 MonitoringInstance 管理接口。
+- 目标：前端必须把 MonitoringInstance 作为可管理对象展示，不再只有“创建并接入 agent”路径；归档和永久清理这类危险操作必须通过统一管理审查入口承载。
+
+#### 2. Signatures
+
+- Frontend list API: `listMonitoringInstances(scope?: 'active'|'archived'|'all')`；`active` 不拼 query，`archived/all` 使用 `scope` query。
+- Frontend review API: `getMonitoringInstanceManagementReview(monitoringInstanceId)`。
+- Frontend action APIs: `retireMonitoringInstance`、`restoreMonitoringInstanceLifecycle`、`archiveMonitoringInstance`、`restoreMonitoringInstanceFromArchive`、`permanentCleanupMonitoringInstance`。
+- Types: `MonitoringInstanceRecord.archived_at?`、`archived_reason?`、`MonitoringInstanceManagementReview`、`MonitoringInstanceManagementCounts`、`MonitoringInstanceManagementActions`、`MonitoringInstancePermanentCleanupResult`。
+- URL-state: `/monitoring?scope=archived|all`；省略 `scope` 表示当前 active 工作集。
+
+#### 3. Contracts
+
+- `MonitoringPage` 默认请求 `/api/monitoring-instances`，不带 `scope=active`；切换 `已归档` / `全部` 才写 URL query。清空筛选必须保留当前 scope。
+- 列表 scope switch 只改变工作集范围，不应清掉用户其他筛选；scope 切换时必须清理批量选择、批量面板和批量错误，避免把旧工作集选择带到新工作集。
+- 批量运行控制只作用于未归档实例：`batchEligibleMonitoringInstances = sortedFilteredMonitoringInstances.filter(!archived_at)`。`scope=all` 下用户全选时，也只把 eligible IDs 发给 batch/action API。
+- 如果筛选变化导致 eligible 数量变成 0，批量动作不得发送空请求，也不得让 `batchSubmitting` 停留为 true；应关闭/重置批量面板或保持可恢复状态。
+- 详情页的管理审查必须懒加载：用户打开“管理实例”入口时再请求 review，避免破坏详情页既有轮询 / runtime / onboarding 请求顺序。
+- 管理动作成功后必须刷新当前 record 和 review；永久清理成功后导航回 `/monitoring`。
+- 归档实例详情仍可浏览历史和管理入口，但必须隐藏或禁用 onboarding、runtime action、command action 和 metadata edit。metadata section 应显示只读原因。
+- 管理危险操作必须复用 `ActionConfirmationModal` 风格；退役 / 恢复需要 reason，归档 / 永久清理需要 reason + 实例显示名确认。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| `/monitoring` without scope | Fetch `/api/monitoring-instances` |
+| switch to archived | Fetch `/api/monitoring-instances?scope=archived` and hide active rows |
+| switch to all | Fetch `/api/monitoring-instances?scope=all` and show active + archived |
+| clear filters while scope=archived/all | Preserve `scope` query |
+| all selected rows are archived | No batch/action request; no stuck `批量操作中…` state |
+| archived detail page | Management visible; runtime/onboarding/metadata edit hidden |
+| management review load failure | Show management error in the management section only |
+| permanent cleanup success | Navigate to `/monitoring` |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: 用户在 `全部` 范围看到 active 与 archived 实例，打开批量操作时只显示并提交 active eligible 数量。
+- Good: 用户打开归档实例详情，只能查看历史和进入管理，不会看到生成安装命令、恢复监控或编辑资料入口。
+- Base: 用户从详情打开管理入口，review 加载失败；页面保留详情主体，只在管理区域显示错误。
+- Bad: 默认列表请求 `scope=all`，把归档实例重新混入日常工作集。
+- Bad: 列表里只按 UI 隐藏归档行，但批量 API payload 仍包含 archived IDs。
+- Bad: 管理动作成功后只更新详情 record 不更新 review，导致 blockers/actions 仍显示旧状态。
+
+#### 6. Tests Required
+
+- `api.test.ts`: list scope query、review endpoint、retire/restore/archive/restore archive/permanent cleanup body。
+- `MonitoringPage.test.tsx`: 默认 active 请求、scope 切换、清空筛选保留 scope、archived 从批量操作中排除、eligible 为空不提交且不保留 submitting。
+- `MonitoringDetailPage.test.tsx`: 管理 review 展示、阻塞项/计数/VPS link、确认名、每个管理动作后刷新、归档详情隐藏 runtime/onboarding/metadata edit、cleanup 后导航。
+- `monitoringDetailHelpers` tests or page assertions: archived / retired runtime actions 返回空。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// 错误：全量视图下把归档实例也提交给批量运行控制。
+const ids = sortedFilteredMonitoringInstances.map((record) => record.monitoring_instance_id)
+await postMonitoringInstanceBatch(ids, action)
+```
+
+```tsx
+// 正确：批量动作只提交未归档实例，并在空目标时提前恢复 UI 状态。
+const ids = batchEligibleMonitoringInstances.map((record) => record.monitoring_instance_id)
+if (ids.length === 0) {
+  setSelectAll(false)
+  setBatchPanelOpen(false)
+  return
+}
+await postMonitoringInstanceBatch(ids, action)
+```
+
 ### 数据格式化
 
 - **所有面向用户的展示格式化都集中在 `web/src/lib/format.ts`**：时间 (`formatDateTime`)、百分比 (`formatPercent`)、数值 (`formatNumber`)、字节 (`formatBytes` / `formatBytesPerSecond`)、延迟 (`formatLatency`)、运行时长 (`formatUptime`)、标签拼接 (`formatLabelList`)。

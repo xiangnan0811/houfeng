@@ -309,6 +309,24 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.MonitoringInstanceRuntimeControlHandler == nil {
 		t.Fatal("router monitoringInstance runtime control handler = nil, want non-nil")
 	}
+	if gotOpts.MonitoringInstanceManagementReviewHandler == nil {
+		t.Fatal("router monitoringInstance management review handler = nil, want non-nil")
+	}
+	if gotOpts.MonitoringInstanceLifecycleRetireHandler == nil {
+		t.Fatal("router monitoringInstance lifecycle retire handler = nil, want non-nil")
+	}
+	if gotOpts.MonitoringInstanceLifecycleRestoreHandler == nil {
+		t.Fatal("router monitoringInstance lifecycle restore handler = nil, want non-nil")
+	}
+	if gotOpts.MonitoringInstanceArchiveHandler == nil {
+		t.Fatal("router monitoringInstance archive handler = nil, want non-nil")
+	}
+	if gotOpts.MonitoringInstanceRestoreFromArchiveHandler == nil {
+		t.Fatal("router monitoringInstance restore from archive handler = nil, want non-nil")
+	}
+	if gotOpts.MonitoringInstancePermanentCleanupHandler == nil {
+		t.Fatal("router monitoringInstance permanent cleanup handler = nil, want non-nil")
+	}
 	if gotOpts.MonitoringInstanceOnboardingHandler == nil {
 		t.Fatal("router monitoringInstance onboarding handler = nil, want non-nil")
 	}

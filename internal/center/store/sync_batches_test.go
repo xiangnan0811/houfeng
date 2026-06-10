@@ -255,7 +255,6 @@ func TestSyncBatchDoesNotOverrideNonPendingLifecycleAfterHostSample(t *testing.T
 		monitoringinstances.LifecycleInUse,
 		monitoringinstances.LifecycleObserving,
 		monitoringinstances.LifecycleNoRenewal,
-		monitoringinstances.LifecycleRetired,
 	}
 
 	for _, lifecycle := range tests {
@@ -286,6 +285,92 @@ func TestSyncBatchDoesNotOverrideNonPendingLifecycleAfterHostSample(t *testing.T
 			}
 			if got := args[3]; got != lifecycle {
 				t.Fatalf("lifecycle update arg = %#v, want %q", got, lifecycle)
+			}
+		})
+	}
+}
+
+func TestSyncBatchShortCircuitsSuppressedMonitoringInstanceWithoutWrites(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		lifecycleStatus  string
+		monitoringStatus string
+		archived         bool
+	}{
+		{
+			name:             "paused",
+			lifecycleStatus:  monitoringinstances.LifecycleInUse,
+			monitoringStatus: monitoringinstances.MonitoringPaused,
+		},
+		{
+			name:             "retired",
+			lifecycleStatus:  monitoringinstances.LifecycleRetired,
+			monitoringStatus: monitoringinstances.MonitoringEnabled,
+		},
+		{
+			name:             "archived",
+			lifecycleStatus:  monitoringinstances.LifecycleRetired,
+			monitoringStatus: monitoringinstances.MonitoringPaused,
+			archived:         true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tx := &fakeSyncBatchTx{
+				monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+				monitoringInstanceFingerprint:   "fp-001",
+				monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+				monitoringInstanceLifecycle:     tt.lifecycleStatus,
+				monitoringInstanceMonitoring:    tt.monitoringStatus,
+				monitoringInstanceArchived:      tt.archived,
+				pendingActionID:                 "act_001",
+				pendingCommandID:                "uptime",
+				probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
+			}
+			repo := &PostgresSyncRepository{
+				beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+					return tx, nil
+				},
+				newIPQualityReportID: func() (string, error) {
+					return "ipq_001", nil
+				},
+			}
+
+			batch := testSyncBatchWithHostSample()
+			batch.IPQualityReports = []ipquality.ReportWrite{ipQualityReportWrite()}
+			batch.CommandResults = []syncing.CommandResult{{ActionID: "act_001", CommandID: "uptime", Stdout: "up", ExitCode: 0}}
+
+			result, err := repo.ApplyBatch(context.Background(), batch)
+			if err != nil {
+				t.Fatalf("ApplyBatch() error = %v", err)
+			}
+			if result.AcceptedAt.IsZero() {
+				t.Fatal("AcceptedAt is zero, want accepted short-circuit sync")
+			}
+			if result.Plan.HostSampleFrequencyTier != "" || result.Plan.HostSampleMaintenanceContext || result.Plan.IPQualityPlan != nil || result.Plan.PendingAction != nil || len(result.Plan.ProbeAssignments) != 0 {
+				t.Fatalf("Plan = %#v, want empty plan", result.Plan)
+			}
+			if tx.commitCalls != 1 {
+				t.Fatalf("commitCalls = %d, want 1", tx.commitCalls)
+			}
+			for _, blocked := range []string{
+				"insert into monitoring_instance_heartbeats",
+				"insert into host_samples",
+				"insert into probe_observations",
+				"insert into ip_quality_reports",
+				"last_heartbeat_at = greatest",
+				"last_action->>'status'",
+				"pending_action_id = NULL",
+			} {
+				if containsSQL(tx.execSQL, blocked) {
+					t.Fatalf("execSQL contains %q for suppressed sync: %#v", blocked, tx.execSQL)
+				}
 			}
 		})
 	}
@@ -344,6 +429,8 @@ type fakeSyncBatchTx struct {
 	monitoringInstanceFingerprint   string
 	monitoringInstanceSyncTokenHash string
 	monitoringInstanceLifecycle     string
+	monitoringInstanceMonitoring    string
+	monitoringInstanceArchived      bool
 	monitoringInstanceLabels        []string
 	pendingActionID                 string
 	pendingCommandID                string
@@ -403,10 +490,20 @@ func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) p
 			if lifecycle == "" {
 				lifecycle = monitoringinstances.LifecycleInUse
 			}
+			monitoringStatus := f.monitoringInstanceMonitoring
+			if monitoringStatus == "" {
+				monitoringStatus = monitoringinstances.MonitoringEnabled
+			}
 			*(dest[0].(*string)) = f.monitoringInstanceBindingStatus
 			*(dest[1].(*string)) = f.monitoringInstanceFingerprint
 			*(dest[2].(*string)) = f.monitoringInstanceSyncTokenHash
 			*(dest[3].(*string)) = lifecycle
+			if len(dest) > 4 {
+				*(dest[4].(*string)) = monitoringStatus
+			}
+			if len(dest) > 5 {
+				*(dest[5].(*bool)) = f.monitoringInstanceArchived
+			}
 			return nil
 		}}
 	case strings.Contains(sql, "from probe_items"):

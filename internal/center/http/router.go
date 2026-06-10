@@ -61,6 +61,12 @@ type RouterOptions struct {
 	MonitoringInstanceRuntimeFactsHandler         stdhttp.Handler
 	MonitoringInstanceRuntimeStreamHandler        stdhttp.Handler
 	MonitoringInstanceRuntimeControlHandler       stdhttp.Handler
+	MonitoringInstanceManagementReviewHandler     stdhttp.Handler
+	MonitoringInstanceLifecycleRetireHandler      stdhttp.Handler
+	MonitoringInstanceLifecycleRestoreHandler     stdhttp.Handler
+	MonitoringInstanceArchiveHandler              stdhttp.Handler
+	MonitoringInstanceRestoreFromArchiveHandler   stdhttp.Handler
+	MonitoringInstancePermanentCleanupHandler     stdhttp.Handler
 	MonitoringInstanceOnboardingHandler           stdhttp.Handler
 	MonitoringInstanceEnrollmentTokenHandler      stdhttp.Handler
 	MonitoringInstanceInstallCommandHandler       stdhttp.Handler
@@ -316,7 +322,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.MonitoringInstanceBatchHandler != nil {
 		mux.Handle("/api/monitoring-instances/batch", protect(opts.MonitoringInstanceBatchHandler))
 	}
-	if opts.MonitoringInstanceItemHandler != nil || opts.MonitoringInstanceVPSHandler != nil || opts.MonitoringInstanceRuntimeFactsHandler != nil || opts.MonitoringInstanceRuntimeStreamHandler != nil || opts.MonitoringInstanceRuntimeControlHandler != nil || opts.MonitoringInstanceOnboardingHandler != nil || opts.MonitoringInstanceEnrollmentTokenHandler != nil || opts.MonitoringInstanceInstallCommandHandler != nil || opts.MonitoringInstanceBindingConfirmRebindHandler != nil || opts.MonitoringInstanceBindingRejectPendingHandler != nil || opts.MonitoringInstanceBindingResetHandler != nil || opts.MonitoringInstanceSparklinesHandler != nil || opts.MonitoringInstanceActionsHandler != nil {
+	if opts.MonitoringInstanceItemHandler != nil || opts.MonitoringInstanceVPSHandler != nil || opts.MonitoringInstanceRuntimeFactsHandler != nil || opts.MonitoringInstanceRuntimeStreamHandler != nil || opts.MonitoringInstanceRuntimeControlHandler != nil || opts.MonitoringInstanceManagementReviewHandler != nil || opts.MonitoringInstanceLifecycleRetireHandler != nil || opts.MonitoringInstanceLifecycleRestoreHandler != nil || opts.MonitoringInstanceArchiveHandler != nil || opts.MonitoringInstanceRestoreFromArchiveHandler != nil || opts.MonitoringInstancePermanentCleanupHandler != nil || opts.MonitoringInstanceOnboardingHandler != nil || opts.MonitoringInstanceEnrollmentTokenHandler != nil || opts.MonitoringInstanceInstallCommandHandler != nil || opts.MonitoringInstanceBindingConfirmRebindHandler != nil || opts.MonitoringInstanceBindingRejectPendingHandler != nil || opts.MonitoringInstanceBindingResetHandler != nil || opts.MonitoringInstanceSparklinesHandler != nil || opts.MonitoringInstanceActionsHandler != nil {
 		mux.Handle("/api/monitoring-instances/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			monitoringInstanceID, subtree := monitoringInstanceSubtreePath(r.URL.Path)
 			if monitoringInstanceID == "" && subtree != monitoringInstanceSubtreeSparklines {
@@ -355,6 +361,42 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.MonitoringInstanceRuntimeControlHandler.ServeHTTP(w, r)
+			case monitoringInstanceSubtreeManagementReview:
+				if opts.MonitoringInstanceManagementReviewHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.MonitoringInstanceManagementReviewHandler.ServeHTTP(w, r)
+			case monitoringInstanceSubtreeLifecycleRetire:
+				if opts.MonitoringInstanceLifecycleRetireHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.MonitoringInstanceLifecycleRetireHandler.ServeHTTP(w, r)
+			case monitoringInstanceSubtreeLifecycleRestore:
+				if opts.MonitoringInstanceLifecycleRestoreHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.MonitoringInstanceLifecycleRestoreHandler.ServeHTTP(w, r)
+			case monitoringInstanceSubtreeArchive:
+				if opts.MonitoringInstanceArchiveHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.MonitoringInstanceArchiveHandler.ServeHTTP(w, r)
+			case monitoringInstanceSubtreeRestoreFromArchive:
+				if opts.MonitoringInstanceRestoreFromArchiveHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.MonitoringInstanceRestoreFromArchiveHandler.ServeHTTP(w, r)
+			case monitoringInstanceSubtreePermanentCleanup:
+				if opts.MonitoringInstancePermanentCleanupHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.MonitoringInstancePermanentCleanupHandler.ServeHTTP(w, r)
 			case monitoringInstanceSubtreeOnboarding:
 				if opts.MonitoringInstanceOnboardingHandler == nil {
 					stdhttp.NotFound(w, r)
@@ -556,6 +598,12 @@ const (
 	monitoringInstanceSubtreeRuntimeFacts         monitoringInstanceSubtree = "runtime-facts"
 	monitoringInstanceSubtreeRuntimeStream        monitoringInstanceSubtree = "runtime-stream"
 	monitoringInstanceSubtreeRuntimeControl       monitoringInstanceSubtree = "runtime-control"
+	monitoringInstanceSubtreeManagementReview     monitoringInstanceSubtree = "management-review"
+	monitoringInstanceSubtreeLifecycleRetire      monitoringInstanceSubtree = "lifecycle-retire"
+	monitoringInstanceSubtreeLifecycleRestore     monitoringInstanceSubtree = "lifecycle-restore"
+	monitoringInstanceSubtreeArchive              monitoringInstanceSubtree = "archive"
+	monitoringInstanceSubtreeRestoreFromArchive   monitoringInstanceSubtree = "restore-from-archive"
+	monitoringInstanceSubtreePermanentCleanup     monitoringInstanceSubtree = "permanent-cleanup"
 	monitoringInstanceSubtreeOnboarding           monitoringInstanceSubtree = "onboarding"
 	monitoringInstanceSubtreeEnrollmentToken      monitoringInstanceSubtree = "enrollment-token"
 	monitoringInstanceSubtreeInstallCommand       monitoringInstanceSubtree = "install-command"
@@ -593,6 +641,26 @@ func monitoringInstanceSubtreePath(path string) (monitoringInstanceID string, su
 	}
 	if segments[1] == "runtime" && len(segments) == 3 {
 		return segments[0], monitoringInstanceSubtreeRuntimeControl
+	}
+	if segments[1] == "management-review" && len(segments) == 2 {
+		return segments[0], monitoringInstanceSubtreeManagementReview
+	}
+	if segments[1] == "lifecycle" && len(segments) == 3 {
+		switch segments[2] {
+		case "retire":
+			return segments[0], monitoringInstanceSubtreeLifecycleRetire
+		case "restore":
+			return segments[0], monitoringInstanceSubtreeLifecycleRestore
+		}
+	}
+	if segments[1] == "archive" && len(segments) == 2 {
+		return segments[0], monitoringInstanceSubtreeArchive
+	}
+	if segments[1] == "restore-from-archive" && len(segments) == 2 {
+		return segments[0], monitoringInstanceSubtreeRestoreFromArchive
+	}
+	if segments[1] == "permanent-cleanup" && len(segments) == 2 {
+		return segments[0], monitoringInstanceSubtreePermanentCleanup
 	}
 	if segments[1] == "onboarding" && len(segments) == 2 {
 		return segments[0], monitoringInstanceSubtreeOnboarding
