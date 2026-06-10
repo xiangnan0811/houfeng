@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -159,6 +159,9 @@ describe('VPSIPQualityPage', () => {
       credentials: 'include',
     })
     expect(screen.getByRole('link', { name: '返回 VPS 详情' })).toHaveAttribute('href', '/vps/vps_001')
+    const headerActions = screen.getByRole('link', { name: '返回 VPS 详情' }).closest('.section-heading__actions')
+    expect(headerActions).not.toBeNull()
+    expect(within(headerActions as HTMLElement).queryByText('高风险')).not.toBeInTheDocument()
     expect(screen.getAllByText('风险信号').length).toBeGreaterThan(0)
     expect(screen.getByText('解锁可用')).toBeInTheDocument()
     expect(screen.getAllByText('数据库一致性').length).toBeGreaterThan(0)
@@ -170,13 +173,24 @@ describe('VPSIPQualityPage', () => {
     expect(screen.getByText('maxmind')).toBeInTheDocument()
     expect(screen.getAllByText('未配置').length).toBeGreaterThan(0)
     expect(screen.getAllByText('查看').length).toBeGreaterThan(0)
-    expect(screen.getByText(/optional IP quality source requires configuration/)).toBeInTheDocument()
+    expect(screen.getAllByText('Server').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Proxy').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Abuse').length).toBeGreaterThan(0)
+    expect(screen.getByText('无用户证据')).toBeInTheDocument()
+    expect(screen.queryByText(/optional IP quality source requires configuration/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/http status 429/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '服务解锁矩阵' })).toBeInTheDocument()
+    expect(screen.getByLabelText('服务解锁状态统计')).toBeInTheDocument()
     expect(screen.getByText('ChatGPT')).toBeInTheDocument()
     expect(screen.getByText('Netflix')).toBeInTheDocument()
     expect(screen.getByText('Disney+')).toBeInTheDocument()
-    expect(screen.getByText('disney_default_probe · —')).toBeInTheDocument()
-    expect(screen.getAllByText('跳过').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('本轮未形成可靠结论').length).toBeGreaterThan(0)
+    expect(screen.queryByText('disney_default_probe · —')).not.toBeInTheDocument()
+    expect(screen.queryByText(/disney_default_probe/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/default_probe/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/openai_status_probe/)).not.toBeInTheDocument()
+    expect(screen.queryByText('跳过')).not.toBeInTheDocument()
+    expect(screen.queryByText('not_configured')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '证据上下文与采集完整性' })).toBeInTheDocument()
     expect(screen.getByText('AS64500')).toBeInTheDocument()
     expect(screen.getByText('Example Transit')).toBeInTheDocument()
