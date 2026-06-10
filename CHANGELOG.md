@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.54.0](https://github.com/xiangnan0811/houfeng/compare/v0.53.4...v0.54.0) (2026-06-10)
+
+
+### Features
+
+* add monitoring instance lifecycle management ([4a6e2a5](https://github.com/xiangnan0811/houfeng/commit/4a6e2a52af7f0aa1615914d4cde3d37981257fd8))
+* add monitoring instance lifecycle management ([0168800](https://github.com/xiangnan0811/houfeng/commit/01688000de5db3c062cafd927f67bf1e1a51f616))
+* expose monitoring instance management UI ([38d985d](https://github.com/xiangnan0811/houfeng/commit/38d985db99c4e5beddb7f167e63c3ed2b5a39ebb))
+
+
+### Bug Fixes
+
+* gate archived monitoring instance writes ([ca11676](https://github.com/xiangnan0811/houfeng/commit/ca1167680f7d241c0746a87924dfdac58124486b))
+
 ## [0.53.4](https://github.com/xiangnan0811/houfeng/compare/v0.53.3...v0.53.4) (2026-06-10)
 
 
