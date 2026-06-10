@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.53.2](https://github.com/xiangnan0811/houfeng/compare/v0.53.1...v0.53.2) (2026-06-10)
+
+
+### Bug Fixes
+
+* **web:** refine ip quality report UX ([60dc8a2](https://github.com/xiangnan0811/houfeng/commit/60dc8a2e19037a007cfea45cffebe2edf46b0ea1))
+* **web:** refine IP quality report UX ([3ba4cfb](https://github.com/xiangnan0811/houfeng/commit/3ba4cfb77426a3d36dfc763ac4a2185527ba91f8))
+
 ## [0.53.1](https://github.com/xiangnan0811/houfeng/compare/v0.53.0...v0.53.1) (2026-06-09)
 
 
