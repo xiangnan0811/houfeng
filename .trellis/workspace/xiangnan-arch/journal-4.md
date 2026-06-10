@@ -414,3 +414,38 @@ Reused existing VPS monitoring instances for agent upgrade/re-onboarding, shippe
 ### Next Steps
 
 - None - task complete
+
+
+## Session 189: Monitoring instance lifecycle management
+
+**Date**: 2026-06-11
+**Task**: Monitoring instance lifecycle management
+**Branch**: `feature/monitoring-instance-lifecycle-management`
+
+### Summary
+
+Added MonitoringInstance lifecycle management with archive/permanent cleanup review, sync/write gating, and management UI scope controls.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0168800` | (see git log) |
+| `ca11676` | (see git log) |
+| `38d985d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
