@@ -61,6 +61,8 @@ export function pendingBindingMetadata(onboarding: MonitoringInstanceOnboardingS
 }
 
 export function monitoringInstanceRuntimeActions(monitoringInstance: MonitoringInstanceRecord): Array<{ action: MonitoringInstanceRuntimeAction; label: string }> {
+  if (monitoringInstance.archived_at || monitoringInstance.lifecycle_status === '已退役') return []
+
   if (monitoringInstance.monitoring_status === '启用') {
     return [
       { action: 'enter-maintenance', label: '进入维护' },

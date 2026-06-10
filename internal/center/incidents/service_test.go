@@ -24,7 +24,7 @@ type fakeMonitoringInstanceRepo struct {
 func (f *fakeMonitoringInstanceRepo) GetMonitoringInstance(context.Context, string) (monitoringinstances.Record, error) {
 	return f.getMonitoringInstanceResult, nil
 }
-func (f *fakeMonitoringInstanceRepo) ListMonitoringInstances(context.Context) ([]monitoringinstances.Record, error) {
+func (f *fakeMonitoringInstanceRepo) ListMonitoringInstances(context.Context, ...monitoringinstances.ListScope) ([]monitoringinstances.Record, error) {
 	return f.listMonitoringInstancesResult, nil
 }
 

@@ -243,6 +243,92 @@ _, err := tx.Exec(ctx, `
 	raw, monitoringInstanceID, "pending", result.ActionID, result.CommandID)
 ```
 
+### MonitoringInstance lifecycle management and archive gates
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `monitoring_instances` lifecycle / monitoring / archive 字段、监控实例列表 scope、管理审查、退役 / 恢复 / 归档 / 永久清理 API、agent sync ingest、onboarding / runtime control / action / metadata 写路径。
+- 目标：MonitoringInstance 是可管理对象，不只是“新增接入 agent”的副产品；错误创建的空实例要能安全清理，真实历史实例要能暂停、退役、归档和恢复，且停止状态不得继续沉淀观测数据。
+
+#### 2. Signatures
+
+- DB columns: `monitoring_instances.archived_at timestamptz null`、`monitoring_instances.archived_reason text not null default ''`。
+- List API: `GET /api/monitoring-instances?scope=active|archived|all`，省略 scope 等同 `active`。
+- Review API: `GET /api/monitoring-instances/{monitoring_instance_id}/management-review`。
+- Management APIs:
+  - `POST /api/monitoring-instances/{id}/lifecycle/retire` with `{"reason": "..."}`
+  - `POST /api/monitoring-instances/{id}/lifecycle/restore` with `{"reason": "..."}`
+  - `POST /api/monitoring-instances/{id}/archive` with `{"reason":"...","confirmation_name":"<display_name>"}`
+  - `POST /api/monitoring-instances/{id}/restore-from-archive`
+  - `POST /api/monitoring-instances/{id}/permanent-cleanup` with `{"reason":"...","confirmation_name":"<display_name>"}`
+- Domain types: `monitoringinstances.ListScope`、`ManagementReview`、`ManagementCounts`、`ManagementActions`、`LifecycleActionInput`、`ArchiveInput`、`PermanentCleanupInput`、`PermanentCleanupResult`。
+
+#### 3. Contracts
+
+- `lifecycle_status` 不包含 `已归档`；归档只由 `archived_at is not null` 表达。允许的 lifecycle 仍是 `待接入`、`在用`、`观察中`、`不续费`、`已退役`。
+- 默认列表只返回未归档实例；`scope=archived` 只返回归档实例；`scope=all` 返回全部实例，但仍沿用已有 VPS 关联工作集裁剪规则。
+- `management-review` 必须一次返回实例、活跃 VPS link、数据 / 审计计数、warnings、blockers、actions 和 `empty_mistake_candidate`；前端不得自行拼多个接口后决定危险操作是否允许。
+- 退役必须设置 `已退役 + 暂停`，清空 enrollment token、sync token、pending binding、pending action，并写生命周期事件。
+- 从退役恢复必须设置 `观察中 + 暂停`，不自动恢复 token、action 或采集。
+- 归档必须在事务内 `select ... for update` 锁定实例，重新计算 review，校验 `confirmation_name`，要求实例已退役且没有仍在当前工作集的 VPS link；成功后设置归档字段、暂停监控、撤销 token / pending binding / pending action。
+- 从归档恢复必须清空归档字段并设置 `观察中 + 暂停`；恢复后仍需要用户显式接入或恢复监控。
+- 永久清理必须在事务内锁定实例、重新计算 review、校验名称确认。空误创建实例可直接清理；有观测 / 事件 / 通知 / lifecycle step 等证据的实例必须先归档。删除实例前先显式删除没有 FK cascade 保护的直接引用，再删除 `monitoring_instances`，其余心跳、样本、观测、IP 质量和 VPS link 依赖 FK cascade。
+- 暂停、退役或归档实例的 agent sync 必须在任何心跳、host sample、probe observation、IP 质量报告或 action result 写入前短路，返回空 plan；不要推进 `last_sync_at`。
+- 已归档实例必须阻断 install command / enrollment token、binding confirm/reject/reset、metadata update、runtime resume、action queue/dispatch 等会继续接入或控制 agent 的写路径。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| invalid list scope | HTTP 400 `invalid input` |
+| missing management reason | HTTP 400 `invalid input` |
+| archive / cleanup confirmation name mismatch | HTTP 400 `invalid input` |
+| unknown monitoring instance | HTTP 404 `monitoring instance not found` |
+| archive while not retired | HTTP 409 management blocked |
+| archive with active non-cancelled/non-archived VPS link | HTTP 409 management blocked |
+| restore lifecycle when not retired | HTTP 409 management blocked |
+| restore archive when not archived | HTTP 409 management blocked |
+| non-empty instance cleanup before archive | HTTP 409 management blocked |
+| archived instance metadata/onboarding/runtime/action write | HTTP 409 |
+| paused/retired sync with observations/IP quality/action result | accepted sync response with empty plan, no persisted writes |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: 重复创建且没有观测证据的 MonitoringInstance 通过 management review 显示为空误创建候选，用户输入名称和原因后永久清理，VPS link 随实例 cascade 删除。
+- Good: 真实运行过的实例先退役再归档；默认列表消失，但详情和归档范围仍可查看历史并可恢复。
+- Base: 暂停或退役实例的旧 agent 继续同步；center 验证 token 后返回空 plan，不写入新心跳或 IP 质量报告。
+- Bad: 把 `已归档` 塞进 `lifecycle_status`，破坏 VPS lifecycle action 对 `不续费` / `已退役` 的含义。
+- Bad: 只在前端隐藏按钮，后端 action / onboarding / sync 写路径仍允许归档实例产生新状态。
+- Bad: `ApplyBatch` 先写心跳和 IP 质量报告，再依赖 `BuildSyncPlan` 返回空计划；这会让暂停 / 退役实例继续沉淀新数据。
+
+#### 6. Tests Required
+
+- Migration / scan tests: 新增归档字段默认值、select/scan/JSON 合同。
+- Store tests: list scope、review counts/blockers/actions、retire/restore/archive/restore archive、cleanup 空实例、cleanup 非空未归档阻塞、cleanup 删除非 FK 引用。
+- Sync tests: paused / retired / archived sync 不写心跳、样本、观测、IP 质量或 action result，并返回空 plan。
+- Handler/router/bootstrap tests: 新 endpoint 方法、输入校验、scope 校验、错误码、router subtree 不落到 item handler / SPA fallback、bootstrap nil 断言。
+- Gating tests: archived metadata、onboarding/binding、runtime resume、action queue/batch 返回冲突。
+
+#### 7. Wrong vs Correct
+
+```go
+// 错误：在 buildSyncPlan 返回空计划前已经写入观测事实。
+recordHeartbeatBatch(ctx, tx, id, fingerprint, receivedAt, batch.Heartbeats)
+recordIPQualityReports(ctx, tx, newID, batch.IPQualityReports, receivedAt)
+plan, _ := buildSyncPlan(ctx, tx, id)
+```
+
+```go
+// 正确：先读取并锁定实例状态，暂停 / 退役 / 归档时直接返回空 plan。
+syncState, err := validateAcceptedSyncBatch(ctx, tx, batch)
+if err != nil {
+	return syncing.Result{}, err
+}
+if syncState.SuppressWritesAndPlan() {
+	return syncing.Result{AcceptedAt: receivedAt, Plan: agentplan.SyncPlan{ProbeAssignments: []agentplan.ProbeAssignment{}}}, nil
+}
+```
+
 ### Asset Ledger providers
 
 `db/migrations/0016_create_asset_ledger.sql` 是 post-V1 Asset Ledger 的 schema 入口，当前落 `providers` 服务商主数据表：

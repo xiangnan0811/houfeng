@@ -33,6 +33,9 @@ const (
 var ErrMonitoringInstanceNotFound = errors.New("monitoring instance not found")
 var ErrInvalidBindingTransition = errors.New("invalid binding transition")
 var ErrMonitoringInstanceMetadataConflict = errors.New("monitoring instance metadata conflict")
+var ErrInvalidManagementInput = errors.New("invalid monitoring instance management input")
+var ErrManagementActionBlocked = errors.New("monitoring instance management action blocked")
+var ErrArchivedMonitoringInstance = errors.New("archived monitoring instance")
 
 var allowedLifecycleStatuses = map[string]struct{}{
 	LifecyclePendingEnrollment: {},
@@ -41,6 +44,14 @@ var allowedLifecycleStatuses = map[string]struct{}{
 	LifecycleNoRenewal:         {},
 	LifecycleRetired:           {},
 }
+
+type ListScope string
+
+const (
+	ListScopeActive   ListScope = "active"
+	ListScopeArchived ListScope = "archived"
+	ListScopeAll      ListScope = "all"
+)
 
 // LastAction describes the queued, in-flight, or completed command action for
 // the monitoring instance. It is nil when no action has ever been requested.
@@ -81,6 +92,8 @@ type Record struct {
 	CurrentPrimaryIssueSummary string          `json:"current_primary_issue_summary"`
 	LastAction                 *LastAction     `json:"last_action,omitempty"`
 	LastActionRaw              json.RawMessage `json:"-"`
+	ArchivedAt                 *time.Time      `json:"archived_at,omitempty"`
+	ArchivedReason             string          `json:"archived_reason,omitempty"`
 	CreatedAt                  time.Time       `json:"created_at"`
 	UpdatedAt                  time.Time       `json:"updated_at"`
 }
@@ -103,8 +116,82 @@ type UpdateMetadataInput struct {
 	ExpectedUpdatedAt *time.Time `json:"-"`
 }
 
+type ManagementVPSLink struct {
+	LinkID          string    `json:"link_id"`
+	VPSID           string    `json:"vps_id"`
+	DisplayName     string    `json:"display_name"`
+	LifecycleStatus string    `json:"lifecycle_status"`
+	UsageStatus     string    `json:"usage_status"`
+	LinkedAt        time.Time `json:"linked_at"`
+	Note            string    `json:"note"`
+}
+
+type ManagementCounts struct {
+	HeartbeatCount                int `json:"heartbeat_count"`
+	HostSampleCount               int `json:"host_sample_count"`
+	ProbeObservationCount         int `json:"probe_observation_count"`
+	HostSampleDailyAggregateCount int `json:"host_sample_daily_aggregate_count"`
+	IPQualityReportCount          int `json:"ip_quality_report_count"`
+	ActiveIncidentCount           int `json:"active_incident_count"`
+	StateChangeEventCount         int `json:"state_change_event_count"`
+	NotificationRecordCount       int `json:"notification_record_count"`
+	AssetLifecycleActionStepCount int `json:"asset_lifecycle_action_step_count"`
+	ActiveVPSLinkCount            int `json:"active_vps_link_count"`
+}
+
+func (c ManagementCounts) EvidenceCount() int {
+	return c.HeartbeatCount +
+		c.HostSampleCount +
+		c.ProbeObservationCount +
+		c.HostSampleDailyAggregateCount +
+		c.IPQualityReportCount +
+		c.ActiveIncidentCount +
+		c.StateChangeEventCount +
+		c.NotificationRecordCount +
+		c.AssetLifecycleActionStepCount
+}
+
+type ManagementActions struct {
+	CanRetire           bool `json:"can_retire"`
+	CanRestoreLifecycle bool `json:"can_restore_lifecycle"`
+	CanArchive          bool `json:"can_archive"`
+	CanRestoreArchive   bool `json:"can_restore_archive"`
+	CanPermanentCleanup bool `json:"can_permanent_cleanup"`
+}
+
+type ManagementReview struct {
+	Record                Record              `json:"record"`
+	ActiveVPSLinks        []ManagementVPSLink `json:"active_vps_links"`
+	Counts                ManagementCounts    `json:"counts"`
+	Warnings              []string            `json:"warnings"`
+	Blockers              []string            `json:"blockers"`
+	Actions               ManagementActions   `json:"actions"`
+	EmptyMistakeCandidate bool                `json:"empty_mistake_candidate"`
+}
+
+type LifecycleActionInput struct {
+	Reason string `json:"reason"`
+}
+
+type ArchiveInput struct {
+	Reason           string `json:"reason"`
+	ConfirmationName string `json:"confirmation_name"`
+}
+
+type PermanentCleanupInput struct {
+	Reason           string `json:"reason"`
+	ConfirmationName string `json:"confirmation_name"`
+}
+
+type PermanentCleanupResult struct {
+	MonitoringInstanceID  string           `json:"monitoring_instance_id"`
+	Counts                ManagementCounts `json:"counts"`
+	DeletedReferenceCount int              `json:"deleted_reference_count"`
+	Deleted               bool             `json:"deleted"`
+}
+
 type Repository interface {
-	ListMonitoringInstances(context.Context) ([]Record, error)
+	ListMonitoringInstances(context.Context, ...ListScope) ([]Record, error)
 	GetMonitoringInstance(context.Context, string) (Record, error)
 	CreateMonitoringInstance(context.Context, CreateInput) (Record, error)
 	UpdateMonitoringInstanceMetadata(context.Context, string, UpdateMetadataInput) (Record, error)
@@ -168,6 +255,19 @@ type OnboardingRepository interface {
 func IsValidLifecycleStatus(status string) bool {
 	_, ok := allowedLifecycleStatuses[status]
 	return ok
+}
+
+func NormalizeListScope(scope ListScope) (ListScope, bool) {
+	switch scope {
+	case "", ListScopeActive:
+		return ListScopeActive, true
+	case ListScopeArchived:
+		return ListScopeArchived, true
+	case ListScopeAll:
+		return ListScopeAll, true
+	default:
+		return "", false
+	}
 }
 
 func DeriveOnboardingPhase(record Record, hasHostSample, hasAcceptedObservation bool) string {

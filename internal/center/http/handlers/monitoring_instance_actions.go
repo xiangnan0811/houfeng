@@ -51,6 +51,10 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 			return
 		}
 
+		if record.ArchivedAt != nil {
+			writeError(w, http.StatusConflict, "archived monitoring instance")
+			return
+		}
 		if record.BindingStatus != monitoringinstances.BindingBound {
 			writeError(w, http.StatusConflict, "monitoring instance agent not bound")
 			return
@@ -67,6 +71,14 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 		}
 
 		if err := repo.SetPendingAction(r.Context(), monitoringInstanceID, actionID, body.CommandID); err != nil {
+			if errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance) {
+				writeError(w, http.StatusConflict, "archived monitoring instance")
+				return
+			}
+			if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+				writeError(w, http.StatusNotFound, "monitoring instance not found")
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}

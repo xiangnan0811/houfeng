@@ -49,7 +49,13 @@ import type {
   IncidentListFilter,
   ExtendVPSValidityInput,
   MonitoringInstanceInstallCommandIssue,
+  MonitoringInstanceArchiveInput,
+  MonitoringInstanceLifecycleManagementInput,
+  MonitoringInstanceListScope,
+  MonitoringInstanceManagementReview,
   MonitoringInstanceOnboardingState,
+  MonitoringInstancePermanentCleanupInput,
+  MonitoringInstancePermanentCleanupResult,
   MonitoringInstanceRecord,
   MonitoringInstanceRuntimeFacts,
   MonitoringInstanceSparklinesResponse,
@@ -204,8 +210,12 @@ function withQuery(
   return suffix ? `${path}?${suffix}` : path
 }
 
-export function listMonitoringInstances() {
-  return requestJSON<MonitoringInstanceRecord[]>('/api/monitoring-instances')
+export function listMonitoringInstances(scope?: MonitoringInstanceListScope) {
+  return requestJSON<MonitoringInstanceRecord[]>(
+    withQuery('/api/monitoring-instances', {
+      scope,
+    }),
+  )
 }
 
 export function createMonitoringInstance(input: CreateMonitoringInstanceInput): Promise<MonitoringInstanceRecord> {
@@ -272,6 +282,50 @@ export function pauseMonitoringInstanceMonitoring(monitoringInstanceId: string) 
 
 export function resumeMonitoringInstanceMonitoring(monitoringInstanceId: string) {
   return postJSON<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}/runtime/resume`)
+}
+
+export function getMonitoringInstanceManagementReview(monitoringInstanceId: string) {
+  return requestJSON<MonitoringInstanceManagementReview>(
+    `/api/monitoring-instances/${monitoringInstanceId}/management-review`,
+  )
+}
+
+export function retireMonitoringInstance(
+  monitoringInstanceId: string,
+  input: MonitoringInstanceLifecycleManagementInput,
+) {
+  return postJSONBody<MonitoringInstanceRecord>(
+    `/api/monitoring-instances/${monitoringInstanceId}/lifecycle/retire`,
+    input,
+  )
+}
+
+export function restoreMonitoringInstanceLifecycle(
+  monitoringInstanceId: string,
+  input: MonitoringInstanceLifecycleManagementInput,
+) {
+  return postJSONBody<MonitoringInstanceRecord>(
+    `/api/monitoring-instances/${monitoringInstanceId}/lifecycle/restore`,
+    input,
+  )
+}
+
+export function archiveMonitoringInstance(monitoringInstanceId: string, input: MonitoringInstanceArchiveInput) {
+  return postJSONBody<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}/archive`, input)
+}
+
+export function restoreMonitoringInstanceFromArchive(monitoringInstanceId: string) {
+  return postJSON<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}/restore-from-archive`)
+}
+
+export function permanentCleanupMonitoringInstance(
+  monitoringInstanceId: string,
+  input: MonitoringInstancePermanentCleanupInput,
+) {
+  return postJSONBody<MonitoringInstancePermanentCleanupResult>(
+    `/api/monitoring-instances/${monitoringInstanceId}/permanent-cleanup`,
+    input,
+  )
 }
 
 export function getMonitoringInstanceOnboarding(monitoringInstanceId: string) {

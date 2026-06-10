@@ -318,7 +318,7 @@ type fakeMonitoringInstanceRepo struct {
 	records []monitoringinstances.Record
 }
 
-func (f fakeMonitoringInstanceRepo) ListMonitoringInstances(context.Context) ([]monitoringinstances.Record, error) {
+func (f fakeMonitoringInstanceRepo) ListMonitoringInstances(context.Context, ...monitoringinstances.ListScope) ([]monitoringinstances.Record, error) {
 	return append([]monitoringinstances.Record(nil), f.records...), nil
 }
 

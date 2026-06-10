@@ -22,6 +22,7 @@ type MonitoringInstancesListSectionProps = {
   monitoringInstanceListView: MonitoringInstanceListView
   baseMonitoringInstances: MonitoringInstanceRecord[]
   monitoring: MonitoringInstanceRecord[]
+  batchEligibleMonitoring: MonitoringInstanceRecord[]
   columns: DataTableColumn<MonitoringInstanceRecord>[]
   showTrends: boolean
   sortState: DataTableSortState | null
@@ -50,6 +51,7 @@ export function MonitoringInstancesListSection({
   monitoringInstanceListView,
   baseMonitoringInstances,
   monitoring,
+  batchEligibleMonitoring,
   columns,
   showTrends,
   sortState,
@@ -88,7 +90,7 @@ export function MonitoringInstancesListSection({
       {firstRunEmpty || !batchPanelVisible ? null : (
         <MonitoringInstancesBatchPanel
           hasActiveFilters={hasActiveFilters}
-          filteredMonitoringInstanceCount={monitoring.length}
+          filteredMonitoringInstanceCount={batchEligibleMonitoring.length}
           selectAll={selectAll}
           batchSubmitting={batchSubmitting}
           batchError={batchError}

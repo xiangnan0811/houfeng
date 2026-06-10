@@ -100,6 +100,8 @@ func executeBatchAction(
 	switch {
 	case errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound):
 		message = "monitoring instance not found"
+	case errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance):
+		message = "archived monitoring instance"
 	case errors.Is(err, store.ErrInvalidMonitoringInstanceRuntimeTransition):
 		message = "invalid runtime transition"
 	}

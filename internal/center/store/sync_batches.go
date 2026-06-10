@@ -68,6 +68,17 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 	}
 
 	receivedAt := time.Now().UTC()
+	if syncState.SuppressWritesAndPlan() {
+		plan := agentplan.SyncPlan{ProbeAssignments: make([]agentplan.ProbeAssignment, 0)}
+		if err := tx.Commit(ctx); err != nil {
+			return syncing.Result{}, fmt.Errorf("commit suppressed sync batch transaction for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
+		}
+		return syncing.Result{
+			AcceptedAt: receivedAt,
+			Plan:       plan,
+		}, nil
+	}
+
 	observationBatch := batchWithReceivedAt(batch.Observations, receivedAt)
 	if err := validateProbeObservations(ctx, tx, observationBatch.ProbeObservations); err != nil {
 		return syncing.Result{}, err
@@ -273,6 +284,14 @@ func recordIPQualityReports(ctx context.Context, tx syncBatchTx, newReportID fun
 type acceptedSyncBatchState struct {
 	BindingFingerprint string
 	LifecycleStatus    string
+	MonitoringStatus   string
+	Archived           bool
+}
+
+func (s acceptedSyncBatchState) SuppressWritesAndPlan() bool {
+	return s.Archived ||
+		s.LifecycleStatus == monitoringinstances.LifecycleRetired ||
+		s.MonitoringStatus == monitoringinstances.MonitoringPaused
 }
 
 func validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncing.Batch) (acceptedSyncBatchState, error) {
@@ -281,17 +300,21 @@ func validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncin
 		bindingFingerprint  string
 		storedSyncTokenHash string
 		lifecycleStatus     string
+		monitoringStatus    string
+		archived            bool
 	)
 	if err := tx.QueryRow(ctx, `
 		select binding_status,
 			coalesce(binding_fingerprint, ''),
 			coalesce(sync_token_hash, ''),
-			lifecycle_status
+			lifecycle_status,
+			monitoring_status,
+			archived_at is not null
 		from monitoring_instances
 		where monitoring_instance_id = $1
 		for update`,
 		batch.MonitoringInstanceID,
-	).Scan(&bindingStatus, &bindingFingerprint, &storedSyncTokenHash, &lifecycleStatus); errors.Is(err, pgx.ErrNoRows) {
+	).Scan(&bindingStatus, &bindingFingerprint, &storedSyncTokenHash, &lifecycleStatus, &monitoringStatus, &archived); errors.Is(err, pgx.ErrNoRows) {
 		return acceptedSyncBatchState{}, monitoringinstances.ErrMonitoringInstanceNotFound
 	} else if err != nil {
 		return acceptedSyncBatchState{}, fmt.Errorf("query sync batch state for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
@@ -327,6 +350,8 @@ func validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncin
 	return acceptedSyncBatchState{
 		BindingFingerprint: bindingFingerprint,
 		LifecycleStatus:    lifecycleStatus,
+		MonitoringStatus:   monitoringStatus,
+		Archived:           archived,
 	}, nil
 }
 

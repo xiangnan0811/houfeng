@@ -29,7 +29,7 @@ type SubscriptionRepository interface {
 }
 
 type MonitoringInstanceRepository interface {
-	ListMonitoringInstances(context.Context) ([]monitoringinstances.Record, error)
+	ListMonitoringInstances(context.Context, ...monitoringinstances.ListScope) ([]monitoringinstances.Record, error)
 }
 
 type Repositories struct {

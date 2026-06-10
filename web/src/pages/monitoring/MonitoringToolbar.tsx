@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 
+import type { MonitoringInstanceListScope } from '../../lib/types'
 import type { MonitoringInstanceFilterState } from './types'
 
 type MonitoringToolbarProps = {
@@ -9,11 +10,19 @@ type MonitoringToolbarProps = {
   runStatusOptions: string[]
   regionOptions: { value: string; label: string }[]
   providerOptions: { value: string; label: string }[]
+  monitoringInstanceListScope: MonitoringInstanceListScope
   compareSet: Set<string>
   onFilterChange: (key: string, value: string | null) => void
+  onScopeChange: (scope: MonitoringInstanceListScope) => void
   onAbnormalChange: (checked: boolean) => void
   onOpenBatchPanel: () => void
 }
+
+const MONITORING_INSTANCE_SCOPE_OPTIONS: Array<{ value: MonitoringInstanceListScope; label: string }> = [
+  { value: 'active', label: '当前' },
+  { value: 'archived', label: '已归档' },
+  { value: 'all', label: '全部' },
+]
 
 export function MonitoringToolbar({
   filterState,
@@ -22,13 +31,28 @@ export function MonitoringToolbar({
   runStatusOptions,
   regionOptions,
   providerOptions,
+  monitoringInstanceListScope,
   compareSet,
   onFilterChange,
+  onScopeChange,
   onAbnormalChange,
   onOpenBatchPanel,
 }: MonitoringToolbarProps) {
   return (
     <>
+      <div className="monitoring-scope-switch" aria-label="监控实例范围">
+        {MONITORING_INSTANCE_SCOPE_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={`monitoring-scope-switch__item${monitoringInstanceListScope === option.value ? ' is-active' : ''}`}
+            aria-pressed={monitoringInstanceListScope === option.value}
+            onClick={() => onScopeChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
       <div className="filter-panel animate-in d1">
         <div className="filter-bar">
           <span className="filter-bar__label">筛选</span>

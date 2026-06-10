@@ -1532,7 +1532,7 @@ func applyMonitoringInstanceLifecycleStatus(ctx context.Context, tx pgx.Tx, acti
 		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, fmt.Errorf("update monitoring instance %q lifecycle for asset lifecycle action: %w", current.MonitoringInstanceID, err)
 	}
 	eventType, summary := monitoringInstanceLifecycleEventForStatus(nextStatus)
-	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, updated, eventType, summary); err != nil {
+	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, updated, eventType, summary, ""); err != nil {
 		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, err
 	}
 	after := map[string]any{"lifecycle_status": updated.LifecycleStatus}

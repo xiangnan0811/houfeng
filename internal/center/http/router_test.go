@@ -546,6 +546,72 @@ func TestRouterDispatchesMonitoringInstanceVPSAPI(t *testing.T) {
 	}
 }
 
+func TestRouterDispatchesMonitoringInstanceManagementAPIs(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{path: "/api/monitoring-instances/mi_001/management-review", want: "management-review"},
+		{path: "/api/monitoring-instances/mi_001/lifecycle/retire", want: "lifecycle-retire"},
+		{path: "/api/monitoring-instances/mi_001/lifecycle/restore", want: "lifecycle-restore"},
+		{path: "/api/monitoring-instances/mi_001/archive", want: "archive"},
+		{path: "/api/monitoring-instances/mi_001/restore-from-archive", want: "restore-from-archive"},
+		{path: "/api/monitoring-instances/mi_001/permanent-cleanup", want: "permanent-cleanup"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			var called string
+			handler := centerhttp.New(centerhttp.RouterOptions{
+				Version: "dev",
+				MonitoringInstanceItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called = "item"
+					w.WriteHeader(http.StatusOK)
+				}),
+				MonitoringInstanceManagementReviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called = "management-review"
+					w.WriteHeader(http.StatusOK)
+				}),
+				MonitoringInstanceLifecycleRetireHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called = "lifecycle-retire"
+					w.WriteHeader(http.StatusOK)
+				}),
+				MonitoringInstanceLifecycleRestoreHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called = "lifecycle-restore"
+					w.WriteHeader(http.StatusOK)
+				}),
+				MonitoringInstanceArchiveHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called = "archive"
+					w.WriteHeader(http.StatusOK)
+				}),
+				MonitoringInstanceRestoreFromArchiveHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called = "restore-from-archive"
+					w.WriteHeader(http.StatusOK)
+				}),
+				MonitoringInstancePermanentCleanupHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called = "permanent-cleanup"
+					w.WriteHeader(http.StatusOK)
+				}),
+			})
+
+			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
+			if strings.HasSuffix(tt.path, "/management-review") {
+				req = httptest.NewRequest(http.MethodGet, tt.path, nil)
+			}
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+			}
+			if called != tt.want {
+				t.Fatalf("called = %q, want %q", called, tt.want)
+			}
+		})
+	}
+}
+
 func TestRouterProtectsSubscriptionRoutes(t *testing.T) {
 	collectionCalled := false
 	itemCalled := false
@@ -603,7 +669,7 @@ type fakeMonitoringInstanceRepository struct {
 	createMonitoringInstanceResult monitoringinstances.Record
 }
 
-func (f *fakeMonitoringInstanceRepository) ListMonitoringInstances(context.Context) ([]monitoringinstances.Record, error) {
+func (f *fakeMonitoringInstanceRepository) ListMonitoringInstances(context.Context, ...monitoringinstances.ListScope) ([]monitoringinstances.Record, error) {
 	return f.listMonitoringInstancesResult, nil
 }
 

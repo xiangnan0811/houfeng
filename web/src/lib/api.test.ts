@@ -4,6 +4,7 @@ import { matchRoutes } from 'react-router-dom'
 import type { ApplyArchiveInput, ApplyCancellationInput } from './types'
 import {
   addAssetDecisionManualGroupMember,
+  archiveMonitoringInstance,
   archiveVPS,
   applyVPSCancellation,
   archiveTarget,
@@ -32,6 +33,7 @@ import {
   getAssetDecisionRecord,
   getDashboard,
   getMonitoringInstanceOnboarding,
+  getMonitoringInstanceManagementReview,
   getProvider,
   getSettings,
   getSubscription,
@@ -60,12 +62,16 @@ import {
   listTargetAssetContexts,
   pauseMonitoringInstanceMonitoring,
   pauseTarget,
+  permanentCleanupMonitoringInstance,
   rejectPendingMonitoringInstanceBinding,
   resetMonitoringInstanceBinding,
+  restoreMonitoringInstanceFromArchive,
+  restoreMonitoringInstanceLifecycle,
   restoreTargetToPaused,
   restoreVPSFromArchive,
   resumeMonitoringInstanceMonitoring,
   resumeTarget,
+  retireMonitoringInstance,
   postMonitoringInstanceAction,
   patchAssetDecisionManualGroup,
   patchAssetDecisionManualGroupMember,
@@ -340,6 +346,31 @@ describe('api helpers', () => {
       name: 'ApiError',
       status: 404,
       message: 'monitoring instance not found',
+    })
+  })
+
+  it('serializes monitoring instance list scope query parameters', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, '[]'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listMonitoringInstances()).resolves.toEqual([])
+    await expect(listMonitoringInstances('archived')).resolves.toEqual([])
+    await expect(listMonitoringInstances('all')).resolves.toEqual([])
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/monitoring-instances', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances?scope=archived', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/monitoring-instances?scope=all', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
     })
   })
 
@@ -2201,6 +2232,7 @@ describe('api helpers', () => {
     const responseBody = {
       monitoring_instance_id: 'mi_001',
       display_name: 'Tokyo Edge',
+      group: '',
       region: 'ap-northeast-1',
       city: 'Tokyo',
       provider: 'aws',
@@ -2256,6 +2288,7 @@ describe('api helpers', () => {
     const responseBody = {
       monitoring_instance_id: 'mi_001',
       display_name: 'Tokyo Edge',
+      group: '',
       region: 'ap-northeast-1',
       city: 'Tokyo',
       provider: 'aws',
@@ -2349,6 +2382,176 @@ describe('api helpers', () => {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
+    })
+  })
+
+  it('loads monitoring instance management review from the explicit endpoint', async () => {
+    const record = {
+      monitoring_instance_id: 'mi_001',
+      display_name: 'Tokyo Edge',
+      group: '',
+      region: 'ap-northeast-1',
+      city: 'Tokyo',
+      provider: 'aws',
+      lifecycle_status: '已退役',
+      monitoring_status: '暂停',
+      binding_status: '已绑定',
+      labels: [],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      archived_at: null,
+      archived_reason: '',
+      created_at: '2026-04-26T09:00:00Z',
+      updated_at: '2026-04-26T09:15:00Z',
+    } satisfies MonitoringInstanceRecord
+    const responseBody = {
+      record,
+      active_vps_links: [
+        {
+          link_id: 'lnk_001',
+          vps_id: 'vps_001',
+          display_name: 'Tokyo VPS',
+          lifecycle_status: 'active',
+          usage_status: 'in_use',
+          linked_at: '2026-04-26T09:00:00Z',
+          note: 'primary',
+        },
+      ],
+      counts: {
+        heartbeat_count: 0,
+        host_sample_count: 0,
+        probe_observation_count: 0,
+        host_sample_daily_aggregate_count: 0,
+        ip_quality_report_count: 0,
+        active_incident_count: 0,
+        state_change_event_count: 0,
+        notification_record_count: 0,
+        asset_lifecycle_action_step_count: 0,
+        active_vps_link_count: 1,
+      },
+      warnings: ['存在活跃 VPS 关联'],
+      blockers: ['归档前需要先解除活跃 VPS 关联'],
+      actions: {
+        can_retire: false,
+        can_restore_lifecycle: true,
+        can_archive: false,
+        can_restore_archive: false,
+        can_permanent_cleanup: true,
+      },
+      empty_mistake_candidate: true,
+    }
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getMonitoringInstanceManagementReview('mi_001')).resolves.toEqual(responseBody)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_001/management-review', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('posts monitoring instance lifecycle and cleanup management actions', async () => {
+    const responseBody = {
+      monitoring_instance_id: 'mi_001',
+      display_name: 'Tokyo Edge',
+      group: '',
+      region: 'ap-northeast-1',
+      city: 'Tokyo',
+      provider: 'aws',
+      lifecycle_status: '已退役',
+      monitoring_status: '暂停',
+      binding_status: '已绑定',
+      labels: [],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-04-26T09:00:00Z',
+      updated_at: '2026-04-26T09:15:00Z',
+    } satisfies MonitoringInstanceRecord
+    const cleanupResult = {
+      monitoring_instance_id: 'mi_001',
+      counts: {
+        heartbeat_count: 0,
+        host_sample_count: 0,
+        probe_observation_count: 0,
+        host_sample_daily_aggregate_count: 0,
+        ip_quality_report_count: 0,
+        active_incident_count: 0,
+        state_change_event_count: 0,
+        notification_record_count: 0,
+        asset_lifecycle_action_step_count: 0,
+        active_vps_link_count: 0,
+      },
+      deleted_reference_count: 0,
+      deleted: true,
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(responseBody)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(responseBody)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify({ ...responseBody, archived_at: '2026-04-26T09:20:00Z', archived_reason: '重复创建' })))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(responseBody)))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(cleanupResult)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(retireMonitoringInstance('mi_001', { reason: '停止观测' })).resolves.toEqual(responseBody)
+    await expect(restoreMonitoringInstanceLifecycle('mi_001', { reason: '重新观察' })).resolves.toEqual(responseBody)
+    await expect(archiveMonitoringInstance('mi_001', { reason: '重复创建', confirmation_name: 'Tokyo Edge' })).resolves.toMatchObject({
+      archived_at: '2026-04-26T09:20:00Z',
+    })
+    await expect(restoreMonitoringInstanceFromArchive('mi_001')).resolves.toEqual(responseBody)
+    await expect(permanentCleanupMonitoringInstance('mi_001', { reason: '误创建空实例', confirmation_name: 'Tokyo Edge' })).resolves.toEqual(cleanupResult)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/monitoring-instances/mi_001/lifecycle/retire', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({ reason: '停止观测' }),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001/lifecycle/restore', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({ reason: '重新观察' }),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/monitoring-instances/mi_001/archive', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({ reason: '重复创建', confirmation_name: 'Tokyo Edge' }),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/monitoring-instances/mi_001/restore-from-archive', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/monitoring-instances/mi_001/permanent-cleanup', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify({ reason: '误创建空实例', confirmation_name: 'Tokyo Edge' }),
     })
   })
 
