@@ -1,0 +1,7 @@
+{"file":".trellis/tasks/06-10-fix-ip-quality-detail-coverage/prd.md","reason":"本任务需求、约束、验收标准。"}
+{"file":".trellis/tasks/06-10-fix-ip-quality-detail-coverage/design.md","reason":"前端展示修复与 agent provider parser 修复设计。"}
+{"file":".trellis/spec/backend/ip-quality-contract.md","reason":"IP 质量采集、上报、入库、API 和展示合同。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"本任务跨 agent、center、API、web，需要逐层核对数据流。"}
+{"file":".trellis/spec/web/component-conventions.md","reason":"IP 质量详情组件修改需遵守前端组件拆分约定。"}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"服务统计横排、风险列和 unknown 状态需复用项目主题样式。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Go parser 和 center 测试质量门。"}
