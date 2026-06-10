@@ -312,3 +312,36 @@ Added standalone VPS IP quality dashboard page, detail summary entry, route cove
 ### Next Steps
 
 - None - task complete
+
+
+## Session 186: IP质量报告体验优化
+
+**Date**: 2026-06-10
+**Task**: IP质量报告体验优化
+**Branch**: `design/ip-quality-ux-refinement`
+
+### Summary
+
+优化 VPS 详情页 IP 质量摘要与独立 IP 质量驾驶舱展示，降噪内部采集字段，补充回归测试与前端规范。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `60dc8a2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
