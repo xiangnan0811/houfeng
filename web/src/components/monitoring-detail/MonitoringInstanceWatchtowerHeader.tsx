@@ -20,6 +20,7 @@ type Props = {
   onOpenCommands: () => void
   onOpenOnboarding: () => void
   onboardingActionLabel: string
+  managementOnly?: boolean
   linkedVPS: VPSSummary[]
   linkedVPSLoading: boolean
   linkedVPSLoaded: boolean
@@ -98,6 +99,7 @@ export function MonitoringInstanceWatchtowerHeader({
   onOpenCommands,
   onOpenOnboarding,
   onboardingActionLabel,
+  managementOnly = false,
   linkedVPS,
   linkedVPSLoading,
   linkedVPSLoaded,
@@ -139,7 +141,7 @@ export function MonitoringInstanceWatchtowerHeader({
             <details className="watchtower-actions-menu">
               <summary aria-label="运行控制操作">…</summary>
               <div className="watchtower-actions-menu__panel">
-                {runtimeActions.map(({ action, label }) => (
+                {!managementOnly && runtimeActions.map(({ action, label }) => (
                   <button
                     key={action}
                     ref={(element) => registerActionRef(action, element)}
@@ -150,25 +152,31 @@ export function MonitoringInstanceWatchtowerHeader({
                     {label}
                   </button>
                 ))}
-                <button
-                  type="button"
-                  className="watchtower-actions-menu__item"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onOpenOnboarding()
-                  }}
-                >
-                  {onboardingActionLabel}
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onOpenCommands()
-                  }}
-                >
-                  执行命令…
-                </button>
+                {!managementOnly ? (
+                  <>
+                    <button
+                      type="button"
+                      className="watchtower-actions-menu__item"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onOpenOnboarding()
+                      }}
+                    >
+                      {onboardingActionLabel}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onOpenCommands()
+                      }}
+                    >
+                      执行命令…
+                    </button>
+                  </>
+                ) : (
+                  <span className="watchtower-actions-menu__hint">归档实例只允许在管理实例中操作</span>
+                )}
               </div>
             </details>
           </div>

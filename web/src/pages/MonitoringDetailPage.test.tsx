@@ -54,6 +54,41 @@ function emptyRuntimeFacts(monitoringInstanceId = 'mi_conflict') {
   }
 }
 
+function emptyManagementCounts(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    heartbeat_count: 0,
+    host_sample_count: 0,
+    probe_observation_count: 0,
+    host_sample_daily_aggregate_count: 0,
+    ip_quality_report_count: 0,
+    active_incident_count: 0,
+    state_change_event_count: 0,
+    notification_record_count: 0,
+    asset_lifecycle_action_step_count: 0,
+    active_vps_link_count: 0,
+    ...overrides,
+  }
+}
+
+function managementReview(record: Record<string, unknown>, overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    record,
+    active_vps_links: [],
+    counts: emptyManagementCounts(),
+    warnings: [],
+    blockers: [],
+    actions: {
+      can_retire: true,
+      can_restore_lifecycle: false,
+      can_archive: false,
+      can_restore_archive: false,
+      can_permanent_cleanup: false,
+    },
+    empty_mistake_candidate: false,
+    ...overrides,
+  }
+}
+
 function hostSampleRecord(monitoringInstanceId: string, overrides: Partial<Record<string, unknown>> = {}) {
   return {
     monitoring_instance_id: monitoringInstanceId,
@@ -467,6 +502,363 @@ describe('MonitoringDetailPage', () => {
     expect(screen.getByText('标签：edge')).toBeInTheDocument()
     expect(screen.getByText('备注：fresh note')).toBeInTheDocument()
     expect(screen.queryByText('Group：stale')).not.toBeInTheDocument()
+  })
+
+  it('loads monitoring instance management review from the unified detail entry', async () => {
+    const record = monitoringInstanceRecord({
+      monitoring_instance_id: 'mi_manage',
+      display_name: 'Tokyo Managed Edge',
+      binding_status: '已绑定',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+    })
+    const review = managementReview(record, {
+      active_vps_links: [
+        {
+          link_id: 'lnk_001',
+          vps_id: 'vps_001',
+          display_name: 'Tokyo VPS',
+          lifecycle_status: 'active',
+          usage_status: 'in_use',
+          linked_at: '2026-04-27T09:00:00Z',
+          note: 'primary host',
+        },
+      ],
+      counts: emptyManagementCounts({
+        host_sample_count: 3,
+        ip_quality_report_count: 1,
+        active_vps_link_count: 1,
+      }),
+      warnings: ['存在历史观测数据'],
+      blockers: ['归档前需要先退役实例'],
+      actions: {
+        can_retire: true,
+        can_restore_lifecycle: false,
+        can_archive: false,
+        can_restore_archive: false,
+        can_permanent_cleanup: false,
+      },
+    })
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_manage/management-review') {
+        return Promise.resolve(mockJSONResponse(review))
+      }
+      if (path === '/api/monitoring-instances/mi_manage') {
+        return Promise.resolve(mockJSONResponse(record))
+      }
+      if (path === '/api/monitoring-instances/mi_manage/runtime-facts?window=realtime') {
+        return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_manage')))
+      }
+      if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_manage') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/events?object_type=monitoring_instance&object_id=mi_manage') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/monitoring-instances/mi_manage/vps') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_manage']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Managed Edge' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByText('管理实例', { selector: 'summary' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_manage/management-review', {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      }),
+    )
+    expect(screen.getByText('主机样本')).toBeInTheDocument()
+    expect(screen.getByText('3')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Tokyo VPS' })).toHaveAttribute('href', '/vps/vps_001')
+    expect(screen.getByText('存在历史观测数据')).toBeInTheDocument()
+    expect(screen.getByText('归档前需要先退役实例')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '退役实例' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '归档实例' })).toBeDisabled()
+  })
+
+  it('retires a monitoring instance from the management panel and refreshes review', async () => {
+    const initialRecord = monitoringInstanceRecord({
+      monitoring_instance_id: 'mi_retire',
+      display_name: 'Tokyo Retire Edge',
+      binding_status: '已绑定',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+    })
+    const retiredRecord = {
+      ...initialRecord,
+      lifecycle_status: '已退役',
+      monitoring_status: '暂停',
+      updated_at: '2026-04-27T09:30:00Z',
+    }
+    let currentReviewRecord = initialRecord
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_retire/lifecycle/retire' && init?.method === 'POST') {
+        currentReviewRecord = retiredRecord
+        return Promise.resolve(mockJSONResponse(retiredRecord))
+      }
+      if (path === '/api/monitoring-instances/mi_retire/management-review') {
+        return Promise.resolve(mockJSONResponse(managementReview(currentReviewRecord, {
+          actions: {
+            can_retire: currentReviewRecord.lifecycle_status !== '已退役',
+            can_restore_lifecycle: currentReviewRecord.lifecycle_status === '已退役',
+            can_archive: currentReviewRecord.lifecycle_status === '已退役',
+            can_restore_archive: false,
+            can_permanent_cleanup: false,
+          },
+        })))
+      }
+      if (path === '/api/monitoring-instances/mi_retire') {
+        return Promise.resolve(mockJSONResponse(initialRecord))
+      }
+      if (path === '/api/monitoring-instances/mi_retire/runtime-facts?window=realtime') {
+        return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_retire')))
+      }
+      if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_retire') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/events?object_type=monitoring_instance&object_id=mi_retire') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/monitoring-instances/mi_retire/vps') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_retire']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Retire Edge' })).toBeInTheDocument())
+    fireEvent.click(screen.getByText('管理实例', { selector: 'summary' }))
+    fireEvent.click(await screen.findByRole('button', { name: '退役实例' }))
+
+    const dialog = await screen.findByRole('alertdialog', { name: '退役监控实例' })
+    fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '已不再需要观测' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认退役' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_retire/lifecycle/retire', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({ reason: '已不再需要观测' }),
+      }),
+    )
+    expect(screen.getAllByText('已退役').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('暂停').length).toBeGreaterThan(0)
+  })
+
+  it('archives a retired monitoring instance with display-name confirmation', async () => {
+    const retiredRecord = monitoringInstanceRecord({
+      monitoring_instance_id: 'mi_archive',
+      display_name: 'Tokyo Archive Edge',
+      lifecycle_status: '已退役',
+      monitoring_status: '暂停',
+      binding_status: '已绑定',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+    })
+    const archivedRecord = {
+      ...retiredRecord,
+      archived_at: '2026-04-27T09:35:00Z',
+      archived_reason: '重复创建',
+      updated_at: '2026-04-27T09:35:00Z',
+    }
+    let currentReviewRecord: Record<string, unknown> = retiredRecord
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_archive/archive' && init?.method === 'POST') {
+        currentReviewRecord = archivedRecord
+        return Promise.resolve(mockJSONResponse(archivedRecord))
+      }
+      if (path === '/api/monitoring-instances/mi_archive/management-review') {
+        return Promise.resolve(mockJSONResponse(managementReview(currentReviewRecord, {
+          actions: {
+            can_retire: false,
+            can_restore_lifecycle: !currentReviewRecord.archived_at,
+            can_archive: !currentReviewRecord.archived_at,
+            can_restore_archive: Boolean(currentReviewRecord.archived_at),
+            can_permanent_cleanup: true,
+          },
+          empty_mistake_candidate: true,
+        })))
+      }
+      if (path === '/api/monitoring-instances/mi_archive') {
+        return Promise.resolve(mockJSONResponse(retiredRecord))
+      }
+      if (path === '/api/monitoring-instances/mi_archive/runtime-facts?window=realtime') {
+        return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_archive')))
+      }
+      if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_archive') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/events?object_type=monitoring_instance&object_id=mi_archive') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/monitoring-instances/mi_archive/vps') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_archive']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Archive Edge' })).toBeInTheDocument())
+    fireEvent.click(screen.getByText('管理实例', { selector: 'summary' }))
+    fireEvent.click(await screen.findByRole('button', { name: '归档实例' }))
+
+    const dialog = await screen.findByRole('alertdialog', { name: '归档监控实例' })
+    expect(within(dialog).getByRole('button', { name: '确认归档' })).toBeDisabled()
+    fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '重复创建' } })
+    fireEvent.change(within(dialog).getByLabelText('输入实例名称确认'), { target: { value: 'Tokyo Archive Edge' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_archive/archive', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({ reason: '重复创建', confirmation_name: 'Tokyo Archive Edge' }),
+      }),
+    )
+    expect(screen.getByText('已归档')).toBeInTheDocument()
+  })
+
+  it('keeps archived details read-only and permanently cleans up from management', async () => {
+    const archivedRecord = monitoringInstanceRecord({
+      monitoring_instance_id: 'mi_cleanup',
+      display_name: 'Tokyo Cleanup Edge',
+      lifecycle_status: '已退役',
+      monitoring_status: '暂停',
+      binding_status: '已绑定',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      archived_at: '2026-04-27T09:35:00Z',
+      archived_reason: '重复创建',
+    })
+    const cleanupResult = {
+      monitoring_instance_id: 'mi_cleanup',
+      counts: emptyManagementCounts(),
+      deleted_reference_count: 0,
+      deleted: true,
+    }
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_cleanup/permanent-cleanup' && init?.method === 'POST') {
+        return Promise.resolve(mockJSONResponse(cleanupResult))
+      }
+      if (path === '/api/monitoring-instances/mi_cleanup/management-review') {
+        return Promise.resolve(mockJSONResponse(managementReview(archivedRecord, {
+          actions: {
+            can_retire: false,
+            can_restore_lifecycle: false,
+            can_archive: false,
+            can_restore_archive: true,
+            can_permanent_cleanup: true,
+          },
+          empty_mistake_candidate: true,
+        })))
+      }
+      if (path === '/api/monitoring-instances/mi_cleanup') {
+        return Promise.resolve(mockJSONResponse(archivedRecord))
+      }
+      if (path === '/api/monitoring-instances/mi_cleanup/runtime-facts?window=realtime') {
+        return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_cleanup')))
+      }
+      if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_cleanup') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/events?object_type=monitoring_instance&object_id=mi_cleanup') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/monitoring-instances/mi_cleanup/vps') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_cleanup']}>
+        <Routes>
+          <Route path="/monitoring" element={<div>monitoring list</div>} />
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Cleanup Edge' })).toBeInTheDocument())
+
+    openRuntimeMenu()
+    expect(screen.queryByRole('button', { name: '升级/重新接入 agent…' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '执行命令…' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '恢复监控' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('标签与备注', { selector: 'summary' }))
+    expect(screen.queryByRole('button', { name: '编辑标签与备注' })).not.toBeInTheDocument()
+    expect(screen.getByText('已归档实例资料只读')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('管理实例', { selector: 'summary' }))
+    fireEvent.click(await screen.findByRole('button', { name: '永久清理' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '永久清理监控实例' })
+    fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '误创建空实例' } })
+    fireEvent.change(within(dialog).getByLabelText('输入实例名称确认'), { target: { value: 'Tokyo Cleanup Edge' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认永久清理' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_cleanup/permanent-cleanup', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({ reason: '误创建空实例', confirmation_name: 'Tokyo Cleanup Edge' }),
+      }),
+    )
+    await waitFor(() => expect(screen.getByText('monitoring list')).toBeInTheDocument())
   })
 
   it('renders monitoringInstance header and latest host sample cards', async () => {

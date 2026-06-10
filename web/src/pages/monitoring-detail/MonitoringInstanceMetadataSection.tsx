@@ -12,6 +12,7 @@ type MonitoringInstanceMetadataSectionProps = {
   noteDraft: string
   submitting: boolean
   error: string | null
+  readOnlyReason?: string | null
   onGroupDraftChange: (value: string) => void
   onLabelDraftChange: (value: string) => void
   onNoteDraftChange: (value: string) => void
@@ -28,6 +29,7 @@ export function MonitoringInstanceMetadataSection({
   noteDraft,
   submitting,
   error,
+  readOnlyReason = null,
   onGroupDraftChange,
   onLabelDraftChange,
   onNoteDraftChange,
@@ -108,9 +110,13 @@ export function MonitoringInstanceMetadataSection({
                 ) : null}
               </div>
               <div className="watchtower-property-item__actions">
-                <Button variant="secondary" onClick={onStartEdit}>
-                  编辑标签与备注
-                </Button>
+                {readOnlyReason ? (
+                  <span className="watchtower-property-item__desc">{readOnlyReason}</span>
+                ) : (
+                  <Button variant="secondary" onClick={onStartEdit}>
+                    编辑标签与备注
+                  </Button>
+                )}
               </div>
             </>
           )}

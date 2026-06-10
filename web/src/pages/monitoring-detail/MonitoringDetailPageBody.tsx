@@ -10,6 +10,7 @@ import type {
   ActiveIncidentRecord,
   HostSample,
   MonitoringInstanceOnboardingState,
+  MonitoringInstanceManagementReview,
   MonitoringInstanceRecord,
   MonitoringInstanceRuntimeFacts,
   StateChangeEventRecord,
@@ -19,6 +20,7 @@ import { MonitoringInstanceBindingConflictSection } from './MonitoringInstanceBi
 import { MonitoringInstanceCommandDrawer } from './MonitoringInstanceCommandDrawer'
 import { MonitoringInstanceDangerCard } from './MonitoringInstanceDangerCard'
 import { MonitoringInstanceHistoryDrawer } from './MonitoringInstanceHistoryDrawer'
+import { MonitoringInstanceManagementSection } from './MonitoringInstanceManagementSection'
 import { MonitoringInstanceMetadataSection } from './MonitoringInstanceMetadataSection'
 import { MonitoringInstanceOnboardingDrawer } from './MonitoringInstanceOnboardingDrawer'
 import { MonitoringInstanceRuntimePauseConfirmation } from './MonitoringInstanceRuntimePauseConfirmation'
@@ -95,6 +97,11 @@ type MonitoringDetailPageBodyProps = {
   metadataNoteDraft: string
   metadataSubmitting: boolean
   metadataError: string | null
+  managementReview: MonitoringInstanceManagementReview | null
+  managementLoading: boolean
+  managementError: string | null
+  managementSubmittingAction: 'retire' | 'restore-lifecycle' | 'archive' | 'restore-archive' | 'permanent-cleanup' | null
+  managementActionError: string | null
   onRuntimeAction: (action: MonitoringInstanceRuntimeAction, confirmed?: boolean) => void
   onCancelRuntimeConfirmation: () => void
   registerActionRef: (action: MonitoringInstanceRuntimeAction, element: HTMLButtonElement | null) => void
@@ -104,6 +111,12 @@ type MonitoringDetailPageBodyProps = {
   onMetadataStartEdit: () => void
   onMetadataCancelEdit: () => void
   onMetadataSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onManagementLoadReview: () => void
+  onManagementRetire: (reason: string) => void
+  onManagementRestoreLifecycle: (reason: string) => void
+  onManagementArchive: (reason: string, confirmationName: string) => void
+  onManagementRestoreArchive: () => void
+  onManagementPermanentCleanup: (reason: string, confirmationName: string) => void
   incidents: ActiveIncidentRecord[]
   events: StateChangeEventRecord[]
   eventsError: string | null
@@ -159,6 +172,11 @@ export function MonitoringDetailPageBody({
   metadataNoteDraft,
   metadataSubmitting,
   metadataError,
+  managementReview,
+  managementLoading,
+  managementError,
+  managementSubmittingAction,
+  managementActionError,
   onRuntimeAction,
   onCancelRuntimeConfirmation,
   registerActionRef,
@@ -168,6 +186,12 @@ export function MonitoringDetailPageBody({
   onMetadataStartEdit,
   onMetadataCancelEdit,
   onMetadataSubmit,
+  onManagementLoadReview,
+  onManagementRetire,
+  onManagementRestoreLifecycle,
+  onManagementArchive,
+  onManagementRestoreArchive,
+  onManagementPermanentCleanup,
   incidents,
   events,
   eventsError,
@@ -219,6 +243,7 @@ export function MonitoringDetailPageBody({
       ? realtimeSamples
       : runtimeFacts?.host_metric_points ?? []
   const isMaintenance = monitoringInstance.monitoring_status === '维护中'
+  const archived = Boolean(monitoringInstance.archived_at)
   const showBindingConflict = monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
   const bindingActionsDisabled =
     bindingAction !== null || bindingConflictLoading || !bindingConflict
@@ -246,6 +271,7 @@ export function MonitoringDetailPageBody({
         onOpenCommands={onOpenCommands}
         onOpenOnboarding={onOpenOnboarding}
         onboardingActionLabel={isUpgradeOnboarding ? '升级/重新接入 agent…' : '接入 agent…'}
+        managementOnly={archived}
         linkedVPS={linkedVPS}
         linkedVPSLoading={linkedVPSLoading}
         linkedVPSLoaded={linkedVPSLoaded}
@@ -270,12 +296,28 @@ export function MonitoringDetailPageBody({
         noteDraft={metadataNoteDraft}
         submitting={metadataSubmitting}
         error={metadataError}
+        readOnlyReason={archived ? '已归档实例资料只读' : null}
         onGroupDraftChange={onMetadataGroupDraftChange}
         onLabelDraftChange={onMetadataLabelDraftChange}
         onNoteDraftChange={onMetadataNoteDraftChange}
         onStartEdit={onMetadataStartEdit}
         onCancelEdit={onMetadataCancelEdit}
         onSubmit={onMetadataSubmit}
+      />
+
+      <MonitoringInstanceManagementSection
+        monitoringInstance={monitoringInstance}
+        review={managementReview}
+        loading={managementLoading}
+        error={managementError}
+        submittingAction={managementSubmittingAction}
+        actionError={managementActionError}
+        onLoadReview={onManagementLoadReview}
+        onRetire={onManagementRetire}
+        onRestoreLifecycle={onManagementRestoreLifecycle}
+        onArchive={onManagementArchive}
+        onRestoreArchive={onManagementRestoreArchive}
+        onPermanentCleanup={onManagementPermanentCleanup}
       />
 
       {showDangerZone ? (

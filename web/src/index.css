@@ -2517,6 +2517,10 @@ select.input::-ms-expand{display:none}
 .monitoring-filter-drawer .list-filter-panel{box-shadow:none}
 @media (max-width:760px){.monitoring-toolbar{grid-template-columns:1fr}.monitoring-toolbar__primary,.monitoring-toolbar__actions,.monitoring-toolbar__refresh{align-items:stretch;flex-direction:column;width:100%}.monitoring-toolbar__actions .btn,.monitoring-toolbar__actions a,.monitoring-toolbar__refresh select,.monitoring-toolbar .list-command-band__meta{width:100%}.monitoring-toolbar__actions .btn,.monitoring-toolbar__actions a{justify-content:center}}
 .monitoring-toolbar__secondary-row{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-4)}
+.monitoring-scope-switch{display:inline-flex;align-items:center;gap:var(--space-1);width:fit-content;max-width:100%;padding:var(--space-1);border:var(--border-w) solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 18%,transparent);margin-bottom:var(--space-3)}
+.monitoring-scope-switch__item{appearance:none;border:0;background:transparent;color:var(--text-muted);font:inherit;font-size:var(--type-small-size);line-height:1.2;border-radius:var(--radius-1);padding:var(--space-2) var(--space-3);cursor:pointer;transition:background-color var(--dur-micro) var(--ease-calm),color var(--dur-micro) var(--ease-calm)}
+.monitoring-scope-switch__item:hover{color:var(--text-primary);background:color-mix(in srgb,var(--surface-elevated) 68%,transparent)}
+.monitoring-scope-switch__item.is-active{color:var(--text-primary);background:color-mix(in srgb,var(--accent) 14%,var(--surface-elevated));box-shadow:0 1px 0 color-mix(in srgb,var(--text-primary) 6%,transparent) inset}
 .monitoring-create-panel{}
 .monitoring-table{min-width:1116px;table-layout:fixed}
 .monitoring-table .monitoring-table__identity{display:flex;flex-direction:column;gap:2px;min-width:0}

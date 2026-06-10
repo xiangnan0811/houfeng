@@ -11,7 +11,12 @@ import {
   postMonitoringInstanceAction,
   postMonitoringInstanceBatch,
 } from '../lib/api'
-import type { AssetContextForMonitoringInstance, MonitoringInstanceRecord, MonitoringInstanceSparklinesResponse } from '../lib/types'
+import type {
+  AssetContextForMonitoringInstance,
+  MonitoringInstanceListScope,
+  MonitoringInstanceRecord,
+  MonitoringInstanceSparklinesResponse,
+} from '../lib/types'
 import { MonitoringHero } from './monitoring/MonitoringHero'
 import { MonitoringInstancesListSection } from './monitoring/MonitoringInstancesListSection'
 import { buildMonitoringInstancesTableColumns } from './monitoring/MonitoringInstancesTableColumns'
@@ -44,6 +49,11 @@ function describeError(error: unknown, fallback: string) {
   return fallback
 }
 
+function parseMonitoringInstanceListScope(value: string | null): MonitoringInstanceListScope {
+  if (value === 'archived' || value === 'all') return value
+  return 'active'
+}
+
 export function MonitoringPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -63,14 +73,18 @@ export function MonitoringPage() {
   const [compareSet, setCompareSet] = useState<Set<string>>(new Set())
   const [monitoringInstanceAssetContexts, setMonitoringInstanceAssetContexts] = useState<Map<string, AssetContextForMonitoringInstance>>(new Map())
   const [monitoringInstanceAssetContextError, setMonitoringInstanceAssetContextError] = useState<string | null>(null)
+  const monitoringInstanceListScope = parseMonitoringInstanceListScope(searchParams.get('scope'))
 
   useEffect(() => {
     let cancelled = false
-    listMonitoringInstances()
+    listMonitoringInstances(monitoringInstanceListScope === 'active' ? undefined : monitoringInstanceListScope)
       .then((result) => {
         if (cancelled) return
         setMonitoringInstances(result)
         setLoading(false)
+        setSelectAll(false)
+        setBatchPanelOpen(false)
+        setBatchError(null)
       })
       .catch((value: unknown) => {
         if (cancelled) return
@@ -81,7 +95,7 @@ export function MonitoringPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [monitoringInstanceListScope])
 
   useEffect(() => {
     let cancelled = false
@@ -213,6 +227,10 @@ export function MonitoringPage() {
     })
     return sorted
   }, [filteredMonitoringInstances, sortState])
+  const batchEligibleMonitoringInstances = useMemo(
+    () => sortedFilteredMonitoringInstances.filter((monitoringInstance) => !monitoringInstance.archived_at),
+    [sortedFilteredMonitoringInstances],
+  )
 
   const hasActiveFilters =
     filterState.group !== null ||
@@ -245,9 +263,14 @@ export function MonitoringPage() {
       setPendingBatchAction('pause')
       return
     }
+    const monitoringInstanceIDs = batchEligibleMonitoringInstances.map((monitoringInstance) => monitoringInstance.monitoring_instance_id)
+    if (monitoringInstanceIDs.length === 0) {
+      setSelectAll(false)
+      setBatchPanelOpen(false)
+      return
+    }
     setBatchSubmitting(true)
     setBatchError(null)
-    const monitoringInstanceIDs = filteredMonitoringInstances.map((monitoringInstance) => monitoringInstance.monitoring_instance_id)
     try {
       const res = await postMonitoringInstanceBatch(monitoringInstanceIDs, action)
       const failed = res.results.filter((result) => !result.ok)
@@ -264,10 +287,15 @@ export function MonitoringPage() {
   }
 
   async function executeBatchPauseConfirmed() {
+    const monitoringInstanceIDs = batchEligibleMonitoringInstances.map((monitoringInstance) => monitoringInstance.monitoring_instance_id)
     setPendingBatchAction(null)
+    if (monitoringInstanceIDs.length === 0) {
+      setSelectAll(false)
+      setBatchPanelOpen(false)
+      return
+    }
     setBatchSubmitting(true)
     setBatchError(null)
-    const monitoringInstanceIDs = filteredMonitoringInstances.map((monitoringInstance) => monitoringInstance.monitoring_instance_id)
     try {
       const res = await postMonitoringInstanceBatch(monitoringInstanceIDs, 'pause')
       const failed = res.results.filter((result) => !result.ok)
@@ -285,10 +313,15 @@ export function MonitoringPage() {
 
   async function executeBatchCommand() {
     if (!commandID.trim()) return
+    const monitoringInstanceIDs = batchEligibleMonitoringInstances.map((monitoringInstance) => monitoringInstance.monitoring_instance_id)
     setCommandOpen(false)
+    if (monitoringInstanceIDs.length === 0) {
+      setSelectAll(false)
+      setBatchPanelOpen(false)
+      return
+    }
     setBatchSubmitting(true)
     setBatchError(null)
-    const monitoringInstanceIDs = filteredMonitoringInstances.map((monitoringInstance) => monitoringInstance.monitoring_instance_id)
     let failCount = 0
     for (const monitoringInstanceID of monitoringInstanceIDs) {
       try {
@@ -346,7 +379,29 @@ export function MonitoringPage() {
   }
 
   function clearAllFilters() {
-    setSearchParams(new URLSearchParams(), { replace: true })
+    setSearchParams((current) => {
+      const next = new URLSearchParams()
+      const scope = current.get('scope')
+      if (scope === 'archived' || scope === 'all') next.set('scope', scope)
+      return next
+    }, { replace: true })
+  }
+
+  function setMonitoringInstanceScope(scope: MonitoringInstanceListScope) {
+    setLoading(true)
+    setError(null)
+    setSelectAll(false)
+    setBatchPanelOpen(false)
+    setBatchError(null)
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (scope === 'active') {
+        next.delete('scope')
+      } else {
+        next.set('scope', scope)
+      }
+      return next
+    }, { replace: true })
   }
 
   function applyQuickView(view: string) {
@@ -425,8 +480,10 @@ export function MonitoringPage() {
           runStatusOptions={runStatusOptions}
           regionOptions={regionOptions}
           providerOptions={providerOptions}
+          monitoringInstanceListScope={monitoringInstanceListScope}
           compareSet={compareSet}
           onFilterChange={updateSearchParam}
+          onScopeChange={setMonitoringInstanceScope}
           onAbnormalChange={(checked) => setAbnormalFilter(checked)}
           onOpenBatchPanel={() => setBatchPanelOpen(true)}
         />
@@ -440,6 +497,7 @@ export function MonitoringPage() {
           monitoringInstanceListView={monitoringInstanceListView}
           baseMonitoringInstances={baseMonitoringInstances}
           monitoring={sortedFilteredMonitoringInstances}
+          batchEligibleMonitoring={batchEligibleMonitoringInstances}
           columns={columns}
           showTrends={true}
           sortState={sortState}

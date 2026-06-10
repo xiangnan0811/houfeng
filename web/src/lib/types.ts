@@ -16,8 +16,74 @@ export type MonitoringInstanceRecord = {
   current_active_incident_count: number
   current_primary_issue_summary: string
   last_action?: LastAction | null
+  archived_at?: string | null
+  archived_reason?: string
   created_at: string
   updated_at: string
+}
+
+export type MonitoringInstanceListScope = 'active' | 'archived' | 'all'
+
+export type MonitoringInstanceManagementVPSLink = {
+  link_id: string
+  vps_id: string
+  display_name: string
+  lifecycle_status: string
+  usage_status: string
+  linked_at: string
+  note: string
+}
+
+export type MonitoringInstanceManagementCounts = {
+  heartbeat_count: number
+  host_sample_count: number
+  probe_observation_count: number
+  host_sample_daily_aggregate_count: number
+  ip_quality_report_count: number
+  active_incident_count: number
+  state_change_event_count: number
+  notification_record_count: number
+  asset_lifecycle_action_step_count: number
+  active_vps_link_count: number
+}
+
+export type MonitoringInstanceManagementActions = {
+  can_retire: boolean
+  can_restore_lifecycle: boolean
+  can_archive: boolean
+  can_restore_archive: boolean
+  can_permanent_cleanup: boolean
+}
+
+export type MonitoringInstanceManagementReview = {
+  record: MonitoringInstanceRecord
+  active_vps_links: MonitoringInstanceManagementVPSLink[]
+  counts: MonitoringInstanceManagementCounts
+  warnings: string[]
+  blockers: string[]
+  actions: MonitoringInstanceManagementActions
+  empty_mistake_candidate: boolean
+}
+
+export type MonitoringInstanceLifecycleManagementInput = {
+  reason: string
+}
+
+export type MonitoringInstanceArchiveInput = {
+  reason: string
+  confirmation_name: string
+}
+
+export type MonitoringInstancePermanentCleanupInput = {
+  reason: string
+  confirmation_name: string
+}
+
+export type MonitoringInstancePermanentCleanupResult = {
+  monitoring_instance_id: string
+  counts: MonitoringInstanceManagementCounts
+  deleted_reference_count: number
+  deleted: boolean
 }
 
 export type LastAction = {

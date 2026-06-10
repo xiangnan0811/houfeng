@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import type { MonitoringInstanceRuntimeAction } from '../components/monitoring-detail'
 import {
   ApiError,
+  archiveMonitoringInstance,
   confirmMonitoringInstanceRebind,
   enterMonitoringInstanceMaintenance,
   exitMonitoringInstanceMaintenance,
   getMonitoringInstance,
+  getMonitoringInstanceManagementReview,
   getMonitoringInstanceOnboarding,
   getMonitoringInstanceRuntimeFacts,
   monitoringInstanceRuntimeStreamURL,
@@ -16,13 +18,24 @@ import {
   listHistoricalIncidents,
   listIncidents,
   pauseMonitoringInstanceMonitoring,
+  permanentCleanupMonitoringInstance,
   postMonitoringInstanceAction,
   rejectPendingMonitoringInstanceBinding,
   resetMonitoringInstanceBinding,
+  restoreMonitoringInstanceFromArchive,
+  restoreMonitoringInstanceLifecycle,
   resumeMonitoringInstanceMonitoring,
+  retireMonitoringInstance,
   updateMonitoringInstanceMetadata,
 } from '../lib/api'
-import type { ActiveIncidentRecord, HostSample, HostSampleStreamMessage, MonitoringInstanceOnboardingState } from '../lib/types'
+import type {
+  ActiveIncidentRecord,
+  HostSample,
+  HostSampleStreamMessage,
+  MonitoringInstanceManagementReview,
+  MonitoringInstanceOnboardingState,
+  MonitoringInstanceRecord,
+} from '../lib/types'
 import { MonitoringDetailPageBody } from './monitoring-detail/MonitoringDetailPageBody'
 import { MonitoringDetailLoading } from './monitoring-detail/MonitoringDetailLoading'
 import { MonitoringDetailUnavailable } from './monitoring-detail/MonitoringDetailUnavailable'
@@ -56,6 +69,7 @@ const RUNTIME_STREAM_RECONNECT_MS = 2000
 const LINKED_VPS_SUMMARY_FETCH_DELAY_MS = 300
 const MONITORING_INSTANCE_LIFECYCLE_PENDING = '待接入'
 const MONITORING_INSTANCE_LIFECYCLE_IN_USE = '在用'
+type MonitoringManagementAction = 'retire' | 'restore-lifecycle' | 'archive' | 'restore-archive' | 'permanent-cleanup'
 
 function sampleKey(sample: HostSample): string {
   return `${sample.observed_at}::${sample.sync_batch_id}`
@@ -99,6 +113,7 @@ export function MonitoringDetailPage() {
 }
 
 function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInstanceId?: string }) {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [onboardingReturnVPSId, setOnboardingReturnVPSId] = useState<string | null>(null)
   const [state, setState] = useState<MonitoringDetailPageState>(INITIAL_MONITORING_DETAIL_STATE)
@@ -110,6 +125,13 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const [metadataForm, setMetadataForm] = useState<MetadataFormState>({ group: '', labels: '', note: '' })
   const [metadataSubmitting, setMetadataSubmitting] = useState(false)
   const [metadataError, setMetadataError] = useState<string | null>(null)
+  const [managementReview, setManagementReview] = useState<MonitoringInstanceManagementReview | null>(null)
+  const [managementRequestedMonitoringInstanceId, setManagementRequestedMonitoringInstanceId] = useState<string | null>(null)
+  const [managementLoading, setManagementLoading] = useState(false)
+  const [managementError, setManagementError] = useState<string | null>(null)
+  const [managementSubmittingAction, setManagementSubmittingAction] =
+    useState<MonitoringManagementAction | null>(null)
+  const [managementActionError, setManagementActionError] = useState<string | null>(null)
   const [bindingConflictState, setBindingConflictState] = useState<BindingConflictState>({
     requestedMonitoringInstanceId: null,
     onboarding: null,
@@ -163,6 +185,15 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   useEffect(() => {
     currentRouteMonitoringInstanceIdRef.current = monitoringInstanceId ?? null
     metadataRequestRef.current += 1
+  }, [monitoringInstanceId])
+
+  useEffect(() => {
+    setManagementReview(null)
+    setManagementRequestedMonitoringInstanceId(null)
+    setManagementLoading(false)
+    setManagementError(null)
+    setManagementSubmittingAction(null)
+    setManagementActionError(null)
   }, [monitoringInstanceId])
 
   // Deep-link: create/list redirects land here with ?onboarding=1 to open the
@@ -1131,6 +1162,168 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     }
   }
 
+  function applyManagementRecord(actionMonitoringInstanceId: string, updated: MonitoringInstanceRecord) {
+    setState((current) => ({
+      ...current,
+      monitoringInstance:
+        current.requestedMonitoringInstanceId === actionMonitoringInstanceId && current.monitoringInstance
+          ? mergeNonMetadataMonitoringInstanceRecord(current.monitoringInstance, updated)
+          : current.monitoringInstance,
+    }))
+  }
+
+  async function loadManagementReview(force = false) {
+    if (!monitoringInstanceId) return
+    const actionMonitoringInstanceId = monitoringInstanceId
+    if (
+      !force &&
+      managementRequestedMonitoringInstanceId === actionMonitoringInstanceId &&
+      (managementReview || managementLoading)
+    ) {
+      return
+    }
+
+    setManagementRequestedMonitoringInstanceId(actionMonitoringInstanceId)
+    setManagementLoading(true)
+    setManagementError(null)
+
+    try {
+      const review = await getMonitoringInstanceManagementReview(actionMonitoringInstanceId)
+      if (
+        !isMountedRef.current ||
+        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
+        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
+      ) {
+        return
+      }
+      setManagementReview(review)
+      applyManagementRecord(actionMonitoringInstanceId, review.record)
+    } catch (error: unknown) {
+      if (
+        !isMountedRef.current ||
+        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
+        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
+      ) {
+        return
+      }
+      setManagementError(describeError(error, '加载监控实例管理审查失败'))
+    } finally {
+      if (
+        isMountedRef.current &&
+        currentRouteMonitoringInstanceIdRef.current === actionMonitoringInstanceId &&
+        currentRequestedMonitoringInstanceIdRef.current === actionMonitoringInstanceId
+      ) {
+        setManagementLoading(false)
+      }
+    }
+  }
+
+  async function runManagementRecordAction(
+    action: MonitoringManagementAction,
+    request: (actionMonitoringInstanceId: string) => Promise<MonitoringInstanceRecord>,
+  ) {
+    if (!monitoringInstance) return
+    const actionMonitoringInstanceId = monitoringInstance.monitoring_instance_id
+    setManagementSubmittingAction(action)
+    setManagementActionError(null)
+
+    try {
+      const updated = await request(actionMonitoringInstanceId)
+      if (
+        !isMountedRef.current ||
+        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
+        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
+      ) {
+        return
+      }
+      applyManagementRecord(actionMonitoringInstanceId, updated)
+      await loadManagementReview(true)
+    } catch (error: unknown) {
+      if (
+        !isMountedRef.current ||
+        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
+        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
+      ) {
+        return
+      }
+      setManagementActionError(describeError(error, '监控实例管理操作失败'))
+    } finally {
+      if (
+        isMountedRef.current &&
+        currentRouteMonitoringInstanceIdRef.current === actionMonitoringInstanceId &&
+        currentRequestedMonitoringInstanceIdRef.current === actionMonitoringInstanceId
+      ) {
+        setManagementSubmittingAction(null)
+      }
+    }
+  }
+
+  function handleManagementRetire(reason: string) {
+    void runManagementRecordAction('retire', (actionMonitoringInstanceId) =>
+      retireMonitoringInstance(actionMonitoringInstanceId, { reason }),
+    )
+  }
+
+  function handleManagementRestoreLifecycle(reason: string) {
+    void runManagementRecordAction('restore-lifecycle', (actionMonitoringInstanceId) =>
+      restoreMonitoringInstanceLifecycle(actionMonitoringInstanceId, { reason }),
+    )
+  }
+
+  function handleManagementArchive(reason: string, confirmationName: string) {
+    void runManagementRecordAction('archive', (actionMonitoringInstanceId) =>
+      archiveMonitoringInstance(actionMonitoringInstanceId, {
+        reason,
+        confirmation_name: confirmationName,
+      }),
+    )
+  }
+
+  function handleManagementRestoreArchive() {
+    void runManagementRecordAction('restore-archive', (actionMonitoringInstanceId) =>
+      restoreMonitoringInstanceFromArchive(actionMonitoringInstanceId),
+    )
+  }
+
+  async function handleManagementPermanentCleanup(reason: string, confirmationName: string) {
+    if (!monitoringInstance) return
+    const actionMonitoringInstanceId = monitoringInstance.monitoring_instance_id
+    setManagementSubmittingAction('permanent-cleanup')
+    setManagementActionError(null)
+
+    try {
+      await permanentCleanupMonitoringInstance(actionMonitoringInstanceId, {
+        reason,
+        confirmation_name: confirmationName,
+      })
+      if (
+        !isMountedRef.current ||
+        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
+        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
+      ) {
+        return
+      }
+      navigate('/monitoring')
+    } catch (error: unknown) {
+      if (
+        !isMountedRef.current ||
+        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
+        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
+      ) {
+        return
+      }
+      setManagementActionError(describeError(error, '永久清理监控实例失败'))
+    } finally {
+      if (
+        isMountedRef.current &&
+        currentRouteMonitoringInstanceIdRef.current === actionMonitoringInstanceId &&
+        currentRequestedMonitoringInstanceIdRef.current === actionMonitoringInstanceId
+      ) {
+        setManagementSubmittingAction(null)
+      }
+    }
+  }
+
   return (
     <MonitoringDetailPageBody
       monitoringInstance={monitoringInstance}
@@ -1144,6 +1337,11 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       metadataNoteDraft={metadataForm.note}
       metadataSubmitting={metadataSubmitting}
       metadataError={metadataError}
+      managementReview={managementRequestedMonitoringInstanceId === monitoringInstanceId ? managementReview : null}
+      managementLoading={managementRequestedMonitoringInstanceId === monitoringInstanceId && managementLoading}
+      managementError={managementRequestedMonitoringInstanceId === monitoringInstanceId ? managementError : null}
+      managementSubmittingAction={managementSubmittingAction}
+      managementActionError={managementActionError}
       onRuntimeAction={(action, confirmed) => void handleRuntimeAction(action, confirmed)}
       onCancelRuntimeConfirmation={() => {
         pendingFocusRestoreRef.current = 'pause'
@@ -1156,6 +1354,12 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       onMetadataStartEdit={startMetadataEdit}
       onMetadataCancelEdit={cancelMetadataEdit}
       onMetadataSubmit={(event) => void handleMetadataSave(event)}
+      onManagementLoadReview={() => void loadManagementReview()}
+      onManagementRetire={handleManagementRetire}
+      onManagementRestoreLifecycle={handleManagementRestoreLifecycle}
+      onManagementArchive={handleManagementArchive}
+      onManagementRestoreArchive={handleManagementRestoreArchive}
+      onManagementPermanentCleanup={(reason, confirmationName) => void handleManagementPermanentCleanup(reason, confirmationName)}
       incidents={incidents}
       events={events}
       eventsError={eventsError}

@@ -328,6 +328,193 @@ describe('MonitoringPage', () => {
     )
   })
 
+  it('switches monitoring instance list scope between active archived and all', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances') {
+        return Promise.resolve(
+          mockJSONResponse([
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_active',
+              display_name: 'Active Edge',
+            }),
+          ]),
+        )
+      }
+      if (path === '/api/monitoring-instances?scope=archived') {
+        return Promise.resolve(
+          mockJSONResponse([
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_archived',
+              display_name: 'Archived Edge',
+              lifecycle_status: '已退役',
+              monitoring_status: '暂停',
+              archived_at: '2026-06-10T09:00:00Z',
+              archived_reason: '重复创建',
+            }),
+          ]),
+        )
+      }
+      if (path === '/api/monitoring-instances?scope=all') {
+        return Promise.resolve(
+          mockJSONResponse([
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_active',
+              display_name: 'Active Edge',
+            }),
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_archived',
+              display_name: 'Archived Edge',
+              lifecycle_status: '已退役',
+              monitoring_status: '暂停',
+              archived_at: '2026-06-10T09:00:00Z',
+              archived_reason: '重复创建',
+            }),
+          ]),
+        )
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring']}>
+        <Routes>
+          <Route path="/monitoring" element={<MonitoringPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Active Edge')).toBeInTheDocument())
+    expect(screen.queryByText('Archived Edge')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '已归档' }))
+    await waitFor(() => expect(screen.getByText('Archived Edge')).toBeInTheDocument())
+    expect(screen.queryByText('Active Edge')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '全部' }))
+    await waitFor(() => expect(screen.getByText('Active Edge')).toBeInTheDocument())
+    expect(screen.getByText('Archived Edge')).toBeInTheDocument()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/monitoring-instances', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances?scope=archived', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/monitoring-instances?scope=all', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('excludes archived monitoring instances from batch runtime actions', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse([
+          monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_active',
+            display_name: 'Active Edge',
+          }),
+          monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_archived',
+            display_name: 'Archived Edge',
+            lifecycle_status: '已退役',
+            monitoring_status: '暂停',
+            archived_at: '2026-06-10T09:00:00Z',
+            archived_reason: '重复创建',
+          }),
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse({ results: [{ monitoring_instance_id: 'mi_active', ok: true }] }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring?scope=all']}>
+        <Routes>
+          <Route path="/monitoring" element={<MonitoringPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Archived Edge')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
+    fireEvent.click(screen.getByLabelText('全选 (1)'))
+    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith('/api/monitoring-instances/batch', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({ monitoring_instance_ids: ['mi_active'], action: 'enter-maintenance' }),
+      }),
+    )
+  })
+
+  it('does not leave batch actions submitting when filters remove every eligible monitoring instance', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      mockJSONResponse([
+        monitoringInstanceRecord({
+          monitoring_instance_id: 'mi_active',
+          display_name: 'Active Edge',
+        }),
+        monitoringInstanceRecord({
+          monitoring_instance_id: 'mi_archived',
+          display_name: 'Archived Edge',
+          lifecycle_status: '已退役',
+          monitoring_status: '暂停',
+          archived_at: '2026-06-10T09:00:00Z',
+          archived_reason: '重复创建',
+        }),
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring?scope=all']}>
+        <Routes>
+          <Route path="/monitoring" element={<MonitoringPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Active Edge')).toBeInTheDocument())
+    expect(screen.getByText('Archived Edge')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
+    fireEvent.click(screen.getByLabelText('全选 (1)'))
+    fireEvent.click(screen.getByRole('button', { name: '执行命令…' }))
+    fireEvent.change(screen.getByLabelText('命令 ID'), { target: { value: 'uptime' } })
+
+    const lifecycleSelect = screen.getByDisplayValue('接入阶段: 全部')
+    fireEvent.change(lifecycleSelect, { target: { value: '已退役' } })
+    await waitFor(() => expect(screen.queryByText('Active Edge')).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '下发命令' }))
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('批量操作中…')).not.toBeInTheDocument()
+
+    fireEvent.change(lifecycleSelect, { target: { value: '' } })
+    await waitFor(() => expect(screen.getByText('Active Edge')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
+    fireEvent.click(screen.getByLabelText('全选 (1)'))
+    expect(screen.getByRole('button', { name: '进入维护' })).toBeEnabled()
+  })
+
   it('renders asset context as one short status plus compact detail', async () => {
     vi.stubGlobal('IntersectionObserver', vi.fn())
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
