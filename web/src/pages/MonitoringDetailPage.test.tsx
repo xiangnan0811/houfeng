@@ -1255,7 +1255,7 @@ describe('MonitoringDetailPage', () => {
     expect(screen.queryByRole('heading', { name: '生命周期' })).not.toBeInTheDocument()
     expect(screen.queryByText('接入凭证状态')).not.toBeInTheDocument()
     openRuntimeMenu()
-    expect(screen.getByRole('button', { name: '接入 agent…' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '升级/重新接入 agent…' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_conflict/onboarding', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -3015,9 +3015,49 @@ describe('MonitoringDetailPage', () => {
 
     openRuntimeMenu()
 
-    expect(screen.getByRole('button', { name: '接入 agent…' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '升级/重新接入 agent…' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '执行命令…' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '退役监控实例' })).not.toBeInTheDocument()
+  })
+
+  it('uses upgrade wording when a bound monitoring instance opens onboarding', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_upgrade',
+            binding_status: '已绑定',
+            monitoring_status: '启用',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('mi_upgrade')))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_upgrade']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('button', { name: '升级/重新接入 agent…' }))
+
+    const drawer = await screen.findByRole('dialog', { name: '监控实例接入抽屉' })
+    expect(within(drawer).getByRole('heading', { name: '升级/重新接入 agent' })).toBeInTheDocument()
+    expect(within(drawer).getByRole('button', { name: '生成升级/重新接入命令' })).toBeInTheDocument()
   })
 
   it('opens command drawer with 8 preset command options', async () => {

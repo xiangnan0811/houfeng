@@ -19,6 +19,7 @@ type Props = {
   onOpenHistory: () => void
   onOpenCommands: () => void
   onOpenOnboarding: () => void
+  onboardingActionLabel: string
   linkedVPS: VPSSummary[]
   linkedVPSLoading: boolean
   linkedVPSLoaded: boolean
@@ -96,6 +97,7 @@ export function MonitoringInstanceWatchtowerHeader({
   onOpenHistory,
   onOpenCommands,
   onOpenOnboarding,
+  onboardingActionLabel,
   linkedVPS,
   linkedVPSLoading,
   linkedVPSLoaded,
@@ -156,7 +158,7 @@ export function MonitoringInstanceWatchtowerHeader({
                     onOpenOnboarding()
                   }}
                 >
-                  接入 agent…
+                  {onboardingActionLabel}
                 </button>
                 <button
                   type="button"

@@ -223,6 +223,9 @@ export function MonitoringDetailPageBody({
   const bindingActionsDisabled =
     bindingAction !== null || bindingConflictLoading || !bindingConflict
   const showDangerZone = monitoringInstance.current_active_incident_count > 0
+  const isUpgradeOnboarding =
+    monitoringInstance.binding_status !== '未绑定' ||
+    Boolean(monitoringInstance.last_heartbeat_at || monitoringInstance.last_sync_at || sample)
   const firstIncident =
     incidents.length > 0
       ? [...incidents].sort(
@@ -242,6 +245,7 @@ export function MonitoringDetailPageBody({
         onOpenHistory={() => onOpenHistory('events')}
         onOpenCommands={onOpenCommands}
         onOpenOnboarding={onOpenOnboarding}
+        onboardingActionLabel={isUpgradeOnboarding ? '升级/重新接入 agent…' : '接入 agent…'}
         linkedVPS={linkedVPS}
         linkedVPSLoading={linkedVPSLoading}
         linkedVPSLoaded={linkedVPSLoaded}
@@ -369,6 +373,7 @@ export function MonitoringDetailPageBody({
         monitoringInstance={monitoringInstance}
         open={onboardingOpen}
         returnVPSId={onboardingReturnVPSId}
+        mode={isUpgradeOnboarding ? 'upgrade' : 'connect'}
         onClose={onCloseOnboarding}
       />
     </div>

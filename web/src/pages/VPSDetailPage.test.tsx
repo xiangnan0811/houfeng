@@ -455,7 +455,7 @@ describe('VPSDetailPage', () => {
     expect(screen.getByRole('button', { name: '编辑基础信息' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '记录经验' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '快速创建订阅' }).length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: '创建并接入 agent' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '升级/重新接入 agent' }).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: '关联已有监控实例' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新增服务' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新增域名' })).toBeInTheDocument()
@@ -868,6 +868,40 @@ describe('VPSDetailPage', () => {
     expect(within(drawer).queryByLabelText('继承字段')).not.toBeInTheDocument()
   })
 
+  it('reuses the existing active monitoring instance when opening the monitoring workbench deep link', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(vpsDetailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001?workbench=monitoring']}>
+        <Routes>
+          <Route
+            path="/vps/:vpsId"
+            element={(
+              <>
+                <LocationProbe />
+                <VPSDetailPage />
+              </>
+            )}
+          />
+          <Route path="/monitoring/:monitoringInstanceId" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/monitoring/mi_001'))
+    expect(screen.getByTestId('location-search')).toHaveTextContent('onboarding=1')
+    expect(screen.getByTestId('location-search')).toHaveTextContent('return_vps=vps_001')
+    expect(screen.queryByRole('dialog', { name: '创建并接入 agent' })).not.toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/vps/vps_001/monitoring-instances', expect.anything())
+  })
+
   it('cleans VPS workbench query params when a deep-linked drawer is cancelled', async () => {
     const fetchMock = vi
       .fn()
@@ -1040,6 +1074,86 @@ describe('VPSDetailPage', () => {
     })
   })
 
+  it('upgrades through the existing active monitoring instance instead of creating another one', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(vpsDetailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route
+            path="/vps/:vpsId"
+            element={(
+              <>
+                <LocationProbe />
+                <VPSDetailPage />
+              </>
+            )}
+          />
+          <Route path="/monitoring/:monitoringInstanceId" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: '创建并接入 agent' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: '升级/重新接入 agent' })[0])
+
+    await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/monitoring/mi_001'))
+    expect(screen.getByTestId('location-search')).toHaveTextContent('onboarding=1')
+    expect(screen.getByTestId('location-search')).toHaveTextContent('return_vps=vps_001')
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/vps/vps_001/monitoring-instances', expect.anything())
+  })
+
+  it('surfaces duplicate active monitoring links for manual review without showing create entry', async () => {
+    const duplicateDetail = {
+      ...vpsDetailBody,
+      active_monitoring_instance_link_count: 2,
+      monitoring_instance_links: [
+        vpsDetailBody.monitoring_instance_links[0],
+        {
+          ...vpsDetailBody.monitoring_instance_links[0],
+          monitoring_instance_id: 'mi_002',
+          display_name: 'Tokyo Monitoring Instance Duplicate',
+          current_health_status: '关注',
+          linked_at: '2026-05-09T09:00:00Z',
+        },
+      ],
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(duplicateDetail))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '查看监控实例详情' }))
+    const evidenceDrawer = await screen.findByRole('dialog', { name: '监控实例证据' })
+
+    expect(within(evidenceDrawer).queryByRole('button', { name: '创建并接入 agent' })).not.toBeInTheDocument()
+    expect(within(evidenceDrawer).queryByRole('button', { name: '关联已有监控实例' })).not.toBeInTheDocument()
+    expect(within(evidenceDrawer).getByRole('alert')).toHaveTextContent('检测到 2 个 active 监控实例关联')
+    expect(within(evidenceDrawer).getAllByRole('button', { name: '升级/重新接入 agent' })).toHaveLength(2)
+    expect(within(evidenceDrawer).getAllByRole('button', { name: '解除关联' })).toHaveLength(2)
+  })
+
   it('does not promote the cancellation workbench for a fresh active VPS', async () => {
     const detailBody = {
       ...vpsDetailBody,
@@ -1069,7 +1183,7 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     expect(screen.getByRole('button', { name: '处理决策' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建订阅' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '接入 agent' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '创建并接入 agent' }).length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: '打开取消/退役工作台' })).not.toBeInTheDocument()
     openVPSActionsMenu()
     expect(screen.queryByRole('button', { name: '取消/退役工作台' })).not.toBeInTheDocument()
@@ -1656,12 +1770,13 @@ describe('VPSDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '查看监控实例详情' }))
     const nodeEvidenceDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
-    fireEvent.click(within(nodeEvidenceDrawer).getByRole('button', { name: '关联已有监控实例' }))
-    expect(await screen.findByRole('dialog', { name: '关联已有监控实例' })).toBeInTheDocument()
+    expect(within(nodeEvidenceDrawer).queryByRole('button', { name: '关联已有监控实例' })).not.toBeInTheDocument()
+    expect(within(nodeEvidenceDrawer).queryByRole('button', { name: '创建并接入 agent' })).not.toBeInTheDocument()
+    expect(within(nodeEvidenceDrawer).getAllByRole('button', { name: '升级/重新接入 agent' }).length).toBeGreaterThan(0)
     fireEvent.click(screen.getAllByRole('button', { name: '查看监控实例详情' })[0])
     const reopenedEvidenceDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
-    fireEvent.click(within(reopenedEvidenceDrawer).getByRole('button', { name: '创建并接入 agent' }))
-    expect(screen.getByRole('dialog', { name: '创建并接入 agent' })).toBeInTheDocument()
+    expect(within(reopenedEvidenceDrawer).queryByRole('button', { name: '创建并接入 agent' })).not.toBeInTheDocument()
+    expect(within(reopenedEvidenceDrawer).getAllByRole('button', { name: '升级/重新接入 agent' }).length).toBeGreaterThan(0)
     fireEvent.click(screen.getAllByRole('button', { name: '查看监控实例详情' })[0])
     const unlinkEvidenceDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
     fireEvent.click(within(unlinkEvidenceDrawer).getByRole('button', { name: '解除关联' }))

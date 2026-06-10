@@ -91,6 +91,73 @@ const issue = await issueMonitoringInstanceInstallCommand(monitoringInstanceId)
 setInstallIssue(issue)
 ```
 
+### VPS 详情 agent 接入/升级复用已有 MonitoringInstance
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 VPS 详情页普通 agent 接入入口、`workbench=monitoring` / `workbench=monitoring-instance-create` 深链、VPS ↔ MonitoringInstance link 写路径、或 MonitoringInstance onboarding 文案。
+- 目标：VPS 已有 active MonitoringInstance link 时，普通 agent 接入入口必须复用现有监控实例进入升级/重新接入流程，避免误创建第二个 active 监控实例。
+
+#### 2. Signatures
+
+- Frontend deep link: `/vps/{vps_id}?workbench=monitoring` and `/vps/{vps_id}?workbench=monitoring-instance-create`。
+- Frontend upgrade target: `/monitoring/{monitoring_instance_id}?onboarding=1&return_vps={vps_id}`。
+- Backend create API: `POST /api/vps/{vps_id}/monitoring-instances`。
+- Backend link API: `POST /api/vps/{vps_id}/link-monitoring-instance`。
+- Backend domain error: `assetlinks.ErrVPSActiveMonitoringInstanceExists` maps to HTTP 409.
+
+#### 3. Contracts
+
+- 0 active links: VPS detail may show `创建并接入 agent`; submit may call `createVPSMonitoringInstance`, then navigate to MonitoringInstance onboarding.
+- 1 active link: VPS detail must show `升级/重新接入 agent`; clicking or opening either monitoring workbench deep link must navigate to the existing MonitoringInstance onboarding and must not call the create API.
+- More than 1 active link: do not auto-clean historical data; hide create/link entry, show a duplicate-active-link warning, and keep per-row `升级/重新接入 agent` plus `解除关联`.
+- Backend create/link write paths must lock/check active links before inserting and return 409 on existing active links. The create path must not insert an orphan `monitoring_instances` row on conflict.
+- Monitoring detail onboarding keeps using `issueMonitoringInstanceInstallCommand`; only copy/title changes between `接入 agent` and `升级/重新接入 agent` based on bound/observed state.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| VPS has 0 active links and user opens monitoring workbench | Open create drawer; create API allowed |
+| VPS has 1 active link and user opens monitoring workbench | Navigate to existing `/monitoring/{id}?onboarding=1&return_vps={vps_id}` |
+| VPS has >1 active links | Show manual duplicate review warning; no create/link CTA |
+| Create/link API sees existing active link | 409 `vps active monitoring instance exists` |
+| Create API sees existing active link | No `monitoring_instances` insert before returning error |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: already-connected VPS upgrades agent by reusing its existing MonitoringInstance and generating a fresh install command there.
+- Base: brand-new VPS without active link creates one MonitoringInstance and enters onboarding.
+- Bad: a button labeled `创建并接入 agent` on an already-linked VPS calls `POST /api/vps/{id}/monitoring-instances` and creates a second active monitoring instance.
+- Bad: only the frontend blocks duplicate creation while backend link/create endpoints still allow another active link.
+
+#### 6. Tests Required
+
+- `VPSDetailPage.test.tsx`: 0/1/multiple active-link behavior, monitoring workbench deep-link branching, and no create API call when reusing an active link.
+- `MonitoringDetailPage.test.tsx`: bound or already-observed instances use `升级/重新接入 agent` wording while still issuing install commands through the existing API.
+- Handler/store Go tests: create/link return 409 for existing active links; store create checks active links before inserting MonitoringInstance.
+
+#### 7. Wrong vs Correct
+
+```tsx
+// 错误：深链和按钮都无条件打开创建流程。
+if (workbench === 'monitoring') {
+  setActiveDrawer('monitoring-instance-create')
+}
+await createVPSMonitoringInstance(vpsId, input)
+```
+
+```tsx
+// 正确：先按 active link 数量分流。
+if (activeLinks.length === 1) {
+  navigate(`/monitoring/${activeLinks[0].monitoring_instance_id}?onboarding=1&return_vps=${vpsId}`)
+} else if (activeLinks.length === 0) {
+  setActiveDrawer('monitoring-instance-create')
+} else {
+  setActiveDrawer('monitoring-instance-evidence')
+}
+```
+
 ### MonitoringInstance 详情 metadata 与运行态合并
 
 #### Contracts

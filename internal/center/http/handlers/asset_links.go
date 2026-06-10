@@ -91,6 +91,10 @@ func VPSMonitoringInstances(repo assetlinks.Repository, vpsRepo vpsassets.Reposi
 				writeError(w, http.StatusConflict, "vps monitoring instance link conflict")
 				return
 			}
+			if errors.Is(err, assetlinks.ErrVPSActiveMonitoringInstanceExists) {
+				writeError(w, http.StatusConflict, "vps active monitoring instance exists")
+				return
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
@@ -171,6 +175,10 @@ func VPSLinkMonitoringInstance(repo assetlinks.Repository) http.Handler {
 		}
 		if errors.Is(err, assetlinks.ErrVPSMonitoringInstanceLinkConflict) {
 			writeError(w, http.StatusConflict, "vps monitoring instance link conflict")
+			return
+		}
+		if errors.Is(err, assetlinks.ErrVPSActiveMonitoringInstanceExists) {
+			writeError(w, http.StatusConflict, "vps active monitoring instance exists")
 			return
 		}
 		if err != nil {

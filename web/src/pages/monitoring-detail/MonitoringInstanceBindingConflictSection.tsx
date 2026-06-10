@@ -99,7 +99,7 @@ export function MonitoringInstanceBindingConflictSection({
           </button>
         </div>
         <p>
-          如需重新生成一次性接入命令，请从右上角运行控制菜单选择「接入 agent…」。
+          如需重新生成一次性接入命令，请从右上角运行控制菜单选择「升级/重新接入 agent…」。
         </p>
       </article>
     </DetailSection>

@@ -10,6 +10,7 @@ import (
 
 var ErrVPSMonitoringInstanceLinkNotFound = errors.New("vps monitoring instance link not found")
 var ErrVPSMonitoringInstanceLinkConflict = errors.New("vps monitoring instance link conflict")
+var ErrVPSActiveMonitoringInstanceExists = errors.New("vps active monitoring instance exists")
 var ErrInvalidVPSMonitoringInstanceLinkInput = errors.New("invalid vps monitoring instance link input")
 
 type Record struct {
