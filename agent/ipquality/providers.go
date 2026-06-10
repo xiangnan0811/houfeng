@@ -181,16 +181,17 @@ func parseProxycheckProvider(payload map[string]any, targetIP string) providerSo
 	if ipPayload == nil {
 		ipPayload = payload
 	}
+	usageType := stringFromMap(ipPayload, "type")
 	proxy := boolFromMap(ipPayload, "proxy")
 	result := agentapi.IPQualityProviderResultPayload{
-		UsageType:  stringFromMap(ipPayload, "type"),
+		UsageType:  usageType,
 		RiskScore:  stringFromMap(ipPayload, "risk"),
 		RegionCode: stringFromMap(ipPayload, "isocode", "country_code"),
 		RegionName: stringFromMap(ipPayload, "country"),
 		IsProxy:    proxy,
-		IsVPN:      boolFromMap(ipPayload, "vpn"),
+		IsVPN:      firstBool(boolFromMap(ipPayload, "vpn"), boolFromUsageType(usageType, "vpn")),
 		IsTor:      boolFromMap(ipPayload, "tor"),
-		IsServer:   boolFromMap(ipPayload, "hosting", "datacenter"),
+		IsServer:   firstBool(boolFromMap(ipPayload, "hosting", "datacenter"), boolFromUsageType(usageType, "hosting", "datacenter", "server")),
 		IsAbuser:   boolFromMap(ipPayload, "abuse"),
 		IsRobot:    boolFromMap(ipPayload, "bot"),
 		ExtraJSON:  extraJSON(ipPayload),
@@ -309,6 +310,20 @@ func firstBool(values ...*bool) *bool {
 	for _, value := range values {
 		if value != nil {
 			return value
+		}
+	}
+	return nil
+}
+
+func boolFromUsageType(value string, matches ...string) *bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return nil
+	}
+	for _, match := range matches {
+		if strings.Contains(normalized, strings.ToLower(match)) {
+			v := true
+			return &v
 		}
 	}
 	return nil

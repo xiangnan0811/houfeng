@@ -1,0 +1,8 @@
+{"file":".trellis/tasks/06-10-fix-ip-quality-detail-coverage/prd.md","reason":"逐条验收用户列出的 7 个问题。"}
+{"file":".trellis/spec/backend/ip-quality-contract.md","reason":"确认 agent 不执行远程 shell，unknown/skipped/failure 不误计风险，provider/service 覆盖语义正确。"}
+{"command":"go test ./agent/ipquality","reason":"验证 209.33.173.4 provider fixture parser、service unknown 语义和 collector 行为。"}
+{"command":"go test ./internal/contracts/agentapi ./internal/center/http/handlers ./internal/center/store","reason":"如 center/API 有改动，验证 IP 质量字段透传、保存和读取。"}
+{"command":"cd web && npm run lint","reason":"前端 lint 质量门。"}
+{"command":"cd web && npm run test -- --run","reason":"前端组件、页面和 helper 回归。"}
+{"command":"cd web && npm run build","reason":"前端类型和生产构建。"}
+{"command":"git diff --check","reason":"提交前通用 whitespace 检查。"}

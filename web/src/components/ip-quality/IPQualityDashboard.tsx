@@ -9,6 +9,7 @@ import {
   deriveQualityScore,
   providerCoverage,
   providerEvidenceSignals,
+  providerSourceGaps,
   providerSucceeded,
   qualityVerdict,
   riskFlags,
@@ -16,6 +17,7 @@ import {
   riskSignalCounts,
   riskTone,
   serviceCardDescription,
+  serviceUnlockMeta,
   serviceCoverage,
   serviceLabel,
   serviceUnlockCounts,
@@ -23,6 +25,7 @@ import {
   unlockStatusKind,
   unlockStatusLabel,
   unlockTone,
+  visibleProviderResults,
 } from './ipQualityPresentation'
 
 type IPQualityDashboardProps = {
@@ -77,11 +80,10 @@ function sourceStatusTone(value?: string): BadgeTone {
   return 'neutral'
 }
 
-function unlockMeta(unlockRegion?: string, unlockType?: string): string {
-  const parts: string[] = []
-  if (unlockRegion) parts.push(`区域 ${unlockRegion}`)
-  if (unlockType && unlockType !== 'none') parts.push(`类型 ${unlockType}`)
-  return parts.length > 0 ? parts.join(' · ') : '无可展示区域'
+function providerRiskLabel(riskLevel?: string, riskScore?: string): string {
+  const normalizedLevel = (riskLevel ?? '').trim()
+  if (normalizedLevel) return riskLevelLabel(normalizedLevel)
+  return riskScore ? '风险分' : '未评级'
 }
 
 function compactJSON(value: unknown): string {
@@ -100,6 +102,8 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
   const serviceCoveragePct = serviceCoverage(report)
   const consistency = databaseConsistency(report.provider_results)
   const serviceCounts = serviceUnlockCounts(report.service_unlocks)
+  const visibleProviders = visibleProviderResults(report.provider_results)
+  const sourceGaps = providerSourceGaps(report.provider_results)
   const coverage = summary.coverage ?? report.latest_report?.coverage
   const negativeSignals = report.provider_results.filter(providerSucceeded).reduce((total, result) => {
     const flags = activeRiskFlags(result).filter((flag) => flag.negative).length
@@ -114,9 +118,6 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
           <div>
             <p className="section-heading__eyebrow">IP Quality</p>
             <h1 className="section-heading__title">IP 质量驾驶舱</h1>
-            <p className="section-heading__description">
-              完整展示低频 IP 质量报告：风险来源、provider 分歧、服务解锁、覆盖率、历史和诊断。
-            </p>
             <p className="section-heading__meta">
               最近采集 {formatDateTime(summary.observed_at)} · Agent {report.latest_report?.agent_version || '—'} · {report.provider_results.length} 个 provider · {report.service_unlocks.length} 个服务
             </p>
@@ -178,7 +179,6 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
             <p className="section-heading__eyebrow">Risk Matrix</p>
             <h2 className="section-heading__title">风险信号矩阵</h2>
           </div>
-          <span className="section-heading__meta">Server / Datacenter 本身只作为上下文，不单独构成负面风险。</span>
         </div>
         <div className="vps-ip-quality-dashboard__signal-grid">
           {riskSignalCounts(report.provider_results).map((signal) => (
@@ -197,9 +197,8 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
             <p className="section-heading__eyebrow">Provider Evidence</p>
             <h2 className="section-heading__title">各 IP 数据库判断</h2>
           </div>
-          <span className="section-heading__meta">逐 provider 展示，不把分歧合并掉。</span>
         </div>
-        {report.provider_results.length > 0 ? (
+        {visibleProviders.length > 0 ? (
           <table className="data-table data-table--compact asset-table vps-ip-quality-dashboard__provider-table">
             <thead className="data-table__head">
               <tr>
@@ -220,7 +219,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
               </tr>
             </thead>
             <tbody>
-              {report.provider_results.map((result) => {
+              {visibleProviders.map((result) => {
                 const flags = riskFlags(result)
                 const evidenceSignals = providerEvidenceSignals(result)
                 return (
@@ -230,8 +229,10 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
                     <td className="data-table__cell">{formatOptional(result.usage_type)}</td>
                     <td className="data-table__cell">{formatOptional(result.company_type)}</td>
                     <td className="data-table__cell">
-                      <Badge variant="state" tone={riskTone(result.risk_level)}>{result.risk_level || result.risk_score || '未评级'}</Badge>
-                      {result.risk_score ? <small>{result.risk_score}</small> : null}
+                      <span className="vps-ip-quality-dashboard__risk-cell">
+                        <Badge variant="state" tone={riskTone(result.risk_level)}>{providerRiskLabel(result.risk_level, result.risk_score)}</Badge>
+                        {result.risk_score ? <span className="vps-ip-quality-dashboard__risk-score">{result.risk_score}</span> : null}
+                      </span>
                     </td>
                     <td className="data-table__cell">{result.region_code || result.region_name || '—'}</td>
                     {flags.map((flag) => (
@@ -262,6 +263,14 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
         ) : (
           <p className="asset-table-empty-state">暂无 provider 结果。</p>
         )}
+        {sourceGaps.length > 0 ? (
+          <div className="vps-ip-quality-dashboard__source-gaps" aria-label="未配置 IP 数据库来源">
+            <span>未配置来源：</span>
+            {sourceGaps.map((gap) => (
+              <Badge key={gap.provider} variant="info" tone={gap.tone}>{gap.label}</Badge>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="page-panel vps-ip-quality-dashboard__service-panel">
@@ -270,7 +279,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
             <p className="section-heading__eyebrow">Service Unlock</p>
             <h2 className="section-heading__title">服务解锁矩阵</h2>
           </div>
-          <div className="asset-context-inline" aria-label="服务解锁状态统计">
+          <div className="vps-ip-quality-dashboard__service-stats" aria-label="服务解锁状态统计">
             <Badge variant="state" tone="normal">{serviceCounts.unlocked} 可用</Badge>
             <Badge variant="state" tone="alert">{serviceCounts.blocked} 受阻</Badge>
             <Badge variant="state" tone="notice">{serviceCounts.partial} 部分</Badge>
@@ -286,7 +295,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
                   <Badge variant="state" tone={unlockTone(unlock.status)}>{unlockStatusLabel(unlock.status, unlock.region)}</Badge>
                 </header>
                 <p>{serviceCardDescription(unlock)}</p>
-                <small>{unlockMeta(unlock.region, unlock.unlock_type)}</small>
+                <small>{serviceUnlockMeta(unlock)}</small>
                 {unlock.extra_json ? (
                   <details className="vps-ip-quality-dashboard__json-detail">
                     <summary>查看采集细节</summary>

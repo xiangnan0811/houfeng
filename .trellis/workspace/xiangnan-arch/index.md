@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 186
+- **Total Sessions**: 187
 - **Last Active**: 2026-06-10
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~347 | Active |
+| `journal-4.md` | ~381 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 187 | 2026-06-10 | 修复 IP 质量详情覆盖展示 | `5ba7172`, `0528f50` | `fix/ip-quality-detail-followups` |
 | 186 | 2026-06-10 | IP质量报告体验优化 | `60dc8a2` | `design/ip-quality-ux-refinement` |
 | 185 | 2026-06-09 | IP质量采集覆盖修复 | `1a93942` | `fix/ip-quality-full-coverage` |
 | 184 | 2026-06-09 | IP quality dashboard page | `2dec324` | `feature/ip-quality-dashboard-page` |

@@ -104,6 +104,38 @@ const ipQualityReportBody = {
       extra_json: { rate_limit: true },
     },
     {
+      provider: 'clean-db',
+      status: 'success',
+      source_type: 'default',
+      latency_ms: 64,
+      usage_type: 'residential',
+      company_type: 'isp',
+      risk_level: 'low',
+      risk_score: '8',
+      region_code: 'JP',
+      region_name: 'Japan',
+      is_proxy: false,
+      is_tor: false,
+      is_vpn: false,
+      is_server: false,
+      is_abuser: false,
+      is_robot: false,
+    },
+    {
+      provider: 'score-only-db',
+      status: 'success',
+      source_type: 'default',
+      latency_ms: 72,
+      risk_score: '31',
+      region_code: 'JP',
+      is_proxy: false,
+      is_tor: false,
+      is_vpn: false,
+      is_server: false,
+      is_abuser: false,
+      is_robot: false,
+    },
+    {
       provider: 'maxmind',
       status: 'not_configured',
       source_type: 'optional',
@@ -114,7 +146,16 @@ const ipQualityReportBody = {
   service_unlocks: [
     { service: 'chatgpt', source: 'openai_status_probe', status: 'unlocked', probe_status: 'success', latency_ms: 211, region: 'JP', unlock_type: 'native', extra_json: { cf_country: 'JP' } },
     { service: 'netflix', source: 'netflix_title_probe', status: 'partial', probe_status: 'success', latency_ms: 320, region: 'US', unlock_type: 'originals' },
-    { service: 'disney-plus', source: 'disney_default_probe', status: 'unknown', probe_status: 'skipped', region: 'US', error_code: 'unsupported_default_probe' },
+    { service: 'youtube-premium', source: 'youtube_premium_page_probe', status: 'unknown', probe_status: 'skipped', unlock_type: 'default_probe', error_code: 'unsupported_default_probe' },
+    {
+      service: 'disney-plus',
+      source: 'disney_default_probe',
+      status: 'unknown',
+      probe_status: 'skipped',
+      region: 'US',
+      error_code: 'unsupported_default_probe',
+      error_summary: 'safe default probe is not available without optional service configuration',
+    },
     { service: 'ipqs', source: 'optional_service_probe', status: 'unknown', probe_status: 'not_configured', error_code: 'not_configured' },
   ],
   history: [
@@ -166,25 +207,38 @@ describe('VPSIPQualityPage', () => {
     expect(screen.getByText('解锁可用')).toBeInTheDocument()
     expect(screen.getAllByText('数据库一致性').length).toBeGreaterThan(0)
     expect(screen.getByText('采集完整性')).toBeInTheDocument()
+    expect(screen.queryByText(/完整展示低频 IP 质量报告/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '风险信号矩阵' })).toBeInTheDocument()
+    expect(screen.queryByText(/Server \/ Datacenter 本身只作为上下文/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '各 IP 数据库判断' })).toBeInTheDocument()
+    expect(screen.queryByText(/逐 provider 展示/)).not.toBeInTheDocument()
     expect(screen.getByText('ipinfo')).toBeInTheDocument()
     expect(screen.getByText('fraud-check')).toBeInTheDocument()
-    expect(screen.getByText('maxmind')).toBeInTheDocument()
-    expect(screen.getAllByText('未配置').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('cell', { name: 'maxmind' })).not.toBeInTheDocument()
+    const sourceGaps = screen.getByLabelText('未配置 IP 数据库来源')
+    expect(within(sourceGaps).getByText('未配置来源：')).toBeInTheDocument()
+    expect(within(sourceGaps).getByText('maxmind')).toBeInTheDocument()
     expect(screen.getAllByText('查看').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Server').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Proxy').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Abuse').length).toBeGreaterThan(0)
-    expect(screen.getByText('无用户证据')).toBeInTheDocument()
+    expect(screen.queryByText('无用户证据')).not.toBeInTheDocument()
+    expect(screen.getByText('采集失败')).toBeInTheDocument()
+    expect(screen.getAllByText('未发现风险信号').length).toBeGreaterThan(0)
+    expect(screen.getByText('52')).toBeInTheDocument()
+    expect(screen.getByText('31')).toBeInTheDocument()
+    expect(screen.getByText('风险分')).toBeInTheDocument()
     expect(screen.queryByText(/optional IP quality source requires configuration/)).not.toBeInTheDocument()
     expect(screen.queryByText(/http status 429/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '服务解锁矩阵' })).toBeInTheDocument()
-    expect(screen.getByLabelText('服务解锁状态统计')).toBeInTheDocument()
+    expect(screen.getByLabelText('服务解锁状态统计')).toHaveClass('vps-ip-quality-dashboard__service-stats')
     expect(screen.getByText('ChatGPT')).toBeInTheDocument()
     expect(screen.getByText('Netflix')).toBeInTheDocument()
     expect(screen.getByText('Disney+')).toBeInTheDocument()
-    expect(screen.getAllByText('本轮未形成可靠结论').length).toBeGreaterThan(0)
+    expect(screen.getByText('YouTube Premium')).toBeInTheDocument()
+    expect(screen.getAllByText('默认探测暂不支持该服务').length).toBeGreaterThan(0)
+    expect(screen.getByText('需要可选配置后才能检测')).toBeInTheDocument()
+    expect(screen.queryByText(/safe default probe is not available/)).not.toBeInTheDocument()
     expect(screen.queryByText('disney_default_probe · —')).not.toBeInTheDocument()
     expect(screen.queryByText(/disney_default_probe/)).not.toBeInTheDocument()
     expect(screen.queryByText(/default_probe/)).not.toBeInTheDocument()

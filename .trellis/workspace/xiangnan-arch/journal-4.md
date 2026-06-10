@@ -345,3 +345,37 @@ Added standalone VPS IP quality dashboard page, detail summary entry, route cove
 ### Next Steps
 
 - None - task complete
+
+
+## Session 187: 修复 IP 质量详情覆盖展示
+
+**Date**: 2026-06-10
+**Task**: 修复 IP 质量详情覆盖展示
+**Branch**: `fix/ip-quality-detail-followups`
+
+### Summary
+
+修复 IP 质量详情页展示噪声、服务解锁内部探测文本、服务统计布局和 provider 风险列；补充 209.33.173.4 默认 provider parser 回归，验证完整质量门与浏览器布局。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5ba7172` | (see git log) |
+| `0528f50` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
