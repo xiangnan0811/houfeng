@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.3](https://github.com/xiangnan0811/houfeng/compare/v0.53.2...v0.53.3) (2026-06-10)
+
+
+### Bug Fixes
+
+* refine IP quality detail coverage ([480c3ea](https://github.com/xiangnan0811/houfeng/commit/480c3eaec2cde816b83b0e420400ef525414845b))
+
 ## [0.53.2](https://github.com/xiangnan0811/houfeng/compare/v0.53.1...v0.53.2) (2026-06-10)
 
 
