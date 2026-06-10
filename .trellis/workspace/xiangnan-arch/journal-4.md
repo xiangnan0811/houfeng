@@ -379,3 +379,38 @@ Added standalone VPS IP quality dashboard page, detail summary entry, route cove
 ### Next Steps
 
 - None - task complete
+
+
+## Session 188: Agent upgrade reuse release
+
+**Date**: 2026-06-10
+**Task**: Agent upgrade reuse release
+**Branch**: `chore/archive-agent-upgrade-reuse-existing`
+
+### Summary
+
+Reused existing VPS monitoring instances for agent upgrade/re-onboarding, shipped PR #258, released v0.53.4, and verified Docker Hub image tags v0.53.4/0.53.4/latest plus agent release assets.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `74670bb` | (see git log) |
+| `3f752c1` | (see git log) |
+| `063fa17` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
