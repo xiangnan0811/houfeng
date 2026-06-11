@@ -393,30 +393,6 @@ func TestRestoreVPSFromArchiveOnlyAllowsArchivedAssets(t *testing.T) {
 	}
 }
 
-func TestListMonitoringInstanceAssetContextsExcludesArchivedAndCancelledVPS(t *testing.T) {
-	t.Parallel()
-
-	var seenSQL string
-	repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{
-		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-			seenSQL = sql
-			return &fakeSubscriptionRows{}, nil
-		},
-	}}
-
-	if _, err := repo.ListMonitoringInstanceAssetContexts(context.Background()); err != nil {
-		t.Fatalf("ListMonitoringInstanceAssetContexts() error = %v", err)
-	}
-	for _, snippet := range []string{
-		"join vps_assets v on v.vps_id = l.vps_id",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
-	} {
-		if !strings.Contains(seenSQL, snippet) {
-			t.Fatalf("ListMonitoringInstanceAssetContexts SQL missing %q in %s", snippet, seenSQL)
-		}
-	}
-}
-
 func TestListTargetAssetContextsExcludesArchivedAndCancelledVPS(t *testing.T) {
 	t.Parallel()
 

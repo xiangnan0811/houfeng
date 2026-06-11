@@ -256,10 +256,10 @@ parent: docs/design/v2-houfeng/design-language.md
 
 ### MonitoringPage
 1. Section heading「监控」+「从 VPS 接入 agent」跳转。页面标题使用“监控”，section 与表格主体使用“监控实例”，文案必须把 MonitoringInstance 定位为 agent 接入后的运行观测对象；普通服务器接入主路径在 VPS 详情页，监控页不得弹出无 VPS 上下文的创建 / 接入表单。
-2. 观测支撑面「资产判断支撑」放在 hero 之后、创建 drawer/列表控制之前，展示四个证据 lane：异常证据、接入/绑定、维护/暂停、VPS 关联。列表可以使用批量 `asset-context/monitoring-instances` 显示关联 VPS 的取消 / 过期 / 状态割裂上下文，但不得逐行请求，也不得展示 contract 中不存在的 linked VPS health。
+2. 监控列表页不承载资产判断支撑面，也不展示「资产上下文」列；资产组合判断集中在资产决策页、VPS 详情 / 取消退役工作台和必要的详情联动中。Hero 之后应直接进入视图切换、筛选、批量操作和 DataTable，避免压缩监控实例扫描主路径。
 3. 监控页空态动作为「创建第一台 VPS」或返回 VPS 库存；独立 MonitoringInstance 创建只允许作为后端 / 运维级高级能力存在，不进入普通前端 CTA。
 4. 视图切换：segmented control 「全部监控实例 N」/「绑定异常 M」
-5. 筛选栏：URL-state 承接 Dashboard 深链；`onboarding=pending` 显示 `待接入/绑定待处理` chip/toggle，匹配生命周期待接入、未绑定或指纹变更待确认的监控实例。支撑面快捷按钮可复用 `abnormal=1`、`onboarding=pending`、运行状态筛选，但必须保持清空和 chip 移除回写 URL。
+5. 筛选栏：URL-state 承接 Dashboard 深链；`onboarding=pending` 显示 `待接入/绑定待处理` chip/toggle，匹配生命周期待接入、未绑定或指纹变更待确认的监控实例。Hero / quick view 快捷入口可复用 `abnormal=1`、`onboarding=pending`、运行状态筛选，但必须保持清空和 chip 移除回写 URL。
 6. **DataTable**（density compact）：列 `[StatusGlyph, 监控实例(Hostname + 名字 + 心跳/同步 mono), 位置, 标签, 当前主问题, 近 24h 趋势(sparkline strip), 操作 hover]`
    - 监控实例身份列三行：第 1 行 `<Hostname truncate>` monitoring_instance_id（mono 小字）、第 2 行 display_name（sans 粗体 link）、第 3 行 `心跳 X 分钟前 · 同步 Y 分钟前`（mono 10px `--text-muted`）
    - 趋势列（~220px）：CPU / Mem / Disk 三指标 mini sparkline strip，每项含上方 mono 当前值（9px）+ 下方 `<Sparkline>` 64×14，tone 按阈值择色（CPU 80/95、Mem 85/95、Disk 80/95）

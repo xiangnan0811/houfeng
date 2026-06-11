@@ -58,7 +58,6 @@ import {
   listIncidents,
   listSubscriptions,
   listAssetDecisionGroups,
-  listMonitoringInstanceAssetContexts,
   listTargetAssetContexts,
   pauseMonitoringInstanceMonitoring,
   pauseTarget,
@@ -1330,7 +1329,7 @@ describe('api helpers', () => {
     })
   })
 
-  it('serializes VPS cancellation preview, confirmed action, and asset contexts', async () => {
+  it('serializes VPS cancellation preview, confirmed action, and target asset contexts', async () => {
     const preview = {
       vps: {
         vps_id: 'vps_001',
@@ -1365,24 +1364,19 @@ describe('api helpers', () => {
       },
       steps: [],
     }
-    const monitoringInstanceContexts = [{
-      monitoring_instance_id: 'mi_001',
-      linked_vps_count: 1,
-      cancellation_attention: true,
-      summaries: [{
-        vps_id: 'vps_001',
-        display_name: 'Tokyo Edge',
-        lifecycle_status: 'cancelled',
-        renewal_decision: 'cancel',
-        subscription_state: 'expired',
-        message: '关联 VPS 已取消，监控实例仍需确认状态。',
-      }],
+    const linkedVPSSummaries = [{
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
+      lifecycle_status: 'cancelled',
+      renewal_decision: 'cancel',
+      subscription_state: 'expired',
+      message: '关联 VPS 已取消，Target 仍需确认状态。',
     }]
     const targetContexts = [{
       target_id: 'tg_001',
       linked_vps_count: 1,
       cancellation_attention: true,
-      summaries: monitoringInstanceContexts[0].summaries,
+      summaries: linkedVPSSummaries,
       service_ids: ['svc_001'],
       domain_ids: ['dom_001'],
     }]
@@ -1398,13 +1392,11 @@ describe('api helpers', () => {
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(preview)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(actionResult)))
-      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(monitoringInstanceContexts)))
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(targetContexts)))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(getVPSCancellationPreview('vps_001')).resolves.toEqual(preview)
     await expect(applyVPSCancellation('vps_001', input)).resolves.toEqual(actionResult)
-    await expect(listMonitoringInstanceAssetContexts()).resolves.toEqual(monitoringInstanceContexts)
     await expect(listTargetAssetContexts()).resolves.toEqual(targetContexts)
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/cancellation-preview', {
@@ -1422,16 +1414,12 @@ describe('api helpers', () => {
       credentials: 'include',
       body: JSON.stringify(input),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/asset-context/monitoring-instances', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/asset-context/targets', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/asset-context/targets', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/asset-context/monitoring-instances', expect.anything())
   })
 
   it('serializes VPS archive review, archive confirmation, and restore endpoints', async () => {

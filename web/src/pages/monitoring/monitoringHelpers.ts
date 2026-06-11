@@ -1,7 +1,5 @@
 import type { HealthState } from '../../components/atoms'
-import { formatDateTime } from '../../lib/format'
 import type { MonitoringInstanceRecord } from '../../lib/types'
-import type { MonitoringInstanceEvidenceItem, MonitoringInstanceEvidenceLead, MonitoringInstanceFilterState } from './types'
 
 export const MONITORING_INSTANCE_LIFECYCLE_FILTER_OPTIONS = [
   { value: '待接入', label: '待接入' },
@@ -69,14 +67,6 @@ export function monitoringInstanceGlyphState(monitoringInstance: MonitoringInsta
   }
 }
 
-export function monitoringInstanceEvidenceGlyphState(monitoringInstance: MonitoringInstanceRecord): HealthState {
-  if (monitoringInstance.monitoring_status === '维护中' || monitoringInstance.monitoring_status === '暂停') {
-    return monitoringInstanceGlyphState(monitoringInstance)
-  }
-  if (isBindingConflictMonitoringInstance(monitoringInstance) || isPendingOnboardingMonitoringInstance(monitoringInstance)) return 'notice'
-  return monitoringInstanceGlyphState(monitoringInstance)
-}
-
 export function isBindingConflictMonitoringInstance(monitoringInstance: MonitoringInstanceRecord) {
   return monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
 }
@@ -101,164 +91,6 @@ export function countMaintenanceOrPausedMonitoringInstances(monitoring: Monitori
   return monitoring.filter(
     (monitoringInstance) => monitoringInstance.monitoring_status === '维护中' || monitoringInstance.monitoring_status === '暂停',
   ).length
-}
-
-function monitoringInstanceAttentionRank(monitoringInstance: MonitoringInstanceRecord): number {
-  if (monitoringInstance.current_health_status === '严重') return 0
-  if (monitoringInstance.current_health_status === '告警') return 1
-  if (isBindingConflictMonitoringInstance(monitoringInstance)) return 2
-  if (monitoringInstance.current_health_status === '关注') return 3
-  if (isPendingOnboardingMonitoringInstance(monitoringInstance)) return 4
-  if (monitoringInstance.monitoring_status === '维护中') return 5
-  if (monitoringInstance.monitoring_status === '暂停') return 6
-  return 9
-}
-
-function monitoringInstanceEvidenceReason(monitoringInstance: MonitoringInstanceRecord): string {
-  if (isBindingConflictMonitoringInstance(monitoringInstance)) return MONITORING_INSTANCE_BINDING_CONFLICT_SUMMARY
-  if (monitoringInstance.current_primary_issue_summary) return monitoringInstance.current_primary_issue_summary
-  if (monitoringInstance.current_health_status !== '正常') return `健康状态：${monitoringInstance.current_health_status}`
-  if (isPendingOnboardingMonitoringInstance(monitoringInstance)) return '接入 / 绑定未完成'
-  if (monitoringInstance.monitoring_status === '维护中') return '维护窗口'
-  if (monitoringInstance.monitoring_status === '暂停') return '监控暂停'
-  return '当前没有明显异常'
-}
-
-function monitoringInstanceEvidenceMeta(monitoringInstance: MonitoringInstanceRecord): string {
-  const location = [monitoringInstance.group, monitoringInstance.region, monitoringInstance.city, monitoringInstance.provider].filter(Boolean).join(' · ')
-  const freshness = monitoringInstance.last_heartbeat_at
-    ? `心跳 ${formatDateTime(monitoringInstance.last_heartbeat_at)}`
-    : '尚无心跳'
-  const incident = `活跃异常 ${monitoringInstance.current_active_incident_count}`
-  return [location || '未标记位置', freshness, incident].join(' · ')
-}
-
-export function pickTopMonitoringInstanceEvidence(monitoring: MonitoringInstanceRecord[]): MonitoringInstanceEvidenceItem | null {
-  if (monitoring.length === 0) return null
-  const candidates = [...monitoring]
-    .filter(
-      (monitoringInstance) =>
-        monitoringInstance.current_health_status !== '正常' ||
-        isPendingOnboardingMonitoringInstance(monitoringInstance) ||
-        monitoringInstance.monitoring_status === '维护中' ||
-        monitoringInstance.monitoring_status === '暂停',
-    )
-    .sort((a, b) => {
-      const rankDiff = monitoringInstanceAttentionRank(a) - monitoringInstanceAttentionRank(b)
-      if (rankDiff !== 0) return rankDiff
-      const incidentDiff = b.current_active_incident_count - a.current_active_incident_count
-      if (incidentDiff !== 0) return incidentDiff
-      return a.display_name.localeCompare(b.display_name, 'zh-Hans-CN')
-    })
-
-  const monitoringInstance = candidates[0]
-  if (!monitoringInstance) return null
-
-  return {
-    monitoringInstance,
-    title: monitoringInstance.display_name || monitoringInstance.monitoring_instance_id,
-    reason: monitoringInstanceEvidenceReason(monitoringInstance),
-    meta: monitoringInstanceEvidenceMeta(monitoringInstance),
-    route: isPendingOnboardingMonitoringInstance(monitoringInstance) ? `/monitoring/${monitoringInstance.monitoring_instance_id}?onboarding=1` : `/monitoring/${monitoringInstance.monitoring_instance_id}`,
-    actionLabel: isPendingOnboardingMonitoringInstance(monitoringInstance) ? '处理接入' : '查看证据',
-  }
-}
-
-export function describeMonitoringInstanceFilterContext(filterState: MonitoringInstanceFilterState): string[] {
-  const items: string[] = []
-  if (filterState.group) items.push(`Group ${filterState.group}`)
-  if (filterState.region) items.push(`地区 ${filterState.region}`)
-  if (filterState.city) items.push(`城市 ${filterState.city}`)
-  if (filterState.provider) items.push(`供应商 ${filterState.provider}`)
-  if (filterState.lifecycle) items.push(`接入阶段 ${filterState.lifecycle}`)
-  if (filterState.runStatus) items.push(`运行 ${filterState.runStatus}`)
-  if (filterState.health) items.push(`健康 ${filterState.health}`)
-  for (const label of filterState.labels) items.push(`标签 ${label}`)
-  if (filterState.abnormal) items.push('仅看异常')
-  if (filterState.onboardingPending) items.push('待接入/绑定')
-  return items
-}
-
-export function buildMonitoringInstanceEvidenceLead(args: {
-  totalMonitoringInstanceCount: number
-  displayedMonitoringInstanceCount: number
-  abnormalMonitoringInstanceCount: number
-  pendingOnboardingMonitoringInstanceCount: number
-  maintenanceOrPausedMonitoringInstanceCount: number
-  hasActiveFilters: boolean
-}): MonitoringInstanceEvidenceLead {
-  const {
-    totalMonitoringInstanceCount,
-    displayedMonitoringInstanceCount,
-    abnormalMonitoringInstanceCount,
-    pendingOnboardingMonitoringInstanceCount,
-    maintenanceOrPausedMonitoringInstanceCount,
-    hasActiveFilters,
-  } = args
-
-  if (displayedMonitoringInstanceCount === 0 && hasActiveFilters) {
-    return {
-      eyebrow: '当前筛选',
-      title: '没有匹配当前证据条件',
-      description: '调整筛选。',
-      actionKind: 'clear',
-      actionLabel: '清空证据筛选',
-      tone: 'offline',
-    }
-  }
-
-  if (totalMonitoringInstanceCount === 0) {
-    return {
-      eyebrow: '观测列表',
-      title: '还没有 VPS 观测证据',
-      description: '普通服务器从 VPS 详情页创建并接入。',
-      actionKind: 'asset',
-      actionLabel: '创建第一台 VPS',
-      tone: 'notice',
-    }
-  }
-
-  if (abnormalMonitoringInstanceCount > 0) {
-    return {
-      eyebrow: '优先证据',
-      title: `先处理 ${abnormalMonitoringInstanceCount} 个异常监控实例`,
-      description: '进详情处理。',
-      actionKind: 'abnormal',
-      actionLabel: '聚焦异常证据',
-      tone: 'alert',
-    }
-  }
-
-  if (pendingOnboardingMonitoringInstanceCount > 0) {
-    return {
-      eyebrow: '接入证据',
-      title: `补齐 ${pendingOnboardingMonitoringInstanceCount} 个接入 / 绑定状态`,
-      description: '未完成。',
-      actionKind: 'onboarding',
-      actionLabel: '聚焦接入证据',
-      tone: 'notice',
-    }
-  }
-
-  if (maintenanceOrPausedMonitoringInstanceCount > 0) {
-    return {
-      eyebrow: '运行上下文',
-      title: `核对 ${maintenanceOrPausedMonitoringInstanceCount} 个维护 / 暂停监控实例`,
-      description: '维护 / 暂停空窗。',
-      actionKind: 'runtime',
-      actionLabel: '聚焦运行证据',
-      tone: 'maintenance',
-    }
-  }
-
-  return {
-    eyebrow: '证据稳定',
-    title: '监控实例运行证据当前稳定',
-    description: '无异常 / 接入缺口。',
-    actionKind: 'asset',
-    actionLabel: '查看 VPS 库存',
-    tone: 'normal',
-  }
 }
 
 export function isRuntimeAttentionMonitoringInstance(monitoringInstance: MonitoringInstanceRecord) {

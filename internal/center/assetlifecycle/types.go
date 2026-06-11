@@ -52,7 +52,6 @@ type Repository interface {
 	GetVPSArchiveReview(context.Context, string) (ArchiveReview, error)
 	ApplyVPSArchive(context.Context, string, ApplyArchiveInput) (ArchiveReview, error)
 	RestoreVPSFromArchive(context.Context, string) (vpsassets.Record, error)
-	ListMonitoringInstanceAssetContexts(context.Context) ([]AssetContextForMonitoringInstance, error)
 	ListTargetAssetContexts(context.Context) ([]AssetContextForTarget, error)
 }
 
@@ -168,13 +167,6 @@ type LifecycleActionStep struct {
 	Message     string         `json:"message"`
 	ExecutedAt  *time.Time     `json:"executed_at"`
 	CreatedAt   time.Time      `json:"created_at"`
-}
-
-type AssetContextForMonitoringInstance struct {
-	MonitoringInstanceID  string             `json:"monitoring_instance_id"`
-	LinkedVPSCount        int                `json:"linked_vps_count"`
-	CancellationAttention bool               `json:"cancellation_attention"`
-	Summaries             []LinkedVPSContext `json:"summaries"`
 }
 
 type AssetContextForTarget struct {

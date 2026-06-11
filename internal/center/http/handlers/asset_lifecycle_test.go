@@ -19,31 +19,29 @@ import (
 )
 
 type fakeAssetLifecycleRepository struct {
-	previewResult                 assetlifecycle.CancellationPreview
-	previewErr                    error
-	previewVPSID                  string
-	applyResult                   assetlifecycle.LifecycleActionResult
-	applyErr                      error
-	applyVPSID                    string
-	applyInput                    assetlifecycle.ApplyCancellationInput
-	extendResult                  assetlifecycle.LifecycleActionResult
-	extendErr                     error
-	extendVPSID                   string
-	extendInput                   assetlifecycle.ExtendValidityInput
-	archiveReviewResult           assetlifecycle.ArchiveReview
-	archiveReviewErr              error
-	archiveReviewVPSID            string
-	archiveResult                 assetlifecycle.ArchiveReview
-	archiveErr                    error
-	archiveVPSID                  string
-	archiveInput                  assetlifecycle.ApplyArchiveInput
-	restoreResult                 vpsassets.Record
-	restoreErr                    error
-	restoreVPSID                  string
-	monitoringInstanceContexts    []assetlifecycle.AssetContextForMonitoringInstance
-	monitoringInstanceContextsErr error
-	targetContexts                []assetlifecycle.AssetContextForTarget
-	targetContextsErr             error
+	previewResult       assetlifecycle.CancellationPreview
+	previewErr          error
+	previewVPSID        string
+	applyResult         assetlifecycle.LifecycleActionResult
+	applyErr            error
+	applyVPSID          string
+	applyInput          assetlifecycle.ApplyCancellationInput
+	extendResult        assetlifecycle.LifecycleActionResult
+	extendErr           error
+	extendVPSID         string
+	extendInput         assetlifecycle.ExtendValidityInput
+	archiveReviewResult assetlifecycle.ArchiveReview
+	archiveReviewErr    error
+	archiveReviewVPSID  string
+	archiveResult       assetlifecycle.ArchiveReview
+	archiveErr          error
+	archiveVPSID        string
+	archiveInput        assetlifecycle.ApplyArchiveInput
+	restoreResult       vpsassets.Record
+	restoreErr          error
+	restoreVPSID        string
+	targetContexts      []assetlifecycle.AssetContextForTarget
+	targetContextsErr   error
 }
 
 func (f *fakeAssetLifecycleRepository) GetVPSCancellationPreview(_ context.Context, vpsID string) (assetlifecycle.CancellationPreview, error) {
@@ -95,10 +93,6 @@ func (f *fakeAssetLifecycleRepository) RestoreVPSFromArchive(_ context.Context, 
 		return vpsassets.Record{}, f.restoreErr
 	}
 	return f.restoreResult, nil
-}
-
-func (f *fakeAssetLifecycleRepository) ListMonitoringInstanceAssetContexts(context.Context) ([]assetlifecycle.AssetContextForMonitoringInstance, error) {
-	return f.monitoringInstanceContexts, f.monitoringInstanceContextsErr
 }
 
 func (f *fakeAssetLifecycleRepository) ListTargetAssetContexts(context.Context) ([]assetlifecycle.AssetContextForTarget, error) {
@@ -427,11 +421,6 @@ func TestAssetLifecycleHandlersValidateInputAndMapErrors(t *testing.T) {
 
 func TestAssetContextHandlersReturnBatchContexts(t *testing.T) {
 	repo := &fakeAssetLifecycleRepository{
-		monitoringInstanceContexts: []assetlifecycle.AssetContextForMonitoringInstance{{
-			MonitoringInstanceID:  "mi_001",
-			LinkedVPSCount:        1,
-			CancellationAttention: true,
-		}},
 		targetContexts: []assetlifecycle.AssetContextForTarget{{
 			TargetID:              "tg_001",
 			LinkedVPSCount:        1,
@@ -439,22 +428,8 @@ func TestAssetContextHandlersReturnBatchContexts(t *testing.T) {
 		}},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/asset-context/monitoring-instances", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/asset-context/targets", nil)
 	recorder := httptest.NewRecorder()
-	handlers.AssetContextMonitoringInstances(repo).ServeHTTP(recorder, req)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("monitoringInstance context status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
-	}
-	var monitoringInstanceBody []assetlifecycle.AssetContextForMonitoringInstance
-	if err := json.Unmarshal(recorder.Body.Bytes(), &monitoringInstanceBody); err != nil {
-		t.Fatalf("unmarshal monitoringInstance contexts: %v", err)
-	}
-	if len(monitoringInstanceBody) != 1 || monitoringInstanceBody[0].MonitoringInstanceID != "mi_001" || !monitoringInstanceBody[0].CancellationAttention {
-		t.Fatalf("monitoringInstance contexts = %#v, want attention context", monitoringInstanceBody)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/api/asset-context/targets", nil)
-	recorder = httptest.NewRecorder()
 	handlers.AssetContextTargets(repo).ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("target context status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())

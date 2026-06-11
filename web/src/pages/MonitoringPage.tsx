@@ -5,14 +5,12 @@ import { type DataTableSortState } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import {
   ApiError,
-  listMonitoringInstanceAssetContexts,
   listMonitoringInstances,
   listMonitoringInstanceSparklines,
   postMonitoringInstanceAction,
   postMonitoringInstanceBatch,
 } from '../lib/api'
 import type {
-  AssetContextForMonitoringInstance,
   MonitoringInstanceListScope,
   MonitoringInstanceRecord,
   MonitoringInstanceSparklinesResponse,
@@ -20,14 +18,11 @@ import type {
 import { MonitoringHero } from './monitoring/MonitoringHero'
 import { MonitoringInstancesListSection } from './monitoring/MonitoringInstancesListSection'
 import { buildMonitoringInstancesTableColumns } from './monitoring/MonitoringInstancesTableColumns'
-import { MonitoringSupportSurface } from './monitoring/MonitoringSupportSurface'
 import { MonitoringToolbar } from './monitoring/MonitoringToolbar'
 import {
-  buildMonitoringInstanceEvidenceLead,
   countAbnormalMonitoringInstances,
   countMaintenanceOrPausedMonitoringInstances,
   countPendingOnboardingMonitoringInstances,
-  describeMonitoringInstanceFilterContext,
   distinctSorted,
   isBindingConflictMonitoringInstance,
   isPendingOnboardingMonitoringInstance,
@@ -36,7 +31,6 @@ import {
   MONITORING_INSTANCE_LIFECYCLE_FILTER_OPTIONS,
   MONITORING_INSTANCE_RUN_STATUS_FILTER_OPTIONS,
   parseMultiValue,
-  pickTopMonitoringInstanceEvidence,
 } from './monitoring/monitoringHelpers'
 import type {
   MonitoringInstanceFilterState,
@@ -71,8 +65,6 @@ export function MonitoringPage() {
   const [commandID, setCommandID] = useState('')
   const [sortState, setSortState] = useState<DataTableSortState | null>(null)
   const [compareSet, setCompareSet] = useState<Set<string>>(new Set())
-  const [monitoringInstanceAssetContexts, setMonitoringInstanceAssetContexts] = useState<Map<string, AssetContextForMonitoringInstance>>(new Map())
-  const [monitoringInstanceAssetContextError, setMonitoringInstanceAssetContextError] = useState<string | null>(null)
   const monitoringInstanceListScope = parseMonitoringInstanceListScope(searchParams.get('scope'))
 
   useEffect(() => {
@@ -104,25 +96,6 @@ export function MonitoringPage() {
         if (!cancelled) setSparklines(data)
       })
       .catch(() => {}) // silent fail
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    if (typeof IntersectionObserver === 'undefined') return
-    listMonitoringInstanceAssetContexts()
-      .then((contexts) => {
-        if (cancelled) return
-        setMonitoringInstanceAssetContexts(new Map(contexts.map((context) => [context.monitoring_instance_id, context])))
-        setMonitoringInstanceAssetContextError(null)
-      })
-      .catch((value: unknown) => {
-        if (cancelled) return
-        setMonitoringInstanceAssetContexts(new Map())
-        setMonitoringInstanceAssetContextError(describeError(value, '加载监控实例资产上下文失败'))
-      })
     return () => {
       cancelled = true
     }
@@ -243,17 +216,6 @@ export function MonitoringPage() {
     filterState.labels.length > 0 ||
     filterState.abnormal ||
     filterState.onboardingPending
-  const monitoringFilterContext = describeMonitoringInstanceFilterContext(filterState)
-  const monitoringEvidenceLead = buildMonitoringInstanceEvidenceLead({
-    totalMonitoringInstanceCount: monitoring.length,
-    displayedMonitoringInstanceCount: sortedFilteredMonitoringInstances.length,
-    abnormalMonitoringInstanceCount,
-    pendingOnboardingMonitoringInstanceCount,
-    maintenanceOrPausedMonitoringInstanceCount,
-    hasActiveFilters,
-  })
-  const topMonitoringEvidence = pickTopMonitoringInstanceEvidence(sortedFilteredMonitoringInstances)
-
   const healthOptions = MONITORING_INSTANCE_HEALTH_STATUS_FILTER_OPTIONS.map((option) => option.value)
   const lifecycleOptions = MONITORING_INSTANCE_LIFECYCLE_FILTER_OPTIONS.map((option) => option.value)
   const runStatusOptions = MONITORING_INSTANCE_RUN_STATUS_FILTER_OPTIONS.map((option) => option.value)
@@ -441,7 +403,6 @@ export function MonitoringPage() {
   const columns = buildMonitoringInstancesTableColumns({
     compareSet,
     sparklines,
-    assetContexts: monitoringInstanceAssetContexts,
     onToggleCompare: toggleCompare,
   })
 
@@ -455,21 +416,6 @@ export function MonitoringPage() {
         onAbnormalClick={() => setAbnormalFilter(abnormalMonitoringInstanceCount > 0)}
         onOnboardingClick={() => setOnboardingFilter(pendingOnboardingMonitoringInstanceCount > 0)}
         onRuntimeAttentionClick={() => applyQuickView('runtime-attention')}
-      />
-
-      <MonitoringSupportSurface
-        totalMonitoringInstanceCount={monitoring.length}
-        displayedMonitoringInstanceCount={sortedFilteredMonitoringInstances.length}
-        abnormalMonitoringInstanceCount={abnormalMonitoringInstanceCount}
-        pendingOnboardingMonitoringInstanceCount={pendingOnboardingMonitoringInstanceCount}
-        evidenceLead={monitoringEvidenceLead}
-        topEvidence={topMonitoringEvidence}
-        filterContext={monitoringFilterContext}
-        hasActiveFilters={hasActiveFilters}
-        onAbnormalClick={() => setAbnormalFilter(abnormalMonitoringInstanceCount > 0)}
-        onOnboardingClick={() => setOnboardingFilter(pendingOnboardingMonitoringInstanceCount > 0)}
-        onRuntimeAttentionClick={() => applyQuickView('runtime-attention')}
-        onClearFilters={clearAllFilters}
       />
 
       <div className="animate-in d2">
@@ -487,11 +433,6 @@ export function MonitoringPage() {
           onAbnormalChange={(checked) => setAbnormalFilter(checked)}
           onOpenBatchPanel={() => setBatchPanelOpen(true)}
         />
-        {monitoringInstanceAssetContextError ? (
-          <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
-            {monitoringInstanceAssetContextError}
-          </p>
-        ) : null}
 
         <MonitoringInstancesListSection
           monitoringInstanceListView={monitoringInstanceListView}

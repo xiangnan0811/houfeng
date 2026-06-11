@@ -6,11 +6,7 @@ import {
   StatusGlyph,
   Timestamp,
 } from '../../components/atoms'
-import type { AssetContextForMonitoringInstance, MonitoringInstanceRecord, MonitoringInstanceSparklinesResponse } from '../../lib/types'
-import {
-  assetContextHasAttention,
-  assetContextPrimarySummary,
-} from '../assetContextSummary'
+import type { MonitoringInstanceRecord, MonitoringInstanceSparklinesResponse } from '../../lib/types'
 import {
   isBindingConflictMonitoringInstance,
   MONITORING_INSTANCE_BINDING_CONFLICT_SUMMARY,
@@ -22,20 +18,7 @@ import { MonitoringInstancesTrendCell } from './MonitoringInstancesTrendCell'
 type BuildMonitoringInstancesTableColumnsArgs = {
   compareSet: Set<string>
   sparklines: MonitoringInstanceSparklinesResponse | null
-  assetContexts: Map<string, AssetContextForMonitoringInstance>
   onToggleCompare: (monitoringInstanceId: string) => void
-}
-
-function assetContextStatus(context: AssetContextForMonitoringInstance | undefined): { label: string; attention: boolean; detail: string | null } {
-  const primary = assetContextPrimarySummary(context)
-  if (!context || !primary) return { label: '未关联', attention: true, detail: null }
-  if (primary.lifecycle_status === 'to_cancel') return { label: '待取消', attention: true, detail: primary.display_name }
-  if (primary.lifecycle_status === 'cancelled') return { label: '已取消', attention: true, detail: primary.display_name }
-  if (primary.subscription_state === 'expired') return { label: '已过期', attention: true, detail: primary.display_name }
-  if (primary.subscription_state === 'cancelled') return { label: '已取消', attention: true, detail: primary.display_name }
-  if (primary.subscription_state === 'paused') return { label: '已暂停', attention: true, detail: primary.display_name }
-  if (primary.subscription_state === 'missing') return { label: '缺订阅', attention: true, detail: primary.display_name }
-  return { label: '已关联', attention: assetContextHasAttention(context), detail: primary.display_name }
 }
 
 function issueSummary(monitoringInstance: MonitoringInstanceRecord): string {
@@ -48,7 +31,6 @@ function issueSummary(monitoringInstance: MonitoringInstanceRecord): string {
 export function buildMonitoringInstancesTableColumns({
   compareSet,
   sparklines,
-  assetContexts,
   onToggleCompare,
 }: BuildMonitoringInstancesTableColumnsArgs): DataTableColumn<MonitoringInstanceRecord>[] {
   return [
@@ -115,23 +97,6 @@ export function buildMonitoringInstancesTableColumns({
           {[monitoringInstance.group, monitoringInstance.region, monitoringInstance.city, monitoringInstance.provider].filter(Boolean).join(' · ') || '—'}
         </span>
       ),
-    },
-    {
-      key: 'asset_context',
-      label: '资产上下文',
-      width: 144,
-      render: (monitoringInstance) => {
-        const context = assetContexts.get(monitoringInstance.monitoring_instance_id)
-        const status = assetContextStatus(context)
-        return (
-          <div className="asset-context-cell">
-            <span className={status.attention ? 'asset-context-pill asset-context-pill--attention' : 'asset-context-pill'}>
-              {status.label}
-            </span>
-            {status.detail ? <small>{status.detail}</small> : null}
-          </div>
-        )
-      },
     },
     {
       key: 'labels',

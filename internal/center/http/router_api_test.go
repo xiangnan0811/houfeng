@@ -524,10 +524,6 @@ func TestRouterKeepsAssetContextOutOfSPAFallback(t *testing.T) {
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
-		AssetContextMonitoringInstancesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`[{"monitoring_instance_id":"mi_001","cancellation_attention":true}]`))
-		}),
 		AssetContextTargetsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[{"target_id":"tg_001","cancellation_attention":true}]`))
@@ -537,10 +533,11 @@ func TestRouterKeepsAssetContextOutOfSPAFallback(t *testing.T) {
 	tests := []struct {
 		name            string
 		path            string
+		wantStatus      int
 		wantBodySnippet string
 	}{
-		{name: "monitoring_instances", path: "/api/asset-context/monitoring-instances", wantBodySnippet: `"monitoring_instance_id":"mi_001"`},
-		{name: "targets", path: "/api/asset-context/targets", wantBodySnippet: `"target_id":"tg_001"`},
+		{name: "monitoring_instances_removed", path: "/api/asset-context/monitoring-instances", wantStatus: http.StatusNotFound},
+		{name: "targets", path: "/api/asset-context/targets", wantStatus: http.StatusOK, wantBodySnippet: `"target_id":"tg_001"`},
 	}
 
 	for _, tt := range tests {
@@ -550,8 +547,8 @@ func TestRouterKeepsAssetContextOutOfSPAFallback(t *testing.T) {
 
 			handler.ServeHTTP(recorder, req)
 
-			if recorder.Code != http.StatusOK {
-				t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("expected status %d, got %d", tt.wantStatus, recorder.Code)
 			}
 			body, err := io.ReadAll(recorder.Body)
 			if err != nil {
@@ -560,7 +557,7 @@ func TestRouterKeepsAssetContextOutOfSPAFallback(t *testing.T) {
 			if strings.TrimSpace(string(body)) == spaShell {
 				t.Fatalf("expected asset context API response, got SPA fallback body %q", string(body))
 			}
-			if !strings.Contains(string(body), tt.wantBodySnippet) {
+			if tt.wantBodySnippet != "" && !strings.Contains(string(body), tt.wantBodySnippet) {
 				t.Fatalf("expected asset context payload, got %q", string(body))
 			}
 		})

@@ -2,12 +2,11 @@ import {
   SUBSCRIPTION_STATUS_LABELS,
   VPS_LIFECYCLE_STATUS_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
-  type AssetContextForMonitoringInstance,
   type AssetContextForTarget,
   type LinkedVPSContext,
 } from '../lib/types'
 
-export type AssetContextLike = AssetContextForMonitoringInstance | AssetContextForTarget
+export type AssetContextLike = AssetContextForTarget
 
 export function assetContextHasAttention(context: AssetContextLike | null | undefined): boolean {
   return Boolean(context?.cancellation_attention)

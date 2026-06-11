@@ -488,7 +488,7 @@ def lifecycle_context_for(
     }
 
 
-def asset_workflow_monitoring_instance_contexts() -> list[dict[str, object]]:
+def asset_workflow_monitoring_instance_vps_links() -> list[dict[str, object]]:
     return [
         {
             "monitoring_instance_id": "mi_hkg_edge_01",
@@ -3242,7 +3242,7 @@ def observability_support_vps_for_monitoring_instance(monitoring_instance_id: st
     context = next(
         (
             row
-            for row in asset_workflow_monitoring_instance_contexts()
+            for row in asset_workflow_monitoring_instance_vps_links()
             if row["monitoring_instance_id"] == monitoring_instance_id
         ),
         None,
@@ -3841,10 +3841,6 @@ def fulfill_asset_workflow_api(route: object) -> None:
         fulfill_json(route, 200, asset_workflow_monthly_budget_records())
         return
 
-    if method == "GET" and path == "/api/asset-context/monitoring-instances":
-        fulfill_json(route, 200, asset_workflow_monitoring_instance_contexts())
-        return
-
     if method == "GET" and path == "/api/asset-context/targets":
         fulfill_json(route, 200, asset_workflow_target_contexts())
         return
@@ -3937,10 +3933,6 @@ def fulfill_observability_support_api(route: object) -> None:
 
     if method == "GET" and path == "/api/targets/sparklines":
         fulfill_json(route, 200, observability_target_sparklines())
-        return
-
-    if method == "GET" and path == "/api/asset-context/monitoring-instances":
-        fulfill_json(route, 200, asset_workflow_monitoring_instance_contexts())
         return
 
     if method == "GET" and path == "/api/asset-context/targets":

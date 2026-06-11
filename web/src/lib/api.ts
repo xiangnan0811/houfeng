@@ -2,7 +2,6 @@ import type {
   ActiveIncidentRecord,
   AssetDomainListFilter,
   AssetDomainRecord,
-  AssetContextForMonitoringInstance,
   AssetContextForTarget,
   AssetDecisionGroupDetail,
   AssetDecisionGroupListFilter,
@@ -848,12 +847,6 @@ export function unlinkVPSMonitoringInstance(vpsId: string, input: UnlinkVPSMonit
 
 export function listVPSForMonitoringInstance(monitoringInstanceId: string) {
   return requestJSON<VPSSummary[]>(`/api/monitoring-instances/${monitoringInstanceId}/vps`)
-}
-
-export function listMonitoringInstanceAssetContexts() {
-  return requestJSON<AssetContextForMonitoringInstance[]>('/api/asset-context/monitoring-instances').then((contexts) =>
-    Array.isArray(contexts) ? contexts : [],
-  )
 }
 
 export function listTargetAssetContexts() {
