@@ -449,3 +449,36 @@ Added MonitoringInstance lifecycle management with archive/permanent cleanup rev
 ### Next Steps
 
 - None - task complete
+
+
+## Session 190: Remove monitoring list asset context support
+
+**Date**: 2026-06-11
+**Task**: Remove monitoring list asset context support
+**Branch**: `feature/monitoring-list-asset-decision-removal`
+
+### Summary
+
+Removed the redundant asset decision support surface from the monitoring list page, deleted its backend monitoring-instance asset-context API path, kept target asset context and monitoring detail VPS flows intact, and refreshed verification/spec/docs coverage.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `65b07f3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

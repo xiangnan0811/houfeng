@@ -147,7 +147,7 @@ TMPDIR="$PWD/.tmp/playwright" /opt/homebrew/opt/python@3.11/bin/python3.11 scrip
   --viewport 390x900
 ```
 
-`--mock-api observability-support` intercepts `/api/auth/me`, `/api/dashboard`, `/api/monitoring-instances`, `/api/monitoring-instances/sparklines`, `/api/targets`, `/api/targets/sparklines`, and `/api/events` in the browser session. The fixture rows intentionally cover abnormal monitoring instances, pending onboarding and binding conflict, maintenance / paused / retired monitoring instances, abnormal targets, paused / archived / maintenance targets, missing execution coverage, event severity, recovery / maintenance / notification filters, and explicit backfilled event opt-in.
+`--mock-api observability-support` intercepts `/api/auth/me`, `/api/dashboard`, `/api/monitoring-instances`, `/api/monitoring-instances/sparklines`, `/api/targets`, `/api/targets/sparklines`, `/api/asset-context/targets`, and `/api/events` in the browser session. The fixture rows intentionally cover abnormal monitoring instances, pending onboarding and binding conflict, maintenance / paused / retired monitoring instances, abnormal targets, paused / archived / maintenance targets, Target asset context, missing execution coverage, event severity, recovery / maintenance / notification filters, and explicit backfilled event opt-in.
 
 Report this as `Data source: mock-api observability-support`. It proves the protected observability support route layout can render with representative states, but it does not prove backend correctness, real incident evaluation, real notification delivery, real backfill classification, or real asset-to-observability linkage.
 

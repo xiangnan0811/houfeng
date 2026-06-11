@@ -1769,13 +1769,6 @@ export type LinkedVPSContext = {
   message: string
 }
 
-export type AssetContextForMonitoringInstance = {
-  monitoring_instance_id: string
-  linked_vps_count: number
-  cancellation_attention: boolean
-  summaries: LinkedVPSContext[]
-}
-
 export type AssetContextForTarget = {
   target_id: string
   linked_vps_count: number

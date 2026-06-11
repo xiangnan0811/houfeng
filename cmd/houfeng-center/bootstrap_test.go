@@ -276,9 +276,6 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSRestoreFromArchiveHandler == nil {
 		t.Fatal("router vps restore from archive handler = nil, want non-nil")
 	}
-	if gotOpts.AssetContextMonitoringInstancesHandler == nil {
-		t.Fatal("router asset context monitoringInstances handler = nil, want non-nil")
-	}
 	if gotOpts.AssetContextTargetsHandler == nil {
 		t.Fatal("router asset context targets handler = nil, want non-nil")
 	}

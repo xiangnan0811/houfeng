@@ -183,7 +183,6 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		VPSArchiveReviewHandler:                     handlers.VPSArchiveReview(assetLifecycleRepo),
 		VPSArchiveHandler:                           handlers.VPSArchive(assetLifecycleRepo),
 		VPSRestoreFromArchiveHandler:                handlers.VPSRestoreFromArchive(assetLifecycleRepo),
-		AssetContextMonitoringInstancesHandler:      handlers.AssetContextMonitoringInstances(assetLifecycleRepo),
 		AssetContextTargetsHandler:                  handlers.AssetContextTargets(assetLifecycleRepo),
 		SubscriptionsCollectionHandler:              handlers.SubscriptionsCollection(subscriptionRepo, subscriptionCostSvc),
 		SubscriptionItemHandler:                     handlers.SubscriptionItem(subscriptionRepo),

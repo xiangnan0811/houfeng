@@ -45,7 +45,6 @@ type RouterOptions struct {
 	VPSArchiveReviewHandler                       stdhttp.Handler
 	VPSArchiveHandler                             stdhttp.Handler
 	VPSRestoreFromArchiveHandler                  stdhttp.Handler
-	AssetContextMonitoringInstancesHandler        stdhttp.Handler
 	AssetContextTargetsHandler                    stdhttp.Handler
 	SubscriptionsCollectionHandler                stdhttp.Handler
 	SubscriptionItemHandler                       stdhttp.Handler
@@ -165,9 +164,6 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.AssetDecisionRecordHandler != nil {
 		mux.Handle("/api/asset-decisions/records/", protect(opts.AssetDecisionRecordHandler))
-	}
-	if opts.AssetContextMonitoringInstancesHandler != nil {
-		mux.Handle("/api/asset-context/monitoring-instances", protect(opts.AssetContextMonitoringInstancesHandler))
 	}
 	if opts.AssetContextTargetsHandler != nil {
 		mux.Handle("/api/asset-context/targets", protect(opts.AssetContextTargetsHandler))

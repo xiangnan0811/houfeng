@@ -54,7 +54,13 @@ describe('MonitoringPage', () => {
   })
 
   it('routes the monitoring page onboarding CTA to VPS inventory without opening a standalone create form', async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('IntersectionObserver', vi.fn())
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances') return Promise.resolve(mockJSONResponse([]))
+      if (path === '/api/asset-context/monitoring-instances') return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -69,8 +75,9 @@ describe('MonitoringPage', () => {
     await waitFor(() => expect(getMonitoringHeaderVPSLink()).toBeInTheDocument())
 
     expect(screen.getByRole('heading', { name: '监控' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '资产判断支撑' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '资产组合决策' })).toHaveAttribute('href', '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup')
+    expect(screen.queryByRole('heading', { name: '资产判断支撑' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '资产组合决策' })).not.toBeInTheDocument()
+    expect(screen.queryByText('资产上下文')).not.toBeInTheDocument()
     expect(screen.getByText('观察 agent 接入后的监控实例、心跳、主机性能与运行控制。')).toBeInTheDocument()
     expect(getMonitoringHeaderVPSLink()).toHaveAttribute('href', '/vps')
     expect(screen.queryByRole('button', { name: '高级创建' })).not.toBeInTheDocument()
@@ -83,7 +90,7 @@ describe('MonitoringPage', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/asset-context/monitoring-instances', expect.anything())
 
     fireEvent.click(getMonitoringHeaderVPSLink())
 
@@ -515,7 +522,7 @@ describe('MonitoringPage', () => {
     expect(screen.getByRole('button', { name: '进入维护' })).toBeEnabled()
   })
 
-  it('renders asset context as one short status plus compact detail', async () => {
+  it('does not request or render monitoring instance asset context in the list', async () => {
     vi.stubGlobal('IntersectionObserver', vi.fn())
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const path = String(input)
@@ -530,25 +537,7 @@ describe('MonitoringPage', () => {
         )
       }
       if (path === '/api/asset-context/monitoring-instances') {
-        return Promise.resolve(
-          mockJSONResponse([
-            {
-              monitoring_instance_id: 'mi_asset',
-              linked_vps_count: 1,
-              cancellation_attention: true,
-              summaries: [
-                {
-                  vps_id: 'vps_asset',
-                  display_name: 'Tokyo VPS',
-                  lifecycle_status: 'active',
-                  renewal_decision: 'keep',
-                  subscription_state: 'expired',
-                  message: '关联 VPS 订阅已过期，监控实例仍需确认状态。',
-                },
-              ],
-            },
-          ]),
-        )
+        return Promise.resolve(mockJSONResponse({ error: 'monitoring list must not request asset context' }, 500))
       }
       return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
     })
@@ -563,15 +552,14 @@ describe('MonitoringPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('Asset Edge')).toBeInTheDocument())
-    await waitFor(() => expect(screen.getByText('已过期')).toBeInTheDocument())
 
     const row = screen.getByText('Asset Edge').closest('tr')
     expect(row).not.toBeNull()
-    expect(within(row!).getByText('已过期')).toBeInTheDocument()
-    expect(within(row!).getByText('Tokyo VPS')).toBeInTheDocument()
-    expect(within(row!).queryByText('关联 VPS 订阅已过期，监控实例仍需确认状态。')).not.toBeInTheDocument()
-    expect(within(row!).queryByText(/active/)).not.toBeInTheDocument()
-    expect(within(row!).queryByText(/expired/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: '资产上下文' })).not.toBeInTheDocument()
+    expect(within(row!).queryByText('未关联')).not.toBeInTheDocument()
+    expect(within(row!).queryByText('已过期')).not.toBeInTheDocument()
+    expect(within(row!).queryByText('Tokyo VPS')).not.toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/asset-context/monitoring-instances', expect.anything())
   })
 
   it('filters the list by lifecycle via the inline filter select', async () => {

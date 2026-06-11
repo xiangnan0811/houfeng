@@ -20,7 +20,6 @@ type AssetLifecycleRepository interface {
 	GetVPSArchiveReview(context.Context, string) (assetlifecycle.ArchiveReview, error)
 	ApplyVPSArchive(context.Context, string, assetlifecycle.ApplyArchiveInput) (assetlifecycle.ArchiveReview, error)
 	RestoreVPSFromArchive(context.Context, string) (vpsassets.Record, error)
-	ListMonitoringInstanceAssetContexts(context.Context) ([]assetlifecycle.AssetContextForMonitoringInstance, error)
 	ListTargetAssetContexts(context.Context) ([]assetlifecycle.AssetContextForTarget, error)
 }
 
@@ -192,26 +191,6 @@ func VPSRestoreFromArchive(repo AssetLifecycleRepository) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, record)
-	})
-}
-
-func AssetContextMonitoringInstances(repo AssetLifecycleRepository) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Trim(r.URL.Path, "/") != "api/asset-context/monitoring-instances" {
-			writeError(w, http.StatusNotFound, "asset context not found")
-			return
-		}
-		if r.Method != http.MethodGet {
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-
-		records, err := repo.ListMonitoringInstanceAssetContexts(r.Context())
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
-		writeJSON(w, http.StatusOK, records)
 	})
 }
 

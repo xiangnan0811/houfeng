@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 189
+- **Total Sessions**: 190
 - **Last Active**: 2026-06-11
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~451 | Active |
+| `journal-4.md` | ~484 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 190 | 2026-06-11 | Remove monitoring list asset context support | `65b07f3` | `feature/monitoring-list-asset-decision-removal` |
 | 189 | 2026-06-11 | Monitoring instance lifecycle management | `0168800`, `ca11676`, `38d985d` | `feature/monitoring-instance-lifecycle-management` |
 | 188 | 2026-06-10 | Agent upgrade reuse release | `74670bb`, `3f752c1`, `063fa17` | `chore/archive-agent-upgrade-reuse-existing` |
 | 187 | 2026-06-10 | 修复 IP 质量详情覆盖展示 | `5ba7172`, `0528f50` | `fix/ip-quality-detail-followups` |

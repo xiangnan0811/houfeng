@@ -415,32 +415,18 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 	}
 }
 
-func TestRouterDispatchesAssetContextAPIs(t *testing.T) {
+func TestRouterDispatchesTargetAssetContextAPI(t *testing.T) {
 	var called string
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		Version: "dev",
-		AssetContextMonitoringInstancesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			called = "monitoring-instances"
-			w.WriteHeader(http.StatusOK)
-		}),
 		AssetContextTargetsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "targets"
 			w.WriteHeader(http.StatusOK)
 		}),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/asset-context/monitoring-instances", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/asset-context/targets", nil)
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, req)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("monitoringInstance context status = %d, want %d", recorder.Code, http.StatusOK)
-	}
-	if called != "monitoring-instances" {
-		t.Fatalf("called = %q, want monitoringInstances", called)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/api/asset-context/targets", nil)
-	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("target context status = %d, want %d", recorder.Code, http.StatusOK)
