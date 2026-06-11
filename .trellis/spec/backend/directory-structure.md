@@ -6,7 +6,7 @@
 
 ## Overview
 
-候风 / Houfeng Fleet Control Plane V1 实现仓的后端代码组织围绕 **1 个 Go center + 1 个 Postgres + N 个 systemd Go agent** 这一拓扑。仓库严格区分：
+候风 / Houfeng Fleet Control Plane 当前后端代码组织围绕 **1 个 Go center + 1 个 Postgres + N 个 systemd Go agent** 这一拓扑。仓库严格区分：
 
 - **入口（`cmd/`）**：单个二进制的 `main.go` + 装配代码，不放业务逻辑。
 - **center 业务实现（`internal/center/`）**：按领域拆子包；HTTP 路由、Postgres 仓库、incident 判定、Telegram 通知、retention 等都各占一个子包。

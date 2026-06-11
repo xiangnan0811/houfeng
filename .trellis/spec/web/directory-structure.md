@@ -6,7 +6,7 @@
 
 ## Overview
 
-`web/` 是候风 / Houfeng Fleet Control Plane V1 的**单页应用**，技术栈实读自 `web/package.json`：
+`web/` 是候风 / Houfeng Fleet Control Plane 当前的**单页应用**，技术栈实读自 `web/package.json`：
 
 - **React 19**（`react@^19.2.5`、`react-dom@^19.2.5`）
 - **TypeScript ~6.0**（`tsc -b` 加 `vite build` 双步构建）
