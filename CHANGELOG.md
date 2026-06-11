@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.54.1](https://github.com/xiangnan0811/houfeng/compare/v0.54.0...v0.54.1) (2026-06-11)
+
+
+### Bug Fixes
+
+* remove monitoring list asset context support ([53d88de](https://github.com/xiangnan0811/houfeng/commit/53d88de83a95e30f14dccad3d2fa55e2dc79c5c2))
+* remove monitoring list asset context support ([65b07f3](https://github.com/xiangnan0811/houfeng/commit/65b07f32a447cb1a1de22cb94da2d4a84acb76d8))
+
 ## [0.54.0](https://github.com/xiangnan0811/houfeng/compare/v0.53.4...v0.54.0) (2026-06-10)
 
 
