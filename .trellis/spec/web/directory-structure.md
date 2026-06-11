@@ -1,12 +1,12 @@
 # 目录结构
 
-> **权威来源**：`CLAUDE.md` + 业务/结构以 `docs/design/v1-baseline/` frozen 子集（architecture-data-model / rules-and-interaction / tech-selection / interactive-prototype-and-operation-flow）为准，视觉以 `docs/design/v2-houfeng/`（design-language / component-spec）为准。冲突时以前述顺序为准。本项目处于初始开发阶段，规则会随代码演进调整。
+> **项目依据**：以当前代码、`.trellis/spec/`、任务文档和 `docs/design/current/` 为准；`docs/design/v1-baseline/` 与 `docs/design/v2-houfeng/` 只作为历史背景。硬性规则只用于保护安全、数据完整性、证据真实性和当前代码/API 合同。
 
 ---
 
 ## Overview
 
-`web/` 是候风 / Houfeng Fleet Control Plane V1 的**单页应用**，技术栈实读自 `web/package.json`：
+`web/` 是候风 / Houfeng Fleet Control Plane 当前的**单页应用**，技术栈实读自 `web/package.json`：
 
 - **React 19**（`react@^19.2.5`、`react-dom@^19.2.5`）
 - **TypeScript ~6.0**（`tsc -b` 加 `vite build` 双步构建）
@@ -47,7 +47,7 @@ web/
     │   ├── RequireAuth.tsx     # 受保护路由壳；未登录跳 /login
     │   ├── RequireAuth.test.tsx
     │   ├── metadata.ts         # PRODUCT_FULL_NAME_ZH 等路由级常量
-    │   ├── RouteModuleFallback.tsx # 路由模块加载中的 v2 surface
+    │   ├── RouteModuleFallback.tsx # 路由模块加载中的 current surface
     │   └── layout/             # 应用骨架（Sidebar、TopBar、Breadcrumb 等）
     │       ├── AppShell.tsx    # 业务路由统一外壳；含 <Outlet />
     │       ├── Sidebar.tsx

@@ -482,3 +482,36 @@ Removed the redundant asset decision support surface from the monitoring list pa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 191: Reset project guidance docs
+
+**Date**: 2026-06-11
+**Task**: Reset project guidance docs
+**Branch**: `docs/reset-project-guidance`
+
+### Summary
+
+Removed active V1/V2 authority from maintained docs and Trellis specs, added current living design guidance, renamed operation workflow docs, and archived the reset task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3b8d1f0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

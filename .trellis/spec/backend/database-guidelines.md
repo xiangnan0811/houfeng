@@ -1,12 +1,12 @@
 # 数据库规范
 
-> **权威来源**：`CLAUDE.md` + 业务/结构以 `docs/design/v1-baseline/` frozen 子集（architecture-data-model / rules-and-interaction / tech-selection / interactive-prototype-and-operation-flow）为准，视觉以 `docs/design/v2-houfeng/`（design-language / component-spec）为准。冲突时以前述顺序为准。本项目处于初始开发阶段，规则会随代码演进调整。
+> **项目依据**：以当前代码、`.trellis/spec/`、任务文档和 `docs/design/current/` 为准；`docs/design/v1-baseline/` 与 `docs/design/v2-houfeng/` 只作为历史背景。硬性规则只用于保护安全、数据完整性、证据真实性和当前代码/API 合同。
 
 ---
 
 ## Overview
 
-候风 V1 后端持久化栈是 **PostgreSQL + pgx/v5**，没有 ORM、没有 query builder。所有 SQL 都是手写原生语句，迁移文件 (`db/migrations/*.sql`) 是 schema 的**唯一权威源**——不允许通过 ORM auto-migrate、SQL 控制台或运维脚本绕过迁移修改 schema。
+候风当前后端持久化栈是 **PostgreSQL + pgx/v5**，没有 ORM、没有 query builder。所有 SQL 都是手写原生语句，迁移文件 (`db/migrations/*.sql`) 是 schema 的**唯一权威源**——不允许通过 ORM auto-migrate、SQL 控制台或运维脚本绕过迁移修改 schema。
 
 核心约定一句话总结：
 - **driver**：`github.com/jackc/pgx/v5` 与 `github.com/jackc/pgx/v5/pgxpool`，连接池在 `cmd/houfeng-center/bootstrap.go` 内构造（参见 `bootstrap.go:60-69`，调用 `store.OpenPostgres`）。
@@ -76,7 +76,7 @@
 2. 在 `db/migrations/` 新建下一个未占用序号的文件，例如当前最大为 `0029_rename_nodes_to_monitoring_instances.sql` 时，下一个应为 `0030_<verb>_<scope>.sql`。
 3. 文件内只允许 `create / alter / drop / insert` 等 DDL/DML 语句，不要在里面写 Go。
 4. 同时更新对应 `internal/center/store/<aggregate>.go` 的 `select` 列、`insert` / `update` 语句、读写函数签名。
-5. 跑 `make verify-go`（含 `migrate` 包的单测，见 `migrate_test.go`）；接着按 `docs/operations/v1-smoke-run.md` 在真 Postgres 上做 fresh-install smoke。
+5. 跑 `make verify-go`（含 `migrate` 包的单测，见 `migrate_test.go`）；接着按 `docs/operations/fresh-install-smoke-run.md` 在真 Postgres 上做 fresh-install smoke。
 
 ### 历史 / 审计字段同步
 
@@ -1065,7 +1065,7 @@ where not exists (
 
 ## 模型层关键不变量
 
-> 来源：`docs/design/v1-baseline/architecture-data-model.md` + `CLAUDE.md` "Key model invariants"。**任何 SQL / 仓库 / 服务改动都必须先验证这些不变量没被破坏**。
+> 来源：当前代码、`docs/design/current/product-and-architecture.md`、历史架构背景与 `CLAUDE.md` "Key model invariants"。**任何 SQL / 仓库 / 服务改动都必须先验证这些不变量没被破坏**。
 
 1. **MonitoringInstance = agent 接入后的运行观测对象**。同一台机重装系统后可保持同一个 MonitoringInstance（保留 `monitoring_instance_id` 与历史时间序列）；换了硬件或明确的新 agent identity 应新建 MonitoringInstance，不要在旧 `monitoring_instance_id` 上重新绑定异种主机。指纹变化通过 `binding_status = '指纹变更待确认'` 进入 `pending_binding_*` 字段（见 `monitoring_instances` 表与 `internal/center/enrollment/`）。
 2. **Target = 一个可观测入口**，地址 (`host` / `base_port`) 属于 Target；`ProbeItem` 仅描述**如何观测**它（探针种类、频率档、超时、配置），不再额外存地址。Target 与 ProbeItem 是 1:N，删除 Target 级联清理 ProbeItem (`on delete cascade`)。

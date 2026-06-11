@@ -1,6 +1,6 @@
 # 代码质量规范
 
-> **权威来源**：`CLAUDE.md` + 业务/结构以 `docs/design/v1-baseline/` frozen 子集（architecture-data-model / rules-and-interaction / tech-selection / interactive-prototype-and-operation-flow）为准，视觉以 `docs/design/v2-houfeng/`（design-language / component-spec）为准。冲突时以前述顺序为准。本项目处于初始开发阶段，规则会随代码演进调整。
+> **项目依据**：以当前代码、`.trellis/spec/`、任务文档和 `docs/design/current/` 为准；`docs/design/v1-baseline/` 与 `docs/design/v2-houfeng/` 只作为历史背景。硬性规则只用于保护安全、数据完整性、证据真实性和当前代码/API 合同。
 
 ---
 
@@ -162,7 +162,7 @@ for _, tt := range tests {
 - 通过 `execErrForSQLSubstring` 等字段按 SQL 文本子串决定哪一步注入错误，验证事务 rollback 行为。
 - 仓库构造时直接替换 `beginTx` 字段（`PostgresSyncRepository.beginTx`，见 `store/sync_batches.go:30-36`），跳过真 pgxpool。
 
-**真实 Postgres 烟囱测试不在 verify 链路里**，由 `docs/operations/v1-smoke-run.md` 的人工 fresh-install 流程补齐。新加 store 方法时如果只能靠真 DB 验证（例如 trigger / 外键级联），应在 `docs/operations/` 下补描述，不要把 verify 弄成"必须有本地 Postgres"。
+**真实 Postgres 烟囱测试不在 verify 链路里**，由 `docs/operations/fresh-install-smoke-run.md` 的人工 fresh-install 流程补齐。新加 store 方法时如果只能靠真 DB 验证（例如 trigger / 外键级联），应在 `docs/operations/` 下补描述，不要把 verify 弄成"必须有本地 Postgres"。
 
 ### Bootstrap 装配测试
 
@@ -222,8 +222,8 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 1. [ ] **`make verify-go`** —— 永远必须通过。fmt 修了直接重跑。
 2. [ ] **改了 `web/` 里任何文件 → `cd web && npm run lint && npm run test`**（CLAUDE.md 第 31 行）。
 3. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完。
-4. [ ] **改了迁移 / 表结构** → 跑一次 `docs/operations/v1-smoke-run.md` 的 fresh-install；若发现可复用的 gap 或规则，补到 `.trellis/spec/` 或当前 active docs。
-5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，并按 `docs/operations/v2-visual-evidence.md` 给出 preview URL、已检查 routes / viewports、browser sanity、local screenshot notes（如有，默认不提交）；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。早期 V1/Stitch 视觉验证流程与 bulk screenshot evidence 已从 tracked docs 移除，不是 active workflow。
+4. [ ] **改了迁移 / 表结构** → 跑一次 `docs/operations/fresh-install-smoke-run.md` 的 fresh-install；若发现可复用的 gap 或规则，补到 `.trellis/spec/` 或当前 active docs。
+5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/current/{interface-language.md,component-patterns.md}`，并按 `docs/operations/ui-preview-and-browser-sanity.md` 给出 preview URL、已检查 routes / viewports、browser sanity、local screenshot notes（如有，默认不提交）。如果任务改变了可复用 UI 方向，同步更新 `docs/design/current/` 或相关 `.trellis/spec/`；历史版本目录只保留背景材料。
 6. [ ] 如果 worker / 调度类改动，本地用注入的小间隔跑 `go test -count=10` 看下抖动。
 
 ---

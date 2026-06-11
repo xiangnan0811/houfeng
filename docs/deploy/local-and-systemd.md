@@ -298,4 +298,4 @@ tail -n 100 ./data/logs/center.log
 docker compose --env-file docs/deploy/compose.env logs --tail=100 houfeng
 ```
 
-Continue with `docs/operations/v1-smoke-run.md` for the full fresh-install path.
+Continue with `docs/operations/fresh-install-smoke-run.md` for the full fresh-install path.

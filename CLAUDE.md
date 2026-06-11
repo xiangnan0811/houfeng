@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **候风 / Houfeng Fleet Control Plane** — an early-stage, single-operator, monitoring-and-probe-first fleet control plane with a lightweight VPS Asset Ledger. The repository should stay truthful to current code and deployment reality: do not present it as production-ready packaging, a Docker/Kubernetes platform, a multi-user SaaS, or a completed real-inventory validation.
 
-V1 business structure (data model / rules / technical choices / operation flow) is retained in `docs/design/v1-baseline/` as the frozen historical baseline. Current active product semantics use `MonitoringInstance` for the former Node domain, plus Target, ProbeItem, agent, incident, and notification semantics. Visual authority is `docs/design/v2-houfeng/`.
+Current product/design guidance lives in `docs/design/current/` and should be treated as living guidance. `docs/design/v1-baseline/` and `docs/design/v2-houfeng/` are historical stubs for traceability only; use git history only when you need archaeology. Current active product semantics use `MonitoringInstance` for the former Node domain, plus Target, ProbeItem, agent, incident, and notification semantics.
 
 Keep constraints proportional to current code and accepted architecture. Preserve hard boundaries backed by implementation and deployment reality, especially the single center + PostgreSQL + outbound systemd agents topology, center-owned one-command install contract, thin-agent security model, raw-observation-first incident processing, and token secrecy. Do not revive completed roadmap/process documents as active requirements.
 
@@ -127,7 +127,7 @@ React 19 + TypeScript + Vite SPA, Vitest + jsdom for tests, ESLint flat config. 
 
 Atoms (`web/src/components/atoms/`): `Badge` / `Button` / `Card` / `Input` / `Toggle` / `Tabs` / `Sparkline` / `TrendArrow` / `StatusGlyph` / `Mono` (`MonoDigits` / `Hostname` / `Timestamp`) / `DataTable` / `MetricChart` / `Drawer` / `Stepper`. All pure CSS + BEM + design tokens; no Tailwind / CSS-in-JS / chart library introduced.
 
-Visual authority: `docs/design/v2-houfeng/design-language.md` + `docs/design/v2-houfeng/component-spec.md`. Earlier v1 visual screenshots, Stitch materials, and v1.x frontend redesign process docs have been removed from tracked docs; do not use them as current guidance. Dark-first, Chinese as the primary UI language, high-density engineering-tool feel.
+Current UI guidance: `docs/design/current/interface-language.md` + `docs/design/current/component-patterns.md`. Earlier visual screenshots, Stitch materials, versioned design bundles, and frontend redesign process docs have been removed from active tracked docs or reduced to historical stubs; do not use them as current authority. Dark-first, Chinese as the primary UI language, high-density engineering-tool feel.
 
 ## Public docs and evidence
 
@@ -136,12 +136,12 @@ Current tracked docs are intentionally lean:
 - `README.md` — public project overview and quick start.
 - `docs/README.md` — maintained docs index.
 - `docs/deploy/local-and-systemd.md` and `docs/deploy/systemd/*.service` — canonical deployment recipe.
-- `docs/operations/v1-smoke-run.md` — current fresh-install smoke workflow, with one-command onboarding primary and manual token fallback secondary.
-- `docs/operations/v2-visual-evidence.md` — active UI preview/browser-sanity workflow; raster screenshots stay untracked unless explicitly approved as public README/docs assets.
+- `docs/operations/fresh-install-smoke-run.md` — current fresh-install smoke workflow, with one-command onboarding primary and manual token fallback secondary.
+- `docs/operations/ui-preview-and-browser-sanity.md` — active UI preview/browser-sanity workflow; raster screenshots stay untracked unless explicitly approved as public README/docs assets.
 - `docs/operations/asset-ledger-real-data-validation-readiness.md` and `docs/operations/asset-ledger-local-sample.json` — non-sensitive Asset Ledger sample validation and real-data privacy boundaries.
-- `docs/design/v1-baseline/` — retained business/data/rule/tech/operation-flow references.
-- `docs/design/v2-houfeng/` — current visual language and component reference.
+- `docs/design/current/` — maintained product, architecture, interface, and component guidance.
+- `docs/design/v1-baseline/` and `docs/design/v2-houfeng/` — historical stubs retained for traceability; they do not freeze future direction.
 
 Completed roadmap, release-gate, audit, archive, and one-off evidence documents are intentionally not kept as tracked in-repository archive copies. If a future task needs historical context, use git history rather than restoring archived copies into the public docs tree.
 
-When changing user-visible behavior, keep docs truthful to current code and update only active guidance/reference docs that remain useful to public operators or maintainers. Do not edit frozen baseline docs to justify new behavior; record new product decisions in the relevant active task/spec instead.
+When changing user-visible behavior, keep docs truthful to current code and update only active guidance/reference docs that remain useful to public operators or maintainers. Do not edit historical version stubs to justify new behavior; record durable product decisions in the relevant current docs, task notes, or `.trellis/spec/` instead.

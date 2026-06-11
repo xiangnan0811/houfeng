@@ -83,7 +83,7 @@ export HOUFENG_INITIAL_USERNAME=admin
 export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-local-password'
 ```
 
-Build and start the center as documented in `docs/operations/v1-smoke-run.md`:
+Build and start the center as documented in `docs/operations/fresh-install-smoke-run.md`:
 
 ```bash
 npm --prefix web run build

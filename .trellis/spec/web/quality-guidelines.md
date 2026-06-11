@@ -1,6 +1,6 @@
 # 质量规范
 
-> **权威来源**：`CLAUDE.md` + 业务/结构以 `docs/design/v1-baseline/` frozen 子集（architecture-data-model / rules-and-interaction / tech-selection / interactive-prototype-and-operation-flow）为准，视觉以 `docs/design/v2-houfeng/`（design-language / component-spec）为准。冲突时以前述顺序为准。本项目处于初始开发阶段，规则会随代码演进调整。
+> **项目依据**：以当前代码、`.trellis/spec/`、任务文档和 `docs/design/current/` 为准；`docs/design/v1-baseline/` 与 `docs/design/v2-houfeng/` 只作为历史背景。硬性规则只用于保护安全、数据完整性、证据真实性和当前代码/API 合同。
 
 ---
 
@@ -161,9 +161,9 @@ it('applies variant class', () => {
 
 ### 不在 verify 链路里的东西
 
-- **可视化回归 / 截图对比**不在 `make verify-web`。当前 active visual authority 是 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`；v2 预览、浏览器 sanity 与本地截图政策见 `docs/operations/v2-visual-evidence.md`。bulk screenshot evidence 与 manifest 不再 tracked；新 raster 图片只有在用户明确批准为 public README/docs asset 时才可提交到 allowlisted docs asset path。旧 V1/Stitch 验证流程与一次性历史截图已从 tracked docs 移除，不要恢复为 active workflow。
+- **可视化回归 / 截图对比**不在 `make verify-web`。当前 UI 指导见 `docs/design/current/{interface-language.md,component-patterns.md}`；预览、浏览器 sanity 与本地截图政策见 `docs/operations/ui-preview-and-browser-sanity.md`。bulk screenshot evidence 与 manifest 不再 tracked；新 raster 图片只有在用户明确批准为 public README/docs asset 时才可提交到 allowlisted docs asset path。旧截图流程与一次性历史截图不是当前 workflow。
 - **本地 browser sanity**可用 `python3 scripts/visual_evidence.py browser-sanity --base-url <url> --route <route> ...` 复用标准几何检查；它依赖本机 Python Playwright 时必须在 PR / final report 里标注为 local-only evidence。缺少本机 Playwright 是证据阻塞项，不要把 Playwright/Cypress/WebDriverIO 加进 `web/package.json` 来绕过。
-- **真实 center 烟囱**由 `docs/operations/v1-smoke-run.md` 承担，前端只在浏览器里 sanity check。
+- **真实 center 烟囱**由 `docs/operations/fresh-install-smoke-run.md` 承担，前端只在浏览器里 sanity check。
 
 ---
 
@@ -210,7 +210,7 @@ export default defineConfig([
 2. [ ] **`cd web && npm run test -- --run`** —— 跑 vitest 一遍。
 3. [ ] **`cd web && npm run build`** —— 跑 `tsc -b && vite build`，确保 TS strict + Vite 产物都干净。
 4. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完（前后端都过）。
-5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/v2-houfeng/{design-language.md,component-spec.md}`，并按 `docs/operations/v2-visual-evidence.md` 给出 preview URL、已检查 routes / viewports、browser sanity、local screenshot notes（如有，默认不提交）；**不要回写 `docs/design/v1-baseline/`**（业务结构基线已冻结）。
+5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/current/{interface-language.md,component-patterns.md}`，并按 `docs/operations/ui-preview-and-browser-sanity.md` 给出 preview URL、已检查 routes / viewports、browser sanity、local screenshot notes（如有，默认不提交）。如果任务改变了可复用 UI 方向，同步更新 `docs/design/current/` 或相关 `.trellis/spec/`，不要把新决策写回历史版本目录。
    - 若只做本地 browser sanity，记录 `scripts/visual_evidence.py browser-sanity` 的 routes / viewports / 结果和 local-only 限制即可。
    - 不要提交 screenshot manifest 或 bulk raster screenshots；只有用户明确批准的 public README/docs asset 可放入 allowlisted docs asset path。
 6. [ ] **改了 API 形状（增减字段 / 改命名 / 改可选性）** → 同 PR 把 `web/src/lib/types.ts` + `web/src/lib/api.ts` 改完，并补 page / 测试断言。
@@ -253,5 +253,5 @@ export default defineConfig([
 > 用于后续任务评审；若形成可复用规则，更新 `.trellis/spec/` 或当前 active docs。
 
 1. **没有 coverage 阈值 / coverage 上传**：当前不强制；如未来引入 `vitest --coverage` 与阈值，需同步更新 `.github/workflows/ci.yml` + 本文件。
-2. **没有 e2e 框架**（Playwright / Cypress）：当前 CI 不跑浏览器自动化；`docs/operations/v2-visual-evidence.md` 只定义本地预览、browser sanity 和本地/外部截图说明，不定义 tracked screenshot evidence。如未来引入正式浏览器自动化，需独立技术决策。
+2. **没有 e2e 框架**（Playwright / Cypress）：当前 CI 不跑浏览器自动化；`docs/operations/ui-preview-and-browser-sanity.md` 只定义本地预览、browser sanity 和本地/外部截图说明，不定义 tracked screenshot evidence。如未来引入正式浏览器自动化，需独立技术决策。
 3. **`web/src/lib/types.ts` 与 Go contract 全靠人工同步**：没有 codegen。reviewer 在 contract 改动 PR 里必须同时检查 `lib/types.ts`。
