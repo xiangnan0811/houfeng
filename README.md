@@ -101,16 +101,16 @@ Start with `docs/README.md` for the maintained documentation index.
 Primary operator docs:
 
 - `docs/deploy/local-and-systemd.md` — canonical local, Docker Compose center, systemd deployment, and one-command agent install guide.
-- `docs/operations/v1-smoke-run.md` — fresh-install smoke run with one-command onboarding as the primary path.
-- `docs/operations/v2-visual-evidence.md` — active UI preview and browser-sanity workflow; screenshots are local/untracked unless explicitly approved as public assets.
+- `docs/operations/fresh-install-smoke-run.md` — fresh-install smoke run with one-command onboarding as the primary path.
+- `docs/operations/ui-preview-and-browser-sanity.md` — UI preview and browser-sanity workflow; screenshots are local/untracked unless explicitly approved as public assets.
 - `docs/operations/asset-ledger-real-data-validation-readiness.md` — local sample and real-data validation boundaries for Asset Ledger.
 
 Design/reference docs:
 
-- `docs/design/v1-baseline/` — retained V1 business/data/rule/tech baselines for traceability.
-- `docs/design/v2-houfeng/` — current visual design language and component reference.
+- `docs/design/current/` — maintained product, architecture, interface, and component guidance.
+- `docs/design/v1-baseline/` and `docs/design/v2-houfeng/` — historical stubs retained for traceability; full old bundles are available through git history and do not freeze future direction.
 
-Completed roadmap, release-gate, archived visual-history, and one-off evidence logs have been removed from the tracked public docs tree. Durable operator cautions and current constraints are folded into README, `docs/README.md`, deployment guidance, smoke guidance, and the active design references.
+Completed roadmap, release-gate, archived visual-history, and one-off evidence logs have been removed from the tracked public docs tree. Durable operator cautions and current constraints are folded into README, `docs/README.md`, deployment guidance, smoke guidance, and current design guidance.
 
 ## Current limitations and cautions
 

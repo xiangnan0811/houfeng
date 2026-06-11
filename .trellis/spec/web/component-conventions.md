@@ -1,12 +1,12 @@
 # 组件约定
 
-> **权威来源**：`CLAUDE.md` + 业务/结构以 `docs/design/v1-baseline/` frozen 子集（architecture-data-model / rules-and-interaction / tech-selection / interactive-prototype-and-operation-flow）为准，视觉以 `docs/design/v2-houfeng/`（design-language / component-spec）为准。冲突时以前述顺序为准。本项目处于初始开发阶段，规则会随代码演进调整。
+> **项目依据**：以当前代码、`.trellis/spec/`、任务文档和 `docs/design/current/` 为准；`docs/design/v1-baseline/` 与 `docs/design/v2-houfeng/` 只作为历史背景。硬性规则只用于保护安全、数据完整性、证据真实性和当前代码/API 合同。
 
 ---
 
 ## Overview
 
-候风前端组件统一采用 **函数式组件 + React 19 hooks**，TypeScript 严格 props（`tsconfig.app.json` 启用 strict）。视觉权威是 `docs/design/v2-houfeng/design-language.md` 与 `docs/design/v2-houfeng/component-spec.md`；新组件只参考这两份 v2 文档与现有 `components/atoms/` / `components/filters/` 实现。早期 v1-baseline 视觉稿、Stitch 截图和 v1.x frontend redesign 过程材料已从 tracked docs 移除；如需追溯使用 git history，不再作为 active implementation authority。
+候风前端组件统一采用 **函数式组件 + React 19 hooks**，TypeScript 严格 props（`tsconfig.app.json` 启用 strict）。当前组件和页面设计先参考 `docs/design/current/interface-language.md`、`docs/design/current/component-patterns.md` 与现有 `components/atoms/` / `components/filters/` 实现。早期版本化设计稿、Stitch 截图和旧 redesign 过程材料只作为历史背景；如需改变当前方向，更新 `docs/design/current/` 和相关测试，而不是回退到旧版本标签。
 
 实读约束（来自 `web/src/components/`、`web/src/pages/`）：
 
@@ -41,7 +41,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **components/ 不依赖路由**：要跳转，由 page 传 callback 或 children 进来。
 - **atoms/ 不依赖 `lib/types.ts`**：原子要复用，必须保持业务无关；需要业务感知就升一层到 `components/`。
 - **跨页业务组合组件可接收 action/meta/glyph 这类 `ReactNode` 插槽**：当组件需要保持 route-agnostic，但页面仍要传入 `<Link>`、`<Button>`、`<StatusGlyph>`、`<Hostname>` 等具体组合时，使用受控插槽，不在组件内 import `react-router-dom` 或领域 helper。参考 `web/src/components/ObservabilityEvidenceLead.tsx` 与 `web/src/components/ObservabilityEvidenceFocus.tsx`：Monitoring / Targets / Events 共享 lead/focus 骨架，但页面自己决定 action、glyph、meta 和路由。
-- **route/detail/list 的 loading / error / empty 状态优先复用 `PageState`**：`web/src/components/PageState.tsx` 是跨页展示 primitive，保持 route-agnostic，通过 `action` slot 接收 `<Link>` / `<Button>` / page callback；页面不要继续手写裸 `page-panel` loading/error，列表空态需要 v2 空态装饰和 CTA 时使用 `surface="empty"`。错误摘要用 `technicalSummary`，组件会截断并避免和 description 重复显示。
+- **route/detail/list 的 loading / error / empty 状态优先复用 `PageState`**：`web/src/components/PageState.tsx` 是跨页展示 primitive，保持 route-agnostic，通过 `action` slot 接收 `<Link>` / `<Button>` / page callback；页面不要继续手写裸 `page-panel` loading/error，列表空态需要当前空态装饰和 CTA 时使用 `surface="empty"`。错误摘要用 `technicalSummary`，组件会截断并避免和 description 重复显示。
 - **DataTable 可点击行与行内操作的合同**：`web/src/components/atoms/DataTable.tsx` 的 `onRowClick` 只处理非交互子节点上的 click / Enter / Space；事件目标落在 `a[href]`、`button`、`input`、`select`、`textarea`、`role="button"`、`role="link"` 内时，表格行不得触发行导航。page 的 action cell 不需要再为了 DataTable 行点击重复写 `stopPropagation`，但自绘 list/queue 不是 DataTable 时仍必须在内部 `<Link>` / `<Button>` 上显式阻止冒泡。
 - **自绘可点击队列不要制造嵌套交互语义**：如果一个 `<li>` / `<article>` 内部已经有可见 `<Link>` 和 `<Button>`，可以让鼠标点击行背景进入主详情，但不要给外层容器加 `role="link"` / `tabIndex=0` 再包住内部交互控件；键盘入口应落在可见 action 上，外层只用 `:focus-within` 做焦点视觉辅助。
 - 当前**未单独建 `hooks/` 目录**；本地 hook 内联在使用文件内即可，需要跨文件再考虑提取（届时落点为 `web/src/lib/use<Name>.ts` 或新增 `web/src/lib/hooks/`，需另做决策）。

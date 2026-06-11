@@ -112,7 +112,7 @@ curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/vps \
     "city": "local",
     "ipv4": "127.0.0.1",
     "ssh_host": "127.0.0.1",
-    "labels": ["smoke", "v1"],
+    "labels": ["smoke", "fresh-install"],
     "note": "fresh-install smoke VPS"
   }'
 ```
@@ -203,7 +203,7 @@ curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/targets \
     "base_port": 8080,
     "run_status": "启用",
     "group": "smoke",
-    "labels": ["smoke", "v1"],
+    "labels": ["smoke", "fresh-install"],
     "execution_monitoring_instance_labels": ["smoke"],
     "note": "fresh-install smoke target"
   }'
@@ -297,7 +297,7 @@ Open `http://127.0.0.1:8080/` and check the current UI surfaces that are relevan
 - Events page filters by object, time, severity/type, notification-only, recovery-only, maintenance-only, and explicit backfilled-event opt-in.
 - Settings page shows effective defaults and notification/retention behavior truthfully.
 
-For broader frontend checks, use the local preview and browser-sanity workflow in `docs/operations/v2-visual-evidence.md` rather than the old V1/Stitch visual flow.
+For broader frontend checks, use the local preview and browser-sanity workflow in `docs/operations/ui-preview-and-browser-sanity.md` rather than removed historical screenshot flows.
 
 ## Troubleshooting fallback: manual enrollment token
 

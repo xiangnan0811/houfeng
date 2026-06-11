@@ -1,6 +1,6 @@
 # 样式规范
 
-> **权威来源**：`CLAUDE.md` + 业务/结构以 `docs/design/v1-baseline/` frozen 子集（architecture-data-model / rules-and-interaction / tech-selection / interactive-prototype-and-operation-flow）为准，视觉以 `docs/design/v2-houfeng/`（design-language / component-spec）为准。冲突时以前述顺序为准。本项目处于初始开发阶段，规则会随代码演进调整。
+> **项目依据**：以当前代码、`.trellis/spec/`、任务文档和 `docs/design/current/` 为准；`docs/design/v1-baseline/` 与 `docs/design/v2-houfeng/` 只作为历史背景。硬性规则只用于保护安全、数据完整性、证据真实性和当前代码/API 合同。
 
 ---
 
@@ -18,20 +18,21 @@
 
 ---
 
-## 视觉权威
+## 当前视觉指导
 
-视觉权威**只有两份 active 文档**：
+当前视觉指导入口：
 
-1. `docs/design/v2-houfeng/design-language.md` —— v2 候风设计语言、主题、密度、状态色、排版与反模式。
-2. `docs/design/v2-houfeng/component-spec.md` —— 原语、atoms、共享组件、页面壳和关键页面的视觉契约。
+1. `docs/design/current/interface-language.md` —— UI tone、视觉默认、状态语言、证据语言与浏览器 sanity 边界。
+2. `docs/design/current/component-patterns.md` —— 当前组件默认、页面职责、测试期望与历史参考边界。
+3. `docs/design/current/product-and-architecture.md` —— 产品形态、拓扑、领域模型与安全边界。
 
-早期 v1 视觉规格、Stitch 素材和 v1.x frontend redesign 过程材料不再保留在 tracked docs 中；如需追溯使用 git history。业务结构仍以 v1-baseline frozen 子集为准，但视觉实现不再回归 v1/stitch。
+历史版本化设计目录只用于追溯背景。普通 UI work 应从当前代码、当前 task、`.trellis/spec/` 和 `docs/design/current/` 出发；如果新方向更合理，更新当前指导和测试，不要用旧版本标签阻止探索。
 
 **禁止**：
 
-- 不要回归早期 concept 屏 / `stitch/` 子目录视觉——这些是历史素材，不是 active guidance。
-- 不要修改 `docs/design/v1-baseline/` frozen 业务结构文档来承载视觉变更；视觉确实需要变更时，在当前任务 PRD、active docs 或 `.trellis/spec/` 中记录可复用结论，再更新 v2 文档 / 代码。
-- 当前 v2 预览、浏览器 sanity 与本地截图政策见 `docs/operations/v2-visual-evidence.md`；不要提交 screenshot manifest 或 bulk raster screenshots。只有用户明确批准的 public README/docs 图片资产才可放入 allowlisted docs asset path。不要恢复旧视觉验证流程或一次性历史截图作为 active workflow。
+- 不要把早期 concept 屏 / `stitch/` 子目录视觉恢复成当前实现目标——这些是历史素材。
+- 不要在历史版本目录里承载新的当前决策；可复用结论应写入当前 task、`docs/design/current/` 或 `.trellis/spec/`。
+- 预览、浏览器 sanity 与本地截图政策见 `docs/operations/ui-preview-and-browser-sanity.md`；不要提交 screenshot manifest 或 bulk raster screenshots。只有用户明确批准的 public README/docs 图片资产才可放入 allowlisted docs asset path。不要恢复旧视觉验证流程或一次性历史截图作为当前 workflow。
 
 ---
 
@@ -108,7 +109,7 @@
 - 跨页复用样式 → `styles/pages.css`（业务级版式）或 `styles/atoms.css`（原子）。
 - 仅 AppShell 子树用 → `app/layout/layout.css`。
 - **不要**为某个 page 单独建 `.css` 文件（LoginPage 是历史例外）。要做局部 → 用 BEM 命名 + 写进 `pages.css`，靠 page 根容器的 block class 隔离。
-- loading / error / empty 的共享页面状态样式统一用 `.page-state` 系列，落在 `styles/pages.css`。页面不要复制 `.page-panel` + 裸文本；空态如果需要 v2 装饰和 CTA，使用 `PageState surface="empty"` 复用 `.empty-state.page-state`。
+- loading / error / empty 的共享页面状态样式统一用 `.page-state` 系列，落在 `styles/pages.css`。页面不要复制 `.page-panel` + 裸文本；空态如果需要当前装饰和 CTA，使用 `PageState surface="empty"` 复用 `.empty-state.page-state`。
 
 ---
 
@@ -198,7 +199,7 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 
 - ❌ **硬编码颜色 / 像素值**：颜色一律 `var(--color-state-*)` / `var(--accent*)` / `var(--surface*)`；间距走 `--space-N`；圆角走 `--radius-N`。
 - ❌ **`style={{ color/background/border/font: ... }}` 写业务样式**：内联只用于运行时计算尺寸（Sparkline / StatusGlyph）。
-- ❌ **回归早期 concept 屏 / `stitch/` 子目录视觉**：视觉权威只有 `docs/design/v2-houfeng/design-language.md` + `docs/design/v2-houfeng/component-spec.md`。
+- ❌ **回归早期 concept 屏 / `stitch/` 子目录视觉**：当前 UI 指导在 `docs/design/current/`；历史素材不能直接成为实现目标。
 - ❌ **`@media (prefers-color-scheme: dark)`**：主题切换走 `theme-*` class，不监听系统偏好分支（用户可在 system / dark / light 三档显式选）。
 - ❌ **新建 `.css` 文件给单个组件 / page 用**：LoginPage 是历史例外；新增样式落 `styles/pages.css` 或 `styles/atoms.css`，靠 BEM 隔离。
 - ❌ **CSS-in-JS / Tailwind / styled-components**：当前不用；要引入需独立技术决策与整体迁移。

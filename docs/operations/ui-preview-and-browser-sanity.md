@@ -1,14 +1,14 @@
-# v2 UI preview and browser-sanity workflow
+# UI preview and browser-sanity workflow
 
-> Status: active local workflow for v2-houfeng UI checks.
+> Status: current local workflow for user-visible UI checks.
 >
-> Visual authority: `docs/design/v2-houfeng/design-language.md` and `docs/design/v2-houfeng/component-spec.md`.
+> Design guidance: `docs/design/current/interface-language.md` and `docs/design/current/component-patterns.md`.
 >
 > Scope: local preview, route/viewport browser sanity, and human review notes for user-visible frontend work. This does not replace automated lint/test/build checks.
 
 ## Why this exists
 
-The removed V1 visual verification flow was tied to historical Stitch screenshots. The active product direction has moved to v2-houfeng. Future UI work still needs a repeatable way to answer:
+Earlier visual verification material was tied to historical Stitch screenshots and versioned design bundles. Future UI work still needs a repeatable way to answer:
 
 - Which local URL can the reviewer open?
 - Which routes and viewports were checked?
@@ -179,7 +179,7 @@ The local sample and real-data readiness workflow is documented in `docs/operati
 
 ## Core route matrix
 
-This is the current v2 core-page acceptance set. A task only needs to check routes it changes, but broad UX tasks should cover the full relevant subset.
+This is the current core-page browser-sanity set. A task only needs to check routes it changes, but broad UX tasks should cover the full relevant subset.
 
 | Surface | Route | Why it matters |
 | --- | --- | --- |
@@ -207,7 +207,7 @@ For large tables, also check horizontal scroll behavior rather than forcing all 
 
 ## Screenshot and image policy
 
-Do not restore or reuse old V1 visual-evidence paths, the removed `docs/operations/v2-visual-evidence/` directory, or bulk screenshot manifests. Local screenshots may be useful while discussing UI changes, but they should remain untracked unless the user explicitly approves specific images for public README/docs presentation.
+Do not restore removed historical visual-evidence paths or bulk screenshot manifests. Local screenshots may be useful while discussing UI changes, but they should remain untracked unless the user explicitly approves specific images for public README/docs presentation.
 
 Repository ignore rules block common raster image formats in docs by default. Future approved public images should use the allowlisted `docs/public-assets/` path and be referenced from README or maintained docs. That directory is intentionally not created until there is an approved public asset. SVG is not blocked by this image policy because the project may use SVG as source assets or code-like vector assets.
 
@@ -221,7 +221,7 @@ For each checked route:
 - Drawer / modal entry points remain reachable by keyboard and mouse.
 - Table-heavy pages still allow scanning; narrow screens may scroll horizontally where appropriate.
 - Empty / loading / error states do not create large confusing blank areas.
-- Theme tokens are used; no return to the removed v1/Stitch visual direction.
+- Theme tokens are used; no return to removed historical concept-screen or Stitch visual material.
 
 ## Temporary automation helpers
 
