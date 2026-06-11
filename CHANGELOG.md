@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.54.2](https://github.com/xiangnan0811/houfeng/compare/v0.54.1...v0.54.2) (2026-06-11)
+
+
+### Documentation
+
+* fix stale guidance references ([7634bc3](https://github.com/xiangnan0811/houfeng/commit/7634bc36d449281d8ce3570d06140b109e34c965))
+* reset project guidance ([dc4065b](https://github.com/xiangnan0811/houfeng/commit/dc4065b232cd3f24de3dd41769b04d09451e9009))
+* reset project guidance ([3b8d1f0](https://github.com/xiangnan0811/houfeng/commit/3b8d1f03241c50227a031314dd145fb5ffb2fe29))
+
 ## [0.54.1](https://github.com/xiangnan0811/houfeng/compare/v0.54.0...v0.54.1) (2026-06-11)
 
 
