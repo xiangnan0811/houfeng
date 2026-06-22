@@ -515,3 +515,36 @@ Removed active V1/V2 authority from maintained docs and Trellis specs, added cur
 ### Next Steps
 
 - None - task complete
+
+
+## Session 192: Update Trellis runtime to 0.6.4
+
+**Date**: 2026-06-22
+**Task**: Update Trellis runtime to 0.6.4
+**Branch**: `chore/update-trellis`
+
+### Summary
+
+Upgraded the project Trellis runtime from 0.6.0-beta.22 to 0.6.4, accepted bundled skill and workflow updates, preserved project specs/configuration, verified Trellis assets and web checks, and documented the existing Go store test baseline failure.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `22da7a3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
