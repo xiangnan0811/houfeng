@@ -548,3 +548,36 @@ Upgraded the project Trellis runtime from 0.6.0-beta.22 to 0.6.4, accepted bundl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 193: Fix PR 267 Go CI follow-up
+
+**Date**: 2026-06-23
+**Task**: Fix PR 267 Go CI follow-up
+**Branch**: `chore/update-trellis`
+
+### Summary
+
+Restored the Trellis update task to active scope, fixed the asset decision store test date-drift failure that broke PR go CI, captured the testing gotcha in backend quality specs, verified go test ./internal/center/store and make verify-go, and confirmed PR #267 checks pass.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7908db0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

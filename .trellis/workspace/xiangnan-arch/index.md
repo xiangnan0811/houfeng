@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 192
-- **Last Active**: 2026-06-22
+- **Total Sessions**: 193
+- **Last Active**: 2026-06-23
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~550 | Active |
+| `journal-4.md` | ~583 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 193 | 2026-06-23 | Fix PR 267 Go CI follow-up | `7908db0` | `chore/update-trellis` |
 | 192 | 2026-06-22 | Update Trellis runtime to 0.6.4 | `22da7a3` | `chore/update-trellis` |
 | 191 | 2026-06-11 | Reset project guidance docs | `3b8d1f0` | `docs/reset-project-guidance` |
 | 190 | 2026-06-11 | Remove monitoring list asset context support | `65b07f3` | `feature/monitoring-list-asset-decision-removal` |
