@@ -164,6 +164,8 @@ for _, tt := range tests {
 
 **真实 Postgres 烟囱测试不在 verify 链路里**，由 `docs/operations/fresh-install-smoke-run.md` 的人工 fresh-install 流程补齐。新加 store 方法时如果只能靠真 DB 验证（例如 trigger / 外键级联），应在 `docs/operations/` 下补描述，不要把 verify 弄成"必须有本地 Postgres"。
 
+时间窗口类 store 测试要避免夹具随真实日期漂移失效：如果生产逻辑用 `time.Now()` / 当前日期判断续费窗口、过期、TTL、retention 等，测试中的"未来日期"必须相对 `time.Now().UTC()` 生成，或者把时间源注入被测代码。不要把 `2026-06-11` 这类固定日期当作"未来 7 天"写进会长期运行的 CI 夹具；到了真实日期之后，它会变成过去日期并让测试从行为验证退化成日历炸弹。固定 `created_at` / `updated_at` 这类展示或排序时间可以继续用稳定常量。
+
 ### Bootstrap 装配测试
 
 `cmd/houfeng-center/bootstrap_test.go` 用工厂替换模式：把 `bootstrapDeps` 内每个工厂（`openPostgres` / `applyMigrations` / `seedInitialUser` / `newIncidentNotifier` / `newRouter` / `newApp`）替成测试桩，验证：
@@ -256,6 +258,7 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 - ❌ **新增 handler 但不更新 `bootstrap_test.go` 的 nil 断言**：会让"装配缺失"绕过 verify。
 - ❌ **测试用 `time.Sleep(N seconds)` 等 worker tick**：用注入小间隔 + ctx cancel 的 deterministic 模式（参考 `retention/worker_test.go:92`）。
 - ❌ **store 测试为了"覆盖更全"启动真 Postgres**：当前生态依赖 `fakeSyncBatchTx` 风格。如果确实要写真 DB 测试，单独走 `_e2e_test.go` 后缀并默认 `t.Skip` 在 env 缺失时跳过——但这条**目前还没人做过**，先和团队确认再加。
+- ❌ **在窗口/过期判断测试里写会过期的固定未来日期**：例如生产逻辑按真实 `time.Now()` 判定 `renew_at` 是否在 30 天内时，测试夹具不能用 `time.Date(2026, time.June, 11, ...)` 表达"7 天后"。用 `time.Now().UTC().AddDate(0, 0, 7)`，或注入时钟后固定测试时钟。
 - ❌ **改 contract 包但不同 PR 改 agent**：`internal/contracts/agentapi/` 的任何 breaking 改动**必须**当 PR 把 agent 也升级，否则 fleet 会立即崩。
 - ❌ **改 `db/migrations/` 已合入的 SQL 文件**：见 `database-guidelines.md`。reviewer 看到这种 diff 应直接 reject。
 

@@ -1292,7 +1292,7 @@ func scanAssetDecisionManualGroupMemberValues(
 }
 
 func fakeAssetDecisionFactRows(now time.Time) pgx.Rows {
-	renewAt := now.AddDate(0, 0, 7)
+	renewAt := time.Now().UTC().AddDate(0, 0, 7)
 	providerID := "pv_001"
 	return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: func(dest ...any) error {
 		*(dest[0].(*string)) = "vps_001"
