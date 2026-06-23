@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.3](https://github.com/xiangnan0811/houfeng/compare/v0.54.2...v0.54.3) (2026-06-23)
+
+
+### Bug Fixes
+
+* stabilize asset decision renewal tests ([7908db0](https://github.com/xiangnan0811/houfeng/commit/7908db0099b6cb5720edab9b6c69a0f65d0bcf2a))
+
 ## [0.54.2](https://github.com/xiangnan0811/houfeng/compare/v0.54.1...v0.54.2) (2026-06-11)
 
 
