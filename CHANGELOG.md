@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.54.4](https://github.com/xiangnan0811/houfeng/compare/v0.54.3...v0.54.4) (2026-06-24)
+
+
+### Documentation
+
+* record release cleanup guidance ([6faa1bf](https://github.com/xiangnan0811/houfeng/commit/6faa1bf19ec1d58a853ec561f425ee8335176c31))
+* record release cleanup guidance ([78e3751](https://github.com/xiangnan0811/houfeng/commit/78e37515cccabd024efd21c3c1126584f6a86f47))
+
 ## [0.54.3](https://github.com/xiangnan0811/houfeng/compare/v0.54.2...v0.54.3) (2026-06-24)
 
 
