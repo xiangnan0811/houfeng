@@ -83,6 +83,20 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 	if err := validateProbeObservations(ctx, tx, observationBatch.ProbeObservations); err != nil {
 		return syncing.Result{}, err
 	}
+	recorded, err := recordAgentSyncBatch(ctx, tx, batch)
+	if err != nil {
+		return syncing.Result{}, err
+	}
+	if !recorded {
+		plan := agentplan.SyncPlan{ProbeAssignments: make([]agentplan.ProbeAssignment, 0)}
+		if err := tx.Commit(ctx); err != nil {
+			return syncing.Result{}, fmt.Errorf("commit duplicate sync batch transaction for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
+		}
+		return syncing.Result{
+			AcceptedAt: receivedAt,
+			Plan:       plan,
+		}, nil
+	}
 
 	lastHeartbeatAt, err := recordHeartbeatBatch(ctx, tx, batch.MonitoringInstanceID, syncState.BindingFingerprint, receivedAt, batch.Heartbeats)
 	if err != nil {
@@ -124,6 +138,25 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 		AcceptedAt: receivedAt,
 		Plan:       plan,
 	}, nil
+}
+
+func recordAgentSyncBatch(ctx context.Context, tx syncBatchTx, batch syncing.Batch) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		insert into agent_sync_batches (
+			monitoring_instance_id,
+			sync_batch_id
+		) values (
+			$1,
+			$2
+		)
+		on conflict (monitoring_instance_id, sync_batch_id) do nothing`,
+		batch.MonitoringInstanceID,
+		batch.Heartbeats[0].SyncBatchID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("record agent sync batch %q for monitoring instance %q: %w", batch.Heartbeats[0].SyncBatchID, batch.MonitoringInstanceID, err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 func recordIPQualityReports(ctx context.Context, tx syncBatchTx, newReportID func() (string, error), reports []ipquality.ReportWrite, receivedAt time.Time) error {
@@ -322,7 +355,7 @@ func validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncin
 	if bindingStatus != monitoringinstances.BindingBound {
 		return acceptedSyncBatchState{}, syncing.ErrBindingNotAccepted
 	}
-	if storedSyncTokenHash == "" || storedSyncTokenHash != hashSyncToken(batch.SyncToken) {
+	if storedSyncTokenHash == "" || !syncTokenHashesEqual(storedSyncTokenHash, hashSyncToken(batch.SyncToken)) {
 		return acceptedSyncBatchState{}, syncing.ErrInvalidSyncToken
 	}
 

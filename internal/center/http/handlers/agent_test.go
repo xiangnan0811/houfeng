@@ -128,6 +128,105 @@ func TestAgentEnrollHandlerRejectsEmptyFingerprint(t *testing.T) {
 	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
 }
 
+func TestAgentEnrollHandlerRejectsOversizedBodyBeforeService(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentEnrollmentService{}
+	handler := handlers.AgentEnroll(svc)
+	body := `{"token":"` + strings.Repeat("x", handlers.AgentEnrollBodyLimit) + `","fingerprint":"fp-001"}`
+	req := httptest.NewRequest(http.MethodPost, agentapi.EnrollPath, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidJSON, "invalid json")
+	if svc.enrollInput.Token != "" || svc.enrollInput.Fingerprint != "" {
+		t.Fatalf("service was called for oversized body: %#v", svc.enrollInput)
+	}
+}
+
+func TestAgentEnrollHandlerRateLimitsByClientIP(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentEnrollmentService{
+		enrollResult: enrollment.EnrollResult{
+			MonitoringInstanceID: "mi_001",
+			BindingStatus:        agentapi.BindingStatusBound,
+			SyncToken:            "sync-token-001",
+		},
+	}
+	handler := handlers.AgentEnrollWithOptions(svc, handlers.AgentEndpointOptions{
+		RateLimit: handlers.AgentRateLimitOptions{
+			MaxRequestsByIP: 2,
+			Window:          time.Minute,
+		},
+	})
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, agentapi.EnrollPath, strings.NewReader(`{"token":"plain-token","fingerprint":"fp-001"}`))
+		req.RemoteAddr = "198.51.100.10:12345"
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, req)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("attempt %d status = %d, want %d", i+1, recorder.Code, http.StatusOK)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, agentapi.EnrollPath, strings.NewReader(`{"token":"plain-token","fingerprint":"fp-001"}`))
+	req.RemoteAddr = "198.51.100.10:12345"
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("limited attempt status = %d, want %d", recorder.Code, http.StatusTooManyRequests)
+	}
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "too many requests")
+}
+
+func TestAgentEnrollHandlerRateLimitIgnoresForgedForwardedForFromUntrustedClient(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentEnrollmentService{
+		enrollResult: enrollment.EnrollResult{
+			MonitoringInstanceID: "mi_001",
+			BindingStatus:        agentapi.BindingStatusBound,
+			SyncToken:            "sync-token-001",
+		},
+	}
+	handler := handlers.AgentEnrollWithOptions(svc, handlers.AgentEndpointOptions{
+		RateLimit: handlers.AgentRateLimitOptions{
+			MaxRequestsByIP: 1,
+			Window:          time.Minute,
+		},
+	})
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, agentapi.EnrollPath, strings.NewReader(`{"token":"plain-token","fingerprint":"fp-001"}`))
+		req.RemoteAddr = "198.51.100.10:12345"
+		req.Header.Set("X-Forwarded-For", "203.0.113.77")
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+
+		handler.ServeHTTP(recorder, req)
+
+		if i == 0 && recorder.Code != http.StatusOK {
+			t.Fatalf("first attempt status = %d, want %d", recorder.Code, http.StatusOK)
+		}
+		if i == 1 && recorder.Code != http.StatusTooManyRequests {
+			t.Fatalf("second attempt status = %d, want %d", recorder.Code, http.StatusTooManyRequests)
+		}
+	}
+}
+
 func TestAgentEnrollHandlerReturnsMethodNotAllowedError(t *testing.T) {
 	t.Parallel()
 
@@ -579,6 +678,104 @@ func TestAgentSyncHandlerRejectsEmptyMonitoringInstanceID(t *testing.T) {
 	}
 
 	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
+}
+
+func TestAgentSyncHandlerRejectsOversizedBodyBeforeService(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentSyncService{}
+	handler := handlers.AgentSync(svc)
+	body := `{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"` + strings.Repeat("x", handlers.AgentSyncBodyLimit) + `","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidJSON, "invalid json")
+	if svc.syncBatch.MonitoringInstanceID != "" {
+		t.Fatalf("service was called for oversized body: %#v", svc.syncBatch)
+	}
+}
+
+func TestAgentSyncHandlerRateLimitsByClientIP(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentSyncService{}
+	handler := handlers.AgentSyncWithOptions(svc, handlers.AgentEndpointOptions{
+		RateLimit: handlers.AgentRateLimitOptions{
+			MaxRequestsByIP: 1,
+			Window:          time.Minute,
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req.RemoteAddr = "198.51.100.20:12345"
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("first attempt status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:31:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_002"}]}`))
+	req.RemoteAddr = "198.51.100.20:12345"
+	req.Header.Set("Content-Type", "application/json")
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("second attempt status = %d, want %d", recorder.Code, http.StatusTooManyRequests)
+	}
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "too many requests")
+}
+
+func TestAgentSyncHandlerRejectsTooManyHeartbeatsBeforeService(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentSyncService{}
+	handler := handlers.AgentSync(svc)
+	heartbeats := make([]string, 0, 257)
+	for i := 0; i < 257; i++ {
+		heartbeats = append(heartbeats, `{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}`)
+	}
+	body := `{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[` + strings.Join(heartbeats, ",") + `]}`
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
+	if svc.syncBatch.MonitoringInstanceID != "" {
+		t.Fatalf("service was called for oversized batch: %#v", svc.syncBatch)
+	}
+}
+
+func TestAgentSyncHandlerRejectsOverlongIdentityStringBeforeService(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentSyncService{}
+	handler := handlers.AgentSync(svc)
+	body := `{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"` + strings.Repeat("x", 257) + `","sync_batch_id":"sync_001"}]}`
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
+	if svc.syncBatch.MonitoringInstanceID != "" {
+		t.Fatalf("service was called for overlong string: %#v", svc.syncBatch)
+	}
 }
 
 func TestAgentSyncHandlerRejectsEmptySyncToken(t *testing.T) {

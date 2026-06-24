@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 
@@ -49,8 +47,9 @@ type settingsUpdateRequest struct {
 }
 
 type feishuSettingsResponse struct {
-	Enabled    bool   `json:"enabled"`
-	WebhookURL string `json:"webhook_url"`
+	Enabled                 bool   `json:"enabled"`
+	WebhookURLPresent       bool   `json:"webhook_url_present"`
+	WebhookURLMaskedSummary string `json:"webhook_url_masked_summary,omitempty"`
 }
 
 type feishuSettingsUpdateRequest struct {
@@ -182,8 +181,9 @@ func newSettingsResponse(record centersettings.CenterSettings) settingsResponse 
 			RuntimeApplyActive: record.Telegram.RuntimeManaged && record.Telegram.Enabled(),
 		},
 		Feishu: feishuSettingsResponse{
-			Enabled:    record.FeishuEnabled,
-			WebhookURL: record.FeishuWebhookURL,
+			Enabled:                 record.FeishuEnabled,
+			WebhookURLPresent:       strings.TrimSpace(record.FeishuWebhookURL) != "",
+			WebhookURLMaskedSummary: maskWebhookURL(record.FeishuWebhookURL),
 		},
 		HostSampleFrequencyTier:  record.HostSampleFrequencyTier,
 		ProbeFrequencyDefaults:   record.ProbeFrequencyDefaults,
@@ -242,6 +242,18 @@ func maskSecretTail(value string) string {
 	return strings.Repeat("*", len(value)-4) + value[len(value)-4:]
 }
 
+func maskWebhookURL(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	const keep = 4
+	if len(value) <= keep {
+		return strings.Repeat("*", len(value))
+	}
+	return value[:min(len(value), 24)] + "***" + value[len(value)-keep:]
+}
+
 func maskTelegramBotToken(token string) string {
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -254,16 +266,5 @@ func maskTelegramBotToken(token string) string {
 }
 
 func decodeSettingsJSONBody(r *http.Request, dst any) error {
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(dst); err != nil {
-		return err
-	}
-	if err := decoder.Decode(new(struct{})); err != io.EOF {
-		if err == nil {
-			return errors.New("unexpected trailing data")
-		}
-		return err
-	}
-	return nil
+	return decodeJSON(r, dst)
 }

@@ -17,8 +17,15 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
+func newTestRouter(opts centerhttp.RouterOptions) http.Handler {
+	if opts.AuthMiddleware == nil {
+		opts.AuthMiddleware = centerhttp.NoAuthForTestOnly()
+	}
+	return centerhttp.New(opts)
+}
+
 func TestRouterHealthz(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{Version: "dev"})
+	handler := newTestRouter(centerhttp.RouterOptions{Version: "dev"})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/healthz", nil)
 	recorder := httptest.NewRecorder()
@@ -76,7 +83,7 @@ func TestRouterPrefersMonitoringInstancesAPIOverSPAFallback(t *testing.T) {
 		}},
 	}
 
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:                              "dev",
 		WebDistDir:                           dir,
 		MonitoringInstancesCollectionHandler: handlers.MonitoringInstancesCollection(repo),
@@ -104,7 +111,7 @@ func TestRouterPrefersMonitoringInstancesAPIOverSPAFallback(t *testing.T) {
 
 func TestRouterDispatchesTargetProbeItemsAPI(t *testing.T) {
 	var called string
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		TargetItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "item"
@@ -131,7 +138,7 @@ func TestRouterDispatchesTargetProbeItemsAPI(t *testing.T) {
 
 func TestRouterDispatchesProviderAPIs(t *testing.T) {
 	var called string
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		ProvidersCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "collection"
@@ -168,7 +175,7 @@ func TestRouterProtectsProviderRoutes(t *testing.T) {
 	collectionCalled := false
 	itemCalled := false
 	middlewareCalls := 0
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		ProvidersCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			collectionCalled = true
@@ -207,9 +214,49 @@ func TestRouterProtectsProviderRoutes(t *testing.T) {
 	}
 }
 
+func TestRouterProtectedRouteFailsClosedWithoutAuthMiddleware(t *testing.T) {
+	called := false
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		DashboardHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusOK)
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", recorder.Code)
+	}
+	if called {
+		t.Fatal("protected handler was called without auth middleware")
+	}
+}
+
+func TestRouterAllowsExplicitNoAuthForTests(t *testing.T) {
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version: "dev",
+		DashboardHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}),
+		AuthMiddleware: centerhttp.NoAuthForTestOnly(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+}
+
 func TestRouterDispatchesVPSAPIs(t *testing.T) {
 	var called string
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		VPSCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "collection"
@@ -327,7 +374,7 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 	archiveCalled := false
 	restoreFromArchiveCalled := false
 	middlewareCalls := 0
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		VPSCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			collectionCalled = true
@@ -417,7 +464,7 @@ func TestRouterProtectsVPSRoutes(t *testing.T) {
 
 func TestRouterDispatchesTargetAssetContextAPI(t *testing.T) {
 	var called string
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		AssetContextTargetsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "targets"
@@ -438,7 +485,7 @@ func TestRouterDispatchesTargetAssetContextAPI(t *testing.T) {
 
 func TestRouterDispatchesSubscriptionAPIs(t *testing.T) {
 	var called string
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		SubscriptionsCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "collection"
@@ -507,7 +554,7 @@ func TestRouterDispatchesSubscriptionAPIs(t *testing.T) {
 
 func TestRouterDispatchesMonitoringInstanceVPSAPI(t *testing.T) {
 	var called string
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		MonitoringInstanceItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "item"
@@ -548,7 +595,7 @@ func TestRouterDispatchesMonitoringInstanceManagementAPIs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
 			var called string
-			handler := centerhttp.New(centerhttp.RouterOptions{
+			handler := newTestRouter(centerhttp.RouterOptions{
 				Version: "dev",
 				MonitoringInstanceItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					called = "item"
@@ -603,7 +650,7 @@ func TestRouterProtectsSubscriptionRoutes(t *testing.T) {
 	itemCalled := false
 	monthlyBudgetsCalled := false
 	middlewareCalls := 0
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		SubscriptionsCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			collectionCalled = true
@@ -690,7 +737,7 @@ func (f *fakeMonitoringInstanceRepository) StoreActionResult(context.Context, st
 func TestRouterDispatchesAgentEndpointsBeforeSPAFallback(t *testing.T) {
 	t.Run("enroll", func(t *testing.T) {
 		var called bool
-		handler := centerhttp.New(centerhttp.RouterOptions{
+		handler := newTestRouter(centerhttp.RouterOptions{
 			Version:    "dev",
 			WebDistDir: "testdata/web",
 			AgentEnrollHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -718,7 +765,7 @@ func TestRouterDispatchesAgentEndpointsBeforeSPAFallback(t *testing.T) {
 
 	t.Run("sync", func(t *testing.T) {
 		var called bool
-		handler := centerhttp.New(centerhttp.RouterOptions{
+		handler := newTestRouter(centerhttp.RouterOptions{
 			Version:    "dev",
 			WebDistDir: "testdata/web",
 			AgentSyncHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -747,7 +794,7 @@ func TestRouterDispatchesAgentEndpointsBeforeSPAFallback(t *testing.T) {
 
 func TestRouterKeepsProbeItemsSubtreeOutOfTargetItemHandler(t *testing.T) {
 	var called string
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		TargetItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "item"
@@ -774,7 +821,7 @@ func TestRouterKeepsProbeItemsSubtreeOutOfTargetItemHandler(t *testing.T) {
 
 func TestRouterDispatchesMonitoringInstanceRuntimeFactsAPI(t *testing.T) {
 	var called string
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		MonitoringInstanceItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "item"
@@ -801,7 +848,7 @@ func TestRouterDispatchesMonitoringInstanceRuntimeFactsAPI(t *testing.T) {
 
 func TestRouterDispatchesMonitoringInstanceRuntimeStreamAPI(t *testing.T) {
 	var called string
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		MonitoringInstanceRuntimeFactsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "runtime-facts"
@@ -828,7 +875,7 @@ func TestRouterDispatchesMonitoringInstanceRuntimeStreamAPI(t *testing.T) {
 
 func TestRouterDispatchesTargetRuntimeFactsAPI(t *testing.T) {
 	var called string
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		TargetItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "item"

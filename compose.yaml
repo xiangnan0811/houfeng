@@ -15,7 +15,7 @@ services:
     ports:
       - "127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001"
     volumes:
-      - ./data/logs:/var/log/houfeng
+      - houfeng_logs:/var/log/houfeng
 
   db:
     image: postgres:16-alpine
@@ -34,3 +34,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+volumes:
+  houfeng_logs:

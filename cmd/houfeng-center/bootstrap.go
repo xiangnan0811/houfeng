@@ -42,12 +42,13 @@ type postgresDB interface {
 }
 
 type bootstrapDeps struct {
-	openPostgres        func(context.Context, string) (postgresDB, error)
-	applyMigrations     func(context.Context, postgresDB) error
-	seedInitialUser     func(context.Context, auth.UserRepository, config.CenterConfig) error
-	newIncidentNotifier func(config.CenterConfig, centersettings.Repository) incidentservice.Notifier
-	newRouter           func(centerhttp.RouterOptions) http.Handler
-	newApp              func(string, http.Handler, ...centerapp.Worker) appRunner
+	openPostgres         func(context.Context, string) (postgresDB, error)
+	applyMigrations      func(context.Context, postgresDB) error
+	seedInitialUser      func(context.Context, auth.UserRepository, config.CenterConfig) error
+	newSessionRepository func(*pgxpool.Pool, []byte) (auth.SessionRepository, error)
+	newIncidentNotifier  func(config.CenterConfig, centersettings.Repository) incidentservice.Notifier
+	newRouter            func(centerhttp.RouterOptions) http.Handler
+	newApp               func(string, http.Handler, ...centerapp.Worker) appRunner
 }
 
 type pgxPostgresDB struct {
@@ -134,17 +135,24 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	syncSvc := syncing.NewService(syncRepo, syncing.NewCompositePostSyncProcessor(incidentSvc, streamHub))
 
 	userRepo := store.NewPostgresUserRepository(db.Pool())
-	sessionRepo := store.NewPostgresSessionRepository(db.Pool())
+	sessionRepo, err := deps.newSessionRepository(db.Pool(), cfg.SessionHMACKey)
+	if err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("create session repository: %w", err)
+	}
 	if err := deps.seedInitialUser(ctx, userRepo, cfg); err != nil {
 		db.Close()
 		return nil, nil, fmt.Errorf("seed initial user: %w", err)
 	}
 	authSvc := auth.New(userRepo, sessionRepo, auth.Options{
-		SessionTTL: cfg.SessionTTL,
-		Now:        time.Now,
+		SessionTTL:         cfg.SessionTTL,
+		Now:                time.Now,
+		PasswordBcryptCost: cfg.PasswordBcryptCost,
 	})
 	sessionCleanup := auth.NewSessionCleanupWorker(sessionRepo, slog.Default(), auth.DefaultSessionCleanupInterval)
-	authMW := centerhttp.RequireSession(authSvc)
+	authMiddleware := func(next http.Handler) http.Handler {
+		return centerhttp.RequireSameOrigin(cfg.PublicBaseURL)(centerhttp.RequireSession(authSvc)(next))
+	}
 
 	router := deps.newRouter(centerhttp.RouterOptions{
 		Version:                                     version,
@@ -222,15 +230,18 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		TargetRuntimeFactsHandler:                     handlers.TargetRuntimeFacts(runtimeFactsRepo),
 		TargetRuntimeControlHandler:                   handlers.TargetRuntimeControls(targetRepo),
 		TargetSparklinesHandler:                       handlers.TargetSparklines(targetSparklinesRepo),
-		AgentEnrollHandler:                            handlers.AgentEnroll(enrollmentSvc),
-		AgentSyncHandler:                              handlers.AgentSync(syncSvc),
+		AgentEnrollHandler:                            handlers.AgentEnrollWithOptions(enrollmentSvc, handlers.AgentEndpointOptions{TrustedProxies: cfg.TrustedProxies}),
+		AgentSyncHandler:                              handlers.AgentSyncWithOptions(syncSvc, handlers.AgentEndpointOptions{TrustedProxies: cfg.TrustedProxies}),
 		InstallerScriptHandler:                        handlers.InstallerScript(installer.Script),
-		AuthLoginHandler:                              handlers.Login(authSvc),
-		AuthLogoutHandler:                             handlers.Logout(authSvc),
-		AuthMeHandler:                                 handlers.Me(authSvc),
-		AuthChangePasswordHandler:                     handlers.ChangePassword(authSvc),
-		AuthMiddleware:                                authMW,
+		AuthLoginHandler: handlers.LoginWithOptions(authSvc, handlers.LoginOptions{
+			TrustedProxies: cfg.TrustedProxies,
+		}),
+		AuthLogoutHandler:         handlers.Logout(authSvc),
+		AuthMeHandler:             handlers.Me(authSvc),
+		AuthChangePasswordHandler: handlers.ChangePassword(authSvc),
+		AuthMiddleware:            authMiddleware,
 	})
+	router = centerhttp.SecurityHeaders(strings.HasPrefix(cfg.PublicBaseURL, "https://"))(router)
 
 	return deps.newApp(cfg.HTTPAddr, router, incidentSvc, retentionWorker, sessionCleanup, exchangeRateWorker, subscriptionReminderWorker), db.Close, nil
 }
@@ -252,7 +263,18 @@ func (d bootstrapDeps) withDefaults() bootstrapDeps {
 	}
 	if d.seedInitialUser == nil {
 		d.seedInitialUser = func(ctx context.Context, repo auth.UserRepository, cfg config.CenterConfig) error {
-			return auth.SeedInitialUser(ctx, repo, cfg.InitialUsername, cfg.InitialPassword, cfg.InitialDisplayName, time.Now)
+			return auth.SeedInitialUserWithOptions(ctx, repo, auth.SeedInitialUserOptions{
+				Username:           cfg.InitialUsername,
+				Password:           cfg.InitialPassword,
+				DisplayName:        cfg.InitialDisplayName,
+				Now:                time.Now,
+				PasswordBcryptCost: cfg.PasswordBcryptCost,
+			})
+		}
+	}
+	if d.newSessionRepository == nil {
+		d.newSessionRepository = func(pool *pgxpool.Pool, hmacKey []byte) (auth.SessionRepository, error) {
+			return store.NewPostgresSessionRepository(pool, hmacKey)
 		}
 	}
 	if d.newIncidentNotifier == nil {

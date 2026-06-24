@@ -17,11 +17,13 @@ import (
 const (
 	defaultMaxEntries = 65536
 	defaultMaxAge     = 72 * time.Hour
+	defaultMaxBytes   = 64 * 1024 * 1024
 )
 
 type Options struct {
 	MaxEntries int
 	MaxAge     time.Duration
+	MaxBytes   int
 	// SkipFsync, when true, skips the file.Sync() and syncDir() calls in
 	// writeEntries. fsync provides crash durability — losing a queue file's
 	// last write on power loss. Tests that exercise runtime retry/restart
@@ -91,6 +93,9 @@ func NewFileStore(path string, opts Options) *FileStore {
 	}
 	if opts.MaxAge <= 0 {
 		opts.MaxAge = defaultMaxAge
+	}
+	if opts.MaxBytes <= 0 {
+		opts.MaxBytes = defaultMaxBytes
 	}
 	return &FileStore{
 		path: path,
@@ -248,9 +253,21 @@ func (s *FileStore) pruneEntries(entries []Entry) []Entry {
 	if len(pruned) > s.opts.MaxEntries {
 		pruned = pruned[len(pruned)-s.opts.MaxEntries:]
 	}
+	pruned = pruneEntriesByBytes(pruned, s.opts.MaxBytes)
 	result := make([]Entry, len(pruned))
 	copy(result, pruned)
 	return result
+}
+
+func pruneEntriesByBytes(entries []Entry, maxBytes int) []Entry {
+	for len(entries) > 0 {
+		payload, err := json.Marshal(entries)
+		if err != nil || len(payload) <= maxBytes {
+			return entries
+		}
+		entries = entries[1:]
+	}
+	return entries
 }
 
 func (s *FileStore) readEntries() ([]Entry, error) {

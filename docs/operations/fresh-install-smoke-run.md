@@ -39,10 +39,12 @@ Required center environment:
 export HOUFENG_HTTP_ADDR=:8080
 export HOUFENG_WEB_DIST_DIR=web/dist
 export HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@localhost:5432/houfeng?sslmode=disable'
+export HOUFENG_DATABASE_REQUIRE_TLS=false
 export HOUFENG_PUBLIC_BASE_URL='http://127.0.0.1:8080'
 export HOUFENG_INCIDENT_SWEEP_INTERVAL=5s
 export HOUFENG_INITIAL_USERNAME=admin
 export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-password'
+export HOUFENG_SESSION_HMAC_KEY='replace-me-with-32-plus-random-bytes'
 ```
 
 `HOUFENG_PUBLIC_BASE_URL` is required for generated install commands. It must be an externally reachable absolute `http(s)` URL without query or fragment. For production-like one-command testing, build `houfeng-center` with a real release version and ensure the matching GitHub Release contains the Linux agent assets published by the release workflow before generating the command; `VERSION=dev` intentionally makes install-command generation return a configuration error.
@@ -98,7 +100,7 @@ curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
   }'
 ```
 
-Expected: HTTP 200 JSON response with the current user and a `houfeng_session` cookie in `$COOKIE_JAR`.
+Expected: HTTP 200 JSON response with the current user and a `__Host-houfeng_session` cookie in `$COOKIE_JAR`.
 
 ## Step 1: Create a VPS and its scoped MonitoringInstance
 
@@ -323,6 +325,7 @@ export HOUFENG_AGENT_SERVER_URL=http://127.0.0.1:8080
 export HOUFENG_AGENT_TOKEN_FILE=/tmp/houfeng-agent-token
 install -d -m 0700 /tmp/houfeng-agent
 export HOUFENG_AGENT_BUFFER_FILE=/tmp/houfeng-agent/sync-buffer.json
+export HOUFENG_AGENT_BUFFER_MAX_BYTES=67108864
 make build-agent
 ./bin/houfeng-agent > /tmp/houfeng-agent.log 2>&1 &
 AGENT_PID=$!

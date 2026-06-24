@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 
 	centerapp "houfeng/internal/center/app"
 	"houfeng/internal/center/auth"
@@ -117,6 +120,8 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		DatabaseURL:      "postgres://center",
 		TelegramBotToken: "seed-bot-token",
 		TelegramChatID:   "seed-chat-id",
+		TrustedProxies:   []string{"10.0.0.0/8"},
+		SessionHMACKey:   []byte("0123456789abcdef0123456789abcdef"),
 	}
 	db := &fakePostgresDB{}
 	app := fakeApp{}
@@ -125,6 +130,7 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	var gotHandler http.Handler
 	var gotNotifierCfg config.CenterConfig
 	var gotSettingsRepo centersettings.Repository
+	var gotSessionHMACKey []byte
 
 	builtApp, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
 		openPostgres: func(context.Context, string) (postgresDB, error) {
@@ -135,6 +141,10 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		},
 		seedInitialUser: func(context.Context, auth.UserRepository, config.CenterConfig) error {
 			return nil
+		},
+		newSessionRepository: func(_ *pgxpool.Pool, key []byte) (auth.SessionRepository, error) {
+			gotSessionHMACKey = append([]byte(nil), key...)
+			return fakeSessionRepository{}, nil
 		},
 		newIncidentNotifier: func(inputCfg config.CenterConfig, repo centersettings.Repository) incidentservice.Notifier {
 			gotNotifierCfg = inputCfg
@@ -375,11 +385,31 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.InstallerScriptHandler == nil {
 		t.Fatal("router installer script handler = nil, want non-nil")
 	}
+	if gotOpts.AuthMiddleware == nil {
+		t.Fatal("router auth middleware = nil, want non-nil")
+	}
 	if gotAddr != cfg.HTTPAddr {
 		t.Fatalf("app addr = %q, want %q", gotAddr, cfg.HTTPAddr)
 	}
 	if gotHandler == nil {
 		t.Fatal("app handler = nil, want non-nil")
+	}
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/healthz", nil)
+	gotHandler.ServeHTTP(recorder, req)
+	if recorder.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal("security header missing from app handler")
+	}
+
+	recorder = httptest.NewRecorder()
+	protected := gotOpts.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req = httptest.NewRequest(http.MethodPost, "https://center.example.com/api/settings", nil)
+	req.Header.Set("Origin", "https://evil.example.net")
+	protected.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("cross-site unsafe request status = %d, want 403", recorder.Code)
 	}
 	if gotNotifierCfg.TelegramBotToken != cfg.TelegramBotToken {
 		t.Fatalf("notifier seed bot token = %q, want %q", gotNotifierCfg.TelegramBotToken, cfg.TelegramBotToken)
@@ -390,6 +420,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotSettingsRepo == nil {
 		t.Fatal("settings repo = nil, want runtime settings repository for notifier wiring")
 	}
+	if string(gotSessionHMACKey) != string(cfg.SessionHMACKey) {
+		t.Fatalf("session HMAC key = %q, want configured key", string(gotSessionHMACKey))
+	}
 	if db.closed {
 		t.Fatal("DB closed before cleanup")
 	}
@@ -397,6 +430,43 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	cleanup()
 	if !db.closed {
 		t.Fatal("cleanup() did not close DB")
+	}
+}
+
+func TestBootstrapDefaultSeedInitialUserUsesConfiguredBcryptCost(t *testing.T) {
+	users := authTestUserRepository{}
+	cfg := config.CenterConfig{
+		InitialUsername:    "admin",
+		InitialPassword:    "correct-horse-battery",
+		PasswordBcryptCost: bcrypt.MinCost,
+	}
+
+	deps := bootstrapDeps{}.withDefaults()
+	if err := deps.seedInitialUser(context.Background(), users, cfg); err != nil {
+		t.Fatalf("seedInitialUser: %v", err)
+	}
+
+	user, err := users.FindByUsername(context.Background(), "admin")
+	if err != nil {
+		t.Fatalf("FindByUsername: %v", err)
+	}
+	got, err := bcrypt.Cost([]byte(user.PasswordHash))
+	if err != nil {
+		t.Fatalf("bcrypt.Cost: %v", err)
+	}
+	if got != bcrypt.MinCost {
+		t.Fatalf("seed bcrypt cost = %d, want %d", got, bcrypt.MinCost)
+	}
+}
+
+func TestBootstrapAuthServiceUsesConfiguredBcryptCost(t *testing.T) {
+	body, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatalf("read bootstrap.go: %v", err)
+	}
+
+	if !strings.Contains(string(body), "PasswordBcryptCost: cfg.PasswordBcryptCost") {
+		t.Fatal("bootstrap auth.New options must pass cfg.PasswordBcryptCost")
 	}
 }
 
@@ -591,4 +661,70 @@ type fakeIncidentNotifier struct{}
 
 func (*fakeIncidentNotifier) Send(context.Context, string) error {
 	return nil
+}
+
+type fakeSessionRepository struct{}
+
+func (fakeSessionRepository) Create(context.Context, auth.Session) error {
+	return nil
+}
+
+func (fakeSessionRepository) Find(context.Context, string) (auth.Session, error) {
+	return auth.Session{}, auth.ErrSessionNotFound
+}
+
+func (fakeSessionRepository) RefreshExpires(context.Context, string, time.Time, time.Time) error {
+	return nil
+}
+
+func (fakeSessionRepository) Delete(context.Context, string) error {
+	return nil
+}
+
+func (fakeSessionRepository) DeleteByUserID(context.Context, string, string) error {
+	return nil
+}
+
+func (fakeSessionRepository) DeleteExpiredBefore(context.Context, time.Time) (int, error) {
+	return 0, nil
+}
+
+type authTestUserRepository map[string]auth.User
+
+func (r authTestUserRepository) Create(_ context.Context, user auth.User) error {
+	r[user.Username] = user
+	return nil
+}
+
+func (r authTestUserRepository) FindByUsername(_ context.Context, username string) (auth.User, error) {
+	user, ok := r[username]
+	if !ok {
+		return auth.User{}, auth.ErrUserNotFound
+	}
+	return user, nil
+}
+
+func (r authTestUserRepository) FindByID(_ context.Context, userID string) (auth.User, error) {
+	for _, user := range r {
+		if user.UserID == userID {
+			return user, nil
+		}
+	}
+	return auth.User{}, auth.ErrUserNotFound
+}
+
+func (r authTestUserRepository) UpdatePassword(_ context.Context, userID, newHash string, changedAt time.Time) error {
+	for username, user := range r {
+		if user.UserID == userID {
+			user.PasswordHash = newHash
+			user.PasswordChangedAt = changedAt
+			r[username] = user
+			return nil
+		}
+	}
+	return auth.ErrUserNotFound
+}
+
+func (r authTestUserRepository) CountUsers(context.Context) (int, error) {
+	return len(r), nil
 }

@@ -24,12 +24,20 @@ type fakeSettingsRepository struct {
 
 type settingsHandlerResponse struct {
 	Telegram                telegramSettingsResponse              `json:"telegram"`
+	Feishu                  feishuSettingsResponse                `json:"feishu"`
 	HostSampleFrequencyTier string                                `json:"host_sample_frequency_tier"`
 	ProbeFrequencyDefaults  centersettings.ProbeFrequencyDefaults `json:"probe_frequency_defaults"`
 	IncidentDefaults        centersettings.IncidentDefaults       `json:"incident_defaults"`
 	OverrideRules           centersettings.OverrideRules          `json:"override_rules"`
 	RetentionPolicy         centersettings.RetentionPolicy        `json:"retention_policy"`
 	IPQualitySettings       centersettings.IPQualitySettings      `json:"ip_quality_settings"`
+}
+
+type feishuSettingsResponse struct {
+	Enabled                 bool   `json:"enabled"`
+	WebhookURL              string `json:"webhook_url"`
+	WebhookURLPresent       bool   `json:"webhook_url_present"`
+	WebhookURLMaskedSummary string `json:"webhook_url_masked_summary"`
 }
 
 type telegramSettingsResponse struct {
@@ -62,6 +70,8 @@ func TestSettingsHandlerReturnsCurrentSettingsWithoutTelegramBotToken(t *testing
 	record.Telegram.BotToken = "123456:ABCDEF-secret-token"
 	record.Telegram.ChatID = "chat-id"
 	record.Telegram.RuntimeManaged = false
+	record.FeishuEnabled = true
+	record.FeishuWebhookURL = "https://open.feishu.cn/open-apis/bot/v2/hook/full-secret-value"
 	repo := &fakeSettingsRepository{getSettingsResult: record}
 
 	handler := handlers.Settings(repo)
@@ -96,6 +106,15 @@ func TestSettingsHandlerReturnsCurrentSettingsWithoutTelegramBotToken(t *testing
 	}
 	if body.Telegram.RuntimeManaged {
 		t.Fatal("expected runtime_managed to stay false until persisted Telegram settings explicitly manage runtime")
+	}
+	if body.Feishu.WebhookURL != "" {
+		t.Fatalf("expected Feishu webhook URL to be redacted from response, got %q", body.Feishu.WebhookURL)
+	}
+	if !body.Feishu.WebhookURLPresent {
+		t.Fatal("expected feishu.webhook_url_present to be true")
+	}
+	if body.Feishu.WebhookURLMaskedSummary == "" || strings.Contains(body.Feishu.WebhookURLMaskedSummary, "full-secret-value") {
+		t.Fatalf("expected masked Feishu webhook summary, got %q", body.Feishu.WebhookURLMaskedSummary)
 	}
 	if body.HostSampleFrequencyTier != centersettings.Default().HostSampleFrequencyTier {
 		t.Fatalf("expected host sample frequency tier %q, got %q", centersettings.Default().HostSampleFrequencyTier, body.HostSampleFrequencyTier)
@@ -299,6 +318,25 @@ func TestSettingsHandlerRejectsUnknownFieldsOnPut(t *testing.T) {
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+}
+
+func TestSettingsHandlerRejectsOversizedPutBody(t *testing.T) {
+	repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
+
+	handler := handlers.Settings(repo)
+	body := `{"telegram":{"chat_id":"` + strings.Repeat("x", handlers.DefaultJSONBodyLimit) + `"}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+	if repo.putSettingsCalls != 0 {
+		t.Fatalf("putSettingsCalls = %d, want 0 because oversized body should not be persisted", repo.putSettingsCalls)
 	}
 }
 

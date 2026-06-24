@@ -3,10 +3,13 @@ set -eu
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: sh -s -- --server-url URL --enrollment-token TOKEN --version VERSION [--release-repo OWNER/REPO]
+Usage: sh houfeng-agent-install.sh --server-url URL (--enrollment-token TOKEN | --enrollment-token-file PATH | --enrollment-token-stdin) --version VERSION [--release-repo OWNER/REPO] [--insecure-allow-http]
 
 Installs houfeng-agent on Linux systemd hosts. The enrollment token is sensitive
 and will be written to /etc/houfeng-agent/token with restrictive permissions.
+Prefer --enrollment-token-file or --enrollment-token-stdin. Passing
+--enrollment-token can expose the secret through shell history and process list
+inspection while the installer is running.
 USAGE
 }
 
@@ -21,8 +24,11 @@ info() {
 
 SERVER_URL=""
 ENROLLMENT_TOKEN=""
+ENROLLMENT_TOKEN_FILE=""
+READ_ENROLLMENT_TOKEN_STDIN=0
 AGENT_VERSION=""
 RELEASE_REPO="xiangnan0811/houfeng"
+INSECURE_ALLOW_HTTP=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -36,6 +42,15 @@ while [ "$#" -gt 0 ]; do
       ENROLLMENT_TOKEN="$2"
       shift 2
       ;;
+    --enrollment-token-file)
+      [ "$#" -ge 2 ] || fail "--enrollment-token-file requires a value"
+      ENROLLMENT_TOKEN_FILE="$2"
+      shift 2
+      ;;
+    --enrollment-token-stdin)
+      READ_ENROLLMENT_TOKEN_STDIN=1
+      shift
+      ;;
     --version)
       [ "$#" -ge 2 ] || fail "--version requires a value"
       AGENT_VERSION="$2"
@@ -45,6 +60,10 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || fail "--release-repo requires a value"
       RELEASE_REPO="$2"
       shift 2
+      ;;
+    --insecure-allow-http)
+      INSECURE_ALLOW_HTTP=1
+      shift
       ;;
     --help|-h)
       usage
@@ -58,12 +77,29 @@ done
 
 [ "$(id -u)" -eq 0 ] || fail "must run as root (use sudo)"
 [ -n "$SERVER_URL" ] || fail "--server-url is required"
-[ -n "$ENROLLMENT_TOKEN" ] || fail "--enrollment-token is required"
 [ -n "$AGENT_VERSION" ] || fail "--version is required"
 [ "$AGENT_VERSION" != "dev" ] || fail "release version must not be dev; publish a release and regenerate the command"
 
+TOKEN_SOURCE_COUNT=0
+[ -n "$ENROLLMENT_TOKEN" ] && TOKEN_SOURCE_COUNT=$((TOKEN_SOURCE_COUNT + 1))
+[ -n "$ENROLLMENT_TOKEN_FILE" ] && TOKEN_SOURCE_COUNT=$((TOKEN_SOURCE_COUNT + 1))
+[ "$READ_ENROLLMENT_TOKEN_STDIN" = "1" ] && TOKEN_SOURCE_COUNT=$((TOKEN_SOURCE_COUNT + 1))
+[ "$TOKEN_SOURCE_COUNT" -eq 1 ] || fail "exactly one enrollment token source is required"
+
+if [ -n "$ENROLLMENT_TOKEN_FILE" ]; then
+  [ -r "$ENROLLMENT_TOKEN_FILE" ] || fail "--enrollment-token-file is not readable"
+  ENROLLMENT_TOKEN="$(tr -d '\r\n' < "$ENROLLMENT_TOKEN_FILE")"
+fi
+if [ "$READ_ENROLLMENT_TOKEN_STDIN" = "1" ]; then
+  ENROLLMENT_TOKEN="$(tr -d '\r\n')"
+fi
+[ -n "$ENROLLMENT_TOKEN" ] || fail "enrollment token must not be empty"
+
 case "$SERVER_URL" in
-  http://*|https://*) ;;
+  https://*) ;;
+  http://*)
+    [ "$INSECURE_ALLOW_HTTP" = "1" ] || fail "--server-url http requires --insecure-allow-http"
+    ;;
   *) fail "--server-url must be an absolute http(s) URL" ;;
 esac
 
@@ -147,6 +183,7 @@ HOUFENG_AGENT_TOKEN_FILE=/etc/houfeng-agent/token
 HOUFENG_AGENT_BUFFER_FILE=/var/lib/houfeng-agent/sync-buffer.json
 HOUFENG_AGENT_BUFFER_MAX_ENTRIES=65536
 HOUFENG_AGENT_BUFFER_MAX_AGE=72h
+HOUFENG_AGENT_BUFFER_MAX_BYTES=67108864
 EOF_ENV
 chown root:houfeng-agent /etc/houfeng-agent/agent.env
 chmod 0640 /etc/houfeng-agent/agent.env

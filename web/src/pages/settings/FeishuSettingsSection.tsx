@@ -1,10 +1,12 @@
 import { DetailSection } from '../../components/DetailSection'
-import { Toggle } from '../../components/atoms'
+import { MonoDigits, Toggle } from '../../components/atoms'
+import type { SettingsRecord } from '../../lib/types'
 import type { SettingsFormState } from './types'
 
-type FeishuSettingsForm = Pick<SettingsFormState, 'feishuEnabled' | 'feishuWebhookUrl'>
+type FeishuSettingsForm = Pick<SettingsFormState, 'feishuEnabled' | 'feishuWebhookPresent' | 'feishuWebhookUrl'>
 
 type FeishuSettingsSectionProps = {
+  settings: SettingsRecord['feishu']
   form: FeishuSettingsForm
   onChange: (patch: Partial<FeishuSettingsForm>) => void
   wrapper?: 'detail' | 'none'
@@ -13,6 +15,7 @@ type FeishuSettingsSectionProps = {
 }
 
 export function FeishuSettingsSection({
+  settings,
   form,
   onChange,
   wrapper = 'detail',
@@ -36,10 +39,19 @@ export function FeishuSettingsSection({
             className="input input--compact input--wide"
             aria-label="Webhook URL"
             type="text"
+            autoComplete="off"
             placeholder="https://open.feishu.cn/..."
             value={form.feishuWebhookUrl}
             onChange={(e) => onChange({ feishuWebhookUrl: e.target.value })}
           />
+        </span>
+      </div>
+      <div className="settings-row">
+        <span className="sr-label">当前持久化状态</span>
+        <span className="sr-value">
+          {settings.webhook_url_present && settings.webhook_url_masked_summary ? (
+            <>已配置飞书 Webhook：<MonoDigits>{settings.webhook_url_masked_summary}</MonoDigits></>
+          ) : '未配置'}
         </span>
       </div>
     </>
@@ -56,8 +68,8 @@ export function FeishuSettingsSection({
       ribbon="accent-2"
       aside={
         <div className="settings-section-aside">
-          <span className={`badge ${form.feishuEnabled ? 'badge-ok' : ''}`}>
-            {form.feishuEnabled && form.feishuWebhookUrl.trim() ? '已配置' : '未配置'}
+          <span className={`badge ${settings.webhook_url_present ? 'badge-ok' : ''}`}>
+            {settings.webhook_url_present ? '已配置持久化 Webhook' : '未配置'}
           </span>
           {onToggleExpand && (
             <button type="button" className="btn sm secondary" onClick={onToggleExpand}>

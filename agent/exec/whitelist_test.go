@@ -3,6 +3,8 @@ package exec
 import (
 	"reflect"
 	"testing"
+
+	"houfeng/internal/contracts/agentapi"
 )
 
 func TestWhitelistStableCommandDefinitions(t *testing.T) {
@@ -31,6 +33,9 @@ func TestWhitelistStableCommandDefinitions(t *testing.T) {
 			}
 			if !reflect.DeepEqual(args, wantDef.Args) {
 				t.Fatalf("Lookup(%q) args = %#v, want %#v", id, args, wantDef.Args)
+			}
+			if !agentapi.IsKnownCommandID(id) {
+				t.Fatalf("agentapi.IsKnownCommandID(%q) = false, want center catalog to include agent whitelist command", id)
 			}
 		})
 	}

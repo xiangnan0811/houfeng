@@ -25,7 +25,7 @@ func (s *stubAuthSvc) Touch(_ context.Context, _ string) (auth.Session, error) {
 func (s *stubAuthSvc) UserBySession(_ context.Context, _ string) (auth.User, error) {
 	return s.user, s.err
 }
-func (s *stubAuthSvc) ChangePassword(_ context.Context, _, _, _ string) error { return nil }
+func (s *stubAuthSvc) ChangePassword(_ context.Context, _, _, _, _ string) error { return nil }
 
 func TestRequireSessionAllowsAuthenticated(t *testing.T) {
 	svc := &stubAuthSvc{user: auth.User{UserID: "u1"}}
@@ -84,5 +84,86 @@ func TestUserIDFromContextEmpty(t *testing.T) {
 	uid, ok := UserIDFromContext(context.Background())
 	if ok || uid != "" {
 		t.Fatalf("UserIDFromContext = %q ok=%v, want empty/false", uid, ok)
+	}
+}
+
+func TestRequireSameOriginRejectsCrossSiteUnsafeMethod(t *testing.T) {
+	mw := RequireSameOrigin("https://houfeng.example.com")
+	innerCalled := false
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		innerCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	r := httptest.NewRequest(http.MethodPost, "https://houfeng.example.com/api/settings", nil)
+	r.Header.Set("Origin", "https://evil.example.net")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+	if innerCalled {
+		t.Fatal("inner handler was called for cross-site unsafe method")
+	}
+}
+
+func TestRequireSameOriginAllowsSameOriginUnsafeMethod(t *testing.T) {
+	mw := RequireSameOrigin("https://houfeng.example.com")
+	innerCalled := false
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		innerCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	r := httptest.NewRequest(http.MethodPut, "https://houfeng.example.com/api/settings", nil)
+	r.Header.Set("Origin", "https://houfeng.example.com")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", w.Code)
+	}
+	if !innerCalled {
+		t.Fatal("inner handler was not called for same-origin unsafe method")
+	}
+}
+
+func TestRequireSameOriginRejectsUnsafeMethodWithoutOriginOrReferer(t *testing.T) {
+	mw := RequireSameOrigin("https://houfeng.example.com")
+	handler := mw(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("inner handler must not be called")
+	}))
+
+	r := httptest.NewRequest(http.MethodDelete, "https://houfeng.example.com/api/settings", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+}
+
+func TestSecurityHeadersSetsBaselineHeaders(t *testing.T) {
+	handler := SecurityHeaders(true)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	r := httptest.NewRequest(http.MethodGet, "https://houfeng.example.com/api/dashboard", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	headers := w.Result().Header
+	if headers.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff", headers.Get("X-Content-Type-Options"))
+	}
+	if headers.Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("X-Frame-Options = %q, want DENY", headers.Get("X-Frame-Options"))
+	}
+	if headers.Get("Strict-Transport-Security") == "" {
+		t.Fatal("Strict-Transport-Security missing")
+	}
+	if headers.Get("Content-Security-Policy") == "" {
+		t.Fatal("Content-Security-Policy missing")
 	}
 }

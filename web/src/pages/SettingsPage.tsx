@@ -57,7 +57,8 @@ function buildFormState(settings: SettingsRecord): SettingsFormState {
     telegramChatId: settings.telegram.chat_id,
     telegramRuntimeManaged: settings.telegram.runtime_managed,
     feishuEnabled: settings.feishu.enabled,
-    feishuWebhookUrl: settings.feishu.webhook_url,
+    feishuWebhookPresent: settings.feishu.webhook_url_present,
+    feishuWebhookUrl: '',
     hostSampleFrequencyTier: settings.host_sample_frequency_tier,
     probeFrequencyDefaults: {
       tcp: settings.probe_frequency_defaults.tcp,
@@ -204,8 +205,14 @@ function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): Setting
   else if (newToken && chatId === '') throw new Error('提供新 Bot Token 时需同时填写 Chat ID。')
   else if (hasToken && rm && chatId === '') throw new Error('启用运行时接管时 Chat ID 不能为空。')
 
+  const feishu: FeishuSettingsInput = { enabled: form.feishuEnabled }
+  const feishuWebhookUrl = form.feishuWebhookUrl.trim()
+  if (feishuWebhookUrl !== '') {
+    feishu.webhook_url = feishuWebhookUrl
+  }
+
   const common = {
-    feishu: { enabled: form.feishuEnabled, webhook_url: form.feishuWebhookUrl.trim() },
+    feishu,
     host_sample_frequency_tier: form.hostSampleFrequencyTier,
     probe_frequency_defaults: { tcp: form.probeFrequencyDefaults.tcp, http: form.probeFrequencyDefaults.http, tls: form.probeFrequencyDefaults.tls },
     incident_defaults: buildIncidentDefaults(form),
@@ -242,7 +249,7 @@ export function SettingsPage() {
     if (state.settings && state.form) {
       const active = new Set<NotificationChannel>()
       if (state.settings.telegram.token_present || state.settings.telegram.runtime_managed || state.form.telegramBotToken || state.form.telegramChatId) active.add('telegram')
-      if (state.form.feishuEnabled || state.form.feishuWebhookUrl.trim()) active.add('feishu')
+      if (state.form.feishuEnabled || state.form.feishuWebhookPresent || state.form.feishuWebhookUrl.trim()) active.add('feishu')
       setActiveChannels((prev) => (prev.size === 0 ? active : prev))
     }
   }, [state.settings, state.form])
@@ -344,6 +351,7 @@ export function SettingsPage() {
               )}
               {activeChannels.has('feishu') && (
                 <FeishuSettingsSection
+                  settings={systemSettings.feishu}
                   form={systemForm}
                   isExpanded={expandedChannels.has('feishu')}
                   onToggleExpand={() => setExpandedChannels((p) => { const n = new Set(p); if (n.has('feishu')) n.delete('feishu'); else n.add('feishu'); return n })}
@@ -462,6 +470,7 @@ export function SettingsPage() {
           {modalState === 'configure-feishu' && (
             <FeishuSettingsSection
               wrapper="none"
+              settings={systemSettings.feishu}
               form={channelDraft ?? systemForm}
               onChange={(patch) => patchDraft((f) => ({ ...f, ...patch }))}
             />

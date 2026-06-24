@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func staticNow() func() time.Time {
@@ -21,6 +23,31 @@ func TestSeedInitialUserCreatesWhenEmpty(t *testing.T) {
 	}
 	if n, _ := users.CountUsers(context.Background()); n != 1 {
 		t.Fatalf("user count = %d, want 1", n)
+	}
+}
+
+func TestSeedInitialUserUsesConfiguredBcryptCost(t *testing.T) {
+	users := newFakeUsers()
+	err := SeedInitialUserWithOptions(context.Background(), users, SeedInitialUserOptions{
+		Username:           "admin",
+		Password:           "correct-horse-battery",
+		DisplayName:        "管理员",
+		Now:                staticNow(),
+		PasswordBcryptCost: bcrypt.MinCost,
+	})
+	if err != nil {
+		t.Fatalf("SeedInitialUserWithOptions: %v", err)
+	}
+	u, err := users.FindByUsername(context.Background(), "admin")
+	if err != nil {
+		t.Fatalf("FindByUsername: %v", err)
+	}
+	got, err := bcrypt.Cost([]byte(u.PasswordHash))
+	if err != nil {
+		t.Fatalf("bcrypt.Cost: %v", err)
+	}
+	if got != bcrypt.MinCost {
+		t.Fatalf("seeded password bcrypt cost = %d, want %d", got, bcrypt.MinCost)
 	}
 }
 
@@ -56,7 +83,7 @@ func TestSeedInitialUserSkipWhenNonEmpty(t *testing.T) {
 
 func TestSeedInitialUserDoesNotOverwriteExistingPassword(t *testing.T) {
 	users := newFakeUsers()
-	existingHash, err := HashPassword("existing-password-xx")
+	existingHash, err := HashPassword("existing-credential-2026!")
 	if err != nil {
 		t.Fatalf("HashPassword existing: %v", err)
 	}
@@ -67,7 +94,7 @@ func TestSeedInitialUserDoesNotOverwriteExistingPassword(t *testing.T) {
 		Role:         RoleAdmin,
 	})
 
-	err = SeedInitialUser(context.Background(), users, "admin", "new-password-xx", "管理员", staticNow())
+	err = SeedInitialUser(context.Background(), users, "admin", "new-credential-2026!", "管理员", staticNow())
 	if err != nil {
 		t.Fatalf("SeedInitialUser: %v", err)
 	}
@@ -78,10 +105,10 @@ func TestSeedInitialUserDoesNotOverwriteExistingPassword(t *testing.T) {
 	if u.PasswordHash != existingHash {
 		t.Fatal("SeedInitialUser changed an existing password hash")
 	}
-	if err := VerifyPassword(u.PasswordHash, "existing-password-xx"); err != nil {
+	if err := VerifyPassword(u.PasswordHash, "existing-credential-2026!"); err != nil {
 		t.Fatalf("existing password no longer verifies: %v", err)
 	}
-	if err := VerifyPassword(u.PasswordHash, "new-password-xx"); err == nil {
+	if err := VerifyPassword(u.PasswordHash, "new-credential-2026!"); err == nil {
 		t.Fatal("seed password unexpectedly replaced existing password")
 	}
 }

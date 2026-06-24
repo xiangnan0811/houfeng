@@ -123,13 +123,18 @@ func MonitoringInstanceInstallCommand(repo monitoringinstances.OnboardingReposit
 		}
 
 		installerURL := publicBaseURL + "/api/agent/install.sh"
+		insecureHTTPFlag := ""
+		if strings.HasPrefix(publicBaseURL, "http://") {
+			insecureHTTPFlag = " --insecure-allow-http"
+		}
 		command := fmt.Sprintf(
-			"curl -fsSL %s | sudo sh -s -- --server-url %s --enrollment-token %s --version %s --release-repo %s",
+			"tmp_installer=\"$(mktemp)\" && curl -fsSL %s -o \"$tmp_installer\" && sudo sh \"$tmp_installer\" --server-url %s --enrollment-token-stdin --version %s --release-repo %s%s <<'HOUFENG_ENROLLMENT_TOKEN'\n%s\nHOUFENG_ENROLLMENT_TOKEN\nstatus=$?; rm -f \"$tmp_installer\"; test \"$status\" -eq 0",
 			shellQuote(installerURL),
 			shellQuote(publicBaseURL),
-			shellQuote(issue.Token),
 			shellQuote(agentVersion),
 			shellQuote(releaseRepo),
+			insecureHTTPFlag,
+			issue.Token,
 		)
 
 		writeJSON(w, http.StatusOK, monitoringinstances.InstallCommandIssue{

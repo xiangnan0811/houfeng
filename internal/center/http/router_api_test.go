@@ -13,7 +13,7 @@ import (
 const spaShell = "<!doctype html><title>houfeng-spa</title>"
 
 func TestRouterKeepsAPIMonitoringInstancesOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		MonitoringInstancesCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +46,7 @@ func TestRouterKeepsAPIMonitoringInstancesOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsSettingsOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		SettingsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +79,7 @@ func TestRouterKeepsSettingsOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsProvidersOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		ProvidersCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +126,7 @@ func TestRouterKeepsProvidersOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsAssetServicesOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		AssetServicesCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +173,7 @@ func TestRouterKeepsAssetServicesOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsAssetDomainsOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		AssetDomainsCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +220,7 @@ func TestRouterKeepsAssetDomainsOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsVPSIPQualityOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		VPSIPQualityHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +250,7 @@ func TestRouterKeepsVPSIPQualityOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsVPSArchiveLifecycleOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		VPSArchiveReviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +303,7 @@ func TestRouterKeepsVPSArchiveLifecycleOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsAssetDecisionsOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		AssetDecisionOverviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -387,7 +387,7 @@ func TestRouterKeepsAssetDecisionsOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		VPSCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -491,7 +491,7 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsMonitoringInstanceVPSOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		MonitoringInstanceVPSHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -521,7 +521,7 @@ func TestRouterKeepsMonitoringInstanceVPSOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsAssetContextOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		AssetContextTargetsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -565,7 +565,7 @@ func TestRouterKeepsAssetContextOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsSubscriptionsOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		SubscriptionsCollectionHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -628,7 +628,7 @@ func TestRouterKeepsSubscriptionsOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterStillFallsBackForWebPath(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 	})
@@ -653,7 +653,7 @@ func TestRouterStillFallsBackForWebPath(t *testing.T) {
 }
 
 func TestRouterDoesNotFallBackToSPAForUnknownAPIPath(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 	})
@@ -678,7 +678,7 @@ func TestRouterDoesNotFallBackToSPAForUnknownAPIPath(t *testing.T) {
 }
 
 func TestRouterKeepsDashboardAndEventsOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		DashboardHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -711,7 +711,7 @@ func TestRouterKeepsDashboardAndEventsOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsMonitoringInstanceSparklinesOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		MonitoringInstanceSparklinesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -736,7 +736,7 @@ func TestRouterKeepsMonitoringInstanceSparklinesOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterDoesNotFallBackToSPAForUnknownTargetSubtree(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		TargetItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -767,7 +767,7 @@ func TestRouterDoesNotFallBackToSPAForUnknownTargetSubtree(t *testing.T) {
 }
 
 func TestRouterKeepsTargetSparklinesOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version: "dev",
 		TargetSparklinesHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -792,7 +792,7 @@ func TestRouterKeepsTargetSparklinesOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsMonitoringInstanceRuntimeFactsOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		MonitoringInstanceRuntimeFactsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -825,7 +825,7 @@ func TestRouterKeepsMonitoringInstanceRuntimeFactsOutOfSPAFallback(t *testing.T)
 }
 
 func TestRouterKeepsMonitoringInstanceOnboardingAdminRoutesOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		MonitoringInstanceOnboardingHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -896,7 +896,7 @@ func TestRouterKeepsMonitoringInstanceOnboardingAdminRoutesOutOfSPAFallback(t *t
 
 func TestRouterServesInstallerScriptOutsideAuthMiddleware(t *testing.T) {
 	calledAuth := false
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		InstallerScriptHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -931,7 +931,7 @@ func TestRouterServesInstallerScriptOutsideAuthMiddleware(t *testing.T) {
 }
 
 func TestRouterKeepsMonitoringInstanceActionsOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		MonitoringInstanceActionsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -940,7 +940,7 @@ func TestRouterKeepsMonitoringInstanceActionsOutOfSPAFallback(t *testing.T) {
 		}),
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemctl_status"}`))
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -961,7 +961,7 @@ func TestRouterKeepsMonitoringInstanceActionsOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterRejectsMonitoringInstanceLifecycleRoutesWithoutSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		MonitoringInstanceItemHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -993,7 +993,7 @@ func TestRouterRejectsMonitoringInstanceLifecycleRoutesWithoutSPAFallback(t *tes
 }
 
 func TestRouterKeepsRuntimeControlRoutesOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		MonitoringInstanceRuntimeControlHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1049,7 +1049,7 @@ func TestRouterKeepsRuntimeControlRoutesOutOfSPAFallback(t *testing.T) {
 }
 
 func TestRouterKeepsTargetRuntimeFactsOutOfSPAFallback(t *testing.T) {
-	handler := centerhttp.New(centerhttp.RouterOptions{
+	handler := newTestRouter(centerhttp.RouterOptions{
 		Version:    "dev",
 		WebDistDir: "testdata/web",
 		TargetRuntimeFactsHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
