@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 196
+- **Total Sessions**: 197
 - **Last Active**: 2026-06-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~685 | Active |
+| `journal-4.md` | ~725 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 197 | 2026-06-24 | Record release cleanup guidance | `78e3751` | `docs/release-cleanup-guidance` |
 | 196 | 2026-06-24 | Security review remediation | `aef0d32` | `security-review-remediation-clean` |
 | 195 | 2026-06-23 | Security Review Remediation Reopened P2 Hardening | - | `security-review-remediation` |
 | 194 | 2026-06-23 | Security Review Remediation Final Gate | - | `security-review-remediation` |

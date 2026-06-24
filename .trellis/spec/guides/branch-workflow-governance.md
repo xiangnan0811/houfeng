@@ -145,6 +145,72 @@ If no release PR, GitHub Release, image workflow, or deploy job is expected for 
 
 ---
 
+## Post-Release Cleanup
+
+After a release-worthy change has been merged, released, and verified in Docker Hub or other final artifact storage, do not stop with the artifact evidence. Clean the local and remote delivery surface before reporting completion.
+
+Required cleanup checklist:
+
+1. Re-check every checkout/worktree involved in the delivery:
+
+   ```bash
+   git status --short --branch
+   git worktree list --porcelain
+   ```
+
+2. Classify any dirty path before ending the session:
+   - Useful follow-up work belongs in a new Trellis task and a new non-main branch.
+   - Useless local residue, such as failed experiment edits, generated build output, or a superseded PR fixture change, must be removed before completion.
+   - Do not append new follow-up work to a task that has already been completed, archived, released, or used to publish an image.
+
+3. If a PR was replaced by a clean branch, close the superseded PR and delete its local and remote branch after the replacement PR has merged:
+
+   ```bash
+   gh pr close <old-pr-number> --comment "<replacement reason>"
+   git push origin --delete <old-branch>
+   git branch -D <old-branch>
+   git fetch origin --prune
+   ```
+
+4. Remove temporary worktrees that were only needed for the delivery path:
+
+   ```bash
+   git worktree remove .worktree/<task-or-branch-name>
+   ```
+
+5. Return the primary checkout to the intended next-task baseline. Usually this is the protected remote `main` after the release PR merge:
+
+   ```bash
+   git switch main
+   git pull --ff-only origin main
+   ```
+
+6. Final completion evidence must include:
+   - `git status --short --branch` showing no dirty paths;
+   - `git worktree list --porcelain` showing no stale temporary worktrees;
+   - branch list evidence that stale replaced branches are gone when branch deletion was part of the cleanup;
+   - the final artifact evidence, such as `publish-images` success plus Docker Hub manifest/tag inspection.
+
+Wrong pattern:
+
+```bash
+# Wrong: image is published, but local release leftovers remain for the next task.
+gh run watch <publish-images-run> --exit-status
+# report completion without checking git status/worktrees/branches
+```
+
+Correct pattern:
+
+```bash
+gh run watch <publish-images-run> --exit-status
+git status --short --branch
+git worktree list --porcelain
+git branch -vv
+# report completion only after the workspace is clean and the next-task baseline is clear
+```
+
+---
+
 ## Remote Protection Requirements
 
 The repository host must protect `main` and `master` when either branch exists:
