@@ -581,3 +581,105 @@ Restored the Trellis update task to active scope, fixed the asset decision store
 ### Next Steps
 
 - None - task complete
+
+
+## Session 194: Security Review Remediation Final Gate
+
+**Date**: 2026-06-23
+**Task**: Security review remediation
+**Branch**: `security-review-remediation`
+
+### Summary
+
+Completed the final audit for the integrated security review remediation task. Re-read the source report, confirmed `HF-SEC-001` through `HF-SEC-023` all map to evidence rows, fixed remaining JSON decoder bypasses in settings and MonitoringInstance actions, synced the frontend Feishu write-only settings contract, and recorded final verification evidence.
+
+### Main Changes
+
+- Closed the final JSON limit gap by routing settings PUT and MonitoringInstance action POST through the shared limited decoder.
+- Updated Settings page/types/tests to consume Feishu `webhook_url_present` / `webhook_url_masked_summary` and omit stored webhooks on unrelated saves.
+- Marked task acceptance criteria/checklist complete and documented deferred follow-ups for HF-SEC-019/020/021 plus broader advisory items.
+
+### Testing
+
+- [OK] `git diff --check`
+- [OK] `make verify-go`
+- [OK] `make verify-web`
+- [OK] `cd web && npm run test -- --run src/lib/api.test.ts src/pages/SettingsPage.test.tsx`
+- [OK] `npm audit --omit=dev` reported 0 production dependency vulnerabilities.
+
+### Status
+
+[OK] **Ready for Phase 3.4 commit review**
+
+### Next Steps
+
+- Review the broad security diff, then commit on the non-main branch when ready.
+
+
+## Session 195: Security Review Remediation Reopened P2 Hardening
+
+**Date**: 2026-06-23
+**Task**: Security review remediation
+**Branch**: `security-review-remediation`
+
+### Summary
+
+Reopened the previously deferred `HF-SEC-019`, `HF-SEC-020`, and `HF-SEC-021` items because the user objective requires all report findings to be fixed. Added test-backed bcrypt cost configuration, a production PostgreSQL TLS startup guard, and Docker rootless/non-root runtime hardening.
+
+### Main Changes
+
+- Added `HOUFENG_PASSWORD_BCRYPT_COST` parsing and routed it through password change, first-user seed, and bootstrap.
+- Added `HOUFENG_DATABASE_REQUIRE_TLS=true` validation for secure PostgreSQL `sslmode` values.
+- Changed the project image to run as `USER houfeng:houfeng`, removed `gosu` runtime privilege dropping, and moved Compose file logs to the `houfeng_logs` named volume.
+- Updated deployment docs, evidence, implementation plan, and backend code-specs for the new contracts.
+
+### Testing
+
+- [OK] Focused Go tests for auth/config/bootstrap/Docker static checks.
+- [OK] `docker compose --env-file docs/deploy/compose.env.example -f compose.yaml config --quiet`
+- [OK] `git diff --check`
+- [OK] `make verify-go`
+- [OK] `make verify-web`
+- [OK] `npm audit --omit=dev` reported 0 production dependency vulnerabilities.
+- [INFO] Docker daemon unavailable at `/var/run/docker.sock`; live image build not run.
+
+### Status
+
+[OK] **Ready for Phase 3.4 commit review**
+
+### Next Steps
+
+- Review the broad security diff, then commit on the non-main branch when ready.
+
+
+## Session 194: Security review remediation
+
+**Date**: 2026-06-24
+**Task**: Security review remediation
+**Branch**: `security-review-remediation`
+
+### Summary
+
+Remediated the integrated security review findings, added regression coverage and deployment contract docs, and verified Go/Web checks before release flow.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `525484d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
