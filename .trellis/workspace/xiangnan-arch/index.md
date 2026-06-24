@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 193
-- **Last Active**: 2026-06-23
+- **Total Sessions**: 196
+- **Last Active**: 2026-06-24
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~583 | Active |
+| `journal-4.md` | ~685 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,9 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 196 | 2026-06-24 | Security review remediation | `aef0d32` | `security-review-remediation-clean` |
+| 195 | 2026-06-23 | Security Review Remediation Reopened P2 Hardening | - | `security-review-remediation` |
+| 194 | 2026-06-23 | Security Review Remediation Final Gate | - | `security-review-remediation` |
 | 193 | 2026-06-23 | Fix PR 267 Go CI follow-up | `7908db0` | `chore/update-trellis` |
 | 192 | 2026-06-22 | Update Trellis runtime to 0.6.4 | `22da7a3` | `chore/update-trellis` |
 | 191 | 2026-06-11 | Reset project guidance docs | `3b8d1f0` | `docs/reset-project-guidance` |
