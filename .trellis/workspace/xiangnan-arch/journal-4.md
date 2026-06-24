@@ -690,3 +690,36 @@ Remediated the integrated security review findings, added regression coverage an
 ### Next Steps
 
 - None - task complete
+
+
+## Session 197: Record release cleanup guidance
+
+**Date**: 2026-06-24
+**Task**: Record release cleanup guidance
+**Branch**: `docs/release-cleanup-guidance`
+
+### Summary
+
+Documented the post-release cleanup checklist so future release flows clean stale worktrees, replaced PR branches, and local dirty state before reporting completion.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `78e3751` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
