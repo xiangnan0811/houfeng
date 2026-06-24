@@ -273,6 +273,29 @@ describe('VPSIPQualityPage', () => {
     expect(screen.getByText('ipq_000')).toBeInTheDocument()
   })
 
+  it('renders raw JSON details as text rather than HTML', async () => {
+    const maliciousJSON = { html: '<img src=x onerror=alert(1)>', script: '<script>alert(1)</script>' }
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse({
+      ...ipQualityReportBody,
+      provider_results: [
+        {
+          ...ipQualityReportBody.provider_results[0],
+          extra_json: maliciousJSON,
+        },
+      ],
+      service_unlocks: [],
+      history: [],
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container } = renderPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量驾驶舱' })).toBeInTheDocument())
+    expect(container.querySelector('img')).toBeNull()
+    expect(screen.getByText(/<img src=x onerror=alert\(1\)>/)).toBeInTheDocument()
+    expect(screen.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument()
+  })
+
   it('shows an empty state when there is no user-visible summary', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse({
       summary: null,

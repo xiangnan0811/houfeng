@@ -58,3 +58,46 @@ func TestScriptPreservesCurrentAndLegacyPostEnrollmentTokens(t *testing.T) {
 		t.Fatal("installer script should require sync_token before preserving the token file")
 	}
 }
+
+func TestScriptRequiresExplicitInsecureAllowHTTP(t *testing.T) {
+	t.Parallel()
+
+	for _, want := range []string{
+		"--insecure-allow-http",
+		"INSECURE_ALLOW_HTTP=0",
+		"INSECURE_ALLOW_HTTP=1",
+		`http://*)`,
+		`[ "$INSECURE_ALLOW_HTTP" = "1" ] || fail "--server-url http requires --insecure-allow-http"`,
+		`https://*) ;;`,
+	} {
+		if !strings.Contains(Script, want) {
+			t.Fatalf("installer script missing HTTP hardening snippet %q", want)
+		}
+	}
+	if strings.Contains(Script, "http://*|https://*) ;;") {
+		t.Fatal("installer script should not accept http:// server URLs without an explicit insecure flag")
+	}
+}
+
+func TestScriptSupportsSaferEnrollmentTokenSources(t *testing.T) {
+	t.Parallel()
+
+	for _, want := range []string{
+		"--enrollment-token TOKEN",
+		"--enrollment-token-file PATH",
+		"--enrollment-token-stdin",
+		"ENROLLMENT_TOKEN_FILE=\"\"",
+		"READ_ENROLLMENT_TOKEN_STDIN=0",
+		"TOKEN_SOURCE_COUNT=0",
+		`[ "$TOKEN_SOURCE_COUNT" -eq 1 ] || fail "exactly one enrollment token source is required"`,
+		`ENROLLMENT_TOKEN="$(tr -d '\r\n' < "$ENROLLMENT_TOKEN_FILE")"`,
+		`ENROLLMENT_TOKEN="$(tr -d '\r\n')"`,
+	} {
+		if !strings.Contains(Script, want) {
+			t.Fatalf("installer script missing safer token source snippet %q", want)
+		}
+	}
+	if !strings.Contains(Script, "process list") || !strings.Contains(Script, "shell history") {
+		t.Fatal("installer usage should warn about command-line enrollment token exposure")
+	}
+}

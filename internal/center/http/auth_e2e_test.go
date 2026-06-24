@@ -125,6 +125,16 @@ func (m *memorySessions) DeleteExpiredBefore(_ context.Context, cutoff time.Time
 	}
 	return n, nil
 }
+func (m *memorySessions) DeleteByUserID(_ context.Context, userID, exceptSessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, sess := range m.byID {
+		if sess.UserID == userID && id != exceptSessionID {
+			delete(m.byID, id)
+		}
+	}
+	return nil
+}
 
 func setupAuthEndToEnd(t *testing.T) (*httptest.Server, func()) {
 	t.Helper()
@@ -151,7 +161,7 @@ func setupAuthEndToEnd(t *testing.T) (*httptest.Server, func()) {
 		AuthChangePasswordHandler: handlers.ChangePassword(svc),
 		AuthMiddleware:            centerhttp.RequireSession(svc),
 	})
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewTLSServer(mux)
 	return srv, srv.Close
 }
 
@@ -163,7 +173,8 @@ func TestAuthEndToEndLoginFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newCookieJar: %v", err)
 	}
-	client := &http.Client{Jar: jar}
+	client := srv.Client()
+	client.Jar = jar
 
 	// 1. Unauthenticated GET /api/dashboard -> 401
 	{
@@ -254,7 +265,8 @@ func TestAuthEndToEndWrongCredentials(t *testing.T) {
 	defer cleanup()
 
 	body := strings.NewReader(`{"username":"admin","password":"wrong-password-xx"}`)
-	resp, err := http.Post(srv.URL+"/api/auth/login", "application/json", body)
+	client := srv.Client()
+	resp, err := client.Post(srv.URL+"/api/auth/login", "application/json", body)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -268,7 +280,8 @@ func TestAuthEndToEndHealthzAndAgentBypass(t *testing.T) {
 	srv, cleanup := setupAuthEndToEnd(t)
 	defer cleanup()
 
-	resp, err := http.Get(srv.URL + "/api/healthz")
+	client := srv.Client()
+	resp, err := client.Get(srv.URL + "/api/healthz")
 	if err != nil {
 		t.Fatalf("healthz: %v", err)
 	}

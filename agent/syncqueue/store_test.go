@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -356,6 +357,39 @@ func TestFileStorePrunesByMaxEntriesAndAge(t *testing.T) {
 	}
 }
 
+func TestFileStorePrunesByMaxBytes(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "sync-buffer.json")
+	ctx := context.Background()
+	const maxBytes = 1800
+	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, MaxBytes: maxBytes, SkipFsync: true})
+
+	if _, err := store.Enqueue(ctx, syncRequestWithOutput("sync_large_old", 700)); err != nil {
+		t.Fatalf("Enqueue(old) error = %v", err)
+	}
+	if _, err := store.Enqueue(ctx, syncRequestWithOutput("sync_large_new", 700)); err != nil {
+		t.Fatalf("Enqueue(new) error = %v", err)
+	}
+
+	entries, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1 after byte pruning", len(entries))
+	}
+	if got := entries[0].Request.Heartbeats[0].SyncBatchID; got != "sync_large_new" {
+		t.Fatalf("remaining SyncBatchID = %q, want newest entry", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat(queue file) error = %v", err)
+	}
+	if info.Size() > maxBytes {
+		t.Fatalf("queue file size = %d, want <= %d", info.Size(), maxBytes)
+	}
+}
+
 func syncRequest(batchID string, backfilled bool) agentapi.SyncRequest {
 	observedAt := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
 	return agentapi.SyncRequest{
@@ -402,4 +436,25 @@ func syncRequest(batchID string, backfilled bool) agentapi.SyncRequest {
 			IsBackfilled:  backfilled,
 		}},
 	}
+}
+
+func syncRequestWithOutput(batchID string, outputBytes int) agentapi.SyncRequest {
+	observedAt := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
+	request := agentapi.SyncRequest{
+		MonitoringInstanceID: "mi_001",
+		SyncToken:            "sync-token-001",
+		Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
+			ObservedAt:   observedAt,
+			AgentVersion: "dev",
+			Fingerprint:  "fp-001",
+			SyncBatchID:  batchID,
+		}},
+	}
+	request.CommandResults = []agentapi.CommandResult{{
+		ActionID:  "act_" + batchID,
+		CommandID: "uptime",
+		Stdout:    strings.Repeat("x", outputBytes),
+		ExitCode:  0,
+	}}
+	return request
 }

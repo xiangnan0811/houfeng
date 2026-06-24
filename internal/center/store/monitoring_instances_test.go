@@ -372,6 +372,9 @@ func TestMonitoringInstanceOnboardingIssueEnrollmentTokenStoresIssuedAt(t *testi
 	if result.Token == "" {
 		t.Fatal("IssueMonitoringInstanceEnrollmentToken().Token = empty, want generated plaintext token")
 	}
+	if !strings.HasPrefix(result.Token, "enroll_") || len(result.Token) != len("enroll_")+64 {
+		t.Fatalf("IssueMonitoringInstanceEnrollmentToken().Token = %q, want 32-byte secret token", result.Token)
+	}
 	if !result.IssuedAt.Equal(issuedAt) {
 		t.Fatalf("IssueMonitoringInstanceEnrollmentToken().IssuedAt = %s, want %s", result.IssuedAt.Format(time.RFC3339), issuedAt.Format(time.RFC3339))
 	}
@@ -511,6 +514,9 @@ func TestApplyEnrollmentConsumesActiveUnexpiredToken(t *testing.T) {
 	}
 	if syncToken == "" {
 		t.Fatal("syncToken = empty, want generated sync token for bound enrollment")
+	}
+	if !strings.HasPrefix(syncToken, "sync_") || len(syncToken) != len("sync_")+64 {
+		t.Fatalf("syncToken = %q, want 32-byte secret token", syncToken)
 	}
 	if len(selectArgs) != 1 || selectArgs[0] != hashEnrollmentToken("enroll_001") {
 		t.Fatalf("select args = %#v, want enrollment hash", selectArgs)
@@ -1297,8 +1303,17 @@ func TestStoreSourceIncludesSyncTokenValidationForHeartbeatWrites(t *testing.T) 
 	if !strings.Contains(heartbeatPath, "coalesce(sync_token_hash, '')") {
 		t.Fatal("RecordAcceptedHeartbeats() should load sync_token_hash inside the heartbeat transaction")
 	}
-	if !strings.Contains(heartbeatPath, "storedSyncTokenHash != hashSyncToken(syncToken)") {
-		t.Fatal("RecordAcceptedHeartbeats() should reject mismatched sync token hashes")
+	if !strings.Contains(heartbeatPath, "syncTokenHashesEqual(storedSyncTokenHash, hashSyncToken(syncToken))") {
+		t.Fatal("RecordAcceptedHeartbeats() should compare sync token hashes with the shared constant-time helper")
+	}
+	if strings.Contains(heartbeatPath, "storedSyncTokenHash != hashSyncToken(syncToken)") {
+		t.Fatal("RecordAcceptedHeartbeats() should not use plain string inequality for sync token hashes")
+	}
+	if !strings.Contains(string(source), "ids.NewSecretToken(\"enroll\")") {
+		t.Fatal("IssueMonitoringInstanceEnrollmentToken() should generate enrollment tokens with NewSecretToken")
+	}
+	if !strings.Contains(string(source), "ids.NewSecretToken(\"sync\")") {
+		t.Fatal("IssueSyncToken()/ApplyEnrollment() should generate sync tokens with NewSecretToken")
 	}
 	if !strings.Contains(heartbeatPath, "write.Fingerprint != bindingFingerprint") {
 		t.Fatal("RecordAcceptedHeartbeats() should continue validating fingerprint within the transaction")

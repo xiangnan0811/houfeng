@@ -30,7 +30,7 @@ FROM debian:bookworm-slim AS runtime
 
 RUN set -eux; \
 	apt-get update; \
-	apt-get install -y --no-install-recommends ca-certificates gosu; \
+	apt-get install -y --no-install-recommends ca-certificates; \
 	rm -rf /var/lib/apt/lists/*; \
 	groupadd --system houfeng; \
 	useradd --system --gid houfeng --home-dir /app --shell /usr/sbin/nologin houfeng; \
@@ -48,5 +48,6 @@ COPY scripts/docker-entrypoint.sh /usr/local/bin/houfeng-docker-entrypoint
 RUN chmod 0755 /usr/local/bin/houfeng-docker-entrypoint
 
 EXPOSE 16001
+USER houfeng:houfeng
 ENTRYPOINT ["/usr/local/bin/houfeng-docker-entrypoint"]
 CMD ["/usr/local/bin/houfeng-center"]

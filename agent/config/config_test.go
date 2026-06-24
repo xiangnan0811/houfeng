@@ -40,6 +40,7 @@ func TestLoadAgentConfigProvidesDurableBufferDefaults(t *testing.T) {
 	t.Setenv("HOUFENG_AGENT_BUFFER_FILE", "")
 	t.Setenv("HOUFENG_AGENT_BUFFER_MAX_ENTRIES", "")
 	t.Setenv("HOUFENG_AGENT_BUFFER_MAX_AGE", "")
+	t.Setenv("HOUFENG_AGENT_BUFFER_MAX_BYTES", "")
 	t.Setenv("HOUFENG_AGENT_IP_QUALITY_STATE_FILE", "")
 
 	cfg, err := agentconfig.LoadAgentConfig()
@@ -55,6 +56,9 @@ func TestLoadAgentConfigProvidesDurableBufferDefaults(t *testing.T) {
 	if cfg.BufferMaxAge != 72*time.Hour {
 		t.Fatalf("BufferMaxAge = %s, want 72h", cfg.BufferMaxAge)
 	}
+	if cfg.BufferMaxBytes != 64*1024*1024 {
+		t.Fatalf("BufferMaxBytes = %d, want 64MiB", cfg.BufferMaxBytes)
+	}
 	if cfg.IPQualityStateFile != "/var/lib/houfeng-agent/ip-quality-state.json" {
 		t.Fatalf("IPQualityStateFile = %q, want default", cfg.IPQualityStateFile)
 	}
@@ -66,6 +70,7 @@ func TestLoadAgentConfigAcceptsDurableBufferOverrides(t *testing.T) {
 	t.Setenv("HOUFENG_AGENT_BUFFER_FILE", "/tmp/houfeng-buffer.json")
 	t.Setenv("HOUFENG_AGENT_BUFFER_MAX_ENTRIES", "17")
 	t.Setenv("HOUFENG_AGENT_BUFFER_MAX_AGE", "2h")
+	t.Setenv("HOUFENG_AGENT_BUFFER_MAX_BYTES", "8192")
 	t.Setenv("HOUFENG_AGENT_IP_QUALITY_STATE_FILE", "/tmp/ip-quality-state.json")
 
 	cfg, err := agentconfig.LoadAgentConfig()
@@ -75,6 +80,7 @@ func TestLoadAgentConfigAcceptsDurableBufferOverrides(t *testing.T) {
 	if cfg.BufferFile != "/tmp/houfeng-buffer.json" ||
 		cfg.BufferMaxEntries != 17 ||
 		cfg.BufferMaxAge != 2*time.Hour ||
+		cfg.BufferMaxBytes != 8192 ||
 		cfg.IPQualityStateFile != "/tmp/ip-quality-state.json" {
 		t.Fatalf("config = %#v, want buffer overrides", cfg)
 	}
@@ -104,6 +110,20 @@ func TestLoadAgentConfigRejectsInvalidDurableBufferMaxAge(t *testing.T) {
 		t.Fatal("LoadAgentConfig() error = nil, want non-nil")
 	}
 	if err.Error() != "HOUFENG_AGENT_BUFFER_MAX_AGE must be a valid duration: time: invalid duration \"soon\"" {
+		t.Fatalf("LoadAgentConfig() error = %q", err)
+	}
+}
+
+func TestLoadAgentConfigRejectsInvalidDurableBufferMaxBytes(t *testing.T) {
+	t.Setenv("HOUFENG_AGENT_SERVER_URL", "http://center")
+	t.Setenv("HOUFENG_AGENT_TOKEN_FILE", "/tmp/token")
+	t.Setenv("HOUFENG_AGENT_BUFFER_MAX_BYTES", "0")
+
+	_, err := agentconfig.LoadAgentConfig()
+	if err == nil {
+		t.Fatal("LoadAgentConfig() error = nil, want non-nil")
+	}
+	if err.Error() != "HOUFENG_AGENT_BUFFER_MAX_BYTES must be a positive integer" {
 		t.Fatalf("LoadAgentConfig() error = %q", err)
 	}
 }

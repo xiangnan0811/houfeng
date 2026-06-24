@@ -97,6 +97,7 @@ func New(cfg agentconfig.AgentConfig, logger *slog.Logger, tokenSource TokenSour
 	queue := syncqueue.NewFileStore(cfg.BufferFile, syncqueue.Options{
 		MaxEntries: cfg.BufferMaxEntries,
 		MaxAge:     cfg.BufferMaxAge,
+		MaxBytes:   cfg.BufferMaxBytes,
 	})
 	ipStateStore := agentipquality.NewFileStateStore(cfg.IPQualityStateFile)
 	ipCollector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{})
@@ -208,7 +209,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 				if err != nil {
 					return fmt.Errorf("sync heartbeat: %w", err)
 				}
-				r.applySyncPlan(response)
+				r.applySyncPlan(ctx, response)
 				continue
 			}
 
@@ -336,7 +337,7 @@ func (r *Runtime) flushSyncQueue(ctx context.Context, currentBatchID string) err
 		if err := r.syncQueue.Delete(ctx, entry.ID); err != nil {
 			return fmt.Errorf("delete synced queue entry %s: %w", entry.ID, err)
 		}
-		r.applySyncPlan(response)
+		r.applySyncPlan(ctx, response)
 	}
 	return nil
 }
@@ -353,7 +354,7 @@ func (r *Runtime) syncRequest(ctx context.Context, entry syncqueue.Entry, curren
 	return response, nil
 }
 
-func (r *Runtime) applySyncPlan(response *agentapi.SyncResponse) {
+func (r *Runtime) applySyncPlan(ctx context.Context, response *agentapi.SyncResponse) {
 	if response != nil && response.Plan != nil {
 		r.currentPlan = cloneSyncPlan(response.Plan)
 
@@ -362,7 +363,7 @@ func (r *Runtime) applySyncPlan(response *agentapi.SyncResponse) {
 			action := response.Plan.PendingAction
 			bin, args, ok := agentexec.Lookup(action.CommandID)
 			if ok {
-				result := agentexec.Run(context.Background(), bin, args)
+				result := agentexec.Run(ctx, bin, args)
 				result.ActionID = action.ActionID
 				result.CommandID = action.CommandID
 				r.pendingResults = append(r.pendingResults, result)

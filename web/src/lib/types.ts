@@ -532,7 +532,8 @@ export type SettingsTelegramResponse = {
 
 export type FeishuSettingsResponse = {
   enabled: boolean
-  webhook_url: string
+  webhook_url_present: boolean
+  webhook_url_masked_summary?: string
 }
 
 export type FeishuSettingsInput = {

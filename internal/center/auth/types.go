@@ -9,7 +9,7 @@ import (
 const (
 	RoleAdmin = "admin"
 
-	SessionCookieName = "houfeng_session"
+	SessionCookieName = "__Host-houfeng_session"
 
 	DefaultSessionTTL = 7 * 24 * time.Hour
 	MinPasswordLength = 8
@@ -19,15 +19,17 @@ const (
 )
 
 var (
-	ErrUserNotFound        = errors.New("user not found")
-	ErrUsernameTaken       = errors.New("username already taken")
-	ErrInvalidCredentials  = errors.New("invalid username or password")
-	ErrSessionNotFound     = errors.New("session not found")
-	ErrSessionExpired      = errors.New("session expired")
-	ErrPasswordTooShort    = errors.New("password too short")
-	ErrPasswordTooLong     = errors.New("password too long")
-	ErrUsernameInvalid     = errors.New("username invalid")
-	ErrPasswordHashInvalid = errors.New("password hash invalid")
+	ErrUserNotFound              = errors.New("user not found")
+	ErrUsernameTaken             = errors.New("username already taken")
+	ErrInvalidCredentials        = errors.New("invalid username or password")
+	ErrSessionNotFound           = errors.New("session not found")
+	ErrSessionExpired            = errors.New("session expired")
+	ErrPasswordTooShort          = errors.New("password too short")
+	ErrPasswordTooLong           = errors.New("password too long")
+	ErrPasswordTooWeak           = errors.New("password too weak")
+	ErrUsernameInvalid           = errors.New("username invalid")
+	ErrPasswordHashInvalid       = errors.New("password hash invalid")
+	ErrPasswordBcryptCostInvalid = errors.New("password bcrypt cost invalid")
 )
 
 type User struct {
@@ -63,5 +65,6 @@ type SessionRepository interface {
 	Find(ctx context.Context, sessionID string) (Session, error)
 	RefreshExpires(ctx context.Context, sessionID string, lastSeenAt, expiresAt time.Time) error
 	Delete(ctx context.Context, sessionID string) error
+	DeleteByUserID(ctx context.Context, userID, exceptSessionID string) error
 	DeleteExpiredBefore(ctx context.Context, cutoff time.Time) (int, error)
 }

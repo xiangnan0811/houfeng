@@ -118,6 +118,43 @@ func TestIPQualitySourceDetailsMigrationExtendsReadModel(t *testing.T) {
 	}
 }
 
+func TestSessionHashMigrationRemovesPlaintextSessionIDs(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0044_hash_session_ids.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, want := range []string{
+		"delete from sessions",
+		"rename column session_id to session_id_hash",
+		"column_name = 'session_id'",
+		"column_name = 'session_id_hash'",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0044 migration missing %q", want)
+		}
+	}
+}
+
+func TestAgentSyncBatchReplayMigrationCreatesIdempotencyTable(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0045_create_agent_sync_batches.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, want := range []string{
+		"create table if not exists agent_sync_batches",
+		"monitoring_instance_id text not null references monitoring_instances(monitoring_instance_id) on delete cascade",
+		"sync_batch_id text not null",
+		"primary key (monitoring_instance_id, sync_batch_id)",
+		"create index if not exists idx_agent_sync_batches_received_at",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0045 migration missing %q", want)
+		}
+	}
+}
+
 func TestIPQualityReadModelFilterMigrationHidesFailurePlaceholders(t *testing.T) {
 	payload, err := migrations.FS.ReadFile("0041_filter_ip_quality_read_models.sql")
 	if err != nil {

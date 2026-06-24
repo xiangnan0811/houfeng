@@ -105,7 +105,11 @@ func TestPostgresIntegrationUpgradePreservesExistingLogin(t *testing.T) {
 		t.Fatal("existing password hash changed during upgrade/bootstrap")
 	}
 
-	svc := auth.New(users, store.NewPostgresSessionRepository(db), auth.Options{
+	sessions, err := store.NewPostgresSessionRepository(db, []byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatalf("NewPostgresSessionRepository: %v", err)
+	}
+	svc := auth.New(users, sessions, auth.Options{
 		SessionTTL: time.Hour,
 		Now: func() time.Time {
 			return time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)

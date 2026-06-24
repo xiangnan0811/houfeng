@@ -9,15 +9,17 @@ import (
 )
 
 type Options struct {
-	SessionTTL time.Duration
-	Now        func() time.Time
+	SessionTTL         time.Duration
+	Now                func() time.Time
+	PasswordBcryptCost int
 }
 
 type Service struct {
-	users    UserRepository
-	sessions SessionRepository
-	now      func() time.Time
-	ttl      time.Duration
+	users              UserRepository
+	sessions           SessionRepository
+	now                func() time.Time
+	ttl                time.Duration
+	passwordBcryptCost int
 }
 
 func New(users UserRepository, sessions SessionRepository, opts Options) *Service {
@@ -29,7 +31,11 @@ func New(users UserRepository, sessions SessionRepository, opts Options) *Servic
 	if ttl <= 0 {
 		ttl = DefaultSessionTTL
 	}
-	return &Service{users: users, sessions: sessions, now: now, ttl: ttl}
+	passwordBcryptCost := opts.PasswordBcryptCost
+	if passwordBcryptCost == 0 {
+		passwordBcryptCost = DefaultPasswordBcryptCost
+	}
+	return &Service{users: users, sessions: sessions, now: now, ttl: ttl, passwordBcryptCost: passwordBcryptCost}
 }
 
 func (s *Service) Login(ctx context.Context, username, password, userAgent, clientIP string) (Session, error) {
@@ -88,6 +94,14 @@ func (s *Service) Touch(ctx context.Context, sessionID string) (Session, error) 
 		_ = s.sessions.Delete(ctx, sessionID)
 		return Session{}, ErrSessionExpired
 	}
+	u, err := s.users.FindByID(ctx, sess.UserID)
+	if err != nil {
+		return Session{}, err
+	}
+	if !sess.IssuedAt.IsZero() && sess.IssuedAt.Before(u.PasswordChangedAt) {
+		_ = s.sessions.Delete(ctx, sessionID)
+		return Session{}, ErrSessionExpired
+	}
 	newExp := now.Add(s.ttl)
 	if err := s.sessions.RefreshExpires(ctx, sessionID, now, newExp); err != nil {
 		return Session{}, err
@@ -105,7 +119,7 @@ func (s *Service) UserBySession(ctx context.Context, sessionID string) (User, er
 	return s.users.FindByID(ctx, sess.UserID)
 }
 
-func (s *Service) ChangePassword(ctx context.Context, userID, oldPassword, newPassword string) error {
+func (s *Service) ChangePassword(ctx context.Context, userID, currentSessionID, oldPassword, newPassword string) error {
 	u, err := s.users.FindByID(ctx, userID)
 	if err != nil {
 		return err
@@ -113,9 +127,12 @@ func (s *Service) ChangePassword(ctx context.Context, userID, oldPassword, newPa
 	if err := VerifyPassword(u.PasswordHash, oldPassword); err != nil {
 		return ErrInvalidCredentials
 	}
-	hash, err := HashPassword(newPassword)
+	hash, err := HashPasswordWithCost(newPassword, s.passwordBcryptCost)
 	if err != nil {
 		return err
 	}
-	return s.users.UpdatePassword(ctx, userID, hash, s.now().UTC())
+	if err := s.users.UpdatePassword(ctx, userID, hash, s.now().UTC()); err != nil {
+		return err
+	}
+	return s.sessions.DeleteByUserID(ctx, userID, currentSessionID)
 }

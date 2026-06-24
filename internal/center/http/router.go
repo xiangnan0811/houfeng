@@ -99,8 +99,15 @@ func New(opts RouterOptions) stdhttp.Handler {
 	mux := stdhttp.NewServeMux()
 
 	protect := func(h stdhttp.Handler) stdhttp.Handler {
-		if opts.AuthMiddleware == nil || h == nil {
+		if h == nil {
 			return h
+		}
+		if opts.AuthMiddleware == nil {
+			return stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(stdhttp.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":"auth middleware is required"}`))
+			})
 		}
 		return opts.AuthMiddleware(h)
 	}

@@ -3,6 +3,8 @@ package enrollment
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -250,6 +252,23 @@ func TestRecordHeartbeatRejectsInvalidSyncToken(t *testing.T) {
 	}
 }
 
+func TestEnrollmentServiceSourceUsesConstantTimeSyncTokenHashCompare(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("service.go")
+	if err != nil {
+		t.Fatalf("ReadFile(service.go) error = %v", err)
+	}
+
+	recordHeartbeatPath := sourceBetween(t, string(source), "func (s *Service) RecordHeartbeatSync", "")
+	if !strings.Contains(recordHeartbeatPath, "syncTokenHashesEqual(record.SyncTokenHash, hashSyncToken(input.SyncToken))") {
+		t.Fatal("RecordHeartbeatSync() should compare sync token hashes with the shared constant-time helper")
+	}
+	if strings.Contains(recordHeartbeatPath, "record.SyncTokenHash != hashSyncToken(input.SyncToken)") {
+		t.Fatal("RecordHeartbeatSync() should not use plain string inequality for sync token hashes")
+	}
+}
+
 func TestRecordHeartbeatRejectsMismatchedFingerprint(t *testing.T) {
 	t.Parallel()
 
@@ -449,4 +468,22 @@ func (f *fakeRepository) RecordAcceptedHeartbeats(_ context.Context, syncToken s
 	batch := append([]HeartbeatWrite(nil), writes...)
 	f.acceptedHeartbeatBatches = append(f.acceptedHeartbeatBatches, batch)
 	return f.recordAcceptedErr
+}
+
+func sourceBetween(t *testing.T, source, start, end string) string {
+	t.Helper()
+
+	startIndex := strings.Index(source, start)
+	if startIndex == -1 {
+		t.Fatalf("source missing start marker %q", start)
+	}
+	section := source[startIndex:]
+	if end == "" {
+		return section
+	}
+	endIndex := strings.Index(section, end)
+	if endIndex == -1 {
+		t.Fatalf("source missing end marker %q", end)
+	}
+	return section[:endIndex]
 }

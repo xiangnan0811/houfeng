@@ -551,7 +551,7 @@ func TestMonitoringInstanceActionsQueuesPendingAction(t *testing.T) {
 	}
 
 	handler := handlers.MonitoringInstanceActions(repo)
-	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemctl_status"}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -566,15 +566,45 @@ func TestMonitoringInstanceActionsQueuesPendingAction(t *testing.T) {
 	if repo.setPendingActionID == "" {
 		t.Fatal("queued action id = empty, want generated id")
 	}
-	if repo.setPendingActionCommand != "systemd_status" {
-		t.Fatalf("queued command = %q, want systemd_status", repo.setPendingActionCommand)
+	if repo.setPendingActionCommand != "systemctl_status" {
+		t.Fatalf("queued command = %q, want systemctl_status", repo.setPendingActionCommand)
 	}
 	var body map[string]string
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if body["status"] != "pending" || body["action_id"] == "" || body["command_id"] != "systemd_status" {
+	if body["status"] != "pending" || body["action_id"] == "" || body["command_id"] != "systemctl_status" {
 		t.Fatalf("body = %#v, want pending action response", body)
+	}
+}
+
+func TestMonitoringInstanceActionsRejectsUnknownCommandIDBeforeRepositoryWrite(t *testing.T) {
+	repo := &fakeMonitoringInstanceRepository{
+		getMonitoringInstanceResult: monitoringinstances.Record{
+			MonitoringInstanceID: "mi_001",
+			BindingStatus:        monitoringinstances.BindingBound,
+			MonitoringStatus:     monitoringinstances.MonitoringEnabled,
+		},
+	}
+	handler := handlers.MonitoringInstanceActions(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+	if repo.setPendingActionID != "" {
+		t.Fatalf("queued action id = %q, want no queued action", repo.setPendingActionID)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body["error"] != "invalid command_id" {
+		t.Fatalf("error = %q, want invalid command_id", body["error"])
 	}
 }
 
@@ -590,10 +620,54 @@ func TestMonitoringInstanceActionsRejectsInvalidBody(t *testing.T) {
 	}
 }
 
+func TestMonitoringInstanceActionsRejectsTrailingJSONBeforeRepositoryWrite(t *testing.T) {
+	repo := &fakeMonitoringInstanceRepository{
+		getMonitoringInstanceResult: monitoringinstances.Record{
+			MonitoringInstanceID: "mi_001",
+			BindingStatus:        monitoringinstances.BindingBound,
+			MonitoringStatus:     monitoringinstances.MonitoringEnabled,
+		},
+	}
+	handler := handlers.MonitoringInstanceActions(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemctl_status"}{"command_id":"uptime"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+	if repo.setPendingActionID != "" {
+		t.Fatalf("queued action id = %q, want no queued action", repo.setPendingActionID)
+	}
+}
+
+func TestMonitoringInstanceActionsRejectsUnknownFieldsBeforeRepositoryWrite(t *testing.T) {
+	repo := &fakeMonitoringInstanceRepository{
+		getMonitoringInstanceResult: monitoringinstances.Record{
+			MonitoringInstanceID: "mi_001",
+			BindingStatus:        monitoringinstances.BindingBound,
+			MonitoringStatus:     monitoringinstances.MonitoringEnabled,
+		},
+	}
+	handler := handlers.MonitoringInstanceActions(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemctl_status","args":["-a"]}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+	if repo.setPendingActionID != "" {
+		t.Fatalf("queued action id = %q, want no queued action", repo.setPendingActionID)
+	}
+}
+
 func TestMonitoringInstanceActionsReturnsNotFoundForUnknownMonitoringInstance(t *testing.T) {
 	repo := &fakeMonitoringInstanceRepository{getMonitoringInstanceErr: monitoringinstances.ErrMonitoringInstanceNotFound}
 	handler := handlers.MonitoringInstanceActions(repo)
-	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemctl_status"}`))
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -638,7 +712,7 @@ func TestMonitoringInstanceActionsReturnsInternalErrorForRepositoryFailures(t *t
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := handlers.MonitoringInstanceActions(tt.repo)
-			req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+			req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemctl_status"}`))
 			recorder := httptest.NewRecorder()
 
 			handler.ServeHTTP(recorder, req)
@@ -661,7 +735,7 @@ func TestMonitoringInstanceActionsRejectsArchivedMonitoringInstance(t *testing.T
 		ArchivedAt:           &archivedAt,
 	}}
 	handler := handlers.MonitoringInstanceActions(repo)
-	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_archived/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_archived/actions", strings.NewReader(`{"command_id":"systemctl_status"}`))
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -693,7 +767,7 @@ func TestMonitoringInstanceActionsMapsArchivedSetPendingRace(t *testing.T) {
 		setPendingActionErr: monitoringinstances.ErrArchivedMonitoringInstance,
 	}
 	handler := handlers.MonitoringInstanceActions(repo)
-	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemctl_status"}`))
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -729,7 +803,7 @@ func TestMonitoringInstanceActionsRejectsUnavailableMonitoringInstanceStates(t *
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeMonitoringInstanceRepository{getMonitoringInstanceResult: tt.monitoringInstance}
 			handler := handlers.MonitoringInstanceActions(repo)
-			req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemd_status"}`))
+			req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemctl_status"}`))
 			recorder := httptest.NewRecorder()
 
 			handler.ServeHTTP(recorder, req)

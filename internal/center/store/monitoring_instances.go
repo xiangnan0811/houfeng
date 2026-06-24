@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -324,6 +325,10 @@ func hashEnrollmentToken(token string) string {
 
 func hashSyncToken(token string) string {
 	return hashOpaqueToken(token)
+}
+
+func syncTokenHashesEqual(storedHash, candidateHash string) bool {
+	return subtle.ConstantTimeCompare([]byte(storedHash), []byte(candidateHash)) == 1
 }
 
 func (r *PostgresMonitoringInstanceRepository) ListMonitoringInstances(ctx context.Context, scopes ...monitoringinstances.ListScope) ([]monitoringinstances.Record, error) {
@@ -1020,7 +1025,7 @@ func (r *PostgresMonitoringInstanceRepository) IssueEnrollmentToken(ctx context.
 }
 
 func (r *PostgresMonitoringInstanceRepository) IssueMonitoringInstanceEnrollmentToken(ctx context.Context, monitoringInstanceID string) (monitoringinstances.EnrollmentTokenIssue, error) {
-	token, err := ids.New("enroll")
+	token, err := ids.NewSecretToken("enroll")
 	if err != nil {
 		return monitoringinstances.EnrollmentTokenIssue{}, fmt.Errorf("generate enrollment token: %w", err)
 	}
@@ -1610,7 +1615,7 @@ func (r *PostgresMonitoringInstanceRepository) ResumeMonitoringInstanceMonitorin
 }
 
 func (r *PostgresMonitoringInstanceRepository) IssueSyncToken(ctx context.Context, monitoringInstanceID string) (string, error) {
-	token, err := ids.New("sync")
+	token, err := ids.NewSecretToken("sync")
 	if err != nil {
 		return "", fmt.Errorf("generate sync token: %w", err)
 	}
@@ -1778,7 +1783,7 @@ func (r *PostgresMonitoringInstanceRepository) ApplyEnrollment(ctx context.Conte
 	syncToken := ""
 	syncTokenHash := ""
 	if next.BindingStatus == monitoringinstances.BindingBound {
-		syncToken, err = ids.New("sync")
+		syncToken, err = ids.NewSecretToken("sync")
 		if err != nil {
 			return monitoringinstances.Record{}, "", fmt.Errorf("generate sync token: %w", err)
 		}
@@ -1864,7 +1869,7 @@ func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats(ctx cont
 	if bindingStatus != monitoringinstances.BindingBound {
 		return enrollment.ErrBindingNotAccepted
 	}
-	if storedSyncTokenHash == "" || storedSyncTokenHash != hashSyncToken(syncToken) {
+	if storedSyncTokenHash == "" || !syncTokenHashesEqual(storedSyncTokenHash, hashSyncToken(syncToken)) {
 		return enrollment.ErrInvalidSyncToken
 	}
 

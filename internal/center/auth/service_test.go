@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type fakeUsers struct {
@@ -56,7 +58,11 @@ func (f *fakeUsers) UpdatePassword(_ context.Context, id, h string, t time.Time)
 func (f *fakeUsers) CountUsers(_ context.Context) (int, error) { return len(f.byID), nil }
 
 type fakeSessions struct {
-	byID map[string]Session
+	byID           map[string]Session
+	deleteByUserID []struct {
+		userID string
+		except string
+	}
 }
 
 func newFakeSessions() *fakeSessions { return &fakeSessions{byID: map[string]Session{}} }
@@ -95,6 +101,18 @@ func (f *fakeSessions) DeleteExpiredBefore(_ context.Context, cutoff time.Time) 
 		}
 	}
 	return n, nil
+}
+func (f *fakeSessions) DeleteByUserID(_ context.Context, userID, exceptSessionID string) error {
+	f.deleteByUserID = append(f.deleteByUserID, struct {
+		userID string
+		except string
+	}{userID: userID, except: exceptSessionID})
+	for id, sess := range f.byID {
+		if sess.UserID == userID && id != exceptSessionID {
+			delete(f.byID, id)
+		}
+	}
+	return nil
 }
 
 func newTestService(t *testing.T) (*Service, *fakeUsers, *fakeSessions) {
@@ -148,9 +166,9 @@ func TestServiceLoginSuccess(t *testing.T) {
 
 func TestServiceLoginWrongPassword(t *testing.T) {
 	svc, users, _ := newTestService(t)
-	mustSeed(t, users, "admin", "right-password-xx")
+	mustSeed(t, users, "admin", "right-credential-2026!")
 
-	_, err := svc.Login(context.Background(), "admin", "wrong-password-xx", "", "")
+	_, err := svc.Login(context.Background(), "admin", "wrong-credential-2026!", "", "")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("Login wrong = %v, want ErrInvalidCredentials", err)
 	}
@@ -202,6 +220,32 @@ func TestServiceTouchExtendsExpiry(t *testing.T) {
 	}
 	if got.SessionID != sess.SessionID {
 		t.Fatalf("SessionID changed unexpectedly")
+	}
+}
+
+func TestServiceTouchRejectsSessionIssuedBeforePasswordChange(t *testing.T) {
+	users := newFakeUsers()
+	sessions := newFakeSessions()
+	now := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
+	svc := New(users, sessions, Options{SessionTTL: time.Hour, Now: func() time.Time { return now }})
+	user := mustSeed(t, users, "admin", "correct-horse-battery")
+	user.PasswordChangedAt = now.Add(10 * time.Minute)
+	users.byID[user.UserID] = user
+
+	sessions.byID["old-session"] = Session{
+		SessionID:  "old-session",
+		UserID:     user.UserID,
+		IssuedAt:   now,
+		LastSeenAt: now,
+		ExpiresAt:  now.Add(time.Hour),
+	}
+
+	_, err := svc.Touch(context.Background(), "old-session")
+	if !errors.Is(err, ErrSessionExpired) {
+		t.Fatalf("Touch old password session = %v, want ErrSessionExpired", err)
+	}
+	if _, ok := sessions.byID["old-session"]; ok {
+		t.Fatal("old password session was not deleted")
 	}
 }
 
@@ -260,7 +304,7 @@ func TestServiceChangePassword(t *testing.T) {
 	svc, users, _ := newTestService(t)
 	mustSeed(t, users, "admin", "correct-horse-battery")
 
-	if err := svc.ChangePassword(context.Background(), "usr_admin", "correct-horse-battery", "new-correct-horse-battery"); err != nil {
+	if err := svc.ChangePassword(context.Background(), "usr_admin", "current-session", "correct-horse-battery", "new-correct-horse-battery"); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
 	_, err := svc.Login(context.Background(), "admin", "correct-horse-battery", "", "")
@@ -272,11 +316,37 @@ func TestServiceChangePassword(t *testing.T) {
 	}
 }
 
+func TestServiceChangePasswordUsesConfiguredBcryptCost(t *testing.T) {
+	users := newFakeUsers()
+	sessions := newFakeSessions()
+	svc := New(users, sessions, Options{
+		SessionTTL:         time.Hour,
+		Now:                staticNow(),
+		PasswordBcryptCost: bcrypt.MinCost,
+	})
+	mustSeed(t, users, "admin", "correct-horse-battery")
+
+	if err := svc.ChangePassword(context.Background(), "usr_admin", "current-session", "correct-horse-battery", "new-correct-horse-battery"); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	user, err := users.FindByID(context.Background(), "usr_admin")
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	got, err := bcrypt.Cost([]byte(user.PasswordHash))
+	if err != nil {
+		t.Fatalf("bcrypt.Cost: %v", err)
+	}
+	if got != bcrypt.MinCost {
+		t.Fatalf("changed password bcrypt cost = %d, want %d", got, bcrypt.MinCost)
+	}
+}
+
 func TestServiceChangePasswordWrongOld(t *testing.T) {
 	svc, users, _ := newTestService(t)
 	mustSeed(t, users, "admin", "correct-horse-battery")
 
-	err := svc.ChangePassword(context.Background(), "usr_admin", "wrong-old-pwd-xx", "new-correct-horse-battery")
+	err := svc.ChangePassword(context.Background(), "usr_admin", "current-session", "wrong-old-pwd-xx", "new-correct-horse-battery")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("ChangePassword wrong old = %v, want ErrInvalidCredentials", err)
 	}
@@ -286,8 +356,36 @@ func TestServiceChangePasswordRejectsTooShort(t *testing.T) {
 	svc, users, _ := newTestService(t)
 	mustSeed(t, users, "admin", "correct-horse-battery")
 
-	err := svc.ChangePassword(context.Background(), "usr_admin", "correct-horse-battery", "abc")
+	err := svc.ChangePassword(context.Background(), "usr_admin", "current-session", "correct-horse-battery", "abc")
 	if !errors.Is(err, ErrPasswordTooShort) {
 		t.Fatalf("ChangePassword short = %v, want ErrPasswordTooShort", err)
+	}
+}
+
+func TestServiceChangePasswordDeletesOtherSessions(t *testing.T) {
+	svc, users, sessions := newTestService(t)
+	mustSeed(t, users, "admin", "correct-horse-battery")
+
+	sessions.byID["current-session"] = Session{SessionID: "current-session", UserID: "usr_admin"}
+	sessions.byID["other-session"] = Session{SessionID: "other-session", UserID: "usr_admin"}
+	sessions.byID["other-user-session"] = Session{SessionID: "other-user-session", UserID: "usr_other"}
+
+	if err := svc.ChangePassword(context.Background(), "usr_admin", "current-session", "correct-horse-battery", "new-correct-horse-battery"); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	if len(sessions.deleteByUserID) != 1 {
+		t.Fatalf("DeleteByUserID calls = %d, want 1", len(sessions.deleteByUserID))
+	}
+	if sessions.deleteByUserID[0].userID != "usr_admin" || sessions.deleteByUserID[0].except != "current-session" {
+		t.Fatalf("DeleteByUserID call = %#v, want usr_admin/current-session", sessions.deleteByUserID[0])
+	}
+	if _, ok := sessions.byID["current-session"]; !ok {
+		t.Fatal("current session was deleted")
+	}
+	if _, ok := sessions.byID["other-session"]; ok {
+		t.Fatal("other session for same user was not deleted")
+	}
+	if _, ok := sessions.byID["other-user-session"]; !ok {
+		t.Fatal("other user's session was deleted")
 	}
 }

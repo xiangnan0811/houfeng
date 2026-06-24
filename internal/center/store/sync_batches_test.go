@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -143,6 +144,94 @@ func TestPostgresSyncRepositoryRejectsObservationBatchWithoutHeartbeatCarrier(t 
 	}
 	if len(tx.execSQL) != 0 {
 		t.Fatalf("len(execSQL) = %d, want 0", len(tx.execSQL))
+	}
+}
+
+func TestSyncBatchSourceUsesConstantTimeSyncTokenHashCompare(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("sync_batches.go")
+	if err != nil {
+		t.Fatalf("ReadFile(sync_batches.go) error = %v", err)
+	}
+
+	validationPath := sourceBetween(t, string(source), "func validateAcceptedSyncBatch", "func lifecycleStatusAfterAcceptedSync")
+	if !strings.Contains(validationPath, "syncTokenHashesEqual(storedSyncTokenHash, hashSyncToken(batch.SyncToken))") {
+		t.Fatal("validateAcceptedSyncBatch() should compare sync token hashes with the shared constant-time helper")
+	}
+	if strings.Contains(validationPath, "storedSyncTokenHash != hashSyncToken(batch.SyncToken)") {
+		t.Fatal("validateAcceptedSyncBatch() should not use plain string inequality for sync token hashes")
+	}
+}
+
+func TestPostgresSyncRepositoryRecordsBatchIDBeforeWritingFacts(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	if _, err := repo.ApplyBatch(context.Background(), testSyncBatch()); err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+
+	recordIndex := sqlIndex(tx.execSQL, "insert into agent_sync_batches")
+	heartbeatIndex := sqlIndex(tx.execSQL, "insert into monitoring_instance_heartbeats")
+	if recordIndex == -1 {
+		t.Fatalf("agent sync batch id was not recorded; execSQL=%#v", tx.execSQL)
+	}
+	if heartbeatIndex == -1 {
+		t.Fatalf("heartbeat insert missing; execSQL=%#v", tx.execSQL)
+	}
+	if recordIndex > heartbeatIndex {
+		t.Fatalf("agent sync batch id insert index %d should run before heartbeat insert index %d", recordIndex, heartbeatIndex)
+	}
+	args := tx.argsForSQL("insert into agent_sync_batches")
+	if len(args) != 2 || args[0] != "mi_001" || args[1] != "sync_001" {
+		t.Fatalf("agent sync batch insert args = %#v, want monitoring instance id and sync batch id", args)
+	}
+}
+
+func TestPostgresSyncRepositoryDuplicateBatchCommitsWithoutRewritingFacts(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		duplicateSyncBatch:              true,
+		probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	result, err := repo.ApplyBatch(context.Background(), testSyncBatch())
+	if err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+	if tx.commitCalls != 1 {
+		t.Fatalf("commitCalls = %d, want 1 for idempotent duplicate", tx.commitCalls)
+	}
+	if containsSQL(tx.execSQL, "insert into monitoring_instance_heartbeats") ||
+		containsSQL(tx.execSQL, "insert into host_samples") ||
+		containsSQL(tx.execSQL, "insert into probe_observations") ||
+		containsSQL(tx.execSQL, "insert into ip_quality_reports") ||
+		containsSQL(tx.execSQL, "last_heartbeat_at = greatest") {
+		t.Fatalf("duplicate sync batch rewrote facts; execSQL=%#v", tx.execSQL)
+	}
+	if result.Plan.ProbeAssignments == nil {
+		t.Fatal("duplicate sync batch should return an empty but non-nil probe assignment slice")
 	}
 }
 
@@ -434,6 +523,7 @@ type fakeSyncBatchTx struct {
 	monitoringInstanceLabels        []string
 	pendingActionID                 string
 	pendingCommandID                string
+	duplicateSyncBatch              bool
 
 	probeMetadataByItemID map[string]observations.ProbeMetadata
 	probeMetadataErr      map[string]error
@@ -453,6 +543,12 @@ func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgco
 	f.execArgs = append(f.execArgs, append([]any(nil), args...))
 	if f.execErr != nil && strings.Contains(sql, f.execErrForSQLSubstring) {
 		return pgconn.CommandTag{}, f.execErr
+	}
+	if strings.Contains(sql, "insert into agent_sync_batches") {
+		if f.duplicateSyncBatch {
+			return pgconn.NewCommandTag("INSERT 0 0"), nil
+		}
+		return pgconn.NewCommandTag("INSERT 0 1"), nil
 	}
 	if strings.Contains(sql, "last_action->>'status'") {
 		if f.commandResultRowsAffected != nil && *f.commandResultRowsAffected == 0 {
