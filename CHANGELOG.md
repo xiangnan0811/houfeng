@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.54.3](https://github.com/xiangnan0811/houfeng/compare/v0.54.2...v0.54.3) (2026-06-24)
+
+
+### Bug Fixes
+
+* remediate security review findings ([d28c208](https://github.com/xiangnan0811/houfeng/commit/d28c2088dfb46362aa4673f6a04d0bfc45cc3d9b))
+* remediate security review findings ([aef0d32](https://github.com/xiangnan0811/houfeng/commit/aef0d32b1c7f62db00c7b46bde846fbe98020191))
+* stabilize asset decision renewal tests ([7908db0](https://github.com/xiangnan0811/houfeng/commit/7908db0099b6cb5720edab9b6c69a0f65d0bcf2a))
+
 ## [0.54.2](https://github.com/xiangnan0811/houfeng/compare/v0.54.1...v0.54.2) (2026-06-11)
 
 
