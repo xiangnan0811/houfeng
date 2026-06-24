@@ -44,10 +44,12 @@ cd ..
 export HOUFENG_HTTP_ADDR=:8080
 export HOUFENG_WEB_DIST_DIR=web/dist
 export HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@localhost:5432/houfeng?sslmode=disable'
+export HOUFENG_DATABASE_REQUIRE_TLS=false
 export HOUFENG_PUBLIC_BASE_URL='http://localhost:8080'
 export HOUFENG_INCIDENT_SWEEP_INTERVAL=5s
 export HOUFENG_INITIAL_USERNAME=admin
 export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-password'
+export HOUFENG_SESSION_HMAC_KEY='replace-me-with-32-plus-random-bytes'
 
 make build-center
 ./bin/houfeng-center
@@ -59,11 +61,11 @@ A Docker Compose center quick start is also available:
 
 ```bash
 cp docs/deploy/compose.env.example docs/deploy/compose.env
-# edit docs/deploy/compose.env and replace the database/admin passwords
+# edit docs/deploy/compose.env and replace the database/admin passwords and session HMAC key
 docker compose --env-file docs/deploy/compose.env up -d
 ```
 
-The Compose stack contains only the project image (`linnea7171/houfeng:latest`, with `houfeng-center`, a small runtime entrypoint, and baked `web/dist`) as service `houfeng` and PostgreSQL. It binds Houfeng to `127.0.0.1:16001` by default for an operator-managed HTTPS reverse proxy, persists PostgreSQL data under `./data/postgres/` for easier migration, writes center application logs under `./data/logs/`, and does not containerize agents. Sensitive values live in the untracked `docs/deploy/compose.env`; the tracked Compose file avoids password-like `HOUFENG_DATABASE_URL`, `POSTGRES_PASSWORD`, and `HOUFENG_INITIAL_PASSWORD` assignments so repository secret scanners do not flag placeholder configuration. Release Please opens or updates release PRs for eligible conventional changes on `main`; merging a release PR publishes a GitHub Release, which then publishes Docker images to `linnea7171/houfeng`. One-command agent onboarding still requires a center image built with a real release version and matching Linux agent release assets.
+The Compose stack contains only the project image (`linnea7171/houfeng:latest`, with `houfeng-center`, a small runtime entrypoint, and baked `web/dist`) as service `houfeng` and PostgreSQL. It binds Houfeng to `127.0.0.1:16001` by default for an operator-managed HTTPS reverse proxy, persists PostgreSQL data under `./data/postgres/` for easier migration, runs the project container as the non-root `houfeng` user, stores center file logs in the `houfeng_logs` named Docker volume, and does not containerize agents. Sensitive values live in the untracked `docs/deploy/compose.env`; the tracked Compose file avoids password-like `HOUFENG_DATABASE_URL`, `POSTGRES_PASSWORD`, `HOUFENG_INITIAL_PASSWORD`, and `HOUFENG_SESSION_HMAC_KEY` assignments so repository secret scanners do not flag placeholder configuration. Release Please opens or updates release PRs for eligible conventional changes on `main`; merging a release PR publishes a GitHub Release, which then publishes Docker images to `linnea7171/houfeng`. One-command agent onboarding still requires a center image built with a real release version and matching Linux agent release assets.
 
 For a real Linux agent onboarding run, follow `docs/deploy/local-and-systemd.md`. One-command installation depends on a center-generated command, an externally reachable `HOUFENG_PUBLIC_BASE_URL`, and Linux agent release assets built with a real version tag:
 

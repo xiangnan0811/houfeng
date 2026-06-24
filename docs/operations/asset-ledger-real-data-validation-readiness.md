@@ -81,6 +81,7 @@ export HOUFENG_WEB_DIST_DIR=web/dist
 export HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@localhost:5432/houfeng?sslmode=disable'
 export HOUFENG_INITIAL_USERNAME=admin
 export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-local-password'
+export HOUFENG_SESSION_HMAC_KEY='replace-me-with-32-plus-random-bytes'
 ```
 
 Build and start the center as documented in `docs/operations/fresh-install-smoke-run.md`:

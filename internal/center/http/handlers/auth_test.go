@@ -22,10 +22,12 @@ type stubAuth struct {
 	chgErr    error
 	gotUser   string
 	gotPass   string
+	gotIP     string
 }
 
-func (s *stubAuth) Login(_ context.Context, username, password, _, _ string) (auth.Session, error) {
+func (s *stubAuth) Login(_ context.Context, username, password, _, clientIP string) (auth.Session, error) {
 	s.gotUser, s.gotPass = username, password
+	s.gotIP = clientIP
 	return s.loginSess, s.loginErr
 }
 func (s *stubAuth) Logout(_ context.Context, _ string) error { return s.logoutErr }
@@ -35,7 +37,7 @@ func (s *stubAuth) Touch(_ context.Context, _ string) (auth.Session, error) {
 func (s *stubAuth) UserBySession(_ context.Context, _ string) (auth.User, error) {
 	return s.touchUser, s.touchErr
 }
-func (s *stubAuth) ChangePassword(_ context.Context, _, _, _ string) error { return s.chgErr }
+func (s *stubAuth) ChangePassword(_ context.Context, _, _, _, _ string) error { return s.chgErr }
 
 // ---- Login ---------------------------------------------------------------
 
@@ -122,6 +124,76 @@ func TestLoginHandlerRejectMalformedBody(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestLoginHandlerUsesRemoteAddrWhenProxyIsUntrusted(t *testing.T) {
+	svc := &stubAuth{
+		loginSess: auth.Session{SessionID: "abc", UserID: "u1", ExpiresAt: time.Now().Add(time.Hour)},
+	}
+	h := Login(svc)
+	r := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"correct-horse"}`))
+	r.RemoteAddr = "198.51.100.10:12345"
+	r.Header.Set("X-Forwarded-For", "203.0.113.77")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if svc.gotIP != "198.51.100.10" {
+		t.Fatalf("client IP = %q, want remote address host", svc.gotIP)
+	}
+}
+
+func TestLoginHandlerUsesForwardedForFromTrustedProxy(t *testing.T) {
+	svc := &stubAuth{
+		loginSess: auth.Session{SessionID: "abc", UserID: "u1", ExpiresAt: time.Now().Add(time.Hour)},
+	}
+	h := LoginWithOptions(svc, LoginOptions{
+		TrustedProxies: []string{"10.0.0.0/8"},
+	})
+	r := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"correct-horse"}`))
+	r.RemoteAddr = "10.1.2.3:12345"
+	r.Header.Set("X-Forwarded-For", "203.0.113.77, 10.1.2.3")
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if svc.gotIP != "203.0.113.77" {
+		t.Fatalf("client IP = %q, want trusted forwarded client", svc.gotIP)
+	}
+}
+
+func TestLoginHandlerRateLimitsFailedAttempts(t *testing.T) {
+	svc := &stubAuth{loginErr: auth.ErrInvalidCredentials}
+	h := LoginWithOptions(svc, LoginOptions{
+		RateLimit: LoginRateLimitOptions{
+			MaxFailuresByUsername: 2,
+			Window:                time.Minute,
+		},
+	})
+
+	for i := 0; i < 2; i++ {
+		r := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"wrong"}`))
+		r.RemoteAddr = "198.51.100.10:12345"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d status = %d, want 401", i+1, w.Code)
+		}
+	}
+
+	r := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"wrong"}`))
+	r.RemoteAddr = "198.51.100.10:12345"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("limited attempt status = %d, want 429", w.Code)
 	}
 }
 
@@ -255,6 +327,23 @@ func TestChangePasswordTooShort(t *testing.T) {
 	}
 	h := ChangePassword(svc)
 	body := strings.NewReader(`{"old_password":"correct-horse-battery","new_password":"abc"}`)
+	r := httptest.NewRequest(http.MethodPut, "/api/auth/password", body)
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "abc"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestChangePasswordTooWeak(t *testing.T) {
+	svc := &stubAuth{
+		touchUser: auth.User{UserID: "u1", Username: "admin", Role: auth.RoleAdmin},
+		chgErr:    auth.ErrPasswordTooWeak,
+	}
+	h := ChangePassword(svc)
+	body := strings.NewReader(`{"old_password":"correct-horse-battery","new_password":"password123"}`)
 	r := httptest.NewRequest(http.MethodPut, "/api/auth/password", body)
 	r.Header.Set("Content-Type", "application/json")
 	r.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "abc"})

@@ -2,13 +2,13 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/monitoringinstances"
+	"houfeng/internal/contracts/agentapi"
 )
 
 type monitoringInstanceActionRepository interface {
@@ -36,8 +36,12 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 		var body struct {
 			CommandID string `json:"command_id"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.CommandID == "" {
+		if err := decodeJSON(r, &body); err != nil || body.CommandID == "" {
 			writeError(w, http.StatusBadRequest, "command_id required")
+			return
+		}
+		if !agentapi.IsKnownCommandID(body.CommandID) {
+			writeError(w, http.StatusBadRequest, "invalid command_id")
 			return
 		}
 

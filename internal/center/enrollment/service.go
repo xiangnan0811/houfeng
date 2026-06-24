@@ -3,6 +3,7 @@ package enrollment
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"time"
@@ -34,6 +35,10 @@ func NewService(repo Repository) *Service {
 func hashSyncToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+func syncTokenHashesEqual(storedHash, candidateHash string) bool {
+	return subtle.ConstantTimeCompare([]byte(storedHash), []byte(candidateHash)) == 1
 }
 
 func (s *Service) IssueMonitoringInstanceEnrollmentToken(ctx context.Context, monitoringInstanceID string) (string, error) {
@@ -68,7 +73,7 @@ func (s *Service) RecordHeartbeatSync(ctx context.Context, input SyncInput) erro
 	if record.BindingStatus != monitoringinstances.BindingBound {
 		return ErrBindingNotAccepted
 	}
-	if record.SyncTokenHash == "" || record.SyncTokenHash != hashSyncToken(input.SyncToken) {
+	if record.SyncTokenHash == "" || !syncTokenHashesEqual(record.SyncTokenHash, hashSyncToken(input.SyncToken)) {
 		return ErrInvalidSyncToken
 	}
 

@@ -24,7 +24,8 @@ const settingsResponseBody = {
   },
   feishu: {
     enabled: false,
-    webhook_url: '',
+    webhook_url_present: false,
+    webhook_url_masked_summary: '',
   },
   host_sample_frequency_tier: '5s',
   probe_frequency_defaults: {
@@ -192,13 +193,49 @@ describe('SettingsPage', () => {
     await expandTelegram()
   })
 
-  it('saves unrelated settings without requiring Telegram token re-entry and omits bot_token from the payload', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
-      .mockResolvedValueOnce(
+  it('shows persisted Feishu webhook as masked write-only state', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
         mockJSONResponse({
           ...settingsResponseBody,
+          feishu: {
+            enabled: true,
+            webhook_url_present: true,
+            webhook_url_masked_summary: 'https://open.feishu.cn/***abcd',
+          },
+        }),
+      ),
+    )
+
+    renderSettingsPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+
+    switchTab('通知')
+    await waitFor(() => expect(screen.getByRole('heading', { name: '飞书通知设置' })).toBeInTheDocument())
+    fireEvent.click(screen.getAllByRole('button', { name: '编辑' })[1])
+
+    expect(screen.getByText(/已配置飞书 Webhook/)).toHaveTextContent('https://open.feishu.cn/***abcd')
+    expect(screen.getByLabelText('Webhook URL')).toHaveValue('')
+    expect(screen.queryByDisplayValue(/full-secret/)).not.toBeInTheDocument()
+  })
+
+  it('saves unrelated settings without requiring Telegram or Feishu secret re-entry and omits stored secrets from the payload', async () => {
+    const settingsWithStoredSecrets = {
+      ...settingsResponseBody,
+      feishu: {
+        enabled: true,
+        webhook_url_present: true,
+        webhook_url_masked_summary: 'https://open.feishu.cn/***abcd',
+      },
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsWithStoredSecrets))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          ...settingsWithStoredSecrets,
           host_sample_frequency_tier: '1m',
           retention_policy: {
             ...settingsResponseBody.retention_policy,
@@ -232,8 +269,7 @@ describe('SettingsPage', () => {
         runtime_managed: false,
       },
       feishu: {
-        enabled: false,
-        webhook_url: '',
+        enabled: true,
       },
       host_sample_frequency_tier: '1m',
       probe_frequency_defaults: {
@@ -476,7 +512,6 @@ describe('SettingsPage', () => {
       },
       feishu: {
         enabled: false,
-        webhook_url: '',
       },
       host_sample_frequency_tier: '1m',
       probe_frequency_defaults: {
@@ -573,7 +608,6 @@ describe('SettingsPage', () => {
       },
       feishu: {
         enabled: false,
-        webhook_url: '',
       },
       host_sample_frequency_tier: '5s',
       probe_frequency_defaults: {

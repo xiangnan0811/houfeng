@@ -21,14 +21,20 @@ func TestSetAndReadSessionCookie(t *testing.T) {
 	if c.Name != SessionCookieName {
 		t.Errorf("name = %q, want %q", c.Name, SessionCookieName)
 	}
+	if c.Name != "__Host-houfeng_session" {
+		t.Errorf("name = %q, want __Host-houfeng_session", c.Name)
+	}
 	if c.Value != "abc123" {
 		t.Errorf("value = %q, want abc123", c.Value)
 	}
 	if !c.HttpOnly {
 		t.Error("cookie must be HttpOnly")
 	}
-	if c.SameSite != http.SameSiteLaxMode {
-		t.Errorf("sameSite = %v, want Lax", c.SameSite)
+	if !c.Secure {
+		t.Error("cookie must be Secure")
+	}
+	if c.SameSite != http.SameSiteStrictMode {
+		t.Errorf("sameSite = %v, want Strict", c.SameSite)
 	}
 	if c.Path != "/" {
 		t.Errorf("path = %q, want /", c.Path)
@@ -65,5 +71,17 @@ func TestClearSessionCookie(t *testing.T) {
 	}
 	if cookie.MaxAge != -1 {
 		t.Errorf("MaxAge = %d, want -1", cookie.MaxAge)
+	}
+	if !cookie.HttpOnly {
+		t.Error("cleared cookie must be HttpOnly")
+	}
+	if !cookie.Secure {
+		t.Error("cleared cookie must be Secure")
+	}
+	if cookie.SameSite != http.SameSiteStrictMode {
+		t.Errorf("sameSite = %v, want Strict", cookie.SameSite)
+	}
+	if cookie.Path != "/" {
+		t.Errorf("path = %q, want /", cookie.Path)
 	}
 }

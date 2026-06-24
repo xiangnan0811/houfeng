@@ -46,6 +46,7 @@ export type SettingsFormState = {
   telegramChatId: string
   telegramRuntimeManaged: boolean
   feishuEnabled: boolean
+  feishuWebhookPresent: boolean
   feishuWebhookUrl: string
   hostSampleFrequencyTier: string
   probeFrequencyDefaults: ProbeFrequencyDefaults

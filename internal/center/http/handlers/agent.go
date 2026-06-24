@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
+	"time"
 
 	"houfeng/internal/center/agentplan"
 	"houfeng/internal/center/enrollment"
@@ -23,15 +25,100 @@ type AgentSyncService interface {
 	SyncBatch(ctx context.Context, batch syncing.Batch) (syncing.Result, error)
 }
 
+const (
+	agentSyncMaxItems          = 256
+	agentIdentityMaxBytes      = 256
+	agentSecretMaxBytes        = 512
+	agentErrorSummaryMaxBytes  = 2048
+	agentCommandOutputMaxBytes = 128 << 10
+	agentRawJSONMaxBytes       = 128 << 10
+)
+
+type AgentEndpointOptions struct {
+	TrustedProxies []string
+	RateLimit      AgentRateLimitOptions
+	Now            func() time.Time
+}
+
+type AgentRateLimitOptions struct {
+	MaxRequestsByIP int
+	Window          time.Duration
+}
+
+type agentRequestLimiter struct {
+	mu       sync.Mutex
+	now      func() time.Time
+	window   time.Duration
+	maxIP    int
+	byIP     map[string][]time.Time
+	resolver trustedProxyResolver
+}
+
+func defaultAgentRateLimitOptions() AgentRateLimitOptions {
+	return AgentRateLimitOptions{
+		MaxRequestsByIP: 120,
+		Window:          time.Minute,
+	}
+}
+
+func newAgentRequestLimiter(opts AgentEndpointOptions) *agentRequestLimiter {
+	if opts.RateLimit == (AgentRateLimitOptions{}) {
+		opts.RateLimit = defaultAgentRateLimitOptions()
+	}
+	if opts.RateLimit.Window <= 0 {
+		opts.RateLimit.Window = time.Minute
+	}
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	return &agentRequestLimiter{
+		now:      now,
+		window:   opts.RateLimit.Window,
+		maxIP:    opts.RateLimit.MaxRequestsByIP,
+		byIP:     make(map[string][]time.Time),
+		resolver: newTrustedProxyResolver(opts.TrustedProxies),
+	}
+}
+
+func (l *agentRequestLimiter) allow(r *http.Request) bool {
+	if l == nil {
+		return true
+	}
+	clientIP := l.resolver.clientIP(r)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now().UTC()
+	cutoff := now.Add(-l.window)
+	l.byIP[clientIP] = append(pruneTimes(l.byIP[clientIP], cutoff), now)
+	if l.maxIP > 0 && len(l.byIP[clientIP]) > l.maxIP {
+		return false
+	}
+	return true
+}
+
+func rejectAgentRateLimited(w http.ResponseWriter) {
+	writeAgentAPIError(w, http.StatusTooManyRequests, agentapi.ErrorCodeInvalidRequest, "too many requests")
+}
+
 func AgentEnroll(svc AgentEnrollService) http.Handler {
+	return AgentEnrollWithOptions(svc, AgentEndpointOptions{})
+}
+
+func AgentEnrollWithOptions(svc AgentEnrollService, opts AgentEndpointOptions) http.Handler {
+	limiter := newAgentRequestLimiter(opts)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeAgentAPIError(w, http.StatusMethodNotAllowed, agentapi.ErrorCodeMethodNotAllowed, "method not allowed")
 			return
 		}
+		if !limiter.allow(r) {
+			rejectAgentRateLimited(w)
+			return
+		}
 
 		var req agentapi.EnrollmentRequest
-		if err := decodeJSON(r, &req); err != nil {
+		if err := decodeJSONLimited(w, r, &req, AgentEnrollBodyLimit); err != nil {
 			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidJSON, "invalid json")
 			return
 		}
@@ -64,14 +151,23 @@ func AgentEnroll(svc AgentEnrollService) http.Handler {
 }
 
 func AgentSync(svc AgentSyncService) http.Handler {
+	return AgentSyncWithOptions(svc, AgentEndpointOptions{})
+}
+
+func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.Handler {
+	limiter := newAgentRequestLimiter(opts)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeAgentAPIError(w, http.StatusMethodNotAllowed, agentapi.ErrorCodeMethodNotAllowed, "method not allowed")
 			return
 		}
+		if !limiter.allow(r) {
+			rejectAgentRateLimited(w)
+			return
+		}
 
 		var req agentapi.SyncRequest
-		if err := decodeJSON(r, &req); err != nil {
+		if err := decodeJSONLimited(w, r, &req, AgentSyncBodyLimit); err != nil {
 			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidJSON, "invalid json")
 			return
 		}
@@ -110,43 +206,88 @@ func writeAgentAPIError(w http.ResponseWriter, status int, code, message string)
 }
 
 func isValidEnrollmentRequest(req agentapi.EnrollmentRequest) bool {
-	return req.Token != "" && req.Fingerprint != ""
+	return requiredMax(req.Token, agentSecretMaxBytes) &&
+		requiredMax(req.Fingerprint, agentIdentityMaxBytes)
 }
 
 func isValidSyncRequest(req agentapi.SyncRequest) bool {
-	if req.MonitoringInstanceID == "" || req.SyncToken == "" || len(req.Heartbeats) == 0 {
+	if !requiredMax(req.MonitoringInstanceID, agentIdentityMaxBytes) ||
+		!requiredMax(req.SyncToken, agentSecretMaxBytes) ||
+		len(req.Heartbeats) == 0 {
+		return false
+	}
+	if exceedsAgentBatchLimit(len(req.Heartbeats), len(req.HostSamples), len(req.ProbeObservations), len(req.IPQualityReports), len(req.CommandResults)) {
 		return false
 	}
 
 	for _, heartbeat := range req.Heartbeats {
-		if heartbeat.ObservedAt.IsZero() || heartbeat.AgentVersion == "" || heartbeat.Fingerprint == "" || heartbeat.SyncBatchID == "" {
+		if !isValidAgentCarrier(heartbeat.ObservedAt, heartbeat.AgentVersion, heartbeat.Fingerprint, heartbeat.SyncBatchID) {
 			return false
 		}
 	}
 
 	for _, sample := range req.HostSamples {
-		if sample.ObservedAt.IsZero() || sample.AgentVersion == "" || sample.Fingerprint == "" || sample.SyncBatchID == "" {
+		if !isValidAgentCarrier(sample.ObservedAt, sample.AgentVersion, sample.Fingerprint, sample.SyncBatchID) ||
+			len(sample.Containers) > agentSyncMaxItems {
 			return false
+		}
+		for _, container := range sample.Containers {
+			if !optionalMax(container.ID, agentIdentityMaxBytes) ||
+				!optionalMax(container.Name, agentIdentityMaxBytes) ||
+				!optionalMax(container.Image, agentIdentityMaxBytes) ||
+				!optionalMax(container.Status, agentIdentityMaxBytes) {
+				return false
+			}
 		}
 	}
 
 	for _, observation := range req.ProbeObservations {
-		if observation.TargetID == "" || observation.ProbeItemID == "" || observation.ProbeKind == "" ||
-			observation.ObservedAt.IsZero() || observation.AgentVersion == "" || observation.Fingerprint == "" ||
-			observation.SyncBatchID == "" || observation.ResultKind == "" {
+		if !requiredMax(observation.TargetID, agentIdentityMaxBytes) ||
+			!requiredMax(observation.ProbeItemID, agentIdentityMaxBytes) ||
+			!requiredMax(observation.ProbeKind, agentIdentityMaxBytes) ||
+			!isValidAgentCarrier(observation.ObservedAt, observation.AgentVersion, observation.Fingerprint, observation.SyncBatchID) ||
+			!requiredMax(observation.ResultKind, agentIdentityMaxBytes) ||
+			!optionalMax(observation.ErrorCode, agentIdentityMaxBytes) ||
+			!optionalMax(observation.ErrorSummary, agentErrorSummaryMaxBytes) {
 			return false
 		}
 	}
 	for _, report := range req.IPQualityReports {
-		if report.ObservedAt.IsZero() || report.AgentVersion == "" || report.Fingerprint == "" || report.SyncBatchID == "" ||
-			report.IPAddress == "" || report.IPVersion == 0 || report.Status == "" {
+		if !isValidAgentCarrier(report.ObservedAt, report.AgentVersion, report.Fingerprint, report.SyncBatchID) ||
+			!requiredMax(report.IPAddress, agentIdentityMaxBytes) ||
+			report.IPVersion == 0 ||
+			!requiredMax(report.Status, agentIdentityMaxBytes) ||
+			!optionalMax(report.ASN, agentIdentityMaxBytes) ||
+			!optionalMax(report.Organization, agentErrorSummaryMaxBytes) ||
+			!optionalMax(report.UseRegionCode, agentIdentityMaxBytes) ||
+			!optionalMax(report.UseRegionName, agentIdentityMaxBytes) ||
+			!optionalMax(report.RegisteredRegionCode, agentIdentityMaxBytes) ||
+			!optionalMax(report.RegisteredRegionName, agentIdentityMaxBytes) ||
+			!optionalMax(report.RiskLevel, agentIdentityMaxBytes) ||
+			!optionalMax(report.ErrorCode, agentIdentityMaxBytes) ||
+			!optionalMax(report.ErrorSummary, agentErrorSummaryMaxBytes) ||
+			len(report.RawJSON) > agentRawJSONMaxBytes ||
+			len(report.DiagnosticsJSON) > agentRawJSONMaxBytes ||
+			len(report.ProviderResults) > agentSyncMaxItems ||
+			len(report.ServiceUnlocks) > agentSyncMaxItems {
 			return false
 		}
 		if !isValidIPQualityReportStatus(report.Status) {
 			return false
 		}
 		for _, provider := range report.ProviderResults {
-			if provider.Provider == "" {
+			if !requiredMax(provider.Provider, agentIdentityMaxBytes) ||
+				!optionalMax(provider.Status, agentIdentityMaxBytes) ||
+				!optionalMax(provider.SourceType, agentIdentityMaxBytes) ||
+				!optionalMax(provider.UsageType, agentIdentityMaxBytes) ||
+				!optionalMax(provider.CompanyType, agentIdentityMaxBytes) ||
+				!optionalMax(provider.RiskLevel, agentIdentityMaxBytes) ||
+				!optionalMax(provider.RiskScore, agentIdentityMaxBytes) ||
+				!optionalMax(provider.RegionCode, agentIdentityMaxBytes) ||
+				!optionalMax(provider.RegionName, agentIdentityMaxBytes) ||
+				!optionalMax(provider.ErrorCode, agentIdentityMaxBytes) ||
+				!optionalMax(provider.ErrorSummary, agentErrorSummaryMaxBytes) ||
+				len(provider.ExtraJSON) > agentRawJSONMaxBytes {
 				return false
 			}
 			if provider.Status != "" && !isValidIPQualitySourceStatus(provider.Status) {
@@ -157,7 +298,15 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 			}
 		}
 		for _, unlock := range report.ServiceUnlocks {
-			if unlock.Service == "" || unlock.Status == "" {
+			if !requiredMax(unlock.Service, agentIdentityMaxBytes) ||
+				!requiredMax(unlock.Status, agentIdentityMaxBytes) ||
+				!optionalMax(unlock.Source, agentIdentityMaxBytes) ||
+				!optionalMax(unlock.ProbeStatus, agentIdentityMaxBytes) ||
+				!optionalMax(unlock.Region, agentIdentityMaxBytes) ||
+				!optionalMax(unlock.UnlockType, agentIdentityMaxBytes) ||
+				!optionalMax(unlock.ErrorCode, agentIdentityMaxBytes) ||
+				!optionalMax(unlock.ErrorSummary, agentErrorSummaryMaxBytes) ||
+				len(unlock.ExtraJSON) > agentRawJSONMaxBytes {
 				return false
 			}
 			if !isValidIPQualityServiceStatus(unlock.Status) {
@@ -168,8 +317,40 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 			}
 		}
 	}
+	for _, result := range req.CommandResults {
+		if !requiredMax(result.ActionID, agentIdentityMaxBytes) ||
+			!requiredMax(result.CommandID, agentIdentityMaxBytes) ||
+			!optionalMax(result.Stdout, agentCommandOutputMaxBytes) ||
+			!optionalMax(result.Stderr, agentCommandOutputMaxBytes) {
+			return false
+		}
+	}
 
 	return true
+}
+
+func exceedsAgentBatchLimit(lengths ...int) bool {
+	for _, length := range lengths {
+		if length > agentSyncMaxItems {
+			return true
+		}
+	}
+	return false
+}
+
+func isValidAgentCarrier(observedAt time.Time, agentVersion, fingerprint, syncBatchID string) bool {
+	return !observedAt.IsZero() &&
+		requiredMax(agentVersion, agentIdentityMaxBytes) &&
+		requiredMax(fingerprint, agentIdentityMaxBytes) &&
+		requiredMax(syncBatchID, agentIdentityMaxBytes)
+}
+
+func requiredMax(value string, maxBytes int) bool {
+	return value != "" && optionalMax(value, maxBytes)
+}
+
+func optionalMax(value string, maxBytes int) bool {
+	return len(value) <= maxBytes
 }
 
 func isValidIPQualityReportStatus(value string) bool {

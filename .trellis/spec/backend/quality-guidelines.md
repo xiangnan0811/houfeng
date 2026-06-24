@@ -61,6 +61,7 @@
 - CI 与本地共用 Makefile target；不要把 lint/test/build 细节复制进 YAML。
 - `web` workspace 是否存在由 `make verify-web` 的 shell 判断负责；workflow 不需要再用 `hashFiles('web/package.json')` 判断。
 - 如果未来确实需要条件跳过 job，`jobs.<job_id>.if` 只能使用 GitHub Actions 在 job-level 支持的上下文和 status 函数；不要把 step-level/file-hash 表达式搬到 job-level。
+- Docker image build verification belongs to GitHub Actions: `ci.yml` keeps a `docker-image` job using `docker/setup-buildx-action@v4` + `docker/build-push-action@v7` with `push: false`, while `publish-images.yml` builds and pushes release images. A local environment without `/var/run/docker.sock` is not evidence that image verification is missing if these workflow jobs remain present.
 
 ### 4. Validation & Error Matrix
 
@@ -69,12 +70,16 @@
 | `jobs.<job_id>.if` 使用 unsupported function，例如 `hashFiles(...)` | 禁止 | GitHub Actions run 直接 `failure`，`jobs=[]`，`log not found`，check suite `latest_check_runs_count=0` |
 | `.github/workflows/ci.yml` 包含 `hashFiles` | 只有在 step-level 支持位置才允许 | job 创建前失败或表达式校验失败 |
 | `make verify-go` / `make verify-web` 失败 | workflow job 应创建并输出日志 | 正常红 job，有可读失败日志 |
+| `docker-image` job missing from CI | 禁止 | PR 不再验证 Dockerfile can build |
+| local Docker daemon unavailable | 不作为本地阻塞项 | 依赖 GitHub Actions `docker-image` / `publish-images` jobs 验证 |
 
 ### 5. Good/Base/Bad Cases
 
 - Good：`web` job 总是创建，`run: make verify-web`；不存在 `web/package.json` 时由 Makefile 输出 `web workspace not initialized yet`。
 - Base：`go` job 总是创建，`run: make verify-go`；Go 工具链版本来自 `go.mod`。
+- Good：`docker-image` job 总是创建，`docker/build-push-action@v7` 对 root `Dockerfile` 执行 `push: false` 构建。
 - Bad：`web` job 写 `if: ${{ hashFiles('web/package.json') != '' }}`，push 后 run 在 job 创建前失败。
+- Bad：因为本地机器没有 Docker daemon 就把 Docker image build 从上线门禁里删除；正确做法是保留 GitHub Actions Buildx job。
 
 ### 6. Tests Required
 
@@ -82,6 +87,7 @@
 - 用 `rg -n "hashFiles" .github/workflows/ci.yml` 确认没有 job-level `hashFiles`。
 - 本地跑 `make verify-go`；如果 workflow 或 Makefile touch 到 web 质量门，同时跑 `make verify-web`。
 - 修复必须推送后观察一次 GitHub Actions run，确认 check suite 创建了实际 `go` / `web` jobs。
+- 改 Dockerfile / entrypoint / Compose / image workflow 时，确认 CI `docker-image` job 仍存在，并在 PR 上观察该 job 成功；发布前再观察 `publish-images` 的 build/publish/inspect steps。
 
 ### 7. Wrong vs Correct
 
@@ -191,6 +197,149 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 - **生产调用必须留 `SkipFsync = false`**（默认零值），保证崩溃恢复语义。
 - 测试里如果跑的是运行时 retry / 重启逻辑、不在乎崩溃恢复，可以显式置 `SkipFsync: true`。
 - 不要把 `SkipFsync` 暴露到 env 配置里。
+
+### Scenario: agent sync queue disk bounds
+
+1. **Scope / Trigger**
+   - Trigger: 修改 `agent/syncqueue/`、`agent/config/` durable buffer env、`agent/runtime` queue construction、installer `agent.env`，或离线队列保留策略。
+   - 目标：agent 离线时保留可重试 sync request，但必须同时受 entry 数、年龄、磁盘字节上限约束，避免长期离线写满磁盘。
+
+2. **Signatures**
+   - Config env:
+     - `HOUFENG_AGENT_BUFFER_FILE`
+     - `HOUFENG_AGENT_BUFFER_MAX_ENTRIES`
+     - `HOUFENG_AGENT_BUFFER_MAX_AGE`
+     - `HOUFENG_AGENT_BUFFER_MAX_BYTES`
+   - Go config: `agent/config.AgentConfig{BufferFile, BufferMaxEntries, BufferMaxAge, BufferMaxBytes}`。
+   - Queue options: `syncqueue.Options{MaxEntries, MaxAge, MaxBytes, SkipFsync}`。
+
+3. **Contracts**
+   - Defaults: `MaxEntries=65536`、`MaxAge=72h`、`MaxBytes=64MiB`。
+   - `MaxBytes <= 0` uses the default; env override must be a positive integer.
+   - Queue pruning order is oldest first after sorting by `CreatedAt` / ID, then max entries, then max bytes.
+   - If even the newest entry cannot fit the configured byte cap, the queue may be empty after pruning; do not write a file larger than the cap.
+   - Production runtime must pass `BufferMaxBytes` into `syncqueue.NewFileStore`; tests may set small caps and `SkipFsync: true`.
+
+4. **Validation & Error Matrix**
+   | Condition | Expected behavior |
+   | --- | --- |
+   | `HOUFENG_AGENT_BUFFER_MAX_BYTES` missing | default 64MiB |
+   | non-integer / `<=0` max bytes | config load error |
+   | two entries exceed max bytes but newest fits | oldest dropped, newest remains, file size <= cap |
+   | newest entry exceeds max bytes | all entries dropped, file size <= cap |
+
+5. **Good / Base / Bad Cases**
+   - Good: center is offline for days; queue keeps recent facts within 64MiB and drops oldest entries predictably.
+   - Base: operator lowers max bytes for a tiny VPS; queue may keep fewer entries but never grows past cap.
+   - Bad: only limiting entry count lets a few very large command/IP quality payloads fill disk.
+
+6. **Tests Required**
+   - `agent/config/config_test.go`: defaults, override, invalid max bytes.
+   - `agent/syncqueue/store_test.go`: byte pruning keeps newest fitting entries and file size stays below cap.
+   - `agent/runtime` or construction coverage proving `BufferMaxBytes` reaches `syncqueue.Options`.
+   - Installer embedded-script check that generated `agent.env` includes `HOUFENG_AGENT_BUFFER_MAX_BYTES`.
+
+7. **Wrong vs Correct**
+
+```go
+// 错误：只限制 entries/age，忽略单条 payload 大小。
+syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: cfg.BufferMaxEntries, MaxAge: cfg.BufferMaxAge})
+```
+
+```go
+// 正确：同时传入字节上限。
+syncqueue.NewFileStore(path, syncqueue.Options{
+	MaxEntries: cfg.BufferMaxEntries,
+	MaxAge:     cfg.BufferMaxAge,
+	MaxBytes:   cfg.BufferMaxBytes,
+})
+```
+
+---
+
+### Scenario: center credential and database hardening config
+
+1. **Scope / Trigger**
+   - Trigger: 修改 `internal/center/config`、`internal/center/auth/password.go`、`internal/center/auth/service.go`、`cmd/houfeng-center/bootstrap.go`、部署 env docs，或中心启动安全配置。
+   - 目标：密码 hash 成本、session ID HMAC secret 和生产 PostgreSQL TLS 要成为可测试的启动合同，避免安全调优只停留在文档建议。
+
+2. **Signatures**
+   - Config env:
+     - `HOUFENG_PASSWORD_BCRYPT_COST`
+     - `HOUFENG_SESSION_HMAC_KEY`
+     - `HOUFENG_SESSION_HMAC_KEY_FILE`
+     - `HOUFENG_DATABASE_REQUIRE_TLS`
+     - `HOUFENG_DATABASE_URL`
+   - Go config: `config.CenterConfig{PasswordBcryptCost int, SessionHMACKey []byte, DatabaseURL string}`。
+   - Auth options: `auth.Options{PasswordBcryptCost int}`。
+   - Seed options: `auth.SeedInitialUserOptions{PasswordBcryptCost int}`。
+   - Store constructor: `store.NewPostgresSessionRepository(pool *pgxpool.Pool, hmacKey []byte) (*PostgresSessionRepository, error)`。
+
+3. **Contracts**
+   - `HOUFENG_PASSWORD_BCRYPT_COST` missing uses `auth.DefaultPasswordBcryptCost`（当前等于 Go bcrypt `DefaultCost`）。
+   - Bcrypt cost must be within Go bcrypt `MinCost..MaxCost`; invalid, empty, non-integer, too-low, or too-high values fail config load.
+   - `auth.HashPasswordWithCost` validates normal password policy first, then validates cost, then calls bcrypt with the configured cost.
+   - `auth.Service.ChangePassword` and first-user seeding must use `cfg.PasswordBcryptCost`; package-level `HashPassword` remains the compatibility/default helper.
+   - `HOUFENG_SESSION_HMAC_KEY` is required, must be at least 32 bytes, and is copied into `config.CenterConfig.SessionHMACKey`.
+   - `HOUFENG_SESSION_HMAC_KEY_FILE` takes precedence over `HOUFENG_SESSION_HMAC_KEY` for secret-mount deployments.
+   - `cmd/houfeng-center/bootstrap.go` must pass `cfg.SessionHMACKey` into `store.NewPostgresSessionRepository`; the session repository must not have a static production default HMAC key.
+   - Rotating the session HMAC secret invalidates existing browser sessions because database lookup hashes no longer match existing rows.
+   - `HOUFENG_DATABASE_REQUIRE_TLS=true` means `HOUFENG_DATABASE_URL` must include `sslmode=require`、`sslmode=verify-ca`、or `sslmode=verify-full`.
+   - Missing `sslmode` or weak modes (`disable`、`allow`、`prefer`) fail startup only when the require-TLS flag is true, so local Compose / localhost development can keep `sslmode=disable`.
+
+4. **Validation & Error Matrix**
+   | Condition | Expected behavior |
+   | --- | --- |
+   | missing bcrypt cost | use default |
+   | bcrypt cost below min / above max / non-integer | `LoadCenterConfig` error |
+   | change password with configured cost | stored bcrypt hash reports that cost via `bcrypt.Cost` |
+   | seed initial user with configured cost | stored bcrypt hash reports that cost via `bcrypt.Cost` |
+   | missing session HMAC key | `LoadCenterConfig` error |
+   | session HMAC key shorter than 32 bytes | `LoadCenterConfig` error |
+   | `HOUFENG_SESSION_HMAC_KEY_FILE` set | file content wins over env key |
+   | bootstrap session repository wiring | receives exactly `cfg.SessionHMACKey` |
+   | `HOUFENG_DATABASE_REQUIRE_TLS=true` and `sslmode=disable` / missing | `LoadCenterConfig` error |
+   | `HOUFENG_DATABASE_REQUIRE_TLS=true` and `sslmode=verify-full` | config load succeeds |
+   | invalid boolean require-TLS value | `LoadCenterConfig` error |
+
+5. **Good / Base / Bad Cases**
+   - Good: production external PostgreSQL uses `HOUFENG_DATABASE_REQUIRE_TLS=true` and `sslmode=verify-full`.
+   - Good: production sets a stable random `HOUFENG_SESSION_HMAC_KEY_FILE` through a secret mount; rolling restart keeps browser sessions valid.
+   - Base: local Docker Compose uses co-located `db` service with generated `sslmode=disable` and leaves `HOUFENG_DATABASE_REQUIRE_TLS` unset/false.
+   - Bad: raising bcrypt cost globally by changing a package constant without config tests or benchmark guidance.
+   - Bad: `PostgresSessionRepository` silently falls back to `[]byte("houfeng-session-hmac-v1")`, so every deployment shares the same public HMAC key.
+   - Bad: documenting production database TLS while code still accepts `sslmode=disable` with no startup guard.
+
+6. **Tests Required**
+   - `internal/center/config/config_test.go`: default/override/invalid bcrypt cost and require-TLS accepted/rejected `sslmode` cases.
+   - `internal/center/config/config_test.go`: required session HMAC key, `_FILE` precedence, and short-key rejection.
+   - `internal/center/auth/password_test.go`: `HashPasswordWithCost` embeds requested cost and rejects invalid cost.
+   - `internal/center/auth/service_test.go`: password change stores a hash with configured cost.
+   - `internal/center/auth/seed_test.go`: first-user seed stores a hash with configured cost.
+   - `internal/center/store/sessions_test.go`: repository rejects missing HMAC key and stores/queries session IDs only by HMAC hash.
+   - `cmd/houfeng-center/bootstrap_test.go`: default seed dependency and bootstrap auth service wiring pass `cfg.PasswordBcryptCost`; session repository wiring passes `cfg.SessionHMACKey`.
+
+7. **Wrong vs Correct**
+
+```go
+// 错误：配置有 cost，但写 hash 时仍走 package-level default。
+hash, err := auth.HashPassword(newPassword)
+```
+
+```go
+// 正确：服务使用启动配置里的 cost。
+hash, err := auth.HashPasswordWithCost(newPassword, s.passwordBcryptCost)
+```
+
+```go
+// 错误：session repository 内部使用所有部署共享的静态 key。
+sessionRepo := store.NewPostgresSessionRepository(pool)
+```
+
+```go
+// 正确：启动配置显式传入部署 secret。
+sessionRepo, err := store.NewPostgresSessionRepository(pool, cfg.SessionHMACKey)
+```
 
 ---
 

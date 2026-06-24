@@ -3,8 +3,17 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+)
+
+const (
+	DefaultJSONBodyLimit = 256 << 10
+	AuthJSONBodyLimit    = 16 << 10
+	AgentEnrollBodyLimit = 64 << 10
+	AgentSyncBodyLimit   = 4 << 20
 )
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -20,9 +29,31 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func decodeJSON(r *http.Request, dst any) error {
-	decoder := json.NewDecoder(r.Body)
+	r.Body = http.MaxBytesReader(nil, r.Body, DefaultJSONBodyLimit)
+	return decodeJSONValue(r.Body, dst)
+}
+
+func decodeJSONLimited(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) error {
+	if maxBytes <= 0 {
+		maxBytes = DefaultJSONBodyLimit
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	return decodeJSONValue(r.Body, dst)
+}
+
+func decodeJSONValue(body io.Reader, dst any) error {
+	decoder := json.NewDecoder(body)
 	decoder.DisallowUnknownFields()
-	return decoder.Decode(dst)
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(struct{})); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain a single json value")
+		}
+		return err
+	}
+	return nil
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {

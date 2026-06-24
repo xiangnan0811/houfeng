@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -840,6 +841,43 @@ func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
 	}
 	if cr.Stdout == "" {
 		t.Fatal("CommandResult.Stdout is empty, want uptime output")
+	}
+}
+
+func TestRuntimePendingActionExecutionInheritsRuntimeContext(t *testing.T) {
+	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
+	binDir := t.TempDir()
+	uptimePath := filepath.Join(binDir, "uptime")
+	if err := os.WriteFile(uptimePath, []byte("#!/bin/sh\n/bin/sleep 1\n"), 0o755); err != nil {
+		t.Fatalf("write fake uptime: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	client := &fakeClient{
+		cancelAfterSyncs: 1,
+		syncResponses: []agentapi.SyncResponse{{
+			AcceptedAt: time.Now().UTC(),
+			Status:     "accepted",
+			Plan: &agentapi.SyncPlan{
+				HostSampleFrequencyTier: agentapi.FrequencyTier1m,
+				PendingAction: &agentapi.PendingAction{
+					CommandID: "uptime",
+					ActionID:  "act_cancel",
+				},
+			},
+		}},
+	}
+	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	client.cancel = cancel
+
+	startedAt := time.Now()
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > 500*time.Millisecond {
+		t.Fatalf("Run() elapsed = %s, want runtime cancellation to stop pending action promptly", elapsed)
 	}
 }
 

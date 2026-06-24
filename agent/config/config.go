@@ -13,6 +13,7 @@ const (
 	DefaultIPQualityStateFile = "/var/lib/houfeng-agent/ip-quality-state.json"
 	DefaultBufferMaxEntries   = 65536
 	DefaultBufferMaxAge       = 72 * time.Hour
+	DefaultBufferMaxBytes     = 64 * 1024 * 1024
 )
 
 type AgentConfig struct {
@@ -22,6 +23,7 @@ type AgentConfig struct {
 	IPQualityStateFile string
 	BufferMaxEntries   int
 	BufferMaxAge       time.Duration
+	BufferMaxBytes     int
 }
 
 func LoadAgentConfig() (AgentConfig, error) {
@@ -45,6 +47,11 @@ func LoadAgentConfig() (AgentConfig, error) {
 		return AgentConfig{}, err
 	}
 
+	bufferMaxBytes, err := optionalPositiveIntEnv("HOUFENG_AGENT_BUFFER_MAX_BYTES", DefaultBufferMaxBytes)
+	if err != nil {
+		return AgentConfig{}, err
+	}
+
 	return AgentConfig{
 		ServerURL:          serverURL,
 		TokenFile:          tokenFile,
@@ -52,6 +59,7 @@ func LoadAgentConfig() (AgentConfig, error) {
 		IPQualityStateFile: optionalEnv("HOUFENG_AGENT_IP_QUALITY_STATE_FILE", DefaultIPQualityStateFile),
 		BufferMaxEntries:   bufferMaxEntries,
 		BufferMaxAge:       bufferMaxAge,
+		BufferMaxBytes:     bufferMaxBytes,
 	}, nil
 }
 

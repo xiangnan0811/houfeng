@@ -104,3 +104,24 @@ func TestAppWaitsForMultipleWorkerShutdownBeforeReturning(t *testing.T) {
 		t.Fatal("workerB did not exit before Run() returned")
 	}
 }
+
+func TestNewConfiguresHTTPServerTimeouts(t *testing.T) {
+	app := centerapp.New("127.0.0.1:0", http.NewServeMux())
+	server := app.ServerForTest()
+
+	if server.ReadHeaderTimeout != 5*time.Second {
+		t.Fatalf("ReadHeaderTimeout = %s, want 5s", server.ReadHeaderTimeout)
+	}
+	if server.ReadTimeout != 30*time.Second {
+		t.Fatalf("ReadTimeout = %s, want 30s", server.ReadTimeout)
+	}
+	if server.WriteTimeout != 30*time.Second {
+		t.Fatalf("WriteTimeout = %s, want 30s", server.WriteTimeout)
+	}
+	if server.IdleTimeout != 60*time.Second {
+		t.Fatalf("IdleTimeout = %s, want 60s", server.IdleTimeout)
+	}
+	if server.MaxHeaderBytes != 1<<20 {
+		t.Fatalf("MaxHeaderBytes = %d, want 1MiB", server.MaxHeaderBytes)
+	}
+}

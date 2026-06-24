@@ -3,10 +3,11 @@
 > Authentication note: the center requires a username + password login for
 > every API call except `/api/healthz` and `/api/agent/*`.
 > First-startup credentials come from `HOUFENG_INITIAL_USERNAME` and
-> `HOUFENG_INITIAL_PASSWORD`; once the `users` table is populated those
-> variables are ignored. Session cookies are HttpOnly + SameSite=Lax and
-> the deployment **must** terminate HTTPS at a reverse proxy to prevent
-> cookie leakage on plain HTTP. See the **Authentication** section below.
+> `HOUFENG_INITIAL_PASSWORD` or `HOUFENG_INITIAL_PASSWORD_FILE`; once the
+> `users` table is populated those variables are ignored. Session cookies are
+> `__Host-` scoped, Secure, HttpOnly, and SameSite=Strict; the deployment
+> **must** terminate HTTPS at a reverse proxy for authenticated browser use.
+> See the **Authentication** section below.
 
 ## Scope
 
@@ -52,16 +53,19 @@ Minimum `/etc/houfeng/center.env`:
 HOUFENG_HTTP_ADDR=:8080
 HOUFENG_WEB_DIST_DIR=/opt/houfeng/web/dist
 HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=disable
+HOUFENG_DATABASE_REQUIRE_TLS=false
 HOUFENG_PUBLIC_BASE_URL=https://center.example.com
 HOUFENG_INCIDENT_SWEEP_INTERVAL=5s
 HOUFENG_LOG_FILE=/var/log/houfeng/center.log
 HOUFENG_INITIAL_USERNAME=admin
 HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
+HOUFENG_SESSION_HMAC_KEY=replace-me-with-32-plus-random-bytes
+HOUFENG_PASSWORD_BCRYPT_COST=10
 HOUFENG_TELEGRAM_BOT_TOKEN=
 HOUFENG_TELEGRAM_CHAT_ID=
 ```
 
-`HOUFENG_DATABASE_URL`, `HOUFENG_INITIAL_USERNAME`, and `HOUFENG_INITIAL_PASSWORD` are required for center startup. `HOUFENG_PUBLIC_BASE_URL` is optional for center startup, but required to generate one-command install commands. Set it to the externally reachable absolute `http(s)` URL that target agents can access, for example `https://center.example.com` or `http://203.0.113.10:8080`; it must not include query or fragment, and the center normalizes trailing slashes when generating commands. `HOUFENG_LOG_FILE` is optional; when set, center writes application logs to both stdout and the configured file, and startup fails if the file cannot be opened. Telegram is disabled unless both Telegram values are set. Use `.env.example` as the full local variable inventory; the systemd snippets below are deployment-shaped examples and must include the required auth seed vars on first startup.
+`HOUFENG_DATABASE_URL`, `HOUFENG_INITIAL_USERNAME`, an initial password source, and `HOUFENG_SESSION_HMAC_KEY` are required for center startup. Use `HOUFENG_INITIAL_PASSWORD_FILE` instead of `HOUFENG_INITIAL_PASSWORD` when the password is provided by a file or secret mount; the file value takes precedence. Use `HOUFENG_SESSION_HMAC_KEY_FILE` instead of `HOUFENG_SESSION_HMAC_KEY` when the session HMAC secret is provided by a file or secret mount; the file value takes precedence. The session HMAC secret must be at least 32 bytes and must stay stable across restarts; rotating it invalidates existing browser sessions. `HOUFENG_PUBLIC_BASE_URL` is optional for center startup, but required to generate one-command install commands. Set it to the externally reachable absolute `http(s)` URL that target agents can access, for example `https://center.example.com` or `http://203.0.113.10:8080`; it must not include query or fragment, and the center normalizes trailing slashes when generating commands. `HOUFENG_DATABASE_REQUIRE_TLS=true` makes startup reject database URLs without `sslmode=require`, `sslmode=verify-ca`, or `sslmode=verify-full`; enable it for external/production PostgreSQL. `HOUFENG_PASSWORD_BCRYPT_COST` defaults to Go bcrypt's default cost and can be raised after benchmarking login and password-change latency on the target host. `HOUFENG_LOG_FILE` is optional; when set, center writes application logs to both stdout and the configured file, and startup fails if the file cannot be opened. Telegram is disabled unless both Telegram values are set. Use `.env.example` as the full local variable inventory; the systemd snippets below are deployment-shaped examples and must include the required auth seed vars on first startup.
 
 > Note: `HOUFENG_WEB_DIST_DIR` defaults to `web/dist`, but the configured directory must exist and contain the built SPA; otherwise center `/` returns 404 and the UI is unavailable. Production deployments should point it at the installed `web/dist` path.
 
@@ -71,9 +75,11 @@ HOUFENG_TELEGRAM_CHAT_ID=
 export HOUFENG_HTTP_ADDR=:8080
 export HOUFENG_WEB_DIST_DIR=web/dist
 export HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@localhost:5432/houfeng?sslmode=disable'
+export HOUFENG_DATABASE_REQUIRE_TLS=false
 export HOUFENG_PUBLIC_BASE_URL='http://localhost:8080'
 export HOUFENG_INITIAL_USERNAME=admin
 export HOUFENG_INITIAL_PASSWORD='replace-me-with-a-real-password'
+export HOUFENG_SESSION_HMAC_KEY='replace-me-with-32-plus-random-bytes'
 make build-center
 ./bin/houfeng-center
 ```
@@ -88,14 +94,14 @@ Prerequisites: Docker with Compose support, and an operator-managed HTTPS revers
 
 ```bash
 cp docs/deploy/compose.env.example docs/deploy/compose.env
-# edit docs/deploy/compose.env and replace the database/admin passwords
+# edit docs/deploy/compose.env and replace the database/admin passwords and session HMAC key
 # optionally set HOUFENG_PUBLIC_BASE_URL before agent onboarding
 docker compose --env-file docs/deploy/compose.env up -d
 ```
 
-The default Compose file pulls and runs `linnea7171/houfeng:latest`. The project image contains `houfeng-center`, a small runtime entrypoint, and baked `web/dist`; the container ultimately runs only `houfeng-center` with `HOUFENG_HTTP_ADDR=:16001`, `HOUFENG_WEB_DIST_DIR=/app/web/dist`, and `HOUFENG_LOG_FILE=/var/log/houfeng/center.log`, so no host-mounted `web/dist` directory is required. The entrypoint assembles `HOUFENG_DATABASE_URL` from values loaded from `docs/deploy/compose.env`, prepares the configured log directory for the non-root `houfeng` user, then executes the center as that user. The root `Dockerfile` is published by the release-only Docker image workflow; the default quick-start still pulls the published image and does not build locally.
+The default Compose file pulls and runs `linnea7171/houfeng:latest`. The project image contains `houfeng-center`, a small runtime entrypoint, and baked `web/dist`; the image runs as the non-root `houfeng` user by default and ultimately runs only `houfeng-center` with `HOUFENG_HTTP_ADDR=:16001`, `HOUFENG_WEB_DIST_DIR=/app/web/dist`, and `HOUFENG_LOG_FILE=/var/log/houfeng/center.log`, so no host-mounted `web/dist` directory is required. The entrypoint assembles `HOUFENG_DATABASE_URL` from values loaded from `docs/deploy/compose.env`; it does not perform runtime privilege dropping. The root `Dockerfile` is published by the release-only Docker image workflow; the default quick-start still pulls the published image and does not build locally.
 
-Sensitive Compose values such as the PostgreSQL password and initial admin password live in the untracked `docs/deploy/compose.env` copied from `docs/deploy/compose.env.example`. The tracked `compose.yaml` intentionally avoids password-like `HOUFENG_DATABASE_URL`, `POSTGRES_PASSWORD`, and `HOUFENG_INITIAL_PASSWORD` assignment lines and loads those values through `env_file` so repository secret scanners do not flag placeholder deployment configuration.
+Sensitive Compose values such as the PostgreSQL password, initial admin password, and session HMAC key live in the untracked `docs/deploy/compose.env` copied from `docs/deploy/compose.env.example`. The tracked `compose.yaml` intentionally avoids password-like `HOUFENG_DATABASE_URL`, `POSTGRES_PASSWORD`, `HOUFENG_INITIAL_PASSWORD`, and `HOUFENG_SESSION_HMAC_KEY` assignment lines and loads those values through `env_file` so repository secret scanners do not flag placeholder deployment configuration.
 
 Maintainers publish Docker images and installer-required agent assets through the release pipeline. Configure GitHub repository secrets `RELEASE_PLEASE_TOKEN`, `DOCKERHUB_USERNAME`, and `DOCKERHUB_TOKEN`. After an eligible conventional feature/fix/docs PR merges to `main`, `.github/workflows/release-please.yml` opens or updates a release PR. When that release PR passes CI and is merged, Release Please publishes a GitHub Release such as `v1.2.3`; the `release.published` event then runs `.github/workflows/publish-images.yml`, uploads `houfeng-agent_v1.2.3_linux_amd64`, `houfeng-agent_v1.2.3_linux_arm64`, and `sha256sums.txt` to the release, and pushes `linnea7171/houfeng:v1.2.3`, `linnea7171/houfeng:1.2.3`, and `linnea7171/houfeng:latest`. Manual workflow dispatch requires explicit `version` and `source_ref` inputs, can rebuild/upload those agent assets for emergency backfills, and does not update the Docker `latest` tag.
 
@@ -104,7 +110,7 @@ Maintainers publish Docker images and installer-required agent assets through th
 - `houfeng` — the Houfeng project image, bound by default to `127.0.0.1:16001` on the host for a local reverse proxy upstream. Override only the host port with `HOUFENG_HOST_PORT=<port>` in `docs/deploy/compose.env` if needed.
 - `db` — PostgreSQL with the user-migratable host directory `./data/postgres/` mounted at `/var/lib/postgresql/data`.
 
-The Houfeng service writes center application logs to `/var/log/houfeng/center.log` inside the container, mapped to `./data/logs/center.log` on the host. It still emits logs to stdout so `docker compose logs houfeng` remains useful.
+The Houfeng service writes center application logs to `/var/log/houfeng/center.log` inside the container, backed by the `houfeng_logs` named Docker volume. It still emits logs to stdout so `docker compose logs houfeng` remains the primary quick troubleshooting path. To inspect the log file directly, use a temporary container with the named volume mounted instead of relying on a host bind path.
 
 PostgreSQL has a `pg_isready` healthcheck and the Houfeng service waits for a healthy database before startup. The center still applies embedded migrations on startup.
 
@@ -116,7 +122,7 @@ docker compose --env-file docs/deploy/compose.env up -d houfeng
 
 For production/public deployments, terminate HTTPS outside this Compose stack with Caddy, Nginx Proxy Manager, Nginx, a cloud load balancer, or similar, and forward to the loopback-bound Houfeng port. Do not expose the center directly on public plain HTTP. If one-command agent onboarding is needed, publish a GitHub Release so the release workflow builds `linnea7171/houfeng:vX.Y.Z`, `linnea7171/houfeng:X.Y.Z`, release-controlled `linnea7171/houfeng:latest`, and the matching Linux agent release assets described above.
 
-For troubleshooting, collect `./data/logs/center.log` plus recent `docker compose --env-file docs/deploy/compose.env logs --tail=100 houfeng` output. Do not paste enrollment commands, tokens, cookies, passwords, or provider credentials into shared logs or issues.
+For troubleshooting, collect recent `docker compose --env-file docs/deploy/compose.env logs --tail=100 houfeng` output plus `/var/log/houfeng/center.log` from the `houfeng_logs` named volume when file logs are needed. Do not paste enrollment commands, tokens, cookies, passwords, or provider credentials into shared logs or issues.
 
 Rollback/removal expectations:
 
@@ -133,6 +139,7 @@ HOUFENG_AGENT_TOKEN_FILE=/etc/houfeng-agent/token
 HOUFENG_AGENT_BUFFER_FILE=/var/lib/houfeng-agent/sync-buffer.json
 HOUFENG_AGENT_BUFFER_MAX_ENTRIES=65536
 HOUFENG_AGENT_BUFFER_MAX_AGE=72h
+HOUFENG_AGENT_BUFFER_MAX_BYTES=67108864
 ```
 
 The token file initially contains an enrollment token issued from the MonitoringInstance onboarding workflow. After the first successful enrollment, `houfeng-agent` replaces it with post-enrollment sync credentials for that MonitoringInstance so service restarts do not reuse the consumed enrollment token. In normal deployments, create or open the VPS first, use **创建并接入 agent** from the VPS detail page, and run the generated one-command installer instead of manually writing this file.
@@ -168,11 +175,14 @@ sudo tee /etc/houfeng/center.env >/dev/null <<'EOF'
 HOUFENG_HTTP_ADDR=:8080
 HOUFENG_WEB_DIST_DIR=/opt/houfeng/web/dist
 HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=disable
+HOUFENG_DATABASE_REQUIRE_TLS=false
 HOUFENG_PUBLIC_BASE_URL=https://center.example.com
 HOUFENG_INCIDENT_SWEEP_INTERVAL=5s
 HOUFENG_LOG_FILE=/var/log/houfeng/center.log
 HOUFENG_INITIAL_USERNAME=admin
 HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
+HOUFENG_SESSION_HMAC_KEY=replace-me-with-32-plus-random-bytes
+HOUFENG_PASSWORD_BCRYPT_COST=10
 HOUFENG_TELEGRAM_BOT_TOKEN=
 HOUFENG_TELEGRAM_CHAT_ID=
 EOF
@@ -192,7 +202,10 @@ Then create or open the VPS in the web UI and use **创建并接入 agent** from
 The generated command has this shape:
 
 ```sh
-curl -fsSL 'https://center.example.com/api/agent/install.sh' | sudo sh -s -- --server-url 'https://center.example.com' --enrollment-token '<token>' --version 'v1.2.3' --release-repo 'xiangnan0811/houfeng'
+tmp_installer="$(mktemp)" && curl -fsSL 'https://center.example.com/api/agent/install.sh' -o "$tmp_installer" && sudo sh "$tmp_installer" --server-url 'https://center.example.com' --enrollment-token-stdin --version 'v1.2.3' --release-repo 'xiangnan0811/houfeng' <<'HOUFENG_ENROLLMENT_TOKEN'
+<token>
+HOUFENG_ENROLLMENT_TOKEN
+status=$?; rm -f "$tmp_installer"; test "$status" -eq 0
 ```
 
 Important behavior:
@@ -200,7 +213,7 @@ Important behavior:
 - The command is generated by the center from `HOUFENG_PUBLIC_BASE_URL`; the browser must not guess the production URL from its current origin.
 - `POST /api/monitoring-instances/{monitoring_instance_id}/install-command` issues a fresh 30-minute one-time enrollment token. Regenerating a command invalidates the previous active token for that MonitoringInstance.
 - If the center was built with the placeholder `dev` version or without `HOUFENG_PUBLIC_BASE_URL`, command generation returns a configuration error instead of guessing.
-- `/api/agent/install.sh` is a public, read-only script route served by the deployed center. It contains no deployment-specific token until the generated command passes `--enrollment-token` at execution time.
+- `/api/agent/install.sh` is a public, read-only script route served by the deployed center. It contains no deployment-specific token until the generated command feeds a token through `--enrollment-token-stdin` at execution time.
 - GitHub Release hosts only `houfeng-agent_<version>_linux_amd64`, `houfeng-agent_<version>_linux_arm64`, and `sha256sums.txt`; the install script is not taken from GitHub raw/release assets.
 - Treat the generated command as a secret: do not paste it into tickets, chat, screenshots, process logs, or shell transcripts you plan to share.
 
@@ -219,6 +232,7 @@ HOUFENG_AGENT_TOKEN_FILE=/etc/houfeng-agent/token
 HOUFENG_AGENT_BUFFER_FILE=/var/lib/houfeng-agent/sync-buffer.json
 HOUFENG_AGENT_BUFFER_MAX_ENTRIES=65536
 HOUFENG_AGENT_BUFFER_MAX_AGE=72h
+HOUFENG_AGENT_BUFFER_MAX_BYTES=67108864
 EOF
 sudo chown root:houfeng-agent /etc/houfeng-agent/agent.env
 sudo chmod 0640 /etc/houfeng-agent/agent.env
@@ -247,8 +261,12 @@ layer. Required environment variables:
 | --- | --- | --- | --- |
 | `HOUFENG_INITIAL_USERNAME` | yes | — | Admin username seeded on first startup. |
 | `HOUFENG_INITIAL_PASSWORD` | yes | — | Admin password seeded on first startup (bcrypt-hashed before persisting). |
+| `HOUFENG_INITIAL_PASSWORD_FILE` | no | — | File path containing the initial admin password; takes precedence over `HOUFENG_INITIAL_PASSWORD`. |
 | `HOUFENG_INITIAL_DISPLAY_NAME` | no | username | Display name for the seed user. |
 | `HOUFENG_SESSION_TTL` | no | `168h` | Rolling session lifetime; refreshed on each authenticated request. |
+| `HOUFENG_SESSION_HMAC_KEY` | yes | — | At least 32-byte HMAC secret for hashing session IDs at rest; keep stable across restarts. |
+| `HOUFENG_SESSION_HMAC_KEY_FILE` | no | — | File path containing the session HMAC secret; takes precedence over `HOUFENG_SESSION_HMAC_KEY`. |
+| `HOUFENG_PASSWORD_BCRYPT_COST` | no | Go bcrypt default cost | Cost used for newly seeded or changed passwords; validate with a latency benchmark before raising. |
 
 Behavior:
 
@@ -257,18 +275,17 @@ Behavior:
 - On subsequent startups (any rows present in `users`) the variables are
   **ignored**; password rotation is done through the authenticated change-password
   flow, not by re-setting the env var.
-- Sessions are stored in the new `sessions` table (migration `0010`) and
-  delivered as `HttpOnly` + `SameSite=Lax` cookies named `houfeng_session`.
-  A background worker sweeps expired rows hourly.
+- Sessions are stored in the `sessions` table, persisted by HMAC hash rather
+  than plaintext session ID, and delivered as Secure + HttpOnly +
+  SameSite=Strict cookies named `__Host-houfeng_session`.
+  The HMAC secret is loaded from `HOUFENG_SESSION_HMAC_KEY` or
+  `HOUFENG_SESSION_HMAC_KEY_FILE`; rotating it invalidates existing browser
+  sessions. A background worker sweeps expired rows hourly.
 - Agent enrollment/sync endpoints continue to authenticate via enrollment or sync tokens (independent of the user session layer); `/api/agent/install.sh` is a public read-only installer script and does not carry a token by itself.
 
 ### HTTPS requirement
 
-The session cookie does **not** carry the `Secure` attribute in the current implementation — the
-deployment is expected to terminate HTTPS at a reverse proxy (Caddy, Nginx,
-etc.) and forward to `HOUFENG_HTTP_ADDR`. Running the center directly on a
-public network without HTTPS will leak the session cookie on plain HTTP and
-**must not** be done.
+The session cookie carries the `Secure` attribute. Browsers will not send it over plain HTTP, so authenticated deployments must terminate HTTPS at a reverse proxy (Caddy, Nginx, etc.) and forward to `HOUFENG_HTTP_ADDR`. Running the center directly on a public network without HTTPS will break browser login and **must not** be done.
 
 ## Reverse proxy and TLS
 
@@ -293,8 +310,6 @@ After Docker Compose startup:
 ```bash
 curl -fsS http://127.0.0.1:16001/api/healthz
 docker compose --env-file docs/deploy/compose.env ps
-test -s ./data/logs/center.log
-tail -n 100 ./data/logs/center.log
 docker compose --env-file docs/deploy/compose.env logs --tail=100 houfeng
 ```
 

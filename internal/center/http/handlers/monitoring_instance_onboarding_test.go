@@ -235,13 +235,55 @@ func TestMonitoringInstanceInstallCommandHandlerReturnsCommand(t *testing.T) {
 	for _, want := range []string{
 		`curl -fsSL 'https://center.example.com/api/agent/install.sh'`,
 		`--server-url 'https://center.example.com'`,
-		`--enrollment-token 'enroll_secret_001'`,
+		`--enrollment-token-stdin`,
+		"<<'HOUFENG_ENROLLMENT_TOKEN'",
+		"\nenroll_secret_001\nHOUFENG_ENROLLMENT_TOKEN\n",
 		`--version 'v1.2.3'`,
 		`--release-repo 'owner/repo'`,
 	} {
 		if !strings.Contains(body.Command, want) {
 			t.Fatalf("Command = %q, missing %q", body.Command, want)
 		}
+	}
+	if strings.Contains(body.Command, "--enrollment-token 'enroll_secret_001'") {
+		t.Fatalf("Command = %q, should not expose enrollment token as an installer argv value", body.Command)
+	}
+	if strings.Contains(body.Command, "printf %s 'enroll_secret_001'") {
+		t.Fatalf("Command = %q, should not expose enrollment token as a printf argv value", body.Command)
+	}
+}
+
+func TestMonitoringInstanceInstallCommandHandlerAddsExplicitInsecureFlagForHTTPBaseURL(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeMonitoringInstanceOnboardingRepository{
+		issueEnrollmentTokenResult: monitoringinstances.EnrollmentTokenIssue{
+			Token:     "enroll_secret_001",
+			IssuedAt:  time.Date(2026, time.May, 15, 8, 30, 0, 0, time.UTC),
+			ExpiresAt: time.Date(2026, time.May, 15, 9, 0, 0, 0, time.UTC),
+		},
+	}
+	handler := handlers.MonitoringInstanceInstallCommand(repo, handlers.InstallCommandOptions{
+		PublicBaseURL: "http://127.0.0.1:8080/",
+		AgentVersion:  "v1.2.3",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/install-command", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	var body monitoringinstances.InstallCommandIssue
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if body.PublicBaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("PublicBaseURL = %q, want trimmed HTTP base URL", body.PublicBaseURL)
+	}
+	if !strings.Contains(body.Command, `--insecure-allow-http`) {
+		t.Fatalf("Command = %q, want explicit insecure HTTP flag", body.Command)
 	}
 }
 
