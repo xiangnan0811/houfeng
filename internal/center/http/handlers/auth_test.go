@@ -197,6 +197,45 @@ func TestLoginHandlerRateLimitsFailedAttempts(t *testing.T) {
 	}
 }
 
+func TestLoginLimiterCapsUsernameKeys(t *testing.T) {
+	now := time.Date(2026, time.June, 26, 8, 0, 0, 0, time.UTC)
+	limiter := newLoginLimiter(LoginRateLimitOptions{
+		MaxTrackedKeys: 3,
+		Window:         time.Minute,
+	}, func() time.Time { return now })
+
+	for i := 0; i < 10; i++ {
+		limiter.recordFailure("user-"+string(rune('a'+i)), "198.51.100.10")
+	}
+
+	if got := len(limiter.byUser); got > 3 {
+		t.Fatalf("tracked username keys = %d, want <= 3", got)
+	}
+}
+
+func TestLoginLimiterSweepsExpiredKeys(t *testing.T) {
+	now := time.Date(2026, time.June, 26, 8, 0, 0, 0, time.UTC)
+	limiter := newLoginLimiter(LoginRateLimitOptions{
+		MaxTrackedKeys: 10,
+		SweepInterval:  time.Minute,
+		Window:         time.Minute,
+	}, func() time.Time { return now })
+
+	limiter.recordFailure("expired-user", "198.51.100.10")
+	now = now.Add(2 * time.Minute)
+	limiter.recordFailure("active-user", "198.51.100.11")
+
+	if _, ok := limiter.byUser["expired-user"]; ok {
+		t.Fatalf("expired username key was not swept: %#v", limiter.byUser)
+	}
+	if _, ok := limiter.byIP["198.51.100.10"]; ok {
+		t.Fatalf("expired IP key was not swept: %#v", limiter.byIP)
+	}
+	if _, ok := limiter.byUser["active-user"]; !ok {
+		t.Fatalf("active username key missing after sweep: %#v", limiter.byUser)
+	}
+}
+
 // ---- Logout --------------------------------------------------------------
 
 func TestLogoutHandlerClearsCookie(t *testing.T) {

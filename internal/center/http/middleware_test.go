@@ -144,6 +144,63 @@ func TestRequireSameOriginRejectsUnsafeMethodWithoutOriginOrReferer(t *testing.T
 	}
 }
 
+func TestRequireAllowedHostAllowsEmptyPublicBaseURL(t *testing.T) {
+	innerCalled := false
+	handler := RequireAllowedHost("")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		innerCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	r := httptest.NewRequest(http.MethodGet, "http://dev.local/api/dashboard", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", w.Code)
+	}
+	if !innerCalled {
+		t.Fatal("inner handler was not called")
+	}
+}
+
+func TestRequireAllowedHostAllowsConfiguredHostWithPort(t *testing.T) {
+	innerCalled := false
+	handler := RequireAllowedHost("https://houfeng.example.com:8443")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		innerCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	r := httptest.NewRequest(http.MethodGet, "http://houfeng.example.com:8443/api/dashboard", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", w.Code)
+	}
+	if !innerCalled {
+		t.Fatal("inner handler was not called")
+	}
+}
+
+func TestRequireAllowedHostRejectsMismatchedHost(t *testing.T) {
+	innerCalled := false
+	handler := RequireAllowedHost("https://houfeng.example.com")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		innerCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	r := httptest.NewRequest(http.MethodGet, "http://evil.example.net/api/dashboard", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+	if innerCalled {
+		t.Fatal("inner handler was called for mismatched host")
+	}
+}
+
 func TestSecurityHeadersSetsBaselineHeaders(t *testing.T) {
 	handler := SecurityHeaders(true)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

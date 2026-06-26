@@ -391,6 +391,9 @@ func TestMonitoringInstanceOnboardingIssueEnrollmentTokenStoresIssuedAt(t *testi
 	if gotArgs[1] != hashEnrollmentToken(result.Token) {
 		t.Fatalf("gotArgs[1] = %#v, want enrollment token hash", gotArgs[1])
 	}
+	if !isHMACAgentTokenHash(gotArgs[1].(string)) {
+		t.Fatalf("gotArgs[1] = %#v, want versioned hmac enrollment token hash", gotArgs[1])
+	}
 	if !strings.Contains(gotSQL, "enrollment_token_issued_at = now()") {
 		t.Fatalf("IssueMonitoringInstanceEnrollmentToken() SQL = %q, want enrollment_token_issued_at update", gotSQL)
 	}
@@ -443,8 +446,8 @@ func TestFindMonitoringInstanceByEnrollmentTokenRequiresActiveUnexpiredToken(t *
 	if err != nil {
 		t.Fatalf("FindMonitoringInstanceByEnrollmentToken() error = %v", err)
 	}
-	if len(gotArgs) != 1 || gotArgs[0] != hashEnrollmentToken("enroll_001") {
-		t.Fatalf("QueryRow args = %#v, want enrollment token hash only", gotArgs)
+	if len(gotArgs) != 2 || gotArgs[0] != hashEnrollmentToken("enroll_001") || gotArgs[1] != hashOpaqueToken("enroll_001") {
+		t.Fatalf("QueryRow args = %#v, want current and legacy enrollment token hashes", gotArgs)
 	}
 	for _, snippet := range []string{
 		"enrollment_token_consumed_at is null",
@@ -475,13 +478,14 @@ func TestApplyEnrollmentConsumesActiveUnexpiredToken(t *testing.T) {
 				selectArgs = append([]any(nil), args...)
 				return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "mi_001"
-					*(dest[1].(*string)) = monitoringinstances.BindingUnbound
-					*(dest[2].(*string)) = ""
-					*(dest[3].(**time.Time)) = nil
-					*(dest[4].(*string)) = ""
-					*(dest[5].(**time.Time)) = nil
+					*(dest[1].(*string)) = hashEnrollmentToken("enroll_001")
+					*(dest[2].(*string)) = monitoringinstances.BindingUnbound
+					*(dest[3].(*string)) = ""
+					*(dest[4].(**time.Time)) = nil
+					*(dest[5].(*string)) = ""
 					*(dest[6].(**time.Time)) = nil
-					*(dest[7].(*int)) = 0
+					*(dest[7].(**time.Time)) = nil
+					*(dest[8].(*int)) = 0
 					return nil
 				}}
 			}
@@ -518,8 +522,8 @@ func TestApplyEnrollmentConsumesActiveUnexpiredToken(t *testing.T) {
 	if !strings.HasPrefix(syncToken, "sync_") || len(syncToken) != len("sync_")+64 {
 		t.Fatalf("syncToken = %q, want 32-byte secret token", syncToken)
 	}
-	if len(selectArgs) != 1 || selectArgs[0] != hashEnrollmentToken("enroll_001") {
-		t.Fatalf("select args = %#v, want enrollment hash", selectArgs)
+	if len(selectArgs) != 2 || selectArgs[0] != hashEnrollmentToken("enroll_001") || selectArgs[1] != hashOpaqueToken("enroll_001") {
+		t.Fatalf("select args = %#v, want current and legacy enrollment hashes", selectArgs)
 	}
 	for _, snippet := range []string{
 		"enrollment_token_consumed_at is null",
@@ -536,11 +540,14 @@ func TestApplyEnrollmentConsumesActiveUnexpiredToken(t *testing.T) {
 	if !strings.Contains(updateSQL, "sync_token_hash = case when $9 <> '' then $9 else sync_token_hash end") {
 		t.Fatalf("ApplyEnrollment update SQL = %q, want atomic sync token write", updateSQL)
 	}
-	if len(updateArgs) != 9 {
-		t.Fatalf("ApplyEnrollment update args = %#v, want 9 args", updateArgs)
+	if len(updateArgs) != 10 {
+		t.Fatalf("ApplyEnrollment update args = %#v, want 10 args", updateArgs)
 	}
 	if updateArgs[8] != hashSyncToken(syncToken) {
 		t.Fatalf("ApplyEnrollment sync hash arg = %#v, want hash of returned token", updateArgs[8])
+	}
+	if !isHMACAgentTokenHash(updateArgs[8].(string)) {
+		t.Fatalf("ApplyEnrollment sync hash arg = %#v, want versioned hmac sync token hash", updateArgs[8])
 	}
 	if !committed {
 		t.Fatal("transaction was not committed")
@@ -1303,8 +1310,8 @@ func TestStoreSourceIncludesSyncTokenValidationForHeartbeatWrites(t *testing.T) 
 	if !strings.Contains(heartbeatPath, "coalesce(sync_token_hash, '')") {
 		t.Fatal("RecordAcceptedHeartbeats() should load sync_token_hash inside the heartbeat transaction")
 	}
-	if !strings.Contains(heartbeatPath, "syncTokenHashesEqual(storedSyncTokenHash, hashSyncToken(syncToken))") {
-		t.Fatal("RecordAcceptedHeartbeats() should compare sync token hashes with the shared constant-time helper")
+	if !strings.Contains(heartbeatPath, "r.tokenHasher.syncTokenMatches(storedSyncTokenHash, syncToken)") {
+		t.Fatal("RecordAcceptedHeartbeats() should compare sync token hashes with the shared versioned token hasher")
 	}
 	if strings.Contains(heartbeatPath, "storedSyncTokenHash != hashSyncToken(syncToken)") {
 		t.Fatal("RecordAcceptedHeartbeats() should not use plain string inequality for sync token hashes")

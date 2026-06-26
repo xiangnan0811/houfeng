@@ -723,3 +723,36 @@ Documented the post-release cleanup checklist so future release flows clean stal
 ### Next Steps
 
 - None - task complete
+
+
+## Session 198: Security review remediation
+
+**Date**: 2026-06-26
+**Task**: Security review remediation
+**Branch**: `fix/security-review-remediation`
+
+### Summary
+
+Remediated external security review findings: bounded public limiters, sync inflight/header guard, agent token HMAC migration, command-output redaction, trusted proxy and Host hardening, generic JSON encode errors, signed installer checksums, docs/spec updates, and evidence matrix.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4a7d4f8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

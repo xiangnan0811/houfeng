@@ -3,6 +3,7 @@ package handlers_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,12 @@ import (
 	"houfeng/internal/center/syncing"
 	"houfeng/internal/contracts/agentapi"
 )
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) {
+	return 0, errors.New("body should not be read")
+}
 
 type fakeAgentEnrollmentService struct {
 	enrollResult enrollment.EnrollResult
@@ -40,6 +47,17 @@ type fakeAgentSyncService struct {
 func (f *fakeAgentSyncService) SyncBatch(_ context.Context, batch syncing.Batch) (syncing.Result, error) {
 	f.syncBatch = batch
 	return f.syncResult, f.syncErr
+}
+
+type blockingAgentSyncService struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (f *blockingAgentSyncService) SyncBatch(_ context.Context, _ syncing.Batch) (syncing.Result, error) {
+	close(f.entered)
+	<-f.release
+	return syncing.Result{}, nil
 }
 
 func TestAgentEnrollHandlerReturnsBindingStatus(t *testing.T) {
@@ -730,6 +748,61 @@ func TestAgentSyncHandlerRateLimitsByClientIP(t *testing.T) {
 		t.Fatalf("second attempt status = %d, want %d", recorder.Code, http.StatusTooManyRequests)
 	}
 	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "too many requests")
+}
+
+func TestAgentSyncHandlerRejectsMalformedHeaderTokenBeforeBodyRead(t *testing.T) {
+	t.Parallel()
+
+	handler := handlers.AgentSync(&fakeAgentSyncService{})
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, errReader{})
+	req.Header.Set("Authorization", "Bearer bad token with spaces")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
+}
+
+func TestAgentSyncHandlerLimitsInflightRequestsBeforeBodyRead(t *testing.T) {
+	t.Parallel()
+
+	svc := &blockingAgentSyncService{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	handler := handlers.AgentSyncWithOptions(svc, handlers.AgentEndpointOptions{
+		RateLimit: handlers.AgentRateLimitOptions{
+			MaxRequestsByIP:   100,
+			MaxRequestsGlobal: 100,
+			MaxSyncInflight:   1,
+			Window:            time.Minute,
+		},
+	})
+	firstReq := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRecorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(firstRecorder, firstReq)
+		close(done)
+	}()
+	<-svc.entered
+
+	secondReq := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, errReader{})
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(secondRecorder, secondReq)
+
+	close(svc.release)
+	<-done
+
+	if secondRecorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", secondRecorder.Code, http.StatusServiceUnavailable)
+	}
+	assertErrorResponse(t, secondRecorder, agentapi.ErrorCodeInvalidRequest, "service unavailable")
 }
 
 func TestAgentSyncHandlerRejectsTooManyHeartbeatsBeforeService(t *testing.T) {

@@ -29,6 +29,7 @@ READ_ENROLLMENT_TOKEN_STDIN=0
 AGENT_VERSION=""
 RELEASE_REPO="xiangnan0811/houfeng"
 INSECURE_ALLOW_HTTP=0
+HOUFENG_CHECKSUM_MINISIGN_PUBLIC_KEY="RWS4uZTCLx9cUtaBrFBtbPxBmqIcEPiKAcQcAD4M63rnLndpdC/KvYNz"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -118,6 +119,7 @@ command -v systemctl >/dev/null 2>&1 || fail "systemctl not found; systemd is re
 for required_cmd in awk grep getent groupadd useradd install chown chmod mktemp; do
   command -v "$required_cmd" >/dev/null 2>&1 || fail "$required_cmd is required"
 done
+command -v minisign >/dev/null 2>&1 || fail "minisign is required to verify release checksums"
 
 DOWNLOADER=""
 if command -v curl >/dev/null 2>&1; then
@@ -158,6 +160,10 @@ info "detected linux/${ASSET_ARCH} with systemd"
 info "downloading release asset ${ASSET} from ${RELEASE_REPO}"
 download "${BASE_URL}/${ASSET}" "${TMPDIR}/${ASSET}"
 download "${BASE_URL}/sha256sums.txt" "${TMPDIR}/sha256sums.txt"
+download "${BASE_URL}/sha256sums.txt.minisig" "${TMPDIR}/sha256sums.txt.minisig"
+
+minisign -Vm "${TMPDIR}/sha256sums.txt" -P "$HOUFENG_CHECKSUM_MINISIGN_PUBLIC_KEY" -x "${TMPDIR}/sha256sums.txt.minisig"
+info "checksum manifest signature verified"
 
 EXPECTED_SUM="$(awk -v asset="$ASSET" '$2 == asset { print $1; found = 1; exit } END { if (!found) exit 1 }' "${TMPDIR}/sha256sums.txt" || true)"
 [ -n "$EXPECTED_SUM" ] || fail "sha256sums.txt does not contain ${ASSET}"

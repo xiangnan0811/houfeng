@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 )
 
@@ -19,7 +19,8 @@ const (
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(value); err != nil {
-		http.Error(w, fmt.Sprintf("encode json: %v", err), http.StatusInternalServerError)
+		slog.Error("encode json", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 

@@ -229,8 +229,8 @@ func TestRecordHeartbeatRejectsInvalidSyncToken(t *testing.T) {
 			MonitoringInstanceID: "mi_791",
 			BindingStatus:        monitoringinstances.BindingBound,
 			BindingFingerprint:   "fp-expected",
-			SyncTokenHash:        hashSyncToken("good-token"),
 		},
+		recordAcceptedErr: ErrInvalidSyncToken,
 	}
 	service := NewService(repo)
 
@@ -247,12 +247,12 @@ func TestRecordHeartbeatRejectsInvalidSyncToken(t *testing.T) {
 	if !errors.Is(err, ErrInvalidSyncToken) {
 		t.Fatalf("RecordHeartbeatSync() error = %v, want ErrInvalidSyncToken", err)
 	}
-	if len(repo.acceptedHeartbeatBatches) != 0 {
-		t.Fatalf("acceptedHeartbeatBatches = %d, want 0", len(repo.acceptedHeartbeatBatches))
+	if len(repo.acceptedHeartbeatBatches) != 1 {
+		t.Fatalf("acceptedHeartbeatBatches = %d, want repository validation attempt", len(repo.acceptedHeartbeatBatches))
 	}
 }
 
-func TestEnrollmentServiceSourceUsesConstantTimeSyncTokenHashCompare(t *testing.T) {
+func TestEnrollmentServiceDelegatesSyncTokenVerificationToRepository(t *testing.T) {
 	t.Parallel()
 
 	source, err := os.ReadFile("service.go")
@@ -261,11 +261,11 @@ func TestEnrollmentServiceSourceUsesConstantTimeSyncTokenHashCompare(t *testing.
 	}
 
 	recordHeartbeatPath := sourceBetween(t, string(source), "func (s *Service) RecordHeartbeatSync", "")
-	if !strings.Contains(recordHeartbeatPath, "syncTokenHashesEqual(record.SyncTokenHash, hashSyncToken(input.SyncToken))") {
-		t.Fatal("RecordHeartbeatSync() should compare sync token hashes with the shared constant-time helper")
+	if !strings.Contains(recordHeartbeatPath, "s.repo.RecordAcceptedHeartbeats(ctx, input.SyncToken, writes)") {
+		t.Fatal("RecordHeartbeatSync() should delegate sync token verification to the repository transaction")
 	}
-	if strings.Contains(recordHeartbeatPath, "record.SyncTokenHash != hashSyncToken(input.SyncToken)") {
-		t.Fatal("RecordHeartbeatSync() should not use plain string inequality for sync token hashes")
+	if strings.Contains(recordHeartbeatPath, "hashSyncToken") || strings.Contains(recordHeartbeatPath, "SyncTokenHash") {
+		t.Fatal("RecordHeartbeatSync() should not duplicate sync token hash policy outside the repository")
 	}
 }
 
@@ -277,7 +277,6 @@ func TestRecordHeartbeatRejectsMismatchedFingerprint(t *testing.T) {
 			MonitoringInstanceID: "mi_792",
 			BindingStatus:        monitoringinstances.BindingBound,
 			BindingFingerprint:   "fp-expected",
-			SyncTokenHash:        hashSyncToken("good-token"),
 		},
 	}
 	service := NewService(repo)
@@ -305,7 +304,6 @@ func TestRecordHeartbeatRejectsMismatchedFingerprintWithoutSideEffects(t *testin
 			MonitoringInstanceID: "mi_793",
 			BindingStatus:        monitoringinstances.BindingBound,
 			BindingFingerprint:   "fp-expected",
-			SyncTokenHash:        hashSyncToken("good-token"),
 		},
 	}
 	service := NewService(repo)
@@ -350,7 +348,6 @@ func TestRecordHeartbeatUsesAtomicAcceptedWritePath(t *testing.T) {
 			MonitoringInstanceID: "mi_794",
 			BindingStatus:        monitoringinstances.BindingBound,
 			BindingFingerprint:   "fp-3",
-			SyncTokenHash:        hashSyncToken("good-token"),
 		},
 	}
 	service := NewService(repo)

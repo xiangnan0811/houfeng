@@ -5,6 +5,8 @@ import (
 	"context"
 	osexec "os/exec"
 	"time"
+
+	"houfeng/internal/security/redact"
 )
 
 const (
@@ -53,12 +55,12 @@ func Run(ctx context.Context, bin string, args []string) Result {
 		}
 	}
 
-	out := stdout.String()
+	out := redact.Secrets(stdout.String())
 	if len(out) > MaxOutputBytes {
 		out = out[:MaxOutputBytes] + "\n[output truncated at 64KB]"
 	}
 
-	errOut := stderr.String()
+	errOut := redact.Secrets(stderr.String())
 	if len(errOut) > MaxOutputBytes {
 		errOut = errOut[:MaxOutputBytes] + "\n[stderr truncated at 64KB]"
 	}

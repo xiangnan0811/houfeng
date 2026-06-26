@@ -63,8 +63,9 @@ Release assets expected under `dist/`:
 - `houfeng-agent_v1.2.3_linux_amd64`
 - `houfeng-agent_v1.2.3_linux_arm64`
 - `sha256sums.txt`
+- `sha256sums.txt.minisig`
 
-Published releases should already contain those files because `.github/workflows/publish-images.yml` uploads them on `release.published`. Use `make build-agent-release VERSION=<tag>` locally as a sanity check or emergency backfill source if a historical release is missing assets. GitHub Release hosts only the binary/checksum assets; the installer script is served by the running center at `/api/agent/install.sh`.
+Published releases should already contain those files because `.github/workflows/publish-images.yml` uploads them on `release.published`. Use `make build-agent-release VERSION=<tag>` locally as a sanity check or emergency backfill source if a historical release is missing assets, but remember that installable releases also need the signed manifest produced by the release workflow. GitHub Release hosts only the binary and signed-checksum assets; the installer script is served by the running center at `/api/agent/install.sh`.
 
 For API-only local smoke on the same machine, `make build-agent` plus the manual fallback appendix can still verify enroll/sync behavior, but it does not verify the release-asset installer path.
 
@@ -168,8 +169,8 @@ Run the exact generated command once on a Linux systemd `amd64` or `arm64` host 
 Expected installer behavior:
 
 - detects Linux/systemd and supported architecture before writing runtime files;
-- downloads `houfeng-agent_<version>_linux_<amd64|arm64>` and `sha256sums.txt` from the configured GitHub Release;
-- verifies the exact checksum entry before replacing `/usr/local/bin/houfeng-agent` or starting the service;
+- downloads `houfeng-agent_<version>_linux_<amd64|arm64>`, `sha256sums.txt`, and `sha256sums.txt.minisig` from the configured GitHub Release;
+- requires `minisign`, verifies the checksum manifest signature with the installer-pinned public key, then verifies the exact checksum entry before replacing `/usr/local/bin/houfeng-agent` or starting the service;
 - writes `/etc/houfeng-agent/agent.env` and `/etc/houfeng-agent/token` with restrictive permissions;
 - enables and starts `houfeng-agent` with systemd.
 

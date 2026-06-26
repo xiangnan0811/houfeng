@@ -48,19 +48,24 @@ type LoginRateLimitOptions struct {
 	MaxFailuresByUsername int
 	MaxFailuresByIP       int
 	MaxFailuresGlobal     int
+	MaxTrackedKeys        int
 	Window                time.Duration
+	SweepInterval         time.Duration
 }
 
 type loginLimiter struct {
-	mu        sync.Mutex
-	now       func() time.Time
-	window    time.Duration
-	maxUser   int
-	maxIP     int
-	maxGlobal int
-	byUser    map[string][]time.Time
-	byIP      map[string][]time.Time
-	global    []time.Time
+	mu            sync.Mutex
+	now           func() time.Time
+	window        time.Duration
+	sweepInterval time.Duration
+	nextSweep     time.Time
+	maxUser       int
+	maxIP         int
+	maxGlobal     int
+	maxKeys       int
+	byUser        map[string][]time.Time
+	byIP          map[string][]time.Time
+	global        []time.Time
 }
 
 func newLoginLimiter(opts LoginRateLimitOptions, now func() time.Time) *loginLimiter {
@@ -70,14 +75,22 @@ func newLoginLimiter(opts LoginRateLimitOptions, now func() time.Time) *loginLim
 	if opts.Window <= 0 {
 		opts.Window = 15 * time.Minute
 	}
+	if opts.MaxTrackedKeys <= 0 {
+		opts.MaxTrackedKeys = 10000
+	}
+	if opts.SweepInterval <= 0 {
+		opts.SweepInterval = opts.Window
+	}
 	return &loginLimiter{
-		now:       now,
-		window:    opts.Window,
-		maxUser:   opts.MaxFailuresByUsername,
-		maxIP:     opts.MaxFailuresByIP,
-		maxGlobal: opts.MaxFailuresGlobal,
-		byUser:    make(map[string][]time.Time),
-		byIP:      make(map[string][]time.Time),
+		now:           now,
+		window:        opts.Window,
+		sweepInterval: opts.SweepInterval,
+		maxUser:       opts.MaxFailuresByUsername,
+		maxIP:         opts.MaxFailuresByIP,
+		maxGlobal:     opts.MaxFailuresGlobal,
+		maxKeys:       opts.MaxTrackedKeys,
+		byUser:        make(map[string][]time.Time),
+		byIP:          make(map[string][]time.Time),
 	}
 }
 
@@ -86,7 +99,9 @@ func defaultLoginRateLimitOptions() LoginRateLimitOptions {
 		MaxFailuresByUsername: 10,
 		MaxFailuresByIP:       30,
 		MaxFailuresGlobal:     300,
+		MaxTrackedKeys:        10000,
 		Window:                15 * time.Minute,
+		SweepInterval:         time.Minute,
 	}
 }
 
@@ -98,13 +113,14 @@ func (l *loginLimiter) allow(username, clientIP string) bool {
 	defer l.mu.Unlock()
 	now := l.now().UTC()
 	cutoff := now.Add(-l.window)
-	l.byUser[username] = pruneTimes(l.byUser[username], cutoff)
-	l.byIP[clientIP] = pruneTimes(l.byIP[clientIP], cutoff)
+	l.sweepExpiredLocked(now, cutoff)
+	userEvents := l.eventsForKey(l.byUser, username, cutoff)
+	ipEvents := l.eventsForKey(l.byIP, clientIP, cutoff)
 	l.global = pruneTimes(l.global, cutoff)
-	if l.maxUser > 0 && len(l.byUser[username]) >= l.maxUser {
+	if l.maxUser > 0 && len(userEvents) >= l.maxUser {
 		return false
 	}
-	if l.maxIP > 0 && len(l.byIP[clientIP]) >= l.maxIP {
+	if l.maxIP > 0 && len(ipEvents) >= l.maxIP {
 		return false
 	}
 	if l.maxGlobal > 0 && len(l.global) >= l.maxGlobal {
@@ -121,8 +137,13 @@ func (l *loginLimiter) recordFailure(username, clientIP string) {
 	defer l.mu.Unlock()
 	now := l.now().UTC()
 	cutoff := now.Add(-l.window)
-	l.byUser[username] = append(pruneTimes(l.byUser[username], cutoff), now)
-	l.byIP[clientIP] = append(pruneTimes(l.byIP[clientIP], cutoff), now)
+	l.sweepExpiredLocked(now, cutoff)
+	if events, ok := l.trackableEventsForKey(l.byUser, username, cutoff); ok {
+		l.byUser[username] = append(events, now)
+	}
+	if events, ok := l.trackableEventsForKey(l.byIP, clientIP, cutoff); ok {
+		l.byIP[clientIP] = append(events, now)
+	}
 	l.global = append(pruneTimes(l.global, cutoff), now)
 }
 
@@ -136,6 +157,43 @@ func (l *loginLimiter) recordSuccess(username, clientIP string) {
 	delete(l.byIP, clientIP)
 }
 
+func (l *loginLimiter) eventsForKey(values map[string][]time.Time, key string, cutoff time.Time) []time.Time {
+	events, ok := values[key]
+	if !ok {
+		return nil
+	}
+	events = pruneTimes(events, cutoff)
+	if len(events) == 0 {
+		delete(values, key)
+		return nil
+	}
+	values[key] = events
+	return events
+}
+
+func (l *loginLimiter) trackableEventsForKey(values map[string][]time.Time, key string, cutoff time.Time) ([]time.Time, bool) {
+	events := l.eventsForKey(values, key, cutoff)
+	if events != nil {
+		return events, true
+	}
+	if l.maxKeys > 0 && len(values) >= l.maxKeys {
+		return nil, false
+	}
+	return nil, true
+}
+
+func (l *loginLimiter) sweepExpiredLocked(now, cutoff time.Time) {
+	if l.sweepInterval <= 0 {
+		return
+	}
+	if !l.nextSweep.IsZero() && now.Before(l.nextSweep) {
+		return
+	}
+	sweepTimeMap(l.byUser, cutoff)
+	sweepTimeMap(l.byIP, cutoff)
+	l.nextSweep = now.Add(l.sweepInterval)
+}
+
 func pruneTimes(values []time.Time, cutoff time.Time) []time.Time {
 	i := 0
 	for ; i < len(values); i++ {
@@ -147,6 +205,17 @@ func pruneTimes(values []time.Time, cutoff time.Time) []time.Time {
 		return values
 	}
 	return append(values[:0], values[i:]...)
+}
+
+func sweepTimeMap(values map[string][]time.Time, cutoff time.Time) {
+	for key, events := range values {
+		events = pruneTimes(events, cutoff)
+		if len(events) == 0 {
+			delete(values, key)
+			continue
+		}
+		values[key] = events
+	}
 }
 
 type trustedProxyResolver struct {

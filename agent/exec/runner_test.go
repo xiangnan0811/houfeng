@@ -58,6 +58,24 @@ func TestRunDoesNotInvokeShellImplicitly(t *testing.T) {
 	}
 }
 
+func TestRunRedactsSensitiveStdoutAndStderr(t *testing.T) {
+	stdoutResult := Run(context.Background(), "printf", []string{"%s", "token=stdout-secret"})
+	if strings.Contains(stdoutResult.Stdout, "stdout-secret") {
+		t.Fatalf("Stdout leaked secret: %q", stdoutResult.Stdout)
+	}
+	if !strings.Contains(stdoutResult.Stdout, "[redacted]") {
+		t.Fatalf("Stdout = %q, want redaction marker", stdoutResult.Stdout)
+	}
+
+	stderrResult := Run(context.Background(), "sh", []string{"-c", "printf '%s' 'Authorization: Bearer stderr-secret' >&2"})
+	if strings.Contains(stderrResult.Stderr, "stderr-secret") {
+		t.Fatalf("Stderr leaked secret: %q", stderrResult.Stderr)
+	}
+	if !strings.Contains(stderrResult.Stderr, "[redacted]") {
+		t.Fatalf("Stderr = %q, want redaction marker", stderrResult.Stderr)
+	}
+}
+
 func TestRunStdoutTruncationAt64KB(t *testing.T) {
 	// dd writes to stdout by default; 66000 bytes > 64KB triggers truncation.
 	result := Run(context.Background(), "dd", []string{"if=/dev/zero", "bs=66000", "count=1"})

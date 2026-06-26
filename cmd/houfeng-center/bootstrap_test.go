@@ -470,6 +470,23 @@ func TestBootstrapAuthServiceUsesConfiguredBcryptCost(t *testing.T) {
 	}
 }
 
+func TestBootstrapAgentTokenRepositoriesUseConfiguredHMACKey(t *testing.T) {
+	body, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatalf("read bootstrap.go: %v", err)
+	}
+	source := string(body)
+
+	for _, want := range []string{
+		"store.NewPostgresMonitoringInstanceRepositoryWithTokenHMACKey(db.Pool(), cfg.SessionHMACKey)",
+		"store.NewPostgresSyncRepositoryWithTokenHMACKey(db.Pool(), cfg.SessionHMACKey)",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("bootstrap.go missing configured agent token HMAC wiring %q", want)
+		}
+	}
+}
+
 func TestSettingsPresentationRepositoryReturnsEffectiveFreshInstallSettings(t *testing.T) {
 	repo := &fakeCenterSettingsRepository{
 		getSettingsResult: centersettings.Default(),

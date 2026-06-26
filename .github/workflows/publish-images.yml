@@ -87,6 +87,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install minisign
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisign
+
       - name: Build agent release assets
         shell: bash
         run: |
@@ -127,6 +133,35 @@ jobs:
             fi
           done
 
+      - name: Sign checksum manifest
+        shell: bash
+        env:
+          HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY: ${{ secrets.HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY }}
+          HOUFENG_RELEASE_MINISIGN_PASSWORD: ${{ secrets.HOUFENG_RELEASE_MINISIGN_PASSWORD }}
+          VERSION: v${{ needs.resolve.outputs.version }}
+        run: |
+          if [[ -z "$HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY" ]]; then
+            echo "Secret HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY must contain the minisign secret key matching the installer-pinned public key." >&2
+            exit 1
+          fi
+
+          key_file="$(mktemp)"
+          cleanup() {
+            rm -f "$key_file"
+          }
+          trap cleanup EXIT
+
+          printf '%s' "$HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY" > "$key_file"
+          chmod 0600 "$key_file"
+
+          if [[ -n "$HOUFENG_RELEASE_MINISIGN_PASSWORD" ]]; then
+            printf '%s\n' "$HOUFENG_RELEASE_MINISIGN_PASSWORD" | minisign -S -s "$key_file" -m dist/sha256sums.txt -x dist/sha256sums.txt.minisig -t "houfeng ${VERSION} checksum manifest"
+          else
+            minisign -S -s "$key_file" -m dist/sha256sums.txt -x dist/sha256sums.txt.minisig -t "houfeng ${VERSION} checksum manifest" < /dev/null
+          fi
+
+          test -s dist/sha256sums.txt.minisig
+
       - name: Upload agent release assets
         shell: bash
         env:
@@ -137,6 +172,7 @@ jobs:
             "dist/houfeng-agent_${VERSION}_linux_amd64" \
             "dist/houfeng-agent_${VERSION}_linux_arm64" \
             "dist/sha256sums.txt" \
+            "dist/sha256sums.txt.minisig" \
             --clobber
 
       - name: Publish summary
@@ -155,6 +191,7 @@ jobs:
             echo "- \`houfeng-agent_${VERSION}_linux_amd64\`"
             echo "- \`houfeng-agent_${VERSION}_linux_arm64\`"
             echo "- \`sha256sums.txt\`"
+            echo "- \`sha256sums.txt.minisig\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   credentials:

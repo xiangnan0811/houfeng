@@ -101,3 +101,36 @@ func TestScriptSupportsSaferEnrollmentTokenSources(t *testing.T) {
 		t.Fatal("installer usage should warn about command-line enrollment token exposure")
 	}
 }
+
+func TestScriptRequiresSignedChecksumManifest(t *testing.T) {
+	t.Parallel()
+
+	for _, want := range []string{
+		"HOUFENG_CHECKSUM_MINISIGN_PUBLIC_KEY=",
+		`command -v minisign >/dev/null 2>&1 || fail "minisign is required to verify release checksums"`,
+		`download "${BASE_URL}/sha256sums.txt.minisig" "${TMPDIR}/sha256sums.txt.minisig"`,
+		`minisign -Vm "${TMPDIR}/sha256sums.txt" -P "$HOUFENG_CHECKSUM_MINISIGN_PUBLIC_KEY" -x "${TMPDIR}/sha256sums.txt.minisig"`,
+		`info "checksum manifest signature verified"`,
+	} {
+		if !strings.Contains(Script, want) {
+			t.Fatalf("installer script missing signed checksum manifest snippet %q", want)
+		}
+	}
+
+	signatureIndex := strings.Index(Script, `minisign -Vm "${TMPDIR}/sha256sums.txt"`)
+	checksumIndex := strings.Index(Script, `EXPECTED_SUM="$(awk -v asset="$ASSET"`)
+	if signatureIndex == -1 || checksumIndex == -1 {
+		t.Fatal("installer script should verify manifest signature and then extract checksum")
+	}
+	if signatureIndex > checksumIndex {
+		t.Fatal("installer script should verify sha256sums.txt signature before reading checksum entries")
+	}
+	if strings.Contains(Script, "checksum-only") {
+		t.Fatal("installer script must not describe a checksum-only fallback")
+	}
+	for _, line := range strings.Split(Script, "\n") {
+		if strings.Contains(line, "minisign") && strings.Contains(line, "|| true") {
+			t.Fatalf("installer script must not ignore minisign failure: %q", line)
+		}
+	}
+}
