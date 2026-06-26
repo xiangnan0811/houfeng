@@ -756,3 +756,37 @@ Remediated external security review findings: bounded public limiters, sync infl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 199: Sync Auth Command Governance
+
+**Date**: 2026-06-26
+**Task**: Sync Auth Command Governance
+**Branch**: `fix/sync-auth-command-governance`
+
+### Summary
+
+Implemented strict agent sync bearer authentication, command sensitivity confirmation, metadata-only audit, 24h command output TTL, frontend confirmation/expired-output UI, and recorded the command governance contracts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2603d31` | (see git log) |
+| `9fcfd3f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
