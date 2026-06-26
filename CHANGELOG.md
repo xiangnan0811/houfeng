@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.5](https://github.com/xiangnan0811/houfeng/compare/v0.54.4...v0.54.5) (2026-06-26)
+
+
+### Bug Fixes
+
+* remediate security review findings ([48f3f36](https://github.com/xiangnan0811/houfeng/commit/48f3f363c4025969a938fe20998b5ba3047070a9))
+
 ## [0.54.4](https://github.com/xiangnan0811/houfeng/compare/v0.54.3...v0.54.4) (2026-06-24)
 
 
