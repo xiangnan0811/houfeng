@@ -58,10 +58,30 @@ func (c *Client) Sync(ctx context.Context, request agentapi.SyncRequest) (*agent
 	if strings.TrimSpace(request.SyncToken) != "" {
 		headers["Authorization"] = "Bearer " + strings.TrimSpace(request.SyncToken)
 	}
-	if err := c.postJSON(ctx, agentapi.SyncPath, request, response, headers); err != nil {
+	if err := c.postJSON(ctx, agentapi.SyncPath, syncRequestPayloadFrom(request), response, headers); err != nil {
 		return nil, err
 	}
 	return response, nil
+}
+
+type syncRequestPayload struct {
+	MonitoringInstanceID string                                 `json:"monitoring_instance_id"`
+	Heartbeats           []agentapi.MonitoringInstanceHeartbeat `json:"heartbeats,omitempty"`
+	HostSamples          []agentapi.HostSamplePayload           `json:"host_samples,omitempty"`
+	ProbeObservations    []agentapi.ProbeObservationPayload     `json:"probe_observations,omitempty"`
+	IPQualityReports     []agentapi.IPQualityReportPayload      `json:"ip_quality_reports,omitempty"`
+	CommandResults       []agentapi.CommandResult               `json:"command_results,omitempty"`
+}
+
+func syncRequestPayloadFrom(request agentapi.SyncRequest) syncRequestPayload {
+	return syncRequestPayload{
+		MonitoringInstanceID: request.MonitoringInstanceID,
+		Heartbeats:           request.Heartbeats,
+		HostSamples:          request.HostSamples,
+		ProbeObservations:    request.ProbeObservations,
+		IPQualityReports:     request.IPQualityReports,
+		CommandResults:       request.CommandResults,
+	}
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, requestBody any, responseBody any, extraHeaders ...map[string]string) error {

@@ -3567,4 +3567,163 @@ describe('MonitoringDetailPage', () => {
     })
   })
 
+  it('requires confirmation before posting sensitive monitoring instance commands', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_cmd_sensitive',
+            binding_status: '已绑定',
+            monitoring_status: '启用',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('mi_cmd_sensitive')))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          action_id: 'act_sensitive',
+          command_id: 'systemctl_status',
+          status: 'pending',
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_cmd_sensitive']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('button', { name: '执行命令…' }))
+    fireEvent.click(await screen.findByRole('button', { name: /systemctl status/ }))
+
+    const dialog = await screen.findByRole('alertdialog', { name: '确认执行敏感命令' })
+    expect(within(dialog).getByText(/systemctl status/)).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认执行' }))
+
+    await waitFor(() =>
+      expect(screen.getByText('systemctl status · 等待 agent 执行…')).toBeInTheDocument(),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/monitoring-instances/mi_cmd_sensitive/actions', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ command_id: 'systemctl_status', confirmed_sensitive: true }),
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('does not post a sensitive command when confirmation is cancelled', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_cmd_cancel',
+            binding_status: '已绑定',
+            monitoring_status: '启用',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('mi_cmd_cancel')))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_cmd_cancel']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('button', { name: '执行命令…' }))
+    fireEvent.click(await screen.findByRole('button', { name: /systemctl status/ }))
+
+    const dialog = await screen.findByRole('alertdialog', { name: '确认执行敏感命令' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('alertdialog', { name: '确认执行敏感命令' })).not.toBeInTheDocument(),
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+
+  it('renders expired command output without stale stdout or stderr', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          monitoringInstanceRecord({
+            monitoring_instance_id: 'mi_cmd_expired',
+            binding_status: '已绑定',
+            monitoring_status: '启用',
+            current_health_status: '正常',
+            current_active_incident_count: 0,
+            current_primary_issue_summary: '',
+            last_action: {
+              action_id: 'act_expired',
+              command_id: 'uptime',
+              status: 'done',
+              exit_code: 0,
+              completed_at: '2026-06-25T12:00:00Z',
+              output_expires_at: '2026-06-26T12:00:00Z',
+              output_expired: true,
+            },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('mi_cmd_expired')))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_cmd_expired']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('button', { name: '执行命令…' }))
+    const drawer = await screen.findByRole('dialog', { name: '执行命令抽屉' })
+
+    expect(within(drawer).getByText(/命令输出已过期/)).toBeInTheDocument()
+    expect(within(drawer).queryByText('stdout')).not.toBeInTheDocument()
+    expect(within(drawer).queryByText('stderr')).not.toBeInTheDocument()
+  })
+
 })

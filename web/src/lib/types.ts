@@ -90,9 +90,14 @@ export type LastAction = {
   action_id: string
   command_id: string
   status: 'pending' | 'done'
+  sensitivity?: 'standard' | 'sensitive'
+  queued_at?: string
   stdout?: string
   stderr?: string
   exit_code?: number
+  completed_at?: string
+  output_expires_at?: string
+  output_expired?: boolean
 }
 
 export type OnboardingPhase =

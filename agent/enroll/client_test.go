@@ -122,6 +122,20 @@ func TestClientSyncReturnsDecodedPointer(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer sync-token-001" {
 			t.Fatalf("Authorization = %q, want bearer sync token", got)
 		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		if payload["monitoring_instance_id"] != "nd-local-01" {
+			t.Fatalf("monitoring_instance_id = %v, want %q", payload["monitoring_instance_id"], "nd-local-01")
+		}
+		if _, ok := payload["sync_token"]; ok {
+			t.Fatalf("request unexpectedly included sync_token: %s", body)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(agentapi.SyncResponse{
 			AcceptedAt: acceptedAt,

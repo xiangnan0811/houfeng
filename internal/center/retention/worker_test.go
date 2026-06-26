@@ -226,6 +226,23 @@ func TestWorkerStopsWhileSleepingOnTimer(t *testing.T) {
 	}
 }
 
+func TestWorkerLogsCommandActionOutputCleanupCount(t *testing.T) {
+	repo := &fakeRepository{results: []Result{{ClearedCommandActionOutputs: 3}}}
+	settingsRepo := &fakeSettingsRepository{records: []centersettings.CenterSettings{settingsWithRetention(30, 30, 90, 180, 45, 180)}}
+	var logs strings.Builder
+	worker := NewWorker(repo, settingsRepo, slog.New(slog.NewTextHandler(&logs, nil)), time.Hour)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	worker.afterPass = cancel
+	if err := worker.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if !strings.Contains(logs.String(), "cleared_command_action_outputs=3") {
+		t.Fatalf("logs = %q, want cleared command action output count", logs.String())
+	}
+}
+
 func settingsWithRetention(raw, aggregate, event, notification, ipQualityRaw, ipQualityHistory int) centersettings.CenterSettings {
 	record := centersettings.Default()
 	record.RetentionPolicy = centersettings.RetentionPolicy{

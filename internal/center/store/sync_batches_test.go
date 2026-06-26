@@ -555,6 +555,7 @@ type fakeSyncBatchTx struct {
 	monitoringInstanceLabels        []string
 	pendingActionID                 string
 	pendingCommandID                string
+	pendingLastActionRaw            []byte
 	duplicateSyncBatch              bool
 
 	probeMetadataByItemID map[string]observations.ProbeMetadata
@@ -576,19 +577,20 @@ func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgco
 	if f.execErr != nil && strings.Contains(sql, f.execErrForSQLSubstring) {
 		return pgconn.CommandTag{}, f.execErr
 	}
-	if strings.Contains(sql, "insert into agent_sync_batches") {
+	lowerSQL := strings.ToLower(sql)
+	if strings.Contains(lowerSQL, "insert into agent_sync_batches") {
 		if f.duplicateSyncBatch {
 			return pgconn.NewCommandTag("INSERT 0 0"), nil
 		}
 		return pgconn.NewCommandTag("INSERT 0 1"), nil
 	}
-	if strings.Contains(sql, "last_action->>'status'") {
+	if strings.Contains(lowerSQL, "last_action->>'status'") {
 		if f.commandResultRowsAffected != nil && *f.commandResultRowsAffected == 0 {
 			return pgconn.NewCommandTag("UPDATE 0"), nil
 		}
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}
-	if strings.Contains(sql, "update monitoring_instances") {
+	if strings.Contains(lowerSQL, "update monitoring_instances") {
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}
 	return pgconn.CommandTag{}, nil
@@ -607,9 +609,13 @@ func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) p
 		}
 		actionID := f.pendingActionID
 		commandID := f.pendingCommandID
+		lastActionRaw := append([]byte(nil), f.pendingLastActionRaw...)
 		return fakeRow{scan: func(dest ...any) error {
 			*(dest[0].(**string)) = &actionID
 			*(dest[1].(**string)) = &commandID
+			if len(dest) > 2 {
+				*(dest[2].(*[]byte)) = lastActionRaw
+			}
 			return nil
 		}}
 	case strings.Contains(sql, "from monitoring_instances"):
@@ -768,6 +774,11 @@ func TestSyncBatchPlanReturnsAcceptedAtAndDerivedPlan(t *testing.T) {
 	if tx.commitCalls != 1 {
 		t.Fatalf("commitCalls = %d, want 1", tx.commitCalls)
 	}
+	resultIndex := sqlIndex(tx.execSQL, "last_action->>'status'")
+	auditIndex := sqlIndexAfter(tx.execSQL, "insert into monitoring_instance_command_action_audit", resultIndex)
+	if auditIndex != -1 && strings.Contains(tx.execSQL[auditIndex], "'completed'") {
+		t.Fatalf("stale command result wrote completion audit: %#v", tx.execSQL)
+	}
 }
 
 func TestSyncBatchDispatchesPendingActionAsDurableLastAction(t *testing.T) {
@@ -818,6 +829,103 @@ func TestSyncBatchDispatchesPendingActionAsDurableLastAction(t *testing.T) {
 	}
 }
 
+func TestSyncBatchDispatchPreservesQueuedPendingActionMetadata(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		pendingActionID:                 "act_sensitive",
+		pendingCommandID:                "systemctl_status",
+		pendingLastActionRaw:            []byte(`{"action_id":"act_sensitive","command_id":"systemctl_status","status":"pending","sensitivity":"sensitive","queued_at":"2026-06-26T11:00:00Z"}`),
+		probeMetadataByItemID: map[string]observations.ProbeMetadata{
+			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
+		},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+		now: func() time.Time {
+			return time.Date(2026, time.June, 26, 12, 0, 0, 0, time.UTC)
+		},
+	}
+
+	if _, err := repo.ApplyBatch(context.Background(), testSyncBatch()); err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+
+	args := tx.argsForSQL("pending_action_id = NULL")
+	if len(args) != 4 {
+		t.Fatalf("dispatch args = %#v, want monitoringInstance id, payload, action id, command id", args)
+	}
+	payload, ok := args[1].([]byte)
+	if !ok {
+		t.Fatalf("pending payload arg = %#v, want []byte JSON", args[1])
+	}
+	for _, want := range []string{
+		`"action_id":"act_sensitive"`,
+		`"command_id":"systemctl_status"`,
+		`"status":"pending"`,
+		`"sensitivity":"sensitive"`,
+		`"queued_at":"2026-06-26T11:00:00Z"`,
+	} {
+		if !strings.Contains(string(payload), want) {
+			t.Fatalf("pending last_action = %s, missing %s", payload, want)
+		}
+	}
+}
+
+func TestSyncBatchDispatchesPendingActionWritesAudit(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		pendingActionID:                 "act_001",
+		pendingCommandID:                "systemctl_status",
+		probeMetadataByItemID: map[string]observations.ProbeMetadata{
+			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
+		},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+		now: func() time.Time {
+			return time.Date(2026, time.June, 26, 12, 0, 0, 0, time.UTC)
+		},
+	}
+
+	if _, err := repo.ApplyBatch(context.Background(), testSyncBatch()); err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+
+	dispatchIndex := sqlIndex(tx.execSQL, "pending_action_id = NULL")
+	auditIndex := sqlIndex(tx.execSQL, "insert into monitoring_instance_command_action_audit")
+	if dispatchIndex == -1 || auditIndex == -1 {
+		t.Fatalf("execSQL = %#v, want dispatch update and audit insert", tx.execSQL)
+	}
+	if auditIndex < dispatchIndex {
+		t.Fatalf("dispatch audit index %d should run after dispatch update index %d", auditIndex, dispatchIndex)
+	}
+	auditArgs := tx.execArgs[auditIndex]
+	if len(auditArgs) != 9 {
+		t.Fatalf("audit args = %#v, want dispatch metadata", auditArgs)
+	}
+	if !strings.Contains(tx.execSQL[auditIndex], "'dispatched'") {
+		t.Fatalf("audit SQL = %q, want dispatched event type", tx.execSQL[auditIndex])
+	}
+	if auditArgs[1] != "act_001" || auditArgs[2] != "mi_001" || auditArgs[3] != "systemctl_status" || auditArgs[4] != "sensitive" || auditArgs[5] != "" || auditArgs[6] != monitoringinstances.CommandActionSourceAgentSync || auditArgs[7] != nil {
+		t.Fatalf("audit args = %#v, want dispatched metadata", auditArgs)
+	}
+	if !auditArgs[8].(time.Time).Equal(time.Date(2026, time.June, 26, 12, 0, 0, 0, time.UTC)) {
+		t.Fatalf("audit occurred_at = %v, want sync timestamp", auditArgs[8])
+	}
+}
+
 func TestSyncBatchStoresMatchingCommandResultWithCommandID(t *testing.T) {
 	t.Parallel()
 
@@ -862,6 +970,111 @@ func TestSyncBatchStoresMatchingCommandResultWithCommandID(t *testing.T) {
 	}
 	if args[1] != "mi_001" || args[2] != commandActionStatusPending || args[3] != "act_001" || args[4] != "uptime" {
 		t.Fatalf("result guard args = %#v, want monitoringInstance/status/action/command guard", args[1:5])
+	}
+}
+
+func TestSyncBatchStoresCommandResultOutputTTLMetadata(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		probeMetadataByItemID: map[string]observations.ProbeMetadata{
+			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
+		},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+		now: func() time.Time {
+			return time.Date(2026, time.June, 26, 12, 0, 0, 0, time.UTC)
+		},
+	}
+
+	batch := testSyncBatch()
+	batch.CommandResults = []syncing.CommandResult{{
+		ActionID:  "act_001",
+		CommandID: "uptime",
+		Stdout:    "up 1 day",
+		ExitCode:  0,
+	}}
+
+	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+
+	args := tx.argsForSQL("last_action->>'status'")
+	payload, ok := args[0].([]byte)
+	if !ok {
+		t.Fatalf("result payload arg = %#v, want []byte JSON", args[0])
+	}
+	for _, want := range []string{
+		`"completed_at":"2026-06-26T12:00:00Z"`,
+		`"output_expires_at":"2026-06-27T12:00:00Z"`,
+		`"output_expired":false`,
+	} {
+		if !strings.Contains(string(payload), want) {
+			t.Fatalf("result last_action = %s, missing %s", payload, want)
+		}
+	}
+}
+
+func TestSyncBatchStoresMatchingCommandResultWritesMetadataOnlyCompletionAudit(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		probeMetadataByItemID: map[string]observations.ProbeMetadata{
+			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
+		},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+		now: func() time.Time {
+			return time.Date(2026, time.June, 26, 12, 0, 0, 0, time.UTC)
+		},
+	}
+
+	batch := testSyncBatch()
+	batch.CommandResults = []syncing.CommandResult{{
+		ActionID:  "act_001",
+		CommandID: "uptime",
+		Stdout:    "up 1 day",
+		Stderr:    "diagnostic",
+		ExitCode:  0,
+	}}
+
+	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+
+	resultIndex := sqlIndex(tx.execSQL, "last_action->>'status'")
+	auditIndex := sqlIndexAfter(tx.execSQL, "insert into monitoring_instance_command_action_audit", resultIndex)
+	if resultIndex == -1 || auditIndex == -1 {
+		t.Fatalf("execSQL = %#v, want result update and completion audit", tx.execSQL)
+	}
+	if !strings.Contains(tx.execSQL[auditIndex], "'completed'") {
+		t.Fatalf("audit SQL = %q, want completed event type", tx.execSQL[auditIndex])
+	}
+	auditArgs := tx.execArgs[auditIndex]
+	if len(auditArgs) != 9 {
+		t.Fatalf("audit args = %#v, want completion metadata", auditArgs)
+	}
+	if auditArgs[1] != "act_001" || auditArgs[2] != "mi_001" || auditArgs[3] != "uptime" || auditArgs[4] != "standard" || auditArgs[5] != "" || auditArgs[6] != monitoringinstances.CommandActionSourceAgentSync || auditArgs[7] != 0 {
+		t.Fatalf("audit args = %#v, want completion metadata", auditArgs)
+	}
+	if !auditArgs[8].(time.Time).Equal(time.Date(2026, time.June, 26, 12, 0, 0, 0, time.UTC)) {
+		t.Fatalf("audit occurred_at = %v, want sync timestamp", auditArgs[8])
+	}
+	sql := strings.ToLower(tx.execSQL[auditIndex])
+	if strings.Contains(sql, "stdout") || strings.Contains(sql, "stderr") {
+		t.Fatalf("completion audit SQL must not store stdout/stderr: %s", tx.execSQL[auditIndex])
 	}
 }
 
@@ -999,6 +1212,18 @@ func containsSQL(sqls []string, want string) bool {
 func sqlIndex(sqls []string, want string) int {
 	for i, sql := range sqls {
 		if strings.Contains(sql, want) {
+			return i
+		}
+	}
+	return -1
+}
+
+func sqlIndexAfter(sqls []string, want string, after int) int {
+	if after < -1 {
+		after = -1
+	}
+	for i := after + 1; i < len(sqls); i++ {
+		if strings.Contains(sqls[i], want) {
 			return i
 		}
 	}

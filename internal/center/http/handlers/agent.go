@@ -261,8 +261,9 @@ func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.
 			rejectAgentRateLimited(w)
 			return
 		}
-		if !isValidOptionalSyncTokenHeader(r) {
-			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
+		syncToken, ok := syncTokenFromAuthorizationHeader(r)
+		if !ok {
+			writeAgentAPIError(w, http.StatusUnauthorized, agentapi.ErrorCodeInvalidSyncToken, "invalid sync token")
 			return
 		}
 		if !inflight.acquire() {
@@ -276,6 +277,7 @@ func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.
 			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidJSON, "invalid json")
 			return
 		}
+		req.SyncToken = syncToken
 		if !isValidSyncRequest(req) {
 			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
 			return
@@ -306,27 +308,25 @@ func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.
 	})
 }
 
-func isValidOptionalSyncTokenHeader(r *http.Request) bool {
-	token := strings.TrimSpace(r.Header.Get("X-Houfeng-Agent-Token"))
-	if authorization := strings.TrimSpace(r.Header.Get("Authorization")); authorization != "" {
-		const bearerPrefix = "Bearer "
-		if !strings.HasPrefix(authorization, bearerPrefix) {
-			return false
-		}
-		token = strings.TrimSpace(strings.TrimPrefix(authorization, bearerPrefix))
+func syncTokenFromAuthorizationHeader(r *http.Request) (string, bool) {
+	const bearerPrefix = "Bearer "
+	authorization := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authorization, bearerPrefix) {
+		return "", false
 	}
+	token := strings.TrimPrefix(authorization, bearerPrefix)
 	if token == "" {
-		return true
+		return "", false
 	}
 	if len(token) > agentSecretMaxBytes {
-		return false
+		return "", false
 	}
 	for _, r := range token {
 		if r <= ' ' || r == '"' || r == '\'' || r == '\\' {
-			return false
+			return "", false
 		}
 	}
-	return true
+	return token, true
 }
 
 func writeAgentAPIError(w http.ResponseWriter, status int, code, message string) {

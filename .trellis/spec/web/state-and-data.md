@@ -189,6 +189,81 @@ setMonitoringInstance({
 })
 ```
 
+### MonitoringInstance 命令操作确认与输出过期
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `MonitoringDetailPage` 命令抽屉、`postMonitoringInstanceAction`、`MonitoringInstanceRecord.last_action`、命令常量、或命令输出展示组件。
+- 目标：前端只做 presentation 和用户确认辅助；backend-owned sensitivity / confirmation / audit / TTL 是安全边界。UI 必须避免绕过 sensitive confirmation，也不能展示已经过期的 stdout/stderr。
+
+#### 2. Signatures
+
+- Frontend API: `postMonitoringInstanceAction(monitoringInstanceId, commandId, options?)`。
+- Sensitive options: `{ confirmedSensitive: true }` serializes as `confirmed_sensitive:true` in `POST /api/monitoring-instances/{id}/actions` body.
+- Command metadata: `MonitoringInstanceCommand.sensitivity` is `'standard' | 'sensitive'` and must mirror backend command tiers for presentation.
+- `LastAction` fields: `sensitivity?`, `queued_at?`, `completed_at?`, `output_expires_at?`, `output_expired?`, plus existing `action_id`, `command_id`, `status`, `stdout`, `stderr`, `exit_code`.
+
+#### 3. Contracts
+
+- Standard commands (`df_h`, `free_m`, `uptime`) post immediately with body `{"command_id":"..."}`.
+- Sensitive commands (`top_head`, `journalctl_u`, `systemctl_status`, `dmesg_err`, `docker_ps`) must open an `ActionConfirmationModal` before POST. Clicking a sensitive command must not call `fetch` until the user confirms.
+- Confirming a sensitive command must call `postMonitoringInstanceAction(..., { confirmedSensitive: true })`; canceling must close the confirmation and leave fetch call count unchanged.
+- Command rows must visually distinguish sensitive commands with a compact marker, but that marker is not authorization.
+- Pending-action disabling stays tied to `last_action.status === 'pending'`; adding confirmation must not allow another command while one is pending.
+- Optimistic pending state must include `action_id`, `command_id`, `status:'pending'`, `sensitivity`, and `queued_at` so the drawer can keep identity visible until polling refreshes.
+- When `last_action.output_expired` is true, `MonitoringInstanceCommandResult` must not render stdout/stderr sections from stale data. It should show a short expired-output message while preserving command label and exit code.
+- Audit browsing UI and role-based command authorization are follow-up scope; do not add placeholder navigation or fake data for them.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Standard command click | One POST with `{"command_id":"uptime"}` |
+| Sensitive command click | Open confirmation; no POST yet |
+| Sensitive confirm | POST includes `confirmed_sensitive:true` |
+| Sensitive cancel | Confirmation closes; no POST |
+| Existing `last_action.status === 'pending'` | All command buttons disabled |
+| `last_action.output_expired === true` | No stdout/stderr blocks; expired-output message visible |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: 用户点击 `systemctl status`，看到二次确认；确认后 payload 含 `confirmed_sensitive:true`，抽屉显示 `systemctl status · 等待 agent 执行…`。
+- Good: 24h 后后端返回 `output_expired:true`，UI 显示“命令输出已过期”，不把旧 stdout/stderr 文本重新展示出来。
+- Base: 用户点击 `uptime`，没有二次确认，保持原有快速诊断流程。
+- Bad: 前端只靠“敏感”标记但点击后直接 POST，后端会拒绝且用户体验混乱。
+- Bad: `output_expired:true` 时仍根据残留 `stdout` 字段渲染 `<pre>`，会把后端已经判定过期的输出重新暴露。
+
+#### 6. Tests Required
+
+- `web/src/lib/api.test.ts`: standard command body不带 `confirmed_sensitive`；confirmed sensitive body 带 `confirmed_sensitive:true`。
+- `MonitoringDetailPage.test.tsx`: sensitive click opens confirmation and does not POST immediately；confirm posts with confirmation field；cancel does not POST；standard command still posts immediately；expired command output hides stdout/stderr and shows expired state。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// 错误：sensitive command 直接 POST，绕过用户确认辅助。
+onClick={() => onExecute(command.id)}
+```
+
+```tsx
+// 正确：sensitive command 先打开确认，确认后才发送 confirmed_sensitive。
+if (command.sensitivity === 'sensitive') {
+  setPendingSensitiveCommand(command)
+  return
+}
+onExecute(command.id)
+```
+
+```tsx
+// 错误：output_expired=true 时仍使用残留 stdout。
+const stdout = action.stdout ?? ''
+```
+
+```tsx
+// 正确：过期输出在展示层也强制清空。
+const stdout = action.output_expired ? '' : (action.stdout ?? '')
+```
+
 ### MonitoringInstance 管理入口与归档工作集
 
 #### 1. Scope / Trigger

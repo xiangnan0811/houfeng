@@ -1113,14 +1113,14 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     setHistoryOpen(false)
   }
 
-  async function handleCommandExecute(cmdId: string) {
+  async function handleCommandExecute(cmdId: string, options: { confirmedSensitive?: boolean } = {}) {
     if (!monitoringInstance) return
     const actionMonitoringInstanceId = monitoringInstance.monitoring_instance_id
     setCommandSubmitting(true)
     setCommandError(null)
 
     try {
-      const action = await postMonitoringInstanceAction(actionMonitoringInstanceId, cmdId)
+      const action = await postMonitoringInstanceAction(actionMonitoringInstanceId, cmdId, options)
       if (
         !isMountedRef.current ||
         currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
@@ -1138,6 +1138,8 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
                   action_id: action.action_id,
                   command_id: action.command_id,
                   status: action.status,
+                  sensitivity: options.confirmedSensitive ? 'sensitive' : 'standard',
+                  queued_at: new Date().toISOString(),
                 },
               }
             : current.monitoringInstance,
@@ -1396,7 +1398,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       commandError={commandError}
       onOpenCommands={openCommandDrawer}
       onCloseCommand={closeCommandDrawer}
-      onExecuteCommand={(commandId) => void handleCommandExecute(commandId)}
+      onExecuteCommand={(commandId, options) => void handleCommandExecute(commandId, options)}
       onboardingOpen={onboardingOpen}
       onboardingReturnVPSId={onboardingReturnVPSId}
       onOpenOnboarding={openOnboardingDrawer}

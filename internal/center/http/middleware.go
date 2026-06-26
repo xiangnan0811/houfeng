@@ -8,18 +8,12 @@ import (
 
 	"houfeng/internal/center/auth"
 	"houfeng/internal/center/http/handlers"
-)
-
-type ctxKey int
-
-const (
-	ctxKeyUserID ctxKey = iota
+	"houfeng/internal/center/http/sessionctx"
 )
 
 // UserIDFromContext returns the authenticated user ID stored by RequireSession.
 func UserIDFromContext(ctx context.Context) (string, bool) {
-	v, ok := ctx.Value(ctxKeyUserID).(string)
-	return v, ok
+	return sessionctx.UserIDFromContext(ctx)
 }
 
 // RequireSession returns middleware that requires a valid session cookie. On
@@ -38,7 +32,7 @@ func RequireSession(svc handlers.AuthService) func(stdhttp.Handler) stdhttp.Hand
 				writeUnauthorized(w)
 				return
 			}
-			ctx := context.WithValue(r.Context(), ctxKeyUserID, u.UserID)
+			ctx := sessionctx.WithUserID(r.Context(), u.UserID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

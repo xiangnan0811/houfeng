@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 198
+- **Total Sessions**: 199
 - **Last Active**: 2026-06-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~758 | Active |
+| `journal-4.md` | ~792 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 199 | 2026-06-26 | Sync Auth Command Governance | `2603d31`, `9fcfd3f` | `fix/sync-auth-command-governance` |
 | 198 | 2026-06-26 | Security review remediation | `4a7d4f8` | `fix/security-review-remediation` |
 | 197 | 2026-06-24 | Record release cleanup guidance | `78e3751` | `docs/release-cleanup-guidance` |
 | 196 | 2026-06-24 | Security review remediation | `aef0d32` | `security-review-remediation-clean` |

@@ -216,12 +216,18 @@ if request.MonitoringInstanceID == "" {
    - 命令下发：center 只通过 `agentapi.PendingAction{ActionID, CommandID}` 下发稳定 `command_id`，不下发二进制路径、参数或 shell snippet。
    - 白名单解析：`agent/exec.Lookup(commandID)` 返回 `(bin, args, ok)`，`args` 必须是内部白名单参数的 defensive copy。
    - 命令执行：`agent/exec.Run(ctx, bin, args)` 使用 `exec.CommandContext`，带 30s timeout 与 stdout/stderr 独立 64KB 截断，并在返回结果前用 `internal/security/redact.Secrets` 脱敏 stdout/stderr。
+   - 命令治理元数据：`internal/contracts/agentapi.KnownCommandDefinitions()` 是 center / web-facing command ID sensitivity 的后端权威源，当前 sensitivity 只有 `standard` 和 `sensitive`。
    - Docker facts：`agent/containersample.Collect(ctx)` 在 host sample 时 best-effort 调用 Docker CLI，返回 `[]agentapi.ContainerInfo` 或 `nil`。
 
 3. **Contracts**
    - 白名单命令 ID 当前固定为：`df_h`、`free_m`、`uptime`、`top_head`、`journalctl_u`、`systemctl_status`、`dmesg_err`、`docker_ps`。
+   - sensitivity tier 当前固定为：`standard` = `df_h`、`free_m`、`uptime`；`sensitive` = `top_head`、`journalctl_u`、`systemctl_status`、`dmesg_err`、`docker_ps`。
+   - 新增、删除或重命名 command ID 时，必须同时更新 agent whitelist、`agentapi.KnownCommandDefinitions()`、center handler/store 测试、web command constants 和 API/page 测试；不得让 agent 可执行命令与 center 治理元数据漂移。
    - 命令参数全部编译进 agent，不接受中心、Web 或用户传入的动态参数。
+   - sensitive command 的二次确认由 center handler 强制执行；前端标记和确认弹层只提供可用性，不是安全边界。
    - 命令 stdout/stderr 必须在 agent 上传前脱敏；center store 持久化 `last_action` 前必须再次脱敏，覆盖旧 agent 或第三方 agent。
+   - center command audit 只保存 action/instance/command/sensitivity/event/source/actor/exit_code/occurred_at 等 metadata，不保存 stdout/stderr。
+   - completed command output 是 24h 可见的当前状态字段；过期后 API 必须隐藏 stdout/stderr，retention 必须清理 persisted `last_action` 输出字段。
    - 脱敏至少覆盖 Authorization bearer、`token` / `access_token` / `refresh_token` / `api_key` / `secret` / `password` 的 key-value/JSON 形态，以及 PEM private key blocks。脱敏是 best-effort，不能替代 agent 最小权限和诊断命令分级。
    - 未知 `command_id` 由 agent runtime 静默忽略，不阻塞 sync loop，不生成 command result。
    - Docker CLI 不存在、daemon 不可用、`docker ps` 失败或 context 已取消时返回 `nil, nil`，不得让 host sample 失败。
@@ -230,22 +236,29 @@ if request.MonitoringInstanceID == "" {
 
 4. **Validation & Error Matrix**
    - `Lookup` 未知 ID -> `ok=false`，bin/args 零值。
+   - `agentapi.SensitivityForCommand` 未知 ID -> `("", false)`，且 `RequiresSensitiveConfirmation` 返回 false；handler 仍必须先拒绝未知 command ID。
+   - sensitive command POST 缺少 `confirmed_sensitive:true` -> center 返回 400，不进入 repository write。
    - 调用方修改 `Lookup` 返回的 args -> 后续 `Lookup` 结果不变。
    - shell metacharacter 作为参数传给 `Run` -> 被当作普通参数，不执行额外 shell 语义。
    - stdout/stderr 含 `Authorization: Bearer abc` 或 `token=abc` -> agent result 和 center persisted `last_action` 都不含原始 secret。
+   - command output 超过 `output_expires_at` -> MonitoringInstance read API 不再返回 stdout/stderr。
    - `docker ps` 输出空或无法解析 -> `nil, nil`。
    - `docker stats` 输出字段无法解析 -> 对应 CPU/mem 字段保持 nil。
 
 5. **Good / Base / Bad Cases**
    - Good: center 下发 `command_id=uptime`，agent 通过 whitelist 解析为 `uptime` + nil args，执行后回传带 action/command identity 的 `CommandResult`。
+   - Good: center 收到 `systemctl_status` queue request 时要求 `confirmed_sensitive:true`，queue / dispatch / completion audit 都记录 `sensitivity='sensitive'` 但不记录 stdout/stderr。
    - Good: Docker 可用时 host sample 附带 container name/image/status 和可选 CPU/mem 百分比；Docker 不可用时 host sample 仍正常上传且 `containers` 为空。
    - Good: 旧 agent 上传未脱敏 command result，center 持久化前再次 redacts stdout/stderr。
    - Base: 当前 whitelist 有 `docker_ps`，但这只是诊断命令，不等于 Docker 编排能力。
    - Bad: 让 center 或 Web 传入 `args:["-c","..."]`、`bin:"sh"`、`command:"docker rm ..."`，会把薄 Agent 扩成任意执行面。
+   - Bad: 只改 agent whitelist 不改 `agentapi.KnownCommandDefinitions()`，导致 center 不能正确确认/审计新命令。
    - Bad: 在 `containersample` 中增加 `docker start/stop/restart/logs/exec` 或 Docker SDK 控制路径，违反 best-effort facts 边界。
 
 6. **Tests Required**
    - `agent/exec/whitelist_test.go`：固定 whitelist command IDs、bin、args；未知 ID 拒绝；返回 args 是 defensive copy。
+   - `internal/contracts/agentapi/commands_test.go`：固定 command ID set 与 sensitivity tier；未知 ID 无 sensitivity。
+   - Handler/store tests：sensitive command confirmation、metadata-only audit、24h output TTL、expired output cleanup。
    - `agent/exec/runner_test.go`：正常/非零/timeout/not-found/output truncation；必须覆盖不隐式调用 shell 和 stdout/stderr secret redaction。
    - `internal/center/store/sync_batches_test.go` 或 command action tests：command result persistence redacts stdout/stderr before writing `last_action`。
    - `agent/containersample/sample_test.go`：Docker 不可用、`ps` 失败、`stats` 失败、状态归一化、固定 Docker CLI 参数形状。

@@ -58,4 +58,5 @@ export type MonitoringInstanceCommand = {
   id: string
   name: string
   description: string
+  sensitivity: 'standard' | 'sensitive'
 }

@@ -24,8 +24,8 @@ export function MonitoringInstanceCommandResult({ action, labels }: MonitoringIn
     )
   }
 
-  const stdout = action.stdout ?? ''
-  const stderr = action.stderr ?? ''
+  const stdout = action.output_expired ? '' : (action.stdout ?? '')
+  const stderr = action.output_expired ? '' : (action.stderr ?? '')
   const exitCode = action.exit_code
   const stdoutLines = stdout.split('\n')
   const stdoutTruncated = stdoutLines.length > MAX_STDOUT_LINES
@@ -39,6 +39,12 @@ export function MonitoringInstanceCommandResult({ action, labels }: MonitoringIn
           tone={exitCode === 0 ? 'green' : 'red'}
         />
       </h4>
+
+      {action.output_expired ? (
+        <p className="command-output-expired">
+          命令输出已过期。退出码和执行记录已保留，stdout / stderr 已按保留策略清理。
+        </p>
+      ) : null}
 
       {stdout ? (
         <div className="command-output-section">
