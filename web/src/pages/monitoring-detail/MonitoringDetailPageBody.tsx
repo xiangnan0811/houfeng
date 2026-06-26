@@ -153,7 +153,7 @@ type MonitoringDetailPageBodyProps = {
   commandError: string | null
   onOpenCommands: () => void
   onCloseCommand: () => void
-  onExecuteCommand: (commandId: string) => void
+  onExecuteCommand: (commandId: string, options?: { confirmedSensitive?: boolean }) => void
   onboardingOpen: boolean
   onboardingReturnVPSId: string | null
   onOpenOnboarding: () => void

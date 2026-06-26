@@ -56,12 +56,17 @@ const (
 // LastAction describes the queued, in-flight, or completed command action for
 // the monitoring instance. It is nil when no action has ever been requested.
 type LastAction struct {
-	ActionID  string `json:"action_id"`
-	CommandID string `json:"command_id"`
-	Status    string `json:"status"`
-	Stdout    string `json:"stdout,omitempty"`
-	Stderr    string `json:"stderr,omitempty"`
-	ExitCode  *int   `json:"exit_code,omitempty"`
+	ActionID        string     `json:"action_id"`
+	CommandID       string     `json:"command_id"`
+	Status          string     `json:"status"`
+	Sensitivity     string     `json:"sensitivity,omitempty"`
+	QueuedAt        *time.Time `json:"queued_at,omitempty"`
+	Stdout          string     `json:"stdout,omitempty"`
+	Stderr          string     `json:"stderr,omitempty"`
+	ExitCode        *int       `json:"exit_code,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	OutputExpiresAt *time.Time `json:"output_expires_at,omitempty"`
+	OutputExpired   bool       `json:"output_expired,omitempty"`
 }
 
 type Record struct {
@@ -190,12 +195,26 @@ type PermanentCleanupResult struct {
 	Deleted               bool             `json:"deleted"`
 }
 
+const (
+	CommandActionSourceWeb       = "web"
+	CommandActionSourceAgentSync = "agent_sync"
+)
+
+type QueueCommandActionInput struct {
+	ActionID    string
+	CommandID   string
+	Sensitivity string
+	ActorUserID string
+	Source      string
+	QueuedAt    time.Time
+}
+
 type Repository interface {
 	ListMonitoringInstances(context.Context, ...ListScope) ([]Record, error)
 	GetMonitoringInstance(context.Context, string) (Record, error)
 	CreateMonitoringInstance(context.Context, CreateInput) (Record, error)
 	UpdateMonitoringInstanceMetadata(context.Context, string, UpdateMetadataInput) (Record, error)
-	SetPendingAction(context.Context, string, string, string) error
+	QueueCommandAction(context.Context, string, QueueCommandActionInput) error
 	GetPendingAction(context.Context, string) (actionID, commandID string, err error)
 	ClearPendingAction(context.Context, string) error
 	StoreActionResult(context.Context, string, []byte) error

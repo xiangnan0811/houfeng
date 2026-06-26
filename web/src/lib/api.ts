@@ -495,11 +495,20 @@ export function listIncidents(filter?: IncidentListFilter) {
   return requestJSON<ActiveIncidentRecord[]>(withQuery('/api/incidents', filter))
 }
 
-export function postMonitoringInstanceAction(monitoringInstanceId: string, commandId: string) {
+export type MonitoringInstanceActionOptions = {
+  confirmedSensitive?: boolean
+}
+
+export function postMonitoringInstanceAction(
+  monitoringInstanceId: string,
+  commandId: string,
+  options: MonitoringInstanceActionOptions = {},
+) {
   return postJSONBody<{ action_id: string; command_id: string; status: 'pending' }>(
     `/api/monitoring-instances/${monitoringInstanceId}/actions`,
     {
       command_id: commandId,
+      ...(options.confirmedSensitive ? { confirmed_sensitive: true } : {}),
     },
   )
 }

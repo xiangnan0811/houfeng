@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -250,40 +251,218 @@ func TestScanMonitoringInstanceReadsArchiveFields(t *testing.T) {
 	}
 }
 
-func TestSetPendingActionStoresDurablePendingLastAction(t *testing.T) {
+func TestLastActionFromRawKeepsUnexpiredCompletedOutput(t *testing.T) {
+	t.Parallel()
+
+	completedAt := time.Date(2026, time.June, 26, 12, 0, 0, 0, time.UTC)
+	expiresAt := completedAt.Add(24 * time.Hour)
+	raw, err := json.Marshal(map[string]any{
+		"action_id":         "act_001",
+		"command_id":        "uptime",
+		"status":            "done",
+		"sensitivity":       "standard",
+		"stdout":            "up 1 day",
+		"stderr":            "",
+		"exit_code":         0,
+		"completed_at":      completedAt.Format(time.RFC3339),
+		"output_expires_at": expiresAt.Format(time.RFC3339),
+		"output_expired":    false,
+	})
+	if err != nil {
+		t.Fatalf("marshal last_action: %v", err)
+	}
+
+	action := lastActionFromRawAt(raw, completedAt.Add(time.Hour))
+	if action == nil {
+		t.Fatal("lastActionFromRawAt() = nil, want action")
+	}
+	if action.Stdout != "up 1 day" || action.Stderr != "" {
+		t.Fatalf("output = stdout %q stderr %q, want unexpired output", action.Stdout, action.Stderr)
+	}
+	if action.ExitCode == nil || *action.ExitCode != 0 {
+		t.Fatalf("ExitCode = %#v, want 0", action.ExitCode)
+	}
+	if action.OutputExpired {
+		t.Fatal("OutputExpired = true, want false")
+	}
+	if action.CompletedAt == nil || !action.CompletedAt.Equal(completedAt) {
+		t.Fatalf("CompletedAt = %v, want %s", action.CompletedAt, completedAt.Format(time.RFC3339))
+	}
+	if action.OutputExpiresAt == nil || !action.OutputExpiresAt.Equal(expiresAt) {
+		t.Fatalf("OutputExpiresAt = %v, want %s", action.OutputExpiresAt, expiresAt.Format(time.RFC3339))
+	}
+}
+
+func TestLastActionFromRawHidesExpiredCompletedOutput(t *testing.T) {
+	t.Parallel()
+
+	completedAt := time.Date(2026, time.June, 25, 12, 0, 0, 0, time.UTC)
+	expiresAt := completedAt.Add(24 * time.Hour)
+	raw, err := json.Marshal(map[string]any{
+		"action_id":         "act_001",
+		"command_id":        "uptime",
+		"status":            "done",
+		"sensitivity":       "standard",
+		"stdout":            "up 1 day",
+		"stderr":            "diagnostic detail",
+		"exit_code":         0,
+		"completed_at":      completedAt.Format(time.RFC3339),
+		"output_expires_at": expiresAt.Format(time.RFC3339),
+		"output_expired":    false,
+	})
+	if err != nil {
+		t.Fatalf("marshal last_action: %v", err)
+	}
+
+	action := lastActionFromRawAt(raw, expiresAt.Add(time.Second))
+	if action == nil {
+		t.Fatal("lastActionFromRawAt() = nil, want action")
+	}
+	if action.Stdout != "" || action.Stderr != "" {
+		t.Fatalf("expired output = stdout %q stderr %q, want hidden output", action.Stdout, action.Stderr)
+	}
+	if action.ExitCode == nil || *action.ExitCode != 0 {
+		t.Fatalf("ExitCode = %#v, want 0", action.ExitCode)
+	}
+	if !action.OutputExpired {
+		t.Fatal("OutputExpired = false, want true")
+	}
+}
+
+func TestLastActionFromRawKeepsLegacyCompletedOutputWithoutExpiry(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{"action_id":"act_legacy","command_id":"uptime","status":"done","stdout":"legacy","stderr":"","exit_code":0}`)
+
+	action := lastActionFromRawAt(raw, time.Date(2026, time.June, 26, 12, 0, 0, 0, time.UTC))
+	if action == nil {
+		t.Fatal("lastActionFromRawAt() = nil, want legacy action")
+	}
+	if action.Stdout != "legacy" {
+		t.Fatalf("Stdout = %q, want legacy output", action.Stdout)
+	}
+	if action.OutputExpired {
+		t.Fatal("OutputExpired = true, want false for legacy action without expiry")
+	}
+}
+
+func TestQueueCommandActionStoresDurablePendingLastActionMetadata(t *testing.T) {
 	t.Parallel()
 
 	var (
-		execSQL  string
-		execArgs []any
+		execSQL  []string
+		execArgs [][]any
 	)
 	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
 		exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-			execSQL = sql
-			execArgs = append([]any(nil), args...)
+			execSQL = append(execSQL, sql)
+			execArgs = append(execArgs, append([]any(nil), args...))
 			return pgconn.NewCommandTag("UPDATE 1"), nil
 		},
 	}}
 
-	if err := repo.SetPendingAction(context.Background(), "mi_001", "act_001", "uptime"); err != nil {
-		t.Fatalf("SetPendingAction() error = %v", err)
+	queuedAt := time.Date(2026, time.June, 26, 12, 30, 0, 0, time.UTC)
+	err := repo.QueueCommandAction(context.Background(), "mi_001", monitoringinstances.QueueCommandActionInput{
+		ActionID:    "act_001",
+		CommandID:   "uptime",
+		Sensitivity: "standard",
+		Source:      monitoringinstances.CommandActionSourceWeb,
+		QueuedAt:    queuedAt,
+	})
+	if err != nil {
+		t.Fatalf("QueueCommandAction() error = %v", err)
 	}
 
-	if !strings.Contains(execSQL, "last_action = $3") {
-		t.Fatalf("exec SQL = %q, want last_action write", execSQL)
-	}
-	if len(execArgs) != 4 {
-		t.Fatalf("exec args = %#v, want action id, command id, payload, monitoringInstance id", execArgs)
-	}
-	raw, ok := execArgs[2].([]byte)
-	if !ok {
-		t.Fatalf("last_action arg = %#v, want []byte JSON", execArgs[2])
-	}
-	payload := string(raw)
-	for _, want := range []string{`"action_id":"act_001"`, `"command_id":"uptime"`, `"status":"pending"`} {
-		if !strings.Contains(payload, want) {
-			t.Fatalf("last_action payload = %s, missing %s", payload, want)
+	updateIndex := -1
+	for i, sql := range execSQL {
+		if strings.Contains(sql, "last_action = $3") {
+			updateIndex = i
+			break
 		}
+	}
+	if updateIndex == -1 {
+		t.Fatalf("exec SQL = %#v, want last_action write", execSQL)
+	}
+	updateArgs := execArgs[updateIndex]
+	if len(updateArgs) != 4 {
+		t.Fatalf("exec args = %#v, want action id, command id, payload, monitoringInstance id", updateArgs)
+	}
+	raw, ok := updateArgs[2].([]byte)
+	if !ok {
+		t.Fatalf("last_action arg = %#v, want []byte JSON", updateArgs[2])
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal last_action: %v", err)
+	}
+	for key, want := range map[string]string{
+		"action_id":   "act_001",
+		"command_id":  "uptime",
+		"status":      "pending",
+		"sensitivity": "standard",
+		"queued_at":   queuedAt.Format(time.RFC3339),
+	} {
+		if payload[key] != want {
+			t.Fatalf("last_action[%s] = %v, want %q; payload=%s", key, payload[key], want, raw)
+		}
+	}
+}
+
+func TestQueueCommandActionInsertsQueuedAuditInTransaction(t *testing.T) {
+	t.Parallel()
+
+	var execSQL []string
+	var execArgs [][]any
+	tx := &fakeMonitoringInstanceTx{
+		exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			execSQL = append(execSQL, sql)
+			execArgs = append(execArgs, append([]any(nil), args...))
+			if strings.Contains(sql, "update monitoring_instances") {
+				return pgconn.NewCommandTag("UPDATE 1"), nil
+			}
+			if strings.Contains(sql, "insert into monitoring_instance_command_action_audit") {
+				return pgconn.NewCommandTag("INSERT 0 1"), nil
+			}
+			return pgconn.NewCommandTag("UPDATE 1"), nil
+		},
+	}
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+
+	queuedAt := time.Date(2026, time.June, 26, 12, 30, 0, 0, time.UTC)
+	err := repo.QueueCommandAction(context.Background(), "mi_001", monitoringinstances.QueueCommandActionInput{
+		ActionID:    "act_001",
+		CommandID:   "systemctl_status",
+		Sensitivity: "sensitive",
+		ActorUserID: "u_operator",
+		Source:      monitoringinstances.CommandActionSourceWeb,
+		QueuedAt:    queuedAt,
+	})
+	if err != nil {
+		t.Fatalf("QueueCommandAction() error = %v", err)
+	}
+
+	assertSQLOrder(t, execSQL,
+		"UPDATE monitoring_instances",
+		"insert into monitoring_instance_command_action_audit",
+	)
+	if len(execArgs) < 2 {
+		t.Fatalf("exec args = %#v, want update and audit args", execArgs)
+	}
+	auditArgs := execArgs[1]
+	if len(auditArgs) != 9 {
+		t.Fatalf("audit args = %#v, want audit metadata", auditArgs)
+	}
+	if !strings.Contains(execSQL[1], "'queued'") {
+		t.Fatalf("audit SQL = %q, want queued event type", execSQL[1])
+	}
+	if auditArgs[1] != "act_001" || auditArgs[2] != "mi_001" || auditArgs[3] != "systemctl_status" || auditArgs[4] != "sensitive" || auditArgs[5] != "u_operator" || auditArgs[6] != monitoringinstances.CommandActionSourceWeb || auditArgs[7] != nil {
+		t.Fatalf("audit args = %#v, want queued metadata", auditArgs)
+	}
+	if !auditArgs[8].(time.Time).Equal(queuedAt) {
+		t.Fatalf("audit occurred_at = %v, want %v", auditArgs[8], queuedAt)
+	}
+	if tx.commitCalls != 1 {
+		t.Fatalf("commit calls = %d, want 1", tx.commitCalls)
 	}
 }
 
@@ -2449,15 +2628,17 @@ func (r fakeMonitoringInstanceRow) Scan(dest ...any) error {
 }
 
 type fakeMonitoringInstanceTx struct {
-	queryRow func(context.Context, string, ...any) pgx.Row
-	query    func(context.Context, string, ...any) (pgx.Rows, error)
-	exec     func(context.Context, string, ...any) (pgconn.CommandTag, error)
-	commit   func(context.Context) error
-	rollback func(context.Context) error
+	queryRow    func(context.Context, string, ...any) pgx.Row
+	query       func(context.Context, string, ...any) (pgx.Rows, error)
+	exec        func(context.Context, string, ...any) (pgconn.CommandTag, error)
+	commit      func(context.Context) error
+	rollback    func(context.Context) error
+	commitCalls int
 }
 
 func (f *fakeMonitoringInstanceTx) Begin(context.Context) (pgx.Tx, error) { return f, nil }
 func (f *fakeMonitoringInstanceTx) Commit(ctx context.Context) error {
+	f.commitCalls++
 	if f.commit != nil {
 		return f.commit(ctx)
 	}

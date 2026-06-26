@@ -8,14 +8,14 @@ export const MONITORING_INSTANCE_BINDING_REJECT_PENDING_LABEL = '拒绝新指纹
 export const MONITORING_INSTANCE_BINDING_RESET_LABEL = '重置绑定'
 
 export const COMMAND_LIST: MonitoringInstanceCommand[] = [
-  { id: 'df_h', name: 'df -h', description: '磁盘使用概览' },
-  { id: 'free_m', name: 'free -m', description: '内存使用情况' },
-  { id: 'uptime', name: 'uptime', description: '系统运行时间与负载' },
-  { id: 'top_head', name: 'top -bn1', description: '进程 CPU/内存排序快照' },
-  { id: 'journalctl_u', name: 'journalctl --lines=50', description: '系统日志最近 50 行' },
-  { id: 'systemctl_status', name: 'systemctl status', description: '所有 systemd unit 状态概览' },
-  { id: 'dmesg_err', name: 'dmesg --level=err', description: '内核错误日志' },
-  { id: 'docker_ps', name: 'docker ps', description: '运行中的 Docker 容器' },
+  { id: 'df_h', name: 'df -h', description: '磁盘使用概览', sensitivity: 'standard' },
+  { id: 'free_m', name: 'free -m', description: '内存使用情况', sensitivity: 'standard' },
+  { id: 'uptime', name: 'uptime', description: '系统运行时间与负载', sensitivity: 'standard' },
+  { id: 'top_head', name: 'top -bn1', description: '进程 CPU/内存排序快照', sensitivity: 'sensitive' },
+  { id: 'journalctl_u', name: 'journalctl --lines=50', description: '系统日志最近 50 行', sensitivity: 'sensitive' },
+  { id: 'systemctl_status', name: 'systemctl status', description: '所有 systemd unit 状态概览', sensitivity: 'sensitive' },
+  { id: 'dmesg_err', name: 'dmesg --level=err', description: '内核错误日志', sensitivity: 'sensitive' },
+  { id: 'docker_ps', name: 'docker ps', description: '运行中的 Docker 容器', sensitivity: 'sensitive' },
 ]
 
 export const COMMAND_LABELS: Record<string, string> = Object.fromEntries(

@@ -155,6 +155,40 @@ func TestAgentSyncBatchReplayMigrationCreatesIdempotencyTable(t *testing.T) {
 	}
 }
 
+func TestCommandActionAuditMigrationCreatesMetadataOnlyAuditTable(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0046_create_command_action_audit.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, want := range []string{
+		"create table if not exists monitoring_instance_command_action_audit",
+		"audit_id text primary key",
+		"action_id text not null",
+		"monitoring_instance_id text not null references monitoring_instances(monitoring_instance_id) on delete cascade",
+		"command_id text not null",
+		"sensitivity text not null",
+		"event_type text not null",
+		"actor_user_id text references users(user_id) on delete set null",
+		"source text not null",
+		"exit_code integer",
+		"occurred_at timestamptz not null default now()",
+		"details jsonb not null default '{}'::jsonb",
+		"sensitivity in ('standard', 'sensitive')",
+		"event_type in ('queued', 'dispatched', 'completed')",
+		"source in ('web', 'agent_sync')",
+		"idx_monitoring_instance_command_action_audit_instance_time",
+		"idx_monitoring_instance_command_action_audit_action_time",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0046 migration missing %q", want)
+		}
+	}
+	if strings.Contains(sql, "stdout") || strings.Contains(sql, "stderr") {
+		t.Fatalf("0046 migration must not create stdout/stderr audit columns")
+	}
+}
+
 func TestIPQualityReadModelFilterMigrationHidesFailurePlaceholders(t *testing.T) {
 	payload, err := migrations.FS.ReadFile("0041_filter_ip_quality_read_models.sql")
 	if err != nil {

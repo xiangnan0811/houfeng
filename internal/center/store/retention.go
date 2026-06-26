@@ -75,6 +75,9 @@ func (r *PostgresRetentionRepository) ApplyRetention(ctx context.Context, policy
 	if result.DeletedNotifications, err = execRows(ctx, tx, deleteExpiredNotificationsSQL, "delete expired notifications", notificationCutoff); err != nil {
 		return retention.Result{}, err
 	}
+	if result.ClearedCommandActionOutputs, err = execRows(ctx, tx, clearExpiredCommandActionOutputsSQL, "clear expired command action outputs", now.UTC()); err != nil {
+		return retention.Result{}, err
+	}
 	if policy.IPQualityRawRetentionDays > 0 {
 		if result.ClearedIPQualityRawJSON, err = execRows(ctx, tx, clearExpiredIPQualityRawJSONSQL, "clear expired ip quality raw json", ipQualityRawCutoff); err != nil {
 			return retention.Result{}, err
@@ -192,5 +195,13 @@ const deleteExpiredMonitoringInstanceAggregatesSQL = `delete from monitoring_ins
 const deleteExpiredTargetAggregatesSQL = `delete from target_probe_daily_aggregates where bucket_date < $1::date`
 const deleteExpiredEventsSQL = `delete from state_change_events where created_at < $1`
 const deleteExpiredNotificationsSQL = `delete from notification_records where created_at < $1`
+const clearExpiredCommandActionOutputsSQL = `
+	update monitoring_instances
+	set last_action = (last_action - 'stdout' - 'stderr') || jsonb_build_object('output_expired', true),
+		updated_at = now()
+	where last_action->>'status' = 'done'
+		and coalesce((last_action->>'output_expired')::boolean, false) = false
+		and last_action ? 'output_expires_at'
+		and (last_action->>'output_expires_at')::timestamptz <= $1`
 const clearExpiredIPQualityRawJSONSQL = `update ip_quality_reports set raw_json = null where raw_json is not null and observed_at < $1`
 const deleteExpiredIPQualityReportsSQL = `delete from ip_quality_reports where observed_at < $1`

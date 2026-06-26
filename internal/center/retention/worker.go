@@ -98,6 +98,7 @@ func (w *Worker) runOnce(ctx context.Context) {
 		"deleted_target_aggregates", result.DeletedTargetAggregates,
 		"deleted_events", result.DeletedEvents,
 		"deleted_notifications", result.DeletedNotifications,
+		"cleared_command_action_outputs", result.ClearedCommandActionOutputs,
 		"cleared_ip_quality_raw_json", result.ClearedIPQualityRawJSON,
 		"deleted_ip_quality_reports", result.DeletedIPQualityReports,
 	)

@@ -174,12 +174,21 @@ func scanMonitoringInstance(row monitoringInstanceScanner) (monitoringinstances.
 }
 
 func lastActionFromRaw(raw json.RawMessage) *monitoringinstances.LastAction {
+	return lastActionFromRawAt(raw, time.Now().UTC())
+}
+
+func lastActionFromRawAt(raw json.RawMessage, now time.Time) *monitoringinstances.LastAction {
 	if len(raw) == 0 {
 		return nil
 	}
 	var action monitoringinstances.LastAction
 	if err := json.Unmarshal(raw, &action); err != nil {
 		return nil
+	}
+	if action.OutputExpiresAt != nil && !now.Before(action.OutputExpiresAt.UTC()) {
+		action.Stdout = ""
+		action.Stderr = ""
+		action.OutputExpired = true
 	}
 	return &action
 }
@@ -1969,19 +1978,52 @@ func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats(ctx cont
 // SetPendingAction queues a command for the agent to execute on its next sync
 // and stores a durable pending last_action for UI/API readers.
 func (r *PostgresMonitoringInstanceRepository) SetPendingAction(ctx context.Context, monitoringInstanceID, actionID, commandID string) error {
-	raw, err := marshalPendingLastAction(actionID, commandID)
+	return r.QueueCommandAction(ctx, monitoringInstanceID, monitoringinstances.QueueCommandActionInput{
+		ActionID:    actionID,
+		CommandID:   commandID,
+		Sensitivity: "standard",
+		Source:      monitoringinstances.CommandActionSourceWeb,
+		QueuedAt:    time.Now().UTC(),
+	})
+}
+
+// QueueCommandAction queues a command for the agent to execute on its next sync
+// and stores a durable pending last_action for UI/API readers.
+func (r *PostgresMonitoringInstanceRepository) QueueCommandAction(ctx context.Context, monitoringInstanceID string, input monitoringinstances.QueueCommandActionInput) error {
+	actionID := input.ActionID
+	commandID := input.CommandID
+	sensitivity := strings.TrimSpace(input.Sensitivity)
+	if sensitivity == "" {
+		sensitivity = "standard"
+	}
+	source := strings.TrimSpace(input.Source)
+	if source == "" {
+		source = monitoringinstances.CommandActionSourceWeb
+	}
+	queuedAt := input.QueuedAt.UTC()
+	if queuedAt.IsZero() {
+		queuedAt = time.Now().UTC()
+	}
+
+	raw, err := marshalPendingLastAction(actionID, commandID, sensitivity, queuedAt)
 	if err != nil {
 		return fmt.Errorf("marshal pending action for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
-	tag, err := r.db.Exec(ctx,
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin queue command action transaction for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx,
 		`UPDATE monitoring_instances SET pending_action_id = $1, pending_action_command_id = $2, last_action = $3, updated_at = now() WHERE monitoring_instance_id = $4 AND archived_at is null`,
 		actionID, commandID, raw, monitoringInstanceID)
 	if err != nil {
 		return fmt.Errorf("set pending action for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	if tag.RowsAffected() == 0 {
-		archived, archiveErr := monitoringInstanceArchived(ctx, r.db, monitoringInstanceID)
+		archived, archiveErr := monitoringInstanceArchived(ctx, tx, monitoringInstanceID)
 		if archiveErr != nil {
 			return fmt.Errorf("set pending action for monitoring instance %q: %w", monitoringInstanceID, archiveErr)
 		}
@@ -1989,6 +2031,23 @@ func (r *PostgresMonitoringInstanceRepository) SetPendingAction(ctx context.Cont
 			return monitoringinstances.ErrArchivedMonitoringInstance
 		}
 		return monitoringinstances.ErrMonitoringInstanceNotFound
+	}
+
+	if err := insertCommandActionAudit(ctx, tx, commandActionAuditEvent{
+		ActionID:             actionID,
+		MonitoringInstanceID: monitoringInstanceID,
+		CommandID:            commandID,
+		Sensitivity:          sensitivity,
+		EventType:            "queued",
+		ActorUserID:          input.ActorUserID,
+		Source:               source,
+		OccurredAt:           queuedAt,
+	}); err != nil {
+		return fmt.Errorf("insert queued command action audit for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit queue command action transaction for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	return nil
 }

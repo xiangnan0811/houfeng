@@ -5,14 +5,16 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
+	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/contracts/agentapi"
 )
 
 type monitoringInstanceActionRepository interface {
-	SetPendingAction(ctx context.Context, monitoringInstanceID, actionID, commandID string) error
+	QueueCommandAction(ctx context.Context, monitoringInstanceID string, input monitoringinstances.QueueCommandActionInput) error
 	GetMonitoringInstance(ctx context.Context, monitoringInstanceID string) (monitoringinstances.Record, error)
 }
 
@@ -34,14 +36,20 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 		}
 
 		var body struct {
-			CommandID string `json:"command_id"`
+			CommandID          string `json:"command_id"`
+			ConfirmedSensitive bool   `json:"confirmed_sensitive,omitempty"`
 		}
 		if err := decodeJSON(r, &body); err != nil || body.CommandID == "" {
 			writeError(w, http.StatusBadRequest, "command_id required")
 			return
 		}
-		if !agentapi.IsKnownCommandID(body.CommandID) {
+		sensitivity, ok := agentapi.SensitivityForCommand(body.CommandID)
+		if !ok {
 			writeError(w, http.StatusBadRequest, "invalid command_id")
+			return
+		}
+		if sensitivity == agentapi.CommandSensitivitySensitive && !body.ConfirmedSensitive {
+			writeError(w, http.StatusBadRequest, "sensitive command confirmation required")
 			return
 		}
 
@@ -74,7 +82,15 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 			return
 		}
 
-		if err := repo.SetPendingAction(r.Context(), monitoringInstanceID, actionID, body.CommandID); err != nil {
+		actorUserID, _ := sessionctx.UserIDFromContext(r.Context())
+		if err := repo.QueueCommandAction(r.Context(), monitoringInstanceID, monitoringinstances.QueueCommandActionInput{
+			ActionID:    actionID,
+			CommandID:   body.CommandID,
+			Sensitivity: string(sensitivity),
+			ActorUserID: actorUserID,
+			Source:      monitoringinstances.CommandActionSourceWeb,
+			QueuedAt:    time.Now().UTC(),
+		}); err != nil {
 			if errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance) {
 				writeError(w, http.StatusConflict, "archived monitoring instance")
 				return

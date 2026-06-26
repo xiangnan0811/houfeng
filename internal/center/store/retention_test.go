@@ -40,6 +40,8 @@ func TestPostgresRetentionRepositoryAppliesAggregatesAndCleanupInTransaction(t *
 		"delete from target_probe_daily_aggregates",
 		"delete from state_change_events",
 		"delete from notification_records",
+		"update monitoring_instances",
+		"output_expired",
 		"update ip_quality_reports",
 		"delete from ip_quality_reports",
 	} {
@@ -57,6 +59,7 @@ func TestPostgresRetentionRepositoryAppliesAggregatesAndCleanupInTransaction(t *
 		result.TargetAggregateRows != 1 ||
 		result.DeletedHeartbeats != 1 ||
 		result.DeletedNotifications != 1 ||
+		result.ClearedCommandActionOutputs != 1 ||
 		result.ClearedIPQualityRawJSON != 1 ||
 		result.DeletedIPQualityReports != 1 {
 		t.Fatalf("result = %#v, want command-tag counts", result)
@@ -102,6 +105,9 @@ func TestPostgresRetentionRepositoryUsesExpectedCutoffs(t *testing.T) {
 	}
 	if got := tx.argsForSQL("delete from state_change_events")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -90)) {
 		t.Fatalf("event cutoff = %s, want %s", got, now.AddDate(0, 0, -90))
+	}
+	if got := tx.argsForSQL("update monitoring_instances")[0].(time.Time); !got.Equal(now) {
+		t.Fatalf("command output expiry cutoff = %s, want %s", got, now)
 	}
 	if got := tx.argsForSQL("update ip_quality_reports")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -45)) {
 		t.Fatalf("ip quality raw cutoff = %s, want %s", got, now.AddDate(0, 0, -45))

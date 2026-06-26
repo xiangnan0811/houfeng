@@ -718,7 +718,7 @@ func (f *fakeMonitoringInstanceRepository) UpdateMonitoringInstanceMetadata(cont
 	return monitoringinstances.Record{}, nil
 }
 
-func (f *fakeMonitoringInstanceRepository) SetPendingAction(context.Context, string, string, string) error {
+func (f *fakeMonitoringInstanceRepository) QueueCommandAction(context.Context, string, monitoringinstances.QueueCommandActionInput) error {
 	return nil
 }
 

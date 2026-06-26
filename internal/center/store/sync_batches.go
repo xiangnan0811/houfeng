@@ -31,6 +31,7 @@ type PostgresSyncRepository struct {
 	beginTx              func(context.Context, pgx.TxOptions) (syncBatchTx, error)
 	newIPQualityReportID func() (string, error)
 	tokenHasher          agentTokenHasher
+	now                  func() time.Time
 }
 
 func NewPostgresSyncRepository(db *pgxpool.Pool) *PostgresSyncRepository {
@@ -46,10 +47,18 @@ func NewPostgresSyncRepositoryWithTokenHMACKey(db *pgxpool.Pool, hmacKey []byte)
 			return ids.New("ipq")
 		},
 		tokenHasher: newAgentTokenHasher(hmacKey),
+		now:         func() time.Time { return time.Now().UTC() },
 	}
 }
 
 var _ syncing.Repository = (*PostgresSyncRepository)(nil)
+
+func (r *PostgresSyncRepository) nowUTC() time.Time {
+	if r.now == nil {
+		return time.Now().UTC()
+	}
+	return r.now().UTC()
+}
 
 func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.Batch) (syncing.Result, error) {
 	if len(batch.Heartbeats) == 0 {
@@ -73,7 +82,7 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 		return syncing.Result{}, err
 	}
 
-	receivedAt := time.Now().UTC()
+	receivedAt := r.nowUTC()
 	if syncState.SuppressWritesAndPlan() {
 		plan := agentplan.SyncPlan{ProbeAssignments: make([]agentplan.ProbeAssignment, 0)}
 		if err := tx.Commit(ctx); err != nil {
@@ -121,11 +130,11 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 
 	// Store command results before dispatching a newly queued action so stale
 	// results cannot overwrite the new in-flight last_action.
-	if err := storeCommandResults(ctx, tx, batch); err != nil {
+	if err := storeCommandResults(ctx, tx, batch, receivedAt); err != nil {
 		return syncing.Result{}, err
 	}
 
-	pendingAction, err := dispatchPendingAction(ctx, tx, batch.MonitoringInstanceID)
+	pendingAction, err := dispatchPendingAction(ctx, tx, batch.MonitoringInstanceID, receivedAt)
 	if err != nil {
 		return syncing.Result{}, err
 	}
@@ -536,11 +545,12 @@ func batchWithReceivedAt(batch observations.BatchWrite, receivedAt time.Time) ob
 
 // dispatchPendingAction reads the queued action, clears the queue columns,
 // and leaves a durable in-flight last_action for result identity matching.
-func dispatchPendingAction(ctx context.Context, tx syncBatchTx, monitoringInstanceID string) (*agentplan.PendingAction, error) {
+func dispatchPendingAction(ctx context.Context, tx syncBatchTx, monitoringInstanceID string, dispatchedAt time.Time) (*agentplan.PendingAction, error) {
 	var actionID, commandID *string
+	var lastActionRaw []byte
 	if err := tx.QueryRow(ctx,
-		`SELECT pending_action_id, pending_action_command_id FROM monitoring_instances WHERE monitoring_instance_id = $1 AND pending_action_id IS NOT NULL`,
-		monitoringInstanceID).Scan(&actionID, &commandID); errors.Is(err, pgx.ErrNoRows) {
+		`SELECT pending_action_id, pending_action_command_id, last_action FROM monitoring_instances WHERE monitoring_instance_id = $1 AND pending_action_id IS NOT NULL`,
+		monitoringInstanceID).Scan(&actionID, &commandID, &lastActionRaw); errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("query pending action for monitoring instance %q: %w", monitoringInstanceID, err)
@@ -549,12 +559,12 @@ func dispatchPendingAction(ctx context.Context, tx syncBatchTx, monitoringInstan
 		return nil, nil
 	}
 
-	raw, err := marshalPendingLastAction(*actionID, *commandID)
+	raw, err := marshalDispatchedPendingLastAction(*actionID, *commandID, lastActionRaw, dispatchedAt)
 	if err != nil {
 		return nil, fmt.Errorf("marshal pending action for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
-	if _, err := tx.Exec(ctx,
+	tag, err := tx.Exec(ctx,
 		`UPDATE monitoring_instances
 		SET pending_action_id = NULL,
 			pending_action_command_id = NULL,
@@ -563,8 +573,24 @@ func dispatchPendingAction(ctx context.Context, tx syncBatchTx, monitoringInstan
 		WHERE monitoring_instance_id = $1
 			AND pending_action_id = $3
 			AND pending_action_command_id = $4`,
-		monitoringInstanceID, raw, *actionID, *commandID); err != nil {
+		monitoringInstanceID, raw, *actionID, *commandID)
+	if err != nil {
 		return nil, fmt.Errorf("clear pending action for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, nil
+	}
+
+	if err := insertCommandActionAudit(ctx, tx, commandActionAuditEvent{
+		ActionID:             *actionID,
+		MonitoringInstanceID: monitoringInstanceID,
+		CommandID:            *commandID,
+		Sensitivity:          sensitivityForKnownCommand(*commandID),
+		EventType:            "dispatched",
+		Source:               monitoringinstances.CommandActionSourceAgentSync,
+		OccurredAt:           dispatchedAt,
+	}); err != nil {
+		return nil, fmt.Errorf("insert dispatched command action audit for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
 	return &agentplan.PendingAction{
@@ -575,7 +601,7 @@ func dispatchPendingAction(ctx context.Context, tx syncBatchTx, monitoringInstan
 
 // storeCommandResults persists command execution results only when they match
 // the action currently marked in-flight for the monitoring instance.
-func storeCommandResults(ctx context.Context, tx syncBatchTx, batch syncing.Batch) error {
+func storeCommandResults(ctx context.Context, tx syncBatchTx, batch syncing.Batch, completedAt time.Time) error {
 	if len(batch.CommandResults) == 0 {
 		return nil
 	}
@@ -584,12 +610,12 @@ func storeCommandResults(ctx context.Context, tx syncBatchTx, batch syncing.Batc
 		if result.ActionID == "" || result.CommandID == "" {
 			continue
 		}
-		raw, err := marshalCompletedLastAction(result.ActionID, result.CommandID, result.Stdout, result.Stderr, result.ExitCode)
+		raw, err := marshalCompletedLastAction(result.ActionID, result.CommandID, result.Stdout, result.Stderr, result.ExitCode, completedAt)
 		if err != nil {
 			return fmt.Errorf("marshal command result for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 		}
 
-		if _, err := tx.Exec(ctx,
+		tag, err := tx.Exec(ctx,
 			`UPDATE monitoring_instances
 			SET last_action = $1,
 				updated_at = now()
@@ -597,8 +623,26 @@ func storeCommandResults(ctx context.Context, tx syncBatchTx, batch syncing.Batc
 				AND last_action->>'status' = $3
 				AND last_action->>'action_id' = $4
 				AND last_action->>'command_id' = $5`,
-			raw, batch.MonitoringInstanceID, commandActionStatusPending, result.ActionID, result.CommandID); err != nil {
+			raw, batch.MonitoringInstanceID, commandActionStatusPending, result.ActionID, result.CommandID)
+		if err != nil {
 			return fmt.Errorf("store command result for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
+		}
+		if tag.RowsAffected() == 0 {
+			continue
+		}
+
+		exitCode := result.ExitCode
+		if err := insertCommandActionAudit(ctx, tx, commandActionAuditEvent{
+			ActionID:             result.ActionID,
+			MonitoringInstanceID: batch.MonitoringInstanceID,
+			CommandID:            result.CommandID,
+			Sensitivity:          sensitivityForKnownCommand(result.CommandID),
+			EventType:            "completed",
+			Source:               monitoringinstances.CommandActionSourceAgentSync,
+			ExitCode:             &exitCode,
+			OccurredAt:           completedAt,
+		}); err != nil {
+			return fmt.Errorf("insert completed command action audit for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 		}
 	}
 

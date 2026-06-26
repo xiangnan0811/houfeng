@@ -2567,6 +2567,31 @@ describe('api helpers', () => {
     })
   })
 
+  it('posts sensitive monitoring instance command confirmation only when requested', async () => {
+    const responseBody = {
+      action_id: 'act_001',
+      command_id: 'systemctl_status',
+      status: 'pending',
+    }
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      postMonitoringInstanceAction('mi_001', 'systemctl_status', { confirmedSensitive: true }),
+    ).resolves.toEqual(responseBody)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_001/actions', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ command_id: 'systemctl_status', confirmed_sensitive: true }),
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
   it('posts target runtime control actions to the explicit endpoints', async () => {
     const responseBody = {
       target_id: 'tg_001',

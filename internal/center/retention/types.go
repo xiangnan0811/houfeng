@@ -28,6 +28,7 @@ type Result struct {
 	DeletedTargetAggregates             int64
 	DeletedEvents                       int64
 	DeletedNotifications                int64
+	ClearedCommandActionOutputs         int64
 	ClearedIPQualityRawJSON             int64
 	DeletedIPQualityReports             int64
 }
