@@ -173,55 +173,81 @@ where enrollment_token_hash = $1
   and enrollment_token_issued_at >= now() - interval '30 minutes'
 ```
 
-### MonitoringInstance command action durability
+### MonitoringInstance command action durability, governance, audit, and output TTL
 
 #### 1. Scope / Trigger
 
-- Trigger: 修改 MonitoringInstance action / remote command 链路时必须加载本节，包括 `POST /api/monitoring-instances/{monitoring_instance_id}/actions`、`agentapi.PendingAction`、`agentapi.CommandResult`、`syncing.CommandResult`、`monitoringinstances.last_action` 或 `store/sync_batches.go`。
-- 目标：单 pending action 模型下保持 command identity 可追踪，避免 agent 结果晚到时覆盖另一个已排队或派发中的 action。
+- Trigger: 修改 MonitoringInstance action / remote command 链路时必须加载本节，包括 `POST /api/monitoring-instances/{monitoring_instance_id}/actions`、`agentapi.PendingAction`、`agentapi.CommandResult`、`syncing.CommandResult`、`monitoringinstances.last_action`、`monitoring_instance_command_action_audit` 或 `store/sync_batches.go`。
+- 目标：单 pending action 模型下保持 command identity 可追踪，加入 backend-owned sensitivity / confirmation / metadata audit / 24h 输出 TTL，避免 agent 结果晚到时覆盖另一个已排队或派发中的 action，也避免把命令 stdout/stderr 当成长期审计存储。
 
 #### 2. Signatures
 
-- HTTP request: `POST /api/monitoring-instances/{monitoring_instance_id}/actions` with body `{"command_id":"uptime"}`。
+- HTTP request: `POST /api/monitoring-instances/{monitoring_instance_id}/actions` with body `{"command_id":"uptime"}`；sensitive command 必须是 `{"command_id":"systemctl_status","confirmed_sensitive":true}`。
 - HTTP response: `{"action_id":"act_xxx","command_id":"uptime","status":"pending"}`。
 - Agent plan: `agentapi.PendingAction{ActionID, CommandID}` serializes as `action_id` + `command_id`。
 - Agent result: `agentapi.CommandResult{ActionID, CommandID, Stdout, Stderr, ExitCode}` serializes as `action_id` + `command_id` + output fields。
 - DB state: `monitoring_instances.pending_action_id`, `monitoring_instances.pending_action_command_id`, and `monitoring_instances.last_action jsonb`。
+- DB audit: `monitoring_instance_command_action_audit(audit_id, action_id, monitoring_instance_id, command_id, sensitivity, event_type, actor_user_id, source, exit_code, occurred_at, details)`，`event_type in ('queued','dispatched','completed')`，`source in ('web','agent_sync')`。
+- Backend metadata source: `internal/contracts/agentapi.KnownCommandDefinitions()` owns command IDs and `standard|sensitive` sensitivity tiers.
 
 #### 3. Contracts
 
-- Queueing an action writes both pending columns and `last_action={"status":"pending","action_id":...,"command_id":...}` so API/UI readers see pending immediately.
-- Sync dispatch clears `pending_action_*` columns to prevent duplicate dispatch, but rewrites the same pending `last_action` to keep the in-flight identity durable until a matching result arrives.
+- Current sensitivity tiers:
+  - `standard`: `df_h`, `free_m`, `uptime`
+  - `sensitive`: `top_head`, `journalctl_u`, `systemctl_status`, `dmesg_err`, `docker_ps`
+- Backend is the enforcement authority for sensitivity. Frontend command metadata is presentation only.
+- Queueing an action writes both pending columns and `last_action={"status":"pending","action_id":...,"command_id":...,"sensitivity":...,"queued_at":...}` so API/UI readers see pending immediately.
+- Sensitive commands require `confirmed_sensitive:true` before repository queue writes. Standard commands must not require confirmation.
+- Queueing inserts a `queued` audit event in the same transaction as pending state, with `source='web'` and `actor_user_id` when a browser session user is available.
+- Sync dispatch clears `pending_action_*` columns to prevent duplicate dispatch, but rewrites the same pending `last_action` to keep the in-flight identity durable until a matching result arrives. Dispatch must preserve queued `sensitivity` and `queued_at` from the existing pending `last_action`; only missing legacy values may fall back to backend command metadata and dispatch time.
+- Dispatch inserts a `dispatched` audit event only after the clear update affects one row, with `source='agent_sync'`.
 - Command result storage must include the real `command_id` and update `last_action` to `status="done"` only when current `last_action` is still `pending` with the same `action_id` and `command_id`.
+- Completion inserts a `completed` audit event only after the guarded result update affects one row, with `source='agent_sync'` and `exit_code`; stale result `UPDATE 0` must not create audit rows.
+- Audit rows are metadata only. They must not store stdout/stderr in columns, details, SQL literals, or JSON payloads.
+- Completed `last_action` includes `completed_at`, `output_expires_at = completed_at + 24h`, and `output_expired:false` while output is visible.
+- Read-side scan must hide stdout/stderr and return `output_expired:true` once `output_expires_at <= now`, even before retention physically rewrites persisted JSON.
+- Retention cleanup must remove expired `last_action.stdout` / `last_action.stderr` and set `output_expired:true`; action ID, command ID, status, exit code, completion time, expiry time, and sensitivity metadata remain.
 - `last_action.status` currently uses only `pending` and `done`; command success/failure is represented by `exit_code`, not by `success` / `failed` status strings.
 - Go `monitoringinstances.LastAction.ExitCode` must stay nullable (`*int`) with `omitempty`: pending actions omit it, while completed success still serializes `exit_code: 0`.
 - `last_action` is the current visible action state, not a full audit log. Do not infer historical command execution from it after another action is queued.
+- RBAC / per-role command authorization and an audit browsing UI are separate follow-up scope; do not half-build them inside command queue plumbing.
 
 #### 4. Validation & Error Matrix
 
 | Condition | Expected behavior |
 | --- | --- |
 | Missing `command_id` in MonitoringInstance action request | 400 `command_id required` |
+| Unknown `command_id` | 400 `unknown command_id`; no repository write |
+| Sensitive `command_id` without `confirmed_sensitive:true` | 400; no repository write |
+| Standard `command_id` without confirmation | Queue action |
 | Unknown monitoring instance | 404 `monitoring instance not found` |
 | MonitoringInstance is not bound | 409 `monitoring instance agent not bound` |
 | monitoring instance monitoring is paused | 409 `monitoring instance monitoring is paused` |
 | Agent result lacks `action_id` or `command_id` | Ignore the result row; do not overwrite `last_action` |
 | Agent result identity does not match current pending `last_action` | Ignore the result row; do not overwrite `last_action` |
+| Completed output `output_expires_at <= now` | API omits stdout/stderr and returns `output_expired:true` |
 | DB write failure while queueing/dispatching/storing | Return wrapped repository error; handler maps to 500 where applicable |
 
 #### 5. Good/Base/Bad Cases
 
 - Good: user queues `uptime`, API immediately returns `command_id`, `last_action` shows pending `uptime`, agent returns matching `action_id` + `command_id`, and `last_action` becomes done with stdout/stderr/exit code.
+- Good: user clicks `systemctl_status`, frontend opens a second confirmation, POST includes `confirmed_sensitive:true`, backend queues it and writes a sensitive `queued` audit event.
+- Good: `systemctl_status` pending state is dispatched later; dispatch preserves `sensitivity:"sensitive"` and the original `queued_at` while writing a `dispatched` audit row.
+- Good: completed output expires after 24h; API still returns command identity and exit code, but stdout/stderr are empty and retention later clears persisted output fields.
 - Base: no pending action and no command results in a sync batch leaves `last_action` unchanged.
 - Bad: writing `last_action.command_id=""` from command results makes the UI lose the command label.
 - Bad: storing command results with `WHERE monitoring_instance_id = $2` only can let a stale result overwrite a newer pending action.
+- Bad: audit `details` includes command stdout/stderr "for convenience"; this turns audit into long-lived sensitive output storage.
+- Bad: dispatch rewrites sensitive pending state as `sensitivity:"standard"` or resets `queued_at` to dispatch time; this breaks UI/audit continuity.
 
 #### 6. Tests Required
 
 - Agent runtime test: pending action execution returns `CommandResult.ActionID` and `CommandResult.CommandID`.
 - Agent handler test: sync request conversion preserves `command_results[].command_id`.
-- Store tests: queueing writes pending `last_action`; dispatch clears pending columns while preserving pending JSON; result update SQL guards on pending status, action ID, and command ID; `UPDATE 0` mismatch is non-fatal; result storage runs before dispatching a newly queued action in the same sync transaction.
-- Frontend API/page tests: `postMonitoringInstanceAction` preserves `command_id`; MonitoringInstance detail command drawer shows pending command label immediately after dispatch.
+- Store tests: queueing writes pending `last_action` with `sensitivity` / `queued_at`; queue/dispatch/completion audit insert order and metadata; dispatch clears pending columns while preserving pending JSON metadata; result update SQL guards on pending status, action ID, and command ID; `UPDATE 0` mismatch is non-fatal and has no completion audit; result storage runs before dispatching a newly queued action in the same sync transaction; TTL scan and retention clear expired stdout/stderr.
+- Handler tests: sensitive command without confirmation returns 400 before repository writes; sensitive confirmed and standard unconfirmed commands queue correctly.
+- Migration tests: audit table, constraints, and indexes exist; audit schema contains no stdout/stderr columns.
+- Frontend API/page tests: `postMonitoringInstanceAction` preserves `command_id` and only sends `confirmed_sensitive:true` when requested; MonitoringInstance detail command drawer opens second confirmation for sensitive commands and shows pending command label immediately after dispatch; expired output state renders without stale stdout/stderr.
 
 #### 7. Wrong vs Correct
 
@@ -240,7 +266,17 @@ _, err := tx.Exec(ctx, `
 		AND last_action->>'status' = $3
 		AND last_action->>'action_id' = $4
 		AND last_action->>'command_id' = $5`,
-	raw, monitoringInstanceID, "pending", result.ActionID, result.CommandID)
+raw, monitoringInstanceID, "pending", result.ActionID, result.CommandID)
+```
+
+```go
+// 错误：dispatch 时丢掉 queued metadata，把 sensitive 命令改成 standard。
+raw, _ := marshalPendingLastAction(actionID, commandID, "standard", time.Now().UTC())
+```
+
+```go
+// 正确：dispatch 从现有 pending last_action 继承 sensitivity / queued_at，缺失时才兜底。
+raw, _ := marshalDispatchedPendingLastAction(actionID, commandID, existingLastActionRaw, dispatchedAt)
 ```
 
 ### MonitoringInstance lifecycle management and archive gates
