@@ -145,12 +145,24 @@ func cidrListEnv(key string) ([]string, error) {
 		if part == "" {
 			continue
 		}
-		if _, _, err := net.ParseCIDR(part); err != nil {
+		_, network, err := net.ParseCIDR(part)
+		if err != nil {
 			return nil, fmt.Errorf("parse %s CIDR %q: %w", key, part, err)
+		}
+		if isAllAddressCIDR(network) {
+			return nil, fmt.Errorf("%s must not include all-address trusted proxy CIDR %q", key, part)
 		}
 		cidrs = append(cidrs, part)
 	}
 	return cidrs, nil
+}
+
+func isAllAddressCIDR(network *net.IPNet) bool {
+	if network == nil {
+		return false
+	}
+	ones, bits := network.Mask.Size()
+	return ones == 0 && (bits == 32 || bits == 128)
 }
 
 func envOrDefault(key, fallback string) (string, error) {

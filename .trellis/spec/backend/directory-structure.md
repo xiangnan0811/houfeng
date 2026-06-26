@@ -215,12 +215,14 @@ if request.MonitoringInstanceID == "" {
 2. **Signatures**
    - 命令下发：center 只通过 `agentapi.PendingAction{ActionID, CommandID}` 下发稳定 `command_id`，不下发二进制路径、参数或 shell snippet。
    - 白名单解析：`agent/exec.Lookup(commandID)` 返回 `(bin, args, ok)`，`args` 必须是内部白名单参数的 defensive copy。
-   - 命令执行：`agent/exec.Run(ctx, bin, args)` 使用 `exec.CommandContext`，带 30s timeout 与 stdout/stderr 独立 64KB 截断。
+   - 命令执行：`agent/exec.Run(ctx, bin, args)` 使用 `exec.CommandContext`，带 30s timeout 与 stdout/stderr 独立 64KB 截断，并在返回结果前用 `internal/security/redact.Secrets` 脱敏 stdout/stderr。
    - Docker facts：`agent/containersample.Collect(ctx)` 在 host sample 时 best-effort 调用 Docker CLI，返回 `[]agentapi.ContainerInfo` 或 `nil`。
 
 3. **Contracts**
    - 白名单命令 ID 当前固定为：`df_h`、`free_m`、`uptime`、`top_head`、`journalctl_u`、`systemctl_status`、`dmesg_err`、`docker_ps`。
    - 命令参数全部编译进 agent，不接受中心、Web 或用户传入的动态参数。
+   - 命令 stdout/stderr 必须在 agent 上传前脱敏；center store 持久化 `last_action` 前必须再次脱敏，覆盖旧 agent 或第三方 agent。
+   - 脱敏至少覆盖 Authorization bearer、`token` / `access_token` / `refresh_token` / `api_key` / `secret` / `password` 的 key-value/JSON 形态，以及 PEM private key blocks。脱敏是 best-effort，不能替代 agent 最小权限和诊断命令分级。
    - 未知 `command_id` 由 agent runtime 静默忽略，不阻塞 sync loop，不生成 command result。
    - Docker CLI 不存在、daemon 不可用、`docker ps` 失败或 context 已取消时返回 `nil, nil`，不得让 host sample 失败。
    - `docker stats` 失败时仍返回 `docker ps` 的 container identity/status facts，CPU/mem 百分比留空。
@@ -230,19 +232,22 @@ if request.MonitoringInstanceID == "" {
    - `Lookup` 未知 ID -> `ok=false`，bin/args 零值。
    - 调用方修改 `Lookup` 返回的 args -> 后续 `Lookup` 结果不变。
    - shell metacharacter 作为参数传给 `Run` -> 被当作普通参数，不执行额外 shell 语义。
+   - stdout/stderr 含 `Authorization: Bearer abc` 或 `token=abc` -> agent result 和 center persisted `last_action` 都不含原始 secret。
    - `docker ps` 输出空或无法解析 -> `nil, nil`。
    - `docker stats` 输出字段无法解析 -> 对应 CPU/mem 字段保持 nil。
 
 5. **Good / Base / Bad Cases**
    - Good: center 下发 `command_id=uptime`，agent 通过 whitelist 解析为 `uptime` + nil args，执行后回传带 action/command identity 的 `CommandResult`。
    - Good: Docker 可用时 host sample 附带 container name/image/status 和可选 CPU/mem 百分比；Docker 不可用时 host sample 仍正常上传且 `containers` 为空。
+   - Good: 旧 agent 上传未脱敏 command result，center 持久化前再次 redacts stdout/stderr。
    - Base: 当前 whitelist 有 `docker_ps`，但这只是诊断命令，不等于 Docker 编排能力。
    - Bad: 让 center 或 Web 传入 `args:["-c","..."]`、`bin:"sh"`、`command:"docker rm ..."`，会把薄 Agent 扩成任意执行面。
    - Bad: 在 `containersample` 中增加 `docker start/stop/restart/logs/exec` 或 Docker SDK 控制路径，违反 best-effort facts 边界。
 
 6. **Tests Required**
    - `agent/exec/whitelist_test.go`：固定 whitelist command IDs、bin、args；未知 ID 拒绝；返回 args 是 defensive copy。
-   - `agent/exec/runner_test.go`：正常/非零/timeout/not-found/output truncation；必须覆盖不隐式调用 shell。
+   - `agent/exec/runner_test.go`：正常/非零/timeout/not-found/output truncation；必须覆盖不隐式调用 shell 和 stdout/stderr secret redaction。
+   - `internal/center/store/sync_batches_test.go` 或 command action tests：command result persistence redacts stdout/stderr before writing `last_action`。
    - `agent/containersample/sample_test.go`：Docker 不可用、`ps` 失败、`stats` 失败、状态归一化、固定 Docker CLI 参数形状。
    - `agent/runtime/runtime_test.go`：pending action 结果携带 action/command identity，未知 command ID 不产生结果，host sample 可附带 container facts。
 
@@ -460,11 +465,14 @@ center 与 agent 同时引用的唯一契约包。内容：
 
 1. **Scope / Trigger**
    - 触发：修改 MonitoringInstance onboarding、一键安装命令、center-served installer、`HOUFENG_PUBLIC_BASE_URL`、agent release artifact 命名、或 `/api/agent/install.sh` 路由。
-   - 目标：让每个自部署 center 负责生成自己的安装命令和 enrollment token；GitHub Release 只提供二进制与 `sha256sums.txt`，不得成为 token/script authority。
+   - 目标：让每个自部署 center 负责生成自己的安装命令和 enrollment token；GitHub Release 只提供二进制与 signed checksum manifest，不能成为 token/script authority，也不能只靠同源 checksum 提供供应链信任。
 
 2. **Signatures**
    - Config: `config.CenterConfig.PublicBaseURL` 来自 `HOUFENG_PUBLIC_BASE_URL`，必须是无 query/fragment 的 absolute `http(s)` URL，可为 domain 或 `IP:port`。
    - Public route: `GET agentapi.InstallScriptPath` -> embedded shell script，未登录可读，只允许读取脚本。
+   - Installer-pinned checksum public key: `HOUFENG_CHECKSUM_MINISIGN_PUBLIC_KEY` inside `internal/center/installer/houfeng-agent-install.sh`。
+   - Release assets: `houfeng-agent_<version>_linux_amd64`、`houfeng-agent_<version>_linux_arm64`、`sha256sums.txt`、`sha256sums.txt.minisig`。
+   - Release workflow secrets: `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY` and optional `HOUFENG_RELEASE_MINISIGN_PASSWORD`。
    - Authenticated route: `POST /api/monitoring-instances/{monitoring_instance_id}/install-command` -> `monitoringinstances.InstallCommandIssue`。
    - Response JSON: `{command, issued_at, expires_at, installer_url, public_base_url, agent_version, release_repo}`。
    - Installer token inputs:
@@ -486,7 +494,8 @@ center 与 agent 同时引用的唯一契约包。内容：
    - Installer server URLs default to HTTPS-only. `http://` is accepted only when the operator passes `--insecure-allow-http`, which the center includes for explicitly configured HTTP `HOUFENG_PUBLIC_BASE_URL` values.
    - Generated commands must not pass the one-time enrollment token as installer argv or as another command's argv. Use a quoted heredoc into installer stdin so token exposure is limited to the copied command text rather than `ps` output for the installer process.
    - Manual installer invocations must provide exactly one enrollment token source; empty token, multiple sources, or unreadable `--enrollment-token-file` values fail before writes.
-   - The installer must verify the downloaded binary against `sha256sums.txt` before replacing `/usr/local/bin/houfeng-agent` or starting systemd.
+   - The installer must require `minisign`, download `sha256sums.txt.minisig`, verify `sha256sums.txt` with the pinned public key, then verify the downloaded binary against the signed manifest before replacing `/usr/local/bin/houfeng-agent` or starting systemd. Missing minisign, missing signature, signature failure, missing checksum entry, and checksum mismatch must fail closed without checksum-only fallback.
+   - Release workflow must sign `dist/sha256sums.txt` before uploading release assets. `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY` must match the installer-pinned public key; encrypted keys require `HOUFENG_RELEASE_MINISIGN_PASSWORD`.
    - Installed `agent.env` must include durable sync queue bounds: `HOUFENG_AGENT_BUFFER_MAX_ENTRIES`、`HOUFENG_AGENT_BUFFER_MAX_AGE`、`HOUFENG_AGENT_BUFFER_MAX_BYTES`.
    - MVP support is Linux + systemd + `amd64`/`arm64` only. Auto-upgrade, uninstall UX, non-systemd hosts, package repos, Docker/Kubernetes installs, and center-hosted binary mirrors are out of scope.
    - Installer output, center logs, and UI conflict copy must not print the full enrollment token or imply a one-time token remains reusable after a failed/pending fingerprint attempt.
@@ -503,22 +512,26 @@ center 与 agent 同时引用的唯一契约包。内容：
    | Multiple token sources or empty token | installer exits before writing runtime files |
    | Unsupported install method | installer returns non-zero with a short error; no partial service start |
    | Unsupported OS / architecture / no running systemd | installer exits before writing binary/config/token |
+   | `minisign` missing or `sha256sums.txt.minisig` missing | installer exits before replacing binary or starting service |
+   | checksum manifest signature invalid | installer exits before reading checksum entries or replacing binary |
    | Missing checksum entry or checksum mismatch | installer exits before replacing binary or starting service |
+   | release workflow missing signing private key | publish workflow fails before asset upload |
 
 5. **Good / Base / Bad Cases**
-   - Good: logged-in operator opens MonitoringInstance onboarding, generates a command from center, copies it to a Linux systemd amd64/arm64 host, checksum verification passes, installer writes config/token with restrictive permissions, enables and starts `houfeng-agent`.
+   - Good: logged-in operator opens MonitoringInstance onboarding, generates a command from center, copies it to a Linux systemd amd64/arm64 host, checksum signature and checksum verification pass, installer writes config/token with restrictive permissions, enables and starts `houfeng-agent`.
    - Base: the public script route is unauthenticated but contains no deployment-specific secret until command generation feeds a one-time token to installer stdin at execution time.
    - Bad: SPA constructs `curl ${window.location.origin}/api/agent/install.sh ...` and ships a command that works only behind the browser's current origin.
    - Bad: generated command uses `--enrollment-token '<token>'`, which exposes the token as installer argv.
    - Bad: putting the installer script only in GitHub Release/raw means all self-hosted deployments share script authority and cannot couple script behavior to their center token contract.
-   - Bad: installing or restarting the service before checksum verification makes a corrupted or substituted binary executable.
+   - Bad: accepting `sha256sums.txt` without verifying `sha256sums.txt.minisig` lets an attacker who can replace release assets replace both binary and checksum.
+   - Bad: installing or restarting the service before signature and checksum verification makes a corrupted or substituted binary executable.
 
 6. **Tests Required**
    - Config tests for valid domain/IP public URLs, trim/trailing slash behavior, rejected scheme, relative URL, query, and fragment.
    - Handler tests for install-command success, 404 monitoring instance, 409 missing public URL, 409 dev/missing version, method not allowed, HTTP base URL `--insecure-allow-http`, no argv token exposure, and shell quoting of all command arguments.
    - Router/bootstrap tests proving `/api/agent/install.sh` is public while `/api/monitoring-instances/{id}/install-command` remains session-protected and wired non-nil.
-   - Installer tests or embedded-script checks for Linux arch mapping, systemd requirement, exact checksum-manifest matching, HTTPS-by-default behavior, token file/stdin sources, token file permissions, and no full-token logging.
-   - Release target test/sanity that `make build-agent-release VERSION=<tag>` emits both Linux binaries and `sha256sums.txt` with names matching installer expectations.
+   - Installer tests or embedded-script checks for Linux arch mapping, systemd requirement, `minisign` requirement, signed checksum manifest download, signature verification before checksum extraction, exact checksum-manifest matching, HTTPS-by-default behavior, token file/stdin sources, token file permissions, and no full-token logging.
+   - Release target test/sanity that `make build-agent-release VERSION=<tag>` emits both Linux binaries and `sha256sums.txt` with names matching installer expectations; publish workflow review checks signing and upload of `sha256sums.txt.minisig`.
 
 7. **Wrong vs Correct**
 

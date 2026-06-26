@@ -155,12 +155,44 @@ func TestSyncBatchSourceUsesConstantTimeSyncTokenHashCompare(t *testing.T) {
 		t.Fatalf("ReadFile(sync_batches.go) error = %v", err)
 	}
 
-	validationPath := sourceBetween(t, string(source), "func validateAcceptedSyncBatch", "func lifecycleStatusAfterAcceptedSync")
-	if !strings.Contains(validationPath, "syncTokenHashesEqual(storedSyncTokenHash, hashSyncToken(batch.SyncToken))") {
-		t.Fatal("validateAcceptedSyncBatch() should compare sync token hashes with the shared constant-time helper")
+	validationPath := sourceBetween(t, string(source), "func (r *PostgresSyncRepository) validateAcceptedSyncBatch", "func lifecycleStatusAfterAcceptedSync")
+	if !strings.Contains(validationPath, "r.tokenHasher.syncTokenMatches(storedSyncTokenHash, batch.SyncToken)") {
+		t.Fatal("validateAcceptedSyncBatch() should compare sync token hashes with the shared versioned token hasher")
 	}
 	if strings.Contains(validationPath, "storedSyncTokenHash != hashSyncToken(batch.SyncToken)") {
 		t.Fatal("validateAcceptedSyncBatch() should not use plain string inequality for sync token hashes")
+	}
+}
+
+func TestPostgresSyncRepositoryMigratesLegacySyncTokenHashAfterSuccessfulValidation(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashOpaqueToken("sync-token-001"),
+		probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	if _, err := repo.ApplyBatch(context.Background(), testSyncBatch()); err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+
+	args := tx.argsForSQL("sync_token_hash = $2")
+	if len(args) != 2 || args[0] != "mi_001" {
+		t.Fatalf("sync token migration args = %#v, want monitoring instance id and hash", args)
+	}
+	migratedHash, ok := args[1].(string)
+	if !ok || !isHMACAgentTokenHash(migratedHash) {
+		t.Fatalf("sync token migration hash = %#v, want versioned hmac hash", args[1])
+	}
+	if migratedHash != hashSyncToken("sync-token-001") {
+		t.Fatalf("sync token migration hash = %q, want current sync token hash", migratedHash)
 	}
 }
 
@@ -830,6 +862,49 @@ func TestSyncBatchStoresMatchingCommandResultWithCommandID(t *testing.T) {
 	}
 	if args[1] != "mi_001" || args[2] != commandActionStatusPending || args[3] != "act_001" || args[4] != "uptime" {
 		t.Fatalf("result guard args = %#v, want monitoringInstance/status/action/command guard", args[1:5])
+	}
+}
+
+func TestSyncBatchRedactsCommandResultsBeforePersisting(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+	batch := testSyncBatch()
+	batch.Observations.HostSamples = nil
+	batch.Observations.ProbeObservations = nil
+	batch.IPQualityReports = nil
+	batch.CommandResults = []syncing.CommandResult{{
+		ActionID:  "act_001",
+		CommandID: "uptime",
+		Stdout:    "token=stdout-secret",
+		Stderr:    "Authorization: Bearer stderr-secret",
+		ExitCode:  0,
+	}}
+
+	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+		t.Fatalf("ApplyBatch() error = %v", err)
+	}
+	args := tx.argsForSQL("last_action->>'status'")
+	if len(args) == 0 {
+		t.Fatal("command result update not executed")
+	}
+	payload := string(args[0].([]byte))
+	for _, leaked := range []string{"stdout-secret", "stderr-secret"} {
+		if strings.Contains(payload, leaked) {
+			t.Fatalf("last_action leaked %q: %s", leaked, payload)
+		}
+	}
+	if !strings.Contains(payload, "[redacted]") {
+		t.Fatalf("last_action = %s, want redaction marker", payload)
 	}
 }
 

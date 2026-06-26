@@ -30,9 +30,14 @@ type syncBatchTx interface {
 type PostgresSyncRepository struct {
 	beginTx              func(context.Context, pgx.TxOptions) (syncBatchTx, error)
 	newIPQualityReportID func() (string, error)
+	tokenHasher          agentTokenHasher
 }
 
 func NewPostgresSyncRepository(db *pgxpool.Pool) *PostgresSyncRepository {
+	return NewPostgresSyncRepositoryWithTokenHMACKey(db, nil)
+}
+
+func NewPostgresSyncRepositoryWithTokenHMACKey(db *pgxpool.Pool, hmacKey []byte) *PostgresSyncRepository {
 	return &PostgresSyncRepository{
 		beginTx: func(ctx context.Context, options pgx.TxOptions) (syncBatchTx, error) {
 			return db.BeginTx(ctx, options)
@@ -40,6 +45,7 @@ func NewPostgresSyncRepository(db *pgxpool.Pool) *PostgresSyncRepository {
 		newIPQualityReportID: func() (string, error) {
 			return ids.New("ipq")
 		},
+		tokenHasher: newAgentTokenHasher(hmacKey),
 	}
 }
 
@@ -62,7 +68,7 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 		_ = tx.Rollback(ctx)
 	}()
 
-	syncState, err := validateAcceptedSyncBatch(ctx, tx, batch)
+	syncState, err := r.validateAcceptedSyncBatch(ctx, tx, batch)
 	if err != nil {
 		return syncing.Result{}, err
 	}
@@ -327,7 +333,7 @@ func (s acceptedSyncBatchState) SuppressWritesAndPlan() bool {
 		s.MonitoringStatus == monitoringinstances.MonitoringPaused
 }
 
-func validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncing.Batch) (acceptedSyncBatchState, error) {
+func (r *PostgresSyncRepository) validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncing.Batch) (acceptedSyncBatchState, error) {
 	var (
 		bindingStatus       string
 		bindingFingerprint  string
@@ -355,8 +361,20 @@ func validateAcceptedSyncBatch(ctx context.Context, tx syncBatchTx, batch syncin
 	if bindingStatus != monitoringinstances.BindingBound {
 		return acceptedSyncBatchState{}, syncing.ErrBindingNotAccepted
 	}
-	if storedSyncTokenHash == "" || !syncTokenHashesEqual(storedSyncTokenHash, hashSyncToken(batch.SyncToken)) {
+	if storedSyncTokenHash == "" || !r.tokenHasher.syncTokenMatches(storedSyncTokenHash, batch.SyncToken) {
 		return acceptedSyncBatchState{}, syncing.ErrInvalidSyncToken
+	}
+	if isLegacySHA256TokenHash(storedSyncTokenHash) {
+		if _, err := tx.Exec(ctx, `
+			update monitoring_instances
+			set sync_token_hash = $2,
+				updated_at = now()
+			where monitoring_instance_id = $1`,
+			batch.MonitoringInstanceID,
+			r.tokenHasher.hashSyncToken(batch.SyncToken),
+		); err != nil {
+			return acceptedSyncBatchState{}, fmt.Errorf("migrate sync token hash for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
+		}
 	}
 
 	for _, heartbeat := range batch.Heartbeats {

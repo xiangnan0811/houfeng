@@ -72,7 +72,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		return nil, nil, fmt.Errorf("apply migrations: %w", err)
 	}
 
-	monitoringInstanceRepo := store.NewPostgresMonitoringInstanceRepository(db.Pool())
+	monitoringInstanceRepo := store.NewPostgresMonitoringInstanceRepositoryWithTokenHMACKey(db.Pool(), cfg.SessionHMACKey)
 	targetRepo := store.NewPostgresTargetRepository(db.Pool())
 	providerRepo := store.NewPostgresProviderRepository(db.Pool())
 	vpsAssetRepo := store.NewPostgresVPSAssetRepository(db.Pool())
@@ -101,7 +101,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	}
 	snapshotReader := incidentservice.NewPostgresSnapshotReader(db.Pool())
 	enrollmentSvc := enrollment.NewService(monitoringInstanceRepo)
-	syncRepo := store.NewPostgresSyncRepository(db.Pool())
+	syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(db.Pool(), cfg.SessionHMACKey)
 	streamHub := runtimefacts.NewStreamHub()
 	notifier := deps.newIncidentNotifier(cfg, notifierSettingsRepo)
 	subscriptionDispatcher := incidentservice.NewSettingsAwareNotificationDispatcher(
@@ -242,6 +242,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		AuthMiddleware:            authMiddleware,
 	})
 	router = centerhttp.SecurityHeaders(strings.HasPrefix(cfg.PublicBaseURL, "https://"))(router)
+	router = centerhttp.RequireAllowedHost(cfg.PublicBaseURL)(router)
 
 	return deps.newApp(cfg.HTTPAddr, router, incidentSvc, retentionWorker, sessionCleanup, exchangeRateWorker, subscriptionReminderWorker), db.Close, nil
 }

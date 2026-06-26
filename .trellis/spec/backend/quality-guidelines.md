@@ -273,7 +273,10 @@ syncqueue.NewFileStore(path, syncqueue.Options{
    - Go config: `config.CenterConfig{PasswordBcryptCost int, SessionHMACKey []byte, DatabaseURL string}`。
    - Auth options: `auth.Options{PasswordBcryptCost int}`。
    - Seed options: `auth.SeedInitialUserOptions{PasswordBcryptCost int}`。
-   - Store constructor: `store.NewPostgresSessionRepository(pool *pgxpool.Pool, hmacKey []byte) (*PostgresSessionRepository, error)`。
+   - Store constructors:
+     - `store.NewPostgresSessionRepository(pool *pgxpool.Pool, hmacKey []byte) (*PostgresSessionRepository, error)`
+     - `store.NewPostgresMonitoringInstanceRepositoryWithTokenHMACKey(pool *pgxpool.Pool, hmacKey []byte) *PostgresMonitoringInstanceRepository`
+     - `store.NewPostgresSyncRepositoryWithTokenHMACKey(pool *pgxpool.Pool, hmacKey []byte) *PostgresSyncRepository`
 
 3. **Contracts**
    - `HOUFENG_PASSWORD_BCRYPT_COST` missing uses `auth.DefaultPasswordBcryptCost`（当前等于 Go bcrypt `DefaultCost`）。
@@ -283,7 +286,9 @@ syncqueue.NewFileStore(path, syncqueue.Options{
    - `HOUFENG_SESSION_HMAC_KEY` is required, must be at least 32 bytes, and is copied into `config.CenterConfig.SessionHMACKey`.
    - `HOUFENG_SESSION_HMAC_KEY_FILE` takes precedence over `HOUFENG_SESSION_HMAC_KEY` for secret-mount deployments.
    - `cmd/houfeng-center/bootstrap.go` must pass `cfg.SessionHMACKey` into `store.NewPostgresSessionRepository`; the session repository must not have a static production default HMAC key.
-   - Rotating the session HMAC secret invalidates existing browser sessions because database lookup hashes no longer match existing rows.
+   - `cmd/houfeng-center/bootstrap.go` must pass the same `cfg.SessionHMACKey` into agent enrollment/sync token repositories through `NewPostgresMonitoringInstanceRepositoryWithTokenHMACKey` and `NewPostgresSyncRepositoryWithTokenHMACKey`; production agent token hashing must not use repository default test key material.
+   - New agent enrollment and sync token hashes must use versioned purpose-separated HMAC-SHA256 values. Legacy plain SHA-256 token hashes may only remain as a verification-and-migration compatibility path.
+   - Rotating the session HMAC secret invalidates existing browser sessions because database lookup hashes no longer match existing rows. It also invalidates agent enrollment/sync token hashes that have migrated to the HMAC format; rollback/rotation requires planned re-enrollment or token reissue.
    - `HOUFENG_DATABASE_REQUIRE_TLS=true` means `HOUFENG_DATABASE_URL` must include `sslmode=require`、`sslmode=verify-ca`、or `sslmode=verify-full`.
    - Missing `sslmode` or weak modes (`disable`、`allow`、`prefer`) fail startup only when the require-TLS flag is true, so local Compose / localhost development can keep `sslmode=disable`.
 
@@ -298,16 +303,19 @@ syncqueue.NewFileStore(path, syncqueue.Options{
    | session HMAC key shorter than 32 bytes | `LoadCenterConfig` error |
    | `HOUFENG_SESSION_HMAC_KEY_FILE` set | file content wins over env key |
    | bootstrap session repository wiring | receives exactly `cfg.SessionHMACKey` |
+   | bootstrap agent token repository wiring | monitoring instance and sync repositories receive exactly `cfg.SessionHMACKey` |
+   | legacy SHA-256 agent token hash validates | request succeeds and rewrites stored hash to versioned HMAC |
    | `HOUFENG_DATABASE_REQUIRE_TLS=true` and `sslmode=disable` / missing | `LoadCenterConfig` error |
    | `HOUFENG_DATABASE_REQUIRE_TLS=true` and `sslmode=verify-full` | config load succeeds |
    | invalid boolean require-TLS value | `LoadCenterConfig` error |
 
 5. **Good / Base / Bad Cases**
    - Good: production external PostgreSQL uses `HOUFENG_DATABASE_REQUIRE_TLS=true` and `sslmode=verify-full`.
-   - Good: production sets a stable random `HOUFENG_SESSION_HMAC_KEY_FILE` through a secret mount; rolling restart keeps browser sessions valid.
+   - Good: production sets a stable random `HOUFENG_SESSION_HMAC_KEY_FILE` through a secret mount; rolling restart keeps browser sessions and migrated agent token hashes valid.
    - Base: local Docker Compose uses co-located `db` service with generated `sslmode=disable` and leaves `HOUFENG_DATABASE_REQUIRE_TLS` unset/false.
    - Bad: raising bcrypt cost globally by changing a package constant without config tests or benchmark guidance.
    - Bad: `PostgresSessionRepository` silently falls back to `[]byte("houfeng-session-hmac-v1")`, so every deployment shares the same public HMAC key.
+   - Bad: production center uses `store.NewPostgresMonitoringInstanceRepository(pool)` or `store.NewPostgresSyncRepository(pool)`, causing agent token hashes to use test/default HMAC key material.
    - Bad: documenting production database TLS while code still accepts `sslmode=disable` with no startup guard.
 
 6. **Tests Required**
@@ -317,7 +325,8 @@ syncqueue.NewFileStore(path, syncqueue.Options{
    - `internal/center/auth/service_test.go`: password change stores a hash with configured cost.
    - `internal/center/auth/seed_test.go`: first-user seed stores a hash with configured cost.
    - `internal/center/store/sessions_test.go`: repository rejects missing HMAC key and stores/queries session IDs only by HMAC hash.
-   - `cmd/houfeng-center/bootstrap_test.go`: default seed dependency and bootstrap auth service wiring pass `cfg.PasswordBcryptCost`; session repository wiring passes `cfg.SessionHMACKey`.
+   - `internal/center/store/agent_token_hash_test.go` plus monitoring/sync repository tests: new agent token hashes are versioned HMAC values, legacy SHA-256 hashes still verify, and successful use migrates legacy rows.
+   - `cmd/houfeng-center/bootstrap_test.go`: default seed dependency and bootstrap auth service wiring pass `cfg.PasswordBcryptCost`; session repository wiring passes `cfg.SessionHMACKey`; source/wiring checks cover agent token repositories receiving `cfg.SessionHMACKey`.
 
 7. **Wrong vs Correct**
 
@@ -339,6 +348,16 @@ sessionRepo := store.NewPostgresSessionRepository(pool)
 ```go
 // 正确：启动配置显式传入部署 secret。
 sessionRepo, err := store.NewPostgresSessionRepository(pool, cfg.SessionHMACKey)
+```
+
+```go
+// 错误：生产 agent token hash 使用 repository 默认测试 key。
+syncRepo := store.NewPostgresSyncRepository(pool)
+```
+
+```go
+// 正确：生产 agent token hash 从启动 secret 派生用途隔离 HMAC key。
+syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMACKey)
 ```
 
 ---

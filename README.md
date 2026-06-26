@@ -74,7 +74,7 @@ make build-center VERSION=v1.2.3
 make build-agent-release VERSION=v1.2.3
 ```
 
-Upload `dist/houfeng-agent_v1.2.3_linux_amd64`, `dist/houfeng-agent_v1.2.3_linux_arm64`, and `dist/sha256sums.txt` to the matching GitHub Release. The installer script itself is served by the deployed center at `/api/agent/install.sh`; GitHub Release hosts only the binary and checksum assets.
+Upload `dist/houfeng-agent_v1.2.3_linux_amd64`, `dist/houfeng-agent_v1.2.3_linux_arm64`, `dist/sha256sums.txt`, and `dist/sha256sums.txt.minisig` to the matching GitHub Release. The installer script itself is served by the deployed center at `/api/agent/install.sh`; GitHub Release hosts only the binary and signed checksum assets.
 
 ## Verification commands
 
@@ -119,5 +119,7 @@ Completed roadmap, release-gate, archived visual-history, and one-off evidence l
 - Houfeng is still early-stage and single-operator oriented.
 - The documented agent installer supports Linux + systemd + `amd64`/`arm64` only.
 - The project provides a minimal Docker Compose path for center + web + PostgreSQL, but does not provide containerized agents, Kubernetes deployment, package repositories, or automatic upgrade UX.
+- Production deployments should set `HOUFENG_PUBLIC_BASE_URL`, reject broad trusted proxy ranges, run behind an HTTPS reverse proxy with request body/rate/connection limits, and pin Docker/image versions or digests instead of relying on mutable tags for change control.
+- Agent diagnostic command output is best-effort redacted before upload and again before persistence, but it can still contain operationally sensitive host state. Run agents as the dedicated `houfeng-agent` user and do not add broad host privileges such as Docker group membership unless the risk is accepted.
 - Asset Ledger facts are only as true as the manually entered or imported data. Do not claim provider account truth, billing accuracy, exchange-rate truth, or completed real-inventory validation unless the specific evidence exists.
 - Enrollment/install commands contain one-time tokens. Treat them as secrets and do not paste them into public issues, screenshots, logs, or shared transcripts.

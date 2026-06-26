@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,23 +42,36 @@ type AgentEndpointOptions struct {
 }
 
 type AgentRateLimitOptions struct {
-	MaxRequestsByIP int
-	Window          time.Duration
+	MaxRequestsByIP   int
+	MaxRequestsGlobal int
+	MaxTrackedKeys    int
+	Window            time.Duration
+	SweepInterval     time.Duration
+	MaxSyncInflight   int
 }
 
 type agentRequestLimiter struct {
-	mu       sync.Mutex
-	now      func() time.Time
-	window   time.Duration
-	maxIP    int
-	byIP     map[string][]time.Time
-	resolver trustedProxyResolver
+	mu            sync.Mutex
+	now           func() time.Time
+	window        time.Duration
+	sweepInterval time.Duration
+	nextSweep     time.Time
+	maxIP         int
+	maxGlobal     int
+	maxKeys       int
+	byIP          map[string][]time.Time
+	global        []time.Time
+	resolver      trustedProxyResolver
 }
 
 func defaultAgentRateLimitOptions() AgentRateLimitOptions {
 	return AgentRateLimitOptions{
-		MaxRequestsByIP: 120,
-		Window:          time.Minute,
+		MaxRequestsByIP:   120,
+		MaxRequestsGlobal: 1000,
+		MaxTrackedKeys:    10000,
+		Window:            time.Minute,
+		SweepInterval:     time.Minute,
+		MaxSyncInflight:   32,
 	}
 }
 
@@ -68,16 +82,25 @@ func newAgentRequestLimiter(opts AgentEndpointOptions) *agentRequestLimiter {
 	if opts.RateLimit.Window <= 0 {
 		opts.RateLimit.Window = time.Minute
 	}
+	if opts.RateLimit.MaxTrackedKeys <= 0 {
+		opts.RateLimit.MaxTrackedKeys = 10000
+	}
+	if opts.RateLimit.SweepInterval <= 0 {
+		opts.RateLimit.SweepInterval = opts.RateLimit.Window
+	}
 	now := opts.Now
 	if now == nil {
 		now = time.Now
 	}
 	return &agentRequestLimiter{
-		now:      now,
-		window:   opts.RateLimit.Window,
-		maxIP:    opts.RateLimit.MaxRequestsByIP,
-		byIP:     make(map[string][]time.Time),
-		resolver: newTrustedProxyResolver(opts.TrustedProxies),
+		now:           now,
+		window:        opts.RateLimit.Window,
+		sweepInterval: opts.RateLimit.SweepInterval,
+		maxIP:         opts.RateLimit.MaxRequestsByIP,
+		maxGlobal:     opts.RateLimit.MaxRequestsGlobal,
+		maxKeys:       opts.RateLimit.MaxTrackedKeys,
+		byIP:          make(map[string][]time.Time),
+		resolver:      newTrustedProxyResolver(opts.TrustedProxies),
 	}
 }
 
@@ -90,15 +113,87 @@ func (l *agentRequestLimiter) allow(r *http.Request) bool {
 	defer l.mu.Unlock()
 	now := l.now().UTC()
 	cutoff := now.Add(-l.window)
-	l.byIP[clientIP] = append(pruneTimes(l.byIP[clientIP], cutoff), now)
-	if l.maxIP > 0 && len(l.byIP[clientIP]) > l.maxIP {
+	l.sweepExpiredLocked(now, cutoff)
+	ipEvents := l.eventsForKey(clientIP, cutoff)
+	l.global = pruneTimes(l.global, cutoff)
+	if l.maxIP > 0 && len(ipEvents) >= l.maxIP {
 		return false
 	}
+	if l.maxGlobal > 0 && len(l.global) >= l.maxGlobal {
+		return false
+	}
+	if events, ok := l.trackableEventsForKey(clientIP, cutoff); ok {
+		l.byIP[clientIP] = append(events, now)
+	}
+	l.global = append(l.global, now)
 	return true
+}
+
+func (l *agentRequestLimiter) eventsForKey(key string, cutoff time.Time) []time.Time {
+	events, ok := l.byIP[key]
+	if !ok {
+		return nil
+	}
+	events = pruneTimes(events, cutoff)
+	if len(events) == 0 {
+		delete(l.byIP, key)
+		return nil
+	}
+	l.byIP[key] = events
+	return events
+}
+
+func (l *agentRequestLimiter) trackableEventsForKey(key string, cutoff time.Time) ([]time.Time, bool) {
+	events := l.eventsForKey(key, cutoff)
+	if events != nil {
+		return events, true
+	}
+	if l.maxKeys > 0 && len(l.byIP) >= l.maxKeys {
+		return nil, false
+	}
+	return nil, true
+}
+
+func (l *agentRequestLimiter) sweepExpiredLocked(now, cutoff time.Time) {
+	if l.sweepInterval <= 0 {
+		return
+	}
+	if !l.nextSweep.IsZero() && now.Before(l.nextSweep) {
+		return
+	}
+	sweepTimeMap(l.byIP, cutoff)
+	l.nextSweep = now.Add(l.sweepInterval)
 }
 
 func rejectAgentRateLimited(w http.ResponseWriter) {
 	writeAgentAPIError(w, http.StatusTooManyRequests, agentapi.ErrorCodeInvalidRequest, "too many requests")
+}
+
+type agentSyncInflightGate chan struct{}
+
+func newAgentSyncInflightGate(max int) agentSyncInflightGate {
+	if max <= 0 {
+		max = defaultAgentRateLimitOptions().MaxSyncInflight
+	}
+	return make(agentSyncInflightGate, max)
+}
+
+func (g agentSyncInflightGate) acquire() bool {
+	select {
+	case g <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (g agentSyncInflightGate) release() {
+	<-g
+}
+
+func rejectAgentUnavailable(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "5")
+	writeAgentAPIError(w, http.StatusServiceUnavailable, agentapi.ErrorCodeInvalidRequest, "service unavailable")
 }
 
 func AgentEnroll(svc AgentEnrollService) http.Handler {
@@ -156,6 +251,7 @@ func AgentSync(svc AgentSyncService) http.Handler {
 
 func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.Handler {
 	limiter := newAgentRequestLimiter(opts)
+	inflight := newAgentSyncInflightGate(opts.RateLimit.MaxSyncInflight)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeAgentAPIError(w, http.StatusMethodNotAllowed, agentapi.ErrorCodeMethodNotAllowed, "method not allowed")
@@ -165,6 +261,15 @@ func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.
 			rejectAgentRateLimited(w)
 			return
 		}
+		if !isValidOptionalSyncTokenHeader(r) {
+			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
+			return
+		}
+		if !inflight.acquire() {
+			rejectAgentUnavailable(w)
+			return
+		}
+		defer inflight.release()
 
 		var req agentapi.SyncRequest
 		if err := decodeJSONLimited(w, r, &req, AgentSyncBodyLimit); err != nil {
@@ -199,6 +304,29 @@ func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.
 			Plan:       syncPlanToAPI(result.Plan),
 		})
 	})
+}
+
+func isValidOptionalSyncTokenHeader(r *http.Request) bool {
+	token := strings.TrimSpace(r.Header.Get("X-Houfeng-Agent-Token"))
+	if authorization := strings.TrimSpace(r.Header.Get("Authorization")); authorization != "" {
+		const bearerPrefix = "Bearer "
+		if !strings.HasPrefix(authorization, bearerPrefix) {
+			return false
+		}
+		token = strings.TrimSpace(strings.TrimPrefix(authorization, bearerPrefix))
+	}
+	if token == "" {
+		return true
+	}
+	if len(token) > agentSecretMaxBytes {
+		return false
+	}
+	for _, r := range token {
+		if r <= ' ' || r == '"' || r == '\'' || r == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 func writeAgentAPIError(w http.ResponseWriter, status int, code, message string) {

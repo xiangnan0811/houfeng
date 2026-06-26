@@ -72,6 +72,20 @@ func TestLoadCenterConfigRejectsInvalidTrustedProxyCIDR(t *testing.T) {
 	}
 }
 
+func TestLoadCenterConfigRejectsOverbroadTrustedProxyCIDR(t *testing.T) {
+	setRequiredAuth(t)
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")
+
+	for _, value := range []string{"0.0.0.0/0", "::/0"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("HOUFENG_TRUSTED_PROXIES", value)
+			if _, err := centerconfig.LoadCenterConfig(); err == nil {
+				t.Fatal("LoadCenterConfig() error = nil, want non-nil for overbroad trusted proxy CIDR")
+			}
+		})
+	}
+}
+
 func TestLoadCenterConfigParsesPublicBaseURL(t *testing.T) {
 	setRequiredAuth(t)
 	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")

@@ -70,6 +70,24 @@ func RequireSameOrigin(publicBaseURL string) func(stdhttp.Handler) stdhttp.Handl
 	}
 }
 
+func RequireAllowedHost(publicBaseURL string) func(stdhttp.Handler) stdhttp.Handler {
+	allowedHost := hostFromRawURL(publicBaseURL)
+	return func(next stdhttp.Handler) stdhttp.Handler {
+		if allowedHost == "" {
+			return next
+		}
+		return stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+			if !strings.EqualFold(strings.TrimSpace(r.Host), allowedHost) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(stdhttp.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":"invalid host"}`))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func SecurityHeaders(enableHSTS bool) func(stdhttp.Handler) stdhttp.Handler {
 	return func(next stdhttp.Handler) stdhttp.Handler {
 		return stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -149,6 +167,17 @@ func originFromRawURL(raw string) string {
 		return ""
 	}
 	return scheme + "://" + strings.ToLower(u.Host)
+}
+
+func hostFromRawURL(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return strings.ToLower(u.Host)
 }
 
 func writeUnauthorized(w stdhttp.ResponseWriter) {

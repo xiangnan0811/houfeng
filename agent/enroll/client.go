@@ -54,13 +54,17 @@ func (c *Client) Enroll(ctx context.Context, request agentapi.EnrollmentRequest)
 
 func (c *Client) Sync(ctx context.Context, request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
 	response := &agentapi.SyncResponse{}
-	if err := c.postJSON(ctx, agentapi.SyncPath, request, response); err != nil {
+	headers := map[string]string{}
+	if strings.TrimSpace(request.SyncToken) != "" {
+		headers["Authorization"] = "Bearer " + strings.TrimSpace(request.SyncToken)
+	}
+	if err := c.postJSON(ctx, agentapi.SyncPath, request, response, headers); err != nil {
 		return nil, err
 	}
 	return response, nil
 }
 
-func (c *Client) postJSON(ctx context.Context, path string, requestBody any, responseBody any) error {
+func (c *Client) postJSON(ctx context.Context, path string, requestBody any, responseBody any, extraHeaders ...map[string]string) error {
 	payload, err := json.Marshal(requestBody)
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
@@ -71,6 +75,11 @@ func (c *Client) postJSON(ctx context.Context, path string, requestBody any, res
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	for _, headers := range extraHeaders {
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

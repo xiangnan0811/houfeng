@@ -119,6 +119,9 @@ func TestClientSyncReturnsDecodedPointer(t *testing.T) {
 		if r.URL.Path != agentapi.SyncPath {
 			t.Fatalf("path = %q, want %q", r.URL.Path, agentapi.SyncPath)
 		}
+		if got := r.Header.Get("Authorization"); got != "Bearer sync-token-001" {
+			t.Fatalf("Authorization = %q, want bearer sync token", got)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(agentapi.SyncResponse{
 			AcceptedAt: acceptedAt,

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -39,11 +38,16 @@ type monitoringInstanceQueryer interface {
 }
 
 type PostgresMonitoringInstanceRepository struct {
-	db monitoringInstanceDB
+	db          monitoringInstanceDB
+	tokenHasher agentTokenHasher
 }
 
 func NewPostgresMonitoringInstanceRepository(db *pgxpool.Pool) *PostgresMonitoringInstanceRepository {
-	return &PostgresMonitoringInstanceRepository{db: db}
+	return NewPostgresMonitoringInstanceRepositoryWithTokenHMACKey(db, nil)
+}
+
+func NewPostgresMonitoringInstanceRepositoryWithTokenHMACKey(db *pgxpool.Pool, hmacKey []byte) *PostgresMonitoringInstanceRepository {
+	return &PostgresMonitoringInstanceRepository{db: db, tokenHasher: newAgentTokenHasher(hmacKey)}
 }
 
 const monitoringInstanceSelectColumns = `
@@ -320,15 +324,15 @@ func hashOpaqueToken(token string) string {
 }
 
 func hashEnrollmentToken(token string) string {
-	return hashOpaqueToken(token)
+	return defaultAgentTokenHasher().hashEnrollmentToken(token)
 }
 
 func hashSyncToken(token string) string {
-	return hashOpaqueToken(token)
+	return defaultAgentTokenHasher().hashSyncToken(token)
 }
 
 func syncTokenHashesEqual(storedHash, candidateHash string) bool {
-	return subtle.ConstantTimeCompare([]byte(storedHash), []byte(candidateHash)) == 1
+	return constantTimeStringEqual(storedHash, candidateHash)
 }
 
 func (r *PostgresMonitoringInstanceRepository) ListMonitoringInstances(ctx context.Context, scopes ...monitoringinstances.ListScope) ([]monitoringinstances.Record, error) {
@@ -1041,7 +1045,7 @@ func (r *PostgresMonitoringInstanceRepository) IssueMonitoringInstanceEnrollment
 			and archived_at is null
 		returning enrollment_token_issued_at`,
 		monitoringInstanceID,
-		hashEnrollmentToken(token),
+		r.tokenHasher.hashEnrollmentToken(token),
 	).Scan(&issuedAt); errors.Is(err, pgx.ErrNoRows) {
 		archived, archiveErr := monitoringInstanceArchived(ctx, r.db, monitoringInstanceID)
 		if archiveErr != nil {
@@ -1627,7 +1631,7 @@ func (r *PostgresMonitoringInstanceRepository) IssueSyncToken(ctx context.Contex
 		where monitoring_instance_id = $1
 			and archived_at is null`,
 		monitoringInstanceID,
-		hashSyncToken(token),
+		r.tokenHasher.hashSyncToken(token),
 	)
 	if err != nil {
 		return "", fmt.Errorf("issue sync token for monitoring instance %q: %w", monitoringInstanceID, err)
@@ -1650,11 +1654,12 @@ func (r *PostgresMonitoringInstanceRepository) FindMonitoringInstanceByEnrollmen
 	record, err := scanMonitoringInstance(r.db.QueryRow(ctx, `
 		select `+monitoringInstanceSelectColumns+`
 		from monitoring_instances
-		where enrollment_token_hash = $1
+		where enrollment_token_hash in ($1, $2)
 			and archived_at is null
 			and enrollment_token_consumed_at is null
 			and enrollment_token_issued_at >= now() - interval '30 minutes'`,
-		hashEnrollmentToken(token),
+		r.tokenHasher.hashEnrollmentToken(token),
+		hashOpaqueToken(token),
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound
@@ -1731,6 +1736,7 @@ func (r *PostgresMonitoringInstanceRepository) ApplyEnrollment(ctx context.Conte
 
 	var (
 		monitoringInstanceID       string
+		storedEnrollmentTokenHash  string
 		bindingStatus              string
 		bindingFingerprint         string
 		bindingEpochStartedAt      *time.Time
@@ -1741,6 +1747,7 @@ func (r *PostgresMonitoringInstanceRepository) ApplyEnrollment(ctx context.Conte
 	)
 	if err := tx.QueryRow(ctx, `
 		select monitoring_instance_id,
+			coalesce(enrollment_token_hash, ''),
 			binding_status,
 			coalesce(binding_fingerprint, ''),
 			binding_epoch_started_at,
@@ -1749,14 +1756,16 @@ func (r *PostgresMonitoringInstanceRepository) ApplyEnrollment(ctx context.Conte
 			pending_binding_last_seen_at,
 			pending_binding_attempt_count
 		from monitoring_instances
-		where enrollment_token_hash = $1
+		where enrollment_token_hash in ($1, $2)
 			and archived_at is null
 			and enrollment_token_consumed_at is null
 			and enrollment_token_issued_at >= now() - interval '30 minutes'
 		for update`,
-		hashEnrollmentToken(input.Token),
+		r.tokenHasher.hashEnrollmentToken(input.Token),
+		hashOpaqueToken(input.Token),
 	).Scan(
 		&monitoringInstanceID,
+		&storedEnrollmentTokenHash,
 		&bindingStatus,
 		&bindingFingerprint,
 		&bindingEpochStartedAt,
@@ -1782,12 +1791,16 @@ func (r *PostgresMonitoringInstanceRepository) ApplyEnrollment(ctx context.Conte
 
 	syncToken := ""
 	syncTokenHash := ""
+	enrollmentTokenHash := ""
+	if isLegacySHA256TokenHash(storedEnrollmentTokenHash) {
+		enrollmentTokenHash = r.tokenHasher.hashEnrollmentToken(input.Token)
+	}
 	if next.BindingStatus == monitoringinstances.BindingBound {
 		syncToken, err = ids.NewSecretToken("sync")
 		if err != nil {
 			return monitoringinstances.Record{}, "", fmt.Errorf("generate sync token: %w", err)
 		}
-		syncTokenHash = hashSyncToken(syncToken)
+		syncTokenHash = r.tokenHasher.hashSyncToken(syncToken)
 	}
 
 	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
@@ -1800,6 +1813,7 @@ func (r *PostgresMonitoringInstanceRepository) ApplyEnrollment(ctx context.Conte
 			pending_binding_last_seen_at = $7,
 			pending_binding_attempt_count = $8,
 			sync_token_hash = case when $9 <> '' then $9 else sync_token_hash end,
+			enrollment_token_hash = case when $10 <> '' then $10 else enrollment_token_hash end,
 			enrollment_token_consumed_at = now(),
 			updated_at = now()
 		where monitoring_instance_id = $1
@@ -1814,6 +1828,7 @@ func (r *PostgresMonitoringInstanceRepository) ApplyEnrollment(ctx context.Conte
 		next.PendingBindingLastSeenAt,
 		next.PendingBindingAttemptCount,
 		syncTokenHash,
+		enrollmentTokenHash,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return monitoringinstances.Record{}, "", monitoringinstances.ErrMonitoringInstanceNotFound
@@ -1869,8 +1884,20 @@ func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats(ctx cont
 	if bindingStatus != monitoringinstances.BindingBound {
 		return enrollment.ErrBindingNotAccepted
 	}
-	if storedSyncTokenHash == "" || !syncTokenHashesEqual(storedSyncTokenHash, hashSyncToken(syncToken)) {
+	if storedSyncTokenHash == "" || !r.tokenHasher.syncTokenMatches(storedSyncTokenHash, syncToken) {
 		return enrollment.ErrInvalidSyncToken
+	}
+	if isLegacySHA256TokenHash(storedSyncTokenHash) {
+		if _, err := tx.Exec(ctx, `
+			update monitoring_instances
+			set sync_token_hash = $2,
+				updated_at = now()
+			where monitoring_instance_id = $1`,
+			monitoringInstanceID,
+			r.tokenHasher.hashSyncToken(syncToken),
+		); err != nil {
+			return fmt.Errorf("migrate sync token hash for monitoring instance %q: %w", monitoringInstanceID, err)
+		}
 	}
 
 	lastHeartbeatAt := writes[0].ObservedAt

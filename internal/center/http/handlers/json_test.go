@@ -65,3 +65,20 @@ func TestDecodeJSONKeepsUnknownFieldRejection(t *testing.T) {
 		t.Fatal("decodeJSONLimited returned nil, want unknown field error")
 	}
 }
+
+func TestWriteJSONEncodeFailureDoesNotExposeEncoderDetail(t *testing.T) {
+	recorder := httptest.NewRecorder()
+
+	writeJSON(recorder, http.StatusOK, func() {})
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", recorder.Code)
+	}
+	body := recorder.Body.String()
+	if strings.Contains(body, "encode json") || strings.Contains(body, "unsupported type") {
+		t.Fatalf("body leaked encoder detail: %q", body)
+	}
+	if !strings.Contains(body, "internal server error") {
+		t.Fatalf("body = %q, want generic internal server error", body)
+	}
+}

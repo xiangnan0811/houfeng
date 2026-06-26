@@ -1,6 +1,10 @@
 package store
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"houfeng/internal/security/redact"
+)
 
 const (
 	commandActionStatusPending = "pending"
@@ -20,8 +24,8 @@ func marshalCompletedLastAction(actionID, commandID, stdout, stderr string, exit
 		"action_id":  actionID,
 		"command_id": commandID,
 		"status":     commandActionStatusDone,
-		"stdout":     stdout,
-		"stderr":     stderr,
+		"stdout":     redact.Secrets(stdout),
+		"stderr":     redact.Secrets(stderr),
 		"exit_code":  exitCode,
 	})
 }
