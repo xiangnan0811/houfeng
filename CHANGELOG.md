@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.6](https://github.com/xiangnan0811/houfeng/compare/v0.54.5...v0.54.6) (2026-06-26)
+
+
+### Bug Fixes
+
+* enforce sync auth and command governance ([1d9df82](https://github.com/xiangnan0811/houfeng/commit/1d9df820d749b2a883a15cd9a9c1d160f0f9cd0c))
+
 ## [0.54.5](https://github.com/xiangnan0811/houfeng/compare/v0.54.4...v0.54.5) (2026-06-26)
 
 
