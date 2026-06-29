@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { useEffect, useRef } from 'react'
 
 import { Badge, Button } from '../../components/atoms'
-import type { VPSDetailOverviewModel } from './vpsDetailOverviewModel'
+import type { VPSDetailOverviewModel, VPSOverviewAction } from './vpsDetailOverviewModel'
 
 type VPSDetailOverviewPanelProps = {
   model: VPSDetailOverviewModel
@@ -30,6 +30,14 @@ type VPSDetailOverviewPanelProps = {
 
 function toneClass(tone?: string): string {
   return tone ? `vps-detail-overview__fact--${tone}` : ''
+}
+
+function judgementToneClass(tone?: string): string {
+  return tone ? `vps-detail-overview__attention-item--${tone}` : ''
+}
+
+function actionKey(action: VPSOverviewAction): string {
+  return `${action.kind}:${action.mode ?? action.to ?? action.label}`
 }
 
 export function VPSDetailOverviewPanel({
@@ -81,6 +89,51 @@ export function VPSDetailOverviewPanel({
   function runMenuAction(action: () => void) {
     closeActionsMenu()
     action()
+  }
+
+  function runOverviewAction(action: VPSOverviewAction) {
+    if (action.mode === 'cancellation') {
+      onCancellationOpen()
+      return
+    }
+    if (action.mode === 'decision') {
+      onDecisionEdit()
+      return
+    }
+    if (action.mode === 'monitoring-instance-evidence') {
+      onMonitoringEvidence()
+      return
+    }
+    if (action.mode === 'monitoring-instance-create') {
+      onMonitoringAgent()
+      return
+    }
+    if (action.mode === 'monitoring-instance-link') {
+      onMonitoringLink()
+      return
+    }
+    if (action.mode === 'subscription') {
+      onSubscriptionOpen()
+      return
+    }
+    if (action.mode === 'validity-extension') {
+      onValidityExtend()
+    }
+  }
+
+  function renderOverviewAction(action: VPSOverviewAction, primary = false) {
+    if (action.kind === 'link' && action.to) {
+      return (
+        <Link key={actionKey(action)} className={['btn', 'sm', primary ? 'primary' : 'secondary'].join(' ')} to={action.to}>
+          {action.label}
+        </Link>
+      )
+    }
+    return (
+      <Button key={actionKey(action)} variant={primary ? 'primary' : 'secondary'} size="sm" onClick={() => runOverviewAction(action)}>
+        {action.label}
+      </Button>
+    )
   }
 
   return (
@@ -160,14 +213,21 @@ export function VPSDetailOverviewPanel({
               </div>
             ))}
           </dl>
-          {model.judgement.primaryAction ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={model.judgement.primaryAction.mode === 'cancellation' ? onCancellationOpen : undefined}
-            >
-              {model.judgement.primaryAction.label}
-            </Button>
+          {model.judgement.attentionItems.length > 0 ? (
+            <div className="vps-detail-overview__attention-list" aria-label="当前需要关注的状态">
+              {model.judgement.attentionItems.map((item) => (
+                <article key={`${item.title}:${item.primaryAction.label}`} className={['vps-detail-overview__attention-item', judgementToneClass(item.tone)].filter(Boolean).join(' ')}>
+                  <div>
+                    <h3>{item.title}</h3>
+                    <p>{item.reason}</p>
+                  </div>
+                  <div className="vps-detail-overview__attention-actions">
+                    {renderOverviewAction(item.primaryAction, true)}
+                    {item.secondaryActions.map((action) => renderOverviewAction(action))}
+                  </div>
+                </article>
+              ))}
+            </div>
           ) : null}
         </aside>
       </div>

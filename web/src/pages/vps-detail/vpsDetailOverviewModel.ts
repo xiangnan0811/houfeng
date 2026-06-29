@@ -79,6 +79,7 @@ export type VPSDetailOverviewModel = {
   judgement: {
     tone: VPSOverviewTone
     rows: Array<{ label: string; value: string }>
+    attentionItems: VPSContextAction[]
     primaryAction: VPSOverviewAction | null
   }
   contextAction: VPSContextAction | null
@@ -130,7 +131,8 @@ export function buildVPSDetailOverviewModel(input: VPSDetailOverviewModelInput):
   const relatedItems = buildRelatedItems(input, subscriptionSummary, ipOverview)
   const contextAction = buildContextAction(input, subscriptionSummary, ipOverview)
   const cancellationWork = input.cancellationAttention ?? needsCancellationWork(input.detail)
-  const actionValue = cancellationWork ? '取消/退役' : contextAction ? contextAction.primaryAction.label : '无'
+  const attentionItems = buildAttentionItems(input, subscriptionSummary, ipOverview, cancellationWork)
+  const actionValue = cancellationWork ? '取消/退役' : attentionItems[0]?.primaryAction.label ?? '无'
 
   return {
     title: input.detail.display_name,
@@ -151,12 +153,13 @@ export function buildVPSDetailOverviewModel(input: VPSDetailOverviewModelInput):
       { label: 'IP 质量', value: ipOverview.titleValue, tone: ipOverviewTone(ipOverview) },
     ],
     judgement: {
-      tone: cancellationWork ? 'critical' : contextAction?.tone ?? 'normal',
+      tone: strongestOverviewTone(attentionItems.map((item) => item.tone)),
       rows: [
         { label: '决策', value: renewalLabel(input.detail.renewal_decision) },
         { label: '续费', value: input.primarySubscription ? renewalDueLabel(input.primarySubscription) : subscriptionSummary.shortValue },
         { label: '动作', value: actionValue },
       ],
+      attentionItems,
       primaryAction: cancellationWork
         ? { kind: 'modal', label: '处理取消/退役', mode: 'cancellation' }
         : null,
@@ -166,6 +169,13 @@ export function buildVPSDetailOverviewModel(input: VPSDetailOverviewModelInput):
     ledger: buildLedger(input),
     ipOverview,
   }
+}
+
+function strongestOverviewTone(tones: VPSOverviewTone[]): VPSOverviewTone {
+  if (tones.includes('critical')) return 'critical'
+  if (tones.includes('alert')) return 'alert'
+  if (tones.includes('notice')) return 'notice'
+  return 'normal'
 }
 
 type SubscriptionSummary = {
@@ -301,12 +311,33 @@ function buildContextAction(
   subscriptionSummary: SubscriptionSummary,
   ipOverview: VPSIPQualityOverviewModel,
 ): VPSContextAction | null {
-  const monitoringInstance = primaryMonitoringInstance(input.detail)
   if (needsCancellationWork(input.detail)) {
     return null
   }
+  return buildAttentionItems(input, subscriptionSummary, ipOverview, false)[0] ?? null
+}
+
+function buildAttentionItems(
+  input: VPSDetailOverviewModelInput,
+  subscriptionSummary: SubscriptionSummary,
+  ipOverview: VPSIPQualityOverviewModel,
+  cancellationWork: boolean,
+): VPSContextAction[] {
+  const monitoringInstance = primaryMonitoringInstance(input.detail)
+  const items: VPSContextAction[] = []
+
+  if (cancellationWork) {
+    items.push({
+      title: '取消/退役',
+      reason: lifecycleLabel(input.detail.lifecycle_status),
+      tone: 'critical',
+      primaryAction: { kind: 'modal', label: '处理取消/退役', mode: 'cancellation' },
+      secondaryActions: [],
+    })
+  }
+
   if (monitoringInstance && monitoringTone(monitoringInstance) !== 'normal') {
-    return {
+    items.push({
       title: '运行观测需要核对',
       reason: `${monitoringInstance.display_name} · ${monitoringInstance.current_active_incident_count} 个活跃异常`,
       tone: monitoringTone(monitoringInstance),
@@ -316,54 +347,56 @@ function buildContextAction(
         to: `/monitoring/${encodeURIComponent(monitoringInstance.monitoring_instance_id)}?return_vps=${encodeURIComponent(input.detail.vps_id)}`,
       },
       secondaryActions: [{ kind: 'modal', label: '监控观测', mode: 'monitoring-instance-evidence' }],
-    }
+    })
   }
+
   if (input.subscriptionLoadFailed) {
-    return {
+    items.push({
       title: '订阅证据暂不可用',
       reason: input.subscriptionError ?? '读取失败，暂不判断缺订阅',
       tone: 'notice',
       primaryAction: { kind: 'link', label: '核对订阅', to: `/subscriptions?vps_id=${encodeURIComponent(input.detail.vps_id)}` },
       secondaryActions: [],
-    }
-  }
-  if (!input.primarySubscription) {
-    return {
+    })
+  } else if (!input.primarySubscription) {
+    items.push({
       title: '缺少当前订阅',
       reason: '需要补齐成本和续费日',
       tone: 'critical',
       primaryAction: { kind: 'modal', label: '创建/更新订阅', mode: 'subscription' },
       secondaryActions: [],
-    }
-  }
-  if (subscriptionSummary.tone === 'critical' || subscriptionSummary.tone === 'notice') {
-    return {
+    })
+  } else if (subscriptionSummary.tone === 'critical' || subscriptionSummary.tone === 'notice') {
+    items.push({
       title: input.primarySubscription.auto_renew_cancelled ? '自动续费已取消' : '续费时间需要关注',
       reason: renewalDueLabel(input.primarySubscription),
       tone: subscriptionSummary.tone,
       primaryAction: { kind: 'modal', label: '调整决策', mode: 'decision' },
       secondaryActions: [{ kind: 'modal', label: '延长有效期', mode: 'validity-extension' }],
-    }
+    })
   }
+
   if (!monitoringInstance) {
-    return {
+    items.push({
       title: '缺少运行观测',
       reason: '尚未关联监控实例',
       tone: 'alert',
       primaryAction: { kind: 'modal', label: '接入/升级 agent', mode: 'monitoring-instance-create' },
       secondaryActions: [{ kind: 'modal', label: '关联已有监控实例', mode: 'monitoring-instance-link' }],
-    }
+    })
   }
+
   if (ipOverview.status === 'error') {
-    return {
+    items.push({
       title: 'IP 质量暂不可用',
       reason: ipOverview.verdict,
       tone: 'notice',
       primaryAction: { kind: 'link', label: '查看 IP 质量', to: ipOverview.reportTo },
       secondaryActions: [],
-    }
+    })
   }
-  return null
+
+  return items
 }
 
 function needsCancellationWork(detail: VPSAssetDetail): boolean {

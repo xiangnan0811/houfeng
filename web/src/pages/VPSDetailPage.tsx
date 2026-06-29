@@ -47,7 +47,6 @@ import type {
   VPSIPQualityReport,
   VPSMonitoringInstanceSummary,
 } from '../lib/types'
-import { VPSContextActionPanel } from './vps-detail/VPSContextActionPanel'
 import { VPSDetailErrorPanel } from './vps-detail/VPSDetailErrorPanel'
 import { VPSDetailLoading } from './vps-detail/VPSDetailLoading'
 import { VPSDetailMissingID } from './vps-detail/VPSDetailMissingID'
@@ -1532,14 +1531,6 @@ export function VPSDetailPage() {
             </p>
           ))}
         </div>
-      ) : null}
-
-      {overviewModel.contextAction ? (
-        <VPSContextActionPanel
-          action={overviewModel.contextAction}
-          onOpenModal={openDrawer}
-          onMonitoringAgent={openMonitoringAgentWorkbench}
-        />
       ) : null}
 
       <VPSRelatedOverview
