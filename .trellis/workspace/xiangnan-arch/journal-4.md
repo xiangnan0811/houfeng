@@ -856,3 +856,37 @@ Moved VPS ledger detail entry buttons into the overview action bar, kept ledger 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 202: Recover missing minisign in installer
+
+**Date**: 2026-06-29
+**Task**: Recover missing minisign in installer
+**Branch**: `chore/archive-installer-minisign-task`
+
+### Summary
+
+Implemented installer recovery for missing minisign with explicit dependency consent, pinned SHA256 bootstrap, generated command flag, docs/UI/spec updates, PR #280 merge, release PR #281 merge, v0.55.1 release assets, and publish-images Docker manifest verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bb72bad` | (see git log) |
+| `511084e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
