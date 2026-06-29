@@ -924,3 +924,36 @@ Moved VPS detail attention states into top current judgement, removed middle con
 ### Next Steps
 
 - None - task complete
+
+
+## Session 204: Document stale installer minisign recovery
+
+**Date**: 2026-06-29
+**Task**: Document stale installer minisign recovery
+**Branch**: `fix/installer-minisign-dependency`
+
+### Summary
+
+Captured the v0.55.0 missing-minisign root cause, documented the v0.55.1+ regenerated-command fix path, and added troubleshooting notes for stale installer commands.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3059287` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
