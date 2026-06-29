@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.4](https://github.com/xiangnan0811/houfeng/compare/v0.55.3...v0.55.4) (2026-06-29)
+
+
+### Documentation
+
+* document Debian minisign upgrade recovery ([867fdeb](https://github.com/xiangnan0811/houfeng/commit/867fdeb89aa305885f8c4701530ee64bbdfaf4a5))
+
 ## [0.55.3](https://github.com/xiangnan0811/houfeng/compare/v0.55.2...v0.55.3) (2026-06-29)
 
 
