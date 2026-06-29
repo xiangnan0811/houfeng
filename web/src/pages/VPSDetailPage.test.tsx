@@ -182,7 +182,7 @@ function cancellationPreviewBody(overrides: Record<string, unknown> = {}) {
       from_state: 'active/cancel',
       to_state: 'cancelled/cancel',
       required: true,
-      message: '将 VPS 续费决策设为 cancel，并根据订阅到期情况设置生命周期。',
+      message: '将 VPS 调整决策设为 cancel，并根据订阅到期情况设置生命周期。',
     }],
     warnings: ['仍有 1 个关联监控实例 未标记不续费或已退役。'],
     blockers: [],
@@ -259,7 +259,10 @@ function openVPSActionsMenu() {
 
 function clickVPSAction(name: string) {
   openVPSActionsMenu()
-  fireEvent.click(screen.getByRole('button', { name }))
+  const summary = screen.getByLabelText('VPS 详情操作')
+  const menu = summary.closest('details')
+  if (!menu) throw new Error('VPS actions menu not found')
+  fireEvent.click(within(menu).getByRole('button', { name }))
 }
 
 function LocationProbe() {
@@ -449,73 +452,76 @@ describe('VPSDetailPage', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(screen.getByRole('button', { name: '处理决策' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Tokyo Edge' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '关联概览' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '单机台账' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'IP 质量概况' })).toBeInTheDocument()
+    const relatedOverviewLayout = screen.getByRole('region', { name: '关联概览' })
+    expect(within(relatedOverviewLayout).getByRole('list')).toHaveClass('vps-related-overview__list')
+    expect(within(relatedOverviewLayout).queryAllByRole('article')).toHaveLength(0)
+    const singleLedgerLayout = screen.getByRole('region', { name: '单机台账' })
+    expect(within(singleLedgerLayout).queryAllByRole('article')).toHaveLength(0)
+    expect(within(singleLedgerLayout).getByRole('list', { name: '近期记录' })).toBeInTheDocument()
+    expect(within(singleLedgerLayout).getByRole('list', { name: '承载清单' })).toBeInTheDocument()
+    expect(screen.getByLabelText('VPS 综合基础信息')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '调整决策' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '基础资料' })).toBeInTheDocument()
     expect(screen.getByLabelText('VPS 详情操作')).toBeInTheDocument()
     openVPSActionsMenu()
-    expect(screen.getByRole('button', { name: '编辑基础信息' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '记录经验' })).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: '快速创建订阅' }).length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('button', { name: '升级/重新接入 agent' }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: '编辑基础资料' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '记录经验' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: '创建/更新订阅' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: '接入/升级 agent' }).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: '关联已有监控实例' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '新增服务' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '新增域名' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '新增服务' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: '新增域名' }).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: '归档 VPS' })).toBeInTheDocument()
-    expect(screen.getByText('资产判断')).toBeInTheDocument()
-    expect(screen.getByText('下一步动作')).toBeInTheDocument()
-    expect(screen.getByText('先核对运行异常')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看监控实例' })).toHaveAttribute('href', '/monitoring/mi_001')
-    expect(screen.getByLabelText('资产判断证据状态')).toBeInTheDocument()
-    expect(screen.getByText('续费与成本')).toBeInTheDocument()
+    expect(screen.getByText('JP · Kanto · Tokyo · nrt')).toBeInTheDocument()
+    expect(screen.getAllByText('cx22').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('192.0.2.1:22').length).toBeGreaterThan(0)
     expect(screen.getAllByText('USD 12.00').length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/续费日 2026-06-01/).length).toBeGreaterThan(0)
-    expect(screen.getByText('续费与成本')).toBeInTheDocument()
-    expect(screen.getAllByText('USD 12.00').length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/续费日 2026-06-01/).length).toBeGreaterThan(0)
-    expect(screen.getAllByText('监控实例证据').length).toBeGreaterThan(0)
-    expect(screen.getByText('服务与域名')).toBeInTheDocument()
-    expect(screen.getByText('最近历史')).toBeInTheDocument()
-    expect(screen.getByText('资料摘要')).toBeInTheDocument()
-    expect(screen.getByText(/1 服务 · 1 域名/)).toBeInTheDocument()
-    expect(screen.getAllByText('Tokyo Monitoring Instance').length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/latency high/).length).toBeGreaterThan(0)
-    expect(screen.getByText(/晚高峰丢包/)).toBeInTheDocument()
-    expect(screen.getByText('Blog；www.example.com')).toBeInTheDocument()
-    expect(screen.getByText(/cx22 · nrt/)).toBeInTheDocument()
-    expect(screen.getAllByText('192.0.2.1').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('监控观测').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('1 个实例 · 关注').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/晚高峰丢包/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Blog').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('www.example.com').length).toBeGreaterThan(0)
+    expect(screen.queryByText('资产判断')).not.toBeInTheDocument()
+    expect(screen.queryByText('下一步动作')).not.toBeInTheDocument()
+    expect(screen.queryByText('成本卡片')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '续费与成本证据' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '决策依据与经验记录' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '监控实例证据' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '决策依据与记录经验' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '监控观测' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '基础信息' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '资产历史' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '服务资产' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '域名资产' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '访问摘要' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '查看监控实例详情' }))
-    const nodeDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
-    expect(within(nodeDrawer).getAllByRole('heading', { name: '监控实例证据' }).length).toBeGreaterThan(0)
-    expect(within(nodeDrawer).getByText(/监控实例作为 VPS 的运行观测事实/)).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: '监控观测' })[0])
+    const nodeDrawer = screen.getByRole('dialog', { name: '监控观测' })
+    expect(within(nodeDrawer).getAllByRole('heading', { name: '监控观测' }).length).toBeGreaterThan(0)
     expect(within(nodeDrawer).getAllByText('Tokyo Monitoring Instance').length).toBeGreaterThan(0)
     fireEvent.click(within(nodeDrawer).getByLabelText('关闭'))
 
-    fireEvent.click(screen.getByRole('button', { name: '服务详情' }))
-    const servicesDrawer = screen.getByRole('dialog', { name: '服务资产详情' })
+    const relatedOverview = screen.getByRole('region', { name: '关联概览' })
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '服务' }))
+    const servicesDrawer = screen.getByRole('dialog', { name: '服务详情' })
     expect(within(servicesDrawer).getByRole('heading', { name: '服务资产' })).toBeInTheDocument()
     expect(within(servicesDrawer).getByText('https://blog.example.com')).toBeInTheDocument()
     expect(within(servicesDrawer).getByText('tg_001')).toBeInTheDocument()
     fireEvent.click(within(servicesDrawer).getByLabelText('关闭'))
 
-    fireEvent.click(screen.getByRole('button', { name: '域名详情' }))
-    const domainsDrawer = screen.getByRole('dialog', { name: '域名资产详情' })
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '域名' }))
+    const domainsDrawer = screen.getByRole('dialog', { name: '域名详情' })
     expect(within(domainsDrawer).getByRole('heading', { name: '域名资产' })).toBeInTheDocument()
     expect(within(domainsDrawer).getByText('www.example.com')).toBeInTheDocument()
     expect(within(domainsDrawer).getByText('NameSilo')).toBeInTheDocument()
     expect(within(domainsDrawer).getByText('2026-07-01')).toBeInTheDocument()
     fireEvent.click(within(domainsDrawer).getByLabelText('关闭'))
 
-    fireEvent.click(screen.getByRole('button', { name: '查看资产历史' }))
-    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史详情' })
-    expect(within(timelineDrawer).getByRole('heading', { name: '资产历史' })).toBeInTheDocument()
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '资产历史' }))
+    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史' })
+    expect(within(timelineDrawer).getAllByRole('heading', { name: '资产历史' }).length).toBeGreaterThan(0)
     expect(within(timelineDrawer).getByText('未评估 -> 保留')).toBeInTheDocument()
     expect(within(timelineDrawer).getAllByText('稳定承载边缘流量').length).toBeGreaterThan(0)
     expect(within(timelineDrawer).getAllByText('USD 10.00 -> USD 12.00').length).toBeGreaterThan(0)
@@ -524,8 +530,8 @@ describe('VPSDetailPage', () => {
     expect(within(timelineDrawer).getByText('已向服务商提交工单')).toBeInTheDocument()
     fireEvent.click(within(timelineDrawer).getByLabelText('关闭'))
 
-    fireEvent.click(screen.getByRole('button', { name: '查看基础资料' }))
-    const factsDrawer = screen.getByRole('dialog', { name: '基础资料详情' })
+    fireEvent.click(screen.getByRole('button', { name: '基础资料' }))
+    const factsDrawer = screen.getByRole('dialog', { name: '基础资料' })
     expect(within(factsDrawer).getByRole('heading', { name: '基础信息' })).toBeInTheDocument()
     expect(within(factsDrawer).getByText('vps_001')).toBeInTheDocument()
   })
@@ -554,12 +560,16 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量概况' })).toBeInTheDocument())
+    expect(screen.queryByText('取消/退役待处理')).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/ip-quality', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
+    const ipQualitySummary = screen.getByRole('region', { name: 'IP 质量概况' })
+    expect(ipQualitySummary.querySelector('.vps-ip-quality-summary__facts')).not.toBeNull()
+    expect(ipQualitySummary.querySelector('.vps-ip-quality-summary__score')).toBeNull()
     expect(screen.getByRole('link', { name: '查看完整 IP 质量报告' })).toHaveAttribute('href', '/vps/vps_001/ip-quality')
     expect(screen.getByText('风险信号')).toBeInTheDocument()
     expect(screen.getByText('解锁概览')).toBeInTheDocument()
@@ -576,6 +586,157 @@ describe('VPSDetailPage', () => {
     expect(screen.queryByText('Netflix')).not.toBeInTheDocument()
     expect(screen.queryByText('受阻 · US')).not.toBeInTheDocument()
     expect(screen.queryByText('Provider 判断')).not.toBeInTheDocument()
+  })
+
+  it('closes the top actions menu when the user clicks elsewhere on the page', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(vpsDetailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    const summary = screen.getByLabelText('VPS 详情操作')
+    const menu = summary.closest('details')
+    expect(menu).not.toBeNull()
+
+    fireEvent.click(summary)
+    expect(menu).toHaveAttribute('open')
+
+    fireEvent.pointerDown(screen.getByLabelText('VPS 综合基础信息'))
+    expect(menu).not.toHaveAttribute('open')
+  })
+
+  it('keeps related overview titles and quick actions wired to their target routes or modals', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse({
+        ...vpsDetailBody,
+        ip_quality_summary: ipQualitySummaryBody,
+      }))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([serviceBody]))
+      .mockResolvedValueOnce(mockJSONResponse([domainBody]))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+      .mockResolvedValueOnce(mockJSONResponse(ipQualityReportBody))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route
+            path="/vps/:vpsId"
+            element={(
+              <>
+                <LocationProbe />
+                <VPSDetailPage />
+              </>
+            )}
+          />
+          <Route path="/subscriptions" element={<LocationProbe />} />
+          <Route path="/monitoring/:monitoringInstanceId" element={<LocationProbe />} />
+          <Route path="/vps/:vpsId/ip-quality" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    const relatedOverview = screen.getByRole('region', { name: '关联概览' })
+
+    expect(within(relatedOverview).getByRole('link', { name: '订阅' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001')
+    expect(within(relatedOverview).getByRole('link', { name: '监控观测' })).toHaveAttribute('href', '/monitoring/mi_001?return_vps=vps_001')
+    expect(within(relatedOverview).getByRole('link', { name: 'IP 质量' })).toHaveAttribute('href', '/vps/vps_001/ip-quality')
+    expect(within(relatedOverview).getByRole('button', { name: '接入/升级 agent' })).toBeInTheDocument()
+    expect(within(relatedOverview).queryByRole('button', { name: '接入/升级' })).not.toBeInTheDocument()
+
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '创建/更新订阅' }))
+    expect(screen.getByRole('dialog', { name: '创建/更新订阅' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('dialog', { name: '创建/更新订阅' }).querySelector('.modal-close') as HTMLElement)
+
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '延长' }))
+    expect(screen.getByRole('dialog', { name: '延长有效期' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('dialog', { name: '延长有效期' }).querySelector('.modal-close') as HTMLElement)
+
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '关联' }))
+    expect(await screen.findByRole('dialog', { name: '关联已有监控实例' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('dialog', { name: '关联已有监控实例' }).querySelector('.modal-close') as HTMLElement)
+
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '服务' }))
+    expect(screen.getByRole('dialog', { name: '服务详情' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('dialog', { name: '服务详情' }).querySelector('.modal-close') as HTMLElement)
+
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '新增服务' }))
+    expect(screen.getByRole('dialog', { name: '新增服务' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('dialog', { name: '新增服务' }).querySelector('.modal-close') as HTMLElement)
+
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '域名' }))
+    expect(screen.getByRole('dialog', { name: '域名详情' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('dialog', { name: '域名详情' }).querySelector('.modal-close') as HTMLElement)
+
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '新增域名' }))
+    expect(screen.getByRole('dialog', { name: '新增域名' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('dialog', { name: '新增域名' }).querySelector('.modal-close') as HTMLElement)
+
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '资产历史' }))
+    expect(screen.getByRole('dialog', { name: '资产历史' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('dialog', { name: '资产历史' }).querySelector('.modal-close') as HTMLElement)
+
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '记录' }))
+    expect(screen.getByRole('dialog', { name: '记录经验' })).toBeInTheDocument()
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/api/targets', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('shows IP quality load failures without mixing in the no-report empty state', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse({
+        ...vpsDetailBody,
+        ip_quality_summary: ipQualitySummaryBody,
+      }))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'ip quality backend down' }, 503))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const ipQualitySummary = await screen.findByRole('region', { name: 'IP 质量概况' })
+    expect(within(ipQualitySummary).getByRole('alert')).toHaveTextContent('ip quality backend down')
+    expect(within(ipQualitySummary).getByText('报告暂不可用')).toBeInTheDocument()
+    expect(within(ipQualitySummary).getByRole('link', { name: '查看完整 IP 质量报告' })).toHaveAttribute('href', '/vps/vps_001/ip-quality')
+    expect(within(ipQualitySummary).queryByText('尚无 IP 质量报告')).not.toBeInTheDocument()
+    expect(within(ipQualitySummary).queryByText('尚未收到可用质量结论。')).not.toBeInTheDocument()
   })
 
   it('does not treat subscription load failures as missing subscription facts', async () => {
@@ -646,9 +807,7 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    expect(screen.getAllByText('订阅读取失败').length).toBeGreaterThan(0)
-    expect(screen.getByText('先恢复订阅证据')).toBeInTheDocument()
-    expect(screen.getByText('读取失败')).toBeInTheDocument()
+    expect(screen.getAllByText('订阅证据暂不可用').length).toBeGreaterThan(0)
     expect(screen.getByRole('link', { name: '核对订阅' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001')
     expect(screen.getAllByText('subscription backend down').length).toBeGreaterThan(0)
     expect(screen.getAllByText('订阅未知').length).toBeGreaterThan(0)
@@ -723,10 +882,10 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
-    expect(screen.getByText('补录续费成本')).toBeInTheDocument()
+    expect(screen.getByText('缺少当前订阅')).toBeInTheDocument()
     expect(screen.getAllByText('缺订阅').length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('button', { name: '快速创建订阅' }).length).toBeGreaterThan(0)
-    expect(screen.queryByText('订阅读取失败')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '创建/更新订阅' }).length).toBeGreaterThan(0)
+    expect(screen.queryByText('订阅证据暂不可用')).not.toBeInTheDocument()
   })
 
   it('creates subscription facts from the VPS detail page without asking for subscription status', async () => {
@@ -767,8 +926,8 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
-    fireEvent.click(screen.getAllByRole('button', { name: '快速创建订阅' })[0])
-    const drawer = screen.getByRole('dialog', { name: '快速创建订阅' })
+    fireEvent.click(screen.getAllByRole('button', { name: '创建/更新订阅' })[0])
+    const drawer = screen.getByRole('dialog', { name: '创建/更新订阅' })
     expect(within(drawer).queryByLabelText('订阅状态')).not.toBeInTheDocument()
     fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '18' } })
     fireEvent.change(within(drawer).getByLabelText('续费日期'), { target: { value: '2026-07-01' } })
@@ -776,7 +935,7 @@ describe('VPSDetailPage', () => {
     fireEvent.change(within(drawer).getByLabelText('支付方式'), { target: { value: '__custom' } })
     fireEvent.change(within(drawer).getByLabelText('自定义支付方式'), { target: { value: 'visa' } })
     fireEvent.change(within(drawer).getByLabelText('备注'), { target: { value: 'created from vps detail' } })
-    fireEvent.click(within(drawer).getByRole('button', { name: '创建订阅' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
 
     await waitFor(() => expect(screen.getByText('订阅账单事实已创建')).toBeInTheDocument())
     expect(screen.getAllByText('USD 18.00').length).toBeGreaterThan(0)
@@ -830,7 +989,7 @@ describe('VPSDetailPage', () => {
       </MemoryRouter>,
     )
 
-    const drawer = await screen.findByRole('dialog', { name: '快速创建订阅' })
+    const drawer = await screen.findByRole('dialog', { name: '创建/更新订阅' })
     expect(within(drawer).getByText('只补录账单事实；生命周期、用途和续费决策继续归 VPS 管理。')).toBeInTheDocument()
     expect(within(drawer).queryByLabelText('订阅状态')).not.toBeInTheDocument()
   })
@@ -859,7 +1018,7 @@ describe('VPSDetailPage', () => {
       </MemoryRouter>,
     )
 
-    const drawer = await screen.findByRole('dialog', { name: '创建并接入 agent' })
+    const drawer = await screen.findByRole('dialog', { name: '接入/升级 agent' })
     expect(within(drawer).getByLabelText('监控实例名称')).toHaveValue('Tokyo Edge')
     expect(within(drawer).getByLabelText('服务商')).toHaveValue('Hetzner')
     expect(within(drawer).getByLabelText('区域')).toHaveValue('Kanto')
@@ -898,7 +1057,7 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/monitoring/mi_001'))
     expect(screen.getByTestId('location-search')).toHaveTextContent('onboarding=1')
     expect(screen.getByTestId('location-search')).toHaveTextContent('return_vps=vps_001')
-    expect(screen.queryByRole('dialog', { name: '创建并接入 agent' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '接入/升级 agent' })).not.toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalledWith('/api/vps/vps_001/monitoring-instances', expect.anything())
   })
 
@@ -929,10 +1088,10 @@ describe('VPSDetailPage', () => {
     )
 
     expect(screen.getByTestId('location-search')).toHaveTextContent('workbench=subscription')
-    const drawer = await screen.findByRole('dialog', { name: '快速创建订阅' })
+    const drawer = await screen.findByRole('dialog', { name: '创建/更新订阅' })
     fireEvent.click(within(drawer).getByRole('button', { name: '取消' }))
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '快速创建订阅' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '创建/更新订阅' })).not.toBeInTheDocument())
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('workbench=')
   })
 
@@ -1041,11 +1200,11 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    fireEvent.click(screen.getAllByRole('button', { name: '创建并接入 agent' })[0])
-    const drawer = screen.getByRole('dialog', { name: '创建并接入 agent' })
+    fireEvent.click(screen.getAllByRole('button', { name: '接入/升级 agent' })[0])
+    const drawer = screen.getByRole('dialog', { name: '接入/升级 agent' })
     expect(within(drawer).getByLabelText('监控实例名称')).toHaveValue('Tokyo Edge')
     expect(within(drawer).getByLabelText('标签')).toHaveValue('edge')
-    fireEvent.click(within(drawer).getByRole('button', { name: '创建并接入 agent' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '接入/升级 agent' }))
 
     await waitFor(() => expect(screen.getByText('monitoring onboarding route')).toBeInTheDocument())
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/monitoring-instances', {
@@ -1102,8 +1261,7 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    expect(screen.queryByRole('button', { name: '创建并接入 agent' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: '升级/重新接入 agent' })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: '接入/升级 agent' })[0])
 
     await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/monitoring/mi_001'))
     expect(screen.getByTestId('location-search')).toHaveTextContent('onboarding=1')
@@ -1144,13 +1302,12 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '查看监控实例详情' }))
-    const evidenceDrawer = await screen.findByRole('dialog', { name: '监控实例证据' })
+    fireEvent.click(screen.getAllByRole('button', { name: '监控观测' })[0])
+    const evidenceDrawer = await screen.findByRole('dialog', { name: '监控观测' })
 
-    expect(within(evidenceDrawer).queryByRole('button', { name: '创建并接入 agent' })).not.toBeInTheDocument()
     expect(within(evidenceDrawer).queryByRole('button', { name: '关联已有监控实例' })).not.toBeInTheDocument()
     expect(within(evidenceDrawer).getByRole('alert')).toHaveTextContent('检测到 2 个 active 监控实例关联')
-    expect(within(evidenceDrawer).getAllByRole('button', { name: '升级/重新接入 agent' })).toHaveLength(2)
+    expect(within(evidenceDrawer).getAllByRole('button', { name: '接入/升级 agent' })).toHaveLength(2)
     expect(within(evidenceDrawer).getAllByRole('button', { name: '解除关联' })).toHaveLength(2)
   })
 
@@ -1181,13 +1338,54 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: '处理决策' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '创建订阅' })).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: '创建并接入 agent' }).length).toBeGreaterThan(0)
-    expect(screen.queryByRole('button', { name: '打开取消/退役工作台' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '调整决策' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '创建/更新订阅' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: '接入/升级 agent' }).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: '打开取消/退役' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '处理取消/退役' })).not.toBeInTheDocument()
     openVPSActionsMenu()
-    expect(screen.queryByRole('button', { name: '取消/退役工作台' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '取消/退役' })).not.toBeInTheDocument()
     expect(screen.queryByText('LIFECYCLE COORDINATION')).not.toBeInTheDocument()
+  })
+
+  it('opens cancellation handling from the top current judgement instead of the more menu', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(vpsDetailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([subscriptionBody]))
+      .mockResolvedValueOnce(mockJSONResponse(cancellationPreviewBody()))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    const currentJudgement = screen.getByLabelText('当前判断')
+    expect(within(currentJudgement).getByText('取消/退役')).toBeInTheDocument()
+    const cancellationButton = within(currentJudgement).getByRole('button', { name: '处理取消/退役' })
+    expect(cancellationButton).toBeInTheDocument()
+    openVPSActionsMenu()
+    expect(screen.queryByRole('button', { name: '取消/退役' })).not.toBeInTheDocument()
+    fireEvent.pointerDown(screen.getByLabelText('VPS 综合基础信息'))
+
+    fireEvent.click(cancellationButton)
+
+    const drawer = await screen.findByRole('dialog', { name: '取消/退役' })
+    expect(within(drawer).getByLabelText('取消/退役影响范围摘要')).toBeInTheDocument()
+    expect(screen.queryByText('取消/退役待处理')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/cancellation-preview', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
   })
 
   it('updates the renewal decision and refreshes asset history', async () => {
@@ -1275,15 +1473,15 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '调整决策' }))
-    const decisionDrawer = screen.getByRole('dialog', { name: '续费决策' })
+    const decisionDrawer = screen.getByRole('dialog', { name: '调整决策' })
     fireEvent.change(within(decisionDrawer).getByLabelText('续费决策'), { target: { value: 'cancel' } })
     fireEvent.change(within(decisionDrawer).getByLabelText('决策理由'), { target: { value: 'too expensive' } })
     fireEvent.click(within(decisionDrawer).getByRole('button', { name: '保存续费决策' }))
 
     await waitFor(() => expect(screen.getByText('续费决策已更新，资产历史已刷新')).toBeInTheDocument())
     expect(screen.getAllByText('too expensive').length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: '查看资产历史' }))
-    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史详情' })
+    fireEvent.click(screen.getAllByRole('button', { name: '资产历史' })[0])
+    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史' })
     expect(within(timelineDrawer).getByText('保留 -> 取消')).toBeInTheDocument()
     fireEvent.click(within(timelineDrawer).getByLabelText('关闭'))
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001', {
@@ -1372,26 +1570,26 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '调整决策' }))
-    let decisionDialog = screen.getByRole('dialog', { name: '续费决策' })
+    let decisionDialog = screen.getByRole('dialog', { name: '调整决策' })
     fireEvent.change(within(decisionDialog).getByLabelText('续费决策'), { target: { value: 'cancel' } })
     fireEvent.change(within(decisionDialog).getByLabelText('决策理由'), { target: { value: 'stale decision' } })
     fireEvent.click(within(decisionDialog).getByRole('button', { name: '取消' }))
-    expect(screen.queryByRole('dialog', { name: '续费决策' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '调整决策' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '调整决策' }))
-    decisionDialog = screen.getByRole('dialog', { name: '续费决策' })
+    decisionDialog = screen.getByRole('dialog', { name: '调整决策' })
     expect(within(decisionDialog).getByLabelText('续费决策')).toHaveValue('keep')
     expect(within(decisionDialog).getByLabelText('决策理由')).toHaveValue('')
     fireEvent.click(within(decisionDialog).getByRole('button', { name: '取消' }))
 
-    clickVPSAction('编辑基础信息')
-    let factsDialog = screen.getByRole('dialog', { name: '编辑基础信息' })
+    clickVPSAction('编辑基础资料')
+    let factsDialog = screen.getByRole('dialog', { name: '编辑基础资料' })
     fireEvent.change(within(factsDialog).getByLabelText('VPS 名称'), { target: { value: 'Stale VPS' } })
     fireEvent.click(within(factsDialog).getByRole('button', { name: '取消编辑' }))
-    expect(screen.queryByRole('dialog', { name: '编辑基础信息' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '编辑基础资料' })).not.toBeInTheDocument()
 
-    clickVPSAction('编辑基础信息')
-    factsDialog = screen.getByRole('dialog', { name: '编辑基础信息' })
+    clickVPSAction('编辑基础资料')
+    factsDialog = screen.getByRole('dialog', { name: '编辑基础资料' })
     expect(within(factsDialog).getByLabelText('VPS 名称')).toHaveValue('Tokyo Edge')
     fireEvent.click(within(factsDialog).getByRole('button', { name: '取消编辑' }))
 
@@ -1409,13 +1607,13 @@ describe('VPSDetailPage', () => {
     fireEvent.click(within(nodeDialog).getByRole('button', { name: '取消' }))
 
     clickVPSAction('记录经验')
-    let experienceDialog = screen.getByRole('dialog', { name: '经验记录' })
+    let experienceDialog = screen.getByRole('dialog', { name: '记录经验' })
     fireEvent.change(within(experienceDialog).getByLabelText('摘要'), { target: { value: 'stale experience' } })
     fireEvent.click(within(experienceDialog).getByRole('button', { name: '取消' }))
-    expect(screen.queryByRole('dialog', { name: '经验记录' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '记录经验' })).not.toBeInTheDocument()
 
     clickVPSAction('记录经验')
-    experienceDialog = screen.getByRole('dialog', { name: '经验记录' })
+    experienceDialog = screen.getByRole('dialog', { name: '记录经验' })
     expect(within(experienceDialog).getByLabelText('摘要')).toHaveValue('')
     fireEvent.click(within(experienceDialog).getByRole('button', { name: '取消' }))
 
@@ -1552,8 +1750,8 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
-    clickVPSAction('编辑基础信息')
-    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础信息' })
+    clickVPSAction('编辑基础资料')
+    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
     fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: 'Tokyo Edge 2' } })
     fireEvent.change(within(factsDrawer).getByLabelText('产品名'), { target: { value: 'cx32' } })
     fireEvent.change(within(factsDrawer).getByLabelText('IPv4 / 主入口'), { target: { value: '198.51.100.5' } })
@@ -1569,10 +1767,9 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('基础信息已更新，资产历史已刷新')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'Tokyo Edge 2' })).toBeInTheDocument()
-    expect(screen.getAllByText('edge.example.com').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('2222').length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: '查看资产历史' }))
-    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史详情' })
+    expect(screen.getAllByText('edge.example.com:2222').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getAllByRole('button', { name: '资产历史' })[0])
+    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史' })
     expect(within(timelineDrawer).getByText('192.0.2.1 -> 198.51.100.5')).toBeInTheDocument()
     expect(within(timelineDrawer).getByText('deploy@edge.example.com:2222')).toBeInTheDocument()
     fireEvent.click(within(timelineDrawer).getByLabelText('关闭'))
@@ -1755,7 +1952,7 @@ describe('VPSDetailPage', () => {
     fireEvent.change(within(screen.getByRole('dialog', { name: '关联已有监控实例' })).getByLabelText('关联备注'), { target: { value: 'secondary' } })
     fireEvent.click(within(screen.getByRole('dialog', { name: '关联已有监控实例' })).getByRole('button', { name: '关联监控实例' }))
 
-    await waitFor(() => expect(screen.getAllByText('Seoul Monitoring Instance').length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText('1 个实例 · 正常').length).toBeGreaterThan(0))
     expect(screen.getByText('监控实例关联已更新')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/link-monitoring-instance', {
       method: 'POST',
@@ -1768,17 +1965,17 @@ describe('VPSDetailPage', () => {
       body: JSON.stringify({ monitoring_instance_id: 'mi_002', note: 'secondary' }),
     })
 
-    fireEvent.click(screen.getByRole('button', { name: '查看监控实例详情' }))
-    const nodeEvidenceDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
+    clickVPSAction('监控观测')
+    const nodeEvidenceDrawer = screen.getByRole('dialog', { name: '监控观测' })
     expect(within(nodeEvidenceDrawer).queryByRole('button', { name: '关联已有监控实例' })).not.toBeInTheDocument()
-    expect(within(nodeEvidenceDrawer).queryByRole('button', { name: '创建并接入 agent' })).not.toBeInTheDocument()
-    expect(within(nodeEvidenceDrawer).getAllByRole('button', { name: '升级/重新接入 agent' }).length).toBeGreaterThan(0)
-    fireEvent.click(screen.getAllByRole('button', { name: '查看监控实例详情' })[0])
-    const reopenedEvidenceDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
-    expect(within(reopenedEvidenceDrawer).queryByRole('button', { name: '创建并接入 agent' })).not.toBeInTheDocument()
-    expect(within(reopenedEvidenceDrawer).getAllByRole('button', { name: '升级/重新接入 agent' }).length).toBeGreaterThan(0)
-    fireEvent.click(screen.getAllByRole('button', { name: '查看监控实例详情' })[0])
-    const unlinkEvidenceDrawer = screen.getByRole('dialog', { name: '监控实例证据' })
+    expect(within(nodeEvidenceDrawer).getAllByRole('button', { name: '接入/升级 agent' }).length).toBeGreaterThan(0)
+    fireEvent.click(within(nodeEvidenceDrawer).getByLabelText('关闭'))
+    clickVPSAction('监控观测')
+    const reopenedEvidenceDrawer = screen.getByRole('dialog', { name: '监控观测' })
+    expect(within(reopenedEvidenceDrawer).getAllByRole('button', { name: '接入/升级 agent' }).length).toBeGreaterThan(0)
+    fireEvent.click(within(reopenedEvidenceDrawer).getByLabelText('关闭'))
+    clickVPSAction('监控观测')
+    const unlinkEvidenceDrawer = screen.getByRole('dialog', { name: '监控观测' })
     fireEvent.click(within(unlinkEvidenceDrawer).getByRole('button', { name: '解除关联' }))
     const unlinkConfirmation = within(unlinkEvidenceDrawer).getByRole('alertdialog', { name: '确认解除监控实例关联' })
     expect(fetchMock).not.toHaveBeenCalledWith('/api/vps/vps_001/unlink-monitoring-instance', expect.anything())
@@ -1872,7 +2069,7 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
     clickVPSAction('记录经验')
-    const experienceDrawer = screen.getByRole('dialog', { name: '经验记录' })
+    const experienceDrawer = screen.getByRole('dialog', { name: '记录经验' })
     fireEvent.change(within(experienceDrawer).getByLabelText('分类'), { target: { value: 'network' } })
     fireEvent.change(within(experienceDrawer).getByLabelText('级别'), { target: { value: 'warning' } })
     fireEvent.change(within(experienceDrawer).getByLabelText('摘要'), { target: { value: '晚高峰丢包' } })
@@ -1881,9 +2078,9 @@ describe('VPSDetailPage', () => {
     fireEvent.click(within(experienceDrawer).getByRole('button', { name: '写入经验记录' }))
 
     await waitFor(() => expect(screen.getAllByText('经验记录已写入资产历史').length).toBeGreaterThan(0))
-    expect(screen.getByText(/晚高峰丢包/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '查看资产历史' }))
-    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史详情' })
+    expect(screen.getAllByText(/晚高峰丢包/).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getAllByRole('button', { name: '资产历史' })[0])
+    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史' })
     expect(within(timelineDrawer).getByText('连续三天 tcp probe 抖动')).toBeInTheDocument()
     fireEvent.click(within(timelineDrawer).getByLabelText('关闭'))
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/experience-logs', {
@@ -2023,6 +2220,7 @@ describe('VPSDetailPage', () => {
     clickVPSAction('归档 VPS')
 
     const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    expect(document.querySelector('.asset-lifecycle-card')).toBeNull()
     expect(within(dialog).getByText('存在 1 条 active 订阅，必须先取消或结束订阅后才能归档。')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '确认归档' })).toBeDisabled()
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/archive-review', {
@@ -2114,6 +2312,7 @@ describe('VPSDetailPage', () => {
 
     clickVPSAction('归档 VPS')
     const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    expect(document.querySelector('.asset-lifecycle-card')).toBeNull()
     expect(within(dialog).getByText('输入 VPS 展示名后才能归档，服务端会再次校验资格。')).toBeInTheDocument()
     const confirmButton = within(dialog).getByRole('button', { name: '确认归档' })
     expect(confirmButton).toBeDisabled()
@@ -2217,9 +2416,11 @@ describe('VPSDetailPage', () => {
     fireEvent.click(within(serviceDrawer).getByRole('button', { name: '创建服务记录' }))
 
     await waitFor(() => expect(screen.getByText('服务记录已创建')).toBeInTheDocument())
-    expect(screen.getByText('Blog；域名上下文待补录')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '服务详情' }))
-    const serviceDetailDrawer = screen.getByRole('dialog', { name: '服务资产详情' })
+    expect(screen.getAllByText('1 个服务').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Blog').length).toBeGreaterThan(0)
+    const relatedOverview = screen.getByRole('region', { name: '关联概览' })
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '服务' }))
+    const serviceDetailDrawer = screen.getByRole('dialog', { name: '服务详情' })
     expect(within(serviceDetailDrawer).getByText('Blog')).toBeInTheDocument()
     expect(within(serviceDetailDrawer).getByText('https://blog.example.com')).toBeInTheDocument()
     expect(within(serviceDetailDrawer).getByText('端口 443')).toBeInTheDocument()
@@ -2391,9 +2592,11 @@ describe('VPSDetailPage', () => {
     fireEvent.click(within(domainDrawer).getByRole('button', { name: '创建域名记录' }))
 
     await waitFor(() => expect(screen.getByText('域名记录已创建')).toBeInTheDocument())
-    expect(screen.getByText('Blog；api.example.com')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '域名详情' }))
-    const domainDetailDrawer = screen.getByRole('dialog', { name: '域名资产详情' })
+    expect(screen.getAllByText('1 个域名').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('api.example.com').length).toBeGreaterThan(0)
+    const relatedOverview = screen.getByRole('region', { name: '关联概览' })
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '域名' }))
+    const domainDetailDrawer = screen.getByRole('dialog', { name: '域名详情' })
     expect(within(domainDetailDrawer).getByText('api.example.com')).toBeInTheDocument()
     expect(within(domainDetailDrawer).getByText('NameSilo')).toBeInTheDocument()
     expect(within(domainDetailDrawer).getByText('2026-07-01')).toBeInTheDocument()
@@ -2543,8 +2746,10 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Empty Edge' })).toBeInTheDocument())
-    expect(screen.getByRole('heading', { name: '资产判断' })).toBeInTheDocument()
-    expect(screen.getByText('服务上下文待补录；域名上下文待补录')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '关联概览' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '单机台账' })).toBeInTheDocument()
+    expect(screen.getByText('未记录服务')).toBeInTheDocument()
+    expect(screen.getByText('未记录域名')).toBeInTheDocument()
     expect(screen.queryByText('暂无续费决策历史')).not.toBeInTheDocument()
     expect(screen.queryByText('暂无价格变化历史')).not.toBeInTheDocument()
     expect(screen.queryByText('暂无 IP 变化历史')).not.toBeInTheDocument()
@@ -2553,8 +2758,9 @@ describe('VPSDetailPage', () => {
     expect(screen.queryByText('尚未记录服务')).not.toBeInTheDocument()
     expect(screen.queryByText('尚未记录域名')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '查看资产历史' }))
-    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史详情' })
+    const relatedOverview = screen.getByRole('region', { name: '关联概览' })
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '资产历史' }))
+    const timelineDrawer = screen.getByRole('dialog', { name: '资产历史' })
     expect(within(timelineDrawer).getByText('暂无续费决策历史')).toBeInTheDocument()
     expect(within(timelineDrawer).getByText('暂无价格变化历史')).toBeInTheDocument()
     expect(within(timelineDrawer).getByText('暂无 IP 变化历史')).toBeInTheDocument()
@@ -2562,13 +2768,13 @@ describe('VPSDetailPage', () => {
     expect(within(timelineDrawer).getByText('暂无经验记录')).toBeInTheDocument()
     fireEvent.click(within(timelineDrawer).getByLabelText('关闭'))
 
-    fireEvent.click(screen.getByRole('button', { name: '服务详情' }))
-    const servicesDrawer = screen.getByRole('dialog', { name: '服务资产详情' })
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '服务' }))
+    const servicesDrawer = screen.getByRole('dialog', { name: '服务详情' })
     expect(within(servicesDrawer).getByText('尚未记录服务')).toBeInTheDocument()
     fireEvent.click(within(servicesDrawer).getByLabelText('关闭'))
 
-    fireEvent.click(screen.getByRole('button', { name: '域名详情' }))
-    const domainsDrawer = screen.getByRole('dialog', { name: '域名资产详情' })
+    fireEvent.click(within(relatedOverview).getByRole('button', { name: '域名' }))
+    const domainsDrawer = screen.getByRole('dialog', { name: '域名详情' })
     expect(within(domainsDrawer).getByText('尚未记录域名')).toBeInTheDocument()
   })
 
@@ -2661,7 +2867,7 @@ describe('VPSDetailPage', () => {
       </MemoryRouter>,
     )
 
-    const workbench = await screen.findByRole('dialog', { name: '取消/退役工作台' })
+    const workbench = await screen.findByRole('dialog', { name: '取消/退役' })
     fireEvent.change(within(workbench).getByLabelText('原因'), {
       target: { value: '已过期且不准备续费' },
     })

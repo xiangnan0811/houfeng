@@ -108,7 +108,7 @@ export function buildVPSDecisionModel(input: BuildDecisionModelInput) {
     },
     buildSubscriptionEvidence(input.primarySubscription, input.subscriptionLoadFailed, input.subscriptionError),
     {
-      label: '监控实例证据',
+      label: '监控观测',
       value: monitoringInstance ? monitoringInstance.display_name : '尚未关联',
       meta: monitoringInstance
         ? `${monitoringInstance.current_health_status} · ${monitoringInstance.current_active_incident_count} 个活跃异常`
@@ -226,7 +226,7 @@ function buildNextAction(
       title: '补录续费成本',
       summary: '订阅接口已成功返回空结果，当前缺少真实续费日和月化成本。',
       tone: 'critical',
-      buttonLabel: '快速创建订阅',
+      buttonLabel: '创建/更新订阅',
       onAction: onSubscriptionCreate,
     }
   }
@@ -235,7 +235,7 @@ function buildNextAction(
       title: '补监控实例运行证据',
       summary: '这台 VPS 尚未关联监控实例，资产判断缺少心跳、健康和异常证据。',
       tone: 'alert',
-      buttonLabel: '创建并接入 agent',
+      buttonLabel: '接入/升级 agent',
       onAction: onMonitoringInstanceCreate,
     }
   }

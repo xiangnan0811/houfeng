@@ -68,6 +68,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **低频报告主视图必须降噪采集字段**：这类报告的 API 往往同时返回用户事实和采集诊断。主视图只能展示用户可判断的质量事实，例如风险信号、provider 证据 chip、服务解锁状态、区域、解锁类型、覆盖率和历史；`source`、`probe_status`、`default_probe`、`not_configured`、latency、长 `error_summary`、raw JSON 等内部采集字段不得进入主卡片、摘要区或表格证据列。需要排障时放入低权重诊断层或折叠详情，并在测试里断言这些内部文本不会出现在主要视图。
 - **tone 系统统一四档**：`'normal' | 'notice' | 'alert' | 'critical'`，经 `toneToGlyphState` 映射到 `StatusGlyph` 的 state；CSS 类前缀按页面命名但结构对齐（`target-decision-*` 镜像 `vps-decision-*`），着色走 `var(--color-state-*)` / `color-mix`，不写 hex。新增详情页复制这套 tone→glyph→CSS 约定，不要另造一套色彩语义。
 - **二级 / 编辑操作收进右上角 `…` 菜单**：非主 CTA 的操作（查看历史、运行控制、编辑基础信息、资料维护）放进 `watchtower-header` 的 `details.watchtower-actions-menu`，不要散落成页面底部的独立按钮。参考 VPS hero「编辑基础信息」(`web/src/pages/vps-detail/VPSDetailHero.tsx`) 与 Target「资料维护」(`web/src/components/target-detail/TargetWatchtowerHeader.tsx`)。该菜单**始终渲染**——即使某状态（如已归档）下运行控制动作为空，菜单仍要在，否则会丢失维护入口；运行控制按钮列表按状态条件渲染，查看历史/维护项常驻。
+- **危险联动流程使用状态驱动入口，不做常驻菜单项**：取消 / 退役 / 迁移这类会影响订阅、监控实例、探测对象或其它关联对象的流程，不能作为普通 `…` 菜单项常驻展示，也不能在详情页中部单独铺一个“待处理”工作区。它应由顶部决策 / 当前判断模型按状态暴露 action，例如 VPS 详情页的 `judgement.primaryAction = { label: '处理取消/退役', mode: 'cancellation' }`；稳定状态返回 `null`。点击后打开居中 `Modal` 加载 preview，让用户显式选择影响对象并确认执行，不得直接提交危险操作。测试必须覆盖：相关状态显示入口、稳定状态隐藏入口、更多菜单没有该危险项、deep link 仍可打开既有 modal。
 - **非实时配置 / 维护 demote 进 modal**：标签备注编辑、归档生命周期这类低频配置从页面主体移入 modal（`web/src/components/atoms/Modal.tsx`），页面主体只保留实时观测证据（决策板、运行控制、ProbeItem 列表与观测、当前异常、事件）。**例外**：本身会再开一个表单 modal 的入口（如 ProbeItem 表单）不要嵌进维护 modal，避免 modal 套 modal——让它贴着对应的实时列表区就近呈现。
 
 ---

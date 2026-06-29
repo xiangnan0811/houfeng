@@ -67,6 +67,8 @@ export type VPSDetailDrawerMode =
   | 'facts-detail'
   | null
 
+export type VPSDetailModalMode = VPSDetailDrawerMode
+
 export type FactEditFormState = {
   displayName: string
   providerID: string

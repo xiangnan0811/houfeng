@@ -148,7 +148,7 @@ export function VPSSubscriptionForm({
 
       <div className="page-form-actions">
         <Button variant="secondary" disabled={submitting} onClick={onCancel}>取消</Button>
-        <Button type="submit" disabled={submitting}>{submitting ? '创建中…' : '创建订阅'}</Button>
+        <Button type="submit" disabled={submitting}>{submitting ? '保存中…' : '创建/更新订阅'}</Button>
       </div>
     </form>
   )

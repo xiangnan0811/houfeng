@@ -193,6 +193,36 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 
 ---
 
+## Panel 内弹层裁剪约定
+
+**What**：`.page-panel` 默认 `overflow:hidden`，放在其中的绝对定位菜单、popover 或 `details` 下拉面板会被父容器裁剪。若业务需要在 panel 内展开弹层，必须显式处理裁剪边界。
+
+**约定**：
+- 优先把复杂弹层做成 portal modal；VPS 详情页这类快速管理入口统一使用居中 `Modal`。
+- 如果保留轻量 `details.watchtower-actions-menu` / popover，所在 panel 或局部 section 必须允许外溢，例如 `.vps-detail-overview{overflow:visible}`，并设置合适 `z-index`。
+- 下拉面板必须限制高度并允许内部滚动：`max-height` + `overflow-y:auto` + `overscroll-behavior:contain`。不能只把父级改成 `overflow:visible` 后让菜单无限延伸到视口外。
+- 轻量 `details` / popover 展开后必须有完整关闭路径：点击菜单项关闭，点击页面其它位置也关闭；不要只依赖用户再次点击 summary。
+- 浏览器验收必须点开菜单确认：桌面不被 panel 裁剪，窄屏不产生页面横向溢出，菜单内容可滚动并能点击关闭。
+
+**Wrong**：
+```css
+.page-panel{overflow:hidden}
+.my-actions-menu__panel{position:absolute;right:0;top:100%}
+```
+
+**Correct**：
+```css
+.my-panel-with-popover{overflow:visible;z-index:2}
+.my-actions-menu__panel{
+  z-index:60;
+  max-height:45vh;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+}
+```
+
+---
+
 ## 反模式
 
 > 这些是当前代码已经回避（或承认偿还）的写法，**新代码不要做**。
