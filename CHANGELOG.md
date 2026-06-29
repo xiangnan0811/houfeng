@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.2](https://github.com/xiangnan0811/houfeng/compare/v0.55.1...v0.55.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* move VPS attention states into current judgement ([4c2b0a4](https://github.com/xiangnan0811/houfeng/commit/4c2b0a478ddbd69ae46fd178eac9c26e374fb736))
+
 ## [0.55.1](https://github.com/xiangnan0811/houfeng/compare/v0.55.0...v0.55.1) (2026-06-29)
 
 
