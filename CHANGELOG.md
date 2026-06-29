@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.3](https://github.com/xiangnan0811/houfeng/compare/v0.55.2...v0.55.3) (2026-06-29)
+
+
+### Documentation
+
+* explain stale minisign installer commands ([#286](https://github.com/xiangnan0811/houfeng/issues/286)) ([10b2d3a](https://github.com/xiangnan0811/houfeng/commit/10b2d3a9bd76c5bc88f014c4f89ae40058702634))
+
 ## [0.55.2](https://github.com/xiangnan0811/houfeng/compare/v0.55.1...v0.55.2) (2026-06-29)
 
 
