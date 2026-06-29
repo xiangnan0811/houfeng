@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.0](https://github.com/xiangnan0811/houfeng/compare/v0.54.6...v0.55.0) (2026-06-29)
+
+
+### Features
+
+* redesign VPS detail page ([38351d1](https://github.com/xiangnan0811/houfeng/commit/38351d1741f9cd92cd3fdf5458655905152041ac))
+
 ## [0.54.6](https://github.com/xiangnan0811/houfeng/compare/v0.54.5...v0.54.6) (2026-06-26)
 
 
