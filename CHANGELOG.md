@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.1](https://github.com/xiangnan0811/houfeng/compare/v0.55.0...v0.55.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* recover missing minisign in installer ([bb72bad](https://github.com/xiangnan0811/houfeng/commit/bb72badcd04ea389c5e6d586d5713246cd88b379))
+
 ## [0.55.0](https://github.com/xiangnan0811/houfeng/compare/v0.54.6...v0.55.0) (2026-06-29)
 
 
