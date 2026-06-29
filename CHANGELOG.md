@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.5](https://github.com/xiangnan0811/houfeng/compare/v0.55.4...v0.55.5) (2026-06-29)
+
+
+### Bug Fixes
+
+* **web:** unify VPS detail attention states ([458b33f](https://github.com/xiangnan0811/houfeng/commit/458b33f7b020d5c261bcb728e31ff6d5eb4cdc5c))
+
 ## [0.55.4](https://github.com/xiangnan0811/houfeng/compare/v0.55.3...v0.55.4) (2026-06-29)
 
 
