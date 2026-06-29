@@ -238,6 +238,7 @@ describe('vpsDetailOverviewModel', () => {
       { label: '续费', value: '3 个月后续费' },
       { label: '动作', value: '无' },
     ])
+    expect(model.judgement.attentionItems).toEqual([])
     expect(model.judgement.primaryAction).toBeNull()
     expect(model.contextAction).toBeNull()
     expect(model.relatedItems.map((item) => item.key)).toEqual([
@@ -271,6 +272,8 @@ describe('vpsDetailOverviewModel', () => {
     expect(subscriptionItem?.quickActions.map((action) => action.label)).not.toContain('创建/更新订阅')
     expect(model.contextAction?.title).toBe('订阅证据暂不可用')
     expect(model.contextAction?.primaryAction).toEqual({ kind: 'link', label: '核对订阅', to: '/subscriptions?vps_id=vps_001' })
+    expect(model.judgement.attentionItems.map((item) => item.title)).toContain('订阅证据暂不可用')
+    expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({ kind: 'link', label: '核对订阅', to: '/subscriptions?vps_id=vps_001' })
   })
 
   it('promotes true missing subscription only after a successful empty subscription response', () => {
@@ -287,6 +290,38 @@ describe('vpsDetailOverviewModel', () => {
     expect(subscriptionItem?.quickActions.map((action) => action.label)).toContain('创建/更新订阅')
     expect(model.contextAction?.title).toBe('缺少当前订阅')
     expect(model.contextAction?.primaryAction).toEqual({ kind: 'modal', label: '创建/更新订阅', mode: 'subscription' })
+    expect(model.judgement.attentionItems.map((item) => item.title)).toContain('缺少当前订阅')
+    expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({ kind: 'modal', label: '创建/更新订阅', mode: 'subscription' })
+  })
+
+  it('promotes monitoring attention into the top judgement', () => {
+    const model = buildModel({
+      detail: {
+        ...baseDetail,
+        monitoring_instance_links: [{
+          ...baseDetail.monitoring_instance_links[0],
+          current_health_status: '告警',
+          current_active_incident_count: 2,
+          current_primary_issue_summary: 'packet loss',
+        }],
+      },
+    })
+
+    expect(model.contextAction?.title).toBe('运行观测需要核对')
+    expect(model.judgement.rows.find((row) => row.label === '动作')?.value).toBe('查看监控实例')
+    expect(model.judgement.attentionItems).toEqual([
+      {
+        title: '运行观测需要核对',
+        reason: 'Tokyo Monitoring Instance · 2 个活跃异常',
+        tone: 'alert',
+        primaryAction: {
+          kind: 'link',
+          label: '查看监控实例',
+          to: '/monitoring/mi_001?return_vps=vps_001',
+        },
+        secondaryActions: [{ kind: 'modal', label: '监控观测', mode: 'monitoring-instance-evidence' }],
+      },
+    ])
   })
 
   it('keeps cancellation and retirement work in the top judgement instead of a middle action panel', () => {
@@ -304,9 +339,17 @@ describe('vpsDetailOverviewModel', () => {
       },
     })
 
-    expect(model.contextAction).toBeNull()
     expect(model.judgement.rows.find((row) => row.label === '动作')?.value).toBe('取消/退役')
     expect(model.judgement.primaryAction).toEqual({
+      kind: 'modal',
+      label: '处理取消/退役',
+      mode: 'cancellation',
+    })
+    expect(model.judgement.attentionItems.map((item) => item.title)).toEqual([
+      '取消/退役',
+      '运行观测需要核对',
+    ])
+    expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({
       kind: 'modal',
       label: '处理取消/退役',
       mode: 'cancellation',
