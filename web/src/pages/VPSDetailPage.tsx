@@ -1461,7 +1461,6 @@ export function VPSDetailPage() {
   }
 
   const pageFeedbackCandidates: Array<PageFeedbackItem | null> = [
-    state.subscriptionsError ? { key: 'subscriptions-error', message: state.subscriptionsError, error: true } : null,
     decisionNotice ? { key: 'decision', message: decisionNotice, action: decisionAction } : null,
     activeDrawer === 'facts' || !factError ? null : { key: 'fact-error', message: factError, error: true },
     factNotice ? { key: 'fact-notice', message: factNotice } : null,

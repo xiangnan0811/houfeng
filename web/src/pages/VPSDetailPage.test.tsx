@@ -835,9 +835,15 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    expect(screen.getAllByText('订阅证据暂不可用').length).toBeGreaterThan(0)
-    expect(screen.getByRole('link', { name: '核对订阅' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001')
-    expect(screen.getAllByText('subscription backend down').length).toBeGreaterThan(0)
+    const currentJudgement = screen.getByLabelText('当前判断')
+    expect(within(currentJudgement).getByText('订阅证据暂不可用')).toBeInTheDocument()
+    expect(within(currentJudgement).getByRole('link', { name: '核对订阅' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001')
+    expect(within(currentJudgement).getByText('subscription backend down')).toBeInTheDocument()
+    const operationFeedback = screen.queryByLabelText('VPS 操作反馈')
+    if (operationFeedback) {
+      expect(operationFeedback).not.toHaveTextContent('订阅证据暂不可用')
+      expect(operationFeedback).not.toHaveTextContent('subscription backend down')
+    }
     expect(screen.getAllByText('订阅未知').length).toBeGreaterThan(0)
     expect(screen.queryByText('缺订阅')).not.toBeInTheDocument()
   })
@@ -1414,6 +1420,59 @@ describe('VPSDetailPage', () => {
       cache: 'no-store',
       credentials: 'include',
     })
+  })
+
+  it('shows multiple persistent attention states together in the top current judgement', async () => {
+    const detailBody = {
+      ...vpsDetailBody,
+      lifecycle_status: 'to_cancel',
+      renewal_decision: 'cancel',
+      monitoring_instance_links: [{
+        ...vpsDetailBody.monitoring_instance_links[0],
+        current_health_status: '告警',
+        current_active_incident_count: 2,
+        current_primary_issue_summary: 'packet loss',
+      }],
+    }
+    const cancelledAutoRenewSubscription = {
+      ...subscriptionBody,
+      auto_renew_cancelled: true,
+      renew_at: '2026-08-15',
+      ends_at: '2026-08-15',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(detailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([cancelledAutoRenewSubscription]))
+      .mockResolvedValueOnce(mockJSONResponse(cancellationPreviewBody({ vps: detailBody })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001?workbench=cancellation']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    const currentJudgement = screen.getByLabelText('当前判断')
+    expect(within(currentJudgement).getAllByText('取消/退役').length).toBeGreaterThan(0)
+    expect(within(currentJudgement).getByText('运行观测需要核对')).toBeInTheDocument()
+    expect(within(currentJudgement).getByText('Tokyo Monitoring Instance · 2 个活跃异常')).toBeInTheDocument()
+    expect(within(currentJudgement).getByText('自动续费已取消')).toBeInTheDocument()
+    expect(within(currentJudgement).getByRole('button', { name: '处理取消/退役' })).toBeInTheDocument()
+    expect(within(currentJudgement).getByRole('link', { name: '查看监控实例' })).toHaveAttribute('href', '/monitoring/mi_001?return_vps=vps_001')
+    expect(within(currentJudgement).getByRole('button', { name: '调整决策' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '需要处理的状态' })).not.toBeInTheDocument()
+    const operationFeedback = screen.queryByLabelText('VPS 操作反馈')
+    if (operationFeedback) {
+      expect(operationFeedback).not.toHaveTextContent('运行观测需要核对')
+      expect(operationFeedback).not.toHaveTextContent('自动续费已取消')
+    }
   })
 
   it('updates the renewal decision and refreshes asset history', async () => {
