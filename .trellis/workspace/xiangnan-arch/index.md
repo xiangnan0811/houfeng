@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 203
+- **Total Sessions**: 204
 - **Last Active**: 2026-06-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~926 | Active |
+| `journal-4.md` | ~959 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 204 | 2026-06-29 | Document stale installer minisign recovery | `3059287` | `fix/installer-minisign-dependency` |
 | 203 | 2026-06-29 | VPS detail attention judgement | `4c2b0a4`, `a4ade14` | `chore/archive-vps-attention-task` |
 | 202 | 2026-06-29 | Recover missing minisign in installer | `bb72bad`, `511084e` | `chore/archive-installer-minisign-task` |
 | 201 | 2026-06-29 | VPS detail ledger action relocation | `c7caaa3` | `feat/vps-detail-redesign` |
