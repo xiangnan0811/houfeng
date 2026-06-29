@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 205
+- **Total Sessions**: 206
 - **Last Active**: 2026-06-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~992 | Active |
+| `journal-4.md` | ~1025 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 206 | 2026-06-29 | Unify VPS detail attention states | `e0093ee` | `fix/vps-detail-attention-states` |
 | 205 | 2026-06-29 | Document Debian minisign upgrade recovery | `7842580` | `fix/installer-minisign-debian-bullseye` |
 | 204 | 2026-06-29 | Document stale installer minisign recovery | `3059287` | `fix/installer-minisign-dependency` |
 | 203 | 2026-06-29 | VPS detail attention judgement | `4c2b0a4`, `a4ade14` | `chore/archive-vps-attention-task` |

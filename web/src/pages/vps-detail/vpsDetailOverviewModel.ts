@@ -82,7 +82,6 @@ export type VPSDetailOverviewModel = {
     attentionItems: VPSContextAction[]
     primaryAction: VPSOverviewAction | null
   }
-  contextAction: VPSContextAction | null
   relatedItems: VPSRelatedOverviewItem[]
   ledger: VPSSingleMachineLedgerModel
   ipOverview: VPSIPQualityOverviewModel
@@ -129,7 +128,6 @@ export function buildVPSDetailOverviewModel(input: VPSDetailOverviewModelInput):
   const subscriptionSummary = buildSubscriptionSummary(input.primarySubscription, input.subscriptionLoadFailed, input.subscriptionError)
   const ipOverview = buildIPQualityOverview(input.detail, input.ipQuality, input.ipQualityError)
   const relatedItems = buildRelatedItems(input, subscriptionSummary, ipOverview)
-  const contextAction = buildContextAction(input, subscriptionSummary, ipOverview)
   const cancellationWork = input.cancellationAttention ?? needsCancellationWork(input.detail)
   const attentionItems = buildAttentionItems(input, subscriptionSummary, ipOverview, cancellationWork)
   const actionValue = cancellationWork ? '取消/退役' : attentionItems[0]?.primaryAction.label ?? '无'
@@ -164,7 +162,6 @@ export function buildVPSDetailOverviewModel(input: VPSDetailOverviewModelInput):
         ? { kind: 'modal', label: '处理取消/退役', mode: 'cancellation' }
         : null,
     },
-    contextAction,
     relatedItems,
     ledger: buildLedger(input),
     ipOverview,
@@ -304,17 +301,6 @@ function buildRelatedItems(
       quickActions: [{ kind: 'modal', label: '记录', mode: 'experience' }],
     },
   ]
-}
-
-function buildContextAction(
-  input: VPSDetailOverviewModelInput,
-  subscriptionSummary: SubscriptionSummary,
-  ipOverview: VPSIPQualityOverviewModel,
-): VPSContextAction | null {
-  if (needsCancellationWork(input.detail)) {
-    return null
-  }
-  return buildAttentionItems(input, subscriptionSummary, ipOverview, false)[0] ?? null
 }
 
 function buildAttentionItems(

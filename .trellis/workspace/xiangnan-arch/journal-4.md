@@ -990,3 +990,36 @@ Captured the Debian 11 v0.55.0 missing-minisign upgrade failure, documented the 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 206: Unify VPS detail attention states
+
+**Date**: 2026-06-29
+**Task**: Unify VPS detail attention states
+**Branch**: `fix/vps-detail-attention-states`
+
+### Summary
+
+Removed the old VPS detail contextAction model path and kept persistent VPS attention states in the top current judgement; added regression coverage for subscription load failures and multi-attention state rendering.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e0093ee` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
