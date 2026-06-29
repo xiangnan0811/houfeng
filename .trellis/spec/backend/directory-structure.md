@@ -494,7 +494,7 @@ center 与 agent 同时引用的唯一契约包。内容：
    - Generated command:
 
      ```sh
-     tmp_installer="$(mktemp)" && curl -fsSL '<public_base_url>/api/agent/install.sh' -o "$tmp_installer" && sudo sh "$tmp_installer" --server-url '<public_base_url>' --enrollment-token-stdin --version '<agent_version>' --release-repo '<owner/repo>' <<'HOUFENG_ENROLLMENT_TOKEN'
+     tmp_installer="$(mktemp)" && curl -fsSL '<public_base_url>/api/agent/install.sh' -o "$tmp_installer" && sudo sh "$tmp_installer" --server-url '<public_base_url>' --enrollment-token-stdin --install-missing-deps --version '<agent_version>' --release-repo '<owner/repo>' <<'HOUFENG_ENROLLMENT_TOKEN'
      <token>
      HOUFENG_ENROLLMENT_TOKEN
      status=$?; rm -f "$tmp_installer"; test "$status" -eq 0
@@ -507,7 +507,10 @@ center 与 agent 同时引用的唯一契约包。内容：
    - Installer server URLs default to HTTPS-only. `http://` is accepted only when the operator passes `--insecure-allow-http`, which the center includes for explicitly configured HTTP `HOUFENG_PUBLIC_BASE_URL` values.
    - Generated commands must not pass the one-time enrollment token as installer argv or as another command's argv. Use a quoted heredoc into installer stdin so token exposure is limited to the copied command text rather than `ps` output for the installer process.
    - Manual installer invocations must provide exactly one enrollment token source; empty token, multiple sources, or unreadable `--enrollment-token-file` values fail before writes.
-   - The installer must require `minisign`, download `sha256sums.txt.minisig`, verify `sha256sums.txt` with the pinned public key, then verify the downloaded binary against the signed manifest before replacing `/usr/local/bin/houfeng-agent` or starting systemd. Missing minisign, missing signature, signature failure, missing checksum entry, and checksum mismatch must fail closed without checksum-only fallback.
+   - Generated commands include `--install-missing-deps` so Debian 11 / older Ubuntu style hosts without a packaged `minisign` can recover without separate operator diagnosis. Manual installer invocations may omit the flag for an interactive `/dev/tty` prompt, or pass `--no-install-missing-deps` to fail closed when `minisign` is missing.
+   - If `minisign` is missing and dependency recovery is allowed, the installer must download the pinned upstream static minisign tarball, verify its embedded SHA256 before extracting, install only the matching `amd64`/`arm64` verifier to `/usr/local/bin/minisign`, ensure the current script `PATH` can find it, then continue. Do not use apt/yum/dnf/apk or enable distro repositories in the installer path; package availability differs by distribution and version.
+   - Any installer prompt must read from `/dev/tty`, never stdin, because generated commands reserve stdin for `--enrollment-token-stdin`.
+   - The installer must require a working `minisign` before release verification, download `sha256sums.txt.minisig`, verify `sha256sums.txt` with the pinned public key, then verify the downloaded binary against the signed manifest before replacing `/usr/local/bin/houfeng-agent` or starting systemd. Missing signature, signature failure, missing checksum entry, checksum mismatch, denied dependency recovery, failed minisign bootstrap checksum, or failed bootstrap install must fail closed without checksum-only fallback.
    - Release workflow must sign `dist/sha256sums.txt` before uploading release assets. `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY` must match the installer-pinned public key; encrypted keys require `HOUFENG_RELEASE_MINISIGN_PASSWORD`.
    - Installed `agent.env` must include durable sync queue bounds: `HOUFENG_AGENT_BUFFER_MAX_ENTRIES`、`HOUFENG_AGENT_BUFFER_MAX_AGE`、`HOUFENG_AGENT_BUFFER_MAX_BYTES`.
    - MVP support is Linux + systemd + `amd64`/`arm64` only. Auto-upgrade, uninstall UX, non-systemd hosts, package repos, Docker/Kubernetes installs, and center-hosted binary mirrors are out of scope.
@@ -525,7 +528,11 @@ center 与 agent 同时引用的唯一契约包。内容：
    | Multiple token sources or empty token | installer exits before writing runtime files |
    | Unsupported install method | installer returns non-zero with a short error; no partial service start |
    | Unsupported OS / architecture / no running systemd | installer exits before writing binary/config/token |
-   | `minisign` missing or `sha256sums.txt.minisig` missing | installer exits before replacing binary or starting service |
+   | `minisign` missing + generated command `--install-missing-deps` | installer verifies pinned minisign tarball SHA256, installs `/usr/local/bin/minisign`, then verifies release manifest |
+   | `minisign` missing + manual interactive run without dependency flag | installer explains the consequence and asks via `/dev/tty`; no answer or `no` exits before release download and local writes |
+   | `minisign` missing + `--no-install-missing-deps` or non-interactive run without consent | installer exits before release download, replacing binary, or starting service |
+   | minisign bootstrap SHA256 mismatch or tarball missing expected arch binary | installer exits before installing verifier or touching agent files |
+   | `sha256sums.txt.minisig` missing | installer exits before replacing binary or starting service |
    | checksum manifest signature invalid | installer exits before reading checksum entries or replacing binary |
    | Missing checksum entry or checksum mismatch | installer exits before replacing binary or starting service |
    | release workflow missing signing private key | publish workflow fails before asset upload |
@@ -543,7 +550,7 @@ center 与 agent 同时引用的唯一契约包。内容：
    - Config tests for valid domain/IP public URLs, trim/trailing slash behavior, rejected scheme, relative URL, query, and fragment.
    - Handler tests for install-command success, 404 monitoring instance, 409 missing public URL, 409 dev/missing version, method not allowed, HTTP base URL `--insecure-allow-http`, no argv token exposure, and shell quoting of all command arguments.
    - Router/bootstrap tests proving `/api/agent/install.sh` is public while `/api/monitoring-instances/{id}/install-command` remains session-protected and wired non-nil.
-   - Installer tests or embedded-script checks for Linux arch mapping, systemd requirement, `minisign` requirement, signed checksum manifest download, signature verification before checksum extraction, exact checksum-manifest matching, HTTPS-by-default behavior, token file/stdin sources, token file permissions, and no full-token logging.
+   - Installer tests or embedded-script checks for Linux arch mapping, systemd requirement, missing-`minisign` dependency recovery flags, `/dev/tty` prompt usage, pinned bootstrap SHA256, recovery before release asset download, signed checksum manifest download, signature verification before checksum extraction, exact checksum-manifest matching, HTTPS-by-default behavior, token file/stdin sources, token file permissions, and no full-token logging.
    - Release target test/sanity that `make build-agent-release VERSION=<tag>` emits both Linux binaries and `sha256sums.txt` with names matching installer expectations; publish workflow review checks signing and upload of `sha256sums.txt.minisig`.
 
 7. **Wrong vs Correct**

@@ -169,8 +169,9 @@ Run the exact generated command once on a Linux systemd `amd64` or `arm64` host 
 Expected installer behavior:
 
 - detects Linux/systemd and supported architecture before writing runtime files;
+- if `minisign` is missing, the generated command's `--install-missing-deps` flag allows the installer to download upstream `minisign` 0.12, verify the pinned tarball SHA256, and install `/usr/local/bin/minisign`;
 - downloads `houfeng-agent_<version>_linux_<amd64|arm64>`, `sha256sums.txt`, and `sha256sums.txt.minisig` from the configured GitHub Release;
-- requires `minisign`, verifies the checksum manifest signature with the installer-pinned public key, then verifies the exact checksum entry before replacing `/usr/local/bin/houfeng-agent` or starting the service;
+- verifies the checksum manifest signature with the installer-pinned public key, then verifies the exact checksum entry before replacing `/usr/local/bin/houfeng-agent` or starting the service;
 - writes `/etc/houfeng-agent/agent.env` and `/etc/houfeng-agent/token` with restrictive permissions;
 - enables and starts `houfeng-agent` with systemd.
 

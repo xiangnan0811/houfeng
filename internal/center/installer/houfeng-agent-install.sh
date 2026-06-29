@@ -3,13 +3,18 @@ set -eu
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: sh houfeng-agent-install.sh --server-url URL (--enrollment-token TOKEN | --enrollment-token-file PATH | --enrollment-token-stdin) --version VERSION [--release-repo OWNER/REPO] [--insecure-allow-http]
+Usage: sh houfeng-agent-install.sh --server-url URL (--enrollment-token TOKEN | --enrollment-token-file PATH | --enrollment-token-stdin) --version VERSION [--release-repo OWNER/REPO] [--insecure-allow-http] [--install-missing-deps | --no-install-missing-deps]
 
 Installs houfeng-agent on Linux systemd hosts. The enrollment token is sensitive
 and will be written to /etc/houfeng-agent/token with restrictive permissions.
 Prefer --enrollment-token-file or --enrollment-token-stdin. Passing
 --enrollment-token can expose the secret through shell history and process list
 inspection while the installer is running.
+
+If minisign is missing, --install-missing-deps allows this installer to install
+a pinned upstream minisign verifier into /usr/local/bin after checking its
+tarball SHA256. Without that flag, interactive runs ask before installing and
+non-interactive runs fail closed.
 USAGE
 }
 
@@ -29,7 +34,11 @@ READ_ENROLLMENT_TOKEN_STDIN=0
 AGENT_VERSION=""
 RELEASE_REPO="xiangnan0811/houfeng"
 INSECURE_ALLOW_HTTP=0
+INSTALL_MISSING_DEPS=""
 HOUFENG_CHECKSUM_MINISIGN_PUBLIC_KEY="RWS4uZTCLx9cUtaBrFBtbPxBmqIcEPiKAcQcAD4M63rnLndpdC/KvYNz"
+HOUFENG_MINISIGN_BOOTSTRAP_VERSION="0.12"
+HOUFENG_MINISIGN_BOOTSTRAP_SHA256="9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73"
+HOUFENG_MINISIGN_BOOTSTRAP_URL="https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -64,6 +73,16 @@ while [ "$#" -gt 0 ]; do
       ;;
     --insecure-allow-http)
       INSECURE_ALLOW_HTTP=1
+      shift
+      ;;
+    --install-missing-deps)
+      [ "$INSTALL_MISSING_DEPS" != "no" ] || fail "--install-missing-deps and --no-install-missing-deps are mutually exclusive"
+      INSTALL_MISSING_DEPS="yes"
+      shift
+      ;;
+    --no-install-missing-deps)
+      [ "$INSTALL_MISSING_DEPS" != "yes" ] || fail "--install-missing-deps and --no-install-missing-deps are mutually exclusive"
+      INSTALL_MISSING_DEPS="no"
       shift
       ;;
     --help|-h)
@@ -109,8 +128,14 @@ OS="$(uname -s 2>/dev/null || true)"
 
 ARCH="$(uname -m 2>/dev/null || true)"
 case "$ARCH" in
-  x86_64|amd64) ASSET_ARCH="amd64" ;;
-  aarch64|arm64) ASSET_ARCH="arm64" ;;
+  x86_64|amd64)
+    ASSET_ARCH="amd64"
+    MINISIGN_ARCH="x86_64"
+    ;;
+  aarch64|arm64)
+    ASSET_ARCH="arm64"
+    MINISIGN_ARCH="aarch64"
+    ;;
   *) fail "unsupported architecture: $ARCH (linux/amd64 or linux/arm64 required)" ;;
 esac
 
@@ -119,7 +144,6 @@ command -v systemctl >/dev/null 2>&1 || fail "systemctl not found; systemd is re
 for required_cmd in awk grep getent groupadd useradd install chown chmod mktemp; do
   command -v "$required_cmd" >/dev/null 2>&1 || fail "$required_cmd is required"
 done
-command -v minisign >/dev/null 2>&1 || fail "minisign is required to verify release checksums"
 
 DOWNLOADER=""
 if command -v curl >/dev/null 2>&1; then
@@ -156,7 +180,57 @@ download() {
   fi
 }
 
+ask_yes_no_from_tty() {
+  prompt="$1"
+  [ -r /dev/tty ] && [ -w /dev/tty ] || return 1
+  printf '%s' "$prompt" > /dev/tty
+  IFS= read answer < /dev/tty || return 1
+  case "$answer" in
+    y|Y|yes|YES|Yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+ensure_minisign() {
+  if command -v minisign >/dev/null 2>&1; then
+    return 0
+  fi
+
+  info "minisign is required to verify release checksums but is not installed"
+  info "the installer can install minisign ${HOUFENG_MINISIGN_BOOTSTRAP_VERSION} to /usr/local/bin/minisign after checking the tarball SHA256"
+  info "if you decline, the agent install/upgrade will stop before changing the agent binary, config, token, or systemd unit"
+
+  case "$INSTALL_MISSING_DEPS" in
+    yes) ;;
+    no)
+      fail "minisign is required to verify release checksums; dependency installation was disabled by --no-install-missing-deps"
+      ;;
+    "")
+      if ! ask_yes_no_from_tty "Install minisign now? [y/N] "; then
+        fail "minisign is required to verify release checksums; rerun with --install-missing-deps or install minisign manually"
+      fi
+      ;;
+    *) fail "invalid dependency installation mode" ;;
+  esac
+
+  command -v tar >/dev/null 2>&1 || fail "tar is required to install missing minisign"
+  info "downloading minisign ${HOUFENG_MINISIGN_BOOTSTRAP_VERSION}"
+  download "$HOUFENG_MINISIGN_BOOTSTRAP_URL" "${TMPDIR}/minisign-${HOUFENG_MINISIGN_BOOTSTRAP_VERSION}-linux.tar.gz"
+  ACTUAL_MINISIGN_BOOTSTRAP_SUM="$($SHA256 "${TMPDIR}/minisign-${HOUFENG_MINISIGN_BOOTSTRAP_VERSION}-linux.tar.gz" | awk '{print $1}')"
+  [ "$HOUFENG_MINISIGN_BOOTSTRAP_SHA256" = "$ACTUAL_MINISIGN_BOOTSTRAP_SUM" ] || fail "minisign bootstrap checksum mismatch"
+  tar -xzf "${TMPDIR}/minisign-${HOUFENG_MINISIGN_BOOTSTRAP_VERSION}-linux.tar.gz" -C "$TMPDIR"
+  [ -f "${TMPDIR}/minisign-linux/${MINISIGN_ARCH}/minisign" ] || fail "minisign bootstrap archive does not contain linux/${MINISIGN_ARCH} binary"
+  install -o root -g root -m 0755 "${TMPDIR}/minisign-linux/${MINISIGN_ARCH}/minisign" /usr/local/bin/minisign
+  case ":$PATH:" in
+    *:/usr/local/bin:*) ;;
+    *) PATH="/usr/local/bin:$PATH" ;;
+  esac
+  command -v minisign >/dev/null 2>&1 || fail "minisign installation did not make minisign available"
+  info "minisign installed to /usr/local/bin/minisign"
+}
+
 info "detected linux/${ASSET_ARCH} with systemd"
+ensure_minisign
 info "downloading release asset ${ASSET} from ${RELEASE_REPO}"
 download "${BASE_URL}/${ASSET}" "${TMPDIR}/${ASSET}"
 download "${BASE_URL}/sha256sums.txt" "${TMPDIR}/sha256sums.txt"
