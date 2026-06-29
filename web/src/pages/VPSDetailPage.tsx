@@ -1493,6 +1493,9 @@ export function VPSDetailPage() {
         isArchived={isArchived}
         lifecycleSubmitting={lifecycleSubmitting}
         onDecisionEdit={() => openDrawer('decision')}
+        onTimelineOpen={() => openDrawer('timeline-detail')}
+        onServicesOpen={() => openDrawer('services-detail')}
+        onDomainsOpen={() => openDrawer('domains-detail')}
         onCancellationOpen={() => openDrawer('cancellation')}
         onFactEdit={() => openFactEdit(detail)}
         onFactsOpen={() => openDrawer('facts-detail')}

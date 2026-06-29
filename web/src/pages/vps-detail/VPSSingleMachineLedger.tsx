@@ -35,7 +35,6 @@ export function VPSSingleMachineLedger({ ledger, onOpenModal }: VPSSingleMachine
           <section className="vps-ledger-group" aria-labelledby="vps-ledger-records-title">
             <div className="vps-ledger-group__head">
               <h3 id="vps-ledger-records-title">近期记录</h3>
-              <button type="button" className="text-link" onClick={() => onOpenModal('timeline-detail')}>资产历史</button>
             </div>
             {ledger.records.length > 0 ? (
               <ul className="vps-ledger-list" aria-label="近期记录">
@@ -56,10 +55,6 @@ export function VPSSingleMachineLedger({ ledger, onOpenModal }: VPSSingleMachine
           <section className="vps-ledger-group" aria-labelledby="vps-ledger-carriers-title">
             <div className="vps-ledger-group__head">
               <h3 id="vps-ledger-carriers-title">承载清单</h3>
-              <div>
-                <button type="button" className="text-link" onClick={() => onOpenModal('services-detail')}>服务</button>
-                <button type="button" className="text-link" onClick={() => onOpenModal('domains-detail')}>域名</button>
-              </div>
             </div>
             {ledger.carriers.length > 0 ? (
               <ul className="vps-ledger-list" aria-label="承载清单">

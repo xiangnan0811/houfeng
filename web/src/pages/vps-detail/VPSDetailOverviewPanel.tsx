@@ -10,6 +10,9 @@ type VPSDetailOverviewPanelProps = {
   isArchived: boolean
   lifecycleSubmitting: boolean
   onDecisionEdit: () => void
+  onTimelineOpen: () => void
+  onServicesOpen: () => void
+  onDomainsOpen: () => void
   onCancellationOpen: () => void
   onFactEdit: () => void
   onFactsOpen: () => void
@@ -35,6 +38,9 @@ export function VPSDetailOverviewPanel({
   isArchived,
   lifecycleSubmitting,
   onDecisionEdit,
+  onTimelineOpen,
+  onServicesOpen,
+  onDomainsOpen,
   onCancellationOpen,
   onFactEdit,
   onFactsOpen,
@@ -90,6 +96,9 @@ export function VPSDetailOverviewPanel({
           </div>
         </div>
         <div className="vps-detail-overview__actions">
+          <Button variant="secondary" size="sm" onClick={onTimelineOpen}>资产历史</Button>
+          <Button variant="secondary" size="sm" onClick={onServicesOpen}>服务</Button>
+          <Button variant="secondary" size="sm" onClick={onDomainsOpen}>域名</Button>
           <Button variant="primary" size="sm" onClick={onDecisionEdit}>调整决策</Button>
           <Button variant="secondary" size="sm" onClick={onFactsOpen}>基础资料</Button>
           <details ref={actionsMenuRef} className="watchtower-actions-menu vps-detail-actions-menu">
