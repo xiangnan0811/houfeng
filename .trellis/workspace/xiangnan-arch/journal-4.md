@@ -957,3 +957,36 @@ Captured the v0.55.0 missing-minisign root cause, documented the v0.55.1+ regene
 ### Next Steps
 
 - None - task complete
+
+
+## Session 205: Document Debian minisign upgrade recovery
+
+**Date**: 2026-06-29
+**Task**: Document Debian minisign upgrade recovery
+**Branch**: `fix/installer-minisign-debian-bullseye`
+
+### Summary
+
+Captured the Debian 11 v0.55.0 missing-minisign upgrade failure, documented the fixed-center recovery path, and verified current installer/install-command behavior with make verify-go.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7842580` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
