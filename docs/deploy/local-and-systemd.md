@@ -44,7 +44,7 @@ Expected release outputs under `dist/`:
 - `sha256sums.txt`
 - `sha256sums.txt.minisig`
 
-`build-agent-release` stamps the agent heartbeat version with the same `VERSION` value used in the artifact names. The center-served installer script is fetched from the deployed center; GitHub Release is only used for these binary and signed-checksum assets. Maintainers must configure `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY` in GitHub Secrets with the secret key matching the installer-pinned public key before publishing installable agent assets. If the key is encrypted, also set `HOUFENG_RELEASE_MINISIGN_PASSWORD`.
+`build-agent-release` stamps the agent heartbeat version with the same `VERSION` value used in the artifact names. The center-served installer script is fetched from the deployed center; GitHub Release is only used for these binary and signed-checksum assets. Maintainers must configure `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY` in GitHub Secrets with the secret key matching the installer-pinned public key before publishing installable agent assets. If the key is encrypted, also set `HOUFENG_RELEASE_MINISIGN_PASSWORD`. Target hosts need `minisign` to verify the signed checksum manifest. The generated command includes `--install-missing-deps`, so if `minisign` is absent the installer downloads the pinned upstream static verifier, checks its SHA256, installs it to `/usr/local/bin/minisign`, and only then verifies Houfeng release assets.
 
 ## Center environment
 
@@ -206,7 +206,7 @@ Then create or open the VPS in the web UI and use **创建并接入 agent** from
 The generated command has this shape:
 
 ```sh
-tmp_installer="$(mktemp)" && curl -fsSL 'https://center.example.com/api/agent/install.sh' -o "$tmp_installer" && sudo sh "$tmp_installer" --server-url 'https://center.example.com' --enrollment-token-stdin --version 'v1.2.3' --release-repo 'xiangnan0811/houfeng' <<'HOUFENG_ENROLLMENT_TOKEN'
+tmp_installer="$(mktemp)" && curl -fsSL 'https://center.example.com/api/agent/install.sh' -o "$tmp_installer" && sudo sh "$tmp_installer" --server-url 'https://center.example.com' --enrollment-token-stdin --install-missing-deps --version 'v1.2.3' --release-repo 'xiangnan0811/houfeng' <<'HOUFENG_ENROLLMENT_TOKEN'
 <token>
 HOUFENG_ENROLLMENT_TOKEN
 status=$?; rm -f "$tmp_installer"; test "$status" -eq 0
@@ -219,9 +219,10 @@ Important behavior:
 - If the center was built with the placeholder `dev` version or without `HOUFENG_PUBLIC_BASE_URL`, command generation returns a configuration error instead of guessing.
 - `/api/agent/install.sh` is a public, read-only script route served by the deployed center. It contains no deployment-specific token until the generated command feeds a token through `--enrollment-token-stdin` at execution time.
 - GitHub Release hosts only `houfeng-agent_<version>_linux_amd64`, `houfeng-agent_<version>_linux_arm64`, `sha256sums.txt`, and `sha256sums.txt.minisig`; the install script is not taken from GitHub raw/release assets.
+- The generated command grants explicit consent for missing dependency recovery with `--install-missing-deps`. Manual installer runs can omit that flag to get an interactive prompt, or pass `--no-install-missing-deps` to fail if `minisign` is missing.
 - Treat the generated command as a secret: do not paste it into tickets, chat, screenshots, process logs, or shell transcripts you plan to share.
 
-The installer supports Linux systemd hosts on `amd64` and `arm64`. It fails before writing runtime files when the OS, architecture, service manager, downloader, `minisign`, or checksum tools are unsupported. It downloads the selected release asset, `sha256sums.txt`, and `sha256sums.txt.minisig` from the configured release repository, verifies the checksum manifest signature with the installer-pinned public key, verifies the exact checksum entry, then replaces `/usr/local/bin/houfeng-agent` and changes systemd state. It writes `/etc/houfeng-agent/agent.env`, writes `/etc/houfeng-agent/token` with mode `0600` when the file does not already contain post-enrollment sync credentials, creates `/var/lib/houfeng-agent`, installs the systemd unit, runs `systemctl daemon-reload`, enables the service, then restarts an already-active `houfeng-agent` or starts it when inactive. Re-running the command on a bound node preserves the existing sync credentials and activates the newly installed agent binary without requiring a separate manual restart.
+The installer supports Linux systemd hosts on `amd64` and `arm64`. It fails before writing runtime files when the OS, architecture, service manager, downloader, or checksum tools are unsupported. If `minisign` is missing, the generated command allows the installer to download upstream `minisign` 0.12, verify the pinned tarball SHA256, and install the matching static binary to `/usr/local/bin/minisign`; if the operator declines or disables dependency recovery, the installer stops before changing agent files. It downloads the selected release asset, `sha256sums.txt`, and `sha256sums.txt.minisig` from the configured release repository, verifies the checksum manifest signature with the installer-pinned public key, verifies the exact checksum entry, then replaces `/usr/local/bin/houfeng-agent` and changes systemd state. It writes `/etc/houfeng-agent/agent.env`, writes `/etc/houfeng-agent/token` with mode `0600` when the file does not already contain post-enrollment sync credentials, creates `/var/lib/houfeng-agent`, installs the systemd unit, runs `systemctl daemon-reload`, enables the service, then restarts an already-active `houfeng-agent` or starts it when inactive. Re-running the command on a bound node preserves the existing sync credentials and activates the newly installed agent binary without requiring a separate manual restart.
 
 Manual installation remains a troubleshooting fallback when investigating installer failures:
 

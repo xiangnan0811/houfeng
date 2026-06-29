@@ -2253,7 +2253,7 @@ describe('api helpers', () => {
 
   it('issues one-command install commands with POST /api/monitoring-instances/:monitoringInstanceId/install-command', async () => {
     const responseBody = {
-      command: 'tmp_installer="$(mktemp)" && curl -fsSL "https://center.example.com/api/agent/install.sh" -o "$tmp_installer" && sudo sh "$tmp_installer" --server-url "https://center.example.com" --enrollment-token-stdin --version "v1.2.3" --release-repo "owner/repo" <<\'HOUFENG_ENROLLMENT_TOKEN\'\nenroll_001\nHOUFENG_ENROLLMENT_TOKEN\nstatus=$?; rm -f "$tmp_installer"; test "$status" -eq 0',
+      command: 'tmp_installer="$(mktemp)" && curl -fsSL "https://center.example.com/api/agent/install.sh" -o "$tmp_installer" && sudo sh "$tmp_installer" --server-url "https://center.example.com" --enrollment-token-stdin --install-missing-deps --version "v1.2.3" --release-repo "owner/repo" <<\'HOUFENG_ENROLLMENT_TOKEN\'\nenroll_001\nHOUFENG_ENROLLMENT_TOKEN\nstatus=$?; rm -f "$tmp_installer"; test "$status" -eq 0',
       issued_at: '2026-04-26T09:10:00Z',
       expires_at: '2026-04-26T09:40:00Z',
       installer_url: 'https://center.example.com/api/agent/install.sh',

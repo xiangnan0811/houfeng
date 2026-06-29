@@ -107,7 +107,7 @@ func TestScriptRequiresSignedChecksumManifest(t *testing.T) {
 
 	for _, want := range []string{
 		"HOUFENG_CHECKSUM_MINISIGN_PUBLIC_KEY=",
-		`command -v minisign >/dev/null 2>&1 || fail "minisign is required to verify release checksums"`,
+		`ensure_minisign`,
 		`download "${BASE_URL}/sha256sums.txt.minisig" "${TMPDIR}/sha256sums.txt.minisig"`,
 		`minisign -Vm "${TMPDIR}/sha256sums.txt" -P "$HOUFENG_CHECKSUM_MINISIGN_PUBLIC_KEY" -x "${TMPDIR}/sha256sums.txt.minisig"`,
 		`info "checksum manifest signature verified"`,
@@ -131,6 +131,56 @@ func TestScriptRequiresSignedChecksumManifest(t *testing.T) {
 	for _, line := range strings.Split(Script, "\n") {
 		if strings.Contains(line, "minisign") && strings.Contains(line, "|| true") {
 			t.Fatalf("installer script must not ignore minisign failure: %q", line)
+		}
+	}
+}
+
+func TestScriptCanBootstrapMissingMinisignWithExplicitConsent(t *testing.T) {
+	t.Parallel()
+
+	for _, want := range []string{
+		"--install-missing-deps",
+		"--no-install-missing-deps",
+		`INSTALL_MISSING_DEPS=""`,
+		`HOUFENG_MINISIGN_BOOTSTRAP_VERSION="0.12"`,
+		`HOUFENG_MINISIGN_BOOTSTRAP_SHA256="9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73"`,
+		`HOUFENG_MINISIGN_BOOTSTRAP_URL="https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz"`,
+		`MINISIGN_ARCH="x86_64"`,
+		`MINISIGN_ARCH="aarch64"`,
+		`ask_yes_no_from_tty`,
+		`read answer < /dev/tty`,
+		`install -o root -g root -m 0755 "${TMPDIR}/minisign-linux/${MINISIGN_ARCH}/minisign" /usr/local/bin/minisign`,
+		`PATH="/usr/local/bin:$PATH"`,
+		`command -v minisign >/dev/null 2>&1 || fail "minisign installation did not make minisign available"`,
+	} {
+		if !strings.Contains(Script, want) {
+			t.Fatalf("installer script missing minisign bootstrap snippet %q", want)
+		}
+	}
+	if strings.Contains(Script, "apt install minisign") || strings.Contains(Script, "yum install minisign") || strings.Contains(Script, "apk add minisign") {
+		t.Fatal("installer script should not depend on distro package managers for minisign recovery")
+	}
+}
+
+func TestScriptPromptsOrFailsBeforeReleaseDownloadWhenMinisignIsMissing(t *testing.T) {
+	t.Parallel()
+
+	ensureIndex := strings.Index(Script, "ensure_minisign")
+	downloadAssetIndex := strings.Index(Script, `download "${BASE_URL}/${ASSET}"`)
+	if ensureIndex == -1 || downloadAssetIndex == -1 {
+		t.Fatal("installer script should ensure minisign before downloading release assets")
+	}
+	if ensureIndex > downloadAssetIndex {
+		t.Fatal("installer script should resolve minisign before downloading release assets")
+	}
+	for _, want := range []string{
+		`fail "minisign is required to verify release checksums; rerun with --install-missing-deps or install minisign manually"`,
+		`fail "minisign is required to verify release checksums; dependency installation was disabled by --no-install-missing-deps"`,
+		`info "if you decline, the agent install/upgrade will stop before changing the agent binary, config, token, or systemd unit"`,
+		`Install minisign now? [y/N]`,
+	} {
+		if !strings.Contains(Script, want) {
+			t.Fatalf("installer script missing missing-minisign UX snippet %q", want)
 		}
 	}
 }

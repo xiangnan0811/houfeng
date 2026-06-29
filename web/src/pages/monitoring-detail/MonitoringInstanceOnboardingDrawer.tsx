@@ -14,14 +14,16 @@ const manualEnvSnippet = `HOUFENG_AGENT_SERVER_URL=${MANUAL_SERVER_PLACEHOLDER}
 HOUFENG_AGENT_TOKEN_FILE=/etc/houfeng-agent/token
 HOUFENG_AGENT_BUFFER_FILE=/var/lib/houfeng-agent/sync-buffer.json
 HOUFENG_AGENT_BUFFER_MAX_ENTRIES=65536
-HOUFENG_AGENT_BUFFER_MAX_AGE=72h`
+HOUFENG_AGENT_BUFFER_MAX_AGE=72h
+HOUFENG_AGENT_BUFFER_MAX_BYTES=67108864`
 const manualTokenSnippet = `printf '%s' '${MANUAL_TOKEN_PLACEHOLDER}' | sudo tee /etc/houfeng-agent/token >/dev/null`
 
 const installChecklist = [
   '复制下方 center 生成的一键安装命令。',
   '在目标 VPS 的 root shell 或具备 sudo 的账号中粘贴执行。',
   '安装器会校验 linux/amd64 或 linux/arm64、systemd、下载工具和 checksum 工具。',
-  '安装器下载 GitHub Release 中的 houfeng-agent，并用 sha256sums.txt 校验后再写入本机。',
+  '如果缺少 minisign，生成命令允许安装器先校验并安装固定版本的签名校验工具。',
+  '安装器下载 GitHub Release 中的 houfeng-agent，并先验签 sha256sums.txt 再校验二进制。',
   '安装完成后 systemd 会启动 agent，回到本页等待首次同步和绑定。',
 ]
 

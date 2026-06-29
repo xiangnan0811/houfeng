@@ -236,6 +236,7 @@ func TestMonitoringInstanceInstallCommandHandlerReturnsCommand(t *testing.T) {
 		`curl -fsSL 'https://center.example.com/api/agent/install.sh'`,
 		`--server-url 'https://center.example.com'`,
 		`--enrollment-token-stdin`,
+		`--install-missing-deps`,
 		"<<'HOUFENG_ENROLLMENT_TOKEN'",
 		"\nenroll_secret_001\nHOUFENG_ENROLLMENT_TOKEN\n",
 		`--version 'v1.2.3'`,
