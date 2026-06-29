@@ -890,3 +890,37 @@ Implemented installer recovery for missing minisign with explicit dependency con
 ### Next Steps
 
 - None - task complete
+
+
+## Session 203: VPS detail attention judgement
+
+**Date**: 2026-06-29
+**Task**: VPS detail attention judgement
+**Branch**: `chore/archive-vps-attention-task`
+
+### Summary
+
+Moved VPS detail attention states into top current judgement, removed middle context-action panel, verified PR #283 and release v0.55.2 image publishing.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4c2b0a4` | (see git log) |
+| `a4ade14` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
