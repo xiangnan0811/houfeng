@@ -790,3 +790,36 @@ Implemented strict agent sync bearer authentication, command sensitivity confirm
 ### Next Steps
 
 - None - task complete
+
+
+## Session 200: VPS detail redesign
+
+**Date**: 2026-06-29
+**Task**: VPS detail redesign
+**Branch**: `feat/vps-detail-redesign`
+
+### Summary
+
+Redesigned the VPS detail default page around compact overview, related overview, ledger, IP quality summary, and state-driven cancellation handling.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cb81914` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
