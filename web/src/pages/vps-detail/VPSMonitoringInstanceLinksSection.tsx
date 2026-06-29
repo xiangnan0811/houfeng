@@ -40,28 +40,25 @@ export function VPSMonitoringInstanceLinksSection({
       <div className="section-heading">
         <div>
           <p className="section-heading__eyebrow">MONITORING EVIDENCE</p>
-          <h2>监控实例证据</h2>
-        <p className="section-heading__description">
-            监控实例作为 VPS 的运行观测事实，用于解释续费和迁移判断。
-        </p>
+          <h2>监控观测</h2>
         </div>
         <span className="section-heading__meta">
           <MonoDigits>{monitoring.length}</MonoDigits> 个 active link
         </span>
         {hasNoActiveLinks ? (
           <div className="section-heading__actions">
-            <Button variant="primary" size="sm" onClick={onCreateMonitoringInstance}>创建并接入 agent</Button>
+            <Button variant="primary" size="sm" onClick={onCreateMonitoringInstance}>接入/升级 agent</Button>
             <Button variant="secondary" size="sm" onClick={onOpenLink}>关联已有监控实例</Button>
           </div>
         ) : hasSingleActiveLink ? (
           <div className="section-heading__actions">
-            <Button variant="primary" size="sm" onClick={() => onUpgradeMonitoringInstance(monitoring[0])}>升级/重新接入 agent</Button>
+            <Button variant="primary" size="sm" onClick={() => onUpgradeMonitoringInstance(monitoring[0])}>接入/升级 agent</Button>
           </div>
         ) : null}
       </div>
       {hasDuplicateActiveLinks ? (
         <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
-          检测到 <MonoDigits>{monitoring.length}</MonoDigits> 个 active 监控实例关联。请人工核对要保留的实例，逐个升级/重新接入或解除多余关联。
+          检测到 <MonoDigits>{monitoring.length}</MonoDigits> 个 active 监控实例关联。请人工核对要保留的实例，逐个接入/升级或解除多余关联。
         </p>
       ) : null}
       {linkFeedback ? (
@@ -84,7 +81,7 @@ export function VPSMonitoringInstanceLinksSection({
             <span>操作后：该监控实例不再关联到这个 VPS。</span>
           </div>
           <div className="asset-lifecycle-confirm__callouts">
-            <p>会移除 VPS 台账中的监控实例证据关联，后续资产判断不再把它计入该 VPS。</p>
+            <p>会移除 VPS 台账中的监控关联，后续不再把它计入该 VPS。</p>
             <p>不会删除监控实例、历史事件、agent 绑定或观测数据。</p>
           </div>
           <div className="asset-operation-actions">
@@ -108,7 +105,7 @@ export function VPSMonitoringInstanceLinksSection({
         </section>
       ) : null}
       {monitoring.length > 0 ? (
-        <div className="vps-monitoring-instance-evidence-strip" aria-label="监控实例证据摘要">
+        <div className="vps-monitoring-instance-evidence-strip" aria-label="监控观测摘要">
           {monitoring.map((monitoringInstance) => (
             <article key={monitoringInstance.monitoring_instance_id} className="vps-monitoring-instance-evidence-strip__item">
               <div>
@@ -136,7 +133,7 @@ export function VPSMonitoringInstanceLinksSection({
                   disabled={unlinkingMonitoringInstanceId !== null}
                   onClick={() => onUpgradeMonitoringInstance(monitoringInstance)}
                 >
-                  升级/重新接入 agent
+                  接入/升级 agent
                 </Button>
                 <Button
                   variant="ghost"

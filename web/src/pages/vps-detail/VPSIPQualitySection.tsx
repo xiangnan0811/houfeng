@@ -28,14 +28,11 @@ export function VPSIPQualitySection({ vpsId, report, error }: VPSIPQualitySectio
   const serviceCoveragePct = report ? serviceCoverage(report) : null
 
   return (
-    <section className="page-panel vps-ip-quality-summary">
+    <section className="page-panel vps-ip-quality-summary" aria-labelledby="vps-ip-quality-summary-title">
       <div className="section-heading section-heading--inline">
         <div>
           <p className="section-heading__eyebrow">IP Quality</p>
-          <h2 className="section-heading__title">IP 质量</h2>
-          <p className="section-heading__description">
-            摘要只保留关键质量结论；完整 provider、服务解锁、覆盖率和诊断请进入报告页查看。
-          </p>
+          <h2 id="vps-ip-quality-summary-title" className="section-heading__title">IP 质量概况</h2>
         </div>
         <div className="section-heading__actions">
           <Link className="btn sm secondary" to={`/vps/${encodeURIComponent(vpsId)}/ip-quality`}>
@@ -46,30 +43,33 @@ export function VPSIPQualitySection({ vpsId, report, error }: VPSIPQualitySectio
       {error ? (
         <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{error}</p>
       ) : null}
-      {summary && report ? (
+      {error ? (
+        <div className="vps-cost-card__empty">
+          <strong>报告暂不可用</strong>
+          <span>保留完整报告入口；当前不根据缓存摘要推断评分。</span>
+        </div>
+      ) : summary && report ? (
         <>
-          <div className="vps-ip-quality-summary__lead">
-            <div className="vps-ip-quality-summary__score">
+          <div className="vps-ip-quality-summary__facts">
+            <div>
               <span>质量评分</span>
               <strong>{score ?? '—'}</strong>
               <small>{qualityVerdict(score, summary)}</small>
             </div>
-            <div className="vps-ip-quality-summary__facts">
-              <div>
-                <span>风险信号</span>
-                <strong>{riskFlags.length > 0 ? `${riskFlags.length} 项` : '未命中'}</strong>
-                <small>{riskFlagLabels.length > 0 ? riskFlagLabels.join(' · ') : '未发现 proxy / VPN / abuse 等负面信号'}</small>
-              </div>
-              <div>
-                <span>解锁概览</span>
-                <strong>{unlockCounts ? `${unlockCounts.unlocked} 可用` : '—'}</strong>
-                <small>{unlockCounts ? `${unlockCounts.blocked} 受阻 · ${unlockCounts.partial} 部分 · ${unlockCounts.unknown} 未知` : '暂无服务解锁结果'}</small>
-              </div>
-              <div>
-                <span>证据覆盖</span>
-                <strong>{formatPercent(providerCoveragePct, 0)}</strong>
-                <small>服务 {formatPercent(serviceCoveragePct, 0)} · provider {report.provider_results.length}</small>
-              </div>
+            <div>
+              <span>风险信号</span>
+              <strong>{riskFlags.length > 0 ? `${riskFlags.length} 项` : '未命中'}</strong>
+              <small>{riskFlagLabels.length > 0 ? riskFlagLabels.join(' · ') : '无明显负面信号'}</small>
+            </div>
+            <div>
+              <span>解锁概览</span>
+              <strong>{unlockCounts ? `${unlockCounts.unlocked} 可用` : '—'}</strong>
+              <small>{unlockCounts ? `${unlockCounts.blocked} 受阻 · ${unlockCounts.partial} 部分 · ${unlockCounts.unknown} 未知` : '暂无服务解锁结果'}</small>
+            </div>
+            <div>
+              <span>证据覆盖</span>
+              <strong>{formatPercent(providerCoveragePct, 0)}</strong>
+              <small>服务 {formatPercent(serviceCoveragePct, 0)} · provider {report.provider_results.length}</small>
             </div>
           </div>
 
@@ -78,13 +78,13 @@ export function VPSIPQualitySection({ vpsId, report, error }: VPSIPQualitySectio
             <Badge variant="state" tone="alert">{unlockCounts?.blocked ?? 0} 受阻</Badge>
             <Badge variant="state" tone="notice">{unlockCounts?.partial ?? 0} 部分</Badge>
             <Badge variant="state" tone="neutral">{unlockCounts?.unknown ?? 0} 未知</Badge>
-            <span>{riskFlagLabels.length > 0 ? `重点风险：${riskFlagLabels.join(' · ')}` : '未发现 proxy / VPN / abuse 等负面信号'}</span>
+            <span>{riskFlagLabels.length > 0 ? `重点风险：${riskFlagLabels.join(' · ')}` : '无明显负面信号'}</span>
           </div>
         </>
       ) : (
         <div className="vps-cost-card__empty">
           <strong>尚无 IP 质量报告</strong>
-          <span>Agent 完成低频采集后会展示质量结论、风险信号和完整报告入口。</span>
+          <span>尚未收到可用质量结论。</span>
         </div>
       )}
     </section>

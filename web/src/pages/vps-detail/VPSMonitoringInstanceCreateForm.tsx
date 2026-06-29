@@ -87,7 +87,7 @@ export function VPSMonitoringInstanceCreateForm({
       {notice ? <p className="asset-operation-feedback" role="status">{notice}</p> : null}
       <div className="page-form-actions">
         <Button variant="secondary" disabled={submitting} onClick={onCancel}>取消</Button>
-        <Button type="submit" disabled={submitting}>{submitting ? '创建中…' : '创建并接入 agent'}</Button>
+        <Button type="submit" disabled={submitting}>{submitting ? '创建中…' : '接入/升级 agent'}</Button>
       </div>
     </form>
   )

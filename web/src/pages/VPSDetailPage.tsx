@@ -30,7 +30,6 @@ import {
   unlinkVPSMonitoringInstance,
   updateVPSAsset,
 } from '../lib/api'
-import { formatDate, formatMoney } from '../lib/format'
 import type {
   ArchiveReview,
   AssetDomainRecord,
@@ -48,27 +47,29 @@ import type {
   VPSIPQualityReport,
   VPSMonitoringInstanceSummary,
 } from '../lib/types'
-import { VPSDecisionBoard } from './vps-detail/VPSDecisionBoard'
+import { VPSContextActionPanel } from './vps-detail/VPSContextActionPanel'
 import { VPSDetailErrorPanel } from './vps-detail/VPSDetailErrorPanel'
-import { VPSDetailHero } from './vps-detail/VPSDetailHero'
 import { VPSDetailLoading } from './vps-detail/VPSDetailLoading'
 import { VPSDetailMissingID } from './vps-detail/VPSDetailMissingID'
+import { VPSDetailOverviewPanel } from './vps-detail/VPSDetailOverviewPanel'
 import { VPSDomainsForm } from './vps-detail/VPSDomainsForm'
 import { VPSDomainsSection } from './vps-detail/VPSDomainsSection'
 import { VPSExperienceLogForm } from './vps-detail/VPSExperienceLogForm'
 import { VPSFactsEditForm } from './vps-detail/VPSFactsEditForm'
 import { VPSFactsSection } from './vps-detail/VPSFactsSection'
 import { VPSIPQualitySection } from './vps-detail/VPSIPQualitySection'
-import { VPSLifecycleCard } from './vps-detail/VPSLifecycleCard'
 import { VPSMonitoringInstanceCreateForm } from './vps-detail/VPSMonitoringInstanceCreateForm'
 import { VPSMonitoringInstanceLinkForm } from './vps-detail/VPSMonitoringInstanceLinkForm'
 import { VPSMonitoringInstanceLinksSection } from './vps-detail/VPSMonitoringInstanceLinksSection'
 import { VPSRenewalDecisionForm } from './vps-detail/VPSRenewalDecisionForm'
+import { VPSRelatedOverview } from './vps-detail/VPSRelatedOverview'
+import { VPSSingleMachineLedger } from './vps-detail/VPSSingleMachineLedger'
 import { VPSSubscriptionForm } from './vps-detail/VPSSubscriptionForm'
 import { VPSValidityExtensionForm } from './vps-detail/VPSValidityExtensionForm'
 import { VPSServicesForm } from './vps-detail/VPSServicesForm'
 import { VPSServicesSection } from './vps-detail/VPSServicesSection'
 import { vpsLifecycleConfirmationCopy } from './vps-detail/vpsLifecycleConfirmationCopy'
+import { buildVPSDetailOverviewModel } from './vps-detail/vpsDetailOverviewModel'
 import type {
   DecisionDraftState,
   DomainDraftState,
@@ -104,6 +105,17 @@ function describeError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
   return fallback
+}
+
+type PageFeedbackItem = {
+  key: string
+  message: string
+  error?: boolean
+  action?: { to: string; label: string } | null
+}
+
+function isPageFeedbackItem(item: PageFeedbackItem | null): item is PageFeedbackItem {
+  return item !== null
 }
 
 async function loadSubscriptions(targetVPSId: string): Promise<{
@@ -199,9 +211,9 @@ function subscriptionLinkageAction(linkage: RenewalSubscriptionLinkage | null | 
   if (!linkage) return null
   if (linkage.status === 'no_active_subscription') {
     if (linkage.candidate_count > 0) {
-      return { to: `/vps/${encodeURIComponent(vpsID)}?workbench=cancellation`, label: '打开取消/退役工作台' }
+      return { to: `/vps/${encodeURIComponent(vpsID)}?workbench=cancellation`, label: '打开取消/退役' }
     }
-    return { to: `/vps/${encodeURIComponent(vpsID)}?workbench=subscription`, label: '快速创建订阅' }
+    return { to: `/vps/${encodeURIComponent(vpsID)}?workbench=subscription`, label: '创建/更新订阅' }
   }
   if (linkage.status === 'multiple_active_subscriptions') {
     return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsID)}`, label: '去订阅页选择处理' }
@@ -228,11 +240,6 @@ function shouldExposeCancellationWorkbench(detail: VPSAssetDetail, preview: Canc
     detail.lifecycle_status === 'cancelled' ||
     detail.lifecycle_status === 'archived' ||
     Boolean(preview && ((preview.warnings ?? []).length > 0 || (preview.blockers ?? []).length > 0))
-}
-
-function baseMoney(value?: number | null, currency = 'CNY'): string {
-  if (value == null || Number.isNaN(value)) return '—'
-  return formatMoney(value, currency)
 }
 
 export function VPSDetailPage() {
@@ -1181,6 +1188,19 @@ export function VPSDetailPage() {
   const activeSubscription = selectActiveSubscription(state.subscriptions)
   const subscriptionLoadFailed = state.subscriptionsError !== null
   const showCancellationWorkbench = shouldExposeCancellationWorkbench(detail, state.cancellationPreview)
+  const overviewModel = buildVPSDetailOverviewModel({
+    detail,
+    timeline,
+    primarySubscription,
+    activeSubscription,
+    subscriptionLoadFailed,
+    subscriptionError: state.subscriptionsError,
+    services: state.services,
+    domains: state.domains,
+    ipQuality: state.ipQuality,
+    ipQualityError: state.ipQualityError,
+    cancellationAttention: showCancellationWorkbench,
+  })
   const archiveBlockers = archiveReview?.blockers ?? []
   const archiveCanConfirm = lifecycleConfirmingAction === 'archive' &&
     !archiveReviewLoading &&
@@ -1189,25 +1209,23 @@ export function VPSDetailPage() {
     archiveConfirmationName.trim() === detail.display_name.trim()
   const lifecycleConfirmDisabled = lifecycleSubmitting ||
     (lifecycleConfirmingAction === 'archive' ? !archiveCanConfirm : false)
-  const activeMonitoringLinks = detail.monitoring_instance_links ?? []
-  const monitoringAgentActionLabel = activeMonitoringLinks.length === 0 ? '创建并接入 agent' : '升级/重新接入 agent'
 
   function drawerTitle(): string {
-    if (activeDrawer === 'decision') return '续费决策'
-    if (activeDrawer === 'cancellation') return '取消/退役工作台'
-    if (activeDrawer === 'facts') return '编辑基础信息'
-    if (activeDrawer === 'subscription') return '快速创建订阅'
+    if (activeDrawer === 'decision') return '调整决策'
+    if (activeDrawer === 'cancellation') return '取消/退役'
+    if (activeDrawer === 'facts') return '编辑基础资料'
+    if (activeDrawer === 'subscription') return '创建/更新订阅'
     if (activeDrawer === 'validity-extension') return '延长有效期'
-    if (activeDrawer === 'monitoring-instance-create') return '创建并接入 agent'
+    if (activeDrawer === 'monitoring-instance-create') return '接入/升级 agent'
     if (activeDrawer === 'monitoring-instance-link') return '关联已有监控实例'
-    if (activeDrawer === 'experience') return '经验记录'
+    if (activeDrawer === 'experience') return '记录经验'
     if (activeDrawer === 'service') return '新增服务'
     if (activeDrawer === 'domain') return '新增域名'
-    if (activeDrawer === 'monitoring-instance-evidence') return '监控实例证据'
-    if (activeDrawer === 'services-detail') return '服务资产详情'
-    if (activeDrawer === 'domains-detail') return '域名资产详情'
-    if (activeDrawer === 'timeline-detail') return '资产历史详情'
-    if (activeDrawer === 'facts-detail') return '基础资料详情'
+    if (activeDrawer === 'monitoring-instance-evidence') return '监控观测'
+    if (activeDrawer === 'services-detail') return '服务详情'
+    if (activeDrawer === 'domains-detail') return '域名详情'
+    if (activeDrawer === 'timeline-detail') return '资产历史'
+    if (activeDrawer === 'facts-detail') return '基础资料'
     return 'VPS 操作'
   }
 
@@ -1443,21 +1461,49 @@ export function VPSDetailPage() {
     return null
   }
 
+  const pageFeedbackCandidates: Array<PageFeedbackItem | null> = [
+    state.subscriptionsError ? { key: 'subscriptions-error', message: state.subscriptionsError, error: true } : null,
+    decisionNotice ? { key: 'decision', message: decisionNotice, action: decisionAction } : null,
+    activeDrawer === 'facts' || !factError ? null : { key: 'fact-error', message: factError, error: true },
+    factNotice ? { key: 'fact-notice', message: factNotice } : null,
+    activeDrawer === 'monitoring-instance-link' || activeDrawer === 'monitoring-instance-evidence' || !linkFeedback
+      ? null
+      : { key: 'link-feedback', message: linkFeedback, error: linkFeedbackIsError },
+    activeDrawer === 'service' || !serviceError ? null : { key: 'service-error', message: serviceError, error: true },
+    serviceNotice ? { key: 'service-notice', message: serviceNotice } : null,
+    activeDrawer === 'domain' || !domainError ? null : { key: 'domain-error', message: domainError, error: true },
+    domainNotice ? { key: 'domain-notice', message: domainNotice } : null,
+    experienceNotice ? { key: 'experience-notice', message: experienceNotice } : null,
+    activeDrawer === 'subscription' || !subscriptionError ? null : { key: 'subscription-error', message: subscriptionError, error: true },
+    subscriptionNotice ? { key: 'subscription-notice', message: subscriptionNotice } : null,
+    activeDrawer === 'validity-extension' || !validityExtensionError ? null : { key: 'validity-error', message: validityExtensionError, error: true },
+    validityExtensionNotice ? { key: 'validity-notice', message: validityExtensionNotice } : null,
+    activeDrawer === 'monitoring-instance-create' || !monitoringCreateError ? null : { key: 'monitoring-create-error', message: monitoringCreateError, error: true },
+    monitoringCreateNotice ? { key: 'monitoring-create-notice', message: monitoringCreateNotice } : null,
+    lifecycleConfirmingAction || !lifecycleError ? null : { key: 'lifecycle-error', message: lifecycleError, error: true },
+    lifecycleNotice ? { key: 'lifecycle-notice', message: lifecycleNotice } : null,
+  ]
+  const pageFeedbackItems = pageFeedbackCandidates.filter(isPageFeedbackItem)
+
   return (
     <div className="page-stack asset-page vps-detail-page">
-      <VPSDetailHero
-        detail={detail}
+      <VPSDetailOverviewPanel
+        model={overviewModel}
+        vpsId={detail.vps_id}
         isArchived={isArchived}
-        showCancellationWorkbench={showCancellationWorkbench}
         lifecycleSubmitting={lifecycleSubmitting}
-        monitoringAgentActionLabel={monitoringAgentActionLabel}
         onDecisionEdit={() => openDrawer('decision')}
+        onTimelineOpen={() => openDrawer('timeline-detail')}
+        onServicesOpen={() => openDrawer('services-detail')}
+        onDomainsOpen={() => openDrawer('domains-detail')}
         onCancellationOpen={() => openDrawer('cancellation')}
         onFactEdit={() => openFactEdit(detail)}
+        onFactsOpen={() => openDrawer('facts-detail')}
         onExperienceLog={() => openDrawer('experience')}
-        onMonitoringInstanceCreate={openMonitoringAgentWorkbench}
-        onMonitoringInstanceLink={() => openDrawer('monitoring-instance-link')}
-        onSubscriptionCreate={() => openDrawer('subscription')}
+        onMonitoringEvidence={() => openDrawer('monitoring-instance-evidence')}
+        onMonitoringAgent={openMonitoringAgentWorkbench}
+        onMonitoringLink={() => openDrawer('monitoring-instance-link')}
+        onSubscriptionOpen={() => openDrawer('subscription')}
         onValidityExtend={() => openDrawer('validity-extension')}
         onServiceCreate={() => openDrawer('service')}
         onDomainCreate={() => openDrawer('domain')}
@@ -1465,132 +1511,46 @@ export function VPSDetailPage() {
         onRestoreStart={() => openLifecycleConfirmation('restore')}
       />
 
-      {state.subscriptionsError ? (
-        <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
-          {state.subscriptionsError}
-        </p>
-      ) : null}
-      {decisionNotice ? (
-        <p className="asset-operation-feedback" role="status">
-          {decisionNotice}
-          {decisionAction ? (
-            <>
-              {' '}
-              <Link className="text-link" to={decisionAction.to}>{decisionAction.label}</Link>
-            </>
-          ) : null}
-        </p>
-      ) : null}
-
-      <VPSDecisionBoard
-        detail={detail}
-        timeline={timeline}
-        primarySubscription={primarySubscription}
-        subscriptionLoadFailed={subscriptionLoadFailed}
-        subscriptionError={state.subscriptionsError}
-        services={state.services}
-        domains={state.domains}
-        factNotice={factNotice}
-        factError={activeDrawer === 'facts' ? null : factError}
-        linkFeedback={activeDrawer === 'monitoring-instance-link' || activeDrawer === 'monitoring-instance-evidence' ? null : linkFeedback}
-        linkFeedbackIsError={linkFeedbackIsError}
-        serviceNotice={serviceNotice}
-        serviceError={activeDrawer === 'service' ? null : serviceError}
-        domainNotice={domainNotice}
-        domainError={activeDrawer === 'domain' ? null : domainError}
-        experienceNotice={experienceNotice}
-        subscriptionNotice={activeDrawer === 'subscription' ? null : subscriptionNotice}
-        subscriptionCreateError={activeDrawer === 'subscription' ? null : subscriptionError}
-        validityExtensionNotice={activeDrawer === 'validity-extension' ? null : validityExtensionNotice}
-        validityExtensionError={activeDrawer === 'validity-extension' ? null : validityExtensionError}
-        monitoringCreateNotice={activeDrawer === 'monitoring-instance-create' ? null : monitoringCreateNotice}
-        monitoringCreateError={activeDrawer === 'monitoring-instance-create' ? null : monitoringCreateError}
-        lifecycleNotice={lifecycleNotice}
-        lifecycleError={lifecycleConfirmingAction ? null : lifecycleError}
-        cancellationPreview={state.cancellationPreview}
-        cancellationPreviewError={state.cancellationPreviewError}
-        onDecisionEdit={() => openDrawer('decision')}
-        onCancellationOpen={() => openDrawer('cancellation')}
-        onFactEdit={() => openFactEdit(detail)}
-        onExperienceLog={() => openDrawer('experience')}
-        onMonitoringInstanceCreate={openMonitoringAgentWorkbench}
-        onSubscriptionCreate={() => openDrawer('subscription')}
-        onOpenFacts={() => openDrawer('facts-detail')}
-        onOpenMonitoringInstanceEvidence={() => openDrawer('monitoring-instance-evidence')}
-        onOpenServices={() => openDrawer('services-detail')}
-        onOpenDomains={() => openDrawer('domains-detail')}
-        onOpenTimeline={() => openDrawer('timeline-detail')}
-      />
-
-      <VPSIPQualitySection vpsId={detail.vps_id} report={state.ipQuality} error={state.ipQualityError} />
-
-      <section className="page-panel vps-cost-card">
-        <div className="section-heading section-heading--inline">
-          <div>
-            <p className="section-heading__eyebrow">Cost</p>
-            <h2 className="section-heading__title">成本卡片</h2>
-          </div>
-          {activeSubscription ? (
-            <Link className="btn sm secondary" to={`/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}`}>
-              订阅工作台
-            </Link>
-          ) : (
-            <button className="btn sm primary" onClick={() => openDrawer('subscription')}>
-              快速创建订阅
-            </button>
-          )}
+      {pageFeedbackItems.length > 0 ? (
+        <div className="vps-detail-feedback-stack" aria-label="VPS 操作反馈">
+          {pageFeedbackItems.map((item) => (
+            <p
+              key={item.key}
+              className={[
+                'asset-operation-feedback',
+                item.error && 'asset-operation-feedback--error',
+              ].filter(Boolean).join(' ')}
+              role={item.error ? 'alert' : 'status'}
+            >
+              {item.message}
+              {item.action ? (
+                <>
+                  {' '}
+                  <Link className="text-link" to={item.action.to}>{item.action.label}</Link>
+                </>
+              ) : null}
+            </p>
+          ))}
         </div>
-        {activeSubscription ? (
-          <>
-            <div className="vps-cost-card__grid">
-              <div>
-                <span>原币种价格</span>
-                <strong>{formatMoney(activeSubscription.price, activeSubscription.currency)}</strong>
-                <small>{activeSubscription.display_name || activeSubscription.cost_category || '当前 active 订阅'}</small>
-              </div>
-              <div>
-                <span>{activeSubscription.base_currency ?? 'CNY'} 月成本</span>
-                <strong>{baseMoney(activeSubscription.monthly_price_base, activeSubscription.base_currency ?? 'CNY')}</strong>
-                <small>年化 {baseMoney(activeSubscription.yearly_price_base, activeSubscription.base_currency ?? 'CNY')}</small>
-              </div>
-              <div>
-                <span>下次续费</span>
-                <strong>{formatDate(activeSubscription.renew_at)}</strong>
-                <small>{activeSubscription.next_reminder_at ? `下次提醒 ${formatDate(activeSubscription.next_reminder_at)}` : '提醒由订阅设置控制'}</small>
-              </div>
-              <div>
-                <span>支付方式</span>
-                <strong>{activeSubscription.payment_method || '未记录'}</strong>
-                <small>全局月预算在订阅设置中管理</small>
-              </div>
-            </div>
-            <div className="asset-context-inline vps-cost-card__signals">
-              {activeSubscription.exchange_rate_stale ? (
-                <span className="asset-context-pill asset-context-pill--attention">汇率过期</span>
-              ) : (
-                <span className="asset-context-pill">汇率 {activeSubscription.exchange_rate_date || '当前缓存'}</span>
-              )}
-              <span className="asset-context-pill">
-                {activeSubscription.auto_renew_cancelled ? '已取消自动续费' : activeSubscription.auto_renew ? '自动续费' : '手动续费'}
-              </span>
-            </div>
-          </>
-        ) : (
-          <div className="vps-cost-card__empty">
-            <strong>缺少 active 订阅账单事实</strong>
-            <span>补齐订阅后，这里会展示原币种价格、统一基准货币成本、续费和提醒状态。</span>
-          </div>
-        )}
-      </section>
+      ) : null}
 
-      {lifecycleConfirmingAction ? (
-        <VPSLifecycleCard
-          detail={detail}
-          action={lifecycleConfirmingAction}
-          error={lifecycleError}
-          notice={lifecycleNotice}
+      {overviewModel.contextAction ? (
+        <VPSContextActionPanel
+          action={overviewModel.contextAction}
+          onOpenModal={openDrawer}
+          onMonitoringAgent={openMonitoringAgentWorkbench}
         />
       ) : null}
+
+      <VPSRelatedOverview
+        items={overviewModel.relatedItems}
+        onOpenModal={openDrawer}
+        onMonitoringAgent={openMonitoringAgentWorkbench}
+      />
+
+      <VPSSingleMachineLedger ledger={overviewModel.ledger} onOpenModal={openDrawer} />
+
+      <VPSIPQualitySection vpsId={detail.vps_id} report={state.ipQuality} error={state.ipQualityError} />
 
       {lifecycleConfirmingAction ? (
         <ActionConfirmationModal
@@ -1669,7 +1629,7 @@ export function VPSDetailPage() {
         size={activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'monitoring-instance-evidence' || activeDrawer === 'facts' || activeDrawer === 'cancellation' || activeDrawer === 'subscription' || activeDrawer === 'validity-extension' || activeDrawer === 'monitoring-instance-create') ? 'lg' : undefined}
         contentClassName={activeDrawer === 'cancellation' ? 'modal-content--asset-cancel' : undefined}
       >
-        <div className="vps-detail-drawer">
+        <div className="vps-detail-modal">
           {renderDrawerContent()}
         </div>
       </Modal>
