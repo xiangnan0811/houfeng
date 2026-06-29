@@ -823,3 +823,36 @@ Redesigned the VPS detail default page around compact overview, related overview
 ### Next Steps
 
 - None - task complete
+
+
+## Session 201: VPS detail ledger action relocation
+
+**Date**: 2026-06-29
+**Task**: VPS detail ledger action relocation
+**Branch**: `feat/vps-detail-redesign`
+
+### Summary
+
+Moved VPS ledger detail entry buttons into the overview action bar, kept ledger facts focused, and verified modal behavior plus responsive sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c7caaa3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

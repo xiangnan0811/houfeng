@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 200
+- **Total Sessions**: 201
 - **Last Active**: 2026-06-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~825 | Active |
+| `journal-4.md` | ~858 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 201 | 2026-06-29 | VPS detail ledger action relocation | `c7caaa3` | `feat/vps-detail-redesign` |
 | 200 | 2026-06-29 | VPS detail redesign | `cb81914` | `feat/vps-detail-redesign` |
 | 199 | 2026-06-26 | Sync Auth Command Governance | `2603d31`, `9fcfd3f` | `fix/sync-auth-command-governance` |
 | 198 | 2026-06-26 | Security review remediation | `4a7d4f8` | `fix/security-review-remediation` |
