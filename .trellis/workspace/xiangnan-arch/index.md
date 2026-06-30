@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 207
+- **Total Sessions**: 208
 - **Last Active**: 2026-06-30
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1058 | Active |
+| `journal-4.md` | ~1091 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 208 | 2026-06-30 | Lifecycle state closure | `ec00ea3` | `audit-state-lifecycle-consistency` |
 | 207 | 2026-06-30 | State lifecycle audit and repair | `39271b6` | `audit-state-lifecycle-consistency` |
 | 206 | 2026-06-29 | Unify VPS detail attention states | `e0093ee` | `fix/vps-detail-attention-states` |
 | 205 | 2026-06-29 | Document Debian minisign upgrade recovery | `7842580` | `fix/installer-minisign-debian-bullseye` |

@@ -1056,3 +1056,36 @@ Audited and repaired VPS, subscription, monitoring threshold, heartbeat stale, I
 ### Next Steps
 
 - None - task complete
+
+
+## Session 208: Lifecycle state closure
+
+**Date**: 2026-06-30
+**Task**: Lifecycle state closure
+**Branch**: `audit-state-lifecycle-consistency`
+
+### Summary
+
+Closed remaining lifecycle state gaps: VPS state matrix, historical asset scope, gift renewal mode, inactive incident convergence, specs, tests, and browser sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ec00ea3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
