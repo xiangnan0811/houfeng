@@ -1186,3 +1186,36 @@ Reviewed audit-state-lifecycle-consistency against origin/main across lifecycle 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 212: Fix incident threshold order validation
+
+**Date**: 2026-06-30
+**Task**: Fix incident threshold order validation
+**Branch**: `audit-state-lifecycle-consistency`
+
+### Summary
+
+Validated incident threshold ordering across backend settings, frontend settings submission, runtime threshold presentation, tests, and specs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a476551` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
