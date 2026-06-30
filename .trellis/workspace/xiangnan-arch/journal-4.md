@@ -1023,3 +1023,36 @@ Removed the old VPS detail contextAction model path and kept persistent VPS atte
 ### Next Steps
 
 - None - task complete
+
+
+## Session 207: State lifecycle audit and repair
+
+**Date**: 2026-06-30
+**Task**: State lifecycle audit and repair
+**Branch**: `audit-state-lifecycle-consistency`
+
+### Summary
+
+Audited and repaired VPS, subscription, monitoring threshold, heartbeat stale, IP quality stale, and migration-intent state contracts; verified backend, frontend, scripts, and browser sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `39271b6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
