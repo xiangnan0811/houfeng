@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.55.6](https://github.com/xiangnan0811/houfeng/compare/v0.55.5...v0.55.6) (2026-06-30)
+
+
+### Bug Fixes
+
+* align state lifecycle contracts ([39271b6](https://github.com/xiangnan0811/houfeng/commit/39271b690090195e32a5569019552302bcea4450))
+* close lifecycle state consistency gaps ([fb56baf](https://github.com/xiangnan0811/houfeng/commit/fb56bafbce3080d0957830970445ff28daf669d7))
+* close lifecycle state gaps ([127a5cb](https://github.com/xiangnan0811/houfeng/commit/127a5cbe281e54ddddf927767d716edc895e6425))
+* close lifecycle state gaps ([ec00ea3](https://github.com/xiangnan0811/houfeng/commit/ec00ea31844dd643a0cadd47f9c53e3d2bfca356))
+* validate incident threshold order ([a476551](https://github.com/xiangnan0811/houfeng/commit/a476551b0dc87fbe3fd2f2b7e3455469e8837014))
+
+
+### Documentation
+
+* record lifecycle state closure review ([1bd9774](https://github.com/xiangnan0811/houfeng/commit/1bd97740cf6bcc40d17e3296357c1b02045ab4ff))
+
 ## [0.55.5](https://github.com/xiangnan0811/houfeng/compare/v0.55.4...v0.55.5) (2026-06-29)
 
 
