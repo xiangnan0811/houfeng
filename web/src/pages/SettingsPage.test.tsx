@@ -93,6 +93,7 @@ const settingsResponseBody = {
   ip_quality_settings: {
     enabled: true,
     frequency_seconds: 86400,
+    stale_after_seconds: 604800,
     timeout_seconds: 15,
     raw_retention_days: 90,
     history_retention_days: 365,
@@ -322,6 +323,7 @@ describe('SettingsPage', () => {
           ip_quality_settings: {
             enabled: false,
             frequency_seconds: 259200,
+            stale_after_seconds: 864000,
             timeout_seconds: 20,
             raw_retention_days: 45,
             history_retention_days: 180,
@@ -338,6 +340,7 @@ describe('SettingsPage', () => {
     switchTab('监控策略')
     fireEvent.click(screen.getByRole('switch', { name: '启用 IP 质量采集' }))
     fireEvent.change(screen.getByLabelText('IP 质量采集周期秒数'), { target: { value: '259200' } })
+    fireEvent.change(screen.getByLabelText('IP 质量过期窗口秒数'), { target: { value: '864000' } })
     fireEvent.change(screen.getByLabelText('IP 质量请求超时秒数'), { target: { value: '20' } })
     fireEvent.change(screen.getByLabelText('IP 质量原始 JSON 保留天数'), { target: { value: '45' } })
     fireEvent.change(screen.getByLabelText('IP 质量历史保留天数'), { target: { value: '180' } })
@@ -349,6 +352,7 @@ describe('SettingsPage', () => {
       ip_quality_settings: {
         enabled: false,
         frequency_seconds: 259200,
+        stale_after_seconds: 864000,
         timeout_seconds: 20,
         raw_retention_days: 45,
         history_retention_days: 180,

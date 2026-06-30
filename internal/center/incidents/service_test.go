@@ -741,6 +741,34 @@ func TestSettingsBackedHeartbeatIntervalUsesPersistedSettings(t *testing.T) {
 	}
 }
 
+func TestSettingsBackedHeartbeatStaleThresholdUsesPersistedSettings(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	stale := now.Add(-3 * time.Minute)
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{listMonitoringInstancesResult: []monitoringinstances.Record{{MonitoringInstanceID: "mi_001", MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &stale}}}
+	targetRepo := &fakeTargetRepo{}
+	snapshots := &fakeSnapshotReader{}
+	writer := &fakeMutationWriter{}
+	settings := centersettings.Default()
+	settings.IncidentDefaults.HeartbeatIntervalSeconds = 60
+	settings.IncidentDefaults.StaleThresholdIntervals = 4
+	settingsRepo := &fakeSettingsRepository{
+		getSettingsResult:         settings,
+		persistedIncidentDefaults: settings.IncidentDefaults,
+		persistedIncidentExists:   true,
+	}
+	service := NewSettingsBackedService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, settingsRepo, slog.Default(), time.Minute, time.Minute)
+
+	if err := service.EvaluateStaleMonitoringInstances(context.Background(), now); err != nil {
+		t.Fatalf("EvaluateStaleMonitoringInstances() error = %v", err)
+	}
+	if len(writer.mutations) != 1 {
+		t.Fatalf("len(mutations) = %d, want 1", len(writer.mutations))
+	}
+	if len(writer.mutations[0].Active) != 1 || writer.mutations[0].Active[0].Severity != SeverityNotice {
+		t.Fatalf("Active = %#v, want notice incident when missed is one below alert threshold", writer.mutations[0].Active)
+	}
+}
+
 func TestSettingsBackedSweepIntervalUsesPersistedSettings(t *testing.T) {
 	settings := centersettings.Default()
 	settings.IncidentDefaults.SweepIntervalSeconds = 180
@@ -805,6 +833,28 @@ func TestServiceEvaluateStaleMonitoringInstancesCreatesHeartbeatIncident(t *test
 	}
 }
 
+func TestServiceEvaluateStaleMonitoringInstancesSkipsNonRunningMonitoringInstances(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	stale := now.Add(-5 * time.Minute)
+	records := []monitoringinstances.Record{
+		{MonitoringInstanceID: "mi_paused", MonitoringStatus: monitoringinstances.MonitoringPaused, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &stale},
+		{MonitoringInstanceID: "mi_maintenance", MonitoringStatus: monitoringinstances.MonitoringMaintenance, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &stale},
+		{MonitoringInstanceID: "mi_retired", MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleRetired, LastHeartbeatAt: &stale},
+	}
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{listMonitoringInstancesResult: records}
+	targetRepo := &fakeTargetRepo{}
+	snapshots := &fakeSnapshotReader{}
+	writer := &fakeMutationWriter{}
+	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, slog.Default(), time.Minute, time.Minute)
+
+	if err := service.EvaluateStaleMonitoringInstances(context.Background(), now); err != nil {
+		t.Fatalf("EvaluateStaleMonitoringInstances() error = %v", err)
+	}
+	if len(writer.mutations) != 0 {
+		t.Fatalf("mutations = %#v, want no heartbeat mutations for non-running monitoring instances", writer.mutations)
+	}
+}
+
 func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
@@ -812,9 +862,9 @@ func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.
 	snapshots := &fakeSnapshotReader{
 		hostSamples: map[string][]runtimefacts.HostSample{
 			"mi_001": {
-				{ObservedAt: now, Load5: 1.9},
-				{ObservedAt: now.Add(-8 * time.Minute), Load5: 2.0},
-				{ObservedAt: now.Add(-15 * time.Minute), Load5: 1.8},
+				{ObservedAt: now, Load5: 6.2},
+				{ObservedAt: now.Add(-8 * time.Minute), Load5: 6.3},
+				{ObservedAt: now.Add(-15 * time.Minute), Load5: 6.1},
 			},
 		},
 	}
@@ -834,6 +884,80 @@ func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.
 	}
 	if !found {
 		t.Fatalf("mutation = %#v, want load-driven resource incident", writer.mutations[0])
+	}
+}
+
+func TestSettingsBackedResourcePressureUsesPersistedLoadAndIOWaitThresholds(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	settings := centersettings.Default()
+	settings.IncidentDefaults.Load5Warning = 4
+	settings.IncidentDefaults.Load5Critical = 8
+	settings.IncidentDefaults.IOWaitWarningPct = 20
+	settings.IncidentDefaults.IOWaitCriticalPct = 50
+	settingsRepo := &fakeSettingsRepository{
+		getSettingsResult:         settings,
+		persistedIncidentDefaults: settings.IncidentDefaults,
+		persistedIncidentExists:   true,
+	}
+
+	quietWriter := &fakeMutationWriter{}
+	quietService := NewSettingsBackedService(
+		&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_load", LastHeartbeatAt: &now}},
+		&fakeTargetRepo{},
+		&fakeSnapshotReader{hostSamples: map[string][]runtimefacts.HostSample{
+			"mi_load": {
+				{ObservedAt: now, Load5: 3.5},
+				{ObservedAt: now.Add(-8 * time.Minute), Load5: 3.5},
+				{ObservedAt: now.Add(-15 * time.Minute), Load5: 3.5},
+			},
+		}},
+		quietWriter,
+		nil,
+		settingsRepo,
+		slog.Default(),
+		time.Minute,
+		time.Minute,
+	)
+	quietService.now = func() time.Time { return now }
+	if err := quietService.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_load"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync(load) error = %v", err)
+	}
+	for _, incident := range quietWriter.mutations[0].Active {
+		if incident.IncidentClass == IncidentMonitoringInstanceResourcePressure {
+			t.Fatalf("Active = %#v, want no resource incident below configured load warning", quietWriter.mutations[0].Active)
+		}
+	}
+
+	iowaitWriter := &fakeMutationWriter{}
+	iowaitService := NewSettingsBackedService(
+		&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_iowait", LastHeartbeatAt: &now}},
+		&fakeTargetRepo{},
+		&fakeSnapshotReader{hostSamples: map[string][]runtimefacts.HostSample{
+			"mi_iowait": {
+				{ObservedAt: now, CPUIOWaitPct: 55},
+				{ObservedAt: now.Add(-15 * time.Minute), CPUIOWaitPct: 55},
+				{ObservedAt: now.Add(-30 * time.Minute), CPUIOWaitPct: 55},
+			},
+		}},
+		iowaitWriter,
+		nil,
+		settingsRepo,
+		slog.Default(),
+		time.Minute,
+		time.Minute,
+	)
+	iowaitService.now = func() time.Time { return now }
+	if err := iowaitService.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_iowait"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync(iowait) error = %v", err)
+	}
+	foundCritical := false
+	for _, incident := range iowaitWriter.mutations[0].Active {
+		if incident.IncidentClass == IncidentMonitoringInstanceResourcePressure && incident.Severity == SeverityCritical {
+			foundCritical = true
+		}
+	}
+	if !foundCritical {
+		t.Fatalf("Active = %#v, want critical resource incident above configured iowait critical", iowaitWriter.mutations[0].Active)
 	}
 }
 

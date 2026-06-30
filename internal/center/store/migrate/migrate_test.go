@@ -189,6 +189,31 @@ func TestCommandActionAuditMigrationCreatesMetadataOnlyAuditTable(t *testing.T) 
 	}
 }
 
+func TestIPQualityStaleAfterSettingsMigrationRebuildsReadModel(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0047_ip_quality_stale_after_settings.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, want := range []string{
+		"stale_after_seconds",
+		"604800",
+		"drop view if exists ip_quality_latest_vps_summaries",
+		"drop view if exists ip_quality_assigned_vps_reports",
+		"center_settings",
+		"ip_quality_settings",
+		"make_interval(secs =>",
+		"assigned_reports.observed_at < now() - make_interval",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0047 migration missing %q", want)
+		}
+	}
+	if strings.Contains(sql, "interval '7 days'") {
+		t.Fatalf("0047 migration must not keep the hardcoded 7-day stale window")
+	}
+}
+
 func TestIPQualityReadModelFilterMigrationHidesFailurePlaceholders(t *testing.T) {
 	payload, err := migrations.FS.ReadFile("0041_filter_ip_quality_read_models.sql")
 	if err != nil {

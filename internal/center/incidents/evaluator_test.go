@@ -106,9 +106,9 @@ func TestEvaluateMonitoringInstanceResourcePressureRequiresFullWindowCoverage(t 
 func TestEvaluateMonitoringInstanceResourcePressureUsesLoadAndLowAvailableMemoryForSeverity(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
 	loadSamples := []MonitoringInstanceResourceSample{
-		{ObservedAt: now, NormalizedLoad5: 1.9, MemAvailableBytes: 800 * 1024 * 1024},
-		{ObservedAt: now.Add(-8 * time.Minute), NormalizedLoad5: 2.0, MemAvailableBytes: 780 * 1024 * 1024},
-		{ObservedAt: now.Add(-15 * time.Minute), NormalizedLoad5: 1.8, MemAvailableBytes: 760 * 1024 * 1024},
+		{ObservedAt: now, NormalizedLoad5: 6.2, MemAvailableBytes: 800 * 1024 * 1024},
+		{ObservedAt: now.Add(-8 * time.Minute), NormalizedLoad5: 6.3, MemAvailableBytes: 780 * 1024 * 1024},
+		{ObservedAt: now.Add(-15 * time.Minute), NormalizedLoad5: 6.1, MemAvailableBytes: 760 * 1024 * 1024},
 	}
 	thresholds := DefaultMetricThresholds()
 	loadResult := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", loadSamples, thresholds)

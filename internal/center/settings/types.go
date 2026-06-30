@@ -161,6 +161,7 @@ type SubscriptionCostSettings struct {
 type IPQualitySettings struct {
 	Enabled              bool     `json:"enabled"`
 	FrequencySeconds     int      `json:"frequency_seconds"`
+	StaleAfterSeconds    int      `json:"stale_after_seconds"`
 	TimeoutSeconds       int      `json:"timeout_seconds"`
 	RawRetentionDays     int      `json:"raw_retention_days"`
 	HistoryRetentionDays int      `json:"history_retention_days"`
@@ -231,6 +232,7 @@ func Default() CenterSettings {
 		IPQuality: IPQualitySettings{
 			Enabled:              false,
 			FrequencySeconds:     24 * 60 * 60,
+			StaleAfterSeconds:    7 * 24 * 60 * 60,
 			TimeoutSeconds:       15,
 			RawRetentionDays:     90,
 			HistoryRetentionDays: 365,
@@ -649,6 +651,12 @@ func validateIPQualitySettings(input IPQualitySettings) (IPQualitySettings, erro
 	if input.FrequencySeconds < 60 {
 		return IPQualitySettings{}, invalidSettings("ip quality frequency seconds must be at least 60")
 	}
+	if input.StaleAfterSeconds == 0 {
+		input.StaleAfterSeconds = defaults.StaleAfterSeconds
+	}
+	if input.StaleAfterSeconds < input.FrequencySeconds {
+		return IPQualitySettings{}, invalidSettings("ip quality stale after seconds must be at least frequency seconds")
+	}
 	if input.TimeoutSeconds < 1 || input.TimeoutSeconds > 300 {
 		return IPQualitySettings{}, invalidSettings("ip quality timeout seconds must be between 1 and 300")
 	}
@@ -676,6 +684,7 @@ func validateIPQualitySettings(input IPQualitySettings) (IPQualitySettings, erro
 func isZeroIPQualitySettings(input IPQualitySettings) bool {
 	return !input.Enabled &&
 		input.FrequencySeconds == 0 &&
+		input.StaleAfterSeconds == 0 &&
 		input.TimeoutSeconds == 0 &&
 		input.RawRetentionDays == 0 &&
 		input.HistoryRetentionDays == 0 &&

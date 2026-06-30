@@ -1,14 +1,23 @@
 import { MonoDigits, Sparkline } from '../../components/atoms'
-import { DEFAULT_THRESHOLDS } from '../../config/thresholds'
+import { DEFAULT_THRESHOLDS, type MetricThreshold, type MetricThresholds } from '../../config/thresholds'
 import { formatPercent } from '../../lib/format'
 import type { MonitoringInstanceRecord, MonitoringInstanceSparklinesResponse } from '../../lib/types'
 
 type MonitoringInstancesTrendCellProps = {
   monitoringInstance: MonitoringInstanceRecord
   sparklines: MonitoringInstanceSparklinesResponse | null
+  thresholds?: MetricThresholds
 }
 
-export function MonitoringInstancesTrendCell({ monitoringInstance, sparklines }: MonitoringInstancesTrendCellProps) {
+function toneFromThreshold(value: number | null, threshold: MetricThreshold) {
+  if (value == null) return 'default'
+  if (value >= threshold.critical) return 'critical'
+  if (value >= threshold.alert) return 'alert'
+  if (value >= threshold.warning) return 'notice'
+  return 'accent'
+}
+
+export function MonitoringInstancesTrendCell({ monitoringInstance, sparklines, thresholds = DEFAULT_THRESHOLDS }: MonitoringInstancesTrendCellProps) {
   const series = sparklines?.monitoring_instances?.[monitoringInstance.monitoring_instance_id]
   if (!series) {
     return <span className="monitoring-table__trends-empty">—</span>
@@ -20,10 +29,9 @@ export function MonitoringInstancesTrendCell({ monitoringInstance, sparklines }:
   const latestMem = mem?.[mem.length - 1] ?? null
   const latestDisk = disk?.[disk.length - 1] ?? null
 
-  const thresholds = DEFAULT_THRESHOLDS
-  const cpuTone = !latestCpu ? 'default' : latestCpu >= thresholds.cpu.critical ? 'critical' : latestCpu >= thresholds.cpu.notice ? 'alert' : 'accent'
-  const memTone = !latestMem ? 'default' : latestMem >= thresholds.mem.critical ? 'critical' : latestMem >= thresholds.mem.notice ? 'alert' : 'accent'
-  const diskTone = !latestDisk ? 'default' : latestDisk >= thresholds.disk.critical ? 'critical' : latestDisk >= thresholds.disk.notice ? 'alert' : 'accent'
+  const cpuTone = toneFromThreshold(latestCpu, thresholds.cpu)
+  const memTone = toneFromThreshold(latestMem, thresholds.mem)
+  const diskTone = toneFromThreshold(latestDisk, thresholds.disk)
 
   return (
     <span className="monitoring-table__trend-strip">

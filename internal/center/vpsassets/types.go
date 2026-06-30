@@ -455,6 +455,16 @@ func ValidatePatchInput(input PatchInput) error {
 	return nil
 }
 
+func ValidateOrdinaryPatchInput(input PatchInput) error {
+	if err := ValidatePatchInput(input); err != nil {
+		return err
+	}
+	if input.LifecycleStatus.Set && !IsValidOrdinaryPatchLifecycleStatus(input.LifecycleStatus.Value) {
+		return fmt.Errorf("%w: invalid lifecycle_status", ErrInvalidVPSAssetInput)
+	}
+	return nil
+}
+
 func (input PatchInput) HasChanges() bool {
 	return input.DisplayName.Set ||
 		input.ProviderID.Set ||
@@ -525,6 +535,15 @@ func NormalizeLabels(labels []string) []string {
 func IsValidLifecycleStatus(status LifecycleStatus) bool {
 	switch status {
 	case LifecycleActive, LifecycleIdle, LifecycleTesting, LifecycleToMigrate, LifecycleToCancel, LifecycleCancelled, LifecycleArchived:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsValidOrdinaryPatchLifecycleStatus(status LifecycleStatus) bool {
+	switch status {
+	case LifecycleActive, LifecycleIdle, LifecycleTesting:
 		return true
 	default:
 		return false

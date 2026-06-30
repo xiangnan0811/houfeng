@@ -32,6 +32,18 @@ export function IPQualitySettingsSection({ value, onChange }: IPQualitySettingsS
         </span>
       </div>
       <div className="settings-row">
+        <span className="sr-label">过期窗口</span>
+        <span className="sr-value">
+          <input
+            className="input input--compact"
+            aria-label="IP 质量过期窗口秒数"
+            inputMode="numeric"
+            value={value.staleAfterSeconds}
+            onChange={(e) => onChange({ staleAfterSeconds: e.target.value })}
+          /> 秒
+        </span>
+      </div>
+      <div className="settings-row">
         <span className="sr-label">请求超时</span>
         <span className="sr-value">
           <input

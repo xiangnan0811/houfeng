@@ -396,20 +396,33 @@ func (s *Service) EvaluatePeriodicState(ctx context.Context, now time.Time) erro
 }
 
 func (s *Service) EvaluateStaleMonitoringInstances(ctx context.Context, now time.Time) error {
-	heartbeatInterval := s.heartbeatIntervalFor(ctx)
+	timing := s.incidentTimingFor(ctx)
 	records, err := s.monitoringInstances.ListMonitoringInstances(ctx)
 	if err != nil {
 		return fmt.Errorf("list monitoring instances for stale sweep: %w", err)
 	}
 	for _, record := range records {
-		if err := s.evaluateMonitoringInstanceHeartbeatOnly(ctx, record, now, heartbeatInterval); err != nil {
+		if !shouldEvaluateHeartbeatForMonitoringInstance(record) {
+			continue
+		}
+		if err := s.evaluateMonitoringInstanceHeartbeatOnly(ctx, record, now, timing.heartbeatInterval, timing.staleThresholdIntervals); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Service) evaluateMonitoringInstanceHeartbeatOnly(ctx context.Context, record monitoringinstances.Record, now time.Time, heartbeatInterval time.Duration) error {
+func shouldEvaluateHeartbeatForMonitoringInstance(record monitoringinstances.Record) bool {
+	if record.MonitoringStatus == monitoringinstances.MonitoringPaused || record.MonitoringStatus == monitoringinstances.MonitoringMaintenance {
+		return false
+	}
+	if record.LifecycleStatus == monitoringinstances.LifecycleRetired {
+		return false
+	}
+	return true
+}
+
+func (s *Service) evaluateMonitoringInstanceHeartbeatOnly(ctx context.Context, record monitoringinstances.Record, now time.Time, heartbeatInterval time.Duration, staleThresholdIntervals int) error {
 	previous, err := s.snapshots.ListActiveIncidents(ctx, ObjectTypeMonitoringInstance, record.MonitoringInstanceID)
 	if err != nil {
 		return fmt.Errorf("list previous monitoring instance incidents for %q: %w", record.MonitoringInstanceID, err)
@@ -417,7 +430,7 @@ func (s *Service) evaluateMonitoringInstanceHeartbeatOnly(ctx context.Context, r
 	previousByClass := incidentsByClass(previous)
 	evaluations := []classEvaluation{{
 		class:  IncidentMonitoringInstanceHeartbeatMissing,
-		result: EvaluateMonitoringInstanceHeartbeatMissing(previousByClass[IncidentMonitoringInstanceHeartbeatMissing], record.MonitoringInstanceID, now, record.LastHeartbeatAt, heartbeatInterval),
+		result: EvaluateMonitoringInstanceHeartbeatMissing(previousByClass[IncidentMonitoringInstanceHeartbeatMissing], record.MonitoringInstanceID, now, record.LastHeartbeatAt, heartbeatInterval, staleThresholdIntervals),
 	}}
 	return s.applyEvaluations(ctx, ObjectTypeMonitoringInstance, record.MonitoringInstanceID, previous, evaluations, now)
 }
@@ -510,8 +523,9 @@ func (s *Service) applyEvaluations(ctx context.Context, objectType ObjectType, o
 }
 
 type incidentTiming struct {
-	heartbeatInterval time.Duration
-	sweepInterval     time.Duration
+	heartbeatInterval       time.Duration
+	sweepInterval           time.Duration
+	staleThresholdIntervals int
 }
 
 type notificationPolicy struct {
@@ -564,7 +578,35 @@ func MetricThresholdsFromDefaults(defaults centersettings.IncidentDefaults) Metr
 	if defaults.InodeCriticalPct > 0 {
 		t.InodeCriticalPct = defaults.InodeCriticalPct
 	}
+	if defaults.IOWaitWarningPct > 0 {
+		t.IOWaitWarningPct = defaults.IOWaitWarningPct
+	}
+	if defaults.IOWaitCriticalPct > 0 {
+		t.IOWaitCriticalPct = defaults.IOWaitCriticalPct
+	}
+	t.IOWaitAlertPct = midpointInt(t.IOWaitWarningPct, t.IOWaitCriticalPct)
+	if defaults.Load5Warning > 0 {
+		t.Load5Warning = defaults.Load5Warning
+	}
+	if defaults.Load5Critical > 0 {
+		t.Load5Critical = defaults.Load5Critical
+	}
+	t.Load5Alert = midpointFloat(t.Load5Warning, t.Load5Critical)
 	return t
+}
+
+func midpointInt(low, high int) int {
+	if high <= low {
+		return low
+	}
+	return low + (high-low)/2
+}
+
+func midpointFloat(low, high float64) float64 {
+	if high <= low {
+		return low
+	}
+	return low + (high-low)/2
 }
 
 func notificationPolicyFromDefaults(defaults centersettings.IncidentDefaults) notificationPolicy {
@@ -598,8 +640,9 @@ func (s *Service) sweepIntervalFor(ctx context.Context) time.Duration {
 
 func (s *Service) incidentTimingFor(ctx context.Context) incidentTiming {
 	timing := incidentTiming{
-		heartbeatInterval: s.fallbackHeartbeatInterval,
-		sweepInterval:     s.fallbackSweepInterval,
+		heartbeatInterval:       s.fallbackHeartbeatInterval,
+		sweepInterval:           s.fallbackSweepInterval,
+		staleThresholdIntervals: 3,
 	}
 	if s.settingsRepo == nil {
 		return timing
@@ -624,6 +667,9 @@ func applyIncidentDefaults(timing incidentTiming, defaults centersettings.Incide
 	}
 	if defaults.SweepIntervalSeconds > 0 {
 		timing.sweepInterval = time.Duration(defaults.SweepIntervalSeconds) * time.Second
+	}
+	if defaults.StaleThresholdIntervals > 0 {
+		timing.staleThresholdIntervals = defaults.StaleThresholdIntervals
 	}
 	return timing
 }

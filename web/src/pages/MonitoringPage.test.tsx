@@ -9,6 +9,26 @@ vi.mock('../lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/api')>()
   return {
     ...actual,
+    getSettings: vi.fn().mockResolvedValue({
+      incident_defaults: {
+        cpu_warning_pct: 80,
+        cpu_alert_pct: 90,
+        cpu_critical_pct: 95,
+        mem_warning_pct: 85,
+        mem_alert_pct: 92,
+        mem_critical_pct: 95,
+        disk_warning_pct: 85,
+        disk_alert_pct: 92,
+        disk_critical_pct: 97,
+        inode_warning_pct: 80,
+        inode_alert_pct: 90,
+        inode_critical_pct: 95,
+        iowait_warning_pct: 20,
+        iowait_critical_pct: 50,
+        load5_warning: 4,
+        load5_critical: 8,
+      },
+    }),
     listMonitoringInstanceSparklines: vi.fn().mockResolvedValue({ monitoring_instances: {} }),
   }
 })

@@ -10,12 +10,16 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
-func EvaluateMonitoringInstanceHeartbeatMissing(previous *IncidentRecord, monitoringInstanceID string, now time.Time, lastHeartbeatAt *time.Time, heartbeatInterval time.Duration) EvaluationResult {
+func EvaluateMonitoringInstanceHeartbeatMissing(previous *IncidentRecord, monitoringInstanceID string, now time.Time, lastHeartbeatAt *time.Time, heartbeatInterval time.Duration, staleThresholdIntervals ...int) EvaluationResult {
 	if lastHeartbeatAt == nil || heartbeatInterval <= 0 {
 		return noop(previous)
 	}
 	missed := int(now.Sub(*lastHeartbeatAt) / heartbeatInterval)
-	severity, summary, active := heartbeatSeverity(missed)
+	threshold := 3
+	if len(staleThresholdIntervals) > 0 && staleThresholdIntervals[0] > 0 {
+		threshold = staleThresholdIntervals[0]
+	}
+	severity, summary, active := heartbeatSeverity(missed, threshold)
 	if !active {
 		return recoverIfNeeded(previous, now, "心跳已恢复")
 	}
@@ -359,13 +363,21 @@ func severityRank(severity Severity) int {
 	}
 }
 
-func heartbeatSeverity(missed int) (Severity, string, bool) {
+func heartbeatSeverity(missed, alertThreshold int) (Severity, string, bool) {
+	if alertThreshold <= 0 {
+		alertThreshold = 3
+	}
+	noticeThreshold := alertThreshold - 1
+	if noticeThreshold < 1 {
+		noticeThreshold = 1
+	}
+	criticalThreshold := alertThreshold + 2
 	switch {
-	case missed >= 5:
+	case missed >= criticalThreshold:
 		return SeverityCritical, fmt.Sprintf("最近 %d 个心跳周期未收到心跳", missed), true
-	case missed >= 3:
+	case missed >= alertThreshold:
 		return SeverityAlert, fmt.Sprintf("最近 %d 个心跳周期未收到心跳", missed), true
-	case missed >= 2:
+	case missed >= noticeThreshold:
 		return SeverityNotice, fmt.Sprintf("最近 %d 个心跳周期未收到心跳", missed), true
 	default:
 		return SeverityNormal, "", false
@@ -408,26 +420,30 @@ func resourcePressureSeverity(window15, window30 []MonitoringInstanceResourceSam
 	switch {
 	case has30m && avg30CPU >= float64(thresholds.CPUCriticalPct):
 		return SeverityCritical, fmt.Sprintf("CPU 连续 30m 平均 %.1f%%", avg30CPU), true
-	case has30m && avg30Load >= 2.5:
+	case has30m && avg30Load >= thresholds.Load5Critical:
 		return SeverityCritical, fmt.Sprintf("归一化 Load5 连续 30m 平均 %.1f", avg30Load), true
 	case has30m && avg30Mem >= float64(thresholds.MemCriticalPct) && min30MemAvailable <= 512*1024*1024:
 		return SeverityCritical, fmt.Sprintf("内存连续 30m 平均 %.1f%%，可用内存持续偏低", avg30Mem), true
 	case has15m && avg15CPU >= float64(thresholds.CPUAlertPct):
 		return SeverityAlert, fmt.Sprintf("CPU 连续 15m 平均 %.1f%%", avg15CPU), true
-	case has15m && avg15Load >= 1.8:
+	case has15m && avg15Load >= thresholds.Load5Alert:
 		return SeverityAlert, fmt.Sprintf("归一化 Load5 连续 15m 平均 %.1f", avg15Load), true
 	case has15m && avg15Mem >= float64(thresholds.MemAlertPct):
 		return SeverityAlert, fmt.Sprintf("内存连续 15m 平均 %.1f%%", avg15Mem), true
-	case has30m && avg30Iowait >= 20:
-		return SeverityAlert, fmt.Sprintf("iowait 连续 30m 平均 %.1f%%", avg30Iowait), true
+	case has30m && avg30Iowait >= float64(thresholds.IOWaitCriticalPct):
+		return SeverityCritical, fmt.Sprintf("iowait 连续 30m 平均 %.1f%%", avg30Iowait), true
+	case has15m && avg15Iowait >= float64(thresholds.IOWaitAlertPct):
+		return SeverityAlert, fmt.Sprintf("iowait 连续 15m 平均 %.1f%%", avg15Iowait), true
 	case has30m && avg30Steal >= 10:
 		return SeverityAlert, fmt.Sprintf("steal 连续 30m 平均 %.1f%%", avg30Steal), true
 	case has15m && avg15CPU >= float64(thresholds.CPUWarningPct):
 		return SeverityNotice, fmt.Sprintf("CPU 连续 15m 平均 %.1f%%", avg15CPU), true
-	case has15m && avg15Load >= 1.2:
+	case has15m && avg15Load >= thresholds.Load5Warning:
 		return SeverityNotice, fmt.Sprintf("归一化 Load5 连续 15m 平均 %.1f", avg15Load), true
 	case has15m && avg15Mem >= float64(thresholds.MemWarningPct):
 		return SeverityNotice, fmt.Sprintf("内存连续 15m 平均 %.1f%%", avg15Mem), true
+	case has15m && avg15Iowait >= float64(thresholds.IOWaitWarningPct):
+		return SeverityNotice, fmt.Sprintf("iowait 连续 15m 平均 %.1f%%", avg15Iowait), true
 	case has15m && avg15Swap > 10:
 		return SeverityNotice, fmt.Sprintf("swap 连续 15m 平均 %.1f%%", avg15Swap), true
 	case has15m && avg15Iowait >= 10:

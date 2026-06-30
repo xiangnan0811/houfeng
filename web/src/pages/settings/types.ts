@@ -35,6 +35,7 @@ export type SettingsRetentionPolicyForm = {
 export type SettingsIPQualityForm = {
   enabled: boolean
   frequencySeconds: string
+  staleAfterSeconds: string
   timeoutSeconds: string
   rawRetentionDays: string
   historyRetentionDays: string

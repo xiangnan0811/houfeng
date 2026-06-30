@@ -93,6 +93,7 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 		IPQuality: centersettings.IPQualitySettings{
 			Enabled:              true,
 			FrequencySeconds:     86400,
+			StaleAfterSeconds:    604800,
 			TimeoutSeconds:       20,
 			RawRetentionDays:     45,
 			HistoryRetentionDays: 180,
@@ -126,7 +127,7 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 	if got.SubscriptionCost.BaseCurrency != "USD" || got.SubscriptionCost.ExchangeRateProvider != string(centersettings.SubscriptionExchangeRateProviderFixer) {
 		t.Fatalf("SubscriptionCost = %#v, want USD/fixer", got.SubscriptionCost)
 	}
-	if got.IPQuality.TimeoutSeconds != 20 || got.IPQuality.Services[1] != "chatgpt" {
+	if got.IPQuality.TimeoutSeconds != 20 || got.IPQuality.StaleAfterSeconds != 604800 || got.IPQuality.Services[1] != "chatgpt" {
 		t.Fatalf("IPQuality = %#v, want timeout/services preserved", got.IPQuality)
 	}
 	if len(got.OverrideRules.MonitoringInstanceLabels) != 1 {

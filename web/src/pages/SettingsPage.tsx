@@ -101,6 +101,7 @@ function buildFormState(settings: SettingsRecord): SettingsFormState {
     ipQuality: {
       enabled: settings.ip_quality_settings.enabled,
       frequencySeconds: String(settings.ip_quality_settings.frequency_seconds),
+      staleAfterSeconds: String(settings.ip_quality_settings.stale_after_seconds),
       timeoutSeconds: String(settings.ip_quality_settings.timeout_seconds),
       rawRetentionDays: String(settings.ip_quality_settings.raw_retention_days),
       historyRetentionDays: String(settings.ip_quality_settings.history_retention_days),
@@ -176,6 +177,8 @@ function buildIncidentDefaults(f: SettingsFormState) {
 function buildIPQualitySettings(f: SettingsFormState) {
   const frequencySeconds = parsePositiveInteger(f.ipQuality.frequencySeconds, 'IP 质量采集周期')
   if (frequencySeconds < 60) throw new Error('IP 质量采集周期必须至少为 60 秒。')
+  const staleAfterSeconds = parsePositiveInteger(f.ipQuality.staleAfterSeconds, 'IP 质量过期窗口')
+  if (staleAfterSeconds < frequencySeconds) throw new Error('IP 质量过期窗口必须大于或等于采集周期。')
   const timeoutSeconds = parsePositiveInteger(f.ipQuality.timeoutSeconds, 'IP 质量请求超时')
   if (timeoutSeconds > 300) throw new Error('IP 质量请求超时必须不超过 300 秒。')
   const rawRetentionDays = parsePositiveInteger(f.ipQuality.rawRetentionDays, 'IP 质量原始 JSON 保留天数')
@@ -186,6 +189,7 @@ function buildIPQualitySettings(f: SettingsFormState) {
   return {
     enabled: f.ipQuality.enabled,
     frequency_seconds: frequencySeconds,
+    stale_after_seconds: staleAfterSeconds,
     timeout_seconds: timeoutSeconds,
     raw_retention_days: rawRetentionDays,
     history_retention_days: historyRetentionDays,

@@ -12,6 +12,7 @@ import {
   getMonitoringInstanceManagementReview,
   getMonitoringInstanceOnboarding,
   getMonitoringInstanceRuntimeFacts,
+  getSettings,
   monitoringInstanceRuntimeStreamURL,
   listVPSForMonitoringInstance,
   listEvents,
@@ -28,6 +29,7 @@ import {
   retireMonitoringInstance,
   updateMonitoringInstanceMetadata,
 } from '../lib/api'
+import { DEFAULT_THRESHOLDS, resolveThresholds, type MetricThresholds } from '../config/thresholds'
 import type {
   ActiveIncidentRecord,
   HostSample,
@@ -154,6 +156,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const [realtimeSamples, setRealtimeSamples] = useState<HostSample[]>([])
   const [runtimeStreamStatus, setRuntimeStreamStatus] = useState<RuntimeStreamStatus>('idle')
   const [runtimeStreamError, setRuntimeStreamError] = useState<string | null>(null)
+  const [thresholds, setThresholds] = useState<MetricThresholds>(DEFAULT_THRESHOLDS)
   const [linkedVPSState, setLinkedVPSState] = useState<LinkedVPSState>({
     requestedMonitoringInstanceId: null,
     records: [],
@@ -247,6 +250,18 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     },
     [],
   )
+
+  useEffect(() => {
+    let cancelled = false
+    getSettings()
+      .then((settings) => {
+        if (!cancelled) setThresholds(resolveThresholds(settings.incident_defaults))
+      })
+      .catch(() => {}) // keep default thresholds when settings cannot be loaded.
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Refetch runtime facts when time window changes (keep old data visible).
   // The mounted ref skips the initial invocation so the main load effect handles
@@ -1384,6 +1399,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       realtimeSamples={realtimeSamples}
       runtimeStreamStatus={runtimeStreamStatus}
       runtimeStreamError={runtimeStreamError}
+      thresholds={thresholds}
       historyOpen={historyOpen}
       historyTab={historyTab}
       historyIncidents={historyIncidents}

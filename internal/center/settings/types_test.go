@@ -314,6 +314,9 @@ func TestSettingsDefaultProvidesDeterministicSingletonShape(t *testing.T) {
 	if got.IPQuality.HistoryRetentionDays != 365 {
 		t.Fatalf("IPQuality.HistoryRetentionDays = %d, want 365", got.IPQuality.HistoryRetentionDays)
 	}
+	if got.IPQuality.StaleAfterSeconds != 7*24*60*60 {
+		t.Fatalf("IPQuality.StaleAfterSeconds = %d, want 604800", got.IPQuality.StaleAfterSeconds)
+	}
 	if len(got.IPQuality.Services) == 0 {
 		t.Fatal("IPQuality.Services = empty, want default service set")
 	}
@@ -329,6 +332,7 @@ func TestSettingsValidateNormalizesIPQualitySettings(t *testing.T) {
 	input.IPQuality = IPQualitySettings{
 		Enabled:              true,
 		FrequencySeconds:     3 * 86400,
+		StaleAfterSeconds:    10 * 86400,
 		TimeoutSeconds:       20,
 		RawRetentionDays:     30,
 		HistoryRetentionDays: 120,
@@ -341,6 +345,9 @@ func TestSettingsValidateNormalizesIPQualitySettings(t *testing.T) {
 	}
 	if got.IPQuality.FrequencySeconds != 259200 {
 		t.Fatalf("FrequencySeconds = %d, want 259200", got.IPQuality.FrequencySeconds)
+	}
+	if got.IPQuality.StaleAfterSeconds != 864000 {
+		t.Fatalf("StaleAfterSeconds = %d, want 864000", got.IPQuality.StaleAfterSeconds)
 	}
 	if got.IPQuality.Services[0] != "netflix" || got.IPQuality.Services[1] != "chatgpt" || got.IPQuality.Services[2] != "youtube-premium" {
 		t.Fatalf("Services = %#v, want normalized unique services", got.IPQuality.Services)
@@ -355,6 +362,13 @@ func TestSettingsValidateRejectsInvalidIPQualitySettings(t *testing.T) {
 	_, err := Validate(input)
 	if !errors.Is(err, ErrInvalidSettings) {
 		t.Fatalf("Validate() error = %v, want ErrInvalidSettings for too-small frequency", err)
+	}
+
+	input = Default()
+	input.IPQuality.StaleAfterSeconds = input.IPQuality.FrequencySeconds - 1
+	_, err = Validate(input)
+	if !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidSettings for stale window below frequency", err)
 	}
 
 	input = Default()

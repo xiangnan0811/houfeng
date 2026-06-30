@@ -5,6 +5,7 @@ import {
   MonitoringInstanceWatchtowerMetrics,
   type MonitoringInstanceRuntimeAction,
 } from '../../components/monitoring-detail'
+import type { MetricThresholds } from '../../config/thresholds'
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import type {
   ActiveIncidentRecord,
@@ -139,6 +140,7 @@ type MonitoringDetailPageBodyProps = {
   realtimeSamples: HostSample[]
   runtimeStreamStatus: RuntimeStreamStatus
   runtimeStreamError: string | null
+  thresholds: MetricThresholds
   historyOpen: boolean
   historyTab: HistoryTab
   historyIncidents: ActiveIncidentRecord[] | null
@@ -214,6 +216,7 @@ export function MonitoringDetailPageBody({
   realtimeSamples,
   runtimeStreamStatus,
   runtimeStreamError,
+  thresholds,
   historyOpen,
   historyTab,
   historyIncidents,
@@ -382,6 +385,7 @@ export function MonitoringDetailPageBody({
         timeWindow={timeWindow}
         window={runtimeFacts?.window}
         isMaintenance={isMaintenance}
+        thresholds={thresholds}
       />
 
       <MonitoringInstanceSnapshotMeta sample={sample} />

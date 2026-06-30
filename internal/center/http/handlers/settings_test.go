@@ -166,6 +166,7 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	updated.ProbeFrequencyDefaults.HTTP = "5s"
 	updated.IPQuality.Enabled = false
 	updated.IPQuality.FrequencySeconds = 259200
+	updated.IPQuality.StaleAfterSeconds = 864000
 	updated.IPQuality.TimeoutSeconds = 20
 	updated.IPQuality.RawRetentionDays = 45
 	updated.IPQuality.HistoryRetentionDays = 180
@@ -173,7 +174,7 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	repo := &fakeSettingsRepository{getSettingsResult: current, putSettingsResult: updated}
 
 	handler := handlers.Settings(repo)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","runtime_managed":true},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":3,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180},"ip_quality_settings":{"enabled":false,"frequency_seconds":259200,"timeout_seconds":20,"raw_retention_days":45,"history_retention_days":180,"services":["netflix","chatgpt"]}}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","runtime_managed":true},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":3,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180},"ip_quality_settings":{"enabled":false,"frequency_seconds":259200,"stale_after_seconds":864000,"timeout_seconds":20,"raw_retention_days":45,"history_retention_days":180,"services":["netflix","chatgpt"]}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -193,6 +194,9 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	}
 	if repo.putSettingsInput.IPQuality.FrequencySeconds != 259200 {
 		t.Fatalf("expected repository input ip quality frequency 259200, got %d", repo.putSettingsInput.IPQuality.FrequencySeconds)
+	}
+	if repo.putSettingsInput.IPQuality.StaleAfterSeconds != 864000 {
+		t.Fatalf("expected repository input ip quality stale after 864000, got %d", repo.putSettingsInput.IPQuality.StaleAfterSeconds)
 	}
 	if len(repo.putSettingsInput.IPQuality.Services) != 2 || repo.putSettingsInput.IPQuality.Services[1] != "chatgpt" {
 		t.Fatalf("expected repository input ip quality services to preserve request, got %#v", repo.putSettingsInput.IPQuality.Services)
@@ -222,6 +226,9 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	}
 	if body.IPQualitySettings.TimeoutSeconds != 20 {
 		t.Fatalf("expected ip_quality_settings.timeout_seconds 20, got %d", body.IPQualitySettings.TimeoutSeconds)
+	}
+	if body.IPQualitySettings.StaleAfterSeconds != 864000 {
+		t.Fatalf("expected ip_quality_settings.stale_after_seconds 864000, got %d", body.IPQualitySettings.StaleAfterSeconds)
 	}
 }
 

@@ -1,6 +1,7 @@
 package assetdecisions
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -777,11 +778,12 @@ func TestExecutionReadbackMissingCurrentFact(t *testing.T) {
 
 func TestExecutionPlanMapsActionsToLanesAndSteps(t *testing.T) {
 	tests := []struct {
-		name     string
-		action   SuggestedAction
-		readback MemberExecutionReadback
-		lane     ExecutionPlanLane
-		step     ExecutionPlanStepKind
+		name      string
+		action    SuggestedAction
+		readback  MemberExecutionReadback
+		lane      ExecutionPlanLane
+		step      ExecutionPlanStepKind
+		stepLabel string
 	}{
 		{
 			name:     "cancel opens cancellation workbench",
@@ -791,11 +793,12 @@ func TestExecutionPlanMapsActionsToLanesAndSteps(t *testing.T) {
 			step:     PlanStepOpenCancellationWorkbench,
 		},
 		{
-			name:     "migrate opens vps detail",
-			action:   ActionMigrate,
-			readback: MemberExecutionReadback{Status: ReadbackOpen},
-			lane:     PlanLaneMigration,
-			step:     PlanStepOpenVPSDetail,
+			name:      "migrate opens vps detail",
+			action:    ActionMigrate,
+			readback:  MemberExecutionReadback{Status: ReadbackOpen},
+			lane:      PlanLaneMigration,
+			step:      PlanStepOpenVPSDetail,
+			stepLabel: "标记迁移意向并人工跟进",
 		},
 		{
 			name:     "keep opens vps detail",
@@ -834,6 +837,12 @@ func TestExecutionPlanMapsActionsToLanesAndSteps(t *testing.T) {
 			})
 			if plan.Lane != tt.lane || plan.StepKind != tt.step {
 				t.Fatalf("plan = %#v, want lane=%s step=%s", plan, tt.lane, tt.step)
+			}
+			if tt.stepLabel != "" && plan.StepLabel != tt.stepLabel {
+				t.Fatalf("step label = %q, want %q", plan.StepLabel, tt.stepLabel)
+			}
+			if strings.Contains(plan.StepLabel, "推进迁移") {
+				t.Fatalf("step label = %q, must not imply an implemented migration workbench", plan.StepLabel)
 			}
 		})
 	}

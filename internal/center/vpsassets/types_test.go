@@ -95,7 +95,7 @@ func TestPatchInputPresenceNormalizationAndNullableProvider(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{
 		"display_name":" Tokyo Edge ",
 		"provider_id":null,
-		"lifecycle_status":" archived ",
+		"lifecycle_status":" testing ",
 		"usage_status":" idle ",
 		"renewal_decision":" observe ",
 		"ssh_port":2222,
@@ -111,8 +111,8 @@ func TestPatchInputPresenceNormalizationAndNullableProvider(t *testing.T) {
 	if !input.ProviderID.Set || input.ProviderID.Value != nil {
 		t.Fatalf("ProviderID patch = %#v, want explicit nil", input.ProviderID)
 	}
-	if !input.LifecycleStatus.Set || input.LifecycleStatus.Value != LifecycleArchived {
-		t.Fatalf("LifecycleStatus patch = %#v, want archived", input.LifecycleStatus)
+	if !input.LifecycleStatus.Set || input.LifecycleStatus.Value != LifecycleTesting {
+		t.Fatalf("LifecycleStatus patch = %#v, want testing", input.LifecycleStatus)
 	}
 	if !input.UsageStatus.Set || input.UsageStatus.Value != UsageIdle {
 		t.Fatalf("UsageStatus patch = %#v, want idle", input.UsageStatus)
@@ -160,6 +160,27 @@ func TestValidatePatchInputRejectsInvalidValues(t *testing.T) {
 			err := ValidatePatchInput(NormalizePatchInput(tt.input))
 			if !errors.Is(err, ErrInvalidVPSAssetInput) {
 				t.Fatalf("ValidatePatchInput() error = %v, want ErrInvalidVPSAssetInput", err)
+			}
+		})
+	}
+}
+
+func TestValidateOrdinaryPatchInputRejectsWorkflowAndTerminalLifecycleStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status LifecycleStatus
+	}{
+		{name: "migration workflow", status: LifecycleToMigrate},
+		{name: "cancellation workflow", status: LifecycleToCancel},
+		{name: "cancelled terminal", status: LifecycleCancelled},
+		{name: "archived terminal", status: LifecycleArchived},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateOrdinaryPatchInput(NormalizePatchInput(PatchInput{LifecycleStatus: PatchLifecycle(tt.status)}))
+			if !errors.Is(err, ErrInvalidVPSAssetInput) {
+				t.Fatalf("ValidateOrdinaryPatchInput() error = %v, want ErrInvalidVPSAssetInput", err)
 			}
 		})
 	}

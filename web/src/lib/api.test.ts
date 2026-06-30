@@ -222,6 +222,7 @@ const settingsResponseBody = {
   ip_quality_settings: {
     enabled: true,
     frequency_seconds: 86400,
+    stale_after_seconds: 604800,
     timeout_seconds: 15,
     raw_retention_days: 90,
     history_retention_days: 365,
@@ -312,6 +313,7 @@ const settingsUpdateBody = {
   ip_quality_settings: {
     enabled: true,
     frequency_seconds: 86400,
+    stale_after_seconds: 604800,
     timeout_seconds: 15,
     raw_retention_days: 90,
     history_retention_days: 365,

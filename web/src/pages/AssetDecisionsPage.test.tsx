@@ -1588,7 +1588,7 @@ describe('AssetDecisionsPage', () => {
             lane: 'migration',
             step_kind: 'open_vps_detail',
             tone: 'critical',
-            summary: '先复核 IP 质量再推进迁移',
+            summary: '先复核 IP 质量再确认迁移意向',
             step_label: '打开 VPS 详情',
             issue_count: 2,
             blocked: true,

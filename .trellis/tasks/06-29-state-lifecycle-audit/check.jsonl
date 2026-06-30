@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/06-29-state-lifecycle-audit/research/state-lifecycle-audit.md", "reason": "检查审查结论、证据链和验证限制"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "后端测试和质量门规范，包含本审查使用的 Go 验证命令"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "前端测试、build、browser sanity 限制和 UI 验证规范"}
+{"file": ".trellis/spec/backend/index.md", "reason": "后端规范索引"}
+{"file": ".trellis/spec/web/index.md", "reason": "前端规范索引"}

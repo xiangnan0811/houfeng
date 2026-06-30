@@ -682,6 +682,7 @@ export type SettingsRecord = {
 export type IPQualitySettings = {
   enabled: boolean
   frequency_seconds: number
+  stale_after_seconds: number
   timeout_seconds: number
   raw_retention_days: number
   history_retention_days: number

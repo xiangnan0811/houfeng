@@ -5,11 +5,13 @@ import { type DataTableSortState } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import {
   ApiError,
+  getSettings,
   listMonitoringInstances,
   listMonitoringInstanceSparklines,
   postMonitoringInstanceAction,
   postMonitoringInstanceBatch,
 } from '../lib/api'
+import { DEFAULT_THRESHOLDS, resolveThresholds, type MetricThresholds } from '../config/thresholds'
 import type {
   MonitoringInstanceListScope,
   MonitoringInstanceRecord,
@@ -56,6 +58,7 @@ export function MonitoringPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sparklines, setSparklines] = useState<MonitoringInstanceSparklinesResponse | null>(null)
+  const [thresholds, setThresholds] = useState<MetricThresholds>(DEFAULT_THRESHOLDS)
   const [selectAll, setSelectAll] = useState(false)
   const [batchPanelOpen, setBatchPanelOpen] = useState(false)
   const [batchSubmitting, setBatchSubmitting] = useState(false)
@@ -96,6 +99,18 @@ export function MonitoringPage() {
         if (!cancelled) setSparklines(data)
       })
       .catch(() => {}) // silent fail
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    getSettings()
+      .then((settings) => {
+        if (!cancelled) setThresholds(resolveThresholds(settings.incident_defaults))
+      })
+      .catch(() => {}) // threshold settings are presentation-only; defaults remain valid.
     return () => {
       cancelled = true
     }
@@ -403,6 +418,7 @@ export function MonitoringPage() {
   const columns = buildMonitoringInstancesTableColumns({
     compareSet,
     sparklines,
+    thresholds,
     onToggleCompare: toggleCompare,
   })
 

@@ -289,35 +289,47 @@ const (
 // MetricThresholds holds the per-metric percentage thresholds used by the
 // incident evaluator. Zero values are treated as "use defaults".
 type MetricThresholds struct {
-	CPUWarningPct    int
-	CPUAlertPct      int
-	CPUCriticalPct   int
-	MemWarningPct    int
-	MemAlertPct      int
-	MemCriticalPct   int
-	DiskWarningPct   int
-	DiskAlertPct     int
-	DiskCriticalPct  int
-	InodeWarningPct  int
-	InodeAlertPct    int
-	InodeCriticalPct int
+	CPUWarningPct     int
+	CPUAlertPct       int
+	CPUCriticalPct    int
+	MemWarningPct     int
+	MemAlertPct       int
+	MemCriticalPct    int
+	DiskWarningPct    int
+	DiskAlertPct      int
+	DiskCriticalPct   int
+	InodeWarningPct   int
+	InodeAlertPct     int
+	InodeCriticalPct  int
+	IOWaitWarningPct  int
+	IOWaitAlertPct    int
+	IOWaitCriticalPct int
+	Load5Warning      float64
+	Load5Alert        float64
+	Load5Critical     float64
 }
 
 // DefaultMetricThresholds returns thresholds matching the original hardcoded
 // evaluator values.
 func DefaultMetricThresholds() MetricThresholds {
 	return MetricThresholds{
-		CPUWarningPct:    80,
-		CPUAlertPct:      90,
-		CPUCriticalPct:   95,
-		MemWarningPct:    85,
-		MemAlertPct:      92,
-		MemCriticalPct:   95,
-		DiskWarningPct:   85,
-		DiskAlertPct:     92,
-		DiskCriticalPct:  97,
-		InodeWarningPct:  80,
-		InodeAlertPct:    90,
-		InodeCriticalPct: 95,
+		CPUWarningPct:     80,
+		CPUAlertPct:       90,
+		CPUCriticalPct:    95,
+		MemWarningPct:     85,
+		MemAlertPct:       92,
+		MemCriticalPct:    95,
+		DiskWarningPct:    85,
+		DiskAlertPct:      92,
+		DiskCriticalPct:   97,
+		InodeWarningPct:   80,
+		InodeAlertPct:     90,
+		InodeCriticalPct:  95,
+		IOWaitWarningPct:  20,
+		IOWaitAlertPct:    35,
+		IOWaitCriticalPct: 50,
+		Load5Warning:      4.0,
+		Load5Alert:        6.0,
+		Load5Critical:     8.0,
 	}
 }
