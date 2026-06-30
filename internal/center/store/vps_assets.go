@@ -130,7 +130,7 @@ func (r *PostgresVPSAssetRepository) ListVPSAssets(ctx context.Context, filters 
 		conditions = append(conditions, fmt.Sprintf("lifecycle_status = $%d", len(args)))
 	} else {
 		switch filters.AssetScope {
-		case vpsassets.AssetScopeArchived:
+		case vpsassets.AssetScopeArchived, vpsassets.AssetScopeHistorical:
 			conditions = append(conditions, "lifecycle_status in ('cancelled', 'archived')")
 		case vpsassets.AssetScopeAll, "":
 		default:

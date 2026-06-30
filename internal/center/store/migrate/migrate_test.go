@@ -214,6 +214,25 @@ func TestIPQualityStaleAfterSettingsMigrationRebuildsReadModel(t *testing.T) {
 	}
 }
 
+func TestSubscriptionGiftRenewalModeMigrationRelaxesConstraints(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0048_subscription_gift_renewal_mode.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, want := range []string{
+		"subscriptions_renewal_mode_allowed",
+		"price_histories_renewal_mode_allowed",
+		"renewal_mode in ('auto', 'manual', 'auto_cancelled', 'lottery', 'gift', 'bonus', 'other')",
+		"from_renewal_mode in ('auto', 'manual', 'auto_cancelled', 'lottery', 'gift', 'bonus', 'other')",
+		"to_renewal_mode in ('auto', 'manual', 'auto_cancelled', 'lottery', 'gift', 'bonus', 'other')",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0048 migration missing %q", want)
+		}
+	}
+}
+
 func TestIPQualityReadModelFilterMigrationHidesFailurePlaceholders(t *testing.T) {
 	payload, err := migrations.FS.ReadFile("0041_filter_ip_quality_read_models.sql")
 	if err != nil {

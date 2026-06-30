@@ -38,9 +38,10 @@ const (
 	UsageTesting UsageStatus = "testing"
 	UsageUnknown UsageStatus = "unknown"
 
-	AssetScopeCurrent  AssetScope = "current"
-	AssetScopeArchived AssetScope = "archived"
-	AssetScopeAll      AssetScope = "all"
+	AssetScopeCurrent    AssetScope = "current"
+	AssetScopeArchived   AssetScope = "archived"
+	AssetScopeHistorical AssetScope = "historical"
+	AssetScopeAll        AssetScope = "all"
 )
 
 type RenewalDecision string
@@ -393,6 +394,12 @@ func ValidateCreateInput(input CreateInput) error {
 	if !IsValidRenewalDecision(input.RenewalDecision) {
 		return fmt.Errorf("%w: invalid renewal_decision", ErrInvalidVPSAssetInput)
 	}
+	if !IsValidCreateLifecycleStatus(input.LifecycleStatus) {
+		return fmt.Errorf("%w: lifecycle_status must be active, idle, or testing on create", ErrInvalidVPSAssetInput)
+	}
+	if err := ValidateVPSStateCombination(input.LifecycleStatus, input.UsageStatus, input.RenewalDecision); err != nil {
+		return err
+	}
 	if !IsValidSSHPort(input.SSHPort) {
 		return fmt.Errorf("%w: ssh_port must be between 1 and 65535", ErrInvalidVPSAssetInput)
 	}
@@ -445,6 +452,9 @@ func ValidatePatchInput(input PatchInput) error {
 	}
 	if input.RenewalDecision.Set && !IsValidRenewalDecision(input.RenewalDecision.Value) {
 		return fmt.Errorf("%w: invalid renewal_decision", ErrInvalidVPSAssetInput)
+	}
+	if err := ValidateVPSPatchStateCombination(input); err != nil {
+		return err
 	}
 	if input.RenewalReason.Set && !input.RenewalDecision.Set {
 		return fmt.Errorf("%w: renewal_reason requires renewal_decision", ErrInvalidVPSAssetInput)
@@ -550,6 +560,10 @@ func IsValidOrdinaryPatchLifecycleStatus(status LifecycleStatus) bool {
 	}
 }
 
+func IsValidCreateLifecycleStatus(status LifecycleStatus) bool {
+	return IsValidOrdinaryPatchLifecycleStatus(status)
+}
+
 func IsValidUsageStatus(status UsageStatus) bool {
 	switch status {
 	case UsageInUse, UsageIdle, UsageStandby, UsageTesting, UsageUnknown:
@@ -561,11 +575,59 @@ func IsValidUsageStatus(status UsageStatus) bool {
 
 func IsValidAssetScope(scope AssetScope) bool {
 	switch scope {
-	case AssetScopeCurrent, AssetScopeArchived, AssetScopeAll:
+	case AssetScopeCurrent, AssetScopeArchived, AssetScopeHistorical, AssetScopeAll:
 		return true
 	default:
 		return false
 	}
+}
+
+func ValidateVPSStateCombination(lifecycle LifecycleStatus, usage UsageStatus, renewal RenewalDecision) error {
+	if lifecycle == LifecycleCancelled {
+		if !IsCancellationRenewalDecision(renewal) {
+			return fmt.Errorf("%w: cancelled lifecycle requires cancellation renewal_decision", ErrInvalidVPSAssetInput)
+		}
+		if usage == UsageInUse {
+			return fmt.Errorf("%w: cancelled lifecycle cannot be in_use", ErrInvalidVPSAssetInput)
+		}
+	}
+	if lifecycle == LifecycleToCancel && !IsCancellationRenewalDecision(renewal) {
+		return fmt.Errorf("%w: to_cancel lifecycle requires cancellation renewal_decision", ErrInvalidVPSAssetInput)
+	}
+	if lifecycle == LifecycleToMigrate && renewal != RenewalMigrate {
+		return fmt.Errorf("%w: to_migrate lifecycle requires migrate renewal_decision", ErrInvalidVPSAssetInput)
+	}
+	if renewal == RenewalReplaced && (lifecycle == LifecycleActive || usage == UsageInUse) {
+		return fmt.Errorf("%w: replaced renewal_decision cannot remain active or in_use", ErrInvalidVPSAssetInput)
+	}
+	return nil
+}
+
+func ValidateVPSPatchStateCombination(input PatchInput) error {
+	if input.LifecycleStatus.Set {
+		lifecycle := input.LifecycleStatus.Value
+		if lifecycle == LifecycleCancelled {
+			if input.RenewalDecision.Set && !IsCancellationRenewalDecision(input.RenewalDecision.Value) {
+				return fmt.Errorf("%w: cancelled lifecycle requires cancellation renewal_decision", ErrInvalidVPSAssetInput)
+			}
+			if input.UsageStatus.Set && input.UsageStatus.Value == UsageInUse {
+				return fmt.Errorf("%w: cancelled lifecycle cannot be in_use", ErrInvalidVPSAssetInput)
+			}
+		}
+		if lifecycle == LifecycleToCancel && input.RenewalDecision.Set && !IsCancellationRenewalDecision(input.RenewalDecision.Value) {
+			return fmt.Errorf("%w: to_cancel lifecycle requires cancellation renewal_decision", ErrInvalidVPSAssetInput)
+		}
+		if lifecycle == LifecycleToMigrate && input.RenewalDecision.Set && input.RenewalDecision.Value != RenewalMigrate {
+			return fmt.Errorf("%w: to_migrate lifecycle requires migrate renewal_decision", ErrInvalidVPSAssetInput)
+		}
+		if lifecycle == LifecycleActive && input.RenewalDecision.Set && input.RenewalDecision.Value == RenewalReplaced {
+			return fmt.Errorf("%w: replaced renewal_decision cannot remain active", ErrInvalidVPSAssetInput)
+		}
+	}
+	if input.UsageStatus.Set && input.RenewalDecision.Set && input.UsageStatus.Value == UsageInUse && input.RenewalDecision.Value == RenewalReplaced {
+		return fmt.Errorf("%w: replaced renewal_decision cannot remain in_use", ErrInvalidVPSAssetInput)
+	}
+	return nil
 }
 
 func IsValidRenewalDecision(decision RenewalDecision) bool {

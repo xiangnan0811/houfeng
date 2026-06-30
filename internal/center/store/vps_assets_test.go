@@ -376,6 +376,7 @@ func TestPostgresVPSAssetListAppliesAssetScope(t *testing.T) {
 	}{
 		{name: "current", scope: vpsassets.AssetScopeCurrent, wantSQL: "lifecycle_status not in ('cancelled', 'archived')"},
 		{name: "archived", scope: vpsassets.AssetScopeArchived, wantSQL: "lifecycle_status in ('cancelled', 'archived')"},
+		{name: "historical", scope: vpsassets.AssetScope("historical"), wantSQL: "lifecycle_status in ('cancelled', 'archived')"},
 		{name: "all", scope: vpsassets.AssetScopeAll, rejectSQL: "lifecycle_status in ("},
 	}
 

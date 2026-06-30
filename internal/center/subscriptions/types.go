@@ -43,6 +43,7 @@ const (
 	RenewalModeManual        RenewalMode = "manual"
 	RenewalModeAutoCancelled RenewalMode = "auto_cancelled"
 	RenewalModeLottery       RenewalMode = "lottery"
+	RenewalModeGift          RenewalMode = "gift"
 	RenewalModeBonus         RenewalMode = "bonus"
 	RenewalModeOther         RenewalMode = "other"
 
@@ -650,7 +651,7 @@ func IsValidBillingPeriodUnit(value string) bool {
 
 func IsValidRenewalMode(value string) bool {
 	switch RenewalMode(NormalizeRenewalMode(value)) {
-	case RenewalModeAuto, RenewalModeManual, RenewalModeAutoCancelled, RenewalModeLottery, RenewalModeBonus, RenewalModeOther:
+	case RenewalModeAuto, RenewalModeManual, RenewalModeAutoCancelled, RenewalModeLottery, RenewalModeGift, RenewalModeBonus, RenewalModeOther:
 		return true
 	default:
 		return false

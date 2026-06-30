@@ -182,6 +182,22 @@ func TestVPSCollectionListsAssetsWithFilters(t *testing.T) {
 	}
 }
 
+func TestVPSCollectionAcceptsHistoricalAssetScope(t *testing.T) {
+	repo := &fakeVPSAssetRepository{}
+	handler := handlers.VPSCollection(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps?asset_scope=historical", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.listVPSAssetsFilter.AssetScope != vpsassets.AssetScope("historical") {
+		t.Fatalf("asset scope = %q, want historical", repo.listVPSAssetsFilter.AssetScope)
+	}
+}
+
 func TestVPSCollectionDefaultsToCurrentAssetScope(t *testing.T) {
 	repo := &fakeVPSAssetRepository{}
 	handler := handlers.VPSCollection(repo)

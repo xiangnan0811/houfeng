@@ -33,6 +33,10 @@ type TargetRepository interface {
 	ListTargets(context.Context) ([]targets.TargetRecord, error)
 }
 
+type TargetGetter interface {
+	GetTarget(context.Context, string) (targets.TargetRecord, error)
+}
+
 type SnapshotReader interface {
 	ListActiveIncidents(context.Context, ObjectType, string) ([]IncidentRecord, error)
 	ListRecentHostSamples(context.Context, string, time.Time) ([]runtimefacts.HostSample, error)
@@ -388,6 +392,12 @@ func (s *Service) EvaluatePeriodicState(ctx context.Context, now time.Time) erro
 		return fmt.Errorf("list targets for periodic sweep: %w", err)
 	}
 	for _, target := range targetRecords {
+		if shouldRecoverIncidentsForTarget(target) {
+			if err := s.recoverActiveIncidentsForInactiveObject(ctx, ObjectTypeTarget, target.TargetID, now, administrativeRecoverySummaryForTarget(target)); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := s.evaluateTarget(ctx, target.TargetID, now); err != nil {
 			return err
 		}
@@ -403,6 +413,9 @@ func (s *Service) EvaluateStaleMonitoringInstances(ctx context.Context, now time
 	}
 	for _, record := range records {
 		if !shouldEvaluateHeartbeatForMonitoringInstance(record) {
+			if err := s.recoverActiveIncidentsForInactiveObject(ctx, ObjectTypeMonitoringInstance, record.MonitoringInstanceID, now, administrativeRecoverySummaryForMonitoringInstance(record)); err != nil {
+				return err
+			}
 			continue
 		}
 		if err := s.evaluateMonitoringInstanceHeartbeatOnly(ctx, record, now, timing.heartbeatInterval, timing.staleThresholdIntervals); err != nil {
@@ -413,13 +426,32 @@ func (s *Service) EvaluateStaleMonitoringInstances(ctx context.Context, now time
 }
 
 func shouldEvaluateHeartbeatForMonitoringInstance(record monitoringinstances.Record) bool {
-	if record.MonitoringStatus == monitoringinstances.MonitoringPaused || record.MonitoringStatus == monitoringinstances.MonitoringMaintenance {
-		return false
-	}
-	if record.LifecycleStatus == monitoringinstances.LifecycleRetired {
+	if isInactiveMonitoringInstance(record) {
 		return false
 	}
 	return true
+}
+
+func isInactiveMonitoringInstance(record monitoringinstances.Record) bool {
+	if record.MonitoringStatus == monitoringinstances.MonitoringPaused || record.MonitoringStatus == monitoringinstances.MonitoringMaintenance {
+		return true
+	}
+	if record.LifecycleStatus == monitoringinstances.LifecycleRetired {
+		return true
+	}
+	if record.ArchivedAt != nil {
+		return true
+	}
+	return false
+}
+
+func shouldRecoverIncidentsForTarget(record targets.TargetRecord) bool {
+	switch record.RunStatus {
+	case targets.RunStatusPaused, targets.RunStatusArchived:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) evaluateMonitoringInstanceHeartbeatOnly(ctx context.Context, record monitoringinstances.Record, now time.Time, heartbeatInterval time.Duration, staleThresholdIntervals int) error {
@@ -443,6 +475,9 @@ func (s *Service) evaluateMonitoringInstance(ctx context.Context, monitoringInst
 	previous, err := s.snapshots.ListActiveIncidents(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID)
 	if err != nil {
 		return fmt.Errorf("list previous monitoring instance incidents for %q: %w", monitoringInstanceID, err)
+	}
+	if isInactiveMonitoringInstance(record) {
+		return s.applyAdministrativeRecovery(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID, previous, now, administrativeRecoverySummaryForMonitoringInstance(record))
 	}
 	previousByClass := incidentsByClass(previous)
 	heartbeatInterval := s.heartbeatIntervalFor(ctx)
@@ -488,6 +523,15 @@ func (s *Service) evaluateTarget(ctx context.Context, targetID string, now time.
 	if err != nil {
 		return fmt.Errorf("list previous target incidents for %q: %w", targetID, err)
 	}
+	if getter, ok := s.targets.(TargetGetter); ok {
+		target, err := getter.GetTarget(ctx, targetID)
+		if err != nil && !errors.Is(err, targets.ErrTargetNotFound) {
+			return fmt.Errorf("get target %q for incident evaluation: %w", targetID, err)
+		}
+		if err == nil && shouldRecoverIncidentsForTarget(target) {
+			return s.applyAdministrativeRecovery(ctx, ObjectTypeTarget, targetID, previous, now, administrativeRecoverySummaryForTarget(target))
+		}
+	}
 	previousByClass := incidentsByClass(previous)
 	observations, err := s.snapshots.ListRecentProbeObservations(ctx, targetID, now.Add(-6*time.Hour))
 	if err != nil {
@@ -514,12 +558,71 @@ func (s *Service) evaluateTarget(ctx context.Context, targetID string, now time.
 	return s.applyEvaluations(ctx, ObjectTypeTarget, targetID, previous, evaluations, now)
 }
 
+func (s *Service) recoverActiveIncidentsForInactiveObject(ctx context.Context, objectType ObjectType, objectID string, now time.Time, summary string) error {
+	previous, err := s.snapshots.ListActiveIncidents(ctx, objectType, objectID)
+	if err != nil {
+		return fmt.Errorf("list previous %s incidents for %q: %w", objectType, objectID, err)
+	}
+	return s.applyAdministrativeRecovery(ctx, objectType, objectID, previous, now, summary)
+}
+
+func (s *Service) applyAdministrativeRecovery(ctx context.Context, objectType ObjectType, objectID string, previous []IncidentRecord, now time.Time, summary string) error {
+	if len(previous) == 0 {
+		return nil
+	}
+	events := make([]StateChangeEventRecord, 0, len(previous))
+	for _, incident := range previous {
+		events = append(events, StateChangeEventRecord{
+			IncidentID:    incident.IncidentID,
+			IncidentClass: incident.IncidentClass,
+			ObjectType:    objectType,
+			ObjectID:      objectID,
+			EventType:     EventIncidentRecovered,
+			Severity:      incident.Severity,
+			Summary:       summary,
+			CreatedAt:     now,
+		})
+	}
+	return s.writer.ApplyIncidentMutation(ctx, IncidentMutation{
+		ObjectType: objectType,
+		ObjectID:   objectID,
+		Active:     []IncidentRecord{},
+		Events:     events,
+	})
+}
+
 func (s *Service) applyEvaluations(ctx context.Context, objectType ObjectType, objectID string, previous []IncidentRecord, evaluations []classEvaluation, now time.Time) error {
 	mutation := buildMutation(objectType, objectID, previous, evaluations)
 	if err := s.writer.ApplyIncidentMutation(ctx, mutation); err != nil {
 		return err
 	}
 	return s.appendNotificationRecords(ctx, objectType, objectID, evaluations)
+}
+
+func administrativeRecoverySummaryForMonitoringInstance(record monitoringinstances.Record) string {
+	if record.ArchivedAt != nil {
+		return "监控实例已归档，当前异常按行政下线收敛"
+	}
+	if record.LifecycleStatus == monitoringinstances.LifecycleRetired {
+		return "监控实例已退役，当前异常按行政下线收敛"
+	}
+	if record.MonitoringStatus == monitoringinstances.MonitoringMaintenance {
+		return "监控实例处于维护中，当前异常按维护状态收敛"
+	}
+	if record.MonitoringStatus == monitoringinstances.MonitoringPaused {
+		return "监控实例已暂停，当前异常按暂停状态收敛"
+	}
+	return "监控实例非运行态，当前异常按行政状态收敛"
+}
+
+func administrativeRecoverySummaryForTarget(record targets.TargetRecord) string {
+	if record.RunStatus == targets.RunStatusArchived {
+		return "Target 已归档，当前异常按行政下线收敛"
+	}
+	if record.RunStatus == targets.RunStatusPaused {
+		return "Target 已暂停，当前异常按暂停状态收敛"
+	}
+	return "Target 非运行态，当前异常按行政状态收敛"
 }
 
 type incidentTiming struct {

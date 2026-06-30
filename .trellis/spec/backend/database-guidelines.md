@@ -384,13 +384,87 @@ if syncState.SuppressWritesAndPlan() {
 - `provider_name` 是导入 / 展示兼容字符串，不能创建、更新或回填 `providers`。
 - `display_name` 必须由数据库 `vps_assets_display_name_not_blank` 约束保证 trim 后非空；领域层 create / patch 也必须校验。
 - `lifecycle_status`、`usage_status`、`renewal_decision` 使用稳定英文机器值，并分别由数据库 check 约束和领域校验共同保护。
-- VPS 列表查询支持 `AssetScope`：未显式传入时 handler 默认 `current`，排除 `lifecycle_status in ('cancelled','archived')`；`archived` 只返回这两个最终不可访问状态；`all` 不按生命周期裁剪。显式 `lifecycle_status` 精确筛选优先于 scope，避免旧状态筛选与归档入口互相冲突。
+- VPS 列表查询支持 `AssetScope`：未显式传入时 handler 默认 `current`，排除 `lifecycle_status in ('cancelled','archived')`；`historical` 返回这两个历史不可访问状态；`archived` 是保留给旧客户端的兼容别名，语义与 `historical` 完全相同；`all` 不按生命周期裁剪。显式 `lifecycle_status` 精确筛选优先于 scope，避免旧状态筛选与归档入口互相冲突。
 - VPS 是业务状态主体：人工生命周期、用途、续费 / 迁移 / 取消决策只写在 `vps_assets`。Subscription 和 MonitoringInstance 只能提供账单事实与运行观测事实，不得在普通创建 / 编辑流程里要求用户重复选择业务状态。
+- VPS create/import 只能创建当前事实：`lifecycle_status` 允许 `active`、`idle`、`testing`；`to_migrate`、`to_cancel`、`cancelled`、`archived` 必须来自 lifecycle action、archive API 或底层 store fixture。不得创建缺少 lifecycle action 审计的历史/流程态资产。
 - `ssh_port` 默认为 `22`，数据库约束为 `1..65535`；领域 create 中 `0` 表示省略并默认，patch 中显式 `0` 必须拒绝。
 - `archived_at` 是派生字段：生命周期切到 `archived` 时补时间，从 `archived` 切出时清空；API 输入不得任意写入 `archived_at`。
 - VPS 资产 CRUD 不得改写 `monitoring_instances.provider`，也不得改变 MonitoringInstance / Target / Agent 的既有语义。
 - 普通 VPS CRUD 只维护 VPS 自身账本；跨订阅、MonitoringInstance、Target 的取消 / 退役协调必须通过 `assetlifecycle` 显式 preview + confirm + audit action 完成。
 - subscription summary 属于 subscriptions 查询；active monitoring instance link count / monitoring instance summary 由 `assetlinks.Repository` 在 HTTP 展示层补充，不得让 `store/vps_assets.go` 直接耦合 MonitoringInstance 表或 link 表细节。
+
+#### Scenario: VPS lifecycle / usage / renewal matrix
+
+##### 1. Scope / Trigger
+
+- Trigger: 修改 `internal/center/vpsassets/types.go`、`PATCH /api/vps/{vps_id}`、VPS create/import、archive/lifecycle action、或任何会写 `vps_assets.lifecycle_status`、`usage_status`、`renewal_decision` 的路径。
+- 目标：防止页面和决策模型读到互相矛盾的 VPS 当前事实，例如“已取消但仍在用”或“迁移流程态但续费决策是取消”。
+
+##### 2. Signatures
+
+- Domain helpers: `ValidateCreateInput(input CreateInput) error`、`ValidateOrdinaryPatchInput(input PatchInput) error`、`ValidateVPSStateCombination(lifecycle, usage, renewal) error`、`ValidateVPSPatchStateCombination(input PatchInput) error`。
+- Machine values:
+  - `lifecycle_status`: `active|idle|testing|to_migrate|to_cancel|cancelled|archived`
+  - `usage_status`: `in_use|idle|standby|testing|unknown`
+  - `renewal_decision`: `unreviewed|keep|observe|migrate|cancel|auto_renew_cancelled|replaced`
+
+##### 3. Contracts
+
+- `ValidateCreateInput` must reject `to_migrate`、`to_cancel`、`cancelled`、`archived`; create/import is not an audit-less lifecycle action path.
+- Ordinary PATCH remains current-fact only for lifecycle: `active|idle|testing`。流程态/终态只能由 lifecycle action/archive API 或 store-level historical fixtures 写入。
+- Full combination hard failures:
+  - `cancelled` requires `renewal_decision in (cancel, auto_renew_cancelled)`。
+  - `cancelled` cannot pair with `usage_status=in_use`。
+  - `to_cancel` requires `renewal_decision in (cancel, auto_renew_cancelled)`。
+  - `to_migrate` requires `renewal_decision=migrate`。
+  - `renewal_decision=replaced` cannot pair with `lifecycle_status=active` or `usage_status=in_use`。
+- Patch delta validation only rejects contradictions among fields present in the same request. It must not infer omitted current values, because archive/lifecycle action paths may call lower-level store helpers after doing their own review.
+- Warning-only or transitional readback combinations can remain visible for historical explanation, but new create/import and ordinary PATCH must fail closed for the hard failures above.
+
+##### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| create `lifecycle_status=cancelled` / `archived` / `to_cancel` / `to_migrate` | 400 invalid VPS asset input |
+| create `lifecycle_status=active, usage_status=in_use, renewal_decision=keep` | allowed |
+| full combination `cancelled + keep` | invalid VPS asset input |
+| full combination `cancelled + in_use` | invalid VPS asset input |
+| full combination `to_migrate + cancel` | invalid VPS asset input |
+| full combination `replaced + active/in_use` | invalid VPS asset input |
+| ordinary PATCH `lifecycle_status=to_cancel` | invalid VPS asset input |
+| PATCH delta `usage_status=in_use, renewal_decision=replaced` | invalid VPS asset input |
+
+##### 5. Good/Base/Bad Cases
+
+- Good: 新导入 VPS 默认 `active/unknown/unreviewed` 或用户明确填 `idle/idle/observe`，后续再通过决策或 lifecycle action 改状态。
+- Base: 旧历史资产在 archive 视图读到 `cancelled/idle/cancel`，作为历史 readback 展示。
+- Bad: 导入 JSON 直接写 `cancelled/in_use/keep`，用户在列表看到“已取消但仍在用且保留”的矛盾资产。
+- Bad: 普通 PATCH 把 VPS 改成 `to_migrate`，但没有 lifecycle action step 或迁移 workbench 审计。
+
+##### 6. Tests Required
+
+- Domain tests: create lifecycle boundary、full combination hard failures、allowed coherent states、PATCH delta hard failures。
+- Handler/store tests: ordinary API create/patch maps invalid matrix to invalid input; archive/lifecycle paths keep their dedicated tests.
+- Import tests: dry-run/import reuse `vpsassets.NormalizeCreateInput` + `ValidateCreateInput` and reject workflow/terminal lifecycle creation.
+
+##### 7. Wrong vs Correct
+
+```go
+// 错误：create 只检查枚举合法，让流程态直接落库。
+if !IsValidLifecycleStatus(input.LifecycleStatus) {
+	return ErrInvalidVPSAssetInput
+}
+```
+
+```go
+// 正确：create 先限制当前事实边界，再检查跨字段组合。
+if !IsValidCreateLifecycleStatus(input.LifecycleStatus) {
+	return ErrInvalidVPSAssetInput
+}
+if err := ValidateVPSStateCombination(input.LifecycleStatus, input.UsageStatus, input.RenewalDecision); err != nil {
+	return err
+}
+```
 
 ### Asset Ledger subscriptions
 
@@ -403,11 +477,71 @@ if syncState.SuppressWritesAndPlan() {
 - `monthly_price` 是后端派生字段，按 `price / billing_months` 计算并四舍五入到 4 位小数；create / patch JSON 不接受 `monthly_price`，patch 修改 `price` 或 `billing_months` 时必须重新计算。
 - `started_at` 与 `renew_at` 是 nullable `date`：未知日期用 `null`，不要写假日期。
 - `status` 使用稳定英文机器值：`active`、`paused`、`cancelled`、`expired`、`unknown`。新用户流程不得把它暴露为必填业务状态；VPS-scoped create 默认只收 price / currency / billing cycle / dates / auto-renew / payment / note 等账单事实，内部可保留 legacy status 作为兼容和历史解释字段。
-- 订阅列表查询同样支持 `AssetScope`，通过关联 `vps_assets.lifecycle_status` 裁剪；默认 `current` 排除归档/已取消 VPS 的订阅，`asset_scope=archived` 供只读归档页查看历史订阅。订阅自身 `status='cancelled'|'expired'` 不能让 VPS 自动进入归档范围，归档边界只能来自 VPS lifecycle。
+- 订阅列表查询同样支持 `AssetScope`，通过关联 `vps_assets.lifecycle_status` 裁剪；默认 `current` 排除归档/已取消 VPS 的订阅，`asset_scope=historical` 供只读归档页查看已取消/已归档 VPS 的历史订阅；`asset_scope=archived` 是兼容别名。订阅自身 `status='cancelled'|'expired'` 不能让 VPS 自动进入归档范围，归档边界只能来自 VPS lifecycle。
+- `renewal_mode` 允许 `auto`、`manual`、`auto_cancelled`、`lottery`、`gift`、`bonus`、`other`。`lottery` 只表达抽奖，`gift` 只表达赠送；两者都不是 legacy 自动续费标记。`LegacyRenewalFlags(gift)` 与 `LegacyRenewalFlags(lottery)` 必须返回 `false,false`。
 - 订阅 CRUD 不得创建 `vps_monitoring_instance_links`、不得改写 `monitoring_instances.provider`、不得增加 Dashboard / import / currency exchange 行为。
 - 订阅 CRUD 仍不得反向改写 VPS、MonitoringInstance 或 Target；订阅取消 / 过期后如资产状态不一致，前端必须暴露 lifecycle action 入口，而不是在订阅 PATCH 中隐式停机或退役。
 - 受控例外：用户显式在 `PATCH /api/vps/{vps_id}` 将 VPS `renewal_decision` 改成取消类决策（当前为 `cancel` 或 `auto_renew_cancelled`）时，VPS patch 事务可以同步处理该 VPS 的明确订阅事实。只有恰好一条 `status='active'` 的订阅候选时，才能在同一事务里把该订阅 `auto_renew=false`、`auto_renew_cancelled=true`，并按既有 `price_histories` 机制记录自动续费字段变化；无 active 订阅或多 active 订阅时只返回 linkage status/message，不批量写订阅。
 - 上述例外仍属于 Asset Ledger 内部 VPS↔Subscription 用户决策流：不得创建或修改 `vps_monitoring_instance_links`、Provider、MonitoringInstance、Target、ProbeItem、Agent 计划或运行时控制；subscription 自己的 CRUD 仍不得反向改写 VPS renewal decision。
+
+#### Scenario: Subscription renewal mode gift and historical scope
+
+##### 1. Scope / Trigger
+
+- Trigger: 修改 `subscriptions.renewal_mode`、`price_histories.from_renewal_mode/to_renewal_mode`、订阅列表 scope、订阅表单选项或续费方式展示标签。
+- 目标：让账单行为、抽奖来源、赠送来源和历史资产范围在 DB、Go 和 UI 中保持同义。
+
+##### 2. Signatures
+
+- DB constraints: `subscriptions_renewal_mode_allowed` and `price_histories_renewal_mode_allowed` must include `gift` alongside `auto|manual|auto_cancelled|lottery|bonus|other`。
+- Domain constant: `subscriptions.RenewalModeGift = "gift"`。
+- List API: `GET /api/subscriptions?asset_scope=current|historical|archived|all`。
+- Store behavior: `historical` and legacy `archived` both query related VPS `lifecycle_status in ('cancelled','archived')`。
+
+##### 3. Contracts
+
+- New migrations must not edit old applied migrations. To add a renewal mode, append a migration that drops/re-adds the two allowed constraints.
+- `NormalizeRenewalMode` must trim and lowercase `gift` like all other machine values.
+- `IsValidRenewalMode("gift")` and renewal history validation must both accept `gift`。
+- `RenewalModeFromLegacyFlags` remains only `auto` / `auto_cancelled` / default `manual`; `gift` is not inferable from legacy booleans.
+- Existing `lottery` rows stay `lottery` and display as 抽奖; there is no automatic backfill to `gift` without historical evidence.
+
+##### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| subscription create `renewal_mode=gift` | accepted; legacy booleans normalized to false/false |
+| price history `from_renewal_mode=gift` or `to_renewal_mode=gift` | accepted |
+| renewal mode `抽奖/赠送` or unknown string | invalid subscription input |
+| `asset_scope=historical` | same SQL predicate as compatibility `archived` |
+| `asset_scope=archived` | still accepted for old clients |
+
+##### 5. Good/Base/Bad Cases
+
+- Good: 用户录入赠送订阅，API 保存 `renewal_mode=gift`，前端显示“赠送”，不勾自动续费。
+- Base: 旧抽奖订阅仍是 `lottery`，前端显示“抽奖”。
+- Bad: 把 `lottery` 标签写成“抽奖/赠送”，导致用户无法区分权益来源。
+- Bad: 只改 `subscriptions` constraint，忘记 `price_histories`，导致修改订阅时历史写入失败。
+
+##### 6. Tests Required
+
+- Migration tests: new migration contains both subscription and price history constraints with `gift`。
+- Domain tests: `gift` normalize / validate / create / price history validation / legacy flags。
+- Store/handler tests: subscriptions historical scope query parsing and SQL predicate。
+- Frontend tests: `RenewalMode` union、option label、normalizer、legacy flags、Archive page historical query。
+
+##### 7. Wrong vs Correct
+
+```sql
+-- 错误：只放松当前订阅表，历史表仍不能记录 gift。
+alter table subscriptions add constraint subscriptions_renewal_mode_allowed check (renewal_mode in (..., 'gift'));
+```
+
+```sql
+-- 正确：当前事实与价格历史的续费方式约束一起放松。
+alter table subscriptions add constraint subscriptions_renewal_mode_allowed check (...);
+alter table price_histories add constraint price_histories_renewal_mode_allowed check (...);
+```
 
 ### Asset lifecycle actions
 
@@ -1109,10 +1243,75 @@ where not exists (
 3. **探针种类只有 `tcp` / `http` / `tls`**（`internal/contracts/agentapi/types.go` 中的 `ProbeKind*` 常量）。`https` 不是独立种类，而是带 TLS 配置的 HTTP 观测。新增种类必须先获得基线批准，并同步更新设计文档与契约包。
 4. **健康状态 (`current_health_status`) 是派生量**（`正常 / 关注 / 告警 / 严重`），由 incident service 在写后计算并回写；**不要直接接受外部 API 的健康字段写入**。
 5. **MonitoringInstance 生命周期状态 (`lifecycle_status`) 是 VPS 附属接入/收尾事实，不是独立业务状态入口**（`待接入 / 在用 / 观察中 / 不续费 / 已退役`）。普通监控 handler 只能处理运行控制、接入、绑定和 metadata；退役/不续费类变更只能从 VPS 生命周期工作台的 `asset_lifecycle` 联动路径写入，并记录审计步骤。其他写路径不应触碰该列。
-6. **维护模式 (`monitoring_status = '维护中'` / `'暂停'`) 是 runtime control，不是健康状态**。维护期间观测照常落库（`maintenance_context = true`），但 incident / notification 处理需识别该上下文（参考 `store/monitoring_instances.go:74-77`、`incidents/service.go`）。
+6. **维护模式 (`monitoring_status = '维护中'` / `'暂停'`) 是 runtime control，不是健康状态**。维护期间观测照常落库（`maintenance_context = true`），但 incident / notification 处理需识别该上下文（参考 `store/monitoring_instances.go:74-77`、`incidents/service.go`）。暂停、维护、退役或归档 MonitoringInstance 不应保留当前 active incident 投影；incident service 必须把已有 active incidents 行政恢复为 recovered events，且不得发送恢复通知。
 7. **请求路径只写原始观测**：handler 接收 sync batch 后通过 `internal/center/syncing/` 落 `monitoring_instance_heartbeats` / `host_samples` / `probe_observations`，**不在请求路径里跑 incident 判定 / 通知**。incident 与通知由 `incidentSvc`（`incidents.NewSettingsBackedService`，启动时作为 `Worker.Run(ctx)` 跑）异步产出。
 8. **回填观测 (`is_backfilled = true`) 必须落库但不得触发实时告警**。请求路径仍旧 `insert`（参见 `store/sync_batches.go:188`），但 incident service 在 select 阶段对历史数据的处理需带条件分支。**不要在 incident 判定里忽略 `is_backfilled` 字段，也不要在写路径里干脆丢弃这条数据**。
 9. **notification_records.channel 是真实发送通道，不是 evaluator 默认值**。`incidents.NotificationChannel` 当前只允许 `telegram` / `feishu` 作为生产通道语义；Feishu-only 发送只写 `channel='feishu'`，Telegram+Feishu 混合发送必须按 channel 写多条 record，单个 channel 失败只能把该 channel 标为 `failed`。通知策略关闭、维护/回填抑制或无可用 channel 时写 `suppressed`，但不能把 Feishu-only 或 mixed delivery 误记成 Telegram-only。
+
+### Scenario: Administrative incident recovery for inactive objects
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `internal/center/incidents/service.go`、MonitoringInstance `monitoring_status/lifecycle_status/archived_at` 语义、Target `run_status` 语义、或 active incident mutation / notification 写入。
+- 目标：用户主动暂停、维护、退役或归档的对象不再在页面上表现为“当前 active 风险”，但仍保留一条 recovered event 解释历史收敛。
+
+#### 2. Signatures
+
+- Service paths: `EvaluateStaleMonitoringInstances(ctx, now)`、`AfterSuccessfulSync(ctx, batch, result)`、`EvaluatePeriodicState(ctx, now)`。
+- Repositories:
+  - MonitoringInstance repo must provide current record for MI evaluation.
+  - Target repo may implement optional `GetTarget(ctx, targetID)` so touched target sync can re-check current run status before evaluating observations.
+- Mutation: `IncidentMutation{ObjectType, ObjectID, Active: []IncidentRecord{}, Events: []StateChangeEventRecord{EventType: recovered}}`。
+
+#### 3. Contracts
+
+- MonitoringInstance inactive states for incident recovery: `monitoring_status in ('暂停','维护中')`、`lifecycle_status='已退役'`、or `archived_at is not null`。
+- Target inactive states for incident recovery: `run_status in ('暂停','已归档')`。
+- Periodic stale sweep must close existing active incidents for inactive MonitoringInstances instead of silently skipping them.
+- `AfterSuccessfulSync` must recover inactive MonitoringInstance incidents before host metric evaluation, so old samples cannot keep disk/resource incidents active after an administrative stop.
+- Periodic Target sweep must recover inactive Target incidents and skip probe/TLS/trend evaluation.
+- If a touched Target can be loaded and is inactive, `AfterSuccessfulSync` must recover prior target incidents and skip new evaluation for that target. If the repository cannot load the Target or returns not found, legacy observation-only evaluation may continue for compatibility.
+- Administrative recovery writes recovered events but intentionally does not call notification append/dispatch. User-initiated stop should not generate a recovery notification storm.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| paused / maintenance / retired / archived MI has prior active incident | mutation active is empty; recovered event written; no notification records |
+| inactive MI has no prior active incident | no mutation required |
+| active MI stale heartbeat | normal heartbeat evaluation still applies |
+| paused / archived Target has prior active incident | target mutation active is empty; recovered event written; no notification records |
+| touched paused Target has fresh failing observations | administrative recovery wins; no new active probe incident |
+| Target getter returns not found | fallback to existing observation evaluation |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: 用户暂停监控实例后，旧 heartbeat/disk active incident 被恢复为“按暂停状态收敛”，当前异常列表清空。
+- Good: 用户归档 Target 后，旧 TLS/probe active incident 被恢复，事件流保留收敛说明。
+- Base: 正常运行对象继续按 stale threshold、probe failure 和 TLS expiry 生成/恢复 incidents。
+- Bad: stale sweep 对暂停对象直接 `continue`，旧 active incident 永远挂在 Dashboard 上。
+- Bad: 行政恢复调用通知派发，用户暂停一批对象后收到大量“恢复”消息。
+
+#### 6. Tests Required
+
+- Service tests: MI periodic inactive recovery, MI `AfterSuccessfulSync` inactive recovery before metric evaluation, Target periodic inactive recovery, touched Target inactive recovery, all assert no notification records/sends.
+- Regression tests: active MI/Target still evaluate normally; `ErrTargetNotFound` fallback remains compatible.
+
+#### 7. Wrong vs Correct
+
+```go
+// 错误：非运行态直接跳过，旧 active_incidents 投影仍留在当前风险列表。
+if !shouldEvaluate(record) {
+	continue
+}
+```
+
+```go
+// 正确：非运行态先做行政恢复，再跳过实时评估。
+if !shouldEvaluate(record) {
+	return s.recoverActiveIncidentsForInactiveObject(ctx, objectType, id, now, summary)
+}
+```
 
 ---
 
