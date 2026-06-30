@@ -259,6 +259,41 @@ func TestVPSAssetStateCombinationMigrationAddsCrossColumnConstraint(t *testing.T
 	}
 }
 
+func TestVPSAssetStateCombinationMigrationNormalizesExistingRowsBeforeConstraint(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0049_vps_asset_state_combination_constraint.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	const addConstraint = "add constraint vps_assets_state_combination_valid"
+	const updateAssets = "update vps_assets"
+	addConstraintIndex := strings.Index(sql, addConstraint)
+	if addConstraintIndex < 0 {
+		t.Fatalf("0049 migration missing %q", addConstraint)
+	}
+	updateIndex := strings.Index(sql, updateAssets)
+	if updateIndex < 0 {
+		t.Fatalf("0049 migration must normalize existing vps_assets rows before adding constraint")
+	}
+	if updateIndex > addConstraintIndex {
+		t.Fatalf("0049 migration normalizes vps_assets after adding constraint")
+	}
+	for _, want := range []string{
+		"lifecycle_status = 'cancelled'",
+		"renewal_decision not in ('cancel', 'auto_renew_cancelled')",
+		"usage_status = 'in_use'",
+		"lifecycle_status = 'to_cancel'",
+		"lifecycle_status = 'to_migrate'",
+		"renewal_decision <> 'migrate'",
+		"renewal_decision = 'replaced'",
+		"lifecycle_status = 'active'",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0049 migration normalization missing %q", want)
+		}
+	}
+}
+
 func TestIPQualityReadModelFilterMigrationHidesFailurePlaceholders(t *testing.T) {
 	payload, err := migrations.FS.ReadFile("0041_filter_ip_quality_read_models.sql")
 	if err != nil {

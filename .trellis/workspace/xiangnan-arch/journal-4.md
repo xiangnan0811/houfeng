@@ -1219,3 +1219,36 @@ Validated incident threshold ordering across backend settings, frontend settings
 ### Next Steps
 
 - None - task complete
+
+
+## Session 213: Hotfix VPS state migration backfill
+
+**Date**: 2026-06-30
+**Task**: Hotfix VPS state migration backfill
+**Branch**: `hotfix/vps-state-migration-backfill`
+
+### Summary
+
+Fixed v0.55.6 bootstrap failure by backfilling legacy VPS state combinations before adding the 0049 cross-column constraint; added migration regression coverage and updated database migration guidance.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `03699f0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
