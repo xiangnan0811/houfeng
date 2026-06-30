@@ -88,13 +88,14 @@
 
 - `vps_assets.lifecycle_status`、`usage_status`、`renewal_decision` 是一个组合状态，不是三个互不相关的枚举。所有写路径必须验证最终组合：`cancelled` 必须使用取消类续费决策且不能 `in_use`；`to_cancel` 必须使用取消类续费决策；`to_migrate` 必须使用 `migrate`；`replaced` 不能仍是 `active` 或 `in_use`。
 - PATCH 入口不能只校验请求体内出现的字段。仓库写入边界必须读取当前行，应用 patch preview 后调用 `vpsassets.ValidateVPSStateCombination`，再执行 `update vps_assets`；受控生命周期 action 若直接调用底层 update helper，也必须先做同样的合成状态校验。
-- DB 必须有跨列 check constraint 作为最后兜底。新增或调整这类约束是破坏性数据完整性收口：如果已有行违反组合不变量，迁移应 fail fast，而不是 `not valid` 静默放过。
+- DB 必须有跨列 check constraint 作为最后兜底。新增或调整这类约束是破坏性数据完整性收口：迁移必须先用幂等 backfill 处理可确定归一化的历史组合，再添加 validated constraint；无法安全推导的脏数据才应 fail fast。不得用 `not valid` 静默放过。
+- 如果某个已发布迁移在记录到 `schema_migrations` 前已经会因历史数据违反新约束而失败，可以按例外修正该失败迁移本身；修正必须把 backfill 放在 `add constraint` 前，并增加 `migrate_test.go` 断言 backfill 语句存在且顺序早于约束。
 - JSON 导入的 `subscription` 对象必须同步订阅创建合同。`subscription.renewal_mode` 是合法字段，支持 `auto|manual|auto_cancelled|lottery|gift|bonus|other`；`gift` 和 `lottery` 归一后 legacy `auto_renew` / `auto_renew_cancelled` 必须为 `false,false`。`DecodeRecords` 继续 `DisallowUnknownFields`，新增可导入字段时必须同时改 DTO、dry-run report、create input 传递和测试。
 
 ### 不要做
 
 - ❌ 修改已经合并/发布过的迁移文件内容（包括加空格）。要修就再写一个新迁移。
-- 例外：如果某个已发布迁移在记录到 `schema_migrations` 前必然失败，导致后续修复迁移无法执行，可以修正该失败迁移本身；修复必须保持幂等，并增加回归测试说明原因。
+- 例外：如果某个已发布迁移在记录到 `schema_migrations` 前必然失败，导致后续修复迁移无法执行，可以修正该失败迁移本身；修复必须保持幂等，并增加回归测试说明原因。涉及约束收口时，测试必须断言 backfill 在约束前执行。
 - ❌ 用任何运维脚本 / SQL 客户端直接改线上 schema，必须走迁移文件。
 - ❌ 把测试数据 / seed 数据写进迁移文件——种子用户由 `internal/center/auth/seed.go` 在 bootstrap 阶段执行（`bootstrap.go:104-107`）。
 
