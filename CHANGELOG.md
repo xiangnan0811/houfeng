@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.55.7](https://github.com/xiangnan0811/houfeng/compare/v0.55.6...v0.55.7) (2026-06-30)
+
+
+### Bug Fixes
+
+* backfill vps state combinations before constraint ([03699f0](https://github.com/xiangnan0811/houfeng/commit/03699f0df5484a57f65237cae5119578aa2e01cd))
+* backfill VPS state combinations before constraint ([ae4d280](https://github.com/xiangnan0811/houfeng/commit/ae4d28082cdf36d687f08671b8d9293a85d85894))
+
 ## [0.55.6](https://github.com/xiangnan0811/houfeng/compare/v0.55.5...v0.55.6) (2026-06-30)
 
 
