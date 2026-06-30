@@ -84,6 +84,13 @@
 - 兼容旧字段时，迁移需要给出可重复的推导规则和约束收口：例如订阅以 `billing_period_unit` + `billing_period_length` + `renewal_mode` 为新合同，同时从 `billing_months`、`billing_cycle`、`auto_renew`、`auto_renew_cancelled` 回填，并短期保留旧字段供下游兼容。
 - 会同时更新业务事实和审计记录的动作必须在一个事务内完成。VPS 有效期延长这类操作应锁定目标 VPS，确认唯一 active subscription，写生命周期 action / step，更新 subscription `renew_at`，并在必要时写 price history。
 
+### VPS 资产状态组合不变量
+
+- `vps_assets.lifecycle_status`、`usage_status`、`renewal_decision` 是一个组合状态，不是三个互不相关的枚举。所有写路径必须验证最终组合：`cancelled` 必须使用取消类续费决策且不能 `in_use`；`to_cancel` 必须使用取消类续费决策；`to_migrate` 必须使用 `migrate`；`replaced` 不能仍是 `active` 或 `in_use`。
+- PATCH 入口不能只校验请求体内出现的字段。仓库写入边界必须读取当前行，应用 patch preview 后调用 `vpsassets.ValidateVPSStateCombination`，再执行 `update vps_assets`；受控生命周期 action 若直接调用底层 update helper，也必须先做同样的合成状态校验。
+- DB 必须有跨列 check constraint 作为最后兜底。新增或调整这类约束是破坏性数据完整性收口：如果已有行违反组合不变量，迁移应 fail fast，而不是 `not valid` 静默放过。
+- JSON 导入的 `subscription` 对象必须同步订阅创建合同。`subscription.renewal_mode` 是合法字段，支持 `auto|manual|auto_cancelled|lottery|gift|bonus|other`；`gift` 和 `lottery` 归一后 legacy `auto_renew` / `auto_renew_cancelled` 必须为 `false,false`。`DecodeRecords` 继续 `DisallowUnknownFields`，新增可导入字段时必须同时改 DTO、dry-run report、create input 传递和测试。
+
 ### 不要做
 
 - ❌ 修改已经合并/发布过的迁移文件内容（包括加空格）。要修就再写一个新迁移。

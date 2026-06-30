@@ -478,6 +478,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - 常规业务对象关联输入不得要求用户复制内部 ID：VPS facts 的 Provider、VPS↔MonitoringInstance link 的 MonitoringInstance、VPS service/domain 的 Target、domain 的 Service 都应使用页面加载的数据选择器，并保留“未关联/不关联”选项。选择器为空或加载失败时必须给出明确说明和到对应列表/创建流程的入口；选择监控实例/Target 只创建资产引用或链接，不隐式修改 MonitoringInstance/Target/Agent/ProbeItem 语义。
 - `/subscriptions?vps_id=<id>&create=1` 只作为次级账单事实入口保留；普通补录从 VPS 详情页的 `createVPSSubscription(vpsId, input)` 发起，且不要求用户选择订阅状态。
 - 订阅表单和 API contract 以 `billing_period_unit` + `billing_period_length` + `renewal_mode` 为用户可见主字段；`billing_cycle`、`billing_months`、`auto_renew`、`auto_renew_cancelled` 仅作为兼容旧数据和下游月化成本计算的辅助字段。币种和支付方式继续保存字符串，但 UI 必须通过共享常用选项 + 自定义入口标准化。`renewal_mode=gift` 与 `lottery` 都应让 legacy auto-renew flags 为 `false,false`；前端保存时不得把“赠送”误写成 `lottery` 或自动续费。
+- `scripts/visual_evidence.py` 的 asset workflow mock 是 browser sanity 的状态展示夹具，必须至少覆盖 `renewal_mode=lottery` 和 `renewal_mode=gift` 的可见订阅行，确保 `/subscriptions` 与资产决策相关页面能实际展示“抽奖”和“赠送”标签；不要只在纯函数测试里覆盖这些标签。
 - VPS 有效期延长必须走 `extendVPSValidity(vpsId, input)`，由后端更新当前 active subscription 的 `renew_at` 并写生命周期/价格历史；前端成功后刷新 detail、timeline、subscriptions 并关闭弹层。不要在浏览器里只改本地订阅日期，也不要在无 active subscription 时伪造延长成功。
 - 从 VPS 补齐监控接入时，主路径是 VPS 详情内的“创建并接入监控实例”：表单按 VPS 资料预填并允许微调，成功后导航到 `/monitoring/{id}?onboarding=1&return_vps={vps_id}`。不要再增加“继承字段确认”前置弹窗；Monitoring detail 消费 onboarding 参数后必须清理 URL，生成命令后自动复制，复制失败时保留手动复制。
 

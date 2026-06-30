@@ -27,7 +27,7 @@
       "billing_months": 12,
       "started_at": "2025-05-20",
       "renew_at": "2026-05-24",
-      "auto_renew": true,
+      "auto_renew": false,
       "auto_renew_cancelled": false,
       "status": "active",
       "payment_method": "sample-card",
@@ -64,11 +64,12 @@
       "billing_months": 1,
       "started_at": "2026-01-05",
       "renew_at": "2026-06-05",
-      "auto_renew": true,
+      "auto_renew": false,
       "auto_renew_cancelled": false,
+      "renewal_mode": "lottery",
       "status": "active",
       "payment_method": "sample-card",
-      "note": "Idle paid sample."
+      "note": "Idle paid sample with lottery renewal semantics."
     },
     "monitoring_instance_name": "sample-fremont-node",
     "target_url": "https://sample-fremont.example.invalid"
@@ -103,9 +104,10 @@
       "renew_at": "2026-06-15",
       "auto_renew": true,
       "auto_renew_cancelled": false,
+      "renewal_mode": "gift",
       "status": "active",
       "payment_method": "sample-invoice",
-      "note": "Standby subscription sample."
+      "note": "Standby subscription sample with gifted renewal semantics."
     }
   },
   {

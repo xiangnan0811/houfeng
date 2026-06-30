@@ -233,6 +233,32 @@ func TestSubscriptionGiftRenewalModeMigrationRelaxesConstraints(t *testing.T) {
 	}
 }
 
+func TestVPSAssetStateCombinationMigrationAddsCrossColumnConstraint(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0049_vps_asset_state_combination_constraint.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, want := range []string{
+		"vps_assets_state_combination_valid",
+		"lifecycle_status <> 'cancelled'",
+		"renewal_decision in ('cancel', 'auto_renew_cancelled')",
+		"usage_status <> 'in_use'",
+		"lifecycle_status <> 'to_cancel'",
+		"lifecycle_status <> 'to_migrate'",
+		"renewal_decision = 'migrate'",
+		"renewal_decision <> 'replaced'",
+		"lifecycle_status <> 'active'",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0049 migration missing %q", want)
+		}
+	}
+	if strings.Contains(sql, "not valid") {
+		t.Fatalf("0049 migration must validate existing rows instead of adding a not valid constraint")
+	}
+}
+
 func TestIPQualityReadModelFilterMigrationHidesFailurePlaceholders(t *testing.T) {
 	payload, err := migrations.FS.ReadFile("0041_filter_ip_quality_read_models.sql")
 	if err != nil {

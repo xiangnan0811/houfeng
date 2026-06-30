@@ -83,6 +83,7 @@ type SubscriptionInput struct {
 	RenewAt            *string              `json:"renew_at"`
 	AutoRenew          bool                 `json:"auto_renew"`
 	AutoRenewCancelled bool                 `json:"auto_renew_cancelled"`
+	RenewalMode        string               `json:"renewal_mode"`
 	Status             subscriptions.Status `json:"status"`
 	PaymentMethod      string               `json:"payment_method"`
 	Note               string               `json:"note"`
@@ -148,6 +149,7 @@ type SubscriptionCandidate struct {
 	BillingMonths int     `json:"billing_months"`
 	MonthlyPrice  float64 `json:"monthly_price"`
 	RenewAt       *string `json:"renew_at,omitempty"`
+	RenewalMode   string  `json:"renewal_mode"`
 }
 
 type RowIssue struct {

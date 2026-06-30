@@ -298,6 +298,14 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 		return r.patchVPSAssetWithHistory(ctx, vpsID, input)
 	}
 
+	current, err := r.GetVPSAsset(ctx, vpsID)
+	if err != nil {
+		return vpsassets.Record{}, err
+	}
+	if err := validateMergedVPSAssetPatch(current, input); err != nil {
+		return vpsassets.Record{}, err
+	}
+
 	record, err := patchVPSAssetRow(ctx, r.db, vpsID, input)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return vpsassets.Record{}, vpsassets.ErrVPSAssetNotFound
@@ -353,6 +361,9 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistoryAndOptionalSubscrip
 	}
 	if err != nil {
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("query vps asset %q before history patch: %w", vpsID, err)
+	}
+	if err := validateMergedVPSAssetPatch(current, input); err != nil {
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
 	}
 
 	record, err := patchVPSAssetRow(ctx, tx, vpsID, input)
@@ -626,6 +637,81 @@ func patchRequiresVPSAssetHistory(input vpsassets.PatchInput) bool {
 		input.Virtualization.Set
 }
 
+func validateMergedVPSAssetPatch(current vpsassets.Record, input vpsassets.PatchInput) error {
+	merged := applyVPSAssetPatchPreview(current, input)
+	return vpsassets.ValidateVPSStateCombination(merged.LifecycleStatus, merged.UsageStatus, merged.RenewalDecision)
+}
+
+func applyVPSAssetPatchPreview(record vpsassets.Record, input vpsassets.PatchInput) vpsassets.Record {
+	if input.DisplayName.Set {
+		record.DisplayName = input.DisplayName.Value
+	}
+	if input.ProviderID.Set {
+		record.ProviderID = cloneVPSAssetStringPtr(input.ProviderID.Value)
+	}
+	if input.ProviderName.Set {
+		record.ProviderName = input.ProviderName.Value
+	}
+	if input.ProductName.Set {
+		record.ProductName = input.ProductName.Value
+	}
+	if input.OrderRef.Set {
+		record.OrderRef = input.OrderRef.Value
+	}
+	if input.Country.Set {
+		record.Country = input.Country.Value
+	}
+	if input.Region.Set {
+		record.Region = input.Region.Value
+	}
+	if input.City.Set {
+		record.City = input.City.Value
+	}
+	if input.Datacenter.Set {
+		record.Datacenter = input.Datacenter.Value
+	}
+	if input.IPv4.Set {
+		record.IPv4 = input.IPv4.Value
+	}
+	if input.IPv6.Set {
+		record.IPv6 = input.IPv6.Value
+	}
+	if input.SSHHost.Set {
+		record.SSHHost = input.SSHHost.Value
+	}
+	if input.SSHPort.Set {
+		record.SSHPort = input.SSHPort.Value
+	}
+	if input.SSHUser.Set {
+		record.SSHUser = input.SSHUser.Value
+	}
+	if input.OSName.Set {
+		record.OSName = input.OSName.Value
+	}
+	if input.Virtualization.Set {
+		record.Virtualization = input.Virtualization.Value
+	}
+	if input.LifecycleStatus.Set {
+		record.LifecycleStatus = input.LifecycleStatus.Value
+	}
+	if input.UsageStatus.Set {
+		record.UsageStatus = input.UsageStatus.Value
+	}
+	if input.RenewalDecision.Set {
+		record.RenewalDecision = input.RenewalDecision.Value
+	}
+	if input.Importance.Set {
+		record.Importance = input.Importance.Value
+	}
+	if input.Labels.Set {
+		record.Labels = append([]string(nil), input.Labels.Values...)
+	}
+	if input.Note.Set {
+		record.Note = input.Note.Value
+	}
+	return record
+}
+
 func vpsSpecChanged(from, to vpsassets.Record) bool {
 	return from.ProductName != to.ProductName ||
 		from.SSHHost != to.SSHHost ||
@@ -721,6 +807,14 @@ func nullableStringArg(value *string) any {
 		return nil
 	}
 	return *value
+}
+
+func cloneVPSAssetStringPtr(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func isVPSAssetInvalidPostgresError(err error) bool {

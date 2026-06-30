@@ -1220,11 +1220,15 @@ func insertFailedLifecycleAction(
 func applyVPSCancellationState(ctx context.Context, tx pgx.Tx, actionID string, current vpsassets.Record, input assetlifecycle.ApplyCancellationInput) (assetlifecycle.LifecycleActionStep, error) {
 	before := map[string]any{
 		"lifecycle_status": string(current.LifecycleStatus),
+		"usage_status":     string(current.UsageStatus),
 		"renewal_decision": string(current.RenewalDecision),
 	}
 	patch := vpsassets.PatchInput{}
 	if current.LifecycleStatus != input.VPSLifecycleStatus {
 		patch.LifecycleStatus = vpsassets.PatchLifecycle(input.VPSLifecycleStatus)
+	}
+	if input.VPSLifecycleStatus == vpsassets.LifecycleCancelled && current.UsageStatus == vpsassets.UsageInUse {
+		patch.UsageStatus = vpsassets.PatchUsage(vpsassets.UsageIdle)
 	}
 	if current.RenewalDecision != vpsassets.RenewalCancel {
 		patch.RenewalDecision = vpsassets.PatchRenewal(vpsassets.RenewalCancel)
@@ -1236,6 +1240,9 @@ func applyVPSCancellationState(ctx context.Context, tx pgx.Tx, actionID string, 
 	}
 	patch = vpsassets.NormalizePatchInput(patch)
 	if err := vpsassets.ValidatePatchInput(patch); err != nil {
+		return assetlifecycle.LifecycleActionStep{}, err
+	}
+	if err := validateMergedVPSAssetPatch(current, patch); err != nil {
 		return assetlifecycle.LifecycleActionStep{}, err
 	}
 
@@ -1254,6 +1261,7 @@ func applyVPSCancellationState(ctx context.Context, tx pgx.Tx, actionID string, 
 	}
 	after := map[string]any{
 		"lifecycle_status": string(updated.LifecycleStatus),
+		"usage_status":     string(updated.UsageStatus),
 		"renewal_decision": string(updated.RenewalDecision),
 	}
 	return insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeVPS, current.VPSID, assetlifecycle.StepTypeVPSLifecycle, assetlifecycle.StepStatusCompleted, before, after, "VPS 取消/退役状态已确认。")

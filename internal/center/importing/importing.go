@@ -356,6 +356,7 @@ func prepareInputRecord(row int, input InputRecord, state existingState, report 
 			RenewAt:            renewAt,
 			AutoRenew:          input.Subscription.AutoRenew,
 			AutoRenewCancelled: input.Subscription.AutoRenewCancelled,
+			RenewalMode:        input.Subscription.RenewalMode,
 			Status:             input.Subscription.Status,
 			PaymentMethod:      input.Subscription.PaymentMethod,
 			Note:               input.Subscription.Note,
@@ -431,6 +432,7 @@ func subscriptionCandidateFromRecord(record preparedRecord) SubscriptionCandidat
 		Currency:      input.Currency,
 		BillingMonths: input.BillingMonths,
 		MonthlyPrice:  subscriptions.CalculateMonthlyPrice(input.Price, input.BillingMonths),
+		RenewalMode:   input.RenewalMode,
 	}
 	if input.RenewAt != nil {
 		value := input.RenewAt.Time.Format(subscriptions.DateLayout)

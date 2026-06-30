@@ -83,7 +83,7 @@ describe('ArchivePage', () => {
     vi.restoreAllMocks()
   })
 
-  it('loads archived VPS and subscriptions through archived scope and renders a list-only archive ledger', async () => {
+  it('loads archived VPS and subscriptions through historical scope and renders a list-only archive ledger', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse([archivedVPS]))

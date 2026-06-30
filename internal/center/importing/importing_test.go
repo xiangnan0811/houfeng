@@ -25,6 +25,92 @@ func TestDecodeRecordsRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestDecodeRecordsAcceptsSubscriptionRenewalMode(t *testing.T) {
+	records, err := DecodeRecords(strings.NewReader(`[{
+		"display_name":"gifted-vps",
+		"provider_name":"Example",
+		"lifecycle_status":"active",
+		"usage_status":"in_use",
+		"subscription":{
+			"price":0,
+			"currency":"usd",
+			"billing_months":12,
+			"renewal_mode":"gift",
+			"status":"active"
+		}
+	}]`))
+	if err != nil {
+		t.Fatalf("DecodeRecords() error = %v, want nil", err)
+	}
+	if len(records) != 1 || records[0].Subscription == nil || records[0].Subscription.RenewalMode != "gift" {
+		t.Fatalf("records = %#v, want subscription renewal_mode gift", records)
+	}
+}
+
+func TestDryRunKeepsSubscriptionRenewalModeGift(t *testing.T) {
+	renewAt := "2026-06-01"
+	report, err := DryRun(context.Background(), []InputRecord{{
+		DisplayName:     "gifted-vps",
+		ProviderName:    "Example Provider",
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageStatus:     vpsassets.UsageInUse,
+		Subscription: &SubscriptionInput{
+			Price:              0,
+			Currency:           "usd",
+			BillingMonths:      12,
+			RenewAt:            &renewAt,
+			RenewalMode:        "gift",
+			AutoRenew:          true,
+			AutoRenewCancelled: true,
+			Status:             subscriptions.StatusActive,
+		},
+	}}, Repositories{
+		Providers:     &fakeProviderRepo{},
+		VPSAssets:     &fakeVPSRepo{},
+		Subscriptions: &fakeSubscriptionRepo{},
+	}, Options{Now: func() time.Time {
+		return time.Date(2026, time.May, 9, 0, 0, 0, 0, time.UTC)
+	}})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if !report.CanImport {
+		t.Fatalf("CanImport = false, validation errors = %#v", report.ValidationErrors)
+	}
+	if len(report.SubscriptionCandidates) != 1 || report.SubscriptionCandidates[0].RenewalMode != "gift" {
+		t.Fatalf("SubscriptionCandidates = %#v, want renewal_mode gift", report.SubscriptionCandidates)
+	}
+}
+
+func TestDryRunRejectsInvalidSubscriptionRenewalMode(t *testing.T) {
+	report, err := DryRun(context.Background(), []InputRecord{{
+		DisplayName:     "invalid-mode-vps",
+		ProviderName:    "Example Provider",
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageStatus:     vpsassets.UsageInUse,
+		Subscription: &SubscriptionInput{
+			Price:         1,
+			Currency:      "usd",
+			BillingMonths: 1,
+			RenewalMode:   "raffle",
+			Status:        subscriptions.StatusActive,
+		},
+	}}, Repositories{
+		Providers:     &fakeProviderRepo{},
+		VPSAssets:     &fakeVPSRepo{},
+		Subscriptions: &fakeSubscriptionRepo{},
+	}, Options{})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if report.CanImport {
+		t.Fatal("CanImport = true, want false for invalid renewal_mode")
+	}
+	if len(report.ValidationErrors) != 1 || report.ValidationErrors[0].Field != "subscription" || !strings.Contains(report.ValidationErrors[0].Message, "invalid renewal_mode") {
+		t.Fatalf("ValidationErrors = %#v, want invalid renewal_mode subscription error", report.ValidationErrors)
+	}
+}
+
 func TestDryRunReportsValidationAndDecisionSignals(t *testing.T) {
 	renewSoon := "2026-05-20"
 	missingRenew := ""
@@ -186,10 +272,13 @@ func TestImportCreatesRecordsWhenDryRunIsClean(t *testing.T) {
 		LifecycleStatus: vpsassets.LifecycleActive,
 		UsageStatus:     vpsassets.UsageInUse,
 		Subscription: &SubscriptionInput{
-			Price:         120,
-			Currency:      "usd",
-			BillingMonths: 12,
-			RenewAt:       &renewAt,
+			Price:              120,
+			Currency:           "usd",
+			BillingMonths:      12,
+			RenewAt:            &renewAt,
+			RenewalMode:        "gift",
+			AutoRenew:          true,
+			AutoRenewCancelled: true,
 		},
 	}}, Repositories{
 		Providers:     providerRepo,
@@ -215,6 +304,9 @@ func TestImportCreatesRecordsWhenDryRunIsClean(t *testing.T) {
 	}
 	if len(subscriptionRepo.created) != 1 || subscriptionRepo.created[0].VPSID != "vps_created_1" {
 		t.Fatalf("created subscriptions = %#v, want vps_created_1", subscriptionRepo.created)
+	}
+	if subscriptionRepo.created[0].RenewalMode != "gift" || subscriptionRepo.created[0].AutoRenew || subscriptionRepo.created[0].AutoRenewCancelled {
+		t.Fatalf("created subscription renewal fields = mode:%q auto:%t cancelled:%t, want gift false/false", subscriptionRepo.created[0].RenewalMode, subscriptionRepo.created[0].AutoRenew, subscriptionRepo.created[0].AutoRenewCancelled)
 	}
 	if report.Totals.ImportedProviders != 1 || report.Totals.ImportedVPSAssets != 1 || report.Totals.ImportedSubscriptions != 1 {
 		t.Fatalf("import totals = %#v, want 1/1/1", report.Totals)

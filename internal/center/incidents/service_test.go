@@ -891,6 +891,48 @@ func TestServiceEvaluateStaleMonitoringInstancesRecoversNonRunningMonitoringInst
 	}
 }
 
+func TestServiceEvaluateStaleMonitoringInstancesRecoversArchivedMonitoringInstance(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	stale := now.Add(-5 * time.Minute)
+	archivedAt := now.Add(-time.Hour)
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{listMonitoringInstancesResult: []monitoringinstances.Record{{
+		MonitoringInstanceID: "mi_archived",
+		MonitoringStatus:     monitoringinstances.MonitoringEnabled,
+		LifecycleStatus:      monitoringinstances.LifecycleInUse,
+		LastHeartbeatAt:      &stale,
+		ArchivedAt:           &archivedAt,
+	}}}
+	snapshots := &fakeSnapshotReader{activeByObject: map[string][]IncidentRecord{
+		"monitoring_instance:mi_archived": {activeIncident(ObjectTypeMonitoringInstance, "mi_archived", IncidentMonitoringInstanceHeartbeatMissing, now.Add(-time.Hour))},
+	}}
+	writer := &fakeMutationWriter{}
+	notifier := &fakeNotifier{}
+	service := NewService(monitoringInstanceRepo, &fakeTargetRepo{}, snapshots, writer, notifier, slog.Default(), time.Minute, time.Minute)
+
+	if err := service.EvaluateStaleMonitoringInstances(context.Background(), now); err != nil {
+		t.Fatalf("EvaluateStaleMonitoringInstances() error = %v", err)
+	}
+	if len(writer.mutations) != 1 {
+		t.Fatalf("mutations = %#v, want one archived monitoring instance recovery mutation", writer.mutations)
+	}
+	mutation := writer.mutations[0]
+	if mutation.ObjectType != ObjectTypeMonitoringInstance || mutation.ObjectID != "mi_archived" {
+		t.Fatalf("mutation = %#v, want monitoring_instance mi_archived", mutation)
+	}
+	if len(mutation.Active) != 0 {
+		t.Fatalf("mutation.Active = %#v, want no active incidents after archived administrative recovery", mutation.Active)
+	}
+	if len(mutation.Events) != 1 || mutation.Events[0].EventType != EventIncidentRecovered || mutation.Events[0].Summary != "监控实例已归档，当前异常按行政下线收敛" {
+		t.Fatalf("mutation.Events = %#v, want archived recovered event", mutation.Events)
+	}
+	if len(writer.notifications) != 0 {
+		t.Fatalf("notifications = %#v, want no administrative recovery notification records", writer.notifications)
+	}
+	if len(notifier.messages) != 0 {
+		t.Fatalf("notifier.messages = %#v, want no administrative recovery sends", notifier.messages)
+	}
+}
+
 func TestServiceAfterSuccessfulSyncRecoversInactiveMonitoringInstanceWithoutMetricEvaluation(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{

@@ -509,6 +509,84 @@ func TestApplyVPSCancellationPersistsFailedAuditAfterRollback(t *testing.T) {
 	}
 }
 
+func TestApplyVPSCancellationMovesInUseVPSOutOfUseBeforeCancelled(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	var vpsPatchArgs []any
+	tx := &fakeAssetLifecycleTx{
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			switch {
+			case strings.Contains(sql, "from subscriptions"),
+				strings.Contains(sql, "from vps_monitoring_instance_links"):
+				return &fakeSubscriptionRows{}, nil
+			default:
+				return nil, errors.New("unexpected query")
+			}
+		},
+		queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "from vps_assets"):
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil))
+					return nil
+				})
+			case strings.Contains(sql, "update vps_assets"):
+				vpsPatchArgs = append([]any(nil), args...)
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					record := assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleCancelled, vpsassets.RenewalCancel, now, nil)
+					record.UsageStatus = vpsassets.UsageIdle
+					scanVPSAssetRecordDestinations(dest, record)
+					return nil
+				})
+			case strings.Contains(sql, "insert into renewal_decisions"):
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					*(dest[0].(*string)) = "rdec_001"
+					*(dest[1].(*string)) = "vps_001"
+					fromDecision := "keep"
+					*(dest[2].(**string)) = &fromDecision
+					*(dest[3].(*string)) = "cancel"
+					*(dest[4].(*string)) = "expired and no renewal"
+					*(dest[5].(*time.Time)) = now
+					*(dest[6].(*time.Time)) = now
+					return nil
+				})
+			default:
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					return errors.New("unexpected query row")
+				})
+			}
+		},
+	}
+	repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{tx}}}
+
+	result, err := repo.ApplyVPSCancellation(context.Background(), "vps_001", assetlifecycle.ApplyCancellationInput{
+		Reason:             "expired and no renewal",
+		VPSLifecycleStatus: vpsassets.LifecycleCancelled,
+	})
+	if err != nil {
+		t.Fatalf("ApplyVPSCancellation() error = %v", err)
+	}
+	if result.Action.Status != assetlifecycle.ActionStatusCompleted {
+		t.Fatalf("action status = %q, want completed", result.Action.Status)
+	}
+	if len(vpsPatchArgs) != 45 {
+		t.Fatalf("vps patch args = %#v, want patchVPSAssetRow args", vpsPatchArgs)
+	}
+	if vpsPatchArgs[35] != true || vpsPatchArgs[36] != string(vpsassets.UsageIdle) {
+		t.Fatalf("usage patch args = set:%#v value:%#v, want usage_status idle before cancelled", vpsPatchArgs[35], vpsPatchArgs[36])
+	}
+	if len(result.Steps) == 0 {
+		t.Fatalf("steps = %#v, want VPS lifecycle step", result.Steps)
+	}
+	if result.Steps[0].BeforeState["usage_status"] != string(vpsassets.UsageInUse) || result.Steps[0].AfterState["usage_status"] != string(vpsassets.UsageIdle) {
+		t.Fatalf("step states before=%#v after=%#v, want usage_status in_use -> idle", result.Steps[0].BeforeState, result.Steps[0].AfterState)
+	}
+	if tx.commitCount != 1 {
+		t.Fatalf("commit count = %d, want 1", tx.commitCount)
+	}
+}
+
 func TestExtendVPSValidityUpdatesSingleActiveSubscriptionAndAuditsAction(t *testing.T) {
 	t.Parallel()
 
