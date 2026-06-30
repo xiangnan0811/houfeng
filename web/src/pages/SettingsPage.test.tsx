@@ -576,6 +576,35 @@ describe('SettingsPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('rejects misordered incident thresholds before submitting settings', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSettingsPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+
+    switchTab('监控策略')
+    fireEvent.change(screen.getByLabelText('CPU 关注阈值'), {
+      target: { value: '95' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('CPU 阈值必须满足 关注 < 告警 < 严重。'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.change(screen.getByLabelText('CPU 关注阈值'), {
+      target: { value: '80' },
+    })
+    fireEvent.change(screen.getByLabelText('Load5 严重阈值'), {
+      target: { value: '4' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Load5 阈值必须满足 关注 < 严重。'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('saves a Telegram chat-id-only update when a token is already stored', async () => {
     const fetchMock = vi
       .fn()

@@ -36,6 +36,61 @@
 - **当前类型是手写**，与 Go contract 没有自动生成机制。新增字段时按以下顺序：1) center handler / contract 改完；2) 在 `lib/types.ts` 加字段（保持 snake_case、保持可选性与后端一致）；3) 在 `lib/api.ts` 引用；4) page / component 消费。
 - Asset Ledger 共享枚举必须跟后端机器值同步：`AssetScope = 'current'|'historical'|'archived'|'all'`，其中 `archived` 是旧 API 兼容别名；`RenewalMode = 'auto'|'manual'|'auto_cancelled'|'lottery'|'gift'|'bonus'|'other'`，其中 `lottery` 展示为“抽奖”，`gift` 展示为“赠送”。选项和标签集中在 `web/src/lib/assetOptions.ts`，页面不得散落 `抽奖/赠送` 这种混合标签。
 
+### Incident threshold settings contract
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `IncidentDefaults` / `IncidentDefaultsOverride` 前端类型、Settings 页监控策略表单、`web/src/config/thresholds.ts`、监控列表/详情阈值展示，或后端 `internal/center/settings.IncidentDefaults`。
+- 目标：前端提交、API 类型和监控图表阈值语义必须与后端 settings 校验一致，不能让用户保存或看到倒序等级。
+
+#### 2. Signatures
+
+- API response/request fields: `incident_defaults.cpu_warning_pct`、`cpu_alert_pct`、`cpu_critical_pct`、`mem_*`、`disk_*`、`inode_*`、`iowait_warning_pct`、`iowait_critical_pct`、`load5_warning`、`load5_critical`。
+- Settings page builder: `web/src/pages/SettingsPage.tsx` `buildIncidentDefaults(form)`。
+- Runtime presentation resolver: `web/src/config/thresholds.ts` `resolveThresholds(incidentDefaults)`.
+
+#### 3. Contracts
+
+- CPU / 内存 / 磁盘 / Inode 三段阈值必须满足 `关注 < 告警 < 严重`，对应后端 `warning < alert < critical`。
+- IOWait / Load5 只有关注与严重输入，必须满足 `关注 < 严重`；告警阈值由中点派生，不在 Settings 页暴露独立输入。
+- Settings 页本地校验失败时必须显示中文错误并阻止 `PUT /api/settings`。
+- `resolveThresholds` 是展示层防御边界：即使 API 返回历史脏数据，倒序 metric 也必须回退到 `DEFAULT_THRESHOLDS`，避免图表阈值线和等级 tooltip 反向。
+- 修改默认阈值时必须同时检查 `web/src/config/thresholds.ts` 与后端 `internal/center/settings/types.go` 的默认值是否一致。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| 用户输入 CPU `95 / 90 / 96` | Settings 页显示 `CPU 阈值必须满足 关注 < 告警 < 严重。`，不提交 |
+| 用户输入 Load5 `4 / 4` | Settings 页显示 `Load5 阈值必须满足 关注 < 严重。`，不提交 |
+| API 返回倒序 CPU 阈值 | 图表/列表使用 CPU 默认阈值 |
+| API 返回有效 IOWait `10 / 40` | 展示阈值为 `10 / 25 / 40` |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: Settings 页保存 `CPU 80/90/95` 后，监控详情 tooltip、阈值线和后端 evaluator 语义一致。
+- Base: `/api/settings` 暂时失败或返回缺失阈值，页面继续使用 `DEFAULT_THRESHOLDS`。
+- Bad: Settings 页只校验正整数，允许 `CPU 95/80/90` 发到后端。
+- Bad: `resolveThresholds` 对 `IOWait 50/20` 派生 `35` 并渲染倒序阈值线。
+
+#### 6. Tests Required
+
+- `web/src/pages/SettingsPage.test.tsx`: 覆盖倒序阈值本地拒绝和不发 PUT。
+- `web/src/config/thresholds.test.ts`: 覆盖有效两段阈值派生 alert，以及倒序 runtime settings 回退默认值。
+- 跨后端改动时同步跑 `go test ./internal/center/settings`。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// 错误：逐项解析后直接提交，等级顺序未校验。
+cpu_warning_pct: parsePositiveInteger(form.cpuWarningPct, 'CPU 关注')
+```
+
+```tsx
+// 正确：解析后校验递进关系，再提交。
+assertThreeLevelThresholdOrder('CPU', cpuWarning, cpuAlert, cpuCritical)
+```
+
 ### MonitoringInstance onboarding 一键安装数据流
 
 #### 1. Scope / Trigger

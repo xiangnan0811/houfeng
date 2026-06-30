@@ -418,6 +418,64 @@ func TestSettingsValidateRejectsOutOfRangeThreshold(t *testing.T) {
 	}
 }
 
+func TestSettingsValidateRejectsMisorderedIncidentThresholds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		mutate    func(*IncidentDefaults)
+		wantError string
+	}{
+		{
+			name: "cpu warning must stay below alert",
+			mutate: func(defaults *IncidentDefaults) {
+				defaults.CPUWarningPct = 91
+				defaults.CPUAlertPct = 90
+			},
+			wantError: "cpu thresholds",
+		},
+		{
+			name: "cpu alert must stay below critical",
+			mutate: func(defaults *IncidentDefaults) {
+				defaults.CPUAlertPct = 95
+				defaults.CPUCriticalPct = 95
+			},
+			wantError: "cpu thresholds",
+		},
+		{
+			name: "iowait warning must stay below critical",
+			mutate: func(defaults *IncidentDefaults) {
+				defaults.IOWaitWarningPct = 50
+				defaults.IOWaitCriticalPct = 20
+			},
+			wantError: "iowait thresholds",
+		},
+		{
+			name: "load warning must stay below critical",
+			mutate: func(defaults *IncidentDefaults) {
+				defaults.Load5Warning = 8
+				defaults.Load5Critical = 8
+			},
+			wantError: "load5 thresholds",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := Default()
+			tt.mutate(&input.IncidentDefaults)
+
+			_, err := Validate(input)
+			if !errors.Is(err, ErrInvalidSettings) {
+				t.Fatalf("Validate() error = %v, want ErrInvalidSettings", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("Validate() error = %v, want mention of %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestSettingsValidateRejectsOutOfRangeOverrideThreshold(t *testing.T) {
 	t.Parallel()
 
@@ -441,6 +499,106 @@ func TestSettingsValidateRejectsOutOfRangeOverrideThreshold(t *testing.T) {
 	}
 }
 
+func TestSettingsValidateRejectsMisorderedOverrideIncidentThresholds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		override  IncidentDefaultsOverride
+		wantError string
+	}{
+		{
+			name: "partial cpu override must preserve effective threshold order",
+			override: IncidentDefaultsOverride{
+				CPUWarningPct: intPtr(95),
+			},
+			wantError: "override cpu thresholds",
+		},
+		{
+			name: "partial iowait override must preserve effective threshold order",
+			override: IncidentDefaultsOverride{
+				IOWaitCriticalPct: intPtr(20),
+			},
+			wantError: "override iowait thresholds",
+		},
+		{
+			name: "partial load override must preserve effective threshold order",
+			override: IncidentDefaultsOverride{
+				Load5Warning: float64Ptr(8),
+			},
+			wantError: "override load5 thresholds",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := Default()
+			input.OverrideRules = OverrideRules{
+				MonitoringInstanceLabels: []MonitoringInstanceLabelOverrideRule{{
+					Label: "core",
+					Overrides: SettingsOverrideFields{
+						IncidentDefaults: &tt.override,
+					},
+				}},
+			}
+
+			_, err := Validate(input)
+			if !errors.Is(err, ErrInvalidSettings) {
+				t.Fatalf("Validate() error = %v, want ErrInvalidSettings", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("Validate() error = %v, want mention of %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestSettingsValidateChecksOverrideIncidentThresholdOrderAgainstConfiguredDefaults(t *testing.T) {
+	t.Parallel()
+
+	input := Default()
+	input.IncidentDefaults.CPUWarningPct = 50
+	input.IncidentDefaults.CPUAlertPct = 60
+	input.IncidentDefaults.CPUCriticalPct = 70
+	input.OverrideRules = OverrideRules{
+		MonitoringInstanceLabels: []MonitoringInstanceLabelOverrideRule{{
+			Label: "core",
+			Overrides: SettingsOverrideFields{
+				IncidentDefaults: &IncidentDefaultsOverride{
+					CPUCriticalPct: intPtr(75),
+				},
+			},
+		}},
+	}
+	if _, err := Validate(input); err != nil {
+		t.Fatalf("Validate() error = %v, want nil for override ordered against configured defaults", err)
+	}
+
+	input = Default()
+	input.IncidentDefaults.CPUWarningPct = 60
+	input.IncidentDefaults.CPUAlertPct = 70
+	input.IncidentDefaults.CPUCriticalPct = 80
+	input.OverrideRules = OverrideRules{
+		MonitoringInstanceLabels: []MonitoringInstanceLabelOverrideRule{{
+			Label: "core",
+			Overrides: SettingsOverrideFields{
+				IncidentDefaults: &IncidentDefaultsOverride{
+					CPUWarningPct: intPtr(75),
+				},
+			},
+		}},
+	}
+	_, err := Validate(input)
+	if !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidSettings", err)
+	}
+	if !strings.Contains(err.Error(), "override cpu thresholds") {
+		t.Fatalf("Validate() error = %v, want override cpu thresholds", err)
+	}
+}
+
 func stringPtr(value string) *string { return &value }
 
 func intPtr(value int) *int { return &value }
+
+func float64Ptr(value float64) *float64 { return &value }

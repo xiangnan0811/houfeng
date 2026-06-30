@@ -29,4 +29,20 @@ describe('thresholds', () => {
       load5: { warning: 2, alert: 6, critical: 10 },
     })
   })
+
+  it('falls back to defaults when runtime thresholds are misordered', () => {
+    expect(resolveThresholds({
+      cpu_warning_pct: 95,
+      cpu_alert_pct: 80,
+      cpu_critical_pct: 90,
+      iowait_warning_pct: 50,
+      iowait_critical_pct: 20,
+      load5_warning: 9,
+      load5_critical: 4,
+    })).toMatchObject({
+      cpu: DEFAULT_THRESHOLDS.cpu,
+      iowait: DEFAULT_THRESHOLDS.iowait,
+      load5: DEFAULT_THRESHOLDS.load5,
+    })
+  })
 })

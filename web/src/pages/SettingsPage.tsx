@@ -128,6 +128,18 @@ function parsePositiveNumber(value: string, label: string) {
   return num
 }
 
+function assertThreeLevelThresholdOrder(metric: string, warning: number, alert: number, critical: number) {
+  if (!(warning < alert && alert < critical)) {
+    throw new Error(`${metric} 阈值必须满足 关注 < 告警 < 严重。`)
+  }
+}
+
+function assertTwoLevelThresholdOrder(metric: string, warning: number, critical: number) {
+  if (!(warning < critical)) {
+    throw new Error(`${metric} 阈值必须满足 关注 < 严重。`)
+  }
+}
+
 function parseCommaList(value: string, label: string) {
   const items = value
     .split(',')
@@ -148,7 +160,7 @@ type SettingsUpdateDraft = Omit<SettingsUpdateInput, 'telegram' | 'feishu'> & {
 }
 
 function buildIncidentDefaults(f: SettingsFormState) {
-  return {
+  const incidentDefaults = {
     heartbeat_interval_seconds: parsePositiveInteger(f.incidentDefaults.heartbeatIntervalSeconds, '心跳间隔'),
     stale_threshold_intervals: parsePositiveInteger(f.incidentDefaults.staleThresholdIntervals, '失联阈值'),
     sweep_interval_seconds: parsePositiveInteger(f.incidentDefaults.sweepIntervalSeconds, '扫描间隔'),
@@ -172,6 +184,13 @@ function buildIncidentDefaults(f: SettingsFormState) {
     load5_warning: parsePositiveNumber(f.incidentDefaults.load5Warning, 'Load5 关注'),
     load5_critical: parsePositiveNumber(f.incidentDefaults.load5Critical, 'Load5 严重'),
   }
+  assertThreeLevelThresholdOrder('CPU', incidentDefaults.cpu_warning_pct, incidentDefaults.cpu_alert_pct, incidentDefaults.cpu_critical_pct)
+  assertThreeLevelThresholdOrder('内存', incidentDefaults.mem_warning_pct, incidentDefaults.mem_alert_pct, incidentDefaults.mem_critical_pct)
+  assertThreeLevelThresholdOrder('磁盘', incidentDefaults.disk_warning_pct, incidentDefaults.disk_alert_pct, incidentDefaults.disk_critical_pct)
+  assertThreeLevelThresholdOrder('Inode', incidentDefaults.inode_warning_pct, incidentDefaults.inode_alert_pct, incidentDefaults.inode_critical_pct)
+  assertTwoLevelThresholdOrder('IOWait', incidentDefaults.iowait_warning_pct, incidentDefaults.iowait_critical_pct)
+  assertTwoLevelThresholdOrder('Load5', incidentDefaults.load5_warning, incidentDefaults.load5_critical)
+  return incidentDefaults
 }
 
 function buildIPQualitySettings(f: SettingsFormState) {
