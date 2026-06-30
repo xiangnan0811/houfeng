@@ -1122,3 +1122,36 @@ Recorded a full post-fix lifecycle/state review, persisted Trellis task preautho
 ### Next Steps
 
 - None - task complete
+
+
+## Session 210: Lifecycle state closure fix
+
+**Date**: 2026-06-30
+**Task**: Lifecycle state closure fix
+**Branch**: `audit-state-lifecycle-consistency`
+
+### Summary
+
+Closed VPS merged-state validation gaps, subscription renewal_mode import support, incident/archive/browser fixture closure, and recorded final state review.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `127a5cb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
