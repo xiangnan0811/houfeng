@@ -43,6 +43,7 @@ const (
 	RenewalModeManual        RenewalMode = "manual"
 	RenewalModeAutoCancelled RenewalMode = "auto_cancelled"
 	RenewalModeLottery       RenewalMode = "lottery"
+	RenewalModeGift          RenewalMode = "gift"
 	RenewalModeBonus         RenewalMode = "bonus"
 	RenewalModeOther         RenewalMode = "other"
 
@@ -536,7 +537,7 @@ func NormalizeListFilters(filters ListFilters) ListFilters {
 	filters.BudgetStatus = strings.ToLower(strings.TrimSpace(filters.BudgetStatus))
 	filters.PaymentMethod = strings.TrimSpace(filters.PaymentMethod)
 	filters.Label = strings.TrimSpace(filters.Label)
-	filters.RenewalDecision = NormalizeRenewalMode(filters.RenewalDecision)
+	filters.RenewalDecision = strings.TrimSpace(filters.RenewalDecision)
 	filters.AssetScope = vpsassets.AssetScope(strings.TrimSpace(string(filters.AssetScope)))
 	filters.Sort = strings.ToLower(strings.TrimSpace(filters.Sort))
 	if filters.Sort == "" {
@@ -566,7 +567,7 @@ func ValidateListFilters(filters ListFilters) error {
 			return fmt.Errorf("%w: invalid budget_status", ErrInvalidSubscriptionInput)
 		}
 	}
-	if filters.RenewalDecision != "" && !IsValidRenewalMode(filters.RenewalDecision) {
+	if filters.RenewalDecision != "" && !vpsassets.IsValidRenewalDecision(vpsassets.RenewalDecision(filters.RenewalDecision)) {
 		return fmt.Errorf("%w: invalid renewal_decision", ErrInvalidSubscriptionInput)
 	}
 	if filters.AssetScope != "" && !vpsassets.IsValidAssetScope(filters.AssetScope) {
@@ -650,7 +651,7 @@ func IsValidBillingPeriodUnit(value string) bool {
 
 func IsValidRenewalMode(value string) bool {
 	switch RenewalMode(NormalizeRenewalMode(value)) {
-	case RenewalModeAuto, RenewalModeManual, RenewalModeAutoCancelled, RenewalModeLottery, RenewalModeBonus, RenewalModeOther:
+	case RenewalModeAuto, RenewalModeManual, RenewalModeAutoCancelled, RenewalModeLottery, RenewalModeGift, RenewalModeBonus, RenewalModeOther:
 		return true
 	default:
 		return false

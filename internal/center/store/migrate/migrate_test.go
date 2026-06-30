@@ -189,6 +189,76 @@ func TestCommandActionAuditMigrationCreatesMetadataOnlyAuditTable(t *testing.T) 
 	}
 }
 
+func TestIPQualityStaleAfterSettingsMigrationRebuildsReadModel(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0047_ip_quality_stale_after_settings.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, want := range []string{
+		"stale_after_seconds",
+		"604800",
+		"drop view if exists ip_quality_latest_vps_summaries",
+		"drop view if exists ip_quality_assigned_vps_reports",
+		"center_settings",
+		"ip_quality_settings",
+		"make_interval(secs =>",
+		"assigned_reports.observed_at < now() - make_interval",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0047 migration missing %q", want)
+		}
+	}
+	if strings.Contains(sql, "interval '7 days'") {
+		t.Fatalf("0047 migration must not keep the hardcoded 7-day stale window")
+	}
+}
+
+func TestSubscriptionGiftRenewalModeMigrationRelaxesConstraints(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0048_subscription_gift_renewal_mode.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, want := range []string{
+		"subscriptions_renewal_mode_allowed",
+		"price_histories_renewal_mode_allowed",
+		"renewal_mode in ('auto', 'manual', 'auto_cancelled', 'lottery', 'gift', 'bonus', 'other')",
+		"from_renewal_mode in ('auto', 'manual', 'auto_cancelled', 'lottery', 'gift', 'bonus', 'other')",
+		"to_renewal_mode in ('auto', 'manual', 'auto_cancelled', 'lottery', 'gift', 'bonus', 'other')",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0048 migration missing %q", want)
+		}
+	}
+}
+
+func TestVPSAssetStateCombinationMigrationAddsCrossColumnConstraint(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0049_vps_asset_state_combination_constraint.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, want := range []string{
+		"vps_assets_state_combination_valid",
+		"lifecycle_status <> 'cancelled'",
+		"renewal_decision in ('cancel', 'auto_renew_cancelled')",
+		"usage_status <> 'in_use'",
+		"lifecycle_status <> 'to_cancel'",
+		"lifecycle_status <> 'to_migrate'",
+		"renewal_decision = 'migrate'",
+		"renewal_decision <> 'replaced'",
+		"lifecycle_status <> 'active'",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0049 migration missing %q", want)
+		}
+	}
+	if strings.Contains(sql, "not valid") {
+		t.Fatalf("0049 migration must validate existing rows instead of adding a not valid constraint")
+	}
+}
+
 func TestIPQualityReadModelFilterMigrationHidesFailurePlaceholders(t *testing.T) {
 	payload, err := migrations.FS.ReadFile("0041_filter_ip_quality_read_models.sql")
 	if err != nil {

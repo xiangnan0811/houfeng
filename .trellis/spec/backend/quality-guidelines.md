@@ -415,6 +415,66 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 | 引入新 worker | 1) `internal/center/<x>/worker.go` 实现 `Worker.Run(ctx) error`；2) `cmd/houfeng-center/bootstrap.go` 添加构造与传给 `centerapp.New(...)`；3) `bootstrap_test.go` 的 `TestBootstrapCenterBuildsAppOnSuccess` 把 `len(workers)` 期望值从 N 改为 N+1（**当前为 3**：incident、retention、session cleanup） |
 | agent 端新采集 / 新探针 | 1) `agent/hostsample/` 或 `agent/probe/` 实现采集；2) 通过 `agent/runtime/runtime.go` 的 `buildSyncRequest` 串接；3) 必要时改 `internal/contracts/agentapi/` DTO（不可单边） |
 
+### Scenario: incident threshold settings order
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `centersettings.IncidentDefaults`、`IncidentDefaultsOverride`、`internal/center/incidents.MetricThresholds`、`/api/settings` 的 incident defaults 请求/响应，或前端监控阈值展示/设置提交。
+- 目标：异常等级阈值必须严格递进，避免用户保存倒序配置后 evaluator、图表阈值线和中文等级文案互相矛盾。
+
+#### 2. Signatures
+
+- Backend settings type: `internal/center/settings.IncidentDefaults`。
+- Backend override type: `internal/center/settings.IncidentDefaultsOverride`。
+- Frontend settings type: `web/src/lib/types.ts` `IncidentDefaults` / `IncidentDefaultsOverride`。
+- Frontend runtime resolver: `web/src/config/thresholds.ts` `resolveThresholds(...)`。
+
+#### 3. Contracts
+
+- CPU / memory / disk / inode 三段阈值必须满足 `warning < alert < critical`。
+- IOWait / Load5 两段设置必须满足 `warning < critical`；alert 只能由中点派生。
+- `settings.Validate` 是持久化与 API 输入的权威校验入口，必须拒绝倒序或相等阈值并返回可 `errors.Is(err, ErrInvalidSettings)` 判定的错误。
+- override 只给出部分 incident threshold 字段时，必须先与当前已规范化的全局 `IncidentDefaults` 合成，再校验有效阈值顺序；不能与代码默认值合成。
+- 前端 Settings 页提交前必须做同样校验，错误文案使用中文等级名，例如 `CPU 阈值必须满足 关注 < 告警 < 严重。`。
+- 前端展示用 `resolveThresholds` 收到旧脏数据时，按 metric 回退到 `DEFAULT_THRESHOLDS`，不要渲染倒序阈值线。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| CPU `warning >= alert` 或 `alert >= critical` | `settings.Validate` 返回 `ErrInvalidSettings` |
+| Load5 / IOWait `warning >= critical` | `settings.Validate` 返回 `ErrInvalidSettings` |
+| override 局部字段与当前全局 defaults 合成后倒序 | `settings.Validate` 返回 `ErrInvalidSettings` |
+| Settings 页用户输入倒序阈值 | 页面显示中文校验错误且不发 `PUT /api/settings` |
+| `resolveThresholds` 收到倒序 runtime settings | 该 metric 使用默认阈值 |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: `CPU 80/90/95`、`IOWait 20/50`、`Load5 4/8` 保存成功，evaluator 和图表均按递进等级工作。
+- Base: 全局 CPU 改成 `50/60/70`，某个 override 只把 critical 改成 `75`，按 `50/60/75` 校验后允许。
+- Bad: `CPU 95/80/90` 被保存，导致关注/告警/严重语义在 evaluator 中反转。
+- Bad: override 与代码默认值合成而不是当前全局配置合成，误放行或误拒绝局部阈值。
+
+#### 6. Tests Required
+
+- `internal/center/settings/types_test.go`: 覆盖默认阈值三段/两段倒序与相等拒绝、override 局部字段按当前全局 defaults 合成校验。
+- `web/src/pages/SettingsPage.test.tsx`: 覆盖倒序设置显示中文错误，且 `fetch` 只发生初始 GET、不发生 PUT。
+- `web/src/config/thresholds.test.ts`: 覆盖 runtime settings 倒序时按 metric 回退默认阈值。
+
+#### 7. Wrong vs Correct
+
+```go
+// 错误：只校验范围，不校验等级顺序。
+if warning < 1 || warning > 100 { return err }
+```
+
+```go
+// 正确：范围校验后必须校验有效等级顺序。
+if !(warning < alert && alert < critical) {
+	return invalidSettings("cpu thresholds must satisfy warning < alert < critical")
+}
+```
+
 ---
 
 ## 反模式 / Common Mistakes

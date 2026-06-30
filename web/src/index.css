@@ -1025,6 +1025,7 @@ select.input::-ms-expand{display:none}
 /* ===== PAGE COMPAT: Watchtower metric card ===== */
 .watchtower-metric-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-2);padding:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2);min-width:0;position:relative;box-shadow:0 var(--border-w) 0 color-mix(in srgb,var(--text-primary) 5%,transparent) inset}
 .watchtower-metric-card--notice{border-left:2px solid var(--color-state-notice);padding-left:calc(var(--space-3) - 1px)}
+.watchtower-metric-card--alert{border-left:2px solid var(--color-state-alert);padding-left:calc(var(--space-3) - 1px);background:color-mix(in srgb,var(--color-state-alert) 4%,var(--surface))}
 .watchtower-metric-card--critical{border-left:2px solid var(--color-state-critical);padding-left:calc(var(--space-3) - 1px);background:color-mix(in srgb,var(--color-state-critical) 5%,var(--surface))}
 .watchtower-metric-card__head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2)}
 .watchtower-metric-card__head h3{font-family:var(--font-sans);font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:var(--text-muted);margin:0}

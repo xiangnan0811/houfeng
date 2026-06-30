@@ -682,6 +682,7 @@ export type SettingsRecord = {
 export type IPQualitySettings = {
   enabled: boolean
   frequency_seconds: number
+  stale_after_seconds: number
   timeout_seconds: number
   raw_retention_days: number
   history_retention_days: number
@@ -754,7 +755,7 @@ export type SubscriptionStatus = 'active' | 'paused' | 'cancelled' | 'expired' |
 
 export type BillingPeriodUnit = 'day' | 'week' | 'month' | 'year'
 
-export type RenewalMode = 'auto' | 'manual' | 'auto_cancelled' | 'lottery' | 'bonus' | 'other'
+export type RenewalMode = 'auto' | 'manual' | 'auto_cancelled' | 'lottery' | 'gift' | 'bonus' | 'other'
 
 export type AssetServiceType = 'web' | 'api' | 'database' | 'worker' | 'proxy' | 'other'
 
@@ -2168,7 +2169,7 @@ export type SubscriptionListFilter = {
   asset_scope?: AssetScope | null
 }
 
-export type AssetScope = 'current' | 'archived' | 'all'
+export type AssetScope = 'current' | 'archived' | 'historical' | 'all'
 
 export type SubscriptionBreakdownItem = {
   key: string

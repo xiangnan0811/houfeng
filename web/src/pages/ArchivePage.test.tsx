@@ -83,7 +83,7 @@ describe('ArchivePage', () => {
     vi.restoreAllMocks()
   })
 
-  it('loads archived VPS and subscriptions through archived scope and renders a list-only archive ledger', async () => {
+  it('loads archived VPS and subscriptions through historical scope and renders a list-only archive ledger', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse([archivedVPS]))
@@ -108,12 +108,12 @@ describe('ArchivePage', () => {
     expect(screen.queryByText('Tokyo Agent History')).not.toBeInTheDocument()
     expect(screen.queryByText('Legacy API')).not.toBeInTheDocument()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps?asset_scope=archived', {
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps?asset_scope=historical', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/subscriptions?sort=renew_at&order=asc&asset_scope=archived', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/subscriptions?sort=renew_at&order=asc&asset_scope=historical', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',

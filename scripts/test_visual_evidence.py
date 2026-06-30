@@ -69,6 +69,11 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(user["username"], "observability-evidence")
 
+        status, settings = call_observability_api("/api/settings")
+        self.assertEqual(status, 200)
+        self.assertEqual(settings["incident_defaults"]["load5_critical"], 8.0)
+        self.assertEqual(settings["ip_quality_settings"]["stale_after_seconds"], 604800)
+
         status, dashboard = call_observability_api("/api/dashboard")
         self.assertEqual(status, 200)
         self.assertGreaterEqual(dashboard["abnormal_monitoring_instance_count"], 2)
@@ -254,12 +259,11 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
             any(bucket["monthly_cost"] > 0 for bucket in statistics["cost_month_buckets"])
         )
 
-        status, body = call_asset_workflow_api("/api/settings")
-        self.assertEqual(status, 404)
-        self.assertEqual(
-            body["error"],
-            "mock asset workflow API has no fixture for this request",
-        )
+        status, settings = call_asset_workflow_api("/api/settings")
+        self.assertEqual(status, 200)
+        self.assertEqual(settings["incident_defaults"]["disk_alert_pct"], 92)
+        self.assertEqual(settings["ip_quality_settings"]["stale_after_seconds"], 604800)
+        self.assertEqual(settings["subscription_cost_settings"]["base_currency"], "CNY")
 
 
 if __name__ == "__main__":

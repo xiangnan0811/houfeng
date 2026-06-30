@@ -189,15 +189,11 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 			}
 
 			input = vpsassets.NormalizePatchInput(input)
-			if err := vpsassets.ValidatePatchInput(input); err != nil {
+			if err := vpsassets.ValidateOrdinaryPatchInput(input); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return
 			}
 			if input.LifecycleStatus.Set {
-				if input.LifecycleStatus.Value == vpsassets.LifecycleArchived {
-					writeError(w, http.StatusBadRequest, "invalid input")
-					return
-				}
 				current, err := repo.GetVPSAsset(r.Context(), vpsID)
 				if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
 					writeError(w, http.StatusNotFound, "vps asset not found")

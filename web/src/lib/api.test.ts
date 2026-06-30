@@ -222,6 +222,7 @@ const settingsResponseBody = {
   ip_quality_settings: {
     enabled: true,
     frequency_seconds: 86400,
+    stale_after_seconds: 604800,
     timeout_seconds: 15,
     raw_retention_days: 90,
     history_retention_days: 365,
@@ -312,6 +313,7 @@ const settingsUpdateBody = {
   ip_quality_settings: {
     enabled: true,
     frequency_seconds: 86400,
+    stale_after_seconds: 604800,
     timeout_seconds: 15,
     raw_retention_days: 90,
     history_retention_days: 365,
@@ -629,7 +631,7 @@ describe('api helpers', () => {
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(vps)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(listVPSAssets({ provider_id: 'pv_001', lifecycle_status: 'active', usage_status: 'in_use', renewal_decision: 'keep', asset_scope: 'archived' })).resolves.toEqual([vps])
+    await expect(listVPSAssets({ provider_id: 'pv_001', lifecycle_status: 'active', usage_status: 'in_use', renewal_decision: 'keep', asset_scope: 'historical' })).resolves.toEqual([vps])
     await expect(getVPSAsset('vps_001')).resolves.toEqual(detail)
     await expect(getVPSIPQuality('vps_001')).resolves.toEqual(ipQuality)
     await expect(getVPSIPQualityReport('vps_001', 'ipq_001')).resolves.toEqual(ipQualityDetail)
@@ -638,7 +640,7 @@ describe('api helpers', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      '/api/vps?provider_id=pv_001&lifecycle_status=active&usage_status=in_use&renewal_decision=keep&asset_scope=archived',
+      '/api/vps?provider_id=pv_001&lifecycle_status=active&usage_status=in_use&renewal_decision=keep&asset_scope=historical',
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
@@ -1667,7 +1669,7 @@ describe('api helpers', () => {
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(updatedSubscription)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(listSubscriptions({ vps_id: 'vps_001', status: 'active', renew_within_days: 30, sort: 'renew_at', order: 'asc', asset_scope: 'archived' })).resolves.toEqual([subscription])
+    await expect(listSubscriptions({ vps_id: 'vps_001', status: 'active', renew_within_days: 30, sort: 'renew_at', order: 'asc', asset_scope: 'historical' })).resolves.toEqual([subscription])
     await expect(getSubscription('sub_001')).resolves.toEqual(subscription)
     await expect(createSubscription(input)).resolves.toEqual(subscription)
     await expect(createVPSSubscription('vps_001', vpsScopedInput)).resolves.toEqual(subscription)
@@ -1675,7 +1677,7 @@ describe('api helpers', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      '/api/subscriptions?vps_id=vps_001&status=active&renew_within_days=30&sort=renew_at&order=asc&asset_scope=archived',
+      '/api/subscriptions?vps_id=vps_001&status=active&renew_within_days=30&sort=renew_at&order=asc&asset_scope=historical',
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',

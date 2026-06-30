@@ -9,7 +9,7 @@ import {
   formatPercent,
 } from '../../lib/format'
 import type { HostMetricPoint, HostSample, MonitoringRuntimeWindow } from '../../lib/types'
-import { DEFAULT_THRESHOLDS } from '../../config/thresholds'
+import { DEFAULT_THRESHOLDS, type MetricThreshold, type MetricThresholds } from '../../config/thresholds'
 
 type Props = {
   sample: HostSample | null
@@ -17,6 +17,7 @@ type Props = {
   timeWindow: MetricTimeWindow
   window?: MonitoringRuntimeWindow
   isMaintenance?: boolean
+  thresholds?: MetricThresholds
 }
 
 type MetricTimeWindow = 'realtime' | '24h' | '7d' | '30d'
@@ -34,8 +35,8 @@ export type HostMetricSeriesPoint = Pick<
   | 'net_out_bytes_per_sec'
 >
 
-type MetricPriority = 0 | 2 | 3 // 0=normal, 2=notice, 3=critical
-type MetricTone = 'normal' | 'notice' | 'critical'
+type MetricPriority = 0 | 1 | 2 | 3 // 0=normal, 1=warning, 2=alert, 3=critical
+type MetricTone = 'normal' | 'notice' | 'alert' | 'critical'
 
 interface MetricCardDef {
   id: string
@@ -45,20 +46,17 @@ interface MetricCardDef {
   render: () => ReactNode
 }
 
-function priorityFromThresholds(value: number, thresholds: { value: number; tone: string }[]): MetricPriority {
-  let p: MetricPriority = 0
-  for (const t of thresholds) {
-    if (value >= t.value) {
-      if (t.tone === 'critical') p = 3
-      else if (t.tone === 'notice' && p < 2) p = 2
-    }
-  }
-  return p
+function priorityFromThresholds(value: number, thresholds: MetricThreshold): MetricPriority {
+  if (value >= thresholds.critical) return 3
+  if (value >= thresholds.alert) return 2
+  if (value >= thresholds.warning) return 1
+  return 0
 }
 
 function priorityTone(p: MetricPriority): MetricTone {
   if (p === 3) return 'critical'
-  if (p === 2) return 'notice'
+  if (p === 2) return 'alert'
+  if (p === 1) return 'notice'
   return 'normal'
 }
 
@@ -77,8 +75,21 @@ function toSeries(
 
 function cardRibbonClass(priority: MetricPriority): string {
   if (priority === 3) return 'watchtower-metric-card--critical'
-  if (priority === 2) return 'watchtower-metric-card--notice'
+  if (priority === 2) return 'watchtower-metric-card--alert'
+  if (priority === 1) return 'watchtower-metric-card--notice'
   return ''
+}
+
+function thresholdLines(thresholds: MetricThreshold, suffix = '') {
+  return [
+    { value: thresholds.warning, tone: 'notice' as const, label: `${thresholds.warning}${suffix}` },
+    { value: thresholds.alert, tone: 'alert' as const, label: `${thresholds.alert}${suffix}` },
+    { value: thresholds.critical, tone: 'critical' as const, label: `${thresholds.critical}${suffix}` },
+  ]
+}
+
+function thresholdTitle(metric: string, thresholds: MetricThreshold, suffix: string, extra: string) {
+  return `${metric}。正常：< ${thresholds.warning}${suffix}，关注：≥ ${thresholds.warning}${suffix}，告警：≥ ${thresholds.alert}${suffix}，严重：≥ ${thresholds.critical}${suffix}。${extra}`
 }
 
 function formatCapacityBytes(value?: number | null): string {
@@ -104,6 +115,7 @@ export function MonitoringInstanceWatchtowerMetrics({
   timeWindow,
   window,
   isMaintenance = false,
+  thresholds = DEFAULT_THRESHOLDS,
 }: Props) {
   const [hoveredAt, setHoveredAt] = useState<string | null>(null)
 
@@ -125,26 +137,13 @@ export function MonitoringInstanceWatchtowerMetrics({
     onHoverAtChange: setHoveredAt,
   }
 
-  // Compute priorities for each metric using default thresholds
-  const t = DEFAULT_THRESHOLDS
-  const cpuPriority = priorityFromThresholds(sample.cpu_usage_pct, [
-    { value: t.cpu.notice, tone: 'notice' }, { value: t.cpu.critical, tone: 'critical' },
-  ])
-  const memPriority = priorityFromThresholds(sample.mem_used_pct, [
-    { value: t.mem.notice, tone: 'notice' }, { value: t.mem.critical, tone: 'critical' },
-  ])
-  const diskPriority = priorityFromThresholds(sample.disk_used_pct, [
-    { value: t.disk.notice, tone: 'notice' }, { value: t.disk.critical, tone: 'critical' },
-  ])
-  const inodePriority = priorityFromThresholds(sample.inode_used_pct, [
-    { value: t.inode.notice, tone: 'notice' }, { value: t.inode.critical, tone: 'critical' },
-  ])
-  const iowaitPriority = priorityFromThresholds(sample.cpu_iowait_pct, [
-    { value: t.iowait.notice, tone: 'notice' }, { value: t.iowait.critical, tone: 'critical' },
-  ])
-  const load5Priority = priorityFromThresholds(sample.load_5, [
-    { value: t.load5.notice, tone: 'notice' }, { value: t.load5.critical, tone: 'critical' },
-  ])
+  const t = thresholds
+  const cpuPriority = priorityFromThresholds(sample.cpu_usage_pct, t.cpu)
+  const memPriority = priorityFromThresholds(sample.mem_used_pct, t.mem)
+  const diskPriority = priorityFromThresholds(sample.disk_used_pct, t.disk)
+  const inodePriority = priorityFromThresholds(sample.inode_used_pct, t.inode)
+  const iowaitPriority = priorityFromThresholds(sample.cpu_iowait_pct, t.iowait)
+  const load5Priority = priorityFromThresholds(sample.load_5, t.load5)
   // Network metrics have no thresholds — always normal priority
   const netInPriority: MetricPriority = 0
   const netOutPriority: MetricPriority = 0
@@ -158,7 +157,7 @@ export function MonitoringInstanceWatchtowerMetrics({
       render: () => (
         <article className={`watchtower-metric-card ${cardRibbonClass(cpuPriority)}`.trim()}>
           <header className="watchtower-metric-card__head">
-            <h3 title="CPU 总体使用率。正常：< 80%，关注：≥ 80%，严重：≥ 95%。含 steal 时间占比。">CPU 使用率</h3>
+            <h3 title={thresholdTitle('CPU 总体使用率', t.cpu, '%', '含 steal 时间占比。')}>CPU 使用率</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatPercent(sample.cpu_usage_pct)}</MonoDigits>
             </span>
@@ -170,10 +169,7 @@ export function MonitoringInstanceWatchtowerMetrics({
             height={160}
             yMin={0}
             yMax={100}
-            thresholds={[
-              { value: t.cpu.notice, tone: 'notice', label: `${t.cpu.notice}%` },
-              { value: t.cpu.critical, tone: 'critical', label: `${t.cpu.critical}%` },
-            ]}
+            thresholds={thresholdLines(t.cpu, '%')}
             formatValue={(v) => formatPercent(v)}
             ariaLabel={`CPU 使用率${labelPrefix}趋势`}
           />
@@ -196,7 +192,7 @@ export function MonitoringInstanceWatchtowerMetrics({
       render: () => (
         <article className={`watchtower-metric-card ${cardRibbonClass(memPriority)}`.trim()}>
           <header className="watchtower-metric-card__head">
-            <h3 title="内存总体使用率。正常：< 85%，关注：≥ 85%，严重：≥ 95%。含 swap 和可用内存。">内存使用率</h3>
+            <h3 title={thresholdTitle('内存总体使用率', t.mem, '%', '含 swap 和可用内存。')}>内存使用率</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatPercent(sample.mem_used_pct)}</MonoDigits>
             </span>
@@ -208,10 +204,7 @@ export function MonitoringInstanceWatchtowerMetrics({
             height={160}
             yMin={0}
             yMax={100}
-            thresholds={[
-              { value: t.mem.notice, tone: 'notice', label: `${t.mem.notice}%` },
-              { value: t.mem.critical, tone: 'critical', label: `${t.mem.critical}%` },
-            ]}
+            thresholds={thresholdLines(t.mem, '%')}
             formatValue={(v) => formatPercent(v)}
             ariaLabel={`内存使用率${labelPrefix}趋势`}
           />
@@ -246,7 +239,7 @@ export function MonitoringInstanceWatchtowerMetrics({
       render: () => (
         <article className={`watchtower-metric-card ${cardRibbonClass(diskPriority)}`.trim()}>
           <header className="watchtower-metric-card__head">
-            <h3 title="磁盘空间使用率。正常：< 80%，关注：≥ 80%，严重：≥ 95%。含 IO busy 和读写速率。">磁盘使用率</h3>
+            <h3 title={thresholdTitle('磁盘空间使用率', t.disk, '%', '含 IO busy 和读写速率。')}>磁盘使用率</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatPercent(sample.disk_used_pct)}</MonoDigits>
             </span>
@@ -258,10 +251,7 @@ export function MonitoringInstanceWatchtowerMetrics({
             height={160}
             yMin={0}
             yMax={100}
-            thresholds={[
-              { value: t.disk.notice, tone: 'notice', label: `${t.disk.notice}%` },
-              { value: t.disk.critical, tone: 'critical', label: `${t.disk.critical}%` },
-            ]}
+            thresholds={thresholdLines(t.disk, '%')}
             formatValue={(v) => formatPercent(v)}
             ariaLabel={`磁盘使用率${labelPrefix}趋势`}
           />
@@ -299,7 +289,7 @@ export function MonitoringInstanceWatchtowerMetrics({
       render: () => (
         <article className={`watchtower-metric-card ${cardRibbonClass(inodePriority)}`.trim()}>
           <header className="watchtower-metric-card__head">
-            <h3 title="Inode 使用率。正常：< 80%，关注：≥ 80%，严重：≥ 95%。Inode 耗尽会导致无法创建新文件。">Inode 使用率</h3>
+            <h3 title={thresholdTitle('Inode 使用率', t.inode, '%', 'Inode 耗尽会导致无法创建新文件。')}>Inode 使用率</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatPercent(sample.inode_used_pct)}</MonoDigits>
             </span>
@@ -311,10 +301,7 @@ export function MonitoringInstanceWatchtowerMetrics({
             height={160}
             yMin={0}
             yMax={100}
-            thresholds={[
-              { value: t.inode.notice, tone: 'notice', label: `${t.inode.notice}%` },
-              { value: t.inode.critical, tone: 'critical', label: `${t.inode.critical}%` },
-            ]}
+            thresholds={thresholdLines(t.inode, '%')}
             formatValue={(v) => formatPercent(v)}
             ariaLabel={`Inode 使用率${labelPrefix}趋势`}
           />
@@ -329,7 +316,7 @@ export function MonitoringInstanceWatchtowerMetrics({
       render: () => (
         <article className={`watchtower-metric-card ${cardRibbonClass(load5Priority)}`.trim()}>
           <header className="watchtower-metric-card__head">
-            <h3 title="系统 5 分钟负载均值。正常：< 4.0，关注：≥ 4.0，严重：≥ 8.0。需结合 CPU 核数判断。">Load5</h3>
+            <h3 title={thresholdTitle('系统 5 分钟负载均值', t.load5, '', '需结合 CPU 核数判断。')}>Load5</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatNumber(sample.load_5)}</MonoDigits>
             </span>
@@ -340,10 +327,7 @@ export function MonitoringInstanceWatchtowerMetrics({
             tone={load5Priority > 0 ? priorityTone(load5Priority) : baseTone}
             height={160}
             yMin={0}
-            thresholds={[
-              { value: t.load5.notice, tone: 'notice', label: String(t.load5.notice) },
-              { value: t.load5.critical, tone: 'critical', label: String(t.load5.critical) },
-            ]}
+            thresholds={thresholdLines(t.load5)}
             formatValue={(v) => formatNumber(v)}
             ariaLabel={`Load5 ${labelPrefix}趋势`}
           />
@@ -368,7 +352,7 @@ export function MonitoringInstanceWatchtowerMetrics({
       render: () => (
         <article className={`watchtower-metric-card ${cardRibbonClass(iowaitPriority)}`.trim()}>
           <header className="watchtower-metric-card__head">
-            <h3 title="CPU 等待 I/O 的时间占比。正常：< 20%，关注：≥ 20%，严重：≥ 50%。偏高通常意味着磁盘瓶颈。">CPU IOWait</h3>
+            <h3 title={thresholdTitle('CPU 等待 I/O 的时间占比', t.iowait, '%', '偏高通常意味着磁盘瓶颈。')}>CPU IOWait</h3>
             <span className="watchtower-metric-card__current">
               <MonoDigits>{formatPercent(sample.cpu_iowait_pct)}</MonoDigits>
             </span>
@@ -379,10 +363,7 @@ export function MonitoringInstanceWatchtowerMetrics({
             tone={iowaitPriority > 0 ? priorityTone(iowaitPriority) : baseTone}
             height={160}
             yMin={0}
-            thresholds={[
-              { value: t.iowait.notice, tone: 'notice', label: `${t.iowait.notice}%` },
-              { value: t.iowait.critical, tone: 'critical', label: `${t.iowait.critical}%` },
-            ]}
+            thresholds={thresholdLines(t.iowait, '%')}
             formatValue={(v) => formatPercent(v)}
             ariaLabel={`CPU IOWait ${labelPrefix}趋势`}
           />

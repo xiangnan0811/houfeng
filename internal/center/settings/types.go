@@ -161,6 +161,7 @@ type SubscriptionCostSettings struct {
 type IPQualitySettings struct {
 	Enabled              bool     `json:"enabled"`
 	FrequencySeconds     int      `json:"frequency_seconds"`
+	StaleAfterSeconds    int      `json:"stale_after_seconds"`
 	TimeoutSeconds       int      `json:"timeout_seconds"`
 	RawRetentionDays     int      `json:"raw_retention_days"`
 	HistoryRetentionDays int      `json:"history_retention_days"`
@@ -231,6 +232,7 @@ func Default() CenterSettings {
 		IPQuality: IPQualitySettings{
 			Enabled:              false,
 			FrequencySeconds:     24 * 60 * 60,
+			StaleAfterSeconds:    7 * 24 * 60 * 60,
 			TimeoutSeconds:       15,
 			RawRetentionDays:     90,
 			HistoryRetentionDays: 365,
@@ -264,7 +266,7 @@ func Validate(input CenterSettings) (CenterSettings, error) {
 	}
 	input.IncidentDefaults = incidentDefaults
 
-	overrideRules, err := validateOverrideRules(input.OverrideRules)
+	overrideRules, err := validateOverrideRules(input.OverrideRules, input.IncidentDefaults)
 	if err != nil {
 		return CenterSettings{}, err
 	}
@@ -367,6 +369,9 @@ func validateIncidentDefaults(input IncidentDefaults) (IncidentDefaults, error) 
 	if input.Load5Critical <= 0 {
 		return IncidentDefaults{}, invalidSettings("load5 critical must be positive")
 	}
+	if err := validateIncidentThresholdOrder("", input); err != nil {
+		return IncidentDefaults{}, err
+	}
 
 	return input, nil
 }
@@ -377,7 +382,7 @@ func applyIntDefault(dst *int, defaultVal int) {
 	}
 }
 
-func validateOverrideRules(input OverrideRules) (OverrideRules, error) {
+func validateOverrideRules(input OverrideRules, incidentDefaults IncidentDefaults) (OverrideRules, error) {
 	if input.MonitoringInstanceLabels == nil {
 		input.MonitoringInstanceLabels = []MonitoringInstanceLabelOverrideRule{}
 	}
@@ -391,7 +396,7 @@ func validateOverrideRules(input OverrideRules) (OverrideRules, error) {
 			return OverrideRules{}, invalidSettings("duplicate monitoringInstance label override selector")
 		}
 		seenMonitoringInstanceLabels[label] = struct{}{}
-		overrides, err := validateSettingsOverrideFields(input.MonitoringInstanceLabels[i].Overrides)
+		overrides, err := validateSettingsOverrideFields(input.MonitoringInstanceLabels[i].Overrides, incidentDefaults)
 		if err != nil {
 			return OverrideRules{}, err
 		}
@@ -412,7 +417,7 @@ func validateOverrideRules(input OverrideRules) (OverrideRules, error) {
 			return OverrideRules{}, invalidSettings("duplicate target type override selector")
 		}
 		seenTargetTypes[targetType] = struct{}{}
-		overrides, err := validateSettingsOverrideFields(input.TargetTypes[i].Overrides)
+		overrides, err := validateSettingsOverrideFields(input.TargetTypes[i].Overrides, incidentDefaults)
 		if err != nil {
 			return OverrideRules{}, err
 		}
@@ -433,7 +438,7 @@ func validateOverrideRules(input OverrideRules) (OverrideRules, error) {
 			return OverrideRules{}, invalidSettings("duplicate target label override selector")
 		}
 		seenTargetLabels[label] = struct{}{}
-		overrides, err := validateSettingsOverrideFields(input.TargetLabels[i].Overrides)
+		overrides, err := validateSettingsOverrideFields(input.TargetLabels[i].Overrides, incidentDefaults)
 		if err != nil {
 			return OverrideRules{}, err
 		}
@@ -444,7 +449,7 @@ func validateOverrideRules(input OverrideRules) (OverrideRules, error) {
 	return input, nil
 }
 
-func validateSettingsOverrideFields(input SettingsOverrideFields) (SettingsOverrideFields, error) {
+func validateSettingsOverrideFields(input SettingsOverrideFields, incidentDefaults IncidentDefaults) (SettingsOverrideFields, error) {
 	hasOverride := false
 
 	if input.HostSampleFrequencyTier != nil {
@@ -466,7 +471,7 @@ func validateSettingsOverrideFields(input SettingsOverrideFields) (SettingsOverr
 	}
 
 	if input.IncidentDefaults != nil {
-		override, err := validateIncidentDefaultsOverride(*input.IncidentDefaults)
+		override, err := validateIncidentDefaultsOverride(*input.IncidentDefaults, incidentDefaults)
 		if err != nil {
 			return SettingsOverrideFields{}, err
 		}
@@ -500,7 +505,7 @@ func validateProbeFrequencyOverride(input ProbeFrequencyOverride) (ProbeFrequenc
 	return input, nil
 }
 
-func validateIncidentDefaultsOverride(input IncidentDefaultsOverride) (IncidentDefaultsOverride, error) {
+func validateIncidentDefaultsOverride(input IncidentDefaultsOverride, incidentDefaults IncidentDefaults) (IncidentDefaultsOverride, error) {
 	hasOverride := false
 
 	if input.HeartbeatIntervalSeconds != nil {
@@ -570,7 +575,89 @@ func validateIncidentDefaultsOverride(input IncidentDefaultsOverride) (IncidentD
 	if !hasOverride {
 		return IncidentDefaultsOverride{}, invalidSettings("incident override must set at least one field")
 	}
+	if err := validateIncidentThresholdOrder("override ", incidentDefaultsFromOverride(input, incidentDefaults)); err != nil {
+		return IncidentDefaultsOverride{}, err
+	}
 	return input, nil
+}
+
+func incidentDefaultsFromOverride(input IncidentDefaultsOverride, defaults IncidentDefaults) IncidentDefaults {
+	if input.CPUWarningPct != nil {
+		defaults.CPUWarningPct = *input.CPUWarningPct
+	}
+	if input.CPUAlertPct != nil {
+		defaults.CPUAlertPct = *input.CPUAlertPct
+	}
+	if input.CPUCriticalPct != nil {
+		defaults.CPUCriticalPct = *input.CPUCriticalPct
+	}
+	if input.MemWarningPct != nil {
+		defaults.MemWarningPct = *input.MemWarningPct
+	}
+	if input.MemAlertPct != nil {
+		defaults.MemAlertPct = *input.MemAlertPct
+	}
+	if input.MemCriticalPct != nil {
+		defaults.MemCriticalPct = *input.MemCriticalPct
+	}
+	if input.DiskWarningPct != nil {
+		defaults.DiskWarningPct = *input.DiskWarningPct
+	}
+	if input.DiskAlertPct != nil {
+		defaults.DiskAlertPct = *input.DiskAlertPct
+	}
+	if input.DiskCriticalPct != nil {
+		defaults.DiskCriticalPct = *input.DiskCriticalPct
+	}
+	if input.InodeWarningPct != nil {
+		defaults.InodeWarningPct = *input.InodeWarningPct
+	}
+	if input.InodeAlertPct != nil {
+		defaults.InodeAlertPct = *input.InodeAlertPct
+	}
+	if input.InodeCriticalPct != nil {
+		defaults.InodeCriticalPct = *input.InodeCriticalPct
+	}
+	if input.IOWaitWarningPct != nil {
+		defaults.IOWaitWarningPct = *input.IOWaitWarningPct
+	}
+	if input.IOWaitCriticalPct != nil {
+		defaults.IOWaitCriticalPct = *input.IOWaitCriticalPct
+	}
+	if input.Load5Warning != nil {
+		defaults.Load5Warning = *input.Load5Warning
+	}
+	if input.Load5Critical != nil {
+		defaults.Load5Critical = *input.Load5Critical
+	}
+	return defaults
+}
+
+func validateIncidentThresholdOrder(prefix string, input IncidentDefaults) error {
+	threeLevelThresholds := []struct {
+		name     string
+		warning  int
+		alert    int
+		critical int
+	}{
+		{name: "cpu", warning: input.CPUWarningPct, alert: input.CPUAlertPct, critical: input.CPUCriticalPct},
+		{name: "mem", warning: input.MemWarningPct, alert: input.MemAlertPct, critical: input.MemCriticalPct},
+		{name: "disk", warning: input.DiskWarningPct, alert: input.DiskAlertPct, critical: input.DiskCriticalPct},
+		{name: "inode", warning: input.InodeWarningPct, alert: input.InodeAlertPct, critical: input.InodeCriticalPct},
+	}
+	for _, t := range threeLevelThresholds {
+		if !(t.warning < t.alert && t.alert < t.critical) {
+			return invalidSettings(fmt.Sprintf("%s%s thresholds must satisfy warning < alert < critical", prefix, t.name))
+		}
+	}
+
+	if input.IOWaitWarningPct >= input.IOWaitCriticalPct {
+		return invalidSettings(fmt.Sprintf("%siowait thresholds must satisfy warning < critical", prefix))
+	}
+	if input.Load5Warning >= input.Load5Critical {
+		return invalidSettings(fmt.Sprintf("%sload5 thresholds must satisfy warning < critical", prefix))
+	}
+	return nil
 }
 
 func validateRetentionPolicy(input RetentionPolicy) (RetentionPolicy, error) {
@@ -649,6 +736,12 @@ func validateIPQualitySettings(input IPQualitySettings) (IPQualitySettings, erro
 	if input.FrequencySeconds < 60 {
 		return IPQualitySettings{}, invalidSettings("ip quality frequency seconds must be at least 60")
 	}
+	if input.StaleAfterSeconds == 0 {
+		input.StaleAfterSeconds = defaults.StaleAfterSeconds
+	}
+	if input.StaleAfterSeconds < input.FrequencySeconds {
+		return IPQualitySettings{}, invalidSettings("ip quality stale after seconds must be at least frequency seconds")
+	}
 	if input.TimeoutSeconds < 1 || input.TimeoutSeconds > 300 {
 		return IPQualitySettings{}, invalidSettings("ip quality timeout seconds must be between 1 and 300")
 	}
@@ -676,6 +769,7 @@ func validateIPQualitySettings(input IPQualitySettings) (IPQualitySettings, erro
 func isZeroIPQualitySettings(input IPQualitySettings) bool {
 	return !input.Enabled &&
 		input.FrequencySeconds == 0 &&
+		input.StaleAfterSeconds == 0 &&
 		input.TimeoutSeconds == 0 &&
 		input.RawRetentionDays == 0 &&
 		input.HistoryRetentionDays == 0 &&

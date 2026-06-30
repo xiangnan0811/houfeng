@@ -229,7 +229,7 @@ func stepLabelForPlan(stepKind ExecutionPlanStepKind, action SuggestedAction) st
 	case PlanStepOpenVPSDetail:
 		switch action {
 		case ActionMigrate:
-			return "打开 VPS 详情推进迁移"
+			return "标记迁移意向并人工跟进"
 		case ActionKeep, ActionObserve:
 			return "打开 VPS 详情核对判断"
 		case ActionCompleteEvidence:

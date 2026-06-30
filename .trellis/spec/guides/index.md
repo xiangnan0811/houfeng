@@ -57,6 +57,12 @@ These guides help you **ask the right questions before coding**.
 
 → Read [Branch Workflow Governance](./branch-workflow-governance.md)
 
+### Project Preauthorization Memory
+
+- [ ] The user has preauthorized Trellis task creation for critical, complex project-quality work in this repository, especially full lifecycle/state reviews, post-fix verification reviews, reliability audits, and similarly broad cross-layer checks.
+- [ ] For those critical reviews, create the Trellis task directly and proceed through planning artifacts without asking again whether a task may be created.
+- [ ] This does not authorize skipping planning, verification, non-main branch governance, destructive-change disclosure, or user review when the task itself requires implementation approval.
+
 ---
 
 ## Pre-Modification Rule (CRITICAL)

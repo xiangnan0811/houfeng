@@ -62,7 +62,8 @@ export const RENEWAL_MODE_OPTIONS: Array<LabeledOption & { value: RenewalMode }>
   { value: 'auto', label: '自动续费', icon: 'Auto' },
   { value: 'manual', label: '手动续费', icon: 'Manual' },
   { value: 'auto_cancelled', label: '已取消自动续费', icon: 'Off' },
-  { value: 'lottery', label: '抽奖/赠送', icon: 'Gift' },
+  { value: 'lottery', label: '抽奖', icon: 'Lottery' },
+  { value: 'gift', label: '赠送', icon: 'Gift' },
   { value: 'bonus', label: 'Bonus/余额抵扣', icon: 'Bonus' },
   { value: 'other', label: '其他', icon: 'Other' },
 ]
@@ -127,6 +128,7 @@ export function normalizeRenewalMode(value: string | undefined | null): RenewalM
     value === 'manual' ||
     value === 'auto_cancelled' ||
     value === 'lottery' ||
+    value === 'gift' ||
     value === 'bonus' ||
     value === 'other'
   ) {

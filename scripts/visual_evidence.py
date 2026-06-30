@@ -381,7 +381,7 @@ def asset_workflow_subscriptions() -> list[dict[str, object]]:
             "renew_at": iso_date(21),
             "auto_renew": False,
             "auto_renew_cancelled": False,
-            "renewal_mode": "manual",
+            "renewal_mode": "lottery",
             "status": "active",
             "payment_method": "paypal-edge",
             "display_name": "sjc-edge 迁移候选",
@@ -413,9 +413,9 @@ def asset_workflow_subscriptions() -> list[dict[str, object]]:
             "monthly_price": 5.0,
             "started_at": iso_date(-240),
             "renew_at": iso_date(5),
-            "auto_renew": True,
-            "auto_renew_cancelled": True,
-            "renewal_mode": "auto_cancelled",
+            "auto_renew": False,
+            "auto_renew_cancelled": False,
+            "renewal_mode": "gift",
             "status": "active",
             "payment_method": "sepa",
             "display_name": "fra legacy 待取消",
@@ -423,7 +423,7 @@ def asset_workflow_subscriptions() -> list[dict[str, object]]:
             "labels": ["legacy", "cost-review"],
             "trial_ends_at": None,
             "ends_at": None,
-            "note": "Cancel queue subscription with auto-renew cancelled.",
+            "note": "Gifted renewal fixture for visible subscription labels.",
             "monthly_price_base": 39.5,
             "yearly_price_base": 474.0,
             "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
@@ -2409,6 +2409,72 @@ def asset_workflow_subscription_settings() -> dict[str, object]:
     }
 
 
+def asset_workflow_settings() -> dict[str, object]:
+    return {
+        "telegram": {
+            "token_present": False,
+            "chat_id": "",
+            "runtime_managed": True,
+        },
+        "feishu": {
+            "webhook_present": False,
+            "webhook_masked_summary": "",
+            "runtime_managed": True,
+        },
+        "host_sample_frequency_tier": "5s",
+        "probe_frequency_defaults": {
+            "tcp": "5s",
+            "http": "5s",
+            "tls": "6h",
+        },
+        "incident_defaults": {
+            "heartbeat_interval_seconds": 5,
+            "stale_threshold_intervals": 3,
+            "sweep_interval_seconds": 5,
+            "notify_on_started": True,
+            "notify_on_escalated": True,
+            "notify_on_recovered": True,
+            "cpu_warning_pct": 80,
+            "cpu_alert_pct": 90,
+            "cpu_critical_pct": 95,
+            "mem_warning_pct": 85,
+            "mem_alert_pct": 92,
+            "mem_critical_pct": 95,
+            "disk_warning_pct": 85,
+            "disk_alert_pct": 92,
+            "disk_critical_pct": 97,
+            "inode_warning_pct": 80,
+            "inode_alert_pct": 90,
+            "inode_critical_pct": 95,
+            "iowait_warning_pct": 20,
+            "iowait_critical_pct": 50,
+            "load5_warning": 4.0,
+            "load5_critical": 8.0,
+        },
+        "override_rules": {
+            "monitoring_instance_labels": [],
+            "target_types": [],
+            "target_labels": [],
+        },
+        "retention_policy": {
+            "raw_layer_days": 30,
+            "aggregate_layer_days": 30,
+            "event_layer_days": 90,
+            "notification_layer_days": 180,
+        },
+        "ip_quality_settings": {
+            "enabled": False,
+            "frequency_seconds": 86400,
+            "stale_after_seconds": 604800,
+            "timeout_seconds": 15,
+            "raw_retention_days": 90,
+            "history_retention_days": 365,
+            "services": ["netflix", "chatgpt", "youtube"],
+        },
+        "subscription_cost_settings": asset_workflow_subscription_settings(),
+    }
+
+
 def asset_workflow_missing_subscription_assets() -> list[dict[str, object]]:
     return [
         {
@@ -3542,6 +3608,10 @@ def fulfill_asset_workflow_api(route: object) -> None:
         fulfill_json(route, 200, asset_workflow_dashboard())
         return
 
+    if method == "GET" and path == "/api/settings":
+        fulfill_json(route, 200, asset_workflow_settings())
+        return
+
     if method == "GET" and path == "/api/asset-decisions/overview":
         fulfill_json(route, 200, asset_decision_overview(query))
         return
@@ -3894,6 +3964,10 @@ def fulfill_observability_support_api(route: object) -> None:
 
     if method == "GET" and path == "/api/dashboard":
         fulfill_json(route, 200, observability_support_dashboard())
+        return
+
+    if method == "GET" and path == "/api/settings":
+        fulfill_json(route, 200, asset_workflow_settings())
         return
 
     if method == "GET" and path == "/api/monitoring-instances":

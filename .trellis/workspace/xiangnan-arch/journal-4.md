@@ -1023,3 +1023,199 @@ Removed the old VPS detail contextAction model path and kept persistent VPS atte
 ### Next Steps
 
 - None - task complete
+
+
+## Session 207: State lifecycle audit and repair
+
+**Date**: 2026-06-30
+**Task**: State lifecycle audit and repair
+**Branch**: `audit-state-lifecycle-consistency`
+
+### Summary
+
+Audited and repaired VPS, subscription, monitoring threshold, heartbeat stale, IP quality stale, and migration-intent state contracts; verified backend, frontend, scripts, and browser sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `39271b6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 208: Lifecycle state closure
+
+**Date**: 2026-06-30
+**Task**: Lifecycle state closure
+**Branch**: `audit-state-lifecycle-consistency`
+
+### Summary
+
+Closed remaining lifecycle state gaps: VPS state matrix, historical asset scope, gift renewal mode, inactive incident convergence, specs, tests, and browser sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ec00ea3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 209: Lifecycle state closure final review
+
+**Date**: 2026-06-30
+**Task**: Lifecycle state closure final review
+**Branch**: `audit-state-lifecycle-consistency`
+
+### Summary
+
+Recorded a full post-fix lifecycle/state review, persisted Trellis task preauthorization memory, verified backend/frontend/browser sanity, and documented remaining VPS PATCH merged-state and subscription import renewal_mode gaps.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1bd9774` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 210: Lifecycle state closure fix
+
+**Date**: 2026-06-30
+**Task**: Lifecycle state closure fix
+**Branch**: `audit-state-lifecycle-consistency`
+
+### Summary
+
+Closed VPS merged-state validation gaps, subscription renewal_mode import support, incident/archive/browser fixture closure, and recorded final state review.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `127a5cb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 211: Review current state lifecycle branch
+
+**Date**: 2026-06-30
+**Task**: Review current state lifecycle branch
+**Branch**: `audit-state-lifecycle-consistency`
+
+### Summary
+
+Reviewed audit-state-lifecycle-consistency against origin/main across lifecycle state tasks; recorded one remaining threshold-order validation finding and confirmed major VPS/subscription/monitoring state closures.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 212: Fix incident threshold order validation
+
+**Date**: 2026-06-30
+**Task**: Fix incident threshold order validation
+**Branch**: `audit-state-lifecycle-consistency`
+
+### Summary
+
+Validated incident threshold ordering across backend settings, frontend settings submission, runtime threshold presentation, tests, and specs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a476551` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

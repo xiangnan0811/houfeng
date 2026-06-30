@@ -62,6 +62,30 @@ func TestValidateCreateInput(t *testing.T) {
 	}
 }
 
+func TestRenewalModeGiftNormalizesValidatesAndKeepsLegacyFlagsOff(t *testing.T) {
+	input := NormalizeCreateInput(CreateInput{
+		VPSID:         "vps_001",
+		Price:         12,
+		Currency:      "usd",
+		BillingMonths: 1,
+		RenewalMode:   " GIFT ",
+	})
+
+	if input.RenewalMode != string(RenewalModeGift) {
+		t.Fatalf("RenewalMode = %q, want gift", input.RenewalMode)
+	}
+	if !IsValidRenewalMode(input.RenewalMode) {
+		t.Fatalf("IsValidRenewalMode(%q) = false, want true", input.RenewalMode)
+	}
+	autoRenew, autoRenewCancelled := LegacyRenewalFlags(input.RenewalMode)
+	if autoRenew || autoRenewCancelled {
+		t.Fatalf("LegacyRenewalFlags(gift) = %v/%v, want both false", autoRenew, autoRenewCancelled)
+	}
+	if err := ValidateCreateInput(input); err != nil {
+		t.Fatalf("ValidateCreateInput(gift) error = %v", err)
+	}
+}
+
 func TestPatchInputPresenceNormalizationAndDates(t *testing.T) {
 	var input PatchInput
 	if err := json.Unmarshal([]byte(`{
@@ -174,9 +198,11 @@ func TestValidateListFilters(t *testing.T) {
 		want    error
 	}{
 		{name: "empty"},
-		{name: "valid", filters: ListFilters{VPSID: " vps_001 ", Status: " active ", RenewWithinDays: &days, Sort: " renew_at ", Order: " DESC ", AssetScope: " archived "}},
+		{name: "valid", filters: ListFilters{VPSID: " vps_001 ", Status: " active ", RenewWithinDays: &days, Sort: " renew_at ", Order: " DESC ", RenewalDecision: " migrate ", AssetScope: " archived "}},
+		{name: "historical asset scope", filters: ListFilters{AssetScope: " historical "}},
 		{name: "invalid status", filters: ListFilters{Status: "online"}, want: ErrInvalidSubscriptionInput},
 		{name: "negative renew within", filters: ListFilters{RenewWithinDays: intPtr(-1)}, want: ErrInvalidSubscriptionInput},
+		{name: "subscription renewal mode is not a vps renewal decision", filters: ListFilters{RenewalDecision: "manual"}, want: ErrInvalidSubscriptionInput},
 		{name: "invalid sort", filters: ListFilters{Sort: "price"}, want: ErrInvalidSubscriptionInput},
 		{name: "invalid order", filters: ListFilters{Order: "later"}, want: ErrInvalidSubscriptionInput},
 		{name: "invalid asset scope", filters: ListFilters{AssetScope: "deleted"}, want: ErrInvalidSubscriptionInput},
@@ -190,9 +216,12 @@ func TestValidateListFilters(t *testing.T) {
 				t.Fatalf("ValidateListFilters() error = %v, want %v", err, tt.want)
 			}
 			if tt.name == "valid" {
-				if filters.VPSID != "vps_001" || filters.Status != StatusActive || filters.Sort != SortRenewAt || filters.Order != OrderDesc || filters.AssetScope != "archived" {
+				if filters.VPSID != "vps_001" || filters.Status != StatusActive || filters.Sort != SortRenewAt || filters.Order != OrderDesc || filters.RenewalDecision != "migrate" || filters.AssetScope != "archived" {
 					t.Fatalf("filters = %#v, want normalized filters", filters)
 				}
+			}
+			if tt.name == "historical asset scope" && filters.AssetScope != "historical" {
+				t.Fatalf("AssetScope = %q, want historical", filters.AssetScope)
 			}
 		})
 	}

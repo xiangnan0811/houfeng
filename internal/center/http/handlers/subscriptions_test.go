@@ -105,6 +105,22 @@ func TestSubscriptionsCollectionListsSubscriptionsWithFilters(t *testing.T) {
 	}
 }
 
+func TestSubscriptionsCollectionAcceptsHistoricalAssetScope(t *testing.T) {
+	repo := &fakeSubscriptionRepository{}
+	handler := handlers.SubscriptionsCollection(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions?asset_scope=historical", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.listSubscriptionsFilter.AssetScope != vpsassets.AssetScope("historical") {
+		t.Fatalf("asset scope = %q, want historical", repo.listSubscriptionsFilter.AssetScope)
+	}
+}
+
 func TestSubscriptionsCollectionDefaultsToCurrentAssetScope(t *testing.T) {
 	repo := &fakeSubscriptionRepository{}
 	handler := handlers.SubscriptionsCollection(repo)

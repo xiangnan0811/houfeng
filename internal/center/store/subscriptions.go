@@ -172,7 +172,7 @@ func (r *PostgresSubscriptionRepository) ListSubscriptions(ctx context.Context, 
 		)`, len(args)))
 	}
 	switch filters.AssetScope {
-	case vpsassets.AssetScopeArchived:
+	case vpsassets.AssetScopeArchived, vpsassets.AssetScopeHistorical:
 		conditions = append(conditions, `exists (
 			select 1 from vps_assets v where v.vps_id = subscriptions.vps_id and v.lifecycle_status in ('cancelled', 'archived')
 		)`)

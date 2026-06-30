@@ -182,6 +182,22 @@ func TestVPSCollectionListsAssetsWithFilters(t *testing.T) {
 	}
 }
 
+func TestVPSCollectionAcceptsHistoricalAssetScope(t *testing.T) {
+	repo := &fakeVPSAssetRepository{}
+	handler := handlers.VPSCollection(repo)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps?asset_scope=historical", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.listVPSAssetsFilter.AssetScope != vpsassets.AssetScope("historical") {
+		t.Fatalf("asset scope = %q, want historical", repo.listVPSAssetsFilter.AssetScope)
+	}
+}
+
 func TestVPSCollectionDefaultsToCurrentAssetScope(t *testing.T) {
 	repo := &fakeVPSAssetRepository{}
 	handler := handlers.VPSCollection(repo)
@@ -1048,6 +1064,9 @@ func TestVPSItemRejectsInvalidPatchAndDeeperPaths(t *testing.T) {
 	}{
 		{name: "blank display name", method: http.MethodPatch, path: "/api/vps/vps_001", body: `{"display_name":" "}`, want: http.StatusBadRequest},
 		{name: "invalid lifecycle", method: http.MethodPatch, path: "/api/vps/vps_001", body: `{"lifecycle_status":"online"}`, want: http.StatusBadRequest},
+		{name: "direct migration workflow lifecycle", method: http.MethodPatch, path: "/api/vps/vps_001", body: `{"lifecycle_status":"to_migrate"}`, want: http.StatusBadRequest},
+		{name: "direct cancellation workflow lifecycle", method: http.MethodPatch, path: "/api/vps/vps_001", body: `{"lifecycle_status":"to_cancel"}`, want: http.StatusBadRequest},
+		{name: "direct cancelled terminal lifecycle", method: http.MethodPatch, path: "/api/vps/vps_001", body: `{"lifecycle_status":"cancelled"}`, want: http.StatusBadRequest},
 		{name: "invalid usage", method: http.MethodPatch, path: "/api/vps/vps_001", body: `{"usage_status":"busy"}`, want: http.StatusBadRequest},
 		{name: "invalid renewal", method: http.MethodPatch, path: "/api/vps/vps_001", body: `{"renewal_decision":"later"}`, want: http.StatusBadRequest},
 		{name: "invalid ssh port", method: http.MethodPatch, path: "/api/vps/vps_001", body: `{"ssh_port":0}`, want: http.StatusBadRequest},

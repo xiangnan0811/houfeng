@@ -6,6 +6,7 @@ import {
   StatusGlyph,
   Timestamp,
 } from '../../components/atoms'
+import type { MetricThresholds } from '../../config/thresholds'
 import type { MonitoringInstanceRecord, MonitoringInstanceSparklinesResponse } from '../../lib/types'
 import {
   isBindingConflictMonitoringInstance,
@@ -18,6 +19,7 @@ import { MonitoringInstancesTrendCell } from './MonitoringInstancesTrendCell'
 type BuildMonitoringInstancesTableColumnsArgs = {
   compareSet: Set<string>
   sparklines: MonitoringInstanceSparklinesResponse | null
+  thresholds: MetricThresholds
   onToggleCompare: (monitoringInstanceId: string) => void
 }
 
@@ -31,6 +33,7 @@ function issueSummary(monitoringInstance: MonitoringInstanceRecord): string {
 export function buildMonitoringInstancesTableColumns({
   compareSet,
   sparklines,
+  thresholds,
   onToggleCompare,
 }: BuildMonitoringInstancesTableColumnsArgs): DataTableColumn<MonitoringInstanceRecord>[] {
   return [
@@ -136,7 +139,7 @@ export function buildMonitoringInstancesTableColumns({
       label: '近 24h',
       width: 212,
       cellClassName: 'monitoring-table__trends',
-      render: (monitoringInstance) => <MonitoringInstancesTrendCell monitoringInstance={monitoringInstance} sparklines={sparklines} />,
+      render: (monitoringInstance) => <MonitoringInstancesTrendCell monitoringInstance={monitoringInstance} sparklines={sparklines} thresholds={thresholds} />,
     },
   ]
 }

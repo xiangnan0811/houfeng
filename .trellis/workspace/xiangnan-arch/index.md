@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 206
-- **Last Active**: 2026-06-29
+- **Total Sessions**: 212
+- **Last Active**: 2026-06-30
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1025 | Active |
+| `journal-4.md` | ~1221 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,12 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 212 | 2026-06-30 | Fix incident threshold order validation | `a476551` | `audit-state-lifecycle-consistency` |
+| 211 | 2026-06-30 | Review current state lifecycle branch | - | `audit-state-lifecycle-consistency` |
+| 210 | 2026-06-30 | Lifecycle state closure fix | `127a5cb` | `audit-state-lifecycle-consistency` |
+| 209 | 2026-06-30 | Lifecycle state closure final review | `1bd9774` | `audit-state-lifecycle-consistency` |
+| 208 | 2026-06-30 | Lifecycle state closure | `ec00ea3` | `audit-state-lifecycle-consistency` |
+| 207 | 2026-06-30 | State lifecycle audit and repair | `39271b6` | `audit-state-lifecycle-consistency` |
 | 206 | 2026-06-29 | Unify VPS detail attention states | `e0093ee` | `fix/vps-detail-attention-states` |
 | 205 | 2026-06-29 | Document Debian minisign upgrade recovery | `7842580` | `fix/installer-minisign-debian-bullseye` |
 | 204 | 2026-06-29 | Document stale installer minisign recovery | `3059287` | `fix/installer-minisign-dependency` |

@@ -46,8 +46,8 @@ export function ArchivePage() {
     let cancelled = false
 
     Promise.all([
-      listVPSAssets({ asset_scope: 'archived' }),
-      listSubscriptions({ asset_scope: 'archived', sort: 'renew_at', order: 'asc' }),
+      listVPSAssets({ asset_scope: 'historical' }),
+      listSubscriptions({ asset_scope: 'historical', sort: 'renew_at', order: 'asc' }),
     ])
       .then(([vps, subscriptions]) => {
         if (cancelled) return

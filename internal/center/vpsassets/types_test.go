@@ -90,12 +90,86 @@ func TestValidateCreateInput(t *testing.T) {
 	}
 }
 
+func TestValidateCreateInputRejectsWorkflowAndTerminalLifecycleStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status LifecycleStatus
+	}{
+		{name: "migration workflow", status: LifecycleToMigrate},
+		{name: "cancellation workflow", status: LifecycleToCancel},
+		{name: "cancelled terminal", status: LifecycleCancelled},
+		{name: "archived terminal", status: LifecycleArchived},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateCreateInput(NormalizeCreateInput(CreateInput{
+				DisplayName:     "Tokyo Edge",
+				LifecycleStatus: tt.status,
+				UsageStatus:     UsageIdle,
+				RenewalDecision: RenewalCancel,
+			}))
+			if !errors.Is(err, ErrInvalidVPSAssetInput) {
+				t.Fatalf("ValidateCreateInput() error = %v, want ErrInvalidVPSAssetInput", err)
+			}
+		})
+	}
+}
+
+func TestValidateVPSStateCombinationRejectsForbiddenPairs(t *testing.T) {
+	tests := []struct {
+		name      string
+		lifecycle LifecycleStatus
+		usage     UsageStatus
+		renewal   RenewalDecision
+	}{
+		{name: "cancelled must use cancellation renewal decision", lifecycle: LifecycleCancelled, usage: UsageIdle, renewal: RenewalKeep},
+		{name: "cancelled cannot be in use", lifecycle: LifecycleCancelled, usage: UsageInUse, renewal: RenewalCancel},
+		{name: "to cancel requires cancellation renewal decision", lifecycle: LifecycleToCancel, usage: UsageIdle, renewal: RenewalKeep},
+		{name: "to migrate requires migration renewal decision", lifecycle: LifecycleToMigrate, usage: UsageIdle, renewal: RenewalCancel},
+		{name: "replaced cannot be active in use", lifecycle: LifecycleActive, usage: UsageInUse, renewal: RenewalReplaced},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateVPSStateCombination(tt.lifecycle, tt.usage, tt.renewal)
+			if !errors.Is(err, ErrInvalidVPSAssetInput) {
+				t.Fatalf("ValidateVPSStateCombination() error = %v, want ErrInvalidVPSAssetInput", err)
+			}
+		})
+	}
+}
+
+func TestValidateVPSStateCombinationAllowsCoherentStates(t *testing.T) {
+	tests := []struct {
+		name      string
+		lifecycle LifecycleStatus
+		usage     UsageStatus
+		renewal   RenewalDecision
+	}{
+		{name: "active keep", lifecycle: LifecycleActive, usage: UsageInUse, renewal: RenewalKeep},
+		{name: "idle unreviewed", lifecycle: LifecycleIdle, usage: UsageIdle, renewal: RenewalUnreviewed},
+		{name: "testing observe", lifecycle: LifecycleTesting, usage: UsageTesting, renewal: RenewalObserve},
+		{name: "to migrate", lifecycle: LifecycleToMigrate, usage: UsageStandby, renewal: RenewalMigrate},
+		{name: "to cancel", lifecycle: LifecycleToCancel, usage: UsageIdle, renewal: RenewalCancel},
+		{name: "cancelled", lifecycle: LifecycleCancelled, usage: UsageIdle, renewal: RenewalAutoRenewCancelled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateVPSStateCombination(tt.lifecycle, tt.usage, tt.renewal); err != nil {
+				t.Fatalf("ValidateVPSStateCombination() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestPatchInputPresenceNormalizationAndNullableProvider(t *testing.T) {
 	var input PatchInput
 	if err := json.Unmarshal([]byte(`{
 		"display_name":" Tokyo Edge ",
 		"provider_id":null,
-		"lifecycle_status":" archived ",
+		"lifecycle_status":" testing ",
 		"usage_status":" idle ",
 		"renewal_decision":" observe ",
 		"ssh_port":2222,
@@ -111,8 +185,8 @@ func TestPatchInputPresenceNormalizationAndNullableProvider(t *testing.T) {
 	if !input.ProviderID.Set || input.ProviderID.Value != nil {
 		t.Fatalf("ProviderID patch = %#v, want explicit nil", input.ProviderID)
 	}
-	if !input.LifecycleStatus.Set || input.LifecycleStatus.Value != LifecycleArchived {
-		t.Fatalf("LifecycleStatus patch = %#v, want archived", input.LifecycleStatus)
+	if !input.LifecycleStatus.Set || input.LifecycleStatus.Value != LifecycleTesting {
+		t.Fatalf("LifecycleStatus patch = %#v, want testing", input.LifecycleStatus)
 	}
 	if !input.UsageStatus.Set || input.UsageStatus.Value != UsageIdle {
 		t.Fatalf("UsageStatus patch = %#v, want idle", input.UsageStatus)
@@ -165,6 +239,50 @@ func TestValidatePatchInputRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestValidatePatchInputRejectsForbiddenStateCombinationDeltas(t *testing.T) {
+	tests := []struct {
+		name  string
+		input PatchInput
+	}{
+		{name: "cancelled with keep renewal", input: PatchInput{LifecycleStatus: PatchLifecycle(LifecycleCancelled), RenewalDecision: PatchRenewal(RenewalKeep)}},
+		{name: "cancelled with in use usage", input: PatchInput{LifecycleStatus: PatchLifecycle(LifecycleCancelled), UsageStatus: PatchUsage(UsageInUse)}},
+		{name: "to cancel with keep renewal", input: PatchInput{LifecycleStatus: PatchLifecycle(LifecycleToCancel), RenewalDecision: PatchRenewal(RenewalKeep)}},
+		{name: "to migrate with cancel renewal", input: PatchInput{LifecycleStatus: PatchLifecycle(LifecycleToMigrate), RenewalDecision: PatchRenewal(RenewalCancel)}},
+		{name: "active with replaced renewal", input: PatchInput{LifecycleStatus: PatchLifecycle(LifecycleActive), RenewalDecision: PatchRenewal(RenewalReplaced)}},
+		{name: "in use with replaced renewal", input: PatchInput{UsageStatus: PatchUsage(UsageInUse), RenewalDecision: PatchRenewal(RenewalReplaced)}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePatchInput(NormalizePatchInput(tt.input))
+			if !errors.Is(err, ErrInvalidVPSAssetInput) {
+				t.Fatalf("ValidatePatchInput() error = %v, want ErrInvalidVPSAssetInput", err)
+			}
+		})
+	}
+}
+
+func TestValidateOrdinaryPatchInputRejectsWorkflowAndTerminalLifecycleStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status LifecycleStatus
+	}{
+		{name: "migration workflow", status: LifecycleToMigrate},
+		{name: "cancellation workflow", status: LifecycleToCancel},
+		{name: "cancelled terminal", status: LifecycleCancelled},
+		{name: "archived terminal", status: LifecycleArchived},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateOrdinaryPatchInput(NormalizePatchInput(PatchInput{LifecycleStatus: PatchLifecycle(tt.status)}))
+			if !errors.Is(err, ErrInvalidVPSAssetInput) {
+				t.Fatalf("ValidateOrdinaryPatchInput() error = %v, want ErrInvalidVPSAssetInput", err)
+			}
+		})
+	}
+}
+
 func TestValidateListFilters(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -173,6 +291,7 @@ func TestValidateListFilters(t *testing.T) {
 	}{
 		{name: "empty"},
 		{name: "valid", filters: ListFilters{ProviderID: " pv_001 ", LifecycleStatus: " active ", UsageStatus: " idle ", RenewalDecision: " keep ", AssetScope: " archived "}},
+		{name: "historical asset scope", filters: ListFilters{AssetScope: " historical "}},
 		{name: "invalid lifecycle", filters: ListFilters{LifecycleStatus: "online"}, want: ErrInvalidVPSAssetInput},
 		{name: "invalid usage", filters: ListFilters{UsageStatus: "busy"}, want: ErrInvalidVPSAssetInput},
 		{name: "invalid renewal", filters: ListFilters{RenewalDecision: "later"}, want: ErrInvalidVPSAssetInput},
@@ -190,6 +309,9 @@ func TestValidateListFilters(t *testing.T) {
 				if filters.ProviderID != "pv_001" || filters.AssetScope != AssetScopeArchived {
 					t.Fatalf("filters = %#v, want trimmed provider and archived asset scope", filters)
 				}
+			}
+			if tt.name == "historical asset scope" && filters.AssetScope != AssetScope("historical") {
+				t.Fatalf("AssetScope = %q, want historical", filters.AssetScope)
 			}
 		})
 	}

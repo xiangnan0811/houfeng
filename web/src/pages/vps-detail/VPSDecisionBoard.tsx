@@ -141,7 +141,7 @@ function lifecycleCoordinationTitle(detail: VPSAssetDetail, preview: Cancellatio
 function lifecycleCoordinationSummary(detail: VPSAssetDetail, preview: CancellationPreview | null, error: string | null): string {
   void detail
   if (error && !preview) return error
-  if (!preview) return '当前 VPS 未处于取消或迁移流程；取消/退役工作台会在需要联动处理时再突出显示。'
+  if (!preview) return '当前 VPS 未处于取消流程，也没有需要联动处理的迁移意向；取消/退役工作台会在需要联动处理时再突出显示。'
   const blockers = preview.blockers ?? []
   const warnings = preview.warnings ?? []
   const subscriptions = preview.subscriptions ?? []
