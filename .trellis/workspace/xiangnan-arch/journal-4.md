@@ -1089,3 +1089,36 @@ Closed remaining lifecycle state gaps: VPS state matrix, historical asset scope,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 209: Lifecycle state closure final review
+
+**Date**: 2026-06-30
+**Task**: Lifecycle state closure final review
+**Branch**: `audit-state-lifecycle-consistency`
+
+### Summary
+
+Recorded a full post-fix lifecycle/state review, persisted Trellis task preauthorization memory, verified backend/frontend/browser sanity, and documented remaining VPS PATCH merged-state and subscription import renewal_mode gaps.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1bd9774` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
