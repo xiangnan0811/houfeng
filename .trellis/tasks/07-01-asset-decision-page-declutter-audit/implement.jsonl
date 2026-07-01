@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Asset decision IA, modal behavior, copy/noise conventions"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "CSS tokens, BEM, dark-first styling constraints"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Asset decision API/data-flow contracts and write-path constraints"}
