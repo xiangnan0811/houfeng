@@ -1519,7 +1519,8 @@ function recordSourceLabel(record: Pick<AssetDecisionRecordSummary, 'source_type
 
 function recordSourceDetail(record: AssetDecisionRecordSummary): string {
   const sourceType = record.source_type === 'manual_group' ? '自定义组合' : record.source_type === 'auto_group' ? '自动组' : record.source_type
-  return `${sourceType} · ${record.source_group_type} · ${VIEW_LABELS[record.source_view] ?? record.source_view} · ${record.source_group_id}`
+  const sourceView = VIEW_LABELS[record.source_view] ?? record.source_view
+  return `${sourceType} · ${sourceView} · ${record.scope_label || '当前来源'}`
 }
 
 function manualGroupSummaryFromDetail(detail: AssetDecisionManualGroupDetail): AssetDecisionManualGroupSummary {
@@ -2029,6 +2030,26 @@ function sourceAvailabilityLabel(source: AssetDecisionOverview['source_availabil
   return missing.length > 0 ? `${missing.join('、')}证据不可用` : '证据源正常'
 }
 
+function normalizeDecisionText(value?: string | null): string {
+  return (value ?? '').replace(/\s+/g, ' ').trim()
+}
+
+function compactDecisionText(value: string | null | undefined, fallback: string, maxLength = 18): string {
+  const normalized = normalizeDecisionText(value) || fallback
+  const firstSentence = normalized.split(/[。！？!?]/)[0]?.trim() || normalized
+  if (firstSentence.length <= maxLength) return firstSentence
+  return `${firstSentence.slice(0, maxLength)}…`
+}
+
+function compactDirectoryMeta(value: string | null | undefined, fallback: string, maxLength = 12): string {
+  const normalized = normalizeDecisionText(value)
+  if (!normalized) return fallback
+  if (/(?:adg|admg|adr|adt|adtm)_/i.test(normalized)) return fallback
+  const firstSegment = normalized.split(/[。！？!?·/]/)[0]?.trim() || normalized
+  if (firstSegment.length <= maxLength) return firstSegment
+  return `${firstSegment.slice(0, maxLength)}…`
+}
+
 function memberContextLabel(member: AssetDecisionGroupMember): string {
   return [
     `服务 ${member.service_count}`,
@@ -2247,9 +2268,9 @@ function manualCoverMeta(detail: AssetDecisionManualGroupDetail, progress: Manua
 
 function recordCoverSummary(detail: AssetDecisionRecordDetail): string {
   const insight = parseComparisonInsight(detail.evidence_snapshot)
-  return insight?.summary
+  return compactDecisionText(insight?.summary
     || detail.execution_readback?.summary
-    || `保存时判断：${detail.goal || '等待补齐组合判断'}`
+    || `保存时判断：${detail.goal || '等待补齐组合判断'}`, '保存判断待复核')
 }
 
 function recordCoverMeta(detail: AssetDecisionRecordDetail): string {
@@ -5235,10 +5256,12 @@ export function AssetDecisionsPage() {
             {renderDetailCommand({
               ariaLabel: '自定义组合当前判断',
               title: '当前判断',
-              summary: manualDetailState.detail.comparison_insight?.summary
-                || manualDetailState.detail.decision_recommendation?.summary
-                || manualDetailState.detail.goal
-                || '继续整理自定义组合成员和意图。',
+              summary: compactDecisionText(
+                manualDetailState.detail.comparison_insight?.summary
+                  || manualDetailState.detail.decision_recommendation?.summary
+                  || manualDetailState.detail.goal,
+                '继续整理组合',
+              ),
               footer: <span className="asset-decision-detail-command__context">{manualCoverMeta(manualDetailState.detail, manualGroupProgress)}</span>,
               assessment: manualDetailState.detail.evidence_assessment,
               recommendation: manualDetailState.detail.decision_recommendation,
@@ -5267,12 +5290,12 @@ export function AssetDecisionsPage() {
               {
                 key: 'edit',
                 label: '编辑组合',
-                meta: MANUAL_GROUP_STATUS_LABELS[manualDetailState.detail.status],
+                meta: compactDirectoryMeta(MANUAL_GROUP_STATUS_LABELS[manualDetailState.detail.status], '组合状态'),
               },
               {
                 key: 'save',
                 label: '保存记录',
-                meta: `${manualGroupProgress.readinessLabel} ${manualGroupProgress.doneCount}/${manualGroupProgress.totalCount}`,
+                meta: compactDirectoryMeta(manualGroupProgress.readinessLabel, '保存状态'),
               },
               {
                 key: 'add',
@@ -5600,7 +5623,7 @@ export function AssetDecisionsPage() {
             {renderDetailCommand({
               ariaLabel: '场景模板当前判断',
               title: '当前模板',
-              summary: templateDetailState.detail.goal || '从该场景创建自定义组合后再细化目标。',
+              summary: compactDecisionText(templateDetailState.detail.goal, '创建组合后细化'),
               footer: <span className="asset-decision-detail-command__context">
                 {MANUAL_GROUP_SCENARIO_LABELS[templateDetailState.detail.scenario]} · {SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status]} · 蓝图 {templateDetailState.detail.member_count}
               </span>,
@@ -5620,12 +5643,12 @@ export function AssetDecisionsPage() {
               {
                 key: 'create',
                 label: '创建组合',
-                meta: templateDetailState.detail.status === 'active' ? '可创建' : '模板已归档',
+                meta: templateDetailState.detail.status === 'active' ? '可创建' : '已归档',
               },
               {
                 key: 'members',
                 label: '成员蓝图',
-                meta: templateDetailState.detail.source_manual_group_id ? `来自 ${templateDetailState.detail.source_manual_group_id}` : '内置模板不固定成员',
+                meta: templateDetailState.detail.source_manual_group_id ? '自定义蓝图' : '内置模板',
                 count: templateDetailState.detail.member_count,
               },
               ...(!templateDetailState.detail.builtin ? [{
@@ -5835,19 +5858,19 @@ export function AssetDecisionsPage() {
               {
                 key: 'execution',
                 label: '执行跟进',
-                meta: executionPlanCountSummary(recordDetailState.detail.execution_plan),
+                meta: compactDirectoryMeta(executionPlanCountSummary(recordDetailState.detail.execution_plan), '执行状态'),
                 count: recordDetailState.detail.execution_plan?.actionable_count ?? 0,
               },
               {
                 key: 'members',
                 label: '成员跟进',
-                meta: `成员 ${recordDetailState.detail.members.length}`,
+                meta: '成员复核',
                 count: recordDetailState.detail.members.length,
               },
               {
                 key: 'source',
                 label: '来源复核',
-                meta: recordSourceLabel(recordDetailState.detail),
+                meta: compactDirectoryMeta(recordSourceLabel(recordDetailState.detail), '来源'),
               },
               {
                 key: 'raw',
