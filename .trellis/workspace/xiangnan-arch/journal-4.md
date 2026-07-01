@@ -1252,3 +1252,36 @@ Fixed v0.55.6 bootstrap failure by backfilling legacy VPS state combinations bef
 ### Next Steps
 
 - None - task complete
+
+
+## Session 214: Asset decisions IA redesign
+
+**Date**: 2026-07-01
+**Task**: Asset decisions IA redesign
+**Branch**: `ux/asset-decisions-ia-redesign`
+
+### Summary
+
+Redesigned /asset-decisions into a portfolio-first workbench, moved records/scenarios/renewal/single queue into controlled secondary areas, updated tests and web spec, and verified lint/tests/build/browser sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c831013` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
