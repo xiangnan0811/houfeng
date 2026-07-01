@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Frontend test, lint, build and review expectations"}
+{"file": ".trellis/tasks/07-01-asset-decision-page-declutter-audit/research/visual-audit.md", "reason": "Browser audit baseline for text, badge and modal density regressions"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify existing asset decision mutations and no unintended business writes"}

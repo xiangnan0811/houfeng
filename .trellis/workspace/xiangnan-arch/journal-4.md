@@ -1353,3 +1353,36 @@ Planned and implemented panel-based asset decision detail modals; verified targe
 ### Next Steps
 
 - None - task complete
+
+
+## Session 217: Declutter asset decision workbench
+
+**Date**: 2026-07-01
+**Task**: Declutter asset decision workbench
+**Branch**: `ux/asset-decision-page-declutter-audit`
+
+### Summary
+
+Reworked the asset decision page default surfaces into compact decision-first views, preserved secondary workflows, and verified lint/tests/build plus local browser CDP checks for desktop and mobile asset-workflow routes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3104b0e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

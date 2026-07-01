@@ -358,7 +358,6 @@ type ComparisonMatrixMember = {
 
 type DetailCommandOptions = {
   ariaLabel: string
-  eyebrow: string
   title: string
   summary: string
   assessment?: AssetDecisionEvidenceAssessment | null
@@ -551,15 +550,6 @@ const COMPARISON_LANE_LABELS: Record<AssetDecisionComparisonLane, string> = {
   evidence: '补证据',
   review: '复核',
 }
-
-const COMPARISON_LANE_ORDER: AssetDecisionComparisonLane[] = [
-  'retire',
-  'evidence',
-  'primary',
-  'standby',
-  'observe',
-  'review',
-]
 
 const EVIDENCE_TIER_LABELS: Record<AssetDecisionEvidenceQualityTier, string> = {
   strong: '证据强',
@@ -1651,6 +1641,57 @@ function renderEvidenceChips(chips: AssetDecisionEvidenceChip[], limit = 5) {
   )
 }
 
+function compactRiskChips(chips: AssetDecisionEvidenceChip[] = [], assessment?: AssetDecisionEvidenceAssessment | null): Array<{
+  key: string
+  label: string
+  tone: BadgeTone
+}> {
+  const risks = chips
+    .filter((chip) => chip.tone === 'critical' || chip.tone === 'alert')
+    .map((chip) => ({
+      key: `${chip.kind}-${chip.label}`,
+      label: chip.label || EVIDENCE_KIND_LABELS[chip.kind] || chip.kind,
+      tone: chipTone(chip.tone),
+    }))
+  if (risks.length < 2 && assessment && assessment.gap_signal_count > 0) {
+    risks.push({ key: 'gap-signal-count', label: `缺口 ${assessment.gap_signal_count}`, tone: 'alert' })
+  }
+  if (risks.length < 2 && assessment && assessment.risk_signal_count > 0) {
+    risks.push({ key: 'risk-signal-count', label: `风险 ${assessment.risk_signal_count}`, tone: 'alert' })
+  }
+  return risks.slice(0, 2)
+}
+
+function renderCompactRiskChips(chips: AssetDecisionEvidenceChip[] = [], assessment?: AssetDecisionEvidenceAssessment | null) {
+  const risks = compactRiskChips(chips, assessment)
+  if (risks.length === 0) {
+    return (
+      <Badge variant="state" tone={assessment ? evidenceTierTone(assessment.quality_tier) : 'normal'}>
+        {assessment ? EVIDENCE_TIER_LABELS[assessment.quality_tier] : '证据稳定'}
+      </Badge>
+    )
+  }
+  return (
+    <>
+      {risks.map((chip) => (
+        <Badge key={chip.key} variant="info" tone={chip.tone}>
+          {chip.label}
+        </Badge>
+      ))}
+    </>
+  )
+}
+
+function renderCompactFact(label: string, value: ReactNode, detail?: ReactNode) {
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {detail ? <small>{detail}</small> : null}
+    </div>
+  )
+}
+
 function renderEvidenceAssessment(assessment: AssetDecisionEvidenceAssessment | null, mode: 'compact' | 'detail' = 'compact') {
   if (!assessment) return <span className="empty-inline">无证据评估</span>
   return (
@@ -1703,89 +1744,26 @@ function renderComparisonSignals(signals: AssetDecisionComparisonSignal[], limit
   )
 }
 
-function renderComparisonLaneCounts(insight?: AssetDecisionComparisonInsight | null) {
-  const counts = insight?.lane_counts ?? []
-  if (counts.length === 0) return <span className="empty-inline">暂无候选分层</span>
-  const byLane = new Map(counts.map((item) => [item.lane, item.count]))
-  return (
-    <span className="asset-decision-chip-row">
-      {COMPARISON_LANE_ORDER.map((lane) => {
-        const count = byLane.get(lane) ?? 0
-        if (count <= 0) return null
-        return (
-          <Badge key={lane} variant="count" tone={comparisonLaneTone(lane)}>
-            {COMPARISON_LANE_LABELS[lane]} {count}
-          </Badge>
-        )
-      })}
-    </span>
-  )
-}
-
-function comparisonPriorityLabel(insight?: AssetDecisionComparisonInsight | null): string {
-  if (!insight || insight.priority_vps_ids.length === 0) return '暂无优先成员'
-  return insight.priority_vps_ids.slice(0, 3).join(' / ')
-}
-
-function renderComparisonOverview(insight?: AssetDecisionComparisonInsight | null, mode: 'compact' | 'detail' = 'compact') {
-  if (!insight) {
-    return (
-      <div className={`asset-decision-comparison-overview asset-decision-comparison-overview--${mode}`}>
-        <span>COMPARISON</span>
-        <strong>等待对比洞察</strong>
-        <small>打开详情后仍可查看成本、承载、监控和证据缺口。</small>
-      </div>
-    )
-  }
-  return (
-    <div className={`asset-decision-comparison-overview asset-decision-comparison-overview--${mode}`}>
-      <div>
-        <span>{mode === 'detail' ? 'PRIMARY AXIS' : 'COMPARISON'}</span>
-        <Badge variant="state" tone={chipTone(insight.tradeoffs[0]?.tone)}>
-          {COMPARISON_AXIS_LABELS[insight.primary_axis] ?? insight.primary_axis}
-        </Badge>
-      </div>
-      <strong>{insight.summary}</strong>
-      <small>优先核对 {comparisonPriorityLabel(insight)}</small>
-      {mode === 'detail' && (
-        <>
-          {renderComparisonLaneCounts(insight)}
-          {renderComparisonSignals(insight.tradeoffs, 4)}
-        </>
-      )}
-    </div>
-  )
-}
-
 function memberComparisonTitle(member: ComparisonMatrixMember) {
   const content = <strong>{member.displayName}</strong>
   return member.href ? <Link className="name" to={member.href}>{content}</Link> : content
 }
 
 function renderDetailCommand(options: DetailCommandOptions) {
+  const leadSummary = options.recommendation?.summary || options.summary
+  const nextStep = options.recommendation?.next_step
   return (
     <section className="asset-decision-detail-command" aria-label={options.ariaLabel}>
       <div className="asset-decision-detail-command__main">
         <div>
-          <p className="section-heading__eyebrow">{options.eyebrow}</p>
           <h3>{options.title}</h3>
-          <strong>{options.summary}</strong>
+          <strong>{leadSummary}</strong>
+          {nextStep && <span>{nextStep}</span>}
         </div>
         <div className="asset-decision-detail-command__meta">
-          {options.badge}
-          {options.assessment ? (
-            <Badge variant="state" tone={evidenceTierTone(options.assessment.quality_tier)}>
-              {EVIDENCE_TIER_LABELS[options.assessment.quality_tier]}
-            </Badge>
-          ) : null}
-          {options.insight ? renderComparisonLaneCounts(options.insight) : null}
+          {options.badge ?? null}
+          {renderCompactRiskChips(options.chips, options.assessment)}
         </div>
-      </div>
-      <div className="asset-decision-detail-command__body">
-        {renderDecisionRecommendation(options.recommendation, 'detail')}
-        {options.assessment ? renderEvidenceAssessment(options.assessment, 'detail') : null}
-        {options.insight ? renderComparisonSignals(options.insight.tradeoffs, 4) : null}
-        {options.chips && options.chips.length > 0 ? renderEvidenceChips(options.chips, 4) : null}
       </div>
       {(options.actions || options.footer) && (
         <div className="asset-decision-detail-command__footer">
@@ -1915,7 +1893,6 @@ function renderDetailPanelNav<TPanel extends string>(
           onClick={() => onChange(item.key)}
         >
           <span>{item.label}</span>
-          {item.summary ? <small>{item.summary}</small> : null}
           {item.count != null ? (
             <Badge variant="count" tone={item.count > 0 ? 'notice' : 'neutral'}>
               {item.count}
@@ -1935,6 +1912,12 @@ function renderDetailPanel(title: string, children: ReactNode) {
   )
 }
 
+function compactMemberPreviewSummary(member: ComparisonMatrixMember): string {
+  const role = ROLE_LABELS[member.intendedRole ?? member.role] ?? '待定角色'
+  const action = ACTION_LABELS[member.intendedAction ?? member.action] ?? '复核'
+  return `${role} · ${action} · ${member.facts}`
+}
+
 function renderMemberDecisionPreview(
   members: ComparisonMatrixMember[],
   ariaLabel: string,
@@ -1951,7 +1934,6 @@ function renderMemberDecisionPreview(
     <section className="asset-decision-member-preview" aria-label={ariaLabel}>
       <div className="asset-decision-member-preview__head">
         <div>
-          <p className="section-heading__eyebrow">MEMBERS</p>
           <h3>关键成员摘要</h3>
         </div>
         <Badge variant="count" tone={sortedMembers.length > 0 ? 'notice' : 'neutral'}>
@@ -1960,7 +1942,7 @@ function renderMemberDecisionPreview(
       </div>
       {visibleMembers.length > 0 ? (
         <div className="asset-decision-member-preview__rows">
-          {visibleMembers.map((member) => {
+          {visibleMembers.slice(0, 2).map((member) => {
             const lane = member.comparison?.lane ?? 'review'
             const intentMismatch = options.showIntent
               && member.comparison
@@ -1972,12 +1954,11 @@ function renderMemberDecisionPreview(
             return (
               <article key={member.key} className="asset-decision-member-preview__row">
                 <div>
-                  <span>#{member.comparison?.rank || '-'} · {COMPARISON_LANE_LABELS[lane] ?? lane}</span>
                   {memberComparisonTitle(member)}
-                  <small>{member.meta}</small>
+                  <small>{COMPARISON_LANE_LABELS[lane] ?? lane} · {member.meta}</small>
                 </div>
                 <div className="asset-decision-member-preview__facts">
-                  <strong>{member.comparison?.summary || member.facts}</strong>
+                  <strong>{compactMemberPreviewSummary(member)}</strong>
                   <small>{member.product} · {member.statusFacts}</small>
                 </div>
                 <span className="asset-decision-chip-row">
@@ -2064,12 +2045,11 @@ function renderRecordSavedEvidence(detail: AssetDecisionRecordDetail, selectedRe
     <section className="asset-decision-saved-evidence" aria-label="保存时判断依据">
       <div className="asset-decision-saved-evidence__head">
         <div>
-          <p className="section-heading__eyebrow">SAVED EVIDENCE</p>
           <h3>保存时判断依据</h3>
           <span>
             {insight
               ? insight.summary
-              : '保存时未记录对比洞察。'}
+              : selectedRecordAssessment?.summary || '保存时未记录对比洞察。'}
           </span>
         </div>
         <Badge variant="state" tone={selectedRecordAssessment ? evidenceTierTone(selectedRecordAssessment.quality_tier) : 'neutral'}>
@@ -2081,10 +2061,11 @@ function renderRecordSavedEvidence(detail: AssetDecisionRecordDetail, selectedRe
           <Badge variant="count" tone="notice">
             快照成员 {detail.members.length}
           </Badge>
-          {insight ? renderComparisonLaneCounts(insight) : null}
-          {selectedRecordAssessment
-            ? renderEvidenceAssessment(selectedRecordAssessment, 'detail')
-            : <span className="empty-inline">保存时未记录证据评估</span>}
+          {selectedRecordAssessment ? (
+            <Badge variant="state" tone={evidenceTierTone(selectedRecordAssessment.quality_tier)}>
+              {EVIDENCE_TIER_LABELS[selectedRecordAssessment.quality_tier]}
+            </Badge>
+          ) : <span className="empty-inline">保存时未记录证据评估</span>}
         </div>
         <div className="asset-decision-saved-evidence__signals">
           <span>保存时取舍</span>
@@ -4429,42 +4410,24 @@ export function AssetDecisionsPage() {
                   </span>
                 </div>
 
-                <div className="asset-decision-group-card__brief">
-                  <div className="asset-decision-group-card__recommendation">
-                    <span>NEXT STEP</span>
-                    <strong>{recommendation?.summary || '打开组详情继续比较成员'}</strong>
-                    <small>{recommendation?.next_step || group.primary_issue_summary || '核对成本、承载和证据缺口后保存判断。'}</small>
-                  </div>
-                  <div className="asset-decision-group-card__comparison">
-                    {renderComparisonOverview(comparison)}
-                    {renderComparisonLaneCounts(comparison)}
-                  </div>
-                  <div className="asset-decision-group-card__assessment">
-                    {renderEvidenceAssessment(assessment)}
-                  </div>
-                </div>
-
                 <div className="asset-decision-group-card__metrics" aria-label={`${group.title} 关键证据`}>
-                  <div>
-                    <span>组合范围</span>
-                    <strong><MonoDigits>{group.member_count}</MonoDigits> 台 VPS</strong>
-                    <small>{countSummary(group.usage_counts, ['in_use', 'standby', 'idle'], usageLabel)}</small>
-                  </div>
-                  <div>
-                    <span>承载证据</span>
-                    <strong>{groupServiceLabel(group)}</strong>
-                    <small>{groupMonitoringLabel(group)}</small>
-                  </div>
-                  <div>
-                    <span>成本证据</span>
-                    <strong>{formatGroupMonthlyCost(group)}</strong>
-                    <small>{formatGroupYearlyCost(group)}</small>
-                  </div>
+                  {renderCompactFact(
+                    '成员',
+                    <><MonoDigits>{group.member_count}</MonoDigits> 台</>,
+                    countSummary(group.usage_counts, ['in_use', 'standby', 'idle'], usageLabel),
+                  )}
+                  {renderCompactFact('承载', groupServiceLabel(group), groupMonitoringLabel(group))}
+                  {renderCompactFact('成本', formatGroupMonthlyCost(group), formatGroupYearlyCost(group))}
                 </div>
 
                 <div className="asset-decision-group-card__evidence">
-                  {renderEvidenceChips(group.evidence_chips, 5)}
-                  <small>{assessment.summary}</small>
+                  <strong>{comparison?.summary || recommendation?.summary || assessment.summary}</strong>
+                  <span className="asset-decision-chip-row">
+                    {renderCompactRiskChips(group.evidence_chips, assessment)}
+                    <Badge variant="state" tone={evidenceBiasTone(assessment.decision_bias)}>
+                      {EVIDENCE_BIAS_LABELS[assessment.decision_bias] ?? assessment.decision_bias}
+                    </Badge>
+                  </span>
                 </div>
               </div>
               <div className="asset-decision-group-card__actions">
@@ -5144,7 +5107,6 @@ export function AssetDecisionsPage() {
             </div>
             {renderDetailCommand({
               ariaLabel: '决策组当前判断',
-              eyebrow: 'GROUP DECISION',
               title: '当前判断',
               summary: detailState.detail.comparison_insight?.summary
                 || detailState.detail.decision_recommendation?.summary
@@ -5168,9 +5130,6 @@ export function AssetDecisionsPage() {
                 </button>
                 </>
               ),
-              footer: detailState.detail.primary_issue_summary ? (
-                <span className="asset-decision-detail__issue">{detailState.detail.primary_issue_summary}</span>
-              ) : null,
             })}
             {renderMemberDecisionPreview(
               detailState.detail.members.map(groupMemberComparisonMatrixMember),
@@ -5402,7 +5361,6 @@ export function AssetDecisionsPage() {
 
             {renderDetailCommand({
               ariaLabel: '自定义组合当前判断',
-              eyebrow: 'SCENARIO DECISION',
               title: '当前判断',
               summary: manualDetailState.detail.comparison_insight?.summary
                 || manualDetailState.detail.decision_recommendation?.summary
@@ -5441,15 +5399,16 @@ export function AssetDecisionsPage() {
                 </>
               ),
               footer: (
-                <div className="asset-decision-detail-command__checks">
-                  {manualGroupProgress.items.map((item) => (
-                    <span key={item.key}>
-                      <Badge variant="state" tone={item.tone}>{item.done ? '完成' : '待补'}</Badge>
-                      <strong>{item.label}</strong>
-                      <small>{item.summary}</small>
-                    </span>
-                  ))}
-                </div>
+                <span className="asset-decision-detail-command__readiness">
+                  {manualGroupProgress.items
+                    .filter((item) => item.key === 'intent' || item.key === 'facts')
+                    .map((item) => (
+                      <span key={item.key}>
+                        <Badge variant="state" tone={item.tone}>{item.label}</Badge>
+                        <small>{item.summary}</small>
+                      </span>
+                    ))}
+                </span>
               ),
             })}
 
@@ -5811,7 +5770,6 @@ export function AssetDecisionsPage() {
 
             <div className="asset-decision-record-detail__lead">
               <div>
-                <p className="section-heading__eyebrow">TEMPLATE GOAL</p>
                 <strong>{templateDetailState.detail.goal || '从该场景创建自定义组合后再细化目标'}</strong>
                 <span>{templateDetailState.detail.note || '模板只保存场景 blueprint，不保存当前成本、订阅、监控或服务事实。'}</span>
               </div>
@@ -6049,14 +6007,12 @@ export function AssetDecisionsPage() {
             </div>
             <div className="asset-decision-record-detail__lead">
               <div>
-                <p className="section-heading__eyebrow">GOAL</p>
                 <strong>{recordDetailState.detail.goal || '暂无组合目标'}</strong>
                 <span>
                   快照成本 {recordDetailState.detail.evidence_snapshot.monthly_cost_base != null
                     ? formatMoney(Number(recordDetailState.detail.evidence_snapshot.monthly_cost_base), String(recordDetailState.detail.evidence_snapshot.base_currency || 'CNY'))
                     : '暂无 base currency 成本'}
                 </span>
-                {selectedRecordAssessment && renderEvidenceAssessment(selectedRecordAssessment, 'detail')}
               </div>
             </div>
             {renderRecordSavedEvidence(recordDetailState.detail, selectedRecordAssessment)}
