@@ -1419,3 +1419,36 @@ Refined asset decision detail defaults into compact decision covers, moved membe
 ### Next Steps
 
 - None - task complete
+
+
+## Session 219: Asset decision workbench third-pass refactor
+
+**Date**: 2026-07-01
+**Task**: Asset decision workbench third-pass refactor
+**Branch**: `ux/asset-decision-workbench-third-pass`
+
+### Summary
+
+Simplified asset decision group, manual group, and saved record defaults into decision covers; preserved detail workflows behind explicit detail entry; verified with web tests, build, make verify-web, and local CDP browser sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bdacc85` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
