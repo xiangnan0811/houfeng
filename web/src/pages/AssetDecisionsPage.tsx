@@ -1682,16 +1682,6 @@ function renderCompactRiskChips(chips: AssetDecisionEvidenceChip[] = [], assessm
   )
 }
 
-function renderCompactFact(label: string, value: ReactNode, detail?: ReactNode) {
-  return (
-    <div>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      {detail ? <small>{detail}</small> : null}
-    </div>
-  )
-}
-
 function renderEvidenceAssessment(assessment: AssetDecisionEvidenceAssessment | null, mode: 'compact' | 'detail' = 'compact') {
   if (!assessment) return <span className="empty-inline">无证据评估</span>
   return (
@@ -2257,14 +2247,24 @@ function groupPressureLabel(group: AssetDecisionGroupSummary): string {
   return parts.length > 0 ? parts.join(' · ') : '暂无高压信号'
 }
 
-function groupServiceLabel(group: AssetDecisionGroupSummary): string {
-  return `服务 ${group.service_count} · 域名 ${group.domain_count} · Target ${group.running_target_count}/${group.target_count}`
+function groupCoverMeta(detail: AssetDecisionGroupDetail): string {
+  return `${VIEW_LABELS[detail.view]} · 成员 ${detail.member_count} · ${formatGroupMonthlyCost(detail)}`
 }
 
-function groupMonitoringLabel(group: AssetDecisionGroupSummary): string {
-  const abnormal = group.abnormal_monitoring_count > 0 ? `异常 ${group.abnormal_monitoring_count}` : '异常 0'
-  const incidents = group.active_incident_count > 0 ? `事件 ${group.active_incident_count}` : '事件 0'
-  return `监控 ${group.monitoring_link_count} · ${abnormal} · ${incidents}`
+function manualCoverMeta(detail: AssetDecisionManualGroupDetail, progress: ManualGroupProgress): string {
+  return `${MANUAL_GROUP_SCENARIO_LABELS[detail.scenario]} · ${MANUAL_GROUP_STATUS_LABELS[detail.status]} · ${progress.readinessLabel} ${progress.doneCount}/${progress.totalCount}`
+}
+
+function recordCoverSummary(detail: AssetDecisionRecordDetail): string {
+  const insight = parseComparisonInsight(detail.evidence_snapshot)
+  return insight?.summary
+    || detail.execution_readback?.summary
+    || `保存时判断：${detail.goal || '等待补齐组合判断'}`
+}
+
+function recordCoverMeta(detail: AssetDecisionRecordDetail): string {
+  const readback = detail.execution_readback?.status ? READBACK_STATUS_LABELS[detail.execution_readback.status] : '等待回读'
+  return `${RECORD_STATUS_LABELS[detail.status]} · 跟进 ${recordFollowupDoneCount(detail)}/${detail.member_count} · ${readback}`
 }
 
 export function AssetDecisionsPage() {
@@ -4299,38 +4299,19 @@ export function AssetDecisionsPage() {
                 <div className="asset-decision-group-card__head">
                   <div>
                     <strong>{group.title}</strong>
-                    <span>{group.scope_label} · {group.primary_issue_summary || '暂无主要问题'}</span>
+                    <span>{group.scope_label}</span>
                   </div>
                   <span className="asset-decision-chip-row">
                     <Badge variant="info" tone={tone}>
                       {groupPressureLabel(group)}
                     </Badge>
-                    <Badge variant="state" tone={evidenceTierTone(assessment.quality_tier)}>
-                      {EVIDENCE_TIER_LABELS[assessment.quality_tier] ?? assessment.quality_tier}
-                    </Badge>
-                    <Badge variant="state" tone={evidenceBiasTone(assessment.decision_bias)}>
-                      {EVIDENCE_BIAS_LABELS[assessment.decision_bias] ?? assessment.decision_bias}
-                    </Badge>
                   </span>
                 </div>
 
-                <div className="asset-decision-group-card__metrics" aria-label={`${group.title} 关键证据`}>
-                  {renderCompactFact(
-                    '成员',
-                    <><MonoDigits>{group.member_count}</MonoDigits> 台</>,
-                    countSummary(group.usage_counts, ['in_use', 'standby', 'idle'], usageLabel),
-                  )}
-                  {renderCompactFact('承载', groupServiceLabel(group), groupMonitoringLabel(group))}
-                  {renderCompactFact('成本', formatGroupMonthlyCost(group), formatGroupYearlyCost(group))}
-                </div>
-
                 <div className="asset-decision-group-card__evidence">
-                  <strong>{comparison?.summary || recommendation?.summary || assessment.summary}</strong>
+                  <strong>{comparison?.summary || recommendation?.summary || group.primary_issue_summary || assessment.summary}</strong>
                   <span className="asset-decision-chip-row">
                     {renderCompactRiskChips(group.evidence_chips, assessment)}
-                    <Badge variant="state" tone={evidenceBiasTone(assessment.decision_bias)}>
-                      {EVIDENCE_BIAS_LABELS[assessment.decision_bias] ?? assessment.decision_bias}
-                    </Badge>
                   </span>
                 </div>
               </div>
@@ -4987,7 +4968,7 @@ export function AssetDecisionsPage() {
           />
         ) : detailState.detail ? (
           <div className="asset-decision-detail">
-            <div className="asset-decision-detail__summary">
+            {groupDetailPanel !== 'overview' && <div className="asset-decision-detail__summary">
               <div>
                 <span>VPS</span>
                 <strong><MonoDigits>{detailState.detail.member_count}</MonoDigits></strong>
@@ -5008,13 +4989,14 @@ export function AssetDecisionsPage() {
                 <strong><MonoDigits>{detailState.detail.evidence_assessment.risk_signal_count + detailState.detail.evidence_assessment.gap_signal_count}</MonoDigits></strong>
                 <small>风险 / 缺口</small>
               </div>
-            </div>
+            </div>}
             {renderDetailCommand({
               ariaLabel: '决策组当前判断',
               title: '当前判断',
               summary: detailState.detail.comparison_insight?.summary
                 || detailState.detail.decision_recommendation?.summary
                 || '先确认当前自动组是否就是本次决策范围。',
+              footer: <span className="asset-decision-detail-command__context">{groupCoverMeta(detailState.detail)}</span>,
               assessment: detailState.detail.evidence_assessment,
               recommendation: detailState.detail.decision_recommendation,
               insight: detailState.detail.comparison_insight,
@@ -5029,13 +5011,13 @@ export function AssetDecisionsPage() {
                 >
                   {manualGroupCreating ? '创建中…' : '创建自定义组合'}
                 </button>
-                <button className="btn sm secondary" type="button" onClick={() => startRecordSave(detailState.detail!)}>
-                  保存为决策记录
+                <button className="btn-text sm secondary" type="button" onClick={() => setGroupDetailPanel('members')}>
+                  查看详情
                 </button>
                 </>
               ),
             })}
-            {renderDetailPanelNav<GroupDetailPanel>([
+            {groupDetailPanel !== 'overview' && renderDetailPanelNav<GroupDetailPanel>([
               { key: 'members', label: '成员明细', count: detailState.detail.members.length },
               { key: 'save', label: '保存记录', ariaLabel: '保存记录面板' },
               ...(groupDetailPanel === 'members' || groupDetailPanel === 'raw'
@@ -5226,7 +5208,7 @@ export function AssetDecisionsPage() {
           />
         ) : manualDetailState.detail && manualGroupProgress ? (
           <div className="asset-decision-detail asset-decision-manual-detail">
-            <div className="asset-decision-detail__summary">
+            {manualDetailPanel !== 'overview' && <div className="asset-decision-detail__summary">
               <div>
                 <span>场景</span>
                 <strong>{MANUAL_GROUP_SCENARIO_LABELS[manualDetailState.detail.scenario]}</strong>
@@ -5247,7 +5229,7 @@ export function AssetDecisionsPage() {
                 <strong>{EVIDENCE_TIER_LABELS[manualDetailState.detail.evidence_assessment.quality_tier]}</strong>
                 <small>{manualDetailState.detail.evidence_assessment.summary}</small>
               </div>
-            </div>
+            </div>}
 
             {renderDetailCommand({
               ariaLabel: '自定义组合当前判断',
@@ -5256,6 +5238,7 @@ export function AssetDecisionsPage() {
                 || manualDetailState.detail.decision_recommendation?.summary
                 || manualDetailState.detail.goal
                 || '继续整理自定义组合成员和意图。',
+              footer: <span className="asset-decision-detail-command__context">{manualCoverMeta(manualDetailState.detail, manualGroupProgress)}</span>,
               assessment: manualDetailState.detail.evidence_assessment,
               recommendation: manualDetailState.detail.decision_recommendation,
               insight: manualDetailState.detail.comparison_insight,
@@ -5267,27 +5250,17 @@ export function AssetDecisionsPage() {
               ),
               actions: (
                 <>
-                  <button className="btn sm primary" type="button" onClick={() => setManualDetailPanel('edit')} disabled={manualGroupSaving}>
-                    编辑组合
-                  </button>
-                  <button
-                    className="btn sm secondary"
-                    type="button"
-                    onClick={() => startManualRecordSave(manualDetailState.detail!)}
-                    disabled={manualDetailState.detail.members.length === 0}
-                  >
-                    保存为决策记录
+                  <button className="btn-text sm secondary" type="button" onClick={() => setManualDetailPanel('members')}>
+                    查看详情
                   </button>
                 </>
               ),
             })}
 
-            {renderDetailPanelNav<ManualDetailPanel>([
+            {manualDetailPanel !== 'overview' && renderDetailPanelNav<ManualDetailPanel>([
               { key: 'members', label: '成员维护', count: manualDetailState.detail.members.length },
+              { key: 'edit', label: '编辑组合' },
               { key: 'save', label: '保存记录', ariaLabel: '保存记录面板' },
-              ...(manualDetailPanel === 'edit'
-                ? [{ key: 'edit' as const, label: '编辑组合' }]
-                : []),
               ...(manualDetailPanel === 'members' || manualDetailPanel === 'add'
                 ? [{ key: 'add' as const, label: '添加成员' }]
                 : []),
@@ -5849,7 +5822,7 @@ export function AssetDecisionsPage() {
           />
         ) : recordDetailState.detail ? (
           <div className="asset-decision-detail asset-decision-record-detail">
-            <div className="asset-decision-detail__summary">
+            {recordDetailPanel !== 'overview' && <div className="asset-decision-detail__summary">
               <div>
                 <span>状态</span>
                 <strong>{RECORD_STATUS_LABELS[recordDetailState.detail.status]}</strong>
@@ -5872,9 +5845,22 @@ export function AssetDecisionsPage() {
                 <strong>{recordDetailState.detail.execution_readback?.status ? READBACK_STATUS_LABELS[recordDetailState.detail.execution_readback.status] : '等待回读'}</strong>
                 <small>{recordDetailState.detail.execution_readback?.summary || '等待执行证据'}</small>
               </div>
-            </div>
-            {renderRecordSavedEvidence(recordDetailState.detail, selectedRecordAssessment)}
-            {renderDetailPanelNav<RecordDetailPanel>([
+            </div>}
+            {recordDetailPanel === 'overview' ? renderDetailCommand({
+              ariaLabel: '保存记录当前判断',
+              title: '当前记录',
+              summary: recordCoverSummary(recordDetailState.detail),
+              footer: <span className="asset-decision-detail-command__context">{recordCoverMeta(recordDetailState.detail)}</span>,
+              assessment: selectedRecordAssessment,
+              insight: parseComparisonInsight(recordDetailState.detail.evidence_snapshot),
+              chips: [],
+              actions: (
+                <button className="btn-text sm secondary" type="button" onClick={() => setRecordDetailPanel('execution')}>
+                  查看详情
+                </button>
+              ),
+            }) : renderRecordSavedEvidence(recordDetailState.detail, selectedRecordAssessment)}
+            {recordDetailPanel !== 'overview' && renderDetailPanelNav<RecordDetailPanel>([
               { key: 'execution', label: '执行跟进', count: recordDetailState.detail.execution_plan?.actionable_count ?? 0 },
               { key: 'members', label: '成员跟进', count: recordDetailState.detail.members.length },
               { key: 'source', label: '来源复核' },
