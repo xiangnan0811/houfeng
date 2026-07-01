@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.10](https://github.com/xiangnan0811/houfeng/compare/v0.56.9...v0.56.10) (2026-07-01)
+
+
+### Bug Fixes
+
+* simplify asset decision modal follow-up panels ([9a9cd80](https://github.com/xiangnan0811/houfeng/commit/9a9cd80143a44ec3c5e608b97fc5573bcbf1de38))
+* simplify asset decision modal follow-up panels ([45890f7](https://github.com/xiangnan0811/houfeng/commit/45890f746e90e8db1ba8091dc90015e5701bcb35))
+
 ## [0.56.9](https://github.com/xiangnan0811/houfeng/compare/v0.56.8...v0.56.9) (2026-07-01)
 
 
