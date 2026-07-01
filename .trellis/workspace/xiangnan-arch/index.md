@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 222
-- **Last Active**: 2026-07-01
+- **Total Sessions**: 223
+- **Last Active**: 2026-07-02
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1554 | Active |
+| `journal-4.md` | ~1587 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 223 | 2026-07-02 | Archive asset decision modal density audit | `df020a7` | `chore/archive-asset-decision-modal-density-audit` |
 | 222 | 2026-07-01 | 收敛资产决策弹窗封面 | `f404b16`, `72b0518` | `ux/asset-decision-modal-full-audit` |
 | 221 | 2026-07-01 | Asset decision modal density cleanup | `1ffc036` | `ux/asset-decision-modal-density-audit` |
 | 220 | 2026-07-01 | Asset decision workbench deep clean | `d6ffb18` | `ux/asset-decision-workbench-deep-clean` |
