@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.3](https://github.com/xiangnan0811/houfeng/compare/v0.56.2...v0.56.3) (2026-07-01)
+
+
+### Bug Fixes
+
+* declutter asset decision workbench ([d5a7149](https://github.com/xiangnan0811/houfeng/commit/d5a714959245a4a74e699612ad28ddc971022ec4))
+* declutter asset decision workbench ([3104b0e](https://github.com/xiangnan0811/houfeng/commit/3104b0e16ac1de308c706f0d819c9f8090923916))
+
 ## [0.56.2](https://github.com/xiangnan0811/houfeng/compare/v0.56.1...v0.56.2) (2026-07-01)
 
 
