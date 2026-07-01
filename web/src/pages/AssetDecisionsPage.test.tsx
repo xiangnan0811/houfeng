@@ -645,12 +645,17 @@ function findFetchCall(fetchMock: ReturnType<typeof vi.fn>, url: string, method?
   })
 }
 
+async function openSecondaryWorkbench(label: '打开记录' | '打开场景' | '查看续费' | '查看单台队列') {
+  const secondaryNav = await screen.findByLabelText('资产决策次级工作区')
+  fireEvent.click(within(secondaryNav).getByRole('button', { name: label }))
+}
+
 describe('AssetDecisionsPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('renders the portfolio workbench as the primary surface', async () => {
+  it('renders the portfolio-first workbench without flattening secondary areas', async () => {
     const fetchMock = vi.fn()
     mockInitialWorkbench(fetchMock)
     vi.stubGlobal('fetch', fetchMock)
@@ -669,19 +674,11 @@ describe('AssetDecisionsPage', () => {
     expect(within(commandSummary).getByText('证据源正常')).toBeInTheDocument()
     expect(within(commandSummary).getByRole('button', { name: '补证据' })).toBeInTheDocument()
     expect(within(commandSummary).getByRole('link', { name: '资料缺口' })).toHaveAttribute('href', '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup')
-    const decisionPath = screen.getByLabelText('资产组合决策推进路径')
-    expect(within(decisionPath).getByRole('heading', { name: '决策路径' })).toBeInTheDocument()
-    expect(within(decisionPath).getByText('发现组合压力')).toBeInTheDocument()
-    expect(within(decisionPath).getByText('形成真实场景')).toBeInTheDocument()
-    expect(within(decisionPath).getByText('保存一次判断')).toBeInTheDocument()
-    expect(within(decisionPath).getByText('回读执行闭环')).toBeInTheDocument()
-    expect(within(decisionPath).getByRole('button', { name: '打开自动组' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '下一步导览' })).toBeInTheDocument()
-    expect(screen.getAllByText('CLOSED LOOP').length).toBeGreaterThan(0)
-    expect(screen.getByText('回读缺证据')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '决策路径' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('资产组合决策推进路径')).not.toBeInTheDocument()
     expect(screen.getByText('PORTFOLIO')).toBeInTheDocument()
-    expect(screen.getByText('DRIFT')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '决策组列表' })).toBeInTheDocument()
+    expect(screen.getByLabelText('资产决策次级工作区')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '决策组扫描' })).toBeInTheDocument()
     expect(screen.getByLabelText('决策组扫描列表')).toBeInTheDocument()
     expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0)
     expect(screen.getAllByText('主力承载明确，备用仍需补齐订阅和监控证据').length).toBeGreaterThan(0)
@@ -689,17 +686,15 @@ describe('AssetDecisionsPage', () => {
     expect(screen.getAllByText('证据强').length).toBeGreaterThan(0)
     expect(screen.getAllByText('承载证据').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/服务 2 · 域名 1 · Target 1\/1/).length).toBeGreaterThan(0)
-    expect(screen.getByRole('heading', { name: '自定义组合' })).toBeInTheDocument()
-    expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0)
-    expect(screen.getByRole('heading', { name: '已保存组合决策' })).toBeInTheDocument()
-    expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('需补证据').length).toBeGreaterThan(0)
-    expect(screen.getByText('缺口 1')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '场景模板' })).toBeInTheDocument()
-    expect(screen.getAllByText('主备取舍模板').length).toBeGreaterThan(0)
-    expect(screen.getByText('RENEWAL EVIDENCE')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '单台待处理队列' })).toBeInTheDocument()
-    expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('heading', { name: '自定义组合' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '已保存组合决策' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '场景模板' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '续费证据区' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '单台待处理队列' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '打开记录' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '打开场景' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看续费' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看单台队列' })).toBeInTheDocument()
 
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=needs_decision&renew_within_days=30')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=needs_decision&renew_within_days=30')
@@ -720,13 +715,65 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '决策组列表' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '决策组扫描' })).toBeInTheDocument())
     expect(screen.getByRole('status')).toHaveTextContent('旧链接已承接到单台辅助队列')
-    expect(screen.getByRole('link', { name: '查看单台队列' })).toHaveAttribute('href', '#single-vps-queue')
+    expect(within(screen.getByRole('status')).getByRole('button', { name: '查看单台队列' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: /单台队列/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '单台待处理队列' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '单台辅助队列' })).toBeInTheDocument()
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=needs_decision&renew_within_days=30')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=needs_decision&renew_within_days=30')
+  })
+
+  it('auto-expands the matching secondary workbench for supported deep links', async () => {
+    const cases: Array<{
+      entry: string
+      activeButton: '打开记录' | '打开场景' | '查看续费'
+      visibleHeading: string
+      route?: MockFetchRoute
+    }> = [
+      {
+        entry: '/asset-decisions?record_id=adr_001',
+        activeButton: '打开记录',
+        visibleHeading: '已保存组合决策',
+        route: { url: '/api/asset-decisions/records/adr_001', body: decisionRecord() },
+      },
+      {
+        entry: '/asset-decisions?manual_group_id=admg_001',
+        activeButton: '打开场景',
+        visibleHeading: '场景工作区',
+        route: { url: '/api/asset-decisions/manual-groups/admg_001', body: manualGroupDetail() },
+      },
+      {
+        entry: '/asset-decisions?template_id=adt_builtin_primary_standby',
+        activeButton: '打开场景',
+        visibleHeading: '场景工作区',
+        route: { url: '/api/asset-decisions/scenario-templates/adt_builtin_primary_standby', body: scenarioTemplate() },
+      },
+      {
+        entry: '/asset-decisions?view=renewal&renew_within_days=30',
+        activeButton: '查看续费',
+        visibleHeading: '续费事实',
+      },
+    ] as const
+
+    for (const deepLink of cases) {
+      const fetchMock = vi.fn()
+      mockInitialWorkbench(fetchMock, deepLink.route ? { routes: [deepLink.route] } : undefined)
+      vi.stubGlobal('fetch', fetchMock)
+
+      const { unmount } = render(
+        <MemoryRouter initialEntries={[deepLink.entry]}>
+          <AssetDecisionsPage />
+        </MemoryRouter>,
+      )
+
+      const secondaryNav = await screen.findByLabelText('资产决策次级工作区')
+      await waitFor(() => expect(screen.getByRole('heading', { name: deepLink.visibleHeading })).toBeInTheDocument())
+      expect(within(secondaryNav).getByRole('button', { name: deepLink.activeButton })).toHaveClass('primary')
+
+      unmount()
+      vi.unstubAllGlobals()
+    }
   })
 
   it('carries cross-page context filters into visible chips and asset-decision queries', async () => {
@@ -821,9 +868,9 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('事实漂移')).toBeInTheDocument())
-    const nextWork = screen.getByLabelText('资产决策下一步工作项')
-    fireEvent.click(within(nextWork).getByRole('button', { name: '复核记录' }))
+    const commandSummary = await screen.findByLabelText('资产组合决策当前判断')
+    expect(within(commandSummary).getByRole('heading', { name: /事实漂移/ })).toBeInTheDocument()
+    fireEvent.click(within(commandSummary).getByRole('button', { name: '复核记录' }))
 
     expect(await screen.findByRole('dialog', { name: '资产组合决策记录详情' })).toBeInTheDocument()
     expect(screen.getByLabelText('current-url')).toHaveTextContent('/asset-decisions?provider_id=pv_001&record_id=adr_001')
@@ -848,9 +895,9 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getAllByText('AUTO GROUP').length).toBeGreaterThan(0))
-    const nextWork = screen.getByLabelText('资产决策下一步工作项')
-    fireEvent.click(within(nextWork).getByRole('button', { name: '打开决策组' }))
+    const commandSummary = await screen.findByLabelText('资产组合决策当前判断')
+    await waitFor(() => expect(within(commandSummary).getAllByText('AUTO GROUP').length).toBeGreaterThan(0))
+    fireEvent.click(within(commandSummary).getByRole('button', { name: '打开决策组' }))
 
     expect(await screen.findByRole('dialog', { name: '资产决策组详情' })).toBeInTheDocument()
     expect(screen.getByLabelText('current-url')).toHaveTextContent('/asset-decisions?group_id=adg_auto_001')
@@ -884,9 +931,9 @@ describe('AssetDecisionsPage', () => {
     )
 
     await waitFor(() => expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0))
-    const nextWork = screen.getByLabelText('资产决策下一步工作项')
-    expect(within(nextWork).getByRole('button', { name: '打开决策组' })).toBeInTheDocument()
-    expect(screen.getByText('组合概览暂不可用，导览只展示已成功加载的事实。')).toBeInTheDocument()
+    const commandSummary = screen.getByLabelText('资产组合决策当前判断')
+    expect(within(commandSummary).getByRole('button', { name: '打开决策组' })).toBeInTheDocument()
+    expect(screen.getByText('组合概览暂不可用，当前只展示已成功加载的事实。')).toBeInTheDocument()
     expect(screen.getByText('组合概览不可用')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '决策组不可用' })).not.toBeInTheDocument()
   })
@@ -894,6 +941,13 @@ describe('AssetDecisionsPage', () => {
   it('does not invent readback next-work items when saved records fail to load', async () => {
     const fetchMock = vi.fn()
     mockInitialWorkbench(fetchMock, {
+      overviewBody: overview({
+        group_count: 0,
+        needs_decision_count: 0,
+        renewal_group_count: 0,
+        evidence_group_count: 0,
+        cost_group_count: 0,
+      }),
       groupsBody: [],
       manualGroupsBody: [],
       templatesBody: [],
@@ -913,13 +967,14 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '下一步导览' })).toBeInTheDocument())
-    const nextWork = screen.getByLabelText('资产决策下一步工作项')
-    expect(within(nextWork).queryByText('事实漂移')).not.toBeInTheDocument()
-    expect(within(nextWork).queryByText('跟进阻塞')).not.toBeInTheDocument()
-    expect(within(nextWork).queryByText('回读缺证据')).not.toBeInTheDocument()
-    expect(screen.getByText('决策记录暂不可用，导览只展示已成功加载的事实。')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '暂无需要置顶的组合工作' })).toBeInTheDocument()
+    const commandSummary = await screen.findByLabelText('资产组合决策当前判断')
+    expect(within(commandSummary).queryByText('事实漂移')).not.toBeInTheDocument()
+    expect(within(commandSummary).queryByText('跟进阻塞')).not.toBeInTheDocument()
+    expect(within(commandSummary).queryByText('回读缺证据')).not.toBeInTheDocument()
+    expect(screen.getByText('决策记录暂不可用，当前只展示已成功加载的事实。')).toBeInTheDocument()
+    expect(within(commandSummary).getByRole('heading', { name: '部分资产决策证据不可用' })).toBeInTheDocument()
+    expect(within(commandSummary).getByText('证据待确认')).toBeInTheDocument()
+    expect(within(commandSummary).queryByText('闭环稳定')).not.toBeInTheDocument()
   })
 
   it('opens group detail with member comparison, evidence, and single VPS entry', async () => {
@@ -1112,6 +1167,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
+    await openSecondaryWorkbench('打开场景')
     await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
     const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
     expect(manualSection).not.toBeNull()
@@ -1187,6 +1243,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
+    await openSecondaryWorkbench('打开场景')
     await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
     const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
     expect(manualSection).not.toBeNull()
@@ -1244,6 +1301,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
+    await openSecondaryWorkbench('打开场景')
     await waitFor(() => expect(screen.getAllByText('自定义主备模板').length).toBeGreaterThan(0))
     const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
     expect(templatesSection).not.toBeNull()
@@ -1362,10 +1420,11 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
+    await openSecondaryWorkbench('打开记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
     const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
     expect(recordsSection).not.toBeNull()
-    expect(within(recordsSection!).getByText('下一步导览')).toBeInTheDocument()
+    expect(within(recordsSection!).getByRole('columnheader', { name: '执行编排' })).toBeInTheDocument()
     fireEvent.click(within(recordsSection!).getByRole('button', { name: '查看记录' }))
 
     const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
@@ -1518,6 +1577,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
+    await openSecondaryWorkbench('打开记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
     const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
     fireEvent.click(within(recordsSection!).getByRole('button', { name: '查看记录' }))
@@ -1611,6 +1671,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
+    await openSecondaryWorkbench('打开记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
     const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
     fireEvent.click(within(recordsSection!).getByRole('button', { name: '查看记录' }))
@@ -1664,6 +1725,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
+    await openSecondaryWorkbench('打开记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
     const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
     fireEvent.click(within(recordsSection!).getByRole('button', { name: '查看记录' }))
@@ -1696,8 +1758,9 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
+    await openSecondaryWorkbench('查看单台队列')
     await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
-    const singleQueue = screen.getByRole('heading', { name: '单台待处理队列' }).closest('section')
+    const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section')
     expect(singleQueue).not.toBeNull()
     fireEvent.click(within(singleQueue!).getAllByRole('button', { name: '处理' })[0])
     const drawer = await screen.findByRole('dialog', { name: '续费决策处理' })
@@ -1745,11 +1808,14 @@ describe('AssetDecisionsPage', () => {
     )
 
     await waitFor(() => expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0))
+    await openSecondaryWorkbench('查看续费')
     expect(screen.getByRole('heading', { name: '续费候选不可用' })).toBeInTheDocument()
     expect(screen.getAllByText(/subscription evidence unavailable/).length).toBeGreaterThan(0)
-    const groupList = screen.getByRole('heading', { name: '决策组列表' }).closest('section')
+    const groupList = screen.getByRole('heading', { name: '决策组扫描' }).closest('section')
     expect(groupList).not.toBeNull()
     expect(within(groupList!).queryByText('缺订阅')).not.toBeInTheDocument()
+    expect(within(groupList!).getAllByText('暂无证据标签').length).toBeGreaterThan(0)
+    expect(within(groupList!).queryByText('证据稳定')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '单台队列不可用' })).not.toBeInTheDocument()
   })
 })

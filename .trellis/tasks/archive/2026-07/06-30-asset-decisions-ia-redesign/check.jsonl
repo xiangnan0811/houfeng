@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "复核组件边界和工作台 UI 约束"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "复核样式、主题和响应式约束"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "复核验证命令和测试覆盖要求"}
+{"file": "docs/design/current/interface-language.md", "reason": "复核视觉质量和证据表述"}
+{"file": "docs/operations/ui-preview-and-browser-sanity.md", "reason": "复核浏览器验收证据"}

@@ -496,12 +496,12 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 #### 3. Contracts
 
-- Asset Decisions 首屏主 surface 必须是 `资产组合决策` 的决策组列表，不得恢复三张同权 VPS queue table，也不得把单台续费队列重新提升为主视觉主体。
+- Asset Decisions 首屏必须是组合优先的单主路径：`portfolio command summary` → 次级工作区入口 → `决策组扫描`。默认页面不得恢复 `决策路径`、`下一步导览`、记录表、场景模板、自定义组合、续费 evidence 或单台队列作为同权常驻 section；也不得把单台续费队列重新提升为主视觉主体。
 - Asset Decisions 顶部必须先展示 portfolio command summary：从当前已加载的记录回读、自动组、自定义组合和模板中派生第一行动，并展示组合范围、续费窗口、执行闭环风险、evidence source 状态和 context filter 摘要。该 summary 是处理顺序导览，不是 KPI 卡片墙；不得把单台队列数量提升为主指标，也不得因为某来源失败而伪造无问题。
-- Asset Decisions 可以在 command summary 后展示轻量 `决策路径 / decision path` rail，把当前已加载事实派生为 `发现组合压力 -> 形成真实场景 -> 保存一次判断 -> 回读执行闭环` 四个阶段。该 rail 只读、不可持久化、不新增 API；点击只能打开已有 `group_id` / `manual_group_id` / `record_id` / `template_id` detail 或切换已有 view。任一来源加载失败时该阶段必须标记不可用，不得把失败解释成健康、已闭环或真实资料缺口。
-- Asset Decisions 可以在 `决策组列表` 右侧展示 `下一步导览 / closed-loop` surface，用于把当前已加载的自动组、已保存记录 execution readback、自定义组合和场景模板收敛成 3-6 个只读工作项。导览排序优先级为事实漂移记录、阻塞记录、需补证据记录、当前自动组、进行中自定义组合、可用模板；点击只复用 `group_id`、`manual_group_id`、`record_id`、`template_id` 打开已有详情，不自动创建、不 PATCH record status、不写 VPS / Subscription / MonitoringInstance / Target。
-- `下一步导览 / closed-loop` 的指标只能从当前已加载 rows 派生，例如自动组数量、进行中自定义组合、未关闭记录、readback drift/blocked/needs_evidence/open、预算压力和资料缺口。任一来源加载失败时只显示局部不可用提示并跳过该来源的工作项，不得把失败解释成无问题、已对齐或真实资料缺口。
-- 已保存组合决策必须作为主工作台下方的辅助 surface 展示，承接“保存本次判断、回看当时证据、推进记录状态”的用户任务，但不得取代自动组发现入口。
+- Asset Decisions 的记录、场景/模板、续费 evidence、单台队列必须通过受控的次级工作区进入；默认 `secondaryWorkbench=null`，同一时间最多展开一个次级区。用户点击入口或 URL 深链可展开对应区：`record_id -> records`，`manual_group_id|template_id -> scenarios`，`view=renewal -> renewals`，legacy `view=single_queue -> single_queue`。`group_id` 只打开自动组详情，不要求展开次级区。
+- 次级工作区切换和关闭只影响本地展开状态，不主动删除 `view`、`renew_within_days`、`provider_id`、`vps_id`、`country`、`region`、`city`、`scenario` 等筛选上下文。打开对象参数只触发读取和展示，不触发创建、PATCH 或业务对象写入。
+- portfolio command summary、决策组扫描和次级入口的指标只能从当前已加载 rows 派生，例如自动组数量、进行中自定义组合、未关闭记录、readback drift/blocked/needs_evidence/open、预算压力和资料缺口。任一来源加载失败时只显示局部不可用提示并跳过该来源的工作项；风险标签必须降级为 `证据待确认` 或等价未知态，不得把失败解释成无问题、已对齐、已闭环、`证据稳定` 或真实资料缺口。
+- 已保存组合决策必须作为次级工作区展示，承接“保存本次判断、回看当时证据、推进记录状态”的用户任务，但不得取代自动组发现入口。
 - 自定义组合必须作为自动组发现和已保存记录之间的 scenario surface：自动组回答“系统发现哪些组合问题”，自定义组合回答“用户正在比较哪些真实场景”，记录回答“某一次判断和后续跟进是什么”。自定义组合可编辑 title/goal/note/scenario/status 与成员 intended role/action/reason/note/sort，不得修改 VPS / Subscription / MonitoringInstance / Target。
 - 场景模板是 scenario surface 的入口层，位于自动组和自定义组合附近，视觉权重低于自动组列表。模板只启动场景或从手工组合保存 blueprint；内置模板不允许编辑，自定义模板只能改模板元数据/归档状态。模板失败只影响模板 surface 或模板 modal，不影响自动组、手工组合、记录、续费 evidence 和单台队列。
 - 自动组至少覆盖 `renewal_attention`、`cancellation_attention`、`region_portfolio`、`provider_portfolio`、`cost_pressure`、`evidence_gap`。组卡展示顺序应优先服务扫描：组名/scope、主问题、当前压力、推荐下一步、证据评估、成员数量、用途分布、成本、服务 / 域名 / Target、监控关联、异常和 evidence chips；避免把五个以上指标做成同权小格，让用户先读表再理解问题。
@@ -542,6 +542,8 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | Condition | Expected behavior |
 | --- | --- |
 | Asset Decisions evidence-boundary explanation grows long | 保持优先级队列为主 surface，证据边界用 `<details>` / 低权重说明承载，不抢占主视觉 |
+| `/asset-decisions` default route renders | 首屏显示 portfolio command summary、次级入口和 `决策组扫描`；不渲染旧常驻 `决策路径`、`下一步导览`、记录、场景、续费 evidence 或单台队列 section |
+| URL has `record_id` / `manual_group_id` / `template_id` / `view=renewal` / legacy `view=single_queue` | 自动展开对应次级工作区，并保留筛选上下文；`group_id` 只打开自动组详情 |
 | `/api/asset-decisions/overview` 或 groups list failed | 组合工作台显示局部错误；底部单台队列和 renewal evidence 可按各自 API 独立加载 |
 | group detail missing / 404 | Drawer 显示决策组不存在或已变化，允许返回列表；不得制造空 group |
 | create manual group from auto group failed | 错误留在自动组详情内；不关闭当前组、不伪造手工组合 |
@@ -555,13 +557,14 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | save record from manual group | POST records 带 `source_type=manual_group`；成功后关闭自定义组合详情并打开记录详情 |
 | create decision record 404 | 显示自动组已变化 / 不存在的保存错误，要求用户刷新组列表，不在前端补造记录 |
 | saved decision records failed | 已保存组合决策 surface 显示局部错误；自动组、续费 evidence 和单台队列继续独立可用 |
+| records / groups / manual groups / templates 部分来源失败 | portfolio command summary 显示 `证据待确认` 或等价未知态，不生成事实漂移 / 阻塞 / 缺证据工作项，也不显示 `闭环稳定` |
 | record detail missing / 404 | 记录详情 modal 显示记录不存在，不制造空记录 |
 | patch record status failed | 错误留在记录详情 modal 内，不改变本地状态，也不触发 VPS/订阅状态修改 |
 | patch record member follow-up failed | 错误留在记录详情 modal 内，不改变成员本地状态，不触发 VPS/订阅/监控/Target 写操作 |
 | record member follow-up note cleared | 前端发送空字符串，后端保存为空备注；不得因 falsy 值省略该字段 |
 | subscriptions list failed in Asset Decisions renewal window | 续费候选 evidence 显示错误，单台辅助队列仍可显示已加载 VPS |
 | all subscriptions failed while building single queue | 单台辅助队列显示加载错误，避免把全量缺订阅误报为真实数据质量 |
-| backend group source availability says subscriptions unavailable | 组列表 / 组详情显示证据不可用，不渲染真实 `缺订阅` chip |
+| backend group source availability says subscriptions unavailable | 组列表 / 组详情显示证据不可用，不渲染真实 `缺订阅` chip，也不把空 evidence chips 文案写成 `证据稳定` |
 | decision record snapshot lacks `evidence_assessment` | 记录详情显示“未记录”或“无证据评估”，成员表继续展示其他 snapshot 字段 |
 | decision record snapshot lacks `comparison_insight` | 记录详情 `SAVED EVIDENCE` 显示“保存时未记录对比洞察”降级；不得阻断 evidence assessment、execution readback、execution plan 或成员跟进 |
 | decision record API returns `execution_readback` | 已保存记录列表显示 readback status badge、summary 和 drift / blocked / needs_evidence / open 计数；记录详情 summary 增加执行回读指标，成员表显示当前事实摘要与 issue chips |
@@ -586,6 +589,9 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Good: `/vps?view=unlinked&renewal_decision=unreviewed` 首屏显示 `视图: 未关联` 和 `续费: 未评估` chips，列表只显示同时满足条件的 rows。
 - Good: `/asset-decisions?view=provider&renew_within_days=60` 首屏请求 provider 组合组，列表展示同服务商 VPS 成本、服务/域名、监控和建议动作。
 - Good: `/asset-decisions?view=provider&provider_id=pv_001&template_id=adt_builtin_provider_review` 首屏展示 provider 上下文 chip，并自动打开服务商评估模板；关闭模板后仍保留 provider 筛选。
+- Good: `/asset-decisions` 默认首屏只展示当前组合判断、四个次级入口和自动组扫描；记录、场景、续费事实和单台辅助队列只有用户点击或深链时才展开。
+- Good: `/asset-decisions?view=single_queue&renew_within_days=30` 承接旧链接并打开单台辅助队列，但 portfolio command summary 与决策组扫描仍是页面框架。
+- Good: 决策记录接口失败时，页面保留已加载自动组，不生成 readback 工作项，portfolio 风险显示 `证据待确认`，不显示 `闭环稳定`。
 - Good: 打开决策组后，同组 VPS 可以比较主订阅、服务 / 域名 / Target / 监控数量、建议角色和 evidence chips；点击单台 `处理` 仍提交原有 VPS renewal decision PATCH。
 - Good: 打开自动组后创建自定义组合，页面刷新自定义组合列表并打开新组合详情；用户能继续编辑组合目标、场景和成员意图。
 - Good: 自定义组合详情通过 VPS selector 新增成员，保存成员 intended action/reason 只调用 `/api/asset-decisions/manual-groups/{id}/members`，不写 VPS / Subscription / MonitoringInstance / Target。
@@ -604,6 +610,8 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Good: VPS 详情无监控实例时显示“创建并接入 agent”，调用 `/api/vps/{vps_id}/monitoring-instances`，后端从 VPS 派生身份字段，成功后跳转 MonitoringInstance onboarding。
 - Base: 订阅为空、Provider 为空时，页面仍能展示 VPS identity、状态、缺订阅、未关联/缺字段提示。
 - Bad: 订阅 evidence 请求失败后，前端把所有 VPS 标成 `缺订阅`，导致用户做出错误取消判断。
+- Bad: 默认 `/asset-decisions` 同时铺开记录表、场景模板、自定义组合、续费 evidence 和单台队列，让次级任务与自动组扫描同权。
+- Bad: 任一证据来源失败后，页面用空数组推断 `闭环稳定`、`证据稳定`、无风险或真实资料缺口。
 - Bad: 在前端只保存自动组 ID 当作长期决策状态，或从记录详情批量取消 VPS / 直接修改 Subscription / MonitoringInstance / Target。
 - Bad: 自定义组合新增成员让用户复制 `vps_...` 内部 ID，或者保存成员意图时顺手 PATCH `/api/vps/{id}`。
 - Bad: 模板详情点击打开后自动创建手工组合，或从模板直接保存为决策记录。
@@ -618,7 +626,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 #### 6. Tests Required
 
 - `web/src/lib/api.test.ts`: `getAssetDecisionOverview`、`listAssetDecisionGroups`、`getAssetDecisionGroup` 路径和 query string；manual group helper list/create/get/patch/member add/patch/delete；scenario template helpers list/create/get/patch/create-manual-group；记录 fixture 覆盖 `execution_readback` 和 `execution_plan`。
-- `AssetDecisionsPage.test.tsx`: `资产组合决策` 主 surface、tabs query、上下文筛选 chips、深链打开 group/manual group/record/template、场景模板列表/详情/创建组合、自定义组合另存模板、组详情 drawer、创建自定义组合、自定义组合详情/成员表单/保存 manual record、组/成员/记录 `evidence_assessment` 与 `decision_recommendation` 展示、组卡 comparison summary、自动组详情 evidence matrix、自定义组合 evidence matrix、记录详情 saved evidence snapshot、旧 snapshot 缺 `comparison_insight` 降级、保存记录、记录详情状态推进、执行回读状态 / 计数 / 当前事实 / issue chips、execution plan 列表片段 / lane board / CTA URL 映射 / 快速跟进、成员跟进 PATCH payload 与计数刷新、readback drift 不触发业务对象写请求、plan CTA 不触发业务对象写请求、模板打开不触发业务对象写请求、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅、错误/空态。
+- `AssetDecisionsPage.test.tsx`: `资产组合决策` 主 surface、默认不渲染旧常驻 `决策路径` / `下一步导览` / 记录 / 场景 / 续费 / 单台队列 section、次级入口点击展开单一工作区、legacy `view=single_queue` 承接、tabs query、上下文筛选 chips、深链打开 group/manual group/record/template、场景模板列表/详情/创建组合、自定义组合另存模板、组详情 drawer、创建自定义组合、自定义组合详情/成员表单/保存 manual record、组/成员/记录 `evidence_assessment` 与 `decision_recommendation` 展示、组卡 comparison summary、自动组详情 evidence matrix、自定义组合 evidence matrix、记录详情 saved evidence snapshot、旧 snapshot 缺 `comparison_insight` 降级、保存记录、记录详情状态推进、执行回读状态 / 计数 / 当前事实 / issue chips、execution plan 列表片段 / lane board / CTA URL 映射 / 快速跟进、成员跟进 PATCH payload 与计数刷新、partial source failure 不显示 `闭环稳定` 或虚构 readback work、readback drift 不触发业务对象写请求、plan CTA 不触发业务对象写请求、模板打开不触发业务对象写请求、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅或 `证据稳定`、错误/空态。
 - `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/监控实例/资料质量展示、创建 VPS 流程和 provider selector 可访问标签。
 - `SubscriptionsPage.test.tsx`: `vps_id` URL context、`create=1` 自动打开/预填、关闭创建表单保留 `vps_id` 并移除 `create=1`。
 - `VPSDetailPage.test.tsx`: Provider/MonitoringInstance/Target/Service selectors 的候选加载、空态/错误提示、提交 payload 仍只发送被选 ID 或空值。

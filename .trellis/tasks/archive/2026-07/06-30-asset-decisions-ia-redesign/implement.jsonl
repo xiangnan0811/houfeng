@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/web/index.md", "reason": "前端规范入口"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "组件拆分、复杂工作台 mockup 和弹层约束"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "CSS/token/BEM 和浏览器验收约束"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API client、URL 状态和类型合同约束"}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "测试、lint、build、浏览器 sanity 验证约束"}
+{"file": "docs/design/current/interface-language.md", "reason": "当前视觉语言与证据语言"}
+{"file": "docs/design/current/component-patterns.md", "reason": "工作台页面组合和组件默认模式"}
+{"file": "docs/operations/ui-preview-and-browser-sanity.md", "reason": "用户可见 UI 的预览和浏览器 sanity 流程"}
