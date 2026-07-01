@@ -1319,3 +1319,37 @@ Redesigned /asset-decisions into a portfolio-first workbench, moved records/scen
 ### Next Steps
 
 - None - task complete
+
+
+## Session 216: Asset decision modal simplification
+
+**Date**: 2026-07-01
+**Task**: Asset decision modal simplification
+**Branch**: `ux/asset-decision-modal-simplification`
+
+### Summary
+
+Planned and implemented panel-based asset decision detail modals; verified target tests, full web tests, lint, build, and browser sanity evidence before PR.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `10a894b` | (see git log) |
+| `77fd443` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

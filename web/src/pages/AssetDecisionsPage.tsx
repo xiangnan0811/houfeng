@@ -230,6 +230,11 @@ type TemplateManualGroupDraft = {
   renewWithinDays: RenewalWindow
 }
 
+type GroupDetailPanel = 'overview' | 'members' | 'save' | 'raw' | 'vps'
+type ManualDetailPanel = 'overview' | 'edit' | 'members' | 'add' | 'save' | 'raw'
+type RecordDetailPanel = 'overview' | 'execution' | 'members' | 'source' | 'raw'
+type TemplateDetailPanel = 'overview' | 'create' | 'members' | 'status'
+
 type ScoreStyle = CSSProperties & {
   '--score': number
 }
@@ -1293,7 +1298,7 @@ function renderDecisionRecommendation(
   recommendation?: AssetDecisionRecommendation | null,
   mode: 'compact' | 'detail' = 'compact',
 ) {
-  if (!recommendation) return <span className="empty-inline">等待建议</span>
+  if (!recommendation) return mode === 'compact' ? <span className="empty-inline">等待建议</span> : null
   const signalLimit = mode === 'detail' ? 5 : 3
   const reasons = recommendation.reasons ?? []
   const blockers = recommendation.blockers ?? []
@@ -1684,8 +1689,8 @@ function renderComparisonSignals(signals: AssetDecisionComparisonSignal[], limit
   const visible = signals.slice(0, limit)
   return (
     <span className="asset-decision-chip-row">
-      {visible.map((signal) => (
-        <Badge key={`${signal.kind}-${signal.label}`} variant="info" tone={chipTone(signal.tone)}>
+      {visible.map((signal, index) => (
+        <Badge key={`${signal.kind}-${signal.label}-${index}`} variant="info" tone={chipTone(signal.tone)}>
           {signal.label}
         </Badge>
       ))}
@@ -1846,7 +1851,7 @@ function renderMemberDecisionCards(members: ComparisonMatrixMember[], options: M
                     )}
                   </span>
                 </div>
-                <p>{comparison?.summary || '当前成员暂无对比洞察，继续查看原始明细。'}</p>
+                <p>{comparison?.summary || '当前成员暂无对比洞察。'}</p>
                 <div className="asset-decision-member-card__facts">
                   <div>
                     <span>成本 / 产品</span>
@@ -1886,7 +1891,117 @@ function renderMemberDecisionCards(members: ComparisonMatrixMember[], options: M
       ) : (
         <div className="asset-decision-member-decisions__empty">
           <strong>暂无可取舍成员</strong>
-          <span>原始明细会保留在下方，用于回看数据来源。</span>
+          <span>当前组合没有可展示的成员判断。</span>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function renderDetailPanelNav<TPanel extends string>(
+  items: Array<{ key: TPanel; label: string; ariaLabel?: string; summary?: string; count?: number }>,
+  activePanel: TPanel,
+  onChange: (panel: TPanel) => void,
+) {
+  return (
+    <nav className="asset-decision-detail-nav" aria-label="详情二级面板">
+      {items.map((item) => (
+        <button
+          key={item.key}
+          className={`asset-decision-detail-nav__item${activePanel === item.key ? ' asset-decision-detail-nav__item--active' : ''}`}
+          type="button"
+          aria-label={item.ariaLabel ?? item.label}
+          aria-pressed={activePanel === item.key}
+          onClick={() => onChange(item.key)}
+        >
+          <span>{item.label}</span>
+          {item.summary ? <small>{item.summary}</small> : null}
+          {item.count != null ? (
+            <Badge variant="count" tone={item.count > 0 ? 'notice' : 'neutral'}>
+              {item.count}
+            </Badge>
+          ) : null}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
+function renderDetailPanel(title: string, children: ReactNode) {
+  return (
+    <section className="asset-decision-detail-panel" aria-label={title}>
+      {children}
+    </section>
+  )
+}
+
+function renderMemberDecisionPreview(
+  members: ComparisonMatrixMember[],
+  ariaLabel: string,
+  options: { showIntent?: boolean; action?: (member: ComparisonMatrixMember) => ReactNode } = {},
+) {
+  const sortedMembers = [...members].sort((left, right) => {
+    const leftRank = left.comparison?.rank ?? Number.POSITIVE_INFINITY
+    const rightRank = right.comparison?.rank ?? Number.POSITIVE_INFINITY
+    if (leftRank !== rightRank) return leftRank - rightRank
+    return left.displayName.localeCompare(right.displayName)
+  })
+  const visibleMembers = sortedMembers.slice(0, 3)
+  return (
+    <section className="asset-decision-member-preview" aria-label={ariaLabel}>
+      <div className="asset-decision-member-preview__head">
+        <div>
+          <p className="section-heading__eyebrow">MEMBERS</p>
+          <h3>关键成员摘要</h3>
+        </div>
+        <Badge variant="count" tone={sortedMembers.length > 0 ? 'notice' : 'neutral'}>
+          成员 {sortedMembers.length}
+        </Badge>
+      </div>
+      {visibleMembers.length > 0 ? (
+        <div className="asset-decision-member-preview__rows">
+          {visibleMembers.map((member) => {
+            const lane = member.comparison?.lane ?? 'review'
+            const intentMismatch = options.showIntent
+              && member.comparison
+              && (
+                (member.intendedAction === 'cancel' || member.intendedAction === 'open_cancellation_workbench') !== (lane === 'retire')
+                || (member.intendedAction === 'complete_evidence') !== (lane === 'evidence')
+                || (member.intendedRole === 'primary_candidate') !== (lane === 'primary')
+              )
+            return (
+              <article key={member.key} className="asset-decision-member-preview__row">
+                <div>
+                  <span>#{member.comparison?.rank || '-'} · {COMPARISON_LANE_LABELS[lane] ?? lane}</span>
+                  {memberComparisonTitle(member)}
+                  <small>{member.meta}</small>
+                </div>
+                <div className="asset-decision-member-preview__facts">
+                  <strong>{member.comparison?.summary || member.facts}</strong>
+                  <small>{member.product} · {member.statusFacts}</small>
+                </div>
+                <span className="asset-decision-chip-row">
+                  <Badge variant="state" tone={roleTone(member.intendedRole ?? member.role)}>
+                    {ROLE_LABELS[member.intendedRole ?? member.role]}
+                  </Badge>
+                  <Badge variant="state" tone={actionTone(member.intendedAction ?? member.action)}>
+                    {ACTION_LABELS[member.intendedAction ?? member.action]}
+                  </Badge>
+                  {options.showIntent && (
+                    <Badge variant="state" tone={intentMismatch ? 'alert' : 'normal'}>
+                      {intentMismatch ? '需复核意图' : '意图匹配'}
+                    </Badge>
+                  )}
+                </span>
+                {options.action ? <div className="asset-decision-member-preview__actions">{options.action(member)}</div> : null}
+              </article>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="asset-decision-member-preview__empty">
+          <strong>暂无成员</strong>
+          <span>当前组合没有成员事实。</span>
         </div>
       )}
     </section>
@@ -1954,7 +2069,7 @@ function renderRecordSavedEvidence(detail: AssetDecisionRecordDetail, selectedRe
           <span>
             {insight
               ? insight.summary
-              : '保存时未记录对比洞察；当前仍保留证据评估快照、成员判断、执行回读和执行编排。'}
+              : '保存时未记录对比洞察。'}
           </span>
         </div>
         <Badge variant="state" tone={selectedRecordAssessment ? evidenceTierTone(selectedRecordAssessment.quality_tier) : 'neutral'}>
@@ -1973,7 +2088,23 @@ function renderRecordSavedEvidence(detail: AssetDecisionRecordDetail, selectedRe
         </div>
         <div className="asset-decision-saved-evidence__signals">
           <span>保存时取舍</span>
-          {insight ? renderComparisonSignals(insight.tradeoffs, 4) : <span className="empty-inline">旧记录缺少 comparison_insight 字段</span>}
+          {insight ? renderComparisonSignals(insight.tradeoffs, 4) : <span className="empty-inline">仅保留旧快照字段</span>}
+        </div>
+        <div className="asset-decision-record-member-summary" aria-label="保存记录成员摘要">
+          {detail.members.slice(0, 3).map((member) => (
+            <div key={member.vps_id}>
+              <strong>{member.display_name || member.vps_id}</strong>
+              <span className="asset-decision-chip-row">
+                <Badge variant="state" tone={roleTone(member.decided_role)}>
+                  {ROLE_LABELS[member.decided_role]}
+                </Badge>
+                <Badge variant="state" tone={actionTone(member.decided_action)}>
+                  {ACTION_LABELS[member.decided_action]}
+                </Badge>
+              </span>
+              <small>{member.reason || '未填写成员理由'}</small>
+            </div>
+          ))}
         </div>
       </div>
     </section>
@@ -2282,6 +2413,10 @@ export function AssetDecisionsPage() {
   const [selectedRecordID, setSelectedRecordID] = useState<string | null>(null)
   const [selectedTemplateID, setSelectedTemplateID] = useState<string | null>(null)
   const [selectedVPS, setSelectedVPS] = useState<VPSAssetRecord | null>(null)
+  const [groupDetailPanel, setGroupDetailPanel] = useState<GroupDetailPanel>('overview')
+  const [manualDetailPanel, setManualDetailPanel] = useState<ManualDetailPanel>('overview')
+  const [recordDetailPanel, setRecordDetailPanel] = useState<RecordDetailPanel>('overview')
+  const [templateDetailPanel, setTemplateDetailPanel] = useState<TemplateDetailPanel>('overview')
   const [recordDraft, setRecordDraft] = useState<RecordDraft | null>(null)
   const [recordSaving, setRecordSaving] = useState(false)
   const [recordSaveError, setRecordSaveError] = useState<string | null>(null)
@@ -2334,10 +2469,15 @@ export function AssetDecisionsPage() {
     setSelectedManualGroupID(null)
     setSelectedRecordID(null)
     setSelectedTemplateID(null)
+    setGroupDetailPanel('overview')
+    setManualDetailPanel('overview')
+    setRecordDetailPanel('overview')
+    setTemplateDetailPanel('overview')
     setDetailState(INITIAL_DETAIL_STATE)
     setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
     setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
     setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
+    setSelectedVPS(null)
     setRecordDraft(null)
     setRecordSaveError(null)
     setManualGroupError(null)
@@ -2361,6 +2501,10 @@ export function AssetDecisionsPage() {
     setTemplateError(null)
     setPendingManualMemberRemoval(null)
     setPendingTemplateStatus(null)
+    setGroupDetailPanel('overview')
+    setManualDetailPanel('overview')
+    setRecordDetailPanel('overview')
+    setTemplateDetailPanel('overview')
     setDetailState({ loading: true, error: null, detail: null })
     setSelectedGroupID(groupID)
   }
@@ -2381,6 +2525,10 @@ export function AssetDecisionsPage() {
     setTemplateError(null)
     setPendingManualMemberRemoval(null)
     setPendingTemplateStatus(null)
+    setGroupDetailPanel('overview')
+    setManualDetailPanel('overview')
+    setRecordDetailPanel('overview')
+    setTemplateDetailPanel('overview')
     setManualDetailState({ loading: true, error: null, detail: null })
     setSelectedManualGroupID(manualGroupID)
   }
@@ -2400,6 +2548,10 @@ export function AssetDecisionsPage() {
     setTemplateError(null)
     setPendingManualMemberRemoval(null)
     setPendingTemplateStatus(null)
+    setGroupDetailPanel('overview')
+    setManualDetailPanel('overview')
+    setRecordDetailPanel('overview')
+    setTemplateDetailPanel('overview')
     setSelectedRecordID(recordID)
     setRecordDetailState({ loading: true, error: null, detail: null })
     setRecordPatchError(null)
@@ -2419,6 +2571,10 @@ export function AssetDecisionsPage() {
     setRecordSaveError(null)
     setManualGroupError(null)
     setTemplateError(null)
+    setGroupDetailPanel('overview')
+    setManualDetailPanel('overview')
+    setRecordDetailPanel('overview')
+    setTemplateDetailPanel('overview')
     setTemplateDetailState({ loading: true, error: null, detail: null })
     setSelectedTemplateID(templateID)
   }
@@ -3506,6 +3662,10 @@ export function AssetDecisionsPage() {
     setRecordSaveError(null)
     setManualGroupError(null)
     setTemplateError(null)
+    setGroupDetailPanel('overview')
+    setManualDetailPanel('overview')
+    setRecordDetailPanel('overview')
+    setTemplateDetailPanel('overview')
     setDetailState({ loading: true, error: null, detail: null })
     setSelectedGroupID(groupID)
     setOpenState('group_id', groupID)
@@ -3519,6 +3679,7 @@ export function AssetDecisionsPage() {
     setRecordSaveError(null)
     setDecisionDraft(INITIAL_DECISION_DRAFT)
     setDecisionError(null)
+    setGroupDetailPanel('overview')
     clearOpenState('group_id')
   }
 
@@ -3536,6 +3697,10 @@ export function AssetDecisionsPage() {
     setRecordSaveError(null)
     setManualGroupError(null)
     setTemplateError(null)
+    setGroupDetailPanel('overview')
+    setManualDetailPanel('overview')
+    setRecordDetailPanel('overview')
+    setTemplateDetailPanel('overview')
     setManualDetailState({ loading: true, error: null, detail: null })
     setSelectedManualGroupID(manualGroupID)
     setOpenState('manual_group_id', manualGroupID)
@@ -3558,6 +3723,7 @@ export function AssetDecisionsPage() {
     })
     setRecordDraft(null)
     setRecordSaveError(null)
+    setManualDetailPanel('overview')
     clearOpenState('manual_group_id')
   }
 
@@ -3575,6 +3741,10 @@ export function AssetDecisionsPage() {
     setRecordSaveError(null)
     setManualGroupError(null)
     setTemplateError(null)
+    setGroupDetailPanel('overview')
+    setManualDetailPanel('overview')
+    setRecordDetailPanel('overview')
+    setTemplateDetailPanel('overview')
     setTemplateDetailState({ loading: true, error: null, detail: null })
     setSelectedTemplateID(templateID)
     setOpenState('template_id', templateID)
@@ -3591,6 +3761,7 @@ export function AssetDecisionsPage() {
       note: '',
       renewWithinDays: renewalWindow,
     })
+    setTemplateDetailPanel('overview')
     clearOpenState('template_id')
   }
 
@@ -3656,6 +3827,8 @@ export function AssetDecisionsPage() {
         setSelectedGroupID(null)
         setDetailState(INITIAL_DETAIL_STATE)
         setSelectedManualGroupID(manualDetail.manual_group_id)
+        setGroupDetailPanel('overview')
+        setManualDetailPanel('overview')
         setOpenState('manual_group_id', manualDetail.manual_group_id)
         setDecisionNotice(`已创建自定义组合：${manualDetail.title}`)
       })
@@ -3668,14 +3841,18 @@ export function AssetDecisionsPage() {
   function startRecordSave(detail: AssetDecisionGroupDetail) {
     setRecordDraft(buildRecordDraft(detail, renewalWindow))
     setRecordSaveError(null)
+    setGroupDetailPanel('save')
   }
 
   function startManualRecordSave(detail: AssetDecisionManualGroupDetail) {
     setRecordDraft(buildManualRecordDraft(detail))
     setRecordSaveError(null)
+    setManualDetailPanel('save')
   }
 
   function cancelRecordSave() {
+    if (recordDraft?.sourceType === 'auto_group') setGroupDetailPanel('overview')
+    if (recordDraft?.sourceType === 'manual_group') setManualDetailPanel('overview')
     setRecordDraft(null)
     setRecordSaveError(null)
   }
@@ -3747,6 +3924,10 @@ export function AssetDecisionsPage() {
         setOpenState('record_id', record.record_id)
         setRecordDetailState({ loading: false, error: null, detail: record })
         setRecordPatchStatus(record.status)
+        setGroupDetailPanel('overview')
+        setManualDetailPanel('overview')
+        setTemplateDetailPanel('overview')
+        setRecordDetailPanel('overview')
       })
       .catch((error: unknown) => {
         setRecordSaveError(describeError(error, '保存组合决策记录失败'))
@@ -3770,6 +3951,10 @@ export function AssetDecisionsPage() {
     setSelectedRecordID(recordID)
     setRecordDetailState({ loading: true, error: null, detail: null })
     setRecordPatchError(null)
+    setGroupDetailPanel('overview')
+    setManualDetailPanel('overview')
+    setRecordDetailPanel('overview')
+    setTemplateDetailPanel('overview')
     setOpenState('record_id', recordID)
   }
 
@@ -3779,6 +3964,7 @@ export function AssetDecisionsPage() {
     setRecordPatchError(null)
     setRecordFollowupDrafts({})
     setRecordFollowupPatching({})
+    setRecordDetailPanel('overview')
     clearOpenState('record_id')
   }
 
@@ -3806,6 +3992,8 @@ export function AssetDecisionsPage() {
         setSelectedTemplateID(null)
         setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
         setSelectedManualGroupID(manualDetail.manual_group_id)
+        setTemplateDetailPanel('overview')
+        setManualDetailPanel('overview')
         setOpenState('manual_group_id', manualDetail.manual_group_id)
         setDecisionNotice(`已从模板创建自定义组合：${manualDetail.title}`)
       })
@@ -3837,6 +4025,7 @@ export function AssetDecisionsPage() {
     if (!detail || detail.builtin || templateSaving) return
     setTemplateError(null)
     setPendingTemplateStatus(status)
+    setTemplateDetailPanel('status')
   }
 
   function cancelTemplateStatusUpdate() {
@@ -3860,6 +4049,8 @@ export function AssetDecisionsPage() {
         setSelectedManualGroupID(null)
         setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
         setSelectedTemplateID(template.template_id)
+        setManualDetailPanel('overview')
+        setTemplateDetailPanel('overview')
         setOpenState('template_id', template.template_id)
         setDecisionNotice(`已另存为场景模板：${template.title}`)
       })
@@ -4293,6 +4484,7 @@ export function AssetDecisionsPage() {
     setDecisionDraft({ renewalDecision: vps.renewal_decision, reason: '' })
     setDecisionError(null)
     setDecisionNotice(null)
+    if (selectedGroupID) setGroupDetailPanel('vps')
   }
 
   function navigateToVPS(vps: VPSAssetRecord) {
@@ -4331,6 +4523,7 @@ export function AssetDecisionsPage() {
     setSelectedVPS(null)
     setDecisionDraft(INITIAL_DECISION_DRAFT)
     setDecisionError(null)
+    if (selectedGroupID) setGroupDetailPanel('overview')
   }
 
   function handleDecisionSubmit(event: FormEvent<HTMLFormElement>) {
@@ -4979,35 +5172,65 @@ export function AssetDecisionsPage() {
                 <span className="asset-decision-detail__issue">{detailState.detail.primary_issue_summary}</span>
               ) : null,
             })}
-            {renderMemberDecisionCards(
+            {renderMemberDecisionPreview(
               detailState.detail.members.map(groupMemberComparisonMatrixMember),
+              '关键成员摘要',
               {
-                title: '成员取舍',
-                ariaLabel: '成员取舍列表',
                 action: (member) => {
                   const sourceMember = detailState.detail?.members.find((item) => item.vps.vps_id === member.key)
                   if (!sourceMember) return null
                   return (
-                    <>
-                      <button className="btn sm primary" type="button" onClick={() => selectVPS(sourceMember.vps)}>
-                        处理
-                      </button>
-                      {sourceMember.suggested_action === 'open_cancellation_workbench' ? (
-                        <Link className="btn sm secondary" to={`/vps/${sourceMember.vps.vps_id}?workbench=cancellation`}>
-                          取消/退役
-                        </Link>
-                      ) : (
-                        <Link className="btn sm secondary" to={`/vps/${sourceMember.vps.vps_id}`}>
-                          VPS
-                        </Link>
-                      )}
-                    </>
+                    <button className="btn sm primary" type="button" onClick={() => selectVPS(sourceMember.vps)}>
+                      处理
+                    </button>
                   )
                 },
               },
             )}
+            {renderDetailPanelNav<GroupDetailPanel>([
+              { key: 'overview', label: '概览', summary: '判断与关键成员' },
+              { key: 'members', label: '成员明细', summary: '取舍卡片', count: detailState.detail.members.length },
+              { key: 'save', label: '保存记录', ariaLabel: '保存记录面板', summary: '沉淀本次判断' },
+              { key: 'raw', label: '数据底稿', ariaLabel: '原始明细', summary: '成员宽表' },
+              ...(selectedVPS ? [{ key: 'vps' as const, label: '处理面板', summary: selectedVPS.display_name }] : []),
+            ], groupDetailPanel, (panel) => {
+              if (panel === 'save' && recordDraft?.sourceType !== 'auto_group') {
+                startRecordSave(detailState.detail!)
+                return
+              }
+              setGroupDetailPanel(panel)
+            })}
             {manualGroupError && <div className="inline-alert danger">{manualGroupError}</div>}
-            {recordDraft && (
+            {groupDetailPanel === 'members' && renderDetailPanel('成员明细',
+              renderMemberDecisionCards(
+                detailState.detail.members.map(groupMemberComparisonMatrixMember),
+                {
+                  title: '成员取舍',
+                  ariaLabel: '成员取舍列表',
+                  action: (member) => {
+                    const sourceMember = detailState.detail?.members.find((item) => item.vps.vps_id === member.key)
+                    if (!sourceMember) return null
+                    return (
+                      <>
+                        <button className="btn sm primary" type="button" onClick={() => selectVPS(sourceMember.vps)}>
+                          处理
+                        </button>
+                        {sourceMember.suggested_action === 'open_cancellation_workbench' ? (
+                          <Link className="btn sm secondary" to={`/vps/${sourceMember.vps.vps_id}?workbench=cancellation`}>
+                            取消/退役
+                          </Link>
+                        ) : (
+                          <Link className="btn sm secondary" to={`/vps/${sourceMember.vps.vps_id}`}>
+                            VPS
+                          </Link>
+                        )}
+                      </>
+                    )
+                  },
+                },
+              ),
+            )}
+            {groupDetailPanel === 'save' && recordDraft && renderDetailPanel('保存记录',
               <form className="asset-decision-record-form" onSubmit={submitRecordSave}>
                 <div className="asset-decision-record-form__header">
                   <div>
@@ -5102,17 +5325,19 @@ export function AssetDecisionsPage() {
                     )
                   })}
                 </div>
-              </form>
+              </form>,
             )}
-            <div className="asset-table-scroll" role="region" aria-label="决策组成员对比" tabIndex={0}>
-              <DataTable
-                className="asset-table asset-decision-members-table"
-                columns={memberColumns}
-                rows={detailState.detail.members}
-                rowKey={(member) => member.vps.vps_id}
-              />
-            </div>
-            {selectedVPS && (
+            {groupDetailPanel === 'raw' && renderDetailPanel('数据底稿',
+              <div className="asset-table-scroll" role="region" aria-label="决策组成员对比" tabIndex={0}>
+                <DataTable
+                  className="asset-table asset-decision-members-table"
+                  columns={memberColumns}
+                  rows={detailState.detail.members}
+                  rowKey={(member) => member.vps.vps_id}
+                />
+              </div>,
+            )}
+            {groupDetailPanel === 'vps' && selectedVPS && (
               <div className="asset-decision-detail__work-panel">
                 <AssetDecisionWorkPanel
                   surface="drawer"
@@ -5194,8 +5419,8 @@ export function AssetDecisionsPage() {
               ),
               actions: (
                 <>
-                  <button className="btn sm primary" type="submit" form="asset-decision-manual-group-form" disabled={manualGroupSaving}>
-                    {manualGroupSaving ? '保存中…' : '保存组合'}
+                  <button className="btn sm primary" type="button" onClick={() => setManualDetailPanel('edit')} disabled={manualGroupSaving}>
+                    编辑组合
                   </button>
                   <button
                     className="btn sm secondary"
@@ -5228,17 +5453,40 @@ export function AssetDecisionsPage() {
               ),
             })}
 
-            {renderMemberDecisionCards(
+            {renderMemberDecisionPreview(
               manualDetailState.detail.members.map(manualMemberComparisonMatrixMember),
-              {
-                title: '成员取舍',
-                ariaLabel: '自定义组合成员取舍',
-                showIntent: true,
-                summary: '把人工意图和当前证据并排呈现，先确认成员是否可沉淀为决策记录。',
-              },
+              '自定义组合成员摘要',
+              { showIntent: true },
+            )}
+            {renderDetailPanelNav<ManualDetailPanel>([
+              { key: 'overview', label: '概览', summary: '判断与意图' },
+              { key: 'edit', label: '编辑组合', summary: '标题与目标' },
+              { key: 'members', label: '成员维护', summary: '意图与移除', count: manualDetailState.detail.members.length },
+              { key: 'add', label: '添加成员', summary: '加入 VPS' },
+              { key: 'save', label: '保存记录', ariaLabel: '保存记录面板', summary: '沉淀判断' },
+              { key: 'raw', label: '数据底稿', ariaLabel: '原始明细', summary: '成员宽表' },
+            ], manualDetailPanel, (panel) => {
+              if (panel === 'save' && recordDraft?.sourceType !== 'manual_group') {
+                startManualRecordSave(manualDetailState.detail!)
+                return
+              }
+              setManualDetailPanel(panel)
+            })}
+
+            {manualDetailPanel === 'members' && renderDetailPanel('成员维护',
+              renderMemberDecisionCards(
+                manualDetailState.detail.members.map(manualMemberComparisonMatrixMember),
+                {
+                  title: '成员取舍',
+                  ariaLabel: '自定义组合成员取舍',
+                  showIntent: true,
+                  summary: '人工意图和当前证据并排呈现。',
+                },
+              ),
             )}
 
-            <form id="asset-decision-manual-group-form" className="asset-decision-manual-group-form" onSubmit={submitManualGroupPatch}>
+            {manualDetailPanel === 'edit' && renderDetailPanel('编辑组合',
+              <form id="asset-decision-manual-group-form" className="asset-decision-manual-group-form" onSubmit={submitManualGroupPatch}>
               <div className="asset-decision-record-form__header">
                 <div>
                   <p className="section-heading__eyebrow">SCENARIO</p>
@@ -5276,9 +5524,16 @@ export function AssetDecisionsPage() {
                   <textarea className="input" name="note" rows={2} defaultValue={manualDetailState.detail.note} />
                 </label>
               </div>
-            </form>
+              <div className="asset-operation-actions">
+                <button className="btn sm primary" type="submit" disabled={manualGroupSaving}>
+                  {manualGroupSaving ? '保存中…' : '保存组合'}
+                </button>
+              </div>
+            </form>,
+            )}
 
-            <form className="asset-decision-manual-add-form" onSubmit={submitManualMemberAdd}>
+            {manualDetailPanel === 'add' && renderDetailPanel('添加成员',
+              <form className="asset-decision-manual-add-form" onSubmit={submitManualMemberAdd}>
               <div className="asset-decision-record-form__header">
                 <div>
                   <p className="section-heading__eyebrow">MEMBER</p>
@@ -5360,9 +5615,10 @@ export function AssetDecisionsPage() {
                   />
                 </label>
               </div>
-            </form>
+            </form>,
+            )}
 
-            {recordDraft && recordDraft.sourceType === 'manual_group' && (
+            {manualDetailPanel === 'save' && recordDraft && recordDraft.sourceType === 'manual_group' && renderDetailPanel('保存记录',
               <form className="asset-decision-record-form" onSubmit={submitRecordSave}>
                 <div className="asset-decision-record-form__header">
                   <div>
@@ -5457,10 +5713,10 @@ export function AssetDecisionsPage() {
                     )
                   })}
                 </div>
-              </form>
+              </form>,
             )}
 
-            {pendingManualMemberRemoval ? (
+            {manualDetailPanel === 'members' && pendingManualMemberRemoval ? (
               <section className="asset-lifecycle-confirm" role="alertdialog" aria-label="确认移除组合成员">
                 <p className="asset-lifecycle-confirm__eyebrow">操作确认</p>
                 <h3>确认移除组合成员</h3>
@@ -5495,14 +5751,16 @@ export function AssetDecisionsPage() {
               </section>
             ) : null}
 
-            <div className="asset-table-scroll" role="region" aria-label="自定义组合成员对比" tabIndex={0}>
-              <DataTable
-                className="asset-table asset-decision-manual-members-table"
-                columns={manualMemberColumns}
-                rows={manualDetailState.detail.members}
-                rowKey={(member) => member.vps_id}
-              />
-            </div>
+            {(manualDetailPanel === 'members' || manualDetailPanel === 'raw') && renderDetailPanel('成员数据',
+              <div className="asset-table-scroll" role="region" aria-label="自定义组合成员对比" tabIndex={0}>
+                <DataTable
+                  className="asset-table asset-decision-manual-members-table"
+                  columns={manualMemberColumns}
+                  rows={manualDetailState.detail.members}
+                  rowKey={(member) => member.vps_id}
+                />
+              </div>,
+            )}
           </div>
         ) : null}
       </Modal>
@@ -5557,7 +5815,26 @@ export function AssetDecisionsPage() {
                 <strong>{templateDetailState.detail.goal || '从该场景创建自定义组合后再细化目标'}</strong>
                 <span>{templateDetailState.detail.note || '模板只保存场景 blueprint，不保存当前成本、订阅、监控或服务事实。'}</span>
               </div>
-              {!templateDetailState.detail.builtin && (
+              <div className="asset-decision-template-status-actions">
+                <Badge variant="state" tone={scenarioTemplateStatusTone(templateDetailState.detail.status)}>
+                  {SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status]}
+                </Badge>
+                <Badge variant="count" tone={templateDetailState.detail.member_count > 0 ? 'notice' : 'neutral'}>
+                  蓝图 {templateDetailState.detail.member_count}
+                </Badge>
+              </div>
+            </div>
+
+            {renderDetailPanelNav<TemplateDetailPanel>([
+              { key: 'overview', label: '概览', summary: '目标与状态' },
+              { key: 'create', label: '创建组合', summary: '从模板启动' },
+              { key: 'members', label: '成员蓝图', summary: '模板成员', count: templateDetailState.detail.member_count },
+              ...(!templateDetailState.detail.builtin ? [{ key: 'status' as const, label: '状态维护', summary: SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status] }] : []),
+            ], templateDetailPanel, setTemplateDetailPanel)}
+            {templateError && <div className="inline-alert danger">{templateError}</div>}
+
+            {templateDetailPanel === 'status' && !templateDetailState.detail.builtin && renderDetailPanel('状态维护',
+              <>
                 <div className="asset-decision-template-status-actions">
                   <Badge variant="state" tone={scenarioTemplateStatusTone(templateDetailState.detail.status)}>
                     {SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status]}
@@ -5571,10 +5848,7 @@ export function AssetDecisionsPage() {
                     {templateSaving ? '更新中…' : templateDetailState.detail.status === 'active' ? '归档模板' : '重新启用'}
                   </button>
                 </div>
-              )}
-            </div>
-
-            {pendingTemplateStatus ? (
+                {pendingTemplateStatus ? (
               <section className="asset-lifecycle-confirm" role="alertdialog" aria-label={pendingTemplateStatus === 'archived' ? '确认归档模板' : '确认重新启用模板'}>
                 <p className="asset-lifecycle-confirm__eyebrow">操作确认</p>
                 <h3>{pendingTemplateStatus === 'archived' ? '确认归档模板' : '确认重新启用模板'}</h3>
@@ -5595,9 +5869,12 @@ export function AssetDecisionsPage() {
                   </button>
                 </div>
               </section>
-            ) : null}
+                ) : null}
+              </>,
+            )}
 
-            <form className="asset-decision-template-form" onSubmit={submitTemplateManualGroup}>
+            {templateDetailPanel === 'create' && renderDetailPanel('创建组合',
+              <form className="asset-decision-template-form" onSubmit={submitTemplateManualGroup}>
               <div className="asset-decision-record-form__header">
                 <div>
                   <p className="section-heading__eyebrow">CREATE SCENARIO</p>
@@ -5649,9 +5926,11 @@ export function AssetDecisionsPage() {
                   />
                 </label>
               </div>
-            </form>
+            </form>,
+            )}
 
-            <div className="asset-decision-template-members">
+            {templateDetailPanel === 'members' && renderDetailPanel('成员蓝图',
+              <div className="asset-decision-template-members">
               <div className="asset-decision-record-form__header">
                 <div>
                   <p className="section-heading__eyebrow">BLUEPRINT</p>
@@ -5688,7 +5967,8 @@ export function AssetDecisionsPage() {
                   ))}
                 </div>
               )}
-            </div>
+            </div>,
+            )}
           </div>
         ) : null}
       </Modal>
@@ -5778,55 +6058,70 @@ export function AssetDecisionsPage() {
                 </span>
                 {selectedRecordAssessment && renderEvidenceAssessment(selectedRecordAssessment, 'detail')}
               </div>
-              <form className="asset-decision-record-status-form" onSubmit={submitRecordStatus}>
-                <label className="input-field">
-                  <span>推进状态</span>
-                  <select
-                    aria-label="推进状态"
-                    className="input"
-                    value={recordPatchStatus}
-                    onChange={(event) => setRecordPatchStatus(event.target.value as AssetDecisionRecordStatus)}
-                  >
-                    {RECORD_STATUS_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <button className="btn sm primary" type="submit" disabled={recordPatching || recordPatchStatus === recordDetailState.detail.status}>
-                  {recordPatching ? '保存中…' : '更新状态'}
-                </button>
-              </form>
             </div>
             {renderRecordSavedEvidence(recordDetailState.detail, selectedRecordAssessment)}
-            <section className="asset-decision-record-continuity" aria-label="决策记录来源连续性">
-              <div>
-                <p className="section-heading__eyebrow">SOURCE CONTINUITY</p>
-                <h3>来源与当前闭环</h3>
-                <strong>{recordSourceLabel(recordDetailState.detail)}</strong>
-                <span>{recordSourceDetail(recordDetailState.detail)}</span>
-              </div>
-              <div className="asset-decision-record-continuity__state">
-                <Badge variant="state" tone={readbackStatusTone(recordDetailState.detail.execution_readback?.status)}>
-                  {recordDetailState.detail.execution_readback?.status ? READBACK_STATUS_LABELS[recordDetailState.detail.execution_readback.status] : '等待回读'}
-                </Badge>
-                <Badge variant="count" tone={recordDetailState.detail.execution_plan?.actionable_count > 0 ? 'maintenance' : 'normal'}>
-                  可推进 {recordDetailState.detail.execution_plan?.actionable_count ?? 0}
-                </Badge>
-                <button className="btn sm secondary" type="button" onClick={() => openRecordSource(recordDetailState.detail!)}>
-                  复核来源
-                </button>
-              </div>
-            </section>
+            {renderDetailPanelNav<RecordDetailPanel>([
+              { key: 'overview', label: '概览', summary: '快照与计数' },
+              { key: 'execution', label: '执行跟进', summary: '状态与编排', count: recordDetailState.detail.execution_plan?.actionable_count ?? 0 },
+              { key: 'members', label: '成员跟进', summary: '备注与回读', count: recordDetailState.detail.members.length },
+              { key: 'source', label: '来源复核', summary: recordSourceLabel(recordDetailState.detail) },
+              { key: 'raw', label: '成员底稿', ariaLabel: '原始成员', summary: '完整成员表' },
+            ], recordDetailPanel, setRecordDetailPanel)}
             {recordPatchError && <div className="inline-alert danger">{recordPatchError}</div>}
-            {renderRecordExecutionBoard(recordDetailState.detail)}
-            <div className="asset-table-scroll" role="region" aria-label="决策记录成员" tabIndex={0}>
-              <DataTable
-                className="asset-table asset-decision-record-members-table"
-                columns={recordMemberColumns}
-                rows={recordDetailState.detail.members}
-                rowKey={(member) => member.vps_id}
-              />
-            </div>
+            {recordDetailPanel === 'execution' && renderDetailPanel('执行跟进',
+              <>
+                <form className="asset-decision-record-status-form" onSubmit={submitRecordStatus}>
+                  <label className="input-field">
+                    <span>推进状态</span>
+                    <select
+                      aria-label="推进状态"
+                      className="input"
+                      value={recordPatchStatus}
+                      onChange={(event) => setRecordPatchStatus(event.target.value as AssetDecisionRecordStatus)}
+                    >
+                      {RECORD_STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button className="btn sm primary" type="submit" disabled={recordPatching || recordPatchStatus === recordDetailState.detail.status}>
+                    {recordPatching ? '保存中…' : '更新状态'}
+                  </button>
+                </form>
+                {renderRecordExecutionBoard(recordDetailState.detail)}
+              </>,
+            )}
+            {recordDetailPanel === 'source' && renderDetailPanel('来源复核',
+              <section className="asset-decision-record-continuity" aria-label="决策记录来源连续性">
+                <div>
+                  <p className="section-heading__eyebrow">SOURCE CONTINUITY</p>
+                  <h3>来源与当前闭环</h3>
+                  <strong>{recordSourceLabel(recordDetailState.detail)}</strong>
+                  <span>{recordSourceDetail(recordDetailState.detail)}</span>
+                </div>
+                <div className="asset-decision-record-continuity__state">
+                  <Badge variant="state" tone={readbackStatusTone(recordDetailState.detail.execution_readback?.status)}>
+                    {recordDetailState.detail.execution_readback?.status ? READBACK_STATUS_LABELS[recordDetailState.detail.execution_readback.status] : '等待回读'}
+                  </Badge>
+                  <Badge variant="count" tone={recordDetailState.detail.execution_plan?.actionable_count > 0 ? 'maintenance' : 'normal'}>
+                    可推进 {recordDetailState.detail.execution_plan?.actionable_count ?? 0}
+                  </Badge>
+                  <button className="btn sm secondary" type="button" onClick={() => openRecordSource(recordDetailState.detail!)}>
+                    复核来源
+                  </button>
+                </div>
+              </section>,
+            )}
+            {(recordDetailPanel === 'members' || recordDetailPanel === 'raw') && renderDetailPanel('成员跟进',
+              <div className="asset-table-scroll" role="region" aria-label="决策记录成员" tabIndex={0}>
+                <DataTable
+                  className="asset-table asset-decision-record-members-table"
+                  columns={recordMemberColumns}
+                  rows={recordDetailState.detail.members}
+                  rowKey={(member) => member.vps_id}
+                />
+              </div>,
+            )}
           </div>
         ) : null}
       </Modal>
