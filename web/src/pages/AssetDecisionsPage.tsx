@@ -2195,7 +2195,7 @@ function renderMemberExecutionPlan(member: AssetDecisionRecordMember) {
         )}
       </span>
       <strong>{plan?.summary || '等待执行编排'}</strong>
-      <span>{plan?.step_label || actionLabelForMember(member)}</span>
+      <span>{actionLabelForMember(member)}</span>
       {plan?.issue_count ? <span>关联问题 {plan.issue_count} 项</span> : <span>无额外问题</span>}
     </div>
   )
@@ -2241,6 +2241,16 @@ function renderMemberReadback(readback?: AssetDecisionMemberExecutionReadback) {
       )}
     </div>
   )
+}
+
+function compactMemberReadbackSummary(readback?: AssetDecisionMemberExecutionReadback): string {
+  if (!readback) return '等待当前事实回读'
+  return compactDecisionText(readback.summary || currentFactsLabel(readback.current_facts), '等待执行回读')
+}
+
+function compactMemberPlanSummary(member: AssetDecisionRecordMember): string {
+  const plan = member.execution_plan
+  return compactDecisionText(plan?.summary || actionLabelForMember(member), '等待下一步')
 }
 
 function membersForExecutionLane(members: AssetDecisionRecordMember[], lane: AssetDecisionExecutionPlanLane): AssetDecisionRecordMember[] {
@@ -3437,59 +3447,111 @@ export function AssetDecisionsPage() {
       label: '跟进',
       align: 'right',
       width: '286px',
-      render: (member) => {
-        const draft = recordFollowupDrafts[member.vps_id] ?? {
-          status: member.followup_status,
-          note: member.followup_note,
-        }
-        const isSaving = Boolean(recordFollowupPatching[member.vps_id])
-        const isChanged = draft.status !== member.followup_status || draft.note !== member.followup_note
-        return (
-          <form className="asset-decision-followup-form" onSubmit={(event) => submitRecordMemberFollowup(event, member)}>
-            <div className="asset-decision-followup-form__status">
-              <Badge variant="state" tone={followupStatusTone(member.followup_status)}>
-                {FOLLOWUP_STATUS_LABELS[member.followup_status]}
-              </Badge>
-              <span>{member.followup_updated_at ? `更新 ${formatDateTime(member.followup_updated_at)}` : '尚未跟进'}</span>
-            </div>
-            <label className="visually-hidden" htmlFor={`followup-status-${member.record_id}-${member.vps_id}`}>
-              {member.display_name || member.vps_id} 跟进状态
-            </label>
-            <select
-              id={`followup-status-${member.record_id}-${member.vps_id}`}
-              aria-label={`${member.display_name || member.vps_id} 跟进状态`}
-              className="input"
-              value={draft.status}
-              onChange={(event) => updateRecordFollowupDraft(member.vps_id, { status: event.target.value as AssetDecisionFollowupStatus })}
-            >
-              {FOLLOWUP_STATUS_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <label className="visually-hidden" htmlFor={`followup-note-${member.record_id}-${member.vps_id}`}>
-              {member.display_name || member.vps_id} 跟进备注
-            </label>
-            <input
-              id={`followup-note-${member.record_id}-${member.vps_id}`}
-              aria-label={`${member.display_name || member.vps_id} 跟进备注`}
-              className="input"
-              value={draft.note}
-              placeholder="备注 / 阻塞原因"
-              onChange={(event) => updateRecordFollowupDraft(member.vps_id, { note: event.target.value })}
-            />
-            <div className="asset-decision-followup-form__actions">
-              <button className="btn sm primary" type="submit" disabled={isSaving || !isChanged}>
-                {isSaving ? '保存中…' : '保存跟进'}
-              </button>
-              <Link className="btn sm secondary" to={actionHrefForMember(member)}>
-                {actionLabelForMember(member)}
-              </Link>
-            </div>
-          </form>
-        )
-      },
+      render: (member) => renderRecordFollowupForm(member),
     },
   ]
+
+  function renderRecordFollowupForm(member: AssetDecisionRecordMember) {
+    const draft = recordFollowupDrafts[member.vps_id] ?? {
+      status: member.followup_status,
+      note: member.followup_note,
+    }
+    const isSaving = Boolean(recordFollowupPatching[member.vps_id])
+    const isChanged = draft.status !== member.followup_status || draft.note !== member.followup_note
+    return (
+      <form className="asset-decision-followup-form" onSubmit={(event) => submitRecordMemberFollowup(event, member)}>
+        <div className="asset-decision-followup-form__status">
+          <Badge variant="state" tone={followupStatusTone(member.followup_status)}>
+            {FOLLOWUP_STATUS_LABELS[member.followup_status]}
+          </Badge>
+          <span>{member.followup_updated_at ? `更新 ${formatDateTime(member.followup_updated_at)}` : '尚未跟进'}</span>
+        </div>
+        <label className="visually-hidden" htmlFor={`followup-status-${member.record_id}-${member.vps_id}`}>
+          {member.display_name || member.vps_id} 跟进状态
+        </label>
+        <select
+          id={`followup-status-${member.record_id}-${member.vps_id}`}
+          aria-label={`${member.display_name || member.vps_id} 跟进状态`}
+          className="input"
+          value={draft.status}
+          onChange={(event) => updateRecordFollowupDraft(member.vps_id, { status: event.target.value as AssetDecisionFollowupStatus })}
+        >
+          {FOLLOWUP_STATUS_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+        <label className="visually-hidden" htmlFor={`followup-note-${member.record_id}-${member.vps_id}`}>
+          {member.display_name || member.vps_id} 跟进备注
+        </label>
+        <input
+          id={`followup-note-${member.record_id}-${member.vps_id}`}
+          aria-label={`${member.display_name || member.vps_id} 跟进备注`}
+          className="input"
+          value={draft.note}
+          placeholder="备注 / 阻塞原因"
+          onChange={(event) => updateRecordFollowupDraft(member.vps_id, { note: event.target.value })}
+        />
+        <div className="asset-decision-followup-form__actions">
+          <button className="btn sm primary" type="submit" disabled={isSaving || !isChanged}>
+            {isSaving ? '保存中…' : '保存跟进'}
+          </button>
+          <Link className="btn sm secondary" to={actionHrefForMember(member)}>
+            {actionLabelForMember(member)}
+          </Link>
+        </div>
+      </form>
+    )
+  }
+
+  function renderRecordMemberFollowupRows(detail: AssetDecisionRecordDetail) {
+    const memberPreview = previewItems(detail.members)
+    if (detail.members.length === 0) {
+      return (
+        <section className="asset-decision-record-followups" aria-label="成员跟进列表">
+          <div className="asset-decision-member-decisions__empty">
+            <strong>暂无成员跟进</strong>
+            <span>当前记录没有可展示的成员。</span>
+          </div>
+        </section>
+      )
+    }
+
+    return (
+      <section className="asset-decision-record-followups" aria-label="成员跟进列表">
+        {memberPreview.visible.map((member) => (
+          <article key={member.vps_id} className="asset-decision-record-followup-row">
+            <div className="asset-decision-record-followup-row__identity">
+              <strong><Link className="name" to={`/vps/${member.vps_id}`}>{member.display_name || member.vps_id}</Link></strong>
+              <span className="asset-decision-chip-row">
+                <Badge variant="state" tone={roleTone(member.decided_role)}>
+                  {ROLE_LABELS[member.decided_role]}
+                </Badge>
+                <Badge variant="state" tone={actionTone(member.decided_action)}>
+                  {ACTION_LABELS[member.decided_action]}
+                </Badge>
+              </span>
+            </div>
+            <div className="asset-decision-record-followup-row__state">
+              <span className="asset-decision-chip-row">
+                {renderReadbackBadge(member.execution_readback)}
+                {renderExecutionPlanBadge(member.execution_plan)}
+              </span>
+              <strong>{compactMemberReadbackSummary(member.execution_readback)}</strong>
+              <span>{compactMemberPlanSummary(member)}</span>
+            </div>
+            <div className="asset-decision-record-followup-row__form">
+              {renderRecordFollowupForm(member)}
+            </div>
+          </article>
+        ))}
+        {memberPreview.hiddenCount > 0 && (
+          <div className="asset-decision-preview-more" role="note">
+            另有 {memberPreview.hiddenCount} 台在成员底稿中查看
+          </div>
+        )}
+      </section>
+    )
+  }
 
   function setWorkbenchView(next: MainWorkbenchView) {
     setPortfolioState((current) => ({
@@ -5157,21 +5219,17 @@ export function AssetDecisionsPage() {
                   action: (member) => {
                     const sourceMember = detailState.detail?.members.find((item) => item.vps.vps_id === member.key)
                     if (!sourceMember) return null
+                    if (sourceMember.suggested_action === 'open_cancellation_workbench') {
+                      return (
+                        <Link className="btn sm primary" to={`/vps/${sourceMember.vps.vps_id}?workbench=cancellation`}>
+                          取消/退役
+                        </Link>
+                      )
+                    }
                     return (
-                      <>
-                        <button className="btn sm primary" type="button" onClick={() => selectVPS(sourceMember.vps)}>
-                          处理
-                        </button>
-                        {sourceMember.suggested_action === 'open_cancellation_workbench' ? (
-                          <Link className="btn sm secondary" to={`/vps/${sourceMember.vps.vps_id}?workbench=cancellation`}>
-                            取消/退役
-                          </Link>
-                        ) : (
-                          <Link className="btn sm secondary" to={`/vps/${sourceMember.vps.vps_id}`}>
-                            VPS
-                          </Link>
-                        )}
-                      </>
+                      <button className="btn sm primary" type="button" onClick={() => selectVPS(sourceMember.vps)}>
+                        处理
+                      </button>
                     )
                   },
                 },
@@ -5958,7 +6016,10 @@ export function AssetDecisionsPage() {
                 </div>
               </section>,
             )}
-            {(recordDetailPanel === 'members' || recordDetailPanel === 'raw') && renderDetailPanel('成员跟进',
+            {recordDetailPanel === 'members' && renderDetailPanel('成员跟进',
+              renderRecordMemberFollowupRows(recordDetailState.detail),
+            )}
+            {recordDetailPanel === 'raw' && renderDetailPanel('成员底稿',
               <div className="asset-table-scroll" role="region" aria-label="决策记录成员" tabIndex={0}>
                 <DataTable
                   className="asset-table asset-decision-record-members-table"
