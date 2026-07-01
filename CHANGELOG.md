@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.56.7](https://github.com/xiangnan0811/houfeng/compare/v0.56.6...v0.56.7) (2026-07-01)
+
+
+### Bug Fixes
+
+* simplify asset decision detail panels ([4305d5f](https://github.com/xiangnan0811/houfeng/commit/4305d5f89678fccda2f08dba3a0ae3084f0d8de8))
+
 ## [0.56.6](https://github.com/xiangnan0811/houfeng/compare/v0.56.5...v0.56.6) (2026-07-01)
 
 
