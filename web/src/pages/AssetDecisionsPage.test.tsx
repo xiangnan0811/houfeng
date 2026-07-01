@@ -840,6 +840,7 @@ function expectAutomaticGroupMembersPanelIsCompact(dialog: HTMLElement, memberDe
   expect(within(memberDecisions).getAllByText('主力候选').length).toBeGreaterThan(0)
   expect(within(memberDecisions).getAllByText('保留').length).toBeGreaterThan(0)
   expect(within(memberDecisions).getAllByText('补证据').length).toBeGreaterThan(0)
+  expectMemberRowsUseSingleAction(memberDecisions)
 }
 
 function expectAutomaticSavePanelIsBrief(dialog: HTMLElement) {
@@ -951,6 +952,29 @@ function expectSavedRecordDetailDirectory(dialog: HTMLElement) {
   expect(within(dialog).queryByLabelText('执行编排')).not.toBeInTheDocument()
   expect(within(dialog).queryByLabelText('决策记录成员')).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('heading', { name: '来源与当前闭环' })).not.toBeInTheDocument()
+}
+
+function expectMemberRowsUseSingleAction(container: HTMLElement) {
+  container.querySelectorAll('.asset-decision-member-row__actions').forEach((actions) => {
+    const interactiveCount = actions.querySelectorAll('button, a[href]').length
+    expect(interactiveCount).toBeLessThanOrEqual(1)
+  })
+}
+
+function expectSavedRecordMembersPanelIsCompact(dialog: HTMLElement) {
+  const panel = within(dialog).getByLabelText('成员跟进列表')
+  expect(panel.querySelector('.asset-table-scroll')).toBeNull()
+  expect(panel.querySelector('table')).toBeNull()
+  expect(panel.querySelectorAll('.asset-decision-record-followup-row').length).toBeGreaterThan(0)
+  expect(within(panel).queryByRole('columnheader', { name: 'VPS' })).not.toBeInTheDocument()
+  expect(within(panel).queryByRole('columnheader', { name: '当前事实' })).not.toBeInTheDocument()
+  expect(within(panel).queryByRole('columnheader', { name: '跟进' })).not.toBeInTheDocument()
+  expect(panel).not.toHaveTextContent(/仍有 active 订阅|IP 203\.0\.113\.9|风险 provider 2|受阻 ChatGPT、Netflix|服务 2 · 域名 1/)
+}
+
+function openSavedRecordRawMembersPanel(dialog: HTMLElement) {
+  fireEvent.click(within(dialog).getByRole('button', { name: '原始成员' }))
+  expect(within(dialog).getByLabelText('决策记录成员')).toBeInTheDocument()
 }
 
 function normalizedText(element: HTMLElement): string {
@@ -2135,6 +2159,7 @@ describe('AssetDecisionsPage', () => {
     ])
 
     fireEvent.click(within(dialog).getByRole('button', { name: '成员跟进' }))
+    expectSavedRecordMembersPanelIsCompact(dialog)
     fireEvent.change(within(dialog).getByLabelText('Germany Primary 跟进状态'), { target: { value: 'blocked' } })
     fireEvent.change(within(dialog).getByLabelText('Germany Primary 跟进备注'), { target: { value: '等待迁移窗口' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '保存跟进' }))
@@ -2164,9 +2189,11 @@ describe('AssetDecisionsPage', () => {
     ])
     expect(within(dialog).getByLabelText('Germany Primary 跟进备注')).toHaveValue('等待迁移窗口')
     expect(within(dialog).getAllByText('有漂移').length).toBeGreaterThan(0)
-    expect(within(dialog).getAllByText('仍有 active 订阅').length).toBeGreaterThan(0)
+    expect(within(dialog).queryByText('仍有 active 订阅')).not.toBeInTheDocument()
     const cancelLinks = within(dialog).getAllByRole('link', { name: '打开取消/退役工作台' })
     expect(cancelLinks[0]).toHaveAttribute('href', '/vps/vps_primary?workbench=cancellation')
+    openSavedRecordRawMembersPanel(dialog)
+    expect(within(dialog).getAllByText('仍有 active 订阅').length).toBeGreaterThan(0)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/vps/'))).toBe(false)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/subscriptions/') && call[1]?.method)).toBe(false)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/monitoring-instances/') && call[1]?.method)).toBe(false)
@@ -2382,9 +2409,16 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).queryByText('打开 VPS 详情推进迁移')).not.toBeInTheDocument()
     expect(within(dialog).getByRole('link', { name: '复核迁移意向' })).toHaveAttribute('href', '/vps/vps_primary')
     fireEvent.click(within(dialog).getByRole('button', { name: '成员跟进' }))
+    expectSavedRecordMembersPanelIsCompact(dialog)
+    expect(within(dialog).queryByText(/IP 203\.0\.113\.9/)).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/风险 provider 2/)).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/受阻 ChatGPT、Netflix/)).not.toBeInTheDocument()
+    openSavedRecordRawMembersPanel(dialog)
     expect(within(dialog).getAllByText(/IP 203\.0\.113\.9/).length).toBeGreaterThan(0)
     expect(within(dialog).getAllByText(/风险 provider 2/).length).toBeGreaterThan(0)
     expect(within(dialog).getAllByText(/受阻 ChatGPT、Netflix/).length).toBeGreaterThan(0)
+    expect(within(dialog).queryByText('打开 VPS 详情推进迁移')).not.toBeInTheDocument()
+    expect(within(dialog).getAllByText('复核迁移意向').length).toBeGreaterThan(0)
   })
 
   it('falls back gracefully when saved record snapshots do not include comparison insight', async () => {
@@ -2448,6 +2482,9 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '执行跟进' }))
     expect(within(dialog).queryByText('旧记录证据可用')).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '成员跟进' }))
+    expectSavedRecordMembersPanelIsCompact(dialog)
+    expect(within(dialog).queryByText('服务 2 · 域名 1')).not.toBeInTheDocument()
+    openSavedRecordRawMembersPanel(dialog)
     expect(within(dialog).getByText('服务 2 · 域名 1')).toBeInTheDocument()
   })
 
