@@ -1386,3 +1386,36 @@ Reworked the asset decision page default surfaces into compact decision-first vi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 218: Second-pass asset decision modal declutter
+
+**Date**: 2026-07-01
+**Task**: Second-pass asset decision modal declutter
+**Branch**: `ux/asset-decision-modal-second-pass`
+
+### Summary
+
+Refined asset decision detail defaults into compact decision covers, moved member/raw evidence to secondary panels, added regression tests and browser verification evidence.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cd99419` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

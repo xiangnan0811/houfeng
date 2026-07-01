@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Required web lint, tests, build and browser evidence expectations"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Verify asset decision default modal contract and secondary capability preservation"}
+{"file": ".trellis/tasks/07-01-asset-decision-modal-second-pass/research/current-modal-audit.txt", "reason": "Baseline metrics for browser re-check comparison"}
