@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 214
+- **Total Sessions**: 215
 - **Last Active**: 2026-07-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1287 | Active |
+| `journal-4.md` | ~1321 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 215 | 2026-07-01 | 重构资产决策详情弹窗 | `0db5686`, `99b4bfa` | `ux/asset-decision-dialog-redesign` |
 | 214 | 2026-07-01 | Asset decisions IA redesign | `c831013` | `ux/asset-decisions-ia-redesign` |
 | 213 | 2026-06-30 | Hotfix VPS state migration backfill | `03699f0` | `hotfix/vps-state-migration-backfill` |
 | 212 | 2026-06-30 | Fix incident threshold order validation | `a476551` | `audit-state-lifecycle-consistency` |
