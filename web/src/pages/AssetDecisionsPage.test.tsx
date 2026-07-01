@@ -658,6 +658,8 @@ function expectAutomaticGroupDefaultCover(dialog: HTMLElement) {
   expect(within(dialog).queryByLabelText('详情二级面板')).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '成员明细' })).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '保存记录面板' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('决策组详情目录')).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '成员取舍' })).not.toBeInTheDocument()
   expect(within(dialog).queryByLabelText('关键成员摘要')).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('heading', { name: '关键成员摘要' })).not.toBeInTheDocument()
   expect(within(dialog).queryByText('Germany Primary')).not.toBeInTheDocument()
@@ -667,6 +669,68 @@ function expectAutomaticGroupDefaultCover(dialog: HTMLElement) {
   expect(within(dialog).queryByRole('button', { name: '处理' })).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '原始明细' })).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '数据底稿' })).not.toBeInTheDocument()
+}
+
+function expectAutomaticGroupDetailDirectory(dialog: HTMLElement) {
+  expect(within(dialog).getByLabelText('决策组详情目录')).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '成员取舍' })).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '保存记录面板' })).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '数据底稿' })).toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('成员取舍列表')).not.toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('决策组成员对比')).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('heading', { name: '保存组合决策记录' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByText('Germany Primary')).not.toBeInTheDocument()
+  expect(within(dialog).queryByText('Germany Standby')).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '处理' })).not.toBeInTheDocument()
+}
+
+function openAutomaticGroupMembers(dialog: HTMLElement) {
+  fireEvent.click(within(dialog).getByRole('button', { name: '成员取舍' }))
+  return within(dialog).getByLabelText('成员取舍列表')
+}
+
+function expectManualGroupDetailDirectory(dialog: HTMLElement) {
+  expect(within(dialog).getByLabelText('自定义组合详情目录')).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '成员维护' })).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '编辑组合' })).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '保存记录面板' })).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '添加成员' })).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '数据底稿' })).toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('自定义组合成员取舍')).not.toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('自定义组合成员对比')).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('heading', { name: '组合场景' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByText('Germany Primary')).not.toBeInTheDocument()
+  expect(within(dialog).queryByText('意图匹配')).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '移除' })).not.toBeInTheDocument()
+}
+
+function openManualGroupMembers(dialog: HTMLElement) {
+  fireEvent.click(within(dialog).getByRole('button', { name: '成员维护' }))
+  return within(dialog).getByLabelText('自定义组合成员取舍')
+}
+
+function expectTemplateDefaultCover(dialog: HTMLElement) {
+  expect(within(dialog).getByLabelText('场景模板当前判断')).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '查看详情' })).toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('场景模板详情目录')).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '创建组合' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '成员蓝图' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '状态维护' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('heading', { name: '从模板创建自定义组合' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('heading', { name: '成员蓝图' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '归档模板' })).not.toBeInTheDocument()
+}
+
+function expectTemplateDetailDirectory(dialog: HTMLElement, options: { custom?: boolean } = {}) {
+  expect(within(dialog).getByLabelText('场景模板详情目录')).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '创建组合' })).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '成员蓝图' })).toBeInTheDocument()
+  if (options.custom) {
+    expect(within(dialog).getByRole('button', { name: '状态维护' })).toBeInTheDocument()
+  }
+  expect(within(dialog).queryByRole('heading', { name: '从模板创建自定义组合' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('heading', { name: '成员蓝图' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '归档模板' })).not.toBeInTheDocument()
 }
 
 function expectSavedRecordDefaultCover(dialog: HTMLElement) {
@@ -939,7 +1003,8 @@ describe('AssetDecisionsPage', () => {
     await waitFor(() => expect(within(commandSummary).getAllByText('AUTO GROUP').length).toBeGreaterThan(0))
     fireEvent.click(within(commandSummary).getByRole('button', { name: '打开决策组' }))
 
-    expect(await screen.findByRole('dialog', { name: '资产决策组详情' })).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+    expectAutomaticGroupDefaultCover(dialog)
     expect(screen.getByLabelText('current-url')).toHaveTextContent('/asset-decisions?group_id=adg_auto_001')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30')
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/vps/') && call[1]?.method === 'PATCH')).toBe(false)
@@ -1053,13 +1118,15 @@ describe('AssetDecisionsPage', () => {
     expectAutomaticGroupDefaultCover(dialog)
 
     fireEvent.click(within(dialog).getByRole('button', { name: '查看详情' }))
+    expectAutomaticGroupDetailDirectory(dialog)
     fireEvent.click(within(dialog).getByRole('button', { name: '保存记录面板' }))
     expect(within(dialog).getByRole('heading', { name: '保存组合决策记录' })).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
 
     fireEvent.click(within(dialog).getByRole('button', { name: '查看详情' }))
+    expectAutomaticGroupDetailDirectory(dialog)
+    const memberDecisions = openAutomaticGroupMembers(dialog)
     expect(within(dialog).getByRole('heading', { name: '成员取舍' })).toBeInTheDocument()
-    const memberDecisions = within(dialog).getByLabelText('成员取舍列表')
     expect(within(memberDecisions).getByText('主力候选：承载服务且监控证据可用')).toBeInTheDocument()
     expect(within(memberDecisions).getByText('补证据候选：缺订阅和监控关联后再判断是否备用')).toBeInTheDocument()
     expect(within(memberDecisions).getAllByText('Germany Primary').length).toBeGreaterThan(0)
@@ -1124,7 +1191,8 @@ describe('AssetDecisionsPage', () => {
     expectAutomaticGroupDefaultCover(dialog)
 
     fireEvent.click(within(dialog).getByRole('button', { name: '查看详情' }))
-    const memberDecisions = within(dialog).getByLabelText('成员取舍列表')
+    expectAutomaticGroupDetailDirectory(dialog)
+    const memberDecisions = openAutomaticGroupMembers(dialog)
     expect(within(memberDecisions).getAllByText('Germany Primary').length).toBeGreaterThan(0)
     expect(within(memberDecisions).getAllByText('Germany Standby').length).toBeGreaterThan(0)
     expect(within(dialog).getAllByRole('button', { name: '处理' }).length).toBeGreaterThan(0)
@@ -1155,6 +1223,7 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看组' }))
     const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
     fireEvent.click(within(dialog).getByRole('button', { name: '查看详情' }))
+    expectAutomaticGroupDetailDirectory(dialog)
     fireEvent.click(within(dialog).getByRole('button', { name: '保存记录面板' }))
     fireEvent.change(within(dialog).getByLabelText('标题'), { target: { value: '德国主备取舍' } })
     fireEvent.change(within(dialog).getByLabelText('状态'), { target: { value: 'decided' } })
@@ -1247,7 +1316,8 @@ describe('AssetDecisionsPage', () => {
     expect(within(manualDialog).queryByRole('button', { name: '保存为决策记录' })).not.toBeInTheDocument()
     expect(within(manualDialog).getByRole('button', { name: '查看详情' })).toBeInTheDocument()
     fireEvent.click(within(manualDialog).getByRole('button', { name: '查看详情' }))
-    const manualMembers = within(manualDialog).getByLabelText('自定义组合成员取舍')
+    expectManualGroupDetailDirectory(manualDialog)
+    const manualMembers = openManualGroupMembers(manualDialog)
     expect(within(manualMembers).getByText('意图匹配')).toBeInTheDocument()
     expect(within(manualMembers).getByText('Germany Primary')).toBeInTheDocument()
     expect(within(manualDialog).getAllByText(/可保存记录 5\/5|接近可保存|继续整理/).length).toBeGreaterThan(0)
@@ -1329,6 +1399,7 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).queryByRole('button', { name: '添加成员' })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: '原始明细' })).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '查看详情' }))
+    expectManualGroupDetailDirectory(dialog)
     fireEvent.click(within(dialog).getByRole('button', { name: '保存记录面板' }))
     fireEvent.change(within(dialog).getByLabelText('组合目标'), { target: { value: '保留主力并观察备用' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
@@ -1402,6 +1473,8 @@ describe('AssetDecisionsPage', () => {
     const dialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
     expect(within(dialog).queryByRole('button', { name: '移除' })).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '查看详情' }))
+    expectManualGroupDetailDirectory(dialog)
+    openManualGroupMembers(dialog)
     fireEvent.click(within(dialog).getByRole('button', { name: '移除' }))
     const confirmation = within(dialog).getByRole('alertdialog', { name: '确认移除组合成员' })
     expect(screen.queryAllByRole('dialog')).toHaveLength(1)
@@ -1460,9 +1533,9 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(templatesSection!).getByRole('button', { name: '使用模板' }))
 
     const dialog = await screen.findByRole('dialog', { name: '资产决策场景模板详情' })
-    expect(within(dialog).queryByRole('button', { name: '归档模板' })).not.toBeInTheDocument()
-    expect(within(dialog).queryByRole('heading', { name: '从模板创建自定义组合' })).not.toBeInTheDocument()
-    expect(within(dialog).queryByRole('heading', { name: '成员蓝图' })).not.toBeInTheDocument()
+    expectTemplateDefaultCover(dialog)
+    fireEvent.click(within(dialog).getByRole('button', { name: '查看详情' }))
+    expectTemplateDetailDirectory(dialog, { custom: true })
     fireEvent.click(within(dialog).getByRole('button', { name: '状态维护' }))
     fireEvent.click(within(dialog).getByRole('button', { name: '归档模板' }))
     const confirmation = within(dialog).getByRole('alertdialog', { name: '确认归档模板' })
@@ -1692,6 +1765,9 @@ describe('AssetDecisionsPage', () => {
     expect(within(sourceDialog).queryByRole('heading', { name: '场景推进建议' })).not.toBeInTheDocument()
     expect(within(sourceDialog).queryByRole('heading', { name: '证据矩阵 / 取舍对比' })).not.toBeInTheDocument()
     expect(within(sourceDialog).getByLabelText('决策组当前判断')).toBeInTheDocument()
+    expectAutomaticGroupDefaultCover(sourceDialog)
+    fireEvent.click(within(sourceDialog).getByRole('button', { name: '查看详情' }))
+    expectAutomaticGroupDetailDirectory(sourceDialog)
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30')
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/vps/') && call[1]?.method === 'PATCH')).toBe(false)
   })
