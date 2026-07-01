@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.56.1](https://github.com/xiangnan0811/houfeng/compare/v0.56.0...v0.56.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* clarify asset decision detail dialogs ([8aeedfa](https://github.com/xiangnan0811/houfeng/commit/8aeedfa2c53c264674def6b4c7d23e994bd02426))
+* clarify asset decision detail dialogs ([0db5686](https://github.com/xiangnan0811/houfeng/commit/0db56862764991499896557d4fd01c4b527a72bb))
+
+
+### Documentation
+
+* **task:** plan asset decision dialog redesign ([99b4bfa](https://github.com/xiangnan0811/houfeng/commit/99b4bfa9327b3d333863a62f099d67790b73ab66))
+
 ## [0.56.0](https://github.com/xiangnan0811/houfeng/compare/v0.55.7...v0.56.0) (2026-07-01)
 
 
