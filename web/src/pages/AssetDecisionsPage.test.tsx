@@ -652,6 +652,7 @@ async function openSecondaryWorkbench(label: '打开记录' | '打开场景' | '
 
 function expectAutomaticGroupDefaultCover(dialog: HTMLElement) {
   expect(within(dialog).getByLabelText('决策组当前判断')).toBeInTheDocument()
+  expectDecisionCoverDensity(within(dialog).getByLabelText('决策组当前判断'))
   expect(within(dialog).getByRole('button', { name: '创建组合' })).toBeInTheDocument()
   expect(within(dialog).getByRole('button', { name: '详情' })).toBeInTheDocument()
   expect(within(dialog).queryByRole('heading', { name: '当前判断' })).not.toBeInTheDocument()
@@ -677,7 +678,9 @@ function expectAutomaticGroupDefaultCover(dialog: HTMLElement) {
 }
 
 function expectAutomaticGroupDetailDirectory(dialog: HTMLElement) {
-  expect(within(dialog).getByLabelText('决策组详情目录')).toBeInTheDocument()
+  const directory = within(dialog).getByLabelText('决策组详情目录')
+  expect(directory).toBeInTheDocument()
+  expectDetailDirectoryDensity(directory)
   expect(within(dialog).getByRole('button', { name: '成员取舍' })).toBeInTheDocument()
   expect(within(dialog).getByRole('button', { name: '保存记录' })).toBeInTheDocument()
   expect(within(dialog).getByRole('button', { name: '底稿' })).toBeInTheDocument()
@@ -737,7 +740,9 @@ function expectAutomaticSavePanelIsBrief(dialog: HTMLElement) {
 }
 
 function expectManualGroupDetailDirectory(dialog: HTMLElement) {
-  expect(within(dialog).getByLabelText('自定义组合详情目录')).toBeInTheDocument()
+  const directory = within(dialog).getByLabelText('自定义组合详情目录')
+  expect(directory).toBeInTheDocument()
+  expectDetailDirectoryDensity(directory)
   expect(within(dialog).getByRole('button', { name: '成员维护' })).toBeInTheDocument()
   expect(within(dialog).getByRole('button', { name: '编辑组合' })).toBeInTheDocument()
   expect(within(dialog).getByRole('button', { name: '保存记录' })).toBeInTheDocument()
@@ -765,7 +770,9 @@ function openManualGroupMembers(dialog: HTMLElement) {
 }
 
 function expectTemplateDefaultCover(dialog: HTMLElement) {
-  expect(within(dialog).getByLabelText('场景模板当前判断')).toBeInTheDocument()
+  const cover = within(dialog).getByLabelText('场景模板当前判断')
+  expect(cover).toBeInTheDocument()
+  expectDecisionCoverDensity(cover)
   expect(within(dialog).getByRole('button', { name: '查看详情' })).toBeInTheDocument()
   expect(within(dialog).queryByLabelText('场景模板详情目录')).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '创建组合' })).not.toBeInTheDocument()
@@ -777,7 +784,10 @@ function expectTemplateDefaultCover(dialog: HTMLElement) {
 }
 
 function expectTemplateDetailDirectory(dialog: HTMLElement, options: { custom?: boolean } = {}) {
-  expect(within(dialog).getByLabelText('场景模板详情目录')).toBeInTheDocument()
+  const directory = within(dialog).getByLabelText('场景模板详情目录')
+  expect(directory).toBeInTheDocument()
+  expectDetailDirectoryDensity(directory)
+  expect(directory).not.toHaveTextContent(/admg_|adt_|adg_|adr_/)
   expect(within(dialog).getByRole('button', { name: '创建组合' })).toBeInTheDocument()
   expect(within(dialog).getByRole('button', { name: '成员蓝图' })).toBeInTheDocument()
   if (options.custom) {
@@ -789,7 +799,9 @@ function expectTemplateDetailDirectory(dialog: HTMLElement, options: { custom?: 
 }
 
 function expectSavedRecordDefaultCover(dialog: HTMLElement) {
-  expect(within(dialog).getByLabelText('保存记录当前判断')).toBeInTheDocument()
+  const cover = within(dialog).getByLabelText('保存记录当前判断')
+  expect(cover).toBeInTheDocument()
+  expectDecisionCoverDensity(cover)
   expect(within(dialog).getByRole('button', { name: '查看详情' })).toBeInTheDocument()
   expect(within(dialog).queryByLabelText('详情二级面板')).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('heading', { name: '保存时判断依据' })).not.toBeInTheDocument()
@@ -807,7 +819,10 @@ function expectSavedRecordDefaultCover(dialog: HTMLElement) {
 }
 
 function expectSavedRecordDetailDirectory(dialog: HTMLElement) {
-  expect(within(dialog).getByLabelText('保存记录详情目录')).toBeInTheDocument()
+  const directory = within(dialog).getByLabelText('保存记录详情目录')
+  expect(directory).toBeInTheDocument()
+  expectDetailDirectoryDensity(directory)
+  expect(directory).not.toHaveTextContent(/admg_|adt_|adg_|adr_/)
   expect(within(dialog).getByRole('button', { name: '执行跟进' })).toBeInTheDocument()
   expect(within(dialog).getByRole('button', { name: '成员跟进' })).toBeInTheDocument()
   expect(within(dialog).getByRole('button', { name: '来源复核' })).toBeInTheDocument()
@@ -821,6 +836,36 @@ function expectSavedRecordDetailDirectory(dialog: HTMLElement) {
   expect(within(dialog).queryByLabelText('执行编排')).not.toBeInTheDocument()
   expect(within(dialog).queryByLabelText('决策记录成员')).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('heading', { name: '来源与当前闭环' })).not.toBeInTheDocument()
+}
+
+function normalizedText(element: HTMLElement): string {
+  return element.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+}
+
+function expectDecisionCoverDensity(cover: HTMLElement) {
+  const text = normalizedText(cover)
+  expect(text.length).toBeLessThanOrEqual(96)
+  expect(cover).not.toHaveTextContent(/。.*。/)
+  expect(cover.querySelector('.asset-table-scroll')).toBeNull()
+  expect(cover.querySelector('.asset-decision-detail-directory')).toBeNull()
+  expect(cover.querySelector('.asset-decision-detail-panel')).toBeNull()
+  expect(cover.querySelector('.asset-decision-member-decisions')).toBeNull()
+  expect(cover.querySelector('.asset-decision-member-row')).toBeNull()
+  expect(cover.querySelector('.asset-decision-record-form')).toBeNull()
+  expect(cover.querySelector('.asset-decision-execution-board')).toBeNull()
+  expect(cover).not.toHaveTextContent(/GROUP DECISION|SCENARIO DECISION|SAVED EVIDENCE|EXECUTION PLAN|SOURCE CONTINUITY|BLUEPRINT|CREATE SCENARIO/)
+  expect(cover).not.toHaveTextContent(/Germany Primary|Germany Standby|保存时判断依据|执行编排|来源复核|成员跟进|底稿/)
+}
+
+function expectDetailDirectoryDensity(directory: HTMLElement) {
+  const text = normalizedText(directory)
+  expect(text.length).toBeLessThanOrEqual(72)
+  expect(directory.querySelector('.asset-table-scroll')).toBeNull()
+  expect(directory.querySelector('.asset-decision-member-row')).toBeNull()
+  expect(directory.querySelector('.asset-decision-record-form')).toBeNull()
+  expect(directory).not.toHaveTextContent(/。/)
+  expect(directory).not.toHaveTextContent(/Germany Primary|Germany Standby|Hetzner|cx22|CNY|USD|\/月|服务 \d|域名 \d|Target \d|监控 \d/)
+  expect(directory).not.toHaveTextContent(/表格|横向滚动|重新读取|当前事实|来源回读|执行编排|保存时判断依据/)
 }
 
 describe('AssetDecisionsPage', () => {
@@ -1515,6 +1560,89 @@ describe('AssetDecisionsPage', () => {
     expect(writeCalls.some((call) => String(call[0]).startsWith('/api/targets/'))).toBe(false)
   })
 
+  it('keeps data-driven long copy and internal ids out of modal covers and directories', async () => {
+    const longManualSummary = '这个自定义组合包含一段非常长的报告式判断。它解释预算压力、证据缺口、成员取舍、后续推进和多个字段来源。默认封面不应该把这段报告原样塞进弹窗。'
+    const longTemplateGoal = '这个模板目标是一段很长的说明文字。它会描述如何从模板创建组合、如何重新读取事实、如何处理成员蓝图以及为什么要人工复核。默认层不能展示成说明文。'
+    const longRecordSummary = '保存时判断是一段很长的记录摘要。它包含执行回读、成员跟进、来源连续性和证据矩阵的解释。默认层必须压缩成一句决策封面。'
+    const longManual = manualGroupDetail({
+      comparison_insight: comparisonInsight({ summary: longManualSummary }),
+      decision_recommendation: { summary: longManualSummary, next_step: longManualSummary, reasons: [], blockers: [] },
+    })
+    const customTemplate = scenarioTemplate({
+      template_id: 'adt_custom_primary_standby',
+      builtin: false,
+      title: '自定义长目标模板',
+      goal: longTemplateGoal,
+      source_manual_group_id: 'admg_001',
+      member_count: 1,
+      members: [
+        {
+          member_id: 'adtm_001',
+          template_id: 'adt_custom_primary_standby',
+          vps_id: 'vps_primary',
+          intended_role: 'primary_candidate',
+          intended_action: 'keep',
+          reason: '',
+          note: '',
+          sort_order: 1,
+        },
+      ],
+    })
+    const longRecord = decisionRecord({
+      evidence_snapshot: {
+        ...decisionRecord().evidence_snapshot,
+        comparison_insight: comparisonInsight({ summary: longRecordSummary }),
+      },
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      manualGroupsBody: [manualGroupSummary(longManual)],
+      templatesBody: [customTemplate],
+      recordsBody: [longRecord],
+      routes: [
+        { url: '/api/asset-decisions/manual-groups/admg_001', body: longManual },
+        { url: '/api/asset-decisions/scenario-templates/adt_custom_primary_standby', body: customTemplate },
+        { url: '/api/asset-decisions/records/adr_001', body: longRecord },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await openSecondaryWorkbench('打开场景')
+    await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
+    const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
+    fireEvent.click(within(manualSection!).getByRole('button', { name: '查看组合' }))
+    const manualDialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    const manualCover = within(manualDialog).getByLabelText('自定义组合当前判断')
+    expectDecisionCoverDensity(manualCover)
+    expect(manualCover).not.toHaveTextContent(longManualSummary)
+    fireEvent.click(within(manualDialog).getByRole('button', { name: '查看详情' }))
+    expectManualGroupDetailDirectory(manualDialog)
+
+    const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
+    fireEvent.click(within(templatesSection!).getByRole('button', { name: '使用模板' }))
+    const templateDialog = await screen.findByRole('dialog', { name: '资产决策场景模板详情' })
+    expectTemplateDefaultCover(templateDialog)
+    expect(within(templateDialog).getByLabelText('场景模板当前判断')).not.toHaveTextContent(longTemplateGoal)
+    fireEvent.click(within(templateDialog).getByRole('button', { name: '查看详情' }))
+    expectTemplateDetailDirectory(templateDialog, { custom: true })
+
+    fireEvent.click(within(templateDialog).getByRole('button', { name: '关闭' }))
+    await openSecondaryWorkbench('打开记录')
+    const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
+    fireEvent.click(within(recordsSection!).getByRole('button', { name: '查看记录' }))
+    const recordDialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
+    expectSavedRecordDefaultCover(recordDialog)
+    expect(within(recordDialog).getByLabelText('保存记录当前判断')).not.toHaveTextContent(longRecordSummary)
+    fireEvent.click(within(recordDialog).getByRole('button', { name: '查看详情' }))
+    expectSavedRecordDetailDirectory(recordDialog)
+  })
+
   it('requires an internal confirmation step before removing a manual group member', async () => {
     const updatedManual = manualGroupDetail({
       member_count: 0,
@@ -1858,7 +1986,8 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).queryByRole('heading', { name: '来源与当前闭环' })).not.toBeInTheDocument()
     const sourcePanel = within(dialog).getByLabelText('决策记录来源连续性')
     expect(within(sourcePanel).getByText('来自自动组 未来 30 天')).toBeInTheDocument()
-    expect(within(sourcePanel).getByText(/自动组 · renewal_attention · 续费取舍 · adg_auto_001/)).toBeInTheDocument()
+    expect(within(sourcePanel).getByText('自动组 · 续费取舍 · 未来 30 天')).toBeInTheDocument()
+    expect(sourcePanel).not.toHaveTextContent(/adg_auto_001|renewal_attention/)
     fireEvent.click(within(dialog).getByRole('button', { name: '复核来源' }))
     const sourceDialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
     expect(within(sourceDialog).queryByRole('heading', { name: '场景推进建议' })).not.toBeInTheDocument()
