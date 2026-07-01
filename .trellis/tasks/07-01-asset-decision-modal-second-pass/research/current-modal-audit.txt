@@ -1,0 +1,485 @@
+
+## main 1440x1000 /asset-decisions
+text=1423 sections=10 badges=34 buttons=31 nav=0 scoreBars=0 overflow=0/0
+headings=["跟进阻塞 · 欧洲主备节点续费决策","决策组扫描"]
+buttons=["折叠侧边栏","工作台","VPS","归档","服务商","订阅","资产决策","监控 1","入口探测 1","事件","设置","☾","0","VPS 库存","订阅列表","处理阻塞","资料缺口","打开记录","打开场景","查看续费","查看单台队列","需要决策 4","续费取舍 1","同区比较 1","服务商组合 1","预算压力 1","资料缺口 1","查看组","查看组","查看组","查看组"]
+nav=[]
+badges=["1 条","模板 2 · 组合 1","4 条","4 / 4","4","1","1","1","1","1","续费窗口 1 · 取消联动 1","可决策","偏退役","取消联动","异常关联","偏退役","续费窗口 3 · 未评估 1 · 取消联动 1","证据强","偏保留","续费临近","预算风险","偏保留","续费窗口 2 · 未评估 1","证据强"]
+sample="候风 运营 工作台 资产 VPS 归档 服务商 订阅 资产决策 观测 监控 1 入口探测 1 事件 系统 设置 V Visual Evidence 管理员 资产决策 ☾ 0 V 资产组合决策 从 VPS、订阅、服务、域名和监控证据中派生组合取舍。 VPS 库存 订阅列表 DECISION MEMORY 跟进阻塞 · 欧洲主备节点续费决策 1 台 VPS 跟进阻塞 处理阻塞 资料缺口 PORTFOLIO 6 全局资产组合 · 需要决策 · 30 天续费窗口 RENEWAL 1 30 天窗口 · 续费组 1 · 待决策"
+top text blocks:
+- 968 section.page-panel asset-decision-command @248,521 "PORTFOLIO WORKBENCH 决策组扫描 当前视图：需要决策。自动组只读派生，不会创建持久化决策记录。快照 2026/07/01 16:00。 续费窗口 未来 30 天 未来 60 天 未来 90 天 当前显示 4 个组 需要决策 4 续费取舍 1 同区比较 1 服务商组合 1 预算压力 1 资料缺口 1 P1 需要决策 取消联动待确认 取消 / "
+- 223 article.asset-decision-group-card asset-decision-group-card--alert @273,718 "P1 需要决策 取消联动待确认 取消 / 运行状态割裂 · legacy service still responds on cancelled host 续费窗口 1 · 取消联动 1 可决策 偏退役 成员 1 台 暂无用途 1 承载 服务 1 · 域名 1 · Target 1/1 监控 1 · 异常 1 · 事件 1 成本 CNY 39.50/月 CN"
+- 211 article.asset-decision-group-card asset-decision-group-card--alert @273,905 "P2 续费取舍 续费窗口组合取舍 未来 30 天 · 暂无主要问题 续费窗口 3 · 未评估 1 · 取消联动 1 证据强 偏保留 成员 3 台 承载业务 1 / 备用 1 / 暂无用途 1 承载 服务 1 · 域名 1 · Target 1/1 监控 4 · 异常 1 · 事件 1 成本 CNY 174.55/月 CNY 2094.60/年 按主力、备用、"
+- 194 article.asset-decision-group-card asset-decision-group-card--alert @273,1092 "P3 预算压力 预算压力组合 CNY 预算风险 · 暂无主要问题 续费窗口 2 · 未评估 1 证据强 偏保留 成员 2 台 承载业务 1 / 备用 1 承载 服务 0 · 域名 0 · Target 0/0 监控 3 · 异常 0 · 事件 0 成本 CNY 135.05/月 CNY 1620.60/年 预算压力主导，比较保留价值和续费窗口 超预算 / 预"
+- 178 article.asset-decision-group-card asset-decision-group-card--alert @273,1279 "P4 资料缺口 资料缺口待补齐 缺订阅 / 缺监控 / 缺基础资料 · 暂无主要问题 未评估 1 先补证据 补证据 成员 1 台 暂无分布 承载 服务 0 · 域名 0 · Target 0/0 监控 0 · 异常 0 · 事件 0 成本 CNY 0.00/月 CNY 0.00/年 资料缺口主导，先补齐证据再做组合取舍 缺订阅 未关联监控 补证据 查看组"
+- 162 section.asset-decision-focus asset-decision-command-summary asset-decision-command-summary--critical animate-in d1 @248,167 "DECISION MEMORY 跟进阻塞 · 欧洲主备节点续费决策 1 台 VPS 跟进阻塞 处理阻塞 资料缺口 PORTFOLIO 6 全局资产组合 · 需要决策 · 30 天续费窗口 RENEWAL 1 30 天窗口 · 续费组 1 · 待决策 4 CLOSED LOOP 2 阻塞 2 EVIDENCE 5 证据源正常"
+- 61 span. @373,752 "取消 / 运行状态割裂 · legacy service still responds on cancelled host"
+- 50 p. @273,582 "当前视图：需要决策。自动组只读派生，不会创建持久化决策记录。快照 2026/07/01 16:00。"
+- 44 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--normal @537,401 "SCENARIOS 场景与模板 管理比较篮子和启动模板 模板 2 · 组合 1 打开场景"
+- 40 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--notice @248,401 "DECISION MEMORY 已保存决策 跟进/证据问题 1 1 条 打开记录"
+- 38 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--notice @1116,401 "AUX QUEUE 单台辅助队列 保留单台续费处理 4 / 4 查看单台队列"
+- 31 span.asset-decision-chip-row @971,918 "续费窗口 3 · 未评估 1 · 取消联动 1 证据强 偏保留"
+- 30 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--notice @827,401 "RENEWAL 续费证据 只读订阅窗口事实 4 条 查看续费"
+- 27 p.page-sub @248,101 "从 VPS、订阅、服务、域名和监控证据中派生组合取舍。"
+suspicious/default-noise blocks:
+- 968 section.page-panel asset-decision-command "PORTFOLIO WORKBENCH 决策组扫描 当前视图：需要决策。自动组只读派生，不会创建持久化决策记录。快照 2026/07/01 16:00。 续费窗口 未来 30 天 未来 60 天 未来 90 天 当前显示 4 个组 需要决策 4 续费取舍 1 同区比较 1 服务商组合 1 预算压力 1 资料缺口 1 P1 需要决策 取消联动待确认 取消 / "
+- 223 article.asset-decision-group-card asset-decision-group-card--alert "P1 需要决策 取消联动待确认 取消 / 运行状态割裂 · legacy service still responds on cancelled host 续费窗口 1 · 取消联动 1 可决策 偏退役 成员 1 台 暂无用途 1 承载 服务 1 · 域名 1 · Target 1/1 监控 1 · 异常 1 · 事件 1 成本 CNY 39.50/月 CN"
+- 211 article.asset-decision-group-card asset-decision-group-card--alert "P2 续费取舍 续费窗口组合取舍 未来 30 天 · 暂无主要问题 续费窗口 3 · 未评估 1 · 取消联动 1 证据强 偏保留 成员 3 台 承载业务 1 / 备用 1 / 暂无用途 1 承载 服务 1 · 域名 1 · Target 1/1 监控 4 · 异常 1 · 事件 1 成本 CNY 174.55/月 CNY 2094.60/年 按主力、备用、"
+- 194 article.asset-decision-group-card asset-decision-group-card--alert "P3 预算压力 预算压力组合 CNY 预算风险 · 暂无主要问题 续费窗口 2 · 未评估 1 证据强 偏保留 成员 2 台 承载业务 1 / 备用 1 承载 服务 0 · 域名 0 · Target 0/0 监控 3 · 异常 0 · 事件 0 成本 CNY 135.05/月 CNY 1620.60/年 预算压力主导，比较保留价值和续费窗口 超预算 / 预"
+- 178 article.asset-decision-group-card asset-decision-group-card--alert "P4 资料缺口 资料缺口待补齐 缺订阅 / 缺监控 / 缺基础资料 · 暂无主要问题 未评估 1 先补证据 补证据 成员 1 台 暂无分布 承载 服务 0 · 域名 0 · Target 0/0 监控 0 · 异常 0 · 事件 0 成本 CNY 0.00/月 CNY 0.00/年 资料缺口主导，先补齐证据再做组合取舍 缺订阅 未关联监控 补证据 查看组"
+- 162 section.asset-decision-focus asset-decision-command-summary asset-decision-command-summary--critical animate-in d1 "DECISION MEMORY 跟进阻塞 · 欧洲主备节点续费决策 1 台 VPS 跟进阻塞 处理阻塞 资料缺口 PORTFOLIO 6 全局资产组合 · 需要决策 · 30 天续费窗口 RENEWAL 1 30 天窗口 · 续费组 1 · 待决策 4 CLOSED LOOP 2 阻塞 2 EVIDENCE 5 证据源正常"
+- 61 span. "取消 / 运行状态割裂 · legacy service still responds on cancelled host"
+- 50 p. "当前视图：需要决策。自动组只读派生，不会创建持久化决策记录。快照 2026/07/01 16:00。"
+- 44 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--normal "SCENARIOS 场景与模板 管理比较篮子和启动模板 模板 2 · 组合 1 打开场景"
+- 40 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--notice "DECISION MEMORY 已保存决策 跟进/证据问题 1 1 条 打开记录"
+
+## auto cancel 1440x1000 /asset-decisions?group_id=adg_auto_mock_cancel
+text=347 sections=3 badges=6 buttons=9 nav=4 scoreBars=0 overflow=0/0
+headings=["取消联动待确认","当前判断","关键成员摘要"]
+buttons=["✕","创建自定义组合","保存为决策记录","fra-legacy-cancel","处理","概览","成员明细 1","保存记录","数据底稿"]
+nav=["概览","成员明细 1","保存记录","数据底稿"]
+badges=["取消联动","异常关联","成员 1","退役候选","进入取消台","1"]
+sample="取消联动待确认 ✕ VPS 1 暂无用途 1 成本 CNY 39.50/月 CNY 474.00/年 业务上下文 1 / 1 服务 / 域名，Target 1/1 证据质量 可决策 可信 84，压力 8，准备 86 当前判断 取消联动主导，先确认退役闭环 取消联动 异常关联 创建自定义组合 保存为决策记录 关键成员摘要 成员 1 fra-legacy-cancel 退役 · Netcup · DE · EU-Central · Frankfurt 退役候选 · 进入取消台 · 服务 1 · 域名 1 · Targe"
+top text blocks:
+- 173 section.asset-decision-member-preview @17,286 "关键成员摘要 成员 1 fra-legacy-cancel 退役 · Netcup · DE · EU-Central · Frankfurt 退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1 EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消 退役候选 进入取消台 处理"
+- 161 article.asset-decision-member-preview__row @30,329 "fra-legacy-cancel 退役 · Netcup · DE · EU-Central · Frankfurt 退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1 EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消 退役候选 进入取消台 处理"
+- 48 strong. @228,347 "退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1"
+- 45 section.asset-decision-detail-command @17,162 "当前判断 取消联动主导，先确认退役闭环 取消联动 异常关联 创建自定义组合 保存为决策记录"
+- 41 small. @40,361 "退役 · Netcup · DE · EU-Central · Frankfurt"
+- 38 small. @228,367 "EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消"
+- 18 small. @507,125 "服务 / 域名，Target 1/1"
+- 17 strong. @40,341 "fra-legacy-cancel"
+- 16 small. @746,125 "可信 84，压力 8，准备 86"
+- 14 strong. @30,195 "取消联动主导，先确认退役闭环"
+- 12 small. @269,125 "CNY 474.00/年"
+- 11 strong. @269,106 "CNY 39.50/月"
+- 10 span.asset-decision-chip-row @697,352 "退役候选 进入取消台"
+- 7 h3. @17,21 "取消联动待确认"
+suspicious/default-noise blocks:
+- 173 section.asset-decision-member-preview "关键成员摘要 成员 1 fra-legacy-cancel 退役 · Netcup · DE · EU-Central · Frankfurt 退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1 EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消 退役候选 进入取消台 处理"
+- 161 article.asset-decision-member-preview__row "fra-legacy-cancel 退役 · Netcup · DE · EU-Central · Frankfurt 退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1 EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消 退役候选 进入取消台 处理"
+- 48 strong. "退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1"
+- 45 section.asset-decision-detail-command "当前判断 取消联动主导，先确认退役闭环 取消联动 异常关联 创建自定义组合 保存为决策记录"
+- 41 small. "退役 · Netcup · DE · EU-Central · Frankfurt"
+- 38 small. "EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消"
+
+## auto renewal 1440x1000 /asset-decisions?group_id=adg_auto_mock_renewal
+text=514 sections=4 badges=8 buttons=11 nav=4 scoreBars=0 overflow=0/0
+headings=["续费窗口组合取舍","当前判断","关键成员摘要"]
+buttons=["✕","创建自定义组合","保存为决策记录","ams-core-01","处理","sjc-edge-02","处理","概览","成员明细 3","保存记录","数据底稿"]
+nav=["概览","成员明细 3","保存记录","数据底稿"]
+badges=["续费临近","预算风险","成员 3","主力候选","保留","备用候选","迁移","3"]
+sample="续费窗口组合取舍 ✕ VPS 3 承载业务 1 / 备用 1 / 暂无用途 1 成本 CNY 174.55/月 CNY 2094.60/年 业务上下文 1 / 1 服务 / 域名，Target 1/1 证据质量 证据强 可信 84，压力 8，准备 86 当前判断 按主力、备用、观察、退役分层比较资产组合 续费临近 预算风险 创建自定义组合 保存为决策记录 关键成员摘要 成员 3 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 "
+top text blocks:
+- 315 section.asset-decision-member-preview @17,286 "关键成员摘要 成员 3 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 处理 sjc-edge-02 观察 · Vult"
+- 156 article.asset-decision-member-preview__row @30,405 "sjc-edge-02 观察 · Vultr · US · US-West · San Jose 备用候选 · 迁移 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/1 USD 8.00/月 · High Frequency 2 vCPU · 待迁移 · 备用 · 迁移 备用候选 迁移 处理"
+- 146 article.asset-decision-member-preview__row @30,329 "ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 处理"
+- 51 section.asset-decision-detail-command @17,162 "当前判断 按主力、备用、观察、退役分层比较资产组合 续费临近 预算风险 创建自定义组合 保存为决策记录"
+- 50 small. @228,443 "USD 8.00/月 · High Frequency 2 vCPU · 待迁移 · 备用 · 迁移"
+- 45 strong. @228,347 "主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2"
+- 45 strong. @228,423 "备用候选 · 迁移 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/1"
+- 39 small. @40,361 "主力 · Hetzner · NL · EU-West · Amsterdam"
+- 37 small. @228,367 "USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估"
+- 36 small. @40,437 "观察 · Vultr · US · US-West · San Jose"
+- 22 small. @30,125 "承载业务 1 / 备用 1 / 暂无用途 1"
+- 20 strong. @30,195 "按主力、备用、观察、退役分层比较资产组合"
+- 18 small. @507,125 "服务 / 域名，Target 1/1"
+- 16 small. @746,125 "可信 84，压力 8，准备 86"
+suspicious/default-noise blocks:
+- 315 section.asset-decision-member-preview "关键成员摘要 成员 3 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 处理 sjc-edge-02 观察 · Vult"
+- 156 article.asset-decision-member-preview__row "sjc-edge-02 观察 · Vultr · US · US-West · San Jose 备用候选 · 迁移 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/1 USD 8.00/月 · High Frequency 2 vCPU · 待迁移 · 备用 · 迁移 备用候选 迁移 处理"
+- 146 article.asset-decision-member-preview__row "ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 处理"
+- 51 section.asset-decision-detail-command "当前判断 按主力、备用、观察、退役分层比较资产组合 续费临近 预算风险 创建自定义组合 保存为决策记录"
+- 50 small. "USD 8.00/月 · High Frequency 2 vCPU · 待迁移 · 备用 · 迁移"
+- 45 strong. "主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2"
+- 45 strong. "备用候选 · 迁移 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/1"
+- 39 small. "主力 · Hetzner · NL · EU-West · Amsterdam"
+- 37 small. "USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估"
+- 36 small. "观察 · Vultr · US · US-West · San Jose"
+
+## auto region 1440x1000 /asset-decisions?group_id=adg_auto_mock_region_eu
+text=507 sections=4 badges=7 buttons=11 nav=4 scoreBars=0 overflow=0/0
+headings=["欧洲节点组合比较","当前判断","关键成员摘要"]
+buttons=["✕","创建自定义组合","保存为决策记录","ams-core-01","处理","fra-legacy-cancel","处理","概览","成员明细 2","保存记录","数据底稿"]
+nav=["概览","成员明细 2","保存记录","数据底稿"]
+badges=["闲置付费","成员 2","主力候选","保留","退役候选","进入取消台","2"]
+sample="欧洲节点组合比较 ✕ VPS 2 承载业务 1 / 暂无用途 1 成本 CNY 116.15/月 CNY 1393.80/年 业务上下文 1 / 1 服务 / 域名，Target 1/1 证据质量 证据强 可信 84，压力 8，准备 86 当前判断 按主力、备用、观察、退役分层比较资产组合 闲置付费 创建自定义组合 保存为决策记录 关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Tar"
+top text blocks:
+- 320 section.asset-decision-member-preview @17,286 "关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 处理 fra-legacy-cancel 退役 "
+- 161 article.asset-decision-member-preview__row @30,405 "fra-legacy-cancel 退役 · Netcup · DE · EU-Central · Frankfurt 退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1 EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消 退役候选 进入取消台 处理"
+- 146 article.asset-decision-member-preview__row @30,329 "ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 处理"
+- 48 strong. @228,423 "退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1"
+- 46 section.asset-decision-detail-command @17,162 "当前判断 按主力、备用、观察、退役分层比较资产组合 闲置付费 创建自定义组合 保存为决策记录"
+- 45 strong. @228,347 "主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2"
+- 41 small. @40,437 "退役 · Netcup · DE · EU-Central · Frankfurt"
+- 39 small. @40,361 "主力 · Hetzner · NL · EU-West · Amsterdam"
+- 38 small. @228,443 "EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消"
+- 37 small. @228,367 "USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估"
+- 20 strong. @30,195 "按主力、备用、观察、退役分层比较资产组合"
+- 18 small. @507,125 "服务 / 域名，Target 1/1"
+- 17 strong. @40,417 "fra-legacy-cancel"
+- 16 small. @746,125 "可信 84，压力 8，准备 86"
+suspicious/default-noise blocks:
+- 320 section.asset-decision-member-preview "关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 处理 fra-legacy-cancel 退役 "
+- 161 article.asset-decision-member-preview__row "fra-legacy-cancel 退役 · Netcup · DE · EU-Central · Frankfurt 退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1 EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消 退役候选 进入取消台 处理"
+- 146 article.asset-decision-member-preview__row "ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 处理"
+- 48 strong. "退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1"
+- 46 section.asset-decision-detail-command "当前判断 按主力、备用、观察、退役分层比较资产组合 闲置付费 创建自定义组合 保存为决策记录"
+- 45 strong. "主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2"
+- 41 small. "退役 · Netcup · DE · EU-Central · Frankfurt"
+- 39 small. "主力 · Hetzner · NL · EU-West · Amsterdam"
+- 38 small. "EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消"
+- 37 small. "USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估"
+
+## auto provider 1440x1000 /asset-decisions?group_id=adg_auto_mock_provider
+text=506 sections=4 badges=7 buttons=11 nav=4 scoreBars=0 overflow=0/0
+headings=["服务商组合复核","当前判断","关键成员摘要"]
+buttons=["✕","创建自定义组合","保存为决策记录","ams-core-01","处理","fra-legacy-cancel","处理","概览","成员明细 2","保存记录","数据底稿"]
+nav=["概览","成员明细 2","保存记录","数据底稿"]
+badges=["成本差异","成员 2","主力候选","保留","退役候选","进入取消台","2"]
+sample="服务商组合复核 ✕ VPS 2 承载业务 1 / 暂无用途 1 成本 CNY 116.15/月 CNY 1393.80/年 业务上下文 1 / 1 服务 / 域名，Target 1/1 证据质量 证据强 可信 84，压力 8，准备 86 当前判断 按主力、备用、观察、退役分层比较资产组合 成本差异 创建自定义组合 保存为决策记录 关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Targ"
+top text blocks:
+- 320 section.asset-decision-member-preview @17,286 "关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 处理 fra-legacy-cancel 退役 "
+- 161 article.asset-decision-member-preview__row @30,405 "fra-legacy-cancel 退役 · Netcup · DE · EU-Central · Frankfurt 退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1 EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消 退役候选 进入取消台 处理"
+- 146 article.asset-decision-member-preview__row @30,329 "ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 处理"
+- 48 strong. @228,423 "退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1"
+- 46 section.asset-decision-detail-command @17,162 "当前判断 按主力、备用、观察、退役分层比较资产组合 成本差异 创建自定义组合 保存为决策记录"
+- 45 strong. @228,347 "主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2"
+- 41 small. @40,437 "退役 · Netcup · DE · EU-Central · Frankfurt"
+- 39 small. @40,361 "主力 · Hetzner · NL · EU-West · Amsterdam"
+- 38 small. @228,443 "EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消"
+- 37 small. @228,367 "USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估"
+- 20 strong. @30,195 "按主力、备用、观察、退役分层比较资产组合"
+- 18 small. @507,125 "服务 / 域名，Target 1/1"
+- 17 strong. @40,417 "fra-legacy-cancel"
+- 16 small. @746,125 "可信 84，压力 8，准备 86"
+suspicious/default-noise blocks:
+- 320 section.asset-decision-member-preview "关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 处理 fra-legacy-cancel 退役 "
+- 161 article.asset-decision-member-preview__row "fra-legacy-cancel 退役 · Netcup · DE · EU-Central · Frankfurt 退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1 EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消 退役候选 进入取消台 处理"
+- 146 article.asset-decision-member-preview__row "ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 处理"
+- 48 strong. "退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1"
+- 46 section.asset-decision-detail-command "当前判断 按主力、备用、观察、退役分层比较资产组合 成本差异 创建自定义组合 保存为决策记录"
+- 45 strong. "主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2"
+- 41 small. "退役 · Netcup · DE · EU-Central · Frankfurt"
+- 39 small. "主力 · Hetzner · NL · EU-West · Amsterdam"
+- 38 small. "EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消"
+- 37 small. "USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估"
+
+## auto cost 1440x1000 /asset-decisions?group_id=adg_auto_mock_cost
+text=505 sections=4 badges=8 buttons=11 nav=4 scoreBars=0 overflow=0/0
+headings=["预算压力组合","当前判断","关键成员摘要"]
+buttons=["✕","创建自定义组合","保存为决策记录","ams-core-01","处理","sjc-edge-02","处理","概览","成员明细 2","保存记录","数据底稿"]
+nav=["概览","成员明细 2","保存记录","数据底稿"]
+badges=["超预算 / 预警","汇率过期","成员 2","主力候选","复核","观察候选","迁移","2"]
+sample="预算压力组合 ✕ VPS 2 承载业务 1 / 备用 1 成本 CNY 135.05/月 CNY 1620.60/年 业务上下文 0 / 0 服务 / 域名，Target 0/0 证据质量 证据强 可信 84，压力 8，准备 86 当前判断 预算压力主导，比较保留价值和续费窗口 超预算 / 预警 汇率过期 创建自定义组合 保存为决策记录 关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 复核 · 服务 0 · 域名 0 · "
+top text blocks:
+- 315 section.asset-decision-member-preview @17,286 "关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 复核 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 复核 处理 sjc-edge-02 观察 · Vult"
+- 156 article.asset-decision-member-preview__row @30,405 "sjc-edge-02 观察 · Vultr · US · US-West · San Jose 观察候选 · 迁移 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/1 USD 8.00/月 · High Frequency 2 vCPU · 待迁移 · 备用 · 迁移 观察候选 迁移 处理"
+- 146 article.asset-decision-member-preview__row @30,329 "ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 复核 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 复核 处理"
+- 53 section.asset-decision-detail-command @17,162 "当前判断 预算压力主导，比较保留价值和续费窗口 超预算 / 预警 汇率过期 创建自定义组合 保存为决策记录"
+- 50 small. @228,443 "USD 8.00/月 · High Frequency 2 vCPU · 待迁移 · 备用 · 迁移"
+- 45 strong. @228,347 "主力候选 · 复核 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2"
+- 45 strong. @228,423 "观察候选 · 迁移 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/1"
+- 39 small. @40,361 "主力 · Hetzner · NL · EU-West · Amsterdam"
+- 37 small. @228,367 "USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估"
+- 36 small. @40,437 "观察 · Vultr · US · US-West · San Jose"
+- 18 small. @507,125 "服务 / 域名，Target 0/0"
+- 18 strong. @30,195 "预算压力主导，比较保留价值和续费窗口"
+- 16 small. @746,125 "可信 84，压力 8，准备 86"
+- 13 small. @30,125 "承载业务 1 / 备用 1"
+suspicious/default-noise blocks:
+- 315 section.asset-decision-member-preview "关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 复核 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 复核 处理 sjc-edge-02 观察 · Vult"
+- 156 article.asset-decision-member-preview__row "sjc-edge-02 观察 · Vultr · US · US-West · San Jose 观察候选 · 迁移 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/1 USD 8.00/月 · High Frequency 2 vCPU · 待迁移 · 备用 · 迁移 观察候选 迁移 处理"
+- 146 article.asset-decision-member-preview__row "ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 复核 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 复核 处理"
+- 53 section.asset-decision-detail-command "当前判断 预算压力主导，比较保留价值和续费窗口 超预算 / 预警 汇率过期 创建自定义组合 保存为决策记录"
+- 50 small. "USD 8.00/月 · High Frequency 2 vCPU · 待迁移 · 备用 · 迁移"
+- 45 strong. "主力候选 · 复核 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2"
+- 45 strong. "观察候选 · 迁移 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/1"
+- 39 small. "主力 · Hetzner · NL · EU-West · Amsterdam"
+- 37 small. "USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估"
+- 36 small. "观察 · Vultr · US · US-West · San Jose"
+
+## auto evidence 1440x1000 /asset-decisions?group_id=adg_auto_mock_evidence
+text=318 sections=3 badges=6 buttons=9 nav=4 scoreBars=0 overflow=0/0
+headings=["资料缺口待补齐","当前判断","关键成员摘要"]
+buttons=["✕","创建自定义组合","保存为决策记录","tokyo-lab-unlinked","处理","概览","成员明细 1","保存记录","数据底稿"]
+nav=["概览","成员明细 1","保存记录","数据底稿"]
+badges=["缺订阅","未关联监控","成员 1","补证据","补齐资料","1"]
+sample="资料缺口待补齐 ✕ VPS 1 暂无分布 成本 CNY 0.00/月 CNY 0.00/年 业务上下文 0 / 0 服务 / 域名，Target 0/0 证据质量 先补证据 可信 84，压力 8，准备 86 当前判断 资料缺口主导，先补齐证据再做组合取舍 缺订阅 未关联监控 创建自定义组合 保存为决策记录 关键成员摘要 成员 1 tokyo-lab-unlinked 补证据 · — · 位置缺失 补证据 · 补齐资料 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/0 缺订阅成本 · vps_t"
+top text blocks:
+- 144 section.asset-decision-member-preview @17,286 "关键成员摘要 成员 1 tokyo-lab-unlinked 补证据 · — · 位置缺失 补证据 · 补齐资料 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/0 缺订阅成本 · vps_tokyo_lab · 测试中 · 未确认 · 未评估 补证据 补齐资料 处理"
+- 132 article.asset-decision-member-preview__row @30,329 "tokyo-lab-unlinked 补证据 · — · 位置缺失 补证据 · 补齐资料 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/0 缺订阅成本 · vps_tokyo_lab · 测试中 · 未确认 · 未评估 补证据 补齐资料 处理"
+- 49 section.asset-decision-detail-command @17,162 "当前判断 资料缺口主导，先补齐证据再做组合取舍 缺订阅 未关联监控 创建自定义组合 保存为决策记录"
+- 46 strong. @228,339 "补证据 · 补齐资料 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/0"
+- 39 small. @228,360 "缺订阅成本 · vps_tokyo_lab · 测试中 · 未确认 · 未评估"
+- 18 small. @507,125 "服务 / 域名，Target 0/0"
+- 18 strong. @30,195 "资料缺口主导，先补齐证据再做组合取舍"
+- 18 strong. @40,341 "tokyo-lab-unlinked"
+- 16 small. @746,125 "可信 84，压力 8，准备 86"
+- 14 small. @40,361 "补证据 · — · 位置缺失"
+- 10 strong. @269,106 "CNY 0.00/月"
+- 10 small. @269,125 "CNY 0.00/年"
+- 8 span.asset-decision-chip-row @697,344 "补证据 补齐资料"
+- 7 h3. @17,21 "资料缺口待补齐"
+suspicious/default-noise blocks:
+- 144 section.asset-decision-member-preview "关键成员摘要 成员 1 tokyo-lab-unlinked 补证据 · — · 位置缺失 补证据 · 补齐资料 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/0 缺订阅成本 · vps_tokyo_lab · 测试中 · 未确认 · 未评估 补证据 补齐资料 处理"
+- 132 article.asset-decision-member-preview__row "tokyo-lab-unlinked 补证据 · — · 位置缺失 补证据 · 补齐资料 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/0 缺订阅成本 · vps_tokyo_lab · 测试中 · 未确认 · 未评估 补证据 补齐资料 处理"
+- 49 section.asset-decision-detail-command "当前判断 资料缺口主导，先补齐证据再做组合取舍 缺订阅 未关联监控 创建自定义组合 保存为决策记录"
+- 46 strong. "补证据 · 补齐资料 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/0"
+- 39 small. "缺订阅成本 · vps_tokyo_lab · 测试中 · 未确认 · 未评估"
+- 18 strong. "资料缺口主导，先补齐证据再做组合取舍"
+- 14 small. "补证据 · — · 位置缺失"
+- 8 span.asset-decision-chip-row "补证据 补齐资料"
+
+## manual 1440x1000 /asset-decisions?manual_group_id=admg_mock_primary_standby
+text=543 sections=4 badges=12 buttons=12 nav=6 scoreBars=0 overflow=0/0
+headings=["欧洲主备手工组合","当前判断","关键成员摘要"]
+buttons=["✕","编辑组合","保存为决策记录","另存为模板","ams-core-01","fra-legacy-cancel","概览","编辑组合","成员维护 2","添加成员","保存记录","数据底稿"]
+nav=["概览","编辑组合","成员维护 2","添加成员","保存记录","数据底稿"]
+badges=["可保存记录 5/5","取消联动","意图","当前事实","成员 2","主力候选","保留","意图匹配","退役候选","进入取消台","意图匹配","2"]
+sample="欧洲主备手工组合 ✕ 场景 主备取舍 进行中 VPS 2 承载业务 1 / 暂无用途 1 成本 CNY 116.15/月 CNY 1393.80/年 证据质量 证据强 可信 84 · 缺口 0 当前判断 按主力、备用、观察、退役分层比较资产组合 可保存记录 5/5 取消联动 意图 已设置 2/2 个成员动作 当前事实 成员当前事实可回读 编辑组合 保存为决策记录 另存为模板 关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · "
+top text blocks:
+- 324 section.asset-decision-member-preview @17,288 "关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 意图匹配 fra-legacy-cancel 退"
+- 163 article.asset-decision-member-preview__row @30,410 "fra-legacy-cancel 退役 · Netcup · DE · EU-Central · Frankfurt 退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1 EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消 退役候选 进入取消台 意图匹配"
+- 148 article.asset-decision-member-preview__row @30,331 "ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 意图匹配"
+- 91 section.asset-decision-detail-command @17,162 "当前判断 按主力、备用、观察、退役分层比较资产组合 可保存记录 5/5 取消联动 意图 已设置 2/2 个成员动作 当前事实 成员当前事实可回读 编辑组合 保存为决策记录 另存为模板"
+- 48 strong. @228,429 "退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1"
+- 45 strong. @228,350 "主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2"
+- 41 small. @40,443 "退役 · Netcup · DE · EU-Central · Frankfurt"
+- 39 small. @40,365 "主力 · Hetzner · NL · EU-West · Amsterdam"
+- 38 small. @228,450 "EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消"
+- 37 small. @228,371 "USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估"
+- 31 span.asset-decision-detail-command__readiness @30,237 "意图 已设置 2/2 个成员动作 当前事实 成员当前事实可回读"
+- 20 strong. @30,195 "按主力、备用、观察、退役分层比较资产组合"
+- 17 strong. @40,423 "fra-legacy-cancel"
+- 16 span. @30,237 "意图 已设置 2/2 个成员动作"
+suspicious/default-noise blocks:
+- 324 section.asset-decision-member-preview "关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 意图匹配 fra-legacy-cancel 退"
+- 163 article.asset-decision-member-preview__row "fra-legacy-cancel 退役 · Netcup · DE · EU-Central · Frankfurt 退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1 EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消 退役候选 进入取消台 意图匹配"
+- 148 article.asset-decision-member-preview__row "ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 保留 意图匹配"
+- 91 section.asset-decision-detail-command "当前判断 按主力、备用、观察、退役分层比较资产组合 可保存记录 5/5 取消联动 意图 已设置 2/2 个成员动作 当前事实 成员当前事实可回读 编辑组合 保存为决策记录 另存为模板"
+- 48 strong. "退役候选 · 进入取消台 · 服务 1 · 域名 1 · Target 1/1 · 监控 1/1"
+- 45 strong. "主力候选 · 保留 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2"
+- 41 small. "退役 · Netcup · DE · EU-Central · Frankfurt"
+- 39 small. "主力 · Hetzner · NL · EU-West · Amsterdam"
+- 38 small. "EUR 5.00/月 · RS 1000 · 待取消 · 暂无用途 · 取消"
+- 37 small. "USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估"
+
+## record 1440x1000 /asset-decisions?record_id=adr_mock_eu_renewal
+text=457 sections=2 badges=13 buttons=6 nav=5 scoreBars=0 overflow=0/0
+headings=["欧洲主备节点续费决策","保存时判断依据"]
+buttons=["✕","概览","执行跟进 3","成员跟进 3","来源复核","成员底稿"]
+nav=["概览","执行跟进 3","成员跟进 3","来源复核","成员底稿"]
+badges=["证据强","快照成员 3","证据强","预算压力","承载服务","主力候选","保留","备用候选","迁移","退役候选","进入取消台","3","3"]
+sample="欧洲主备节点续费决策 ✕ 状态 已决策 adr_mock_eu_renewal 成员 3 未来 30 天 跟进 0/3 阻塞 1 · 待处理 1 执行回读 阻塞 阻塞 1 · 待处理 1 执行计划 3 项 可推进 3 · 阻塞 1 · 取消退役 1 · 迁移 1 · 保留观察 1 证据快照 证据强 可信 84，压力 8 保留 ams-core-01 作为主力，迁移 sjc-edge-02，进入 fra-legacy-cancel 取消联动检查。 快照成本 CNY 174.55 保存时判断依据 按主力、备用、观察、退"
+top text blocks:
+- 189 section.asset-decision-saved-evidence @17,328 "保存时判断依据 按主力、备用、观察、退役分层比较资产组合 证据强 快照成员 3 证据强 保存时取舍 预算压力 承载服务 ams-core-01 主力候选 保留 主力节点证据完整，虽然超预算但承载核心服务。 sjc-edge-02 备用候选 迁移 作为备用节点继续观察迁移窗口。 fra-legacy-cancel 退役候选 进入取消台 取消前需要先处理仍在运行"
+- 79 div.asset-decision-record-detail__lead @17,253 "保留 ams-core-01 作为主力，迁移 sjc-edge-02，进入 fra-legacy-cancel 取消联动检查。 快照成本 CNY 174.55"
+- 63 strong. @30,266 "保留 ams-core-01 作为主力，迁移 sjc-edge-02，进入 fra-legacy-cancel 取消联动检查。"
+- 37 small. @30,201 "可推进 3 · 阻塞 1 · 取消退役 1 · 迁移 1 · 保留观察 1"
+- 22 small. @39,530 "主力节点证据完整，虽然超预算但承载核心服务。"
+- 21 small. @655,530 "取消前需要先处理仍在运行的服务和监控联动。"
+- 20 span. @30,361 "按主力、备用、观察、退役分层比较资产组合"
+- 19 small. @30,125 "adr_mock_eu_renewal"
+- 17 strong. @655,483 "fra-legacy-cancel"
+- 15 span. @30,286 "快照成本 CNY 174.55"
+- 15 small. @347,530 "作为备用节点继续观察迁移窗口。"
+- 12 small. @507,125 "阻塞 1 · 待处理 1"
+- 12 small. @746,125 "阻塞 1 · 待处理 1"
+- 11 strong. @39,483 "ams-core-01"
+suspicious/default-noise blocks:
+- 189 section.asset-decision-saved-evidence "保存时判断依据 按主力、备用、观察、退役分层比较资产组合 证据强 快照成员 3 证据强 保存时取舍 预算压力 承载服务 ams-core-01 主力候选 保留 主力节点证据完整，虽然超预算但承载核心服务。 sjc-edge-02 备用候选 迁移 作为备用节点继续观察迁移窗口。 fra-legacy-cancel 退役候选 进入取消台 取消前需要先处理仍在运行"
+- 79 div.asset-decision-record-detail__lead "保留 ams-core-01 作为主力，迁移 sjc-edge-02，进入 fra-legacy-cancel 取消联动检查。 快照成本 CNY 174.55"
+- 63 strong. "保留 ams-core-01 作为主力，迁移 sjc-edge-02，进入 fra-legacy-cancel 取消联动检查。"
+- 37 small. "可推进 3 · 阻塞 1 · 取消退役 1 · 迁移 1 · 保留观察 1"
+- 22 small. "主力节点证据完整，虽然超预算但承载核心服务。"
+- 21 small. "取消前需要先处理仍在运行的服务和监控联动。"
+- 15 span. "快照成本 CNY 174.55"
+- 15 small. "作为备用节点继续观察迁移窗口。"
+
+## template builtin 1440x1000 /asset-decisions?template_id=adt_builtin_primary_standby
+text=179 sections=1 badges=3 buttons=4 nav=3 scoreBars=0 overflow=0/0
+headings=["主备取舍模板"]
+buttons=["✕","概览","创建组合","成员蓝图 2"]
+nav=["概览","创建组合","成员蓝图 2"]
+badges=["启用","蓝图 2","2"]
+sample="主备取舍模板 ✕ 场景 主备取舍 adt_builtin_primary_standby 类型 内置模板 启用 蓝图成员 2 创建时读取当前事实 更新 版本内置 可用于创建组合 比较主力、备用与可退役 VPS，先形成自定义组合再保存决策。 内置模板只保存场景 blueprint，不保存当前成本、订阅或监控事实。 启用 蓝图 2 概览 创建组合 成员蓝图 2"
+top text blocks:
+- 75 div.asset-decision-record-detail__lead @17,162 "比较主力、备用与可退役 VPS，先形成自定义组合再保存决策。 内置模板只保存场景 blueprint，不保存当前成本、订阅或监控事实。 启用 蓝图 2"
+- 36 span. @30,209 "内置模板只保存场景 blueprint，不保存当前成本、订阅或监控事实。"
+- 30 strong. @30,188 "比较主力、备用与可退役 VPS，先形成自定义组合再保存决策。"
+- 27 small. @30,125 "adt_builtin_primary_standby"
+- 9 small. @507,125 "创建时读取当前事实"
+- 7 small. @746,125 "可用于创建组合"
+- 6 h3. @17,21 "主备取舍模板"
+- 4 strong. @30,106 "主备取舍"
+- 4 strong. @269,106 "内置模板"
+- 4 span. @507,91 "蓝图成员"
+- 4 strong. @746,106 "版本内置"
+- 4 span. @344,268 "创建组合"
+- 4 span. @658,268 "成员蓝图"
+- 2 span. @30,91 "场景"
+suspicious/default-noise blocks:
+- 75 div.asset-decision-record-detail__lead "比较主力、备用与可退役 VPS，先形成自定义组合再保存决策。 内置模板只保存场景 blueprint，不保存当前成本、订阅或监控事实。 启用 蓝图 2"
+- 36 span. "内置模板只保存场景 blueprint，不保存当前成本、订阅或监控事实。"
+- 30 strong. "比较主力、备用与可退役 VPS，先形成自定义组合再保存决策。"
+- 9 small. "创建时读取当前事实"
+
+## template custom 1440x1000 /asset-decisions?template_id=adt_mock_manual_primary_standby
+text=198 sections=1 badges=3 buttons=5 nav=4 scoreBars=0 overflow=0/0
+headings=["欧洲主备手工组合 模板"]
+buttons=["✕","概览","创建组合","成员蓝图 2","状态维护"]
+nav=["概览","创建组合","成员蓝图 2","状态维护"]
+badges=["启用","蓝图 2","2"]
+sample="欧洲主备手工组合 模板 ✕ 场景 主备取舍 adt_mock_manual_primary_standby 类型 自定义模板 启用 蓝图成员 2 来自 admg_mock_primary_standby 更新 2026/07/01 16:00 可用于创建组合 确认欧洲主力、备用与退役节点的保留顺序。 从手工组合另存的模板 fixture。 启用 蓝图 2 概览 创建组合 成员蓝图 2 状态维护"
+top text blocks:
+- 48 div.asset-decision-record-detail__lead @17,162 "确认欧洲主力、备用与退役节点的保留顺序。 从手工组合另存的模板 fixture。 启用 蓝图 2"
+- 31 small. @30,125 "adt_mock_manual_primary_standby"
+- 28 small. @507,125 "来自 admg_mock_primary_standby"
+- 20 strong. @30,188 "确认欧洲主力、备用与退役节点的保留顺序。"
+- 19 span. @30,209 "从手工组合另存的模板 fixture。"
+- 16 strong. @746,106 "2026/07/01 16:00"
+- 11 h3. @17,21 "欧洲主备手工组合 模板"
+- 7 small. @746,125 "可用于创建组合"
+- 5 strong. @269,106 "自定义模板"
+- 4 strong. @30,106 "主备取舍"
+- 4 span. @507,91 "蓝图成员"
+- 4 span. @266,268 "创建组合"
+- 4 span. @501,268 "成员蓝图"
+- 4 span. @736,268 "状态维护"
+suspicious/default-noise blocks:
+- 48 div.asset-decision-record-detail__lead "确认欧洲主力、备用与退役节点的保留顺序。 从手工组合另存的模板 fixture。 启用 蓝图 2"
+
+## single queue 1440x1000 /asset-decisions?view=single_queue&renew_within_days=30
+text=2010 sections=11 badges=48 buttons=46 nav=0 scoreBars=0 overflow=0/0
+headings=["跟进阻塞 · 欧洲主备节点续费决策","决策组扫描","单台辅助队列"]
+buttons=["折叠侧边栏","工作台","VPS","归档","服务商","订阅","资产决策","监控 1","入口探测 1","事件","设置","☾","0","VPS 库存","订阅列表","处理阻塞","资料缺口","查看单台队列","打开记录","打开场景","查看续费","查看单台队列","需要决策 4","续费取舍 1","同区比较 1","服务商组合 1","预算压力 1","资料缺口 1","查看组","查看组","查看组","查看组","全部 4","待评估 2","30天续费 3","迁移 1","取消 1","取消联动","未关联 1","缺订阅 1","处理","缺订阅","处理","处理","处理","取消/退役"]
+nav=[]
+badges=["1 条","模板 2 · 组合 1","4 条","4 / 4","4","1","1","1","1","1","续费窗口 1 · 取消联动 1","可决策","偏退役","取消联动","异常关联","偏退役","续费窗口 3 · 未评估 1 · 取消联动 1","证据强","偏保留","续费临近","预算风险","偏保留","续费窗口 2 · 未评估 1","证据强"]
+sample="候风 运营 工作台 资产 VPS 归档 服务商 订阅 资产决策 观测 监控 1 入口探测 1 事件 系统 设置 V Visual Evidence 管理员 资产决策 ☾ 0 V 资产组合决策 从 VPS、订阅、服务、域名和监控证据中派生组合取舍。 VPS 库存 订阅列表 DECISION MEMORY 跟进阻塞 · 欧洲主备节点续费决策 1 台 VPS 跟进阻塞 处理阻塞 资料缺口 PORTFOLIO 6 全局资产组合 · 需要决策 · 30 天续费窗口 RENEWAL 1 30 天窗口 · 续费组 1 · 待决策"
+top text blocks:
+- 968 section.page-panel asset-decision-command @248,571 "PORTFOLIO WORKBENCH 决策组扫描 当前视图：需要决策。自动组只读派生，不会创建持久化决策记录。快照 2026/07/01 16:00。 续费窗口 未来 30 天 未来 60 天 未来 90 天 当前显示 4 个组 需要决策 4 续费取舍 1 同区比较 1 服务商组合 1 预算压力 1 资料缺口 1 P1 需要决策 取消联动待确认 取消 / "
+- 550 section.page-panel asset-decision-single-queue asset-decision-support-surface animate-in d5 @248,1545 "SINGLE VPS QUEUE 单台辅助队列 保留已有单台续费决策能力；取消/退役仍从 VPS 详情的 lifecycle workbench 进入。 4 / 4 全部 4 待评估 2 30天续费 3 迁移 1 取消 1 取消联动 未关联 1 缺订阅 1 VPS 决策 订阅 成本信号 监控 操作 ams-core-01 Hetzner · NL · EU-"
+- 223 article.asset-decision-group-card asset-decision-group-card--alert @273,768 "P1 需要决策 取消联动待确认 取消 / 运行状态割裂 · legacy service still responds on cancelled host 续费窗口 1 · 取消联动 1 可决策 偏退役 成员 1 台 暂无用途 1 承载 服务 1 · 域名 1 · Target 1/1 监控 1 · 异常 1 · 事件 1 成本 CNY 39.50/月 CN"
+- 211 article.asset-decision-group-card asset-decision-group-card--alert @273,955 "P2 续费取舍 续费窗口组合取舍 未来 30 天 · 暂无主要问题 续费窗口 3 · 未评估 1 · 取消联动 1 证据强 偏保留 成员 3 台 承载业务 1 / 备用 1 / 暂无用途 1 承载 服务 1 · 域名 1 · Target 1/1 监控 4 · 异常 1 · 事件 1 成本 CNY 174.55/月 CNY 2094.60/年 按主力、备用、"
+- 194 article.asset-decision-group-card asset-decision-group-card--alert @273,1142 "P3 预算压力 预算压力组合 CNY 预算风险 · 暂无主要问题 续费窗口 2 · 未评估 1 证据强 偏保留 成员 2 台 承载业务 1 / 备用 1 承载 服务 0 · 域名 0 · Target 0/0 监控 3 · 异常 0 · 事件 0 成本 CNY 135.05/月 CNY 1620.60/年 预算压力主导，比较保留价值和续费窗口 超预算 / 预"
+- 178 article.asset-decision-group-card asset-decision-group-card--alert @273,1329 "P4 资料缺口 资料缺口待补齐 缺订阅 / 缺监控 / 缺基础资料 · 暂无主要问题 未评估 1 先补证据 补证据 成员 1 台 暂无分布 承载 服务 0 · 域名 0 · Target 0/0 监控 0 · 异常 0 · 事件 0 成本 CNY 0.00/月 CNY 0.00/年 资料缺口主导，先补齐证据再做组合取舍 缺订阅 未关联监控 补证据 查看组"
+- 162 section.asset-decision-focus asset-decision-command-summary asset-decision-command-summary--critical animate-in d1 @248,167 "DECISION MEMORY 跟进阻塞 · 欧洲主备节点续费决策 1 台 VPS 跟进阻塞 处理阻塞 资料缺口 PORTFOLIO 6 全局资产组合 · 需要决策 · 30 天续费窗口 RENEWAL 1 30 天窗口 · 续费组 1 · 待决策 4 CLOSED LOOP 2 阻塞 2 EVIDENCE 5 证据源正常"
+- 61 span. @373,802 "取消 / 运行状态割裂 · legacy service still responds on cancelled host"
+- 52 p. @273,1606 "保留已有单台续费决策能力；取消/退役仍从 VPS 详情的 lifecycle workbench 进入。"
+- 50 p. @273,632 "当前视图：需要决策。自动组只读派生，不会创建持久化决策记录。快照 2026/07/01 16:00。"
+- 44 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--normal @537,451 "SCENARIOS 场景与模板 管理比较篮子和启动模板 模板 2 · 组合 1 打开场景"
+- 40 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--notice @248,451 "DECISION MEMORY 已保存决策 跟进/证据问题 1 1 条 打开记录"
+- 38 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--notice asset-decision-secondary-nav__item--active @1116,451 "AUX QUEUE 单台辅助队列 保留单台续费处理 4 / 4 查看单台队列"
+- 36 span. @286,2011 "Netcup · DE · EU-Central · Frankfurt"
+suspicious/default-noise blocks:
+- 968 section.page-panel asset-decision-command "PORTFOLIO WORKBENCH 决策组扫描 当前视图：需要决策。自动组只读派生，不会创建持久化决策记录。快照 2026/07/01 16:00。 续费窗口 未来 30 天 未来 60 天 未来 90 天 当前显示 4 个组 需要决策 4 续费取舍 1 同区比较 1 服务商组合 1 预算压力 1 资料缺口 1 P1 需要决策 取消联动待确认 取消 / "
+- 550 section.page-panel asset-decision-single-queue asset-decision-support-surface animate-in d5 "SINGLE VPS QUEUE 单台辅助队列 保留已有单台续费决策能力；取消/退役仍从 VPS 详情的 lifecycle workbench 进入。 4 / 4 全部 4 待评估 2 30天续费 3 迁移 1 取消 1 取消联动 未关联 1 缺订阅 1 VPS 决策 订阅 成本信号 监控 操作 ams-core-01 Hetzner · NL · EU-"
+- 223 article.asset-decision-group-card asset-decision-group-card--alert "P1 需要决策 取消联动待确认 取消 / 运行状态割裂 · legacy service still responds on cancelled host 续费窗口 1 · 取消联动 1 可决策 偏退役 成员 1 台 暂无用途 1 承载 服务 1 · 域名 1 · Target 1/1 监控 1 · 异常 1 · 事件 1 成本 CNY 39.50/月 CN"
+- 211 article.asset-decision-group-card asset-decision-group-card--alert "P2 续费取舍 续费窗口组合取舍 未来 30 天 · 暂无主要问题 续费窗口 3 · 未评估 1 · 取消联动 1 证据强 偏保留 成员 3 台 承载业务 1 / 备用 1 / 暂无用途 1 承载 服务 1 · 域名 1 · Target 1/1 监控 4 · 异常 1 · 事件 1 成本 CNY 174.55/月 CNY 2094.60/年 按主力、备用、"
+- 194 article.asset-decision-group-card asset-decision-group-card--alert "P3 预算压力 预算压力组合 CNY 预算风险 · 暂无主要问题 续费窗口 2 · 未评估 1 证据强 偏保留 成员 2 台 承载业务 1 / 备用 1 承载 服务 0 · 域名 0 · Target 0/0 监控 3 · 异常 0 · 事件 0 成本 CNY 135.05/月 CNY 1620.60/年 预算压力主导，比较保留价值和续费窗口 超预算 / 预"
+- 178 article.asset-decision-group-card asset-decision-group-card--alert "P4 资料缺口 资料缺口待补齐 缺订阅 / 缺监控 / 缺基础资料 · 暂无主要问题 未评估 1 先补证据 补证据 成员 1 台 暂无分布 承载 服务 0 · 域名 0 · Target 0/0 监控 0 · 异常 0 · 事件 0 成本 CNY 0.00/月 CNY 0.00/年 资料缺口主导，先补齐证据再做组合取舍 缺订阅 未关联监控 补证据 查看组"
+- 162 section.asset-decision-focus asset-decision-command-summary asset-decision-command-summary--critical animate-in d1 "DECISION MEMORY 跟进阻塞 · 欧洲主备节点续费决策 1 台 VPS 跟进阻塞 处理阻塞 资料缺口 PORTFOLIO 6 全局资产组合 · 需要决策 · 30 天续费窗口 RENEWAL 1 30 天窗口 · 续费组 1 · 待决策 4 CLOSED LOOP 2 阻塞 2 EVIDENCE 5 证据源正常"
+- 61 span. "取消 / 运行状态割裂 · legacy service still responds on cancelled host"
+- 52 p. "保留已有单台续费决策能力；取消/退役仍从 VPS 详情的 lifecycle workbench 进入。"
+- 50 p. "当前视图：需要决策。自动组只读派生，不会创建持久化决策记录。快照 2026/07/01 16:00。"
+
+## main mobile 390x900 /asset-decisions
+text=1351 sections=10 badges=34 buttons=30 nav=0 scoreBars=0 overflow=0/0
+headings=["跟进阻塞 · 欧洲主备节点续费决策","决策组扫描"]
+buttons=["工作台","VPS","归档","服务商","订阅","资产决策","1","1","事件","设置","☾","0","VPS 库存","订阅列表","处理阻塞","资料缺口","打开记录","打开场景","查看续费","查看单台队列","需要决策 4","续费取舍 1","同区比较 1","服务商组合 1","预算压力 1","资料缺口 1","查看组","查看组","查看组","查看组"]
+nav=[]
+badges=["1 条","模板 2 · 组合 1","4 条","4 / 4","4","1","1","1","1","1","续费窗口 1 · 取消联动 1","可决策","偏退役","取消联动","异常关联","偏退役","续费窗口 3 · 未评估 1 · 取消联动 1","证据强","偏保留","续费临近","预算风险","偏保留","续费窗口 2 · 未评估 1","证据强"]
+sample="1 1 V 资产决策 ☾ 0 V 资产组合决策 从 VPS、订阅、服务、域名和监控证据中派生组合取舍。 VPS 库存 订阅列表 DECISION MEMORY 跟进阻塞 · 欧洲主备节点续费决策 1 台 VPS 跟进阻塞 处理阻塞 资料缺口 PORTFOLIO 6 全局资产组合 · 需要决策 · 30 天续费窗口 RENEWAL 1 30 天窗口 · 续费组 1 · 待决策 4 CLOSED LOOP 2 阻塞 2 EVIDENCE 5 证据源正常 DECISION MEMORY 已保存决策 跟进/证据问题 1 1"
+top text blocks:
+- 968 section.page-panel asset-decision-command @68,845 "PORTFOLIO WORKBENCH 决策组扫描 当前视图：需要决策。自动组只读派生，不会创建持久化决策记录。快照 2026/07/01 16:00。 续费窗口 未来 30 天 未来 60 天 未来 90 天 当前显示 4 个组 需要决策 4 续费取舍 1 同区比较 1 服务商组合 1 预算压力 1 资料缺口 1 P1 需要决策 取消联动待确认 取消 / "
+- 223 article.asset-decision-group-card asset-decision-group-card--alert @93,1130 "P1 需要决策 取消联动待确认 取消 / 运行状态割裂 · legacy service still responds on cancelled host 续费窗口 1 · 取消联动 1 可决策 偏退役 成员 1 台 暂无用途 1 承载 服务 1 · 域名 1 · Target 1/1 监控 1 · 异常 1 · 事件 1 成本 CNY 39.50/月 CN"
+- 211 article.asset-decision-group-card asset-decision-group-card--alert @93,1828 "P2 续费取舍 续费窗口组合取舍 未来 30 天 · 暂无主要问题 续费窗口 3 · 未评估 1 · 取消联动 1 证据强 偏保留 成员 3 台 承载业务 1 / 备用 1 / 暂无用途 1 承载 服务 1 · 域名 1 · Target 1/1 监控 4 · 异常 1 · 事件 1 成本 CNY 174.55/月 CNY 2094.60/年 按主力、备用、"
+- 194 article.asset-decision-group-card asset-decision-group-card--alert @93,2599 "P3 预算压力 预算压力组合 CNY 预算风险 · 暂无主要问题 续费窗口 2 · 未评估 1 证据强 偏保留 成员 2 台 承载业务 1 / 备用 1 承载 服务 0 · 域名 0 · Target 0/0 监控 3 · 异常 0 · 事件 0 成本 CNY 135.05/月 CNY 1620.60/年 预算压力主导，比较保留价值和续费窗口 超预算 / 预"
+- 178 article.asset-decision-group-card asset-decision-group-card--alert @93,3342 "P4 资料缺口 资料缺口待补齐 缺订阅 / 缺监控 / 缺基础资料 · 暂无主要问题 未评估 1 先补证据 补证据 成员 1 台 暂无分布 承载 服务 0 · 域名 0 · Target 0/0 监控 0 · 异常 0 · 事件 0 成本 CNY 0.00/月 CNY 0.00/年 资料缺口主导，先补齐证据再做组合取舍 缺订阅 未关联监控 补证据 查看组"
+- 162 section.asset-decision-focus asset-decision-command-summary asset-decision-command-summary--critical animate-in d1 @68,200 "DECISION MEMORY 跟进阻塞 · 欧洲主备节点续费决策 1 台 VPS 跟进阻塞 处理阻塞 资料缺口 PORTFOLIO 6 全局资产组合 · 需要决策 · 30 天续费窗口 RENEWAL 1 30 天窗口 · 续费组 1 · 待决策 4 CLOSED LOOP 2 阻塞 2 EVIDENCE 5 证据源正常"
+- 61 span. @107,1203 "取消 / 运行状态割裂 · legacy service still responds on cancelled host"
+- 50 p. @93,905 "当前视图：需要决策。自动组只读派生，不会创建持久化决策记录。快照 2026/07/01 16:00。"
+- 44 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--normal @227,549 "SCENARIOS 场景与模板 管理比较篮子和启动模板 模板 2 · 组合 1 打开场景"
+- 40 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--notice @68,549 "DECISION MEMORY 已保存决策 跟进/证据问题 1 1 条 打开记录"
+- 38 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--notice @227,693 "AUX QUEUE 单台辅助队列 保留单台续费处理 4 / 4 查看单台队列"
+- 31 span.asset-decision-chip-row @107,1928 "续费窗口 3 · 未评估 1 · 取消联动 1 证据强 偏保留"
+- 30 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--notice @68,693 "RENEWAL 续费证据 只读订阅窗口事实 4 条 查看续费"
+- 27 p.page-sub @68,89 "从 VPS、订阅、服务、域名和监控证据中派生组合取舍。"
+suspicious/default-noise blocks:
+- 968 section.page-panel asset-decision-command "PORTFOLIO WORKBENCH 决策组扫描 当前视图：需要决策。自动组只读派生，不会创建持久化决策记录。快照 2026/07/01 16:00。 续费窗口 未来 30 天 未来 60 天 未来 90 天 当前显示 4 个组 需要决策 4 续费取舍 1 同区比较 1 服务商组合 1 预算压力 1 资料缺口 1 P1 需要决策 取消联动待确认 取消 / "
+- 223 article.asset-decision-group-card asset-decision-group-card--alert "P1 需要决策 取消联动待确认 取消 / 运行状态割裂 · legacy service still responds on cancelled host 续费窗口 1 · 取消联动 1 可决策 偏退役 成员 1 台 暂无用途 1 承载 服务 1 · 域名 1 · Target 1/1 监控 1 · 异常 1 · 事件 1 成本 CNY 39.50/月 CN"
+- 211 article.asset-decision-group-card asset-decision-group-card--alert "P2 续费取舍 续费窗口组合取舍 未来 30 天 · 暂无主要问题 续费窗口 3 · 未评估 1 · 取消联动 1 证据强 偏保留 成员 3 台 承载业务 1 / 备用 1 / 暂无用途 1 承载 服务 1 · 域名 1 · Target 1/1 监控 4 · 异常 1 · 事件 1 成本 CNY 174.55/月 CNY 2094.60/年 按主力、备用、"
+- 194 article.asset-decision-group-card asset-decision-group-card--alert "P3 预算压力 预算压力组合 CNY 预算风险 · 暂无主要问题 续费窗口 2 · 未评估 1 证据强 偏保留 成员 2 台 承载业务 1 / 备用 1 承载 服务 0 · 域名 0 · Target 0/0 监控 3 · 异常 0 · 事件 0 成本 CNY 135.05/月 CNY 1620.60/年 预算压力主导，比较保留价值和续费窗口 超预算 / 预"
+- 178 article.asset-decision-group-card asset-decision-group-card--alert "P4 资料缺口 资料缺口待补齐 缺订阅 / 缺监控 / 缺基础资料 · 暂无主要问题 未评估 1 先补证据 补证据 成员 1 台 暂无分布 承载 服务 0 · 域名 0 · Target 0/0 监控 0 · 异常 0 · 事件 0 成本 CNY 0.00/月 CNY 0.00/年 资料缺口主导，先补齐证据再做组合取舍 缺订阅 未关联监控 补证据 查看组"
+- 162 section.asset-decision-focus asset-decision-command-summary asset-decision-command-summary--critical animate-in d1 "DECISION MEMORY 跟进阻塞 · 欧洲主备节点续费决策 1 台 VPS 跟进阻塞 处理阻塞 资料缺口 PORTFOLIO 6 全局资产组合 · 需要决策 · 30 天续费窗口 RENEWAL 1 30 天窗口 · 续费组 1 · 待决策 4 CLOSED LOOP 2 阻塞 2 EVIDENCE 5 证据源正常"
+- 61 span. "取消 / 运行状态割裂 · legacy service still responds on cancelled host"
+- 50 p. "当前视图：需要决策。自动组只读派生，不会创建持久化决策记录。快照 2026/07/01 16:00。"
+- 44 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--normal "SCENARIOS 场景与模板 管理比较篮子和启动模板 模板 2 · 组合 1 打开场景"
+- 40 article.asset-decision-secondary-nav__item asset-decision-secondary-nav__item--notice "DECISION MEMORY 已保存决策 跟进/证据问题 1 1 条 打开记录"
+
+## cost mobile 390x900 /asset-decisions?group_id=adg_auto_mock_cost
+text=505 sections=4 badges=8 buttons=11 nav=4 scoreBars=0 overflow=0/0
+headings=["预算压力组合","当前判断","关键成员摘要"]
+buttons=["✕","创建自定义组合","保存为决策记录","ams-core-01","处理","sjc-edge-02","处理","概览","成员明细 2","保存记录","数据底稿"]
+nav=["概览","成员明细 2","保存记录","数据底稿"]
+badges=["超预算 / 预警","汇率过期","成员 2","主力候选","复核","观察候选","迁移","2"]
+sample="预算压力组合 ✕ VPS 2 承载业务 1 / 备用 1 成本 CNY 135.05/月 CNY 1620.60/年 业务上下文 0 / 0 服务 / 域名，Target 0/0 证据质量 证据强 可信 84，压力 8，准备 86 当前判断 预算压力主导，比较保留价值和续费窗口 超预算 / 预警 汇率过期 创建自定义组合 保存为决策记录 关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 复核 · 服务 0 · 域名 0 · "
+top text blocks:
+- 315 section.asset-decision-member-preview @13,537 "关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 复核 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 复核 处理 sjc-edge-02 观察 · Vult"
+- 156 article.asset-decision-member-preview__row @22,790 "sjc-edge-02 观察 · Vultr · US · US-West · San Jose 观察候选 · 迁移 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/1 USD 8.00/月 · High Frequency 2 vCPU · 待迁移 · 备用 · 迁移 观察候选 迁移 处理"
+- 146 article.asset-decision-member-preview__row @22,603 "ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 复核 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 复核 处理"
+- 53 section.asset-decision-detail-command @13,384 "当前判断 预算压力主导，比较保留价值和续费窗口 超预算 / 预警 汇率过期 创建自定义组合 保存为决策记录"
+- 50 small. @32,885 "USD 8.00/月 · High Frequency 2 vCPU · 待迁移 · 备用 · 迁移"
+- 45 strong. @32,658 "主力候选 · 复核 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2"
+- 45 strong. @32,846 "观察候选 · 迁移 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/1"
+- 39 small. @32,635 "主力 · Hetzner · NL · EU-West · Amsterdam"
+- 37 small. @32,698 "USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估"
+- 36 small. @32,822 "观察 · Vultr · US · US-West · San Jose"
+- 18 small. @26,272 "服务 / 域名，Target 0/0"
+- 18 strong. @22,414 "预算压力主导，比较保留价值和续费窗口"
+- 16 small. @26,348 "可信 84，压力 8，准备 86"
+- 13 small. @26,121 "承载业务 1 / 备用 1"
+suspicious/default-noise blocks:
+- 315 section.asset-decision-member-preview "关键成员摘要 成员 2 ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 复核 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 复核 处理 sjc-edge-02 观察 · Vult"
+- 156 article.asset-decision-member-preview__row "sjc-edge-02 观察 · Vultr · US · US-West · San Jose 观察候选 · 迁移 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/1 USD 8.00/月 · High Frequency 2 vCPU · 待迁移 · 备用 · 迁移 观察候选 迁移 处理"
+- 146 article.asset-decision-member-preview__row "ams-core-01 主力 · Hetzner · NL · EU-West · Amsterdam 主力候选 · 复核 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2 USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估 主力候选 复核 处理"
+- 53 section.asset-decision-detail-command "当前判断 预算压力主导，比较保留价值和续费窗口 超预算 / 预警 汇率过期 创建自定义组合 保存为决策记录"
+- 50 small. "USD 8.00/月 · High Frequency 2 vCPU · 待迁移 · 备用 · 迁移"
+- 45 strong. "主力候选 · 复核 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/2"
+- 45 strong. "观察候选 · 迁移 · 服务 0 · 域名 0 · Target 0/0 · 监控 0/1"
+- 39 small. "主力 · Hetzner · NL · EU-West · Amsterdam"
+- 37 small. "USD 10.50/月 · CPX31 · 在用 · 承载业务 · 未评估"
+- 36 small. "观察 · Vultr · US · US-West · San Jose"
+
+## record mobile 390x900 /asset-decisions?record_id=adr_mock_eu_renewal
+text=457 sections=2 badges=13 buttons=6 nav=5 scoreBars=0 overflow=0/0
+headings=["欧洲主备节点续费决策","保存时判断依据"]
+buttons=["✕","概览","执行跟进 3","成员跟进 3","来源复核","成员底稿"]
+nav=["概览","执行跟进 3","成员跟进 3","来源复核","成员底稿"]
+badges=["证据强","快照成员 3","证据强","预算压力","承载服务","主力候选","保留","备用候选","迁移","退役候选","进入取消台","3","3"]
+sample="欧洲主备节点续费决策 ✕ 状态 已决策 adr_mock_eu_renewal 成员 3 未来 30 天 跟进 0/3 阻塞 1 · 待处理 1 执行回读 阻塞 阻塞 1 · 待处理 1 执行计划 3 项 可推进 3 · 阻塞 1 · 取消退役 1 · 迁移 1 · 保留观察 1 证据快照 证据强 可信 84，压力 8 保留 ams-core-01 作为主力，迁移 sjc-edge-02，进入 fra-legacy-cancel 取消联动检查。 快照成本 CNY 174.55 保存时判断依据 按主力、备用、观察、退"
+top text blocks:
+- 189 section.asset-decision-saved-evidence @13,629 "保存时判断依据 按主力、备用、观察、退役分层比较资产组合 证据强 快照成员 3 证据强 保存时取舍 预算压力 承载服务 ams-core-01 主力候选 保留 主力节点证据完整，虽然超预算但承载核心服务。 sjc-edge-02 备用候选 迁移 作为备用节点继续观察迁移窗口。 fra-legacy-cancel 退役候选 进入取消台 取消前需要先处理仍在运行"
+- 79 div.asset-decision-record-detail__lead @13,535 "保留 ams-core-01 作为主力，迁移 sjc-edge-02，进入 fra-legacy-cancel 取消联动检查。 快照成本 CNY 174.55"
+- 63 strong. @26,548 "保留 ams-core-01 作为主力，迁移 sjc-edge-02，进入 fra-legacy-cancel 取消联动检查。"
+- 37 small. @26,423 "可推进 3 · 阻塞 1 · 取消退役 1 · 迁移 1 · 保留观察 1"
+- 22 small. @31,936 "主力节点证据完整，虽然超预算但承载核心服务。"
+- 21 small. @31,1106 "取消前需要先处理仍在运行的服务和监控联动。"
+- 20 span. @22,659 "按主力、备用、观察、退役分层比较资产组合"
+- 19 small. @26,121 "adr_mock_eu_renewal"
+- 17 strong. @31,1058 "fra-legacy-cancel"
+- 15 span. @26,588 "快照成本 CNY 174.55"
+- 15 small. @31,1021 "作为备用节点继续观察迁移窗口。"
+- 12 small. @26,272 "阻塞 1 · 待处理 1"
+- 12 small. @26,348 "阻塞 1 · 待处理 1"
+- 11 strong. @31,888 "ams-core-01"
+suspicious/default-noise blocks:
+- 189 section.asset-decision-saved-evidence "保存时判断依据 按主力、备用、观察、退役分层比较资产组合 证据强 快照成员 3 证据强 保存时取舍 预算压力 承载服务 ams-core-01 主力候选 保留 主力节点证据完整，虽然超预算但承载核心服务。 sjc-edge-02 备用候选 迁移 作为备用节点继续观察迁移窗口。 fra-legacy-cancel 退役候选 进入取消台 取消前需要先处理仍在运行"
+- 79 div.asset-decision-record-detail__lead "保留 ams-core-01 作为主力，迁移 sjc-edge-02，进入 fra-legacy-cancel 取消联动检查。 快照成本 CNY 174.55"
+- 63 strong. "保留 ams-core-01 作为主力，迁移 sjc-edge-02，进入 fra-legacy-cancel 取消联动检查。"
+- 37 small. "可推进 3 · 阻塞 1 · 取消退役 1 · 迁移 1 · 保留观察 1"
+- 22 small. "主力节点证据完整，虽然超预算但承载核心服务。"
+- 21 small. "取消前需要先处理仍在运行的服务和监控联动。"
+- 15 span. "快照成本 CNY 174.55"
+- 15 small. "作为备用节点继续观察迁移窗口。"

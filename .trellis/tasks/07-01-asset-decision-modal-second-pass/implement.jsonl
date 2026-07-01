@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Asset decision modal default should be a workbench/decision surface, not a document"}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "CSS tokens, BEM and mobile overflow constraints"}
+{"file": ".trellis/tasks/07-01-asset-decision-modal-second-pass/research/modal-audit-summary.md", "reason": "Current release audit and strict default modal budget"}

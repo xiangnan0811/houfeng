@@ -650,6 +650,33 @@ async function openSecondaryWorkbench(label: '打开记录' | '打开场景' | '
   fireEvent.click(within(secondaryNav).getByRole('button', { name: label }))
 }
 
+function expectAutomaticGroupDefaultCover(dialog: HTMLElement) {
+  expect(within(dialog).getByLabelText('决策组当前判断')).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '创建自定义组合' })).toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '保存为决策记录' })).toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('关键成员摘要')).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('heading', { name: '关键成员摘要' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByText('Germany Primary')).not.toBeInTheDocument()
+  expect(within(dialog).queryByText('Germany Standby')).not.toBeInTheDocument()
+  expect(within(dialog).queryByText('主力候选：承载服务且监控证据可用')).not.toBeInTheDocument()
+  expect(within(dialog).queryByText('补证据候选：缺订阅和监控关联后再判断是否备用')).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '处理' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '原始明细' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '数据底稿' })).not.toBeInTheDocument()
+}
+
+function expectSavedRecordDefaultCover(dialog: HTMLElement) {
+  expect(within(dialog).getByText('保存时判断：主力保留，备用补证据后再观察')).toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('保存记录成员摘要')).not.toBeInTheDocument()
+  expect(within(dialog).queryByText('快照成员 1')).not.toBeInTheDocument()
+  expect(within(dialog).queryByText('主力保留')).not.toBeInTheDocument()
+  expect(within(dialog).queryByText(/Germany Primary|Germany Standby|fra-legacy-cancel|ams-core-01|sjc-edge-02/)).not.toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('Germany Primary 跟进状态')).not.toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('决策记录成员')).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '原始成员' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '成员底稿' })).not.toBeInTheDocument()
+}
+
 describe('AssetDecisionsPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -1013,10 +1040,7 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).queryByLabelText('决策组成员对比')).not.toBeInTheDocument()
     expect(within(dialog).queryByLabelText('续费决策')).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/原始明细|继续查看原始明细/)).not.toBeInTheDocument()
-    const preview = within(dialog).getByLabelText('关键成员摘要')
-    expect(preview).toBeInTheDocument()
-    expect(within(preview).queryByText('主力候选：承载服务且监控证据可用')).not.toBeInTheDocument()
-    expect(within(preview).queryByText('补证据候选：缺订阅和监控关联后再判断是否备用')).not.toBeInTheDocument()
+    expectAutomaticGroupDefaultCover(dialog)
 
     fireEvent.click(within(dialog).getByRole('button', { name: '保存记录面板' }))
     expect(within(dialog).getByRole('heading', { name: '保存组合决策记录' })).toBeInTheDocument()
@@ -1033,15 +1057,66 @@ describe('AssetDecisionsPage', () => {
     expect(within(memberDecisions).getAllByText('保留').length).toBeGreaterThan(0)
     expect(within(memberDecisions).getAllByText(/服务 2/).length).toBeGreaterThan(0)
     expect(within(memberDecisions).getAllByText(/监控 1/).length).toBeGreaterThan(0)
-    expect(within(dialog).getByText('证据质量')).toBeInTheDocument()
     expect(within(memberDecisions).getAllByText('补证据').length).toBeGreaterThan(0)
     fireEvent.click(within(dialog).getByRole('button', { name: '原始明细' }))
     expect(within(dialog).getByLabelText('决策组成员对比')).toBeInTheDocument()
+    expect(within(dialog).getByRole('columnheader', { name: '建议' })).toBeInTheDocument()
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30')
 
     fireEvent.click(within(dialog).getAllByRole('button', { name: '处理' })[0])
     expect(within(dialog).getAllByText('Germany Primary').length).toBeGreaterThan(0)
     expect(within(dialog).getByLabelText('续费决策')).toHaveValue('keep')
+  })
+
+  it('applies the same decision-cover default to cost pressure groups', async () => {
+    const costSummary = groupSummary({
+      group_id: 'adg_cost_001',
+      group_type: 'cost_pressure',
+      view: 'cost',
+      title: '预算压力与弱承载',
+      scope_label: '月度成本异常',
+      primary_issue_summary: '成本偏高且成员承载薄弱，默认层不应展开成员报告。',
+      evidence_chips: [
+        { kind: 'budget_risk', label: '预算压力', tone: 'alert' },
+        { kind: 'no_service_context', label: '弱承载', tone: 'notice' },
+      ],
+      comparison_insight: comparisonInsight({
+        summary: '预算压力集中在弱承载成员，先创建自定义组合再确认削减路径',
+        primary_axis: 'cost',
+      }),
+    })
+    const costDetail = {
+      ...groupDetail(),
+      ...costSummary,
+      members: groupDetail().members,
+    }
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      groupsBody: [costSummary],
+      routes: [
+        { url: '/api/asset-decisions/groups/adg_cost_001?renew_within_days=30', body: costDetail },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('预算压力与弱承载').length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByRole('button', { name: '查看组' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+    expect(within(dialog).getByText('预算压力集中在弱承载成员，先创建自定义组合再确认削减路径')).toBeInTheDocument()
+    expectAutomaticGroupDefaultCover(dialog)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '成员明细' }))
+    const memberDecisions = within(dialog).getByLabelText('成员取舍列表')
+    expect(within(memberDecisions).getAllByText('Germany Primary').length).toBeGreaterThan(0)
+    expect(within(memberDecisions).getAllByText('Germany Standby').length).toBeGreaterThan(0)
+    expect(within(dialog).getAllByRole('button', { name: '处理' }).length).toBeGreaterThan(0)
   })
 
   it('saves a decision group as a persistent decision record', async () => {
@@ -1150,14 +1225,19 @@ describe('AssetDecisionsPage', () => {
     expect(within(manualCommand).getByText(/可保存记录 5\/5|接近可保存|继续整理/)).toBeInTheDocument()
     expect(within(manualDialog).queryByLabelText('自定义组合成员取舍')).not.toBeInTheDocument()
     expect(within(manualDialog).queryByRole('heading', { name: '组合场景' })).not.toBeInTheDocument()
-    const manualSummary = within(manualDialog).getByLabelText('自定义组合成员摘要')
-    expect(within(manualSummary).getByText('意图匹配')).toBeInTheDocument()
+    expect(within(manualDialog).queryByLabelText('自定义组合成员摘要')).not.toBeInTheDocument()
+    expect(within(manualDialog).queryByText('Germany Primary')).not.toBeInTheDocument()
+    expect(within(manualDialog).queryByText('意图匹配')).not.toBeInTheDocument()
+    expect(within(manualDialog).queryByRole('button', { name: '另存为模板' })).not.toBeInTheDocument()
+    expect(within(manualDialog).queryByRole('button', { name: '添加成员' })).not.toBeInTheDocument()
+    expect(within(manualDialog).queryByRole('button', { name: '原始明细' })).not.toBeInTheDocument()
     fireEvent.click(within(manualDialog).getByRole('button', { name: '成员维护' }))
     const manualMembers = within(manualDialog).getByLabelText('自定义组合成员取舍')
     expect(within(manualMembers).getByText('意图匹配')).toBeInTheDocument()
+    expect(within(manualMembers).getByText('Germany Primary')).toBeInTheDocument()
     expect(within(manualDialog).getByText(/可保存记录 5\/5|接近可保存|继续整理/)).toBeInTheDocument()
-    expect(within(manualDialog).getByText('当前事实')).toBeInTheDocument()
-    fireEvent.click(within(manualDialog).getAllByRole('button', { name: '编辑组合' })[1])
+    expect(within(manualMembers).getByText('主力候选：承载服务且监控证据可用')).toBeInTheDocument()
+    fireEvent.click(within(manualDialog).getByRole('button', { name: '编辑组合' }))
     expect(within(manualDialog).getByRole('heading', { name: '组合场景' })).toBeInTheDocument()
     expect(within(manualDialog).getByDisplayValue('德国主力组合')).toBeInTheDocument()
     expect(within(manualDialog).getByDisplayValue('保留主力，观察备用')).toBeInTheDocument()
@@ -1223,10 +1303,13 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).queryByLabelText('自定义组合成员取舍')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { name: '组合场景' })).not.toBeInTheDocument()
     expect(within(dialog).queryByLabelText('自定义组合成员对比')).not.toBeInTheDocument()
-    const manualSummary = within(dialog).getByLabelText('自定义组合成员摘要')
-    expect(within(manualSummary).getByText('意图匹配')).toBeInTheDocument()
-    expect(within(dialog).getByText('意图')).toBeInTheDocument()
-    expect(within(dialog).getByText('已设置 1/1 个成员动作')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('自定义组合成员摘要')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Germany Primary')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('意图匹配')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('已设置 1/1 个成员动作')).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '另存为模板' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '添加成员' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '原始明细' })).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '保存为决策记录' }))
     fireEvent.change(within(dialog).getByLabelText('组合目标'), { target: { value: '保留主力并观察备用' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
@@ -1482,15 +1565,12 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(recordsSection!).getByRole('button', { name: '查看记录' }))
 
     const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
-    expect(within(dialog).getByText('主力保留')).toBeInTheDocument()
-    expect(within(dialog).getByText('证据快照')).toBeInTheDocument()
     expect(within(dialog).getByRole('heading', { name: '保存时判断依据' })).toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { name: '快照对比矩阵' })).not.toBeInTheDocument()
     expect(within(dialog).queryByText('GOAL')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('SAVED EVIDENCE')).not.toBeInTheDocument()
     expect(within(dialog).queryByLabelText('证据评估刻度')).not.toBeInTheDocument()
-    expect(within(dialog).getAllByText('保存时判断：主力保留，备用补证据后再观察').length).toBeGreaterThan(0)
-    expect(within(dialog).getByText('快照成员 1')).toBeInTheDocument()
+    expectSavedRecordDefaultCover(dialog)
     expect(within(dialog).getByText('执行回读')).toBeInTheDocument()
     expect(within(dialog).queryByText('执行编排')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { name: '来源与当前闭环' })).not.toBeInTheDocument()
@@ -1798,7 +1878,8 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).getByRole('heading', { name: '保存时判断依据' })).toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { name: '快照对比矩阵' })).not.toBeInTheDocument()
     expect(within(dialog).queryByText('保存时未记录对比洞察；当前仍保留证据评估快照、成员判断、执行回读和执行编排。')).not.toBeInTheDocument()
-    expect(within(dialog).getByText('快照成员 1')).toBeInTheDocument()
+    expect(within(dialog).queryByText('快照成员 1')).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('保存记录成员摘要')).not.toBeInTheDocument()
     expect(within(dialog).getAllByText('旧记录证据可用').length).toBeGreaterThan(0)
     expect(within(dialog).queryByLabelText('证据评估刻度')).not.toBeInTheDocument()
     expect(within(dialog).getByText('执行回读')).toBeInTheDocument()

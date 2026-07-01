@@ -1912,83 +1912,6 @@ function renderDetailPanel(title: string, children: ReactNode) {
   )
 }
 
-function compactMemberPreviewSummary(member: ComparisonMatrixMember): string {
-  const role = ROLE_LABELS[member.intendedRole ?? member.role] ?? '待定角色'
-  const action = ACTION_LABELS[member.intendedAction ?? member.action] ?? '复核'
-  return `${role} · ${action} · ${member.facts}`
-}
-
-function renderMemberDecisionPreview(
-  members: ComparisonMatrixMember[],
-  ariaLabel: string,
-  options: { showIntent?: boolean; action?: (member: ComparisonMatrixMember) => ReactNode } = {},
-) {
-  const sortedMembers = [...members].sort((left, right) => {
-    const leftRank = left.comparison?.rank ?? Number.POSITIVE_INFINITY
-    const rightRank = right.comparison?.rank ?? Number.POSITIVE_INFINITY
-    if (leftRank !== rightRank) return leftRank - rightRank
-    return left.displayName.localeCompare(right.displayName)
-  })
-  const visibleMembers = sortedMembers.slice(0, 3)
-  return (
-    <section className="asset-decision-member-preview" aria-label={ariaLabel}>
-      <div className="asset-decision-member-preview__head">
-        <div>
-          <h3>关键成员摘要</h3>
-        </div>
-        <Badge variant="count" tone={sortedMembers.length > 0 ? 'notice' : 'neutral'}>
-          成员 {sortedMembers.length}
-        </Badge>
-      </div>
-      {visibleMembers.length > 0 ? (
-        <div className="asset-decision-member-preview__rows">
-          {visibleMembers.slice(0, 2).map((member) => {
-            const lane = member.comparison?.lane ?? 'review'
-            const intentMismatch = options.showIntent
-              && member.comparison
-              && (
-                (member.intendedAction === 'cancel' || member.intendedAction === 'open_cancellation_workbench') !== (lane === 'retire')
-                || (member.intendedAction === 'complete_evidence') !== (lane === 'evidence')
-                || (member.intendedRole === 'primary_candidate') !== (lane === 'primary')
-              )
-            return (
-              <article key={member.key} className="asset-decision-member-preview__row">
-                <div>
-                  {memberComparisonTitle(member)}
-                  <small>{COMPARISON_LANE_LABELS[lane] ?? lane} · {member.meta}</small>
-                </div>
-                <div className="asset-decision-member-preview__facts">
-                  <strong>{compactMemberPreviewSummary(member)}</strong>
-                  <small>{member.product} · {member.statusFacts}</small>
-                </div>
-                <span className="asset-decision-chip-row">
-                  <Badge variant="state" tone={roleTone(member.intendedRole ?? member.role)}>
-                    {ROLE_LABELS[member.intendedRole ?? member.role]}
-                  </Badge>
-                  <Badge variant="state" tone={actionTone(member.intendedAction ?? member.action)}>
-                    {ACTION_LABELS[member.intendedAction ?? member.action]}
-                  </Badge>
-                  {options.showIntent && (
-                    <Badge variant="state" tone={intentMismatch ? 'alert' : 'normal'}>
-                      {intentMismatch ? '需复核意图' : '意图匹配'}
-                    </Badge>
-                  )}
-                </span>
-                {options.action ? <div className="asset-decision-member-preview__actions">{options.action(member)}</div> : null}
-              </article>
-            )
-          })}
-        </div>
-      ) : (
-        <div className="asset-decision-member-preview__empty">
-          <strong>暂无成员</strong>
-          <span>当前组合没有成员事实。</span>
-        </div>
-      )}
-    </section>
-  )
-}
-
 function groupMemberComparisonMatrixMember(member: AssetDecisionGroupMember): ComparisonMatrixMember {
   const monthlyCost = member.primary_subscription
     ? `${formatMoney(member.primary_subscription.monthly_price, member.primary_subscription.currency)}/月`
@@ -2058,9 +1981,6 @@ function renderRecordSavedEvidence(detail: AssetDecisionRecordDetail, selectedRe
       </div>
       <div className="asset-decision-saved-evidence__compact">
         <div className="asset-decision-saved-evidence__summary">
-          <Badge variant="count" tone="notice">
-            快照成员 {detail.members.length}
-          </Badge>
           {selectedRecordAssessment ? (
             <Badge variant="state" tone={evidenceTierTone(selectedRecordAssessment.quality_tier)}>
               {EVIDENCE_TIER_LABELS[selectedRecordAssessment.quality_tier]}
@@ -2070,22 +1990,6 @@ function renderRecordSavedEvidence(detail: AssetDecisionRecordDetail, selectedRe
         <div className="asset-decision-saved-evidence__signals">
           <span>保存时取舍</span>
           {insight ? renderComparisonSignals(insight.tradeoffs, 4) : <span className="empty-inline">仅保留旧快照字段</span>}
-        </div>
-        <div className="asset-decision-record-member-summary" aria-label="保存记录成员摘要">
-          {detail.members.slice(0, 3).map((member) => (
-            <div key={member.vps_id}>
-              <strong>{member.display_name || member.vps_id}</strong>
-              <span className="asset-decision-chip-row">
-                <Badge variant="state" tone={roleTone(member.decided_role)}>
-                  {ROLE_LABELS[member.decided_role]}
-                </Badge>
-                <Badge variant="state" tone={actionTone(member.decided_action)}>
-                  {ACTION_LABELS[member.decided_action]}
-                </Badge>
-              </span>
-              <small>{member.reason || '未填写成员理由'}</small>
-            </div>
-          ))}
         </div>
       </div>
     </section>
@@ -5087,22 +4991,22 @@ export function AssetDecisionsPage() {
               <div>
                 <span>VPS</span>
                 <strong><MonoDigits>{detailState.detail.member_count}</MonoDigits></strong>
-                <small>{countSummary(detailState.detail.usage_counts, ['in_use', 'standby', 'idle'], usageLabel)}</small>
+                <small>成员</small>
               </div>
               <div>
                 <span>成本</span>
                 <strong>{formatGroupMonthlyCost(detailState.detail)}</strong>
-                <small>{formatGroupYearlyCost(detailState.detail)}</small>
+                <small>月度</small>
               </div>
               <div>
-                <span>业务上下文</span>
-                <strong>{detailState.detail.service_count} / {detailState.detail.domain_count}</strong>
-                <small>服务 / 域名，Target {detailState.detail.running_target_count}/{detailState.detail.target_count}</small>
-              </div>
-              <div>
-                <span>证据质量</span>
+                <span>证据</span>
                 <strong>{EVIDENCE_TIER_LABELS[detailState.detail.evidence_assessment.quality_tier]}</strong>
-                <small>可信 {detailState.detail.evidence_assessment.confidence_score}，压力 {detailState.detail.evidence_assessment.pressure_score}，准备 {detailState.detail.evidence_assessment.readiness_score}</small>
+                <small>{detailState.detail.evidence_assessment.summary}</small>
+              </div>
+              <div>
+                <span>风险</span>
+                <strong><MonoDigits>{detailState.detail.evidence_assessment.risk_signal_count + detailState.detail.evidence_assessment.gap_signal_count}</MonoDigits></strong>
+                <small>风险 / 缺口</small>
               </div>
             </div>
             {renderDetailCommand({
@@ -5131,27 +5035,13 @@ export function AssetDecisionsPage() {
                 </>
               ),
             })}
-            {renderMemberDecisionPreview(
-              detailState.detail.members.map(groupMemberComparisonMatrixMember),
-              '关键成员摘要',
-              {
-                action: (member) => {
-                  const sourceMember = detailState.detail?.members.find((item) => item.vps.vps_id === member.key)
-                  if (!sourceMember) return null
-                  return (
-                    <button className="btn sm primary" type="button" onClick={() => selectVPS(sourceMember.vps)}>
-                      处理
-                    </button>
-                  )
-                },
-              },
-            )}
             {renderDetailPanelNav<GroupDetailPanel>([
-              { key: 'overview', label: '概览', summary: '判断与关键成员' },
-              { key: 'members', label: '成员明细', summary: '取舍卡片', count: detailState.detail.members.length },
-              { key: 'save', label: '保存记录', ariaLabel: '保存记录面板', summary: '沉淀本次判断' },
-              { key: 'raw', label: '数据底稿', ariaLabel: '原始明细', summary: '成员宽表' },
-              ...(selectedVPS ? [{ key: 'vps' as const, label: '处理面板', summary: selectedVPS.display_name }] : []),
+              { key: 'members', label: '成员明细', count: detailState.detail.members.length },
+              { key: 'save', label: '保存记录', ariaLabel: '保存记录面板' },
+              ...(groupDetailPanel === 'members' || groupDetailPanel === 'raw'
+                ? [{ key: 'raw' as const, label: '数据底稿', ariaLabel: '原始明细' }]
+                : []),
+              ...(selectedVPS ? [{ key: 'vps' as const, label: '处理面板' }] : []),
             ], groupDetailPanel, (panel) => {
               if (panel === 'save' && recordDraft?.sourceType !== 'auto_group') {
                 startRecordSave(detailState.detail!)
@@ -5345,17 +5235,17 @@ export function AssetDecisionsPage() {
               <div>
                 <span>VPS</span>
                 <strong><MonoDigits>{manualDetailState.detail.member_count}</MonoDigits></strong>
-                <small>{countSummary(manualDetailState.detail.usage_counts, ['in_use', 'standby', 'idle'], usageLabel)}</small>
+                <small>成员</small>
               </div>
               <div>
                 <span>成本</span>
                 <strong>{formatGroupMonthlyCost(manualDetailState.detail)}</strong>
-                <small>{formatGroupYearlyCost(manualDetailState.detail)}</small>
+                <small>月度</small>
               </div>
               <div>
-                <span>证据质量</span>
+                <span>证据</span>
                 <strong>{EVIDENCE_TIER_LABELS[manualDetailState.detail.evidence_assessment.quality_tier]}</strong>
-                <small>可信 {manualDetailState.detail.evidence_assessment.confidence_score} · 缺口 {manualDetailState.detail.evidence_assessment.gap_signal_count}</small>
+                <small>{manualDetailState.detail.evidence_assessment.summary}</small>
               </div>
             </div>
 
@@ -5388,42 +5278,22 @@ export function AssetDecisionsPage() {
                   >
                     保存为决策记录
                   </button>
-                  <button
-                    className="btn sm secondary"
-                    type="button"
-                    onClick={() => saveManualGroupAsTemplate(manualDetailState.detail!)}
-                    disabled={templateSaving}
-                  >
-                    {templateSaving ? '保存中…' : '另存为模板'}
-                  </button>
                 </>
-              ),
-              footer: (
-                <span className="asset-decision-detail-command__readiness">
-                  {manualGroupProgress.items
-                    .filter((item) => item.key === 'intent' || item.key === 'facts')
-                    .map((item) => (
-                      <span key={item.key}>
-                        <Badge variant="state" tone={item.tone}>{item.label}</Badge>
-                        <small>{item.summary}</small>
-                      </span>
-                    ))}
-                </span>
               ),
             })}
 
-            {renderMemberDecisionPreview(
-              manualDetailState.detail.members.map(manualMemberComparisonMatrixMember),
-              '自定义组合成员摘要',
-              { showIntent: true },
-            )}
             {renderDetailPanelNav<ManualDetailPanel>([
-              { key: 'overview', label: '概览', summary: '判断与意图' },
-              { key: 'edit', label: '编辑组合', summary: '标题与目标' },
-              { key: 'members', label: '成员维护', summary: '意图与移除', count: manualDetailState.detail.members.length },
-              { key: 'add', label: '添加成员', summary: '加入 VPS' },
-              { key: 'save', label: '保存记录', ariaLabel: '保存记录面板', summary: '沉淀判断' },
-              { key: 'raw', label: '数据底稿', ariaLabel: '原始明细', summary: '成员宽表' },
+              { key: 'members', label: '成员维护', count: manualDetailState.detail.members.length },
+              { key: 'save', label: '保存记录', ariaLabel: '保存记录面板' },
+              ...(manualDetailPanel === 'edit'
+                ? [{ key: 'edit' as const, label: '编辑组合' }]
+                : []),
+              ...(manualDetailPanel === 'members' || manualDetailPanel === 'add'
+                ? [{ key: 'add' as const, label: '添加成员' }]
+                : []),
+              ...(manualDetailPanel === 'members' || manualDetailPanel === 'raw'
+                ? [{ key: 'raw' as const, label: '数据底稿', ariaLabel: '原始明细' }]
+                : []),
             ], manualDetailPanel, (panel) => {
               if (panel === 'save' && recordDraft?.sourceType !== 'manual_group') {
                 startManualRecordSave(manualDetailState.detail!)
@@ -5486,6 +5356,14 @@ export function AssetDecisionsPage() {
               <div className="asset-operation-actions">
                 <button className="btn sm primary" type="submit" disabled={manualGroupSaving}>
                   {manualGroupSaving ? '保存中…' : '保存组合'}
+                </button>
+                <button
+                  className="btn sm secondary"
+                  type="button"
+                  onClick={() => saveManualGroupAsTemplate(manualDetailState.detail!)}
+                  disabled={templateSaving}
+                >
+                  {templateSaving ? '保存中…' : '另存为模板'}
                 </button>
               </div>
             </form>,
@@ -5975,53 +5853,34 @@ export function AssetDecisionsPage() {
               <div>
                 <span>状态</span>
                 <strong>{RECORD_STATUS_LABELS[recordDetailState.detail.status]}</strong>
-                <small>{recordDetailState.detail.record_id}</small>
+                <small>记录</small>
               </div>
               <div>
                 <span>成员</span>
                 <strong><MonoDigits>{recordDetailState.detail.member_count}</MonoDigits></strong>
-                <small>{recordDetailState.detail.scope_label || recordDetailState.detail.source_group_id}</small>
+                <small>{recordDetailState.detail.scope_label || '组合'}</small>
               </div>
               <div>
                 <span>跟进</span>
                 <strong>
                   <MonoDigits>{recordFollowupDoneCount(recordDetailState.detail)}</MonoDigits>/<MonoDigits>{recordDetailState.detail.member_count}</MonoDigits>
                 </strong>
-                <small>阻塞 {recordDetailState.detail.followup_blocked_count ?? 0} · 待处理 {recordDetailState.detail.followup_todo_count ?? 0}</small>
+                <small>已完成 / 总数</small>
               </div>
               <div>
                 <span>执行回读</span>
                 <strong>{recordDetailState.detail.execution_readback?.status ? READBACK_STATUS_LABELS[recordDetailState.detail.execution_readback.status] : '等待回读'}</strong>
-                <small>{readbackCountSummary(recordDetailState.detail.execution_readback)}</small>
-              </div>
-              <div>
-                <span>执行计划</span>
-                <strong><MonoDigits>{recordDetailState.detail.execution_plan?.actionable_count ?? 0}</MonoDigits> 项</strong>
-                <small>{executionPlanCountSummary(recordDetailState.detail.execution_plan)}</small>
-              </div>
-              <div>
-                <span>证据快照</span>
-                <strong>{selectedRecordAssessment ? EVIDENCE_TIER_LABELS[selectedRecordAssessment.quality_tier] : '未记录'}</strong>
-                <small>{selectedRecordAssessment ? `可信 ${selectedRecordAssessment.confidence_score}，压力 ${selectedRecordAssessment.pressure_score}` : formatDateTime(recordDetailState.detail.updated_at)}</small>
-              </div>
-            </div>
-            <div className="asset-decision-record-detail__lead">
-              <div>
-                <strong>{recordDetailState.detail.goal || '暂无组合目标'}</strong>
-                <span>
-                  快照成本 {recordDetailState.detail.evidence_snapshot.monthly_cost_base != null
-                    ? formatMoney(Number(recordDetailState.detail.evidence_snapshot.monthly_cost_base), String(recordDetailState.detail.evidence_snapshot.base_currency || 'CNY'))
-                    : '暂无 base currency 成本'}
-                </span>
+                <small>{recordDetailState.detail.execution_readback?.summary || '等待执行证据'}</small>
               </div>
             </div>
             {renderRecordSavedEvidence(recordDetailState.detail, selectedRecordAssessment)}
             {renderDetailPanelNav<RecordDetailPanel>([
-              { key: 'overview', label: '概览', summary: '快照与计数' },
-              { key: 'execution', label: '执行跟进', summary: '状态与编排', count: recordDetailState.detail.execution_plan?.actionable_count ?? 0 },
-              { key: 'members', label: '成员跟进', summary: '备注与回读', count: recordDetailState.detail.members.length },
-              { key: 'source', label: '来源复核', summary: recordSourceLabel(recordDetailState.detail) },
-              { key: 'raw', label: '成员底稿', ariaLabel: '原始成员', summary: '完整成员表' },
+              { key: 'execution', label: '执行跟进', count: recordDetailState.detail.execution_plan?.actionable_count ?? 0 },
+              { key: 'members', label: '成员跟进', count: recordDetailState.detail.members.length },
+              { key: 'source', label: '来源复核' },
+              ...(recordDetailPanel === 'members' || recordDetailPanel === 'raw'
+                ? [{ key: 'raw' as const, label: '成员底稿', ariaLabel: '原始成员' }]
+                : []),
             ], recordDetailPanel, setRecordDetailPanel)}
             {recordPatchError && <div className="inline-alert danger">{recordPatchError}</div>}
             {recordDetailPanel === 'execution' && renderDetailPanel('执行跟进',
