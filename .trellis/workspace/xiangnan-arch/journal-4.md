@@ -1518,3 +1518,37 @@ Compressed asset decision detail modals into cover, directory, and single-task p
 ### Next Steps
 
 - None - task complete
+
+
+## Session 222: 收敛资产决策弹窗封面
+
+**Date**: 2026-07-01
+**Task**: 收敛资产决策弹窗封面
+**Branch**: `ux/asset-decision-modal-full-audit`
+
+### Summary
+
+补强资产决策弹窗默认层和目录密度合同，裁剪数据源长文案与内部 ID，验证桌面/移动端运行时无横向溢出。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f404b16` | (see git log) |
+| `72b0518` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
