@@ -540,6 +540,7 @@ const EXECUTION_PLAN_LANE_ORDER: AssetDecisionExecutionPlanLane[] = [
   'evidence',
   'review',
 ]
+const ASSET_DECISION_DETAIL_PREVIEW_LIMIT = 3
 
 const COMPARISON_AXIS_LABELS: Record<AssetDecisionComparisonPrimaryAxis, string> = {
   renewal: '续费压力',
@@ -1829,6 +1830,7 @@ function renderMemberDecisionRows(members: ComparisonMatrixMember[], options: Me
     if (leftRank !== rightRank) return leftRank - rightRank
     return left.displayName.localeCompare(right.displayName)
   })
+  const memberPreview = previewItems(sortedMembers)
   return (
     <section className="asset-decision-member-decisions">
       <div className="asset-decision-member-decisions__header">
@@ -1842,7 +1844,7 @@ function renderMemberDecisionRows(members: ComparisonMatrixMember[], options: Me
       </div>
       {sortedMembers.length > 0 ? (
         <div className="asset-decision-member-rows" aria-label={options.ariaLabel}>
-          {sortedMembers.map((member) => {
+          {memberPreview.visible.map((member) => {
             const comparison = member.comparison
             const lane: AssetDecisionComparisonLane = comparison?.lane ?? 'review'
             const laneTone = comparisonLaneTone(lane)
@@ -1884,6 +1886,11 @@ function renderMemberDecisionRows(members: ComparisonMatrixMember[], options: Me
               </article>
             )
           })}
+          {memberPreview.hiddenCount > 0 && (
+            <div className="asset-decision-preview-more" role="note">
+              另有 {memberPreview.hiddenCount} 台在底稿中查看
+            </div>
+          )}
         </div>
       ) : (
         <div className="asset-decision-member-decisions__empty">
@@ -2238,6 +2245,13 @@ function renderMemberReadback(readback?: AssetDecisionMemberExecutionReadback) {
 
 function membersForExecutionLane(members: AssetDecisionRecordMember[], lane: AssetDecisionExecutionPlanLane): AssetDecisionRecordMember[] {
   return members.filter((member) => (member.execution_plan?.lane ?? 'review') === lane)
+}
+
+function previewItems<T>(items: T[]): { visible: T[]; hiddenCount: number } {
+  return {
+    visible: items.slice(0, ASSET_DECISION_DETAIL_PREVIEW_LIMIT),
+    hiddenCount: Math.max(0, items.length - ASSET_DECISION_DETAIL_PREVIEW_LIMIT),
+  }
 }
 
 function laneIssueCount(members: AssetDecisionRecordMember[]): number {
@@ -3786,9 +3800,10 @@ export function AssetDecisionsPage() {
     }>,
   ) {
     if (!recordDraft) return null
+    const memberPreview = previewItems(members)
     return (
       <div className="asset-decision-save-members" aria-label="保存记录成员复核">
-        {members.map((member) => {
+        {memberPreview.visible.map((member) => {
           const memberDraft = recordDraft.members[member.vpsID]
           const decidedRole = memberDraft?.decidedRole ?? member.fallbackRole
           const decidedAction = memberDraft?.decidedAction ?? member.fallbackAction
@@ -3862,6 +3877,11 @@ export function AssetDecisionsPage() {
             </article>
           )
         })}
+        {memberPreview.hiddenCount > 0 && (
+          <div className="asset-decision-preview-more" role="note">
+            另有 {memberPreview.hiddenCount} 台成员保留在保存底稿中
+          </div>
+        )}
       </div>
     )
   }
@@ -4269,8 +4289,13 @@ export function AssetDecisionsPage() {
   }
 
   function renderRecordExecutionBoard(detail: AssetDecisionRecordDetail) {
+    const executionPreview = previewItems(detail.members)
     const lanes = EXECUTION_PLAN_LANE_ORDER
-      .map((lane) => ({ lane, members: membersForExecutionLane(detail.members, lane) }))
+      .map((lane) => ({
+        lane,
+        members: membersForExecutionLane(executionPreview.visible, lane),
+        totalMembers: membersForExecutionLane(detail.members, lane),
+      }))
       .filter((section) => section.members.length > 0)
 
     if (lanes.length === 0) {
@@ -4302,16 +4327,16 @@ export function AssetDecisionsPage() {
           </div>
         </div>
         <div className="asset-decision-execution-board__lanes">
-          {lanes.map(({ lane, members }) => (
+          {lanes.map(({ lane, members, totalMembers }) => (
             <section key={lane} className={`asset-decision-execution-lane asset-decision-execution-lane--${lane}`}>
               <div className="asset-decision-execution-lane__header">
                 <div>
                   <strong>{EXECUTION_PLAN_LANE_LABELS[lane]}</strong>
-                  <span><MonoDigits>{members.length}</MonoDigits> 台 · 可推进 {laneActionableCount(members)} · 问题 {laneIssueCount(members)}</span>
+                  <span><MonoDigits>{totalMembers.length}</MonoDigits> 台 · 可推进 {laneActionableCount(totalMembers)} · 问题 {laneIssueCount(totalMembers)}</span>
                 </div>
-                {laneBlockedCount(members) > 0 && (
+                {laneBlockedCount(totalMembers) > 0 && (
                   <Badge variant="count" tone="critical">
-                    阻塞 {laneBlockedCount(members)}
+                    阻塞 {laneBlockedCount(totalMembers)}
                   </Badge>
                 )}
               </div>
@@ -4372,6 +4397,11 @@ export function AssetDecisionsPage() {
             </section>
           ))}
         </div>
+        {executionPreview.hiddenCount > 0 && (
+          <div className="asset-decision-preview-more" role="note">
+            另有 {executionPreview.hiddenCount} 台在成员跟进或底稿中查看
+          </div>
+        )}
       </section>
     )
   }
