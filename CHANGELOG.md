@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.5](https://github.com/xiangnan0811/houfeng/compare/v0.56.4...v0.56.5) (2026-07-01)
+
+
+### Bug Fixes
+
+* simplify asset decision workbench defaults ([9785794](https://github.com/xiangnan0811/houfeng/commit/9785794008e8d77ee7c0b60d343d98a6b5a86aeb))
+* simplify asset decision workbench defaults ([bdacc85](https://github.com/xiangnan0811/houfeng/commit/bdacc851f5bd3644e0c8dc35c241525f2c80dd43))
+
 ## [0.56.4](https://github.com/xiangnan0811/houfeng/compare/v0.56.3...v0.56.4) (2026-07-01)
 
 
