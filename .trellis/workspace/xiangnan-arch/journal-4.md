@@ -1485,3 +1485,36 @@ Refactored asset decision detail dialogs to use cover-first and directory-first 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 221: Asset decision modal density cleanup
+
+**Date**: 2026-07-01
+**Task**: Asset decision modal density cleanup
+**Branch**: `ux/asset-decision-modal-density-audit`
+
+### Summary
+
+Compressed asset decision detail modals into cover, directory, and single-task panels; added regression tests and browser sanity for dense secondary panels.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1ffc036` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

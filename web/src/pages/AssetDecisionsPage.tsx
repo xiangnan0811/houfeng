@@ -232,7 +232,7 @@ type TemplateManualGroupDraft = {
 
 type GroupDetailPanel = 'overview' | 'directory' | 'members' | 'save' | 'raw' | 'vps'
 type ManualDetailPanel = 'overview' | 'directory' | 'edit' | 'members' | 'add' | 'save' | 'raw'
-type RecordDetailPanel = 'overview' | 'execution' | 'members' | 'source' | 'raw'
+type RecordDetailPanel = 'overview' | 'directory' | 'execution' | 'members' | 'source' | 'raw'
 type TemplateDetailPanel = 'overview' | 'directory' | 'create' | 'members' | 'status'
 
 type ScoreStyle = CSSProperties & {
@@ -380,8 +380,8 @@ type MemberDecisionCardsOptions = {
 type DetailDirectoryItem<TPanel extends string> = {
   key: TPanel
   label: string
-  summary: string
-  meta: string
+  summary?: string
+  meta?: string
   tone?: BadgeTone
   count?: number
 }
@@ -1626,7 +1626,16 @@ function actionHrefForMember(member: AssetDecisionRecordMember): string {
 }
 
 function actionLabelForMember(member: AssetDecisionRecordMember): string {
-  if (member.execution_plan?.step_label) return member.execution_plan.step_label
+  const plan = member.execution_plan
+  if (
+    plan?.lane === 'migration'
+    || plan?.step_label?.includes('推进迁移')
+    || plan?.step_label?.includes('迁移流程')
+    || plan?.step_label?.includes('迁移工作台')
+  ) {
+    return '复核迁移意向'
+  }
+  if (plan?.step_label) return plan.step_label
   if (member.decided_action === 'open_cancellation_workbench' || member.decided_action === 'cancel') return '取消/退役'
   return 'VPS 详情'
 }
@@ -1691,6 +1700,17 @@ function renderCompactRiskChips(chips: AssetDecisionEvidenceChip[] = [], assessm
   )
 }
 
+function compactGroupJudgement(group: Pick<AssetDecisionGroupSummary, 'view' | 'evidence_assessment'>): string {
+  if (group.evidence_assessment.quality_tier === 'blocked') return '证据阻塞，先补齐'
+  if (group.evidence_assessment.gap_signal_count > 0) return '资料缺口，先复核'
+  if (group.view === 'cost') return '预算压力，先比价'
+  if (group.view === 'renewal') return '续费临近，先分层'
+  if (group.view === 'region') return '同区比较，先排序'
+  if (group.view === 'provider') return '服务商组合，先取舍'
+  if (group.view === 'evidence') return '资料缺口，先补证'
+  return '需要决策'
+}
+
 function renderEvidenceAssessment(assessment: AssetDecisionEvidenceAssessment | null, mode: 'compact' | 'detail' = 'compact') {
   if (!assessment) return <span className="empty-inline">无证据评估</span>
   return (
@@ -1749,15 +1769,11 @@ function memberComparisonTitle(member: ComparisonMatrixMember) {
 }
 
 function renderDetailCommand(options: DetailCommandOptions) {
-  const leadSummary = options.recommendation?.summary || options.summary
-  const nextStep = options.recommendation?.next_step
   return (
     <section className="asset-decision-detail-command" aria-label={options.ariaLabel}>
       <div className="asset-decision-detail-command__main">
         <div>
-          <h3>{options.title}</h3>
-          <strong>{leadSummary}</strong>
-          {nextStep && <span>{nextStep}</span>}
+          <strong>{options.summary}</strong>
         </div>
         <div className="asset-decision-detail-command__meta">
           {options.badge ?? null}
@@ -1797,8 +1813,8 @@ function renderDetailDirectory<TPanel extends string>(
               </Badge>
             ) : null}
           </span>
-          <span>{item.summary}</span>
-          <small>{item.meta}</small>
+          {item.summary ? <span>{item.summary}</span> : null}
+          {item.meta ? <small>{item.meta}</small> : null}
         </button>
       ))}
     </section>
@@ -1816,9 +1832,8 @@ function renderMemberDecisionRows(members: ComparisonMatrixMember[], options: Me
     <section className="asset-decision-member-decisions">
       <div className="asset-decision-member-decisions__header">
         <div>
-          <p className="section-heading__eyebrow">MEMBER DECISIONS</p>
           <h3>{options.title}</h3>
-          <span>{options.summary || '按当前判断排序，优先看角色、动作、成本承载和证据缺口。'}</span>
+          {options.summary ? <span>{options.summary}</span> : null}
         </div>
         <Badge variant="count" tone={sortedMembers.length > 0 ? 'notice' : 'neutral'}>
           成员 {sortedMembers.length}
@@ -1842,7 +1857,6 @@ function renderMemberDecisionRows(members: ComparisonMatrixMember[], options: Me
                 <div className="asset-decision-member-row__identity">
                   <span>#{comparison?.rank || '—'} · {COMPARISON_LANE_LABELS[lane] ?? lane}</span>
                   {memberComparisonTitle(member)}
-                  <small>{member.meta}</small>
                 </div>
                 <div className="asset-decision-member-row__decision">
                   <div>
@@ -1860,12 +1874,10 @@ function renderMemberDecisionRows(members: ComparisonMatrixMember[], options: Me
                     )}
                     </span>
                     <strong>{comparison?.summary || '当前成员暂无对比洞察。'}</strong>
-                    <small>{member.facts}</small>
                   </div>
                 </div>
                 <div className="asset-decision-member-row__signals">
                   {renderComparisonSignals([...(comparison?.risks ?? []), ...(comparison?.gaps ?? [])], 2)}
-                  {member.evidenceChips && member.evidenceChips.length > 0 ? renderEvidenceChips(member.evidenceChips, 2) : null}
                 </div>
                 {options.action && <div className="asset-decision-member-row__actions">{options.action(member)}</div>}
               </article>
@@ -1966,40 +1978,6 @@ function manualMemberComparisonMatrixMember(member: AssetDecisionManualGroupMemb
     intendedAction: member.intended_action,
     currentFactFound: member.current_fact_found,
   }
-}
-
-function renderRecordSavedEvidence(detail: AssetDecisionRecordDetail, selectedRecordAssessment: AssetDecisionEvidenceAssessment | null) {
-  const insight = parseComparisonInsight(detail.evidence_snapshot)
-  return (
-    <section className="asset-decision-saved-evidence" aria-label="保存时判断依据">
-      <div className="asset-decision-saved-evidence__head">
-        <div>
-          <h3>保存时判断依据</h3>
-          <span>
-            {insight
-              ? insight.summary
-              : selectedRecordAssessment?.summary || '保存时未记录对比洞察。'}
-          </span>
-        </div>
-        <Badge variant="state" tone={selectedRecordAssessment ? evidenceTierTone(selectedRecordAssessment.quality_tier) : 'neutral'}>
-          {selectedRecordAssessment ? EVIDENCE_TIER_LABELS[selectedRecordAssessment.quality_tier] : '旧快照'}
-        </Badge>
-      </div>
-      <div className="asset-decision-saved-evidence__compact">
-        <div className="asset-decision-saved-evidence__summary">
-          {selectedRecordAssessment ? (
-            <Badge variant="state" tone={evidenceTierTone(selectedRecordAssessment.quality_tier)}>
-              {EVIDENCE_TIER_LABELS[selectedRecordAssessment.quality_tier]}
-            </Badge>
-          ) : <span className="empty-inline">保存时未记录证据评估</span>}
-        </div>
-        <div className="asset-decision-saved-evidence__signals">
-          <span>保存时取舍</span>
-          {insight ? renderComparisonSignals(insight.tradeoffs, 4) : <span className="empty-inline">仅保留旧快照字段</span>}
-        </div>
-      </div>
-    </section>
-  )
 }
 
 function formatGroupMonthlyCost(group: CostSummaryLike): string {
@@ -2263,10 +2241,6 @@ function groupPressureLabel(group: AssetDecisionGroupSummary): string {
   return parts.length > 0 ? parts.join(' · ') : '暂无高压信号'
 }
 
-function groupCoverMeta(detail: AssetDecisionGroupDetail): string {
-  return `${VIEW_LABELS[detail.view]} · 成员 ${detail.member_count} · ${formatGroupMonthlyCost(detail)}`
-}
-
 function manualCoverMeta(detail: AssetDecisionManualGroupDetail, progress: ManualGroupProgress): string {
   return `${MANUAL_GROUP_SCENARIO_LABELS[detail.scenario]} · ${MANUAL_GROUP_STATUS_LABELS[detail.status]} · ${progress.readinessLabel} ${progress.doneCount}/${progress.totalCount}`
 }
@@ -2319,6 +2293,7 @@ export function AssetDecisionsPage() {
   const [recordDetailPanel, setRecordDetailPanel] = useState<RecordDetailPanel>('overview')
   const [templateDetailPanel, setTemplateDetailPanel] = useState<TemplateDetailPanel>('overview')
   const [recordDraft, setRecordDraft] = useState<RecordDraft | null>(null)
+  const [recordDraftEditingMemberID, setRecordDraftEditingMemberID] = useState<string | null>(null)
   const [recordSaving, setRecordSaving] = useState(false)
   const [recordSaveError, setRecordSaveError] = useState<string | null>(null)
   const [manualGroupCreating, setManualGroupCreating] = useState(false)
@@ -3741,12 +3716,14 @@ export function AssetDecisionsPage() {
 
   function startRecordSave(detail: AssetDecisionGroupDetail) {
     setRecordDraft(buildRecordDraft(detail, renewalWindow))
+    setRecordDraftEditingMemberID(null)
     setRecordSaveError(null)
     setGroupDetailPanel('save')
   }
 
   function startManualRecordSave(detail: AssetDecisionManualGroupDetail) {
     setRecordDraft(buildManualRecordDraft(detail))
+    setRecordDraftEditingMemberID(null)
     setRecordSaveError(null)
     setManualDetailPanel('save')
   }
@@ -3755,6 +3732,7 @@ export function AssetDecisionsPage() {
     if (recordDraft?.sourceType === 'auto_group') setGroupDetailPanel('directory')
     if (recordDraft?.sourceType === 'manual_group') setManualDetailPanel('directory')
     setRecordDraft(null)
+    setRecordDraftEditingMemberID(null)
     setRecordSaveError(null)
   }
 
@@ -3774,6 +3752,97 @@ export function AssetDecisionsPage() {
         },
       }
     })
+  }
+
+  function renderRecordDraftMemberRows(
+    members: Array<{
+      vpsID: string
+      displayName: string
+      fallbackRole: AssetDecisionSuggestedRole
+      fallbackAction: AssetDecisionSuggestedAction
+      meta?: string
+      chips?: AssetDecisionEvidenceChip[]
+    }>,
+  ) {
+    if (!recordDraft) return null
+    return (
+      <div className="asset-decision-save-members" aria-label="保存记录成员复核">
+        {members.map((member) => {
+          const memberDraft = recordDraft.members[member.vpsID]
+          const decidedRole = memberDraft?.decidedRole ?? member.fallbackRole
+          const decidedAction = memberDraft?.decidedAction ?? member.fallbackAction
+          const reason = memberDraft?.reason ?? ''
+          const editing = recordDraftEditingMemberID === member.vpsID
+          return (
+            <article key={member.vpsID} className={`asset-decision-save-member${editing ? ' asset-decision-save-member--editing' : ''}`}>
+              <div className="asset-decision-save-member__summary">
+                <div className="asset-table__identity">
+                  <strong>{member.displayName}</strong>
+                </div>
+                <span className="asset-decision-chip-row">
+                  <Badge variant="state" tone={roleTone(decidedRole)}>
+                    {ROLE_LABELS[decidedRole]}
+                  </Badge>
+                  <Badge variant="state" tone={actionTone(decidedAction)}>
+                    {ACTION_LABELS[decidedAction]}
+                  </Badge>
+                  <Badge variant="state" tone={reason.trim() ? 'normal' : 'maintenance'}>
+                    {reason.trim() ? '已写理由' : '理由待补'}
+                  </Badge>
+                </span>
+                <button
+                  className="btn-text sm secondary"
+                  type="button"
+                  aria-expanded={editing}
+                  onClick={() => setRecordDraftEditingMemberID((current) => current === member.vpsID ? null : member.vpsID)}
+                >
+                  {editing ? '收起编辑' : `编辑 ${member.displayName} 成员理由`}
+                </button>
+              </div>
+              {editing && (
+                <div className="asset-decision-save-member__editor">
+                  <div className="input-field">
+                    <span>角色</span>
+                    <select
+                      aria-label={`${member.displayName} 角色`}
+                      className="input"
+                      value={decidedRole}
+                      onChange={(event) => updateRecordDraftMember(member.vpsID, { decidedRole: event.target.value as AssetDecisionSuggestedRole })}
+                    >
+                      {ROLE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="input-field">
+                    <span>动作</span>
+                    <select
+                      aria-label={`${member.displayName} 动作`}
+                      className="input"
+                      value={decidedAction}
+                      onChange={(event) => updateRecordDraftMember(member.vpsID, { decidedAction: event.target.value as AssetDecisionSuggestedAction })}
+                    >
+                      {ACTION_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="input-field asset-decision-save-member__reason">
+                    <span>理由</span>
+                    <input
+                      aria-label={`${member.displayName} 理由`}
+                      className="input"
+                      value={reason}
+                      onChange={(event) => updateRecordDraftMember(member.vpsID, { reason: event.target.value })}
+                    />
+                  </div>
+                </div>
+              )}
+            </article>
+          )
+        })}
+      </div>
+    )
   }
 
   function submitRecordSave(event: FormEvent<HTMLFormElement>) {
@@ -4198,9 +4267,7 @@ export function AssetDecisionsPage() {
       <section className="asset-decision-execution-board" aria-label="执行编排">
         <div className="asset-decision-execution-board__header">
           <div>
-            <p className="section-heading__eyebrow">EXECUTION PLAN</p>
-            <h3>执行编排</h3>
-            <span>{detail.execution_plan?.summary || '按成员当前事实生成执行编排。'}</span>
+            <strong>{detail.execution_plan?.summary || '等待执行步骤'}</strong>
           </div>
           <div className="asset-decision-execution-board__counts">
             <Badge variant="count" tone={detail.execution_plan?.actionable_count > 0 ? 'maintenance' : 'normal'}>
@@ -4242,11 +4309,6 @@ export function AssetDecisionsPage() {
                         </span>
                       </div>
                       <p>{member.execution_plan?.summary || '等待执行编排'}</p>
-                      <div className="asset-decision-execution-card__facts">
-                        <span>当前事实</span>
-                        <strong>{currentFactsLabel(member.execution_readback?.current_facts)}</strong>
-                        <small>{currentFactsStateLabel(member.execution_readback?.current_facts)}</small>
-                      </div>
                       {member.execution_readback?.issues?.length > 0 && (
                         <span className="asset-decision-chip-row">
                           {member.execution_readback.issues.slice(0, 3).map((issue) => (
@@ -4298,8 +4360,6 @@ export function AssetDecisionsPage() {
       <div className="asset-decision-group-cards" aria-label="决策组扫描列表">
         {groups.map((group, index) => {
           const assessment = group.evidence_assessment
-          const recommendation = group.decision_recommendation
-          const comparison = group.comparison_insight
           const hasOperationalRisk = group.cancellation_attention_count > 0
             || group.active_incident_count > 0
             || group.abnormal_monitoring_count > 0
@@ -4325,7 +4385,7 @@ export function AssetDecisionsPage() {
                 </div>
 
                 <div className="asset-decision-group-card__evidence">
-                  <strong>{comparison?.summary || recommendation?.summary || group.primary_issue_summary || assessment.summary}</strong>
+                  <strong>{compactGroupJudgement(group)}</strong>
                   <span className="asset-decision-chip-row">
                     {renderCompactRiskChips(group.evidence_chips, assessment)}
                   </span>
@@ -4490,22 +4550,19 @@ export function AssetDecisionsPage() {
           <div className="asset-decision-focus__item asset-decision-focus__item--notice">
             <span>PORTFOLIO</span>
             <strong>{portfolioState.overviewLoading ? '...' : overview?.group_count ?? portfolioState.groups.length}</strong>
-            <small>{portfolioLead.contextLabel}</small>
           </div>
           <div className="asset-decision-focus__item asset-decision-focus__item--alert">
             <span>RENEWAL</span>
             <strong>{portfolioState.overviewLoading ? '...' : overview?.renewal_group_count ?? 0}</strong>
-            <small>{portfolioLead.renewalLabel}</small>
           </div>
           <div className="asset-decision-focus__item asset-decision-focus__item--critical">
             <span>CLOSED LOOP</span>
             <strong>{closedLoopMetrics.readbackDriftCount + closedLoopMetrics.readbackBlockedCount + closedLoopMetrics.readbackNeedsEvidenceCount}</strong>
-            <small>{portfolioLead.riskLabel}</small>
+            {closedLoopMetrics.partialErrorCount > 0 && <small>{portfolioLead.riskLabel}</small>}
           </div>
           <div className="asset-decision-focus__item asset-decision-focus__item--normal">
             <span>EVIDENCE</span>
             <strong>{overview ? '5' : '—'}</strong>
-            <small>{portfolioLead.evidenceLabel}</small>
           </div>
         </div>
       </section>
@@ -4537,10 +4594,6 @@ export function AssetDecisionsPage() {
             <div>
               <p className="section-heading__eyebrow">PORTFOLIO WORKBENCH</p>
               <h2>决策组扫描</h2>
-              <p>
-                当前视图：{VIEW_LABELS[portfolioView]}。自动组只读派生，不会创建持久化决策记录。
-                {overview?.snapshot_generated_at ? `快照 ${formatDateTime(overview.snapshot_generated_at)}。` : ''}
-              </p>
             </div>
             <div className="asset-decision-board__tools">
               <div className="asset-decision-window">
@@ -4984,35 +5037,10 @@ export function AssetDecisionsPage() {
           />
         ) : detailState.detail ? (
           <div className="asset-decision-detail">
-            {groupDetailPanel !== 'overview' && <div className="asset-decision-detail__summary">
-              <div>
-                <span>VPS</span>
-                <strong><MonoDigits>{detailState.detail.member_count}</MonoDigits></strong>
-                <small>成员</small>
-              </div>
-              <div>
-                <span>成本</span>
-                <strong>{formatGroupMonthlyCost(detailState.detail)}</strong>
-                <small>月度</small>
-              </div>
-              <div>
-                <span>证据</span>
-                <strong>{EVIDENCE_TIER_LABELS[detailState.detail.evidence_assessment.quality_tier]}</strong>
-                <small>{detailState.detail.evidence_assessment.summary}</small>
-              </div>
-              <div>
-                <span>风险</span>
-                <strong><MonoDigits>{detailState.detail.evidence_assessment.risk_signal_count + detailState.detail.evidence_assessment.gap_signal_count}</MonoDigits></strong>
-                <small>风险 / 缺口</small>
-              </div>
-            </div>}
             {renderDetailCommand({
               ariaLabel: '决策组当前判断',
-              title: '当前判断',
-              summary: detailState.detail.comparison_insight?.summary
-                || detailState.detail.decision_recommendation?.summary
-                || '先确认当前自动组是否就是本次决策范围。',
-              footer: <span className="asset-decision-detail-command__context">{groupCoverMeta(detailState.detail)}</span>,
+              title: '',
+              summary: compactGroupJudgement(detailState.detail),
               assessment: detailState.detail.evidence_assessment,
               recommendation: detailState.detail.decision_recommendation,
               insight: detailState.detail.comparison_insight,
@@ -5025,10 +5053,10 @@ export function AssetDecisionsPage() {
                   onClick={() => createManualGroupFromAuto(detailState.detail!)}
                   disabled={manualGroupCreating}
                 >
-                  {manualGroupCreating ? '创建中…' : '创建自定义组合'}
+                  {manualGroupCreating ? '创建中…' : '创建组合'}
                 </button>
                 <button className="btn-text sm secondary" type="button" onClick={() => setGroupDetailPanel('directory')}>
-                  查看详情
+                  详情
                 </button>
                 </>
               ),
@@ -5037,21 +5065,15 @@ export function AssetDecisionsPage() {
               {
                 key: 'members',
                 label: '成员取舍',
-                summary: '查看每台成员的角色、动作和关键风险。',
-                meta: '紧凑列表，不展开底稿',
                 count: detailState.detail.members.length,
               },
               {
                 key: 'save',
-                label: '保存记录面板',
-                summary: '把当前组合判断保存为可跟进记录。',
-                meta: '进入后再编辑标题、目标和成员理由',
+                label: '保存记录',
               },
               {
                 key: 'raw',
-                label: '数据底稿',
-                summary: '查看完整成员字段和证据来源。',
-                meta: '表格在面板内横向滚动',
+                label: '底稿',
               },
             ], (panel) => {
               if (panel === 'save' && recordDraft?.sourceType !== 'auto_group') {
@@ -5062,9 +5084,9 @@ export function AssetDecisionsPage() {
             })}
             {groupDetailPanel !== 'overview' && groupDetailPanel !== 'directory' && renderDetailPanelNav<GroupDetailPanel>([
               { key: 'members', label: '成员明细', count: detailState.detail.members.length },
-              { key: 'save', label: '保存记录', ariaLabel: '保存记录面板' },
+              { key: 'save', label: '保存记录' },
               ...(groupDetailPanel === 'members' || groupDetailPanel === 'raw'
-                ? [{ key: 'raw' as const, label: '数据底稿', ariaLabel: '原始明细' }]
+                ? [{ key: 'raw' as const, label: '底稿', ariaLabel: '原始明细' }]
                 : []),
               ...(selectedVPS ? [{ key: 'vps' as const, label: '处理面板' }] : []),
             ], groupDetailPanel, (panel) => {
@@ -5108,9 +5130,7 @@ export function AssetDecisionsPage() {
               <form className="asset-decision-record-form" onSubmit={submitRecordSave}>
                 <div className="asset-decision-record-form__header">
                   <div>
-                    <p className="section-heading__eyebrow">SAVE DECISION</p>
                     <h3>保存组合决策记录</h3>
-                    <p>记录当前组级目标、成员判断和这一次聚合出的证据快照。</p>
                   </div>
                   <div className="asset-decision-member-actions">
                     <button className="btn sm primary" type="submit" disabled={recordSaving}>
@@ -5153,52 +5173,13 @@ export function AssetDecisionsPage() {
                     />
                   </label>
                 </div>
-                <div className="asset-decision-record-form__members">
-                  {detailState.detail.members.map((member) => {
-                    const memberDraft = recordDraft.members[member.vps.vps_id]
-                    return (
-                      <div className="asset-decision-record-form__member" key={member.vps.vps_id}>
-                        <div className="asset-table__identity">
-                          <strong>{member.vps.display_name}</strong>
-                          <span>{member.vps.vps_id}</span>
-                          {renderEvidenceChips(member.evidence_chips, 2)}
-                        </div>
-                        <label className="input-field">
-                          <span>角色</span>
-                          <select
-                            className="input"
-                            value={memberDraft?.decidedRole ?? member.suggested_role}
-                            onChange={(event) => updateRecordDraftMember(member.vps.vps_id, { decidedRole: event.target.value as AssetDecisionSuggestedRole })}
-                          >
-                            {ROLE_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="input-field">
-                          <span>动作</span>
-                          <select
-                            className="input"
-                            value={memberDraft?.decidedAction ?? member.suggested_action}
-                            onChange={(event) => updateRecordDraftMember(member.vps.vps_id, { decidedAction: event.target.value as AssetDecisionSuggestedAction })}
-                          >
-                            {ACTION_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="input-field">
-                          <span>理由</span>
-                          <input
-                            className="input"
-                            value={memberDraft?.reason ?? ''}
-                            onChange={(event) => updateRecordDraftMember(member.vps.vps_id, { reason: event.target.value })}
-                          />
-                        </label>
-                      </div>
-                    )
-                  })}
-                </div>
+                {renderRecordDraftMemberRows(detailState.detail.members.map((member) => ({
+                  vpsID: member.vps.vps_id,
+                  displayName: member.vps.display_name || member.vps.vps_id,
+                  fallbackRole: member.suggested_role,
+                  fallbackAction: member.suggested_action,
+                  meta: `${formatOptional(member.vps.provider_name)} · ${vpsLocationLabel(member.vps)}`,
+                })))}
               </form>,
             )}
             {groupDetailPanel === 'raw' && renderDetailPanel('数据底稿',
@@ -5251,29 +5232,6 @@ export function AssetDecisionsPage() {
           />
         ) : manualDetailState.detail && manualGroupProgress ? (
           <div className="asset-decision-detail asset-decision-manual-detail">
-            {manualDetailPanel !== 'overview' && <div className="asset-decision-detail__summary">
-              <div>
-                <span>场景</span>
-                <strong>{MANUAL_GROUP_SCENARIO_LABELS[manualDetailState.detail.scenario]}</strong>
-                <small>{MANUAL_GROUP_STATUS_LABELS[manualDetailState.detail.status]}</small>
-              </div>
-              <div>
-                <span>VPS</span>
-                <strong><MonoDigits>{manualDetailState.detail.member_count}</MonoDigits></strong>
-                <small>成员</small>
-              </div>
-              <div>
-                <span>成本</span>
-                <strong>{formatGroupMonthlyCost(manualDetailState.detail)}</strong>
-                <small>月度</small>
-              </div>
-              <div>
-                <span>证据</span>
-                <strong>{EVIDENCE_TIER_LABELS[manualDetailState.detail.evidence_assessment.quality_tier]}</strong>
-                <small>{manualDetailState.detail.evidence_assessment.summary}</small>
-              </div>
-            </div>}
-
             {renderDetailCommand({
               ariaLabel: '自定义组合当前判断',
               title: '当前判断',
@@ -5304,33 +5262,25 @@ export function AssetDecisionsPage() {
               {
                 key: 'members',
                 label: '成员维护',
-                summary: '复核成员意图、证据匹配和移除风险。',
-                meta: '紧凑列表，进入后才显示成员',
                 count: manualDetailState.detail.members.length,
               },
               {
                 key: 'edit',
                 label: '编辑组合',
-                summary: '维护标题、场景、目标和备注。',
                 meta: MANUAL_GROUP_STATUS_LABELS[manualDetailState.detail.status],
               },
               {
                 key: 'save',
-                label: '保存记录面板',
-                summary: '把当前自定义组合沉淀为决策记录。',
+                label: '保存记录',
                 meta: `${manualGroupProgress.readinessLabel} ${manualGroupProgress.doneCount}/${manualGroupProgress.totalCount}`,
               },
               {
                 key: 'add',
                 label: '添加成员',
-                summary: '从当前 VPS 目录选择新成员。',
-                meta: '只修改组合成员，不修改资产事实',
               },
               {
                 key: 'raw',
-                label: '数据底稿',
-                summary: '查看成员当前事实和证据字段。',
-                meta: '表格在面板内横向滚动',
+                label: '底稿',
               },
             ], (panel) => {
               if (panel === 'save' && recordDraft?.sourceType !== 'manual_group') {
@@ -5343,7 +5293,7 @@ export function AssetDecisionsPage() {
             {manualDetailPanel !== 'overview' && manualDetailPanel !== 'directory' && renderDetailPanelNav<ManualDetailPanel>([
               { key: 'members', label: '成员维护', count: manualDetailState.detail.members.length },
               { key: 'edit', label: '编辑组合' },
-              { key: 'save', label: '保存记录', ariaLabel: '保存记录面板' },
+              { key: 'save', label: '保存记录' },
               ...(manualDetailPanel === 'members' || manualDetailPanel === 'add'
                 ? [{ key: 'add' as const, label: '添加成员' }]
                 : []),
@@ -5365,7 +5315,6 @@ export function AssetDecisionsPage() {
                   title: '成员取舍',
                   ariaLabel: '自定义组合成员取舍',
                   showIntent: true,
-                  summary: '人工意图和当前证据并排呈现。',
                   action: (member) => {
                     const sourceMember = manualDetailState.detail?.members.find((item) => item.vps_id === member.key)
                     if (!sourceMember) return null
@@ -5388,9 +5337,7 @@ export function AssetDecisionsPage() {
               <form id="asset-decision-manual-group-form" className="asset-decision-manual-group-form" onSubmit={submitManualGroupPatch}>
               <div className="asset-decision-record-form__header">
                 <div>
-                  <p className="section-heading__eyebrow">SCENARIO</p>
                   <h3>组合场景</h3>
-                  <p>{manualDetailState.detail.source_type === 'auto_group' ? `来自自动组 ${manualDetailState.detail.source_group_id}` : '手工维护的资产对比篮子'}</p>
                 </div>
               </div>
               {manualGroupError && <div className="inline-alert danger">{manualGroupError}</div>}
@@ -5443,9 +5390,7 @@ export function AssetDecisionsPage() {
               <form className="asset-decision-manual-add-form" onSubmit={submitManualMemberAdd}>
               <div className="asset-decision-record-form__header">
                 <div>
-                  <p className="section-heading__eyebrow">MEMBER</p>
                   <h3>加入 VPS</h3>
-                  <p>从当前 VPS 资产目录选择成员，组合只保存意图，不修改 VPS 状态。</p>
                 </div>
                 <button className="btn sm primary" type="submit" disabled={manualGroupSaving || vpsCatalogState.loading || !manualMemberAddDraft.vpsID}>
                   {manualGroupSaving ? '加入中…' : '加入组合'}
@@ -5529,9 +5474,7 @@ export function AssetDecisionsPage() {
               <form className="asset-decision-record-form" onSubmit={submitRecordSave}>
                 <div className="asset-decision-record-form__header">
                   <div>
-                    <p className="section-heading__eyebrow">SAVE DECISION</p>
                     <h3>保存自定义组合决策</h3>
-                    <p>使用当前自定义组合成员意图生成一次可跟进、可回读的决策记录。</p>
                   </div>
                   <div className="asset-decision-member-actions">
                     <button className="btn sm primary" type="submit" disabled={recordSaving}>
@@ -5574,52 +5517,13 @@ export function AssetDecisionsPage() {
                     />
                   </label>
                 </div>
-                <div className="asset-decision-record-form__members">
-                  {manualDetailState.detail.members.map((member) => {
-                    const memberDraft = recordDraft.members[member.vps_id]
-                    return (
-                      <div className="asset-decision-record-form__member" key={member.vps_id}>
-                        <div className="asset-table__identity">
-                          <strong>{member.current_fact_found ? member.vps.display_name : member.vps_id}</strong>
-                          <span>{member.vps_id}</span>
-                          {renderEvidenceChips(member.evidence_chips, 2)}
-                        </div>
-                        <label className="input-field">
-                          <span>角色</span>
-                          <select
-                            className="input"
-                            value={memberDraft?.decidedRole ?? member.intended_role}
-                            onChange={(event) => updateRecordDraftMember(member.vps_id, { decidedRole: event.target.value as AssetDecisionSuggestedRole })}
-                          >
-                            {ROLE_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="input-field">
-                          <span>动作</span>
-                          <select
-                            className="input"
-                            value={memberDraft?.decidedAction ?? member.intended_action}
-                            onChange={(event) => updateRecordDraftMember(member.vps_id, { decidedAction: event.target.value as AssetDecisionSuggestedAction })}
-                          >
-                            {ACTION_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="input-field">
-                          <span>理由</span>
-                          <input
-                            className="input"
-                            value={memberDraft?.reason ?? ''}
-                            onChange={(event) => updateRecordDraftMember(member.vps_id, { reason: event.target.value })}
-                          />
-                        </label>
-                      </div>
-                    )
-                  })}
-                </div>
+                {renderRecordDraftMemberRows(manualDetailState.detail.members.map((member) => ({
+                  vpsID: member.vps_id,
+                  displayName: member.current_fact_found ? member.vps.display_name || member.vps_id : member.vps_id,
+                  fallbackRole: member.intended_role,
+                  fallbackAction: member.intended_action,
+                  meta: member.current_fact_found ? `${formatOptional(member.vps.provider_name)} · ${vpsLocationLabel(member.vps)}` : '当前事实缺失',
+                })))}
               </form>,
             )}
 
@@ -5693,29 +5597,6 @@ export function AssetDecisionsPage() {
           />
         ) : templateDetailState.detail ? (
           <div className="asset-decision-detail asset-decision-template-detail">
-            {templateDetailPanel !== 'overview' && <div className="asset-decision-detail__summary">
-              <div>
-                <span>场景</span>
-                <strong>{MANUAL_GROUP_SCENARIO_LABELS[templateDetailState.detail.scenario]}</strong>
-                <small>{templateDetailState.detail.template_id}</small>
-              </div>
-              <div>
-                <span>类型</span>
-                <strong>{templateDetailState.detail.builtin ? '内置模板' : '自定义模板'}</strong>
-                <small>{SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status]}</small>
-              </div>
-              <div>
-                <span>蓝图成员</span>
-                <strong><MonoDigits>{templateDetailState.detail.member_count}</MonoDigits></strong>
-                <small>{templateDetailState.detail.source_manual_group_id ? `来自 ${templateDetailState.detail.source_manual_group_id}` : '创建时读取当前事实'}</small>
-              </div>
-              <div>
-                <span>更新</span>
-                <strong>{templateDetailState.detail.builtin ? '版本内置' : formatDateTime(templateDetailState.detail.updated_at)}</strong>
-                <small>{templateDetailState.detail.archived_at ? `归档 ${formatDateTime(templateDetailState.detail.archived_at)}` : '可用于创建组合'}</small>
-              </div>
-            </div>}
-
             {renderDetailCommand({
               ariaLabel: '场景模板当前判断',
               title: '当前模板',
@@ -5739,43 +5620,25 @@ export function AssetDecisionsPage() {
               {
                 key: 'create',
                 label: '创建组合',
-                summary: '从模板启动一个新的自定义组合。',
-                meta: templateDetailState.detail.status === 'active' ? '创建时重新读取当前事实' : '模板已归档，不能创建',
+                meta: templateDetailState.detail.status === 'active' ? '可创建' : '模板已归档',
               },
               {
                 key: 'members',
                 label: '成员蓝图',
-                summary: '查看模板固定的成员意图。',
                 meta: templateDetailState.detail.source_manual_group_id ? `来自 ${templateDetailState.detail.source_manual_group_id}` : '内置模板不固定成员',
                 count: templateDetailState.detail.member_count,
               },
               ...(!templateDetailState.detail.builtin ? [{
                 key: 'status' as const,
                 label: '状态维护',
-                summary: '归档或重新启用这个模板。',
                 meta: SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status],
               }] : []),
             ], setTemplateDetailPanel)}
 
-            {templateDetailPanel !== 'overview' && templateDetailPanel !== 'directory' && <div className="asset-decision-record-detail__lead">
-              <div>
-                <strong>{templateDetailState.detail.goal || '从该场景创建自定义组合后再细化目标'}</strong>
-                <span>{templateDetailState.detail.note || '模板只保存场景 blueprint，不保存当前成本、订阅、监控或服务事实。'}</span>
-              </div>
-              <div className="asset-decision-template-status-actions">
-                <Badge variant="state" tone={scenarioTemplateStatusTone(templateDetailState.detail.status)}>
-                  {SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status]}
-                </Badge>
-                <Badge variant="count" tone={templateDetailState.detail.member_count > 0 ? 'notice' : 'neutral'}>
-                  蓝图 {templateDetailState.detail.member_count}
-                </Badge>
-              </div>
-            </div>}
-
             {templateDetailPanel !== 'overview' && templateDetailPanel !== 'directory' && renderDetailPanelNav<TemplateDetailPanel>([
-              { key: 'create', label: '创建组合', summary: '从模板启动' },
-              { key: 'members', label: '成员蓝图', summary: '模板成员', count: templateDetailState.detail.member_count },
-              ...(!templateDetailState.detail.builtin ? [{ key: 'status' as const, label: '状态维护', summary: SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status] }] : []),
+              { key: 'create', label: '创建组合' },
+              { key: 'members', label: '成员蓝图', count: templateDetailState.detail.member_count },
+              ...(!templateDetailState.detail.builtin ? [{ key: 'status' as const, label: '状态维护' }] : []),
             ], templateDetailPanel, setTemplateDetailPanel)}
             {templateError && <div className="inline-alert danger">{templateError}</div>}
 
@@ -5823,9 +5686,7 @@ export function AssetDecisionsPage() {
               <form className="asset-decision-template-form" onSubmit={submitTemplateManualGroup}>
               <div className="asset-decision-record-form__header">
                 <div>
-                  <p className="section-heading__eyebrow">CREATE SCENARIO</p>
                   <h3>从模板创建自定义组合</h3>
-                  <p>创建时后端会重新读取当前 VPS、订阅、服务、域名、Target 和监控关联事实。</p>
                 </div>
                 <button className="btn sm primary" type="submit" disabled={templateSaving || templateDetailState.detail.status !== 'active'}>
                   {templateSaving ? '创建中…' : '创建组合'}
@@ -5879,9 +5740,7 @@ export function AssetDecisionsPage() {
               <div className="asset-decision-template-members">
               <div className="asset-decision-record-form__header">
                 <div>
-                  <p className="section-heading__eyebrow">BLUEPRINT</p>
                   <h3>成员蓝图</h3>
-                  <p>{templateDetailState.detail.member_count > 0 ? '自定义模板会按蓝图成员重新读取当前事实。' : '内置模板不固定成员，适合从当前筛选场景启动。'}</p>
                 </div>
               </div>
               {templateDetailState.detail.members.length === 0 ? (
@@ -5898,7 +5757,7 @@ export function AssetDecisionsPage() {
                     <div className="asset-decision-template-member" key={member.member_id || `${member.vps_id}-${member.sort_order}`}>
                       <div className="asset-table__identity">
                         <strong>{member.vps_id || '待补 VPS'}</strong>
-                        <span>{member.reason || '未填写理由'}</span>
+                        <span>{ROLE_LABELS[member.intended_role ?? 'observe_candidate']} · {ACTION_LABELS[member.intended_action ?? 'review']}</span>
                       </div>
                       <span className="asset-decision-chip-row">
                         <Badge variant="state" tone={roleTone(member.intended_role ?? 'observe_candidate')}>
@@ -5908,7 +5767,6 @@ export function AssetDecisionsPage() {
                           {ACTION_LABELS[member.intended_action ?? 'review']}
                         </Badge>
                       </span>
-                      <span>{member.note || '无备注'}</span>
                     </div>
                   ))}
                 </div>
@@ -5959,30 +5817,6 @@ export function AssetDecisionsPage() {
           />
         ) : recordDetailState.detail ? (
           <div className="asset-decision-detail asset-decision-record-detail">
-            {recordDetailPanel !== 'overview' && <div className="asset-decision-detail__summary">
-              <div>
-                <span>状态</span>
-                <strong>{RECORD_STATUS_LABELS[recordDetailState.detail.status]}</strong>
-                <small>记录</small>
-              </div>
-              <div>
-                <span>成员</span>
-                <strong><MonoDigits>{recordDetailState.detail.member_count}</MonoDigits></strong>
-                <small>{recordDetailState.detail.scope_label || '组合'}</small>
-              </div>
-              <div>
-                <span>跟进</span>
-                <strong>
-                  <MonoDigits>{recordFollowupDoneCount(recordDetailState.detail)}</MonoDigits>/<MonoDigits>{recordDetailState.detail.member_count}</MonoDigits>
-                </strong>
-                <small>已完成 / 总数</small>
-              </div>
-              <div>
-                <span>执行回读</span>
-                <strong>{recordDetailState.detail.execution_readback?.status ? READBACK_STATUS_LABELS[recordDetailState.detail.execution_readback.status] : '等待回读'}</strong>
-                <small>{recordDetailState.detail.execution_readback?.summary || '等待执行证据'}</small>
-              </div>
-            </div>}
             {recordDetailPanel === 'overview' ? renderDetailCommand({
               ariaLabel: '保存记录当前判断',
               title: '当前记录',
@@ -5992,12 +5826,35 @@ export function AssetDecisionsPage() {
               insight: parseComparisonInsight(recordDetailState.detail.evidence_snapshot),
               chips: [],
               actions: (
-                <button className="btn-text sm secondary" type="button" onClick={() => setRecordDetailPanel('execution')}>
+                <button className="btn-text sm secondary" type="button" onClick={() => setRecordDetailPanel('directory')}>
                   查看详情
                 </button>
               ),
-            }) : renderRecordSavedEvidence(recordDetailState.detail, selectedRecordAssessment)}
-            {recordDetailPanel !== 'overview' && renderDetailPanelNav<RecordDetailPanel>([
+            }) : null}
+            {recordDetailPanel === 'directory' && renderDetailDirectory<RecordDetailPanel>('保存记录详情目录', [
+              {
+                key: 'execution',
+                label: '执行跟进',
+                meta: executionPlanCountSummary(recordDetailState.detail.execution_plan),
+                count: recordDetailState.detail.execution_plan?.actionable_count ?? 0,
+              },
+              {
+                key: 'members',
+                label: '成员跟进',
+                meta: `成员 ${recordDetailState.detail.members.length}`,
+                count: recordDetailState.detail.members.length,
+              },
+              {
+                key: 'source',
+                label: '来源复核',
+                meta: recordSourceLabel(recordDetailState.detail),
+              },
+              {
+                key: 'raw',
+                label: '成员底稿',
+              },
+            ], setRecordDetailPanel)}
+            {recordDetailPanel !== 'overview' && recordDetailPanel !== 'directory' && renderDetailPanelNav<RecordDetailPanel>([
               { key: 'execution', label: '执行跟进', count: recordDetailState.detail.execution_plan?.actionable_count ?? 0 },
               { key: 'members', label: '成员跟进', count: recordDetailState.detail.members.length },
               { key: 'source', label: '来源复核' },
@@ -6032,8 +5889,6 @@ export function AssetDecisionsPage() {
             {recordDetailPanel === 'source' && renderDetailPanel('来源复核',
               <section className="asset-decision-record-continuity" aria-label="决策记录来源连续性">
                 <div>
-                  <p className="section-heading__eyebrow">SOURCE CONTINUITY</p>
-                  <h3>来源与当前闭环</h3>
                   <strong>{recordSourceLabel(recordDetailState.detail)}</strong>
                   <span>{recordSourceDetail(recordDetailState.detail)}</span>
                 </div>

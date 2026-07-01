@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 220
+- **Total Sessions**: 221
 - **Last Active**: 2026-07-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1487 | Active |
+| `journal-4.md` | ~1520 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 221 | 2026-07-01 | Asset decision modal density cleanup | `1ffc036` | `ux/asset-decision-modal-density-audit` |
 | 220 | 2026-07-01 | Asset decision workbench deep clean | `d6ffb18` | `ux/asset-decision-workbench-deep-clean` |
 | 219 | 2026-07-01 | Asset decision workbench third-pass refactor | `bdacc85` | `ux/asset-decision-workbench-third-pass` |
 | 218 | 2026-07-01 | Second-pass asset decision modal declutter | `cd99419` | `ux/asset-decision-modal-second-pass` |
