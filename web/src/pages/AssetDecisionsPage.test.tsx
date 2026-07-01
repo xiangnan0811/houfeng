@@ -510,6 +510,121 @@ function manualGroupDetail(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function cloneGroupMember(index: number) {
+  const [primary, standby] = groupDetail().members
+  const baseMember = index % 2 === 0 ? primary : standby
+  const lane = index % 3 === 0 ? 'primary' : index % 3 === 1 ? 'evidence' : 'review'
+  const suggestedRole = lane === 'primary' ? 'primary_candidate' : lane === 'evidence' ? 'evidence_needed' : 'observe_candidate'
+  const suggestedAction = lane === 'primary' ? 'keep' : lane === 'evidence' ? 'complete_evidence' : 'review'
+  return {
+    ...baseMember,
+    vps: {
+      ...baseMember.vps,
+      vps_id: `vps_bulk_${index}`,
+      display_name: `Bulk Member ${index}`,
+      renewal_decision: suggestedAction === 'keep' ? 'keep' : 'unreviewed',
+    },
+    primary_subscription: baseMember.primary_subscription
+      ? {
+        ...baseMember.primary_subscription,
+        subscription_id: `sub_bulk_${index}`,
+        vps_id: `vps_bulk_${index}`,
+      }
+      : null,
+    suggested_role: suggestedRole,
+    suggested_action: suggestedAction,
+    evidence_assessment: evidenceAssessment({
+      quality_tier: lane === 'evidence' ? 'blocked' : 'usable',
+      decision_bias: suggestedAction,
+    }),
+    comparison_insight: memberComparisonInsight({
+      rank: index,
+      lane,
+      summary: `Bulk Member ${index} 的紧凑取舍判断`,
+    }),
+  }
+}
+
+function groupDetailWithManyMembers(count = 8) {
+  const members = Array.from({ length: count }, (_, index) => cloneGroupMember(index + 1))
+  return {
+    ...groupDetail(),
+    member_count: members.length,
+    members,
+  }
+}
+
+function manualGroupDetailWithManyMembers(count = 8) {
+  const members = groupDetailWithManyMembers(count).members.map((member, index) => ({
+    ...member,
+    manual_group_id: 'admg_001',
+    vps_id: member.vps.vps_id,
+    intended_role: member.suggested_role,
+    intended_action: member.suggested_action,
+    reason: `成员 ${index + 1} 取舍理由`,
+    note: '',
+    sort_order: (index + 1) * 10,
+    evidence_snapshot: { vps_id: member.vps.vps_id, service_count: member.service_count },
+    current_fact_found: true,
+    created_at: '2026-06-06T08:00:00Z',
+    updated_at: '2026-06-06T08:00:00Z',
+  }))
+  return {
+    ...manualGroupDetail(),
+    member_count: members.length,
+    members,
+  }
+}
+
+function cloneRecordMember(index: number) {
+  const baseMember = decisionRecord().members[0]
+  const lane = index % 3 === 0 ? 'cancel_retire' : index % 3 === 1 ? 'evidence' : 'keep_observe'
+  const stepKind = lane === 'cancel_retire'
+    ? 'open_cancellation_workbench'
+    : lane === 'evidence'
+      ? 'open_subscription_context'
+      : 'open_vps_detail'
+  return {
+    ...baseMember,
+    vps_id: `vps_record_bulk_${index}`,
+    display_name: `Record Bulk ${index}`,
+    decided_action: lane === 'cancel_retire' ? 'open_cancellation_workbench' : lane === 'evidence' ? 'complete_evidence' : 'keep',
+    followup_status: 'todo',
+    execution_readback: memberReadback({
+      status: lane === 'evidence' ? 'needs_evidence' : 'aligned',
+      summary: `Record Bulk ${index} 当前回读`,
+      issues: lane === 'evidence' ? [{ kind: 'missing_subscription', label: '缺订阅', tone: 'alert', details: '' }] : [],
+    }),
+    execution_plan: memberExecutionPlan({
+      lane,
+      step_kind: stepKind,
+      tone: lane === 'cancel_retire' ? 'critical' : lane === 'evidence' ? 'alert' : 'normal',
+      summary: `Record Bulk ${index} 的执行下一步`,
+      step_label: lane === 'cancel_retire' ? '打开取消/退役工作台' : lane === 'evidence' ? '核对订阅上下文' : '打开 VPS 详情核对判断',
+      issue_count: lane === 'evidence' ? 1 : 0,
+      blocked: false,
+      actionable: true,
+    }),
+  }
+}
+
+function decisionRecordWithManyMembers(count = 8) {
+  const members = Array.from({ length: count }, (_, index) => cloneRecordMember(index + 1))
+  return decisionRecord({
+    member_count: members.length,
+    followup_todo_count: members.length,
+    execution_plan: recordExecutionPlan({
+      lane_counts: [
+        { lane: 'evidence', count: Math.ceil(count / 3) },
+        { lane: 'keep_observe', count: Math.floor(count / 3) },
+        { lane: 'cancel_retire', count: Math.floor(count / 3) },
+      ],
+      actionable_count: members.length,
+    }),
+    members,
+  })
+}
+
 function manualGroupSummary(overrides: Record<string, unknown> = {}) {
   const detail = manualGroupDetail()
   const summary = {
@@ -1312,6 +1427,82 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).getAllByRole('button', { name: '处理' }).length).toBeGreaterThan(0)
   })
 
+  it('caps automatic group member and save panels to preview rows for large groups', async () => {
+    const largeDetail = groupDetailWithManyMembers(8)
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      groupsBody: [groupSummary({ member_count: largeDetail.members.length })],
+      routes: [
+        { url: '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', body: largeDetail },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByRole('button', { name: '查看组' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '详情' }))
+    const memberDecisions = openAutomaticGroupMembers(dialog)
+    expect(memberDecisions.querySelectorAll('.asset-decision-member-row')).toHaveLength(3)
+    expect(within(memberDecisions).getByText('Bulk Member 1')).toBeInTheDocument()
+    expect(within(memberDecisions).getByText('Bulk Member 2')).toBeInTheDocument()
+    expect(within(memberDecisions).getByText('Bulk Member 3')).toBeInTheDocument()
+    expect(within(memberDecisions).queryByText('Bulk Member 8')).not.toBeInTheDocument()
+    expect(within(memberDecisions).getByText('另有 5 台在底稿中查看')).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+    const saveMembers = within(dialog).getByLabelText('保存记录成员复核')
+    expect(saveMembers.querySelectorAll('.asset-decision-save-member')).toHaveLength(3)
+    expect(within(saveMembers).getByRole('button', { name: '编辑 Bulk Member 1 成员理由' })).toBeInTheDocument()
+    expect(within(saveMembers).queryByRole('button', { name: '编辑 Bulk Member 8 成员理由' })).not.toBeInTheDocument()
+    expect(within(saveMembers).getByText('另有 5 台成员保留在保存底稿中')).toBeInTheDocument()
+  })
+
+  it('caps manual group member and save panels to preview rows for large groups', async () => {
+    const largeManual = manualGroupDetailWithManyMembers(8)
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      manualGroupsBody: [manualGroupSummary({ member_count: largeManual.members.length })],
+      routes: [
+        { url: '/api/asset-decisions/manual-groups/admg_001', body: largeManual },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await openSecondaryWorkbench('打开场景')
+    await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
+    const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
+    fireEvent.click(within(manualSection!).getByRole('button', { name: '查看组合' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '查看详情' }))
+    const memberDecisions = openManualGroupMembers(dialog)
+    expect(memberDecisions.querySelectorAll('.asset-decision-member-row')).toHaveLength(3)
+    expect(within(memberDecisions).getByText('Bulk Member 1')).toBeInTheDocument()
+    expect(within(memberDecisions).queryByText('Bulk Member 8')).not.toBeInTheDocument()
+    expect(within(memberDecisions).getByText('另有 5 台在底稿中查看')).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+    const saveMembers = within(dialog).getByLabelText('保存记录成员复核')
+    expect(saveMembers.querySelectorAll('.asset-decision-save-member')).toHaveLength(3)
+    expect(within(saveMembers).getByRole('button', { name: '编辑 Bulk Member 1 成员理由' })).toBeInTheDocument()
+    expect(within(saveMembers).queryByRole('button', { name: '编辑 Bulk Member 8 成员理由' })).not.toBeInTheDocument()
+    expect(within(saveMembers).getByText('另有 5 台成员保留在保存底稿中')).toBeInTheDocument()
+  })
+
   it('saves a decision group as a persistent decision record', async () => {
     const created = decisionRecord({
       record_id: 'adr_created',
@@ -1998,6 +2189,41 @@ describe('AssetDecisionsPage', () => {
     expectAutomaticGroupDetailDirectory(sourceDialog)
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30')
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/vps/') && call[1]?.method === 'PATCH')).toBe(false)
+  })
+
+  it('caps saved record execution board to actionable preview cards for large records', async () => {
+    const largeRecord = decisionRecordWithManyMembers(8)
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      recordsBody: [largeRecord],
+      routes: [
+        { url: '/api/asset-decisions/records/adr_001', body: largeRecord },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await openSecondaryWorkbench('打开记录')
+    await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
+    const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
+    fireEvent.click(within(recordsSection!).getByRole('button', { name: '查看记录' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '查看详情' }))
+    expectSavedRecordDetailDirectory(dialog)
+    fireEvent.click(within(dialog).getByRole('button', { name: '执行跟进' }))
+    const executionBoard = within(dialog).getByLabelText('执行编排')
+    expect(executionBoard.querySelectorAll('.asset-decision-execution-card')).toHaveLength(3)
+    expect(within(executionBoard).getByText('Record Bulk 1')).toBeInTheDocument()
+    expect(within(executionBoard).getByText('Record Bulk 2')).toBeInTheDocument()
+    expect(within(executionBoard).getByText('Record Bulk 3')).toBeInTheDocument()
+    expect(within(executionBoard).queryByText('Record Bulk 8')).not.toBeInTheDocument()
+    expect(within(executionBoard).getByText('另有 5 台在成员跟进或底稿中查看')).toBeInTheDocument()
   })
 
   it('maps execution plan subscription CTA without writing business assets', async () => {
