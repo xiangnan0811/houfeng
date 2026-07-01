@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.56.2](https://github.com/xiangnan0811/houfeng/compare/v0.56.1...v0.56.2) (2026-07-01)
+
+
+### Bug Fixes
+
+* simplify asset decision detail modals ([77fd443](https://github.com/xiangnan0811/houfeng/commit/77fd443f2d9acafb0eb26e097d4bf974cc35ebfe))
+
+
+### Documentation
+
+* **task:** plan asset decision modal simplification ([10a894b](https://github.com/xiangnan0811/houfeng/commit/10a894b41cd5384e0313faf7bb1d31ebef197985))
+
 ## [0.56.1](https://github.com/xiangnan0811/houfeng/compare/v0.56.0...v0.56.1) (2026-07-01)
 
 
