@@ -1452,3 +1452,36 @@ Simplified asset decision group, manual group, and saved record defaults into de
 ### Next Steps
 
 - None - task complete
+
+
+## Session 220: Asset decision workbench deep clean
+
+**Date**: 2026-07-01
+**Task**: Asset decision workbench deep clean
+**Branch**: `ux/asset-decision-workbench-deep-clean`
+
+### Summary
+
+Refactored asset decision detail dialogs to use cover-first and directory-first disclosure, compact member rows, strengthened tests and browser sanity for desktop/mobile.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d6ffb18` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
