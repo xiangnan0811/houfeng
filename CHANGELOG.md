@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.56.4](https://github.com/xiangnan0811/houfeng/compare/v0.56.3...v0.56.4) (2026-07-01)
+
+
+### Bug Fixes
+
+* refine asset decision modal defaults ([cd99419](https://github.com/xiangnan0811/houfeng/commit/cd9941920957060f631ce6d4ed9c05e57428992b))
+
 ## [0.56.3](https://github.com/xiangnan0811/houfeng/compare/v0.56.2...v0.56.3) (2026-07-01)
 
 
