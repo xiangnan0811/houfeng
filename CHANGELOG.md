@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.56.8](https://github.com/xiangnan0811/houfeng/compare/v0.56.7...v0.56.8) (2026-07-01)
+
+
+### Bug Fixes
+
+* tighten asset decision modal covers ([#312](https://github.com/xiangnan0811/houfeng/issues/312)) ([09d617f](https://github.com/xiangnan0811/houfeng/commit/09d617f8a3465fef44ea6a74ec3f652d2027178e))
+
 ## [0.56.7](https://github.com/xiangnan0811/houfeng/compare/v0.56.6...v0.56.7) (2026-07-01)
 
 
