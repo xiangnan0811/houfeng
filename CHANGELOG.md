@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.6](https://github.com/xiangnan0811/houfeng/compare/v0.56.5...v0.56.6) (2026-07-01)
+
+
+### Bug Fixes
+
+* deep clean asset decision workbench ([c3327c7](https://github.com/xiangnan0811/houfeng/commit/c3327c75d41238b60965b8eddf60f6dd030c9f06))
+* deep clean asset decision workbench ([d6ffb18](https://github.com/xiangnan0811/houfeng/commit/d6ffb18238f7d9a11b4639df2cfb4696fbb2ff2b))
+
 ## [0.56.5](https://github.com/xiangnan0811/houfeng/compare/v0.56.4...v0.56.5) (2026-07-01)
 
 
