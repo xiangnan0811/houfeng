@@ -1285,3 +1285,37 @@ Redesigned /asset-decisions into a portfolio-first workbench, moved records/scen
 ### Next Steps
 
 - None - task complete
+
+
+## Session 215: 重构资产决策详情弹窗
+
+**Date**: 2026-07-01
+**Task**: 重构资产决策详情弹窗
+**Branch**: `ux/asset-decision-dialog-redesign`
+
+### Summary
+
+重构 /asset-decisions 自动组、自定义组和保存记录详情弹窗的信息架构，移除默认解释矩阵，补测试、样式、前端规范和浏览器 sanity 证据。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0db5686` | (see git log) |
+| `99b4bfa` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
