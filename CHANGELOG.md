@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.56.9](https://github.com/xiangnan0811/houfeng/compare/v0.56.8...v0.56.9) (2026-07-01)
+
+
+### Bug Fixes
+
+* cap asset decision modal previews ([#314](https://github.com/xiangnan0811/houfeng/issues/314)) ([df020a7](https://github.com/xiangnan0811/houfeng/commit/df020a7b1f0158ade5296373717153d0c314146d))
+
 ## [0.56.8](https://github.com/xiangnan0811/houfeng/compare/v0.56.7...v0.56.8) (2026-07-01)
 
 
