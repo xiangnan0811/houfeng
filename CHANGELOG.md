@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.56.0](https://github.com/xiangnan0811/houfeng/compare/v0.55.7...v0.56.0) (2026-07-01)
+
+
+### Features
+
+* redesign asset decisions workbench ([07b10b3](https://github.com/xiangnan0811/houfeng/commit/07b10b37cd2d922636edf67e67e33e547d2aff87))
+
 ## [0.55.7](https://github.com/xiangnan0811/houfeng/compare/v0.55.6...v0.55.7) (2026-06-30)
 
 
