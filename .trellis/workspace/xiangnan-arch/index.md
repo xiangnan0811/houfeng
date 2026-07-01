@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 216
+- **Total Sessions**: 217
 - **Last Active**: 2026-07-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1355 | Active |
+| `journal-4.md` | ~1388 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 217 | 2026-07-01 | Declutter asset decision workbench | `3104b0e` | `ux/asset-decision-page-declutter-audit` |
 | 216 | 2026-07-01 | Asset decision modal simplification | `10a894b`, `77fd443` | `ux/asset-decision-modal-simplification` |
 | 215 | 2026-07-01 | 重构资产决策详情弹窗 | `0db5686`, `99b4bfa` | `ux/asset-decision-dialog-redesign` |
 | 214 | 2026-07-01 | Asset decisions IA redesign | `c831013` | `ux/asset-decisions-ia-redesign` |
