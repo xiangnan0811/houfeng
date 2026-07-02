@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.12](https://github.com/xiangnan0811/houfeng/compare/v0.56.11...v0.56.12) (2026-07-02)
+
+
+### Bug Fixes
+
+* refine asset decision workbench ux ([b5e4805](https://github.com/xiangnan0811/houfeng/commit/b5e4805d105423c7d05f0f4e53db37b3fb1ce8b6))
+* refine asset decision workbench ux ([33bf6f6](https://github.com/xiangnan0811/houfeng/commit/33bf6f6b6ea2f2b2984be4d239e610e47bc52577))
+
 ## [0.56.11](https://github.com/xiangnan0811/houfeng/compare/v0.56.10...v0.56.11) (2026-07-02)
 
 
