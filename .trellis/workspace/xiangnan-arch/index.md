@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 224
+- **Total Sessions**: 225
 - **Last Active**: 2026-07-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1620 | Active |
+| `journal-4.md` | ~1653 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 225 | 2026-07-02 | Asset decision modal visual simplification | `e5cd15a` | `chore/archive-asset-decision-modal-visual-simplification` |
 | 224 | 2026-07-02 | Asset Decision Modal Density Follow-up | `45890f7` | `fix/asset-decision-modal-comprehensive-density` |
 | 223 | 2026-07-02 | Archive asset decision modal density audit | `df020a7` | `chore/archive-asset-decision-modal-density-audit` |
 | 222 | 2026-07-01 | 收敛资产决策弹窗封面 | `f404b16`, `72b0518` | `ux/asset-decision-modal-full-audit` |
