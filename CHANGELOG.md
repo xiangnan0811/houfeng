@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.13](https://github.com/xiangnan0811/houfeng/compare/v0.56.12...v0.56.13) (2026-07-02)
+
+
+### Bug Fixes
+
+* complete asset decision workflow ([b66bf5f](https://github.com/xiangnan0811/houfeng/commit/b66bf5fa825b6a84434ec4ce9236caf80caca455))
+* complete asset decision workflow ([b3a53d7](https://github.com/xiangnan0811/houfeng/commit/b3a53d70b8b6d2aefd5416d5498e9f5e4b80e9c2))
+
 ## [0.56.12](https://github.com/xiangnan0811/houfeng/compare/v0.56.11...v0.56.12) (2026-07-02)
 
 
