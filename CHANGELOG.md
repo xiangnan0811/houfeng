@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.11](https://github.com/xiangnan0811/houfeng/compare/v0.56.10...v0.56.11) (2026-07-02)
+
+
+### Bug Fixes
+
+* simplify asset decision modal density ([5b8bbb5](https://github.com/xiangnan0811/houfeng/commit/5b8bbb55809c745464ded2bd0c3e8c03d0f325e7))
+* simplify asset decision modal density ([e5cd15a](https://github.com/xiangnan0811/houfeng/commit/e5cd15a8be1c6297d9803771f03b5e34346945ba))
+
 ## [0.56.10](https://github.com/xiangnan0811/houfeng/compare/v0.56.9...v0.56.10) (2026-07-01)
 
 
