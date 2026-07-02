@@ -1684,3 +1684,36 @@ Refactored asset decision modal information architecture and density, validated 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 227: Complete asset decision workflow
+
+**Date**: 2026-07-02
+**Task**: Complete asset decision workflow
+**Branch**: `ux/asset-decisions-complete`
+
+### Summary
+
+Completed asset decision page workflow fixes, backend archived-template guard, visual/browser verification, and spec update.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b3a53d7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
