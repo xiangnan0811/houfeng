@@ -961,11 +961,40 @@ function expectMemberRowsUseSingleAction(container: HTMLElement) {
   })
 }
 
+function expectTaskPanelDensity(
+  container: HTMLElement,
+  options: {
+    textMax: number
+    interactiveMax: number
+    inputsMax?: number
+    memberRowsMax?: number
+  },
+) {
+  const text = normalizedText(container)
+  const interactiveCount = container.querySelectorAll('button, a[href]').length
+  const inputCount = container.querySelectorAll('input, textarea, select').length
+  const memberRows = container.querySelectorAll('.asset-decision-member-row, .asset-decision-record-followup-row, .asset-decision-execution-card, .asset-decision-save-member, .asset-decision-template-member').length
+  expect(text.length).toBeLessThanOrEqual(options.textMax)
+  expect(interactiveCount).toBeLessThanOrEqual(options.interactiveMax)
+  expect(inputCount).toBeLessThanOrEqual(options.inputsMax ?? 0)
+  if (options.memberRowsMax != null) {
+    expect(memberRows).toBeLessThanOrEqual(options.memberRowsMax)
+  }
+}
+
+function expectNoDetailCoverWhileInTaskPanel(dialog: HTMLElement) {
+  expect(within(dialog).queryByLabelText('决策组当前判断')).not.toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('自定义组合当前判断')).not.toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('场景模板当前判断')).not.toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('保存记录当前判断')).not.toBeInTheDocument()
+}
+
 function expectSavedRecordMembersPanelIsCompact(dialog: HTMLElement) {
   const panel = within(dialog).getByLabelText('成员跟进列表')
   expect(panel.querySelector('.asset-table-scroll')).toBeNull()
   expect(panel.querySelector('table')).toBeNull()
   expect(panel.querySelectorAll('.asset-decision-record-followup-row').length).toBeGreaterThan(0)
+  expect(panel.querySelectorAll('input, textarea, select')).toHaveLength(0)
   expect(within(panel).queryByRole('columnheader', { name: 'VPS' })).not.toBeInTheDocument()
   expect(within(panel).queryByRole('columnheader', { name: '当前事实' })).not.toBeInTheDocument()
   expect(within(panel).queryByRole('columnheader', { name: '跟进' })).not.toBeInTheDocument()
@@ -1389,8 +1418,10 @@ describe('AssetDecisionsPage', () => {
     const memberDecisions = openAutomaticGroupMembers(dialog)
     expect(within(dialog).getByRole('heading', { name: '成员取舍' })).toBeInTheDocument()
     expect(within(memberDecisions).getByText('主力候选：承载服务且监控证据可用')).toBeInTheDocument()
-    expect(within(memberDecisions).getByText('补证据候选：缺订阅和监控关联后再判断是否备用')).toBeInTheDocument()
+    expect(within(memberDecisions).getByText(/补证据候选：缺订阅和监控关联后再判断/)).toBeInTheDocument()
     expectAutomaticGroupMembersPanelIsCompact(dialog, memberDecisions)
+    expectNoDetailCoverWhileInTaskPanel(dialog)
+    expectTaskPanelDensity(dialog, { textMax: 180, interactiveMax: 7, memberRowsMax: 3 })
     fireEvent.click(within(dialog).getByRole('button', { name: '原始明细' }))
     expect(within(dialog).getByLabelText('决策组成员对比')).toBeInTheDocument()
     expect(within(dialog).getByRole('columnheader', { name: '建议' })).toBeInTheDocument()
@@ -1448,6 +1479,8 @@ describe('AssetDecisionsPage', () => {
     expectAutomaticGroupDetailDirectory(dialog)
     const memberDecisions = openAutomaticGroupMembers(dialog)
     expectAutomaticGroupMembersPanelIsCompact(dialog, memberDecisions)
+    expectNoDetailCoverWhileInTaskPanel(dialog)
+    expectTaskPanelDensity(dialog, { textMax: 180, interactiveMax: 7, memberRowsMax: 3 })
     expect(within(dialog).getAllByRole('button', { name: '处理' }).length).toBeGreaterThan(0)
   })
 
@@ -1651,7 +1684,6 @@ describe('AssetDecisionsPage', () => {
     expect(within(manualDialog).queryByText('人工意图和当前证据并排呈现。')).not.toBeInTheDocument()
     expect(within(manualMembers).getByText('意图匹配')).toBeInTheDocument()
     expect(within(manualMembers).getByText('Germany Primary')).toBeInTheDocument()
-    expect(within(manualDialog).getAllByText(/可保存记录 5\/5|接近可保存|继续整理/).length).toBeGreaterThan(0)
     expect(within(manualMembers).getByText('主力候选：承载服务且监控证据可用')).toBeInTheDocument()
     fireEvent.click(within(manualDialog).getByRole('button', { name: '编辑组合' }))
     expect(within(manualDialog).getByRole('heading', { name: '组合场景' })).toBeInTheDocument()
@@ -1959,11 +1991,16 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).queryByText('归档或重新启用这个模板。')).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '创建组合' }))
     expect(within(dialog).getByRole('heading', { name: '从模板创建自定义组合' })).toBeInTheDocument()
+    expectNoDetailCoverWhileInTaskPanel(dialog)
+    expectTaskPanelDensity(dialog, { textMax: 132, interactiveMax: 5, inputsMax: 4 })
     expect(within(dialog).queryByText('CREATE SCENARIO')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('创建时后端会重新读取当前 VPS、订阅、服务、域名、Target 和监控关联事实。')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('模板只保存场景 blueprint，不保存当前成本、订阅、监控或服务事实。')).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '成员蓝图' }))
     expect(within(dialog).getByRole('heading', { name: '成员蓝图' })).toBeInTheDocument()
+    expectNoDetailCoverWhileInTaskPanel(dialog)
+    expectTaskPanelDensity(dialog, { textMax: 120, interactiveMax: 4, memberRowsMax: 2 })
+    expect(within(dialog).queryByText(/vps_/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText('BLUEPRINT')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('自定义模板会按蓝图成员重新读取当前事实。')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('内置模板不固定成员，适合从当前筛选场景启动。')).not.toBeInTheDocument()
@@ -2111,6 +2148,8 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).queryByText('保存时判断依据')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('EXECUTION PLAN')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { name: '执行编排' })).not.toBeInTheDocument()
+    expectNoDetailCoverWhileInTaskPanel(dialog)
+    expectTaskPanelDensity(dialog, { textMax: 260, interactiveMax: 9, inputsMax: 1, memberRowsMax: 3 })
     fireEvent.change(within(dialog).getByLabelText('推进状态'), { target: { value: 'in_progress' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '更新状态' }))
 
@@ -2160,6 +2199,10 @@ describe('AssetDecisionsPage', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: '成员跟进' }))
     expectSavedRecordMembersPanelIsCompact(dialog)
+    expectNoDetailCoverWhileInTaskPanel(dialog)
+    expectTaskPanelDensity(dialog, { textMax: 220, interactiveMax: 9, inputsMax: 0, memberRowsMax: 3 })
+    expect(within(dialog).queryByLabelText('Germany Primary 跟进状态')).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '编辑 Germany Primary 跟进' }))
     fireEvent.change(within(dialog).getByLabelText('Germany Primary 跟进状态'), { target: { value: 'blocked' } })
     fireEvent.change(within(dialog).getByLabelText('Germany Primary 跟进备注'), { target: { value: '等待迁移窗口' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '保存跟进' }))
@@ -2190,8 +2233,11 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).getByLabelText('Germany Primary 跟进备注')).toHaveValue('等待迁移窗口')
     expect(within(dialog).getAllByText('有漂移').length).toBeGreaterThan(0)
     expect(within(dialog).queryByText('仍有 active 订阅')).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('link', { name: '打开取消/退役工作台' })).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '执行跟进' }))
     const cancelLinks = within(dialog).getAllByRole('link', { name: '打开取消/退役工作台' })
     expect(cancelLinks[0]).toHaveAttribute('href', '/vps/vps_primary?workbench=cancellation')
+    fireEvent.click(within(dialog).getByRole('button', { name: '成员跟进' }))
     openSavedRecordRawMembersPanel(dialog)
     expect(within(dialog).getAllByText('仍有 active 订阅').length).toBeGreaterThan(0)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/vps/'))).toBe(false)
