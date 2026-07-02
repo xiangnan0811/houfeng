@@ -668,6 +668,97 @@ func TestPostgresAssetDecisionRepositoryCreateManualGroupFromAutoGroupPersistsMe
 	}
 }
 
+func TestPostgresAssetDecisionRepositoryCreateManualGroupFromTemplateRejectsArchivedTemplate(t *testing.T) {
+	now := time.Date(2026, time.June, 6, 11, 30, 0, 0, time.UTC)
+	archivedAt := now.Add(-time.Hour)
+	txBegun := false
+	repo := &PostgresAssetDecisionRepository{
+		db: fakeAssetDecisionQueryer{
+			queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+				if !strings.Contains(sql, "asset_decision_scenario_templates") || args[0] != "adt_archived" {
+					t.Fatalf("QueryRow sql=%q args=%#v, want archived scenario template lookup", sql, args)
+				}
+				return fakeAssetDecisionRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "adt_archived"
+					*(dest[1].(*string)) = string(assetdecisions.ScenarioTemplateStatusArchived)
+					*(dest[2].(*string)) = string(assetdecisions.ManualGroupScenarioRegionReview)
+					*(dest[3].(*string)) = "已归档模板"
+					*(dest[4].(*string)) = "不应再创建组合"
+					*(dest[5].(*string)) = ""
+					*(dest[6].(*string)) = ""
+					*(dest[7].(*time.Time)) = now
+					*(dest[8].(*time.Time)) = now
+					*(dest[9].(**time.Time)) = &archivedAt
+					return nil
+				}}
+			},
+			query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if strings.Contains(sql, "from asset_decision_scenario_template_members") {
+					return &fakeAssetDecisionRows{}, nil
+				}
+				if strings.Contains(sql, "from vps_assets") {
+					return fakeAssetDecisionFactRows(now), nil
+				}
+				t.Fatalf("Query sql=%q, want template members or facts", sql)
+				return nil, nil
+			},
+		},
+		beginTx: func(context.Context, pgx.TxOptions) (assetDecisionTx, error) {
+			txBegun = true
+			return &fakeAssetDecisionTx{}, nil
+		},
+	}
+
+	_, err := repo.CreateManualGroupFromTemplate(context.Background(), "adt_archived", assetdecisions.CreateManualGroupFromTemplateInput{
+		RenewWithinDays: 30,
+	})
+	if err != assetdecisions.ErrInvalidAssetDecisionInput {
+		t.Fatalf("CreateManualGroupFromTemplate() error = %v, want invalid input", err)
+	}
+	if txBegun {
+		t.Fatal("transaction begun = true, want archived template rejected before create")
+	}
+}
+
+func TestPostgresAssetDecisionRepositoryCreateManualGroupFromBuiltinTemplateStillSucceeds(t *testing.T) {
+	now := time.Date(2026, time.June, 6, 11, 45, 0, 0, time.UTC)
+	var execs []fakeAssetDecisionExecCall
+	tx := &fakeAssetDecisionTx{exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+		execs = append(execs, fakeAssetDecisionExecCall{sql: sql, args: args})
+		return pgconn.CommandTag{}, nil
+	}}
+	repo := &PostgresAssetDecisionRepository{
+		db: fakeAssetDecisionQueryer{
+			query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+				if strings.Contains(sql, "from vps_assets") {
+					return fakeAssetDecisionFactRows(now), nil
+				}
+				t.Fatalf("Query sql=%q, want facts for builtin template create", sql)
+				return nil, nil
+			},
+		},
+		beginTx: func(context.Context, pgx.TxOptions) (assetDecisionTx, error) {
+			return tx, nil
+		},
+	}
+
+	detail, err := repo.CreateManualGroupFromTemplate(context.Background(), "adt_builtin_primary_standby", assetdecisions.CreateManualGroupFromTemplateInput{
+		RenewWithinDays: 60,
+	})
+	if err != nil {
+		t.Fatalf("CreateManualGroupFromTemplate() error = %v", err)
+	}
+	if !tx.committed {
+		t.Fatal("transaction committed = false, want true")
+	}
+	if detail.SourceType != assetdecisions.ManualGroupSourceManual || detail.Title != "主力与容灾取舍" || detail.Scenario != assetdecisions.ManualGroupScenarioPrimaryStandby || detail.RenewWithinDays != 60 {
+		t.Fatalf("detail summary = %#v, want manual group from builtin template defaults", detail.ManualGroupSummary)
+	}
+	if len(execs) != 1 || !strings.Contains(execs[0].sql, "insert into asset_decision_manual_groups") {
+		t.Fatalf("execs = %#v, want only manual group insert for empty builtin template members", execs)
+	}
+}
+
 func TestPostgresAssetDecisionRepositoryCreateRecordFromManualGroupUsesIntentAndReadback(t *testing.T) {
 	now := time.Date(2026, time.June, 6, 12, 0, 0, 0, time.UTC)
 	manualSnapshot, err := json.Marshal(assetdecisions.EvidenceSnapshot{"source": "manual"})

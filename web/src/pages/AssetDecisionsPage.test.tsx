@@ -1765,6 +1765,131 @@ describe('AssetDecisionsPage', () => {
     ])
   })
 
+  it('keeps the scenarios workbench visible after closing a manual group created from an automatic group', async () => {
+    const createdManual = manualGroupDetail({
+      manual_group_id: 'admg_created',
+      title: '德国主力组合',
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', body: groupDetail() },
+        { url: '/api/asset-decisions/manual-groups', method: 'POST', body: createdManual, status: 201 },
+        { url: '/api/asset-decisions/manual-groups/admg_created', body: createdManual },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByRole('button', { name: '查看组' }))
+    const groupDialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+    fireEvent.click(within(groupDialog).getByRole('button', { name: '创建组合' }))
+
+    await waitFor(() => expect(screen.getByText('已创建自定义组合：德国主力组合')).toBeInTheDocument())
+    const manualDialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    expect(screen.getByRole('heading', { name: '场景工作区' })).toBeInTheDocument()
+    fireEvent.click(within(manualDialog).getByRole('button', { name: '关闭' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '自定义资产组合详情' })).not.toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: '场景工作区' })).toBeInTheDocument()
+    const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
+    expect(within(manualSection!).getByText('德国主力组合')).toBeInTheDocument()
+  })
+
+  it('keeps create-combo action usable from automatic group task panels', async () => {
+    const cases: Array<{
+      name: string
+      openPanel: (dialog: HTMLElement) => void
+      assertPanel: (dialog: HTMLElement) => void
+    }> = [
+      {
+        name: 'members',
+        openPanel: (dialog) => {
+          fireEvent.click(within(dialog).getByRole('button', { name: '详情' }))
+          fireEvent.click(within(dialog).getByRole('button', { name: '成员取舍' }))
+        },
+        assertPanel: (dialog) => {
+          expect(within(dialog).getByRole('heading', { name: '成员取舍' })).toBeInTheDocument()
+        },
+      },
+      {
+        name: 'save',
+        openPanel: (dialog) => {
+          fireEvent.click(within(dialog).getByRole('button', { name: '详情' }))
+          fireEvent.click(within(dialog).getAllByRole('button', { name: '保存记录' }).at(-1)!)
+        },
+        assertPanel: (dialog) => {
+          expect(within(dialog).getByRole('heading', { name: '保存组合决策记录' })).toBeInTheDocument()
+        },
+      },
+      {
+        name: 'raw',
+        openPanel: (dialog) => {
+          fireEvent.click(within(dialog).getByRole('button', { name: '详情' }))
+          fireEvent.click(within(dialog).getByRole('button', { name: '底稿' }))
+        },
+        assertPanel: (dialog) => {
+          expect(within(dialog).getByRole('heading', { name: '数据底稿' })).toBeInTheDocument()
+        },
+      },
+      {
+        name: 'vps',
+        openPanel: (dialog) => {
+          fireEvent.click(within(dialog).getByRole('button', { name: '详情' }))
+          fireEvent.click(within(dialog).getByRole('button', { name: '成员取舍' }))
+          fireEvent.click(within(dialog).getAllByRole('button', { name: '处理' })[0])
+        },
+        assertPanel: (dialog) => {
+          expect(within(dialog).getByLabelText('续费决策')).toBeInTheDocument()
+        },
+      },
+    ]
+
+    for (const taskPanel of cases) {
+      const createdManual = manualGroupDetail({
+        manual_group_id: `admg_created_${taskPanel.name}`,
+        title: `德国主力组合 ${taskPanel.name}`,
+      })
+      const fetchMock = vi.fn()
+      mockInitialWorkbench(fetchMock, {
+        routes: [
+          { url: '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', body: groupDetail() },
+          { url: '/api/asset-decisions/manual-groups', method: 'POST', body: createdManual, status: 201 },
+          { url: `/api/asset-decisions/manual-groups/admg_created_${taskPanel.name}`, body: createdManual },
+        ],
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const { unmount } = render(
+        <MemoryRouter>
+          <AssetDecisionsPage />
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0))
+      fireEvent.click(screen.getByRole('button', { name: '查看组' }))
+      const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+      taskPanel.openPanel(dialog)
+
+      taskPanel.assertPanel(dialog)
+      fireEvent.click(within(dialog).getByRole('button', { name: '创建组合' }))
+
+      await waitFor(() => expect(screen.getByText(`已创建自定义组合：德国主力组合 ${taskPanel.name}`)).toBeInTheDocument())
+      expect(findFetchCall(fetchMock, '/api/asset-decisions/manual-groups', 'POST')).toBeDefined()
+      expect(await screen.findByRole('dialog', { name: '自定义资产组合详情' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: '场景工作区' })).toBeInTheDocument()
+
+      unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('saves a manual scenario group as a decision record without touching business assets', async () => {
     const created = decisionRecord({
       record_id: 'adr_manual',

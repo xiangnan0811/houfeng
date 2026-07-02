@@ -1552,16 +1552,31 @@ function manualGroupSummaryFromDetail(detail: AssetDecisionManualGroupDetail): A
   return summary
 }
 
-function upsertManualGroupSummary(
+function mergeManualGroupSummaries(
   rows: AssetDecisionManualGroupSummary[],
-  detail: AssetDecisionManualGroupDetail,
+  additions: AssetDecisionManualGroupSummary[],
 ): AssetDecisionManualGroupSummary[] {
-  const summary = manualGroupSummaryFromDetail(detail)
-  const next = [summary, ...rows.filter((row) => row.manual_group_id !== summary.manual_group_id)]
+  let next = [...rows]
+  for (const summary of additions) {
+    next = [summary, ...next.filter((row) => row.manual_group_id !== summary.manual_group_id)]
+  }
   return next.sort((left, right) => {
     if (left.status !== right.status) return left.status === 'active' ? -1 : 1
     return right.updated_at.localeCompare(left.updated_at)
   })
+}
+
+function assetDecisionFilterKey(filter: AssetDecisionGroupListFilter): string {
+  return [
+    filter.view ?? '',
+    filter.renew_within_days ?? '',
+    filter.provider_id ?? '',
+    filter.vps_id ?? '',
+    filter.country ?? '',
+    filter.region ?? '',
+    filter.city ?? '',
+    filter.scenario ?? '',
+  ].join('|')
 }
 
 function scenarioTemplateSummaryFromDetail(detail: AssetDecisionScenarioTemplateDetail): AssetDecisionScenarioTemplateSummary {
@@ -1900,9 +1915,10 @@ function renderDetailPanelNav<TPanel extends string>(
   )
 }
 
-function renderDetailPanel(title: string, children: ReactNode) {
+function renderDetailPanel(title: string, children: ReactNode, includeHiddenHeading = false) {
   return (
     <section className="asset-decision-detail-panel" aria-label={title}>
+      {includeHiddenHeading ? <h4 className="visually-hidden">{title}</h4> : null}
       {children}
     </section>
   )
@@ -2294,6 +2310,10 @@ export function AssetDecisionsPage() {
     () => buildAssetDecisionFilter(searchParams, portfolioView, renewalWindow),
     [portfolioView, renewalWindow, searchParams],
   )
+  const manualGroupListFilterKey = useMemo(
+    () => assetDecisionFilterKey(assetDecisionFilter),
+    [assetDecisionFilter],
+  )
   const contextFilterChips = useMemo(
     () => buildContextFilterChips(assetDecisionFilter),
     [assetDecisionFilter],
@@ -2367,6 +2387,10 @@ export function AssetDecisionsPage() {
   const [selectedSecondaryWorkbench, setSelectedSecondaryWorkbench] = useState<SecondaryWorkbench | null>(null)
   const secondaryWorkbench = urlSecondaryWorkbench ?? selectedSecondaryWorkbench
   const handledOpenStateRef = useRef('')
+  const preservedManualGroupSummariesRef = useRef(new Map<string, {
+    filterKey: string
+    summary: AssetDecisionManualGroupSummary
+  }>())
 
   function applyURLClearedOpenState() {
     setSelectedGroupID(null)
@@ -2536,7 +2560,16 @@ export function AssetDecisionsPage() {
     listAssetDecisionManualGroups(assetDecisionFilter)
       .then((groups) => {
         if (cancelled) return
-        setManualGroupsState({ loading: false, error: null, groups })
+        setManualGroupsState({
+          loading: false,
+          error: null,
+          groups: mergeManualGroupSummaries(
+            groups,
+            Array.from(preservedManualGroupSummariesRef.current.values())
+              .filter((item) => item.filterKey === manualGroupListFilterKey)
+              .map((item) => item.summary),
+          ),
+        })
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -2547,7 +2580,7 @@ export function AssetDecisionsPage() {
         })
       })
     return () => { cancelled = true }
-  }, [assetDecisionFilter, refreshToken])
+  }, [assetDecisionFilter, manualGroupListFilterKey, refreshToken])
 
   useEffect(() => {
     let cancelled = false
@@ -3758,6 +3791,11 @@ export function AssetDecisionsPage() {
   }
 
   function applyManualDetail(detail: AssetDecisionManualGroupDetail) {
+    const summary = manualGroupSummaryFromDetail(detail)
+    preservedManualGroupSummariesRef.current.set(summary.manual_group_id, {
+      filterKey: manualGroupListFilterKey,
+      summary,
+    })
     setManualDetailState({ loading: false, error: null, detail })
     setManualMemberDrafts(buildManualMemberDrafts(detail))
     setPendingManualMemberRemoval((current) =>
@@ -3766,7 +3804,7 @@ export function AssetDecisionsPage() {
     setManualGroupsState((current) => ({
       loading: false,
       error: null,
-      groups: upsertManualGroupSummary(current.groups, detail),
+      groups: mergeManualGroupSummaries(current.groups, [summary]),
     }))
   }
 
@@ -3800,6 +3838,7 @@ export function AssetDecisionsPage() {
     })
       .then((manualDetail) => {
         applyManualDetail(manualDetail)
+        setSelectedSecondaryWorkbench('scenarios')
         setSelectedGroupID(null)
         setDetailState(INITIAL_DETAIL_STATE)
         setSelectedManualGroupID(manualDetail.manual_group_id)
@@ -5227,6 +5266,18 @@ export function AssetDecisionsPage() {
               }
               setGroupDetailPanel(panel)
             })}
+            {groupDetailPanel !== 'overview' && groupDetailPanel !== 'directory' && (
+              <div className="asset-decision-detail-actionbar" aria-label="决策组主动作">
+                <button
+                  className="btn sm primary"
+                  type="button"
+                  onClick={() => createManualGroupFromAuto(detailState.detail!)}
+                  disabled={manualGroupCreating}
+                >
+                  {manualGroupCreating ? '创建中…' : '创建组合'}
+                </button>
+              </div>
+            )}
             {manualGroupError && <div className="inline-alert danger">{manualGroupError}</div>}
             {groupDetailPanel === 'members' && renderDetailPanel('成员明细',
               renderMemberDecisionRows(
@@ -5316,6 +5367,7 @@ export function AssetDecisionsPage() {
                   rowKey={(member) => member.vps.vps_id}
                 />
               </div>,
+              true,
             )}
             {groupDetailPanel === 'vps' && selectedVPS && (
               <div className="asset-decision-detail__work-panel">
@@ -5706,6 +5758,7 @@ export function AssetDecisionsPage() {
                   rowKey={(member) => member.vps_id}
                 />
               </div>,
+              true,
             )}
           </div>
         ) : null}
@@ -6048,6 +6101,7 @@ export function AssetDecisionsPage() {
                   rowKey={(member) => member.vps_id}
                 />
               </div>,
+              true,
             )}
           </div>
         ) : null}

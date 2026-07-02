@@ -1012,6 +1012,12 @@ func TestAssetDecisionHandlersMapErrors(t *testing.T) {
 			wantCode: http.StatusNotFound,
 		},
 		{
+			name:     "scenario template manual group invalid input",
+			handler:  handlers.AssetDecisionScenarioTemplate(&fakeAssetDecisionRepository{templateManualErr: assetdecisions.ErrInvalidAssetDecisionInput}),
+			request:  httptest.NewRequest(http.MethodPost, "/api/asset-decisions/scenario-templates/adt_custom_001/manual-groups", bytes.NewReader([]byte(`{"title":"x"}`))),
+			wantCode: http.StatusBadRequest,
+		},
+		{
 			name:     "scenario template item method not allowed",
 			handler:  handlers.AssetDecisionScenarioTemplate(&fakeAssetDecisionRepository{}),
 			request:  httptest.NewRequest(http.MethodPut, "/api/asset-decisions/scenario-templates/adt_custom_001", nil),

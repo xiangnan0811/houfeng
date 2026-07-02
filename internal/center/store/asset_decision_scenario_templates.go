@@ -271,6 +271,9 @@ func (r *PostgresAssetDecisionRepository) CreateManualGroupFromTemplate(ctx cont
 	if err != nil {
 		return assetdecisions.ManualGroupDetail{}, err
 	}
+	if template.Status == assetdecisions.ScenarioTemplateStatusArchived {
+		return assetdecisions.ManualGroupDetail{}, assetdecisions.ErrInvalidAssetDecisionInput
+	}
 	input = assetdecisions.NormalizeCreateManualGroupFromTemplateInput(input)
 	if err := assetdecisions.ValidateCreateManualGroupFromTemplateInput(input); err != nil {
 		return assetdecisions.ManualGroupDetail{}, err

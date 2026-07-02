@@ -2322,6 +2322,7 @@ select.input::-ms-expand{display:none}
 .asset-decision-detail-nav__item--active{border-color:color-mix(in srgb,var(--accent) 42%,var(--border));background:color-mix(in srgb,var(--accent) 7%,var(--surface));color:var(--text-primary)}
 .asset-decision-detail-nav__item span:not(.badge){min-width:0;color:inherit;font-size:var(--type-small-size);font-weight:600;line-height:1.25;overflow-wrap:anywhere}
 .asset-decision-detail-nav__item .badge{justify-self:end}
+.asset-decision-detail-actionbar{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-2);min-width:0;padding:var(--space-2) 0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 68%,transparent)}
 .asset-decision-detail-panel{display:flex;flex-direction:column;gap:var(--space-3);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 74%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 8%,var(--surface))}
 .asset-decision-detail-directory{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:var(--space-2);min-width:0;padding:var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 70%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 8%,var(--surface))}
 .asset-decision-detail-directory__item{display:flex;flex-direction:column;align-items:stretch;gap:var(--space-1);min-width:0;min-height:112px;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 68%,transparent);border-radius:var(--radius-1);background:color-mix(in srgb,var(--surface) 86%,transparent);color:var(--text-secondary);text-align:left;cursor:pointer;transition:border-color var(--dur-micro) var(--ease-calm),background-color var(--dur-micro) var(--ease-calm),color var(--dur-micro) var(--ease-calm)}
@@ -2525,7 +2526,9 @@ select.input::-ms-expand{display:none}
 .asset-decision-followup-form__status span{color:var(--text-muted);font-size:var(--type-small-size);line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .asset-decision-followup-form select.input,.asset-decision-followup-form input.input{width:100%;min-width:0;min-height:32px;padding-top:var(--space-1);padding-bottom:var(--space-1);font-size:var(--type-small-size)}
 .asset-decision-followup-form__actions{grid-column:1 / -1;display:flex;justify-content:flex-end;gap:var(--space-1);flex-wrap:wrap;min-width:0}
-.asset-decision-record-modal .modal-body,.asset-decision-group-modal .modal-body,.asset-decision-manual-modal .modal-body,.asset-decision-template-modal .modal-body{overflow-x:hidden}
+.asset-decision-record-modal,.asset-decision-group-modal,.asset-decision-manual-modal,.asset-decision-template-modal{background:var(--bg-side)}
+.asset-decision-record-modal .modal-header,.asset-decision-group-modal .modal-header,.asset-decision-manual-modal .modal-header,.asset-decision-template-modal .modal-header,.asset-decision-record-modal .modal-body,.asset-decision-group-modal .modal-body,.asset-decision-manual-modal .modal-body,.asset-decision-template-modal .modal-body{background:var(--bg-side)}
+.asset-decision-record-modal .modal-body,.asset-decision-group-modal .modal-body,.asset-decision-manual-modal .modal-body,.asset-decision-template-modal .modal-body{min-width:0}
 .asset-decision-group-modal .asset-decision-panel{max-width:560px}
 .asset-renewal-evidence .data-table{font-size:var(--type-small-size)}
 .vps-inventory-command{gap:var(--space-3)}
