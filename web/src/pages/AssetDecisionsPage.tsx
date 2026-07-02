@@ -1747,7 +1747,7 @@ function renderEvidenceAssessment(assessment: AssetDecisionEvidenceAssessment | 
 }
 
 function renderComparisonSignals(signals: AssetDecisionComparisonSignal[], limit = 3) {
-  if (signals.length === 0) return <span className="empty-inline">暂无额外信号</span>
+  if (signals.length === 0) return null
   const visible = signals.slice(0, limit)
   return (
     <span className="asset-decision-chip-row">
@@ -1766,8 +1766,7 @@ function renderComparisonSignals(signals: AssetDecisionComparisonSignal[], limit
 }
 
 function memberComparisonTitle(member: ComparisonMatrixMember) {
-  const content = <strong>{member.displayName}</strong>
-  return member.href ? <Link className="name" to={member.href}>{content}</Link> : content
+  return <strong>{member.displayName}</strong>
 }
 
 function renderDetailCommand(options: DetailCommandOptions) {
@@ -1833,15 +1832,7 @@ function renderMemberDecisionRows(members: ComparisonMatrixMember[], options: Me
   const memberPreview = previewItems(sortedMembers)
   return (
     <section className="asset-decision-member-decisions">
-      <div className="asset-decision-member-decisions__header">
-        <div>
-          <h3>{options.title}</h3>
-          {options.summary ? <span>{options.summary}</span> : null}
-        </div>
-        <Badge variant="count" tone={sortedMembers.length > 0 ? 'notice' : 'neutral'}>
-          成员 {sortedMembers.length}
-        </Badge>
-      </div>
+      {renderCompactTaskHeader(options.title, `成员 ${sortedMembers.length}`)}
       {sortedMembers.length > 0 ? (
         <div className="asset-decision-member-rows" aria-label={options.ariaLabel}>
           {memberPreview.visible.map((member) => {
@@ -1858,7 +1849,7 @@ function renderMemberDecisionRows(members: ComparisonMatrixMember[], options: Me
             return (
               <article key={member.key} className={`asset-decision-member-row asset-decision-member-row--${laneTone}`}>
                 <div className="asset-decision-member-row__identity">
-                  <span>#{comparison?.rank || '—'} · {COMPARISON_LANE_LABELS[lane] ?? lane}</span>
+                  <span>{COMPARISON_LANE_LABELS[lane] ?? lane}</span>
                   {memberComparisonTitle(member)}
                 </div>
                 <div className="asset-decision-member-row__decision">
@@ -1876,12 +1867,14 @@ function renderMemberDecisionRows(members: ComparisonMatrixMember[], options: Me
                       </Badge>
                     )}
                     </span>
-                    <strong>{comparison?.summary || '当前成员暂无对比洞察。'}</strong>
+                    <strong>{compactDecisionText(comparison?.summary, '等待复核')}</strong>
                   </div>
                 </div>
-                <div className="asset-decision-member-row__signals">
-                  {renderComparisonSignals([...(comparison?.risks ?? []), ...(comparison?.gaps ?? [])], 2)}
-                </div>
+                {((comparison?.risks?.length ?? 0) + (comparison?.gaps?.length ?? 0)) > 0 && (
+                  <div className="asset-decision-member-row__signals">
+                    {renderComparisonSignals([...(comparison?.risks ?? []), ...(comparison?.gaps ?? [])], 2)}
+                  </div>
+                )}
                 {options.action && <div className="asset-decision-member-row__actions">{options.action(member)}</div>}
               </article>
             )
@@ -1935,6 +1928,15 @@ function renderDetailPanel(title: string, children: ReactNode) {
     <section className="asset-decision-detail-panel" aria-label={title}>
       {children}
     </section>
+  )
+}
+
+function renderCompactTaskHeader(title: string, meta?: ReactNode) {
+  return (
+    <div className="asset-decision-task-header" role="heading" aria-level={4} aria-label={title}>
+      <strong>{title}</strong>
+      {meta ? <span aria-hidden="true">{meta}</span> : null}
+    </div>
   )
 }
 
@@ -2253,8 +2255,22 @@ function compactMemberPlanSummary(member: AssetDecisionRecordMember): string {
   return compactDecisionText(plan?.summary || actionLabelForMember(member), '等待下一步')
 }
 
-function membersForExecutionLane(members: AssetDecisionRecordMember[], lane: AssetDecisionExecutionPlanLane): AssetDecisionRecordMember[] {
-  return members.filter((member) => (member.execution_plan?.lane ?? 'review') === lane)
+function executionLaneRank(member: AssetDecisionRecordMember): number {
+  const lane = member.execution_plan?.lane ?? 'review'
+  const rank = EXECUTION_PLAN_LANE_ORDER.indexOf(lane)
+  return rank >= 0 ? rank : EXECUTION_PLAN_LANE_ORDER.length
+}
+
+function sortedExecutionMembers(members: AssetDecisionRecordMember[]): AssetDecisionRecordMember[] {
+  return members
+    .map((member, index) => ({ member, index }))
+    .sort((left, right) => executionLaneRank(left.member) - executionLaneRank(right.member) || left.index - right.index)
+    .map(({ member }) => member)
+}
+
+function compactVPSOptionLabel(vps: VPSAssetRecord): string {
+  const location = [vps.country, vps.city].filter(Boolean).join(' · ')
+  return location ? `${vps.display_name} · ${location}` : vps.display_name
 }
 
 function previewItems<T>(items: T[]): { visible: T[]; hiddenCount: number } {
@@ -2262,18 +2278,6 @@ function previewItems<T>(items: T[]): { visible: T[]; hiddenCount: number } {
     visible: items.slice(0, ASSET_DECISION_DETAIL_PREVIEW_LIMIT),
     hiddenCount: Math.max(0, items.length - ASSET_DECISION_DETAIL_PREVIEW_LIMIT),
   }
-}
-
-function laneIssueCount(members: AssetDecisionRecordMember[]): number {
-  return members.reduce((total, member) => total + (member.execution_plan?.issue_count ?? member.execution_readback?.issues?.length ?? 0), 0)
-}
-
-function laneActionableCount(members: AssetDecisionRecordMember[]): number {
-  return members.filter((member) => member.execution_plan?.actionable).length
-}
-
-function laneBlockedCount(members: AssetDecisionRecordMember[]): number {
-  return members.filter((member) => member.execution_plan?.blocked || member.followup_status === 'blocked').length
 }
 
 function groupPressureLabel(group: AssetDecisionGroupSummary): string {
@@ -2355,11 +2359,13 @@ export function AssetDecisionsPage() {
     note: '',
     sortOrder: '',
   })
+  const [manualMemberAddAdvanced, setManualMemberAddAdvanced] = useState(false)
   const [recordPatchStatus, setRecordPatchStatus] = useState<AssetDecisionRecordStatus>('draft')
   const [recordPatching, setRecordPatching] = useState(false)
   const [recordPatchError, setRecordPatchError] = useState<string | null>(null)
   const [recordFollowupDrafts, setRecordFollowupDrafts] = useState<Record<string, RecordFollowupDraft>>({})
   const [recordFollowupPatching, setRecordFollowupPatching] = useState<Record<string, boolean>>({})
+  const [recordFollowupEditingMemberID, setRecordFollowupEditingMemberID] = useState<string | null>(null)
   const [templateSaving, setTemplateSaving] = useState(false)
   const [templateError, setTemplateError] = useState<string | null>(null)
   const [pendingTemplateStatus, setPendingTemplateStatus] = useState<AssetDecisionScenarioTemplateStatus | null>(null)
@@ -2745,7 +2751,7 @@ export function AssetDecisionsPage() {
         setTemplateManualDraft({
           title: detail.title,
           goal: detail.goal,
-          note: detail.note,
+          note: '',
           renewWithinDays: renewalWindow,
         })
       })
@@ -3495,9 +3501,13 @@ export function AssetDecisionsPage() {
           <button className="btn sm primary" type="submit" disabled={isSaving || !isChanged}>
             {isSaving ? '保存中…' : '保存跟进'}
           </button>
-          <Link className="btn sm secondary" to={actionHrefForMember(member)}>
-            {actionLabelForMember(member)}
-          </Link>
+          <button
+            className="btn sm secondary"
+            type="button"
+            onClick={() => setRecordFollowupEditingMemberID(null)}
+          >
+            收起
+          </button>
         </div>
       </form>
     )
@@ -3518,32 +3528,50 @@ export function AssetDecisionsPage() {
 
     return (
       <section className="asset-decision-record-followups" aria-label="成员跟进列表">
-        {memberPreview.visible.map((member) => (
-          <article key={member.vps_id} className="asset-decision-record-followup-row">
-            <div className="asset-decision-record-followup-row__identity">
-              <strong><Link className="name" to={`/vps/${member.vps_id}`}>{member.display_name || member.vps_id}</Link></strong>
-              <span className="asset-decision-chip-row">
-                <Badge variant="state" tone={roleTone(member.decided_role)}>
-                  {ROLE_LABELS[member.decided_role]}
-                </Badge>
-                <Badge variant="state" tone={actionTone(member.decided_action)}>
-                  {ACTION_LABELS[member.decided_action]}
-                </Badge>
-              </span>
-            </div>
-            <div className="asset-decision-record-followup-row__state">
-              <span className="asset-decision-chip-row">
-                {renderReadbackBadge(member.execution_readback)}
-                {renderExecutionPlanBadge(member.execution_plan)}
-              </span>
-              <strong>{compactMemberReadbackSummary(member.execution_readback)}</strong>
-              <span>{compactMemberPlanSummary(member)}</span>
-            </div>
-            <div className="asset-decision-record-followup-row__form">
-              {renderRecordFollowupForm(member)}
-            </div>
-          </article>
-        ))}
+        {memberPreview.visible.map((member) => {
+          const editing = recordFollowupEditingMemberID === member.vps_id
+          return (
+            <article key={member.vps_id} className={`asset-decision-record-followup-row${editing ? ' asset-decision-record-followup-row--editing' : ''}`}>
+              <div className="asset-decision-record-followup-row__identity">
+                <strong>{member.display_name || member.vps_id}</strong>
+                <span className="asset-decision-chip-row">
+                  <Badge variant="state" tone={roleTone(member.decided_role)}>
+                    {ROLE_LABELS[member.decided_role]}
+                  </Badge>
+                  <Badge variant="state" tone={actionTone(member.decided_action)}>
+                    {ACTION_LABELS[member.decided_action]}
+                  </Badge>
+                </span>
+              </div>
+              <div className="asset-decision-record-followup-row__state">
+                <span className="asset-decision-chip-row">
+                  {renderReadbackBadge(member.execution_readback)}
+                  <Badge variant="state" tone={followupStatusTone(member.followup_status)}>
+                    {FOLLOWUP_STATUS_LABELS[member.followup_status]}
+                  </Badge>
+                </span>
+                <strong>
+                  {compactDecisionText(member.followup_note || compactMemberReadbackSummary(member.execution_readback), '尚未跟进')}
+                </strong>
+              </div>
+              <div className="asset-decision-record-followup-row__form">
+                {editing ? (
+                  renderRecordFollowupForm(member)
+                ) : (
+                  <button
+                    className="btn-text sm secondary"
+                    type="button"
+                    aria-label={`编辑 ${member.display_name || member.vps_id} 跟进`}
+                    aria-expanded={false}
+                    onClick={() => setRecordFollowupEditingMemberID(member.vps_id)}
+                  >
+                    编辑跟进
+                  </button>
+                )}
+              </div>
+            </article>
+          )
+        })}
         {memberPreview.hiddenCount > 0 && (
           <div className="asset-decision-preview-more" role="note">
             另有 {memberPreview.hiddenCount} 台在成员底稿中查看
@@ -3773,7 +3801,7 @@ export function AssetDecisionsPage() {
     setTemplateManualDraft({
       title: detail.title,
       goal: detail.goal,
-      note: detail.note,
+      note: '',
       renewWithinDays: renewalWindow,
     })
     setTemplatesState((current) => ({
@@ -4028,6 +4056,7 @@ export function AssetDecisionsPage() {
     setManualDetailPanel('overview')
     setRecordDetailPanel('overview')
     setTemplateDetailPanel('overview')
+    setRecordFollowupEditingMemberID(null)
     setOpenState('record_id', recordID)
   }
 
@@ -4037,6 +4066,7 @@ export function AssetDecisionsPage() {
     setRecordPatchError(null)
     setRecordFollowupDrafts({})
     setRecordFollowupPatching({})
+    setRecordFollowupEditingMemberID(null)
     setRecordDetailPanel('overview')
     clearOpenState('record_id')
   }
@@ -4195,6 +4225,25 @@ export function AssetDecisionsPage() {
       .finally(() => setManualGroupSaving(false))
   }
 
+  function setManualMemberAddAdvancedVisible(next: boolean) {
+    setManualMemberAddAdvanced(next)
+    if (!next) {
+      setManualMemberAddDraft((current) => ({
+        ...current,
+        reason: '',
+        note: '',
+        sortOrder: '',
+      }))
+    }
+  }
+
+  function selectManualDetailPanel(panel: ManualDetailPanel) {
+    if (panel === 'add') {
+      setManualMemberAddAdvancedVisible(false)
+    }
+    setManualDetailPanel(panel)
+  }
+
   function submitManualMemberAdd(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const detail = manualDetailState.detail
@@ -4225,6 +4274,7 @@ export function AssetDecisionsPage() {
           note: '',
           sortOrder: '',
         })
+        setManualMemberAddAdvanced(false)
         setDecisionNotice('自定义组合成员已加入')
       })
       .catch((error: unknown) => {
@@ -4352,15 +4402,9 @@ export function AssetDecisionsPage() {
 
   function renderRecordExecutionBoard(detail: AssetDecisionRecordDetail) {
     const executionPreview = previewItems(detail.members)
-    const lanes = EXECUTION_PLAN_LANE_ORDER
-      .map((lane) => ({
-        lane,
-        members: membersForExecutionLane(executionPreview.visible, lane),
-        totalMembers: membersForExecutionLane(detail.members, lane),
-      }))
-      .filter((section) => section.members.length > 0)
+    const visibleExecutionMembers = sortedExecutionMembers(executionPreview.visible)
 
-    if (lanes.length === 0) {
+    if (visibleExecutionMembers.length === 0) {
       return (
         <section className="asset-decision-execution-board" aria-label="执行编排">
           <div className="asset-decision-execution-board__empty">
@@ -4388,76 +4432,72 @@ export function AssetDecisionsPage() {
             )}
           </div>
         </div>
-        <div className="asset-decision-execution-board__lanes">
-          {lanes.map(({ lane, members, totalMembers }) => (
-            <section key={lane} className={`asset-decision-execution-lane asset-decision-execution-lane--${lane}`}>
-              <div className="asset-decision-execution-lane__header">
-                <div>
-                  <strong>{EXECUTION_PLAN_LANE_LABELS[lane]}</strong>
-                  <span><MonoDigits>{totalMembers.length}</MonoDigits> 台 · 可推进 {laneActionableCount(totalMembers)} · 问题 {laneIssueCount(totalMembers)}</span>
+        <div className="asset-decision-execution-board__members">
+          {visibleExecutionMembers.map((member) => {
+            const isSaving = Boolean(recordFollowupPatching[member.vps_id])
+            const canStart = member.followup_status === 'todo'
+            const canMarkDone = member.execution_readback?.status === 'aligned' && member.followup_status !== 'done' && member.followup_status !== 'skipped'
+            const primaryAction = (() => {
+              if (canMarkDone) {
+                return (
+                  <button className="btn sm primary" type="button" disabled={isSaving} onClick={() => saveRecordMemberFollowup(member, 'done')}>
+                    标记完成
+                  </button>
+                )
+              }
+              if (member.execution_plan?.step_kind === 'review_record') {
+                return (
+                  <button className="btn sm secondary" type="button" onClick={() => setDecisionNotice(`请在当前记录中复核：${member.display_name || member.vps_id}`)}>
+                    {actionLabelForMember(member)}
+                  </button>
+                )
+              }
+              if (member.execution_plan?.step_kind) {
+                return (
+                  <Link className="btn sm secondary" to={actionHrefForMember(member)}>
+                    {actionLabelForMember(member)}
+                  </Link>
+                )
+              }
+              if (canStart) {
+                return (
+                  <button className="btn sm secondary" type="button" disabled={isSaving} onClick={() => saveRecordMemberFollowup(member, 'in_progress')}>
+                    开始跟进
+                  </button>
+                )
+              }
+              return null
+            })()
+            return (
+              <article key={member.vps_id} className="asset-decision-execution-card">
+                <div className="asset-decision-execution-card__head">
+                  <strong>{member.display_name || member.vps_id}</strong>
+                  <span className="asset-decision-chip-row">
+                    {renderExecutionPlanBadge(member.execution_plan)}
+                    {renderReadbackBadge(member.execution_readback)}
+                  </span>
                 </div>
-                {laneBlockedCount(totalMembers) > 0 && (
-                  <Badge variant="count" tone="critical">
-                    阻塞 {laneBlockedCount(totalMembers)}
-                  </Badge>
+                <p>{compactMemberPlanSummary(member)}</p>
+                {member.execution_readback?.issues?.length > 0 && (
+                  <span className="asset-decision-chip-row">
+                    {member.execution_readback.issues.slice(0, 2).map((issue) => (
+                      <Badge key={`${member.vps_id}-${issue.kind}-${issue.label}`} variant="info" tone={chipTone(issue.tone)}>
+                        {issue.label}
+                      </Badge>
+                    ))}
+                    {member.execution_readback.issues.length > 2 && (
+                      <Badge variant="count" tone="neutral">
+                        +{member.execution_readback.issues.length - 2}
+                      </Badge>
+                    )}
+                  </span>
                 )}
-              </div>
-              <div className="asset-decision-execution-lane__members">
-                {members.map((member) => {
-                  const isSaving = Boolean(recordFollowupPatching[member.vps_id])
-                  const canStart = member.followup_status === 'todo'
-                  const canMarkDone = member.execution_readback?.status === 'aligned' && member.followup_status !== 'done' && member.followup_status !== 'skipped'
-                  return (
-                    <article key={member.vps_id} className="asset-decision-execution-card">
-                      <div className="asset-decision-execution-card__head">
-                        <strong><Link className="name" to={`/vps/${member.vps_id}`}>{member.display_name || member.vps_id}</Link></strong>
-                        <span className="asset-decision-chip-row">
-                          {renderExecutionPlanBadge(member.execution_plan)}
-                          {renderReadbackBadge(member.execution_readback)}
-                        </span>
-                      </div>
-                      <p>{member.execution_plan?.summary || '等待执行编排'}</p>
-                      {member.execution_readback?.issues?.length > 0 && (
-                        <span className="asset-decision-chip-row">
-                          {member.execution_readback.issues.slice(0, 3).map((issue) => (
-                            <Badge key={`${member.vps_id}-${issue.kind}-${issue.label}`} variant="info" tone={chipTone(issue.tone)}>
-                              {issue.label}
-                            </Badge>
-                          ))}
-                          {member.execution_readback.issues.length > 3 && (
-                            <Badge variant="count" tone="neutral">
-                              +{member.execution_readback.issues.length - 3}
-                            </Badge>
-                          )}
-                        </span>
-                      )}
-                      <div className="asset-decision-execution-card__actions">
-                        {member.execution_plan?.step_kind === 'review_record' ? (
-                          <button className="btn sm secondary" type="button" onClick={() => setDecisionNotice(`请在当前记录中复核：${member.display_name || member.vps_id}`)}>
-                            {actionLabelForMember(member)}
-                          </button>
-                        ) : (
-                          <Link className="btn sm secondary" to={actionHrefForMember(member)}>
-                            {actionLabelForMember(member)}
-                          </Link>
-                        )}
-                        {canStart && (
-                          <button className="btn sm secondary" type="button" disabled={isSaving} onClick={() => saveRecordMemberFollowup(member, 'in_progress')}>
-                            开始跟进
-                          </button>
-                        )}
-                        {canMarkDone && (
-                          <button className="btn sm primary" type="button" disabled={isSaving} onClick={() => saveRecordMemberFollowup(member, 'done')}>
-                            标记完成
-                          </button>
-                        )}
-                      </div>
-                    </article>
-                  )
-                })}
-              </div>
-            </section>
-          ))}
+                <div className="asset-decision-execution-card__actions">
+                  {primaryAction}
+                </div>
+              </article>
+            )
+          })}
         </div>
         {executionPreview.hiddenCount > 0 && (
           <div className="asset-decision-preview-more" role="note">
@@ -5150,7 +5190,7 @@ export function AssetDecisionsPage() {
           />
         ) : detailState.detail ? (
           <div className="asset-decision-detail">
-            {renderDetailCommand({
+            {(groupDetailPanel === 'overview' || groupDetailPanel === 'directory') && renderDetailCommand({
               ariaLabel: '决策组当前判断',
               title: '',
               summary: compactGroupJudgement(detailState.detail),
@@ -5238,9 +5278,7 @@ export function AssetDecisionsPage() {
             {groupDetailPanel === 'save' && recordDraft && renderDetailPanel('保存记录',
               <form className="asset-decision-record-form" onSubmit={submitRecordSave}>
                 <div className="asset-decision-record-form__header">
-                  <div>
-                    <h3>保存组合决策记录</h3>
-                  </div>
+                  {renderCompactTaskHeader('保存组合决策记录', `成员 ${detailState.detail.members.length}`)}
                   <div className="asset-decision-member-actions">
                     <button className="btn sm primary" type="submit" disabled={recordSaving}>
                       {recordSaving ? '保存中…' : '保存记录'}
@@ -5341,7 +5379,7 @@ export function AssetDecisionsPage() {
           />
         ) : manualDetailState.detail && manualGroupProgress ? (
           <div className="asset-decision-detail asset-decision-manual-detail">
-            {renderDetailCommand({
+            {(manualDetailPanel === 'overview' || manualDetailPanel === 'directory') && renderDetailCommand({
               ariaLabel: '自定义组合当前判断',
               title: '当前判断',
               summary: compactDecisionText(
@@ -5398,7 +5436,7 @@ export function AssetDecisionsPage() {
                 startManualRecordSave(manualDetailState.detail!)
                 return
               }
-              setManualDetailPanel(panel)
+              selectManualDetailPanel(panel)
             })}
 
             {manualDetailPanel !== 'overview' && manualDetailPanel !== 'directory' && renderDetailPanelNav<ManualDetailPanel>([
@@ -5416,7 +5454,7 @@ export function AssetDecisionsPage() {
                 startManualRecordSave(manualDetailState.detail!)
                 return
               }
-              setManualDetailPanel(panel)
+              selectManualDetailPanel(panel)
             })}
 
             {manualDetailPanel === 'members' && renderDetailPanel('成员维护',
@@ -5447,9 +5485,7 @@ export function AssetDecisionsPage() {
             {manualDetailPanel === 'edit' && renderDetailPanel('编辑组合',
               <form id="asset-decision-manual-group-form" className="asset-decision-manual-group-form" onSubmit={submitManualGroupPatch}>
               <div className="asset-decision-record-form__header">
-                <div>
-                  <h3>组合场景</h3>
-                </div>
+                {renderCompactTaskHeader('组合场景', MANUAL_GROUP_STATUS_LABELS[manualDetailState.detail.status])}
               </div>
               {manualGroupError && <div className="inline-alert danger">{manualGroupError}</div>}
               <div className="asset-decision-manual-group-form__grid">
@@ -5500,12 +5536,20 @@ export function AssetDecisionsPage() {
             {manualDetailPanel === 'add' && renderDetailPanel('添加成员',
               <form className="asset-decision-manual-add-form" onSubmit={submitManualMemberAdd}>
               <div className="asset-decision-record-form__header">
-                <div>
-                  <h3>加入 VPS</h3>
+                {renderCompactTaskHeader('加入 VPS', `候选 ${manualMemberCandidateRows.length}`)}
+                <div className="asset-decision-member-actions">
+                  <button
+                    className="btn sm secondary"
+                    type="button"
+                    aria-expanded={manualMemberAddAdvanced}
+                    onClick={() => setManualMemberAddAdvancedVisible(!manualMemberAddAdvanced)}
+                  >
+                    高级选项
+                  </button>
+                  <button className="btn sm primary" type="submit" disabled={manualGroupSaving || vpsCatalogState.loading || !manualMemberAddDraft.vpsID}>
+                    {manualGroupSaving ? '加入中…' : '加入组合'}
+                  </button>
                 </div>
-                <button className="btn sm primary" type="submit" disabled={manualGroupSaving || vpsCatalogState.loading || !manualMemberAddDraft.vpsID}>
-                  {manualGroupSaving ? '加入中…' : '加入组合'}
-                </button>
               </div>
               {vpsCatalogState.error && <div className="inline-alert danger">{vpsCatalogState.error}</div>}
               <div className="asset-decision-manual-add-form__grid">
@@ -5520,7 +5564,7 @@ export function AssetDecisionsPage() {
                     <option value="">{vpsCatalogState.loading ? '正在加载 VPS…' : manualMemberCandidateRows.length === 0 ? '暂无可加入 VPS' : '选择 VPS'}</option>
                     {manualMemberCandidateRows.map((vps) => (
                       <option key={vps.vps_id} value={vps.vps_id}>
-                        {vps.display_name} · {formatOptional(vps.provider_name)} · {vpsLocationLabel(vps)}
+                        {compactVPSOptionLabel(vps)}
                       </option>
                     ))}
                   </select>
@@ -5549,34 +5593,38 @@ export function AssetDecisionsPage() {
                     ))}
                   </select>
                 </label>
-                <label className="input-field">
-                  <span>排序</span>
-                  <input
-                    className="input"
-                    inputMode="numeric"
-                    value={manualMemberAddDraft.sortOrder}
-                    onChange={(event) => setManualMemberAddDraft((current) => ({ ...current, sortOrder: event.target.value }))}
-                    placeholder="自动"
-                  />
-                </label>
-                <label className="input-field">
-                  <span>理由</span>
-                  <input
-                    className="input"
-                    value={manualMemberAddDraft.reason}
-                    onChange={(event) => setManualMemberAddDraft((current) => ({ ...current, reason: event.target.value }))}
-                    placeholder="加入组合的原因"
-                  />
-                </label>
-                <label className="input-field">
-                  <span>备注</span>
-                  <input
-                    className="input"
-                    value={manualMemberAddDraft.note}
-                    onChange={(event) => setManualMemberAddDraft((current) => ({ ...current, note: event.target.value }))}
-                    placeholder="可选"
-                  />
-                </label>
+                {manualMemberAddAdvanced && (
+                  <>
+                    <label className="input-field">
+                      <span>排序</span>
+                      <input
+                        className="input"
+                        inputMode="numeric"
+                        value={manualMemberAddDraft.sortOrder}
+                        onChange={(event) => setManualMemberAddDraft((current) => ({ ...current, sortOrder: event.target.value }))}
+                        placeholder="自动"
+                      />
+                    </label>
+                    <label className="input-field">
+                      <span>理由</span>
+                      <input
+                        className="input"
+                        value={manualMemberAddDraft.reason}
+                        onChange={(event) => setManualMemberAddDraft((current) => ({ ...current, reason: event.target.value }))}
+                        placeholder="加入组合的原因"
+                      />
+                    </label>
+                    <label className="input-field">
+                      <span>备注</span>
+                      <input
+                        className="input"
+                        value={manualMemberAddDraft.note}
+                        onChange={(event) => setManualMemberAddDraft((current) => ({ ...current, note: event.target.value }))}
+                        placeholder="可选"
+                      />
+                    </label>
+                  </>
+                )}
               </div>
             </form>,
             )}
@@ -5584,9 +5632,7 @@ export function AssetDecisionsPage() {
             {manualDetailPanel === 'save' && recordDraft && recordDraft.sourceType === 'manual_group' && renderDetailPanel('保存记录',
               <form className="asset-decision-record-form" onSubmit={submitRecordSave}>
                 <div className="asset-decision-record-form__header">
-                  <div>
-                    <h3>保存自定义组合决策</h3>
-                  </div>
+                  {renderCompactTaskHeader('保存自定义组合决策', `成员 ${manualDetailState.detail.members.length}`)}
                   <div className="asset-decision-member-actions">
                     <button className="btn sm primary" type="submit" disabled={recordSaving}>
                       {recordSaving ? '保存中…' : '保存记录'}
@@ -5708,7 +5754,7 @@ export function AssetDecisionsPage() {
           />
         ) : templateDetailState.detail ? (
           <div className="asset-decision-detail asset-decision-template-detail">
-            {renderDetailCommand({
+            {(templateDetailPanel === 'overview' || templateDetailPanel === 'directory') && renderDetailCommand({
               ariaLabel: '场景模板当前判断',
               title: '当前模板',
               summary: compactDecisionText(templateDetailState.detail.goal, '创建组合后细化'),
@@ -5796,9 +5842,7 @@ export function AssetDecisionsPage() {
             {templateDetailPanel === 'create' && renderDetailPanel('创建组合',
               <form className="asset-decision-template-form" onSubmit={submitTemplateManualGroup}>
               <div className="asset-decision-record-form__header">
-                <div>
-                  <h3>从模板创建自定义组合</h3>
-                </div>
+                {renderCompactTaskHeader('从模板创建自定义组合', SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status])}
                 <button className="btn sm primary" type="submit" disabled={templateSaving || templateDetailState.detail.status !== 'active'}>
                   {templateSaving ? '创建中…' : '创建组合'}
                 </button>
@@ -5850,9 +5894,7 @@ export function AssetDecisionsPage() {
             {templateDetailPanel === 'members' && renderDetailPanel('成员蓝图',
               <div className="asset-decision-template-members">
               <div className="asset-decision-record-form__header">
-                <div>
-                  <h3>成员蓝图</h3>
-                </div>
+                {renderCompactTaskHeader('成员蓝图', `成员 ${templateDetailState.detail.members.length}`)}
               </div>
               {templateDetailState.detail.members.length === 0 ? (
                 <PageStateView
@@ -5864,10 +5906,10 @@ export function AssetDecisionsPage() {
                 />
               ) : (
                 <div className="asset-decision-template-member-list">
-                  {templateDetailState.detail.members.map((member) => (
+                  {templateDetailState.detail.members.map((member, index) => (
                     <div className="asset-decision-template-member" key={member.member_id || `${member.vps_id}-${member.sort_order}`}>
                       <div className="asset-table__identity">
-                        <strong>{member.vps_id || '待补 VPS'}</strong>
+                        <strong>{member.vps_id ? `成员 ${index + 1}` : '待补成员'}</strong>
                         <span>{ROLE_LABELS[member.intended_role ?? 'observe_candidate']} · {ACTION_LABELS[member.intended_action ?? 'review']}</span>
                       </div>
                       <span className="asset-decision-chip-row">
@@ -5928,7 +5970,7 @@ export function AssetDecisionsPage() {
           />
         ) : recordDetailState.detail ? (
           <div className="asset-decision-detail asset-decision-record-detail">
-            {recordDetailPanel === 'overview' ? renderDetailCommand({
+            {(recordDetailPanel === 'overview' || recordDetailPanel === 'directory') ? renderDetailCommand({
               ariaLabel: '保存记录当前判断',
               title: '当前记录',
               summary: recordCoverSummary(recordDetailState.detail),
