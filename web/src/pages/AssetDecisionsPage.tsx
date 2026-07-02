@@ -308,11 +308,12 @@ type AssetDecisionNextWorkItem = {
 }
 
 type AssetDecisionPortfolioLead = {
+  kind: 'work' | 'stable'
   tone: BadgeTone
   eyebrow: string
   title: string
   summary: string
-  actionLabel: string
+  actionLabel?: string
   contextLabel: string
   riskLabel: string
   evidenceLabel: string
@@ -1017,8 +1018,6 @@ function deriveClosedLoopMetrics(
 function deriveNextWorkItems(
   groups: AssetDecisionGroupSummary[],
   records: AssetDecisionRecordSummary[],
-  manualGroups: AssetDecisionManualGroupSummary[],
-  templates: AssetDecisionScenarioTemplateSummary[],
   sourceErrors: ClosedLoopSourceErrors,
 ): AssetDecisionNextWorkItem[] {
   const items: AssetDecisionNextWorkItem[] = []
@@ -1033,7 +1032,7 @@ function deriveNextWorkItems(
           id: `record-drift-${record.record_id}`,
           kind: 'record_drift',
           tone: 'critical',
-          sourceLabel: 'DECISION MEMORY',
+          sourceLabel: '保存记录',
           kindLabel: '事实漂移',
           title: record.title,
           summary: readback.summary || '当前事实与已保存判断不一致，需要复核执行闭环。',
@@ -1047,7 +1046,7 @@ function deriveNextWorkItems(
           id: `record-blocked-${record.record_id}`,
           kind: 'record_blocked',
           tone: 'critical',
-          sourceLabel: 'DECISION MEMORY',
+          sourceLabel: '保存记录',
           kindLabel: '跟进阻塞',
           title: record.title,
           summary: readback.summary || '记录中仍有成员阻塞，需要人工解除或调整跟进路径。',
@@ -1061,7 +1060,7 @@ function deriveNextWorkItems(
           id: `record-needs-evidence-${record.record_id}`,
           kind: 'record_needs_evidence',
           tone: 'alert',
-          sourceLabel: 'DECISION MEMORY',
+          sourceLabel: '保存记录',
           kindLabel: '回读缺证据',
           title: record.title,
           summary: readback.summary || '当前记录仍有证据缺口，先补齐资料再推进判断。',
@@ -1081,7 +1080,7 @@ function deriveNextWorkItems(
         id: `auto-group-${group.group_id}`,
         kind: 'auto_group',
         tone: group.evidence_assessment.quality_tier === 'blocked' ? 'alert' : 'notice',
-        sourceLabel: 'AUTO GROUP',
+        sourceLabel: '自动组合',
         kindLabel: VIEW_LABELS[group.view],
         title: group.title,
         summary: group.decision_recommendation?.summary || group.primary_issue_summary || '打开自动组比较成员、成本、服务承载和证据缺口。',
@@ -1089,42 +1088,6 @@ function deriveNextWorkItems(
         actionLabel: '打开决策组',
         priority: 620 + group.priority + pressure,
         target: { type: 'group', id: group.group_id },
-      })
-    }
-  }
-
-  if (!sourceErrors.manualGroups) {
-    for (const group of manualGroups.filter((item) => item.status === 'active')) {
-      items.push({
-        id: `manual-group-${group.manual_group_id}`,
-        kind: 'manual_group',
-        tone: 'maintenance',
-        sourceLabel: 'SCENARIO WORKBENCH',
-        kindLabel: MANUAL_GROUP_SCENARIO_LABELS[group.scenario],
-        title: group.title,
-        summary: group.decision_recommendation?.next_step || group.goal || '继续维护成员意图，必要时保存为一次组合决策记录。',
-        meta: `${group.member_count} 台 VPS · 资料缺口 ${group.evidence_assessment.gap_signal_count} · 更新 ${formatDateTime(group.updated_at)}`,
-        actionLabel: '继续组合',
-        priority: 520 + group.member_count * 4 + group.evidence_assessment.gap_signal_count * 8,
-        target: { type: 'manual_group', id: group.manual_group_id },
-      })
-    }
-  }
-
-  if (!sourceErrors.templates) {
-    for (const template of templates.filter((item) => item.status === 'active')) {
-      items.push({
-        id: `scenario-template-${template.template_id}`,
-        kind: 'scenario_template',
-        tone: template.builtin ? 'notice' : 'maintenance',
-        sourceLabel: 'SCENARIO TEMPLATES',
-        kindLabel: MANUAL_GROUP_SCENARIO_LABELS[template.scenario],
-        title: template.title,
-        summary: template.goal || template.note || '从模板启动自定义组合，再根据当前事实补齐成员。',
-        meta: `${template.builtin ? '内置模板' : '自定义模板'} · 蓝图成员 ${template.member_count}`,
-        actionLabel: '使用模板',
-        priority: 320 + (template.builtin ? 8 : 16) + template.member_count,
-        target: { type: 'template', id: template.template_id },
       })
     }
   }
@@ -1182,6 +1145,7 @@ function buildPortfolioLead(
   const fallbackGroup = groups[0]
   if (first) {
     return {
+      kind: 'work',
       tone: first.tone,
       eyebrow: first.sourceLabel,
       title: `${first.kindLabel} · ${first.title}`,
@@ -1196,8 +1160,9 @@ function buildPortfolioLead(
   }
   if (fallbackGroup) {
     return {
+      kind: 'work',
       tone: fallbackGroup.evidence_assessment.gap_signal_count > 0 ? 'alert' : 'notice',
-      eyebrow: 'AUTO GROUP',
+      eyebrow: '自动组合',
       title: `先比较 ${fallbackGroup.title}`,
       summary: fallbackGroup.decision_recommendation?.summary || fallbackGroup.primary_issue_summary || '当前视图有可比较的自动决策组，先打开组详情核对成员事实。',
       actionLabel: '打开决策组',
@@ -1208,14 +1173,26 @@ function buildPortfolioLead(
       primaryGroupID: fallbackGroup.group_id,
     }
   }
+  if (metrics.partialErrorCount === 0) {
+    return {
+      kind: 'stable',
+      tone: 'normal',
+      eyebrow: '当前判断',
+      title: '当前没有需要处理的组合决策',
+      summary: '已加载视图内暂无待处理项；历史记录、场景模板和单台队列可按需打开。',
+      contextLabel,
+      riskLabel,
+      evidenceLabel,
+      renewalLabel: renewalLabelText,
+    }
+  }
   return {
-    tone: metrics.partialErrorCount > 0 ? 'alert' : 'normal',
-    eyebrow: 'PORTFOLIO STATUS',
-    title: metrics.partialErrorCount > 0 ? '部分资产决策证据不可用' : '当前视图暂无置顶组合工作',
-    summary: metrics.partialErrorCount > 0
-      ? '请先查看局部错误边界；已加载的自动组、记录和单台辅助队列仍可继续处理。'
-      : '当前已加载数据没有漂移、阻塞或可启动场景，可切换视图继续检查其它组合压力。',
-    actionLabel: '查看需要决策',
+    kind: 'work',
+    tone: 'alert',
+    eyebrow: '当前判断',
+    title: '部分资产决策证据不可用',
+    summary: '请先查看局部错误边界；已加载的自动组、记录和单台辅助队列仍可继续处理。',
+    actionLabel: '查看已加载决策组',
     contextLabel,
     riskLabel,
     evidenceLabel,
@@ -1257,36 +1234,36 @@ function buildSecondaryNavItems(
   return [
     {
       value: 'records',
-      eyebrow: 'DECISION MEMORY',
-      title: '已保存决策',
-      summary: recordIssues > 0 ? `跟进/证据问题 ${recordIssues}` : '回看判断与执行回读',
+      eyebrow: '历史记录',
+      title: '保存记录',
+      summary: recordIssues > 0 ? `待复核 ${recordIssues}` : '可回看',
       meta: recordMeta,
       actionLabel: '打开记录',
       tone: recordsState.error ? 'alert' : recordIssues > 0 ? 'notice' : 'normal',
     },
     {
       value: 'scenarios',
-      eyebrow: 'SCENARIOS',
-      title: '场景与模板',
-      summary: '管理比较篮子和启动模板',
+      eyebrow: '场景',
+      title: '场景与组合',
+      summary: manualGroupsState.error || templatesState.error ? '部分不可用' : '按需打开',
       meta: scenarioMeta,
       actionLabel: '打开场景',
       tone: manualGroupsState.error || templatesState.error ? 'alert' : 'normal',
     },
     {
       value: 'renewals',
-      eyebrow: 'RENEWAL',
-      title: '续费证据',
-      summary: '只读订阅窗口事实',
+      eyebrow: '续费事实',
+      title: '续费窗口',
+      summary: queueState.renewals.length > 0 ? '有临近项' : '无临近项',
       meta: renewalMeta,
       actionLabel: '查看续费',
       tone: queueState.renewalsError ? 'alert' : queueState.renewals.length > 0 ? 'notice' : 'normal',
     },
     {
       value: 'single_queue',
-      eyebrow: 'AUX QUEUE',
-      title: '单台辅助队列',
-      summary: '保留单台续费处理',
+      eyebrow: '单台辅助',
+      title: '单台队列',
+      summary: totalDecisionQueue > 0 ? '可逐台处理' : '暂无待处理',
       meta: singleQueueMeta,
       actionLabel: '查看单台队列',
       tone: queueState.queueError ? 'alert' : totalDecisionQueue > 0 ? 'notice' : 'normal',
@@ -2875,8 +2852,6 @@ export function AssetDecisionsPage() {
   const nextWorkItems = deriveNextWorkItems(
     portfolioState.groups,
     recordsState.records,
-    manualGroupsState.groups,
-    templatesState.templates,
     closedLoopSourceErrors,
   )
   const portfolioLead = buildPortfolioLead(
@@ -4573,6 +4548,7 @@ export function AssetDecisionsPage() {
   }
 
   function openPortfolioLead() {
+    if (portfolioLead.kind === 'stable') return
     if (portfolioLead.primaryItem) {
       openNextWorkItem(portfolioLead.primaryItem)
       return
@@ -4690,32 +4666,34 @@ export function AssetDecisionsPage() {
           <span>{portfolioLead.eyebrow}</span>
           <h2>{portfolioLead.title}</h2>
           <p>{portfolioLead.summary}</p>
-          <div className="asset-decision-command-summary__actions">
-            <button className="btn md primary" type="button" onClick={openPortfolioLead}>
-              {portfolioLead.actionLabel}
-            </button>
-            <Link className="btn md secondary" to={`/asset-decisions?view=evidence&renew_within_days=${renewalWindow}&scenario=evidence_cleanup`}>
-              资料缺口
-            </Link>
-          </div>
+          {portfolioLead.kind === 'work' && portfolioLead.actionLabel && (
+            <div className="asset-decision-command-summary__actions">
+              <button className="btn md primary" type="button" onClick={openPortfolioLead}>
+                {portfolioLead.actionLabel}
+              </button>
+              <Link className="btn md secondary" to={`/asset-decisions?view=evidence&renew_within_days=${renewalWindow}&scenario=evidence_cleanup`}>
+                资料缺口
+              </Link>
+            </div>
+          )}
         </div>
         <div className="asset-decision-command-summary__facts" aria-label="资产组合决策当前事实">
           <div className="asset-decision-focus__item asset-decision-focus__item--notice">
-            <span>PORTFOLIO</span>
+            <span>组合组数</span>
             <strong>{portfolioState.overviewLoading ? '...' : overview?.group_count ?? portfolioState.groups.length}</strong>
           </div>
           <div className="asset-decision-focus__item asset-decision-focus__item--alert">
-            <span>RENEWAL</span>
+            <span>续费组</span>
             <strong>{portfolioState.overviewLoading ? '...' : overview?.renewal_group_count ?? 0}</strong>
           </div>
           <div className="asset-decision-focus__item asset-decision-focus__item--critical">
-            <span>CLOSED LOOP</span>
+            <span>闭环异常</span>
             <strong>{closedLoopMetrics.readbackDriftCount + closedLoopMetrics.readbackBlockedCount + closedLoopMetrics.readbackNeedsEvidenceCount}</strong>
             {closedLoopMetrics.partialErrorCount > 0 && <small>{portfolioLead.riskLabel}</small>}
           </div>
           <div className="asset-decision-focus__item asset-decision-focus__item--normal">
-            <span>EVIDENCE</span>
-            <strong>{overview ? '5' : '—'}</strong>
+            <span>证据状态</span>
+            <strong>{overview ? '已聚合' : '等待'}</strong>
           </div>
         </div>
       </section>
@@ -4745,7 +4723,7 @@ export function AssetDecisionsPage() {
         <section className="page-panel asset-decision-command">
           <div className="asset-decision-board__header">
             <div>
-              <p className="section-heading__eyebrow">PORTFOLIO WORKBENCH</p>
+              <p className="section-heading__eyebrow">组合扫描</p>
               <h2>决策组扫描</h2>
             </div>
             <div className="asset-decision-board__tools">
@@ -4802,7 +4780,7 @@ export function AssetDecisionsPage() {
               kind="empty"
               title="当前视图暂无决策组"
               description="可切换到需要决策或资料缺口；单台辅助队列可从上方入口打开。"
-              action={<button className="btn sm secondary" onClick={() => setWorkbenchView('needs_decision')}>查看需要决策</button>}
+              action={portfolioLead.kind === 'stable' ? undefined : <button className="btn sm secondary" onClick={() => setWorkbenchView('needs_decision')}>查看需要决策</button>}
               surface="empty"
               compact
             />
@@ -4816,7 +4794,7 @@ export function AssetDecisionsPage() {
       <section className="page-panel asset-decision-scenario-records animate-in d3">
         <div className="asset-decision-board__header">
           <div>
-            <p className="section-heading__eyebrow">SCENARIO WORKBENCH</p>
+            <p className="section-heading__eyebrow">场景工作区</p>
             <h2>场景工作区</h2>
             <p>模板负责启动场景，自定义组合承接真实比较；已保存决策从记录入口进入。</p>
           </div>
@@ -4834,7 +4812,7 @@ export function AssetDecisionsPage() {
           <section className="asset-decision-scenario-card asset-decision-templates" aria-label="资产决策场景模板">
             <div className="asset-decision-scenario-card__head">
               <div>
-                <p className="section-heading__eyebrow">SCENARIO TEMPLATES</p>
+                <p className="section-heading__eyebrow">场景模板</p>
                 <h3>场景模板</h3>
                 <span>作为场景启动器使用，不直接保存决策记录。</span>
               </div>
@@ -4887,7 +4865,7 @@ export function AssetDecisionsPage() {
           <section className="asset-decision-scenario-card asset-decision-manual-groups" aria-label="自定义资产组合">
             <div className="asset-decision-scenario-card__head">
               <div>
-                <p className="section-heading__eyebrow">SCENARIO WORKBENCH</p>
+                <p className="section-heading__eyebrow">自定义组合</p>
                 <h3>自定义组合</h3>
                 <span>沉淀真实比较篮子，可继续补成员和保存记录。</span>
               </div>
@@ -4932,7 +4910,7 @@ export function AssetDecisionsPage() {
         <section className="page-panel asset-decision-scenario-card asset-decision-records animate-in d3" aria-label="已保存组合决策">
           <div className="asset-decision-scenario-card__head">
             <div>
-              <p className="section-heading__eyebrow">DECISION MEMORY</p>
+              <p className="section-heading__eyebrow">保存记录</p>
               <h3>已保存组合决策</h3>
               <span>保存过的判断、跟进状态、执行回读和执行编排。</span>
             </div>
@@ -4974,7 +4952,7 @@ export function AssetDecisionsPage() {
       <section className="page-panel asset-renewal-evidence asset-decision-support-surface animate-in d4">
         <div className="section-heading section-heading--inline">
           <div>
-            <p className="section-heading__eyebrow">RENEWAL EVIDENCE</p>
+            <p className="section-heading__eyebrow">续费事实</p>
             <h2 className="section-heading__title">续费事实</h2>
             <p className="section-heading__description">
               只展示订阅续费事实，不在这里替代组合判断。
@@ -5008,7 +4986,7 @@ export function AssetDecisionsPage() {
       <section id="single-vps-queue" className="page-panel asset-decision-single-queue asset-decision-support-surface animate-in d5">
         <div className="asset-decision-board__header">
           <div>
-            <p className="section-heading__eyebrow">SINGLE VPS QUEUE</p>
+            <p className="section-heading__eyebrow">单台辅助</p>
             <h2>单台辅助队列</h2>
             <p>保留已有单台续费决策能力；取消/退役仍从 VPS 详情的 lifecycle workbench 进入。</p>
           </div>

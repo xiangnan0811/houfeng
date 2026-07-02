@@ -761,8 +761,8 @@ function findFetchCall(fetchMock: ReturnType<typeof vi.fn>, url: string, method?
 }
 
 async function openSecondaryWorkbench(label: '打开记录' | '打开场景' | '查看续费' | '查看单台队列') {
-  const secondaryNav = await screen.findByLabelText('资产决策次级工作区')
-  fireEvent.click(within(secondaryNav).getByRole('button', { name: label }))
+  const supportStrip = await screen.findByLabelText('资产决策辅助入口')
+  fireEvent.click(within(supportStrip).getByRole('button', { name: label }))
 }
 
 function expectAutomaticGroupDefaultCover(dialog: HTMLElement) {
@@ -1036,6 +1036,10 @@ function expectDetailDirectoryDensity(directory: HTMLElement) {
   expect(directory).not.toHaveTextContent(/表格|横向滚动|重新读取|当前事实|来源回读|执行编排|保存时判断依据/)
 }
 
+function expectNoAssetDecisionPageEnglishNoise(container: HTMLElement = document.body) {
+  expect(container).not.toHaveTextContent(/\b(?:PORTFOLIO|RENEWAL|CLOSED LOOP|EVIDENCE|WORKBENCH|SCENARIO|SCENARIOS|DECISION MEMORY|SINGLE VPS QUEUE|AUTO GROUP|AUX QUEUE)\b/)
+}
+
 describe('AssetDecisionsPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -1063,8 +1067,13 @@ describe('AssetDecisionsPage', () => {
     expect(within(commandSummary).getByRole('link', { name: '资料缺口' })).toHaveAttribute('href', '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup')
     expect(screen.queryByRole('heading', { name: '决策路径' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('资产组合决策推进路径')).not.toBeInTheDocument()
-    expect(screen.getByText('PORTFOLIO')).toBeInTheDocument()
-    expect(screen.getByLabelText('资产决策次级工作区')).toBeInTheDocument()
+    expectNoAssetDecisionPageEnglishNoise()
+    expect(screen.queryByText('PORTFOLIO')).not.toBeInTheDocument()
+    const supportStrip = screen.getByLabelText('资产决策辅助入口')
+    expect(supportStrip).toHaveClass('asset-decision-support-strip')
+    expect(within(supportStrip).getAllByRole('button')).toHaveLength(4)
+    expect(normalizedText(supportStrip).length).toBeLessThanOrEqual(160)
+    expect(within(supportStrip).queryByText(/回看判断与执行回读|管理比较篮子和启动模板|只读订阅窗口事实|保留单台续费处理/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '决策组扫描' })).toBeInTheDocument()
     const groupQueue = screen.getByLabelText('决策组扫描列表')
     expect(groupQueue).toBeInTheDocument()
@@ -1096,6 +1105,49 @@ describe('AssetDecisionsPage', () => {
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/manual-groups?view=needs_decision&renew_within_days=30')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/scenario-templates')
     expectFetchCalledWith(fetchMock, '/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc')
+  })
+
+  it('shows a quiet stable state without promoting templates or manual groups', async () => {
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      overviewBody: overview({
+        group_count: 0,
+        member_vps_count: 0,
+        needs_decision_count: 0,
+        renewal_group_count: 0,
+        region_group_count: 0,
+        provider_group_count: 0,
+        cost_group_count: 0,
+        evidence_group_count: 0,
+        top_groups: [],
+        type_counts: {},
+        view_counts: {},
+      }),
+      groupsBody: [],
+      recordsBody: [],
+      manualGroupsBody: [manualGroupSummary({ title: '欧洲主备手工组合', status: 'active' })],
+      templatesBody: [scenarioTemplate({ title: '主备取舍模板', status: 'active' })],
+      renewalEvidenceBody: [],
+      subscriptionsBody: [],
+      unreviewedBody: [],
+      migrateBody: [],
+      cancelBody: [],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    const commandSummary = await screen.findByLabelText('资产组合决策当前判断')
+    expect(within(commandSummary).getByRole('heading', { name: '当前没有需要处理的组合决策' })).toBeInTheDocument()
+    expect(within(commandSummary).queryByRole('button', { name: /处理|使用模板|继续组合|打开决策组/ })).not.toBeInTheDocument()
+    expect(within(commandSummary).queryByText(/主备取舍模板|欧洲主备手工组合/)).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '当前视图暂无决策组' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '场景工作区' })).not.toBeInTheDocument()
+    expectNoAssetDecisionPageEnglishNoise()
   })
 
   it('keeps legacy single_queue URLs on the portfolio workbench and points to the support queue', async () => {
@@ -1161,9 +1213,9 @@ describe('AssetDecisionsPage', () => {
         </MemoryRouter>,
       )
 
-      const secondaryNav = await screen.findByLabelText('资产决策次级工作区')
+      const supportStrip = await screen.findByLabelText('资产决策辅助入口')
       await waitFor(() => expect(screen.getByRole('heading', { name: deepLink.visibleHeading })).toBeInTheDocument())
-      expect(within(secondaryNav).getByRole('button', { name: deepLink.activeButton })).toHaveClass('primary')
+      expect(within(supportStrip).getByRole('button', { name: deepLink.activeButton })).toHaveClass('primary')
 
       unmount()
       vi.unstubAllGlobals()
@@ -1290,7 +1342,7 @@ describe('AssetDecisionsPage', () => {
     )
 
     const commandSummary = await screen.findByLabelText('资产组合决策当前判断')
-    await waitFor(() => expect(within(commandSummary).getAllByText('AUTO GROUP').length).toBeGreaterThan(0))
+    await waitFor(() => expect(within(commandSummary).getByText('自动组合')).toBeInTheDocument())
     fireEvent.click(within(commandSummary).getByRole('button', { name: '打开决策组' }))
 
     const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
