@@ -1651,3 +1651,36 @@ Refactored asset decision modal information architecture and density, validated 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 226: 资产组合决策页面全面 UX 重构
+
+**Date**: 2026-07-02
+**Task**: 资产组合决策页面全面 UX 重构
+**Branch**: `ux/asset-decisions-comprehensive-review`
+
+### Summary
+
+重构资产组合决策页面主体：当前判断与决策组扫描优先、稳定态静默、辅助入口压缩为工具条；补充页面中文噪音和稳定态回归测试，完成桌面/移动浏览器审计。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `33bf6f6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
