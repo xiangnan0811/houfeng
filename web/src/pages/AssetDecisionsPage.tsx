@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { AssetDecisionRenewalTable } from '../components/AssetDecisionRenewalTable'
@@ -18,7 +18,6 @@ import {
 import { FilterChip } from '../components/filters'
 import { PageState as PageStateView } from '../components/PageState'
 import {
-  ApiError,
   addAssetDecisionManualGroupMember,
   createAssetDecisionScenarioTemplate,
   createAssetDecisionManualGroup,
@@ -37,7 +36,6 @@ import {
   listSubscriptions,
   listVPSAssets,
   patchAssetDecisionManualGroup,
-  patchAssetDecisionManualGroupMember,
   patchAssetDecisionRecord,
   patchAssetDecisionScenarioTemplate,
   updateVPSAsset,
@@ -47,17 +45,10 @@ import {
   type AssetDecisionEvidenceChip,
   type AssetDecisionEvidenceAssessment,
   type AssetDecisionEvidenceDecisionBias,
-  type AssetDecisionEvidenceKind,
   type AssetDecisionEvidenceQualityTier,
   type AssetDecisionEvidenceSnapshot,
-  type AssetDecisionExecutionCurrentFacts,
-  type AssetDecisionExecutionPlanLane,
-  type AssetDecisionExecutionPlanTone,
-  type AssetDecisionExecutionReadbackStatus,
   type AssetDecisionComparisonInsight,
   type AssetDecisionComparisonLane,
-  type AssetDecisionComparisonPrimaryAxis,
-  type AssetDecisionComparisonSignal,
   type AssetDecisionMemberComparisonInsight,
   type AssetDecisionGroupDetail,
   type AssetDecisionGroupMember,
@@ -67,14 +58,8 @@ import {
   type AssetDecisionManualGroupScenario,
   type AssetDecisionManualGroupStatus,
   type AssetDecisionManualGroupSummary,
-  type AssetDecisionMemberExecutionReadback,
-  type AssetDecisionMemberExecutionPlan,
   type AssetDecisionRecommendation,
-  type AssetDecisionRecordExecutionPlan,
-  type AssetDecisionRecordExecutionReadback,
-  type AssetDecisionOverview,
   type AssetDecisionRecordDetail,
-  type AssetDecisionSourceType,
   type AssetDecisionFollowupStatus,
   type AssetDecisionGroupListFilter,
   type AssetDecisionRecordMember,
@@ -85,167 +70,138 @@ import {
   type AssetDecisionScenarioTemplateSummary,
   type AssetDecisionSuggestedAction,
   type AssetDecisionSuggestedRole,
-  type AssetDecisionView,
   type SubscriptionRecord,
   type VPSAssetRecord,
-  type VPSRenewalDecision,
 } from '../lib/types'
 import {
   LifecycleBadge,
   RenewalBadge,
-  SubscriptionStatusBadge,
   UsageBadge,
 } from './assetPageBadges'
 import {
-  buildVPSQualityIssues,
+
   daysUntilDate,
   groupSubscriptionsByVPS,
-  isSubscriptionInRenewalWindow,
   lifecycleLabel,
   renewalLabel,
-  selectPrimarySubscription,
   usageLabel,
   vpsLocationLabel,
-  type AssetQualityIssue,
 } from './assetPageUtils'
 import { AssetDecisionSecondaryNav } from './asset-decisions/AssetDecisionSecondaryNav'
-import type { AssetDecisionSecondaryNavItem, SecondaryWorkbench } from './asset-decisions/types'
+import type {
+  WorkbenchView,
+  MainWorkbenchView,
+  DecisionQueueView,
+  DecisionQueueItem,
+  PortfolioState,
+  DetailState,
+  ManualGroupsState,
+  ManualDetailState,
+  ScenarioTemplatesState,
+  TemplateDetailState,
+  VPSCatalogState,
+  RecordsState,
+  RecordDetailState,
+  RecordMemberDraft,
+  RecordFollowupDraft,
+  RecordDraft,
+  ManualMemberAddDraft,
+  TemplateManualGroupDraft,
+  GroupDetailPanel,
+  ManualDetailPanel,
+  RecordDetailPanel,
+  TemplateDetailPanel,
+  ContextFilterKey,
+  OpenStateKey,
+  ContextFilterChip,
+  AssetDecisionSecondaryNavItem,
+  SecondaryWorkbench,
+} from './asset-decisions/types'
+import {
+  RENEWAL_WINDOWS,
+  INITIAL_DECISION_DRAFT,
+  INITIAL_PORTFOLIO_STATE,
+  INITIAL_DETAIL_STATE,
+  INITIAL_MANUAL_GROUPS_STATE,
+  INITIAL_MANUAL_DETAIL_STATE,
+  INITIAL_SCENARIO_TEMPLATES_STATE,
+  INITIAL_TEMPLATE_DETAIL_STATE,
+  INITIAL_VPS_CATALOG_STATE,
+  INITIAL_RECORDS_STATE,
+  INITIAL_RECORD_DETAIL_STATE,
+  INITIAL_QUEUE_STATE,
+  VIEW_LABELS,
+  ROLE_LABELS,
+  ACTION_LABELS,
+  MANUAL_GROUP_STATUS_LABELS,
+  SCENARIO_TEMPLATE_STATUS_LABELS,
+  MANUAL_GROUP_SCENARIO_LABELS,
+  RECORD_STATUS_LABELS,
+  FOLLOWUP_STATUS_LABELS,
+  READBACK_STATUS_LABELS,
+  ASSET_DECISION_DETAIL_PREVIEW_LIMIT,
+  COMPARISON_LANE_LABELS,
+  ROLE_OPTIONS,
+  ACTION_OPTIONS,
+  MANUAL_GROUP_SCENARIO_OPTIONS,
+  RECORD_STATUS_OPTIONS,
+  FOLLOWUP_STATUS_OPTIONS,
+  CONTEXT_FILTER_KEYS,
+  OPEN_STATE_KEYS,
+  WORKBENCH_TABS,
+} from './asset-decisions/constants'
+import {
+  renderCompactRiskChips,
+  renderComparisonSignals,
+  renderReadbackBadge,
+  renderExecutionPlanBadge,
+} from './asset-decisions/renderHelpers'
+import {
+  buildDecisionQueue,
+  updateDecisionQueues,
+  deriveClosedLoopMetrics,
+  deriveNextWorkItems,
+  buildPortfolioLead,
+  buildManualGroupProgress,
+} from './asset-decisions/businessLogic'
+import {
+  describeError,
+  parseRenewalWindow,
+  parseWorkbenchView,
+  trimParam,
+  buildAssetDecisionFilter,
+  parseComparisonInsight,
+} from './asset-decisions/utils'
+import {
+  chipTone,
+  roleTone,
+  actionTone,
+  manualGroupStatusTone,
+  recordStatusTone,
+  followupStatusTone,
+  readbackStatusTone,
+  comparisonLaneTone,
+  scenarioTemplateStatusTone,
+  baseMoney,
+  renewalQueueLabel,
+  recordSourceLabel,
+  recordSourceDetail,
+  recordFollowupDoneCount,
+  compactDecisionText,
+  sourceAvailabilityLabel,
+  memberContextLabel,
+  compactMemberReadbackSummary,
+  compactMemberPlanSummary,
+  actionLabelForMember,
+  compactVPSOptionLabel,
+  groupPressureLabel,
+  manualCoverMeta,
+  recordCoverSummary,
+  recordCoverMeta,
+  compactGroupJudgement,
+} from './asset-decisions/formatters'
 
-type RenewalWindow = 30 | 60 | 90
-type WorkbenchView = AssetDecisionView | 'single_queue'
-type MainWorkbenchView = AssetDecisionView
-type DecisionQueueView =
-  | 'all'
-  | 'unreviewed'
-  | 'renewal'
-  | 'migrate'
-  | 'cancel'
-  | 'cancellation_attention'
-  | 'unlinked'
-  | 'missing_subscription'
-
-type DecisionQueueItem = {
-  vps: VPSAssetRecord
-  subscription: SubscriptionRecord | null
-  qualityIssues: AssetQualityIssue[]
-  renewalDue: boolean
-  priority: number
-}
-
-type PortfolioState = {
-  overviewLoading: boolean
-  overviewError: string | null
-  overview: AssetDecisionOverview | null
-  groupsLoading: boolean
-  groupsError: string | null
-  groups: AssetDecisionGroupSummary[]
-}
-
-type DetailState = {
-  loading: boolean
-  error: string | null
-  detail: AssetDecisionGroupDetail | null
-}
-
-type ManualGroupsState = {
-  loading: boolean
-  error: string | null
-  groups: AssetDecisionManualGroupSummary[]
-}
-
-type ManualDetailState = {
-  loading: boolean
-  error: string | null
-  detail: AssetDecisionManualGroupDetail | null
-}
-
-type ScenarioTemplatesState = {
-  loading: boolean
-  error: string | null
-  templates: AssetDecisionScenarioTemplateSummary[]
-}
-
-type TemplateDetailState = {
-  loading: boolean
-  error: string | null
-  detail: AssetDecisionScenarioTemplateDetail | null
-}
-
-type VPSCatalogState = {
-  loading: boolean
-  error: string | null
-  rows: VPSAssetRecord[]
-}
-
-type RecordsState = {
-  loading: boolean
-  error: string | null
-  records: AssetDecisionRecordSummary[]
-}
-
-type RecordDetailState = {
-  loading: boolean
-  error: string | null
-  detail: AssetDecisionRecordDetail | null
-}
-
-type RecordMemberDraft = {
-  decidedRole: AssetDecisionSuggestedRole
-  decidedAction: AssetDecisionSuggestedAction
-  reason: string
-}
-
-type RecordFollowupDraft = {
-  status: AssetDecisionFollowupStatus
-  note: string
-}
-
-type RecordDraft = {
-  sourceType: AssetDecisionSourceType
-  sourceGroupID: string
-  renewWithinDays: number
-  title: string
-  goal: string
-  status: AssetDecisionRecordStatus
-  memberOrder: string[]
-  members: Record<string, RecordMemberDraft>
-}
-
-type ManualMemberDraft = {
-  intendedRole: AssetDecisionSuggestedRole
-  intendedAction: AssetDecisionSuggestedAction
-  reason: string
-  note: string
-  sortOrder: string
-}
-
-type ManualMemberAddDraft = ManualMemberDraft & {
-  vpsID: string
-}
-
-type TemplateManualGroupDraft = {
-  title: string
-  goal: string
-  note: string
-  renewWithinDays: RenewalWindow
-}
-
-type GroupDetailPanel = 'overview' | 'directory' | 'members' | 'save' | 'raw' | 'vps'
-type ManualDetailPanel = 'overview' | 'directory' | 'edit' | 'members' | 'add' | 'save' | 'raw'
-type RecordDetailPanel = 'overview' | 'directory' | 'execution' | 'members' | 'source' | 'raw'
-type TemplateDetailPanel = 'overview' | 'directory' | 'create' | 'members' | 'status'
-
-type ScoreStyle = CSSProperties & {
-  '--score': number
-}
-
-type CostSummaryLike = {
-  monthly_cost_by_currency: AssetDecisionGroupSummary['monthly_cost_by_currency']
-  monthly_cost_base?: number | null
-  yearly_cost_base?: number | null
-  base_currency?: string
-}
-
+// 页面级状态类型
 type QueueState = {
   renewalsLoading: boolean
   renewalsError: string | null
@@ -264,19 +220,6 @@ type ClosedLoopSourceErrors = {
   records?: string | null
   manualGroups?: string | null
   templates?: string | null
-}
-
-type ClosedLoopMetrics = {
-  autoGroupCount: number
-  manualActiveCount: number
-  recordActiveCount: number
-  readbackDriftCount: number
-  readbackBlockedCount: number
-  readbackNeedsEvidenceCount: number
-  readbackOpenCount: number
-  costPressureGroupCount: number
-  evidenceGapGroupCount: number
-  partialErrorCount: number
 }
 
 type AssetDecisionNextWorkKind =
@@ -305,38 +248,6 @@ type AssetDecisionNextWorkItem = {
   actionLabel: string
   priority: number
   target: AssetDecisionNextWorkTarget
-}
-
-type AssetDecisionPortfolioLead = {
-  kind: 'work' | 'stable'
-  tone: BadgeTone
-  eyebrow: string
-  title: string
-  summary: string
-  actionLabel?: string
-  contextLabel: string
-  riskLabel: string
-  evidenceLabel: string
-  renewalLabel: string
-  primaryItem?: AssetDecisionNextWorkItem
-  primaryGroupID?: string
-}
-
-type ManualGroupProgressItem = {
-  key: string
-  label: string
-  summary: string
-  tone: BadgeTone
-  done: boolean
-}
-
-type ManualGroupProgress = {
-  readinessLabel: string
-  readinessTone: BadgeTone
-  readyToRecord: boolean
-  doneCount: number
-  totalCount: number
-  items: ManualGroupProgressItem[]
 }
 
 type ComparisonMatrixMember = {
@@ -378,344 +289,8 @@ type MemberDecisionCardsOptions = {
   action?: (member: ComparisonMatrixMember) => ReactNode
 }
 
-type DetailDirectoryItem<TPanel extends string> = {
-  key: TPanel
-  label: string
-  summary?: string
-  meta?: string
-  tone?: BadgeTone
-  count?: number
-}
-
-const RENEWAL_WINDOWS: readonly RenewalWindow[] = [30, 60, 90]
-const DECISION_QUEUE_VALUES: VPSRenewalDecision[] = ['unreviewed', 'migrate', 'cancel']
-const INITIAL_DECISION_DRAFT: AssetDecisionDraft = {
-  renewalDecision: 'unreviewed',
-  reason: '',
-}
-const INITIAL_PORTFOLIO_STATE: PortfolioState = {
-  overviewLoading: true,
-  overviewError: null,
-  overview: null,
-  groupsLoading: true,
-  groupsError: null,
-  groups: [],
-}
-const INITIAL_DETAIL_STATE: DetailState = {
-  loading: false,
-  error: null,
-  detail: null,
-}
-const INITIAL_MANUAL_GROUPS_STATE: ManualGroupsState = {
-  loading: true,
-  error: null,
-  groups: [],
-}
-const INITIAL_MANUAL_DETAIL_STATE: ManualDetailState = {
-  loading: false,
-  error: null,
-  detail: null,
-}
-const INITIAL_SCENARIO_TEMPLATES_STATE: ScenarioTemplatesState = {
-  loading: true,
-  error: null,
-  templates: [],
-}
-const INITIAL_TEMPLATE_DETAIL_STATE: TemplateDetailState = {
-  loading: false,
-  error: null,
-  detail: null,
-}
-const INITIAL_VPS_CATALOG_STATE: VPSCatalogState = {
-  loading: true,
-  error: null,
-  rows: [],
-}
-const INITIAL_RECORDS_STATE: RecordsState = {
-  loading: true,
-  error: null,
-  records: [],
-}
-const INITIAL_RECORD_DETAIL_STATE: RecordDetailState = {
-  loading: false,
-  error: null,
-  detail: null,
-}
-const INITIAL_QUEUE_STATE: QueueState = {
-  renewalsLoading: true,
-  renewalsError: null,
-  queueLoading: true,
-  queueError: null,
-  renewals: [],
-  subscriptions: [],
-  unreviewed: [],
-  migrate: [],
-  cancel: [],
-}
-
-const VIEW_LABELS: Record<WorkbenchView, string> = {
-  needs_decision: '需要决策',
-  renewal: '续费取舍',
-  region: '同区比较',
-  provider: '服务商组合',
-  cost: '预算压力',
-  evidence: '资料缺口',
-  single_queue: '单台队列',
-}
-
-const ROLE_LABELS: Record<AssetDecisionSuggestedRole, string> = {
-  primary_candidate: '主力候选',
-  standby_candidate: '备用候选',
-  observe_candidate: '观察候选',
-  retire_candidate: '退役候选',
-  evidence_needed: '补证据',
-}
-
-const ACTION_LABELS: Record<AssetDecisionSuggestedAction, string> = {
-  review: '复核',
-  keep: '保留',
-  observe: '观察',
-  migrate: '迁移',
-  cancel: '取消',
-  open_cancellation_workbench: '进入取消台',
-  complete_evidence: '补齐资料',
-}
-
-const MANUAL_GROUP_STATUS_LABELS: Record<AssetDecisionManualGroupStatus, string> = {
-  active: '进行中',
-  archived: '已归档',
-}
-
-const SCENARIO_TEMPLATE_STATUS_LABELS: Record<AssetDecisionScenarioTemplateStatus, string> = {
-  active: '启用',
-  archived: '已归档',
-}
-
-const MANUAL_GROUP_SCENARIO_LABELS: Record<AssetDecisionManualGroupScenario, string> = {
-  general: '通用组合',
-  primary_standby: '主备取舍',
-  budget_reduction: '预算压缩',
-  provider_review: '服务商评估',
-  region_review: '同区比较',
-  migration_retirement: '迁移退役',
-  evidence_cleanup: '资料清理',
-}
-
-const RECORD_STATUS_LABELS: Record<AssetDecisionRecordStatus, string> = {
-  draft: '草稿',
-  decided: '已决策',
-  in_progress: '推进中',
-  completed: '已完成',
-  abandoned: '已放弃',
-}
-
-const FOLLOWUP_STATUS_LABELS: Record<AssetDecisionFollowupStatus, string> = {
-  todo: '待处理',
-  in_progress: '处理中',
-  blocked: '阻塞',
-  done: '已完成',
-  skipped: '跳过',
-}
-
-const READBACK_STATUS_LABELS: Record<AssetDecisionExecutionReadbackStatus, string> = {
-  open: '待回读',
-  aligned: '已对齐',
-  drift: '有漂移',
-  blocked: '阻塞',
-  needs_evidence: '需补证据',
-  inactive: '不活跃',
-}
-
-const EXECUTION_PLAN_LANE_LABELS: Record<AssetDecisionExecutionPlanLane, string> = {
-  cancel_retire: '取消退役',
-  migration: '迁移',
-  keep_observe: '保留观察',
-  evidence: '补证据',
-  review: '复核',
-}
-
-const EXECUTION_PLAN_LANE_ORDER: AssetDecisionExecutionPlanLane[] = [
-  'cancel_retire',
-  'migration',
-  'keep_observe',
-  'evidence',
-  'review',
-]
-const ASSET_DECISION_DETAIL_PREVIEW_LIMIT = 3
-
-const COMPARISON_AXIS_LABELS: Record<AssetDecisionComparisonPrimaryAxis, string> = {
-  renewal: '续费压力',
-  cost: '成本取舍',
-  service_context: '承载上下文',
-  monitoring: '监控证据',
-  evidence: '资料完整度',
-  lifecycle: '生命周期',
-  review: '人工复核',
-}
-
-const COMPARISON_LANE_LABELS: Record<AssetDecisionComparisonLane, string> = {
-  primary: '主力',
-  standby: '备用',
-  observe: '观察',
-  retire: '退役',
-  evidence: '补证据',
-  review: '复核',
-}
-
-const EVIDENCE_TIER_LABELS: Record<AssetDecisionEvidenceQualityTier, string> = {
-  strong: '证据强',
-  usable: '可决策',
-  weak: '证据弱',
-  blocked: '先补证据',
-}
-
-const EVIDENCE_BIAS_LABELS: Record<AssetDecisionEvidenceDecisionBias, string> = {
-  keep: '偏保留',
-  observe: '偏观察',
-  complete_evidence: '补证据',
-  retire: '偏退役',
-  migrate: '偏迁移',
-  review: '待复核',
-}
-
-const EVIDENCE_KIND_LABELS: Partial<Record<AssetDecisionEvidenceKind, string>> = {
-  ip_quality_missing: 'IP 质量缺失',
-  ip_quality_stale: 'IP 质量过期',
-  ip_quality_risk: 'IP 质量风险',
-  ip_egress_mismatch: '出口 IP 不一致',
-  media_unlock_blocked: '服务解锁受阻',
-}
-
-const ROLE_OPTIONS: ReadonlyArray<{ value: AssetDecisionSuggestedRole; label: string }> = [
-  { value: 'primary_candidate', label: ROLE_LABELS.primary_candidate },
-  { value: 'standby_candidate', label: ROLE_LABELS.standby_candidate },
-  { value: 'observe_candidate', label: ROLE_LABELS.observe_candidate },
-  { value: 'retire_candidate', label: ROLE_LABELS.retire_candidate },
-  { value: 'evidence_needed', label: ROLE_LABELS.evidence_needed },
-]
-
-const ACTION_OPTIONS: ReadonlyArray<{ value: AssetDecisionSuggestedAction; label: string }> = [
-  { value: 'review', label: ACTION_LABELS.review },
-  { value: 'keep', label: ACTION_LABELS.keep },
-  { value: 'observe', label: ACTION_LABELS.observe },
-  { value: 'migrate', label: ACTION_LABELS.migrate },
-  { value: 'cancel', label: ACTION_LABELS.cancel },
-  { value: 'open_cancellation_workbench', label: ACTION_LABELS.open_cancellation_workbench },
-  { value: 'complete_evidence', label: ACTION_LABELS.complete_evidence },
-]
-
-const MANUAL_GROUP_SCENARIO_OPTIONS: ReadonlyArray<{ value: AssetDecisionManualGroupScenario; label: string }> = [
-  { value: 'general', label: MANUAL_GROUP_SCENARIO_LABELS.general },
-  { value: 'primary_standby', label: MANUAL_GROUP_SCENARIO_LABELS.primary_standby },
-  { value: 'budget_reduction', label: MANUAL_GROUP_SCENARIO_LABELS.budget_reduction },
-  { value: 'provider_review', label: MANUAL_GROUP_SCENARIO_LABELS.provider_review },
-  { value: 'region_review', label: MANUAL_GROUP_SCENARIO_LABELS.region_review },
-  { value: 'migration_retirement', label: MANUAL_GROUP_SCENARIO_LABELS.migration_retirement },
-  { value: 'evidence_cleanup', label: MANUAL_GROUP_SCENARIO_LABELS.evidence_cleanup },
-]
-
-const RECORD_STATUS_OPTIONS: ReadonlyArray<{ value: AssetDecisionRecordStatus; label: string }> = [
-  { value: 'draft', label: RECORD_STATUS_LABELS.draft },
-  { value: 'decided', label: RECORD_STATUS_LABELS.decided },
-  { value: 'in_progress', label: RECORD_STATUS_LABELS.in_progress },
-  { value: 'completed', label: RECORD_STATUS_LABELS.completed },
-  { value: 'abandoned', label: RECORD_STATUS_LABELS.abandoned },
-]
-
-const FOLLOWUP_STATUS_OPTIONS: ReadonlyArray<{ value: AssetDecisionFollowupStatus; label: string }> = [
-  { value: 'todo', label: FOLLOWUP_STATUS_LABELS.todo },
-  { value: 'in_progress', label: FOLLOWUP_STATUS_LABELS.in_progress },
-  { value: 'blocked', label: FOLLOWUP_STATUS_LABELS.blocked },
-  { value: 'done', label: FOLLOWUP_STATUS_LABELS.done },
-  { value: 'skipped', label: FOLLOWUP_STATUS_LABELS.skipped },
-]
-
-const CONTEXT_FILTER_KEYS = ['provider_id', 'vps_id', 'country', 'region', 'city', 'scenario'] as const
-const OPEN_STATE_KEYS = ['group_id', 'manual_group_id', 'record_id', 'template_id'] as const
-
-type ContextFilterKey = typeof CONTEXT_FILTER_KEYS[number]
-type OpenStateKey = typeof OPEN_STATE_KEYS[number]
-
-type ContextFilterChip = {
-  key: ContextFilterKey
-  label: string
-  value: string
-}
-
-const WORKBENCH_TABS: ReadonlyArray<{ value: MainWorkbenchView; label: string }> = [
-  { value: 'needs_decision', label: '需要决策' },
-  { value: 'renewal', label: '续费取舍' },
-  { value: 'region', label: '同区比较' },
-  { value: 'provider', label: '服务商组合' },
-  { value: 'cost', label: '预算压力' },
-  { value: 'evidence', label: '资料缺口' },
-]
-
-function describeError(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) return error.message
-  if (error instanceof Error) return error.message
-  return fallback
-}
-
-function parseRenewalWindow(value?: string | null): RenewalWindow {
-  const parsed = Number.parseInt(value ?? '', 10)
-  return RENEWAL_WINDOWS.includes(parsed as RenewalWindow) ? (parsed as RenewalWindow) : 30
-}
-
-function parseWorkbenchView(value?: string | null): WorkbenchView {
-  switch (value) {
-    case 'renewal_attention':
-    case 'renewal':
-      return 'renewal'
-    case 'region_portfolio':
-    case 'region':
-      return 'region'
-    case 'provider_portfolio':
-    case 'provider':
-      return 'provider'
-    case 'cost_pressure':
-    case 'cost':
-      return 'cost'
-    case 'evidence_gap':
-    case 'evidence':
-      return 'evidence'
-    case 'single_queue':
-      return 'single_queue'
-    case 'needs_decision':
-    default:
-      return 'needs_decision'
-  }
-}
-
 function portfolioViewForWorkbench(view: WorkbenchView): MainWorkbenchView {
   return view === 'single_queue' ? 'needs_decision' : view
-}
-
-function buildAssetDecisionFilter(searchParams: URLSearchParams, view: MainWorkbenchView, renewalWindow: RenewalWindow): AssetDecisionGroupListFilter {
-  const scenario = parseScenario(searchParams.get('scenario'))
-  return {
-    view,
-    renew_within_days: renewalWindow,
-    provider_id: trimParam(searchParams.get('provider_id')),
-    vps_id: trimParam(searchParams.get('vps_id')),
-    country: trimParam(searchParams.get('country')),
-    region: trimParam(searchParams.get('region')),
-    city: trimParam(searchParams.get('city')),
-    scenario,
-  }
-}
-
-function parseScenario(value: string | null): AssetDecisionManualGroupScenario | undefined {
-  const normalized = trimParam(value)
-  if (!normalized) return undefined
-  return MANUAL_GROUP_SCENARIO_OPTIONS.some((option) => option.value === normalized)
-    ? normalized as AssetDecisionManualGroupScenario
-    : undefined
-}
-
-function trimParam(value: string | null): string | undefined {
-  const trimmed = value?.trim()
-  return trimmed || undefined
 }
 
 function buildContextFilterChips(filter: AssetDecisionGroupListFilter): ContextFilterChip[] {
@@ -727,73 +302,6 @@ function buildContextFilterChips(filter: AssetDecisionGroupListFilter): ContextF
   if (filter.city) chips.push({ key: 'city', label: '城市', value: filter.city })
   if (filter.scenario) chips.push({ key: 'scenario', label: '场景', value: MANUAL_GROUP_SCENARIO_LABELS[filter.scenario] })
   return chips
-}
-
-function updateDecisionQueues(
-  state: QueueState,
-  updated: VPSAssetRecord,
-): Pick<QueueState, 'unreviewed' | 'migrate' | 'cancel'> {
-  const next = {
-    unreviewed: state.unreviewed.filter((vps) => vps.vps_id !== updated.vps_id),
-    migrate: state.migrate.filter((vps) => vps.vps_id !== updated.vps_id),
-    cancel: state.cancel.filter((vps) => vps.vps_id !== updated.vps_id),
-  }
-
-  if (updated.renewal_decision === 'unreviewed') next.unreviewed = [updated, ...next.unreviewed]
-  if (updated.renewal_decision === 'migrate') next.migrate = [updated, ...next.migrate]
-  if (updated.renewal_decision === 'cancel') next.cancel = [updated, ...next.cancel]
-
-  return next
-}
-
-function renewalQueueLabel(value: VPSRenewalDecision): string {
-  return DECISION_QUEUE_VALUES.includes(value) ? renewalLabel(value) : '已处理'
-}
-
-function buildDecisionQueue(
-  vpsRows: VPSAssetRecord[],
-  subscriptionsByVPS: Map<string, SubscriptionRecord[]>,
-  renewalWindow: RenewalWindow,
-): DecisionQueueItem[] {
-  const uniqueRows = new Map<string, VPSAssetRecord>()
-  for (const vps of vpsRows) uniqueRows.set(vps.vps_id, vps)
-
-  return [...uniqueRows.values()]
-    .map((vps) => {
-      const subscription = selectPrimarySubscription(subscriptionsByVPS, vps.vps_id)
-      const qualityIssues = buildVPSQualityIssues(vps, subscription)
-      const renewalDue = isSubscriptionInRenewalWindow(subscription, renewalWindow)
-      return {
-        vps,
-        subscription,
-        qualityIssues,
-        renewalDue,
-        priority: queuePriority(vps, subscription, qualityIssues, renewalDue),
-      }
-    })
-    .sort((left, right) => {
-      if (left.priority !== right.priority) return right.priority - left.priority
-      const leftDays = daysUntilDate(left.subscription?.renew_at) ?? Number.POSITIVE_INFINITY
-      const rightDays = daysUntilDate(right.subscription?.renew_at) ?? Number.POSITIVE_INFINITY
-      if (leftDays !== rightDays) return leftDays - rightDays
-      return left.vps.display_name.localeCompare(right.vps.display_name)
-    })
-}
-
-function queuePriority(
-  vps: VPSAssetRecord,
-  subscription: SubscriptionRecord | null,
-  qualityIssues: AssetQualityIssue[],
-  renewalDue: boolean,
-): number {
-  let priority = 0
-  if (vps.renewal_decision === 'unreviewed') priority += 500
-  if (renewalDue) priority += 300
-  if (vps.renewal_decision === 'migrate' || vps.renewal_decision === 'cancel') priority += 180
-  if (subscription?.exchange_rate_stale) priority += 60
-  if (vps.active_monitoring_instance_link_count <= 0) priority += 90
-  if (!subscription) priority += 80
-  return priority + qualityIssues.length * 8
 }
 
 function filterDecisionQueue(
@@ -818,386 +326,8 @@ function hasCancellationAttention(row: DecisionQueueItem): boolean {
   return inactiveSubscription && !vpsCancelled
 }
 
-function baseMoney(value?: number | null, currency = 'CNY'): string {
-  if (value == null || Number.isNaN(value)) return '—'
-  return formatMoney(value, currency)
-}
-
 function subscriptionCostAttention(subscription: SubscriptionRecord | null): boolean {
   return Boolean(subscription?.exchange_rate_stale)
-}
-
-function chipTone(tone?: string): BadgeTone {
-  if (tone === 'normal' || tone === 'notice' || tone === 'alert' || tone === 'critical' || tone === 'maintenance' || tone === 'offline') {
-    return tone
-  }
-  return 'neutral'
-}
-
-function roleTone(role: AssetDecisionSuggestedRole): BadgeTone {
-  if (role === 'primary_candidate') return 'normal'
-  if (role === 'standby_candidate' || role === 'observe_candidate') return 'maintenance'
-  if (role === 'retire_candidate') return 'critical'
-  return 'notice'
-}
-
-function actionTone(action: AssetDecisionSuggestedAction): BadgeTone {
-  if (action === 'keep') return 'normal'
-  if (action === 'open_cancellation_workbench' || action === 'cancel') return 'critical'
-  if (action === 'migrate' || action === 'observe') return 'maintenance'
-  return 'notice'
-}
-
-function manualGroupStatusTone(status: AssetDecisionManualGroupStatus): BadgeTone {
-  return status === 'active' ? 'maintenance' : 'offline'
-}
-
-function scenarioForGroup(group: Pick<AssetDecisionGroupSummary, 'group_type'>): AssetDecisionManualGroupScenario {
-  if (group.group_type === 'region_portfolio') return 'region_review'
-  if (group.group_type === 'provider_portfolio') return 'provider_review'
-  if (group.group_type === 'cost_pressure') return 'budget_reduction'
-  if (group.group_type === 'cancellation_attention') return 'migration_retirement'
-  if (group.group_type === 'evidence_gap') return 'evidence_cleanup'
-  return 'general'
-}
-
-function recordStatusTone(status: AssetDecisionRecordStatus): BadgeTone {
-  if (status === 'completed') return 'normal'
-  if (status === 'in_progress') return 'maintenance'
-  if (status === 'decided') return 'notice'
-  if (status === 'abandoned') return 'offline'
-  return 'neutral'
-}
-
-function followupStatusTone(status: AssetDecisionFollowupStatus): BadgeTone {
-  if (status === 'done' || status === 'skipped') return 'normal'
-  if (status === 'blocked') return 'critical'
-  if (status === 'in_progress') return 'maintenance'
-  return 'notice'
-}
-
-function readbackStatusTone(status?: AssetDecisionExecutionReadbackStatus): BadgeTone {
-  if (status === 'aligned') return 'normal'
-  if (status === 'drift') return 'critical'
-  if (status === 'blocked') return 'critical'
-  if (status === 'needs_evidence') return 'alert'
-  if (status === 'inactive') return 'offline'
-  if (status === 'open') return 'maintenance'
-  return 'neutral'
-}
-
-function executionPlanTone(tone?: AssetDecisionExecutionPlanTone): BadgeTone {
-  if (tone === 'normal') return 'normal'
-  if (tone === 'critical') return 'critical'
-  if (tone === 'alert') return 'alert'
-  if (tone === 'notice') return 'maintenance'
-  return 'neutral'
-}
-
-function comparisonLaneTone(lane?: AssetDecisionComparisonLane): BadgeTone {
-  if (lane === 'primary') return 'normal'
-  if (lane === 'standby' || lane === 'observe') return 'maintenance'
-  if (lane === 'retire') return 'critical'
-  if (lane === 'evidence') return 'alert'
-  return 'neutral'
-}
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function parseComparisonAxis(value: unknown): AssetDecisionComparisonPrimaryAxis {
-  return typeof value === 'string' && value in COMPARISON_AXIS_LABELS
-    ? value as AssetDecisionComparisonPrimaryAxis
-    : 'review'
-}
-
-function parseComparisonLane(value: unknown): AssetDecisionComparisonLane {
-  return typeof value === 'string' && value in COMPARISON_LANE_LABELS
-    ? value as AssetDecisionComparisonLane
-    : 'review'
-}
-
-function parseComparisonSignal(value: unknown): AssetDecisionComparisonSignal | null {
-  if (!isObjectRecord(value) || typeof value.kind !== 'string' || typeof value.label !== 'string') return null
-  return {
-    kind: value.kind,
-    label: value.label,
-    tone: typeof value.tone === 'string' ? value.tone : 'neutral',
-    details: typeof value.details === 'string' ? value.details : undefined,
-  }
-}
-
-function parseComparisonSignals(value: unknown): AssetDecisionComparisonSignal[] {
-  if (!Array.isArray(value)) return []
-  return value.map(parseComparisonSignal).filter((signal): signal is AssetDecisionComparisonSignal => signal != null)
-}
-
-function parseComparisonInsight(snapshot?: AssetDecisionEvidenceSnapshot | null): AssetDecisionComparisonInsight | null {
-  const raw = snapshot?.comparison_insight
-  if (!isObjectRecord(raw)) return null
-  const laneCounts = Array.isArray(raw.lane_counts)
-    ? raw.lane_counts
-      .map((item) => {
-        if (!isObjectRecord(item) || typeof item.count !== 'number') return null
-        return {
-          lane: parseComparisonLane(item.lane),
-          count: item.count,
-        }
-      })
-      .filter((item): item is AssetDecisionComparisonInsight['lane_counts'][number] => item != null)
-    : []
-  return {
-    summary: typeof raw.summary === 'string' && raw.summary.trim() ? raw.summary : '保存时对比洞察',
-    primary_axis: parseComparisonAxis(raw.primary_axis),
-    lane_counts: laneCounts,
-    priority_vps_ids: Array.isArray(raw.priority_vps_ids)
-      ? raw.priority_vps_ids.filter((item): item is string => typeof item === 'string')
-      : [],
-    tradeoffs: parseComparisonSignals(raw.tradeoffs),
-  }
-}
-
-function recordFollowupDoneCount(record: AssetDecisionRecordSummary): number {
-  return (record.followup_done_count ?? 0) + (record.followup_skipped_count ?? 0)
-}
-
-function recordFollowupOpenCount(record: AssetDecisionRecordSummary): number {
-  return (record.followup_todo_count ?? 0) + (record.followup_in_progress_count ?? 0) + (record.followup_blocked_count ?? 0)
-}
-
-function readbackCountSummary(readback?: AssetDecisionRecordExecutionReadback): string {
-  if (!readback) return '等待回读'
-  const parts = [
-    readback.drift_count > 0 ? `漂移 ${readback.drift_count}` : '',
-    readback.blocked_count > 0 ? `阻塞 ${readback.blocked_count}` : '',
-    readback.needs_evidence_count > 0 ? `缺口 ${readback.needs_evidence_count}` : '',
-    readback.open_count > 0 ? `待处理 ${readback.open_count}` : '',
-  ].filter(Boolean)
-  return parts.length > 0 ? parts.join(' · ') : `对齐 ${readback.aligned_count ?? 0}`
-}
-
-function executionPlanCountSummary(plan?: AssetDecisionRecordExecutionPlan): string {
-  if (!plan) return '等待编排'
-  const laneSummary = (plan.lane_counts ?? [])
-    .filter((item) => item.count > 0)
-    .map((item) => `${EXECUTION_PLAN_LANE_LABELS[item.lane] ?? item.lane} ${item.count}`)
-  const actionSummary = plan.actionable_count > 0 ? `可推进 ${plan.actionable_count}` : '无待推进'
-  const blockedSummary = plan.blocked_count > 0 ? `阻塞 ${plan.blocked_count}` : ''
-  return [actionSummary, blockedSummary, ...laneSummary].filter(Boolean).join(' · ')
-}
-
-function scenarioTemplateStatusTone(status: AssetDecisionScenarioTemplateStatus): BadgeTone {
-  return status === 'active' ? 'maintenance' : 'offline'
-}
-
-function deriveClosedLoopMetrics(
-  groups: AssetDecisionGroupSummary[],
-  records: AssetDecisionRecordSummary[],
-  manualGroups: AssetDecisionManualGroupSummary[],
-  sourceErrors: ClosedLoopSourceErrors,
-  overview?: AssetDecisionOverview | null,
-): ClosedLoopMetrics {
-  return {
-    autoGroupCount: groups.length,
-    manualActiveCount: manualGroups.filter((group) => group.status === 'active').length,
-    recordActiveCount: records.filter((record) => record.status !== 'completed' && record.status !== 'abandoned').length,
-    readbackDriftCount: records.reduce((total, record) => total + (record.execution_readback?.drift_count ?? 0), 0),
-    readbackBlockedCount: records.reduce(
-      (total, record) => total + (record.execution_readback?.blocked_count ?? 0) + (record.followup_blocked_count ?? 0),
-      0,
-    ),
-    readbackNeedsEvidenceCount: records.reduce((total, record) => total + (record.execution_readback?.needs_evidence_count ?? 0), 0),
-    readbackOpenCount: records.reduce((total, record) => total + (record.execution_readback?.open_count ?? 0), 0),
-    costPressureGroupCount: overview?.cost_group_count ?? groups.filter((group) => group.view === 'cost' || group.group_type === 'cost_pressure').length,
-    evidenceGapGroupCount: overview?.evidence_group_count ?? groups.filter((group) => group.view === 'evidence' || group.group_type === 'evidence_gap').length,
-    partialErrorCount: Object.values(sourceErrors).filter(Boolean).length,
-  }
-}
-
-function deriveNextWorkItems(
-  groups: AssetDecisionGroupSummary[],
-  records: AssetDecisionRecordSummary[],
-  sourceErrors: ClosedLoopSourceErrors,
-): AssetDecisionNextWorkItem[] {
-  const items: AssetDecisionNextWorkItem[] = []
-
-  if (!sourceErrors.records) {
-    for (const record of records) {
-      const readback = record.execution_readback
-      if (!readback) continue
-      const scope = record.scope_label || record.source_group_id
-      if (readback.drift_count > 0 || readback.status === 'drift') {
-        items.push({
-          id: `record-drift-${record.record_id}`,
-          kind: 'record_drift',
-          tone: 'critical',
-          sourceLabel: '保存记录',
-          kindLabel: '事实漂移',
-          title: record.title,
-          summary: readback.summary || '当前事实与已保存判断不一致，需要复核执行闭环。',
-          meta: `${scope} · ${readbackCountSummary(readback)} · 跟进未关闭 ${recordFollowupOpenCount(record)}`,
-          actionLabel: '复核记录',
-          priority: 1000 + readback.drift_count * 16 + recordFollowupOpenCount(record),
-          target: { type: 'record', id: record.record_id },
-        })
-      } else if (readback.blocked_count > 0 || record.followup_blocked_count > 0 || readback.status === 'blocked') {
-        items.push({
-          id: `record-blocked-${record.record_id}`,
-          kind: 'record_blocked',
-          tone: 'critical',
-          sourceLabel: '保存记录',
-          kindLabel: '跟进阻塞',
-          title: record.title,
-          summary: readback.summary || '记录中仍有成员阻塞，需要人工解除或调整跟进路径。',
-          meta: `${scope} · 阻塞 ${(readback.blocked_count ?? 0) + (record.followup_blocked_count ?? 0)} · 未关闭 ${recordFollowupOpenCount(record)}`,
-          actionLabel: '处理阻塞',
-          priority: 900 + (readback.blocked_count ?? 0) * 12 + (record.followup_blocked_count ?? 0) * 12,
-          target: { type: 'record', id: record.record_id },
-        })
-      } else if (readback.needs_evidence_count > 0 || readback.status === 'needs_evidence') {
-        items.push({
-          id: `record-needs-evidence-${record.record_id}`,
-          kind: 'record_needs_evidence',
-          tone: 'alert',
-          sourceLabel: '保存记录',
-          kindLabel: '回读缺证据',
-          title: record.title,
-          summary: readback.summary || '当前记录仍有证据缺口，先补齐资料再推进判断。',
-          meta: `${scope} · ${readbackCountSummary(readback)} · 成员 ${record.member_count}`,
-          actionLabel: '补证据',
-          priority: 800 + readback.needs_evidence_count * 10,
-          target: { type: 'record', id: record.record_id },
-        })
-      }
-    }
-  }
-
-  if (!sourceErrors.groups) {
-    for (const group of groups) {
-      const pressure = group.evidence_assessment.pressure_score + group.evidence_assessment.gap_signal_count * 4
-      items.push({
-        id: `auto-group-${group.group_id}`,
-        kind: 'auto_group',
-        tone: group.evidence_assessment.quality_tier === 'blocked' ? 'alert' : 'notice',
-        sourceLabel: '自动组合',
-        kindLabel: VIEW_LABELS[group.view],
-        title: group.title,
-        summary: group.decision_recommendation?.summary || group.primary_issue_summary || '打开自动组比较成员、成本、服务承载和证据缺口。',
-        meta: `${group.scope_label} · ${group.member_count} 台 VPS · 续费 ${group.renewal_window_count} · 缺口 ${group.evidence_assessment.gap_signal_count}`,
-        actionLabel: '打开决策组',
-        priority: 620 + group.priority + pressure,
-        target: { type: 'group', id: group.group_id },
-      })
-    }
-  }
-
-  return items
-    .sort((left, right) => {
-      if (left.priority !== right.priority) return right.priority - left.priority
-      return left.title.localeCompare(right.title)
-    })
-    .slice(0, 6)
-}
-
-function portfolioContextLabel(chips: ContextFilterChip[], view: MainWorkbenchView, renewalWindow: RenewalWindow): string {
-  if (chips.length === 0) {
-    return `全局资产组合 · ${VIEW_LABELS[view]} · ${renewalWindow} 天续费窗口`
-  }
-  return chips.map((chip) => `${chip.label} ${chip.value}`).join(' / ')
-}
-
-function portfolioRiskLabel(metrics: ClosedLoopMetrics): string {
-  if (metrics.partialErrorCount > 0) return '证据待确认'
-  if (metrics.readbackDriftCount > 0) return `事实漂移 ${metrics.readbackDriftCount}`
-  if (metrics.readbackBlockedCount > 0) return `阻塞 ${metrics.readbackBlockedCount}`
-  const gapCount = metrics.readbackNeedsEvidenceCount + metrics.evidenceGapGroupCount
-  if (gapCount > 0) return `资料缺口 ${gapCount}`
-  if (metrics.readbackOpenCount > 0) return `待回读 ${metrics.readbackOpenCount}`
-  if (metrics.recordActiveCount > 0) return `跟进中 ${metrics.recordActiveCount}`
-  return '闭环稳定'
-}
-
-function portfolioEvidenceLabel(overview?: AssetDecisionOverview | null): string {
-  if (!overview) return '等待资产证据聚合'
-  return sourceAvailabilityLabel(overview.source_availability)
-}
-
-function portfolioRenewalLabel(overview: AssetDecisionOverview | null | undefined, renewalWindow: RenewalWindow): string {
-  if (!overview) return `${renewalWindow} 天窗口等待聚合`
-  return `${renewalWindow} 天窗口 · 续费组 ${overview.renewal_group_count} · 待决策 ${overview.needs_decision_count}`
-}
-
-function buildPortfolioLead(
-  view: MainWorkbenchView,
-  renewalWindow: RenewalWindow,
-  overview: AssetDecisionOverview | null,
-  groups: AssetDecisionGroupSummary[],
-  nextWorkItems: AssetDecisionNextWorkItem[],
-  metrics: ClosedLoopMetrics,
-  contextChips: ContextFilterChip[],
-): AssetDecisionPortfolioLead {
-  const first = nextWorkItems[0]
-  const contextLabel = portfolioContextLabel(contextChips, view, renewalWindow)
-  const riskLabel = portfolioRiskLabel(metrics)
-  const evidenceLabel = portfolioEvidenceLabel(overview)
-  const renewalLabelText = portfolioRenewalLabel(overview, renewalWindow)
-  const fallbackGroup = groups[0]
-  if (first) {
-    return {
-      kind: 'work',
-      tone: first.tone,
-      eyebrow: first.sourceLabel,
-      title: `${first.kindLabel} · ${first.title}`,
-      summary: first.summary,
-      actionLabel: first.actionLabel,
-      contextLabel,
-      riskLabel,
-      evidenceLabel,
-      renewalLabel: renewalLabelText,
-      primaryItem: first,
-    }
-  }
-  if (fallbackGroup) {
-    return {
-      kind: 'work',
-      tone: fallbackGroup.evidence_assessment.gap_signal_count > 0 ? 'alert' : 'notice',
-      eyebrow: '自动组合',
-      title: `先比较 ${fallbackGroup.title}`,
-      summary: fallbackGroup.decision_recommendation?.summary || fallbackGroup.primary_issue_summary || '当前视图有可比较的自动决策组，先打开组详情核对成员事实。',
-      actionLabel: '打开决策组',
-      contextLabel,
-      riskLabel,
-      evidenceLabel,
-      renewalLabel: renewalLabelText,
-      primaryGroupID: fallbackGroup.group_id,
-    }
-  }
-  if (metrics.partialErrorCount === 0) {
-    return {
-      kind: 'stable',
-      tone: 'normal',
-      eyebrow: '当前判断',
-      title: '当前没有需要处理的组合决策',
-      summary: '已加载视图内暂无待处理项；历史记录、场景模板和单台队列可按需打开。',
-      contextLabel,
-      riskLabel,
-      evidenceLabel,
-      renewalLabel: renewalLabelText,
-    }
-  }
-  return {
-    kind: 'work',
-    tone: 'alert',
-    eyebrow: '当前判断',
-    title: '部分资产决策证据不可用',
-    summary: '请先查看局部错误边界；已加载的自动组、记录和单台辅助队列仍可继续处理。',
-    actionLabel: '查看已加载决策组',
-    contextLabel,
-    riskLabel,
-    evidenceLabel,
-    renewalLabel: renewalLabelText,
-  }
 }
 
 function buildSecondaryNavItems(
@@ -1271,49 +401,6 @@ function buildSecondaryNavItems(
   ]
 }
 
-function renderDecisionRecommendation(
-  recommendation?: AssetDecisionRecommendation | null,
-  mode: 'compact' | 'detail' = 'compact',
-) {
-  if (!recommendation) return mode === 'compact' ? <span className="empty-inline">等待建议</span> : null
-  const signalLimit = mode === 'detail' ? 5 : 3
-  const reasons = recommendation.reasons ?? []
-  const blockers = recommendation.blockers ?? []
-  return (
-    <div className={`asset-decision-recommendation asset-decision-recommendation--${mode}`}>
-      <span className="asset-decision-chip-row">
-        <Badge variant="state" tone={blockers.length > 0 ? 'critical' : 'notice'}>
-          {recommendation.confidence_label || '建议'}
-        </Badge>
-        {blockers.length > 0 && (
-          <Badge variant="count" tone="critical">
-            阻塞 {blockers.length}
-          </Badge>
-        )}
-      </span>
-      <strong>{recommendation.summary || '等待系统建议'}</strong>
-      <span>{recommendation.next_step || '继续比较同组成员后记录判断'}</span>
-      {mode === 'detail' && recommendation.priority_vps_ids.length > 0 && (
-        <small>优先核对 {recommendation.priority_vps_ids.join(' / ')}</small>
-      )}
-      {(reasons.length > 0 || blockers.length > 0) && (
-        <span className="asset-decision-chip-row">
-          {[...blockers, ...reasons].slice(0, signalLimit).map((reason) => (
-            <Badge key={`${reason.kind}-${reason.label}`} variant="info" tone={chipTone(reason.tone)}>
-              {reason.label}
-            </Badge>
-          ))}
-          {blockers.length + reasons.length > signalLimit && (
-            <Badge variant="count" tone="neutral">
-              +{blockers.length + reasons.length - signalLimit}
-            </Badge>
-          )}
-        </span>
-      )}
-    </div>
-  )
-}
-
 function buildRecordFollowupDrafts(detail: AssetDecisionRecordDetail | null): Record<string, RecordFollowupDraft> {
   const drafts: Record<string, RecordFollowupDraft> = {}
   for (const member of detail?.members ?? []) {
@@ -1323,35 +410,6 @@ function buildRecordFollowupDrafts(detail: AssetDecisionRecordDetail | null): Re
     }
   }
   return drafts
-}
-
-function buildManualMemberDrafts(detail: AssetDecisionManualGroupDetail | null): Record<string, ManualMemberDraft> {
-  const drafts: Record<string, ManualMemberDraft> = {}
-  for (const member of detail?.members ?? []) {
-    drafts[member.vps_id] = {
-      intendedRole: member.intended_role,
-      intendedAction: member.intended_action,
-      reason: member.reason,
-      note: member.note,
-      sortOrder: String(member.sort_order),
-    }
-  }
-  return drafts
-}
-
-function evidenceTierTone(tier: AssetDecisionEvidenceQualityTier): BadgeTone {
-  if (tier === 'strong') return 'normal'
-  if (tier === 'usable') return 'notice'
-  if (tier === 'blocked') return 'critical'
-  return 'maintenance'
-}
-
-function evidenceBiasTone(bias: AssetDecisionEvidenceDecisionBias): BadgeTone {
-  if (bias === 'keep') return 'normal'
-  if (bias === 'retire') return 'critical'
-  if (bias === 'migrate' || bias === 'observe') return 'maintenance'
-  if (bias === 'complete_evidence') return 'alert'
-  return 'notice'
 }
 
 function parseEvidenceAssessment(snapshot?: AssetDecisionEvidenceSnapshot | null): AssetDecisionEvidenceAssessment | null {
@@ -1425,80 +483,6 @@ function buildManualRecordDraft(detail: AssetDecisionManualGroupDetail): RecordD
     memberOrder,
     members,
   }
-}
-
-function memberIntentIsSet(member: AssetDecisionManualGroupMember): boolean {
-  return Boolean(member.intended_role && member.intended_action && member.intended_action !== 'review')
-}
-
-function buildManualGroupProgress(detail: AssetDecisionManualGroupDetail): ManualGroupProgress {
-  const hasGoal = Boolean(detail.goal.trim() || detail.title.trim())
-  const hasMembers = detail.members.length > 0
-  const intentReadyCount = detail.members.filter(memberIntentIsSet).length
-  const intentReady = hasMembers && intentReadyCount === detail.members.length
-  const evidenceReady = detail.evidence_assessment.quality_tier !== 'blocked' && detail.evidence_assessment.gap_signal_count === 0
-  const currentFactMissingCount = detail.members.filter((member) => !member.current_fact_found).length
-  const factReady = currentFactMissingCount === 0
-  const readyToRecord = hasGoal && hasMembers && intentReady && evidenceReady && factReady
-  const items: ManualGroupProgressItem[] = [
-    {
-      key: 'goal',
-      label: '目标',
-      summary: hasGoal ? detail.goal || detail.title : '补齐组合目标后再沉淀判断',
-      tone: hasGoal ? 'normal' : 'alert',
-      done: hasGoal,
-    },
-    {
-      key: 'members',
-      label: '成员',
-      summary: hasMembers ? `${detail.members.length} 台 VPS 已加入比较` : '至少加入一台 VPS',
-      tone: hasMembers ? 'normal' : 'alert',
-      done: hasMembers,
-    },
-    {
-      key: 'intent',
-      label: '意图',
-      summary: hasMembers ? `已设置 ${intentReadyCount}/${detail.members.length} 个成员动作` : '等待成员后设置角色和动作',
-      tone: intentReady ? 'normal' : hasMembers ? 'notice' : 'neutral',
-      done: intentReady,
-    },
-    {
-      key: 'evidence',
-      label: '证据',
-      summary: evidenceReady ? detail.evidence_assessment.summary : `仍有 ${detail.evidence_assessment.gap_signal_count} 个资料缺口`,
-      tone: evidenceReady ? 'normal' : detail.evidence_assessment.quality_tier === 'blocked' ? 'critical' : 'alert',
-      done: evidenceReady,
-    },
-    {
-      key: 'facts',
-      label: '当前事实',
-      summary: factReady ? '成员当前事实可回读' : `${currentFactMissingCount} 个成员缺少当前事实`,
-      tone: factReady ? 'normal' : 'critical',
-      done: factReady,
-    },
-  ]
-  const doneCount = items.filter((item) => item.done).length
-  return {
-    readinessLabel: readyToRecord ? '可保存记录' : doneCount >= 3 ? '接近可保存' : '继续整理',
-    readinessTone: readyToRecord ? 'normal' : doneCount >= 3 ? 'maintenance' : 'alert',
-    readyToRecord,
-    doneCount,
-    totalCount: items.length,
-    items,
-  }
-}
-
-function recordSourceLabel(record: Pick<AssetDecisionRecordSummary, 'source_type' | 'source_group_id' | 'source_group_type' | 'scope_label'>): string {
-  const scope = record.scope_label || record.source_group_id
-  if (record.source_type === 'manual_group') return `来自自定义组合 ${scope}`
-  if (record.source_type === 'auto_group') return `来自自动组 ${scope}`
-  return `来源 ${scope}`
-}
-
-function recordSourceDetail(record: AssetDecisionRecordSummary): string {
-  const sourceType = record.source_type === 'manual_group' ? '自定义组合' : record.source_type === 'auto_group' ? '自动组' : record.source_type
-  const sourceView = VIEW_LABELS[record.source_view] ?? record.source_view
-  return `${sourceType} · ${sourceView} · ${record.scope_label || '当前来源'}`
 }
 
 function manualGroupSummaryFromDetail(detail: AssetDecisionManualGroupDetail): AssetDecisionManualGroupSummary {
@@ -1609,153 +593,8 @@ function upsertScenarioTemplateSummary(
   })
 }
 
-function actionHrefForMember(member: AssetDecisionRecordMember): string {
-  if (member.execution_plan?.step_kind === 'open_cancellation_workbench') {
-    return `/vps/${member.vps_id}?workbench=cancellation`
-  }
-  if (member.execution_plan?.step_kind === 'open_subscription_context') {
-    return `/subscriptions?vps_id=${encodeURIComponent(member.vps_id)}`
-  }
-  return `/vps/${member.vps_id}`
-}
 
-function actionLabelForMember(member: AssetDecisionRecordMember): string {
-  const plan = member.execution_plan
-  if (
-    plan?.lane === 'migration'
-    || plan?.step_label?.includes('推进迁移')
-    || plan?.step_label?.includes('迁移流程')
-    || plan?.step_label?.includes('迁移工作台')
-  ) {
-    return '复核迁移意向'
-  }
-  if (plan?.step_label) return plan.step_label
-  if (member.decided_action === 'open_cancellation_workbench' || member.decided_action === 'cancel') return '取消/退役'
-  return 'VPS 详情'
-}
 
-function renderEvidenceChips(chips: AssetDecisionEvidenceChip[], limit = 5) {
-  if (chips.length === 0) return <span className="empty-inline">暂无证据标签</span>
-  const visible = chips.slice(0, limit)
-  return (
-    <span className="asset-decision-chip-row">
-      {visible.map((chip) => (
-        <Badge key={`${chip.kind}-${chip.label}`} variant="info" tone={chipTone(chip.tone)}>
-          {chip.label || EVIDENCE_KIND_LABELS[chip.kind] || chip.kind}
-        </Badge>
-      ))}
-      {chips.length > visible.length && (
-        <Badge variant="count" tone="neutral">
-          +{chips.length - visible.length}
-        </Badge>
-      )}
-    </span>
-  )
-}
-
-function compactRiskChips(chips: AssetDecisionEvidenceChip[] = [], assessment?: AssetDecisionEvidenceAssessment | null): Array<{
-  key: string
-  label: string
-  tone: BadgeTone
-}> {
-  const risks = chips
-    .filter((chip) => chip.tone === 'critical' || chip.tone === 'alert')
-    .map((chip) => ({
-      key: `${chip.kind}-${chip.label}`,
-      label: chip.label || EVIDENCE_KIND_LABELS[chip.kind] || chip.kind,
-      tone: chipTone(chip.tone),
-    }))
-  if (risks.length < 2 && assessment && assessment.gap_signal_count > 0) {
-    risks.push({ key: 'gap-signal-count', label: `缺口 ${assessment.gap_signal_count}`, tone: 'alert' })
-  }
-  if (risks.length < 2 && assessment && assessment.risk_signal_count > 0) {
-    risks.push({ key: 'risk-signal-count', label: `风险 ${assessment.risk_signal_count}`, tone: 'alert' })
-  }
-  return risks.slice(0, 2)
-}
-
-function renderCompactRiskChips(chips: AssetDecisionEvidenceChip[] = [], assessment?: AssetDecisionEvidenceAssessment | null) {
-  const risks = compactRiskChips(chips, assessment)
-  if (risks.length === 0) {
-    return (
-      <Badge variant="state" tone={assessment ? evidenceTierTone(assessment.quality_tier) : 'normal'}>
-        {assessment ? EVIDENCE_TIER_LABELS[assessment.quality_tier] : '证据稳定'}
-      </Badge>
-    )
-  }
-  return (
-    <>
-      {risks.map((chip) => (
-        <Badge key={chip.key} variant="info" tone={chip.tone}>
-          {chip.label}
-        </Badge>
-      ))}
-    </>
-  )
-}
-
-function compactGroupJudgement(group: Pick<AssetDecisionGroupSummary, 'view' | 'evidence_assessment'>): string {
-  if (group.evidence_assessment.quality_tier === 'blocked') return '证据阻塞，先补齐'
-  if (group.evidence_assessment.gap_signal_count > 0) return '资料缺口，先复核'
-  if (group.view === 'cost') return '预算压力，先比价'
-  if (group.view === 'renewal') return '续费临近，先分层'
-  if (group.view === 'region') return '同区比较，先排序'
-  if (group.view === 'provider') return '服务商组合，先取舍'
-  if (group.view === 'evidence') return '资料缺口，先补证'
-  return '需要决策'
-}
-
-function renderEvidenceAssessment(assessment: AssetDecisionEvidenceAssessment | null, mode: 'compact' | 'detail' = 'compact') {
-  if (!assessment) return <span className="empty-inline">无证据评估</span>
-  return (
-    <div className={`asset-decision-assessment asset-decision-assessment--${mode}`}>
-      <div className="asset-decision-assessment__head">
-        <Badge variant="state" tone={evidenceTierTone(assessment.quality_tier)}>
-          {EVIDENCE_TIER_LABELS[assessment.quality_tier] ?? assessment.quality_tier}
-        </Badge>
-        <Badge variant="state" tone={evidenceBiasTone(assessment.decision_bias)}>
-          {EVIDENCE_BIAS_LABELS[assessment.decision_bias] ?? assessment.decision_bias}
-        </Badge>
-      </div>
-      <div className="asset-decision-assessment__bars" aria-label="证据评估刻度">
-        <span style={{ '--score': assessment.confidence_score } as ScoreStyle}>
-          可信 <MonoDigits>{assessment.confidence_score}</MonoDigits>
-        </span>
-        <span style={{ '--score': assessment.pressure_score } as ScoreStyle}>
-          压力 <MonoDigits>{assessment.pressure_score}</MonoDigits>
-        </span>
-        <span style={{ '--score': assessment.readiness_score } as ScoreStyle}>
-          准备 <MonoDigits>{assessment.readiness_score}</MonoDigits>
-        </span>
-      </div>
-      {mode === 'detail' && (
-        <div className="asset-decision-assessment__meta">
-          <strong>{assessment.summary}</strong>
-          <span>支撑 {assessment.support_signal_count} · 风险 {assessment.risk_signal_count} · 缺口 {assessment.gap_signal_count}</span>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function renderComparisonSignals(signals: AssetDecisionComparisonSignal[], limit = 3) {
-  if (signals.length === 0) return null
-  const visible = signals.slice(0, limit)
-  return (
-    <span className="asset-decision-chip-row">
-      {visible.map((signal, index) => (
-        <Badge key={`${signal.kind}-${signal.label}-${index}`} variant="info" tone={chipTone(signal.tone)}>
-          {signal.label}
-        </Badge>
-      ))}
-      {signals.length > visible.length && (
-        <Badge variant="count" tone="neutral">
-          +{signals.length - visible.length}
-        </Badge>
-      )}
-    </span>
-  )
-}
 
 function memberComparisonTitle(member: ComparisonMatrixMember) {
   return <strong>{member.displayName}</strong>
@@ -1783,36 +622,6 @@ function renderDetailCommand(options: DetailCommandOptions) {
   )
 }
 
-function renderDetailDirectory<TPanel extends string>(
-  ariaLabel: string,
-  items: Array<DetailDirectoryItem<TPanel>>,
-  onSelect: (panel: TPanel) => void,
-) {
-  return (
-    <section className="asset-decision-detail-directory" aria-label={ariaLabel}>
-      {items.map((item) => (
-        <button
-          key={item.key}
-          className="asset-decision-detail-directory__item"
-          type="button"
-          aria-label={item.label}
-          onClick={() => onSelect(item.key)}
-        >
-          <span className="asset-decision-detail-directory__label">
-            <strong>{item.label}</strong>
-            {item.count != null ? (
-              <Badge variant="count" tone={item.count > 0 ? 'notice' : 'neutral'}>
-                {item.count}
-              </Badge>
-            ) : null}
-          </span>
-          {item.summary ? <span>{item.summary}</span> : null}
-          {item.meta ? <small>{item.meta}</small> : null}
-        </button>
-      ))}
-    </section>
-  )
-}
 
 function renderMemberDecisionRows(members: ComparisonMatrixMember[], options: MemberDecisionCardsOptions) {
   const sortedMembers = [...members].sort((left, right) => {
@@ -1887,33 +696,6 @@ function renderMemberDecisionRows(members: ComparisonMatrixMember[], options: Me
   )
 }
 
-function renderDetailPanelNav<TPanel extends string>(
-  items: Array<{ key: TPanel; label: string; ariaLabel?: string; summary?: string; count?: number }>,
-  activePanel: TPanel,
-  onChange: (panel: TPanel) => void,
-) {
-  return (
-    <nav className="asset-decision-detail-nav" aria-label="详情二级面板">
-      {items.map((item) => (
-        <button
-          key={item.key}
-          className={`asset-decision-detail-nav__item${activePanel === item.key ? ' asset-decision-detail-nav__item--active' : ''}`}
-          type="button"
-          aria-label={item.ariaLabel ?? item.label}
-          aria-pressed={activePanel === item.key}
-          onClick={() => onChange(item.key)}
-        >
-          <span>{item.label}</span>
-          {item.count != null ? (
-            <Badge variant="count" tone={item.count > 0 ? 'notice' : 'neutral'}>
-              {item.count}
-            </Badge>
-          ) : null}
-        </button>
-      ))}
-    </nav>
-  )
-}
 
 function renderDetailPanel(title: string, children: ReactNode, includeHiddenHeading = false) {
   return (
@@ -1983,287 +765,36 @@ function manualMemberComparisonMatrixMember(member: AssetDecisionManualGroupMemb
   }
 }
 
-function formatGroupMonthlyCost(group: CostSummaryLike): string {
-  if (group.monthly_cost_base != null) {
-    return `${formatMoney(group.monthly_cost_base, group.base_currency ?? 'CNY')}/月`
+function actionHrefForMember(member: AssetDecisionRecordMember): string {
+  if (member.execution_plan?.step_kind === 'open_cancellation_workbench') {
+    return `/vps/${member.vps_id}?workbench=cancellation`
   }
-  if (group.monthly_cost_by_currency.length > 0) {
-    return group.monthly_cost_by_currency
-      .map((item) => `${formatMoney(item.monthly_total, item.currency)}/月`)
-      .join(' / ')
+  if (member.execution_plan?.step_kind === 'open_subscription_context') {
+    return `/subscriptions?vps_id=${encodeURIComponent(member.vps_id)}`
   }
-  return '暂无成本'
-}
-
-function formatGroupYearlyCost(group: CostSummaryLike): string {
-  if (group.yearly_cost_base != null) {
-    return `${formatMoney(group.yearly_cost_base, group.base_currency ?? 'CNY')}/年`
-  }
-  if (group.monthly_cost_by_currency.length > 0) {
-    return group.monthly_cost_by_currency
-      .map((item) => `${formatMoney(item.yearly_total, item.currency)}/年`)
-      .join(' / ')
-  }
-  return '成本证据不足'
-}
-
-function countSummary<T extends string>(
-  counts: Partial<Record<T, number>>,
-  order: T[],
-  labeler: (value: T) => string,
-): string {
-  const parts = order
-    .map((key) => {
-      const count = counts[key] ?? 0
-      return count > 0 ? `${labeler(key)} ${count}` : ''
-    })
-    .filter(Boolean)
-  return parts.length > 0 ? parts.join(' / ') : '暂无分布'
-}
-
-function sourceAvailabilityLabel(source: AssetDecisionOverview['source_availability'] | AssetDecisionGroupMember['source_availability']): string {
-  const missing = [
-    !source.subscriptions && '订阅',
-    !source.services && '服务',
-    !source.domains && '域名',
-    !source.monitoring && '监控',
-    !source.targets && 'Target',
-  ].filter(Boolean)
-  return missing.length > 0 ? `${missing.join('、')}证据不可用` : '证据源正常'
-}
-
-function normalizeDecisionText(value?: string | null): string {
-  return (value ?? '').replace(/\s+/g, ' ').trim()
-}
-
-function compactDecisionText(value: string | null | undefined, fallback: string, maxLength = 18): string {
-  const normalized = normalizeDecisionText(value) || fallback
-  const firstSentence = normalized.split(/[。！？!?]/)[0]?.trim() || normalized
-  if (firstSentence.length <= maxLength) return firstSentence
-  return `${firstSentence.slice(0, maxLength)}…`
-}
-
-function compactDirectoryMeta(value: string | null | undefined, fallback: string, maxLength = 12): string {
-  const normalized = normalizeDecisionText(value)
-  if (!normalized) return fallback
-  if (/(?:adg|admg|adr|adt|adtm)_/i.test(normalized)) return fallback
-  const firstSegment = normalized.split(/[。！？!?·/]/)[0]?.trim() || normalized
-  if (firstSegment.length <= maxLength) return firstSegment
-  return `${firstSegment.slice(0, maxLength)}…`
-}
-
-function memberContextLabel(member: AssetDecisionGroupMember): string {
-  return [
-    `服务 ${member.service_count}`,
-    `域名 ${member.domain_count}`,
-    `Target ${member.running_target_count}/${member.target_count}`,
-    `监控 ${member.running_monitoring_count}/${member.monitoring_link_count}`,
-  ].join(' · ')
-}
-
-function currentFactsLabel(facts?: AssetDecisionExecutionCurrentFacts): string {
-  if (!facts) return '当前事实尚未返回'
-  if (!facts.found) return '当前事实缺失'
-  return [
-    `订阅 ${facts.active_subscription_count}`,
-    `服务 ${facts.service_count}`,
-    `域名 ${facts.domain_count}`,
-    `Target ${facts.running_target_count}/${facts.target_count}`,
-    `监控 ${facts.running_monitoring_count}/${facts.monitoring_link_count}`,
-    currentFactsIPQualityLabel(facts),
-  ].filter(Boolean).join(' · ')
-}
-
-function currentFactsStateLabel(facts?: AssetDecisionExecutionCurrentFacts): string {
-  if (!facts) return '等待资产聚合事实'
-  if (!facts.found) return '资产聚合中未找到当前 VPS'
-  return [
-    facts.lifecycle_status ? lifecycleLabel(facts.lifecycle_status) : '',
-    facts.usage_status ? usageLabel(facts.usage_status) : '',
-    facts.renewal_decision ? renewalLabel(facts.renewal_decision) : '',
-    facts.abnormal_monitoring_count > 0 ? `异常监控 ${facts.abnormal_monitoring_count}` : '',
-    facts.active_incident_count > 0 ? `事件 ${facts.active_incident_count}` : '',
-    ...currentFactsIPQualityStateLabels(facts),
-  ].filter(Boolean).join(' · ') || '基础状态正常'
-}
-
-function currentFactsIPQualityLabel(facts: AssetDecisionExecutionCurrentFacts): string {
-  const summary = facts.ip_quality_summary
-  if (!summary) return ''
-  const parts = [`IP ${summary.ip_address}`]
-  if (summary.status === 'success') {
-    parts.push(ipQualityRiskLabel(summary.risk_level))
-    const region = summary.use_region_code || summary.use_region_name
-    if (region) parts.push(region)
-  } else {
-    parts.push('采集未完成')
-  }
-  return parts.filter(Boolean).join(' ')
-}
-
-function currentFactsIPQualityStateLabels(facts: AssetDecisionExecutionCurrentFacts): string[] {
-  const labels: string[] = []
-  const summary = facts.ip_quality_summary
-  if (summary?.ambiguous) labels.push('IP 归属不唯一')
-  if (summary?.stale) labels.push('IP 质量过期')
-  if (summary && summary.status !== 'success') labels.push(summary.error_summary || 'IP 采集未完成')
-  if ((facts.ip_quality_provider_risk_signal_count ?? 0) > 0) {
-    labels.push(`风险 provider ${facts.ip_quality_provider_risk_signal_count}`)
-  }
-  if (facts.ip_quality_blocked_services && facts.ip_quality_blocked_services.length > 0) {
-    const visible = facts.ip_quality_blocked_services.slice(0, 3).map(ipQualityServiceLabel)
-    const suffix = facts.ip_quality_blocked_services.length > visible.length
-      ? ` 等 ${facts.ip_quality_blocked_services.length} 项`
-      : ''
-    labels.push(`受阻 ${visible.join('、')}${suffix}`)
-  }
-  return labels
-}
-
-function ipQualityRiskLabel(value?: string): string {
-  const risk = (value ?? '').trim().toLowerCase()
-  if (risk === 'low' || risk === 'clean' || risk === 'safe') return '低风险'
-  if (risk === 'medium' || risk === 'moderate') return '中风险'
-  if (risk === 'high') return '高风险'
-  if (risk === 'critical') return '严重风险'
-  return risk || '未评级'
-}
-
-function ipQualityServiceLabel(value: string): string {
-  const normalized = value.trim().toLowerCase()
-  if (normalized === 'chatgpt' || normalized === 'openai') return 'ChatGPT'
-  if (normalized === 'netflix') return 'Netflix'
-  if (normalized === 'youtube-premium') return 'YouTube Premium'
-  if (normalized === 'amazon-prime-video') return 'Amazon Prime Video'
-  if (normalized === 'disney-plus') return 'Disney+'
-  if (normalized === 'tiktok') return 'TikTok'
-  if (normalized === 'reddit') return 'Reddit'
-  return value
-}
-
-function renderReadbackBadge(readback?: { status: AssetDecisionExecutionReadbackStatus }) {
-  const status = readback?.status
-  if (!status) {
-    return (
-      <Badge variant="state" tone="neutral">
-        等待回读
-      </Badge>
-    )
-  }
-  return (
-    <Badge variant="state" tone={readbackStatusTone(status)}>
-      {READBACK_STATUS_LABELS[status] ?? status}
-    </Badge>
-  )
-}
-
-function renderExecutionPlanBadge(plan?: AssetDecisionMemberExecutionPlan) {
-  if (!plan) {
-    return (
-      <Badge variant="state" tone="neutral">
-        等待编排
-      </Badge>
-    )
-  }
-  return (
-    <Badge variant="state" tone={executionPlanTone(plan.tone)}>
-      {EXECUTION_PLAN_LANE_LABELS[plan.lane] ?? plan.lane}
-    </Badge>
-  )
-}
-
-function renderMemberExecutionPlan(member: AssetDecisionRecordMember) {
-  const plan = member.execution_plan
-  return (
-    <div className="asset-table__stack asset-decision-plan-cell">
-      <span className="asset-decision-chip-row">
-        {renderExecutionPlanBadge(plan)}
-        {plan?.actionable && (
-          <Badge variant="count" tone={executionPlanTone(plan.tone)}>
-            可推进
-          </Badge>
-        )}
-        {plan?.blocked && (
-          <Badge variant="count" tone="critical">
-            阻塞
-          </Badge>
-        )}
-      </span>
-      <strong>{plan?.summary || '等待执行编排'}</strong>
-      <span>{actionLabelForMember(member)}</span>
-      {plan?.issue_count ? <span>关联问题 {plan.issue_count} 项</span> : <span>无额外问题</span>}
-    </div>
-  )
-}
-
-function renderMemberReadback(readback?: AssetDecisionMemberExecutionReadback) {
-  if (!readback) {
-    return (
-      <div className="asset-table__stack asset-decision-readback-cell">
-        <span className="asset-decision-chip-row">{renderReadbackBadge()}</span>
-        <strong>等待执行证据回读</strong>
-        <span>当前事实尚未返回</span>
-      </div>
-    )
-  }
-  const issues = readback.issues ?? []
-  return (
-    <div className="asset-table__stack asset-decision-readback-cell">
-      <span className="asset-decision-chip-row">
-        {renderReadbackBadge(readback)}
-        {issues.length > 0 && (
-          <Badge variant="count" tone={readbackStatusTone(readback.status)}>
-            {issues.length} 项
-          </Badge>
-        )}
-      </span>
-      <strong>{readback.summary || '等待执行回读'}</strong>
-      <span>{currentFactsLabel(readback.current_facts)}</span>
-      <span>{currentFactsStateLabel(readback.current_facts)}</span>
-      {issues.length > 0 && (
-        <span className="asset-decision-chip-row">
-          {issues.slice(0, 3).map((issue) => (
-            <Badge key={`${issue.kind}-${issue.label}`} variant="info" tone={chipTone(issue.tone)}>
-              {issue.label}
-            </Badge>
-          ))}
-          {issues.length > 3 && (
-            <Badge variant="count" tone="neutral">
-              +{issues.length - 3}
-            </Badge>
-          )}
-        </span>
-      )}
-    </div>
-  )
-}
-
-function compactMemberReadbackSummary(readback?: AssetDecisionMemberExecutionReadback): string {
-  if (!readback) return '等待当前事实回读'
-  return compactDecisionText(readback.summary || currentFactsLabel(readback.current_facts), '等待执行回读')
-}
-
-function compactMemberPlanSummary(member: AssetDecisionRecordMember): string {
-  const plan = member.execution_plan
-  return compactDecisionText(plan?.summary || actionLabelForMember(member), '等待下一步')
-}
-
-function executionLaneRank(member: AssetDecisionRecordMember): number {
-  const lane = member.execution_plan?.lane ?? 'review'
-  const rank = EXECUTION_PLAN_LANE_ORDER.indexOf(lane)
-  return rank >= 0 ? rank : EXECUTION_PLAN_LANE_ORDER.length
+  return `/vps/${member.vps_id}`
 }
 
 function sortedExecutionMembers(members: AssetDecisionRecordMember[]): AssetDecisionRecordMember[] {
+  const EXECUTION_PLAN_LANE_ORDER = ['retirement', 'migration', 'evidence', 'primary', 'standby', 'observe', 'review']
+  function executionLaneRank(member: AssetDecisionRecordMember): number {
+    const lane = member.execution_plan?.lane ?? 'review'
+    const rank = EXECUTION_PLAN_LANE_ORDER.indexOf(lane)
+    return rank >= 0 ? rank : EXECUTION_PLAN_LANE_ORDER.length
+  }
   return members
     .map((member, index) => ({ member, index }))
     .sort((left, right) => executionLaneRank(left.member) - executionLaneRank(right.member) || left.index - right.index)
     .map(({ member }) => member)
 }
 
-function compactVPSOptionLabel(vps: VPSAssetRecord): string {
-  const location = [vps.country, vps.city].filter(Boolean).join(' · ')
-  return location ? `${vps.display_name} · ${location}` : vps.display_name
+function scenarioForGroup(group: Pick<AssetDecisionGroupSummary, 'group_type'>): AssetDecisionManualGroupScenario {
+  if (group.group_type === 'region_portfolio') return 'region_review'
+  if (group.group_type === 'provider_portfolio') return 'provider_review'
+  if (group.group_type === 'cost_pressure') return 'budget_reduction'
+  if (group.group_type === 'cancellation_attention') return 'migration_retirement'
+  if (group.group_type === 'evidence_gap') return 'evidence_cleanup'
+  return 'general'
 }
 
 function previewItems<T>(items: T[]): { visible: T[]; hiddenCount: number } {
@@ -2273,31 +804,9 @@ function previewItems<T>(items: T[]): { visible: T[]; hiddenCount: number } {
   }
 }
 
-function groupPressureLabel(group: AssetDecisionGroupSummary): string {
-  const parts = [
-    group.renewal_window_count > 0 ? `续费窗口 ${group.renewal_window_count}` : '',
-    group.unreviewed_count > 0 ? `未评估 ${group.unreviewed_count}` : '',
-    group.cancellation_attention_count > 0 ? `取消联动 ${group.cancellation_attention_count}` : '',
-    group.evidence_assessment.gap_signal_count > 0 ? `缺口 ${group.evidence_assessment.gap_signal_count}` : '',
-  ].filter(Boolean)
-  return parts.length > 0 ? parts.join(' · ') : '暂无高压信号'
-}
 
-function manualCoverMeta(detail: AssetDecisionManualGroupDetail, progress: ManualGroupProgress): string {
-  return `${MANUAL_GROUP_SCENARIO_LABELS[detail.scenario]} · ${MANUAL_GROUP_STATUS_LABELS[detail.status]} · ${progress.readinessLabel} ${progress.doneCount}/${progress.totalCount}`
-}
 
-function recordCoverSummary(detail: AssetDecisionRecordDetail): string {
-  const insight = parseComparisonInsight(detail.evidence_snapshot)
-  return compactDecisionText(insight?.summary
-    || detail.execution_readback?.summary
-    || `保存时判断：${detail.goal || '等待补齐组合判断'}`, '保存判断待复核')
-}
 
-function recordCoverMeta(detail: AssetDecisionRecordDetail): string {
-  const readback = detail.execution_readback?.status ? READBACK_STATUS_LABELS[detail.execution_readback.status] : '等待回读'
-  return `${RECORD_STATUS_LABELS[detail.status]} · 跟进 ${recordFollowupDoneCount(detail)}/${detail.member_count} · ${readback}`
-}
 
 export function AssetDecisionsPage() {
   const navigate = useNavigate()
@@ -2345,7 +854,6 @@ export function AssetDecisionsPage() {
   const [manualGroupCreating, setManualGroupCreating] = useState(false)
   const [manualGroupSaving, setManualGroupSaving] = useState(false)
   const [manualGroupError, setManualGroupError] = useState<string | null>(null)
-  const [manualMemberDrafts, setManualMemberDrafts] = useState<Record<string, ManualMemberDraft>>({})
   const [manualMemberSaving, setManualMemberSaving] = useState<Record<string, boolean>>({})
   const [pendingManualMemberRemoval, setPendingManualMemberRemoval] = useState<AssetDecisionManualGroupMember | null>(null)
   const [manualMemberAddDraft, setManualMemberAddDraft] = useState<ManualMemberAddDraft>({
@@ -2711,7 +1219,6 @@ export function AssetDecisionsPage() {
       .then((detail) => {
         if (cancelled) return
         setManualDetailState({ loading: false, error: null, detail })
-        setManualMemberDrafts(buildManualMemberDrafts(detail))
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -2720,7 +1227,6 @@ export function AssetDecisionsPage() {
           error: describeError(error, '加载自定义组合详情失败'),
           detail: null,
         })
-        setManualMemberDrafts({})
       })
     return () => { cancelled = true }
   }, [selectedManualGroupID, refreshToken])
@@ -2937,87 +1443,41 @@ export function AssetDecisionsPage() {
   const manualGroupColumns: DataTableColumn<AssetDecisionManualGroupSummary>[] = [
     {
       key: 'group',
-      label: '自定义组合',
-      width: '286px',
+      label: '组合',
+      width: '320px',
       render: (group) => (
-        <div className="asset-table__identity asset-decision-group-cell">
+        <div className="asset-table__identity">
           <strong>{group.title}</strong>
-          <span>{MANUAL_GROUP_SCENARIO_LABELS[group.scenario]} · {group.goal || group.scope_label || '用户场景'}</span>
-          <span className="asset-decision-chip-row">
-            <Badge variant="state" tone={manualGroupStatusTone(group.status)}>
-              {MANUAL_GROUP_STATUS_LABELS[group.status]}
-            </Badge>
-            <Badge variant="info" tone="neutral">
-              {group.source_type === 'auto_group' ? '来自自动组' : '手工创建'}
-            </Badge>
-          </span>
-          {renderEvidenceChips(group.evidence_chips, 3)}
-          {renderDecisionRecommendation(group.decision_recommendation)}
+          <span>{MANUAL_GROUP_SCENARIO_LABELS[group.scenario]}</span>
         </div>
       ),
     },
     {
-      key: 'portfolio',
-      label: '组合事实',
-      width: '220px',
+      key: 'status',
+      label: '状态',
+      width: '140px',
       render: (group) => (
-        <div className="asset-table__stack">
-          <strong><MonoDigits>{group.member_count}</MonoDigits> 台 VPS</strong>
-          <span>{countSummary(group.usage_counts, ['in_use', 'standby', 'idle'], usageLabel)}</span>
-          <span>{countSummary(group.renewal_decision_counts, ['unreviewed', 'keep', 'observe', 'migrate', 'cancel', 'auto_renew_cancelled', 'replaced'], renewalLabel)}</span>
-        </div>
+        <Badge variant="state" tone={manualGroupStatusTone(group.status)}>
+          {MANUAL_GROUP_STATUS_LABELS[group.status]}
+        </Badge>
       ),
     },
     {
-      key: 'evidence',
-      label: '证据',
-      width: '236px',
+      key: 'members',
+      label: '成员数',
+      width: '120px',
       render: (group) => (
-        <div className="asset-table__stack">
-          <strong>
-            服务 {group.service_count} · 域名 {group.domain_count}
-          </strong>
-          <span>Target {group.running_target_count}/{group.target_count} · 监控 {group.monitoring_link_count}</span>
-          <span>资料缺口 {group.evidence_assessment.gap_signal_count} · 风险 {group.evidence_assessment.risk_signal_count}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'assessment',
-      label: '判断尺度',
-      width: '238px',
-      render: (group) => renderEvidenceAssessment(group.evidence_assessment),
-    },
-    {
-      key: 'cost',
-      label: '成本',
-      width: '176px',
-      render: (group) => (
-        <div className="asset-table__stack">
-          <strong>{formatGroupMonthlyCost(group)}</strong>
-          <span>{formatGroupYearlyCost(group)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'updated',
-      label: '更新',
-      width: '160px',
-      render: (group) => (
-        <div className="asset-table__stack">
-          <strong>{formatDateTime(group.updated_at)}</strong>
-          <span>{group.archived_at ? `归档 ${formatDateTime(group.archived_at)}` : '持续跟进'}</span>
-        </div>
+        <span><MonoDigits>{group.member_count}</MonoDigits> 台</span>
       ),
     },
     {
       key: 'actions',
-      label: '入口',
+      label: '操作',
       align: 'right',
       width: '128px',
       render: (group) => (
         <button className="btn sm primary" type="button" onClick={() => openManualGroup(group.manual_group_id)}>
-          查看组合
+          查看
         </button>
       ),
     },
@@ -3026,102 +1486,43 @@ export function AssetDecisionsPage() {
   const recordColumns: DataTableColumn<AssetDecisionRecordSummary>[] = [
     {
       key: 'record',
-      label: '决策记录',
-      width: '286px',
+      label: '标题',
+      width: '320px',
       render: (record) => (
-        <div className="asset-table__identity asset-decision-record-cell">
+        <div className="asset-table__identity">
           <strong>{record.title}</strong>
-          <span>{VIEW_LABELS[record.source_view]} · {record.scope_label || record.source_group_id}</span>
-          <span>{record.source_group_type} · {record.source_group_id}</span>
-          <span>{record.goal || '暂无目标备注'}</span>
+          <span>{VIEW_LABELS[record.source_view]}</span>
         </div>
       ),
     },
     {
       key: 'status',
       label: '状态',
-      width: '136px',
+      width: '140px',
       render: (record) => (
-        <div className="asset-table__stack">
-          <Badge variant="state" tone={recordStatusTone(record.status)}>
-            {RECORD_STATUS_LABELS[record.status]}
-          </Badge>
-          <span>{record.renew_within_days} 天窗口</span>
-        </div>
+        <Badge variant="state" tone={recordStatusTone(record.status)}>
+          {RECORD_STATUS_LABELS[record.status]}
+        </Badge>
       ),
     },
     {
-      key: 'scope',
-      label: '推进',
-      width: '220px',
+      key: 'progress',
+      label: '进度',
+      width: '160px',
       render: (record) => (
-        <div className="asset-table__stack">
-          <strong>
-            推进 <MonoDigits>{recordFollowupDoneCount(record)}</MonoDigits>/<MonoDigits>{record.member_count}</MonoDigits>
-          </strong>
-          <span>
-            待处理 {record.followup_todo_count ?? 0} · 处理中 {record.followup_in_progress_count ?? 0}
-          </span>
-          <span>
-            阻塞 {record.followup_blocked_count ?? 0} · 未关闭 {recordFollowupOpenCount(record)}
-          </span>
-        </div>
-      ),
-    },
-    {
-      key: 'readback',
-      label: '执行回读',
-      width: '228px',
-      render: (record) => (
-        <div className="asset-table__stack asset-decision-readback-cell">
-          <span className="asset-decision-chip-row">
-            {renderReadbackBadge(record.execution_readback)}
-          </span>
-          <strong>{record.execution_readback?.summary || '等待执行证据回读'}</strong>
-          <span>{readbackCountSummary(record.execution_readback)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'plan',
-      label: '执行编排',
-      width: '260px',
-      render: (record) => (
-        <div className="asset-table__stack asset-decision-plan-cell">
-          <span className="asset-decision-chip-row">
-            <Badge variant="state" tone={record.execution_plan?.blocked_count > 0 ? 'critical' : record.execution_plan?.actionable_count > 0 ? 'maintenance' : 'normal'}>
-              执行编排
-            </Badge>
-            {record.execution_plan?.actionable_count > 0 && (
-              <Badge variant="count" tone="maintenance">
-                {record.execution_plan.actionable_count} 项
-              </Badge>
-            )}
-          </span>
-          <strong>{record.execution_plan?.summary || '等待执行编排'}</strong>
-          <span>{executionPlanCountSummary(record.execution_plan)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'updated',
-      label: '更新时间',
-      width: '168px',
-      render: (record) => (
-        <div className="asset-table__stack">
-          <strong>{formatDateTime(record.updated_at)}</strong>
-          <span>{record.completed_at ? `完成 ${formatDateTime(record.completed_at)}` : record.decided_at ? `决策 ${formatDateTime(record.decided_at)}` : '尚未决策'}</span>
-        </div>
+        <span>
+          <MonoDigits>{recordFollowupDoneCount(record)}</MonoDigits>/<MonoDigits>{record.member_count}</MonoDigits>
+        </span>
       ),
     },
     {
       key: 'actions',
-      label: '入口',
+      label: '操作',
       align: 'right',
       width: '112px',
       render: (record) => (
         <button className="btn sm primary" type="button" onClick={() => openRecord(record.record_id)}>
-          查看记录
+          查看
         </button>
       ),
     },
@@ -3131,105 +1532,55 @@ export function AssetDecisionsPage() {
     {
       key: 'vps',
       label: 'VPS',
-      width: '240px',
+      width: '280px',
       render: (member) => (
         <div className="asset-table__identity">
           <strong><Link className="name" to={`/vps/${member.vps.vps_id}`}>{member.vps.display_name}</Link></strong>
           <span>{formatOptional(member.vps.provider_name)} · {vpsLocationLabel(member.vps)}</span>
-          <span>{member.vps.product_name || member.vps.vps_id}</span>
-          <span className="asset-decision-chip-row">
-            <LifecycleBadge value={member.vps.lifecycle_status} />
-            <UsageBadge value={member.vps.usage_status} />
-            <RenewalBadge value={member.vps.renewal_decision} />
-          </span>
         </div>
       ),
     },
     {
-      key: 'subscription',
-      label: '订阅',
-      width: '188px',
-      render: (member) => {
-        const sub = member.primary_subscription
-        if (!member.source_availability.subscriptions) {
-          return (
-            <div className="asset-subscription-cell asset-subscription-cell--unknown">
-              <strong>订阅证据不可用</strong>
-              <span>不会按缺订阅误判</span>
-            </div>
-          )
-        }
-        if (!sub) {
-          return (
-            <div className="asset-subscription-cell asset-subscription-cell--missing">
-              <strong>缺订阅</strong>
-              <span>需回 VPS 详情补齐</span>
-            </div>
-          )
-        }
-        const daysLeft = daysUntilDate(sub.renew_at)
-        return (
-          <div className="asset-subscription-cell">
-            <strong>{formatMoney(sub.monthly_price, sub.currency)}/月</strong>
-            <span>{formatDate(sub.renew_at)} {daysLeft != null ? `· ${daysLeft}天` : ''}</span>
-            <SubscriptionStatusBadge value={sub.status} />
-          </div>
-        )
-      },
-    },
-    {
-      key: 'context',
-      label: '上下文',
-      width: '248px',
+      key: 'role',
+      label: '角色',
+      width: '160px',
       render: (member) => (
-        <div className="asset-table__stack">
-          <strong>{memberContextLabel(member)}</strong>
-          <span>{sourceAvailabilityLabel(member.source_availability)}</span>
-          <span>{member.primary_issue_summary || '暂无主要问题'}</span>
-        </div>
+        <Badge variant="state" tone={roleTone(member.suggested_role)}>
+          {ROLE_LABELS[member.suggested_role]}
+        </Badge>
       ),
     },
     {
-      key: 'suggestion',
-      label: '建议',
-      width: '244px',
+      key: 'action',
+      label: '动作',
+      width: '180px',
       render: (member) => (
-        <div className="asset-table__stack">
-          <span className="asset-decision-chip-row">
-            <Badge variant="state" tone={roleTone(member.suggested_role)}>
-              {ROLE_LABELS[member.suggested_role]}
-            </Badge>
-            <Badge variant="state" tone={actionTone(member.suggested_action)}>
-              {ACTION_LABELS[member.suggested_action]}
-            </Badge>
-          </span>
-          {renderDecisionRecommendation(member.decision_recommendation)}
-          {renderEvidenceAssessment(member.evidence_assessment)}
-          {member.cancellation_attention_reason && <span>{member.cancellation_attention_reason}</span>}
-          {renderEvidenceChips(member.evidence_chips, 4)}
-        </div>
+        <Badge variant="state" tone={actionTone(member.suggested_action)}>
+          {ACTION_LABELS[member.suggested_action]}
+        </Badge>
+      ),
+    },
+    {
+      key: 'status',
+      label: '状态',
+      width: '220px',
+      render: (member) => (
+        <span className="asset-decision-chip-row">
+          <LifecycleBadge value={member.vps.lifecycle_status} />
+          <UsageBadge value={member.vps.usage_status} />
+          <RenewalBadge value={member.vps.renewal_decision} />
+        </span>
       ),
     },
     {
       key: 'actions',
       label: '操作',
       align: 'right',
-      width: '172px',
+      width: '112px',
       render: (member) => (
-        <div className="asset-decision-member-actions">
-          <button className="btn sm primary" type="button" onClick={() => selectVPS(member.vps)}>
-            处理
-          </button>
-          {member.suggested_action === 'open_cancellation_workbench' ? (
-            <Link className="btn sm secondary" to={`/vps/${member.vps.vps_id}?workbench=cancellation`}>
-              取消/退役
-            </Link>
-          ) : (
-            <Link className="btn sm secondary" to={`/vps/${member.vps.vps_id}`}>
-              VPS
-            </Link>
-          )}
-        </div>
+        <button className="btn sm primary" type="button" onClick={() => selectVPS(member.vps)}>
+          处理
+        </button>
       ),
     },
   ]
@@ -3238,7 +1589,7 @@ export function AssetDecisionsPage() {
     {
       key: 'vps',
       label: 'VPS',
-      width: '236px',
+      width: '280px',
       render: (member) => {
         const displayName = member.current_fact_found ? member.vps.display_name : member.vps_id
         return (
@@ -3251,129 +1602,62 @@ export function AssetDecisionsPage() {
               )}
             </strong>
             <span>{member.current_fact_found ? `${formatOptional(member.vps.provider_name)} · ${vpsLocationLabel(member.vps)}` : '当前资产事实缺失'}</span>
-            <span>{member.current_fact_found ? member.vps.product_name || member.vps_id : member.vps_id}</span>
-            <span className="asset-decision-chip-row">
-              {member.current_fact_found ? (
-                <>
-                  <LifecycleBadge value={member.vps.lifecycle_status} />
-                  <UsageBadge value={member.vps.usage_status} />
-                  <RenewalBadge value={member.vps.renewal_decision} />
-                </>
-              ) : (
-                <Badge variant="state" tone="critical">事实缺失</Badge>
-              )}
-            </span>
           </div>
         )
       },
     },
     {
-      key: 'context',
-      label: '当前上下文',
-      width: '248px',
+      key: 'role',
+      label: '角色',
+      width: '160px',
       render: (member) => (
-        <div className="asset-table__stack">
-          <strong>{member.current_fact_found ? memberContextLabel(member) : '无法回读当前事实'}</strong>
-          <span>{member.current_fact_found ? sourceAvailabilityLabel(member.source_availability) : '手工组合成员仍在，但当前 facts 未返回该 VPS'}</span>
-          <span>{member.primary_issue_summary || '暂无主要问题'}</span>
-        </div>
+        <Badge variant="state" tone={roleTone(member.intended_role)}>
+          {ROLE_LABELS[member.intended_role]}
+        </Badge>
       ),
     },
     {
-      key: 'intent',
-      label: '组合意图',
-      width: '336px',
-      render: (member) => {
-        const draft = manualMemberDrafts[member.vps_id] ?? {
-          intendedRole: member.intended_role,
-          intendedAction: member.intended_action,
-          reason: member.reason,
-          note: member.note,
-          sortOrder: String(member.sort_order),
-        }
-        const isSaving = Boolean(manualMemberSaving[member.vps_id])
-        return (
-          <form className="asset-decision-manual-member-form" onSubmit={(event) => submitManualMemberPatch(event, member)}>
-            <label className="visually-hidden" htmlFor={`manual-role-${member.manual_group_id}-${member.vps_id}`}>
-              {member.vps_id} 组合角色
-            </label>
-            <select
-              id={`manual-role-${member.manual_group_id}-${member.vps_id}`}
-              aria-label={`${member.vps_id} 组合角色`}
-              className="input"
-              value={draft.intendedRole}
-              onChange={(event) => updateManualMemberDraft(member.vps_id, { intendedRole: event.target.value as AssetDecisionSuggestedRole })}
-            >
-              {ROLE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <label className="visually-hidden" htmlFor={`manual-action-${member.manual_group_id}-${member.vps_id}`}>
-              {member.vps_id} 组合动作
-            </label>
-            <select
-              id={`manual-action-${member.manual_group_id}-${member.vps_id}`}
-              aria-label={`${member.vps_id} 组合动作`}
-              className="input"
-              value={draft.intendedAction}
-              onChange={(event) => updateManualMemberDraft(member.vps_id, { intendedAction: event.target.value as AssetDecisionSuggestedAction })}
-            >
-              {ACTION_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <label className="visually-hidden" htmlFor={`manual-reason-${member.manual_group_id}-${member.vps_id}`}>
-              {member.vps_id} 意图理由
-            </label>
-            <input
-              id={`manual-reason-${member.manual_group_id}-${member.vps_id}`}
-              aria-label={`${member.vps_id} 意图理由`}
-              className="input"
-              value={draft.reason}
-              placeholder="理由"
-              onChange={(event) => updateManualMemberDraft(member.vps_id, { reason: event.target.value })}
-            />
-            <label className="visually-hidden" htmlFor={`manual-note-${member.manual_group_id}-${member.vps_id}`}>
-              {member.vps_id} 备注
-            </label>
-            <input
-              id={`manual-note-${member.manual_group_id}-${member.vps_id}`}
-              aria-label={`${member.vps_id} 备注`}
-              className="input"
-              value={draft.note}
-              placeholder="备注"
-              onChange={(event) => updateManualMemberDraft(member.vps_id, { note: event.target.value })}
-            />
-            <div className="asset-decision-manual-member-form__actions">
-              <button className="btn sm primary" type="submit" disabled={isSaving}>
-                {isSaving ? '保存中…' : '保存意图'}
-              </button>
-              <button className="btn sm secondary" type="button" onClick={() => requestManualMemberRemoval(member)} disabled={isSaving}>
-                移除
-              </button>
-            </div>
-          </form>
-        )
-      },
+      key: 'action',
+      label: '动作',
+      width: '180px',
+      render: (member) => (
+        <Badge variant="state" tone={actionTone(member.intended_action)}>
+          {ACTION_LABELS[member.intended_action]}
+        </Badge>
+      ),
     },
     {
-      key: 'evidence',
-      label: '证据',
-      width: '250px',
+      key: 'status',
+      label: '状态',
+      width: '220px',
       render: (member) => (
-        <div className="asset-table__stack">
-          <span className="asset-decision-chip-row">
-            <Badge variant="state" tone={roleTone(member.intended_role)}>
-              {ROLE_LABELS[member.intended_role]}
-            </Badge>
-            <Badge variant="state" tone={actionTone(member.intended_action)}>
-              {ACTION_LABELS[member.intended_action]}
-            </Badge>
-          </span>
-          {renderDecisionRecommendation(member.decision_recommendation)}
-          {renderEvidenceAssessment(member.evidence_assessment)}
-          {renderEvidenceChips(member.evidence_chips, 3)}
-        </div>
+        <span className="asset-decision-chip-row">
+          {member.current_fact_found ? (
+            <>
+              <LifecycleBadge value={member.vps.lifecycle_status} />
+              <UsageBadge value={member.vps.usage_status} />
+              <RenewalBadge value={member.vps.renewal_decision} />
+            </>
+          ) : (
+            <Badge variant="state" tone="critical">事实缺失</Badge>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      label: '操作',
+      align: 'right',
+      width: '112px',
+      render: (member) => (
+        <button
+          className="btn sm secondary"
+          type="button"
+          disabled={Boolean(manualMemberSaving[member.vps_id])}
+          onClick={() => requestManualMemberRemoval(member)}
+        >
+          移除
+        </button>
       ),
     },
   ]
@@ -3382,86 +1666,58 @@ export function AssetDecisionsPage() {
     {
       key: 'vps',
       label: 'VPS',
-      width: '220px',
+      width: '240px',
       render: (member) => (
         <div className="asset-table__identity">
           <strong><Link className="name" to={`/vps/${member.vps_id}`}>{member.display_name || member.vps_id}</Link></strong>
           <span>{member.vps_id}</span>
-          <span>保存于 {formatDateTime(member.created_at)}</span>
         </div>
       ),
     },
     {
-      key: 'suggested',
-      label: '系统建议',
+      key: 'role',
+      label: '角色',
+      width: '160px',
+      render: (member) => (
+        <Badge variant="state" tone={roleTone(member.decided_role)}>
+          {ROLE_LABELS[member.decided_role]}
+        </Badge>
+      ),
+    },
+    {
+      key: 'action',
+      label: '动作',
       width: '180px',
       render: (member) => (
-        <span className="asset-decision-chip-row">
-          <Badge variant="state" tone={roleTone(member.suggested_role)}>
-            {ROLE_LABELS[member.suggested_role]}
-          </Badge>
-          <Badge variant="state" tone={actionTone(member.suggested_action)}>
-            {ACTION_LABELS[member.suggested_action]}
-          </Badge>
-        </span>
+        <Badge variant="state" tone={actionTone(member.decided_action)}>
+          {ACTION_LABELS[member.decided_action]}
+        </Badge>
       ),
     },
     {
-      key: 'decided',
-      label: '用户判断',
-      width: '220px',
+      key: 'followup',
+      label: '跟进状态',
+      width: '160px',
       render: (member) => (
-        <div className="asset-table__stack">
-          <span className="asset-decision-chip-row">
-            <Badge variant="state" tone={roleTone(member.decided_role)}>
-              {ROLE_LABELS[member.decided_role]}
-            </Badge>
-            <Badge variant="state" tone={actionTone(member.decided_action)}>
-              {ACTION_LABELS[member.decided_action]}
-            </Badge>
-          </span>
-          <span>{member.reason || '未填写成员理由'}</span>
-        </div>
+        <Badge variant="state" tone={followupStatusTone(member.followup_status)}>
+          {FOLLOWUP_STATUS_LABELS[member.followup_status]}
+        </Badge>
       ),
-    },
-    {
-      key: 'evidence',
-      label: '快照证据',
-      width: '308px',
-      render: (member) => {
-        const assessment = parseEvidenceAssessment(member.evidence_snapshot)
-        return (
-          <div className="asset-table__stack">
-            {renderEvidenceAssessment(assessment)}
-            <strong>
-              服务 {String(member.evidence_snapshot.service_count ?? '—')} · 域名 {String(member.evidence_snapshot.domain_count ?? '—')}
-            </strong>
-            <span>
-              监控 {String(member.evidence_snapshot.running_monitoring_count ?? '—')}/{String(member.evidence_snapshot.monitoring_link_count ?? '—')}
-            </span>
-            <span>{String(member.evidence_snapshot.primary_issue_summary || '暂无主要问题')}</span>
-          </div>
-        )
-      },
-    },
-    {
-      key: 'readback',
-      label: '当前回读',
-      width: '312px',
-      render: (member) => renderMemberReadback(member.execution_readback),
-    },
-    {
-      key: 'plan',
-      label: '下一步',
-      width: '248px',
-      render: (member) => renderMemberExecutionPlan(member),
     },
     {
       key: 'actions',
-      label: '跟进',
+      label: '操作',
       align: 'right',
-      width: '286px',
-      render: (member) => renderRecordFollowupForm(member),
+      width: '112px',
+      render: (member) => (
+        <button
+          className="btn sm primary"
+          type="button"
+          onClick={() => setRecordFollowupEditingMemberID(member.vps_id)}
+        >
+          编辑
+        </button>
+      ),
     },
   ]
 
@@ -3485,7 +1741,7 @@ export function AssetDecisionsPage() {
         </label>
         <select
           id={`followup-status-${member.record_id}-${member.vps_id}`}
-          aria-label={`${member.display_name || member.vps_id} 跟进状态`}
+          aria-label="跟进状态"
           className="input"
           value={draft.status}
           onChange={(event) => updateRecordFollowupDraft(member.vps_id, { status: event.target.value as AssetDecisionFollowupStatus })}
@@ -3499,7 +1755,7 @@ export function AssetDecisionsPage() {
         </label>
         <input
           id={`followup-note-${member.record_id}-${member.vps_id}`}
-          aria-label={`${member.display_name || member.vps_id} 跟进备注`}
+          aria-label="跟进备注"
           className="input"
           value={draft.note}
           placeholder="备注 / 阻塞原因"
@@ -3569,7 +1825,7 @@ export function AssetDecisionsPage() {
                   <button
                     className="btn-text sm secondary"
                     type="button"
-                    aria-label={`编辑 ${member.display_name || member.vps_id} 跟进`}
+                    aria-label="编辑跟进"
                     aria-expanded={false}
                     onClick={() => setRecordFollowupEditingMemberID(member.vps_id)}
                   >
@@ -3719,7 +1975,6 @@ export function AssetDecisionsPage() {
     setSelectedManualGroupID(null)
     setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
     setManualGroupError(null)
-    setManualMemberDrafts({})
     setManualMemberSaving({})
     setPendingManualMemberRemoval(null)
     setManualMemberAddDraft({
@@ -3797,7 +2052,6 @@ export function AssetDecisionsPage() {
       summary,
     })
     setManualDetailState({ loading: false, error: null, detail })
-    setManualMemberDrafts(buildManualMemberDrafts(detail))
     setPendingManualMemberRemoval((current) =>
       current && detail.members.some((member) => member.vps_id === current.vps_id) ? current : null,
     )
@@ -3868,8 +2122,6 @@ export function AssetDecisionsPage() {
   }
 
   function cancelRecordSave() {
-    if (recordDraft?.sourceType === 'auto_group') setGroupDetailPanel('directory')
-    if (recordDraft?.sourceType === 'manual_group') setManualDetailPanel('directory')
     setRecordDraft(null)
     setRecordDraftEditingMemberID(null)
     setRecordSaveError(null)
@@ -3944,7 +2196,7 @@ export function AssetDecisionsPage() {
                   <div className="input-field">
                     <span>角色</span>
                     <select
-                      aria-label={`${member.displayName} 角色`}
+                      aria-label="角色"
                       className="input"
                       value={decidedRole}
                       onChange={(event) => updateRecordDraftMember(member.vpsID, { decidedRole: event.target.value as AssetDecisionSuggestedRole })}
@@ -3957,7 +2209,7 @@ export function AssetDecisionsPage() {
                   <div className="input-field">
                     <span>动作</span>
                     <select
-                      aria-label={`${member.displayName} 动作`}
+                      aria-label="动作"
                       className="input"
                       value={decidedAction}
                       onChange={(event) => updateRecordDraftMember(member.vpsID, { decidedAction: event.target.value as AssetDecisionSuggestedAction })}
@@ -3970,7 +2222,7 @@ export function AssetDecisionsPage() {
                   <div className="input-field asset-decision-save-member__reason">
                     <span>理由</span>
                     <input
-                      aria-label={`${member.displayName} 理由`}
+                      aria-label="理由"
                       className="input"
                       value={reason}
                       onChange={(event) => updateRecordDraftMember(member.vpsID, { reason: event.target.value })}
@@ -4200,16 +2452,6 @@ export function AssetDecisionsPage() {
       .finally(() => setRecordPatching(false))
   }
 
-  function updateManualMemberDraft(vpsID: string, patch: Partial<ManualMemberDraft>) {
-    setManualMemberDrafts((current) => ({
-      ...current,
-      [vpsID]: {
-        ...current[vpsID],
-        ...patch,
-      },
-    }))
-  }
-
   function submitManualGroupPatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const detail = manualDetailState.detail
@@ -4295,39 +2537,6 @@ export function AssetDecisionsPage() {
         setManualGroupError(describeError(error, '新增自定义组合成员失败'))
       })
       .finally(() => setManualGroupSaving(false))
-  }
-
-  function submitManualMemberPatch(event: FormEvent<HTMLFormElement>, member: AssetDecisionManualGroupMember) {
-    event.preventDefault()
-    const detail = manualDetailState.detail
-    if (!detail) return
-    const draft = manualMemberDrafts[member.vps_id] ?? {
-      intendedRole: member.intended_role,
-      intendedAction: member.intended_action,
-      reason: member.reason,
-      note: member.note,
-      sortOrder: String(member.sort_order),
-    }
-    const parsedSortOrder = Number.parseInt(draft.sortOrder, 10)
-    setManualGroupError(null)
-    setManualMemberSaving((current) => ({ ...current, [member.vps_id]: true }))
-    patchAssetDecisionManualGroupMember(detail.manual_group_id, member.vps_id, {
-      intended_role: draft.intendedRole,
-      intended_action: draft.intendedAction,
-      reason: draft.reason.trim(),
-      note: draft.note.trim(),
-      ...(Number.isFinite(parsedSortOrder) ? { sort_order: parsedSortOrder } : {}),
-    })
-      .then((updated) => {
-        applyManualDetail(updated)
-        setDecisionNotice(`成员意图已更新：${member.current_fact_found ? member.vps.display_name : member.vps_id}`)
-      })
-      .catch((error: unknown) => {
-        setManualGroupError(describeError(error, '更新成员意图失败'))
-      })
-      .finally(() => {
-        setManualMemberSaving((current) => ({ ...current, [member.vps_id]: false }))
-      })
   }
 
   function deleteManualMember(member: AssetDecisionManualGroupMember) {
@@ -4423,7 +2632,6 @@ export function AssetDecisionsPage() {
         <section className="asset-decision-execution-board" aria-label="执行编排">
           <div className="asset-decision-execution-board__empty">
             <strong>暂无执行编排</strong>
-            <span>当前记录没有可展示的成员步骤。</span>
           </div>
         </section>
       )
@@ -4436,9 +2644,9 @@ export function AssetDecisionsPage() {
             <strong>{detail.execution_plan?.summary || '等待执行步骤'}</strong>
           </div>
           <div className="asset-decision-execution-board__counts">
-            <Badge variant="count" tone={detail.execution_plan?.actionable_count > 0 ? 'maintenance' : 'normal'}>
+            <span>
               可推进 {detail.execution_plan?.actionable_count ?? 0}
-            </Badge>
+            </span>
             {detail.execution_plan?.blocked_count > 0 && (
               <Badge variant="count" tone="critical">
                 阻塞 {detail.execution_plan.blocked_count}
@@ -4500,9 +2708,9 @@ export function AssetDecisionsPage() {
                       </Badge>
                     ))}
                     {member.execution_readback.issues.length > 2 && (
-                      <Badge variant="count" tone="neutral">
+                      <span>
                         +{member.execution_readback.issues.length - 2}
-                      </Badge>
+                      </span>
                     )}
                   </span>
                 )}
@@ -4559,7 +2767,7 @@ export function AssetDecisionsPage() {
                 </div>
               </div>
               <div className="asset-decision-group-card__actions">
-                <button className="btn sm primary" type="button" onClick={() => openGroup(group.group_id)}>
+                <button className="btn md primary" type="button" onClick={() => openGroup(group.group_id)}>
                   查看组
                 </button>
               </div>
@@ -4700,14 +2908,14 @@ export function AssetDecisionsPage() {
         <div className="inline-alert ok" role="status">{decisionNotice}</div>
       )}
 
-      <section className={`asset-decision-focus asset-decision-command-summary asset-decision-command-summary--${portfolioLead.tone} animate-in d1`} aria-label="资产组合决策当前判断">
+      <section className={`asset-decision-focus asset-decision-command-summary asset-decision-command-summary--${portfolioLead.tone} asset-decision-primary-focus animate-in d1`} aria-label="资产组合决策当前判断">
         <div className="asset-decision-command-summary__lead">
-          <span>{portfolioLead.eyebrow}</span>
-          <h2>{portfolioLead.title}</h2>
-          <p>{portfolioLead.summary}</p>
+          <span className="asset-decision-eyebrow">{portfolioLead.eyebrow}</span>
+          <h2 className="asset-decision-focus-title">{portfolioLead.title}</h2>
+          <p className="asset-decision-focus-summary">{portfolioLead.summary}</p>
           {portfolioLead.kind === 'work' && portfolioLead.actionLabel && (
-            <div className="asset-decision-command-summary__actions">
-              <button className="btn md primary" type="button" onClick={openPortfolioLead}>
+            <div className="asset-decision-command-summary__actions asset-decision-primary-actions">
+              <button className="btn lg primary" type="button" onClick={openPortfolioLead}>
                 {portfolioLead.actionLabel}
               </button>
               <Link className="btn md secondary" to={`/asset-decisions?view=evidence&renew_within_days=${renewalWindow}&scenario=evidence_cleanup`}>
@@ -4744,7 +2952,7 @@ export function AssetDecisionsPage() {
         </div>
       )}
 
-      <div className="asset-decision-topology animate-in d2">
+      <div className="asset-decision-topology asset-decision-secondary-level animate-in d2">
         <AssetDecisionSecondaryNav
           items={secondaryNavItems}
           active={secondaryWorkbench}
@@ -4758,14 +2966,14 @@ export function AssetDecisionsPage() {
         </div>
       )}
 
-      <div className="asset-decision-primary-grid asset-decision-primary-grid--single animate-in d2">
+      <div className="asset-decision-primary-grid asset-decision-primary-grid--single asset-decision-secondary-content animate-in d2">
         <section className="page-panel asset-decision-command">
           <div className="asset-decision-board__header">
             <div>
-              <p className="section-heading__eyebrow">组合扫描</p>
-              <h2>决策组扫描</h2>
+              <p className="section-heading__eyebrow asset-decision-tertiary-text">组合扫描</p>
+              <h2 className="asset-decision-secondary-title">决策组扫描</h2>
             </div>
-            <div className="asset-decision-board__tools">
+            <div className="asset-decision-board__tools asset-decision-tertiary-controls">
               <div className="asset-decision-window">
                 <span>续费窗口</span>
                 <select
@@ -4779,7 +2987,7 @@ export function AssetDecisionsPage() {
                   ))}
                 </select>
               </div>
-              <p>{portfolioState.overviewError ? '组合概览不可用' : `当前显示 ${portfolioState.groups.length} 个组`}</p>
+              <p className="asset-decision-tertiary-text">{portfolioState.overviewError ? '组合概览不可用' : `当前显示 ${portfolioState.groups.length} 个组`}</p>
             </div>
           </div>
           <div className="asset-decision-tabs">
@@ -4809,8 +3017,6 @@ export function AssetDecisionsPage() {
             <PageStateView
               kind="error"
               title="决策组不可用"
-              description={<>{portfolioState.groupsError}</>}
-              technicalSummary={portfolioState.groupsError}
               surface="empty"
               compact
             />
@@ -4818,7 +3024,6 @@ export function AssetDecisionsPage() {
             <PageStateView
               kind="empty"
               title="当前视图暂无决策组"
-              description="可切换到需要决策或资料缺口；单台辅助队列可从上方入口打开。"
               action={portfolioLead.kind === 'stable' ? undefined : <button className="btn sm secondary" onClick={() => setWorkbenchView('needs_decision')}>查看需要决策</button>}
               surface="empty"
               compact
@@ -4830,30 +3035,28 @@ export function AssetDecisionsPage() {
       </div>
 
       {secondaryWorkbench === 'scenarios' && (
-      <section className="page-panel asset-decision-scenario-records animate-in d3">
+      <section className="page-panel asset-decision-scenario-records asset-decision-tertiary-surface animate-in d3">
         <div className="asset-decision-board__header">
           <div>
-            <p className="section-heading__eyebrow">场景工作区</p>
-            <h2>场景工作区</h2>
-            <p>模板负责启动场景，自定义组合承接真实比较；已保存决策从记录入口进入。</p>
+            <p className="section-heading__eyebrow asset-decision-tertiary-text">场景工作区</p>
+            <h2 className="asset-decision-tertiary-title">场景工作区</h2>
           </div>
           <div className="asset-decision-board__tools">
-            <span className="section-count">
+            <span className="section-count asset-decision-tertiary-text">
               模板 {templatesState.loading ? '...' : templatesState.error ? '不可用' : templatesState.templates.length}
             </span>
-            <span className="section-count">
+            <span className="section-count asset-decision-tertiary-text">
               组合 {manualGroupsState.loading ? '...' : manualGroupsState.error ? '不可用' : manualGroupsState.groups.length}
             </span>
           </div>
         </div>
 
         <div className="asset-decision-scenario-records__grid">
-          <section className="asset-decision-scenario-card asset-decision-templates" aria-label="资产决策场景模板">
+          <section className="asset-decision-scenario-card asset-decision-templates" aria-label="场景模板">
             <div className="asset-decision-scenario-card__head">
               <div>
-                <p className="section-heading__eyebrow">场景模板</p>
-                <h3>场景模板</h3>
-                <span>作为场景启动器使用，不直接保存决策记录。</span>
+                <p className="section-heading__eyebrow asset-decision-tertiary-text">场景模板</p>
+                <h3 className="asset-decision-tertiary-title">场景模板</h3>
               </div>
             </div>
             {templatesState.loading ? (
@@ -4862,8 +3065,6 @@ export function AssetDecisionsPage() {
               <PageStateView
                 kind="error"
                 title="场景模板不可用"
-                description={<>{templatesState.error}</>}
-                technicalSummary={templatesState.error}
                 surface="empty"
                 compact
               />
@@ -4871,7 +3072,6 @@ export function AssetDecisionsPage() {
               <PageStateView
                 kind="empty"
                 title="暂无场景模板"
-                description="可以先从自动组创建自定义组合，再另存为模板。"
                 surface="empty"
                 compact
               />
@@ -4884,9 +3084,11 @@ export function AssetDecisionsPage() {
                         <Badge variant="state" tone={scenarioTemplateStatusTone(template.status)}>
                           {SCENARIO_TEMPLATE_STATUS_LABELS[template.status]}
                         </Badge>
-                        <Badge variant="info" tone={template.builtin ? 'notice' : 'neutral'}>
-                          {template.builtin ? '内置' : '自定义'}
-                        </Badge>
+                        {template.builtin && (
+                          <Badge variant="info" tone="notice">
+                            内置
+                          </Badge>
+                        )}
                       </span>
                       <strong>{template.title}</strong>
                       <span>{MANUAL_GROUP_SCENARIO_LABELS[template.scenario]} · {template.goal || template.note || '场景启动器'}</span>
@@ -4901,12 +3103,11 @@ export function AssetDecisionsPage() {
             )}
           </section>
 
-          <section className="asset-decision-scenario-card asset-decision-manual-groups" aria-label="自定义资产组合">
+          <section className="asset-decision-scenario-card asset-decision-manual-groups" aria-label="自定义组合">
             <div className="asset-decision-scenario-card__head">
               <div>
-                <p className="section-heading__eyebrow">自定义组合</p>
-                <h3>自定义组合</h3>
-                <span>沉淀真实比较篮子，可继续补成员和保存记录。</span>
+                <p className="section-heading__eyebrow asset-decision-tertiary-text">自定义组合</p>
+                <h3 className="asset-decision-tertiary-title">自定义组合</h3>
               </div>
             </div>
             {manualGroupsState.loading ? (
@@ -4915,8 +3116,6 @@ export function AssetDecisionsPage() {
               <PageStateView
                 kind="error"
                 title="自定义组合不可用"
-                description={<>{manualGroupsState.error}</>}
-                technicalSummary={manualGroupsState.error}
                 surface="empty"
                 compact
               />
@@ -4924,7 +3123,6 @@ export function AssetDecisionsPage() {
               <PageStateView
                 kind="empty"
                 title="尚未创建自定义组合"
-                description="打开上方自动决策组后，可以把它创建为可长期编辑的手工组合。"
                 surface="empty"
                 compact
               />
@@ -4946,12 +3144,11 @@ export function AssetDecisionsPage() {
       )}
 
       {secondaryWorkbench === 'records' && (
-        <section className="page-panel asset-decision-scenario-card asset-decision-records animate-in d3" aria-label="已保存组合决策">
+        <section className="page-panel asset-decision-scenario-card asset-decision-records asset-decision-tertiary-surface animate-in d3" aria-label="已保存组合决策">
           <div className="asset-decision-scenario-card__head">
             <div>
-              <p className="section-heading__eyebrow">保存记录</p>
-              <h3>已保存组合决策</h3>
-              <span>保存过的判断、跟进状态、执行回读和执行编排。</span>
+              <p className="section-heading__eyebrow asset-decision-tertiary-text">保存记录</p>
+              <h3 className="asset-decision-tertiary-title">已保存组合决策</h3>
             </div>
           </div>
           {recordsState.loading ? (
@@ -4960,8 +3157,6 @@ export function AssetDecisionsPage() {
             <PageStateView
               kind="error"
               title="决策记录不可用"
-              description={<>{recordsState.error}</>}
-              technicalSummary={recordsState.error}
               surface="empty"
               compact
             />
@@ -4969,7 +3164,6 @@ export function AssetDecisionsPage() {
             <PageStateView
               kind="empty"
               title="尚未保存组合决策"
-              description="打开上方决策组后，可以把当前组合判断保存成长期记录。"
               surface="empty"
               compact
             />
@@ -4988,16 +3182,13 @@ export function AssetDecisionsPage() {
       )}
 
       {secondaryWorkbench === 'renewals' && (
-      <section className="page-panel asset-renewal-evidence asset-decision-support-surface animate-in d4">
+      <section className="page-panel asset-renewal-evidence asset-decision-support-surface asset-decision-tertiary-surface animate-in d4">
         <div className="section-heading section-heading--inline">
           <div>
-            <p className="section-heading__eyebrow">续费事实</p>
-            <h2 className="section-heading__title">续费事实</h2>
-            <p className="section-heading__description">
-              只展示订阅续费事实，不在这里替代组合判断。
-            </p>
+            <p className="section-heading__eyebrow asset-decision-tertiary-text">续费事实</p>
+            <h2 className="section-heading__title asset-decision-tertiary-title">续费事实</h2>
           </div>
-          <span className={`section-count${queueState.renewals.length > 0 ? ' section-count--warn' : ''}`}>
+          <span className={`section-count asset-decision-tertiary-text${queueState.renewals.length > 0 ? ' section-count--warn' : ''}`}>
             {queueState.renewalsLoading ? '...' : queueState.renewalsError ? '不可用' : `${queueState.renewals.length} 条`}
           </span>
         </div>
@@ -5022,14 +3213,13 @@ export function AssetDecisionsPage() {
       )}
 
       {secondaryWorkbench === 'single_queue' && (
-      <section id="single-vps-queue" className="page-panel asset-decision-single-queue asset-decision-support-surface animate-in d5">
+      <section id="single-vps-queue" className="page-panel asset-decision-single-queue asset-decision-support-surface asset-decision-tertiary-surface animate-in d5">
         <div className="asset-decision-board__header">
           <div>
-            <p className="section-heading__eyebrow">单台辅助</p>
-            <h2>单台辅助队列</h2>
-            <p>保留已有单台续费决策能力；取消/退役仍从 VPS 详情的 lifecycle workbench 进入。</p>
+            <p className="section-heading__eyebrow asset-decision-tertiary-text">单台辅助</p>
+            <h2 className="asset-decision-tertiary-title">单台辅助队列</h2>
           </div>
-          <span className="section-count">
+          <span className="section-count asset-decision-tertiary-text">
             {queueState.queueLoading ? '...' : `${visibleDecisionQueue.length} / ${totalDecisionQueue}`}
           </span>
         </div>
@@ -5047,8 +3237,6 @@ export function AssetDecisionsPage() {
           <PageStateView
             kind="error"
             title="单台队列不可用"
-            description={<>{queueState.queueError}</>}
-            technicalSummary={queueState.queueError}
             surface="empty"
             compact
           />
@@ -5056,7 +3244,6 @@ export function AssetDecisionsPage() {
           <PageStateView
             kind="empty"
             title="当前视图暂无待处理 VPS"
-            description="可回到全部或 VPS 库存；订阅和接入都从 VPS 详情页补齐。"
             action={
               <div className="asset-empty-actions">
                 {queueView !== 'all' && (
@@ -5200,14 +3387,27 @@ export function AssetDecisionsPage() {
           <PageStateView
             kind="error"
             title="决策组详情不可用"
-            description={<>{detailState.error}</>}
-            technicalSummary={detailState.error}
             surface="empty"
             compact
           />
         ) : detailState.detail ? (
           <div className="asset-decision-detail">
-            {(groupDetailPanel === 'overview' || groupDetailPanel === 'directory') && renderDetailCommand({
+            <Tabs
+              items={[
+                { value: 'overview', label: '概览' },
+                { value: 'members', label: '成员', count: detailState.detail.members.length },
+                { value: 'save', label: '保存' },
+              ]}
+              value={groupDetailPanel}
+              onChange={(value) => {
+                if (value === 'save' && recordDraft?.sourceType !== 'auto_group') {
+                  startRecordSave(detailState.detail!)
+                  return
+                }
+                setGroupDetailPanel(value as GroupDetailPanel)
+              }}
+            />
+            {groupDetailPanel === 'overview' && renderDetailCommand({
               ariaLabel: '决策组当前判断',
               title: '',
               summary: compactGroupJudgement(detailState.detail),
@@ -5216,68 +3416,16 @@ export function AssetDecisionsPage() {
               insight: detailState.detail.comparison_insight,
               chips: detailState.detail.evidence_chips,
               actions: (
-                <>
                 <button
-                  className="btn sm primary"
+                  className="btn md primary"
                   type="button"
                   onClick={() => createManualGroupFromAuto(detailState.detail!)}
                   disabled={manualGroupCreating}
                 >
                   {manualGroupCreating ? '创建中…' : '创建组合'}
                 </button>
-                <button className="btn-text sm secondary" type="button" onClick={() => setGroupDetailPanel('directory')}>
-                  详情
-                </button>
-                </>
               ),
             })}
-            {groupDetailPanel === 'directory' && renderDetailDirectory<GroupDetailPanel>('决策组详情目录', [
-              {
-                key: 'members',
-                label: '成员取舍',
-                count: detailState.detail.members.length,
-              },
-              {
-                key: 'save',
-                label: '保存记录',
-              },
-              {
-                key: 'raw',
-                label: '底稿',
-              },
-            ], (panel) => {
-              if (panel === 'save' && recordDraft?.sourceType !== 'auto_group') {
-                startRecordSave(detailState.detail!)
-                return
-              }
-              setGroupDetailPanel(panel)
-            })}
-            {groupDetailPanel !== 'overview' && groupDetailPanel !== 'directory' && renderDetailPanelNav<GroupDetailPanel>([
-              { key: 'members', label: '成员明细', count: detailState.detail.members.length },
-              { key: 'save', label: '保存记录' },
-              ...(groupDetailPanel === 'members' || groupDetailPanel === 'raw'
-                ? [{ key: 'raw' as const, label: '底稿', ariaLabel: '原始明细' }]
-                : []),
-              ...(selectedVPS ? [{ key: 'vps' as const, label: '处理面板' }] : []),
-            ], groupDetailPanel, (panel) => {
-              if (panel === 'save' && recordDraft?.sourceType !== 'auto_group') {
-                startRecordSave(detailState.detail!)
-                return
-              }
-              setGroupDetailPanel(panel)
-            })}
-            {groupDetailPanel !== 'overview' && groupDetailPanel !== 'directory' && (
-              <div className="asset-decision-detail-actionbar" aria-label="决策组主动作">
-                <button
-                  className="btn sm primary"
-                  type="button"
-                  onClick={() => createManualGroupFromAuto(detailState.detail!)}
-                  disabled={manualGroupCreating}
-                >
-                  {manualGroupCreating ? '创建中…' : '创建组合'}
-                </button>
-              </div>
-            )}
             {manualGroupError && <div className="inline-alert danger">{manualGroupError}</div>}
             {groupDetailPanel === 'members' && renderDetailPanel('成员明细',
               renderMemberDecisionRows(
@@ -5309,10 +3457,10 @@ export function AssetDecisionsPage() {
                 <div className="asset-decision-record-form__header">
                   {renderCompactTaskHeader('保存组合决策记录', `成员 ${detailState.detail.members.length}`)}
                   <div className="asset-decision-member-actions">
-                    <button className="btn sm primary" type="submit" disabled={recordSaving}>
+                    <button className="btn md primary" type="submit" disabled={recordSaving}>
                       {recordSaving ? '保存中…' : '保存记录'}
                     </button>
-                    <button className="btn sm secondary" type="button" onClick={cancelRecordSave} disabled={recordSaving}>
+                    <button className="btn md secondary" type="button" onClick={cancelRecordSave} disabled={recordSaving}>
                       取消
                     </button>
                   </div>
@@ -5402,14 +3550,28 @@ export function AssetDecisionsPage() {
           <PageStateView
             kind="error"
             title="自定义组合详情不可用"
-            description={<>{manualDetailState.error}</>}
-            technicalSummary={manualDetailState.error}
             surface="empty"
             compact
           />
         ) : manualDetailState.detail && manualGroupProgress ? (
           <div className="asset-decision-detail asset-decision-manual-detail">
-            {(manualDetailPanel === 'overview' || manualDetailPanel === 'directory') && renderDetailCommand({
+            <Tabs
+              items={[
+                { value: 'overview', label: '概览' },
+                { value: 'members', label: '成员', count: manualDetailState.detail.members.length },
+                { value: 'edit', label: '编辑' },
+                { value: 'save', label: '保存' },
+              ]}
+              value={manualDetailPanel}
+              onChange={(value) => {
+                if (value === 'save' && recordDraft?.sourceType !== 'manual_group') {
+                  startManualRecordSave(manualDetailState.detail!)
+                  return
+                }
+                selectManualDetailPanel(value as ManualDetailPanel)
+              }}
+            />
+            {manualDetailPanel === 'overview' && renderDetailCommand({
               ariaLabel: '自定义组合当前判断',
               title: '当前判断',
               summary: compactDecisionText(
@@ -5428,65 +3590,8 @@ export function AssetDecisionsPage() {
                   {manualGroupProgress.readinessLabel} {manualGroupProgress.doneCount}/{manualGroupProgress.totalCount}
                 </Badge>
               ),
-              actions: (
-                <>
-                  <button className="btn-text sm secondary" type="button" onClick={() => setManualDetailPanel('directory')}>
-                    查看详情
-                  </button>
-                </>
-              ),
             })}
-
-            {manualDetailPanel === 'directory' && renderDetailDirectory<ManualDetailPanel>('自定义组合详情目录', [
-              {
-                key: 'members',
-                label: '成员维护',
-                count: manualDetailState.detail.members.length,
-              },
-              {
-                key: 'edit',
-                label: '编辑组合',
-                meta: compactDirectoryMeta(MANUAL_GROUP_STATUS_LABELS[manualDetailState.detail.status], '组合状态'),
-              },
-              {
-                key: 'save',
-                label: '保存记录',
-                meta: compactDirectoryMeta(manualGroupProgress.readinessLabel, '保存状态'),
-              },
-              {
-                key: 'add',
-                label: '添加成员',
-              },
-              {
-                key: 'raw',
-                label: '底稿',
-              },
-            ], (panel) => {
-              if (panel === 'save' && recordDraft?.sourceType !== 'manual_group') {
-                startManualRecordSave(manualDetailState.detail!)
-                return
-              }
-              selectManualDetailPanel(panel)
-            })}
-
-            {manualDetailPanel !== 'overview' && manualDetailPanel !== 'directory' && renderDetailPanelNav<ManualDetailPanel>([
-              { key: 'members', label: '成员维护', count: manualDetailState.detail.members.length },
-              { key: 'edit', label: '编辑组合' },
-              { key: 'save', label: '保存记录' },
-              ...(manualDetailPanel === 'members' || manualDetailPanel === 'add'
-                ? [{ key: 'add' as const, label: '添加成员' }]
-                : []),
-              ...(manualDetailPanel === 'members' || manualDetailPanel === 'raw'
-                ? [{ key: 'raw' as const, label: '数据底稿', ariaLabel: '原始明细' }]
-                : []),
-            ], manualDetailPanel, (panel) => {
-              if (panel === 'save' && recordDraft?.sourceType !== 'manual_group') {
-                startManualRecordSave(manualDetailState.detail!)
-                return
-              }
-              selectManualDetailPanel(panel)
-            })}
-
+            {manualGroupError && <div className="inline-alert danger">{manualGroupError}</div>}
             {manualDetailPanel === 'members' && renderDetailPanel('成员维护',
               renderMemberDecisionRows(
                 manualDetailState.detail.members.map(manualMemberComparisonMatrixMember),
@@ -5548,11 +3653,11 @@ export function AssetDecisionsPage() {
                 </label>
               </div>
               <div className="asset-operation-actions">
-                <button className="btn sm primary" type="submit" disabled={manualGroupSaving}>
+                <button className="btn md primary" type="submit" disabled={manualGroupSaving}>
                   {manualGroupSaving ? '保存中…' : '保存组合'}
                 </button>
                 <button
-                  className="btn sm secondary"
+                  className="btn md secondary"
                   type="button"
                   onClick={() => saveManualGroupAsTemplate(manualDetailState.detail!)}
                   disabled={templateSaving}
@@ -5576,7 +3681,7 @@ export function AssetDecisionsPage() {
                   >
                     高级选项
                   </button>
-                  <button className="btn sm primary" type="submit" disabled={manualGroupSaving || vpsCatalogState.loading || !manualMemberAddDraft.vpsID}>
+                  <button className="btn md primary" type="submit" disabled={manualGroupSaving || vpsCatalogState.loading || !manualMemberAddDraft.vpsID}>
                     {manualGroupSaving ? '加入中…' : '加入组合'}
                   </button>
                 </div>
@@ -5664,10 +3769,10 @@ export function AssetDecisionsPage() {
                 <div className="asset-decision-record-form__header">
                   {renderCompactTaskHeader('保存自定义组合决策', `成员 ${manualDetailState.detail.members.length}`)}
                   <div className="asset-decision-member-actions">
-                    <button className="btn sm primary" type="submit" disabled={recordSaving}>
+                    <button className="btn md primary" type="submit" disabled={recordSaving}>
                       {recordSaving ? '保存中…' : '保存记录'}
                     </button>
-                    <button className="btn sm secondary" type="button" onClick={cancelRecordSave} disabled={recordSaving}>
+                    <button className="btn md secondary" type="button" onClick={cancelRecordSave} disabled={recordSaving}>
                       取消
                     </button>
                   </div>
@@ -5778,14 +3883,21 @@ export function AssetDecisionsPage() {
           <PageStateView
             kind="error"
             title="场景模板不可用"
-            description={<>{templateDetailState.error}</>}
-            technicalSummary={templateDetailState.error}
             surface="empty"
             compact
           />
         ) : templateDetailState.detail ? (
           <div className="asset-decision-detail asset-decision-template-detail">
-            {(templateDetailPanel === 'overview' || templateDetailPanel === 'directory') && renderDetailCommand({
+            <Tabs
+              items={[
+                { value: 'overview', label: '概览' },
+                { value: 'members', label: '成员', count: templateDetailState.detail.member_count },
+                ...(!templateDetailState.detail.builtin ? [{ value: 'status' as const, label: '状态' }] : []),
+              ]}
+              value={templateDetailPanel}
+              onChange={(value) => setTemplateDetailPanel(value as TemplateDetailPanel)}
+            />
+            {templateDetailPanel === 'overview' && renderDetailCommand({
               ariaLabel: '场景模板当前判断',
               title: '当前模板',
               summary: compactDecisionText(templateDetailState.detail.goal, '创建组合后细化'),
@@ -5797,37 +3909,7 @@ export function AssetDecisionsPage() {
                   {SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status]}
                 </Badge>
               ),
-              actions: (
-                <button className="btn-text sm secondary" type="button" onClick={() => setTemplateDetailPanel('directory')}>
-                  查看详情
-                </button>
-              ),
             })}
-
-            {templateDetailPanel === 'directory' && renderDetailDirectory<TemplateDetailPanel>('场景模板详情目录', [
-              {
-                key: 'create',
-                label: '创建组合',
-                meta: templateDetailState.detail.status === 'active' ? '可创建' : '已归档',
-              },
-              {
-                key: 'members',
-                label: '成员蓝图',
-                meta: templateDetailState.detail.source_manual_group_id ? '自定义蓝图' : '内置模板',
-                count: templateDetailState.detail.member_count,
-              },
-              ...(!templateDetailState.detail.builtin ? [{
-                key: 'status' as const,
-                label: '状态维护',
-                meta: SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status],
-              }] : []),
-            ], setTemplateDetailPanel)}
-
-            {templateDetailPanel !== 'overview' && templateDetailPanel !== 'directory' && renderDetailPanelNav<TemplateDetailPanel>([
-              { key: 'create', label: '创建组合' },
-              { key: 'members', label: '成员蓝图', count: templateDetailState.detail.member_count },
-              ...(!templateDetailState.detail.builtin ? [{ key: 'status' as const, label: '状态维护' }] : []),
-            ], templateDetailPanel, setTemplateDetailPanel)}
             {templateError && <div className="inline-alert danger">{templateError}</div>}
 
             {templateDetailPanel === 'status' && !templateDetailState.detail.builtin && renderDetailPanel('状态维护',
@@ -5874,7 +3956,7 @@ export function AssetDecisionsPage() {
               <form className="asset-decision-template-form" onSubmit={submitTemplateManualGroup}>
               <div className="asset-decision-record-form__header">
                 {renderCompactTaskHeader('从模板创建自定义组合', SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status])}
-                <button className="btn sm primary" type="submit" disabled={templateSaving || templateDetailState.detail.status !== 'active'}>
+                <button className="btn md primary" type="submit" disabled={templateSaving || templateDetailState.detail.status !== 'active'}>
                   {templateSaving ? '创建中…' : '创建组合'}
                 </button>
               </div>
@@ -5994,14 +4076,22 @@ export function AssetDecisionsPage() {
           <PageStateView
             kind="error"
             title="决策记录不可用"
-            description={<>{recordDetailState.error}</>}
-            technicalSummary={recordDetailState.error}
             surface="empty"
             compact
           />
         ) : recordDetailState.detail ? (
           <div className="asset-decision-detail asset-decision-record-detail">
-            {(recordDetailPanel === 'overview' || recordDetailPanel === 'directory') ? renderDetailCommand({
+            <Tabs
+              items={[
+                { value: 'overview', label: '概览' },
+                { value: 'execution', label: '执行', count: recordDetailState.detail.execution_plan?.actionable_count ?? 0 },
+                { value: 'members', label: '成员', count: recordDetailState.detail.members.length },
+                { value: 'source', label: '来源' },
+              ]}
+              value={recordDetailPanel}
+              onChange={(value) => setRecordDetailPanel(value as RecordDetailPanel)}
+            />
+            {recordDetailPanel === 'overview' && renderDetailCommand({
               ariaLabel: '保存记录当前判断',
               title: '当前记录',
               summary: recordCoverSummary(recordDetailState.detail),
@@ -6009,43 +4099,7 @@ export function AssetDecisionsPage() {
               assessment: selectedRecordAssessment,
               insight: parseComparisonInsight(recordDetailState.detail.evidence_snapshot),
               chips: [],
-              actions: (
-                <button className="btn-text sm secondary" type="button" onClick={() => setRecordDetailPanel('directory')}>
-                  查看详情
-                </button>
-              ),
-            }) : null}
-            {recordDetailPanel === 'directory' && renderDetailDirectory<RecordDetailPanel>('保存记录详情目录', [
-              {
-                key: 'execution',
-                label: '执行跟进',
-                meta: compactDirectoryMeta(executionPlanCountSummary(recordDetailState.detail.execution_plan), '执行状态'),
-                count: recordDetailState.detail.execution_plan?.actionable_count ?? 0,
-              },
-              {
-                key: 'members',
-                label: '成员跟进',
-                meta: '成员复核',
-                count: recordDetailState.detail.members.length,
-              },
-              {
-                key: 'source',
-                label: '来源复核',
-                meta: compactDirectoryMeta(recordSourceLabel(recordDetailState.detail), '来源'),
-              },
-              {
-                key: 'raw',
-                label: '成员底稿',
-              },
-            ], setRecordDetailPanel)}
-            {recordDetailPanel !== 'overview' && recordDetailPanel !== 'directory' && renderDetailPanelNav<RecordDetailPanel>([
-              { key: 'execution', label: '执行跟进', count: recordDetailState.detail.execution_plan?.actionable_count ?? 0 },
-              { key: 'members', label: '成员跟进', count: recordDetailState.detail.members.length },
-              { key: 'source', label: '来源复核' },
-              ...(recordDetailPanel === 'members' || recordDetailPanel === 'raw'
-                ? [{ key: 'raw' as const, label: '成员底稿', ariaLabel: '原始成员' }]
-                : []),
-            ], recordDetailPanel, setRecordDetailPanel)}
+            })}
             {recordPatchError && <div className="inline-alert danger">{recordPatchError}</div>}
             {recordDetailPanel === 'execution' && renderDetailPanel('执行跟进',
               <>
