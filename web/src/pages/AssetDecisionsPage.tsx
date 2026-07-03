@@ -1,21 +1,22 @@
 import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
-import { AssetDecisionRenewalTable } from '../components/AssetDecisionRenewalTable'
 import {
   AssetDecisionWorkPanel,
   type AssetDecisionDraft,
 } from '../components/AssetDecisionWorkPanel'
 import {
-  Badge,
   type BadgeTone,
+} from '../components/atoms'
+import { PortfolioWorkbench } from './asset-decisions/components/PortfolioWorkbench'
+import { SecondaryWorkbenches } from './asset-decisions/components/SecondaryWorkbenches'
+import {
+  Badge,
   DataTable,
   type DataTableColumn,
   Modal,
-  MonoDigits,
   Tabs,
 } from '../components/atoms'
-import { FilterChip } from '../components/filters'
 import { PageState as PageStateView } from '../components/PageState'
 import {
   addAssetDecisionManualGroupMember,
@@ -40,7 +41,7 @@ import {
   patchAssetDecisionScenarioTemplate,
   updateVPSAsset,
 } from '../lib/api'
-import { formatDate, formatDateTime, formatMoney, formatOptional } from '../lib/format'
+import { formatDateTime, formatMoney, formatOptional } from '../lib/format'
 import {
   type AssetDecisionEvidenceChip,
   type AssetDecisionEvidenceAssessment,
@@ -79,15 +80,12 @@ import {
   UsageBadge,
 } from './assetPageBadges'
 import {
-
-  daysUntilDate,
   groupSubscriptionsByVPS,
   lifecycleLabel,
   renewalLabel,
   usageLabel,
   vpsLocationLabel,
 } from './assetPageUtils'
-import { AssetDecisionSecondaryNav } from './asset-decisions/AssetDecisionSecondaryNav'
 import type {
   WorkbenchView,
   MainWorkbenchView,
@@ -130,7 +128,6 @@ import {
   INITIAL_RECORDS_STATE,
   INITIAL_RECORD_DETAIL_STATE,
   INITIAL_QUEUE_STATE,
-  VIEW_LABELS,
   ROLE_LABELS,
   ACTION_LABELS,
   MANUAL_GROUP_STATUS_LABELS,
@@ -148,7 +145,6 @@ import {
   FOLLOWUP_STATUS_OPTIONS,
   CONTEXT_FILTER_KEYS,
   OPEN_STATE_KEYS,
-  WORKBENCH_TABS,
 } from './asset-decisions/constants'
 import {
   renderCompactRiskChips,
@@ -176,17 +172,13 @@ import {
   chipTone,
   roleTone,
   actionTone,
-  manualGroupStatusTone,
-  recordStatusTone,
   followupStatusTone,
   readbackStatusTone,
   comparisonLaneTone,
   scenarioTemplateStatusTone,
-  baseMoney,
   renewalQueueLabel,
   recordSourceLabel,
   recordSourceDetail,
-  recordFollowupDoneCount,
   compactDecisionText,
   sourceAvailabilityLabel,
   memberContextLabel,
@@ -194,7 +186,6 @@ import {
   compactMemberPlanSummary,
   actionLabelForMember,
   compactVPSOptionLabel,
-  groupPressureLabel,
   manualCoverMeta,
   recordCoverSummary,
   recordCoverMeta,
@@ -1418,116 +1409,6 @@ export function AssetDecisionsPage() {
     totalDecisionQueue,
   )
 
-  const workbenchTabs = WORKBENCH_TABS.map((item) => ({
-    ...item,
-    count:
-      item.value === 'needs_decision' ? overview?.needs_decision_count
-        : item.value === 'renewal' ? overview?.renewal_group_count
-          : item.value === 'region' ? overview?.region_group_count
-            : item.value === 'provider' ? overview?.provider_group_count
-              : item.value === 'cost' ? overview?.cost_group_count
-                : item.value === 'evidence' ? overview?.evidence_group_count
-                  : undefined,
-  }))
-  const queueTabs = [
-    { value: 'all', label: '全部', count: totalDecisionQueue },
-    { value: 'unreviewed', label: '待评估', count: queueState.unreviewed.length },
-    { value: 'renewal', label: `${renewalWindow}天续费`, count: renewalDueQueueCount },
-    { value: 'migrate', label: '迁移', count: queueState.migrate.length },
-    { value: 'cancel', label: '取消', count: queueState.cancel.length },
-    { value: 'cancellation_attention', label: '取消联动', count: cancellationAttentionCount },
-    { value: 'unlinked', label: '未关联', count: unlinkedCount },
-    { value: 'missing_subscription', label: '缺订阅', count: missingSubscriptionCount },
-  ] satisfies Array<{ value: DecisionQueueView; label: string; count: number }>
-
-  const manualGroupColumns: DataTableColumn<AssetDecisionManualGroupSummary>[] = [
-    {
-      key: 'group',
-      label: '组合',
-      width: '320px',
-      render: (group) => (
-        <div className="asset-table__identity">
-          <strong>{group.title}</strong>
-          <span>{MANUAL_GROUP_SCENARIO_LABELS[group.scenario]}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'status',
-      label: '状态',
-      width: '140px',
-      render: (group) => (
-        <Badge variant="state" tone={manualGroupStatusTone(group.status)}>
-          {MANUAL_GROUP_STATUS_LABELS[group.status]}
-        </Badge>
-      ),
-    },
-    {
-      key: 'members',
-      label: '成员数',
-      width: '120px',
-      render: (group) => (
-        <span><MonoDigits>{group.member_count}</MonoDigits> 台</span>
-      ),
-    },
-    {
-      key: 'actions',
-      label: '操作',
-      align: 'right',
-      width: '128px',
-      render: (group) => (
-        <button className="btn sm primary" type="button" onClick={() => openManualGroup(group.manual_group_id)}>
-          查看
-        </button>
-      ),
-    },
-  ]
-
-  const recordColumns: DataTableColumn<AssetDecisionRecordSummary>[] = [
-    {
-      key: 'record',
-      label: '标题',
-      width: '320px',
-      render: (record) => (
-        <div className="asset-table__identity">
-          <strong>{record.title}</strong>
-          <span>{VIEW_LABELS[record.source_view]}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'status',
-      label: '状态',
-      width: '140px',
-      render: (record) => (
-        <Badge variant="state" tone={recordStatusTone(record.status)}>
-          {RECORD_STATUS_LABELS[record.status]}
-        </Badge>
-      ),
-    },
-    {
-      key: 'progress',
-      label: '进度',
-      width: '160px',
-      render: (record) => (
-        <span>
-          <MonoDigits>{recordFollowupDoneCount(record)}</MonoDigits>/<MonoDigits>{record.member_count}</MonoDigits>
-        </span>
-      ),
-    },
-    {
-      key: 'actions',
-      label: '操作',
-      align: 'right',
-      width: '112px',
-      render: (record) => (
-        <button className="btn sm primary" type="button" onClick={() => openRecord(record.record_id)}>
-          查看
-        </button>
-      ),
-    },
-  ]
-
   const memberColumns: DataTableColumn<AssetDecisionGroupMember>[] = [
     {
       key: 'vps',
@@ -2730,54 +2611,6 @@ export function AssetDecisionsPage() {
     )
   }
 
-  function renderDecisionGroupCards(groups: AssetDecisionGroupSummary[]) {
-    return (
-      <div className="asset-decision-group-cards" aria-label="决策组扫描列表">
-        {groups.map((group, index) => {
-          const assessment = group.evidence_assessment
-          const hasOperationalRisk = group.cancellation_attention_count > 0
-            || group.active_incident_count > 0
-            || group.abnormal_monitoring_count > 0
-            || group.evidence_chips.some((chip) => chip.tone === 'critical' || chip.tone === 'alert')
-          const tone = hasOperationalRisk || assessment.gap_signal_count > 0 ? 'alert' : 'normal'
-          return (
-            <article key={group.group_id} className={`asset-decision-group-card asset-decision-group-card--${tone}`}>
-              <div className="asset-decision-group-card__rank">
-                <strong>P{index + 1}</strong>
-                <span>{VIEW_LABELS[group.view]}</span>
-              </div>
-              <div className="asset-decision-group-card__body">
-                <div className="asset-decision-group-card__head">
-                  <div>
-                    <strong>{group.title}</strong>
-                    <span>{group.scope_label}</span>
-                  </div>
-                  <span className="asset-decision-chip-row">
-                    <Badge variant="info" tone={tone}>
-                      {groupPressureLabel(group)}
-                    </Badge>
-                  </span>
-                </div>
-
-                <div className="asset-decision-group-card__evidence">
-                  <strong>{compactGroupJudgement(group)}</strong>
-                  <span className="asset-decision-chip-row">
-                    {renderCompactRiskChips(group.evidence_chips, assessment)}
-                  </span>
-                </div>
-              </div>
-              <div className="asset-decision-group-card__actions">
-                <button className="btn md primary" type="button" onClick={() => openGroup(group.group_id)}>
-                  查看组
-                </button>
-              </div>
-            </article>
-          )
-        })}
-      </div>
-    )
-  }
-
   function selectVPS(vps: VPSAssetRecord) {
     setSelectedVPS(vps)
     setDecisionDraft({ renewalDecision: vps.renewal_decision, reason: '' })
@@ -2908,42 +2741,22 @@ export function AssetDecisionsPage() {
         <div className="inline-alert ok" role="status">{decisionNotice}</div>
       )}
 
-      <section className={`asset-decision-focus asset-decision-command-summary asset-decision-command-summary--${portfolioLead.tone} asset-decision-primary-focus animate-in d1`} aria-label="资产组合决策当前判断">
-        <div className="asset-decision-command-summary__lead">
-          <span className="asset-decision-eyebrow">{portfolioLead.eyebrow}</span>
-          <h2 className="asset-decision-focus-title">{portfolioLead.title}</h2>
-          <p className="asset-decision-focus-summary">{portfolioLead.summary}</p>
-          {portfolioLead.kind === 'work' && portfolioLead.actionLabel && (
-            <div className="asset-decision-command-summary__actions asset-decision-primary-actions">
-              <button className="btn lg primary" type="button" onClick={openPortfolioLead}>
-                {portfolioLead.actionLabel}
-              </button>
-              <Link className="btn md secondary" to={`/asset-decisions?view=evidence&renew_within_days=${renewalWindow}&scenario=evidence_cleanup`}>
-                资料缺口
-              </Link>
-            </div>
-          )}
-        </div>
-        <div className="asset-decision-command-summary__facts" aria-label="资产组合决策当前事实">
-          <div className="asset-decision-focus__item asset-decision-focus__item--notice">
-            <span>组合组数</span>
-            <strong>{portfolioState.overviewLoading ? '...' : overview?.group_count ?? portfolioState.groups.length}</strong>
-          </div>
-          <div className="asset-decision-focus__item asset-decision-focus__item--alert">
-            <span>续费组</span>
-            <strong>{portfolioState.overviewLoading ? '...' : overview?.renewal_group_count ?? 0}</strong>
-          </div>
-          <div className="asset-decision-focus__item asset-decision-focus__item--critical">
-            <span>闭环异常</span>
-            <strong>{closedLoopMetrics.readbackDriftCount + closedLoopMetrics.readbackBlockedCount + closedLoopMetrics.readbackNeedsEvidenceCount}</strong>
-            {closedLoopMetrics.partialErrorCount > 0 && <small>{portfolioLead.riskLabel}</small>}
-          </div>
-          <div className="asset-decision-focus__item asset-decision-focus__item--normal">
-            <span>证据状态</span>
-            <strong>{overview ? '已聚合' : '等待'}</strong>
-          </div>
-        </div>
-      </section>
+      <PortfolioWorkbench
+        portfolioView={portfolioView}
+        renewalWindow={renewalWindow}
+        portfolioState={portfolioState}
+        portfolioLead={portfolioLead}
+        contextFilterChips={contextFilterChips}
+        closedLoopPartialErrors={closedLoopPartialErrors}
+        closedLoopAnomalies={closedLoopMetrics.readbackDriftCount + closedLoopMetrics.readbackBlockedCount + closedLoopMetrics.readbackNeedsEvidenceCount}
+        partialErrorCount={closedLoopMetrics.partialErrorCount}
+        onSetWorkbenchView={setWorkbenchView}
+        onChangeRenewalWindow={changeRenewalWindow}
+        onOpenGroup={openGroup}
+        onOpenPortfolioLead={openPortfolioLead}
+        onClearContextFilter={clearContextFilter}
+        onClearAllContextFilters={clearAllContextFilters}
+      />
 
       {isSingleQueueDeepLink && (
         <div className="inline-alert info asset-decision-deeplink-notice" role="status">
@@ -2952,426 +2765,33 @@ export function AssetDecisionsPage() {
         </div>
       )}
 
-      <div className="asset-decision-topology asset-decision-secondary-level animate-in d2">
-        <AssetDecisionSecondaryNav
-          items={secondaryNavItems}
-          active={secondaryWorkbench}
-          onOpen={setSelectedSecondaryWorkbench}
-        />
-      </div>
-
-      {closedLoopPartialErrors.length > 0 && (
-        <div className="inline-alert warn" role="status">
-          {closedLoopPartialErrors.join('、')}暂不可用，当前只展示已成功加载的事实。
-        </div>
-      )}
-
-      <div className="asset-decision-primary-grid asset-decision-primary-grid--single asset-decision-secondary-content animate-in d2">
-        <section className="page-panel asset-decision-command">
-          <div className="asset-decision-board__header">
-            <div>
-              <p className="section-heading__eyebrow asset-decision-tertiary-text">组合扫描</p>
-              <h2 className="asset-decision-secondary-title">决策组扫描</h2>
-            </div>
-            <div className="asset-decision-board__tools asset-decision-tertiary-controls">
-              <div className="asset-decision-window">
-                <span>续费窗口</span>
-                <select
-                  className="input filter-select--inline"
-                  aria-label="续费窗口"
-                  value={String(renewalWindow)}
-                  onChange={(event) => changeRenewalWindow(event.target.value)}
-                >
-                  {RENEWAL_WINDOWS.map((value) => (
-                    <option key={value} value={value}>未来 {value} 天</option>
-                  ))}
-                </select>
-              </div>
-              <p className="asset-decision-tertiary-text">{portfolioState.overviewError ? '组合概览不可用' : `当前显示 ${portfolioState.groups.length} 个组`}</p>
-            </div>
-          </div>
-          <div className="asset-decision-tabs">
-            <Tabs items={workbenchTabs} value={portfolioView} onChange={setWorkbenchView} variant="pill" />
-            {contextFilterChips.length > 0 && (
-              <div className="asset-decision-filter-chips" aria-label="资产决策上下文筛选">
-                {contextFilterChips.map((chip) => (
-                  <FilterChip
-                    key={chip.key}
-                    label={`${chip.label}: ${chip.value}`}
-                    onRemove={() => clearContextFilter(chip.key)}
-                  />
-                ))}
-                <button className="filter-clear" type="button" onClick={clearAllContextFilters}>清除上下文</button>
-              </div>
-            )}
-          </div>
-
-          {portfolioState.groupsLoading ? (
-            <PageStateView
-              kind="loading"
-              title="正在加载决策组…"
-              surface="empty"
-              compact
-            />
-          ) : portfolioState.groupsError ? (
-            <PageStateView
-              kind="error"
-              title="决策组不可用"
-              surface="empty"
-              compact
-            />
-          ) : portfolioState.groups.length === 0 ? (
-            <PageStateView
-              kind="empty"
-              title="当前视图暂无决策组"
-              action={portfolioLead.kind === 'stable' ? undefined : <button className="btn sm secondary" onClick={() => setWorkbenchView('needs_decision')}>查看需要决策</button>}
-              surface="empty"
-              compact
-            />
-          ) : (
-            renderDecisionGroupCards(portfolioState.groups)
-          )}
-        </section>
-      </div>
-
-      {secondaryWorkbench === 'scenarios' && (
-      <section className="page-panel asset-decision-scenario-records asset-decision-tertiary-surface animate-in d3">
-        <div className="asset-decision-board__header">
-          <div>
-            <p className="section-heading__eyebrow asset-decision-tertiary-text">场景工作区</p>
-            <h2 className="asset-decision-tertiary-title">场景工作区</h2>
-          </div>
-          <div className="asset-decision-board__tools">
-            <span className="section-count asset-decision-tertiary-text">
-              模板 {templatesState.loading ? '...' : templatesState.error ? '不可用' : templatesState.templates.length}
-            </span>
-            <span className="section-count asset-decision-tertiary-text">
-              组合 {manualGroupsState.loading ? '...' : manualGroupsState.error ? '不可用' : manualGroupsState.groups.length}
-            </span>
-          </div>
-        </div>
-
-        <div className="asset-decision-scenario-records__grid">
-          <section className="asset-decision-scenario-card asset-decision-templates" aria-label="场景模板">
-            <div className="asset-decision-scenario-card__head">
-              <div>
-                <p className="section-heading__eyebrow asset-decision-tertiary-text">场景模板</p>
-                <h3 className="asset-decision-tertiary-title">场景模板</h3>
-              </div>
-            </div>
-            {templatesState.loading ? (
-              <PageStateView kind="loading" title="正在加载场景模板…" surface="empty" compact />
-            ) : templatesState.error ? (
-              <PageStateView
-                kind="error"
-                title="场景模板不可用"
-                surface="empty"
-                compact
-              />
-            ) : templatesState.templates.length === 0 ? (
-              <PageStateView
-                kind="empty"
-                title="暂无场景模板"
-                surface="empty"
-                compact
-              />
-            ) : (
-              <div className="asset-decision-template-launchers">
-                {templatesState.templates.slice(0, 6).map((template) => (
-                  <article key={template.template_id} className="asset-decision-template-launcher">
-                    <div>
-                      <span className="asset-decision-chip-row">
-                        <Badge variant="state" tone={scenarioTemplateStatusTone(template.status)}>
-                          {SCENARIO_TEMPLATE_STATUS_LABELS[template.status]}
-                        </Badge>
-                        {template.builtin && (
-                          <Badge variant="info" tone="notice">
-                            内置
-                          </Badge>
-                        )}
-                      </span>
-                      <strong>{template.title}</strong>
-                      <span>{MANUAL_GROUP_SCENARIO_LABELS[template.scenario]} · {template.goal || template.note || '场景启动器'}</span>
-                      <small>蓝图成员 <MonoDigits>{template.member_count}</MonoDigits></small>
-                    </div>
-                    <button className="btn sm secondary" type="button" onClick={() => openTemplate(template.template_id)}>
-                      使用模板
-                    </button>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="asset-decision-scenario-card asset-decision-manual-groups" aria-label="自定义组合">
-            <div className="asset-decision-scenario-card__head">
-              <div>
-                <p className="section-heading__eyebrow asset-decision-tertiary-text">自定义组合</p>
-                <h3 className="asset-decision-tertiary-title">自定义组合</h3>
-              </div>
-            </div>
-            {manualGroupsState.loading ? (
-              <PageStateView kind="loading" title="正在加载自定义组合…" surface="empty" compact />
-            ) : manualGroupsState.error ? (
-              <PageStateView
-                kind="error"
-                title="自定义组合不可用"
-                surface="empty"
-                compact
-              />
-            ) : manualGroupsState.groups.length === 0 ? (
-              <PageStateView
-                kind="empty"
-                title="尚未创建自定义组合"
-                surface="empty"
-                compact
-              />
-            ) : (
-              <div className="asset-table-scroll" role="region" aria-label="自定义资产组合" tabIndex={0}>
-                <DataTable
-                  className="asset-table asset-decision-manual-groups-table"
-                  columns={manualGroupColumns}
-                  rows={manualGroupsState.groups}
-                  rowKey={(group) => group.manual_group_id}
-                  onRowClick={(group) => openManualGroup(group.manual_group_id)}
-                />
-              </div>
-            )}
-          </section>
-        </div>
-
-      </section>
-      )}
-
-      {secondaryWorkbench === 'records' && (
-        <section className="page-panel asset-decision-scenario-card asset-decision-records asset-decision-tertiary-surface animate-in d3" aria-label="已保存组合决策">
-          <div className="asset-decision-scenario-card__head">
-            <div>
-              <p className="section-heading__eyebrow asset-decision-tertiary-text">保存记录</p>
-              <h3 className="asset-decision-tertiary-title">已保存组合决策</h3>
-            </div>
-          </div>
-          {recordsState.loading ? (
-            <PageStateView kind="loading" title="正在加载决策记录…" surface="empty" compact />
-          ) : recordsState.error ? (
-            <PageStateView
-              kind="error"
-              title="决策记录不可用"
-              surface="empty"
-              compact
-            />
-          ) : recordsState.records.length === 0 ? (
-            <PageStateView
-              kind="empty"
-              title="尚未保存组合决策"
-              surface="empty"
-              compact
-            />
-          ) : (
-            <div className="asset-table-scroll" role="region" aria-label="已保存组合决策" tabIndex={0}>
-              <DataTable
-                className="asset-table asset-decision-records-table"
-                columns={recordColumns}
-                rows={recordsState.records}
-                rowKey={(record) => record.record_id}
-                onRowClick={(record) => openRecord(record.record_id)}
-              />
-            </div>
-          )}
-        </section>
-      )}
-
-      {secondaryWorkbench === 'renewals' && (
-      <section className="page-panel asset-renewal-evidence asset-decision-support-surface asset-decision-tertiary-surface animate-in d4">
-        <div className="section-heading section-heading--inline">
-          <div>
-            <p className="section-heading__eyebrow asset-decision-tertiary-text">续费事实</p>
-            <h2 className="section-heading__title asset-decision-tertiary-title">续费事实</h2>
-          </div>
-          <span className={`section-count asset-decision-tertiary-text${queueState.renewals.length > 0 ? ' section-count--warn' : ''}`}>
-            {queueState.renewalsLoading ? '...' : queueState.renewalsError ? '不可用' : `${queueState.renewals.length} 条`}
-          </span>
-        </div>
-        <AssetDecisionRenewalTable
-          loading={queueState.renewalsLoading}
-          error={queueState.renewalsError}
-          renewals={queueState.renewals}
-          vpsByID={vpsByID}
-          renderVPSReference={(subscription, vps) => (
-            <Link className="name" to={`/vps/${subscription.vps_id}`}>
-              {vps?.display_name ?? subscription.vps_id}
-            </Link>
-          )}
-          renderActions={(subscription) => (
-            <>
-              <Link className="btn-text sm secondary" to={`/asset-decisions?view=renewal&renew_within_days=${renewalWindow}`}>组合判断</Link>
-              <Link className="btn-text sm secondary" to={`/vps/${subscription.vps_id}`}>VPS 详情</Link>
-            </>
-          )}
-        />
-      </section>
-      )}
-
-      {secondaryWorkbench === 'single_queue' && (
-      <section id="single-vps-queue" className="page-panel asset-decision-single-queue asset-decision-support-surface asset-decision-tertiary-surface animate-in d5">
-        <div className="asset-decision-board__header">
-          <div>
-            <p className="section-heading__eyebrow asset-decision-tertiary-text">单台辅助</p>
-            <h2 className="asset-decision-tertiary-title">单台辅助队列</h2>
-          </div>
-          <span className="section-count asset-decision-tertiary-text">
-            {queueState.queueLoading ? '...' : `${visibleDecisionQueue.length} / ${totalDecisionQueue}`}
-          </span>
-        </div>
-        <div className="asset-decision-tabs">
-          <Tabs items={queueTabs} value={queueView} onChange={setQueueView} variant="pill" />
-        </div>
-        {queueState.queueLoading ? (
-          <PageStateView
-            kind="loading"
-            title="正在加载单台队列…"
-            surface="empty"
-            compact
-          />
-        ) : queueState.queueError ? (
-          <PageStateView
-            kind="error"
-            title="单台队列不可用"
-            surface="empty"
-            compact
-          />
-        ) : visibleDecisionQueue.length === 0 ? (
-          <PageStateView
-            kind="empty"
-            title="当前视图暂无待处理 VPS"
-            action={
-              <div className="asset-empty-actions">
-                {queueView !== 'all' && (
-                  <button className="btn sm secondary" onClick={() => setQueueView('all')}>查看全部</button>
-                )}
-                <Link className="btn sm ghost" to="/vps">VPS 库存</Link>
-                <Link className="btn sm ghost" to="/vps?view=missing_subscription">缺订阅 VPS</Link>
-              </div>
-            }
-            surface="empty"
-            compact
-          />
-        ) : (
-          <div className="asset-table-scroll" role="region" aria-label="单台辅助队列" tabIndex={0}>
-            <DataTable
-              className="asset-table asset-decision-queue-table"
-              columns={[
-              {
-                key: 'vps',
-                label: 'VPS',
-                width: '236px',
-                render: (item) => (
-                  <div className="asset-table__identity">
-                    <strong>{item.vps.display_name}</strong>
-                    <span>{formatOptional(item.vps.provider_name)} · {vpsLocationLabel(item.vps)}</span>
-                  </div>
-                ),
-              },
-              {
-                key: 'decision',
-                label: '决策',
-                width: '112px',
-                render: (item) => <RenewalBadge value={item.vps.renewal_decision} />,
-              },
-              {
-                key: 'subscription',
-                label: '订阅',
-                width: '176px',
-                render: (item) => {
-                  const sub = item.subscription
-                  const daysLeft = sub ? daysUntilDate(sub.renew_at) : null
-                  return sub ? (
-                    <div className="asset-table__stack">
-                      <strong>{formatMoney(sub.monthly_price, sub.currency)}/月</strong>
-                      <span className={daysLeft != null && daysLeft <= renewalWindow ? 'days-urgent' : 'days-normal'}>
-                        {daysLeft != null ? `${daysLeft}天` : formatDate(sub.renew_at)}
-                      </span>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="text-link"
-                      onClick={() => navigateToVPSSubscription(item.vps.vps_id)}
-                    >
-                      缺订阅
-                    </button>
-                  )
-                },
-              },
-              {
-                key: 'cost',
-                label: '成本信号',
-                width: '220px',
-                render: (item) => {
-                  const sub = item.subscription
-                  return sub ? (
-                    <div className="asset-context-cell asset-cost-signal">
-                      <span className={sub.exchange_rate_stale ? 'badge badge-warn' : 'badge badge-ok'}>
-                        <span className="badge-dot" />{sub.exchange_rate_stale ? '汇率过期' : '成本已换算'}
-                      </span>
-                      <small>
-                        {baseMoney(sub.monthly_price_base, sub.base_currency ?? 'CNY')}/月 · {baseMoney(sub.yearly_price_base, sub.base_currency ?? 'CNY')}/年
-                      </small>
-                      {subscriptionCostAttention(sub) ? (
-                        <span className="asset-context-pill asset-context-pill--attention">
-                          汇率过期
-                        </span>
-                      ) : (
-                        <span className="asset-context-pill">成本正常</span>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="asset-context-cell asset-cost-signal">
-                      <span className="asset-context-pill asset-context-pill--attention">缺订阅成本</span>
-                      <small>无法参与续费判断</small>
-                    </div>
-                  )
-                },
-              },
-              {
-                key: 'monitoring',
-                label: '监控',
-                width: '112px',
-                render: (item) => (
-                  item.vps.active_monitoring_instance_link_count > 0 ? (
-                    <span><MonoDigits>{item.vps.active_monitoring_instance_link_count}</MonoDigits> 关联</span>
-                  ) : (
-                    <span className="text-muted">未关联</span>
-                  )
-                ),
-              },
-              {
-                key: 'actions',
-                label: '操作',
-                align: 'right',
-                width: '172px',
-                render: (item) => (
-                  <div className="asset-decision-member-actions">
-                    <button className="btn sm primary" onClick={() => selectVPS(item.vps)}>
-                      处理
-                    </button>
-                    {item.vps.renewal_decision === 'cancel' || hasCancellationAttention(item) ? (
-                      <Link className="btn sm secondary" to={`/vps/${item.vps.vps_id}?workbench=cancellation`}>
-                        取消/退役
-                      </Link>
-                    ) : null}
-                  </div>
-                ),
-              },
-            ]}
-              rows={visibleDecisionQueue}
-              rowKey={(item) => item.vps.vps_id}
-              onRowClick={(item) => navigateToVPS(item.vps)}
-            />
-          </div>
-        )}
-      </section>
-      )}
+      <SecondaryWorkbenches
+        secondaryWorkbench={secondaryWorkbench}
+        secondaryNavItems={secondaryNavItems}
+        queueView={queueView}
+        renewalWindow={renewalWindow}
+        queueState={queueState}
+        visibleDecisionQueue={visibleDecisionQueue}
+        totalDecisionQueue={totalDecisionQueue}
+        renewalDueQueueCount={renewalDueQueueCount}
+        missingSubscriptionCount={missingSubscriptionCount}
+        unlinkedCount={unlinkedCount}
+        cancellationAttentionCount={cancellationAttentionCount}
+        manualGroupsState={manualGroupsState}
+        templatesState={templatesState}
+        recordsState={recordsState}
+        vpsByID={vpsByID}
+        onSetSelectedSecondaryWorkbench={setSelectedSecondaryWorkbench}
+        onSetQueueView={setQueueView}
+        onSelectVPS={selectVPS}
+        onNavigateToVPS={navigateToVPS}
+        onNavigateToVPSSubscription={navigateToVPSSubscription}
+        onOpenManualGroup={openManualGroup}
+        onOpenTemplate={openTemplate}
+        onOpenRecord={openRecord}
+        hasCancellationAttention={hasCancellationAttention}
+        subscriptionCostAttention={subscriptionCostAttention}
+      />
 
       <Modal
         open={selectedGroupID != null}

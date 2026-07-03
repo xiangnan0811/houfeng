@@ -952,17 +952,6 @@ function expectDecisionCoverDensity(cover: HTMLElement) {
   expect(cover).not.toHaveTextContent(/Germany Primary|Germany Standby|保存时判断依据|执行编排|来源复核|成员跟进|底稿/)
 }
 
-function expectDetailDirectoryDensity(directory: HTMLElement) {
-  const text = normalizedText(directory)
-  expect(text.length).toBeLessThanOrEqual(72)
-  expect(directory.querySelector('.asset-table-scroll')).toBeNull()
-  expect(directory.querySelector('.asset-decision-member-row')).toBeNull()
-  expect(directory.querySelector('.asset-decision-record-form')).toBeNull()
-  expect(directory).not.toHaveTextContent(/。/)
-  expect(directory).not.toHaveTextContent(/Germany Primary|Germany Standby|Hetzner|cx22|CNY|USD|\/月|服务 \d|域名 \d|Target \d|监控 \d/)
-  expect(directory).not.toHaveTextContent(/表格|横向滚动|重新读取|当前事实|来源回读|执行编排|保存时判断依据/)
-}
-
 function expectNoAssetDecisionPageEnglishNoise(container: HTMLElement = document.body) {
   expect(container).not.toHaveTextContent(/\b(?:PORTFOLIO|RENEWAL|CLOSED LOOP|EVIDENCE|WORKBENCH|SCENARIO|SCENARIOS|DECISION MEMORY|SINGLE VPS QUEUE|AUTO GROUP|AUX QUEUE)\b/)
 }
