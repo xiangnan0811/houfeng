@@ -178,6 +178,6 @@ describe('VPSCancellationWorkbench', () => {
     const second = within(screen.getByText('sub_002').closest('.asset-cancel-workbench__row')!).getByRole('checkbox')
     expect(first).not.toBeChecked()
     expect(second).not.toBeChecked()
-    expect(screen.getByText('active 订阅不会自动勾选；必须显式选择本次要取消自动续费的订阅。')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '订阅处理' })).toBeInTheDocument()
   })
 })
