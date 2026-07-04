@@ -11,26 +11,16 @@ export function AssetDecisionSecondaryNav({ items, active, onOpen }: AssetDecisi
   return (
     <nav className="asset-decision-support-strip" aria-label="资产决策辅助入口">
       {items.map((item) => (
-        <article
+        <button
           key={item.value}
+          type="button"
           className={`asset-decision-support-strip__item asset-decision-support-strip__item--${item.tone}${active === item.value ? ' asset-decision-support-strip__item--active' : ''}`}
+          onClick={() => onOpen(item.value)}
+          aria-pressed={active === item.value}
         >
-          <div className="asset-decision-support-strip__copy">
-            <span>{item.eyebrow}</span>
-            <strong>{item.title}</strong>
-            <small>{item.summary}</small>
-          </div>
-          <div className="asset-decision-support-strip__meta">
-            <Badge variant="state" tone={item.tone}>{item.meta}</Badge>
-            <button
-              className={`btn sm ${active === item.value ? 'primary' : 'secondary'}`}
-              type="button"
-              onClick={() => onOpen(item.value)}
-            >
-              {item.actionLabel}
-            </button>
-          </div>
-        </article>
+          <span className="asset-decision-support-strip__title">{item.title}</span>
+          <Badge variant="state" tone={item.tone}>{item.meta}</Badge>
+        </button>
       ))}
     </nav>
   )
