@@ -1078,8 +1078,6 @@ describe('AssetDecisionsPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '决策组扫描' })).toBeInTheDocument())
-    expect(screen.getByRole('status')).toHaveTextContent('旧链接已承接到单台辅助队列')
-    expect(within(screen.getByRole('status')).getByRole('button', { name: '查看单台队列' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: /单台队列/ })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '单台辅助队列' })).toBeInTheDocument()
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=needs_decision&renew_within_days=30')

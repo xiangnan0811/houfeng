@@ -560,7 +560,6 @@ export function AssetDecisionsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const activeView = parseWorkbenchView(searchParams.get('view'))
   const portfolioView = portfolioViewForWorkbench(activeView)
-  const isSingleQueueDeepLink = activeView === 'single_queue'
   const renewalWindow = parseRenewalWindow(searchParams.get('renew_within_days'))
   const assetDecisionFilter = useMemo(
     () => buildAssetDecisionFilter(searchParams, portfolioView, renewalWindow),
@@ -2485,7 +2484,6 @@ export function AssetDecisionsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">资产组合决策</h1>
-          <p className="page-sub">从 VPS、订阅、服务、域名和监控证据中派生组合取舍。</p>
         </div>
         <div className="header-actions">
           <Link className="btn md secondary" to="/vps">VPS 库存</Link>
@@ -2513,13 +2511,6 @@ export function AssetDecisionsPage() {
         onClearContextFilter={clearContextFilter}
         onClearAllContextFilters={clearAllContextFilters}
       />
-
-      {isSingleQueueDeepLink && (
-        <div className="inline-alert info asset-decision-deeplink-notice" role="status">
-          旧链接已承接到单台辅助队列；组合判断仍以决策组扫描为主。
-          <button className="alert-action" type="button" onClick={() => setSelectedSecondaryWorkbench('single_queue')}>查看单台队列</button>
-        </div>
-      )}
 
       <SecondaryWorkbenches
         secondaryWorkbench={secondaryWorkbench}
