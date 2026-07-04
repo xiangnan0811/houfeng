@@ -1732,6 +1732,8 @@ export function AssetDecisionsPage() {
         setSelectedSecondaryWorkbench('scenarios')
         setSelectedGroupID(null)
         setDetailState(INITIAL_DETAIL_STATE)
+        setSelectedVPS(null)
+        setDecisionDraft(INITIAL_DECISION_DRAFT)
         setSelectedManualGroupID(manualDetail.manual_group_id)
         setGroupDetailPanel('overview')
         setManualDetailPanel('overview')

@@ -16,6 +16,7 @@ export function AssetDecisionSecondaryNav({ items, active, onOpen }: AssetDecisi
           type="button"
           className={`asset-decision-support-strip__item asset-decision-support-strip__item--${item.tone}${active === item.value ? ' asset-decision-support-strip__item--active' : ''}`}
           onClick={() => onOpen(item.value)}
+          aria-label={item.title}
           aria-pressed={active === item.value}
         >
           <span className="asset-decision-support-strip__title">{item.title}</span>

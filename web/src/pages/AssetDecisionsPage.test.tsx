@@ -760,9 +760,21 @@ function findFetchCall(fetchMock: ReturnType<typeof vi.fn>, url: string, method?
   })
 }
 
-async function openSecondaryWorkbench(label: '保存记录' | '场景与组合' | '续费窗口' | '单台队列') {
-  const supportStrip = await screen.findByLabelText('资产决策辅助入口')
-  fireEvent.click(within(supportStrip).getByRole('button', { name: new RegExp(label) }))
+type SecondaryWorkbenchLabel = '保存记录' | '场景与组合' | '续费窗口' | '单台队列'
+
+function getSecondaryWorkbenchButton(supportStrip: HTMLElement, label: SecondaryWorkbenchLabel) {
+  return within(supportStrip).getByRole('button', { name: label })
+}
+
+async function findSecondaryWorkbenchButton(label: SecondaryWorkbenchLabel) {
+  const supportStrip = await screen.findByRole('navigation', { name: '资产决策辅助入口' })
+  return getSecondaryWorkbenchButton(supportStrip, label)
+}
+
+async function openSecondaryWorkbench(label: SecondaryWorkbenchLabel) {
+  const button = await findSecondaryWorkbenchButton(label)
+  fireEvent.click(button)
+  return button
 }
 
 function expectAutomaticGroupDefaultCover(dialog: HTMLElement) {
@@ -956,6 +968,11 @@ function expectNoAssetDecisionPageEnglishNoise(container: HTMLElement = document
   expect(container).not.toHaveTextContent(/\b(?:PORTFOLIO|RENEWAL|CLOSED LOOP|EVIDENCE|WORKBENCH|SCENARIO|SCENARIOS|DECISION MEMORY|SINGLE VPS QUEUE|AUTO GROUP|AUX QUEUE)\b/)
 }
 
+function countSourceLines(content: string): number {
+  const normalized = content.replace(/\r?\n$/, '')
+  return normalized ? normalized.split(/\r?\n/).length : 0
+}
+
 describe('AssetDecisionsPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -985,9 +1002,15 @@ describe('AssetDecisionsPage', () => {
     expect(screen.queryByLabelText('资产组合决策推进路径')).not.toBeInTheDocument()
     expectNoAssetDecisionPageEnglishNoise()
     expect(screen.queryByText('PORTFOLIO')).not.toBeInTheDocument()
-    const supportStrip = screen.getByLabelText('资产决策辅助入口')
+    const supportStrip = screen.getByRole('navigation', { name: '资产决策辅助入口' })
     expect(supportStrip).toHaveClass('asset-decision-support-strip')
-    expect(within(supportStrip).getAllByRole('button')).toHaveLength(4)
+    const secondaryButtons = within(supportStrip).getAllByRole('button')
+    expect(secondaryButtons).toHaveLength(4)
+    for (const label of ['保存记录', '场景与组合', '续费窗口', '单台队列'] as const) {
+      const button = getSecondaryWorkbenchButton(supportStrip, label)
+      expect(button).toBeInTheDocument()
+      expect(button).toHaveAttribute('aria-pressed', 'false')
+    }
     expect(normalizedText(supportStrip).length).toBeLessThanOrEqual(160)
     expect(within(supportStrip).queryByText(/回看判断与执行回读|管理比较篮子和启动模板|只读订阅窗口事实|保留单台续费处理/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '决策组扫描' })).toBeInTheDocument()
@@ -1010,10 +1033,6 @@ describe('AssetDecisionsPage', () => {
     expect(screen.queryByRole('heading', { name: '场景模板' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '续费证据区' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '单台待处理队列' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /保存记录/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /场景与组合/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /续费窗口/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /单台队列/ })).toBeInTheDocument()
 
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=needs_decision&renew_within_days=30')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=needs_decision&renew_within_days=30')
@@ -1080,6 +1099,11 @@ describe('AssetDecisionsPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: '决策组扫描' })).toBeInTheDocument())
     expect(screen.queryByRole('tab', { name: /单台队列/ })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '单台辅助队列' })).toBeInTheDocument()
+    const singleQueueButton = await findSecondaryWorkbenchButton('单台队列')
+    expect(singleQueueButton).toHaveAttribute('aria-pressed', 'true')
+    const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section') as HTMLElement
+    fireEvent.click(within(singleQueue).getAllByRole('button', { name: '处理' })[0])
+    expect(await screen.findByRole('dialog', { name: '续费决策处理' })).toBeInTheDocument()
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=needs_decision&renew_within_days=30')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=needs_decision&renew_within_days=30')
   })
@@ -1089,24 +1113,28 @@ describe('AssetDecisionsPage', () => {
       entry: string
       activeButton: '保存记录' | '场景与组合' | '续费窗口'
       visibleHeading: string
+      expectedDialog?: string
       route?: MockFetchRoute
     }> = [
       {
         entry: '/asset-decisions?record_id=adr_001',
         activeButton: '保存记录',
         visibleHeading: '已保存组合决策',
+        expectedDialog: '资产组合决策记录详情',
         route: { url: '/api/asset-decisions/records/adr_001', body: decisionRecord() },
       },
       {
         entry: '/asset-decisions?manual_group_id=admg_001',
         activeButton: '场景与组合',
         visibleHeading: '场景工作区',
+        expectedDialog: '自定义资产组合详情',
         route: { url: '/api/asset-decisions/manual-groups/admg_001', body: manualGroupDetail() },
       },
       {
         entry: '/asset-decisions?template_id=adt_builtin_primary_standby',
         activeButton: '场景与组合',
         visibleHeading: '场景工作区',
+        expectedDialog: '资产决策场景模板详情',
         route: { url: '/api/asset-decisions/scenario-templates/adt_builtin_primary_standby', body: scenarioTemplate() },
       },
       {
@@ -1127,9 +1155,14 @@ describe('AssetDecisionsPage', () => {
         </MemoryRouter>,
       )
 
-      const supportStrip = await screen.findByLabelText('资产决策辅助入口')
+      const supportStrip = await screen.findByRole('navigation', { name: '资产决策辅助入口' })
       await waitFor(() => expect(screen.getByRole('heading', { name: deepLink.visibleHeading })).toBeInTheDocument())
-      expect(within(supportStrip).getByRole('button', { name: new RegExp(deepLink.activeButton) })).toHaveClass('asset-decision-support-strip__item--active')
+      const activeButton = getSecondaryWorkbenchButton(supportStrip, deepLink.activeButton)
+      expect(activeButton).toHaveClass('asset-decision-support-strip__item--active')
+      expect(activeButton).toHaveAttribute('aria-pressed', 'true')
+      if (deepLink.expectedDialog) {
+        expect(await screen.findByRole('dialog', { name: deepLink.expectedDialog })).toBeInTheDocument()
+      }
 
       unmount()
       vi.unstubAllGlobals()
@@ -1556,6 +1589,8 @@ describe('AssetDecisionsPage', () => {
 
     await waitFor(() => expect(screen.getByText('已保存组合决策记录：德国主备取舍')).toBeInTheDocument())
     expect(await screen.findByRole('dialog', { name: '资产组合决策记录详情' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '资产决策组详情' })).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1)
     expect(findFetchCall(fetchMock, '/api/asset-decisions/records', 'POST')).toEqual([
       '/api/asset-decisions/records',
       {
@@ -1620,6 +1655,8 @@ describe('AssetDecisionsPage', () => {
 
     await waitFor(() => expect(screen.getByText('已创建自定义组合：德国主力组合')).toBeInTheDocument())
     const manualDialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    expect(screen.queryByRole('dialog', { name: '资产决策组详情' })).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1)
     expect(within(manualDialog).queryByRole('heading', { name: '组合推进状态' })).not.toBeInTheDocument()
     expect(within(manualDialog).queryByRole('heading', { name: '自定义组合证据矩阵' })).not.toBeInTheDocument()
     expect(within(manualDialog).queryByText('SCENARIO DECISION')).not.toBeInTheDocument()
@@ -1778,6 +1815,8 @@ describe('AssetDecisionsPage', () => {
       await waitFor(() => expect(screen.getByText(`已创建自定义组合：德国主力组合 ${taskPanel.name}`)).toBeInTheDocument())
       expect(findFetchCall(fetchMock, '/api/asset-decisions/manual-groups', 'POST')).toBeDefined()
       expect(await screen.findByRole('dialog', { name: '自定义资产组合详情' })).toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: '资产决策组详情' })).not.toBeInTheDocument()
+      expect(screen.queryAllByRole('dialog')).toHaveLength(1)
       expect(screen.getByRole('heading', { name: '场景工作区' })).toBeInTheDocument()
 
       unmount()
@@ -1939,14 +1978,18 @@ describe('AssetDecisionsPage', () => {
     const manualCover = within(manualDialog).getByLabelText('自定义组合当前判断')
     expectDecisionCoverDensity(manualCover)
     expect(manualCover).not.toHaveTextContent(longManualSummary)
+    fireEvent.click(within(manualDialog).getByRole('button', { name: '关闭' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '自定义资产组合详情' })).not.toBeInTheDocument())
 
     const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
-    const templateArticle = within(templatesSection!).getByText("自定义长目标模板").closest("article")!; fireEvent.click(within(templateArticle).getByRole("button", { name: "使用模板" }))
+    const templateArticle = within(templatesSection!).getByText('自定义长目标模板').closest('article')!
+    fireEvent.click(within(templateArticle).getByRole('button', { name: '使用模板' }))
     const templateDialog = await screen.findByRole('dialog', { name: '资产决策场景模板详情' })
     expectTemplateDefaultCover(templateDialog)
     expect(within(templateDialog).getByLabelText('场景模板当前判断')).not.toHaveTextContent(longTemplateGoal)
 
     fireEvent.click(within(templateDialog).getByRole('button', { name: '关闭' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '资产决策场景模板详情' })).not.toBeInTheDocument())
     await openSecondaryWorkbench('保存记录')
     const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
@@ -2053,12 +2096,8 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).queryByText('查看模板固定的成员意图。')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('归档或重新启用这个模板。')).not.toBeInTheDocument()
 
-    // After UI refactor, archive button may be in overview tab
-    const archiveButton = within(dialog).queryByRole('button', { name: '归档模板' })
-    if (!archiveButton) {
-      // Skip tab navigation if archive button not found
-      return
-    }
+    fireEvent.click(within(dialog).getByRole('tab', { name: '状态' }))
+    const archiveButton = within(dialog).getByRole('button', { name: '归档模板' })
 
     fireEvent.click(archiveButton)
     const confirmation = within(dialog).getByRole('alertdialog', { name: '确认归档模板' })
@@ -2253,21 +2292,16 @@ describe('AssetDecisionsPage', () => {
     expectTaskPanelDensity(dialog, { textMax: 220, interactiveMax: 9, inputsMax: 0, memberRowsMax: 3 })
     expect(within(dialog).queryByLabelText('Germany Primary 跟进状态')).not.toBeInTheDocument()
 
-    // After UI refactor, edit button may not exist - try to find status input directly
-    const editButton = within(dialog).queryByRole('button', { name: '编辑 Germany Primary 跟进' })
-    if (editButton) {
-      fireEvent.click(editButton)
-    }
+    const followupPanel = within(dialog).getByLabelText('成员跟进列表')
+    const primaryFollowupRow = within(followupPanel).getByText('Germany Primary').closest('.asset-decision-record-followup-row') as HTMLElement
+    expect(primaryFollowupRow).not.toBeNull()
+    fireEvent.click(within(primaryFollowupRow).getByRole('button', { name: '编辑跟进' }))
 
-    const statusInput = within(dialog).queryByLabelText('Germany Primary 跟进状态')
-    if (!statusInput) {
-      // Skip this part of test if UI structure changed significantly
-      return
-    }
-
+    const statusInput = within(primaryFollowupRow).getByLabelText('跟进状态')
+    const noteInput = within(primaryFollowupRow).getByLabelText('跟进备注')
     fireEvent.change(statusInput, { target: { value: 'blocked' } })
-    fireEvent.change(within(dialog).getByLabelText('Germany Primary 跟进备注'), { target: { value: '等待迁移窗口' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存跟进' }))
+    fireEvent.change(noteInput, { target: { value: '等待迁移窗口' } })
+    fireEvent.click(within(primaryFollowupRow).getByRole('button', { name: '保存跟进' }))
 
     await waitFor(() => expect(screen.getByText('成员跟进已更新：Germany Primary -> 阻塞')).toBeInTheDocument())
     const secondRecordPatchCalls = fetchMock.mock.calls.filter((call) => (
@@ -2292,7 +2326,7 @@ describe('AssetDecisionsPage', () => {
         }),
       },
     ])
-    expect(within(dialog).getByLabelText('Germany Primary 跟进备注')).toHaveValue('等待迁移窗口')
+    expect(within(primaryFollowupRow).getByLabelText('跟进备注')).toHaveValue('等待迁移窗口')
     expect(within(dialog).getAllByText('有漂移').length).toBeGreaterThan(0)
     expect(within(dialog).queryByText('仍有 active 订阅')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('link', { name: '打开取消/退役工作台' })).not.toBeInTheDocument()
@@ -2681,15 +2715,24 @@ describe('AssetDecisionsPage', () => {
 describe('AssetDecisionsPage 结构守护', () => {
   it('主文件不超过 2800 行', async () => {
     const files = import.meta.glob('./AssetDecisionsPage.tsx', { query: '?raw', import: 'default', eager: true })
-    const content = files['./AssetDecisionsPage.tsx'] as string
-    const lineCount = content.split('\n').length
-    expect(lineCount).toBeLessThanOrEqual(2800)
+    expect(Object.keys(files)).toEqual(['./AssetDecisionsPage.tsx'])
+    const content = files['./AssetDecisionsPage.tsx']
+    expect(typeof content).toBe('string')
+    expect(countSourceLines(content as string)).toBeLessThanOrEqual(2800)
   })
 
   it('弹窗组件各自不超过 500 行', async () => {
     const files = import.meta.glob('./asset-decisions/modals/*.tsx', { query: '?raw', import: 'default', eager: true })
+    expect(Object.keys(files).sort()).toEqual([
+      './asset-decisions/modals/GroupDetailModal.tsx',
+      './asset-decisions/modals/ManualGroupDetailModal.tsx',
+      './asset-decisions/modals/RecordDetailModal.tsx',
+      './asset-decisions/modals/RenewalDecisionModal.tsx',
+      './asset-decisions/modals/TemplateDetailModal.tsx',
+    ])
     for (const [path, content] of Object.entries(files)) {
-      const lineCount = (content as string).split('\n').length
+      expect(typeof content).toBe('string')
+      const lineCount = countSourceLines(content as string)
       expect(lineCount, `${path} should be <= 500 lines`).toBeLessThanOrEqual(500)
     }
   })
