@@ -8,6 +8,8 @@ import type {
   AssetDecisionGroupDetail,
   AssetDecisionGroupMember,
   AssetDecisionRecordStatus,
+  AssetDecisionSuggestedAction,
+  AssetDecisionSuggestedRole,
   VPSAssetRecord,
 } from '../../../lib/types'
 import { formatOptional } from '../../../lib/format'
@@ -55,9 +57,9 @@ type GroupDetailModalProps = {
   renderRecordDraftMemberRows: (members: Array<{
     vpsID: string
     displayName: string
-    fallbackRole: string
-    fallbackAction: string
-    meta: string
+    fallbackRole: AssetDecisionSuggestedRole
+    fallbackAction: AssetDecisionSuggestedAction
+    meta?: string
   }>) => ReactNode
 }
 

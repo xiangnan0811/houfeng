@@ -54,6 +54,7 @@ import {
   type AssetDecisionManualGroupDetail,
   type AssetDecisionManualGroupMember,
   type AssetDecisionManualGroupScenario,
+  type AssetDecisionManualGroupStatus,
   type AssetDecisionManualGroupSummary,
   type AssetDecisionRecordDetail,
   type AssetDecisionFollowupStatus,

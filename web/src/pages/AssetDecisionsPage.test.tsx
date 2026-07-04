@@ -2677,3 +2677,20 @@ describe('AssetDecisionsPage', () => {
     expect(screen.queryByRole('heading', { name: '单台队列不可用' })).not.toBeInTheDocument()
   })
 })
+
+describe('AssetDecisionsPage 结构守护', () => {
+  it('主文件不超过 2800 行', async () => {
+    const files = import.meta.glob('./AssetDecisionsPage.tsx', { query: '?raw', import: 'default', eager: true })
+    const content = files['./AssetDecisionsPage.tsx'] as string
+    const lineCount = content.split('\n').length
+    expect(lineCount).toBeLessThanOrEqual(2800)
+  })
+
+  it('弹窗组件各自不超过 500 行', async () => {
+    const files = import.meta.glob('./asset-decisions/modals/*.tsx', { query: '?raw', import: 'default', eager: true })
+    for (const [path, content] of Object.entries(files)) {
+      const lineCount = (content as string).split('\n').length
+      expect(lineCount, `${path} should be <= 500 lines`).toBeLessThanOrEqual(500)
+    }
+  })
+})

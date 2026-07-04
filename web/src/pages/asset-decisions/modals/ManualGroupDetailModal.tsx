@@ -79,9 +79,9 @@ type ManualGroupDetailModalProps = {
   renderRecordDraftMemberRows: (members: Array<{
     vpsID: string
     displayName: string
-    fallbackRole: string
-    fallbackAction: string
-    meta: string
+    fallbackRole: AssetDecisionSuggestedRole
+    fallbackAction: AssetDecisionSuggestedAction
+    meta?: string
   }>) => ReactNode
 }
 
