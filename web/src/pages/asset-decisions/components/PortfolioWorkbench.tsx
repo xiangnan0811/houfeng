@@ -152,7 +152,7 @@ export function PortfolioWorkbench({
           <div className="asset-decision-focus__item asset-decision-focus__item--critical">
             <span>闭环异常</span>
             <strong>{closedLoopAnomalies}</strong>
-            {partialErrorCount > 0 && <small>{portfolioLead.riskLabel}</small>}
+            {(closedLoopAnomalies > 0 || partialErrorCount > 0) && <small>{portfolioLead.riskLabel}</small>}
           </div>
           <div className="asset-decision-focus__item asset-decision-focus__item--normal">
             <span>证据状态</span>

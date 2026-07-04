@@ -1232,6 +1232,10 @@ describe('AssetDecisionsPage', () => {
 
     const commandSummary = await screen.findByLabelText('资产组合决策当前判断')
     expect(within(commandSummary).getByRole('heading', { name: /事实漂移/ })).toBeInTheDocument()
+    // 闭环异常存在时，风险标签必须随异常数字一起显示，说明具体异常类型
+    const anomalyItem = within(commandSummary).getByText('闭环异常').closest('.asset-decision-focus__item')
+    expect(anomalyItem).not.toBeNull()
+    expect(within(anomalyItem as HTMLElement).getByText(/事实漂移/)).toBeInTheDocument()
     fireEvent.click(within(commandSummary).getByRole('button', { name: '复核记录' }))
 
     expect(await screen.findByRole('dialog', { name: '资产组合决策记录详情' })).toBeInTheDocument()
