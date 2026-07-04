@@ -1,0 +1,43 @@
+{
+  "id": "07-03-asset-decisions-refactor",
+  "name": "07-03-asset-decisions-refactor",
+  "title": "资产组合决策页面模块化重构与UI精简",
+  "description": "将AssetDecisionsPage从6111行单一文件重构为模块化架构，提取6个专职模块，精简Modal层级和信息密度，建立清晰的视觉层次。",
+  "status": "completed",
+  "dev_type": "refactor",
+  "scope": "web",
+  "package": "web/src/pages",
+  "priority": "P1",
+  "creator": "claude-opus",
+  "assignee": "claude-opus",
+  "createdAt": "2026-07-03",
+  "completedAt": "2026-07-03",
+  "branch": "refactor/asset-decisions-phase2",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "6d81120",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "web/src/pages/AssetDecisionsPage.tsx",
+    "web/src/pages/AssetDecisionsPage.test.tsx",
+    "web/src/pages/asset-decisions/types.ts",
+    "web/src/pages/asset-decisions/constants.ts",
+    "web/src/pages/asset-decisions/utils.ts",
+    "web/src/pages/asset-decisions/formatters.ts",
+    "web/src/pages/asset-decisions/businessLogic.ts",
+    "web/src/pages/asset-decisions/renderHelpers.tsx",
+    "web/src/pages/asset-decisions/tableColumns.tsx"
+  ],
+  "notes": "前期经历了Phase 1（模块化）、Phase 2（删重复）、Phase 3（UI精简）三个阶段，最终squash为2个清晰提交。",
+  "meta": {
+    "lines_before": 6111,
+    "lines_after": 4149,
+    "lines_reduction": 1962,
+    "modules_created": 6,
+    "tests_passed": 29,
+    "test_file_lines": 2689
+  }
+}
