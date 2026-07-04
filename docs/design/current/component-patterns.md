@@ -30,6 +30,17 @@ The current product prefers workbench-first pages:
 
 This is guidance, not a page freeze. A page may change structure when the current task has a clearer workflow and updates tests/specs accordingly.
 
+## Decision and workbench page IA
+
+Decision-heavy pages (asset decisions, detail pages with decision boards) follow a three-tier information architecture instead of stacking every API field on one screen:
+
+1. **Primary tier — one question**: "What should I act on now?" A single judgement plus a single primary action. When there is nothing to decide, show a quiet stable hint — no CTAs, warning colors, or stat cards.
+2. **Scan tier — list**: one row per item: identity + status + single entry point, no explanatory sentences. Auxiliary entries (history, templates, renewal facts, single-VPS queue) collapse into a toolbar by default (one row on desktop, 2×2 on mobile) and expand a single panel on click.
+3. **Detail tier — modal**: at most 3 tabs, each tab one task. Default tab shows object name + one-line judgement + primary action. Long API text is trimmed to a short judgement, never shown verbatim. Raw data (full member lists, wide tables, execution details) lives behind an explicit "view all" entry; write payloads still use full data.
+4. **Copy**: no explanatory paragraphs; eyebrows are Chinese or removed; field meaning is conveyed by labels and placeholders.
+
+This replaces prior patch-style rules about specific markers, density caps, and preview limits with a positive contract. Tests should assert user task completion in ≤3 steps, not just absence of old markers.
+
 ## Current surface responsibilities
 
 - Dashboard / workbench: daily entry point and highest-priority next actions, not a dump of every API field.
