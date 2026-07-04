@@ -1,24 +1,37 @@
+import type { ReactNode } from 'react'
+
 import { Badge, type BadgeTone, MonoDigits } from '../../components/atoms'
 import type {
+  AssetDecisionComparisonLane,
   AssetDecisionComparisonSignal,
   AssetDecisionEvidenceAssessment,
   AssetDecisionEvidenceChip,
   AssetDecisionExecutionReadbackStatus,
+  AssetDecisionGroupMember,
+  AssetDecisionManualGroupMember,
   AssetDecisionMemberExecutionPlan,
   AssetDecisionMemberExecutionReadback,
   AssetDecisionRecordMember,
   AssetDecisionRecommendation,
 } from '../../lib/types'
+import { formatMoney, formatOptional } from '../../lib/format'
+import { lifecycleLabel, renewalLabel, usageLabel, vpsLocationLabel } from '../assetPageUtils'
 
 import {
+  ASSET_DECISION_DETAIL_PREVIEW_LIMIT,
+  COMPARISON_LANE_LABELS,
   EVIDENCE_BIAS_LABELS,
   EVIDENCE_KIND_LABELS,
   EVIDENCE_TIER_LABELS,
   EXECUTION_PLAN_LANE_LABELS,
   READBACK_STATUS_LABELS,
+  ROLE_LABELS,
+  ACTION_LABELS,
 } from './constants'
 import {
   chipTone,
+  compactDecisionText,
+  comparisonLaneTone,
   currentFactsLabel,
   currentFactsStateLabel,
   evidenceBiasTone,
@@ -26,7 +39,16 @@ import {
   executionPlanTone,
   readbackStatusTone,
   actionLabelForMember,
+  actionTone,
+  roleTone,
+  memberContextLabel,
+  sourceAvailabilityLabel,
 } from './formatters'
+import type {
+  ComparisonMatrixMember,
+  DetailCommandOptions,
+  MemberDecisionCardsOptions,
+} from './types'
 
 type ScoreStyle = React.CSSProperties & {
   '--score': number
@@ -275,4 +297,180 @@ export function renderDecisionRecommendation(
       )}
     </div>
   )
+}
+
+// ---- 详情面板渲染函数（从 AssetDecisionsPage 提取，供弹窗组件复用）----
+
+export function previewItems<T>(items: T[]): { visible: T[]; hiddenCount: number } {
+  return {
+    visible: items.slice(0, ASSET_DECISION_DETAIL_PREVIEW_LIMIT),
+    hiddenCount: Math.max(0, items.length - ASSET_DECISION_DETAIL_PREVIEW_LIMIT),
+  }
+}
+
+export function memberComparisonTitle(member: ComparisonMatrixMember) {
+  return <strong>{member.displayName}</strong>
+}
+
+export function renderDetailCommand(options: DetailCommandOptions) {
+  return (
+    <section className="asset-decision-detail-command" aria-label={options.ariaLabel}>
+      <div className="asset-decision-detail-command__main">
+        <div>
+          <strong>{options.summary}</strong>
+        </div>
+        <div className="asset-decision-detail-command__meta">
+          {options.badge ?? null}
+          {renderCompactRiskChips(options.chips, options.assessment)}
+        </div>
+      </div>
+      {(options.actions || options.footer) && (
+        <div className="asset-decision-detail-command__footer">
+          {options.footer}
+          {options.actions && <div className="asset-decision-detail-command__actions">{options.actions}</div>}
+        </div>
+      )}
+    </section>
+  )
+}
+
+export function renderMemberDecisionRows(members: ComparisonMatrixMember[], options: MemberDecisionCardsOptions) {
+  const sortedMembers = [...members].sort((left, right) => {
+    const leftRank = left.comparison?.rank ?? Number.POSITIVE_INFINITY
+    const rightRank = right.comparison?.rank ?? Number.POSITIVE_INFINITY
+    if (leftRank !== rightRank) return leftRank - rightRank
+    return left.displayName.localeCompare(right.displayName)
+  })
+  const memberPreview = previewItems(sortedMembers)
+  return (
+    <section className="asset-decision-member-decisions">
+      {renderCompactTaskHeader(options.title, `成员 ${sortedMembers.length}`)}
+      {sortedMembers.length > 0 ? (
+        <div className="asset-decision-member-rows" aria-label={options.ariaLabel}>
+          {memberPreview.visible.map((member) => {
+            const comparison = member.comparison
+            const lane: AssetDecisionComparisonLane = comparison?.lane ?? 'review'
+            const laneTone = comparisonLaneTone(lane)
+            const intentMismatch = options.showIntent
+              && comparison
+              && (
+                (member.intendedAction === 'cancel' || member.intendedAction === 'open_cancellation_workbench') !== (lane === 'retire')
+                || (member.intendedAction === 'complete_evidence') !== (lane === 'evidence')
+                || (member.intendedRole === 'primary_candidate') !== (lane === 'primary')
+              )
+            return (
+              <article key={member.key} className={`asset-decision-member-row asset-decision-member-row--${laneTone}`}>
+                <div className="asset-decision-member-row__identity">
+                  <span>{COMPARISON_LANE_LABELS[lane] ?? lane}</span>
+                  {memberComparisonTitle(member)}
+                </div>
+                <div className="asset-decision-member-row__decision">
+                  <div>
+                    <span className="asset-decision-chip-row">
+                    <Badge variant="state" tone={roleTone(member.intendedRole ?? member.role)}>
+                      {ROLE_LABELS[member.intendedRole ?? member.role]}
+                    </Badge>
+                    <Badge variant="state" tone={actionTone(member.intendedAction ?? member.action)}>
+                      {ACTION_LABELS[member.intendedAction ?? member.action]}
+                    </Badge>
+                    {options.showIntent && (
+                      <Badge variant="state" tone={intentMismatch ? 'alert' : 'normal'}>
+                        {intentMismatch ? '需复核意图' : '意图匹配'}
+                      </Badge>
+                    )}
+                    </span>
+                    <strong>{compactDecisionText(comparison?.summary, '等待复核')}</strong>
+                  </div>
+                </div>
+                {((comparison?.risks?.length ?? 0) + (comparison?.gaps?.length ?? 0)) > 0 && (
+                  <div className="asset-decision-member-row__signals">
+                    {renderComparisonSignals([...(comparison?.risks ?? []), ...(comparison?.gaps ?? [])], 2)}
+                  </div>
+                )}
+                {options.action && <div className="asset-decision-member-row__actions">{options.action(member)}</div>}
+              </article>
+            )
+          })}
+          {memberPreview.hiddenCount > 0 && (
+            <div className="asset-decision-preview-more" role="note">
+              另有 {memberPreview.hiddenCount} 台在底稿中查看
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="asset-decision-member-decisions__empty">
+          <strong>暂无可取舍成员</strong>
+          <span>当前组合没有可展示的成员判断。</span>
+        </div>
+      )}
+    </section>
+  )
+}
+
+export function renderDetailPanel(title: string, children: ReactNode, includeHiddenHeading = false) {
+  return (
+    <section className="asset-decision-detail-panel" aria-label={title}>
+      {includeHiddenHeading ? <h4 className="visually-hidden">{title}</h4> : null}
+      {children}
+    </section>
+  )
+}
+
+export function renderCompactTaskHeader(title: string, meta?: ReactNode) {
+  return (
+    <div className="asset-decision-task-header" role="heading" aria-level={4} aria-label={title}>
+      <strong>{title}</strong>
+      {meta ? <span aria-hidden="true">{meta}</span> : null}
+    </div>
+  )
+}
+
+export function groupMemberComparisonMatrixMember(member: AssetDecisionGroupMember): ComparisonMatrixMember {
+  const monthlyCost = member.primary_subscription
+    ? `${formatMoney(member.primary_subscription.monthly_price, member.primary_subscription.currency)}/月`
+    : member.source_availability.subscriptions ? '缺订阅成本' : '订阅证据不可用'
+  return {
+    key: member.vps.vps_id,
+    displayName: member.vps.display_name || member.vps.vps_id,
+    href: `/vps/${member.vps.vps_id}`,
+    meta: `${formatOptional(member.vps.provider_name)} · ${vpsLocationLabel(member.vps)}`,
+    product: `${monthlyCost} · ${member.vps.product_name || member.vps.vps_id}`,
+    facts: memberContextLabel(member),
+    statusFacts: `${lifecycleLabel(member.vps.lifecycle_status)} · ${usageLabel(member.vps.usage_status)} · ${renewalLabel(member.vps.renewal_decision)}`,
+    sourceLabel: sourceAvailabilityLabel(member.source_availability),
+    role: member.suggested_role,
+    action: member.suggested_action,
+    comparison: member.comparison_insight,
+    evidenceChips: member.evidence_chips,
+    currentFactFound: true,
+  }
+}
+
+export function manualMemberComparisonMatrixMember(member: AssetDecisionManualGroupMember): ComparisonMatrixMember {
+  if (!member.current_fact_found) {
+    return {
+      key: member.vps_id,
+      displayName: member.vps_id,
+      meta: '当前资产事实缺失',
+      product: '无法回读成本和产品',
+      facts: '无法回读承载和监控',
+      statusFacts: '当前 facts 未返回',
+      sourceLabel: '当前事实缺失',
+      role: member.suggested_role,
+      action: member.suggested_action,
+      intendedRole: member.intended_role,
+      intendedAction: member.intended_action,
+      comparison: member.comparison_insight,
+      evidenceChips: member.evidence_chips,
+      currentFactFound: false,
+    }
+  }
+  return {
+    ...groupMemberComparisonMatrixMember(member),
+    key: member.vps_id,
+    href: `/vps/${member.vps_id}`,
+    intendedRole: member.intended_role,
+    intendedAction: member.intended_action,
+    currentFactFound: member.current_fact_found,
+  }
 }
