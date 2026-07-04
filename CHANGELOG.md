@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.14](https://github.com/xiangnan0811/houfeng/compare/v0.56.13...v0.56.14) (2026-07-04)
+
+
+### Bug Fixes
+
+* **asset-decisions:** 修复记录封面使用残缺解析函数的问题 ([0f243eb](https://github.com/xiangnan0811/houfeng/commit/0f243eb5def1d24e3a718aba83d411decd896230))
+* **asset-decisions:** 修复闭环异常风险标签不显示的问题 ([a4e3df1](https://github.com/xiangnan0811/houfeng/commit/a4e3df113ac3951207d01255a4cff353d4649dbc))
+
 ## [0.56.13](https://github.com/xiangnan0811/houfeng/compare/v0.56.12...v0.56.13) (2026-07-02)
 
 
