@@ -5,7 +5,6 @@ import type {
   AssetDecisionEvidenceDecisionBias,
   AssetDecisionEvidenceKind,
   AssetDecisionEvidenceQualityTier,
-  AssetDecisionEvidenceSnapshot,
   AssetDecisionExecutionCurrentFacts,
   AssetDecisionExecutionPlanTone,
   AssetDecisionExecutionReadbackStatus,
@@ -35,6 +34,7 @@ import {
   renewalLabel,
   usageLabel,
 } from '../assetPageUtils'
+import { parseComparisonInsight } from './utils'
 
 // 常量映射表
 export const VIEW_LABELS: Record<AssetDecisionView, string> = {
@@ -515,15 +515,9 @@ export function recordSourceDetail(record: AssetDecisionRecordSummary): string {
   return `${sourceType} · ${sourceView} · ${record.scope_label || '当前来源'}`
 }
 
-export function parseComparisonInsight(snapshot?: AssetDecisionEvidenceSnapshot | null) {
-  // 此函数需要完整的解析逻辑，暂时作为占位
-  // 完整实现在 mappers.ts 中
-  return snapshot?.comparison_insight ?? null
-}
-
 export function recordCoverSummary(detail: AssetDecisionRecordDetail): string {
   const insight = parseComparisonInsight(detail.evidence_snapshot)
-  return compactDecisionText((insight as any)?.summary
+  return compactDecisionText(insight?.summary
     || detail.execution_readback?.summary
     || `保存时判断：${detail.goal || '等待补齐组合判断'}`, '保存判断待复核')
 }
