@@ -136,6 +136,10 @@ import {
 } from './asset-decisions/constants'
 import { vpsDetailPath, vpsWorkbenchPath } from './asset-decisions/paths'
 import {
+  completeRecordDraftFromGroupDetail,
+  completeRecordDraftFromManualDetail,
+} from './asset-decisions/recordDrafts'
+import {
   renderReadbackBadge,
   renderExecutionPlanBadge,
   renderEvidenceAssessment,
@@ -370,53 +374,6 @@ function parseEvidenceAssessment(snapshot?: AssetDecisionEvidenceSnapshot | null
   }
 }
 
-function buildRecordDraft(detail: AssetDecisionGroupDetail, renewWithinDays: number): RecordDraft {
-  const members: Record<string, RecordMemberDraft> = {}
-  const memberOrder: string[] = []
-  for (const member of detail.members) {
-    const vpsID = member.vps.vps_id
-    memberOrder.push(vpsID)
-    members[vpsID] = {
-      decidedRole: member.suggested_role,
-      decidedAction: member.suggested_action,
-      reason: '',
-    }
-  }
-  return {
-    sourceType: 'auto_group',
-    sourceGroupID: detail.group_id,
-    renewWithinDays,
-    title: detail.title,
-    goal: '',
-    status: 'draft',
-    memberOrder,
-    members,
-  }
-}
-
-function buildManualRecordDraft(detail: AssetDecisionManualGroupDetail): RecordDraft {
-  const members: Record<string, RecordMemberDraft> = {}
-  const memberOrder: string[] = []
-  for (const member of detail.members) {
-    memberOrder.push(member.vps_id)
-    members[member.vps_id] = {
-      decidedRole: member.intended_role,
-      decidedAction: member.intended_action,
-      reason: member.reason,
-    }
-  }
-  return {
-    sourceType: 'manual_group',
-    sourceGroupID: detail.manual_group_id,
-    renewWithinDays: detail.renew_within_days,
-    title: detail.title,
-    goal: detail.goal,
-    status: 'draft',
-    memberOrder,
-    members,
-  }
-}
-
 function manualGroupSummaryFromDetail(detail: AssetDecisionManualGroupDetail): AssetDecisionManualGroupSummary {
   const summary: AssetDecisionManualGroupSummary = {
     manual_group_id: detail.manual_group_id,
@@ -548,38 +505,6 @@ function sortedExecutionMembers(members: AssetDecisionRecordMember[]): AssetDeci
     .map((member, index) => ({ member, index }))
     .sort((left, right) => executionLaneRank(left.member) - executionLaneRank(right.member) || left.index - right.index)
     .map(({ member }) => member)
-}
-
-function completeRecordDraftFromManualDetail(
-  current: RecordDraft | null,
-  detail: AssetDecisionManualGroupDetail,
-): RecordDraft {
-  const baseDraft = current?.sourceType === 'manual_group' && current.sourceGroupID === detail.manual_group_id
-    ? current
-    : buildManualRecordDraft(detail)
-  const activeIDs = new Set(detail.members.map((member) => member.vps_id))
-  const memberOrder = [
-    ...baseDraft.memberOrder.filter((vpsID) => activeIDs.has(vpsID)),
-    ...detail.members.map((member) => member.vps_id).filter((vpsID) => !baseDraft.memberOrder.includes(vpsID)),
-  ]
-  const members = Object.fromEntries(
-    detail.members.map((member) => {
-      const existing = baseDraft.members[member.vps_id]
-      return [
-        member.vps_id,
-        existing ?? {
-          decidedRole: member.intended_role,
-          decidedAction: member.intended_action,
-          reason: member.reason,
-        },
-      ]
-    }),
-  )
-  return {
-    ...baseDraft,
-    memberOrder,
-    members,
-  }
 }
 
 function scenarioForGroup(group: Pick<AssetDecisionGroupSummary, 'group_type'>): AssetDecisionManualGroupScenario {
@@ -1414,16 +1339,19 @@ export function AssetDecisionsPage() {
       key: 'actions',
       label: '跟进',
       align: 'right',
-      width: '112px',
-      render: (member) => (
-        <button
-          className="btn sm primary"
-          type="button"
-          onClick={() => setRecordFollowupEditingMemberID(member.vps_id)}
-        >
-          编辑
-        </button>
-      ),
+      width: '286px',
+      render: (member) => {
+        const editing = recordFollowupEditingMemberID === member.vps_id
+        return editing ? renderRecordFollowupForm(member) : (
+          <button
+            className="btn sm primary"
+            type="button"
+            onClick={() => setRecordFollowupEditingMemberID(member.vps_id)}
+          >
+            编辑
+          </button>
+        )
+      },
     },
   ]
 
@@ -1858,8 +1786,8 @@ export function AssetDecisionsPage() {
 
   function startRecordSave(detail: AssetDecisionGroupDetail) {
     const keepsCurrentDraft = recordDraft?.sourceType === 'auto_group' && recordDraft.sourceGroupID === detail.group_id
+    setRecordDraft((current) => completeRecordDraftFromGroupDetail(current, detail, renewalWindow))
     if (!keepsCurrentDraft) {
-      setRecordDraft(buildRecordDraft(detail, renewalWindow))
       setRecordDraftEditingMemberID(null)
     }
     setRecordSaveError(null)

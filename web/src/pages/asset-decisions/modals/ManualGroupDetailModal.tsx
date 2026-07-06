@@ -416,7 +416,7 @@ export function ManualGroupDetailModal({
             </form>,
           )}
 
-          {manualDetailPanel === 'members' && pendingManualMemberRemoval ? (
+          {pendingManualMemberRemoval ? (
             <section className="asset-lifecycle-confirm" role="alertdialog" aria-label="确认移除组合成员">
               <p className="asset-lifecycle-confirm__eyebrow">操作确认</p>
               <h3>确认移除组合成员</h3>

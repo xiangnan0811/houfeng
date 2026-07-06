@@ -1577,6 +1577,10 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(memberDecisions).getByRole('button', { name: '查看成员数据' }))
     expect(within(dialog).getByLabelText('自定义组合成员对比')).toBeInTheDocument()
     expect(within(dialog).getByText('Bulk Member 8')).toBeInTheDocument()
+    const rawMemberRow = within(dialog).getByText('Bulk Member 8').closest('tr') as HTMLElement
+    fireEvent.click(within(rawMemberRow).getByRole('button', { name: '移除' }))
+    expect(within(dialog).getByRole('alertdialog', { name: '确认移除组合成员' })).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
 
     fireEvent.click(within(dialog).getByRole('tab', { name: '概览' }))
     fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
@@ -1585,6 +1589,80 @@ describe('AssetDecisionsPage', () => {
     expect(within(saveMembers).getByRole('button', { name: '编辑 Bulk Member 1 成员理由' })).toBeInTheDocument()
     expect(within(saveMembers).queryByRole('button', { name: '编辑 Bulk Member 8 成员理由' })).not.toBeInTheDocument()
     expect(within(saveMembers).getByText('另有 5 台成员保留在保存底稿中')).toBeInTheDocument()
+  })
+
+  it('keeps an automatic record draft aligned with group member changes before saving', async () => {
+    const changedDetail = {
+      ...groupDetail(),
+      member_count: 1,
+      members: [groupDetail().members[1]],
+    }
+    const updatedPrimary = {
+      ...groupDetail().members[0].vps,
+      renewal_decision: 'observe',
+    }
+    const created = decisionRecord({
+      record_id: 'adr_auto_changed',
+      title: '德国主力组合',
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        {
+          url: '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30',
+          responses: [
+            { body: groupDetail() },
+            { body: changedDetail },
+          ],
+        },
+        { url: '/api/vps/vps_primary', method: 'PATCH', body: updatedPrimary },
+        { url: '/api/asset-decisions/records', method: 'POST', body: created, status: 201 },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByRole('button', { name: '查看组' }))
+    const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+    fireEvent.click(within(dialog).getByRole('tab', { name: '保存' }))
+    fireEvent.change(within(dialog).getByLabelText('组合目标'), { target: { value: '保留备用观察' } })
+    fireEvent.click(within(dialog).getByRole('tab', { name: /成员/ }))
+    fireEvent.click(within(dialog).getAllByRole('button', { name: '处理' })[0])
+    fireEvent.change(within(dialog).getByLabelText('续费决策'), { target: { value: 'observe' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存续费决策' }))
+
+    await waitFor(() => expect(screen.getByText(/续费决策已保存：Germany Primary ->/)).toBeInTheDocument())
+    await waitFor(() => expect(within(dialog).queryByText('Germany Primary')).not.toBeInTheDocument())
+    fireEvent.click(within(dialog).getByRole('tab', { name: '保存' }))
+    expect(within(dialog).queryByRole('button', { name: '编辑 Germany Primary 成员理由' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '编辑 Germany Standby 成员理由' })).toBeInTheDocument()
+    expect(within(dialog).getByDisplayValue('保留备用观察')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+
+    await waitFor(() => expect(screen.getByText('已保存组合决策记录：德国主力组合')).toBeInTheDocument())
+    const recordCall = findFetchCall(fetchMock, '/api/asset-decisions/records', 'POST')
+    expect(recordCall?.[1]?.body).toBe(JSON.stringify({
+      source_type: 'auto_group',
+      source_group_id: 'adg_auto_001',
+      renew_within_days: 30,
+      title: '德国主力组合',
+      goal: '保留备用观察',
+      status: 'draft',
+      members: [
+        {
+          vps_id: 'vps_standby',
+          decided_role: 'evidence_needed',
+          decided_action: 'complete_evidence',
+          reason: '',
+        },
+      ],
+    }))
   })
 
   it('saves a decision group as a persistent decision record', async () => {
@@ -2527,6 +2605,15 @@ describe('AssetDecisionsPage', () => {
     const hasRawPanel = openSavedRecordRawMembersPanel(dialog)
     if (hasRawPanel) {
       expect(within(dialog).getAllByText('仍有 active 订阅').length).toBeGreaterThan(0)
+      const rawMembers = within(dialog).getByLabelText('决策记录成员')
+      const rawPrimaryRow = within(rawMembers).getByText('Germany Primary').closest('tr') as HTMLElement
+      const rawPrimaryEditButton = within(rawPrimaryRow).queryByRole('button', { name: '编辑' })
+      if (rawPrimaryEditButton) {
+        fireEvent.click(rawPrimaryEditButton)
+      }
+      expect(within(rawPrimaryRow).getByLabelText('跟进状态')).toBeInTheDocument()
+      expect(within(rawPrimaryRow).getByLabelText('跟进备注')).toHaveValue('等待迁移窗口')
+      fireEvent.click(within(rawPrimaryRow).getByRole('button', { name: '收起' }))
     }
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/vps/'))).toBe(false)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/subscriptions/') && call[1]?.method)).toBe(false)

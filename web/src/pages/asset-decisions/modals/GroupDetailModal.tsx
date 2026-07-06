@@ -120,7 +120,7 @@ export function GroupDetailModal({
             ]}
             value={groupDetailPanel}
             onChange={(value) => {
-              if (value === 'save' && recordDraft?.sourceType !== 'auto_group') {
+              if (value === 'save') {
                 onStartRecordSave(detailState.detail!)
                 return
               }
