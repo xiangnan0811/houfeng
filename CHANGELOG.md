@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.56.15](https://github.com/xiangnan0811/houfeng/compare/v0.56.14...v0.56.15) (2026-07-06)
+
+
+### Bug Fixes
+
+* **asset-decisions:** 修复底稿操作入口 ([f8e9b5a](https://github.com/xiangnan0811/houfeng/commit/f8e9b5a7a7df0f3eaa077b0e075b123c444c5903))
+* **asset-decisions:** 修复详情面板与记录草稿 ([29c7a84](https://github.com/xiangnan0811/houfeng/commit/29c7a844addb70ea6a9023e93c8ff2148e1a6046))
+
+
+### Documentation
+
+* **spec:** 合并资产决策补丁为通用设计契约 ([9bfaf0f](https://github.com/xiangnan0811/houfeng/commit/9bfaf0f158f99222966aff6b5184aa1f894bc8ac))
+
 ## [0.56.14](https://github.com/xiangnan0811/houfeng/compare/v0.56.13...v0.56.14) (2026-07-04)
 
 
