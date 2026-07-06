@@ -39,6 +39,11 @@ export type AssetDecisionDraft = {
   reason: string
 }
 
+export type FormSubmitEvent = {
+  preventDefault: () => void
+  currentTarget: HTMLFormElement
+}
+
 // 基础类型
 export type RenewalWindow = 30 | 60 | 90
 export type WorkbenchView = AssetDecisionView | 'single_queue'
@@ -316,6 +321,8 @@ export type MemberDecisionCardsOptions = {
   summary?: string
   showIntent?: boolean
   action?: (member: ComparisonMatrixMember) => ReactNode
+  hiddenAction?: ReactNode
+  footerAction?: ReactNode
 }
 
 // 上下文过滤器

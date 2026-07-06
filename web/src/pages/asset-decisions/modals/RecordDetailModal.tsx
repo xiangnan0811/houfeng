@@ -7,6 +7,7 @@ import type {
   AssetDecisionRecordStatus,
 } from '../../../lib/types'
 import {
+  ASSET_DECISION_DETAIL_PREVIEW_LIMIT,
   READBACK_STATUS_LABELS,
   RECORD_STATUS_OPTIONS,
 } from '../constants'
@@ -22,7 +23,7 @@ import {
   renderDetailCommand,
   renderDetailPanel,
 } from '../renderHelpers'
-import type { RecordDetailPanel } from '../types'
+import type { FormSubmitEvent, RecordDetailPanel } from '../types'
 
 type RecordDetailState = {
   loading: boolean
@@ -41,7 +42,7 @@ type RecordDetailModalProps = {
   recordMemberColumns: DataTableColumn<AssetDecisionRecordMember>[]
   onClose: () => void
   onSetRecordDetailPanel: (panel: RecordDetailPanel) => void
-  onSubmitRecordStatus: (event: React.FormEvent<HTMLFormElement>) => void
+  onSubmitRecordStatus: (event: FormSubmitEvent) => void
   onSetRecordPatchStatus: (status: AssetDecisionRecordStatus) => void
   onOpenRecordSource: (detail: AssetDecisionRecordDetail) => void
   renderRecordExecutionBoard: (detail: AssetDecisionRecordDetail) => React.ReactNode
@@ -70,7 +71,7 @@ export function RecordDetailModal({
       open={open}
       onClose={onClose}
       title={recordDetailState.detail?.title ?? '组合决策记录'}
-      ariaLabel="资产组合决策记录详情"
+      ariaLabel={recordDetailState.detail?.title ?? '组合决策记录'}
       size="xl"
       contentClassName="asset-decision-record-modal"
     >
@@ -88,9 +89,8 @@ export function RecordDetailModal({
           <Tabs
             items={[
               { value: 'overview', label: '概览' },
-              { value: 'execution', label: '执行', count: recordDetailState.detail.execution_plan?.actionable_count ?? 0 },
-              { value: 'members', label: '成员', count: recordDetailState.detail.members.length },
-              { value: 'source', label: '来源' },
+              { value: recordDetailPanel === 'source' ? 'source' : 'execution', label: recordDetailPanel === 'source' ? '来源' : '执行', count: recordDetailState.detail.execution_plan?.actionable_count ?? 0 },
+              { value: recordDetailPanel === 'raw' ? 'raw' : 'members', label: recordDetailPanel === 'raw' ? '底稿' : '成员', count: recordDetailState.detail.members.length },
             ]}
             value={recordDetailPanel}
             onChange={(value) => onSetRecordDetailPanel(value as RecordDetailPanel)}
@@ -103,6 +103,11 @@ export function RecordDetailModal({
             assessment: selectedRecordAssessment,
             insight: parseComparisonInsight(recordDetailState.detail.evidence_snapshot),
             chips: [],
+            actions: (
+              <button className="btn md secondary" type="button" onClick={() => onSetRecordDetailPanel('source')}>
+                复核来源
+              </button>
+            ),
           })}
           {recordPatchError && <div className="inline-alert danger">{recordPatchError}</div>}
           {recordDetailPanel === 'execution' && renderDetailPanel('执行跟进',
@@ -126,6 +131,11 @@ export function RecordDetailModal({
                 </button>
               </form>
               {renderRecordExecutionBoard(recordDetailState.detail)}
+              {recordDetailState.detail.members.length > ASSET_DECISION_DETAIL_PREVIEW_LIMIT && (
+                <button className="btn-text sm secondary" type="button" onClick={() => onSetRecordDetailPanel('raw')}>
+                  查看成员底稿
+                </button>
+              )}
             </>,
           )}
           {recordDetailPanel === 'source' && renderDetailPanel('来源复核',
@@ -148,7 +158,16 @@ export function RecordDetailModal({
             </section>,
           )}
           {recordDetailPanel === 'members' && renderDetailPanel('成员跟进',
-            renderRecordMemberFollowupRows(recordDetailState.detail),
+            <>
+              {renderRecordMemberFollowupRows(recordDetailState.detail)}
+              {recordDetailState.detail.members.length <= ASSET_DECISION_DETAIL_PREVIEW_LIMIT && (
+                <div className="asset-operation-actions">
+                  <button className="btn-text sm secondary" type="button" onClick={() => onSetRecordDetailPanel('raw')}>
+                    查看成员底稿
+                  </button>
+                </div>
+              )}
+            </>,
           )}
           {recordDetailPanel === 'raw' && renderDetailPanel('成员底稿',
             <div className="asset-table-scroll" role="region" aria-label="决策记录成员" tabIndex={0}>

@@ -1,5 +1,3 @@
-import type { FormEvent } from 'react'
-
 import { Modal, Tabs, Badge } from '../../../components/atoms'
 import { PageState as PageStateView } from '../../../components/PageState'
 import type {
@@ -25,6 +23,7 @@ import {
   renderCompactTaskHeader,
 } from '../renderHelpers'
 import type {
+  FormSubmitEvent,
   TemplateDetailPanel,
   TemplateDetailState,
   TemplateManualGroupDraft,
@@ -43,7 +42,7 @@ type TemplateDetailModalProps = {
   onRequestTemplateStatusUpdate: (status: AssetDecisionScenarioTemplateStatus) => void
   onCancelTemplateStatusUpdate: () => void
   onUpdateTemplateStatus: (status: AssetDecisionScenarioTemplateStatus) => void
-  onSubmitTemplateManualGroup: (event: FormEvent<HTMLFormElement>) => void
+  onSubmitTemplateManualGroup: (event: FormSubmitEvent) => void
   onSetTemplateManualDraft: React.Dispatch<React.SetStateAction<TemplateManualGroupDraft>>
 }
 
@@ -86,7 +85,7 @@ export function TemplateDetailModal({
           <Tabs
             items={[
               { value: 'overview', label: '概览' },
-              { value: 'members', label: '成员', count: templateDetailState.detail.member_count },
+              { value: templateDetailPanel === 'create' ? 'create' : 'members', label: templateDetailPanel === 'create' ? '创建' : '成员', count: templateDetailState.detail.member_count },
               ...(!templateDetailState.detail.builtin ? [{ value: 'status' as const, label: '状态' }] : []),
             ]}
             value={templateDetailPanel}
@@ -103,6 +102,16 @@ export function TemplateDetailModal({
               <Badge variant="state" tone={scenarioTemplateStatusTone(templateDetailState.detail.status)}>
                 {SCENARIO_TEMPLATE_STATUS_LABELS[templateDetailState.detail.status]}
               </Badge>
+            ),
+            actions: (
+              <button
+                className="btn md primary"
+                type="button"
+                onClick={() => onSetTemplateDetailPanel('create')}
+                disabled={templateDetailState.detail.status !== 'active'}
+              >
+                创建组合
+              </button>
             ),
           })}
           {templateError && <div className="inline-alert danger">{templateError}</div>}

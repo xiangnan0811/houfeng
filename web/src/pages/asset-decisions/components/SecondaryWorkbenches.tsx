@@ -28,6 +28,7 @@ import {
   vpsLocationLabel,
 } from '../../assetPageUtils'
 import { AssetDecisionSecondaryNav } from '../AssetDecisionSecondaryNav'
+import { vpsDetailPath, vpsWorkbenchPath } from '../paths'
 import type {
   DecisionQueueView,
   DecisionQueueItem,
@@ -380,14 +381,14 @@ export function SecondaryWorkbenches({
             renewals={queueState.renewals}
             vpsByID={vpsByID}
             renderVPSReference={(subscription, vps) => (
-              <Link className="name" to={`/vps/${subscription.vps_id}`}>
+              <Link className="name" to={vpsDetailPath(subscription.vps_id)}>
                 {vps?.display_name ?? subscription.vps_id}
               </Link>
             )}
             renderActions={(subscription) => (
               <>
                 <Link className="btn-text sm secondary" to={`/asset-decisions?view=renewal&renew_within_days=${renewalWindow}`}>组合判断</Link>
-                <Link className="btn-text sm secondary" to={`/vps/${subscription.vps_id}`}>VPS 详情</Link>
+                <Link className="btn-text sm secondary" to={vpsDetailPath(subscription.vps_id)}>VPS 详情</Link>
               </>
             )}
           />
@@ -538,7 +539,7 @@ export function SecondaryWorkbenches({
                           处理
                         </button>
                         {item.vps.renewal_decision === 'cancel' || hasCancellationAttention(item) ? (
-                          <Link className="btn sm secondary" to={`/vps/${item.vps.vps_id}?workbench=cancellation`}>
+                          <Link className="btn sm secondary" to={vpsWorkbenchPath(item.vps.vps_id, 'cancellation')}>
                             取消/退役
                           </Link>
                         ) : null}

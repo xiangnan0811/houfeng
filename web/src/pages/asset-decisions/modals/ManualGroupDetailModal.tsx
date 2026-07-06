@@ -1,4 +1,4 @@
-import type { FormEvent, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
 import { Modal, Tabs, Badge, DataTable, type DataTableColumn } from '../../../components/atoms'
 import { PageState as PageStateView } from '../../../components/PageState'
@@ -32,6 +32,7 @@ import {
   manualMemberComparisonMatrixMember,
 } from '../renderHelpers'
 import type {
+  FormSubmitEvent,
   ManualDetailPanel,
   ManualDetailState,
   ManualGroupProgress,
@@ -65,11 +66,11 @@ type ManualGroupDetailModalProps = {
   onClose: () => void
   onSelectManualDetailPanel: (panel: ManualDetailPanel) => void
   onStartManualRecordSave: (detail: AssetDecisionManualGroupDetail) => void
-  onSubmitRecordSave: (event: FormEvent<HTMLFormElement>) => void
+  onSubmitRecordSave: (event: FormSubmitEvent) => void
   onCancelRecordSave: () => void
-  onSubmitManualGroupPatch: (event: FormEvent<HTMLFormElement>) => void
+  onSubmitManualGroupPatch: (event: FormSubmitEvent) => void
   onSaveManualGroupAsTemplate: (detail: AssetDecisionManualGroupDetail) => void
-  onSubmitManualMemberAdd: (event: FormEvent<HTMLFormElement>) => void
+  onSubmitManualMemberAdd: (event: FormSubmitEvent) => void
   onRequestManualMemberRemoval: (member: AssetDecisionManualGroupMember) => void
   onCancelManualMemberRemoval: () => void
   onDeleteManualMember: (member: AssetDecisionManualGroupMember) => void
@@ -142,18 +143,11 @@ export function ManualGroupDetailModal({
           <Tabs
             items={[
               { value: 'overview', label: '概览' },
-              { value: 'members', label: '成员', count: manualDetailState.detail.members.length },
-              { value: 'edit', label: '编辑' },
-              { value: 'save', label: '保存' },
+              { value: manualDetailPanel === 'add' || manualDetailPanel === 'raw' ? manualDetailPanel : 'members', label: manualDetailPanel === 'add' ? '添加' : manualDetailPanel === 'raw' ? '底稿' : '成员', count: manualDetailState.detail.members.length },
+              { value: manualDetailPanel === 'save' ? 'save' : 'edit', label: manualDetailPanel === 'save' ? '保存' : '编辑' },
             ]}
             value={manualDetailPanel}
-            onChange={(value) => {
-              if (value === 'save' && recordDraft?.sourceType !== 'manual_group') {
-                onStartManualRecordSave(manualDetailState.detail!)
-                return
-              }
-              onSelectManualDetailPanel(value as ManualDetailPanel)
-            }}
+            onChange={(value) => onSelectManualDetailPanel(value as ManualDetailPanel)}
           />
           {manualDetailPanel === 'overview' && renderDetailCommand({
             ariaLabel: '自定义组合当前判断',
@@ -173,6 +167,15 @@ export function ManualGroupDetailModal({
               <Badge variant="state" tone={manualGroupProgress.readinessTone}>
                 {manualGroupProgress.readinessLabel} {manualGroupProgress.doneCount}/{manualGroupProgress.totalCount}
               </Badge>
+            ),
+            actions: (
+              <button
+                className="btn md primary"
+                type="button"
+                onClick={() => onStartManualRecordSave(manualDetailState.detail!)}
+              >
+                保存记录
+              </button>
             ),
           })}
           {manualGroupError && <div className="inline-alert danger">{manualGroupError}</div>}
@@ -197,6 +200,16 @@ export function ManualGroupDetailModal({
                     </button>
                   )
                 },
+                hiddenAction: (
+                  <button className="btn-text sm secondary" type="button" onClick={() => onSelectManualDetailPanel('raw')}>
+                    查看成员数据
+                  </button>
+                ),
+                footerAction: (
+                  <button className="btn sm primary" type="button" onClick={() => onSelectManualDetailPanel('add')}>
+                    添加成员
+                  </button>
+                ),
               },
             ),
           )}

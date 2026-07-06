@@ -28,6 +28,7 @@ import {
   ROLE_LABELS,
   ACTION_LABELS,
 } from './constants'
+import { vpsDetailPath } from './paths'
 import {
   chipTone,
   compactDecisionText,
@@ -393,15 +394,28 @@ export function renderMemberDecisionRows(members: ComparisonMatrixMember[], opti
           })}
           {memberPreview.hiddenCount > 0 && (
             <div className="asset-decision-preview-more" role="note">
-              另有 {memberPreview.hiddenCount} 台在底稿中查看
+              <span>另有 {memberPreview.hiddenCount} 台在底稿中查看</span>
+              {options.hiddenAction}
+            </div>
+          )}
+          {options.footerAction && (
+            <div className="asset-operation-actions">
+              {options.footerAction}
             </div>
           )}
         </div>
       ) : (
-        <div className="asset-decision-member-decisions__empty">
-          <strong>暂无可取舍成员</strong>
-          <span>当前组合没有可展示的成员判断。</span>
-        </div>
+        <>
+          <div className="asset-decision-member-decisions__empty">
+            <strong>暂无可取舍成员</strong>
+            <span>当前组合没有可展示的成员判断。</span>
+          </div>
+          {options.footerAction && (
+            <div className="asset-operation-actions">
+              {options.footerAction}
+            </div>
+          )}
+        </>
       )}
     </section>
   )
@@ -432,7 +446,7 @@ export function groupMemberComparisonMatrixMember(member: AssetDecisionGroupMemb
   return {
     key: member.vps.vps_id,
     displayName: member.vps.display_name || member.vps.vps_id,
-    href: `/vps/${member.vps.vps_id}`,
+    href: vpsDetailPath(member.vps.vps_id),
     meta: `${formatOptional(member.vps.provider_name)} · ${vpsLocationLabel(member.vps)}`,
     product: `${monthlyCost} · ${member.vps.product_name || member.vps.vps_id}`,
     facts: memberContextLabel(member),
@@ -468,7 +482,7 @@ export function manualMemberComparisonMatrixMember(member: AssetDecisionManualGr
   return {
     ...groupMemberComparisonMatrixMember(member),
     key: member.vps_id,
-    href: `/vps/${member.vps_id}`,
+    href: vpsDetailPath(member.vps_id),
     intendedRole: member.intended_role,
     intendedAction: member.intended_action,
     currentFactFound: member.current_fact_found,

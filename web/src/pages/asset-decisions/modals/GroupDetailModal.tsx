@@ -1,4 +1,4 @@
-import type { FormEvent, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import { Modal, Tabs, DataTable, type DataTableColumn } from '../../../components/atoms'
@@ -15,6 +15,7 @@ import type {
 import { formatOptional } from '../../../lib/format'
 import { vpsLocationLabel } from '../../assetPageUtils'
 import { RECORD_STATUS_OPTIONS } from '../constants'
+import { vpsWorkbenchPath } from '../paths'
 import { compactGroupJudgement } from '../formatters'
 import {
   renderDetailCommand,
@@ -25,6 +26,7 @@ import {
 } from '../renderHelpers'
 import type {
   DetailState,
+  FormSubmitEvent,
   GroupDetailPanel,
   RecordDraft,
 } from '../types'
@@ -47,12 +49,12 @@ type GroupDetailModalProps = {
   onSetGroupDetailPanel: (panel: GroupDetailPanel) => void
   onSetRecordDraft: React.Dispatch<React.SetStateAction<RecordDraft | null>>
   onStartRecordSave: (detail: AssetDecisionGroupDetail) => void
-  onSubmitRecordSave: (event: FormEvent<HTMLFormElement>) => void
+  onSubmitRecordSave: (event: FormSubmitEvent) => void
   onCancelRecordSave: () => void
   onCreateManualGroupFromAuto: (detail: AssetDecisionGroupDetail) => void
   onSelectVPS: (vps: VPSAssetRecord) => void
   onCloseDecisionDrawer: () => void
-  onHandleDecisionSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onHandleDecisionSubmit: (event: FormSubmitEvent) => void
   onSetDecisionDraft: React.Dispatch<React.SetStateAction<AssetDecisionDraft>>
   renderRecordDraftMemberRows: (members: Array<{
     vpsID: string
@@ -156,7 +158,7 @@ export function GroupDetailModal({
                   if (!sourceMember) return null
                   if (sourceMember.suggested_action === 'open_cancellation_workbench') {
                     return (
-                      <Link className="btn sm primary" to={`/vps/${sourceMember.vps.vps_id}?workbench=cancellation`}>
+                      <Link className="btn sm primary" to={vpsWorkbenchPath(sourceMember.vps.vps_id, 'cancellation')}>
                         取消/退役
                       </Link>
                     )
@@ -167,6 +169,11 @@ export function GroupDetailModal({
                     </button>
                   )
                 },
+                hiddenAction: (
+                  <button className="btn-text sm secondary" type="button" onClick={() => onSetGroupDetailPanel('raw')}>
+                    查看数据底稿
+                  </button>
+                ),
               },
             ),
           )}
