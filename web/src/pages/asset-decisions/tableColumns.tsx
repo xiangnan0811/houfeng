@@ -46,6 +46,8 @@ import {
   roleTone,
   sourceAvailabilityLabel,
 } from './formatters'
+import { vpsDetailPath, vpsWorkbenchPath } from './paths'
+import type { FormSubmitEvent } from './types'
 import {
   renderDecisionRecommendation,
   renderEvidenceAssessment,
@@ -266,7 +268,7 @@ export function createMemberColumns(options: {
       width: '240px',
       render: (member) => (
         <div className="asset-table__identity">
-          <strong><Link className="name" to={`/vps/${member.vps.vps_id}`}>{member.vps.display_name}</Link></strong>
+          <strong><Link className="name" to={vpsDetailPath(member.vps.vps_id)}>{member.vps.display_name}</Link></strong>
           <span>{formatOptional(member.vps.provider_name)} · {vpsLocationLabel(member.vps)}</span>
           <span>{member.vps.product_name || member.vps.vps_id}</span>
           <span className="asset-decision-chip-row">
@@ -353,11 +355,11 @@ export function createMemberColumns(options: {
             处理
           </button>
           {member.suggested_action === 'open_cancellation_workbench' ? (
-            <Link className="btn sm secondary" to={`/vps/${member.vps.vps_id}?workbench=cancellation`}>
+            <Link className="btn sm secondary" to={vpsWorkbenchPath(member.vps.vps_id, 'cancellation')}>
               取消/退役
             </Link>
           ) : (
-            <Link className="btn sm secondary" to={`/vps/${member.vps.vps_id}`}>
+            <Link className="btn sm secondary" to={vpsDetailPath(member.vps.vps_id)}>
               VPS
             </Link>
           )}
@@ -383,7 +385,7 @@ export function createManualMemberColumns(options: {
     note: string
     sortOrder: string
   }>) => void
-  onSubmit: (event: React.FormEvent<HTMLFormElement>, member: AssetDecisionManualGroupMember) => void
+  onSubmit: (event: FormSubmitEvent, member: AssetDecisionManualGroupMember) => void
   onRequestRemoval: (member: AssetDecisionManualGroupMember) => void
   roleOptions: ReadonlyArray<{ value: AssetDecisionSuggestedRole; label: string }>
   actionOptions: ReadonlyArray<{ value: AssetDecisionSuggestedAction; label: string }>
@@ -399,7 +401,7 @@ export function createManualMemberColumns(options: {
           <div className="asset-table__identity">
             <strong>
               {member.current_fact_found ? (
-                <Link className="name" to={`/vps/${member.vps_id}`}>{displayName}</Link>
+                <Link className="name" to={vpsDetailPath(member.vps_id)}>{displayName}</Link>
               ) : (
                 displayName
               )}
@@ -543,7 +545,7 @@ export function createRecordMemberColumns(options: {
       width: '220px',
       render: (member) => (
         <div className="asset-table__identity">
-          <strong><Link className="name" to={`/vps/${member.vps_id}`}>{member.display_name || member.vps_id}</Link></strong>
+          <strong><Link className="name" to={vpsDetailPath(member.vps_id)}>{member.display_name || member.vps_id}</Link></strong>
           <span>{member.vps_id}</span>
           <span>保存于 {formatDateTime(member.created_at)}</span>
         </div>

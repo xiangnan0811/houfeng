@@ -760,9 +760,21 @@ function findFetchCall(fetchMock: ReturnType<typeof vi.fn>, url: string, method?
   })
 }
 
-async function openSecondaryWorkbench(label: '打开记录' | '打开场景' | '查看续费' | '查看单台队列') {
-  const supportStrip = await screen.findByLabelText('资产决策辅助入口')
-  fireEvent.click(within(supportStrip).getByRole('button', { name: label }))
+type SecondaryWorkbenchLabel = '保存记录' | '场景与组合' | '续费窗口' | '单台队列'
+
+function getSecondaryWorkbenchButton(supportStrip: HTMLElement, label: SecondaryWorkbenchLabel) {
+  return within(supportStrip).getByRole('button', { name: label })
+}
+
+async function findSecondaryWorkbenchButton(label: SecondaryWorkbenchLabel) {
+  const supportStrip = await screen.findByRole('navigation', { name: '资产决策辅助入口' })
+  return getSecondaryWorkbenchButton(supportStrip, label)
+}
+
+async function openSecondaryWorkbench(label: SecondaryWorkbenchLabel) {
+  const button = await findSecondaryWorkbenchButton(label)
+  fireEvent.click(button)
+  return button
 }
 
 function expectAutomaticGroupDefaultCover(dialog: HTMLElement) {
@@ -845,7 +857,7 @@ function expectTemplateDefaultCover(dialog: HTMLElement) {
   expectDecisionCoverDensity(cover)
   expect(within(dialog).getByRole('tab', { name: '概览' })).toBeInTheDocument()
   expect(within(dialog).queryByLabelText('场景模板详情目录')).not.toBeInTheDocument()
-  expect(within(dialog).queryByRole('button', { name: '创建组合' })).not.toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '创建组合' })).toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '成员蓝图' })).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '状态维护' })).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('heading', { name: '从模板创建自定义组合' })).not.toBeInTheDocument()
@@ -923,12 +935,9 @@ function expectSavedRecordMembersPanelIsCompact(dialog: HTMLElement) {
 }
 
 function openSavedRecordRawMembersPanel(dialog: HTMLElement): boolean {
-  const rawTab = within(dialog).queryByRole('tab', { name: /底稿/ })
-  if (!rawTab) {
-    // After UI refactor, raw/底稿 tab may not exist
-    return false
-  }
-  fireEvent.click(rawTab)
+  const rawButton = within(dialog).queryByRole('button', { name: '查看成员底稿' })
+  if (!rawButton) return false
+  fireEvent.click(rawButton)
   expect(within(dialog).getByLabelText('决策记录成员')).toBeInTheDocument()
   return true
 }
@@ -954,6 +963,11 @@ function expectDecisionCoverDensity(cover: HTMLElement) {
 
 function expectNoAssetDecisionPageEnglishNoise(container: HTMLElement = document.body) {
   expect(container).not.toHaveTextContent(/\b(?:PORTFOLIO|RENEWAL|CLOSED LOOP|EVIDENCE|WORKBENCH|SCENARIO|SCENARIOS|DECISION MEMORY|SINGLE VPS QUEUE|AUTO GROUP|AUX QUEUE)\b/)
+}
+
+function countSourceLines(content: string): number {
+  const normalized = content.replace(/\r?\n$/, '')
+  return normalized ? normalized.split(/\r?\n/).length : 0
 }
 
 describe('AssetDecisionsPage', () => {
@@ -985,9 +999,15 @@ describe('AssetDecisionsPage', () => {
     expect(screen.queryByLabelText('资产组合决策推进路径')).not.toBeInTheDocument()
     expectNoAssetDecisionPageEnglishNoise()
     expect(screen.queryByText('PORTFOLIO')).not.toBeInTheDocument()
-    const supportStrip = screen.getByLabelText('资产决策辅助入口')
+    const supportStrip = screen.getByRole('navigation', { name: '资产决策辅助入口' })
     expect(supportStrip).toHaveClass('asset-decision-support-strip')
-    expect(within(supportStrip).getAllByRole('button')).toHaveLength(4)
+    const secondaryButtons = within(supportStrip).getAllByRole('button')
+    expect(secondaryButtons).toHaveLength(4)
+    for (const label of ['保存记录', '场景与组合', '续费窗口', '单台队列'] as const) {
+      const button = getSecondaryWorkbenchButton(supportStrip, label)
+      expect(button).toBeInTheDocument()
+      expect(button).toHaveAttribute('aria-pressed', 'false')
+    }
     expect(normalizedText(supportStrip).length).toBeLessThanOrEqual(160)
     expect(within(supportStrip).queryByText(/回看判断与执行回读|管理比较篮子和启动模板|只读订阅窗口事实|保留单台续费处理/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '决策组扫描' })).toBeInTheDocument()
@@ -1010,10 +1030,6 @@ describe('AssetDecisionsPage', () => {
     expect(screen.queryByRole('heading', { name: '场景模板' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '续费证据区' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '单台待处理队列' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '打开记录' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '打开场景' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '查看续费' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '查看单台队列' })).toBeInTheDocument()
 
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=needs_decision&renew_within_days=30')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=needs_decision&renew_within_days=30')
@@ -1078,10 +1094,13 @@ describe('AssetDecisionsPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '决策组扫描' })).toBeInTheDocument())
-    expect(screen.getByRole('status')).toHaveTextContent('旧链接已承接到单台辅助队列')
-    expect(within(screen.getByRole('status')).getByRole('button', { name: '查看单台队列' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: /单台队列/ })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '单台辅助队列' })).toBeInTheDocument()
+    const singleQueueButton = await findSecondaryWorkbenchButton('单台队列')
+    expect(singleQueueButton).toHaveAttribute('aria-pressed', 'true')
+    const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section') as HTMLElement
+    fireEvent.click(within(singleQueue).getAllByRole('button', { name: '处理' })[0])
+    expect(await screen.findByRole('dialog', { name: '续费决策处理' })).toBeInTheDocument()
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=needs_decision&renew_within_days=30')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=needs_decision&renew_within_days=30')
   })
@@ -1089,31 +1108,42 @@ describe('AssetDecisionsPage', () => {
   it('auto-expands the matching secondary workbench for supported deep links', async () => {
     const cases: Array<{
       entry: string
-      activeButton: '打开记录' | '打开场景' | '查看续费'
+      activeButton: '保存记录' | '场景与组合' | '续费窗口'
       visibleHeading: string
+      expectedDialog?: string
       route?: MockFetchRoute
     }> = [
       {
         entry: '/asset-decisions?record_id=adr_001',
-        activeButton: '打开记录',
+        activeButton: '保存记录',
         visibleHeading: '已保存组合决策',
+        expectedDialog: '德国主备取舍记录',
+        route: { url: '/api/asset-decisions/records/adr_001', body: decisionRecord() },
+      },
+      {
+        entry: '/asset-decisions?view=renewal&renew_within_days=30&record_id=adr_001',
+        activeButton: '保存记录',
+        visibleHeading: '已保存组合决策',
+        expectedDialog: '德国主备取舍记录',
         route: { url: '/api/asset-decisions/records/adr_001', body: decisionRecord() },
       },
       {
         entry: '/asset-decisions?manual_group_id=admg_001',
-        activeButton: '打开场景',
+        activeButton: '场景与组合',
         visibleHeading: '场景工作区',
+        expectedDialog: '自定义资产组合详情',
         route: { url: '/api/asset-decisions/manual-groups/admg_001', body: manualGroupDetail() },
       },
       {
         entry: '/asset-decisions?template_id=adt_builtin_primary_standby',
-        activeButton: '打开场景',
+        activeButton: '场景与组合',
         visibleHeading: '场景工作区',
+        expectedDialog: '资产决策场景模板详情',
         route: { url: '/api/asset-decisions/scenario-templates/adt_builtin_primary_standby', body: scenarioTemplate() },
       },
       {
         entry: '/asset-decisions?view=renewal&renew_within_days=30',
-        activeButton: '查看续费',
+        activeButton: '续费窗口',
         visibleHeading: '续费事实',
       },
     ] as const
@@ -1129,13 +1159,39 @@ describe('AssetDecisionsPage', () => {
         </MemoryRouter>,
       )
 
-      const supportStrip = await screen.findByLabelText('资产决策辅助入口')
+      const supportStrip = await screen.findByRole('navigation', { name: '资产决策辅助入口' })
       await waitFor(() => expect(screen.getByRole('heading', { name: deepLink.visibleHeading })).toBeInTheDocument())
-      expect(within(supportStrip).getByRole('button', { name: deepLink.activeButton })).toHaveClass('primary')
+      const activeButton = getSecondaryWorkbenchButton(supportStrip, deepLink.activeButton)
+      expect(activeButton).toHaveClass('asset-decision-support-strip__item--active')
+      expect(activeButton).toHaveAttribute('aria-pressed', 'true')
+      if (deepLink.expectedDialog) {
+        expect(await screen.findByRole('dialog', { name: deepLink.expectedDialog })).toBeInTheDocument()
+      }
 
       unmount()
       vi.unstubAllGlobals()
     }
+  })
+
+  it('lets support entries override renewal URL deep links after the first auto-open', async () => {
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/asset-decisions?view=renewal&renew_within_days=30']}>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '续费事实' })).toBeInTheDocument())
+    fireEvent.click(await findSecondaryWorkbenchButton('保存记录'))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '已保存组合决策' })).toBeInTheDocument())
+    expect(await findSecondaryWorkbenchButton('保存记录')).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(await findSecondaryWorkbenchButton('场景与组合'))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '场景工作区' })).toBeInTheDocument())
+    expect(await findSecondaryWorkbenchButton('场景与组合')).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('carries cross-page context filters into visible chips and asset-decision queries', async () => {
@@ -1238,7 +1294,7 @@ describe('AssetDecisionsPage', () => {
     expect(within(anomalyItem as HTMLElement).getByText(/事实漂移/)).toBeInTheDocument()
     fireEvent.click(within(commandSummary).getByRole('button', { name: '复核记录' }))
 
-    expect(await screen.findByRole('dialog', { name: '资产组合决策记录详情' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '德国主备取舍记录' })).toBeInTheDocument()
     expect(screen.getByLabelText('current-url')).toHaveTextContent('/asset-decisions?provider_id=pv_001&record_id=adr_001')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/records/adr_001')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/records?view=needs_decision&renew_within_days=30&provider_id=pv_001')
@@ -1478,6 +1534,9 @@ describe('AssetDecisionsPage', () => {
     expect(within(memberDecisions).getByText('Bulk Member 3')).toBeInTheDocument()
     expect(within(memberDecisions).queryByText('Bulk Member 8')).not.toBeInTheDocument()
     expect(within(memberDecisions).getByText('另有 5 台在底稿中查看')).toBeInTheDocument()
+    fireEvent.click(within(memberDecisions).getByRole('button', { name: '查看数据底稿' }))
+    expect(within(dialog).getByLabelText('决策组成员对比')).toBeInTheDocument()
+    expect(within(dialog).getByText('Bulk Member 8')).toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('tab', { name: '保存' }))
     const saveMembers = within(dialog).getByLabelText('保存记录成员复核')
@@ -1504,7 +1563,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('打开场景')
+    await openSecondaryWorkbench('场景与组合')
     await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
     const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
     fireEvent.click(within(manualSection!).getByText("德国主备自定义组合"))
@@ -1515,13 +1574,95 @@ describe('AssetDecisionsPage', () => {
     expect(within(memberDecisions).getByText('Bulk Member 1')).toBeInTheDocument()
     expect(within(memberDecisions).queryByText('Bulk Member 8')).not.toBeInTheDocument()
     expect(within(memberDecisions).getByText('另有 5 台在底稿中查看')).toBeInTheDocument()
+    fireEvent.click(within(memberDecisions).getByRole('button', { name: '查看成员数据' }))
+    expect(within(dialog).getByLabelText('自定义组合成员对比')).toBeInTheDocument()
+    expect(within(dialog).getByText('Bulk Member 8')).toBeInTheDocument()
+    const rawMemberRow = within(dialog).getByText('Bulk Member 8').closest('tr') as HTMLElement
+    fireEvent.click(within(rawMemberRow).getByRole('button', { name: '移除' }))
+    expect(within(dialog).getByRole('alertdialog', { name: '确认移除组合成员' })).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
 
-    fireEvent.click(within(dialog).getByRole('tab', { name: '保存' }))
+    fireEvent.click(within(dialog).getByRole('tab', { name: '概览' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
     const saveMembers = within(dialog).getByLabelText('保存记录成员复核')
     expect(saveMembers.querySelectorAll('.asset-decision-save-member')).toHaveLength(3)
     expect(within(saveMembers).getByRole('button', { name: '编辑 Bulk Member 1 成员理由' })).toBeInTheDocument()
     expect(within(saveMembers).queryByRole('button', { name: '编辑 Bulk Member 8 成员理由' })).not.toBeInTheDocument()
     expect(within(saveMembers).getByText('另有 5 台成员保留在保存底稿中')).toBeInTheDocument()
+  })
+
+  it('keeps an automatic record draft aligned with group member changes before saving', async () => {
+    const changedDetail = {
+      ...groupDetail(),
+      member_count: 1,
+      members: [groupDetail().members[1]],
+    }
+    const updatedPrimary = {
+      ...groupDetail().members[0].vps,
+      renewal_decision: 'observe',
+    }
+    const created = decisionRecord({
+      record_id: 'adr_auto_changed',
+      title: '德国主力组合',
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        {
+          url: '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30',
+          responses: [
+            { body: groupDetail() },
+            { body: changedDetail },
+          ],
+        },
+        { url: '/api/vps/vps_primary', method: 'PATCH', body: updatedPrimary },
+        { url: '/api/asset-decisions/records', method: 'POST', body: created, status: 201 },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByRole('button', { name: '查看组' }))
+    const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+    fireEvent.click(within(dialog).getByRole('tab', { name: '保存' }))
+    fireEvent.change(within(dialog).getByLabelText('组合目标'), { target: { value: '保留备用观察' } })
+    fireEvent.click(within(dialog).getByRole('tab', { name: /成员/ }))
+    fireEvent.click(within(dialog).getAllByRole('button', { name: '处理' })[0])
+    fireEvent.change(within(dialog).getByLabelText('续费决策'), { target: { value: 'observe' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存续费决策' }))
+
+    await waitFor(() => expect(screen.getByText(/续费决策已保存：Germany Primary ->/)).toBeInTheDocument())
+    await waitFor(() => expect(within(dialog).queryByText('Germany Primary')).not.toBeInTheDocument())
+    fireEvent.click(within(dialog).getByRole('tab', { name: '保存' }))
+    expect(within(dialog).queryByRole('button', { name: '编辑 Germany Primary 成员理由' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '编辑 Germany Standby 成员理由' })).toBeInTheDocument()
+    expect(within(dialog).getByDisplayValue('保留备用观察')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+
+    await waitFor(() => expect(screen.getByText('已保存组合决策记录：德国主力组合')).toBeInTheDocument())
+    const recordCall = findFetchCall(fetchMock, '/api/asset-decisions/records', 'POST')
+    expect(recordCall?.[1]?.body).toBe(JSON.stringify({
+      source_type: 'auto_group',
+      source_group_id: 'adg_auto_001',
+      renew_within_days: 30,
+      title: '德国主力组合',
+      goal: '保留备用观察',
+      status: 'draft',
+      members: [
+        {
+          vps_id: 'vps_standby',
+          decided_role: 'evidence_needed',
+          decided_action: 'complete_evidence',
+          reason: '',
+        },
+      ],
+    }))
   })
 
   it('saves a decision group as a persistent decision record', async () => {
@@ -1557,7 +1698,9 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
 
     await waitFor(() => expect(screen.getByText('已保存组合决策记录：德国主备取舍')).toBeInTheDocument())
-    expect(await screen.findByRole('dialog', { name: '资产组合决策记录详情' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '德国主备取舍' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '资产决策组详情' })).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1)
     expect(findFetchCall(fetchMock, '/api/asset-decisions/records', 'POST')).toEqual([
       '/api/asset-decisions/records',
       {
@@ -1622,6 +1765,8 @@ describe('AssetDecisionsPage', () => {
 
     await waitFor(() => expect(screen.getByText('已创建自定义组合：德国主力组合')).toBeInTheDocument())
     const manualDialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    expect(screen.queryByRole('dialog', { name: '资产决策组详情' })).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1)
     expect(within(manualDialog).queryByRole('heading', { name: '组合推进状态' })).not.toBeInTheDocument()
     expect(within(manualDialog).queryByRole('heading', { name: '自定义组合证据矩阵' })).not.toBeInTheDocument()
     expect(within(manualDialog).queryByText('SCENARIO DECISION')).not.toBeInTheDocument()
@@ -1780,11 +1925,107 @@ describe('AssetDecisionsPage', () => {
       await waitFor(() => expect(screen.getByText(`已创建自定义组合：德国主力组合 ${taskPanel.name}`)).toBeInTheDocument())
       expect(findFetchCall(fetchMock, '/api/asset-decisions/manual-groups', 'POST')).toBeDefined()
       expect(await screen.findByRole('dialog', { name: '自定义资产组合详情' })).toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: '资产决策组详情' })).not.toBeInTheDocument()
+      expect(screen.queryAllByRole('dialog')).toHaveLength(1)
       expect(screen.getByRole('heading', { name: '场景工作区' })).toBeInTheDocument()
 
       unmount()
       vi.unstubAllGlobals()
     }
+  })
+
+  it('keeps a manual record draft aligned with member changes before saving', async () => {
+    const addedManual = manualGroupDetail({
+      member_count: 2,
+      members: [
+        ...manualGroupDetail().members,
+        {
+          ...manualGroupDetail().members[0],
+          manual_group_id: 'admg_001',
+          vps_id: 'vps_standby',
+          vps: {
+            ...manualGroupDetail().members[0].vps,
+            vps_id: 'vps_standby',
+            display_name: 'Germany Standby',
+          },
+          intended_role: 'observe_candidate',
+          intended_action: 'review',
+          reason: '新增备用观察',
+          note: '',
+          sort_order: 20,
+          evidence_snapshot: { vps_id: 'vps_standby', service_count: 0 },
+          current_fact_found: true,
+        },
+      ],
+    })
+    const created = decisionRecord({
+      record_id: 'adr_manual_added',
+      title: '德国主备自定义组合',
+      source_type: 'manual_group',
+      source_group_id: 'admg_001',
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/manual-groups/admg_001', body: manualGroupDetail() },
+        { url: '/api/asset-decisions/manual-groups/admg_001/members', method: 'POST', body: addedManual, status: 201 },
+        { url: '/api/asset-decisions/records', method: 'POST', body: created, status: 201 },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await openSecondaryWorkbench('场景与组合')
+    await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
+    const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
+    fireEvent.click(within(manualSection!).getByText('德国主备自定义组合'))
+
+    const dialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+    fireEvent.change(within(dialog).getByLabelText('组合目标'), { target: { value: '保留主力并观察备用' } })
+    fireEvent.click(within(dialog).getByRole('tab', { name: /成员/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '添加成员' }))
+    fireEvent.change(within(dialog).getByLabelText('VPS'), { target: { value: 'vps_standby' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '高级选项' }))
+    fireEvent.change(within(dialog).getByLabelText('理由'), { target: { value: '新增备用观察' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '加入组合' }))
+
+    await waitFor(() => expect(screen.getByText('自定义组合成员已加入')).toBeInTheDocument())
+    fireEvent.click(within(dialog).getByRole('tab', { name: '概览' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+    expect(within(dialog).getByDisplayValue('保留主力并观察备用')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '编辑 Germany Standby 成员理由' })).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+
+    await waitFor(() => expect(screen.getByText('已保存组合决策记录：德国主备自定义组合')).toBeInTheDocument())
+    const recordCall = findFetchCall(fetchMock, '/api/asset-decisions/records', 'POST')
+    expect(recordCall?.[1]?.body).toBe(JSON.stringify({
+      source_type: 'manual_group',
+      source_group_id: 'admg_001',
+      renew_within_days: 30,
+      title: '德国主备自定义组合',
+      goal: '保留主力并观察备用',
+      status: 'draft',
+      members: [
+        {
+          vps_id: 'vps_primary',
+          decided_role: 'primary_candidate',
+          decided_action: 'keep',
+          reason: '主力稳定',
+        },
+        {
+          vps_id: 'vps_standby',
+          decided_role: 'observe_candidate',
+          decided_action: 'review',
+          reason: '新增备用观察',
+        },
+      ],
+    }))
   })
 
   it('saves a manual scenario group as a decision record without touching business assets', async () => {
@@ -1809,7 +2050,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('打开场景')
+    await openSecondaryWorkbench('场景与组合')
     await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
     const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
     expect(manualSection).not.toBeNull()
@@ -1835,8 +2076,7 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).queryByRole('button', { name: '另存为模板' })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: '添加成员' })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: '原始明细' })).not.toBeInTheDocument()
-    // Tab navigation replaces detail directory
-    fireEvent.click(within(dialog).getByRole('tab', { name: '保存' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
     expect(within(dialog).queryAllByLabelText('角色')).toHaveLength(0)
     expect(within(dialog).queryAllByLabelText('动作')).toHaveLength(0)
     expect(within(dialog).queryAllByLabelText('理由')).toHaveLength(0)
@@ -1933,7 +2173,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('打开场景')
+    await openSecondaryWorkbench('场景与组合')
     await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
     const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
     fireEvent.click(within(manualSection!).getByText("德国主备自定义组合"))
@@ -1941,18 +2181,22 @@ describe('AssetDecisionsPage', () => {
     const manualCover = within(manualDialog).getByLabelText('自定义组合当前判断')
     expectDecisionCoverDensity(manualCover)
     expect(manualCover).not.toHaveTextContent(longManualSummary)
+    fireEvent.click(within(manualDialog).getByRole('button', { name: '关闭' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '自定义资产组合详情' })).not.toBeInTheDocument())
 
     const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
-    const templateArticle = within(templatesSection!).getByText("自定义长目标模板").closest("article")!; fireEvent.click(within(templateArticle).getByRole("button", { name: "使用模板" }))
+    const templateArticle = within(templatesSection!).getByText('自定义长目标模板').closest('article')!
+    fireEvent.click(within(templateArticle).getByRole('button', { name: '使用模板' }))
     const templateDialog = await screen.findByRole('dialog', { name: '资产决策场景模板详情' })
     expectTemplateDefaultCover(templateDialog)
     expect(within(templateDialog).getByLabelText('场景模板当前判断')).not.toHaveTextContent(longTemplateGoal)
 
     fireEvent.click(within(templateDialog).getByRole('button', { name: '关闭' }))
-    await openSecondaryWorkbench('打开记录')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '资产决策场景模板详情' })).not.toBeInTheDocument())
+    await openSecondaryWorkbench('保存记录')
     const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
-    const recordDialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
+    const recordDialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
     expectSavedRecordDefaultCover(recordDialog)
     expect(within(recordDialog).getByLabelText('保存记录当前判断')).not.toHaveTextContent(longRecordSummary)
   })
@@ -1981,7 +2225,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('打开场景')
+    await openSecondaryWorkbench('场景与组合')
     await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
     const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
     expect(manualSection).not.toBeNull()
@@ -2042,7 +2286,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('打开场景')
+    await openSecondaryWorkbench('场景与组合')
     await waitFor(() => expect(screen.getAllByText('自定义主备模板').length).toBeGreaterThan(0))
     const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
     expect(templatesSection).not.toBeNull()
@@ -2055,12 +2299,8 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).queryByText('查看模板固定的成员意图。')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('归档或重新启用这个模板。')).not.toBeInTheDocument()
 
-    // After UI refactor, archive button may be in overview tab
-    const archiveButton = within(dialog).queryByRole('button', { name: '归档模板' })
-    if (!archiveButton) {
-      // Skip tab navigation if archive button not found
-      return
-    }
+    fireEvent.click(within(dialog).getByRole('tab', { name: '状态' }))
+    const archiveButton = within(dialog).getByRole('button', { name: '归档模板' })
 
     fireEvent.click(archiveButton)
     const confirmation = within(dialog).getByRole('alertdialog', { name: '确认归档模板' })
@@ -2082,6 +2322,71 @@ describe('AssetDecisionsPage', () => {
         cache: 'no-store',
         credentials: 'include',
         body: JSON.stringify({ status: 'archived' }),
+      },
+    ])
+  })
+
+  it('creates a manual group from a scenario template through the template detail action', async () => {
+    const customTemplate = scenarioTemplate({
+      template_id: 'adt_custom_primary_standby',
+      builtin: false,
+      title: '自定义主备模板',
+      status: 'active',
+    })
+    const createdManual = manualGroupDetail({
+      manual_group_id: 'admg_from_template',
+      title: '模板生成组合',
+      source_type: 'scenario_template',
+      source_group_id: 'adt_custom_primary_standby',
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      templatesBody: [customTemplate],
+      routes: [
+        { url: '/api/asset-decisions/scenario-templates/adt_custom_primary_standby', body: customTemplate },
+        { url: '/api/asset-decisions/scenario-templates/adt_custom_primary_standby/manual-groups', method: 'POST', body: createdManual, status: 201 },
+        { url: '/api/asset-decisions/manual-groups/admg_from_template', body: createdManual },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await openSecondaryWorkbench('场景与组合')
+    await waitFor(() => expect(screen.getAllByText('自定义主备模板').length).toBeGreaterThan(0))
+    const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
+    fireEvent.click(within(templatesSection!).getByRole('button', { name: '使用模板' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '资产决策场景模板详情' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建组合' }))
+    expect(within(dialog).getByRole('heading', { name: '从模板创建自定义组合' })).toBeInTheDocument()
+    fireEvent.change(within(dialog).getByLabelText('标题'), { target: { value: '模板生成组合' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建组合' }))
+
+    await waitFor(() => expect(screen.getByText('已从模板创建自定义组合：模板生成组合')).toBeInTheDocument())
+    expect(await screen.findByRole('dialog', { name: '自定义资产组合详情' })).toBeInTheDocument()
+    expect(findFetchCall(fetchMock, '/api/asset-decisions/scenario-templates/adt_custom_primary_standby/manual-groups', 'POST')).toEqual([
+      '/api/asset-decisions/scenario-templates/adt_custom_primary_standby/manual-groups',
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        credentials: 'include',
+        body: JSON.stringify({
+          title: '模板生成组合',
+          goal: customTemplate.goal,
+          note: '',
+          scenario: 'primary_standby',
+          status: 'active',
+          renew_within_days: 30,
+        }),
       },
     ])
   })
@@ -2175,13 +2480,13 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('打开记录')
+    await openSecondaryWorkbench('保存记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
     const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
     expect(recordsSection).not.toBeNull()
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
-    const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
+    const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
     expect(within(dialog).getByLabelText('保存记录当前判断')).toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { name: '快照对比矩阵' })).not.toBeInTheDocument()
     expect(within(dialog).queryByText('GOAL')).not.toBeInTheDocument()
@@ -2255,21 +2560,16 @@ describe('AssetDecisionsPage', () => {
     expectTaskPanelDensity(dialog, { textMax: 220, interactiveMax: 9, inputsMax: 0, memberRowsMax: 3 })
     expect(within(dialog).queryByLabelText('Germany Primary 跟进状态')).not.toBeInTheDocument()
 
-    // After UI refactor, edit button may not exist - try to find status input directly
-    const editButton = within(dialog).queryByRole('button', { name: '编辑 Germany Primary 跟进' })
-    if (editButton) {
-      fireEvent.click(editButton)
-    }
+    const followupPanel = within(dialog).getByLabelText('成员跟进列表')
+    const primaryFollowupRow = within(followupPanel).getByText('Germany Primary').closest('.asset-decision-record-followup-row') as HTMLElement
+    expect(primaryFollowupRow).not.toBeNull()
+    fireEvent.click(within(primaryFollowupRow).getByRole('button', { name: '编辑跟进' }))
 
-    const statusInput = within(dialog).queryByLabelText('Germany Primary 跟进状态')
-    if (!statusInput) {
-      // Skip this part of test if UI structure changed significantly
-      return
-    }
-
+    const statusInput = within(primaryFollowupRow).getByLabelText('跟进状态')
+    const noteInput = within(primaryFollowupRow).getByLabelText('跟进备注')
     fireEvent.change(statusInput, { target: { value: 'blocked' } })
-    fireEvent.change(within(dialog).getByLabelText('Germany Primary 跟进备注'), { target: { value: '等待迁移窗口' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存跟进' }))
+    fireEvent.change(noteInput, { target: { value: '等待迁移窗口' } })
+    fireEvent.click(within(primaryFollowupRow).getByRole('button', { name: '保存跟进' }))
 
     await waitFor(() => expect(screen.getByText('成员跟进已更新：Germany Primary -> 阻塞')).toBeInTheDocument())
     const secondRecordPatchCalls = fetchMock.mock.calls.filter((call) => (
@@ -2294,7 +2594,7 @@ describe('AssetDecisionsPage', () => {
         }),
       },
     ])
-    expect(within(dialog).getByLabelText('Germany Primary 跟进备注')).toHaveValue('等待迁移窗口')
+    expect(within(primaryFollowupRow).getByLabelText('跟进备注')).toHaveValue('等待迁移窗口')
     expect(within(dialog).getAllByText('有漂移').length).toBeGreaterThan(0)
     expect(within(dialog).queryByText('仍有 active 订阅')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('link', { name: '打开取消/退役工作台' })).not.toBeInTheDocument()
@@ -2305,13 +2605,23 @@ describe('AssetDecisionsPage', () => {
     const hasRawPanel = openSavedRecordRawMembersPanel(dialog)
     if (hasRawPanel) {
       expect(within(dialog).getAllByText('仍有 active 订阅').length).toBeGreaterThan(0)
+      const rawMembers = within(dialog).getByLabelText('决策记录成员')
+      const rawPrimaryRow = within(rawMembers).getByText('Germany Primary').closest('tr') as HTMLElement
+      const rawPrimaryEditButton = within(rawPrimaryRow).queryByRole('button', { name: '编辑' })
+      if (rawPrimaryEditButton) {
+        fireEvent.click(rawPrimaryEditButton)
+      }
+      expect(within(rawPrimaryRow).getByLabelText('跟进状态')).toBeInTheDocument()
+      expect(within(rawPrimaryRow).getByLabelText('跟进备注')).toHaveValue('等待迁移窗口')
+      fireEvent.click(within(rawPrimaryRow).getByRole('button', { name: '收起' }))
     }
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/vps/'))).toBe(false)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/subscriptions/') && call[1]?.method)).toBe(false)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/monitoring-instances/') && call[1]?.method)).toBe(false)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/targets/') && call[1]?.method)).toBe(false)
 
-    fireEvent.click(within(dialog).getByRole('tab', { name: /来源/ }))
+    fireEvent.click(within(dialog).getByRole('tab', { name: '概览' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '复核来源' }))
     expect(within(dialog).queryByText('SOURCE CONTINUITY')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { name: '来源与当前闭环' })).not.toBeInTheDocument()
     const sourcePanel = within(dialog).getByLabelText('决策记录来源连续性')
@@ -2345,20 +2655,20 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('打开记录')
+    await openSecondaryWorkbench('保存记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
     const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
-    const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
+    const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
     // Tab navigation replaces detail directory
     fireEvent.click(within(dialog).getByRole('tab', { name: /执行/ }))
     const executionBoard = within(dialog).getByLabelText('执行编排')
     expect(executionBoard.querySelectorAll('.asset-decision-execution-card')).toHaveLength(3)
-    expect(within(executionBoard).getByText('Record Bulk 1')).toBeInTheDocument()
-    expect(within(executionBoard).getByText('Record Bulk 2')).toBeInTheDocument()
     expect(within(executionBoard).getByText('Record Bulk 3')).toBeInTheDocument()
-    expect(within(executionBoard).queryByText('Record Bulk 8')).not.toBeInTheDocument()
+    expect(within(executionBoard).getByText('Record Bulk 6')).toBeInTheDocument()
+    expect(within(executionBoard).getByText('Record Bulk 2')).toBeInTheDocument()
+    expect(within(executionBoard).queryByText('Record Bulk 1')).not.toBeInTheDocument()
     expect(within(executionBoard).getByText('另有 5 台在成员跟进或底稿中查看')).toBeInTheDocument()
   })
 
@@ -2404,12 +2714,12 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('打开记录')
+    await openSecondaryWorkbench('保存记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
     const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
-    const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
+    const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
     // Tab navigation replaces detail directory
     fireEvent.click(within(dialog).getByRole('tab', { name: /执行/ }))
     expect(within(dialog).getAllByText('证据仍未补齐，先补上下文再确认判断').length).toBeGreaterThan(0)
@@ -2500,12 +2810,12 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('打开记录')
+    await openSecondaryWorkbench('保存记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
     const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
-    const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
+    const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
     // Tab navigation replaces detail directory
     fireEvent.click(within(dialog).getByRole('tab', { name: /执行/ }))
     expect(within(dialog).getAllByText('IP 高风险').length).toBeGreaterThan(0)
@@ -2571,12 +2881,12 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('打开记录')
+    await openSecondaryWorkbench('保存记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
     const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
-    const dialog = await screen.findByRole('dialog', { name: '资产组合决策记录详情' })
+    const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
     expect(within(dialog).getByLabelText('保存记录当前判断')).toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { name: '快照对比矩阵' })).not.toBeInTheDocument()
     expect(within(dialog).queryByText('保存时未记录对比洞察；当前仍保留证据评估快照、成员判断、执行回读和执行编排。')).not.toBeInTheDocument()
@@ -2618,7 +2928,7 @@ describe('AssetDecisionsPage', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('查看单台队列')
+    await openSecondaryWorkbench('单台队列')
     await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
     const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section')
     expect(singleQueue).not.toBeNull()
@@ -2668,7 +2978,7 @@ describe('AssetDecisionsPage', () => {
     )
 
     await waitFor(() => expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0))
-    await openSecondaryWorkbench('查看续费')
+    await openSecondaryWorkbench('续费窗口')
     expect(screen.getByRole('heading', { name: '续费候选不可用' })).toBeInTheDocument()
     expect(screen.getAllByText(/subscription evidence unavailable/).length).toBeGreaterThan(0)
     const groupList = screen.getByRole('heading', { name: '决策组扫描' }).closest('section')
@@ -2677,5 +2987,31 @@ describe('AssetDecisionsPage', () => {
     expect(within(groupList!).queryByText('暂无证据标签')).not.toBeInTheDocument()
     expect(within(groupList!).queryByText('证据稳定')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '单台队列不可用' })).not.toBeInTheDocument()
+  })
+})
+
+describe('AssetDecisionsPage 结构守护', () => {
+  it('主文件不超过 2800 行', async () => {
+    const files = import.meta.glob('./AssetDecisionsPage.tsx', { query: '?raw', import: 'default', eager: true })
+    expect(Object.keys(files)).toEqual(['./AssetDecisionsPage.tsx'])
+    const content = files['./AssetDecisionsPage.tsx']
+    expect(typeof content).toBe('string')
+    expect(countSourceLines(content as string)).toBeLessThanOrEqual(2800)
+  })
+
+  it('弹窗组件各自不超过 500 行', async () => {
+    const files = import.meta.glob('./asset-decisions/modals/*.tsx', { query: '?raw', import: 'default', eager: true })
+    expect(Object.keys(files).sort()).toEqual([
+      './asset-decisions/modals/GroupDetailModal.tsx',
+      './asset-decisions/modals/ManualGroupDetailModal.tsx',
+      './asset-decisions/modals/RecordDetailModal.tsx',
+      './asset-decisions/modals/RenewalDecisionModal.tsx',
+      './asset-decisions/modals/TemplateDetailModal.tsx',
+    ])
+    for (const [path, content] of Object.entries(files)) {
+      expect(typeof content).toBe('string')
+      const lineCount = countSourceLines(content as string)
+      expect(lineCount, `${path} should be <= 500 lines`).toBeLessThanOrEqual(500)
+    }
   })
 })

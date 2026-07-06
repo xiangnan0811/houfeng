@@ -124,13 +124,13 @@ export function PortfolioWorkbench({
 
   return (
     <>
-      <section className={`asset-decision-focus asset-decision-command-summary asset-decision-command-summary--${portfolioLead.tone} asset-decision-primary-focus animate-in d1`} aria-label="资产组合决策当前判断">
+      <section className={`asset-decision-focus asset-decision-command-summary asset-decision-command-summary--${portfolioLead.tone} animate-in d1`} aria-label="资产组合决策当前判断">
         <div className="asset-decision-command-summary__lead">
-          <span className="asset-decision-eyebrow">{portfolioLead.eyebrow}</span>
-          <h2 className="asset-decision-focus-title">{portfolioLead.title}</h2>
-          <p className="asset-decision-focus-summary">{portfolioLead.summary}</p>
+          <span className="section-heading__eyebrow">{portfolioLead.eyebrow}</span>
+          <h2 className="asset-decision-command-summary__title">{portfolioLead.title}</h2>
+          <p className="asset-decision-command-summary__summary">{portfolioLead.summary}</p>
           {portfolioLead.kind === 'work' && portfolioLead.actionLabel && (
-            <div className="asset-decision-command-summary__actions asset-decision-primary-actions">
+            <div className="asset-decision-command-summary__actions">
               <button className="btn lg primary" type="button" onClick={onOpenPortfolioLead}>
                 {portfolioLead.actionLabel}
               </button>
@@ -167,14 +167,14 @@ export function PortfolioWorkbench({
         </div>
       )}
 
-      <div className="asset-decision-primary-grid asset-decision-primary-grid--single asset-decision-secondary-content animate-in d2">
+      <div className="asset-decision-primary-grid asset-decision-primary-grid--single animate-in d2">
         <section className="page-panel asset-decision-command">
           <div className="asset-decision-board__header">
             <div>
-              <p className="section-heading__eyebrow asset-decision-tertiary-text">组合扫描</p>
-              <h2 className="asset-decision-secondary-title">决策组扫描</h2>
+              <p className="section-heading__eyebrow">组合扫描</p>
+              <h2 className="section-heading__title">决策组扫描</h2>
             </div>
-            <div className="asset-decision-board__tools asset-decision-tertiary-controls">
+            <div className="asset-decision-board__tools">
               <div className="asset-decision-window">
                 <span>续费窗口</span>
                 <select
@@ -188,7 +188,7 @@ export function PortfolioWorkbench({
                   ))}
                 </select>
               </div>
-              <p className="asset-decision-tertiary-text">{portfolioState.overviewError ? '组合概览不可用' : `当前显示 ${portfolioState.groups.length} 个组`}</p>
+              <p className="section-count">{portfolioState.overviewError ? '组合概览不可用' : `当前显示 ${portfolioState.groups.length} 个组`}</p>
             </div>
           </div>
           <div className="asset-decision-tabs">

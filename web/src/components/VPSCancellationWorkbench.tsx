@@ -200,9 +200,8 @@ export function VPSCancellationWorkbench({
           <section className="asset-cancel-workbench__section asset-cancel-workbench__section--vps">
             <div className="asset-cancel-workbench__section-head">
               <div>
-                <p className="asset-cancel-workbench__eyebrow">VPS STATE</p>
+                <p className="asset-cancel-workbench__eyebrow">VPS 状态</p>
                 <h3>取消/退役目标</h3>
-                <p>普通 CRUD 不会联动；这里仅提交本次明确确认的 lifecycle action。</p>
               </div>
               <Badge variant="state" tone={vpsLifecycleStatus === 'cancelled' ? 'critical' : 'notice'}>
                 {vpsLifecycleLabel}
@@ -240,9 +239,8 @@ export function VPSCancellationWorkbench({
           <section className="asset-cancel-workbench__section asset-cancel-workbench__section--audit">
             <div className="asset-cancel-workbench__section-head">
               <div>
-                <p className="asset-cancel-workbench__eyebrow">AUDIT</p>
+                <p className="asset-cancel-workbench__eyebrow">确认执行</p>
                 <h3>确认执行</h3>
-                <p>将写入 1 个 lifecycle action，并记录所选对象步骤。</p>
               </div>
               <span className="asset-cancel-workbench__step-count">
                 <MonoDigits>{selectedStepCount}</MonoDigits> steps
@@ -277,20 +275,15 @@ export function VPSCancellationWorkbench({
           <section className="asset-cancel-workbench__section">
             <div className="asset-cancel-workbench__section-head">
               <div>
-                <p className="asset-cancel-workbench__eyebrow">SUBSCRIPTIONS</p>
+                <p className="asset-cancel-workbench__eyebrow">订阅</p>
                 <h3>订阅处理</h3>
-                {activeSubscriptions.length > 0 ? (
-                  <p>active 订阅不会自动勾选；必须显式选择本次要取消自动续费的订阅。</p>
-                ) : (
-                  <p>非活跃订阅只作为证据保留，不会重复变更。</p>
-                )}
               </div>
               <span className="asset-cancel-workbench__step-count">
                 <MonoDigits>{subscriptionIDs.length}</MonoDigits> selected
               </span>
             </div>
             {preview.subscriptions.length === 0 ? (
-              <p className="asset-cancel-workbench__empty">没有订阅记录；仍可继续处理 VPS、监控实例与入口探测。</p>
+              <p className="asset-cancel-workbench__empty">没有订阅记录。</p>
             ) : (
               <div className="asset-cancel-workbench__list">
                 {preview.subscriptions.map((impact) => {
@@ -331,9 +324,8 @@ export function VPSCancellationWorkbench({
           <section className="asset-cancel-workbench__section">
             <div className="asset-cancel-workbench__section-head">
               <div>
-                <p className="asset-cancel-workbench__eyebrow">MONITORING INSTANCES</p>
+                <p className="asset-cancel-workbench__eyebrow">监控实例</p>
                 <h3>监控实例确认</h3>
-                <p>未勾选的监控实例只保留预览证据，不会修改生命周期或监控。</p>
               </div>
               <span className="asset-cancel-workbench__step-count">
                 <MonoDigits>{selectedMonitoringInstanceCount}</MonoDigits> selected
@@ -402,16 +394,15 @@ export function VPSCancellationWorkbench({
           <section className="asset-cancel-workbench__section">
             <div className="asset-cancel-workbench__section-head">
               <div>
-                <p className="asset-cancel-workbench__eyebrow">TARGETS</p>
+                <p className="asset-cancel-workbench__eyebrow">入口探测</p>
                 <h3>Target/实例确认</h3>
-                <p>未勾选的 Target 继续保持当前运行状态。</p>
               </div>
               <span className="asset-cancel-workbench__step-count">
                 <MonoDigits>{selectedTargetCount}</MonoDigits> selected
               </span>
             </div>
             {preview.target_links.length === 0 ? (
-              <p className="asset-cancel-workbench__empty">没有通过服务或域名关联的 Target/实例。</p>
+              <p className="asset-cancel-workbench__empty">没有关联的 Target/实例。</p>
             ) : (
               <div className="asset-cancel-workbench__list">
                 {preview.target_links.map((target) => {

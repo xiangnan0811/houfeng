@@ -28,6 +28,7 @@ import {
   vpsLocationLabel,
 } from '../../assetPageUtils'
 import { AssetDecisionSecondaryNav } from '../AssetDecisionSecondaryNav'
+import { vpsDetailPath, vpsWorkbenchPath } from '../paths'
 import type {
   DecisionQueueView,
   DecisionQueueItem,
@@ -209,7 +210,7 @@ export function SecondaryWorkbenches({
 
   return (
     <>
-      <div className="asset-decision-topology asset-decision-secondary-level animate-in d2">
+      <div className="asset-decision-topology animate-in d2">
         <AssetDecisionSecondaryNav
           items={secondaryNavItems}
           active={secondaryWorkbench}
@@ -218,17 +219,17 @@ export function SecondaryWorkbenches({
       </div>
 
       {secondaryWorkbench === 'scenarios' && (
-        <section className="page-panel asset-decision-scenario-records asset-decision-tertiary-surface animate-in d3">
+        <section className="page-panel asset-decision-scenario-records animate-in d3">
           <div className="asset-decision-board__header">
             <div>
-              <p className="section-heading__eyebrow asset-decision-tertiary-text">场景工作区</p>
-              <h2 className="asset-decision-tertiary-title">场景工作区</h2>
+              <p className="section-heading__eyebrow">场景工作区</p>
+              <h2 className="section-heading__title">场景工作区</h2>
             </div>
             <div className="asset-decision-board__tools">
-              <span className="section-count asset-decision-tertiary-text">
+              <span className="section-count">
                 模板 {templatesState.loading ? '...' : templatesState.error ? '不可用' : templatesState.templates.length}
               </span>
-              <span className="section-count asset-decision-tertiary-text">
+              <span className="section-count">
                 组合 {manualGroupsState.loading ? '...' : manualGroupsState.error ? '不可用' : manualGroupsState.groups.length}
               </span>
             </div>
@@ -238,8 +239,8 @@ export function SecondaryWorkbenches({
             <section className="asset-decision-scenario-card asset-decision-templates" aria-label="场景模板">
               <div className="asset-decision-scenario-card__head">
                 <div>
-                  <p className="section-heading__eyebrow asset-decision-tertiary-text">场景模板</p>
-                  <h3 className="asset-decision-tertiary-title">场景模板</h3>
+                  <p className="section-heading__eyebrow">场景模板</p>
+                  <h3 className="section-heading__title">场景模板</h3>
                 </div>
               </div>
               {templatesState.loading ? (
@@ -289,8 +290,8 @@ export function SecondaryWorkbenches({
             <section className="asset-decision-scenario-card asset-decision-manual-groups" aria-label="自定义组合">
               <div className="asset-decision-scenario-card__head">
                 <div>
-                  <p className="section-heading__eyebrow asset-decision-tertiary-text">自定义组合</p>
-                  <h3 className="asset-decision-tertiary-title">自定义组合</h3>
+                  <p className="section-heading__eyebrow">自定义组合</p>
+                  <h3 className="section-heading__title">自定义组合</h3>
                 </div>
               </div>
               {manualGroupsState.loading ? (
@@ -326,11 +327,11 @@ export function SecondaryWorkbenches({
       )}
 
       {secondaryWorkbench === 'records' && (
-        <section className="page-panel asset-decision-scenario-card asset-decision-records asset-decision-tertiary-surface animate-in d3" aria-label="已保存组合决策">
+        <section className="page-panel asset-decision-scenario-card asset-decision-records animate-in d3" aria-label="已保存组合决策">
           <div className="asset-decision-scenario-card__head">
             <div>
-              <p className="section-heading__eyebrow asset-decision-tertiary-text">保存记录</p>
-              <h3 className="asset-decision-tertiary-title">已保存组合决策</h3>
+              <p className="section-heading__eyebrow">保存记录</p>
+              <h3 className="section-heading__title">已保存组合决策</h3>
             </div>
           </div>
           {recordsState.loading ? (
@@ -364,13 +365,13 @@ export function SecondaryWorkbenches({
       )}
 
       {secondaryWorkbench === 'renewals' && (
-        <section className="page-panel asset-renewal-evidence asset-decision-support-surface asset-decision-tertiary-surface animate-in d4">
+        <section className="page-panel asset-renewal-evidence animate-in d4">
           <div className="section-heading section-heading--inline">
             <div>
-              <p className="section-heading__eyebrow asset-decision-tertiary-text">续费事实</p>
-              <h2 className="section-heading__title asset-decision-tertiary-title">续费事实</h2>
+              <p className="section-heading__eyebrow">续费事实</p>
+              <h2 className="section-heading__title">续费事实</h2>
             </div>
-            <span className={`section-count asset-decision-tertiary-text${queueState.renewals.length > 0 ? ' section-count--warn' : ''}`}>
+            <span className={`section-count${queueState.renewals.length > 0 ? ' section-count--warn' : ''}`}>
               {queueState.renewalsLoading ? '...' : queueState.renewalsError ? '不可用' : `${queueState.renewals.length} 条`}
             </span>
           </div>
@@ -380,14 +381,14 @@ export function SecondaryWorkbenches({
             renewals={queueState.renewals}
             vpsByID={vpsByID}
             renderVPSReference={(subscription, vps) => (
-              <Link className="name" to={`/vps/${subscription.vps_id}`}>
+              <Link className="name" to={vpsDetailPath(subscription.vps_id)}>
                 {vps?.display_name ?? subscription.vps_id}
               </Link>
             )}
             renderActions={(subscription) => (
               <>
                 <Link className="btn-text sm secondary" to={`/asset-decisions?view=renewal&renew_within_days=${renewalWindow}`}>组合判断</Link>
-                <Link className="btn-text sm secondary" to={`/vps/${subscription.vps_id}`}>VPS 详情</Link>
+                <Link className="btn-text sm secondary" to={vpsDetailPath(subscription.vps_id)}>VPS 详情</Link>
               </>
             )}
           />
@@ -395,13 +396,13 @@ export function SecondaryWorkbenches({
       )}
 
       {secondaryWorkbench === 'single_queue' && (
-        <section id="single-vps-queue" className="page-panel asset-decision-single-queue asset-decision-support-surface asset-decision-tertiary-surface animate-in d5">
+        <section id="single-vps-queue" className="page-panel asset-decision-single-queue animate-in d5">
           <div className="asset-decision-board__header">
             <div>
-              <p className="section-heading__eyebrow asset-decision-tertiary-text">单台辅助</p>
-              <h2 className="asset-decision-tertiary-title">单台辅助队列</h2>
+              <p className="section-heading__eyebrow">单台辅助</p>
+              <h2 className="section-heading__title">单台辅助队列</h2>
             </div>
-            <span className="section-count asset-decision-tertiary-text">
+            <span className="section-count">
               {queueState.queueLoading ? '...' : `${visibleDecisionQueue.length} / ${totalDecisionQueue}`}
             </span>
           </div>
@@ -538,7 +539,7 @@ export function SecondaryWorkbenches({
                           处理
                         </button>
                         {item.vps.renewal_decision === 'cancel' || hasCancellationAttention(item) ? (
-                          <Link className="btn sm secondary" to={`/vps/${item.vps.vps_id}?workbench=cancellation`}>
+                          <Link className="btn sm secondary" to={vpsWorkbenchPath(item.vps.vps_id, 'cancellation')}>
                             取消/退役
                           </Link>
                         ) : null}

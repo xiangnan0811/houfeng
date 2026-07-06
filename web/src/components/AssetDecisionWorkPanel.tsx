@@ -52,7 +52,7 @@ export function AssetDecisionWorkPanel({
       {surface === 'panel' && (
         <div className="section-heading">
           <div>
-            <p className="section-heading__eyebrow">DECISION</p>
+            <p className="section-heading__eyebrow">续费决策</p>
             <h2>处理面板</h2>
           </div>
         </div>
@@ -106,7 +106,7 @@ export function AssetDecisionWorkPanel({
           <div className="asset-operation-form__header">
             <div>
               <h3>选择一台 VPS</h3>
-              <p>从左侧队列进入处理；已确认保留、观察或已替换的资产会离开当前工作台队列。</p>
+              <p>从队列进入处理。</p>
             </div>
           </div>
           {notice && <p className="asset-operation-feedback" role="status">{notice}</p>}

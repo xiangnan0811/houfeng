@@ -151,7 +151,8 @@ describe('VPSCancellationWorkbench', () => {
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
-  it('does not preselect multiple active subscriptions', () => {
+  it('does not preselect multiple active subscriptions', async () => {
+    const onSubmit = vi.fn()
     const preview = previewFixture()
     preview.subscriptions = [
       preview.subscriptions[0],
@@ -170,14 +171,25 @@ describe('VPSCancellationWorkbench', () => {
         submitting={false}
         error={null}
         result={null}
-        onSubmit={vi.fn()}
+        onSubmit={onSubmit}
       />,
     )
 
-    const first = within(screen.getByText('sub_001').closest('.asset-cancel-workbench__row')!).getByRole('checkbox')
-    const second = within(screen.getByText('sub_002').closest('.asset-cancel-workbench__row')!).getByRole('checkbox')
+    const firstRow = screen.getByText('sub_001').closest('.asset-cancel-workbench__row') as HTMLElement
+    const secondRow = screen.getByText('sub_002').closest('.asset-cancel-workbench__row') as HTMLElement
+    const first = within(firstRow).getByRole('checkbox')
+    const second = within(secondRow).getByRole('checkbox')
     expect(first).not.toBeChecked()
     expect(second).not.toBeChecked()
-    expect(screen.getByText('active 订阅不会自动勾选；必须显式选择本次要取消自动续费的订阅。')).toBeInTheDocument()
+    expect(firstRow).toHaveTextContent('需要显式确认取消自动续费')
+    expect(secondRow).toHaveTextContent('需要显式确认取消自动续费')
+
+    fireEvent.change(screen.getByLabelText('原因'), {
+      target: { value: '已过期且不准备续费' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('请显式选择要取消自动续费的 active 订阅。')
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 })
