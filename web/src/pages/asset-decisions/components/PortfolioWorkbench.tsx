@@ -167,7 +167,7 @@ export function PortfolioWorkbench({
         </div>
       )}
 
-      <div className="asset-decision-primary-grid asset-decision-primary-grid--single animate-in d2">
+      <div className="page-panel--scan page-panel--scan--single animate-in d2">
         <section className="page-panel asset-decision-command">
           <div className="asset-decision-board__header">
             <div>
