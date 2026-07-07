@@ -162,7 +162,7 @@ it('applies variant class', () => {
 ### 不在 verify 链路里的东西
 
 - **可视化回归 / 截图对比**不在 `make verify-web`。当前 UI 指导见 `docs/design/current/{interface-language.md,component-patterns.md}`；预览、浏览器 sanity 与本地截图政策见 `docs/operations/ui-preview-and-browser-sanity.md`。bulk screenshot evidence 与 manifest 不再 tracked；新 raster 图片只有在用户明确批准为 public README/docs asset 时才可提交到 allowlisted docs asset path。旧截图流程与一次性历史截图不是当前 workflow。
-- **本地 browser sanity**可用 `python3 scripts/visual_evidence.py browser-sanity --base-url <url> --route <route> ...` 复用标准几何检查；它依赖本机 Python Playwright 时必须在 PR / final report 里标注为 local-only evidence。缺少本机 Playwright 是证据阻塞项，不要把 Playwright/Cypress/WebDriverIO 加进 `web/package.json` 来绕过。
+- **本地 browser sanity**优先用 `python3 scripts/visual_evidence.py browser-sanity --base-url <url> --route <route> ...` 复用标准几何检查；它依赖本机 Python Playwright 时必须在 PR / final report 里标注为 local-only evidence。缺少本机 Python Playwright 只说明这条 helper 路径不可用，不能直接断言“浏览器 sanity 被阻塞”；先检查是否可用本机 Chromium remote debugging + CDP（例如 Node 原生 WebSocket）或其它已安装浏览器工具取得等价 route / viewport / selector 证据。无论走哪条本地路径，都不要把 Playwright/Cypress/WebDriverIO 加进 `web/package.json` 来绕过。
 - **真实 center 烟囱**由 `docs/operations/fresh-install-smoke-run.md` 承担，前端只在浏览器里 sanity check。
 
 ---
