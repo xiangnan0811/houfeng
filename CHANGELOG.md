@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.57.0](https://github.com/xiangnan0811/houfeng/compare/v0.56.15...v0.57.0) (2026-07-07)
+
+
+### Features
+
+* **web:** 统一视觉统计卡片与工作台概览 ([180674c](https://github.com/xiangnan0811/houfeng/commit/180674c24ac5f1c257948390ca184b6f83ab7779))
+* **web:** 统一视觉统计卡片与工作台概览 ([3cbb5bf](https://github.com/xiangnan0811/houfeng/commit/3cbb5bf11d1f89c44407672675d7e7fc95ef7282))
+
+
+### Bug Fixes
+
+* **web:** stabilize VPS actions menu listener ([773f21a](https://github.com/xiangnan0811/houfeng/commit/773f21a24078bd3dc41f5904bcb8de1ee47d4649))
+
 ## [0.56.15](https://github.com/xiangnan0811/houfeng/compare/v0.56.14...v0.56.15) (2026-07-06)
 
 
