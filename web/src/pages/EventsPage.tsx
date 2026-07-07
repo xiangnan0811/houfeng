@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-import { Sparkline } from '../components/atoms'
+import { Sparkline, StatCard } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import {
   ApiError,
@@ -449,21 +449,17 @@ export function EventsPage() {
       </div>
 
       {dashboard && (
-        <div className="hero-stats animate-in d1">
-          <div className="hero-stat">
-            <span className="hs-label">新增异常 (24h)</span>
-            <span className="hs-value">{dashboard.recent_new_incident_count}</span>
-            {dashboard.new_incident_trend_24h && (
-              <Sparkline values={dashboard.new_incident_trend_24h} tone="alert" />
-            )}
-          </div>
-          <div className="hero-stat">
-            <span className="hs-label">已恢复 (24h)</span>
-            <span className="hs-value">{dashboard.recent_recovery_count}</span>
-            {dashboard.recovery_trend_24h && (
-              <Sparkline values={dashboard.recovery_trend_24h} tone="normal" />
-            )}
-          </div>
+        <div className="stat-grid">
+          <StatCard
+            value={dashboard.recent_new_incident_count}
+            label="新增异常 (24h)"
+            sub={dashboard.new_incident_trend_24h ? <Sparkline values={dashboard.new_incident_trend_24h} tone="alert" /> : undefined}
+          />
+          <StatCard
+            value={dashboard.recent_recovery_count}
+            label="已恢复 (24h)"
+            sub={dashboard.recovery_trend_24h ? <Sparkline values={dashboard.recovery_trend_24h} tone="normal" /> : undefined}
+          />
         </div>
       )}
 

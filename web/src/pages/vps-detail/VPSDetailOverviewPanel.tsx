@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 
 import { Badge, Button } from '../../components/atoms'
 import type { VPSDetailOverviewModel, VPSOverviewAction } from './vpsDetailOverviewModel'
@@ -65,7 +65,7 @@ export function VPSDetailOverviewPanel({
 }: VPSDetailOverviewPanelProps) {
   const actionsMenuRef = useRef<HTMLDetailsElement | null>(null)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     function handleDocumentPointerDown(event: PointerEvent) {
       const menu = actionsMenuRef.current
       if (!menu?.open) return

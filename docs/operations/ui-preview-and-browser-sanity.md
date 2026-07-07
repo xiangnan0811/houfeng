@@ -73,6 +73,8 @@ If no `--viewport` is provided, the helper uses the standard `1440x1000` and `39
 
 The browser sanity helper uses locally installed Python Playwright when available. The repository intentionally does not depend on Playwright/Cypress/WebDriverIO, so a missing browser driver is a local tooling limitation to report, not a CI failure.
 
+Missing Python Playwright only blocks this repo-local helper path. Before reporting browser sanity as blocked, check whether the machine has another local browser automation path that can produce equivalent route/viewport evidence, such as Chromium launched with remote debugging plus CDP over Node's native WebSocket. Report that evidence as local browser sanity, including the browser/runtime used, routes, viewports, key selectors or counters checked, and any limitation. Do not add browser automation dependencies to `web/package.json` just to make one local evidence path work.
+
 If your machine has multiple Python versions, run the helper with the interpreter that owns the local Playwright package, for example:
 
 ```bash
@@ -234,6 +236,7 @@ Current repository constraints:
 - Do not add Playwright, Cypress, WebDriverIO, or screenshot diffing dependencies in ordinary UI tasks.
 - Do not add CI visual regression without a dedicated architecture decision.
 - If a local browser automation run depends on machine-specific tools, record it as local evidence and include the limitation.
+- If `scripts/visual_evidence.py browser-sanity` is unavailable because Python Playwright is missing, do not automatically mark browser sanity as blocked; first check whether a CDP/Chromium path or another already-installed local browser tool can verify the same route/viewport and selector-level expectations.
 - Do not commit screenshot directories or manifests by default; attach local screenshots externally or use approved public assets only.
 
 ## PR / final-report template

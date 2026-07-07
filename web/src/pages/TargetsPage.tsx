@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Button, Input, Modal, Hostname, MonoDigits, StatusGlyph, Timestamp } from '../components/atoms'
+import { Button, Input, Modal, Hostname, MonoDigits, StatusGlyph, Timestamp, StatCard } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import { StatusBadge } from '../components/StatusBadge'
 import {
@@ -555,29 +555,11 @@ export function TargetsPage() {
         </div>
       </div>
 
-      <div className="hero-stats animate-in">
-        <div className="hero-stat">
-          <div className="hs-label">全部目标</div>
-          <div className="hs-value"><MonoDigits>{targets.length}</MonoDigits></div>
-        </div>
-        <div className="hero-stat">
-          <div className="hs-label">异常</div>
-          <div className={`hs-value${abnormalTargetCount > 0 ? ' danger' : ''}`}>
-            <MonoDigits>{abnormalTargetCount}</MonoDigits>
-          </div>
-        </div>
-        <div className="hero-stat">
-          <div className="hs-label">启用</div>
-          <div className="hs-value">
-            <MonoDigits>{targets.filter((t) => t.run_status === '启用').length}</MonoDigits>
-          </div>
-        </div>
-        <div className="hero-stat">
-          <div className="hs-label">暂停/归档</div>
-          <div className={`hs-value${(pausedTargetCount + archivedTargetCount) > 0 ? ' muted' : ''}`}>
-            <MonoDigits>{pausedTargetCount + archivedTargetCount}</MonoDigits>
-          </div>
-        </div>
+      <div className="stat-grid">
+        <StatCard value={<MonoDigits>{targets.length}</MonoDigits>} label="全部目标" />
+        <StatCard value={<MonoDigits>{abnormalTargetCount}</MonoDigits>} label="异常" tone={abnormalTargetCount > 0 ? 'err' : 'normal'} />
+        <StatCard value={<MonoDigits>{targets.filter((t) => t.run_status === '启用').length}</MonoDigits>} label="启用" />
+        <StatCard value={<MonoDigits>{pausedTargetCount + archivedTargetCount}</MonoDigits>} label="暂停/归档" tone={(pausedTargetCount + archivedTargetCount) > 0 ? 'warn' : 'normal'} />
       </div>
 
       <TargetsSupportSurface

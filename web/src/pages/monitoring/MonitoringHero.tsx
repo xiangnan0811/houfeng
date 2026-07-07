@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 
-import { MonoDigits } from '../../components/atoms'
+import { MonoDigits, StatCard } from '../../components/atoms'
 
 type MonitoringHeroProps = {
   totalMonitoringInstanceCount: number
@@ -34,29 +34,11 @@ export function MonitoringHero({
           </Link>
         </div>
       </div>
-      <div className="hero-stats animate-in">
-        <button type="button" className="hero-stat" onClick={onAbnormalClick}>
-          <div className="hs-label">全部监控实例</div>
-          <div className="hs-value"><MonoDigits>{totalMonitoringInstanceCount}</MonoDigits></div>
-        </button>
-        <button type="button" className="hero-stat" onClick={onAbnormalClick}>
-          <div className="hs-label">异常</div>
-          <div className={`hs-value${abnormalMonitoringInstanceCount > 0 ? ' danger' : ''}`}>
-            <MonoDigits>{abnormalMonitoringInstanceCount}</MonoDigits>
-          </div>
-        </button>
-        <button type="button" className="hero-stat" onClick={onOnboardingClick}>
-          <div className="hs-label">待接入</div>
-          <div className={`hs-value${pendingOnboardingMonitoringInstanceCount > 0 ? ' warn' : ''}`}>
-            <MonoDigits>{pendingOnboardingMonitoringInstanceCount}</MonoDigits>
-          </div>
-        </button>
-        <button type="button" className="hero-stat" onClick={onRuntimeAttentionClick}>
-          <div className="hs-label">维护/暂停</div>
-          <div className={`hs-value${maintenanceOrPausedMonitoringInstanceCount > 0 ? ' muted' : ''}`}>
-            <MonoDigits>{maintenanceOrPausedMonitoringInstanceCount}</MonoDigits>
-          </div>
-        </button>
+      <div className="stat-grid">
+        <StatCard value={<MonoDigits>{totalMonitoringInstanceCount}</MonoDigits>} label="全部监控实例" onClick={onAbnormalClick} />
+        <StatCard value={<MonoDigits>{abnormalMonitoringInstanceCount}</MonoDigits>} label="异常" tone={abnormalMonitoringInstanceCount > 0 ? 'err' : 'normal'} onClick={onAbnormalClick} />
+        <StatCard value={<MonoDigits>{pendingOnboardingMonitoringInstanceCount}</MonoDigits>} label="待接入" tone={pendingOnboardingMonitoringInstanceCount > 0 ? 'warn' : 'normal'} onClick={onOnboardingClick} />
+        <StatCard value={<MonoDigits>{maintenanceOrPausedMonitoringInstanceCount}</MonoDigits>} label="维护/暂停" tone={maintenanceOrPausedMonitoringInstanceCount > 0 ? 'warn' : 'normal'} onClick={onRuntimeAttentionClick} />
       </div>
     </>
   )

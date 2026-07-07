@@ -233,7 +233,7 @@ describe('DashboardPage', () => {
     expect(screen.getByText('14天内续费')).toBeInTheDocument()
     expect(screen.getByText('月均成本')).toBeInTheDocument()
     expect(screen.getAllByText('预算风险').length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByText('订阅预算接近或超过上限').closest('.wb-att-item')!)
+    fireEvent.click(screen.getByText('订阅预算接近或超过上限').closest('.dash-att')!)
     expect(screen.getByTestId('location-probe')).toHaveTextContent('/asset-decisions?view=cost&renew_within_days=30&scenario=budget_reduction')
     expect(screen.queryByText('资产决策队列')).not.toBeInTheDocument()
 
