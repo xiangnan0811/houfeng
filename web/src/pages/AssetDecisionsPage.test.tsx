@@ -1579,8 +1579,9 @@ describe('AssetDecisionsPage', () => {
     expect(within(dialog).getByText('Bulk Member 8')).toBeInTheDocument()
     const rawMemberRow = within(dialog).getByText('Bulk Member 8').closest('tr') as HTMLElement
     fireEvent.click(within(rawMemberRow).getByRole('button', { name: '移除' }))
-    expect(within(dialog).getByRole('alertdialog', { name: '确认移除组合成员' })).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+    const removalConfirmation = await screen.findByRole('alertdialog', { name: '确认移除组合成员' })
+    expect(within(dialog).queryByRole('alertdialog', { name: '确认移除组合成员' })).not.toBeInTheDocument()
+    fireEvent.click(within(removalConfirmation).getByRole('button', { name: '取消' }))
 
     fireEvent.click(within(dialog).getByRole('tab', { name: '概览' }))
     fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
@@ -2236,7 +2237,8 @@ describe('AssetDecisionsPage', () => {
     // Tab navigation replaces detail directory
     openManualGroupMembers(dialog)
     fireEvent.click(within(dialog).getByRole('button', { name: '移除' }))
-    const confirmation = within(dialog).getByRole('alertdialog', { name: '确认移除组合成员' })
+    const confirmation = await screen.findByRole('alertdialog', { name: '确认移除组合成员' })
+    expect(within(dialog).queryByRole('alertdialog', { name: '确认移除组合成员' })).not.toBeInTheDocument()
     expect(screen.queryAllByRole('dialog')).toHaveLength(1)
     expect(findFetchCall(fetchMock, '/api/asset-decisions/manual-groups/admg_001/members/vps_primary', 'DELETE')).toBeUndefined()
 
@@ -2303,7 +2305,8 @@ describe('AssetDecisionsPage', () => {
     const archiveButton = within(dialog).getByRole('button', { name: '归档模板' })
 
     fireEvent.click(archiveButton)
-    const confirmation = within(dialog).getByRole('alertdialog', { name: '确认归档模板' })
+    const confirmation = await screen.findByRole('alertdialog', { name: '确认归档模板' })
+    expect(within(dialog).queryByRole('alertdialog', { name: '确认归档模板' })).not.toBeInTheDocument()
     expect(within(confirmation).getByText('归档后不能直接从该模板创建新组合。')).toBeInTheDocument()
     expect(screen.queryAllByRole('dialog')).toHaveLength(1)
     expect(findFetchCall(fetchMock, '/api/asset-decisions/scenario-templates/adt_custom_primary_standby', 'PATCH')).toBeUndefined()
@@ -2991,15 +2994,15 @@ describe('AssetDecisionsPage', () => {
 })
 
 describe('AssetDecisionsPage 结构守护', () => {
-  it('主文件不超过 2800 行', async () => {
+  it('主文件不超过 800 行', async () => {
     const files = import.meta.glob('./AssetDecisionsPage.tsx', { query: '?raw', import: 'default', eager: true })
     expect(Object.keys(files)).toEqual(['./AssetDecisionsPage.tsx'])
     const content = files['./AssetDecisionsPage.tsx']
     expect(typeof content).toBe('string')
-    expect(countSourceLines(content as string)).toBeLessThanOrEqual(2800)
+    expect(countSourceLines(content as string)).toBeLessThanOrEqual(800)
   })
 
-  it('弹窗组件各自不超过 500 行', async () => {
+  it('弹窗组件各自不超过 200 行', async () => {
     const files = import.meta.glob('./asset-decisions/modals/*.tsx', { query: '?raw', import: 'default', eager: true })
     expect(Object.keys(files).sort()).toEqual([
       './asset-decisions/modals/GroupDetailModal.tsx',
@@ -3011,7 +3014,21 @@ describe('AssetDecisionsPage 结构守护', () => {
     for (const [path, content] of Object.entries(files)) {
       expect(typeof content).toBe('string')
       const lineCount = countSourceLines(content as string)
-      expect(lineCount, `${path} should be <= 500 lines`).toBeLessThanOrEqual(500)
+      expect(lineCount, `${path} should be <= 200 lines`).toBeLessThanOrEqual(200)
+    }
+  })
+
+  it('不再使用资产决策 primary/secondary/tertiary 碎片层级类', async () => {
+    const sourceFiles = import.meta.glob([
+      './AssetDecisionsPage.tsx',
+      './AssetDecisionsPageContent.tsx',
+      './asset-decisions/**/*.tsx',
+      '../index.css',
+    ], { query: '?raw', import: 'default', eager: true })
+
+    for (const [path, content] of Object.entries(sourceFiles)) {
+      expect(typeof content).toBe('string')
+      expect(content as string, path).not.toMatch(/asset-decision-(primary|secondary|tertiary)-/)
     }
   })
 })

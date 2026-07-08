@@ -1750,3 +1750,36 @@ Completed asset decision page workflow fixes, backend archived-template guard, v
 ### Next Steps
 
 - None - task complete
+
+
+## Session 229: Asset decisions IA reset closeout
+
+**Date**: 2026-07-07
+**Task**: Asset decisions IA reset closeout
+**Branch**: `refactor/asset-decisions-ia-reset-closeout`
+
+### Summary
+
+Confirmed the asset-decisions IA reset task was still active after PR merge, closed the remaining structural guards on a non-main branch, replaced embedded confirmations with ActionConfirmationModal, tightened tests, and verified web quality plus local browser sanity.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `76dadb6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
