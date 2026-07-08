@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.57.1](https://github.com/xiangnan0811/houfeng/compare/v0.57.0...v0.57.1) (2026-07-08)
+
+
+### Build System
+
+* **release:** publish asset-decisions closeout image ([b21a538](https://github.com/xiangnan0811/houfeng/commit/b21a538dc5437292729b0534e54d617362d09128))
+* **release:** publish asset-decisions closeout image ([646dbc1](https://github.com/xiangnan0811/houfeng/commit/646dbc12c58111e28633f627495cf56ef67a7434))
+
 ## [0.57.0](https://github.com/xiangnan0811/houfeng/compare/v0.56.15...v0.57.0) (2026-07-07)
 
 
