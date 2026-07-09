@@ -322,11 +322,10 @@ summary:focus-visible,
   cursor: pointer;
   transition: background var(--dur-state, 0.18s) var(--ease-calm, ease), border-color var(--dur-state, 0.18s) var(--ease-calm, ease);
 }
-/* 中和 index.css 旧 .toggle::after 残留的白色圆点（仅本套重设计使用文字态） */
+/* index.css 的 .toggle::after 白色圆点残留已在拆分时彻底移除，此处无需再中和 */
 .toggle::after {
   content: 'OFF';
   position: absolute;
-  left: auto;
   right: 9px;
   top: 50%;
   transform: translateY(-50%);
@@ -334,7 +333,6 @@ summary:focus-visible,
   height: auto;
   background: transparent;
   border: none;
-  border-radius: 0;
   box-shadow: none;
   font-size: 9px;
   font-weight: 800;

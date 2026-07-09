@@ -1,0 +1,11 @@
+/* partial: overlays.css (extracted from index.css; do not hand-edit large rules here) */
+/* === Tooltip & Popover (Scheme B: Bordered Arrow) === */
+.tip{padding:6px 10px;border-radius:6px;background:var(--tooltip-bg);color:var(--tooltip-c);font-size:11px;font-weight:500;white-space:nowrap;box-shadow:var(--shadow-md);border:1px solid var(--tooltip-bd);z-index:1000;position:absolute;pointer-events:none}
+.tip .tip-arrow{position:absolute;top:-4px;left:50%;width:8px;height:8px;background:var(--tooltip-bg);border-left:1px solid var(--tooltip-bd);border-top:1px solid var(--tooltip-bd);transform:translateX(-50%) rotate(45deg)}
+.tip kbd{font-family:"IBM Plex Mono",monospace;font-size:9.5px;padding:1px 5px;border-radius:3px;background:var(--item-bg);border:1px solid var(--tooltip-bd);color:var(--tooltip-c);margin-left:6px}
+.popover{padding:12px 14px;border-radius:8px;background:var(--tooltip-bg);box-shadow:var(--shadow-md);border:1px solid var(--tooltip-bd);min-width:190px;z-index:1000;position:absolute}
+.popover .pop-arrow{position:absolute;top:-5px;left:20px;width:10px;height:10px;background:var(--tooltip-bg);border-left:1px solid var(--tooltip-bd);border-top:1px solid var(--tooltip-bd);transform:rotate(45deg)}
+.popover .pop-title{font-size:12px;font-weight:600;color:var(--tooltip-c);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--tooltip-bd)}
+.popover .pop-row{display:flex;justify-content:space-between;padding:3px 0;font-size:11px}
+.popover .pop-k{color:var(--t3)}
+.popover .pop-v{color:var(--tooltip-c);font-weight:500}
