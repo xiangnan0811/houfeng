@@ -1,9 +1,34 @@
 /// <reference types="node" />
 
 import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const indexCss = readFileSync('src/index.css', 'utf8')
+const indexPath = 'src/index.css'
+
+/**
+ * index.css is now a manifest of `@import './styles/partials/*.css'` statements.
+ * Vite inlines those partials in import order, so the contract must run against
+ * the final, concatenated stylesheet (identical to what the browser receives).
+ * We resolve the @import chain here so the same assertions hold post-split.
+ */
+function resolveImported(filePath: string, seen = new Set<string>()): string {
+  const full = resolve(filePath)
+  if (seen.has(full)) return ''
+  seen.add(full)
+  const raw = readFileSync(full, 'utf8')
+  const dir = dirname(full)
+  return raw
+    .split('\n')
+    .map((line) => {
+      const m = line.match(/^\s*@import\s+['"]([^'"]+)['"]\s*;?/)
+      if (m) return resolveImported(resolve(dir, m[1]), seen)
+      return line
+    })
+    .join('\n')
+}
+
+const indexCss = resolveImported(indexPath)
 const loginPageCss = readFileSync('src/pages/LoginPage.css', 'utf8')
 
 function ruleBody(css: string, selector: string): string {

@@ -1,0 +1,55 @@
+/* partial: dashboard.css (extracted from index.css; do not hand-edit large rules here) */
+/* === Dashboard v2: inner list components (replaces legacy .wb-*) === */
+.dash-att{display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:5px;font-size:12px;transition:background 0.12s}
+.dash-att--clickable{cursor:pointer}
+.dash-att--clickable:hover{background:var(--nav-active)}
+.dash-att-body{flex:1;min-width:0}
+.dash-att-text{font-size:11.5px;color:var(--text-primary);font-weight:500;display:block;line-height:1.4}
+.dash-att-meta{font-size:10.5px;color:var(--text-muted);display:block;margin-top:2px}
+.dash-row{display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:5px;cursor:pointer;transition:background 0.12s;font-size:12px}
+.dash-row:hover{background:var(--nav-active)}
+.dash-row .dot{margin-right:0;flex-shrink:0}
+.dash-row-name{color:var(--text-primary);font-weight:500;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dash-row-meta{font-size:10.5px;color:var(--text-muted);flex-shrink:0}
+.dash-row-val{font-size:11.5px;color:var(--text-secondary);font-weight:500;flex-shrink:0;text-align:right}
+.dash-row-val.is-warn{color:var(--warn)}
+.dash-evt{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:5px;font-size:11.5px;color:var(--text-secondary)}
+.dash-evt-time{font-size:10px;color:var(--text-muted);font-family:"IBM Plex Mono",monospace;width:34px;flex-shrink:0}
+.dash-evt-text{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dash-kv{display:flex;align-items:center;justify-content:space-between;padding:5px 6px;font-size:11.5px;color:var(--text-secondary)}
+.dash-kv .mono{font-family:"IBM Plex Mono",monospace;font-size:11px}
+.dash-note{display:flex;align-items:flex-start;gap:6px;padding:5px 6px;font-size:11.5px}
+.dash-note-date{font-size:10px;color:var(--text-muted);font-family:"IBM Plex Mono",monospace;flex-shrink:0;min-width:34px}
+.dash-note-text{color:var(--text-secondary);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* === Dashboard modernization: cohesive accent + motion polish === */
+/* Subtle top accent glow behind the whole dashboard (theme-adaptive) */
+.dash-page{position:relative}
+.dash-page::before{content:"";position:absolute;top:-140px;left:50%;transform:translateX(-50%);width:min(760px,90%);height:380px;background:radial-gradient(closest-side,color-mix(in srgb,var(--accent) 12%,transparent),transparent 70%);pointer-events:none;z-index:0}
+.dash-page>*{position:relative;z-index:1}
+
+/* Header: eyebrow + subtle accent-tinted gradient on the greeting (large text, ≥4.5:1) */
+.dash-eyebrow{font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+.dash-greeting{background:linear-gradient(95deg,var(--text-primary) 52%,color-mix(in srgb,var(--accent) 65%,var(--text-primary)));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+
+/* Section titles get a small accent marker */
+.section-title{padding-left:11px}
+.section-title::before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:13px;border-radius:2px;background:var(--accent)}
+
+/* Stat cards: hover lift + accent top bar */
+.stat-grid .card{transition:transform var(--dur-normal) var(--ease),border-color var(--dur-normal) var(--ease),box-shadow var(--dur-normal) var(--ease)}
+.stat-grid .card::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg,var(--accent),transparent 70%);opacity:0;transition:opacity var(--dur-normal) var(--ease)}
+.stat-grid .card:hover{transform:translateY(-3px);border-color:var(--border-h);box-shadow:var(--shadow-md)}
+.stat-grid .card:hover::before{opacity:1}
+.stat-value{transition:color var(--dur-normal) var(--ease)}
+
+/* List rows: accent-tinted hover for interactive items */
+.dash-att--clickable:hover,.dash-row:hover{background:var(--accent-soft)}
+.dash-row:hover .dash-row-name{color:var(--accent)}
+
+/* "关注" attention panel: persistent amber left ribbon to read as the alert surface */
+.dash-panel--attention{border-left:2px solid var(--warn)}
+
+/* Friendlier empty list rows */
+.dash-evt.is-empty,.dash-att.is-empty{justify-content:center;padding:18px 8px}
+.dash-note.is-empty{justify-content:center;padding:18px 8px}

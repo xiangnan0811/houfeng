@@ -1,0 +1,26 @@
+/* partial: dashboard-responsive.css (extracted from index.css; do not hand-edit large rules here) */
+/* ===== Dashboard v2: responsive, atom-based layout ===== */
+.dash-header{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-2)}
+.dash-greeting{font-size:var(--type-display-size);font-weight:var(--type-display-weight);color:var(--text-primary);line-height:1.2;letter-spacing:-0.01em}
+.dash-sub{margin-top:6px;color:var(--text-muted);font-size:var(--type-small-size)}
+
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-4);margin-bottom:var(--space-6)}
+.stat{display:flex;flex-direction:column;gap:6px}
+.stat--clickable{cursor:pointer;transition:border-color 0.2s,box-shadow 0.2s,background 0.2s}
+.stat--clickable:hover{border-color:var(--border-h);box-shadow:var(--shadow-md);background:var(--bg-card-h)}
+.stat-value{font-size:26px;font-weight:700;color:var(--text-primary);line-height:1.1;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}
+.stat-value.is-warn{color:var(--warn)}
+.stat-value.is-err{color:var(--err)}
+.stat-label{font-size:var(--type-small-size);font-weight:500;color:var(--text-secondary)}
+.stat-sub{font-size:11px;color:var(--text-muted)}
+
+.dash-panels{display:grid;grid-template-columns:repeat(6,1fr);gap:var(--space-5);margin-bottom:var(--space-6)}
+.dash-panel{grid-column:span 2}
+.dash-panel--wide{grid-column:span 3}
+.panel-link{font-size:12px;color:var(--accent);cursor:pointer;white-space:nowrap}
+.panel-link:hover{text-decoration:underline}
+.section-action{margin-left:auto;font-size:12px;white-space:nowrap}
+
+@media (max-width:1024px){.dash-panels{grid-template-columns:repeat(2,1fr)}.dash-panel,.dash-panel--wide{grid-column:auto}}
+@media (max-width:640px){.dash-panels{grid-template-columns:1fr}.stat-grid{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:420px){.stat-grid{grid-template-columns:1fr}}

@@ -1,0 +1,7 @@
+/* partial: motion.css (extracted from index.css; do not hand-edit large rules here) */
+/* Respect reduced-motion: disable non-essential animation */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:0.001ms!important;animation-iteration-count:1!important;transition-duration:0.001ms!important;scroll-behavior:auto!important}
+}
+/* Suppress animate-in replay on client-side navigation; keep first-load animation */
+.app-booted .animate-in{animation:none!important}
