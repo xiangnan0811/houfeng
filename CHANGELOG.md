@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.57.2](https://github.com/xiangnan0811/houfeng/compare/v0.57.1...v0.57.2) (2026-07-09)
+
+
+### Bug Fixes
+
+* **web:** polish settings and login UI review fixes ([d36e04e](https://github.com/xiangnan0811/houfeng/commit/d36e04e6a05bcad588d94e0024ec27841cf3fdc5))
+* **web:** polish settings and login UI review fixes ([452b3a1](https://github.com/xiangnan0811/houfeng/commit/452b3a175990e96ba2d063cf2db656d93872c3fa))
+
 ## [0.57.1](https://github.com/xiangnan0811/houfeng/compare/v0.57.0...v0.57.1) (2026-07-08)
 
 
