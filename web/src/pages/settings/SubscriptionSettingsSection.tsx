@@ -44,6 +44,9 @@ type BudgetDraft = {
 }
 
 type BudgetValues = Omit<UpsertSubscriptionMonthlyBudgetInput, 'budget_month'>
+type PendingBudgetSave =
+  | { kind: 'single'; month: string; input: UpsertSubscriptionMonthlyBudgetInput }
+  | { kind: 'bulk'; input: BulkUpsertSubscriptionMonthlyBudgetInput }
 
 const INITIAL_STATE: LoadState = {
   loading: true,
@@ -96,12 +99,12 @@ function parseIntegerList(value: string): number[] {
 function settingsToDraft(settings: SubscriptionCostSettings | null): SettingsDraft {
   if (!settings) return INITIAL_SETTINGS_DRAFT
   return {
-    baseCurrency: settings.base_currency,
-    provider: settings.exchange_rate_provider,
+    baseCurrency: settings.base_currency ?? INITIAL_SETTINGS_DRAFT.baseCurrency,
+    provider: settings.exchange_rate_provider ?? INITIAL_SETTINGS_DRAFT.provider,
     fixerApiKey: '',
-    reminderOffsets: settings.default_reminder_offsets_days.join(','),
-    maxLeadDays: String(settings.max_reminder_lead_days),
-    staleHours: String(settings.exchange_rate_stale_after_hours),
+    reminderOffsets: settings.default_reminder_offsets_days?.join(',') ?? INITIAL_SETTINGS_DRAFT.reminderOffsets,
+    maxLeadDays: settings.max_reminder_lead_days != null ? String(settings.max_reminder_lead_days) : INITIAL_SETTINGS_DRAFT.maxLeadDays,
+    staleHours: settings.exchange_rate_stale_after_hours != null ? String(settings.exchange_rate_stale_after_hours) : INITIAL_SETTINGS_DRAFT.staleHours,
   }
 }
 
@@ -112,10 +115,10 @@ function money(value?: number | null, currency = 'CNY'): string {
 
 function budgetToDraft(budget: SubscriptionMonthlyBudgetRecord): BudgetDraft {
   return {
-    month: budget.budget_month.slice(0, 7),
+    month: budget.budget_month?.slice(0, 7) ?? currentMonthValue(),
     monthlyLimit: String(budget.monthly_limit),
     warningPct: String(budget.warning_pct),
-    note: budget.note,
+    note: budget.note ?? '',
   }
 }
 
@@ -158,7 +161,6 @@ export function SubscriptionSettingsSection() {
   const [budgetDraft, setBudgetDraft] = useState<BudgetDraft>(INITIAL_BUDGET_DRAFT)
   const [budgetBulkEnabled, setBudgetBulkEnabled] = useState(false)
   const [budgetBulkScope, setBudgetBulkScope] = useState<SubscriptionMonthlyBudgetBulkScope>('recent_year')
-  const [budgetSubmitting, setBudgetSubmitting] = useState(false)
   const [budgetError, setBudgetError] = useState<string | null>(null)
   const [budgetNotice, setBudgetNotice] = useState<string | null>(null)
   const [editingBudgetMonth, setEditingBudgetMonth] = useState<string | null>(null)
@@ -187,10 +189,12 @@ export function SubscriptionSettingsSection() {
     setReloadKey((key) => key + 1)
   }
 
-  function handleSettingsSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function handleSaveAll(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     setSettingsError(null)
+    setBudgetError(null)
     setSettingsNotice(null)
+    setBudgetNotice(null)
     const maxLeadDays = Number.parseInt(settingsDraft.maxLeadDays, 10)
     const staleHours = Number.parseInt(settingsDraft.staleHours, 10)
     const offsets = parseIntegerList(settingsDraft.reminderOffsets)
@@ -210,22 +214,59 @@ export function SubscriptionSettingsSection() {
       setSettingsError('提醒窗口不能为空，且不能超过最远提前天数。')
       return
     }
+    const nextBaseCurrency = settingsDraft.baseCurrency.trim().toUpperCase()
+    let pendingBudget: PendingBudgetSave | null = null
+    if (budgetDraft.monthlyLimit.trim() !== '') {
+      try {
+        pendingBudget = budgetBulkEnabled
+          ? { kind: 'bulk', input: { ...buildBudgetValues(budgetDraft, nextBaseCurrency), scope: budgetBulkScope } }
+          : { kind: 'single', month: budgetDraft.month, input: buildMonthlyBudgetInput(budgetDraft, nextBaseCurrency) }
+      } catch (err: unknown) {
+        setBudgetError(describeError(err, '预算输入无效'))
+        return
+      }
+    }
     setSettingsSubmitting(true)
-    updateSubscriptionCostSettings({
-      base_currency: settingsDraft.baseCurrency.trim().toUpperCase(),
-      exchange_rate_provider: settingsDraft.provider,
-      fixer_api_key: settingsDraft.fixerApiKey.trim() || undefined,
-      default_reminder_offsets_days: offsets,
-      max_reminder_lead_days: maxLeadDays,
-      exchange_rate_stale_after_hours: staleHours,
-    })
-      .then((settings) => {
-        setState((current) => ({ ...current, settings }))
-        setSettingsDraft(settingsToDraft(settings))
-        setSettingsNotice('订阅成本设置已保存')
+    let updated: SubscriptionCostSettings
+    try {
+      updated = await updateSubscriptionCostSettings({
+        base_currency: nextBaseCurrency,
+        exchange_rate_provider: settingsDraft.provider,
+        fixer_api_key: settingsDraft.fixerApiKey.trim() || undefined,
+        default_reminder_offsets_days: offsets,
+        max_reminder_lead_days: maxLeadDays,
+        exchange_rate_stale_after_hours: staleHours,
       })
-      .catch((err: unknown) => setSettingsError(describeError(err, '保存订阅设置失败')))
-      .finally(() => setSettingsSubmitting(false))
+      setState((current) => ({ ...current, settings: updated }))
+      setSettingsDraft(settingsToDraft(updated))
+      setSettingsNotice('订阅成本设置已保存')
+    } catch (err: unknown) {
+      setSettingsSubmitting(false)
+      setSettingsError(describeError(err, '保存订阅设置失败'))
+      return
+    }
+
+    if (pendingBudget) {
+      try {
+        if (pendingBudget.kind === 'bulk') {
+          const result = await bulkUpsertSubscriptionMonthlyBudgets(pendingBudget.input)
+          const scopeLabel = BUDGET_BULK_SCOPE_OPTIONS.find((item) => item.value === result.scope)?.label ?? '历史月预算'
+          setBudgetNotice(`${scopeLabel}已保存，共覆盖 ${result.records.length} 个月`)
+        } else {
+          await upsertSubscriptionMonthlyBudget(pendingBudget.month, pendingBudget.input)
+          setBudgetNotice('预算已保存')
+        }
+        setBudgetDraft({ ...INITIAL_BUDGET_DRAFT, month: currentMonthValue() })
+        setBudgetBulkEnabled(false)
+      } catch (err: unknown) {
+        setSettingsSubmitting(false)
+        setBudgetError(describeError(err, '保存预算失败'))
+        reload()
+        return
+      }
+    }
+    reload()
+    setSettingsSubmitting(false)
   }
 
   function handleRefreshRates() {
@@ -233,45 +274,13 @@ export function SubscriptionSettingsSection() {
     setRefreshingRates(true)
     refreshSubscriptionExchangeRates()
       .then((result) => {
-        const failed = result.failed.map((item) => item.quote_currency).filter(Boolean)
-        setRateNotice(`汇率刷新完成：成功 ${result.succeeded.length}，失败 ${result.failed.length}${failed.length ? `（${failed.join(', ')}）` : ''}`)
+        const failedItems = result.failed ?? []
+        const failed = failedItems.map((item) => item?.quote_currency).filter(Boolean)
+        setRateNotice(`汇率刷新完成：成功 ${result.succeeded?.length ?? 0}，失败 ${failedItems.length}${failed.length ? `（${failed.join(', ')}）` : ''}`)
         reload()
       })
       .catch((err: unknown) => setRateNotice(describeError(err, '汇率刷新失败')))
       .finally(() => setRefreshingRates(false))
-  }
-
-  function handleCreateBudget(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setBudgetError(null)
-    setBudgetNotice(null)
-    let input: UpsertSubscriptionMonthlyBudgetInput | BulkUpsertSubscriptionMonthlyBudgetInput
-    try {
-      input = budgetBulkEnabled
-        ? { ...buildBudgetValues(budgetDraft, baseCurrency), scope: budgetBulkScope }
-        : buildMonthlyBudgetInput(budgetDraft, baseCurrency)
-    } catch (err: unknown) {
-      setBudgetError(describeError(err, '预算输入无效'))
-      return
-    }
-    setBudgetSubmitting(true)
-    const request = budgetBulkEnabled
-      ? bulkUpsertSubscriptionMonthlyBudgets(input as BulkUpsertSubscriptionMonthlyBudgetInput)
-      : upsertSubscriptionMonthlyBudget(budgetDraft.month, input as UpsertSubscriptionMonthlyBudgetInput)
-    request
-      .then((result) => {
-        setBudgetDraft({ ...INITIAL_BUDGET_DRAFT, month: currentMonthValue() })
-        setBudgetBulkEnabled(false)
-        if ('records' in result) {
-          const scopeLabel = BUDGET_BULK_SCOPE_OPTIONS.find((item) => item.value === result.scope)?.label ?? '历史月预算'
-          setBudgetNotice(`${scopeLabel}已保存，共覆盖 ${result.records.length} 个月`)
-        } else {
-          setBudgetNotice('预算已创建')
-        }
-        reload()
-      })
-      .catch((err: unknown) => setBudgetError(describeError(err, '创建预算失败')))
-      .finally(() => setBudgetSubmitting(false))
   }
 
   function startEditBudget(budget: SubscriptionMonthlyBudgetRecord) {
@@ -335,7 +344,7 @@ export function SubscriptionSettingsSection() {
             {refreshingRates ? '刷新中…' : '刷新汇率'}
           </button>
         </div>
-        <form className="subscription-inline-form subscription-inline-form--settings" onSubmit={handleSettingsSubmit}>
+        <form className="subscription-inline-form subscription-inline-form--settings" onSubmit={handleSaveAll}>
           <Input label="基准货币" value={settingsDraft.baseCurrency} onChange={(event) => setSettingsDraft({ ...settingsDraft, baseCurrency: event.target.value })} />
           <Select label="汇率 Provider" value={settingsDraft.provider} onChange={(event) => setSettingsDraft({ ...settingsDraft, provider: event.target.value })}>
             <option value="frankfurter">Frankfurter</option>
@@ -351,10 +360,6 @@ export function SubscriptionSettingsSection() {
           <Input label="提醒窗口" value={settingsDraft.reminderOffsets} onChange={(event) => setSettingsDraft({ ...settingsDraft, reminderOffsets: event.target.value })} />
           <Input label="最远提前天数" type="number" min="1" value={settingsDraft.maxLeadDays} onChange={(event) => setSettingsDraft({ ...settingsDraft, maxLeadDays: event.target.value })} />
           <Input label="汇率过期小时" type="number" min="1" value={settingsDraft.staleHours} onChange={(event) => setSettingsDraft({ ...settingsDraft, staleHours: event.target.value })} />
-          {settingsError ? <p className="create-form__error" role="alert">{settingsError}</p> : null}
-          {settingsNotice ? <p className="asset-operation-feedback" role="status">{settingsNotice}</p> : null}
-          {rateNotice ? <p className="asset-operation-feedback" role="status">{rateNotice}</p> : null}
-          <button className="btn sm primary" type="submit" disabled={settingsSubmitting}>{settingsSubmitting ? '保存中…' : '保存订阅设置'}</button>
         </form>
       </section>
 
@@ -398,7 +403,7 @@ export function SubscriptionSettingsSection() {
             )
           ))}
         </div>
-        <form className="subscription-inline-form" onSubmit={handleCreateBudget}>
+        <form className="subscription-inline-form" onSubmit={handleSaveAll}>
           <Input label="预算月份" type="month" value={budgetDraft.month} onChange={(event) => setBudgetDraft({ ...budgetDraft, month: event.target.value })} />
           <Input label={`月预算 ${baseCurrency}`} type="number" min="0" step="0.01" value={budgetDraft.monthlyLimit} onChange={(event) => setBudgetDraft({ ...budgetDraft, monthlyLimit: event.target.value })} />
           <Input label="预警比例" type="number" min="1" max="100" value={budgetDraft.warningPct} onChange={(event) => setBudgetDraft({ ...budgetDraft, warningPct: event.target.value })} />
@@ -425,11 +430,25 @@ export function SubscriptionSettingsSection() {
               ))}
             </Select>
           ) : null}
-          {budgetError ? <p className="create-form__error" role="alert">{budgetError}</p> : null}
-          {budgetNotice ? <p className="asset-operation-feedback" role="status">{budgetNotice}</p> : null}
-          <button className="btn sm primary" type="submit" disabled={budgetSubmitting}>{budgetSubmitting ? '保存中…' : '保存月预算'}</button>
         </form>
       </section>
+
+      <div className="settings-save-footer">
+        <div>
+          {settingsError ? <p className="settings-save-footer__message settings-save-footer__message--error" role="alert">{settingsError}</p> : null}
+          {settingsNotice ? <p className="settings-save-footer__message settings-save-footer__message--success">{settingsNotice}</p> : null}
+          {budgetError ? <p className="settings-save-footer__message settings-save-footer__message--error" role="alert">{budgetError}</p> : null}
+          {budgetNotice ? <p className="settings-save-footer__message settings-save-footer__message--success">{budgetNotice}</p> : null}
+          {rateNotice ? <p className="settings-save-footer__message settings-save-footer__message--success">{rateNotice}</p> : null}
+        </div>
+        <button className="btn md primary" type="button" onClick={() => handleSaveAll()} disabled={settingsSubmitting}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
+            <path d="M17 21v-8H7v8M7 3v5h8" />
+          </svg>
+          {settingsSubmitting ? '保存中…' : '保存订阅配置'}
+        </button>
+      </div>
     </div>
   )
 }

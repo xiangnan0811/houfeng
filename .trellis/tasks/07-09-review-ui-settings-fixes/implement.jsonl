@@ -1,0 +1,8 @@
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"确认本次补流程和复审均在非 main/master 分支 fix/review-findings-ui-settings 上进行，不直接提交或修改主分支。"}
+{"file":".trellis/spec/web/index.md","reason":"确认本次变更归属 Web layer，并从 Web 规范入口选择具体前端规范。"}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"约束 tokens.css、modernize.css、LoginPage.css、index.css 的 token/BEM/主题覆盖/浏览器 sanity 要求。"}
+{"file":".trellis/spec/web/component-conventions.md","reason":"约束 SettingsPage、LoginPage 和各设置 section 的组件分层、命名导出、受控组件与可访问交互。"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"约束 Settings 草稿、保存、丢弃和派生 UI state 的数据流一致性。"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"确认前端质量门为 make verify-web，并明确 lint/test/build、Node 版本和浏览器 sanity 边界。"}
+{"file":"docs/design/current/interface-language.md","reason":"确认当前 UI 方向为暗色优先、高密度工程工具感、证据语言边界和 restrained accent 方向。"}
+{"file":"docs/operations/ui-preview-and-browser-sanity.md","reason":"确认 /login 本地浏览器 sanity 的 route、viewport、证据等级和不提交截图政策。"}

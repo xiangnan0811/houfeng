@@ -160,9 +160,10 @@ export function DashboardPage() {
   const abnormalMonitoringInstances = overview.abnormal_monitoring_instances.slice(0, 4)
 
   return (
-    <div className="page-stack">
+    <div className="page-stack dash-page">
       <div className="dash-header">
         <div>
+          <div className="dash-eyebrow">工作台 · CONSOLE</div>
           <div className="dash-greeting">{getGreeting()}，管理员</div>
           <div className="dash-sub">资产、观测与账单的全局概览</div>
         </div>
@@ -194,7 +195,7 @@ export function DashboardPage() {
       {/* Overview panels: responsive 6-col grid (3 + 2) */}
       <div className="dash-panels">
         {/* Column 1: Attention */}
-          <Card className="dash-panel">
+          <Card className="dash-panel dash-panel--attention">
           <SectionTitle title="关注" />
           {assetOnboardingNeeded ? (
             <div className="dash-att dash-att--clickable" onClick={() => navigate('/vps')}>
@@ -206,7 +207,7 @@ export function DashboardPage() {
             </div>
           ) : null}
           {!assetOnboardingNeeded && overview.abnormal_monitoring_instances.length === 0 && overview.abnormal_targets.length === 0 && cancellationAttention === 0 && (
-            <div className="dash-att"><span className="dash-att-text text-muted text-sm">暂无需关注项</span></div>
+            <div className="dash-att is-empty"><span className="dash-att-text text-muted">暂无需关注项</span></div>
           )}
           {cancellationAttention > 0 ? (
             <div className="dash-att dash-att--clickable" onClick={() => navigate('/asset-decisions?view=needs_decision&renew_within_days=30&scenario=migration_retirement')}>
@@ -264,7 +265,7 @@ export function DashboardPage() {
           <Card className="dash-panel">
           <SectionTitle title="动态" action={<span className="panel-link" onClick={() => navigate('/events')}>全部 →</span>} />
           {recentEvents.length === 0 && (
-            <div className="dash-evt"><span className="dash-evt-text text-muted">暂无事件</span></div>
+            <div className="dash-evt is-empty"><span className="dash-evt-text text-muted">暂无事件</span></div>
           )}
           {recentEvents.map((evt, i) => {
             const icon = eventIcon(evt)
@@ -315,7 +316,7 @@ export function DashboardPage() {
         {/* Column 5: Experience / Memo (wide) */}
           <Card className="dash-panel dash-panel--wide">
           <SectionTitle title="经验记录" action={<span className="panel-link" onClick={() => navigate('/vps')}>全部 →</span>} />
-          <div className="dash-note"><span className="dash-note-date">—</span><span className="dash-note-text text-muted">暂无经验记录</span></div>
+          <div className="dash-note is-empty"><span className="dash-note-text text-muted">接入 agent 后，运维经验将在此自动沉淀</span></div>
         </Card>
       </div>
 

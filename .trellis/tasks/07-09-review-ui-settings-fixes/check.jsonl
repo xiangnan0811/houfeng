@@ -1,0 +1,4 @@
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"最终验收必须重新运行 make verify-web，覆盖 npm ci、ESLint、Vitest 和 tsc/Vite build。"}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"复核新增 tokens/modernize/login/index CSS 是否保持 token 化、主题覆盖、LoginPage 局部 CSS 例外和 CSS 合同测试。"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"复核 Settings 未保存切换、丢弃 draft、订阅合并保存和回归测试是否符合状态一致性规则。"}
+{"file":"docs/operations/ui-preview-and-browser-sanity.md","reason":"最终报告需要记录本地 /login 桌面与窄屏浏览器 sanity 的 URL、viewport、结果和 local-only 限制。"}

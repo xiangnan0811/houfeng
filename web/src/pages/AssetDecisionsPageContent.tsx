@@ -2534,6 +2534,7 @@ export function AssetDecisionsPageContent() {
     <div className="animate-in asset-decision-workbench">
       <div className="page-header">
         <div>
+          <div className="page-eyebrow">决策台 · DECISIONS</div>
           <h1 className="page-title">资产组合决策</h1>
         </div>
         <div className="header-actions">

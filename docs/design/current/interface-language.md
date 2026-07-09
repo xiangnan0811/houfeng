@@ -19,6 +19,7 @@ Current UI defaults:
 
 - dark-first theme with an equally usable light theme;
 - CSS custom properties in `web/src/styles/tokens.css`;
+- the current accent direction is operational blue (`--accent`) with amber secondary emphasis (`--accent-2`), kept restrained rather than neon;
 - compact spacing based on the existing token scale;
 - high-density tables for list scanning;
 - cards for repeated items, modals, warnings, and contained tools, not for wrapping every page section;

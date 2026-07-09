@@ -18,6 +18,7 @@ docs/deploy/compose.env
 .gemini/
 .agent/
 .superpowers/
+.codebuddy/
 
 # git worktrees
 .worktree/

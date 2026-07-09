@@ -1092,6 +1092,19 @@ include_backfilled: filters.include_backfilled
 - **`useRef` 用于不触发 render 的可变值**（DOM 引用、focus 还原 token、回调最新值）。典型例子：`web/src/pages/MonitoringPage.tsx:162-163` 的 `actionButtonRefs` / `pendingFocusRestoreRef`。
 - **`useReducer` 当前未使用**。如某个 page 状态机分支 ≥ 4 个动作 + state 之间相互依赖，可以考虑引入；目前的页面用多个 `useState` + 描述性的 update 函数已经够。
 - **派生状态不要存 state**：能用 `monitoringInstances.filter(isBindingConflictMonitoringInstance)` 现算的就别 `useEffect` 同步进 state（参考 `MonitoringPage.tsx`）。
+- **丢弃 draft 必须同步重置依赖该 draft 的派生 UI state**。如果表单草稿会驱动可见集合、展开项、选中项或 pending target，`不保存` / 取消 / Esc / overlay 关闭不能只把 `form` 重置为已保存值，还要把这些派生 state 重建或裁剪到已保存数据范围。否则用户选择丢弃后，页面会继续显示未保存的通道、分组或展开面板。
+
+```tsx
+// 错误：只重置 form，activeChannels 仍保留未保存新增的 Telegram。
+setState((current) => ({ ...current, form: buildFormState(settings) }))
+
+// 正确：用已保存 settings 重建 form，并同步重置由 form/settings 派生的可见集合。
+const resetForm = buildFormState(settings)
+const resetChannels = deriveActiveChannels(settings, resetForm)
+setState((current) => ({ ...current, form: resetForm }))
+setActiveChannels(resetChannels)
+setExpandedChannels((prev) => new Set(Array.from(prev).filter((channel) => resetChannels.has(channel))))
+```
 
 ---
 

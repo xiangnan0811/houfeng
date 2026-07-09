@@ -519,7 +519,7 @@ export function SubscriptionsPage() {
 
   return (
     <div className="page-stack">
-      <div className="watchtower-header">
+      <div className="watchtower-header" aria-label="订阅成本中枢">
         <div className="watchtower-header__row1">
           <div className="watchtower-header__title-block">
             <h1>订阅成本中枢</h1>

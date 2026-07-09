@@ -77,6 +77,7 @@ export function ArchivePage() {
     <div className="page-stack archive-page animate-in">
       <div className="page-header">
         <div>
+          <div className="page-eyebrow">历史 · ARCHIVE</div>
           <h1 className="page-title">归档资产</h1>
           <p className="page-subtitle">已取消、已归档 VPS 的只读资产历史。</p>
         </div>

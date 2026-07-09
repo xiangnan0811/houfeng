@@ -19,65 +19,69 @@ export function IPQualitySettingsSection({ value, onChange }: IPQualitySettingsS
           onChange={(enabled) => onChange({ enabled })}
         />
       </div>
-      <div className="settings-row">
-        <span className="sr-label">采集周期</span>
-        <span className="sr-value">
-          <input
-            className="input input--compact"
-            aria-label="IP 质量采集周期秒数"
-            inputMode="numeric"
-            value={value.frequencySeconds}
-            onChange={(e) => onChange({ frequencySeconds: e.target.value })}
-          /> 秒
-        </span>
+      <div className="settings-row-group settings-row-group--3">
+        <div className="settings-row">
+          <span className="sr-label">采集周期</span>
+          <span className="sr-value">
+            <input
+              className="input input--compact"
+              aria-label="IP 质量采集周期秒数"
+              inputMode="numeric"
+              value={value.frequencySeconds}
+              onChange={(e) => onChange({ frequencySeconds: e.target.value })}
+            /> 秒
+          </span>
+        </div>
+        <div className="settings-row">
+          <span className="sr-label">过期窗口</span>
+          <span className="sr-value">
+            <input
+              className="input input--compact"
+              aria-label="IP 质量过期窗口秒数"
+              inputMode="numeric"
+              value={value.staleAfterSeconds}
+              onChange={(e) => onChange({ staleAfterSeconds: e.target.value })}
+            /> 秒
+          </span>
+        </div>
+        <div className="settings-row">
+          <span className="sr-label">请求超时</span>
+          <span className="sr-value">
+            <input
+              className="input input--compact"
+              aria-label="IP 质量请求超时秒数"
+              inputMode="numeric"
+              value={value.timeoutSeconds}
+              onChange={(e) => onChange({ timeoutSeconds: e.target.value })}
+            /> 秒
+          </span>
+        </div>
       </div>
-      <div className="settings-row">
-        <span className="sr-label">过期窗口</span>
-        <span className="sr-value">
-          <input
-            className="input input--compact"
-            aria-label="IP 质量过期窗口秒数"
-            inputMode="numeric"
-            value={value.staleAfterSeconds}
-            onChange={(e) => onChange({ staleAfterSeconds: e.target.value })}
-          /> 秒
-        </span>
-      </div>
-      <div className="settings-row">
-        <span className="sr-label">请求超时</span>
-        <span className="sr-value">
-          <input
-            className="input input--compact"
-            aria-label="IP 质量请求超时秒数"
-            inputMode="numeric"
-            value={value.timeoutSeconds}
-            onChange={(e) => onChange({ timeoutSeconds: e.target.value })}
-          /> 秒
-        </span>
-      </div>
-      <div className="settings-row">
-        <span className="sr-label">Raw JSON 保留</span>
-        <span className="sr-value">
-          <input
-            className="input input--compact"
-            aria-label="IP 质量原始 JSON 保留天数"
-            inputMode="numeric"
-            value={value.rawRetentionDays}
-            onChange={(e) => onChange({ rawRetentionDays: e.target.value })}
-          /> 天
-        </span>
-      </div>
-      <div className="settings-row">
-        <span className="sr-label">历史保留</span>
-        <span className="sr-value">
-          <input
-            className="input input--compact"
-            aria-label="IP 质量历史保留天数"
-            inputMode="numeric"
-            value={value.historyRetentionDays}
-            onChange={(e) => onChange({ historyRetentionDays: e.target.value })}
-          /> 天
-        </span>
+      <div className="settings-row-group settings-row-group--2">
+        <div className="settings-row">
+          <span className="sr-label">Raw JSON 保留</span>
+          <span className="sr-value">
+            <input
+              className="input input--compact"
+              aria-label="IP 质量原始 JSON 保留天数"
+              inputMode="numeric"
+              value={value.rawRetentionDays}
+              onChange={(e) => onChange({ rawRetentionDays: e.target.value })}
+            /> 天
+          </span>
+        </div>
+        <div className="settings-row">
+          <span className="sr-label">历史保留</span>
+          <span className="sr-value">
+            <input
+              className="input input--compact"
+              aria-label="IP 质量历史保留天数"
+              inputMode="numeric"
+              value={value.historyRetentionDays}
+              onChange={(e) => onChange({ historyRetentionDays: e.target.value })}
+            /> 天
+          </span>
+        </div>
       </div>
       <div className="settings-row settings-row--block">
         <div className="sr-label-row">

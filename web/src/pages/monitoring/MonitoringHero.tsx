@@ -25,6 +25,7 @@ export function MonitoringHero({
     <>
       <div className="page-header animate-in">
         <div>
+          <div className="page-eyebrow">观测 · MONITORING</div>
           <h1 className="page-title">监控</h1>
           <p className="page-sub">观察 agent 接入后的监控实例、心跳、主机性能与运行控制。</p>
         </div>
