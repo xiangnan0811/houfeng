@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 229
-- **Last Active**: 2026-07-07
+- **Total Sessions**: 230
+- **Last Active**: 2026-07-09
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1785 | Active |
+| `journal-4.md` | ~1818 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 230 | 2026-07-09 | Review UI settings fixes | `452b3a1` | `fix/review-findings-ui-settings` |
 | 229 | 2026-07-07 | Asset decisions IA reset closeout | `76dadb6` | `refactor/asset-decisions-ia-reset-closeout` |
 | 228 | 2026-07-07 | 前端视觉重构与统计卡片统一 | `3cbb5bf` | `visual-redesign` |
 | 227 | 2026-07-02 | Complete asset decision workflow | `b3a53d7` | `ux/asset-decisions-complete` |
