@@ -430,6 +430,7 @@ export function EventsPage() {
     <div className="animate-in">
       <div className="page-header">
         <div>
+          <div className="page-eyebrow">事件时间线 · TIMELINE</div>
           <h1 className="page-title">事件流</h1>
           <p className="page-sub">状态变更事件时间线</p>
         </div>

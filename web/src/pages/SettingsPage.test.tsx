@@ -416,14 +416,14 @@ describe('SettingsPage', () => {
 
     fireEvent.change(screen.getByLabelText('基准货币'), { target: { value: 'USD' } })
     fireEvent.change(screen.getByLabelText('最远提前天数'), { target: { value: '45' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存订阅设置' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存订阅配置' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscriptions/settings' && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
     await waitFor(() => expect(screen.getByLabelText('月预算 USD')).toBeInTheDocument())
 
     fireEvent.change(screen.getByLabelText('预算月份'), { target: { value: '2026-07' } })
     fireEvent.change(screen.getByLabelText('月预算 USD'), { target: { value: '120' } })
     fireEvent.change(screen.getByLabelText('备注'), { target: { value: '增长期' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存月预算' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存订阅配置' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscription-monthly-budgets/2026-07' && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
     await waitFor(() => expect(screen.getByRole('heading', { name: '月预算时间线' })).toBeInTheDocument())
 
@@ -431,7 +431,7 @@ describe('SettingsPage', () => {
     fireEvent.change(screen.getByLabelText('备注'), { target: { value: '首次基线' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /批量覆盖历史月预算/ }))
     fireEvent.change(screen.getByLabelText('覆盖范围'), { target: { value: 'current_year' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存月预算' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存订阅配置' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscription-monthly-budgets/bulk' && (init as RequestInit | undefined)?.method === 'POST')).toBe(true))
     const bulkCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/subscription-monthly-budgets/bulk' && (init as RequestInit | undefined)?.method === 'POST')
     expect(JSON.parse(String((bulkCall?.[1] as RequestInit | undefined)?.body))).toEqual({
@@ -446,6 +446,58 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscriptions/exchange-rates/refresh' && (init as RequestInit | undefined)?.method === 'POST')).toBe(true))
     await waitFor(() => expect(screen.getByRole('heading', { name: '月预算时间线' })).toBeInTheDocument())
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/subscription-budgets'))).toBe(false)
+  })
+
+  it('validates subscription budget before saving settings to avoid partial updates', async () => {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/subscriptions/settings' && method === 'GET') {
+        return Promise.resolve(mockJSONResponse(settingsResponseBody.subscription_cost_settings))
+      }
+      if (url === '/api/subscription-monthly-budgets' && method === 'GET') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (url === '/api/subscriptions/settings' && method === 'PUT') {
+        return Promise.resolve(mockJSONResponse(settingsResponseBody.subscription_cost_settings))
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSettingsPage('/settings?tab=subscriptions')
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '成本基准与汇率' })).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('月预算 CNY'), { target: { value: '-1' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存订阅配置' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('月预算必须为非负数字。')
+    expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscriptions/settings' && (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)
+  })
+
+  it('disables subscription save while the combined save is in flight', async () => {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/subscriptions/settings' && method === 'GET') {
+        return Promise.resolve(mockJSONResponse(settingsResponseBody.subscription_cost_settings))
+      }
+      if (url === '/api/subscription-monthly-budgets' && method === 'GET') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (url === '/api/subscriptions/settings' && method === 'PUT') {
+        return new Promise<Response>(() => {})
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSettingsPage('/settings?tab=subscriptions')
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '成本基准与汇率' })).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('最远提前天数'), { target: { value: '45' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存订阅配置' }))
+
+    const savingButton = await screen.findByRole('button', { name: '保存中…' })
+    expect(savingButton).toBeDisabled()
   })
 
   it('falls back to appearance for invalid settings tab', async () => {
@@ -488,6 +540,17 @@ describe('SettingsPage', () => {
     fireEvent.change(screen.getByLabelText('新的 Telegram Bot Token'), {
       target: { value: 'replacement-token' },
     })
+    // 先保存 Telegram 替换 token（此举会清空草稿，避免跨 tab 未保存拦截）
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      telegram: {
+        bot_token: 'replacement-token',
+        chat_id: 'chat-id',
+        runtime_managed: true,
+      },
+    })
+
     switchTab('监控策略')
     fireEvent.change(screen.getByLabelText('当前监控实例主机样本频率'), {
       target: { value: '1m' },
@@ -497,65 +560,80 @@ describe('SettingsPage', () => {
     })
 
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
-
-    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/settings')
-    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
-      method: 'PUT',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-    })
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    const finalPayload = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))
+    expect(finalPayload).toMatchObject({
       telegram: {
-        bot_token: 'replacement-token',
         chat_id: 'chat-id',
         runtime_managed: true,
       },
-      feishu: {
-        enabled: false,
-      },
       host_sample_frequency_tier: '1m',
-      probe_frequency_defaults: {
-        tcp: '5s',
-        http: '5s',
-        tls: '6h',
-      },
-      incident_defaults: {
-        heartbeat_interval_seconds: 5,
-        stale_threshold_intervals: 3,
-        sweep_interval_seconds: 5,
-        notify_on_started: true,
-        notify_on_escalated: true,
-        notify_on_recovered: true,
-        cpu_warning_pct: 80,
-        cpu_alert_pct: 90,
-        cpu_critical_pct: 95,
-        mem_warning_pct: 85,
-        mem_alert_pct: 92,
-        mem_critical_pct: 95,
-        disk_warning_pct: 85,
-        disk_alert_pct: 92,
-        disk_critical_pct: 97,
-        inode_warning_pct: 80,
-        inode_alert_pct: 90,
-        inode_critical_pct: 95,
-        iowait_warning_pct: 20,
-        iowait_critical_pct: 50,
-        load5_warning: 4,
-        load5_critical: 8,
-      },
-      override_rules: settingsResponseBody.override_rules,
       retention_policy: {
         raw_layer_days: 45,
-        aggregate_layer_days: 30,
-        event_layer_days: 90,
-        notification_layer_days: 180,
       },
-      ip_quality_settings: settingsResponseBody.ip_quality_settings,
     })
+    // token 已在首次保存时落地，二次保存不再重复携带
+    expect(finalPayload.telegram).not.toHaveProperty('bot_token')
+  })
+
+  it('warns before leaving a tab with unsaved changes and can discard', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)))
+
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+
+    switchTab('监控策略')
+    fireEvent.change(screen.getByLabelText('原始层保留天数'), { target: { value: '45' } })
+    expect(screen.getByText('有未保存的修改')).toBeInTheDocument()
+
+    // 未保存就切到外观：应弹窗且不真正切换
+    switchTab('外观')
+    expect(screen.getByRole('button', { name: '不保存' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存并切换' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '监控策略' })).toHaveAttribute('aria-selected', 'true')
+
+    // 选择“不保存”后丢弃修改并切换
+    fireEvent.click(screen.getByRole('button', { name: '不保存' }))
+    await waitFor(() => expect(screen.getByRole('tab', { name: '外观' })).toHaveAttribute('aria-selected', 'true'))
+    expect(screen.queryByText('有未保存的修改')).not.toBeInTheDocument()
+  })
+
+  it('discards an unsaved newly added notification channel when leaving without saving', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse({
+          ...settingsResponseBody,
+          telegram: {
+            chat_id: '',
+            token_present: false,
+            token_masked_summary: '',
+            runtime_managed: false,
+            runtime_apply_active: false,
+          },
+        }),
+      ),
+    )
+
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+
+    switchTab('通知')
+    fireEvent.click(screen.getByRole('button', { name: '+ 新增通知渠道' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Telegram' }))
+    fireEvent.change(screen.getByLabelText('新的 Telegram Bot Token'), { target: { value: 'draft-token' } })
+    fireEvent.change(screen.getByLabelText('Telegram Chat ID'), { target: { value: 'draft-chat' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加并编辑' }))
+    expect(screen.getByRole('heading', { name: 'Telegram 通知设置' })).toBeInTheDocument()
+    expect(screen.getByText('有未保存的修改')).toBeInTheDocument()
+
+    switchTab('监控策略')
+    fireEvent.click(screen.getByRole('button', { name: '不保存' }))
+    await waitFor(() => expect(screen.getByRole('tab', { name: '监控策略' })).toHaveAttribute('aria-selected', 'true'))
+
+    switchTab('通知')
+    await waitFor(() => expect(screen.getByRole('tab', { name: '通知' })).toHaveAttribute('aria-selected', 'true'))
+    expect(screen.queryByRole('heading', { name: 'Telegram 通知设置' })).not.toBeInTheDocument()
   })
 
   it('rejects raw retention below the 30 day monitoring window minimum', async () => {

@@ -541,6 +541,7 @@ export function TargetsPage() {
     <div className="page-stack animate-in">
       <div className="page-header animate-in">
         <div>
+          <div className="page-eyebrow">探测 · PROBES</div>
           <h1 className="page-title">入口探测</h1>
           <p className="page-sub">监控入口健康与延迟</p>
         </div>

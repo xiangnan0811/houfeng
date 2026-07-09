@@ -426,6 +426,7 @@ export function VPSPage() {
     <div className="animate-in">
       <div className="page-header">
         <div>
+          <div className="page-eyebrow">资产库存 · INVENTORY</div>
           <h1 className="page-title">VPS 资产</h1>
         </div>
         <div className="header-actions">

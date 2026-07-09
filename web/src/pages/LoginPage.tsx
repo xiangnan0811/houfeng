@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ApiError } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
+import './LoginPage.css'
 
 export function LoginPage() {
   const { login } = useAuth()
@@ -33,29 +34,43 @@ export function LoginPage() {
 
   return (
     <div className="login-page">
-      <form className="login-card" onSubmit={onSubmit}>
-        <div className="lc-logo">
-          <div className="logo-mark logo-mark--lg">
-            <svg viewBox="0 0 24 24">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-            </svg>
-          </div>
+      <div className="login-page__seal" aria-hidden="true">
+        <span>候</span>
+      </div>
+      <form className="login-page__card" onSubmit={onSubmit}>
+        <div className="login-page__brand">
+          <div className="login-page__brand-zh">候风控制面板</div>
+          <div className="login-page__brand-en">Fleet Control Plane</div>
+          <div className="login-page__motto">观风测候 · 守界安服</div>
         </div>
-        <div className="lc-title">候风控制面板</div>
-        <div className="lc-sub">Fleet Control Plane</div>
         {error && <p className="login-page__error" role="alert">{error}</p>}
-        <div className="lc-field">
+        <div className="login-page__field">
           <label htmlFor="login-username">用户名</label>
-          <input id="login-username" type="text" autoComplete="username" placeholder="admin" value={username} onChange={(e) => setUsername(e.target.value)} />
+          <input
+            id="login-username"
+            type="text"
+            autoComplete="username"
+            placeholder="admin"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
         </div>
-        <div className="lc-field">
+        <div className="login-page__field">
           <label htmlFor="login-password">密码</label>
-          <input id="login-password" type="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input
+            id="login-password"
+            type="password"
+            autoComplete="current-password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
         </div>
         <button type="submit" className="lc-btn" disabled={submitting}>
           {submitting ? '登录中…' : '登录'}
         </button>
       </form>
+      <div className="login-page__footer">观测入口 · 仅授权人员</div>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { Modal } from '../components/atoms/Modal'
@@ -108,6 +108,13 @@ function buildFormState(settings: SettingsRecord): SettingsFormState {
       servicesText: settings.ip_quality_settings.services.join(', '),
     },
   }
+}
+
+function deriveActiveChannels(settings: SettingsRecord, form: SettingsFormState) {
+  const active = new Set<NotificationChannel>()
+  if (settings.telegram.token_present || settings.telegram.runtime_managed || form.telegramBotToken || form.telegramChatId) active.add('telegram')
+  if (form.feishuEnabled || form.feishuWebhookPresent || form.feishuWebhookUrl.trim()) active.add('feishu')
+  return active
 }
 
 function parsePositiveInteger(value: string, label: string) {
@@ -266,13 +273,18 @@ export function SettingsPage() {
   const [channelDraft, setChannelDraft] = useState<SettingsFormState | null>(null)
   const [activeChannels, setActiveChannels] = useState<Set<NotificationChannel>>(new Set())
   const [expandedChannels, setExpandedChannels] = useState<Set<NotificationChannel>>(new Set())
+  const [unsavedOpen, setUnsavedOpen] = useState(false)
+  const pendingTabRef = useRef<SettingsTab | null>(null)
   const systemSettingsLoaded = state.settings !== null
+
+  const isDirty =
+    !!state.settings &&
+    !!state.form &&
+    JSON.stringify(buildFormState(state.settings)) !== JSON.stringify(state.form)
 
   useEffect(() => {
     if (state.settings && state.form) {
-      const active = new Set<NotificationChannel>()
-      if (state.settings.telegram.token_present || state.settings.telegram.runtime_managed || state.form.telegramBotToken || state.form.telegramChatId) active.add('telegram')
-      if (state.form.feishuEnabled || state.form.feishuWebhookPresent || state.form.feishuWebhookUrl.trim()) active.add('feishu')
+      const active = deriveActiveChannels(state.settings, state.form)
       setActiveChannels((prev) => (prev.size === 0 ? active : prev))
     }
   }, [state.settings, state.form])
@@ -314,39 +326,78 @@ export function SettingsPage() {
     setState((c) => ({ ...c, form: channelDraft ?? c.form, saveError: null, saveSuccess: null }))
     setActiveChannels((p) => new Set(p).add(ch)); setExpandedChannels((p) => new Set(p).add(ch)); closeModal()
   }
-  function changeTab(tab: SettingsTab) {
+  function applyTab(tab: SettingsTab) {
     const next = new URLSearchParams(searchParams)
     if (tab === 'appearance') next.delete('tab')
     else next.set('tab', tab)
     setSearchParams(next, { replace: true })
   }
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    let payload: SettingsUpdateDraft
+  async function saveSettings(): Promise<boolean> {
     if (!state.settings || !state.form) {
       setState((c) => ({ ...c, saveError: '系统设置尚未加载完成', saveSuccess: null }))
-      return
+      return false
     }
-    try { payload = buildUpdateInput(state.form, state.settings) } catch (err) { setState((c) => ({ ...c, saveError: describeError(err, '校验失败'), saveSuccess: null })); return }
+    let payload: SettingsUpdateDraft
+    try { payload = buildUpdateInput(state.form, state.settings) }
+    catch (err) { setState((c) => ({ ...c, saveError: describeError(err, '校验失败'), saveSuccess: null })); return false }
     setState((c) => ({ ...c, saving: true, saveError: null, saveSuccess: null }))
     try {
       const updated = await updateSettings(payload)
       setState((c) => ({ ...c, saving: false, settings: updated, form: buildFormState(updated), saveError: null, saveSuccess: '设置已保存' }))
-    } catch (err) { setState((c) => ({ ...c, saving: false, saveError: describeError(err, '保存失败'), saveSuccess: null })) }
+      return true
+    } catch (err) { setState((c) => ({ ...c, saving: false, saveError: describeError(err, '保存失败'), saveSuccess: null })); return false }
+  }
+
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    void saveSettings()
+  }
+
+  function requestTab(tab: SettingsTab) {
+    if (tab === activeTab) return
+    if (systemTabActive && isDirty) {
+      pendingTabRef.current = tab
+      setUnsavedOpen(true)
+      return
+    }
+    applyTab(tab)
+  }
+
+  async function confirmSaveAndLeave() {
+    const target = pendingTabRef.current
+    setUnsavedOpen(false)
+    pendingTabRef.current = null
+    const ok = await saveSettings()
+    if (ok && target) applyTab(target)
+  }
+
+  function discardAndLeave() {
+    const target = pendingTabRef.current
+    setUnsavedOpen(false)
+    pendingTabRef.current = null
+    if (state.settings) {
+      const resetForm = buildFormState(state.settings)
+      const resetChannels = deriveActiveChannels(state.settings, resetForm)
+      setState((c) => ({ ...c, form: resetForm, saveError: null, saveSuccess: null }))
+      setActiveChannels(resetChannels)
+      setExpandedChannels((prev) => new Set(Array.from(prev).filter((channel) => resetChannels.has(channel))))
+    }
+    if (target) applyTab(target)
   }
 
   return (
     <div className="page-stack animate-in">
       <div className="page-header">
         <div>
+          <div className="page-eyebrow">配置 · SETTINGS</div>
           <h1 className="page-title">系统设置</h1>
           <p className="page-sub">通知、阈值、策略配置</p>
         </div>
       </div>
 
       <div className="settings-tabs">
-        <Tabs variant="pill" value={activeTab} onChange={changeTab} items={SETTINGS_TABS} />
+        <Tabs variant="pill" value={activeTab} onChange={requestTab} items={SETTINGS_TABS} />
       </div>
 
       {activeTab === 'subscriptions' ? (
@@ -430,11 +481,16 @@ export function SettingsPage() {
           )}
 
           <div className="settings-save-footer">
+            {isDirty && <span className="settings-save-footer__hint">有未保存的修改</span>}
             <div>
               {state.saveError && <p className="settings-save-footer__message settings-save-footer__message--error" role="alert">{state.saveError}</p>}
               {state.saveSuccess && <p className="settings-save-footer__message settings-save-footer__message--success">{state.saveSuccess}</p>}
             </div>
             <button type="submit" className="btn md primary" disabled={state.saving}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
+                <path d="M17 21v-8H7v8M7 3v5h8" />
+              </svg>
               {state.saving ? '保存中…' : '保存设置'}
             </button>
           </div>
@@ -500,6 +556,23 @@ export function SettingsPage() {
           )}
         </Modal>
       ) : null}
+
+      <Modal
+        open={unsavedOpen}
+        onClose={() => setUnsavedOpen(false)}
+        title="未保存的修改"
+        footer={
+          <>
+            <button type="button" className="btn md ghost" onClick={discardAndLeave}>不保存</button>
+            <button type="button" className="btn md ghost" onClick={() => setUnsavedOpen(false)}>取消</button>
+            <button type="button" className="btn md primary" onClick={confirmSaveAndLeave} disabled={state.saving}>
+              {state.saving ? '保存中…' : '保存并切换'}
+            </button>
+          </>
+        }
+      >
+        <p>当前标签页有未保存的修改，切换后将丢失。是否先保存当前修改？</p>
+      </Modal>
     </div>
   )
 }

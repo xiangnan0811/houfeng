@@ -1,0 +1,379 @@
+/* ============================================================
+   modernize.css — 全站统一现代化层（轻量 · 全局 · 非 page-local）
+   ------------------------------------------------------------
+   设计意图：在「冻结巨型 index.css」的前提下，集中放置可跨页面
+   复用的统一优化。所有颜色 / 间距 / 圆角 / 字阶一律走 tokens.css
+   令牌，换主题（houfeng-dark / light / classic-dark）自动适配。
+   本文件作为全局样式接入（与 tokens.css 同机制），不引入新样式系统。
+   ============================================================ */
+
+/* ---------- 1. 主题化滚动条（全站，细腻现代手感） ---------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: var(--radius-pill);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--accent);
+}
+
+/* ---------- 2. 文本选区强调色（全站，主题自适应） ---------- */
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--text-primary);
+}
+
+/* ---------- 3. 路由切换入场动画（统一节奏；尊重减弱动效偏好） ---------- */
+/* 仅作用于页面级 .page-stack，子组件重渲染不会重播，避免抖动。 */
+.page-stack {
+  animation: page-enter var(--dur-slow) var(--ease-out) both;
+}
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none; /* 终结态无 transform，不残留 containing block */
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-stack {
+    animation: none;
+  }
+}
+
+/* ---------- 4. 监控对比页表头统一（与列表页一致：eyebrow + 渐变标题） ---------- */
+/* 该页用 .compare-command 结构而非标准 .page-header，此前未纳入统一处理。 */
+.compare-command__eyebrow {
+  font-size: var(--type-eyebrow-size);
+  font-weight: var(--type-eyebrow-weight);
+  letter-spacing: var(--type-eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.compare-command h1 {
+  font-family: var(--font-sans);
+  font-size: var(--type-h1-size);
+  font-weight: var(--type-h1-weight);
+  line-height: var(--type-h1-leading);
+  background: linear-gradient(
+    95deg,
+    var(--text-primary) 52%,
+    color-mix(in srgb, var(--accent) 65%, var(--text-primary))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* ---------- 5. 键盘焦点环统一（链接 / 可聚焦控件，提升可访问性一致性） ---------- */
+a:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible,
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-1);
+}
+
+/* ============================================================
+   设置页专项优化（2026-07-09）
+   目标：①修复新增通知渠道按钮被拉伸成细长条
+        ②把监控策略等同类配置项排成 2-4 列，且标签在上、输入框紧凑
+        ③保存按钮改为悬浮药丸按钮，不再像白条
+        ④开关在关闭/开启状态都清晰可见
+   ============================================================ */
+
+/* ---------- 6. 新增通知渠道按钮：不要被 flex column 拉伸成全宽 ---------- */
+.settings-channel-manager {
+  align-items: flex-start; /* 取消 column 方向下的 stretch，按钮恢复自然宽度 */
+}
+.settings-channel-manager .btn {
+  border-style: dashed;
+  padding: 9px 16px;
+}
+
+/* ---------- 7. 设置表单字段组：同类字段 2-4 列，标签在上、输入框紧凑 ---------- */
+.settings-row-group {
+  display: grid;
+  gap: 12px 16px;
+  padding: 12px 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-row-group .settings-row {
+  display: block;
+  border-bottom: none;
+  padding: 0;
+}
+.settings-row-group .settings-row .sr-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  line-height: 1.4;
+}
+.settings-row-group .settings-row .sr-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: 100%;
+  font-family: inherit;
+  color: var(--text-primary);
+}
+/* 文本框/大输入保持通栏 */
+.settings-row-group .settings-row .input {
+  width: 100%;
+}
+/* 数字类紧凑输入：固定紧凑宽度，数字右对齐等宽，聚焦高亮 */
+.settings-row-group .settings-row .input--compact {
+  width: 72px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  text-align: right;
+  letter-spacing: 0.3px;
+  transition: border-color var(--dur-state, 0.15s) var(--ease-calm, ease), box-shadow var(--dur-state, 0.15s) var(--ease-calm, ease);
+}
+.settings-row-group .settings-row .input--compact:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+/* 下拉框在卡片里需要撑满 */
+.settings-row-group .settings-row select.input.input--compact {
+  width: 100%;
+  padding-right: 32px;
+  text-align: left;
+}
+.settings-row-group--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.settings-row-group--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.settings-row-group--4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1080px) {
+  .settings-row-group--3,
+  .settings-row-group--4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .settings-row-group--2,
+  .settings-row-group--3,
+  .settings-row-group--4 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- 8. 保存按钮：悬浮药丸按钮，无背景白条 ---------- */
+.settings-system-form {
+  padding-bottom: 100px; /* 为固定保存按钮预留空间，避免遮挡最末内容 */
+}
+.subscription-settings {
+  padding-bottom: 96px; /* 订阅 tab 同样为浮动保存按钮预留空间 */
+}
+.settings-save-footer {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.settings-save-footer > div:first-child {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.settings-save-footer__message {
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  font-size: var(--type-small-size);
+  line-height: 1.5;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-soft);
+}
+.settings-save-footer__message--error {
+  color: color-mix(in srgb, var(--color-state-critical) 74%, var(--text-primary));
+  background: color-mix(in srgb, var(--color-state-critical) 9%, transparent);
+  border-color: color-mix(in srgb, var(--color-state-critical) 36%, transparent);
+}
+.settings-save-footer__message--success {
+  color: var(--color-state-normal);
+  background: color-mix(in srgb, var(--color-state-normal) 9%, transparent);
+  border-color: color-mix(in srgb, var(--color-state-normal) 30%, transparent);
+}
+.settings-save-footer__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 15px;
+  border-radius: var(--radius-pill);
+  font-size: var(--type-small-size);
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-soft);
+}
+.settings-save-footer__hint::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
+  animation: unsaved-pulse 1.6s var(--ease-calm, ease) infinite;
+}
+@keyframes unsaved-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.settings-save-footer .btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-pill);
+  padding: 12px 26px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+  border: 1px solid color-mix(in srgb, var(--accent-strong) 65%, #000 25%);
+  box-shadow: 0 12px 26px -8px color-mix(in srgb, var(--accent) 55%, transparent), var(--shadow-lg);
+  transition: transform var(--dur-state, 0.15s) var(--ease-out, ease), box-shadow var(--dur-state, 0.15s) var(--ease-out, ease);
+}
+.settings-save-footer .btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 34px -10px color-mix(in srgb, var(--accent) 60%, transparent), var(--shadow-lg);
+}
+.settings-save-footer .btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.settings-save-footer .btn:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+.settings-save-footer .btn svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 700px) {
+  .settings-save-footer {
+    right: 12px;
+    left: 12px;
+    bottom: 12px;
+    justify-content: flex-end;
+  }
+  .settings-save-footer .btn {
+    flex: 1 1 auto;
+  }
+}
+
+/* ---------- 9. 开关重设计：一眼可见 + 明确开/关状态 ---------- */
+.toggle {
+  width: 52px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border-strong);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+  position: relative;
+  flex: 0 0 auto;
+  padding: 0;
+  cursor: pointer;
+  transition: background var(--dur-state, 0.18s) var(--ease-calm, ease), border-color var(--dur-state, 0.18s) var(--ease-calm, ease);
+}
+/* 中和 index.css 旧 .toggle::after 残留的白色圆点（仅本套重设计使用文字态） */
+.toggle::after {
+  content: 'OFF';
+  position: absolute;
+  left: auto;
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: auto;
+  height: auto;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+.toggle.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: none;
+}
+.toggle.is-on::after {
+  content: 'ON';
+  right: auto;
+  left: 10px;
+  color: #fff;
+}
+.toggle__thumb {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform var(--dur-state, 0.18s) var(--ease-out, ease);
+}
+.toggle.is-on .toggle__thumb {
+  transform: translate(24px, -50%);
+  background: #fff;
+}
+.toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

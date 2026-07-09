@@ -4,6 +4,7 @@
 .login-page {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   background: var(--bg);
@@ -116,6 +117,52 @@
   font-size: 12px;
 }
 
+.login-page__field {
+  margin-bottom: var(--space-3);
+}
+.login-page__field label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.login-page__field input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+.login-page__field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.lc-btn {
+  width: 100%;
+  padding: 11px;
+  border-radius: var(--radius-2);
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: var(--space-2);
+  font-family: inherit;
+  transition: all 0.2s;
+}
+.lc-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.lc-btn:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
 .login-page__submit {
   width: 100%;
   margin-top: var(--space-2);
