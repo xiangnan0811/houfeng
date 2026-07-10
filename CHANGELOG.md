@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.57.5](https://github.com/xiangnan0811/houfeng/compare/v0.57.4...v0.57.5) (2026-07-10)
+
+
+### Bug Fixes
+
+* **web:** add shell error recovery ([54feae7](https://github.com/xiangnan0811/houfeng/commit/54feae7ee4027e6ce213dd73ebcfaf81016b3328))
+* **web:** keep shell summary fresh and honest ([2432833](https://github.com/xiangnan0811/houfeng/commit/2432833ecd5bdfadcf6c3577af2d29aa33570c8b))
+* **web:** make shell status honest and recoverable ([a79677b](https://github.com/xiangnan0811/houfeng/commit/a79677bfec89f0abf393c09a82116d0b4cb60efd))
+
 ## [0.57.4](https://github.com/xiangnan0811/houfeng/compare/v0.57.3...v0.57.4) (2026-07-10)
 
 
