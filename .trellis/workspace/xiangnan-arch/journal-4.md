@@ -1849,3 +1849,37 @@ Reviewed and fixed frontend UI/settings changes, added Trellis task artifacts, v
 ### Next Steps
 
 - None - task complete
+
+
+## Session 232: Dashboard 事实可信度修复与发布
+
+**Date**: 2026-07-10
+**Task**: Dashboard 事实可信度修复与发布
+**Branch**: `codex/archive-frontend-dashboard-trust`
+
+### Summary
+
+完成前端修复计划 Task 3：显式 RemoteState、五状态单主行动、abnormal/severe subset、VPS false-empty 修复与 Dashboard 旧岛清理；PR #346 合并，v0.57.4 双架构镜像和 agent 资产已发布并核验。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `99a8959` | (see git log) |
+| `5f5884a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
