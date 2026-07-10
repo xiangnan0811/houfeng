@@ -98,7 +98,7 @@ select.input::-ms-expand{display:none}
 .data-table-empty{padding:40px;text-align:center;color:var(--text-muted);background:color-mix(in srgb,var(--surface) 92%,transparent);border:1px dashed color-mix(in srgb,var(--border) 70%,transparent);border-radius:var(--radius-3)}
 
 /* ===== ATOM COMPAT: StatusGlyph + Mono + Trend ===== */
-.status-glyph{display:inline-block;border-radius:50%}
+.status-glyph{display:inline-block;vertical-align:middle;border-radius:50%}
 .status-glyph--sm{width:8px;height:8px}
 .status-glyph--md{width:12px;height:12px}
 .mono{font-family:var(--font-mono)}
@@ -176,38 +176,42 @@ select.input::-ms-expand{display:none}
 .input-field__label--required::after{content:' *';color:var(--color-state-critical)}
 
 /* ===== ATOM COMPAT: Sparkline ===== */
-.sparkline{display:inline-block;vertical-align:middle}
-.sparkline--empty{background:var(--surface-elevated);border:1px dashed var(--border-dashed);border-radius:var(--radius-2);display:inline-flex;align-items:center;justify-content:center}
-.sparkline__placeholder{font-family:var(--font-sans);font-size:11px;color:var(--text-muted);letter-spacing:0.02em}
-.sparkline-shell{position:relative}
+.sparkline{display:block;vertical-align:middle;overflow:visible;cursor:default}
+.sparkline--interactive{cursor:crosshair}
+.sparkline--empty{background:var(--surface-elevated);border:1px dashed var(--border-dashed);border-radius:var(--radius-2)}
+.sparkline__placeholder{font-family:var(--font-sans);font-size:11px;fill:var(--text-muted);letter-spacing:0.02em}
+.sparkline-shell{position:relative;display:inline-block;line-height:0;vertical-align:middle}
+.sparkline-shell--expand{display:block;width:100%}
 .sparkline-shell--interactive .sparkline{transition:opacity var(--dur-micro) var(--ease-calm)}
 .sparkline-shell--interactive:hover .sparkline{opacity:0.95}
 .sparkline__hint{position:absolute;inset:0;display:inline-flex;align-items:center;justify-content:center;font-family:var(--font-sans);font-size:11px;color:var(--text-muted);letter-spacing:0.02em;pointer-events:none}
-.sparkline__tooltip{position:absolute;bottom:calc(100% + 6px);transform:translateX(-50%);display:inline-flex;flex-direction:column;align-items:center;gap:1px;padding:4px 8px;background:var(--surface-pressed,var(--surface-elevated));border:1px solid var(--border);border-radius:3px;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-size:11px;color:var(--text-primary);white-space:nowrap;pointer-events:none;z-index:5;box-shadow:var(--shadow-soft)}
+.sparkline__tooltip-frame{overflow:visible;pointer-events:none}
+.sparkline__tooltip{box-sizing:border-box;display:flex;height:100%;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:4px 8px;background:var(--surface-pressed,var(--surface-elevated));border:1px solid var(--border);border-radius:3px;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-size:11px;line-height:1.15;color:var(--text-primary);white-space:nowrap;pointer-events:none;box-shadow:var(--shadow-soft)}
 .sparkline__tooltip-value{font-weight:600;color:var(--text-primary)}
 .sparkline__tooltip-time{color:var(--text-muted);font-size:10px}
 
 /* ===== ATOM COMPAT: MetricChart ===== */
-.metric-chart{display:block;vertical-align:middle}
-.metric-chart--empty{background:var(--surface-elevated);border:1px dashed var(--border-dashed);border-radius:var(--radius-2);display:inline-flex;align-items:center;justify-content:center}
-.metric-chart__placeholder{font-family:var(--font-sans);font-size:11px;color:var(--text-muted);letter-spacing:0.02em}
-.metric-chart-shell{position:relative}
+.metric-chart{display:block;vertical-align:middle;cursor:default}
+.metric-chart--interactive{cursor:crosshair}
+.metric-chart--empty{background:var(--surface-elevated);border:1px dashed var(--border-dashed);border-radius:var(--radius-2)}
+.metric-chart__placeholder{font-family:var(--font-sans);font-size:11px;fill:var(--text-muted);letter-spacing:0.02em}
+.metric-chart-shell{position:relative;display:block;width:100%;line-height:0;vertical-align:middle}
+.metric-chart-shell--fixed{display:inline-block;width:max-content}
 .metric-chart__hint{position:absolute;inset:0;display:inline-flex;align-items:center;justify-content:center;font-family:var(--font-sans);font-size:11px;color:var(--text-muted);letter-spacing:0.02em;pointer-events:none}
-.metric-chart__tooltip{position:absolute;transform:translate(-50%,calc(-100% - 6px));display:inline-flex;flex-direction:column;align-items:center;gap:1px;max-width:min(176px,calc(100% - 12px));padding:4px 8px;background:var(--surface-pressed,var(--surface-elevated));border:1px solid var(--border);border-radius:3px;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-size:11px;color:var(--text-primary);white-space:nowrap;pointer-events:none;z-index:5;box-shadow:var(--shadow-soft)}
-.metric-chart__tooltip--below{transform:translate(-50%,6px)}
-.metric-chart__tooltip--edge-start{transform:translate(0,calc(-100% - 6px))}
-.metric-chart__tooltip--edge-start.metric-chart__tooltip--below{transform:translate(0,6px)}
-.metric-chart__tooltip--edge-end{transform:translate(-100%,calc(-100% - 6px))}
-.metric-chart__tooltip--edge-end.metric-chart__tooltip--below{transform:translate(-100%,6px)}
+.metric-chart__tooltip-frame{overflow:visible;pointer-events:none}
+.metric-chart__tooltip{box-sizing:border-box;display:flex;height:100%;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:4px 8px;background:var(--surface-pressed,var(--surface-elevated));border:1px solid var(--border);border-radius:3px;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-size:11px;line-height:1.15;color:var(--text-primary);white-space:nowrap;pointer-events:none;box-shadow:var(--shadow-soft)}
 .metric-chart__tooltip-value{font-weight:600;color:var(--text-primary)}
 .metric-chart__tooltip-time{color:var(--text-muted);font-size:10px}
 .metric-chart__axis-text{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-size:10px;fill:var(--text-muted)}
 .metric-chart__threshold-label{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-size:10px;font-weight:600}
 
 /* ===== ATOM COMPAT: Stepper ===== */
-.stepper{display:grid;grid-auto-flow:column;list-style:none;margin:0;padding:0;width:100%;gap:0}
+.stepper{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);list-style:none;margin:0;padding:0;width:100%;gap:0}
 .stepper__step{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding-top:6px;text-align:center;min-width:0}
 .stepper__connector{position:absolute;top:13px;left:50%;width:100%;height:1px;background:var(--color-state-offline);z-index:0;pointer-events:none}
+.stepper__step--current .stepper__connector{background:var(--accent)}
+.stepper__step--done .stepper__connector{background:var(--color-state-normal)}
+.stepper__step--error .stepper__connector{background:var(--color-state-critical)}
 .stepper__dot{position:relative;z-index:1;display:inline-block;flex-shrink:0}
 .stepper__label{font-family:var(--font-sans);font-size:11px;letter-spacing:0.02em;color:var(--text-secondary);line-height:1.4;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 var(--space-1)}
 .stepper__step--pending .stepper__label{color:var(--text-muted)}

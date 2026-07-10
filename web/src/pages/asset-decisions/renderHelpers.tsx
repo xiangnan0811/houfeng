@@ -51,10 +51,6 @@ import type {
   MemberDecisionCardsOptions,
 } from './types'
 
-type ScoreStyle = React.CSSProperties & {
-  '--score': number
-}
-
 export function renderReadbackBadge(readback?: { status: AssetDecisionExecutionReadbackStatus }) {
   const status = readback?.status
   if (!status) {
@@ -218,15 +214,9 @@ export function renderEvidenceAssessment(assessment: AssetDecisionEvidenceAssess
         </Badge>
       </div>
       <div className="asset-decision-assessment__bars" aria-label="证据评估刻度">
-        <span style={{ '--score': assessment.confidence_score } as ScoreStyle}>
-          可信 <MonoDigits>{assessment.confidence_score}</MonoDigits>
-        </span>
-        <span style={{ '--score': assessment.pressure_score } as ScoreStyle}>
-          压力 <MonoDigits>{assessment.pressure_score}</MonoDigits>
-        </span>
-        <span style={{ '--score': assessment.readiness_score } as ScoreStyle}>
-          准备 <MonoDigits>{assessment.readiness_score}</MonoDigits>
-        </span>
+        {renderAssessmentScore('可信', assessment.confidence_score)}
+        {renderAssessmentScore('压力', assessment.pressure_score)}
+        {renderAssessmentScore('准备', assessment.readiness_score)}
       </div>
       {mode === 'detail' && (
         <div className="asset-decision-assessment__meta">
@@ -234,6 +224,17 @@ export function renderEvidenceAssessment(assessment: AssetDecisionEvidenceAssess
           <span>支撑 {assessment.support_signal_count} · 风险 {assessment.risk_signal_count} · 缺口 {assessment.gap_signal_count}</span>
         </div>
       )}
+    </div>
+  )
+}
+
+function renderAssessmentScore(label: string, value: number) {
+  return (
+    <div className="asset-decision-assessment__bar">
+      <progress aria-label={label} max={100} value={value} />
+      <span className="asset-decision-assessment__bar-label" aria-hidden="true">
+        {label} <MonoDigits>{value}</MonoDigits>
+      </span>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { type CSSProperties, type MouseEvent, useState, useEffect, useRef } from 'react'
+import { type MouseEvent, useState, useEffect, useRef } from 'react'
 export type MetricChartTone =
   | 'normal'
   | 'notice'
@@ -161,7 +161,7 @@ export function MetricChart({
   showTooltip = true,
 }: MetricChartProps) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLSpanElement>(null)
   const [measuredWidth, setMeasuredWidth] = useState<number>(0)
 
   useEffect(() => {
@@ -197,12 +197,29 @@ export function MetricChart({
     return (
       <span
         ref={containerRef}
-        className={['metric-chart', 'metric-chart--empty', className].filter(Boolean).join(' ')}
-        role="img"
-        aria-label={ariaLabel ?? '暂无观测数据'}
-        style={{ width: propsWidth ? width : '100%', height }}
+        className={[
+          'metric-chart-shell',
+          propsWidth && 'metric-chart-shell--fixed',
+        ].filter(Boolean).join(' ')}
       >
-        <span className="metric-chart__placeholder">暂无观测数据</span>
+        <svg
+          className={['metric-chart', 'metric-chart--empty', className].filter(Boolean).join(' ')}
+          width={propsWidth ? width : '100%'}
+          height={height}
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label={ariaLabel ?? '暂无观测数据'}
+        >
+          <text
+            className="metric-chart__placeholder"
+            x={width / 2}
+            y={height / 2}
+            textAnchor="middle"
+            dominantBaseline="middle"
+          >
+            暂无观测数据
+          </text>
+        </svg>
       </span>
     )
   }
@@ -301,24 +318,31 @@ export function MetricChart({
     if (!showTooltip || effectiveHoverIndex == null || isSingle) return null
     const x = projectX(effectiveHoverIndex)
     const y = projectY(samples[effectiveHoverIndex].value)
-    const xPercent = (x / width) * 100
     const sample = samples[effectiveHoverIndex]
-    const placementClass = y < PADDING.top + 34
-      ? 'metric-chart__tooltip--below'
-      : 'metric-chart__tooltip--above'
-    const edgeClass = xPercent < 18
-      ? 'metric-chart__tooltip--edge-start'
-      : xPercent > 82
-        ? 'metric-chart__tooltip--edge-end'
-        : ''
+    const tooltipInset = 6
+    const tooltipWidth = Math.min(176, width - tooltipInset * 2)
+    const tooltipHeight = 38
+    const tooltipX = Math.max(
+      tooltipInset,
+      Math.min(width - tooltipInset - tooltipWidth, x - tooltipWidth / 2),
+    )
+    const preferredY = y < PADDING.top + tooltipHeight + tooltipInset
+      ? y + tooltipInset
+      : y - tooltipHeight - tooltipInset
+    const tooltipY = Math.max(0, Math.min(height - tooltipHeight, preferredY))
     return (
-      <span
-        className={['metric-chart__tooltip', placementClass, edgeClass].filter(Boolean).join(' ')}
-        style={{ left: `${xPercent}%`, top: `${y.toFixed(2)}px` }}
+      <foreignObject
+        className="metric-chart__tooltip-frame"
+        x={tooltipX}
+        y={tooltipY}
+        width={tooltipWidth}
+        height={tooltipHeight}
       >
-        <span className="metric-chart__tooltip-value">{formatValue(sample.value)}</span>
-        <span className="metric-chart__tooltip-time">{formatTooltipLabel(sample.observedAt)}</span>
-      </span>
+        <div className="metric-chart__tooltip">
+          <span className="metric-chart__tooltip-value">{formatValue(sample.value)}</span>
+          <span className="metric-chart__tooltip-time">{formatTooltipLabel(sample.observedAt)}</span>
+        </div>
+      </foreignObject>
     )
   })()
 
@@ -362,20 +386,18 @@ export function MetricChart({
     })
   })()
 
-  const svgStyle: CSSProperties = {
-    display: 'block',
-    cursor: isSingle ? 'default' : 'crosshair',
-  }
-
   const svg = (
     <svg
-      className={['metric-chart', className].filter(Boolean).join(' ')}
+      className={[
+        'metric-chart',
+        isSingle ? 'metric-chart--single' : 'metric-chart--interactive',
+        className,
+      ].filter(Boolean).join(' ')}
       width={propsWidth ? width : '100%'}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       role="img"
       aria-label={ariaLabel ?? `时序图 ${samples.length} 个采样`}
-      style={svgStyle}
       onMouseMove={isSingle ? undefined : handleMove}
       onMouseLeave={isSingle ? undefined : handleLeave}
     >
@@ -509,6 +531,7 @@ export function MetricChart({
           </g>
         )
       })()}
+      {tooltipNode}
     </svg>
   )
 
@@ -518,20 +541,13 @@ export function MetricChart({
       className={[
         'metric-chart-shell',
         isSingle && 'metric-chart-shell--single',
+        propsWidth && 'metric-chart-shell--fixed',
       ]
         .filter(Boolean)
         .join(' ')}
-      style={{
-        position: 'relative',
-        display: 'inline-block',
-        width: propsWidth ? width : '100%',
-        height,
-        verticalAlign: 'middle',
-      }}
     >
       {svg}
       {isSingle ? <span className="metric-chart__hint">样本不足</span> : null}
-      {tooltipNode}
     </span>
   )
 }

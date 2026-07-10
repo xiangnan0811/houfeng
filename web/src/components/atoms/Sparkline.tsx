@@ -1,4 +1,4 @@
-import { type CSSProperties, type MouseEvent, useState } from 'react'
+import { type MouseEvent, useEffect, useRef, useState } from 'react'
 
 export type SparklineTone =
   | 'default'
@@ -70,26 +70,51 @@ export function Sparkline({
 }: SparklineProps) {
   const series: number[] = samples ? samples.map((s) => s.value) : (values ?? [])
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+  const [measuredWidth, setMeasuredWidth] = useState(0)
+
+  useEffect(() => {
+    if (!expand || !svgRef.current) return
+
+    const measureCurrentWidth = () => {
+      const nextWidth = svgRef.current?.getBoundingClientRect().width ?? 0
+      if (nextWidth > 0) setMeasuredWidth(nextWidth)
+    }
+    measureCurrentWidth()
+
+    if (typeof globalThis.ResizeObserver === 'undefined') return
+    const resizeObserver = new globalThis.ResizeObserver((entries) => {
+      const nextWidth = entries[0]?.contentRect.width ?? 0
+      if (nextWidth > 0) setMeasuredWidth(nextWidth)
+    })
+    resizeObserver.observe(svgRef.current)
+    return () => resizeObserver.disconnect()
+  }, [expand])
 
   const toneClass = `sparkline--${tone}`
+  const chartWidth = expand ? measuredWidth || width : width
 
   if (series.length === 0) {
     return (
-      <span
+      <svg
+        ref={svgRef}
         className={['sparkline', toneClass, 'sparkline--empty', className].filter(Boolean).join(' ')}
+        width={expand ? '100%' : chartWidth}
+        height={height}
+        viewBox={`0 0 ${chartWidth} ${height}`}
         aria-label={ariaLabel ?? '暂无趋势数据'}
         role="img"
-        style={{
-          width: expand ? '100%' : width,
-          height,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          verticalAlign: 'middle',
-        }}
       >
-        <span className="sparkline__placeholder">暂无数据</span>
-      </span>
+        <text
+          className="sparkline__placeholder"
+          x={chartWidth / 2}
+          y={height / 2}
+          textAnchor="middle"
+          dominantBaseline="middle"
+        >
+          暂无数据
+        </text>
+      </svg>
     )
   }
 
@@ -97,7 +122,7 @@ export function Sparkline({
   const max = Math.max(...series)
   const range = max - min || 1
   const isSingle = series.length === 1
-  const stepX = isSingle ? 0 : width / (series.length - 1)
+  const stepX = isSingle ? 0 : chartWidth / (series.length - 1)
 
   const projectXY = (i: number) => {
     const x = i * stepX
@@ -120,7 +145,7 @@ export function Sparkline({
     const rect = e.currentTarget.getBoundingClientRect()
     if (rect.width === 0) return
     const relX = e.clientX - rect.left
-    const vbX = (relX / rect.width) * width
+    const vbX = (relX / rect.width) * chartWidth
     const idx = Math.round(vbX / stepX)
     setHoverIndex(Math.max(0, Math.min(series.length - 1, idx)))
   }
@@ -129,21 +154,44 @@ export function Sparkline({
     if (interactive) setHoverIndex(null)
   }
 
-  const svgStyle: CSSProperties = {
-    display: 'block',
-    cursor: interactive && !isSingle ? 'crosshair' : 'default',
-  }
+  const tooltipNode = (() => {
+    if (hoverIndex == null || !interactive) return null
+    const p = projectXY(hoverIndex)
+    const tooltipWidth = Math.min(128, chartWidth)
+    const tooltipHeight = 36
+    const tooltipX = Math.max(0, Math.min(chartWidth - tooltipWidth, p.x - tooltipWidth / 2))
+    const time = samples?.[hoverIndex]?.observedAt
+    return (
+      <foreignObject
+        className="sparkline__tooltip-frame"
+        x={tooltipX}
+        y={-tooltipHeight - 6}
+        width={tooltipWidth}
+        height={tooltipHeight}
+      >
+        <div className="sparkline__tooltip">
+          <span className="sparkline__tooltip-value">{formatValue(series[hoverIndex])}</span>
+          {time ? <span className="sparkline__tooltip-time">{formatTooltipTime(time)}</span> : null}
+        </div>
+      </foreignObject>
+    )
+  })()
 
   const svg = (
     <svg
-      className={['sparkline', toneClass, className].filter(Boolean).join(' ')}
-      width={expand ? '100%' : width}
+      ref={svgRef}
+      className={[
+        'sparkline',
+        toneClass,
+        interactive && !isSingle && 'sparkline--interactive',
+        className,
+      ].filter(Boolean).join(' ')}
+      width={expand ? '100%' : chartWidth}
       height={height}
-      viewBox={`0 0 ${width} ${height}`}
+      viewBox={`0 0 ${chartWidth} ${height}`}
       preserveAspectRatio={expand ? 'none' : undefined}
       role="img"
       aria-label={ariaLabel ?? `趋势 ${series.length} 个采样`}
-      style={svgStyle}
       onMouseMove={interactive ? handleMove : undefined}
       onMouseLeave={interactive ? handleLeave : undefined}
     >
@@ -184,6 +232,7 @@ export function Sparkline({
           </g>
         )
       })()}
+      {tooltipNode}
     </svg>
   )
 
@@ -192,41 +241,19 @@ export function Sparkline({
     return svg
   }
 
-  const containerStyle: CSSProperties = {
-    position: 'relative',
-    display: expand ? 'block' : 'inline-block',
-    width: expand ? '100%' : width,
-    height,
-    verticalAlign: 'middle',
-  }
-
-  const tooltipNode = (() => {
-    if (hoverIndex == null || !interactive) return null
-    const p = projectXY(hoverIndex)
-    const xPercent = (p.x / width) * 100
-    const time = samples?.[hoverIndex]?.observedAt
-    return (
-      <span className="sparkline__tooltip" style={{ left: `${xPercent}%` }}>
-        <span className="sparkline__tooltip-value">{formatValue(series[hoverIndex])}</span>
-        {time ? <span className="sparkline__tooltip-time">{formatTooltipTime(time)}</span> : null}
-      </span>
-    )
-  })()
-
   return (
     <span
       className={[
         'sparkline-shell',
         interactive && 'sparkline-shell--interactive',
         isSingle && 'sparkline-shell--single',
+        expand && 'sparkline-shell--expand',
       ]
         .filter(Boolean)
         .join(' ')}
-      style={containerStyle}
     >
       {svg}
       {isSingle ? <span className="sparkline__hint">样本不足</span> : null}
-      {tooltipNode}
     </span>
   )
 }

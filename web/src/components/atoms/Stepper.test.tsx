@@ -62,5 +62,6 @@ describe('Stepper', () => {
     const { container } = render(<Stepper steps={steps} />)
     const connectors = container.querySelectorAll('.stepper__connector')
     expect(connectors.length).toBe(steps.length - 1)
+    expect(container.querySelector('[style]')).not.toBeInTheDocument()
   })
 })

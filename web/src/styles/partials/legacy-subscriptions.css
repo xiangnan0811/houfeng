@@ -56,7 +56,13 @@
 
 .subscription-breakdown-bar{height:8px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--border) 58%,transparent);overflow:hidden}
 
-.subscription-breakdown-bar span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 76%,var(--color-state-normal)),color-mix(in srgb,var(--color-state-normal) 68%,transparent))}
+.subscription-breakdown-bar progress{display:block;width:100%;height:100%;border:0;border-radius:inherit;background:transparent;appearance:none;-webkit-appearance:none}
+
+.subscription-breakdown-bar progress::-webkit-progress-bar{background:transparent}
+
+.subscription-breakdown-bar progress::-webkit-progress-value{min-width:4%;border-radius:var(--radius-pill);background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 76%,var(--color-state-normal)),color-mix(in srgb,var(--color-state-normal) 68%,transparent))}
+
+.subscription-breakdown-bar progress::-moz-progress-bar{min-width:4%;border-radius:var(--radius-pill);background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 76%,var(--color-state-normal)),color-mix(in srgb,var(--color-state-normal) 68%,transparent))}
 
 .subscription-budget-row{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(160px,auto) auto;gap:var(--space-3);align-items:center;min-width:0;padding:var(--space-2) var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 70%,transparent);border-left:var(--border-w-strong) solid color-mix(in srgb,var(--border-strong) 72%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 16%,transparent)}
 
@@ -106,7 +112,7 @@
 
 .subscription-panel-select{display:flex;align-items:center;gap:var(--space-2);min-width:150px;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.2;white-space:nowrap}
 
-.subscription-panel-select select{min-width:108px;height:34px;padding:0 30px 0 var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 86%,transparent);border-radius:var(--radius-2);background:var(--surface) linear-gradient(45deg,transparent 50%,var(--text-muted) 50%) right 12px center/5px 5px no-repeat;color:var(--text-primary);font:inherit;appearance:none;cursor:pointer}
+.subscription-panel-select select{min-width:108px;height:34px;padding:0 30px 0 var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 86%,transparent);border-radius:var(--radius-2);background-color:var(--surface);background-image:var(--select-caret);background-position:right 12px center;background-size:12px 12px;background-repeat:no-repeat;color:var(--text-primary);font:inherit;appearance:none;cursor:pointer}
 
 .subscription-panel-select select:hover{border-color:color-mix(in srgb,var(--accent) 42%,var(--border))}
 

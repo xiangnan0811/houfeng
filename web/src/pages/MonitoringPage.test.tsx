@@ -303,6 +303,8 @@ describe('MonitoringPage', () => {
     expect(within(seoulRow!).getByText('seoul')).toBeInTheDocument()
     expect(within(tokyoRow!).queryByText('同步')).not.toBeInTheDocument()
     expect(within(tokyoRow!).queryByText('暂停')).not.toBeInTheDocument()
+    expect(document.querySelector('col[width="28"]')).toBeInTheDocument()
+    expect(document.querySelector('col[style]')).not.toBeInTheDocument()
 
     fireEvent.click(tokyoRow!)
     await waitFor(() => expect(screen.getByText('monitoring detail')).toBeInTheDocument())

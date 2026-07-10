@@ -99,7 +99,6 @@ export function Stepper({ steps, ariaLabel, className }: StepperProps) {
       className={cls}
       role="list"
       aria-label={ariaLabel ?? `流程进度 (${steps.length} 步)`}
-      style={{ gridTemplateColumns: `repeat(${steps.length}, 1fr)` }}
     >
       {steps.map((step, i) => {
         const stepCls = [
@@ -107,7 +106,6 @@ export function Stepper({ steps, ariaLabel, className }: StepperProps) {
           `stepper__step--${step.state}`,
         ].join(' ')
         // Connector reflects this step's state (line trailing each step except last)
-        const connectorColor = STATE_COLOR[step.state]
         const isLast = i === steps.length - 1
         return (
           <li
@@ -119,7 +117,6 @@ export function Stepper({ steps, ariaLabel, className }: StepperProps) {
               <span
                 className="stepper__connector"
                 aria-hidden="true"
-                style={{ background: connectorColor }}
               />
             ) : null}
             <StepDot state={step.state} />

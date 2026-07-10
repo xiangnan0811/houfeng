@@ -88,6 +88,21 @@ describe('DataTable', () => {
     expect(monoCell).toBeTruthy()
   })
 
+  it('preserves column widths without emitting inline styles', () => {
+    const widthColumns: DataTableColumn<Row>[] = [
+      { key: 'name', label: '名字', width: 120, render: (r) => r.name },
+      { key: 'value', label: '值', width: '25%', render: (r) => r.value },
+    ]
+    const { container } = render(
+      <DataTable columns={widthColumns} rows={rows} rowKey={(r) => r.id} />,
+    )
+    const columnElements = Array.from(container.querySelectorAll('col'))
+
+    expect(columnElements[0]).toHaveAttribute('width', '120')
+    expect(columnElements[1]).toHaveAttribute('width', '25%')
+    expect(container.querySelector('col[style]')).not.toBeInTheDocument()
+  })
+
   it('shows empty content when rows is empty', () => {
     render(
       <DataTable

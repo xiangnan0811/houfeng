@@ -87,7 +87,7 @@ export function DataTable<T>({
         {columns.map((col) => (
           <col
             key={col.key}
-            style={col.width ? { width: typeof col.width === 'number' ? `${col.width}px` : col.width } : undefined}
+            width={col.width || undefined}
           />
         ))}
       </colgroup>

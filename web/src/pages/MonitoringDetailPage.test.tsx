@@ -1455,7 +1455,10 @@ describe('MonitoringDetailPage', () => {
       expect(card).toBeTruthy()
       const tooltip = card!.querySelector('.metric-chart__tooltip')
       expect(tooltip).toBeTruthy()
-      expect((tooltip as HTMLElement).style.top).not.toBe('')
+      const tooltipFrame = card!.querySelector('.metric-chart__tooltip-frame')
+      expect(tooltipFrame).toHaveAttribute('x')
+      expect(tooltipFrame).toHaveAttribute('y')
+      expect(tooltip).not.toHaveAttribute('style')
       return tooltip!
     }
 

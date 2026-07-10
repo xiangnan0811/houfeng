@@ -25,3 +25,9 @@
 .events-page .detail-section:has(.event-group){border-color:color-mix(in srgb,var(--accent-2) 22%,var(--border));box-shadow:var(--shadow-soft)}
 
 .events-page .detail-section:has(.event-group) .detail-section__title{font-size:var(--type-h1-size)}
+
+.events-stream-empty{padding:var(--space-6);text-align:center}
+
+.events-stream-empty__message{font-size:13px;color:var(--text-secondary)}
+
+.events-stream-empty__reset{margin-top:var(--space-3)}

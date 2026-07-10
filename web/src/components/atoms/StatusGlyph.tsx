@@ -62,7 +62,6 @@ export function StatusGlyph({
       viewBox="0 0 16 16"
       role="img"
       aria-label={ariaLabel ?? STATE_LABEL[state]}
-      style={{ display: 'inline-block', verticalAlign: 'middle' }}
     >
       {state === 'normal' && <circle cx={8} cy={8} r={5} fill={color} />}
       {state === 'notice' && (
