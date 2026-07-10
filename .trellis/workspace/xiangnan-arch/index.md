@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 231
+- **Total Sessions**: 232
 - **Last Active**: 2026-07-10
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1851 | Active |
+| `journal-4.md` | ~1885 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 232 | 2026-07-10 | Dashboard 事实可信度修复与发布 | `99a8959`, `5f5884a` | `codex/archive-frontend-dashboard-trust` |
 | 231 | 2026-07-10 | 前端 Modal 栈与嵌套焦点 | `ba39024` | `codex/archive-frontend-modal-stack-focus` |
 | 230 | 2026-07-09 | Review UI settings fixes | `452b3a1` | `fix/review-findings-ui-settings` |
 | 229 | 2026-07-07 | Asset decisions IA reset closeout | `76dadb6` | `refactor/asset-decisions-ia-reset-closeout` |
