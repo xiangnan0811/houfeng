@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.57.4](https://github.com/xiangnan0811/houfeng/compare/v0.57.3...v0.57.4) (2026-07-10)
+
+
+### Bug Fixes
+
+* **web:** establish dashboard trust model ([99a8959](https://github.com/xiangnan0811/houfeng/commit/99a89590fbf47f4d3fcf74263756451b7c9070cc))
+* **web:** restore dashboard command surface ([5f5884a](https://github.com/xiangnan0811/houfeng/commit/5f5884a8738cdb7e7da1bd07de408a42c5c6a43b))
+* **web:** restore trustworthy dashboard decisions ([afa0ef7](https://github.com/xiangnan0811/houfeng/commit/afa0ef71354f5ee01e7d867ad4b3856b8d9c471a))
+
 ## [0.57.3](https://github.com/xiangnan0811/houfeng/compare/v0.57.2...v0.57.3) (2026-07-10)
 
 
