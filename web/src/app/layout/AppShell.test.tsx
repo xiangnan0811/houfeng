@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -27,7 +27,7 @@ function mockJSONResponse(body: unknown, status = 200) {
 
 function baseOverview(overrides: Record<string, unknown> = {}) {
   return {
-    snapshot_generated_at: '2026-04-25T08:30:00Z',
+    snapshot_generated_at: new Date(Date.now() - 60_000).toISOString(),
     total_monitoring_instance_count: 5,
     total_target_count: 4,
     abnormal_monitoring_instance_count: 0,
@@ -83,7 +83,12 @@ function renderAuthenticatedAppShell(authUser: User = user) {
 
 describe('AppShell', () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    })
   })
 
   it('renders sidebar chrome and sets document title when authenticated', () => {
@@ -111,6 +116,18 @@ describe('AppShell', () => {
     expect(layout!.textContent).not.toMatch(/单用户|全权限|个人系统|V1 冻结基线/)
   })
 
+  it('links the notification control to filtered events without a fake count', () => {
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})))
+
+    renderAuthenticatedAppShell()
+
+    expect(screen.getByRole('link', { name: '查看通知事件' })).toHaveAttribute(
+      'href',
+      '/events?notification_only=1',
+    )
+    expect(document.querySelector('.notif-count')).toBeNull()
+  })
+
   it('requests dashboard summary when authenticated and shows loading as degraded', () => {
     const fetchMock = vi.fn().mockReturnValue(new Promise(() => {}))
     vi.stubGlobal('fetch', fetchMock)
@@ -122,9 +139,9 @@ describe('AppShell', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-    // Loading state shows degraded sync indicator
+    // Loading is explicit and does not imply a known clear/anomaly result.
     const syncEl = document.querySelector('.tp-sync')
-    expect(syncEl).toHaveClass('tp-sync--degraded')
+    expect(syncEl).toHaveClass('tp-sync--loading')
     expect(syncEl).toHaveAttribute('title', '正在读取系统摘要')
   })
 
@@ -147,8 +164,8 @@ describe('AppShell', () => {
 
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
-      expect(syncEl).toHaveClass('tp-sync--degraded')
-      expect(syncEl).toHaveAttribute('title', '存在异常')
+      expect(syncEl).toHaveClass('tp-sync--anomaly')
+      expect(syncEl).toHaveAttribute('title', '摘要有异常')
     })
   })
 
@@ -169,8 +186,8 @@ describe('AppShell', () => {
 
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
-      expect(syncEl).toHaveClass('tp-sync--degraded')
-      expect(syncEl).toHaveAttribute('title', '存在异常')
+      expect(syncEl).toHaveClass('tp-sync--anomaly')
+      expect(syncEl).toHaveAttribute('title', '摘要有异常')
     })
   })
 
@@ -192,7 +209,7 @@ describe('AppShell', () => {
 
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
-      expect(syncEl).toHaveClass('tp-sync--degraded')
+      expect(syncEl).toHaveClass('tp-sync--anomaly')
     })
     // Sidebar shows anomaly count badges
     expect(screen.getByText('3')).toHaveClass('nav-badge')
@@ -216,8 +233,8 @@ describe('AppShell', () => {
     const { unmount } = renderAuthenticatedAppShell()
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
-      expect(syncEl).toHaveClass('tp-sync--degraded')
-      expect(syncEl).toHaveAttribute('title', '存在异常')
+      expect(syncEl).toHaveClass('tp-sync--anomaly')
+      expect(syncEl).toHaveAttribute('title', '摘要有异常')
     })
     unmount()
 
@@ -225,7 +242,7 @@ describe('AppShell', () => {
 
     // After remount, should be back to loading state
     const syncEl = document.querySelector('.tp-sync')
-    expect(syncEl).toHaveClass('tp-sync--degraded')
+    expect(syncEl).toHaveClass('tp-sync--loading')
     expect(syncEl).toHaveAttribute('title', '正在读取系统摘要')
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
   })
@@ -247,21 +264,126 @@ describe('AppShell', () => {
 
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
-      expect(syncEl).toHaveClass('tp-sync--degraded')
-      expect(syncEl).toHaveAttribute('title', '存在异常')
+      expect(syncEl).toHaveClass('tp-sync--anomaly')
+      expect(syncEl).toHaveAttribute('title', '摘要有异常')
     })
   })
 
-  it('marks loaded summaries without anomalies as ok', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
+  it('describes a clear dashboard snapshot without claiming the system is healthy', async () => {
+    const generatedAt = new Date(Date.now() - 60_000).toISOString()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse(baseOverview({ snapshot_generated_at: generatedAt })),
+      ),
+    )
 
     renderAuthenticatedAppShell()
 
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
-      expect(syncEl).toHaveClass('tp-sync--ok')
-      expect(syncEl).toHaveAttribute('title', '系统正常')
+      expect(syncEl).toHaveClass('tp-sync--clear')
+      expect(syncEl).toHaveAttribute('title', '摘要无异常')
     })
+    expect(screen.getByText('摘要无异常')).toBeInTheDocument()
+    expect(screen.getByText(/摘要生成/)).toBeInTheDocument()
+    expect(document.querySelector('.layout')).not.toHaveTextContent('系统正常')
+  })
+
+  it('marks a dashboard snapshot stale after the freshness window expires', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-25T08:30:00Z'))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        mockJSONResponse(baseOverview({ snapshot_generated_at: '2026-04-25T08:30:00Z' })),
+      ),
+    )
+
+    renderAuthenticatedAppShell()
+    await act(async () => {})
+
+    expect(document.querySelector('.tp-sync')).toHaveClass('tp-sync--clear')
+
+    await act(async () => {
+      vi.advanceTimersByTime(5 * 60_000 + 1)
+    })
+
+    const syncEl = document.querySelector('.tp-sync')
+    expect(syncEl).toHaveClass('tp-sync--stale')
+    expect(syncEl).toHaveAttribute('title', '摘要已过期')
+    expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
+  })
+
+  it('refreshes on visibility and focus while deduplicating an in-flight request', async () => {
+    let resolveRefresh: ((response: Response) => void) | undefined
+    const refreshResponse = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve
+    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(baseOverview()))
+      .mockReturnValueOnce(refreshResponse)
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAuthenticatedAppShell()
+    await waitFor(() => {
+      expect(document.querySelector('.tp-sync')).toHaveClass('tp-sync--clear')
+    })
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    })
+    fireEvent(document, new Event('visibilitychange'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    })
+    fireEvent(document, new Event('visibilitychange'))
+    fireEvent(window, new Event('focus'))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    resolveRefresh?.(
+      mockJSONResponse(baseOverview({ abnormal_monitoring_instance_count: 2 })),
+    )
+    await waitFor(() => {
+      expect(document.querySelector('.tp-sync')).toHaveClass('tp-sync--anomaly')
+    })
+    expect(screen.getByText('2')).toHaveClass('nav-badge')
+  })
+
+  it('keeps the last successful snapshot but marks it stale when refresh fails', async () => {
+    const generatedAt = new Date(Date.now() - 60_000).toISOString()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          baseOverview({
+            snapshot_generated_at: generatedAt,
+            abnormal_monitoring_instance_count: 2,
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'dashboard unavailable' }, 503))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAuthenticatedAppShell()
+    await waitFor(() => {
+      expect(screen.getByText('2')).toHaveClass('nav-badge')
+    })
+
+    fireEvent(window, new Event('focus'))
+
+    await waitFor(() => {
+      const syncEl = document.querySelector('.tp-sync')
+      expect(syncEl).toHaveClass('tp-sync--stale')
+      expect(syncEl).toHaveAttribute('title', '摘要已过期')
+    })
+    expect(screen.getByText(/摘要生成/)).toBeInTheDocument()
+    expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
   })
 
   it('shows dashboard unavailable when the shell summary request fails', async () => {
@@ -274,7 +396,7 @@ describe('AppShell', () => {
 
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
-      expect(syncEl).toHaveClass('tp-sync--down')
+      expect(syncEl).toHaveClass('tp-sync--unavailable')
       expect(syncEl).toHaveAttribute('title', '摘要不可用')
     })
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)

@@ -4,7 +4,6 @@ import { MemoryRouter } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 
 const user = { user_id: 'u1', username: 'admin', role: 'admin', display_name: '' }
-const sync = { state: 'ok' as const, label: '摘要已加载', meta: 'v1.0 · dashboard 14:32:01' }
 
 describe('Sidebar', () => {
   it('renders brand and grouped asset-aware nav items', () => {
@@ -12,7 +11,6 @@ describe('Sidebar', () => {
       <MemoryRouter>
         <Sidebar
           user={user}
-          sync={sync}
           anomalyCounts={{ monitoring: 0, targets: 0 }}
           collapsed={false}
           onToggle={() => {}}
@@ -40,7 +38,6 @@ describe('Sidebar', () => {
       <MemoryRouter>
         <Sidebar
           user={user}
-          sync={sync}
           anomalyCounts={{ monitoring: 3, targets: 1 }}
           collapsed={false}
           onToggle={() => {}}
@@ -61,7 +58,6 @@ describe('Sidebar', () => {
       <MemoryRouter>
         <Sidebar
           user={user}
-          sync={sync}
           anomalyCounts={{ monitoring: 0, targets: 0 }}
           collapsed={false}
           onToggle={() => {}}

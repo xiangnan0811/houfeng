@@ -1,11 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import type { User } from '../../lib/auth-client'
-import type { SyncStatusProps } from './SyncStatus'
 
 export interface SidebarProps {
   user: User
-  sync: SyncStatusProps
   anomalyCounts: { monitoring: number; targets: number }
   collapsed: boolean
   onToggle: () => void

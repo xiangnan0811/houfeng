@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import { useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { GlobalSearch } from './GlobalSearch'
 import { useThemeOptional } from '../../lib/theme-context'
-import type { SyncStatusProps } from './SyncStatus'
+import { SyncStatus, type SyncStatusProps } from './SyncStatus'
 import type { User } from '../../lib/auth-client'
 
 const PAGE_TITLES: Record<string, string> = {
@@ -25,9 +25,6 @@ interface TopBarProps {
 export function TopBar({ sync, user }: TopBarProps) {
   const location = useLocation()
   const pageTitle = derivePageTitle(location.pathname)
-  const syncTitle = sync.label
-  const syncClass = `tp-sync tp-sync--${sync.state}`
-
   return (
     <header className="topbar">
       <span className="tp-page">{pageTitle}</span>
@@ -36,7 +33,7 @@ export function TopBar({ sync, user }: TopBarProps) {
       <div className="tp-divider" />
       <ThemeSwitcher />
       <NotificationBell />
-      <span className={syncClass} title={syncTitle} />
+      <SyncStatus {...sync} />
       {user && <UserAvatar user={user} />}
     </header>
   )
@@ -105,13 +102,17 @@ function ThemeSwitcher() {
 
 function NotificationBell() {
   return (
-    <button className="tp-icon-btn" title="通知">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+    <Link
+      className="tp-icon-btn"
+      to="/events?notification_only=1"
+      aria-label="查看通知事件"
+      title="通知事件"
+    >
+      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
         <path d="M4 6a4 4 0 018 0c0 4 2 5 2 5H2s2-1 2-5" />
         <path d="M6.5 13a1.5 1.5 0 003 0" />
       </svg>
-      <span className="notif-count">0</span>
-    </button>
+    </Link>
   )
 }
 
