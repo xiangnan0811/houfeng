@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.58.0](https://github.com/xiangnan0811/houfeng/compare/v0.57.5...v0.58.0) (2026-07-10)
+
+
+### Features
+
+* **security:** enforce shared strict CSP ([254959a](https://github.com/xiangnan0811/houfeng/commit/254959abd2e6f5b1a2a8cd738c6fd9a6a507f848))
+* **security:** enforce strict frontend CSP ([89c2572](https://github.com/xiangnan0811/houfeng/commit/89c25720cae985c72dd78e024a0e7947186ba2a8))
+
+
+### Bug Fixes
+
+* **build:** expose shared CSP policy to web stage ([d2be9c0](https://github.com/xiangnan0811/houfeng/commit/d2be9c0213d958b52894023345a57e2eca70f01e))
+
+
+### Documentation
+
+* **spec:** record strict CSP contract ([50aa3dd](https://github.com/xiangnan0811/houfeng/commit/50aa3dd9634a7f7202f9238b7ff6a6691bf22701))
+
 ## [0.57.5](https://github.com/xiangnan0811/houfeng/compare/v0.57.4...v0.57.5) (2026-07-10)
 
 
