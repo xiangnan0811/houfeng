@@ -1,6 +1,16 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { visualizer } from 'rollup-plugin-visualizer'
+
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const contentSecurityPolicy = readFileSync(
+  resolve(repositoryRoot, 'internal/center/http/csp-policy.txt'),
+  'utf8',
+).trim()
+const securityHeaders = { 'Content-Security-Policy': contentSecurityPolicy }
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -29,12 +39,16 @@ export default defineConfig(({ mode }) => {
   return {
     plugins,
     server: {
+      headers: securityHeaders,
       proxy: {
         '/api': {
           target,
           changeOrigin: true,
         },
       },
+    },
+    preview: {
+      headers: securityHeaders,
     },
   }
 })

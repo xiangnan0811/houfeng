@@ -1,3 +1,11 @@
+@font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:400;font-display:swap;src:url('/fonts/ibm-plex-sans-400.woff2') format('woff2')}
+@font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:500;font-display:swap;src:url('/fonts/ibm-plex-sans-500.woff2') format('woff2')}
+@font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:600;font-display:swap;src:url('/fonts/ibm-plex-sans-600.woff2') format('woff2')}
+@font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:700;font-display:swap;src:url('/fonts/ibm-plex-sans-700.woff2') format('woff2')}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:400;font-display:swap;src:url('/fonts/ibm-plex-mono-400.woff2') format('woff2')}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:500;font-display:swap;src:url('/fonts/ibm-plex-mono-500.woff2') format('woff2')}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:600;font-display:swap;src:url('/fonts/ibm-plex-mono-600.woff2') format('woff2')}
+
 :root{--ease:cubic-bezier(0.4,0,0.2,1);--ease-out:cubic-bezier(0.2,0,0,1);--dur-fast:100ms;--dur-normal:200ms;--dur-slow:300ms;--t:var(--dur-slow) var(--ease)}
 :root, .theme-houfeng-dark{
   --bg:#0a0a0f;--bg-side:#0c0c14;--bg-card:rgba(15,15,25,0.8);--bg-card-h:rgba(20,20,35,0.9);
@@ -27,7 +35,7 @@
   --color-state-normal:#34d399;--color-state-notice:#f59e0b;--color-state-alert:#f59e0b;
   --color-state-critical:#ef4444;--color-state-maintenance:#64748b;--color-state-offline:#475569;
   --text-primary:#f1f5f9;--text-muted:#94a3b8;--text-secondary:#7e8a99;
-  --select-caret:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
+  --select-caret:url('/select-caret-houfeng-dark.svg');
   --surface:rgba(15,15,25,0.8);--surface-elevated:rgba(20,20,35,0.9);--surface-pressed:rgba(10,10,18,0.9);
   --surface-1:rgba(15,15,25,0.6);--surface-2:rgba(20,20,35,0.7);--surface-3:rgba(25,25,40,0.8);
   --row-bg:rgba(255,255,255,0.025);--row-bg-hover:rgba(255,255,255,0.06);
@@ -75,7 +83,7 @@
   --color-state-normal:#10b981;--color-state-notice:#f59e0b;--color-state-alert:#f59e0b;
   --color-state-critical:#ef4444;--color-state-maintenance:#94a3b8;--color-state-offline:#cbd5e1;
   --text-primary:#0f172a;--text-muted:#475569;--text-secondary:#64748b;
-  --select-caret:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
+  --select-caret:url('/select-caret-houfeng-light.svg');
   --surface:#ffffff;--surface-elevated:#ffffff;--surface-pressed:#f1f5f9;
   --surface-1:#f8fafc;--surface-2:#f1f5f9;--surface-3:#e2e8f0;
   --row-bg:#f8fafc;--row-bg-hover:#eef2f7;
@@ -124,7 +132,7 @@
   --color-state-normal:#34d399;--color-state-notice:#f59e0b;--color-state-alert:#f59e0b;
   --color-state-critical:#ef4444;--color-state-maintenance:#71717a;--color-state-offline:#52525b;
   --text-primary:#fafafa;--text-muted:#a1a1aa;--text-secondary:#8a8a8a;
-  --select-caret:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
+  --select-caret:url('/select-caret-classic-dark.svg');
   --surface:#18181b;--surface-elevated:#1f1f23;--surface-pressed:#09090b;
   --surface-1:#18181b;--surface-2:#1f1f23;--surface-3:#27272a;
   --row-bg:#1c1c20;--row-bg-hover:#26262b;
