@@ -32,12 +32,19 @@
 | `npm run test` | `vitest` —— 默认进 watch（CI 用 `--run` 一次性跑完） | 本地反复跑测；CI 用 `npm run test -- --run` |
 | `npm run preview` | `vite preview` —— 看本地 build 产物效果 | 偶尔做产物 sanity check |
 
-**Makefile 端**（`Makefile:65-70`）：
+**Makefile 端**（`Makefile:92-104`）：
 
 ```make
-verify-web:
+test-web-toolchain:
+	@scripts/check-web-toolchain.test.sh
+
+verify-web: test-web-toolchain
+	@scripts/check-web-toolchain.sh
 	@if [ -f web/package.json ]; then \
-		cd web && $(NPM) ci && $(NPM) run lint && $(NPM) run test -- --run && $(NPM) run build; \
+		env -u NODE_ENV $(NPM) --prefix web ci --include=dev && \
+		NODE_ENV=test $(NPM) --prefix web run lint && \
+		NODE_ENV=test $(NPM) --prefix web run test -- --run && \
+		NODE_ENV=production $(NPM) --prefix web run build; \
 	else \
 		echo 'web workspace not initialized yet'; \
 	fi
@@ -47,13 +54,67 @@ verify-web:
 
 - **`make verify-web` 会跑 `npm run lint`**，然后跑 `npm run test -- --run` 与 `npm run build`。CI 与本地通过同一个 target 覆盖 lint / Vitest / TS+Vite build。
 - `npm ci` 每次清空 `node_modules` 重装，本地反复跑会比较慢；本地速度优先时直接 `cd web && npm run test -- --run` / `npm run build` 即可，CI 仍走完整 `verify-web`。
-- CI 用 `actions/setup-node@v6 with node-version: 22 cache: npm`（`.github/workflows/ci.yml:24-28`）锁 Node 22.x；本地 Node 必须 ≥ 22（`web/package.json:6-8` 的 `engines.node = "22.x"`）。
+- `.node-version` 是本地与 CI 的唯一精确 runtime pin；`actions/setup-node@v6` 必须通过 `node-version-file: .node-version` 读取它。`web/package.json` 的 `engines.node = "22.x"` 只声明兼容范围。
+
+## Scenario: 可重复前端质量门
+
+### 1. Scope / Trigger
+
+- 修改 Node runtime、npm lockfile、TypeScript compiler options、`verify-web` 或 Web CI 时，必须同时遵守本节。
+
+### 2. Signatures
+
+- `make test-web-toolchain`：验证 runtime pin、CI 引用、tsconfig strict、Node types 与 preflight 行为。
+- `make verify-web`：唯一完整 Web gate；先执行 toolchain test/preflight，再 install、lint、test、build。
+- `scripts/check-web-toolchain.sh`：无参数；Node major 非 22 时返回 1。
+
+### 3. Contracts
+
+- `.node-version` 固定当前批准的 Node 22 LTS patch；CI 不再另外写一份 Node 版本。
+- install 必须清除调用者 `NODE_ENV` 并显式包含 devDependencies。
+- lint/test 固定 `NODE_ENV=test`，build 固定 `NODE_ENV=production`。
+- `tsconfig.app.json` 与 `tsconfig.node.json` 均显式 `strict: true`；`@types/node` 保持 `^22`。
+- Bash 脚本从 Make 直接执行以遵守 shebang；不要用 `sh script` 覆盖 Bash interpreter。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 结果 |
+|------|------|
+| Node major 不是 22 | install 前失败，输出 `web requires Node 22.x; found vX.Y.Z` |
+| 调用者设置 `NODE_ENV=production` | 仍安装 devDependencies，并完成 lint/test/production build |
+| `.node-version`、CI、tsconfig 或 Node types 漂移 | `test-web-toolchain` 在 npm install 前失败 |
+| lint、test 或 build 任一失败 | `verify-web` 原样返回非零，不继续掩盖失败 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：Node 22.23.1 下 `NODE_ENV=production make verify-web` 与无 `NODE_ENV` 调用结果一致。
+- Base：开发者可单独运行 `npm --prefix web run test -- --run` 做 focused feedback，提交前仍跑完整 gate。
+- Bad：依赖调用 shell 恰好未设置 `NODE_ENV`，或在 workflow 里维护另一份 `node-version: 22`。
+
+### 6. Tests Required
+
+- fake Node 22 通过、fake/real Node 24 被拒绝，并断言完整错误文本。
+- 断言 `.node-version`、setup-node `node-version-file`、两个 strict 配置和 `@types/node` 一致。
+- CI 以 `NODE_ENV=production make verify-web` 执行，断言完整测试与 production build 均通过。
+
+### 7. Wrong vs Correct
+
+```make
+# Wrong: 继承调用环境，并用 sh 覆盖 Bash shebang
+	@sh scripts/check-web-toolchain.sh
+	@cd web && npm ci && npm run test -- --run
+
+# Correct: 脚本直接执行，每个阶段拥有明确环境
+	@scripts/check-web-toolchain.sh
+	@env -u NODE_ENV npm --prefix web ci --include=dev
+	@NODE_ENV=test npm --prefix web run test -- --run
+```
 
 ---
 
 ## TypeScript
 
-- **strict 模式**：`web/tsconfig.app.json` 启用 `noUnusedLocals` / `noUnusedParameters` / `noFallthroughCasesInSwitch` / `erasableSyntaxOnly` / `verbatimModuleSyntax`，配合 ESLint 的 `typescript-eslint` 推荐集相当于 strict。
+- **strict 模式**：`web/tsconfig.app.json` 与 `web/tsconfig.node.json` 均显式启用 `strict: true`，并叠加 `noUnusedLocals` / `noUnusedParameters` / `noFallthroughCasesInSwitch` / `erasableSyntaxOnly` / `verbatimModuleSyntax`。
 - **`tsc -b` 是 build 第一步**：`web/package.json:11` 的 `build` = `tsc -b && vite build`。**类型错误会让 build 直接挂**，CI 红。
 - **类型断言**：尽量用具体类型，**禁止 `any`**（`web/eslint.config.js:14` 启用 `tseslint.configs.recommended`）。如必须用未知输入，用 `unknown` + 收口判别。
 - **类型导入**：`verbatimModuleSyntax: true` 强制类型 import 必须显式 `import type { Foo } from '...'`，不要省略 `type`。

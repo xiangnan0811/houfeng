@@ -10,7 +10,7 @@ AGENT_RELEASE_DIR ?= ./dist
 AGENT_RELEASE_AMD64 := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_linux_amd64
 AGENT_RELEASE_ARM64 := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_linux_arm64
 
-.PHONY: fmt-go test-go vet-go build-center build-agent build-agent-release verify-go verify-web verify
+.PHONY: fmt-go test-go vet-go build-center build-agent build-agent-release verify-go test-web-toolchain verify-web verify
 
 fmt-go:
 	@if ! command -v $(GO) >/dev/null 2>&1; then \
@@ -89,9 +89,16 @@ build-agent-release:
 
 verify-go: fmt-go vet-go test-go
 
-verify-web:
+test-web-toolchain:
+	@scripts/check-web-toolchain.test.sh
+
+verify-web: test-web-toolchain
+	@scripts/check-web-toolchain.sh
 	@if [ -f web/package.json ]; then \
-		cd web && $(NPM) ci && $(NPM) run lint && $(NPM) run test -- --run && $(NPM) run build; \
+		env -u NODE_ENV $(NPM) --prefix web ci --include=dev && \
+		NODE_ENV=test $(NPM) --prefix web run lint && \
+		NODE_ENV=test $(NPM) --prefix web run test -- --run && \
+		NODE_ENV=production $(NPM) --prefix web run build; \
 	else \
 		echo 'web workspace not initialized yet'; \
 	fi
