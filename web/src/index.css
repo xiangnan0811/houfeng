@@ -14,8 +14,12 @@
 @import './styles/partials/pagination.css';
 @import './styles/partials/atoms.css';
 @import './styles/partials/page.css';
-@import './styles/partials/legacy-1.css';
-@import './styles/partials/legacy-2.css';
-@import './styles/partials/legacy-3.css';
+@import './styles/partials/legacy-events.css';
+@import './styles/partials/legacy-subscriptions.css';
+@import './styles/partials/legacy-vps.css';
+@import './styles/partials/legacy-assets.css';
+@import './styles/partials/legacy-monitoring.css';
+@import './styles/partials/legacy-batch.css';
+@import './styles/partials/legacy-misc.css';
 @import './styles/partials/dashboard-responsive.css';
 @import './styles/partials/motion.css';
