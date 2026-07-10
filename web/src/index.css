@@ -20,6 +20,13 @@
 @import './styles/partials/legacy-assets.css';
 @import './styles/partials/legacy-monitoring.css';
 @import './styles/partials/legacy-batch.css';
+@import './styles/partials/legacy-dashboard.css';
+@import './styles/partials/legacy-targets.css';
+@import './styles/partials/legacy-observability.css';
+@import './styles/partials/legacy-provider.css';
+@import './styles/partials/legacy-archive.css';
+@import './styles/partials/legacy-compare.css';
+@import './styles/partials/legacy-onboarding.css';
 @import './styles/partials/legacy-misc.css';
 @import './styles/partials/dashboard-responsive.css';
 @import './styles/partials/motion.css';
