@@ -1,8 +1,9 @@
-import { useId, useState, type FormEvent } from 'react'
+import { useId, useState, useSyncExternalStore, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 
 import { Button, Input } from '../../components/atoms'
 import { changePassword } from '../../lib/auth-client'
+import { getModalDepth, isTopModal, subscribeModalStack } from '../../lib/modalStack'
 import { useModalFocus } from '../../lib/useModalFocus'
 
 export interface ChangePasswordModalProps {
@@ -10,8 +11,14 @@ export interface ChangePasswordModalProps {
 }
 
 export function ChangePasswordModal({ onClose }: ChangePasswordModalProps) {
+  const modalId = useId()
   const titleId = useId()
-  const modalRef = useModalFocus<HTMLFormElement>(true, onClose)
+  const modalRef = useModalFocus<HTMLFormElement>(true, onClose, modalId)
+  const isTop = useSyncExternalStore(
+    subscribeModalStack,
+    () => getModalDepth(modalId) === 0 || isTopModal(modalId),
+    () => false,
+  )
   const [oldPw, setOldPw] = useState('')
   const [newPw, setNewPw] = useState('')
   const [confirmPw, setConfirmPw] = useState('')
@@ -43,12 +50,22 @@ export function ChangePasswordModal({ onClose }: ChangePasswordModalProps) {
   }
 
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={onClose}>
+    <div
+      className={['modal-backdrop', isTop && 'modal-stack-layer--top']
+        .filter(Boolean)
+        .join(' ')}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && isTopModal(modalId)) onClose()
+      }}
+    >
       <form
         ref={modalRef}
+        data-modal-stack-id={modalId}
         className="modal"
         role="dialog"
-        aria-modal="true"
+        aria-modal={isTop ? 'true' : undefined}
+        aria-hidden={isTop ? undefined : 'true'}
+        inert={isTop ? undefined : true}
         aria-labelledby={titleId}
         tabIndex={-1}
         onSubmit={onSubmit}

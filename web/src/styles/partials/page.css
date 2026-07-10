@@ -202,7 +202,8 @@
 .breadcrumb__link{color:var(--text-muted);transition:color var(--dur-micro);text-decoration:none}
 .breadcrumb__link:hover{color:var(--text-primary)}
 .breadcrumb__current{color:var(--text-primary);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.modal-backdrop{position:fixed;inset:0;background:color-mix(in srgb,var(--bg-sidebar) 72%,transparent);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal-backdrop{position:fixed;inset:0;background:color-mix(in srgb,var(--bg-sidebar) 72%,transparent);display:flex;align-items:center;justify-content:center;z-index:1000}
+.modal-backdrop.modal-stack-layer--top{z-index:1001}
 .modal{width:420px;padding:var(--space-6);background:var(--surface-elevated);border:1px solid var(--border);border-radius:var(--radius-3);box-shadow:var(--shadow-overlay);display:flex;flex-direction:column;gap:var(--space-4);animation:modal-fade-in var(--dur-page) var(--ease-calm)}
 @keyframes modal-fade-in{from{opacity:0;transform:translateY(20px) scale(0.95)}to{opacity:1;transform:translateY(0) scale(1)}}
 .modal__title{font-family:var(--font-sans);font-size:20px;font-weight:600;color:var(--text-primary)}

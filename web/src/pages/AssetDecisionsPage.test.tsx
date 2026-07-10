@@ -2239,7 +2239,10 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '移除' }))
     const confirmation = await screen.findByRole('alertdialog', { name: '确认移除组合成员' })
     expect(within(dialog).queryByRole('alertdialog', { name: '确认移除组合成员' })).not.toBeInTheDocument()
-    expect(screen.queryAllByRole('dialog')).toHaveLength(1)
+    expect(screen.queryAllByRole('dialog')).toHaveLength(0)
+    expect(screen.queryAllByRole('dialog', { hidden: true })).toHaveLength(1)
+    expect(dialog).toHaveAttribute('aria-hidden', 'true')
+    expect(dialog).toHaveAttribute('inert')
     expect(findFetchCall(fetchMock, '/api/asset-decisions/manual-groups/admg_001/members/vps_primary', 'DELETE')).toBeUndefined()
 
     fireEvent.click(within(confirmation).getByRole('button', { name: '确认移除' }))
@@ -2285,6 +2288,7 @@ describe('AssetDecisionsPage', () => {
     render(
       <MemoryRouter>
         <AssetDecisionsPage />
+        <LocationProbe />
       </MemoryRouter>,
     )
 
@@ -2303,13 +2307,28 @@ describe('AssetDecisionsPage', () => {
 
     fireEvent.click(within(dialog).getByRole('tab', { name: '状态' }))
     const archiveButton = within(dialog).getByRole('button', { name: '归档模板' })
+    const urlBeforeConfirmation = screen.getByLabelText('current-url').textContent
 
+    archiveButton.focus()
     fireEvent.click(archiveButton)
-    const confirmation = await screen.findByRole('alertdialog', { name: '确认归档模板' })
+    let confirmation = await screen.findByRole('alertdialog', { name: '确认归档模板' })
     expect(within(dialog).queryByRole('alertdialog', { name: '确认归档模板' })).not.toBeInTheDocument()
     expect(within(confirmation).getByText('归档后不能直接从该模板创建新组合。')).toBeInTheDocument()
-    expect(screen.queryAllByRole('dialog')).toHaveLength(1)
+    expect(screen.queryAllByRole('dialog')).toHaveLength(0)
+    expect(screen.queryAllByRole('dialog', { hidden: true })).toHaveLength(1)
+    expect(dialog).toHaveAttribute('aria-hidden', 'true')
+    expect(dialog).toHaveAttribute('inert')
     expect(findFetchCall(fetchMock, '/api/asset-decisions/scenario-templates/adt_custom_primary_standby', 'PATCH')).toBeUndefined()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('alertdialog', { name: '确认归档模板' })).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '资产决策场景模板详情' })).toBe(dialog)
+    expect(within(dialog).getByRole('tab', { name: '状态' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByLabelText('current-url')).toHaveTextContent(urlBeforeConfirmation ?? '')
+    await waitFor(() => expect(archiveButton).toHaveFocus())
+
+    fireEvent.click(archiveButton)
+    confirmation = await screen.findByRole('alertdialog', { name: '确认归档模板' })
 
     fireEvent.click(within(confirmation).getByRole('button', { name: '确认归档模板' }))
 

@@ -1,7 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ActionConfirmationModal } from './ActionConfirmationModal'
+import { Modal } from './atoms'
 
 function renderModal(overrides: Partial<Parameters<typeof ActionConfirmationModal>[0]> = {}) {
   return render(
@@ -57,5 +59,42 @@ describe('ActionConfirmationModal', () => {
 
     expect(screen.getByRole('button', { name: '取消' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '确认' })).toBeDisabled()
+  })
+
+  it('closes only the confirmation layer and restores its parent trigger on Escape', async () => {
+    function Harness() {
+      const [parentOpen, setParentOpen] = useState(false)
+      const [confirmOpen, setConfirmOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setParentOpen(true)}>打开详情</button>
+          <Modal open={parentOpen} onClose={() => setParentOpen(false)} title="详情">
+            <button type="button" onClick={() => setConfirmOpen(true)}>请求确认</button>
+            <ActionConfirmationModal
+              open={confirmOpen}
+              title="确认嵌套操作"
+              current="当前"
+              result="之后"
+              impact="影响"
+              unchanged="其他不变"
+              confirmLabel="确认操作"
+              onConfirm={vi.fn()}
+              onCancel={() => setConfirmOpen(false)}
+            />
+          </Modal>
+        </>
+      )
+    }
+
+    render(<Harness />)
+    fireEvent.click(screen.getByRole('button', { name: '打开详情' }))
+    const confirmationTrigger = screen.getByRole('button', { name: '请求确认' })
+    confirmationTrigger.focus()
+    fireEvent.click(confirmationTrigger)
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('alertdialog', { name: '确认嵌套操作' })).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '详情' })).toBeInTheDocument()
+    await waitFor(() => expect(confirmationTrigger).toHaveFocus())
   })
 })

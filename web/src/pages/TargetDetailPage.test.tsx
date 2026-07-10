@@ -2392,6 +2392,13 @@ describe('TargetDetailPage', () => {
   })
 
   it('uses an inline stateful confirmation before archiving from the detail page', async () => {
+    const nativeFocus = HTMLElement.prototype.focus
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (
+      this: HTMLElement,
+      options?: FocusOptions,
+    ) {
+      if (!this.closest('[inert]')) nativeFocus.call(this, options)
+    })
     const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const fetchMock = vi
       .fn()

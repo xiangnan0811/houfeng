@@ -45,7 +45,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **DataTable 可点击行与行内操作的合同**：`web/src/components/atoms/DataTable.tsx` 的 `onRowClick` 只处理非交互子节点上的 click / Enter / Space；事件目标落在 `a[href]`、`button`、`input`、`select`、`textarea`、`role="button"`、`role="link"` 内时，表格行不得触发行导航。page 的 action cell 不需要再为了 DataTable 行点击重复写 `stopPropagation`，但自绘 list/queue 不是 DataTable 时仍必须在内部 `<Link>` / `<Button>` 上显式阻止冒泡。
 - **自绘可点击队列不要制造嵌套交互语义**：如果一个 `<li>` / `<article>` 内部已经有可见 `<Link>` 和 `<Button>`，可以让鼠标点击行背景进入主详情，但不要给外层容器加 `role="link"` / `tabIndex=0` 再包住内部交互控件；键盘入口应落在可见 action 上，外层只用 `:focus-within` 做焦点视觉辅助。
 - 当前**未单独建 `hooks/` 目录**；本地 hook 内联在使用文件内即可，需要跨文件再考虑提取（届时落点为 `web/src/lib/use<Name>.ts` 或新增 `web/src/lib/hooks/`，需另做决策）。
-- **modal / drawer focus 行为复用 `web/src/lib/useModalFocus.ts`**：可访问性弹层必须 portal 到 `document.body`，声明 `role="dialog"` / `aria-modal="true"`（确认类用 `alertdialog`），打开后移动初始焦点，Tab / Shift+Tab containment，Escape 关闭，关闭后恢复触发器焦点；不要在各组件里复制 ad-hoc `document.addEventListener('keydown')` + 手写 focus trap。
+- **modal / dialog focus 行为复用 `web/src/lib/useModalFocus.ts` 与 `web/src/lib/modalStack.ts`**：可访问性弹层必须 portal 到 `document.body`，确认类用 `alertdialog`；只有栈顶声明 `aria-modal="true"` 并处理 Tab / Escape / backdrop，非栈顶设置 `aria-hidden` + `inert`。`persistent` 栈顶忽略 Escape/backdrop，只允许显式关闭。不要在各组件里复制 ad-hoc keydown、focus trap、body overflow 或 overlay Escape。
 - **Drawer 取消/关闭必须清理未提交本地状态**：page 用 Drawer 承载 create/edit 表单时，`onClose` / 取消按钮 / Escape / overlay 关闭都必须丢弃 draft、表单错误和保存反馈；重新打开应从当前已保存数据或初始空表单重建。测试至少覆盖“编辑草稿 → 取消关闭 → 重新打开草稿已重置”以及取消不触发提交。
 - **复杂表单 modal 必须有可读宽度和收束行为**：创建/编辑订阅、VPS 基础信息、监控实例接入、服务商等字段密集表单使用 `Modal` 的 `md` / `lg` / `xl` 尺寸，避免默认窄弹窗造成标签和命令无意义换行。提交成功必须关闭或跳转；取消必须丢弃草稿；失败留在当前弹层并展示错误。由 URL deep-link 打开的弹层在消费或关闭时必须清理 `create=1`、`onboarding=1` 等临时参数，同时保留承接上下文参数。
 - **常见有界字段优先选择器 + 自定义入口**：VPS 国家/地区、订阅币种、支付方式、计费周期单位、续费方式这类高频字段必须使用共享 option/helper 与 `<select>` / radio 控件；常见值内置，确实不在范围内才进入“自定义/其他”。不要把这些字段退回裸文本输入，也不要在创建和编辑表单各自散落字符串。
@@ -130,7 +130,104 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - `useCallback` / `useMemo` 只在 **Provider** 与少数 layout 子组件里出现（如 `web/src/lib/auth-context.tsx:20-43`、`web/src/lib/theme-context.tsx:34-48`）；**page / 普通 component 不要预先 wrap callback**——除非真的因为传给 memo 子组件触发不必要 render，否则直接传函数。
 - **不使用 `React.memo`**；如出现性能问题，先确认 props 是否稳定，再考虑提取。
 - **不使用 React 19 的 `use()` API / Server Components**：候风是纯客户端 SPA，center 只静态吐 `web/dist/`。
-- 自定义 hook 当前未抽出独立目录；`useAuth` / `useTheme` / `useThemeOptional` 都在对应 context 文件内导出。跨组件复用的 modal focus 例外落在 `web/src/lib/useModalFocus.ts`，供 `Drawer` 与 `ChangePasswordModal` 共享。
+- 自定义 hook 当前未抽出独立目录；`useAuth` / `useTheme` / `useThemeOptional` 都在对应 context 文件内导出。跨组件复用的 modal focus 例外落在 `web/src/lib/useModalFocus.ts`，供通用 `Modal` 与 `ChangePasswordModal` 共享。
+
+### Scenario: Modal 栈、嵌套焦点与滚动锁
+
+#### 1. Scope / Trigger
+
+- 新建或修改 portal dialog、确认弹层、persistent 表单，或让一个弹层再打开另一个弹层时，必须使用本合同。
+- `Modal` 公共 props 保持业务兼容；栈、父子关系、top class 和滚动锁是内部实现，不由业务 page 自行维护。
+
+#### 2. Signatures
+
+```ts
+type ModalStackEntry = {
+  id: string
+  container: HTMLElement
+  restoreTarget: HTMLElement | null
+  parentId?: string | null
+}
+
+registerModal(entry: ModalStackEntry): () => void
+isTopModal(id: string): boolean
+getModalDepth(id: string): number
+subscribeModalStack(listener: () => void): () => void
+acquireBodyScrollLock(): () => void
+
+useModalFocus<T extends HTMLElement>(
+  active: boolean,
+  onClose: () => void,
+  modalId: string,
+  dismissOnEscape?: boolean,
+  parentModalId?: string | null,
+): RefObject<T | null>
+```
+
+`modalId` 使用 `useId()` 保持实例稳定；cleanup 必须幂等。重复 id 的旧 cleanup 通过 registration token 隔离，不得删除新 registration。
+
+#### 3. Contracts
+
+- 栈按父子拓扑排序，再以注册顺序处理无父子关系的弹层；即使子层比父层先执行 effect，同次挂载后也必须是子层置顶。
+- 嵌套 `Modal` 通过内部 React context 声明 `parentId`；业务上作为 sibling 渲染的确认弹层可从打开时的 restore target 所在 dialog 推断父层。推断时不得把已经指向当前 modal 的后代误认成父层并形成环。
+- 只有 top dialog 处理 Escape、Tab / Shift+Tab 和 backdrop。非 top dialog 移除 `aria-modal`，设置 `aria-hidden="true"`、`inert`，对应 overlay 不带 `modal-stack-layer--top`。
+- top overlay 使用 CSS class `modal-stack-layer--top` 提升层级；禁止为了排序移动 React portal DOM，也禁止新增 inline `z-index`，前者会丢焦点，后者会破坏严格 CSP。
+- `persistent` 只禁止 Escape/backdrop dismiss；标题栏关闭、取消或业务显式关闭仍有效。
+- body scroll lock 是引用计数：首次 acquire 保存原 `body.style.overflow`，最后一次 release 才恢复原值；每个 release 可重复调用。
+- 子层关闭时，父层解除 `inert` 前不能同步聚焦其触发器。若 restore target 位于 inert 子树，使用 microtask 延后恢复，并在执行前重新检查 target 仍连接且已不在 inert 子树；父层仍保持 body lock。
+- 延迟恢复不得覆盖更晚的显式业务焦点：microtask 执行时若已有连接、非 inert、非 `body` 的 active element，保留该焦点。若状态更新把原触发按钮替换成 successor（例如“归档”变“恢复到暂停”），业务 focus effect 也要延后到父层解除 inert，再聚焦已连接的新 ref。
+- 关闭最后一层后恢复页面触发器与原 body overflow；异常 unmount、StrictMode effect 重放和已被移除的 restore target 均不得抛错或产生负计数。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 必须结果 |
+|------|----------|
+| 单层普通 Modal | 初始焦点进入本层；Escape/backdrop 关闭；焦点回触发器 |
+| 两层或三层 Modal | 仅最上层可交互；一次 Escape 只关闭一层；父层 scroll lock 保留 |
+| 父子同次挂载、子 effect 先运行 | 父深度小于子深度；子层拥有 top class 与焦点；不得形成 parent cycle |
+| persistent 位于栈顶 | Escape/backdrop 被消费但不关闭；显式关闭可用 |
+| restore target 仍在 inert 父层 | 等父层解除 inert 后再聚焦，不得落到 `body` |
+| restore target 已卸载 | 跳过恢复，不抛异常 |
+| 原触发按钮被状态更新替换 | 保留业务显式聚焦的新 successor，不被旧 restore target 抢回 |
+| cleanup 重复、旧 registration 晚清理 | 当前 registration 与其他 scroll owner 不受影响 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：Asset Decisions 详情 Modal 打开确认 `alertdialog`；父层立即 inert，Tab 只在确认层循环；第一次 Escape 回到父层原按钮且 body 仍锁定，第二次 Escape 回页面触发器并释放滚动锁。
+- Base：单层 `Modal` / `ChangePasswordModal` 使用稳定 id、共享 hook 和协调器，调用方 props 不变。
+- Bad：每个实例各自清空 `body.style.overflow`，overlay 和 document 同时监听 Escape，或在父层仍 inert 时直接 `restoreTarget.focus()`。
+
+#### 6. Tests Required
+
+- `modalStack.test.ts`：one-based depth、top、父子反序注册、重复 id stale cleanup、subscribe 和引用计数滚动锁。
+- `useModalFocus.test.tsx`：StrictMode 仅一份 registration、最新 onClose callback、unmount 恢复与 scroll release。
+- `Modal.test.tsx`：单/双/三层、父子同次挂载、persistent、top class、ARIA/inert、Tab、逐层 Escape、真实 inert 延迟恢复和显式业务焦点优先级。
+- 业务回归至少覆盖一个真实嵌套确认流程，断言父层 tab / URL / 草稿保持；修改共享行为后搜索并迁移所有 persistent Modal 的旧 Escape 期望。
+- 浏览器 sanity 至少覆盖 `1440x1000`、`1024x768`、`390x900`：无页面横向溢出；top dialog 在视口内；真实键盘 Tab/Escape；父层 focus restore；最后一层关闭后 body unlock；无 console/page/CSP error。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// Wrong: 每层重复键盘与滚动副作用，子层关闭会提前解锁并可能连关父层。
+useEffect(() => {
+  document.body.style.overflow = open ? 'hidden' : ''
+  document.addEventListener('keydown', onEscape)
+  return () => {
+    document.body.style.overflow = ''
+    document.removeEventListener('keydown', onEscape)
+  }
+}, [open])
+
+// Correct: 稳定 id 接入共享栈；persistent 只改变栈顶 Escape 合同。
+const modalId = useId()
+const modalRef = useModalFocus<HTMLDivElement>(
+  open,
+  onClose,
+  modalId,
+  !persistent,
+  parentModalId,
+)
+```
 
 ---
 

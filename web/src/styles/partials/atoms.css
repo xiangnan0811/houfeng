@@ -142,6 +142,7 @@ select.input::-ms-expand{display:none}
 
 /* ===== ATOM COMPAT: Modal ===== */
 .modal-overlay{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 64%,transparent);z-index:1000;display:flex;align-items:center;justify-content:center}
+.modal-overlay.modal-stack-layer--top{z-index:1001}
 .modal-content{background:var(--surface-elevated);border:1px solid var(--border);border-radius:var(--radius-3);box-shadow:var(--shadow-overlay);width:min(94vw,640px);max-width:640px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;animation:modal-pop var(--dur-state) var(--ease-calm)}
 @keyframes modal-pop{0%{opacity:0;transform:scale(0.95)}100%{opacity:1;transform:scale(1)}}
 .modal-header{flex:0 0 auto;padding:var(--space-4);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
