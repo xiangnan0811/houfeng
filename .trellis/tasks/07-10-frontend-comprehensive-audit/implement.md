@@ -834,14 +834,23 @@ git commit -m "test(web): ratchet browser and contract quality gates"
 
 ## 13. 每阶段退出条件
 
-### Gate A：P1 关闭（Task 1-5）
+### Gate A：P1 关闭（Task 1-5）— 已通过
 
-- `NODE_ENV=production make verify-web` 和无 `NODE_ENV` 调用均通过。
-- abnormal=2/severe=1 显示 2；VPS 503 不显示 onboarding。
-- Shell 不出现“系统正常”，stale/failure 有准确语义。
-- 嵌套 Modal 一次 Escape 只关闭一层，焦点与 scroll lock 正确。
-- production policy 下 CSP violation 为零。
-- Dashboard 390px 首屏显示主行动，而不是四张等权大卡。
+- [x] `NODE_ENV=production make verify-web` 和无 `NODE_ENV` 调用均通过。
+- [x] abnormal=2/severe=1 显示 2；VPS 503 不显示 onboarding。
+- [x] Shell 不出现“系统正常”，stale/failure 有准确语义。
+- [x] 嵌套 Modal 一次 Escape 只关闭一层，焦点与 scroll lock 正确。
+- [x] production policy 下 CSP violation 为零。
+- [x] Dashboard 390px 首屏显示主行动，而不是四张等权大卡。
+
+**同版集成证据（2026-07-10）：**
+
+- Gate A 以 `v0.58.0`（merge `783b8f3`，Task 5 集成 commit `89c2572`）为共同版本；该版本包含 Task 1–5 的合并结果，而不是分别以不同版本通过后拼接结论。
+- Node `22.23.1` 下，污染环境与干净环境的 `verify-web` 已由 Task 1 和 CI 验证；归档前在 `v0.58.0` 基线上再次运行 `env -u NODE_ENV make verify`，Go fmt/vet/tests、86 个 Vitest 文件 / 633 tests、lint、strict TypeScript build 全部通过，`npm audit --include=dev` 为 0 vulnerabilities。
+- Dashboard 的 subset 计数、VPS 失败语义和五状态单主行动由 Task 3 的 model/page tests 固化；Task 5 最终浏览器门在 `1440x1000`、`1024x768`、`390x900` 三种视口复验集成后的 Dashboard 与核心路由。
+- Task 2 浏览器键盘证据确认嵌套 dialog 第一次 Escape 只关闭子层并保留 body lock，第二次关闭父层并恢复焦点、释放 lock；Task 4 tests 与发布版本确认 Shell 五态、freshness、错误恢复和真实通知链接。
+- Task 5 使用 Chrome `150.0.7871.114` 跑 11 routes × 3 viewports = 33/33 PASS；CSP violation、console/runtime error、非预期 network error、DOM inline style 与 document/body 横向溢出均为 0。PR #352、release PR #353、main CI 和 `publish-images` run `29092689244` 均通过，镜像 manifest digest 为 `sha256:b063f8445ba9f2bc0ce15027989e17c12a0f2a82319ae852202214ac3f418f95`。
+- 上述浏览器数据使用仓库 fixture，不替代真实认证 Center/PostgreSQL；staging 仍是 Task 10 / Gate C 的强制未完成项。
 
 ### Gate B：交互与移动端关闭（Task 6-7）
 

@@ -1918,3 +1918,39 @@ Reviewed and fixed frontend UI/settings changes, added Trellis task artifacts, v
 ### Next Steps
 
 - None - task complete
+
+
+## Session 234: 前端严格 CSP 兼容与 Gate A 收口
+
+**Date**: 2026-07-10
+**Task**: 前端严格 CSP 兼容与 Gate A 收口
+**Branch**: `codex/archive-frontend-csp-compat`
+
+### Summary
+
+完成 Task 5 严格 CSP 修复、Docker web-build 边界回归、PR #352 与 v0.58.0 双架构发布核验；在同一集成版本复验完整质量门、记录 Gate A 证据并归档 frontend-csp-compat。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `77f9d51` | (see git log) |
+| `254959a` | (see git log) |
+| `50aa3dd` | (see git log) |
+| `d2be9c0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

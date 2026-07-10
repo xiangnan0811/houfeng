@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 233
+- **Total Sessions**: 234
 - **Last Active**: 2026-07-10
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1920 | Active |
+| `journal-4.md` | ~1956 | Active |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
 | `journal-1.md` | ~1991 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 234 | 2026-07-10 | 前端严格 CSP 兼容与 Gate A 收口 | `77f9d51`, `254959a`, `50aa3dd`, `d2be9c0` | `codex/archive-frontend-csp-compat` |
 | 233 | 2026-07-10 | 完成前端 Shell 摘要与错误恢复 | `2432833`, `54feae7`, `b8a2108` | `codex/frontend-shell-recovery` |
 | 232 | 2026-07-10 | Dashboard 事实可信度修复与发布 | `99a8959`, `5f5884a` | `codex/archive-frontend-dashboard-trust` |
 | 231 | 2026-07-10 | 前端 Modal 栈与嵌套焦点 | `ba39024` | `codex/archive-frontend-modal-stack-focus` |
