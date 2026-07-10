@@ -17,7 +17,7 @@
 
 顶层职责划分（与项目根 `CLAUDE.md` "Frontend (`web/`)" 段一致）：
 
-- **入口**：`web/index.html` → `web/src/main.tsx`，`main.tsx` 串起 `ThemeProvider` → `AuthProvider` → `RouterProvider`。
+- **入口**：`web/index.html` → `web/src/main.tsx`，`main.tsx` 串起 `AppErrorBoundary` → `ThemeProvider` → `AuthProvider` → `RouterProvider`。
 - **路由 / 布局壳 / 全局 provider**：`web/src/app/`。
 - **路由页**：`web/src/pages/`，每条业务路由一个 `<Name>Page.tsx` + 同名 `<Name>Page.test.tsx`。
 - **跨页复用展示原子与组合**：`web/src/components/`（其中 `atoms/` 是最底层视觉 / 行为原子）。
@@ -47,6 +47,8 @@ web/
     │   ├── RequireAuth.tsx     # 受保护路由壳；未登录跳 /login
     │   ├── RequireAuth.test.tsx
     │   ├── metadata.ts         # PRODUCT_FULL_NAME_ZH 等路由级常量
+    │   ├── AppErrorBoundary.tsx # Provider/Router 外层 render error 恢复面
+    │   ├── RouteErrorPage.tsx   # route render / lazy chunk error 恢复面
     │   ├── RouteModuleFallback.tsx # 路由模块加载中的 current surface
     │   └── layout/             # 应用骨架（Sidebar、TopBar、Breadcrumb 等）
     │       ├── AppShell.tsx    # 业务路由统一外壳；含 <Outlet />

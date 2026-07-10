@@ -57,7 +57,85 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **Skip link 必须有可聚焦目标**：AppShell 顶部使用 `<a className="skip-link" href="#main-content">跳到主内容</a>`，主区域必须是 `<main id="main-content" tabIndex={-1}>`。测试断言 skip link 的 `href` 与 main 的 `tabindex="-1"`，避免只滚动不转移焦点。
 - **GlobalSearch 结果必须是可访问链接语义**：可点击结果用 `<Link role="option" to={result.to}>`，不要用 `<button>` + pointer-only `navigate()` 伪装跳转；键盘 Enter 可以继续调用 `navigate(result.to)` 来激活当前 focusIndex。
 - **Search result 只能指向已注册 / 可落地的前端路由**：有详情页的对象链接详情，如 VPS `/vps/:id`、监控实例 `/monitoring/:id`、入口 `/targets/:id`；没有详情页的对象链接列表页或列表筛选，如服务商 `/providers`、订阅 `/subscriptions?vps_id=<vps_id>`。不要生成不存在的 `/providers/:id` 或 `/subscriptions/:id`。
+- **通知入口必须是真实链接**：TopBar 通知图标使用 `<Link to="/events?notification_only=1" aria-label="查看通知事件">`，由 EventsPage 已有 query contract 承接。没有真实 count contract 时不得渲染固定 0、占位 badge 或无 handler 的 button。
 - **列表主扫描路径上的创建/编辑表单优先放 Drawer**：如果创建表单会挤占库存表 / 队列主视图，应使用 `Drawer` 承载，并保留页面主列表可见。关闭 Drawer 时重置草稿/错误；提交成功后的跳转和 payload 合同仍由 page 测试断言。
+
+### Scenario: 应用与路由错误恢复
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `web/src/main.tsx` provider/root 结构、`app/router.tsx` route tree、React.lazy 路由加载边界、`AppErrorBoundary` 或 `RouteErrorPage` 时，必须遵守本合同。
+- 目标：provider/render exception 与 route render/lazy chunk failure 都有安全恢复面，不让用户停在空白页，也不把异常对象、URL、token 或 stack 直接渲染到 DOM。
+
+#### 2. Signatures
+
+```tsx
+<AppErrorBoundary>
+  <ThemeProvider>
+    <AuthProvider>
+      <RouterProvider router={router} />
+    </AuthProvider>
+  </ThemeProvider>
+</AppErrorBoundary>
+
+type RouteObject = {
+  element: ReactNode
+  errorElement: ReactNode
+}
+```
+
+- `AppErrorBoundary` 是 class error boundary；`RouteErrorPage` 通过 `useRouteError()` 读取错误，但只能把完整对象写入 console/log，不能交给 `PageState.technicalSummary`。
+
+#### 3. Contracts
+
+- `AppErrorBoundary` 必须位于 Theme/Auth/Router provider tree 外层，覆盖 provider 初始化与 Router render；fallback 不依赖这些 provider 才能显示。
+- 登录 route 与受保护 route tree 都必须配置 `errorElement={<RouteErrorPage />}`，让 render throw 和 rejected dynamic import 使用产品恢复面，不落到 React Router 默认开发错误页。
+- 根恢复面提供“重试渲染”“刷新页面”“返回工作台”；路由恢复面提供“重试当前页面”“刷新页面”“返回工作台”。根层返回使用普通 `<a href="/">`，路由层可使用 `<Link>`。
+- retry 只重建当前 React/route surface；lazy import rejection 可能被 React.lazy 缓存，因此必须同时保留 full reload 路径。
+- 用户可见描述使用固定安全中文摘要；禁止渲染 `error.message`、`String(error)`、stack、chunk URL 或任意 raw exception。完整异常只进入 `console.error` / 运行日志。
+- error boundary 不承诺捕获 event handler、timer 或任意异步 Promise 错误；这些路径仍需在各自调用边界显式处理。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| provider / Router 外层 render throw | `AppErrorBoundary` 显示应用恢复面；可重试、刷新、返回 `/` |
+| protected route component render throw | `RouteErrorPage` 显示页面恢复面；raw error 不在 DOM |
+| React.lazy import rejects | 同一安全页面；full reload 可在 chunk 恢复后重新加载 |
+| route retry 后组件不再抛错 | errorElement 清除，当前 route 正常显示 |
+| 异常 message 含 URL/token/stack | 只出现在 console/log，DOM 文本不包含该字符串 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：Events route chunk 首次请求失败，用户看到安全恢复页；资源恢复后点击“刷新页面”回到事件流。
+- Base：一次 transient render error 点击“重试当前页面”后恢复，无需 full reload。
+- Bad：只保留 `Suspense` loading fallback；import reject 后页面空白。
+- Bad：`<PageState technicalSummary={String(useRouteError())}>` 把内部 URL 或异常详情暴露给用户。
+- Bad：只在 Router 内加一层 boundary，Theme/Auth provider 自身抛错时仍全白。
+
+#### 6. Tests Required
+
+- `AppErrorBoundary.test.tsx`：child render throw、安全文案、raw secret 不在 DOM、reload callback、retry 后恢复、返回工作台 href。
+- `RouteErrorPage.test.tsx`：route render throw、rejected lazy import、安全文案、raw secret 不在 DOM、route retry、full reload 与返回工作台。
+- `router.test.tsx`：受保护 route match 中至少一层存在 `errorElement`；入口合同测试确保根 provider tree 被 `AppErrorBoundary` 包裹。
+- 本地 Chromium 故障注入：阻断一个未加载 route chunk，确认恢复面出现；解除阻断并刷新后 route 恢复。该证据不替代 unit/build gate。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// Wrong: Suspense 只覆盖 pending，不覆盖 rejected import；raw error 还会泄露。
+<Suspense fallback={<RouteModuleFallback />}>
+  <LazyPage />
+</Suspense>
+<p>{String(error)}</p>
+
+// Correct: route 与 provider tree 各有恢复边界，UI 使用固定安全摘要。
+{
+  element: <RequireAuth />,
+  errorElement: <RouteErrorPage />,
+  children: protectedRoutes,
+}
+```
 
 ### 详情页 IA 合同（决策板 + 操作菜单 + 维护 modal）
 
