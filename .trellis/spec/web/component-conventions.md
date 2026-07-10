@@ -339,7 +339,7 @@ const modalRef = useModalFocus<HTMLDivElement>(
 - ❌ **`any` / 不带类型的 `useState()`**：`useState<T>(initial)` 必须给出 T，或让 initial 推导出 T。
 - ❌ **暴露内部 state setter 给父组件**（如 `setOpen` 直接 props 出去）：用受控模式（`open` + `onOpenChange`）或非受控模式（仅 `defaultOpen`），不要混。
 - ❌ **组件文件 > 300 行不拆**（已知偿还点：`MonitoringDetailPage.tsx`、`TargetDetailPage.tsx`、`SettingsPage.tsx`、`TargetsPage.tsx` 都超）。新页面应主动按 section 拆 `components/`。
-- ❌ **CSS in JS / inline style 写业务样式**：颜色 / 间距用 `tokens.css` 变量；inline `style={}` 仅限尺寸 / 计算量（参考 `web/src/components/atoms/Sparkline.tsx:71`）。
+- ❌ **CSS in JS / 生产 JSX `style=`**：严格 CSP 下颜色 / 间距走 `tokens.css` + BEM，动态 SVG 几何走 attributes，比例与列宽分别使用 `<progress>` / `<col width>`；详见 `styling-guidelines.md` 的严格 CSP 合同。
 - ❌ **从 `pages/` import 别的 page**：要复用就升到 `components/`。
 - ❌ **共享业务组件内写死 `<Link to=...>` 或 import page-private helper**：这会让组件反向感知路由或领域排名逻辑。正确做法是由 page 传入 `action` / `secondaryAction` / `glyph` / `meta` 节点。
 - ❌ **绕过 `app/router.tsx` 私加路由 / 用 `<BrowserRouter>` 包裹**：路由唯一入口在 `web/src/app/router.tsx`。

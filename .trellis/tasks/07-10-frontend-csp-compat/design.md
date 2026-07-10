@@ -8,7 +8,7 @@
 default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'
 ```
 
-Go 通过 `go:embed` 和 `strings.TrimSpace` 读取；Vite preview/e2e 从同一仓库文件读取 response header，禁止复制第二份策略。
+Go 通过 `go:embed` 和 `strings.TrimSpace` 读取；Vite preview 与 source contract 从同一仓库文件读取 response header，禁止复制第二份策略。Task 5 使用本地 Chromium/CDP 留存真实 violation 证据；Playwright 依赖、持久化 e2e spec 与 CI browser gate 由其既定 owner `frontend-quality-ratchets`（Task 10）引入。
 
 ## Resource Migration
 

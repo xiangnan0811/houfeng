@@ -415,6 +415,82 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 | 引入新 worker | 1) `internal/center/<x>/worker.go` 实现 `Worker.Run(ctx) error`；2) `cmd/houfeng-center/bootstrap.go` 添加构造与传给 `centerapp.New(...)`；3) `bootstrap_test.go` 的 `TestBootstrapCenterBuildsAppOnSuccess` 把 `len(workers)` 期望值从 N 改为 N+1（**当前为 3**：incident、retention、session cleanup） |
 | agent 端新采集 / 新探针 | 1) `agent/hostsample/` 或 `agent/probe/` 实现采集；2) 通过 `agent/runtime/runtime.go` 的 `buildSyncRequest` 串接；3) 必要时改 `internal/contracts/agentapi/` DTO（不可单边） |
 
+### Scenario: Center 与 Web 严格 CSP 同源合同
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `internal/center/http/SecurityHeaders`、CSP policy、`web/index.html`、Vite dev/preview headers、字体/图标等静态资源、主题 bootstrap，或生产 TSX/CSS 的资源与样式表达时，必须遵守本合同。
+- 目标：Center、前端开发预览和 production build 共享一份精确的严格同源策略；不靠 `unsafe-inline`、nonce、data URI 或远程 origin 掩盖资源迁移缺口。
+
+#### 2. Signatures
+
+- Policy source: `internal/center/http/csp-policy.txt`，单行精确文本。
+- Go embed: `//go:embed csp-policy.txt` → `contentSecurityPolicySource` → `strings.TrimSpace(...)` → `SecurityHeaders(enableHSTS bool)` 的 `Content-Security-Policy` response header。
+- Vite boundary: `web/vite.config.ts` 从仓库同一 policy 文件读取，并赋给 `server.headers` 与 `preview.headers`。
+- Browser resources: `/theme-bootstrap.js`、`/fonts/*.woff2`、`/select-caret-*.svg` 均来自 `web/public/` 的同源 URL。
+
+#### 3. Contracts
+
+- 唯一批准策略是：`default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'`。
+- Go runtime 与 Vite 不得各维护策略副本；运行时唯一来源是 `csp-policy.txt`。测试中的 expected literal 只用于发现 policy 漂移，不能成为第二个运行时来源。
+- HTML 不得含 inline script 或远程 font；主题 bootstrap 必须在 React 入口前同步加载同源文件，并只接受 `houfeng|classic` 与 `dark|light|system` allowlist。
+- CSS 不得引用 remote font 或 `data:` image。IBM Plex Sans 400/500/600/700、Mono 400/500/600、OFL 和三套主题 caret 必须作为受跟踪的 `web/public/` 资源存在。
+- 所有生产 `.tsx` 禁止 JSX `style=`。静态视觉使用 BEM/令牌，SVG 动态几何使用 attributes，比例与列宽优先使用 `<progress>` 与 `<col width>`。Modal scroll lock / clipboard fallback 的窄范围 CSSOM 写入必须保留行为测试与真实 Chromium CSP 证据，不得扩展成业务样式通道。
+- CSP 合格需要三层证据同时成立：source contract、Go exact-header/Vite shared-header tests、真实 production build 浏览器 violation gate；只通过其中一层不能宣称兼容。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| `csp-policy.txt` 与批准文本不一致 | Go exact-header、Vite header 或 Web source contract 至少一项失败 |
+| HTML 出现 inline script / Google Fonts | `cspContract.test.ts` 失败，production browser 不得放宽策略通过 |
+| CSS 出现 `data:` image / remote font | source contract 失败；禁止加入 `data:` 或远程 origin 到 policy |
+| production TSX 出现 `style=` | source contract 报出文件与行号；改用 class/attribute/原生元素 |
+| bootstrap persisted preset/mode 非 allowlist | 回退到 `theme-houfeng-dark`，不得生成任意 class |
+| 字体、caret、bootstrap 或 OFL 缺失 | public-resource contract 失败；浏览器 resource/network gate 不得标绿 |
+| 任一核心路由触发 `securitypolicyviolation`、console/runtime error 或非预期 4xx/5xx | browser gate 失败并保留 route + viewport + directive/URL 证据 |
+| 登录页 `/api/auth/me` 返回预期 401 | 只作为未认证基线，不计入非预期网络错误；Document 仍必须带精确 CSP |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: Center production、Vite dev/preview 都返回同一策略；七个字体文件、主题脚本和 caret 同源加载，核心路由在三档视口均零 violation。
+- Base: 新增动态 SVG 图表，用 presentation attributes + class 表达几何和视觉，并在 source/browser gate 中通过。
+- Bad: 为保留 `<script>...</script>` 或 React `style={{...}}` 把 `unsafe-inline` 加回 `script-src` / `style-src`。
+- Bad: Go 与 Vite 各复制一份 policy；一次安全收紧只改其中一处，导致本地预览与 production 行为分叉。
+
+#### 6. Tests Required
+
+- `internal/center/http/middleware_test.go`: `TestSecurityHeadersSetsBaselineHeaders` 必须断言完整、精确 CSP header。
+- `web/vite.config.test.ts`: 断言 dev 与 preview headers 等于批准 policy。
+- `web/src/security/cspContract.test.ts`: 断言唯一 policy 文件、无 remote/inline/data/JSX style、所有同源资源与 license 存在、font/caret wiring 完整、theme allowlist 与 `classic-light` 回退一致。
+- 改到的 chart/table/progress/component 必须有 focused unit test，断言不再生成 `style` prop 且运行时值仍进入对应 attribute/value。
+- production build 后用真实 Chromium 覆盖 login 与核心路由、`1440x1000` / `1024x768` / `390x900`，捕获 `securitypolicyviolation`、console/runtime、network、Document header、字体、caret、主题切换与动态图表交互；持久化 CI browser gate 由前端质量 ratchet 任务维护。
+
+#### 7. Wrong vs Correct
+
+```go
+// 错误：在 Go 内复制策略并为现有 inline 资源放宽。
+header.Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'")
+```
+
+```go
+// 正确：运行时只消费嵌入的同一 policy 文件。
+//go:embed csp-policy.txt
+var contentSecurityPolicySource string
+
+header.Set("Content-Security-Policy", strings.TrimSpace(contentSecurityPolicySource))
+```
+
+```tsx
+// 错误：React 会生成被严格 style-src 拒绝的内联样式。
+<div style={{ width: `${ratio}%` }} />
+
+// 正确：用原生语义元素携带动态比例，视觉由 CSS class 负责。
+<progress className="score-bar" value={ratio} max={100} />
+```
+
+---
+
 ### Scenario: incident threshold settings order
 
 #### 1. Scope / Trigger
