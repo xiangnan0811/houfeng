@@ -83,11 +83,6 @@ function compactAmount(value: number): string {
   return value.toFixed(value >= 100 ? 0 : 2)
 }
 
-function barWidth(value: number, max: number): string {
-  if (!Number.isFinite(value) || !Number.isFinite(max) || max <= 0) return '0%'
-  return `${Math.max(4, Math.min(100, (value / max) * 100))}%`
-}
-
 function monthLabel(bucket: string): string {
   const [year, month] = bucket.split('-')
   if (!year || !month) return bucket
@@ -417,7 +412,11 @@ export function SubscriptionInsights({
                       <small>{money(row.price, row.currency)} · {share.toFixed(1)}%</small>
                     </div>
                     <div className="subscription-breakdown-bar">
-                      <span style={{ width: barWidth(cost, rankingMax) }} />
+                      <progress
+                        aria-label={`${row.display_name || row.vps_display_name || row.vps_id} 月成本`}
+                        max={rankingMax || 1}
+                        value={cost}
+                      />
                     </div>
                     <span className="mono">{money(cost, baseCurrency)}</span>
                   </button>
@@ -487,7 +486,11 @@ export function SubscriptionInsights({
                   <small>{item.subscription_count} 项订阅</small>
                 </div>
                 <div className="subscription-breakdown-bar">
-                  <span style={{ width: barWidth(item.monthly_cost, breakdownMax) }} />
+                  <progress
+                    aria-label={`${item.label} 月成本`}
+                    max={breakdownMax || 1}
+                    value={item.monthly_cost}
+                  />
                 </div>
                 <span className="mono">{money(item.monthly_cost, baseCurrency)}</span>
               </div>

@@ -67,12 +67,12 @@ export function EventsStreamSection({
 
   if (events.length === 0) {
     return (
-      <div className="card" style={{ padding: '24px', textAlign: 'center' }}>
-        <p style={{ fontSize: '13px', color: 'var(--t3)' }}>
+      <div className="card events-stream-empty">
+        <p className="events-stream-empty__message">
           {hasActiveFilters ? '当前筛选没有匹配的事件' : '最近没有状态变更事件'}
         </p>
         {hasActiveFilters && (
-          <button type="button" className="btn sm secondary" style={{ marginTop: '12px' }} onClick={onClearFilters}>
+          <button type="button" className="btn sm secondary events-stream-empty__reset" onClick={onClearFilters}>
             重置筛选
           </button>
         )}

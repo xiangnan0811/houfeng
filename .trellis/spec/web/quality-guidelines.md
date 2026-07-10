@@ -118,7 +118,7 @@ verify-web: test-web-toolchain
 - **`tsc -b` 是 build 第一步**：`web/package.json:11` 的 `build` = `tsc -b && vite build`。**类型错误会让 build 直接挂**，CI 红。
 - **类型断言**：尽量用具体类型，**禁止 `any`**（`web/eslint.config.js:14` 启用 `tseslint.configs.recommended`）。如必须用未知输入，用 `unknown` + 收口判别。
 - **类型导入**：`verbatimModuleSyntax: true` 强制类型 import 必须显式 `import type { Foo } from '...'`，不要省略 `type`。
-- **JSX**：`jsx: react-jsx`，**不需要** `import React from 'react'`，按需 import 具体 hook / 类型即可（参考 `web/src/components/atoms/Sparkline.tsx:1` `import type { CSSProperties } from 'react'`）。
+- **JSX**：`jsx: react-jsx`，**不需要** `import React from 'react'`，按需 import 具体 hook / 类型即可；同一 import 中的类型必须显式写 `type`（参考 `web/src/components/atoms/Sparkline.tsx:1` 的 `import { type MouseEvent, ... } from 'react'`）。
 
 ---
 
@@ -288,8 +288,8 @@ export default defineConfig([
 | 新增 / 修改业务 API 调用 | 必须落到 `web/src/lib/api.ts`，**不要**在 page / component 里直接 `fetch()`；历史直连创建监控实例 API 已偿还，reviewer 不要让这类请求回流到 page |
 | 新增 page | `web/src/app/router.tsx` 注册路由 + colocate `<Page>.test.tsx`（至少 1 个 happy-path test） |
 | 新增 atom | `web/src/components/atoms/<Name>.tsx` + 同名 `.test.tsx` + `atoms/index.ts` 加 barrel export + `web/src/styles/atoms.css` 加样式（用令牌） |
-| 新增 / 改 CSS 令牌 | `web/src/styles/tokens.css` 同步改 4 个主题块（`:root` / `theme-houfeng-light` / `theme-classic-dark` / `theme-classic-light`），见 `.trellis/spec/web/styling-guidelines.md` |
-| 改首屏防闪烁脚本 | `web/index.html:8-19` 与 `web/src/lib/theme.ts` 的逻辑必须保持一致——它们之间没有共享代码，靠人工对齐 |
+| 新增 / 改 CSS 令牌 | `web/src/styles/tokens.css` 同步检查 3 套运行时主题（`:root` / `theme-houfeng-light` / `theme-classic-dark`）；`classic-light` 复用 `houfeng-light`，见 `.trellis/spec/web/styling-guidelines.md` |
+| 改首屏防闪烁脚本 | `web/public/theme-bootstrap.js` 与 `web/src/lib/theme.ts` 的 preset/mode allowlist、system scheme 和 `classic-light` 回退必须保持一致；`web/index.html` 只同步加载同源脚本，不得恢复 inline script |
 | 改路由注册 / 页面加载边界 | 保持 `appRoutes` 可被 `matchRoutes` 测试；路由页用 `React.lazy` + `RouteModuleFallback`；运行 `npm run build` 并确认没有 Vite large chunk warning，入口 chunk 不应回退到单个 500 kB+ app bundle |
 
 ---

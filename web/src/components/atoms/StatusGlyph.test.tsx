@@ -8,6 +8,7 @@ describe('StatusGlyph', () => {
     const svg = container.querySelector('svg')
     expect(svg).toBeTruthy()
     expect(svg!.classList.contains('status-glyph--critical')).toBe(true)
+    expect(svg).not.toHaveAttribute('style')
   })
 
   it('uses default Chinese aria label per state', () => {

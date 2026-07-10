@@ -2,22 +2,10 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+    <script src="/theme-bootstrap.js"></script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>候风 · 服务器舰队控制面</title>
-    <script>
-      (function () {
-        try {
-          var p = localStorage.getItem('houfeng.theme.preset') || 'houfeng';
-          var m = localStorage.getItem('houfeng.theme.mode') || 'dark';
-          var scheme = m === 'system'
-            ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-            : m;
-          document.documentElement.classList.add('theme-' + p + '-' + scheme);
-        } catch (e) { /* ignore */ }
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>

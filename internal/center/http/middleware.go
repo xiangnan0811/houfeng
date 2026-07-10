@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	_ "embed"
 	stdhttp "net/http"
 	"net/url"
 	"strings"
@@ -10,6 +11,11 @@ import (
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/http/sessionctx"
 )
+
+//go:embed csp-policy.txt
+var contentSecurityPolicySource string
+
+var contentSecurityPolicy = strings.TrimSpace(contentSecurityPolicySource)
 
 // UserIDFromContext returns the authenticated user ID stored by RequireSession.
 func UserIDFromContext(ctx context.Context) (string, bool) {
@@ -89,7 +95,7 @@ func SecurityHeaders(enableHSTS bool) func(stdhttp.Handler) stdhttp.Handler {
 			header.Set("X-Content-Type-Options", "nosniff")
 			header.Set("X-Frame-Options", "DENY")
 			header.Set("Referrer-Policy", "no-referrer")
-			header.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'")
+			header.Set("Content-Security-Policy", contentSecurityPolicy)
 			header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 			if enableHSTS {
 				header.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")

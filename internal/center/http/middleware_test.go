@@ -220,7 +220,8 @@ func TestSecurityHeadersSetsBaselineHeaders(t *testing.T) {
 	if headers.Get("Strict-Transport-Security") == "" {
 		t.Fatal("Strict-Transport-Security missing")
 	}
-	if headers.Get("Content-Security-Policy") == "" {
-		t.Fatal("Content-Security-Policy missing")
+	const wantCSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+	if got := headers.Get("Content-Security-Policy"); got != wantCSP {
+		t.Fatalf("Content-Security-Policy = %q, want %q", got, wantCSP)
 	}
 }

@@ -598,13 +598,19 @@
 
 .asset-decision-assessment__bars{display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0}
 
-.asset-decision-assessment__bars span{position:relative;display:flex;align-items:center;justify-content:space-between;gap:var(--space-1);min-width:0;min-height:20px;padding:2px var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 66%,transparent);border-radius:var(--radius-1);color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.2;white-space:nowrap;overflow:hidden}
+.asset-decision-assessment__bar{position:relative;display:flex;align-items:center;min-width:0;min-height:20px;border:var(--border-w) solid color-mix(in srgb,var(--border) 66%,transparent);border-radius:var(--radius-1);overflow:hidden}
 
-.asset-decision-assessment__bars span::before{content:'';position:absolute;inset:0 auto 0 0;width:calc(var(--score) * 1%);max-width:100%;background:color-mix(in srgb,var(--accent) 18%,transparent);pointer-events:none}
+.asset-decision-assessment__bar progress{position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent;appearance:none;-webkit-appearance:none;pointer-events:none}
 
-.asset-decision-assessment__bars span > *,.asset-decision-assessment__bars span{z-index:0}
+.asset-decision-assessment__bar progress::-webkit-progress-bar{background:transparent}
 
-.asset-decision-assessment__bars span .mono-digits{position:relative;z-index:1;color:var(--text-primary)}
+.asset-decision-assessment__bar progress::-webkit-progress-value{background:color-mix(in srgb,var(--accent) 18%,transparent)}
+
+.asset-decision-assessment__bar progress::-moz-progress-bar{background:color-mix(in srgb,var(--accent) 18%,transparent)}
+
+.asset-decision-assessment__bar-label{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:var(--space-1);width:100%;min-width:0;padding:2px var(--space-2);color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.2;white-space:nowrap}
+
+.asset-decision-assessment__bar-label .mono-digits{color:var(--text-primary)}
 
 .asset-decision-assessment__meta{display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0}
 

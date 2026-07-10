@@ -14,7 +14,11 @@ describe('Sparkline', () => {
   it('renders an empty placeholder with text when values is empty', () => {
     const { container, getByText } = render(<Sparkline values={[]} />)
     expect(container.querySelector('polyline')).toBeNull()
-    expect(container.querySelector('.sparkline--empty')).toBeTruthy()
+    const emptySparkline = container.querySelector('svg.sparkline--empty')
+    expect(emptySparkline).toBeTruthy()
+    expect(emptySparkline).toHaveAttribute('width', '64')
+    expect(emptySparkline).toHaveAttribute('height', '16')
+    expect(emptySparkline).not.toHaveAttribute('style')
     expect(getByText('暂无数据')).toBeInTheDocument()
   })
 
@@ -64,6 +68,9 @@ describe('Sparkline', () => {
 
     const tooltip = container.querySelector('.sparkline__tooltip')
     expect(tooltip).toBeTruthy()
+    expect(container.querySelector('.sparkline__tooltip-frame')).toHaveAttribute('x')
+    expect(tooltip).not.toHaveAttribute('style')
+    expect(container.querySelector('[style]')).not.toBeInTheDocument()
     // mid-point should snap to the middle sample (value 20)
     expect(container.querySelector('.sparkline__tooltip-value')?.textContent).toBe('20.00')
   })

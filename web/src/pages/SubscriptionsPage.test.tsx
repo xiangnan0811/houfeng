@@ -582,6 +582,7 @@ describe('SubscriptionsPage', () => {
     const insights = screen.getByRole('region', { name: '订阅成本洞察' })
     const headings = within(insights).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
     expect(headings).toEqual(['月成本', '年度趋势与风险', '成本构成', '续费队列'])
+    expect(within(insights).getByRole('progressbar', { name: 'Hetzner 月成本' })).toHaveAttribute('value', '84')
     expect(screen.getByLabelText('构成维度')).toHaveValue('provider')
     fireEvent.change(screen.getByLabelText('构成维度'), { target: { value: 'payment' } })
     expect(screen.getByText('card')).toBeInTheDocument()
@@ -594,6 +595,11 @@ describe('SubscriptionsPage', () => {
     expect(screen.getByText('基准月成本：CNY 84.00')).toBeInTheDocument()
     fireEvent.mouseLeave(donutSegment)
     expect(screen.queryByText('原始付费：USD 12.00')).not.toBeInTheDocument()
+
+    fireEvent.click(within(insights).getByRole('tab', { name: '排行' }))
+    expect(within(insights).getByRole('progressbar', { name: 'Tokyo Edge 月成本' })).toHaveAttribute('max', '84')
+    expect(within(insights).getByRole('progressbar', { name: 'Osaka Backup 月成本' })).toHaveAttribute('value', '42')
+    expect(insights.querySelector('[style]')).not.toBeInTheDocument()
   })
 
   it('renders monthly labels for the annual trend axis', async () => {

@@ -51,7 +51,7 @@
 
 **使用规则**：
 
-- 颜色 / 间距 / 字号 / 圆角 / 边框 / 阴影 / 动效**一律走 `var(--xxx)`**，**严禁组件 / 全局样式里写硬编码 hex 或像素**（除非是 SVG 内部计算尺寸，参考 `Sparkline.tsx:71` 的 `style={{ width, height }}`）。
+- 颜色 / 间距 / 字号 / 圆角 / 边框 / 阴影 / 动效**一律走 `var(--xxx)`**，**严禁组件 / 全局样式里写硬编码 hex 或像素**。运行时 SVG 几何使用 `width` / `height` / `x` / `y` / `points` 等 presentation attributes，不通过 JSX `style` 绕过令牌与 CSP。
 - 状态色派生写法用 `color-mix(in srgb, var(--color-state-xxx) NN%, transparent)`，参见 `atoms.css:155-196` 的 `tone--*` 系列。**不要**自己另算 RGBA / 引入额外色板。
 - 新增令牌：先在 `tokens.css` `:root` 段加默认值，再到每个 `html.theme-*` 块补对应主题值——**漏一个主题会让该主题视觉破洞**。
 - 兼容别名令牌必须跨主题一致：如果引入 `--surface-0..3`、`--border-muted`、`--border-default`、`--text-tertiary` 这类 alias，必须在 `:root` 与每个 `html.theme-*` 块都定义，并让 alias 指向当前主题的基础令牌（如 `--surface-2: var(--surface-elevated)`），不要只在默认主题补别名。
@@ -65,8 +65,8 @@
 **主题切换实现**：
 
 - 主题状态由 `web/src/lib/theme-context.tsx` 管理（`Preset = 'houfeng' | 'classic'`、`Mode = 'dark' | 'light' | 'system'`）。
-- `web/src/lib/theme.ts:36-44` 的 `applyTheme(preset, mode)` 根据 preset + 解析后的 scheme 在 `<html>` 上加 `theme-houfeng-dark` / `theme-houfeng-light` / `theme-classic-dark` / `theme-classic-light` 四个 class 之一，CSS 由对应的 `html.theme-xxx { ... }` 块覆盖令牌值（`tokens.css:91-213`）。
-- 首屏防闪烁脚本在 `web/index.html:8-19`：内联 JS 在 React 挂载前就读 localStorage 加上正确的 `theme-*` class。**不要**把这段逻辑搬到 React 内执行。
+- `web/src/lib/theme.ts` 的 `applyTheme(preset, mode)` 根据 preset + 解析后的 scheme 在 `<html>` 上加 `theme-houfeng-dark` / `theme-houfeng-light` / `theme-classic-dark` 三个 class 之一；`classic-light` 明确回退到 `theme-houfeng-light`。
+- 首屏防闪烁逻辑位于同源静态资源 `web/public/theme-bootstrap.js`，由 `web/index.html` 在 React 入口前以 `<script src="/theme-bootstrap.js"></script>` 同步加载。脚本只接受已知 preset/mode allowlist，并与 `web/src/lib/theme.ts` 保持相同的 `classic-light` 回退；禁止改回 inline script 或把预热延后到 React。
 - 持久化 key 由 `THEME_STORAGE_KEYS` 集中（`web/src/lib/theme.ts:5-8`）：`houfeng.theme.preset` / `houfeng.theme.mode`。
 
 **新组件准备暗色**：
@@ -113,17 +113,18 @@
 
 ---
 
-## 内联样式（`style={{ ... }}`）
+## JSX 内联样式与严格 CSP
 
-**仅限尺寸 / 计算量**。允许的真实场景：
+`style-src 'self'` 不允许 React 把 JSX `style` 序列化成元素内联样式；`web/src/security/cspContract.test.ts` 因此扫描所有生产 `.tsx` 并禁止任何 `style=`，包括过去认为可接受的运行时尺寸。
 
-- SVG / Canvas 的 `width` / `height` 等运行时计算尺寸：`web/src/components/atoms/Sparkline.tsx:49`、`StatusGlyph.tsx:65`。
-- 已知历史偿还点（**不要复制**）：`web/src/pages/SettingsPage.tsx:853` / `:862` 的 `style={{ marginBottom: 8 }}` —— 应该走类名表达。
+**替代方式**：
 
-**严禁**：
+- 静态视觉与 spacing 使用 BEM class + `tokens.css`。
+- SVG 的动态几何使用 `width` / `height` / `x` / `y` / `points` / `strokeDasharray` 等 SVG attributes；HTML tooltip 需要动态定位时可放进带动态 SVG 几何属性的 `<foreignObject>`，内部样式仍走 class。
+- 动态比例优先使用原生 `<progress value={value} max={max}>`；表格列宽使用 `<col width={column.width}>`，不要在 cell/header 上生成 inline style。
+- 不要用 `setAttribute('style', ...)`、运行时 `<style>` 或给元素写 CSS custom property 来伪装规避 source scan。
 
-- ❌ 在 `style={{ ... }}` 里写颜色 / 背景 / 边框 / 阴影 / 字体（这些必须走令牌 + BEM 类）。
-- ❌ 在 `style={{ ... }}` 里写硬编码间距（除非是 SVG / 像素级精算）；间距走 `var(--space-N)` 或 BEM modifier。
+**窄例外**：`web/src/lib/modalStack.ts` 的 `document.body.style.overflow` 引用计数滚动锁，以及 `web/src/lib/useCopyToClipboard.ts` 的临时 textarea CSSOM 写入，是浏览器行为型 imperative API；已在真实 Chromium 严格 CSP 下验证不会触发 violation。它们不得承载业务视觉，也不构成新增 `.style.*` 或 JSX `style` 的通行证。
 
 ---
 
@@ -161,10 +162,10 @@
 
 **What**：所有 form `<select>` 必须用 `appearance:none` 关掉原生 OS 箭头，并用 `background-image:var(--select-caret)` 画候风自定义箭头。
 
-**Why**：原生箭头在暗色主题下突兀，且颜色不随主题切换。`background-image:url(data:svg)` 无法引用 CSS 变量，所以箭头颜色不能写死（曾硬编码 `#7B7F88`，三主题皆不匹配）——改为每个主题块各定义一个 `--select-caret`（stroke = 该主题 `--text-muted`）。
+**Why**：原生箭头在暗色主题下突兀，且颜色不随主题切换；`url(data:image/svg+xml,...)` 又会被严格 `img-src 'self'` 拒绝。箭头因此必须是同源静态 SVG，并由主题令牌选择资源。
 
 **约定**：
-- `--select-caret` 在 `web/src/index.css` 三个主题块各定义一次：`:root, .theme-houfeng-dark`（stroke `%2394a3b8`）/ `.theme-houfeng-light`（`%23475569`）/ `.theme-classic-dark`（`%23a1a1aa`）。运行时只有这 3 个主题（`theme.ts` 的 `applyTheme` 把 `classic-light` 回退到 `houfeng-light`），漏一个主题会让该主题 select 只有 `appearance:none` 而无箭头（空白指示符）。
+- `--select-caret` 在 `web/src/styles/tokens.css` 的 `:root`、`.theme-houfeng-light`、`.theme-classic-dark` 分别指向 `/select-caret-houfeng-dark.svg`、`/select-caret-houfeng-light.svg`、`/select-caret-classic-dark.svg`；`classic-light` 使用既定的 `houfeng-light` 回退。三个 SVG 必须保存在 `web/public/` 并纳入 CSP source contract。
 - 新增 form select 时**复用现有带 caret 的规则**（`select.input` / `.filter-select__control` / `.page-stack select` / `.asset-operation-field select` / `.target-create-drawer__form select` / `.filter-panel select.filter-select` 等），优先走 `Select` 原子（`web/src/components/atoms/Select.tsx`）或 `FilterSelect`，不要新造裸 select。
 - 紧凑型 select：`padding-right` ≈ 24-26px、`background-position:right 8px center`；标准型：`padding-right` ≈ 30px、`right 12px center`。padding-right 必须够大,否则箭头压字。
 
@@ -174,7 +175,7 @@
                             // 会落到无 caret 规则 → 原生 OS 箭头
 ```
 ```css
-select.input{appearance:none;background-image:url("...stroke='%237B7F88'...")}  /* 硬编码色,不随主题 */
+select.input{appearance:none;background-image:url("data:image/svg+xml,...")}  /* img-src 'self' 下被阻止 */
 ```
 
 **Correct**：
@@ -183,9 +184,9 @@ import { Select } from '../components/atoms'
 <Select label="服务商" required value={v} onChange={...}>{options}</Select>
 ```
 ```css
-:root, .theme-houfeng-dark{ --select-caret:url("...stroke='%2394a3b8'..."); }
-.theme-houfeng-light{ --select-caret:url("...stroke='%23475569'..."); }
-.theme-classic-dark{ --select-caret:url("...stroke='%23a1a1aa'..."); }
+:root{ --select-caret:url('/select-caret-houfeng-dark.svg'); }
+.theme-houfeng-light{ --select-caret:url('/select-caret-houfeng-light.svg'); }
+.theme-classic-dark{ --select-caret:url('/select-caret-classic-dark.svg'); }
 select.input{appearance:none;-webkit-appearance:none;background-image:var(--select-caret);padding-right:36px;background-position:right 14px center}
 ```
 
@@ -228,13 +229,13 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 > 这些是当前代码已经回避（或承认偿还）的写法，**新代码不要做**。
 
 - ❌ **硬编码颜色 / 像素值**：颜色一律 `var(--color-state-*)` / `var(--accent*)` / `var(--surface*)`；间距走 `--space-N`；圆角走 `--radius-N`。
-- ❌ **`style={{ color/background/border/font: ... }}` 写业务样式**：内联只用于运行时计算尺寸（Sparkline / StatusGlyph）。
+- ❌ **任何生产 JSX `style=`**：严格 CSP 下静态视觉走 BEM/令牌，动态 SVG 几何走 attributes，比例和列宽分别用 `<progress>` / `<col width>`。
 - ❌ **回归早期 concept 屏 / `stitch/` 子目录视觉**：当前 UI 指导在 `docs/design/current/`；历史素材不能直接成为实现目标。
 - ❌ **`@media (prefers-color-scheme: dark)`**：主题切换走 `theme-*` class，不监听系统偏好分支（用户可在 system / dark / light 三档显式选）。
 - ❌ **新建 `.css` 文件给单个组件 / page 用**：LoginPage 是历史例外；新增样式落 `styles/pages.css` 或 `styles/atoms.css`，靠 BEM 隔离。
 - ❌ **CSS-in-JS / Tailwind / styled-components**：当前不用；要引入需独立技术决策与整体迁移。
 - ❌ **类名简写 / 工具类滥用**（`mt-2`、`flex`、`text-red`）：`reset.css` 仅留 `.tnum` `.mono` 两个工具类，其余走 BEM 表达语义。
-- ❌ **令牌只改一份主题**：`tokens.css` 改了 `:root` 的 `--surface`，必须同步 `theme-houfeng-light` / `theme-classic-dark` / `theme-classic-light` 三个块。
+- ❌ **令牌只改一份主题**：`tokens.css` 改了 `:root` 的主题令牌，必须同步检查 `.theme-houfeng-light` / `.theme-classic-dark`；`classic-light` 明确复用 `houfeng-light`，不要私自新增第四套漂移值。
 - ❌ **在组件文件 `import './x.css'`**（除 `LoginPage.tsx` 这个历史例外）：全局样式由 `main.tsx` 顶部 + `app/layout/layout.css` 集中管理。
 - ❌ **DataTable 可排序表头双 padding**：`.data-table__th--sortable` 自身必须清零 padding，实际间距由 `.data-table__sort-btn` 承担；若密度规则用 `.data-table--compact .data-table__head th` 这类更高特异性选择器，清零规则也必须带上同等上下文（如 `th.data-table__th--sortable`），否则 sortable 表头会比普通表头更宽。
 
@@ -244,9 +245,8 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 
 > 用于后续任务评审；若形成可复用规则，更新 `.trellis/spec/` 或当前 active docs。
 
-1. **SettingsPage 仍有少量 inline spacing/layout style**，绕过了令牌 + BEM 的规则。属已知小额偿还，新代码不要复制。
-2. **`web/src/pages/LoginPage.css` 是 page 局部 CSS 唯一例外**，与"组件文件不 import css"的规则冲突。当前合理（首屏前 AppShell 未挂），不打算回头消除。
-3. **`atoms.css` 内某些渐变 / 阴影直接用 `rgba(255,255,255,0.x)`**（如 `atoms.css:149` `background: rgba(255, 255, 255, 0.08);`），未走令牌——这是为高光 / 镜面层效果保留的允许例外，写新原子时如果需要类似效果可参考。
+1. **`web/src/pages/LoginPage.css` 是 page 局部 CSS 唯一例外**，与"组件文件不 import css"的规则冲突。当前合理（首屏前 AppShell 未挂），不打算回头消除。
+2. **`atoms.css` 内某些渐变 / 阴影直接用 `rgba(255,255,255,0.x)`**（如 `atoms.css:149` `background: rgba(255, 255, 255, 0.08);`），未走令牌——这是为高光 / 镜面层效果保留的允许例外，写新原子时如果需要类似效果可参考。
 
 ---
 
@@ -256,6 +256,6 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 
 - **设计系统原子（BEM + 令牌 + 复合 modifier）**：`web/src/components/atoms/Button.tsx:18` 的 `['btn', 'btn--' + variant, 'btn--' + size, className].filter(Boolean).join(' ')`，配 `web/src/styles/atoms.css:7-66` 的 `.btn` / `.btn--primary` / `.btn--sm` 等。
 - **状态色派生（`color-mix` + 状态令牌）**：`web/src/styles/atoms.css:155-196` 的 `.tone--normal` / `.tone--alert` / `.tone--critical` 系列。
-- **多主题令牌覆盖**：`web/src/styles/tokens.css:91-213` 同一组 `--surface` / `--accent` / `--color-state-*` 在 `theme-houfeng-light` / `theme-classic-dark` / `theme-classic-light` 三个块各自重新赋值，组件代码无感知。
-- **首屏防闪烁主题预热**：`web/index.html:8-19` 内联脚本 + `web/src/lib/theme.ts:36-44` 的 `applyTheme` 配合的 SSR-less 暗色优先方案。
+- **多主题令牌覆盖**：`web/src/styles/tokens.css` 的 `:root` / `.theme-houfeng-light` / `.theme-classic-dark` 为三套运行时主题赋值，`classic-light` 由运行时回退到 `houfeng-light`，组件代码无感知。
+- **严格 CSP 下的首屏主题预热**：`web/index.html` 同步加载同源 `web/public/theme-bootstrap.js`，其 allowlist 与 `web/src/lib/theme.ts` 的 `applyTheme` 保持一致。
 - **chart 调色板使用**：`web/src/components/atoms/Sparkline.tsx:23-33` 的 `TONE_VAR` 把状态色 / accent 映射到 `var(--color-state-*)` / `var(--accent*)`，没有任何 hex。

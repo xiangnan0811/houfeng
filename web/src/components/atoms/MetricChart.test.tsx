@@ -58,7 +58,11 @@ describe('MetricChart', () => {
   it('renders an empty placeholder when samples is empty', () => {
     const { container, getByText } = render(<MetricChart samples={[]} />)
     expect(container.querySelector('polyline')).toBeNull()
-    expect(container.querySelector('.metric-chart--empty')).toBeTruthy()
+    const emptyChart = container.querySelector('svg.metric-chart--empty')
+    expect(emptyChart).toBeTruthy()
+    expect(emptyChart).toHaveAttribute('width', '100%')
+    expect(emptyChart).toHaveAttribute('height', '160')
+    expect(emptyChart).not.toHaveAttribute('style')
     expect(getByText('暂无观测数据')).toBeInTheDocument()
   })
 
@@ -113,8 +117,10 @@ describe('MetricChart', () => {
 
     const tooltip = container.querySelector('.metric-chart__tooltip')
     expect(tooltip).toBeTruthy()
-    expect((tooltip as HTMLElement).style.top).not.toBe('')
-    expect((tooltip as HTMLElement).style.left).not.toBe('')
+    const tooltipFrame = container.querySelector('.metric-chart__tooltip-frame')
+    expect(tooltipFrame).toHaveAttribute('x')
+    expect(tooltipFrame).toHaveAttribute('y')
+    expect(tooltip).not.toHaveAttribute('style')
     const valueNode = container.querySelector('.metric-chart__tooltip-value')
     expect(valueNode).toBeTruthy()
     // Tooltip should display one of the sample values formatted by formatValue
@@ -188,7 +194,8 @@ describe('MetricChart', () => {
     const tooltip = container.querySelector('.metric-chart__tooltip')
     expect(tooltip).toBeTruthy()
     expect(tooltip).toHaveTextContent('20.0%')
-    expect((tooltip as HTMLElement).style.top).not.toBe('')
+    expect(container.querySelector('.metric-chart__tooltip-frame')).toHaveAttribute('y')
+    expect(container.querySelector('[style]')).not.toBeInTheDocument()
     expect(container.querySelector('.metric-chart__cursor')).toBeTruthy()
   })
 

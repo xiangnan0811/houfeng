@@ -7,7 +7,7 @@
 ## Confirmed Facts
 
 - Center 当前 CSP 只有 `default-src 'self'` 等兜底指令。
-- `index.html` 使用 Google Fonts 与 inline theme bootstrap；CSS 有 data SVG；生产 TSX 有 16 处 inline style。
+- `index.html` 使用 Google Fonts 与 inline theme bootstrap；CSS 有 3 处 data SVG；生产 TSX 实际有 9 个文件、21 处 inline style。
 - 所有已抽查核心路由均产生 CSP violation，现有 Go test 只断言 header 非空。
 
 ## Requirements
@@ -21,10 +21,11 @@
 
 - 依赖 `frontend-quality-gate-strict` 合并。
 - 可以修改 Center security header，但不放宽为远程字体、data image 或 inline script/style。
+- 本任务必须取得本地真实 Chromium CSP 证据，但不提前引入 Playwright；持久化 browser spec、依赖与 CI gate 由 `frontend-quality-ratchets` 统一落地。
 
 ## Acceptance Criteria
 
-- [ ] production HTML/CSS/TSX source 不含 remote font、inline script、data image 或 `style={{`。
-- [ ] Center 返回精确 CSP，保留 frame/object/base/form 限制。
-- [ ] login、Dashboard、select、图表和主题切换没有 console 或 `securitypolicyviolation`。
-- [ ] 字体 license 被跟踪，字体总量进入后续 bundle budget。
+- [x] production HTML/CSS/TSX source 不含 remote font、inline script、data image 或 JSX `style=`。
+- [x] Center 返回精确 CSP，保留 frame/object/base/form 限制。
+- [x] login、Dashboard、select、图表和主题切换没有 console 或 `securitypolicyviolation`。
+- [x] 字体 license 被跟踪；字体总量交由 `frontend-quality-ratchets` 纳入后续 bundle budget。
