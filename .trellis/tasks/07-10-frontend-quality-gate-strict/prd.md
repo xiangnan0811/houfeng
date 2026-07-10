@@ -24,7 +24,7 @@
 
 ## Acceptance Criteria
 
-- [ ] Node 非 22 时 preflight 在安装前失败，并输出实际版本与修复指引。
-- [ ] `NODE_ENV=production make verify-web` 与 `env -u NODE_ENV make verify-web` 均通过。
-- [ ] 两个 tsconfig 均启用 strict，lint/test/build 仍通过且测试不少于 74 files / 578 tests。
-- [ ] lockfile、CI recipe 与文档化 Node pin 一致。
+- [x] Node 非 22 时 preflight 在安装前失败，并输出实际版本与修复指引。
+- [x] `NODE_ENV=production make verify-web` 与 `env -u NODE_ENV make verify-web` 均通过。
+- [x] 两个 tsconfig 均启用 strict，lint/test/build 仍通过且测试不少于 74 files / 578 tests。
+- [x] lockfile、CI recipe 与文档化 Node pin 一致。
