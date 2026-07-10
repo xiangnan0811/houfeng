@@ -3,7 +3,7 @@
   "name": "frontend-shell-recovery",
   "title": "前端 Shell 摘要与错误恢复",
   "description": "修正 Shell 摘要语义与 freshness，增加错误恢复和真实通知入口",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

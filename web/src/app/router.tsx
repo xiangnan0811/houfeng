@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-do
 
 import { AppShell } from './layout/AppShell'
 import { RequireAuth } from './RequireAuth'
+import { RouteErrorPage } from './RouteErrorPage'
 import { RouteModuleFallback } from './RouteModuleFallback'
 
 const assetDecisionsPage = lazy(() =>
@@ -66,9 +67,14 @@ function routeElement(Component: ComponentType, loadingLabel: string) {
 }
 
 export const appRoutes: RouteObject[] = [
-  { path: '/login', element: routeElement(loginPage, '正在加载登录页') },
+  {
+    path: '/login',
+    element: routeElement(loginPage, '正在加载登录页'),
+    errorElement: <RouteErrorPage />,
+  },
   {
     element: <RequireAuth />,
+    errorElement: <RouteErrorPage />,
     children: [
       {
         path: '/',

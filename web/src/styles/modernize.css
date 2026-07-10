@@ -92,6 +92,21 @@ summary:focus-visible,
   border-radius: var(--radius-1);
 }
 
+/* Router 与应用边界共享克制的全屏恢复面。 */
+.app-recovery {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: var(--bg);
+}
+
+.app-recovery__surface {
+  width: 100%;
+  max-width: 72ch;
+  margin: 0;
+}
+
 /* ============================================================
    设置页专项优化（2026-07-09）
    目标：①修复新增通知渠道按钮被拉伸成细长条
