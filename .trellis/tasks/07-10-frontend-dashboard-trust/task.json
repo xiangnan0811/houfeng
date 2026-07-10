@@ -3,7 +3,7 @@
   "name": "frontend-dashboard-trust",
   "title": "前端 Dashboard 事实可信度",
   "description": "修正聚合计数与 false-empty，恢复五状态 command surface",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

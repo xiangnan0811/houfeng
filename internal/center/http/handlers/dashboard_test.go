@@ -30,6 +30,7 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 		TotalMonitoringInstanceCount:             5,
 		TotalTargetCount:                         4,
 		AbnormalMonitoringInstanceCount:          2,
+		SevereMonitoringInstanceCount:            1,
 		PendingOnboardingMonitoringInstanceCount: 1,
 		PausedMonitoringInstanceCount:            1,
 		RetiredMonitoringInstanceCount:           1,
@@ -129,6 +130,12 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	}
 	if body["abnormal_monitoring_instance_count"] != float64(2) {
 		t.Fatalf("body = %#v, want abnormal_monitoring_instance_count=2", body)
+	}
+	if body["severe_monitoring_instance_count"] != float64(1) {
+		t.Fatalf("body = %#v, want severe_monitoring_instance_count=1", body)
+	}
+	if body["severe_monitoring_instance_count"].(float64) > body["abnormal_monitoring_instance_count"].(float64) {
+		t.Fatalf("body = %#v, severe monitoring instances must remain a subset of abnormal monitoring instances", body)
 	}
 	if body["snapshot_generated_at"] != "2026-04-25T12:00:00Z" {
 		t.Fatalf("body = %#v, want snapshot_generated_at", body)
