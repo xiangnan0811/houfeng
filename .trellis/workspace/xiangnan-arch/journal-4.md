@@ -1816,3 +1816,36 @@ Reviewed and fixed frontend UI/settings changes, added Trellis task artifacts, v
 ### Next Steps
 
 - None - task complete
+
+
+## Session 231: 前端 Modal 栈与嵌套焦点
+
+**Date**: 2026-07-10
+**Task**: 前端 Modal 栈与嵌套焦点
+**Branch**: `codex/archive-frontend-modal-stack-focus`
+
+### Summary
+
+完成 parent-aware Modal stack、top-only Escape/Tab/backdrop、persistent、inert、引用计数滚动锁与真实浏览器焦点恢复；PR #344/main CI 通过，发布 v0.57.3，multi-arch 镜像 digest sha256:ad2b8b6dfd0762518e8812fca95503840e08fd4b9e8e36f9f6b4a31ac8b483da。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ba39024` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
