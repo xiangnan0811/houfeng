@@ -12,7 +12,7 @@
   "assignee": "xiangnan-arch",
   "createdAt": "2026-07-10",
   "completedAt": null,
-  "branch": null,
+  "branch": "codex/frontend-quality-ratchets",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
