@@ -1883,3 +1883,38 @@ Reviewed and fixed frontend UI/settings changes, added Trellis task artifacts, v
 ### Next Steps
 
 - None - task complete
+
+
+## Session 233: 完成前端 Shell 摘要与错误恢复
+
+**Date**: 2026-07-10
+**Task**: 完成前端 Shell 摘要与错误恢复
+**Branch**: `codex/frontend-shell-recovery`
+
+### Summary
+
+完成 Shell 五态与 freshness、错误恢复和真实通知入口；PR #349、main CI、v0.57.5 release 与 amd64/arm64 镜像均通过。浏览器发现 Providers 组合决策链接的 48px 预存裁切，留给 frontend-responsive-workflows。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2432833` | (see git log) |
+| `54feae7` | (see git log) |
+| `b8a2108` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
