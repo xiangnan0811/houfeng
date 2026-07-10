@@ -1,26 +1,37 @@
-/* partial: dashboard-responsive.css (extracted from index.css; do not hand-edit large rules here) */
-/* ===== Dashboard v2: responsive, atom-based layout ===== */
-.dash-header{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-2)}
-.dash-greeting{font-size:var(--type-display-size);font-weight:var(--type-display-weight);color:var(--text-primary);line-height:1.2;letter-spacing:-0.01em}
-.dash-sub{margin-top:6px;color:var(--text-muted);font-size:var(--type-small-size)}
+/* Dashboard owner: responsive collapse without page-level overflow. */
+@media (max-width:1024px){
+  .dashboard-decision-surface{padding:var(--space-5)}
+  .dashboard-decision-surface__header{grid-template-columns:minmax(0,1fr) minmax(calc(var(--space-12) * 3.5),calc(var(--space-12) * 4.5))}
+  .dashboard-evidence-grid{grid-template-columns:minmax(0,1fr)}
+}
 
-.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-4);margin-bottom:var(--space-6)}
-.stat{display:flex;flex-direction:column;gap:6px}
-.stat--clickable{cursor:pointer;transition:border-color 0.2s,box-shadow 0.2s,background 0.2s}
-.stat--clickable:hover{border-color:var(--border-h);box-shadow:var(--shadow-md);background:var(--bg-card-h)}
-.stat-value{font-size:26px;font-weight:700;color:var(--text-primary);line-height:1.1;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}
-.stat-value.is-warn{color:var(--warn)}
-.stat-value.is-err{color:var(--err)}
-.stat-label{font-size:var(--type-small-size);font-weight:500;color:var(--text-secondary)}
-.stat-sub{font-size:11px;color:var(--text-muted)}
+@media (max-width:640px){
+  .dashboard-decision-surface{gap:var(--space-3);padding:var(--space-3);border-radius:var(--radius-2)}
+  .dashboard-decision-surface__header{grid-template-columns:minmax(0,1fr);gap:var(--space-3);align-items:stretch}
+  .dashboard-decision-surface__intro{gap:var(--space-1)}
+  .dashboard-decision-surface__intro h1{font-size:var(--type-h1-size)}
+  .dashboard-decision-surface__intro h2{font-size:var(--type-h2-size)}
+  .dashboard-decision-surface__summary{font-size:var(--type-small-size);line-height:var(--type-small-leading)}
+  .dashboard-primary-action{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"title action" "detail action";align-items:center;padding:var(--space-3)}
+  .dashboard-primary-action h2{grid-area:title}
+  .dashboard-primary-action p{grid-area:detail}
+  .dashboard-primary-action .btn{grid-area:action;align-self:stretch}
+  .dashboard-judgement-rail{grid-template-columns:minmax(0,1fr);padding-top:0;border-top:0}
+  .dashboard-judgement{padding:var(--space-2) var(--space-3)}
+  .dashboard-degradation{align-items:flex-start;flex-direction:column;gap:var(--space-2)}
+  .dashboard-degradation .btn{width:100%}
+  .dashboard-evidence-lane{padding:var(--space-3)}
+  .dashboard-evidence-lane__header{align-items:center}
+  .dashboard-evidence-metrics,.dashboard-source-list{grid-template-columns:minmax(0,1fr)}
+  .dashboard-attention-link{grid-template-columns:auto minmax(0,1fr)}
+  .dashboard-attention-link__meta{grid-column:2;max-width:none;text-align:left}
+}
 
-.dash-panels{display:grid;grid-template-columns:repeat(6,1fr);gap:var(--space-5);margin-bottom:var(--space-6)}
-.dash-panel{grid-column:span 2}
-.dash-panel--wide{grid-column:span 3}
-.panel-link{font-size:12px;color:var(--accent);cursor:pointer;white-space:nowrap}
-.panel-link:hover{text-decoration:underline}
-.section-action{margin-left:auto;font-size:12px;white-space:nowrap}
-
-@media (max-width:1024px){.dash-panels{grid-template-columns:repeat(2,1fr)}.dash-panel,.dash-panel--wide{grid-column:auto}}
-@media (max-width:640px){.dash-panels{grid-template-columns:1fr}.stat-grid{grid-template-columns:repeat(2,1fr)}}
-@media (max-width:420px){.stat-grid{grid-template-columns:1fr}}
+@media (max-width:420px){
+  .dashboard-decision-surface__meta{align-items:flex-start;flex-direction:column}
+  .dashboard-primary-action{grid-template-columns:minmax(0,1fr);grid-template-areas:"title" "detail" "action"}
+  .dashboard-evidence-lane__header{align-items:flex-start;flex-direction:column}
+  .dashboard-evidence-lane__header .text-link{white-space:normal}
+  .dashboard-source__header{flex-direction:column}
+  .dashboard-source__header span{text-align:left}
+}

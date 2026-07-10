@@ -402,49 +402,93 @@ await postMonitoringInstanceBatch(ids, action)
 
 ---
 
-### Dashboard 数据可信度
+### Scenario: Dashboard 五状态与显式 RemoteState
 
-- `DashboardPage` 是全局工作台，但只能展示 `getDashboard()` / `/api/dashboard` 已明确返回的事实，并且**不得默认展示所有 contract 字段**。当前可用事实来自 `DashboardOverview`：dashboard 生成时间、总监控实例/目标数、异常/严重/维护计数、库存完整度计数、24h 新异常/恢复趋势、真实全量 `group_summaries`、通知配置布尔摘要、异常监控实例/目标摘要、最近事件；这些字段是可用事实池，不是首页全部展示清单。
-- Dashboard 首屏按 asset-decision-first command surface 做渐进披露：顶部只展示一个 `工作台 command surface`，并把现有优先级决策收敛成一个主行动块 `今日第一步`。资产决策与观测异常事实可以作为同一 surface 内的证据 lane 支撑主行动；刷新、自动刷新、管理入口和非主行动链接必须降为低权重控制或 `次级动作`，不得恢复成与主 CTA 同权的第三 lane。异常态下方继续展示统一异常处理队列、工作台内 `运行上下文` 和紧凑 `管理入口`；其中处理队列仍是主任务，运行上下文与管理入口只能作为队列下方的辅助跳转，不得拆成独立 page section。正常 / 维护态下方展示运行概览、运行上下文与紧凑管理入口；首次接入态下方只展示 onboarding。不要为了“contract 已返回”而渲染 API loaded facts、独立 KPI/summary strip、`系统快捷入口` 详情列表、`Group 摘要` 列表或 `最近事件摘要` 列表。
-- Command surface 的顶部可以展示一个低高度 `今日判断摘要` 轨道，但它只能汇总当前最高优先级判断：资产压力 / 资产主线、严重异常 / 观测异常 / 维护观察 / 观测稳定、以及第一条下一步动作。它不是 KPI strip，不得扩展为全量 dashboard metric 列表；每项必须链接到已有 Dashboard 深链承接页，且 390px 视口下折叠为单列。
-- `snapshot_generated_at` 只能写成 `生成时间`、`摘要生成` 这类接口生成时间提示。它不是 Center health、agent heartbeat、sync freshness 或全链路实时性证明，不要写 `中心运行正常` / `同步于` / `健康检查通过` 之类文案。
-- `abnormal_monitoring_instances` / `abnormal_targets` 只能代表当前异常对象队列，**不能**推导全量 group / region / provider 分布。`group_summaries` 必须来自后端全量聚合，但它默认不在 Dashboard 首屏展开；如果未来重新展示 Group 上下文，必须保持轻量、服务当前状态决策，数组为空时只显示轻量说明，不在前端制造 `未分组 0` 行。
-- `recent_events` 默认不在 Dashboard 首屏展开成事件列表。Dashboard 只保留 `查看事件流` / `/events?time_range=24h` 这类入口；复杂历史筛选、事件列表和上下文展开交给 EventsPage。
-- Dashboard 可以在主工作台内部展示一个低权重 `运行上下文` strip，用于补充同类服务器管理系统常见的影响范围、库存状态、最近活动。该 strip 最多 3 个 link item：不得恢复独立 KPI/summary strip，不得使用 `Group 摘要` / `最近事件摘要` heading，不得展示完整 group list 或 recent event summary 列表。最近活动只展示事件类型、严重度、对象和时间语义入口，具体事件摘要交给 EventsPage。视觉上它应是工作台内的 compact context rail，而不是三个同权摘要卡片。
-- `notification_status` 只能展示配置布尔摘要，例如 Telegram / Feishu 是否已配置、Telegram runtime apply 是否生效。前端不得要求或展示 `telegram_bot_token`、`telegram_chat_id`、`feishu_webhook_url` 等敏感配置值；需要编辑真实配置时跳转 SettingsPage。
-- `asset_summary` 只能展示 VPS Asset Ledger 的少量组合判断入口：30 天续费、待决策、待取消/迁移、未关联监控实例、关联异常 VPS、按币种月付成本。它应集中出现在 Dashboard 首屏 `资产组合决策` lane 中，避免在下方工作台重复出现同权资产卡片。它不能展开资产明细，不能替代 VPS / 订阅页面，也不能把 Dashboard 变成资产字段总表。入口必须深链到 `/asset-decisions?view=...&renew_within_days=30` 或 VPS/观测列表的明确筛选，而不是裸 `/asset-decisions` 或旧 `single_queue` 主入口。
-- 系统入口可以展示 dashboard contract 支撑的库存完整度事实，例如待接入监控实例、暂停监控实例、退役监控实例、暂停目标、归档目标。Dashboard 深链是受支持 contract：`/monitoring?onboarding=pending` 表示待接入或绑定待处理监控实例，`/monitoring?abnormal=1` 表示异常监控实例，`/targets?abnormal=1`、`/targets?run_status=暂停`、`/targets?run_status=已归档` 表示对应目标列表筛选，`/events?severity=严重`、`/events?time_range=24h`、`/events?maintenance_only=1` 表示事件页筛选；新增深链必须先在目标页面用 URL-state 和可见 chip/toggle 承接。
-- AppShell 可以复用 `getDashboard()` 做轻量 shell summary，但只能把它标成 dashboard 摘要来源。加载中显示“正在读取系统摘要”，失败显示“摘要不可用”；不要写死 `center ok`、`中心运行正常`、`sync HH:mm:ss` 或用浏览器当前时间伪装后端同步时间。Sidebar 的监控实例/目标 count 可以来自 `abnormal_monitoring_instance_count` / `abnormal_target_count`，但加载中/失败时必须由 Shell 状态说明 0 count 不代表无异常。
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `DashboardPage`、`dashboardModel.ts`、`DashboardCommandSurface`、Dashboard 深链、三项数据加载或首屏状态文案时，必须遵守本合同。
+- 本节约束现有 wire shape 的消费方式；如果增删/改名 `/api/dashboard` 字段，还必须同步下方 `Dashboard Overview Contract`。
+
+#### 2. Signatures
+
+```ts
+type RemoteState<T> =
+  | { status: 'loading' }
+  | { status: 'success'; value: T; loadedAt: string }
+  | { status: 'error'; error: string }
+
+type DashboardMode =
+  | 'critical'
+  | 'abnormal'
+  | 'maintenance'
+  | 'onboarding'
+  | 'stable'
+
+buildDashboardModel(input: {
+  overview: RemoteState<DashboardOverview>
+  vps: RemoteState<VPSAssetRecord[]>
+  subscription: RemoteState<SubscriptionOverview>
+}): DashboardModel
+```
+
+- 数据入口：`getDashboard()`、`listVPSAssets()`、`getSubscriptionOverview()`；三者必须独立保存状态，业务请求仍统一经过 `web/src/lib/api.ts`。
+
+#### 3. Contracts
+
+- 失败不得再用 `[]` / `null` 表示。`overview` 失败是可重试整页 error；VPS / subscription 失败是局部 degradation，并保留已成功的 Dashboard 摘要。
+- mode 优先级固定为 `critical -> abnormal -> maintenance -> onboarding -> stable`。`onboarding` 只在 VPS 请求 `success([])` 且 `total_monitoring_instance_count === 0`、`total_target_count === 0` 时成立；VPS loading/error 永远不能触发首次接入。
+- `abnormal_*_count` 已包含 `severe_*_count`。总异常只允许 `abnormal_monitoring_instance_count + abnormal_target_count`；严重只做优先级分层，禁止把 severe 再加进 abnormal。
+- 每个 ready model 恰好一个 `primaryAction`。固定深链：critical → `/events?severity=严重`；abnormal → 有监控实例时 `/monitoring?abnormal=1`，否则 `/targets?abnormal=1`；maintenance → `/events?maintenance_only=1`；onboarding → `/vps`；stable → 真实资产 signal 的 `/asset-decisions?...`，无 signal 时 `/vps`。
+- 判断摘要固定三项（观测、资产、订阅），每项必须链接到其文案所指的承接工作流；不得出现“资产待核对”却固定跳 `/vps` 的链接漂移。
+- stable 只表示没有观测异常/维护/首次接入条件，不等于所有来源健康。stable + 资产待办显示 `资产判断等待核对`；stable + 局部请求失败使用 notice tone、标题 `部分事实待确认` 和信号 `局部数据不可用`，不得显示 `摘要无异常` 或 `当前没有紧急处理项`。
+- subscription 请求失败时可使用 `DashboardOverview.asset_summary.cost_by_currency` 作为较低精度 fallback，但必须同时展示来源、失败信息和 `snapshot_generated_at`；不能伪装成 subscription overview 同精度结果。
+- `snapshot_generated_at` 只能表达 `摘要生成`。VPS `loadedAt` 只能表达客户端完成读取的时间；两者都不是 Center health、agent heartbeat 或全链路同步证明。
+- 首屏只保留一个 command surface、一个 `今日第一步`、三项判断摘要和两条证据 lane。异常对象最多展示前三项；完整事件、资产、订阅明细交给对应路由。不得恢复独立 KPI strip、Group 摘要、最近事件列表、系统快捷入口或第二套 Dashboard workbench。
+- `abnormal_monitoring_instances` / `abnormal_targets` 只用于异常对象预览，不能推导全量 group/provider/region。`notification_status` 仍只能包含布尔配置摘要，不得暴露 token/chat id/webhook。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| overview loading | 整页显示 `正在加载工作台…` |
+| overview error | 整页显示 `工作台不可用` + retry，不渲染 command surface |
+| VPS `success([])` 且观测库存为 0 | onboarding，唯一主行动 `创建第一台 VPS` |
+| VPS 503 且观测库存为 0 | 非 onboarding；显示 `部分事实待确认`、VPS 局部错误和 retry |
+| abnormal=2、severe=1 | critical；UI 异常总数仍为 2，严重为 1 |
+| abnormal>0、severe=0 | abnormal；按异常主体跳 monitoring 或 targets |
+| abnormal=0、maintenance>0 | maintenance；跳维护事件 |
+| subscription 503 | 页面保留；标明较低精度 Dashboard fallback，不制造 0 成本事实 |
+| stable + asset signal | mode 仍为 stable，但标题/信号和 primary action 表达真实资产待办 |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: Dashboard 返回 abnormal=2/severe=1，页面展示“异常总数 2（严重已包含）”，主行动只有“处理严重异常”。
+- Good: VPS 清单 503，Dashboard 仍展示已加载观测事实，但明确写“部分事实待确认”，重试只触发 supporting resources。
+- Base: subscription 仍在 loading；账单判断显示读取中并暂用 Dashboard 聚合来源，不把 loading 写成真实空数据。
+- Bad: `listVPSAssets().catch(() => [])` 导致请求失败时出现“创建第一台 VPS”。
+- Bad: stable 模式无条件显示“摘要无异常”，同时主行动却是“进入资产组合决策”或页面存在局部失败。
+- Bad: 恢复被删除的第二套 command surface、全量 KPI/Group/recent-events dump，或让多个同权 CTA 竞争 `今日第一步`。
+
+#### 6. Tests Required
+
+- `dashboardModel.test.ts`: subset 计数、五 mode 优先级、VPS failure-not-onboarding、stable asset signal、fallback 来源、loading/error。
+- `DashboardPage.test.tsx`: 五 mode 唯一主行动及 deep link、禁止旧 surface、VPS 503、supporting retry、订阅 fallback、异常详情链接和可信标题。
+- `internal/center/store/dashboard_test.go` 与 `internal/center/http/handlers/dashboard_test.go`: abnormal=2/severe=1，并断言 severe 不大于 abnormal。
+- 用户可见结构变化必须做本地 browser sanity：Dashboard 的五种 fixture 至少覆盖 `1440x1000`、`390x900`，并补 `1024x768`；断言首屏主行动/至少一个判断摘要可见、无页面横向溢出、无关键文字裁切和 console/page/CSP error。该证据是 mock frontend rendering，不代表后端或真实资产通过。
+
+#### 7. Wrong vs Correct
 
 ```tsx
-// 错误：从异常摘要伪装成全量分布
-const groupSummaries = overview.abnormal_monitoring_instances.reduce(...)
-<GroupContextSummary groups={groupSummaries} />
+// Wrong: error 被伪装成 empty，且 severe 被重复加总。
+const vps = await listVPSAssets().catch(() => [])
+const abnormalTotal = overview.abnormal_monitoring_instance_count
+  + overview.severe_monitoring_instance_count
 
-// 错误：把 dashboard 生成时间写成同步/健康状态
-<Timestamp value={overview.snapshot_generated_at} /> 同步完成
-
-// 错误：要求 dashboard 暴露敏感通知配置
-overview.notification_status.telegram_bot_token
-
-// 错误：把资产摘要扩成资产明细 dump
-overview.asset_summary.vps_assets.map(...)
-
-// 错误：没有真实 health/sync contract 时伪造 Shell 健康状态
-<SyncStatus state="ok" label="中心运行正常" meta={`v1.0 · sync ${new Date().toISOString()}`} />
-
-// 错误：把 dashboard contract 当作首屏展示清单
-<GlobalKpiStrip items={['监控实例', '目标', '严重', '维护', '24h 变化']} />
-<ShortcutRail title="系统快捷入口" entries={allEntryDescriptions} />
-<GroupContextSummary groups={overview.group_summaries} />
-<RecentEventsContext events={overview.recent_events} />
-
-// 正确：只展示支撑当前决策路径的 dashboard contract 事实
-<DashboardCommandSurface overview={overview} lanes={['资产组合决策', '观测异常队列', '下一步动作']} />
-<DashboardWorkbench title="当前需要处理" attentionItems={attentionItems} />
-<DashboardContextStrip items={['影响范围', '库存状态', '最近活动']} />
-<span>摘要生成 <Timestamp value={overview.snapshot_generated_at} /></span>
-<SyncStatus state="degraded" label="正在读取系统摘要" meta="v1.0 · dashboard loading" />
+// Correct: 保留显式来源状态；severe 只做分层。
+const vps: RemoteState<VPSAssetRecord[]> = await listVPSAssets()
+  .then((value) => remoteSuccess(value, new Date().toISOString()))
+  .catch((error) => remoteError(errorMessage(error, '加载 VPS 清单失败')))
+const abnormalTotal = overview.abnormal_monitoring_instance_count
 ```
 
 ### Monitoring 列表工作台状态
@@ -921,6 +965,7 @@ const overview = await getSubscriptionOverview()
 
 - `limit` 只限制 `abnormal_monitoring_instances`、`abnormal_targets` 和 `recent_events`；不得限制全局计数、`group_summaries` 或 `notification_status`。
 - `snapshot_generated_at` 是 Center 生成 overview 的时间，只能被展示为 dashboard 生成时间。
+- `abnormal_monitoring_instance_count` / `abnormal_target_count` 分别是对应 severe 集合的超集；`severe_*_count` 不能被前端再次加到 abnormal 总数。相同集合关系也适用于 `group_summaries` 中的 abnormal/severe 字段。
 - `group_summaries` 必须由后端基于全量 `monitoring_instances` + `targets` 计算，空白 group 归一为 `未分组`，前端不得从异常队列 reduce。
 - `notification_status` 只能包含配置布尔摘要，不包含 Telegram token/chat id 或 Feishu webhook URL。
 - `asset_summary` 只能包含聚合摘要：`renewal_due_30d_subscription_count`、`renewal_due_30d_vps_count`、`unreviewed_vps_count`、`to_cancel_vps_count`、`to_migrate_vps_count`、`unlinked_vps_count`、`abnormal_linked_vps_count`、`cost_by_currency[]`。`cost_by_currency[]` 只包含 `currency`、`monthly_total`、`yearly_total`。
@@ -933,6 +978,7 @@ const overview = await getSubscriptionOverview()
 | `limit` 缺失 | handler 使用默认 limit |
 | `limit <= 0` 或非数字 | handler 返回 400 |
 | dashboard store 查询失败 | handler 返回 500，store error 用 `%w` 包装上下文 |
+| abnormal=2、severe=1 | JSON 原样返回 2/1；前端异常总数保持 2 |
 | `center_settings` singleton 缺失 | `notification_status` 全 false，不返回错误 |
 | `group_summaries` 为空 | Dashboard 显示空态，不制造 `未分组 0` |
 | Asset Ledger 表为空 | `asset_summary` 返回 0 计数与空 `cost_by_currency`，Dashboard 显示低权重空态 |
@@ -940,27 +986,31 @@ const overview = await getSubscriptionOverview()
 #### 5. Good/Base/Bad Cases
 
 - Good: group 只存在于 targets 时仍出现在 `group_summaries`，监控实例计数为 0、目标计数为真实值。
+- Good: severe monitoring instance 是 abnormal monitoring instances 的一项分层，后端返回 abnormal=2/severe=1，前端不做 2+1。
 - Base: 无监控实例无目标时 dashboard 仍返回 200，计数为 0，首次接入工作台显示，Group 区为空态。
 - Good: 资产摘要显示为工作台内低权重入口，链接到 VPS / 订阅 / 监控筛选页，不新增资产明细表。
 - Bad: 从 `abnormal_monitoring_instances` 推导 `按 Group 分布`；把 `snapshot_generated_at` 写成同步完成；把通知 token 暴露给 Dashboard。
+- Bad: 用 `abnormal_*_count + severe_*_count` 生成异常总数，导致严重对象被重复计数。
 - Bad: 把 `asset_summary` 扩展成 `vps_assets` / `subscriptions` 明细数组，或在 Dashboard 首屏展示所有资产字段。
 
 #### 6. Tests Required
 
-- Go store test: 新计数字段、全量 group SQL、settings 缺失时通知 false、`limit` 不影响 group summary。
-- Go handler test: 新字段 JSON snake_case，且不泄露敏感通知字段。
+- Go store test: abnormal=2/severe=1 的集合关系、新计数字段、全量 group SQL、settings 缺失时通知 false、`limit` 不影响 group summary。
+- Go handler test: abnormal/severe snake_case 字段保持 2/1、severe 不大于 abnormal，且不泄露敏感通知字段。
 - Frontend type/API fixture: `DashboardOverview` fixture 覆盖新增字段；新增 `asset_summary` 时必须同步 AppShell、DashboardPage、api test fixtures。
-- DashboardPage test: 生成时间、PR4 深链、异常处理队列、运行上下文、库存完整度 / 通知配置在内联关键指标和紧凑入口中的呈现，资产摘要低权重入口，以及异常态 / 首次接入态不展开独立 summary/KPI strip、Group、最近事件、API facts、资产明细 dump。
+- DashboardPage test: 生成时间、五 mode 唯一主行动/deep link、abnormal/severe 不重复、VPS false-empty、局部 fallback，以及不展开独立 summary/KPI strip、Group、最近事件、API facts、资产明细 dump。
 - AppShell test: 共享 dashboard fixture 与新增 contract 保持兼容。
 
 #### 7. Wrong vs Correct
 
 ```tsx
-// 错误：PR4 前从 Dashboard 拼筛选深链，并且筛选语义不由 API contract 支撑
-<Link to={`/monitoring?monitoring_status=${overview.paused_monitoring_instance_count > 0 ? '暂停' : ''}`}>暂停监控实例</Link>
+// 错误：severe 已包含在 abnormal 中，却再次相加。
+const abnormalTotal = overview.abnormal_monitoring_instance_count
+  + overview.severe_monitoring_instance_count
 
-// 正确：PR3 只展示 contract 支撑的状态摘要，入口仍去列表页
-<Link to="/monitoring">暂停 <MonoDigits>{overview.paused_monitoring_instance_count}</MonoDigits></Link>
+// 正确：异常总数直接消费 abnormal，severe 只展示优先级分层。
+const abnormalTotal = overview.abnormal_monitoring_instance_count
+const severeTotal = overview.severe_monitoring_instance_count
 
 // 错误：要求 settings secret 出现在 dashboard contract
 overview.notification_status.feishu_webhook_url

@@ -158,8 +158,11 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	if overview.TotalMonitoringInstanceCount != 5 || overview.TotalTargetCount != 4 {
 		t.Fatalf("total counts = (%d,%d), want (5,4)", overview.TotalMonitoringInstanceCount, overview.TotalTargetCount)
 	}
-	if overview.AbnormalMonitoringInstanceCount != 2 || overview.RecentRecoveryCount != 2 {
-		t.Fatalf("overview = %#v, want populated counts", overview)
+	if overview.AbnormalMonitoringInstanceCount != 2 || overview.SevereMonitoringInstanceCount != 1 || overview.RecentRecoveryCount != 2 {
+		t.Fatalf("overview = %#v, want abnormal=2, severe=1 and populated recovery count", overview)
+	}
+	if overview.SevereMonitoringInstanceCount > overview.AbnormalMonitoringInstanceCount {
+		t.Fatalf("monitoring instance counts = abnormal %d / severe %d, severe must remain a subset of abnormal", overview.AbnormalMonitoringInstanceCount, overview.SevereMonitoringInstanceCount)
 	}
 	if overview.SnapshotGeneratedAt.IsZero() {
 		t.Fatal("SnapshotGeneratedAt is zero, want dashboard generation time")
