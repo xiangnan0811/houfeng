@@ -1407,7 +1407,7 @@ describe('TargetsPage', () => {
     expect(screen.queryByText('target detail')).not.toBeInTheDocument()
   })
 
-  it('toggles the create target drawer via the section heading button and restores focus', async () => {
+  it('keeps the persistent create target dialog open on Escape and restores focus after explicit close', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValueOnce(mockJSONResponse([targetRecord()])),
@@ -1430,17 +1430,21 @@ describe('TargetsPage', () => {
     expect(screen.queryByRole('dialog', { name: '创建目标' })).not.toBeInTheDocument()
 
     fireEvent.click(trigger)
-    expect(screen.getByRole('dialog', { name: '创建目标' })).toBeInTheDocument()
+    let dialog = screen.getByRole('dialog', { name: '创建目标' })
 
     fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '创建目标' })).not.toBeInTheDocument())
+    expect(dialog).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+    expect(screen.queryByRole('dialog', { name: '创建目标' })).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
 
     fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
-    expect(screen.getByRole('dialog', { name: '创建目标' })).toBeInTheDocument()
+    dialog = screen.getByRole('dialog', { name: '创建目标' })
 
-    fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('dialog', { name: '创建目标' })).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
   })
 
   // ─── PR2: sparkline strip ──────────────────────────────────────────────

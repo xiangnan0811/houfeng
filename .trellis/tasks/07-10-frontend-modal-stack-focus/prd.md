@@ -24,7 +24,7 @@
 
 ## Acceptance Criteria
 
-- [ ] 单层、双层、三层、persistent 与 unmount 测试通过。
-- [ ] 一次 Escape 只关闭最上层；子层关闭后父层仍存在且 body 仍锁定。
-- [ ] 焦点只在栈顶循环，关闭子层后回到父层原触发按钮。
-- [ ] Asset Decisions 真实嵌套确认流程保持 URL、草稿和父层 tab 状态。
+- [x] 单层、双层、三层、persistent 与 unmount 测试通过。
+- [x] 一次 Escape 只关闭最上层；子层关闭后父层仍存在且 body 仍锁定。
+- [x] 焦点只在栈顶循环，关闭子层后回到父层原触发按钮。
+- [x] Asset Decisions 真实嵌套确认流程保持 URL、草稿和父层 tab 状态。

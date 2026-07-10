@@ -187,8 +187,12 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           : null
     const target = [preferred, fallback].find((element) => element?.isConnected)
 
-    target?.focus()
     pendingRuntimeFocusRestoreRef.current = null
+    if (!target) return
+
+    queueMicrotask(() => {
+      if (target.isConnected && !target.closest('[inert]')) target.focus()
+    })
   }, [pendingRuntimeConfirmation, state.target])
 
   useEffect(() => {
