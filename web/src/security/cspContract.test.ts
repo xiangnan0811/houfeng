@@ -54,6 +54,19 @@ describe('strict CSP source contract', () => {
     expect(readFileSync(policyPath, 'utf8').trim()).toBe(CSP_POLICY)
   })
 
+  it('copies the shared policy into the Docker web build stage', () => {
+    const dockerfile = readFileSync(resolve(REPOSITORY_ROOT, 'Dockerfile'), 'utf8')
+    const webBuildStart = dockerfile.indexOf(' AS web-build')
+    const goBuildStart = dockerfile.indexOf(' AS go-build')
+    const webBuildStage = dockerfile.slice(webBuildStart, goBuildStart)
+    const policyCopy = 'COPY internal/center/http/csp-policy.txt /src/internal/center/http/csp-policy.txt'
+
+    expect(webBuildStart).toBeGreaterThanOrEqual(0)
+    expect(goBuildStart).toBeGreaterThan(webBuildStart)
+    expect(webBuildStage).toContain(policyCopy)
+    expect(webBuildStage.indexOf(policyCopy)).toBeLessThan(webBuildStage.indexOf('RUN npm run build'))
+  })
+
   it('keeps production HTML free of remote fonts and inline scripts', () => {
     const html = readFileSync(resolve(WEB_ROOT, 'index.html'), 'utf8')
     const inlineScripts = html.match(/<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/gi) ?? []

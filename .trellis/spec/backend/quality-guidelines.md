@@ -427,12 +427,14 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 - Policy source: `internal/center/http/csp-policy.txt`，单行精确文本。
 - Go embed: `//go:embed csp-policy.txt` → `contentSecurityPolicySource` → `strings.TrimSpace(...)` → `SecurityHeaders(enableHSTS bool)` 的 `Content-Security-Policy` response header。
 - Vite boundary: `web/vite.config.ts` 从仓库同一 policy 文件读取，并赋给 `server.headers` 与 `preview.headers`。
+- Docker boundary: root `Dockerfile` 的 `web-build` stage 在 `npm run build` 前把同一文件复制到 `/src/internal/center/http/csp-policy.txt`，保持 Vite 的仓库相对路径成立。
 - Browser resources: `/theme-bootstrap.js`、`/fonts/*.woff2`、`/select-caret-*.svg` 均来自 `web/public/` 的同源 URL。
 
 #### 3. Contracts
 
 - 唯一批准策略是：`default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'`。
 - Go runtime 与 Vite 不得各维护策略副本；运行时唯一来源是 `csp-policy.txt`。测试中的 expected literal 只用于发现 policy 漂移，不能成为第二个运行时来源。
+- Docker web stage 不能只复制 `web/`：它必须复制原始 `csp-policy.txt` 到 Vite 解析的 `/src/internal/center/http/` 路径；禁止在 `web/` 下生成或维护第二份 policy。
 - HTML 不得含 inline script 或远程 font；主题 bootstrap 必须在 React 入口前同步加载同源文件，并只接受 `houfeng|classic` 与 `dark|light|system` allowlist。
 - CSS 不得引用 remote font 或 `data:` image。IBM Plex Sans 400/500/600/700、Mono 400/500/600、OFL 和三套主题 caret 必须作为受跟踪的 `web/public/` 资源存在。
 - 所有生产 `.tsx` 禁止 JSX `style=`。静态视觉使用 BEM/令牌，SVG 动态几何使用 attributes，比例与列宽优先使用 `<progress>` 与 `<col width>`。Modal scroll lock / clipboard fallback 的窄范围 CSSOM 写入必须保留行为测试与真实 Chromium CSP 证据，不得扩展成业务样式通道。
@@ -443,6 +445,7 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 | Condition | Expected behavior |
 | --- | --- |
 | `csp-policy.txt` 与批准文本不一致 | Go exact-header、Vite header 或 Web source contract 至少一项失败 |
+| Docker web stage 未复制 policy，或复制发生在 `npm run build` 之后 | source contract 失败；镜像构建在加载 Vite config 时以 `ENOENT /src/internal/center/http/csp-policy.txt` 失败 |
 | HTML 出现 inline script / Google Fonts | `cspContract.test.ts` 失败，production browser 不得放宽策略通过 |
 | CSS 出现 `data:` image / remote font | source contract 失败；禁止加入 `data:` 或远程 origin 到 policy |
 | production TSX 出现 `style=` | source contract 报出文件与行号；改用 class/attribute/原生元素 |
@@ -463,6 +466,7 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 - `internal/center/http/middleware_test.go`: `TestSecurityHeadersSetsBaselineHeaders` 必须断言完整、精确 CSP header。
 - `web/vite.config.test.ts`: 断言 dev 与 preview headers 等于批准 policy。
 - `web/src/security/cspContract.test.ts`: 断言唯一 policy 文件、无 remote/inline/data/JSX style、所有同源资源与 license 存在、font/caret wiring 完整、theme allowlist 与 `classic-light` 回退一致。
+- `web/src/security/cspContract.test.ts`: 同时断言 Docker `web-build` stage 在 `npm run build` 前把原始 policy 复制到 `/src/internal/center/http/csp-policy.txt`。
 - 改到的 chart/table/progress/component 必须有 focused unit test，断言不再生成 `style` prop 且运行时值仍进入对应 attribute/value。
 - production build 后用真实 Chromium 覆盖 login 与核心路由、`1440x1000` / `1024x768` / `390x900`，捕获 `securitypolicyviolation`、console/runtime、network、Document header、字体、caret、主题切换与动态图表交互；持久化 CI browser gate 由前端质量 ratchet 任务维护。
 
@@ -487,6 +491,17 @@ header.Set("Content-Security-Policy", strings.TrimSpace(contentSecurityPolicySou
 
 // 正确：用原生语义元素携带动态比例，视觉由 CSS class 负责。
 <progress className="score-bar" value={ratio} max={100} />
+```
+
+```dockerfile
+# 错误：web stage 看不到 Vite 读取的仓库级 policy。
+COPY web/ ./
+RUN npm run build
+
+# 正确：复制同一个源文件到 Vite 预期路径，再构建 web。
+COPY internal/center/http/csp-policy.txt /src/internal/center/http/csp-policy.txt
+COPY web/ ./
+RUN npm run build
 ```
 
 ---

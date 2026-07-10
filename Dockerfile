@@ -9,6 +9,7 @@ WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 
+COPY internal/center/http/csp-policy.txt /src/internal/center/http/csp-policy.txt
 COPY web/ ./
 RUN npm run build
 
