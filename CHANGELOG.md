@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.57.3](https://github.com/xiangnan0811/houfeng/compare/v0.57.2...v0.57.3) (2026-07-10)
+
+
+### Bug Fixes
+
+* **web:** make modal behavior stack aware ([8214174](https://github.com/xiangnan0811/houfeng/commit/82141746a6cf1249f6b2cdbf20e4c141333a9ffe))
+* **web:** make modal behavior stack aware ([ba39024](https://github.com/xiangnan0811/houfeng/commit/ba39024ca485612d19d5266340ddfbcab629e18d))
+
+
+### Documentation
+
+* **trellis:** plan comprehensive frontend repair program ([421d363](https://github.com/xiangnan0811/houfeng/commit/421d363502be3125f502f56daa7f2583b19158ad))
+* **trellis:** split frontend repair program into child tasks ([863f191](https://github.com/xiangnan0811/houfeng/commit/863f191803da04498fc495851624f1a8cdf2c70c))
+
+
+### Build System
+
+* **web:** isolate verification environment ([b791103](https://github.com/xiangnan0811/houfeng/commit/b791103b55cef38cbe225292e48eaedde87916b9))
+* **web:** isolate verification environment ([486d5bf](https://github.com/xiangnan0811/houfeng/commit/486d5bf08ecf0b3dd3436ada1157f6681b601770))
+
 ## [0.57.2](https://github.com/xiangnan0811/houfeng/compare/v0.57.1...v0.57.2) (2026-07-09)
 
 
