@@ -226,6 +226,65 @@ it('applies variant class', () => {
 - **本地 browser sanity**优先用 `python3 scripts/visual_evidence.py browser-sanity --base-url <url> --route <route> ...` 复用标准几何检查；它依赖本机 Python Playwright 时必须在 PR / final report 里标注为 local-only evidence。缺少本机 Python Playwright 只说明这条 helper 路径不可用，不能直接断言“浏览器 sanity 被阻塞”；先检查是否可用本机 Chromium remote debugging + CDP（例如 Node 原生 WebSocket）或其它已安装浏览器工具取得等价 route / viewport / selector 证据。无论走哪条本地路径，都不要把 Playwright/Cypress/WebDriverIO 加进 `web/package.json` 来绕过。
 - **真实 center 烟囱**由 `docs/operations/fresh-install-smoke-run.md` 承担，前端只在浏览器里 sanity check。
 
+### Scenario: 非语义点击 AST contract 与可访问性证据层级
+
+#### 1. Scope / Trigger
+
+- Trigger: 新增/修改 production TSX 的 `onClick`、Tabs/Menu/skip-link/row keyboard 行为，或声称 axe/browser 可访问性通过时，必须使用本合同。
+- 目标：默认阻止鼠标专属容器回流，并区分 source/RTL、本地 Chromium 与 Task 10 正式 CI browser gate 的证明能力。
+
+#### 2. Signatures
+
+- Source contract：`web/src/security/semanticInteractionContract.test.ts`。
+- `auditSource(path, source)` 使用 TypeScript compiler AST 找 intrinsic JSX element 与 `onClick` attribute；不得用正则扫描 JSX。
+- 当前有限原因集合：`modal-backdrop`、`event-propagation`、`keyboard-complete-row`、`primary-link-row-enhancement`。
+- 相邻 marker 形状：`{/* a11y-allow-nonsemantic-click: <reason> */}`；marker 必须是目标 JSX node 的立即前一个有效 sibling。
+
+#### 3. Contracts
+
+- `div` / `span` / `tr` / `td` / `li` / `article` / `section` / `p` / `label` 带 `onClick` 默认失败；native button/link 等不需要 marker。
+- 未知 reason、非相邻 comment、按路径/行号静态白名单、目录 wildcard 或把测试文件当 production 例外都不能放行。
+- marker 只解释已经具备其它完整语义路径的结构：backdrop、事件隔离、已有键盘合同的复合 row、有主 Link 的 pointer enhancement。真实命令必须改为 native element。
+- RTL/Vitest 证明 DOM attributes 与事件合同；本地 Chromium/CDP 证明真实 Tab/default action、focus return、console/network/CSP 与 viewport geometry；固定版本本地 axe 证明本次 settled surface。只有 Task 10 把 Playwright/axe 加入 package/lockfile/CI 后，才可称为持久化 browser gate。
+- 本地 axe 必须等待 CSS transition/animation settled 后扫描，serious/critical 不得禁用或降级；发生失败要记录 rule/target/failureSummary 并回到 owner token/组件修复。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Result |
+| --- | --- |
+| unmarked `<div onClick>` | source contract 列出 path/line/tag 并失败 |
+| approved marker 后插入另一个 JSX sibling | 原节点 marker 不再相邻，失败 |
+| VPS row 有主 Link + background enhancement marker | 允许；Link click 必须被 row guard 忽略 |
+| local axe serious/critical > 0 | 本任务浏览器门失败；不得写入“通过”证据 |
+| Python Playwright 缺失但本机 Chromium/CDP 可用 | 使用 CDP 等价证据并注明 local-only，不增加 repo dependency |
+| 只有 RTL 通过 | 不能宣称真实 Tab/default focus 或 axe 已通过 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：AST inventory 为 7 个受控 entry、0 unexplained；Chromium 用真实 `Input.dispatchKeyEvent` 验证菜单 Tab 前移，axe 4.10.3 在 settled Dashboard/Settings/VPS 上 serious/critical 为 0。
+- Base：组件单测先 RED→GREEN，再由本地浏览器覆盖真实 default action；Task 10 尚未完成时明确写“local-only”。
+- Bad：给 clickable div 加一个 broad comment；只跑 jsdom 就称 axe/browser 通过；通过禁用 `color-contrast` 规则让报告变绿。
+
+#### 6. Tests Required
+
+- synthetic AST fixtures：native pass、unmarked fail、unknown/non-adjacent fail、四个有限 reason pass。
+- repository inventory：扫描全部 non-test production TSX，unexplained=0，并对当前 allowed 数量做有意识的 bounded assertion。
+- 行为 focused tests：UserChip/TopBar/AppShell/VPS/Tabs/SegmentedControl；marker 涉及的 Modal/DataTable/Targets/Monitoring 回归一并运行。
+- 本地 Chromium：至少记录 browser/axe 版本、数据源、routes/viewports、focus sequence、page overflow、console/exception/CSP/network counters；截图不是默认 tracked evidence。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// Wrong: comment 不能把真实命令变成可访问控件。
+{/* a11y-allow-nonsemantic-click: convenience */}
+<div onClick={save}>保存</div>
+
+// Correct: 命令使用原生 button；只有 pointer enhancement 进入有限例外。
+<button type="button" onClick={save}>保存</button>
+{/* a11y-allow-nonsemantic-click: primary-link-row-enhancement */}
+<tr onClick={handleBackgroundClick}>...</tr>
+```
+
 ---
 
 ## ESLint

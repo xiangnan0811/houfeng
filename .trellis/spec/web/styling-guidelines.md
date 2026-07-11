@@ -56,6 +56,23 @@
 - 新增令牌：先在 `tokens.css` `:root` 段加默认值，再到每个 `html.theme-*` 块补对应主题值——**漏一个主题会让该主题视觉破洞**。
 - 兼容别名令牌必须跨主题一致：如果引入 `--surface-0..3`、`--border-muted`、`--border-default`、`--text-tertiary` 这类 alias，必须在 `:root` 与每个 `html.theme-*` 块都定义，并让 alias 指向当前主题的基础令牌（如 `--surface-2: var(--surface-elevated)`），不要只在默认主题补别名。
 
+### 状态前景与主按钮对比度合同
+
+- 带文字的 `.tone--*` badge、状态文本和 `.btn.primary` 必须在三套运行时主题上达到 WCAG AA 普通文本对比度；不能因为 dark-first 就把 500 色阶原样用于 light surface。
+- light 主题使用对比度安全的状态 owner tokens：normal `#047857`、notice/alert/warn `#92400e`、critical/error `#b91c1c`、maintenance/offline `#475569`。`--badge-*-c` 与 `--color-state-*` 引用这些 owner，不在组件规则重新硬编码第二套颜色。
+- `.btn.primary` 使用 `background: var(--accent); color: var(--bg)`：暗色主题得到深色前景配亮蓝，亮色主题得到白色前景配深蓝。不要恢复 `#fff`，默认/经典暗色的 `#3b82f6` 对白色小字只有约 3.68:1。
+- 修改任一状态/背景 token 后，至少在 `theme-houfeng-dark`、`theme-houfeng-light`、`theme-classic-dark` 的代表性状态密集页面运行 settled local axe；Task 10 完成前，这仍是 local-only evidence，不是 CI gate。
+
+```css
+/* Wrong: dark theme 可见，不代表 light theme 仍有对比度。 */
+.tone--notice{color:#f59e0b}
+.btn.primary{background:var(--accent);color:#fff}
+
+/* Correct: 组件消费主题 owner token。 */
+.tone--notice{color:var(--color-state-notice)}
+.btn.primary{background:var(--accent);color:var(--bg)}
+```
+
 ---
 
 ## 主题与暗色优先
