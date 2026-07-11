@@ -30,7 +30,7 @@ import type {
   TemplateManualGroupDraft,
   VPSCatalogState,
 } from '../types'
-import { describeError } from '../utils'
+import { assetDecisionFilterKey, describeError } from '../utils'
 
 const INITIAL_MEMBER_ADD_DRAFT: ManualMemberAddDraft = {
   vpsID: '',
@@ -116,19 +116,6 @@ type UseAssetDecisionManualGroupsInput = Readonly<{
   onNotice: (notice: string) => void
 }>
 
-function filterKey(filter: AssetDecisionGroupListFilter): string {
-  return [
-    filter.view ?? '',
-    filter.renew_within_days ?? '',
-    filter.provider_id ?? '',
-    filter.vps_id ?? '',
-    filter.country ?? '',
-    filter.region ?? '',
-    filter.city ?? '',
-    filter.scenario ?? '',
-  ].join('|')
-}
-
 function summaryFromDetail(detail: AssetDecisionManualGroupDetail): AssetDecisionManualGroupSummary {
   const { members, ...summary } = detail
   void members
@@ -194,8 +181,8 @@ export function useAssetDecisionManualGroups({
     summary: AssetDecisionManualGroupSummary
   }>())
   const previousSelectedManualGroupIDRef = useRef(selectedManualGroupID)
-  const currentFilterKey = filterKey(filter)
-  const isListCurrent = settledList?.filter === filter &&
+  const currentFilterKey = assetDecisionFilterKey(filter)
+  const isListCurrent = settledList?.filterKey === currentFilterKey &&
     settledList.revision === revision &&
     settledList.retryRevision === listRetryRevision
   const isDetailCurrent = selectedManualGroupID != null &&

@@ -120,6 +120,19 @@ export function buildAssetDecisionFilter(searchParams: URLSearchParams, view: As
   }
 }
 
+export function assetDecisionFilterKey(filter: AssetDecisionGroupListFilter): string {
+  return [
+    filter.view ?? '',
+    filter.renew_within_days ?? '',
+    filter.provider_id ?? '',
+    filter.vps_id ?? '',
+    filter.country ?? '',
+    filter.region ?? '',
+    filter.city ?? '',
+    filter.scenario ?? '',
+  ].join('|')
+}
+
 export function portfolioViewForWorkbench(view: WorkbenchView): MainWorkbenchView {
   return view === 'single_queue' ? 'needs_decision' : view
 }

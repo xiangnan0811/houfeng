@@ -73,6 +73,34 @@ describe('useAssetDecisionPortfolio', () => {
     }))
   })
 
+  it('keeps the settled overview visible while an equivalent filter identity revalidates', async () => {
+    const revalidation = deferred<AssetDecisionOverview>()
+    const getOverview = vi.spyOn(api, 'getAssetDecisionOverview')
+      .mockResolvedValueOnce(OVERVIEW)
+      .mockReturnValueOnce(revalidation.promise)
+    const filter: AssetDecisionGroupListFilter = {
+      view: 'needs_decision',
+      renew_within_days: 30,
+      provider_id: 'provider_001',
+    }
+
+    const { result, rerender } = renderHook(
+      ({ activeFilter }) => useAssetDecisionPortfolio({ filter: activeFilter, revision: 0 }),
+      { initialProps: { activeFilter: filter } },
+    )
+    await waitFor(() => expect(result.current.state.overview).toBe(OVERVIEW))
+
+    const equivalentFilter = { ...filter }
+    rerender({ activeFilter: equivalentFilter })
+
+    expect(getOverview).toHaveBeenNthCalledWith(2, equivalentFilter)
+    expect(result.current.state).toEqual({
+      loading: false,
+      error: null,
+      overview: OVERVIEW,
+    })
+  })
+
   it('keeps an overview failure local and uses the existing fallback message', async () => {
     vi.spyOn(api, 'getAssetDecisionOverview').mockRejectedValue('offline')
     const filter: AssetDecisionGroupListFilter = {

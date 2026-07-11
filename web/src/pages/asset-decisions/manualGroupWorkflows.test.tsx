@@ -24,6 +24,36 @@ describe('Asset Decisions manual group workflows', () => {
     vi.restoreAllMocks()
   })
 
+  it('restores focus to the opened manual group trigger after Escape closes the detail', async () => {
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/manual-groups/admg_001', body: manualGroupDetail() },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await openSecondaryWorkbench('场景与组合')
+    const manualSection = (await screen.findByRole('heading', { name: '自定义组合' })).closest('section')
+    const trigger = within(manualSection!).getByRole('button', { name: '查看' })
+    trigger.focus()
+    fireEvent.click(trigger)
+
+    expect(await screen.findByRole('dialog', { name: '自定义资产组合详情' })).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '自定义资产组合详情' })).not.toBeInTheDocument()
+      expect(within(manualSection!).getByRole('button', { name: '查看' })).toHaveFocus()
+    })
+  })
+
   it('caps manual group member and save panels to preview rows for large groups', async () => {
     const largeManual = manualGroupDetailWithManyMembers(8)
     const fetchMock = vi.fn()

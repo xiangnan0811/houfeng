@@ -29,6 +29,34 @@ describe('Asset Decisions automatic group workflows', () => {
     vi.restoreAllMocks()
   })
 
+  it('restores focus to the opened group trigger after Escape closes the detail', async () => {
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', body: groupDetail() },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    const trigger = await screen.findByRole('button', { name: '查看组' })
+    trigger.focus()
+    fireEvent.click(trigger)
+
+    expect(await screen.findByRole('dialog', { name: '资产决策组详情' })).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '资产决策组详情' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '查看组' })).toHaveFocus()
+    })
+  })
+
   it('opens group detail with member comparison, evidence, and single VPS entry', async () => {
     const fetchMock = vi.fn()
     mockInitialWorkbench(fetchMock, {

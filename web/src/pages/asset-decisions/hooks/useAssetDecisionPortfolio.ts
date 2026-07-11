@@ -5,7 +5,7 @@ import type {
   AssetDecisionGroupListFilter,
   AssetDecisionOverview,
 } from '../../../lib/types'
-import { describeError } from '../utils'
+import { assetDecisionFilterKey, describeError } from '../utils'
 
 export type AssetDecisionPortfolioState = Readonly<{
   loading: boolean
@@ -39,7 +39,9 @@ export function useAssetDecisionPortfolio({
 } {
   const [retryRevision, setRetryRevision] = useState(0)
   const [settled, setSettled] = useState<SettledOverview | null>(null)
-  const isCurrent = settled?.filter === filter &&
+  const currentFilterKey = assetDecisionFilterKey(filter)
+  const isCurrent = settled != null &&
+    assetDecisionFilterKey(settled.filter) === currentFilterKey &&
     settled.revision === revision &&
     settled.retryRevision === retryRevision
 

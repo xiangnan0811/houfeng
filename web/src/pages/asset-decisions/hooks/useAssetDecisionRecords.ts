@@ -34,7 +34,7 @@ import type {
   RecordsState,
   RenewalWindow,
 } from '../types'
-import { describeError } from '../utils'
+import { assetDecisionFilterKey, describeError } from '../utils'
 
 type SettledRecordList = Readonly<{
   filter: AssetDecisionGroupListFilter
@@ -127,7 +127,9 @@ export function useAssetDecisionRecords({
   const [followupSaving, setFollowupSaving] = useState<Record<string, boolean>>({})
   const [followupErrors, setFollowupErrors] = useState<Record<string, string | null>>({})
   const [followupEditingMemberID, setFollowupEditingMemberID] = useState<string | null>(null)
-  const isListCurrent = settledList?.filter === filter &&
+  const currentFilterKey = assetDecisionFilterKey(filter)
+  const isListCurrent = settledList != null &&
+    assetDecisionFilterKey(settledList.filter) === currentFilterKey &&
     settledList.revision === revision &&
     settledList.retryRevision === listRetryRevision
   const isDetailCurrent = selectedRecordID != null &&

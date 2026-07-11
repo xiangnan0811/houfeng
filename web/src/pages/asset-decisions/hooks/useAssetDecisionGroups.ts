@@ -14,7 +14,7 @@ import type {
   GroupDetailPanel,
   RenewalWindow,
 } from '../types'
-import { describeError } from '../utils'
+import { assetDecisionFilterKey, describeError } from '../utils'
 
 export type AssetDecisionGroupListState = Readonly<{
   loading: boolean
@@ -77,7 +77,9 @@ export function useAssetDecisionGroups({
     panel: GroupDetailPanel
   }> | null>(null)
   const previousSelectedGroupIDRef = useRef(selectedGroupID)
-  const isListCurrent = settledList?.filter === filter &&
+  const currentFilterKey = assetDecisionFilterKey(filter)
+  const isListCurrent = settledList != null &&
+    assetDecisionFilterKey(settledList.filter) === currentFilterKey &&
     settledList.revision === revision &&
     settledList.retryRevision === listRetryRevision
   const isDetailCurrent = selectedGroupID != null &&

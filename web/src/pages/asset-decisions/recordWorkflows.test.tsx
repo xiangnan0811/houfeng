@@ -29,6 +29,36 @@ describe('Asset Decisions saved record workflows', () => {
     vi.restoreAllMocks()
   })
 
+  it('restores focus to the opened record trigger after Escape closes the detail', async () => {
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/records/adr_001', body: decisionRecord() },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await openSecondaryWorkbench('保存记录')
+    const recordsSection = (await screen.findByRole('heading', { name: '已保存组合决策' })).closest('section')
+    const trigger = within(recordsSection!).getByRole('button', { name: '查看' })
+    trigger.focus()
+    fireEvent.click(trigger)
+
+    expect(await screen.findByRole('dialog', { name: '德国主备取舍记录' })).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '德国主备取舍记录' })).not.toBeInTheDocument()
+      expect(within(recordsSection!).getByRole('button', { name: '查看' })).toHaveFocus()
+    })
+  })
+
   it('opens saved decision records and patches record status', async () => {
     const patched = decisionRecord({
       status: 'in_progress',
