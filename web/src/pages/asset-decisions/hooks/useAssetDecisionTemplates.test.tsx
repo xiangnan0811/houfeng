@@ -107,6 +107,22 @@ describe('useAssetDecisionTemplates', () => {
     expect(result.current.state.detail.error).toBeNull()
   })
 
+  it('keeps a detail failure separate from a successful template list', async () => {
+    const detail = templateDetail()
+    vi.spyOn(api, 'listAssetDecisionScenarioTemplates').mockResolvedValue([templateSummary(detail)])
+    vi.spyOn(api, 'getAssetDecisionScenarioTemplate').mockRejectedValue(new Error('detail offline'))
+
+    const { result } = renderHook(() => useAssetDecisionTemplates({
+      selectedTemplateID: 'adt_001',
+      renewalWindow: 30,
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+
+    await waitFor(() => expect(result.current.state.detail.error).toBe('detail offline'))
+    expect(result.current.state.list.templates).toEqual([templateSummary(detail)])
+  })
+
   it('ignores a stale detail response after the selected template changes', async () => {
     const firstRequest = deferred<AssetDecisionScenarioTemplateDetail>()
     const secondRequest = deferred<AssetDecisionScenarioTemplateDetail>()
@@ -197,6 +213,50 @@ describe('useAssetDecisionTemplates', () => {
     expect(notice).toHaveBeenCalledWith('已另存为场景模板：德国主备组合 模板')
   })
 
+  it('sorts built-in templates before active and archived custom templates', async () => {
+    const builtin = templateDetail('adt_builtin', {
+      builtin: true,
+      title: '内置模板',
+      updated_at: '2026-06-01T00:00:00Z',
+    })
+    const active = templateDetail('adt_active', {
+      title: '启用模板',
+      updated_at: '2026-07-02T00:00:00Z',
+    })
+    const archived = templateDetail('adt_archived', {
+      status: 'archived',
+      title: '归档模板',
+      updated_at: '2026-07-03T00:00:00Z',
+    })
+    vi.spyOn(api, 'listAssetDecisionScenarioTemplates').mockResolvedValue([
+      templateSummary(archived),
+      templateSummary(active),
+      templateSummary(builtin),
+    ])
+    vi.spyOn(api, 'getAssetDecisionScenarioTemplate').mockResolvedValue(active)
+    const created = templateDetail('adt_created', {
+      title: '新模板',
+      updated_at: '2026-07-04T00:00:00Z',
+    })
+    vi.spyOn(api, 'createAssetDecisionScenarioTemplate').mockResolvedValue(created)
+    const { result } = renderHook(() => useAssetDecisionTemplates({
+      selectedTemplateID: 'adt_active',
+      renewalWindow: 30,
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+    await waitFor(() => expect(result.current.state.list.loading).toBe(false))
+
+    await act(async () => result.current.commands.createFromManualGroup(MANUAL_DETAIL))
+
+    expect(result.current.state.list.templates.map((template) => template.template_id)).toEqual([
+      'adt_builtin',
+      'adt_created',
+      'adt_active',
+      'adt_archived',
+    ])
+  })
+
   it('guards built-in templates and requires pending confirmation before status PATCH', async () => {
     const builtin = templateDetail('adt_builtin', { builtin: true })
     mockSuccessfulReads(builtin)
@@ -243,6 +303,55 @@ describe('useAssetDecisionTemplates', () => {
     expect(result.current.state.list.templates[0]?.status).toBe('archived')
   })
 
+  it('reactivates an archived custom template after explicit confirmation', async () => {
+    const detail = templateDetail('adt_001', { status: 'archived' })
+    mockSuccessfulReads(detail)
+    const updated = templateDetail('adt_001', { status: 'active' })
+    vi.spyOn(api, 'patchAssetDecisionScenarioTemplate').mockResolvedValue(updated)
+    const notice = vi.fn()
+    const { result } = renderHook(() => useAssetDecisionTemplates({
+      selectedTemplateID: 'adt_001',
+      renewalWindow: 30,
+      revision: 0,
+      onNotice: notice,
+    }))
+    await waitFor(() => expect(result.current.state.detail.detail).toBe(detail))
+
+    act(() => result.current.commands.requestStatusUpdate('active'))
+    await act(async () => result.current.commands.updateStatus('active'))
+
+    expect(notice).toHaveBeenCalledWith('模板状态已更新：服务商评估 -> 启用')
+  })
+
+  it('keeps detail-only commands inert without a selected template', async () => {
+    vi.spyOn(api, 'listAssetDecisionScenarioTemplates').mockResolvedValue([])
+    const patchTemplate = vi.spyOn(api, 'patchAssetDecisionScenarioTemplate')
+    const { result } = renderHook(() => useAssetDecisionTemplates({
+      selectedTemplateID: null,
+      renewalWindow: 60,
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+    await waitFor(() => expect(result.current.state.list.loading).toBe(false))
+
+    act(() => {
+      result.current.commands.requestStatusUpdate('archived')
+      result.current.commands.updateManualDraft({ title: '不会保留' })
+      result.current.commands.selectPanel('create')
+    })
+    await act(async () => result.current.commands.updateStatus('archived'))
+
+    expect(result.current.state.detailPanel).toBe('overview')
+    expect(result.current.state.manualDraft).toEqual({
+      title: '',
+      goal: '',
+      note: '',
+      renewWithinDays: 60,
+    })
+    expect(result.current.state.pendingStatus).toBeNull()
+    expect(patchTemplate).not.toHaveBeenCalled()
+  })
+
   it('owns keyed panel and manual draft patches', async () => {
     mockSuccessfulReads()
     const getTemplate = vi.mocked(api.getAssetDecisionScenarioTemplate)
@@ -273,5 +382,32 @@ describe('useAssetDecisionTemplates', () => {
     act(() => result.current.commands.resetDetailUI())
     expect(result.current.state.error).toBeNull()
     expect(getTemplate).toHaveBeenCalledTimes(2)
+  })
+
+  it('rebuilds keyed panel and draft state while a different template detail loads', async () => {
+    const first = templateDetail('adt_001')
+    const secondRequest = deferred<AssetDecisionScenarioTemplateDetail>()
+    vi.spyOn(api, 'listAssetDecisionScenarioTemplates').mockResolvedValue([templateSummary(first)])
+    vi.spyOn(api, 'getAssetDecisionScenarioTemplate')
+      .mockResolvedValueOnce(first)
+      .mockReturnValueOnce(secondRequest.promise)
+    const { result, rerender } = renderHook(
+      ({ selectedTemplateID }) => useAssetDecisionTemplates({
+        selectedTemplateID,
+        renewalWindow: 30,
+        revision: 0,
+        onNotice: vi.fn(),
+      }),
+      { initialProps: { selectedTemplateID: 'adt_001' } },
+    )
+    await waitFor(() => expect(result.current.state.detail.detail).toBe(first))
+
+    rerender({ selectedTemplateID: 'adt_002' })
+    act(() => result.current.commands.updateManualDraft({ title: '第二个模板草稿' }))
+    expect(result.current.state.manualDraft.title).toBe('第二个模板草稿')
+
+    act(() => result.current.commands.resetDetailUI())
+    act(() => result.current.commands.selectPanel('create'))
+    expect(result.current.state.detailPanel).toBe('create')
   })
 })

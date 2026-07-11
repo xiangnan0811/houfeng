@@ -389,6 +389,23 @@ describe('useAssetDecisionRecords', () => {
     expect(result.current.state.detail.detail).toBe(secondDetail)
   })
 
+  it('keeps a detail failure separate from a successful record list', async () => {
+    const detail = recordDetail()
+    const filter = {}
+    vi.spyOn(api, 'listAssetDecisionRecords').mockResolvedValue([recordSummary(detail)])
+    vi.spyOn(api, 'getAssetDecisionRecord').mockRejectedValue(new Error('detail offline'))
+    const { result } = renderHook(() => useAssetDecisionRecords({
+      filter,
+      selectedRecordID: 'adr_001',
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+
+    await waitFor(() => expect(result.current.state.detail.error).toBe('detail offline'))
+
+    expect(result.current.state.list.records).toEqual([recordSummary(detail)])
+  })
+
   it('reloads the list and selected detail on an external revision', async () => {
     mockSuccessfulReads()
     const listRecords = vi.mocked(api.listAssetDecisionRecords)
@@ -484,6 +501,69 @@ describe('useAssetDecisionRecords', () => {
     expect(Object.keys(result.current)).toEqual(['state', 'commands'])
   })
 
+  it('keeps draft and detail commands inert when their owning state is absent', async () => {
+    const filter = {}
+    vi.spyOn(api, 'listAssetDecisionRecords').mockResolvedValue([])
+    const createRecord = vi.spyOn(api, 'createAssetDecisionRecord')
+    const patchRecord = vi.spyOn(api, 'patchAssetDecisionRecord')
+    const { result } = renderHook(() => useAssetDecisionRecords({
+      filter,
+      selectedRecordID: null,
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+    await waitFor(() => expect(result.current.state.list.loading).toBe(false))
+    const member = recordDetail().members[0]!
+
+    act(() => {
+      result.current.commands.updateDraft({ title: '不会保存' })
+      result.current.commands.updateDraftMember('missing-vps', { reason: '不会保存' })
+      result.current.commands.setPatchStatus('decided')
+      result.current.commands.updateFollowupDraft(member.vps_id, { note: '不会保存' })
+      result.current.commands.selectPanel('members')
+    })
+    let saved: AssetDecisionRecordDetail | null = recordDetail()
+    await act(async () => {
+      saved = await result.current.commands.saveDraft()
+      await result.current.commands.patchStatus()
+      await result.current.commands.saveFollowup(member)
+    })
+
+    expect(saved).toBeNull()
+    expect(result.current.state.draft).toBeNull()
+    expect(result.current.state.detailPanel).toBe('overview')
+    expect(result.current.state.patchStatus).toBe('draft')
+    expect(result.current.state.followupDrafts).toEqual({})
+    expect(createRecord).not.toHaveBeenCalled()
+    expect(patchRecord).not.toHaveBeenCalled()
+  })
+
+  it('owns keyed detail UI commands while the selected detail is still loading', async () => {
+    const detailRequest = deferred<AssetDecisionRecordDetail>()
+    const filter = {}
+    vi.spyOn(api, 'listAssetDecisionRecords').mockResolvedValue([])
+    vi.spyOn(api, 'getAssetDecisionRecord').mockReturnValue(detailRequest.promise)
+    const { result } = renderHook(() => useAssetDecisionRecords({
+      filter,
+      selectedRecordID: 'adr_waiting',
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+
+    act(() => {
+      result.current.commands.setPatchStatus('decided')
+      result.current.commands.updateFollowupDraft('vps_waiting', { note: '等待详情' })
+      result.current.commands.selectPanel('members')
+    })
+
+    expect(result.current.state.patchStatus).toBe('decided')
+    expect(result.current.state.followupDrafts.vps_waiting).toEqual({
+      status: 'todo',
+      note: '等待详情',
+    })
+    expect(result.current.state.detailPanel).toBe('members')
+  })
+
   it('validates and saves the exact record POST, then locally merges the returned detail', async () => {
     mockSuccessfulReads()
     const created = recordDetail('adr_created', {
@@ -559,6 +639,25 @@ describe('useAssetDecisionRecords', () => {
     expect(updateVPS).not.toHaveBeenCalled()
   })
 
+  it('can save a draft before the background record list settles', async () => {
+    const listRequest = deferred<AssetDecisionRecordSummary[]>()
+    const filter = {}
+    vi.spyOn(api, 'listAssetDecisionRecords').mockReturnValue(listRequest.promise)
+    const created = recordDetail('adr_early', { title: '先保存的记录' })
+    vi.spyOn(api, 'createAssetDecisionRecord').mockResolvedValue(created)
+    const { result } = renderHook(() => useAssetDecisionRecords({
+      filter,
+      selectedRecordID: null,
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+
+    act(() => result.current.commands.startFromAutomatic(automaticDetail(), 30))
+    await act(async () => result.current.commands.saveDraft())
+
+    expect(result.current.state.list.records[0]?.record_id).toBe('adr_early')
+  })
+
   it('patches record status and updates the keyed detail and list summary locally', async () => {
     const detail = recordDetail()
     mockSuccessfulReads(detail)
@@ -585,6 +684,83 @@ describe('useAssetDecisionRecords', () => {
     expect(result.current.state.list.records[0]?.status).toBe('in_progress')
     expect(result.current.state.patchStatus).toBe('in_progress')
     expect(notice).toHaveBeenCalledWith('决策记录状态已更新：德国主备取舍记录 -> 推进中')
+  })
+
+  it('appends a selected detail missing from the list and later updates it without dropping siblings', async () => {
+    const detail = recordDetail()
+    const sibling = recordDetail('adr_sibling', { title: '另一条记录' })
+    const filter = {}
+    vi.spyOn(api, 'listAssetDecisionRecords').mockResolvedValue([recordSummary(sibling)])
+    vi.spyOn(api, 'getAssetDecisionRecord').mockResolvedValue(detail)
+    const firstUpdate = recordDetail('adr_001', { status: 'in_progress' })
+    const secondUpdate = recordDetail('adr_001', { status: 'decided' })
+    vi.spyOn(api, 'patchAssetDecisionRecord')
+      .mockResolvedValueOnce(firstUpdate)
+      .mockResolvedValueOnce(secondUpdate)
+    const { result } = renderHook(() => useAssetDecisionRecords({
+      filter,
+      selectedRecordID: 'adr_001',
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+    await waitFor(() => expect(result.current.state.detail.detail).toBe(detail))
+
+    act(() => result.current.commands.setPatchStatus('in_progress'))
+    await act(async () => result.current.commands.patchStatus())
+    expect(result.current.state.list.records.map((record) => record.record_id)).toEqual([
+      'adr_001',
+      'adr_sibling',
+    ])
+
+    act(() => result.current.commands.setPatchStatus('decided'))
+    await act(async () => result.current.commands.patchStatus())
+    expect(result.current.state.list.records).toEqual([
+      recordSummary(secondUpdate),
+      recordSummary(sibling),
+    ])
+  })
+
+  it('updates a loaded detail before its background list has settled', async () => {
+    const listRequest = deferred<AssetDecisionRecordSummary[]>()
+    const filter = {}
+    const detail = recordDetail()
+    const updated = recordDetail('adr_001', { status: 'in_progress' })
+    vi.spyOn(api, 'listAssetDecisionRecords').mockReturnValue(listRequest.promise)
+    vi.spyOn(api, 'getAssetDecisionRecord').mockResolvedValue(detail)
+    vi.spyOn(api, 'patchAssetDecisionRecord').mockResolvedValue(updated)
+    const { result } = renderHook(() => useAssetDecisionRecords({
+      filter,
+      selectedRecordID: 'adr_001',
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+    await waitFor(() => expect(result.current.state.detail.detail).toBe(detail))
+
+    act(() => result.current.commands.setPatchStatus('in_progress'))
+    await act(async () => result.current.commands.patchStatus())
+
+    expect(result.current.state.list.records).toEqual([recordSummary(updated)])
+  })
+
+  it('rebuilds each keyed detail editor after its local UI state is reset', async () => {
+    const filter = {}
+    const detail = recordDetail()
+    mockSuccessfulReads(detail)
+    const { result } = renderHook(() => useAssetDecisionRecords({
+      filter,
+      selectedRecordID: 'adr_001',
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+    await waitFor(() => expect(result.current.state.detail.detail).toBe(detail))
+
+    act(() => result.current.commands.resetDetailUI())
+    act(() => result.current.commands.updateFollowupDraft('vps_001', { note: '重建跟进草稿' }))
+    expect(result.current.state.followupDrafts.vps_001?.note).toBe('重建跟进草稿')
+
+    act(() => result.current.commands.resetDetailUI())
+    act(() => result.current.commands.selectPanel('members'))
+    expect(result.current.state.detailPanel).toBe('members')
   })
 
   it('saves one member follow-up with an explicit empty note and synchronizes returned counters', async () => {
@@ -644,6 +820,39 @@ describe('useAssetDecisionRecords', () => {
       followup_blocked_count: 1,
     })
     expect(notice).toHaveBeenCalledWith('成员跟进已更新：Germany Primary -> 阻塞')
+  })
+
+  it('falls back to member facts when no keyed follow-up draft exists', async () => {
+    const detail = recordDetail()
+    const filter = {}
+    mockSuccessfulReads(detail)
+    vi.spyOn(api, 'patchAssetDecisionRecord').mockResolvedValue(detail)
+    const notice = vi.fn()
+    const { result } = renderHook(() => useAssetDecisionRecords({
+      filter,
+      selectedRecordID: 'adr_001',
+      revision: 0,
+      onNotice: notice,
+    }))
+    await waitFor(() => expect(result.current.state.detail.detail).toBe(detail))
+    const syntheticMember = {
+      ...detail.members[0]!,
+      vps_id: 'vps_missing_draft',
+      display_name: '',
+      followup_status: 'in_progress' as const,
+      followup_note: '  继续核对  ',
+    }
+
+    await act(async () => result.current.commands.saveFollowup(syntheticMember))
+
+    expect(api.patchAssetDecisionRecord).toHaveBeenCalledWith('adr_001', {
+      members: [{
+        vps_id: 'vps_missing_draft',
+        followup_status: 'in_progress',
+        followup_note: '继续核对',
+      }],
+    })
+    expect(notice).toHaveBeenCalledWith('成员跟进已更新：vps_missing_draft -> 处理中')
   })
 
   it('retains the current detail and assigns a follow-up failure to that member', async () => {

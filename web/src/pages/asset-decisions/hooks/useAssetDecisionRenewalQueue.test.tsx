@@ -173,6 +173,24 @@ describe('useAssetDecisionRenewalQueue', () => {
     expect(result.current.state.decisionQueue).toHaveLength(3)
   })
 
+  it('keeps a single-VPS queue failure separate from renewal evidence', async () => {
+    const renewal = subscription()
+    vi.spyOn(api, 'listSubscriptions').mockResolvedValue([renewal])
+    vi.spyOn(api, 'listVPSAssets').mockRejectedValue(new Error('queue offline'))
+    const { result } = renderHook(() => useAssetDecisionRenewalQueue({
+      renewalWindow: 30,
+      revision: 0,
+      onNotice: vi.fn(),
+      onInvalidate: vi.fn(),
+    }))
+
+    await waitFor(() => expect(result.current.state.queue.queueError).toBe('queue offline'))
+
+    expect(result.current.state.queue.renewalsError).toBeNull()
+    expect(result.current.state.queue.renewals).toEqual([renewal])
+    expect(result.current.state.decisionQueue).toEqual([])
+  })
+
   it('replays both renewal and queue reads when the external revision changes', async () => {
     mockSuccessfulReads()
     const listSubscriptions = vi.mocked(api.listSubscriptions)
@@ -316,6 +334,30 @@ describe('useAssetDecisionRenewalQueue', () => {
     expect(notice).toHaveBeenCalledWith('续费决策已保存：Tokyo Review -> 取消。关联订阅已取消自动续费')
   })
 
+  it('completes a selected mutation before its background queue reads settle', async () => {
+    const pendingSubscriptions = new Promise<SubscriptionRecord[]>(() => undefined)
+    vi.spyOn(api, 'listSubscriptions').mockReturnValue(pendingSubscriptions)
+    vi.spyOn(api, 'listVPSAssets').mockResolvedValue([])
+    const updated: VPSAssetUpdateResult = { ...UNREVIEWED, renewal_decision: 'migrate' }
+    vi.spyOn(api, 'updateVPSAsset').mockResolvedValue(updated)
+    const notice = vi.fn()
+    const { result } = renderHook(() => useAssetDecisionRenewalQueue({
+      renewalWindow: 30,
+      revision: 0,
+      onNotice: notice,
+      onInvalidate: vi.fn(),
+    }))
+
+    act(() => {
+      result.current.commands.selectVPS(UNREVIEWED)
+      result.current.commands.updateDraft({ renewalDecision: 'migrate' })
+    })
+    await act(async () => result.current.commands.submitRenewal())
+
+    expect(result.current.state.selectedVPS).toBeNull()
+    expect(notice).toHaveBeenCalledWith('续费决策已保存：Tokyo Review -> 迁移')
+  })
+
   it('rejects an unchanged decision without sending a PATCH', async () => {
     mockSuccessfulReads()
     const updateVPS = vi.spyOn(api, 'updateVPSAsset').mockResolvedValue(UNREVIEWED)
@@ -341,6 +383,23 @@ describe('useAssetDecisionRenewalQueue', () => {
     expect(updateVPS).not.toHaveBeenCalled()
     expect(notice).not.toHaveBeenCalled()
     expect(invalidate).not.toHaveBeenCalled()
+  })
+
+  it('does not submit when no VPS is selected', async () => {
+    mockSuccessfulReads()
+    const updateVPS = vi.spyOn(api, 'updateVPSAsset')
+    const { result } = renderHook(() => useAssetDecisionRenewalQueue({
+      renewalWindow: 30,
+      revision: 0,
+      onNotice: vi.fn(),
+      onInvalidate: vi.fn(),
+    }))
+    await waitFor(() => expect(result.current.state.queue.queueLoading).toBe(false))
+
+    await expect(result.current.commands.submitRenewal()).resolves.toBeNull()
+
+    expect(updateVPS).not.toHaveBeenCalled()
+    expect(result.current.state.error).toBeNull()
   })
 
   it('keeps the selected VPS open and exposes the mutation error on failure', async () => {

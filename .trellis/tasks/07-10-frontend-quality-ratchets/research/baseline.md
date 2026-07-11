@@ -49,6 +49,46 @@ Task 9 CSS analyzer remains the sole CSS budget owner:
 | Repeated selectors / literal colors / `!important` | 151 / 247 / 11 |
 | Production raw / gzip | 293,270 / 38,119 |
 
+## Coverage Baseline And Ratchet
+
+The exact `@vitest/coverage-v8@4.1.5` provider now inventories every production
+`src/**/*.{ts,tsx}` file, including unimported files such as `src/main.tsx` at
+0%, while excluding only colocated tests, declarations, setup code and audited
+test fixtures. The first credible run established the committed global floor:
+
+| Metric | Initial covered / total | Initial floor | Final verified covered / total | Final verified |
+| --- | ---: | ---: | ---: | ---: |
+| Statements | 8,237 / 10,408 | 79.14% | 8,281 / 10,408 | 79.56% |
+| Branches | 6,821 / 9,706 | 70.27% | 6,898 / 9,706 | 71.06% |
+| Functions | 2,668 / 3,382 | 78.88% | 2,671 / 3,382 | 78.97% |
+| Lines | 7,342 / 8,851 | 82.95% | 7,354 / 8,851 | 83.08% |
+
+Final critical-file branch evidence from 117 files / 820 tests:
+
+| Critical owner | Covered / total | Branch coverage |
+| --- | ---: | ---: |
+| `src/lib/modalStack.ts` | 18 / 19 | 94.73% |
+| `src/lib/useModalFocus.ts` | 71 / 78 | 91.02% |
+| `src/components/atoms/Modal.tsx` | 27 / 27 | 100% |
+| `src/pages/dashboard/dashboardRemoteState.ts` | 0 / 0 | 100% |
+| `src/pages/dashboard/dashboardModel.ts` | 117 / 127 | 92.12% |
+| `src/lib/apiRequest.ts` | 9 / 9 | 100% |
+| `src/lib/auth-client.ts` | 10 / 10 | 100% |
+| `src/lib/auth-context.tsx` | 2 / 2 | 100% |
+| `src/pages/asset-decisions/hooks/useAssetDecisionRouteState.ts` | 28 / 30 | 93.33% |
+| `src/pages/asset-decisions/hooks/useAssetDecisionPortfolio.ts` | 11 / 12 | 91.66% |
+| `src/pages/asset-decisions/hooks/useAssetDecisionGroups.ts` | 33 / 35 | 94.28% |
+| `src/pages/asset-decisions/hooks/useAssetDecisionManualGroups.ts` | 103 / 113 | 91.15% |
+| `src/pages/asset-decisions/hooks/useAssetDecisionTemplates.ts` | 61 / 67 | 91.04% |
+| `src/pages/asset-decisions/hooks/useAssetDecisionRecords.ts` | 99 / 107 | 92.52% |
+| `src/pages/asset-decisions/hooks/useAssetDecisionRenewalQueue.ts` | 58 / 62 | 93.54% |
+
+Fail-closed proofs were run and restored: temporarily raising
+`useModalFocus.ts` to 92% failed after all 820 tests passed because its actual
+branch coverage was 91.02%; temporarily replacing the required
+`modalStack.ts` budget key with a nonexistent path failed the source contract
+with `src/lib/modalStack.ts must define a branch threshold`.
+
 ## TypeScript Probe Debt
 
 The probes used the main app config with one or both options overridden on the CLI; expected exit code was 2 because the ratchets are not enabled yet.

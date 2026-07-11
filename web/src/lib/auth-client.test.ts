@@ -44,6 +44,29 @@ describe('auth-client', () => {
     expect(await me()).toBeNull()
   })
 
+  it('me returns null when the response is not a complete user', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ user_id: 'u1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    expect(await me()).toBeNull()
+  })
+
+  it('me preserves non-authentication request failures', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: 'auth service unavailable' }), { status: 503 }),
+    )
+
+    await expect(me()).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 503,
+      message: 'auth service unavailable',
+    })
+  })
+
   it('changePassword puts JSON', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')

@@ -18,6 +18,18 @@ function Probe() {
 describe('AuthProvider', () => {
   beforeEach(() => vi.restoreAllMocks())
 
+  it('rejects consumers outside AuthProvider', () => {
+    function OutsideProbe() {
+      useAuth()
+      return null
+    }
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    expect(() => render(<OutsideProbe />)).toThrow('useAuth must be inside <AuthProvider>')
+
+    consoleError.mockRestore()
+  })
+
   it('boots with /me result', async () => {
     vi.spyOn(client, 'me').mockResolvedValue({
       user_id: 'u1',

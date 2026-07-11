@@ -56,8 +56,8 @@ git diff --check
 
 ### Checklist
 
-- [ ] RED：package 缺少 `test:coverage`、`test:e2e`、bundle check scripts 和三项 direct dev dependencies。
-- [ ] RED：coverage budget 缺全局四项、任一 approved critical path 不存在或 branch <90。
+- [x] RED：package 缺少 `test:coverage`、`test:e2e`、bundle check scripts 和三项 direct dev dependencies。
+- [x] RED：coverage budget 缺全局四项、任一 approved critical path 不存在或 branch <90。
 - [ ] RED：bundle checker 对缺入口、多入口、零字体和超预算 fixture 返回非零，并报告 metric/actual/limit。
 - [ ] RED：CI 不包含独立 browser job，或 browser job 未读取 `.node-version` 时失败。
 - [ ] RED：CSP browser contract 不读取仓库唯一 policy source 时失败。
@@ -104,14 +104,14 @@ Expected package-script contract（Task 9 已拥有的 `css:analyze` 保持原�
 
 ### Checklist
 
-- [ ] 配置 production include 与审计过的 test-only excludes；先运行 coverage，不设阈值，确认未测试 production files 也出现在报告。
-- [ ] 记录四项 covered/total/percentage 到 task evidence；将真实数值写入 `coverage-budget.json`。
-- [ ] contract 枚举 final critical files：Modal stack/focus、Dashboard model/RemoteState、request transport、auth client/context、所有 command-owning Asset hooks。
-- [ ] 对低于 90% 的 critical file，逐个写真实分支 RED tests；不为数字添加 production-only test seam。
-- [ ] API transport 若需提取：先冻结 request headers/credentials/cache、401、JSON、empty body 与 error parsing；再最小搬移并保持 `api.ts` exports/wire behavior。
-- [ ] 运行 coverage，确认 global >= fresh baseline 且每个 critical file branch >=90。
-- [ ] 证明将任一阈值临时提高到当前值以上会失败，再恢复审核值；证明把 critical path 改成不存在路径会被 contract test 捕获。
-- [ ] `npm run test:coverage` 是一次性 run，不启动 watch；普通 `npm run test` 仍用于 focused feedback。
+- [x] 配置 production include 与审计过的 test-only excludes；先运行 coverage，不设阈值，确认未测试 production files 也出现在报告。
+- [x] 记录四项 covered/total/percentage 到 task evidence；将真实数值写入 `coverage-budget.json`。
+- [x] contract 枚举 final critical files：Modal stack/focus、Dashboard model/RemoteState、request transport、auth client/context、所有 command-owning Asset hooks。
+- [x] 对低于 90% 的 critical file，逐个写真实分支 RED tests；不为数字添加 production-only test seam。
+- [x] API transport 若需提取：先冻结 request headers/credentials/cache、401、JSON、empty body 与 error parsing；再最小搬移并保持 `api.ts` exports/wire behavior。
+- [x] 运行 coverage，确认 global >= fresh baseline 且每个 critical file branch >=90。
+- [x] 证明将任一阈值临时提高到当前值以上会失败，再恢复审核值；证明把 critical path 改成不存在路径会被 contract test 捕获。
+- [x] `npm run test:coverage` 是一次性 run，不启动 watch；普通 `npm run test` 仍用于 focused feedback。
 
 Expected config mapping（实际数字来自本阶段首次成功报告）：
 
