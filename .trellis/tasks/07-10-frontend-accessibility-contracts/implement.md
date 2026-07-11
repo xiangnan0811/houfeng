@@ -378,12 +378,12 @@ Recommended commits：
 - [x] 每个 commit前运行对应 focused gate；不混入 Task7 responsive或Task8/9结构改动。
 - [x] 使用 `trellis-check` 对 code/spec/data-flow/重复实现/AST guard做全量检查。
 - [x] 使用 `superpowers:verification-before-completion` 重跑第11节并读取完整输出。
-- [ ] push `codex/frontend-accessibility-contracts`，创建 ready PR `fix(web): restore native interaction contracts`。
-- [ ] 监控 PR go/web/docker/GitGuardian；failure在同一branch本地复现后修复，不force-push猜测。
-- [ ] checks green 后通过 GitHub PR merge，不直接 push main；监控 main CI与Release Please。
-- [ ] 这是 release-worthy accessibility fix：更新/合并 release PR前确认checks；监控 GitHub Release和`publish-images`，核验版本、workflow run、Docker tag与manifest digest。
-- [ ] 发布版本上重跑 task-local browser keyboard/axe smoke；记录release commit/tag与结果。
-- [ ] archive Task6，提交独立 archive/evidence PR并监控main CI；清理worktree/branch前检查无dirty residue。
+- [x] push `codex/frontend-accessibility-contracts`，创建 ready PR `fix(web): restore native interaction contracts`。
+- [x] 监控 PR go/web/docker/GitGuardian；failure在同一branch本地复现后修复，不force-push猜测。
+- [x] checks green 后通过 GitHub PR merge，不直接 push main；监控 main CI与Release Please。
+- [x] 这是 release-worthy accessibility fix：更新/合并 release PR前确认checks；监控 GitHub Release和`publish-images`，核验版本、workflow run、Docker tag与manifest digest。
+- [x] 发布版本上重跑 task-local browser keyboard/axe smoke；记录release commit/tag与结果。
+- [ ] archive Task6，提交独立 archive/evidence PR并监控main CI；该项由当前 archive branch 完成，不能在归档前自证。
 - [ ] Task6归档和post-merge检查完成后，才从fresh main创建/启动 Task7；Task10继续planning。
 
 ## 13. Rollback Matrix
