@@ -112,6 +112,17 @@ describe('Tabs', () => {
         label="监控视图"
         idBase="monitoring-view"
         items={items}
+        value="a"
+        onChange={onChange}
+        variant="pill"
+      />,
+    )
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    rerender(
+      <Tabs
+        label="监控视图"
+        idBase="monitoring-view"
+        items={items}
         value="c"
         onChange={onChange}
         variant="pill"

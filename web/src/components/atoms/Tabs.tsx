@@ -33,16 +33,17 @@ export function Tabs<V extends string = string>({
   variant = 'underline',
 }: TabsProps<V>) {
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([])
-  const pendingScrollTargetRef = useRef<HTMLButtonElement | null>(null)
+  const pendingScrollTargetRef = useRef<{ button: HTMLButtonElement | null; value: V } | null>(null)
   const selectedIndex = items.findIndex((item) => item.value === value)
   const tabStopIndex = selectedIndex >= 0 ? selectedIndex : items.length > 0 ? 0 : -1
   const cls = ['tabs', `tabs--${variant}`].join(' ')
 
   useLayoutEffect(() => {
-    const target = pendingScrollTargetRef.current
+    const pending = pendingScrollTargetRef.current
+    if (!pending || pending.value !== value) return
     pendingScrollTargetRef.current = null
-    if (target?.isConnected) {
-      target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    if (pending.button?.isConnected) {
+      pending.button.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
     }
   })
 
@@ -67,7 +68,7 @@ export function Tabs<V extends string = string>({
 
     event.preventDefault()
     const nextButton = buttonRefs.current[nextIndex]
-    pendingScrollTargetRef.current = nextButton
+    pendingScrollTargetRef.current = { button: nextButton, value: items[nextIndex].value }
     nextButton?.focus()
     onChange(items[nextIndex].value)
   }
