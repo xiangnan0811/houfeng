@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -506,7 +506,28 @@ describe('SettingsPage', () => {
     renderSettingsPage('/settings?tab=missing')
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
-    expect(screen.getByRole('tab', { name: '外观' })).toHaveAttribute('aria-selected', 'true')
+    const tablist = screen.getByRole('tablist', { name: '系统设置分区' })
+    const activeTab = within(tablist).getByRole('tab', { name: '外观' })
+    const panel = screen.getByRole('tabpanel')
+    expect(activeTab).toHaveAttribute('aria-selected', 'true')
+    expect(activeTab).toHaveAttribute('aria-controls', panel.id)
+    expect(panel).toHaveAttribute('aria-labelledby', activeTab.id)
+  })
+
+  it('uses segmented buttons for theme values instead of tabs without panels', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)))
+
+    renderSettingsPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    const presetGroup = screen.getByRole('group', { name: '主题风格' })
+    const modeGroup = screen.getByRole('group', { name: '主题明暗' })
+    expect(within(presetGroup).getByRole('button', { name: '候风原色' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(modeGroup).getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(presetGroup).queryByRole('tab')).not.toBeInTheDocument()
+
+    fireEvent.click(within(presetGroup).getByRole('button', { name: '经典' }))
+    expect(within(presetGroup).getByRole('button', { name: '经典' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('saves updated settings with a replacement Telegram token and refreshed defaults', async () => {

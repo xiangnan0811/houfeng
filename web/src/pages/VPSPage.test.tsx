@@ -143,9 +143,13 @@ describe('VPSPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'VPS 资产' })).toBeInTheDocument()
+    const tokyoLink = screen.getByRole('link', { name: 'Tokyo Edge' })
+    expect(tokyoLink).toHaveAttribute('href', '/vps/vps_001')
     expect(screen.getByRole('link', { name: '进入组合决策' })).toHaveAttribute('href', '/asset-decisions?view=needs_decision&renew_within_days=30')
     expect(screen.getByRole('link', { name: '查看归档' })).toHaveAttribute('href', '/archive')
-    expect(screen.queryByRole('tab', { name: /已归档/ })).not.toBeInTheDocument()
+    const quickViews = screen.getByRole('group', { name: 'VPS 快速视图' })
+    expect(within(quickViews).queryByRole('button', { name: /已归档/ })).not.toBeInTheDocument()
+    expect(within(quickViews).queryByRole('tab')).not.toBeInTheDocument()
     expect(screen.getAllByText('在用').length).toBeGreaterThan(0)
     expect(screen.getAllByText('保留').length).toBeGreaterThan(0)
     expect(screen.getByText('IP 低风险 · JP')).toBeInTheDocument()
@@ -165,7 +169,11 @@ describe('VPSPage', () => {
       credentials: 'include',
     })
 
-    fireEvent.click(screen.getByRole('tab', { name: /未关联/ }))
+    tokyoLink.addEventListener('click', (event) => event.preventDefault(), { once: true })
+    fireEvent.click(tokyoLink)
+    expect(screen.queryByText('vps detail route')).not.toBeInTheDocument()
+
+    fireEvent.click(within(quickViews).getByRole('button', { name: /未关联/ }))
     expect(screen.getByText('Osaka Missing')).toBeInTheDocument()
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
     expect(screen.getByText('视图: 未关联')).toBeInTheDocument()
@@ -186,7 +194,9 @@ describe('VPSPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /移除筛选 视图/ }))
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
     expect(screen.getByRole('link', { name: '进入组合决策' })).toHaveAttribute('href', '/asset-decisions?view=needs_decision&renew_within_days=30')
-    fireEvent.click(screen.getByText('Tokyo Edge'))
+    const tokyoRow = screen.getByRole('link', { name: 'Tokyo Edge' }).closest('tr')
+    if (!tokyoRow) throw new Error('expected Tokyo Edge link to belong to a VPS table row')
+    fireEvent.click(tokyoRow)
     await waitFor(() => expect(screen.getByText('vps detail route')).toBeInTheDocument())
   })
 
@@ -211,7 +221,7 @@ describe('VPSPage', () => {
     expect(screen.getByRole('status')).toHaveTextContent('订阅不可用，不判定。')
 
     // Missing subscription tab should not show items when evidence is unavailable
-    fireEvent.click(screen.getByRole('tab', { name: '缺订阅' }))
+    fireEvent.click(screen.getByRole('button', { name: '缺订阅' }))
     expect(screen.queryByText('Osaka Missing')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /移除筛选 视图/ }))

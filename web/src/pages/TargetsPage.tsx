@@ -1,7 +1,7 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Button, Input, Modal, Hostname, MonoDigits, StatusGlyph, Timestamp, StatCard } from '../components/atoms'
+import { Button, Input, Modal, Hostname, MonoDigits, StatusGlyph, Timestamp, StatCard, isInteractiveRowTarget } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import { StatusBadge } from '../components/StatusBadge'
 import {
@@ -727,97 +727,93 @@ export function TargetsPage() {
                     const assetContext = targetAssetContexts.get(target.target_id)
                     const primaryContext = assetContextPrimarySummary(assetContext)
                     return (
-                      <tr
-                        key={target.target_id}
-                        tabIndex={0}
-                        onClick={(e) => {
-                          if (
-                            e.target instanceof Element &&
-                            e.target.closest('a[href],button,input,select,textarea,[role="button"],[role="link"]')
-                          ) return
-                          if (!shouldNavigateOnRowClick(target)) return
-                          navigate(`/targets/${target.target_id}`)
-                        }}
-                        onKeyDown={(e) => {
-                          if (
-                            e.target instanceof Element &&
-                            e.target.closest('a[href],button,input,select,textarea,[role="button"],[role="link"]')
-                          ) return
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            if (shouldNavigateOnRowClick(target)) {
-                              navigate(`/targets/${target.target_id}`)
+                      <Fragment key={target.target_id}>
+                        {/* a11y-allow-nonsemantic-click: keyboard-complete-row */}
+                        <tr
+                          tabIndex={0}
+                          onClick={(e) => {
+                            if (isInteractiveRowTarget(e.target)) return
+                            if (!shouldNavigateOnRowClick(target)) return
+                            navigate(`/targets/${target.target_id}`)
+                          }}
+                          onKeyDown={(e) => {
+                            if (isInteractiveRowTarget(e.target)) return
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              if (shouldNavigateOnRowClick(target)) {
+                                navigate(`/targets/${target.target_id}`)
+                              }
                             }
-                          }
-                        }}
-                      >
-                        <td>
-                          <StatusGlyph
-                            state={targetGlyphState(target)}
-                            size="md"
-                            ariaLabel={`${target.name} 健康 ${target.current_health_status}`}
-                          />
-                        </td>
-                        <td>
-                          <div className="name">{target.name}</div>
-                          <div className="sub">
-                            成功 <Timestamp value={target.last_success_at ?? null} mode="relative" />
-                            {' '}· 失败 <Timestamp value={target.last_failure_at ?? null} mode="relative" />
-                          </div>
-                        </td>
-                        <td><span className="probe-kind">{target.target_type}</span></td>
-                        <td className="mono">
-                          {target.group ? <span className="targets-table__group">{target.group} · </span> : null}
-                          <Hostname>{hostDisplay}</Hostname>
-                        </td>
-                        <td>
-                          <span className="targets-table__status">
-                            <StatusBadge label={target.run_status} />
-                            <StatusBadge label={target.current_health_status} />
-                          </span>
-                          {target.execution_monitoring_instance_labels.length > 0 && (
-                            <div className="sub">执行: {target.execution_monitoring_instance_labels.join(', ')}</div>
-                          )}
-                        </td>
-                        <td>
-                          {primaryContext ? (
-                            <div className="asset-context-cell">
-                              <span className={assetContextHasAttention(assetContext) ? 'asset-context-pill asset-context-pill--attention' : 'asset-context-pill'}>
-                                {assetContextMessage(assetContext)}
-                              </span>
-                              <small>
-                                {vpsLifecycleLabel(primaryContext.lifecycle_status)} · {subscriptionStateLabel(primaryContext.subscription_state)}
-                              </small>
+                          }}
+                        >
+                          <td>
+                            <StatusGlyph
+                              state={targetGlyphState(target)}
+                              size="md"
+                              ariaLabel={`${target.name} 健康 ${target.current_health_status}`}
+                            />
+                          </td>
+                          <td>
+                            <div className="name">{target.name}</div>
+                            <div className="sub">
+                              成功 <Timestamp value={target.last_success_at ?? null} mode="relative" />
+                              {' '}· 失败 <Timestamp value={target.last_failure_at ?? null} mode="relative" />
                             </div>
-                          ) : (
-                            <span className="asset-context-pill">未关联 VPS</span>
-                          )}
-                        </td>
-                        <td className="targets-table__trends">
-                          <TargetsTrendCell target={target} sparklines={sparklines} />
-                        </td>
-                        <td>
-                          <div className="targets-table__issue">
-                            <MonoDigits className="targets-table__issue-count">
-                              {target.current_active_incident_count}
-                            </MonoDigits>
-                            <span className="targets-table__issue-summary">
-                              {target.current_primary_issue_summary || '暂无明显异常'}
+                          </td>
+                          <td><span className="probe-kind">{target.target_type}</span></td>
+                          <td className="mono">
+                            {target.group ? <span className="targets-table__group">{target.group} · </span> : null}
+                            <Hostname>{hostDisplay}</Hostname>
+                          </td>
+                          <td>
+                            <span className="targets-table__status">
+                              <StatusBadge label={target.run_status} />
+                              <StatusBadge label={target.current_health_status} />
                             </span>
-                          </div>
-                        </td>
-                        <td className="targets-table__actions-cell">
-                          <TargetsActionsCell
-                            target={target}
-                            metadataEditingTargetId={metadataEditingTargetId}
-                            metadataSavingTargetId={metadataSavingTargetId}
-                            runtimeBusyTargetId={runtimeBusyTargetId}
-                            actionButtonRefs={actionButtonRefs}
-                            onStartMetadataEdit={beginMetadataEdit}
-                            onRuntimeAction={(t, action) => void handleRuntimeAction(t, action)}
-                          />
-                        </td>
-                      </tr>
+                            {target.execution_monitoring_instance_labels.length > 0 && (
+                              <div className="sub">执行: {target.execution_monitoring_instance_labels.join(', ')}</div>
+                            )}
+                          </td>
+                          <td>
+                            {primaryContext ? (
+                              <div className="asset-context-cell">
+                                <span className={assetContextHasAttention(assetContext) ? 'asset-context-pill asset-context-pill--attention' : 'asset-context-pill'}>
+                                  {assetContextMessage(assetContext)}
+                                </span>
+                                <small>
+                                  {vpsLifecycleLabel(primaryContext.lifecycle_status)} · {subscriptionStateLabel(primaryContext.subscription_state)}
+                                </small>
+                              </div>
+                            ) : (
+                              <span className="asset-context-pill">未关联 VPS</span>
+                            )}
+                          </td>
+                          <td className="targets-table__trends">
+                            <TargetsTrendCell target={target} sparklines={sparklines} />
+                          </td>
+                          <td>
+                            <div className="targets-table__issue">
+                              <MonoDigits className="targets-table__issue-count">
+                                {target.current_active_incident_count}
+                              </MonoDigits>
+                              <span className="targets-table__issue-summary">
+                                {target.current_primary_issue_summary || '暂无明显异常'}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="targets-table__actions-cell">
+                            <TargetsActionsCell
+                              target={target}
+                              metadataEditingTargetId={metadataEditingTargetId}
+                              metadataSavingTargetId={metadataSavingTargetId}
+                              runtimeBusyTargetId={runtimeBusyTargetId}
+                              actionButtonRefs={actionButtonRefs}
+                              onStartMetadataEdit={beginMetadataEdit}
+                              onRuntimeAction={(t, action) => void handleRuntimeAction(t, action)}
+                            />
+                          </td>
+                        </tr>
+                      </Fragment>
                     )
                   })}
                 </tbody>

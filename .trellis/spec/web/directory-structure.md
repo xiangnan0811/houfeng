@@ -33,13 +33,13 @@
 
 ```
 web/
-├── index.html                  # 单页入口；含 inline 主题预热脚本
+├── index.html                  # 单页入口；同步加载同源 theme-bootstrap.js
 ├── package.json                # node 22.x；脚本 dev / build / lint / test
 ├── vite.config.ts              # /api 反代到 VITE_API_TARGET
 ├── vitest.config.ts
 ├── eslint.config.js
 ├── tsconfig.json / .app.json / .node.json
-├── public/                     # 静态资源（图标等）
+├── public/                     # 同源静态资源（主题预热、字体、caret、图标等）
 └── src/
     ├── main.tsx                # createRoot + Provider 嵌套
     ├── app/                    # 路由 / 布局壳 / 路由级 metadata
@@ -74,7 +74,7 @@ web/
     ├── components/             # 跨页复用展示组件
     │   ├── atoms/              # 设计系统原子（Button / Card / Badge / ...）
     │   │   ├── index.ts        # barrel export，pages 通常 from './atoms'
-    │   │   └── Sparkline.tsx 等 + 同名 *.test.tsx
+    │   │   └── Sparkline / Tabs / SegmentedControl 等 + 同名 *.test.tsx
     │   ├── ActionConfirmationCard.tsx
     │   ├── DetailSection.tsx
     │   ├── EventList.tsx
@@ -87,6 +87,9 @@ web/
     │   ├── theme.ts + theme-context.tsx
     │   ├── format.ts           # 时间 / 字节 / 百分比等展示格式化
     │   └── types.ts            # 与 center JSON 响应对齐的 TS 类型
+    ├── security/               # production source contracts（CSP / semantic interaction）
+    │   ├── cspContract.test.ts
+    │   └── semanticInteractionContract.test.ts
     ├── styles/                 # 全局 CSS，main.tsx 一次性导入
     │   ├── reset.css
     │   ├── tokens.css          # 设计令牌（颜色、间距、字体）
@@ -138,6 +141,15 @@ web/
 - `format.ts`：所有面向用户的格式化（时间、字节、百分比、标签拼接）；**新格式化函数都加到这里**，不要散落到组件文件。
 - `types.ts`：与 center HTTP 响应对齐的 TypeScript 类型；**不要在 page / component 里手抄一遍**。
 
+### `web/src/security/`
+
+生产源码的 fail-closed contract tests。它们与被扫描代码分离，但仍由普通 Vitest 全量门执行：
+
+- `cspContract.test.ts`：禁止 production TSX inline `style=`，并校验同源资源/policy 合同。
+- `semanticInteractionContract.test.ts`：用 TypeScript compiler AST 扫描 production TSX 的 non-semantic `onClick`；有限 marker reason 只能解释 backdrop、事件隔离、已有键盘 row 和主 Link 的 pointer enhancement。
+
+不要把普通组件测试搬进 `security/`，也不要在这里维护按路径/行号放行的静态白名单。
+
 ### `web/src/styles/`
 
 全局 CSS，仅在 `main.tsx` 顶部 import 一次（参见 `web/src/main.tsx:5-9`）。**不要在组件文件里 `import './foo.css'`**——例外是 `app/layout/layout.css`（仅供 layout 子树）和 `pages/LoginPage.css`（首屏前缺少应用壳的特例）。
@@ -176,6 +188,7 @@ web/
 | 新跨树 / 跨组件状态 | 当前只有 `auth-context` / `theme-context` 两个 Provider；如确需第三个，放 `web/src/lib/<name>-context.tsx`，并在 `main.tsx` 挂到 Provider 链 |
 | 新布局壳元素（侧边栏 / 顶栏内增项） | 改 `web/src/app/layout/`；不要把布局碎片散到 `pages/` |
 | 新 SPA 全局样式 | 改 `web/src/styles/` 下既有文件；非必要不新增 CSS 文件 |
+| 新 production source contract | `web/src/security/<Contract>.test.ts`；使用 AST/结构解析并配 synthetic fixture，不用正则扫描 JSX或路径级白名单 |
 
 ---
 

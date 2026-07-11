@@ -1,4 +1,4 @@
-import { Tabs } from '../../components/atoms'
+import { SegmentedControl } from '../../components/atoms'
 import { useThemeOptional, type Mode, type Preset } from '../../lib/theme-context'
 
 const PRESET_TABS = [
@@ -22,8 +22,8 @@ export function ThemeSettingsSection() {
       <div className="ss-desc">本地浏览器偏好，不影响其他操作员</div>
       <div className="settings-row">
         <span className="sr-label">风格</span>
-        <Tabs<Preset>
-          variant="pill"
+        <SegmentedControl<Preset>
+          label="主题风格"
           value={preset}
           onChange={setPreset}
           items={PRESET_TABS}
@@ -31,8 +31,8 @@ export function ThemeSettingsSection() {
       </div>
       <div className="settings-row">
         <span className="sr-label">明暗</span>
-        <Tabs<Mode>
-          variant="pill"
+        <SegmentedControl<Mode>
+          label="主题明暗"
           value={mode}
           onChange={setMode}
           items={MODE_TABS}

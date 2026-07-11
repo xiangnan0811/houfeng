@@ -766,6 +766,16 @@ function getSecondaryWorkbenchButton(supportStrip: HTMLElement, label: Secondary
   return within(supportStrip).getByRole('button', { name: label })
 }
 
+function expectTabPanelRelationship(container: HTMLElement, tablistName: string) {
+  const tablist = within(container).getByRole('tablist', { name: tablistName })
+  const activeTab = within(tablist).getByRole('tab', { selected: true })
+  const panel = within(container).getByRole('tabpanel')
+  expect(activeTab.id).not.toBe('')
+  expect(panel.id).not.toBe('')
+  expect(activeTab).toHaveAttribute('aria-controls', panel.id)
+  expect(panel).toHaveAttribute('aria-labelledby', activeTab.id)
+}
+
 async function findSecondaryWorkbenchButton(label: SecondaryWorkbenchLabel) {
   const supportStrip = await screen.findByRole('navigation', { name: '资产决策辅助入口' })
   return getSecondaryWorkbenchButton(supportStrip, label)
@@ -778,6 +788,7 @@ async function openSecondaryWorkbench(label: SecondaryWorkbenchLabel) {
 }
 
 function expectAutomaticGroupDefaultCover(dialog: HTMLElement) {
+  expectTabPanelRelationship(dialog, '决策组详情分区')
   expect(within(dialog).getByLabelText('决策组当前判断')).toBeInTheDocument()
   expectDecisionCoverDensity(within(dialog).getByLabelText('决策组当前判断'))
   expect(within(dialog).getByRole('button', { name: '创建组合' })).toBeInTheDocument()
@@ -852,6 +863,7 @@ function openManualGroupMembers(dialog: HTMLElement) {
 }
 
 function expectTemplateDefaultCover(dialog: HTMLElement) {
+  expectTabPanelRelationship(dialog, '场景模板详情分区')
   const cover = within(dialog).getByLabelText('场景模板当前判断')
   expect(cover).toBeInTheDocument()
   expectDecisionCoverDensity(cover)
@@ -867,6 +879,7 @@ function expectTemplateDefaultCover(dialog: HTMLElement) {
 
 
 function expectSavedRecordDefaultCover(dialog: HTMLElement) {
+  expectTabPanelRelationship(dialog, '决策记录详情分区')
   const cover = within(dialog).getByLabelText('保存记录当前判断')
   expect(cover).toBeInTheDocument()
   expectDecisionCoverDensity(cover)
@@ -1011,6 +1024,7 @@ describe('AssetDecisionsPage', () => {
     expect(normalizedText(supportStrip).length).toBeLessThanOrEqual(160)
     expect(within(supportStrip).queryByText(/回看判断与执行回读|管理比较篮子和启动模板|只读订阅窗口事实|保留单台续费处理/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '决策组扫描' })).toBeInTheDocument()
+    expectTabPanelRelationship(document.body, '资产决策组合视图')
     const groupQueue = screen.getByLabelText('决策组扫描列表')
     expect(groupQueue).toBeInTheDocument()
     expect(screen.queryByText(/当前视图：/)).not.toBeInTheDocument()
@@ -1766,6 +1780,7 @@ describe('AssetDecisionsPage', () => {
 
     await waitFor(() => expect(screen.getByText('已创建自定义组合：德国主力组合')).toBeInTheDocument())
     const manualDialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    expectTabPanelRelationship(manualDialog, '自定义组合详情分区')
     expect(screen.queryByRole('dialog', { name: '资产决策组详情' })).not.toBeInTheDocument()
     expect(screen.queryAllByRole('dialog')).toHaveLength(1)
     expect(within(manualDialog).queryByRole('heading', { name: '组合推进状态' })).not.toBeInTheDocument()
@@ -2954,6 +2969,7 @@ describe('AssetDecisionsPage', () => {
     await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
     const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section')
     expect(singleQueue).not.toBeNull()
+    expectTabPanelRelationship(singleQueue!, '单台辅助队列视图')
     fireEvent.click(within(singleQueue!).getAllByRole('button', { name: '处理' })[0])
     const drawer = await screen.findByRole('dialog', { name: '续费决策处理' })
     fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'migrate' } })

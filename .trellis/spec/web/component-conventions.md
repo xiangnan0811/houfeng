@@ -60,6 +60,92 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **通知入口必须是真实链接**：TopBar 通知图标使用 `<Link to="/events?notification_only=1" aria-label="查看通知事件">`，由 EventsPage 已有 query contract 承接。没有真实 count contract 时不得渲染固定 0、占位 badge 或无 handler 的 button。
 - **列表主扫描路径上的创建/编辑表单优先放 Drawer**：如果创建表单会挤占库存表 / 队列主视图，应使用 `Drawer` 承载，并保留页面主列表可见。关闭 Drawer 时重置草稿/错误；提交成功后的跳转和 payload 合同仍由 page 测试断言。
 
+### Scenario: 原生字段、Tabs、值选择与菜单合同
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `Input` / `Select`、互斥内容切换、pill 值选择器、AppShell 菜单或带整行 pointer 导航的列表时，必须使用本合同。
+- 目标：表单状态落到原生 control；真正的内容面使用 Tabs/TabPanel；过滤/值选择使用 SegmentedControl；命令与导航使用 button/Link，容器点击只作为受控增强。
+
+#### 2. Signatures
+
+```ts
+interface TabsProps<V extends string = string> {
+  label: string
+  idBase: string
+  items: readonly TabItem<V>[]
+  value: V
+  onChange: (next: V) => void
+  variant?: 'underline' | 'pill'
+}
+
+interface TabPanelProps<V extends string = string> {
+  idBase: string
+  value: V
+  className?: string
+  children: ReactNode
+}
+
+interface SegmentedControlProps<V extends string = string> {
+  label: string
+  items: readonly SegmentedItem<V>[]
+  value: V
+  onChange: (next: V) => void
+}
+```
+
+- `tabId(idBase, value)` 与 `tabPanelId(idBase, value)` 位于 `web/src/components/atoms/tabIds.ts`，是 tab/panel id 的唯一 owner。
+- `InputProps` / `SelectProps` 继续扩展原生 HTML attributes，并用 `forwardRef` 把 ref 指向真实 `<input>` / `<select>`。
+
+#### 3. Contracts
+
+- Input/Select 以 `id ?? useId()` 为 control id，当前可见 error/hint 分别使用 `<id>-error` / `<id>-hint`。`aria-describedby` 按“调用者 token → 当前内部 id”合并、按空白拆分去重；error 覆盖 hint，并强制 `aria-invalid=true`。无 error 时保留调用者的 `aria-invalid`。
+- `required` 同时传给原生 control 和 required label class；options/children、原生 onChange、className 和其余 DOM attributes 不得被 atom 吞掉。
+- Tabs 必须有可访问名称；selected tab 是唯一 `tabIndex=0`。ArrowLeft/Right 循环，Home/End 到边界，移动焦点并自动调用 `onChange`。controlled value 暂时不在 items 中时，第一项成为唯一 tab stop；空 items 不抛错。
+- 真正的互斥内容面用 `Tabs` + active `TabPanel`，双方 id/labelledby/controls 必须闭环。主题、时间范围、快速视图等值选择使用 `SegmentedControl` 的 native buttons + `aria-pressed`，不得伪装成无 panel 的 tabs。
+- User/theme menu trigger 使用 native button + `aria-haspopup="menu"` / `aria-controls` / `aria-expanded`。menu command 使用 `menuitem`，单选主题使用 `menuitemradio` + `aria-checked`；Arrow/Home/End 导航、Escape 返回 trigger、Tab 离开并关闭、outside pointer 关闭。
+- 列表主导航必须有可见 Link。保留整行 click 时，事件目标位于 link/button/input/select/textarea 或对应 role 内必须忽略；外层不得再增加模拟 link 的 role/tabIndex，键盘只依赖主 Link。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| caller describedby 与内部 error id 重复 | 输出一次，caller token 顺序保留 |
+| error 从无变有 | hint 不渲染/不被引用；control invalid=true |
+| Tabs value 不在动态 items 中 | 第一项是唯一 tab stop，不在 render 中隐式改 value |
+| ArrowRight 位于最后一个 tab | focus/selection 循环到第一项，onChange 一次 |
+| 值选择器没有对应内容 panel | 使用 SegmentedControl，不产生 tab/tablist/tabpanel role |
+| menu Escape / Tab | Escape 关闭并回 trigger；Tab 关闭且真实焦点继续前移 |
+| pointer 点击 VPS 名称 Link | Link 自己导航，row enhancement 不重复 navigate |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：Settings 的“外观/通知”使用 Tabs + TabPanel；VPS 的“全部/未关联”使用 SegmentedControl；浏览器中 Tab 进入一个 selected tab，ArrowRight 激活下一 panel。
+- Base：Input 只有调用者 `aria-describedby` 且无 hint/error，原样保留；普通原生 attrs/ref 继续工作。
+- Bad：所有 pill 都写 `role="tab"` 却没有 panel；在 `div` 上补 `role="button"` 模拟命令；整行 `<tr>` 成为 VPS 详情唯一键盘入口。
+
+#### 6. Tests Required
+
+- `Input.test.tsx` / `Select.test.tsx`：required、ref、generated/explicit id、error/hint、describedby 去重、invalid precedence、options/children。
+- `Tabs.test.tsx` / `SegmentedControl.test.tsx`：命名、唯一 tab stop、四个导航键、动态缺失 value、id 闭环、pressed buttons 与 generic value。
+- 所有 Tabs 调用迁移后用 page tests 断言 active tab 的 `aria-controls` 指向 DOM panel，panel `aria-labelledby` 指回 tab；值选择器断言 group/button，不查询虚假 tab。
+- `UserChip.test.tsx` / `TopBar.test.tsx`：menu ownership、Arrow/Home/End、Escape/Tab/outside、callback 单次调用与 focus return；真实 Chromium补 Tab 默认焦点前移证据。
+- `AppShell.test.tsx` / `VPSPage.test.tsx`：skip link/main target、主 Link href、Link click 不触发行增强、背景 click 仍可用。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// Wrong: 过滤器冒充 tab，整行是唯一导航入口。
+<div role="tab" onClick={() => setView('unlinked')}>未关联</div>
+<tr onClick={() => navigate(`/vps/${id}`)}><td>{name}</td></tr>
+
+// Correct: 值选择与主导航都使用原生元素。
+<SegmentedControl label="VPS 快速视图" items={views} value={view} onChange={setView} />
+<tr onClick={handleBackgroundClick}>
+  <td><Link to={`/vps/${id}`}>{name}</Link></td>
+</tr>
+```
+
 ### Scenario: 应用与路由错误恢复
 
 #### 1. Scope / Trigger

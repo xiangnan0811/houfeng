@@ -1,4 +1,4 @@
-import type { TabItem } from '../../components/atoms'
+import type { SegmentedItem } from '../../components/atoms'
 import type { FilterSelectOption } from '../../components/filters'
 import {
   STATE_CHANGE_EVENT_TYPE_LABELS,
@@ -50,7 +50,7 @@ export const EVENT_TYPE_SELECT_OPTIONS: FilterSelectOption[] = EVENT_TYPE_OPTION
   ([value, label]) => ({ value, label }),
 )
 
-export const TIME_RANGE_TABS: TabItem<TimeRange>[] = [
+export const TIME_RANGE_TABS: SegmentedItem<TimeRange>[] = [
   { value: '24h', label: '近 24 小时' },
   { value: '7d', label: '近 7 天' },
   { value: '30d', label: '近 30 天' },

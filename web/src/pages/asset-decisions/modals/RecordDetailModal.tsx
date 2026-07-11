@@ -1,4 +1,4 @@
-import { Modal, Tabs, Badge, DataTable, type DataTableColumn } from '../../../components/atoms'
+import { Modal, TabPanel, Tabs, Badge, DataTable, type DataTableColumn } from '../../../components/atoms'
 import { PageState as PageStateView } from '../../../components/PageState'
 import type {
   AssetDecisionEvidenceAssessment,
@@ -87,6 +87,8 @@ export function RecordDetailModal({
       ) : recordDetailState.detail ? (
         <div className="asset-decision-detail asset-decision-record-detail">
           <Tabs
+            label="决策记录详情分区"
+            idBase="asset-record-detail"
             items={[
               { value: 'overview', label: '概览' },
               { value: recordDetailPanel === 'source' ? 'source' : 'execution', label: recordDetailPanel === 'source' ? '来源' : '执行', count: recordDetailState.detail.execution_plan?.actionable_count ?? 0 },
@@ -95,6 +97,11 @@ export function RecordDetailModal({
             value={recordDetailPanel}
             onChange={(value) => onSetRecordDetailPanel(value as RecordDetailPanel)}
           />
+          <TabPanel
+            idBase="asset-record-detail"
+            value={recordDetailPanel}
+            className="asset-decision-tab-panel"
+          >
           {recordDetailPanel === 'overview' && renderDetailCommand({
             ariaLabel: '保存记录当前判断',
             title: '当前记录',
@@ -180,6 +187,7 @@ export function RecordDetailModal({
             </div>,
             true,
           )}
+          </TabPanel>
         </div>
       ) : null}
     </Modal>

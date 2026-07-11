@@ -68,4 +68,22 @@ describe('Sidebar', () => {
     )
     expect(container.querySelectorAll('.nav-badge')).toHaveLength(0)
   })
+
+  it('uses one native UserChip menu button instead of an inline clickable container', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <Sidebar
+          user={user}
+          anomalyCounts={{ monitoring: 0, targets: 0 }}
+          collapsed={false}
+          onToggle={() => {}}
+          onLogout={() => {}}
+          onChangePassword={() => {}}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(container.querySelectorAll('.user-chip')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'admin 用户菜单' })).toBeInTheDocument()
+  })
 })

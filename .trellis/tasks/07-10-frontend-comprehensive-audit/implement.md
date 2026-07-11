@@ -518,7 +518,7 @@ git commit -m "fix(security): align frontend assets with strict csp"
 - Modify: `web/src/pages/VPSPage.tsx`
 - Modify: remaining non-semantic command sites reported by AST scan
 
-- [ ] **Step 1: 写 Select required/error 失败测试**
+- [x] **Step 1: 写 Select required/error 失败测试**
 
 ```tsx
 render(<Select label="状态" required error="请选择状态" options={[]} />)
@@ -528,15 +528,15 @@ expect(select).toHaveAttribute('aria-invalid', 'true')
 expect(select).toHaveAccessibleDescription('请选择状态')
 ```
 
-- [ ] **Step 2: 实现共享 field description id**
+- [x] **Step 2: 实现共享 field description id**
 
 Input/Select 为 error/hint 生成稳定 id，合并调用者已有 `aria-describedby`，error 时自动 `aria-invalid=true`；`required` 原样传给原生控件。
 
-- [ ] **Step 3: 写 Tabs 键盘失败测试**
+- [x] **Step 3: 写 Tabs 键盘失败测试**
 
 测试只有 selected tab `tabIndex=0`，其余为 -1；ArrowRight/Left/Home/End 移动 focus 并调用 onChange；tab id 与 panel `aria-controls` 对齐。
 
-- [ ] **Step 4: 扩展 Tabs contract**
+- [x] **Step 4: 扩展 Tabs contract**
 
 ```ts
 export interface TabsProps<V extends string> {
@@ -550,7 +550,7 @@ export interface TabsProps<V extends string> {
 
 调用页面给对应 panel 设置 `role="tabpanel"`、`id`、`aria-labelledby`。
 
-- [ ] **Step 5: 把模拟控件换成原生控件**
+- [x] **Step 5: 把模拟控件换成原生控件**
 
 - Dashboard 导航命令在 Task 3 已使用 Link/button。
 - VPS row 将资产名变成详情 Link，整行点击只作为指针增强，键盘不依赖 row。
@@ -558,15 +558,15 @@ export interface TabsProps<V extends string> {
 - Theme options 改 menuitemradio/button，支持 Escape、Arrow、focus return。
 - AppShell 增加首个可聚焦 skip link 指向 `#main-content`。
 
-- [ ] **Step 6: AST guard**
+- [x] **Step 6: AST guard**
 
 新增小型 TypeScript AST test，禁止生产 TSX 新增带 `onClick` 的 `div/span`，只允许带注释 allowlist 的 backdrop/propagation container。不要使用正则扫描 JSX。
 
-- [ ] **Step 7: axe 与键盘验收**
+- [x] **Step 7: axe 与键盘验收**
 
 对 AppShell、Settings、VPS、Dashboard 运行 axe；手动只用 Tab/Shift+Tab/Arrow/Enter/Escape 完成菜单、tabs、row link 与 skip link。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add web/src/components/atoms web/src/app/layout web/src/pages/VPSPage.tsx web/src/security
@@ -858,6 +858,14 @@ git commit -m "test(web): ratchet browser and contract quality gates"
 - 核心 workflow 不依赖不可聚焦 div/span。
 - Settings、Asset secondary nav、Provider decision link 在 390px 文本完整可达。
 - axe serious/critical 为零，document 无横向溢出。
+
+**Task 6 local evidence（2026-07-11；Gate B 仍等待 Task 7）：**
+
+- `codex/frontend-accessibility-contracts` 在 Node `22.23.1` 上达到 90 个 Vitest files / 669 tests；Field、10 个 Tabs + TabPanel、6 个 SegmentedControl、User/theme menu、skip link、VPS 主 Link 与 semantic AST guard 已落地。
+- semantic AST inventory 为 allowed=7、unexplained=0；受控原因仅为 modal backdrop、event propagation、keyboard-complete row 与 primary-link row enhancement。
+- Chromium `150.0.7871.114` + axe-core `4.10.3` 使用 production dist 与 `mock-api asset-workflows` 验证 `/`、`/settings`、`/vps`、`/asset-decisions`；6 条真实键盘流程通过，Dashboard/AppShell、Settings、VPS serious/critical=0，VPS 三主题矩阵为 0。
+- `1440x1000`、`1024x768`、`390x900` 上 4 routes × 3 viewports 无 document 横向溢出或 shell control clipping；page console/runtime/CSP/HTTP>=400/network failure 均为 0。
+- 本证据是 Task 10 前的 local-only gate；Gate B 的 390px command/Tabs/table 完整可达仍由 Task 7 关闭，因此此处不把 Gate B 标记为整体通过。
 
 ### Gate C：结构债关闭（Task 8-10）
 

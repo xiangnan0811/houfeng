@@ -1,22 +1,9 @@
-import type { DataTableColumn, DataTableSortState } from '../../components/atoms'
+import { Fragment } from 'react'
+import { isInteractiveRowTarget, type DataTableColumn, type DataTableSortState } from '../../components/atoms'
 import { PageState } from '../../components/PageState'
 import type { MonitoringInstanceRecord } from '../../lib/types'
 import { MonitoringInstancesBatchPanel } from './MonitoringInstancesBatchPanel'
 import type { MonitoringInstanceListView } from './types'
-
-const INTERACTIVE_SELECTOR = [
-  'a[href]',
-  'button',
-  'input',
-  'select',
-  'textarea',
-  '[role="button"]',
-  '[role="link"]',
-].join(',')
-
-function isInteractive(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest(INTERACTIVE_SELECTOR) != null
-}
 
 type MonitoringInstancesListSectionProps = {
   monitoringInstanceListView: MonitoringInstanceListView
@@ -191,32 +178,34 @@ export function MonitoringInstancesListSection({
             </thead>
             <tbody>
               {monitoring.map((monitoringInstance, ri) => (
-                <tr
-                  key={monitoringInstance.monitoring_instance_id}
-                  role="row"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    if (isInteractive(e.target)) return
-                    onRowClick(monitoringInstance)
-                  }}
-                  onKeyDown={(e) => {
-                    if (isInteractive(e.target)) return
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
+                <Fragment key={monitoringInstance.monitoring_instance_id}>
+                  {/* a11y-allow-nonsemantic-click: keyboard-complete-row */}
+                  <tr
+                    role="row"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      if (isInteractiveRowTarget(e.target)) return
                       onRowClick(monitoringInstance)
-                    }
-                  }}
-                >
-                  {visibleColumns.map((col) => (
-                    <td
-                      key={col.key}
-                      role="cell"
-                      className={col.cellClassName || undefined}
-                    >
-                      {col.render(monitoringInstance, ri)}
-                    </td>
-                  ))}
-                </tr>
+                    }}
+                    onKeyDown={(e) => {
+                      if (isInteractiveRowTarget(e.target)) return
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        onRowClick(monitoringInstance)
+                      }
+                    }}
+                  >
+                    {visibleColumns.map((col) => (
+                      <td
+                        key={col.key}
+                        role="cell"
+                        className={col.cellClassName || undefined}
+                      >
+                        {col.render(monitoringInstance, ri)}
+                      </td>
+                    ))}
+                  </tr>
+                </Fragment>
               ))}
             </tbody>
           </table>

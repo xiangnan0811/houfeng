@@ -1,5 +1,5 @@
 import { ActionConfirmationModal } from '../../../components/ActionConfirmationModal'
-import { Modal, Tabs, Badge } from '../../../components/atoms'
+import { Modal, TabPanel, Tabs, Badge } from '../../../components/atoms'
 import { PageState as PageStateView } from '../../../components/PageState'
 import type {
   AssetDecisionScenarioTemplateStatus,
@@ -84,6 +84,8 @@ export function TemplateDetailModal({
       ) : templateDetailState.detail ? (
         <div className="asset-decision-detail asset-decision-template-detail">
           <Tabs
+            label="场景模板详情分区"
+            idBase="asset-template-detail"
             items={[
               { value: 'overview', label: '概览' },
               { value: templateDetailPanel === 'create' ? 'create' : 'members', label: templateDetailPanel === 'create' ? '创建' : '成员', count: templateDetailState.detail.member_count },
@@ -92,6 +94,11 @@ export function TemplateDetailModal({
             value={templateDetailPanel}
             onChange={(value) => onSetTemplateDetailPanel(value as TemplateDetailPanel)}
           />
+          <TabPanel
+            idBase="asset-template-detail"
+            value={templateDetailPanel}
+            className="asset-decision-tab-panel"
+          >
           {templateDetailPanel === 'overview' && renderDetailCommand({
             ariaLabel: '场景模板当前判断',
             title: '当前模板',
@@ -238,6 +245,7 @@ export function TemplateDetailModal({
             )}
           </div>,
           )}
+          </TabPanel>
         </div>
       ) : null}
     </Modal>

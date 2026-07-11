@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-import { Modal, Tabs, DataTable, type DataTableColumn } from '../../../components/atoms'
+import { Modal, TabPanel, Tabs, DataTable, type DataTableColumn } from '../../../components/atoms'
 import { PageState as PageStateView } from '../../../components/PageState'
 import { AssetDecisionWorkPanel, type AssetDecisionDraft } from '../../../components/AssetDecisionWorkPanel'
 import type {
@@ -113,10 +113,19 @@ export function GroupDetailModal({
       ) : detailState.detail ? (
         <div className="asset-decision-detail">
           <Tabs
+            label="决策组详情分区"
+            idBase="asset-group-detail"
             items={[
               { value: 'overview', label: '概览' },
-              { value: 'members', label: '成员', count: detailState.detail.members.length },
-              { value: 'save', label: '保存' },
+              {
+                value: groupDetailPanel === 'raw' ? 'raw' : 'members',
+                label: groupDetailPanel === 'raw' ? '底稿' : '成员',
+                count: detailState.detail.members.length,
+              },
+              {
+                value: groupDetailPanel === 'vps' ? 'vps' : 'save',
+                label: groupDetailPanel === 'vps' ? '处理' : '保存',
+              },
             ]}
             value={groupDetailPanel}
             onChange={(value) => {
@@ -127,6 +136,11 @@ export function GroupDetailModal({
               onSetGroupDetailPanel(value as GroupDetailPanel)
             }}
           />
+          <TabPanel
+            idBase="asset-group-detail"
+            value={groupDetailPanel}
+            className="asset-decision-tab-panel"
+          >
           {groupDetailPanel === 'overview' && renderDetailCommand({
             ariaLabel: '决策组当前判断',
             title: '',
@@ -257,6 +271,7 @@ export function GroupDetailModal({
               />
             </div>
           )}
+          </TabPanel>
         </div>
       ) : null}
     </Modal>

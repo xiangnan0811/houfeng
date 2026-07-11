@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -203,8 +203,10 @@ describe('EventsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
 
-    await waitFor(() =>
-      expect(screen.getByRole('dialog', { name: '事件高级筛选' })).toBeInTheDocument(),
-    )
+    const drawer = await screen.findByRole('dialog', { name: '事件高级筛选' })
+    const timeRange = within(drawer).getByRole('group', { name: '事件时间范围' })
+    expect(timeRange).toBeInTheDocument()
+    expect(within(timeRange).getByRole('button', { name: '自定义' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(timeRange).queryByRole('tab')).not.toBeInTheDocument()
   })
 })
