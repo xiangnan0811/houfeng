@@ -103,7 +103,7 @@ interface SegmentedControlProps<V extends string = string> {
 
 - Input/Select 以 `id ?? useId()` 为 control id，当前可见 error/hint 分别使用 `<id>-error` / `<id>-hint`。`aria-describedby` 按“调用者 token → 当前内部 id”合并、按空白拆分去重；error 覆盖 hint，并强制 `aria-invalid=true`。无 error 时保留调用者的 `aria-invalid`。
 - `required` 同时传给原生 control 和 required label class；options/children、原生 onChange、className 和其余 DOM attributes 不得被 atom 吞掉。
-- Tabs 必须有可访问名称；selected tab 是唯一 `tabIndex=0`。ArrowLeft/Right 循环，Home/End 到边界，移动焦点并自动调用 `onChange`。两种 variant 的 tab 都不得 shrink/换行，overflow 由 tablist 自己承担。键盘目标先写入 pending ref；受控 value 与对应 panel 完成同一次 React commit 后，`useLayoutEffect` 才调用 `scrollIntoView({ block: 'nearest', inline: 'nearest' })`，避免 panel 高度改变父级滚动条后目标再次被裁。不得用同步 `focus()` 的隐式滚动、任意单/双 rAF 延时或手算 `scrollLeft` 替代 commit 边界。controlled value 暂时不在 items 中时，第一项成为唯一 tab stop；空 items 不抛错。
+- Tabs 必须有可访问名称；selected tab 是唯一 `tabIndex=0`。ArrowLeft/Right 循环，Home/End 到边界，移动焦点并自动调用 `onChange`。两种 variant 的 tab 都不得 shrink/换行，overflow 由 tablist 自己承担。键盘目标把 button 与目标 value 一起写入 pending ref；只有受控 value 与目标相等、对应 panel 完成 React commit 后，`useLayoutEffect` 才清空 pending 并调用 `scrollIntoView({ block: 'nearest', inline: 'nearest' })`。父级先以旧 value 中间 rerender 时必须保留 pending 且不滚动，避免 panel 高度改变父级滚动条后目标再次被裁。不得用同步 `focus()` 的隐式滚动、任意单/双 rAF 延时或手算 `scrollLeft` 替代 commit 边界。controlled value 暂时不在 items 中时，第一项成为唯一 tab stop；空 items 不抛错。
 - 真正的互斥内容面用 `Tabs` + active `TabPanel`，双方 id/labelledby/controls 必须闭环。主题、时间范围、快速视图等值选择使用 `SegmentedControl` 的 native buttons + `aria-pressed`，不得伪装成无 panel 的 tabs。
 - User/theme menu trigger 使用 native button + `aria-haspopup="menu"` / `aria-controls` / `aria-expanded`。menu command 使用 `menuitem`，单选主题使用 `menuitemradio` + `aria-checked`；Arrow/Home/End 导航、Escape 返回 trigger、Tab 离开并关闭、outside pointer 关闭。
 - 列表主导航必须有可见 Link。保留整行 click 时，事件目标位于 link/button/input/select/textarea 或对应 role 内必须忽略；外层不得再增加模拟 link 的 role/tabIndex，键盘只依赖主 Link。
@@ -116,6 +116,7 @@ interface SegmentedControlProps<V extends string = string> {
 | error 从无变有 | hint 不渲染/不被引用；control invalid=true |
 | Tabs value 不在动态 items 中 | 第一项是唯一 tab stop，不在 render 中隐式改 value |
 | ArrowRight 位于最后一个 tab | focus/selection 循环到第一项，onChange 一次 |
+| onChange 后父级先以旧 value rerender | pending target/value 保留，不调用 scrollIntoView |
 | Home/End 改变 panel 高度并使父级出现滚动条 | 新 value commit 后目标完整进入 tablist；document 不横向滚动 |
 | 值选择器没有对应内容 panel | 使用 SegmentedControl，不产生 tab/tablist/tabpanel role |
 | menu Escape / Tab | Escape 关闭并回 trigger；Tab 关闭且真实焦点继续前移 |
@@ -130,7 +131,7 @@ interface SegmentedControlProps<V extends string = string> {
 #### 6. Tests Required
 
 - `Input.test.tsx` / `Select.test.tsx`：required、ref、generated/explicit id、error/hint、describedby 去重、invalid precedence、options/children。
-- `Tabs.test.tsx` / `SegmentedControl.test.tsx`：命名、唯一 tab stop、四个导航键、动态缺失 value、id 闭环、pressed buttons 与 generic value；Tabs 还要断言 controlled rerender 前不滚、commit 后以 nearest/nearest 滚动目标。
+- `Tabs.test.tsx` / `SegmentedControl.test.tsx`：命名、唯一 tab stop、四个导航键、动态缺失 value、id 闭环、pressed buttons 与 generic value；Tabs 还要断言无 rerender 时不滚、旧 value 中间 rerender 仍不滚、目标 value commit 后才以 nearest/nearest 滚动。
 - 所有 Tabs 调用迁移后用 page tests 断言 active tab 的 `aria-controls` 指向 DOM panel，panel `aria-labelledby` 指回 tab；值选择器断言 group/button，不查询虚假 tab。
 - `UserChip.test.tsx` / `TopBar.test.tsx`：menu ownership、Arrow/Home/End、Escape/Tab/outside、callback 单次调用与 focus return；真实 Chromium补 Tab 默认焦点前移证据。
 - `Sidebar.test.tsx` / `AppShell.test.tsx` / `VPSPage.test.tsx`：折叠后仍稳定命名的导航 Link、异常数 accessible label、skip link/main target、主 Link href、Link click 不触发行增强、背景 click 仍可用。

@@ -81,7 +81,7 @@
 ```
 
 - `width:fit-content + max-width:100%` 让 pill 桌面仍按内容收束，超宽时才成为 scroll container。
-- 键盘事件先把目标 button 写入 pending ref、聚焦并调用 `onChange`；受控 value 与对应 panel commit 后，由 `useLayoutEffect` 调用 `scrollIntoView({block:'nearest',inline:'nearest'})`。只依赖同步 `focus()` 的隐式滚动会在 panel 高度改变父级滚动条后再次裁切目标，因此不能作为最终合同。
+- 键盘事件先把目标 button + value 写入 pending ref、聚焦并调用 `onChange`；只有受控 value 与 pending value 相等、对应 panel commit 后，才由 `useLayoutEffect` 清空 pending 并调用 `scrollIntoView({block:'nearest',inline:'nearest'})`。父级以旧 value 中间 rerender 时保留 pending 且不滚；只依赖同步 `focus()` 的隐式滚动会在 panel 高度改变父级滚动条后再次裁切目标，因此不能作为最终合同。
 - 不增加 document listener、任意 rAF 延时或手写 `scrollLeft`；scroll owner 仍是 tablist。
 - scrollbar 不强制隐藏；可用性优先于“干净外观”。
 

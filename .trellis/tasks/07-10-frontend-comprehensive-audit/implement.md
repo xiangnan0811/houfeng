@@ -873,7 +873,7 @@ git commit -m "test(web): ratchet browser and contract quality gates"
 
 - `codex/frontend-responsive-workflows` 已建立 Tabs 局部滚动、Asset 四入口两列完整排版与 Provider 具名局部 table region；API、wire、route、package、lockfile 和 CI 未改变。
 - production dist 在 Chrome `150.0.7871.114` 下完成 9 routes × 3 viewports = 27/27；全部 `documentWidth == innerWidth`，blank surface、shell clipping、console/runtime/CSP/HTTP/network error 均为 0。Dashboard 主行动 bottom=`371.56 < 900`。
-- Settings End/Home 在受控 panel commit 后均完整进入 tablist，End 时 `scrollLeft=16`；四个 Asset command 高度均 72px 且 title client/scroll=`127/127`；Provider section client/scroll=`298/298`，具名 region client/scroll=`240/1000`，ArrowRight 后 `scrollLeft=3`，“组合决策” client/scroll=`60/60`。
+- Settings End/Home 在受控 panel commit 后均完整进入 tablist，End 时 `scrollLeft=16`；四个 Asset command 高度均 72px 且 title client/scroll=`127/127`；Provider section client/scroll=`298/298`，具名 region client/scroll=`240/1000`，ArrowRight 后 `scrollLeft=6`，“组合决策” client/scroll=`60/60`。
 - Settings、Asset Decisions、Providers settled axe serious/critical=0；VPS、Asset Decisions、Providers 的三主题矩阵共 9 次扫描均为 0。亮色 Asset 4.46:1 context RED 已由 owner CSS 修复并复验，不以禁用 rule 或忽略中间色换取绿色。
 - 以上仍是 fixture/local-only candidate evidence。Gate B 只有在 implementation PR 合并、发布镜像 smoke 与同版 full gate 记录后才标记整体通过；真实认证 staging 继续属于 Task 10 / Gate C。
 

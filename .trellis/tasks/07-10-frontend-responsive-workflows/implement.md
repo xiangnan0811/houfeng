@@ -339,7 +339,7 @@ assert(providerRegion.ariaLabel === '服务商与入口')
 
 Tab 到 Provider region 后派发 ArrowRight，断言 `scrollLeft` 增加；Settings 用 End/Home 验证 focus target 自动进入 tablist 可视区。
 
-**Implementation finding:** 初版只依赖同步 `focus()` 的浏览器隐式滚动；Settings 的受控 panel commit 后父级滚动条发生变化，End 目标再次部分离开 tablist。最终实现把目标暂存到 ref，并在 value/panel commit 后由 `useLayoutEffect` 执行 nearest/nearest `scrollIntoView`；unit test 明确断言 rerender 前不滚、rerender 后滚，且不使用 rAF。
+**Implementation finding:** 初版只依赖同步 `focus()` 的浏览器隐式滚动；Settings 的受控 panel commit 后父级滚动条发生变化，End 目标再次部分离开 tablist。实现把目标 button + value 暂存到 ref，并在目标 value/panel commit 后由 `useLayoutEffect` 执行 nearest/nearest `scrollIntoView`；提交前 review 又补出“旧 value 中间 rerender”RED，最终 test 明确断言无 rerender/旧 value rerender 均不滚、目标 value commit 后才滚，且不使用 rAF。
 
 - [x] **Step 3: Run nine-route viewport matrix**
 
@@ -411,7 +411,8 @@ Recommended commits：
 3. `fix(web): isolate provider table overflow`
 4. `fix(web): close responsive accessibility gaps`（受控 commit 后滚动、折叠 Sidebar 稳定名称、critical info badge 对比度）
 5. `fix(web): preserve light-theme asset context contrast`
-6. `docs(spec): record responsive overflow contracts`
+6. `fix(web): wait for committed tab selection before scrolling`
+7. `docs(spec): record responsive overflow contracts`
 
 - [ ] push `codex/frontend-responsive-workflows`，创建 ready PR `fix(web): close narrow viewport workflow gaps`。
 - [ ] 监控 PR go/web/docker/GitGuardian；同分支本地复现失败，不 force-push 猜测。
