@@ -414,7 +414,7 @@ Recommended commits：
 6. `fix(web): wait for committed tab selection before scrolling`
 7. `docs(spec): record responsive overflow contracts`
 
-- [ ] push `codex/frontend-responsive-workflows`，创建 ready PR `fix(web): close narrow viewport workflow gaps`。
+- [x] push `codex/frontend-responsive-workflows`，创建 ready PR #360 `fix(web): close narrow viewport workflow gaps`。
 - [ ] 监控 PR go/web/docker/GitGuardian；同分支本地复现失败，不 force-push 猜测。
 - [ ] checks green 后通过 GitHub PR merge；监控 main CI 与 Release Please。
 - [ ] 这是 release-worthy responsive fix：release PR checks green 后合并，监控 GitHub Release、agent assets、`publish-images` 与 multi-arch digest。

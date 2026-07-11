@@ -52,3 +52,4 @@ Routes：`/`、`/settings`、`/vps`、`/asset-decisions`、`/providers`、`/subs
 - 这是固定版本本地 Chromium/CDP + fixture 的预合并证据，不是 Task 10 的 repository Playwright/axe CI gate。
 - fixture 不代表真实认证 Center/PostgreSQL、真实 Provider/Asset 数据或 staging；Task 10 与父任务仍必须完成 `workflow_dispatch` + GitHub staging environment 的认证 smoke。
 - implementation PR 合并、release tag/image、发布镜像 smoke 与最终 Gate B 同版结论由后续 archive/evidence PR 记录；本文件不提前宣称它们通过。
+- 预合并实现与证据通过 ready PR #360 交付；required checks、merge 与 post-merge 状态以 GitHub 记录为准。
