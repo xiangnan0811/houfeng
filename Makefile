@@ -91,6 +91,7 @@ verify-go: fmt-go vet-go test-go
 
 test-web-toolchain:
 	@scripts/check-web-toolchain.test.sh
+	@scripts/check-web-quality-gates.test.sh
 
 verify-web: test-web-toolchain
 	@scripts/check-web-toolchain.sh

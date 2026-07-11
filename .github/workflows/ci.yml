@@ -28,6 +28,38 @@ jobs:
       - name: Verify web recipe isolates caller environment
         run: NODE_ENV=production make verify-web
 
+  web-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - name: Install web dependencies
+        run: env -u NODE_ENV npm --prefix web ci --include=dev
+      - name: Install lockfile-compatible Chromium
+        run: npm --prefix web exec playwright install -- --with-deps chromium
+      - name: Run Chromium contract gate
+        run: npm --prefix web run test:e2e
+      - name: Upload browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-${{ github.run_id }}
+          path: |
+            web/playwright-report
+            web/test-results/playwright
+          if-no-files-found: warn
+          retention-days: 7
+
   docker-image:
     runs-on: ubuntu-latest
     steps:
