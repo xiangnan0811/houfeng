@@ -1,23 +1,9 @@
 import { Fragment } from 'react'
-import type { DataTableColumn, DataTableSortState } from '../../components/atoms'
+import { isInteractiveRowTarget, type DataTableColumn, type DataTableSortState } from '../../components/atoms'
 import { PageState } from '../../components/PageState'
 import type { MonitoringInstanceRecord } from '../../lib/types'
 import { MonitoringInstancesBatchPanel } from './MonitoringInstancesBatchPanel'
 import type { MonitoringInstanceListView } from './types'
-
-const INTERACTIVE_SELECTOR = [
-  'a[href]',
-  'button',
-  'input',
-  'select',
-  'textarea',
-  '[role="button"]',
-  '[role="link"]',
-].join(',')
-
-function isInteractive(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest(INTERACTIVE_SELECTOR) != null
-}
 
 type MonitoringInstancesListSectionProps = {
   monitoringInstanceListView: MonitoringInstanceListView
@@ -198,11 +184,11 @@ export function MonitoringInstancesListSection({
                     role="row"
                     tabIndex={0}
                     onClick={(e) => {
-                      if (isInteractive(e.target)) return
+                      if (isInteractiveRowTarget(e.target)) return
                       onRowClick(monitoringInstance)
                     }}
                     onKeyDown={(e) => {
-                      if (isInteractive(e.target)) return
+                      if (isInteractiveRowTarget(e.target)) return
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault()
                         onRowClick(monitoringInstance)

@@ -6,6 +6,7 @@ import {
   Modal,
   MonoDigits,
   SegmentedControl,
+  isInteractiveRowTarget,
 } from '../components/atoms'
 import { FilterChip, FilterSelect, type FilterSelectOption } from '../components/filters'
 import { PageState as PageStateView } from '../components/PageState'
@@ -76,20 +77,6 @@ type FilterState = {
   lifecycle_status: VPSLifecycleStatus | null
   usage_status: VPSUsageStatus | null
   renewal_decision: VPSRenewalDecision | null
-}
-
-const INTERACTIVE_ROW_TARGET_SELECTOR = [
-  'a[href]',
-  'button',
-  'input',
-  'select',
-  'textarea',
-  '[role="button"]',
-  '[role="link"]',
-].join(',')
-
-function isInteractiveRowTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest(INTERACTIVE_ROW_TARGET_SELECTOR) != null
 }
 
 const INITIAL_PAGE_STATE: PageState = {

@@ -1,7 +1,7 @@
 import { Fragment, type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Button, Input, Modal, Hostname, MonoDigits, StatusGlyph, Timestamp, StatCard } from '../components/atoms'
+import { Button, Input, Modal, Hostname, MonoDigits, StatusGlyph, Timestamp, StatCard, isInteractiveRowTarget } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import { StatusBadge } from '../components/StatusBadge'
 import {
@@ -732,18 +732,12 @@ export function TargetsPage() {
                         <tr
                           tabIndex={0}
                           onClick={(e) => {
-                            if (
-                              e.target instanceof Element &&
-                              e.target.closest('a[href],button,input,select,textarea,[role="button"],[role="link"]')
-                            ) return
+                            if (isInteractiveRowTarget(e.target)) return
                             if (!shouldNavigateOnRowClick(target)) return
                             navigate(`/targets/${target.target_id}`)
                           }}
                           onKeyDown={(e) => {
-                            if (
-                              e.target instanceof Element &&
-                              e.target.closest('a[href],button,input,select,textarea,[role="button"],[role="link"]')
-                            ) return
+                            if (isInteractiveRowTarget(e.target)) return
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault()
                               if (shouldNavigateOnRowClick(target)) {
