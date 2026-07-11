@@ -47,9 +47,18 @@ Routes：`/`、`/settings`、`/vps`、`/asset-decisions`、`/providers`、`/subs
 - diagnostics：console errors=0、runtime exceptions=0、CSP violations=0、HTTP >=400=0、network loading failures=0。
 - 没有禁用 axe rule；每次主题切换均等待有限 animation/transition settled 后扫描。
 
+## Merge, Release And Published-Image Evidence
+
+- Implementation PR #360（head `6c0f02ca3326f8317284f18b58802fa0ff777026`）的 Go/Web/Docker/GitGuardian 全绿；CI run `29140228566`。PR 于 2026-07-11 合并为 `2f82f29b74af751e8faf3ee9b73ca2cffe461bc1`。
+- implementation merge 后 main CI run `29140303324` 与 Release Please run `29140303318` 成功；release PR #359 更新为 `0.58.2`，其 CI run `29140317925` 四项全绿。
+- release PR #359 合并为 `225d3622f1c5cfc1767d1277c59223164b6f98c8`；tag / GitHub Release `v0.58.2` 指向同一 commit。release assets 包含 amd64/arm64 agent、`sha256sums.txt` 与 minisign signature。
+- release 后 main CI run `29140387637`、Release Please run `29140387652` 与 `publish-images` run `29140391260` 全部成功；amd64、arm64、agent-assets 与 manifest publish jobs 均通过。
+- `v0.58.2`、`0.58.2`、`latest` 三个标签的 registry manifest 内容 hash 相同；workflow/registry manifest digest 为 `sha256:2332b27b8b11ae7ecdcc924b59eb6f7266f5b33961b8d9fa8fc9a68d057abd97`，包含 linux/amd64 与 linux/arm64 镜像（以及各自 provenance attestation）。
+- 直接 pull 该 digest 并从镜像复制 `/app/web/dist` 后，以同一 fixture 重跑 9 routes × 3 viewports = 27/27：geometry failures=0、axe serious/critical=0、三主题 failures=0、console/runtime/CSP/HTTP/network counters 全为 0。390px 指标保持 Settings `scrollLeft=16`、Asset title `127/127`、Provider region `240/1000`、组合决策 `60/60`、ArrowRight `0→5`、Dashboard bottom=`371.56`。
+
 ## Evidence Boundary
 
 - 这是固定版本本地 Chromium/CDP + fixture 的预合并证据，不是 Task 10 的 repository Playwright/axe CI gate。
 - fixture 不代表真实认证 Center/PostgreSQL、真实 Provider/Asset 数据或 staging；Task 10 与父任务仍必须完成 `workflow_dispatch` + GitHub staging environment 的认证 smoke。
-- implementation PR 合并、release tag/image、发布镜像 smoke 与最终 Gate B 同版结论由后续 archive/evidence PR 记录；本文件不提前宣称它们通过。
-- 预合并实现与证据通过 ready PR #360 交付；required checks、merge 与 post-merge 状态以 GitHub 记录为准。
+- implementation、release tag/image 与发布镜像 smoke 已由上述 GitHub run、registry digest 和本地 release-dist 证据闭环；Gate B 可在 `v0.58.2` 同版关闭。
+- 真实认证 staging 仍明确保留给 Task 10 / Gate C，不把 fixture 结果写成生产环境通过。
