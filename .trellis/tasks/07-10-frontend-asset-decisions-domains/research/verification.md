@@ -108,4 +108,4 @@ Node 24.18.0 会在 install 前被 preflight 正确拒绝；精确 Node 22.23.1 
 
 ## 交付门说明
 
-本文件当前记录本地实现与 mock production-dist 证据。PR checks、合并后 main CI、Release Please、GitHub Release、multi-arch image digest 与 released `/app/web/dist` 复验属于 Task 8 的后续必经门；完成后把具体 URL、run id、version、digest 和 released-dist 结果追加到本文件，再归档任务。
+实现 PR：[houfeng#363](https://github.com/xiangnan0811/houfeng/pull/363)。本文件当前记录本地实现与 mock production-dist 证据；PR checks、合并后 main CI、Release Please、GitHub Release、multi-arch image digest 与 released `/app/web/dist` 复验仍是 Task 8 的后续必经门。完成后把具体 run id、version、digest 和 released-dist 结果追加到本文件，再归档任务。
