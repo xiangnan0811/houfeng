@@ -234,6 +234,35 @@ describe('useAssetDecisionRenewalQueue', () => {
     expect(result.current.state.draft).toEqual({ renewalDecision: 'unreviewed', reason: '' })
   })
 
+  it('discards a selected VPS when its route context changes', async () => {
+    mockSuccessfulReads()
+    const { result, rerender } = renderHook(
+      ({ contextKey }: { contextKey: string }) => useAssetDecisionRenewalQueue({
+        renewalWindow: 30,
+        revision: 0,
+        contextKey,
+        onNotice: vi.fn(),
+        onInvalidate: vi.fn(),
+      }),
+      { initialProps: { contextKey: 'group_id:adg_001' } },
+    )
+    await waitFor(() => expect(result.current.state.queue.queueLoading).toBe(false))
+    act(() => {
+      result.current.commands.selectVPS(UNREVIEWED)
+      result.current.commands.updateDraft({ renewalDecision: 'cancel', reason: '离开前草稿' })
+    })
+    expect(result.current.state.selectedVPS).toBe(UNREVIEWED)
+
+    rerender({ contextKey: '' })
+    expect(result.current.state.selectedVPS).toBeNull()
+    expect(result.current.state.draft).toEqual({ renewalDecision: 'unreviewed', reason: '' })
+    await act(async () => { await Promise.resolve() })
+    rerender({ contextKey: 'group_id:adg_001' })
+
+    expect(result.current.state.selectedVPS).toBeNull()
+    expect(result.current.state.error).toBeNull()
+  })
+
   it('submits the exact PATCH, merges linkage locally, and emits one semantic invalidation', async () => {
     mockSuccessfulReads()
     const updated: VPSAssetUpdateResult = {

@@ -520,6 +520,7 @@ describe('useAssetDecisionManualGroups', () => {
 
   it('owns panel and member-add draft reset semantics', async () => {
     mockSuccessfulReads()
+    const getGroup = vi.mocked(api.getAssetDecisionManualGroup)
 
     const { result } = renderHook(() => useAssetDecisionManualGroups({
       filter: FILTER,
@@ -545,5 +546,33 @@ describe('useAssetDecisionManualGroups', () => {
     expect(result.current.state.detailPanel).toBe('overview')
     expect(result.current.state.memberAddDraft.vpsID).toBe('')
     expect(result.current.state.error).toBeNull()
+    expect(getGroup).toHaveBeenCalledOnce()
+  })
+
+  it('does not revive manual-group UI state after the route leaves and returns', async () => {
+    mockSuccessfulReads()
+    const { result, rerender } = renderHook(
+      ({ selectedManualGroupID }: { selectedManualGroupID: string | null }) => useAssetDecisionManualGroups({
+        filter: FILTER,
+        renewalWindow: 30,
+        selectedManualGroupID,
+        revision: 0,
+        onNotice: vi.fn(),
+      }),
+      { initialProps: { selectedManualGroupID: 'admg_001' as string | null } },
+    )
+    await waitFor(() => expect(result.current.state.detail.loading).toBe(false))
+    act(() => {
+      result.current.commands.selectPanel('add')
+      result.current.commands.updateMemberAddDraft({ vpsID: 'vps_001', reason: '临时理由' })
+    })
+    expect(result.current.state.detailPanel).toBe('add')
+
+    rerender({ selectedManualGroupID: null })
+    await act(async () => { await Promise.resolve() })
+    rerender({ selectedManualGroupID: 'admg_001' })
+
+    expect(result.current.state.detailPanel).toBe('overview')
+    expect(result.current.state.memberAddDraft).toMatchObject({ vpsID: '', reason: '' })
   })
 })

@@ -245,6 +245,7 @@ describe('useAssetDecisionTemplates', () => {
 
   it('owns keyed panel and manual draft patches', async () => {
     mockSuccessfulReads()
+    const getTemplate = vi.mocked(api.getAssetDecisionScenarioTemplate)
 
     const { result, rerender } = renderHook(
       ({ selectedTemplateID }) => useAssetDecisionTemplates({
@@ -271,5 +272,6 @@ describe('useAssetDecisionTemplates', () => {
     expect(result.current.state.detailPanel).toBe('overview')
     act(() => result.current.commands.resetDetailUI())
     expect(result.current.state.error).toBeNull()
+    expect(getTemplate).toHaveBeenCalledTimes(2)
   })
 })

@@ -183,10 +183,17 @@ export function useAssetDecisionManualGroups({
   const [error, setError] = useState<string | null>(null)
   const [memberSaving, setMemberSaving] = useState<Record<string, boolean>>({})
   const [pendingMemberRemoval, setPendingMemberRemoval] = useState<AssetDecisionManualGroupMember | null>(null)
+  const resetDetailUI = useCallback(() => {
+    setDetailUI(null)
+    setError(null)
+    setPendingMemberRemoval(null)
+    setMemberSaving({})
+  }, [])
   const preservedSummariesRef = useRef(new Map<string, {
     filterKey: string
     summary: AssetDecisionManualGroupSummary
   }>())
+  const previousSelectedManualGroupIDRef = useRef(selectedManualGroupID)
   const currentFilterKey = filterKey(filter)
   const isListCurrent = settledList?.filter === filter &&
     settledList.revision === revision &&
@@ -258,6 +265,10 @@ export function useAssetDecisionManualGroups({
   }, [catalogRetryRevision, revision])
 
   useEffect(() => {
+    if (previousSelectedManualGroupIDRef.current !== selectedManualGroupID) {
+      previousSelectedManualGroupIDRef.current = selectedManualGroupID
+      queueMicrotask(resetDetailUI)
+    }
     if (!selectedManualGroupID) return
     let cancelled = false
 
@@ -284,7 +295,7 @@ export function useAssetDecisionManualGroups({
       })
 
     return () => { cancelled = true }
-  }, [detailRetryRevision, revision, selectedManualGroupID])
+  }, [detailRetryRevision, resetDetailUI, revision, selectedManualGroupID])
 
   const list: Readonly<ManualGroupsState> = isListCurrent
     ? { loading: false, error: settledList.error, groups: settledList.groups }
@@ -551,14 +562,6 @@ export function useAssetDecisionManualGroups({
       return { ...base, panel }
     })
   }, [selectedManualGroupID, setMemberAddAdvanced])
-
-  const resetDetailUI = useCallback(() => {
-    setDetailUI(null)
-    setError(null)
-    setPendingMemberRemoval(null)
-    setMemberSaving({})
-    setDetailRetryRevision((current) => current + 1)
-  }, [])
 
   return {
     state: {

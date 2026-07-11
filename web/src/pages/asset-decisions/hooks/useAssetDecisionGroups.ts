@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
   getAssetDecisionGroup,
@@ -76,6 +76,7 @@ export function useAssetDecisionGroups({
     groupID: string
     panel: GroupDetailPanel
   }> | null>(null)
+  const previousSelectedGroupIDRef = useRef(selectedGroupID)
   const isListCurrent = settledList?.filter === filter &&
     settledList.revision === revision &&
     settledList.retryRevision === listRetryRevision
@@ -144,6 +145,12 @@ export function useAssetDecisionGroups({
     return () => { cancelled = true }
   }, [detailRetryRevision, renewalWindow, revision, selectedGroupID])
 
+  useEffect(() => {
+    if (previousSelectedGroupIDRef.current === selectedGroupID) return
+    previousSelectedGroupIDRef.current = selectedGroupID
+    queueMicrotask(() => setPanelSelection(null))
+  }, [selectedGroupID])
+
   const list: AssetDecisionGroupListState = isListCurrent
     ? {
         loading: false,
@@ -184,7 +191,6 @@ export function useAssetDecisionGroups({
   }, [selectedGroupID])
   const resetDetailUI = useCallback(() => {
     setPanelSelection(null)
-    setDetailRetryRevision((current) => current + 1)
   }, [])
 
   return {

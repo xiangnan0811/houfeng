@@ -242,7 +242,7 @@ describe('useAssetDecisionGroups', () => {
 
   it('resets the panel for a different selection and on explicit detail reset', async () => {
     vi.spyOn(api, 'listAssetDecisionGroups').mockResolvedValue([GROUP_SUMMARY])
-    vi.spyOn(api, 'getAssetDecisionGroup').mockResolvedValue(GROUP_DETAIL)
+    const getGroup = vi.spyOn(api, 'getAssetDecisionGroup').mockResolvedValue(GROUP_DETAIL)
 
     const { result, rerender } = renderHook(
       ({ selectedGroupID }) => useAssetDecisionGroups({
@@ -265,5 +265,6 @@ describe('useAssetDecisionGroups', () => {
     expect(result.current.state.detailPanel).toBe('raw')
     act(() => result.current.commands.resetDetailUI())
     expect(result.current.state.detailPanel).toBe('overview')
+    expect(getGroup).toHaveBeenCalledTimes(2)
   })
 })

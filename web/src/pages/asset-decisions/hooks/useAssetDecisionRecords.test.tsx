@@ -412,6 +412,26 @@ describe('useAssetDecisionRecords', () => {
     expect(listRecords).toHaveBeenCalledTimes(2)
   })
 
+  it('resets detail UI without reloading the selected record', async () => {
+    mockSuccessfulReads()
+    const getRecord = vi.mocked(api.getAssetDecisionRecord)
+    const filter = {}
+    const { result } = renderHook(() => useAssetDecisionRecords({
+      filter,
+      selectedRecordID: 'adr_001',
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+    await waitFor(() => expect(result.current.state.detail.loading).toBe(false))
+
+    act(() => result.current.commands.selectPanel('members'))
+    expect(result.current.state.detailPanel).toBe('members')
+    act(() => result.current.commands.resetDetailUI())
+
+    expect(result.current.state.detailPanel).toBe('overview')
+    expect(getRecord).toHaveBeenCalledOnce()
+  })
+
   it('constructs and preserves keyed automatic/manual drafts without exposing setters', async () => {
     mockSuccessfulReads()
     const filter = {}

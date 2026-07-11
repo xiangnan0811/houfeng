@@ -324,7 +324,6 @@ export function useAssetDecisionTemplates({
     setDetailUI(null)
     setError(null)
     setPendingStatus(null)
-    setDetailRetryRevision((current) => current + 1)
   }, [])
 
   return {

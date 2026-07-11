@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, useLocation } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AssetDecisionsPage } from './AssetDecisionsPage'
@@ -15,6 +15,14 @@ function mockJSONResponse(body: unknown, status = 200) {
 function LocationProbe() {
   const location = useLocation()
   return <output aria-label="current-url">{location.pathname}{location.search}</output>
+}
+
+function HistoryControls() {
+  const navigate = useNavigate()
+  return <>
+    <button type="button" onClick={() => navigate(-1)}>返回上一条历史</button>
+    <button type="button" onClick={() => navigate(1)}>前往下一条历史</button>
+  </>
 }
 
 const sourceAvailability = {
@@ -1377,6 +1385,43 @@ describe('AssetDecisionsPage', () => {
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/subscriptions/') && call[1]?.method)).toBe(false)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/monitoring-instances/') && call[1]?.method)).toBe(false)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith('/api/targets/') && call[1]?.method)).toBe(false)
+  })
+
+  it('closes a nested renewal draft when browser history leaves its group', async () => {
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30', body: groupDetail() },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter
+        initialEntries={['/asset-decisions', '/asset-decisions?group_id=adg_auto_001']}
+        initialIndex={1}
+      >
+        <AssetDecisionsPage />
+        <LocationProbe />
+        <HistoryControls />
+      </MemoryRouter>,
+    )
+
+    const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+    const members = openAutomaticGroupMembers(dialog)
+    fireEvent.click(within(members).getAllByRole('button', { name: '处理' })[0])
+    expect(within(dialog).getByLabelText('续费决策')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '返回上一条历史' }))
+
+    await waitFor(() => expect(screen.getByLabelText('current-url')).toHaveTextContent('/asset-decisions'))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '资产决策组详情' })).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog', { name: '续费决策处理' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '前往下一条历史' }))
+    const reopenedDialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+    expect(within(reopenedDialog).getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
+    expect(within(reopenedDialog).queryByLabelText('续费决策')).not.toBeInTheDocument()
   })
 
   it('keeps loaded auto groups available when overview fails', async () => {

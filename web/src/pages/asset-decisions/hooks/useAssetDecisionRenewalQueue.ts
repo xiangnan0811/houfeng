@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   listSubscriptions,
@@ -76,6 +76,7 @@ export type AssetDecisionRenewalQueueCommands = Readonly<{
 type UseAssetDecisionRenewalQueueInput = Readonly<{
   renewalWindow: RenewalWindow
   revision: number
+  contextKey?: string
   onNotice: (notice: string) => void
   onInvalidate: (event: AssetDecisionInvalidationEvent) => void
 }>
@@ -83,6 +84,7 @@ type UseAssetDecisionRenewalQueueInput = Readonly<{
 export function useAssetDecisionRenewalQueue({
   renewalWindow,
   revision,
+  contextKey = '',
   onNotice,
   onInvalidate,
 }: UseAssetDecisionRenewalQueueInput): {
@@ -95,6 +97,7 @@ export function useAssetDecisionRenewalQueue({
   const [settledQueue, setSettledQueue] = useState<SettledQueue | null>(null)
   const [queueView, setQueueView] = useState<DecisionQueueView>('all')
   const [selectedVPS, setSelectedVPS] = useState<VPSAssetRecord | null>(null)
+  const [selectedContextKey, setSelectedContextKey] = useState<string | null>(null)
   const [draft, setDraft] = useState<AssetDecisionDraft>(INITIAL_DECISION_DRAFT)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -103,6 +106,7 @@ export function useAssetDecisionRenewalQueue({
     settledRenewals.retryRevision === renewalsRetryRevision
   const isQueueCurrent = settledQueue?.revision === revision &&
     settledQueue.retryRevision === queueRetryRevision
+  const selectionIsCurrent = selectedContextKey === contextKey
 
   useEffect(() => {
     let cancelled = false
@@ -169,6 +173,21 @@ export function useAssetDecisionRenewalQueue({
     return () => { cancelled = true }
   }, [queueRetryRevision, revision])
 
+  const previousContextKeyRef = useRef(contextKey)
+  useEffect(() => {
+    if (previousContextKeyRef.current === contextKey) return
+    previousContextKeyRef.current = contextKey
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setSelectedVPS(null)
+      setSelectedContextKey(null)
+      setDraft(INITIAL_DECISION_DRAFT)
+      setError(null)
+    })
+    return () => { cancelled = true }
+  }, [contextKey])
+
   const queue = useMemo<Readonly<QueueState>>(() => ({
     renewalsLoading: !areRenewalsCurrent,
     renewalsError: areRenewalsCurrent ? settledRenewals.error : null,
@@ -207,12 +226,14 @@ export function useAssetDecisionRenewalQueue({
 
   const selectVPS = useCallback((vps: VPSAssetRecord) => {
     setSelectedVPS(vps)
+    setSelectedContextKey(contextKey)
     setDraft({ renewalDecision: vps.renewal_decision, reason: '' })
     setError(null)
-  }, [])
+  }, [contextKey])
 
   const closeVPS = useCallback(() => {
     setSelectedVPS(null)
+    setSelectedContextKey(null)
     setDraft(INITIAL_DECISION_DRAFT)
     setError(null)
   }, [])
@@ -222,7 +243,7 @@ export function useAssetDecisionRenewalQueue({
   }, [])
 
   const submitRenewal = useCallback(async (): Promise<VPSAssetUpdateResult | null> => {
-    if (!selectedVPS) return null
+    if (!selectionIsCurrent || !selectedVPS) return null
     setError(null)
     if (draft.renewalDecision === selectedVPS.renewal_decision) {
       setError('请选择一个不同的续费决策')
@@ -256,6 +277,7 @@ export function useAssetDecisionRenewalQueue({
         )),
       } : current)
       setSelectedVPS(null)
+      setSelectedContextKey(null)
       setDraft(INITIAL_DECISION_DRAFT)
       const baseNotice = `续费决策已保存：${updated.display_name} -> ${renewalQueueLabel(updated.renewal_decision)}`
       const linkageMessage = updated.renewal_subscription_linkage?.message
@@ -268,7 +290,7 @@ export function useAssetDecisionRenewalQueue({
     } finally {
       setSubmitting(false)
     }
-  }, [draft.reason, draft.renewalDecision, onInvalidate, onNotice, queue, selectedVPS])
+  }, [draft.reason, draft.renewalDecision, onInvalidate, onNotice, queue, selectedVPS, selectionIsCurrent])
 
   return {
     state: {
@@ -276,10 +298,10 @@ export function useAssetDecisionRenewalQueue({
       decisionQueue,
       visibleDecisionQueue,
       queueView,
-      selectedVPS,
-      draft,
-      submitting,
-      error,
+      selectedVPS: selectionIsCurrent ? selectedVPS : null,
+      draft: selectionIsCurrent ? draft : INITIAL_DECISION_DRAFT,
+      submitting: selectionIsCurrent && submitting,
+      error: selectionIsCurrent ? error : null,
       totalDecisionQueue: decisionQueue.length,
       renewalDueQueueCount,
       missingSubscriptionCount,

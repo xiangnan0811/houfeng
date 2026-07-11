@@ -449,7 +449,6 @@ export function useAssetDecisionRecords({
     setFollowupSaving({})
     setFollowupErrors({})
     setFollowupEditingMemberID(null)
-    setDetailRetryRevision((current) => current + 1)
   }, [])
 
   return {
