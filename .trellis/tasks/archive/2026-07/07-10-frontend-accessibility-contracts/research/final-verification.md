@@ -1,6 +1,6 @@
-# Task 6 本地验证证据
+# Task 6 交付验证证据
 
-> 状态：implementation PR 前的本地证据；正式跨路由 Playwright/axe CI 属于 Task 10，真实认证 staging 与发布版本 smoke 尚未完成。
+> 状态：implementation、main CI、release、镜像发布与发布产物 smoke 已完成；正式跨路由 Playwright/axe CI 和真实认证 staging 仍属于 Task 10。
 
 ## Baseline And Commits
 
@@ -47,9 +47,19 @@
   - primary action `#fff` / `#3b82f6` 仅 3.68:1，改为 theme-aware `color: var(--bg)`；
   - maintenance token 与 light theme normal/notice/critical/muted 状态色不足，收敛到三主题 owner tokens 后全矩阵通过。
 
+## PR, Release And Published Image
+
+- Implementation PR [#357](https://github.com/xiangnan0811/houfeng/pull/357) 以 ready 状态提交；PR CI run `29137285402` 的 go、web、docker-image 与 GitGuardian 全部通过，merge commit 为 `df5669e039a82641df1e484c411f2236fd001d4b`。
+- implementation merge 后 main CI run `29137362151` 与 Release Please run `29137362153` 全部成功；Release Please 把既有 PR [#355](https://github.com/xiangnan0811/houfeng/pull/355) 更新为 `chore(main): release 0.58.1`，CHANGELOG 明确包含本任务的 fix/docs commits。
+- Release PR #355 的 go、web、docker-image 与 GitGuardian 全部通过；merge commit `f8fdb30d6339b00ae49f181527af7afac6ee4a70` 随后通过 main CI run `29137447764` 与 Release Please run `29137447777`。
+- GitHub Release [`v0.58.1`](https://github.com/xiangnan0811/houfeng/releases/tag/v0.58.1) 于 2026-07-11 发布，target commit 为 `f8fdb30d6339b00ae49f181527af7afac6ee4a70`；amd64/arm64 agent、checksum manifest 与 minisign signature 四个 assets 均已上传。
+- `publish-images` run [`29137451638`](https://github.com/xiangnan0811/houfeng/actions/runs/29137451638) 的 agent-assets、linux/amd64、linux/arm64 与 multi-arch publish 全部成功。
+- Docker Hub `linnea7171/houfeng:v0.58.1`、`:0.58.1` 与 `:latest` 均为 OCI image index，三者共同 digest 为 `sha256:ff15def93f7f42d9a9aaf3757e0b450723e1513ce64720a7d38a487583f3cbe6`。本地 pull 后 OCI labels 精确为 revision `f8fdb30d6339b00ae49f181527af7afac6ee4a70`、version `v0.58.1`。
+- 发布版本 smoke 直接从上述 digest 对应镜像的 `/app/web/dist` 提取产物，不复用分支 `web/dist`。全新 Chromium profile 下再次完成 4 routes × 3 viewports = 12/12、六条键盘流程与三主题 axe；serious/critical、console、runtime、CSP、HTTP >=400、network failure、document overflow 与 shell control clipping 均为 0。
+
 ## Limitations And Remaining Gates
 
 - 本地 fixture 只证明受保护页面与代表性资产状态的前端行为，不证明真实后端数据、认证、导入或通知正确性。
 - 未提交截图或 bulk raster；本任务不建立长期视觉基线。
 - Task 10 仍负责把 coverage、Playwright、axe、CSP、bundle/AST budgets 和 `workflow_dispatch + GitHub staging environment` 写入 CI。
-- Task 6 只有在 implementation PR、main CI、Release Please、release/publish-images、发布版本 browser smoke 与 archive PR 完成后才能归档；Task 7 在此之前不得启动。
+- implementation、main CI、Release Please、release/publish-images 与发布版本 browser smoke 已完成；当前独立 archive/evidence PR 合并并通过 post-merge 检查后，才从 fresh main 启动 Task 7。

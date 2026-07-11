@@ -122,4 +122,4 @@
 - [x] TypeScript AST guard 报告零个未解释的 non-semantic click，并能用 synthetic fixture 证明违规会失败。
 - [x] Task 6 修改范围的本地 Chromium 键盘流程通过；AppShell、Settings、VPS、Dashboard axe serious/critical 为零，且证据明确标注为 Task 10 前的本地门。
 - [x] 测试文件/用例数不低于 86/633，或每个替换都有等价覆盖证据；lint、test、build、audit、make verify、diff check 全绿。
-- [ ] PR、main CI、release、publish-images 与镜像 tag/digest 已核验；Task 6 归档并更新 parent Gate B 证据后，Task 7 才可启动。
+- [x] PR、main CI、release、publish-images、镜像 tag/digest 与发布产物 browser smoke 已核验；parent Gate B 已补 Task 6 证据，Task 7 仍等待独立 archive PR 合并与 post-merge 检查。

@@ -859,13 +859,15 @@ git commit -m "test(web): ratchet browser and contract quality gates"
 - Settings、Asset secondary nav、Provider decision link 在 390px 文本完整可达。
 - axe serious/critical 为零，document 无横向溢出。
 
-**Task 6 local evidence（2026-07-11；Gate B 仍等待 Task 7）：**
+**Task 6 delivery evidence（2026-07-11；Gate B 仍等待 Task 7）：**
 
 - `codex/frontend-accessibility-contracts` 在 Node `22.23.1` 上达到 90 个 Vitest files / 669 tests；Field、10 个 Tabs + TabPanel、6 个 SegmentedControl、User/theme menu、skip link、VPS 主 Link 与 semantic AST guard 已落地。
 - semantic AST inventory 为 allowed=7、unexplained=0；受控原因仅为 modal backdrop、event propagation、keyboard-complete row 与 primary-link row enhancement。
 - Chromium `150.0.7871.114` + axe-core `4.10.3` 使用 production dist 与 `mock-api asset-workflows` 验证 `/`、`/settings`、`/vps`、`/asset-decisions`；6 条真实键盘流程通过，Dashboard/AppShell、Settings、VPS serious/critical=0，VPS 三主题矩阵为 0。
 - `1440x1000`、`1024x768`、`390x900` 上 4 routes × 3 viewports 无 document 横向溢出或 shell control clipping；page console/runtime/CSP/HTTP>=400/network failure 均为 0。
-- 本证据是 Task 10 前的 local-only gate；Gate B 的 390px command/Tabs/table 完整可达仍由 Task 7 关闭，因此此处不把 Gate B 标记为整体通过。
+- implementation PR #357、两轮 main CI、release PR #355、GitHub Release `v0.58.1` 与 `publish-images` run `29137451638` 全部通过；`v0.58.1` / `0.58.1` / `latest` 共同 manifest digest 为 `sha256:ff15def93f7f42d9a9aaf3757e0b450723e1513ce64720a7d38a487583f3cbe6`。
+- 发布 smoke 直接使用该 digest 镜像内 `/app/web/dist`，再次完成 12/12 viewport/route、六条键盘流程与三主题 axe，所有错误/溢出/裁切计数为 0。
+- 浏览器数据仍使用本地 fixture，不替代 Task 10 的真实认证 staging。Gate B 的 390px command/Tabs/table 完整可达仍由 Task 7 关闭，因此此处不把 Gate B 标记为整体通过。
 
 ### Gate C：结构债关闭（Task 8-10）
 
