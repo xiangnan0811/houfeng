@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "owners": {
+    "app-shell": [
+      "src/styles/partials/layout.css"
+    ],
+    "dashboard": [
+      "src/styles/partials/dashboard-responsive.css",
+      "src/styles/partials/dashboard.css"
+    ],
+    "assets": [
+      "src/styles/partials/legacy-archive.css",
+      "src/styles/partials/legacy-assets.css",
+      "src/styles/partials/legacy-provider.css"
+    ],
+    "vps": [
+      "src/styles/partials/legacy-vps.css"
+    ],
+    "observability": [
+      "src/styles/partials/legacy-batch.css",
+      "src/styles/partials/legacy-compare.css",
+      "src/styles/partials/legacy-events.css",
+      "src/styles/partials/legacy-monitoring.css",
+      "src/styles/partials/legacy-onboarding.css",
+      "src/styles/partials/legacy-observability.css",
+      "src/styles/partials/legacy-targets.css"
+    ],
+    "settings-subscriptions": [
+      "src/styles/partials/legacy-subscriptions.css"
+    ],
+    "shared-atoms-page": [
+      "src/index.css",
+      "src/pages/LoginPage.css",
+      "src/styles/modernize.css",
+      "src/styles/partials/atoms.css",
+      "src/styles/partials/base.css",
+      "src/styles/partials/forms.css",
+      "src/styles/partials/motion.css",
+      "src/styles/partials/page.css",
+      "src/styles/partials/tabs.css",
+      "src/styles/reset.css",
+      "src/styles/tokens.css"
+    ]
+  }
+}

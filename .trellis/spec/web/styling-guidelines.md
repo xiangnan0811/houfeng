@@ -6,12 +6,13 @@
 
 ## Overview
 
-候风前端**没有引入任何 CSS 框架 / CSS-in-JS / 预处理器**——`web/package.json` `dependencies` 与 `devDependencies` 都没有 Tailwind / Emotion / styled-components / Sass / Less / Stitches / vanilla-extract。所有样式都是**纯 CSS**，借助 CSS 自定义属性（设计令牌）+ BEM 类名 + `color-mix(in srgb, ...)` 函数实现暗 / 亮 / 多预设主题。
+候风前端**没有引入任何 CSS 框架 / CSS-in-JS / 预处理器**——`web/package.json` `dependencies` 与 `devDependencies` 都没有 Tailwind / Emotion / styled-components / Sass / Less / Stitches / vanilla-extract。所有浏览器样式都是**纯 CSS**，借助 CSS 自定义属性（设计令牌）+ BEM 类名 + `color-mix(in srgb, ...)` 函数实现暗 / 亮 / 多预设主题。`postcss` 是仅供 AST inventory/contract 使用的 direct devDependency，不参与浏览器 CSS 转换。
 
 **当前的样式组织**：
 
-- 全局样式集中在 `web/src/styles/`：`reset.css` / `tokens.css` / `atoms.css` / `pages.css`，由 `web/src/main.tsx:5-9` 顺序导入；导入顺序固定为 reset → tokens → atoms → pages，**不要打乱**（tokens 必须在所有引用 `var(--...)` 的样式之前）。
-- 应用壳样式落 `web/src/app/layout/layout.css`，由 `main.tsx:9` 单独导入。
+- `web/src/main.tsx` 固定按 reset → tokens → `index.css` owner manifest → `modernize.css` 顺序导入；tokens 必须在所有 `var(--...)` 消费方之前。
+- `web/src/index.css` 只承载七个显式 owner section 与本地 `@import`，不承载规则。owner 顺序为 shared-atoms-page → app-shell → dashboard → assets → vps → observability → settings-subscriptions。
+- 规则落点位于 `web/src/styles/partials/`；`web/css-owners.json` 对 `web/src/**/*.css`（包括 reset、tokens、modernize、Login route CSS）做唯一且穷尽的 owner 映射。
 - 唯一一处 page 自带 CSS 的例外：`web/src/pages/LoginPage.css`，由 `LoginPage.tsx:5` 自身 import（首屏前 AppShell 还没挂上）。其余所有 page 与 component **不写 `import './foo.css'`**。
 
 > **未来留余地**：如果团队后续决定引入 Tailwind / CSS Modules / Vanilla-Extract 之类的方案，需要做独立技术决策并整体迁移，**不要**让两套体系并存。
@@ -98,7 +99,7 @@
 
 ## 类名约定
 
-实读 `web/src/styles/atoms.css` / `pages.css` / `app/layout/layout.css`，**统一使用 BEM**：`block__element--modifier`。
+实读 `web/src/styles/partials/atoms.css` / `page.css` / `layout.css`，**统一使用 BEM**：`block__element--modifier`。
 
 - **block**：组件 / 区域名小写连字符。例：`btn` / `card` / `input` / `badge` / `sparkline` / `tabs` / `sidebar` / `top-bar` / `breadcrumb` / `sync-status` / `user-chip` / `app-shell` / `page-stack` / `page-panel` / `hero-panel`.
 - **element**：双下划线后跟元素名。例：`sidebar__brand`、`sidebar__brand-zh`、`page-panel__title`、`sync-status__dot`、`modal__actions`。
@@ -106,7 +107,7 @@
 
 **复合 modifier 实读规则**：组件叠加多 modifier 时直接空格拼接，常见模式见 `web/src/components/atoms/Card.tsx:23-33`（`['card', 'card--state', 'card--ribbon-left', 'tone--alert'].filter(Boolean).join(' ')`）。
 
-**辅助类**：仅在 `reset.css` 提供两个全局工具类——`.tnum`（启用 `tabular-nums`）与 `.mono`（切到 `var(--font-mono)`）。**不要**自己再造工具类（如 `.mt-2`、`.flex-center`）；要排版 / 间距请进 `pages.css` / `atoms.css` 用 BEM 表达。
+**辅助类**：仅在 `reset.css` 提供两个全局工具类——`.tnum`（启用 `tabular-nums`）与 `.mono`（切到 `var(--font-mono)`）。**不要**自己再造工具类（如 `.mt-2`、`.flex-center`）；要排版 / 间距请进对应 owner 的 `partials/page.css` / `partials/atoms.css` 用 BEM 表达。
 
 ---
 
@@ -118,17 +119,89 @@
 |------|------|----------|
 | `web/src/styles/reset.css` | box-sizing / body 默认排版 / aurora 背景 / `.tnum` `.mono` 工具类 | `body { background: var(--bg); ... }` |
 | `web/src/styles/tokens.css` | 设计令牌 + 主题覆盖 + reduce-motion | `:root { --space-1: 4px; ... }` |
-| `web/src/styles/atoms.css` | 设计系统原子样式（`.btn` / `.card` / `.input` / `.badge` / `.sparkline` / `.tabs` / `.toggle` / `.data-table` / `.tone--*`） | `.btn--primary { ... }` |
-| `web/src/styles/pages.css` | 页面级共享版式（`.page-stack` / `.page-panel` / `.hero-panel` / `.section-heading` / 表格 / 列表卡片等所有 page 通用块） | `.page-panel__title { ... }` |
-| `web/src/app/layout/layout.css` | AppShell 子树（Sidebar / TopBar / Breadcrumb / GlobalSearch / SyncStatus / UserChip / Modal） | `.sidebar { ... }` |
+| `web/src/styles/partials/atoms.css` | 设计系统原子样式（`.btn` / `.card` / `.input` / `.badge` / `.sparkline` / `.tabs` / `.data-table` / `.tone--*`） | `.btn--primary { ... }` |
+| `web/src/styles/partials/page.css` | 页面级共享版式与跨域 workflow primitives（`.page-stack` / `.page-panel` / `.hero-panel` / `.section-heading`） | `.page-panel__title { ... }` |
+| `web/src/styles/partials/layout.css` | AppShell 子树（Sidebar / TopBar / Breadcrumb / GlobalSearch / SyncStatus / UserChip） | `.sidebar { ... }` |
+| `web/src/styles/partials/{dashboard,legacy-assets,legacy-vps,legacy-observability,legacy-subscriptions,...}.css` | `web/css-owners.json` 指定的业务 owner；新规则按真实 BEM/domain 归属进入现有 owner 文件 | `.asset-decision-*` / `.vps-*` / `.monitoring-*` |
+| `web/src/styles/modernize.css` | 已有全站兼容覆盖；不是新规则的默认 catch-all | `.settings-save-footer { ... }` |
 | `web/src/pages/LoginPage.css` | 唯一 page 局部样式例外（首屏前缺壳） | `.login-page__card { ... }` |
 
 **原则**：
 
-- 跨页复用样式 → `styles/pages.css`（业务级版式）或 `styles/atoms.css`（原子）。
-- 仅 AppShell 子树用 → `app/layout/layout.css`。
-- **不要**为某个 page 单独建 `.css` 文件（LoginPage 是历史例外）。要做局部 → 用 BEM 命名 + 写进 `pages.css`，靠 page 根容器的 block class 隔离。
-- loading / error / empty 的共享页面状态样式统一用 `.page-state` 系列，落在 `styles/pages.css`。页面不要复制 `.page-panel` + 裸文本；空态如果需要当前装饰和 CTA，使用 `PageState surface="empty"` 复用 `.empty-state.page-state`。
+- 跨页复用样式 → `styles/partials/page.css`（业务级版式）或 `styles/partials/atoms.css`（原子）。
+- 仅 AppShell 子树用 → `styles/partials/layout.css`；业务规则按 `css-owners.json` 进入其现有 owner 文件。
+- **不要**为某个 page 单独建 `.css` 文件（LoginPage 是历史例外），也不要新建 `misc.css` / `legacy-misc.css` / “final overrides” bucket。无法归属的规则先作为删除候选。
+- loading / error / empty 的共享页面状态样式统一用 `.page-state` 系列，落在 `styles/partials/page.css`。页面不要复制 `.page-panel` + 裸文本；空态如果需要当前装饰和 CTA，使用 `PageState surface="empty"` 复用 `.empty-state.page-state`。
+
+## Scenario: CSS owner manifest 与 AST budget ratchet
+
+### 1. Scope / Trigger
+
+- 新增、删除、移动任何 production CSS，修改 `index.css` import 顺序、owner map、CSS budget，或尝试 route-owned CSS 时，必须使用本合同。
+
+### 2. Signatures
+
+- `npm --prefix web run css:analyze`：读取 `web/css-owners.json`、`web/css-budget.json` 与 fresh `web/dist/**/*.css`，输出文本摘要；owner/config/预算失败时返回非零。
+- `node scripts/analyze-web-css.mjs --format json|text [--web-root PATH --owners PATH --budget PATH --dist PATH]`：可供 synthetic fixture 与 Task 10 CI 直接调用。
+- `web/css-owners.json`：`version=1`，恰好包含 app-shell、dashboard、assets、vps、observability、settings-subscriptions、shared-atoms-page 七个 key。
+- `web/css-budget.json`：`version=1`，固定 source files/bytes、rules、declarations、repeated selector texts、literal colors、`!important`、production raw/gzip 九个上限。
+
+### 3. Contracts
+
+- 每个 `web/src/**/*.css` 必须且只能出现在一个 owner；unknown path、重复 owner、漏 owner 均 fail closed。
+- `index.css` 的每个 partial import 必须紧随唯一 `/* owner: <name> */` section，所有 imported partial 必须含非 comment node；manifest 与 owner map 的 partial 集合完全相等。
+- production selector branch 的每个 class 必须由非测试 TS/TSX/HTML 字符串 inventory 或明确动态 modifier prefix 拥有。不可达 branch 删除；同一 rule 仍可达的 selector branch 保留。
+- 同一 selector 在同一 at-rule context 只有一个定义。唯一 allowlist 是入口包与 Login 懒加载包各自需要的 root `.login-page`；media/theme context 不做机械合并。
+- 预算只能随有证据的清理降低；不得为让 CI 变绿而抬高上限。production 指标必须在 fresh build 后测量。
+- route CSS 只有在 owner 真正 route-private、无 FOUC、workflow/browser gate 通过且入口 raw+gzip 下降时保留；跨 VPS/Subscriptions/Providers/Archive 共享的 Assets owner 不得伪装成 Asset Decisions 单路由 CSS。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 结果 |
+| --- | --- |
+| CSS 未配置 owner，或同一路径配置两个 owner | analyzer 返回 1，并列出路径与 exactly one owner 错误 |
+| 任一九项 actual > max | analyzer 返回 1，输出 metric、actual、max |
+| budget/owner JSON 缺字段、类型错误或引用未知 CSS | analyzer 返回 1，不回退默认值 |
+| analyzer 的 `--dist` 不存在 | 返回非零；正式 production 分析不得使用陈旧/虚构产物 |
+| Vitest 仅检查 source、且运行阶段早于 build | 为该测试传入已存在的空临时 `--dist`；不要依赖本机上次留下的 `web/dist` |
+| imported partial 仅剩注释，出现 misc catch-all，或同 context 重复 selector | repository AST contract 失败 |
+| 只删除 selector list 中一个失联 branch | 保留其它 branch 与原 at-rule context，reachability contract 变绿 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：先 fresh build，再运行 analyzer；指标低于现有 budget 后把 limits 精确降至新值，并用 9 route × 3 viewport 复验。
+- Base：只改一个已归属 owner 的规则，focused AST tests 通过，最终仍跑 build + analyzer。
+- Bad：把新规则塞进 `misc.css`；删除整个含可达 branch 的 selector list；测试阶段读取偶然存在的旧 `dist`；无证据提高 budget。
+
+### 6. Tests Required
+
+- `cssAnalyzerContract.test.ts`：JSON inventory、唯一 owner、超预算 fail-closed、同 context 唯一性与 Login bundle allowlist。
+- `cssReachabilityContract.test.ts`：扫描真实 production glob，并列出 file/line/selector/unowned class。
+- `indexCssContract.test.ts`：递归本地 import graph、cycle/owner/non-empty partial、selector/context/declaration 唯一性与 synthetic first-match loophole。
+- 提交前运行 production build → `css:analyze`；涉及布局删除/重排时再跑 desktop/tablet/mobile local browser gate，断言 document/关键命令/局部 scroll owner 与 console/network/CSP。
+
+### 7. Wrong vs Correct
+
+```css
+/* Wrong: 新 catch-all 隐藏 owner，重复定义靠后写覆盖。 */
+/* owner: shared-atoms-page */
+@import './styles/partials/misc.css';
+.command{display:block}
+.command{display:none}
+
+/* Correct: manifest 明确 owner；同 context 只有一个最终定义。 */
+/* owner: observability */
+@import './styles/partials/legacy-events.css';
+.command{display:none}
+```
+
+```ts
+// Wrong: Vitest 先于 build，却读取默认 web/dist，clean CI 会 ENOENT。
+spawnSync(process.execPath, [analyzerPath, '--format', 'json'])
+
+// Correct: source-only contract 显式传入测试创建的空 dist；正式 analyzer 仍 fail closed。
+spawnSync(process.execPath, [analyzerPath, '--dist', emptyDist, '--format', 'json'])
+```
 
 ---
 
@@ -265,11 +338,11 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 - ❌ **任何生产 JSX `style=`**：严格 CSP 下静态视觉走 BEM/令牌，动态 SVG 几何走 attributes，比例和列宽分别用 `<progress>` / `<col width>`。
 - ❌ **回归早期 concept 屏 / `stitch/` 子目录视觉**：当前 UI 指导在 `docs/design/current/`；历史素材不能直接成为实现目标。
 - ❌ **`@media (prefers-color-scheme: dark)`**：主题切换走 `theme-*` class，不监听系统偏好分支（用户可在 system / dark / light 三档显式选）。
-- ❌ **新建 `.css` 文件给单个组件 / page 用**：LoginPage 是历史例外；新增样式落 `styles/pages.css` 或 `styles/atoms.css`，靠 BEM 隔离。
+- ❌ **新建 `.css` 文件给单个组件 / page 用**：LoginPage 是历史例外；新增样式落真实 owner 的 `styles/partials/page.css` / `atoms.css` / 业务文件，靠 BEM 隔离。
 - ❌ **CSS-in-JS / Tailwind / styled-components**：当前不用；要引入需独立技术决策与整体迁移。
 - ❌ **类名简写 / 工具类滥用**（`mt-2`、`flex`、`text-red`）：`reset.css` 仅留 `.tnum` `.mono` 两个工具类，其余走 BEM 表达语义。
 - ❌ **令牌只改一份主题**：`tokens.css` 改了 `:root` 的主题令牌，必须同步检查 `.theme-houfeng-light` / `.theme-classic-dark`；`classic-light` 明确复用 `houfeng-light`，不要私自新增第四套漂移值。
-- ❌ **在组件文件 `import './x.css'`**（除 `LoginPage.tsx` 这个历史例外）：全局样式由 `main.tsx` 顶部 + `app/layout/layout.css` 集中管理。
+- ❌ **在组件文件 `import './x.css'`**（除 `LoginPage.tsx` 这个历史例外）：全局样式由 `main.tsx` 固定入口与 `index.css` owner manifest 集中管理。
 - ❌ **DataTable 可排序表头双 padding**：`.data-table__th--sortable` 自身必须清零 padding，实际间距由 `.data-table__sort-btn` 承担；若密度规则用 `.data-table--compact .data-table__head th` 这类更高特异性选择器，清零规则也必须带上同等上下文（如 `th.data-table__th--sortable`），否则 sortable 表头会比普通表头更宽。
 
 ---
@@ -287,8 +360,8 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 
 仓库内"样式写法符合基线"的真实参考点：
 
-- **设计系统原子（BEM + 令牌 + 复合 modifier）**：`web/src/components/atoms/Button.tsx:18` 的 `['btn', 'btn--' + variant, 'btn--' + size, className].filter(Boolean).join(' ')`，配 `web/src/styles/atoms.css:7-66` 的 `.btn` / `.btn--primary` / `.btn--sm` 等。
-- **状态色派生（`color-mix` + 状态令牌）**：`web/src/styles/atoms.css:155-196` 的 `.tone--normal` / `.tone--alert` / `.tone--critical` 系列。
+- **设计系统原子（BEM + 令牌 + 复合 modifier）**：`web/src/components/atoms/Button.tsx` 的 `['btn', 'btn--' + variant, 'btn--' + size, className].filter(Boolean).join(' ')`，配 `web/src/styles/partials/atoms.css` 的 `.btn` / `.btn--primary` / `.btn--sm` 等。
+- **状态色派生（`color-mix` + 状态令牌）**：`web/src/styles/partials/atoms.css` 的 `.tone--normal` / `.tone--alert` / `.tone--critical` 系列。
 - **多主题令牌覆盖**：`web/src/styles/tokens.css` 的 `:root` / `.theme-houfeng-light` / `.theme-classic-dark` 为三套运行时主题赋值，`classic-light` 由运行时回退到 `houfeng-light`，组件代码无感知。
 - **严格 CSP 下的首屏主题预热**：`web/index.html` 同步加载同源 `web/public/theme-bootstrap.js`，其 allowlist 与 `web/src/lib/theme.ts` 的 `applyTheme` 保持一致。
 - **chart 调色板使用**：`web/src/components/atoms/Sparkline.tsx:23-33` 的 `TONE_VAR` 把状态色 / accent 映射到 `var(--color-state-*)` / `var(--accent*)`，没有任何 hex。

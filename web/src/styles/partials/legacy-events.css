@@ -1,33 +1,17 @@
 /* partial: legacy-events.css (semantic split of the legacy index.css block) */
 
-.event-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);transition:background-color var(--dur-micro) var(--ease-calm)}
-
-.event-row:last-child{border-bottom:none}
-
-.event-row:hover{background:var(--surface-elevated)}
-
-.event-title{font-weight:500;color:var(--text-primary);font-size:12.5px}
-
-.event-body{flex:1;min-width:0;font-size:var(--type-small-size);color:var(--text-secondary);line-height:1.5}
-
-.event-time{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);width:64px;flex-shrink:0}
-
-.event-target{font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);flex-shrink:0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-.event-detail{font-size:11px;color:var(--text-muted)}
-
-.event-group{display:flex;flex-direction:column;gap:var(--space-3)}
-
-.event-group .section-heading{margin-bottom:0;padding-bottom:var(--space-2);align-items:center;flex-direction:row;justify-content:space-between}
-
-.event-group .section-heading__title{font-size:var(--type-body-size)}
-
-.events-page .detail-section:has(.event-group){border-color:color-mix(in srgb,var(--accent-2) 22%,var(--border));box-shadow:var(--shadow-soft)}
-
-.events-page .detail-section:has(.event-group) .detail-section__title{font-size:var(--type-h1-size)}
-
 .events-stream-empty{padding:var(--space-6);text-align:center}
 
 .events-stream-empty__message{font-size:13px;color:var(--text-secondary)}
 
 .events-stream-empty__reset{margin-top:var(--space-3)}
+
+.events-stream-card{min-width:0}
+
+.events-table-scroll-hint{margin:0 0 var(--space-2);color:var(--text-muted);font-size:var(--type-small-size)}
+
+.events-table-scroll{max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-gutter:stable;border-radius:var(--radius-2)}
+
+.events-table-scroll:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:var(--space-1)}
+
+.events-table-scroll .table{min-width:calc(var(--space-12) * 16)}

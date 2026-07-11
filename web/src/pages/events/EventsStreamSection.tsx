@@ -81,34 +81,45 @@ export function EventsStreamSection({
   }
 
   return (
-    <div className="card">
-      <table className="table">
-        <thead>
-          <tr>
-            <th className="time">时间</th>
-            <th>严重度</th>
-            <th>事件类型</th>
-            <th>异常类别</th>
-            <th>摘要</th>
-            <th>对象</th>
-          </tr>
-        </thead>
-        <tbody>
-          {displayEvents.map((evt) => {
-            const link = objectLink(evt.object_type, evt.object_id, nameMap)
-            return (
-              <tr key={evt.event_id ?? `${evt.created_at}-${evt.incident_id}-${evt.event_type}`}>
-                <td className="time mono">{formatEventTime(evt.created_at)}</td>
-                <td><span className={severityClass(evt.severity)}>{evt.severity || '—'}</span></td>
-                <td>{eventTypeLabel(evt.event_type)}</td>
-                <td>{evt.incident_class || '—'}</td>
-                <td className="name">{evt.summary || '暂无摘要'}</td>
-                <td><Link to={link.to} className="mono">{link.label}</Link></td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+    <div className="card events-stream-card">
+      <p id="events-table-scroll-hint" className="events-table-scroll-hint">
+        表格可横向滚动查看完整事件字段
+      </p>
+      <div
+        className="events-table-scroll"
+        role="region"
+        aria-labelledby="events-page-title"
+        aria-describedby="events-table-scroll-hint"
+        tabIndex={0}
+      >
+        <table className="table">
+          <thead>
+            <tr>
+              <th className="time">时间</th>
+              <th>严重度</th>
+              <th>事件类型</th>
+              <th>异常类别</th>
+              <th>摘要</th>
+              <th>对象</th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayEvents.map((evt) => {
+              const link = objectLink(evt.object_type, evt.object_id, nameMap)
+              return (
+                <tr key={evt.event_id ?? `${evt.created_at}-${evt.incident_id}-${evt.event_type}`}>
+                  <td className="time mono">{formatEventTime(evt.created_at)}</td>
+                  <td><span className={severityClass(evt.severity)}>{evt.severity || '—'}</span></td>
+                  <td>{eventTypeLabel(evt.event_type)}</td>
+                  <td>{evt.incident_class || '—'}</td>
+                  <td className="name">{evt.summary || '暂无摘要'}</td>
+                  <td><Link to={link.to} className="mono">{link.label}</Link></td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
 
       <div className="table-pagination">
         <button
