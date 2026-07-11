@@ -86,19 +86,11 @@
 
 .targets-table .targets-table__labels-cell{font-size:var(--type-small-size);color:var(--text-secondary)}
 
-.targets-table .targets-table__labels{font-size:var(--type-small-size);color:var(--text-secondary)}
-
 .targets-table .targets-table__labels-more{color:var(--text-muted)}
 
 .targets-table .targets-table__status{display:inline-flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}
 
 .targets-table .targets-table__exec-labels{font-family:var(--font-sans);font-size:var(--type-small-size);color:var(--text-muted)}
-
-.targets-table .targets-table__observation{display:flex;flex-direction:column;gap:2px;font-size:var(--type-small-size)}
-
-.targets-table .targets-table__observation-row{display:inline-flex;gap:4px;color:var(--text-muted)}
-
-.targets-table .targets-table__observation-label{color:var(--text-muted)}
 
 .targets-table__freshness{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:10px;color:var(--text-muted);line-height:1.3}
 
