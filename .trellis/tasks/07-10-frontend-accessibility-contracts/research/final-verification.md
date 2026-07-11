@@ -29,6 +29,7 @@
 ## Local Chromium Keyboard And Axe
 
 - Browser: Chromium `150.0.7871.114`（CDP，headless=new）。
+- Final clean rerun: branch HEAD `bc93f52`（implementation tree `f7db74d`）；全新 Chromium profile、重新生成的 production dist。
 - axe-core: exact `4.10.3`，只安装在 `/tmp/houfeng-task6-browser`，未修改 `web/package.json` / lockfile。
 - Data source: `mock-api asset-workflows`；production `web/dist` 由本地临时 server 提供，并发送仓库精确 CSP policy。
 - Routes: `/`、`/settings`、`/vps`、`/asset-decisions`。
