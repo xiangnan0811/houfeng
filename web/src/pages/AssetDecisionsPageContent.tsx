@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import {
   type AssetDecisionDraft,
@@ -9,6 +9,7 @@ import {
 } from '../components/atoms'
 import { PortfolioWorkbench } from './asset-decisions/components/PortfolioWorkbench'
 import { SecondaryWorkbenches } from './asset-decisions/components/SecondaryWorkbenches'
+import { useAssetDecisionRouteState } from './asset-decisions/hooks/useAssetDecisionRouteState'
 import {
   Badge,
   type DataTableColumn,
@@ -80,7 +81,6 @@ import {
   vpsLocationLabel,
 } from './assetPageUtils'
 import type {
-  WorkbenchView,
   MainWorkbenchView,
   DecisionQueueView,
   DecisionQueueItem,
@@ -105,9 +105,7 @@ import type {
   TemplateDetailPanel,
   ContextFilterKey,
   OpenStateKey,
-  ContextFilterChip,
   AssetDecisionSecondaryNavItem,
-  SecondaryWorkbench,
 } from './asset-decisions/types'
 import {
   INITIAL_DECISION_DRAFT,
@@ -124,15 +122,12 @@ import {
   ROLE_LABELS,
   ACTION_LABELS,
   SCENARIO_TEMPLATE_STATUS_LABELS,
-  MANUAL_GROUP_SCENARIO_LABELS,
   RECORD_STATUS_LABELS,
   FOLLOWUP_STATUS_LABELS,
   ROLE_OPTIONS,
   ACTION_OPTIONS,
   FOLLOWUP_STATUS_OPTIONS,
   EXECUTION_PLAN_LANE_ORDER,
-  CONTEXT_FILTER_KEYS,
-  OPEN_STATE_KEYS,
 } from './asset-decisions/constants'
 import { vpsDetailPath, vpsWorkbenchPath } from './asset-decisions/paths'
 import {
@@ -157,9 +152,6 @@ import {
 import {
   describeError,
   parseRenewalWindow,
-  parseWorkbenchView,
-  trimParam,
-  buildAssetDecisionFilter,
 } from './asset-decisions/utils'
 import {
   chipTone,
@@ -223,21 +215,6 @@ type AssetDecisionNextWorkItem = {
   actionLabel: string
   priority: number
   target: AssetDecisionNextWorkTarget
-}
-
-function portfolioViewForWorkbench(view: WorkbenchView): MainWorkbenchView {
-  return view === 'single_queue' ? 'needs_decision' : view
-}
-
-function buildContextFilterChips(filter: AssetDecisionGroupListFilter): ContextFilterChip[] {
-  const chips: ContextFilterChip[] = []
-  if (filter.provider_id) chips.push({ key: 'provider_id', label: '服务商', value: filter.provider_id })
-  if (filter.vps_id) chips.push({ key: 'vps_id', label: 'VPS', value: filter.vps_id })
-  if (filter.country) chips.push({ key: 'country', label: '国家', value: filter.country })
-  if (filter.region) chips.push({ key: 'region', label: '区域', value: filter.region })
-  if (filter.city) chips.push({ key: 'city', label: '城市', value: filter.city })
-  if (filter.scenario) chips.push({ key: 'scenario', label: '场景', value: MANUAL_GROUP_SCENARIO_LABELS[filter.scenario] })
-  return chips
 }
 
 function filterDecisionQueue(
@@ -521,23 +498,15 @@ function scenarioForGroup(group: Pick<AssetDecisionGroupSummary, 'group_type'>):
 
 
 export function AssetDecisionsPageContent() {
-  const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const activeView = parseWorkbenchView(searchParams.get('view'))
-  const portfolioView = portfolioViewForWorkbench(activeView)
-  const renewalWindow = parseRenewalWindow(searchParams.get('renew_within_days'))
-  const assetDecisionFilter = useMemo(
-    () => buildAssetDecisionFilter(searchParams, portfolioView, renewalWindow),
-    [portfolioView, renewalWindow, searchParams],
-  )
+  const route = useAssetDecisionRouteState()
+  const portfolioView = route.state.portfolioView
+  const renewalWindow = route.state.renewalWindow
+  const assetDecisionFilter = route.state.filter
   const manualGroupListFilterKey = useMemo(
     () => assetDecisionFilterKey(assetDecisionFilter),
     [assetDecisionFilter],
   )
-  const contextFilterChips = useMemo(
-    () => buildContextFilterChips(assetDecisionFilter),
-    [assetDecisionFilter],
-  )
+  const contextFilterChips = route.state.contextFilterChips
   const [queueView, setQueueView] = useState<DecisionQueueView>('all')
   const [portfolioState, setPortfolioState] = useState<PortfolioState>(INITIAL_PORTFOLIO_STATE)
   const [detailState, setDetailState] = useState<DetailState>(INITIAL_DETAIL_STATE)
@@ -596,24 +565,9 @@ export function AssetDecisionsPageContent() {
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [decisionNotice, setDecisionNotice] = useState<string | null>(null)
   const [refreshToken, setRefreshToken] = useState(0)
-  const urlSecondaryWorkbench: SecondaryWorkbench | null = (() => {
-    if (trimParam(searchParams.get('record_id'))) return 'records'
-    if (trimParam(searchParams.get('manual_group_id')) || trimParam(searchParams.get('template_id'))) return 'scenarios'
-    if (activeView === 'single_queue') return 'single_queue'
-    if (portfolioView === 'renewal') return 'renewals'
-    return null
-  })()
-  const [selectedSecondaryWorkbench, setSelectedSecondaryWorkbenchState] = useState<SecondaryWorkbench | null>(null)
-  const searchParamSignature = searchParams.toString()
-  const selectedSecondaryWorkbenchSearchKeyRef = useRef('')
-  const manualSecondaryWorkbench = selectedSecondaryWorkbenchSearchKeyRef.current === searchParamSignature
-    ? selectedSecondaryWorkbench
-    : null
-  const secondaryWorkbench = manualSecondaryWorkbench ?? urlSecondaryWorkbench
-  const setSelectedSecondaryWorkbench = useCallback((workbench: SecondaryWorkbench | null) => {
-    selectedSecondaryWorkbenchSearchKeyRef.current = searchParamSignature
-    setSelectedSecondaryWorkbenchState(workbench)
-  }, [searchParamSignature])
+  const searchParamSignature = route.state.searchSignature
+  const secondaryWorkbench = route.state.secondary
+  const setSelectedSecondaryWorkbench = route.commands.setSecondary
   const handledOpenStateRef = useRef('')
   const preservedManualGroupSummariesRef = useRef(new Map<string, {
     filterKey: string
@@ -666,7 +620,6 @@ export function AssetDecisionsPageContent() {
   }
 
   function applyURLManualGroupOpenState(manualGroupID: string) {
-    setSelectedSecondaryWorkbenchState('scenarios')
     setSelectedGroupID(null)
     setDetailState(INITIAL_DETAIL_STATE)
     setSelectedRecordID(null)
@@ -690,7 +643,6 @@ export function AssetDecisionsPageContent() {
   }
 
   function applyURLRecordOpenState(recordID: string) {
-    setSelectedSecondaryWorkbenchState('records')
     setSelectedGroupID(null)
     setSelectedManualGroupID(null)
     setSelectedTemplateID(null)
@@ -714,7 +666,6 @@ export function AssetDecisionsPageContent() {
   }
 
   function applyURLTemplateOpenState(templateID: string) {
-    setSelectedSecondaryWorkbenchState('scenarios')
     setSelectedGroupID(null)
     setDetailState(INITIAL_DETAIL_STATE)
     setSelectedManualGroupID(null)
@@ -1003,15 +954,12 @@ export function AssetDecisionsPageContent() {
   }, [selectedTemplateID, renewalWindow, refreshToken])
 
   useEffect(() => {
-    const groupID = trimParam(searchParams.get('group_id'))
-    const manualGroupID = trimParam(searchParams.get('manual_group_id'))
-    const recordID = trimParam(searchParams.get('record_id'))
-    const templateID = trimParam(searchParams.get('template_id'))
-    const openStateKey = groupID ? `group:${groupID}`
-      : manualGroupID ? `manual:${manualGroupID}`
-        : recordID ? `record:${recordID}`
-          : templateID ? `template:${templateID}`
-            : ''
+    const openSelection = route.state.open
+    const groupID = openSelection?.type === 'group_id' ? openSelection.id : undefined
+    const manualGroupID = openSelection?.type === 'manual_group_id' ? openSelection.id : undefined
+    const recordID = openSelection?.type === 'record_id' ? openSelection.id : undefined
+    const templateID = openSelection?.type === 'template_id' ? openSelection.id : undefined
+    const openStateKey = openSelection ? `${openSelection.type}:${openSelection.id}` : ''
 
     if (openStateKey === handledOpenStateRef.current) return
     // Defer URL-driven drawer/modal selection so deep links do not cascade renders in the effect body.
@@ -1042,7 +990,7 @@ export function AssetDecisionsPageContent() {
     return () => {
       window.clearTimeout(timer)
     }
-  }, [searchParams, selectedGroupID, selectedManualGroupID, selectedRecordID, selectedTemplateID])
+  }, [route.state.open, searchParamSignature, selectedGroupID, selectedManualGroupID, selectedRecordID, selectedTemplateID])
 
   const subscriptionsByVPS = useMemo(
     () => groupSubscriptionsByVPS(queueState.subscriptions),
@@ -1524,10 +1472,7 @@ export function AssetDecisionsPageContent() {
       groupsLoading: true,
       groupsError: null,
     }))
-    const nextParams = new URLSearchParams(searchParams)
-    nextParams.set('view', next)
-    nextParams.set('renew_within_days', String(renewalWindow))
-    setSearchParams(nextParams)
+    route.commands.setWorkbench(next)
   }
 
   function changeRenewalWindow(value: string) {
@@ -1544,49 +1489,23 @@ export function AssetDecisionsPageContent() {
       renewalsLoading: true,
       renewalsError: null,
     }))
-    const nextParams = new URLSearchParams(searchParams)
-    nextParams.set('view', portfolioView)
-    nextParams.set('renew_within_days', String(nextWindow))
-    setSearchParams(nextParams)
-  }
-
-  function updateAssetDecisionSearchParams(mutator: (next: URLSearchParams) => void) {
-    const nextParams = new URLSearchParams(searchParams)
-    mutator(nextParams)
-    if (nextParams.toString() !== searchParams.toString()) {
-      setSearchParams(nextParams)
-    }
+    route.commands.setRenewalWindow(nextWindow)
   }
 
   function setOpenState(key: OpenStateKey, value: string) {
-    updateAssetDecisionSearchParams((nextParams) => {
-      for (const openKey of OPEN_STATE_KEYS) {
-        if (openKey !== key) nextParams.delete(openKey)
-      }
-      nextParams.set(key, value)
-    })
+    route.commands.openEntity(key, value)
   }
 
   function clearOpenState(key: OpenStateKey) {
-    const nextParams = new URLSearchParams(searchParams)
-    nextParams.delete(key)
-    const nextSignature = nextParams.toString()
-    if (nextSignature !== searchParamSignature) {
-      selectedSecondaryWorkbenchSearchKeyRef.current = nextSignature
-      setSearchParams(nextParams)
-    }
+    route.commands.closeEntity(key)
   }
 
   function clearContextFilter(key: ContextFilterKey) {
-    updateAssetDecisionSearchParams((nextParams) => {
-      nextParams.delete(key)
-    })
+    route.commands.clearFilter(key)
   }
 
   function clearAllContextFilters() {
-    updateAssetDecisionSearchParams((nextParams) => {
-      for (const key of CONTEXT_FILTER_KEYS) nextParams.delete(key)
-    })
+    route.commands.clearAllFilters()
   }
 
   function openGroup(groupID: string) {
@@ -2426,11 +2345,11 @@ export function AssetDecisionsPageContent() {
   }
 
   function navigateToVPS(vps: VPSAssetRecord) {
-    navigate(vpsDetailPath(vps.vps_id))
+    route.commands.navigateToVPS(vps.vps_id)
   }
 
   function navigateToVPSSubscription(vpsID: string) {
-    navigate(vpsWorkbenchPath(vpsID, 'subscription'))
+    route.commands.navigateToVPSSubscription(vpsID)
   }
 
   function openPortfolioLead() {

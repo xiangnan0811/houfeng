@@ -760,6 +760,13 @@ function findFetchCall(fetchMock: ReturnType<typeof vi.fn>, url: string, method?
   })
 }
 
+function fetchRequestInventory(fetchMock: ReturnType<typeof vi.fn>, startIndex = 0): string[] {
+  return fetchMock.mock.calls
+    .slice(startIndex)
+    .map((call) => `${call[1]?.method ?? 'GET'} ${call[0]}`)
+    .sort()
+}
+
 type SecondaryWorkbenchLabel = '保存记录' | '场景与组合' | '续费窗口' | '单台队列'
 
 function getSecondaryWorkbenchButton(supportStrip: HTMLElement, label: SecondaryWorkbenchLabel) {
@@ -1051,6 +1058,33 @@ describe('AssetDecisionsPage', () => {
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/manual-groups?view=needs_decision&renew_within_days=30')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/scenario-templates')
     expectFetchCalledWith(fetchMock, '/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc')
+  })
+
+  it('issues the exact eleven-request initial inventory once', async () => {
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(11))
+    expect(fetchRequestInventory(fetchMock)).toEqual([
+      'GET /api/asset-decisions/groups?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/manual-groups?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/overview?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/records?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/scenario-templates',
+      'GET /api/subscriptions?renew_within_days=30&sort=renew_at&order=asc',
+      'GET /api/subscriptions?sort=renew_at&order=asc',
+      'GET /api/vps',
+      'GET /api/vps?renewal_decision=cancel',
+      'GET /api/vps?renewal_decision=migrate',
+      'GET /api/vps?renewal_decision=unreviewed',
+    ])
   })
 
   it('shows a quiet stable state without promoting templates or manual groups', async () => {
@@ -1375,6 +1409,32 @@ describe('AssetDecisionsPage', () => {
     expect(screen.queryByRole('heading', { name: '决策组不可用' })).not.toBeInTheDocument()
   })
 
+  it('keeps the loaded overview available when decision groups fail', async () => {
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        {
+          url: '/api/asset-decisions/groups?view=needs_decision&renew_within_days=30',
+          body: { error: 'groups unavailable' },
+          status: 500,
+        },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: '决策组不可用' })).toBeInTheDocument()
+    const currentFacts = screen.getByLabelText('资产组合决策当前事实')
+    expect(within(currentFacts).getByText('组合组数')).toBeInTheDocument()
+    expect(within(currentFacts).getByText('3')).toBeInTheDocument()
+    expect(screen.getByText('自动组暂不可用，当前只展示已成功加载的事实。')).toBeInTheDocument()
+  })
+
   it('does not invent readback next-work items when saved records fail to load', async () => {
     const fetchMock = vi.fn()
     mockInitialWorkbench(fetchMock, {
@@ -1650,10 +1710,27 @@ describe('AssetDecisionsPage', () => {
     fireEvent.click(within(dialog).getByRole('tab', { name: /成员/ }))
     fireEvent.click(within(dialog).getAllByRole('button', { name: '处理' })[0])
     fireEvent.change(within(dialog).getByLabelText('续费决策'), { target: { value: 'observe' } })
+    const renewalMutationStart = fetchMock.mock.calls.length
     fireEvent.click(within(dialog).getByRole('button', { name: '保存续费决策' }))
 
     await waitFor(() => expect(screen.getByText(/续费决策已保存：Germany Primary ->/)).toBeInTheDocument())
     await waitFor(() => expect(within(dialog).queryByText('Germany Primary')).not.toBeInTheDocument())
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(renewalMutationStart + 13))
+    expect(fetchRequestInventory(fetchMock, renewalMutationStart)).toEqual([
+      'GET /api/asset-decisions/groups/adg_auto_001?renew_within_days=30',
+      'GET /api/asset-decisions/groups?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/manual-groups?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/overview?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/records?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/scenario-templates',
+      'GET /api/subscriptions?renew_within_days=30&sort=renew_at&order=asc',
+      'GET /api/subscriptions?sort=renew_at&order=asc',
+      'GET /api/vps',
+      'GET /api/vps?renewal_decision=cancel',
+      'GET /api/vps?renewal_decision=migrate',
+      'GET /api/vps?renewal_decision=unreviewed',
+      'PATCH /api/vps/vps_primary',
+    ])
     fireEvent.click(within(dialog).getByRole('tab', { name: '保存' }))
     expect(within(dialog).queryByRole('button', { name: '编辑 Germany Primary 成员理由' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '编辑 Germany Standby 成员理由' })).toBeInTheDocument()
@@ -1776,10 +1853,21 @@ describe('AssetDecisionsPage', () => {
     await waitFor(() => expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole('button', { name: '查看组' }))
     const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(16))
+    const mutationStart = fetchMock.mock.calls.length
     fireEvent.click(within(dialog).getByRole('button', { name: '创建组合' }))
 
     await waitFor(() => expect(screen.getByText('已创建自定义组合：德国主力组合')).toBeInTheDocument())
     const manualDialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(mutationStart + 6))
+    expect(fetchRequestInventory(fetchMock, mutationStart)).toEqual([
+      'GET /api/asset-decisions/groups?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/manual-groups/admg_created',
+      'GET /api/asset-decisions/manual-groups?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/overview?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/records?view=needs_decision&renew_within_days=30',
+      'POST /api/asset-decisions/manual-groups',
+    ])
     expectTabPanelRelationship(manualDialog, '自定义组合详情分区')
     expect(screen.queryByRole('dialog', { name: '资产决策组详情' })).not.toBeInTheDocument()
     expect(screen.queryAllByRole('dialog')).toHaveLength(1)
@@ -2992,6 +3080,52 @@ describe('AssetDecisionsPage', () => {
           renewal_reason: 'move to Osaka',
         }),
       },
+    ])
+  })
+
+  it('replays the compatibility refresh inventory after a renewal decision', async () => {
+    const updated = {
+      ...vps,
+      renewal_decision: 'migrate',
+      updated_at: '2026-05-09T09:00:00Z',
+    }
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      routes: [
+        { url: '/api/vps/vps_review', method: 'PATCH', body: updated },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await openSecondaryWorkbench('单台队列')
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(11))
+    const mutationStart = fetchMock.mock.calls.length
+    const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section')
+    fireEvent.click(within(singleQueue!).getAllByRole('button', { name: '处理' })[0])
+    const drawer = await screen.findByRole('dialog', { name: '续费决策处理' })
+    fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'migrate' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '保存续费决策' }))
+
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(mutationStart + 12))
+    expect(fetchRequestInventory(fetchMock, mutationStart)).toEqual([
+      'GET /api/asset-decisions/groups?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/manual-groups?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/overview?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/records?view=needs_decision&renew_within_days=30',
+      'GET /api/asset-decisions/scenario-templates',
+      'GET /api/subscriptions?renew_within_days=30&sort=renew_at&order=asc',
+      'GET /api/subscriptions?sort=renew_at&order=asc',
+      'GET /api/vps',
+      'GET /api/vps?renewal_decision=cancel',
+      'GET /api/vps?renewal_decision=migrate',
+      'GET /api/vps?renewal_decision=unreviewed',
+      'PATCH /api/vps/vps_review',
     ])
   })
 
