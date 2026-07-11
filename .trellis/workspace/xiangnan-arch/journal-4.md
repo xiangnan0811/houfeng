@@ -1954,3 +1954,45 @@ Reviewed and fixed frontend UI/settings changes, added Trellis task artifacts, v
 ### Next Steps
 
 - None - task complete
+
+
+## Session 235: 完成前端可访问性交互契约
+
+**Date**: 2026-07-11
+**Task**: 完成前端可访问性交互契约
+**Branch**: `codex/archive-frontend-accessibility-contracts`
+
+### Summary
+
+完成 Task 6 原生字段、Tabs/Segmented、菜单、skip link、VPS 主链接与 AST contract；90/669 全量门、PR #357、main CI、v0.58.1 release、双架构镜像与发布产物 Chromium/axe smoke 全部通过，manifest digest sha256:ff15def93f7f42d9a9aaf3757e0b450723e1513ce64720a7d38a487583f3cbe6。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b96ffc8` | (see git log) |
+| `dd55783` | (see git log) |
+| `f3fd4e0` | (see git log) |
+| `3133961` | (see git log) |
+| `1380089` | (see git log) |
+| `f7db74d` | (see git log) |
+| `bc93f52` | (see git log) |
+| `61c28a2` | (see git log) |
+| `0c18bda` | (see git log) |
+| `5a06d62` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
