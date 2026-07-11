@@ -176,9 +176,11 @@ export function updateMonitoringInstanceMetadata(
   input: UpdateMonitoringInstanceMetadataInput,
   options: MetadataUpdateOptions = {},
 ) {
-  return patchJSONBody<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}`, input, {
-    ifMatch: options.expectedUpdatedAt,
-  })
+  return patchJSONBody<MonitoringInstanceRecord>(
+    `/api/monitoring-instances/${monitoringInstanceId}`,
+    input,
+    options.expectedUpdatedAt ? { ifMatch: options.expectedUpdatedAt } : {},
+  )
 }
 
 export function getMonitoringInstanceRuntimeFacts(monitoringInstanceId: string, timeWindow = '24h') {
@@ -322,9 +324,11 @@ export function updateTargetMetadata(
   input: UpdateTargetMetadataInput,
   options: MetadataUpdateOptions = {},
 ) {
-  return patchJSONBody<TargetRecord>(`/api/targets/${targetId}`, input, {
-    ifMatch: options.expectedUpdatedAt,
-  })
+  return patchJSONBody<TargetRecord>(
+    `/api/targets/${targetId}`,
+    input,
+    options.expectedUpdatedAt ? { ifMatch: options.expectedUpdatedAt } : {},
+  )
 }
 
 export function listTargetProbeItems(targetId: string) {
@@ -740,16 +744,8 @@ export function listVPSServices(vpsId: string) {
 }
 
 export function createVPSService(vpsId: string, input: CreateAssetServiceInput): Promise<AssetServiceRecord> {
-  const body: Omit<CreateAssetServiceInput, 'vps_id'> = {
-    target_id: input.target_id,
-    name: input.name,
-    service_type: input.service_type,
-    status: input.status,
-    url: input.url,
-    port: input.port,
-    labels: input.labels,
-    note: input.note,
-  }
+  const { vps_id: ignoredVPSID, ...body } = input
+  void ignoredVPSID
   return postJSONBody<AssetServiceRecord>(`/api/vps/${vpsId}/services`, body)
 }
 
@@ -758,19 +754,8 @@ export function listVPSDomains(vpsId: string) {
 }
 
 export function createVPSDomain(vpsId: string, input: CreateAssetDomainInput): Promise<AssetDomainRecord> {
-  const body: Omit<CreateAssetDomainInput, 'vps_id'> = {
-    service_id: input.service_id,
-    target_id: input.target_id,
-    domain_name: input.domain_name,
-    purpose: input.purpose,
-    status: input.status,
-    registrar: input.registrar,
-    expires_at: input.expires_at,
-    auto_renew: input.auto_renew,
-    https_enabled: input.https_enabled,
-    labels: input.labels,
-    note: input.note,
-  }
+  const { vps_id: ignoredVPSID, ...body } = input
+  void ignoredVPSID
   return postJSONBody<AssetDomainRecord>(`/api/vps/${vpsId}/domains`, body)
 }
 
