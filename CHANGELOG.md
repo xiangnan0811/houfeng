@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.58.5](https://github.com/xiangnan0811/houfeng/compare/v0.58.4...v0.58.5) (2026-07-11)
+
+
+### Documentation
+
+* **spec:** align frontend quality contracts ([ad33ada](https://github.com/xiangnan0811/houfeng/commit/ad33adaba0d38a67bb241e12f06d1a1623cb99da))
+* **task:** record quality ratchet baseline ([bbb4576](https://github.com/xiangnan0811/houfeng/commit/bbb457694c6554eb0a89862bfe72d7910ff32a0f))
+
+
+### Build System
+
+* **web:** enforce bundle and CSS budgets ([6661f7e](https://github.com/xiangnan0811/houfeng/commit/6661f7e8420a58f655114bc6bea4d61037ad7c27))
+* **web:** enforce scoped type-aware lint ([8f8f6c4](https://github.com/xiangnan0811/houfeng/commit/8f8f6c4dcf5c3b10bb67b57a2c70cfa60cdd7ab7))
+* **web:** pin browser and coverage tooling ([c4ee4e6](https://github.com/xiangnan0811/houfeng/commit/c4ee4e61d2315fcc5cf6b4ea3a1d5af23af99ce8))
+
+
+### CI
+
+* **web:** enforce frontend quality ratchets ([03c6acb](https://github.com/xiangnan0811/houfeng/commit/03c6acb6baea6fc78214063e55ac7de870cf8cf4))
+* **web:** require browser and staging audit gates ([e8b3125](https://github.com/xiangnan0811/houfeng/commit/e8b31259333a88e9f2234816aca7b02074b4d66c))
+
 ## [0.58.4](https://github.com/xiangnan0811/houfeng/compare/v0.58.3...v0.58.4) (2026-07-11)
 
 
