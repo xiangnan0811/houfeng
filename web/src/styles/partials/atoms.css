@@ -13,7 +13,7 @@
 select.input{appearance:none;-webkit-appearance:none;-moz-appearance:none;padding-right:36px;cursor:pointer;background-image:var(--select-caret);background-repeat:no-repeat;background-position:right 14px center}
 select.input::-ms-expand{display:none}
 .input-field__error{font-size:12px;color:var(--color-state-critical);display:flex;align-items:center;gap:4px}
-.input-field__hint{font-size:12px;color:var(--text-muted)}
+.input-field__hint{font-size:11px;color:var(--text-muted)}
 
 /* ===== ATOM COMPAT: Badge ===== */
 .badge{display:inline-flex;align-items:center;gap:6px}
@@ -102,8 +102,6 @@ select.input::-ms-expand{display:none}
 .status-glyph{display:inline-block;vertical-align:middle;border-radius:50%}
 .status-glyph--sm{width:8px;height:8px}
 .status-glyph--md{width:12px;height:12px}
-.mono{font-family:var(--font-mono)}
-.tnum{font-variant-numeric:tabular-nums}
 .mono-digits{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
 .hostname{font-family:var(--font-mono);font-size:var(--type-code-size);color:var(--text-primary);letter-spacing:0.01em}
 .hostname--truncate{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
@@ -116,29 +114,8 @@ select.input::-ms-expand{display:none}
 .trend--tone-muted{color:var(--text-muted)}
 .empty-inline{color:var(--text-muted);font-size:13px;font-style:italic}
 
-/* ===== ATOM COMPAT: Toggle ===== */
-.toggle{width:44px;height:24px;border-radius:12px;background:var(--control-bg);border:1px solid var(--control-border);position:relative;transition:background-color var(--dur-state) var(--ease-calm),border-color var(--dur-state) var(--ease-calm);cursor:pointer}
-.toggle.is-on{background:var(--accent);border-color:transparent}
-.toggle__thumb{position:absolute;top:2px;left:2px;width:18px;height:18px;background:var(--surface-elevated);border-radius:50%;box-shadow:var(--shadow-soft);transition:transform var(--dur-state) var(--ease-calm)}
-.toggle.is-on .toggle__thumb{transform:translateX(20px);background:var(--bg-sidebar)}
-.toggle:disabled{opacity:0.5;cursor:not-allowed}
-.toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-
 /* ===== ATOM COMPAT: Drawer ===== */
-.drawer-overlay{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 68%,transparent);z-index:100;opacity:0;pointer-events:none;transition:opacity var(--dur-state) var(--ease-calm)}
-.drawer-overlay--open{opacity:1;pointer-events:auto}
 .drawer{position:fixed;top:0;bottom:0;display:flex;flex-direction:column;width:440px;max-width:92vw;min-width:min(360px,92vw);background:var(--panel-bg-elevated);color:var(--text-primary);border:0 solid var(--border);box-shadow:var(--shadow-overlay);z-index:101;transform:translateX(100%);transition:transform var(--dur-state) var(--ease-calm)}
-.drawer--open{transform:translateX(0)}
-.drawer--right{right:0;border-left-width:var(--border-w);transform:translateX(100%)}
-.drawer--right.drawer--open{transform:translateX(0)}
-.drawer--left{left:0;border-right-width:var(--border-w);transform:translateX(-100%)}
-.drawer--left.drawer--open{transform:translateX(0)}
-.drawer__header{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-4);padding:var(--space-6);border-bottom:var(--border-w) solid var(--border);background:color-mix(in srgb,var(--surface-elevated) 42%,transparent)}
-.drawer__title{margin:0;color:var(--text-primary);font-family:var(--font-serif);font-size:var(--type-h1-size);font-weight:var(--type-h1-weight);line-height:var(--type-h1-leading)}
-.drawer__close{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:32px;height:32px;padding:0;border:var(--border-w) solid transparent;border-radius:var(--radius-2);background:transparent;color:var(--text-muted);font:inherit;font-size:24px;line-height:1;cursor:pointer;transition:background-color var(--dur-micro) var(--ease-calm),border-color var(--dur-micro) var(--ease-calm),color var(--dur-micro) var(--ease-calm)}
-.drawer__close:hover{background:var(--surface-pressed);border-color:var(--border);color:var(--text-primary)}
-.drawer__close:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.drawer__body{display:flex;flex:1;flex-direction:column;min-height:0;padding:var(--space-6);overflow-y:auto}
 @media(min-width:1100px){.drawer{max-width:40vw}}
 
 /* ===== ATOM COMPAT: Modal ===== */
@@ -164,7 +141,6 @@ select.input::-ms-expand{display:none}
 .vps-create-form__section-title{font-size:var(--type-eyebrow-size);font-weight:500;letter-spacing:var(--type-eyebrow-tracking);text-transform:uppercase;color:var(--text-muted);padding-bottom:var(--space-2);border-bottom:1px solid var(--border-muted)}
 .vps-create-form__row{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}
 .vps-create-form__row--3col{display:grid;grid-template-columns:2fr 1fr 1fr;gap:var(--space-3)}
-.vps-create-form__wide{grid-column:1 / -1}
 .vps-create-form__toggle-row{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);padding:var(--space-3);border:var(--border-w) solid var(--border-muted);border-radius:var(--radius-2);background:var(--surface-1)}
 .vps-create-form__toggle-row .tg{flex-shrink:0}
 .vps-create-form__provider-row{display:flex;align-items:flex-end;gap:var(--space-3)}

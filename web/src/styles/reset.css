@@ -9,6 +9,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text-primary);
+  transition: background var(--t), color var(--t);
   font-family: var(--font-sans);
   font-size: var(--type-body-size);
   line-height: var(--type-body-leading);

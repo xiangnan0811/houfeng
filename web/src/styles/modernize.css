@@ -8,10 +8,6 @@
    ============================================================ */
 
 /* ---------- 1. 主题化滚动条（全站，细腻现代手感） ---------- */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -37,9 +33,6 @@
 
 /* ---------- 3. 路由切换入场动画（统一节奏；尊重减弱动效偏好） ---------- */
 /* 仅作用于页面级 .page-stack，子组件重渲染不会重播，避免抖动。 */
-.page-stack {
-  animation: page-enter var(--dur-slow) var(--ease-out) both;
-}
 @keyframes page-enter {
   from {
     opacity: 0;
@@ -415,10 +408,6 @@ summary:focus-visible,
   color: var(--text-muted);
   font-size: var(--type-eyebrow-size);
   white-space: nowrap;
-}
-
-.topbar .tp-sync {
-  background: var(--text-muted);
 }
 
 .topbar .tp-sync--clear {

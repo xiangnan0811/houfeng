@@ -1,32 +1,38 @@
-/* ============================================================
- * index.css — frozen monolith, now composed from partials.
- * New global styles go in web/src/styles/modernize.css (imported
- * after this file in main.tsx). Do NOT add new rules here.
- * Partials are @imported in cascade order (last wins on ties).
- * ============================================================ */
+/* index.css is the explicit owner manifest for global CSS.
+ * Shared foundations load first; business owners may specialize them later.
+ * A partial appears under exactly one owner and import order is contractual. */
+
+/* owner: shared-atoms-page */
 @import './styles/partials/base.css';
-@import './styles/partials/layout.css';
 @import './styles/partials/forms.css';
-@import './styles/partials/dashboard.css';
-@import './styles/partials/misc.css';
-@import './styles/partials/overlays.css';
-@import './styles/partials/tabs.css';
-@import './styles/partials/pagination.css';
 @import './styles/partials/atoms.css';
 @import './styles/partials/page.css';
-@import './styles/partials/legacy-events.css';
-@import './styles/partials/legacy-subscriptions.css';
-@import './styles/partials/legacy-vps.css';
+@import './styles/partials/tabs.css';
+@import './styles/partials/motion.css';
+
+/* owner: app-shell */
+@import './styles/partials/layout.css';
+
+/* owner: dashboard */
+@import './styles/partials/dashboard.css';
+@import './styles/partials/dashboard-responsive.css';
+
+/* owner: assets */
 @import './styles/partials/legacy-assets.css';
-@import './styles/partials/legacy-monitoring.css';
-@import './styles/partials/legacy-batch.css';
-@import './styles/partials/legacy-dashboard.css';
-@import './styles/partials/legacy-targets.css';
-@import './styles/partials/legacy-observability.css';
 @import './styles/partials/legacy-provider.css';
 @import './styles/partials/legacy-archive.css';
+
+/* owner: vps */
+@import './styles/partials/legacy-vps.css';
+
+/* owner: observability */
+@import './styles/partials/legacy-events.css';
+@import './styles/partials/legacy-monitoring.css';
+@import './styles/partials/legacy-batch.css';
+@import './styles/partials/legacy-targets.css';
+@import './styles/partials/legacy-observability.css';
 @import './styles/partials/legacy-compare.css';
 @import './styles/partials/legacy-onboarding.css';
-@import './styles/partials/legacy-misc.css';
-@import './styles/partials/dashboard-responsive.css';
-@import './styles/partials/motion.css';
+
+/* owner: settings-subscriptions */
+@import './styles/partials/legacy-subscriptions.css';
