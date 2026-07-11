@@ -587,17 +587,17 @@ git commit -m "fix(web): restore native interaction contracts"
 - Modify: Dashboard owner CSS
 - Modify: `web/src/pages/asset-decisions/AssetDecisionSecondaryNav.tsx`
 - Modify: `web/src/pages/ProvidersPage.tsx`
-- Add: Playwright responsive specs/screenshots
+- Add: Task-local Chromium/CDP responsive evidence；repository Playwright/axe/CI gate 仍由 Task 10 统一落地
 
 - [ ] **Step 1: 写窄视口失败断言**
 
-在 390x900 验证：
+使用 repo 外 CDP harness 在 390x900 先取得失败证据；不向 package/lockfile 增加 Task 10 依赖：
 
-```ts
-await expect(page.getByRole('tab', { name: '监控策略' })).toHaveText('监控策略')
-await expect(page.getByRole('button', { name: '场景与组合' })).toBeInViewport()
-await expect(page.getByRole('link', { name: /服务商组合决策/ }).first()).toContainText('组合决策')
-expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
+```js
+assert(settingsTab.whiteSpace === 'nowrap')
+assert(assetTitle.scrollWidth <= assetTitle.clientWidth + 1)
+assert(providerDecision.scrollWidth <= providerDecision.clientWidth + 1)
+assert(document.documentElement.scrollWidth <= innerWidth + 1)
 ```
 
 - [ ] **Step 2: 定义 Tabs overflow 策略**
@@ -619,11 +619,11 @@ Dashboard 已由 Task 3 消除四卡阻塞；再验证主 action 处于 390x900 
 - [ ] **Step 6: 提交**
 
 ```bash
-git add web/src/pages web/src/styles web/e2e
+git add web/src/pages web/src/styles .trellis/tasks/07-10-frontend-responsive-workflows
 git commit -m "fix(web): close narrow viewport workflow gaps"
 ```
 
-**Rollback:** Settings Tabs、Asset nav、Provider table 分 commit；截图差异能定位到单 owner。
+**Rollback:** Settings Tabs、Asset nav、Provider table 分 commit；task-local computed geometry 能定位到单 owner。
 
 ## 10. Task 8：Asset Decisions 按业务域拆分
 
