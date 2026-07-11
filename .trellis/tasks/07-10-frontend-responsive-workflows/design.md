@@ -6,7 +6,7 @@
 2. **overflow 有唯一 owner**：Tabs 自己滚、宽表 wrapper 自己滚；page/section/document 不替子元素承担水平滚动。
 3. **窄屏不是隐藏模式**：允许重新排版、换行和局部滚动，不隐藏命令、字段或 badge。
 4. **最小行为变化**：CSS 与 wrapper 只改变布局/可达性；API、路由、受控值、点击 handler、排序和 modal 流程不变。
-5. **证据分层**：Vitest/source contract 证明 markup 与规则存在，本地 Chromium 证明真实几何/默认滚动/焦点；Task 10 才把浏览器门持久化进 CI。
+5. **证据分层**：Vitest/source contract 证明 markup 与规则存在，本地 Chromium 证明真实几何、受控 commit 后的滚动和焦点；Task 10 才把浏览器门持久化进 CI。
 
 ## 1.1 Alternatives Considered
 
@@ -81,7 +81,8 @@
 ```
 
 - `width:fit-content + max-width:100%` 让 pill 桌面仍按内容收束，超宽时才成为 scroll container。
-- Task 6 的 `focus()` 使用浏览器默认 scroll-into-view；不增加 document listener 或手写 scroll math。
+- 键盘事件先把目标 button 写入 pending ref、聚焦并调用 `onChange`；受控 value 与对应 panel commit 后，由 `useLayoutEffect` 调用 `scrollIntoView({block:'nearest',inline:'nearest'})`。只依赖同步 `focus()` 的隐式滚动会在 panel 高度改变父级滚动条后再次裁切目标，因此不能作为最终合同。
+- 不增加 document listener、任意 rAF 延时或手写 `scrollLeft`；scroll owner 仍是 tablist。
 - scrollbar 不强制隐藏；可用性优先于“干净外观”。
 
 ## 5. Asset Secondary Navigation

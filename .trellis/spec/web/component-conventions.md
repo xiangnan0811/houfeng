@@ -43,6 +43,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **跨页业务组合组件可接收 action/meta/glyph 这类 `ReactNode` 插槽**：当组件需要保持 route-agnostic，但页面仍要传入 `<Link>`、`<Button>`、`<StatusGlyph>`、`<Hostname>` 等具体组合时，使用受控插槽，不在组件内 import `react-router-dom` 或领域 helper。参考 `web/src/components/ObservabilityEvidenceLead.tsx` 与 `web/src/components/ObservabilityEvidenceFocus.tsx`：Monitoring / Targets / Events 共享 lead/focus 骨架，但页面自己决定 action、glyph、meta 和路由。
 - **route/detail/list 的 loading / error / empty 状态优先复用 `PageState`**：`web/src/components/PageState.tsx` 是跨页展示 primitive，保持 route-agnostic，通过 `action` slot 接收 `<Link>` / `<Button>` / page callback；页面不要继续手写裸 `page-panel` loading/error，列表空态需要当前空态装饰和 CTA 时使用 `surface="empty"`。错误摘要用 `technicalSummary`，组件会截断并避免和 description 重复显示。
 - **DataTable 可点击行与行内操作的合同**：`web/src/components/atoms/DataTable.tsx` 的 `onRowClick` 只处理非交互子节点上的 click / Enter / Space；事件目标落在 `a[href]`、`button`、`input`、`select`、`textarea`、`role="button"`、`role="link"` 内时，表格行不得触发行导航。page 的 action cell 不需要再为了 DataTable 行点击重复写 `stopPropagation`，但自绘 list/queue 不是 DataTable 时仍必须在内部 `<Link>` / `<Button>` 上显式阻止冒泡。
+- **宽表必须有独立、可命名的滚动边界**：heading、计数、筛选与错误提示留在固定 section 中，只有 `DataTable` 外的 page-owned wrapper 使用 `overflow-x:auto`。wrapper 必须有 `role="region"`、通过 `aria-labelledby` 关联可见 heading、通过 `aria-describedby` 关联可见滚动提示，并设置 `tabIndex={0}` 与 `:focus-visible`；不要把 `page-panel--scroll-x` 放在整个 section 上。参考 `ProvidersPage.tsx` 的 `provider-directory-table-scroll`。
 - **自绘可点击队列不要制造嵌套交互语义**：如果一个 `<li>` / `<article>` 内部已经有可见 `<Link>` 和 `<Button>`，可以让鼠标点击行背景进入主详情，但不要给外层容器加 `role="link"` / `tabIndex=0` 再包住内部交互控件；键盘入口应落在可见 action 上，外层只用 `:focus-within` 做焦点视觉辅助。
 - 当前**未单独建 `hooks/` 目录**；本地 hook 内联在使用文件内即可，需要跨文件再考虑提取（届时落点为 `web/src/lib/use<Name>.ts` 或新增 `web/src/lib/hooks/`，需另做决策）。
 - **modal / dialog focus 行为复用 `web/src/lib/useModalFocus.ts` 与 `web/src/lib/modalStack.ts`**：可访问性弹层必须 portal 到 `document.body`，确认类用 `alertdialog`；只有栈顶声明 `aria-modal="true"` 并处理 Tab / Escape / backdrop，非栈顶设置 `aria-hidden` + `inert`。`persistent` 栈顶忽略 Escape/backdrop，只允许显式关闭。不要在各组件里复制 ad-hoc keydown、focus trap、body overflow 或 overlay Escape。
@@ -58,6 +59,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **GlobalSearch 结果必须是可访问链接语义**：可点击结果用 `<Link role="option" to={result.to}>`，不要用 `<button>` + pointer-only `navigate()` 伪装跳转；键盘 Enter 可以继续调用 `navigate(result.to)` 来激活当前 focusIndex。
 - **Search result 只能指向已注册 / 可落地的前端路由**：有详情页的对象链接详情，如 VPS `/vps/:id`、监控实例 `/monitoring/:id`、入口 `/targets/:id`；没有详情页的对象链接列表页或列表筛选，如服务商 `/providers`、订阅 `/subscriptions?vps_id=<vps_id>`。不要生成不存在的 `/providers/:id` 或 `/subscriptions/:id`。
 - **通知入口必须是真实链接**：TopBar 通知图标使用 `<Link to="/events?notification_only=1" aria-label="查看通知事件">`，由 EventsPage 已有 query contract 承接。没有真实 count contract 时不得渲染固定 0、占位 badge 或无 handler 的 button。
+- **折叠 Sidebar 的链接名称不能依赖可见文本**：`SidebarNavItem` 必须从同一 `label` owner 生成 `NavLink aria-label`；有异常徽标时名称包含“`<label>，<count> 个异常`”。移动断点会把 `.nav-text` 设为 `display:none`，因此不能让隐藏文本或只剩数字的 `.nav-badge` 成为唯一 accessible name。
 - **列表主扫描路径上的创建/编辑表单优先放 Drawer**：如果创建表单会挤占库存表 / 队列主视图，应使用 `Drawer` 承载，并保留页面主列表可见。关闭 Drawer 时重置草稿/错误；提交成功后的跳转和 payload 合同仍由 page 测试断言。
 
 ### Scenario: 原生字段、Tabs、值选择与菜单合同
@@ -101,7 +103,7 @@ interface SegmentedControlProps<V extends string = string> {
 
 - Input/Select 以 `id ?? useId()` 为 control id，当前可见 error/hint 分别使用 `<id>-error` / `<id>-hint`。`aria-describedby` 按“调用者 token → 当前内部 id”合并、按空白拆分去重；error 覆盖 hint，并强制 `aria-invalid=true`。无 error 时保留调用者的 `aria-invalid`。
 - `required` 同时传给原生 control 和 required label class；options/children、原生 onChange、className 和其余 DOM attributes 不得被 atom 吞掉。
-- Tabs 必须有可访问名称；selected tab 是唯一 `tabIndex=0`。ArrowLeft/Right 循环，Home/End 到边界，移动焦点并自动调用 `onChange`。controlled value 暂时不在 items 中时，第一项成为唯一 tab stop；空 items 不抛错。
+- Tabs 必须有可访问名称；selected tab 是唯一 `tabIndex=0`。ArrowLeft/Right 循环，Home/End 到边界，移动焦点并自动调用 `onChange`。两种 variant 的 tab 都不得 shrink/换行，overflow 由 tablist 自己承担。键盘目标先写入 pending ref；受控 value 与对应 panel 完成同一次 React commit 后，`useLayoutEffect` 才调用 `scrollIntoView({ block: 'nearest', inline: 'nearest' })`，避免 panel 高度改变父级滚动条后目标再次被裁。不得用同步 `focus()` 的隐式滚动、任意单/双 rAF 延时或手算 `scrollLeft` 替代 commit 边界。controlled value 暂时不在 items 中时，第一项成为唯一 tab stop；空 items 不抛错。
 - 真正的互斥内容面用 `Tabs` + active `TabPanel`，双方 id/labelledby/controls 必须闭环。主题、时间范围、快速视图等值选择使用 `SegmentedControl` 的 native buttons + `aria-pressed`，不得伪装成无 panel 的 tabs。
 - User/theme menu trigger 使用 native button + `aria-haspopup="menu"` / `aria-controls` / `aria-expanded`。menu command 使用 `menuitem`，单选主题使用 `menuitemradio` + `aria-checked`；Arrow/Home/End 导航、Escape 返回 trigger、Tab 离开并关闭、outside pointer 关闭。
 - 列表主导航必须有可见 Link。保留整行 click 时，事件目标位于 link/button/input/select/textarea 或对应 role 内必须忽略；外层不得再增加模拟 link 的 role/tabIndex，键盘只依赖主 Link。
@@ -114,6 +116,7 @@ interface SegmentedControlProps<V extends string = string> {
 | error 从无变有 | hint 不渲染/不被引用；control invalid=true |
 | Tabs value 不在动态 items 中 | 第一项是唯一 tab stop，不在 render 中隐式改 value |
 | ArrowRight 位于最后一个 tab | focus/selection 循环到第一项，onChange 一次 |
+| Home/End 改变 panel 高度并使父级出现滚动条 | 新 value commit 后目标完整进入 tablist；document 不横向滚动 |
 | 值选择器没有对应内容 panel | 使用 SegmentedControl，不产生 tab/tablist/tabpanel role |
 | menu Escape / Tab | Escape 关闭并回 trigger；Tab 关闭且真实焦点继续前移 |
 | pointer 点击 VPS 名称 Link | Link 自己导航，row enhancement 不重复 navigate |
@@ -127,10 +130,10 @@ interface SegmentedControlProps<V extends string = string> {
 #### 6. Tests Required
 
 - `Input.test.tsx` / `Select.test.tsx`：required、ref、generated/explicit id、error/hint、describedby 去重、invalid precedence、options/children。
-- `Tabs.test.tsx` / `SegmentedControl.test.tsx`：命名、唯一 tab stop、四个导航键、动态缺失 value、id 闭环、pressed buttons 与 generic value。
+- `Tabs.test.tsx` / `SegmentedControl.test.tsx`：命名、唯一 tab stop、四个导航键、动态缺失 value、id 闭环、pressed buttons 与 generic value；Tabs 还要断言 controlled rerender 前不滚、commit 后以 nearest/nearest 滚动目标。
 - 所有 Tabs 调用迁移后用 page tests 断言 active tab 的 `aria-controls` 指向 DOM panel，panel `aria-labelledby` 指回 tab；值选择器断言 group/button，不查询虚假 tab。
 - `UserChip.test.tsx` / `TopBar.test.tsx`：menu ownership、Arrow/Home/End、Escape/Tab/outside、callback 单次调用与 focus return；真实 Chromium补 Tab 默认焦点前移证据。
-- `AppShell.test.tsx` / `VPSPage.test.tsx`：skip link/main target、主 Link href、Link click 不触发行增强、背景 click 仍可用。
+- `Sidebar.test.tsx` / `AppShell.test.tsx` / `VPSPage.test.tsx`：折叠后仍稳定命名的导航 Link、异常数 accessible label、skip link/main target、主 Link href、Link click 不触发行增强、背景 click 仍可用。
 
 #### 7. Wrong vs Correct
 

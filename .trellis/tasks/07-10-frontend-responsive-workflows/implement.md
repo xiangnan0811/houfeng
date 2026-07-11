@@ -23,7 +23,7 @@
 - Read: `web/src/pages/ProvidersPage.tsx`
 - Record: `.trellis/tasks/07-10-frontend-responsive-workflows/research/baseline.md`
 
-- [ ] **Step 1: Confirm dependency and branch invariants**
+- [x] **Step 1: Confirm dependency and branch invariants**
 
 ```bash
 git branch --show-current
@@ -34,7 +34,7 @@ python3 ./.trellis/scripts/task.py validate .trellis/tasks/07-10-frontend-respon
 
 Expected: branch `codex/frontend-responsive-workflows`，clean；merge-base `dfe11a8...`；Task 6 位于 archive，Task 7 为当前 `in_progress`。
 
-- [ ] **Step 2: Confirm exact inventories before edits**
+- [x] **Step 2: Confirm exact inventories before edits**
 
 ```bash
 rg -n "tabs--pill|tabs--underline" web/src/styles/partials/atoms.css
@@ -45,7 +45,7 @@ rg -n "page-panel--scroll-x" web/src/pages web/src/components
 
 Expected: Asset support-strip breakpoint declarations只在既有 owner 中出现；Provider section 仍带 page-level scroll class；无并行 Task 8/9 改动。
 
-- [ ] **Step 3: Preserve browser RED measurements**
+- [x] **Step 3: Preserve browser RED measurements**
 
 在 repo 外 CDP harness 中断言并记录以下当前失败：
 
@@ -68,7 +68,7 @@ assert(providerPanel.role === null && providerPanel.tabIndex === -1)
 - Modify: `web/src/styles/indexCssContract.test.ts`
 - Modify: `web/src/pages/ProvidersPage.test.tsx`
 
-- [ ] **Step 1: Add final-cascade CSS helpers**
+- [x] **Step 1: Add final-cascade CSS helpers**
 
 在 `indexCssContract.test.ts` 保留 `resolveImported()`，新增收集同 selector 全部 rule body 的 helper：
 
@@ -80,7 +80,7 @@ function ruleBodies(css: string, selector: string): string[] {
 }
 ```
 
-- [ ] **Step 2: Write Tabs and Asset RED assertions**
+- [x] **Step 2: Write Tabs and Asset RED assertions**
 
 ```ts
 it('keeps responsive tabs and asset commands readable within their owner', () => {
@@ -98,7 +98,7 @@ it('keeps responsive tabs and asset commands readable within their owner', () =>
 
 Expected RED: 当前 pill 无 overflow/nowrap，Asset title 使用 ellipsis，grid breakpoint 多于一套。
 
-- [ ] **Step 3: Write Provider RED assertions**
+- [x] **Step 3: Write Provider RED assertions**
 
 在现有 Provider happy-path test 中加入：
 
@@ -115,7 +115,7 @@ expect(screen.getByRole('link', { name: '查看 Hetzner 服务商组合决策' }
 
 Expected RED: region/hint/id/modifier 不存在，section 仍拥有 `page-panel--scroll-x`。
 
-- [ ] **Step 4: Run focused RED**
+- [x] **Step 4: Run focused RED**
 
 ```bash
 NODE_ENV=test PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH npm --prefix web run test -- --run \
@@ -134,7 +134,7 @@ RED 必须只来自上述 responsive contract assertion；import、syntax、fixt
 - Modify: `web/src/styles/partials/legacy-misc.css`
 - Test: `web/src/styles/indexCssContract.test.ts`
 
-- [ ] **Step 1: Implement Tabs local overflow**
+- [x] **Step 1: Implement Tabs local overflow**
 
 在现有 variant owner 中加入：
 
@@ -147,7 +147,7 @@ RED 必须只来自上述 responsive contract assertion；import、syntax、fixt
 
 保留原 selected/hover/focus/color/radius；不要新增 scrollbar hiding 或 JavaScript scroll handler。
 
-- [ ] **Step 2: Remove Asset title clipping**
+- [x] **Step 2: Remove Asset title clipping**
 
 ```css
 .asset-decision-support-strip__title{
@@ -159,7 +159,7 @@ RED 必须只来自上述 responsive contract assertion；import、syntax、fixt
 }
 ```
 
-- [ ] **Step 3: Consolidate Asset breakpoints**
+- [x] **Step 3: Consolidate Asset breakpoints**
 
 在唯一 `@media(max-width:920px)` owner 中保留：
 
@@ -183,7 +183,7 @@ RED 必须只来自上述 responsive contract assertion；import、syntax、fixt
 
 从两组 640px media rule 删除相同 support-strip selectors；不要添加新的末尾 override。
 
-- [ ] **Step 4: Run focused GREEN and build**
+- [x] **Step 4: Run focused GREEN and build**
 
 ```bash
 NODE_ENV=test PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH npm --prefix web run test -- --run \
@@ -210,7 +210,7 @@ Expected: source contract green；Settings/Asset 业务测试无 state/ARIA 回�
 - Modify: `web/src/styles/partials/legacy-provider.css`
 - Test: `web/src/styles/indexCssContract.test.ts`
 
-- [ ] **Step 1: Move overflow from section to table wrapper**
+- [x] **Step 1: Move overflow from section to table wrapper**
 
 实现以下稳定 id 与 DOM 关系：
 
@@ -238,7 +238,7 @@ Expected: source contract green；Settings/Asset 业务测试无 state/ARIA 回�
 </section>
 ```
 
-- [ ] **Step 2: Preserve full link text**
+- [x] **Step 2: Preserve full link text**
 
 把 entry column width 从 `176px` 调整为 `232px`，decision link 使用：
 
@@ -254,7 +254,7 @@ Expected: source contract green；Settings/Asset 业务测试无 state/ARIA 回�
 
 href、条件与 aria-label 保持不变。
 
-- [ ] **Step 3: Implement Provider owner styles**
+- [x] **Step 3: Implement Provider owner styles**
 
 ```css
 .provider-directory-table{min-width:1000px;table-layout:fixed}
@@ -266,7 +266,7 @@ href、条件与 aria-label 保持不变。
 .provider-directory-entry-link--decision{padding-inline:var(--space-2)}
 ```
 
-- [ ] **Step 4: Run focused GREEN**
+- [x] **Step 4: Run focused GREEN**
 
 ```bash
 NODE_ENV=test PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH npm --prefix web run test -- --run \
@@ -285,7 +285,7 @@ Expected: Provider region/links/tests green；DataTable 与 semantic allowlist �
 
 ## 5. Focused Integration Gate
 
-- [ ] **Step 1: Run direct regression set**
+- [x] **Step 1: Run direct regression set**
 
 ```bash
 NODE_ENV=test PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH npm --prefix web run test -- --run \
@@ -301,7 +301,7 @@ NODE_ENV=test PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH npm --pref
   src/security/semanticInteractionContract.test.ts
 ```
 
-- [ ] **Step 2: Static scope review**
+- [x] **Step 2: Static scope review**
 
 ```bash
 git diff -- web/src
@@ -316,7 +316,7 @@ Expected: 被审查的两个命令无裁切；Asset breakpoint 只有一套；pa
 
 Task 10 尚未提供 repository Playwright，不运行不存在的 `npm run test:e2e`。
 
-- [ ] **Step 1: Build and start production fixture**
+- [x] **Step 1: Build and start production fixture**
 
 ```bash
 NODE_ENV=production PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH npm --prefix web run build
@@ -324,7 +324,7 @@ NODE_ENV=production PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH npm 
 
 用 repo 外 server 对 `web/dist` 发送仓库严格 CSP，并组合 `asset-workflows` 与 `observability-support` fixture；axe-core 固定 `4.10.3`，不写 package/lockfile。
 
-- [ ] **Step 2: Verify key 390px contracts**
+- [x] **Step 2: Verify key 390px contracts**
 
 ```js
 assert(settingsTab.whiteSpace === 'nowrap')
@@ -339,7 +339,9 @@ assert(providerRegion.ariaLabel === '服务商与入口')
 
 Tab 到 Provider region 后派发 ArrowRight，断言 `scrollLeft` 增加；Settings 用 End/Home 验证 focus target 自动进入 tablist 可视区。
 
-- [ ] **Step 3: Run nine-route viewport matrix**
+**Implementation finding:** 初版只依赖同步 `focus()` 的浏览器隐式滚动；Settings 的受控 panel commit 后父级滚动条发生变化，End 目标再次部分离开 tablist。最终实现把目标暂存到 ref，并在 value/panel commit 后由 `useLayoutEffect` 执行 nearest/nearest `scrollIntoView`；unit test 明确断言 rerender 前不滚、rerender 后滚，且不使用 rAF。
+
+- [x] **Step 3: Run nine-route viewport matrix**
 
 Routes：`/`、`/settings`、`/vps`、`/asset-decisions`、`/providers`、`/subscriptions`、`/monitoring`、`/targets`、`/events`。
 
@@ -359,11 +361,11 @@ assert(loadingFailures.length === 0)
 
 Dashboard `.dashboard-primary-action` 的 `bottom < 900`；关键末尾命令 `elementFromPoint()` 命中自身或后代，不被 fixed/sticky surface 遮挡。
 
-- [ ] **Step 4: Run settled axe**
+- [x] **Step 4: Run settled axe**
 
 扫描 `/settings`、`/asset-decisions`、`/providers`；serious=0、critical=0，不禁用 rule，不把结果描述成 Task 10 formal CI gate。
 
-- [ ] **Step 5: Record evidence**
+- [x] **Step 5: Record evidence**
 
 创建 `.trellis/tasks/07-10-frontend-responsive-workflows/research/final-verification.md`，记录 commit、browser/axe 版本、fixture、27 个 route/viewport 结果、关键 computed metrics、keyboard scroll、diagnostics、limitations；不提交截图或 bulk raster。
 
@@ -371,7 +373,7 @@ Dashboard `.dashboard-primary-action` 的 `bottom < 900`；关键末尾命令 `e
 
 ## 7. Spec Update And Full Gate
 
-- [ ] **Step 1: Update executable specs after behavior stabilizes**
+- [x] **Step 1: Update executable specs after behavior stabilizes**
 
 使用 `trellis-update-spec` 更新：
 
@@ -380,7 +382,7 @@ Dashboard `.dashboard-primary-action` 的 `bottom < 900`；关键末尾命令 `e
 - `.trellis/spec/web/quality-guidelines.md`：local CDP responsive evidence 与 Task 10 formal gate 分层。
 - parent Gate B：只补 Task 7 evidence 后才标记 Gate B integrated pass。
 
-- [ ] **Step 2: Run clean full gate**
+- [x] **Step 2: Run clean full gate**
 
 ```bash
 env -u NODE_ENV PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH npm --prefix web ci --include=dev
@@ -396,7 +398,7 @@ git diff --check
 
 最低基线：90 test files / 669 tests；package/lockfile 无变化；npm audit 0 vulnerabilities。
 
-- [ ] **Step 3: Final self-review**
+- [x] **Step 3: Final self-review**
 
 逐条映射 PRD AC、检查三 owner commit、API/wire/route 零变化、无 debug/suppressions/unsafe cast、无 Task 8/9/10 越界。
 
@@ -407,7 +409,9 @@ Recommended commits：
 1. `docs(task): detail responsive workflow repair`
 2. `fix(web): keep narrow tabs and asset commands readable`
 3. `fix(web): isolate provider table overflow`
-4. `docs(spec): record responsive overflow contracts`
+4. `fix(web): close responsive accessibility gaps`（受控 commit 后滚动、折叠 Sidebar 稳定名称、critical info badge 对比度）
+5. `fix(web): preserve light-theme asset context contrast`
+6. `docs(spec): record responsive overflow contracts`
 
 - [ ] push `codex/frontend-responsive-workflows`，创建 ready PR `fix(web): close narrow viewport workflow gaps`。
 - [ ] 监控 PR go/web/docker/GitGuardian；同分支本地复现失败，不 force-push 猜测。

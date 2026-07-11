@@ -78,10 +78,10 @@
 
 ## Acceptance Criteria
 
-- [ ] 390x900 下“监控策略”保持单行且 tablist 局部可滚动；Arrow/Home/End 后 focus target 进入可视范围。
-- [ ] 390x900 下“场景与组合”标题 `scrollWidth <= clientWidth`，无 hidden/ellipsis；四个辅助按钮均完整可操作且高度不少于 40px。
-- [ ] Provider “组合决策”可见文本完整；table scroll region 有 heading-derived name、可见提示、`tabIndex=0`，键盘 ArrowRight 能滚动。
-- [ ] Provider heading/toolbar 不随 table 横向滚动；Settings、Asset Decisions、Providers 与 Dashboard 无 document overflow。
-- [ ] Dashboard 主行动继续位于 390x900 首屏；九条核心路由在三视口无 shell/末尾命令遮挡和浏览器错误。
-- [ ] Settings、Asset Decisions、Providers axe serious/critical 为 0；90/669 测试基线只允许增加或有证据地替换。
-- [ ] lint、全量 Vitest、production build、audit、`make verify`、Trellis validate 与 `git diff --check` 全绿，且 package/lockfile 无变化。
+- [x] 390x900 下“监控策略”保持单行且 tablist 局部可滚动；Arrow/Home/End 后 focus target 进入可视范围。
+- [x] 390x900 下“场景与组合”标题 `scrollWidth <= clientWidth`，无 hidden/ellipsis；四个辅助按钮均完整可操作且高度不少于 40px。
+- [x] Provider “组合决策”可见文本完整；table scroll region 有 heading-derived name、可见提示、`tabIndex=0`，键盘 ArrowRight 能滚动。
+- [x] Provider heading/toolbar 不随 table 横向滚动；Settings、Asset Decisions、Providers 与 Dashboard 无 document overflow。
+- [x] Dashboard 主行动继续位于 390x900 首屏；九条核心路由在三视口无 shell/末尾命令遮挡和浏览器错误。
+- [x] Settings、Asset Decisions、Providers axe serious/critical 为 0；90/669 测试基线只允许增加或有证据地替换。
+- [x] lint、全量 Vitest、production build、audit、`make verify`、Trellis validate 与 `git diff --check` 全绿，且 package/lockfile 无变化。
