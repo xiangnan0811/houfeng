@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.58.6](https://github.com/xiangnan0811/houfeng/compare/v0.58.5...v0.58.6) (2026-07-11)
+
+
+### Bug Fixes
+
+* **web:** correlate staging resource errors ([a067332](https://github.com/xiangnan0811/houfeng/commit/a0673320344a171dcfad04a12019d751b73ab08e))
+* **web:** correlate staging resource errors ([af3faf8](https://github.com/xiangnan0811/houfeng/commit/af3faf82034c6292349bbe5b2c6fef35f20955d4))
+
 ## [0.58.5](https://github.com/xiangnan0811/houfeng/compare/v0.58.4...v0.58.5) (2026-07-11)
 
 
