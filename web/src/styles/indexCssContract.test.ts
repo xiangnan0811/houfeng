@@ -103,4 +103,12 @@ describe('index.css modernization contracts', () => {
     expect(entryLink).toContain('text-overflow:clip')
     expect(entryLink).not.toContain('text-overflow:ellipsis')
   })
+
+  it('keeps critical info badges readable on dark state backgrounds', () => {
+    const criticalInfo = compact(ruleBody(indexCss, '.badge--info.tone--critical'))
+
+    expect(criticalInfo).toContain(
+      'color:color-mix(insrgb,var(--color-state-critical)78%,var(--text-primary))',
+    )
+  })
 })

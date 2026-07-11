@@ -31,6 +31,7 @@ select.input::-ms-expand{display:none}
 .tone--alert{color:var(--color-state-alert);border-color:color-mix(in srgb,var(--color-state-alert) 30%,transparent);background:color-mix(in srgb,var(--color-state-alert) 10%,transparent)}
 .tone--alert .badge__dot{background:var(--color-state-alert)}
 .tone--critical{color:var(--color-state-critical);border-color:color-mix(in srgb,var(--color-state-critical) 30%,transparent);background:color-mix(in srgb,var(--color-state-critical) 10%,transparent)}
+.badge--info.tone--critical{color:color-mix(in srgb,var(--color-state-critical) 78%,var(--text-primary))}
 .tone--critical .badge__dot{background:var(--color-state-critical)}
 .tone--maintenance{color:var(--color-state-maintenance);border-color:color-mix(in srgb,var(--color-state-maintenance) 30%,transparent);background:color-mix(in srgb,var(--color-state-maintenance) 10%,transparent)}
 .tone--maintenance .badge__dot{background:var(--color-state-maintenance)}
