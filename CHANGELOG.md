@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.58.2](https://github.com/xiangnan0811/houfeng/compare/v0.58.1...v0.58.2) (2026-07-11)
+
+
+### Bug Fixes
+
+* **web:** close narrow viewport workflow gaps ([2f82f29](https://github.com/xiangnan0811/houfeng/commit/2f82f29b74af751e8faf3ee9b73ca2cffe461bc1))
+* **web:** close responsive accessibility gaps ([0802a04](https://github.com/xiangnan0811/houfeng/commit/0802a04af57130a64513c14317710b121a080c3a))
+* **web:** isolate provider table overflow ([299fdce](https://github.com/xiangnan0811/houfeng/commit/299fdcedddf63e2a5bd02f8b75824fb0f62bbdd6))
+* **web:** keep narrow tabs and asset commands readable ([7578b90](https://github.com/xiangnan0811/houfeng/commit/7578b909243614dbf0afec4ab44d959d81d1de55))
+* **web:** preserve light-theme asset context contrast ([30a99db](https://github.com/xiangnan0811/houfeng/commit/30a99dbd755bcffbfea9e14d8c43561b04a9b190))
+* **web:** wait for committed tab selection before scrolling ([88d8ed2](https://github.com/xiangnan0811/houfeng/commit/88d8ed23b03579db6bbff553c492c4d929bf5a2c))
+
+
+### Documentation
+
+* **spec:** record responsive overflow contracts ([a727b55](https://github.com/xiangnan0811/houfeng/commit/a727b55e5422e8bf690c81d2ccfc3a670cfd4cd6))
+* **spec:** require committed tab selection before scrolling ([74d9848](https://github.com/xiangnan0811/houfeng/commit/74d98489f56bdc8457e32de4cdbb786abc950df0))
+* **task:** detail responsive workflow repair ([e68b226](https://github.com/xiangnan0811/houfeng/commit/e68b2269d0ef474b5d635162eeeed36e638ba6f6))
+* **task:** link responsive workflow pull request ([6c0f02c](https://github.com/xiangnan0811/houfeng/commit/6c0f02ca3326f8317284f18b58802fa0ff777026))
+* **task:** record Task 6 release verification ([5a06d62](https://github.com/xiangnan0811/houfeng/commit/5a06d62b5af72491264ed259cb5225a640a2fb74))
+
 ## [0.58.1](https://github.com/xiangnan0811/houfeng/compare/v0.58.0...v0.58.1) (2026-07-11)
 
 
