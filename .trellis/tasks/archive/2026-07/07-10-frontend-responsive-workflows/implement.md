@@ -415,10 +415,10 @@ Recommended commits：
 7. `docs(spec): record responsive overflow contracts`
 
 - [x] push `codex/frontend-responsive-workflows`，创建 ready PR #360 `fix(web): close narrow viewport workflow gaps`。
-- [ ] 监控 PR go/web/docker/GitGuardian；同分支本地复现失败，不 force-push 猜测。
-- [ ] checks green 后通过 GitHub PR merge；监控 main CI 与 Release Please。
-- [ ] 这是 release-worthy responsive fix：release PR checks green 后合并，监控 GitHub Release、agent assets、`publish-images` 与 multi-arch digest。
-- [ ] 从发布镜像 `/app/web/dist` 重跑关键 390px browser/axe smoke，记录 release commit/tag/digest。
+- [x] PR #360 的 go/web/docker/GitGuardian 全绿（CI run `29140228566`），无失败或 force-push。
+- [x] PR #360 合并为 `2f82f29`；其 main CI run `29140303324` 与 Release Please run `29140303318` 全绿。
+- [x] release PR #359 checks 全绿后合并为 `225d362`；GitHub Release `v0.58.2`、agent assets、release 后 main CI `29140387637` 与 `publish-images` run `29140391260` 全绿，multi-arch digest 已核验。
+- [x] 从 `linnea7171/houfeng@sha256:2332b27b8b11ae7ecdcc924b59eb6f7266f5b33961b8d9fa8fc9a68d057abd97` 的 `/app/web/dist` 重跑完整 27/27 browser/axe smoke并通过。
 - [ ] 独立 archive/evidence PR 归档 Task 7，监控 post-merge main CI；完成后才启动 Task 8。
 
 ## 9. Rollback Matrix

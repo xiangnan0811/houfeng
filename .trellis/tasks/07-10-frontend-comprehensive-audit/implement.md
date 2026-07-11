@@ -877,6 +877,13 @@ git commit -m "test(web): ratchet browser and contract quality gates"
 - Settings、Asset Decisions、Providers settled axe serious/critical=0；VPS、Asset Decisions、Providers 的三主题矩阵共 9 次扫描均为 0。亮色 Asset 4.46:1 context RED 已由 owner CSS 修复并复验，不以禁用 rule 或忽略中间色换取绿色。
 - 以上仍是 fixture/local-only candidate evidence。Gate B 只有在 implementation PR 合并、发布镜像 smoke 与同版 full gate 记录后才标记整体通过；真实认证 staging 继续属于 Task 10 / Gate C。
 
+**Task 7 release integration evidence（2026-07-11；Gate B PASS）：**
+
+- implementation PR #360 CI、merge `2f82f29`、两轮 main CI、release PR #359 CI 与 merge `225d362` 全部通过；GitHub Release `v0.58.2` 指向 `225d362`。
+- `publish-images` run `29140391260` 的 amd64、arm64、agent-assets 与 manifest jobs 全绿；`v0.58.2` / `0.58.2` / `latest` 共用 manifest digest `sha256:2332b27b8b11ae7ecdcc924b59eb6f7266f5b33961b8d9fa8fc9a68d057abd97`。
+- 从该 digest 镜像的 `/app/web/dist` 重跑 27/27 route/viewport、三主题 axe 和 diagnostics：geometry/axe/theme/console/runtime/CSP/HTTP/network failure 全为 0；关键 390px 几何与键盘指标保持。
+- Gate B 在同一 `v0.58.2` 集成版本关闭。该结论仍是发布产物 + fixture browser evidence；真实认证 staging 继续作为 Task 10 / Gate C 必要门，不在此处提前关闭。
+
 ### Gate C：结构债关闭（Task 8-10）
 
 - 不存在 2,705 行 Asset controller 替身；route page 不直接承载领域 API/mutation 细节。
