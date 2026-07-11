@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { ConsoleMessage, Page, Request, Response } from '@playwright/test'
+import type { Page, Request, Response } from '@playwright/test'
 
 import { EXPECTED_CSP } from '../support/diagnostics'
 
@@ -84,11 +84,21 @@ function sanitizeMessage(message: string): string {
     .slice(0, 400)
 }
 
-function resourceConsoleStatus(message: ConsoleMessage): number | null {
-  const match = message.text().match(
-    /^Failed to load resource: the server responded with a status of (\d+) \([^)]+\)$/,
+export function shouldIgnoreResourceConsoleError(
+  allowedHttpErrors: ReadonlySet<string>,
+  text: string,
+  location: string,
+): boolean {
+  const match = text.match(
+    /^Failed to load resource: the server responded with a status of (\d+) \([^)]*\)$/,
   )
-  return match ? Number(match[1]) : null
+  const statusText = match?.[1]
+  if (!statusText) return false
+  const status = Number(statusText)
+  if (location) {
+    return allowedHttpErrors.has(`${sanitizePath(location)} ${status}`)
+  }
+  return [...allowedHttpErrors].some((key) => key.endsWith(` ${status}`))
 }
 
 function requestDuration(request: Request): number | null {
@@ -114,12 +124,12 @@ export class StagingAudit {
   async install(page: Page): Promise<void> {
     page.on('console', (message) => {
       if (message.type() !== 'error') return
-      const status = resourceConsoleStatus(message)
       const location = message.location().url
-      if (status != null && location) {
-        const key = this.httpErrorKey(sanitizePath(location), status)
-        if (this.allowedHttpErrors.has(key)) return
-      }
+      if (shouldIgnoreResourceConsoleError(
+        this.allowedHttpErrors,
+        message.text(),
+        location,
+      )) return
       this.consoleErrors.push(sanitizeMessage(message.text()))
     })
     page.on('pageerror', (error) => {
