@@ -24,7 +24,7 @@
 
 ## Acceptance Criteria
 
-- [ ] AST inventory 和 CI budget 覆盖 source/rules/declarations/duplicates/colors/important/raw+gzip。
-- [ ] 正则 first-match contract 被 AST/context contract 替换。
-- [ ] 每条 legacy block 有唯一 owner，无新增 misc bucket。
-- [ ] 最终所有核心指标低于初始基线，desktop/mobile visual gate 通过。
+- [x] AST inventory 和 fail-closed budget 覆盖 source/rules/declarations/duplicates/colors/important/raw+gzip，并可由 Task 10 原样接入 CI。
+- [x] 正则 first-match contract 被 AST/context contract 替换。
+- [x] 每条 legacy block 有唯一 owner，无新增 misc bucket。
+- [x] 最终所有核心指标低于初始基线，production-dist 的 desktop/tablet/mobile local browser gate 通过；Task 10 再把该证据固化为 Playwright CI。

@@ -14,7 +14,7 @@
 
 - ❌ Prettier（仓库 `find . -name '.prettierrc*' -maxdepth 3` 为空）
 - ❌ husky / lint-staged / lefthook 等 git hook 工具（同样为空）
-- ❌ stylelint / postcss 配置（纯 CSS 不需要预处理）
+- ❌ stylelint / PostCSS transform 配置（纯 CSS 不做预处理；direct `postcss` 只服务 AST inventory/contract）
 - ❌ Playwright / Cypress / WebDriverIO 等 e2e 框架（`web/package.json` 无依赖）
 - ❌ 任何 codegen（前端类型与 Go contract 手对齐，详见 `.trellis/spec/web/state-and-data.md`）
 
@@ -28,6 +28,7 @@
 |------|----------|--------|
 | `npm run dev` | `vite` —— 起 dev server，`/api/*` 反代到 `VITE_API_TARGET`（默认 `http://127.0.0.1:8080`，见 `web/vite.config.ts:11-23`） | 本地开发 |
 | `npm run build` | `tsc -b && vite build` —— 严格 TS 多项目 build + Vite 产物到 `web/dist/` | 提交前必跑（CI 也跑），产物由 center 通过 `HOUFENG_WEB_DIST_DIR` 吐给浏览器 |
+| `npm run css:analyze` | PostCSS AST owner/debt inventory + source/production budget ratchet | 改 CSS 时在 fresh production build 后运行；Task 10 再接入 CI |
 | `npm run lint` | `eslint .` —— 跑 `web/eslint.config.js` 的 flat config | 提交前必跑 |
 | `npm run test` | `vitest` —— 默认进 watch（CI 用 `--run` 一次性跑完） | 本地反复跑测；CI 用 `npm run test -- --run` |
 | `npm run preview` | `vite preview` —— 看本地 build 产物效果 | 偶尔做产物 sanity check |
@@ -353,7 +354,7 @@ export default defineConfig([
 | 新增 / 修改业务 API 调用 | 必须落到 `web/src/lib/api.ts`，**不要**在 page / component 里直接 `fetch()`；历史直连创建监控实例 API 已偿还，reviewer 不要让这类请求回流到 page |
 | 修改 Asset Decisions controller / route composition | 运行 `AssetDecisionsPage.test.tsx`、全部 `asset-decisions/` domain workflow/controller tests 与 `assetDecisionArchitectureContract.test.ts`；核对四个 filtered GET、11 GET renewal inventory、group/manual/record focus restore 和结构预算 |
 | 新增 page | `web/src/app/router.tsx` 注册路由 + colocate `<Page>.test.tsx`（至少 1 个 happy-path test） |
-| 新增 atom | `web/src/components/atoms/<Name>.tsx` + 同名 `.test.tsx` + `atoms/index.ts` 加 barrel export + `web/src/styles/atoms.css` 加样式（用令牌） |
+| 新增 atom | `web/src/components/atoms/<Name>.tsx` + 同名 `.test.tsx` + `atoms/index.ts` 加 barrel export + `web/src/styles/partials/atoms.css` 加样式（用令牌） |
 | 新增 / 改 CSS 令牌 | `web/src/styles/tokens.css` 同步检查 3 套运行时主题（`:root` / `theme-houfeng-light` / `theme-classic-dark`）；`classic-light` 复用 `houfeng-light`，见 `.trellis/spec/web/styling-guidelines.md` |
 | 改首屏防闪烁脚本 | `web/public/theme-bootstrap.js` 与 `web/src/lib/theme.ts` 的 preset/mode allowlist、system scheme 和 `classic-light` 回退必须保持一致；`web/index.html` 只同步加载同源脚本，不得恢复 inline script |
 | 改路由注册 / 页面加载边界 | 保持 `appRoutes` 可被 `matchRoutes` 测试；路由页用 `React.lazy` + `RouteModuleFallback`；运行 `npm run build` 并确认没有 Vite large chunk warning，入口 chunk 不应回退到单个 500 kB+ app bundle |
