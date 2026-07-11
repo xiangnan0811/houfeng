@@ -29,7 +29,7 @@
 ## Local Chromium Keyboard And Axe
 
 - Browser: Chromium `150.0.7871.114`（CDP，headless=new）。
-- Final clean rerun: branch HEAD `bc93f52`（implementation tree `f7db74d`）；全新 Chromium profile、重新生成的 production dist。
+- Final clean rerun: branch HEAD `61c28a2`（implementation tree `f7db74d`）；全新 Chromium profile、production dist 与增强后的真实默认 Tab 路径。
 - axe-core: exact `4.10.3`，只安装在 `/tmp/houfeng-task6-browser`，未修改 `web/package.json` / lockfile。
 - Data source: `mock-api asset-workflows`；production `web/dist` 由本地临时 server 提供，并发送仓库精确 CSP policy。
 - Routes: `/`、`/settings`、`/vps`、`/asset-decisions`。
@@ -37,7 +37,7 @@
 - 真实按键流程：
   1. 首次 Tab → skip link，Enter → `main#main-content`。
   2. User menu Enter/ArrowDown/Home/End/Escape；Escape 回 trigger；重开后 Tab 关闭并把焦点前移到全局搜索。
-  3. Theme menu Enter/ArrowDown/Enter、Space、Escape；Arrow 只移动焦点，选择/Escape 回 trigger。
+  3. Theme menu Enter/ArrowDown/Enter；Arrow 只移动焦点，选择后回 trigger。再次 Space 打开后，真实 Tab 默认行为关闭菜单并把焦点前移到“查看通知事件”，Shift+Tab 回到 theme trigger；再次 Space 打开、Escape 关闭并回 trigger。
   4. Settings Tabs ArrowRight/Home 自动激活并保持 tab/panel id 双向关系；SegmentedControl Space 激活“经典”。
   5. VPS SegmentedControl Space 激活“未关联”；VPS 名称 Link Enter 导航到 `/vps/vps_tokyo_lab`。
   6. Asset detail Modal 的 tab ArrowRight 激活 matching panel；Escape 关闭、恢复“查看组” trigger 并释放 body scroll lock。
