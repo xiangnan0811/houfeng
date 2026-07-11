@@ -75,9 +75,9 @@ type ManualGroupDetailModalProps = {
   onRequestManualMemberRemoval: (member: AssetDecisionManualGroupMember) => void
   onCancelManualMemberRemoval: () => void
   onDeleteManualMember: (member: AssetDecisionManualGroupMember) => void
-  onSetManualMemberAddDraft: React.Dispatch<React.SetStateAction<ManualMemberAddDraft>>
+  onUpdateMemberAddDraft: (patch: Partial<ManualMemberAddDraft>) => void
   onSetManualMemberAddAdvancedVisible: (visible: boolean) => void
-  onSetRecordDraft: React.Dispatch<React.SetStateAction<RecordDraft | null>>
+  onUpdateRecordDraft: (patch: Partial<RecordDraft>) => void
   renderRecordDraftMemberRows: (members: Array<{
     vpsID: string
     displayName: string
@@ -116,9 +116,9 @@ export function ManualGroupDetailModal({
   onRequestManualMemberRemoval,
   onCancelManualMemberRemoval,
   onDeleteManualMember,
-  onSetManualMemberAddDraft,
+  onUpdateMemberAddDraft,
   onSetManualMemberAddAdvancedVisible,
-  onSetRecordDraft,
+  onUpdateRecordDraft,
   renderRecordDraftMemberRows,
 }: ManualGroupDetailModalProps) {
   return (
@@ -298,7 +298,7 @@ export function ManualGroupDetailModal({
                 <select
                   className="input"
                   value={manualMemberAddDraft.vpsID}
-                  onChange={(event) => onSetManualMemberAddDraft((current) => ({ ...current, vpsID: event.target.value }))}
+                  onChange={(event) => onUpdateMemberAddDraft({ vpsID: event.target.value })}
                   disabled={vpsCatalogState.loading || Boolean(vpsCatalogState.error)}
                 >
                   <option value="">{vpsCatalogState.loading ? '正在加载 VPS…' : manualMemberCandidateRows.length === 0 ? '暂无可加入 VPS' : '选择 VPS'}</option>
@@ -314,7 +314,7 @@ export function ManualGroupDetailModal({
                 <select
                   className="input"
                   value={manualMemberAddDraft.intendedRole}
-                  onChange={(event) => onSetManualMemberAddDraft((current) => ({ ...current, intendedRole: event.target.value as AssetDecisionSuggestedRole }))}
+                  onChange={(event) => onUpdateMemberAddDraft({ intendedRole: event.target.value as AssetDecisionSuggestedRole })}
                 >
                   {ROLE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -326,7 +326,7 @@ export function ManualGroupDetailModal({
                 <select
                   className="input"
                   value={manualMemberAddDraft.intendedAction}
-                  onChange={(event) => onSetManualMemberAddDraft((current) => ({ ...current, intendedAction: event.target.value as AssetDecisionSuggestedAction }))}
+                  onChange={(event) => onUpdateMemberAddDraft({ intendedAction: event.target.value as AssetDecisionSuggestedAction })}
                 >
                   {ACTION_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -341,7 +341,7 @@ export function ManualGroupDetailModal({
                       className="input"
                       inputMode="numeric"
                       value={manualMemberAddDraft.sortOrder}
-                      onChange={(event) => onSetManualMemberAddDraft((current) => ({ ...current, sortOrder: event.target.value }))}
+                      onChange={(event) => onUpdateMemberAddDraft({ sortOrder: event.target.value })}
                       placeholder="自动"
                     />
                   </label>
@@ -350,7 +350,7 @@ export function ManualGroupDetailModal({
                     <input
                       className="input"
                       value={manualMemberAddDraft.reason}
-                      onChange={(event) => onSetManualMemberAddDraft((current) => ({ ...current, reason: event.target.value }))}
+                      onChange={(event) => onUpdateMemberAddDraft({ reason: event.target.value })}
                       placeholder="加入组合的原因"
                     />
                   </label>
@@ -359,7 +359,7 @@ export function ManualGroupDetailModal({
                     <input
                       className="input"
                       value={manualMemberAddDraft.note}
-                      onChange={(event) => onSetManualMemberAddDraft((current) => ({ ...current, note: event.target.value }))}
+                      onChange={(event) => onUpdateMemberAddDraft({ note: event.target.value })}
                       placeholder="可选"
                     />
                   </label>
@@ -389,7 +389,7 @@ export function ManualGroupDetailModal({
                   <input
                     className="input"
                     value={recordDraft.title}
-                    onChange={(event) => onSetRecordDraft((current) => current ? { ...current, title: event.target.value } : current)}
+                    onChange={(event) => onUpdateRecordDraft({ title: event.target.value })}
                   />
                 </label>
                 <label className="input-field">
@@ -397,7 +397,7 @@ export function ManualGroupDetailModal({
                   <select
                     className="input"
                     value={recordDraft.status}
-                    onChange={(event) => onSetRecordDraft((current) => current ? { ...current, status: event.target.value as AssetDecisionRecordStatus } : current)}
+                    onChange={(event) => onUpdateRecordDraft({ status: event.target.value as AssetDecisionRecordStatus })}
                   >
                     {RECORD_STATUS_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
@@ -410,7 +410,7 @@ export function ManualGroupDetailModal({
                     className="input"
                     value={recordDraft.goal}
                     rows={2}
-                    onChange={(event) => onSetRecordDraft((current) => current ? { ...current, goal: event.target.value } : current)}
+                    onChange={(event) => onUpdateRecordDraft({ goal: event.target.value })}
                   />
                 </label>
               </div>

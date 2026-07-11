@@ -3173,14 +3173,17 @@ describe('AssetDecisionsPage 结构守护', () => {
 
   it('弹窗组件各自不超过 200 行', async () => {
     const files = import.meta.glob('./asset-decisions/modals/*.tsx', { query: '?raw', import: 'default', eager: true })
-    expect(Object.keys(files).sort()).toEqual([
+    const productionFiles = Object.fromEntries(
+      Object.entries(files).filter(([path]) => !path.endsWith('.test.tsx')),
+    )
+    expect(Object.keys(productionFiles).sort()).toEqual([
       './asset-decisions/modals/GroupDetailModal.tsx',
       './asset-decisions/modals/ManualGroupDetailModal.tsx',
       './asset-decisions/modals/RecordDetailModal.tsx',
       './asset-decisions/modals/RenewalDecisionModal.tsx',
       './asset-decisions/modals/TemplateDetailModal.tsx',
     ])
-    for (const [path, content] of Object.entries(files)) {
+    for (const [path, content] of Object.entries(productionFiles)) {
       expect(typeof content).toBe('string')
       const lineCount = countSourceLines(content as string)
       expect(lineCount, `${path} should be <= 200 lines`).toBeLessThanOrEqual(200)
