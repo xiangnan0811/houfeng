@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.58.4](https://github.com/xiangnan0811/houfeng/compare/v0.58.3...v0.58.4) (2026-07-11)
+
+
+### Bug Fixes
+
+* **events:** isolate wide table overflow ([507a7a0](https://github.com/xiangnan0811/houfeng/commit/507a7a09abafa017a7cef01ceb1c1ad2e82d3aa6))
+
+
+### Documentation
+
+* **css:** record owner contracts and verification ([9856a94](https://github.com/xiangnan0811/houfeng/commit/9856a94bd058bb127e26cef72e5284632839a5d9))
+
 ## [0.58.3](https://github.com/xiangnan0811/houfeng/compare/v0.58.2...v0.58.3) (2026-07-11)
 
 
