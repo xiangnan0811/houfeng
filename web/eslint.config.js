@@ -46,4 +46,13 @@ export default defineConfig([
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
     },
   },
+  {
+    files: ['e2e/**/*.ts', 'playwright.config.ts', 'playwright.staging.config.ts'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+      },
+    },
+  },
 ])
