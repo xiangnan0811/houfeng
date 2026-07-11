@@ -42,8 +42,11 @@ describe('Asset Decisions renewal queue workflows', () => {
     await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
     const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section')
     expect(singleQueue).not.toBeNull()
-    expectTabPanelRelationship(singleQueue!, '单台辅助队列视图')
-    fireEvent.click(within(singleQueue!).getAllByRole('button', { name: '处理' })[0])
+    if (!singleQueue) throw new Error('single queue section must be rendered')
+    expectTabPanelRelationship(singleQueue, '单台辅助队列视图')
+    const firstQueueAction = within(singleQueue).getAllByRole('button', { name: '处理' })[0]
+    if (!firstQueueAction) throw new Error('single queue must expose a primary action')
+    fireEvent.click(firstQueueAction)
     const drawer = await screen.findByRole('dialog', { name: '续费决策处理' })
     fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'migrate' } })
     fireEvent.change(within(drawer).getByLabelText('决策理由'), { target: { value: 'move to Osaka' } })
@@ -91,7 +94,10 @@ describe('Asset Decisions renewal queue workflows', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(11))
     const mutationStart = fetchMock.mock.calls.length
     const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section')
-    fireEvent.click(within(singleQueue!).getAllByRole('button', { name: '处理' })[0])
+    if (!singleQueue) throw new Error('single queue section must be rendered')
+    const firstQueueAction = within(singleQueue).getAllByRole('button', { name: '处理' })[0]
+    if (!firstQueueAction) throw new Error('single queue must expose a primary action')
+    fireEvent.click(firstQueueAction)
     const drawer = await screen.findByRole('dialog', { name: '续费决策处理' })
     fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'migrate' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '保存续费决策' }))

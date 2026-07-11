@@ -1,0 +1,61 @@
+name: frontend staging smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Exact deployed Houfeng release version to verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-staging-smoke
+  cancel-in-progress: false
+
+jobs:
+  ref-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require protected main workflow
+        shell: bash
+        run: test "$GITHUB_REF" = "refs/heads/main"
+
+  staging-smoke:
+    needs: ref-guard
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      HOUFENG_STAGING_BASE_URL: ${{ vars.HOUFENG_STAGING_BASE_URL }}
+      HOUFENG_STAGING_USERNAME: ${{ secrets.HOUFENG_STAGING_USERNAME }}
+      HOUFENG_STAGING_PASSWORD: ${{ secrets.HOUFENG_STAGING_PASSWORD }}
+      HOUFENG_EXPECTED_VERSION: ${{ inputs.expected_version }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - name: Install web dependencies
+        run: env -u NODE_ENV npm --prefix web ci --include=dev
+      - name: Install lockfile-compatible Chromium
+        run: npm --prefix web exec playwright install -- --with-deps chromium
+      - name: Run authenticated staging audit
+        run: npm --prefix web run test:e2e:staging
+      - name: Upload sanitized staging audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-staging-audit-${{ github.run_id }}
+          path: web/test-results/staging-audit
+          if-no-files-found: error
+          retention-days: 30

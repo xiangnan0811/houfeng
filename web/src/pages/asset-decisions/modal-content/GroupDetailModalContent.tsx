@@ -143,8 +143,12 @@ export function GroupDetailModal({
             title: '',
             summary: compactGroupJudgement(detailState.detail),
             assessment: detailState.detail.evidence_assessment,
-            recommendation: detailState.detail.decision_recommendation,
-            insight: detailState.detail.comparison_insight,
+            ...(detailState.detail.decision_recommendation === undefined
+              ? {}
+              : { recommendation: detailState.detail.decision_recommendation }),
+            ...(detailState.detail.comparison_insight === undefined
+              ? {}
+              : { insight: detailState.detail.comparison_insight }),
             chips: detailState.detail.evidence_chips,
             actions: (
               <button

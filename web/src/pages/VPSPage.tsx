@@ -511,7 +511,13 @@ export function VPSPage() {
                       </td>
                       <td>{formatOptional(row.vps.provider_name)}</td>
                       <td className="mono">{row.vps.ipv4 || row.vps.ssh_host || '—'}</td>
-                      <td><IPQualityBadge summary={row.vps.ip_quality_summary} /></td>
+                      <td>
+                        <IPQualityBadge
+                          {...(row.vps.ip_quality_summary === undefined
+                            ? {}
+                            : { summary: row.vps.ip_quality_summary })}
+                        />
+                      </td>
                       <td><LifecycleBadge value={row.vps.lifecycle_status} /></td>
                       <td><RenewalBadge value={row.vps.renewal_decision} /></td>
                       <td className="time">{renderRenewalDate(row)}</td>

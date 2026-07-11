@@ -67,7 +67,14 @@ export function completeRecordDraftFromGroupDetail(
       ...baseDraft.memberOrder.filter((vpsID) => activeIDs.has(vpsID)),
       ...detailIDs.filter((vpsID) => !baseDraft.memberOrder.includes(vpsID)),
     ],
-    members: Object.fromEntries(detailIDs.map((vpsID) => [vpsID, baseDraft.members[vpsID] ?? fallbackMembers[vpsID]])),
+    members: Object.fromEntries(detail.members.map((member) => {
+      const vpsID = member.vps.vps_id
+      return [vpsID, baseDraft.members[vpsID] ?? {
+        decidedRole: member.suggested_role,
+        decidedAction: member.suggested_action,
+        reason: '',
+      }]
+    })),
   }
 }
 
@@ -97,6 +104,13 @@ export function completeRecordDraftFromManualDetail(
       ...baseDraft.memberOrder.filter((vpsID) => activeIDs.has(vpsID)),
       ...detailIDs.filter((vpsID) => !baseDraft.memberOrder.includes(vpsID)),
     ],
-    members: Object.fromEntries(detailIDs.map((vpsID) => [vpsID, baseDraft.members[vpsID] ?? fallbackMembers[vpsID]])),
+    members: Object.fromEntries(detail.members.map((member) => [
+      member.vps_id,
+      baseDraft.members[member.vps_id] ?? {
+        decidedRole: member.intended_role,
+        decidedAction: member.intended_action,
+        reason: member.reason,
+      },
+    ])),
   }
 }

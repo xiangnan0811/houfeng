@@ -97,6 +97,7 @@ function orderModalStack(entries: RegisteredModal[]) {
     if (nextIndex < 0) return [...ordered, ...remaining]
 
     const [nextEntry] = remaining.splice(nextIndex, 1)
+    if (!nextEntry) return [...ordered, ...remaining]
     ordered.push(nextEntry)
     orderedIds.add(nextEntry.id)
   }

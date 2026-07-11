@@ -36,12 +36,13 @@ import { TargetTimeWindowTabs } from './TargetTimeWindowTabs'
 import type { HistoryTab, MetadataFormState, PendingRuntimeConfirmation, TimeWindow } from './types'
 
 function latestObservationAt(observations: ProbeObservation[]) {
-  if (observations.length === 0) return null
-  return observations.reduce((latest, observation) =>
+  const [firstObservation, ...remainingObservations] = observations
+  if (!firstObservation) return null
+  return remainingObservations.reduce((latest, observation) =>
     new Date(observation.observed_at).getTime() > new Date(latest).getTime()
       ? observation.observed_at
       : latest,
-  observations[0].observed_at)
+  firstObservation.observed_at)
 }
 
 function countLatencySamples(observations: ProbeObservation[]) {
@@ -203,7 +204,7 @@ export function TargetDetailPageBody({
       ? [...incidents].sort(
           (a, b) =>
             new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-        )[0]
+        )[0] ?? null
       : null
   const probeRowMutationBusy = probeMutationBusyId !== null
   const probeActionsDisabled =

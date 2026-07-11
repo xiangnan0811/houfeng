@@ -16,7 +16,8 @@ export function assetContextPrimarySummary(context: AssetContextLike | null | un
   if (!context || context.summaries.length === 0) return null
   return context.summaries.find((summary) => summary.lifecycle_status === 'to_cancel' || summary.lifecycle_status === 'cancelled') ??
     context.summaries.find((summary) => summary.subscription_state !== 'active' && summary.subscription_state !== 'missing') ??
-    context.summaries[0]
+    context.summaries[0] ??
+    null
 }
 
 export function assetContextMessage(context: AssetContextLike | null | undefined): string {

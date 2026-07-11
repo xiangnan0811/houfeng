@@ -44,6 +44,7 @@ function previousJsxReason(node: ts.JsxElement | ts.JsxSelfClosingElement, sourc
   const index = parent.children.findIndex((child) => child === node)
   for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
     const sibling = parent.children[cursor]
+    if (!sibling) continue
     if (ts.isJsxText(sibling) && sibling.getText(sourceFile).trim() === '') continue
     if (!ts.isJsxExpression(sibling) || sibling.expression) return null
     return sibling.getFullText(sourceFile).match(REASON_PATTERN)?.[1] ?? null

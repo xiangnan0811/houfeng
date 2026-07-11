@@ -109,7 +109,7 @@ export function MonitoringDetailPage() {
   return (
     <MonitoringDetailPageContent
       key={monitoringInstanceId ?? 'missing-monitoring-instance'}
-      monitoringInstanceId={monitoringInstanceId}
+      {...(monitoringInstanceId === undefined ? {} : { monitoringInstanceId })}
     />
   )
 }
@@ -926,7 +926,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       const updated = await updateMonitoringInstanceMetadata(
         actionMonitoringInstanceId,
         {
-          group: metadataForm.group.trim() || undefined,
+          ...(metadataForm.group.trim() ? { group: metadataForm.group.trim() } : {}),
           labels: parseLabels(metadataForm.labels),
           note: metadataForm.note.trim(),
         },

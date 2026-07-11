@@ -93,8 +93,9 @@ export function Sparkline({
 
   const toneClass = `sparkline--${tone}`
   const chartWidth = expand ? measuredWidth || width : width
+  const [firstValue, ...remainingValues] = series
 
-  if (series.length === 0) {
+  if (firstValue === undefined) {
     return (
       <svg
         ref={svgRef}
@@ -124,20 +125,20 @@ export function Sparkline({
   const isSingle = series.length === 1
   const stepX = isSingle ? 0 : chartWidth / (series.length - 1)
 
-  const projectXY = (i: number) => {
+  const projectXY = (i: number, value: number) => {
     const x = i * stepX
-    const y = height - ((series[i] - min) / range) * (height - 2) - 1
+    const y = height - ((value - min) / range) * (height - 2) - 1
     return { x, y }
   }
 
   const points = series
-    .map((_, i) => {
-      const p = projectXY(i)
+    .map((value, i) => {
+      const p = projectXY(i, value)
       return `${p.x.toFixed(2)},${p.y.toFixed(2)}`
     })
     .join(' ')
 
-  const last = projectXY(series.length - 1)
+  const last = projectXY(series.length - 1, remainingValues.at(-1) ?? firstValue)
   const stroke = TONE_VAR[tone]
 
   const handleMove = (e: MouseEvent<SVGSVGElement>) => {
@@ -156,7 +157,9 @@ export function Sparkline({
 
   const tooltipNode = (() => {
     if (hoverIndex == null || !interactive) return null
-    const p = projectXY(hoverIndex)
+    const hoveredValue = series[hoverIndex]
+    if (hoveredValue === undefined) return null
+    const p = projectXY(hoverIndex, hoveredValue)
     const tooltipWidth = Math.min(128, chartWidth)
     const tooltipHeight = 36
     const tooltipX = Math.max(0, Math.min(chartWidth - tooltipWidth, p.x - tooltipWidth / 2))
@@ -170,7 +173,7 @@ export function Sparkline({
         height={tooltipHeight}
       >
         <div className="sparkline__tooltip">
-          <span className="sparkline__tooltip-value">{formatValue(series[hoverIndex])}</span>
+          <span className="sparkline__tooltip-value">{formatValue(hoveredValue)}</span>
           {time ? <span className="sparkline__tooltip-time">{formatTooltipTime(time)}</span> : null}
         </div>
       </foreignObject>
@@ -208,7 +211,9 @@ export function Sparkline({
       )}
       <circle cx={last.x} cy={last.y} r={1.6} fill={stroke} />
       {hoverIndex != null && (() => {
-        const p = projectXY(hoverIndex)
+        const hoveredValue = series[hoverIndex]
+        if (hoveredValue === undefined) return null
+        const p = projectXY(hoverIndex, hoveredValue)
         return (
           <g className="sparkline__cursor">
             <line

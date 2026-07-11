@@ -15,7 +15,7 @@
 - ❌ Prettier（仓库 `find . -name '.prettierrc*' -maxdepth 3` 为空）
 - ❌ husky / lint-staged / lefthook 等 git hook 工具（同样为空）
 - ❌ stylelint / PostCSS transform 配置（纯 CSS 不做预处理；direct `postcss` 只服务 AST inventory/contract）
-- ❌ Playwright / Cypress / WebDriverIO 等 e2e 框架（`web/package.json` 无依赖）
+- ❌ Cypress / WebDriverIO、跨浏览器矩阵和像素 golden；仓库固定使用 lockfile 内的 Playwright Chromium 做合同测试，不维护截图 diff 基线
 - ❌ 任何 codegen（前端类型与 Go contract 手对齐，详见 `.trellis/spec/web/state-and-data.md`）
 
 ---
@@ -28,9 +28,13 @@
 |------|----------|--------|
 | `npm run dev` | `vite` —— 起 dev server，`/api/*` 反代到 `VITE_API_TARGET`（默认 `http://127.0.0.1:8080`，见 `web/vite.config.ts:11-23`） | 本地开发 |
 | `npm run build` | `tsc -b && vite build` —— 严格 TS 多项目 build + Vite 产物到 `web/dist/` | 提交前必跑（CI 也跑），产物由 center 通过 `HOUFENG_WEB_DIST_DIR` 吐给浏览器 |
-| `npm run css:analyze` | PostCSS AST owner/debt inventory + source/production budget ratchet | 改 CSS 时在 fresh production build 后运行；Task 10 再接入 CI |
+| `npm run test:coverage` | Vitest V8 覆盖全部 production TS/TSX，并读取 `coverage-budget.json` 阻断全局或关键文件回退 | `make verify-web` 与 CI；本地改关键模块时先 focused test 再跑 |
+| `npm run css:analyze` | PostCSS AST owner/debt inventory + source/production budget ratchet | production build 后运行；已由 `make verify-web` 接入 CI |
+| `npm run bundle:check` | 校验入口 JS/CSS gzip、最大 async JS gzip 与全部 WOFF2 raw budget | production build 后运行；默认只读 `bundle-budget.json` |
 | `npm run lint` | `eslint .` —— 跑 `web/eslint.config.js` 的 flat config | 提交前必跑 |
 | `npm run test` | `vitest` —— 默认进 watch（CI 用 `--run` 一次性跑完） | 本地反复跑测；CI 用 `npm run test -- --run` |
+| `npm run test:e2e` | 先 production build，再用固定 Chromium 跑 fail-closed fixture browser gate | 本地完整浏览器验证与独立 `web-browser` CI job |
+| `npm run test:e2e:staging` | 使用 `playwright.staging.config.ts` 对已部署 staging 做真实认证审计 | 只由受保护的 manual staging workflow 调用 |
 | `npm run preview` | `vite preview` —— 看本地 build 产物效果 | 偶尔做产物 sanity check |
 
 **Makefile 端**（`Makefile:92-104`）：
@@ -38,14 +42,17 @@
 ```make
 test-web-toolchain:
 	@scripts/check-web-toolchain.test.sh
+	@scripts/check-web-quality-gates.test.sh
 
 verify-web: test-web-toolchain
 	@scripts/check-web-toolchain.sh
 	@if [ -f web/package.json ]; then \
 		env -u NODE_ENV $(NPM) --prefix web ci --include=dev && \
 		NODE_ENV=test $(NPM) --prefix web run lint && \
-		NODE_ENV=test $(NPM) --prefix web run test -- --run && \
-		NODE_ENV=production $(NPM) --prefix web run build; \
+		NODE_ENV=test $(NPM) --prefix web run test:coverage && \
+		NODE_ENV=production $(NPM) --prefix web run build && \
+		$(NPM) --prefix web run bundle:check && \
+		$(NPM) --prefix web run css:analyze; \
 	else \
 		echo 'web workspace not initialized yet'; \
 	fi
@@ -53,7 +60,7 @@ verify-web: test-web-toolchain
 
 注意：
 
-- **`make verify-web` 会跑 `npm run lint`**，然后跑 `npm run test -- --run` 与 `npm run build`。CI 与本地通过同一个 target 覆盖 lint / Vitest / TS+Vite build。
+- **`make verify-web` 会跑 source/toolchain contract、lint、coverage、strict TS+Vite build、bundle/font 与 CSS AST budget**。正式 Chromium gate 作为独立 `web-browser` job 运行，避免浏览器下载与普通 source gate 混在一份日志里。
 - `npm ci` 每次清空 `node_modules` 重装，本地反复跑会比较慢；本地速度优先时直接 `cd web && npm run test -- --run` / `npm run build` 即可，CI 仍走完整 `verify-web`。
 - `.node-version` 是本地与 CI 的唯一精确 runtime pin；`actions/setup-node@v6` 必须通过 `node-version-file: .node-version` 读取它。`web/package.json` 的 `engines.node = "22.x"` 只声明兼容范围。
 
@@ -65,8 +72,8 @@ verify-web: test-web-toolchain
 
 ### 2. Signatures
 
-- `make test-web-toolchain`：验证 runtime pin、CI 引用、tsconfig strict、Node types 与 preflight 行为。
-- `make verify-web`：唯一完整 Web gate；先执行 toolchain test/preflight，再 install、lint、test、build。
+- `make test-web-toolchain`：验证 runtime pin、CI 引用、tsconfig strict、Node types、quality gate wiring 与 preflight 行为。
+- `make verify-web`：source Web gate；先执行 toolchain/source contract，再 install、lint、coverage、build、bundle/font 和 CSS AST budget。
 - `scripts/check-web-toolchain.sh`：无参数；Node major 非 22 时返回 1。
 
 ### 3. Contracts
@@ -74,7 +81,7 @@ verify-web: test-web-toolchain
 - `.node-version` 固定当前批准的 Node 22 LTS patch；CI 不再另外写一份 Node 版本。
 - install 必须清除调用者 `NODE_ENV` 并显式包含 devDependencies。
 - lint/test 固定 `NODE_ENV=test`，build 固定 `NODE_ENV=production`。
-- `tsconfig.app.json` 与 `tsconfig.node.json` 均显式 `strict: true`；`@types/node` 保持 `^22`。
+- `tsconfig.app.json` 同时启用 `strict`、`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`；`tsconfig.node.json` 也显式 `strict: true`，`@types/node` 保持 `^22`。
 - Bash 脚本从 Make 直接执行以遵守 shebang；不要用 `sh script` 覆盖 Bash interpreter。
 
 ### 4. Validation & Error Matrix
@@ -84,19 +91,19 @@ verify-web: test-web-toolchain
 | Node major 不是 22 | install 前失败，输出 `web requires Node 22.x; found vX.Y.Z` |
 | 调用者设置 `NODE_ENV=production` | 仍安装 devDependencies，并完成 lint/test/production build |
 | `.node-version`、CI、tsconfig 或 Node types 漂移 | `test-web-toolchain` 在 npm install 前失败 |
-| lint、test 或 build 任一失败 | `verify-web` 原样返回非零，不继续掩盖失败 |
+| lint、coverage、build 或预算任一失败 | `verify-web` 原样返回非零，不继续掩盖失败 |
 
 ### 5. Good / Base / Bad Cases
 
 - Good：Node 22.23.1 下 `NODE_ENV=production make verify-web` 与无 `NODE_ENV` 调用结果一致。
-- Base：开发者可单独运行 `npm --prefix web run test -- --run` 做 focused feedback，提交前仍跑完整 gate。
+- Base：开发者可单独运行 `npm --prefix web run test -- --run` 做 focused feedback，提交前仍跑完整 coverage/source gate 与相关 browser suite。
 - Bad：依赖调用 shell 恰好未设置 `NODE_ENV`，或在 workflow 里维护另一份 `node-version: 22`。
 
 ### 6. Tests Required
 
 - fake Node 22 通过、fake/real Node 24 被拒绝，并断言完整错误文本。
 - 断言 `.node-version`、setup-node `node-version-file`、两个 strict 配置和 `@types/node` 一致。
-- CI 以 `NODE_ENV=production make verify-web` 执行，断言完整测试与 production build 均通过。
+- CI 以 `NODE_ENV=production make verify-web` 执行，断言 coverage、production build 与静态预算均通过；`scripts/check-web-quality-gates.test.sh` 还必须证明独立 browser job 的 Node pin/install/test 位于同一 job block。
 
 ### 7. Wrong vs Correct
 
@@ -111,11 +118,76 @@ verify-web: test-web-toolchain
 	@NODE_ENV=test npm --prefix web run test -- --run
 ```
 
+### Scenario: coverage、Chromium 与 staging 审计门
+
+#### 1. Scope / Trigger
+
+- 修改 production TS/TSX、coverage/bundle/CSS budget、九条核心路由、CSP、Modal/Tabs/Menu、响应式布局、Playwright fixture、CI browser job 或 staging workflow 时，必须使用本合同。
+
+#### 2. Signatures
+
+- `npm --prefix web run test:coverage`：V8 provider；production include 固定为 `src/**/*.{ts,tsx}`，阈值来自 `web/coverage-budget.json`。
+- `npm --prefix web run test:e2e`：`web/playwright.config.ts`；Chromium、production preview `127.0.0.1:4175`、九 route × 三 viewport。
+- `npm --prefix web run test:e2e:staging`：`web/playwright.staging.config.ts`；不启动本地 server，只访问 `HOUFENG_STAGING_BASE_URL`。
+- `.github/workflows/frontend-staging-smoke.yml`：仅 `workflow_dispatch(expected_version)`，`environment: staging`。
+- staging env：variable `HOUFENG_STAGING_BASE_URL`；secrets `HOUFENG_STAGING_USERNAME`、`HOUFENG_STAGING_PASSWORD`；input 映射为 `HOUFENG_EXPECTED_VERSION`。
+
+#### 3. Contracts
+
+- coverage 全局下限是 statements `79.14`、branches `70.27`、functions `78.88`、lines `82.95`；`modalStack`、`useModalFocus`、`Modal`、Dashboard RemoteState/model、`apiRequest`、auth client/context 与七个 Asset controller 的 branch threshold 均不低于 90%，路径不存在也必须失败。
+- fixture router 以 method + canonical path/query 精确匹配；未知 API 返回 501 并在 teardown 失败，mutation fixture 必须声明 body key 集合。loading 使用受控 Promise，不用固定 sleep。
+- broad browser matrix 固定 `/`、`/vps`、`/asset-decisions`、`/monitoring`、`/targets`、`/events`、`/providers`、`/subscriptions`、`/settings` × `1440x1000`、`1024x768`、`390x900`。每项断言 main/workflow、document overflow、关键命令裁切与统一 diagnostics。
+- CSP 只读取 `internal/center/http/csp-policy.txt`，main document header 必须精确相等；console/page/request/HTTP/CSP/unhandled rejection 默认全部阻断，只有测试显式声明的 method/path/status 可放行。
+- staging real lane 与 deployed-frontend injection lane 必须在 manifest 中分开。真实 lane验证版本、UI 登录、九路由、自定义模板 cancel-only、设置保存/恢复、主题 reload；injection lane验证 Dashboard 五态、503、受控慢响应与长列表三视口，不能冒充后端/生产数据通过。
+- staging 设置 mutation 必须串行、先快照、临时 `+1`、readback，并在 `finally` 恢复/readback。workflow 固定 concurrency 且 `cancel-in-progress: false`；非 `main` ref 在读取 environment secrets 前失败。
+- staging 禁止 trace/video/自动截图，并以 `preserveOutput: 'never'` 丢弃 Playwright `error-context` 等内部输出；显式截图必须 mask 登录字段和用户 chip。artifact 只含 allowlisted headers、origin-relative 脱敏 path/status/timing、计数、步骤与截图，不含 cookie、Authorization、密码、token、request/response body。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 结果 |
+| --- | --- |
+| coverage 指标下降、关键路径改名或零匹配 | `test:coverage` 返回非零 |
+| fixture 未声明 API / mutation body keys | 浏览器返回测试 501/422，teardown 列出 exact request 并失败 |
+| main CSP 不等于 policy source、console/page/network 出现非预期错误 | 当前 browser test 失败 |
+| page 产生横向 overflow、关键命令裁切或宽表无具名键盘 scroll region | route/visual contract 失败 |
+| staging expected/observed version 不同、凭据/URL缺失 | smoke 在登录/业务验证前失败，只报告缺失变量名 |
+| staging 设置恢复失败 | run 阻断并标记 `settings-restore`，不得继续归档 |
+| 非 `refs/heads/main` 手工 dispatch | secret-free `ref-guard` 失败，environment job 不启动 |
+| 无真实 staging environment/凭据 | 仓库 gate 可合并，但不得把 Task/Gate C 标记完成 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：PR 的 source gate 与 58 个 Chromium contracts 都绿；release 后由 main ref dispatch staging，artifact 明确区分 real-data 与 injection。
+- Base：普通纯逻辑改动跑 focused Vitest + `make verify-web`；未触及 UI 时无需凭空新增 browser case，但现有 browser job仍必须绿。
+- Bad：把失败 API兜底为 `[]`、允许所有 4xx/5xx、增加 retry 掩盖 flake、抬预算让 CI 变绿，或用 mock/injection 声称真实 staging 通过。
+
+#### 6. Tests Required
+
+- `scripts/check-web-quality-gates.test.sh`：package scripts、Make 调用链、browser job 作用域、staging dispatch/ref/environment/concurrency/permissions/artifact 合同。
+- `web/e2e/{auth-router,core-routes,page-states,fixture-router,security,accessibility,visual-contracts}.spec.ts`：认证、27 route matrix、五态/四态、fail-closed、diagnostics、axe/键盘、390px/局部滚动。
+- 修改 audit/staging harness 后至少运行 `tsc -b`、ESLint 与 source contract；真实 lane 只能在配置完成的 GitHub staging environment 验收。
+
+#### 7. Wrong vs Correct
+
+```yaml
+# Wrong: PR job 直接读取 staging secrets，且新 run 可打断设置恢复。
+on: [pull_request]
+concurrency: { cancel-in-progress: true }
+
+# Correct: main ref guard 先运行，staging environment job 串行且不可取消。
+on:
+  workflow_dispatch:
+concurrency:
+  group: frontend-staging-smoke
+  cancel-in-progress: false
+```
+
 ---
 
 ## TypeScript
 
-- **strict 模式**：`web/tsconfig.app.json` 与 `web/tsconfig.node.json` 均显式启用 `strict: true`，并叠加 `noUnusedLocals` / `noUnusedParameters` / `noFallthroughCasesInSwitch` / `erasableSyntaxOnly` / `verbatimModuleSyntax`。
+- **strict 模式**：`web/tsconfig.app.json` 显式启用 `strict`、`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`，并叠加 `noUnusedLocals` / `noUnusedParameters` / `noFallthroughCasesInSwitch` / `erasableSyntaxOnly` / `verbatimModuleSyntax`；`tsconfig.node.json` 也保持 `strict`。
+- **type-aware ESLint**：`src/lib/**/*` 与 `src/pages/asset-decisions/hooks/**/*` 使用 project service，阻断 floating/misused promises、await 非 Promise、不必要断言与非穷尽 switch；不要用全局 disable 消音。
 - **`tsc -b` 是 build 第一步**：`web/package.json:11` 的 `build` = `tsc -b && vite build`。**类型错误会让 build 直接挂**，CI 红。
 - **类型断言**：尽量用具体类型，**禁止 `any`**（`web/eslint.config.js:14` 启用 `tseslint.configs.recommended`）。如必须用未知输入，用 `unknown` + 收口判别。
 - **类型导入**：`verbatimModuleSyntax: true` 强制类型 import 必须显式 `import type { Foo } from '...'`，不要省略 `type`。
@@ -139,7 +211,7 @@ verify-web: test-web-toolchain
 
 ### 测试覆盖目标
 
-**当前阶段不强制覆盖率阈值**——CI 不跑 coverage，`vitest` 也未启用 `--coverage`。但仓库当前已经做到的"事实约束"是：
+coverage 是 source gate 的强制 ratchet：全局阈值与关键文件清单都由 `web/coverage-budget.json` 读取，provider 必须显式 inventory 未被测试 import 的 production file；不得用 ignore/exclude、测试专用生产分支或重命名绕过。除此之外仍保持以下结构事实：
 
 - **每个路由页有至少 1 份 `<Page>.test.tsx`**：实读 `web/src/pages/` 下 9 个 page 全部配套（`DashboardPage` / `EventsPage` / `LoginPage` / `MonitoringDetailPage` / `MonitoringDetailPage` / `MonitoringPage` / `SettingsPage` / `TargetDetailPage` / `TargetsPage`）。**新增 page 必须保持这条线**——至少 1 个 happy-path test 覆盖渲染 + 拉数据 + 默认交互。
 - **每个 atom 有同名测试**（`atoms/Button.test.tsx` / `Card.test.tsx` / `Sparkline.test.tsx` / `Input.test.tsx` / `Badge.test.tsx` / `DataTable.test.tsx` / `Mono.test.tsx` / `StatusGlyph.test.tsx` / `Tabs.test.tsx` / `Toggle.test.tsx`）。新增 atom 同样补一份。
@@ -224,8 +296,8 @@ it('applies variant class', () => {
 
 ### 不在 verify 链路里的东西
 
-- **可视化回归 / 截图对比**不在 `make verify-web`。当前 UI 指导见 `docs/design/current/{interface-language.md,component-patterns.md}`；预览、浏览器 sanity 与本地截图政策见 `docs/operations/ui-preview-and-browser-sanity.md`。bulk screenshot evidence 与 manifest 不再 tracked；新 raster 图片只有在用户明确批准为 public README/docs asset 时才可提交到 allowlisted docs asset path。旧截图流程与一次性历史截图不是当前 workflow。
-- **本地 browser sanity**优先用 `python3 scripts/visual_evidence.py browser-sanity --base-url <url> --route <route> ...` 复用标准几何检查；它依赖本机 Python Playwright 时必须在 PR / final report 里标注为 local-only evidence。缺少本机 Python Playwright 只说明这条 helper 路径不可用，不能直接断言“浏览器 sanity 被阻塞”；先检查是否可用本机 Chromium remote debugging + CDP（例如 Node 原生 WebSocket）或其它已安装浏览器工具取得等价 route / viewport / selector 证据。无论走哪条本地路径，都不要把 Playwright/Cypress/WebDriverIO 加进 `web/package.json` 来绕过。
+- **像素 visual regression / tracked screenshot baseline**不在 `make verify-web` 或 Playwright gate。正式 browser suite 使用语义、焦点、几何、overflow、axe 与 diagnostics；失败截图/trace 是短期 CI artifact，不是产品视觉验收。
+- **本地 Python helper** `scripts/visual_evidence.py browser-sanity` 继续用于 running dev/local center 的增量检查，但属于 local-only 辅助。仓库正式 gate 是 lockfile 固定的 Node Playwright；缺少 Python Playwright 不影响 `npm run test:e2e` 的 CI 合同。
 - 响应式修复的 local-only CDP 证据必须记录 route × viewport 矩阵、`documentWidth/innerWidth`、目标 `client/scroll` 尺寸、computed `white-space/overflow/text-overflow`、局部 scroll region 的 role/name/tabIndex/scrollLeft、关键命令 hit-test 和完整 diagnostics counters。只写“肉眼看起来正常”或只保留截图不算通过。
 - URL-owned Modal 的浏览器证据还必须覆盖至少一个真实 filtered revalidation：聚焦实体入口，打开详情并确认请求 inventory，Escape 关闭后断言焦点回同一 group/manual/record 入口、body unlock、无 console/page/network/CSP error。测试不能只等新按钮出现；必须检查真实 `document.activeElement`，否则 restore target 被卸载后落到 `body` 会漏检。
 - **真实 center 烟囱**由 `docs/operations/fresh-install-smoke-run.md` 承担，前端只在浏览器里 sanity check。
@@ -235,7 +307,7 @@ it('applies variant class', () => {
 #### 1. Scope / Trigger
 
 - Trigger: 新增/修改 production TSX 的 `onClick`、Tabs/Menu/skip-link/row keyboard 行为，或声称 axe/browser 可访问性通过时，必须使用本合同。
-- 目标：默认阻止鼠标专属容器回流，并区分 source/RTL、本地 Chromium 与 Task 10 正式 CI browser gate 的证明能力。
+- 目标：默认阻止鼠标专属容器回流，并区分 source/RTL、正式 fixture Chromium、本地 helper 与认证 staging 的证明能力。
 
 #### 2. Signatures
 
@@ -249,8 +321,8 @@ it('applies variant class', () => {
 - `div` / `span` / `tr` / `td` / `li` / `article` / `section` / `p` / `label` 带 `onClick` 默认失败；native button/link 等不需要 marker。
 - 未知 reason、非相邻 comment、按路径/行号静态白名单、目录 wildcard 或把测试文件当 production 例外都不能放行。
 - marker 只解释已经具备其它完整语义路径的结构：backdrop、事件隔离、已有键盘合同的复合 row、有主 Link 的 pointer enhancement。真实命令必须改为 native element。
-- RTL/Vitest 证明 DOM attributes 与事件合同；本地 Chromium/CDP 证明真实 Tab/default action、focus return、console/network/CSP 与 viewport geometry；固定版本本地 axe 证明本次 settled surface。只有 Task 10 把 Playwright/axe 加入 package/lockfile/CI 后，才可称为持久化 browser gate。
-- 本地 axe 必须等待 CSS transition/animation settled 后扫描，serious/critical 不得禁用或降级；发生失败要记录 rule/target/failureSummary 并回到 owner token/组件修复。
+- RTL/Vitest 证明 DOM attributes 与事件合同；`web/e2e/accessibility.spec.ts` 用 lockfile 固定 Chromium/axe 证明真实 Tab/default action、focus return 与 settled serious/critical=0；`security.spec.ts` 和统一 fixture再证明 console/network/CSP。真实认证与部署 header 仍只由 staging lane 证明。
+- axe 必须等待 CSS/font/transition settled 后扫描，serious/critical 不得禁用或降级；发生失败要记录 rule/target/failureSummary 并回到 owner token/组件修复。
 - 折叠/移动 AppShell 运行 axe 时，Sidebar Link 的 accessible name 必须来自稳定 `aria-label`，不能依赖会被 media query `display:none` 的 `.nav-text` 或只剩数字的 badge。主题切换后必须等待 animations settled 再扫描，避免把过渡中的中间颜色误记成最终 contrast。
 
 #### 4. Validation & Error Matrix
@@ -269,7 +341,7 @@ it('applies variant class', () => {
 #### 5. Good / Base / Bad Cases
 
 - Good：AST inventory 为 7 个受控 entry、0 unexplained；Chromium 用真实 `Input.dispatchKeyEvent` 验证菜单 Tab 前移，axe 4.10.3 在 settled Dashboard/Settings/VPS 上 serious/critical 为 0。
-- Base：组件单测先 RED→GREEN，再由本地浏览器覆盖真实 default action；Task 10 尚未完成时明确写“local-only”。
+- Base：组件单测先 RED→GREEN，再由 repository Chromium suite 覆盖真实 default action；额外 Python/CDP 证据仍明确写“local-only”。
 - Bad：给 clickable div 加一个 broad comment；只跑 jsdom 就称 axe/browser 通过；通过禁用 `color-contrast` 规则让报告变绿。
 
 #### 6. Tests Required
@@ -324,7 +396,7 @@ export default defineConfig([
 **政策**：
 
 - **warning vs error 一律视作必修**——`exhaustive-deps` 是 warning，但当前代码库没有未修的 warning，新增不要破坏这条惯例。
-- **不允许 `// eslint-disable-next-line` 静默问题**——当前 `grep -rn "eslint-disable" web/src/` 为空，保持纪录干净。如必须 disable（如 React Hooks rule 误报），写完整中文理由 + 跟踪 issue。
+- **不允许 `// eslint-disable-next-line` 静默问题**——只有可搜索、紧邻并写出具体框架原因的有限例外（当前 Provider+hook colocation 的 React Refresh 说明）；不得全局关闭 type-aware 或 hooks rules。
 - **不要**为了通过 lint 把类型改成 `any` / 把 hook 依赖项硬塞 `[]`：先确认根因。
 
 ---
@@ -333,12 +405,11 @@ export default defineConfig([
 
 下面这条清单是 happy-path，按顺序勾：
 
-1. [ ] **`cd web && npm run lint`** —— 快速本地 lint；完整 `make verify-web` 也会跑这一项。
-2. [ ] **`cd web && npm run test -- --run`** —— 跑 vitest 一遍。
-3. [ ] **`cd web && npm run build`** —— 跑 `tsc -b && vite build`，确保 TS strict + Vite 产物都干净。
+1. [ ] **focused lint/test** —— 修改时先跑相关 Vitest/ESLint，保留 RED→GREEN 证据。
+2. [ ] **`make verify-web`** —— coverage、strict build、bundle/font 与 CSS AST source gate 全绿。
+3. [ ] **改了 user-visible UI / browser contract → `npm --prefix web run test:e2e`** —— 运行固定 Chromium；九 route broad change 必须保持 27/27。
 4. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完（前后端都过）。
-5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/current/{interface-language.md,component-patterns.md}`，并按 `docs/operations/ui-preview-and-browser-sanity.md` 给出 preview URL、已检查 routes / viewports、browser sanity、local screenshot notes（如有，默认不提交）。如果任务改变了可复用 UI 方向，同步更新 `docs/design/current/` 或相关 `.trellis/spec/`，不要把新决策写回历史版本目录。
-   - 若只做本地 browser sanity，记录 `scripts/visual_evidence.py browser-sanity` 的 routes / viewports / 结果和 local-only 限制即可。
+5. [ ] **需要人工视觉判断** → 对照 `docs/design/current/{interface-language.md,component-patterns.md}`，并按 `docs/operations/ui-preview-and-browser-sanity.md` 记录 preview、routes/viewports、正式 browser result 与人工判断。额外本地 helper 证据必须标注 local-only；如果改变可复用 UI 方向，同步更新当前 design/spec。
    - 不要提交 screenshot manifest 或 bulk raster screenshots；只有用户明确批准的 public README/docs asset 可放入 allowlisted docs asset path。
 6. [ ] **改了 API 形状（增减字段 / 改命名 / 改可选性）** → 同 PR 把 `web/src/lib/types.ts` + `web/src/lib/api.ts` 改完，并补 page / 测试断言。
 
@@ -364,7 +435,7 @@ export default defineConfig([
 ## 反模式 / Common Mistakes
 
 - ❌ **跳测试 / 跳 lint 提交**：哪怕"只改一行 className"也跑 `npm run lint && npm run test -- --run`，几秒的事。
-- ❌ **`git commit --no-verify`**：当前仓库**没有** pre-commit hook，但如果哪天加了，禁止用 `--no-verify` 绕过。
+- ❌ **`git commit --no-verify`**：仓库 `.githooks/` 已保护本地/远端 main/master；先运行 `scripts/setup-git-hooks.sh`，不得绕过。
 - ❌ **`any` / 不带类型的 `useState()`**：`useState<T>(initial)` 必须给出 T 或让 initial 推导出 T；类型断言用 `unknown` + 收口判别替代 `any`。
 - ❌ **把 `exhaustive-deps` warning 当噪音**：要么补依赖，要么用 `useCallback` / `useRef` 重组结构；不要 `// eslint-disable`。
 - ❌ **CI 红了 force-push 改一行试**：先在本地复现 `cd web && npm run lint && npm run test -- --run && npm run build`，找到根因再提 commit。
@@ -380,6 +451,6 @@ export default defineConfig([
 
 > 用于后续任务评审；若形成可复用规则，更新 `.trellis/spec/` 或当前 active docs。
 
-1. **没有 coverage 阈值 / coverage 上传**：当前不强制；如未来引入 `vitest --coverage` 与阈值，需同步更新 `.github/workflows/ci.yml` + 本文件。
-2. **没有 e2e 框架**（Playwright / Cypress）：当前 CI 不跑浏览器自动化；`docs/operations/ui-preview-and-browser-sanity.md` 只定义本地预览、browser sanity 和本地/外部截图说明，不定义 tracked screenshot evidence。如未来引入正式浏览器自动化，需独立技术决策。
-3. **`web/src/lib/types.ts` 与 Go contract 全靠人工同步**：没有 codegen。reviewer 在 contract 改动 PR 里必须同时检查 `lib/types.ts`。
+1. **认证 staging 依赖外部配置**：没有 GitHub `staging` environment、main-only deployment policy、URL 与账号 secrets 时，workflow 实现可以通过 source/CI，但真实 staging AC 与 Gate C 必须保持未完成。
+2. **`web/src/lib/types.ts` 与 Go contract 全靠人工同步**：没有 codegen。reviewer 在 contract 改动 PR 里必须同时检查 `lib/types.ts`；只有后端正式拥有 schema 后另立生成任务。
+3. **正式 browser gate 只跑 Chromium**：Firefox/WebKit、Lighthouse 与像素视觉回归不在当前合同；需要时必须独立评审成本与 owner。

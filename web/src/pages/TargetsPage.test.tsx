@@ -1518,6 +1518,8 @@ describe('TargetsPage', () => {
     // so the row should show placeholder dash in trends column.
     const trendCells = document.querySelectorAll('.targets-table__trends')
     expect(trendCells.length).toBe(1)
-    expect(trendCells[0].textContent).toContain('—')
+    const firstTrendCell = trendCells[0]
+    if (!firstTrendCell) throw new Error('targets table must render the trend cell')
+    expect(firstTrendCell.textContent).toContain('—')
   })
 })

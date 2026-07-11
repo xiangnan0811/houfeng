@@ -87,7 +87,9 @@ function requireUniqueRule(root: Root, selector: string, context = 'root') {
       `${selector} must have exactly one rule in ${context}; found ${matches.length}`,
     )
   }
-  return matches[0]
+  const match = matches[0]
+  if (!match) throw new Error(`${selector} is missing from ${context}`)
+  return match
 }
 
 function declaration(rule: Rule, property: string) {
@@ -99,7 +101,9 @@ function declaration(rule: Rule, property: string) {
       `${rule.selector} must declare ${property} exactly once in ${ruleContext(rule)}; found ${matches.length}`,
     )
   }
-  return normalizeWhitespace(matches[0].value)
+  const match = matches[0]
+  if (!match) throw new Error(`${rule.selector} is missing ${property}`)
+  return normalizeWhitespace(match.value)
 }
 
 const indexCss = resolveImportedCss('src/index.css')
@@ -162,7 +166,9 @@ describe('index.css modernization contracts', () => {
     for (const line of indexManifest.split('\n')) {
       const ownerMatch = line.match(/^\/\* owner: ([a-z-]+) \*\/$/)
       if (ownerMatch) {
-        currentOwner = ownerMatch[1]
+        const owner = ownerMatch[1]
+        if (!owner) throw new Error(`invalid CSS owner marker: ${line}`)
+        currentOwner = owner
         sectionOwners.push(currentOwner)
         continue
       }
@@ -171,7 +177,9 @@ describe('index.css modernization contracts', () => {
       if (!importMatch) continue
       expect(currentOwner, `${line} must follow an owner marker`).not.toBe('')
 
-      const importedPath = resolve(dirname('src/index.css'), localImportPath(importMatch[1]))
+      const importParams = importMatch[1]
+      if (!importParams) throw new Error(`invalid CSS import: ${line}`)
+      const importedPath = resolve(dirname('src/index.css'), localImportPath(importParams))
       const ownerPath = relative('.', importedPath)
       importedPartials.push(ownerPath)
       expect(cssOwners.owners[currentOwner], `${ownerPath} owner`).toContain(ownerPath)
@@ -332,6 +340,9 @@ describe('index.css modernization contracts', () => {
       '.asset-decision-support-strip',
       ['root', '@media (max-width:920px)'],
     )
+    if (!base || !responsive) {
+      throw new Error('asset decision support strip must define base and responsive rules')
+    }
     expect(declaration(base, 'display')).toBe('flex')
     expect(declaration(responsive, 'display')).toBe('grid')
     expect(declaration(responsive, 'grid-template-columns')).toBe(

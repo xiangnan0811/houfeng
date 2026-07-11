@@ -147,8 +147,8 @@ function lifecycleCoordinationSummary(detail: VPSAssetDetail, preview: Cancellat
   const subscriptions = preview.subscriptions ?? []
   const monitoringInstanceLinks = preview.monitoring_instance_links ?? []
   const targetLinks = preview.target_links ?? []
-  if (blockers.length > 0) return blockers[0]
-  if (warnings.length > 0) return warnings[0]
+  if (blockers.length > 0) return blockers[0] ?? '取消动作存在阻塞'
+  if (warnings.length > 0) return warnings[0] ?? '需要处理资产联动'
   const activeSubscriptions = subscriptions.filter((impact) => impact.record.status === 'active').length
   return `订阅 ${activeSubscriptions}/${subscriptions.length} active · 监控实例 ${monitoringInstanceLinks.length} · Target ${targetLinks.length}，普通 CRUD 不会隐式联动。`
 }

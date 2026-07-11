@@ -154,8 +154,10 @@ describe('Asset Decisions decision queue model', () => {
     )
 
     expect(rows.map((row) => row.vps.vps_id)).toEqual(['vps_review', 'vps_missing', 'vps_migrate'])
-    expect(rows[0]).toMatchObject({ renewalDue: true, qualityIssues: [] })
-    expect(rows[0].vps.display_name).toBe('Tokyo Review Latest')
+    const firstRow = rows[0]
+    if (!firstRow) throw new Error('decision queue must include the reviewed VPS')
+    expect(firstRow).toMatchObject({ renewalDue: true, qualityIssues: [] })
+    expect(firstRow.vps.display_name).toBe('Tokyo Review Latest')
     expect(filterDecisionQueue(rows, 'renewal').map((row) => row.vps.vps_id)).toEqual(['vps_review'])
     expect(filterDecisionQueue(rows, 'unreviewed').map((row) => row.vps.vps_id)).toEqual(['vps_review'])
     expect(filterDecisionQueue(rows, 'missing_subscription').map((row) => row.vps.vps_id)).toEqual(['vps_missing'])

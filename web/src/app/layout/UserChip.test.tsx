@@ -38,7 +38,9 @@ describe('UserChip', () => {
     expect(menu).toHaveAttribute('id', trigger.getAttribute('aria-controls'))
     const items = within(menu).getAllByRole('menuitem')
     expect(items.map((item) => item.textContent)).toEqual(['修改密码', '退出登录'])
-    expect(items[0]).toHaveFocus()
+    const firstItem = items[0]
+    if (!firstItem) throw new Error('user menu must expose a first command')
+    expect(firstItem).toHaveFocus()
     expect(within(menu).queryByText('主题设置')).not.toBeInTheDocument()
   })
 
@@ -47,28 +49,35 @@ describe('UserChip', () => {
     const trigger = screen.getByRole('button', { name: 'admin 用户菜单' })
 
     fireEvent.keyDown(trigger, { key: 'ArrowUp' })
-    expect(screen.getAllByRole('menuitem')[1]).toHaveFocus()
+    const upItems = screen.getAllByRole('menuitem')
+    const upLastItem = upItems[1]
+    if (!upLastItem) throw new Error('user menu must expose two commands')
+    expect(upLastItem).toHaveFocus()
 
-    fireEvent.keyDown(screen.getAllByRole('menuitem')[1], { key: 'Escape' })
+    fireEvent.keyDown(upLastItem, { key: 'Escape' })
     fireEvent.keyDown(trigger, { key: 'ArrowDown' })
-    expect(screen.getAllByRole('menuitem')[0]).toHaveFocus()
+    const downFirstItem = screen.getAllByRole('menuitem')[0]
+    if (!downFirstItem) throw new Error('user menu must expose a first command')
+    expect(downFirstItem).toHaveFocus()
   })
 
   it('supports Arrow, Home, and End navigation with wraparound', () => {
     renderUserChip()
     fireEvent.click(screen.getByRole('button', { name: 'admin 用户菜单' }))
     const items = screen.getAllByRole('menuitem')
+    const [firstItem, secondItem] = items
+    if (!firstItem || !secondItem) throw new Error('user menu must expose two commands')
 
-    fireEvent.keyDown(items[0], { key: 'ArrowDown' })
-    expect(items[1]).toHaveFocus()
-    fireEvent.keyDown(items[1], { key: 'ArrowDown' })
-    expect(items[0]).toHaveFocus()
-    fireEvent.keyDown(items[0], { key: 'ArrowUp' })
-    expect(items[1]).toHaveFocus()
-    fireEvent.keyDown(items[1], { key: 'Home' })
-    expect(items[0]).toHaveFocus()
-    fireEvent.keyDown(items[0], { key: 'End' })
-    expect(items[1]).toHaveFocus()
+    fireEvent.keyDown(firstItem, { key: 'ArrowDown' })
+    expect(secondItem).toHaveFocus()
+    fireEvent.keyDown(secondItem, { key: 'ArrowDown' })
+    expect(firstItem).toHaveFocus()
+    fireEvent.keyDown(firstItem, { key: 'ArrowUp' })
+    expect(secondItem).toHaveFocus()
+    fireEvent.keyDown(secondItem, { key: 'Home' })
+    expect(firstItem).toHaveFocus()
+    fireEvent.keyDown(firstItem, { key: 'End' })
+    expect(secondItem).toHaveFocus()
   })
 
   it('closes on Escape and restores focus to the trigger', () => {
@@ -76,7 +85,9 @@ describe('UserChip', () => {
     const trigger = screen.getByRole('button', { name: 'admin 用户菜单' })
     fireEvent.click(trigger)
 
-    fireEvent.keyDown(screen.getAllByRole('menuitem')[0], { key: 'Escape' })
+    const escapeItem = screen.getAllByRole('menuitem')[0]
+    if (!escapeItem) throw new Error('user menu must expose a command')
+    fireEvent.keyDown(escapeItem, { key: 'Escape' })
 
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
@@ -87,7 +98,9 @@ describe('UserChip', () => {
     renderUserChip()
     fireEvent.click(screen.getByRole('button', { name: 'admin 用户菜单' }))
 
-    fireEvent.keyDown(screen.getAllByRole('menuitem')[0], { key: 'Tab' })
+    const tabItem = screen.getAllByRole('menuitem')[0]
+    if (!tabItem) throw new Error('user menu must expose a command')
+    fireEvent.keyDown(tabItem, { key: 'Tab' })
 
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })

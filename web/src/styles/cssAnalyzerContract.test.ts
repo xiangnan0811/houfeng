@@ -140,6 +140,7 @@ describe('CSS analyzer CLI contract', () => {
       .filter((entries) => entries.length > 1)
       .filter((entries) => {
         const [first] = entries
+        if (!first) return false
         return !(
           first.context === 'root' &&
           first.selector === '.login-page' &&

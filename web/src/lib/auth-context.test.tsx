@@ -9,14 +9,26 @@ function Probe() {
   return (
     <div>
       <span data-testid="user">{user?.username ?? 'none'}</span>
-      <button onClick={() => login('admin', 'pw')}>in</button>
-      <button onClick={() => logout()}>out</button>
+      <button onClick={() => { void login('admin', 'pw') }}>in</button>
+      <button onClick={() => { void logout() }}>out</button>
     </div>
   )
 }
 
 describe('AuthProvider', () => {
   beforeEach(() => vi.restoreAllMocks())
+
+  it('rejects consumers outside AuthProvider', () => {
+    function OutsideProbe() {
+      useAuth()
+      return null
+    }
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    expect(() => render(<OutsideProbe />)).toThrow('useAuth must be inside <AuthProvider>')
+
+    consoleError.mockRestore()
+  })
 
   it('boots with /me result', async () => {
     vi.spyOn(client, 'me').mockResolvedValue({
@@ -31,6 +43,18 @@ describe('AuthProvider', () => {
       </AuthProvider>,
     )
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('admin'))
+  })
+
+  it('finishes boot in the signed-out state when /me fails', async () => {
+    vi.spyOn(client, 'me').mockRejectedValue(new Error('auth service unavailable'))
+
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'))
   })
 
   it('sets user after login', async () => {

@@ -27,10 +27,14 @@ describe('Stepper', () => {
     const { container } = render(<Stepper steps={steps} />)
     const items = container.querySelectorAll('.stepper__step')
     expect(items.length).toBe(4)
-    expect(items[0].classList.contains('stepper__step--done')).toBe(true)
-    expect(items[1].classList.contains('stepper__step--current')).toBe(true)
-    expect(items[2].classList.contains('stepper__step--pending')).toBe(true)
-    expect(items[3].classList.contains('stepper__step--error')).toBe(true)
+    const [doneStep, currentStep, pendingStep, errorStep] = items
+    if (!doneStep || !currentStep || !pendingStep || !errorStep) {
+      throw new Error('stepper must render all configured steps')
+    }
+    expect(doneStep.classList.contains('stepper__step--done')).toBe(true)
+    expect(currentStep.classList.contains('stepper__step--current')).toBe(true)
+    expect(pendingStep.classList.contains('stepper__step--pending')).toBe(true)
+    expect(errorStep.classList.contains('stepper__step--error')).toBe(true)
   })
 
   it('renders error state with critical color circle', () => {
@@ -38,8 +42,9 @@ describe('Stepper', () => {
     const { container } = render(<Stepper steps={steps} />)
     const errorStep = container.querySelector('.stepper__step--error')
     expect(errorStep).toBeTruthy()
+    if (!errorStep) throw new Error('error step must be rendered')
     // The dot SVG should be present inside the step
-    expect(errorStep!.querySelector('svg.stepper__dot')).toBeTruthy()
+    expect(errorStep.querySelector('svg.stepper__dot')).toBeTruthy()
   })
 
   it('returns null when given an empty steps array', () => {

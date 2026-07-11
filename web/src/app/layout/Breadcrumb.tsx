@@ -41,6 +41,7 @@ export function Breadcrumb() {
 
   const crumbs: Crumb[] = []
   const sectionKey = segments[0]
+  if (!sectionKey) return null
   const sectionLabel = SECTION_LABELS[sectionKey]
   if (!sectionLabel) return null
   crumbs.push({ label: sectionLabel, to: `/${sectionKey}` })
@@ -51,7 +52,7 @@ export function Breadcrumb() {
     const isCurrent = segments.length === 2
     crumbs.push({
       label: truncateId(detailId),
-      to: isCurrent ? undefined : `/${sectionKey}/${detailId}`,
+      ...(isCurrent ? {} : { to: `/${sectionKey}/${detailId}` }),
     })
   }
 

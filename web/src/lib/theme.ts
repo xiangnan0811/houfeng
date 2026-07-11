@@ -34,7 +34,7 @@ export function resolveScheme(mode: Mode): Scheme {
 }
 
 export function applyTheme(preset: Preset, mode: Mode | Scheme): void {
-  const scheme: Scheme = mode === 'system' ? preferredScheme() : (mode as Scheme)
+  const scheme: Scheme = mode === 'system' ? preferredScheme() : mode
   // classic-light falls back to houfeng-light since we only have 3 themes
   const cls = preset === 'classic' && scheme === 'light'
     ? 'theme-houfeng-light'

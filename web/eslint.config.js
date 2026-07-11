@@ -6,7 +6,14 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores([
+    'dist',
+    'coverage',
+    'playwright-report',
+    'test-results',
+    '.playwright',
+    'e2e/.auth',
+  ]),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -18,6 +25,34 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+    },
+  },
+  {
+    files: [
+      'src/lib/**/*.{ts,tsx}',
+      'src/pages/asset-decisions/hooks/**/*.{ts,tsx}',
+    ],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/await-thenable': 'error',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'error',
+      '@typescript-eslint/switch-exhaustiveness-check': 'error',
+    },
+  },
+  {
+    files: ['e2e/**/*.ts', 'playwright.config.ts', 'playwright.staging.config.ts'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+      },
     },
   },
 ])

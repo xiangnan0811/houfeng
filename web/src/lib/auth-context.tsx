@@ -24,7 +24,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const drop = () => setUser(null)
     setUnauthorizedHandler(drop)
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial-load gate: setLoading(false) runs in async .finally() after refresh() resolves, not synchronously in effect body
-    refresh().finally(() => setLoading(false))
+    void refresh()
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false))
     return () => {
       setUnauthorizedHandler(undefined)
     }

@@ -268,7 +268,7 @@ describe('useAssetDecisionManualGroups', () => {
         revision: 0,
         onNotice: vi.fn(),
       }),
-      { initialProps: { selectedManualGroupID: 'admg_001' as string | null } },
+      { initialProps: { selectedManualGroupID: 'admg_001' } },
     )
 
     rerender({ selectedManualGroupID: 'admg_002' })
@@ -361,6 +361,36 @@ describe('useAssetDecisionManualGroups', () => {
     expect(result.current.state.list.groups[0]?.manual_group_id).toBe('admg_created')
   })
 
+  it.each([
+    ['region_portfolio', 'region_review'],
+    ['cost_pressure', 'budget_reduction'],
+    ['cancellation_attention', 'migration_retirement'],
+    ['evidence_gap', 'evidence_cleanup'],
+    ['renewal_attention', 'general'],
+  ] as const)('maps automatic group %s to scenario %s', async (groupType, scenario) => {
+    vi.spyOn(api, 'listAssetDecisionManualGroups').mockResolvedValue([])
+    vi.spyOn(api, 'listVPSAssets').mockResolvedValue([VPS])
+    const created = manualDetail(`admg_${groupType}`, { scenario })
+    const createGroup = vi.spyOn(api, 'createAssetDecisionManualGroup').mockResolvedValue(created)
+    const { result } = renderHook(() => useAssetDecisionManualGroups({
+      filter: FILTER,
+      renewalWindow: 30,
+      selectedManualGroupID: null,
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+    await waitFor(() => expect(result.current.state.list.loading).toBe(false))
+
+    await act(async () => {
+      await result.current.commands.createFromAutomatic({
+        ...AUTO_GROUP,
+        group_type: groupType,
+      })
+    })
+
+    expect(createGroup).toHaveBeenCalledWith(expect.objectContaining({ scenario }))
+  })
+
   it('creates from a template with its exact draft and rejects a blank title before the API', async () => {
     mockSuccessfulReads()
     const created = manualDetail('admg_template', { title: '模板组合' })
@@ -443,6 +473,42 @@ describe('useAssetDecisionManualGroups', () => {
     expect(result.current.state.list.groups[0]?.title).toBe('更新后的组合')
   })
 
+  it('validates a patch and applies optional-field defaults without clearing a pending member removal', async () => {
+    const detail = manualDetail()
+    mockSuccessfulReads(detail)
+    const updated = manualDetail('admg_001', { title: '精简更新', goal: '', note: '' })
+    const patchGroup = vi.spyOn(api, 'patchAssetDecisionManualGroup').mockResolvedValue(updated)
+    const { result } = renderHook(() => useAssetDecisionManualGroups({
+      filter: FILTER,
+      renewalWindow: 30,
+      selectedManualGroupID: 'admg_001',
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+    await waitFor(() => expect(result.current.state.detail.detail).toBe(detail))
+
+    await act(async () => result.current.commands.patchCurrent({ title: '   ' }))
+    expect(result.current.state.error).toBe('请填写自定义组合标题')
+    expect(patchGroup).not.toHaveBeenCalled()
+
+    await act(async () => result.current.commands.patchCurrent({}))
+    expect(result.current.state.error).toBe('请填写自定义组合标题')
+    expect(patchGroup).not.toHaveBeenCalled()
+
+    const member = detail.members[0]!
+    act(() => result.current.commands.requestMemberRemoval(member))
+    await act(async () => result.current.commands.patchCurrent({ title: '  精简更新  ' }))
+
+    expect(patchGroup).toHaveBeenCalledWith('admg_001', {
+      title: '精简更新',
+      goal: '',
+      note: '',
+      scenario: detail.scenario,
+      status: detail.status,
+    })
+    expect(result.current.state.pendingMemberRemoval).toBe(member)
+  })
+
   it('adds a member from the owned draft without writing any VPS business object', async () => {
     const detail = manualDetail('admg_001', { members: [] })
     mockSuccessfulReads(detail)
@@ -483,6 +549,39 @@ describe('useAssetDecisionManualGroups', () => {
     expect(result.current.state.detail.detail).toBe(updated)
   })
 
+  it('requires a VPS selection and omits an invalid optional sort order', async () => {
+    const detail = manualDetail('admg_001', { members: [] })
+    mockSuccessfulReads(detail)
+    const updated = manualDetail()
+    const addMember = vi.spyOn(api, 'addAssetDecisionManualGroupMember').mockResolvedValue(updated)
+    const { result } = renderHook(() => useAssetDecisionManualGroups({
+      filter: FILTER,
+      renewalWindow: 30,
+      selectedManualGroupID: 'admg_001',
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+    await waitFor(() => expect(result.current.state.detail.detail).toBe(detail))
+
+    await act(async () => result.current.commands.addMember())
+    expect(result.current.state.error).toBe('请选择要加入组合的 VPS')
+    expect(addMember).not.toHaveBeenCalled()
+
+    act(() => result.current.commands.updateMemberAddDraft({
+      vpsID: 'vps_001',
+      sortOrder: 'not-a-number',
+    }))
+    await act(async () => result.current.commands.addMember())
+
+    expect(addMember).toHaveBeenCalledWith('admg_001', {
+      vps_id: 'vps_001',
+      intended_role: 'observe_candidate',
+      intended_action: 'review',
+      reason: '',
+      note: '',
+    })
+  })
+
   it('requires an explicit pending confirmation before deleting a member', async () => {
     const detail = manualDetail()
     mockSuccessfulReads(detail)
@@ -518,6 +617,68 @@ describe('useAssetDecisionManualGroups', () => {
     expect(result.current.state.detail.detail).toBe(updated)
   })
 
+  it('blocks duplicate removal requests and names a missing-fact member by ID', async () => {
+    const base = manualDetail()
+    const member = { ...base.members[0]!, current_fact_found: false }
+    const detail = manualDetail('admg_001', { members: [member] })
+    mockSuccessfulReads(detail)
+    const removal = deferred<AssetDecisionManualGroupDetail>()
+    vi.spyOn(api, 'deleteAssetDecisionManualGroupMember').mockReturnValue(removal.promise)
+    const notice = vi.fn()
+    const { result } = renderHook(() => useAssetDecisionManualGroups({
+      filter: FILTER,
+      renewalWindow: 30,
+      selectedManualGroupID: 'admg_001',
+      revision: 0,
+      onNotice: notice,
+    }))
+    await waitFor(() => expect(result.current.state.detail.detail).toBe(detail))
+
+    act(() => result.current.commands.requestMemberRemoval(member))
+    act(() => { void result.current.commands.removeMember(member) })
+    await waitFor(() => expect(result.current.state.memberSaving.vps_001).toBe(true))
+
+    act(() => result.current.commands.requestMemberRemoval(member))
+    expect(result.current.state.pendingMemberRemoval).toBeNull()
+
+    await act(async () => {
+      removal.resolve(manualDetail('admg_001', { members: [], member_count: 0 }))
+      await removal.promise
+    })
+    expect(notice).toHaveBeenCalledWith('成员已移出自定义组合：vps_001')
+  })
+
+  it('keeps detail-only commands inert without a selected manual group', async () => {
+    vi.spyOn(api, 'listAssetDecisionManualGroups').mockResolvedValue([])
+    vi.spyOn(api, 'listVPSAssets').mockResolvedValue([VPS])
+    const patchGroup = vi.spyOn(api, 'patchAssetDecisionManualGroup')
+    const addMember = vi.spyOn(api, 'addAssetDecisionManualGroupMember')
+    const { result } = renderHook(() => useAssetDecisionManualGroups({
+      filter: FILTER,
+      renewalWindow: 30,
+      selectedManualGroupID: null,
+      revision: 0,
+      onNotice: vi.fn(),
+    }))
+    await waitFor(() => expect(result.current.state.list.loading).toBe(false))
+
+    act(() => {
+      result.current.commands.updateMemberAddDraft({ vpsID: 'vps_001' })
+      result.current.commands.setMemberAddAdvanced(true)
+      result.current.commands.selectPanel('add')
+    })
+    await act(async () => {
+      await result.current.commands.patchCurrent({ title: '不会保存' })
+      await result.current.commands.addMember()
+    })
+
+    expect(result.current.state.detailPanel).toBe('overview')
+    expect(result.current.state.memberAddDraft.vpsID).toBe('')
+    expect(result.current.state.memberAddAdvanced).toBe(false)
+    expect(patchGroup).not.toHaveBeenCalled()
+    expect(addMember).not.toHaveBeenCalled()
+  })
+
   it('owns panel and member-add draft reset semantics', async () => {
     mockSuccessfulReads()
     const getGroup = vi.mocked(api.getAssetDecisionManualGroup)
@@ -551,6 +712,9 @@ describe('useAssetDecisionManualGroups', () => {
 
   it('does not revive manual-group UI state after the route leaves and returns', async () => {
     mockSuccessfulReads()
+    const initialProps: { selectedManualGroupID: string | null } = {
+      selectedManualGroupID: 'admg_001',
+    }
     const { result, rerender } = renderHook(
       ({ selectedManualGroupID }: { selectedManualGroupID: string | null }) => useAssetDecisionManualGroups({
         filter: FILTER,
@@ -559,7 +723,7 @@ describe('useAssetDecisionManualGroups', () => {
         revision: 0,
         onNotice: vi.fn(),
       }),
-      { initialProps: { selectedManualGroupID: 'admg_001' as string | null } },
+      { initialProps },
     )
     await waitFor(() => expect(result.current.state.detail.loading).toBe(false))
     act(() => {

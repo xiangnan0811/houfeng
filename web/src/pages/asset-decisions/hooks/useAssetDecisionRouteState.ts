@@ -175,8 +175,8 @@ export function useAssetDecisionRouteState(): {
       closeEntity,
       clearFilter,
       clearAllFilters,
-      navigateToVPS: (vpsID) => navigate(vpsDetailPath(vpsID)),
-      navigateToVPSSubscription: (vpsID) => navigate(vpsWorkbenchPath(vpsID, 'subscription')),
+      navigateToVPS: (vpsID) => { void navigate(vpsDetailPath(vpsID)) },
+      navigateToVPSSubscription: (vpsID) => { void navigate(vpsWorkbenchPath(vpsID, 'subscription')) },
     },
   }
 }

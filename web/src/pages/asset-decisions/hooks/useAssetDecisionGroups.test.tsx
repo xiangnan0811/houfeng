@@ -172,7 +172,7 @@ describe('useAssetDecisionGroups', () => {
         selectedGroupID,
         revision: 0,
       }),
-      { initialProps: { selectedGroupID: 'adg_001' as string | null } },
+      { initialProps: { selectedGroupID: 'adg_001' } },
     )
 
     rerender({ selectedGroupID: 'adg_002' })
@@ -240,6 +240,25 @@ describe('useAssetDecisionGroups', () => {
     expect(listGroups).toHaveBeenCalledTimes(2)
   })
 
+  it('does not select a detail panel without a selected group', async () => {
+    vi.spyOn(api, 'listAssetDecisionGroups').mockResolvedValue([GROUP_SUMMARY])
+    const getGroup = vi.spyOn(api, 'getAssetDecisionGroup')
+
+    const { result } = renderHook(() => useAssetDecisionGroups({
+      filter: FILTER,
+      renewalWindow: 60,
+      selectedGroupID: null,
+      revision: 0,
+    }))
+    await waitFor(() => expect(result.current.state.list.loading).toBe(false))
+
+    act(() => result.current.commands.selectPanel('members'))
+
+    expect(result.current.state.detailPanel).toBe('overview')
+    expect(result.current.state.detail).toEqual({ loading: false, error: null, detail: null })
+    expect(getGroup).not.toHaveBeenCalled()
+  })
+
   it('resets the panel for a different selection and on explicit detail reset', async () => {
     vi.spyOn(api, 'listAssetDecisionGroups').mockResolvedValue([GROUP_SUMMARY])
     const getGroup = vi.spyOn(api, 'getAssetDecisionGroup').mockResolvedValue(GROUP_DETAIL)
@@ -251,7 +270,7 @@ describe('useAssetDecisionGroups', () => {
         selectedGroupID,
         revision: 0,
       }),
-      { initialProps: { selectedGroupID: 'adg_001' as string | null } },
+      { initialProps: { selectedGroupID: 'adg_001' } },
     )
     await waitFor(() => expect(result.current.state.detail.detail).toBe(GROUP_DETAIL))
 

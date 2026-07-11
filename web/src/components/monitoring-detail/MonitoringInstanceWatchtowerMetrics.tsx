@@ -427,6 +427,7 @@ export function MonitoringInstanceWatchtowerMetrics({
     if (b.priority !== a.priority) return b.priority - a.priority
     return a.id.localeCompare(b.id)
   })
+  const topCard = sorted[0]
 
   return (
     <section className="watchtower-metrics-panel" aria-label="主机指标趋势">
@@ -440,7 +441,7 @@ export function MonitoringInstanceWatchtowerMetrics({
             ? `实时滚动 ${ascending.length} 点`
             : `${labelPrefix} · ${window?.sample_count ?? 0} 个原始样本 · ${availableWindowLabel(window)}`}
           {' · 已按阈值优先级排序'}
-          {sorted[0]?.priority > 0 ? <> · 首要关注 {sorted[0].label}</> : null}
+          {topCard && topCard.priority > 0 ? <> · 首要关注 {topCard.label}</> : null}
         </p>
       </div>
       <div className="watchtower-metrics" role="group" aria-label="主机指标趋势">

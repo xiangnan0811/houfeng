@@ -91,14 +91,17 @@ verify-go: fmt-go vet-go test-go
 
 test-web-toolchain:
 	@scripts/check-web-toolchain.test.sh
+	@scripts/check-web-quality-gates.test.sh
 
 verify-web: test-web-toolchain
 	@scripts/check-web-toolchain.sh
 	@if [ -f web/package.json ]; then \
 		env -u NODE_ENV $(NPM) --prefix web ci --include=dev && \
 		NODE_ENV=test $(NPM) --prefix web run lint && \
-		NODE_ENV=test $(NPM) --prefix web run test -- --run && \
-		NODE_ENV=production $(NPM) --prefix web run build; \
+		NODE_ENV=test $(NPM) --prefix web run test:coverage && \
+		NODE_ENV=production $(NPM) --prefix web run build && \
+		$(NPM) --prefix web run bundle:check && \
+		$(NPM) --prefix web run css:analyze; \
 	else \
 		echo 'web workspace not initialized yet'; \
 	fi

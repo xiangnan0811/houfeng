@@ -130,6 +130,43 @@ describe('VPSCancellationWorkbench', () => {
     })
   })
 
+  it('omits monitoring status when the selected instance remains enabled', async () => {
+    const onSubmit = vi.fn()
+    const preview = previewFixture()
+    const recommendedStep = preview.recommended_steps[0]
+    if (!recommendedStep) throw new Error('fixture must include a VPS recommendation')
+    preview.recommended_steps[0] = {
+      ...recommendedStep,
+      to_state: 'to_cancel/cancel',
+    }
+    render(
+      <VPSCancellationWorkbench
+        preview={preview}
+        submitting={false}
+        error={null}
+        result={null}
+        onSubmit={onSubmit}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('原因'), {
+      target: { value: '到期后停止续费' },
+    })
+    const subscriptionRow = screen.getByText('sub_001').closest<HTMLElement>('.asset-cancel-workbench__row')
+    const monitoringRow = screen.getByText('Tokyo Monitoring Instance').closest<HTMLElement>('.asset-checkbox-line')
+    if (!subscriptionRow || !monitoringRow) {
+      throw new Error('workbench fixture rows must be rendered')
+    }
+    fireEvent.click(within(subscriptionRow).getByRole('checkbox'))
+    fireEvent.click(within(monitoringRow).getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    expect(onSubmit.mock.calls[0]?.[0].monitoring_instance_actions).toStrictEqual([
+      { monitoring_instance_id: 'mi_001', lifecycle_status: '不续费' },
+    ])
+  })
+
   it('requires explicit active subscription selection before submitting', async () => {
     const onSubmit = vi.fn()
     render(
@@ -154,12 +191,14 @@ describe('VPSCancellationWorkbench', () => {
   it('does not preselect multiple active subscriptions', async () => {
     const onSubmit = vi.fn()
     const preview = previewFixture()
+    const firstSubscription = preview.subscriptions[0]
+    if (!firstSubscription) throw new Error('fixture must include an active subscription')
     preview.subscriptions = [
-      preview.subscriptions[0],
+      firstSubscription,
       {
-        ...preview.subscriptions[0],
+        ...firstSubscription,
         record: {
-          ...preview.subscriptions[0].record,
+          ...firstSubscription.record,
           subscription_id: 'sub_002',
         },
       },

@@ -98,77 +98,16 @@ import type {
   VPSSummary,
   VPSTimeline,
 } from './types'
+import { postJSON, postJSONBody, requestEmpty, requestJSON } from './apiRequest'
 
-export class ApiError extends Error {
-  status: number
-
-  constructor(status: number, message: string) {
-    super(message)
-    this.name = 'ApiError'
-    this.status = status
-  }
-}
-
-// Set by AuthProvider on mount; fired when any /api/* responds with 401.
-let onUnauthorized: (() => void) | undefined
-export function setUnauthorizedHandler(h: (() => void) | undefined): void {
-  onUnauthorized = h
-}
-
-async function request(path: string, init?: RequestInit): Promise<string> {
-  const response = await fetch(path, {
-    headers: { Accept: 'application/json' },
-    cache: 'no-store',
-    credentials: 'include',
-    ...init,
-  })
-
-  const rawBody = await response.text()
-
-  if (response.status === 401) {
-    onUnauthorized?.()
-    throw new ApiError(401, 'unauthenticated')
-  }
-
-  if (!response.ok) {
-    let message = `Request failed: ${response.status}`
-    if (rawBody.trim()) {
-      try {
-        const errorBody = JSON.parse(rawBody) as { error?: string; message?: string }
-        message = errorBody.error ?? errorBody.message ?? rawBody
-      } catch {
-        message = rawBody
-      }
-    }
-    throw new ApiError(response.status, message)
-  }
-
-  return rawBody
-}
-
-export async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
-  const rawBody = await request(path, init)
-  return JSON.parse(rawBody) as T
-}
-
-export async function requestEmpty(path: string, init?: RequestInit): Promise<void> {
-  await request(path, init)
-}
-
-export function postJSON<T>(path: string): Promise<T> {
-  return requestJSON<T>(path, { method: 'POST' })
-}
-
-export function postJSONBody<T>(path: string, body: unknown): Promise<T> {
-  return requestJSON<T>(path, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  })
-}
+export {
+  ApiError,
+  postJSON,
+  postJSONBody,
+  requestEmpty,
+  requestJSON,
+  setUnauthorizedHandler,
+} from './apiRequest'
 
 type PatchJSONOptions = {
   ifMatch?: string
@@ -237,9 +176,11 @@ export function updateMonitoringInstanceMetadata(
   input: UpdateMonitoringInstanceMetadataInput,
   options: MetadataUpdateOptions = {},
 ) {
-  return patchJSONBody<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}`, input, {
-    ifMatch: options.expectedUpdatedAt,
-  })
+  return patchJSONBody<MonitoringInstanceRecord>(
+    `/api/monitoring-instances/${monitoringInstanceId}`,
+    input,
+    options.expectedUpdatedAt ? { ifMatch: options.expectedUpdatedAt } : {},
+  )
 }
 
 export function getMonitoringInstanceRuntimeFacts(monitoringInstanceId: string, timeWindow = '24h') {
@@ -383,9 +324,11 @@ export function updateTargetMetadata(
   input: UpdateTargetMetadataInput,
   options: MetadataUpdateOptions = {},
 ) {
-  return patchJSONBody<TargetRecord>(`/api/targets/${targetId}`, input, {
-    ifMatch: options.expectedUpdatedAt,
-  })
+  return patchJSONBody<TargetRecord>(
+    `/api/targets/${targetId}`,
+    input,
+    options.expectedUpdatedAt ? { ifMatch: options.expectedUpdatedAt } : {},
+  )
 }
 
 export function listTargetProbeItems(targetId: string) {
@@ -802,14 +745,14 @@ export function listVPSServices(vpsId: string) {
 
 export function createVPSService(vpsId: string, input: CreateAssetServiceInput): Promise<AssetServiceRecord> {
   const body: Omit<CreateAssetServiceInput, 'vps_id'> = {
-    target_id: input.target_id,
+    ...(input.target_id === undefined ? {} : { target_id: input.target_id }),
     name: input.name,
-    service_type: input.service_type,
-    status: input.status,
-    url: input.url,
-    port: input.port,
-    labels: input.labels,
-    note: input.note,
+    ...(input.service_type === undefined ? {} : { service_type: input.service_type }),
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(input.url === undefined ? {} : { url: input.url }),
+    ...(input.port === undefined ? {} : { port: input.port }),
+    ...(input.labels === undefined ? {} : { labels: input.labels }),
+    ...(input.note === undefined ? {} : { note: input.note }),
   }
   return postJSONBody<AssetServiceRecord>(`/api/vps/${vpsId}/services`, body)
 }
@@ -820,17 +763,17 @@ export function listVPSDomains(vpsId: string) {
 
 export function createVPSDomain(vpsId: string, input: CreateAssetDomainInput): Promise<AssetDomainRecord> {
   const body: Omit<CreateAssetDomainInput, 'vps_id'> = {
-    service_id: input.service_id,
-    target_id: input.target_id,
+    ...(input.service_id === undefined ? {} : { service_id: input.service_id }),
+    ...(input.target_id === undefined ? {} : { target_id: input.target_id }),
     domain_name: input.domain_name,
-    purpose: input.purpose,
-    status: input.status,
-    registrar: input.registrar,
-    expires_at: input.expires_at,
-    auto_renew: input.auto_renew,
-    https_enabled: input.https_enabled,
-    labels: input.labels,
-    note: input.note,
+    ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(input.registrar === undefined ? {} : { registrar: input.registrar }),
+    ...(input.expires_at === undefined ? {} : { expires_at: input.expires_at }),
+    ...(input.auto_renew === undefined ? {} : { auto_renew: input.auto_renew }),
+    ...(input.https_enabled === undefined ? {} : { https_enabled: input.https_enabled }),
+    ...(input.labels === undefined ? {} : { labels: input.labels }),
+    ...(input.note === undefined ? {} : { note: input.note }),
   }
   return postJSONBody<AssetDomainRecord>(`/api/vps/${vpsId}/domains`, body)
 }

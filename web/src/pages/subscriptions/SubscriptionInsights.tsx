@@ -164,6 +164,7 @@ function buildDifferenceAreas(points: TrendPoint[]): DifferenceArea[] {
   for (let index = 0; index < points.length - 1; index += 1) {
     const left = points[index]
     const right = points[index + 1]
+    if (!left || !right) continue
     if (left.budget == null || right.budget == null || left.yBudget == null || right.yBudget == null) continue
     const leftDelta = left.cost - left.budget
     const rightDelta = right.cost - right.budget

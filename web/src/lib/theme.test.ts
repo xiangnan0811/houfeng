@@ -62,7 +62,7 @@ describe('theme runtime', () => {
       addEventListener: () => {},
       removeEventListener: () => {},
       dispatchEvent: () => false,
-    }) as unknown as MediaQueryList
+    })
     vi.stubGlobal('matchMedia', fake)
     expect(preferredScheme()).toBe('dark')
     vi.unstubAllGlobals()

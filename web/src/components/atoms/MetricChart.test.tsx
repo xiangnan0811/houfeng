@@ -15,6 +15,12 @@ function makeSamples(count: number, base = 50, stepMs = 60_000): MetricChartSamp
   }))
 }
 
+function sampleAt(samples: MetricChartSample[], index: number): MetricChartSample {
+  const sample = samples[index]
+  if (!sample) throw new Error(`fixture must include sample ${index}`)
+  return sample
+}
+
 describe('MetricChart', () => {
   it('renders polyline + thresholds + axis ticks for typical inputs', () => {
     const samples = makeSamples(5)
@@ -78,8 +84,8 @@ describe('MetricChart', () => {
   it('renders maintenance window rectangles within the data span', () => {
     const samples = makeSamples(10)
     // Maintenance window covers samples 3..6
-    const start = samples[3].observedAt
-    const end = samples[6].observedAt
+    const start = sampleAt(samples, 3).observedAt
+    const end = sampleAt(samples, 6).observedAt
     const windows: MetricChartMaintenanceWindow[] = [{ startedAt: start, endedAt: end }]
     const { container } = render(
       <MetricChart samples={samples} maintenanceWindows={windows} tone="maintenance" />,
@@ -87,9 +93,11 @@ describe('MetricChart', () => {
 
     const maintGroups = container.querySelectorAll('.metric-chart__maintenance')
     expect(maintGroups).toHaveLength(1)
+    const maintenanceGroup = maintGroups[0]
+    if (!maintenanceGroup) throw new Error('chart must render the maintenance group')
     // Should contain both the band rect and the top-edge marker triangle
-    expect(maintGroups[0].querySelector('rect')).toBeTruthy()
-    expect(maintGroups[0].querySelector('polygon')).toBeTruthy()
+    expect(maintenanceGroup.querySelector('rect')).toBeTruthy()
+    expect(maintenanceGroup.querySelector('polygon')).toBeTruthy()
   })
 
   it('shows a crosshair tooltip with second-level time while axis stays minute-level', () => {
@@ -186,7 +194,7 @@ describe('MetricChart', () => {
         samples={samples}
         width={300}
         height={140}
-        hoveredAt={samples[2].observedAt}
+        hoveredAt={sampleAt(samples, 2).observedAt}
         formatValue={(v) => `${v.toFixed(1)}%`}
       />,
     )
@@ -207,7 +215,7 @@ describe('MetricChart', () => {
         samples={samples}
         width={300}
         height={140}
-        hoveredAt={samples[2].observedAt}
+        hoveredAt={sampleAt(samples, 2).observedAt}
         onHoverAtChange={onHoverAtChange}
         showTooltip={false}
       />,
@@ -229,7 +237,7 @@ describe('MetricChart', () => {
       toJSON: () => ({}),
     })
     fireEvent.mouseMove(svg, { clientX: 300 })
-    expect(onHoverAtChange).toHaveBeenCalledWith(samples[4].observedAt)
+    expect(onHoverAtChange).toHaveBeenCalledWith(sampleAt(samples, 4).observedAt)
     fireEvent.mouseLeave(svg)
     expect(onHoverAtChange).toHaveBeenCalledWith(null)
   })

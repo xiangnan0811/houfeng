@@ -134,7 +134,9 @@ export function DashboardPage() {
       <DashboardCommandSurface
         model={model}
         supportingLoading={supportingLoading}
-        onRetrySupporting={model.degradations.length > 0 ? retrySupportingResources : undefined}
+        {...(model.degradations.length > 0
+          ? { onRetrySupporting: retrySupportingResources }
+          : {})}
       />
     </div>
   )

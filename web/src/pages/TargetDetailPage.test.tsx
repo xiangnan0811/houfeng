@@ -3882,7 +3882,9 @@ describe('TargetDetailPage', () => {
     )
     expect(fetchMock).toHaveBeenCalledTimes(5)
 
-    fireEvent.click(screen.getAllByRole('button', { name: '查看历史' })[0])
+    const firstHistoryButton = screen.getAllByRole('button', { name: '查看历史' })[0]
+    if (!firstHistoryButton) throw new Error('target detail must expose history')
+    fireEvent.click(firstHistoryButton)
 
     const drawer = await screen.findByRole('dialog', { name: '目标历史抽屉' })
     const historyTabs = within(drawer).getByRole('tablist', { name: '目标历史类型' })

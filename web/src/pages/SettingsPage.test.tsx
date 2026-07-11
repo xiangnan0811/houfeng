@@ -215,7 +215,9 @@ describe('SettingsPage', () => {
 
     switchTab('通知')
     await waitFor(() => expect(screen.getByRole('heading', { name: '飞书通知设置' })).toBeInTheDocument())
-    fireEvent.click(screen.getAllByRole('button', { name: '编辑' })[1])
+    const feishuEditButton = screen.getAllByRole('button', { name: '编辑' })[1]
+    if (!feishuEditButton) throw new Error('notification settings must expose Feishu editing')
+    fireEvent.click(feishuEditButton)
 
     expect(screen.getByText(/已配置飞书 Webhook/)).toHaveTextContent('https://open.feishu.cn/***abcd')
     expect(screen.getByLabelText('Webhook URL')).toHaveValue('')
@@ -827,7 +829,9 @@ describe('SettingsPage', () => {
 
     // Click the first format button
     const formatButtons = screen.getAllByRole('button', { name: '格式化' })
-    fireEvent.click(formatButtons[0])
+    const firstFormatButton = formatButtons[0]
+    if (!firstFormatButton) throw new Error('advanced settings must expose a format command')
+    fireEvent.click(firstFormatButton)
 
     expect(textarea.value).toContain('  "label": "edge"')
   })

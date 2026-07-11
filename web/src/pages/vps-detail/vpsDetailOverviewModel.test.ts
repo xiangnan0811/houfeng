@@ -160,7 +160,7 @@ const baseDomain: AssetDomainRecord = {
 }
 
 const baseIPQuality: VPSIPQualityReport = {
-  summary: baseDetail.ip_quality_summary,
+  summary: baseDetail.ip_quality_summary ?? null,
   latest_report: null,
   provider_results: [{
     provider: 'ipinfo',
@@ -180,6 +180,12 @@ const baseIPQuality: VPSIPQualityReport = {
     { service: 'netflix', status: 'blocked', region: 'US', unlock_type: 'none' },
   ],
   history: [],
+}
+
+function baseMonitoringInstance() {
+  const monitoringInstance = baseDetail.monitoring_instance_links[0]
+  if (!monitoringInstance) throw new Error('fixture must include a monitoring instance')
+  return monitoringInstance
 }
 
 function buildModel(overrides: Partial<Parameters<typeof buildVPSDetailOverviewModel>[0]> = {}) {
@@ -297,7 +303,7 @@ describe('vpsDetailOverviewModel', () => {
       detail: {
         ...baseDetail,
         monitoring_instance_links: [{
-          ...baseDetail.monitoring_instance_links[0],
+          ...baseMonitoringInstance(),
           current_health_status: '告警',
           current_active_incident_count: 2,
           current_primary_issue_summary: 'packet loss',
@@ -332,7 +338,7 @@ describe('vpsDetailOverviewModel', () => {
         lifecycle_status: 'to_cancel',
         renewal_decision: 'cancel',
         monitoring_instance_links: [{
-          ...baseDetail.monitoring_instance_links[0],
+          ...baseMonitoringInstance(),
           current_health_status: '关注',
           current_active_incident_count: 1,
           current_primary_issue_summary: 'legacy service still responds',

@@ -1,0 +1,25 @@
+{
+  "global": {
+    "statements": 79.14,
+    "branches": 70.27,
+    "functions": 78.88,
+    "lines": 82.95
+  },
+  "critical": {
+    "src/lib/modalStack.ts": { "branches": 90 },
+    "src/lib/useModalFocus.ts": { "branches": 90 },
+    "src/components/atoms/Modal.tsx": { "branches": 90 },
+    "src/pages/dashboard/dashboardRemoteState.ts": { "branches": 90 },
+    "src/pages/dashboard/dashboardModel.ts": { "branches": 90 },
+    "src/lib/apiRequest.ts": { "branches": 90 },
+    "src/lib/auth-client.ts": { "branches": 90 },
+    "src/lib/auth-context.tsx": { "branches": 90 },
+    "src/pages/asset-decisions/hooks/useAssetDecisionRouteState.ts": { "branches": 90 },
+    "src/pages/asset-decisions/hooks/useAssetDecisionPortfolio.ts": { "branches": 90 },
+    "src/pages/asset-decisions/hooks/useAssetDecisionGroups.ts": { "branches": 90 },
+    "src/pages/asset-decisions/hooks/useAssetDecisionManualGroups.ts": { "branches": 90 },
+    "src/pages/asset-decisions/hooks/useAssetDecisionTemplates.ts": { "branches": 90 },
+    "src/pages/asset-decisions/hooks/useAssetDecisionRecords.ts": { "branches": 90 },
+    "src/pages/asset-decisions/hooks/useAssetDecisionRenewalQueue.ts": { "branches": 90 }
+  }
+}

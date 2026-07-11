@@ -126,7 +126,8 @@ export function GlobalSearch() {
       setFocusIndex((i) => (i - 1 + results.length) % results.length)
     } else if (e.key === 'Enter' && focusIndex >= 0) {
       e.preventDefault()
-      activate(results[focusIndex])
+      const focusedResult = results[focusIndex]
+      if (focusedResult) activate(focusedResult)
     } else if (e.key === 'Escape') {
       setOpen(false)
     }

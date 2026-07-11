@@ -71,15 +71,14 @@ export function useModalFocus<T extends HTMLElement>(
       const container = containerRef.current
       if (!container) return
 
-      const focusableElements = getFocusableElements(container)
-      if (focusableElements.length === 0) {
+      const [firstFocusable, ...remainingFocusable] = getFocusableElements(container)
+      if (!firstFocusable) {
         event.preventDefault()
         container.focus()
         return
       }
 
-      const firstFocusable = focusableElements[0]
-      const lastFocusable = focusableElements[focusableElements.length - 1]
+      const lastFocusable = remainingFocusable.at(-1) ?? firstFocusable
       const activeElement = document.activeElement
 
       if (event.shiftKey) {

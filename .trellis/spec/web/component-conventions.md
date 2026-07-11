@@ -133,7 +133,7 @@ interface SegmentedControlProps<V extends string = string> {
 - `Input.test.tsx` / `Select.test.tsx`：required、ref、generated/explicit id、error/hint、describedby 去重、invalid precedence、options/children。
 - `Tabs.test.tsx` / `SegmentedControl.test.tsx`：命名、唯一 tab stop、四个导航键、动态缺失 value、id 闭环、pressed buttons 与 generic value；Tabs 还要断言无 rerender 时不滚、旧 value 中间 rerender 仍不滚、目标 value commit 后才以 nearest/nearest 滚动。
 - 所有 Tabs 调用迁移后用 page tests 断言 active tab 的 `aria-controls` 指向 DOM panel，panel `aria-labelledby` 指回 tab；值选择器断言 group/button，不查询虚假 tab。
-- `UserChip.test.tsx` / `TopBar.test.tsx`：menu ownership、Arrow/Home/End、Escape/Tab/outside、callback 单次调用与 focus return；真实 Chromium补 Tab 默认焦点前移证据。
+- `UserChip.test.tsx` / `TopBar.test.tsx`：menu ownership、Arrow/Home/End、Escape/Tab/outside、callback 单次调用与 focus return；`web/e2e/accessibility.spec.ts` 固定真实 Chromium 的 Tab 默认焦点前移、Escape restore、Settings Tabs 与 skip-link。
 - `Sidebar.test.tsx` / `AppShell.test.tsx` / `VPSPage.test.tsx`：折叠后仍稳定命名的导航 Link、异常数 accessible label、skip link/main target、主 Link href、Link click 不触发行增强、背景 click 仍可用。
 
 #### 7. Wrong vs Correct
@@ -262,7 +262,7 @@ type RouteObject = {
 | Props 类型 | `<ComponentName>Props`；下面"Props 类型定义模式"详述 | `SparklineProps`、`CardProps`、`IncidentListProps` |
 | Hook | `use<Name>` camelCase；返回值结构清晰 | `useAuth`、`useTheme`、`useThemeOptional` |
 | Context | `<Name>Context`（内部）+ `<Name>Provider`（导出）+ `use<Name>`（hook） | `ThemeContext` / `ThemeProvider` / `useTheme` |
-| CSS class | BEM `block__element--modifier`，与 `styles/atoms.css` / `pages.css` 对齐 | `card--state`、`probe-card__header`、`btn--primary` |
+| CSS class | BEM `block__element--modifier`，与 `styles/partials/atoms.css` / `page.css` 和各 domain owner 对齐 | `card--state`、`probe-card__header`、`btn--primary` |
 
 ---
 
@@ -373,7 +373,7 @@ useModalFocus<T extends HTMLElement>(
 - `useModalFocus.test.tsx`：StrictMode 仅一份 registration、最新 onClose callback、unmount 恢复与 scroll release。
 - `Modal.test.tsx`：单/双/三层、父子同次挂载、persistent、top class、ARIA/inert、Tab、逐层 Escape、真实 inert 延迟恢复和显式业务焦点优先级。
 - 业务回归至少覆盖一个真实嵌套确认流程，断言父层 tab / URL / 草稿保持；URL-owned Modal 还要覆盖 automatic group、manual group、record 的“聚焦入口 → 打开 → Escape → 同实体入口恢复”，并同时保留 filtered GET inventory。修改共享行为后搜索并迁移所有 persistent Modal 的旧 Escape 期望。
-- 浏览器 sanity 至少覆盖 `1440x1000`、`1024x768`、`390x900`：无页面横向溢出；top dialog 在视口内；真实键盘 Tab/Escape；父层 focus restore；最后一层关闭后 body unlock；无 console/page/CSP error。
+- repository browser gate 必须保留核心路由 `1440x1000`、`1024x768`、`390x900` 几何覆盖，以及 `accessibility.spec.ts` 的真实 nested Modal Tab/Escape、父层 inert/focus restore、逐层 body unlock；统一 diagnostics 中 console/page/CSP/network 必须为 0。
 
 #### 7. Wrong vs Correct
 

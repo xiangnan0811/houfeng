@@ -182,7 +182,9 @@ describe('Asset Decisions route and composition workflows', () => {
     const singleQueueButton = await findSecondaryWorkbenchButton('单台队列')
     expect(singleQueueButton).toHaveAttribute('aria-pressed', 'true')
     const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section') as HTMLElement
-    fireEvent.click(within(singleQueue).getAllByRole('button', { name: '处理' })[0])
+    const firstQueueAction = within(singleQueue).getAllByRole('button', { name: '处理' })[0]
+    if (!firstQueueAction) throw new Error('single queue must expose a primary action')
+    fireEvent.click(firstQueueAction)
     expect(await screen.findByRole('dialog', { name: '续费决策处理' })).toBeInTheDocument()
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=needs_decision&renew_within_days=30')
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups?view=needs_decision&renew_within_days=30')
@@ -429,7 +431,9 @@ describe('Asset Decisions route and composition workflows', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
     const members = openAutomaticGroupMembers(dialog)
-    fireEvent.click(within(members).getAllByRole('button', { name: '处理' })[0])
+    const firstMemberAction = within(members).getAllByRole('button', { name: '处理' })[0]
+    if (!firstMemberAction) throw new Error('automatic group must expose a member action')
+    fireEvent.click(firstMemberAction)
     expect(within(dialog).getByLabelText('续费决策')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '返回上一条历史' }))

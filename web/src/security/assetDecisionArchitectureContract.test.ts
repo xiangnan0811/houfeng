@@ -608,10 +608,12 @@ function auditSources(sources: SourceMap): ArchitectureViolation[] {
     visit(sourceFile)
 
     if (isControllerPath(path) && effectCalls.length > MAX_CONTROLLER_EFFECTS) {
+      const firstOverBudgetEffect = effectCalls[MAX_CONTROLLER_EFFECTS]
+      if (!firstOverBudgetEffect) continue
       addViolation(
         path,
         sourceFile,
-        effectCalls[MAX_CONTROLLER_EFFECTS],
+        firstOverBudgetEffect,
         'effect-budget',
         'budget=useEffect actual=' + effectCalls.length + ' limit=' + MAX_CONTROLLER_EFFECTS,
       )
