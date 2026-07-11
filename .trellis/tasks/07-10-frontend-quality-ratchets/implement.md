@@ -73,12 +73,12 @@ git diff --check
 
 ### Checklist
 
-- [ ] 查询并选择彼此兼容的 stable `@vitest/coverage-v8`（必须与已锁 Vitest 一致）、`@playwright/test`、`@axe-core/playwright`。
-- [ ] 用 normal tracked install 写入 package/lockfile；不使用规划期失败的 `--no-save` 临时树作为证据。
-- [ ] 添加 `coverage/`、`playwright-report/`、`test-results/` 和 browser temp state ignore；不放宽仓库 raster policy。
-- [ ] `npm ci --include=dev` 从空 node_modules 可重复成功。
-- [ ] `npx playwright install --with-deps chromium` 后记录 Playwright/Chromium 版本；不安装 Firefox/WebKit。
-- [ ] 运行 `npm audit --include=dev`；任何漏洞先评估/解决，不用 `--force` 无脑升级。
+- [x] 选择精确兼容 Vitest `4.1.5` 的 `@vitest/coverage-v8@4.1.5`，并固定 `@playwright/test@1.61.1`、`@axe-core/playwright@4.12.1`。
+- [x] 用 normal tracked install 写入 package/lockfile；未使用规划期失败的 `--no-save` 临时树作为证据。
+- [x] 添加 `coverage/`、`playwright-report/`、`test-results/`、`.playwright` 与 `e2e/.auth` ignore；未放宽 raster policy。
+- [x] `npm ci --include=dev` 从 clean node_modules 可重复成功。
+- [x] 本机 Arch 上 `--with-deps` 因 Ubuntu fallback 需要 sudo 而不可用；精确 Playwright revision `1228` 已通过 `playwright install chromium` 和 headless launch 验证，Chromium 为 `149.0.7827.55`。Ubuntu CI 仍必须执行 `--with-deps chromium`。
+- [x] `npm audit --include=dev` 为 0 vulnerabilities；未使用 `--force`。
 
 Expected package-script contract（Task 9 已拥有的 `css:analyze` 保持原名）：
 

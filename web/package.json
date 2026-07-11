@@ -9,10 +9,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "bundle:check": "node ../scripts/check-web-bundle-budget.mjs",
     "css:analyze": "node ../scripts/analyze-web-css.mjs --format text",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "test:coverage": "vitest --run --coverage",
+    "pretest:e2e": "npm run build",
+    "test:e2e": "playwright test",
+    "test:e2e:staging": "playwright test --config playwright.staging.config.ts"
   },
   "dependencies": {
     "react": "^19.2.5",
@@ -20,13 +25,16 @@
     "react-router-dom": "^7.17.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "1.61.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^22",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/coverage-v8": "4.1.5",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
