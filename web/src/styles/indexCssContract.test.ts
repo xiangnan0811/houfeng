@@ -104,11 +104,17 @@ describe('index.css modernization contracts', () => {
     expect(entryLink).not.toContain('text-overflow:ellipsis')
   })
 
-  it('keeps critical info badges readable on dark state backgrounds', () => {
+  it('keeps small state text readable on tinted surfaces', () => {
     const criticalInfo = compact(ruleBody(indexCss, '.badge--info.tone--critical'))
+    const assetGroupContext = compact(
+      ruleBody(indexCss, '.asset-decision-group-card__head span:not(.badge)'),
+    )
 
     expect(criticalInfo).toContain(
       'color:color-mix(insrgb,var(--color-state-critical)78%,var(--text-primary))',
+    )
+    expect(assetGroupContext).toContain(
+      'color:color-mix(insrgb,var(--text-secondary)90%,var(--text-primary))',
     )
   })
 })
