@@ -118,22 +118,25 @@ function AuthenticatedAppShell({ user, logout }: AuthenticatedAppShellProps) {
     : { monitoring: 0, targets: 0 }
 
   return (
-    <div className={`layout${collapsed ? ' sidebar-collapsed' : ''}`}>
-      <Sidebar
-        user={user}
-        anomalyCounts={anomalyCounts}
-        collapsed={collapsed}
-        onToggle={() => setCollapsed((v) => !v)}
-        onLogout={() => { void logout() }}
-        onChangePassword={() => setChangePwOpen(true)}
-      />
-      <div className="main-wrap">
-        <TopBar sync={sync} user={user} />
-        <main className="main" id="main-content">
-          <Outlet />
-        </main>
+    <>
+      <a className="skip-link" href="#main-content">跳到主内容</a>
+      <div className={`layout${collapsed ? ' sidebar-collapsed' : ''}`}>
+        <Sidebar
+          user={user}
+          anomalyCounts={anomalyCounts}
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((v) => !v)}
+          onLogout={() => { void logout() }}
+          onChangePassword={() => setChangePwOpen(true)}
+        />
+        <div className="main-wrap">
+          <TopBar sync={sync} user={user} />
+          <main className="main" id="main-content" tabIndex={-1}>
+            <Outlet />
+          </main>
+        </div>
+        {changePwOpen && <ChangePasswordModal onClose={() => setChangePwOpen(false)} />}
       </div>
-      {changePwOpen && <ChangePasswordModal onClose={() => setChangePwOpen(false)} />}
-    </div>
+    </>
   )
 }

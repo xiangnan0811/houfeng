@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 
 const INTERACTIVE_ROW_TARGET_SELECTOR = [
   'a[href]',
@@ -136,43 +136,45 @@ export function DataTable<T>({
           const extra = rowClassName?.(row)
           const trCls = ['data-table__row', extra].filter(Boolean).join(' ')
           return (
-            <tr
-              key={rowKey(row)}
-              role="row"
-              className={trCls}
-              onClick={onRowClick ? (e) => {
-                if (isInteractiveRowTarget(e.target)) return
-                onRowClick(row)
-              } : undefined}
-              tabIndex={onRowClick ? 0 : undefined}
-              onKeyDown={
-                onRowClick
-                  ? (e) => {
-                      if (isInteractiveRowTarget(e.target)) return
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        onRowClick(row)
+            <Fragment key={rowKey(row)}>
+              {/* a11y-allow-nonsemantic-click: keyboard-complete-row */}
+              <tr
+                role="row"
+                className={trCls}
+                onClick={onRowClick ? (e) => {
+                  if (isInteractiveRowTarget(e.target)) return
+                  onRowClick(row)
+                } : undefined}
+                tabIndex={onRowClick ? 0 : undefined}
+                onKeyDown={
+                  onRowClick
+                    ? (e) => {
+                        if (isInteractiveRowTarget(e.target)) return
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          onRowClick(row)
+                        }
                       }
-                    }
-                  : undefined
-              }
-            >
-              {columns.map((col) => (
-                <td
-                  key={col.key}
-                  role="cell"
-                  className={[
-                    'data-table__cell',
-                    `data-table__cell--${col.align ?? 'left'}`,
-                    col.cellClassName,
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                >
-                  {col.render(row, ri)}
-                </td>
-              ))}
-            </tr>
+                    : undefined
+                }
+              >
+                {columns.map((col) => (
+                  <td
+                    key={col.key}
+                    role="cell"
+                    className={[
+                      'data-table__cell',
+                      `data-table__cell--${col.align ?? 'left'}`,
+                      col.cellClassName,
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
+                    {col.render(row, ri)}
+                  </td>
+                ))}
+              </tr>
+            </Fragment>
           )
         })}
       </tbody>

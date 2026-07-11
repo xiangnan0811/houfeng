@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import type { DataTableColumn, DataTableSortState } from '../../components/atoms'
 import { PageState } from '../../components/PageState'
 import type { MonitoringInstanceRecord } from '../../lib/types'
@@ -191,32 +192,34 @@ export function MonitoringInstancesListSection({
             </thead>
             <tbody>
               {monitoring.map((monitoringInstance, ri) => (
-                <tr
-                  key={monitoringInstance.monitoring_instance_id}
-                  role="row"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    if (isInteractive(e.target)) return
-                    onRowClick(monitoringInstance)
-                  }}
-                  onKeyDown={(e) => {
-                    if (isInteractive(e.target)) return
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
+                <Fragment key={monitoringInstance.monitoring_instance_id}>
+                  {/* a11y-allow-nonsemantic-click: keyboard-complete-row */}
+                  <tr
+                    role="row"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      if (isInteractive(e.target)) return
                       onRowClick(monitoringInstance)
-                    }
-                  }}
-                >
-                  {visibleColumns.map((col) => (
-                    <td
-                      key={col.key}
-                      role="cell"
-                      className={col.cellClassName || undefined}
-                    >
-                      {col.render(monitoringInstance, ri)}
-                    </td>
-                  ))}
-                </tr>
+                    }}
+                    onKeyDown={(e) => {
+                      if (isInteractive(e.target)) return
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        onRowClick(monitoringInstance)
+                      }
+                    }}
+                  >
+                    {visibleColumns.map((col) => (
+                      <td
+                        key={col.key}
+                        role="cell"
+                        className={col.cellClassName || undefined}
+                      >
+                        {col.render(monitoringInstance, ri)}
+                      </td>
+                    ))}
+                  </tr>
+                </Fragment>
               ))}
             </tbody>
           </table>

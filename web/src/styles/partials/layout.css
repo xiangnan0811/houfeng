@@ -104,6 +104,9 @@
 .topbar .tp-search .kbd{font-size:9px;font-family:"IBM Plex Mono",monospace;background:var(--bg);padding:1px 4px;border-radius:3px;border:1px solid var(--border);margin-left:auto}
 .topbar .tp-divider{width:1px;height:20px;background:var(--border)}
 .topbar .tp-theme{position:relative}
+
+.skip-link{position:fixed;z-index:1000;top:var(--space-2);left:var(--space-2);transform:translateY(calc(-100% - var(--space-4)));padding:var(--space-2) var(--space-3);border:var(--border-w) solid var(--accent-border);border-radius:var(--radius-2);box-shadow:var(--shadow-md);background:var(--surface-elevated);color:var(--text-primary);transition:transform var(--dur-micro) var(--ease-calm)}
+.skip-link:focus-visible{transform:translateY(0)}
 .topbar .tp-icon-btn{position:relative;width:28px;height:28px;border-radius:6px;border:none;background:transparent;color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.15s,color 0.15s}
 .topbar .tp-icon-btn:hover{background:var(--item-bg);color:var(--t1)}
 .topbar .tp-sync{width:6px;height:6px;border-radius:50%;background:var(--ok);flex-shrink:0}
@@ -111,7 +114,7 @@
 .topbar .tp-avatar:hover{opacity:0.85}
 .theme-menu{position:absolute;top:100%;right:0;margin-top:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow-md);padding:4px;min-width:140px;z-index:100;display:none}
 .theme-menu.open{display:block}
-.theme-menu .tm-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:5px;font-size:12px;color:var(--t2);cursor:pointer;transition:background 0.12s}
+.theme-menu .tm-item{display:flex;width:100%;align-items:center;gap:8px;padding:7px 10px;border:0;border-radius:5px;background:transparent;font:inherit;font-size:12px;color:var(--t2);text-align:left;cursor:pointer;transition:background 0.12s}
 .theme-menu .tm-item:hover{background:var(--item-bg);color:var(--t1)}
 .theme-menu .tm-item.active{color:var(--accent);font-weight:500}
 .theme-menu .tm-item .tm-icon{width:16px;text-align:center;font-size:11px}

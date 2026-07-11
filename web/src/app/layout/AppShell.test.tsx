@@ -107,6 +107,18 @@ describe('AppShell', () => {
     expect(document.title).toBe(PRODUCT_FULL_NAME_ZH)
   })
 
+  it('starts authenticated keyboard navigation with a skip link to a focusable main', () => {
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})))
+    const { container } = renderAuthenticatedAppShell()
+
+    const skipLink = screen.getByRole('link', { name: '跳到主内容' })
+    const main = container.querySelector('main#main-content')
+    const focusable = container.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])')
+    expect(focusable[0]).toBe(skipLink)
+    expect(skipLink).toHaveAttribute('href', '#main-content')
+    expect(main).toHaveAttribute('tabindex', '-1')
+  })
+
   it('does not surface single-user phrasing', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
 

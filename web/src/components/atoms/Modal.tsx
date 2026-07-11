@@ -64,37 +64,40 @@ export function Modal({
   }
 
   return createPortal(
-    <div
-      className={['modal-overlay', isTop && 'modal-stack-layer--top']
-        .filter(Boolean)
-        .join(' ')}
-      role="presentation"
-      onClick={handleBackdropClick}
-    >
+    <>
+      {/* a11y-allow-nonsemantic-click: modal-backdrop */}
       <div
-        ref={modalRef}
-        data-modal-stack-id={modalId}
-        data-modal-stack-parent-id={parentModalId ?? undefined}
-        className={['modal-content', size && `modal-content--${size}`, contentClassName].filter(Boolean).join(' ')}
-        role={dialogRole}
-        aria-modal={isTop ? 'true' : undefined}
-        aria-hidden={isTop ? undefined : 'true'}
-        inert={isTop ? undefined : true}
-        {...(ariaLabel ? { 'aria-label': ariaLabel } : { 'aria-labelledby': titleId })}
-        tabIndex={-1}
+        className={['modal-overlay', isTop && 'modal-stack-layer--top']
+          .filter(Boolean)
+          .join(' ')}
+        role="presentation"
+        onClick={handleBackdropClick}
       >
-        <div className="modal-header">
-          <h3 id={titleId}>{title}</h3>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="关闭">
-            ✕
-          </button>
+        <div
+          ref={modalRef}
+          data-modal-stack-id={modalId}
+          data-modal-stack-parent-id={parentModalId ?? undefined}
+          className={['modal-content', size && `modal-content--${size}`, contentClassName].filter(Boolean).join(' ')}
+          role={dialogRole}
+          aria-modal={isTop ? 'true' : undefined}
+          aria-hidden={isTop ? undefined : 'true'}
+          inert={isTop ? undefined : true}
+          {...(ariaLabel ? { 'aria-label': ariaLabel } : { 'aria-labelledby': titleId })}
+          tabIndex={-1}
+        >
+          <div className="modal-header">
+            <h3 id={titleId}>{title}</h3>
+            <button type="button" className="modal-close" onClick={onClose} aria-label="关闭">
+              ✕
+            </button>
+          </div>
+          <ModalParentContext.Provider value={modalId}>
+            <div className="modal-body">{children}</div>
+            {footer && <div className="modal-footer">{footer}</div>}
+          </ModalParentContext.Provider>
         </div>
-        <ModalParentContext.Provider value={modalId}>
-          <div className="modal-body">{children}</div>
-          {footer && <div className="modal-footer">{footer}</div>}
-        </ModalParentContext.Provider>
       </div>
-    </div>,
+    </>,
     document.body,
   )
 }

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { GlobalSearch } from './GlobalSearch'
 import { useThemeOptional } from '../../lib/theme-context'
@@ -51,12 +51,21 @@ const THEME_OPTIONS = [
 function ThemeSwitcher() {
   const theme = useThemeOptional()
   const [open, setOpen] = useState(false)
+  const menuId = `${useId()}-menu`
   const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const pendingFocusIndex = useRef(0)
+
+  useEffect(() => {
+    if (!open) return
+    itemRefs.current[pendingFocusIndex.current]?.focus()
+  }, [open])
 
   useEffect(() => {
     if (!open) return
     const close = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+      if (!(e.target instanceof Node) || !ref.current?.contains(e.target)) setOpen(false)
     }
     document.addEventListener('mousedown', close)
     return () => document.removeEventListener('mousedown', close)
@@ -69,30 +78,104 @@ function ThemeSwitcher() {
     (o) => o.preset === preset && o.mode === mode
   ) ?? THEME_OPTIONS[0]
 
+  function openMenu(index: number) {
+    pendingFocusIndex.current = index
+    setOpen(true)
+  }
+
+  function closeAndRestoreFocus() {
+    setOpen(false)
+    triggerRef.current?.focus()
+  }
+
+  function selectTheme(option: (typeof THEME_OPTIONS)[number]) {
+    setPreset(option.preset)
+    setMode(option.mode)
+    closeAndRestoreFocus()
+  }
+
+  function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    event.preventDefault()
+    openMenu(event.key === 'ArrowDown' ? 0 : THEME_OPTIONS.length - 1)
+  }
+
+  function handleItemKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+    option: (typeof THEME_OPTIONS)[number],
+  ) {
+    let nextIndex: number
+    switch (event.key) {
+      case 'ArrowDown':
+        nextIndex = (index + 1) % THEME_OPTIONS.length
+        break
+      case 'ArrowUp':
+        nextIndex = (index - 1 + THEME_OPTIONS.length) % THEME_OPTIONS.length
+        break
+      case 'Home':
+        nextIndex = 0
+        break
+      case 'End':
+        nextIndex = THEME_OPTIONS.length - 1
+        break
+      case 'Enter':
+      case ' ':
+        event.preventDefault()
+        selectTheme(option)
+        return
+      case 'Escape':
+        event.preventDefault()
+        closeAndRestoreFocus()
+        return
+      case 'Tab':
+        setOpen(false)
+        return
+      default:
+        return
+    }
+
+    event.preventDefault()
+    itemRefs.current[nextIndex]?.focus()
+  }
+
   return (
     <div className="tp-theme" ref={ref}>
       <button
+        ref={triggerRef}
+        type="button"
         className="tp-icon-btn"
-        onClick={() => setOpen((v) => !v)}
         aria-label="切换主题"
+        aria-haspopup="menu"
+        aria-controls={menuId}
+        aria-expanded={open}
+        onClick={() => {
+          if (open) setOpen(false)
+          else openMenu(0)
+        }}
+        onKeyDown={handleTriggerKeyDown}
       >
         {current.icon}
       </button>
       {open && (
-        <div className="theme-menu open">
-          {THEME_OPTIONS.map((o) => (
-            <div
+        <div id={menuId} className="theme-menu open" role="menu" aria-label="主题选项">
+          {THEME_OPTIONS.map((o, index) => (
+            <button
               key={`${o.preset}-${o.mode}`}
-              className={`tm-item${o === current ? ' active' : ''}`}
-              onClick={() => {
-                setPreset(o.preset)
-                setMode(o.mode)
-                setOpen(false)
+              ref={(node) => {
+                itemRefs.current[index] = node
               }}
+              type="button"
+              role="menuitemradio"
+              aria-label={o.label}
+              aria-checked={o === current}
+              className={`tm-item${o === current ? ' active' : ''}`}
+              onClick={() => selectTheme(o)}
+              onKeyDown={(event) => handleItemKeyDown(event, index, o)}
             >
               <span className="tm-icon">{o.icon}</span>
               {o.label}
-            </div>
+            </button>
           ))}
         </div>
       )}

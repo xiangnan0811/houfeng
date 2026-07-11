@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import {
@@ -76,6 +76,20 @@ type FilterState = {
   lifecycle_status: VPSLifecycleStatus | null
   usage_status: VPSUsageStatus | null
   renewal_decision: VPSRenewalDecision | null
+}
+
+const INTERACTIVE_ROW_TARGET_SELECTOR = [
+  'a[href]',
+  'button',
+  'input',
+  'select',
+  'textarea',
+  '[role="button"]',
+  '[role="link"]',
+].join(',')
+
+function isInteractiveRowTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(INTERACTIVE_ROW_TARGET_SELECTOR) != null
 }
 
 const INITIAL_PAGE_STATE: PageState = {
@@ -494,23 +508,36 @@ export function VPSPage() {
               {filteredRows.map((row) => {
                 const cancellationReason = cancellationAttentionReason(row)
                 return (
-                  <tr key={row.vps.vps_id} onClick={() => navigate(`/vps/${row.vps.vps_id}`)} className="row-clickable">
-                    <td className="name">{row.vps.display_name}</td>
-                    <td>{formatOptional(row.vps.provider_name)}</td>
-                    <td className="mono">{row.vps.ipv4 || row.vps.ssh_host || '—'}</td>
-                    <td><IPQualityBadge summary={row.vps.ip_quality_summary} /></td>
-                    <td><LifecycleBadge value={row.vps.lifecycle_status} /></td>
-                    <td><RenewalBadge value={row.vps.renewal_decision} /></td>
-                    <td className="time">{renderRenewalDate(row)}</td>
-                    <td>{row.vps.active_monitoring_instance_link_count > 0 ? <MonoDigits>{row.vps.active_monitoring_instance_link_count}</MonoDigits> : '—'}</td>
-                    <td>
-                      {cancellationReason ? (
-                        <span className="asset-context-pill asset-context-pill--attention">{cancellationReason}</span>
-                      ) : (
-                        <span className="asset-context-pill">已同步</span>
-                      )}
-                    </td>
-                  </tr>
+                  <Fragment key={row.vps.vps_id}>
+                    {/* a11y-allow-nonsemantic-click: primary-link-row-enhancement */}
+                    <tr
+                      onClick={(event) => {
+                        if (isInteractiveRowTarget(event.target)) return
+                        navigate(`/vps/${row.vps.vps_id}`)
+                      }}
+                      className="row-clickable"
+                    >
+                      <td>
+                        <Link className="name" to={`/vps/${row.vps.vps_id}`}>
+                          {row.vps.display_name}
+                        </Link>
+                      </td>
+                      <td>{formatOptional(row.vps.provider_name)}</td>
+                      <td className="mono">{row.vps.ipv4 || row.vps.ssh_host || '—'}</td>
+                      <td><IPQualityBadge summary={row.vps.ip_quality_summary} /></td>
+                      <td><LifecycleBadge value={row.vps.lifecycle_status} /></td>
+                      <td><RenewalBadge value={row.vps.renewal_decision} /></td>
+                      <td className="time">{renderRenewalDate(row)}</td>
+                      <td>{row.vps.active_monitoring_instance_link_count > 0 ? <MonoDigits>{row.vps.active_monitoring_instance_link_count}</MonoDigits> : '—'}</td>
+                      <td>
+                        {cancellationReason ? (
+                          <span className="asset-context-pill asset-context-pill--attention">{cancellationReason}</span>
+                        ) : (
+                          <span className="asset-context-pill">已同步</span>
+                        )}
+                      </td>
+                    </tr>
+                  </Fragment>
                 )
               })}
             </tbody>

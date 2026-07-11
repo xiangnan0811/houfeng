@@ -43,58 +43,61 @@ export function TargetsLabelsCell({
 }: TargetsLabelsCellProps) {
   if (editing) {
     return (
-      <div
-        className="targets-table__label-editor"
-        onClick={(event) => event.stopPropagation()}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.stopPropagation()
-          }
-        }}
-      >
-        <label className="targets-table__label-editor-field">
-          <span className="visually-hidden">Group</span>
-          <input
-            name={`target-group-${target.target_id}`}
-            value={metadataGroupInput}
-            onChange={(event) => onGroupInputChange(event.target.value)}
-            aria-label="Group"
-            placeholder="Group"
-          />
-        </label>
-        <label className="targets-table__label-editor-field">
-          <span className="visually-hidden">标签</span>
-          <input
-            name={`target-labels-${target.target_id}`}
-            value={metadataLabelInput}
-            onChange={(event) => onLabelInputChange(event.target.value)}
-            aria-label="标签"
-          />
-        </label>
-        <div className="targets-table__label-editor-actions">
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={metadataSavingTargetId === target.target_id}
-            onClick={() => onSaveMetadata(target)}
-          >
-            {metadataSavingTargetId === target.target_id ? '正在保存…' : '保存标签'}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={metadataSavingTargetId === target.target_id}
-            onClick={() => onCancelMetadata(target.target_id)}
-          >
-            取消
-          </Button>
+      <>
+        {/* a11y-allow-nonsemantic-click: event-propagation */}
+        <div
+          className="targets-table__label-editor"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.stopPropagation()
+            }
+          }}
+        >
+          <label className="targets-table__label-editor-field">
+            <span className="visually-hidden">Group</span>
+            <input
+              name={`target-group-${target.target_id}`}
+              value={metadataGroupInput}
+              onChange={(event) => onGroupInputChange(event.target.value)}
+              aria-label="Group"
+              placeholder="Group"
+            />
+          </label>
+          <label className="targets-table__label-editor-field">
+            <span className="visually-hidden">标签</span>
+            <input
+              name={`target-labels-${target.target_id}`}
+              value={metadataLabelInput}
+              onChange={(event) => onLabelInputChange(event.target.value)}
+              aria-label="标签"
+            />
+          </label>
+          <div className="targets-table__label-editor-actions">
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={metadataSavingTargetId === target.target_id}
+              onClick={() => onSaveMetadata(target)}
+            >
+              {metadataSavingTargetId === target.target_id ? '正在保存…' : '保存标签'}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={metadataSavingTargetId === target.target_id}
+              onClick={() => onCancelMetadata(target.target_id)}
+            >
+              取消
+            </Button>
+          </div>
+          {metadataError ? (
+            <p className="targets-table__inline-error" role="alert">
+              {metadataError}
+            </p>
+          ) : null}
         </div>
-        {metadataError ? (
-          <p className="targets-table__inline-error" role="alert">
-            {metadataError}
-          </p>
-        ) : null}
-      </div>
+      </>
     )
   }
 

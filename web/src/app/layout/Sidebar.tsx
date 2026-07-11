@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import type { User } from '../../lib/auth-client'
+import { UserChip } from './UserChip'
 
 export interface SidebarProps {
   user: User
@@ -20,20 +20,6 @@ export function Sidebar({
   onChangePassword,
 }: SidebarProps) {
   void _collapsed
-  const [userMenuOpen, setUserMenuOpen] = useState(false)
-  const userMenuRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!userMenuOpen) return
-    const close = (e: MouseEvent) => {
-      if (!userMenuRef.current?.contains(e.target as Node)) setUserMenuOpen(false)
-    }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [userMenuOpen])
-
-  const display = user.display_name || user.username || ''
-  const initial = display.slice(0, 1).toUpperCase() || '·'
 
   return (
     <aside className="sidebar">
@@ -70,27 +56,8 @@ export function Sidebar({
           <SidebarNavItem to="/settings" label="设置" icon={<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.5"/><path d="M8 2v1.5M8 12.5V14M2 8h1.5M12.5 8H14"/></svg>} />
         </div>
       </nav>
-      <div className="sidebar-footer" ref={userMenuRef}>
-        <div className="user-chip" onClick={() => setUserMenuOpen((v) => !v)}>
-          <div className="user-avatar">{initial}</div>
-          <div className="user-info">
-            <div className="user-name">{user.display_name || user.username}</div>
-            <div className="user-role">管理员</div>
-          </div>
-        </div>
-        {userMenuOpen && (
-          <div className="user-chip__menu" role="menu">
-            <button type="button" className="user-chip__menu-item" role="menuitem"
-              onClick={() => { setUserMenuOpen(false); onChangePassword() }}>
-              修改密码
-            </button>
-            <div className="user-chip__divider" />
-            <button type="button" className="user-chip__menu-item user-chip__menu-item--danger" role="menuitem"
-              onClick={() => { setUserMenuOpen(false); onLogout() }}>
-              退出登录
-            </button>
-          </div>
-        )}
+      <div className="sidebar-footer">
+        <UserChip user={user} onLogout={onLogout} onChangePassword={onChangePassword} />
       </div>
     </aside>
   )
