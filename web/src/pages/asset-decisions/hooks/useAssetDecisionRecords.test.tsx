@@ -371,7 +371,7 @@ describe('useAssetDecisionRecords', () => {
         revision: 0,
         onNotice: vi.fn(),
       }),
-      { initialProps: { selectedRecordID: 'adr_001' as string | null } },
+      { initialProps: { selectedRecordID: 'adr_001' } },
     )
 
     await waitFor(() => expect(result.current.state.list.error).toBe('records offline'))

@@ -139,7 +139,7 @@ describe('useAssetDecisionTemplates', () => {
         revision: 0,
         onNotice: vi.fn(),
       }),
-      { initialProps: { selectedTemplateID: 'adt_001' as string | null } },
+      { initialProps: { selectedTemplateID: 'adt_001' } },
     )
 
     rerender({ selectedTemplateID: 'adt_002' })
@@ -363,7 +363,7 @@ describe('useAssetDecisionTemplates', () => {
         revision: 0,
         onNotice: vi.fn(),
       }),
-      { initialProps: { selectedTemplateID: 'adt_001' as string | null } },
+      { initialProps: { selectedTemplateID: 'adt_001' } },
     )
     await waitFor(() => expect(result.current.state.detail.loading).toBe(false))
 

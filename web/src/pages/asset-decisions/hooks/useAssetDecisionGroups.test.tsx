@@ -172,7 +172,7 @@ describe('useAssetDecisionGroups', () => {
         selectedGroupID,
         revision: 0,
       }),
-      { initialProps: { selectedGroupID: 'adg_001' as string | null } },
+      { initialProps: { selectedGroupID: 'adg_001' } },
     )
 
     rerender({ selectedGroupID: 'adg_002' })
@@ -270,7 +270,7 @@ describe('useAssetDecisionGroups', () => {
         selectedGroupID,
         revision: 0,
       }),
-      { initialProps: { selectedGroupID: 'adg_001' as string | null } },
+      { initialProps: { selectedGroupID: 'adg_001' } },
     )
     await waitFor(() => expect(result.current.state.detail.detail).toBe(GROUP_DETAIL))
 

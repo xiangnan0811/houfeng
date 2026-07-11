@@ -268,7 +268,7 @@ describe('useAssetDecisionManualGroups', () => {
         revision: 0,
         onNotice: vi.fn(),
       }),
-      { initialProps: { selectedManualGroupID: 'admg_001' as string | null } },
+      { initialProps: { selectedManualGroupID: 'admg_001' } },
     )
 
     rerender({ selectedManualGroupID: 'admg_002' })
@@ -712,6 +712,9 @@ describe('useAssetDecisionManualGroups', () => {
 
   it('does not revive manual-group UI state after the route leaves and returns', async () => {
     mockSuccessfulReads()
+    const initialProps: { selectedManualGroupID: string | null } = {
+      selectedManualGroupID: 'admg_001',
+    }
     const { result, rerender } = renderHook(
       ({ selectedManualGroupID }: { selectedManualGroupID: string | null }) => useAssetDecisionManualGroups({
         filter: FILTER,
@@ -720,7 +723,7 @@ describe('useAssetDecisionManualGroups', () => {
         revision: 0,
         onNotice: vi.fn(),
       }),
-      { initialProps: { selectedManualGroupID: 'admg_001' as string | null } },
+      { initialProps },
     )
     await waitFor(() => expect(result.current.state.detail.loading).toBe(false))
     act(() => {
