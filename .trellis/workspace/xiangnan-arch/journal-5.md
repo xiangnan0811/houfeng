@@ -92,3 +92,43 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 238: 完成 CSS owner 化、发布与归档
+
+**Date**: 2026-07-11
+**Task**: 完成 CSS owner 化、发布与归档
+**Branch**: `codex/archive-frontend-css-ownership`
+
+### Summary
+
+建立七 owner CSS 合同和 fail-closed PostCSS AST 预算，删除遗留 cascade 并修复 Events 局部滚动；PR #365 合并后完成 v0.58.4、双架构 Docker manifest 与签名 agent 资产验证，归档 Task 9。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `507a7a0` | (see git log) |
+| `8760bf4` | (see git log) |
+| `ea77a88` | (see git log) |
+| `4523786` | (see git log) |
+| `135997b` | (see git log) |
+| `6fd7b8f` | (see git log) |
+| `8a96f90` | (see git log) |
+| `9856a94` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

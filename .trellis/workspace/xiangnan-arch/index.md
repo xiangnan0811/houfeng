@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 237
+- **Total Sessions**: 238
 - **Last Active**: 2026-07-11
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~94 | Active |
+| `journal-5.md` | ~134 | Active |
 | `journal-4.md` | ~1998 | Archived |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 238 | 2026-07-11 | 完成 CSS owner 化、发布与归档 | `507a7a0`, `8760bf4`, `ea77a88`, `4523786`, `135997b`, `6fd7b8f`, `8a96f90`, `9856a94` | `codex/archive-frontend-css-ownership` |
 | 237 | 2026-07-11 | 完成 Asset Decisions 领域拆分与发布归档 | `4bdd9bb`, `f5c5cda`, `a038eea`, `bdc8325`, `0a803fc`, `0ea8482`, `b1db70d`, `85e5469`, `515a37a`, `3200bee`, `4ff93c4`, `f861d64`, `cf6a20a` | `codex/archive-frontend-asset-decisions-domains` |
 | 236 | 2026-07-11 | Task 7 窄视口核心流程发布与归档 | `e68b226`, `7578b90`, `299fdce`, `0802a04`, `30a99db`, `a727b55`, `88d8ed2`, `74d9848`, `6c0f02c`, `bf31079` | `codex/archive-frontend-responsive-workflows` |
 | 235 | 2026-07-11 | 完成前端可访问性交互契约 | `b96ffc8`, `dd55783`, `f3fd4e0`, `3133961`, `1380089`, `f7db74d`, `bc93f52`, `61c28a2`, `0c18bda`, `5a06d62` | `codex/archive-frontend-accessibility-contracts` |
