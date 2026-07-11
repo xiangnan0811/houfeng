@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react'
-
 import { ActionConfirmationModal } from '../../../components/ActionConfirmationModal'
 import { Modal, TabPanel, Tabs, Badge, DataTable, type DataTableColumn } from '../../../components/atoms'
 import { PageState as PageStateView } from '../../../components/PageState'
@@ -25,6 +23,7 @@ import {
   compactVPSOptionLabel,
   manualCoverMeta,
 } from '../formatters'
+import { RecordDraftMemberRows } from '../components/RecordDraftMemberRows'
 import {
   renderDetailCommand,
   renderDetailPanel,
@@ -39,6 +38,7 @@ import type {
   ManualGroupProgress,
   ManualMemberAddDraft,
   RecordDraft,
+  RecordMemberDraft,
 } from '../types'
 
 type VpsCatalogState = {
@@ -61,6 +61,7 @@ type ManualGroupDetailModalProps = {
   vpsCatalogState: VpsCatalogState
   manualMemberCandidateRows: VPSAssetRecord[]
   recordDraft: RecordDraft | null
+  recordDraftEditingMemberID: string | null
   recordSaving: boolean
   recordSaveError: string | null
   manualMemberColumns: DataTableColumn<AssetDecisionManualGroupMember>[]
@@ -77,14 +78,9 @@ type ManualGroupDetailModalProps = {
   onDeleteManualMember: (member: AssetDecisionManualGroupMember) => void
   onUpdateMemberAddDraft: (patch: Partial<ManualMemberAddDraft>) => void
   onSetManualMemberAddAdvancedVisible: (visible: boolean) => void
-  onUpdateRecordDraft: (patch: Partial<RecordDraft>) => void
-  renderRecordDraftMemberRows: (members: Array<{
-    vpsID: string
-    displayName: string
-    fallbackRole: AssetDecisionSuggestedRole
-    fallbackAction: AssetDecisionSuggestedAction
-    meta?: string
-  }>) => ReactNode
+  onUpdateRecordDraft: (patch: Partial<Pick<RecordDraft, 'title' | 'goal' | 'status'>>) => void
+  onUpdateRecordDraftMember: (vpsID: string, patch: Partial<RecordMemberDraft>) => void
+  onEditRecordDraftMember: (vpsID: string | null) => void
 }
 
 export function ManualGroupDetailModal({
@@ -102,6 +98,7 @@ export function ManualGroupDetailModal({
   vpsCatalogState,
   manualMemberCandidateRows,
   recordDraft,
+  recordDraftEditingMemberID,
   recordSaving,
   recordSaveError,
   manualMemberColumns,
@@ -119,7 +116,8 @@ export function ManualGroupDetailModal({
   onUpdateMemberAddDraft,
   onSetManualMemberAddAdvancedVisible,
   onUpdateRecordDraft,
-  renderRecordDraftMemberRows,
+  onUpdateRecordDraftMember,
+  onEditRecordDraftMember,
 }: ManualGroupDetailModalProps) {
   return (
     <Modal
@@ -414,13 +412,19 @@ export function ManualGroupDetailModal({
                   />
                 </label>
               </div>
-              {renderRecordDraftMemberRows(manualDetailState.detail.members.map((member) => ({
-                vpsID: member.vps_id,
-                displayName: member.current_fact_found ? member.vps.display_name || member.vps_id : member.vps_id,
-                fallbackRole: member.intended_role,
-                fallbackAction: member.intended_action,
-                meta: member.current_fact_found ? `${formatOptional(member.vps.provider_name)} · ${vpsLocationLabel(member.vps)}` : '当前事实缺失',
-              })))}
+              <RecordDraftMemberRows
+                members={manualDetailState.detail.members.map((member) => ({
+                  vpsID: member.vps_id,
+                  displayName: member.current_fact_found ? member.vps.display_name || member.vps_id : member.vps_id,
+                  fallbackRole: member.intended_role,
+                  fallbackAction: member.intended_action,
+                  meta: member.current_fact_found ? `${formatOptional(member.vps.provider_name)} · ${vpsLocationLabel(member.vps)}` : '当前事实缺失',
+                }))}
+                draft={recordDraft}
+                editingMemberID={recordDraftEditingMemberID}
+                onEditMember={onEditRecordDraftMember}
+                onUpdateMember={onUpdateRecordDraftMember}
+              />
             </form>,
           )}
 

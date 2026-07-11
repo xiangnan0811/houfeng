@@ -10,6 +10,7 @@ const EXPECTED_CONTROLLER_PATHS = [
   '../pages/asset-decisions/hooks/useAssetDecisionGroups.ts',
   '../pages/asset-decisions/hooks/useAssetDecisionManualGroups.ts',
   '../pages/asset-decisions/hooks/useAssetDecisionPortfolio.ts',
+  '../pages/asset-decisions/hooks/useAssetDecisionRecords.ts',
   '../pages/asset-decisions/hooks/useAssetDecisionRouteState.ts',
   '../pages/asset-decisions/hooks/useAssetDecisionTemplates.ts',
 ]

@@ -12,29 +12,20 @@ import { SecondaryWorkbenches } from './asset-decisions/components/SecondaryWork
 import { useAssetDecisionGroups } from './asset-decisions/hooks/useAssetDecisionGroups'
 import { useAssetDecisionManualGroups } from './asset-decisions/hooks/useAssetDecisionManualGroups'
 import { useAssetDecisionPortfolio } from './asset-decisions/hooks/useAssetDecisionPortfolio'
+import { useAssetDecisionRecords } from './asset-decisions/hooks/useAssetDecisionRecords'
 import { useAssetDecisionRouteState } from './asset-decisions/hooks/useAssetDecisionRouteState'
 import { useAssetDecisionTemplates } from './asset-decisions/hooks/useAssetDecisionTemplates'
-import {
-  Badge,
-  type DataTableColumn,
-} from '../components/atoms'
 import { GroupDetailModal } from './asset-decisions/modals/GroupDetailModal'
 import { ManualGroupDetailModal } from './asset-decisions/modals/ManualGroupDetailModal'
 import { TemplateDetailModal } from './asset-decisions/modals/TemplateDetailModal'
 import { RecordDetailModal } from './asset-decisions/modals/RecordDetailModal'
 import { RenewalDecisionModal } from './asset-decisions/modals/RenewalDecisionModal'
 import {
-  createAssetDecisionRecord,
-  getAssetDecisionRecord,
-  listAssetDecisionRecords,
   listSubscriptions,
   listVPSAssets,
-  patchAssetDecisionRecord,
   updateVPSAsset,
 } from '../lib/api'
-import { formatDateTime } from '../lib/format'
 import {
-  type AssetDecisionEvidenceChip,
   type AssetDecisionEvidenceAssessment,
   type AssetDecisionEvidenceDecisionBias,
   type AssetDecisionEvidenceQualityTier,
@@ -44,14 +35,8 @@ import {
   type AssetDecisionManualGroupMember,
   type AssetDecisionManualGroupScenario,
   type AssetDecisionManualGroupStatus,
-  type AssetDecisionRecordDetail,
-  type AssetDecisionFollowupStatus,
-  type AssetDecisionRecordMember,
-  type AssetDecisionRecordStatus,
   type AssetDecisionRecordSummary,
   type AssetDecisionScenarioTemplateStatus,
-  type AssetDecisionSuggestedAction,
-  type AssetDecisionSuggestedRole,
   type SubscriptionRecord,
   type VPSAssetRecord,
 } from '../lib/types'
@@ -66,46 +51,19 @@ import type {
   ManualGroupsState,
   ScenarioTemplatesState,
   RecordsState,
-  RecordDetailState,
-  RecordMemberDraft,
-  RecordFollowupDraft,
-  RecordDraft,
   FormSubmitEvent,
-  RecordDetailPanel,
   ContextFilterKey,
   OpenStateKey,
   AssetDecisionSecondaryNavItem,
 } from './asset-decisions/types'
 import {
   INITIAL_DECISION_DRAFT,
-  INITIAL_RECORDS_STATE,
-  INITIAL_RECORD_DETAIL_STATE,
   INITIAL_QUEUE_STATE,
-  ROLE_LABELS,
-  ACTION_LABELS,
-  RECORD_STATUS_LABELS,
-  FOLLOWUP_STATUS_LABELS,
-  ROLE_OPTIONS,
-  ACTION_OPTIONS,
-  FOLLOWUP_STATUS_OPTIONS,
-  EXECUTION_PLAN_LANE_ORDER,
 } from './asset-decisions/constants'
-import { vpsDetailPath, vpsWorkbenchPath } from './asset-decisions/paths'
 import {
   createManualMemberColumns,
   createMemberColumns,
 } from './asset-decisions/tableColumns'
-import {
-  completeRecordDraftFromGroupDetail,
-  completeRecordDraftFromManualDetail,
-} from './asset-decisions/recordDrafts'
-import {
-  renderReadbackBadge,
-  renderExecutionPlanBadge,
-  renderEvidenceAssessment,
-  renderMemberExecutionPlan,
-  previewItems,
-} from './asset-decisions/renderHelpers'
 import {
   buildDecisionQueue,
   updateDecisionQueues,
@@ -118,20 +76,7 @@ import {
   describeError,
   parseRenewalWindow,
 } from './asset-decisions/utils'
-import {
-  chipTone,
-  roleTone,
-  actionTone,
-  followupStatusTone,
-  renewalQueueLabel,
-  compactDecisionText,
-  compactMemberReadbackSummary,
-  compactMemberPlanSummary,
-  currentFactsLabel,
-  currentFactsStateLabel,
-  ipQualityServiceLabel,
-  actionLabelForMember,
-} from './asset-decisions/formatters'
+import { renewalQueueLabel } from './asset-decisions/formatters'
 
 // 页面级状态类型
 type QueueState = {
@@ -279,17 +224,6 @@ function buildSecondaryNavItems(
   ]
 }
 
-function buildRecordFollowupDrafts(detail: AssetDecisionRecordDetail | null): Record<string, RecordFollowupDraft> {
-  const drafts: Record<string, RecordFollowupDraft> = {}
-  for (const member of detail?.members ?? []) {
-    drafts[member.vps_id] = {
-      status: member.followup_status,
-      note: member.followup_note,
-    }
-  }
-  return drafts
-}
-
 function parseEvidenceAssessment(snapshot?: AssetDecisionEvidenceSnapshot | null): AssetDecisionEvidenceAssessment | null {
   const raw = snapshot?.evidence_assessment
   if (!raw || typeof raw !== 'object') return null
@@ -316,28 +250,6 @@ function parseEvidenceAssessment(snapshot?: AssetDecisionEvidenceSnapshot | null
   }
 }
 
-function actionHrefForMember(member: AssetDecisionRecordMember): string {
-  if (member.execution_plan?.step_kind === 'open_cancellation_workbench') {
-    return vpsWorkbenchPath(member.vps_id, 'cancellation')
-  }
-  if (member.execution_plan?.step_kind === 'open_subscription_context') {
-    return `/subscriptions?vps_id=${encodeURIComponent(member.vps_id)}`
-  }
-  return vpsDetailPath(member.vps_id)
-}
-
-function sortedExecutionMembers(members: AssetDecisionRecordMember[]): AssetDecisionRecordMember[] {
-  function executionLaneRank(member: AssetDecisionRecordMember): number {
-    const lane = member.execution_plan?.lane ?? 'review'
-    const rank = EXECUTION_PLAN_LANE_ORDER.indexOf(lane)
-    return rank >= 0 ? rank : EXECUTION_PLAN_LANE_ORDER.length
-  }
-  return members
-    .map((member, index) => ({ member, index }))
-    .sort((left, right) => executionLaneRank(left.member) - executionLaneRank(right.member) || left.index - right.index)
-    .map(({ member }) => member)
-}
-
 export function AssetDecisionsPageContent() {
   const route = useAssetDecisionRouteState()
   const portfolioView = route.state.portfolioView
@@ -345,25 +257,12 @@ export function AssetDecisionsPageContent() {
   const assetDecisionFilter = route.state.filter
   const contextFilterChips = route.state.contextFilterChips
   const [queueView, setQueueView] = useState<DecisionQueueView>('all')
-  const [recordsState, setRecordsState] = useState<RecordsState>(INITIAL_RECORDS_STATE)
-  const [recordDetailState, setRecordDetailState] = useState<RecordDetailState>(INITIAL_RECORD_DETAIL_STATE)
   const [queueState, setQueueState] = useState<QueueState>(INITIAL_QUEUE_STATE)
   const [selectedGroupID, setSelectedGroupID] = useState<string | null>(null)
   const [selectedManualGroupID, setSelectedManualGroupID] = useState<string | null>(null)
   const [selectedRecordID, setSelectedRecordID] = useState<string | null>(null)
   const [selectedTemplateID, setSelectedTemplateID] = useState<string | null>(null)
   const [selectedVPS, setSelectedVPS] = useState<VPSAssetRecord | null>(null)
-  const [recordDetailPanel, setRecordDetailPanel] = useState<RecordDetailPanel>('overview')
-  const [recordDraft, setRecordDraft] = useState<RecordDraft | null>(null)
-  const [recordDraftEditingMemberID, setRecordDraftEditingMemberID] = useState<string | null>(null)
-  const [recordSaving, setRecordSaving] = useState(false)
-  const [recordSaveError, setRecordSaveError] = useState<string | null>(null)
-  const [recordPatchStatus, setRecordPatchStatus] = useState<AssetDecisionRecordStatus>('draft')
-  const [recordPatching, setRecordPatching] = useState(false)
-  const [recordPatchError, setRecordPatchError] = useState<string | null>(null)
-  const [recordFollowupDrafts, setRecordFollowupDrafts] = useState<Record<string, RecordFollowupDraft>>({})
-  const [recordFollowupPatching, setRecordFollowupPatching] = useState<Record<string, boolean>>({})
-  const [recordFollowupEditingMemberID, setRecordFollowupEditingMemberID] = useState<string | null>(null)
   const [decisionDraft, setDecisionDraft] = useState<AssetDecisionDraft>(INITIAL_DECISION_DRAFT)
   const [decisionSubmitting, setDecisionSubmitting] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
@@ -389,6 +288,12 @@ export function AssetDecisionsPageContent() {
   const templates = useAssetDecisionTemplates({
     selectedTemplateID,
     renewalWindow,
+    revision: refreshToken,
+    onNotice: setDecisionNotice,
+  })
+  const records = useAssetDecisionRecords({
+    filter: assetDecisionFilter,
+    selectedRecordID,
     revision: refreshToken,
     onNotice: setDecisionNotice,
   })
@@ -424,6 +329,21 @@ export function AssetDecisionsPageContent() {
   const pendingTemplateStatus = templates.state.pendingStatus
   const templateManualDraft = templates.state.manualDraft
   const resetTemplateDetailUI = templates.commands.resetDetailUI
+  const recordsState = records.state.list
+  const recordDetailState = records.state.detail
+  const recordDetailPanel = records.state.detailPanel
+  const recordDraft = records.state.draft
+  const recordDraftEditingMemberID = records.state.draftEditingMemberID
+  const recordSaving = records.state.saving
+  const recordSaveError = records.state.saveError
+  const recordPatchStatus = records.state.patchStatus
+  const recordPatching = records.state.patching
+  const recordPatchError = records.state.patchError
+  const recordFollowupDrafts = records.state.followupDrafts
+  const recordFollowupPatching = records.state.followupSaving
+  const recordFollowupEditingMemberID = records.state.followupEditingMemberID
+  const cancelRecordDraft = records.commands.cancelDraft
+  const resetRecordDetailUI = records.commands.resetDetailUI
   const searchParamSignature = route.state.searchSignature
   const secondaryWorkbench = route.state.secondary
   const setSelectedSecondaryWorkbench = route.commands.setSecondary
@@ -435,46 +355,40 @@ export function AssetDecisionsPageContent() {
     setSelectedManualGroupID(null)
     resetManualDetailUI()
     setSelectedRecordID(null)
+    resetRecordDetailUI()
     setSelectedTemplateID(null)
     resetTemplateDetailUI()
-    setRecordDetailPanel('overview')
-    setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
     setSelectedVPS(null)
-    setRecordDraft(null)
-    setRecordSaveError(null)
-  }, [resetGroupDetailUI, resetManualDetailUI, resetTemplateDetailUI])
+    cancelRecordDraft()
+  }, [cancelRecordDraft, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
 
   const applyURLGroupOpenState = useCallback((groupID: string) => {
     setSelectedManualGroupID(null)
     resetManualDetailUI()
     setSelectedRecordID(null)
-    setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
+    resetRecordDetailUI()
     setSelectedTemplateID(null)
     resetTemplateDetailUI()
     setSelectedVPS(null)
     setDecisionError(null)
-    setRecordDraft(null)
-    setRecordSaveError(null)
+    cancelRecordDraft()
     resetGroupDetailUI()
-    setRecordDetailPanel('overview')
     setSelectedGroupID(groupID)
-  }, [resetGroupDetailUI, resetManualDetailUI, resetTemplateDetailUI])
+  }, [cancelRecordDraft, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
 
   const applyURLManualGroupOpenState = useCallback((manualGroupID: string) => {
     setSelectedGroupID(null)
     resetGroupDetailUI()
     resetManualDetailUI()
     setSelectedRecordID(null)
-    setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
+    resetRecordDetailUI()
     setSelectedTemplateID(null)
     resetTemplateDetailUI()
     setSelectedVPS(null)
     setDecisionError(null)
-    setRecordDraft(null)
-    setRecordSaveError(null)
-    setRecordDetailPanel('overview')
+    cancelRecordDraft()
     setSelectedManualGroupID(manualGroupID)
-  }, [resetGroupDetailUI, resetManualDetailUI, resetTemplateDetailUI])
+  }, [cancelRecordDraft, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
 
   const applyURLRecordOpenState = useCallback((recordID: string) => {
     setSelectedGroupID(null)
@@ -484,13 +398,10 @@ export function AssetDecisionsPageContent() {
     setSelectedTemplateID(null)
     resetTemplateDetailUI()
     setSelectedVPS(null)
-    setRecordDraft(null)
-    setRecordSaveError(null)
-    setRecordDetailPanel('overview')
+    cancelRecordDraft()
+    resetRecordDetailUI()
     setSelectedRecordID(recordID)
-    setRecordDetailState({ loading: true, error: null, detail: null })
-    setRecordPatchError(null)
-  }, [resetGroupDetailUI, resetManualDetailUI, resetTemplateDetailUI])
+  }, [cancelRecordDraft, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
 
   const applyURLTemplateOpenState = useCallback((templateID: string) => {
     setSelectedGroupID(null)
@@ -498,33 +409,13 @@ export function AssetDecisionsPageContent() {
     setSelectedManualGroupID(null)
     resetManualDetailUI()
     setSelectedRecordID(null)
-    setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
+    resetRecordDetailUI()
     setSelectedVPS(null)
     setDecisionError(null)
-    setRecordDraft(null)
-    setRecordSaveError(null)
+    cancelRecordDraft()
     resetTemplateDetailUI()
-    setRecordDetailPanel('overview')
     setSelectedTemplateID(templateID)
-  }, [resetGroupDetailUI, resetManualDetailUI, resetTemplateDetailUI])
-
-  useEffect(() => {
-    let cancelled = false
-    listAssetDecisionRecords(assetDecisionFilter)
-      .then((records) => {
-        if (cancelled) return
-        setRecordsState({ loading: false, error: null, records })
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setRecordsState({
-          loading: false,
-          error: describeError(error, '加载已保存组合决策失败'),
-          records: [],
-        })
-      })
-    return () => { cancelled = true }
-  }, [assetDecisionFilter, refreshToken])
+  }, [cancelRecordDraft, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
 
   useEffect(() => {
     let cancelled = false
@@ -588,30 +479,6 @@ export function AssetDecisionsPageContent() {
       })
     return () => { cancelled = true }
   }, [refreshToken])
-
-  useEffect(() => {
-    if (!selectedRecordID) {
-      return
-    }
-    let cancelled = false
-    getAssetDecisionRecord(selectedRecordID)
-      .then((detail) => {
-        if (cancelled) return
-        setRecordDetailState({ loading: false, error: null, detail })
-        setRecordPatchStatus(detail.status)
-        setRecordFollowupDrafts(buildRecordFollowupDrafts(detail))
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setRecordDetailState({
-          loading: false,
-          error: describeError(error, '加载决策记录失败'),
-          detail: null,
-        })
-        setRecordFollowupDrafts({})
-      })
-    return () => { cancelled = true }
-  }, [selectedRecordID, refreshToken])
 
   useEffect(() => {
     const openSelection = route.state.open
@@ -761,250 +628,6 @@ export function AssetDecisionsPageContent() {
     onRequestRemoval: requestManualMemberRemoval,
   })
 
-  const recordMemberColumns: DataTableColumn<AssetDecisionRecordMember>[] = [
-    {
-      key: 'vps',
-      label: 'VPS',
-      width: '220px',
-      render: (member) => (
-        <div className="asset-table__identity">
-          <strong><Link className="name" to={vpsDetailPath(member.vps_id)}>{member.display_name || member.vps_id}</Link></strong>
-          <span>{member.vps_id}</span>
-          <span>保存于 {formatDateTime(member.created_at)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'decided',
-      label: '用户判断',
-      width: '220px',
-      render: (member) => (
-        <div className="asset-table__stack">
-          <span className="asset-decision-chip-row">
-            <Badge variant="state" tone={roleTone(member.decided_role)}>
-              {ROLE_LABELS[member.decided_role]}
-            </Badge>
-            <Badge variant="state" tone={actionTone(member.decided_action)}>
-              {ACTION_LABELS[member.decided_action]}
-            </Badge>
-          </span>
-          <span>{member.reason || '未填写成员理由'}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'evidence',
-      label: '快照证据',
-      width: '308px',
-      render: (member) => {
-        const assessment = member.evidence_snapshot.evidence_assessment as AssetDecisionEvidenceAssessment | null
-        return (
-          <div className="asset-table__stack">
-            {renderEvidenceAssessment(assessment)}
-            <strong>
-              服务 {String(member.evidence_snapshot.service_count ?? '—')} · 域名 {String(member.evidence_snapshot.domain_count ?? '—')}
-            </strong>
-            <span>
-              监控 {String(member.evidence_snapshot.running_monitoring_count ?? '—')}/{String(member.evidence_snapshot.monitoring_link_count ?? '—')}
-            </span>
-            <span>{String(member.evidence_snapshot.primary_issue_summary || '暂无主要问题')}</span>
-          </div>
-        )
-      },
-    },
-    {
-      key: 'readback',
-      label: '当前回读',
-      width: '360px',
-      render: (member) => renderRecordMemberRawDetails(member),
-    },
-    {
-      key: 'plan',
-      label: '下一步',
-      width: '248px',
-      render: (member) => renderMemberExecutionPlan(member),
-    },
-    {
-      key: 'actions',
-      label: '跟进',
-      align: 'right',
-      width: '286px',
-      render: (member) => {
-        const editing = recordFollowupEditingMemberID === member.vps_id
-        return editing ? renderRecordFollowupForm(member) : (
-          <button
-            className="btn sm primary"
-            type="button"
-            onClick={() => setRecordFollowupEditingMemberID(member.vps_id)}
-          >
-            编辑
-          </button>
-        )
-      },
-    },
-  ]
-
-  function renderRecordFollowupForm(member: AssetDecisionRecordMember) {
-    const draft = recordFollowupDrafts[member.vps_id] ?? {
-      status: member.followup_status,
-      note: member.followup_note,
-    }
-    const isSaving = Boolean(recordFollowupPatching[member.vps_id])
-    const isChanged = draft.status !== member.followup_status || draft.note !== member.followup_note
-    return (
-      <form className="asset-decision-followup-form" onSubmit={(event) => submitRecordMemberFollowup(event, member)}>
-        <div className="asset-decision-followup-form__status">
-          <Badge variant="state" tone={followupStatusTone(member.followup_status)}>
-            {FOLLOWUP_STATUS_LABELS[member.followup_status]}
-          </Badge>
-          <span>{member.followup_updated_at ? `更新 ${formatDateTime(member.followup_updated_at)}` : '尚未跟进'}</span>
-        </div>
-        <label className="visually-hidden" htmlFor={`followup-status-${member.record_id}-${member.vps_id}`}>
-          {member.display_name || member.vps_id} 跟进状态
-        </label>
-        <select
-          id={`followup-status-${member.record_id}-${member.vps_id}`}
-          aria-label="跟进状态"
-          className="input"
-          value={draft.status}
-          onChange={(event) => updateRecordFollowupDraft(member.vps_id, { status: event.target.value as AssetDecisionFollowupStatus })}
-        >
-          {FOLLOWUP_STATUS_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>{option.label}</option>
-          ))}
-        </select>
-        <label className="visually-hidden" htmlFor={`followup-note-${member.record_id}-${member.vps_id}`}>
-          {member.display_name || member.vps_id} 跟进备注
-        </label>
-        <input
-          id={`followup-note-${member.record_id}-${member.vps_id}`}
-          aria-label="跟进备注"
-          className="input"
-          value={draft.note}
-          placeholder="备注 / 阻塞原因"
-          onChange={(event) => updateRecordFollowupDraft(member.vps_id, { note: event.target.value })}
-        />
-        <div className="asset-decision-followup-form__actions">
-          <button className="btn sm primary" type="submit" disabled={isSaving || !isChanged}>
-            {isSaving ? '保存中…' : '保存跟进'}
-          </button>
-          <button
-            className="btn sm secondary"
-            type="button"
-            onClick={() => setRecordFollowupEditingMemberID(null)}
-          >
-            收起
-          </button>
-        </div>
-      </form>
-    )
-  }
-
-  function renderRecordMemberRawDetails(member: AssetDecisionRecordMember) {
-    const issues = member.execution_readback?.issues ?? []
-    const facts = member.execution_readback?.current_facts
-    const ipQuality = facts?.ip_quality_summary
-    const blockedServices = facts?.ip_quality_blocked_services ?? []
-    return (
-      <div className="asset-table__stack">
-        <strong>{member.execution_readback?.summary || '等待执行回读'}</strong>
-        <span>{currentFactsLabel(facts)}</span>
-        <span>{currentFactsStateLabel(facts)}</span>
-        {issues.length > 0 && (
-          <span>
-            问题{' '}
-            {issues.map((issue, index) => (
-              <span key={`${issue.kind}-${issue.label}-${index}`}>
-                {index > 0 ? '；' : ''}
-                <span>{issue.label}</span>
-                {issue.details ? `：${issue.details}` : ''}
-              </span>
-            ))}
-          </span>
-        )}
-        {ipQuality && (
-          <span>
-            IP 质量 {ipQuality.observed_at || '未记录时间'} · {ipQuality.asn || 'ASN 未知'} · {ipQuality.organization || '组织未知'} · provider {ipQuality.provider_count} · 可解锁 {ipQuality.unlockable_count} · {ipQuality.assignment_mode}
-          </span>
-        )}
-        {blockedServices.length > 0 && (
-          <span>受阻服务 {blockedServices.map(ipQualityServiceLabel).join('、')}</span>
-        )}
-      </div>
-    )
-  }
-
-  function renderRecordMemberFollowupRows(detail: AssetDecisionRecordDetail) {
-    const memberPreview = previewItems(detail.members)
-    if (detail.members.length === 0) {
-      return (
-        <section className="asset-decision-record-followups" aria-label="成员跟进列表">
-          <div className="asset-decision-member-decisions__empty">
-            <strong>暂无成员跟进</strong>
-            <span>当前记录没有可展示的成员。</span>
-          </div>
-        </section>
-      )
-    }
-
-    return (
-      <section className="asset-decision-record-followups" aria-label="成员跟进列表">
-        {memberPreview.visible.map((member) => {
-          const editing = recordFollowupEditingMemberID === member.vps_id
-          return (
-            <article key={member.vps_id} className={`asset-decision-record-followup-row${editing ? ' asset-decision-record-followup-row--editing' : ''}`}>
-              <div className="asset-decision-record-followup-row__identity">
-                <strong>{member.display_name || member.vps_id}</strong>
-                <span className="asset-decision-chip-row">
-                  <Badge variant="state" tone={roleTone(member.decided_role)}>
-                    {ROLE_LABELS[member.decided_role]}
-                  </Badge>
-                  <Badge variant="state" tone={actionTone(member.decided_action)}>
-                    {ACTION_LABELS[member.decided_action]}
-                  </Badge>
-                </span>
-              </div>
-              <div className="asset-decision-record-followup-row__state">
-                <span className="asset-decision-chip-row">
-                  {renderReadbackBadge(member.execution_readback)}
-                  <Badge variant="state" tone={followupStatusTone(member.followup_status)}>
-                    {FOLLOWUP_STATUS_LABELS[member.followup_status]}
-                  </Badge>
-                </span>
-                <strong>
-                  {compactDecisionText(member.followup_note || compactMemberReadbackSummary(member.execution_readback), '尚未跟进')}
-                </strong>
-              </div>
-              <div className="asset-decision-record-followup-row__form">
-                {editing ? (
-                  renderRecordFollowupForm(member)
-                ) : (
-                  <button
-                    className="btn-text sm secondary"
-                    type="button"
-                    aria-label="编辑跟进"
-                    aria-expanded={false}
-                    onClick={() => setRecordFollowupEditingMemberID(member.vps_id)}
-                  >
-                    编辑跟进
-                  </button>
-                )}
-              </div>
-            </article>
-          )
-        })}
-        {memberPreview.hiddenCount > 0 && (
-          <div className="asset-decision-preview-more" role="note">
-            <span>另有 {memberPreview.hiddenCount} 台在成员底稿中查看</span>
-            <button className="btn-text sm secondary" type="button" onClick={() => setRecordDetailPanel('raw')}>
-              查看成员底稿
-            </button>
-          </div>
-        )}
-      </section>
-    )
-  }
-
   function setWorkbenchView(next: MainWorkbenchView) {
     route.commands.setWorkbench(next)
   }
@@ -1039,15 +662,13 @@ export function AssetDecisionsPageContent() {
     setSelectedManualGroupID(null)
     manualGroups.commands.resetDetailUI()
     setSelectedRecordID(null)
-    setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
+    records.commands.resetDetailUI()
     setSelectedTemplateID(null)
     templates.commands.resetDetailUI()
     setSelectedVPS(null)
     setDecisionError(null)
-    setRecordDraft(null)
-    setRecordSaveError(null)
+    records.commands.cancelDraft()
     automaticGroups.commands.resetDetailUI()
-    setRecordDetailPanel('overview')
     setSelectedGroupID(groupID)
     setOpenState('group_id', groupID)
   }
@@ -1056,8 +677,7 @@ export function AssetDecisionsPageContent() {
     setSelectedGroupID(null)
     automaticGroups.commands.resetDetailUI()
     setSelectedVPS(null)
-    setRecordDraft(null)
-    setRecordSaveError(null)
+    records.commands.cancelDraft()
     setDecisionDraft(INITIAL_DECISION_DRAFT)
     setDecisionError(null)
     clearOpenState('group_id')
@@ -1068,15 +688,13 @@ export function AssetDecisionsPageContent() {
     setSelectedGroupID(null)
     automaticGroups.commands.resetDetailUI()
     setSelectedRecordID(null)
-    setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
+    records.commands.resetDetailUI()
     setSelectedTemplateID(null)
     templates.commands.resetDetailUI()
     setSelectedVPS(null)
     setDecisionError(null)
-    setRecordDraft(null)
-    setRecordSaveError(null)
+    records.commands.cancelDraft()
     manualGroups.commands.resetDetailUI()
-    setRecordDetailPanel('overview')
     setSelectedManualGroupID(manualGroupID)
     setOpenState('manual_group_id', manualGroupID)
   }
@@ -1084,8 +702,7 @@ export function AssetDecisionsPageContent() {
   function closeManualGroupDetail() {
     setSelectedManualGroupID(null)
     manualGroups.commands.resetDetailUI()
-    setRecordDraft(null)
-    setRecordSaveError(null)
+    records.commands.cancelDraft()
     clearOpenState('manual_group_id')
   }
 
@@ -1096,13 +713,11 @@ export function AssetDecisionsPageContent() {
     setSelectedManualGroupID(null)
     manualGroups.commands.resetDetailUI()
     setSelectedRecordID(null)
-    setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
+    records.commands.resetDetailUI()
     setSelectedVPS(null)
     setDecisionError(null)
-    setRecordDraft(null)
-    setRecordSaveError(null)
+    records.commands.cancelDraft()
     templates.commands.resetDetailUI()
-    setRecordDetailPanel('overview')
     setSelectedTemplateID(templateID)
     setOpenState('template_id', templateID)
   }
@@ -1142,208 +757,35 @@ export function AssetDecisionsPageContent() {
   }
 
   function startRecordSave(detail: AssetDecisionGroupDetail) {
-    const keepsCurrentDraft = recordDraft?.sourceType === 'auto_group' && recordDraft.sourceGroupID === detail.group_id
-    setRecordDraft((current) => completeRecordDraftFromGroupDetail(current, detail, renewalWindow))
-    if (!keepsCurrentDraft) {
-      setRecordDraftEditingMemberID(null)
-    }
-    setRecordSaveError(null)
+    records.commands.startFromAutomatic(detail, renewalWindow)
     automaticGroups.commands.selectPanel('save')
   }
 
   function startManualRecordSave(detail: AssetDecisionManualGroupDetail) {
-    const keepsCurrentDraft = recordDraft?.sourceType === 'manual_group' && recordDraft.sourceGroupID === detail.manual_group_id
-    setRecordDraft((current) => completeRecordDraftFromManualDetail(current, detail))
-    if (!keepsCurrentDraft) {
-      setRecordDraftEditingMemberID(null)
-    }
-    setRecordSaveError(null)
+    records.commands.startFromManual(detail)
     manualGroups.commands.selectPanel('save')
   }
 
   function cancelRecordSave() {
     const sourceType = recordDraft?.sourceType
-    setRecordDraft(null)
-    setRecordDraftEditingMemberID(null)
-    setRecordSaveError(null)
+    records.commands.cancelDraft()
     if (sourceType === 'auto_group') automaticGroups.commands.selectPanel('overview')
     if (sourceType === 'manual_group') manualGroups.commands.selectPanel('overview')
   }
 
-  function updateRecordDraft(patch: Partial<RecordDraft>) {
-    setRecordDraft((current) => current ? { ...current, ...patch } : current)
-  }
-
-  function updateRecordDraftMember(vpsID: string, patch: Partial<RecordMemberDraft>) {
-    setRecordDraft((current) => {
-      if (!current) return current
-      const existing = current.members[vpsID]
-      if (!existing) return current
-      return {
-        ...current,
-        members: {
-          ...current.members,
-          [vpsID]: {
-            ...existing,
-            ...patch,
-          },
-        },
-      }
-    })
-  }
-
-  function renderRecordDraftMemberRows(
-    members: Array<{
-      vpsID: string
-      displayName: string
-      fallbackRole: AssetDecisionSuggestedRole
-      fallbackAction: AssetDecisionSuggestedAction
-      meta?: string
-      chips?: AssetDecisionEvidenceChip[]
-    }>,
-  ) {
-    if (!recordDraft) return null
-    const memberPreview = previewItems(members)
-    return (
-      <div className="asset-decision-save-members" aria-label="保存记录成员复核">
-        {memberPreview.visible.map((member) => {
-          const memberDraft = recordDraft.members[member.vpsID]
-          const decidedRole = memberDraft?.decidedRole ?? member.fallbackRole
-          const decidedAction = memberDraft?.decidedAction ?? member.fallbackAction
-          const reason = memberDraft?.reason ?? ''
-          const editing = recordDraftEditingMemberID === member.vpsID
-          return (
-            <article key={member.vpsID} className={`asset-decision-save-member${editing ? ' asset-decision-save-member--editing' : ''}`}>
-              <div className="asset-decision-save-member__summary">
-                <div className="asset-table__identity">
-                  <strong>{member.displayName}</strong>
-                </div>
-                <span className="asset-decision-chip-row">
-                  <Badge variant="state" tone={roleTone(decidedRole)}>
-                    {ROLE_LABELS[decidedRole]}
-                  </Badge>
-                  <Badge variant="state" tone={actionTone(decidedAction)}>
-                    {ACTION_LABELS[decidedAction]}
-                  </Badge>
-                  <Badge variant="state" tone={reason.trim() ? 'normal' : 'maintenance'}>
-                    {reason.trim() ? '已写理由' : '理由待补'}
-                  </Badge>
-                </span>
-                <button
-                  className="btn-text sm secondary"
-                  type="button"
-                  aria-expanded={editing}
-                  onClick={() => setRecordDraftEditingMemberID((current) => current === member.vpsID ? null : member.vpsID)}
-                >
-                  {editing ? '收起编辑' : `编辑 ${member.displayName} 成员理由`}
-                </button>
-              </div>
-              {editing && (
-                <div className="asset-decision-save-member__editor">
-                  <div className="input-field">
-                    <span>角色</span>
-                    <select
-                      aria-label="角色"
-                      className="input"
-                      value={decidedRole}
-                      onChange={(event) => updateRecordDraftMember(member.vpsID, { decidedRole: event.target.value as AssetDecisionSuggestedRole })}
-                    >
-                      {ROLE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="input-field">
-                    <span>动作</span>
-                    <select
-                      aria-label="动作"
-                      className="input"
-                      value={decidedAction}
-                      onChange={(event) => updateRecordDraftMember(member.vpsID, { decidedAction: event.target.value as AssetDecisionSuggestedAction })}
-                    >
-                      {ACTION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="input-field asset-decision-save-member__reason">
-                    <span>理由</span>
-                    <input
-                      aria-label="理由"
-                      className="input"
-                      value={reason}
-                      onChange={(event) => updateRecordDraftMember(member.vpsID, { reason: event.target.value })}
-                    />
-                  </div>
-                </div>
-              )}
-            </article>
-          )
-        })}
-        {memberPreview.hiddenCount > 0 && (
-          <div className="asset-decision-preview-more" role="note">
-            另有 {memberPreview.hiddenCount} 台成员保留在保存底稿中
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  function submitRecordSave(event: FormSubmitEvent) {
+  async function submitRecordSave(event: FormSubmitEvent) {
     event.preventDefault()
-    const draft = recordDraft
-    if (!draft) return
-    setRecordSaveError(null)
-
-    const title = draft.title.trim()
-    if (!title) {
-      setRecordSaveError('请填写决策记录标题')
-      return
-    }
-
-    setRecordSaving(true)
-    createAssetDecisionRecord({
-      source_type: draft.sourceType,
-      source_group_id: draft.sourceGroupID,
-      renew_within_days: draft.renewWithinDays,
-      title,
-      goal: draft.goal.trim(),
-      status: draft.status,
-      members: draft.memberOrder.map((vpsID) => {
-        const memberDraft = draft.members[vpsID]
-        return {
-          vps_id: vpsID,
-          decided_role: memberDraft?.decidedRole ?? 'observe_candidate',
-          decided_action: memberDraft?.decidedAction ?? 'review',
-          reason: memberDraft?.reason.trim() ?? '',
-        }
-      }),
-    })
-      .then((record) => {
-        setRecordsState((current) => ({
-          loading: false,
-          error: null,
-          records: [record, ...current.records.filter((item) => item.record_id !== record.record_id)],
-        }))
-        setRecordDraft(null)
-        setDecisionNotice(`已保存组合决策记录：${record.title}`)
-        setSelectedGroupID(null)
-        automaticGroups.commands.resetDetailUI()
-        setSelectedManualGroupID(null)
-        manualGroups.commands.resetDetailUI()
-        setSelectedTemplateID(null)
-        templates.commands.resetDetailUI()
-        setSelectedVPS(null)
-        setSelectedRecordID(record.record_id)
-        setOpenState('record_id', record.record_id)
-        setRecordDetailState({ loading: false, error: null, detail: record })
-        setRecordPatchStatus(record.status)
-        setRecordDetailPanel('overview')
-      })
-      .catch((error: unknown) => {
-        setRecordSaveError(describeError(error, '保存组合决策记录失败'))
-      })
-      .finally(() => setRecordSaving(false))
+    const record = await records.commands.saveDraft()
+    if (!record) return
+    setSelectedGroupID(null)
+    automaticGroups.commands.resetDetailUI()
+    setSelectedManualGroupID(null)
+    manualGroups.commands.resetDetailUI()
+    setSelectedTemplateID(null)
+    templates.commands.resetDetailUI()
+    setSelectedVPS(null)
+    setSelectedRecordID(record.record_id)
+    setOpenState('record_id', record.record_id)
   }
 
   function openRecord(recordID: string) {
@@ -1355,24 +797,15 @@ export function AssetDecisionsPageContent() {
     setSelectedTemplateID(null)
     templates.commands.resetDetailUI()
     setSelectedVPS(null)
-    setRecordDraft(null)
-    setRecordSaveError(null)
+    records.commands.cancelDraft()
+    records.commands.resetDetailUI()
     setSelectedRecordID(recordID)
-    setRecordDetailState({ loading: true, error: null, detail: null })
-    setRecordPatchError(null)
-    setRecordDetailPanel('overview')
-    setRecordFollowupEditingMemberID(null)
     setOpenState('record_id', recordID)
   }
 
   function closeRecordDetail() {
     setSelectedRecordID(null)
-    setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
-    setRecordPatchError(null)
-    setRecordFollowupDrafts({})
-    setRecordFollowupPatching({})
-    setRecordFollowupEditingMemberID(null)
-    setRecordDetailPanel('overview')
+    records.commands.resetDetailUI()
     clearOpenState('record_id')
   }
 
@@ -1409,29 +842,6 @@ export function AssetDecisionsPageContent() {
     setOpenState('template_id', template.template_id)
   }
 
-  function submitRecordStatus(event: FormSubmitEvent) {
-    event.preventDefault()
-    const detail = recordDetailState.detail
-    if (!detail) return
-    setRecordPatchError(null)
-    setRecordPatching(true)
-    patchAssetDecisionRecord(detail.record_id, { status: recordPatchStatus })
-      .then((record) => {
-        setRecordDetailState({ loading: false, error: null, detail: record })
-        setRecordPatchStatus(record.status)
-        setRecordsState((current) => ({
-          loading: false,
-          error: null,
-          records: current.records.map((item) => (item.record_id === record.record_id ? record : item)),
-        }))
-        setDecisionNotice(`决策记录状态已更新：${record.title} -> ${RECORD_STATUS_LABELS[record.status]}`)
-      })
-      .catch((error: unknown) => {
-        setRecordPatchError(describeError(error, '更新决策记录状态失败'))
-      })
-      .finally(() => setRecordPatching(false))
-  }
-
   async function submitManualGroupPatch(event: FormSubmitEvent) {
     event.preventDefault()
     const detail = manualDetailState.detail
@@ -1461,167 +871,6 @@ export function AssetDecisionsPageContent() {
 
   function cancelManualMemberRemoval() {
     manualGroups.commands.cancelMemberRemoval()
-  }
-
-  function updateRecordFollowupDraft(vpsID: string, patch: Partial<RecordFollowupDraft>) {
-    setRecordFollowupDrafts((current) => ({
-      ...current,
-      [vpsID]: {
-        ...current[vpsID],
-        ...patch,
-      },
-    }))
-  }
-
-  function submitRecordMemberFollowup(event: FormSubmitEvent, member: AssetDecisionRecordMember) {
-    event.preventDefault()
-    saveRecordMemberFollowup(member)
-  }
-
-  function saveRecordMemberFollowup(member: AssetDecisionRecordMember, nextStatus?: AssetDecisionFollowupStatus) {
-    const detail = recordDetailState.detail
-    if (!detail) return
-    const draft = recordFollowupDrafts[member.vps_id] ?? {
-      status: member.followup_status,
-      note: member.followup_note,
-    }
-    const status = nextStatus ?? draft.status
-    setRecordPatchError(null)
-    setRecordFollowupPatching((current) => ({ ...current, [member.vps_id]: true }))
-    patchAssetDecisionRecord(detail.record_id, {
-      members: [{
-        vps_id: member.vps_id,
-        followup_status: status,
-        followup_note: draft.note.trim(),
-      }],
-    })
-      .then((record) => {
-        setRecordDetailState({ loading: false, error: null, detail: record })
-        setRecordPatchStatus(record.status)
-        setRecordFollowupDrafts(buildRecordFollowupDrafts(record))
-        setRecordsState((current) => ({
-          loading: false,
-          error: null,
-          records: current.records.map((item) => (item.record_id === record.record_id ? record : item)),
-        }))
-        setDecisionNotice(`成员跟进已更新：${member.display_name || member.vps_id} -> ${FOLLOWUP_STATUS_LABELS[status]}`)
-      })
-      .catch((error: unknown) => {
-        setRecordPatchError(describeError(error, '更新成员跟进失败'))
-      })
-      .finally(() => {
-        setRecordFollowupPatching((current) => ({
-          ...current,
-          [member.vps_id]: false,
-        }))
-      })
-  }
-
-  function renderRecordExecutionBoard(detail: AssetDecisionRecordDetail) {
-    const executionPreview = previewItems(sortedExecutionMembers(detail.members))
-    const visibleExecutionMembers = executionPreview.visible
-
-    if (visibleExecutionMembers.length === 0) {
-      return (
-        <section className="asset-decision-execution-board" aria-label="执行编排">
-          <div className="asset-decision-execution-board__empty">
-            <strong>暂无执行编排</strong>
-          </div>
-        </section>
-      )
-    }
-
-    return (
-      <section className="asset-decision-execution-board" aria-label="执行编排">
-        <div className="asset-decision-execution-board__header">
-          <div>
-            <strong>{detail.execution_plan?.summary || '等待执行步骤'}</strong>
-          </div>
-          <div className="asset-decision-execution-board__counts">
-            <span>
-              可推进 {detail.execution_plan?.actionable_count ?? 0}
-            </span>
-            {detail.execution_plan?.blocked_count > 0 && (
-              <Badge variant="count" tone="critical">
-                阻塞 {detail.execution_plan.blocked_count}
-              </Badge>
-            )}
-          </div>
-        </div>
-        <div className="asset-decision-execution-board__members">
-          {visibleExecutionMembers.map((member) => {
-            const isSaving = Boolean(recordFollowupPatching[member.vps_id])
-            const canStart = member.followup_status === 'todo'
-            const canMarkDone = member.execution_readback?.status === 'aligned' && member.followup_status !== 'done' && member.followup_status !== 'skipped'
-            const primaryAction = (() => {
-              if (canMarkDone) {
-                return (
-                  <button className="btn sm primary" type="button" disabled={isSaving} onClick={() => saveRecordMemberFollowup(member, 'done')}>
-                    标记完成
-                  </button>
-                )
-              }
-              if (member.execution_plan?.step_kind === 'review_record') {
-                return (
-                  <button className="btn sm secondary" type="button" onClick={() => setDecisionNotice(`请在当前记录中复核：${member.display_name || member.vps_id}`)}>
-                    {actionLabelForMember(member)}
-                  </button>
-                )
-              }
-              if (member.execution_plan?.step_kind) {
-                return (
-                  <Link className="btn sm secondary" to={actionHrefForMember(member)}>
-                    {actionLabelForMember(member)}
-                  </Link>
-                )
-              }
-              if (canStart) {
-                return (
-                  <button className="btn sm secondary" type="button" disabled={isSaving} onClick={() => saveRecordMemberFollowup(member, 'in_progress')}>
-                    开始跟进
-                  </button>
-                )
-              }
-              return null
-            })()
-            return (
-              <article key={member.vps_id} className="asset-decision-execution-card">
-                <div className="asset-decision-execution-card__head">
-                  <strong>{member.display_name || member.vps_id}</strong>
-                  <span className="asset-decision-chip-row">
-                    {renderExecutionPlanBadge(member.execution_plan)}
-                    {renderReadbackBadge(member.execution_readback)}
-                  </span>
-                </div>
-                <p>{compactMemberPlanSummary(member)}</p>
-                {member.execution_readback?.issues?.length > 0 && (
-                  <span className="asset-decision-chip-row">
-                    {member.execution_readback.issues.slice(0, 2).map((issue) => (
-                      <Badge key={`${member.vps_id}-${issue.kind}-${issue.label}`} variant="info" tone={chipTone(issue.tone)}>
-                        {issue.label}
-                      </Badge>
-                    ))}
-                    {member.execution_readback.issues.length > 2 && (
-                      <span>
-                        +{member.execution_readback.issues.length - 2}
-                      </span>
-                    )}
-                  </span>
-                )}
-                <div className="asset-decision-execution-card__actions">
-                  {primaryAction}
-                </div>
-              </article>
-            )
-          })}
-        </div>
-        {executionPreview.hiddenCount > 0 && (
-          <div className="asset-decision-preview-more" role="note">
-            另有 {executionPreview.hiddenCount} 台在成员跟进或底稿中查看
-          </div>
-        )}
-      </section>
-    )
   }
 
   function selectVPS(vps: VPSAssetRecord) {
@@ -1792,7 +1041,10 @@ export function AssetDecisionsPageContent() {
         groupDetailPanel={groupDetailPanel}
         onSetGroupDetailPanel={automaticGroups.commands.selectPanel}
         recordDraft={recordDraft}
-        onSetRecordDraft={setRecordDraft}
+        recordDraftEditingMemberID={recordDraftEditingMemberID}
+        onUpdateRecordDraft={records.commands.updateDraft}
+        onUpdateRecordDraftMember={records.commands.updateDraftMember}
+        onEditRecordDraftMember={records.commands.editDraftMember}
         recordSaving={recordSaving}
         recordSaveError={recordSaveError}
         manualGroupCreating={manualGroupCreating}
@@ -1811,7 +1063,6 @@ export function AssetDecisionsPageContent() {
         onCloseDecisionDrawer={closeDecisionDrawer}
         onHandleDecisionSubmit={handleDecisionSubmit}
         memberColumns={memberColumns}
-        renderRecordDraftMemberRows={renderRecordDraftMemberRows}
       />
 
       <ManualGroupDetailModal
@@ -1829,6 +1080,7 @@ export function AssetDecisionsPageContent() {
         vpsCatalogState={vpsCatalogState}
         manualMemberCandidateRows={manualMemberCandidateRows}
         recordDraft={recordDraft}
+        recordDraftEditingMemberID={recordDraftEditingMemberID}
         recordSaving={recordSaving}
         recordSaveError={recordSaveError}
         onClose={closeManualGroupDetail}
@@ -1844,9 +1096,10 @@ export function AssetDecisionsPageContent() {
         onDeleteManualMember={deleteManualMember}
         onUpdateMemberAddDraft={manualGroups.commands.updateMemberAddDraft}
         onSetManualMemberAddAdvancedVisible={manualGroups.commands.setMemberAddAdvanced}
-        onUpdateRecordDraft={updateRecordDraft}
+        onUpdateRecordDraft={records.commands.updateDraft}
+        onUpdateRecordDraftMember={records.commands.updateDraftMember}
+        onEditRecordDraftMember={records.commands.editDraftMember}
         manualMemberColumns={manualMemberColumns}
-        renderRecordDraftMemberRows={renderRecordDraftMemberRows}
       />
 
       <TemplateDetailModal
@@ -1885,14 +1138,18 @@ export function AssetDecisionsPageContent() {
         recordPatchStatus={recordPatchStatus}
         recordPatching={recordPatching}
         selectedRecordAssessment={selectedRecordAssessment}
+        followupDrafts={recordFollowupDrafts}
+        followupSaving={recordFollowupPatching}
+        followupEditingMemberID={recordFollowupEditingMemberID}
         onClose={closeRecordDetail}
-        onSetRecordDetailPanel={setRecordDetailPanel}
-        onSubmitRecordStatus={submitRecordStatus}
-        onSetRecordPatchStatus={setRecordPatchStatus}
+        onSetRecordDetailPanel={records.commands.selectPanel}
+        onPatchRecordStatus={records.commands.patchStatus}
+        onSetRecordPatchStatus={records.commands.setPatchStatus}
         onOpenRecordSource={openRecordSource}
-        recordMemberColumns={recordMemberColumns}
-        renderRecordExecutionBoard={renderRecordExecutionBoard}
-        renderRecordMemberFollowupRows={renderRecordMemberFollowupRows}
+        onUpdateFollowupDraft={records.commands.updateFollowupDraft}
+        onEditFollowupMember={records.commands.editFollowupMember}
+        onSaveFollowup={records.commands.saveFollowup}
+        onReviewRecord={(member) => setDecisionNotice(`请在当前记录中复核：${member.display_name || member.vps_id}`)}
       />
     </div>
   )

@@ -80,6 +80,7 @@ describe('ManualGroupDetailModal', () => {
         vpsCatalogState={{ loading: false, error: null }}
         manualMemberCandidateRows={[CANDIDATE]}
         recordDraft={null}
+        recordDraftEditingMemberID={null}
         recordSaving={false}
         recordSaveError={null}
         manualMemberColumns={[]}
@@ -97,7 +98,8 @@ describe('ManualGroupDetailModal', () => {
         onUpdateMemberAddDraft={updateMemberAddDraft}
         onSetManualMemberAddAdvancedVisible={setMemberAddAdvanced}
         onUpdateRecordDraft={vi.fn()}
-        renderRecordDraftMemberRows={() => null}
+        onUpdateRecordDraftMember={vi.fn()}
+        onEditRecordDraftMember={vi.fn()}
       />,
     )
 
