@@ -8,8 +8,8 @@ type RenewalDecisionModalProps = {
   decisionDraft: AssetDecisionDraft
   submitting: boolean
   error: string | null
-  onDraftChange: (draft: AssetDecisionDraft) => void
-  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
+  onUpdateDraft: (draft: AssetDecisionDraft) => void
+  onSubmitDecision: () => void
   onClose: () => void
 }
 
@@ -19,8 +19,8 @@ export function RenewalDecisionModal({
   decisionDraft,
   submitting,
   error,
-  onDraftChange,
-  onSubmit,
+  onUpdateDraft,
+  onSubmitDecision,
   onClose,
 }: RenewalDecisionModalProps) {
   return (
@@ -37,8 +37,11 @@ export function RenewalDecisionModal({
         submitting={submitting}
         error={error}
         notice={null}
-        onDraftChange={onDraftChange}
-        onSubmit={onSubmit}
+        onDraftChange={onUpdateDraft}
+        onSubmit={(event) => {
+          event.preventDefault()
+          onSubmitDecision()
+        }}
         onCancel={onClose}
       />
     </Modal>

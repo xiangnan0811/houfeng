@@ -2,9 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import {
-  type AssetDecisionDraft,
-} from '../components/AssetDecisionWorkPanel'
-import {
   type BadgeTone,
 } from '../components/atoms'
 import { PortfolioWorkbench } from './asset-decisions/components/PortfolioWorkbench'
@@ -13,18 +10,19 @@ import { useAssetDecisionGroups } from './asset-decisions/hooks/useAssetDecision
 import { useAssetDecisionManualGroups } from './asset-decisions/hooks/useAssetDecisionManualGroups'
 import { useAssetDecisionPortfolio } from './asset-decisions/hooks/useAssetDecisionPortfolio'
 import { useAssetDecisionRecords } from './asset-decisions/hooks/useAssetDecisionRecords'
+import { useAssetDecisionRenewalQueue } from './asset-decisions/hooks/useAssetDecisionRenewalQueue'
 import { useAssetDecisionRouteState } from './asset-decisions/hooks/useAssetDecisionRouteState'
 import { useAssetDecisionTemplates } from './asset-decisions/hooks/useAssetDecisionTemplates'
+import {
+  applyAssetDecisionInvalidation,
+  INITIAL_ASSET_DECISION_REVISIONS,
+  type AssetDecisionInvalidationEvent,
+} from './asset-decisions/hooks/invalidation'
 import { GroupDetailModal } from './asset-decisions/modals/GroupDetailModal'
 import { ManualGroupDetailModal } from './asset-decisions/modals/ManualGroupDetailModal'
 import { TemplateDetailModal } from './asset-decisions/modals/TemplateDetailModal'
 import { RecordDetailModal } from './asset-decisions/modals/RecordDetailModal'
 import { RenewalDecisionModal } from './asset-decisions/modals/RenewalDecisionModal'
-import {
-  listSubscriptions,
-  listVPSAssets,
-  updateVPSAsset,
-} from '../lib/api'
 import {
   type AssetDecisionEvidenceAssessment,
   type AssetDecisionEvidenceDecisionBias,
@@ -37,16 +35,10 @@ import {
   type AssetDecisionManualGroupStatus,
   type AssetDecisionRecordSummary,
   type AssetDecisionScenarioTemplateStatus,
-  type SubscriptionRecord,
   type VPSAssetRecord,
 } from '../lib/types'
-import {
-  groupSubscriptionsByVPS,
-} from './assetPageUtils'
 import type {
   MainWorkbenchView,
-  DecisionQueueView,
-  DecisionQueueItem,
   PortfolioState,
   ManualGroupsState,
   ScenarioTemplatesState,
@@ -55,41 +47,19 @@ import type {
   ContextFilterKey,
   OpenStateKey,
   AssetDecisionSecondaryNavItem,
+  QueueState,
 } from './asset-decisions/types'
-import {
-  INITIAL_DECISION_DRAFT,
-  INITIAL_QUEUE_STATE,
-} from './asset-decisions/constants'
 import {
   createManualMemberColumns,
   createMemberColumns,
 } from './asset-decisions/tableColumns'
 import {
-  buildDecisionQueue,
-  updateDecisionQueues,
   deriveClosedLoopMetrics,
   deriveNextWorkItems,
   buildPortfolioLead,
   buildManualGroupProgress,
 } from './asset-decisions/businessLogic'
-import {
-  describeError,
-  parseRenewalWindow,
-} from './asset-decisions/utils'
-import { renewalQueueLabel } from './asset-decisions/formatters'
-
-// 页面级状态类型
-type QueueState = {
-  renewalsLoading: boolean
-  renewalsError: string | null
-  queueLoading: boolean
-  queueError: string | null
-  renewals: SubscriptionRecord[]
-  subscriptions: SubscriptionRecord[]
-  unreviewed: VPSAssetRecord[]
-  migrate: VPSAssetRecord[]
-  cancel: VPSAssetRecord[]
-}
+import { parseRenewalWindow } from './asset-decisions/utils'
 
 type ClosedLoopSourceErrors = {
   overview?: string | null
@@ -125,32 +95,6 @@ type AssetDecisionNextWorkItem = {
   actionLabel: string
   priority: number
   target: AssetDecisionNextWorkTarget
-}
-
-function filterDecisionQueue(
-  rows: DecisionQueueItem[],
-  view: DecisionQueueView,
-): DecisionQueueItem[] {
-  if (view === 'all') return rows
-  if (view === 'renewal') return rows.filter((row) => row.renewalDue)
-  if (view === 'unlinked') return rows.filter((row) => row.vps.active_monitoring_instance_link_count <= 0)
-  if (view === 'missing_subscription') return rows.filter((row) => !row.subscription)
-  if (view === 'cancellation_attention') return rows.filter((row) => hasCancellationAttention(row))
-  return rows.filter((row) => row.vps.renewal_decision === view)
-}
-
-function hasCancellationAttention(row: DecisionQueueItem): boolean {
-  if (row.vps.renewal_decision === 'cancel' && row.vps.lifecycle_status !== 'to_cancel' && row.vps.lifecycle_status !== 'cancelled') {
-    return true
-  }
-  if (!row.subscription) return false
-  const inactiveSubscription = row.subscription.status !== 'active'
-  const vpsCancelled = row.vps.lifecycle_status === 'to_cancel' || row.vps.lifecycle_status === 'cancelled'
-  return inactiveSubscription && !vpsCancelled
-}
-
-function subscriptionCostAttention(subscription: SubscriptionRecord | null): boolean {
-  return Boolean(subscription?.exchange_rate_stale)
 }
 
 function buildSecondaryNavItems(
@@ -256,46 +200,49 @@ export function AssetDecisionsPageContent() {
   const renewalWindow = route.state.renewalWindow
   const assetDecisionFilter = route.state.filter
   const contextFilterChips = route.state.contextFilterChips
-  const [queueView, setQueueView] = useState<DecisionQueueView>('all')
-  const [queueState, setQueueState] = useState<QueueState>(INITIAL_QUEUE_STATE)
   const [selectedGroupID, setSelectedGroupID] = useState<string | null>(null)
   const [selectedManualGroupID, setSelectedManualGroupID] = useState<string | null>(null)
   const [selectedRecordID, setSelectedRecordID] = useState<string | null>(null)
   const [selectedTemplateID, setSelectedTemplateID] = useState<string | null>(null)
-  const [selectedVPS, setSelectedVPS] = useState<VPSAssetRecord | null>(null)
-  const [decisionDraft, setDecisionDraft] = useState<AssetDecisionDraft>(INITIAL_DECISION_DRAFT)
-  const [decisionSubmitting, setDecisionSubmitting] = useState(false)
-  const [decisionError, setDecisionError] = useState<string | null>(null)
   const [decisionNotice, setDecisionNotice] = useState<string | null>(null)
-  const [refreshToken, setRefreshToken] = useState(0)
+  const [revisions, setRevisions] = useState(INITIAL_ASSET_DECISION_REVISIONS)
+  const handleInvalidation = useCallback((event: AssetDecisionInvalidationEvent) => {
+    setRevisions((current) => applyAssetDecisionInvalidation(current, event))
+  }, [])
   const portfolio = useAssetDecisionPortfolio({
     filter: assetDecisionFilter,
-    revision: refreshToken,
+    revision: revisions.portfolio,
   })
   const automaticGroups = useAssetDecisionGroups({
     filter: assetDecisionFilter,
     renewalWindow,
     selectedGroupID,
-    revision: refreshToken,
+    revision: revisions.groups,
   })
   const manualGroups = useAssetDecisionManualGroups({
     filter: assetDecisionFilter,
     renewalWindow,
     selectedManualGroupID,
-    revision: refreshToken,
+    revision: revisions.manualGroups,
     onNotice: setDecisionNotice,
   })
   const templates = useAssetDecisionTemplates({
     selectedTemplateID,
     renewalWindow,
-    revision: refreshToken,
+    revision: revisions.templates,
     onNotice: setDecisionNotice,
   })
   const records = useAssetDecisionRecords({
     filter: assetDecisionFilter,
     selectedRecordID,
-    revision: refreshToken,
+    revision: revisions.records,
     onNotice: setDecisionNotice,
+  })
+  const renewalQueue = useAssetDecisionRenewalQueue({
+    renewalWindow,
+    revision: revisions.renewalQueue,
+    onNotice: setDecisionNotice,
+    onInvalidate: handleInvalidation,
   })
   const portfolioState: PortfolioState = {
     overviewLoading: portfolio.state.loading,
@@ -344,6 +291,19 @@ export function AssetDecisionsPageContent() {
   const recordFollowupEditingMemberID = records.state.followupEditingMemberID
   const cancelRecordDraft = records.commands.cancelDraft
   const resetRecordDetailUI = records.commands.resetDetailUI
+  const queueState = renewalQueue.state.queue
+  const queueView = renewalQueue.state.queueView
+  const selectedVPS = renewalQueue.state.selectedVPS
+  const decisionDraft = renewalQueue.state.draft
+  const decisionSubmitting = renewalQueue.state.submitting
+  const decisionError = renewalQueue.state.error
+  const visibleDecisionQueue = renewalQueue.state.visibleDecisionQueue
+  const totalDecisionQueue = renewalQueue.state.totalDecisionQueue
+  const renewalDueQueueCount = renewalQueue.state.renewalDueQueueCount
+  const missingSubscriptionCount = renewalQueue.state.missingSubscriptionCount
+  const unlinkedCount = renewalQueue.state.unlinkedCount
+  const cancellationAttentionCount = renewalQueue.state.cancellationAttentionCount
+  const closeRenewalDecision = renewalQueue.commands.closeVPS
   const searchParamSignature = route.state.searchSignature
   const secondaryWorkbench = route.state.secondary
   const setSelectedSecondaryWorkbench = route.commands.setSecondary
@@ -358,9 +318,9 @@ export function AssetDecisionsPageContent() {
     resetRecordDetailUI()
     setSelectedTemplateID(null)
     resetTemplateDetailUI()
-    setSelectedVPS(null)
+    closeRenewalDecision()
     cancelRecordDraft()
-  }, [cancelRecordDraft, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
+  }, [cancelRecordDraft, closeRenewalDecision, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
 
   const applyURLGroupOpenState = useCallback((groupID: string) => {
     setSelectedManualGroupID(null)
@@ -369,12 +329,11 @@ export function AssetDecisionsPageContent() {
     resetRecordDetailUI()
     setSelectedTemplateID(null)
     resetTemplateDetailUI()
-    setSelectedVPS(null)
-    setDecisionError(null)
+    closeRenewalDecision()
     cancelRecordDraft()
     resetGroupDetailUI()
     setSelectedGroupID(groupID)
-  }, [cancelRecordDraft, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
+  }, [cancelRecordDraft, closeRenewalDecision, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
 
   const applyURLManualGroupOpenState = useCallback((manualGroupID: string) => {
     setSelectedGroupID(null)
@@ -384,11 +343,10 @@ export function AssetDecisionsPageContent() {
     resetRecordDetailUI()
     setSelectedTemplateID(null)
     resetTemplateDetailUI()
-    setSelectedVPS(null)
-    setDecisionError(null)
+    closeRenewalDecision()
     cancelRecordDraft()
     setSelectedManualGroupID(manualGroupID)
-  }, [cancelRecordDraft, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
+  }, [cancelRecordDraft, closeRenewalDecision, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
 
   const applyURLRecordOpenState = useCallback((recordID: string) => {
     setSelectedGroupID(null)
@@ -397,11 +355,11 @@ export function AssetDecisionsPageContent() {
     resetManualDetailUI()
     setSelectedTemplateID(null)
     resetTemplateDetailUI()
-    setSelectedVPS(null)
+    closeRenewalDecision()
     cancelRecordDraft()
     resetRecordDetailUI()
     setSelectedRecordID(recordID)
-  }, [cancelRecordDraft, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
+  }, [cancelRecordDraft, closeRenewalDecision, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
 
   const applyURLTemplateOpenState = useCallback((templateID: string) => {
     setSelectedGroupID(null)
@@ -410,75 +368,11 @@ export function AssetDecisionsPageContent() {
     resetManualDetailUI()
     setSelectedRecordID(null)
     resetRecordDetailUI()
-    setSelectedVPS(null)
-    setDecisionError(null)
+    closeRenewalDecision()
     cancelRecordDraft()
     resetTemplateDetailUI()
     setSelectedTemplateID(templateID)
-  }, [cancelRecordDraft, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
-
-  useEffect(() => {
-    let cancelled = false
-    listSubscriptions({
-      renew_within_days: renewalWindow,
-      sort: 'renew_at',
-      order: 'asc',
-    })
-      .then((renewals) => {
-        if (cancelled) return
-        setQueueState((current) => ({
-          ...current,
-          renewalsLoading: false,
-          renewalsError: null,
-          renewals,
-        }))
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setQueueState((current) => ({
-          ...current,
-          renewalsLoading: false,
-          renewalsError: describeError(error, '加载续费 evidence 失败'),
-          renewals: [],
-        }))
-      })
-    return () => { cancelled = true }
-  }, [renewalWindow, refreshToken])
-
-  useEffect(() => {
-    let cancelled = false
-    Promise.all([
-      listSubscriptions({ sort: 'renew_at', order: 'asc' }),
-      listVPSAssets({ renewal_decision: 'unreviewed' }),
-      listVPSAssets({ renewal_decision: 'migrate' }),
-      listVPSAssets({ renewal_decision: 'cancel' }),
-    ])
-      .then(([subscriptions, unreviewed, migrate, cancel]) => {
-        if (cancelled) return
-        setQueueState((current) => ({
-          ...current,
-          queueLoading: false,
-          queueError: null,
-          subscriptions,
-          unreviewed,
-          migrate,
-          cancel,
-        }))
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setQueueState((current) => ({
-          ...current,
-          queueLoading: false,
-          queueError: describeError(error, '加载 VPS 单台队列失败'),
-          subscriptions: [],
-          unreviewed: [],
-          migrate: [],
-          cancel: [],
-        }))
-      })
-    return () => { cancelled = true }
-  }, [refreshToken])
+  }, [cancelRecordDraft, closeRenewalDecision, resetGroupDetailUI, resetManualDetailUI, resetRecordDetailUI, resetTemplateDetailUI])
 
   useEffect(() => {
     const openSelection = route.state.open
@@ -531,10 +425,6 @@ export function AssetDecisionsPageContent() {
     selectedTemplateID,
   ])
 
-  const subscriptionsByVPS = useMemo(
-    () => groupSubscriptionsByVPS(queueState.subscriptions),
-    [queueState.subscriptions],
-  )
   const vpsByID = useMemo(() => {
     const rows = new Map<string, VPSAssetRecord>()
     for (const vps of vpsCatalogState.rows) rows.set(vps.vps_id, vps)
@@ -549,26 +439,7 @@ export function AssetDecisionsPageContent() {
     }
     return rows
   }, [detailState.detail?.members, manualDetailState.detail?.members, queueState.cancel, queueState.migrate, queueState.unreviewed, vpsCatalogState.rows])
-  const decisionQueue = useMemo(
-    () =>
-      buildDecisionQueue(
-        [...queueState.unreviewed, ...queueState.migrate, ...queueState.cancel],
-        subscriptionsByVPS,
-        renewalWindow,
-      ),
-    [queueState.cancel, queueState.migrate, queueState.unreviewed, subscriptionsByVPS, renewalWindow],
-  )
-  const visibleDecisionQueue = useMemo(
-    () => filterDecisionQueue(decisionQueue, queueView),
-    [decisionQueue, queueView],
-  )
-
   const overview = portfolioState.overview
-  const renewalDueQueueCount = decisionQueue.filter((item) => item.renewalDue).length
-  const missingSubscriptionCount = decisionQueue.filter((item) => !item.subscription).length
-  const unlinkedCount = decisionQueue.filter((item) => item.vps.active_monitoring_instance_link_count <= 0).length
-  const cancellationAttentionCount = decisionQueue.filter(hasCancellationAttention).length
-  const totalDecisionQueue = decisionQueue.length
   const selectedRecordAssessment = recordDetailState.detail
     ? parseEvidenceAssessment(recordDetailState.detail.evidence_snapshot)
     : null
@@ -634,11 +505,6 @@ export function AssetDecisionsPageContent() {
 
   function changeRenewalWindow(value: string) {
     const nextWindow = parseRenewalWindow(value)
-    setQueueState((current) => ({
-      ...current,
-      renewalsLoading: true,
-      renewalsError: null,
-    }))
     route.commands.setRenewalWindow(nextWindow)
   }
 
@@ -665,8 +531,7 @@ export function AssetDecisionsPageContent() {
     records.commands.resetDetailUI()
     setSelectedTemplateID(null)
     templates.commands.resetDetailUI()
-    setSelectedVPS(null)
-    setDecisionError(null)
+    closeRenewalDecision()
     records.commands.cancelDraft()
     automaticGroups.commands.resetDetailUI()
     setSelectedGroupID(groupID)
@@ -676,10 +541,8 @@ export function AssetDecisionsPageContent() {
   function closeGroupDetail() {
     setSelectedGroupID(null)
     automaticGroups.commands.resetDetailUI()
-    setSelectedVPS(null)
+    closeRenewalDecision()
     records.commands.cancelDraft()
-    setDecisionDraft(INITIAL_DECISION_DRAFT)
-    setDecisionError(null)
     clearOpenState('group_id')
   }
 
@@ -691,8 +554,7 @@ export function AssetDecisionsPageContent() {
     records.commands.resetDetailUI()
     setSelectedTemplateID(null)
     templates.commands.resetDetailUI()
-    setSelectedVPS(null)
-    setDecisionError(null)
+    closeRenewalDecision()
     records.commands.cancelDraft()
     manualGroups.commands.resetDetailUI()
     setSelectedManualGroupID(manualGroupID)
@@ -714,8 +576,7 @@ export function AssetDecisionsPageContent() {
     manualGroups.commands.resetDetailUI()
     setSelectedRecordID(null)
     records.commands.resetDetailUI()
-    setSelectedVPS(null)
-    setDecisionError(null)
+    closeRenewalDecision()
     records.commands.cancelDraft()
     templates.commands.resetDetailUI()
     setSelectedTemplateID(templateID)
@@ -750,8 +611,7 @@ export function AssetDecisionsPageContent() {
     setSelectedSecondaryWorkbench('scenarios')
     setSelectedGroupID(null)
     automaticGroups.commands.resetDetailUI()
-    setSelectedVPS(null)
-    setDecisionDraft(INITIAL_DECISION_DRAFT)
+    closeRenewalDecision()
     setSelectedManualGroupID(manualDetail.manual_group_id)
     setOpenState('manual_group_id', manualDetail.manual_group_id)
   }
@@ -783,7 +643,7 @@ export function AssetDecisionsPageContent() {
     manualGroups.commands.resetDetailUI()
     setSelectedTemplateID(null)
     templates.commands.resetDetailUI()
-    setSelectedVPS(null)
+    closeRenewalDecision()
     setSelectedRecordID(record.record_id)
     setOpenState('record_id', record.record_id)
   }
@@ -796,7 +656,7 @@ export function AssetDecisionsPageContent() {
     manualGroups.commands.resetDetailUI()
     setSelectedTemplateID(null)
     templates.commands.resetDetailUI()
-    setSelectedVPS(null)
+    closeRenewalDecision()
     records.commands.cancelDraft()
     records.commands.resetDetailUI()
     setSelectedRecordID(recordID)
@@ -874,9 +734,7 @@ export function AssetDecisionsPageContent() {
   }
 
   function selectVPS(vps: VPSAssetRecord) {
-    setSelectedVPS(vps)
-    setDecisionDraft({ renewalDecision: vps.renewal_decision, reason: '' })
-    setDecisionError(null)
+    renewalQueue.commands.selectVPS(vps)
     setDecisionNotice(null)
     if (selectedGroupID) automaticGroups.commands.selectPanel('vps')
     if (selectedManualGroupID) manualGroups.commands.selectPanel('add')
@@ -916,61 +774,13 @@ export function AssetDecisionsPageContent() {
   }
 
   function closeDecisionDrawer() {
-    setSelectedVPS(null)
-    setDecisionDraft(INITIAL_DECISION_DRAFT)
-    setDecisionError(null)
+    closeRenewalDecision()
     if (selectedGroupID) automaticGroups.commands.selectPanel('members')
   }
 
-  function handleDecisionSubmit(event: FormSubmitEvent) {
-    event.preventDefault()
-    if (!selectedVPS) return
-    setDecisionError(null)
-    setDecisionNotice(null)
-
-    if (decisionDraft.renewalDecision === selectedVPS.renewal_decision) {
-      setDecisionError('请选择一个不同的续费决策')
-      return
-    }
-
-    const reason = decisionDraft.reason.trim()
-    setDecisionSubmitting(true)
-    updateVPSAsset(selectedVPS.vps_id, {
-      renewal_decision: decisionDraft.renewalDecision,
-      ...(reason ? { renewal_reason: reason } : {}),
-    })
-      .then((updated) => {
-        setQueueState((current) => ({
-          ...current,
-          ...updateDecisionQueues(current, updated),
-          subscriptions: current.subscriptions.map((subscription) =>
-            updated.renewal_subscription_linkage?.updated && subscription.subscription_id === updated.renewal_subscription_linkage.subscription_id
-              ? { ...subscription, auto_renew: false, auto_renew_cancelled: true }
-              : subscription,
-          ),
-          renewals: current.renewals.map((subscription) =>
-            updated.renewal_subscription_linkage?.updated && subscription.subscription_id === updated.renewal_subscription_linkage.subscription_id
-              ? { ...subscription, auto_renew: false, auto_renew_cancelled: true }
-              : subscription,
-          ),
-        }))
-        closeDecisionDrawer()
-        setQueueState((current) => ({
-          ...current,
-          renewalsLoading: true,
-          renewalsError: null,
-          queueLoading: true,
-          queueError: null,
-        }))
-        setRefreshToken((current) => current + 1)
-        const baseNotice = `续费决策已保存：${updated.display_name} -> ${renewalQueueLabel(updated.renewal_decision)}`
-        const linkageMessage = updated.renewal_subscription_linkage?.message
-        setDecisionNotice(linkageMessage ? `${baseNotice}。${linkageMessage}` : baseNotice)
-      })
-      .catch((error: unknown) => {
-        setDecisionError(describeError(error, '更新续费决策失败'))
-      })
-      .finally(() => setDecisionSubmitting(false))
+  async function submitRenewal() {
+    const updated = await renewalQueue.commands.submitRenewal()
+    if (updated && selectedGroupID) automaticGroups.commands.selectPanel('members')
   }
 
   return (
@@ -1024,15 +834,13 @@ export function AssetDecisionsPageContent() {
         recordsState={recordsState}
         vpsByID={vpsByID}
         onSetSelectedSecondaryWorkbench={setSelectedSecondaryWorkbench}
-        onSetQueueView={setQueueView}
+        onSetQueueView={renewalQueue.commands.selectQueueView}
         onSelectVPS={selectVPS}
         onNavigateToVPS={navigateToVPS}
         onNavigateToVPSSubscription={navigateToVPSSubscription}
         onOpenManualGroup={openManualGroup}
         onOpenTemplate={openTemplate}
         onOpenRecord={openRecord}
-        hasCancellationAttention={hasCancellationAttention}
-        subscriptionCostAttention={subscriptionCostAttention}
       />
 
       <GroupDetailModal
@@ -1056,12 +864,12 @@ export function AssetDecisionsPageContent() {
         onCreateManualGroupFromAuto={createManualGroupFromAuto}
         selectedVPS={selectedVPS}
         decisionDraft={decisionDraft}
-        onSetDecisionDraft={setDecisionDraft}
+        onUpdateDecisionDraft={renewalQueue.commands.updateDraft}
         decisionSubmitting={decisionSubmitting}
         decisionError={decisionError}
         onSelectVPS={selectVPS}
         onCloseDecisionDrawer={closeDecisionDrawer}
-        onHandleDecisionSubmit={handleDecisionSubmit}
+        onSubmitDecision={submitRenewal}
         memberColumns={memberColumns}
       />
 
@@ -1125,8 +933,8 @@ export function AssetDecisionsPageContent() {
         decisionDraft={decisionDraft}
         submitting={decisionSubmitting}
         error={decisionError}
-        onDraftChange={setDecisionDraft}
-        onSubmit={handleDecisionSubmit}
+        onUpdateDraft={renewalQueue.commands.updateDraft}
+        onSubmitDecision={submitRenewal}
         onClose={closeDecisionDrawer}
       />
 

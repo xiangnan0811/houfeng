@@ -56,8 +56,8 @@ type GroupDetailModalProps = {
   onCreateManualGroupFromAuto: (detail: AssetDecisionGroupDetail) => void
   onSelectVPS: (vps: VPSAssetRecord) => void
   onCloseDecisionDrawer: () => void
-  onHandleDecisionSubmit: (event: FormSubmitEvent) => void
-  onSetDecisionDraft: React.Dispatch<React.SetStateAction<AssetDecisionDraft>>
+  onSubmitDecision: () => void
+  onUpdateDecisionDraft: (draft: AssetDecisionDraft) => void
 }
 
 export function GroupDetailModal({
@@ -86,8 +86,8 @@ export function GroupDetailModal({
   onCreateManualGroupFromAuto,
   onSelectVPS,
   onCloseDecisionDrawer,
-  onHandleDecisionSubmit,
-  onSetDecisionDraft,
+  onSubmitDecision,
+  onUpdateDecisionDraft,
 }: GroupDetailModalProps) {
   return (
     <Modal
@@ -268,8 +268,11 @@ export function GroupDetailModal({
                 submitting={decisionSubmitting}
                 error={decisionError}
                 notice={null}
-                onDraftChange={onSetDecisionDraft}
-                onSubmit={onHandleDecisionSubmit}
+                onDraftChange={onUpdateDecisionDraft}
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  onSubmitDecision()
+                }}
                 onCancel={onCloseDecisionDrawer}
               />
             </div>

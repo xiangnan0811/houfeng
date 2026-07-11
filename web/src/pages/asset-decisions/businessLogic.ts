@@ -27,6 +27,7 @@ import type {
   ClosedLoopSourceErrors,
   ContextFilterChip,
   DecisionQueueItem,
+  DecisionQueueView,
   MainWorkbenchView,
   ManualGroupProgress,
   QueueState,
@@ -39,6 +40,36 @@ import {
   selectPrimarySubscription,
   sourceAvailabilityLabel,
 } from './utils'
+
+export function hasCancellationAttention(row: DecisionQueueItem): boolean {
+  if (
+    row.vps.renewal_decision === 'cancel' &&
+    row.vps.lifecycle_status !== 'to_cancel' &&
+    row.vps.lifecycle_status !== 'cancelled'
+  ) {
+    return true
+  }
+  if (!row.subscription) return false
+  const inactiveSubscription = row.subscription.status !== 'active'
+  const vpsCancelled = row.vps.lifecycle_status === 'to_cancel' || row.vps.lifecycle_status === 'cancelled'
+  return inactiveSubscription && !vpsCancelled
+}
+
+export function subscriptionCostAttention(subscription: SubscriptionRecord | null): boolean {
+  return Boolean(subscription?.exchange_rate_stale)
+}
+
+export function filterDecisionQueue(
+  rows: DecisionQueueItem[],
+  view: DecisionQueueView,
+): DecisionQueueItem[] {
+  if (view === 'all') return rows
+  if (view === 'renewal') return rows.filter((row) => row.renewalDue)
+  if (view === 'unlinked') return rows.filter((row) => row.vps.active_monitoring_instance_link_count <= 0)
+  if (view === 'missing_subscription') return rows.filter((row) => !row.subscription)
+  if (view === 'cancellation_attention') return rows.filter(hasCancellationAttention)
+  return rows.filter((row) => row.vps.renewal_decision === view)
+}
 
 /**
  * 计算队列优先级
