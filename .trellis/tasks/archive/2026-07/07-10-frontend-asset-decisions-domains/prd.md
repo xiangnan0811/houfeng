@@ -80,24 +80,24 @@
 
 ### Behavior
 
-- [ ] 默认首屏、partial failure、filters、tabs、secondary workbench、四类 deep link、close/back/forward 与 URL 参数保留均由回归测试覆盖且行为不变。
-- [ ] 所有现有 mutation 的 method/path/body、确认步骤、错误归属、本地合并、打开实体和兼容 refresh set 均有测试。
-- [ ] 自动组、manual group、template、record、renewal queue 的现有核心 workflow 全部通过；测试数不低于 673，除非有证据地拆分/替换同一断言。
+- [x] 默认首屏、partial failure、filters、tabs、secondary workbench、四类 deep link、close/back/forward 与 URL 参数保留均由回归测试覆盖且行为不变。
+- [x] 所有现有 mutation 的 method/path/body、确认步骤、错误归属、本地合并、打开实体和兼容 refresh set 均有测试。
+- [x] 自动组、manual group、template、record、renewal queue 的现有核心 workflow 全部通过；测试数不低于 673，除非有证据地拆分/替换同一断言。
 
 ### Architecture
 
-- [ ] 七个 hook 均存在并统一暴露 `{state, commands}`，不暴露 raw setter。
-- [ ] `useAssetDecisionRouteState` 是唯一 search-param owner；跨域只通过 typed result/invalidation 协调。
-- [ ] route page 无 API/effect/mutation 细节，展示层无 API/controller import。
-- [ ] 删除 `AssetDecisionsPageContent.tsx`，AST contract 无 `*PageContent` 替身且所有预算/方向/owner 断言通过。
+- [x] 七个 hook 均存在并统一暴露 `{state, commands}`，不暴露 raw setter。
+- [x] `useAssetDecisionRouteState` 是唯一 search-param owner；跨域只通过 typed result/invalidation 协调。
+- [x] route page 无 API/effect/mutation 细节，展示层无 API/controller import。
+- [x] 删除 `AssetDecisionsPageContent.tsx`，AST contract 无 `*PageContent` 替身且所有预算/方向/owner 断言通过。
 
 ### Validation
 
-- [ ] focused controller/page/modal/model/architecture tests 通过。
-- [ ] `env -u NODE_ENV make verify-web`、`npm --prefix web audit --include=dev`、`git diff --check` 通过。
-- [ ] production dist + `mock-api asset-workflows` 在 Chromium `1440x1000`、`1024x768`、`390x900` 下无 page/console/CSP/network error、无页面横向溢出、关键文字不裁切。
-- [ ] 浏览器完成：自动组打开/关闭、auto→manual、manual member remove nested confirmation、template archive nested confirmation、record status/follow-up、single VPS renewal；键盘 Tab/Escape/focus restore 和 body scroll lock 保持 Task 2 合同。
-- [ ] PR CI、合并后 main CI、Release Please、GitHub Release 和 multi-arch image 发布完成；发布镜像 `/app/web/dist` 重跑 Asset Decisions browser gate。
+- [x] focused controller/page/modal/model/architecture tests 通过。
+- [x] `env -u NODE_ENV make verify-web`、`npm --prefix web audit --include=dev`、`git diff --check` 通过。
+- [x] production dist + `mock-api asset-workflows` 在 Chromium `1440x1000`、`1024x768`、`390x900` 下无 page/console/CSP/network error、无页面横向溢出、关键文字不裁切。
+- [x] 浏览器完成：自动组打开/关闭、auto→manual、manual member remove nested confirmation、template archive nested confirmation、record status/follow-up、single VPS renewal；键盘 Tab/Escape/focus restore 和 body scroll lock 保持 Task 2 合同。
+- [x] PR CI、合并后 main CI、Release Please、GitHub Release 和 multi-arch image 发布完成；发布镜像 `/app/web/dist` 重跑 Asset Decisions browser gate。
 
 ## Open Questions
 

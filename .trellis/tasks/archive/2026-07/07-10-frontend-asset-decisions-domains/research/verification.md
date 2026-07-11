@@ -106,6 +106,26 @@ Node 24.18.0 会在 install 前被 preflight 正确拒绝；精确 Node 22.23.1 
 - [x] `.trellis/spec/web/quality-guidelines.md`
 - [x] task-local regression tests 与本验证记录
 
-## 交付门说明
+## PR、合并与发布门
 
-实现 PR：[houfeng#363](https://github.com/xiangnan0811/houfeng/pull/363)。本文件当前记录本地实现与 mock production-dist 证据；PR checks、合并后 main CI、Release Please、GitHub Release、multi-arch image digest 与 released `/app/web/dist` 复验仍是 Task 8 的后续必经门。完成后把具体 run id、version、digest 和 released-dist 结果追加到本文件，再归档任务。
+- 实现 PR：[houfeng#363](https://github.com/xiangnan0811/houfeng/pull/363)；PR CI run `29151218186` 的 Go、Web、Docker 与 GitGuardian jobs 全部通过。
+- 实现 merge commit：`b262e1db95a81633ea9a1aa76c6c9669bfc239dc`；合并后 main CI run `29151285600` 全部通过。
+- Release Please run `29151285603` 成功；release PR [houfeng#362](https://github.com/xiangnan0811/houfeng/pull/362) checks 全部通过并以 `c560718402d797488aa7ff290381c849f16b38dc` 合并。
+- GitHub Release：[v0.58.3](https://github.com/xiangnan0811/houfeng/releases/tag/v0.58.3)；release main CI run `29151377010` 与 publish-images run `29151381023` 全部通过。
+
+发布镜像为 `docker.io/linnea7171/houfeng:v0.58.3`，index digest：
+
+```text
+sha256:c536c6c014c7320be8c722f04e2561b750cb280b7a8a3b4e633a328e4b68d505
+```
+
+平台 digest：
+
+```text
+linux/amd64 sha256:4d8888aa4edea9d8c54fcd28790072378a3cdeca8ed4c6adc1c3bc9f1997fffb
+linux/arm64 sha256:4eeb6db5d6d058e280be8d3405c7aab2404abdb6f4d9b31b66caf67b41a784e2
+```
+
+镜像 labels 精确为 `version=v0.58.3`、`revision=c560718402d797488aa7ff290381c849f16b38dc`。从该 exact index digest 提取的 `/app/web/dist` 共 49 个文件；`index.html` 为 535 bytes、SHA-256 为 `1e56a4aab518a6c95dd8e7403538f20e7d0c6e5255ca6bffddb17986f9a3205a`，Asset Decisions chunk 为 `AssetDecisionsPage-CPdpaBav.js`（136,551 bytes）。
+
+该 released dist 已重跑与本地门相同的完整 CDP 验收：三个 viewport、自动组/自定义组合/记录的焦点恢复、嵌套确认、全部 mutation 与默认 11 GET inventory 均通过；console、page exception、network、HTTP >=400 与 CSP violation 均为 0。至此 Task 8 的 PR、main、release、multi-arch image 和 released-dist 门全部留有可追溯证据。
