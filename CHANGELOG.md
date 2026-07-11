@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.58.3](https://github.com/xiangnan0811/houfeng/compare/v0.58.2...v0.58.3) (2026-07-11)
+
+
+### Bug Fixes
+
+* **asset-decisions:** preserve focus during revalidation ([4ff93c4](https://github.com/xiangnan0811/houfeng/commit/4ff93c46f31dfce845f05741800e7f2416f39440))
+
+
+### Documentation
+
+* **asset-decisions:** record domain ownership contracts ([f861d64](https://github.com/xiangnan0811/houfeng/commit/f861d6424094655fa3e6c78ccc01de3ce5b849ab))
+* **task:** detail asset decisions domain split ([4bdd9bb](https://github.com/xiangnan0811/houfeng/commit/4bdd9bb9acf827da7504e6f9abfbd49abe995209))
+* **task:** link asset decisions pull request ([cf6a20a](https://github.com/xiangnan0811/houfeng/commit/cf6a20a88767c7f3ab6bfe643170f15976c47ac6))
+* **task:** record Task 7 release verification ([bf31079](https://github.com/xiangnan0811/houfeng/commit/bf31079738d1dedfc1672fbd30e6781c3cbfb720))
+
 ## [0.58.2](https://github.com/xiangnan0811/houfeng/compare/v0.58.1...v0.58.2) (2026-07-11)
 
 
