@@ -13,6 +13,7 @@ import { useAssetDecisionGroups } from './asset-decisions/hooks/useAssetDecision
 import { useAssetDecisionManualGroups } from './asset-decisions/hooks/useAssetDecisionManualGroups'
 import { useAssetDecisionPortfolio } from './asset-decisions/hooks/useAssetDecisionPortfolio'
 import { useAssetDecisionRouteState } from './asset-decisions/hooks/useAssetDecisionRouteState'
+import { useAssetDecisionTemplates } from './asset-decisions/hooks/useAssetDecisionTemplates'
 import {
   Badge,
   type DataTableColumn,
@@ -23,16 +24,12 @@ import { TemplateDetailModal } from './asset-decisions/modals/TemplateDetailModa
 import { RecordDetailModal } from './asset-decisions/modals/RecordDetailModal'
 import { RenewalDecisionModal } from './asset-decisions/modals/RenewalDecisionModal'
 import {
-  createAssetDecisionScenarioTemplate,
   createAssetDecisionRecord,
   getAssetDecisionRecord,
-  getAssetDecisionScenarioTemplate,
   listAssetDecisionRecords,
-  listAssetDecisionScenarioTemplates,
   listSubscriptions,
   listVPSAssets,
   patchAssetDecisionRecord,
-  patchAssetDecisionScenarioTemplate,
   updateVPSAsset,
 } from '../lib/api'
 import { formatDateTime } from '../lib/format'
@@ -52,9 +49,7 @@ import {
   type AssetDecisionRecordMember,
   type AssetDecisionRecordStatus,
   type AssetDecisionRecordSummary,
-  type AssetDecisionScenarioTemplateDetail,
   type AssetDecisionScenarioTemplateStatus,
-  type AssetDecisionScenarioTemplateSummary,
   type AssetDecisionSuggestedAction,
   type AssetDecisionSuggestedRole,
   type SubscriptionRecord,
@@ -70,30 +65,24 @@ import type {
   PortfolioState,
   ManualGroupsState,
   ScenarioTemplatesState,
-  TemplateDetailState,
   RecordsState,
   RecordDetailState,
   RecordMemberDraft,
   RecordFollowupDraft,
   RecordDraft,
-  TemplateManualGroupDraft,
   FormSubmitEvent,
   RecordDetailPanel,
-  TemplateDetailPanel,
   ContextFilterKey,
   OpenStateKey,
   AssetDecisionSecondaryNavItem,
 } from './asset-decisions/types'
 import {
   INITIAL_DECISION_DRAFT,
-  INITIAL_SCENARIO_TEMPLATES_STATE,
-  INITIAL_TEMPLATE_DETAIL_STATE,
   INITIAL_RECORDS_STATE,
   INITIAL_RECORD_DETAIL_STATE,
   INITIAL_QUEUE_STATE,
   ROLE_LABELS,
   ACTION_LABELS,
-  SCENARIO_TEMPLATE_STATUS_LABELS,
   RECORD_STATUS_LABELS,
   FOLLOWUP_STATUS_LABELS,
   ROLE_OPTIONS,
@@ -327,39 +316,6 @@ function parseEvidenceAssessment(snapshot?: AssetDecisionEvidenceSnapshot | null
   }
 }
 
-function scenarioTemplateSummaryFromDetail(detail: AssetDecisionScenarioTemplateDetail): AssetDecisionScenarioTemplateSummary {
-  return {
-    template_id: detail.template_id,
-    builtin: detail.builtin,
-    status: detail.status,
-    scenario: detail.scenario,
-    title: detail.title,
-    goal: detail.goal,
-    note: detail.note,
-    source_manual_group_id: detail.source_manual_group_id,
-    member_count: detail.member_count,
-    created_at: detail.created_at,
-    updated_at: detail.updated_at,
-    archived_at: detail.archived_at,
-  }
-}
-
-function upsertScenarioTemplateSummary(
-  rows: AssetDecisionScenarioTemplateSummary[],
-  detail: AssetDecisionScenarioTemplateDetail,
-): AssetDecisionScenarioTemplateSummary[] {
-  const summary = scenarioTemplateSummaryFromDetail(detail)
-  const next = [summary, ...rows.filter((row) => row.template_id !== summary.template_id)]
-  return next.sort((left, right) => {
-    if (left.builtin !== right.builtin) return left.builtin ? -1 : 1
-    if (left.status !== right.status) return left.status === 'active' ? -1 : 1
-    return right.updated_at.localeCompare(left.updated_at)
-  })
-}
-
-
-
-
 function actionHrefForMember(member: AssetDecisionRecordMember): string {
   if (member.execution_plan?.step_kind === 'open_cancellation_workbench') {
     return vpsWorkbenchPath(member.vps_id, 'cancellation')
@@ -389,8 +345,6 @@ export function AssetDecisionsPageContent() {
   const assetDecisionFilter = route.state.filter
   const contextFilterChips = route.state.contextFilterChips
   const [queueView, setQueueView] = useState<DecisionQueueView>('all')
-  const [templatesState, setTemplatesState] = useState<ScenarioTemplatesState>(INITIAL_SCENARIO_TEMPLATES_STATE)
-  const [templateDetailState, setTemplateDetailState] = useState<TemplateDetailState>(INITIAL_TEMPLATE_DETAIL_STATE)
   const [recordsState, setRecordsState] = useState<RecordsState>(INITIAL_RECORDS_STATE)
   const [recordDetailState, setRecordDetailState] = useState<RecordDetailState>(INITIAL_RECORD_DETAIL_STATE)
   const [queueState, setQueueState] = useState<QueueState>(INITIAL_QUEUE_STATE)
@@ -400,7 +354,6 @@ export function AssetDecisionsPageContent() {
   const [selectedTemplateID, setSelectedTemplateID] = useState<string | null>(null)
   const [selectedVPS, setSelectedVPS] = useState<VPSAssetRecord | null>(null)
   const [recordDetailPanel, setRecordDetailPanel] = useState<RecordDetailPanel>('overview')
-  const [templateDetailPanel, setTemplateDetailPanel] = useState<TemplateDetailPanel>('overview')
   const [recordDraft, setRecordDraft] = useState<RecordDraft | null>(null)
   const [recordDraftEditingMemberID, setRecordDraftEditingMemberID] = useState<string | null>(null)
   const [recordSaving, setRecordSaving] = useState(false)
@@ -411,15 +364,6 @@ export function AssetDecisionsPageContent() {
   const [recordFollowupDrafts, setRecordFollowupDrafts] = useState<Record<string, RecordFollowupDraft>>({})
   const [recordFollowupPatching, setRecordFollowupPatching] = useState<Record<string, boolean>>({})
   const [recordFollowupEditingMemberID, setRecordFollowupEditingMemberID] = useState<string | null>(null)
-  const [templateSaving, setTemplateSaving] = useState(false)
-  const [templateError, setTemplateError] = useState<string | null>(null)
-  const [pendingTemplateStatus, setPendingTemplateStatus] = useState<AssetDecisionScenarioTemplateStatus | null>(null)
-  const [templateManualDraft, setTemplateManualDraft] = useState<TemplateManualGroupDraft>({
-    title: '',
-    goal: '',
-    note: '',
-    renewWithinDays: renewalWindow,
-  })
   const [decisionDraft, setDecisionDraft] = useState<AssetDecisionDraft>(INITIAL_DECISION_DRAFT)
   const [decisionSubmitting, setDecisionSubmitting] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
@@ -439,6 +383,12 @@ export function AssetDecisionsPageContent() {
     filter: assetDecisionFilter,
     renewalWindow,
     selectedManualGroupID,
+    revision: refreshToken,
+    onNotice: setDecisionNotice,
+  })
+  const templates = useAssetDecisionTemplates({
+    selectedTemplateID,
+    renewalWindow,
     revision: refreshToken,
     onNotice: setDecisionNotice,
   })
@@ -466,6 +416,14 @@ export function AssetDecisionsPageContent() {
   const manualMemberAddDraft = manualGroups.state.memberAddDraft
   const manualMemberAddAdvanced = manualGroups.state.memberAddAdvanced
   const resetManualDetailUI = manualGroups.commands.resetDetailUI
+  const templatesState = templates.state.list
+  const templateDetailState = templates.state.detail
+  const templateDetailPanel = templates.state.detailPanel
+  const templateSaving = templates.state.saving
+  const templateError = templates.state.error
+  const pendingTemplateStatus = templates.state.pendingStatus
+  const templateManualDraft = templates.state.manualDraft
+  const resetTemplateDetailUI = templates.commands.resetDetailUI
   const searchParamSignature = route.state.searchSignature
   const secondaryWorkbench = route.state.secondary
   const setSelectedSecondaryWorkbench = route.commands.setSecondary
@@ -478,16 +436,13 @@ export function AssetDecisionsPageContent() {
     resetManualDetailUI()
     setSelectedRecordID(null)
     setSelectedTemplateID(null)
+    resetTemplateDetailUI()
     setRecordDetailPanel('overview')
-    setTemplateDetailPanel('overview')
     setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
-    setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
     setSelectedVPS(null)
     setRecordDraft(null)
     setRecordSaveError(null)
-    setTemplateError(null)
-    setPendingTemplateStatus(null)
-  }, [resetGroupDetailUI, resetManualDetailUI])
+  }, [resetGroupDetailUI, resetManualDetailUI, resetTemplateDetailUI])
 
   const applyURLGroupOpenState = useCallback((groupID: string) => {
     setSelectedManualGroupID(null)
@@ -495,18 +450,15 @@ export function AssetDecisionsPageContent() {
     setSelectedRecordID(null)
     setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
     setSelectedTemplateID(null)
-    setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
+    resetTemplateDetailUI()
     setSelectedVPS(null)
     setDecisionError(null)
     setRecordDraft(null)
     setRecordSaveError(null)
-    setTemplateError(null)
-    setPendingTemplateStatus(null)
     resetGroupDetailUI()
     setRecordDetailPanel('overview')
-    setTemplateDetailPanel('overview')
     setSelectedGroupID(groupID)
-  }, [resetGroupDetailUI, resetManualDetailUI])
+  }, [resetGroupDetailUI, resetManualDetailUI, resetTemplateDetailUI])
 
   const applyURLManualGroupOpenState = useCallback((manualGroupID: string) => {
     setSelectedGroupID(null)
@@ -515,17 +467,14 @@ export function AssetDecisionsPageContent() {
     setSelectedRecordID(null)
     setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
     setSelectedTemplateID(null)
-    setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
+    resetTemplateDetailUI()
     setSelectedVPS(null)
     setDecisionError(null)
     setRecordDraft(null)
     setRecordSaveError(null)
-    setTemplateError(null)
-    setPendingTemplateStatus(null)
     setRecordDetailPanel('overview')
-    setTemplateDetailPanel('overview')
     setSelectedManualGroupID(manualGroupID)
-  }, [resetGroupDetailUI, resetManualDetailUI])
+  }, [resetGroupDetailUI, resetManualDetailUI, resetTemplateDetailUI])
 
   const applyURLRecordOpenState = useCallback((recordID: string) => {
     setSelectedGroupID(null)
@@ -533,18 +482,15 @@ export function AssetDecisionsPageContent() {
     setSelectedManualGroupID(null)
     resetManualDetailUI()
     setSelectedTemplateID(null)
-    setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
+    resetTemplateDetailUI()
     setSelectedVPS(null)
     setRecordDraft(null)
     setRecordSaveError(null)
-    setTemplateError(null)
-    setPendingTemplateStatus(null)
     setRecordDetailPanel('overview')
-    setTemplateDetailPanel('overview')
     setSelectedRecordID(recordID)
     setRecordDetailState({ loading: true, error: null, detail: null })
     setRecordPatchError(null)
-  }, [resetGroupDetailUI, resetManualDetailUI])
+  }, [resetGroupDetailUI, resetManualDetailUI, resetTemplateDetailUI])
 
   const applyURLTemplateOpenState = useCallback((templateID: string) => {
     setSelectedGroupID(null)
@@ -557,12 +503,10 @@ export function AssetDecisionsPageContent() {
     setDecisionError(null)
     setRecordDraft(null)
     setRecordSaveError(null)
-    setTemplateError(null)
+    resetTemplateDetailUI()
     setRecordDetailPanel('overview')
-    setTemplateDetailPanel('overview')
-    setTemplateDetailState({ loading: true, error: null, detail: null })
     setSelectedTemplateID(templateID)
-  }, [resetGroupDetailUI, resetManualDetailUI])
+  }, [resetGroupDetailUI, resetManualDetailUI, resetTemplateDetailUI])
 
   useEffect(() => {
     let cancelled = false
@@ -581,24 +525,6 @@ export function AssetDecisionsPageContent() {
       })
     return () => { cancelled = true }
   }, [assetDecisionFilter, refreshToken])
-
-  useEffect(() => {
-    let cancelled = false
-    listAssetDecisionScenarioTemplates()
-      .then((templates) => {
-        if (cancelled) return
-        setTemplatesState({ loading: false, error: null, templates })
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setTemplatesState({
-          loading: false,
-          error: describeError(error, '加载场景模板失败'),
-          templates: [],
-        })
-      })
-    return () => { cancelled = true }
-  }, [refreshToken])
 
   useEffect(() => {
     let cancelled = false
@@ -686,33 +612,6 @@ export function AssetDecisionsPageContent() {
       })
     return () => { cancelled = true }
   }, [selectedRecordID, refreshToken])
-
-  useEffect(() => {
-    if (!selectedTemplateID) {
-      return
-    }
-    let cancelled = false
-    getAssetDecisionScenarioTemplate(selectedTemplateID)
-      .then((detail) => {
-        if (cancelled) return
-        setTemplateDetailState({ loading: false, error: null, detail })
-        setTemplateManualDraft({
-          title: detail.title,
-          goal: detail.goal,
-          note: '',
-          renewWithinDays: renewalWindow,
-        })
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setTemplateDetailState({
-          loading: false,
-          error: describeError(error, '加载场景模板失败'),
-          detail: null,
-        })
-      })
-    return () => { cancelled = true }
-  }, [selectedTemplateID, renewalWindow, refreshToken])
 
   useEffect(() => {
     const openSelection = route.state.open
@@ -1142,15 +1041,13 @@ export function AssetDecisionsPageContent() {
     setSelectedRecordID(null)
     setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
     setSelectedTemplateID(null)
-    setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
+    templates.commands.resetDetailUI()
     setSelectedVPS(null)
     setDecisionError(null)
     setRecordDraft(null)
     setRecordSaveError(null)
-    setTemplateError(null)
     automaticGroups.commands.resetDetailUI()
     setRecordDetailPanel('overview')
-    setTemplateDetailPanel('overview')
     setSelectedGroupID(groupID)
     setOpenState('group_id', groupID)
   }
@@ -1173,15 +1070,13 @@ export function AssetDecisionsPageContent() {
     setSelectedRecordID(null)
     setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
     setSelectedTemplateID(null)
-    setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
+    templates.commands.resetDetailUI()
     setSelectedVPS(null)
     setDecisionError(null)
     setRecordDraft(null)
     setRecordSaveError(null)
     manualGroups.commands.resetDetailUI()
-    setTemplateError(null)
     setRecordDetailPanel('overview')
-    setTemplateDetailPanel('overview')
     setSelectedManualGroupID(manualGroupID)
     setOpenState('manual_group_id', manualGroupID)
   }
@@ -1206,26 +1101,15 @@ export function AssetDecisionsPageContent() {
     setDecisionError(null)
     setRecordDraft(null)
     setRecordSaveError(null)
-    setTemplateError(null)
+    templates.commands.resetDetailUI()
     setRecordDetailPanel('overview')
-    setTemplateDetailPanel('overview')
-    setTemplateDetailState({ loading: true, error: null, detail: null })
     setSelectedTemplateID(templateID)
     setOpenState('template_id', templateID)
   }
 
   function closeTemplateDetail() {
     setSelectedTemplateID(null)
-    setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
-    setTemplateError(null)
-    setPendingTemplateStatus(null)
-    setTemplateManualDraft({
-      title: '',
-      goal: '',
-      note: '',
-      renewWithinDays: renewalWindow,
-    })
-    setTemplateDetailPanel('overview')
+    templates.commands.resetDetailUI()
     clearOpenState('template_id')
   }
 
@@ -1243,22 +1127,6 @@ export function AssetDecisionsPageContent() {
       return
     }
     openGroup(item.target.id)
-  }
-
-  function applyTemplateDetail(detail: AssetDecisionScenarioTemplateDetail) {
-    setTemplateDetailState({ loading: false, error: null, detail })
-    setPendingTemplateStatus(null)
-    setTemplateManualDraft({
-      title: detail.title,
-      goal: detail.goal,
-      note: '',
-      renewWithinDays: renewalWindow,
-    })
-    setTemplatesState((current) => ({
-      loading: false,
-      error: null,
-      templates: upsertScenarioTemplateSummary(current.templates, detail),
-    }))
   }
 
   async function createManualGroupFromAuto(detail: AssetDecisionGroupDetail) {
@@ -1464,13 +1332,12 @@ export function AssetDecisionsPageContent() {
         setSelectedManualGroupID(null)
         manualGroups.commands.resetDetailUI()
         setSelectedTemplateID(null)
-        setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
+        templates.commands.resetDetailUI()
         setSelectedVPS(null)
         setSelectedRecordID(record.record_id)
         setOpenState('record_id', record.record_id)
         setRecordDetailState({ loading: false, error: null, detail: record })
         setRecordPatchStatus(record.status)
-        setTemplateDetailPanel('overview')
         setRecordDetailPanel('overview')
       })
       .catch((error: unknown) => {
@@ -1486,16 +1353,14 @@ export function AssetDecisionsPageContent() {
     setSelectedManualGroupID(null)
     manualGroups.commands.resetDetailUI()
     setSelectedTemplateID(null)
-    setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
+    templates.commands.resetDetailUI()
     setSelectedVPS(null)
     setRecordDraft(null)
     setRecordSaveError(null)
-    setTemplateError(null)
     setSelectedRecordID(recordID)
     setRecordDetailState({ loading: true, error: null, detail: null })
     setRecordPatchError(null)
     setRecordDetailPanel('overview')
-    setTemplateDetailPanel('overview')
     setRecordFollowupEditingMemberID(null)
     setOpenState('record_id', recordID)
   }
@@ -1518,65 +1383,30 @@ export function AssetDecisionsPageContent() {
     const manualDetail = await manualGroups.commands.createFromTemplate(detail, templateManualDraft)
     if (!manualDetail) return
     setSelectedTemplateID(null)
-    setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
+    templates.commands.resetDetailUI()
     setSelectedManualGroupID(manualDetail.manual_group_id)
-    setTemplateDetailPanel('overview')
     setOpenState('manual_group_id', manualDetail.manual_group_id)
   }
 
-  function updateTemplateStatus(status: AssetDecisionScenarioTemplateStatus) {
-    const detail = templateDetailState.detail
-    if (!detail || detail.builtin) return
-    setTemplateError(null)
-    setPendingTemplateStatus(null)
-    setTemplateSaving(true)
-    patchAssetDecisionScenarioTemplate(detail.template_id, { status })
-      .then((updated) => {
-        applyTemplateDetail(updated)
-        setDecisionNotice(`模板状态已更新：${updated.title} -> ${SCENARIO_TEMPLATE_STATUS_LABELS[updated.status]}`)
-      })
-      .catch((error: unknown) => {
-        setTemplateError(describeError(error, '更新模板状态失败'))
-      })
-      .finally(() => setTemplateSaving(false))
+  async function updateTemplateStatus(status: AssetDecisionScenarioTemplateStatus) {
+    await templates.commands.updateStatus(status)
   }
 
   function requestTemplateStatusUpdate(status: AssetDecisionScenarioTemplateStatus) {
-    const detail = templateDetailState.detail
-    if (!detail || detail.builtin || templateSaving) return
-    setTemplateError(null)
-    setPendingTemplateStatus(status)
-    setTemplateDetailPanel('status')
+    templates.commands.requestStatusUpdate(status)
   }
 
   function cancelTemplateStatusUpdate() {
-    setPendingTemplateStatus(null)
-    setTemplateError(null)
+    templates.commands.cancelStatusUpdate()
   }
 
-  function saveManualGroupAsTemplate(detail: AssetDecisionManualGroupDetail) {
-    setTemplateError(null)
-    setTemplateSaving(true)
-    createAssetDecisionScenarioTemplate({
-      source_manual_group_id: detail.manual_group_id,
-      title: `${detail.title} 模板`,
-      scenario: detail.scenario,
-      goal: detail.goal,
-      note: detail.note,
-    })
-      .then((template) => {
-        applyTemplateDetail(template)
-        setSelectedManualGroupID(null)
-        manualGroups.commands.resetDetailUI()
-        setSelectedTemplateID(template.template_id)
-        setTemplateDetailPanel('overview')
-        setOpenState('template_id', template.template_id)
-        setDecisionNotice(`已另存为场景模板：${template.title}`)
-      })
-      .catch((error: unknown) => {
-        setTemplateError(describeError(error, '另存为场景模板失败'))
-      })
-      .finally(() => setTemplateSaving(false))
+  async function saveManualGroupAsTemplate(detail: AssetDecisionManualGroupDetail) {
+    const template = await templates.commands.createFromManualGroup(detail)
+    if (!template) return
+    setSelectedManualGroupID(null)
+    manualGroups.commands.resetDetailUI()
+    setSelectedTemplateID(template.template_id)
+    setOpenState('template_id', template.template_id)
   }
 
   function submitRecordStatus(event: FormSubmitEvent) {
@@ -2028,12 +1858,12 @@ export function AssetDecisionsPageContent() {
         pendingTemplateStatus={pendingTemplateStatus}
         templateManualDraft={templateManualDraft}
         onClose={closeTemplateDetail}
-        onSetTemplateDetailPanel={setTemplateDetailPanel}
+        onSetTemplateDetailPanel={templates.commands.selectPanel}
         onRequestTemplateStatusUpdate={requestTemplateStatusUpdate}
         onCancelTemplateStatusUpdate={cancelTemplateStatusUpdate}
         onUpdateTemplateStatus={updateTemplateStatus}
         onSubmitTemplateManualGroup={submitTemplateManualGroup}
-        onSetTemplateManualDraft={setTemplateManualDraft}
+        onUpdateTemplateManualDraft={templates.commands.updateManualDraft}
       />
 
       <RenewalDecisionModal
