@@ -1,6 +1,6 @@
 import { type KeyboardEvent, useState } from 'react'
 
-import { StatusGlyph, Tabs } from '../../components/atoms'
+import { StatusGlyph, TabPanel, Tabs } from '../../components/atoms'
 import { formatDate, formatMoney } from '../../lib/format'
 import type {
   SubscriptionBreakdownItem,
@@ -347,16 +347,28 @@ export function SubscriptionInsights({
               <p className="section-heading__eyebrow">This Month</p>
               <h3 className="section-heading__title">月成本</h3>
             </div>
-            <Tabs variant="pill" value={monthCostView} onChange={setMonthCostView} items={MONTH_COST_TABS} />
+            <Tabs
+              label="月成本展示"
+              idBase="subscription-month-cost"
+              variant="pill"
+              value={monthCostView}
+              onChange={setMonthCostView}
+              items={MONTH_COST_TABS}
+            />
           </div>
-          <span className="subscription-panel-total">{money(donutTotal, baseCurrency)}</span>
-          {monthlyRows.length === 0 ? (
-            <p className="asset-table-empty-state">
-              <strong>暂无可展示成本</strong>
-              <span>当前没有可换算为基准货币的 VPS 订阅成本。</span>
-            </p>
-          ) : monthCostView === 'pie' ? (
-            <div className="subscription-donut-layout subscription-donut-layout--compact">
+          <TabPanel
+            idBase="subscription-month-cost"
+            value={monthCostView}
+            className="subscription-insight-panel__tab-panel"
+          >
+            <span className="subscription-panel-total">{money(donutTotal, baseCurrency)}</span>
+            {monthlyRows.length === 0 ? (
+              <p className="asset-table-empty-state">
+                <strong>暂无可展示成本</strong>
+                <span>当前没有可换算为基准货币的 VPS 订阅成本。</span>
+              </p>
+            ) : monthCostView === 'pie' ? (
+              <div className="subscription-donut-layout subscription-donut-layout--compact">
               <svg className="subscription-donut" viewBox="0 0 140 140" role="img" aria-label={`本月 VPS 成本占用，总计 ${money(donutTotal, baseCurrency)}`}>
                 <circle className="subscription-donut__track" cx="70" cy="70" r="52" />
                 {donutSegments.map(({ item, index, length, dashOffset }) => {
@@ -399,9 +411,9 @@ export function SubscriptionInsights({
                   {activeDonutItem.isOther ? <small>其他项仅展示汇总，不应用筛选。</small> : null}
                 </div>
               ) : null}
-            </div>
-          ) : (
-            <div className="subscription-ranking-list subscription-panel-scroll">
+              </div>
+            ) : (
+              <div className="subscription-ranking-list subscription-panel-scroll">
               {monthlyRows.map((row) => {
                 const cost = row.monthly_price_base ?? 0
                 const share = donutTotal > 0 ? (cost / donutTotal) * 100 : 0
@@ -422,8 +434,9 @@ export function SubscriptionInsights({
                   </button>
                 )
               })}
-            </div>
-          )}
+              </div>
+            )}
+          </TabPanel>
         </div>
 
         <div className="page-panel subscription-insight-panel subscription-insight-panel--trend">

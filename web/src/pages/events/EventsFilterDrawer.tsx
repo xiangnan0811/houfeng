@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react'
 
-import { Modal, Tabs } from '../../components/atoms'
+import { Modal, SegmentedControl } from '../../components/atoms'
 import { FilterSelect, FilterToggle } from '../../components/filters'
 import type { StateChangeEventType } from '../../lib/types'
 import {
@@ -48,8 +48,8 @@ export function EventsFilterDrawer({
       <form className="events-filter-drawer" onSubmit={handleSubmit}>
         <div className="events-filter-drawer__group">
           <span className="events-filter-drawer__label">时间范围</span>
-          <Tabs<TimeRange>
-            variant="pill"
+          <SegmentedControl<TimeRange>
+            label="事件时间范围"
             value={filters.time_range}
             onChange={onTimeRangeChange}
             items={TIME_RANGE_TABS}

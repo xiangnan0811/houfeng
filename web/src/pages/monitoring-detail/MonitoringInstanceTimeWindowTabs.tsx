@@ -1,4 +1,4 @@
-import { Tabs } from '../../components/atoms'
+import { SegmentedControl } from '../../components/atoms'
 import { TIME_WINDOW_ITEMS } from './monitoringDetailConstants'
 import type { RuntimeStreamStatus, TimeWindow } from './types'
 
@@ -25,8 +25,8 @@ export function MonitoringInstanceTimeWindowTabs({
 }: MonitoringInstanceTimeWindowTabsProps) {
   return (
     <div className="watchtower-window-tabs">
-      <Tabs<TimeWindow>
-        variant="pill"
+      <SegmentedControl<TimeWindow>
+        label="监控实例观测时间窗口"
         value={value}
         onChange={onChange}
         items={TIME_WINDOW_ITEMS}

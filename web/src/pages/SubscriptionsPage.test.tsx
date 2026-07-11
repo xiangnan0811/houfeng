@@ -580,6 +580,11 @@ describe('SubscriptionsPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '成本洞察' })).toBeInTheDocument())
     const insights = screen.getByRole('region', { name: '订阅成本洞察' })
+    const monthTabs = within(insights).getByRole('tablist', { name: '月成本展示' })
+    const activeMonthTab = within(monthTabs).getByRole('tab', { selected: true })
+    const monthPanel = within(insights).getByRole('tabpanel')
+    expect(activeMonthTab).toHaveAttribute('aria-controls', monthPanel.id)
+    expect(monthPanel).toHaveAttribute('aria-labelledby', activeMonthTab.id)
     const headings = within(insights).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
     expect(headings).toEqual(['月成本', '年度趋势与风险', '成本构成', '续费队列'])
     expect(within(insights).getByRole('progressbar', { name: 'Hetzner 月成本' })).toHaveAttribute('value', '84')

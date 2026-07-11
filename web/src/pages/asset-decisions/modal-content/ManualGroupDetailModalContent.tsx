@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { ActionConfirmationModal } from '../../../components/ActionConfirmationModal'
-import { Modal, Tabs, Badge, DataTable, type DataTableColumn } from '../../../components/atoms'
+import { Modal, TabPanel, Tabs, Badge, DataTable, type DataTableColumn } from '../../../components/atoms'
 import { PageState as PageStateView } from '../../../components/PageState'
 import type {
   AssetDecisionManualGroupDetail,
@@ -142,6 +142,8 @@ export function ManualGroupDetailModal({
       ) : manualDetailState.detail && manualGroupProgress ? (
         <div className="asset-decision-detail asset-decision-manual-detail">
           <Tabs
+            label="自定义组合详情分区"
+            idBase="asset-manual-group-detail"
             items={[
               { value: 'overview', label: '概览' },
               { value: manualDetailPanel === 'add' || manualDetailPanel === 'raw' ? manualDetailPanel : 'members', label: manualDetailPanel === 'add' ? '添加' : manualDetailPanel === 'raw' ? '底稿' : '成员', count: manualDetailState.detail.members.length },
@@ -150,6 +152,11 @@ export function ManualGroupDetailModal({
             value={manualDetailPanel}
             onChange={(value) => onSelectManualDetailPanel(value as ManualDetailPanel)}
           />
+          <TabPanel
+            idBase="asset-manual-group-detail"
+            value={manualDetailPanel}
+            className="asset-decision-tab-panel"
+          >
           {manualDetailPanel === 'overview' && renderDetailCommand({
             ariaLabel: '自定义组合当前判断',
             title: '当前判断',
@@ -445,6 +452,7 @@ export function ManualGroupDetailModal({
             </div>,
             true,
           )}
+          </TabPanel>
         </div>
       ) : null}
     </Modal>

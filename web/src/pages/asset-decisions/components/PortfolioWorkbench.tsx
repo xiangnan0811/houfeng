@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 
 import { FilterChip } from '../../../components/filters'
 import { PageState as PageStateView } from '../../../components/PageState'
-import { Tabs } from '../../../components/atoms'
+import { TabPanel, Tabs } from '../../../components/atoms'
 import type {
   AssetDecisionGroupSummary,
 } from '../../../lib/types'
@@ -192,7 +192,14 @@ export function PortfolioWorkbench({
             </div>
           </div>
           <div className="asset-decision-tabs">
-            <Tabs items={workbenchTabs} value={portfolioView} onChange={onSetWorkbenchView} variant="pill" />
+            <Tabs
+              label="资产决策组合视图"
+              idBase="asset-portfolio-workbench"
+              items={workbenchTabs}
+              value={portfolioView}
+              onChange={onSetWorkbenchView}
+              variant="pill"
+            />
             {contextFilterChips.length > 0 && (
               <div className="asset-decision-filter-chips" aria-label="资产决策上下文筛选">
                 {contextFilterChips.map((chip) => (
@@ -207,31 +214,37 @@ export function PortfolioWorkbench({
             )}
           </div>
 
-          {portfolioState.groupsLoading ? (
-            <PageStateView
-              kind="loading"
-              title="正在加载决策组…"
-              surface="empty"
-              compact
-            />
-          ) : portfolioState.groupsError ? (
-            <PageStateView
-              kind="error"
-              title="决策组不可用"
-              surface="empty"
-              compact
-            />
-          ) : portfolioState.groups.length === 0 ? (
-            <PageStateView
-              kind="empty"
-              title="当前视图暂无决策组"
-              action={portfolioLead.kind === 'stable' ? undefined : <button className="btn sm secondary" onClick={() => onSetWorkbenchView('needs_decision')}>查看需要决策</button>}
-              surface="empty"
-              compact
-            />
-          ) : (
-            renderDecisionGroupCards(portfolioState.groups)
-          )}
+          <TabPanel
+            idBase="asset-portfolio-workbench"
+            value={portfolioView}
+            className="asset-decision-tab-panel"
+          >
+            {portfolioState.groupsLoading ? (
+              <PageStateView
+                kind="loading"
+                title="正在加载决策组…"
+                surface="empty"
+                compact
+              />
+            ) : portfolioState.groupsError ? (
+              <PageStateView
+                kind="error"
+                title="决策组不可用"
+                surface="empty"
+                compact
+              />
+            ) : portfolioState.groups.length === 0 ? (
+              <PageStateView
+                kind="empty"
+                title="当前视图暂无决策组"
+                action={portfolioLead.kind === 'stable' ? undefined : <button className="btn sm secondary" onClick={() => onSetWorkbenchView('needs_decision')}>查看需要决策</button>}
+                surface="empty"
+                compact
+              />
+            ) : (
+              renderDecisionGroupCards(portfolioState.groups)
+            )}
+          </TabPanel>
         </section>
       </div>
     </>

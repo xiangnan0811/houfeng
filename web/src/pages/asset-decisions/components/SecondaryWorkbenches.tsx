@@ -6,6 +6,7 @@ import {
   DataTable,
   type DataTableColumn,
   MonoDigits,
+  TabPanel,
   Tabs,
 } from '../../../components/atoms'
 import { PageState as PageStateView } from '../../../components/PageState'
@@ -407,40 +408,52 @@ export function SecondaryWorkbenches({
             </span>
           </div>
           <div className="asset-decision-tabs">
-            <Tabs items={queueTabs} value={queueView} onChange={onSetQueueView} variant="pill" />
+            <Tabs
+              label="单台辅助队列视图"
+              idBase="asset-decision-queue"
+              items={queueTabs}
+              value={queueView}
+              onChange={onSetQueueView}
+              variant="pill"
+            />
           </div>
-          {queueState.queueLoading ? (
-            <PageStateView
-              kind="loading"
-              title="正在加载单台队列…"
-              surface="empty"
-              compact
-            />
-          ) : queueState.queueError ? (
-            <PageStateView
-              kind="error"
-              title="单台队列不可用"
-              surface="empty"
-              compact
-            />
-          ) : visibleDecisionQueue.length === 0 ? (
-            <PageStateView
-              kind="empty"
-              title="当前视图暂无待处理 VPS"
-              action={
-                <div className="asset-empty-actions">
-                  {queueView !== 'all' && (
-                    <button className="btn sm secondary" onClick={() => onSetQueueView('all')}>查看全部</button>
-                  )}
-                  <Link className="btn sm ghost" to="/vps">VPS 库存</Link>
-                  <Link className="btn sm ghost" to="/vps?view=missing_subscription">缺订阅 VPS</Link>
-                </div>
-              }
-              surface="empty"
-              compact
-            />
-          ) : (
-            <div className="asset-table-scroll" role="region" aria-label="单台辅助队列" tabIndex={0}>
+          <TabPanel
+            idBase="asset-decision-queue"
+            value={queueView}
+            className="asset-decision-tab-panel"
+          >
+            {queueState.queueLoading ? (
+              <PageStateView
+                kind="loading"
+                title="正在加载单台队列…"
+                surface="empty"
+                compact
+              />
+            ) : queueState.queueError ? (
+              <PageStateView
+                kind="error"
+                title="单台队列不可用"
+                surface="empty"
+                compact
+              />
+            ) : visibleDecisionQueue.length === 0 ? (
+              <PageStateView
+                kind="empty"
+                title="当前视图暂无待处理 VPS"
+                action={
+                  <div className="asset-empty-actions">
+                    {queueView !== 'all' && (
+                      <button className="btn sm secondary" onClick={() => onSetQueueView('all')}>查看全部</button>
+                    )}
+                    <Link className="btn sm ghost" to="/vps">VPS 库存</Link>
+                    <Link className="btn sm ghost" to="/vps?view=missing_subscription">缺订阅 VPS</Link>
+                  </div>
+                }
+                surface="empty"
+                compact
+              />
+            ) : (
+              <div className="asset-table-scroll" role="region" aria-label="单台辅助队列" tabIndex={0}>
               <DataTable
                 className="asset-table asset-decision-queue-table"
                 columns={[
@@ -551,8 +564,9 @@ export function SecondaryWorkbenches({
                 rowKey={(item) => item.vps.vps_id}
                 onRowClick={(item) => onNavigateToVPS(item.vps)}
               />
-            </div>
-          )}
+              </div>
+            )}
+          </TabPanel>
         </section>
       )}
     </>

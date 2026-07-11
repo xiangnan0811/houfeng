@@ -3155,7 +3155,14 @@ describe('MonitoringDetailPage', () => {
     expect(dialog).toHaveTextContent('事件抽屉里的事件文案')
 
     // Switching to 历史异常 triggers the incidents?include_resolved=true fetch.
-    fireEvent.click(screen.getByRole('tab', { name: '历史异常' }))
+    const historyDrawer = screen.getByRole('dialog', { name: '监控实例历史抽屉' })
+    const historyTabs = within(historyDrawer).getByRole('tablist', { name: '监控实例历史类型' })
+    const activeHistoryTab = within(historyTabs).getByRole('tab', { selected: true })
+    const historyPanel = within(historyDrawer).getByRole('tabpanel')
+    expect(activeHistoryTab).toHaveAttribute('aria-controls', historyPanel.id)
+    expect(historyPanel).toHaveAttribute('aria-labelledby', activeHistoryTab.id)
+
+    fireEvent.click(within(historyDrawer).getByRole('tab', { name: '历史异常' }))
 
     await waitFor(() =>
       expect(
@@ -3214,12 +3221,12 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    const tablist = screen.getByRole('tablist')
-    expect(tablist).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '实时' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: '24h' })).toHaveAttribute('aria-selected', 'false')
-    expect(screen.getByRole('tab', { name: '7d' })).toHaveAttribute('aria-selected', 'false')
-    expect(screen.getByRole('tab', { name: '30d' })).toHaveAttribute('aria-selected', 'false')
+    const windowGroup = screen.getByRole('group', { name: '监控实例观测时间窗口' })
+    expect(windowGroup).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '实时' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('switches to 7d window and fetches runtime facts with window=7d', async () => {
@@ -3266,7 +3273,7 @@ describe('MonitoringDetailPage', () => {
     })
 
     // Switch to 7d.
-    fireEvent.click(screen.getByRole('tab', { name: '7d' }))
+    fireEvent.click(screen.getByRole('button', { name: '7d' }))
 
     await waitFor(() =>
       expect(
@@ -3394,7 +3401,7 @@ describe('MonitoringDetailPage', () => {
     expect(screen.getByText('42.0%')).toBeInTheDocument()
     expect(container.querySelectorAll('.watchtower-metrics polyline').length).toBe(8)
 
-    fireEvent.click(screen.getByRole('tab', { name: '24h' }))
+    fireEvent.click(screen.getByRole('button', { name: '24h' }))
     await waitFor(() => expect(socket.close).toHaveBeenCalledTimes(1))
     expect(screen.queryByText('已连接')).not.toBeInTheDocument()
   })

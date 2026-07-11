@@ -5,7 +5,7 @@ import {
   Button,
   Modal,
   MonoDigits,
-  Tabs,
+  SegmentedControl,
 } from '../components/atoms'
 import { FilterChip, FilterSelect, type FilterSelectOption } from '../components/filters'
 import { PageState as PageStateView } from '../components/PageState'
@@ -440,11 +440,11 @@ export function VPSPage() {
       </div>
 
       <div className="tabs animate-in">
-        <Tabs
+        <SegmentedControl
+          label="VPS 快速视图"
           items={quickViews}
           value={filters.view}
           onChange={(view) => setFilter('view', view)}
-          variant="pill"
         />
       </div>
 

@@ -3786,14 +3786,14 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
     )
 
-    const tablist = screen.getByRole('tablist')
-    expect(tablist).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '24h' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: '7d' })).toHaveAttribute('aria-selected', 'false')
-    expect(screen.getByRole('tab', { name: '30d' })).toHaveAttribute('aria-selected', 'false')
+    const windowGroup = screen.getByRole('group', { name: '目标观测时间窗口' })
+    expect(windowGroup).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'false')
     expect(fetchMock).toHaveBeenCalledTimes(5)
 
-    fireEvent.click(screen.getByRole('tab', { name: '7d' }))
+    fireEvent.click(screen.getByRole('button', { name: '7d' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
     expect(fetchMock).toHaveBeenLastCalledWith('/api/targets/tg_001/runtime-facts?window=7d', {
@@ -3801,9 +3801,9 @@ describe('TargetDetailPage', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(screen.getByRole('tab', { name: '7d' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'true')
     await waitFor(() => expect(screen.getAllByText('95 ms').length).toBeGreaterThan(0))
-    expect(screen.getByRole('tab', { name: '7d' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.queryByText('近 7d 暂无可用延迟样本')).not.toBeInTheDocument()
   })
 
@@ -3885,6 +3885,11 @@ describe('TargetDetailPage', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '查看历史' })[0])
 
     const drawer = await screen.findByRole('dialog', { name: '目标历史抽屉' })
+    const historyTabs = within(drawer).getByRole('tablist', { name: '目标历史类型' })
+    const activeHistoryTab = within(historyTabs).getByRole('tab', { selected: true })
+    const historyPanel = within(drawer).getByRole('tabpanel')
+    expect(activeHistoryTab).toHaveAttribute('aria-controls', historyPanel.id)
+    expect(historyPanel).toHaveAttribute('aria-labelledby', activeHistoryTab.id)
     expect(within(drawer).getByText('已加载事件直接进入历史抽屉')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(5)
 

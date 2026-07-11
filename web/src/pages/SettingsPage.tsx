@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { Modal } from '../components/atoms/Modal'
-import { Tabs } from '../components/atoms'
+import { TabPanel, Tabs } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import { ApiError, getSettings, updateSettings } from '../lib/api'
 import type {
@@ -397,13 +397,21 @@ export function SettingsPage() {
       </div>
 
       <div className="settings-tabs">
-        <Tabs variant="pill" value={activeTab} onChange={requestTab} items={SETTINGS_TABS} />
+        <Tabs
+          label="系统设置分区"
+          idBase="settings-sections"
+          variant="pill"
+          value={activeTab}
+          onChange={requestTab}
+          items={SETTINGS_TABS}
+        />
       </div>
 
-      {activeTab === 'subscriptions' ? (
-        <SubscriptionSettingsSection />
-      ) : systemSettings && systemForm ? (
-        <form className="settings-system-form" onSubmit={handleSubmit}>
+      <TabPanel idBase="settings-sections" value={activeTab}>
+        {activeTab === 'subscriptions' ? (
+          <SubscriptionSettingsSection />
+        ) : systemSettings && systemForm ? (
+          <form className="settings-system-form" onSubmit={handleSubmit}>
           {activeTab === 'appearance' && (
             <div className="settings-section animate-in">
               <ThemeSettingsSection />
@@ -494,8 +502,9 @@ export function SettingsPage() {
               {state.saving ? '保存中…' : '保存设置'}
             </button>
           </div>
-        </form>
-      ) : null}
+          </form>
+        ) : null}
+      </TabPanel>
 
       {systemSettings && systemForm ? (
         <Modal
