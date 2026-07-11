@@ -58,14 +58,14 @@ select.input::-ms-expand{display:none}
 .card--state.card--ribbon-top.tone--offline{border-style:dashed;border-color:var(--border-dashed);opacity:0.85}
 
 /* ===== ATOM COMPAT: Tabs ===== */
-.tabs--underline{display:flex;gap:var(--space-6);border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent)}
-.tabs--underline .tab{background:none;border:none;color:var(--text-muted);padding:12px 0;margin-bottom:-1px;font-family:var(--font-sans);font-size:14px;font-weight:500;cursor:pointer;transition:color var(--dur-micro) var(--ease-calm);position:relative}
+.tabs--underline{display:flex;max-width:100%;gap:var(--space-6);border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);overflow-x:auto;overscroll-behavior-x:contain;scrollbar-gutter:stable}
+.tabs--underline .tab{flex:0 0 auto;background:none;border:none;color:var(--text-muted);padding:12px 0;margin-bottom:-1px;font-family:var(--font-sans);font-size:14px;font-weight:500;white-space:nowrap;cursor:pointer;transition:color var(--dur-micro) var(--ease-calm);position:relative}
 .tabs--underline .tab::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--accent);transform:scaleX(0);transition:transform var(--dur-micro) var(--ease-calm);transform-origin:center}
 .tabs--underline .tab:hover{color:var(--text-primary)}
 .tabs--underline .tab.is-active{color:var(--text-primary)}
 .tabs--underline .tab.is-active::after{transform:scaleX(1)}
-.tabs--pill{display:inline-flex;max-width:100%;padding:3px;background:color-mix(in srgb,var(--surface-elevated) 72%,transparent);border-radius:var(--radius-pill);gap:3px;border:1px solid color-mix(in srgb,var(--border) 80%,transparent)}
-.tabs--pill .tab{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-2);min-width:0;padding:5px 14px;color:var(--text-muted);font-size:13px;border-radius:var(--radius-pill);transition:background-color var(--dur-micro) var(--ease-calm),color var(--dur-micro) var(--ease-calm)}
+.tabs--pill{display:flex;width:fit-content;max-width:100%;padding:3px;background:color-mix(in srgb,var(--surface-elevated) 72%,transparent);border-radius:var(--radius-pill);gap:3px;border:1px solid color-mix(in srgb,var(--border) 80%,transparent);overflow-x:auto;overscroll-behavior-x:contain;scrollbar-gutter:stable}
+.tabs--pill .tab{display:inline-flex;flex:0 0 auto;align-items:center;justify-content:center;gap:var(--space-2);padding:5px 14px;color:var(--text-muted);font-size:13px;white-space:nowrap;border-radius:var(--radius-pill);transition:background-color var(--dur-micro) var(--ease-calm),color var(--dur-micro) var(--ease-calm)}
 .tabs--pill .tab:hover{color:var(--text-primary)}
 .tabs--pill .tab.is-active{background:color-mix(in srgb,var(--accent) 14%,var(--surface-elevated));color:var(--text-primary);box-shadow:0 1px 0 color-mix(in srgb,var(--text-primary) 6%,transparent) inset}
 

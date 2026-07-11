@@ -382,7 +382,7 @@
 
 .asset-decision-support-strip__item--normal{border-left:var(--border-w-strong) solid color-mix(in srgb,var(--color-state-normal) 44%,var(--border))}
 
-.asset-decision-support-strip__title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.asset-decision-support-strip__title{min-width:0;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
 
 .asset-decision-support-strip__item .badge{font-size:var(--type-eyebrow-size);white-space:nowrap}
 

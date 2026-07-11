@@ -3,7 +3,7 @@
   "name": "frontend-responsive-workflows",
   "title": "前端窄视口核心流程",
   "description": "修复 390px 下 Tabs、辅助导航、表格及关键命令裁切",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

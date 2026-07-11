@@ -31,10 +31,14 @@ function resolveImported(filePath: string, seen = new Set<string>()): string {
 const indexCss = resolveImported(indexPath)
 const loginPageCss = readFileSync('src/pages/LoginPage.css', 'utf8')
 
-function ruleBody(css: string, selector: string): string {
+function ruleBodies(css: string, selector: string): string[] {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))
-  return match?.[1] ?? ''
+  return [...css.matchAll(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, 'g'))]
+    .map((match) => match[1] ?? '')
+}
+
+function ruleBody(css: string, selector: string): string {
+  return ruleBodies(css, selector)[0] ?? ''
 }
 
 function compact(css: string): string {
@@ -55,5 +59,28 @@ describe('index.css modernization contracts', () => {
   it('stacks the login card and footer vertically', () => {
     expect(compact(ruleBody(indexCss, '.login-page'))).toContain('flex-direction:column')
     expect(compact(ruleBody(loginPageCss, '.login-page'))).toContain('flex-direction:column')
+  })
+
+  it('keeps responsive tabs and asset commands readable within their owner', () => {
+    for (const variant of ['underline', 'pill']) {
+      const tabs = compact(ruleBody(indexCss, `.tabs--${variant}`))
+      const tab = compact(ruleBody(indexCss, `.tabs--${variant} .tab`))
+
+      expect(tabs).toContain('max-width:100%')
+      expect(tabs).toContain('overflow-x:auto')
+      expect(tab).toContain('flex:00auto')
+      expect(tab).toContain('white-space:nowrap')
+    }
+
+    const title = compact(ruleBody(indexCss, '.asset-decision-support-strip__title'))
+    expect(title).toContain('white-space:normal')
+    expect(title).toContain('overflow:visible')
+    expect(title).toContain('text-overflow:clip')
+    expect(title).not.toContain('text-overflow:ellipsis')
+
+    const gridRules = ruleBodies(indexCss, '.asset-decision-support-strip')
+      .map(compact)
+      .filter((body) => body.includes('grid-template-columns:'))
+    expect(gridRules).toHaveLength(1)
   })
 })
