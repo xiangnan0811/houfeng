@@ -168,6 +168,23 @@ requireMatch(stagingJob, /frontend-staging-audit-\$\{\{\s*github\.run_id\s*\}\}/
 requireMatch(stagingJob, /web\/test-results\/staging-audit/, 'staging artifact must use the sanitized audit directory')
 requireMatch(stagingJob, /retention-days:\s*30/, 'staging audit artifact must retain evidence for 30 days')
 
+const webSpecCorpus = [
+  read('.trellis/spec/web/quality-guidelines.md'),
+  read('.trellis/spec/web/directory-structure.md'),
+  read('.trellis/spec/web/styling-guidelines.md'),
+  read('.trellis/spec/web/component-conventions.md'),
+  read('.trellis/spec/web/state-and-data.md'),
+  read('docs/operations/ui-preview-and-browser-sanity.md'),
+].join('\n')
+for (const obsoletePath of ['styles/atoms.css', 'styles/pages.css', 'app/layout/layout.css']) {
+  if (webSpecCorpus.includes(obsoletePath)) failures.push(`web specs must not reference removed ${obsoletePath}`)
+}
+requireMatch(webSpecCorpus, /npm (?:--prefix web )?run test:e2e/, 'web specs must document the repository Chromium command')
+requireMatch(webSpecCorpus, /frontend-staging-smoke\.yml/, 'web specs must document the authenticated staging workflow')
+if (/仓库.*没有.*Playwright|没有 e2e 框架/.test(webSpecCorpus)) {
+  failures.push('web specs must not claim the repository lacks Playwright')
+}
+
 if (failures.length > 0) {
   console.error('web quality gate contract failed:')
   for (const failure of failures) console.error(`- ${failure}`)

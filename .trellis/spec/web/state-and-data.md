@@ -8,7 +8,7 @@
 
 候风前端**当前没有引入任何第三方状态管理库**（`web/package.json` `dependencies` 仅 `react`、`react-dom`、`react-router-dom`，**无** Redux / Zustand / Jotai / Recoil / React Query / SWR）。整体策略：
 
-- **数据获取**集中在 `web/src/lib/`，通过函数式 API client (`api.ts` / `auth-client.ts`) 调用 center 的 `/api/*` 端点；返回类型从 `web/src/lib/types.ts` 引用。
+- **数据获取**集中在 `web/src/lib/`：`apiRequest.ts` 拥有 transport/error/401/JSON primitives，`api.ts` 拥有业务 endpoint façade，`auth-client.ts` 复用同一 transport；返回类型从 `types.ts` 引用。
 - **本地组件状态**使用 React 内建 hooks（主用 `useState` + `useEffect`，少量 `useRef`；当前未发现 `useReducer`）。
 - **跨组件 / 跨页状态**仅由两个 React Context 承担：`AuthProvider` (`web/src/lib/auth-context.tsx`) 与 `ThemeProvider` (`web/src/lib/theme-context.tsx`)；两者都在 `web/src/main.tsx:15-23` 一次性挂载。
 - **URL 状态**走 `react-router-dom@7` 的路由参数（`useParams`、`useNavigate`），不另起 store。
@@ -21,11 +21,10 @@
 
 ### API client
 
-- **业务 `/api/*` 调用一律走 `web/src/lib/api.ts`**。该文件实现：
-  - 一个 `request(path, init)` 内部函数（`web/src/lib/api.ts:39-68`）封装通用 fetch 行为：默认 `credentials: 'include'`、`Accept: application/json`、`cache: 'no-store`，对 401 调用 `onUnauthorized()` 钩子并抛 `ApiError(401)`，对非 2xx 解析 `error` / `message` 字段后包成 `ApiError(status, message)`。
-  - 业务函数使用动词 + 资源命名（`listMonitoringInstances` / `getMonitoringInstance` / `createTarget` / `updateMonitoringInstanceMetadata` / `enterMonitoringInstanceMaintenance` / `getDashboard` 等），返回 `Promise<T>`，T 来自 `lib/types.ts`。
-  - `If-Match` 乐观锁通过 `patchJSONBody(path, body, { ifMatch })` 表达（`web/src/lib/api.ts:98-112`），传入的是上一次拿到的 `updated_at`。
-- **`/api/auth/*` 走 `web/src/lib/auth-client.ts`**，并复用 `web/src/lib/api.ts` 的 request helpers 与 401 hook。不要新增第二套 fetch 包装。
+- **业务 `/api/*` 调用一律由 `web/src/lib/api.ts` 暴露**。业务函数使用动词 + 资源命名（`listMonitoringInstances` / `getMonitoringInstance` / `createTarget` / `getDashboard` 等），返回 `Promise<T>`，T 来自 `lib/types.ts`。
+- **transport 唯一 owner 是 `web/src/lib/apiRequest.ts`**：默认 `credentials: 'include'`、`Accept: application/json`、`cache: 'no-store'`；401 触发共享 unauthorized handler 并抛 `ApiError(401)`；非 2xx 只从 error/message 文本生成 `ApiError(status, message)`。`api.ts` re-export兼容 primitives，不复制 fetch wrapper。
+- **`/api/auth/*` 走 `web/src/lib/auth-client.ts`**，并复用 `apiRequest.ts` 的 primitives 与 401 hook。不要新增第二套 fetch 包装。
+- `If-Match` 乐观锁仍由业务 façade 的 `patchJSONBody(path, body, { ifMatch })` 表达，传入上一次拿到的 `updated_at`；transport seam 不改变 method/header/body/wire shape。
 - **不要在 page / component 里直接 `fetch()`**。业务请求必须加到 `web/src/lib/api.ts` 再由 page / component 调用；`MonitoringPage` 的历史直连 `fetch('/api/monitoring-instances')` 已偿还为 `createMonitoringInstance` API helper，新代码不要恢复这条路径。
 
 ### 类型对齐
@@ -474,7 +473,7 @@ buildDashboardModel(input: {
 - `dashboardModel.test.ts`: subset 计数、五 mode 优先级、VPS failure-not-onboarding、stable asset signal、fallback 来源、loading/error。
 - `DashboardPage.test.tsx`: 五 mode 唯一主行动及 deep link、禁止旧 surface、VPS 503、supporting retry、订阅 fallback、异常详情链接和可信标题。
 - `internal/center/store/dashboard_test.go` 与 `internal/center/http/handlers/dashboard_test.go`: abnormal=2/severe=1，并断言 severe 不大于 abnormal。
-- 用户可见结构变化必须做本地 browser sanity：Dashboard 的五种 fixture 至少覆盖 `1440x1000`、`390x900`，并补 `1024x768`；断言首屏主行动/至少一个判断摘要可见、无页面横向溢出、无关键文字裁切和 console/page/CSP error。该证据是 mock frontend rendering，不代表后端或真实资产通过。
+- 用户可见结构变化必须更新/运行 repository Playwright：`page-states.spec.ts` 固定五种 Dashboard fixture，`core-routes.spec.ts` 覆盖 `1440x1000`、`1024x768`、`390x900`，统一断言主行动、横向溢出、裁切和 console/page/CSP/network。该证据仍是 fixture frontend rendering，不代表后端或真实资产通过；真实数据只由 staging real lane 证明。
 
 #### 7. Wrong vs Correct
 
@@ -764,6 +763,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - `web/src/lib/api.test.ts`: `getAssetDecisionOverview`、`listAssetDecisionGroups`、`getAssetDecisionGroup` 路径和 query string；manual group helper list/create/get/patch/member add/patch/delete；scenario template helpers list/create/get/patch/create-manual-group；记录 fixture 覆盖 `execution_readback` 和 `execution_plan`。
 - `AssetDecisionsPage.test.tsx` 与 route/domain workflow tests: `资产组合决策` 主 surface、默认不渲染旧常驻 `决策路径` / `下一步导览` / 记录 / 场景 / 续费 / 单台队列 section、次级入口点击展开单一工作区、legacy `view=single_queue` 承接、tabs query、上下文筛选 chips、深链打开 group/manual group/record/template、同值 filter revalidation 仍发四个 GET 且 group/manual/record 关闭恢复同实体入口焦点、场景模板列表/详情/创建组合、自定义组合另存模板、组详情 drawer、创建自定义组合、自定义组合详情/成员表单/保存 manual record、组/成员/记录 `evidence_assessment` 与 `decision_recommendation` 展示、组卡 comparison summary、默认层/目录层/普通二级面板密度预算、自动组/自定义组/保存记录普通面板不出现 `GROUP TO SCENARIO` / `EVIDENCE MATRIX` / 宽表底稿 / provider-product-cost-facts 串、记录详情 saved evidence snapshot 只在 raw/底稿中可回看、旧 snapshot 缺 `comparison_insight` 降级、保存记录、记录详情状态推进、execution plan 列表片段 / lane board / CTA URL 映射 / 快速跟进、成员跟进 PATCH payload 与计数刷新、成员跟进面板预览限量且不展示完整当前事实、partial source failure 不显示 `闭环稳定` 或虚构 readback work、readback drift 不触发业务对象写请求、plan CTA 不触发业务对象写请求、模板打开不触发业务对象写请求、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅或 `证据稳定`、错误/空态。
 - `assetDecisionArchitectureContract.test.ts`: TypeScript AST synthetic + repository fixtures 覆盖七个 controller entry、API owner 白名单、唯一 router owner、禁止依赖边、无 `*PageContent` 替身、page/controller/global/effect 预算；错误必须报告路径、行与 forbidden symbol/edge/budget。
+- `web/e2e/accessibility.spec.ts` / `visual-contracts.spec.ts`：真实 Chromium 覆盖 Asset nested confirmation 逐层 Escape/inert/body lock/focus restore，以及 390px“场景与组合”命令完整可达；staging real lane 对已有自定义模板只打开确认并取消，禁止发送 template mutation。
 - `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/监控实例/资料质量展示、创建 VPS 流程和 provider selector 可访问标签。
 - `SubscriptionsPage.test.tsx`: `vps_id` URL context、`create=1` 自动打开/预填、关闭创建表单保留 `vps_id` 并移除 `create=1`。
 - `VPSDetailPage.test.tsx`: Provider/MonitoringInstance/Target/Service selectors 的候选加载、空态/错误提示、提交 payload 仍只发送被选 ID 或空值。
@@ -1312,7 +1312,7 @@ setExpandedChannels((prev) => new Set(Array.from(prev).filter((channel) => reset
 
 > 用于后续任务评审；若形成可复用规则，更新 `.trellis/spec/` 或当前 active docs。
 
-1. **认证请求与业务请求现在共享 `api.ts` 的 request helpers 和 401 hook**；新代码不要再加第二套 fetch 包装。
+1. **认证请求与业务请求共享 `apiRequest.ts` 的 transport primitives 和 401 hook**；`api.ts` 只拥有业务 endpoint façade/兼容 re-export，新代码不要再加第二套 fetch 包装。
 2. **类型与 Go contract 全靠手维护**——没有 codegen。前后端字段如有漂移，依赖测试 + 运行期 `unknown` 解析报错暴露。
 3. **当前没有任何状态库 / 数据缓存层**：CLAUDE.md 也没要求引入。本 spec 把"暂不引入"作为现行约束写明。
 
@@ -1325,4 +1325,4 @@ setExpandedChannels((prev) => new Set(Array.from(prev).filter((channel) => reset
 - **标准 page 数据流（loading / error / data 三态 + cancelled 旗标）**：`web/src/pages/EventsPage.tsx:63-108`，配合 `web/src/lib/api.ts:304-325` 的 `listEvents(filter)`。
 - **乐观锁更新**：`web/src/pages/MonitoringPage.tsx:283-325` 的 `handleSaveLabels` → `updateMonitoringInstanceMetadata(monitoringInstanceId, input, { expectedUpdatedAt })`，其内部由 `web/src/lib/api.ts:145-153` 走 `If-Match` 头实现。
 - **Provider + Hook 配对**：`web/src/lib/auth-context.tsx`（`AuthProvider` 内 `useEffect` 挂 401 钩子 → 用 `useAuth()` 暴露 `{ user, loading, login, logout, refresh }`）。
-- **类型驱动的 API 函数集**：`web/src/lib/api.ts:1-21` 顶部从 `./types` 一次性 import 所有领域类型，下方所有 `requestJSON<T>` 都直接复用。
+- **类型驱动的 API 函数集**：`web/src/lib/api.ts` 从 `./types` 引入领域类型并复用 `apiRequest.ts` primitives；transport 分支由 `apiRequest.test.ts` 的 >=90% branch ratchet 保护。

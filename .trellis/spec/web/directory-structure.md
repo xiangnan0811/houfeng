@@ -13,6 +13,7 @@
 - **Vite 8**（`web/vite.config.ts`：dev 模式把 `/api/*` 反代到 `VITE_API_TARGET`，默认 `http://127.0.0.1:8080`）
 - **react-router-dom 7**（`createBrowserRouter`，详见 `web/src/app/router.tsx`）
 - **Vitest 4 + jsdom**（测试环境在 `web/src/test/setup.ts`）
+- **Playwright 1.61 + Chromium / axe**（正式 browser contracts 在 `web/e2e/`，staging 使用独立 config/workflow）
 - **ESLint flat config**（`web/eslint.config.js`，含 `typescript-eslint`、`react-hooks`、`react-refresh`）
 
 顶层职责划分（与项目根 `CLAUDE.md` "Frontend (`web/`)" 段一致）：
@@ -22,7 +23,8 @@
 - **路由页**：`web/src/pages/`，每条业务路由一个 `<Name>Page.tsx` + 同名 `<Name>Page.test.tsx`。
 - **跨页复用展示原子与组合**：`web/src/components/`（其中 `atoms/` 是最底层视觉 / 行为原子）。
 - **API client、共享类型、formatter、客户端 context**：`web/src/lib/`。
-- **样式资源**：`web/src/styles/`（`reset.css` / `tokens.css` / `atoms.css` / `pages.css`），全部在 `main.tsx` 顶部一次性导入。
+- **样式资源**：`main.tsx` 按 `reset.css` → `tokens.css` → `index.css` owner manifest → `modernize.css` 导入；真实规则位于 `web/src/styles/partials/`。
+- **质量配置与浏览器合同**：`coverage-budget.json` / `bundle-budget.json` / `css-{budget,owners}.json`、`playwright*.config.ts`、`e2e/`。
 - **静态资源**：`web/public/`、`web/index.html` 中的 `/favicon.svg` 等。
 
 **生产部署**：`npm run build` 产物在 `web/dist/`，由 center 通过 `HOUFENG_WEB_DIST_DIR` + `internal/center/http/handlers/spa.go` 兜底吐给浏览器（详见仓库根 `CLAUDE.md` "Runtime layout"）。
@@ -34,11 +36,22 @@
 ```
 web/
 ├── index.html                  # 单页入口；同步加载同源 theme-bootstrap.js
-├── package.json                # node 22.x；脚本 dev / build / lint / test
+├── package.json                # node 22.x；source、coverage、browser 与 budget 命令门户
+├── coverage-budget.json        # V8 全局与关键文件 branch ratchet
+├── bundle-budget.json          # entry/async/font 静态预算
+├── css-budget.json             # CSS AST/source/production 预算（Task 9 owner）
+├── css-owners.json             # 七个 CSS owner 的穷尽映射
 ├── vite.config.ts              # /api 反代到 VITE_API_TARGET
 ├── vitest.config.ts
+├── playwright.config.ts        # fixture Chromium gate + production preview
+├── playwright.staging.config.ts # 已部署 staging；无本地 webServer/trace/video
 ├── eslint.config.js
-├── tsconfig.json / .app.json / .node.json
+├── tsconfig.json / .app.json / .e2e.json / .node.json
+├── e2e/
+│   ├── fixtures/               # fail-closed method/path/query router 与 typed profiles
+│   ├── support/                # CSP/console/network diagnostics 与 geometry
+│   ├── staging/                # 脱敏 audit collector + authenticated smoke
+│   └── *.spec.ts               # route/state/a11y/security/responsive contracts
 ├── public/                     # 同源静态资源（主题预热、字体、caret、图标等）
 └── src/
     ├── main.tsx                # createRoot + Provider 嵌套
@@ -58,8 +71,7 @@ web/
     │       ├── GlobalSearch.tsx
     │       ├── SyncStatus.tsx
     │       ├── UserChip.tsx
-    │       ├── ChangePasswordModal.tsx
-    │       └── layout.css      # 仅服务于本目录组件
+    │       └── ChangePasswordModal.tsx
     ├── pages/                  # 一文件一路由页
     │   ├── DashboardPage.tsx + DashboardPage.test.tsx
     │   ├── AssetDecisionsPage.tsx + AssetDecisionsPage.test.tsx
@@ -81,26 +93,29 @@ web/
     │   ├── atoms/              # 设计系统原子（Button / Card / Badge / ...）
     │   │   ├── index.ts        # barrel export，pages 通常 from './atoms'
     │   │   └── Sparkline / Tabs / SegmentedControl 等 + 同名 *.test.tsx
-    │   ├── ActionConfirmationCard.tsx
+    │   ├── ActionConfirmationModal.tsx
     │   ├── DetailSection.tsx
     │   ├── EventList.tsx
     │   ├── IncidentList.tsx
     │   └── StatusBadge.tsx
     ├── lib/                    # 数据层与无 UI 工具
-    │   ├── api.ts              # 统一 API client（封装 /api/* 调用）
-    │   ├── auth-client.ts      # /api/auth/* 薄封装，复用 api.ts request helpers
+    │   ├── api.ts              # 业务 endpoint façade（封装 /api/* 调用）
+    │   ├── apiRequest.ts       # fetch/401/error/JSON transport primitives
+    │   ├── auth-client.ts      # /api/auth/* 薄封装，复用 apiRequest transport
     │   ├── auth-context.tsx    # AuthProvider + useAuth
+    │   ├── modalStack.ts + useModalFocus.ts # portal modal 栈、焦点与滚动锁
     │   ├── theme.ts + theme-context.tsx
     │   ├── format.ts           # 时间 / 字节 / 百分比等展示格式化
     │   └── types.ts            # 与 center JSON 响应对齐的 TS 类型
     ├── security/               # production source contracts（CSP / semantic interaction）
     │   ├── cspContract.test.ts
     │   └── semanticInteractionContract.test.ts
-    ├── styles/                 # 全局 CSS，main.tsx 一次性导入
+    ├── index.css               # 七 owner 的唯一 import manifest；本身不承载规则
+    ├── styles/
     │   ├── reset.css
     │   ├── tokens.css          # 设计令牌（颜色、间距、字体）
-    │   ├── atoms.css           # atoms 组件样式
-    │   └── pages.css
+    │   ├── modernize.css       # owner 映射内的现代化补充层
+    │   └── partials/           # atoms/page/layout + 各业务 owner 的 production 规则
     └── test/
         └── setup.ts            # vitest setup（jest-dom 等）
 ```
@@ -135,8 +150,8 @@ web/
 
 跨页可复用的展示 / 行为组件。**不持有业务路由概念**，不直接调 API client（数据通过 props 进来）。
 
-- `components/atoms/`：设计系统原子（Button、Input、Badge、Card、Tabs、Toggle、Sparkline、TrendArrow、StatusGlyph、Mono / Hostname / Timestamp、DataTable）。这些组件**只与 `styles/atoms.css` 与 `tokens.css` 耦合**，不依赖任何业务类型。`atoms/index.ts` 是 barrel export，调用方统一 `from '../components/atoms'`。
-- `components/`（atoms 上一层）：领域感知的组合组件（如 `IncidentList`、`EventList`、`StatusBadge`、`DetailSection`、`ActionConfirmationCard`），它们可以引用 `lib/types.ts` 的类型，但仍然是**纯展示 / 受控**——不发请求、不依赖路由。
+- `components/atoms/`：设计系统原子（Button、Input、Select、Badge、Card、Modal、Tabs、SegmentedControl、DataTable 等）。组件规则由 `styles/partials/atoms.css` / `forms.css` / `tabs.css` 等 shared owner 持有，不依赖业务类型。`atoms/index.ts` 是 barrel export。
+- `components/`（atoms 上一层）：领域感知的组合组件（如 `IncidentList`、`EventList`、`StatusBadge`、`DetailSection`、`ActionConfirmationModal`），它们可以引用 `lib/types.ts` 的类型，但仍然是**纯展示 / 受控**——不发请求、不依赖路由。
 
 ### `web/src/lib/`
 
@@ -159,11 +174,20 @@ web/
 
 ### `web/src/styles/`
 
-全局 CSS，仅在 `main.tsx` 顶部 import 一次（参见 `web/src/main.tsx:5-9`）。**不要在组件文件里 `import './foo.css'`**——例外是 `app/layout/layout.css`（仅供 layout 子树）和 `pages/LoginPage.css`（首屏前缺少应用壳的特例）。
+`main.tsx` 只直接 import reset、tokens、`index.css` 与 modernize；`index.css` 以七个 owner section 导入 `styles/partials/`。**不要在组件文件里 `import './foo.css'`**——当前唯一 route-level 例外是 `pages/LoginPage.css`，且仍必须出现在 `css-owners.json`。
 
 ### `web/src/test/`
 
 仅放 vitest setup（注册 `@testing-library/jest-dom` 等）。所有测试文件 colocate 在被测代码旁边，**不要建集中 `__tests__` 目录**。
+
+### `web/e2e/`
+
+正式 Chromium 合同，不与 `src/` 的 Vitest/RTL 混放：
+
+- `fixtures/contracts.ts` 定义 method/path/canonical-query 与 response 形状；`router.ts` 对未知请求 fail closed；`profiles.ts` 持有 typed route/state fixture。
+- `support/diagnostics.ts` 从后端 policy source 读取 CSP，并统一收集 console/page/request/HTTP/CSP/unhandled rejection；`geometry.ts` 持有 document overflow 与裁切断言。
+- 顶层 `*.spec.ts` 只消费 fixture/support，不在每个文件复制 auth、catch-all API 或 diagnostics。
+- `staging/` 不使用 fixture router：它在真实 origin/UI auth 上区分 real-environment 与 deployed-frontend injection，并只向 `test-results/staging-audit` 写脱敏 artifact。
 
 ---
 
@@ -179,7 +203,7 @@ web/
 | Context Provider | `<Name>Provider`，对应 hook `use<Name>` | `AuthProvider` + `useAuth` |
 | API client 函数 | 动词 + 资源驼峰；GET 用 `list/get`、POST 用 `create/issue/...` | `listMonitoringInstances`、`getMonitoringInstance`、`createTarget`、`issueMonitoringInstanceEnrollmentToken` |
 | 类型 | 与 center 响应同名的领域记录用 `<Aggregate>Record` / `<Aggregate>Input` 后缀 | `MonitoringInstanceRecord`、`UpdateMonitoringInstanceMetadataInput` |
-| CSS class | BEM 风（`block__element--modifier`），见 `styles/pages.css` 与 `atoms.css` | `page-panel__title`、`btn--primary` |
+| CSS class | BEM 风（`block__element--modifier`），见 `styles/partials/page.css` 与 `atoms.css` | `page-panel__title`、`btn--primary` |
 
 ---
 
@@ -188,7 +212,7 @@ web/
 | 变更类型 | 落点 |
 |----------|------|
 | 新增业务路由 / 整页 | 1) 新建 `web/src/pages/<Name>Page.tsx` + 同名 `*.test.tsx`；2) 在 `web/src/app/router.tsx` 用 `React.lazy` 建 lower camelCase 页面模块变量；3) 在 `appRoutes` 内用 `routeElement(<module>, '<中文加载文案>')` 挂到 `<RequireAuth />` 下；4) 如需新数据，先在 `lib/api.ts` 加函数 + `lib/types.ts` 加类型 |
-| 新跨页展示原子 | `web/src/components/atoms/<Name>.tsx` + 同名 `*.test.tsx`；在 `atoms/index.ts` 导出；如需新样式加到 `styles/atoms.css` |
+| 新跨页展示原子 | `web/src/components/atoms/<Name>.tsx` + 同名 `*.test.tsx`；在 `atoms/index.ts` 导出；样式放 `styles/partials/atoms.css` / `forms.css` / `tabs.css` 的既有 shared owner |
 | 新跨页业务组合组件 | `web/src/components/<Name>.tsx`（与 IncidentList / EventList 同级），保持纯展示 / 受控 |
 | 新复杂路由私有 controller / presentation | `web/src/pages/<route>/hooks/use<Name>.ts` 与同级 `components/` / `modals/`；route page 是唯一 composition point，controller 不互相 import，展示层不 import controller/API |
 | 新 API 调用 | `web/src/lib/api.ts` 加函数；如响应/请求体新颖，同步在 `lib/types.ts` 加类型；不要在 page / component 里直接 `fetch()` |
@@ -197,6 +221,7 @@ web/
 | 新布局壳元素（侧边栏 / 顶栏内增项） | 改 `web/src/app/layout/`；不要把布局碎片散到 `pages/` |
 | 新 SPA 全局样式 | 改 `web/src/styles/` 下既有文件；非必要不新增 CSS 文件 |
 | 新 production source contract | `web/src/security/<Contract>.test.ts`；使用 AST/结构解析并配 synthetic fixture，不用正则扫描 JSX或路径级白名单 |
+| 新 repository browser contract | `web/e2e/<domain>.spec.ts`；复用 `fixtures/` 的 fail-closed router 与 `support/diagnostics.ts`，不在 spec 自建 catch-all API mock |
 
 ---
 
@@ -209,7 +234,7 @@ web/
 - ❌ 在 `lib/` 里写 React 组件 / JSX（context Provider 例外）：`lib/` 是无 UI 数据/工具层。
 - ❌ 绕过 `app/router.tsx` 私自加路由（如手写 `<BrowserRouter>`）：路由唯一入口是 `createBrowserRouter(appRoutes)`。
 - ❌ 在 `router.tsx` 里 eagerly import 业务页面或定义 PascalCase lazy 常量：前者会恢复大入口 chunk，后者会触发 React Refresh 规则，因为 `router.tsx` 同时导出 `appRoutes` / `router`。
-- ❌ 在组件文件里 `import './foo.css'`：全局样式由 `main.tsx` 顶部 + `app/layout/layout.css` + `pages/LoginPage.css` 三处统一管理。
+- ❌ 在组件文件里 `import './foo.css'`：规则由 `main.tsx` import chain + `index.css` owner manifest 管理；只有 Login route 例外。
 - ❌ 新建 `__tests__/` 集中目录：测试一律 colocate（与被测同目录、同名 `.test.*`）。
 - ❌ 在 `pages/` 之间相互 import：要复用就提到 `components/`。
 - ❌ 从 `app/layout/` 直接被 `pages/` 引用：layout 仅服务 AppShell。

@@ -116,18 +116,18 @@
 ## Acceptance Criteria
 
 - [x] Task 5、6、7、9 均已归档且 post-merge main CI 通过；Task 9 已包含 Task 8 输出。
-- [ ] `npm ci` 可重复安装固定的 coverage/Playwright/axe 依赖，`npm audit --include=dev` 为 0 vulnerabilities。
-- [ ] coverage 包含全部 production TS/TSX；全局四项不低于 fresh baseline。
-- [ ] 每个关键文件存在且 branch coverage >= 90%，重命名或零匹配会失败。
-- [ ] `noUncheckedIndexedAccess` 与 `exactOptionalPropertyTypes` 在主 app tsconfig 启用；type-aware lint 对 lib/Asset hooks 生效且零 warning。
-- [ ] 九 route × 三 viewport Chromium matrix 全绿，无 page/console/CSP/unhandled/unexpected-network error，无 document 横向溢出或关键文字裁切。
-- [ ] Dashboard 五状态、PageState 四态、Modal/Tabs/Menu/skip-link 键盘流程均有 Playwright 回归。
-- [ ] AppShell、Dashboard、Settings、VPS/Asset 关键 surface 的 axe serious/critical 为零。
+- [x] `npm ci` 可重复安装固定的 coverage/Playwright/axe 依赖，`npm audit --include=dev` 为 0 vulnerabilities。
+- [x] coverage 包含全部 production TS/TSX；全局四项不低于 fresh baseline。
+- [x] 每个关键文件存在且 branch coverage >= 90%，重命名或零匹配会失败。
+- [x] `noUncheckedIndexedAccess` 与 `exactOptionalPropertyTypes` 在主 app tsconfig 启用；type-aware lint 对 lib/Asset hooks 生效且零 warning。
+- [x] 九 route × 三 viewport Chromium matrix 全绿，无 page/console/CSP/unhandled/unexpected-network error，无 document 横向溢出或关键文字裁切。
+- [x] Dashboard 五状态、PageState 四态、Modal/Tabs/Menu/skip-link 键盘流程均有 Playwright 回归。
+- [x] AppShell、Dashboard、Settings、VPS/Asset 关键 surface 的 axe serious/critical 为零。
 - [ ] 入口 JS/CSS gzip、最大 async JS gzip、字体 raw budget 与 Task 9 CSS AST budget 在本地和 CI 阻断增长。
 - [ ] `make verify-web`、browser job、Docker job 与 main post-merge CI 都使用 Node `22.23.1` 并通过。
-- [ ] 任务启动时的最新 Vitest file/test count 只增不减，或每个替换都有等价覆盖证据；历史 74/578 与当前规划 86/633 都不得无说明回退。
-- [ ] `.trellis/spec/web/*` 和 browser operations doc 与真实目录、命令、owner 和证据层级一致，不再引用已删除 CSS/layout 路径或“仓库无 Playwright”。
-- [ ] `frontend-staging-smoke.yml` 仅能通过 `workflow_dispatch` 运行，使用 GitHub `staging` environment，并且不会在 PR/fork CI 中暴露凭据。
+- [x] 任务启动时的最新 Vitest file/test count 只增不减，或每个替换都有等价覆盖证据；历史 74/578 与当前规划 86/633 都不得无说明回退。
+- [x] `.trellis/spec/web/*` 和 browser operations doc 与真实目录、命令、owner 和证据层级一致，不再引用已删除 CSS/layout 路径或“仓库无 Playwright”。
+- [x] `frontend-staging-smoke.yml` 仅能通过 `workflow_dispatch` 运行，使用 GitHub `staging` environment，并且不会在 PR/fork CI 中暴露凭据。
 - [ ] environment 仅允许 `main` deployment ref；非 `main` dispatch 在读取 environment secrets 前失败；staging run 串行且不会被新 run 取消。
 - [ ] 真实认证 staging run 对目标 release/version 通过并保存脱敏证据；没有环境/凭据时本项保持未勾选，task 不归档。
 - [ ] Gate C 在同一个集成版本通过，并把 run、commit/tag 和残余风险写回 parent task。

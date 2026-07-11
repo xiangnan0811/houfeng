@@ -58,10 +58,10 @@ git diff --check
 
 - [x] RED：package 缺少 `test:coverage`、`test:e2e`、bundle check scripts 和三项 direct dev dependencies。
 - [x] RED：coverage budget 缺全局四项、任一 approved critical path 不存在或 branch <90。
-- [ ] RED：bundle checker 对缺入口、多入口、零字体和超预算 fixture 返回非零，并报告 metric/actual/limit。
-- [ ] RED：CI 不包含独立 browser job，或 browser job 未读取 `.node-version` 时失败。
-- [ ] RED：CSP browser contract 不读取仓库唯一 policy source 时失败。
-- [ ] 保持测试检查结构/行为，不写只能匹配一段 YAML whitespace 的脆弱正则。
+- [x] RED：bundle checker 对缺入口、多入口、零字体和超预算 fixture 返回非零，并报告 metric/actual/limit。
+- [x] RED：CI 不包含独立 browser job，或 browser job 未读取 `.node-version` 时失败。
+- [x] RED：CSP browser contract 不读取仓库唯一 policy source 时失败。
+- [x] 保持测试检查结构/行为，不写只能匹配一段 YAML whitespace 的脆弱正则。
 
 **Focused gate:** 只运行新增 source/synthetic tests，确认它们因预期缺失而红，不接受语法错误型 RED。
 
@@ -159,21 +159,21 @@ coverage: {
 
 ### Checklist
 
-- [ ] 为第一层创建临时 profile，同时启用两项 flag，确认规划期类别仍能 RED。
-- [ ] 每个 error 先分类：unchecked read、optional omission/null、fixture/type drift、真正的 impossible state。
-- [ ] 用 guard、条件构造 payload、discriminated union 和 exhaustive switch 修复；每个行为分支先补测试。
-- [ ] 特别验证 PATCH optional vs explicit `null`、URL query omission、数组空态和 async callback 错误传播。
-- [ ] 一层为零后才扩大下一层；每层单独 commit，避免 156 类改动不可审阅。
-- [ ] 最终在 `web/tsconfig.app.json` 写入：
+- [x] 为第一层创建临时 profile，同时启用两项 flag，确认规划期类别仍能 RED。
+- [x] 每个 error 先分类：unchecked read、optional omission/null、fixture/type drift、真正的 impossible state。
+- [x] 用 guard、条件构造 payload、discriminated union 和 exhaustive switch 修复；每个行为分支先补测试。
+- [x] 特别验证 PATCH optional vs explicit `null`、URL query omission、数组空态和 async callback 错误传播。
+- [x] 一层为零后才扩大下一层；每层单独 commit，避免 156 类改动不可审阅。
+- [x] 最终在 `web/tsconfig.app.json` 写入：
 
 ```json
 "noUncheckedIndexedAccess": true,
 "exactOptionalPropertyTypes": true
 ```
 
-- [ ] 删除临时 ratchet profiles，运行 `tsc -b` 证明唯一主配置全绿。
-- [ ] ESLint flat config 为 `src/lib/**` 和 final Asset hooks 开启明确 type-aware rules；e2e/config 文件使用正确 Node/browser globals。
-- [ ] 搜索并审计新增 `eslint-disable`、` as `、non-null assertion、`any`；无理由 suppressions 为零。
+- [x] 删除临时 ratchet profiles，运行 `tsc -b` 证明唯一主配置全绿。
+- [x] ESLint flat config 为 `src/lib/**` 和 final Asset hooks 开启明确 type-aware rules；e2e/config 文件使用正确 Node/browser globals。
+- [x] 搜索并审计新增 `eslint-disable`、` as `、non-null assertion、`any`；无理由 suppressions 为零。
 
 **Focused verification:** 每层 profile + 受影响 unit tests + lint；最终完整 build。
 
@@ -189,12 +189,12 @@ coverage: {
 
 ### Checklist
 
-- [ ] 用 synthetic dist fixtures 先完成入口/hash/gzip/max-chunk/font/error-path RED→GREEN。
-- [ ] 在 fresh production dist 运行 explicit baseline mode，review 后提交最终四项数值；不得复制规划期值。
-- [ ] 默认 check 只读 budget；验证超 1 byte 会失败并输出 actual/limit。
-- [ ] 确认字体为非零且涵盖 Task 5 七个 WOFF2；预算不把 license 或 SVG 混入 font bytes。
-- [ ] `make verify-web` 在 production build 后调用 bundle check 与 Task 9 `css:analyze`。
-- [ ] 延续 Task 9 指标只降不升；若 Task 9 已把 CSS check 接入 Make，Task 10 只验证不重复调用。
+- [x] 用 synthetic dist fixtures 先完成入口/hash/gzip/max-chunk/font/error-path RED→GREEN。
+- [x] 在 fresh production dist 运行 explicit baseline mode，review 后提交最终四项数值；不得复制规划期值。
+- [x] 默认 check 只读 budget；验证超 1 byte 会失败并输出 actual/limit。
+- [x] 确认字体为非零且涵盖 Task 5 七个 WOFF2；预算不把 license 或 SVG 混入 font bytes。
+- [x] `make verify-web` 在 production build 后调用 bundle check 与 Task 9 `css:analyze`。
+- [x] 延续 Task 9 指标只降不升；若 Task 9 已把 CSS check 接入 Make，Task 10 只验证不重复调用。
 
 Budget file contract（数值由 `--write-baseline` 从 final fresh dist 生成）：
 
@@ -223,12 +223,12 @@ Budget file contract（数值由 `--write-baseline` 从 final fresh dist 生成�
 
 ### Checklist
 
-- [ ] 配置 Chromium、loopback production preview、locale/timezone、zero retries、bounded workers、failure-only diagnostics artifacts。
-- [ ] 先写一个 protected route RED：没有 auth fixture 时必须重定向 login；加入 `/api/auth/me` 后进入目标 route。
-- [ ] 建立 method/path/canonical-query router；未知 endpoint 返回测试 501 并在 teardown 失败。
-- [ ] 复用 Task 3 Dashboard fixtures；其余 fixture 用 `satisfies` 检查 required TS wire fields。
-- [ ] 建立 profile reset，确保 test 间无共享 mutation/state。
-- [ ] 增加 source contract：fixture 不得有 catch-all empty response，mutation expectation 必须声明 method/body keys。
+- [x] 配置 Chromium、loopback production preview、locale/timezone、zero retries、bounded workers、failure-only diagnostics artifacts。
+- [x] 先写一个 protected route RED：没有 auth fixture 时必须重定向 login；加入 `/api/auth/me` 后进入目标 route。
+- [x] 建立 method/path/canonical-query router；未知 endpoint 返回测试 501 并在 teardown 失败。
+- [x] 复用 Task 3 Dashboard fixtures；其余 fixture 用 `satisfies` 检查 required TS wire fields。
+- [x] 建立 profile reset，确保 test 间无共享 mutation/state。
+- [x] 增加 source contract：fixture 不得有 catch-all empty response，mutation expectation 必须声明 method/body keys。
 
 Base config shape:
 
@@ -273,23 +273,23 @@ type ApiFixtureProfile = Readonly<Record<ApiRouteKey, ApiFixtureResponse>>
 
 ### Core Routes
 
-- [ ] 建立九 route manifest，给每条 route 指定 heading/main/workflow anchor/critical command text。
-- [ ] 先在 390px 写预期会捕获已知历史裁切/overflow 的几何断言，再确认 Task 6/7 final code为 GREEN。
-- [ ] 扩展 1024/1440；得到 27/27 matrix。
-- [ ] 每条 route 断言 URL 未被 auth/wildcard redirect、main 非空白、document/body scrollWidth 不超 viewport。
+- [x] 建立九 route manifest，给每条 route 指定 heading/main/workflow anchor/critical command text。
+- [x] 先在 390px 写预期会捕获已知历史裁切/overflow 的几何断言，再确认 Task 6/7 final code为 GREEN。
+- [x] 扩展 1024/1440；得到 27/27 matrix。
+- [x] 每条 route 断言 URL 未被 auth/wildcard redirect、main 非空白、document/body scrollWidth 不超 viewport。
 
 ### States
 
-- [ ] PageState loading/empty/error/success；loading 用受控 deferred response，不用任意 sleep。
-- [ ] Dashboard critical/abnormal/maintenance/onboarding/stable，覆盖 abnormal subset 与 VPS 503 failure-not-onboarding。
-- [ ] error retry 只重发规定 endpoint；unknown refresh 请求仍 fail closed。
+- [x] PageState loading/empty/error/success；loading 用受控 deferred response，不用任意 sleep。
+- [x] Dashboard critical/abnormal/maintenance/onboarding/stable，覆盖 abnormal subset 与 VPS 503 failure-not-onboarding。
+- [x] error retry 只重发规定 endpoint；unknown refresh 请求仍 fail closed。
 
 ### Security/Diagnostics
 
-- [ ] init script 先于 app 收集 CSP/unhandled rejection；page fixture 统一收集 console/page/network。
-- [ ] 精确断言 main document CSP header 等于 repository policy。
-- [ ] 故意注入 console error/CSP diagnostic 的 helper self-test先 RED，证明 collector 真会阻断；不要向 production source 注入。
-- [ ] 正常 suite 的 violation/error/unexpected network 全为零。
+- [x] init script 先于 app 收集 CSP/unhandled rejection；page fixture 统一收集 console/page/network。
+- [x] 精确断言 main document CSP header 等于 repository policy。
+- [x] 故意注入 console error/CSP diagnostic 的 helper self-test先 RED，证明 collector 真会阻断；不要向 production source 注入。
+- [x] 正常 suite 的 violation/error/unexpected network 全为零。
 
 **Focused verification:** `core-routes.spec.ts`, `page-states.spec.ts`, `security.spec.ts`。
 
@@ -297,14 +297,14 @@ type ApiFixtureProfile = Readonly<Record<ApiRouteKey, ApiFixtureResponse>>
 
 ### Checklist
 
-- [ ] axe 扫描 AppShell、Dashboard、Settings、VPS/Asset settled states，serious/critical = 0。
-- [ ] skip link：Tab 到链接、Enter 后 main 成为 activeElement。
-- [ ] Tabs：唯一 tab stop、ArrowLeft/Right 循环、Home/End、tab/tabpanel ids 与 label。
-- [ ] menu：打开、Arrow/Escape（按 Task 6 final contract）、关闭后 focus restore。
-- [ ] nested Modal：Tab trap；一次 Escape 只关子层并保持 body lock/父层；第二次关父层并恢复页面 focus。
-- [ ] Settings“监控策略”、Asset“场景与组合”、Provider“组合决策”在 390px 完整可见且 hit target 可达。
-- [ ] 宽表 wrapper 有可访问名称、`tabIndex=0` 和局部 overflow；heading/toolbar 不随表格横滚。
-- [ ] 不创建 tracked screenshot baseline；失败 artifacts 用于定位，人工视觉判断仍由 reviewer/staging evidence承担。
+- [x] axe 扫描 AppShell、Dashboard、Settings、VPS/Asset settled states，serious/critical = 0。
+- [x] skip link：Tab 到链接、Enter 后 main 成为 activeElement。
+- [x] Tabs：唯一 tab stop、ArrowLeft/Right 循环、Home/End、tab/tabpanel ids 与 label。
+- [x] menu：打开、Arrow/Escape（按 Task 6 final contract）、关闭后 focus restore。
+- [x] nested Modal：Tab trap；一次 Escape 只关子层并保持 body lock/父层；第二次关父层并恢复页面 focus。
+- [x] Settings“监控策略”、Asset“场景与组合”、Provider“组合决策”在 390px 完整可见且 hit target 可达。
+- [x] 宽表 wrapper 有可访问名称、`tabIndex=0` 和局部 overflow；heading/toolbar 不随表格横滚。
+- [x] 不创建 tracked screenshot baseline；失败 artifacts 用于定位，人工视觉判断仍由 reviewer/staging evidence承担。
 
 **Focused verification:** `accessibility.spec.ts`, `visual-contracts.spec.ts`。
 
@@ -312,17 +312,18 @@ type ApiFixtureProfile = Readonly<Record<ApiRouteKey, ApiFixtureResponse>>
 
 ### Existing Web Job
 
-- [ ] setup-node 仍唯一读取 `.node-version`，调用者继续用 `NODE_ENV=production make verify-web` 验证隔离。
-- [ ] `make verify-web` 完成 install -> lint/type-aware -> coverage -> build -> bundle/font -> CSS AST。
-- [ ] source/toolchain contract 证明 coverage/budget scripts 没有只存在 package.json 而未被 Make/CI调用。
+- [x] setup-node 仍唯一读取 `.node-version`，调用者继续用 `NODE_ENV=production make verify-web` 验证隔离。
+- [x] `make verify-web` 完成 install -> lint/type-aware -> coverage -> build -> bundle/font -> CSS AST。
+- [x] source/toolchain contract 证明 coverage/budget scripts 没有只存在 package.json 而未被 Make/CI调用。
 
 ### New Browser Job
 
-- [ ] checkout/setup-node/npm cache/npm ci。
-- [ ] cache + install matching Chromium；不能复用系统任意 Chrome 版本冒充 lockfile browser。
-- [ ] 运行 `npm run test:e2e`，上传 failure-only Playwright artifacts，retention 有限。
-- [ ] job 独立命名，配置为 required check；无 staging secrets、fork 安全。
-- [ ] 记录总时长；若过长先用 workers/cache/shard优化，不删断言。
+- [x] checkout/setup-node/npm cache/npm ci。
+- [x] cache + install matching Chromium；不能复用系统任意 Chrome 版本冒充 lockfile browser。
+- [x] 运行 `npm run test:e2e`，上传 failure-only Playwright artifacts，retention 有限。
+- [x] job 独立命名且无 staging secrets、fork 安全。
+- [ ] PR checks 实际出现后，将 `web-browser` 配置为 `main` required check（当前仓库尚未启用 branch protection）。
+- [x] 本地 58 tests 总时长 8.5s；CI 实际时长在 PR run 记录，若过长先用 workers/cache/shard优化，不删断言。
 
 Browser job wiring shape:
 
@@ -362,14 +363,14 @@ web-browser:
 
 在实现/路径稳定后使用 `trellis-update-spec`，不能先把理想路径写成现状。
 
-- [ ] `quality-guidelines.md`：新命令门户、coverage、browser/axe、bundle/CSS、type-aware lint、CI evidence。
-- [ ] `directory-structure.md`：Task 9 final CSS owner tree、e2e/fixture/config/budget真实路径；删除不存在路径和 inline theme 描述。
-- [ ] `styling-guidelines.md`：final CSS owner/import顺序、budget、CSP/static theme resources。
-- [ ] `component-conventions.md`：Task 6 final Form/Tabs/Menu/skip link 与正式 keyboard browser gate。
-- [ ] `state-and-data.md`：Task 8 `{state,commands}` controllers、request transport seam、Dashboard fixtures/e2e evidence boundary。
-- [ ] `index.md`：必要的 guide description/status更新。
-- [ ] `docs/operations/ui-preview-and-browser-sanity.md`：CI Playwright vs local helper vs staging、九 route/三 viewport、artifact与敏感数据政策。
-- [ ] 全仓搜索 `styles/atoms.css|styles/pages.css|app/layout/layout.css|inline theme|仓库.*没有.*Playwright`，仅保留明确历史/迁移说明。
+- [x] `quality-guidelines.md`：新命令门户、coverage、browser/axe、bundle/CSS、type-aware lint、CI evidence。
+- [x] `directory-structure.md`：Task 9 final CSS owner tree、e2e/fixture/config/budget真实路径；删除不存在路径和 inline theme 描述。
+- [x] `styling-guidelines.md`：final CSS owner/import顺序、budget、CSP/static theme resources。
+- [x] `component-conventions.md`：Task 6 final Form/Tabs/Menu/skip link 与正式 keyboard browser gate。
+- [x] `state-and-data.md`：Task 8 `{state,commands}` controllers、request transport seam、Dashboard fixtures/e2e evidence boundary。
+- [x] `index.md`：现有 description/status 仍准确，无需改动。
+- [x] `docs/operations/ui-preview-and-browser-sanity.md`：CI Playwright vs local helper vs staging、九 route/三 viewport、artifact与敏感数据政策。
+- [x] 全仓搜索 `styles/atoms.css|styles/pages.css|app/layout/layout.css|inline theme|仓库.*没有.*Playwright`，仅保留明确历史/迁移说明。
 
 **Validation:** task/spec links、真实 paths、所有 commands 可执行；不用占位词。
 
@@ -397,6 +398,18 @@ Exit evidence must include:
 - Playwright/Chromium/Node versions and CI duration;
 - all intentional exclusions/limitations (staging remains separate).
 
+### Local Gate Evidence — 2026-07-11
+
+- Toolchain: Node `22.23.1`, npm `10.9.8`, `@playwright/test 1.61.1`, Chromium `149.0.7827.55`（revision 1228）。
+- `env -u NODE_ENV ... make verify`: Go fmt/vet/tests、Web source contract、ESLint、coverage、strict build、bundle/font 与 CSS AST 全绿。
+- Vitest/V8: `118` files / `829` tests；statements `79.52%`、branches `70.89%`、functions `78.95%`、lines `83.16%`，均高于 committed global budget；全部 15 个 critical paths branch >=90。
+- Bundle/font: entry JS gzip `110742/110742`、entry CSS gzip `37135/37135`、max async JS gzip `32052/32052`、7 WOFF2 raw `139072/139072` bytes。
+- CSS: 26 files / 311063 source bytes / 2107 rules / 8517 declarations / 151 repeated selectors / 247 literal colors / 11 `!important`；production `293270` raw / `38119` gzip，全部等于或低于 Task 9 budget。
+- Chromium: `58/58`，其中 auth 2、core matrix 27/27、fixture-router 3、page states 12、security 2、accessibility/keyboard 8、responsive/geometry 4；本地总时长 `8.5s`。
+- `npm audit --include=dev`: `0 vulnerabilities`；`git diff --check`、Trellis validate 与 `scripts/check-web-quality-gates.test.sh` 全绿。
+- staging 负向自测：仅用 Vite preview + 虚构凭据时 `/api/healthz` 返回 502，smoke 按预期失败并写出 `conclusion=failed`、`failureCategory=real-environment:release version`、掩码截图；上传目录对虚构 username/password 零命中，且不含 trace/video/error-context。该结果只证明 fail-closed/脱敏失败路径，不是 staging 通过。
+- 限制：真实 GitHub `staging` environment、main-only deployment policy、URL 与账号 secrets 仍不存在；真实认证、real-data、injection、run artifact 与 Gate C 项保持未勾选。
+
 ## 13. Commit And PR Boundaries
 
 Recommended reviewable commits:
@@ -421,9 +434,9 @@ Recommended reviewable commits:
 
 - [x] 用户已于 2026-07-10 确认使用 `workflow_dispatch + GitHub staging environment`；人工本机入口不作为 Gate C 替代机制。
 - [ ] 创建 GitHub `staging` environment，将 deployment branch/ref policy 限制为仅 `main`，配置 `HOUFENG_STAGING_BASE_URL` variable 与 username/password secrets；值不写入 repo/task/log。
-- [ ] 增加不读取 environment/secrets 的 ref preflight；非 `main` dispatch 必须失败，不能仅 skip 后显示为成功。
-- [ ] 使用固定 concurrency group 串行运行并设置 `cancel-in-progress: false`，避免保存/恢复状态被并发或取消破坏。
-- [ ] workflow 输入 expected release version；healthz 不匹配立即失败。
+- [x] 增加不读取 environment/secrets 的 ref preflight；非 `main` dispatch 必须失败，不能仅 skip 后显示为成功。
+- [x] 使用固定 concurrency group 串行运行并设置 `cancel-in-progress: false`，避免保存/恢复状态被并发或取消破坏。
+- [x] workflow 输入 expected release version；healthz 不匹配立即失败。
 
 Approved workflow contract:
 

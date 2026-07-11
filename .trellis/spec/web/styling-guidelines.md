@@ -64,7 +64,7 @@
 - `.btn.primary` 使用 `background: var(--accent); color: var(--bg)`：暗色主题得到深色前景配亮蓝，亮色主题得到白色前景配深蓝。不要恢复 `#fff`，默认/经典暗色的 `#3b82f6` 对白色小字只有约 3.68:1。
 - `.badge--info.tone--critical` 的 11px 文字不能直接使用 critical token；`#ef4444` 在自身 10% tint 背景上只有约 4.0:1。共享 atom 使用 `color-mix(in srgb, var(--color-state-critical) 78%, var(--text-primary))` 提升暗色前景，同时让亮色 critical 继续向深色文本收束；border/background 仍由原 critical token 驱动。
 - 11.5px 的 `--text-secondary` 不能直接放在 alert/critical tint 上并假设基础 surface 对比度仍成立；例如亮色 Asset group card 的 alert 4% 背景上只有 4.46:1。该 card 的 context owner 使用 `color-mix(in srgb, var(--text-secondary) 90%, var(--text-primary))`，修改后必须在三主题 settled axe 中复验真实复合背景。
-- 修改任一状态/背景 token 后，至少在 `theme-houfeng-dark`、`theme-houfeng-light`、`theme-classic-dark` 的代表性状态密集页面运行 settled local axe；Task 10 完成前，这仍是 local-only evidence，不是 CI gate。
+- 修改任一状态/背景 token 后，先跑相关组件/页面测试，再运行 `web/e2e/accessibility.spec.ts` 的 settled axe 与三视口 browser contracts；serious/critical 必须为 0。额外主题人工/CDP 检查可以补充，但不能替代 repository gate。
 
 ```css
 /* Wrong: dark theme 可见，不代表 light theme 仍有对比度。 */
@@ -142,7 +142,7 @@
 ### 2. Signatures
 
 - `npm --prefix web run css:analyze`：读取 `web/css-owners.json`、`web/css-budget.json` 与 fresh `web/dist/**/*.css`，输出文本摘要；owner/config/预算失败时返回非零。
-- `node scripts/analyze-web-css.mjs --format json|text [--web-root PATH --owners PATH --budget PATH --dist PATH]`：可供 synthetic fixture 与 Task 10 CI 直接调用。
+- `node scripts/analyze-web-css.mjs --format json|text [--web-root PATH --owners PATH --budget PATH --dist PATH]`：供 synthetic fixture 与 `make verify-web` 的 CI gate 调用。
 - `web/css-owners.json`：`version=1`，恰好包含 app-shell、dashboard、assets、vps、observability、settings-subscriptions、shared-atoms-page 七个 key。
 - `web/css-budget.json`：`version=1`，固定 source files/bytes、rules、declarations、repeated selector texts、literal colors、`!important`、production raw/gzip 九个上限。
 
@@ -178,7 +178,7 @@
 - `cssAnalyzerContract.test.ts`：JSON inventory、唯一 owner、超预算 fail-closed、同 context 唯一性与 Login bundle allowlist。
 - `cssReachabilityContract.test.ts`：扫描真实 production glob，并列出 file/line/selector/unowned class。
 - `indexCssContract.test.ts`：递归本地 import graph、cycle/owner/non-empty partial、selector/context/declaration 唯一性与 synthetic first-match loophole。
-- 提交前运行 production build → `css:analyze`；涉及布局删除/重排时再跑 desktop/tablet/mobile local browser gate，断言 document/关键命令/局部 scroll owner 与 console/network/CSP。
+- 提交前运行 `make verify-web`（production build → bundle/font → `css:analyze`）；涉及布局删除/重排时再跑 `npm --prefix web run test:e2e`，断言 1440/1024/390 的 document、关键命令、局部 scroll owner 与 console/network/CSP。
 
 ### 7. Wrong vs Correct
 
