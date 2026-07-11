@@ -9,6 +9,7 @@ import {
 } from '../components/atoms'
 import { PortfolioWorkbench } from './asset-decisions/components/PortfolioWorkbench'
 import { SecondaryWorkbenches } from './asset-decisions/components/SecondaryWorkbenches'
+import { useAssetDecisionPortfolio } from './asset-decisions/hooks/useAssetDecisionPortfolio'
 import { useAssetDecisionRouteState } from './asset-decisions/hooks/useAssetDecisionRouteState'
 import {
   Badge,
@@ -28,7 +29,6 @@ import {
   deleteAssetDecisionManualGroupMember,
   getAssetDecisionGroup,
   getAssetDecisionManualGroup,
-  getAssetDecisionOverview,
   getAssetDecisionRecord,
   getAssetDecisionScenarioTemplate,
   listAssetDecisionGroups,
@@ -109,7 +109,6 @@ import type {
 } from './asset-decisions/types'
 import {
   INITIAL_DECISION_DRAFT,
-  INITIAL_PORTFOLIO_STATE,
   INITIAL_DETAIL_STATE,
   INITIAL_MANUAL_GROUPS_STATE,
   INITIAL_MANUAL_DETAIL_STATE,
@@ -508,7 +507,14 @@ export function AssetDecisionsPageContent() {
   )
   const contextFilterChips = route.state.contextFilterChips
   const [queueView, setQueueView] = useState<DecisionQueueView>('all')
-  const [portfolioState, setPortfolioState] = useState<PortfolioState>(INITIAL_PORTFOLIO_STATE)
+  const [groupsState, setGroupsState] = useState<Pick<
+    PortfolioState,
+    'groupsLoading' | 'groupsError' | 'groups'
+  >>({
+    groupsLoading: true,
+    groupsError: null,
+    groups: [],
+  })
   const [detailState, setDetailState] = useState<DetailState>(INITIAL_DETAIL_STATE)
   const [manualGroupsState, setManualGroupsState] = useState<ManualGroupsState>(INITIAL_MANUAL_GROUPS_STATE)
   const [manualDetailState, setManualDetailState] = useState<ManualDetailState>(INITIAL_MANUAL_DETAIL_STATE)
@@ -565,6 +571,16 @@ export function AssetDecisionsPageContent() {
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [decisionNotice, setDecisionNotice] = useState<string | null>(null)
   const [refreshToken, setRefreshToken] = useState(0)
+  const portfolio = useAssetDecisionPortfolio({
+    filter: assetDecisionFilter,
+    revision: refreshToken,
+  })
+  const portfolioState: PortfolioState = {
+    overviewLoading: portfolio.state.loading,
+    overviewError: portfolio.state.error,
+    overview: portfolio.state.overview,
+    ...groupsState,
+  }
   const searchParamSignature = route.state.searchSignature
   const secondaryWorkbench = route.state.secondary
   const setSelectedSecondaryWorkbench = route.commands.setSecondary
@@ -690,27 +706,22 @@ export function AssetDecisionsPageContent() {
     let cancelled = false
     const filter = assetDecisionFilter
 
-    Promise.allSettled([
-      getAssetDecisionOverview(filter),
-      listAssetDecisionGroups(filter),
-    ] as const)
-      .then(([overviewResult, groupsResult]) => {
+    listAssetDecisionGroups(filter)
+      .then((groups) => {
         if (cancelled) return
-        const overviewError = overviewResult.status === 'rejected'
-          ? describeError(overviewResult.reason, '加载资产组合概览失败')
-          : null
-        const groupsError = groupsResult.status === 'rejected'
-          ? describeError(groupsResult.reason, '加载资产决策组失败')
-          : null
-        setPortfolioState((current) => ({
-          ...current,
-          overviewLoading: false,
-          overviewError,
-          overview: overviewResult.status === 'fulfilled' ? overviewResult.value : null,
+        setGroupsState({
           groupsLoading: false,
-          groupsError,
-          groups: groupsResult.status === 'fulfilled' ? groupsResult.value : [],
-        }))
+          groupsError: null,
+          groups,
+        })
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setGroupsState({
+          groupsLoading: false,
+          groupsError: describeError(error, '加载资产决策组失败'),
+          groups: [],
+        })
       })
 
     return () => { cancelled = true }
@@ -1465,10 +1476,8 @@ export function AssetDecisionsPageContent() {
   }
 
   function setWorkbenchView(next: MainWorkbenchView) {
-    setPortfolioState((current) => ({
+    setGroupsState((current) => ({
       ...current,
-      overviewLoading: true,
-      overviewError: null,
       groupsLoading: true,
       groupsError: null,
     }))
@@ -1477,10 +1486,8 @@ export function AssetDecisionsPageContent() {
 
   function changeRenewalWindow(value: string) {
     const nextWindow = parseRenewalWindow(value)
-    setPortfolioState((current) => ({
+    setGroupsState((current) => ({
       ...current,
-      overviewLoading: true,
-      overviewError: null,
       groupsLoading: true,
       groupsError: null,
     }))
@@ -2417,10 +2424,8 @@ export function AssetDecisionsPageContent() {
           ),
         }))
         closeDecisionDrawer()
-        setPortfolioState((current) => ({
+        setGroupsState((current) => ({
           ...current,
-          overviewLoading: true,
-          overviewError: null,
           groupsLoading: true,
           groupsError: null,
         }))
