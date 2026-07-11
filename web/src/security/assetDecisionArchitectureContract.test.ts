@@ -7,6 +7,7 @@ const controllerSources = import.meta.glob('../pages/asset-decisions/hooks/useAs
 })
 
 const EXPECTED_CONTROLLER_PATHS = [
+  '../pages/asset-decisions/hooks/useAssetDecisionGroups.ts',
   '../pages/asset-decisions/hooks/useAssetDecisionPortfolio.ts',
   '../pages/asset-decisions/hooks/useAssetDecisionRouteState.ts',
 ]

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import {
@@ -9,6 +9,7 @@ import {
 } from '../components/atoms'
 import { PortfolioWorkbench } from './asset-decisions/components/PortfolioWorkbench'
 import { SecondaryWorkbenches } from './asset-decisions/components/SecondaryWorkbenches'
+import { useAssetDecisionGroups } from './asset-decisions/hooks/useAssetDecisionGroups'
 import { useAssetDecisionPortfolio } from './asset-decisions/hooks/useAssetDecisionPortfolio'
 import { useAssetDecisionRouteState } from './asset-decisions/hooks/useAssetDecisionRouteState'
 import {
@@ -27,11 +28,9 @@ import {
   createManualGroupFromScenarioTemplate,
   createAssetDecisionRecord,
   deleteAssetDecisionManualGroupMember,
-  getAssetDecisionGroup,
   getAssetDecisionManualGroup,
   getAssetDecisionRecord,
   getAssetDecisionScenarioTemplate,
-  listAssetDecisionGroups,
   listAssetDecisionManualGroups,
   listAssetDecisionRecords,
   listAssetDecisionScenarioTemplates,
@@ -50,7 +49,6 @@ import {
   type AssetDecisionEvidenceQualityTier,
   type AssetDecisionEvidenceSnapshot,
   type AssetDecisionGroupDetail,
-  type AssetDecisionGroupMember,
   type AssetDecisionGroupSummary,
   type AssetDecisionManualGroupDetail,
   type AssetDecisionManualGroupMember,
@@ -85,7 +83,6 @@ import type {
   DecisionQueueView,
   DecisionQueueItem,
   PortfolioState,
-  DetailState,
   ManualGroupsState,
   ManualDetailState,
   ScenarioTemplatesState,
@@ -99,7 +96,6 @@ import type {
   ManualMemberAddDraft,
   TemplateManualGroupDraft,
   FormSubmitEvent,
-  GroupDetailPanel,
   ManualDetailPanel,
   RecordDetailPanel,
   TemplateDetailPanel,
@@ -109,7 +105,6 @@ import type {
 } from './asset-decisions/types'
 import {
   INITIAL_DECISION_DRAFT,
-  INITIAL_DETAIL_STATE,
   INITIAL_MANUAL_GROUPS_STATE,
   INITIAL_MANUAL_DETAIL_STATE,
   INITIAL_SCENARIO_TEMPLATES_STATE,
@@ -129,6 +124,7 @@ import {
   EXECUTION_PLAN_LANE_ORDER,
 } from './asset-decisions/constants'
 import { vpsDetailPath, vpsWorkbenchPath } from './asset-decisions/paths'
+import { createMemberColumns } from './asset-decisions/tableColumns'
 import {
   completeRecordDraftFromGroupDetail,
   completeRecordDraftFromManualDetail,
@@ -507,15 +503,6 @@ export function AssetDecisionsPageContent() {
   )
   const contextFilterChips = route.state.contextFilterChips
   const [queueView, setQueueView] = useState<DecisionQueueView>('all')
-  const [groupsState, setGroupsState] = useState<Pick<
-    PortfolioState,
-    'groupsLoading' | 'groupsError' | 'groups'
-  >>({
-    groupsLoading: true,
-    groupsError: null,
-    groups: [],
-  })
-  const [detailState, setDetailState] = useState<DetailState>(INITIAL_DETAIL_STATE)
   const [manualGroupsState, setManualGroupsState] = useState<ManualGroupsState>(INITIAL_MANUAL_GROUPS_STATE)
   const [manualDetailState, setManualDetailState] = useState<ManualDetailState>(INITIAL_MANUAL_DETAIL_STATE)
   const [templatesState, setTemplatesState] = useState<ScenarioTemplatesState>(INITIAL_SCENARIO_TEMPLATES_STATE)
@@ -529,7 +516,6 @@ export function AssetDecisionsPageContent() {
   const [selectedRecordID, setSelectedRecordID] = useState<string | null>(null)
   const [selectedTemplateID, setSelectedTemplateID] = useState<string | null>(null)
   const [selectedVPS, setSelectedVPS] = useState<VPSAssetRecord | null>(null)
-  const [groupDetailPanel, setGroupDetailPanel] = useState<GroupDetailPanel>('overview')
   const [manualDetailPanel, setManualDetailPanel] = useState<ManualDetailPanel>('overview')
   const [recordDetailPanel, setRecordDetailPanel] = useState<RecordDetailPanel>('overview')
   const [templateDetailPanel, setTemplateDetailPanel] = useState<TemplateDetailPanel>('overview')
@@ -575,12 +561,23 @@ export function AssetDecisionsPageContent() {
     filter: assetDecisionFilter,
     revision: refreshToken,
   })
+  const automaticGroups = useAssetDecisionGroups({
+    filter: assetDecisionFilter,
+    renewalWindow,
+    selectedGroupID,
+    revision: refreshToken,
+  })
   const portfolioState: PortfolioState = {
     overviewLoading: portfolio.state.loading,
     overviewError: portfolio.state.error,
     overview: portfolio.state.overview,
-    ...groupsState,
+    groupsLoading: automaticGroups.state.list.loading,
+    groupsError: automaticGroups.state.list.error,
+    groups: automaticGroups.state.list.groups,
   }
+  const detailState = automaticGroups.state.detail
+  const groupDetailPanel = automaticGroups.state.detailPanel
+  const resetGroupDetailUI = automaticGroups.commands.resetDetailUI
   const searchParamSignature = route.state.searchSignature
   const secondaryWorkbench = route.state.secondary
   const setSelectedSecondaryWorkbench = route.commands.setSecondary
@@ -590,16 +587,15 @@ export function AssetDecisionsPageContent() {
     summary: AssetDecisionManualGroupSummary
   }>())
 
-  function applyURLClearedOpenState() {
+  const applyURLClearedOpenState = useCallback(() => {
     setSelectedGroupID(null)
+    resetGroupDetailUI()
     setSelectedManualGroupID(null)
     setSelectedRecordID(null)
     setSelectedTemplateID(null)
-    setGroupDetailPanel('overview')
     setManualDetailPanel('overview')
     setRecordDetailPanel('overview')
     setTemplateDetailPanel('overview')
-    setDetailState(INITIAL_DETAIL_STATE)
     setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
     setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
     setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
@@ -610,9 +606,9 @@ export function AssetDecisionsPageContent() {
     setTemplateError(null)
     setPendingManualMemberRemoval(null)
     setPendingTemplateStatus(null)
-  }
+  }, [resetGroupDetailUI])
 
-  function applyURLGroupOpenState(groupID: string) {
+  const applyURLGroupOpenState = useCallback((groupID: string) => {
     setSelectedManualGroupID(null)
     setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
     setSelectedRecordID(null)
@@ -627,17 +623,16 @@ export function AssetDecisionsPageContent() {
     setTemplateError(null)
     setPendingManualMemberRemoval(null)
     setPendingTemplateStatus(null)
-    setGroupDetailPanel('overview')
+    resetGroupDetailUI()
     setManualDetailPanel('overview')
     setRecordDetailPanel('overview')
     setTemplateDetailPanel('overview')
-    setDetailState({ loading: true, error: null, detail: null })
     setSelectedGroupID(groupID)
-  }
+  }, [resetGroupDetailUI])
 
-  function applyURLManualGroupOpenState(manualGroupID: string) {
+  const applyURLManualGroupOpenState = useCallback((manualGroupID: string) => {
     setSelectedGroupID(null)
-    setDetailState(INITIAL_DETAIL_STATE)
+    resetGroupDetailUI()
     setSelectedRecordID(null)
     setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
     setSelectedTemplateID(null)
@@ -650,19 +645,18 @@ export function AssetDecisionsPageContent() {
     setTemplateError(null)
     setPendingManualMemberRemoval(null)
     setPendingTemplateStatus(null)
-    setGroupDetailPanel('overview')
     setManualDetailPanel('overview')
     setRecordDetailPanel('overview')
     setTemplateDetailPanel('overview')
     setManualDetailState({ loading: true, error: null, detail: null })
     setSelectedManualGroupID(manualGroupID)
-  }
+  }, [resetGroupDetailUI])
 
-  function applyURLRecordOpenState(recordID: string) {
+  const applyURLRecordOpenState = useCallback((recordID: string) => {
     setSelectedGroupID(null)
+    resetGroupDetailUI()
     setSelectedManualGroupID(null)
     setSelectedTemplateID(null)
-    setDetailState(INITIAL_DETAIL_STATE)
     setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
     setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
     setSelectedVPS(null)
@@ -672,18 +666,17 @@ export function AssetDecisionsPageContent() {
     setTemplateError(null)
     setPendingManualMemberRemoval(null)
     setPendingTemplateStatus(null)
-    setGroupDetailPanel('overview')
     setManualDetailPanel('overview')
     setRecordDetailPanel('overview')
     setTemplateDetailPanel('overview')
     setSelectedRecordID(recordID)
     setRecordDetailState({ loading: true, error: null, detail: null })
     setRecordPatchError(null)
-  }
+  }, [resetGroupDetailUI])
 
-  function applyURLTemplateOpenState(templateID: string) {
+  const applyURLTemplateOpenState = useCallback((templateID: string) => {
     setSelectedGroupID(null)
-    setDetailState(INITIAL_DETAIL_STATE)
+    resetGroupDetailUI()
     setSelectedManualGroupID(null)
     setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
     setSelectedRecordID(null)
@@ -694,38 +687,12 @@ export function AssetDecisionsPageContent() {
     setRecordSaveError(null)
     setManualGroupError(null)
     setTemplateError(null)
-    setGroupDetailPanel('overview')
     setManualDetailPanel('overview')
     setRecordDetailPanel('overview')
     setTemplateDetailPanel('overview')
     setTemplateDetailState({ loading: true, error: null, detail: null })
     setSelectedTemplateID(templateID)
-  }
-
-  useEffect(() => {
-    let cancelled = false
-    const filter = assetDecisionFilter
-
-    listAssetDecisionGroups(filter)
-      .then((groups) => {
-        if (cancelled) return
-        setGroupsState({
-          groupsLoading: false,
-          groupsError: null,
-          groups,
-        })
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setGroupsState({
-          groupsLoading: false,
-          groupsError: describeError(error, '加载资产决策组失败'),
-          groups: [],
-        })
-      })
-
-    return () => { cancelled = true }
-  }, [assetDecisionFilter, refreshToken])
+  }, [resetGroupDetailUI])
 
   useEffect(() => {
     let cancelled = false
@@ -872,27 +839,6 @@ export function AssetDecisionsPageContent() {
   }, [refreshToken])
 
   useEffect(() => {
-    if (!selectedGroupID) {
-      return
-    }
-    let cancelled = false
-    getAssetDecisionGroup(selectedGroupID, { renew_within_days: renewalWindow })
-      .then((detail) => {
-        if (cancelled) return
-        setDetailState({ loading: false, error: null, detail })
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setDetailState({
-          loading: false,
-          error: describeError(error, '加载决策组详情失败'),
-          detail: null,
-        })
-      })
-    return () => { cancelled = true }
-  }, [selectedGroupID, renewalWindow, refreshToken])
-
-  useEffect(() => {
     if (!selectedManualGroupID) {
       return
     }
@@ -1001,7 +947,19 @@ export function AssetDecisionsPageContent() {
     return () => {
       window.clearTimeout(timer)
     }
-  }, [route.state.open, searchParamSignature, selectedGroupID, selectedManualGroupID, selectedRecordID, selectedTemplateID])
+  }, [
+    applyURLClearedOpenState,
+    applyURLGroupOpenState,
+    applyURLManualGroupOpenState,
+    applyURLRecordOpenState,
+    applyURLTemplateOpenState,
+    route.state.open,
+    searchParamSignature,
+    selectedGroupID,
+    selectedManualGroupID,
+    selectedRecordID,
+    selectedTemplateID,
+  ])
 
   const subscriptionsByVPS = useMemo(
     () => groupSubscriptionsByVPS(queueState.subscriptions),
@@ -1097,62 +1055,9 @@ export function AssetDecisionsPageContent() {
     totalDecisionQueue,
   )
 
-  const memberColumns: DataTableColumn<AssetDecisionGroupMember>[] = [
-    {
-      key: 'vps',
-      label: 'VPS',
-      width: '280px',
-      render: (member) => (
-        <div className="asset-table__identity">
-          <strong><Link className="name" to={vpsDetailPath(member.vps.vps_id)}>{member.vps.display_name}</Link></strong>
-          <span>{formatOptional(member.vps.provider_name)} · {vpsLocationLabel(member.vps)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'role',
-      label: '角色',
-      width: '160px',
-      render: (member) => (
-        <Badge variant="state" tone={roleTone(member.suggested_role)}>
-          {ROLE_LABELS[member.suggested_role]}
-        </Badge>
-      ),
-    },
-    {
-      key: 'action',
-      label: '动作',
-      width: '180px',
-      render: (member) => (
-        <Badge variant="state" tone={actionTone(member.suggested_action)}>
-          {ACTION_LABELS[member.suggested_action]}
-        </Badge>
-      ),
-    },
-    {
-      key: 'status',
-      label: '状态',
-      width: '220px',
-      render: (member) => (
-        <span className="asset-decision-chip-row">
-          <LifecycleBadge value={member.vps.lifecycle_status} />
-          <UsageBadge value={member.vps.usage_status} />
-          <RenewalBadge value={member.vps.renewal_decision} />
-        </span>
-      ),
-    },
-    {
-      key: 'actions',
-      label: '操作',
-      align: 'right',
-      width: '112px',
-      render: (member) => (
-        <button className="btn sm primary" type="button" onClick={() => selectVPS(member.vps)}>
-          处理
-        </button>
-      ),
-    },
-  ]
+  const memberColumns = createMemberColumns({
+    onSelect: (member) => selectVPS(member.vps),
+  })
 
   const manualMemberColumns: DataTableColumn<AssetDecisionManualGroupMember>[] = [
     {
@@ -1476,21 +1381,11 @@ export function AssetDecisionsPageContent() {
   }
 
   function setWorkbenchView(next: MainWorkbenchView) {
-    setGroupsState((current) => ({
-      ...current,
-      groupsLoading: true,
-      groupsError: null,
-    }))
     route.commands.setWorkbench(next)
   }
 
   function changeRenewalWindow(value: string) {
     const nextWindow = parseRenewalWindow(value)
-    setGroupsState((current) => ({
-      ...current,
-      groupsLoading: true,
-      groupsError: null,
-    }))
     setQueueState((current) => ({
       ...current,
       renewalsLoading: true,
@@ -1528,31 +1423,29 @@ export function AssetDecisionsPageContent() {
     setRecordSaveError(null)
     setManualGroupError(null)
     setTemplateError(null)
-    setGroupDetailPanel('overview')
+    automaticGroups.commands.resetDetailUI()
     setManualDetailPanel('overview')
     setRecordDetailPanel('overview')
     setTemplateDetailPanel('overview')
-    setDetailState({ loading: true, error: null, detail: null })
     setSelectedGroupID(groupID)
     setOpenState('group_id', groupID)
   }
 
   function closeGroupDetail() {
     setSelectedGroupID(null)
-    setDetailState(INITIAL_DETAIL_STATE)
+    automaticGroups.commands.resetDetailUI()
     setSelectedVPS(null)
     setRecordDraft(null)
     setRecordSaveError(null)
     setDecisionDraft(INITIAL_DECISION_DRAFT)
     setDecisionError(null)
-    setGroupDetailPanel('overview')
     clearOpenState('group_id')
   }
 
   function openManualGroup(manualGroupID: string) {
     setSelectedSecondaryWorkbench('scenarios')
     setSelectedGroupID(null)
-    setDetailState(INITIAL_DETAIL_STATE)
+    automaticGroups.commands.resetDetailUI()
     setSelectedRecordID(null)
     setRecordDetailState(INITIAL_RECORD_DETAIL_STATE)
     setSelectedTemplateID(null)
@@ -1563,7 +1456,6 @@ export function AssetDecisionsPageContent() {
     setRecordSaveError(null)
     setManualGroupError(null)
     setTemplateError(null)
-    setGroupDetailPanel('overview')
     setManualDetailPanel('overview')
     setRecordDetailPanel('overview')
     setTemplateDetailPanel('overview')
@@ -1595,7 +1487,7 @@ export function AssetDecisionsPageContent() {
   function openTemplate(templateID: string) {
     setSelectedSecondaryWorkbench('scenarios')
     setSelectedGroupID(null)
-    setDetailState(INITIAL_DETAIL_STATE)
+    automaticGroups.commands.resetDetailUI()
     setSelectedManualGroupID(null)
     setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
     setSelectedRecordID(null)
@@ -1606,7 +1498,6 @@ export function AssetDecisionsPageContent() {
     setRecordSaveError(null)
     setManualGroupError(null)
     setTemplateError(null)
-    setGroupDetailPanel('overview')
     setManualDetailPanel('overview')
     setRecordDetailPanel('overview')
     setTemplateDetailPanel('overview')
@@ -1695,11 +1586,10 @@ export function AssetDecisionsPageContent() {
         applyManualDetail(manualDetail)
         setSelectedSecondaryWorkbench('scenarios')
         setSelectedGroupID(null)
-        setDetailState(INITIAL_DETAIL_STATE)
+        automaticGroups.commands.resetDetailUI()
         setSelectedVPS(null)
         setDecisionDraft(INITIAL_DECISION_DRAFT)
         setSelectedManualGroupID(manualDetail.manual_group_id)
-        setGroupDetailPanel('overview')
         setManualDetailPanel('overview')
         setOpenState('manual_group_id', manualDetail.manual_group_id)
         setDecisionNotice(`已创建自定义组合：${manualDetail.title}`)
@@ -1717,7 +1607,7 @@ export function AssetDecisionsPageContent() {
       setRecordDraftEditingMemberID(null)
     }
     setRecordSaveError(null)
-    setGroupDetailPanel('save')
+    automaticGroups.commands.selectPanel('save')
   }
 
   function startManualRecordSave(detail: AssetDecisionManualGroupDetail) {
@@ -1735,7 +1625,7 @@ export function AssetDecisionsPageContent() {
     setRecordDraft(null)
     setRecordDraftEditingMemberID(null)
     setRecordSaveError(null)
-    if (sourceType === 'auto_group') setGroupDetailPanel('overview')
+    if (sourceType === 'auto_group') automaticGroups.commands.selectPanel('overview')
     if (sourceType === 'manual_group') setManualDetailPanel('overview')
   }
 
@@ -1893,9 +1783,9 @@ export function AssetDecisionsPageContent() {
         setRecordDraft(null)
         setDecisionNotice(`已保存组合决策记录：${record.title}`)
         setSelectedGroupID(null)
+        automaticGroups.commands.resetDetailUI()
         setSelectedManualGroupID(null)
         setSelectedTemplateID(null)
-        setDetailState(INITIAL_DETAIL_STATE)
         setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
         setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
         setSelectedVPS(null)
@@ -1903,7 +1793,6 @@ export function AssetDecisionsPageContent() {
         setOpenState('record_id', record.record_id)
         setRecordDetailState({ loading: false, error: null, detail: record })
         setRecordPatchStatus(record.status)
-        setGroupDetailPanel('overview')
         setManualDetailPanel('overview')
         setTemplateDetailPanel('overview')
         setRecordDetailPanel('overview')
@@ -1917,9 +1806,9 @@ export function AssetDecisionsPageContent() {
   function openRecord(recordID: string) {
     setSelectedSecondaryWorkbench('records')
     setSelectedGroupID(null)
+    automaticGroups.commands.resetDetailUI()
     setSelectedManualGroupID(null)
     setSelectedTemplateID(null)
-    setDetailState(INITIAL_DETAIL_STATE)
     setManualDetailState(INITIAL_MANUAL_DETAIL_STATE)
     setTemplateDetailState(INITIAL_TEMPLATE_DETAIL_STATE)
     setSelectedVPS(null)
@@ -1930,7 +1819,6 @@ export function AssetDecisionsPageContent() {
     setSelectedRecordID(recordID)
     setRecordDetailState({ loading: true, error: null, detail: null })
     setRecordPatchError(null)
-    setGroupDetailPanel('overview')
     setManualDetailPanel('overview')
     setRecordDetailPanel('overview')
     setTemplateDetailPanel('overview')
@@ -2347,7 +2235,7 @@ export function AssetDecisionsPageContent() {
     setDecisionDraft({ renewalDecision: vps.renewal_decision, reason: '' })
     setDecisionError(null)
     setDecisionNotice(null)
-    if (selectedGroupID) setGroupDetailPanel('vps')
+    if (selectedGroupID) automaticGroups.commands.selectPanel('vps')
     if (selectedManualGroupID) setManualDetailPanel('add')
   }
 
@@ -2388,7 +2276,7 @@ export function AssetDecisionsPageContent() {
     setSelectedVPS(null)
     setDecisionDraft(INITIAL_DECISION_DRAFT)
     setDecisionError(null)
-    if (selectedGroupID) setGroupDetailPanel('members')
+    if (selectedGroupID) automaticGroups.commands.selectPanel('members')
   }
 
   function handleDecisionSubmit(event: FormSubmitEvent) {
@@ -2424,11 +2312,6 @@ export function AssetDecisionsPageContent() {
           ),
         }))
         closeDecisionDrawer()
-        setGroupsState((current) => ({
-          ...current,
-          groupsLoading: true,
-          groupsError: null,
-        }))
         setQueueState((current) => ({
           ...current,
           renewalsLoading: true,
@@ -2436,13 +2319,6 @@ export function AssetDecisionsPageContent() {
           queueLoading: true,
           queueError: null,
         }))
-        if (selectedGroupID) {
-          setDetailState((current) => ({
-            ...current,
-            loading: true,
-            error: null,
-          }))
-        }
         setRefreshToken((current) => current + 1)
         const baseNotice = `续费决策已保存：${updated.display_name} -> ${renewalQueueLabel(updated.renewal_decision)}`
         const linkageMessage = updated.renewal_subscription_linkage?.message
@@ -2520,7 +2396,7 @@ export function AssetDecisionsPageContent() {
         open={selectedGroupID != null}
         detailState={detailState}
         groupDetailPanel={groupDetailPanel}
-        onSetGroupDetailPanel={setGroupDetailPanel}
+        onSetGroupDetailPanel={automaticGroups.commands.selectPanel}
         recordDraft={recordDraft}
         onSetRecordDraft={setRecordDraft}
         recordSaving={recordSaving}
