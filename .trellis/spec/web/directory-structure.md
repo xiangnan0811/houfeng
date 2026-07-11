@@ -62,6 +62,12 @@ web/
     │       └── layout.css      # 仅服务于本目录组件
     ├── pages/                  # 一文件一路由页
     │   ├── DashboardPage.tsx + DashboardPage.test.tsx
+    │   ├── AssetDecisionsPage.tsx + AssetDecisionsPage.test.tsx
+    │   ├── asset-decisions/    # Asset Decisions 路由私有领域模块
+    │   │   ├── hooks/          # 七个 {state, commands} controller + invalidation
+    │   │   ├── components/     # 受控 workbench / record presentation
+    │   │   ├── modals/         # 五个受控 modal 边界
+    │   │   └── *.test.tsx      # 按业务域拆分的 workflow tests
     │   ├── MonitoringPage.tsx + MonitoringPage.test.tsx
     │   ├── MonitoringDetailPage.tsx + MonitoringDetailPage.test.tsx
     │   ├── MonitoringDetailPage.tsx + MonitoringDetailPage.test.tsx
@@ -121,6 +127,7 @@ web/
 **一条业务路由一个 `<Name>Page.tsx`**，并 colocate 同名测试 `<Name>Page.test.tsx`（实测：`pages/` 下每个页面都有同名 `.test.tsx`）。
 
 - 页面是**装配点**：调 `lib/api.ts` 拉数据，编排 `components/` 的展示原子，处理本地 UI 状态与表单。
+- 复杂单路由可建立 `<route-name>/` 私有目录；`asset-decisions/` 是当前参考：route page 只组合七个 `{state, commands}` controller、纯 model 与受控展示，controller / component / modal / workflow test 均留在路由私有边界内，不提升为跨页共享模块。
 - 页面之间**不要相互 import**；要复用就抽到 `components/`。
 - 页面仅由 `app/router.tsx` 引用。
 
@@ -168,7 +175,7 @@ web/
 | 路由页组件 | 与文件同名命名导出 `export function <Name>Page()` | `export function MonitoringPage()` |
 | 共享组件文件 | `<ComponentName>.tsx`（PascalCase，与组件同名） | `IncidentList.tsx`、`atoms/Sparkline.tsx` |
 | 测试文件 | 与被测同目录、同名 + `.test.tsx` / `.test.ts` | `MonitoringPage.test.tsx`、`api.test.ts` |
-| Hook 文件 | 当前未单独建 `hooks/` 目录；本地 hook 就近放在使用文件内 | — |
+| Hook 文件 | 跨页 hook 放 `lib/`；经设计评审的复杂路由 controller 可放 `pages/<route>/hooks/`，并统一返回 `{state, commands}` | `pages/asset-decisions/hooks/useAssetDecisionGroups.ts` |
 | Context Provider | `<Name>Provider`，对应 hook `use<Name>` | `AuthProvider` + `useAuth` |
 | API client 函数 | 动词 + 资源驼峰；GET 用 `list/get`、POST 用 `create/issue/...` | `listMonitoringInstances`、`getMonitoringInstance`、`createTarget`、`issueMonitoringInstanceEnrollmentToken` |
 | 类型 | 与 center 响应同名的领域记录用 `<Aggregate>Record` / `<Aggregate>Input` 后缀 | `MonitoringInstanceRecord`、`UpdateMonitoringInstanceMetadataInput` |
@@ -183,6 +190,7 @@ web/
 | 新增业务路由 / 整页 | 1) 新建 `web/src/pages/<Name>Page.tsx` + 同名 `*.test.tsx`；2) 在 `web/src/app/router.tsx` 用 `React.lazy` 建 lower camelCase 页面模块变量；3) 在 `appRoutes` 内用 `routeElement(<module>, '<中文加载文案>')` 挂到 `<RequireAuth />` 下；4) 如需新数据，先在 `lib/api.ts` 加函数 + `lib/types.ts` 加类型 |
 | 新跨页展示原子 | `web/src/components/atoms/<Name>.tsx` + 同名 `*.test.tsx`；在 `atoms/index.ts` 导出；如需新样式加到 `styles/atoms.css` |
 | 新跨页业务组合组件 | `web/src/components/<Name>.tsx`（与 IncidentList / EventList 同级），保持纯展示 / 受控 |
+| 新复杂路由私有 controller / presentation | `web/src/pages/<route>/hooks/use<Name>.ts` 与同级 `components/` / `modals/`；route page 是唯一 composition point，controller 不互相 import，展示层不 import controller/API |
 | 新 API 调用 | `web/src/lib/api.ts` 加函数；如响应/请求体新颖，同步在 `lib/types.ts` 加类型；不要在 page / component 里直接 `fetch()` |
 | 新数据格式化 | `web/src/lib/format.ts` 加函数；同时在 `lib/format.test.ts` 增用例 |
 | 新跨树 / 跨组件状态 | 当前只有 `auth-context` / `theme-context` 两个 Provider；如确需第三个，放 `web/src/lib/<name>-context.tsx`，并在 `main.tsx` 挂到 Provider 链 |

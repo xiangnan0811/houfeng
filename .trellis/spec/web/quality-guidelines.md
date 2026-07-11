@@ -144,6 +144,7 @@ verify-web: test-web-toolchain
 - **每个 atom 有同名测试**（`atoms/Button.test.tsx` / `Card.test.tsx` / `Sparkline.test.tsx` / `Input.test.tsx` / `Badge.test.tsx` / `DataTable.test.tsx` / `Mono.test.tsx` / `StatusGlyph.test.tsx` / `Tabs.test.tsx` / `Toggle.test.tsx`）。新增 atom 同样补一份。
 - **跨页业务组合组件按需测**（`IncidentList.test.tsx` / `EventList.test.tsx` / `ActionConfirmationCard.test.tsx` 已有；`DetailSection` / `StatusBadge` 当前未测——**不强制**，但如果改动到行为分支，请补）。
 - **`lib/` 工具函数**——纯逻辑（`format.ts` / `theme.ts`）应有单测，I/O 边界（`api.ts` / `auth-client.ts`）按现状 mock `fetch` 跑表驱动用例。
+- **复杂路由的结构合同必须扫描真实 production glob**：`assetDecisionArchitectureContract.test.ts` 使用 TypeScript compiler AST + synthetic fixtures，固定七个 controller entry、API symbol owner、唯一 router owner、禁止依赖边、无 `*PageContent` 替身，以及 page ≤400、controller ≤600、任一 route-private production file ≤800、controller `useEffect` ≤3。不要用 wrapper 文件、正则 import parser、路径/行号白名单或仅测试 happy fixture 代替 repository inventory。
 
 ### 测试模式（实读）
 
@@ -225,6 +226,7 @@ it('applies variant class', () => {
 - **可视化回归 / 截图对比**不在 `make verify-web`。当前 UI 指导见 `docs/design/current/{interface-language.md,component-patterns.md}`；预览、浏览器 sanity 与本地截图政策见 `docs/operations/ui-preview-and-browser-sanity.md`。bulk screenshot evidence 与 manifest 不再 tracked；新 raster 图片只有在用户明确批准为 public README/docs asset 时才可提交到 allowlisted docs asset path。旧截图流程与一次性历史截图不是当前 workflow。
 - **本地 browser sanity**优先用 `python3 scripts/visual_evidence.py browser-sanity --base-url <url> --route <route> ...` 复用标准几何检查；它依赖本机 Python Playwright 时必须在 PR / final report 里标注为 local-only evidence。缺少本机 Python Playwright 只说明这条 helper 路径不可用，不能直接断言“浏览器 sanity 被阻塞”；先检查是否可用本机 Chromium remote debugging + CDP（例如 Node 原生 WebSocket）或其它已安装浏览器工具取得等价 route / viewport / selector 证据。无论走哪条本地路径，都不要把 Playwright/Cypress/WebDriverIO 加进 `web/package.json` 来绕过。
 - 响应式修复的 local-only CDP 证据必须记录 route × viewport 矩阵、`documentWidth/innerWidth`、目标 `client/scroll` 尺寸、computed `white-space/overflow/text-overflow`、局部 scroll region 的 role/name/tabIndex/scrollLeft、关键命令 hit-test 和完整 diagnostics counters。只写“肉眼看起来正常”或只保留截图不算通过。
+- URL-owned Modal 的浏览器证据还必须覆盖至少一个真实 filtered revalidation：聚焦实体入口，打开详情并确认请求 inventory，Escape 关闭后断言焦点回同一 group/manual/record 入口、body unlock、无 console/page/network/CSP error。测试不能只等新按钮出现；必须检查真实 `document.activeElement`，否则 restore target 被卸载后落到 `body` 会漏检。
 - **真实 center 烟囱**由 `docs/operations/fresh-install-smoke-run.md` 承担，前端只在浏览器里 sanity check。
 
 ### Scenario: 非语义点击 AST contract 与可访问性证据层级
@@ -349,6 +351,7 @@ export default defineConfig([
 |------|----------------|
 | 新增 / 修改 center HTTP 端点的请求 / 响应字段 | 1) 后端按 `.trellis/spec/backend/` 改完；2) `web/src/lib/types.ts` 加 / 改 `*Record` `*Input`，**保持 snake_case 与 Go JSON tag 一致**；3) `web/src/lib/api.ts` 加 / 改函数；4) page / component 调用方更新；5) 必要时 page 测试的 `toHaveBeenLastCalledWith` 断言一起更新 |
 | 新增 / 修改业务 API 调用 | 必须落到 `web/src/lib/api.ts`，**不要**在 page / component 里直接 `fetch()`；历史直连创建监控实例 API 已偿还，reviewer 不要让这类请求回流到 page |
+| 修改 Asset Decisions controller / route composition | 运行 `AssetDecisionsPage.test.tsx`、全部 `asset-decisions/` domain workflow/controller tests 与 `assetDecisionArchitectureContract.test.ts`；核对四个 filtered GET、11 GET renewal inventory、group/manual/record focus restore 和结构预算 |
 | 新增 page | `web/src/app/router.tsx` 注册路由 + colocate `<Page>.test.tsx`（至少 1 个 happy-path test） |
 | 新增 atom | `web/src/components/atoms/<Name>.tsx` + 同名 `.test.tsx` + `atoms/index.ts` 加 barrel export + `web/src/styles/atoms.css` 加样式（用令牌） |
 | 新增 / 改 CSS 令牌 | `web/src/styles/tokens.css` 同步检查 3 套运行时主题（`:root` / `theme-houfeng-light` / `theme-classic-dark`）；`classic-light` 复用 `houfeng-light`，见 `.trellis/spec/web/styling-guidelines.md` |

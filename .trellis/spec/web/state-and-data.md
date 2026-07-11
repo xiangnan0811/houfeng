@@ -606,6 +606,9 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 #### 2. Signatures
 
 - Frontend API: `getAssetDecisionOverview(filter?)`, `listAssetDecisionGroups(filter?)`, `getAssetDecisionGroup(groupId, filter?)`, `listAssetDecisionManualGroups(filter?)`, `createAssetDecisionManualGroup(input)`, `getAssetDecisionManualGroup(manualGroupId)`, `patchAssetDecisionManualGroup(manualGroupId, input)`, `addAssetDecisionManualGroupMember(manualGroupId, input)`, `patchAssetDecisionManualGroupMember(manualGroupId, vpsId, input)`, `deleteAssetDecisionManualGroupMember(manualGroupId, vpsId)`, `listAssetDecisionScenarioTemplates()`, `createAssetDecisionScenarioTemplate(input)`, `getAssetDecisionScenarioTemplate(templateId)`, `patchAssetDecisionScenarioTemplate(templateId, input)`, `createManualGroupFromScenarioTemplate(templateId, input)`, `listAssetDecisionRecords(filter?)`, `createAssetDecisionRecord(input)`, `getAssetDecisionRecord(recordId)`, `patchAssetDecisionRecord(recordId, input)`, `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。`listVPSAssets` / `listSubscriptions` 支持 `asset_scope='current'|'historical'|'archived'|'all'`；普通页面不传 scope，使用后端默认 current；归档列表页显式传 `historical`；`archived` 只作为旧客户端兼容别名；归档详情订阅历史使用 `all`。`updateVPSAsset` 仍返回 VPS record 字段，并可在取消类续费决策响应中附带 `renewal_subscription_linkage` 状态摘要。取消 / 退役协同使用 `getVPSCancellationPreview(vpsId)`、`applyVPSCancellation(vpsId, input)`、`listTargetAssetContexts()`；归档 / 恢复使用 `getVPSArchiveReview(vpsId)`、`archiveVPS(vpsId, input)`、`restoreVPSFromArchive(vpsId)`。页面不得直接 `fetch()`。
+- Route-scoped controller signatures: `useAssetDecisionRouteState`、`useAssetDecisionPortfolio`、`useAssetDecisionGroups`、`useAssetDecisionManualGroups`、`useAssetDecisionTemplates`、`useAssetDecisionRecords`、`useAssetDecisionRenewalQueue` 均只返回 `{state, commands}`。`useAssetDecisionRouteState` 是唯一 `useSearchParams` / `useNavigate` owner；六个数据 controller 按各自 API 白名单拥有读取、mutation、错误与局部 UI state。
+- Revalidation identity: `assetDecisionFilterKey(filter)` 是判断 filtered UI 是否仍代表同一语义查询的唯一 owner。route 的完整 `searchParams` identity 仍作为 effect dependency，以保留 open key 变化时 overview / groups / manual groups / records 四个 GET；UI currency 不得使用对象引用相等判断。
+- Cross-domain invalidation: `renewal-decision-saved` 是唯一语义事件，`applyAssetDecisionInvalidation` 把它映射到 portfolio / groups / manualGroups / templates / records / renewalQueue 六个 revision；controller 不直接调用另一个 controller。
 - Asset portfolio data: `AssetDecisionsPage` 首屏主 surface 从 `/api/asset-decisions/overview` 与 `/api/asset-decisions/groups?view=&renew_within_days=` 读取自动组；点击组时读取 `/api/asset-decisions/groups/{group_id}?renew_within_days=`。自动组是只读派生视图，不在前端保存或补写 group state；保存决策必须调用 `/api/asset-decisions/records`，由后端重新计算组详情并生成快照。
 - Manual scenario data: 页面读取 `/api/asset-decisions/manual-groups` 展示“自定义组合” surface；点击组合读取 `/api/asset-decisions/manual-groups/{manual_group_id}`。从自动组创建手工组合 POST `source_type=auto_group`、`source_group_id`、`renew_within_days`、`scenario`、`title`、`goal`、`note`；成员增删改只调用 manual group member endpoints。新增成员必须用 VPS selector，从 `listVPSAssets()` 候选选择，不要求用户复制内部 ID。
 - Scenario template data: 页面读取 `/api/asset-decisions/scenario-templates` 展示“场景模板” surface。内置模板只能用于创建自定义组合，不能 PATCH；自定义模板可从手工组合另存并可归档/启用。模板详情 `template_id` 深链只读取模板；从模板创建组合必须调用 `createManualGroupFromScenarioTemplate`，成功后打开新 manual group。模板不能直接创建 record，不能写 VPS / Subscription / MonitoringInstance / Target。
@@ -622,6 +625,8 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 #### 3. Contracts
 
+- `AssetDecisionsPage.tsx` 是薄 composition coordinator：只组合七个 controller、纯 model、两个 workbench 与五个 modal；不得 import `lib/api`、调用 router hook / `useEffect`、解析响应或构造 request body。展示组件不得 import controller/API，controller 之间不得互相 import。
+- 同值 filter 的新对象 identity 表示 revalidation，不是新业务状态：四个 filtered GET 必须照常发出，但已有 settled overview/list 保持 `loading=false`、错误与 rows 可见，入口 DOM 不卸载。filter key、external revision 或 local retry 变化才进入 loading；返回结果仍以 cancelled flag 防止旧响应覆盖当前 state。
 - Asset Decisions 首屏必须是组合优先的单主路径：`portfolio command summary` → 次级工作区入口 → `决策组扫描`。默认页面不得恢复 `决策路径`、`下一步导览`、记录表、场景模板、自定义组合、续费 evidence 或单台队列作为同权常驻 section；也不得把单台续费队列重新提升为主视觉主体。
 - Asset Decisions 顶部必须先展示 portfolio command summary：从当前已加载的记录回读、自动组、自定义组合和模板中派生第一行动，并展示组合范围、续费窗口、执行闭环风险、evidence source 状态和 context filter 摘要。该 summary 是处理顺序导览，不是 KPI 卡片墙；不得把单台队列数量提升为主指标，也不得因为某来源失败而伪造无问题。
 - Asset Decisions 的记录、场景/模板、续费 evidence、单台队列必须通过受控的次级工作区进入；默认 `secondaryWorkbench=null`，同一时间最多展开一个次级区。用户点击入口或 URL 深链可展开对应区：`record_id -> records`，`manual_group_id|template_id -> scenarios`，`view=renewal -> renewals`，legacy `view=single_queue -> single_queue`。`group_id` 只打开自动组详情，不要求展开次级区。
@@ -700,6 +705,9 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | VPS inventory subscriptions empty | 行级展示 `缺订阅`，quick view `缺订阅` 可筛出对应 VPS |
 | VPS inventory URL has unsupported `view` | 降级为 `all`，下次用户操作时写回合法 query |
 | user removes a chip or clears all filters | URL-state 与 visible rows 同步更新，不重新请求 `/api/vps?...` derived query |
+| open/close `group_id` / `manual_group_id` / `record_id`，业务 filter 值不变 | overview / groups / manual groups / records 四个 GET 重发；settled 列表不切 loading，Modal 关闭后焦点回对应入口 |
+| `view` / window / context filter key 改变 | 新语义查询进入 loading；旧响应不得覆盖新 filter 的 state |
+| renewal decision 保存成功 | 六个 revision 各加一；默认 11 GET 与可选当前 detail GET 各重发一次，不扩大或缩小 inventory |
 | `/archive` loads archived subscriptions in multiple currencies | 订阅历史行逐条展示原币种价格；摘要按币种分组，不跨币种求和 |
 | `/archive` renders archive list | 请求 `asset_scope=historical` 只读展示已取消 / 已归档 VPS 摘要，不自动请求单台 services/domains/timeline；行级入口进入 `/archive/:vpsId` |
 | `/archive/:vpsId` renders detail context | 只读展示 archive review、timeline、全量订阅历史、services、domains、monitoring links 和 Target links；用户记录排在订阅/服务/域名明细之前；archived 才显示受控恢复，cancelled 不显示恢复；不得出现编辑、取消、添加、创建或关联按钮 |
@@ -715,6 +723,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Good: `/vps?view=unlinked&renewal_decision=unreviewed` 首屏显示 `视图: 未关联` 和 `续费: 未评估` chips，列表只显示同时满足条件的 rows。
 - Good: `/asset-decisions?view=provider&renew_within_days=60` 首屏请求 provider 组合组，列表展示同服务商 VPS 成本、服务/域名、监控和建议动作。
 - Good: `/asset-decisions?view=provider&provider_id=pv_001&template_id=adt_builtin_provider_review` 首屏展示 provider 上下文 chip，并自动打开服务商评估模板；关闭模板后仍保留 provider 筛选。
+- Good: 聚焦某行“查看”后打开 group/manual/record Modal；open key 让四个 filtered GET revalidate，但列表节点保持连接，Escape 关闭后焦点回同一行入口且 body 解锁。
 - Good: `/asset-decisions` 默认首屏只展示当前组合判断、四个次级入口和自动组扫描；记录、场景、续费事实和单台辅助队列只有用户点击或深链时才展开。
 - Good: `/asset-decisions?view=single_queue&renew_within_days=30` 承接旧链接并打开单台辅助队列，但 portfolio command summary 与决策组扫描仍是页面框架。
 - Good: 决策记录接口失败时，页面保留已加载自动组，不生成 readback 工作项，portfolio 风险显示 `证据待确认`，不显示 `闭环稳定`。
@@ -737,6 +746,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Base: 订阅为空、Provider 为空时，页面仍能展示 VPS identity、状态、缺订阅、未关联/缺字段提示。
 - Bad: 订阅 evidence 请求失败后，前端把所有 VPS 标成 `缺订阅`，导致用户做出错误取消判断。
 - Bad: 默认 `/asset-decisions` 同时铺开记录表、场景模板、自定义组合、续费 evidence 和单台队列，让次级任务与自动组扫描同权。
+- Bad: 用 `settled.filter === filter` 判断列表是否 current；只增加一个 `group_id` 就把已有 rows 替换成 loading，卸载 Modal restore target 并让焦点落到 `body`。
 - Bad: 任一证据来源失败后，页面用空数组推断 `闭环稳定`、`证据稳定`、无风险或真实资料缺口。
 - Bad: 在前端只保存自动组 ID 当作长期决策状态，或从记录详情批量取消 VPS / 直接修改 Subscription / MonitoringInstance / Target。
 - Bad: 自定义组合新增成员让用户复制 `vps_...` 内部 ID，或者保存成员意图时顺手 PATCH `/api/vps/{id}`。
@@ -752,7 +762,8 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 #### 6. Tests Required
 
 - `web/src/lib/api.test.ts`: `getAssetDecisionOverview`、`listAssetDecisionGroups`、`getAssetDecisionGroup` 路径和 query string；manual group helper list/create/get/patch/member add/patch/delete；scenario template helpers list/create/get/patch/create-manual-group；记录 fixture 覆盖 `execution_readback` 和 `execution_plan`。
-- `AssetDecisionsPage.test.tsx`: `资产组合决策` 主 surface、默认不渲染旧常驻 `决策路径` / `下一步导览` / 记录 / 场景 / 续费 / 单台队列 section、次级入口点击展开单一工作区、legacy `view=single_queue` 承接、tabs query、上下文筛选 chips、深链打开 group/manual group/record/template、场景模板列表/详情/创建组合、自定义组合另存模板、组详情 drawer、创建自定义组合、自定义组合详情/成员表单/保存 manual record、组/成员/记录 `evidence_assessment` 与 `decision_recommendation` 展示、组卡 comparison summary、默认层/目录层/普通二级面板密度预算、自动组/自定义组/保存记录普通面板不出现 `GROUP TO SCENARIO` / `EVIDENCE MATRIX` / 宽表底稿 / provider-product-cost-facts 串、记录详情 saved evidence snapshot 只在 raw/底稿中可回看、旧 snapshot 缺 `comparison_insight` 降级、保存记录、记录详情状态推进、execution plan 列表片段 / lane board / CTA URL 映射 / 快速跟进、成员跟进 PATCH payload 与计数刷新、成员跟进面板预览限量且不展示完整当前事实、partial source failure 不显示 `闭环稳定` 或虚构 readback work、readback drift 不触发业务对象写请求、plan CTA 不触发业务对象写请求、模板打开不触发业务对象写请求、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅或 `证据稳定`、错误/空态。
+- `AssetDecisionsPage.test.tsx` 与 route/domain workflow tests: `资产组合决策` 主 surface、默认不渲染旧常驻 `决策路径` / `下一步导览` / 记录 / 场景 / 续费 / 单台队列 section、次级入口点击展开单一工作区、legacy `view=single_queue` 承接、tabs query、上下文筛选 chips、深链打开 group/manual group/record/template、同值 filter revalidation 仍发四个 GET 且 group/manual/record 关闭恢复同实体入口焦点、场景模板列表/详情/创建组合、自定义组合另存模板、组详情 drawer、创建自定义组合、自定义组合详情/成员表单/保存 manual record、组/成员/记录 `evidence_assessment` 与 `decision_recommendation` 展示、组卡 comparison summary、默认层/目录层/普通二级面板密度预算、自动组/自定义组/保存记录普通面板不出现 `GROUP TO SCENARIO` / `EVIDENCE MATRIX` / 宽表底稿 / provider-product-cost-facts 串、记录详情 saved evidence snapshot 只在 raw/底稿中可回看、旧 snapshot 缺 `comparison_insight` 降级、保存记录、记录详情状态推进、execution plan 列表片段 / lane board / CTA URL 映射 / 快速跟进、成员跟进 PATCH payload 与计数刷新、成员跟进面板预览限量且不展示完整当前事实、partial source failure 不显示 `闭环稳定` 或虚构 readback work、readback drift 不触发业务对象写请求、plan CTA 不触发业务对象写请求、模板打开不触发业务对象写请求、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅或 `证据稳定`、错误/空态。
+- `assetDecisionArchitectureContract.test.ts`: TypeScript AST synthetic + repository fixtures 覆盖七个 controller entry、API owner 白名单、唯一 router owner、禁止依赖边、无 `*PageContent` 替身、page/controller/global/effect 预算；错误必须报告路径、行与 forbidden symbol/edge/budget。
 - `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/监控实例/资料质量展示、创建 VPS 流程和 provider selector 可访问标签。
 - `SubscriptionsPage.test.tsx`: `vps_id` URL context、`create=1` 自动打开/预填、关闭创建表单保留 `vps_id` 并移除 `create=1`。
 - `VPSDetailPage.test.tsx`: Provider/MonitoringInstance/Target/Service selectors 的候选加载、空态/错误提示、提交 payload 仍只发送被选 ID 或空值。
@@ -788,6 +799,18 @@ useEffect(() => {
 // 正确：把 URL 作为可见状态来源，必要的本地开关只处理用户交互。
 const createRequested = searchParams.get('create') === '1'
 const createPanelOpen = createOpen || createRequested
+```
+
+```tsx
+// 错误：请求 identity 一变就把仍属同一业务 filter 的 settled UI 标成 loading。
+const isCurrent = settled?.filter === filter
+
+// 正确：effect 仍依赖 filter identity 发起 revalidation；UI currency 使用语义 key。
+const currentFilterKey = assetDecisionFilterKey(filter)
+const isCurrent = settled != null
+  && assetDecisionFilterKey(settled.filter) === currentFilterKey
+  && settled.revision === revision
+  && settled.retryRevision === retryRevision
 ```
 
 ### Asset service 数据流
