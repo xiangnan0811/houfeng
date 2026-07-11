@@ -191,9 +191,10 @@ export function MetricChart({
 
   const stroke = TONE_VAR[tone]
   const width = propsWidth || measuredWidth || 360
+  const firstSample = samples.at(0)
 
   // Empty state
-  if (samples.length === 0) {
+  if (!firstSample) {
     return (
       <span
         ref={containerRef}
@@ -261,8 +262,10 @@ export function MetricChart({
     .join(' ')
 
   const lastIdx = samples.length - 1
+  const sampleAt = (index: number) => samples[index] ?? firstSample
+  const lastSample = sampleAt(lastIdx)
   const lastX = projectX(lastIdx)
-  const lastY = projectY(samples[lastIdx].value)
+  const lastY = projectY(lastSample.value)
   const isControlledHover = hoveredAt !== undefined || onHoverAtChange !== undefined
   const effectiveHoverIndex = isControlledHover ? indexForObservedAt(samples, hoveredAt) : hoverIndex
 
@@ -292,19 +295,19 @@ export function MetricChart({
     const vbX = (relX / rect.width) * width
     // Convert vbX into sample index, accounting for left padding
     if (vbX < PADDING.left) {
-      if (isControlledHover) onHoverAtChange?.(samples[0].observedAt)
+      if (isControlledHover) onHoverAtChange?.(firstSample.observedAt)
       else setHoverIndex(0)
       return
     }
     if (vbX > PADDING.left + innerW) {
-      if (isControlledHover) onHoverAtChange?.(samples[lastIdx].observedAt)
+      if (isControlledHover) onHoverAtChange?.(lastSample.observedAt)
       else setHoverIndex(lastIdx)
       return
     }
     const dataX = vbX - PADDING.left
     const idx = Math.round((dataX / innerW) * (samples.length - 1))
     const nextIndex = Math.max(0, Math.min(lastIdx, idx))
-    if (isControlledHover) onHoverAtChange?.(samples[nextIndex].observedAt)
+    if (isControlledHover) onHoverAtChange?.(sampleAt(nextIndex).observedAt)
     else setHoverIndex(nextIndex)
   }
 
@@ -317,8 +320,8 @@ export function MetricChart({
   const tooltipNode = (() => {
     if (!showTooltip || effectiveHoverIndex == null || isSingle) return null
     const x = projectX(effectiveHoverIndex)
-    const y = projectY(samples[effectiveHoverIndex].value)
-    const sample = samples[effectiveHoverIndex]
+    const sample = sampleAt(effectiveHoverIndex)
+    const y = projectY(sample.value)
     const tooltipInset = 6
     const tooltipWidth = Math.min(176, width - tooltipInset * 2)
     const tooltipHeight = 38
@@ -349,8 +352,8 @@ export function MetricChart({
   // Maintenance window rectangles (rendered first → behind grid + line)
   const maintenanceRects = (() => {
     if (!maintenanceWindows || maintenanceWindows.length === 0 || isSingle) return null
-    const firstTime = new Date(samples[0].observedAt).getTime()
-    const lastTime = new Date(samples[lastIdx].observedAt).getTime()
+    const firstTime = new Date(firstSample.observedAt).getTime()
+    const lastTime = new Date(lastSample.observedAt).getTime()
     const span = lastTime - firstTime
     if (span <= 0) return null
     return maintenanceWindows.map((win, i) => {
@@ -437,7 +440,7 @@ export function MetricChart({
       {/* X-axis tick labels */}
       {xTickIndices.map((idx) => {
         const x = projectX(idx)
-        const sample = samples[idx]
+        const sample = sampleAt(idx)
         let anchor: 'start' | 'middle' | 'end' = 'middle'
         if (idx === 0) anchor = 'start'
         else if (idx === samples.length - 1) anchor = 'end'
@@ -508,7 +511,7 @@ export function MetricChart({
       {/* Hover crosshair */}
       {effectiveHoverIndex != null && !isSingle && (() => {
         const x = projectX(effectiveHoverIndex)
-        const y = projectY(samples[effectiveHoverIndex].value)
+        const y = projectY(sampleAt(effectiveHoverIndex).value)
         return (
           <g className="metric-chart__cursor">
             <line

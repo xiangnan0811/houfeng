@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.ratchet-atoms.tsbuildinfo",
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true
+  },
+  "include": [
+    "src/lib/**/*.ts",
+    "src/lib/**/*.tsx",
+    "src/components/atoms/**/*.ts",
+    "src/components/atoms/**/*.tsx"
+  ],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/**/*TestFixtures.ts",
+    "src/**/*TestFixtures.tsx",
+    "src/**/*testFixtures.ts",
+    "src/**/*testFixtures.tsx"
+  ]
+}

@@ -67,10 +67,12 @@ export function Tabs<V extends string = string>({
     }
 
     event.preventDefault()
-    const nextButton = buttonRefs.current[nextIndex]
-    pendingScrollTargetRef.current = { button: nextButton, value: items[nextIndex].value }
+    const nextItem = items[nextIndex]
+    if (!nextItem) return
+    const nextButton = buttonRefs.current[nextIndex] ?? null
+    pendingScrollTargetRef.current = { button: nextButton, value: nextItem.value }
     nextButton?.focus()
-    onChange(items[nextIndex].value)
+    onChange(nextItem.value)
   }
 
   return (
