@@ -24,7 +24,13 @@
 
 .provider-directory-view-button:disabled{cursor:not-allowed;opacity:.55}
 
-.provider-directory-table{min-width:928px;table-layout:fixed}
+.provider-directory-table-hint{margin:0;color:var(--text-muted);font-size:var(--type-small-size)}
+
+.provider-directory-table-scroll{max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-gutter:stable;border-radius:var(--radius-3)}
+
+.provider-directory-table-scroll:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:var(--space-1)}
+
+.provider-directory-table{min-width:1000px;table-layout:fixed}
 
 .provider-directory-identity{display:flex;flex-direction:column;gap:4px;min-width:0}
 
@@ -50,9 +56,11 @@
 
 .provider-directory-asset-count--muted{color:var(--text-muted)}
 
-.provider-directory-entry-links{display:flex;align-items:center;gap:var(--space-1);min-width:0;flex-wrap:nowrap;overflow:hidden}
+.provider-directory-entry-links{display:flex;align-items:center;gap:var(--space-1);min-width:0;flex-wrap:wrap;overflow:visible}
 
-.provider-directory-entry-link{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-height:22px;max-width:48px;padding:2px 7px;border:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:var(--radius-pill);background:color-mix(in srgb,var(--surface-elevated) 24%,transparent);color:var(--text-secondary);font-size:11px;font-weight:600;line-height:1;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:color var(--dur-micro) var(--ease-calm),border-color var(--dur-micro) var(--ease-calm),background-color var(--dur-micro) var(--ease-calm)}
+.provider-directory-entry-link{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-height:22px;max-width:none;padding:2px 7px;border:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:var(--radius-pill);background:color-mix(in srgb,var(--surface-elevated) 24%,transparent);color:var(--text-secondary);font-size:11px;font-weight:600;line-height:1;text-decoration:none;overflow:visible;text-overflow:clip;white-space:nowrap;transition:color var(--dur-micro) var(--ease-calm),border-color var(--dur-micro) var(--ease-calm),background-color var(--dur-micro) var(--ease-calm)}
+
+.provider-directory-entry-link--decision{padding-inline:var(--space-2)}
 
 .provider-directory-entry-link:hover{border-color:color-mix(in srgb,var(--accent) 34%,var(--border));background:color-mix(in srgb,var(--accent) 7%,var(--surface));color:var(--text-primary)}
 

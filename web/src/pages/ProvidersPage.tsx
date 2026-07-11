@@ -534,7 +534,7 @@ export function ProvidersPage() {
     {
       key: 'entry',
       label: '服务入口',
-      width: '176px',
+      width: '232px',
       render: (row) => {
         const website = row.provider.website.trim()
         const panelURL = row.provider.panel_url.trim()
@@ -574,7 +574,7 @@ export function ProvidersPage() {
               </Link>
             ) : null}
             {!state.contextError && row.vpsCount > 0 ? (
-              <Link className="provider-directory-entry-link" to={`/asset-decisions?view=provider&renew_within_days=30&provider_id=${providerID}`} aria-label={`查看 ${row.provider.name} 服务商组合决策`}>
+              <Link className="provider-directory-entry-link provider-directory-entry-link--decision" to={`/asset-decisions?view=provider&renew_within_days=30&provider_id=${providerID}`} aria-label={`查看 ${row.provider.name} 服务商组合决策`}>
                 组合决策
               </Link>
             ) : null}
@@ -709,11 +709,11 @@ export function ProvidersPage() {
             <span><strong><MonoDigits>{EXTERNAL_REPUTATION_SOURCES.length}</MonoDigits></strong> 外部口碑源入口</span>
           </div>
 
-          <section className="page-panel page-panel--scroll-x provider-directory-panel">
+          <section className="page-panel provider-directory-panel">
             <div className="section-heading section-heading--inline">
               <div>
                 <p className="section-heading__eyebrow">Providers</p>
-                <h2 className="section-heading__title">服务商与入口</h2>
+                <h2 id="provider-directory-table-title" className="section-heading__title">服务商与入口</h2>
               </div>
               <span className="section-heading__meta">{filteredRows.length} / {rows.length} 条</span>
             </div>
@@ -749,14 +749,25 @@ export function ProvidersPage() {
               </p>
             ) : null}
 
-            <DataTable<ProviderDirectoryRow>
-              className="provider-directory-table"
-              density="compact"
-              columns={columns}
-              rows={filteredRows}
-              rowKey={(row) => row.provider.provider_id}
-              emptyContent={<span className="provider-directory-empty-inline">没有匹配的服务商</span>}
-            />
+            <p id="provider-directory-table-hint" className="provider-directory-table-hint">
+              横向滚动查看完整列
+            </p>
+            <div
+              className="provider-directory-table-scroll"
+              role="region"
+              aria-labelledby="provider-directory-table-title"
+              aria-describedby="provider-directory-table-hint"
+              tabIndex={0}
+            >
+              <DataTable<ProviderDirectoryRow>
+                className="provider-directory-table"
+                density="compact"
+                columns={columns}
+                rows={filteredRows}
+                rowKey={(row) => row.provider.provider_id}
+                emptyContent={<span className="provider-directory-empty-inline">没有匹配的服务商</span>}
+              />
+            </div>
           </section>
         </>
       )}

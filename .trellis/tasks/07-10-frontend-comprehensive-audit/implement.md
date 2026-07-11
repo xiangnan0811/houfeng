@@ -587,17 +587,17 @@ git commit -m "fix(web): restore native interaction contracts"
 - Modify: Dashboard owner CSS
 - Modify: `web/src/pages/asset-decisions/AssetDecisionSecondaryNav.tsx`
 - Modify: `web/src/pages/ProvidersPage.tsx`
-- Add: Playwright responsive specs/screenshots
+- Add: Task-local Chromium/CDP responsive evidence；repository Playwright/axe/CI gate 仍由 Task 10 统一落地
 
 - [ ] **Step 1: 写窄视口失败断言**
 
-在 390x900 验证：
+使用 repo 外 CDP harness 在 390x900 先取得失败证据；不向 package/lockfile 增加 Task 10 依赖：
 
-```ts
-await expect(page.getByRole('tab', { name: '监控策略' })).toHaveText('监控策略')
-await expect(page.getByRole('button', { name: '场景与组合' })).toBeInViewport()
-await expect(page.getByRole('link', { name: /服务商组合决策/ }).first()).toContainText('组合决策')
-expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
+```js
+assert(settingsTab.whiteSpace === 'nowrap')
+assert(assetTitle.scrollWidth <= assetTitle.clientWidth + 1)
+assert(providerDecision.scrollWidth <= providerDecision.clientWidth + 1)
+assert(document.documentElement.scrollWidth <= innerWidth + 1)
 ```
 
 - [ ] **Step 2: 定义 Tabs overflow 策略**
@@ -619,11 +619,11 @@ Dashboard 已由 Task 3 消除四卡阻塞；再验证主 action 处于 390x900 
 - [ ] **Step 6: 提交**
 
 ```bash
-git add web/src/pages web/src/styles web/e2e
+git add web/src/pages web/src/styles .trellis/tasks/07-10-frontend-responsive-workflows
 git commit -m "fix(web): close narrow viewport workflow gaps"
 ```
 
-**Rollback:** Settings Tabs、Asset nav、Provider table 分 commit；截图差异能定位到单 owner。
+**Rollback:** Settings Tabs、Asset nav、Provider table 分 commit；task-local computed geometry 能定位到单 owner。
 
 ## 10. Task 8：Asset Decisions 按业务域拆分
 
@@ -868,6 +868,14 @@ git commit -m "test(web): ratchet browser and contract quality gates"
 - implementation PR #357、两轮 main CI、release PR #355、GitHub Release `v0.58.1` 与 `publish-images` run `29137451638` 全部通过；`v0.58.1` / `0.58.1` / `latest` 共同 manifest digest 为 `sha256:ff15def93f7f42d9a9aaf3757e0b450723e1513ce64720a7d38a487583f3cbe6`。
 - 发布 smoke 直接使用该 digest 镜像内 `/app/web/dist`，再次完成 12/12 viewport/route、六条键盘流程与三主题 axe，所有错误/溢出/裁切计数为 0。
 - 浏览器数据仍使用本地 fixture，不替代 Task 10 的真实认证 staging。Gate B 的 390px command/Tabs/table 完整可达仍由 Task 7 关闭，因此此处不把 Gate B 标记为整体通过。
+
+**Task 7 pre-merge evidence（2026-07-11；Gate B 等待 merge/release smoke）：**
+
+- `codex/frontend-responsive-workflows` 已建立 Tabs 局部滚动、Asset 四入口两列完整排版与 Provider 具名局部 table region；API、wire、route、package、lockfile 和 CI 未改变。
+- production dist 在 Chrome `150.0.7871.114` 下完成 9 routes × 3 viewports = 27/27；全部 `documentWidth == innerWidth`，blank surface、shell clipping、console/runtime/CSP/HTTP/network error 均为 0。Dashboard 主行动 bottom=`371.56 < 900`。
+- Settings End/Home 在受控 panel commit 后均完整进入 tablist，End 时 `scrollLeft=16`；四个 Asset command 高度均 72px 且 title client/scroll=`127/127`；Provider section client/scroll=`298/298`，具名 region client/scroll=`240/1000`，ArrowRight 后 `scrollLeft=6`，“组合决策” client/scroll=`60/60`。
+- Settings、Asset Decisions、Providers settled axe serious/critical=0；VPS、Asset Decisions、Providers 的三主题矩阵共 9 次扫描均为 0。亮色 Asset 4.46:1 context RED 已由 owner CSS 修复并复验，不以禁用 rule 或忽略中间色换取绿色。
+- 以上仍是 fixture/local-only candidate evidence。Gate B 只有在 implementation PR 合并、发布镜像 smoke 与同版 full gate 记录后才标记整体通过；真实认证 staging 继续属于 Task 10 / Gate C。
 
 ### Gate C：结构债关闭（Task 8-10）
 

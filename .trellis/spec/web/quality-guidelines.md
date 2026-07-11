@@ -224,6 +224,7 @@ it('applies variant class', () => {
 
 - **可视化回归 / 截图对比**不在 `make verify-web`。当前 UI 指导见 `docs/design/current/{interface-language.md,component-patterns.md}`；预览、浏览器 sanity 与本地截图政策见 `docs/operations/ui-preview-and-browser-sanity.md`。bulk screenshot evidence 与 manifest 不再 tracked；新 raster 图片只有在用户明确批准为 public README/docs asset 时才可提交到 allowlisted docs asset path。旧截图流程与一次性历史截图不是当前 workflow。
 - **本地 browser sanity**优先用 `python3 scripts/visual_evidence.py browser-sanity --base-url <url> --route <route> ...` 复用标准几何检查；它依赖本机 Python Playwright 时必须在 PR / final report 里标注为 local-only evidence。缺少本机 Python Playwright 只说明这条 helper 路径不可用，不能直接断言“浏览器 sanity 被阻塞”；先检查是否可用本机 Chromium remote debugging + CDP（例如 Node 原生 WebSocket）或其它已安装浏览器工具取得等价 route / viewport / selector 证据。无论走哪条本地路径，都不要把 Playwright/Cypress/WebDriverIO 加进 `web/package.json` 来绕过。
+- 响应式修复的 local-only CDP 证据必须记录 route × viewport 矩阵、`documentWidth/innerWidth`、目标 `client/scroll` 尺寸、computed `white-space/overflow/text-overflow`、局部 scroll region 的 role/name/tabIndex/scrollLeft、关键命令 hit-test 和完整 diagnostics counters。只写“肉眼看起来正常”或只保留截图不算通过。
 - **真实 center 烟囱**由 `docs/operations/fresh-install-smoke-run.md` 承担，前端只在浏览器里 sanity check。
 
 ### Scenario: 非语义点击 AST contract 与可访问性证据层级
@@ -247,6 +248,7 @@ it('applies variant class', () => {
 - marker 只解释已经具备其它完整语义路径的结构：backdrop、事件隔离、已有键盘合同的复合 row、有主 Link 的 pointer enhancement。真实命令必须改为 native element。
 - RTL/Vitest 证明 DOM attributes 与事件合同；本地 Chromium/CDP 证明真实 Tab/default action、focus return、console/network/CSP 与 viewport geometry；固定版本本地 axe 证明本次 settled surface。只有 Task 10 把 Playwright/axe 加入 package/lockfile/CI 后，才可称为持久化 browser gate。
 - 本地 axe 必须等待 CSS transition/animation settled 后扫描，serious/critical 不得禁用或降级；发生失败要记录 rule/target/failureSummary 并回到 owner token/组件修复。
+- 折叠/移动 AppShell 运行 axe 时，Sidebar Link 的 accessible name 必须来自稳定 `aria-label`，不能依赖会被 media query `display:none` 的 `.nav-text` 或只剩数字的 badge。主题切换后必须等待 animations settled 再扫描，避免把过渡中的中间颜色误记成最终 contrast。
 
 #### 4. Validation & Error Matrix
 
@@ -257,6 +259,8 @@ it('applies variant class', () => {
 | VPS row 有主 Link + background enhancement marker | 允许；Link click 必须被 row guard 忽略 |
 | local axe serious/critical > 0 | 本任务浏览器门失败；不得写入“通过”证据 |
 | Python Playwright 缺失但本机 Chromium/CDP 可用 | 使用 CDP 等价证据并注明 local-only，不增加 repo dependency |
+| tab focus 后受控 panel 让父级滚动条出现 | 检查最终 commit 后的 tab/list rect 与 scrollLeft；不能只断言 `document.activeElement` |
+| collapsed Sidebar `.nav-text` 被隐藏 | 每个 nav Link 仍有 label/count 派生的可辨识名称 |
 | 只有 RTL 通过 | 不能宣称真实 Tab/default focus 或 axe 已通过 |
 
 #### 5. Good / Base / Bad Cases
@@ -270,7 +274,7 @@ it('applies variant class', () => {
 - synthetic AST fixtures：native pass、unmarked fail、unknown/non-adjacent fail、四个有限 reason pass。
 - repository inventory：扫描全部 non-test production TSX，unexplained=0，并对当前 allowed 数量做有意识的 bounded assertion。
 - 行为 focused tests：UserChip/TopBar/AppShell/VPS/Tabs/SegmentedControl；marker 涉及的 Modal/DataTable/Targets/Monitoring 回归一并运行。
-- 本地 Chromium：至少记录 browser/axe 版本、数据源、routes/viewports、focus sequence、page overflow、console/exception/CSP/network counters；截图不是默认 tracked evidence。
+- 本地 Chromium：至少记录 browser/axe 版本、数据源、routes/viewports、focus sequence、page overflow、关键文本 client/scroll/computed style、局部滚动区语义/键盘 scrollLeft、console/exception/CSP/network counters；截图不是默认 tracked evidence。
 
 #### 7. Wrong vs Correct
 

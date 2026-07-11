@@ -31,10 +31,14 @@ function resolveImported(filePath: string, seen = new Set<string>()): string {
 const indexCss = resolveImported(indexPath)
 const loginPageCss = readFileSync('src/pages/LoginPage.css', 'utf8')
 
-function ruleBody(css: string, selector: string): string {
+function ruleBodies(css: string, selector: string): string[] {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))
-  return match?.[1] ?? ''
+  return [...css.matchAll(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, 'g'))]
+    .map((match) => match[1] ?? '')
+}
+
+function ruleBody(css: string, selector: string): string {
+  return ruleBodies(css, selector)[0] ?? ''
 }
 
 function compact(css: string): string {
@@ -55,5 +59,62 @@ describe('index.css modernization contracts', () => {
   it('stacks the login card and footer vertically', () => {
     expect(compact(ruleBody(indexCss, '.login-page'))).toContain('flex-direction:column')
     expect(compact(ruleBody(loginPageCss, '.login-page'))).toContain('flex-direction:column')
+  })
+
+  it('keeps responsive tabs and asset commands readable within their owner', () => {
+    for (const variant of ['underline', 'pill']) {
+      const tabs = compact(ruleBody(indexCss, `.tabs--${variant}`))
+      const tab = compact(ruleBody(indexCss, `.tabs--${variant} .tab`))
+
+      expect(tabs).toContain('max-width:100%')
+      expect(tabs).toContain('overflow-x:auto')
+      expect(tab).toContain('flex:00auto')
+      expect(tab).toContain('white-space:nowrap')
+    }
+
+    const title = compact(ruleBody(indexCss, '.asset-decision-support-strip__title'))
+    expect(title).toContain('white-space:normal')
+    expect(title).toContain('overflow:visible')
+    expect(title).toContain('text-overflow:clip')
+    expect(title).not.toContain('text-overflow:ellipsis')
+
+    const gridRules = ruleBodies(indexCss, '.asset-decision-support-strip')
+      .map(compact)
+      .filter((body) => body.includes('grid-template-columns:'))
+    expect(gridRules).toHaveLength(1)
+  })
+
+  it('isolates provider table overflow and keeps entry labels visible', () => {
+    const table = compact(ruleBody(indexCss, '.provider-directory-table'))
+    const scrollRegion = compact(ruleBody(indexCss, '.provider-directory-table-scroll'))
+    const focusRing = compact(ruleBody(indexCss, '.provider-directory-table-scroll:focus-visible'))
+    const entryLinks = compact(ruleBody(indexCss, '.provider-directory-entry-links'))
+    const entryLink = compact(ruleBody(indexCss, '.provider-directory-entry-link'))
+
+    expect(table).toContain('min-width:1000px')
+    expect(scrollRegion).toContain('max-width:100%')
+    expect(scrollRegion).toContain('overflow-x:auto')
+    expect(scrollRegion).toContain('scrollbar-gutter:stable')
+    expect(focusRing).toContain('outline:var(--border-w-strong)solidvar(--accent)')
+    expect(entryLinks).toContain('flex-wrap:wrap')
+    expect(entryLinks).toContain('overflow:visible')
+    expect(entryLink).toContain('max-width:none')
+    expect(entryLink).toContain('overflow:visible')
+    expect(entryLink).toContain('text-overflow:clip')
+    expect(entryLink).not.toContain('text-overflow:ellipsis')
+  })
+
+  it('keeps small state text readable on tinted surfaces', () => {
+    const criticalInfo = compact(ruleBody(indexCss, '.badge--info.tone--critical'))
+    const assetGroupContext = compact(
+      ruleBody(indexCss, '.asset-decision-group-card__head span:not(.badge)'),
+    )
+
+    expect(criticalInfo).toContain(
+      'color:color-mix(insrgb,var(--color-state-critical)78%,var(--text-primary))',
+    )
+    expect(assetGroupContext).toContain(
+      'color:color-mix(insrgb,var(--text-secondary)90%,var(--text-primary))',
+    )
   })
 })

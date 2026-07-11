@@ -72,10 +72,13 @@ interface SidebarNavItemProps {
 }
 
 function SidebarNavItem({ to, label, icon, badge, end }: SidebarNavItemProps) {
+  const accessibleLabel = badge != null && badge > 0 ? `${label}，${badge} 个异常` : label
+
   return (
     <NavLink
       to={to}
       end={end}
+      aria-label={accessibleLabel}
       className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
     >
       {icon}

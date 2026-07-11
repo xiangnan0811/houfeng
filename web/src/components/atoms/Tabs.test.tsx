@@ -83,6 +83,55 @@ describe('Tabs', () => {
     expect(onChange).toHaveBeenLastCalledWith('a')
   })
 
+  it('scrolls the keyboard focus target into the nearest tablist viewport', () => {
+    const onChange = vi.fn()
+    const requestFrame = vi.fn()
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    const { rerender } = render(
+      <Tabs
+        label="监控视图"
+        idBase="monitoring-view"
+        items={items}
+        value="a"
+        onChange={onChange}
+        variant="pill"
+      />,
+    )
+    const overview = screen.getByRole('tab', { name: '概览' })
+    const anomalies = screen.getByRole('tab', { name: /活跃异常/ })
+    const scrollIntoView = vi.fn()
+    anomalies.scrollIntoView = scrollIntoView
+
+    fireEvent.keyDown(overview, { key: 'End' })
+
+    expect(anomalies).toHaveFocus()
+    expect(onChange).toHaveBeenCalledWith('c')
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    rerender(
+      <Tabs
+        label="监控视图"
+        idBase="monitoring-view"
+        items={items}
+        value="a"
+        onChange={onChange}
+        variant="pill"
+      />,
+    )
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    rerender(
+      <Tabs
+        label="监控视图"
+        idBase="monitoring-view"
+        items={items}
+        value="c"
+        onChange={onChange}
+        variant="pill"
+      />,
+    )
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' })
+    expect(requestFrame).not.toHaveBeenCalled()
+  })
+
   it('uses the first item as the only tab stop when the controlled value is absent', () => {
     const onChange = renderTabs('missing')
     const tabs = screen.getAllByRole('tab')

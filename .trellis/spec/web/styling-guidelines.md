@@ -61,6 +61,8 @@
 - 带文字的 `.tone--*` badge、状态文本和 `.btn.primary` 必须在三套运行时主题上达到 WCAG AA 普通文本对比度；不能因为 dark-first 就把 500 色阶原样用于 light surface。
 - light 主题使用对比度安全的状态 owner tokens：normal `#047857`、notice/alert/warn `#92400e`、critical/error `#b91c1c`、maintenance/offline `#475569`。`--badge-*-c` 与 `--color-state-*` 引用这些 owner，不在组件规则重新硬编码第二套颜色。
 - `.btn.primary` 使用 `background: var(--accent); color: var(--bg)`：暗色主题得到深色前景配亮蓝，亮色主题得到白色前景配深蓝。不要恢复 `#fff`，默认/经典暗色的 `#3b82f6` 对白色小字只有约 3.68:1。
+- `.badge--info.tone--critical` 的 11px 文字不能直接使用 critical token；`#ef4444` 在自身 10% tint 背景上只有约 4.0:1。共享 atom 使用 `color-mix(in srgb, var(--color-state-critical) 78%, var(--text-primary))` 提升暗色前景，同时让亮色 critical 继续向深色文本收束；border/background 仍由原 critical token 驱动。
+- 11.5px 的 `--text-secondary` 不能直接放在 alert/critical tint 上并假设基础 surface 对比度仍成立；例如亮色 Asset group card 的 alert 4% 背景上只有 4.46:1。该 card 的 context owner 使用 `color-mix(in srgb, var(--text-secondary) 90%, var(--text-primary))`，修改后必须在三主题 settled axe 中复验真实复合背景。
 - 修改任一状态/背景 token 后，至少在 `theme-houfeng-dark`、`theme-houfeng-light`、`theme-classic-dark` 的代表性状态密集页面运行 settled local axe；Task 10 完成前，这仍是 local-only evidence，不是 CI gate。
 
 ```css
@@ -152,6 +154,19 @@
 - 字体角色固定（`tokens.css:22-27`）：标题 / 强调字段用 `--font-serif`（思源宋体回退栈）；正文 / UI 用 `--font-sans`；ID / 数字 / 代码用 `--font-mono`。`Mono` / `Hostname` / `Timestamp` 原子（`web/src/components/atoms/Mono.tsx`）已封装好，不要在 page 里自己写 `font-family: monospace`。
 - 工程工具感的关键在密度：留白用 `--space-2` / `--space-3` 而非 `--space-6`；表格 / 列表行高用 `--type-body-leading` 默认 1.6（紧凑场景压到 1.4 时显式声明）。
 
+### 窄视口命令与局部 overflow 合同
+
+- 可操作标题必须完整可见；不能用 `max-width` + `overflow:hidden` + `text-overflow:ellipsis`，再靠 `aria-label` 或 title tooltip 补救。空间不足时让 badge/标题换行、改变 grid，或让明确 owner 局部滚动。
+- `.tabs--pill` / `.tabs--underline` 均使用 `max-width:100%`、`overflow-x:auto`、`overscroll-behavior-x:contain`；tab 使用 `flex:0 0 auto` 与 `white-space:nowrap`。pill 额外使用 `width:fit-content`，桌面仍按内容收束。
+- Asset Decisions 辅助入口在 `max-width:920px` 只保留一套两列 grid；item 是单列 grid、最小高度 72px，title/badge 可换行。不要在 640px 再重复同一 selector 的 display/grid/min-height。
+- 宽表的 section 不拥有水平滚动；只有带 region/name/hint/focus 合同的 wrapper 使用 `overflow-x:auto`。浏览器中必须同时断言 section `scrollWidth <= clientWidth + 1`、wrapper 确实可滚，以及 document 无横向 overflow。
+
+```css
+.tabs--pill,.tabs--underline{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+.tabs--pill .tab,.tabs--underline .tab{flex:0 0 auto;white-space:nowrap}
+.provider-directory-table-scroll{max-width:100%;min-width:0;overflow-x:auto;scrollbar-gutter:stable}
+```
+
 ### 高密度 DataTable 列宽合同
 
 服务商、订阅、资产等事实目录页使用 `DataTable` 时，短状态列和操作列必须有明确宽度与 `white-space: nowrap` 保护；身份 / 名称列不能用大比例宽度挤压右侧列。上线前浏览器核查要同时看桌面与窄屏：桌面不应出现“大量空白 + 短中文状态换行”的组合，窄屏只允许表格容器内部横向滚动，不允许页面整体横向溢出。
@@ -165,12 +180,13 @@
 **Correct**：
 ```tsx
 { key: 'identity', label: '服务商', width: '196px', render: ... }
-{ key: 'entry', label: '服务入口', width: '136px', render: ... }
+{ key: 'entry', label: '服务入口', width: '232px', render: ... }
 ```
 ```css
-.provider-directory-table{min-width:1104px;table-layout:fixed}
-.provider-directory-entry .badge{white-space:nowrap}
-.provider-directory-actions{flex-wrap:nowrap}
+.provider-directory-table-scroll{max-width:100%;overflow-x:auto}
+.provider-directory-table{min-width:1000px;table-layout:fixed}
+.provider-directory-entry-links{flex-wrap:wrap;overflow:visible}
+.provider-directory-entry-link{max-width:none;overflow:visible;text-overflow:clip}
 ```
 
 ---

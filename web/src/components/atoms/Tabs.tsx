@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, useRef } from 'react'
+import { type KeyboardEvent, type ReactNode, useLayoutEffect, useRef } from 'react'
 import { Badge } from './Badge'
 import { tabId, tabPanelId } from './tabIds'
 
@@ -33,9 +33,19 @@ export function Tabs<V extends string = string>({
   variant = 'underline',
 }: TabsProps<V>) {
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const pendingScrollTargetRef = useRef<{ button: HTMLButtonElement | null; value: V } | null>(null)
   const selectedIndex = items.findIndex((item) => item.value === value)
   const tabStopIndex = selectedIndex >= 0 ? selectedIndex : items.length > 0 ? 0 : -1
   const cls = ['tabs', `tabs--${variant}`].join(' ')
+
+  useLayoutEffect(() => {
+    const pending = pendingScrollTargetRef.current
+    if (!pending || pending.value !== value) return
+    pendingScrollTargetRef.current = null
+    if (pending.button?.isConnected) {
+      pending.button.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    }
+  })
 
   function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentIndex: number) {
     let nextIndex: number
@@ -57,7 +67,9 @@ export function Tabs<V extends string = string>({
     }
 
     event.preventDefault()
-    buttonRefs.current[nextIndex]?.focus()
+    const nextButton = buttonRefs.current[nextIndex]
+    pendingScrollTargetRef.current = { button: nextButton, value: items[nextIndex].value }
+    nextButton?.focus()
     onChange(items[nextIndex].value)
   }
 
