@@ -3350,6 +3350,7 @@ describe('MonitoringDetailPage', () => {
 
     await waitFor(() => expect(MockRuntimeWebSocket.instances).toHaveLength(1))
     const socket = MockRuntimeWebSocket.instances[0]
+    if (!socket) throw new Error('realtime mode must create one WebSocket')
     expect(new URL(socket.url).protocol).toBe('ws:')
     expect(new URL(socket.url).pathname).toBe('/api/monitoring-instances/mi_realtime/runtime-stream')
 

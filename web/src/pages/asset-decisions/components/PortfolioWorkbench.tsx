@@ -62,17 +62,20 @@ export function PortfolioWorkbench({
 }: PortfolioWorkbenchProps) {
   const overview = portfolioState.overview
 
-  const workbenchTabs = WORKBENCH_TABS.map((item) => ({
-    ...item,
-    count:
+  const workbenchTabs = WORKBENCH_TABS.map((item) => {
+    const count =
       item.value === 'needs_decision' ? overview?.needs_decision_count
         : item.value === 'renewal' ? overview?.renewal_group_count
           : item.value === 'region' ? overview?.region_group_count
             : item.value === 'provider' ? overview?.provider_group_count
               : item.value === 'cost' ? overview?.cost_group_count
                 : item.value === 'evidence' ? overview?.evidence_group_count
-                  : undefined,
-  }))
+                  : undefined
+    return {
+      ...item,
+      ...(count === undefined ? {} : { count }),
+    }
+  })
 
   function renderDecisionGroupCards(groups: AssetDecisionGroupSummary[]) {
     return (

@@ -108,15 +108,20 @@ function parseScenario(value: string | null): AssetDecisionManualGroupScenario |
 
 export function buildAssetDecisionFilter(searchParams: URLSearchParams, view: AssetDecisionView, renewalWindow: RenewalWindow): AssetDecisionGroupListFilter {
   const scenario = parseScenario(searchParams.get('scenario'))
+  const providerID = trimParam(searchParams.get('provider_id'))
+  const vpsID = trimParam(searchParams.get('vps_id'))
+  const country = trimParam(searchParams.get('country'))
+  const region = trimParam(searchParams.get('region'))
+  const city = trimParam(searchParams.get('city'))
   return {
     view,
     renew_within_days: renewalWindow,
-    provider_id: trimParam(searchParams.get('provider_id')),
-    vps_id: trimParam(searchParams.get('vps_id')),
-    country: trimParam(searchParams.get('country')),
-    region: trimParam(searchParams.get('region')),
-    city: trimParam(searchParams.get('city')),
-    scenario,
+    ...(providerID === undefined ? {} : { provider_id: providerID }),
+    ...(vpsID === undefined ? {} : { vps_id: vpsID }),
+    ...(country === undefined ? {} : { country }),
+    ...(region === undefined ? {} : { region }),
+    ...(city === undefined ? {} : { city }),
+    ...(scenario === undefined ? {} : { scenario }),
   }
 }
 
@@ -170,7 +175,7 @@ function parseComparisonSignal(value: unknown): AssetDecisionComparisonSignal | 
     kind: value.kind,
     label: value.label,
     tone: typeof value.tone === 'string' ? value.tone : 'neutral',
-    details: typeof value.details === 'string' ? value.details : undefined,
+    ...(typeof value.details === 'string' ? { details: value.details } : {}),
   }
 }
 

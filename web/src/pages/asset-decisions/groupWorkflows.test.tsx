@@ -107,7 +107,9 @@ describe('Asset Decisions automatic group workflows', () => {
     expectTaskPanelDensity(dialog, { textMax: 180, interactiveMax: 7, memberRowsMax: 3 })
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/groups/adg_auto_001?renew_within_days=30')
 
-    fireEvent.click(within(dialog).getAllByRole('button', { name: '处理' })[0])
+    const firstMemberAction = within(dialog).getAllByRole('button', { name: '处理' })[0]
+    if (!firstMemberAction) throw new Error('group detail must expose a member action')
+    fireEvent.click(firstMemberAction)
     expect(within(dialog).getAllByText('Germany Primary').length).toBeGreaterThan(0)
     expect(within(dialog).getByLabelText('续费决策')).toHaveValue('keep')
   })
@@ -201,13 +203,19 @@ describe('Asset Decisions automatic group workflows', () => {
     expect(within(saveMembers).getByText('另有 5 台成员保留在保存底稿中')).toBeInTheDocument()
   })
   it('keeps an automatic record draft aligned with group member changes before saving', async () => {
+    const initialDetail = groupDetail()
+    const changedMember = initialDetail.members[1]
+    const primaryMember = initialDetail.members[0]
+    if (!changedMember || !primaryMember) {
+      throw new Error('group detail fixture must include primary and changed members')
+    }
     const changedDetail = {
-      ...groupDetail(),
+      ...initialDetail,
       member_count: 1,
-      members: [groupDetail().members[1]],
+      members: [changedMember],
     }
     const updatedPrimary = {
-      ...groupDetail().members[0].vps,
+      ...primaryMember.vps,
       renewal_decision: 'observe',
     }
     const created = decisionRecord({
@@ -242,7 +250,9 @@ describe('Asset Decisions automatic group workflows', () => {
     fireEvent.click(within(dialog).getByRole('tab', { name: '保存' }))
     fireEvent.change(within(dialog).getByLabelText('组合目标'), { target: { value: '保留备用观察' } })
     fireEvent.click(within(dialog).getByRole('tab', { name: /成员/ }))
-    fireEvent.click(within(dialog).getAllByRole('button', { name: '处理' })[0])
+    const firstChangedMemberAction = within(dialog).getAllByRole('button', { name: '处理' })[0]
+    if (!firstChangedMemberAction) throw new Error('changed group must expose a member action')
+    fireEvent.click(firstChangedMemberAction)
     fireEvent.change(within(dialog).getByLabelText('续费决策'), { target: { value: 'observe' } })
     const renewalMutationStart = fetchMock.mock.calls.length
     fireEvent.click(within(dialog).getByRole('button', { name: '保存续费决策' }))
@@ -518,7 +528,9 @@ describe('Asset Decisions automatic group workflows', () => {
         name: 'vps',
         openPanel: (dialog) => {
           fireEvent.click(within(dialog).getByRole('tab', { name: /成员/ }))
-          fireEvent.click(within(dialog).getAllByRole('button', { name: '处理' })[0])
+          const firstMemberAction = within(dialog).getAllByRole('button', { name: '处理' })[0]
+          if (!firstMemberAction) throw new Error('group detail must expose a member action')
+          fireEvent.click(firstMemberAction)
         },
         assertPanel: (dialog) => {
           expect(within(dialog).getByLabelText('续费决策')).toBeInTheDocument()

@@ -258,7 +258,7 @@ export function MonitoringDetailPageBody({
     incidents.length > 0
       ? [...incidents].sort(
           (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-        )[0]
+        )[0] ?? null
       : null
 
   return (
@@ -383,7 +383,7 @@ export function MonitoringDetailPageBody({
         sample={sample}
         metricPoints={metricPoints}
         timeWindow={timeWindow}
-        window={runtimeFacts?.window}
+        {...(runtimeFacts?.window === undefined ? {} : { window: runtimeFacts.window })}
         isMaintenance={isMaintenance}
         thresholds={thresholds}
       />

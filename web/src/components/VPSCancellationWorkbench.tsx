@@ -97,17 +97,25 @@ export function VPSCancellationWorkbench({
   }
 
   function updateMonitoringInstanceChoice(monitoringInstanceID: string, patch: Partial<WorkbenchMonitoringInstanceChoice>) {
-    setMonitoringInstanceChoices((current) => ({
-      ...current,
-      [monitoringInstanceID]: { ...current[monitoringInstanceID], ...patch },
-    }))
+    setMonitoringInstanceChoices((current) => {
+      const existing = current[monitoringInstanceID]
+      if (!existing) return current
+      return {
+        ...current,
+        [monitoringInstanceID]: { ...existing, ...patch },
+      }
+    })
   }
 
   function updateTargetChoice(targetID: string, patch: Partial<WorkbenchTargetChoice>) {
-    setTargetChoices((current) => ({
-      ...current,
-      [targetID]: { ...current[targetID], ...patch },
-    }))
+    setTargetChoices((current) => {
+      const existing = current[targetID]
+      if (!existing) return current
+      return {
+        ...current,
+        [targetID]: { ...existing, ...patch },
+      }
+    })
   }
 
   function buildInput(): ApplyCancellationInput {
@@ -118,26 +126,32 @@ export function VPSCancellationWorkbench({
     if (activeSubscriptions.length > 0 && subscriptionIDs.length === 0) {
       throw new Error('请显式选择要取消自动续费的 active 订阅。')
     }
+    const monitoringInstanceActions: ApplyCancellationInput['monitoring_instance_actions'] = []
+    for (const monitoringInstance of preview.monitoring_instance_links) {
+      const choice = monitoringInstanceChoices[monitoringInstance.monitoring_instance_id]
+      if (!choice?.enabled) continue
+      monitoringInstanceActions.push({
+        monitoring_instance_id: monitoringInstance.monitoring_instance_id,
+        ...(choice.lifecycleStatus ? { lifecycle_status: choice.lifecycleStatus } : {}),
+        ...(choice.pauseMonitoring ? { monitoring_status: '暂停' } : {}),
+      })
+    }
+    const targetActions: ApplyCancellationInput['target_actions'] = []
+    for (const targetID of targetIDs) {
+      const choice = targetChoices[targetID]
+      if (!choice?.enabled) continue
+      targetActions.push({
+        target_id: targetID,
+        run_status: choice.runStatus,
+      })
+    }
     return {
       reason: cleanReason,
       effective_date: effectiveDate || null,
       subscription_ids: subscriptionIDs,
       vps_lifecycle_status: vpsLifecycleStatus,
-      monitoring_instance_actions: preview.monitoring_instance_links
-        .map((monitoringInstance) => ({ monitoringInstance, choice: monitoringInstanceChoices[monitoringInstance.monitoring_instance_id] }))
-        .filter(({ choice }) => choice?.enabled)
-        .map(({ monitoringInstance, choice }) => ({
-          monitoring_instance_id: monitoringInstance.monitoring_instance_id,
-          lifecycle_status: choice.lifecycleStatus || undefined,
-          monitoring_status: choice.pauseMonitoring ? '暂停' : undefined,
-        })),
-      target_actions: targetIDs
-        .map((targetID) => ({ targetID, choice: targetChoices[targetID] }))
-        .filter(({ choice }) => choice?.enabled)
-        .map(({ targetID, choice }) => ({
-          target_id: targetID,
-          run_status: choice.runStatus,
-        })),
+      monitoring_instance_actions: monitoringInstanceActions,
+      target_actions: targetActions,
     }
   }
 

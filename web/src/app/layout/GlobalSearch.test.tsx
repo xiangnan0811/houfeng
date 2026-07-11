@@ -74,8 +74,6 @@ const mockTargets = [
     note: '',
     current_health_status: '正常',
     current_active_incident_count: 0,
-    last_success_at: undefined,
-    last_failure_at: undefined,
     current_primary_issue_summary: '',
     created_at: '2026-04-20T00:00:00Z',
     updated_at: '2026-04-30T08:00:00Z',

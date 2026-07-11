@@ -100,16 +100,19 @@ describe('Asset Decisions manual group workflows', () => {
     expect(within(saveMembers).getByText('另有 5 台成员保留在保存底稿中')).toBeInTheDocument()
   })
   it('keeps a manual record draft aligned with member changes before saving', async () => {
+    const initialManualDetail = manualGroupDetail()
+    const initialMember = initialManualDetail.members[0]
+    if (!initialMember) throw new Error('manual group fixture must include a member')
     const addedManual = manualGroupDetail({
       member_count: 2,
       members: [
-        ...manualGroupDetail().members,
+        ...initialManualDetail.members,
         {
-          ...manualGroupDetail().members[0],
+          ...initialMember,
           manual_group_id: 'admg_001',
           vps_id: 'vps_standby',
           vps: {
-            ...manualGroupDetail().members[0].vps,
+            ...initialMember.vps,
             vps_id: 'vps_standby',
             display_name: 'Germany Standby',
           },

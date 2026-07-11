@@ -68,6 +68,8 @@ import { VPSValidityExtensionForm } from './vps-detail/VPSValidityExtensionForm'
 import { VPSServicesForm } from './vps-detail/VPSServicesForm'
 import { VPSServicesSection } from './vps-detail/VPSServicesSection'
 import { vpsLifecycleConfirmationCopy } from './vps-detail/vpsLifecycleConfirmationCopy'
+
+const LARGE_MODAL_SIZE = 'lg'
 import { buildVPSDetailOverviewModel } from './vps-detail/vpsDetailOverviewModel'
 import type {
   DecisionDraftState,
@@ -400,8 +402,9 @@ export function VPSDetailPage() {
         setDomainError(null)
         setDomainNotice(null)
         const initialMonitoringLinks = normalizedDetail.monitoring_instance_links ?? []
-        if (initialDrawerFromQuery === 'monitoring-instance-create' && initialMonitoringLinks.length === 1) {
-          navigate(`/monitoring/${encodeURIComponent(initialMonitoringLinks[0].monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(normalizedDetail.vps_id)}`)
+        const initialMonitoringLink = initialMonitoringLinks[0]
+        if (initialDrawerFromQuery === 'monitoring-instance-create' && initialMonitoringLinks.length === 1 && initialMonitoringLink) {
+          navigate(`/monitoring/${encodeURIComponent(initialMonitoringLink.monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(normalizedDetail.vps_id)}`)
           return
         }
         if (initialDrawerFromQuery === 'monitoring-instance-create' && initialMonitoringLinks.length > 1) {
@@ -672,8 +675,9 @@ export function VPSDetailPage() {
       openDrawer('monitoring-instance-create')
       return
     }
-    if (activeLinks.length === 1) {
-      navigate(`/monitoring/${encodeURIComponent(activeLinks[0].monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(detail.vps_id)}`)
+    const activeLink = activeLinks[0]
+    if (activeLinks.length === 1 && activeLink) {
+      navigate(`/monitoring/${encodeURIComponent(activeLink.monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(detail.vps_id)}`)
       return
     }
     openDrawer('monitoring-instance-evidence')
@@ -1616,8 +1620,8 @@ export function VPSDetailPage() {
         title={drawerTitle()}
         ariaLabel={drawerTitle()}
         persistent={activeDrawer != null && !activeDrawer.endsWith('-detail') && activeDrawer !== 'monitoring-instance-evidence'}
-        size={activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'monitoring-instance-evidence' || activeDrawer === 'facts' || activeDrawer === 'cancellation' || activeDrawer === 'subscription' || activeDrawer === 'validity-extension' || activeDrawer === 'monitoring-instance-create') ? 'lg' : undefined}
-        contentClassName={activeDrawer === 'cancellation' ? 'modal-content--asset-cancel' : undefined}
+        {...(activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'monitoring-instance-evidence' || activeDrawer === 'facts' || activeDrawer === 'cancellation' || activeDrawer === 'subscription' || activeDrawer === 'validity-extension' || activeDrawer === 'monitoring-instance-create') ? { size: LARGE_MODAL_SIZE } : {})}
+        {...(activeDrawer === 'cancellation' ? { contentClassName: 'modal-content--asset-cancel' } : {})}
       >
         <div className="vps-detail-modal">
           {renderDrawerContent()}

@@ -108,7 +108,9 @@ export function MonitoringComparePage() {
                 sample={monitoringInstanceA.runtimeFacts.latest_host_sample ?? null}
                 metricPoints={monitoringInstanceA.runtimeFacts.host_metric_points ?? []}
                 timeWindow="24h"
-                window={monitoringInstanceA.runtimeFacts.window}
+                {...(monitoringInstanceA.runtimeFacts.window === undefined
+                  ? {}
+                  : { window: monitoringInstanceA.runtimeFacts.window })}
               />
             ) : (
               <CompareColumnPlaceholder state={monitoringInstanceA} />
@@ -120,7 +122,9 @@ export function MonitoringComparePage() {
                 sample={monitoringInstanceB.runtimeFacts.latest_host_sample ?? null}
                 metricPoints={monitoringInstanceB.runtimeFacts.host_metric_points ?? []}
                 timeWindow="24h"
-                window={monitoringInstanceB.runtimeFacts.window}
+                {...(monitoringInstanceB.runtimeFacts.window === undefined
+                  ? {}
+                  : { window: monitoringInstanceB.runtimeFacts.window })}
               />
             ) : (
               <CompareColumnPlaceholder state={monitoringInstanceB} />

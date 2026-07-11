@@ -316,7 +316,7 @@ export function TargetsPage() {
       const updated = await updateTargetMetadata(
         target.target_id,
         {
-          group: metadataGroupInput.trim() || undefined,
+          ...(metadataGroupInput.trim() ? { group: metadataGroupInput.trim() } : {}),
           labels: dedupeLabels(parseLabels(metadataLabelInput)),
           note: target.note,
         },

@@ -232,7 +232,9 @@ export function SubscriptionSettingsSection() {
       updated = await updateSubscriptionCostSettings({
         base_currency: nextBaseCurrency,
         exchange_rate_provider: settingsDraft.provider,
-        fixer_api_key: settingsDraft.fixerApiKey.trim() || undefined,
+        ...(settingsDraft.fixerApiKey.trim()
+          ? { fixer_api_key: settingsDraft.fixerApiKey.trim() }
+          : {}),
         default_reminder_offsets_days: offsets,
         max_reminder_lead_days: maxLeadDays,
         exchange_rate_stale_after_hours: staleHours,

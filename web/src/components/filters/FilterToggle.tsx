@@ -19,7 +19,12 @@ export function FilterToggle({
   return (
     <div className={classes}>
       <span className="filter-toggle__label">{label}</span>
-      <Toggle checked={checked} onChange={onChange} label={label} disabled={disabled} />
+      <Toggle
+        checked={checked}
+        onChange={onChange}
+        label={label}
+        {...(disabled === undefined ? {} : { disabled })}
+      />
     </div>
   )
 }

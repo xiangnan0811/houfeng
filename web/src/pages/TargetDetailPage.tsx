@@ -65,7 +65,12 @@ import type {
 
 export function TargetDetailPage() {
   const { targetId } = useParams()
-  return <TargetDetailPageContent key={targetId ?? 'missing-target'} targetId={targetId} />
+  return (
+    <TargetDetailPageContent
+      key={targetId ?? 'missing-target'}
+      {...(targetId === undefined ? {} : { targetId })}
+    />
+  )
 }
 
 function TargetDetailPageContent({ targetId }: { targetId?: string }) {
@@ -456,7 +461,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       const updated = await updateTargetMetadata(
         actionTargetId,
         {
-          group: metadataForm.group.trim() || undefined,
+          ...(metadataForm.group.trim() ? { group: metadataForm.group.trim() } : {}),
           labels: dedupeLabels(parseLabels(metadataForm.labels)),
           note: metadataForm.note.trim(),
         },

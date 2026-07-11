@@ -4,6 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { VPSDetailPage } from './VPSDetailPage'
 
+function firstResult<T>(items: readonly T[], description: string): T {
+  const item = items[0]
+  if (!item) throw new Error(`${description} must expose a first result`)
+  return item
+}
+
 const timelineEmptyBody = {
   vps_id: 'vps_001',
   renewal_decisions: [],
@@ -960,7 +966,7 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
-    fireEvent.click(screen.getAllByRole('button', { name: '创建/更新订阅' })[0])
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '创建/更新订阅' }), 'subscription command'))
     const drawer = screen.getByRole('dialog', { name: '创建/更新订阅' })
     expect(within(drawer).queryByLabelText('订阅状态')).not.toBeInTheDocument()
     fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '18' } })
@@ -1148,7 +1154,7 @@ describe('VPSDetailPage', () => {
     )
 
     const validityButtons = await screen.findAllByRole('button', { name: '延长有效期' })
-    fireEvent.click(validityButtons[0])
+    fireEvent.click(firstResult(validityButtons, 'validity command'))
     const drawer = await screen.findByRole('dialog', { name: '延长有效期' })
     fireEvent.change(within(drawer).getByLabelText('延长至日期'), { target: { value: '2026-05-15' } })
     fireEvent.change(within(drawer).getByLabelText('延长原因'), { target: { value: '故障补偿' } })
@@ -1234,7 +1240,7 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    fireEvent.click(screen.getAllByRole('button', { name: '接入/升级 agent' })[0])
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '接入/升级 agent' }), 'agent onboarding command'))
     const drawer = screen.getByRole('dialog', { name: '接入/升级 agent' })
     expect(within(drawer).getByLabelText('监控实例名称')).toHaveValue('Tokyo Edge')
     expect(within(drawer).getByLabelText('标签')).toHaveValue('edge')
@@ -1295,7 +1301,7 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    fireEvent.click(screen.getAllByRole('button', { name: '接入/升级 agent' })[0])
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '接入/升级 agent' }), 'agent upgrade command'))
 
     await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/monitoring/mi_001'))
     expect(screen.getByTestId('location-search')).toHaveTextContent('onboarding=1')
@@ -1336,7 +1342,7 @@ describe('VPSDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    fireEvent.click(screen.getAllByRole('button', { name: '监控观测' })[0])
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '监控观测' }), 'monitoring evidence command'))
     const evidenceDrawer = await screen.findByRole('dialog', { name: '监控观测' })
 
     expect(within(evidenceDrawer).queryByRole('button', { name: '关联已有监控实例' })).not.toBeInTheDocument()
@@ -1567,7 +1573,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('续费决策已更新，资产历史已刷新')).toBeInTheDocument())
     expect(screen.getAllByText('too expensive').length).toBeGreaterThan(0)
-    fireEvent.click(screen.getAllByRole('button', { name: '资产历史' })[0])
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '资产历史' }), 'asset history command'))
     const timelineDrawer = screen.getByRole('dialog', { name: '资产历史' })
     expect(within(timelineDrawer).getByText('保留 -> 取消')).toBeInTheDocument()
     fireEvent.click(within(timelineDrawer).getByLabelText('关闭'))
@@ -1855,7 +1861,7 @@ describe('VPSDetailPage', () => {
     await waitFor(() => expect(screen.getByText('基础信息已更新，资产历史已刷新')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'Tokyo Edge 2' })).toBeInTheDocument()
     expect(screen.getAllByText('edge.example.com:2222').length).toBeGreaterThan(0)
-    fireEvent.click(screen.getAllByRole('button', { name: '资产历史' })[0])
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '资产历史' }), 'asset history command'))
     const timelineDrawer = screen.getByRole('dialog', { name: '资产历史' })
     expect(within(timelineDrawer).getByText('192.0.2.1 -> 198.51.100.5')).toBeInTheDocument()
     expect(within(timelineDrawer).getByText('deploy@edge.example.com:2222')).toBeInTheDocument()
@@ -2166,7 +2172,7 @@ describe('VPSDetailPage', () => {
 
     await waitFor(() => expect(screen.getAllByText('经验记录已写入资产历史').length).toBeGreaterThan(0))
     expect(screen.getAllByText(/晚高峰丢包/).length).toBeGreaterThan(0)
-    fireEvent.click(screen.getAllByRole('button', { name: '资产历史' })[0])
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '资产历史' }), 'asset history command'))
     const timelineDrawer = screen.getByRole('dialog', { name: '资产历史' })
     expect(within(timelineDrawer).getByText('连续三天 tcp probe 抖动')).toBeInTheDocument()
     fireEvent.click(within(timelineDrawer).getByLabelText('关闭'))

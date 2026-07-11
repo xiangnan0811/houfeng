@@ -744,8 +744,16 @@ export function listVPSServices(vpsId: string) {
 }
 
 export function createVPSService(vpsId: string, input: CreateAssetServiceInput): Promise<AssetServiceRecord> {
-  const { vps_id: ignoredVPSID, ...body } = input
-  void ignoredVPSID
+  const body: Omit<CreateAssetServiceInput, 'vps_id'> = {
+    ...(input.target_id === undefined ? {} : { target_id: input.target_id }),
+    name: input.name,
+    ...(input.service_type === undefined ? {} : { service_type: input.service_type }),
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(input.url === undefined ? {} : { url: input.url }),
+    ...(input.port === undefined ? {} : { port: input.port }),
+    ...(input.labels === undefined ? {} : { labels: input.labels }),
+    ...(input.note === undefined ? {} : { note: input.note }),
+  }
   return postJSONBody<AssetServiceRecord>(`/api/vps/${vpsId}/services`, body)
 }
 
@@ -754,8 +762,19 @@ export function listVPSDomains(vpsId: string) {
 }
 
 export function createVPSDomain(vpsId: string, input: CreateAssetDomainInput): Promise<AssetDomainRecord> {
-  const { vps_id: ignoredVPSID, ...body } = input
-  void ignoredVPSID
+  const body: Omit<CreateAssetDomainInput, 'vps_id'> = {
+    ...(input.service_id === undefined ? {} : { service_id: input.service_id }),
+    ...(input.target_id === undefined ? {} : { target_id: input.target_id }),
+    domain_name: input.domain_name,
+    ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(input.registrar === undefined ? {} : { registrar: input.registrar }),
+    ...(input.expires_at === undefined ? {} : { expires_at: input.expires_at }),
+    ...(input.auto_renew === undefined ? {} : { auto_renew: input.auto_renew }),
+    ...(input.https_enabled === undefined ? {} : { https_enabled: input.https_enabled }),
+    ...(input.labels === undefined ? {} : { labels: input.labels }),
+    ...(input.note === undefined ? {} : { note: input.note }),
+  }
   return postJSONBody<AssetDomainRecord>(`/api/vps/${vpsId}/domains`, body)
 }
 

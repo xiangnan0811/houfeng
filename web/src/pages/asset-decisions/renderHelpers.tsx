@@ -455,7 +455,9 @@ export function groupMemberComparisonMatrixMember(member: AssetDecisionGroupMemb
     sourceLabel: sourceAvailabilityLabel(member.source_availability),
     role: member.suggested_role,
     action: member.suggested_action,
-    comparison: member.comparison_insight,
+    ...(member.comparison_insight === undefined
+      ? {}
+      : { comparison: member.comparison_insight }),
     evidenceChips: member.evidence_chips,
     currentFactFound: true,
   }
@@ -475,7 +477,9 @@ export function manualMemberComparisonMatrixMember(member: AssetDecisionManualGr
       action: member.suggested_action,
       intendedRole: member.intended_role,
       intendedAction: member.intended_action,
-      comparison: member.comparison_insight,
+      ...(member.comparison_insight === undefined
+        ? {}
+        : { comparison: member.comparison_insight }),
       evidenceChips: member.evidence_chips,
       currentFactFound: false,
     }

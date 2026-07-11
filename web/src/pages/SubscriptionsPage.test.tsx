@@ -98,9 +98,13 @@ function overviewFor(subscriptions: SubscriptionRecord[] = [], overrides: Partia
       vps_display_name: 'Tokyo Edge',
       display_name: sub.display_name ?? '',
       provider_name: 'Hetzner',
-      renew_at: sub.renew_at,
-      monthly_price_base: sub.monthly_price_base,
-      yearly_price_base: sub.yearly_price_base,
+      ...(sub.renew_at === undefined ? {} : { renew_at: sub.renew_at }),
+      ...(sub.monthly_price_base === undefined
+        ? {}
+        : { monthly_price_base: sub.monthly_price_base }),
+      ...(sub.yearly_price_base === undefined
+        ? {}
+        : { yearly_price_base: sub.yearly_price_base }),
       base_currency: sub.base_currency ?? 'CNY',
       currency: sub.currency,
       renewal_decision: 'keep',
@@ -131,14 +135,22 @@ function overviewFor(subscriptions: SubscriptionRecord[] = [], overrides: Partia
       price: sub.price,
       currency: sub.currency,
       monthly_price: sub.monthly_price,
-      monthly_price_base: sub.monthly_price_base,
-      yearly_price_base: sub.yearly_price_base,
+      ...(sub.monthly_price_base === undefined
+        ? {}
+        : { monthly_price_base: sub.monthly_price_base }),
+      ...(sub.yearly_price_base === undefined
+        ? {}
+        : { yearly_price_base: sub.yearly_price_base }),
       base_currency: sub.base_currency ?? 'CNY',
-      exchange_rate: sub.exchange_rate,
-      exchange_rate_date: sub.exchange_rate_date,
+      ...(sub.exchange_rate === undefined ? {} : { exchange_rate: sub.exchange_rate }),
+      ...(sub.exchange_rate_date === undefined
+        ? {}
+        : { exchange_rate_date: sub.exchange_rate_date }),
       exchange_rate_stale: Boolean(sub.exchange_rate_stale),
-      renew_at: sub.renew_at,
-      next_reminder_at: sub.next_reminder_at,
+      ...(sub.renew_at === undefined ? {} : { renew_at: sub.renew_at }),
+      ...(sub.next_reminder_at === undefined
+        ? {}
+        : { next_reminder_at: sub.next_reminder_at }),
       status: sub.status,
       payment_method: sub.payment_method,
       lifecycle_status: 'active',

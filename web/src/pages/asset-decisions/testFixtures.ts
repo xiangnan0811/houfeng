@@ -451,6 +451,12 @@ export function decisionRecord(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function primaryGroupMember() {
+  const member = groupDetail().members[0]
+  if (!member) throw new Error('group detail fixture must include a primary member')
+  return member
+}
+
 export function manualGroupDetail(overrides: Record<string, unknown> = {}) {
   return {
     manual_group_id: 'admg_001',
@@ -500,7 +506,7 @@ export function manualGroupDetail(overrides: Record<string, unknown> = {}) {
     archived_at: null,
     members: [
       {
-        ...groupDetail().members[0],
+        ...primaryGroupMember(),
         manual_group_id: 'admg_001',
         vps_id: 'vps_primary',
         intended_role: 'primary_candidate',
@@ -520,6 +526,7 @@ export function manualGroupDetail(overrides: Record<string, unknown> = {}) {
 
 export function cloneGroupMember(index: number) {
   const [primary, standby] = groupDetail().members
+  if (!primary || !standby) throw new Error('group detail fixture must include two members')
   const baseMember = index % 2 === 0 ? primary : standby
   const lane = index % 3 === 0 ? 'primary' : index % 3 === 1 ? 'evidence' : 'review'
   const suggestedRole = lane === 'primary' ? 'primary_candidate' : lane === 'evidence' ? 'evidence_needed' : 'observe_candidate'
@@ -635,11 +642,8 @@ export function decisionRecordWithManyMembers(count = 8) {
 
 export function manualGroupSummary(overrides: Record<string, unknown> = {}) {
   const detail = manualGroupDetail()
-  const summary = {
-    ...detail,
-    members: undefined,
-  }
-  delete summary.members
+  const { members: ignoredMembers, ...summary } = detail
+  void ignoredMembers
   return {
     ...summary,
     ...overrides,
@@ -740,7 +744,10 @@ export function mockInitialWorkbench(fetchMock: ReturnType<typeof vi.fn>, option
     const route = routes.find((candidate) => candidate.url === url && candidate.method === method)
       ?? routes.find((candidate) => candidate.url === url && !candidate.method && method === 'GET')
     if (route) {
-      const response = route.responses.length > 1 ? route.responses.shift()! : route.responses[0]
+      const response = route.responses.length > 1 ? route.responses.shift() : route.responses[0]
+      if (!response) {
+        return Promise.reject(new Error(`fixture route has no response: ${method} ${url}`))
+      }
       return Promise.resolve(mockJSONResponse(response.body, response.status ?? 200))
     }
     if (method !== 'GET') {

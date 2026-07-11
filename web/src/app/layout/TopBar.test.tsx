@@ -38,7 +38,9 @@ describe('TopBar theme menu', () => {
     const options = screen.getAllByRole('menuitemradio')
     expect(options).toHaveLength(4)
     expect(options.filter((option) => option.getAttribute('aria-checked') === 'true')).toHaveLength(1)
-    expect(options[0]).toHaveFocus()
+    const firstOption = options[0]
+    if (!firstOption) throw new Error('theme menu must expose a first option')
+    expect(firstOption).toHaveFocus()
   })
 
   it('moves focus with Arrow, Home, and End without changing the selected theme', () => {
@@ -46,15 +48,19 @@ describe('TopBar theme menu', () => {
     fireEvent.click(screen.getByRole('button', { name: '切换主题' }))
     const options = screen.getAllByRole('menuitemradio')
     const initiallyChecked = options.find((option) => option.getAttribute('aria-checked') === 'true')
+    const [firstOption, secondOption, , lastOption] = options
+    if (!firstOption || !secondOption || !lastOption) {
+      throw new Error('theme menu must expose four options')
+    }
 
-    fireEvent.keyDown(options[0], { key: 'ArrowDown' })
-    expect(options[1]).toHaveFocus()
-    fireEvent.keyDown(options[1], { key: 'End' })
-    expect(options[3]).toHaveFocus()
-    fireEvent.keyDown(options[3], { key: 'Home' })
-    expect(options[0]).toHaveFocus()
-    fireEvent.keyDown(options[0], { key: 'ArrowUp' })
-    expect(options[3]).toHaveFocus()
+    fireEvent.keyDown(firstOption, { key: 'ArrowDown' })
+    expect(secondOption).toHaveFocus()
+    fireEvent.keyDown(secondOption, { key: 'End' })
+    expect(lastOption).toHaveFocus()
+    fireEvent.keyDown(lastOption, { key: 'Home' })
+    expect(firstOption).toHaveFocus()
+    fireEvent.keyDown(firstOption, { key: 'ArrowUp' })
+    expect(lastOption).toHaveFocus()
     expect(initiallyChecked).toHaveAttribute('aria-checked', 'true')
   })
 
@@ -77,12 +83,16 @@ describe('TopBar theme menu', () => {
     const trigger = screen.getByRole('button', { name: '切换主题' })
 
     fireEvent.click(trigger)
-    fireEvent.keyDown(screen.getAllByRole('menuitemradio')[0], { key: 'Escape' })
+    const escapeOption = screen.getAllByRole('menuitemradio')[0]
+    if (!escapeOption) throw new Error('theme menu must expose an option')
+    fireEvent.keyDown(escapeOption, { key: 'Escape' })
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
 
     fireEvent.click(trigger)
-    fireEvent.keyDown(screen.getAllByRole('menuitemradio')[0], { key: 'Tab' })
+    const tabOption = screen.getAllByRole('menuitemradio')[0]
+    if (!tabOption) throw new Error('theme menu must expose an option')
+    fireEvent.keyDown(tabOption, { key: 'Tab' })
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
 
     fireEvent.click(trigger)

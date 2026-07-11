@@ -77,7 +77,7 @@ function SidebarNavItem({ to, label, icon, badge, end }: SidebarNavItemProps) {
   return (
     <NavLink
       to={to}
-      end={end}
+      {...(end === undefined ? {} : { end })}
       aria-label={accessibleLabel}
       className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
     >

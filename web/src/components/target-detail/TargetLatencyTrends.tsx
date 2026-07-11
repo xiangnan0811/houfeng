@@ -12,6 +12,8 @@ import type {
   ProbeObservation,
 } from '../../lib/types'
 
+const MAINTENANCE_RIBBON = 'maintenance'
+
 export type TargetLatencyTrend = {
   probeItemId: string
   probeKind: ProbeKind
@@ -66,8 +68,7 @@ function deriveLatencyTrends(
       }))
       const distinctMonitoringInstances = new Set(obs.map((o) => o.monitoring_instance_id))
 
-      const latestLatency =
-        latencies.length > 0 ? latencies[latencies.length - 1] : null
+      const latestLatency = latencies.at(-1) ?? null
       const averageLatency =
         latencies.length > 0
           ? latencies.reduce((acc, value) => acc + value, 0) / latencies.length
@@ -99,7 +100,8 @@ function describeMeta(observations: ProbeObservation[], timeWindow: string): str
       new Date(a.observed_at).getTime() - new Date(b.observed_at).getTime(),
   )
   const oldest = sorted[0]
-  const newest = sorted[sorted.length - 1]
+  const newest = sorted.at(-1)
+  if (!oldest || !newest) return `${timeWindowLabel} 暂无观测`
   const backfillCount = observations.filter((o) => o.is_backfilled).length
   const parts = [
     `${timeWindowLabel} ${observations.length} 样本`,
@@ -201,13 +203,11 @@ export function TargetLatencyTrends({
     )
   }
 
-  const ribbon = isMaintenance ? 'maintenance' : undefined
-
   return (
     <DetailSection
       eyebrow="近期延迟"
       title="近期延迟趋势"
-      ribbon={ribbon}
+      {...(isMaintenance ? { ribbon: MAINTENANCE_RIBBON } : {})}
       aside={<span className="detail-section__aside-meta">{meta}</span>}
     >
       {trends.length === 0 ? (

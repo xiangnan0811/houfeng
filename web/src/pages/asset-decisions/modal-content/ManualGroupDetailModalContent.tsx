@@ -166,8 +166,12 @@ export function ManualGroupDetailModal({
             ),
             footer: <span className="asset-decision-detail-command__context">{manualCoverMeta(manualDetailState.detail, manualGroupProgress)}</span>,
             assessment: manualDetailState.detail.evidence_assessment,
-            recommendation: manualDetailState.detail.decision_recommendation,
-            insight: manualDetailState.detail.comparison_insight,
+            ...(manualDetailState.detail.decision_recommendation === undefined
+              ? {}
+              : { recommendation: manualDetailState.detail.decision_recommendation }),
+            ...(manualDetailState.detail.comparison_insight === undefined
+              ? {}
+              : { insight: manualDetailState.detail.comparison_insight }),
             chips: manualDetailState.detail.evidence_chips,
             badge: (
               <Badge variant="state" tone={manualGroupProgress.readinessTone}>

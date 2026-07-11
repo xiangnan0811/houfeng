@@ -32,7 +32,7 @@ export function VPSMonitoringInstanceLinksSection({
 }: VPSMonitoringInstanceLinksSectionProps) {
   const pendingUnlinkName = pendingUnlinkMonitoringInstance?.display_name ?? pendingUnlinkMonitoringInstance?.monitoring_instance_id ?? ''
   const hasNoActiveLinks = monitoring.length === 0
-  const hasSingleActiveLink = monitoring.length === 1
+  const singleActiveLink = monitoring.length === 1 ? monitoring[0] ?? null : null
   const hasDuplicateActiveLinks = monitoring.length > 1
 
   return (
@@ -50,9 +50,9 @@ export function VPSMonitoringInstanceLinksSection({
             <Button variant="primary" size="sm" onClick={onCreateMonitoringInstance}>接入/升级 agent</Button>
             <Button variant="secondary" size="sm" onClick={onOpenLink}>关联已有监控实例</Button>
           </div>
-        ) : hasSingleActiveLink ? (
+        ) : singleActiveLink ? (
           <div className="section-heading__actions">
-            <Button variant="primary" size="sm" onClick={() => onUpgradeMonitoringInstance(monitoring[0])}>接入/升级 agent</Button>
+            <Button variant="primary" size="sm" onClick={() => onUpgradeMonitoringInstance(singleActiveLink)}>接入/升级 agent</Button>
           </div>
         ) : null}
       </div>

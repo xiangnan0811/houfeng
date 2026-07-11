@@ -139,7 +139,7 @@ export function TargetProbeList({
     <div className="probe-list">
       {probeItems.map((probeItem) => {
         const observations = observationsByProbe.get(probeItem.probe_item_id) ?? []
-        const latestObservedAt = observations.length > 0 ? observations[0].observed_at : null
+        const latestObservedAt = observations[0]?.observed_at ?? null
         return (
           <article key={probeItem.probe_item_id} className="probe-card">
             <header className="probe-card__header">

@@ -864,7 +864,9 @@ describe('MonitoringPage', () => {
     expect(trendCells.length).toBe(2)
 
     // Trend strip should have 3 trend items per row
-    const trendItems = trendCells[0].querySelectorAll('.monitoring-table__trend-item')
+    const firstTrendCell = trendCells[0]
+    if (!firstTrendCell) throw new Error('monitoring table must render the first trend cell')
+    const trendItems = firstTrendCell.querySelectorAll('.monitoring-table__trend-item')
     expect(trendItems.length).toBe(3)
   })
 
@@ -895,9 +897,12 @@ describe('MonitoringPage', () => {
     const trendCells = document.querySelectorAll('.monitoring-table__trends')
     expect(trendCells.length).toBe(1)
     // The placeholder should be rendered
-    const placeholder = trendCells[0].querySelector('.monitoring-table__trends-empty')
+    const firstTrendCell = trendCells[0]
+    if (!firstTrendCell) throw new Error('monitoring table must render the trend cell')
+    const placeholder = firstTrendCell.querySelector('.monitoring-table__trends-empty')
     expect(placeholder).not.toBeNull()
-    expect(placeholder!.textContent).toBe('—')
+    if (!placeholder) throw new Error('missing trend data must render a placeholder')
+    expect(placeholder.textContent).toBe('—')
   })
 
   it('shows heartbeat and missing-heartbeat problems in the current issue column, not under identity', async () => {

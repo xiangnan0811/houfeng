@@ -98,7 +98,10 @@ describe('production CSS reachability', () => {
       root.walkRules((rule) => {
         for (const selector of splitSelectors(rule.selector)) {
           const classes = [
-            ...new Set([...selector.matchAll(/\.([_a-zA-Z][\w-]*)/g)].map((match) => match[1])),
+            ...new Set([...selector.matchAll(/\.([_a-zA-Z][\w-]*)/g)].flatMap((match) => {
+              const className = match[1]
+              return className ? [className] : []
+            })),
           ]
           const unowned = classes.filter((className) => !isUsed(className))
           if (unowned.length > 0) {
