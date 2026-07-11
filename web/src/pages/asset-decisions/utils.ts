@@ -16,10 +16,15 @@ import type {
   SubscriptionRecord,
   VPSAssetRecord,
 } from '../../lib/types'
-import type { AssetQualityIssue } from './types'
+import { MANUAL_GROUP_SCENARIO_LABELS } from './constants'
+import type {
+  AssetQualityIssue,
+  ContextFilterChip,
+  MainWorkbenchView,
+  WorkbenchView,
+} from './types'
 
 type RenewalWindow = 30 | 60 | 90
-type WorkbenchView = AssetDecisionView | 'single_queue'
 
 const RENEWAL_WINDOWS: readonly RenewalWindow[] = [30, 60, 90]
 
@@ -113,6 +118,34 @@ export function buildAssetDecisionFilter(searchParams: URLSearchParams, view: As
     city: trimParam(searchParams.get('city')),
     scenario,
   }
+}
+
+export function assetDecisionFilterKey(filter: AssetDecisionGroupListFilter): string {
+  return [
+    filter.view ?? '',
+    filter.renew_within_days ?? '',
+    filter.provider_id ?? '',
+    filter.vps_id ?? '',
+    filter.country ?? '',
+    filter.region ?? '',
+    filter.city ?? '',
+    filter.scenario ?? '',
+  ].join('|')
+}
+
+export function portfolioViewForWorkbench(view: WorkbenchView): MainWorkbenchView {
+  return view === 'single_queue' ? 'needs_decision' : view
+}
+
+export function buildContextFilterChips(filter: AssetDecisionGroupListFilter): ContextFilterChip[] {
+  const chips: ContextFilterChip[] = []
+  if (filter.provider_id) chips.push({ key: 'provider_id', label: '服务商', value: filter.provider_id })
+  if (filter.vps_id) chips.push({ key: 'vps_id', label: 'VPS', value: filter.vps_id })
+  if (filter.country) chips.push({ key: 'country', label: '国家', value: filter.country })
+  if (filter.region) chips.push({ key: 'region', label: '区域', value: filter.region })
+  if (filter.city) chips.push({ key: 'city', label: '城市', value: filter.city })
+  if (filter.scenario) chips.push({ key: 'scenario', label: '场景', value: MANUAL_GROUP_SCENARIO_LABELS[filter.scenario] })
+  return chips
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

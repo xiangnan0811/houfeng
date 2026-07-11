@@ -44,7 +44,7 @@ type TemplateDetailModalProps = {
   onCancelTemplateStatusUpdate: () => void
   onUpdateTemplateStatus: (status: AssetDecisionScenarioTemplateStatus) => void
   onSubmitTemplateManualGroup: (event: FormSubmitEvent) => void
-  onSetTemplateManualDraft: React.Dispatch<React.SetStateAction<TemplateManualGroupDraft>>
+  onUpdateTemplateManualDraft: (patch: Partial<TemplateManualGroupDraft>) => void
 }
 
 export function TemplateDetailModal({
@@ -61,7 +61,7 @@ export function TemplateDetailModal({
   onCancelTemplateStatusUpdate,
   onUpdateTemplateStatus,
   onSubmitTemplateManualGroup,
-  onSetTemplateManualDraft,
+  onUpdateTemplateManualDraft,
 }: TemplateDetailModalProps) {
   return (
     <Modal
@@ -173,7 +173,7 @@ export function TemplateDetailModal({
                 <input
                   className="input"
                   value={templateManualDraft.title}
-                  onChange={(event) => onSetTemplateManualDraft((current) => ({ ...current, title: event.target.value }))}
+                  onChange={(event) => onUpdateTemplateManualDraft({ title: event.target.value })}
                 />
               </label>
               <label className="input-field">
@@ -181,7 +181,7 @@ export function TemplateDetailModal({
                 <select
                   className="input"
                   value={String(templateManualDraft.renewWithinDays)}
-                  onChange={(event) => onSetTemplateManualDraft((current) => ({ ...current, renewWithinDays: parseRenewalWindow(event.target.value) }))}
+                  onChange={(event) => onUpdateTemplateManualDraft({ renewWithinDays: parseRenewalWindow(event.target.value) })}
                 >
                   {RENEWAL_WINDOWS.map((value) => (
                     <option key={value} value={value}>未来 {value} 天</option>
@@ -194,7 +194,7 @@ export function TemplateDetailModal({
                   className="input"
                   rows={2}
                   value={templateManualDraft.goal}
-                  onChange={(event) => onSetTemplateManualDraft((current) => ({ ...current, goal: event.target.value }))}
+                  onChange={(event) => onUpdateTemplateManualDraft({ goal: event.target.value })}
                 />
               </label>
               <label className="input-field asset-decision-record-form__goal">
@@ -203,7 +203,7 @@ export function TemplateDetailModal({
                   className="input"
                   rows={2}
                   value={templateManualDraft.note}
-                  onChange={(event) => onSetTemplateManualDraft((current) => ({ ...current, note: event.target.value }))}
+                  onChange={(event) => onUpdateTemplateManualDraft({ note: event.target.value })}
                 />
               </label>
             </div>

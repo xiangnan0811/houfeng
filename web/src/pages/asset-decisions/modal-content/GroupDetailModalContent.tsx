@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import { Modal, TabPanel, Tabs, DataTable, type DataTableColumn } from '../../../components/atoms'
@@ -8,8 +7,6 @@ import type {
   AssetDecisionGroupDetail,
   AssetDecisionGroupMember,
   AssetDecisionRecordStatus,
-  AssetDecisionSuggestedAction,
-  AssetDecisionSuggestedRole,
   VPSAssetRecord,
 } from '../../../lib/types'
 import { formatOptional } from '../../../lib/format'
@@ -17,6 +14,7 @@ import { vpsLocationLabel } from '../../assetPageUtils'
 import { RECORD_STATUS_OPTIONS } from '../constants'
 import { vpsWorkbenchPath } from '../paths'
 import { compactGroupJudgement } from '../formatters'
+import { RecordDraftMemberRows } from '../components/RecordDraftMemberRows'
 import {
   renderDetailCommand,
   renderDetailPanel,
@@ -29,6 +27,7 @@ import type {
   FormSubmitEvent,
   GroupDetailPanel,
   RecordDraft,
+  RecordMemberDraft,
 } from '../types'
 
 type GroupDetailModalProps = {
@@ -36,6 +35,7 @@ type GroupDetailModalProps = {
   detailState: DetailState
   groupDetailPanel: GroupDetailPanel
   recordDraft: RecordDraft | null
+  recordDraftEditingMemberID: string | null
   recordSaving: boolean
   recordSaveError: string | null
   manualGroupCreating: boolean
@@ -47,22 +47,17 @@ type GroupDetailModalProps = {
   memberColumns: DataTableColumn<AssetDecisionGroupMember>[]
   onClose: () => void
   onSetGroupDetailPanel: (panel: GroupDetailPanel) => void
-  onSetRecordDraft: React.Dispatch<React.SetStateAction<RecordDraft | null>>
+  onUpdateRecordDraft: (patch: Partial<Pick<RecordDraft, 'title' | 'goal' | 'status'>>) => void
+  onUpdateRecordDraftMember: (vpsID: string, patch: Partial<RecordMemberDraft>) => void
+  onEditRecordDraftMember: (vpsID: string | null) => void
   onStartRecordSave: (detail: AssetDecisionGroupDetail) => void
   onSubmitRecordSave: (event: FormSubmitEvent) => void
   onCancelRecordSave: () => void
   onCreateManualGroupFromAuto: (detail: AssetDecisionGroupDetail) => void
   onSelectVPS: (vps: VPSAssetRecord) => void
   onCloseDecisionDrawer: () => void
-  onHandleDecisionSubmit: (event: FormSubmitEvent) => void
-  onSetDecisionDraft: React.Dispatch<React.SetStateAction<AssetDecisionDraft>>
-  renderRecordDraftMemberRows: (members: Array<{
-    vpsID: string
-    displayName: string
-    fallbackRole: AssetDecisionSuggestedRole
-    fallbackAction: AssetDecisionSuggestedAction
-    meta?: string
-  }>) => ReactNode
+  onSubmitDecision: () => void
+  onUpdateDecisionDraft: (draft: AssetDecisionDraft) => void
 }
 
 export function GroupDetailModal({
@@ -70,6 +65,7 @@ export function GroupDetailModal({
   detailState,
   groupDetailPanel,
   recordDraft,
+  recordDraftEditingMemberID,
   recordSaving,
   recordSaveError,
   manualGroupCreating,
@@ -81,16 +77,17 @@ export function GroupDetailModal({
   memberColumns,
   onClose,
   onSetGroupDetailPanel,
-  onSetRecordDraft,
+  onUpdateRecordDraft,
+  onUpdateRecordDraftMember,
+  onEditRecordDraftMember,
   onStartRecordSave,
   onSubmitRecordSave,
   onCancelRecordSave,
   onCreateManualGroupFromAuto,
   onSelectVPS,
   onCloseDecisionDrawer,
-  onHandleDecisionSubmit,
-  onSetDecisionDraft,
-  renderRecordDraftMemberRows,
+  onSubmitDecision,
+  onUpdateDecisionDraft,
 }: GroupDetailModalProps) {
   return (
     <Modal
@@ -211,7 +208,7 @@ export function GroupDetailModal({
                   <input
                     className="input"
                     value={recordDraft.title}
-                    onChange={(event) => onSetRecordDraft((current) => current ? { ...current, title: event.target.value } : current)}
+                    onChange={(event) => onUpdateRecordDraft({ title: event.target.value })}
                   />
                 </label>
                 <label className="input-field">
@@ -219,7 +216,7 @@ export function GroupDetailModal({
                   <select
                     className="input"
                     value={recordDraft.status}
-                    onChange={(event) => onSetRecordDraft((current) => current ? { ...current, status: event.target.value as AssetDecisionRecordStatus } : current)}
+                    onChange={(event) => onUpdateRecordDraft({ status: event.target.value as AssetDecisionRecordStatus })}
                   >
                     {RECORD_STATUS_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
@@ -232,17 +229,23 @@ export function GroupDetailModal({
                     className="input"
                     value={recordDraft.goal}
                     rows={2}
-                    onChange={(event) => onSetRecordDraft((current) => current ? { ...current, goal: event.target.value } : current)}
+                    onChange={(event) => onUpdateRecordDraft({ goal: event.target.value })}
                   />
                 </label>
               </div>
-              {renderRecordDraftMemberRows(detailState.detail.members.map((member) => ({
-                vpsID: member.vps.vps_id,
-                displayName: member.vps.display_name || member.vps.vps_id,
-                fallbackRole: member.suggested_role,
-                fallbackAction: member.suggested_action,
-                meta: `${formatOptional(member.vps.provider_name)} · ${vpsLocationLabel(member.vps)}`,
-              })))}
+              <RecordDraftMemberRows
+                members={detailState.detail.members.map((member) => ({
+                  vpsID: member.vps.vps_id,
+                  displayName: member.vps.display_name || member.vps.vps_id,
+                  fallbackRole: member.suggested_role,
+                  fallbackAction: member.suggested_action,
+                  meta: `${formatOptional(member.vps.provider_name)} · ${vpsLocationLabel(member.vps)}`,
+                }))}
+                draft={recordDraft}
+                editingMemberID={recordDraftEditingMemberID}
+                onEditMember={onEditRecordDraftMember}
+                onUpdateMember={onUpdateRecordDraftMember}
+              />
             </form>,
           )}
           {groupDetailPanel === 'raw' && renderDetailPanel('数据底稿',
@@ -265,8 +268,11 @@ export function GroupDetailModal({
                 submitting={decisionSubmitting}
                 error={decisionError}
                 notice={null}
-                onDraftChange={onSetDecisionDraft}
-                onSubmit={onHandleDecisionSubmit}
+                onDraftChange={onUpdateDecisionDraft}
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  onSubmitDecision()
+                }}
                 onCancel={onCloseDecisionDrawer}
               />
             </div>

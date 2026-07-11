@@ -45,7 +45,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **DataTable 可点击行与行内操作的合同**：`web/src/components/atoms/DataTable.tsx` 的 `onRowClick` 只处理非交互子节点上的 click / Enter / Space；事件目标落在 `a[href]`、`button`、`input`、`select`、`textarea`、`role="button"`、`role="link"` 内时，表格行不得触发行导航。page 的 action cell 不需要再为了 DataTable 行点击重复写 `stopPropagation`，但自绘 list/queue 不是 DataTable 时仍必须在内部 `<Link>` / `<Button>` 上显式阻止冒泡。
 - **宽表必须有独立、可命名的滚动边界**：heading、计数、筛选与错误提示留在固定 section 中，只有 `DataTable` 外的 page-owned wrapper 使用 `overflow-x:auto`。wrapper 必须有 `role="region"`、通过 `aria-labelledby` 关联可见 heading、通过 `aria-describedby` 关联可见滚动提示，并设置 `tabIndex={0}` 与 `:focus-visible`；不要把 `page-panel--scroll-x` 放在整个 section 上。参考 `ProvidersPage.tsx` 的 `provider-directory-table-scroll`。
 - **自绘可点击队列不要制造嵌套交互语义**：如果一个 `<li>` / `<article>` 内部已经有可见 `<Link>` 和 `<Button>`，可以让鼠标点击行背景进入主详情，但不要给外层容器加 `role="link"` / `tabIndex=0` 再包住内部交互控件；键盘入口应落在可见 action 上，外层只用 `:focus-within` 做焦点视觉辅助。
-- 当前**未单独建 `hooks/` 目录**；本地 hook 内联在使用文件内即可，需要跨文件再考虑提取（届时落点为 `web/src/lib/use<Name>.ts` 或新增 `web/src/lib/hooks/`，需另做决策）。
+- 普通页面的本地 hook 仍优先内联；跨页 hook 放 `web/src/lib/`。经复杂路由设计评审后，可像 `web/src/pages/asset-decisions/hooks/` 一样建立 route-private controller 目录；每个 controller 只公开 `{state, commands}`，不向 page / 展示层暴露 raw setter，也不互相 import。
 - **modal / dialog focus 行为复用 `web/src/lib/useModalFocus.ts` 与 `web/src/lib/modalStack.ts`**：可访问性弹层必须 portal 到 `document.body`，确认类用 `alertdialog`；只有栈顶声明 `aria-modal="true"` 并处理 Tab / Escape / backdrop，非栈顶设置 `aria-hidden` + `inert`。`persistent` 栈顶忽略 Escape/backdrop，只允许显式关闭。不要在各组件里复制 ad-hoc keydown、focus trap、body overflow 或 overlay Escape。
 - **Drawer 取消/关闭必须清理未提交本地状态**：page 用 Drawer 承载 create/edit 表单时，`onClose` / 取消按钮 / Escape / overlay 关闭都必须丢弃 draft、表单错误和保存反馈；重新打开应从当前已保存数据或初始空表单重建。测试至少覆盖“编辑草稿 → 取消关闭 → 重新打开草稿已重置”以及取消不触发提交。
 - **复杂表单 modal 必须有可读宽度和收束行为**：创建/编辑订阅、VPS 基础信息、监控实例接入、服务商等字段密集表单使用 `Modal` 的 `md` / `lg` / `xl` 尺寸，避免默认窄弹窗造成标签和命令无意义换行。提交成功必须关闭或跳转；取消必须丢弃草稿；失败留在当前弹层并展示错误。由 URL deep-link 打开的弹层在消费或关闭时必须清理 `create=1`、`onboarding=1` 等临时参数，同时保留承接上下文参数。
@@ -298,7 +298,7 @@ type RouteObject = {
 - `useCallback` / `useMemo` 只在 **Provider** 与少数 layout 子组件里出现（如 `web/src/lib/auth-context.tsx:20-43`、`web/src/lib/theme-context.tsx:34-48`）；**page / 普通 component 不要预先 wrap callback**——除非真的因为传给 memo 子组件触发不必要 render，否则直接传函数。
 - **不使用 `React.memo`**；如出现性能问题，先确认 props 是否稳定，再考虑提取。
 - **不使用 React 19 的 `use()` API / Server Components**：候风是纯客户端 SPA，center 只静态吐 `web/dist/`。
-- 自定义 hook 当前未抽出独立目录；`useAuth` / `useTheme` / `useThemeOptional` 都在对应 context 文件内导出。跨组件复用的 modal focus 例外落在 `web/src/lib/useModalFocus.ts`，供通用 `Modal` 与 `ChangePasswordModal` 共享。
+- 自定义 hook 的落点由作用域决定：`useAuth` / `useTheme` / `useThemeOptional` 与对应 context 同文件；跨组件 modal focus 放 `web/src/lib/useModalFocus.ts`；只服务一个复杂路由的数据/controller hook 放该 route 的私有 `hooks/`。不要把 route-private controller 提升到 `lib/`，也不要让展示组件接收 controller 实例。
 
 ### Scenario: Modal 栈、嵌套焦点与滚动锁
 
@@ -344,6 +344,7 @@ useModalFocus<T extends HTMLElement>(
 - body scroll lock 是引用计数：首次 acquire 保存原 `body.style.overflow`，最后一次 release 才恢复原值；每个 release 可重复调用。
 - 子层关闭时，父层解除 `inert` 前不能同步聚焦其触发器。若 restore target 位于 inert 子树，使用 microtask 延后恢复，并在执行前重新检查 target 仍连接且已不在 inert 子树；父层仍保持 body lock。
 - 延迟恢复不得覆盖更晚的显式业务焦点：microtask 执行时若已有连接、非 inert、非 `body` 的 active element，保留该焦点。若状态更新把原触发按钮替换成 successor（例如“归档”变“恢复到暂停”），业务 focus effect 也要延后到父层解除 inert，再聚焦已连接的新 ref。
+- URL open key 只改变请求 identity、但不改变列表的语义 filter 时，拥有触发器的 controller 必须继续发兼容 revalidation 请求，同时保留 settled list 与触发按钮 DOM；使用 `assetDecisionFilterKey` 判断 UI 是否仍为当前，不能用 filter 对象引用相等决定 loading。真实 filter key、revision 或 retry 改变时才进入 loading。这样普通 Modal cleanup 可恢复原触发器，不需要用 `body` 或任意首个按钮兜底。
 - 关闭最后一层后恢复页面触发器与原 body overflow；异常 unmount、StrictMode effect 重放和已被移除的 restore target 均不得抛错或产生负计数。
 
 #### 4. Validation & Error Matrix
@@ -357,6 +358,7 @@ useModalFocus<T extends HTMLElement>(
 | restore target 仍在 inert 父层 | 等父层解除 inert 后再聚焦，不得落到 `body` |
 | restore target 已卸载 | 跳过恢复，不抛异常 |
 | 原触发按钮被状态更新替换 | 保留业务显式聚焦的新 successor，不被旧 restore target 抢回 |
+| open/close URL 仅触发同值 filter revalidation | GET 仍执行；settled 列表与触发器不卸载；关闭后焦点回同一实体入口 |
 | cleanup 重复、旧 registration 晚清理 | 当前 registration 与其他 scroll owner 不受影响 |
 
 #### 5. Good / Base / Bad Cases
@@ -370,7 +372,7 @@ useModalFocus<T extends HTMLElement>(
 - `modalStack.test.ts`：one-based depth、top、父子反序注册、重复 id stale cleanup、subscribe 和引用计数滚动锁。
 - `useModalFocus.test.tsx`：StrictMode 仅一份 registration、最新 onClose callback、unmount 恢复与 scroll release。
 - `Modal.test.tsx`：单/双/三层、父子同次挂载、persistent、top class、ARIA/inert、Tab、逐层 Escape、真实 inert 延迟恢复和显式业务焦点优先级。
-- 业务回归至少覆盖一个真实嵌套确认流程，断言父层 tab / URL / 草稿保持；修改共享行为后搜索并迁移所有 persistent Modal 的旧 Escape 期望。
+- 业务回归至少覆盖一个真实嵌套确认流程，断言父层 tab / URL / 草稿保持；URL-owned Modal 还要覆盖 automatic group、manual group、record 的“聚焦入口 → 打开 → Escape → 同实体入口恢复”，并同时保留 filtered GET inventory。修改共享行为后搜索并迁移所有 persistent Modal 的旧 Escape 期望。
 - 浏览器 sanity 至少覆盖 `1440x1000`、`1024x768`、`390x900`：无页面横向溢出；top dialog 在视口内；真实键盘 Tab/Escape；父层 focus restore；最后一层关闭后 body unlock；无 console/page/CSP error。
 
 #### 7. Wrong vs Correct

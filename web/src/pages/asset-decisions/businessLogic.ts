@@ -10,35 +10,226 @@
  */
 
 import type {
+  AssetDecisionGroupDetail,
   AssetDecisionGroupSummary,
   AssetDecisionManualGroupDetail,
   AssetDecisionManualGroupMember,
   AssetDecisionManualGroupSummary,
   AssetDecisionOverview,
+  AssetDecisionRecordDetail,
   AssetDecisionRecordSummary,
   SubscriptionRecord,
   VPSAssetRecord,
 } from '../../lib/types'
 import { VIEW_LABELS } from './constants'
 import type {
+  AssetDecisionSecondaryNavItem,
   AssetDecisionNextWorkItem,
   AssetDecisionPortfolioLead,
   ClosedLoopMetrics,
   ClosedLoopSourceErrors,
   ContextFilterChip,
   DecisionQueueItem,
+  DecisionQueueView,
   MainWorkbenchView,
+  ManualGroupsState,
   ManualGroupProgress,
+  PortfolioState,
   QueueState,
+  RecordsState,
   RenewalWindow,
+  ScenarioTemplatesState,
 } from './types'
 import {
   buildVPSQualityIssues,
   daysUntilDate,
   isSubscriptionInRenewalWindow,
+  parseEvidenceAssessment,
   selectPrimarySubscription,
   sourceAvailabilityLabel,
 } from './utils'
+
+export function hasCancellationAttention(row: DecisionQueueItem): boolean {
+  if (
+    row.vps.renewal_decision === 'cancel' &&
+    row.vps.lifecycle_status !== 'to_cancel' &&
+    row.vps.lifecycle_status !== 'cancelled'
+  ) {
+    return true
+  }
+  if (!row.subscription) return false
+  const inactiveSubscription = row.subscription.status !== 'active'
+  const vpsCancelled = row.vps.lifecycle_status === 'to_cancel' || row.vps.lifecycle_status === 'cancelled'
+  return inactiveSubscription && !vpsCancelled
+}
+
+export function subscriptionCostAttention(subscription: SubscriptionRecord | null): boolean {
+  return Boolean(subscription?.exchange_rate_stale)
+}
+
+export function filterDecisionQueue(
+  rows: DecisionQueueItem[],
+  view: DecisionQueueView,
+): DecisionQueueItem[] {
+  if (view === 'all') return rows
+  if (view === 'renewal') return rows.filter((row) => row.renewalDue)
+  if (view === 'unlinked') return rows.filter((row) => row.vps.active_monitoring_instance_link_count <= 0)
+  if (view === 'missing_subscription') return rows.filter((row) => !row.subscription)
+  if (view === 'cancellation_attention') return rows.filter(hasCancellationAttention)
+  return rows.filter((row) => row.vps.renewal_decision === view)
+}
+
+export function buildSecondaryNavItems(
+  recordsState: RecordsState,
+  manualGroupsState: ManualGroupsState,
+  templatesState: ScenarioTemplatesState,
+  queueState: QueueState,
+  visibleDecisionQueueCount: number,
+  totalDecisionQueue: number,
+): AssetDecisionSecondaryNavItem[] {
+  const recordMeta = recordsState.loading
+    ? '读取中'
+    : recordsState.error
+      ? '不可用'
+      : `${recordsState.records.length} 条`
+  const recordIssues = recordsState.records.reduce((count, record) => (
+    count + (record.followup_blocked_count ?? 0) + (record.execution_readback?.needs_evidence_count ?? 0)
+  ), 0)
+  const scenarioMeta = [
+    templatesState.loading ? '模板 ...' : templatesState.error ? '模板不可用' : `模板 ${templatesState.templates.length}`,
+    manualGroupsState.loading ? '组合 ...' : manualGroupsState.error ? '组合不可用' : `组合 ${manualGroupsState.groups.length}`,
+  ].join(' · ')
+  const renewalMeta = queueState.renewalsLoading
+    ? '读取中'
+    : queueState.renewalsError
+      ? '不可用'
+      : `${queueState.renewals.length} 条`
+  const singleQueueMeta = queueState.queueLoading
+    ? '读取中'
+    : queueState.queueError
+      ? '不可用'
+      : `${visibleDecisionQueueCount} / ${totalDecisionQueue}`
+
+  return [
+    {
+      value: 'records',
+      eyebrow: '历史记录',
+      title: '保存记录',
+      summary: recordIssues > 0 ? `待复核 ${recordIssues}` : '可回看',
+      meta: recordMeta,
+      actionLabel: '打开记录',
+      tone: recordsState.error ? 'alert' : recordIssues > 0 ? 'notice' : 'normal',
+    },
+    {
+      value: 'scenarios',
+      eyebrow: '场景',
+      title: '场景与组合',
+      summary: manualGroupsState.error || templatesState.error ? '部分不可用' : '按需打开',
+      meta: scenarioMeta,
+      actionLabel: '打开场景',
+      tone: manualGroupsState.error || templatesState.error ? 'alert' : 'normal',
+    },
+    {
+      value: 'renewals',
+      eyebrow: '续费事实',
+      title: '续费窗口',
+      summary: queueState.renewals.length > 0 ? '有临近项' : '无临近项',
+      meta: renewalMeta,
+      actionLabel: '查看续费',
+      tone: queueState.renewalsError ? 'alert' : queueState.renewals.length > 0 ? 'notice' : 'normal',
+    },
+    {
+      value: 'single_queue',
+      eyebrow: '单台辅助',
+      title: '单台队列',
+      summary: totalDecisionQueue > 0 ? '可逐台处理' : '暂无待处理',
+      meta: singleQueueMeta,
+      actionLabel: '查看单台队列',
+      tone: queueState.queueError ? 'alert' : totalDecisionQueue > 0 ? 'notice' : 'normal',
+    },
+  ]
+}
+
+type AssetDecisionPageModelInput = Readonly<{
+  portfolioView: MainWorkbenchView
+  renewalWindow: RenewalWindow
+  portfolioState: PortfolioState
+  recordsState: RecordsState
+  manualGroupsState: ManualGroupsState
+  templatesState: ScenarioTemplatesState
+  queueState: QueueState
+  recordDetail: AssetDecisionRecordDetail | null
+  manualDetail: AssetDecisionManualGroupDetail | null
+  automaticDetail: AssetDecisionGroupDetail | null
+  vpsCatalogRows: VPSAssetRecord[]
+  contextFilterChips: ContextFilterChip[]
+  visibleDecisionQueueCount: number
+  totalDecisionQueue: number
+}>
+
+export function buildAssetDecisionPageModel(input: AssetDecisionPageModelInput) {
+  const sourceErrors: ClosedLoopSourceErrors = {
+    overview: input.portfolioState.overviewError,
+    groups: input.portfolioState.groupsError,
+    records: input.recordsState.error,
+    manualGroups: input.manualGroupsState.error,
+    templates: input.templatesState.error,
+  }
+  const closedLoopMetrics = deriveClosedLoopMetrics(
+    input.portfolioState.groups,
+    input.recordsState.records,
+    input.manualGroupsState.groups,
+    sourceErrors,
+    input.portfolioState.overview,
+  )
+  const nextWorkItems = deriveNextWorkItems(
+    input.portfolioState.groups,
+    input.recordsState.records,
+    sourceErrors,
+  )
+  const vpsByID = new Map<string, VPSAssetRecord>()
+  for (const vps of input.vpsCatalogRows) vpsByID.set(vps.vps_id, vps)
+  for (const vps of [...input.queueState.unreviewed, ...input.queueState.migrate, ...input.queueState.cancel]) {
+    vpsByID.set(vps.vps_id, vps)
+  }
+  for (const member of input.automaticDetail?.members ?? []) vpsByID.set(member.vps.vps_id, member.vps)
+  for (const member of input.manualDetail?.members ?? []) {
+    if (member.current_fact_found && member.vps?.vps_id) vpsByID.set(member.vps.vps_id, member.vps)
+  }
+
+  return {
+    vpsByID,
+    selectedRecordAssessment: input.recordDetail
+      ? parseEvidenceAssessment(input.recordDetail.evidence_snapshot)
+      : null,
+    manualGroupProgress: input.manualDetail ? buildManualGroupProgress(input.manualDetail) : null,
+    closedLoopMetrics,
+    portfolioLead: buildPortfolioLead(
+      input.portfolioView,
+      input.renewalWindow,
+      input.portfolioState.overview,
+      input.portfolioState.groups,
+      nextWorkItems,
+      closedLoopMetrics,
+      input.contextFilterChips,
+    ),
+    closedLoopPartialErrors: [
+      sourceErrors.overview ? '组合概览' : '',
+      sourceErrors.groups ? '自动组' : '',
+      sourceErrors.records ? '决策记录' : '',
+      sourceErrors.manualGroups ? '自定义组合' : '',
+      sourceErrors.templates ? '场景模板' : '',
+    ].filter(Boolean),
+    secondaryNavItems: buildSecondaryNavItems(
+      input.recordsState,
+      input.manualGroupsState,
+      input.templatesState,
+      input.queueState,
+      input.visibleDecisionQueueCount,
+      input.totalDecisionQueue,
+    ),
+  }
+}
 
 /**
  * 计算队列优先级

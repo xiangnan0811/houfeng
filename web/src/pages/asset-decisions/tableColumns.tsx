@@ -13,8 +13,6 @@ import {
   type AssetDecisionManualGroupSummary,
   type AssetDecisionRecordMember,
   type AssetDecisionRecordSummary,
-  type AssetDecisionSuggestedAction,
-  type AssetDecisionSuggestedRole,
 } from '../../lib/types'
 import {
   LifecycleBadge,
@@ -47,7 +45,6 @@ import {
   sourceAvailabilityLabel,
 } from './formatters'
 import { vpsDetailPath, vpsWorkbenchPath } from './paths'
-import type { FormSubmitEvent } from './types'
 import {
   renderDecisionRecommendation,
   renderEvidenceAssessment,
@@ -370,31 +367,14 @@ export function createMemberColumns(options: {
 }
 
 export function createManualMemberColumns(options: {
-  drafts: Record<string, {
-    intendedRole: AssetDecisionSuggestedRole
-    intendedAction: AssetDecisionSuggestedAction
-    reason: string
-    note: string
-    sortOrder: string
-  }>
   saving: Record<string, boolean>
-  onUpdateDraft: (vpsID: string, patch: Partial<{
-    intendedRole: AssetDecisionSuggestedRole
-    intendedAction: AssetDecisionSuggestedAction
-    reason: string
-    note: string
-    sortOrder: string
-  }>) => void
-  onSubmit: (event: FormSubmitEvent, member: AssetDecisionManualGroupMember) => void
   onRequestRemoval: (member: AssetDecisionManualGroupMember) => void
-  roleOptions: ReadonlyArray<{ value: AssetDecisionSuggestedRole; label: string }>
-  actionOptions: ReadonlyArray<{ value: AssetDecisionSuggestedAction; label: string }>
 }): DataTableColumn<AssetDecisionManualGroupMember>[] {
   return [
     {
       key: 'vps',
       label: 'VPS',
-      width: '236px',
+      width: '280px',
       render: (member) => {
         const displayName = member.current_fact_found ? member.vps.display_name : member.vps_id
         return (
@@ -407,129 +387,62 @@ export function createManualMemberColumns(options: {
               )}
             </strong>
             <span>{member.current_fact_found ? `${formatOptional(member.vps.provider_name)} · ${vpsLocationLabel(member.vps)}` : '当前资产事实缺失'}</span>
-            <span>{member.current_fact_found ? member.vps.product_name || member.vps_id : member.vps_id}</span>
-            <span className="asset-decision-chip-row">
-              {member.current_fact_found ? (
-                <>
-                  <LifecycleBadge value={member.vps.lifecycle_status} />
-                  <UsageBadge value={member.vps.usage_status} />
-                  <RenewalBadge value={member.vps.renewal_decision} />
-                </>
-              ) : (
-                <Badge variant="state" tone="critical">事实缺失</Badge>
-              )}
-            </span>
           </div>
         )
       },
     },
     {
-      key: 'context',
-      label: '当前上下文',
-      width: '248px',
+      key: 'role',
+      label: '角色',
+      width: '160px',
       render: (member) => (
-        <div className="asset-table__stack">
-          <strong>{member.current_fact_found ? memberContextLabel(member) : '无法回读当前事实'}</strong>
-          <span>{member.current_fact_found ? sourceAvailabilityLabel(member.source_availability) : '手工组合成员仍在，但当前 facts 未返回该 VPS'}</span>
-          <span>{member.primary_issue_summary || '暂无主要问题'}</span>
-        </div>
+        <Badge variant="state" tone={roleTone(member.intended_role)}>
+          {ROLE_LABELS[member.intended_role]}
+        </Badge>
       ),
     },
     {
-      key: 'intent',
-      label: '组合意图',
-      width: '336px',
-      render: (member) => {
-        const draft = options.drafts[member.vps_id] ?? {
-          intendedRole: member.intended_role,
-          intendedAction: member.intended_action,
-          reason: member.reason,
-          note: member.note,
-          sortOrder: String(member.sort_order),
-        }
-        const isSaving = Boolean(options.saving[member.vps_id])
-        return (
-          <form className="asset-decision-manual-member-form" onSubmit={(event) => options.onSubmit(event, member)}>
-            <label className="visually-hidden" htmlFor={`manual-role-${member.manual_group_id}-${member.vps_id}`}>
-              {member.vps_id} 组合角色
-            </label>
-            <select
-              id={`manual-role-${member.manual_group_id}-${member.vps_id}`}
-              aria-label={`${member.vps_id} 组合角色`}
-              className="input"
-              value={draft.intendedRole}
-              onChange={(event) => options.onUpdateDraft(member.vps_id, { intendedRole: event.target.value as AssetDecisionSuggestedRole })}
-            >
-              {options.roleOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <label className="visually-hidden" htmlFor={`manual-action-${member.manual_group_id}-${member.vps_id}`}>
-              {member.vps_id} 组合动作
-            </label>
-            <select
-              id={`manual-action-${member.manual_group_id}-${member.vps_id}`}
-              aria-label={`${member.vps_id} 组合动作`}
-              className="input"
-              value={draft.intendedAction}
-              onChange={(event) => options.onUpdateDraft(member.vps_id, { intendedAction: event.target.value as AssetDecisionSuggestedAction })}
-            >
-              {options.actionOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <label className="visually-hidden" htmlFor={`manual-reason-${member.manual_group_id}-${member.vps_id}`}>
-              {member.vps_id} 意图理由
-            </label>
-            <input
-              id={`manual-reason-${member.manual_group_id}-${member.vps_id}`}
-              aria-label={`${member.vps_id} 意图理由`}
-              className="input"
-              value={draft.reason}
-              placeholder="理由"
-              onChange={(event) => options.onUpdateDraft(member.vps_id, { reason: event.target.value })}
-            />
-            <label className="visually-hidden" htmlFor={`manual-note-${member.manual_group_id}-${member.vps_id}`}>
-              {member.vps_id} 备注
-            </label>
-            <input
-              id={`manual-note-${member.manual_group_id}-${member.vps_id}`}
-              aria-label={`${member.vps_id} 备注`}
-              className="input"
-              value={draft.note}
-              placeholder="备注"
-              onChange={(event) => options.onUpdateDraft(member.vps_id, { note: event.target.value })}
-            />
-            <div className="asset-decision-manual-member-form__actions">
-              <button className="btn sm primary" type="submit" disabled={isSaving}>
-                {isSaving ? '保存中…' : '保存意图'}
-              </button>
-              <button className="btn sm secondary" type="button" onClick={() => options.onRequestRemoval(member)} disabled={isSaving}>
-                移除
-              </button>
-            </div>
-          </form>
-        )
-      },
+      key: 'action',
+      label: '动作',
+      width: '180px',
+      render: (member) => (
+        <Badge variant="state" tone={actionTone(member.intended_action)}>
+          {ACTION_LABELS[member.intended_action]}
+        </Badge>
+      ),
     },
     {
-      key: 'evidence',
-      label: '证据',
-      width: '250px',
+      key: 'status',
+      label: '状态',
+      width: '220px',
       render: (member) => (
-        <div className="asset-table__stack">
-          <span className="asset-decision-chip-row">
-            <Badge variant="state" tone={roleTone(member.intended_role)}>
-              {ROLE_LABELS[member.intended_role]}
-            </Badge>
-            <Badge variant="state" tone={actionTone(member.intended_action)}>
-              {ACTION_LABELS[member.intended_action]}
-            </Badge>
-          </span>
-          {renderDecisionRecommendation(member.decision_recommendation)}
-          {renderEvidenceAssessment(member.evidence_assessment)}
-          {renderEvidenceChips(member.evidence_chips, 3)}
-        </div>
+        <span className="asset-decision-chip-row">
+          {member.current_fact_found ? (
+            <>
+              <LifecycleBadge value={member.vps.lifecycle_status} />
+              <UsageBadge value={member.vps.usage_status} />
+              <RenewalBadge value={member.vps.renewal_decision} />
+            </>
+          ) : (
+            <Badge variant="state" tone="critical">事实缺失</Badge>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      label: '操作',
+      align: 'right',
+      width: '112px',
+      render: (member) => (
+        <button
+          className="btn sm secondary"
+          type="button"
+          disabled={Boolean(options.saving[member.vps_id])}
+          onClick={() => options.onRequestRemoval(member)}
+        >
+          移除
+        </button>
       ),
     },
   ]

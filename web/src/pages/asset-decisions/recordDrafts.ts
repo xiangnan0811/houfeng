@@ -1,8 +1,21 @@
 import type {
   AssetDecisionGroupDetail,
   AssetDecisionManualGroupDetail,
+  AssetDecisionRecordDetail,
 } from '../../lib/types'
-import type { RecordDraft, RecordMemberDraft } from './types'
+import type { RecordDraft, RecordFollowupDraft, RecordMemberDraft } from './types'
+
+export function buildRecordFollowupDrafts(
+  detail: AssetDecisionRecordDetail | null,
+): Record<string, RecordFollowupDraft> {
+  return Object.fromEntries((detail?.members ?? []).map((member) => [
+    member.vps_id,
+    {
+      status: member.followup_status,
+      note: member.followup_note,
+    },
+  ]))
+}
 
 function groupMemberDrafts(detail: AssetDecisionGroupDetail): Record<string, RecordMemberDraft> {
   return Object.fromEntries(detail.members.map((member) => [

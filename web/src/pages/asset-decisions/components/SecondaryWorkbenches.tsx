@@ -18,7 +18,6 @@ import {
 import type {
   AssetDecisionManualGroupSummary,
   AssetDecisionRecordSummary,
-  SubscriptionRecord,
   VPSAssetRecord,
 } from '../../../lib/types'
 import {
@@ -29,6 +28,10 @@ import {
   vpsLocationLabel,
 } from '../../assetPageUtils'
 import { AssetDecisionSecondaryNav } from '../AssetDecisionSecondaryNav'
+import {
+  hasCancellationAttention,
+  subscriptionCostAttention,
+} from '../businessLogic'
 import { vpsDetailPath, vpsWorkbenchPath } from '../paths'
 import type {
   DecisionQueueView,
@@ -79,8 +82,6 @@ type SecondaryWorkbenchesProps = {
   onOpenManualGroup: (manualGroupID: string) => void
   onOpenTemplate: (templateID: string) => void
   onOpenRecord: (recordID: string) => void
-  hasCancellationAttention: (row: DecisionQueueItem) => boolean
-  subscriptionCostAttention: (subscription: SubscriptionRecord | null) => boolean
 }
 
 export function SecondaryWorkbenches({
@@ -107,8 +108,6 @@ export function SecondaryWorkbenches({
   onOpenManualGroup,
   onOpenTemplate,
   onOpenRecord,
-  hasCancellationAttention,
-  subscriptionCostAttention,
 }: SecondaryWorkbenchesProps) {
   const manualGroupColumns: DataTableColumn<AssetDecisionManualGroupSummary>[] = [
     {
