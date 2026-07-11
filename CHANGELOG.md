@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.58.1](https://github.com/xiangnan0811/houfeng/compare/v0.58.0...v0.58.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **web:** expose native field accessibility state ([b96ffc8](https://github.com/xiangnan0811/houfeng/commit/b96ffc8247b5f755834f129dbbca37bce658d58d))
+* **web:** harden light theme state contrast ([1380089](https://github.com/xiangnan0811/houfeng/commit/138008982f34c21b87cd417d9eba6e6e3824e472))
+* **web:** meet accessible state contrast ([3133961](https://github.com/xiangnan0811/houfeng/commit/313396158ff9fcfa101b22515b8f495d9841c93c))
+* **web:** restore native interaction contracts ([df5669e](https://github.com/xiangnan0811/houfeng/commit/df5669e039a82641df1e484c411f2236fd001d4b))
+* **web:** restore shell and row keyboard paths ([f3fd4e0](https://github.com/xiangnan0811/houfeng/commit/f3fd4e053137047924e555d6b87afcf81fd60f43))
+* **web:** separate tabs from segmented choices ([dd55783](https://github.com/xiangnan0811/houfeng/commit/dd55783cf547744afe55f1acf75a0828ddb3fa4d))
+
+
+### Documentation
+
+* **spec:** record accessible interaction contracts ([bc93f52](https://github.com/xiangnan0811/houfeng/commit/bc93f52fd5b2faba890c44dc499a58cbf4dd274a))
+* **task:** record final browser rerun ([61c28a2](https://github.com/xiangnan0811/houfeng/commit/61c28a228c808aff0f8c938baedad0e8b84e5db8))
+* **task:** record theme menu tab flow ([0c18bda](https://github.com/xiangnan0811/houfeng/commit/0c18bdae5dd43b025576d2f6efda2f78f6ed1bbc))
+* **trellis:** detail frontend quality ratchets plan ([07a9a77](https://github.com/xiangnan0811/houfeng/commit/07a9a77af050d1a5d7b3cc155e597d8f80dc10be))
+* **trellis:** detail frontend quality ratchets plan ([6f79f72](https://github.com/xiangnan0811/houfeng/commit/6f79f72fb5c13291b77fd0e5062e63566eef006b))
+* **trellis:** record frontend Gate A evidence ([f0c23af](https://github.com/xiangnan0811/houfeng/commit/f0c23af3d4c2929a2e995f854020e4500522d767))
+
 ## [0.58.0](https://github.com/xiangnan0811/houfeng/compare/v0.57.5...v0.58.0) (2026-07-10)
 
 
