@@ -1,120 +1,380 @@
 /// <reference types="node" />
 
 import { readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { dirname, relative, resolve } from 'node:path'
+import postcss, {
+  type AnyNode,
+  type Declaration,
+  type Root,
+  type Rule,
+} from 'postcss'
 import { describe, expect, it } from 'vitest'
 
-const indexPath = 'src/index.css'
-
-/**
- * index.css is now a manifest of `@import './styles/partials/*.css'` statements.
- * Vite inlines those partials in import order, so the contract must run against
- * the final, concatenated stylesheet (identical to what the browser receives).
- * We resolve the @import chain here so the same assertions hold post-split.
- */
-function resolveImported(filePath: string, seen = new Set<string>()): string {
-  const full = resolve(filePath)
-  if (seen.has(full)) return ''
-  seen.add(full)
-  const raw = readFileSync(full, 'utf8')
-  const dir = dirname(full)
-  return raw
-    .split('\n')
-    .map((line) => {
-      const m = line.match(/^\s*@import\s+['"]([^'"]+)['"]\s*;?/)
-      if (m) return resolveImported(resolve(dir, m[1]), seen)
-      return line
-    })
-    .join('\n')
+function normalizeWhitespace(value: string) {
+  return value.replace(/\s+/g, ' ').trim()
 }
 
-const indexCss = resolveImported(indexPath)
-const loginPageCss = readFileSync('src/pages/LoginPage.css', 'utf8')
-
-function ruleBodies(css: string, selector: string): string[] {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return [...css.matchAll(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, 'g'))]
-    .map((match) => match[1] ?? '')
+function ruleContext(rule: Rule) {
+  const contexts: string[] = []
+  let parent: AnyNode | undefined = rule.parent
+  while (parent) {
+    if (parent.type === 'atrule') {
+      const params = normalizeWhitespace(parent.params)
+      contexts.unshift(`@${parent.name}${params === '' ? '' : ` ${params}`}`)
+    }
+    parent = parent.parent
+  }
+  return contexts.length === 0 ? 'root' : contexts.join(' > ')
 }
 
-function ruleBody(css: string, selector: string): string {
-  return ruleBodies(css, selector)[0] ?? ''
+function localImportPath(params: string) {
+  const normalized = params.trim()
+  const quote = normalized[0]
+  if ((quote !== "'" && quote !== '"') || normalized.at(-1) !== quote) {
+    throw new Error(`index CSS contract only accepts quoted local imports: ${params}`)
+  }
+  const path = normalized.slice(1, -1)
+  if (!path.startsWith('.')) {
+    throw new Error(`index CSS contract only accepts local imports: ${path}`)
+  }
+  return path
 }
 
-function compact(css: string): string {
-  return css.replace(/\s+/g, '')
+function resolveImportedCss(filePath: string, seen = new Set<string>()): Root {
+  const absolutePath = resolve(filePath)
+  if (seen.has(absolutePath)) {
+    throw new Error(`CSS import cycle detected at ${absolutePath}`)
+  }
+  seen.add(absolutePath)
+
+  const parsed = postcss.parse(readFileSync(absolutePath, 'utf8'), { from: absolutePath })
+  const resolvedRoot = postcss.root()
+
+  for (const node of parsed.nodes) {
+    if (node.type === 'atrule' && node.name === 'import') {
+      const importedPath = resolve(dirname(absolutePath), localImportPath(node.params))
+      const importedRoot = resolveImportedCss(importedPath, seen)
+      for (const importedNode of importedRoot.nodes) resolvedRoot.append(importedNode.clone())
+    } else {
+      resolvedRoot.append(node.clone())
+    }
+  }
+
+  seen.delete(absolutePath)
+  return resolvedRoot
 }
+
+function matchingRules(root: Root, selector: string) {
+  const normalizedSelector = normalizeWhitespace(selector)
+  const matches: Rule[] = []
+  root.walkRules((rule) => {
+    if (normalizeWhitespace(rule.selector) === normalizedSelector) matches.push(rule)
+  })
+  return matches
+}
+
+function requireSelectorContexts(root: Root, selector: string, expectedContexts: string[]) {
+  const matches = matchingRules(root, selector)
+  const actualContexts = matches.map(ruleContext)
+  expect(actualContexts, `${selector} contexts`).toEqual(expectedContexts)
+  return matches
+}
+
+function requireUniqueRule(root: Root, selector: string, context = 'root') {
+  const matches = matchingRules(root, selector).filter((rule) => ruleContext(rule) === context)
+  if (matches.length !== 1) {
+    throw new Error(
+      `${selector} must have exactly one rule in ${context}; found ${matches.length}`,
+    )
+  }
+  return matches[0]
+}
+
+function declaration(rule: Rule, property: string) {
+  const matches = rule.nodes.filter(
+    (node): node is Declaration => node.type === 'decl' && node.prop === property,
+  )
+  if (matches.length !== 1) {
+    throw new Error(
+      `${rule.selector} must declare ${property} exactly once in ${ruleContext(rule)}; found ${matches.length}`,
+    )
+  }
+  return normalizeWhitespace(matches[0].value)
+}
+
+const indexCss = resolveImportedCss('src/index.css')
+const indexManifest = readFileSync('src/index.css', 'utf8')
+const loginPageCss = postcss.parse(readFileSync('src/pages/LoginPage.css', 'utf8'), {
+  from: 'src/pages/LoginPage.css',
+})
+const cssOwners = JSON.parse(readFileSync('css-owners.json', 'utf8')) as {
+  owners: Record<string, string[]>
+}
+
+describe('PostCSS contract helpers', () => {
+  it('rejects a correct first match followed by a conflicting rule in the same context', () => {
+    const fixture = postcss.parse('.command { display: block } .command { display: none }')
+
+    expect(() => requireUniqueRule(fixture, '.command')).toThrow(
+      '.command must have exactly one rule in root; found 2',
+    )
+  })
+
+  it('accepts only the explicitly declared at-rule context set', () => {
+    const fixture = postcss.parse(
+      '.command { display: flex } @media (max-width: 40rem) { .command { display: grid } }',
+    )
+
+    expect(requireSelectorContexts(fixture, '.command', [
+      'root',
+      '@media (max-width: 40rem)',
+    ])).toHaveLength(2)
+    expect(() => requireSelectorContexts(fixture, '.command', ['root'])).toThrow()
+  })
+})
 
 describe('index.css modernization contracts', () => {
+  it('groups every non-empty partial under one explicit owner without catch-all files', () => {
+    const expectedOwners = [
+      'app-shell',
+      'assets',
+      'dashboard',
+      'observability',
+      'settings-subscriptions',
+      'shared-atoms-page',
+      'vps',
+    ]
+    const expectedManifestOrder = [
+      'shared-atoms-page',
+      'app-shell',
+      'dashboard',
+      'assets',
+      'vps',
+      'observability',
+      'settings-subscriptions',
+    ]
+    const sectionOwners: string[] = []
+    const importedPartials: string[] = []
+    let currentOwner = ''
+
+    expect(Object.keys(cssOwners.owners).sort()).toEqual(expectedOwners)
+
+    for (const line of indexManifest.split('\n')) {
+      const ownerMatch = line.match(/^\/\* owner: ([a-z-]+) \*\/$/)
+      if (ownerMatch) {
+        currentOwner = ownerMatch[1]
+        sectionOwners.push(currentOwner)
+        continue
+      }
+
+      const importMatch = line.match(/^@import\s+((?:'|").*(?:'|"));$/)
+      if (!importMatch) continue
+      expect(currentOwner, `${line} must follow an owner marker`).not.toBe('')
+
+      const importedPath = resolve(dirname('src/index.css'), localImportPath(importMatch[1]))
+      const ownerPath = relative('.', importedPath)
+      importedPartials.push(ownerPath)
+      expect(cssOwners.owners[currentOwner], `${ownerPath} owner`).toContain(ownerPath)
+
+      const parsed = postcss.parse(readFileSync(importedPath, 'utf8'), { from: importedPath })
+      expect(
+        parsed.nodes.some((node) => node.type !== 'comment'),
+        `${ownerPath} must not be comment-only`,
+      ).toBe(true)
+    }
+
+    const ownedPartials = Object.values(cssOwners.owners)
+      .flat()
+      .filter((path) => path.startsWith('src/styles/partials/'))
+      .sort()
+    const retiredCatchAlls = [
+      'src/styles/partials/legacy-dashboard.css',
+      'src/styles/partials/legacy-misc.css',
+      'src/styles/partials/misc.css',
+    ]
+
+    expect(sectionOwners).toEqual(expectedManifestOrder)
+    expect(importedPartials.sort()).toEqual(ownedPartials)
+    expect(Object.values(cssOwners.owners).flat()).not.toEqual(
+      expect.arrayContaining(retiredCatchAlls),
+    )
+  })
+
+  it('does not retain CSS owners for Task 3 and Task 8 surfaces removed from production', () => {
+    const retiredClassPrefixes = [
+      'events-filter-panel',
+      'events-filter-drawer__value',
+      'events-filter-drawer__hint',
+      'list-command-band',
+      'dashboard-empty-state',
+      'summary-grid--strip',
+      'summary-grid--numeric',
+      'asset-hero-meta',
+      'asset-cancel-workbench__hint',
+      'asset-drawer-context',
+      'asset-workbench-summary',
+      'asset-decision-board__summary',
+      'asset-decision-board__context',
+      'asset-decision-actions',
+      'asset-decision-row',
+      'asset-decision-signal',
+      'asset-decision-quality',
+      'asset-decision-path',
+      'asset-decision-deeplink-notice',
+      'asset-decision-support-surface',
+      'asset-decision-closed-loop',
+      'asset-decision-next-work',
+      'asset-decision-groups-table',
+      'asset-decision-templates-table',
+      'asset-decision-comparison-overview',
+      'asset-decision-detail__summary',
+      'asset-decision-detail-nav',
+      'asset-decision-detail-actionbar',
+      'asset-decision-detail-directory',
+      'asset-decision-comparison-matrix',
+      'asset-decision-saved-evidence',
+      'asset-decision-progression-branch',
+      'asset-decision-progress-panel',
+      'asset-decision-comparison-card',
+      'asset-decision-progress-item',
+      'asset-decision-detail-command__body',
+      'asset-decision-detail-command__checks',
+      'asset-decision-detail-command__readiness',
+      'asset-decision-member-preview',
+      'asset-decision-member-list',
+      'asset-decision-member-card',
+      'asset-decision-record-member-summary',
+      'asset-decision-detail__evidence',
+      'asset-decision-detail__issue',
+      'asset-decision-record-form__members',
+      'asset-decision-record-form__member',
+      'asset-decision-manual-member-form',
+      'asset-decision-record-detail__lead',
+      'asset-decision-execution-card__facts',
+      'asset-quality-list',
+      'asset-quality-pill',
+      'asset-create-form',
+    ]
+    const violations: string[] = []
+
+    indexCss.walkRules((rule) => {
+      for (const classPrefix of retiredClassPrefixes) {
+        if (rule.selector.includes(`.${classPrefix}`)) {
+          violations.push(`${classPrefix} in ${ruleContext(rule)}: ${rule.selector}`)
+        }
+      }
+    })
+
+    expect(violations).toEqual([])
+  })
+
   it('anchors section title accent markers to the title itself', () => {
-    expect(ruleBody(indexCss, '.section-title')).toContain('position:relative')
+    const rule = requireUniqueRule(indexCss, '.section-title')
+    expect(declaration(rule, 'position')).toBe('relative')
   })
 
   it('only shows watchtower h1 eyebrow pseudo elements for explicit variants', () => {
-    expect(ruleBody(indexCss, '.watchtower-header__title-block h1::before')).toContain('display:none')
-    expect(ruleBody(indexCss, '.watchtower-header[aria-label="VPS 身份与操作"] .watchtower-header__title-block h1::before')).toContain('display:block')
-    expect(ruleBody(indexCss, '.provider-directory .watchtower-header__title-block h1::before')).toContain('display:block')
+    expect(
+      declaration(
+        requireUniqueRule(indexCss, '.watchtower-header__title-block h1::before'),
+        'display',
+      ),
+    ).toBe('none')
+    expect(
+      declaration(
+        requireUniqueRule(
+          indexCss,
+          '.watchtower-header[aria-label="VPS 身份与操作"] .watchtower-header__title-block h1::before',
+        ),
+        'display',
+      ),
+    ).toBe('block')
+    expect(
+      declaration(
+        requireUniqueRule(
+          indexCss,
+          '.provider-directory .watchtower-header__title-block h1::before',
+        ),
+        'display',
+      ),
+    ).toBe('block')
   })
 
-  it('stacks the login card and footer vertically', () => {
-    expect(compact(ruleBody(indexCss, '.login-page'))).toContain('flex-direction:column')
-    expect(compact(ruleBody(loginPageCss, '.login-page'))).toContain('flex-direction:column')
+  it('stacks the login card and footer vertically in both global and route CSS', () => {
+    expect(declaration(requireUniqueRule(indexCss, '.login-page'), 'flex-direction')).toBe(
+      'column',
+    )
+    expect(
+      declaration(requireUniqueRule(loginPageCss, '.login-page'), 'flex-direction'),
+    ).toBe('column')
   })
 
-  it('keeps responsive tabs and asset commands readable within their owner', () => {
+  it('keeps responsive tabs readable within their unique owner rules', () => {
     for (const variant of ['underline', 'pill']) {
-      const tabs = compact(ruleBody(indexCss, `.tabs--${variant}`))
-      const tab = compact(ruleBody(indexCss, `.tabs--${variant} .tab`))
+      const tabs = requireUniqueRule(indexCss, `.tabs--${variant}`)
+      const tab = requireUniqueRule(indexCss, `.tabs--${variant} .tab`)
 
-      expect(tabs).toContain('max-width:100%')
-      expect(tabs).toContain('overflow-x:auto')
-      expect(tab).toContain('flex:00auto')
-      expect(tab).toContain('white-space:nowrap')
+      expect(declaration(tabs, 'max-width')).toBe('100%')
+      expect(declaration(tabs, 'overflow-x')).toBe('auto')
+      expect(declaration(tab, 'flex')).toBe('0 0 auto')
+      expect(declaration(tab, 'white-space')).toBe('nowrap')
     }
+  })
 
-    const title = compact(ruleBody(indexCss, '.asset-decision-support-strip__title'))
-    expect(title).toContain('white-space:normal')
-    expect(title).toContain('overflow:visible')
-    expect(title).toContain('text-overflow:clip')
-    expect(title).not.toContain('text-overflow:ellipsis')
+  it('keeps the asset support strip title readable and owns one responsive override', () => {
+    const title = requireUniqueRule(indexCss, '.asset-decision-support-strip__title')
+    expect(declaration(title, 'white-space')).toBe('normal')
+    expect(declaration(title, 'overflow')).toBe('visible')
+    expect(declaration(title, 'text-overflow')).toBe('clip')
 
-    const gridRules = ruleBodies(indexCss, '.asset-decision-support-strip')
-      .map(compact)
-      .filter((body) => body.includes('grid-template-columns:'))
-    expect(gridRules).toHaveLength(1)
+    const [base, responsive] = requireSelectorContexts(
+      indexCss,
+      '.asset-decision-support-strip',
+      ['root', '@media (max-width:920px)'],
+    )
+    expect(declaration(base, 'display')).toBe('flex')
+    expect(declaration(responsive, 'display')).toBe('grid')
+    expect(declaration(responsive, 'grid-template-columns')).toBe(
+      'repeat(2,minmax(0,1fr))',
+    )
   })
 
   it('isolates provider table overflow and keeps entry labels visible', () => {
-    const table = compact(ruleBody(indexCss, '.provider-directory-table'))
-    const scrollRegion = compact(ruleBody(indexCss, '.provider-directory-table-scroll'))
-    const focusRing = compact(ruleBody(indexCss, '.provider-directory-table-scroll:focus-visible'))
-    const entryLinks = compact(ruleBody(indexCss, '.provider-directory-entry-links'))
-    const entryLink = compact(ruleBody(indexCss, '.provider-directory-entry-link'))
+    const table = requireUniqueRule(indexCss, '.provider-directory-table')
+    const scrollRegion = requireUniqueRule(indexCss, '.provider-directory-table-scroll')
+    const focusRing = requireUniqueRule(
+      indexCss,
+      '.provider-directory-table-scroll:focus-visible',
+    )
+    const entryLinks = requireUniqueRule(indexCss, '.provider-directory-entry-links')
+    const entryLink = requireUniqueRule(indexCss, '.provider-directory-entry-link')
 
-    expect(table).toContain('min-width:1000px')
-    expect(scrollRegion).toContain('max-width:100%')
-    expect(scrollRegion).toContain('overflow-x:auto')
-    expect(scrollRegion).toContain('scrollbar-gutter:stable')
-    expect(focusRing).toContain('outline:var(--border-w-strong)solidvar(--accent)')
-    expect(entryLinks).toContain('flex-wrap:wrap')
-    expect(entryLinks).toContain('overflow:visible')
-    expect(entryLink).toContain('max-width:none')
-    expect(entryLink).toContain('overflow:visible')
-    expect(entryLink).toContain('text-overflow:clip')
-    expect(entryLink).not.toContain('text-overflow:ellipsis')
+    expect(declaration(table, 'min-width')).toBe('1000px')
+    expect(declaration(scrollRegion, 'max-width')).toBe('100%')
+    expect(declaration(scrollRegion, 'overflow-x')).toBe('auto')
+    expect(declaration(scrollRegion, 'scrollbar-gutter')).toBe('stable')
+    expect(declaration(focusRing, 'outline')).toBe(
+      'var(--border-w-strong) solid var(--accent)',
+    )
+    expect(declaration(entryLinks, 'flex-wrap')).toBe('wrap')
+    expect(declaration(entryLinks, 'overflow')).toBe('visible')
+    expect(declaration(entryLink, 'max-width')).toBe('none')
+    expect(declaration(entryLink, 'overflow')).toBe('visible')
+    expect(declaration(entryLink, 'text-overflow')).toBe('clip')
   })
 
   it('keeps small state text readable on tinted surfaces', () => {
-    const criticalInfo = compact(ruleBody(indexCss, '.badge--info.tone--critical'))
-    const assetGroupContext = compact(
-      ruleBody(indexCss, '.asset-decision-group-card__head span:not(.badge)'),
+    const criticalInfo = requireUniqueRule(indexCss, '.badge--info.tone--critical')
+    const assetGroupContext = requireUniqueRule(
+      indexCss,
+      '.asset-decision-group-card__head span:not(.badge)',
     )
 
-    expect(criticalInfo).toContain(
-      'color:color-mix(insrgb,var(--color-state-critical)78%,var(--text-primary))',
+    expect(declaration(criticalInfo, 'color')).toBe(
+      'color-mix(in srgb,var(--color-state-critical) 78%,var(--text-primary))',
     )
-    expect(assetGroupContext).toContain(
-      'color:color-mix(insrgb,var(--text-secondary)90%,var(--text-primary))',
+    expect(declaration(assetGroupContext, 'color')).toBe(
+      'color-mix(in srgb,var(--text-secondary) 90%,var(--text-primary))',
     )
   })
 })

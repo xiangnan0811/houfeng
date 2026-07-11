@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "limits": {
+    "sourceFilesMax": 26,
+    "sourceBytesMax": 311063,
+    "rulesMax": 2107,
+    "declarationsMax": 8517,
+    "repeatedSelectorTextsMax": 151,
+    "literalColorDeclarationsMax": 247,
+    "importantDeclarationsMax": 11,
+    "productionCssBytesMax": 293270,
+    "productionCssGzipBytesMax": 38119
+  }
+}
