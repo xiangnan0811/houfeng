@@ -12,14 +12,14 @@
 
 ## 0. Workflow State And Hard Preconditions
 
-当前 task 必须保持 `planning`。本文件通过 review 不等于允许启动。
+激活前 task 必须保持 `planning`；以下依赖门已于 2026-07-11 全部满足，当前状态为 `in_progress`。
 
 - [x] 用户已于 2026-07-10 审阅最终 `prd.md`、`design.md`、`implement.md` 并批准在全部前置条件满足后启动；本项不豁免以下依赖门。
-- [ ] `frontend-csp-compat`、`frontend-accessibility-contracts`、`frontend-responsive-workflows`、`frontend-css-ownership` 均已归档；Task 9 的历史包含已完成 Task 8。
-- [ ] 每个前置 task 的 implementation PR、release/main CI 与 post-merge checks 均成功。
-- [ ] 从 fresh `origin/main` 创建/刷新 `codex/frontend-quality-ratchets` 独立 worktree；不修改本地 `main`。
-- [ ] 在 worktree 运行 `sh scripts/setup-git-hooks.sh`，确认 Node `22.23.1`，确认 working tree clean。
-- [ ] 只有上述条件满足后运行 `python3 ./.trellis/scripts/task.py start 07-10-frontend-quality-ratchets`。
+- [x] `frontend-csp-compat`、`frontend-accessibility-contracts`、`frontend-responsive-workflows`、`frontend-css-ownership` 均已归档；Task 9 的历史包含已完成 Task 8。
+- [x] 每个前置 task 的 implementation PR、release/main CI 与 post-merge checks 均成功。
+- [x] 从 fresh `origin/main@5633102739d22f18ae7c52c89e19b6e7d2f2a4d7` 重建 `codex/frontend-quality-ratchets` 独立 worktree；未修改本地 `main`。
+- [x] 在 worktree 运行 `sh scripts/setup-git-hooks.sh`，确认 Node `22.23.1` / npm `10.9.8`，确认 working tree clean。
+- [x] 上述条件满足后已运行 `python3 ./.trellis/scripts/task.py start 07-10-frontend-quality-ratchets`，task 状态为 `in_progress`。
 
 Inline 执行模式保持不变，不分派运行时子代理。Task 6–9 文档中的 `npm run test:e2e` 是由本 task 建立后的最终合同，不作为那些前置 task 当时的启动条件；前置 task 使用 focused tests + local browser evidence。
 
@@ -27,8 +27,8 @@ Inline 执行模式保持不变，不分派运行时子代理。Task 6–9 文�
 
 在最新前置集成版本重做规划期测量，旧数值只用于解释差异。
 
-- [ ] 记录 commit、Node/npm、`git status`、测试 file/test count。
-- [ ] 运行 full baseline：
+- [x] 记录 commit、Node/npm、`git status`、测试 file/test count。
+- [x] 运行 full baseline：
 
 ```bash
 env -u NODE_ENV PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH make verify
@@ -36,10 +36,10 @@ npm --prefix web audit --include=dev
 git diff --check
 ```
 
-- [ ] 读取 Task 6/7/8/9 最终 artifacts 与实际文件树，建立交付清单：Tabs/Menu/skip-link selectors、responsive critical texts、Asset command-owning hooks、CSS analyzer/budget/owner paths。
-- [ ] 重跑两个 TypeScript probes 并保存按目录/错误码统计；不能沿用规划期 121/35/156 数字做完成判断。
-- [ ] fresh production build 后记录 entry JS/CSS、最大 async JS、WOFF2 与 Task 9 CSS 指标。
-- [ ] 若 baseline 本身失败，先回到对应前置 owner 修复；Task 10 不在失败基线上制造 budget。
+- [x] 读取 Task 6/7/8/9 最终 artifacts 与实际文件树，建立交付清单：Tabs/Menu/skip-link selectors、responsive critical texts、Asset command-owning hooks、CSS analyzer/budget/owner paths。
+- [x] 重跑两个 TypeScript probes 并保存按目录/错误码统计；fresh 数值为 176 / 33 / combined 209，不沿用规划期 121/35/156。
+- [x] fresh production build 后记录 entry JS/CSS、最大 async JS、WOFF2 与 Task 9 CSS 指标。
+- [x] baseline 本身未失败；若后续 fresh baseline 回归失败，先回到对应 owner 修复，不在失败基线上制造 budget。
 
 **Rollback/stop:** baseline failure、依赖 task 未归档或 Task 9 budget 缺失时停止，不开始安装新依赖。
 

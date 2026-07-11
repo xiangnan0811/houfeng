@@ -15,32 +15,32 @@
 
 ### Repository Baseline
 
-- 规划基线为 `origin/main` commit `2ab081c`；Node 固定为 `22.23.1`。
-- `env -u NODE_ENV make verify` 已通过：Go fmt/vet/tests、86 个 Vitest 文件 / 633 tests、ESLint、strict TypeScript 和 production build 全绿，npm install audit 输出 0 vulnerabilities。
-- 最近一次 main CI run `29097572830`：go 33s、docker-image 30s、web 2m07s；Release Please run `29097572846` 成功。
+- 实施基线为 `origin/main` commit `5633102739d22f18ae7c52c89e19b6e7d2f2a4d7`；Node 固定为 `22.23.1`，npm 为 `10.9.8`。
+- `env -u NODE_ENV PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH make verify` 已通过：Go fmt/vet/tests、115 个 Vitest 文件 / 769 tests、ESLint、strict TypeScript 和 production build 全绿，npm install/audit 输出 0 vulnerabilities。
+- 基线 main CI run `29154612059` 在同一 commit 上通过 go、web、docker-image；Release Please run `29154612051` 成功且没有生成新的 release PR。
 - `web/package.json` 当前没有 `@vitest/coverage-v8`、`@playwright/test`、`@axe-core/playwright`，也没有 `test:coverage`、`test:e2e`、bundle budget scripts。
 - `.github/workflows/ci.yml` 只有 go、web、docker-image 三个 job；web 只执行 `NODE_ENV=production make verify-web`。
 - 当前浏览器 helper `scripts/visual_evidence.py browser-sanity` 依赖开发机 Python Playwright/CDP，明确不在 CI；它继续作为本地/真实数据辅助，不是持久化 gate 的替代品。
 
 ### Current Measurements
 
-- production build 规划快照：入口 JS raw/gzip `350,564 / 109,012` bytes；入口 CSS raw/gzip `393,768 / 48,639` bytes；最大异步 route chunk（Asset Decisions）raw/gzip `121,304 / 28,751` bytes。
-- 自托管字体为 7 个 WOFF2，共 `139,072` bytes；CSS 源码当前 31 files / `417,171` bytes。
-- 上述数值在 Task 6–9 合并后会变化，不能直接成为最终 budget；Task 10 激活后必须在 fresh `origin/main` production build 上重采并提交唯一基线。
+- fresh production build 实施快照：入口 JS raw/gzip `355,132 / 110,565` bytes；入口 CSS raw/gzip `289,964 / 37,135` bytes；最大异步 route chunk（Asset Decisions）raw/gzip `136,551 / 31,953` bytes。
+- 自托管字体为 7 个 WOFF2，共 `139,072` bytes。Task 9 final CSS 为 26 files / `311,063` source bytes，production raw/gzip `293,270 / 38,119` bytes。
+- bundle/font 数值来自 Task 6–9 全部合并、发布和归档后的 fresh `origin/main`，是 deterministic checker 的首次 baseline 候选；Task 10 复用 Task 9 analyzer/budget，不另建 CSS baseline。
 - coverage 尚未有可信基线。规划期无跟踪安装尝试暴露 npm 临时 peer-tree/jsdom 解析限制，因此 `0/Unknown` 不得写入预算；正式实现必须先把匹配 Vitest 版本的 provider 写入 package/lockfile，再由 `npm ci` 生成基线。
 
 ### Type And Lint Debt
 
-- `strict: true` 已启用，但 `noUncheckedIndexedAccess` 探针有 121 errors：pages 71、atoms 24、components 14、lib 7、app 2、asset hooks 2、styles 1。
-- `exactOptionalPropertyTypes` 探针有 35 errors：pages 18、asset hooks 7、lib 4、app 3、components 3。
-- 两项同时启用共有 156 errors；不能用一次全局开关加大批 `as`、非空断言或 eslint disable 消音。
+- fresh `noUncheckedIndexedAccess` 探针有 176 errors：pages 75、components 41、styles 34、app 16、lib 7、security 3。
+- fresh `exactOptionalPropertyTypes` 探针有 33 errors：pages 23、lib 4、app 3、components 3。
+- 两项同时启用共有 209 errors：pages 98、components 44、styles 34、app 19、lib 11、security 3；不能用一次全局开关加大批 `as`、非空断言或 eslint disable 消音。
 - ESLint 当前只使用非 type-aware recommended config，没有 `no-floating-promises`、`no-misused-promises`、`await-thenable` 等类型信息规则。
 
 ### Spec And Environment Drift
 
-- `.trellis/spec/web/directory-structure.md` 与 `styling-guidelines.md` 仍把不存在的 `styles/atoms.css`、`styles/pages.css`、`app/layout/layout.css` 和 inline theme bootstrap 写成现状；实际入口为 `styles/reset.css`、`styles/tokens.css`、`index.css`、`styles/modernize.css`，`index.css` 再导入 partials，主题脚本是同源静态资源。
+- `.trellis/spec/web/styling-guidelines.md` 已由 Task 9 更新为真实 CSS owner/AST 合同；`directory-structure.md` 仍把不存在的 `styles/atoms.css`、`styles/pages.css`、`app/layout/layout.css` 写成现状，Task 10 必须按最终真实树修正。
 - `.trellis/spec/web/quality-guidelines.md` 和 `docs/operations/ui-preview-and-browser-sanity.md` 仍明确说仓库没有且普通任务不得加入 Playwright；Task 10 正是批准这项架构变更并同步规范的责任边界。
-- 仓库当前没有 GitHub `staging` environment、staging variables 或 staging secrets。缺少真实环境/凭据时可合并可重复门禁实现，但本 task 必须保持未完成，不能归档，也不能把 mock 证据标记为 staging 通过。
+- 仓库当前没有 GitHub `staging` environment、staging variables 或 staging secrets，且 GitHub API 报告 `main` 尚未启用 branch protection。缺少真实环境/凭据时可合并可重复门禁实现，但本 task 必须保持未完成，不能归档，也不能把 mock 证据标记为 staging 通过；required-check protection 在新 checks 实际出现后配置。
 - GitHub 仓库为 public，Actions 默认 token 权限为 read；`workflow_dispatch` 可选择运行 ref，因此仅声明 `environment: staging` 仍不足以阻止 feature ref 上被修改的 workflow 请求 environment secrets。
 - 用户已于 2026-07-10 确认采用 `workflow_dispatch + GitHub staging environment` 管理 staging URL、账号凭据和审计 artifact；执行机制已定稿。
 
@@ -50,7 +50,7 @@
 
 - 直接依赖 `frontend-csp-compat`、`frontend-accessibility-contracts`、`frontend-responsive-workflows`、`frontend-css-ownership` 全部合并、归档并完成 post-merge main CI。
 - `frontend-css-ownership` 又依赖 `frontend-asset-decisions-domains`；因此 Task 8 是 Task 10 的传递前置。
-- Task 5 已归档、Gate A 已通过；Task 6、7、9 当前仍为 planning。规划可以完成，但在这些前置条件满足且用户审阅本方案前不得运行 `task.py start`。
+- Task 5、6、7、9 均已归档并完成 post-merge main CI；Task 9 历史包含已完成 Task 8，Task 10 已从其归档提交后的 fresh `origin/main` 激活。
 - Task 6–9 只需留下各自 focused tests 与本地浏览器证据；它们计划中尚不存在的 `npm run test:e2e` 由本任务统一实现和接管，不能倒置依赖。
 
 ### 2. Coverage Ratchet
@@ -115,7 +115,7 @@
 
 ## Acceptance Criteria
 
-- [ ] Task 5、6、7、9 均已归档且 post-merge main CI 通过；Task 9 已包含 Task 8 输出。
+- [x] Task 5、6、7、9 均已归档且 post-merge main CI 通过；Task 9 已包含 Task 8 输出。
 - [ ] `npm ci` 可重复安装固定的 coverage/Playwright/axe 依赖，`npm audit --include=dev` 为 0 vulnerabilities。
 - [ ] coverage 包含全部 production TS/TSX；全局四项不低于 fresh baseline。
 - [ ] 每个关键文件存在且 branch coverage >= 90%，重命名或零匹配会失败。
