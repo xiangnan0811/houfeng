@@ -57,3 +57,11 @@
 - clean-CI 回归：source-only same-context contract 使用测试创建的空 `--dist`，不依赖测试阶段之前不存在的 `web/dist`；focused 4/4 通过。
 - `npm --prefix web run css:analyze`：最终 budget pass，数值与本文件 Final 列一致。
 - `git diff --check` 与 `task.py validate 07-10-frontend-css-ownership`：通过。
+
+## PR、主干与发布证据
+
+- 功能 PR [#365](https://github.com/xiangnan0811/houfeng/pull/365) 在 head `9856a94bd058bb127e26cef72e5284632839a5d9` 的 Go、Web、Docker image 与 GitGuardian 检查全部通过后合并；merge commit 为 `2a26a55e7921b39775e1d4dd1baec319ee609dc9`。
+- 合并后的 `main` CI run `29154186205` 在同一 merge commit 上通过 Go、Web 与 Docker image；Release Please run `29154186212` 成功创建 release PR。
+- release PR [#366](https://github.com/xiangnan0811/houfeng/pull/366) 的四项检查全部通过后合并为 `e1910d50b297320d4e7ae940b153b4a906286c28`；其 post-merge `main` CI run `29154283793` 全绿。
+- GitHub Release [v0.58.4](https://github.com/xiangnan0811/houfeng/releases/tag/v0.58.4) 指向 `e1910d50b297320d4e7ae940b153b4a906286c28`；publish-images run `29154288713` 完成 agent 资产、minisign checksum、linux/amd64、linux/arm64 与多架构 manifest 发布。
+- Docker Hub `docker.io/linnea7171/houfeng:v0.58.4` 远端 OCI index digest 为 `sha256:33a80e264f1b7e6fd21fe5584ab5a8eadb5f24b6a13d0fa3aee27716a27d2203`；linux/amd64 digest 为 `sha256:9bcd429b4ec981298f27262f673563bf5db862427851218823f2ad89fc0e952f`，linux/arm64 digest 为 `sha256:71530154138ccf280002a9e5ec940a507e2b494152594729ec79244d46e3516d`。
