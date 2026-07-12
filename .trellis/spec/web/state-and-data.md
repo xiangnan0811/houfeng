@@ -611,6 +611,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Asset portfolio data: `AssetDecisionsPage` 首屏主 surface 从 `/api/asset-decisions/overview` 与 `/api/asset-decisions/groups?view=&renew_within_days=` 读取自动组；点击组时读取 `/api/asset-decisions/groups/{group_id}?renew_within_days=`。自动组是只读派生视图，不在前端保存或补写 group state；保存决策必须调用 `/api/asset-decisions/records`，由后端重新计算组详情并生成快照。
 - Manual scenario data: 页面读取 `/api/asset-decisions/manual-groups` 展示“自定义组合” surface；点击组合读取 `/api/asset-decisions/manual-groups/{manual_group_id}`。从自动组创建手工组合 POST `source_type=auto_group`、`source_group_id`、`renew_within_days`、`scenario`、`title`、`goal`、`note`；成员增删改只调用 manual group member endpoints。新增成员必须用 VPS selector，从 `listVPSAssets()` 候选选择，不要求用户复制内部 ID。
 - Scenario template data: 页面读取 `/api/asset-decisions/scenario-templates` 展示“场景模板” surface。内置模板只能用于创建自定义组合，不能 PATCH；自定义模板可从手工组合另存并可归档/启用。模板详情 `template_id` 深链只读取模板；从模板创建组合必须调用 `createManualGroupFromScenarioTemplate`，成功后打开新 manual group。模板不能直接创建 record，不能写 VPS / Subscription / MonitoringInstance / Target。
+- Asset Decisions 的成功响应仍是运行时边界：Go `nil` slice 会编码成 JSON `null`，即使手写 TypeScript 把 `members`、`evidence_chips`、`monthly_cost_by_currency` 等字段声明为数组。对成功响应中的集合执行 `filter` / `map` / `some` 前，拥有该展示或 controller 边界的 helper 必须把 `null | undefined` 收口为空数组；这只处理字段级空集合，不得把请求失败或整个响应缺失伪装成成功空态。
 - Asset decision records data: 页面读取 `/api/asset-decisions/records` 展示“已保存组合决策”辅助 surface；点击记录读取 `/api/asset-decisions/records/{record_id}`；推进记录状态 PATCH `/api/asset-decisions/records/{record_id}` 的 `title` / `goal` / `status` 字段，成员跟进 PATCH 同 endpoint 的 `members:[{vps_id, followup_status?, followup_note?}]`，但不得修改 VPS/订阅/监控/Target。
 - Asset decision execution plan data: `RecordSummary`、`RecordDetail` 和 `RecordMember` 可以包含只读 `execution_plan`，字段与后端 snake_case 对齐。记录级展示 `summary`、`lane_counts`、`actionable_count`、`blocked_count`；成员级展示 `lane`、`step_kind`、`tone`、`summary`、`step_label`、`issue_count`、`blocked`、`actionable`。前端只根据 `step_kind` 生成本地深链，后端不得返回 URL。
 - Evidence assessment data: `AssetDecisionGroupSummary` 与 `AssetDecisionGroupMember` 必须包含 `evidence_assessment`；字段为 `confidence_score`、`pressure_score`、`readiness_score`、`quality_tier`、`decision_bias`、`support_signal_count`、`risk_signal_count`、`gap_signal_count`、`summary`。记录详情从 `evidence_snapshot.evidence_assessment` 读取保存时快照；历史记录缺失该字段时只显示降级文案。
@@ -682,6 +683,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | manual group member patch/delete failed | 错误留在自定义组合详情内；不修改本地成员意图，不触发业务对象写接口 |
 | scenario template list/detail failed | 场景模板 surface/modal 显示局部错误；其他资产决策 surfaces 继续可用 |
 | create manual group from scenario template failed | 错误留在模板详情；不关闭模板 modal，不伪造自定义组合 |
+| empty builtin template create returns `members:[]` and `evidence_chips:null` | mutation 仍按成功处理并打开新组合详情；显示空成员任务面，不触发 route error，也不诱导用户重试并创建重复组合 |
 | patch builtin scenario template | 前端不展示编辑按钮；后端返回错误时显示模板错误，不影响其他 surface |
 | URL has `template_id` | 只读取并打开模板详情，不自动创建组合或记录 |
 | save record from manual group | POST records 带 `source_type=manual_group`；成功后关闭自定义组合详情并打开记录详情 |
@@ -730,6 +732,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Good: 打开自动组后创建自定义组合，页面刷新自定义组合列表并打开新组合详情；用户能继续编辑组合目标、场景和成员意图。
 - Good: 自定义组合详情通过 VPS selector 新增成员，保存成员 intended action/reason 只调用 `/api/asset-decisions/manual-groups/{id}/members`，不写 VPS / Subscription / MonitoringInstance / Target。
 - Good: 从内置模板创建自定义组合，成功后 URL 切换到 `manual_group_id=<id>` 并打开组合详情；从自定义组合另存模板，成功后刷新模板列表并打开 `template_id=<id>`。
+- Base: “资料补齐”等内置模板可以没有蓝图成员；创建空组合后仍能打开详情，再由用户添加 VPS 或直接另存为自定义模板。
 - Good: 从自定义组合保存记录时，payload 带 `source_type=manual_group` 和成员决定值，记录详情继续使用 execution readback。
 - Good: 打开决策组后保存为组合决策记录，记录详情能回看成员决定角色/动作/理由和保存时证据快照，并能把状态从 `draft` 推进到 `in_progress`。
 - Good: 打开已保存记录后，把单台 VPS 成员跟进从 `todo` 改为 `blocked` 并保存备注；记录详情显示更新时间，记录列表的阻塞 / 未关闭计数同步更新，业务动作入口仍只是跳到 VPS 详情或取消工作台。
@@ -750,6 +753,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Bad: 在前端只保存自动组 ID 当作长期决策状态，或从记录详情批量取消 VPS / 直接修改 Subscription / MonitoringInstance / Target。
 - Bad: 自定义组合新增成员让用户复制 `vps_...` 内部 ID，或者保存成员意图时顺手 PATCH `/api/vps/{id}`。
 - Bad: 模板详情点击打开后自动创建手工组合，或从模板直接保存为决策记录。
+- Bad: 用参数默认值 `chips = []` 代替运行时收口；JSON `null` 不会触发 JavaScript 默认参数，随后调用 `chips.filter(...)` 会在 mutation 已落库后让整条路由崩溃。
 - Bad: 前端用 IP/路由/性能趋势填充 recommendation 文案；这些语义在 agent 未成熟前不属于资产决策推荐。
 - Bad: 前端看到 readback `drift` 后自动把记录状态改成 `in_progress` / `completed`，或自动调用 `/api/vps/*`、`/api/subscriptions/*`、`/api/monitoring-instances/*`、`/api/targets/*` 写接口。
 - Bad: 前端把 `execution_plan` 当作真实执行系统，点击 CTA 后直接 PATCH VPS / Subscription / MonitoringInstance / Target，或根据 `actionable_count=0` 自动把 record status 改成 completed。
@@ -762,6 +766,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 - `web/src/lib/api.test.ts`: `getAssetDecisionOverview`、`listAssetDecisionGroups`、`getAssetDecisionGroup` 路径和 query string；manual group helper list/create/get/patch/member add/patch/delete；scenario template helpers list/create/get/patch/create-manual-group；记录 fixture 覆盖 `execution_readback` 和 `execution_plan`。
 - `AssetDecisionsPage.test.tsx` 与 route/domain workflow tests: `资产组合决策` 主 surface、默认不渲染旧常驻 `决策路径` / `下一步导览` / 记录 / 场景 / 续费 / 单台队列 section、次级入口点击展开单一工作区、legacy `view=single_queue` 承接、tabs query、上下文筛选 chips、深链打开 group/manual group/record/template、同值 filter revalidation 仍发四个 GET 且 group/manual/record 关闭恢复同实体入口焦点、场景模板列表/详情/创建组合、自定义组合另存模板、组详情 drawer、创建自定义组合、自定义组合详情/成员表单/保存 manual record、组/成员/记录 `evidence_assessment` 与 `decision_recommendation` 展示、组卡 comparison summary、默认层/目录层/普通二级面板密度预算、自动组/自定义组/保存记录普通面板不出现 `GROUP TO SCENARIO` / `EVIDENCE MATRIX` / 宽表底稿 / provider-product-cost-facts 串、记录详情 saved evidence snapshot 只在 raw/底稿中可回看、旧 snapshot 缺 `comparison_insight` 降级、保存记录、记录详情状态推进、execution plan 列表片段 / lane board / CTA URL 映射 / 快速跟进、成员跟进 PATCH payload 与计数刷新、成员跟进面板预览限量且不展示完整当前事实、partial source failure 不显示 `闭环稳定` 或虚构 readback work、readback drift 不触发业务对象写请求、plan CTA 不触发业务对象写请求、模板打开不触发业务对象写请求、单台 `AssetDecisionWorkPanel` PATCH payload、renewal evidence 失败不误报缺订阅或 `证据稳定`、错误/空态。
+- `templateWorkflows.test.tsx`: 必须用未经类型工厂收窄的真实 JSON fixture 覆盖空内置模板创建响应（至少 `members:[]`、`evidence_chips:null`），断言成功 notice、新组合 modal 和空成员面同时存在，且没有未捕获 render error。
 - `assetDecisionArchitectureContract.test.ts`: TypeScript AST synthetic + repository fixtures 覆盖七个 controller entry、API owner 白名单、唯一 router owner、禁止依赖边、无 `*PageContent` 替身、page/controller/global/effect 预算；错误必须报告路径、行与 forbidden symbol/edge/budget。
 - `web/e2e/accessibility.spec.ts` / `visual-contracts.spec.ts`：真实 Chromium 覆盖 Asset nested confirmation 逐层 Escape/inert/body lock/focus restore，以及 390px“场景与组合”命令完整可达；staging real lane 对已有自定义模板只打开确认并取消，禁止发送 template mutation。
 - `VPSPage.test.tsx`: initial fetch、quick view、active chips、高级筛选 drawer、client-side filtering、订阅/监控实例/资料质量展示、创建 VPS 流程和 provider selector 可访问标签。
@@ -769,6 +774,18 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - `VPSDetailPage.test.tsx`: Provider/MonitoringInstance/Target/Service selectors 的候选加载、空态/错误提示、提交 payload 仍只发送被选 ID 或空值。
 
 #### 7. Wrong vs Correct
+
+```tsx
+// 错误：默认参数只接住 undefined，接不住 Go nil slice 编码出的 JSON null。
+function renderRiskChips(chips: EvidenceChip[] = []) {
+  return chips.filter(isRisk)
+}
+
+// 正确：在成功响应的字段消费边界显式收口 nullable collection。
+function renderRiskChips(chips: EvidenceChip[] | null | undefined) {
+  return chips ? chips.filter(isRisk) : []
+}
+```
 
 ```tsx
 // 错误：常规关联让用户复制内部 ID，且加载失败时只能猜。

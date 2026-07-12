@@ -167,14 +167,14 @@ export function renderEvidenceChips(chips: AssetDecisionEvidenceChip[], limit = 
   )
 }
 
-export function renderCompactRiskChips(chips: AssetDecisionEvidenceChip[] = [], assessment?: AssetDecisionEvidenceAssessment | null) {
+export function renderCompactRiskChips(chips: AssetDecisionEvidenceChip[] | null | undefined, assessment?: AssetDecisionEvidenceAssessment | null) {
   const risks = chips
-    .filter((chip) => chip.tone === 'critical' || chip.tone === 'alert')
-    .map((chip) => ({
-      key: `${chip.kind}-${chip.label}`,
-      label: chip.label || EVIDENCE_KIND_LABELS[chip.kind] || chip.kind,
-      tone: chipTone(chip.tone),
-    }))
+    ? chips.filter((chip) => chip.tone === 'critical' || chip.tone === 'alert').map((chip) => ({
+        key: `${chip.kind}-${chip.label}`,
+        label: chip.label || EVIDENCE_KIND_LABELS[chip.kind] || chip.kind,
+        tone: chipTone(chip.tone),
+      }))
+    : []
   if (risks.length < 2 && assessment && assessment.gap_signal_count > 0) {
     risks.push({ key: 'gap-signal-count', label: `缺口 ${assessment.gap_signal_count}`, tone: 'alert' as BadgeTone })
   }
