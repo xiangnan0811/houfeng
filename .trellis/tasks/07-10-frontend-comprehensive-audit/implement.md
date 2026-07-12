@@ -780,7 +780,7 @@ npm --prefix web run test:e2e -- visual-contracts.spec.ts
 - Modify: `.github/workflows/ci.yml`
 - Update: `.trellis/spec/web/*.md` through `trellis-update-spec`
 
-- [ ] **Step 1: 安装明确依赖**
+- [x] **Step 1: 安装明确依赖**
 
 ```bash
 npm --prefix web install --save-dev @playwright/test @axe-core/playwright @vitest/coverage-v8 postcss
@@ -789,22 +789,22 @@ npx --prefix web playwright install chromium
 
 新增 scripts：`test:coverage`、`test:e2e`、`css:analyze`、`build:budget`。
 
-- [ ] **Step 2: 建立 coverage baseline 与 ratchet**
+- [x] **Step 2: 建立 coverage baseline 与 ratchet**
 
 首次报告记录 statements/branches/functions/lines，不设置拍脑袋 80%。规则：全局不得低于 baseline；Modal stack、Dashboard model、API request helpers、auth、Asset command hooks 的 branch coverage 目标至少 90%；新/改文件必须有直接测试或在 PR 说明覆盖路径。
 
-- [ ] **Step 3: 建立最小 Playwright 套件**
+- [x] **Step 3: 建立最小 Playwright 套件**
 
 - core routes：mock API contract、route 非空白、PageState error/empty/loading。
 - accessibility：axe serious/critical 为零；Modal/Tabs/menu 键盘流程。
 - visual contracts：Dashboard、Asset Decisions、Providers、Settings 的 1440/390 稳定截图与文本不裁切断言。
 - CSP：复用 Task 5 policy，console/securitypolicyviolation 为零。
 
-- [ ] **Step 4: 增加 bundle 与 CSS budget**
+- [x] **Step 4: 增加 bundle 与 CSS budget**
 
 CI 记录入口 JS/CSS gzip、最大 route chunk、字体总量、CSS AST。初始上限取修复后的 fresh baseline；超限必须在 PR 中解释并显式更新 budget，不能静默漂移。
 
-- [ ] **Step 5: 分阶段开启更严格类型检查**
+- [x] **Step 5: 分阶段开启更严格类型检查**
 
 先运行探针并建 issue list：
 
@@ -815,15 +815,15 @@ npm --prefix web exec tsc -- -p tsconfig.app.json --noEmit --exactOptionalProper
 
 按 `lib -> atoms -> dashboard -> routes` 顺序偿还。type-aware ESLint 先在 `lib` 与新 hooks 启用，再扩大目录。
 
-- [ ] **Step 6: 更新 Trellis specs**
+- [x] **Step 6: 更新 Trellis specs**
 
 使用 `trellis-update-spec` 更新真实 CSS owner、Modal stack、Dashboard remote state、浏览器 gate、Node 22 与 CSP contract。删除不存在的 `styles/atoms.css`、`styles/pages.css`、`app/layout/layout.css` 旧路径，避免新任务继续按过时结构写代码。
 
-- [ ] **Step 7: staging 验收**
+- [x] **Step 7: staging 验收**
 
 在真实认证 Center/PostgreSQL 环境补跑：登录、Dashboard 五状态、资产决策嵌套确认、设置保存、慢请求/503、长文本/大列表、主题切换。记录浏览器/版本、响应头、console/network 与截图；明确 mock 与 staging 证据边界。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add web .github/workflows/ci.yml .trellis/spec/web
@@ -884,13 +884,26 @@ git commit -m "test(web): ratchet browser and contract quality gates"
 - 从该 digest 镜像的 `/app/web/dist` 重跑 27/27 route/viewport、三主题 axe 和 diagnostics：geometry/axe/theme/console/runtime/CSP/HTTP/network failure 全为 0；关键 390px 几何与键盘指标保持。
 - Gate B 在同一 `v0.58.2` 集成版本关闭。该结论仍是发布产物 + fixture browser evidence；真实认证 staging 继续作为 Task 10 / Gate C 必要门，不在此处提前关闭。
 
-### Gate C：结构债关闭（Task 8-10）
+### Gate C：结构债关闭（Task 8-10）— 已通过
 
-- 不存在 2,705 行 Asset controller 替身；route page 不直接承载领域 API/mutation 细节。
-- CSS source/rule/duplicate/bundle 指标低于 Task 9 初始 baseline，且每个 owner 有验证。
-- coverage/browser/CSP/bundle/AST checks 进入 CI。
-- `.trellis/spec/web` 与真实目录、命令和契约一致。
-- staging authenticated smoke 完成，未验证项被明确保留而非标成通过。
+- [x] 不存在 2,705 行 Asset controller 替身；route page 不直接承载领域 API/mutation 细节。
+- [x] CSS source/rule/duplicate/bundle 指标低于 Task 9 初始 baseline，且每个 owner 有验证。
+- [x] coverage/browser/CSP/bundle/AST checks 进入 CI。
+- [x] `.trellis/spec/web` 与真实目录、命令和契约一致。
+- [x] staging authenticated smoke 完成，未验证项被明确保留而非标成通过。
+
+**同版集成证据（2026-07-12）：**
+
+- Gate C 共同版本为 GitHub Release `v0.58.8` / tag commit `5dedf222283bb4e1e34b6c7b99e0abc7657eff29`，包含已归档 Task 8、Task 9、Task 10 implementation 与真实 staging 暴露后的全部修复；不是把不同版本的局部结果拼接为结论。
+- release commit main CI [`29179972331`](https://github.com/xiangnan0811/houfeng/actions/runs/29179972331) 的 `go`、`web`、`web-browser`、`docker-image` 全绿；main branch protection 以 strict 模式要求这四项，enforce admins，禁止 force push/delete 并要求 conversation resolution。
+- 最终 119 个 Vitest files / 839 tests；coverage statements `79.52%`、branches `70.89%`、functions `78.95%`、lines `83.15%`。bundle/font actual/limit 为 entry JS `110740/110742`、entry CSS `37135/37135`、max async JS `32050/32052`、7 WOFF2 `139072/139072` bytes。
+- CSS 保持 26 files / `311063` source bytes / 2107 rules / 8517 declarations / 151 repeated selectors / 247 literal colors / 11 `!important`；production `293270` raw / `38119` gzip，均受 Task 9 AST/bundle budgets 阻断。
+- Task 10 implementation PR [#368](https://github.com/xiangnan0811/houfeng/pull/368) 与 staging 反馈修复 PR [#370](https://github.com/xiangnan0811/houfeng/pull/370)、[#372](https://github.com/xiangnan0811/houfeng/pull/372)、[#373](https://github.com/xiangnan0811/houfeng/pull/373)、[#374](https://github.com/xiangnan0811/houfeng/pull/374)、[#376](https://github.com/xiangnan0811/houfeng/pull/376) 均经 required CI 后合并；最后一个回归修复明确归属于 Task 10 staging 阻断，不另立新任务。
+- Release Please PR [#377](https://github.com/xiangnan0811/houfeng/pull/377) 与 `publish-images` run [`29179975996`](https://github.com/xiangnan0811/houfeng/actions/runs/29179975996) 通过；`v0.58.8`、`0.58.8`、`latest` 共同 OCI index digest 为 `sha256:33bdc5893904bfbcd481fefe2596fb4a134beab5bda68538524e61d5d05193ae`。
+- GitHub `staging` environment 唯一 deployment branch policy 为 `main`。feature-ref 负向 run [`29161439145`](https://github.com/xiangnan0811/houfeng/actions/runs/29161439145) 在读取 environment secrets 前失败，`staging-smoke` 被跳过。
+- 真实认证 run [`29181528110`](https://github.com/xiangnan0811/houfeng/actions/runs/29181528110) 在同一 `main@5dedf222` 对 expected/observed `v0.58.8` 通过：真实登录、九核心路由、自定义模板 cancel-only、设置保存/恢复、主题 reload，以及明确标注的 Dashboard 五态、503/慢响应、三视口长列表 injection 均通过。
+- artifact `frontend-staging-audit-29181528110`（id `8256569614`，digest `sha256:2f8ddf6225b8aca98f84b99d533eb4b576ce150eef7afda56e8c8b2ce5ed7404`）中 console/page/request/CSP/unhandled/unexpected HTTP 全为 0；只有预期登录前 401 与注入 503。artifact 到期 `2026-08-11`，永久摘要保存在 Task 10 `research/final-verification.md`。
+- 残余风险：staging 是单一 Chromium、专用非生产账号和当前测试数据集；没有真实移动设备、Firefox/WebKit、生产权限/数据、8 小时长会话或 Lighthouse 结论。injection lane 只证明 deployed frontend 的容错展示，不证明真实后端/生产数据健康。GitHub runner 另提示 `actions/cache@v4` 与 `actions/upload-artifact@v4` 的 Node 20 action runtime 被强制到 Node 24；项目和 Playwright job 本身仍由 `.node-version` 固定 Node `22.23.1`。
 
 ## 14. 启动前 review gate
 

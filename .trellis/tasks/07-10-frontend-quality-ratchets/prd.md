@@ -40,7 +40,7 @@
 
 - `.trellis/spec/web/styling-guidelines.md` 已由 Task 9 更新为真实 CSS owner/AST 合同；`directory-structure.md` 仍把不存在的 `styles/atoms.css`、`styles/pages.css`、`app/layout/layout.css` 写成现状，Task 10 必须按最终真实树修正。
 - `.trellis/spec/web/quality-guidelines.md` 和 `docs/operations/ui-preview-and-browser-sanity.md` 仍明确说仓库没有且普通任务不得加入 Playwright；Task 10 正是批准这项架构变更并同步规范的责任边界。
-- 仓库当前没有 GitHub `staging` environment、staging variables 或 staging secrets，且 GitHub API 报告 `main` 尚未启用 branch protection。缺少真实环境/凭据时可合并可重复门禁实现，但本 task 必须保持未完成，不能归档，也不能把 mock 证据标记为 staging 通过；required-check protection 在新 checks 实际出现后配置。
+- 规划/激活基线时仓库没有 GitHub `staging` environment、staging variables、staging secrets 或 `main` branch protection。缺少真实环境/凭据时可合并可重复门禁实现，但本 task 必须保持未完成，不能归档，也不能把 mock 证据标记为 staging 通过；这些外部门已在最终验收阶段配置并由下方 Final Acceptance Evidence 复核。
 - GitHub 仓库为 public，Actions 默认 token 权限为 read；`workflow_dispatch` 可选择运行 ref，因此仅声明 `environment: staging` 仍不足以阻止 feature ref 上被修改的 workflow 请求 environment secrets。
 - 用户已于 2026-07-10 确认采用 `workflow_dispatch + GitHub staging environment` 管理 staging URL、账号凭据和审计 artifact；执行机制已定稿。
 
@@ -123,18 +123,28 @@
 - [x] 九 route × 三 viewport Chromium matrix 全绿，无 page/console/CSP/unhandled/unexpected-network error，无 document 横向溢出或关键文字裁切。
 - [x] Dashboard 五状态、PageState 四态、Modal/Tabs/Menu/skip-link 键盘流程均有 Playwright 回归。
 - [x] AppShell、Dashboard、Settings、VPS/Asset 关键 surface 的 axe serious/critical 为零。
-- [ ] 入口 JS/CSS gzip、最大 async JS gzip、字体 raw budget 与 Task 9 CSS AST budget 在本地和 CI 阻断增长。
-- [ ] `make verify-web`、browser job、Docker job 与 main post-merge CI 都使用 Node `22.23.1` 并通过。
+- [x] 入口 JS/CSS gzip、最大 async JS gzip、字体 raw budget 与 Task 9 CSS AST budget 在本地和 CI 阻断增长。
+- [x] `make verify-web`、browser job、Docker job 与 main post-merge CI 都使用 Node `22.23.1` 并通过。
 - [x] 任务启动时的最新 Vitest file/test count 只增不减，或每个替换都有等价覆盖证据；历史 74/578 与当前规划 86/633 都不得无说明回退。
 - [x] `.trellis/spec/web/*` 和 browser operations doc 与真实目录、命令、owner 和证据层级一致，不再引用已删除 CSS/layout 路径或“仓库无 Playwright”。
 - [x] `frontend-staging-smoke.yml` 仅能通过 `workflow_dispatch` 运行，使用 GitHub `staging` environment，并且不会在 PR/fork CI 中暴露凭据。
-- [ ] environment 仅允许 `main` deployment ref；非 `main` dispatch 在读取 environment secrets 前失败；staging run 串行且不会被新 run 取消。
-- [ ] 真实认证 staging run 对目标 release/version 通过并保存脱敏证据；没有环境/凭据时本项保持未勾选，task 不归档。
-- [ ] Gate C 在同一个集成版本通过，并把 run、commit/tag 和残余风险写回 parent task。
+- [x] environment 仅允许 `main` deployment ref；非 `main` dispatch 在读取 environment secrets 前失败；staging run 串行且不会被新 run 取消。
+- [x] 真实认证 staging run 对目标 release/version 通过并保存脱敏证据；没有环境/凭据时本项保持未勾选，task 不归档。
+- [x] Gate C 在同一个集成版本通过，并把 run、commit/tag 和残余风险写回 parent task。
 
 ## Confirmed Staging Decision
 
 - 用户已确认独立 `workflow_dispatch` + GitHub `staging` environment 方案，不再保留人工本机入口作为关闭 Gate C 的替代路径。
-- 当前仓库尚未创建该 environment，也没有 URL/username/password 配置；这些是 Phase 2 的外部配置前置，不在 planning 阶段写入或索取 secret value。
+- 实施期已创建 GitHub `staging` environment，并配置 URL variable 与专用非生产账号 secrets；具体值不进入仓库、任务文档或 audit artifact。
 - environment 的 ref policy 固定为仅 `main`，并通过 non-secret preflight 与非取消式串行 concurrency 做纵深防护。
 - audit artifact 保存浏览器/路由/视口、允许的响应头、脱敏 console/network 计数和截图；Trellis task 永久记录 run URL/id、artifact 名、expected/observed version 与结论。
+
+## Final Acceptance Evidence — 2026-07-12
+
+- 最终共同版本为 GitHub Release `v0.58.8`，tag/target commit 为 `5dedf222283bb4e1e34b6c7b99e0abc7657eff29`；Task 8、Task 9、Task 10 及 staging 验收修复均为该提交祖先。
+- release commit 的 main CI run [`29179972331`](https://github.com/xiangnan0811/houfeng/actions/runs/29179972331) 中 `go`、`web`、`web-browser`、`docker-image` 全绿；main protection 以 strict 模式要求这四个 contexts，并对管理员生效、禁止 force push/delete。
+- `publish-images` run [`29179975996`](https://github.com/xiangnan0811/houfeng/actions/runs/29179975996) 成功发布 amd64/arm64 镜像与签名 agent assets；`v0.58.8`、`0.58.8`、`latest` 指向同一 OCI index digest `sha256:33bdc5893904bfbcd481fefe2596fb4a134beab5bda68538524e61d5d05193ae`。
+- GitHub `staging` environment 使用唯一 custom branch policy `main`。负向 run [`29161439145`](https://github.com/xiangnan0811/houfeng/actions/runs/29161439145) 在 feature ref 的 secret-free `ref-guard` 失败，`staging-smoke` job 无 steps 且被跳过。
+- 真实认证 run [`29181528110`](https://github.com/xiangnan0811/houfeng/actions/runs/29181528110) 在 `main@5dedf222` 对 expected/observed `v0.58.8` 通过；Chromium `149.0.7827.55`，九条核心路由、模板 cancel-only、设置保存/恢复、主题 reload、Dashboard 五态、503/慢响应及三视口长列表全部通过。
+- artifact `frontend-staging-audit-29181528110`（id `8256569614`，ZIP digest `sha256:2f8ddf6225b8aca98f84b99d533eb4b576ce150eef7afda56e8c8b2ce5ed7404`，到期 `2026-08-11`）记录 21 张显式截图、allowlisted headers 与 172 条脱敏 network facts；console/page/request/CSP/unhandled/unexpected HTTP 计数均为 0，只有预期登录前 401 与注入 503。
+- 长期证据见 `research/final-verification.md`。残余风险限于单一 Chromium/专用账号/当前非生产数据集，没有真实移动设备、Firefox/WebKit、生产权限/数据或 8 小时长会话结论；injection lane 只证明部署前端韧性，不证明真实后端故障行为。
