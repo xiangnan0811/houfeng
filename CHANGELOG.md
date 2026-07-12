@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.58.9](https://github.com/xiangnan0811/houfeng/compare/v0.58.8...v0.58.9) (2026-07-12)
+
+
+### Documentation
+
+* **task:** record frontend audit integration verification ([d26fea1](https://github.com/xiangnan0811/houfeng/commit/d26fea17766a47521cdd53502ab82552cc8155f5))
+* **task:** record Task 10 staging verification ([0014f6d](https://github.com/xiangnan0811/houfeng/commit/0014f6d54b066984311c7ede7b5ea70ebacba9a8))
+
 ## [0.58.8](https://github.com/xiangnan0811/houfeng/compare/v0.58.7...v0.58.8) (2026-07-12)
 
 
