@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.59.0](https://github.com/xiangnan0811/houfeng/compare/v0.58.9...v0.59.0) (2026-07-12)
+
+
+### Features
+
+* add global command audit backend ([487ee17](https://github.com/xiangnan0811/houfeng/commit/487ee17a49e522bf0f88bf9600ea63dcba6a3479))
+* add global command audit center ([3089837](https://github.com/xiangnan0811/houfeng/commit/3089837a0e02d32f03fa47af2d630b95c178f817))
+* **web:** add command audit center ([d70d1e6](https://github.com/xiangnan0811/houfeng/commit/d70d1e6dfbc2cf6e4a8c9497c4b5abfb51f869bb))
+
+
+### Bug Fixes
+
+* harden command audit review findings ([9ebb2f9](https://github.com/xiangnan0811/houfeng/commit/9ebb2f9f3de9923407d326e0dbc101d0f443955a))
+
+
+### Documentation
+
+* **task:** record command audit implementation ([8aeac03](https://github.com/xiangnan0811/houfeng/commit/8aeac032a4f1157408c2e23f91998f6e9f03df21))
+* **task:** record command audit review ([8a9685a](https://github.com/xiangnan0811/houfeng/commit/8a9685a35121e0b982393771d52c29ab8d79ff7e))
+* **task:** record delivery handoff ([e9c74d2](https://github.com/xiangnan0811/houfeng/commit/e9c74d2a9d0919d54f258eb48ac6737b5d8c96f5))
+
 ## [0.58.9](https://github.com/xiangnan0811/houfeng/compare/v0.58.8...v0.58.9) (2026-07-12)
 
 
