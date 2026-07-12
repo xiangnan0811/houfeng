@@ -91,6 +91,7 @@ outcome-failed: execution=1.113ms, limit_rows=21, global_index_rows=360
 
 - 未执行：用户明确要求不得 push。
 - 当前仅在本地 `codex/command-audit-center`，基线 `origin/main@a375c0b0330b` 无漂移。
+- 初始实现提交为 `487ee17a`、`d70d1e6d`、`8aeac032`；全方位审查修复提交为 `9ebb2f9f`。
 - 未 push、未创建 PR、未运行 required CI、未 merge/release，也未删除旧 planning 分支。
 - required CI 全绿前不能宣称远端交付完成；后续只有得到用户新授权才能恢复该流程。
 

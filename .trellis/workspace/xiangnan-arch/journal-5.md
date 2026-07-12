@@ -198,3 +198,47 @@ v0.58.8 真实认证 staging run 29181528110 通过；核对 main-only environme
 ### Next Steps
 
 - None - task complete
+
+
+## Session 241: 全局命令审计中心提交后综合审查
+
+**Date**: 2026-07-12
+**Task**: 全局命令审计中心
+**Branch**: `codex/command-audit-center`
+
+### Summary
+
+在三个初始本地提交之后，对全局命令审计中心完成数据库迁移/写路径、可信拒绝、读取 API/cursor、清理语义、Web 状态/渲染、fixture 浏览器和容量边界的全分支审查。修复目标 FK 误删风险、rejected 状态竞态、handler 嵌套 DTO fail-closed、严格日期、load-more 重试、宽表可访问性与测试证据缺口；用户禁止 push，因此只保留本地提交，任务继续保持 in_progress。
+
+### Main Changes
+
+- 0050 只解除实例/actor 目标 FK，保留无关 FK；三种旧 INSERT、三个索引和重复迁移由 PostgreSQL 16 实测。
+- rejected `INSERT … SELECT` 原子复核未归档/已绑定/未暂停状态，0 行 fail closed；唯一生产审计 INSERT helper 保持不变。
+- handler 自有 action/event/instance/actor response DTO，Web 严格日期、失败续页重试和 hostile output/details allowlist 得到回归覆盖。
+- 完整证据写入 task `check.md`，明确区分 unit/fake、真实 PostgreSQL、fixture Chromium、本地视觉、未执行 staging 与未执行 required CI。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `487ee17a` | `feat: add global command audit backend` |
+| `d70d1e6d` | `feat(web): add command audit center` |
+| `8aeac032` | `docs(task): record command audit implementation` |
+| `9ebb2f9f` | `fix: harden command audit review findings` |
+
+### Testing
+
+- [OK] PostgreSQL 16 integration：migrate/store/handlers 全套通过；EXPLAIN 1.197ms / 1.113ms，global index candidates 360，limit rows 21。
+- [OK] `make verify-go`；三包 `go test -race`。
+- [OK] `make verify-web`：124 files / 865 tests，lint/type/build/bundle/CSS budgets 全通过，npm audit 0 vulnerabilities。
+- [OK] Chromium production preview：64/64；10×3 core route、fail-closed、axe、CSP、keyboard/local scroll/output allowlist。
+- [OK] 本地 1440×1000 / 390×900 人工视觉复核；临时截图已删除，预览已停止。
+- [BLOCKED BY USER SCOPE] staging、push、PR、required CI、merge/release 未执行。
+
+### Status
+
+[IN PROGRESS] 本地实现与提交后审查完成；用户禁止 push，远端交付证据尚不存在。
+
+### Next Steps
+
+- 仅在用户新授权后 push `codex/command-audit-center`、创建 PR 并监控 required CI；不得把本地证据描述为远端交付完成。

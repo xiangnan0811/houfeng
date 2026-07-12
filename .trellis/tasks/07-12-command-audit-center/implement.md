@@ -186,7 +186,7 @@
 - [x] Run `npm --prefix web run test:e2e`.
 - [x] Run `git diff --check` and inspect `git diff --stat`, `git status`, and the final diff for accidental output fields or unrelated changes.
 - [x] Update task check evidence; keep the task active because staging/PR/required CI have not run.
-- [ ] Commit the post-initial-commit review fixes and developer journal locally on `codex/command-audit-center`.
+- [x] Commit the post-initial-commit review fixes locally as `9ebb2f9f`; record this review and its evidence in the developer journal through the following local documentation commit.
 - [ ] Push/create PR/monitor required CI only after the user gives new authorization. The current explicit instruction forbids push, so these original delivery steps are suspended rather than silently treated as passed.
 - [ ] After future required CI passes, stop without merge, release, deleting the old planning branch, or cleaning up the feature branch unless separately authorized.
 
