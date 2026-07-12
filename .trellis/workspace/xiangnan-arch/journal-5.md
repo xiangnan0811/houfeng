@@ -242,3 +242,41 @@ v0.58.8 真实认证 staging run 29181528110 通过；核对 main-only environme
 ### Next Steps
 
 - 仅在用户新授权后 push `codex/command-audit-center`、创建 PR 并监控 required CI；不得把本地证据描述为远端交付完成。
+
+
+## Session 241: Deliver global command audit center
+
+**Date**: 2026-07-12
+**Task**: Deliver global command audit center
+**Branch**: `codex/command-audit-center`
+
+### Summary
+
+Implemented and comprehensively reviewed the global command audit center, reran fresh Go, Web, Chromium, race, and PostgreSQL 16 gates, and handed the clean branch to the authorized PR/release pipeline.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `487ee17a` | (see git log) |
+| `d70d1e6d` | (see git log) |
+| `8aeac032` | (see git log) |
+| `9ebb2f9f` | (see git log) |
+| `8a9685a3` | (see git log) |
+| `e9c74d2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

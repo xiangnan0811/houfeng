@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 240
+- **Total Sessions**: 241
 - **Last Active**: 2026-07-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~200 | Active |
+| `journal-5.md` | ~282 | Active |
 | `journal-4.md` | ~1998 | Archived |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 241 | 2026-07-12 | Deliver global command audit center | `487ee17a`, `d70d1e6d`, `8aeac032`, `9ebb2f9f`, `8a9685a3`, `e9c74d2` | `codex/command-audit-center` |
 | 240 | 2026-07-12 | 完成前端全方位修复父任务集成验收 | `d26fea17` | `codex/frontend-comprehensive-audit` |
 | 239 | 2026-07-12 | 完成 Task 10 staging Gate C 与归档 | `0014f6d5` | `codex/archive-frontend-quality-ratchets` |
 | 238 | 2026-07-11 | 完成 CSS owner 化、发布与归档 | `507a7a0`, `8760bf4`, `ea77a88`, `4523786`, `135997b`, `6fd7b8f`, `8a96f90`, `9856a94` | `codex/archive-frontend-css-ownership` |
