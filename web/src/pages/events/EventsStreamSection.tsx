@@ -68,7 +68,7 @@ export function EventsStreamSection({
   if (events.length === 0) {
     return (
       <div className="card events-stream-empty">
-        <p className="events-stream-empty__message">
+        <p className="page-sub events-stream-empty__message">
           {hasActiveFilters ? '当前筛选没有匹配的事件' : '最近没有状态变更事件'}
         </p>
         {hasActiveFilters && (

@@ -177,6 +177,12 @@ export function MonitoringInstanceWatchtowerHeader({
                 ) : (
                   <span className="watchtower-actions-menu__hint">归档实例只允许在管理实例中操作</span>
                 )}
+                <Link
+                  className="watchtower-actions-menu__item"
+                  to={`/command-audit?monitoring_instance=${encodeURIComponent(monitoringInstance.monitoring_instance_id)}`}
+                >
+                  查看命令审计
+                </Link>
               </div>
             </details>
           </div>

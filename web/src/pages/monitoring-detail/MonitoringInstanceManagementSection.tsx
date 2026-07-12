@@ -37,6 +37,7 @@ const COUNT_ITEMS: Array<{ key: keyof MonitoringInstanceManagementReview['counts
   { key: 'state_change_event_count', label: '事件' },
   { key: 'notification_record_count', label: '通知' },
   { key: 'asset_lifecycle_action_step_count', label: '生命周期动作' },
+  { key: 'command_action_audit_count', label: '命令审计' },
   { key: 'active_vps_link_count', label: 'VPS 关联' },
 ]
 
@@ -84,7 +85,7 @@ function dialogCopy(action: ManagementDialogAction, displayName: string) {
         current: `当前：${displayName} 将进入不可恢复清理流程。`,
         result: '之后：监控实例和可删除关联记录会被删除。',
         impact: '此操作不可撤销，只适合清理误创建的空实例或已归档且审查允许的实例。',
-        unchanged: '不会影响其他监控实例；有阻塞项时后端会拒绝清理。',
+        unchanged: '命令审计元数据将永久保留，可继续在全局审计页查询，且不会计入已删除关联数量；有阻塞项时后端会拒绝清理。',
         confirmLabel: '确认永久清理',
       }
   }

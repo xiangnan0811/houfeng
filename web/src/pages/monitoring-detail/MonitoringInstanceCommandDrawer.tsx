@@ -2,8 +2,8 @@ import { useState } from 'react'
 
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import { Modal } from '../../components/atoms'
+import type { MonitoringInstanceCommand } from '../../config/commands'
 import type { MonitoringInstanceRecord } from '../../lib/types'
-import type { MonitoringInstanceCommand } from './types'
 import { MonitoringInstanceCommandResult } from './MonitoringInstanceCommandResult'
 
 type MonitoringInstanceCommandDrawerProps = {

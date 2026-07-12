@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 import { BrowserDiagnostics } from './support/diagnostics'
 import { apiRouteKey } from './fixtures/contracts'
-import { unauthenticatedProfile } from './fixtures/profiles'
+import { coreRouteProfile, unauthenticatedProfile } from './fixtures/profiles'
 import { ApiFixtureController } from './fixtures/router'
 
 async function installRouter(page: import('@playwright/test').Page) {
@@ -73,4 +73,32 @@ test('matches query parameters by canonical key order', async ({ page }) => {
 
   expect(result).toEqual({ status: 200, body: { ok: true } })
   expect(() => api.assertNoUnexpectedRequests()).not.toThrow()
+})
+
+test('command audit profile declares only the metadata-safe default query', async ({ page }) => {
+  const api = await installRouter(page)
+  api.useProfile(coreRouteProfile('/command-audit'))
+
+  await page.goto('/command-audit')
+  await expect(page.getByRole('heading', { name: '命令审计', exact: true })).toBeVisible()
+  await expect(page.getByText('Tokyo Edge', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '展开 2 个事件' }).click()
+
+  for (const forbidden of [
+    'COMMAND_AUDIT_STDOUT_SHOULD_NOT_RENDER',
+    'COMMAND_AUDIT_STDERR_SHOULD_NOT_RENDER',
+    'COMMAND_AUDIT_EVENT_OUTPUT_SHOULD_NOT_RENDER',
+  ]) {
+    await expect(page.getByText(forbidden, { exact: true })).toHaveCount(0)
+  }
+
+  const status = await page.evaluate(async () => {
+    const response = await fetch('/api/command-audits?cursor=undeclared')
+    return response.status
+  })
+
+  expect(status).toBe(501)
+  expect(() => api.assertNoUnexpectedRequests()).toThrow(
+    /GET \/api\/command-audits\?cursor=undeclared/,
+  )
 })

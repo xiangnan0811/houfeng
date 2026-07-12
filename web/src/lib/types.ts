@@ -44,6 +44,7 @@ export type MonitoringInstanceManagementCounts = {
   state_change_event_count: number
   notification_record_count: number
   asset_lifecycle_action_step_count: number
+  command_action_audit_count: number
   active_vps_link_count: number
 }
 
@@ -98,6 +99,61 @@ export type LastAction = {
   completed_at?: string
   output_expires_at?: string
   output_expired?: boolean
+}
+
+export type CommandAuditWindow = '24h' | '7d' | '30d' | 'all' | 'custom'
+export type CommandAuditOutcome = 'rejected' | 'queued' | 'dispatched' | 'succeeded' | 'failed'
+
+export type CommandAuditEvent = {
+  audit_id: string
+  event_type: 'queued' | 'dispatched' | 'completed' | 'rejected'
+  source: 'web' | 'agent_sync'
+  occurred_at: string
+  exit_code?: number
+  rejection_reason?: 'sensitive_confirmation_required'
+}
+
+export type CommandAuditMonitoringInstance = {
+  id: string
+  name: string
+  deleted: boolean
+}
+
+export type CommandAuditActor = {
+  user_id: string
+  username: string
+  display_name: string
+}
+
+export type CommandAuditAction = {
+  id: string
+  action_id?: string
+  monitoring_instance: CommandAuditMonitoringInstance
+  command_id: string
+  sensitivity: 'standard' | 'sensitive'
+  outcome: CommandAuditOutcome
+  actor: CommandAuditActor | null
+  started_at: string
+  events: CommandAuditEvent[]
+}
+
+export type CommandAuditListResponse = {
+  items: CommandAuditAction[]
+  next_cursor?: string
+}
+
+export type CommandAuditListFilter = {
+  cursor?: string
+  window?: CommandAuditWindow
+  started_from?: string
+  started_to?: string
+  monitoring_instance?: string
+  command_id?: string
+  sensitivity?: 'standard' | 'sensitive'
+  outcome?: CommandAuditOutcome
+  actor?: string
+  action_id?: string
+  limit?: number
 }
 
 export type OnboardingPhase =

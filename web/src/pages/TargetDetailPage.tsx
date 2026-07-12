@@ -16,9 +16,6 @@ import {
   exitTargetMaintenance,
   getTarget,
   getTargetRuntimeFacts,
-  listEvents,
-  listHistoricalIncidents,
-  listIncidents,
   listTargetAssetContexts,
   listTargetProbeItems,
   pauseTarget,
@@ -27,6 +24,7 @@ import {
   updateTargetMetadata,
   updateProbeItem,
 } from '../lib/api'
+import { listEvents, listHistoricalIncidents, listIncidents } from '../lib/observabilityApi'
 import type {
   ActiveIncidentRecord,
   AssetContextForTarget,

@@ -54,8 +54,6 @@ import {
   listVPSExperienceLogs,
   listProviders,
   listMonitoringInstances,
-  listEvents,
-  listIncidents,
   listSubscriptions,
   listAssetDecisionGroups,
   listTargetAssetContexts,
@@ -93,6 +91,8 @@ import {
   createVPSDomain,
   createVPSSubscription,
 } from './api'
+import { listCommandAudits, listEvents, listIncidents } from './observabilityApi'
+import type { CommandAuditListFilter } from './types'
 import type {
   AssetDomainListFilter,
   AssetDomainRecord,
@@ -2199,6 +2199,59 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
     })
+  })
+
+  it('requests default command audits without query parameters', async () => {
+    const response = { items: [], next_cursor: '' }
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(response)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listCommandAudits()).resolves.toEqual(response)
+    expect(fetchMock).toHaveBeenCalledWith('/api/command-audits', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('serializes normalized initial command audit filters', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, '{"items":[]}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const filter: CommandAuditListFilter = {
+      window: 'custom',
+      started_from: '2026-07-01T00:00:00Z',
+      started_to: '2026-07-02T00:00:00Z',
+      monitoring_instance: ' Tokyo ',
+      command_id: 'uptime',
+      sensitivity: 'standard',
+      outcome: 'succeeded',
+      actor: 'admin',
+      action_id: 'act_001',
+      limit: 100,
+    }
+
+    await listCommandAudits(filter)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/command-audits?window=custom&started_from=2026-07-01T00%3A00%3A00Z&started_to=2026-07-02T00%3A00%3A00Z&monitoring_instance=Tokyo&command_id=uptime&sensitivity=standard&outcome=succeeded&actor=admin&action_id=act_001&limit=100',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
+  it('uses cursor alone for command audit continuation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, '{"items":[]}'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listCommandAudits({
+      cursor: 'opaque_cursor',
+      window: '7d',
+      actor: 'must-not-leak',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/command-audits?cursor=opaque_cursor',
+      expect.objectContaining({ credentials: 'include' }),
+    )
   })
 
   it('serializes only non-empty incident filters', async () => {

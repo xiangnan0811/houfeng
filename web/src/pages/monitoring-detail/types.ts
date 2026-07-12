@@ -53,10 +53,3 @@ export type LinkedVPSState = {
 export type TimeWindow = 'realtime' | '24h' | '7d' | '30d'
 export type RuntimeStreamStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
 export type HistoryTab = 'events' | 'incidents'
-
-export type MonitoringInstanceCommand = {
-  id: string
-  name: string
-  description: string
-  sensitivity: 'standard' | 'sensitive'
-}

@@ -27,7 +27,7 @@ describe('Sidebar', () => {
         ),
       ).toBe(true)
     }
-    for (const label of ['VPS', '归档', '服务商', '订阅', '资产决策', '监控', '入口探测', '事件', '设置']) {
+    for (const label of ['VPS', '归档', '服务商', '订阅', '资产决策', '监控', '入口探测', '事件', '命令审计', '设置']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
     expect(screen.getByRole('link', { name: 'VPS' })).toHaveAttribute('aria-label', 'VPS')
@@ -49,9 +49,10 @@ describe('Sidebar', () => {
     )
     const links = screen.getAllByRole('link')
     const linkText = links.map((link) => link.textContent)
-    expect(linkText).toEqual(['工作台', 'VPS', '归档', '服务商', '订阅', '资产决策', '监控3', '入口探测1', '事件', '设置'])
+    expect(linkText).toEqual(['工作台', 'VPS', '归档', '服务商', '订阅', '资产决策', '监控3', '入口探测1', '事件', '命令审计', '设置'])
     expect(screen.getByRole('link', { name: '监控，3 个异常' })).toHaveAttribute('href', '/monitoring')
     expect(screen.getByRole('link', { name: '入口探测，1 个异常' })).toHaveAttribute('href', '/targets')
+    expect(screen.getByRole('link', { name: '命令审计' })).toHaveAttribute('href', '/command-audit')
     expect(screen.getByText('3')).toHaveClass('nav-badge')
     expect(screen.getByText('1')).toHaveClass('nav-badge')
   })

@@ -6,10 +6,10 @@ import { PageState } from '../components/PageState'
 import {
   ApiError,
   getDashboard,
-  listEvents,
   listMonitoringInstances,
   listTargets,
 } from '../lib/api'
+import { listEvents } from '../lib/observabilityApi'
 import {
   STATE_CHANGE_EVENT_TYPE_LABELS,
   type DashboardOverview,

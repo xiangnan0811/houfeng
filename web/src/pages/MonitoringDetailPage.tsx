@@ -15,9 +15,6 @@ import {
   getSettings,
   monitoringInstanceRuntimeStreamURL,
   listVPSForMonitoringInstance,
-  listEvents,
-  listHistoricalIncidents,
-  listIncidents,
   pauseMonitoringInstanceMonitoring,
   permanentCleanupMonitoringInstance,
   postMonitoringInstanceAction,
@@ -29,6 +26,7 @@ import {
   retireMonitoringInstance,
   updateMonitoringInstanceMetadata,
 } from '../lib/api'
+import { listEvents, listHistoricalIncidents, listIncidents } from '../lib/observabilityApi'
 import { DEFAULT_THRESHOLDS, resolveThresholds, type MetricThresholds } from '../config/thresholds'
 import type {
   ActiveIncidentRecord,

@@ -43,6 +43,7 @@ const CORE_ROUTES = [
   { name: 'monitoring', path: '/monitoring', heading: /^监控$/ },
   { name: 'targets', path: '/targets', heading: /^入口探测$/ },
   { name: 'events', path: '/events', heading: /^事件流$/ },
+  { name: 'command-audit', path: '/command-audit', heading: /^命令审计$/ },
   { name: 'providers', path: '/providers', heading: /服务商目录$/ },
   { name: 'subscriptions', path: '/subscriptions', heading: /订阅成本中枢$/ },
   { name: 'settings', path: '/settings', heading: /^系统设置$/ },
@@ -453,9 +454,18 @@ test('audits the authenticated staging release without retaining credentials or 
       await audit.assertClean(page)
     })
 
-    await runAuditStep('real-environment', 'nine core routes', async () => {
+    await runAuditStep('real-environment', 'ten core routes', async () => {
       for (const route of CORE_ROUTES) {
         await gotoAuditedRoute(page, audit, route)
+        if (route.path === '/command-audit') {
+          await expect(page.getByText(
+            '只展示命令、身份、时间和结果元数据，不保存或展示命令输出。',
+            { exact: true },
+          )).toBeVisible()
+          await expect(page.locator(
+            '.command-audit-page .command-output, .command-audit-page .command-output-section',
+          )).toHaveCount(0)
+        }
         await captureAuditScreenshot(page, audit, `real-${route.name}.png`)
       }
     })

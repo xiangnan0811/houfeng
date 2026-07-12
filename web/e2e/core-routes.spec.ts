@@ -16,6 +16,7 @@ const CORE_ROUTES = [
   { name: 'Monitoring', path: '/monitoring', heading: /^监控$/, workflow: { role: 'link', name: '从 VPS 接入 agent' } },
   { name: 'Targets', path: '/targets', heading: /^入口探测$/, workflow: { role: 'link', name: '组合决策' } },
   { name: 'Events', path: '/events', heading: /^事件流$/, workflow: { role: 'button', name: '高级筛选' } },
+  { name: 'Command Audit', path: '/command-audit', heading: /^命令审计$/, workflow: { role: 'button', name: '高级筛选' } },
   { name: 'Providers', path: '/providers', heading: /服务商目录$/, workflow: { role: 'button', name: '新建服务商' } },
   { name: 'Subscriptions', path: '/subscriptions', heading: /订阅成本中枢$/, workflow: { role: 'button', name: '新建订阅' } },
   { name: 'Settings', path: '/settings', heading: /^系统设置$/, workflow: { role: 'tab', name: '监控策略' } },
