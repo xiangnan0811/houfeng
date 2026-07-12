@@ -56,7 +56,7 @@
 - [x] 明确残余风险、环境限制和需要在真实部署环境补做的检查。
 - [x] 复杂任务的 `design.md` 与 `implement.md` 完整、无占位项、无相互矛盾。
 - [x] 十个 child task 已定义唯一问题映射、依赖、验收和回滚边界。
-- [ ] 所有 child task 完成后，Gate A/B/C 在同一集成版本通过并保存 staging 证据。
+- [x] 所有 child task 完成后，Gate A/B/C 在同一集成版本通过并保存 staging 证据。
 
 ## Notes
 
