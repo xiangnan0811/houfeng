@@ -39,6 +39,8 @@ For each arrow, ask:
 | Backend ↔ Frontend | Serialization, date formats |
 | Component ↔ Component | Props shape changes |
 
+For Go ↔ TypeScript JSON boundaries, explicitly test empty collections: a nil Go slice is serialized as `null`, not `[]`. A handwritten TypeScript array type does not validate runtime JSON, so decide whether the backend guarantees non-nil slices or the owning frontend boundary normalizes nullable collections before array operations.
+
 ### Step 3: Define Contracts
 
 For each boundary:
@@ -80,6 +82,7 @@ Before implementation:
 
 After implementation:
 - [ ] Tested with edge cases (null, empty, invalid)
+- [ ] For every Go slice field, verified the actual JSON shape for both nil and empty values (`null` versus `[]`)
 - [ ] Verified error handling at each boundary
 - [ ] Checked data survives round-trip
 

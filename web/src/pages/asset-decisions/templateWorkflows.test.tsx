@@ -211,4 +211,64 @@ describe('Asset Decisions scenario template workflows', () => {
       },
     ])
   })
+
+  it('opens an empty group created from the evidence cleanup template when center returns null evidence chips', async () => {
+    const evidenceCleanupTemplate = scenarioTemplate({
+      template_id: 'adt_builtin_evidence_cleanup',
+      title: '资料补齐',
+      goal: '资料清理',
+      scenario: 'evidence_cleanup',
+    })
+    const createdManual = manualGroupDetail({
+      manual_group_id: 'admg_empty_evidence_cleanup',
+      title: '资料补齐',
+      goal: '资料清理',
+      scenario: 'evidence_cleanup',
+      source_type: 'manual',
+      source_group_id: '',
+      member_count: 0,
+      members: [],
+      monthly_cost_by_currency: null,
+      evidence_chips: null,
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      templatesBody: [evidenceCleanupTemplate],
+      vpsCatalogBody: [],
+      routes: [
+        { url: '/api/asset-decisions/scenario-templates/adt_builtin_evidence_cleanup', body: evidenceCleanupTemplate },
+        {
+          url: '/api/asset-decisions/scenario-templates/adt_builtin_evidence_cleanup/manual-groups',
+          method: 'POST',
+          body: createdManual,
+          status: 201,
+        },
+        { url: '/api/asset-decisions/manual-groups/admg_empty_evidence_cleanup', body: createdManual },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await openSecondaryWorkbench('场景与组合')
+    const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
+    if (!templatesSection) throw new Error('scenario template section must exist')
+    const templateCard = within(templatesSection).getByText('资料补齐').closest('article')
+    if (!templateCard) throw new Error('evidence cleanup template card must exist')
+    fireEvent.click(within(templateCard).getByRole('button', { name: '使用模板' }))
+
+    const templateDialog = await screen.findByRole('dialog', { name: '资产决策场景模板详情' })
+    fireEvent.click(within(templateDialog).getByRole('button', { name: '创建组合' }))
+    fireEvent.click(within(templateDialog).getByRole('button', { name: '创建组合' }))
+
+    await waitFor(() => expect(screen.getByText('已从模板创建自定义组合：资料补齐')).toBeInTheDocument())
+    const manualDialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
+    expect(within(manualDialog).getByLabelText('自定义组合当前判断')).toBeInTheDocument()
+    fireEvent.click(within(manualDialog).getByRole('tab', { name: '成员' }))
+    expect(within(manualDialog).getByText('暂无可取舍成员')).toBeInTheDocument()
+  })
 })
