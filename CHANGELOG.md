@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.58.8](https://github.com/xiangnan0811/houfeng/compare/v0.58.7...v0.58.8) (2026-07-12)
+
+
+### Bug Fixes
+
+* **web:** keep empty template groups renderable ([4dc8b1a](https://github.com/xiangnan0811/houfeng/commit/4dc8b1a5b4c7a8caa57f354e433ae808c8926ee0))
+* **web:** keep empty template groups renderable ([70e83f9](https://github.com/xiangnan0811/houfeng/commit/70e83f96a94f0e6d9202052960ff25c6185ed21e))
+
 ## [0.58.7](https://github.com/xiangnan0811/houfeng/compare/v0.58.6...v0.58.7) (2026-07-12)
 
 
