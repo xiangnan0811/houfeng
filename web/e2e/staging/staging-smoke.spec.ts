@@ -241,7 +241,10 @@ async function gotoAuditedRoute(
   audit: StagingAudit,
   route: { path: string; heading: string | RegExp },
 ): Promise<void> {
-  if (page.url() !== 'about:blank') await audit.assertClean(page)
+  if (page.url() !== 'about:blank') {
+    await page.evaluate(() => document.fonts.ready)
+    await audit.assertClean(page)
+  }
   const response = await page.goto(route.path, { waitUntil: 'domcontentloaded' })
   await captureDocumentResponse(audit, response)
   const viewport = page.viewportSize()
