@@ -322,7 +322,7 @@ type ApiFixtureProfile = Readonly<Record<ApiRouteKey, ApiFixtureResponse>>
 - [x] cache + install matching Chromium；不能复用系统任意 Chrome 版本冒充 lockfile browser。
 - [x] 运行 `npm run test:e2e`，上传 failure-only Playwright artifacts，retention 有限。
 - [x] job 独立命名且无 staging secrets、fork 安全。
-- [ ] PR checks 实际出现后，将 `web-browser` 配置为 `main` required check（当前仓库尚未启用 branch protection）。
+- [x] PR checks 实际出现后，将 `web-browser` 配置为 `main` required check；main protection 同时要求 `go`、`web`、`web-browser`、`docker-image`，并启用 strict up-to-date 检查。
 - [x] 本地 58 tests 总时长 8.5s；CI 实际时长在 PR run 记录，若过长先用 workers/cache/shard优化，不删断言。
 
 Browser job wiring shape:
@@ -356,8 +356,8 @@ web-browser:
 
 ### CI RED/GREEN
 
-- [ ] 在 PR 上先观察各 job 实际出现；故意超 budget/阈值的本地 self-test证明会失败后恢复。
-- [ ] 全部 required checks green 才进入 specs/final gate。
+- [x] 在 PR 上先观察各 job 实际出现；故意超 budget/阈值的本地 self-test证明会失败后恢复。
+- [x] 全部 required checks green 才进入 specs/final gate。
 
 ## 11. Specs And Operations Update
 
@@ -423,17 +423,17 @@ Recommended reviewable commits:
 7. `ci(web): require browser and budget checks`
 8. `docs(spec): align frontend quality contracts`
 
-- [ ] 每个 commit 自洽、有对应 focused tests；不把 budget update 混进无关代码。
-- [ ] push `codex/frontend-quality-ratchets`，创建独立 PR，监控所有 required checks。
-- [ ] CI failure 在同一 branch 修复；不 force-push 猜测。
-- [ ] checks green 后合并，监控 main CI、Release Please、release PR、publish-images；发布成功并核验版本/镜像后才进入 staging gate。
+- [x] 每个 commit 自洽、有对应 focused tests；不把 budget update 混进无关代码。
+- [x] push `codex/frontend-quality-ratchets`，创建独立 PR #368，监控所有 required checks。
+- [x] CI failure 在同一 branch 修复；不 force-push 猜测。
+- [x] checks green 后合并，监控 main CI、Release Please、release PR、publish-images；发布成功并核验版本/镜像后才进入 staging gate。
 
 ## 14. Authenticated Staging Gate
 
 ### Mechanism Review
 
 - [x] 用户已于 2026-07-10 确认使用 `workflow_dispatch + GitHub staging environment`；人工本机入口不作为 Gate C 替代机制。
-- [ ] 创建 GitHub `staging` environment，将 deployment branch/ref policy 限制为仅 `main`，配置 `HOUFENG_STAGING_BASE_URL` variable 与 username/password secrets；值不写入 repo/task/log。
+- [x] 创建 GitHub `staging` environment，将 deployment branch/ref policy 限制为仅 `main`，配置 `HOUFENG_STAGING_BASE_URL` variable 与 username/password secrets；值不写入 repo/task/log。
 - [x] 增加不读取 environment/secrets 的 ref preflight；非 `main` dispatch 必须失败，不能仅 skip 后显示为成功。
 - [x] 使用固定 concurrency group 串行运行并设置 `cancel-in-progress: false`，避免保存/恢复状态被并发或取消破坏。
 - [x] workflow 输入 expected release version；healthz 不匹配立即失败。
@@ -493,32 +493,40 @@ jobs:
 
 ### Real Environment Lane
 
-- [ ] 真实登录并确认九条 core route 未跳回 login；记录实际数据限制。
-- [ ] 检查 main document CSP/security headers、console/network 无异常。
-- [ ] 打开 Asset nested confirmation，验证 focus/Escape/cancel，不执行危险 mutation。
-- [ ] Settings 保存一个批准的可逆字段：先 snapshot、保存、readback、`finally` 恢复、再 readback；恢复失败阻断。
-- [ ] 切换主题并 reload，确认同源资源/CSP无 violation。
+- [x] 真实登录并确认九条 core route 未跳回 login；记录实际数据限制。
+- [x] 检查 main document CSP/security headers、console/network 无异常。
+- [x] 打开 Asset nested confirmation，验证 focus/Escape/cancel，不执行危险 mutation。
+- [x] Settings 保存一个批准的可逆字段：先 snapshot、保存、readback、`finally` 恢复、再 readback；恢复失败阻断。
+- [x] 切换主题并 reload，确认同源资源/CSP无 violation。
 
 ### Explicit Injection Lane
 
-- [ ] 同一已认证部署上覆盖 Dashboard 五状态。
-- [ ] 对只读 GET 做 503 与 deferred slow response，验证 loading/stale/unavailable/retry。
-- [ ] 注入长文本/大列表，检查 390/1024/1440 overflow、裁切和局部滚动。
-- [ ] 报告明确写“deployed frontend fault injection”，不写成真实后端/生产数据通过。
+- [x] 同一已认证部署上覆盖 Dashboard 五状态。
+- [x] 对只读 GET 做 503 与 deferred slow response，验证 loading/stale/unavailable/retry。
+- [x] 注入长文本/大列表，检查 390/1024/1440 overflow、裁切和局部滚动。
+- [x] 报告明确写“deployed frontend fault injection”，不写成真实后端/生产数据通过。
 
 ### Evidence
 
-- [ ] 上传脱敏 manifest：run URL/id、commit/tag、healthz version、browser version、routes/viewports、allowed headers、console/network counters。
-- [ ] 上传 `frontend-staging-audit-<run-id>`，保留 30 天，包含脱敏 manifest 与成功/失败截图；staging 不上传含凭据/request body的 trace。
-- [ ] 将 run/artifact link 和结果写回本 task 与 parent Gate C。
+- [x] 上传脱敏 manifest：run URL/id、commit/tag、healthz version、browser version、routes/viewports、allowed headers、console/network counters。
+- [x] 上传 `frontend-staging-audit-<run-id>`，保留 30 天，包含脱敏 manifest 与成功/失败截图；staging 不上传含凭据/request body的 trace。
+- [x] 将 run/artifact link 和结果写回本 task 与 parent Gate C。
 
-**Hard blocker:** 当前没有 staging environment/variables/secrets。缺少时本节保持未勾选，task status 维持 `in_progress`，不得 archive。
+### Staging Acceptance Evidence — 2026-07-12
+
+- environment id `17999943032` 使用 `custom_branch_policies=true`，唯一 branch policy 是 `main`；main branch protection strict-required contexts 为 `go`、`web`、`web-browser`、`docker-image`。
+- feature-ref 负向 dispatch [`29161439145`](https://github.com/xiangnan0811/houfeng/actions/runs/29161439145) 只执行并失败于 `ref-guard`；受 environment 保护的 `staging-smoke` job 被跳过且 steps 为空。
+- 通过 run [`29181528110`](https://github.com/xiangnan0811/houfeng/actions/runs/29181528110) 使用 `main@5dedf222`、expected/observed `v0.58.8`、Chromium `149.0.7827.55`；真实环境 6 步与 deployed-frontend injection 4 步全部通过。
+- 真实路由为 `/`、`/vps`、`/asset-decisions`、`/monitoring`、`/targets`、`/events`、`/providers`、`/subscriptions`、`/settings`，另验证 `/settings?tab=monitoring`；视口为 `1440x1000`、`1024x768`、`390x900`。
+- manifest counters：consoleErrors `0`、pageErrors `0`、requestFailures `0`、unexpectedHttpErrors `0`、cspViolations `0`、unhandledRejections `0`；172 条 network facts 中 170×200，预期登录前 `/api/auth/me` 401 与注入 `/api/vps` 503 各 1。
+- artifact `frontend-staging-audit-29181528110` / id `8256569614` / ZIP digest `sha256:2f8ddf6225b8aca98f84b99d533eb4b576ce150eef7afda56e8c8b2ce5ed7404`，保留到 `2026-08-11`。内容为 `manifest.json`、`summary.md` 与 21 张显式截图，无 trace/video/error-context/request body/response body/cookie/Authorization/password/token。
+- 详情、文件哈希、发布链与残余风险见 `research/final-verification.md`。
 
 ## 15. Gate C And Archive
 
-- [ ] Task 8 总控删除、Task 9 CSS 指标下降与 Task 10 coverage/browser/CSP/bundle/AST CI 在同一 release 版本成立。
-- [ ] staging 对该 release/version 通过，证据可访问且不含 secrets。
-- [ ] parent Gate C 逐项勾选并列出 run/commit/tag、残余风险。
-- [ ] 使用 `trellis-check` 做最终 code/spec/data-flow/CI consistency review。
+- [x] Task 8 总控删除、Task 9 CSS 指标下降与 Task 10 coverage/browser/CSP/bundle/AST CI 在同一 release 版本成立。
+- [x] staging 对该 release/version 通过，证据可访问且不含 secrets。
+- [x] parent Gate C 逐项勾选并列出 run/commit/tag、残余风险。
+- [x] 使用 `trellis-check` 做最终 code/spec/data-flow/CI consistency review。
 - [ ] 业务实现、evidence 和 journal commits 均完成后，才归档 `frontend-quality-ratchets`。
 - [ ] Task 10 归档 PR/main CI 完成后，parent 仍保持 planning，等待所有 children 完成后的跨任务最终集成，不在 parent 修改业务代码。
