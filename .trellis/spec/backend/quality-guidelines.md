@@ -580,6 +580,7 @@ if !(warning < alert && alert < critical) {
 - ❌ **在窗口/过期判断测试里写会过期的固定未来日期**：例如生产逻辑按真实 `time.Now()` 判定 `renew_at` 是否在 30 天内时，测试夹具不能用 `time.Date(2026, time.June, 11, ...)` 表达"7 天后"。用 `time.Now().UTC().AddDate(0, 0, 7)`，或注入时钟后固定测试时钟。
 - ❌ **改 contract 包但不同 PR 改 agent**：`internal/contracts/agentapi/` 的任何 breaking 改动**必须**当 PR 把 agent 也升级，否则 fleet 会立即崩。
 - ❌ **改 `db/migrations/` 已合入的 SQL 文件**：见 `database-guidelines.md`。reviewer 看到这种 diff 应直接 reject。
+- ❌ **真实 PostgreSQL helper 在返回前 `defer adminPool.Close()`**：`t.Cleanup` 在 test 结束才 drop 临时 database/schema，helper-level defer 会先关闭 admin pool，留下 `closed pool` 和泄漏数据库。正确顺序是先注册 `t.Cleanup(adminPool.Close)`，再注册 drop cleanup，最后注册 test pool close；利用 LIFO 得到 test pool close → drop → admin close，并把 drop error 作为测试失败而不是只记日志。
 
 ---
 

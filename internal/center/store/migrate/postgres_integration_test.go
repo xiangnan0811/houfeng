@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -36,6 +37,157 @@ func TestPostgresIntegrationAppliesFreshMigrations(t *testing.T) {
 	assertSingleStringValue(t, ctx, db, "select to_regclass('public.monitoring_instances')::text", "monitoring_instances")
 	assertSingleStringValue(t, ctx, db, "select to_regclass('public.vps_monitoring_instance_links')::text", "vps_monitoring_instance_links")
 	assertSingleIntValue(t, ctx, db, "select count(*)::int from schema_migrations where name = '0030_vps_first_status_semantics.sql'", 1)
+	assertSingleIntValue(t, ctx, db, "select count(*)::int from schema_migrations where name = '0050_extend_command_action_audit.sql'", 1)
+	assertSingleStringValue(t, ctx, db, "select to_regclass('public.idx_monitoring_instance_command_action_audit_global_time')::text", "idx_monitoring_instance_command_action_audit_global_time")
+}
+
+func TestPostgresIntegrationCommandActionAuditUpgrade(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresSchema(t, ctx)
+
+	execSQL(t, ctx, db, `
+		create table users (
+			user_id text primary key,
+			username text not null unique,
+			password_hash text not null,
+			display_name text not null default '',
+			role text not null default 'admin',
+			created_at timestamptz not null default now(),
+			password_changed_at timestamptz not null default now()
+		)
+	`)
+	execSQL(t, ctx, db, `
+		create table monitoring_instances (
+			monitoring_instance_id text primary key,
+			display_name text not null
+		)
+	`)
+	execSQL(t, ctx, db, `
+		insert into users (user_id, username, password_hash, display_name)
+		values ('usr_audit', 'audit-admin', 'hash', '审计管理员')
+	`)
+	execSQL(t, ctx, db, `
+		insert into monitoring_instances (monitoring_instance_id, display_name)
+		values ('mi_audit', 'Tokyo Audit')
+	`)
+
+	legacyMigration, err := fs.ReadFile(migrations.FS, "0046_create_command_action_audit.sql")
+	if err != nil {
+		t.Fatalf("read 0046 migration: %v", err)
+	}
+	execSQL(t, ctx, db, string(legacyMigration))
+	execSQL(t, ctx, db, `
+		insert into monitoring_instance_command_action_audit (
+			audit_id, action_id, monitoring_instance_id, command_id,
+			sensitivity, event_type, actor_user_id, source, occurred_at
+		) values (
+			'cmd_aud_legacy', 'act_legacy', 'mi_audit', 'uptime',
+			'standard', 'queued', 'usr_audit', 'web', '2026-07-01T00:00:00Z'
+		)
+	`)
+
+	extensionMigration, err := fs.ReadFile(migrations.FS, "0050_extend_command_action_audit.sql")
+	if err != nil {
+		t.Fatalf("read 0050 migration: %v", err)
+	}
+	execSQL(t, ctx, db, string(extensionMigration))
+	execSQL(t, ctx, db, string(extensionMigration))
+
+	var instanceName, actorUsername, actorDisplayName string
+	if err := db.QueryRow(ctx, `
+		select monitoring_instance_name_snapshot, actor_username_snapshot, actor_display_name_snapshot
+		from monitoring_instance_command_action_audit
+		where audit_id = 'cmd_aud_legacy'
+	`).Scan(&instanceName, &actorUsername, &actorDisplayName); err != nil {
+		t.Fatalf("query backfilled command audit snapshots: %v", err)
+	}
+	if instanceName != "Tokyo Audit" || actorUsername != "audit-admin" || actorDisplayName != "审计管理员" {
+		t.Fatalf("backfilled snapshots = (%q, %q, %q)", instanceName, actorUsername, actorDisplayName)
+	}
+
+	execSQL(t, ctx, db, `
+		insert into monitoring_instance_command_action_audit (
+			audit_id, action_id, monitoring_instance_id, command_id,
+			sensitivity, event_type, actor_user_id, source, occurred_at
+		) values (
+			'cmd_aud_rollback', 'act_rollback', 'mi_audit', 'uptime',
+			'standard', 'queued', 'usr_audit', 'web', '2026-07-01T00:01:00Z'
+		)
+	`)
+	assertSingleStringValue(t, ctx, db, `
+		select monitoring_instance_name_snapshot
+		from monitoring_instance_command_action_audit
+		where audit_id = 'cmd_aud_rollback'
+	`, "")
+
+	execSQL(t, ctx, db, `
+		insert into monitoring_instance_command_action_audit (
+			audit_id, action_id, monitoring_instance_id, command_id,
+			sensitivity, event_type, actor_user_id, source, occurred_at, details
+		) values (
+			'cmd_aud_rejected', null, 'mi_audit', 'systemctl_status',
+			'sensitive', 'rejected', 'usr_audit', 'web', '2026-07-01T00:02:00Z',
+			'{"reason":"sensitive_confirmation_required"}'::jsonb
+		)
+	`)
+
+	expectSQLConstraintFailure(t, ctx, db, "command_action_audit_action_identity_valid", `
+		insert into monitoring_instance_command_action_audit (
+			audit_id, action_id, monitoring_instance_id, command_id,
+			sensitivity, event_type, source, details
+		) values (
+			'cmd_aud_bad_rejected_action', 'act_bad', 'mi_audit', 'systemctl_status',
+			'sensitive', 'rejected', 'web', '{"reason":"sensitive_confirmation_required"}'::jsonb
+		)
+	`)
+	expectSQLConstraintFailure(t, ctx, db, "command_action_audit_action_identity_valid", `
+		insert into monitoring_instance_command_action_audit (
+			audit_id, action_id, monitoring_instance_id, command_id,
+			sensitivity, event_type, source
+		) values ('cmd_aud_bad_queued_action', null, 'mi_audit', 'uptime', 'standard', 'queued', 'web')
+	`)
+	expectSQLConstraintFailure(t, ctx, db, "command_action_audit_rejected_source_valid", `
+		insert into monitoring_instance_command_action_audit (
+			audit_id, action_id, monitoring_instance_id, command_id,
+			sensitivity, event_type, source, details
+		) values (
+			'cmd_aud_bad_rejected_source', null, 'mi_audit', 'systemctl_status',
+			'sensitive', 'rejected', 'agent_sync', '{"reason":"sensitive_confirmation_required"}'::jsonb
+		)
+	`)
+	expectSQLConstraintFailure(t, ctx, db, "command_action_audit_rejected_reason_valid", `
+		insert into monitoring_instance_command_action_audit (
+			audit_id, action_id, monitoring_instance_id, command_id,
+			sensitivity, event_type, source, details
+		) values (
+			'cmd_aud_bad_rejected_reason', null, 'mi_audit', 'systemctl_status',
+			'sensitive', 'rejected', 'web', '{"reason":"other"}'::jsonb
+		)
+	`)
+	expectSQLConstraintFailure(t, ctx, db, "command_action_audit_details_metadata_only", `
+		insert into monitoring_instance_command_action_audit (
+			audit_id, action_id, monitoring_instance_id, command_id,
+			sensitivity, event_type, source, details
+		) values (
+			'cmd_aud_bad_output', 'act_output', 'mi_audit', 'uptime',
+			'standard', 'queued', 'web', '{"nested":{"stdout":"must-not-persist"}}'::jsonb
+		)
+	`)
+
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from pg_constraint
+		where conrelid = 'monitoring_instance_command_action_audit'::regclass
+			and contype = 'f'
+	`, 0)
+	execSQL(t, ctx, db, `delete from users where user_id = 'usr_audit'`)
+	execSQL(t, ctx, db, `delete from monitoring_instances where monitoring_instance_id = 'mi_audit'`)
+	assertSingleIntValue(t, ctx, db, `select count(*)::int from monitoring_instance_command_action_audit`, 3)
+	assertSingleStringValue(t, ctx, db, `
+		select actor_user_id
+		from monitoring_instance_command_action_audit
+		where audit_id = 'cmd_aud_legacy'
+	`, "usr_audit")
 }
 
 func TestPostgresIntegrationVPSFirstUpgradeNormalizesLegacyState(t *testing.T) {
@@ -73,11 +225,14 @@ func TestPostgresIntegrationVPSFirstUpgradeNormalizesLegacyState(t *testing.T) {
 
 func TestPostgresIntegrationUpgradePreservesExistingLogin(t *testing.T) {
 	ctx := context.Background()
-	db := openTemporaryPostgresSchema(t, ctx)
+	db := openTemporaryPostgresDatabase(t, ctx)
+	const (
+		existingPassword    = "Legacy-Login-42!"
+		replacementPassword = "Replacement-Seed-42!"
+	)
 
-	createLegacyAuthSchema(t, ctx, db)
-	createMinimalPost0029Schema(t, ctx, db)
-	legacyHash, err := auth.HashPassword("existing-password-xx")
+	applyPostgresMigrationsThrough(t, ctx, db, "0029_rename_nodes_to_monitoring_instances.sql")
+	legacyHash, err := auth.HashPassword(existingPassword)
 	if err != nil {
 		t.Fatalf("HashPassword legacy: %v", err)
 	}
@@ -85,14 +240,12 @@ func TestPostgresIntegrationUpgradePreservesExistingLogin(t *testing.T) {
 		insert into users (user_id, username, password_hash, display_name, role, created_at, password_changed_at)
 		values ('usr_existing', 'admin', $1, '管理员', 'admin', now() - interval '1 day', now() - interval '1 day')
 	`, legacyHash)
-	markMigrationsAppliedThrough(t, ctx, db, "0029_rename_nodes_to_monitoring_instances.sql")
-
 	if err := Apply(ctx, db); err != nil {
 		t.Fatalf("Apply() upgrade with existing user error = %v", err)
 	}
 
 	users := store.NewPostgresUserRepository(db)
-	if err := auth.SeedInitialUser(ctx, users, "admin", "new-password-xx", "管理员", func() time.Time {
+	if err := auth.SeedInitialUser(ctx, users, "admin", replacementPassword, "管理员", func() time.Time {
 		return time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	}); err != nil {
 		t.Fatalf("SeedInitialUser: %v", err)
@@ -115,16 +268,43 @@ func TestPostgresIntegrationUpgradePreservesExistingLogin(t *testing.T) {
 			return time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 		},
 	})
-	sess, err := svc.Login(ctx, "admin", "existing-password-xx", "ua", "127.0.0.1")
+	sess, err := svc.Login(ctx, "admin", existingPassword, "ua", "127.0.0.1")
 	if err != nil {
 		t.Fatalf("Login with existing password after upgrade: %v", err)
 	}
 	if sess.UserID != "usr_existing" {
 		t.Fatalf("session user = %q, want usr_existing", sess.UserID)
 	}
-	_, err = svc.Login(ctx, "admin", "new-password-xx", "", "")
+	_, err = svc.Login(ctx, "admin", replacementPassword, "", "")
 	if !errors.Is(err, auth.ErrInvalidCredentials) {
 		t.Fatalf("Login with seed replacement password = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+func applyPostgresMigrationsThrough(t *testing.T, ctx context.Context, db *pgxpool.Pool, throughName string) {
+	t.Helper()
+	names, err := Names()
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	files := fstest.MapFS{}
+	found := false
+	for _, name := range names {
+		payload, err := fs.ReadFile(migrations.FS, name)
+		if err != nil {
+			t.Fatalf("read migration %s: %v", name, err)
+		}
+		files[name] = &fstest.MapFile{Data: payload}
+		if name == throughName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("migration %q not found", throughName)
+	}
+	if err := applyFS(ctx, poolStore{db: db}, files); err != nil {
+		t.Fatalf("apply migrations through %s: %v", throughName, err)
 	}
 }
 
@@ -152,7 +332,7 @@ func openTemporaryPostgresDatabase(t *testing.T, ctx context.Context) *pgxpool.P
 	if err != nil {
 		t.Fatalf("open admin postgres pool: %v", err)
 	}
-	defer adminPool.Close()
+	t.Cleanup(adminPool.Close)
 
 	if _, err := adminPool.Exec(ctx, `create database `+quotePostgresIdentifier(testDatabaseName)); err != nil {
 		if isPostgresInsufficientPrivilege(err) {
@@ -164,7 +344,7 @@ func openTemporaryPostgresDatabase(t *testing.T, ctx context.Context) *pgxpool.P
 		dropCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if _, err := adminPool.Exec(dropCtx, `drop database if exists `+quotePostgresIdentifier(testDatabaseName)+` with (force)`); err != nil {
-			t.Logf("drop temporary postgres database %q: %v", testDatabaseName, err)
+			t.Errorf("drop temporary postgres database %q: %v", testDatabaseName, err)
 		}
 	})
 
@@ -456,6 +636,21 @@ func execSQL(t *testing.T, ctx context.Context, db *pgxpool.Pool, sql string, ar
 	t.Helper()
 	if _, err := db.Exec(ctx, sql, args...); err != nil {
 		t.Fatalf("exec sql %q error = %v", oneLineSQL(sql), err)
+	}
+}
+
+func expectSQLConstraintFailure(t *testing.T, ctx context.Context, db *pgxpool.Pool, constraintName, sql string) {
+	t.Helper()
+	_, err := db.Exec(ctx, sql)
+	if err == nil {
+		t.Fatalf("exec sql %q succeeded, want constraint %q failure", oneLineSQL(sql), constraintName)
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("exec sql %q error = %T %v, want postgres error", oneLineSQL(sql), err, err)
+	}
+	if pgErr.ConstraintName != constraintName {
+		t.Fatalf("exec sql %q constraint = %q, want %q", oneLineSQL(sql), pgErr.ConstraintName, constraintName)
 	}
 }
 

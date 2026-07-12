@@ -5,6 +5,13 @@ import (
 	"testing"
 )
 
+func TestManagementCountsEvidenceIncludesCommandActionAudit(t *testing.T) {
+	counts := ManagementCounts{CommandActionAuditCount: 3}
+	if got := counts.EvidenceCount(); got != 3 {
+		t.Fatalf("EvidenceCount() = %d, want 3", got)
+	}
+}
+
 func TestRecordJSONDoesNotExposePrivateBindingSecrets(t *testing.T) {
 	t.Parallel()
 

@@ -141,6 +141,7 @@ type ManagementCounts struct {
 	StateChangeEventCount         int `json:"state_change_event_count"`
 	NotificationRecordCount       int `json:"notification_record_count"`
 	AssetLifecycleActionStepCount int `json:"asset_lifecycle_action_step_count"`
+	CommandActionAuditCount       int `json:"command_action_audit_count"`
 	ActiveVPSLinkCount            int `json:"active_vps_link_count"`
 }
 
@@ -153,7 +154,8 @@ func (c ManagementCounts) EvidenceCount() int {
 		c.ActiveIncidentCount +
 		c.StateChangeEventCount +
 		c.NotificationRecordCount +
-		c.AssetLifecycleActionStepCount
+		c.AssetLifecycleActionStepCount +
+		c.CommandActionAuditCount
 }
 
 type ManagementActions struct {
@@ -209,12 +211,21 @@ type QueueCommandActionInput struct {
 	QueuedAt    time.Time
 }
 
+type RejectedCommandActionInput struct {
+	CommandID   string
+	Sensitivity string
+	ActorUserID string
+	Source      string
+	OccurredAt  time.Time
+}
+
 type Repository interface {
 	ListMonitoringInstances(context.Context, ...ListScope) ([]Record, error)
 	GetMonitoringInstance(context.Context, string) (Record, error)
 	CreateMonitoringInstance(context.Context, CreateInput) (Record, error)
 	UpdateMonitoringInstanceMetadata(context.Context, string, UpdateMetadataInput) (Record, error)
 	QueueCommandAction(context.Context, string, QueueCommandActionInput) error
+	RecordRejectedCommandAction(context.Context, string, RejectedCommandActionInput) error
 	GetPendingAction(context.Context, string) (actionID, commandID string, err error)
 	ClearPendingAction(context.Context, string) error
 	StoreActionResult(context.Context, string, []byte) error

@@ -718,6 +718,7 @@ func queryMonitoringInstanceManagementCounts(ctx context.Context, queryer monito
 			(select count(*)::int from state_change_events where object_type = 'monitoring_instance' and object_id = $1),
 			(select count(*)::int from notification_records where object_type = 'monitoring_instance' and object_id = $1),
 			(select count(*)::int from asset_lifecycle_action_steps where object_type = 'monitoring_instance' and object_id = $1),
+			(select count(*)::int from monitoring_instance_command_action_audit where monitoring_instance_id = $1),
 			(select count(*)::int from vps_monitoring_instance_links where monitoring_instance_id = $1 and unlinked_at is null)`,
 		monitoringInstanceID,
 	).Scan(
@@ -730,6 +731,7 @@ func queryMonitoringInstanceManagementCounts(ctx context.Context, queryer monito
 		&counts.StateChangeEventCount,
 		&counts.NotificationRecordCount,
 		&counts.AssetLifecycleActionStepCount,
+		&counts.CommandActionAuditCount,
 		&counts.ActiveVPSLinkCount,
 	); err != nil {
 		return monitoringinstances.ManagementCounts{}, fmt.Errorf("query monitoring instance management counts for %q: %w", monitoringInstanceID, err)
@@ -1985,6 +1987,21 @@ func (r *PostgresMonitoringInstanceRepository) SetPendingAction(ctx context.Cont
 		Source:      monitoringinstances.CommandActionSourceWeb,
 		QueuedAt:    time.Now().UTC(),
 	})
+}
+
+func (r *PostgresMonitoringInstanceRepository) RecordRejectedCommandAction(ctx context.Context, monitoringInstanceID string, input monitoringinstances.RejectedCommandActionInput) error {
+	if err := insertCommandActionAudit(ctx, r.db, commandActionAuditEvent{
+		MonitoringInstanceID: monitoringInstanceID,
+		CommandID:            input.CommandID,
+		Sensitivity:          input.Sensitivity,
+		EventType:            "rejected",
+		ActorUserID:          input.ActorUserID,
+		Source:               input.Source,
+		OccurredAt:           input.OccurredAt,
+	}); err != nil {
+		return fmt.Errorf("insert rejected command action audit for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+	return nil
 }
 
 // QueueCommandAction queues a command for the agent to execute on its next sync

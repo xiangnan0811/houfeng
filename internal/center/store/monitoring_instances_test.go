@@ -466,6 +466,45 @@ func TestQueueCommandActionInsertsQueuedAuditInTransaction(t *testing.T) {
 	}
 }
 
+func TestQueueCommandActionRollsBackWhenQueuedAuditFails(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("audit write failed")
+	var execSQL []string
+	tx := &fakeMonitoringInstanceTx{
+		exec: func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+			execSQL = append(execSQL, sql)
+			if strings.Contains(sql, "insert into monitoring_instance_command_action_audit") {
+				return pgconn.CommandTag{}, wantErr
+			}
+			return pgconn.NewCommandTag("UPDATE 1"), nil
+		},
+	}
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+
+	err := repo.QueueCommandAction(context.Background(), "mi_001", monitoringinstances.QueueCommandActionInput{
+		ActionID:    "act_001",
+		CommandID:   "uptime",
+		Sensitivity: "standard",
+		ActorUserID: "u_operator",
+		Source:      monitoringinstances.CommandActionSourceWeb,
+		QueuedAt:    time.Date(2026, time.June, 26, 12, 30, 0, 0, time.UTC),
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("QueueCommandAction() error = %v, want wrapped audit error", err)
+	}
+	if tx.commitCalls != 0 {
+		t.Fatalf("commit calls = %d, want 0", tx.commitCalls)
+	}
+	if tx.rollbackCalls != 1 {
+		t.Fatalf("rollback calls = %d, want 1", tx.rollbackCalls)
+	}
+	assertSQLOrder(t, execSQL,
+		"UPDATE monitoring_instances",
+		"insert into monitoring_instance_command_action_audit",
+	)
+}
+
 func TestSetPendingActionBlocksArchivedMonitoringInstance(t *testing.T) {
 	t.Parallel()
 
@@ -1885,7 +1924,8 @@ func TestMonitoringInstanceManagementReviewBuildsCountsAndActions(t *testing.T) 
 					*(dest[6].(*int)) = 7
 					*(dest[7].(*int)) = 8
 					*(dest[8].(*int)) = 9
-					*(dest[9].(*int)) = 1
+					*(dest[9].(*int)) = 10
+					*(dest[10].(*int)) = 1
 					return nil
 				}}
 			}
@@ -1924,6 +1964,7 @@ func TestMonitoringInstanceManagementReviewBuildsCountsAndActions(t *testing.T) 
 		review.Counts.StateChangeEventCount != 7 ||
 		review.Counts.NotificationRecordCount != 8 ||
 		review.Counts.AssetLifecycleActionStepCount != 9 ||
+		review.Counts.CommandActionAuditCount != 10 ||
 		review.Counts.ActiveVPSLinkCount != 1 {
 		t.Fatalf("counts = %#v, want populated counts", review.Counts)
 	}
@@ -1949,6 +1990,7 @@ func TestMonitoringInstanceManagementReviewBuildsCountsAndActions(t *testing.T) 
 		"from state_change_events",
 		"from notification_records",
 		"from asset_lifecycle_action_steps",
+		"from monitoring_instance_command_action_audit",
 		"from vps_monitoring_instance_links",
 	} {
 		if !containsSQL(queryRows, snippet) {
@@ -2463,6 +2505,7 @@ func TestPermanentCleanupMonitoringInstanceDeletesArchivedNonEmptyInstance(t *te
 				}
 				*(dest[0].(*int)) = 2
 				*(dest[7].(*int)) = 3
+				*(dest[9].(*int)) = 4
 				return nil
 			}}
 		},
@@ -2482,8 +2525,11 @@ func TestPermanentCleanupMonitoringInstanceDeletesArchivedNonEmptyInstance(t *te
 	if err != nil {
 		t.Fatalf("PermanentCleanupMonitoringInstance() error = %v", err)
 	}
-	if !result.Deleted || result.Counts.HeartbeatCount != 2 || result.Counts.NotificationRecordCount != 3 {
+	if !result.Deleted || result.Counts.HeartbeatCount != 2 || result.Counts.NotificationRecordCount != 3 || result.Counts.CommandActionAuditCount != 4 {
 		t.Fatalf("cleanup result = %#v, want pre-delete counts", result)
+	}
+	if result.DeletedReferenceCount != 4 {
+		t.Fatalf("DeletedReferenceCount = %d, want 4 without preserved command audits", result.DeletedReferenceCount)
 	}
 	if deletedRowsSeen == 0 {
 		t.Fatal("cleanup did not execute delete command tags")
@@ -2495,6 +2541,9 @@ func TestPermanentCleanupMonitoringInstanceDeletesArchivedNonEmptyInstance(t *te
 		"delete from asset_lifecycle_action_steps",
 		"delete from monitoring_instances",
 	)
+	if containsSQL(execSQLs, "delete from monitoring_instance_command_action_audit") {
+		t.Fatalf("cleanup SQL = %#v, must preserve command audits", execSQLs)
+	}
 }
 
 type fakeMonitoringInstanceManagementLinkRows struct {
@@ -2628,12 +2677,13 @@ func (r fakeMonitoringInstanceRow) Scan(dest ...any) error {
 }
 
 type fakeMonitoringInstanceTx struct {
-	queryRow    func(context.Context, string, ...any) pgx.Row
-	query       func(context.Context, string, ...any) (pgx.Rows, error)
-	exec        func(context.Context, string, ...any) (pgconn.CommandTag, error)
-	commit      func(context.Context) error
-	rollback    func(context.Context) error
-	commitCalls int
+	queryRow      func(context.Context, string, ...any) pgx.Row
+	query         func(context.Context, string, ...any) (pgx.Rows, error)
+	exec          func(context.Context, string, ...any) (pgconn.CommandTag, error)
+	commit        func(context.Context) error
+	rollback      func(context.Context) error
+	commitCalls   int
+	rollbackCalls int
 }
 
 func (f *fakeMonitoringInstanceTx) Begin(context.Context) (pgx.Tx, error) { return f, nil }
@@ -2645,6 +2695,7 @@ func (f *fakeMonitoringInstanceTx) Commit(ctx context.Context) error {
 	return nil
 }
 func (f *fakeMonitoringInstanceTx) Rollback(ctx context.Context) error {
+	f.rollbackCalls++
 	if f.rollback != nil {
 		return f.rollback(ctx)
 	}
