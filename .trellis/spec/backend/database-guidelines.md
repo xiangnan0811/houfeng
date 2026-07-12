@@ -208,15 +208,15 @@ where enrollment_token_hash = $1
 - Backend is the enforcement authority for sensitivity. Frontend command metadata is presentation only.
 - Queueing an action writes both pending columns and `last_action={"status":"pending","action_id":...,"command_id":...,"sensitivity":...,"queued_at":...}` so API/UI readers see pending immediately.
 - Sensitive commands require `confirmed_sensitive:true` before queueing. 对认证会话、已知敏感命令、真实且可执行实例的缺确认请求，handler 必须在生成 action ID 前写且只写一个 `rejected`，`details` 精确为 `{"reason":"sensitive_confirmation_required"}`，随后仍返回 400；无效 JSON、未知命令以及不存在/归档/未绑定/暂停实例不写拒绝审计。
-- 所有 `queued` / `dispatched` / `completed` / `rejected` 都必须调用 `insertCommandActionAudit`；helper 使用 `INSERT … SELECT` 从当前实例/用户生成快照，并要求 `RowsAffected()==1`。调用方不得自行拼接审计 INSERT。
+- 所有 `queued` / `dispatched` / `completed` / `rejected` 都必须调用 `insertCommandActionAudit`；helper 使用 `INSERT … SELECT` 从当前实例/用户生成快照，并要求 `RowsAffected()==1`。`rejected` 的同一条 INSERT 还必须重新检查 `archived_at is null`、`binding_status='已绑定'`、`monitoring_status<>'暂停'`，避免 handler 读取后状态变化仍留下不可信拒绝；0 行按审计完整性失败返回 500。调用方不得自行拼接审计 INSERT。
 - Queueing inserts a `queued` audit event in the same transaction as pending state, with `source='web'` and `actor_user_id` when a browser session user is available.
 - Sync dispatch clears `pending_action_*` columns to prevent duplicate dispatch, but rewrites the same pending `last_action` to keep the in-flight identity durable until a matching result arrives. Dispatch must preserve queued `sensitivity` and `queued_at` from the existing pending `last_action`; only missing legacy values may fall back to backend command metadata and dispatch time.
 - Dispatch inserts a `dispatched` audit event only after the clear update affects one row, with `source='agent_sync'`.
 - Command result storage must include the real `command_id` and update `last_action` to `status="done"` only when current `last_action` is still `pending` with the same `action_id` and `command_id`.
 - Completion inserts a `completed` audit event only after the guarded result update affects one row, with `source='agent_sync'` and `exit_code`; stale result `UPDATE 0` must not create audit rows.
-- Audit rows are metadata only。具名数据库约束递归禁止 `details` 任意层出现 stdout/stderr；Go read model 和 HTTP response 也只映射 allowlist fields，不定义/透传 `details`、stdout 或 stderr。
-- 实例/用户外键在永久审计升级后解除；稳定 ID 是权威身份，名称/用户名/显示名是事件时快照。永久清理实例或删除用户不删除审计，管理审查的 `command_action_audit_count` 属于 evidence，但不计入 cleanup 的 `deleted_reference_count`。
-- 旧二进制兼容依靠三个快照列 `not null default ''`；旧式 queued/dispatched/completed INSERT 仍可写，读取空快照时回退稳定 ID。不要在回滚时自动恢复 cascade 外键。
+- Audit rows are metadata only。具名数据库约束递归禁止 `details` 任意层出现 stdout/stderr；Go read model 和 HTTP response 也只映射 allowlist fields，不定义/透传 `details`、stdout 或 stderr。Handler 的 action/event/instance/actor response DTO 必须由 handler 自有并逐字段复制，不得把领域 JSON 类型直接嵌入 response；否则领域类型以后增加内部字段会静默扩大 API。
+- 实例/用户外键在永久审计升级后解除；迁移只能删除约束列包含 `monitoring_instance_id` 或 `actor_user_id` 的目标 FK，必须保留审计表以后可能拥有的其他外键。稳定 ID 是权威身份，名称/用户名/显示名是事件时快照。永久清理实例或删除用户不删除审计，管理审查的 `command_action_audit_count` 属于 evidence，但不计入 cleanup 的 `deleted_reference_count`。
+- 旧二进制兼容依靠三个快照列 `not null default ''`；旧式 queued、dispatched、completed 三种 INSERT 都必须实测仍可写，读取空快照时回退稳定 ID。不要在回滚时自动恢复 cascade 外键。
 - Read API 首次请求固定上下界；cursor 使用 versioned base64url JSON 封装规范化筛选、limit、固定 bounds 与 `(before_started_at,before_id)`。排序固定为 action `started_at desc,id desc`、event `occurred_at asc,audit_id asc`；outcome 优先级为 rejected → completed(exit 0 succeeded, otherwise failed) → dispatched → queued。
 - `monitoring_instance` 和 `actor` 只做转义后的字面量 `ILIKE` 子串匹配；`%`、`_`、`\` 不得成为通配符。默认 30 天 + limit 20，全局时间/action 索引与固定两次查询是当前容量边界。
 - Completed `last_action` includes `completed_at`, `output_expires_at = completed_at + 24h`, and `output_expired:false` while output is visible.
@@ -244,6 +244,7 @@ where enrollment_token_hash = $1
 | Completed output `output_expires_at <= now` | API omits stdout/stderr and returns `output_expired:true` |
 | DB write failure while queueing/dispatching/storing | Return wrapped repository error; handler maps to 500 where applicable |
 | Trusted rejection lookup/audit write fails | Return 500; do not silently return the ordinary 400 |
+| Instance becomes archived/unbound/paused before rejected INSERT snapshot | INSERT 0 rows; return 500 and do not create an untrusted audit |
 | Invalid command-audit enum/time/limit/cursor or cursor mixed with another query | 400 `invalid input`; repository is not called |
 | User or monitoring instance permanently deleted | Audit remains queryable with stable ID/snapshot and `monitoring_instance.deleted=true` |
 
@@ -261,6 +262,7 @@ where enrollment_token_hash = $1
 - Bad: audit `details` includes command stdout/stderr "for convenience"; this turns audit into long-lived sensitive output storage.
 - Bad: dispatch rewrites sensitive pending state as `sensitivity:"standard"` or resets `queued_at` to dispatch time; this breaks UI/audit continuity.
 - Bad:解除外键后改用 `VALUES` 直接写 monitoring instance / actor ID；这会为从未存在的实体制造永久伪审计。
+- Bad:0050 遍历并删除审计表全部外键；以后新增的无关引用约束会被静默破坏。
 - Bad:分页续页重新计算 `now()-30d`，或按 `started_at` 单键翻页；同时间 action 和新事件会产生重复/跳页。
 
 #### 6. Tests Required
@@ -268,8 +270,8 @@ where enrollment_token_hash = $1
 - Agent runtime test: pending action execution returns `CommandResult.ActionID` and `CommandResult.CommandID`.
 - Agent handler test: sync request conversion preserves `command_results[].command_id`.
 - Store tests: queueing writes pending `last_action` with `sensitivity` / `queued_at`; queue/dispatch/completion audit insert order and metadata; dispatch clears pending columns while preserving pending JSON metadata; result update SQL guards on pending status, action ID, and command ID; `UPDATE 0` mismatch is non-fatal and has no completion audit; result storage runs before dispatching a newly queued action in the same sync transaction; TTL scan and retention clear expired stdout/stderr.
-- Handler tests: trusted rejection writes once/no action，non-trusted inputs do not write，lookup/audit failures return 500；command-audit filters/cursor/cursor-only continuation and response allowlist are covered.
-- Migration tests: 0046→0050 + repeated apply、snapshot backfill、old INSERT compatibility、FK removal、named constraints and three indexes；fresh install also records 0050 once。
+- Handler tests: trusted rejection writes once/no action，non-trusted inputs do not write，lookup/audit failures return 500；command-audit filters/cursor/cursor-only continuation、handler-owned nested response DTO 和 response allowlist are covered.
+- Migration tests: 0046→0050 + repeated apply、snapshot backfill、三种旧 INSERT compatibility、只移除实例/actor FK 且保留无关 FK、named constraints and three indexes；fresh install also records 0050 once。
 - Real PostgreSQL tests: deletion/cleanup retention、five outcomes、literal filters、same-time composite keyset、real handler cursor and `EXPLAIN (ANALYZE, BUFFERS)`；代表性数据必须使用 global time/action indexes、limit+1，repository query count exactly 2。
 - Frontend API/page/browser tests: `postMonitoringInstanceAction` confirmation，`listCommandAudits` cursor-only，URL canonicalization/draft/load-more/deleted identity/output allowlist，以及 `/command-audit` 的 10×3 route、axe、390px named local scroll 与 Modal focus。
 
@@ -310,6 +312,31 @@ _, _ = tx.Exec(ctx, `insert into monitoring_instance_command_action_audit (...) 
 // 正确：所有事件走同一个 INSERT … SELECT helper，并要求恰好一行。
 if err := insertCommandActionAudit(ctx, tx, event); err != nil {
 	return fmt.Errorf("insert command action audit: %w", err)
+}
+```
+
+```sql
+-- 错误：rejected 只信任 handler 较早读取的状态。
+where mi.monitoring_instance_id = $3
+
+-- 正确：写入快照再次执行可信状态安全门；状态已变化时 INSERT 0 行并 fail closed。
+where mi.monitoring_instance_id = $3
+  and mi.archived_at is null
+  and mi.binding_status = '已绑定'
+  and mi.monitoring_status <> '暂停'
+```
+
+```go
+// 错误：领域类型未来增加字段时会自动进入 handler JSON。
+type commandAuditActionResponse struct {
+	Actor *commandaudits.ActorIdentity `json:"actor"`
+}
+
+// 正确：handler 自有 DTO，逐字段复制公开 allowlist。
+type commandAuditActorResponse struct {
+	UserID      string `json:"user_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
 }
 ```
 

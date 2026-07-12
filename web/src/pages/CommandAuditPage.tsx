@@ -273,5 +273,3 @@ export function CommandAuditPage() {
     </div>
   )
 }
-
-export default CommandAuditPage

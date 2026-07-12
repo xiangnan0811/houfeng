@@ -46,7 +46,7 @@ test('Command Audit keeps output metadata-only and owns narrow-screen table scro
   await page.goto('/command-audit')
 
   await expect(page.getByRole('heading', { name: '命令审计', exact: true })).toBeVisible()
-  const results = page.getByRole('region', { name: '命令审计结果，可横向滚动' })
+  const results = page.getByRole('region', { name: '审计记录' })
   await expect(results).toBeVisible()
   const geometry = await results.evaluate((element) => ({
     clientWidth: element.clientWidth,
@@ -65,7 +65,9 @@ test('Command Audit keeps output metadata-only and owns narrow-screen table scro
   for (const forbidden of [
     'COMMAND_AUDIT_STDOUT_SHOULD_NOT_RENDER',
     'COMMAND_AUDIT_STDERR_SHOULD_NOT_RENDER',
+    'COMMAND_AUDIT_DETAILS_SHOULD_NOT_RENDER',
     'COMMAND_AUDIT_EVENT_OUTPUT_SHOULD_NOT_RENDER',
+    'COMMAND_AUDIT_EVENT_DETAILS_SHOULD_NOT_RENDER',
   ]) {
     await expect(page.getByText(forbidden, { exact: true })).toHaveCount(0)
   }

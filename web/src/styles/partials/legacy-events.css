@@ -8,10 +8,8 @@
 
 .events-table-scroll-hint{margin:0 0 var(--space-2);color:var(--text-muted);font-size:var(--type-small-size)}
 
-.events-table-scroll{max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-gutter:stable;border-radius:var(--radius-2)}
+.events-table-scroll{max-width:100%;min-width:0;overflow-x:auto;scrollbar-gutter:stable;border-radius:var(--radius-2)}
 
 .events-table-scroll:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:var(--space-1)}
 
-.events-table-scroll .table{min-width:calc(var(--space-12) * 16)}
-
-.command-audit-table{min-width:1360px;table-layout:fixed}
+.events-table-scroll table{min-width:calc(var(--space-12)*16)}

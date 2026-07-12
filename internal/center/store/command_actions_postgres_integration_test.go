@@ -45,6 +45,7 @@ func TestPostgresIntegrationCommandActionAuditWritePathsAndCleanup(t *testing.T)
 	if err != nil {
 		t.Fatalf("CreateMonitoringInstance() error = %v", err)
 	}
+	setCommandAuditMonitoringInstanceExecutable(t, ctx, db, record.MonitoringInstanceID)
 
 	queuedAt := time.Date(2026, time.July, 12, 8, 30, 0, 0, time.UTC)
 	if err := repo.QueueCommandAction(ctx, record.MonitoringInstanceID, monitoringinstances.QueueCommandActionInput{
@@ -156,6 +157,92 @@ func TestPostgresIntegrationCommandActionAuditWritePathsAndCleanup(t *testing.T)
 	}
 }
 
+func TestPostgresIntegrationRejectedAuditRequiresCurrentlyExecutableInstance(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryCommandActionPostgresSchema(t, ctx)
+	if err := storemigrate.Apply(ctx, db); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+	if _, err := db.Exec(ctx, `
+		insert into users (user_id, username, password_hash, display_name)
+		values ('usr_rejection_gate', 'rejection-gate', 'hash', '拒绝审计操作者')
+	`); err != nil {
+		t.Fatalf("insert rejection audit actor: %v", err)
+	}
+
+	repo := NewPostgresMonitoringInstanceRepository(db)
+	record, err := repo.CreateMonitoringInstance(ctx, monitoringinstances.CreateInput{
+		DisplayName:     "Rejection Gate",
+		Group:           "review",
+		Region:          "test",
+		City:            "test",
+		Provider:        "test",
+		LifecycleStatus: monitoringinstances.LifecycleInUse,
+		Labels:          []string{"review"},
+	})
+	if err != nil {
+		t.Fatalf("create rejection gate monitoring instance: %v", err)
+	}
+
+	setState := func(bindingStatus, monitoringStatus string, archivedAt any) {
+		t.Helper()
+		if _, err := db.Exec(ctx, `
+			update monitoring_instances
+			set binding_status = $2,
+			    monitoring_status = $3,
+			    archived_at = $4,
+			    archived_reason = case when $4::timestamptz is null then '' else 'review gate' end
+			where monitoring_instance_id = $1
+		`, record.MonitoringInstanceID, bindingStatus, monitoringStatus, archivedAt); err != nil {
+			t.Fatalf("set rejection gate state: %v", err)
+		}
+	}
+	input := monitoringinstances.RejectedCommandActionInput{
+		CommandID:   "systemctl_status",
+		Sensitivity: "sensitive",
+		ActorUserID: "usr_rejection_gate",
+		Source:      monitoringinstances.CommandActionSourceWeb,
+		OccurredAt:  time.Date(2026, time.July, 12, 9, 0, 0, 0, time.UTC),
+	}
+
+	setState(monitoringinstances.BindingBound, monitoringinstances.MonitoringEnabled, nil)
+	if err := repo.RecordRejectedCommandAction(ctx, record.MonitoringInstanceID, input); err != nil {
+		t.Fatalf("record executable rejection audit: %v", err)
+	}
+
+	nonExecutableStates := []struct {
+		name             string
+		bindingStatus    string
+		monitoringStatus string
+		archivedAt       any
+	}{
+		{name: "unbound", bindingStatus: monitoringinstances.BindingUnbound, monitoringStatus: monitoringinstances.MonitoringEnabled},
+		{name: "paused", bindingStatus: monitoringinstances.BindingBound, monitoringStatus: monitoringinstances.MonitoringPaused},
+		{name: "archived", bindingStatus: monitoringinstances.BindingBound, monitoringStatus: monitoringinstances.MonitoringEnabled, archivedAt: time.Date(2026, time.July, 12, 9, 5, 0, 0, time.UTC)},
+	}
+	for _, state := range nonExecutableStates {
+		t.Run(state.name, func(t *testing.T) {
+			setState(state.bindingStatus, state.monitoringStatus, state.archivedAt)
+			err := repo.RecordRejectedCommandAction(ctx, record.MonitoringInstanceID, input)
+			if err == nil || !strings.Contains(err.Error(), "inserted exactly one row") {
+				t.Fatalf("RecordRejectedCommandAction() error = %v, want fail-closed integrity error", err)
+			}
+		})
+	}
+
+	var auditCount int
+	if err := db.QueryRow(ctx, `
+		select count(*)::int
+		from monitoring_instance_command_action_audit
+		where monitoring_instance_id = $1
+	`, record.MonitoringInstanceID).Scan(&auditCount); err != nil {
+		t.Fatalf("count rejection gate audits: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("rejection gate audit count = %d, want only the executable attempt", auditCount)
+	}
+}
+
 func TestPostgresIntegrationCommandAuditReadModelFiltersOutcomesAndKeyset(t *testing.T) {
 	ctx := context.Background()
 	db := openTemporaryCommandActionPostgresSchema(t, ctx)
@@ -194,6 +281,8 @@ func TestPostgresIntegrationCommandAuditReadModelFiltersOutcomesAndKeyset(t *tes
 	if err != nil {
 		t.Fatalf("create deleted monitoring instance: %v", err)
 	}
+	setCommandAuditMonitoringInstanceExecutable(t, ctx, db, active.MonitoringInstanceID)
+	setCommandAuditMonitoringInstanceExecutable(t, ctx, db, deleted.MonitoringInstanceID)
 
 	upperBound := time.Date(2026, time.July, 12, 12, 0, 10, 0, time.UTC)
 	sameStartedAt := upperBound.Add(-10 * time.Second)
@@ -304,7 +393,9 @@ func TestPostgresIntegrationCommandAuditReadModelFiltersOutcomesAndKeyset(t *tes
 		t.Fatalf("second keyset page = %#v", secondPage)
 	}
 
-	assertCommandAuditFilterCount(t, ctx, repo, commandaudits.Query{StartedFrom: &startedFrom, StartedTo: upperBound, Limit: 10, Outcome: "failed"}, 1)
+	for _, outcome := range []string{"rejected", "queued", "dispatched", "succeeded", "failed"} {
+		assertCommandAuditFilterCount(t, ctx, repo, commandaudits.Query{StartedFrom: &startedFrom, StartedTo: upperBound, Limit: 10, Outcome: outcome}, 1)
+	}
 	assertCommandAuditFilterCount(t, ctx, repo, commandaudits.Query{StartedFrom: &startedFrom, StartedTo: upperBound, Limit: 10, CommandID: "systemctl_status"}, 1)
 	assertCommandAuditFilterCount(t, ctx, repo, commandaudits.Query{StartedFrom: &startedFrom, StartedTo: upperBound, Limit: 10, Sensitivity: "sensitive"}, 1)
 	assertCommandAuditFilterCount(t, ctx, repo, commandaudits.Query{StartedFrom: &startedFrom, StartedTo: upperBound, Limit: 10, MonitoringInstance: `%_`}, 1)
@@ -538,6 +629,22 @@ func seedQueuedCommandAudit(t *testing.T, ctx context.Context, repo *PostgresMon
 	}
 }
 
+func setCommandAuditMonitoringInstanceExecutable(t *testing.T, ctx context.Context, db *pgxpool.Pool, monitoringInstanceID string) {
+	t.Helper()
+	tag, err := db.Exec(ctx, `
+		update monitoring_instances
+		set binding_status = $2,
+		    monitoring_status = $3
+		where monitoring_instance_id = $1
+	`, monitoringInstanceID, monitoringinstances.BindingBound, monitoringinstances.MonitoringEnabled)
+	if err != nil {
+		t.Fatalf("make command audit monitoring instance %q executable: %v", monitoringInstanceID, err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("make command audit monitoring instance %q executable: updated %d rows", monitoringInstanceID, tag.RowsAffected())
+	}
+}
+
 func seedCommandAuditEvent(t *testing.T, ctx context.Context, db *pgxpool.Pool, event commandActionAuditEvent) {
 	t.Helper()
 	if err := insertCommandActionAudit(ctx, db, event); err != nil {
@@ -589,7 +696,7 @@ func openTemporaryCommandActionPostgresSchema(t *testing.T, ctx context.Context)
 		dropCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if _, err := adminPool.Exec(dropCtx, `drop database if exists `+quotedDatabase+` with (force)`); err != nil {
-			t.Logf("drop temporary postgres database %q: %v", databaseName, err)
+			t.Errorf("drop temporary postgres database %q: %v", databaseName, err)
 		}
 	})
 

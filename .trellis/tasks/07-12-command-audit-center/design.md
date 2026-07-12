@@ -27,7 +27,7 @@
 
 ### 2.2 Referential lifetime and constraints
 
-迁移动态删除审计表上的所有外键（当前仅实例和 actor），然后解除 `action_id NOT NULL`。用可重复的 `DO` block 安装具名约束：
+迁移只动态删除约束列包含 `monitoring_instance_id` 或 `actor_user_id` 的外键，保留以后可能添加到审计表的其他无关 FK，然后解除 `action_id NOT NULL`。用可重复的 `DO` block 安装具名约束：
 
 - event type 仅 `queued|dispatched|completed|rejected`
 - sensitivity 仅 `standard|sensitive`
@@ -58,6 +58,8 @@ where mi.monitoring_instance_id = $monitoring_instance_id
 ```
 
 helper 检查 `RowsAffected() == 1`，否则返回完整性错误。这样解除外键后仍不可能为从未存在的实例或伪造 actor 生成新记录。queued/dispatched/completed 的调用点不直接写 SQL，并保留其现有事务边界。
+
+`rejected` 使用同一条 `INSERT … SELECT` 额外检查实例仍未归档、已绑定且未暂停。handler 的预读负责保持既有错误优先级，写入时的状态安全门负责关闭预读到 INSERT 之间的竞态；安全门失败表现为 0 行完整性错误和 HTTP 500，不得降级成未审计的普通 400。
 
 ## 3. Trusted rejection state machine
 
@@ -146,6 +148,8 @@ decode 后重新执行与首次请求相同的枚举、长度、边界和排序�
 
 空实例快照回退实例 ID；actor 显示名依次回退 display name → username → user ID。没有 actor 的 agent-only 数据返回 null。`deleted` 由起始查询 left join 当前实例计算。
 
+HTTP handler 使用自己拥有的实例、actor、action 与 event response DTO 逐字段映射，不直接序列化领域类型。这样即使领域读模型以后增加内部字段，也不会自动扩大 API JSON；`details` 只在 store 内归一化拒绝原因时读取，永远不进入领域或 handler response 类型。
+
 ## 5. Monitoring-instance cleanup integration
 
 `ManagementCounts` 增加 `CommandActionAuditCount`，`EvidenceCount()` 纳入该值；管理 review SQL 加 count 子查询。永久清理仍只删除原有可删除引用和实例本身，不触碰审计表，因此结果的 `DeletedReferenceCount` 不含审计。归档实例依旧允许永久清理；未归档且存在审计时不再被误判为空实例。Web 管理确认区显示审计计数并明确“命令审计将永久保留”。
@@ -154,7 +158,7 @@ decode 后重新执行与首次请求相同的枚举、长度、边界和排序�
 
 ### 6.1 Filter controller
 
-`filterModel.ts` 是 URL 与 API 查询的唯一规范化 owner：默认 `30d` 不序列化；custom 才写两个时间；空值和默认值删除；非法值回退默认后用 replace canonicalize。页面保持 applied filters、drawer draft、items、next cursor、expanded IDs 和 request generation。筛选应用时先清空 items/cursor/expanded，再发首次请求；加载更多只传 cursor，并丢弃过期 generation 的响应。
+`filterModel.ts` 是 URL 与 API 查询的唯一规范化 owner：默认 `30d` 不序列化；custom 才写两个时间；空值和默认值删除；非法值回退默认后用 replace canonicalize。custom 时间先验证真实日历日和 datetime/RFC3339 结构，禁止依赖 `Date.parse` 的日期滚动。页面保持 applied filters、drawer draft、items、next cursor、expanded IDs 和 request generation。筛选应用时先清空 items/cursor/expanded，再发首次请求；加载更多只传 cursor，并丢弃过期 generation 的响应；局部失败保留已有 items/cursor 供重试。
 
 ### 6.2 Presentation components
 
@@ -188,6 +192,6 @@ decode 后重新执行与首次请求相同的枚举、长度、边界和排序�
 - 单元/fake：SQL 文本约束、事务错误路径、handler 验证、cursor、Web state/render。
 - 真实 PostgreSQL：0046 升级/重复、旧式 INSERT、删除保留、真实聚合/筛选/keyset/rejection/cleanup，fresh install 与 EXPLAIN。
 - fixture browser：10×3 core、accessibility、fail-closed、交互与窄屏滚动。
-- production bundle：fresh build 后 CSS 为 311047 source bytes / 293254 raw / 38108 gzip；entry JS 为 110736 gzip，观测 API 形成独立 async shared chunk，预算仅向下收紧。
+- production bundle：fresh build 后 CSS 为 310967 source bytes / 293189 raw / 38109 gzip；entry CSS 为 37125 gzip，entry JS 为 110738 gzip，最大 async JS 为 31897 gzip；观测 API 形成独立 async shared chunk，预算仅向下收紧。
 - staging：真实部署 smoke 只在环境可用时记录；缺失时明确标注未执行。
 - PR CI：required checks 单独记录，不能替代 PostgreSQL 或浏览器证据。

@@ -185,14 +185,26 @@
 - [x] Run `make verify-web`.
 - [x] Run `npm --prefix web run test:e2e`.
 - [x] Run `git diff --check` and inspect `git diff --stat`, `git status`, and the final diff for accidental output fields or unrelated changes.
-- [ ] Update task check evidence and developer journal; use `trellis-finish-work` only after all local quality gates pass.
-- [ ] Commit logical changes on `codex/command-audit-center`, push that branch, create a non-draft PR, and monitor/fix required CI on the same branch.
-- [ ] Stop after required CI passes. Do not merge, release, delete the old planning branch, or clean up the feature branch without new user direction.
+- [x] Update task check evidence; keep the task active because staging/PR/required CI have not run.
+- [ ] Commit the post-initial-commit review fixes and developer journal locally on `codex/command-audit-center`.
+- [ ] Push/create PR/monitor required CI only after the user gives new authorization. The current explicit instruction forbids push, so these original delivery steps are suspended rather than silently treated as passed.
+- [ ] After future required CI passes, stop without merge, release, deleting the old planning branch, or cleaning up the feature branch unless separately authorized.
 
 Full-gate findings already resolved:
 
 - [x] CSS budget RED：组合现有 observability/events/shared primitives，消除新增 rule/declaration/repeated-selector debt，并将 source/raw/gzip budgets 向下收紧到 fresh build 实测值。
-- [x] Entry JS budget RED：把仅由 lazy route 消费的 observability endpoint façade 移出 eager `api.ts`，简化 audit lazy registration/icon，并将 entry budget 从 110742 向下收紧到 110736；未提高 max-async budget。
+- [x] Entry JS budget RED：把仅由 lazy route 消费的 observability endpoint façade 移出 eager `api.ts`，简化 audit lazy registration/icon，并将 entry budget 从 110742 向下收紧到 fresh build 实测 110738；未提高 max-async budget。
+- [x] 提交后迁移审查：0050 只删除包含实例/actor 列的目标 FK，真实 PostgreSQL 证明无关 FK 保留；三种旧式 INSERT、三个索引和重复迁移均通过。
+- [x] 提交后拒绝竞态审查：rejected 的单条 `INSERT … SELECT` 增加未归档、已绑定、未暂停状态门；状态变化时 0 行并返回 500，不静默降级。
+- [x] 提交后 API 审查：handler 自有嵌套 response DTO，逐字段复制实例与 actor，避免领域类型未来扩展时扩大 JSON。
+- [x] 提交后 Web 审查：严格日历日期、加载更多失败保留原结果/cursor、named-only lazy module、宽表可见标题/提示/键盘 region 和 hostile details/output 不渲染均有回归证据。
+- [x] 提交后证据审查：真实 cursor 测试在第一页之后插入上界外 action；临时 PostgreSQL database 清理失败会使测试失败；本地视觉截图只写 `/tmp` 并已删除。
+
+## User-directed delivery override
+
+- 2026-07-12 用户要求完成本地提交后不得 push，并要求先做全方位审查。
+- 因此本轮允许的终点是：本地 feature branch 提交 + 本地单元/真实 PostgreSQL/fixture Chromium/人工视觉证据 + 提交后复核。
+- staging smoke、push、PR、required CI、merge、release 和远端分支清理均未获本轮授权；不得用本地证据替代这些层，也不得为满足旧 checkbox 违反最新用户指令。
 
 ## Rollback points
 

@@ -69,6 +69,16 @@ describe('command audit filter model', () => {
     expect(commandAuditSearchParamsFromFilters(filters).toString()).toBe('')
   })
 
+  it('rejects impossible calendar dates instead of letting Date.parse roll them forward', () => {
+    const filters = commandAuditFiltersFromSearchParams(new URLSearchParams(
+      'window=custom&started_from=2026-02-30T08%3A00&started_to=2026-03-03T08%3A00',
+    ))
+
+    expect(filters).toEqual(DEFAULT_COMMAND_AUDIT_FILTERS)
+    expect(commandAuditSearchParamsFromFilters(filters).toString()).toBe('')
+    expect(commandAuditToAPIQuery(filters)).toEqual({})
+  })
+
   it('uses stable canonical ordering for filter request keys', () => {
     const left = commandAuditFiltersFromSearchParams(new URLSearchParams(
       'actor=admin&window=24h&monitoring_instance=mi_001&outcome=queued',

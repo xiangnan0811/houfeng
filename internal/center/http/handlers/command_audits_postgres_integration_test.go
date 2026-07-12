@@ -62,17 +62,6 @@ func TestPostgresIntegrationCommandAuditHandlerCursorSurvivesPermanentCleanup(t 
 			t.Fatalf("queue %s: %v", actionID, err)
 		}
 	}
-	if err := monitoringRepo.QueueCommandAction(ctx, record.MonitoringInstanceID, monitoringinstances.QueueCommandActionInput{
-		ActionID:    "act_handler_after_upper_bound",
-		CommandID:   "uptime",
-		Sensitivity: "standard",
-		ActorUserID: "usr_handler_audit",
-		Source:      monitoringinstances.CommandActionSourceWeb,
-		QueuedAt:    upperBound.Add(time.Second),
-	}); err != nil {
-		t.Fatalf("queue action after fixed upper bound: %v", err)
-	}
-
 	if _, err := db.Exec(ctx, `delete from users where user_id = 'usr_handler_audit'`); err != nil {
 		t.Fatalf("delete command audit actor: %v", err)
 	}
@@ -90,8 +79,8 @@ func TestPostgresIntegrationCommandAuditHandlerCursorSurvivesPermanentCleanup(t 
 	if err != nil {
 		t.Fatalf("permanent cleanup monitoring instance: %v", err)
 	}
-	if !cleanup.Deleted || cleanup.Counts.CommandActionAuditCount != 4 || cleanup.DeletedReferenceCount != 0 {
-		t.Fatalf("cleanup = %#v, want four preserved command audits and no deleted audit references", cleanup)
+	if !cleanup.Deleted || cleanup.Counts.CommandActionAuditCount != 3 || cleanup.DeletedReferenceCount != 0 {
+		t.Fatalf("cleanup = %#v, want three preserved command audits and no deleted audit references", cleanup)
 	}
 
 	handler := CommandAuditsWithOptions(
@@ -117,6 +106,17 @@ func TestPostgresIntegrationCommandAuditHandlerCursorSurvivesPermanentCleanup(t 
 		}
 	}
 	assertPostgresCommandAuditBodyIsMetadataOnly(t, firstBody)
+	if _, err := db.Exec(ctx, `
+		insert into monitoring_instance_command_action_audit (
+			audit_id, action_id, monitoring_instance_id, monitoring_instance_name_snapshot,
+			command_id, sensitivity, event_type, source, occurred_at
+		) values (
+			'cmd_aud_handler_after_upper_bound', 'act_handler_after_upper_bound', $1, 'Tokyo Handler Audit',
+			'uptime', 'standard', 'queued', 'web', $2
+		)
+	`, record.MonitoringInstanceID, upperBound.Add(time.Second)); err != nil {
+		t.Fatalf("insert action after first cursor page: %v", err)
+	}
 
 	second, secondBody := servePostgresCommandAuditRequest(
 		t,
@@ -188,7 +188,7 @@ func openTemporaryCommandAuditHandlerDatabase(t *testing.T, ctx context.Context)
 		dropCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if _, err := adminPool.Exec(dropCtx, `drop database if exists `+quotedDatabase+` with (force)`); err != nil {
-			t.Logf("drop temporary postgres database %q: %v", databaseName, err)
+			t.Errorf("drop temporary postgres database %q: %v", databaseName, err)
 		}
 	})
 

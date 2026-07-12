@@ -38,7 +38,13 @@ func TestPostgresIntegrationAppliesFreshMigrations(t *testing.T) {
 	assertSingleStringValue(t, ctx, db, "select to_regclass('public.vps_monitoring_instance_links')::text", "vps_monitoring_instance_links")
 	assertSingleIntValue(t, ctx, db, "select count(*)::int from schema_migrations where name = '0030_vps_first_status_semantics.sql'", 1)
 	assertSingleIntValue(t, ctx, db, "select count(*)::int from schema_migrations where name = '0050_extend_command_action_audit.sql'", 1)
-	assertSingleStringValue(t, ctx, db, "select to_regclass('public.idx_monitoring_instance_command_action_audit_global_time')::text", "idx_monitoring_instance_command_action_audit_global_time")
+	for _, indexName := range []string{
+		"idx_monitoring_instance_command_action_audit_instance_time",
+		"idx_monitoring_instance_command_action_audit_action_time",
+		"idx_monitoring_instance_command_action_audit_global_time",
+	} {
+		assertSingleStringValue(t, ctx, db, "select to_regclass('public."+indexName+"')::text", indexName)
+	}
 }
 
 func TestPostgresIntegrationCommandActionAuditUpgrade(t *testing.T) {
@@ -77,6 +83,18 @@ func TestPostgresIntegrationCommandActionAuditUpgrade(t *testing.T) {
 	}
 	execSQL(t, ctx, db, string(legacyMigration))
 	execSQL(t, ctx, db, `
+		create table command_action_audit_external_refs (
+			external_ref_id text primary key
+		)
+	`)
+	execSQL(t, ctx, db, `
+		alter table monitoring_instance_command_action_audit
+			add column external_ref_id text,
+			add constraint command_action_audit_external_ref_fkey
+			foreign key (external_ref_id)
+			references command_action_audit_external_refs(external_ref_id)
+	`)
+	execSQL(t, ctx, db, `
 		insert into monitoring_instance_command_action_audit (
 			audit_id, action_id, monitoring_instance_id, command_id,
 			sensitivity, event_type, actor_user_id, source, occurred_at
@@ -114,11 +132,32 @@ func TestPostgresIntegrationCommandActionAuditUpgrade(t *testing.T) {
 			'standard', 'queued', 'usr_audit', 'web', '2026-07-01T00:01:00Z'
 		)
 	`)
-	assertSingleStringValue(t, ctx, db, `
-		select monitoring_instance_name_snapshot
+	execSQL(t, ctx, db, `
+		insert into monitoring_instance_command_action_audit (
+			audit_id, action_id, monitoring_instance_id, command_id,
+			sensitivity, event_type, source, occurred_at
+		) values (
+			'cmd_aud_rollback_dispatched', 'act_rollback', 'mi_audit', 'uptime',
+			'standard', 'dispatched', 'agent_sync', '2026-07-01T00:01:01Z'
+		)
+	`)
+	execSQL(t, ctx, db, `
+		insert into monitoring_instance_command_action_audit (
+			audit_id, action_id, monitoring_instance_id, command_id,
+			sensitivity, event_type, source, exit_code, occurred_at
+		) values (
+			'cmd_aud_rollback_completed', 'act_rollback', 'mi_audit', 'uptime',
+			'standard', 'completed', 'agent_sync', 0, '2026-07-01T00:01:02Z'
+		)
+	`)
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
 		from monitoring_instance_command_action_audit
-		where audit_id = 'cmd_aud_rollback'
-	`, "")
+		where action_id = 'act_rollback'
+			and monitoring_instance_name_snapshot = ''
+			and actor_username_snapshot = ''
+			and actor_display_name_snapshot = ''
+	`, 3)
 
 	execSQL(t, ctx, db, `
 		insert into monitoring_instance_command_action_audit (
@@ -179,10 +218,17 @@ func TestPostgresIntegrationCommandActionAuditUpgrade(t *testing.T) {
 		from pg_constraint
 		where conrelid = 'monitoring_instance_command_action_audit'::regclass
 			and contype = 'f'
+			and confrelid in ('monitoring_instances'::regclass, 'users'::regclass)
 	`, 0)
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from pg_constraint
+		where conrelid = 'monitoring_instance_command_action_audit'::regclass
+			and conname = 'command_action_audit_external_ref_fkey'
+	`, 1)
 	execSQL(t, ctx, db, `delete from users where user_id = 'usr_audit'`)
 	execSQL(t, ctx, db, `delete from monitoring_instances where monitoring_instance_id = 'mi_audit'`)
-	assertSingleIntValue(t, ctx, db, `select count(*)::int from monitoring_instance_command_action_audit`, 3)
+	assertSingleIntValue(t, ctx, db, `select count(*)::int from monitoring_instance_command_action_audit`, 5)
 	assertSingleStringValue(t, ctx, db, `
 		select actor_user_id
 		from monitoring_instance_command_action_audit

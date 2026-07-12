@@ -782,6 +782,9 @@ func TestMonitoringInstanceActionsRejectsUnknownCommandIDBeforeRepositoryWrite(t
 	if repo.setPendingActionInput.ActionID != "" {
 		t.Fatalf("queued action id = %q, want no queued action", repo.setPendingActionInput.ActionID)
 	}
+	if repo.getMonitoringInstanceCalls != 0 || repo.rejectedActionAuditCalls != 0 {
+		t.Fatalf("unknown command repository calls = lookup %d, rejected audit %d; want none", repo.getMonitoringInstanceCalls, repo.rejectedActionAuditCalls)
+	}
 	var body map[string]string
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
@@ -792,7 +795,8 @@ func TestMonitoringInstanceActionsRejectsUnknownCommandIDBeforeRepositoryWrite(t
 }
 
 func TestMonitoringInstanceActionsRejectsInvalidBody(t *testing.T) {
-	handler := handlers.MonitoringInstanceActions(&fakeMonitoringInstanceRepository{})
+	repo := &fakeMonitoringInstanceRepository{}
+	handler := handlers.MonitoringInstanceActions(repo)
 	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{}`))
 	recorder := httptest.NewRecorder()
 
@@ -800,6 +804,9 @@ func TestMonitoringInstanceActionsRejectsInvalidBody(t *testing.T) {
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if repo.getMonitoringInstanceCalls != 0 || repo.rejectedActionAuditCalls != 0 || repo.setPendingActionInput.ActionID != "" {
+		t.Fatalf("invalid body repository state = lookup %d, rejected audit %d, queued %#v", repo.getMonitoringInstanceCalls, repo.rejectedActionAuditCalls, repo.setPendingActionInput)
 	}
 }
 
@@ -823,6 +830,9 @@ func TestMonitoringInstanceActionsRejectsTrailingJSONBeforeRepositoryWrite(t *te
 	if repo.setPendingActionInput.ActionID != "" {
 		t.Fatalf("queued action id = %q, want no queued action", repo.setPendingActionInput.ActionID)
 	}
+	if repo.getMonitoringInstanceCalls != 0 || repo.rejectedActionAuditCalls != 0 {
+		t.Fatalf("trailing JSON repository calls = lookup %d, rejected audit %d; want none", repo.getMonitoringInstanceCalls, repo.rejectedActionAuditCalls)
+	}
 }
 
 func TestMonitoringInstanceActionsRejectsUnknownFieldsBeforeRepositoryWrite(t *testing.T) {
@@ -844,6 +854,9 @@ func TestMonitoringInstanceActionsRejectsUnknownFieldsBeforeRepositoryWrite(t *t
 	}
 	if repo.setPendingActionInput.ActionID != "" {
 		t.Fatalf("queued action id = %q, want no queued action", repo.setPendingActionInput.ActionID)
+	}
+	if repo.getMonitoringInstanceCalls != 0 || repo.rejectedActionAuditCalls != 0 {
+		t.Fatalf("unknown field repository calls = lookup %d, rejected audit %d; want none", repo.getMonitoringInstanceCalls, repo.rejectedActionAuditCalls)
 	}
 }
 

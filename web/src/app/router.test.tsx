@@ -1,6 +1,7 @@
 import { matchRoutes } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
+import * as commandAuditPageModule from '../pages/CommandAuditPage'
 import { appRoutes } from './router'
 import { RequireAuth } from './RequireAuth'
 
@@ -14,6 +15,10 @@ describe('appRoutes error recovery', () => {
 })
 
 describe('command audit route', () => {
+  it('keeps the lazy page module named-only like the other routes', () => {
+    expect('default' in commandAuditPageModule).toBe(false)
+  })
+
   it('is registered below the private route boundary', () => {
     const matches = matchRoutes(appRoutes, '/command-audit')
 

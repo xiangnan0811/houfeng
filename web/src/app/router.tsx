@@ -21,7 +21,9 @@ const dashboardPage = lazy(() =>
 const eventsPage = lazy(() =>
   import('../pages/EventsPage').then((module) => ({ default: module.EventsPage })),
 )
-const commandAuditPage = lazy(() => import('../pages/CommandAuditPage'))
+const commandAuditPage = lazy(() =>
+  import('../pages/CommandAuditPage').then((module) => ({ default: module.CommandAuditPage })),
+)
 const loginPage = lazy(() =>
   import('../pages/LoginPage').then((module) => ({ default: module.LoginPage })),
 )
@@ -108,7 +110,7 @@ export const appRoutes: RouteObject[] = [
             element: routeElement(targetDetailPage, '正在加载目标详情'),
           },
           { path: 'events', element: routeElement(eventsPage, '正在加载事件时间线') },
-          { path: 'command-audit', element: routeElement(commandAuditPage, '正在加载命令审计') },
+          { path: 'command-audit', element: routeElement(commandAuditPage, '加载命令审计') },
           { path: 'settings', element: routeElement(settingsPage, '正在加载设置') },
           { path: '*', element: <Navigate to="/" replace /> },
         ],

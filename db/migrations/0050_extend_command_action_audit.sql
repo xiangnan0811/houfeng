@@ -30,10 +30,14 @@ declare
     foreign_key_name text;
 begin
     for foreign_key_name in
-        select conname
-        from pg_constraint
-        where conrelid = 'monitoring_instance_command_action_audit'::regclass
-            and contype = 'f'
+        select distinct foreign_key.conname
+        from pg_constraint foreign_key
+        join pg_attribute constrained_column
+            on constrained_column.attrelid = foreign_key.conrelid
+            and constrained_column.attnum = any(foreign_key.conkey)
+        where foreign_key.conrelid = 'monitoring_instance_command_action_audit'::regclass
+            and foreign_key.contype = 'f'
+            and constrained_column.attname in ('monitoring_instance_id', 'actor_user_id')
     loop
         execute format(
             'alter table monitoring_instance_command_action_audit drop constraint %I',

@@ -96,6 +96,9 @@ func TestInsertCommandActionAuditWritesFixedRejectedReasonWithoutAction(t *testi
 	for _, want := range []string{
 		"'rejected'",
 		"jsonb_build_object('reason', 'sensitive_confirmation_required')",
+		"mi.archived_at is null",
+		"mi.binding_status = '已绑定'",
+		"mi.monitoring_status <> '暂停'",
 	} {
 		if !strings.Contains(lowerSQL, want) {
 			t.Fatalf("rejected audit SQL missing %q: %s", want, oneLineStoreSQL(exec.sql))

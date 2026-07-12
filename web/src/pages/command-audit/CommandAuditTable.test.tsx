@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
@@ -20,6 +22,14 @@ function action(outcome: CommandAuditAction['outcome'], id: string): CommandAudi
 }
 
 describe('CommandAuditTable', () => {
+  it('expresses the wide-table minimum width through the shared spacing scale', () => {
+    const styles = readFileSync('src/styles/partials/legacy-events.css', 'utf8')
+
+    expect(styles).toContain('.events-table-scroll table{min-width:calc(var(--space-12)*16)}')
+    expect(styles).not.toMatch(/\.command-audit-table\{[^}]*\bmin-width:\d+px/)
+    expect(styles).not.toContain('overflow-y:hidden')
+  })
+
   it('renders five outcomes, shared command labels, and current/deleted identities', () => {
     const rows = [
       action('rejected', 'cmd_aud_rejected'),
@@ -30,6 +40,8 @@ describe('CommandAuditTable', () => {
     ]
     rows[0]!.monitoring_instance = { id: 'mi_deleted', name: 'Osaka Relay', deleted: true }
     rows[0]!.actor = { user_id: 'usr_deleted', username: '', display_name: '' }
+    rows[1]!.actor = { user_id: 'usr_username', username: 'audit-user', display_name: '' }
+    rows[2]!.actor = null
 
     render(
       <MemoryRouter>
@@ -43,6 +55,8 @@ describe('CommandAuditTable', () => {
     expect(screen.getAllByText('uptime').length).toBeGreaterThan(0)
     expect(screen.getByText('systemctl status')).toBeInTheDocument()
     expect(screen.getAllByText('usr_deleted')).toHaveLength(2)
+    expect(screen.getByText('audit-user')).toBeInTheDocument()
+    expect(screen.getByText('系统')).toBeInTheDocument()
     expect(screen.getByText('已删除')).toBeInTheDocument()
     expect(screen.getByText('Osaka Relay').closest('a')).toBeNull()
     expect(screen.getByRole('link', { name: '实例 act_queued' })).toHaveAttribute(
@@ -112,6 +126,13 @@ describe('CommandAuditTable', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('region', { name: '命令审计结果，可横向滚动' })).toHaveAttribute('tabindex', '0')
+    const region = screen.getByRole('region', { name: '审计记录' })
+    expect(region).toHaveAttribute('tabindex', '0')
+    expect(region).toHaveAttribute('aria-labelledby', 'command-audit-table-heading')
+    expect(region).toHaveAttribute('aria-describedby', 'command-audit-table-scroll-hint')
+    expect(screen.getByText('可横向滚动；聚焦表格区域后可使用方向键浏览。')).toHaveAttribute(
+      'id',
+      'command-audit-table-scroll-hint',
+    )
   })
 })

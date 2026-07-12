@@ -87,7 +87,9 @@ test('command audit profile declares only the metadata-safe default query', asyn
   for (const forbidden of [
     'COMMAND_AUDIT_STDOUT_SHOULD_NOT_RENDER',
     'COMMAND_AUDIT_STDERR_SHOULD_NOT_RENDER',
+    'COMMAND_AUDIT_DETAILS_SHOULD_NOT_RENDER',
     'COMMAND_AUDIT_EVENT_OUTPUT_SHOULD_NOT_RENDER',
+    'COMMAND_AUDIT_EVENT_DETAILS_SHOULD_NOT_RENDER',
   ]) {
     await expect(page.getByText(forbidden, { exact: true })).toHaveCount(0)
   }

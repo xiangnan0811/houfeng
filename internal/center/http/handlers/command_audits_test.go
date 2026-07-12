@@ -7,12 +7,32 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"houfeng/internal/center/commandaudits"
 )
+
+func TestCommandAuditResponseOwnsNestedIdentityAllowlists(t *testing.T) {
+	t.Parallel()
+
+	responseType := reflect.TypeOf(commandAuditActionResponse{})
+	for _, fieldName := range []string{"MonitoringInstance", "Actor"} {
+		field, ok := responseType.FieldByName(fieldName)
+		if !ok {
+			t.Fatalf("commandAuditActionResponse is missing %s", fieldName)
+		}
+		fieldType := field.Type
+		if fieldType.Kind() == reflect.Pointer {
+			fieldType = fieldType.Elem()
+		}
+		if fieldType.PkgPath() != responseType.PkgPath() {
+			t.Fatalf("%s response type = %v from %q, want a handler-owned allowlist DTO", fieldName, field.Type, fieldType.PkgPath())
+		}
+	}
+}
 
 func TestCommandAuditsDefaultsToFixedThirtyDayWindowAndMetadataResponse(t *testing.T) {
 	t.Parallel()

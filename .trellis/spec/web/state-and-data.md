@@ -396,10 +396,10 @@ const stdout = action.output_expired ? '' : (action.stdout ?? '')
 
 #### 3. Contracts
 
-- `filterModel.ts` 是 parse → normalize → canonical URL → API query 的唯一 owner。非法/冗余参数用 replace canonicalize；custom browser `datetime-local` 在 API query 转 RFC3339。
+- `filterModel.ts` 是 parse → normalize → canonical URL → API query 的唯一 owner。非法/冗余参数用 replace canonicalize；custom browser `datetime-local` 在 API query 转 RFC3339。日期校验必须先验证真实日历日和支持的 datetime/RFC3339 结构，不能只用会把 `2026-02-30` 滚动到三月的 `Date.parse`。
 - 页面保持 applied filters、primary/advanced draft、items、next cursor、expanded IDs 和 request generation。筛选提交必须先清空旧 items/cursor/expanded；过期 response 按 generation 丢弃。
 - 高级 Modal 打开时从当前 applied/primary draft 初始化；Cancel/Escape/close 丢弃 draft，Reset 只清 advanced fields，Apply 才写 URL/发请求。
-- 首次请求按 URL filters；加载更多只调用 `listCommandAudits({cursor})`，按 action `id` 去重；无 cursor 不发请求。
+- 首次请求按 URL filters；加载更多只调用 `listCommandAudits({cursor})`，按 action `id` 去重；无 cursor 不发请求。加载更多失败必须保留现有 items 与原 cursor，显示局部错误并允许使用同一 cursor 重试。
 - 表格/时间线只能读取显式字段，禁止 `Object.entries`、spread-to-DOM 或 JSON dump。即使 runtime response 额外带 `stdout` / `stderr` / `details`，页面也不得渲染。
 - 当前实例名称链接 `/monitoring/:id`；`deleted=true` 显示快照名 + 稳定 ID + “已删除”，不生成失效链接。actor 显示优先 display name → username → user ID → 系统。
 - command labels/options/sensitivity 由 `web/src/config/commands.ts` 共享；Monitoring detail 与审计页不得复制 command list。页面不新增 Context、dependency 或 route-private CSS。
@@ -410,6 +410,7 @@ const stdout = action.output_expired ? '' : (action.stdout ?? '')
 | --- | --- |
 | `/command-audit` 或 `?window=30d` | 请求 `/api/command-audits`，canonical URL 无默认参数 |
 | invalid enum/unknown parameter/incomplete custom time | 回退合法 filters 并 replace URL，不发送非法 query |
+| impossible custom calendar date such as `2026-02-30` | 回退默认 30d 并 canonicalize；不得静默查询滚动后的三月日期 |
 | advanced draft Cancel/Escape | URL/request 不变；重新打开恢复 applied values |
 | initial/filter request races | 只接受最新 generation；旧响应不回填列表 |
 | load-more response repeats an existing ID | 保留已有项一次，追加新 ID；按 cursor 继续 |
@@ -427,9 +428,9 @@ const stdout = action.output_expired ? '' : (action.stdout ?? '')
 
 #### 6. Tests Required
 
-- `filterModel.test.ts`: default omission、custom RFC3339、trim、invalid canonicalization 和 stable filter key。
+- `filterModel.test.ts`: default omission、custom RFC3339、trim、非法/不存在日历日期 canonicalization 和 stable filter key。
 - `api.test.ts` / `commandAuditContract.test.ts`: `observabilityApi` 的 default no-query、normalized initial query、cursor-only 和 source/type output-field absence。
-- `CommandAuditPage.test.tsx` + private component tests: drafts、race、load-more/dedupe/reset、five outcomes、actor fallback、deleted link、event order、hostile output 和 local scroll region。
+- `CommandAuditPage.test.tsx` + private component tests: drafts、race、load-more success/failure retry/dedupe/reset、five outcomes、actor fallback、deleted link、event order、hostile output 和 named local scroll region；宽表尺寸使用共享 spacing token，不新增硬编码像素。
 - `web/e2e`: exact default fixture + undeclared cursor fail-closed，10×3 core route，axe，390px keyboard scroll/expand/Modal focus；staging 只要求 metadata-only copy，不依赖存在真实 audit rows。
 
 #### 7. Wrong vs Correct

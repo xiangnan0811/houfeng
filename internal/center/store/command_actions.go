@@ -187,8 +187,13 @@ func commandActionAuditEventSQL(eventType string) (string, error) {
 
 func commandActionAuditInsertSQL(eventType string) string {
 	detailsSQL := "'{}'::jsonb"
+	instanceStateSQL := ""
 	if eventType == "rejected" {
 		detailsSQL = "jsonb_build_object('reason', 'sensitive_confirmation_required')"
+		instanceStateSQL = `
+			and mi.archived_at is null
+			and mi.binding_status = '` + monitoringinstances.BindingBound + `'
+			and mi.monitoring_status <> '` + monitoringinstances.MonitoringPaused + `'`
 	}
 	return `
 		insert into monitoring_instance_command_action_audit (
@@ -225,5 +230,5 @@ func commandActionAuditInsertSQL(eventType string) string {
 		from monitoring_instances mi
 		left join users actor on actor.user_id = nullif($6, '')
 		where mi.monitoring_instance_id = $3
-			and (nullif($6, '') is null or actor.user_id is not null)`
+			and (nullif($6, '') is null or actor.user_id is not null)` + instanceStateSQL
 }

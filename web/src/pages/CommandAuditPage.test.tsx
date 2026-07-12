@@ -169,6 +169,45 @@ describe('CommandAuditPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps the current page and cursor retry available when loading more fails', async () => {
+    const second = auditAction({
+      id: 'act_002',
+      action_id: 'act_002',
+      monitoring_instance: { id: 'mi_002', name: 'Osaka Relay', deleted: false },
+      started_at: '2026-07-12T09:00:00Z',
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse({ items: [auditAction()], next_cursor: 'cursor_retry' }))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'temporary failure' }, 500))
+      .mockResolvedValueOnce(mockJSONResponse({ items: [second] }))
+    vi.stubGlobal('fetch', fetchMock)
+    renderPage()
+    await screen.findByText('Tokyo Edge')
+
+    fireEvent.click(screen.getByRole('button', { name: '加载更多' }))
+
+    await screen.findByText(/加载更多失败/)
+    expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '加载更多' })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '加载更多' }))
+
+    await screen.findByText('Osaka Relay')
+    expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/command-audits?cursor=cursor_retry',
+      expect.any(Object),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/command-audits?cursor=cursor_retry',
+      expect.any(Object),
+    )
+    expect(screen.queryByText(/加载更多失败/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
+  })
+
   it('clears expanded rows and old results when filters change', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(mockJSONResponse({ items: [auditAction()] }))

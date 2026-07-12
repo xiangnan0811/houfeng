@@ -77,15 +77,27 @@ type commandAuditListResponse struct {
 }
 
 type commandAuditActionResponse struct {
-	ID                 string                                   `json:"id"`
-	ActionID           string                                   `json:"action_id,omitempty"`
-	MonitoringInstance commandaudits.MonitoringInstanceIdentity `json:"monitoring_instance"`
-	CommandID          string                                   `json:"command_id"`
-	Sensitivity        string                                   `json:"sensitivity"`
-	Outcome            string                                   `json:"outcome"`
-	Actor              *commandaudits.ActorIdentity             `json:"actor"`
-	StartedAt          time.Time                                `json:"started_at"`
-	Events             []commandAuditEventResponse              `json:"events"`
+	ID                 string                                 `json:"id"`
+	ActionID           string                                 `json:"action_id,omitempty"`
+	MonitoringInstance commandAuditMonitoringInstanceResponse `json:"monitoring_instance"`
+	CommandID          string                                 `json:"command_id"`
+	Sensitivity        string                                 `json:"sensitivity"`
+	Outcome            string                                 `json:"outcome"`
+	Actor              *commandAuditActorResponse             `json:"actor"`
+	StartedAt          time.Time                              `json:"started_at"`
+	Events             []commandAuditEventResponse            `json:"events"`
+}
+
+type commandAuditMonitoringInstanceResponse struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Deleted bool   `json:"deleted"`
+}
+
+type commandAuditActorResponse struct {
+	UserID      string `json:"user_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
 }
 
 type commandAuditEventResponse struct {
@@ -115,18 +127,33 @@ func mapCommandAuditActions(actions []commandaudits.Action) []commandAuditAction
 			events = append(events, mapped)
 		}
 		result = append(result, commandAuditActionResponse{
-			ID:                 action.ID,
-			ActionID:           action.ActionID,
-			MonitoringInstance: action.MonitoringInstance,
-			CommandID:          action.CommandID,
-			Sensitivity:        action.Sensitivity,
-			Outcome:            action.Outcome,
-			Actor:              action.Actor,
-			StartedAt:          action.StartedAt,
-			Events:             events,
+			ID:       action.ID,
+			ActionID: action.ActionID,
+			MonitoringInstance: commandAuditMonitoringInstanceResponse{
+				ID:      action.MonitoringInstance.ID,
+				Name:    action.MonitoringInstance.Name,
+				Deleted: action.MonitoringInstance.Deleted,
+			},
+			CommandID:   action.CommandID,
+			Sensitivity: action.Sensitivity,
+			Outcome:     action.Outcome,
+			Actor:       mapCommandAuditActor(action.Actor),
+			StartedAt:   action.StartedAt,
+			Events:      events,
 		})
 	}
 	return result
+}
+
+func mapCommandAuditActor(actor *commandaudits.ActorIdentity) *commandAuditActorResponse {
+	if actor == nil {
+		return nil
+	}
+	return &commandAuditActorResponse{
+		UserID:      actor.UserID,
+		Username:    actor.Username,
+		DisplayName: actor.DisplayName,
+	}
 }
 
 func parseCommandAuditRequest(values url.Values, now func() time.Time) (commandaudits.Query, commandAuditCursorState, error) {

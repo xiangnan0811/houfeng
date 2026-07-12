@@ -126,19 +126,28 @@ export function CommandAuditTable({ rows, expandedIDs, onToggle }: CommandAuditT
   ]
 
   return (
-    <div
-      className="events-table-scroll command-audit-table-scroll"
-      role="region"
-      aria-label="命令审计结果，可横向滚动"
-      tabIndex={0}
-    >
-      <DataTable
-        className="command-audit-table"
-        columns={columns}
-        rows={rows}
-        rowKey={(row) => row.id}
-        density="compact"
-      />
-    </div>
+    <>
+      <div className="section-heading">
+        <h2 className="section-heading__title" id="command-audit-table-heading">审计记录</h2>
+      </div>
+      <p className="events-table-scroll-hint" id="command-audit-table-scroll-hint">
+        可横向滚动；聚焦表格区域后可使用方向键浏览。
+      </p>
+      <div
+        className="events-table-scroll command-audit-table-scroll"
+        role="region"
+        aria-labelledby="command-audit-table-heading"
+        aria-describedby="command-audit-table-scroll-hint"
+        tabIndex={0}
+      >
+        <DataTable
+          className="command-audit-table"
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => row.id}
+          density="compact"
+        />
+      </div>
+    </>
   )
 }
