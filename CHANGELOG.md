@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.58.7](https://github.com/xiangnan0811/houfeng/compare/v0.58.6...v0.58.7) (2026-07-12)
+
+
+### Bug Fixes
+
+* **web:** keep custom scenario templates reachable ([092b232](https://github.com/xiangnan0811/houfeng/commit/092b2324b8b54090a509628991bf72906c48e8e7))
+* **web:** keep custom scenario templates reachable ([c3186a2](https://github.com/xiangnan0811/houfeng/commit/c3186a243403988a7d6036bda9b497816e29d1df))
+
 ## [0.58.6](https://github.com/xiangnan0811/houfeng/compare/v0.58.5...v0.58.6) (2026-07-11)
 
 
