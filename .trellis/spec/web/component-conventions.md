@@ -240,6 +240,7 @@ type RouteObject = {
   5. **文案零解释**：无说明性段落；eyebrow 全中文或去除（不渲染 `PORTFOLIO`/`RENEWAL`/`WORKBENCH` 等英文噪声）；字段含义靠标签和占位符自解释。内部 ID（`adg_`/`admg_`/`adr_`/`adt_`）、后端 group type 机器值不进入用户可见层。
   6. **弹窗内容面不透明**：`var(--surface-elevated)`，overlay 半透明，底层页面文字不得透进弹窗。
   7. **测试以用户任务为正向断言**（能在 ≤3 步内完成 X），辅以行数守护；不以“旧 marker 不出现”为唯一标准。
+  8. **可维护集合不得静默截断**：场景模板、自定义组合、决策记录等带详情/维护命令的集合，只有在同一 surface 提供可访问的分页、筛选或“查看全部”入口时才能限制首屏数量。不得对 controller 返回值直接固定 `slice(0, N)` 后丢弃其余项；场景模板 API 固定先返回 7 个内置模板再返回 custom templates，固定截断会让 custom 状态维护入口永久不可达。模板 workflow 回归必须覆盖“7 个内置 + 至少 1 个 custom”全部可见且 custom 可打开。
 - **低频深度报告使用独立页面承载**：IP 质量、性能基准、路由质量这类“买完 VPS 后才通过 agent 测得”的深度报告，字段多、矩阵多、历史/诊断多，不适合塞进 VPS 详情页的一个普通 section。VPS 详情页只保留摘要结论、关键风险/缺口和“查看完整报告”入口；完整驾驶舱应使用独立 route/page 展示质量结论、provider/service 矩阵、覆盖率、历史变化和诊断。这样后续性能、路由报告可以复用同一 IA，而不会把 VPS 详情页变成所有低频事实的长表堆叠。
 - **低频报告主视图必须降噪采集字段**：这类报告的 API 往往同时返回用户事实和采集诊断。主视图只能展示用户可判断的质量事实，例如风险信号、provider 证据 chip、服务解锁状态、区域、解锁类型、覆盖率和历史；`source`、`probe_status`、`default_probe`、`not_configured`、latency、长 `error_summary`、raw JSON 等内部采集字段不得进入主卡片、摘要区或表格证据列。需要排障时放入低权重诊断层或折叠详情，并在测试里断言这些内部文本不会出现在主要视图。
 - **tone 系统统一四档**：`'normal' | 'notice' | 'alert' | 'critical'`，经 `toneToGlyphState` 映射到 `StatusGlyph` 的 state；CSS 类前缀按页面命名但结构对齐（`target-decision-*` 镜像 `vps-decision-*`），着色走 `var(--color-state-*)` / `color-mix`，不写 hex。新增详情页复制这套 tone→glyph→CSS 约定，不要另造一套色彩语义。
