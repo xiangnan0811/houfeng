@@ -189,6 +189,42 @@ func TestCommandActionAuditMigrationCreatesMetadataOnlyAuditTable(t *testing.T) 
 	}
 }
 
+func TestCommandActionAuditExtensionMigrationPreservesPermanentMetadata(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0050_extend_command_action_audit.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, want := range []string{
+		"add column if not exists monitoring_instance_name_snapshot text not null default ''",
+		"add column if not exists actor_username_snapshot text not null default ''",
+		"add column if not exists actor_display_name_snapshot text not null default ''",
+		"monitoring_instance_name_snapshot = mi.display_name",
+		"then u.username",
+		"then u.display_name",
+		"alter column action_id drop not null",
+		"command_action_audit_event_type_allowed",
+		"event_type in ('queued', 'dispatched', 'completed', 'rejected')",
+		"command_action_audit_action_identity_valid",
+		"command_action_audit_rejected_source_valid",
+		"command_action_audit_rejected_reason_valid",
+		"sensitive_confirmation_required",
+		"command_action_audit_details_metadata_only",
+		"not jsonb_path_exists",
+		"exists(@.stdout) || exists(@.stderr)",
+		"idx_monitoring_instance_command_action_audit_global_time",
+		"on monitoring_instance_command_action_audit(occurred_at desc, audit_id desc)",
+		"from pg_constraint",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0050 migration missing %q", want)
+		}
+	}
+	if strings.Contains(sql, "delete from monitoring_instance_command_action_audit") {
+		t.Fatal("0050 migration must preserve command audit rows")
+	}
+}
+
 func TestIPQualityStaleAfterSettingsMigrationRebuildsReadModel(t *testing.T) {
 	payload, err := migrations.FS.ReadFile("0047_ip_quality_stale_after_settings.sql")
 	if err != nil {

@@ -4,12 +4,14 @@ import type { AssetDecisionScenarioTemplateDetail } from '../src/lib/types'
 import { expect, test } from './fixtures'
 import { coreRouteProfile, dashboardProfile } from './fixtures/profiles'
 import { apiRouteKey } from './fixtures/contracts'
+import { expectNoDocumentOverflow } from './support/geometry'
 
 const AXE_SURFACES = [
   { name: 'AppShell and Dashboard', path: '/', heading: /^工作台$/ },
   { name: 'Settings', path: '/settings', heading: /^系统设置$/ },
   { name: 'VPS', path: '/vps', heading: /^VPS 资产$/ },
   { name: 'Asset Decisions', path: '/asset-decisions', heading: /^资产组合决策$/ },
+  { name: 'Command Audit', path: '/command-audit', heading: /^命令审计$/ },
 ] as const
 
 for (const surface of AXE_SURFACES) {
@@ -33,6 +35,58 @@ for (const surface of AXE_SURFACES) {
     expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([])
   })
 }
+
+test('Command Audit keeps output metadata-only and owns narrow-screen table scrolling and dialog focus', async ({
+  api,
+  page,
+}) => {
+  api.useProfile(coreRouteProfile('/command-audit'))
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/command-audit')
+
+  await expect(page.getByRole('heading', { name: '命令审计', exact: true })).toBeVisible()
+  const results = page.getByRole('region', { name: '审计记录' })
+  await expect(results).toBeVisible()
+  const geometry = await results.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }))
+  expect(geometry.scrollWidth).toBeGreaterThan(geometry.clientWidth + 1)
+  await expectNoDocumentOverflow(page)
+
+  await results.focus()
+  await expect(results).toBeFocused()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => results.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+
+  await page.getByRole('button', { name: '展开 2 个事件' }).click()
+  await expect(page.getByRole('region', { name: 'act_e2e_command_audit 原始审计事件' })).toBeVisible()
+  for (const forbidden of [
+    'COMMAND_AUDIT_STDOUT_SHOULD_NOT_RENDER',
+    'COMMAND_AUDIT_STDERR_SHOULD_NOT_RENDER',
+    'COMMAND_AUDIT_DETAILS_SHOULD_NOT_RENDER',
+    'COMMAND_AUDIT_EVENT_OUTPUT_SHOULD_NOT_RENDER',
+    'COMMAND_AUDIT_EVENT_DETAILS_SHOULD_NOT_RENDER',
+  ]) {
+    await expect(page.getByText(forbidden, { exact: true })).toHaveCount(0)
+  }
+
+  const advanced = page.getByRole('button', { name: '高级筛选' })
+  await advanced.focus()
+  await advanced.click()
+  const dialog = page.getByRole('dialog', { name: '命令审计高级筛选' })
+  await expect(dialog).toBeVisible()
+  const close = dialog.getByRole('button', { name: '关闭' })
+  await expect(close).toBeFocused()
+  const apply = dialog.getByRole('button', { name: '应用高级筛选' })
+  await apply.focus()
+  await page.keyboard.press('Tab')
+  await expect(close).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(advanced).toBeFocused()
+})
 
 test('skip link moves real keyboard focus to the main landmark', async ({ api, page }) => {
   api.useProfile(dashboardProfile())

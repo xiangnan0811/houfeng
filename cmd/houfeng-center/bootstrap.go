@@ -87,6 +87,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	runtimeFactsRepo := store.NewPostgresRuntimeFactsRepository(db.Pool())
 	incidentRepo := store.NewPostgresIncidentRepository(db.Pool())
 	dashboardRepo := store.NewPostgresDashboardRepository(db.Pool())
+	commandAuditRepo := store.NewPostgresCommandAuditRepository(db.Pool())
 	assetDecisionRepo := store.NewPostgresAssetDecisionRepository(db.Pool())
 	settingsRepo := store.NewPostgresSettingsRepository(db.Pool())
 	retentionRepo := store.NewPostgresRetentionRepository(db.Pool())
@@ -159,6 +160,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		WebDistDir:                                  cfg.WebDistDir,
 		DashboardHandler:                            handlers.Dashboard(dashboardRepo),
 		EventsHandler:                               handlers.Events(dashboardRepo),
+		CommandAuditsHandler:                        handlers.CommandAudits(commandAuditRepo),
 		IncidentsHandler:                            handlers.Incidents(incidentRepo),
 		SettingsHandler:                             handlers.Settings(settingsHandlerRepo),
 		AssetDomainsCollectionHandler:               handlers.AssetDomainsCollection(assetDomainRepo),

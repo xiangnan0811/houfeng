@@ -214,6 +214,55 @@ func TestRouterProtectsProviderRoutes(t *testing.T) {
 	}
 }
 
+func TestRouterCommandAuditsRouteFailsClosedWithoutAuthMiddleware(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		CommandAuditsHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusOK)
+		}),
+	})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/command-audits", nil))
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want fail-closed %d", recorder.Code, http.StatusInternalServerError)
+	}
+	if called {
+		t.Fatal("command audits handler was called without auth middleware")
+	}
+}
+
+func TestRouterProtectsCommandAuditsRoute(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	middlewareCalls := 0
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		CommandAuditsHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusOK)
+		}),
+		AuthMiddleware: func(_ http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				middlewareCalls++
+				w.WriteHeader(http.StatusUnauthorized)
+			})
+		},
+	})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/command-audits", nil))
+
+	if recorder.Code != http.StatusUnauthorized || middlewareCalls != 1 {
+		t.Fatalf("status = %d middlewareCalls = %d, want protected route", recorder.Code, middlewareCalls)
+	}
+	if called {
+		t.Fatal("command audits handler bypassed auth middleware")
+	}
+}
+
 func TestRouterProtectedRouteFailsClosedWithoutAuthMiddleware(t *testing.T) {
 	called := false
 	handler := centerhttp.New(centerhttp.RouterOptions{
@@ -719,6 +768,10 @@ func (f *fakeMonitoringInstanceRepository) UpdateMonitoringInstanceMetadata(cont
 }
 
 func (f *fakeMonitoringInstanceRepository) QueueCommandAction(context.Context, string, monitoringinstances.QueueCommandActionInput) error {
+	return nil
+}
+
+func (f *fakeMonitoringInstanceRepository) RecordRejectedCommandAction(context.Context, string, monitoringinstances.RejectedCommandActionInput) error {
 	return nil
 }
 

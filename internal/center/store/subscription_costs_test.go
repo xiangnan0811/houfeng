@@ -426,7 +426,7 @@ func TestPostgresSubscriptionCostRepositoryUpsertMonthlyBudgets(t *testing.T) {
 
 func TestPostgresSubscriptionCostRepositoryListCostMonthBucketsIntegration(t *testing.T) {
 	ctx := context.Background()
-	db := openTemporarySubscriptionCostPostgresSchema(t, ctx)
+	db := openTemporarySubscriptionCostPostgresDatabase(t, ctx)
 	if err := migrate.Apply(ctx, db); err != nil {
 		t.Fatalf("apply migrations: %v", err)
 	}
@@ -514,7 +514,7 @@ func (f *fakeSubscriptionCostRows) Scan(dest ...any) error {
 	return f.rows[f.idx-1].scan(dest...)
 }
 
-func openTemporarySubscriptionCostPostgresSchema(t *testing.T, ctx context.Context) *pgxpool.Pool {
+func openTemporarySubscriptionCostPostgresDatabase(t *testing.T, ctx context.Context) *pgxpool.Pool {
 	t.Helper()
 
 	if os.Getenv("HOUFENG_POSTGRES_INTEGRATION") != "1" {
@@ -529,41 +529,38 @@ func openTemporarySubscriptionCostPostgresSchema(t *testing.T, ctx context.Conte
 	if err != nil {
 		t.Fatalf("parse HOUFENG_DATABASE_URL: %v", err)
 	}
-	schemaName := fmt.Sprintf("houfeng_sub_cost_%d_%d", time.Now().UnixNano(), os.Getpid())
-	if !isSafeSubscriptionCostPostgresIdentifier(schemaName) {
-		t.Fatalf("unsafe generated schema name %q", schemaName)
+	databaseName := fmt.Sprintf("houfeng_sub_cost_%d_%d", time.Now().UnixNano(), os.Getpid())
+	if !isSafeSubscriptionCostPostgresIdentifier(databaseName) {
+		t.Fatalf("unsafe generated database name %q", databaseName)
 	}
 
 	adminPool, err := pgxpool.NewWithConfig(ctx, adminConfig)
 	if err != nil {
-		t.Fatalf("open postgres pool for schema setup: %v", err)
+		t.Fatalf("open postgres pool for database setup: %v", err)
 	}
 	t.Cleanup(adminPool.Close)
 
-	if _, err := adminPool.Exec(ctx, `create schema `+quoteSubscriptionCostPostgresIdentifier(schemaName)); err != nil {
-		t.Fatalf("create temporary postgres schema %q: %v", schemaName, err)
+	if _, err := adminPool.Exec(ctx, `create database `+quoteSubscriptionCostPostgresIdentifier(databaseName)); err != nil {
+		t.Fatalf("create temporary postgres database %q: %v", databaseName, err)
 	}
 	t.Cleanup(func() {
 		dropCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if _, err := adminPool.Exec(dropCtx, `drop schema if exists `+quoteSubscriptionCostPostgresIdentifier(schemaName)+` cascade`); err != nil {
-			t.Logf("drop temporary postgres schema %q: %v", schemaName, err)
+		if _, err := adminPool.Exec(dropCtx, `drop database if exists `+quoteSubscriptionCostPostgresIdentifier(databaseName)+` with (force)`); err != nil {
+			t.Errorf("drop temporary postgres database %q: %v", databaseName, err)
 		}
 	})
 
 	testConfig := adminConfig.Copy()
-	if testConfig.ConnConfig.RuntimeParams == nil {
-		testConfig.ConnConfig.RuntimeParams = map[string]string{}
-	}
-	testConfig.ConnConfig.RuntimeParams["search_path"] = schemaName
+	testConfig.ConnConfig.Database = databaseName
 
 	testPool, err := pgxpool.NewWithConfig(ctx, testConfig)
 	if err != nil {
-		t.Fatalf("open temporary postgres schema %q: %v", schemaName, err)
+		t.Fatalf("open temporary postgres database %q: %v", databaseName, err)
 	}
 	t.Cleanup(testPool.Close)
 	if err := testPool.Ping(ctx); err != nil {
-		t.Fatalf("ping temporary postgres schema %q: %v", schemaName, err)
+		t.Fatalf("ping temporary postgres database %q: %v", databaseName, err)
 	}
 	return testPool
 }

@@ -5,6 +5,7 @@ import {
   MonitoringInstanceWatchtowerMetrics,
   type MonitoringInstanceRuntimeAction,
 } from '../../components/monitoring-detail'
+import { COMMAND_LABELS, COMMAND_LIST } from '../../config/commands'
 import type { MetricThresholds } from '../../config/thresholds'
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import type {
@@ -28,8 +29,6 @@ import { MonitoringInstanceRuntimePauseConfirmation } from './MonitoringInstance
 import { MonitoringInstanceSnapshotMeta } from './MonitoringInstanceSnapshotMeta'
 import { MonitoringInstanceTimeWindowTabs } from './MonitoringInstanceTimeWindowTabs'
 import {
-  COMMAND_LABELS,
-  COMMAND_LIST,
   MONITORING_INSTANCE_BINDING_CONFIRM_REBIND_LABEL,
   MONITORING_INSTANCE_BINDING_CONFLICT_STATUS,
   MONITORING_INSTANCE_BINDING_REJECT_PENDING_LABEL,

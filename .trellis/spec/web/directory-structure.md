@@ -82,7 +82,8 @@ web/
     │   │   └── *.test.tsx      # 按业务域拆分的 workflow tests
     │   ├── MonitoringPage.tsx + MonitoringPage.test.tsx
     │   ├── MonitoringDetailPage.tsx + MonitoringDetailPage.test.tsx
-    │   ├── MonitoringDetailPage.tsx + MonitoringDetailPage.test.tsx
+    │   ├── CommandAuditPage.tsx + CommandAuditPage.test.tsx
+    │   ├── command-audit/      # 审计页私有 filter model / filters / table / event timeline
     │   ├── TargetsPage.tsx + TargetsPage.test.tsx
     │   ├── TargetDetailPage.tsx + TargetDetailPage.test.tsx
     │   ├── EventsPage.tsx + EventsPage.test.tsx
@@ -99,7 +100,8 @@ web/
     │   ├── IncidentList.tsx
     │   └── StatusBadge.tsx
     ├── lib/                    # 数据层与无 UI 工具
-    │   ├── api.ts              # 业务 endpoint façade（封装 /api/* 调用）
+    │   ├── api.ts              # eager/shared endpoint façade + withQuery/re-exports
+    │   ├── observabilityApi.ts # route-lazy events/incidents/command-audit façade
     │   ├── apiRequest.ts       # fetch/401/error/JSON transport primitives
     │   ├── auth-client.ts      # /api/auth/* 薄封装，复用 apiRequest transport
     │   ├── auth-context.tsx    # AuthProvider + useAuth
@@ -141,8 +143,9 @@ web/
 
 **一条业务路由一个 `<Name>Page.tsx`**，并 colocate 同名测试 `<Name>Page.test.tsx`（实测：`pages/` 下每个页面都有同名 `.test.tsx`）。
 
-- 页面是**装配点**：调 `lib/api.ts` 拉数据，编排 `components/` 的展示原子，处理本地 UI 状态与表单。
+- 页面是**装配点**：调 `lib/` 下 owning API façade 拉数据，编排 `components/` 的展示原子，处理本地 UI 状态与表单。
 - 复杂单路由可建立 `<route-name>/` 私有目录；`asset-decisions/` 是当前参考：route page 只组合七个 `{state, commands}` controller、纯 model 与受控展示，controller / component / modal / workflow test 均留在路由私有边界内，不提升为跨页共享模块。
+- `CommandAuditPage.tsx` 是 `/command-audit` 唯一 controller/composition point，拥有 URL canonicalization、request generation、cursor append 与 expanded state；`pages/command-audit/` 只放 route-private filter model、筛选 UI、DataTable 和 allowlisted event timeline。共享 command display metadata 位于 `config/commands.ts`，不得把审计页组件提升到跨页 `components/` 或复制 Monitoring detail command list。
 - 页面之间**不要相互 import**；要复用就抽到 `components/`。
 - 页面仅由 `app/router.tsx` 引用。
 
@@ -157,7 +160,8 @@ web/
 
 无 UI 的数据 / 工具层：
 
-- `api.ts`：统一 API client。**所有 `/api/*` 请求必须经此处的 request helpers 或导出业务函数**。导出函数式 API（`listMonitoringInstances()`、`getDashboard()` 等），返回 `Promise<T>`，T 直接来自 `types.ts`。
+- `api.ts`：eager/shared API façade，导出 `withQuery`、兼容 transport re-export 与启动/多域共享函数（`listMonitoringInstances()`、`getDashboard()` 等）。
+- `observabilityApi.ts`：bundle-evidenced route-lazy façade，拥有 events/incidents/command-audit 读取。它只能复用 `api.ts` / `apiRequest.ts` primitives，不拥有第二套 fetch/401/error 逻辑；新增 domain façade 的门槛见 `state-and-data.md`。
 - `auth-client.ts`：`/api/auth/*` 的薄封装（`login`、`logout`、`me`、`changePassword`），复用 `api.ts` 的 `requestJSON` / `postJSONBody` / `requestEmpty` 与同一套 401 hook。
 - `auth-context.tsx` / `theme-context.tsx`：唯二的 React Context Provider，分别在 `main.tsx` 顶层一次性挂载。
 - `format.ts`：所有面向用户的格式化（时间、字节、百分比、标签拼接）；**新格式化函数都加到这里**，不要散落到组件文件。
@@ -211,11 +215,11 @@ web/
 
 | 变更类型 | 落点 |
 |----------|------|
-| 新增业务路由 / 整页 | 1) 新建 `web/src/pages/<Name>Page.tsx` + 同名 `*.test.tsx`；2) 在 `web/src/app/router.tsx` 用 `React.lazy` 建 lower camelCase 页面模块变量；3) 在 `appRoutes` 内用 `routeElement(<module>, '<中文加载文案>')` 挂到 `<RequireAuth />` 下；4) 如需新数据，先在 `lib/api.ts` 加函数 + `lib/types.ts` 加类型 |
+| 新增业务路由 / 整页 | 1) 新建 `web/src/pages/<Name>Page.tsx` + 同名 `*.test.tsx`；2) 在 `web/src/app/router.tsx` 用 `React.lazy` 建 lower camelCase 页面模块变量；3) 在 `appRoutes` 内用 `routeElement(<module>, '<中文加载文案>')` 挂到 `<RequireAuth />` 下；4) 如需新数据，在 `lib/types.ts` 加类型并选择 owning `lib/*Api.ts` façade；5) fresh build + bundle gate 验证 lazy 边界 |
 | 新跨页展示原子 | `web/src/components/atoms/<Name>.tsx` + 同名 `*.test.tsx`；在 `atoms/index.ts` 导出；样式放 `styles/partials/atoms.css` / `forms.css` / `tabs.css` 的既有 shared owner |
 | 新跨页业务组合组件 | `web/src/components/<Name>.tsx`（与 IncidentList / EventList 同级），保持纯展示 / 受控 |
 | 新复杂路由私有 controller / presentation | `web/src/pages/<route>/hooks/use<Name>.ts` 与同级 `components/` / `modals/`；route page 是唯一 composition point，controller 不互相 import，展示层不 import controller/API |
-| 新 API 调用 | `web/src/lib/api.ts` 加函数；如响应/请求体新颖，同步在 `lib/types.ts` 加类型；不要在 page / component 里直接 `fetch()` |
+| 新 API 调用 | 默认在 `web/src/lib/api.ts` 加函数；若全部 consumer 都是 lazy route 且 bundle 证据要求隔离，放入已有 domain façade；同步 `lib/types.ts`，不要在 page/component 直接 `fetch()` |
 | 新数据格式化 | `web/src/lib/format.ts` 加函数；同时在 `lib/format.test.ts` 增用例 |
 | 新跨树 / 跨组件状态 | 当前只有 `auth-context` / `theme-context` 两个 Provider；如确需第三个，放 `web/src/lib/<name>-context.tsx`，并在 `main.tsx` 挂到 Provider 链 |
 | 新布局壳元素（侧边栏 / 顶栏内增项） | 改 `web/src/app/layout/`；不要把布局碎片散到 `pages/` |
@@ -229,7 +233,7 @@ web/
 
 > 这些是当前代码库已经回避（或正在偿还）的写法，**新代码不要做**。
 
-- ❌ 在 `pages/` 或 `components/` 里直接 `fetch()`：必须走 `lib/api.ts`。
+- ❌ 在 `pages/` 或 `components/` 里直接 `fetch()`：必须走 `lib/` 下 owning API façade。
 - ❌ `components/` 反向 import `pages/`：组件层不该感知具体路由页。
 - ❌ 在 `lib/` 里写 React 组件 / JSX（context Provider 例外）：`lib/` 是无 UI 数据/工具层。
 - ❌ 绕过 `app/router.tsx` 私自加路由（如手写 `<BrowserRouter>`）：路由唯一入口是 `createBrowserRouter(appRoutes)`。
@@ -249,6 +253,7 @@ web/
 2. **`app/layout/`、`app/RequireAuth.tsx`、`app/metadata.ts` 也在 `CLAUDE.md` 简述之外**，是当前实际的应用壳组织方式。
 3. **`auth-client.ts` 当前复用 `api.ts` 的 request helpers**，所以 401 hook 只有 `setUnauthorizedHandler` 一套，由 `auth-context.tsx` 绑定。新代码不要再新增第二套 fetch 包装。
 4. **当前未使用 React Query / SWR / Redux / Zustand 等状态库**（`web/package.json` 无依赖）；详见 `state-and-data.md`。
+5. **route-lazy domain façade 是受 bundle ratchet 约束的窄例外**：当前仅 `observabilityApi.ts`；不能无证据把单体 API 拆成文件风暴，也不能复制 transport。
 
 ---
 
@@ -259,4 +264,4 @@ web/
 - **完整一条路由线**：`web/src/app/router.tsx` lazy 注册 `/monitoring` → `web/src/pages/MonitoringPage.tsx`（页面装配） + `web/src/pages/MonitoringPage.test.tsx`（colocated 测试） + `web/src/lib/api.ts`（业务 API client） + `web/src/lib/types.ts`（`MonitoringInstanceRecord` 类型）。
 - **设计系统原子使用**：`web/src/components/IncidentList.tsx:1` `import { Hostname, StatusGlyph, Timestamp } from './atoms'`，体现"组合组件按需引用 atoms barrel"的范式。
 - **应用壳分层**：`web/src/app/layout/AppShell.tsx` 引用 `Sidebar`、`TopBar`、`ChangePasswordModal`，并通过 `<Outlet />` 渲染当前路由页（`web/src/app/router.tsx:23` 处的子路由）。
-- **数据获取分层**：`web/src/pages/EventsPage.tsx:63-94` 完整体现 "page 调 `lib/api.ts` → `loading/error/data` 三态 → 渲染 `components/EventList`" 的标准结构。
+- **数据获取分层**：`web/src/pages/EventsPage.tsx` 调 `lib/observabilityApi.ts` → `loading/error/data` 三态 → 渲染事件展示；transport/401 仍由 `apiRequest.ts` 唯一拥有。

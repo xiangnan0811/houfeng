@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -100,6 +101,15 @@ func sensitivityForKnownCommand(commandID string) string {
 }
 
 func insertCommandActionAudit(ctx context.Context, exec commandActionAuditExecutor, event commandActionAuditEvent) error {
+	source := strings.TrimSpace(event.Source)
+	if source == "" && event.EventType != "rejected" {
+		source = monitoringinstances.CommandActionSourceAgentSync
+	}
+	event.Source = source
+	if err := validateCommandActionAuditEvent(event); err != nil {
+		return err
+	}
+
 	auditID, err := ids.New("cmd_aud")
 	if err != nil {
 		return fmt.Errorf("generate command action audit id: %w", err)
@@ -108,22 +118,22 @@ func insertCommandActionAudit(ctx context.Context, exec commandActionAuditExecut
 	if occurredAt.IsZero() {
 		occurredAt = time.Now().UTC()
 	}
-	source := event.Source
-	if source == "" {
-		source = monitoringinstances.CommandActionSourceAgentSync
-	}
 	var exitCode any
 	if event.ExitCode != nil {
 		exitCode = *event.ExitCode
+	}
+	var actionID any = event.ActionID
+	if event.EventType == "rejected" {
+		actionID = nil
 	}
 
 	eventSQL, err := commandActionAuditEventSQL(event.EventType)
 	if err != nil {
 		return err
 	}
-	_, err = exec.Exec(ctx, eventSQL,
+	tag, err := exec.Exec(ctx, eventSQL,
 		auditID,
-		event.ActionID,
+		actionID,
 		event.MonitoringInstanceID,
 		event.CommandID,
 		event.Sensitivity,
@@ -132,7 +142,32 @@ func insertCommandActionAudit(ctx context.Context, exec commandActionAuditExecut
 		exitCode,
 		occurredAt,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("insert command action audit: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("command action audit must have inserted exactly one row: inserted %d", tag.RowsAffected())
+	}
+	return nil
+}
+
+func validateCommandActionAuditEvent(event commandActionAuditEvent) error {
+	switch event.EventType {
+	case "rejected":
+		if event.ActionID != "" {
+			return fmt.Errorf("rejected command action audit must not have an action id")
+		}
+		if event.Source != monitoringinstances.CommandActionSourceWeb {
+			return fmt.Errorf("rejected command action audit must have web source")
+		}
+	case "queued", "dispatched", "completed":
+		if event.ActionID == "" {
+			return fmt.Errorf("%s command action audit must have an action id", event.EventType)
+		}
+	default:
+		return fmt.Errorf("unsupported command action audit event type %q", event.EventType)
+	}
+	return nil
 }
 
 func commandActionAuditEventSQL(eventType string) (string, error) {
@@ -143,24 +178,57 @@ func commandActionAuditEventSQL(eventType string) (string, error) {
 		return commandActionAuditInsertSQL("dispatched"), nil
 	case "completed":
 		return commandActionAuditInsertSQL("completed"), nil
+	case "rejected":
+		return commandActionAuditInsertSQL("rejected"), nil
 	default:
 		return "", fmt.Errorf("unsupported command action audit event type %q", eventType)
 	}
 }
 
 func commandActionAuditInsertSQL(eventType string) string {
+	detailsSQL := "'{}'::jsonb"
+	instanceStateSQL := ""
+	if eventType == "rejected" {
+		detailsSQL = "jsonb_build_object('reason', 'sensitive_confirmation_required')"
+		instanceStateSQL = `
+			and mi.archived_at is null
+			and mi.binding_status = '` + monitoringinstances.BindingBound + `'
+			and mi.monitoring_status <> '` + monitoringinstances.MonitoringPaused + `'`
+	}
 	return `
 		insert into monitoring_instance_command_action_audit (
 			audit_id,
 			action_id,
 			monitoring_instance_id,
+			monitoring_instance_name_snapshot,
 			command_id,
 			sensitivity,
 			event_type,
 			actor_user_id,
+			actor_username_snapshot,
+			actor_display_name_snapshot,
 			source,
 			exit_code,
-			occurred_at
+			occurred_at,
+			details
 		)
-		values ($1, $2, $3, $4, $5, '` + eventType + `', nullif($6, ''), $7, $8, $9)`
+		select
+			$1,
+			$2,
+			mi.monitoring_instance_id,
+			mi.display_name,
+			$4,
+			$5,
+			'` + eventType + `',
+			nullif($6, ''),
+			coalesce(actor.username, ''),
+			coalesce(actor.display_name, ''),
+			$7,
+			$8,
+			$9,
+			` + detailsSQL + `
+		from monitoring_instances mi
+		left join users actor on actor.user_id = nullif($6, '')
+		where mi.monitoring_instance_id = $3
+			and (nullif($6, '') is null or actor.user_id is not null)` + instanceStateSQL
 }

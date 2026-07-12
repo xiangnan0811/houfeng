@@ -8,7 +8,7 @@
 
 候风前端**当前没有引入任何第三方状态管理库**（`web/package.json` `dependencies` 仅 `react`、`react-dom`、`react-router-dom`，**无** Redux / Zustand / Jotai / Recoil / React Query / SWR）。整体策略：
 
-- **数据获取**集中在 `web/src/lib/`：`apiRequest.ts` 拥有 transport/error/401/JSON primitives，`api.ts` 拥有业务 endpoint façade，`auth-client.ts` 复用同一 transport；返回类型从 `types.ts` 引用。
+- **数据获取**集中在 `web/src/lib/`：`apiRequest.ts` 拥有 transport/error/401/JSON primitives，`api.ts` 拥有启动路径与通用业务 endpoint façade；只有在 production bundle 证据要求保持 route-lazy 边界时，才使用同目录的 domain façade（当前为 `observabilityApi.ts`）。`auth-client.ts` 复用同一 transport，返回类型从 `types.ts` 引用。
 - **本地组件状态**使用 React 内建 hooks（主用 `useState` + `useEffect`，少量 `useRef`；当前未发现 `useReducer`）。
 - **跨组件 / 跨页状态**仅由两个 React Context 承担：`AuthProvider` (`web/src/lib/auth-context.tsx`) 与 `ThemeProvider` (`web/src/lib/theme-context.tsx`)；两者都在 `web/src/main.tsx:15-23` 一次性挂载。
 - **URL 状态**走 `react-router-dom@7` 的路由参数（`useParams`、`useNavigate`），不另起 store。
@@ -21,19 +21,80 @@
 
 ### API client
 
-- **业务 `/api/*` 调用一律由 `web/src/lib/api.ts` 暴露**。业务函数使用动词 + 资源命名（`listMonitoringInstances` / `getMonitoringInstance` / `createTarget` / `getDashboard` 等），返回 `Promise<T>`，T 来自 `lib/types.ts`。
-- **transport 唯一 owner 是 `web/src/lib/apiRequest.ts`**：默认 `credentials: 'include'`、`Accept: application/json`、`cache: 'no-store'`；401 触发共享 unauthorized handler 并抛 `ApiError(401)`；非 2xx 只从 error/message 文本生成 `ApiError(status, message)`。`api.ts` re-export兼容 primitives，不复制 fetch wrapper。
+- **业务 `/api/*` 调用一律由 `web/src/lib/` 下的 façade 暴露**。默认 owner 是 `api.ts`；只有全部 production consumer 都位于 lazy route、且 fresh build 证明入口预算需要隔离时，才按领域拆出 façade。当前 `observabilityApi.ts` 拥有 `listEvents`、`listIncidents`、`listHistoricalIncidents`、`listCommandAudits`。业务函数使用动词 + 资源命名并返回 `Promise<T>`，T 来自 `lib/types.ts`。
+- **transport 唯一 owner 是 `web/src/lib/apiRequest.ts`**：默认 `credentials: 'include'`、`Accept: application/json`、`cache: 'no-store'`；401 触发共享 unauthorized handler 并抛 `ApiError(401)`；非 2xx 只从 error/message 文本生成 `ApiError(status, message)`。`api.ts` re-export 兼容 primitives 并拥有 `withQuery`；domain façade 只能复用这些 primitive/helper，不得复制 fetch wrapper。
 - **`/api/auth/*` 走 `web/src/lib/auth-client.ts`**，并复用 `apiRequest.ts` 的 primitives 与 401 hook。不要新增第二套 fetch 包装。
 - `If-Match` 乐观锁仍由业务 façade 的 `patchJSONBody(path, body, { ifMatch })` 表达，传入上一次拿到的 `updated_at`；transport seam 不改变 method/header/body/wire shape。
-- **不要在 page / component 里直接 `fetch()`**。业务请求必须加到 `web/src/lib/api.ts` 再由 page / component 调用；`MonitoringPage` 的历史直连 `fetch('/api/monitoring-instances')` 已偿还为 `createMonitoringInstance` API helper，新代码不要恢复这条路径。
+- **不要在 page / component 里直接 `fetch()`**。业务请求必须进入 `web/src/lib/` façade 再由 page / component 调用；`MonitoringPage` 的历史直连 `fetch('/api/monitoring-instances')` 已偿还为 `createMonitoringInstance` API helper，新代码不要恢复这条路径。
 
 ### 类型对齐
 
 - 与 center 响应 / 请求体一一对应的类型集中在 `web/src/lib/types.ts`：`MonitoringInstanceRecord`、`TargetRecord`、`ProbeItemRecord`、`StateChangeEventRecord`、`DashboardOverview`、`SettingsRecord` 等；命名遵循 `<Aggregate>Record`（响应行）/ `<Aggregate>Input` / `<Aggregate>Override` 后缀。
 - 字段名**完全镜像 center JSON**（snake_case，如 `monitoring_instance_id` / `current_health_status` / `last_heartbeat_at`）。**不要在前端再驼峰化一遍**——保持 grep 友好，便于和 Go 侧 `internal/center/http/handlers/*` 对齐。
 - 中文枚举（如 `IncidentSeverity = '正常' | '关注' | '告警' | '严重'`、`OnboardingPhase` 等）来自 center，前端原样保留中文字面量；展示标签通过 `STATE_CHANGE_EVENT_TYPE_LABELS` (`web/src/lib/types.ts:202-221`) 这种 const map 二次映射，**不要散落到组件文件**。
-- **当前类型是手写**，与 Go contract 没有自动生成机制。新增字段时按以下顺序：1) center handler / contract 改完；2) 在 `lib/types.ts` 加字段（保持 snake_case、保持可选性与后端一致）；3) 在 `lib/api.ts` 引用；4) page / component 消费。
+- **当前类型是手写**，与 Go contract 没有自动生成机制。新增字段时按以下顺序：1) center handler / contract 改完；2) 在 `lib/types.ts` 加字段（保持 snake_case、保持可选性与后端一致）；3) 在 owning `lib/*Api.ts` façade 引用；4) page / component 消费。
 - Asset Ledger 共享枚举必须跟后端机器值同步：`AssetScope = 'current'|'historical'|'archived'|'all'`，其中 `archived` 是旧 API 兼容别名；`RenewalMode = 'auto'|'manual'|'auto_cancelled'|'lottery'|'gift'|'bonus'|'other'`，其中 `lottery` 展示为“抽奖”，`gift` 展示为“赠送”。选项和标签集中在 `web/src/lib/assetOptions.ts`，页面不得散落 `抽奖/赠送` 这种混合标签。
+
+### Scenario: route-lazy API façade 与 bundle 边界
+
+#### 1. Scope / Trigger
+
+- Trigger: 新增只被 lazy route 使用的 API helper、`bundle:check` 报告 entry JS 回退，或准备把 endpoint 从 `api.ts` 移到 domain façade。
+- 目标：保持业务请求、认证和错误边界统一，同时避免单体 `api.ts` 把 route-private endpoint 实现强制打进入口 chunk。
+
+#### 2. Signatures
+
+- Transport: `apiRequest.ts` 的 `requestJSON/requestEmpty/postJSON/postJSONBody`。
+- Query helper: `api.ts` 的 `withQuery(path, filter)`。
+- Shared/eager façade: `api.ts`；lazy observability façade: `observabilityApi.ts`。
+- `observabilityApi.ts` exports: `listEvents`、`listIncidents`、`listHistoricalIncidents`、`listCommandAudits`。
+
+#### 3. Contracts
+
+- domain façade 必须位于 `web/src/lib/`，只组合 `apiRequest.ts` primitives、`api.ts` 的 `withQuery` 和 `types.ts`；不得拥有第二套 `fetch`、401 hook、错误解析或 credentials 默认值。
+- 只有所有 production consumer 都位于 lazy route 时才允许拆分。AppShell、auth、router bootstrap 等启动路径使用的 helper 留在 `api.ts`，不能为了数字好看制造首屏 waterfall。
+- helper 移动不得改变 method、path、query 顺序/省略规则、body 或 response 解包；原有 API/page tests 必须继续覆盖 wire shape。
+- 每次拆分先 fresh production build，再运行 `bundle:check`；入口与最大 async 两项都必须在现有 ratchet 内。预算只能随有证据的清理降低，不能抬高掩盖回退。
+- page/component 只能 import façade，禁止直接 import `apiRequest.ts` 或调用 `fetch`。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| route-private helper 加入 eager `api.ts` 后 entry 超预算 | 移入已有 domain façade或先回到设计；不得抬预算 |
+| helper 仍被 AppShell/启动路径使用 | 保留在 `api.ts`，不引入启动期动态请求 |
+| domain façade 复制 fetch/error parsing | review/source gate 阻断，改为复用 transport primitive |
+| entry 降低但 max async 超预算 | 拆分不通过，调整 chunk ownership 后重新 fresh build |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: command audit、events 与 incident helper 进入 `observabilityApi.ts`，三个既有 lazy detail/events route 和新 audit route 共享一个小 async chunk，entry 与 max async 均通过。
+- Base: 同时被 AppShell 和 DashboardPage 使用的 `getDashboard` 留在 `api.ts`。
+- Bad: 页面为了懒加载直接 `fetch('/api/command-audits')`，复制 credentials/error 处理。
+- Bad: 把所有 endpoint 机械拆成几十个文件，却没有 consumer/bundle 证据。
+
+#### 6. Tests Required
+
+- API wire tests继续断言 default、filters、cursor、incident/event query 与错误 transport 行为。
+- 受影响 page tests继续覆盖 loading/error/data 与请求 inventory。
+- `NODE_ENV=production npm --prefix web run build` 后运行 `npm --prefix web run bundle:check`，记录 entry/max async 实测值。
+
+#### 7. Wrong vs Correct
+
+```ts
+// 错误：route-private helper 进入 eager façade，且通过抬预算掩盖入口增长。
+// api.ts
+export function listCommandAudits(...) { ... }
+```
+
+```ts
+// 正确：lazy domain façade复用唯一 transport/query owner。
+// observabilityApi.ts
+import { requestJSON, withQuery } from './api'
+export function listCommandAudits(filter?: CommandAuditListFilter) {
+  return requestJSON<CommandAuditListResponse>(withQuery('/api/command-audits', filter))
+}
+```
 
 ### Incident threshold settings contract
 
@@ -267,7 +328,7 @@ setMonitoringInstance({
 - Pending-action disabling stays tied to `last_action.status === 'pending'`; adding confirmation must not allow another command while one is pending.
 - Optimistic pending state must include `action_id`, `command_id`, `status:'pending'`, `sensitivity`, and `queued_at` so the drawer can keep identity visible until polling refreshes.
 - When `last_action.output_expired` is true, `MonitoringInstanceCommandResult` must not render stdout/stderr sections from stale data. It should show a short expired-output message while preserving command label and exit code.
-- Audit browsing UI and role-based command authorization are follow-up scope; do not add placeholder navigation or fake data for them.
+- Global audit browsing lives at `/command-audit` and is metadata-only；role-based command/audit authorization remains GitHub #381 follow-up，Monitoring detail 不得自行实现第二套权限或审计列表。
 
 #### 4. Validation & Error Matrix
 
@@ -317,6 +378,81 @@ const stdout = action.stdout ?? ''
 ```tsx
 // 正确：过期输出在展示层也强制清空。
 const stdout = action.output_expired ? '' : (action.stdout ?? '')
+```
+
+### Global command audit URL, cursor, and metadata-only contract
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `/command-audit`、`CommandAuditPage`、`pages/command-audit/`、`listCommandAudits`、`CommandAudit*` types、共享 command metadata 或 MonitoringInstance 审计入口时必须加载本节。
+- 目标：让 URL、API snapshot cursor、action/event 展示和危险输出 allowlist 只有一个明确 owner；筛选、翻页或恶意附加字段都不能把旧结果或 stdout/stderr 带进 DOM。
+
+#### 2. Signatures
+
+- Page route: private lazy `/command-audit`；MonitoringInstance 入口为 `/command-audit?monitoring_instance=<stable-id>`。
+- API: `observabilityApi.ts` 的 `listCommandAudits(filter?: CommandAuditListFilter) -> Promise<CommandAuditListResponse>`；cursor continuation 只序列化 `cursor`。
+- URL filters: `window=24h|7d|30d|all|custom`、`started_from`、`started_to`、`monitoring_instance`、`command_id`、`sensitivity`、`outcome`、`actor`、`action_id`；默认 `30d` 不写 URL。
+- Response types: `CommandAuditAction` / `CommandAuditEvent` only include stable identity, snapshots, command/sensitivity/outcome, actor, timestamps, exit code and normalized rejection reason；类型中不存在 `details`、stdout、stderr。
+
+#### 3. Contracts
+
+- `filterModel.ts` 是 parse → normalize → canonical URL → API query 的唯一 owner。非法/冗余参数用 replace canonicalize；custom browser `datetime-local` 在 API query 转 RFC3339。日期校验必须先验证真实日历日和支持的 datetime/RFC3339 结构，不能只用会把 `2026-02-30` 滚动到三月的 `Date.parse`。
+- 页面保持 applied filters、primary/advanced draft、items、next cursor、expanded IDs 和 request generation。筛选提交必须先清空旧 items/cursor/expanded；过期 response 按 generation 丢弃。
+- 高级 Modal 打开时从当前 applied/primary draft 初始化；Cancel/Escape/close 丢弃 draft，Reset 只清 advanced fields，Apply 才写 URL/发请求。
+- 首次请求按 URL filters；加载更多只调用 `listCommandAudits({cursor})`，按 action `id` 去重；无 cursor 不发请求。加载更多失败必须保留现有 items 与原 cursor，显示局部错误并允许使用同一 cursor 重试。
+- 表格/时间线只能读取显式字段，禁止 `Object.entries`、spread-to-DOM 或 JSON dump。即使 runtime response 额外带 `stdout` / `stderr` / `details`，页面也不得渲染。
+- 当前实例名称链接 `/monitoring/:id`；`deleted=true` 显示快照名 + 稳定 ID + “已删除”，不生成失效链接。actor 显示优先 display name → username → user ID → 系统。
+- command labels/options/sensitivity 由 `web/src/config/commands.ts` 共享；Monitoring detail 与审计页不得复制 command list。页面不新增 Context、dependency 或 route-private CSS。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| `/command-audit` 或 `?window=30d` | 请求 `/api/command-audits`，canonical URL 无默认参数 |
+| invalid enum/unknown parameter/incomplete custom time | 回退合法 filters 并 replace URL，不发送非法 query |
+| impossible custom calendar date such as `2026-02-30` | 回退默认 30d 并 canonicalize；不得静默查询滚动后的三月日期 |
+| advanced draft Cancel/Escape | URL/request 不变；重新打开恢复 applied values |
+| initial/filter request races | 只接受最新 generation；旧响应不回填列表 |
+| load-more response repeats an existing ID | 保留已有项一次，追加新 ID；按 cursor 继续 |
+| deleted monitoring instance | snapshot/ID/“已删除”可见；无 detail link |
+| runtime payload adds stdout/stderr/details | types 不声明；table/timeline DOM 不出现其 key/value |
+| 390px viewport | document 不横向溢出；named focusable table wrapper owns horizontal scroll |
+
+#### 5. Good / Base / Bad Cases
+
+- Good: 用户从 MonitoringInstance 菜单进入预筛选审计，展开两条 allowlisted event，再用 opaque cursor 加载更多；URL 只保存可分享 filters。
+- Good: 实例和 actor 已删除，表格仍显示稳定 ID 与快照； hostile fixture 附带 output 字段但 DOM 没有输出文本。
+- Base: 当前筛选无结果，页面显示 bounded empty state；加载更多失败保留已加载 items 并提供局部错误。
+- Bad: 把 cursor 与 filter 一起发给 API，或筛选改变后继续 append 旧 cursor page。
+- Bad: 为“调试方便”遍历 event object 并输出所有 key，导致恶意/未来 stdout 字段泄漏。
+
+#### 6. Tests Required
+
+- `filterModel.test.ts`: default omission、custom RFC3339、trim、非法/不存在日历日期 canonicalization 和 stable filter key。
+- `api.test.ts` / `commandAuditContract.test.ts`: `observabilityApi` 的 default no-query、normalized initial query、cursor-only 和 source/type output-field absence。
+- `CommandAuditPage.test.tsx` + private component tests: drafts、race、load-more success/failure retry/dedupe/reset、five outcomes、actor fallback、deleted link、event order、hostile output 和 named local scroll region；宽表尺寸使用共享 spacing token，不新增硬编码像素。
+- `web/e2e`: exact default fixture + undeclared cursor fail-closed，10×3 core route，axe，390px keyboard scroll/expand/Modal focus；staging 只要求 metadata-only copy，不依赖存在真实 audit rows。
+
+#### 7. Wrong vs Correct
+
+```tsx
+// 错误：把 runtime response 当任意对象 dump，未来字段会直接进入 DOM。
+<pre>{JSON.stringify(action, null, 2)}</pre>
+
+// 正确：presentation 只消费显式 metadata contract。
+<CommandAuditTable
+  rows={response.items}
+  expandedIDs={expandedIDs}
+  onToggle={toggleExpanded}
+/>
+```
+
+```ts
+// 错误：续页重新带 filters，可能与 cursor snapshot 漂移。
+listCommandAudits({ ...appliedFilters, cursor: nextCursor })
+
+// 正确：cursor 自含规范化 filters/bounds/last key。
+listCommandAudits({ cursor: nextCursor })
 ```
 
 ### MonitoringInstance 管理入口与归档工作集
@@ -1157,7 +1293,7 @@ overview.asset_summary.subscriptions.map((item) => item.renew_at)
 
 #### 1. Scope / Trigger
 
-- Trigger: 修改 `web/src/pages/EventsPage.tsx` 的筛选状态、`web/src/lib/types.ts` 的 `EventListFilter`、或 `web/src/lib/api.ts` 的 `listEvents` query 序列化。
+- Trigger: 修改 `web/src/pages/EventsPage.tsx` 的筛选状态、`web/src/lib/types.ts` 的 `EventListFilter`、或 `web/src/lib/observabilityApi.ts` 的 `listEvents` query 序列化。
 
 #### 2. Signatures
 
@@ -1313,8 +1449,8 @@ setExpandedChannels((prev) => new Set(Array.from(prev).filter((channel) => reset
 
 > 这些是当前代码已经回避（或承认偿还）的写法，**新代码不要做**。
 
-- ❌ **page / component 里直接 `fetch()`**：业务请求必须走 `web/src/lib/api.ts`，认证请求走 `web/src/lib/auth-client.ts`。
-- ❌ **手抄后端字段名 / 自己拼 URL 格式化**：从 `lib/types.ts` import 类型 + 用 `lib/api.ts` 里的 `withQuery` 模式构造查询参数。
+- ❌ **page / component 里直接 `fetch()`**：业务请求必须走 `web/src/lib/` 的 owning façade，认证请求走 `web/src/lib/auth-client.ts`。
+- ❌ **手抄后端字段名 / 自己拼 URL 格式化**：从 `lib/types.ts` import 类型 + 在 owning façade 复用 `api.ts` 的 `withQuery` 模式构造查询参数。
 - ❌ **驼峰化后端字段**：保持 snake_case（`monitoring_instance_id`、`current_health_status`），便于和 center 端 grep 对齐。
 - ❌ **跨 page 共享 mutable 全局变量**：不要用模块级 `let` / Map 缓存业务数据或 plaintext token；监控实例安装命令只从 center 生成并在当前 onboarding page 状态中展示。
 - ❌ **绕过 ApiError 直接 throw 字符串**：`lib/api.ts` 已统一错 `ApiError(status, message)`，page 用 `instanceof ApiError` 判别后挑 `.message` 展示。
@@ -1329,7 +1465,7 @@ setExpandedChannels((prev) => new Set(Array.from(prev).filter((channel) => reset
 
 > 用于后续任务评审；若形成可复用规则，更新 `.trellis/spec/` 或当前 active docs。
 
-1. **认证请求与业务请求共享 `apiRequest.ts` 的 transport primitives 和 401 hook**；`api.ts` 只拥有业务 endpoint façade/兼容 re-export，新代码不要再加第二套 fetch 包装。
+1. **认证请求与业务请求共享 `apiRequest.ts` 的 transport primitives 和 401 hook**；`api.ts` 拥有 eager/shared endpoint façade、`withQuery` 与兼容 re-export，bundle-evidenced domain façade只做 endpoint 组合，新代码不要再加第二套 fetch 包装。
 2. **类型与 Go contract 全靠手维护**——没有 codegen。前后端字段如有漂移，依赖测试 + 运行期 `unknown` 解析报错暴露。
 3. **当前没有任何状态库 / 数据缓存层**：CLAUDE.md 也没要求引入。本 spec 把"暂不引入"作为现行约束写明。
 
@@ -1339,7 +1475,7 @@ setExpandedChannels((prev) => new Set(Array.from(prev).filter((channel) => reset
 
 仓库内"数据获取写得好"的真实参考点：
 
-- **标准 page 数据流（loading / error / data 三态 + cancelled 旗标）**：`web/src/pages/EventsPage.tsx:63-108`，配合 `web/src/lib/api.ts:304-325` 的 `listEvents(filter)`。
+- **标准 page 数据流（loading / error / data 三态 + cancelled 旗标）**：`web/src/pages/EventsPage.tsx`，配合 `web/src/lib/observabilityApi.ts` 的 `listEvents(filter)`。
 - **乐观锁更新**：`web/src/pages/MonitoringPage.tsx:283-325` 的 `handleSaveLabels` → `updateMonitoringInstanceMetadata(monitoringInstanceId, input, { expectedUpdatedAt })`，其内部由 `web/src/lib/api.ts:145-153` 走 `If-Match` 头实现。
 - **Provider + Hook 配对**：`web/src/lib/auth-context.tsx`（`AuthProvider` 内 `useEffect` 挂 401 钩子 → 用 `useAuth()` 暴露 `{ user, loading, login, logout, refresh }`）。
-- **类型驱动的 API 函数集**：`web/src/lib/api.ts` 从 `./types` 引入领域类型并复用 `apiRequest.ts` primitives；transport 分支由 `apiRequest.test.ts` 的 >=90% branch ratchet 保护。
+- **类型驱动的 API 函数集**：`web/src/lib/api.ts` / `observabilityApi.ts` 从 `./types` 引入领域类型并复用唯一 transport/query primitives；transport 分支由 `apiRequest.test.ts` 的 >=90% branch ratchet 保护。

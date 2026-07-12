@@ -16,43 +16,49 @@ import (
 )
 
 type fakeMonitoringInstanceRepository struct {
-	listMonitoringInstancesResult          []monitoringinstances.Record
-	listMonitoringInstancesErr             error
-	getMonitoringInstanceResult            monitoringinstances.Record
-	getMonitoringInstanceErr               error
-	createMonitoringInstanceResult         monitoringinstances.Record
-	createMonitoringInstanceErr            error
-	createMonitoringInstanceInput          monitoringinstances.CreateInput
-	setPendingActionErr                    error
-	setPendingActionMonitoringInstanceID   string
-	setPendingActionInput                  monitoringinstances.QueueCommandActionInput
-	updateMonitoringInstanceMetadataResult monitoringinstances.Record
-	updateMonitoringInstanceMetadataErr    error
-	updateMonitoringInstanceMetadataID     string
-	updateMonitoringInstanceMetadataInput  monitoringinstances.UpdateMetadataInput
-	listMonitoringInstancesScope           monitoringinstances.ListScope
-	managementReviewResult                 monitoringinstances.ManagementReview
-	managementReviewErr                    error
-	managementReviewID                     string
-	retireResult                           monitoringinstances.Record
-	retireErr                              error
-	retireID                               string
-	retireInput                            monitoringinstances.LifecycleActionInput
-	restoreLifecycleResult                 monitoringinstances.Record
-	restoreLifecycleErr                    error
-	restoreLifecycleID                     string
-	restoreLifecycleInput                  monitoringinstances.LifecycleActionInput
-	archiveResult                          monitoringinstances.Record
-	archiveErr                             error
-	archiveID                              string
-	archiveInput                           monitoringinstances.ArchiveInput
-	restoreArchiveResult                   monitoringinstances.Record
-	restoreArchiveErr                      error
-	restoreArchiveID                       string
-	cleanupResult                          monitoringinstances.PermanentCleanupResult
-	cleanupErr                             error
-	cleanupID                              string
-	cleanupInput                           monitoringinstances.PermanentCleanupInput
+	listMonitoringInstancesResult           []monitoringinstances.Record
+	listMonitoringInstancesErr              error
+	getMonitoringInstanceResult             monitoringinstances.Record
+	getMonitoringInstanceErr                error
+	createMonitoringInstanceResult          monitoringinstances.Record
+	createMonitoringInstanceErr             error
+	createMonitoringInstanceInput           monitoringinstances.CreateInput
+	setPendingActionErr                     error
+	setPendingActionMonitoringInstanceID    string
+	setPendingActionInput                   monitoringinstances.QueueCommandActionInput
+	rejectedActionAuditErr                  error
+	rejectedActionAuditCalls                int
+	rejectedActionAuditMonitoringInstanceID string
+	rejectedActionAuditInput                monitoringinstances.RejectedCommandActionInput
+	getMonitoringInstanceCalls              int
+	getMonitoringInstanceID                 string
+	updateMonitoringInstanceMetadataResult  monitoringinstances.Record
+	updateMonitoringInstanceMetadataErr     error
+	updateMonitoringInstanceMetadataID      string
+	updateMonitoringInstanceMetadataInput   monitoringinstances.UpdateMetadataInput
+	listMonitoringInstancesScope            monitoringinstances.ListScope
+	managementReviewResult                  monitoringinstances.ManagementReview
+	managementReviewErr                     error
+	managementReviewID                      string
+	retireResult                            monitoringinstances.Record
+	retireErr                               error
+	retireID                                string
+	retireInput                             monitoringinstances.LifecycleActionInput
+	restoreLifecycleResult                  monitoringinstances.Record
+	restoreLifecycleErr                     error
+	restoreLifecycleID                      string
+	restoreLifecycleInput                   monitoringinstances.LifecycleActionInput
+	archiveResult                           monitoringinstances.Record
+	archiveErr                              error
+	archiveID                               string
+	archiveInput                            monitoringinstances.ArchiveInput
+	restoreArchiveResult                    monitoringinstances.Record
+	restoreArchiveErr                       error
+	restoreArchiveID                        string
+	cleanupResult                           monitoringinstances.PermanentCleanupResult
+	cleanupErr                              error
+	cleanupID                               string
+	cleanupInput                            monitoringinstances.PermanentCleanupInput
 }
 
 func (f *fakeMonitoringInstanceRepository) ListMonitoringInstances(_ context.Context, scopes ...monitoringinstances.ListScope) ([]monitoringinstances.Record, error) {
@@ -62,11 +68,20 @@ func (f *fakeMonitoringInstanceRepository) ListMonitoringInstances(_ context.Con
 	return f.listMonitoringInstancesResult, f.listMonitoringInstancesErr
 }
 
-func (f *fakeMonitoringInstanceRepository) GetMonitoringInstance(context.Context, string) (monitoringinstances.Record, error) {
+func (f *fakeMonitoringInstanceRepository) GetMonitoringInstance(_ context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
+	f.getMonitoringInstanceCalls++
+	f.getMonitoringInstanceID = monitoringInstanceID
 	if f.getMonitoringInstanceErr != nil {
 		return monitoringinstances.Record{}, f.getMonitoringInstanceErr
 	}
 	return f.getMonitoringInstanceResult, nil
+}
+
+func (f *fakeMonitoringInstanceRepository) RecordRejectedCommandAction(_ context.Context, monitoringInstanceID string, input monitoringinstances.RejectedCommandActionInput) error {
+	f.rejectedActionAuditCalls++
+	f.rejectedActionAuditMonitoringInstanceID = monitoringInstanceID
+	f.rejectedActionAuditInput = input
+	return f.rejectedActionAuditErr
 }
 
 func (f *fakeMonitoringInstanceRepository) CreateMonitoringInstance(_ context.Context, input monitoringinstances.CreateInput) (monitoringinstances.Record, error) {
@@ -594,6 +609,7 @@ func TestMonitoringInstanceActionsRejectsSensitiveCommandWithoutConfirmation(t *
 
 	handler := handlers.MonitoringInstanceActions(repo)
 	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemctl_status"}`))
+	req = req.WithContext(sessionctx.WithUserID(req.Context(), "u_operator"))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -605,12 +621,109 @@ func TestMonitoringInstanceActionsRejectsSensitiveCommandWithoutConfirmation(t *
 	if repo.setPendingActionInput.ActionID != "" {
 		t.Fatalf("queued action id = %q, want no queued action", repo.setPendingActionInput.ActionID)
 	}
+	if repo.getMonitoringInstanceCalls != 1 || repo.getMonitoringInstanceID != "mi_001" {
+		t.Fatalf("GetMonitoringInstance calls/id = %d/%q, want 1/mi_001", repo.getMonitoringInstanceCalls, repo.getMonitoringInstanceID)
+	}
+	if repo.rejectedActionAuditCalls != 1 || repo.rejectedActionAuditMonitoringInstanceID != "mi_001" {
+		t.Fatalf("rejected audit calls/id = %d/%q, want 1/mi_001", repo.rejectedActionAuditCalls, repo.rejectedActionAuditMonitoringInstanceID)
+	}
+	if repo.rejectedActionAuditInput.CommandID != "systemctl_status" || repo.rejectedActionAuditInput.Sensitivity != "sensitive" || repo.rejectedActionAuditInput.ActorUserID != "u_operator" || repo.rejectedActionAuditInput.Source != "web" || repo.rejectedActionAuditInput.OccurredAt.IsZero() {
+		t.Fatalf("rejected audit input = %#v", repo.rejectedActionAuditInput)
+	}
 	var body map[string]string
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
 	if body["error"] != "sensitive command confirmation required" {
 		t.Fatalf("error = %q, want sensitive command confirmation required", body["error"])
+	}
+}
+
+func TestMonitoringInstanceActionsDoesNotAuditUntrustedSensitiveRejections(t *testing.T) {
+	archivedAt := time.Date(2026, time.July, 12, 8, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name   string
+		record monitoringinstances.Record
+		err    error
+	}{
+		{name: "missing instance", err: monitoringinstances.ErrMonitoringInstanceNotFound},
+		{
+			name: "archived instance",
+			record: monitoringinstances.Record{
+				MonitoringInstanceID: "mi_001", BindingStatus: monitoringinstances.BindingBound, MonitoringStatus: monitoringinstances.MonitoringEnabled, ArchivedAt: &archivedAt,
+			},
+		},
+		{
+			name: "unbound instance",
+			record: monitoringinstances.Record{
+				MonitoringInstanceID: "mi_001", BindingStatus: monitoringinstances.BindingUnbound, MonitoringStatus: monitoringinstances.MonitoringEnabled,
+			},
+		},
+		{
+			name: "paused instance",
+			record: monitoringinstances.Record{
+				MonitoringInstanceID: "mi_001", BindingStatus: monitoringinstances.BindingBound, MonitoringStatus: monitoringinstances.MonitoringPaused,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeMonitoringInstanceRepository{getMonitoringInstanceResult: tt.record, getMonitoringInstanceErr: tt.err}
+			handler := handlers.MonitoringInstanceActions(repo)
+			req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemctl_status"}`))
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+			}
+			if repo.getMonitoringInstanceCalls != 1 {
+				t.Fatalf("GetMonitoringInstance calls = %d, want 1", repo.getMonitoringInstanceCalls)
+			}
+			if repo.rejectedActionAuditCalls != 0 || repo.setPendingActionInput.ActionID != "" {
+				t.Fatalf("rejected audit calls = %d, queued input = %#v", repo.rejectedActionAuditCalls, repo.setPendingActionInput)
+			}
+		})
+	}
+}
+
+func TestMonitoringInstanceActionsReturnsInternalErrorWhenTrustedRejectionCannotBeAudited(t *testing.T) {
+	tests := []struct {
+		name string
+		repo *fakeMonitoringInstanceRepository
+	}{
+		{
+			name: "instance lookup",
+			repo: &fakeMonitoringInstanceRepository{getMonitoringInstanceErr: errors.New("lookup failed")},
+		},
+		{
+			name: "audit write",
+			repo: &fakeMonitoringInstanceRepository{
+				getMonitoringInstanceResult: monitoringinstances.Record{
+					MonitoringInstanceID: "mi_001", BindingStatus: monitoringinstances.BindingBound, MonitoringStatus: monitoringinstances.MonitoringEnabled,
+				},
+				rejectedActionAuditErr: errors.New("audit failed"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := handlers.MonitoringInstanceActions(tt.repo)
+			req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{"command_id":"systemctl_status"}`))
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusInternalServerError, recorder.Body.String())
+			}
+			if tt.repo.setPendingActionInput.ActionID != "" {
+				t.Fatalf("queued action input = %#v, want none", tt.repo.setPendingActionInput)
+			}
+		})
 	}
 }
 
@@ -669,6 +782,9 @@ func TestMonitoringInstanceActionsRejectsUnknownCommandIDBeforeRepositoryWrite(t
 	if repo.setPendingActionInput.ActionID != "" {
 		t.Fatalf("queued action id = %q, want no queued action", repo.setPendingActionInput.ActionID)
 	}
+	if repo.getMonitoringInstanceCalls != 0 || repo.rejectedActionAuditCalls != 0 {
+		t.Fatalf("unknown command repository calls = lookup %d, rejected audit %d; want none", repo.getMonitoringInstanceCalls, repo.rejectedActionAuditCalls)
+	}
 	var body map[string]string
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
@@ -679,7 +795,8 @@ func TestMonitoringInstanceActionsRejectsUnknownCommandIDBeforeRepositoryWrite(t
 }
 
 func TestMonitoringInstanceActionsRejectsInvalidBody(t *testing.T) {
-	handler := handlers.MonitoringInstanceActions(&fakeMonitoringInstanceRepository{})
+	repo := &fakeMonitoringInstanceRepository{}
+	handler := handlers.MonitoringInstanceActions(repo)
 	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/actions", strings.NewReader(`{}`))
 	recorder := httptest.NewRecorder()
 
@@ -687,6 +804,9 @@ func TestMonitoringInstanceActionsRejectsInvalidBody(t *testing.T) {
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if repo.getMonitoringInstanceCalls != 0 || repo.rejectedActionAuditCalls != 0 || repo.setPendingActionInput.ActionID != "" {
+		t.Fatalf("invalid body repository state = lookup %d, rejected audit %d, queued %#v", repo.getMonitoringInstanceCalls, repo.rejectedActionAuditCalls, repo.setPendingActionInput)
 	}
 }
 
@@ -710,6 +830,9 @@ func TestMonitoringInstanceActionsRejectsTrailingJSONBeforeRepositoryWrite(t *te
 	if repo.setPendingActionInput.ActionID != "" {
 		t.Fatalf("queued action id = %q, want no queued action", repo.setPendingActionInput.ActionID)
 	}
+	if repo.getMonitoringInstanceCalls != 0 || repo.rejectedActionAuditCalls != 0 {
+		t.Fatalf("trailing JSON repository calls = lookup %d, rejected audit %d; want none", repo.getMonitoringInstanceCalls, repo.rejectedActionAuditCalls)
+	}
 }
 
 func TestMonitoringInstanceActionsRejectsUnknownFieldsBeforeRepositoryWrite(t *testing.T) {
@@ -731,6 +854,9 @@ func TestMonitoringInstanceActionsRejectsUnknownFieldsBeforeRepositoryWrite(t *t
 	}
 	if repo.setPendingActionInput.ActionID != "" {
 		t.Fatalf("queued action id = %q, want no queued action", repo.setPendingActionInput.ActionID)
+	}
+	if repo.getMonitoringInstanceCalls != 0 || repo.rejectedActionAuditCalls != 0 {
+		t.Fatalf("unknown field repository calls = lookup %d, rejected audit %d; want none", repo.getMonitoringInstanceCalls, repo.rejectedActionAuditCalls)
 	}
 }
 

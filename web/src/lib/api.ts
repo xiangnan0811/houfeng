@@ -1,5 +1,4 @@
 import type {
-  ActiveIncidentRecord,
   AssetDomainListFilter,
   AssetDomainRecord,
   AssetContextForTarget,
@@ -18,9 +17,9 @@ import type {
   ApplyArchiveInput,
   ApplyCancellationInput,
   ArchiveReview,
-  CancellationPreview,
   BulkUpsertSubscriptionMonthlyBudgetInput,
   BulkUpsertSubscriptionMonthlyBudgetResult,
+  CancellationPreview,
   CreateAssetDomainInput,
   CreateAssetDecisionManualGroupInput,
   CreateAssetDecisionManualGroupMemberInput,
@@ -43,9 +42,6 @@ import type {
   LifecycleActionResult,
   UpdateProbeItemInput,
   DashboardOverview,
-  EventListFilter,
-  EventListResponse,
-  IncidentListFilter,
   ExtendVPSValidityInput,
   MonitoringInstanceInstallCommandIssue,
   MonitoringInstanceArchiveInput,
@@ -65,7 +61,6 @@ import type {
   SubscriptionCostSettings,
   SubscriptionCostSettingsUpdateInput,
   SubscriptionMonthlyBudgetRecord,
-  StateChangeEventRecord,
   SettingsUpdateInput,
   ExchangeRateRefreshResult,
   SubscriptionListFilter,
@@ -129,7 +124,7 @@ function patchJSONBody<T>(path: string, body: unknown, options: PatchJSONOptions
   })
 }
 
-function withQuery(
+export function withQuery(
   path: string,
   filter?: Record<string, string | number | boolean | null | undefined>,
 ): string {
@@ -410,34 +405,6 @@ export function updateSettings(settings: SettingsUpdateInput) {
   })
 }
 
-export function listEvents(filter?: EventListFilter) {
-  return requestJSON<EventListResponse | StateChangeEventRecord[]>(
-    withQuery(
-      '/api/events',
-      filter
-        ? {
-            object_type: filter.object_type,
-            object_id: filter.object_id,
-            severity: filter.severity,
-            event_type: filter.event_type,
-            limit: filter.limit,
-            created_from: filter.created_from,
-            created_to: filter.created_to,
-            label: filter.label,
-            notification_only: filter.notification_only,
-            recovery_only: filter.recovery_only,
-            maintenance_only: filter.maintenance_only,
-            include_backfilled: filter.include_backfilled,
-          }
-        : undefined,
-    ),
-  ).then((response) => Array.isArray(response) ? response : response.items)
-}
-
-export function listIncidents(filter?: IncidentListFilter) {
-  return requestJSON<ActiveIncidentRecord[]>(withQuery('/api/incidents', filter))
-}
-
 export type MonitoringInstanceActionOptions = {
   confirmedSensitive?: boolean
 }
@@ -467,14 +434,6 @@ export function postMonitoringInstanceBatch(monitoringInstanceIDs: string[], act
     monitoring_instance_ids: monitoringInstanceIDs,
     action,
   })
-}
-
-export function listHistoricalIncidents(objectType: string, objectId: string) {
-  return requestJSON<ActiveIncidentRecord[]>(
-    `/api/incidents?object_type=${encodeURIComponent(objectType)}&object_id=${encodeURIComponent(
-      objectId,
-    )}&include_resolved=true`,
-  )
 }
 
 export function listProviders() {

@@ -190,6 +190,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.EventsHandler == nil {
 		t.Fatal("router events handler = nil, want non-nil")
 	}
+	if gotOpts.CommandAuditsHandler == nil {
+		t.Fatal("router command audits handler = nil, want non-nil")
+	}
 	if gotOpts.IncidentsHandler == nil {
 		t.Fatal("router incidents handler = nil, want non-nil")
 	}
@@ -483,6 +486,23 @@ func TestBootstrapAgentTokenRepositoriesUseConfiguredHMACKey(t *testing.T) {
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("bootstrap.go missing configured agent token HMAC wiring %q", want)
+		}
+	}
+}
+
+func TestBootstrapWiresSeparateCommandAuditReadRepositoryAndHandler(t *testing.T) {
+	body, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatalf("read bootstrap.go: %v", err)
+	}
+	source := string(body)
+	for _, want := range []string{
+		"commandAuditRepo := store.NewPostgresCommandAuditRepository(db.Pool())",
+		"CommandAuditsHandler:",
+		"handlers.CommandAudits(commandAuditRepo)",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("bootstrap.go missing command audit wiring %q", want)
 		}
 	}
 }

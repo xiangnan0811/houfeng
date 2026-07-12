@@ -15,6 +15,7 @@ import (
 
 type monitoringInstanceActionRepository interface {
 	QueueCommandAction(ctx context.Context, monitoringInstanceID string, input monitoringinstances.QueueCommandActionInput) error
+	RecordRejectedCommandAction(ctx context.Context, monitoringInstanceID string, input monitoringinstances.RejectedCommandActionInput) error
 	GetMonitoringInstance(ctx context.Context, monitoringInstanceID string) (monitoringinstances.Record, error)
 }
 
@@ -49,6 +50,28 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 			return
 		}
 		if sensitivity == agentapi.CommandSensitivitySensitive && !body.ConfirmedSensitive {
+			record, err := repo.GetMonitoringInstance(r.Context(), monitoringInstanceID)
+			if err != nil && !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			if err == nil && commandActionExecutable(record) {
+				actorUserID, actorOK := sessionctx.UserIDFromContext(r.Context())
+				if !actorOK || strings.TrimSpace(actorUserID) == "" {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
+				if err := repo.RecordRejectedCommandAction(r.Context(), monitoringInstanceID, monitoringinstances.RejectedCommandActionInput{
+					CommandID:   body.CommandID,
+					Sensitivity: string(sensitivity),
+					ActorUserID: actorUserID,
+					Source:      monitoringinstances.CommandActionSourceWeb,
+					OccurredAt:  time.Now().UTC(),
+				}); err != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
+			}
 			writeError(w, http.StatusBadRequest, "sensitive command confirmation required")
 			return
 		}
@@ -109,6 +132,12 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 			"status":     "pending",
 		})
 	})
+}
+
+func commandActionExecutable(record monitoringinstances.Record) bool {
+	return record.ArchivedAt == nil &&
+		record.BindingStatus == monitoringinstances.BindingBound &&
+		record.MonitoringStatus != monitoringinstances.MonitoringPaused
 }
 
 // monitoringInstanceIDFromActionsPath extracts the monitoring instance ID from a /api/monitoring-instances/{id}/actions path.

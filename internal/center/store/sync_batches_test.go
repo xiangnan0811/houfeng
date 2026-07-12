@@ -584,6 +584,9 @@ func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgco
 		}
 		return pgconn.NewCommandTag("INSERT 0 1"), nil
 	}
+	if strings.Contains(lowerSQL, "insert into monitoring_instance_command_action_audit") {
+		return pgconn.NewCommandTag("INSERT 0 1"), nil
+	}
 	if strings.Contains(lowerSQL, "last_action->>'status'") {
 		if f.commandResultRowsAffected != nil && *f.commandResultRowsAffected == 0 {
 			return pgconn.NewCommandTag("UPDATE 0"), nil
@@ -926,6 +929,44 @@ func TestSyncBatchDispatchesPendingActionWritesAudit(t *testing.T) {
 	}
 }
 
+func TestSyncBatchRollsBackDispatchWhenAuditFails(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("dispatch audit failed")
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		pendingActionID:                 "act_001",
+		pendingCommandID:                "uptime",
+		probeMetadataByItemID: map[string]observations.ProbeMetadata{
+			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
+		},
+		execErrForSQLSubstring: "insert into monitoring_instance_command_action_audit",
+		execErr:                wantErr,
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	_, err := repo.ApplyBatch(context.Background(), testSyncBatch())
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("ApplyBatch() error = %v, want wrapped dispatch audit error", err)
+	}
+	if tx.commitCalls != 0 {
+		t.Fatalf("commitCalls = %d, want 0", tx.commitCalls)
+	}
+	if tx.rollbackCalls != 1 {
+		t.Fatalf("rollbackCalls = %d, want 1", tx.rollbackCalls)
+	}
+	assertSQLOrder(t, tx.execSQL,
+		"pending_action_id = NULL",
+		"insert into monitoring_instance_command_action_audit",
+	)
+}
+
 func TestSyncBatchStoresMatchingCommandResultWithCommandID(t *testing.T) {
 	t.Parallel()
 
@@ -1076,6 +1117,49 @@ func TestSyncBatchStoresMatchingCommandResultWritesMetadataOnlyCompletionAudit(t
 	if strings.Contains(sql, "stdout") || strings.Contains(sql, "stderr") {
 		t.Fatalf("completion audit SQL must not store stdout/stderr: %s", tx.execSQL[auditIndex])
 	}
+}
+
+func TestSyncBatchRollsBackCompletionWhenAuditFails(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("completion audit failed")
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		probeMetadataByItemID: map[string]observations.ProbeMetadata{
+			"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP},
+		},
+		execErrForSQLSubstring: "insert into monitoring_instance_command_action_audit",
+		execErr:                wantErr,
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+	batch := testSyncBatch()
+	batch.CommandResults = []syncing.CommandResult{{
+		ActionID:  "act_001",
+		CommandID: "uptime",
+		Stdout:    "up 1 day",
+		ExitCode:  0,
+	}}
+
+	_, err := repo.ApplyBatch(context.Background(), batch)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("ApplyBatch() error = %v, want wrapped completion audit error", err)
+	}
+	if tx.commitCalls != 0 {
+		t.Fatalf("commitCalls = %d, want 0", tx.commitCalls)
+	}
+	if tx.rollbackCalls != 1 {
+		t.Fatalf("rollbackCalls = %d, want 1", tx.rollbackCalls)
+	}
+	assertSQLOrder(t, tx.execSQL,
+		"last_action->>'status'",
+		"insert into monitoring_instance_command_action_audit",
+	)
 }
 
 func TestSyncBatchRedactsCommandResultsBeforePersisting(t *testing.T) {

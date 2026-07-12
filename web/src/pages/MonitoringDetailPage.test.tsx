@@ -92,6 +92,7 @@ function emptyManagementCounts(overrides: Partial<Record<string, unknown>> = {})
     state_change_event_count: 0,
     notification_record_count: 0,
     asset_lifecycle_action_step_count: 0,
+    command_action_audit_count: 0,
     active_vps_link_count: 0,
     ...overrides,
   }
@@ -555,6 +556,7 @@ describe('MonitoringDetailPage', () => {
       counts: emptyManagementCounts({
         host_sample_count: 3,
         ip_quality_report_count: 1,
+        command_action_audit_count: 4,
         active_vps_link_count: 1,
       }),
       warnings: ['存在历史观测数据'],
@@ -612,6 +614,9 @@ describe('MonitoringDetailPage', () => {
     )
     expect(screen.getByText('主机样本')).toBeInTheDocument()
     expect(screen.getByText('3')).toBeInTheDocument()
+    const counts = screen.getByLabelText('管理审查计数')
+    expect(within(counts).getByText('命令审计')).toBeInTheDocument()
+    expect(within(counts).getByText('4')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Tokyo VPS' })).toHaveAttribute('href', '/vps/vps_001')
     expect(screen.getByText('存在历史观测数据')).toBeInTheDocument()
     expect(screen.getByText('归档前需要先退役实例')).toBeInTheDocument()
@@ -817,6 +822,7 @@ describe('MonitoringDetailPage', () => {
       }
       if (path === '/api/monitoring-instances/mi_cleanup/management-review') {
         return Promise.resolve(mockJSONResponse(managementReview(archivedRecord, {
+          counts: emptyManagementCounts({ command_action_audit_count: 2 }),
           actions: {
             can_retire: false,
             can_restore_lifecycle: false,
@@ -869,6 +875,7 @@ describe('MonitoringDetailPage', () => {
     fireEvent.click(screen.getByText('管理实例', { selector: 'summary' }))
     fireEvent.click(await screen.findByRole('button', { name: '永久清理' }))
     const dialog = await screen.findByRole('alertdialog', { name: '永久清理监控实例' })
+    expect(within(dialog).getByText(/命令审计元数据将永久保留/)).toBeInTheDocument()
     fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '误创建空实例' } })
     fireEvent.change(within(dialog).getByLabelText('输入实例名称确认'), { target: { value: 'Tokyo Cleanup Edge' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '确认永久清理' }))
@@ -3447,6 +3454,10 @@ describe('MonitoringDetailPage', () => {
 
     expect(screen.getByRole('button', { name: '升级/重新接入 agent…' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '执行命令…' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看命令审计' })).toHaveAttribute(
+      'href',
+      '/command-audit?monitoring_instance=mi_cmd',
+    )
     expect(screen.queryByRole('button', { name: '退役监控实例' })).not.toBeInTheDocument()
   })
 

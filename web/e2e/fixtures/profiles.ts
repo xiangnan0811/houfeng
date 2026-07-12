@@ -1,6 +1,9 @@
 import type { User } from '../../src/lib/auth-client'
 import type {
   AssetDecisionOverview,
+  CommandAuditAction,
+  CommandAuditEvent,
+  CommandAuditListResponse,
   DashboardOverview,
   MonitoringInstanceSparklinesResponse,
   ProviderRecord,
@@ -189,6 +192,62 @@ const TARGET_SPARKLINES = {
   targets: {},
 } satisfies TargetSparklinesResponse
 
+type HostileCommandAuditEvent = CommandAuditEvent & {
+  stdout?: string
+  stderr?: string
+  details?: Record<string, unknown>
+}
+
+type HostileCommandAuditAction = Omit<CommandAuditAction, 'events'> & {
+  stdout: string
+  stderr: string
+  details: Record<string, unknown>
+  events: HostileCommandAuditEvent[]
+}
+
+const COMMAND_AUDIT_RESPONSE: CommandAuditListResponse & {
+  items: HostileCommandAuditAction[]
+} = {
+  items: [{
+    id: 'act_e2e_command_audit',
+    action_id: 'act_e2e_command_audit',
+    monitoring_instance: {
+      id: 'mi_001',
+      name: 'Tokyo Edge',
+      deleted: false,
+    },
+    command_id: 'systemctl_status',
+    sensitivity: 'sensitive',
+    outcome: 'succeeded',
+    actor: {
+      user_id: 'u_e2e',
+      username: 'e2e-admin',
+      display_name: 'E2E Admin',
+    },
+    started_at: '2026-07-12T08:00:00Z',
+    events: [
+      {
+        audit_id: 'cmd_aud_e2e_queued',
+        event_type: 'queued',
+        source: 'web',
+        occurred_at: '2026-07-12T08:00:00Z',
+        stdout: 'COMMAND_AUDIT_EVENT_OUTPUT_SHOULD_NOT_RENDER',
+        details: { stderr: 'COMMAND_AUDIT_EVENT_DETAILS_SHOULD_NOT_RENDER' },
+      },
+      {
+        audit_id: 'cmd_aud_e2e_completed',
+        event_type: 'completed',
+        source: 'agent_sync',
+        occurred_at: '2026-07-12T08:00:02Z',
+        exit_code: 0,
+      },
+    ],
+    stdout: 'COMMAND_AUDIT_STDOUT_SHOULD_NOT_RENDER',
+    stderr: 'COMMAND_AUDIT_STDERR_SHOULD_NOT_RENDER',
+    details: { stdout: 'COMMAND_AUDIT_DETAILS_SHOULD_NOT_RENDER' },
+  }],
+}
+
 export type CoreRoutePath =
   | '/'
   | '/vps'
@@ -196,6 +255,7 @@ export type CoreRoutePath =
   | '/monitoring'
   | '/targets'
   | '/events'
+  | '/command-audit'
   | '/providers'
   | '/subscriptions'
   | '/settings'
@@ -310,6 +370,13 @@ export function coreRouteProfile(path: CoreRoutePath): ApiFixtureProfile {
         [apiRouteKey('GET', '/api/monitoring-instances')]: { status: 200, body: [] },
         [apiRouteKey('GET', '/api/targets')]: { status: 200, body: [] },
         [apiRouteKey('GET', '/api/events?limit=200')]: { status: 200, body: { items: [] } },
+      })
+    case '/command-audit':
+      return authenticatedProfile({
+        [apiRouteKey('GET', '/api/command-audits')]: {
+          status: 200,
+          body: COMMAND_AUDIT_RESPONSE,
+        },
       })
     case '/providers':
       return authenticatedProfile({

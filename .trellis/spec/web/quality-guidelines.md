@@ -122,12 +122,12 @@ verify-web: test-web-toolchain
 
 #### 1. Scope / Trigger
 
-- 修改 production TS/TSX、coverage/bundle/CSS budget、九条核心路由、CSP、Modal/Tabs/Menu、响应式布局、Playwright fixture、CI browser job 或 staging workflow 时，必须使用本合同。
+- 修改 production TS/TSX、coverage/bundle/CSS budget、十条核心路由、CSP、Modal/Tabs/Menu、响应式布局、Playwright fixture、CI browser job 或 staging workflow 时，必须使用本合同。
 
 #### 2. Signatures
 
 - `npm --prefix web run test:coverage`：V8 provider；production include 固定为 `src/**/*.{ts,tsx}`，阈值来自 `web/coverage-budget.json`。
-- `npm --prefix web run test:e2e`：`web/playwright.config.ts`；Chromium、production preview `127.0.0.1:4175`、九 route × 三 viewport。
+- `npm --prefix web run test:e2e`：`web/playwright.config.ts`；Chromium、production preview `127.0.0.1:4175`、十 route × 三 viewport。
 - `npm --prefix web run test:e2e:staging`：`web/playwright.staging.config.ts`；不启动本地 server，只访问 `HOUFENG_STAGING_BASE_URL`。
 - `.github/workflows/frontend-staging-smoke.yml`：仅 `workflow_dispatch(expected_version)`，`environment: staging`。
 - staging env：variable `HOUFENG_STAGING_BASE_URL`；secrets `HOUFENG_STAGING_USERNAME`、`HOUFENG_STAGING_PASSWORD`；input 映射为 `HOUFENG_EXPECTED_VERSION`。
@@ -137,9 +137,10 @@ verify-web: test-web-toolchain
 
 - coverage 全局下限是 statements `79.14`、branches `70.27`、functions `78.88`、lines `82.95`；`modalStack`、`useModalFocus`、`Modal`、Dashboard RemoteState/model、`apiRequest`、auth client/context 与七个 Asset controller 的 branch threshold 均不低于 90%，路径不存在也必须失败。
 - fixture router 以 method + canonical path/query 精确匹配；未知 API 返回 501 并在 teardown 失败，mutation fixture 必须声明 body key 集合。loading 使用受控 Promise，不用固定 sleep。
-- broad browser matrix 固定 `/`、`/vps`、`/asset-decisions`、`/monitoring`、`/targets`、`/events`、`/providers`、`/subscriptions`、`/settings` × `1440x1000`、`1024x768`、`390x900`。每项断言 main/workflow、document overflow、关键命令裁切与统一 diagnostics。
+- broad browser matrix 固定 `/`、`/vps`、`/asset-decisions`、`/monitoring`、`/targets`、`/events`、`/command-audit`、`/providers`、`/subscriptions`、`/settings` × `1440x1000`、`1024x768`、`390x900`。每项断言 main/workflow、document overflow、关键命令裁切与统一 diagnostics。
+- `/command-audit` fixture 只声明 exact default `/api/command-audits`，并故意附加 hostile stdout/stderr/details 字段；浏览器必须证明这些字段不进入 DOM，undeclared cursor query 仍返回 501。390px 合同还要证明 named focusable table wrapper 独占横向滚动、event expand 可用、advanced Modal Tab/Escape/focus restore 正常。
 - CSP 只读取 `internal/center/http/csp-policy.txt`，main document header 必须精确相等；console/page/request/HTTP/CSP/unhandled rejection 默认全部阻断，只有测试显式声明的 method/path/status 可放行。
-- staging real lane 与 deployed-frontend injection lane 必须在 manifest 中分开。真实 lane验证版本、UI 登录、九路由、自定义模板 cancel-only、设置保存/恢复、主题 reload；injection lane验证 Dashboard 五态、503、受控慢响应与长列表三视口，不能冒充后端/生产数据通过。
+- staging real lane 与 deployed-frontend injection lane 必须在 manifest 中分开。真实 lane验证版本、UI 登录、十路由、自定义模板 cancel-only、设置保存/恢复、主题 reload；`/command-audit` 只断言 metadata-only 声明/无 output surface，不要求环境已有审计数据。injection lane验证 Dashboard 五态、503、受控慢响应与长列表三视口，不能冒充后端/生产数据通过。
 - staging 设置 mutation 必须串行、先快照、临时 `+1`、readback，并在 `finally` 恢复/readback。workflow 固定 concurrency 且 `cancel-in-progress: false`；非 `main` ref 在读取 environment secrets 前失败。
 - staging 的 audited route navigation 在旧文档不是 `about:blank` 时，必须先等待 tracked requests 持续空闲，再等待 `document.fonts.ready`、检查 diagnostics，最后才调用 `page.goto`；新 route 的 heading 可见后还必须再次等待 requests/fonts settle，才检查 layout/diagnostics 和截图。heading 可见只证明 route shell 已渲染，不能证明真实业务数据已完成。否则主动导航会取消旧文档仍在加载的 API/WOFF2，并把 harness 自造的 `net::ERR_ABORTED` 误报成部署失败；不得用宽泛 aborted-request allowlist 掩盖这个时序错误。
 - staging 禁止 trace/video/自动截图，并以 `preserveOutput: 'never'` 丢弃 Playwright `error-context` 等内部输出；显式截图必须 mask 登录字段和用户 chip。artifact 只含 allowlisted headers、origin-relative 脱敏 path/status/timing、计数、步骤与截图，不含 cookie、Authorization、密码、token、request/response body。
@@ -161,7 +162,7 @@ verify-web: test-web-toolchain
 
 #### 5. Good / Base / Bad Cases
 
-- Good：PR 的 source gate 与 58 个 Chromium contracts 都绿；release 后由 main ref dispatch staging，每次 route transition 前后都 settle tracked requests/fonts，成功截图不保留 PageState loading surface，artifact 明确区分 real-data 与 injection。
+- Good：PR 的 source gate 与 30-case core route matrix/相关 Chromium contracts 都绿；release 后由 main ref dispatch staging，每次 route transition 前后都 settle tracked requests/fonts，成功截图不保留 PageState loading surface，artifact 明确区分 real-data 与 injection。
 - Base：普通纯逻辑改动跑 focused Vitest + `make verify-web`；未触及 UI 时无需凭空新增 browser case，但现有 browser job仍必须绿。
 - Bad：把失败 API兜底为 `[]`、允许所有 4xx/5xx、增加 retry 掩盖 flake、抬预算让 CI 变绿，或用 mock/injection 声称真实 staging 通过。
 
@@ -169,7 +170,7 @@ verify-web: test-web-toolchain
 
 - `scripts/check-web-quality-gates.test.sh`：package scripts、Make 调用链、browser job 作用域、staging dispatch/ref/environment/concurrency/permissions/artifact 合同。
 - `web/src/security/stagingAuditContract.test.ts`：用 fake timers 证明 request idle window 会被级联请求重置且 timeout 失败；用 TypeScript AST 断言 `gotoAuditedRoute` 在首个 `page.goto` 前后都等待 tracked requests，并保持旧文档 font wait 位于 navigation 前；同时覆盖 locationless expected HTTP console correlation 的正反例。
-- `web/e2e/{auth-router,core-routes,page-states,fixture-router,security,accessibility,visual-contracts}.spec.ts`：认证、27 route matrix、五态/四态、fail-closed、diagnostics、axe/键盘、390px/局部滚动。
+- `web/e2e/{auth-router,core-routes,page-states,fixture-router,security,accessibility,visual-contracts}.spec.ts`：认证、30 route matrix、五态/四态、fail-closed、diagnostics、axe/键盘、390px/局部滚动。
 - 修改 audit/staging harness 后至少运行 `tsc -b`、ESLint 与 source contract；真实 lane 只能在配置完成的 GitHub staging environment 验收。
 
 #### 7. Wrong vs Correct
@@ -239,7 +240,7 @@ coverage 是 source gate 的强制 ratchet：全局阈值与关键文件清单�
 - **每个路由页有至少 1 份 `<Page>.test.tsx`**：实读 `web/src/pages/` 下 9 个 page 全部配套（`DashboardPage` / `EventsPage` / `LoginPage` / `MonitoringDetailPage` / `MonitoringDetailPage` / `MonitoringPage` / `SettingsPage` / `TargetDetailPage` / `TargetsPage`）。**新增 page 必须保持这条线**——至少 1 个 happy-path test 覆盖渲染 + 拉数据 + 默认交互。
 - **每个 atom 有同名测试**（`atoms/Button.test.tsx` / `Card.test.tsx` / `Sparkline.test.tsx` / `Input.test.tsx` / `Badge.test.tsx` / `DataTable.test.tsx` / `Mono.test.tsx` / `StatusGlyph.test.tsx` / `Tabs.test.tsx` / `Toggle.test.tsx`）。新增 atom 同样补一份。
 - **跨页业务组合组件按需测**（`IncidentList.test.tsx` / `EventList.test.tsx` / `ActionConfirmationCard.test.tsx` 已有；`DetailSection` / `StatusBadge` 当前未测——**不强制**，但如果改动到行为分支，请补）。
-- **`lib/` 工具函数**——纯逻辑（`format.ts` / `theme.ts`）应有单测，I/O 边界（`api.ts` / `auth-client.ts`）按现状 mock `fetch` 跑表驱动用例。
+- **`lib/` 工具函数**——纯逻辑（`format.ts` / `theme.ts`）应有单测，I/O 边界（`api.ts` / `observabilityApi.ts` / `auth-client.ts`）按现状 mock `fetch` 跑表驱动用例。
 - **复杂路由的结构合同必须扫描真实 production glob**：`assetDecisionArchitectureContract.test.ts` 使用 TypeScript compiler AST + synthetic fixtures，固定七个 controller entry、API symbol owner、唯一 router owner、禁止依赖边、无 `*PageContent` 替身，以及 page ≤400、controller ≤600、任一 route-private production file ≤800、controller `useEffect` ≤3。不要用 wrapper 文件、正则 import parser、路径/行号白名单或仅测试 happy fixture 代替 repository inventory。
 
 ### 测试模式（实读）
@@ -430,11 +431,11 @@ export default defineConfig([
 
 1. [ ] **focused lint/test** —— 修改时先跑相关 Vitest/ESLint，保留 RED→GREEN 证据。
 2. [ ] **`make verify-web`** —— coverage、strict build、bundle/font 与 CSS AST source gate 全绿。
-3. [ ] **改了 user-visible UI / browser contract → `npm --prefix web run test:e2e`** —— 运行固定 Chromium；九 route broad change 必须保持 27/27。
+3. [ ] **改了 user-visible UI / browser contract → `npm --prefix web run test:e2e`** —— 运行固定 Chromium；十 route broad change 必须保持 30/30。
 4. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完（前后端都过）。
 5. [ ] **需要人工视觉判断** → 对照 `docs/design/current/{interface-language.md,component-patterns.md}`，并按 `docs/operations/ui-preview-and-browser-sanity.md` 记录 preview、routes/viewports、正式 browser result 与人工判断。额外本地 helper 证据必须标注 local-only；如果改变可复用 UI 方向，同步更新当前 design/spec。
    - 不要提交 screenshot manifest 或 bulk raster screenshots；只有用户明确批准的 public README/docs asset 可放入 allowlisted docs asset path。
-6. [ ] **改了 API 形状（增减字段 / 改命名 / 改可选性）** → 同 PR 把 `web/src/lib/types.ts` + `web/src/lib/api.ts` 改完，并补 page / 测试断言。
+6. [ ] **改了 API 形状（增减字段 / 改命名 / 改可选性）** → 同 PR 把 `web/src/lib/types.ts` + owning `web/src/lib/*Api.ts` façade 改完，并补 page / 测试断言。
 
 ---
 
@@ -444,14 +445,15 @@ export default defineConfig([
 
 | 改动 | 必须连带的修改 |
 |------|----------------|
-| 新增 / 修改 center HTTP 端点的请求 / 响应字段 | 1) 后端按 `.trellis/spec/backend/` 改完；2) `web/src/lib/types.ts` 加 / 改 `*Record` `*Input`，**保持 snake_case 与 Go JSON tag 一致**；3) `web/src/lib/api.ts` 加 / 改函数；4) page / component 调用方更新；5) 必要时 page 测试的 `toHaveBeenLastCalledWith` 断言一起更新 |
-| 新增 / 修改业务 API 调用 | 必须落到 `web/src/lib/api.ts`，**不要**在 page / component 里直接 `fetch()`；历史直连创建监控实例 API 已偿还，reviewer 不要让这类请求回流到 page |
+| 新增 / 修改 center HTTP 端点的请求 / 响应字段 | 1) 后端按 `.trellis/spec/backend/` 改完；2) `web/src/lib/types.ts` 加 / 改 `*Record` `*Input`，**保持 snake_case 与 Go JSON tag 一致**；3) owning `web/src/lib/*Api.ts` façade 加 / 改函数；4) page / component 调用方更新；5) 必要时 page 测试的 `toHaveBeenLastCalledWith` 断言一起更新 |
+| 新增 / 修改业务 API 调用 | 必须落到 `web/src/lib/` façade，**不要**在 page / component 里直接 `fetch()`；默认使用 `api.ts`，只有全部 consumer 都是 lazy route 且 fresh bundle 证据要求隔离时才使用 domain façade，详见 `state-and-data.md` |
+| 移动 API helper 到 route-lazy domain façade | wire shape/API tests 不变；fresh production build 后同时检查 entry 与 max async budget，不得让入口下降以换取 async 超限，也不得抬预算 |
 | 修改 Asset Decisions controller / route composition | 运行 `AssetDecisionsPage.test.tsx`、全部 `asset-decisions/` domain workflow/controller tests 与 `assetDecisionArchitectureContract.test.ts`；核对四个 filtered GET、11 GET renewal inventory、group/manual/record focus restore 和结构预算 |
 | 新增 page | `web/src/app/router.tsx` 注册路由 + colocate `<Page>.test.tsx`（至少 1 个 happy-path test） |
 | 新增 atom | `web/src/components/atoms/<Name>.tsx` + 同名 `.test.tsx` + `atoms/index.ts` 加 barrel export + `web/src/styles/partials/atoms.css` 加样式（用令牌） |
 | 新增 / 改 CSS 令牌 | `web/src/styles/tokens.css` 同步检查 3 套运行时主题（`:root` / `theme-houfeng-light` / `theme-classic-dark`）；`classic-light` 复用 `houfeng-light`，见 `.trellis/spec/web/styling-guidelines.md` |
 | 改首屏防闪烁脚本 | `web/public/theme-bootstrap.js` 与 `web/src/lib/theme.ts` 的 preset/mode allowlist、system scheme 和 `classic-light` 回退必须保持一致；`web/index.html` 只同步加载同源脚本，不得恢复 inline script |
-| 改路由注册 / 页面加载边界 | 保持 `appRoutes` 可被 `matchRoutes` 测试；路由页用 `React.lazy` + `RouteModuleFallback`；运行 `npm run build` 并确认没有 Vite large chunk warning，入口 chunk 不应回退到单个 500 kB+ app bundle |
+| 改路由注册 / 页面加载边界 | 保持 `appRoutes` 可被 `matchRoutes` 测试；路由页用 `React.lazy` + `RouteModuleFallback`；fresh build 后运行 `bundle:check`，确认 entry/max async 均在 ratchet 内且没有 Vite large chunk warning |
 
 ---
 

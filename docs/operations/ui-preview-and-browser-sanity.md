@@ -24,9 +24,9 @@ Use the lowest level that honestly proves the change.
 | Level | Required when | Evidence |
 | --- | --- | --- |
 | Preview URL | Any user-visible UI change | Running dev server URL and route list in the final report / PR body |
-| Repository Chromium gate | Every PR/main CI; especially core page UX, state, keyboard, CSP or responsive changes | `npm run test:e2e`: fail-closed fixture routes, 27 route/viewport matrix, state/a11y/security/geometry contracts |
+| Repository Chromium gate | Every PR/main CI; especially core page UX, state, keyboard, CSP or responsive changes | `npm run test:e2e`: fail-closed fixture routes, 30 route/viewport matrix, state/a11y/security/geometry contracts |
 | Local helper / center sample | Incremental detail route or real local data investigation | `visual_evidence.py`/CDP notes with explicit data source and local-only limitation |
-| Authenticated staging real lane | Release/Gate C | health version, UI login, nine real-data routes, cancel-only nested confirmation, reversible Settings save/restore, theme reload, sanitized artifact |
+| Authenticated staging real lane | Release/Gate C | health version, UI login, ten real-data routes, command-audit metadata-only presence, cancel-only nested confirmation, reversible Settings save/restore, theme reload, sanitized artifact |
 | Staging injection lane | Release/Gate C frontend resilience | Deployed assets/origin/auth with explicitly intercepted five-state/503/slow/long-list responses; never described as backend or production-data proof |
 | Local screenshot for review | First-viewport structure, page hierarchy, theme, or cross-page UX materially changes and a reviewer asks for visual context | Local, untracked screenshots or external attachments; do not commit bulk screenshots or manifests by default |
 | Manual review | Visual quality, taste, density, copy, or product judgment cannot be automated | Explicit reviewer notes; do not present automated tests as visual acceptance |
@@ -74,9 +74,9 @@ The fixture router is fail closed: method + canonical path/query must match, mut
 
 Current suites:
 
-- `core-routes.spec.ts`: nine routes × `1440x1000` / `1024x768` / `390x900` = 27 contracts;
+- `core-routes.spec.ts`: ten routes × `1440x1000` / `1024x768` / `390x900` = 30 contracts;
 - `page-states.spec.ts`: Dashboard five modes, controlled loading, explicit empty/error/success, 503 false-empty prevention and scoped retry;
-- `accessibility.spec.ts`: axe serious/critical=0 plus skip link, Tabs, Menu and nested Modal real-keyboard behavior;
+- `accessibility.spec.ts`: axe serious/critical=0 plus skip link, Tabs, Menu, nested Modal and command-audit local-scroll/advanced-filter real-keyboard behavior;
 - `security.spec.ts` / `fixture-router.spec.ts`: collector self-tests, CSP, unknown API, canonical query and mutation-body fail-closed behavior;
 - `visual-contracts.spec.ts`: 390px critical commands and named keyboard-scroll table region.
 
@@ -207,7 +207,7 @@ The local sample and real-data readiness workflow is documented in `docs/operati
 
 ## Core route matrix
 
-The repository broad gate always covers these nine top-level routes. A focused task can run one spec during development, but the full browser job remains required before merge.
+The repository broad gate always covers these ten top-level routes. A focused task can run one spec during development, but the full browser job remains required before merge.
 
 | Surface | Route | Why it matters |
 | --- | --- | --- |
@@ -217,11 +217,12 @@ The repository broad gate always covers these nine top-level routes. A focused t
 | Monitoring | `/monitoring` | Monitoring instances and runtime evidence for assets |
 | Targets | `/targets` | Service / entry observability evidence |
 | Events | `/events` | Diagnostic and audit timeline |
+| Command audit | `/command-audit` | Permanent metadata-only command attempts, stable cursor, and deleted-identity readback |
 | Providers | `/providers` | Provider directory, decision links and wide table scroll ownership |
 | Subscriptions | `/subscriptions` | Cost/renewal workbench |
 | Settings | `/settings` | Runtime configuration and theme controls |
 
-Detail routes such as `/vps/:vpsId`, `/monitoring/:monitoringInstanceId`, `/targets/:targetId` and archive/IP-quality routes remain task-specific expansion points. Add focused repository/local/staging evidence when their contract changes; do not multiply every detail route into the broad 27-case matrix without a stable reason.
+Detail routes such as `/vps/:vpsId`, `/monitoring/:monitoringInstanceId`, `/targets/:targetId` and archive/IP-quality routes remain task-specific expansion points. Add focused repository/local/staging evidence when their contract changes; do not multiply every detail route into the broad 30-case matrix without a stable reason.
 
 ## Recommended viewports
 
@@ -247,7 +248,7 @@ The workflow's secret-free `ref-guard` rejects any ref other than `refs/heads/ma
 
 The smoke checks `/api/healthz.version` before login, authenticates through the visible login form, and separates two evidence lanes:
 
-1. Real environment: nine actual routes, main-document security headers/CSP, cancel-only nested template confirmation, raw retention `snapshot → +1 → save/readback → finally restore/readback`, and theme persistence after reload.
+1. Real environment: ten actual routes, main-document security headers/CSP, command-audit metadata-only presence without requiring rows, cancel-only nested template confirmation, raw retention `snapshot → +1 → save/readback → finally restore/readback`, and theme persistence after reload.
 2. Deployed-frontend injection: Dashboard five modes, explicit VPS 503, controlled slow response, and long provider list across all three viewports. These steps prove deployed frontend resilience only.
 
 Staging Playwright disables trace, video and automatic screenshots, places internal output outside the audit path, and uses `preserveOutput: 'never'` so `error-context` snapshots cannot enter the artifact. Explicit screenshots mask login inputs and the user chip. `StagingAudit` stores only allowlisted document headers, sanitized origin-relative paths with query values redacted, method/status/timing, counters and step outcomes; it never stores cookies, Authorization, credentials, request bodies or response bodies.
