@@ -18,6 +18,47 @@ describe('Asset Decisions scenario template workflows', () => {
     vi.restoreAllMocks()
   })
 
+  it('keeps custom templates reachable after all seven built-in templates', async () => {
+    const builtinTemplates = Array.from({ length: 7 }, (_, index) => scenarioTemplate({
+      template_id: `adt_builtin_${index + 1}`,
+      title: `内置模板 ${index + 1}`,
+    }))
+    const customTemplate = scenarioTemplate({
+      template_id: 'adt_staging_audit',
+      builtin: false,
+      title: 'Staging 审计模板',
+    })
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      templatesBody: [...builtinTemplates, customTemplate],
+      routes: [
+        {
+          url: '/api/asset-decisions/scenario-templates/adt_staging_audit',
+          body: customTemplate,
+        },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    await openSecondaryWorkbench('场景与组合')
+    const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
+    expect(templatesSection).not.toBeNull()
+    expect(within(templatesSection!).getAllByRole('button', { name: '使用模板' })).toHaveLength(8)
+
+    const customCard = within(templatesSection!).getByText('Staging 审计模板').closest('article')
+    expect(customCard).not.toBeNull()
+    fireEvent.click(within(customCard!).getByRole('button', { name: '使用模板' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '资产决策场景模板详情' })
+    expect(within(dialog).getByRole('tab', { name: '状态' })).toBeInTheDocument()
+  })
+
   it('requires an internal confirmation step before archiving a custom scenario template', async () => {
     const customTemplate = scenarioTemplate({
       template_id: 'adt_custom_primary_standby',

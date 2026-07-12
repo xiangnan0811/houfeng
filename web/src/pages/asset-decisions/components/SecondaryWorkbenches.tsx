@@ -261,7 +261,7 @@ export function SecondaryWorkbenches({
                 />
               ) : (
                 <div className="asset-decision-template-launchers">
-                  {templatesState.templates.slice(0, 6).map((template) => (
+                  {templatesState.templates.map((template) => (
                     <article key={template.template_id} className="asset-decision-template-launcher">
                       <div>
                         <span className="asset-decision-chip-row">
