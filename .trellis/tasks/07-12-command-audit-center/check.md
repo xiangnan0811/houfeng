@@ -95,6 +95,14 @@ outcome-failed: execution=1.113ms, limit_rows=21, global_index_rows=360
 - 未 push、未创建 PR、未运行 required CI、未 merge/release，也未删除旧 planning 分支。
 - required CI 全绿前不能宣称远端交付完成；后续只有得到用户新授权才能恢复该流程。
 
+### Delivery resumption handoff
+
+- 2026-07-12 后续用户指令已授权 push、PR、CI、merge、release、Docker Hub 验证和最终清理，但明确要求 push 前 Trellis 无活跃任务且分支干净。
+- fetch 后 `origin/main` 仍为 `a375c0b0330b`，与本分支 merge-base 一致；分支仅包含预期功能提交，无主线漂移。
+- 归档前 fresh 本地门通过：`make verify-go`；Node 22.23.1 下 `make verify-web`（124 files / 865 tests、0 vulnerabilities、lint/type/build/bundle/CSS budgets）；Chromium E2E 64/64；三包 `go test -race -count=1`；真实 PostgreSQL 16 migrate/store/handler integration（1.464s / 4.146s / 0.639s）。
+- 首次 Docker bridge 启动在创建 veth 时被宿主环境拒绝，未进入测试；确认无残留后改用 host networking 启动同一 `postgres:16-alpine`，测试通过并删除容器。
+- 本任务据此只结束本地开发阶段并按用户前置条件归档。PR、required CI、merge、GitHub Release、publish-images 与 Docker Hub manifest 在归档时仍未发生，必须在后续流程中逐项取证，不能由本节替代。
+
 ## 6. Review findings resolved
 
 - 0050 从“删除表上全部 FK”收紧为只删除包含实例/actor 列的目标 FK，并用真实无关 FK 回归证明。

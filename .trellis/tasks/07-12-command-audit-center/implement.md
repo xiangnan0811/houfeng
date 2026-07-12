@@ -206,6 +206,13 @@ Full-gate findings already resolved:
 - 因此本轮允许的终点是：本地 feature branch 提交 + 本地单元/真实 PostgreSQL/fixture Chromium/人工视觉证据 + 提交后复核。
 - staging smoke、push、PR、required CI、merge、release 和远端分支清理均未获本轮授权；不得用本地证据替代这些层，也不得为满足旧 checkbox 违反最新用户指令。
 
+## Delivery resumption and Trellis handoff
+
+- 2026-07-12 后续指令已明确授权恢复完整交付链路，并要求按以下前置关系推进：无主线漂移与本地质量门通过 → Trellis 无活跃任务且分支干净 → push/PR → required CI → merge → 主线与 Release Please → release/publish-images → Docker Hub 镜像验证 → 本地同步与现场清理。
+- 按用户明确的 push 前置条件，本任务在本地实现、复审和 fresh 质量门完成后归档；PR、CI、合并、发布与镜像状态继续由远端权威证据逐步验证，不因 Trellis 归档而视为已通过。
+- 归档前 fresh 证据：`make verify-go`、Node 22.23.1 下的 `make verify-web`（124 files / 865 tests）、Chromium E2E（64/64）、三包 race detector，以及 PostgreSQL 16 migrate/store/handler integration 均通过；临时数据库容器已删除。
+- 上述原始 PR delivery checkbox 保留未勾选，用于如实反映归档时刻尚未发生的远端步骤；后续交付状态以 GitHub PR、Actions、Release 与 Docker Hub manifest 为准。
+
 ## Rollback points
 
 - After Task 1: code is still not wired; migration can be revised safely before PR. Never restore cascading FKs automatically once orphan audit rows may exist.
