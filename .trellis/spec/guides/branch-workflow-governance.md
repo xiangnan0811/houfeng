@@ -143,6 +143,8 @@ gh run list --workflow publish-images --limit 5
 
 If no release PR, GitHub Release, image workflow, or deploy job is expected for the change, record the exact evidence for that conclusion in the final report instead of leaving the status ambiguous.
 
+> **Release Please gotcha:** this repository can create or update a patch release PR for a `docs(...)` commit, including Trellis evidence/archive commits. A green release PR is not by itself authorization or a reason to publish. Inspect its body and changed files first; when the post-merge diff is documentation/task metadata only and no product release is intended, leave the release PR unmerged and record its URL, state, latest published tag, and why it is not release-worthy. Do not close it reflexively, because a later release-worthy commit may update the same rolling PR.
+
 ---
 
 ## Post-Release Cleanup
