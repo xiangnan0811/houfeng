@@ -131,6 +131,7 @@ verify-web: test-web-toolchain
 - `npm --prefix web run test:e2e:staging`：`web/playwright.staging.config.ts`；不启动本地 server，只访问 `HOUFENG_STAGING_BASE_URL`。
 - `.github/workflows/frontend-staging-smoke.yml`：仅 `workflow_dispatch(expected_version)`，`environment: staging`。
 - staging env：variable `HOUFENG_STAGING_BASE_URL`；secrets `HOUFENG_STAGING_USERNAME`、`HOUFENG_STAGING_PASSWORD`；input 映射为 `HOUFENG_EXPECTED_VERSION`。
+- `StagingAudit.waitForRequestsToSettle(): Promise<void>`：跟踪 page 的 `request` / `requestfinished` / `requestfailed` 生命周期；默认要求 500ms 持续空闲，30s 内不能 settle 时以脱敏 method/path 失败。
 
 #### 3. Contracts
 
@@ -140,7 +141,7 @@ verify-web: test-web-toolchain
 - CSP 只读取 `internal/center/http/csp-policy.txt`，main document header 必须精确相等；console/page/request/HTTP/CSP/unhandled rejection 默认全部阻断，只有测试显式声明的 method/path/status 可放行。
 - staging real lane 与 deployed-frontend injection lane 必须在 manifest 中分开。真实 lane验证版本、UI 登录、九路由、自定义模板 cancel-only、设置保存/恢复、主题 reload；injection lane验证 Dashboard 五态、503、受控慢响应与长列表三视口，不能冒充后端/生产数据通过。
 - staging 设置 mutation 必须串行、先快照、临时 `+1`、readback，并在 `finally` 恢复/readback。workflow 固定 concurrency 且 `cancel-in-progress: false`；非 `main` ref 在读取 environment secrets 前失败。
-- staging 的 audited route navigation 在旧文档不是 `about:blank` 时，必须先 `await page.evaluate(() => document.fonts.ready)`，再检查 diagnostics，最后才调用 `page.goto`。否则主动导航会取消仍在加载的旧文档 WOFF2，并把 harness 自造的 `net::ERR_ABORTED` 误报成部署失败；不得用宽泛 aborted-request allowlist 掩盖这个时序错误。
+- staging 的 audited route navigation 在旧文档不是 `about:blank` 时，必须先等待 tracked requests 持续空闲，再等待 `document.fonts.ready`、检查 diagnostics，最后才调用 `page.goto`；新 route 的 heading 可见后还必须再次等待 requests/fonts settle，才检查 layout/diagnostics 和截图。heading 可见只证明 route shell 已渲染，不能证明真实业务数据已完成。否则主动导航会取消旧文档仍在加载的 API/WOFF2，并把 harness 自造的 `net::ERR_ABORTED` 误报成部署失败；不得用宽泛 aborted-request allowlist 掩盖这个时序错误。
 - staging 禁止 trace/video/自动截图，并以 `preserveOutput: 'never'` 丢弃 Playwright `error-context` 等内部输出；显式截图必须 mask 登录字段和用户 chip。artifact 只含 allowlisted headers、origin-relative 脱敏 path/status/timing、计数、步骤与截图，不含 cookie、Authorization、密码、token、request/response body。
 
 #### 4. Validation & Error Matrix
@@ -152,21 +153,22 @@ verify-web: test-web-toolchain
 | main CSP 不等于 policy source、console/page/network 出现非预期错误 | 当前 browser test 失败 |
 | page 产生横向 overflow、关键命令裁切或宽表无具名键盘 scroll region | route/visual contract 失败 |
 | staging expected/observed version 不同、凭据/URL缺失 | smoke 在登录/业务验证前失败，只报告缺失变量名 |
-| audited route navigation 时旧文档字体仍在加载 | 先等待旧文档 `document.fonts.ready`；真实字体加载失败仍由 `requestfailed` 阻断，不忽略 `ERR_ABORTED` |
+| audited route heading 可见但业务 API 仍在加载 | 等待 tracked requests 连续 500ms 为空；30s 未 settle 时列出脱敏 method/path 并失败，不能截图或继续导航 |
+| audited route navigation 时旧文档字体仍在加载 | requests settle 后再等待旧文档 `document.fonts.ready`；真实字体加载失败仍由 `requestfailed` 阻断，不忽略 `ERR_ABORTED` |
 | staging 设置恢复失败 | run 阻断并标记 `settings-restore`，不得继续归档 |
 | 非 `refs/heads/main` 手工 dispatch | secret-free `ref-guard` 失败，environment job 不启动 |
 | 无真实 staging environment/凭据 | 仓库 gate 可合并，但不得把 Task/Gate C 标记完成 |
 
 #### 5. Good / Base / Bad Cases
 
-- Good：PR 的 source gate 与 58 个 Chromium contracts 都绿；release 后由 main ref dispatch staging，每次 route transition 先 settle 旧文档字体，artifact 明确区分 real-data 与 injection。
+- Good：PR 的 source gate 与 58 个 Chromium contracts 都绿；release 后由 main ref dispatch staging，每次 route transition 前后都 settle tracked requests/fonts，成功截图不保留 PageState loading surface，artifact 明确区分 real-data 与 injection。
 - Base：普通纯逻辑改动跑 focused Vitest + `make verify-web`；未触及 UI 时无需凭空新增 browser case，但现有 browser job仍必须绿。
 - Bad：把失败 API兜底为 `[]`、允许所有 4xx/5xx、增加 retry 掩盖 flake、抬预算让 CI 变绿，或用 mock/injection 声称真实 staging 通过。
 
 #### 6. Tests Required
 
 - `scripts/check-web-quality-gates.test.sh`：package scripts、Make 调用链、browser job 作用域、staging dispatch/ref/environment/concurrency/permissions/artifact 合同。
-- `web/src/security/stagingAuditContract.test.ts`：用 TypeScript AST 断言 `gotoAuditedRoute` 的旧文档 font wait 位于首个 `page.goto` 之前，并覆盖 locationless expected HTTP console correlation 的正反例。
+- `web/src/security/stagingAuditContract.test.ts`：用 fake timers 证明 request idle window 会被级联请求重置且 timeout 失败；用 TypeScript AST 断言 `gotoAuditedRoute` 在首个 `page.goto` 前后都等待 tracked requests，并保持旧文档 font wait 位于 navigation 前；同时覆盖 locationless expected HTTP console correlation 的正反例。
 - `web/e2e/{auth-router,core-routes,page-states,fixture-router,security,accessibility,visual-contracts}.spec.ts`：认证、27 route matrix、五态/四态、fail-closed、diagnostics、axe/键盘、390px/局部滚动。
 - 修改 audit/staging harness 后至少运行 `tsc -b`、ESLint 与 source contract；真实 lane 只能在配置完成的 GitHub staging environment 验收。
 
@@ -186,16 +188,21 @@ concurrency:
 ```
 
 ```ts
-// Wrong: page.goto 会主动取消旧文档仍在加载的字体。
+// Wrong: heading 可见时 API/font 仍可能在加载，page.goto 会主动取消它们。
+await expect(page.getByRole('heading', { name: route.heading })).toBeVisible()
 await page.goto(route.path)
-await page.evaluate(() => document.fonts.ready)
 
-// Correct: 先让旧文档 settle，并保留严格 diagnostics，再开始导航。
+// Correct: 导航前后都等待真实请求与字体 settle，并保留严格 diagnostics。
 if (page.url() !== 'about:blank') {
+  await audit.waitForRequestsToSettle()
   await page.evaluate(() => document.fonts.ready)
   await audit.assertClean(page)
 }
 await page.goto(route.path)
+await expect(page.getByRole('heading', { name: route.heading })).toBeVisible()
+await audit.waitForRequestsToSettle()
+await page.evaluate(() => document.fonts.ready)
+await audit.assertClean(page)
 ```
 
 ---

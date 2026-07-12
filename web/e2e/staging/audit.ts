@@ -106,6 +106,87 @@ function requestDuration(request: Request): number | null {
   return timing.responseEnd >= 0 ? Math.round(timing.responseEnd) : null
 }
 
+type RequestSettleOptions<T> = Readonly<{
+  idleMs?: number
+  timeoutMs?: number
+  describePending?: (request: T) => string
+}>
+
+export class RequestSettleTracker<T> {
+  private readonly pending = new Set<T>()
+  private readonly activityWaiters = new Set<() => void>()
+  private activityVersion = 0
+
+  start(request: T): void {
+    const previousSize = this.pending.size
+    this.pending.add(request)
+    if (this.pending.size !== previousSize) this.recordActivity()
+  }
+
+  finish(request: T): void {
+    if (this.pending.delete(request)) this.recordActivity()
+  }
+
+  async waitForIdle(options: RequestSettleOptions<T> = {}): Promise<void> {
+    const idleMs = options.idleMs ?? 500
+    const timeoutMs = options.timeoutMs ?? 30_000
+    if (!Number.isFinite(idleMs) || idleMs <= 0) {
+      throw new Error('staging request idle window must be a positive number')
+    }
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      throw new Error('staging request settle timeout must be a positive number')
+    }
+
+    const deadline = Date.now() + timeoutMs
+    while (true) {
+      const remainingMs = deadline - Date.now()
+      if (remainingMs <= 0) throw this.timeoutError(timeoutMs, options.describePending)
+
+      const activityVersion = this.activityVersion
+      const waitingForIdleWindow = this.pending.size === 0
+      const waitMs = waitingForIdleWindow ? Math.min(idleMs, remainingMs) : remainingMs
+      const activityObserved = await this.waitForActivity(activityVersion, waitMs)
+      if (activityObserved) continue
+      if (waitingForIdleWindow && this.pending.size === 0 && waitMs === idleMs) return
+      throw this.timeoutError(timeoutMs, options.describePending)
+    }
+  }
+
+  private recordActivity(): void {
+    this.activityVersion += 1
+    for (const waiter of [...this.activityWaiters]) waiter()
+  }
+
+  private waitForActivity(version: number, timeoutMs: number): Promise<boolean> {
+    if (this.activityVersion !== version) return Promise.resolve(true)
+    return new Promise((resolve) => {
+      let settled = false
+      const finish = (activityObserved: boolean) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        this.activityWaiters.delete(onActivity)
+        resolve(activityObserved)
+      }
+      const onActivity = () => finish(true)
+      const timeout = setTimeout(() => finish(false), timeoutMs)
+      this.activityWaiters.add(onActivity)
+      if (this.activityVersion !== version) onActivity()
+    })
+  }
+
+  private timeoutError(
+    timeoutMs: number,
+    describePending: ((request: T) => string) | undefined,
+  ): Error {
+    const pending = [...this.pending]
+      .slice(0, 10)
+      .map((request) => describePending?.(request) ?? 'pending request')
+    const detail = pending.length > 0 ? `:\n${pending.join('\n')}` : ''
+    return new Error(`staging requests did not settle within ${timeoutMs}ms${detail}`)
+  }
+}
+
 export class StagingAudit {
   private readonly consoleErrors: string[] = []
   private readonly pageErrors: string[] = []
@@ -120,6 +201,7 @@ export class StagingAudit {
   private readonly documents: AuditDocumentEntry[] = []
   private readonly steps: AuditStep[] = []
   private readonly browserDiagnostics: BrowserSideDiagnostic[] = []
+  private readonly requestSettleTracker = new RequestSettleTracker<Request>()
 
   async install(page: Page): Promise<void> {
     page.on('console', (message) => {
@@ -135,7 +217,14 @@ export class StagingAudit {
     page.on('pageerror', (error) => {
       this.pageErrors.push(`${error.name}: ${sanitizeMessage(error.message)}`)
     })
+    page.on('request', (request) => {
+      this.requestSettleTracker.start(request)
+    })
+    page.on('requestfinished', (request) => {
+      this.requestSettleTracker.finish(request)
+    })
     page.on('requestfailed', (request) => {
+      this.requestSettleTracker.finish(request)
       this.requestFailures.push(
         `${request.method()} ${sanitizePath(request.url())} ${sanitizeMessage(request.failure()?.errorText ?? 'unknown')}`,
       )
@@ -205,6 +294,12 @@ export class StagingAudit {
         (entry) => entry.kind === 'unhandledrejection',
       ).length,
     }
+  }
+
+  async waitForRequestsToSettle(): Promise<void> {
+    await this.requestSettleTracker.waitForIdle({
+      describePending: (request) => `${request.method()} ${sanitizePath(request.url())}`,
+    })
   }
 
   async assertClean(page: Page): Promise<void> {

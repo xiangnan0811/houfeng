@@ -242,7 +242,9 @@ async function gotoAuditedRoute(
   route: { path: string; heading: string | RegExp },
 ): Promise<void> {
   if (page.url() !== 'about:blank') {
+    await audit.waitForRequestsToSettle()
     await page.evaluate(() => document.fonts.ready)
+    await expect(page.locator('main#main-content .page-state--loading')).toHaveCount(0)
     await audit.assertClean(page)
   }
   const response = await page.goto(route.path, { waitUntil: 'domcontentloaded' })
@@ -255,7 +257,9 @@ async function gotoAuditedRoute(
   await expect(main).toBeVisible()
   await expect(main).not.toBeEmpty()
   await expect(page.getByRole('heading', { name: route.heading }).first()).toBeVisible()
+  await audit.waitForRequestsToSettle()
   await page.evaluate(() => document.fonts.ready)
+  await expect(main.locator('.page-state--loading')).toHaveCount(0)
   await expectNoDocumentOverflow(page)
   await audit.assertClean(page)
 }
