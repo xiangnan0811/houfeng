@@ -112,3 +112,57 @@ func TestAppACLManifestPersistedV1DigestFixtureUsesDifferentBodyLengths(t *testi
 		t.Fatalf("length encodings unexpectedly collide: %x", left)
 	}
 }
+
+func TestValidateAppACLManifestChainV1RequiresContiguousLinkedHead(t *testing.T) {
+	migrationBody, err := CanonicalMigrationSetBodyV1([]MigrationChecksumEntry{{
+		Filename: "0001_initial_schema.sql",
+		Checksum: checksumFromHex(t, strings.Repeat("01", 32)),
+	}})
+	if err != nil {
+		t.Fatalf("CanonicalMigrationSetBodyV1() error = %v", err)
+	}
+	privilegeBody, err := CanonicalPrivilegeSetBodyV1(
+		[]AppACLRoleBinding{
+			{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
+			{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("CanonicalPrivilegeSetBodyV1() error = %v", err)
+	}
+	first, err := NewAppACLManifestPersistedV1(1, [32]byte{}, migrationBody, privilegeBody)
+	if err != nil {
+		t.Fatalf("NewAppACLManifestPersistedV1(first) error = %v", err)
+	}
+	second, err := NewAppACLManifestPersistedV1(2, first.ManifestDigest, migrationBody, privilegeBody)
+	if err != nil {
+		t.Fatalf("NewAppACLManifestPersistedV1(second) error = %v", err)
+	}
+	head := AppACLManifestHeadV1{ManifestRevision: second.ManifestRevision, ManifestDigest: second.ManifestDigest}
+	if err := ValidateAppACLManifestChainV1([]AppACLManifestPersistedV1{first, second}, head); err != nil {
+		t.Fatalf("ValidateAppACLManifestChainV1() error = %v", err)
+	}
+
+	gap, err := NewAppACLManifestPersistedV1(3, first.ManifestDigest, migrationBody, privilegeBody)
+	if err != nil {
+		t.Fatalf("NewAppACLManifestPersistedV1(gap) error = %v", err)
+	}
+	if err := ValidateAppACLManifestChainV1([]AppACLManifestPersistedV1{first, gap}, head); err == nil {
+		t.Fatal("ValidateAppACLManifestChainV1() error = nil for revision gap")
+	}
+	var unexpectedPrevious [32]byte
+	unexpectedPrevious[0] = 1
+	wrongPredecessor, err := NewAppACLManifestPersistedV1(2, unexpectedPrevious, migrationBody, privilegeBody)
+	if err != nil {
+		t.Fatalf("NewAppACLManifestPersistedV1(wrong predecessor) error = %v", err)
+	}
+	if err := ValidateAppACLManifestChainV1([]AppACLManifestPersistedV1{first, wrongPredecessor}, head); err == nil {
+		t.Fatal("ValidateAppACLManifestChainV1() error = nil for previous digest drift")
+	}
+	wrongHead := head
+	wrongHead.ManifestRevision--
+	if err := ValidateAppACLManifestChainV1([]AppACLManifestPersistedV1{first, second}, wrongHead); err == nil {
+		t.Fatal("ValidateAppACLManifestChainV1() error = nil for stale manifest head")
+	}
+}

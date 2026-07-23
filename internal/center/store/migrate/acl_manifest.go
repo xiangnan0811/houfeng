@@ -541,6 +541,13 @@ type AppACLManifestPersistedV1 struct {
 	ManifestDigest         [32]byte
 }
 
+// AppACLManifestHeadV1 mirrors the non-null pair held by
+// app_acl_manifest_head after the first manifest revision is committed.
+type AppACLManifestHeadV1 struct {
+	ManifestRevision uint64
+	ManifestDigest   [32]byte
+}
+
 // NewAppACLManifestPersistedV1 produces a fully bound manifest value from two
 // canonical body bytes. It never derives the revision from migration names.
 func NewAppACLManifestPersistedV1(
@@ -572,6 +579,38 @@ func (manifest AppACLManifestPersistedV1) Validate() error {
 	}
 	if manifest.ManifestDigest != manifest.computedDigest() {
 		return fmt.Errorf("app ACL manifest digest does not match canonical fields")
+	}
+	return nil
+}
+
+// ValidateAppACLManifestChainV1 verifies the complete, ordered immutable
+// manifest chain and its persisted head pointer. Callers must supply every
+// revision in manifest_revision order; a partial, reordered, or far-tail
+// result is rejected rather than treated as an equivalent chain.
+func ValidateAppACLManifestChainV1(manifests []AppACLManifestPersistedV1, head AppACLManifestHeadV1) error {
+	if len(manifests) == 0 {
+		return fmt.Errorf("app ACL manifest chain has no revisions")
+	}
+	if len(manifests) > 999999 {
+		return fmt.Errorf("app ACL manifest chain has too many revisions")
+	}
+
+	for index, manifest := range manifests {
+		expectedRevision := uint64(index + 1)
+		if manifest.ManifestRevision != expectedRevision {
+			return fmt.Errorf("app ACL manifest chain revision %d has manifest revision %d", expectedRevision, manifest.ManifestRevision)
+		}
+		if err := manifest.Validate(); err != nil {
+			return fmt.Errorf("validate app ACL manifest revision %d: %w", expectedRevision, err)
+		}
+		if index > 0 && manifest.PreviousManifestDigest != manifests[index-1].ManifestDigest {
+			return fmt.Errorf("app ACL manifest revision %d does not bind the previous manifest digest", expectedRevision)
+		}
+	}
+
+	latest := manifests[len(manifests)-1]
+	if head.ManifestRevision != latest.ManifestRevision || head.ManifestDigest != latest.ManifestDigest {
+		return fmt.Errorf("app ACL manifest head does not match latest revision")
 	}
 	return nil
 }
