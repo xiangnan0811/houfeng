@@ -1,0 +1,517 @@
+# VPS 详情页体验深度审查与重构设计
+
+## Goal
+
+基于 0.59.0 staging 的真实使用流程、现有代码与数据能力，完整审查 VPS 详情页在功能、信息架构、视觉层级、交互可发现性、资产历史和经验记录方面的问题，并形成一套克制、清晰、适合长期运维使用的重构设计。设计应同时降低首次使用门槛和高频用户的操作成本，但不以装饰性视觉或不必要功能换取“丰富感”。
+
+完整书面设计已由用户于 2026-07-14 明确批准；当前只进入实施计划与 11 个子任务的规划阶段，未经后续明确批准仍不开始产品实现。
+
+## Requirements
+
+### 用户已报告的问题
+
+- 页面整体朴素、颜色与视觉层级单一，重要信息需要逐项仔细阅读；首次或低频使用时难以快速建立页面心智模型。
+- 按钮、链接等可点击元素与普通文本之间差异不明显，功能可发现性依赖长期摸索。
+- 资产历史存在同类展示问题，且当前能力过于简单，难以支持更深入的资产变化理解与回溯。
+- “记录经验”目前主要依靠摘要、详情两个自由文本字段，无法系统记录实际排查、修复过程、关键发现与后续行动；期望支持 Markdown 形式的富文本记录。
+
+### 研究与设计要求
+
+- 在 0.59.0 staging 环境中实际检查页面，而非只依据截图或主观推断。
+- 对照现有前后端代码、接口、数据模型、权限和测试，区分纯展示问题、交互问题、信息架构问题与能力缺口。
+- 覆盖 VPS 详情页的主要任务流、状态与边界场景，并发现用户尚未指出的问题。
+- 调研相关开源和商业产品的优秀模式及其适用前提，避免直接照搬不符合本项目定位的设计。
+- 至少比较 2–3 个可行的整体方向，说明信息密度、学习成本、操作效率、实现复杂度与风险取舍，并给出推荐方案。
+- 可使用可视化伴侣展示信息架构、布局、关键交互和方案对比。
+- 经验记录设计需覆盖 Markdown 编辑与阅读体验，以及问题排查、修复、发现等真实运维场景；最终范围由后续需求访谈与证据共同确定。
+- `资产活动` 与 `运维记录` 必须具有不同的数据和交互语义：
+  - 资产活动由系统生成，服务审计与事实回溯，不允许普通编辑覆盖原始事件。
+  - 运维记录由用户编写，支持 Markdown、后续编辑和可追溯修订，服务问题排查、修复验证、重要发现与长期知识沉淀。
+  - 两者可在最近活动中按时间合流，但必须显示来源与类型，不能混淆人工判断和系统事实。
+- 完整设计已经过分节和整文评审；用户之后曾授权并启动平台基础的旧合同实施，但方案 A 安全修订使该实现分支重新冻结在 planning review。旧启动授权不覆盖本轮修订，不重复执行 `task.py start`；只有六份父/子规划工件最终审阅并再次获得明确书面批准后，才恢复同一平台子任务。
+- 默认页的首要成功标准是：用户无需操作即可在 30 秒内确认当前 VPS 的身份、正常/风险状态、最近变化和当前最需要处理的事项；深度任务通过显式入口进入，但不把全部内容展开在概览中。
+- 稳定/无异常状态只展示常规身份、状态、关系和近期活动内容；不得渲染 `动作：无`、空异常卡、禁用异常按钮或为未来异常预留的空白区域。
+- 异常、临期、缺证据或生命周期问题出现时，才按优先级插入对应状态说明和处理入口；异常解除后该异常界面必须完全退出布局。
+- 深度内容按任务复杂度进入居中 modal 或独立页面；短而有界的当前 VPS 操作可留在 modal，适合检索、比较、长内容阅读或持续工作的能力应使用独立页面。
+- 整体信息架构采用“任务导向概览 + 独立工作区”：
+  - `/vps/:id` 是当前 VPS 的 30 秒概览与任务入口，不承载完整历史、长记录编辑、跨主体比较或所有关联管理表单。
+  - 单主体活动、记录和证据使用保留当前 VPS 身份上下文的独立子页面；项目级记录中心与比较工作台拥有独立一级路由和跨主体视角。
+  - 各 VPS 子页面共享轻量身份条、局部导航、返回来源与筛选上下文，但不建立承载所有功能的固定大标签壳。
+  - 短而有界的资料/关联编辑使用 modal；需要搜索、筛选、比较、长文阅读编辑或持续工作的任务使用可深链、可返回、状态写入 URL 的页面。
+  - 不采用把所有能力继续塞入一个长页面的吸顶目录方案，也不复制一套仅在 VPS 标签内存在的记录产品。
+- VPS 概览后的入口与内容顺序必须遵循稳定的任务层级：
+  - 实际异常存在时，异常事实、影响与必要处理入口临时覆盖为最高优先级；恢复后完全退出布局。
+  - 正常状态下，监控、IP 质量等观测详情，以及最近变化、单主体记录时间线和“新建记录”是首级深度入口。
+  - 订阅/成本、服务、域名和监控实例等关联上下文为第二级导航；它们应可发现，但不与首级排查入口争夺同等视觉权重。
+  - 基础资料、关联维护、续费决策等修改能力归入明确的次级管理入口；归档、取消、永久清理等低频高风险操作归入生命周期分组，并且只在当前状态允许或需要时出现。
+  - 桌面、窄屏、移动端和键盘导航必须保持同一语义优先级；响应式布局不得只是把桌面全部内容原顺序纵向堆叠。
+- 已确认的 VPS 概览视觉结构采用以下稳定骨架：
+  - 轻量身份头包含名称、当前状态、服务商/地域/用途与数据更新时间；首层只保留“新建记录”“查看时间线”和分组管理菜单三个显式动作，并提供概览/活动/记录/证据局部导航。
+  - 首个常规内容区并列呈现综合状态、监控、IP 质量和下次续费，各自显示数据新鲜度；资产事实区只放稳定身份与配置，不再次复制同一状态摘要。
+  - 最近变化区将系统活动与人工记录按真实时间合流并明确标源；关联上下文使用带常驻进入指示的紧凑入口展示监控、订阅、服务和域名规模与最近状态。
+  - 稳定态从身份头直接进入常规概况；异常态在两者之间插入带影响、证据和处理入口的状态块，将常规内容向下推而不替换，恢复后整块移除。
+  - 视觉以中性表面和有限边界建立层级，蓝色只突出主操作，绿色/黄色/红色只表达可解释状态；可点击项不能只依赖 hover 变色或透明整行命中。
+- 记录能力需要同时提供：
+  - 侧边栏可达的一级记录入口，用于跨 VPS 检索、筛选和横向比较；
+  - 从 VPS 详情进入的当前 VPS 记录视图，用于按时间纵向回顾同一 VPS；
+  - 两种入口必须复用一致的数据与筛选语义，不能形成两个互相漂移的记录产品。
+- 记录能力按项目级“记录中心”设计，不限定为 VPS 私有功能：
+  - VPS、监控实例、探测对象是可独立记录和纵向回顾的主要运维主体。
+  - 订阅、服务、域名、服务商、事件和命令审计可作为关联证据、受影响对象或上下文引用。
+  - 各主要主体详情页提供预筛后的记录/活动入口；一级记录页面负责跨主体搜索、筛选、比较和知识复用。
+  - 设置等并非运维主体的数据不为了“通用”而强行纳入主体模型。
+  - 主体/关联使用版本化 kind/role 注册表而非任意字符串：VPS、监控实例、Target 可作 primary；订阅、服务、域名、服务商、监控事件、命令审计只按明确的 affected/context/billing/trigger/change/evidence 等 related role 使用。每个 kind 必须提供权限、allowlist 身份快照、搜索、live route/tombstone、导入导出和来源删除合同；记录详情返回全部有序关系而不只显示数量。
+- 人工运维记录采用“类型化文档 + Markdown 正文”模型：
+  - 共享结构化元数据至少覆盖标题、状态、影响级别、发生/解决时间、主要主体、关联对象、证据、标签、作者和修订信息。
+  - 排障、维护/变更、迁移、服务商沟通、账单、重要发现、一般笔记等类型提供不同的可选 Markdown 模板。
+  - 模板帮助记录现象、排查、根因、修复、验证与后续行动，但正文仍允许自由组织，不把真实排障强制拆成繁琐的刚性字段。
+  - 模板使用版本化 ID，只在新草稿或用户明确插入时生成普通 Markdown/字段建议；历史修订保存所用模板 provenance，模板升级不重写已有正文。切换类型默认保留正文，只预览新模板建议，未经明确选择不得替换或重复插入段落。
+- 运维记录使用“文档生命周期 + 类型业务状态 + 统一状态组”的双层状态模型：
+  - 正式记录的文档生命周期只有有效与已归档；工作草稿是作者私有的独立对象，永久删除审计是记录已消失后的无内容投影，两者都不是可写入 `records.lifecycle` 的记录状态。该层不与问题是否解决混为一个字段。
+  - 排障默认流程为待排查→排查中→观察验证→已解决/已关闭；维护/迁移为计划中→执行中→验证中→已完成/已取消；服务商沟通为待联系→等待服务商/等待我方→已解决/已关闭；账单为待核对→处理中→已解决/已关闭。
+  - 类型业务状态必须映射到统一状态组：待处理、进行中、等待中、验证中、已完成、已取消，用于记录中心的跨类型筛选和统计。
+  - 一般笔记和重要发现默认不要求业务状态；界面直接不渲染状态字段，不显示“不适用”或空状态占位。
+  - 业务状态变更是正式编辑，同时产生新修订和明确的系统活动。
+  - 每种业务记录类型定义推荐流转图并突出合理的下一状态，但采用引导式而非僵硬的逐步状态机：正常前进可直接保存，跳过阶段、回退或从终态重新打开仍允许，但必须填写原因。
+  - 非推荐流转、重开和回退都产生正式修订与明确活动；重开后旧完成时间和结论保留在历史修订中，当前投影恢复为未完成，下一次完成生成新的当前完成时间。
+  - 更改记录类型必须先预览字段、模板和状态映射；当前状态与新类型不兼容时由用户显式选择新状态，禁止静默重置或伪造中间状态。
+  - 服务端只硬性阻止真正的语义矛盾，例如已完成却缺少完成时间、已取消却没有取消原因；不得强制用户为了满足流程图而保存没有实际信息的中间状态。
+  - 自动保存、行动项完成、监控恢复、评论或系统事件均不能自动改变记录业务状态，只能产生建议并由有权用户确认。
+- 运维记录支持受管、版本安全的用户附件：
+  - 支持粘贴/上传截图，以及 PDF、纯文本/日志、JSON/YAML、CSV、配置和 patch/diff 等常见排障材料。
+  - 可安全预览白名单覆盖 PNG、JPEG、WebP、PDF，以及 UTF-8 的纯文本、Markdown、日志、JSON、YAML、CSV/TSV、INI/TOML 和 patch/diff；大文本只内联预览前 5 MiB，原文件仍可按权限下载。
+  - ZIP、TAR、GZIP、Zstandard 等排障包只有在结构检查和 required scanner 成功后才可保存且只允许下载；加密包、嵌套/解压炸弹、签名/扩展名不匹配和已判定危险的包立即拒绝。scanner 暂时不可用时，在途包保持 quarantine、不可引用/预览/下载，恢复后重试；超过配置的隔离期限则 `expired/rejected` 并清理。required scanner 未配置或健康检查失败时拒绝创建新的压缩包上传，绝不降级放行。可执行文件、脚本包、HTML、SVG、宏文档、磁盘镜像及其他主动内容拒绝上传。
+  - 附件是用户提供的上下文，必须在界面、数据模型和导出中与服务端生成的可验证系统证据区分，不得使用相同的“系统事实”标识。
+  - 附件内容首次正式保存后不可就地替换；记录修订保存当时的附件引用，当前修订移除或替换文件不破坏旧修订。
+  - 附件元数据至少包含原始文件名、安全展示名、字节数、服务端检测的 MIME、内容哈希、上传者与上传时间。
+  - 服务端必须检测真实 MIME、文件签名、扩展名一致性、内容哈希、图片像素和文档复杂度，并在隔离检查完成前保持 quarantine 状态；只有安全准入类型可在沙箱阅读面中预览，任何文件内容都不在应用权限上下文中执行。
+  - 远程 URL 默认仅作外部链接，服务端不自动抓取，避免 SSRF、意外认证请求和未知敏感内容持久化。
+  - 默认配额为单文件 50 MiB、单记录 500 MiB、项目总量 10 GiB，并在总量达到 80% 时预警；管理员可调整。配额耗尽只阻止新增附件，不得阻止保存纯文字内容、删除当前引用或修改已有记录。
+  - 设置与管理视图显示容量使用、隔离/拒绝原因和可安全清理的孤立文件，不得删除仍被任一历史修订引用的内容。
+  - 附件正文存储不得依赖临时容器文件系统或 PostgreSQL 大 JSON；存储抽象同时支持单节点持久化目录和 S3 兼容对象存储，部署必须显式配置数据卷/凭据，并将附件纳入备份、恢复、迁移与哈希完整性检查。
+  - 附件扫描/预览、归档解包、证据静态渲染和 Chromium PDF 导出等内容处理器不得留下未建模副本：默认在逐任务私有 tmpfs/profile/cache 中运行，禁用 core dump 与共享缓存，宿主 swap 必须禁用或使用不随备份保留的临时加密键；任务创建后、写入任何字节前登记 workspace，成功、取消、超时和崩溃都由可重试 janitor 生成清理 receipt。
+  - 外部 scanner/renderer 必须作为受管 processor 明确声明数据位置、最大保留、任务身份和删除/核验接口，并纳入删除预览、最长窗口和 purge receipt；无法界定保留或验证清理的 processor 不得在启用永久删除能力的记录材料上使用。临时 workspace/profile/cache 必须与应用备份隔离；无法隔离时按受管恢复源登记，不能默认为“临时所以不存在”。
+- 记录编辑器采用“Markdown 源文为权威 + 结构化引用块”的文档模型：
+  - 每个正式修订保存可移植 Markdown 源文和版本化的结构化引用清单，不使用某个所见即所得编辑器的私有 JSON 作为唯一权威内容。
+  - 支持标题、列表、任务清单、表格、引用、链接、脚注、围栏代码块和语法高亮；原始 HTML、脚本、事件属性和其他可执行渲染内容禁用。
+  - 编辑体验同时提供工具栏、快捷键、类型模板、单独编辑/预览与分栏模式，不要求首次用户记住全部 Markdown 语法。
+  - 系统证据和受管附件通过稳定、版本化引用块插入正文；Markdown 只保存引用标识和可读说明，不嵌入快照 JSON、二进制或 `data:` URL。
+  - 阅读时引用块渲染为明确区分证据/附件来源的紧凑卡片、图表、图片或文件卡，并可展开或进入深度详情；记录阅读面同时提供完整证据/附件目录。
+  - 从当前正文移除引用只影响新修订；历史修订仍必须能解析当时的快照或附件。
+  - Markdown 导出需把结构化引用物化为可读标题、观测时间、摘要和文件清单，使文档离开候风后仍能理解；外部图片默认不直接热加载，需持久嵌入时转为受管附件。
+  - 已确认的编辑器使用独立全页面：顶部同时显示当前正式修订、明确的自动草稿状态和“保存为新修订”动作；标题与适用的类型、状态、影响、主体、负责人、跟进时间和可见性元数据位于正文之前。
+  - 正文工作区支持编辑/分栏/预览三种模式、常用 Markdown 工具栏、结构化证据/附件插入和安全预览；桌面材料侧栏分别列出系统证据、用户附件、行动项、大纲与本次正式保存影响，窄屏改为可打开的抽屉而非挤压正文。
+  - 编辑器中的引用块是对稳定引用语法的可视化装饰，底层仍保留可移植 Markdown 与版本化引用清单；阅读预览明确区分“系统证据”和“作者判断”，不把正文结论渲染为自动事实。
+  - 添加证据使用独立选择器：按证据类型选择来源、对象、绝对时间窗、精度、指标与敏感拓扑，并在确认前显示服务端可生成性、实际覆盖、桶数、样本质量、schema、预计体积、脱敏结果和长期语义。
+- 记录中心使用服务端索引与明确版本范围的检索合同：
+  - 默认只检索每条有效记录的最新正式修订，可搜字段包括标题、Markdown 纯文本、标签、类型/状态、主体与关联对象身份、规范化证据摘要和附件展示名。
+  - 已归档记录只在用户显式选择归档/全部范围时加入结果；不与默认有效列表混合。
+  - 历史修订只在显式开启“搜索历史版本”后索引/返回；结果必须标明修订号、修改时间和“非当前内容”，并打开对应修订/差异视图。
+  - 工作草稿仅在草稿恢复入口向所属用户展示，不进入普通搜索、统计、比较或顶部全局搜索；永久删除审计不得通过原标题、正文或证据内容搜索。
+  - 全文检索、结构化筛选、排序和稳定游标分页均由服务端执行；应用筛选反映到可规范化、可分享、可返回的 URL，续页游标封装固定查询范围与排序键。
+  - 主要主体与关联对象必须分别索引当时身份快照、实时 route 和 tombstone，并支持独立 primary/related 筛选与从记录反向导航；对象删除后仍可在原权限边界内搜到历史身份，但只显示 tombstone，不按名称自动重连。
+  - 顶部全局搜索只返回当前有效记录的少量高相关摘要，并提供“在记录中心查看全部结果”；不在顶部拉取完整正文、附件或历史修订。
+  - 已确认的记录中心桌面布局以搜索和结构化筛选为主，顶部只在确有数据时插入待跟进、受阻和临期提示；结果使用高密度列表同时呈现类型、标题/摘要、主要主体、状态/跟进、更新时间及证据/附件/评论数量。
+  - 记录中心的类型、主要主体/关联对象、状态、负责人/参与者、下次跟进、行动项状态/负责人/截止时间、发生/更新时间与版本范围筛选均使用显式控件和可移除筛选 chip；同字段多值 OR、不同字段组 AND，记录跟进与行动项截止不得混成一个“时间”口径。无业务状态类型在结果中省略状态单元内容，不显示“不适用”。
+- 记录与证据比较同时支持单主体纵向回顾和跨主体横向对齐：
+  - VPS、监控实例和探测对象详情中的单主体视图以时间线为主，统一回顾人工记录、系统活动和证据变化，不将它强制展开成多列宽表。
+  - 已确认的单主体时间线保留轻量主体身份头与概览/活动/记录/证据局部导航；“活动”合流人工记录、系统活动、证据、评论/行动项，“记录”是同一服务端查询的人工记录过滤，而不是第二份数据。
+  - 时间线按实际发生时间分段，使用形状、文字和颜色共同区分人工可修订内容、系统不可改写事实与不可变证据；证据条目直接显示关键指标、实际覆盖、桶宽与来源状态，深度内容再进入详情。
+  - 统一活动必须同时保存业务 `event_at`、系统 `recorded_at`、全局 ingest sequence、稳定 source event/version 和 backfilled 标识：新记录/revision 1 合并，后续修订按保存时间，legacy/晚到事实按原发生时间并标回填，证据按观测时间且显示捕获时间，评论/行动项按变更时间；不得让同一事实以“创建+修订/迁移”重复出现。
+  - 时间线首请求在服务端固定 `projection_generation + committed-contiguous published_ingest_sequence` 并在该水位内全源排序/游标分页；view/source/kind/time/auth/current-revision predicate必须在LIMIT前生效。generation/head/scope只进入不可解码、不可比较的confidential cursor，不出现在响应字段；灾难重建递增generation并使旧cursor过期，隐藏权限范围推进不能被受限用户从freshness推断。迟到事件只在刷新后的新水位进入，projector重试先验existing hash且只为missing row连续分号，不能因分页间插入、sequence空洞、先limit后过滤或按来源分别limit而漏项/重复。
+  - 独立比较工作台提供两种入口：选择 2–6 个主体后由系统推荐观测时间接近且类型/schema 兼容的记录/证据；或在记录/证据列表中直接勾选具体快照。
+  - 记录入口必须在选择时固定 `record_id + revision_id`，只展开该修订实际引用的证据；同一 kind 有多个快照时由用户明确选择。无证据记录只显示“仅元数据/无可比较证据”，不得随当前修订漂移或生成空图/补零。
+  - baseline 由用户显式确认；对齐支持保留原始实际覆盖和仅在合同允许时使用真实共同覆盖两种模式。baseline、固定 revision/snapshot IDs、对齐模式、容差、请求/实际/共同窗口都写入 URL、请求摘要和另存记录 provenance。
+  - 比较按统一维度对齐主体身份、记录类型/状态、观测时间、实际覆盖、数据新鲜度和同类证据的规范化指标；不从自由 Markdown 自动推导数值或风险。
+  - 缺失数据、部分覆盖、截断、不同聚合精度、时间偏移和 schema 不兼容必须显式呈现；不得用 0、空白、静默重采样或无说明自动换算来伪造可比性。
+  - 只有具体证据合同定义了相同单位、语义和转换规则时，才计算差值、变化率或风险分层；不生成跨 IP、成本、监控、路由和性能等所有证据的虚假“最佳 VPS”总分。
+  - 工作台可将比较结果另存为新运维记录，并一同固化对比对象、选定快照、比较条件、可比性告警和人工结论；保存不反向修改原记录或证据。
+  - 已确认的比较工作台在同一页面展示主体/精确快照双选择模式、2–6 个选择篮子、请求时间窗、对齐方式、容差与桶宽，并在任何指标或图表之前给出可比性审查结果。
+  - 同类证据使用独立标签与对齐矩阵；列头同时显示主体、快照身份、实际覆盖、桶数和质量，趋势线在数据截止处停止，表格对不可计算差值使用明确原因标签，不用 0、空白或外推线替代。
+  - 工作台底部把“系统可验证差异”和“人工结论”分开；创建新记录时固化 baseline、选定快照、请求/实际窗口、桶宽、schema 和全部可比性告警。
+- 记录、修订、证据、附件、比较和导出共享统一授权边界：
+  - 工作草稿仅作者本人可见；首次正式保存后默认成为项目共享知识。
+  - 正式记录可显式设为“受限”，但只使用项目定义的角色/权限组，不建立逐用户、临时且难以审计的记录级 ACL。
+  - 一条记录的有效可读范围是记录可见范围与所有引用主体/证据源权限的交集；不得通过快照、引用块、附件链接或导出把受限来源扩大给更宽松的受众。
+  - 来源删除事务必须锁定最终 auth revision，并把 version、显式 `VisibilityKind=project|restricted`、project、稳定 role/group IDs、policy version/revision 作为最小可执行 `authorization_floor_snapshot` 写入 source delete commit/full witness。`project` 与 role/group 都为空但语义为 deny-all 的 `restricted` 必须从 canonical bytes 独立区分，不能靠数组猜测。删除后使用 `record visibility ∩ capture scope ∩ final floor`；floor 缺失/未知 kind 或 version 时失败关闭，不回退到更宽的捕获范围。恢复到来源收窄前的旧备份也先重放 floor，再开放列表、搜索、详情、材料或导出。
+  - 无权用户在列表、搜索、统计、时间线、比较候选和顶部全局搜索中都不看到记录存在，不泄露标题、命中摘要或受限主体身份。
+  - 可见范围变更同时产生正式修订与安全审计；作者身份不授予绕过后续权限变更的永久特权。
+  - 不提供匿名公开链接；外部分享通过受控导出执行，单独校验导出权限、记录操作者、选定内容与最终文件范围。
+  - 当前只有 admin 时，所有正式记录对管理员共享；增加第二种真实角色前必须先实现统一授权基础，不得只在记录前端增加不可信开关。
+  - 高风险永久删除使用独立能力：`record.permanent_delete` 当前只授予项目管理员；preview 与 execute 都重验，execute 在 reservation 最终事务内再次授权。`record.deletion.status.read` 只允许 operation initiator/当前项目管理员，`record.deletion_audit.read` 只允许项目管理员；作者、普通编辑权或知道 operation ID 不构成授权。
+  - 记录清除后 operation GET 以独立 ledger 中的 immutable deployment/project namespace、initiator 和 object kind 授权，不依赖已删除记录 ACL。跨项目、其他普通用户和枚举 operation ID 统一返回 404；无法证明 ledger/witness 状态返回 503，不能用假 404 或假完成掩盖。
+- 记录可移植性同时提供人类可读导出和机器可恢复归档：
+  - 单条记录支持 Markdown 目录包和 PDF；两者都使用同一安全渲染合同，包含已解析证据摘要、观测时间、来源状态与附件清单，并只打包用户有权导出的附件。
+  - 人类可读导出默认只包含当前正式修订；用户可显式选择包含完整修订历史，导出预览必须说明新增的敏感范围和文件体积。
+  - 机器归档包使用版本化 manifest，保存记录、修订、类型化证据、引用关系、允许的附件、主体身份快照、schema 版本与内容哈希，以支持完整性校验和实例间迁移。
+  - 内容哈希只证明包内完整性，不证明签发者真实性；导出可用实例 Ed25519 键对规范化 manifest 签名，导入记录 signer instance/key、验证时间与 trust-policy 版本，并区分历史验证结果和公钥当前 trusted/revoked/unknown 状态。无论签名状态如何，包内 producer/actor/source 声明都只是带来源的历史元数据，不能成为本实例当前事实或自动验证证据。
+  - 导入必须先 dry-run，展示包/schema 版本兼容性、ID 冲突、缺失主体、权限变化、重复附件、未解析引用与预计占用空间；未经用户确认不写数据。
+  - 归档始终按不可信输入在隔离区处理：重新执行规范化路径、重复路径、symlink/hardlink、条目/体积、压缩炸弹、Markdown 安全解析和附件隔离扫描，签名通过也不能跳过内容安全检查。
+  - 包内 ACL、role、group 和 capability 永不在目标实例生效；导入管理员必须选择目标项目可见范围，结果继续与已解析来源权限取交集，原授权只作为不可信 provenance 元数据。
+  - 导入记录保留来源实例标识、导出时间、原记录/修订 ID 和导入操作者；导入证据始终是历史快照，不得写入监控、资产、IP 质量或成本源表并伪装成当前事实。
+  - 无法安全解析的原主体/对象只保留身份快照并标记“来源未解析”；只能在显式确认后手动重新关联，禁止仅按名称自动绑定。
+  - 导入原包、解包树、扫描副本和 dry-run plan 使用独立隔离临时存储；在写入首字节前登记 job/artifact、target deployment/project scope 和 `identity_classification=unknown`，每个 part 保存哈希/过期/receipt。完整解析后才原子写入全部规范化 object/origin refs 与 classification digest。计划默认 1 小时有效，apply、取消或过期后立即进入可验证清理；部分解包和 worker 崩溃同样由 janitor 收敛，单纯“plan 已过期”不能替代 purge receipt。
+  - 同 scope 存在 identity 未分类的上传/半包/解析失败 job 时，任一永久删除都必须先取消/drain/purge 全部 parts/workspace 或等待完整分类后重预览；不能因尚无 object/origin refs 而放行。只有 complete classification digest 才能把互斥从 project/deployment scope 收窄到具体对象。
+  - dry-run plan 必须绑定规范化 object/origin 集合、observed witness sequence/hash 和明确的 `normal_import` 或 `reimport_deleted` 审批类型。apply 在最终数据库事务前重新取得 fresh serving fence/ledger head，并逐一检查 object/origin tombstone；新增相关 tombstone、围栏不可证明或来源/权限/容量漂移时返回 `409 import_plan_stale`，普通导入批准不能自动升级为“重新导入已删除内容”。
+  - import apply 与永久删除 reservation 必须对 canonical object/origin 使用同一持久 identity mutation guard 和全局锁顺序：apply 先提交时原子推进 identity epoch，使旧删除预览失效；deletion reservation 先提交时 apply 在最终事务中失败。账本检查与写入之间不得留下双方都能提交的竞态窗口。
+  - import upload/unpack/scanner/apply worker 与删除 reservation 使用相同 source version + epoch/lease。相关对象进入永久删除时，活动 plan/artifact 必须在预览中出现，并在 ledger append 前取消、drain、清除或作为明确存续副本重新预览；旧 epoch 的迟到 apply 永远不能重新创建记录。导入临时存储默认排除应用备份，平台无法排除时必须纳入受管库存、最长窗口和删除重放。
+  - 人类导出和机器归档都执行同一权限、脱敏、禁止字段、体积预览和导出审计合同；命令输出、凭据与其他禁止持久化内容永不进入导出。
+- 有业务工作流的记录支持独立、轻量的责任与跟进层：
+  - 可设置一名主要负责人、多名参与者和可选下次跟进时间；一般笔记与重要发现默认不渲染这些字段，除非用户显式开启跟进。
+  - 每条记录可包含结构化行动项，字段至少包括内容、待处理/进行中/受阻/已完成/已取消状态、负责人、可选截止时间、完成时间与关联主体。
+  - 逾期、受阻与无负责人等提示只在实际发生时动态插入，不在正常记录中保留“无逾期”、空异常卡或禁用操作占位。
+  - Markdown 任务清单仍是自由文档内容，不被静默解析为行动项；用户可显式将选中清单项提升为结构化行动项。
+  - 行动项是记录的独立子对象，具有自己的不可变变更活动；快速变更行动项状态不为整篇 Markdown 制造新修订，但记录级负责人、参与者和下次跟进时间变化仍属于正式修订。
+  - 全部行动项完成时只提示用户将记录标记解决/完成，不自动改状态；任何行动项都不自动调用 VPS、订阅、监控、Target 或其他业务写接口。
+  - 记录跟进层不建立看板、Sprint、工时、任意依赖图、无限子任务或自定义字段引擎；复杂项目管理通过外部系统关联。
+- 记录中心提供独立于权威正文与正式修订的协作层：
+  - 评论使用禁用原始 HTML 和可执行内容的安全 Markdown 子集；新增或回复评论不产生整篇记录修订，也不能静默改写记录结论。
+  - 评论编辑保留可审计的编辑历史；普通删除只隐藏内容并保留作者、时间与“评论已删除” tombstone，不造成时间线断裂或回复失去上下文。
+  - 讨论采用按时间平铺的记录时间线，并显示被回复评论的引用上下文；不建立无限嵌套线程、独立聊天室或与记录脱离的通用消息系统。
+  - 记录作者、主要负责人和参与者默认自动关注；其他有权用户可手动关注或取消关注，但取消关注不得屏蔽直接提及、分配和权限/安全类强制通知。
+  - 站内通知至少覆盖直接提及、负责人/行动项分配、评论回复、受阻、临期/逾期以及重要业务状态或正式修订变化；本人触发的操作与自动保存草稿不通知，高频重复事件按记录和事件类型聚合。
+  - Telegram、飞书等外部渠道只发送权限安全的短摘要与站内深链，不携带受限正文、评论全文、证据或附件；外部投递失败不影响站内通知和原业务事务。
+  - 评论、关注关系、未读状态、站内通知、外部投递和导出全部复用记录授权结果；权限撤销后不得通过历史通知摘要、深链或外部重试泄露记录存在性或内容。
+  - 外投 outbox 只保存稳定 event/record/revision/recipient/template 引用与幂等身份，不保存可重放的渲染正文；首次发送和每次重试都重新检查 deletion fence、记录/来源权限、recipient/channel 绑定与 integration 状态并重新渲染，最终外发前再查 fence。权限撤销、目标解绑或永久删除会取消任务并清理旧 payload/cache。
+  - 记录存在时站内通知/外部 delivery audit 默认最多 180 天；永久删除会立即清所有摘要和 record/revision/recipient/integration/channel/message 关联，普通 TTL 不覆盖。最小删除审计只留 `external_copy_disclosed` 与无身份渠道类别聚合/receipt digest；已成功投递的外部消息本身仍无法召回。
+- 运维记录采用显式保存驱动的不可变修订合同：
+  - 首次正式保存产生修订 1；以后每次用户明确保存时，只要 Markdown、结构化字段、业务状态、关联对象或证据引用发生变化，就产生一份完整不可变修订；无变化保存不增加版本。
+  - 输入过程的自动保存只形成可恢复工作草稿，不进入正式修订历史、活动时间线、搜索索引或比较结果。
+  - 工作草稿由服务端按作者私有持久化并支持跨设备恢复；浏览器只在按用户/草稿隔离的 IndexedDB 中保留尚未成功同步的字段/Markdown 缓冲，最长 24 小时且不含附件字节/证据 payload，不把单台浏览器存储当作权威草稿库。同步成功、明确丢弃、登出或换用户后立即清除。
+  - 用户停止输入约 2 秒后触发自动保存，并持续显示正在保存、已保存或保存失败状态；离开时仍有未同步内容必须给出明确警告，不能用模糊的页面关闭行为冒充已保存。
+  - 每位作者对每条现有记录保留一个当前工作草稿；新记录可有彼此独立的草稿 ID。服务端另保留有界滚动恢复点以找回近期误删，但恢复点同样不是正式修订。
+  - 草稿保存其基于的正式修订 ID；若服务器当前修订已推进，打开或正式保存草稿时必须进入字段与 Markdown 差异合并流程，禁止用陈旧草稿直接覆盖。
+  - 正式保存成功后清除对应工作草稿；用户可以经过明确提示主动丢弃。默认在最后活动 90 天后清理未完成草稿，并提前 7 天在草稿恢复入口提示；管理员可配置保留期。
+  - 草稿附件遵循草稿保留和孤立文件回收合同；已经被任一正式修订引用的附件不得随草稿清理。草稿、恢复点及草稿附件只对作者可见，不进入普通搜索、活动、比较、通知或导出。
+  - 恢复浏览器缓冲前必须重新授权。权限撤销或记录永久删除时安全优先：停止自动保存，清除内存/IndexedDB/对象 URL 与服务端草稿内容，不提供复制或导出受限缓冲；“失败不丢本地输入”只适用于网络、冲突、存储和材料错误，不适用于失去授权。
+  - 打开的记录/修订/证据/附件/编辑器使用最长 5 秒的在线 client content lease，通过项目 SSE 续租并以短轮询降级。撤权/reservation 广播 revoke：活动 tab 中止 fetch/autosave、替换无内容 shell、清 editor/React state、对应 IndexedDB 和 object URL，经 BroadcastChannel 清同源 tab 后回执。后台 tab 在 focus/pageshow/reconnect 时先遮蔽并重鉴权，禁止闪现旧 DOM；未回执客户端到期后作为可能离线缓冲进入删除影响预览，不声称可远程擦除。
+  - 旧修订为只读，可与其他修订比较；“恢复此版本”是把旧内容复制为新修订，不覆盖或删除其后历史。
+  - 每个旧修订继续引用它当时使用的不可变证据；当前修订移除或替换证据不改写旧修订的事实。
+  - 正式保存必须使用乐观锁；并发冲突时展示本地草稿与服务器最新修订的差异并由用户合并，禁止以最后保存静默覆盖。
+- 记录持久化采用“稳定记录根 + 不可变完整修订 + 规范化当前投影”的混合模型：
+  - 记录根只保存稳定 ID、文档生命周期、当前修订指针、乐观锁版本和服务端查询所需的当前投影；可见范围、负责人/参与者/跟进、Markdown、业务字段和当时引用关系的权威内容位于不可变修订，root 同名字段不得反向覆盖历史。
+  - 主体、关联对象、标签、证据和附件按修订保存关系，同时保留可空的实时导航引用与当时身份快照；源对象永久删除只使实时引用失效，禁止级联删除记录修订。
+  - 草稿及其滚动恢复点按作者与记录/新记录草稿隔离；行动项、评论/评论编辑历史、关注关系和未读通知是记录下的独立对象，各自拥有活动合同，不塞入 Markdown 修订 JSON。
+  - 证据快照是带类型/schema、捕获者、权限、来源身份与敏感级别的逻辑对象；较大规范化序列与附件均可使用内容寻址的不可变 payload/blob 去重，但逻辑身份、权限和引用审计不能合并。
+  - 搜索文档、统一活动时间线、统计和通知收件箱属于可重建投影，不能成为业务权威；投影损坏应可从修订、活动和引用事实重建。
+  - 永久删除记录清除其修订、草稿、评论、行动项、附件引用和逻辑证据；其他记录已经复制或合法引用的内容必须在影响预览中列出，系统不得宣称完成全局清除。物理 payload/blob 只能在全局无引用时删除；普通引用移除走孤立回收，永久删除产生的独占对象走无宽限在线 purge。
+  - 永久删除确认先在应用数据库用记录版本/依赖 digest CAS 建立持久 provisional read/write reservation，并递增单调 reservation-fence epoch；两分钟 owner lease 过期只允许 reconciler 接管，不能自动解锁。全部 serving lease 在 ≤1 秒内应用/过期后，所有读取在缓存前检查 reservation；修订、草稿、评论/行动项、材料复制/转移、attachment upload/multipart complete/scanner、evidence capture intent/payload worker、import upload/unpack/scanner/apply、内容处理器 workspace、通知/outbox、导出/下载、搜索/活动/摘要 projector、cache warmer 和 backup epoch 都必须绑定对象 source version + reservation epoch，并在最终数据库、Blob、投影或外发提交前复查。等待全部在途 lease drain 后再次核对影响/备份库存，变化时重新预览且不得入账；旧 epoch 的迟到任务只能被 tombstone 拒绝并进入无宽限清理，不能复活内容、投影或字节。
+  - 所有返回记录正文、修订、搜索/活动摘要、比较、证据/附件预览或下载、导出字节的 handler 必须取得并续租 ≤1 秒的 object content read/stream lease；发送 header/字节时推进单调 content-delivery epoch。reservation 阻止新 lease、取消并 drain 旧流，实例只有在 handler 不再写 socket 后才能确认 applied epoch。preview 后已发送或结果不明会使执行 `409 deletion_preview_stale` 并披露可能外部副本；未发任何字节且取消 receipt 明确才可继续。lease 续租失败时流必须在到期前自我取消。
+  - preview 同时用 CSPRNG 签发独立于 10 分钟授权 token 的 256-bit `DeletionRequestTokenV1`，客户端把其 canonical `drt1_<base64url-no-pad-32-bytes>` 值作为本次永久删除的 `Idempotency-Key`；preview/execute 只持久化 `SHA-256("houfeng-deletion-request-token-v1" NUL deployment NUL project NUL raw-token)` commitment，raw token 不写数据库、日志、遥测或备份。随后把不可逆请求以 `delete_commit` 追加到与应用恢复域分离的 primary ledger 并由零 RPO witness 确认。commitment 在 delete/outcome 间唯一，对象删除身份只对 `delete_commit` 唯一；同 token 同 fingerprint 重试解析原 operation，同 token 不同请求稳定冲突，不同 token 并发删除同一对象返回已有 delete operation。commitment 可永久验证且无服务端历史 secret/keyring 生命周期。
+  - primary delete commit 结果未知或 witness 尚未确认时，provisional fence 持续生效并返回可轮询 `202 ledger_commit_unknown|witness_pending`，禁止开始 purge。若 reconciler 先 fence 原 append owner generation 并由 fresh primary+witness 证明 delete commit 不存在，仍须把同一 operation 的无内容 `attempt_not_committed` outcome 追加并 witness；`release_pending` 期间继续 202/fail closed，outcome durable 后才递增 release epoch、解除 reservation 并进入 `200 not_committed`。同 key 永远返回该未提交结果且不再尝试删除；再次删除必须重新 preview 并换新 key。delete commit witness 确认后同 key 始终返回 `202`、同一 operation ID 和当前 state；任何 `202` 返回时在线读取命中已为 0。
+  - `last_fully_applied_sequence/hash` 按 ledger entry type 连续推进且不得跳号：`delete_commit` 需要全部在线/legacy/材料/processor/restore workspace purge 与 auth-floor receipt；`attempt_not_committed` 需要终态投影、release epoch 持久化和 reservation 解除；`contract_activation` 需要 genesis/inventory、minimum fence version 与 membership/start/queue gate 已应用；`domain_identity_rotation` 需要 candidate identity set、projection/replay/inventory、旧域 retirement 与 final proof 已由新 full witness 确认。未知类型/版本保持水位并失败关闭。
+  - serving lease 同时保存 observed/applied reservation epoch、observed witness head 与连续已应用 ledger fence sequence/hash；两组都一致或完成对象线性化查询后才能服务。witness durable 且活动实例应用永久 ledger fence 后状态才是 `read_fenced`；账本/witness 或 reservation epoch 无法刷新应用时，记录、草稿、证据、附件、记录搜索/活动/比较和导入导出域读写失败关闭，无关监控/资产能力可局部继续。
+  - `read_fenced` 后再清除在线数据库内容、对应 legacy `experience_logs` 原行正文、搜索投影、缓存、仅由该记录拥有且全局无引用的 Blob/payload、服务端导出、包含目标 object/origin 的导入计划/原包/解包树，以及 scanner/renderer/browser profile 等受管 processor workspace；所有活动副本和远端 processor receipt 全部验证不存在后才能显示“在线清除完成”。部分失败保持不可读不可写并进入可见重试，不得谎报成功。
+  - 记录以及 VPS、监控实例、Target 等承诺永久清理的来源对象都使用该账本。存在 legacy/import lineage 时规范化 origin identity 必填并可多 sequence 查询；对象 ID 永不复用，再次导入同一来源默认命中 tombstone，只有显式重新导入审批才分配新 ID。
+  - 账本与应用数据库位于不同集群/卷快照/恢复凭据边界。`postgres_sync` witness 零 RPO 复制完整账本行；`s3_worm` 每 sequence 保存完整 canonical 最小 entry，并使用 Object Lock COMPLIANCE + legal hold。只保存 hash/head、异步/同卷副本均不合格；账本/witness 尾部新鲜度、完整性或一致性无法证明时永久删除与恢复失败关闭。
+  - 应用管理的备份可能在已披露的最长保留窗口内继续包含删除前字节。恢复流程必须取得比目标备份更新且连续完整的删除账本，先重放删除、清理恢复出的 Blob/投影/导出并再次追平账本，才允许应用服务启动；账本不可用、过旧或有缺口时恢复必须失败关闭。
+  - 旧备份介质按已声明策略到期销毁；保留窗口内备份管理员仍可能从原始介质取证恢复，因此界面和文档不得声称即时物理或密码学擦除。下载导出、已投递外部通知、浏览器手工保存内容和未联网设备缓冲等已离开候风控制面的副本无法远程召回；受管缓冲只在设备再次联网鉴权后清理。
+- 正式修订使用强一致保存事务，异步副作用使用 outbox：
+  - 草稿自动保存携带独立 draft ETag/version；正式保存携带基准修订 ID、幂等键和完整修订输入，两条写路径不共用版本或成功提示。
+  - 证据预览生成带绝对时间窗、规范化选择、源数据 digest 和短期有效期的 capture intent；正式保存重新鉴权和读取源事实，预览后因补传等发生变化时返回 `409` 与新预览，禁止静默固化不同内容。
+  - 附件先流式进入隔离区，只有检查完成且状态可用时才能被正式修订引用；草稿可以保留待处理材料，移除未就绪引用后仍可保存纯文字内容。
+  - 新证据 payload 与附件 blob 在数据库提交前写入最终内容寻址地址；数据库事务失败时它们成为可审查/回收孤立对象，已提交修订不得指向半成品。
+  - 单次 PostgreSQL 事务写入证据元数据、完整修订、全部引用、当前指针 CAS、领域活动、当前搜索投影和 outbox；任一步失败均不产生半份修订，同一幂等键重试不得重复创建版本。
+  - 站内通知生成与 Telegram/飞书投递由 outbox worker 重试，投递失败不回滚修订；列表、时间线、比较、下载和通知读取始终重新执行统一授权。
+  - Blob/源事实/数据库/权限失败使用可区分错误码；所有失败都保留本地草稿。新增材料失败只阻止包含该材料的正式保存，不得损坏已有记录或谎报成功。
+- 系统继续采用现有 Go 单体与 React 应用，在进程内建立单向依赖的模块与路由工作区：
+  - 后端拆分为 records、evidence、attachments、recordauth、recordsearch/activity/recordnotify、portability、deletionledger/recorddeletion 与 vpsoverview 等职责模块；HTTP handler 只做协议转换，跨域编排由应用服务完成，不拆分需要分布式事务的微服务。
+  - evidence 使用版本化 kind 注册表；每个 kind 必须提供选择校验、预览、捕获、脱敏、规范化摘要、比较和导出合同。外部unsupported kind/schema仅在archive/entry完整性有效的quarantine/dry-run显示allowlisted envelope metadata与不可解释状态，不得创建record/snapshot、apply、render/compare/search/activity或re-export；损坏entry只显示job级安全错误/bytes/digest。权威库出现unknown contract失败关闭，禁止通用组件猜测或渲染任意JSON。
+  - vpsoverview 是专用服务端读模型，返回统一生成时间、动态异常、身份/健康/续费/关联/最近活动及各来源新鲜度/局部不可用状态；写操作继续由原领域 API 负责。
+  - 前端按 `/vps/:id`、主体 activity/records/evidence、`/records`、记录阅读/编辑/修订和 `/records/compare` 路由拆分独立页面，共享主体身份条、查询状态、时间线、Markdown 编辑器、材料抽屉、证据渲染注册表与修订差异组件。
+  - 当前 `VPSDetailPage` 不再继续承载所有 modal、草稿、加载和提交状态；共享组件只持有单一职责，页面负责组合，前端条件隐藏不承担授权。
+  - 永久删除启用前建立受保护的 deployment membership 与单调 `minimum_fence_contract_version`：所有可达 API backend、旧兼容读路由和领取相关队列的 worker 必须登记 instance/deployment epoch、合同版本、能力与短期 heartbeat，负载均衡和队列只接纳当前 epoch 且版本达标的成员。删除账本首次激活后禁止后端/worker 回退到更低合同版本；旧 UI 只能回退到调用 fence-aware 兼容 API 的版本，未知、失联或孤立旧实例不能获得流量或任务。
+- 迁移和发布采用增量 schema、幂等历史转换、短期并行验证和向前修复：
+  - 先增加授权/记录/修订/outbox/Blob/search 与 worker 基础，再幂等迁移旧 experience log；新旧数据不双写，旧表和读路径短期只读保留，回退前端/路由时不删除新数据或执行破坏性 down migration。
+  - 每条旧 experience 通过 `legacy_source_type/id` 唯一映射为修订 1；摘要、详情、分类、级别和发生时间原样保留，无法可靠映射时使用一般笔记，缺作者时标记历史迁移，禁止猜测类型或伪造用户。
+  - 永久删除迁移记录时保留无内容的 legacy mapping tombstone，并把 allowlist 的 legacy source type/id 写入删除账本；原 `experience_logs` 行是同一内容的活动在线副本，provisional fence 后旧读 API 必须先查 reservation/mapping/ledger 并返回 404，在线 purge 必须删除其 `summary/details` 等正文并取得数据库 receipt。重新迁移或恢复到迁移前旧库后，恢复重放必须在任何旧 UI/API/worker 启动前按 origin identity 清除旧行；随后迁移仍先查账本，禁止旧 experience 以原行或新 record ID 复活。
+  - 价格、IP、规格和续费历史仍是系统活动来源，不转换成人工记录；统一时间线用稳定来源ID合流。新版VPS概览与记录路由只在子任务11完成PR required checks→双亲feature merge→main CI→protected-main重扫/隔离签名→ordinal 11 exact-one-file metadata PR合入→父级按`MergeOrdinal=1..11`验连续chain并按ChildID计算唯一union receipt后，才可批准/合并Release Please、发布release image、执行五binary smoke并以全部flags=off部署精确digest；随后才通过preflight在staging shadow对照并分阶段切换。任何staging修复重新走完整受保护发布链。
+  - 中文与混合内容搜索使用规范化纯文本、`pg_trgm` GIN 与 `tsvector` 组合，不引入外部搜索服务；索引和投影提供幂等重建与一致性检查。
+  - 部署新增显式本地持久化目录/S3 配置与 Compose 数据卷，启动时检查读写、权限与容量；required scanner 未配置/不健康时禁用新的压缩包上传，已在途包保持隔离并按期限重试或过期清理，不能降级放行。
+  - backup epoch 与 deletion reservation 的互斥 scope 必须等于 artifact scope；当前 PostgreSQL 全库备份使用 deployment-wide lease。备份在同一事务注册 snapshot marker 和对象 pin 后才可快照，删除必须等待/取消在途 epoch 并重核库存，避免确认后产生未披露备份或 manifest 缺对象。
+  - 系统备份基于 PostgreSQL 一致性快照生成数据库 artifact 与 Blob manifest；canonical manifest 绑定 backup/snapshot ID、数据库哈希、object-list digest、同快照 fully-applied deletion watermark、策略和到期时间，并用独立 Ed25519 备份键签名后写入不可覆盖目录。恢复先验签/验哈希，隔离恢复后再把 DB 内 marker/watermark 与 manifest 逐字比对，禁止把外部 ledger head 或自洽但串包的 manifest 当 replay cutoff。
+  - backup job 在写第一字节前登记 attempt/workspace、scope/marker、staging DB/object prefix、refs/pin、lease 和状态；dump/copy/multipart/sidecar/manifest/signature partial 全部可枚举。只有签名恢复点原子发布才转 published；失败/取消/超时/崩溃由 janitor 清 partial/pin 并出逐位置 receipt。receipt 前仍在受管库存并阻止相关永久删除；staging prefix 必须排除其他备份，否则递归纳入恢复源。
+  - 所有受管恢复源都必须生成来源专属且签名的 `RecoveryPointManifest`：全量/逻辑备份绑定数据库 artifact、snapshot marker、Blob object-list digest 与同快照 applied watermark；PITR 绑定签名 base backup、timeline/起始 LSN、连续 WAL 范围、目标时间/LSN 与 Blob durability catalog，并始终以较低的 base signed watermark 作为 deletion replay baseline；卷/文件系统快照在同一冻结点绑定 sidecar、DB checkpoint/timeline、applied watermark、Blob version/object digest、策略和到期时间；S3/Blob 恢复显式绑定对象 version/hash。缺少签名、sidecar、连续 WAL、原子冻结证明或对象完整性时，只能隔离取证，不能走受支持启动。
+- 每个恢复 manifest 签名固定携带 `key_id`，恢复公钥存于不依赖应用数据库的版本化 `RecoveryTrustStore`。每次 key 变更递增单调 revision/hash chain，完整 canonical 非秘密 entry 包含 public key、active/retired 时间、status、原因、依赖库存 digest 和前后 hash；变更生效前由独立零 RPO `postgres_sync` 第四 PostgreSQL full-witness store 或 `s3_worm` 每 revision 完整 immutable entry/bundle/receipt 确认，单独 head tuple 或可覆盖 head key 不合格。full witness 还永久保存 canonical plan、authorization artifact、bundle、final trust/ledger entry 与 completion receipt；恢复从 immutable far tail 连续验链，主库+checkpoint 同时丢失时可由 full witness 重建。正常轮换只让新 manifest 使用新私钥；旧 public key 至少保留到库存证明最后一个依赖的恢复点/activation manifest 到期。正常 retired key 在原有效期内的签名继续可验；compromised key 的全部历史 manifest 默认失去受支持恢复资格，不能信任可能伪造的 signed-at，除非由独立可信来源重新生成/证明。完整治理 artifact/entry/bundle 缺失、far tail/head 倒退、profile 不可用或 key 状态未知时恢复失败关闭。
+  - 首个 recovery trust root 不允许由普通 center 启动时对空库执行 TOFU。独立管理 CLI 先只读生成确定性 activation plan 与完整 digest，再凭 approval policy 允许的本地 TTY 全 digest 确认或 detached Ed25519 threshold approval 执行。commitment DAG 固定为 `leaf canonical bodies → ordered bundle → raw plan → canonical authorization artifact → final trust entry → final ledger entry → witnessed completion receipt`；body 不含自己的 digest，pre-entry 不含 `TrustHeadHash`、最终 entry/head 或未来 receipt。首次 intent 把完整 plan 与二选一 authorization bytes 在 primary/full witness 固化；durable 后 `status|resume --mutation-id` 可在本地 plan/approval/TTY 环境与 recovery-control 丢失时只靠 full witness 续跑。initial signed inventory/manifest、ledger contract activation/full witness、fence projection 和 completion 使用同一 mutation/DAG 只前进；任一 cutpoint 未完成都保持能力关闭。普通 center 自动 seed、手工 SQL、`--yes`、digest 前缀与自由文本 actor 授权均不构成生产路径。
+  - key add/rotation/retire/compromise/remove、approval-policy rotation 与 domain identity rotation 复用版本化 mutation envelope且 TTY/detached 严格互斥。bootstrap 可用 candidate policy 允许的 TTY 或 candidate detached threshold；add/rotate/retire/remove 可用 current policy 允许的 TTY 或 current detached threshold；compromise 仅 detached current；approval-policy rotation 仅 detached current+candidate。recovery key 轮换需要旧 active key 授权与新 key possession proof；compromise 不信任疑似泄露 key；policy rotation 的每个 candidate-only approver key 都提供 candidate-scope possession。进入 `removed` 终态前由新签名库存证明所有 recovery point、PITR sidecar 与 activation manifest 依赖均为 0。历史 witness 保留非秘密 public key bytes 作为不可变审计，但运行时不再用它验签且同 key ID 不得复活。
+  - active domain identity set 不能因改 DSN/endpoint 自动改变。`domain identity rotate` 只接受 detached current approval，并要求独立 candidate-domain possession；candidate admission 必须走 authenticated `challenge draft → current threshold sign/seal → prepare → candidate attestation/preparation threshold sign/seal → plan`，offline signer 不连接数据库/网络，prepare 不持 governance 私钥并使用独立 pinned-current policy。完整 sealed challenge/preparation wrappers 必须逐字进入 typed `DomainRotationIntentV1` 的 primary/full witness，不能只保存 digest；durable intent 后本地 artifact 与 recovery-control 同时丢失也可按 mutation ID 重建。若同时更换 domain-attestation governance policy，还需 current+candidate governance thresholds 与每个 candidate-only governance key proof。v1 每次只替换当前 profile 一个 member，global/member epoch 均 `N→N+1`，其他 member bytes 不变；identity-set body、primary receipt 与显式绑定其 digest 的 witness receipt 是三个独立闭合 V1 schema，PostgreSQL/S3 full witness 都保存可在 primary 丢失后重建的完整 bytes。planned mode 使用 current-authoritative dual-write；disaster mode 只接受独立 `unreachable draft → governance sign → seal → resume` 产生并 witnessed 的 current-unreachable/quarantine proof，两者严格 XOR且 lost-domain adapter 调用为 0。从 genesis 复制 ledger/trust/full-witness/governance artifacts并完成受管数据追平；current transfer exporter、cutover exporter 与 recovery-request exporter 都必须显式接收 `--recovery-signing-key PATH`，通过 bounded regular/no-follow exact-0400 loader 读取 raw 32-byte Ed25519 seed 或 public half 自洽的 raw 64-byte private key，并在输出第一个字节前 exact-match 各自 witnessed signer；缺失、不可读、symlink、错 mode/长度/格式/signer 或已过期 descriptor/deadline 时 FD 输出字节数为 0。transfer 使用 `ObjectStart → ObjectChunk* → ObjectEnd`，plan/bundle/inventory 可分别达到 24/20/8 MiB 且按 digest、连续 offset、index/count穷尽验证。drain 后 receipt 顺序固定为 `DrainContinuation* → CandidateImportApplied → CandidateImportRevoked → Cutover`，applied 经 current primary/full-witness/readback 后才可撤销 import credential并写 binding revocation，随后才能构造 cutover bundle；candidate receipt 只能经 current `resume --receipt-fd FD` 验签/append/full-witness，candidate 不得写 current recovery-control。完成顺序固定为 Final witnessed → revoke cutover credential并经current primary/full-witness/readback revocation → destroy candidate receipt key/bundle/workspace与AEAD/nonce key material → witness purge/workspace-zero receipts → completion receipt（绑定最终 receipt-chain head、完整 candidate-control policy-chain head 及最终 primary/witness publication receipt digests）→ complete；revocation readback前销毁成功数为0，任一步缺失都不能完成。durable intent 后只能 exact resume，旧域退役后不能回退；`postgres_sync↔s3_worm` 与无法取得完整 genesis 的 total loss 没有 override。
+  - candidate-control generation 1 必须由 read-only draft 创建 mutation ID，显式读取 canonical `--nonce-reservation-signer-descriptor` 与 `--cleanup-verifier-descriptor`，经 current/candidate governance thresholds 离线签名、seal、primary/full-witness 2+3 readback 后，challenge 才能引用；同 phase renewal和`prepare→import→cutover→cleanup`前进只能从完整 witnessed previous policy 逐字继承两份 descriptor，重新注入在 stat 前拒绝。nonce reservation 使用独立 purpose/key，只能签两类 encrypted payload 的 reservation；candidate receipt key 只签 import/cutover phase receipts；workspace 外 cleanup verifier 只签 purge/workspace-zero，三者交叉签名均拒绝。恰有六个 byte-handling 命令——candidate prepare、transfer import、cutover apply、credential revoke、candidate abandon、candidate cleanup——的 encrypt/decrypt/destroy parser 必须 exact-one 接受 strict-0400 raw 32-byte local key，或 pinned KMS config + strict-0400 credential file，其他命令在 stat 前拒绝这些输入。nonce private key 只允许 prepare/import/cutover 调用签名；credential revoke不能打开它，abandon/cleanup仅可定位、核验并销毁且签名调用数必须为0，其他scope在stat前拒绝。完整 nonce descriptor 必须进入published policy、sealed preparation与typed intent。Final 绑定完整 policy-chain head 与 verifier descriptor；Final 后 primary/PostgreSQL-witness/S3 都禁止替换 key/public identity/exclusion-proof/validity。completion 还必须绑定该 policy-chain head 及最终 primary/witness publication receipt digests；缺失时不能 complete。
+  - 首次启用删除账本时创建 witness 确认的 genesis 和签名 activation manifest；只有盘点为早于 activation 的旧备份可映射 sequence 0。未知旧备份、时间/摘要不可信或 activation 后仍无 watermark/signature 的备份不支持恢复；盘点完成或旧备份到期前不得启用永久删除。
+  - 备份可恢复窗口没有隐式默认值；部署必须显式声明无应用管理备份或配置有界策略，并把数据库全量备份、PITR/WAL、卷快照、Blob 备份、S3 非当前版本/Object Lock 等全部受管恢复源纳入库存。任一来源未知、无界、到期状态不可核对或删除账本不健康时，高风险永久删除功能失败关闭。
+  - restore 在复制 DB/Blob/WAL 前登记于独立 recovery-control store，绑定恢复点/baseline、隔离 volume/prefix、操作者、lease/state/expiry。普通失败/取消 workspace 默认最后进度 24 小时清理、续租总上限 7 天，且绝不能晚于来源恢复点已签名的 `recoverable_until`；剩余窗口不足以完成受支持恢复时 preflight 拒绝，管理员不能通过续租扩大此前披露的备份窗口。普通 workspace 禁止普通 HTTP/worker/外发/再次备份；step 2–6 任一失败都清 DB/Blob/WAL/tmp 并出 receipt。保留取证必须显式审批转 forensic，期限同样不超过原恢复点到期并纳入备份窗口披露。生产删除能看到普通 workspace，须追平并 purge 或取消销毁后才能 ledger append。
+  - recovery preflight 必须证明 restore DB/Blob/WAL/tmp volume/prefix 不进入数据库备份、PITR/WAL 归档、卷快照、对象版本/Object Lock；无法证明时，该派生 workspace 从首字节起注册为新的受管恢复源，拥有 inventory/到期/签名 manifest/deletion replay，且派生 `recoverable_until` 不得晚于 source `recoverable_until`。平台最短保留/Object Lock 无法满足该上限，或自动快照/版本策略未知时，恢复与永久删除失败关闭，不能在 janitor 删除工作区后留下未披露副本。
+  - 删除预览披露应用管理备份的最长保留窗口和最晚到期时间，并固定提示组织自行维护的外部备份无法由候风核对或清除，不能用模糊承诺替代。
+  - 后台任务使用数据库 lease 与幂等重试，覆盖 outbox、通知聚合、草稿/capture intent 过期、附件检查、孤立 Blob 回收、永久删除登记/purge/receipt、备份库存与账本检查点、完整性巡检和搜索重建；管理面显示积压、失败、容量与最近成功时间。
+  - 日志/遥测 inventory 必须覆盖应用 HTTP/worker/logger/trace/APM/error reporter、ingress/LB、CDN/object access、PostgreSQL/DB proxy/audit/slow query、备份恢复工具、browser error collector 与本地/远端 processor 及其归档/备份。请求/响应体、raw URL/query/header、SQL bind value、Markdown/搜索词、标题/摘要、评论/行动项、文件名、证据/通知/导出内容、对象可读 key、预签 URL、DOM/input、临时删除说明和浏览器缓冲永久禁止采集；普通 sink 只允许 route/SQL template/fingerprint、短期 request/correlation/operation ID、状态、大小、耗时、安全代码与无内容计数，record/object stable ID 只进入最小审计。
+  - PostgreSQL/代理固定关闭 statement/bind/错误参数/慢查询参数内容采集；ingress/object 只记 route/prefix template，browser collector 不采 DOM/表单/网络 body/query。每个 sink 登记 owner、配置 hash、位置和最长保留；内容域在线事件及归档/备份硬上限 30 天，之后只留不可反查 route/status/time-bucket 聚合。未知 sink/配置或无法核验 ≤30 天 TTL 时永久删除失败关闭。启用前必须审计旧版本所有 sink 及日志备份：能证明未含内容并满足 TTL 才排除，否则先可验证清理/到期；合规日志不再是单次 record purge 的扫描目标。
+  - 当前 admin 映射为项目管理员；引入任何第二角色前必须先启用统一授权策略和权限组，禁止用前端隐藏代替。
+- 验收必须覆盖领域/数据库、证据/附件、权限安全、前端状态、可访问性/响应式、端到端、迁移/运维和真实 staging 八层，不允许用 mock 或单元测试代替跨层验证：
+  - 首次接触者完成“识别 VPS、判断状态、指出最近变化、找到下一入口”的场景成功率至少 90%，且在 30 秒内完成；稳定态没有异常占位，身份区最多三个首层动作。
+  - Axe 无 critical/serious；主要任务仅用键盘可完成，状态不只依赖颜色，触摸目标至少 44px，390px 不发生无意横向溢出或桌面内容机械堆叠。
+  - 基准数据集至少包含 10,000 条当前记录、200,000 个修订和 1,000,000 条活动；该规模下 VPS 概览 API p95≤750ms，搜索首 25 条/时间线首 50 条 p95≤1s，草稿保存 p95≤500ms，纯文字正式修订 p95≤1s，comparison candidate/summary p95≤1s、6×2,000 detail p95≤2s，最大证据预览/捕获 p95≤10s 且有持续状态。comparison另受单请求96MiB、4GiB参考容器aggregate 512MiB weighted admission、2秒等待与5秒取消drain门禁约束。
+  - migration 对账差异为 0；备份恢复后所有被引用 Blob 哈希通过；权限矩阵、永久禁止字段和不可比数据不得存在已知泄露、补零、外推或静默覆盖。
+- 当前任务作为父任务管理完整目标与跨子任务验收，不直接承载实现；获批设计后创建 11 个均属必交付范围的子任务：
+  - 统一授权与平台基础；记录/修订/草稿/状态核心；Blob/附件/配额/扫描；证据注册表与首批适配器；Markdown 编辑/阅读/差异/材料；搜索/记录中心/全局搜索；活动投影/单主体页面/VPS 概览；横向比较；负责人/行动项/评论/关注/通知；导入导出/legacy 迁移；集成切换/安全/性能/备份恢复与终验。
+  - 依赖必须写入各子任务文档：授权→记录核心；记录核心→附件/证据/搜索；附件+证据→编辑器；证据+搜索→时间线/概览；证据+编辑器→比较；记录核心→协作；附件+证据+编辑器+协作→可移植性；所有能力→最终集成验收。
+  - 删除与恢复能力不新建模糊的尾部任务：独立账本/witness、RecoveryTrustStore、各来源 RecoveryPointManifest/inventory、backup attempt/workspace、recovery-control、restore/replay 编排基础、配置/启动 gate 与现有来源永久删除适配属于子任务 1；read fence/记录 purge/审计投影属于 2；Blob/附件无宽限清理与备份/恢复适配属于 3；服务端导出清理与删除 ID 防导入复活属于 10；子任务 11 在 1–10 的运行时能力上完成跨存储恢复接入、删除不复活、故障演练、最终 gate 和 staging 终验，而不是只写验收用例。
+  - 视觉合同也不是父任务中的无主验收项：子任务5承接编辑器与证据选择器，6承接记录中心，7承接VPS概览与单主体时间线，8承接比较工作台；子任务11统一执行Artifact v1桌面/390px的语义、DOM状态、几何、overflow、focus、Axe、键盘与44px合同。正式基线不创建tracked pixel golden、screenshot manifest或批量raster；脱敏截图仅可作为未跟踪、短期人工评审证据，不能冒充自动回归门。
+  - 父任务只在全部子任务独立验收和跨层验收通过后关闭；阶段顺序仅用于控制风险，任何子任务都不得被降为不确定的“以后再做”。
+- 运维记录采用归档优先、显式永久删除的生命周期：
+  - 普通“删除”为可恢复归档：退出默认列表，但仍可在归档范围内检索、阅读与恢复，所有修订和证据保持不变。
+  - VPS、监控实例或探测对象永久清理时不连带删除记录/证据；清理预览必须列出仍会保留的记录和快照，后续阅读明确标识“原主体已删除”。
+  - 只有独立的高风险“永久删除记录”可清除正文、全部修订和其证据快照；执行前必须展示影响预览、要求输入确认与删除原因。
+  - 影响预览必须同时披露：会被在线清除的内容、其他记录、用户导出或已经投递到 Telegram/飞书等外部渠道中仍会存在的合法副本、应用管理备份的最长保留期/最晚到期时间、备份管理员在窗口内的取证能力，以及官方恢复会先重放删除账本而不会复活内容。
+  - 预览 token 必须绑定当前记录版本、依赖图、逻辑证据/附件集合、content-delivery epoch、备份/processor 库存版本和 observed witness head；执行时重新计算业务影响，变化时要求重新预览。witness 可连续单调前进但不能倒退/分叉，其他对象的删除不得无意义地使本预览失效。
+  - 删除确认后 provisional reservation 在 ≤1 秒内阻止全部在线读取、新写入与外发，随后才尝试 ledger；因此 primary 可能提交后的任何 `202` 返回时读取命中为 0。witness durable 且永久 fence 已连续应用后进入 `read_fenced` 并开始清除在线数据库、无共享引用的 Blob/payload、搜索、缓存与服务端导出。跨存储部分失败时保持不可读不可写并幂等清理，只有 receipt 全部验证后才能宣告在线清除完成。
+  - 如果最终证明 delete commit 未发生，系统只有在 `attempt_not_committed` outcome 经 witness 确认后才恢复读写，并明确显示“未删除”；旧确认和旧幂等键不能重新触发删除，用户必须重新查看影响后发起新请求。
+  - Retention registry 必须区分 owner 存续期间的正常产品数据与删除后的 survivor：`live_product_authority|live_product_derived|draft_product|managed_client_buffer` 可逐字段登记标题、Markdown、附件/证据 bytes、canonical payload、展示元数据、文件名和安全 URL；它们只能使用 owner-bound lifecycle，owner 永久删除或明确到期后内容语义 survivor 必须为 `none`。禁止内容/URL/path/free-text 的规则只适用于 immutable governance、minimal survivor、operational telemetry 和具体 transition 后的 residue，不得被解释为禁止产品本身存储真实内容。
+  - 每条 retention policy 必须使用 exact-one `RetentionSurfaceAddressV1`（PostgreSQL column、canonical leaf、S3 key/metadata/control property、managed file、managed client leaf之一），并绑定闭合 lifecycle policy ID、trigger/deadline/action/proof/survivor、owner child 与 purge participant；unknown action/proof/owner、wildcard 或缺少生命周期都关闭永久删除。`ManagedClientStorageRegistryV1` 只是 canonical producer，不是第三个 policy source。v1 浏览器内容面只允许 same-origin `IndexedDBDraftBufferV1`：exact database/version/store/key `(deployment,project,user,draft)`、value ≤256 KiB、`expires_at<=updated_at+24h` 且不含附件/证据 bytes；sync/discard/logout/user-switch/revoke/delete/TTL 清理，在线 tab 用 lease+BroadcastChannel ack，离线设备只披露 `client_ack_or_expiry`，不能声称远程 zero。local/session storage、CacheStorage、service-worker cache 的内容命中必须为 0。
+  - 永久删除后的长期 record/object 关联元数据只允许显式 allowlist：独立 ledger/witness 的非内容 delete/outcome/activation/domain-rotation entry（来源删除可含带显式 kind 的稳定 role/group authorization floor）、不含 record/object identity 的 canonical plan/authorization/bundle/completion 治理证据、最小删除审计、legacy/import origin tombstone、窗口内签名 recovery inventory/到期后无内容介质销毁证明，以及无内容 RecoveryTrustStore/domain-identity/deployment contract。留存合同由八个独立 registry roots exact join；其中 `CanonicalSchemaRegistryV1`（仅生产 bounded encoder/decoder 提供真实 leaf）和人工审阅 `RetentionPolicyRegistryV1` 是两个分类权威，另外显式固定 lifecycle clock templates、purge participant capabilities/executable bindings 与 S3/filesystem/client inventories。最终 lifecycle/participant 初始程序集合恰为 21/24 行；禁止按字段名、数据库类型或 opaque container 推断语义。不得保留 Markdown、标题/显示名、文件名、证据摘要/payload hash、搜索词、自由文本原因、原始路径或错误正文。
+  - 详细 purge operation/dependency/receipt/error 在逐 kind 闭合终态 + 连续 applied + 更新签名库存 checkpoint + 无活动 workspace 后最多再留 30 天并压缩为 audit receipt digest；fence/object/client lease、identity guard、membership 历史在确认无活动后 24 小时内清；content-delivery epoch 随记录 purge；import/export/processor/backup/restore/telemetry 的详细 record/object refs 在 receipt 后最多 30 天删除/去关联。记录仍存在时，notification/delivery 固定 `product_expires_at=min(created_at+configured_ttl,created_at+180d)`；永久删除立即清 summary/content 与 record/revision/object/recipient/integration/provider-message/channel 关联并取消未发送 outbox，verified purge 后 claim/lease 24 小时、identity-free attempt detail 最多 30 天。manifest 必须逐 PostgreSQL 普通/generated/storage-only 列、每个 canonical leaf、S3 key/metadata/storage/control-plane property、managed filesystem 与 managed client surface 双向全等；core dump 逐层证明 process rlimit、systemd、container、kernel/helper 和所有目标均不产出，否则纳入受管 surface。无备份策略仍生成零恢复点签名 checkpoint；未知/额外/无法扫描或排除的 surface 关闭永久删除，每日 allowlist/TTL/forbidden-residue 扫描失败告警。
+  - 该能力不承诺在备份窗口内从原始介质即时物理擦除，也不控制已离开候风控制面的导出、外部通知、浏览器保存或离线设备缓冲；不为此引入逐记录 KMS/Vault 密钥销毁依赖。
+- 运维记录必须支持引用并固化系统证据：
+  - 当前证据类型至少包括 IP 质量、监控、订阅与预算；架构需要能扩展到路由质量、性能测试等未来数据。
+  - “源引用”和“证据快照”是两层互补能力：引用在源数据仍存在时提供导航和继续分析，快照保存当时用于判断的事实；不得用其中一种替代另一种。
+  - 保存记录时可把用户选定的数据写成独立、不可变、带来源和采集时间的证据快照，而不是只保存可能失效的对象 ID 或 URL。
+  - 快照保存后不随源数据刷新、重算或变更；如需记录新的观测结果，应追加新快照并保留两者的时间关系。
+  - 原始数据被归档、清理、超过留存期或源对象被安全删除后，记录中的合规证据快照仍应可读并说明原来源已不可用。
+  - 快照必须保留可读的主体/来源身份摘要和版本化的证据 schema，不能假设未来始终能通过已删除对象的 ID 还原语义。
+  - 证据快照需要支持同类数据的跨时间/跨主体比较，并区分采集时间、记录引用时间和数据新鲜度。
+  - 快照只能复制经过明确 allowlist 和脱敏的数据；不得借记录功能绕过命令输出 TTL、凭据、token、原始敏感 payload 或其他既有安全边界。
+  - 客户端只提交来源、报告/事件、时间窗、指标与精度等选择参数；服务端必须在保存事务中重新读取源事实、校验权限并按版本化 allowlist 生成快照，不接收客户端任意 evidence JSON 作为权威内容。
+  - 每个证据适配器必须声明一致性策略：库内来源在 repeatable-read/固定 source watermark 中读取，报告类绑定不可变 revision；快照保存 source watermark/revision、计算版本与策略。无法得到一致切片时阻止捕获，不能把补传、留存和并发写入混合结果标为可验证证据。
+  - 相对时间窗在写入时必须物化为绝对 UTC 起止时间，并保存请求范围、实际数据覆盖、聚合方法、桶宽、样本数、缺口、单位、维护/补传语义和计算版本。
+  - 时序快照保存规范化摘要和有界聚合序列，不复制完整原始样本窗口；默认自适应精度以每项指标约 720 个桶为目标：6 小时内 1 分钟、48 小时内 5 分钟、30 天内 1 小时，更长窗口使用日聚合。
+  - 用户可显式选择诊断精度，但单指标最多 2,000 个桶、单快照最多 50,000 个数据点和 5 MiB 结构数据；超限时必须调整时间窗、指标或精度，禁止静默截断、丢指标或伪装覆盖。
+  - 每个时序桶保存合同允许的样本数、缺口、补传/维护数量、平均/最小/最大/分位数，并可额外保存有界数量的异常峰值时间点；不得借诊断精度保存整段 5 秒原始样本。
+  - 保存前预览实际覆盖、预计桶数、桶宽、数据点与体积；来源只有日聚合时必须明确显示，不能插值或伪装成分钟级证据。
+  - 证据快照随记录及其历史修订长期保留，不设独立于记录的 TTL；相同内容可按哈希去重正文存储，但权限、捕获者、引用与审计关系保持独立。系统证据容量单独统计和预警，不能因附件配额耗尽而阻止保存关键证据。
+  - 证据项目配额耗尽只阻止新增快照，仍允许纯文字修订、移除引用和引用已有快照；不得静默省略已经由用户确认的新证据。
+  - 所有 kind 共享最小 envelope 与准入测试：四类时间、来源 revision/watermark、producer/计算版本、单位/质量/敏感等级、canonical hash、体积边界，以及禁止字段、确定性编码、导入导出、复制/删除/权限和比较兼容性。
+  - 本实例合法生成或成功导入且仍有引用的schema必须长期保留decoder/renderer/exporter；只有引用为0，或已有无损且版本化的安全派生阅读模型时才能移除旧renderer，原payload仍不可改写。外部unsupported schema只在integrity-valid quarantine/dry-run显示allowlisted envelope metadata，不能成为升级丢失历史可读性的fallback或进入权威记录。
+  - 结构化证据、有界静态渲染和源入口可同时保留，但截图或链接不能代替可比较的结构化快照。
+  - 命令审计的元数据可成为证据；stdout/stderr 即使用户显式选择也不能由证据选择器固化，避免绕过既有 24 小时 TTL 和永久审计禁止输出的合同。
+  - 记录/证据与来源对象的关系不得使用会在来源永久删除时连带销毁内容的 cascade 模型；导航引用与身份快照必须解耦。
+  - 证据捕获必须是显式、可预览的用户动作：用户选择来源、具体报告/事件、时间窗、指标和精度，保存前看到实际覆盖、缺口、脱敏结果和预计体积。
+  - 模板和系统可以推荐或预选候选证据，但不得静默复制全部数据；最终写入集合由用户确认。
+  - 保存后的证据是类型化、不可变的长期快照，同时保留规范化结构数据、有界静态呈现和可用时的源入口。
+  - 数值指标、单位、实际覆盖、阈值、聚合方法和数据质量属于普通证据字段；IP、主机名、SSH 用户/端口、Target host/端口/path、服务 URL、容器名称/镜像/状态属于敏感拓扑字段，默认不选，只有用户显式勾选并完成长期留存预览后才能固化。
+  - URL 证据只允许规范化 scheme、host、port 和 path，默认剥离 query、fragment 与 userinfo；容器拓扑必须限制条目数量与字段长度，不能保存逐样本容器数组。
+  - 容器 ID、完整 fingerprint、环境变量、挂载明细、任意 raw JSON、Cookie、认证头、token、密码、密钥和命令 stdout/stderr 是永久禁止字段，任何管理员设置或导出选项都不能绕过。
+  - 记录列表、比较摘要、通知与普通导出默认掩码敏感拓扑；有权用户只能在记录详情中主动揭示。导出提供默认安全模式和“包含已准入敏感拓扑”模式，后者需要独立 `record.export_sensitive_topology` 权限、影响预览、再次确认与审计，仍排除永久禁止字段。
+  - 来源删除后，已准入敏感拓扑随不可变证据继续存在，但阅读面必须同时显示捕获时间、敏感级别与来源不可用状态。
+
+### 约束
+
+- 重要信息不能因追求视觉活跃而被弱化；颜色必须承担一致、有限且可解释的语义。
+- 页面应兼顾首次/低频使用者的可发现性和长期高频使用者的扫描、定位与操作效率。
+- 设计必须建立在项目现有业务模型与可演进边界上，明确哪些改进可复用现有能力、哪些需要新增能力。
+- 当前任务不以尽快交付优化方案为目标，优先保证研究完整性与设计质量。
+- 项目当前尚无外部用户，本轮不得以“先做 MVP”作为主动删减合理功能的理由；应设计完整目标形态，再基于依赖、风险和可验证性拆分实施顺序。
+- 分阶段、父子任务或多次交付只用于控制工程风险，不得把已确认有价值的能力静默降为不确定的“以后再做”。确需排除的功能必须基于产品价值、安全、数据真实性或项目边界给出具体理由。
+- 设计需要发挥主动判断，覆盖完整的日常使用、深度排查、历史回溯、跨 VPS 比较、数据增长、编辑修订、安全、迁移与长期维护场景，而不是只修复截图中最显眼的问题。
+
+### 已确认事实
+
+- 2026-05 与 2026-06 已对 VPS 详情页进行过两轮信息架构/重构工作；当前 0.59.0 页面并非未经设计的遗留页。
+- 上一轮为降低混乱，刻意移除了关联项的通用“查看/管理”按钮，并要求通过可点击标题、hover/focus 表达入口；该规则与本轮真实使用中暴露的低可发现性直接相关。
+- 当前实现仍在顶部、事实网格、当前判断、关联概览和下方概况之间重复订阅、监控、IP 质量与资产历史事实。
+- 当前单机台账的不同记录类型没有按时间统一排序；关联概览所称“最近记录”也不一定是实际最近记录。
+- 当前资产历史由续费决策、价格、IP、部分规格和经验五类完整数组组成；没有统一时间流、分页、搜索或筛选，且并不覆盖所有资产变化。
+- 当前经验记录底层 `details` 为 PostgreSQL `text`，可以保存 Markdown 源文本，但前后端没有 Markdown 解析/安全渲染、编辑修订或知识记录工作流。
+- 当前 VPS 详情的 experience draft 只存在于 React 页面状态，关闭/取消后会重置，仓库没有服务端草稿、自动保存、滚动恢复点或跨设备恢复合同。
+- 当前仓库没有业务文件上传端点、附件数据模型、blob/object storage 抽象或 Markdown 解析/脱敏依赖；完整记录设计如包含附件，属于新能力而不是复用现有上传基础。
+- 当前 Compose 只为 PostgreSQL 与中心日志配置持久化，中心容器没有专用应用数据卷或附件目录；systemd 配置同样没有附件存储参数。附件不能写入临时容器文件系统，完整设计必须新增可备份、可迁移的持久化 blob 存储与容量观测合同。
+- 当前普通业务 JSON 请求的默认上限为 256 KiB；附件必须使用经过独立限流、流式处理和大小校验的上传合同，不能扩大所有 JSON API 的全局请求上限。
+- 当前全局搜索会同时请求 VPS、监控实例、Target、服务商和订阅的完整列表，在浏览器做小写子串匹配并截断到 10 条；当前迁移也没有记录正文所需的服务端全文索引。该模式不能扩展到长 Markdown、附件和多修订记录。
+- 当前 `MonitoringComparePage` 只支持恰好两个监控实例的当前身份与 24h runtime facts 并排，不具备按历史时间点、证据类型/schema、实际数据覆盖做对齐的能力。
+- 资产决策中心已有面向当前组合取舍的 `comparison_insight`，但其合同刻意限制为现有资产决策事实，不读取新的 runtime/IP/路由/性能证据。记录中心的历史证据比较不应被偷塞进这个现有读模型。
+- 当前只有面向 VPS/服务商/订阅初始数据的 `houfeng-import-vps-json` CLI，具备严格 JSON 解码、dry-run 和冲突报告；仓库没有通用业务导出包、记录导入或修订/证据/附件可移植合同。
+- 现有资产决策记录只在成员级保存 `todo / in_progress / blocked / done / skipped` 和一段跟进备注，没有负责人、到期/下次跟进时间或通用行动项；该模型的领域语义是组合判断后的执行记忆，不能直接升格成项目级记录任务模型。
+- 当前顶栏“通知”入口只是跳转到 `/events?notification_only=1` 的通知投递事件筛选，`notification_records` 记录的也是 Telegram/飞书等渠道的投递审计；仓库没有面向用户的站内收件箱、评论、提及或关注模型，记录协作通知属于需要单独设计的新能力。
+- staging 非敏感地址为 `https://staging.yading.de`，未认证访问正常跳转登录页；当前自动化浏览器没有可复用的登录会话。
+- 用户已提供 staging 专用测试账号，并通过仓库外/未跟踪的本机 `0600` 文件提供密码；不得把账号凭据写入任务资料、日志、截图或提交。
+- 用户确认把系统自动活动与人工运维记录拆成两个产品对象：自动活动保持不可随意修改，人工记录使用 Markdown 并允许持续编辑；两者只在展示层按时间合流并保留清晰来源。
+- 用户认可默认页以 30 秒内理解身份、状态、最近变化和必要动作作为首要职责；不要求默认页直接展开完成所有深度管理。
+- 用户确认概览后按“异常处理（仅异常时）→观测与记录→关联上下文→资料/决策管理→低频高风险生命周期操作”排序；正常态不让管理和危险操作挤占首级入口。
+- 用户同意以“任务导向概览 + 独立工作区”为整体主方向，并在 VPS 子页面保留轻量身份条和局部导航；不选择单页长画布或承载所有功能的详情内大标签工作台。
+- 用户通过可视化伴侣认可 VPS 概览的稳定骨架、三个首层动作、观测/续费摘要、去重资产事实、合流时间线、显式关联入口，以及异常动态插入/恢复后移除的两态设计。
+- 用户通过可视化伴侣认可项目级记录中心与单主体时间线的双入口布局：全局视角用于跨主体搜索/筛选/跟进，单主体视角用于人工记录、系统活动和证据的纵向回顾，两者复用同一记录 ID、权限、筛选和 URL 合同。
+- 用户通过可视化伴侣认可横向比较工作台布局：选择与对齐条件常驻、可比性先于指标展示、部分覆盖在图表/矩阵中停止且不参与无效差值、各证据类型独立比较，并可把条件、告警与结论保存为新记录。
+- 用户通过可视化伴侣认可完整页面 Markdown 编辑器与证据选择器：自动草稿/正式修订分离、三种编辑预览模式、结构化引用、材料侧栏、系统证据/用户附件分类，以及保存前覆盖/精度/体积/脱敏预览。
+- 用户确认领域模型采用稳定记录根、不可变完整修订与规范化当前投影；草稿、证据、附件、行动项、评论和关注分别建模，搜索/时间线/通知为可重建投影，来源删除不级联，永久删除按引用关系回收且不虚假承诺清除其他记录中的合法副本。
+- 用户确认正式修订采用证据预览 intent、防漂移重读、附件隔离、内容寻址先写和单次数据库事务；当前指针、修订/引用、活动、搜索投影与 outbox 原子提交，幂等重试不重复，通知异步失败不回滚，任何失败保留草稿且不留下半份记录。
+- 用户确认保持 Go/React 单体并在进程内按记录、证据、附件、授权、投影/通知、可移植性和 VPS 概览读模型分模块；证据使用 schema 专属注册表而非任意 JSON 渲染，前端使用独立路由工作区并拆解当前巨型 VPS 详情状态。
+- 用户确认增量迁移与向前修复方案：旧 experience 幂等转为记录且不双写，资产历史保持系统活动，短期 feature flag 对照后切换；中文搜索使用 pg_trgm/tsvector，Blob 配置/备份/恢复与后台任务可观测，第二角色必须等待统一授权基础。
+- 用户确认八层验收矩阵、可用性/可访问性/性能/迁移/备份量化门槛，以及当前任务作为父任务、11 个完整能力子任务按显式依赖独立交付并最终跨层验收的拆分。
+- 用户再次确认完整规划与设计，并授权由 Codex 自主选择后续会话编排；采用当前长会话总控、每个子任务独立新会话和隔离 worktree 串行实施。各新会话的主代理按 inline 模式直接实现与正式检查，subagent 仅可承担有界只读调查，不负责实现或质量门；该编排确认不自动构成任一 `task.py start` 授权。
+- 用户随后明确要求开始实施，平台基础子任务曾在隔离分支推进并完成一轮验证；方案 A 审查发现首次信任、恢复域身份、drain/approval 与 full-witness 合同需升级，因此该分支保留未提交且冻结。当前控制会话先完成修订规划，旧授权不自动批准修订合同。
+- 用户进一步明确：无异常时不得展示异常操作、按钮或占位；有异常时才展示对应异常状态和动作，正常状态展示常规内容。
+- 用户提出记录能力应升级为侧边栏一级页面，同时保留从单台 VPS 进入其记录页面的路径，以支持跨 VPS 横向比较和单 VPS 纵向回顾。
+- 用户明确拒绝以 MVP 思路限定记录/活动体系范围；由于项目暂无外部用户，应优先形成尽可能完整且长期合理的功能设计，再安排实施拆分。
+- 用户确认将记录/活动能力设计为项目级记录中心：VPS、监控实例和探测对象可作为主要记录主体，订阅、服务、域名、服务商、事件与命令审计作为关联上下文。
+- 用户确认人工记录采用类型化文档与可选模板，同时保留自由 Markdown 正文。
+- 用户要求记录可引用 IP 质量、监控、订阅/预算以及未来路由、性能测试等系统数据，并将所选数据固化到记录中，避免源历史删除或归档后证据丢失。
+- 用户确认证据采用显式选择与保存前预览；模板可推荐/预选但不得静默复制，确认后由服务端生成类型化、脱敏、不可变的长期快照。
+- 用户确认证据采用分级敏感边界：指标与质量语义可正常选择，IP/主机/端口/path/服务 URL/容器名称和镜像等拓扑默认关闭并需显式确认；秘密、认证材料、完整指纹、任意 raw JSON 和命令输出永久禁止，普通展示/通知/导出默认掩码，特权导出仍需二次确认和审计。
+- 用户确认时序证据采用约 720 桶的默认自适应精度与有界诊断精度：单指标不超过 2,000 桶、单快照不超过 50,000 点和 5 MiB，保留数据质量与有界峰值而不复制 5 秒原始样本；快照随记录长期保留并单独统计容量。
+- 用户确认记录默认通过归档隐藏且可恢复；源主体永久清理不连带删除记录/证据，并在清理预览中显示存续影响；另行的高风险永久删除才能清除记录全部内容与快照，同时保留无内容的最小删除审计。
+- 用户确认以明确保存为正式修订边界：自动保存仅保护工作草稿，实际变更的显式保存产生完整不可变修订；旧版恢复、状态/关联/证据变更也通过新修订表达，不改写历史。
+- 用户确认并发保存必须使用乐观锁和可见差异合并，不允许最后写入者静默覆盖；在记录存续期间，旧修订始终保留当时证据引用，只有整条记录的高风险永久删除会按已确认边界清除。
+- 用户确认记录状态拆分为共享文档生命周期和类型专属业务流程；各类型状态映射到待处理/进行中/等待中/验证中/已完成/已取消统一状态组，一般笔记和重要发现默认隐藏业务状态。
+- 用户确认类型状态使用引导式、可审计的流转图：允许有理由地跳过、回退和重开，保留旧完成结论并生成新修订/活动；类型变更需预览和显式重选不兼容状态，只硬阻止真正矛盾，任何系统事件不得自动推进状态。
+- 用户确认完整记录能力包含受管附件：图片和常见排障文档可上传，文件内容不可就地替换并随修订保留引用；附件与系统证据明确分类，危险/可执行类型拒绝，远程 URL 不自动抓取，存储接受可配置配额与孤立文件审查。
+- 用户确认以 Markdown 源文而非私有富文本 JSON 作为修订权威内容；系统证据/附件通过稳定结构化引用块与正文组合，界面提供工具栏、快捷键、模板、预览/分栏和安全富展示，导出时引用物化为候风之外仍可读的摘要。
+- 用户确认记录默认只检索有效记录的最新正式修订；已归档与历史修订分别通过显式范围开关加入，草稿和永久删除内容不进入检索。搜索/筛选/排序/游标分页由服务端执行并反映到 URL，顶部全局搜索只提供少量当前记录摘要和全部结果入口。
+- 用户确认单主体页面以纵向时间线回顾记录/活动/证据，横向任务进入独立比较工作台；工作台同时支持 2–6 主体推荐候选和精确快照勾选，显式处理时间/覆盖/schema 不可比性，不生成跨证据虚假总分，且可将比较另存为包含所用快照和条件的新记录。
+- 用户确认工作草稿仅作者可见，正式记录默认项目共享并可使用项目权限组显式受限；实际权限取记录范围与所有来源权限的交集，不做逐用户临时 ACL，无权时不泄露存在性，不提供匿名链接，导出继承相同授权并审计。
+- 用户确认双轨可移植性：Markdown 目录包/PDF 用于人类阅读，版本化机器归档包用于完整修订、证据、引用和附件恢复；导入必须 dry-run，未解析来源不按名称自动绑定，导入证据永远保持历史快照语义而不成为当前业务事实。
+- 用户确认记录包含轻量跟进层：业务型记录可有主要负责人、参与者、下次跟进时间和独立结构化行动项；Markdown 清单不自动变任务，行动项变更使用自身活动而不污染文档修订，且不自动改记录状态或执行任何业务动作。
+- 用户确认记录协作层采用独立评论、平铺回复上下文、自动与手动关注、提及/分配/回复/受阻/临期及重要变更站内通知；评论不改权威正文，外部渠道只传权限安全摘要和链接，不发送受限内容。
+- 用户确认工作草稿采用作者私有的服务端跨设备保存、浏览器未同步短期缓冲、约 2 秒空闲自动保存、可见保存状态、有界滚动恢复点和基于正式修订的冲突合并；默认 90 天无活动后清理并提前 7 天提示，正式保存或明确丢弃后结束草稿生命周期。
+- 用户确认附件采用安全预览白名单、压缩排障包只下载、危险/主动内容拒绝、隔离检查与 MIME/签名/复杂度校验；默认配额为 50 MiB/文件、500 MiB/记录、10 GiB/项目并在 80% 预警，支持管理员调整，且使用可备份的本地持久化目录或 S3 兼容对象存储。
+- 用户确认永久删除采用方案 A：完成前清除在线数据库、Blob、搜索、缓存和服务端导出；删除前披露应用管理备份最长保留期；以独立追加式删除账本阻止官方恢复路径复活内容，旧介质按策略到期销毁，并诚实说明保留窗口内备份管理员仍可能取证恢复、外部归档不受控且不引入逐记录 KMS/Vault。
+- 监控原始样本默认保留 30 天，日聚合默认也为 30 天，事件为 90 天，通知为 180 天；当前数据层本身不是记录所需的长期证据库。
+- 默认 5 秒的主机采样会为单监控实例生成约 518,400 条/30 天；全量 raw 复制不是可行的记录存储策略。
+- 当前探测对象 `24h` / `7d` / `30d` runtime facts 只限制最新原始行数，没有返回实际覆盖或截断标志；在 5 秒单路探测下甚至只约覆盖 24 分钟 / 2.8 小时 / 12 小时。现有响应不能原样当作证据快照。
+- 当前事件没有自身的 live/backfilled provenance，而是通过已存 raw facts 反查；raw 默认 30 天、事件 90 天，因此原始行清理后的补传事件可能被误认成实时事件。这是现有事件可信度缺陷，不只是新记录的实现细节。
+- 现有事件也没有完整的指标值、规则/阈值版本、actor、producer 与 observed/recorded time；recovery 事件保留恢复前严重度，严重度下降也不一定生成事件，所以事件序列不能完整重建 incident 状态。
+- 现有 VPS 历史与 experience log 都对 VPS 使用 `on delete cascade`；新记录模型若要满足用户的长期证据要求，必须改变这个存续合同。
+- 当前只有 admin 角色，监控 API 没有对象级权限。完整设计不应伪造尚不存在的 RBAC，但必须保留作者/捕获者、主体范围与未来统一授权边界。
+- `users.role` 字段已存在，但领域常量只有 `admin`；`RequireSession` 仅在请求上下文放入 `user_id`，没有放入 role/scope 或执行对象级授权。前端条件隐藏不能成为记录/证据权限边界。
+
+## Acceptance Criteria
+
+- [ ] `P-AC-001` 已实际走查 staging 的核心与次要交互，并记录可复核的证据、严重度、影响用户和触发场景。
+- [ ] `P-AC-002` 已核对相关前后端实现、数据模型、接口、权限、响应式行为与测试，研究结论能区分已验证事实和待验证假设。
+- [ ] `P-AC-003` 审查范围至少覆盖信息架构、视觉层级、交互可发现性、任务效率、状态反馈、空/错/加载态、可访问性、响应式布局、资产历史与经验记录。
+- [ ] `P-AC-004` 已将用户报告的四类问题逐项验证、修正或补充，并形成去重、分级的问题清单。
+- [ ] `P-AC-005` 已研究有代表性的开源与商业产品，提炼可迁移模式、适用条件和不宜照搬之处。
+- [ ] `P-AC-006` 已向用户展示 2–3 个整体设计方向及其取舍，并完成关键产品决策。
+- [ ] `P-AC-007` 最终设计包含页面目标、用户任务、信息架构、内容优先级、布局与交互、资产历史、经验记录、状态与边界场景、可访问性、响应式策略、数据/接口影响、迁移策略及可验证的成功指标。
+- [ ] `P-AC-008` 设计明确自动资产活动与人工运维记录的字段、生命周期、编辑/修订权限、时间排序和合流展示合同。
+- [ ] `P-AC-009` 稳定态截图/原型中不存在 `动作：无`、空异常容器、禁用异常按钮或异常区域占位；异常态原型能按状态插入明确动作并在恢复后移除。
+- [ ] `P-AC-010` 概览身份头、三个首层动作、四项状态/续费摘要、去重事实、合流时间线和关联入口在桌面/移动原型中保持职责分离；所有入口静止态可辨识，状态颜色不成为唯一信息载体。
+- [ ] `P-AC-011` 概览后的桌面、移动和键盘路径均能验证“观测与记录优先、关联上下文其次、修改管理再次、生命周期按需”的任务层级；移动端不是桌面内容的机械纵向堆叠。
+- [ ] `P-AC-012` 概览、单主体活动/记录/证据、项目级记录中心与比较工作台具有明确且可深链的路由边界；跨页保持主体身份、返回来源和 URL 筛选状态，不在不同入口复制记录或证据事实。
+- [ ] `P-AC-013` 记录信息架构同时覆盖侧边栏一级入口和单 VPS 入口，支持跨 VPS 与单 VPS 两种视角且复用同一数据合同。
+- [ ] `P-AC-014` 最终记录/活动设计不是“人工记录列表 + 自动活动列表”的最小拼接，而是完整覆盖创建、阅读、检索、比较、关联、编辑修订、审计、数据增长、安全和跨入口一致性；任何明确排除项都说明产品理由。
+- [ ] `P-AC-015` 全局记录中心与 VPS/监控实例/探测对象详情入口使用同一主体、关联、筛选和权限合同，并能从记录反向回到所有关联对象。
+- [ ] `P-AC-016` 首批 relation kind/role 映射、身份快照 allowlist、route/tombstone 与反向查询逐项可测试；非法 primary/role 组合被拒绝，命令关系永不含输出，记录 DTO 不遗漏关联对象。新增 kind 必须通过权限、搜索、导出和来源删除 conformance suite。
+- [ ] `P-AC-017` 记录可以选择、预览并持久化版本化证据快照；删除/归档源对象后仍能读取合规快照，且界面明确显示来源、观测时间、新鲜度、快照时间和源对象可用性。
+- [ ] `P-AC-018` 同类证据快照支持跨时间和跨主体对比；未来增加路由/性能证据时不需要把任意未验证 JSON 直接塞入通用渲染器。
+- [ ] `P-AC-019` 证据快照具有 allowlist、大小/容量、版本、完整性、脱敏和留存合同，不能扩大命令输出、凭据或原始敏感数据的保存范围。
+- [ ] `P-AC-020` 普通证据、敏感拓扑与永久禁止字段使用服务端 schema 分级；默认选择、保存预览、详情揭示、列表/比较/通知掩码和两种导出模式均执行同一分类，客户端无法把禁止字段改名后持久化。
+- [ ] `P-AC-021` URL 规范化移除 query/fragment/userinfo，容器拓扑有界且不含 ID/环境变量/挂载/逐样本数组；来源删除不改变已准入快照内容，但必须显示敏感等级和来源不可用状态。
+- [ ] `P-AC-022` 监控/探测证据不直接复制现有 sparkline/runtime response；它保存绝对时窗、实际覆盖、聚合方法、样本数、缺口、最值/分位数、维护/补传语义和当时阈值，且能明确标识截断或部分可用。
+- [ ] `P-AC-023` 默认 720 桶目标、四档自适应桶宽、诊断模式 2,000 桶/指标、50,000 点与 5 MiB/快照上限均由服务端计算和强制；超限、仅有粗粒度来源或部分覆盖时必须在保存前阻止或明确提示，不能静默降精度。
+- [ ] `P-AC-024` 时序桶和有界峰值保留足够的数据质量与极值语义但不包含完整 5 秒样本；内容哈希去重不合并权限/引用审计，证据容量独立于用户附件统计，历史修订引用的快照没有独立 TTL。
+- [ ] `P-AC-025` 证据 10 GiB 默认项目配额与 80% 预警可配置；耗尽只阻止新增快照，仍可保存纯文字、移除引用或引用已有快照，服务端不得静默省略用户已确认的新 intent。
+- [ ] `P-AC-026` 证据快照由服务端从源数据生成并执行权限/allowlist/脱敏/容量校验；客户端无法提交任意 JSON 或命令输出伪装成系统证据。
+- [ ] `P-AC-027` 每个证据 kind 在固定 source watermark/revision 或一致性事务中捕获并保存 consistency 元数据；并发补传/retention/写入无法形成一致切片时返回稳定失败，不产生“已验证”快照。
+- [ ] `P-AC-028` 新 kind 必须通过最小 envelope、禁止字段、确定性 canonicalization、大小、未知版本、导入导出、复制/删除/权限和比较 conformance suite；未来 route/performance kind 不能绕过。
+- [ ] `P-AC-029` 本机仍被任一记录/修订引用的旧 schema 在升级后继续可读、可导出；renderer 移除只在零引用或无损版本化派生阅读模型存在时发生，原 payload 不被改写。
+- [ ] `P-AC-030` 证据选择器要求用户确认来源、报告/事件、时间窗、指标和精度，并在保存前预览实际覆盖、缺口、脱敏结果和预计体积；模板预选不能绕过最终确认。
+- [ ] `P-AC-031` 来源对象归档、永久清理或超过 TTL 后，记录与合规快照的存续语义清晰，不被现有 cascade 外键静默删除。
+- [ ] `P-AC-032` 记录归档可恢复且不改变修订/证据；永久删除有影响预览、输入确认、原因、最小无内容审计和独立追加式删除账本。确认先建立持久 provisional read/write reservation，全部 serving lease 在 ≤1 秒内应用/过期后才尝试 ledger；primary 可能提交后的任何 `202` 在线读取命中为 0，`read_fenced` 表示永久 ledger fence 已应用。
+- [ ] `P-AC-033` 永久删除 preview/execute 仅允许 `record.permanent_delete`，且 preview 后撤权会使 execute 在 reservation 事务内失败、ledger append 数为 0。记录清除前后，initiator/项目管理员可轮询同一 operation；跨项目、普通作者/编辑者和随机 operation ID 均得到无泄露 404，audit actor/reason/state 泄露数为 0。
+- [ ] `P-AC-034` 永久删除只有在在线数据库内容、搜索、缓存、服务端导出、逻辑证据/附件引用和无共享引用 Blob/payload 均清除且验证后才显示在线完成；任一存储失败时保持不可读、显示待清理并幂等重试，不把保留期 GC 或部分成功称为完成。
+- [ ] `P-AC-035` `RetentionRegistryStateV1` 的八个独立 roots 按 exact-one `RetentionSurfaceAddressV1` 逐 PostgreSQL column/canonical leaf/S3 key+metadata+control property/managed file/managed client leaf 求交；`CanonicalSchemaRegistryV1` 与人工 `RetentionPolicyRegistryV1` 是唯一两个分类权威，lifecycle 只定义 clock template，policy stage binding才定义具体anchor/expiry、participant、exact capability tuple、proof set、survivor与stage residue。初始程序清单恰有21个unique lifecycle与24个unique purge participant，introduced/owner child与merge顺序一致，每个live participant与Go/Web executable binding exact-equal；unknown/duplicate/missing/extra/nil binding均失败。未知 enum、wildcard、字段名推断、decoder/policy 单边条目、opaque bytes、新未分类 surface 或缺 lifecycle/purge participant 均使 build/readiness 失败。class覆盖live authority/derived、draft、managed client与immutable/minimal/operational/recoverability/storage/ephemeral；live内容owner delete后survivor为none。每个适用stage的`ForbiddenAfterTransition`必须与`RequiredForbiddenAfterTransitionV1(class,semantic,lifecycle,stage,survivor)`生成集合全等，任一必需enum遗漏或额外值均使build/readiness失败；未绑定stage只表示该surface在该stage不适用，不能隐式授权删除或保留，且每个template stage全局至少有一个reverse consumer。`IndexedDBDraftBufferV1` exact store/key/codec、≤256KiB/24h且无附件/证据bytes；其他browser storage内容命中为0，offline只披露ack-or-expiry。逐 family 24h/30d、以`captured_at`为锚的telemetry绝对30d上限、notification绝对180d上限和forensic source-window合同成立；S3 multipart与phase credential authority必须分别有typed abort/revoke action和zero proof。逐row逐deadline corpus覆盖product content/filename/safe URL/path/free-text/credential及record/origin/actor/governance/operation/recovery-source/external-delivery identity，在PostgreSQL、primary/full witness、S3 body/key/metadata/control、filesystem和managed client非法位置命中为0。`DeploymentIDV1=dp-[0-9a-f]{64}`、`ProjectIDV1=default`与基础设施domain-separated digest、filesystem exclusion/core-dump proof仍须全等；`not_committed`非tombstone。
+
+  每个child的PR/merge-queue required check生成、不写回被哈希source tree的确定性`ChildRetentionSourceClaimV1`，绑定child ID/slug、merge ordinal、exact base/source commit+tree、owner-matrix entry、registry before/nonempty delta/after、pinned scanner identity/version/binary+rules digest、source-input Merkle digest与observed inventory digest；本计划首轮11个child全部固定`required_nonempty`，不得声明`no_new_surface`。PR内不可能预签未来merge commit。feature以双亲`merge_commit`合入后，只有受保护主线CI可重扫实际merge tree并用专用acceptance key生成`SignedChildRetentionMergeAcceptanceV1`，逐字内嵌并绑定source claim、source/base/实际merge commit+tree、required-check snapshot、registry before/delta/after、前一acceptance、scanner与inventory digests；开发分支、merge-tree代码和普通runner均不可读取私钥。该完整wrapper必须由自动化创建只含`attestations/record-retention/v1/<ordinal>-<slug>/<feature-merge-sha>.acceptance.v1`的metadata-only PR，经过独立验签/check后合入主线；CI临时artifact不是长期证据，下一child必须等待上一份metadata PR合入。任务11 PR gate只验证已入库的child 1–10 acceptances及自身source claim/delta，不能预造自身acceptance；任务11合并后按相同流程生成并合入第11份，父最终门先按merge ordinal验证1–11连续chain，再计算按child ID排序唯一的registry union并与最终production inventory双向全等。任一missing/stale/wrong-tree/replayed/base-result-chain gap/错误key或policy/workflow/scanner digest、metadata路径不符、merge-resolution漂移都关闭永久删除，task11不能替owner补policy。
+- [ ] `P-AC-036` 正式保存、草稿、证据/附件复制、attachment upload/multipart complete/scanner、evidence capture intent/payload worker、import upload/unpack/scanner/apply、内容处理器 workspace、评论/行动项、通知/outbox、导出/下载、搜索/活动/摘要 projector、cache warmer 与删除并发时，reservation 后新增可见读取、在线字节/引用/投影/外投数为 0；全部管线在最终写入前复查 source version + reservation epoch，在途 lease 必须 drain 并重预览，旧 epoch 迟到任务不能复活内容，`commit_unknown + owner lease 过期` 仍持久 fail closed。
+- [ ] `P-AC-037` 在 JSON/附件/证据/预览流的 headers 前后、首 chunk 和末 chunk 注入 reservation：所有 object content lease 在 ledger append 前结束/取消；preview 后可能发送字节的路径稳定要求重预览并披露，未披露外发数为 0。DB/实例失联或 lease 续租失败不会让仍写 socket 的流被误判为 drained。
+- [ ] `P-AC-038` backup epoch lease scope 与 artifact 一致；全库备份和任一 deletion reservation 互斥。marker、snapshot、manifest/pin 发布各 cutpoint 不会产生未披露的新备份或缺 Blob manifest。
+- [ ] `P-AC-039` backup marker 前后、DB dump、Blob copy、multipart、manifest/signature/publish 各 cutpoint 强杀后，所有 partial 都仍在库存直到 publish 或 purge receipt；相关删除不会越过残留，janitor 收敛后的无 manifest staging bytes、pin 和 multipart 残留数均为 0，staging prefix 不被递归备份。
+- [ ] `P-AC-040` primary append、witness ack、ack 响应丢失、fence 投影和各存储 purge 的每个崩溃点都有测试；preview 使用 CSPRNG 生成且只向客户端返回 canonical 256-bit `DeletionRequestTokenV1`，账本/日志/遥测/备份 raw token 命中数为 0。primary 可能提交后 POST 以同一 token 返回同一 operation/state，不依赖可轮换的服务端 verify key；同 token 不同 fingerprint 冲突，不同 token 并发删除同一对象不产生双 operation，低熵/错格式/跨 deployment-project token 在 reservation 或 ledger 写入前拒绝。
+- [ ] `P-AC-041` 故障测试覆盖 timeout→`202 ledger_commit_unknown`→fence 原 owner→权威证明未提交→`202 release_pending`→witness outcome→`200 not_committed`→读写恢复；outcome 任一 append/ack 崩溃点都不提前解锁。同 key 永不删除，新 preview+新 key 才可重试，`attempt_not_committed` 不占对象 tombstone 唯一约束。
+- [ ] `P-AC-042` 连续 ledger 序列混合 `contract_activation → attempt_not_committed → delete_commit → domain_identity_rotation` 时，逐 entry receipt 后水位严格逐一推进；activation 恢复 minimum fence/membership gate，outcome 恢复 release epoch，delete 执行 purge，rotation 只在 candidate identity set、projection/replay/inventory、旧域 retirement 与由新 full witness 确认的 final proof 全部应用后推进。四类 entry 任一 receipt 缺失、类型/版本未知或试图跳号时，备份 watermark/恢复启动错误放行数为 0。
+- [ ] `P-AC-043` serving lease 同时验证 observed/applied reservation epoch、observed witness head 与连续已应用 ledger fence sequence/hash；新实例或旧 DB failover 在 head 最新但 reservation/tombstone 投影陈旧时不能服务，之后也不能重新变为 active/archived。负载均衡/队列 membership 能证明所有可达 backend、兼容旧 API 和 worker 均满足 witness 中单调的 minimum fence-contract version；未知或旧版本实例无流量、无任务 lease。
+- [ ] `P-AC-044` 删除预览展示其他记录、已交付导出、已投递外部通知和离线浏览器缓冲的存续影响、应用管理备份的最长保留期和最晚到期时间，并明确备份管理员窗口内取证能力、外部副本不受控以及“非即时物理/密码学擦除”；策略或账本健康未知时永久删除失败关闭。
+- [ ] `P-AC-045` 删除预览 token 绑定记录版本、依赖图、证据/附件集合、备份库存和 observed witness head；预览后发生新修订、复制、引用或策略变化时执行返回稳定冲突并要求重预览，witness 只允许连续单调前进，其他对象的正常删除不会无意义地使预览失效。
+- [ ] `P-AC-046` 恢复测试覆盖“备份后删除再恢复”：签名 manifest 绑定 DB marker/artifact/object digest/同快照 applied watermark，隔离恢复后逐字交叉校验，再取得 witness 当前连续尾部并重放。manifest 交换/上调、到期时间篡改、签名错、账本缺失/断链/尾截/回滚、未知合同版本或重放失败均阻止启动。
+- [ ] `P-AC-047` restore step 2–6 在 DB/Blob 已落盘、ledger gap、重放/receipt 和二次追平等 cutpoint 强杀/失败后，普通 workspace 保持隔离且最终 DB/Blob/WAL/tmp 残留数为 0并有 purge receipt；主 recovery-control store 不依赖目标 DB。普通与 forensic workspace 的 `expires_at` 均不晚于 source `recoverable_until`，临近到期恢复会在 preflight 被拒绝，续租越过已披露窗口数为 0；显式 forensic 转换有审批/限时/访问审计并在到期销毁，普通失败环境无限留存数为 0。
+- [ ] `P-AC-048` restore workspace 的 DB/Blob/WAL/tmp 在受支持平台可证明不进入任何备份/version/snapshot；模拟无法排除时，它会成为新的签名受管恢复点并参与最长窗口/删除重放，且派生 expiry 不晚于 source expiry；平台保留下限无法满足或策略未知时，错误继续恢复或删除数为 0。
+- [ ] `P-AC-049` PostgreSQL 全量/逻辑备份、PITR/WAL、卷/文件系统快照及 Blob/S3 对象版本分别产生可验签的 `RecoveryPointManifest`；测试覆盖 base watermark 被恢复后 DB 值错误上调、WAL 缺段、timeline/LSN 不符、快照 sidecar 缺失或串包、非原子冻结和对象 version/hash 不一致，任一异常都不能绕过 deletion replay baseline 或受支持启动门禁。
+- [ ] `P-AC-050` 恢复签名 key 正常轮换后，仍在窗口内的旧 key manifest 可继续恢复，新 manifest 只使用 active key；主 RecoveryTrustStore 与最新 checkpoint 同时丢失时能由 `postgres_sync|s3_worm` full witness 从 genesis 重建完整公钥生命周期链。key 提前删除、完整 entry/artifact 缺失或不一致、head/immutable tail 回滚、compromise 尾部截断、active profile 不可用、未知 key_id 和 compromised key 均稳定阻止启动，受影响恢复点只有经独立可信来源重新生成/证明后才能重新进入支持范围。
+- [ ] `P-AC-051` fresh revision-0 trust store 只能通过独立管理 CLI 的 `activation plan/apply` 激活：plan 无写入且 digest 可复现；commitment DAG 固定为 leaf canonical bodies → ordered bundle → raw plan → canonical authorization artifact → final trust entry → final ledger entry → witnessed completion receipt，任何 body 不含自己的 digest，pre-entry 不含 `TrustHeadHash` 或未来 head/receipt。首次 durable intent 把完整 plan 与二选一 authorization bytes 在 primary/full witness 逐字固化；删除本地 plan/approval/TTY 环境和 recovery-control 后，`activation status|resume --mutation-id` 仍能重建并 exact-resume。primary、full witness、inventory/manifest、ledger、projection/replay 和 completion 的每个 ack-loss/cutpoint 都按同 mutation 收敛，只有 completion receipt 持久化且 full-witness confirmed 后可 `complete`；自动 seed、手工 SQL、替换 plan/approval、digest/expected-head 冲突和自引用错误放行数均为 0。
+- [ ] `P-AC-052` 授权动作矩阵逐项可执行审计且 TTY/detached 严格互斥：bootstrap 仅在 candidate policy 明确允许时接受本地 TTY，否则要求 candidate threshold；add/rotate/retire/remove 仅接受 witnessed current policy 允许的 TTY 或 current threshold；compromise 与 approval-policy rotate 禁止 TTY，后者同时满足 current/candidate threshold；domain identity rotation 只接受 current-scope detached threshold。recovery/domain candidate possession、candidate-only governance-key proof和 retire/remove dependency inventory 均是独立证明，不能计入 approver threshold；`backup_recoverability=none` 仍发布可验签零恢复点 inventory。任何 scope 跨计、混合模式、自由文本 actor、`--yes` 或 digest 前缀成功数为 0。
+- [ ] `P-AC-053` ledger activation manifest 完整盘点 pre-activation 旧备份并只允许可信条目映射 sequence 0；未知旧备份或 activation 后缺 watermark/signature 的备份不能走受支持恢复。激活后的 planned single-domain replacement 与 app/ledger/witness/recovery 域灾难恢复必须走同一 `domain identity rotate` saga：epoch 只增 1且恰一 member 改变；challenge/preparation 分别由 witnessed-current/candidate governance threshold signature set 认证，完整 sealed wrappers 进入 typed intent primary/full witness，offline signer 网络/DB 调用与 prepare governance 私钥读取均为 0。identity-set body、primary receipt、绑定其 digest 的 witness receipt 是三个独立 V1 schema且 primary 丢失后仍可由 PostgreSQL/S3 witness 重建。planned dual-write 与独立 `unreachable draft → governance sign → seal → resume` 生成并 witnessed 的 disaster proof 严格 XOR，lost-domain 调用为 0并从 genesis 复制完整治理/受管数据。LB、queue 与 copy-replay drain 输入必须是完整 bounded signed snapshot wrapper，drain/continuation receipt 逐字保存或绑定其 full-witness canonical bytes，不能只保存 signature digest。transfer/cutover exporter 必须显式接收 `--recovery-signing-key PATH`且 wrong-key 输出为 0；`ObjectStart/ObjectChunk/ObjectEnd` 对 24/20/8 MiB plan/bundle/inventory exact-max 成功、一字节超限或 gap/overlap/offset/index/count/digest 错误失败。15 个 receipt kind 在 Go/primary SQL/PostgreSQL witness/S3 decoder 一致且仅 continuation 可重复，顺序强制为 `DrainContinuation* → CandidateImportApplied → CandidateImportRevoked → Cutover`；applied 经 current primary/full-witness/readback 后才可撤销 import 并生成 binding revocation，cutover 只允许 current export → candidate apply → current `resume --receipt-fd FD` 验签、append、full-witness，candidate 写 current recovery-control 次数为 0。Final full-witness/readback 后必须依序撤销 cutover credential、由current primary/full-witness/readback revocation、再销毁candidate receipt key/bundle/workspace与AEAD/nonce key material、再full-witness purge/workspace-zero；completion绑定最终receipt-chain、policy-chain head及publication receipts后才可complete。revocation readback前销毁成功数为0，任何receipt缺失/乱序完成数为0。durable intent 后只能 exact-resume，retirement 后不能回退；旧单体命令、旧域重现、candidate gap/far-tail、profile transition、total loss 或恢复源不足均无 override且 admission 保持关闭。
+  该项还要求：single strict intent validator 在 plan/apply/import/resume/PostgreSQL witness/S3 put+readback 递归重验 nested schema/canonical bytes/digest/purpose/policy/threshold/signature order/mutation binding；任一 single-byte、purpose、policy、threshold、排序或 mutation mismatch 放行数为 0。identity-set 发布必须读回 primary set+receipt 和 witness set+canonical primary-receipt copy+witness receipt 共五个物理工件，copy 缺失/篡改时重建、投影和完成成功数为 0。删除 route 只允许 `record_permanent_delete|source_permanent_delete`，删除 reason 只允许 `user_confirmed|source_removed|retention_replay`，trust reason 只允许 `bootstrap_activated|key_added|key_rotated|key_retired|key_compromised|key_removed`；Go、primary SQL、PostgreSQL witness 与 S3 对未知值、大小写变体、URL/path/free text 的写入成功数为 0。
+  candidate-control 证据必须覆盖 generation-1 mutation-ID draft 对两份 public descriptor与≤30天immutable deadline的显式必填输入→双 threshold sign/seal→primary/full-witness 2+3 publication/readback、same-phase renewal与逐 phase predecessor/prerequisite从previous policy逐字继承且reinjection在stat前拒绝、完整nonce/cleanup descriptors在policy/preparation/intent/plan全等。post-intent candidate命令删除本地policy/preparation及recovery-control后必须仅靠typed recovery-request FD续跑；pre-intent abandon与intent CAS互斥、无sealed preparation可清零且authorization/completion均2+3 witnessed，不新增rotation kind。import/cutover revoke receipt在current witness readback前不得销毁candidate receipt key/bundle/workspace。六scope local-key XOR KMS parser、两类payload nonce reservation、三类signer purpose隔离、cleanup verifier仅purge/workspace-zero、unsigned AEAD/wrapped-DEK/nonce destruction evidence、两个remaining-key count为0、purge/workspace-zero inherited FD no-self-storage均须验证。Final canonical body携带完整policy head+cleanup descriptor；completion primary/witness/S3携带policy-head generation/digest+最终publication receipts。任一missing/both key arm、purpose/request cross-use、nonce replay、self-storage、descriptor/deadline drift、销毁早于ack、额外verifier签名用途或未绑定policy-chain的完成成功数为0。
+- [ ] `P-AC-054` 删除账本覆盖记录和所有承诺永久清理的来源类型；恢复旧备份后，已删除来源不得复活或按名称重新关联，而存续记录/证据仍可读并显示来源已删除。
+- [ ] `P-AC-055` 应用管理的过期备份介质按策略销毁并留下不含内容的运维证明；仍在保留窗口内的原始备份被明确列为有限期例外，产品、帮助文档和审计均不作绝对不可恢复承诺。
+- [ ] `P-AC-056` backup/restore/import 和正式写事务使用显式对象 pin 与安全水位；并发备份、永久删除和 GC 不会造成 manifest 指向缺失 Blob/payload，未完成且含被删记录的备份/导出会取消并清理部分产物。
+- [ ] `P-AC-057` 使用带秘密标记的 record-content corpus 穿过 HTTP、数据库成功/错误/慢查询、ingress/LB、对象/CDN、worker/processor、browser collector、附件/证据、导入导出、通知和全部失败路径后，inventory 中每个在线 sink 及其日志备份对 raw URL/query/header、SQL bind、Markdown/搜索词、标题/摘要、评论/行动项、文件名、证据/导出内容、预签 URL、DOM/input、临时删除说明和 record/object stable ID 的命中数均为 0；未知 sink/配置 fail closed。在线/归档事件在 30 天后 request/correlation/operation ID 残留数为 0，只余不可反查聚合；外部 sink TTL 无法核验时能力关闭。
+- [ ] `P-AC-058` 正式修订只在有实际变更的显式保存时生成；自动保存草稿不污染修订/活动/搜索历史，恢复旧版产生新修订，历史修订及其当时证据不被改写。
+- [ ] `P-AC-059` 任一修订可独立还原标题、Markdown、类型/状态/影响/时间、可见范围、主体/关联、标签、证据/附件、负责人、参与者、下次跟进和 template provenance；root 上的查询字段只是当前投影。恢复旧版会把这些字段整体复制为新修订，而不是混用当前值。
+- [ ] `P-AC-060` 模板升级不改变已有草稿/修订；新建、显式插入和类型切换分别记录 template ID/version，类型切换默认保留正文，重复插入或静默覆盖数为 0。
+- [ ] `P-AC-061` 草稿可在另一设备由同一作者恢复，自动保存状态与离开警告不会谎报数据安全；90 天默认清理、7 天提示、管理员配置、正式保存清除和明确丢弃均有可测试边界。
+- [ ] `P-AC-062` 草稿恢复点有明确数量/时间上限且不成为正式修订；基准修订过期时强制差异合并，草稿附件清理不删除任何正式修订仍引用的文件。
+- [ ] `P-AC-063` 并发编辑冲突不能静默覆盖；界面保留本地草稿、显示与服务器修订的字段/Markdown 差异，并允许用户完成合并后重试。
+- [ ] `P-AC-064` 数据模型能从记录根定位当前修订并枚举全部历史；任一修订的主体/关联/证据/附件可独立还原，源对象删除不会破坏身份快照，当前投影可从权威事实重建并验证一致性。
+- [ ] `P-AC-065` 草稿、行动项、评论、关注/未读不通过修改 Markdown 修订实现；内容寻址去重不会合并逻辑权限或审计，永久删除与孤立回收可证明不会删掉其他记录/历史仍引用的 payload。
+- [ ] `P-AC-066` 正式保存的基准修订、幂等键、capture intent、防漂移重读、附件就绪状态、内容寻址对象与 PostgreSQL 事务均有成功/失败/重试测试；失败时当前指针、修订数量、活动和 outbox 要么全部变化，要么全部不变。
+- [ ] `P-AC-067` 草稿网络失败、草稿/修订冲突、证据过期或变化、附件检查/拒绝/配额、Blob 不可用、数据库失败和外部通知失败都有非歧义界面，不丢未授权仍有效的本地输入且不谎报正式保存。
+- [ ] `P-AC-068` 浏览器缓冲按用户/草稿隔离、最长 24 小时、不含附件/证据字节，并在同步、丢弃、登出、换用户时清除；权限撤销/永久删除会清除当前在线客户端与服务端草稿，离线设备未重新鉴权时不得展示并在下次联网后清除，且影响预览不谎称可远程擦除离线存储。
+- [ ] `P-AC-069` 两个 tab/两台设备场景覆盖 SSE 正常、SSE 断线轮询、后台冻结、focus/pageshow/reconnect：撤权或另一设备删除后，未过期在线 lease 在 5 秒内 ack 并清可见 DOM、editor state、IndexedDB/object URL、停止 autosave；未 ack 客户端使预览 stale 并按离线缓冲披露，恢复前重鉴权且旧内容闪现帧数为 0。
+- [ ] `P-AC-070` 后端模块依赖方向和接口可在测试中替换，records不直接读取任意源表或Blob实现；每个evidence kind具有独立schema/脱敏/比较/导出测试。外部unsupported版本只在integrity-valid quarantine/dry-run显示allowlisted envelope metadata，创建record/snapshot、apply、普通render/compare/search/activity/re-export命中为0；损坏entry不信任kind metadata，权威库unknown contract失败关闭，任何路径都不使用通用JSON渲染。
+- [ ] `P-AC-071` VPS 概览读模型能够表达各区生成时间与局部失败；前端路由页面分别拥有加载/提交状态，当前详情页不再集中持有记录中心、比较、长编辑和所有 modal 的业务状态。
+- [ ] `P-AC-072` 旧 experience 迁移可重复执行且数量、原 ID、时间、文本和分类可对账；未知类型/作者不被猜测，旧资产历史不会被误标为人工记录，新旧系统不存在不可审计双写。“迁移→永久删除”后新记录、旧 `/experience-logs` API/UI 和 `experience_logs` SQL 的正文命中数均为 0；重跑迁移或恢复到迁移前旧库时，删除重放在旧路由/worker 启动前清除原行，复活数为 0。
+- [ ] `P-AC-073` feature flag 回退不丢新记录；旧页面只能回退到 fence-aware API。精确配置矩阵覆盖 `HOUFENG_RECORDS_ENABLED`、`HOUFENG_RECORD_PERMANENT_DELETE_ENABLED` 与唯一 `HOUFENG_DELETION_WITNESS_MODE=postgres_sync|s3_worm`，证明未选 profile/command scope 的变量、文件和 endpoint 从未 stat/parse/resolve/open。flags-off 保留 0.59 owner path；records-only 只运行 `migrate --scope app` 并使用 APP runtime；永久删除只运行 `migrate --scope permanent-delete` 并打开选定 profile。APP r1 精确绑定 `0001…0051` 的 52 个 SQL 文件，0051 精确拥有 22 张 public 应用/治理表；`app_acl_manifest_rNNNNNN` revision 独立单调，绑定按 filename 排序的完整 migration checksum set 与精确 privilege set。先 0056 后 0055 仍只增不退，catalog exact-check 包含 PUBLIC、membership、ownership、column/default ACL，APP runtime 对精确 4 条 sequence 有 USAGE且持久函数 EXECUTE 集只能是 `public.record_platform_cas_contract_activation_projection(bytea)` 与 `public.record_platform_cas_domain_rotation_projection(bytea)`，PUBLIC/extension 函数 EXECUTE 集为 0；22/52/4/2 任一遗漏或额外对象/权限均失败。测试还覆盖新旧 backend/worker 混跑、滚动发布、孤立旧实例、陈旧 LB target、队列旧消费者和后端版本回退：账本激活后低于 minimum fence-contract version 的实例对受保护记录域的 version-aware readiness、流量和任务接纳数均为 0；进程可继续承载无关监控域，普通旧 `/ready` 200 不构成记录域准入。向前修复、搜索投影重建、本地/S3 启动检查、Blob manifest 备份恢复、worker lease/重试，以及 scanner 缺失时“新压缩包拒收、在途包隔离后重试/过期”均有演练或自动化验证。
+- [ ] `P-AC-074` 代表性数据规模的概览、搜索、时间线、草稿、纯文字修订、comparison summary/detail和最大证据性能达到已确认 p95；测试固定参考资源、seed/hash、local/MinIO profile、5 分钟预热、15 分钟混合到达率、最低样本和 3 轮逐轮过线，并输出一键命令、p50/p95/p99、错误率、资源、comparison admission/drain和查询计划。30秒理解测试至少20名未参与本项目需求规划、视觉/技术设计、产品或代码实现、代码审查、测试/fixture实现、Trellis/Codex规划复核的目标参与者（≥10名首次、其余低频），稳定/异常与桌面/390px反平衡，四问全对且≤30秒需≥18/20；自动化browser cue断言不得计入参与者结果。Axe/键盘/触摸、迁移零差异和Blob恢复哈希均有同commit可复核报告。
+- [ ] `P-AC-075` 父任务列出 11 个必交付子任务、每个子任务的独立验收与显式依赖；最终集成任务验证所有组合路径，不能因某个子任务单独通过就宣称父任务完成。
+- [ ] `P-AC-076` 每种记录类型的业务状态、允许流转与统一状态组映射都有可测试合同；无业务状态类型不渲染空字段，状态变更同时产生新修订和系统活动。
+- [ ] `P-AC-077` 推荐流转、非推荐跳转、回退、重开、类型变更和终态必填条件均有服务端与界面合同；允许的例外必须记录原因，旧完成周期仍可审计，系统事件只能建议而不能代替用户变更状态。
+- [ ] `P-AC-078` 附件准入类型、MIME 检测、文件名安全、哈希、不可变内容、修订引用、预览/强制下载、危险类型拒绝、远程 URL、配额和孤立文件回收均有可测试合同；任一历史修订仍引用的文件不得被回收。
+- [ ] `P-AC-079` 附件隔离、签名/扩展名不匹配、图片/文档复杂度、压缩炸弹、加密包、主动内容拒绝和沙箱预览均有失败态；未通过检查的文件不能被引用、预览或通过可猜 URL 下载。
+- [ ] `P-AC-080` 强杀 attachment scanner、归档解包、证据 renderer 和 Chromium export worker 后，清理完成 receipt 对应的逐任务 tmpfs/profile/cache、quarantine 派生文件与 partial archive 残留命中数为 0，core dump 生成数始终为 0；清理尚未收敛时保持可轮询失败而非谎报完成。外部 processor 的最大保留和删除核验进入同一库存，无法验证时永久删除失败关闭。
+- [ ] `P-AC-081` 50 MiB/文件、500 MiB/记录、10 GiB/项目、80% 预警和管理员调整具有一致的服务端强制合同；配额用尽仍能保存不新增附件的记录变更。
+- [ ] `P-AC-082` 单节点数据卷与 S3 兼容存储使用相同的附件身份、权限、哈希、备份/恢复和迁移语义；容器重建不会丢失附件，普通 JSON API 的 256 KiB 限制不会被全局放宽。
+- [ ] `P-AC-083` 每个逻辑附件满足 `record_id XOR draft_id`：新上传先归作者草稿，正式保存事务原子转移到记录并重算配额，失败仍留在草稿；跨记录使用创建带 copied-from 的新逻辑附件，可以共享 Blob 但不共享权限/配额/审计，删除一条记录不会按内容哈希误删另一条记录的合法附件。
+- [ ] `P-AC-084` 记录详情、导出与修订对比始终区分“用户附件”与“系统证据”，不会把上传文件的内容标记为已验证系统事实。
+- [ ] `P-AC-085` Markdown 存储、安全解析、GFM/脚注/代码高亮子集、原始 HTML 禁用、工具栏/快捷键/模板/预览、结构化引用块、历史修订解析和可移植导出均有清晰可测试合同。
+- [ ] `P-AC-086` 编辑器在桌面和窄屏均能区分草稿状态、当前正式修订与显式保存动作；分栏预览不会成为第二份权威内容，材料侧栏/抽屉不会混淆系统证据、用户附件和作者正文结论。
+- [ ] `P-AC-087` 证据选择器从来源参数重新生成版本化服务端预览，明确 report/event/source identity、kind/schema、请求/实际/观测窗口、精度/桶宽/桶数/数据点、样本质量/缺口、source watermark/计算版本、体积/配额、敏感选择/脱敏和长期留存语义；不适用字段带 reason。最终保存逐字段再次校验，预览与保存之间的源变化不能静默产生不同快照。
+- [ ] `P-AC-088` 证据/附件引用不在 Markdown 中嵌入 JSON、二进制或 `data:` URL；移除当前引用不破坏历史修订，引用丢失/已彻底清除时显示明确 tombstone 而不是空白或损坏卡片。
+- [ ] `P-AC-089` 记录全文检索和结构化筛选为服务端能力，支持稳定排序/游标分页、URL 规范化和命中摘要；不会通过拉取所有记录到浏览器后子串过滤来伪装可扩展搜索。
+- [ ] `P-AC-090` 搜索索引和筛选同时覆盖 primary 与 related identity snapshot；从记录可反向进入全部仍有权的实时对象，来源删除后保留可搜历史身份并显示 tombstone，按名称误重连数和因 live join 为空而丢失的历史结果数均为 0。
+- [ ] `P-AC-091` 记录中心原型中的实际待跟进/受阻/临期提示按数据动态插入；列表可在不打开详情的情况下识别记录类型、主体、状态/跟进和关联材料规模，无状态类型不会显示空占位。
+- [ ] `P-AC-092` 默认、归档、历史修订和草稿搜索范围互不混淆；历史命中显示修订号/时间/非当前标识，顶部全局搜索不返回草稿、归档或历史内容。
+- [ ] `P-AC-093` 单主体纵向时间线和横向比较工作台使用同一记录/活动/证据合同；两种入口不复制存储或生成不同版本的事实。
+- [ ] `P-AC-094` 单主体活动/记录两个局部视图通过同一查询范围投影，来源使用非颜色单一通道可区分；时间线中的证据摘要显示实际覆盖与精度，系统活动不可编辑，人工记录可进入对应修订详情。
+- [ ] `P-AC-095` 活动event-time映射对新记录/revision1、后续修订、legacy回填、系统事实、证据、评论和行动项逐类可测试；同一source event/version重建重复数为0。固定`projection_generation + committed-contiguous published_ingest_sequence`的多页结果无漏项/重复，低序号延迟commit与全/部分重复retry不产生水位空洞；稀疏view/kind/current筛选在LIMIT前生效。分页中到达的旧事件只在刷新后按业务时间出现并标backfilled，灾难重建旧cursor过期，响应无global head且隐藏scope推进不可推断。
+- [ ] `P-AC-096` 比较工作台支持主体推荐和精确快照选择，能对齐身份/时间/覆盖/新鲜度/schema/规范化指标，并对缺失、部分、截断、聚合不同和不兼容给出非歧义表达。
+- [ ] `P-AC-097` 记录比较入口固定不可变 revision 并只展开该版证据；多同类快照需要选择、无证据显示明确空态。刷新或来源记录产生新修订不会改变已有比较；baseline 与 actual/common-overlap 模式切换形成新的规范化条件并在交集为空时阻止数值计算。
+- [ ] `P-AC-098` 比较原型在指标之前显示选择/对齐条件与可比性审查；趋势线不会穿越无数据区间，矩阵对部分覆盖和不可计算差值给出原因，切换共同覆盖会形成新的显式比较条件。
+- [ ] `P-AC-099` 数值差异只在同类证据合同允许时计算，不从 Markdown 或跨类型任意字段生成总分；另存比较创建新记录与新快照引用，不修改源内容。
+- [ ] `P-AC-100` 草稿、项目共享记录和权限组受限记录在 API、列表、搜索、统计、时间线、比较、附件下载和导出中使用同一授权结果，前端隐藏不是安全边界。
+- [ ] `P-AC-101` 多来源记录的权限取交集，不能通过证据快照、引用块、附件 URL、比较结果或导出绕过；可见范围变更可修订、可审计，匿名公开链接不在能力内。
+- [ ] `P-AC-102` `capture=project-wide → source restrict=group A → source delete` 后，被撤权用户在列表、搜索、详情、时间线、证据/附件、比较、通知和导出始终 404；从 restrict 之前的备份恢复再重放 delete commit 时，full witness 的 authorization floor 可重建且结果相同。`AuthorizationFloorSnapshot.Kind` 与 version 都显式进入 canonical bytes，使空 role/group 的 deny-all `restricted` 不会被误解为 `project`；floor 缺失、篡改、Kind 缺失/未知或 version 未知的错误放行数为 0。
+- [ ] `P-AC-103` 人类可读导出包含 Markdown 目录包和 PDF，默认当前修订并可显式包含历史；证据/附件/来源状态可读且遵守权限与脱敏，两种格式的内容语义不漂移。
+- [ ] `P-AC-104` 导出计划绑定 revision/material ID 与哈希，生成和每次下载都重新授权；创建/下载前提示外部副本不可召回，服务端产物按 24 小时 TTL/15 分钟链接清理且在永久删除时立即撤销和 purge。
+- [ ] `P-AC-105` 机器归档包有版本 manifest、schema、内容哈希和可选实例签名；界面区分完整性与签发者真实性，保存 signer/key、unverified/signature_verified、验证时间、策略版本及当前 trust 状态，任何导入 producer/actor/source 声明和历史快照都不会被写成当前监控/资产事实。
+- [ ] `P-AC-106` 包内 ACL/role/group/capability 永不授予目标实例权限；导入管理员显式选择目标可见范围并继续与已解析来源权限取交集，原授权只作为不可信 provenance。
+- [ ] `P-AC-107` 导入 dry-run 覆盖兼容、哈希/签名、规范化/重复路径、symlink/hardlink、压缩炸弹、缺失来源、权限、重复、体积、附件重扫、重新关联和删除账本命中；已删除原 ID 不得复活，只能经显式确认分配新 ID。
+- [ ] `P-AC-108` 导入记录强制保存规范化 origin lineage；“导入→永久删除→同包再导”默认命中 tombstone，“显式审批新 ID→再次删除”可追加新的 ledger sequence，origin 非唯一索引仍能命中任一历史删除。
+- [ ] `P-AC-109` dry-run plan 绑定 object/origin 集合、observed witness sequence/hash 和审批类型；在 dry-run 后、apply 前永久删除同一 object/origin 时，普通计划稳定返回 `409 import_plan_stale`，最终事务 fresh ledger/tombstone 检查和 reservation epoch 能阻止旧 worker/旧计划复活内容，只有新的 `reimport_deleted` 审批可分配新 ID。
+- [ ] `P-AC-110` import apply 与 deletion reservation 共享 canonical identity guard；并发测试覆盖 apply 先提交、reservation 先提交及双方最终提交点交错：前者使删除预览稳定失效并列出新副本，后者使 import 失败，双提交、漏报副本和 tombstone 后复活数均为 0。
+- [ ] `P-AC-111` 导入原包、解包树、扫描副本、partial artifact 和 plan 均有任务前登记、反向 object/origin refs、明确 TTL、备份排除或库存、取消/过期/崩溃清理与 purge receipt；永久删除预览不会把这些候风控制面的副本误称为外部不可控或因 plan 过期而视为已清除。
+- [ ] `P-AC-112` 在 import manifest/identity 解析前的首字节、中间 chunk、半包、解析失败各状态发起同 project/deployment 永久删除，unknown classification job 均成为 blocker并在 ledger append 前清 parts/原包/workspace；complete digest 后才使用对象级 refs。未分类包残留且 online_purged 的组合数为 0。
+- [ ] `P-AC-113` 主要负责人、参与者、下次跟进时间与行动项只在适用时出现；逾期/受阻提示不预留空位。记录中心可分别按 owner/participant、follow-up 状态/范围、action status/assignee/due 状态/范围筛选；同字段 OR、跨字段 AND，服务端 `EXISTS` 不产生重复记录，规范化 URL 往返不混淆两种截止时间。
+- [ ] `P-AC-114` 行动项有独立变更活动、权限与导出合同；它不导致 Markdown 修订噪声，不自动关闭记录，不通过任何隐式规则修改关联业务对象。
+- [ ] `P-AC-115` 评论使用安全 Markdown 子集且与正式修订分离；编辑历史、删除 tombstone、平铺回复上下文和导出能够完整保留讨论语义，不形成无限嵌套聊天产品。
+- [ ] `P-AC-116` 关注、提及和通知触发规则可测试：默认关注者正确、手动取消不屏蔽强制通知、本人操作与草稿自动保存不产生噪声、重复事件可聚合，且未读状态按用户独立维护。
+- [ ] `P-AC-117` 站内与 Telegram/飞书等外部通知在发送、每次重试、历史展示和深链打开时均重新执行权限与脱敏合同；outbox 不持久化已渲染正文，权限撤销/目标解绑/永久删除后旧 payload/cache 清除且外投数为 0。外部消息不包含受限正文、评论全文、证据或附件，投递失败不回滚业务操作。
+- [ ] `P-AC-118` 永久删除后候风侧成功 delivery audit 的 record/revision/recipient/channel/message 关联和摘要命中数为 0，只剩最小 audit 的 external-copy boolean/无身份聚合；记录未删除时 180 天 TTL 可配置缩短。已交付外部消息在影响预览中明确不可召回，不用清内部审计冒充外部召回。
+- [ ] `P-AC-119` 关键布局与交互通过可视化原型或高保真示意得到用户评审。
+- [ ] `P-AC-120` `research/visual-design-contract.md`以Artifact `vps-records-visual-contract/v1`固化闭合五组 `comparison_workbench|evidence_selector|markdown_editor|records_center_and_subject_timeline|vps_overview` 与闭合六态 `authorization_revoked_or_permanently_deleted|first_empty|initial_loading|local_failure|query_no_results|submitting_or_background` 的完整 `5×6=30` 顶层 fixture；fixture ID 严格为 `<PageGroupV1>__<VisualStateV1>`。`records_center_and_subject_timeline` 是一个page group而不是第六页的折叠别名，其每个顶层fixture必须同时内含独立、可断言的`records_center`与`subject_timeline`两个route subfixture；缺任一subview都算该fixture缺失，但subfixture不增加顶层计数。每项含桌面/390px语义、DOM状态、几何、overflow、focus顺序和Axe。后续回归引用该版本，不依赖会话记忆或失效临时URL，也不引入tracked pixel golden、screenshot manifest或批量raster。脱敏本地截图仅为未跟踪短期人工评审证据。
+- [ ] `P-AC-121` `prd.md` 与复杂任务所需的设计资料经过自审，无未解释的占位符、互相矛盾或可产生两种解释的关键要求。
+## Open Questions
+
+- 无尚待产品取舍的开放问题。当前门槛是完成并复核方案 A 修订后的父/平台子任务 `prd.md`、`design.md`、`implement.md`。全部规划产物再次交付用户审阅后，仍需独立明确批准，才可恢复已冻结的平台基础实施分支；不重复 start 父任务或其他子任务。
+
+## Execution Gate
+
+- 用户已于 2026-07-14 明确批准完整设计并曾授权启动平台基础旧合同；方案 A 修订后产品分支重新冻结，当前只修改规划工件，不重复 `task.py start`。2026-07-15 用户已审阅并明确批准方案 A 修订后的父/平台子任务规划工件，可在既有冻结的平台基础工作树中按该合同恢复实施；父任务与其他子任务不重复启动。该治理状态不是第 122 条产品验收标准；父级产品验收集合固定为 `P-AC-001…P-AC-121`。
