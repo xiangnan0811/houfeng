@@ -111,6 +111,98 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, reader, migrations.FS, privilegeBody); err != nil {
 		t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() error = %v", err)
 	}
+
+	t.Run("rejects SET ROLE identity bypass", func(t *testing.T) {
+		runtimeRole := fmt.Sprintf("houfeng_runtime_%d_%d", time.Now().UnixNano(), os.Getpid())
+		quotedRuntimeRole := quotePostgresIdentifier(runtimeRole)
+		if _, err := db.Exec(ctx, `create role `+quotedRuntimeRole+` noinherit`); err != nil {
+			t.Fatalf("create temporary runtime role %q: %v", runtimeRole, err)
+		}
+		t.Cleanup(func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if _, err := db.Exec(cleanupCtx, `drop owned by `+quotedRuntimeRole); err != nil {
+				t.Errorf("drop temporary runtime role dependencies %q: %v", runtimeRole, err)
+				return
+			}
+			if _, err := db.Exec(cleanupCtx, `drop role `+quotedRuntimeRole); err != nil {
+				t.Errorf("drop temporary runtime role %q: %v", runtimeRole, err)
+			}
+		})
+		if _, err := db.Exec(ctx, `grant usage on schema public to `+quotedRuntimeRole); err != nil {
+			t.Fatalf("grant runtime role schema usage: %v", err)
+		}
+		if _, err := db.Exec(ctx, `grant select on table public.app_acl_manifest_revisions, public.app_acl_manifest_head, public.schema_migrations to `+quotedRuntimeRole); err != nil {
+			t.Fatalf("grant runtime role manifest reads: %v", err)
+		}
+
+		runtimePrivilegeBody, err := CanonicalPrivilegeSetBodyV1(
+			[]AppACLRoleBinding{
+				{Subject: AppACLSubjectCenterRuntime, CatalogRole: runtimeRole},
+				{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+			},
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("CanonicalPrivilegeSetBodyV1() runtime role error = %v", err)
+		}
+		runtimeManifest, err := NewAppACLManifestPersistedV1(2, manifest.ManifestDigest, migrationBody, runtimePrivilegeBody)
+		if err != nil {
+			t.Fatalf("NewAppACLManifestPersistedV1() runtime role error = %v", err)
+		}
+		if _, err := db.Exec(ctx, `
+			insert into public.app_acl_manifest_revisions (
+				manifest_revision,
+				previous_manifest_digest,
+				canonical_migration_set,
+				sorted_migration_set_digest,
+				canonical_privilege_set,
+				privilege_set_digest,
+				manifest_digest
+			) values ($1, $2, $3, $4, $5, $6, $7)
+		`,
+			int64(runtimeManifest.ManifestRevision),
+			runtimeManifest.PreviousManifestDigest[:],
+			runtimeManifest.CanonicalMigrationSet,
+			runtimeManifest.MigrationSetDigest[:],
+			runtimeManifest.CanonicalPrivilegeSet,
+			runtimeManifest.PrivilegeSetDigest[:],
+			runtimeManifest.ManifestDigest[:],
+		); err != nil {
+			t.Fatalf("insert runtime role manifest revision: %v", err)
+		}
+		if _, err := db.Exec(ctx, `
+			update public.app_acl_manifest_head
+			set manifest_revision = $1, manifest_digest = $2
+			where singleton
+		`, int64(runtimeManifest.ManifestRevision), runtimeManifest.ManifestDigest[:]); err != nil {
+			t.Fatalf("advance app ACL manifest head for runtime role: %v", err)
+		}
+
+		runtimePoolConfig := db.Config().Copy()
+		runtimePoolConfig.MaxConns = 1
+		runtimePoolConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+			_, err := conn.Exec(ctx, `set role `+quotedRuntimeRole)
+			return err
+		}
+		runtimePool, err := pgxpool.NewWithConfig(ctx, runtimePoolConfig)
+		if err != nil {
+			t.Fatalf("open SET ROLE runtime pool: %v", err)
+		}
+		t.Cleanup(runtimePool.Close)
+
+		runtimeReader := NewPostgresAppACLManifestRuntimeReader(runtimePool)
+		if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, runtimeReader, migrations.FS, runtimePrivilegeBody); err == nil || !strings.Contains(err.Error(), "session user") {
+			t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() SET ROLE error = %v, want session-user rejection", err)
+		}
+		runtimeSnapshot, err := runtimeReader.ReadAppACLManifestRuntimeSnapshotV1(ctx)
+		if err != nil {
+			t.Fatalf("ReadAppACLManifestRuntimeSnapshotV1() SET ROLE error = %v", err)
+		}
+		if runtimeSnapshot.SessionUser != sessionUser || runtimeSnapshot.CurrentUser != runtimeRole {
+			t.Fatalf("SET ROLE runtime identities = (%q, %q), want (%q, %q)", runtimeSnapshot.SessionUser, runtimeSnapshot.CurrentUser, sessionUser, runtimeRole)
+		}
+	})
 }
 
 func TestPostgresIntegrationEnsureAppACLManifestGenesisV1(t *testing.T) {
