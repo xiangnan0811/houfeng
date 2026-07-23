@@ -3,10 +3,13 @@ package platformmigrate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -17,6 +20,110 @@ import (
 )
 
 const postgresIntegrationFlag = "HOUFENG_POSTGRES_INTEGRATION"
+
+func TestPostgresIntegrationProvisionRolesRequiresPrecreatedNoInheritRoles(t *testing.T) {
+	if os.Getenv(postgresIntegrationFlag) != "1" {
+		t.Skipf("%s=1 is required for postgres integration tests", postgresIntegrationFlag)
+	}
+
+	ctx := context.Background()
+	url := strings.TrimSpace(os.Getenv("HOUFENG_DATABASE_URL"))
+	if url == "" {
+		t.Fatalf("HOUFENG_DATABASE_URL is required when %s=1", postgresIntegrationFlag)
+	}
+	db, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatalf("open application database: %v", err)
+	}
+	t.Cleanup(db.Close)
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	roles := AppRoleSetV1{
+		CenterRuntime: "rp_runtime_" + suffix,
+		PlatformAdmin: "rp_admin_" + suffix,
+		Migrator:      "rp_migrator_" + suffix,
+	}
+	for _, role := range []string{roles.CenterRuntime, roles.PlatformAdmin, roles.Migrator} {
+		createPrecreatedNoInheritRole(t, ctx, db, role)
+	}
+
+	if err := ProvisionRoles(ctx, db, roles); err != nil {
+		t.Fatalf("ProvisionRoles() valid roles error = %v", err)
+	}
+
+	if _, err := db.Exec(ctx, "alter role "+pgx.Identifier{roles.CenterRuntime}.Sanitize()+" inherit"); err != nil {
+		t.Fatalf("make runtime role inherit: %v", err)
+	}
+	if err := ProvisionRoles(ctx, db, roles); err == nil || !strings.Contains(err.Error(), "NOINHERIT") {
+		t.Fatalf("ProvisionRoles() inheriting runtime role error = %v, want NOINHERIT rejection", err)
+	}
+	if _, err := db.Exec(ctx, "alter role "+pgx.Identifier{roles.CenterRuntime}.Sanitize()+" noinherit"); err != nil {
+		t.Fatalf("restore runtime role NOINHERIT: %v", err)
+	}
+	if _, err := db.Exec(ctx, "alter role "+pgx.Identifier{roles.Migrator}.Sanitize()+" inherit"); err != nil {
+		t.Fatalf("make migrator role inherit: %v", err)
+	}
+	if err := ProvisionRoles(ctx, db, roles); err == nil || !strings.Contains(err.Error(), "NOINHERIT") {
+		t.Fatalf("ProvisionRoles() inheriting migrator role error = %v, want NOINHERIT rejection", err)
+	}
+	if _, err := db.Exec(ctx, "alter role "+pgx.Identifier{roles.Migrator}.Sanitize()+" noinherit"); err != nil {
+		t.Fatalf("restore migrator role NOINHERIT: %v", err)
+	}
+
+	if _, err := db.Exec(ctx, "grant "+pgx.Identifier{roles.Migrator}.Sanitize()+" to "+pgx.Identifier{roles.CenterRuntime}.Sanitize()); err != nil {
+		t.Fatalf("grant migrator membership to runtime: %v", err)
+	}
+	if err := ProvisionRoles(ctx, db, roles); err == nil || !strings.Contains(err.Error(), "membership") {
+		t.Fatalf("ProvisionRoles() runtime membership error = %v, want membership rejection", err)
+	}
+	if _, err := db.Exec(ctx, "revoke "+pgx.Identifier{roles.Migrator}.Sanitize()+" from "+pgx.Identifier{roles.CenterRuntime}.Sanitize()); err != nil {
+		t.Fatalf("revoke migrator membership from runtime: %v", err)
+	}
+
+	schemaName := "rp_roles_" + suffix
+	if _, err := db.Exec(ctx, "create schema "+pgx.Identifier{schemaName}.Sanitize()+" authorization "+pgx.Identifier{roles.CenterRuntime}.Sanitize()); err != nil {
+		t.Fatalf("create runtime-owned schema: %v", err)
+	}
+	if err := ProvisionRoles(ctx, db, roles); err == nil || !strings.Contains(err.Error(), "owns") {
+		t.Fatalf("ProvisionRoles() runtime-owned schema error = %v, want ownership rejection", err)
+	}
+	if _, err := db.Exec(ctx, "drop schema "+pgx.Identifier{schemaName}.Sanitize()); err != nil {
+		t.Fatalf("drop runtime-owned schema: %v", err)
+	}
+
+	missing := roles
+	missing.Migrator = "rp_missing_" + suffix
+	var existedBefore bool
+	if err := db.QueryRow(ctx, `select exists (select 1 from pg_roles where rolname = $1)`, missing.Migrator).Scan(&existedBefore); err != nil {
+		t.Fatalf("read missing role before preflight: %v", err)
+	}
+	if existedBefore {
+		t.Fatalf("missing role %q unexpectedly exists before preflight", missing.Migrator)
+	}
+	if err := ProvisionRoles(ctx, db, missing); err == nil || !strings.Contains(err.Error(), "missing pre-created") {
+		t.Fatalf("ProvisionRoles() missing role error = %v, want missing pre-created role rejection", err)
+	}
+	var existedAfter bool
+	if err := db.QueryRow(ctx, `select exists (select 1 from pg_roles where rolname = $1)`, missing.Migrator).Scan(&existedAfter); err != nil {
+		t.Fatalf("read missing role after preflight: %v", err)
+	}
+	if existedAfter {
+		t.Fatalf("ProvisionRoles() created missing role %q", missing.Migrator)
+	}
+}
+
+func createPrecreatedNoInheritRole(t *testing.T, ctx context.Context, db *pgxpool.Pool, role string) {
+	t.Helper()
+	quoted := pgx.Identifier{role}.Sanitize()
+	if _, err := db.Exec(ctx, "create role "+quoted+" login noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls"); err != nil {
+		t.Fatalf("create pre-created role %q: %v", role, err)
+	}
+	t.Cleanup(func() {
+		if _, err := db.Exec(context.Background(), "drop role if exists "+quoted); err != nil {
+			t.Errorf("drop pre-created role %q: %v", role, err)
+		}
+	})
+}
 
 func TestPostgresIntegrationIndependentMigrationDomains(t *testing.T) {
 	if os.Getenv(postgresIntegrationFlag) != "1" {
