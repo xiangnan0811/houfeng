@@ -394,11 +394,6 @@ func TestApplyFSExecutesPendingMigrationsInSortedOrder(t *testing.T) {
 		t.Fatalf("ensureCalls = %d, want 1", store.ensureCalls)
 	}
 
-	wantChecks := []string{"0001_initial_schema.sql", "0002_second.sql"}
-	if !reflect.DeepEqual(store.appliedChecks, wantChecks) {
-		t.Fatalf("appliedChecks = %#v, want %#v", store.appliedChecks, wantChecks)
-	}
-
 	wantExec := []string{"select 1;", "select 2;"}
 	if !reflect.DeepEqual(store.execSQL, wantExec) {
 		t.Fatalf("execSQL = %#v, want %#v", store.execSQL, wantExec)
@@ -431,6 +426,40 @@ func TestApplyFSSkipsAlreadyAppliedMigrations(t *testing.T) {
 	wantRecorded := []string{"0002_second.sql"}
 	if !reflect.DeepEqual(store.recorded, wantRecorded) {
 		t.Fatalf("recorded = %#v, want %#v", store.recorded, wantRecorded)
+	}
+}
+
+func TestApplyFSRejectsChecksumMismatchForAppliedMigration(t *testing.T) {
+	const migrationName = "0001_initial_schema.sql"
+	fsys := fstest.MapFS{
+		migrationName: {Data: []byte("select 1;")},
+	}
+	store := &fakeMigrationStore{
+		applied: map[string]bool{migrationName: true},
+		checksums: map[string]string{
+			migrationName: strings.Repeat("0", 64),
+		},
+	}
+
+	err := applyFS(context.Background(), store, fsys)
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("applyFS() error = %v, want checksum mismatch", err)
+	}
+}
+
+func TestApplyFSRejectsUnknownAppliedMigration(t *testing.T) {
+	store := &fakeMigrationStore{
+		applied: map[string]bool{"0000_unknown.sql": true},
+		checksums: map[string]string{
+			"0000_unknown.sql": strings.Repeat("0", 64),
+		},
+	}
+
+	err := applyFS(context.Background(), store, fstest.MapFS{
+		"0001_initial_schema.sql": {Data: []byte("select 1;")},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown applied migration") {
+		t.Fatalf("applyFS() error = %v, want unknown applied migration", err)
 	}
 }
 
@@ -478,33 +507,53 @@ func TestAssetDecisionFollowupMigrationDropsRecordsViewBeforeChangingShape(t *te
 }
 
 type fakeMigrationStore struct {
-	ensureCalls   int
-	applied       map[string]bool
-	appliedChecks []string
-	execSQL       []string
-	recorded      []string
-	execErr       map[string]error
+	ensureCalls int
+	applied     map[string]bool
+	checksums   map[string]string
+	execSQL     []string
+	recorded    []string
+	execErr     map[string]error
 }
 
-func (f *fakeMigrationStore) EnsureLedger(context.Context) error {
+func (f *fakeMigrationStore) EnsureLedger(_ context.Context, sources map[string]migrationSource) error {
 	f.ensureCalls++
-	return nil
-}
-
-func (f *fakeMigrationStore) HasMigration(_ context.Context, name string) (bool, error) {
-	f.appliedChecks = append(f.appliedChecks, name)
-	return f.applied[name], nil
-}
-
-func (f *fakeMigrationStore) ExecMigration(_ context.Context, sql string) error {
-	f.execSQL = append(f.execSQL, sql)
-	if err := f.execErr[sql]; err != nil {
-		return err
+	if f.applied == nil {
+		f.applied = make(map[string]bool)
+	}
+	if f.checksums == nil {
+		f.checksums = make(map[string]string)
+	}
+	for name, applied := range f.applied {
+		if !applied {
+			continue
+		}
+		if _, alreadyPinned := f.checksums[name]; alreadyPinned {
+			continue
+		}
+		if source, ok := sources[name]; ok {
+			f.checksums[name] = source.checksum
+		}
 	}
 	return nil
 }
 
-func (f *fakeMigrationStore) RecordMigration(_ context.Context, name string) error {
+func (f *fakeMigrationStore) Applied(context.Context) (map[string]string, error) {
+	applied := make(map[string]string, len(f.applied))
+	for name, isApplied := range f.applied {
+		if isApplied {
+			applied[name] = f.checksums[name]
+		}
+	}
+	return applied, nil
+}
+
+func (f *fakeMigrationStore) Apply(_ context.Context, name, checksum, sql string) error {
+	f.execSQL = append(f.execSQL, sql)
+	if err := f.execErr[sql]; err != nil {
+		return err
+	}
+	f.applied[name] = true
+	f.checksums[name] = checksum
 	f.recorded = append(f.recorded, name)
 	return nil
 }

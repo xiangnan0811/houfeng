@@ -130,6 +130,53 @@ func TestPostgresIntegrationRecordPlatformFoundationSchema(t *testing.T) {
 	}
 }
 
+func TestPostgresIntegrationAdoptsNameOnlyMigrationLedger(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresDatabase(t, ctx)
+
+	applyPostgresMigrationsThrough(t, ctx, db, "0050_extend_command_action_audit.sql")
+	var before time.Time
+	if err := db.QueryRow(ctx, `
+		select applied_at
+		from schema_migrations
+		where name = '0001_initial_schema.sql'
+	`).Scan(&before); err != nil {
+		t.Fatalf("read pre-adoption applied_at: %v", err)
+	}
+	if _, err := db.Exec(ctx, `alter table schema_migrations drop column checksum`); err != nil {
+		t.Fatalf("simulate 0.59 name-only migration ledger: %v", err)
+	}
+
+	if err := Apply(ctx, db); err != nil {
+		t.Fatalf("Apply() after name-only migration ledger error = %v", err)
+	}
+
+	var checksum string
+	var after time.Time
+	if err := db.QueryRow(ctx, `
+		select checksum, applied_at
+		from schema_migrations
+		where name = '0001_initial_schema.sql'
+	`).Scan(&checksum, &after); err != nil {
+		t.Fatalf("read adopted migration ledger row: %v", err)
+	}
+	if len(checksum) != 64 {
+		t.Fatalf("adopted checksum length = %d, want 64", len(checksum))
+	}
+	if !after.Equal(before) {
+		t.Fatalf("adopted applied_at = %s, want preserved %s", after, before)
+	}
+	assertSingleIntValue(t, ctx, db, `select count(*)::int from schema_migrations`, 52)
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'schema_migrations'
+		  and column_name = 'checksum'
+		  and is_nullable = 'NO'
+	`, 1)
+}
+
 func TestPostgresIntegrationCommandActionAuditUpgrade(t *testing.T) {
 	ctx := context.Background()
 	db := openTemporaryPostgresSchema(t, ctx)
