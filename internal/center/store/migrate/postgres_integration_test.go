@@ -534,6 +534,14 @@ func TestPostgresIntegrationRecordPlatformProjectorFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal rotation command: %v", err)
 	}
+	if _, err := adminDB.Exec(ctx, `select public.record_platform_cas_domain_rotation_projection($1)`, rotationBytes); !isPostgresInsufficientPrivilege(err) {
+		t.Fatalf("admin rotation invoke error = %v, want SQLSTATE 42501", err)
+	}
+
+	malformedRotation := append([]byte(nil), rotationBytes...)
+	malformedRotation[0] ^= 0xff
+	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "rotation malformed command", "public.record_platform_cas_domain_rotation_projection", malformedRotation)
+	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "rotation trailing command", "public.record_platform_cas_domain_rotation_projection", append(append([]byte(nil), rotationBytes...), 0))
 
 	profileMismatch := rotation
 	profileMismatch.ActiveProfile = recordplatform.ProjectionProfileS3WORM
@@ -557,6 +565,26 @@ func TestPostgresIntegrationRecordPlatformProjectorFunctions(t *testing.T) {
 	if !bytes.Equal(rotationReceipt, rotationRetry) {
 		t.Fatalf("rotation retry receipt = %x, want %x", rotationRetry, rotationReceipt)
 	}
+
+	nextRotation := projectorCASNextRotation(rotation, 15, 16)
+	staleSequence := nextRotation
+	staleSequence.ExpectedWitnessedLedgerSequence = rotation.ExpectedWitnessedLedgerSequence
+	staleSequenceBytes, err := staleSequence.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal stale expected witnessed ledger sequence rotation: %v", err)
+	}
+	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "stale expected witnessed ledger sequence", "public.record_platform_cas_domain_rotation_projection", staleSequenceBytes)
+
+	staleIdentityEpoch := nextRotation
+	staleIdentityEpoch.ExpectedIdentitySetEpoch = rotation.ExpectedIdentitySetEpoch
+	staleIdentityEpoch.ExpectedIdentitySetDigest = rotation.ExpectedIdentitySetDigest
+	staleIdentityEpoch.NextIdentitySetEpoch = rotation.NextIdentitySetEpoch
+	staleIdentityEpoch.NextIdentitySetDigest = rotation.NextIdentitySetDigest
+	staleIdentityEpochBytes, err := staleIdentityEpoch.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal stale expected identity-set epoch rotation: %v", err)
+	}
+	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "stale expected identity-set epoch", "public.record_platform_cas_domain_rotation_projection", staleIdentityEpochBytes)
 
 	assertProjectorCASRotationState(t, ctx, db, rotation)
 	assertProjectorCASConcurrentContenders(t, ctx, db, runtimeDB, rotation)
