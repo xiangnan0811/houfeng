@@ -101,6 +101,72 @@
 
 > ⚠️ **已知 gap**：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。前者是历史 Node 命名迁移，当前 schema 由 `0029_rename_nodes_to_monitoring_instances.sql` 迁到 MonitoringInstance 语义；`migrate.Apply` 按文件名字典序排序，二者顺序由后缀决定，并不冲突；但序号撞车违反了"序号唯一"的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（当前最大为 `0029_rename_nodes_to_monitoring_instances.sql`，下一个应为 `0030_*`，如果期间已有新迁移则继续顺延）。
 
+### Scenario: PostgreSQL ACL catalog direct facts and scope
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 app ACL manifest/compiler、`VerifyPostgresAppACLEffectiveCatalogR1`、其 PostgreSQL catalog reader，或 ACL migration/integration regression 时。
+- Catalog scope 必须覆盖每个持久、非系统、非临时 schema：`nspname !~ '^pg_'`、`nspname <> 'information_schema'`，并防御性排除 `pg_catalog.pg_my_temp_schema()` 和 `pg_catalog.pg_is_other_temp_schema(namespace.oid)`。
+
+#### 2. Signatures
+
+- Reader: `readAppACLEffectiveCatalogDirectPrivilegesR1(ctx, tx, databaseName)`；effective verification 是独立 reader/check，不得复用 direct snapshot 语义。
+- Direct ACL sources: `pg_database.datacl`、`pg_namespace.nspacl`、`pg_class.relacl`、`pg_proc.proacl`，各自以 `pg_catalog.aclexplode(...)` 展开。
+- Function identity: `procedure.proname::text || '(' || pg_catalog.pg_get_function_identity_arguments(procedure.oid) || ')'`。
+
+#### 3. Contracts
+
+- Raw/direct facts 只来自非 `NULL` 的 `datacl` / `nspacl` / `relacl` / `proacl`；绝不使用 `coalesce(..., acldefault(...))`。默认权限和角色继承后的有效权限由单独 effective checks 判断。
+- Direct rows 必须保留 `PUBLIC`、任意（包括 `NOLOGIN`）grantee 和 `is_grantable`。仅可忽略 owner baseline direct rows，且唯一理由是 ownership 已由独立 catalog owner check 验证。
+- 所有 namespace、relation 和 function UNION arms 使用同一 persistent-schema CTE；不得只扫描 `public` 或按当前 manifest 预筛选。
+- PostgreSQL `name` 值参与 function identity 拼接时必须先 cast 为 `text`，否则长 canonical identity 可能在 UNION 输出中截断。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| `datacl` / `nspacl` / `relacl` / `proacl` is `NULL` | No direct row; do not synthesize an `acldefault` row. |
+| Explicit `PUBLIC` / NOLOGIN / grant-option entry | Preserve it in direct facts; catalog comparison fails on an unexpected entry. |
+| Owner baseline ACL entry | Exclude only from direct facts; independent owner verification must still exact-match. |
+| System or temporary namespace | Exclude from application catalog scope. |
+| Long function name/identity arguments | Return the complete text identity and fail on a contract mismatch. |
+
+#### 5. Good / Base / Bad Cases
+
+- Good: an explicit third-party function grant with grant option, or an explicit `PUBLIC` grant, is observed and rejected when absent from the manifest.
+- Base: a `NULL` ACL produces no raw direct grant while a separate effective check may still observe PostgreSQL default behavior.
+- Bad: deriving raw facts with `acldefault`, filtering out NOLOGIN roles, or omitting `is_grantable` hides an explicit privilege drift.
+- Bad: concatenating `name` without `::text` truncates a long function identity and can make a UNION comparison pass/fail against the wrong object.
+
+#### 6. Tests Required
+
+- Cover all four raw ACL sources, all persistent application schemas, `PUBLIC`, arbitrary/NOLOGIN grantees, grant options, owner separation, `NULL` ACLs, temporary/system exclusions, and a function identity longer than PostgreSQL `name`.
+- Run PostgreSQL regressions through the integration wrapper; a locally skipped Go test is **not** integration evidence:
+
+  ```bash
+  scripts/test-record-platform-integration.sh postgres -- \
+    go test -v ./internal/center/store/migrate \
+    -run '^TestPostgresIntegrationVerifyAppACLEffectiveCatalogR1'
+  ```
+
+#### 7. Wrong vs Correct
+
+```sql
+-- 错误：把 PostgreSQL 默认有效权限伪装成显式 direct ACL。
+cross join lateral pg_catalog.aclexplode(
+  coalesce(relation.relacl, pg_catalog.acldefault('r', relation.relowner))
+) as acl_entry
+```
+
+```sql
+-- 正确：direct facts 只读取 catalog 中实际存储的非 NULL ACL。
+cross join lateral pg_catalog.aclexplode(relation.relacl) as acl_entry
+where relation.relacl is not null
+
+-- 正确：name 先转 text，保留完整 canonical function identity。
+procedure.proname::text || '(' || pg_catalog.pg_get_function_identity_arguments(procedure.oid) || ')'
+```
+
 ---
 
 ## Naming Conventions
