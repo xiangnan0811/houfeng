@@ -47,6 +47,89 @@ func TestPostgresIntegrationAppliesFreshMigrations(t *testing.T) {
 	}
 }
 
+func TestPostgresIntegrationRecordPlatformFoundationSchema(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresDatabase(t, ctx)
+
+	if err := Apply(ctx, db); err != nil {
+		t.Fatalf("Apply() record-platform foundation error = %v", err)
+	}
+
+	for _, table := range []string{
+		"record_access_groups",
+		"record_access_group_members",
+		"record_outbox",
+		"record_idempotency_keys",
+		"identity_mutation_guards",
+		"deletion_reservations",
+		"record_purge_operations",
+		"record_deletion_audits",
+		"deletion_fence_leases",
+		"object_content_leases",
+		"client_content_leases",
+		"content_delivery_epochs",
+		"backup_epochs",
+		"recovery_inventory_projection",
+		"deletion_replay_state",
+		"deployment_membership",
+		"source_deletion_tombstones",
+		"deployment_contract_state",
+		"record_platform_domain_identity",
+		"record_platform_domain_attestations",
+		"app_acl_manifest_revisions",
+		"app_acl_manifest_head",
+	} {
+		assertSingleStringValue(t, ctx, db, "select to_regclass('public."+table+"')::text", table)
+	}
+	assertSingleStringValue(t, ctx, db, "select coalesce(to_regclass('public.records')::text, '')", "")
+	assertSingleStringValue(t, ctx, db, "select coalesce(to_regclass('public.record_revisions')::text, '')", "")
+	assertSingleIntValue(t, ctx, db,
+		"select count(*)::int from schema_migrations where name = '0051_create_record_platform_foundation.sql'", 1)
+
+	var extensionSchema string
+	if err := db.QueryRow(ctx, `
+		select n.nspname
+		from pg_extension e
+		join pg_namespace n on n.oid = e.extnamespace
+		where e.extname = 'pgcrypto'
+	`).Scan(&extensionSchema); err != nil {
+		t.Fatalf("query pgcrypto extension schema: %v", err)
+	}
+	if extensionSchema != "record_platform_internal" {
+		t.Fatalf("pgcrypto extension schema = %q, want record_platform_internal", extensionSchema)
+	}
+
+	for _, column := range []string{
+		"activation_sequence",
+		"activation_mutation_id",
+		"activation_plan_digest",
+		"activation_authorization_artifact_digest",
+		"activation_bundle_digest",
+		"last_domain_identity_sequence",
+		"last_domain_identity_entry_hash",
+	} {
+		var found int
+		if err := db.QueryRow(ctx, `
+			select count(*)::int
+			from information_schema.columns
+			where table_schema = 'public'
+				and table_name = 'deployment_contract_state'
+				and column_name = $1
+		`, column).Scan(&found); err != nil {
+			t.Fatalf("query deployment contract state column %q: %v", column, err)
+		}
+		if found != 1 {
+			t.Fatalf("deployment contract state column %q count = %d, want 1", column, found)
+		}
+	}
+
+	_, err := db.Exec(ctx, "delete from public.record_platform_domain_identity")
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55000" {
+		t.Fatalf("delete immutable domain identity error = %v, want SQLSTATE 55000", err)
+	}
+}
+
 func TestPostgresIntegrationCommandActionAuditUpgrade(t *testing.T) {
 	ctx := context.Background()
 	db := openTemporaryPostgresSchema(t, ctx)
