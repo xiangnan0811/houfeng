@@ -30,9 +30,9 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 	if err := Apply(ctx, db); err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
-	var currentUser string
-	if err := db.QueryRow(ctx, `select current_user`).Scan(&currentUser); err != nil {
-		t.Fatalf("read current user: %v", err)
+	var sessionUser, currentUser string
+	if err := db.QueryRow(ctx, `select session_user, current_user`).Scan(&sessionUser, &currentUser); err != nil {
+		t.Fatalf("read runtime identities: %v", err)
 	}
 	reader := NewPostgresAppACLManifestRuntimeReader(db)
 	fresh, err := reader.ReadAppACLManifestRuntimeSnapshotV1(ctx)
@@ -41,6 +41,9 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 	}
 	if fresh.Head != nil || len(fresh.Manifests) != 0 || len(fresh.AppliedMigrations) != 52 {
 		t.Fatalf("fresh snapshot = %#v, want null head, zero revisions, and 52 migrations", fresh)
+	}
+	if fresh.SessionUser != sessionUser || fresh.CurrentUser != currentUser {
+		t.Fatalf("fresh runtime identities = (%q, %q), want (%q, %q)", fresh.SessionUser, fresh.CurrentUser, sessionUser, currentUser)
 	}
 
 	migrationBody, err := CanonicalMigrationSetFromFS(migrations.FS)
@@ -101,6 +104,9 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 		!bytes.Equal(snapshot.Manifests[0].CanonicalMigrationSet, manifest.CanonicalMigrationSet) ||
 		!bytes.Equal(snapshot.Manifests[0].CanonicalPrivilegeSet, manifest.CanonicalPrivilegeSet) {
 		t.Fatalf("snapshot manifests = %#v, want %#v", snapshot.Manifests, manifest)
+	}
+	if snapshot.SessionUser != sessionUser || snapshot.CurrentUser != currentUser {
+		t.Fatalf("runtime identities = (%q, %q), want (%q, %q)", snapshot.SessionUser, snapshot.CurrentUser, sessionUser, currentUser)
 	}
 	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, reader, migrations.FS, privilegeBody); err != nil {
 		t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() error = %v", err)

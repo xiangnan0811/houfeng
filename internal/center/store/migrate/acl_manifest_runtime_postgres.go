@@ -41,8 +41,8 @@ func (reader *PostgresAppACLManifestRuntimeReader) ReadAppACLManifestRuntimeSnap
 		_ = tx.Rollback(ctx)
 	}()
 
-	if err := tx.QueryRow(ctx, `select current_user`).Scan(&snapshot.CurrentUser); err != nil {
-		return AppACLManifestRuntimeSnapshotV1{}, fmt.Errorf("read app ACL manifest runtime current user: %w", err)
+	if err := tx.QueryRow(ctx, `select session_user, current_user`).Scan(&snapshot.SessionUser, &snapshot.CurrentUser); err != nil {
+		return AppACLManifestRuntimeSnapshotV1{}, fmt.Errorf("read app ACL manifest runtime identities: %w", err)
 	}
 	if snapshot.Manifests, err = readAppACLManifestRevisionsV1(ctx, tx); err != nil {
 		return AppACLManifestRuntimeSnapshotV1{}, err

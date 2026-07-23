@@ -11,6 +11,7 @@ import (
 // verify the persisted ACL manifest against the applied and embedded maps.
 // A nil Head represents the nullable fresh-install head row.
 type AppACLManifestRuntimeSnapshotV1 struct {
+	SessionUser       string
 	CurrentUser       string
 	Manifests         []AppACLManifestPersistedV1
 	Head              *AppACLManifestHeadV1
@@ -67,6 +68,9 @@ func VerifyPersistedAppACLManifestRuntimeV1(
 			runtimeRole = binding.CatalogRole
 			break
 		}
+	}
+	if snapshot.SessionUser != snapshot.CurrentUser {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("session user %q does not match current user %q", snapshot.SessionUser, snapshot.CurrentUser)
 	}
 	if snapshot.CurrentUser != runtimeRole {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("current user %q does not match latest app ACL manifest center runtime binding", snapshot.CurrentUser)
