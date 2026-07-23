@@ -125,13 +125,27 @@ func readAppACLManifestRevisionsV1(ctx context.Context, tx pgx.Tx) ([]AppACLMani
 }
 
 func readAppACLManifestHeadV1(ctx context.Context, tx pgx.Tx) (*AppACLManifestHeadV1, error) {
-	var revision pgtype.Int8
-	var digest []byte
-	if err := tx.QueryRow(ctx, `
+	return readAppACLManifestHeadV1WithLock(ctx, tx, false)
+}
+
+// readAppACLManifestHeadForUpdateV1 is only for the scoped migrator path.
+// Runtime verification remains a read-only snapshot and must not take a row lock.
+func readAppACLManifestHeadForUpdateV1(ctx context.Context, tx pgx.Tx) (*AppACLManifestHeadV1, error) {
+	return readAppACLManifestHeadV1WithLock(ctx, tx, true)
+}
+
+func readAppACLManifestHeadV1WithLock(ctx context.Context, tx pgx.Tx, forUpdate bool) (*AppACLManifestHeadV1, error) {
+	query := `
 		select manifest_revision, manifest_digest
 		from public.app_acl_manifest_head
 		where singleton
-	`).Scan(&revision, &digest); err != nil {
+	`
+	if forUpdate {
+		query += ` for update`
+	}
+	var revision pgtype.Int8
+	var digest []byte
+	if err := tx.QueryRow(ctx, query).Scan(&revision, &digest); err != nil {
 		return nil, fmt.Errorf("read app ACL manifest head: %w", err)
 	}
 	if !revision.Valid {

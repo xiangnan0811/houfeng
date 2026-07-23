@@ -1,0 +1,155 @@
+package migrate
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io/fs"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const appACLSchemaAdvisoryLockV1 = "houfeng-app-schema-acl-v1"
+
+// EnsureAppACLManifestGenesisV1 writes the only allowed r1 manifest genesis.
+// It is deliberately narrower than the later scoped migration path: it refuses
+// ledger, manifest, or privilege drift instead of trying to repair any state.
+func EnsureAppACLManifestGenesisV1(
+	ctx context.Context,
+	db *pgxpool.Pool,
+	embeddedMigrations fs.FS,
+	compiledPrivilegeSet []byte,
+) (AppACLManifestPersistedV1, error) {
+	if db == nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("app ACL manifest genesis has no PostgreSQL pool")
+	}
+	if embeddedMigrations == nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("embedded migration filesystem is nil")
+	}
+	if len(compiledPrivilegeSet) < 1 || len(compiledPrivilegeSet) > maxCanonicalACLManifestBodyBytes {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("compiled app ACL privilege set size is outside v1 bounds")
+	}
+	if _, err := ParseCanonicalPrivilegeSetBodyV1(compiledPrivilegeSet); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("validate compiled app ACL privilege set: %w", err)
+	}
+
+	embeddedMigrationSet, err := CanonicalMigrationSetFromFS(embeddedMigrations)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("build embedded application migration set: %w", err)
+	}
+
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("begin app ACL manifest genesis transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, appACLSchemaAdvisoryLockV1); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("lock app ACL manifest genesis: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `lock table public.schema_migrations in share row exclusive mode`); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("lock application migration ledger: %w", err)
+	}
+
+	appliedMigrations, err := readAppliedAppMigrationsV1(ctx, tx)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	appliedMigrationSet, err := CanonicalMigrationSetBodyV1(appliedMigrations)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("encode applied application migration ledger: %w", err)
+	}
+	if !bytes.Equal(appliedMigrationSet, embeddedMigrationSet) {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("applied application migration ledger does not match embedded migrations")
+	}
+
+	head, err := readAppACLManifestHeadForUpdateV1(ctx, tx)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	manifests, err := readAppACLManifestRevisionsV1(ctx, tx)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	if head == nil {
+		if len(manifests) != 0 {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("app ACL manifest has revisions with a null head")
+		}
+		genesis, err := insertAppACLManifestGenesisV1(ctx, tx, embeddedMigrationSet, compiledPrivilegeSet)
+		if err != nil {
+			return AppACLManifestPersistedV1{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("commit app ACL manifest genesis transaction: %w", err)
+		}
+		return genesis, nil
+	}
+
+	if err := ValidateAppACLManifestChainV1(manifests, *head); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("validate persisted app ACL manifest chain: %w", err)
+	}
+	if head.ManifestRevision != 1 || len(manifests) != 1 {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("app ACL manifest chain is already advanced")
+	}
+	genesis := manifests[0]
+	if !bytes.Equal(genesis.CanonicalMigrationSet, embeddedMigrationSet) {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("persisted app ACL manifest migration set does not match embedded migrations")
+	}
+	if !bytes.Equal(genesis.CanonicalPrivilegeSet, compiledPrivilegeSet) {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("persisted app ACL manifest privilege set does not match compiled privilege set")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("commit read-only app ACL manifest genesis transaction: %w", err)
+	}
+	return genesis, nil
+}
+
+func insertAppACLManifestGenesisV1(
+	ctx context.Context,
+	tx pgx.Tx,
+	embeddedMigrationSet []byte,
+	compiledPrivilegeSet []byte,
+) (AppACLManifestPersistedV1, error) {
+	genesis, err := NewAppACLManifestPersistedV1(1, [32]byte{}, embeddedMigrationSet, compiledPrivilegeSet)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("build app ACL manifest genesis: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into public.app_acl_manifest_revisions (
+			manifest_revision,
+			previous_manifest_digest,
+			canonical_migration_set,
+			sorted_migration_set_digest,
+			canonical_privilege_set,
+			privilege_set_digest,
+			manifest_digest
+		) values ($1, $2, $3, $4, $5, $6, $7)
+	`,
+		int64(genesis.ManifestRevision),
+		genesis.PreviousManifestDigest[:],
+		genesis.CanonicalMigrationSet,
+		genesis.MigrationSetDigest[:],
+		genesis.CanonicalPrivilegeSet,
+		genesis.PrivilegeSetDigest[:],
+		genesis.ManifestDigest[:],
+	); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("insert app ACL manifest genesis revision: %w", err)
+	}
+	result, err := tx.Exec(ctx, `
+		update public.app_acl_manifest_head
+		set manifest_revision = $1, manifest_digest = $2
+		where singleton
+		  and manifest_revision is null
+		  and manifest_digest is null
+	`, int64(genesis.ManifestRevision), genesis.ManifestDigest[:])
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("cas app ACL manifest genesis head: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("app ACL manifest genesis head changed concurrently")
+	}
+	return genesis, nil
+}

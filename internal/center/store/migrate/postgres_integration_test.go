@@ -103,6 +103,165 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 	}
 }
 
+func TestPostgresIntegrationEnsureAppACLManifestGenesisV1(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresDatabase(t, ctx)
+	if err := Apply(ctx, db); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	privilegeBody, err := CanonicalPrivilegeSetBodyV1(
+		[]AppACLRoleBinding{
+			{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
+			{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("CanonicalPrivilegeSetBodyV1() error = %v", err)
+	}
+
+	first, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody)
+	if err != nil {
+		t.Fatalf("EnsureAppACLManifestGenesisV1() first error = %v", err)
+	}
+	if first.ManifestRevision != 1 || first.PreviousManifestDigest != [32]byte{} {
+		t.Fatalf("first manifest = %#v, want genesis revision", first)
+	}
+	var beforeUpdatedAt time.Time
+	var headRevision int64
+	var headDigest []byte
+	if err := db.QueryRow(ctx, `
+		select manifest_revision, manifest_digest, updated_at
+		from public.app_acl_manifest_head
+		where singleton
+	`).Scan(&headRevision, &headDigest, &beforeUpdatedAt); err != nil {
+		t.Fatalf("read genesis manifest head: %v", err)
+	}
+	if headRevision != 1 || !bytes.Equal(headDigest, first.ManifestDigest[:]) {
+		t.Fatalf("genesis head = (%d, %x), want (1, %x)", headRevision, headDigest, first.ManifestDigest)
+	}
+	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, NewPostgresAppACLManifestRuntimeReader(db), migrations.FS, privilegeBody); err != nil {
+		t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() after genesis error = %v", err)
+	}
+
+	second, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody)
+	if err != nil {
+		t.Fatalf("EnsureAppACLManifestGenesisV1() repeat error = %v", err)
+	}
+	if second.ManifestDigest != first.ManifestDigest {
+		t.Fatalf("repeat manifest digest = %x, want %x", second.ManifestDigest, first.ManifestDigest)
+	}
+	var afterUpdatedAt time.Time
+	if err := db.QueryRow(ctx, `select updated_at from public.app_acl_manifest_head where singleton`).Scan(&afterUpdatedAt); err != nil {
+		t.Fatalf("read repeated manifest head timestamp: %v", err)
+	}
+	if !afterUpdatedAt.Equal(beforeUpdatedAt) {
+		t.Fatalf("repeat manifest head updated_at = %s, want %s", afterUpdatedAt, beforeUpdatedAt)
+	}
+
+	driftingPrivilegeBody, err := CanonicalPrivilegeSetBodyV1(
+		[]AppACLRoleBinding{
+			{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
+			{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+		},
+		[]AppACLPrivilege{{
+			Subject:        AppACLSubjectCenterRuntime,
+			ObjectClass:    AppACLObjectClassDatabase,
+			ObjectIdentity: "houfeng",
+			Privilege:      AppACLPrivilegeConnect,
+		}},
+	)
+	if err != nil {
+		t.Fatalf("CanonicalPrivilegeSetBodyV1() drifting error = %v", err)
+	}
+	if _, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, driftingPrivilegeBody); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("EnsureAppACLManifestGenesisV1() drifting privilege error = %v, want rejection", err)
+	}
+	assertSingleIntValue(t, ctx, db, `select count(*)::int from public.app_acl_manifest_revisions`, 1)
+}
+
+func TestPostgresIntegrationEnsureAppACLManifestGenesisV1RejectsLedgerAndAdvancedChain(t *testing.T) {
+	ctx := context.Background()
+	privilegeBody, err := CanonicalPrivilegeSetBodyV1(
+		[]AppACLRoleBinding{
+			{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
+			{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("CanonicalPrivilegeSetBodyV1() error = %v", err)
+	}
+
+	t.Run("rejects applied ledger drift before genesis", func(t *testing.T) {
+		db := openTemporaryPostgresDatabase(t, ctx)
+		if err := Apply(ctx, db); err != nil {
+			t.Fatalf("Apply() error = %v", err)
+		}
+		if _, err := db.Exec(ctx, `delete from public.schema_migrations where name = '0051_create_record_platform_foundation.sql'`); err != nil {
+			t.Fatalf("delete applied migration to simulate drift: %v", err)
+		}
+
+		if _, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody); err == nil || !strings.Contains(err.Error(), "does not match embedded migrations") {
+			t.Fatalf("EnsureAppACLManifestGenesisV1() ledger drift error = %v, want embedded-map rejection", err)
+		}
+		assertSingleIntValue(t, ctx, db, `select count(*)::int from public.app_acl_manifest_revisions`, 0)
+	})
+
+	t.Run("rejects an already advanced manifest chain", func(t *testing.T) {
+		db := openTemporaryPostgresDatabase(t, ctx)
+		if err := Apply(ctx, db); err != nil {
+			t.Fatalf("Apply() error = %v", err)
+		}
+		first, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody)
+		if err != nil {
+			t.Fatalf("EnsureAppACLManifestGenesisV1() first error = %v", err)
+		}
+		advanced, err := NewAppACLManifestPersistedV1(
+			2,
+			first.ManifestDigest,
+			first.CanonicalMigrationSet,
+			first.CanonicalPrivilegeSet,
+		)
+		if err != nil {
+			t.Fatalf("NewAppACLManifestPersistedV1() advanced error = %v", err)
+		}
+		if _, err := db.Exec(ctx, `
+			insert into public.app_acl_manifest_revisions (
+				manifest_revision,
+				previous_manifest_digest,
+				canonical_migration_set,
+				sorted_migration_set_digest,
+				canonical_privilege_set,
+				privilege_set_digest,
+				manifest_digest
+			) values ($1, $2, $3, $4, $5, $6, $7)
+		`,
+			int64(advanced.ManifestRevision),
+			advanced.PreviousManifestDigest[:],
+			advanced.CanonicalMigrationSet,
+			advanced.MigrationSetDigest[:],
+			advanced.CanonicalPrivilegeSet,
+			advanced.PrivilegeSetDigest[:],
+			advanced.ManifestDigest[:],
+		); err != nil {
+			t.Fatalf("insert advanced app ACL manifest revision: %v", err)
+		}
+		if _, err := db.Exec(ctx, `
+			update public.app_acl_manifest_head
+			set manifest_revision = $1, manifest_digest = $2
+			where singleton
+		`, int64(advanced.ManifestRevision), advanced.ManifestDigest[:]); err != nil {
+			t.Fatalf("advance app ACL manifest head: %v", err)
+		}
+
+		if _, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody); err == nil || !strings.Contains(err.Error(), "already advanced") {
+			t.Fatalf("EnsureAppACLManifestGenesisV1() advanced-chain error = %v, want rejection", err)
+		}
+		assertSingleIntValue(t, ctx, db, `select count(*)::int from public.app_acl_manifest_revisions`, 2)
+	})
+}
+
 func TestPostgresIntegrationAppliesFreshMigrations(t *testing.T) {
 	ctx := context.Background()
 	db := openTemporaryPostgresDatabase(t, ctx)
