@@ -68,7 +68,7 @@ func (reader postgresAppACLEffectiveCatalogReaderR1) read(
 	if snapshot.Owners, err = readAppACLEffectiveCatalogOwnersR1(ctx, tx, snapshot.DatabaseName); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
-	if snapshot.DirectPrivileges, err = readAppACLEffectiveCatalogDirectPrivilegesR1(ctx, tx, snapshot.DatabaseName, roleNames[:2]); err != nil {
+	if snapshot.DirectPrivileges, err = readAppACLEffectiveCatalogDirectPrivilegesR1(ctx, tx, snapshot.DatabaseName); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
 	if snapshot.EffectivePrivileges, err = readAppACLEffectiveCatalogEffectivePrivilegesR1(ctx, tx, snapshot.DatabaseName, roleNames[:2]); err != nil {
@@ -197,6 +197,14 @@ func readAppACLEffectiveCatalogOwnersR1(
 	databaseName string,
 ) ([]AppACLEffectiveCatalogObjectOwnerR1, error) {
 	rows, err := tx.Query(ctx, `
+		with application_namespaces as (
+			select namespace.oid, namespace.nspname, namespace.nspowner
+			from pg_catalog.pg_namespace namespace
+			where namespace.nspname !~ '^pg_'
+			  and namespace.nspname <> 'information_schema'
+			  and namespace.oid <> pg_catalog.pg_my_temp_schema()
+			  and not pg_catalog.pg_is_other_temp_schema(namespace.oid)
+		)
 		select object_class, schema_name, object_identity, owner_role
 		from (
 			select 'database'::text as object_class,
@@ -208,12 +216,11 @@ func readAppACLEffectiveCatalogOwnersR1(
 			where database.datname = $1
 			union all
 			select 'schema'::text,
-		       namespace.nspname,
+			       namespace.nspname,
 		       namespace.nspname,
 		       owner.rolname
-			from pg_catalog.pg_namespace namespace
+			from application_namespaces namespace
 			join pg_catalog.pg_roles owner on owner.oid = namespace.nspowner
-			where namespace.nspname = 'public'
 			union all
 			select case
 			         when relation.relkind = 'S' then 'sequence'
@@ -224,19 +231,17 @@ func readAppACLEffectiveCatalogOwnersR1(
 		       relation.relname,
 		       owner.rolname
 			from pg_catalog.pg_class relation
-			join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
+			join application_namespaces namespace on namespace.oid = relation.relnamespace
 			join pg_catalog.pg_roles owner on owner.oid = relation.relowner
-			where namespace.nspname = 'public'
-			  and relation.relkind in ('r', 'p', 'f', 'v', 'm', 'S')
+			where relation.relkind in ('r', 'p', 'f', 'v', 'm', 'S')
 			union all
 			select 'function'::text,
 		       namespace.nspname,
 		       procedure.proname || '(' || pg_catalog.pg_get_function_identity_arguments(procedure.oid) || ')',
 		       owner.rolname
 			from pg_catalog.pg_proc procedure
-			join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
+			join application_namespaces namespace on namespace.oid = procedure.pronamespace
 			join pg_catalog.pg_roles owner on owner.oid = procedure.proowner
-			where namespace.nspname = 'public'
 		) owners
 		order by object_class, schema_name, object_identity, owner_role
 	`, databaseName)
@@ -265,37 +270,44 @@ func readAppACLEffectiveCatalogDirectPrivilegesR1(
 	ctx context.Context,
 	tx pgx.Tx,
 	databaseName string,
-	roleNames []string,
 ) ([]AppACLEffectiveCatalogPrivilegeObservationR1, error) {
 	rows, err := tx.Query(ctx, `
-		with direct_grants as (
+		with application_namespaces as (
+			select namespace.oid, namespace.nspname, namespace.nspowner, namespace.nspacl
+			from pg_catalog.pg_namespace namespace
+			where namespace.nspname !~ '^pg_'
+			  and namespace.nspname <> 'information_schema'
+			  and namespace.oid <> pg_catalog.pg_my_temp_schema()
+			  and not pg_catalog.pg_is_other_temp_schema(namespace.oid)
+		), direct_grants as (
 			select 'database'::text as object_class,
 		       ''::text as schema_name,
-		       database.datname as object_identity,
+		       database.datname::text as object_identity,
 		       ''::text as column_name,
 		       case when acl_entry.grantee = 0 then 'PUBLIC' else grantee.rolname end as grantee_name,
 		       acl_entry.privilege_type,
 		       acl_entry.is_grantable
 			from pg_catalog.pg_database database
-			cross join lateral pg_catalog.aclexplode(
-				coalesce(database.datacl, pg_catalog.acldefault('d'::"char", database.datdba))
-			) as acl_entry(grantor, grantee, privilege_type, is_grantable)
+			cross join lateral pg_catalog.aclexplode(database.datacl)
+			  as acl_entry(grantor, grantee, privilege_type, is_grantable)
 			left join pg_catalog.pg_roles grantee on grantee.oid = acl_entry.grantee
 			where database.datname = $1
+			  and database.datacl is not null
+			  and acl_entry.grantee <> database.datdba
 			union all
 			select 'schema'::text,
 		       ''::text,
-		       namespace.nspname,
+		       namespace.nspname::text,
 		       ''::text,
 		       case when acl_entry.grantee = 0 then 'PUBLIC' else grantee.rolname end,
 		       acl_entry.privilege_type,
 		       acl_entry.is_grantable
-			from pg_catalog.pg_namespace namespace
-			cross join lateral pg_catalog.aclexplode(
-				coalesce(namespace.nspacl, pg_catalog.acldefault('n'::"char", namespace.nspowner))
-			) as acl_entry(grantor, grantee, privilege_type, is_grantable)
+			from application_namespaces namespace
+			cross join lateral pg_catalog.aclexplode(namespace.nspacl)
+			  as acl_entry(grantor, grantee, privilege_type, is_grantable)
 			left join pg_catalog.pg_roles grantee on grantee.oid = acl_entry.grantee
-			where namespace.nspname = 'public'
+			where namespace.nspacl is not null
+			  and acl_entry.grantee <> namespace.nspowner
 			union all
 			select case
 			         when relation.relkind = 'S' then 'sequence'
@@ -303,49 +315,41 @@ func readAppACLEffectiveCatalogDirectPrivilegesR1(
 			         else 'table'
 			       end,
 		       namespace.nspname,
-		       relation.relname,
+			       relation.relname::text,
 		       ''::text,
 		       case when acl_entry.grantee = 0 then 'PUBLIC' else grantee.rolname end,
 		       acl_entry.privilege_type,
 		       acl_entry.is_grantable
 			from pg_catalog.pg_class relation
-			join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
-			cross join lateral pg_catalog.aclexplode(
-				coalesce(
-					relation.relacl,
-					pg_catalog.acldefault(
-						case when relation.relkind = 'S' then 'S'::"char" else 'r'::"char" end,
-						relation.relowner
-					)
-				)
-			) as acl_entry(grantor, grantee, privilege_type, is_grantable)
+			join application_namespaces namespace on namespace.oid = relation.relnamespace
+			cross join lateral pg_catalog.aclexplode(relation.relacl)
+			  as acl_entry(grantor, grantee, privilege_type, is_grantable)
 			left join pg_catalog.pg_roles grantee on grantee.oid = acl_entry.grantee
-			where namespace.nspname = 'public'
-			  and relation.relkind in ('r', 'p', 'f', 'v', 'm', 'S')
+			where relation.relkind in ('r', 'p', 'f', 'v', 'm', 'S')
+			  and relation.relacl is not null
+			  and acl_entry.grantee <> relation.relowner
 			union all
 			select 'function'::text,
 		       ''::text,
-		       namespace.nspname || '.' || procedure.proname || '(' || pg_catalog.pg_get_function_identity_arguments(procedure.oid) || ')',
+			       namespace.nspname::text || '.' || procedure.proname::text || '(' || pg_catalog.pg_get_function_identity_arguments(procedure.oid) || ')',
 		       ''::text,
 		       case when acl_entry.grantee = 0 then 'PUBLIC' else grantee.rolname end,
 		       acl_entry.privilege_type,
 		       acl_entry.is_grantable
 			from pg_catalog.pg_proc procedure
-			join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
-			cross join lateral pg_catalog.aclexplode(
-				coalesce(procedure.proacl, pg_catalog.acldefault('f'::"char", procedure.proowner))
-			) as acl_entry(grantor, grantee, privilege_type, is_grantable)
+			join application_namespaces namespace on namespace.oid = procedure.pronamespace
+			cross join lateral pg_catalog.aclexplode(procedure.proacl)
+			  as acl_entry(grantor, grantee, privilege_type, is_grantable)
 			left join pg_catalog.pg_roles grantee on grantee.oid = acl_entry.grantee
-			where namespace.nspname = 'public'
+			where procedure.proacl is not null
+			  and acl_entry.grantee <> procedure.proowner
 		)
 		select object_class, schema_name, object_identity, column_name,
 		       grantee_name, privilege_type, is_grantable
 		from direct_grants
-		where grantee_name = 'PUBLIC'
-		   or grantee_name = any($2::text[])
 		order by object_class, schema_name, object_identity, column_name,
 		         grantee_name, privilege_type, is_grantable
-	`, databaseName, roleNames)
+	`, databaseName)
 	if err != nil {
 		return nil, fmt.Errorf("read direct app ACL catalog privileges: %w", err)
 	}
@@ -382,7 +386,14 @@ func readAppACLEffectiveCatalogEffectivePrivilegesR1(
 	roleNames []string,
 ) ([]AppACLEffectiveCatalogPrivilegeObservationR1, error) {
 	rows, err := tx.Query(ctx, `
-		with target_roles as (
+		with application_namespaces as (
+			select namespace.oid, namespace.nspname
+			from pg_catalog.pg_namespace namespace
+			where namespace.nspname !~ '^pg_'
+			  and namespace.nspname <> 'information_schema'
+			  and namespace.oid <> pg_catalog.pg_my_temp_schema()
+			  and not pg_catalog.pg_is_other_temp_schema(namespace.oid)
+		), target_roles as (
 			select role.oid, role.rolname
 			from pg_catalog.pg_roles role
 			where role.rolname = any($1::name[])
@@ -390,7 +401,7 @@ func readAppACLEffectiveCatalogEffectivePrivilegesR1(
 			select role.rolname as grantee_name,
 		       'database'::text as object_class,
 		       ''::text as schema_name,
-		       database.datname as object_identity,
+		       database.datname::text as object_identity,
 		       ''::text as column_name,
 		       privilege.privilege_type
 			from target_roles role
@@ -402,55 +413,51 @@ func readAppACLEffectiveCatalogEffectivePrivilegesR1(
 			select role.rolname,
 		       'schema'::text,
 		       ''::text,
-		       namespace.nspname,
+		       namespace.nspname::text,
 		       ''::text,
 		       privilege.privilege_type
 			from target_roles role
-			cross join pg_catalog.pg_namespace namespace
+			cross join application_namespaces namespace
 			cross join (values ('USAGE'::text), ('CREATE'::text)) as privilege(privilege_type)
-			where namespace.nspname = 'public'
-			  and pg_catalog.has_schema_privilege(role.oid, namespace.oid, privilege.privilege_type)
+			where pg_catalog.has_schema_privilege(role.oid, namespace.oid, privilege.privilege_type)
 			union all
 			select role.rolname,
 		       case when relation.relkind in ('v', 'm') then 'view' else 'table' end,
 		       namespace.nspname,
-		       relation.relname,
+			       relation.relname::text,
 		       ''::text,
 		       privilege.privilege_type
 			from target_roles role
 			join pg_catalog.pg_class relation on relation.relkind in ('r', 'p', 'f', 'v', 'm')
-			join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
+			join application_namespaces namespace on namespace.oid = relation.relnamespace
 			cross join (values
 				('SELECT'::text), ('INSERT'::text), ('UPDATE'::text), ('DELETE'::text),
 				('TRUNCATE'::text), ('REFERENCES'::text), ('TRIGGER'::text)
 			) as privilege(privilege_type)
-			where namespace.nspname = 'public'
-			  and pg_catalog.has_table_privilege(role.oid, relation.oid, privilege.privilege_type)
+			where pg_catalog.has_table_privilege(role.oid, relation.oid, privilege.privilege_type)
 			union all
 			select role.rolname,
 		       'sequence'::text,
 		       namespace.nspname,
-		       relation.relname,
+		       relation.relname::text,
 		       ''::text,
 		       privilege.privilege_type
 			from target_roles role
 			join pg_catalog.pg_class relation on relation.relkind = 'S'
-			join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
+			join application_namespaces namespace on namespace.oid = relation.relnamespace
 			cross join (values ('USAGE'::text), ('SELECT'::text), ('UPDATE'::text)) as privilege(privilege_type)
-			where namespace.nspname = 'public'
-			  and pg_catalog.has_sequence_privilege(role.oid, relation.oid, privilege.privilege_type)
+			where pg_catalog.has_sequence_privilege(role.oid, relation.oid, privilege.privilege_type)
 			union all
 			select role.rolname,
 		       'function'::text,
 		       ''::text,
-		       namespace.nspname || '.' || procedure.proname || '(' || pg_catalog.pg_get_function_identity_arguments(procedure.oid) || ')',
+			       namespace.nspname::text || '.' || procedure.proname::text || '(' || pg_catalog.pg_get_function_identity_arguments(procedure.oid) || ')',
 		       ''::text,
 		       'EXECUTE'::text
 			from target_roles role
 			join pg_catalog.pg_proc procedure on true
-			join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
-			where namespace.nspname = 'public'
-			  and pg_catalog.has_function_privilege(role.oid, procedure.oid, 'EXECUTE')
+			join application_namespaces namespace on namespace.oid = procedure.pronamespace
+			where pg_catalog.has_function_privilege(role.oid, procedure.oid, 'EXECUTE')
 		)
 		select grantee_name, object_class, schema_name, object_identity, column_name, privilege_type
 		from effective_privileges
@@ -489,20 +496,27 @@ func readAppACLEffectiveCatalogColumnACLsR1(
 	tx pgx.Tx,
 ) ([]AppACLEffectiveCatalogColumnACLR1, error) {
 	rows, err := tx.Query(ctx, `
+		with application_namespaces as (
+			select namespace.oid, namespace.nspname
+			from pg_catalog.pg_namespace namespace
+			where namespace.nspname !~ '^pg_'
+			  and namespace.nspname <> 'information_schema'
+			  and namespace.oid <> pg_catalog.pg_my_temp_schema()
+			  and not pg_catalog.pg_is_other_temp_schema(namespace.oid)
+		)
 		select namespace.nspname,
 		       relation.relname,
 		       attribute.attname,
 		       case when acl_entry.grantee = 0 then 'PUBLIC' else grantee.rolname end,
 		       acl_entry.privilege_type,
 		       acl_entry.is_grantable
-		from pg_catalog.pg_attribute attribute
-		join pg_catalog.pg_class relation on relation.oid = attribute.attrelid
-		join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
+			from pg_catalog.pg_attribute attribute
+			join pg_catalog.pg_class relation on relation.oid = attribute.attrelid
+			join application_namespaces namespace on namespace.oid = relation.relnamespace
 		cross join lateral pg_catalog.aclexplode(attribute.attacl)
 		  as acl_entry(grantor, grantee, privilege_type, is_grantable)
 		left join pg_catalog.pg_roles grantee on grantee.oid = acl_entry.grantee
-		where namespace.nspname = 'public'
-		  and relation.relkind in ('r', 'p', 'f', 'v', 'm', 'S')
+			where relation.relkind in ('r', 'p', 'f', 'v', 'm', 'S')
 		  and attribute.attnum > 0
 		  and not attribute.attisdropped
 		order by namespace.nspname, relation.relname, attribute.attname,

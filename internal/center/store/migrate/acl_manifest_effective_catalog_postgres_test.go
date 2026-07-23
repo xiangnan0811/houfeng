@@ -98,6 +98,63 @@ func TestPostgresIntegrationVerifyAppACLEffectiveCatalogR1RejectsSecurityDefiner
 	fixture.requireRejects(t, ctx, "SECURITY DEFINER")
 }
 
+func TestPostgresIntegrationVerifyAppACLEffectiveCatalogR1ReadsCompleteDirectFunctionIdentity(t *testing.T) {
+	ctx := context.Background()
+	fixture := newAppACLEffectiveCatalogPostgresFixture(t, ctx)
+	fixture.materializeCompilerDerivedBaseline(t, ctx)
+
+	snapshot, err := (postgresAppACLEffectiveCatalogReaderR1{db: fixture.db}).read(ctx, fixture.input)
+	if err != nil {
+		t.Fatalf("read app ACL effective catalog snapshot: %v", err)
+	}
+	want := fixture.expectedFunction(t, "record_platform_cas_contract_activation_projection").Identity
+	for _, privilege := range snapshot.DirectPrivileges {
+		if privilege.Grantee == fixture.roles.centerRuntime && privilege.ObjectClass == AppACLObjectClassFunction && strings.HasPrefix(privilege.ObjectIdentity, "public.record_platform_cas_contract_activation_projection(") {
+			if privilege.ObjectIdentity != want {
+				t.Fatalf("direct function identity = %q, want %q", privilege.ObjectIdentity, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("direct catalog snapshot is missing expected function %q", want)
+}
+
+func TestPostgresIntegrationVerifyAppACLEffectiveCatalogR1RejectsRuntimeUsageInInternalSchema(t *testing.T) {
+	ctx := context.Background()
+	fixture := newAppACLEffectiveCatalogPostgresFixture(t, ctx)
+	fixture.materializeCompilerDerivedBaseline(t, ctx)
+	fixture.requireAccepts(t, ctx)
+
+	if _, err := fixture.db.Exec(ctx, `create schema record_platform_internal`); err != nil {
+		t.Fatalf("create internal schema drift: %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `grant usage on schema record_platform_internal to `+quotePostgresIdentifier(fixture.roles.centerRuntime)); err != nil {
+		t.Fatalf("grant runtime internal schema USAGE drift: %v", err)
+	}
+
+	fixture.requireRejects(t, ctx, "unexpected direct app ACL privilege")
+}
+
+func TestPostgresIntegrationVerifyAppACLEffectiveCatalogR1RejectsThirdPartyFunctionGrantOption(t *testing.T) {
+	ctx := context.Background()
+	fixture := newAppACLEffectiveCatalogPostgresFixture(t, ctx)
+	fixture.materializeCompilerDerivedBaseline(t, ctx)
+	fixture.requireAccepts(t, ctx)
+
+	thirdPartyRole := "houfeng_catalog_third_party_" + fixture.roles.suffix
+	if _, err := fixture.db.Exec(ctx, `create role `+quotePostgresIdentifier(thirdPartyRole)+` nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls`); err != nil {
+		t.Fatalf("create third-party role %q: %v", thirdPartyRole, err)
+	}
+	fixture.dropRole(t, thirdPartyRole)
+
+	functionIdentity := fixture.functionIdentity(t, "record_platform_cas_contract_activation_projection")
+	if _, err := fixture.db.Exec(ctx, `grant execute on function `+functionIdentity+` to `+quotePostgresIdentifier(thirdPartyRole)+` with grant option`); err != nil {
+		t.Fatalf("grant third-party function EXECUTE WITH GRANT OPTION drift: %v", err)
+	}
+
+	fixture.requireRejects(t, ctx, "direct app ACL privilege has unknown grantee")
+}
+
 type appACLEffectiveCatalogPostgresFixture struct {
 	db           *pgxpool.Pool
 	databaseName string
@@ -145,6 +202,116 @@ func (fixture appACLEffectiveCatalogPostgresFixture) requireRejects(t *testing.T
 	err := VerifyPostgresAppACLEffectiveCatalogR1(ctx, fixture.db, fixture.input)
 	if err == nil || !strings.Contains(err.Error(), reason) {
 		t.Fatalf("VerifyPostgresAppACLEffectiveCatalogR1() error = %v, want %s rejection", err, reason)
+	}
+}
+
+func (fixture appACLEffectiveCatalogPostgresFixture) requireAccepts(t *testing.T, ctx context.Context) {
+	t.Helper()
+	if err := VerifyPostgresAppACLEffectiveCatalogR1(ctx, fixture.db, fixture.input); err != nil {
+		t.Fatalf("VerifyPostgresAppACLEffectiveCatalogR1() error = %v, want acceptance", err)
+	}
+}
+
+func (fixture appACLEffectiveCatalogPostgresFixture) materializeCompilerDerivedBaseline(t *testing.T, ctx context.Context) {
+	t.Helper()
+	rolesBySubject := make(map[AppACLSubject]string, len(fixture.input.Contract.RoleBindings))
+	for _, binding := range fixture.input.Contract.RoleBindings {
+		rolesBySubject[binding.Subject] = binding.CatalogRole
+	}
+
+	created := make(map[AppACLObjectClass]map[string]struct{})
+	for _, privilege := range fixture.input.Contract.Privileges {
+		switch privilege.ObjectClass {
+		case AppACLObjectClassDatabase, AppACLObjectClassSchema:
+			continue
+		case AppACLObjectClassTable:
+			if fixture.markCreated(created, privilege.ObjectClass, privilege.ObjectIdentity) {
+				fixture.exec(t, ctx, `create table public.`+quotePostgresIdentifier(privilege.ObjectIdentity)+` (placeholder integer)`)
+			}
+		case AppACLObjectClassView:
+			if fixture.markCreated(created, privilege.ObjectClass, privilege.ObjectIdentity) {
+				fixture.exec(t, ctx, `create view public.`+quotePostgresIdentifier(privilege.ObjectIdentity)+` as select 1 as placeholder`)
+			}
+		case AppACLObjectClassSequence:
+			if fixture.markCreated(created, privilege.ObjectClass, privilege.ObjectIdentity) {
+				fixture.exec(t, ctx, `create sequence public.`+quotePostgresIdentifier(privilege.ObjectIdentity))
+			}
+		case AppACLObjectClassFunction:
+			if fixture.markCreated(created, privilege.ObjectClass, privilege.ObjectIdentity) {
+				functionIdentity := fixture.functionIdentity(t, strings.TrimSuffix(strings.TrimPrefix(privilege.ObjectIdentity, "public."), "(bytea)"))
+				fixture.exec(t, ctx, `create function `+functionIdentity+` returns void language plpgsql security definer set search_path = pg_catalog as $$ begin end $$`)
+				fixture.exec(t, ctx, `alter function `+functionIdentity+` owner to `+quotePostgresIdentifier(fixture.roles.migrator))
+				fixture.exec(t, ctx, `revoke all on function `+functionIdentity+` from public`)
+			}
+		default:
+			t.Fatalf("compiler emitted unsupported baseline object class %q", privilege.ObjectClass)
+		}
+	}
+
+	for _, privilege := range fixture.input.Contract.Privileges {
+		role, ok := rolesBySubject[privilege.Subject]
+		if !ok {
+			t.Fatalf("compiler emitted privilege for unbound subject %q", privilege.Subject)
+		}
+		fixture.grant(t, ctx, privilege, role)
+	}
+}
+
+func (fixture appACLEffectiveCatalogPostgresFixture) markCreated(created map[AppACLObjectClass]map[string]struct{}, class AppACLObjectClass, identity string) bool {
+	identities := created[class]
+	if identities == nil {
+		identities = make(map[string]struct{})
+		created[class] = identities
+	}
+	if _, exists := identities[identity]; exists {
+		return false
+	}
+	identities[identity] = struct{}{}
+	return true
+}
+
+func (fixture appACLEffectiveCatalogPostgresFixture) grant(t *testing.T, ctx context.Context, privilege AppACLPrivilege, role string) {
+	t.Helper()
+	grantee := quotePostgresIdentifier(role)
+	privilegeName := string(privilege.Privilege)
+	switch privilege.ObjectClass {
+	case AppACLObjectClassDatabase:
+		fixture.exec(t, ctx, `grant `+privilegeName+` on database `+quotePostgresIdentifier(privilege.ObjectIdentity)+` to `+grantee)
+	case AppACLObjectClassSchema:
+		fixture.exec(t, ctx, `grant `+privilegeName+` on schema `+quotePostgresIdentifier(privilege.ObjectIdentity)+` to `+grantee)
+	case AppACLObjectClassTable, AppACLObjectClassView:
+		fixture.exec(t, ctx, `grant `+privilegeName+` on table public.`+quotePostgresIdentifier(privilege.ObjectIdentity)+` to `+grantee)
+	case AppACLObjectClassSequence:
+		fixture.exec(t, ctx, `grant `+privilegeName+` on sequence public.`+quotePostgresIdentifier(privilege.ObjectIdentity)+` to `+grantee)
+	case AppACLObjectClassFunction:
+		functionName := strings.TrimSuffix(strings.TrimPrefix(privilege.ObjectIdentity, "public."), "(bytea)")
+		fixture.exec(t, ctx, `grant `+privilegeName+` on function `+fixture.functionIdentity(t, functionName)+` to `+grantee)
+	default:
+		t.Fatalf("compiler emitted unsupported baseline grant object class %q", privilege.ObjectClass)
+	}
+}
+
+func (fixture appACLEffectiveCatalogPostgresFixture) functionIdentity(t *testing.T, name string) string {
+	t.Helper()
+	fixture.expectedFunction(t, name)
+	return `public.` + quotePostgresIdentifier(name) + `(bytea)`
+}
+
+func (fixture appACLEffectiveCatalogPostgresFixture) expectedFunction(t *testing.T, name string) AppACLEffectiveCatalogExpectedFunctionR1 {
+	t.Helper()
+	for _, expected := range fixture.input.ExpectedFunctions {
+		if expected.Identity == "public."+name+"(bytea)" {
+			return expected
+		}
+	}
+	t.Fatalf("expected function %q is not compiler-derived", name)
+	return AppACLEffectiveCatalogExpectedFunctionR1{}
+}
+
+func (fixture appACLEffectiveCatalogPostgresFixture) exec(t *testing.T, ctx context.Context, sql string) {
+	t.Helper()
+	if _, err := fixture.db.Exec(ctx, sql); err != nil {
+		t.Fatalf("execute %q: %v", sql, err)
 	}
 }
 
