@@ -117,7 +117,7 @@
 #### 3. Contracts
 
 - Raw/direct facts 只来自非 `NULL` 的 `datacl` / `nspacl` / `relacl` / `proacl`；绝不使用 `coalesce(..., acldefault(...))`。默认权限和角色继承后的有效权限由单独 effective checks 判断。
-- Direct rows 必须保留 `PUBLIC`、任意（包括 `NOLOGIN`）grantee 和 `is_grantable`。仅可忽略 owner baseline direct rows，且唯一理由是 ownership 已由独立 catalog owner check 验证。
+- Direct rows 必须保留 `PUBLIC`、任意（包括 `NOLOGIN`）grantee 和 `is_grantable`。仅可忽略 owner baseline direct rows；ownership 仍由独立 catalog owner reader 验证，但当前 R1 只拒绝目标应用角色所有权并校验预期函数的 migrator owner，不代表完整 owner-matrix convergence。
 - 所有 namespace、relation 和 function UNION arms 使用同一 persistent-schema CTE；不得只扫描 `public` 或按当前 manifest 预筛选。
 - PostgreSQL `name` 值参与 function identity 拼接时必须先 cast 为 `text`，否则长 canonical identity 可能在 UNION 输出中截断。
 
@@ -127,7 +127,7 @@
 | --- | --- |
 | `datacl` / `nspacl` / `relacl` / `proacl` is `NULL` | No direct row; do not synthesize an `acldefault` row. |
 | Explicit `PUBLIC` / NOLOGIN / grant-option entry | Preserve it in direct facts; catalog comparison fails on an unexpected entry. |
-| Owner baseline ACL entry | Exclude only from direct facts; independent owner verification must still exact-match. |
+| Owner baseline ACL entry | Exclude only from direct facts; ownership remains checked by the independent owner reader. Do not treat this exclusion as complete owner-matrix convergence. |
 | System or temporary namespace | Exclude from application catalog scope. |
 | Long function name/identity arguments | Return the complete text identity and fail on a contract mismatch. |
 
