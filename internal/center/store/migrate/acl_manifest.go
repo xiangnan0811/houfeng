@@ -533,6 +533,7 @@ func readCanonicalString(body []byte, offset *int, maximumLength int, field stri
 // its manifest_digest CHECK constraint.
 type AppACLManifestPersistedV1 struct {
 	ManifestRevision       uint64
+	MigratorCatalogRole    string
 	PreviousManifestDigest [32]byte
 	CanonicalMigrationSet  []byte
 	MigrationSetDigest     [32]byte
@@ -552,12 +553,14 @@ type AppACLManifestHeadV1 struct {
 // canonical body bytes. It never derives the revision from migration names.
 func NewAppACLManifestPersistedV1(
 	manifestRevision uint64,
+	migratorCatalogRole string,
 	previousManifestDigest [32]byte,
 	canonicalMigrationSet []byte,
 	canonicalPrivilegeSet []byte,
 ) (AppACLManifestPersistedV1, error) {
 	manifest := AppACLManifestPersistedV1{
 		ManifestRevision:       manifestRevision,
+		MigratorCatalogRole:    migratorCatalogRole,
 		PreviousManifestDigest: previousManifestDigest,
 		CanonicalMigrationSet:  append([]byte(nil), canonicalMigrationSet...),
 		CanonicalPrivilegeSet:  append([]byte(nil), canonicalPrivilegeSet...),
@@ -625,6 +628,9 @@ func (manifest AppACLManifestPersistedV1) validateFields() error {
 	if manifest.ManifestRevision > 1 && manifest.PreviousManifestDigest == [32]byte{} {
 		return fmt.Errorf("app ACL manifest non-genesis revision has no previous digest")
 	}
+	if !validCatalogRoleName(manifest.MigratorCatalogRole) {
+		return fmt.Errorf("app ACL manifest has invalid migrator catalog role")
+	}
 	if len(manifest.CanonicalMigrationSet) < 1 || len(manifest.CanonicalMigrationSet) > maxCanonicalACLManifestBodyBytes {
 		return fmt.Errorf("canonical migration set size is outside v1 bounds")
 	}
@@ -648,9 +654,11 @@ func (manifest AppACLManifestPersistedV1) validateFields() error {
 
 func (manifest AppACLManifestPersistedV1) computedDigest() [32]byte {
 	preimage := make([]byte, 0,
-		len(appACLManifestMagic)+8+len(manifest.PreviousManifestDigest)+4+len(manifest.CanonicalMigrationSet)+len(manifest.MigrationSetDigest)+4+len(manifest.CanonicalPrivilegeSet)+len(manifest.PrivilegeSetDigest))
+		len(appACLManifestMagic)+8+4+len(manifest.MigratorCatalogRole)+len(manifest.PreviousManifestDigest)+4+len(manifest.CanonicalMigrationSet)+len(manifest.MigrationSetDigest)+4+len(manifest.CanonicalPrivilegeSet)+len(manifest.PrivilegeSetDigest))
 	preimage = append(preimage, appACLManifestMagic...)
 	preimage = appendACLManifestUint64(preimage, manifest.ManifestRevision)
+	preimage = appendUint32(preimage, uint32(len(manifest.MigratorCatalogRole)))
+	preimage = append(preimage, manifest.MigratorCatalogRole...)
 	preimage = append(preimage, manifest.PreviousManifestDigest[:]...)
 	preimage = appendUint32(preimage, uint32(len(manifest.CanonicalMigrationSet)))
 	preimage = append(preimage, manifest.CanonicalMigrationSet...)

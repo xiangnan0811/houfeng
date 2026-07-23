@@ -16,7 +16,7 @@ func CompileAppACLPrivilegeSetR1(databaseName string, bindings []AppACLRoleBindi
 }
 
 func appACLPrivilegesR1(databaseName string) []AppACLPrivilege {
-	privileges := make([]AppACLPrivilege, 0, 206)
+	privileges := make([]AppACLPrivilege, 0, 204)
 	addDatabaseAndSchema := func(subject AppACLSubject) {
 		privileges = append(privileges,
 			AppACLPrivilege{
@@ -46,15 +46,6 @@ func appACLPrivilegesR1(databaseName string) []AppACLPrivilege {
 			}
 		}
 	}
-	addFunction := func(subject AppACLSubject, identity string) {
-		privileges = append(privileges, AppACLPrivilege{
-			Subject:        subject,
-			ObjectClass:    AppACLObjectClassFunction,
-			ObjectIdentity: identity,
-			Privilege:      AppACLPrivilegeExecute,
-		})
-	}
-
 	runtime := AppACLSubjectCenterRuntime
 	addDatabaseAndSchema(runtime)
 	addRelations(runtime, AppACLObjectClassTable, []string{
@@ -153,9 +144,6 @@ func appACLPrivilegesR1(databaseName string) []AppACLPrivilege {
 		"deployment_contract_state",
 	}, AppACLPrivilegeSelect)
 	addRelations(runtime, AppACLObjectClassSequence, []string{"record_outbox_outbox_row_id_seq"}, AppACLPrivilegeUsage)
-	addFunction(runtime, "public.record_platform_cas_contract_activation_projection(bytea)")
-	addFunction(runtime, "public.record_platform_cas_domain_rotation_projection(bytea)")
-
 	admin := AppACLSubjectPlatformAdmin
 	addDatabaseAndSchema(admin)
 	addRelations(admin, AppACLObjectClassTable, []string{

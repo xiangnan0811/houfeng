@@ -35,9 +35,9 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 	if err := Apply(ctx, db); err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
-	var sessionUser, currentUser string
-	if err := db.QueryRow(ctx, `select session_user, current_user`).Scan(&sessionUser, &currentUser); err != nil {
-		t.Fatalf("read runtime identities: %v", err)
+	var databaseName, sessionUser, currentUser string
+	if err := db.QueryRow(ctx, `select current_database(), session_user, current_user`).Scan(&databaseName, &sessionUser, &currentUser); err != nil {
+		t.Fatalf("read runtime database and identities: %v", err)
 	}
 	reader := NewPostgresAppACLManifestRuntimeReader(db)
 	fresh, err := reader.ReadAppACLManifestRuntimeSnapshotV1(ctx)
@@ -47,40 +47,41 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 	if fresh.Head != nil || len(fresh.Manifests) != 0 || len(fresh.AppliedMigrations) != 52 {
 		t.Fatalf("fresh snapshot = %#v, want null head, zero revisions, and 52 migrations", fresh)
 	}
-	if fresh.SessionUser != sessionUser || fresh.CurrentUser != currentUser {
-		t.Fatalf("fresh runtime identities = (%q, %q), want (%q, %q)", fresh.SessionUser, fresh.CurrentUser, sessionUser, currentUser)
+	if fresh.DatabaseName != databaseName || fresh.SessionUser != sessionUser || fresh.CurrentUser != currentUser {
+		t.Fatalf("fresh runtime snapshot = (%q, %q, %q), want (%q, %q, %q)", fresh.DatabaseName, fresh.SessionUser, fresh.CurrentUser, databaseName, sessionUser, currentUser)
 	}
 
 	migrationBody, err := CanonicalMigrationSetFromFS(migrations.FS)
 	if err != nil {
 		t.Fatalf("CanonicalMigrationSetFromFS() error = %v", err)
 	}
-	privilegeBody, err := CanonicalPrivilegeSetBodyV1(
+	privilegeBody, err := CompileAppACLPrivilegeSetR1(databaseName,
 		[]AppACLRoleBinding{
 			{Subject: AppACLSubjectCenterRuntime, CatalogRole: currentUser},
 			{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
 		},
-		nil,
 	)
 	if err != nil {
-		t.Fatalf("CanonicalPrivilegeSetBodyV1() error = %v", err)
+		t.Fatalf("CompileAppACLPrivilegeSetR1() error = %v", err)
 	}
-	manifest, err := NewAppACLManifestPersistedV1(1, [32]byte{}, migrationBody, privilegeBody)
+	manifest, err := NewAppACLManifestPersistedV1(1, "houfeng_migrator", [32]byte{}, migrationBody, privilegeBody)
 	if err != nil {
 		t.Fatalf("NewAppACLManifestPersistedV1() error = %v", err)
 	}
 	if _, err := db.Exec(ctx, `
 		insert into public.app_acl_manifest_revisions (
 			manifest_revision,
+			migrator_catalog_role,
 			previous_manifest_digest,
 			canonical_migration_set,
 			sorted_migration_set_digest,
 			canonical_privilege_set,
 			privilege_set_digest,
 			manifest_digest
-		) values ($1, $2, $3, $4, $5, $6, $7)
+		) values ($1, $2, $3, $4, $5, $6, $7, $8)
 	`,
 		int64(manifest.ManifestRevision),
+		manifest.MigratorCatalogRole,
 		manifest.PreviousManifestDigest[:],
 		manifest.CanonicalMigrationSet,
 		manifest.MigrationSetDigest[:],
@@ -97,6 +98,17 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 	`, int64(manifest.ManifestRevision), manifest.ManifestDigest[:]); err != nil {
 		t.Fatalf("update app ACL manifest head: %v", err)
 	}
+	var persistedMigratorCatalogRole string
+	if err := db.QueryRow(ctx, `
+		select migrator_catalog_role
+		from public.app_acl_manifest_revisions
+		where manifest_revision = $1
+	`, int64(manifest.ManifestRevision)).Scan(&persistedMigratorCatalogRole); err != nil {
+		t.Fatalf("read persisted migrator catalog role: %v", err)
+	}
+	if persistedMigratorCatalogRole != manifest.MigratorCatalogRole {
+		t.Fatalf("persisted migrator catalog role = %q, want %q", persistedMigratorCatalogRole, manifest.MigratorCatalogRole)
+	}
 
 	snapshot, err := reader.ReadAppACLManifestRuntimeSnapshotV1(ctx)
 	if err != nil {
@@ -106,14 +118,15 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 		t.Fatalf("snapshot head = %#v, want revision %d digest %x", snapshot.Head, manifest.ManifestRevision, manifest.ManifestDigest)
 	}
 	if len(snapshot.Manifests) != 1 || snapshot.Manifests[0].ManifestDigest != manifest.ManifestDigest ||
+		snapshot.Manifests[0].MigratorCatalogRole != persistedMigratorCatalogRole ||
 		!bytes.Equal(snapshot.Manifests[0].CanonicalMigrationSet, manifest.CanonicalMigrationSet) ||
 		!bytes.Equal(snapshot.Manifests[0].CanonicalPrivilegeSet, manifest.CanonicalPrivilegeSet) {
 		t.Fatalf("snapshot manifests = %#v, want %#v", snapshot.Manifests, manifest)
 	}
-	if snapshot.SessionUser != sessionUser || snapshot.CurrentUser != currentUser {
-		t.Fatalf("runtime identities = (%q, %q), want (%q, %q)", snapshot.SessionUser, snapshot.CurrentUser, sessionUser, currentUser)
+	if snapshot.DatabaseName != databaseName || snapshot.SessionUser != sessionUser || snapshot.CurrentUser != currentUser {
+		t.Fatalf("runtime snapshot = (%q, %q, %q), want (%q, %q, %q)", snapshot.DatabaseName, snapshot.SessionUser, snapshot.CurrentUser, databaseName, sessionUser, currentUser)
 	}
-	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, reader, migrations.FS, privilegeBody); err != nil {
+	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, reader, migrations.FS); err != nil {
 		t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() error = %v", err)
 	}
 
@@ -182,32 +195,33 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 			t.Fatalf("grant runtime role manifest reads: %v", err)
 		}
 
-		runtimePrivilegeBody, err := CanonicalPrivilegeSetBodyV1(
+		runtimePrivilegeBody, err := CompileAppACLPrivilegeSetR1(databaseName,
 			[]AppACLRoleBinding{
 				{Subject: AppACLSubjectCenterRuntime, CatalogRole: runtimeRole},
 				{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
 			},
-			nil,
 		)
 		if err != nil {
-			t.Fatalf("CanonicalPrivilegeSetBodyV1() runtime role error = %v", err)
+			t.Fatalf("CompileAppACLPrivilegeSetR1() runtime role error = %v", err)
 		}
-		runtimeManifest, err := NewAppACLManifestPersistedV1(2, manifest.ManifestDigest, migrationBody, runtimePrivilegeBody)
+		runtimeManifest, err := NewAppACLManifestPersistedV1(2, "houfeng_migrator", manifest.ManifestDigest, migrationBody, runtimePrivilegeBody)
 		if err != nil {
 			t.Fatalf("NewAppACLManifestPersistedV1() runtime role error = %v", err)
 		}
 		if _, err := db.Exec(ctx, `
 			insert into public.app_acl_manifest_revisions (
 				manifest_revision,
+				migrator_catalog_role,
 				previous_manifest_digest,
 				canonical_migration_set,
 				sorted_migration_set_digest,
 				canonical_privilege_set,
 				privilege_set_digest,
 				manifest_digest
-			) values ($1, $2, $3, $4, $5, $6, $7)
+			) values ($1, $2, $3, $4, $5, $6, $7, $8)
 		`,
 			int64(runtimeManifest.ManifestRevision),
+			runtimeManifest.MigratorCatalogRole,
 			runtimeManifest.PreviousManifestDigest[:],
 			runtimeManifest.CanonicalMigrationSet,
 			runtimeManifest.MigrationSetDigest[:],
@@ -248,17 +262,22 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 		if runtimeSnapshot.SessionUser != memberLogin || runtimeSnapshot.CurrentUser != runtimeRole {
 			t.Fatalf("SET ROLE runtime identities = (%q, %q), want (%q, %q)", runtimeSnapshot.SessionUser, runtimeSnapshot.CurrentUser, memberLogin, runtimeRole)
 		}
-		if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, runtimeReader, migrations.FS, runtimePrivilegeBody); err == nil || err.Error() != fmt.Sprintf("session user %q does not match current user %q", memberLogin, runtimeRole) {
+		if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, runtimeReader, migrations.FS); err == nil || err.Error() != fmt.Sprintf("session user %q does not match current user %q", memberLogin, runtimeRole) {
 			t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() SET ROLE error = %v, want exact member-session identity rejection", err)
 		}
 	})
 }
 
-func TestPostgresIntegrationEnsureAppACLManifestGenesisV1(t *testing.T) {
+func TestPostgresIntegrationAppACLManifestRevisionSQLCheckBindsMigratorCatalogRole(t *testing.T) {
 	ctx := context.Background()
 	db := openTemporaryPostgresDatabase(t, ctx)
 	if err := Apply(ctx, db); err != nil {
 		t.Fatalf("Apply() error = %v", err)
+	}
+
+	migrationBody, err := CanonicalMigrationSetFromFS(migrations.FS)
+	if err != nil {
+		t.Fatalf("CanonicalMigrationSetFromFS() error = %v", err)
 	}
 	privilegeBody, err := CanonicalPrivilegeSetBodyV1(
 		[]AppACLRoleBinding{
@@ -270,13 +289,103 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalPrivilegeSetBodyV1() error = %v", err)
 	}
+	manifest, err := NewAppACLManifestPersistedV1(1, "houfeng_migrator", [32]byte{}, migrationBody, privilegeBody)
+	if err != nil {
+		t.Fatalf("NewAppACLManifestPersistedV1() error = %v", err)
+	}
 
-	first, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody)
+	_, err = db.Exec(ctx, `
+		insert into public.app_acl_manifest_revisions (
+			manifest_revision,
+			migrator_catalog_role,
+			previous_manifest_digest,
+			canonical_migration_set,
+			sorted_migration_set_digest,
+			canonical_privilege_set,
+			privilege_set_digest,
+			manifest_digest
+		) values ($1, $2, $3, $4, $5, $6, $7, $8)
+	`,
+		int64(manifest.ManifestRevision),
+		"houfeng_tampered_migrator",
+		manifest.PreviousManifestDigest[:],
+		manifest.CanonicalMigrationSet,
+		manifest.MigrationSetDigest[:],
+		manifest.CanonicalPrivilegeSet,
+		manifest.PrivilegeSetDigest[:],
+		manifest.ManifestDigest[:],
+	)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" || pgErr.ConstraintName != "app_acl_manifest_digest_matches" {
+		t.Fatalf("tampered migrator catalog role insert error = %v, want app_acl_manifest_digest_matches SQLSTATE 23514", err)
+	}
+}
+
+func TestPostgresIntegrationEnsureAppACLManifestGenesisV1(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresDatabase(t, ctx)
+	if err := Apply(ctx, db); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	var databaseName, sessionUser, currentUser string
+	if err := db.QueryRow(ctx, `select current_database(), session_user, current_user`).Scan(&databaseName, &sessionUser, &currentUser); err != nil {
+		t.Fatalf("read direct runtime database and identity: %v", err)
+	}
+	if sessionUser != currentUser {
+		t.Fatalf("genesis fixture session user %q does not match current user %q", sessionUser, currentUser)
+	}
+	privilegeBody, err := CompileAppACLPrivilegeSetR1(databaseName,
+		[]AppACLRoleBinding{
+			{Subject: AppACLSubjectCenterRuntime, CatalogRole: currentUser},
+			{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+		},
+	)
+	if err != nil {
+		t.Fatalf("CompileAppACLPrivilegeSetR1() error = %v", err)
+	}
+
+	first, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody, "houfeng_migrator")
 	if err != nil {
 		t.Fatalf("EnsureAppACLManifestGenesisV1() first error = %v", err)
 	}
 	if first.ManifestRevision != 1 || first.PreviousManifestDigest != [32]byte{} {
 		t.Fatalf("first manifest = %#v, want genesis revision", first)
+	}
+	var persistedRevision int64
+	var persistedMigratorCatalogRole string
+	var persistedPreviousDigest, persistedMigrationSet, persistedMigrationSetDigest, persistedPrivilegeSet, persistedPrivilegeSetDigest, persistedManifestDigest []byte
+	if err := db.QueryRow(ctx, `
+		select manifest_revision,
+		       migrator_catalog_role,
+		       previous_manifest_digest,
+		       canonical_migration_set,
+		       sorted_migration_set_digest,
+		       canonical_privilege_set,
+		       privilege_set_digest,
+		       manifest_digest
+		from public.app_acl_manifest_revisions
+		where manifest_revision = 1
+	`).Scan(
+		&persistedRevision,
+		&persistedMigratorCatalogRole,
+		&persistedPreviousDigest,
+		&persistedMigrationSet,
+		&persistedMigrationSetDigest,
+		&persistedPrivilegeSet,
+		&persistedPrivilegeSetDigest,
+		&persistedManifestDigest,
+	); err != nil {
+		t.Fatalf("read all persisted genesis manifest fields: %v", err)
+	}
+	if persistedRevision != int64(first.ManifestRevision) ||
+		persistedMigratorCatalogRole != first.MigratorCatalogRole ||
+		!bytes.Equal(persistedPreviousDigest, first.PreviousManifestDigest[:]) ||
+		!bytes.Equal(persistedMigrationSet, first.CanonicalMigrationSet) ||
+		!bytes.Equal(persistedMigrationSetDigest, first.MigrationSetDigest[:]) ||
+		!bytes.Equal(persistedPrivilegeSet, first.CanonicalPrivilegeSet) ||
+		!bytes.Equal(persistedPrivilegeSetDigest, first.PrivilegeSetDigest[:]) ||
+		!bytes.Equal(persistedManifestDigest, first.ManifestDigest[:]) {
+		t.Fatal("persisted genesis manifest fields do not exactly match the eight-field canonical manifest")
 	}
 	var beforeUpdatedAt time.Time
 	var headRevision int64
@@ -291,11 +400,11 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1(t *testing.T) {
 	if headRevision != 1 || !bytes.Equal(headDigest, first.ManifestDigest[:]) {
 		t.Fatalf("genesis head = (%d, %x), want (1, %x)", headRevision, headDigest, first.ManifestDigest)
 	}
-	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, NewPostgresAppACLManifestRuntimeReader(db), migrations.FS, privilegeBody); err != nil {
+	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, NewPostgresAppACLManifestRuntimeReader(db), migrations.FS); err != nil {
 		t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() after genesis error = %v", err)
 	}
 
-	second, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody)
+	second, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody, "houfeng_migrator")
 	if err != nil {
 		t.Fatalf("EnsureAppACLManifestGenesisV1() repeat error = %v", err)
 	}
@@ -325,7 +434,7 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalPrivilegeSetBodyV1() drifting error = %v", err)
 	}
-	if _, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, driftingPrivilegeBody); err == nil || !strings.Contains(err.Error(), "does not match") {
+	if _, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, driftingPrivilegeBody, "houfeng_migrator"); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("EnsureAppACLManifestGenesisV1() drifting privilege error = %v, want rejection", err)
 	}
 	assertSingleIntValue(t, ctx, db, `select count(*)::int from public.app_acl_manifest_revisions`, 1)
@@ -353,7 +462,7 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1RejectsLedgerAndAdvance
 			t.Fatalf("delete applied migration to simulate drift: %v", err)
 		}
 
-		if _, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody); err == nil || !strings.Contains(err.Error(), "does not match embedded migrations") {
+		if _, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody, "houfeng_migrator"); err == nil || !strings.Contains(err.Error(), "does not match embedded migrations") {
 			t.Fatalf("EnsureAppACLManifestGenesisV1() ledger drift error = %v, want embedded-map rejection", err)
 		}
 		assertSingleIntValue(t, ctx, db, `select count(*)::int from public.app_acl_manifest_revisions`, 0)
@@ -364,12 +473,13 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1RejectsLedgerAndAdvance
 		if err := Apply(ctx, db); err != nil {
 			t.Fatalf("Apply() error = %v", err)
 		}
-		first, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody)
+		first, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody, "houfeng_migrator")
 		if err != nil {
 			t.Fatalf("EnsureAppACLManifestGenesisV1() first error = %v", err)
 		}
 		advanced, err := NewAppACLManifestPersistedV1(
 			2,
+			first.MigratorCatalogRole,
 			first.ManifestDigest,
 			first.CanonicalMigrationSet,
 			first.CanonicalPrivilegeSet,
@@ -380,15 +490,17 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1RejectsLedgerAndAdvance
 		if _, err := db.Exec(ctx, `
 			insert into public.app_acl_manifest_revisions (
 				manifest_revision,
+				migrator_catalog_role,
 				previous_manifest_digest,
 				canonical_migration_set,
 				sorted_migration_set_digest,
 				canonical_privilege_set,
 				privilege_set_digest,
 				manifest_digest
-			) values ($1, $2, $3, $4, $5, $6, $7)
+			) values ($1, $2, $3, $4, $5, $6, $7, $8)
 		`,
 			int64(advanced.ManifestRevision),
+			advanced.MigratorCatalogRole,
 			advanced.PreviousManifestDigest[:],
 			advanced.CanonicalMigrationSet,
 			advanced.MigrationSetDigest[:],
@@ -406,7 +518,7 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1RejectsLedgerAndAdvance
 			t.Fatalf("advance app ACL manifest head: %v", err)
 		}
 
-		if _, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody); err == nil || !strings.Contains(err.Error(), "already advanced") {
+		if _, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody, "houfeng_migrator"); err == nil || !strings.Contains(err.Error(), "already advanced") {
 			t.Fatalf("EnsureAppACLManifestGenesisV1() advanced-chain error = %v, want rejection", err)
 		}
 		assertSingleIntValue(t, ctx, db, `select count(*)::int from public.app_acl_manifest_revisions`, 2)
@@ -435,6 +547,95 @@ func TestPostgresIntegrationAppliesFreshMigrations(t *testing.T) {
 	} {
 		assertSingleStringValue(t, ctx, db, "select to_regclass('public."+indexName+"')::text", indexName)
 	}
+}
+
+func TestPostgresIntegrationRecordPlatformPgcryptoInstallsWithConstrainedDirectMigrator(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresDatabase(t, ctx)
+	databaseName := currentPostgresDatabaseName(t, ctx, db)
+
+	var bootstrapOwner string
+	if err := db.QueryRow(ctx, `
+		select pg_catalog.pg_get_userbyid(database.datdba)
+		from pg_catalog.pg_database database
+		where database.datname = $1
+	`, databaseName).Scan(&bootstrapOwner); err != nil {
+		t.Fatalf("read temporary database owner: %v", err)
+	}
+	migratorRole := fmt.Sprintf("houfeng_direct_migrator_%d_%d", time.Now().UnixNano(), os.Getpid())
+	migratorPassword := appACLEffectiveCatalogTemporaryPassword(t)
+	quotedMigrator := quotePostgresIdentifier(migratorRole)
+	quotedBootstrapOwner := quotePostgresIdentifier(bootstrapOwner)
+	if _, err := db.Exec(ctx, `create role `+quotedMigrator+` login noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls password '`+migratorPassword+`'`); err != nil {
+		t.Fatalf("create constrained direct migrator %q: %v", migratorRole, err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := db.Exec(cleanupCtx, `reassign owned by `+quotedMigrator+` to `+quotedBootstrapOwner); err != nil {
+			t.Errorf("reassign constrained direct migrator %q ownership: %v", migratorRole, err)
+		}
+		if _, err := db.Exec(cleanupCtx, `drop owned by `+quotedMigrator); err != nil {
+			t.Errorf("drop constrained direct migrator %q dependencies: %v", migratorRole, err)
+		}
+		if _, err := db.Exec(cleanupCtx, `drop role if exists `+quotedMigrator); err != nil {
+			t.Errorf("drop constrained direct migrator %q: %v", migratorRole, err)
+		}
+	})
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := db.Exec(cleanupCtx, `alter database `+quotePostgresIdentifier(databaseName)+` owner to `+quotedBootstrapOwner); err != nil {
+			t.Errorf("restore temporary database owner %q: %v", bootstrapOwner, err)
+		}
+	})
+	if _, err := db.Exec(ctx, `alter database `+quotePostgresIdentifier(databaseName)+` owner to `+quotedMigrator); err != nil {
+		t.Fatalf("assign temporary database to constrained direct migrator: %v", err)
+	}
+
+	migratorFixture := appACLEffectiveCatalogPostgresFixture{
+		db:            db,
+		rolePasswords: map[string]string{migratorRole: migratorPassword},
+	}
+	migratorDB := migratorFixture.openDirectRolePool(t, ctx, migratorRole)
+	if err := Apply(ctx, migratorDB); err != nil {
+		t.Fatalf("Apply() with constrained direct migrator error = %v", err)
+	}
+
+	var extensionSchema string
+	if err := db.QueryRow(ctx, `
+		select namespace.nspname
+		from pg_catalog.pg_extension installed_extension
+		join pg_catalog.pg_namespace namespace on namespace.oid = installed_extension.extnamespace
+		where installed_extension.extname = 'pgcrypto'
+	`).Scan(&extensionSchema); err != nil {
+		t.Fatalf("read pgcrypto extension after constrained direct migrator apply: %v", err)
+	}
+	if extensionSchema != appACLManagedInternalSchemaR1 {
+		t.Fatalf("pgcrypto extension schema after constrained direct migrator apply = %q, want %q", extensionSchema, appACLManagedInternalSchemaR1)
+	}
+}
+
+func TestPostgresIntegrationRecordPlatformPgcryptoWrongSchemaRejectsApplyWithoutRecording0051(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresDatabase(t, ctx)
+	if _, err := db.Exec(ctx, `create extension pgcrypto with schema public`); err != nil {
+		t.Fatalf("preinstall pgcrypto in public: %v", err)
+	}
+
+	err := Apply(ctx, db)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55000" || pgErr.Message != "pgcrypto must be installed in record_platform_internal" {
+		t.Fatalf("Apply() with pgcrypto in public error = %v, want 0051 SQLSTATE 55000 pgcrypto schema rejection", err)
+	}
+	if !strings.Contains(err.Error(), "apply migration 0051_create_record_platform_foundation.sql") {
+		t.Fatalf("Apply() with pgcrypto in public error = %v, want 0051 migration context", err)
+	}
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from public.schema_migrations
+		where name = '0051_create_record_platform_foundation.sql'
+	`, 0)
 }
 
 func TestPostgresIntegrationRecordPlatformFoundationSchema(t *testing.T) {
@@ -532,6 +733,7 @@ func TestPostgresIntegrationRecordPlatformProjectorFunctions(t *testing.T) {
 	databaseName := currentPostgresDatabaseName(t, ctx, db)
 	runtimeDB := openPostgresPoolWithRole(t, ctx, db, roles.runtime)
 	adminDB := openPostgresPoolWithRole(t, ctx, db, roles.admin)
+	projectorDB := migratorDB
 	configureProjectorCASPrivileges(t, ctx, db, databaseName, roles)
 	assertProjectorCASFunctionCatalog(t, ctx, db, roles.migrator)
 
@@ -551,18 +753,21 @@ func TestPostgresIntegrationRecordPlatformProjectorFunctions(t *testing.T) {
 	if _, err := adminDB.Exec(ctx, `select public.record_platform_cas_contract_activation_projection($1)`, activationBytes); !isPostgresInsufficientPrivilege(err) {
 		t.Fatalf("admin activation invoke error = %v, want SQLSTATE 42501", err)
 	}
+	if _, err := runtimeDB.Exec(ctx, `select public.record_platform_cas_contract_activation_projection($1)`, activationBytes); !isPostgresInsufficientPrivilege(err) {
+		t.Fatalf("runtime activation invoke error = %v, want SQLSTATE 42501", err)
+	}
 
 	malformed := append([]byte(nil), activationBytes...)
 	malformed[0] ^= 0xff
-	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "activation malformed command", "public.record_platform_cas_contract_activation_projection", malformed)
+	assertProjectorCASInvocationFails(t, ctx, projectorDB, "activation malformed command", "public.record_platform_cas_contract_activation_projection", malformed)
 	invalidDeployment := append([]byte(nil), activationBytes...)
 	invalidDeployment[37+3] = 'A'
-	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "activation invalid deployment token", "public.record_platform_cas_contract_activation_projection", invalidDeployment)
-	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "activation trailing command", "public.record_platform_cas_contract_activation_projection", append(append([]byte(nil), activationBytes...), 0))
+	assertProjectorCASInvocationFails(t, ctx, projectorDB, "activation invalid deployment token", "public.record_platform_cas_contract_activation_projection", invalidDeployment)
+	assertProjectorCASInvocationFails(t, ctx, projectorDB, "activation trailing command", "public.record_platform_cas_contract_activation_projection", append(append([]byte(nil), activationBytes...), 0))
 
-	activationReceipt := invokeProjectorCASFunction(t, ctx, runtimeDB, "public.record_platform_cas_contract_activation_projection", activationBytes)
+	activationReceipt := invokeProjectorCASFunction(t, ctx, projectorDB, "public.record_platform_cas_contract_activation_projection", activationBytes)
 	assertProjectorCASReceipt(t, activationBytes, activationReceipt)
-	activationRetry := invokeProjectorCASFunction(t, ctx, runtimeDB, "public.record_platform_cas_contract_activation_projection", activationBytes)
+	activationRetry := invokeProjectorCASFunction(t, ctx, projectorDB, "public.record_platform_cas_contract_activation_projection", activationBytes)
 	if !bytes.Equal(activationReceipt, activationRetry) {
 		t.Fatalf("activation retry receipt = %x, want %x", activationRetry, activationReceipt)
 	}
@@ -573,7 +778,7 @@ func TestPostgresIntegrationRecordPlatformProjectorFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal different activation command: %v", err)
 	}
-	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "different active activation", "public.record_platform_cas_contract_activation_projection", differentActivationBytes)
+	assertProjectorCASInvocationFails(t, ctx, projectorDB, "different active activation", "public.record_platform_cas_contract_activation_projection", differentActivationBytes)
 
 	rotation := projectorCASRotationFromActivation(activation)
 	rotationBytes, err := rotation.MarshalBinary()
@@ -583,11 +788,14 @@ func TestPostgresIntegrationRecordPlatformProjectorFunctions(t *testing.T) {
 	if _, err := adminDB.Exec(ctx, `select public.record_platform_cas_domain_rotation_projection($1)`, rotationBytes); !isPostgresInsufficientPrivilege(err) {
 		t.Fatalf("admin rotation invoke error = %v, want SQLSTATE 42501", err)
 	}
+	if _, err := runtimeDB.Exec(ctx, `select public.record_platform_cas_domain_rotation_projection($1)`, rotationBytes); !isPostgresInsufficientPrivilege(err) {
+		t.Fatalf("runtime rotation invoke error = %v, want SQLSTATE 42501", err)
+	}
 
 	malformedRotation := append([]byte(nil), rotationBytes...)
 	malformedRotation[0] ^= 0xff
-	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "rotation malformed command", "public.record_platform_cas_domain_rotation_projection", malformedRotation)
-	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "rotation trailing command", "public.record_platform_cas_domain_rotation_projection", append(append([]byte(nil), rotationBytes...), 0))
+	assertProjectorCASInvocationFails(t, ctx, projectorDB, "rotation malformed command", "public.record_platform_cas_domain_rotation_projection", malformedRotation)
+	assertProjectorCASInvocationFails(t, ctx, projectorDB, "rotation trailing command", "public.record_platform_cas_domain_rotation_projection", append(append([]byte(nil), rotationBytes...), 0))
 
 	profileMismatch := rotation
 	profileMismatch.ActiveProfile = recordplatform.ProjectionProfileS3WORM
@@ -595,19 +803,19 @@ func TestPostgresIntegrationRecordPlatformProjectorFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal profile-mismatch rotation: %v", err)
 	}
-	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "profile mismatch", "public.record_platform_cas_domain_rotation_projection", profileMismatchBytes)
+	assertProjectorCASInvocationFails(t, ctx, projectorDB, "profile mismatch", "public.record_platform_cas_domain_rotation_projection", profileMismatchBytes)
 
 	staleState := append([]byte(nil), rotationBytes...)
 	staleState[180] ^= 0xff
-	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "stale witnessed hash", "public.record_platform_cas_domain_rotation_projection", staleState)
+	assertProjectorCASInvocationFails(t, ctx, projectorDB, "stale witnessed hash", "public.record_platform_cas_domain_rotation_projection", staleState)
 
 	lowerFence := append([]byte(nil), rotationBytes...)
 	binary.BigEndian.PutUint64(lowerFence[460:468], rotation.ExpectedMinimumFenceContractVersion-1)
-	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "lower fence", "public.record_platform_cas_domain_rotation_projection", lowerFence)
+	assertProjectorCASInvocationFails(t, ctx, projectorDB, "lower fence", "public.record_platform_cas_domain_rotation_projection", lowerFence)
 
-	rotationReceipt := invokeProjectorCASFunction(t, ctx, runtimeDB, "public.record_platform_cas_domain_rotation_projection", rotationBytes)
+	rotationReceipt := invokeProjectorCASFunction(t, ctx, projectorDB, "public.record_platform_cas_domain_rotation_projection", rotationBytes)
 	assertProjectorCASReceipt(t, rotationBytes, rotationReceipt)
-	rotationRetry := invokeProjectorCASFunction(t, ctx, runtimeDB, "public.record_platform_cas_domain_rotation_projection", rotationBytes)
+	rotationRetry := invokeProjectorCASFunction(t, ctx, projectorDB, "public.record_platform_cas_domain_rotation_projection", rotationBytes)
 	if !bytes.Equal(rotationReceipt, rotationRetry) {
 		t.Fatalf("rotation retry receipt = %x, want %x", rotationRetry, rotationReceipt)
 	}
@@ -619,7 +827,7 @@ func TestPostgresIntegrationRecordPlatformProjectorFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal stale expected witnessed ledger sequence rotation: %v", err)
 	}
-	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "stale expected witnessed ledger sequence", "public.record_platform_cas_domain_rotation_projection", staleSequenceBytes)
+	assertProjectorCASInvocationFails(t, ctx, projectorDB, "stale expected witnessed ledger sequence", "public.record_platform_cas_domain_rotation_projection", staleSequenceBytes)
 
 	staleIdentityEpoch := nextRotation
 	staleIdentityEpoch.ExpectedIdentitySetEpoch = rotation.ExpectedIdentitySetEpoch
@@ -630,10 +838,10 @@ func TestPostgresIntegrationRecordPlatformProjectorFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal stale expected identity-set epoch rotation: %v", err)
 	}
-	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "stale expected identity-set epoch", "public.record_platform_cas_domain_rotation_projection", staleIdentityEpochBytes)
+	assertProjectorCASInvocationFails(t, ctx, projectorDB, "stale expected identity-set epoch", "public.record_platform_cas_domain_rotation_projection", staleIdentityEpochBytes)
 
 	assertProjectorCASRotationState(t, ctx, db, rotation)
-	assertProjectorCASConcurrentContenders(t, ctx, db, runtimeDB, rotation)
+	assertProjectorCASConcurrentContenders(t, ctx, db, projectorDB, rotation)
 }
 
 type projectorCASTestRoles struct {
@@ -739,12 +947,6 @@ func configureProjectorCASPrivileges(t *testing.T, ctx context.Context, db *pgxp
 	execSQL(t, ctx, db, `revoke all on schema public from public`)
 	execSQL(t, ctx, db, `grant usage on schema public to `+quotedRuntime)
 	execSQL(t, ctx, db, `grant usage on schema public to `+quotedAdmin)
-	for _, identity := range []string{
-		"public.record_platform_cas_contract_activation_projection(bytea)",
-		"public.record_platform_cas_domain_rotation_projection(bytea)",
-	} {
-		execSQL(t, ctx, db, `grant execute on function `+identity+` to `+quotedRuntime)
-	}
 }
 
 func assertProjectorCASFunctionCatalog(t *testing.T, ctx context.Context, db *pgxpool.Pool, migrator string) {

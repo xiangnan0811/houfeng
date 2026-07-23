@@ -18,7 +18,6 @@ begin
   end if;
 end
 $$;
-revoke execute on all functions in schema record_platform_internal from public;
 
 create or replace function record_platform_internal.reject_immutable_mutation()
 returns trigger
@@ -937,6 +936,7 @@ create table if not exists public.app_acl_manifest_revisions (
   manifest_revision bigint primary key check (manifest_revision between 1 and 999999),
   predecessor_revision bigint generated always as
     (case when manifest_revision = 1 then null else manifest_revision - 1 end) stored,
+  migrator_catalog_role text not null check (octet_length(migrator_catalog_role) between 1 and 63),
   previous_manifest_digest bytea not null check (octet_length(previous_manifest_digest) = 32),
   canonical_migration_set bytea not null check (octet_length(canonical_migration_set) between 1 and 4194304),
   sorted_migration_set_digest bytea not null check (octet_length(sorted_migration_set_digest) = 32),
@@ -952,6 +952,8 @@ create table if not exists public.app_acl_manifest_revisions (
     manifest_digest = record_platform_internal.digest(
       convert_to('HOUFENG-APP-ACL-MANIFEST-V1', 'UTF8')
       || int8send(manifest_revision)
+      || int4send(octet_length(migrator_catalog_role))
+      || convert_to(migrator_catalog_role, 'UTF8')
       || previous_manifest_digest
       || int4send(octet_length(canonical_migration_set))
       || canonical_migration_set

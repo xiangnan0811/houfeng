@@ -20,6 +20,7 @@ func EnsureAppACLManifestGenesisV1(
 	db *pgxpool.Pool,
 	embeddedMigrations fs.FS,
 	compiledPrivilegeSet []byte,
+	migratorCatalogRole string,
 ) (AppACLManifestPersistedV1, error) {
 	if db == nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("app ACL manifest genesis has no PostgreSQL pool")
@@ -32,6 +33,9 @@ func EnsureAppACLManifestGenesisV1(
 	}
 	if _, err := ParseCanonicalPrivilegeSetBodyV1(compiledPrivilegeSet); err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("validate compiled app ACL privilege set: %w", err)
+	}
+	if !validCatalogRoleName(migratorCatalogRole) {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("invalid app ACL migrator catalog role")
 	}
 
 	embeddedMigrationSet, err := CanonicalMigrationSetFromFS(embeddedMigrations)
@@ -78,7 +82,7 @@ func EnsureAppACLManifestGenesisV1(
 		if len(manifests) != 0 {
 			return AppACLManifestPersistedV1{}, fmt.Errorf("app ACL manifest has revisions with a null head")
 		}
-		genesis, err := insertAppACLManifestGenesisV1(ctx, tx, embeddedMigrationSet, compiledPrivilegeSet)
+		genesis, err := insertAppACLManifestGenesisV1(ctx, tx, embeddedMigrationSet, compiledPrivilegeSet, migratorCatalogRole)
 		if err != nil {
 			return AppACLManifestPersistedV1{}, err
 		}
@@ -101,6 +105,9 @@ func EnsureAppACLManifestGenesisV1(
 	if !bytes.Equal(genesis.CanonicalPrivilegeSet, compiledPrivilegeSet) {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("persisted app ACL manifest privilege set does not match compiled privilege set")
 	}
+	if genesis.MigratorCatalogRole != migratorCatalogRole {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("persisted app ACL manifest migrator catalog role does not match expected role")
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("commit read-only app ACL manifest genesis transaction: %w", err)
 	}
@@ -112,23 +119,26 @@ func insertAppACLManifestGenesisV1(
 	tx pgx.Tx,
 	embeddedMigrationSet []byte,
 	compiledPrivilegeSet []byte,
+	migratorCatalogRole string,
 ) (AppACLManifestPersistedV1, error) {
-	genesis, err := NewAppACLManifestPersistedV1(1, [32]byte{}, embeddedMigrationSet, compiledPrivilegeSet)
+	genesis, err := NewAppACLManifestPersistedV1(1, migratorCatalogRole, [32]byte{}, embeddedMigrationSet, compiledPrivilegeSet)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("build app ACL manifest genesis: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		insert into public.app_acl_manifest_revisions (
 			manifest_revision,
+			migrator_catalog_role,
 			previous_manifest_digest,
 			canonical_migration_set,
 			sorted_migration_set_digest,
 			canonical_privilege_set,
 			privilege_set_digest,
 			manifest_digest
-		) values ($1, $2, $3, $4, $5, $6, $7)
+		) values ($1, $2, $3, $4, $5, $6, $7, $8)
 	`,
 		int64(genesis.ManifestRevision),
+		genesis.MigratorCatalogRole,
 		genesis.PreviousManifestDigest[:],
 		genesis.CanonicalMigrationSet,
 		genesis.MigrationSetDigest[:],

@@ -1,11 +1,14 @@
 package migrate
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
 	"houfeng/db/migrations"
 )
+
+var forbiddenRecordPlatformInternalBlanketFunctionPublicRevoke = regexp.MustCompile(`(?i)\brevoke\s+(?:execute|all(?:\s+privileges)?)\s+on\s+all\s+(?:functions|routines)\s+in\s+schema\s+record_platform_internal\s+from\s+public\b`)
 
 func TestRecordPlatformFoundationMigrationDefinesOnlyFoundationTables(t *testing.T) {
 	payload, err := migrations.FS.ReadFile("0051_create_record_platform_foundation.sql")
@@ -75,6 +78,74 @@ func TestRecordPlatformFoundationMigrationPinsPGCryptoToItsLocalSchema(t *testin
 			t.Fatalf("0051 migration missing local pgcrypto contract %q", want)
 		}
 	}
+	if forbiddenRecordPlatformInternalBlanketFunctionPublicRevoke.MatchString(sql) {
+		t.Fatal("0051 migration must not blanket-revoke PG16 pgcrypto extension members")
+	}
+	for _, identity := range []string{
+		"record_platform_internal.reject_immutable_mutation()",
+		"record_platform_internal.record_platform_projection_read_bytes_v1(bytea, integer, integer)",
+		"record_platform_internal.record_platform_projection_read_uint64_v1(bytea, integer)",
+		"record_platform_internal.record_platform_projection_read_token_v1(bytea, integer, text)",
+		"record_platform_internal.record_platform_projection_read_profile_v1(bytea, integer)",
+		"record_platform_internal.record_platform_projection_validate_header_v1(bytea, integer, integer, integer)",
+		"record_platform_internal.record_platform_projection_cas_receipt_v1(bytea)",
+		"public.record_platform_cas_contract_activation_projection(bytea)",
+		"public.record_platform_cas_domain_rotation_projection(bytea)",
+		"record_platform_internal.reject_acl_manifest_revision_mutation()",
+	} {
+		if !strings.Contains(sql, "revoke all on function "+identity+" from public") {
+			t.Fatalf("0051 migration must explicitly revoke PUBLIC from migrator-owned function %q", identity)
+		}
+	}
+}
+
+func TestRecordPlatformFoundationMigrationRejectsEquivalentBlanketPGCryptoFunctionRevokes(t *testing.T) {
+	tests := []struct {
+		name      string
+		statement string
+	}{
+		{
+			name:      "execute all functions",
+			statement: "revoke execute on all functions in schema record_platform_internal from public;",
+		},
+		{
+			name:      "execute all routines with whitespace",
+			statement: "REVOKE\n  EXECUTE ON ALL ROUTINES IN SCHEMA\n  record_platform_internal FROM PUBLIC;",
+		},
+		{
+			name:      "all all functions",
+			statement: "revoke all on all functions in schema record_platform_internal from public;",
+		},
+		{
+			name:      "all all routines",
+			statement: "revoke all on all routines in schema record_platform_internal from public;",
+		},
+		{
+			name:      "all privileges all functions",
+			statement: "revoke all privileges on all functions in schema record_platform_internal from public;",
+		},
+		{
+			name:      "all privileges all routines",
+			statement: "revoke all privileges on all routines in schema record_platform_internal from public;",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !forbiddenRecordPlatformInternalBlanketFunctionPublicRevoke.MatchString(tt.statement) {
+				t.Fatalf("forbidden blanket revoke detector does not match %q", tt.statement)
+			}
+		})
+	}
+	for _, statement := range []string{
+		"revoke all on function record_platform_internal.reject_immutable_mutation() from public;",
+		"revoke all on schema record_platform_internal from public;",
+		"revoke all on all functions in schema public from public;",
+	} {
+		if forbiddenRecordPlatformInternalBlanketFunctionPublicRevoke.MatchString(statement) {
+			t.Fatalf("forbidden blanket revoke detector unexpectedly matches %q", statement)
+		}
+	}
 }
 
 func TestRecordPlatformFoundationMigrationBindsAppACLManifestAndLocalDomainKind(t *testing.T) {
@@ -86,14 +157,27 @@ func TestRecordPlatformFoundationMigrationBindsAppACLManifestAndLocalDomainKind(
 	sql := strings.ToLower(string(payload))
 	for _, want := range []string{
 		"domain_kind text not null check (domain_kind = 'application')",
+		"migrator_catalog_role text not null",
 		"constraint app_acl_manifest_digest_matches check",
 		"convert_to('houfeng-app-acl-manifest-v1', 'utf8')",
 		"int8send(manifest_revision)",
+		"int4send(octet_length(migrator_catalog_role))",
+		"convert_to(migrator_catalog_role, 'utf8')",
 		"int4send(octet_length(canonical_migration_set))",
 		"int4send(octet_length(canonical_privilege_set))",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("0051 migration missing app ACL/domain contract %q", want)
+		}
+	}
+	digestConstraint := sql[strings.Index(sql, "constraint app_acl_manifest_digest_matches check"):]
+	for _, ordered := range [][2]string{
+		{"int8send(manifest_revision)", "int4send(octet_length(migrator_catalog_role))"},
+		{"convert_to(migrator_catalog_role, 'utf8')", "previous_manifest_digest"},
+		{"previous_manifest_digest", "int4send(octet_length(canonical_migration_set))"},
+	} {
+		if strings.Index(digestConstraint, ordered[0]) >= strings.Index(digestConstraint, ordered[1]) {
+			t.Fatalf("0051 manifest digest field order must keep %q before %q", ordered[0], ordered[1])
 		}
 	}
 }

@@ -41,8 +41,8 @@ func (reader *PostgresAppACLManifestRuntimeReader) ReadAppACLManifestRuntimeSnap
 		_ = tx.Rollback(ctx)
 	}()
 
-	if err := tx.QueryRow(ctx, `select session_user, current_user`).Scan(&snapshot.SessionUser, &snapshot.CurrentUser); err != nil {
-		return AppACLManifestRuntimeSnapshotV1{}, fmt.Errorf("read app ACL manifest runtime identities: %w", err)
+	if err := tx.QueryRow(ctx, `select current_database(), session_user, current_user`).Scan(&snapshot.DatabaseName, &snapshot.SessionUser, &snapshot.CurrentUser); err != nil {
+		return AppACLManifestRuntimeSnapshotV1{}, fmt.Errorf("read app ACL manifest runtime database and identities: %w", err)
 	}
 	if snapshot.Manifests, err = readAppACLManifestRevisionsV1(ctx, tx); err != nil {
 		return AppACLManifestRuntimeSnapshotV1{}, err
@@ -62,6 +62,7 @@ func (reader *PostgresAppACLManifestRuntimeReader) ReadAppACLManifestRuntimeSnap
 func readAppACLManifestRevisionsV1(ctx context.Context, tx pgx.Tx) ([]AppACLManifestPersistedV1, error) {
 	rows, err := tx.Query(ctx, `
 		select manifest_revision,
+		       migrator_catalog_role,
 		       previous_manifest_digest,
 		       canonical_migration_set,
 		       sorted_migration_set_digest,
@@ -79,9 +80,11 @@ func readAppACLManifestRevisionsV1(ctx context.Context, tx pgx.Tx) ([]AppACLMani
 	manifests := make([]AppACLManifestPersistedV1, 0)
 	for rows.Next() {
 		var revision int64
+		var migratorCatalogRole string
 		var previousDigest, migrationSet, migrationSetDigest, privilegeSet, privilegeSetDigest, manifestDigest []byte
 		if err := rows.Scan(
 			&revision,
+			&migratorCatalogRole,
 			&previousDigest,
 			&migrationSet,
 			&migrationSetDigest,
@@ -113,6 +116,7 @@ func readAppACLManifestRevisionsV1(ctx context.Context, tx pgx.Tx) ([]AppACLMani
 		}
 		manifests = append(manifests, AppACLManifestPersistedV1{
 			ManifestRevision:       manifestRevision,
+			MigratorCatalogRole:    migratorCatalogRole,
 			PreviousManifestDigest: previous,
 			CanonicalMigrationSet:  append([]byte(nil), migrationSet...),
 			MigrationSetDigest:     migrationDigest,

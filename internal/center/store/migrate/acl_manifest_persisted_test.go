@@ -32,7 +32,7 @@ func TestAppACLManifestPersistedV1BindsExactSiblingBodies(t *testing.T) {
 		t.Fatalf("CanonicalPrivilegeSetBodyV1() error = %v", err)
 	}
 
-	manifest, err := NewAppACLManifestPersistedV1(1, [32]byte{}, migrationBody, privilegeBody)
+	manifest, err := NewAppACLManifestPersistedV1(1, "houfeng_migrator", [32]byte{}, migrationBody, privilegeBody)
 	if err != nil {
 		t.Fatalf("NewAppACLManifestPersistedV1() error = %v", err)
 	}
@@ -42,6 +42,8 @@ func TestAppACLManifestPersistedV1BindsExactSiblingBodies(t *testing.T) {
 
 	wantPreimage := []byte("HOUFENG-APP-ACL-MANIFEST-V1")
 	wantPreimage = appendManifestUint64(wantPreimage, 1)
+	wantPreimage = appendManifestUint32(wantPreimage, uint32(len("houfeng_migrator")))
+	wantPreimage = append(wantPreimage, "houfeng_migrator"...)
 	wantPreimage = append(wantPreimage, make([]byte, 32)...)
 	wantPreimage = appendManifestUint32(wantPreimage, uint32(len(migrationBody)))
 	wantPreimage = append(wantPreimage, migrationBody...)
@@ -54,6 +56,60 @@ func TestAppACLManifestPersistedV1BindsExactSiblingBodies(t *testing.T) {
 	wantDigest := sha256.Sum256(wantPreimage)
 	if manifest.ManifestDigest != wantDigest {
 		t.Fatalf("manifest digest = %x, want %x", manifest.ManifestDigest, wantDigest)
+	}
+}
+
+func TestAppACLManifestPersistedV1BindsMigratorCatalogRoleBeforePreviousDigest(t *testing.T) {
+	migrationBody, err := CanonicalMigrationSetBodyV1([]MigrationChecksumEntry{{
+		Filename: "0001_initial_schema.sql",
+		Checksum: checksumFromHex(t, strings.Repeat("01", 32)),
+	}})
+	if err != nil {
+		t.Fatalf("CanonicalMigrationSetBodyV1() error = %v", err)
+	}
+	privilegeBody, err := CanonicalPrivilegeSetBodyV1(
+		[]AppACLRoleBinding{
+			{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
+			{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("CanonicalPrivilegeSetBodyV1() error = %v", err)
+	}
+
+	manifest, err := NewAppACLManifestPersistedV1(1, "houfeng_migrator", [32]byte{}, migrationBody, privilegeBody)
+	if err != nil {
+		t.Fatalf("NewAppACLManifestPersistedV1() error = %v", err)
+	}
+	if manifest.MigratorCatalogRole != "houfeng_migrator" {
+		t.Fatalf("manifest migrator catalog role = %q, want houfeng_migrator", manifest.MigratorCatalogRole)
+	}
+
+	wantPreimage := []byte("HOUFENG-APP-ACL-MANIFEST-V1")
+	wantPreimage = appendManifestUint64(wantPreimage, 1)
+	wantPreimage = appendManifestUint32(wantPreimage, uint32(len("houfeng_migrator")))
+	wantPreimage = append(wantPreimage, "houfeng_migrator"...)
+	wantPreimage = append(wantPreimage, make([]byte, 32)...)
+	wantPreimage = appendManifestUint32(wantPreimage, uint32(len(migrationBody)))
+	wantPreimage = append(wantPreimage, migrationBody...)
+	migrationDigest := sha256.Sum256(migrationBody)
+	wantPreimage = append(wantPreimage, migrationDigest[:]...)
+	wantPreimage = appendManifestUint32(wantPreimage, uint32(len(privilegeBody)))
+	wantPreimage = append(wantPreimage, privilegeBody...)
+	privilegeDigest := sha256.Sum256(privilegeBody)
+	wantPreimage = append(wantPreimage, privilegeDigest[:]...)
+	if want := sha256.Sum256(wantPreimage); manifest.ManifestDigest != want {
+		t.Fatalf("manifest digest = %x, want %x", manifest.ManifestDigest, want)
+	}
+
+	mutated := manifest
+	mutated.MigratorCatalogRole = "other_migrator"
+	if err := mutated.Validate(); err == nil {
+		t.Fatal("manifest.Validate() error = nil after migrator catalog role mutation")
+	}
+	if _, err := NewAppACLManifestPersistedV1(1, "", [32]byte{}, migrationBody, privilegeBody); err == nil {
+		t.Fatal("NewAppACLManifestPersistedV1() error = nil for omitted migrator catalog role")
 	}
 }
 
@@ -75,7 +131,7 @@ func TestAppACLManifestPersistedV1RejectsDigestAndGenesisDrift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalPrivilegeSetBodyV1() error = %v", err)
 	}
-	manifest, err := NewAppACLManifestPersistedV1(1, [32]byte{}, migrationBody, privilegeBody)
+	manifest, err := NewAppACLManifestPersistedV1(1, "houfeng_migrator", [32]byte{}, migrationBody, privilegeBody)
 	if err != nil {
 		t.Fatalf("NewAppACLManifestPersistedV1() error = %v", err)
 	}
@@ -131,11 +187,11 @@ func TestValidateAppACLManifestChainV1RequiresContiguousLinkedHead(t *testing.T)
 	if err != nil {
 		t.Fatalf("CanonicalPrivilegeSetBodyV1() error = %v", err)
 	}
-	first, err := NewAppACLManifestPersistedV1(1, [32]byte{}, migrationBody, privilegeBody)
+	first, err := NewAppACLManifestPersistedV1(1, "houfeng_migrator", [32]byte{}, migrationBody, privilegeBody)
 	if err != nil {
 		t.Fatalf("NewAppACLManifestPersistedV1(first) error = %v", err)
 	}
-	second, err := NewAppACLManifestPersistedV1(2, first.ManifestDigest, migrationBody, privilegeBody)
+	second, err := NewAppACLManifestPersistedV1(2, "houfeng_migrator", first.ManifestDigest, migrationBody, privilegeBody)
 	if err != nil {
 		t.Fatalf("NewAppACLManifestPersistedV1(second) error = %v", err)
 	}
@@ -144,7 +200,7 @@ func TestValidateAppACLManifestChainV1RequiresContiguousLinkedHead(t *testing.T)
 		t.Fatalf("ValidateAppACLManifestChainV1() error = %v", err)
 	}
 
-	gap, err := NewAppACLManifestPersistedV1(3, first.ManifestDigest, migrationBody, privilegeBody)
+	gap, err := NewAppACLManifestPersistedV1(3, "houfeng_migrator", first.ManifestDigest, migrationBody, privilegeBody)
 	if err != nil {
 		t.Fatalf("NewAppACLManifestPersistedV1(gap) error = %v", err)
 	}
@@ -153,7 +209,7 @@ func TestValidateAppACLManifestChainV1RequiresContiguousLinkedHead(t *testing.T)
 	}
 	var unexpectedPrevious [32]byte
 	unexpectedPrevious[0] = 1
-	wrongPredecessor, err := NewAppACLManifestPersistedV1(2, unexpectedPrevious, migrationBody, privilegeBody)
+	wrongPredecessor, err := NewAppACLManifestPersistedV1(2, "houfeng_migrator", unexpectedPrevious, migrationBody, privilegeBody)
 	if err != nil {
 		t.Fatalf("NewAppACLManifestPersistedV1(wrong predecessor) error = %v", err)
 	}

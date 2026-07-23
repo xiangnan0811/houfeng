@@ -2,7 +2,7 @@ package migrate
 
 import "fmt"
 
-const appACLEffectiveCatalogR1PrivilegeCount = 206
+const appACLEffectiveCatalogR1PrivilegeCount = 204
 
 // AppACLEffectiveCatalogRolePolicyR1 is the expected non-grant catalog state
 // for one application role. Every boolean records the presence of that

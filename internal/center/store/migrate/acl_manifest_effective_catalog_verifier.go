@@ -2,11 +2,11 @@ package migrate
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 )
 
 const appACLEffectiveCatalogPublicGranteeR1 = "PUBLIC"
+const appACLEffectiveCatalogPublicSchemaDatabaseOwnerRoleR1 = "pg_database_owner"
 
 // AppACLEffectiveCatalogExpectedFunctionR1 identifies one function whose
 // identity comes from the compiled privilege contract and whose owner must be
@@ -103,10 +103,20 @@ type AppACLEffectiveCatalogFunctionR1 struct {
 	Config            []string
 }
 
+// AppACLEffectiveCatalogExtensionR1 records one named PostgreSQL extension's
+// placement. Extension-member procedures remain opaque to the APP function
+// ACL surface, but their extension schema is still an admission invariant.
+type AppACLEffectiveCatalogExtensionR1 struct {
+	ExtensionName string
+	SchemaName    string
+}
+
 // AppACLEffectiveCatalogSnapshotR1 is the catalog-only portion of one
 // repeatable read-only PostgreSQL snapshot.
 type AppACLEffectiveCatalogSnapshotR1 struct {
 	DatabaseName        string
+	SessionUser         string
+	CurrentUser         string
 	Roles               []AppACLEffectiveCatalogRoleStateR1
 	Memberships         []AppACLEffectiveCatalogMembershipR1
 	Owners              []AppACLEffectiveCatalogObjectOwnerR1
@@ -115,11 +125,12 @@ type AppACLEffectiveCatalogSnapshotR1 struct {
 	ColumnACLs          []AppACLEffectiveCatalogColumnACLR1
 	DefaultACLs         []AppACLEffectiveCatalogDefaultACLR1
 	Functions           []AppACLEffectiveCatalogFunctionR1
+	PGCryptoExtension   AppACLEffectiveCatalogExtensionR1
 }
 
-// NewAppACLEffectiveCatalogVerifierInputR1 derives every expected function
-// identity from the supplied compiler result and binds both functions to the
-// explicit scoped migrator role.
+// NewAppACLEffectiveCatalogVerifierInputR1 derives the fixed public projector
+// inventory while proving the supplied compiler result grants no persistent
+// functions, then binds both projectors to the explicit scoped migrator role.
 func NewAppACLEffectiveCatalogVerifierInputR1(
 	contract AppACLEffectiveCatalogContractR1,
 	migratorRole string,
@@ -165,7 +176,7 @@ func (input AppACLEffectiveCatalogVerifierInputR1) Validate() error {
 		return err
 	}
 	if expectedFunctions != input.ExpectedFunctions {
-		return fmt.Errorf("app ACL expected function input does not match compiled contract")
+		return fmt.Errorf("app ACL expected function input does not match static projector inventory")
 	}
 	return nil
 }
@@ -174,31 +185,21 @@ func appACLEffectiveCatalogExpectedFunctionsR1(
 	contract AppACLEffectiveCatalogContractR1,
 	migratorRole string,
 ) ([2]AppACLEffectiveCatalogExpectedFunctionR1, error) {
-	identities := make([]string, 0, len(contract.Privileges))
 	for _, privilege := range contract.Privileges {
 		if privilege.ObjectClass == AppACLObjectClassFunction {
-			if privilege.Privilege != AppACLPrivilegeExecute || privilege.GrantOption || !validFunctionIdentity(privilege.ObjectIdentity) {
-				return [2]AppACLEffectiveCatalogExpectedFunctionR1{}, fmt.Errorf("compiled app ACL catalog contract has invalid function privilege")
-			}
-			identities = append(identities, privilege.ObjectIdentity)
+			return [2]AppACLEffectiveCatalogExpectedFunctionR1{}, fmt.Errorf("compiled app ACL catalog contract must not grant persistent-function EXECUTE")
 		}
 	}
-	if len(identities) != 2 {
-		return [2]AppACLEffectiveCatalogExpectedFunctionR1{}, fmt.Errorf("compiled app ACL catalog contract has %d manifest functions, want 2", len(identities))
-	}
-	sort.Strings(identities)
-	if identities[0] == identities[1] {
-		return [2]AppACLEffectiveCatalogExpectedFunctionR1{}, fmt.Errorf("compiled app ACL catalog contract has duplicate manifest function identity")
-	}
+	projectors := appACLProjectorFunctionsR1()
 	return [2]AppACLEffectiveCatalogExpectedFunctionR1{
-		{Identity: identities[0], OwnerRole: migratorRole},
-		{Identity: identities[1], OwnerRole: migratorRole},
+		{Identity: projectors[0].schemaName + "." + projectors[0].identity, OwnerRole: migratorRole},
+		{Identity: projectors[1].schemaName + "." + projectors[1].identity, OwnerRole: migratorRole},
 	}, nil
 }
 
 // VerifyAppACLEffectiveCatalogSnapshotR1 compares one PostgreSQL snapshot to
-// the closed r1 compiler contract. Missing, duplicate, unknown, or malformed
-// catalog facts are all rejected.
+// the closed r1 compiled privilege contract and static projector inventory.
+// Missing, duplicate, unknown, or malformed catalog facts are all rejected.
 func VerifyAppACLEffectiveCatalogSnapshotR1(
 	snapshot AppACLEffectiveCatalogSnapshotR1,
 	input AppACLEffectiveCatalogVerifierInputR1,
@@ -208,6 +209,9 @@ func VerifyAppACLEffectiveCatalogSnapshotR1(
 	}
 	if snapshot.DatabaseName != input.Contract.DatabaseName {
 		return fmt.Errorf("app ACL catalog snapshot database %q does not match expected database %q", snapshot.DatabaseName, input.Contract.DatabaseName)
+	}
+	if err := verifyAppACLEffectiveCatalogPGCryptoExtensionR1(snapshot.PGCryptoExtension); err != nil {
+		return err
 	}
 
 	roleStates := make(map[string]AppACLEffectiveCatalogRoleStateR1, 3)
@@ -229,19 +233,23 @@ func VerifyAppACLEffectiveCatalogSnapshotR1(
 	if _, ok := roleStates[input.MigratorRole]; !ok {
 		return fmt.Errorf("app ACL catalog snapshot is missing migrator role %q", input.MigratorRole)
 	}
+	for _, roleName := range []string{
+		input.Contract.RoleBindings[0].CatalogRole,
+		input.Contract.RoleBindings[1].CatalogRole,
+		input.MigratorRole,
+	} {
+		role := roleStates[roleName]
+		if !role.Login || role.Inherit || role.Superuser || role.CreateDatabase || role.CreateRole || role.Replication || role.BypassRLS {
+			return fmt.Errorf("app ACL role %q must be LOGIN, NOINHERIT, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION, and NOBYPASSRLS", role.Name)
+		}
+	}
 	if len(snapshot.Memberships) != 0 {
 		membership := snapshot.Memberships[0]
 		return fmt.Errorf("app ACL role membership is forbidden: %q -> %q", membership.MemberRole, membership.ParentRole)
 	}
 
-	targetRoles := make(map[string]struct{}, len(input.Contract.RoleBindings))
-	for _, binding := range input.Contract.RoleBindings {
-		targetRoles[binding.CatalogRole] = struct{}{}
-	}
-	for _, owner := range snapshot.Owners {
-		if _, ownedByTargetRole := targetRoles[owner.OwnerRole]; ownedByTargetRole {
-			return fmt.Errorf("app ACL role %q is owner of %s %q", owner.OwnerRole, owner.ObjectClass, appACLEffectiveCatalogObjectLabel(owner.SchemaName, owner.ObjectIdentity))
-		}
+	if err := verifyAppACLManagedObjectOwnersR1(snapshot.Owners, input); err != nil {
+		return err
 	}
 	for _, binding := range input.Contract.RoleBindings {
 		role := roleStates[binding.CatalogRole]
@@ -262,9 +270,10 @@ func VerifyAppACLEffectiveCatalogSnapshotR1(
 		columnACL := snapshot.ColumnACLs[0]
 		return fmt.Errorf("column ACL drift on %s.%s(%s)", columnACL.SchemaName, columnACL.RelationName, columnACL.ColumnName)
 	}
-	if len(snapshot.DefaultACLs) != 0 {
-		defaultACL := snapshot.DefaultACLs[0]
-		return fmt.Errorf("default ACL drift for owner %q and grantee %q", defaultACL.OwnerRole, defaultACL.Grantee)
+	for _, defaultACL := range snapshot.DefaultACLs {
+		if defaultACL.OwnerRole == input.MigratorRole && (defaultACL.SchemaName == "" || defaultACL.SchemaName == appACLManagedPublicSchemaR1 || defaultACL.SchemaName == appACLManagedInternalSchemaR1) {
+			return fmt.Errorf("default ACL drift for migrator owner %q and grantee %q", defaultACL.OwnerRole, defaultACL.Grantee)
+		}
 	}
 	if err := verifyAppACLEffectiveCatalogFunctionsR1(snapshot.Functions, input.ExpectedFunctions); err != nil {
 		return err
@@ -274,6 +283,72 @@ func VerifyAppACLEffectiveCatalogSnapshotR1(
 	}
 	if err := verifyAppACLEffectiveCatalogPrivilegesR1("effective", snapshot.EffectivePrivileges, input.Contract); err != nil {
 		return err
+	}
+	return nil
+}
+
+func verifyAppACLEffectiveCatalogPGCryptoExtensionR1(extension AppACLEffectiveCatalogExtensionR1) error {
+	if extension.ExtensionName != "pgcrypto" {
+		return fmt.Errorf("pgcrypto extension is missing")
+	}
+	if extension.SchemaName != appACLManagedInternalSchemaR1 {
+		return fmt.Errorf("pgcrypto extension schema %q does not match required schema %q", extension.SchemaName, appACLManagedInternalSchemaR1)
+	}
+	return nil
+}
+
+func verifyAppACLManagedObjectOwnersR1(
+	owners []AppACLEffectiveCatalogObjectOwnerR1,
+	input AppACLEffectiveCatalogVerifierInputR1,
+) error {
+	surface, err := CompileAppACLManagedSurfaceR1(input.Contract.DatabaseName)
+	if err != nil {
+		return fmt.Errorf("compile app ACL managed surface: %w", err)
+	}
+	expected := make(map[AppACLManagedObjectR1]struct{}, len(surface.Objects))
+	for _, object := range surface.Objects {
+		expected[object] = struct{}{}
+	}
+	actual := make(map[AppACLManagedObjectR1]AppACLEffectiveCatalogObjectOwnerR1, len(owners))
+	for _, owner := range owners {
+		object := AppACLManagedObjectR1{
+			ObjectClass:    owner.ObjectClass,
+			SchemaName:     owner.SchemaName,
+			ObjectIdentity: owner.ObjectIdentity,
+		}
+		if _, wanted := expected[object]; !wanted {
+			return fmt.Errorf("unexpected managed object owner for %s", appACLEffectiveCatalogObjectLabel(owner.SchemaName, owner.ObjectIdentity))
+		}
+		if _, duplicate := actual[object]; duplicate {
+			return fmt.Errorf("duplicate managed object owner for %s", appACLEffectiveCatalogObjectLabel(owner.SchemaName, owner.ObjectIdentity))
+		}
+		actual[object] = owner
+	}
+	for object := range expected {
+		if _, found := actual[object]; !found {
+			return fmt.Errorf("managed object owner is missing for %s", appACLEffectiveCatalogObjectLabel(object.SchemaName, object.ObjectIdentity))
+		}
+	}
+
+	databaseObject := AppACLManagedObjectR1{ObjectClass: AppACLObjectClassDatabase, ObjectIdentity: input.Contract.DatabaseName}
+	databaseOwner := actual[databaseObject]
+	if databaseOwner.OwnerRole != input.MigratorRole {
+		return fmt.Errorf("managed database owner %q for %s does not match migrator role %q", databaseOwner.OwnerRole, databaseObject.ObjectIdentity, input.MigratorRole)
+	}
+	for _, object := range surface.Objects {
+		owner := actual[object]
+		if object.ObjectClass == AppACLObjectClassSchema && object.SchemaName == appACLManagedPublicSchemaR1 && object.ObjectIdentity == appACLManagedPublicSchemaR1 && owner.OwnerRole == appACLEffectiveCatalogPublicSchemaDatabaseOwnerRoleR1 {
+			// PostgreSQL's bootstrap public schema is commonly owned by the
+			// predefined pg_database_owner role. The exact database owner check
+			// above binds that dynamic owner to this direct migrator snapshot.
+			continue
+		}
+		if owner.OwnerRole != input.MigratorRole {
+			if object.ObjectClass == AppACLObjectClassSchema && object.SchemaName == appACLManagedPublicSchemaR1 && object.ObjectIdentity == appACLManagedPublicSchemaR1 {
+				return fmt.Errorf("managed public schema owner %q does not match migrator role %q or pg_database_owner", owner.OwnerRole, input.MigratorRole)
+			}
+			return fmt.Errorf("managed object owner %q for %s does not match migrator role %q", owner.OwnerRole, appACLEffectiveCatalogObjectLabel(object.SchemaName, object.ObjectIdentity), input.MigratorRole)
+		}
 	}
 	return nil
 }

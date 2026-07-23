@@ -30,7 +30,7 @@ func TestCompileAppACLPrivilegeSetR1MatchesFrozenCatalogContract(t *testing.T) {
 		}
 		got[privilege] = struct{}{}
 	}
-	if len(got) != 206 || len(got) != len(want) {
+	if len(got) != 204 || len(got) != len(want) {
 		t.Fatalf("privilege tuple count = %d, want %d", len(got), len(want))
 	}
 	for privilege := range want {
@@ -103,15 +103,6 @@ func appACLPrivilegeSetR1Contract(databaseName string) map[AppACLPrivilege]struc
 			}
 		}
 	}
-	addFunction := func(subject AppACLSubject, identity string) {
-		privileges[AppACLPrivilege{
-			Subject:        subject,
-			ObjectClass:    AppACLObjectClassFunction,
-			ObjectIdentity: identity,
-			Privilege:      AppACLPrivilegeExecute,
-		}] = struct{}{}
-	}
-
 	runtime := AppACLSubjectCenterRuntime
 	addDatabaseAndSchema(runtime)
 	addRelations(runtime, AppACLObjectClassTable, []string{
@@ -210,9 +201,6 @@ func appACLPrivilegeSetR1Contract(databaseName string) map[AppACLPrivilege]struc
 		"deployment_contract_state",
 	}, AppACLPrivilegeSelect)
 	addRelations(runtime, AppACLObjectClassSequence, []string{"record_outbox_outbox_row_id_seq"}, AppACLPrivilegeUsage)
-	addFunction(runtime, "public.record_platform_cas_contract_activation_projection(bytea)")
-	addFunction(runtime, "public.record_platform_cas_domain_rotation_projection(bytea)")
-
 	admin := AppACLSubjectPlatformAdmin
 	addDatabaseAndSchema(admin)
 	addRelations(admin, AppACLObjectClassTable, []string{

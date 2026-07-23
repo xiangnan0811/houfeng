@@ -35,8 +35,8 @@ func TestCompileAppACLEffectiveCatalogContractR1DerivesCanonicalExpectedCatalog(
 	if err != nil {
 		t.Fatalf("ParseCanonicalPrivilegeSetBodyV1() error = %v", err)
 	}
-	if got := len(contract.Privileges); got != 206 {
-		t.Fatalf("contract privilege count = %d, want 206", got)
+	if got := len(contract.Privileges); got != 204 {
+		t.Fatalf("contract privilege count = %d, want 204", got)
 	}
 	for index, privilege := range contract.Privileges {
 		if privilege != canonicalSet.Privileges[index] {
@@ -57,9 +57,6 @@ func TestCompileAppACLEffectiveCatalogContractR1DerivesCanonicalExpectedCatalog(
 			}
 			sequenceUsage[privilege.SchemaName+"."+privilege.ObjectIdentity] = struct{}{}
 		case AppACLObjectClassFunction:
-			if privilege.Subject != AppACLSubjectCenterRuntime || privilege.Privilege != AppACLPrivilegeExecute {
-				t.Fatalf("function privilege = %#v, want runtime EXECUTE", privilege)
-			}
 			functionExecute[privilege.ObjectIdentity] = struct{}{}
 		}
 	}
@@ -71,11 +68,8 @@ func TestCompileAppACLEffectiveCatalogContractR1DerivesCanonicalExpectedCatalog(
 	}; !reflect.DeepEqual(sequenceUsage, want) {
 		t.Fatalf("sequence USAGE = %#v, want %#v", sequenceUsage, want)
 	}
-	if want := map[string]struct{}{
-		"public.record_platform_cas_contract_activation_projection(bytea)": {},
-		"public.record_platform_cas_domain_rotation_projection(bytea)":     {},
-	}; !reflect.DeepEqual(functionExecute, want) {
-		t.Fatalf("function EXECUTE = %#v, want %#v", functionExecute, want)
+	if len(functionExecute) != 0 {
+		t.Fatalf("function EXECUTE = %#v, want no persistent-function grants", functionExecute)
 	}
 
 	wantPolicies := [2]AppACLEffectiveCatalogRolePolicyR1{

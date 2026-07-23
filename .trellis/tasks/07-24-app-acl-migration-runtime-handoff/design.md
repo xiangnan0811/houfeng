@@ -83,3 +83,25 @@ The runtime reader uses one `REPEATABLE READ READ ONLY` transaction to read `ses
 - If convergence fails, the transaction leaves no pending baseline/ACL/head fragment. Correct deployment preconditions, then rerun the migrator.
 - If runtime admission fails after successful convergence, do not use an owner fallback; keep records-on blocked until the scoped migrator or deployment correction produces an exact state.
 - If 0051 is discovered externally applied, stop before editing it and create a separate forward-migration design.
+
+## 2026-07-24 implementation checkpoint
+
+`internal/center/store/migrate/acl_manifest_genesis.go` must insert the eight persisted revision fields in the same order as the SQL table, canonical codec, and runtime reader: revision, migrator catalog role, previous digest, migration body/digest, privilege body/digest, and manifest digest. The real PostgreSQL genesis regression exposed the earlier `$7` placeholder mismatch: the INSERT listed eight columns and supplied eight Go arguments. The fixed SQL now ends at `$8`. This checkpoint records repository regression evidence only; it makes no claim about an external deployment having used the earlier form.
+
+## 2026-07-24 extension-member opacity resolution
+
+OID-confirmed extension-member procedures remain opaque to the normal managed
+owner, direct-ACL, effective-ACL, and function-definition readers. That
+exception must not hide a callable capability: in the same `REPEATABLE READ
+READ ONLY` transaction, admission separately rejects any opaque member for
+which either APP runtime/admin role has both schema `USAGE` and function
+`EXECUTE` in `public` or `record_platform_internal`.
+
+The two reserved public projector names have a separate structural gate, also
+in that transaction and without an extension-member filter: each name must
+resolve to exactly one `pg_proc` row and that row must not be an extension
+member. The normal non-member reader then verifies its exact `bytea` identity,
+owner, `SECURITY DEFINER`, `search_path`, and ACL state. This preserves strict
+OID opacity for generic extension implementation details while rejecting an
+extra, replaced, or extension-attached projector overload even when it is not
+currently executable.
