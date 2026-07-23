@@ -114,10 +114,10 @@ SHA-256(
 - Create: `internal/center/recordplatform/projection_command.go`
 - Create: `internal/center/recordplatform/projection_command_test.go`
 
-- [ ] Write RED tests for exact activation/rotation encodings, parser round trips, foreign operation, malformed header/count/length, trailing bytes, bad token/profile, high-bit integer, invalid activation invariants, non-next epoch, non-monotonic ledger/fence/trust/policy transitions.
-- [ ] Run `go test ./internal/center/recordplatform -run ProjectionCommand -count=1`; observe missing-package/function failures.
-- [ ] Implement the minimal closed types, marshal, parse and validation needed for the tests. No database access or caller wiring belongs in this package.
-- [ ] Re-run the focused test command; it must pass before any DDL uses a generated command.
+- [x] Write RED tests for exact activation/rotation encodings, parser round trips, foreign operation, malformed header/count/length, trailing bytes, bad token/profile, high-bit integer, invalid activation invariants, non-next epoch, non-monotonic ledger/fence/trust/policy transitions.
+- [x] Run `go test ./internal/center/recordplatform -run ProjectionCommand -count=1`; observe missing-package/function failures.
+- [x] Implement the minimal closed types, marshal, parse and validation needed for the tests. No database access or caller wiring belongs in this package.
+- [x] Re-run the focused test command; it must pass before any DDL uses a generated command.
 
 ### Task 2: Add real 0051 projector DDL and migration regression
 
@@ -126,10 +126,10 @@ SHA-256(
 - Modify: `db/migrations/0051_create_record_platform_foundation.sql`
 - Modify: `internal/center/store/migrate/record_platform_migration_test.go`
 
-- [ ] Write RED source-level assertions for both exact public identities, security-definer/search-path/PUBLIC revoke fragments and the two closed operation markers.
-- [ ] Run `go test ./internal/center/store/migrate -run RecordPlatformFoundationMigration -count=1`; observe failure because 0051 has neither function.
-- [ ] Add the internal reader helpers and two public functions. Keep parsing and validation before mutation, use `FOR UPDATE`, and return the exact receipt digest on apply and exact retry.
-- [ ] Re-run the focused migration test; it must pass.
+- [x] Write RED source-level assertions for both exact public identities, security-definer/search-path/PUBLIC revoke fragments and the two closed operation markers.
+- [x] Run `go test ./internal/center/store/migrate -run RecordPlatformFoundationMigration -count=1`; observe failure because 0051 has neither function.
+- [x] Add the internal reader helpers and two public functions. Keep parsing and validation before mutation, use `FOR UPDATE`, and return the exact receipt digest on apply and exact retry.
+- [x] Re-run the focused migration test; it must pass.
 
 ### Task 3: Prove behavior against a real migrated PostgreSQL database
 
@@ -137,17 +137,23 @@ SHA-256(
 
 - Modify: `internal/center/store/migrate/postgres_integration_test.go`
 
-- [ ] Write RED integration cases that apply the real 0051 as a temporary migrator role, inspect `pg_proc`/ACLs, grant runtime only the two exact `EXECUTE` identities, and prove direct runtime `UPDATE` plus admin function calls fail with `42501`.
-- [ ] Add valid activation, byte-identical retry, valid next-epoch rotation, stale ledger/hash/epoch, profile mismatch, lower fence, malformed/trailing command and concurrent contender cases. Build commands only through the production Go codec.
-- [ ] Run the focused real PostgreSQL test through `scripts/test-record-platform-integration.sh postgres -- go test -v ./internal/center/store/migrate -run '^TestPostgresIntegrationRecordPlatformProjectorFunctions$' -count=1`; first observe the intended RED failures, then GREEN after the DDL is complete.
+- [x] Write RED integration cases that apply the real 0051 as a temporary migrator role, inspect `pg_proc`/ACLs, grant runtime only the two exact `EXECUTE` identities, and prove direct runtime `UPDATE` plus admin function calls fail with `42501`.
+- [x] Add valid activation, byte-identical retry, valid next-epoch rotation, stale ledger/hash/epoch, profile mismatch, lower fence, malformed/trailing command and concurrent contender cases. Build commands only through the production Go codec.
+- [x] Run the focused real PostgreSQL test through `scripts/test-record-platform-integration.sh postgres -- go test -v ./internal/center/store/migrate -run '^TestPostgresIntegrationRecordPlatformProjectorFunctions$' -count=1`; first observe the intended RED failures, then GREEN after the DDL is complete.
 
 ### Task 4: Review and verification
 
-- [ ] Run `gofmt -w internal/center/recordplatform/*.go` and `git diff --check`.
-- [ ] Run `GOTMPDIR=/home/murray/.codex GOFLAGS=-p=1 make verify-go`.
-- [ ] Run the focused PostgreSQL integration command again (the wrapper rejects skip).
-- [ ] Require a fresh spec/security review first, then a separate code-quality review. Fix every blocking finding and repeat the affected review.
+- [x] Run `gofmt -w internal/center/recordplatform/*.go` and `git diff --check`.
+- [x] Run `GOTMPDIR=/home/murray/.codex GOFLAGS=-p=1 make verify-go`.
+- [x] Run the focused PostgreSQL integration command again (the wrapper rejects skip).
+- [x] Require a fresh spec/security review first, then a separate code-quality review. Fix every blocking finding and repeat the affected review.
 
-## 5. Non-goals / follow-up gate
+## 5. 验证证据（2026-07-23）
 
-This plan deliberately does not mark Child 1 ready for Child 2. After this slice, the controller must still address production runtime wiring, migration/ACL convergence, external typed ledger + full-witness validation and receipt persistence, owner matrix/default ACL policy, and all remaining Child 1 acceptance evidence. No Child 2–11 admission follows merely from the existence of these functions.
+- `d57d65d3` 交付闭合的 Go codec 和两个真实 `0051` projector 函数；`527118af` 补齐 rotation 拒绝、畸形/尾随命令和过期 sequence/epoch 的覆盖。
+- `8b9767fc` 加强相邻 ACL runtime regression：独立认证的受限成员登录获得临时 runtime-role membership 后执行 `SET ROLE`，以精确的 `session_user`/`current_user` 不匹配被拒绝。该 membership 是仅限测试的对抗性漂移，并会在清理时移除。
+- 控制会话独立运行了 focused codec、migration-source、projector PostgreSQL 和 member-login PostgreSQL selectors，随后执行 `GOTMPDIR=/home/murray/.codex GOFLAGS=-p=1 make verify-go`；均已成功完成。新的 spec/security 与独立 code-quality review 对各自范围均未报告 P0/P1/P2。
+
+## 6. 非目标与后续准入门
+
+本计划刻意不把 Child 1 标记为已可准入 Child 2。完成此切片后，控制会话仍须处理生产 runtime wiring、migration/ACL convergence、外部 typed ledger + full-witness validation 与 receipt persistence、owner matrix/default ACL policy，以及 Child 1 的其余 acceptance evidence。仅因这些函数存在，Child 2–11 不得获得准入。

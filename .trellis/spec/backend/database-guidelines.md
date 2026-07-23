@@ -105,12 +105,13 @@
 
 #### 1. Scope / Trigger
 
-- Trigger: 修改 app ACL manifest/compiler、`VerifyPostgresAppACLEffectiveCatalogR1`、其 PostgreSQL catalog reader，或 ACL migration/integration regression 时。
+- Trigger: 修改 app ACL manifest/compiler、`VerifyPostgresAppACLEffectiveCatalogR1`、其 PostgreSQL catalog reader、`VerifyPersistedAppACLManifestRuntimeV1`，或 ACL migration/integration regression 时。
 - Catalog scope 必须覆盖每个持久、非系统、非临时 schema：`nspname !~ '^pg_'`、`nspname <> 'information_schema'`，并防御性排除 `pg_catalog.pg_my_temp_schema()` 和 `pg_catalog.pg_is_other_temp_schema(namespace.oid)`。
 
 #### 2. Signatures
 
 - Reader: `readAppACLEffectiveCatalogDirectPrivilegesR1(ctx, tx, databaseName)`；effective verification 是独立 reader/check，不得复用 direct snapshot 语义。
+- 运行时身份校验器：`VerifyPersistedAppACLManifestRuntimeV1(ctx, reader, migrationFS, compiledPrivileges)` 与 `ReadAppACLManifestRuntimeSnapshotV1(ctx)`；PostgreSQL 快照必须在同一条可重复读、只读事务中同时取得 `session_user` 和 `current_user`。
 - Direct ACL sources: `pg_database.datacl`、`pg_namespace.nspacl`、`pg_class.relacl`、`pg_proc.proacl`，各自以 `pg_catalog.aclexplode(...)` 展开。
 - Function identity: `procedure.proname::text || '(' || pg_catalog.pg_get_function_identity_arguments(procedure.oid) || ')'`。
 
@@ -120,6 +121,7 @@
 - Direct rows 必须保留 `PUBLIC`、任意（包括 `NOLOGIN`）grantee 和 `is_grantable`。仅可忽略 owner baseline direct rows；ownership 仍由独立 catalog owner reader 验证，但当前 R1 只拒绝目标应用角色所有权并校验预期函数的 migrator owner，不代表完整 owner-matrix convergence。
 - 所有 namespace、relation 和 function UNION arms 使用同一 persistent-schema CTE；不得只扫描 `public` 或按当前 manifest 预筛选。
 - PostgreSQL `name` 值参与 function identity 拼接时必须先 cast 为 `text`，否则长 canonical identity 可能在 UNION 输出中截断。
+- 运行时身份必须 fail-closed：持久化 manifest 的 runtime binding 必须等于 `current_user`，且 `session_user` 必须等于 `current_user`。可对绑定的 runtime role 执行 `SET ROLE` 的临时成员登录只可作为对抗性测试数据；生产 catalog/preflight verification 必须拒绝这项 membership。
 
 #### 4. Validation & Error Matrix
 
@@ -130,6 +132,7 @@
 | Owner baseline ACL entry | Exclude only from direct facts; ownership remains checked by the independent owner reader. Do not treat this exclusion as complete owner-matrix convergence. |
 | System or temporary namespace | Exclude from application catalog scope. |
 | Long function name/identity arguments | Return the complete text identity and fail on a contract mismatch. |
+| 受限的独立成员登录对 manifest runtime role 执行 `SET ROLE` | 在 migration 或 privilege body 比较前，精确拒绝为 `session user %q does not match current user %q`。 |
 
 #### 5. Good / Base / Bad Cases
 
@@ -137,16 +140,25 @@
 - Base: a `NULL` ACL produces no raw direct grant while a separate effective check may still observe PostgreSQL default behavior.
 - Bad: deriving raw facts with `acldefault`, filtering out NOLOGIN roles, or omitting `is_grantable` hides an explicit privilege drift.
 - Bad: concatenating `name` without `::text` truncates a long function identity and can make a UNION comparison pass/fail against the wrong object.
+- Good：受限的 `LOGIN NOINHERIT` 成员以自己的密码认证后，对受限的 `NOLOGIN` runtime role 执行 `SET ROLE`；运行时校验器观察到不同身份并拒绝。
+- Bad：复用 integration wrapper 的超级用户/基础会话后只调用 `SET ROLE`；这不能证明普通成员登录攻击路径或密码连接池配置。
 
 #### 6. Tests Required
 
 - Cover all four raw ACL sources, all persistent application schemas, `PUBLIC`, arbitrary/NOLOGIN grantees, grant options, owner separation, `NULL` ACLs, temporary/system exclusions, and a function identity longer than PostgreSQL `name`.
+- Runtime identity integration 必须创建一个使用 CSPRNG 密码的独立、非超级用户 `LOGIN NOINHERIT` 成员，显式向其授予临时 runtime role；用该成员的 `User`/`Password` 打开单连接池，在 `AfterConnect` 执行 `SET ROLE`，断言 `session_user == member`、`current_user == runtime` 和精确的校验器错误。撤销 membership、删除两个临时 role 前必须先关闭该连接池；绝不记录密码。
 - Run PostgreSQL regressions through the integration wrapper; a locally skipped Go test is **not** integration evidence:
 
   ```bash
   scripts/test-record-platform-integration.sh postgres -- \
     go test -v ./internal/center/store/migrate \
     -run '^TestPostgresIntegrationVerifyAppACLEffectiveCatalogR1'
+  ```
+
+  ```bash
+  scripts/test-record-platform-integration.sh postgres -- \
+    go test -v ./internal/center/store/migrate \
+    -run '^TestPostgresIntegrationAppACLManifestRuntimeReader$'
   ```
 
 #### 7. Wrong vs Correct
@@ -165,6 +177,19 @@ where relation.relacl is not null
 
 -- 正确：name 先转 text，保留完整 canonical function identity。
 procedure.proname::text || '(' || pg_catalog.pg_get_function_identity_arguments(procedure.oid) || ')'
+```
+
+```go
+// 错误：继续使用 wrapper 的特权登录，只证明该登录可 SET ROLE。
+poolConfig := db.Config().Copy()
+poolConfig.AfterConnect = setRuntimeRole
+
+// 正确：以独立成员身份认证，再在连接初始化时切换角色。
+poolConfig := db.Config().Copy()
+poolConfig.MaxConns = 1
+poolConfig.ConnConfig.User = memberLogin
+poolConfig.ConnConfig.Password = memberPassword
+poolConfig.AfterConnect = setRuntimeRole
 ```
 
 ---
