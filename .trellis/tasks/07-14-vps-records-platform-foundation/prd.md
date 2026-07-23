@@ -6,6 +6,8 @@
 
 ## Requirements
 
+> **2026-07-24 r1 governance correction — takes precedence over earlier projector-ACL wording in this parent.** The `records-on/delete-off` child `07-24-app-acl-migration-runtime-handoff` freezes r1 runtime and platform-admin persistent-function `EXECUTE` sets as empty. The two 0051 projectors remain migrator-owned catalog objects and are verified by admission, but no current APP role may invoke them until a future trusted caller, witness binding and independent admission are designed. r1 catalog convergence is limited to its migration-owned APP surface; it does not reject unrelated schemas or unrelated owners' default ACLs.
+
 - 父设计：`../07-13-vps-detail-experience-design/design.md` §10、§11.3–11.4、§15、§18、§21、§23。
 - 直接依赖：无；这是其余 10 个子任务的安全与运行时前置。
 - 扩展当前只有 `admin` 的 session context，使服务端能够统一获得 actor、role、未来 group 与默认 project scope；不在前端伪造权限。
@@ -32,6 +34,8 @@
 - 当前任务不实现 records/evidence/attachment 业务表、UI 或真正备份复制；只提供明确接口和可由后续适配器接入的运行时底座。
 
 ## Acceptance Criteria
+
+> **2026-07-24 r1 acceptance correction — takes precedence over earlier 0051 function-grant text below.** r1 has 204 compiler tuples and no runtime/admin persistent-function `EXECUTE`. It uses a direct, constrained migrator, opaque PG16 `pgcrypto` extension members behind a no-`USAGE` internal schema, and a scoped catalog verifier. Any later projectors caller is a separate child admission problem.
 
 - [ ] `PF-AC-001` middleware/session scope 与 `recordauth.Policy` 在 API、store query builder 和 worker 三类调用中给出同一授权结果；visibility/source authorization 使用版本化 typed scope、稳定 role/group、规范化 digest 与可验证 final floor，任意字符串、未知 capability/kind/version、缺失或篡改 floor 默认拒绝。
 - [ ] `PF-AC-002` 当前 admin 映射 project admin；测试中的非 admin/group scope 能验证 allow/deny 交集，且未授权资源外部统一 404。

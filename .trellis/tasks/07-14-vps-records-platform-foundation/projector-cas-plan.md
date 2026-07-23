@@ -3,9 +3,9 @@
 > Active task: `.trellis/tasks/07-14-vps-records-platform-foundation`
 > 范围：补齐 r1 必需的 APP projection SQL primitive；不把尚未实现的 ledger/full-witness saga 伪装为已经完成。
 
-**Goal:** 让真实 `0051` schema 提供两项唯一、最小权限、可重试的 runtime APP projection 函数，并以一个闭合的 v1 `bytea` 命令合同驱动 `deployment_contract_state` 的 activation / domain-rotation CAS。
+**Goal:** 让真实 `0051` schema 提供两项唯一、migrator-owned、可重试的 APP projection DDL primitive，并以一个闭合的 v1 `bytea` 命令合同驱动 `deployment_contract_state` 的 activation / domain-rotation CAS；r1 不向 runtime/admin 授予调用权。
 
-**Architecture:** runtime 在调用前负责从 primary + full witness 验证外部治理证据；本计划中的 APP 函数只接受已经验证后的 canonical projection command，锁定本地 singleton state，比较完整前态，并原子写入唯一可由 APP 保存的投影。函数返回由 command 派生的确定性 CAS receipt digest，供后续 ledger/witness receipt 持久化；它不声称能跨 DSN 自行验证外部 witness。
+**Architecture:** 未来受单独准入的 trusted caller 必须先从 primary + full witness 验证外部治理证据；本计划中的 APP 函数只接受已经验证后的 canonical projection command，锁定本地 singleton state，比较完整前态，并原子写入唯一可由 APP 保存的投影。函数返回由 command 派生的确定性 CAS receipt digest，供后续 ledger/witness receipt 持久化；它不声称能跨 DSN 自行验证外部 witness，也不授权现有 runtime/admin 绕过该边界。
 
 **Tech stack:** Go 1.24 canonical codec + PostgreSQL 16 PL/pgSQL `SECURITY DEFINER` functions + pgx integration tests.
 
@@ -13,7 +13,7 @@
 
 ## 1. 已确认的边界
 
-- r1 runtime 的持久函数 `EXECUTE` 集精确为 `public.record_platform_cas_contract_activation_projection(bytea)` 与 `public.record_platform_cas_domain_rotation_projection(bytea)`；admin 没有这两项权限，也没有 `deployment_contract_state` 直写权限。
+- r1 runtime 与 platform-admin 的持久函数 `EXECUTE` 集均为空；两个 projector 仍必须以 migrator owner、`SECURITY DEFINER`、唯一 `bytea` identity 和 `search_path=pg_catalog` 出现在 catalog verifier 中。未来 caller 另行设计并准入。
 - 真实 `0051` 当前缺失这两个函数，现有 catalog fixture 会自行造 no-op 函数，不能证明真实 migration。
 - `0051` 尚未进入 `origin/main` 或远端分支；Task 11 也明确该未发布 0051 baseline 应直接修订，不能新建与其它 Child 所有权冲突的临时 migration。
 - 本次不实现 ledger/witness/recovery-control 的 typed entry / receipt 验证、外部 saga 或 production caller wiring。调用者必须在未来实现中先验证 witnessed `(sequence, hash)`，再调用本地 CAS；该依赖要继续作为 Child 1 未完成项保留。
@@ -92,7 +92,7 @@ SQL requires the expected deployment/profile/current ledger tuple/current identi
 
 - Define both public functions in unreleased `db/migrations/0051_create_record_platform_foundation.sql`, after the singleton state and local internal schema exist.
 - Both are `SECURITY DEFINER`, `SET search_path = pg_catalog`, use fully qualified `public.*` / `record_platform_internal.*` references, accept exactly one `bytea`, and have no overload or convenience entrypoint.
-- Internal fixed-width reader helpers are private to `record_platform_internal`, are revoked from `PUBLIC`, and exist only to avoid duplicate byte arithmetic. The two public functions explicitly `REVOKE ALL ... FROM PUBLIC`; runtime-specific grants remain the scoped manifest-convergence responsibility.
+- Internal fixed-width reader helpers are private to `record_platform_internal`, are revoked from `PUBLIC`, and exist only to avoid duplicate byte arithmetic. The two public functions explicitly `REVOKE ALL ... FROM PUBLIC`; r1 scoped manifest convergence grants neither runtime nor admin `EXECUTE`.
 - Each public function locks `public.deployment_contract_state` for `project_id='default'` before deciding apply / exact-retry / conflict. It returns `bytea`:
 
 ```text
@@ -137,7 +137,7 @@ SHA-256(
 
 - Modify: `internal/center/store/migrate/postgres_integration_test.go`
 
-- [x] Write RED integration cases that apply the real 0051 as a temporary migrator role, inspect `pg_proc`/ACLs, grant runtime only the two exact `EXECUTE` identities, and prove direct runtime `UPDATE` plus admin function calls fail with `42501`.
+- [x] Historical test direction was superseded by 07-24: real 0051 tests must inspect `pg_proc`/ACLs and prove **both** runtime/admin projector calls plus direct runtime/admin writes fail with `42501`; projector semantics execute only as the migrator owner or an explicit test-only future caller.
 - [x] Add valid activation, byte-identical retry, valid next-epoch rotation, stale ledger/hash/epoch, profile mismatch, lower fence, malformed/trailing command and concurrent contender cases. Build commands only through the production Go codec.
 - [x] Run the focused real PostgreSQL test through `scripts/test-record-platform-integration.sh postgres -- go test -v ./internal/center/store/migrate -run '^TestPostgresIntegrationRecordPlatformProjectorFunctions$' -count=1`; first observe the intended RED failures, then GREEN after the DDL is complete.
 
@@ -149,6 +149,8 @@ SHA-256(
 - [x] Require a fresh spec/security review first, then a separate code-quality review. Fix every blocking finding and repeat the affected review.
 
 ## 5. 验证证据（2026-07-23）
+
+> These historical focused results precede the 2026-07-24 ACL-scope correction. They are evidence for projector codec/CAS mechanics only, not evidence that a runtime/admin caller, pgcrypto hardening, or records-on admission is safe. Those claims must be re-established by child 07-24's real-schema tests.
 
 - `d57d65d3` 交付闭合的 Go codec 和两个真实 `0051` projector 函数；`527118af` 补齐 rotation 拒绝、畸形/尾随命令和过期 sequence/epoch 的覆盖。
 - `8b9767fc` 加强相邻 ACL runtime regression：独立认证的受限成员登录获得临时 runtime-role membership 后执行 `SET ROLE`，以精确的 `session_user`/`current_user` 不匹配被拒绝。该 membership 是仅限测试的对抗性漂移，并会在清理时移除。

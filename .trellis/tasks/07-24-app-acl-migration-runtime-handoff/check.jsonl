@@ -1,0 +1,13 @@
+{"file":".trellis/tasks/07-24-app-acl-migration-runtime-handoff/prd.md","reason":"Acceptance criteria and non-goals for spec-compliance review."}
+{"file":".trellis/tasks/07-24-app-acl-migration-runtime-handoff/design.md","reason":"Security-critical ACL, transaction, runtime-admission, and rollback invariants to verify against the diff."}
+{"file":".trellis/tasks/07-24-app-acl-migration-runtime-handoff/implement.md","reason":"Required test-first implementation sequence, validation commands, required spec revision, and two-stage review order."}
+{"file":".trellis/tasks/07-14-vps-records-platform-foundation/prd.md","reason":"Parent acceptance boundary; the child must not admit later children or claim projector caller authorization."}
+{"file":".trellis/tasks/07-14-vps-records-platform-foundation/design.md","reason":"Parent r1 manifest/catalog correction and cross-task security context."}
+{"file":".trellis/tasks/07-14-vps-records-platform-foundation/projector-cas-plan.md","reason":"Verify projectors remain hardened catalog objects while runtime/admin EXECUTE remains absent."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Database contracts to validate and update, including removal of the obsolete whole-schema ACL requirement."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify fail-closed propagation and no credential/DSN leakage."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Required unit, PostgreSQL integration, full Go gate, and review evidence."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Validate command/config/store/platformmigrate file placement and test placement."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Validate isolated-branch and commit/PR safety."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Validate config-to-bootstrap/importer-to-runtime-admission boundary propagation."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Validate shared parser/reader reuse and prevent duplicate bypass paths."}

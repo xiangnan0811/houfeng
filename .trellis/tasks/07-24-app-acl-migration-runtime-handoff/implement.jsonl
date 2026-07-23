@@ -1,0 +1,13 @@
+{"file":".trellis/tasks/07-24-app-acl-migration-runtime-handoff/prd.md","reason":"Authoritative scope, requirements, acceptance criteria, non-goals, and explicit child-admission boundary for this implementation."}
+{"file":".trellis/tasks/07-24-app-acl-migration-runtime-handoff/design.md","reason":"Authoritative r1 transaction, managed-surface, pgcrypto, projector, runtime-admission, rollout, and rollback design."}
+{"file":".trellis/tasks/07-24-app-acl-migration-runtime-handoff/implement.md","reason":"Ordered RED/GREEN implementation, validation, spec-update, and review gates for the single handoff task."}
+{"file":".trellis/tasks/07-14-vps-records-platform-foundation/prd.md","reason":"Parent task requirements and the 2026-07-24 governance correction that supersedes historic projector grants."}
+{"file":".trellis/tasks/07-14-vps-records-platform-foundation/design.md","reason":"Parent platform invariants and the authoritative r1 correction for the manifest, projector, and catalog boundary."}
+{"file":".trellis/tasks/07-14-vps-records-platform-foundation/projector-cas-plan.md","reason":"Projector DDL/CAS context; its correction establishes that no current runtime/admin caller may execute the functions."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"PostgreSQL/pgx/migration guidance; its obsolete whole-schema ACL scenario must be replaced by this task's managed-surface contract."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Fail-closed error wrapping, configuration, and sensitive-value handling rules for CLI, migration, and runtime admission paths."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Go formatting, focused/full test gates, integration evidence, and review requirements."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Ownership and placement rules for commands, configuration, migration/store, platform-migration, and tests."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Non-main branch, worktree, hooks, commit, and remote delivery governance."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Mode/configuration-to-bootstrap-to-importer-to-database admission data-flow checklist."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Require shared mode parsing and transaction-bound reader reuse rather than divergent center/importer implementations."}
