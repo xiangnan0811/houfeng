@@ -3,7 +3,9 @@ package migrate
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -116,22 +118,63 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 	}
 
 	t.Run("rejects SET ROLE identity bypass", func(t *testing.T) {
-		runtimeRole := fmt.Sprintf("houfeng_runtime_%d_%d", time.Now().UnixNano(), os.Getpid())
+		suffix := fmt.Sprintf("%d_%d", time.Now().UnixNano(), os.Getpid())
+		runtimeRole := "houfeng_runtime_" + suffix
+		memberLogin := "houfeng_runtime_member_" + suffix
 		quotedRuntimeRole := quotePostgresIdentifier(runtimeRole)
-		if _, err := db.Exec(ctx, `create role `+quotedRuntimeRole+` noinherit`); err != nil {
-			t.Fatalf("create temporary runtime role %q: %v", runtimeRole, err)
+		quotedMemberLogin := quotePostgresIdentifier(memberLogin)
+		var memberPasswordEntropy [32]byte
+		if _, err := rand.Read(memberPasswordEntropy[:]); err != nil {
+			t.Fatalf("generate temporary member login password: %v", err)
 		}
+		memberPassword := "test-" + hex.EncodeToString(memberPasswordEntropy[:])
+		runtimeRoleCreated := false
+		memberLoginCreated := false
 		t.Cleanup(func() {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			if _, err := db.Exec(cleanupCtx, `drop owned by `+quotedRuntimeRole); err != nil {
-				t.Errorf("drop temporary runtime role dependencies %q: %v", runtimeRole, err)
-				return
+			if runtimeRoleCreated && memberLoginCreated {
+				if _, err := db.Exec(cleanupCtx, `revoke `+quotedRuntimeRole+` from `+quotedMemberLogin); err != nil {
+					t.Errorf("revoke temporary runtime role %q from member login %q: %v", runtimeRole, memberLogin, err)
+				}
 			}
-			if _, err := db.Exec(cleanupCtx, `drop role `+quotedRuntimeRole); err != nil {
-				t.Errorf("drop temporary runtime role %q: %v", runtimeRole, err)
+			for _, role := range []struct {
+				name    string
+				quoted  string
+				created bool
+			}{
+				{name: memberLogin, quoted: quotedMemberLogin, created: memberLoginCreated},
+				{name: runtimeRole, quoted: quotedRuntimeRole, created: runtimeRoleCreated},
+			} {
+				if !role.created {
+					continue
+				}
+				if _, err := db.Exec(cleanupCtx, `reassign owned by `+role.quoted+` to `+quotePostgresIdentifier(currentUser)); err != nil {
+					t.Errorf("reassign temporary role %q ownership: %v", role.name, err)
+				}
+				if _, err := db.Exec(cleanupCtx, `drop owned by `+role.quoted); err != nil {
+					t.Errorf("drop temporary role %q dependencies: %v", role.name, err)
+				}
+				if _, err := db.Exec(cleanupCtx, `drop role if exists `+role.quoted); err != nil {
+					t.Errorf("drop temporary role %q: %v", role.name, err)
+				}
 			}
 		})
+		if _, err := db.Exec(ctx, `create role `+quotedRuntimeRole+` nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls`); err != nil {
+			t.Fatalf("create temporary runtime role %q: %v", runtimeRole, err)
+		}
+		runtimeRoleCreated = true
+		if _, err := db.Exec(ctx, `create role `+quotedMemberLogin+` login noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls password '`+memberPassword+`'`); err != nil {
+			t.Fatalf("create temporary member login %q: %v", memberLogin, err)
+		}
+		memberLoginCreated = true
+		if _, err := db.Exec(ctx, `grant `+quotedRuntimeRole+` to `+quotedMemberLogin); err != nil {
+			t.Fatalf("grant temporary runtime role %q to member login %q: %v", runtimeRole, memberLogin, err)
+		}
+		databaseName := currentPostgresDatabaseName(t, ctx, db)
+		if _, err := db.Exec(ctx, `grant connect on database `+quotePostgresIdentifier(databaseName)+` to `+quotedMemberLogin); err != nil {
+			t.Fatalf("grant member login database connect: %v", err)
+		}
 		if _, err := db.Exec(ctx, `grant usage on schema public to `+quotedRuntimeRole); err != nil {
 			t.Fatalf("grant runtime role schema usage: %v", err)
 		}
@@ -184,6 +227,9 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 
 		runtimePoolConfig := db.Config().Copy()
 		runtimePoolConfig.MaxConns = 1
+		runtimePoolConfig.MinConns = 0
+		runtimePoolConfig.ConnConfig.User = memberLogin
+		runtimePoolConfig.ConnConfig.Password = memberPassword
 		runtimePoolConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 			_, err := conn.Exec(ctx, `set role `+quotedRuntimeRole)
 			return err
@@ -195,15 +241,15 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 		t.Cleanup(runtimePool.Close)
 
 		runtimeReader := NewPostgresAppACLManifestRuntimeReader(runtimePool)
-		if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, runtimeReader, migrations.FS, runtimePrivilegeBody); err == nil || !strings.Contains(err.Error(), "session user") {
-			t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() SET ROLE error = %v, want session-user rejection", err)
-		}
 		runtimeSnapshot, err := runtimeReader.ReadAppACLManifestRuntimeSnapshotV1(ctx)
 		if err != nil {
 			t.Fatalf("ReadAppACLManifestRuntimeSnapshotV1() SET ROLE error = %v", err)
 		}
-		if runtimeSnapshot.SessionUser != sessionUser || runtimeSnapshot.CurrentUser != runtimeRole {
-			t.Fatalf("SET ROLE runtime identities = (%q, %q), want (%q, %q)", runtimeSnapshot.SessionUser, runtimeSnapshot.CurrentUser, sessionUser, runtimeRole)
+		if runtimeSnapshot.SessionUser != memberLogin || runtimeSnapshot.CurrentUser != runtimeRole {
+			t.Fatalf("SET ROLE runtime identities = (%q, %q), want (%q, %q)", runtimeSnapshot.SessionUser, runtimeSnapshot.CurrentUser, memberLogin, runtimeRole)
+		}
+		if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, runtimeReader, migrations.FS, runtimePrivilegeBody); err == nil || err.Error() != fmt.Sprintf("session user %q does not match current user %q", memberLogin, runtimeRole) {
+			t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() SET ROLE error = %v, want exact member-session identity rejection", err)
 		}
 	})
 }
