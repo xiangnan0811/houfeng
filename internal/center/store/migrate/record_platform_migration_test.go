@@ -131,3 +131,52 @@ func TestRecordPlatformFoundationMigrationDefinesActivationAndAdmissionProjectio
 		}
 	}
 }
+
+func TestRecordPlatformFoundationMigrationDefinesProjectorCASFunctions(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0051_create_record_platform_foundation.sql")
+	if err != nil {
+		t.Fatalf("read 0051 record-platform migration: %v", err)
+	}
+
+	sql := strings.ToLower(string(payload))
+	for _, functionName := range []string{
+		"record_platform_cas_contract_activation_projection",
+		"record_platform_cas_domain_rotation_projection",
+	} {
+		createPrefix := "create or replace function public." + functionName + "(bytea)"
+		if strings.Count(sql, createPrefix) != 1 {
+			t.Fatalf("0051 migration must define exactly one %q function", createPrefix)
+		}
+		revoke := "revoke all on function public." + functionName + "(bytea) from public"
+		if !strings.Contains(sql, revoke) {
+			t.Fatalf("0051 migration missing public EXECUTE revoke %q", revoke)
+		}
+
+		start := strings.Index(sql, createPrefix)
+		end := strings.Index(sql[start:], revoke)
+		if end < 0 {
+			t.Fatalf("0051 migration could not isolate %q definition", functionName)
+		}
+		definition := sql[start : start+end]
+		for _, want := range []string{
+			"security definer",
+			"set search_path = pg_catalog",
+			"public.deployment_contract_state",
+			"for update",
+		} {
+			if !strings.Contains(definition, want) {
+				t.Fatalf("%q definition missing %q", functionName, want)
+			}
+		}
+	}
+
+	for _, want := range []string{
+		"houfeng-app-projection-command-v1",
+		"houfeng-app-projection-cas-receipt-v1",
+		"record_platform_internal",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0051 migration missing projector CAS contract fragment %q", want)
+		}
+	}
+}

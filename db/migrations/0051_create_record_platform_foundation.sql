@@ -360,6 +360,528 @@ insert into public.deployment_contract_state(project_id)
 values ('default')
 on conflict (project_id) do nothing;
 
+create or replace function record_platform_internal.record_platform_projection_read_bytes_v1(
+  p_command bytea,
+  p_offset integer,
+  p_length integer
+)
+returns bytea
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+begin
+  if p_command is null
+    or p_offset < 0
+    or p_length < 0
+    or p_offset > pg_catalog.octet_length(p_command)
+    or p_length > pg_catalog.octet_length(p_command) - p_offset then
+    raise exception using
+      errcode = '22023',
+      message = 'invalid record-platform projection command field bounds';
+  end if;
+
+  return pg_catalog.substr(p_command, p_offset + 1, p_length);
+end
+$$;
+
+revoke all on function record_platform_internal.record_platform_projection_read_bytes_v1(bytea, integer, integer) from public;
+
+create or replace function record_platform_internal.record_platform_projection_read_uint64_v1(
+  p_command bytea,
+  p_offset integer
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_value bigint;
+begin
+  if pg_catalog.get_byte(
+      record_platform_internal.record_platform_projection_read_bytes_v1(p_command, p_offset, 8),
+      0
+    ) >= 128 then
+    raise exception using
+      errcode = '22023',
+      message = 'record-platform projection integer exceeds PostgreSQL bigint';
+  end if;
+
+  v_value :=
+    pg_catalog.get_byte(p_command, p_offset)::bigint * 72057594037927936::bigint
+    + pg_catalog.get_byte(p_command, p_offset + 1)::bigint * 281474976710656::bigint
+    + pg_catalog.get_byte(p_command, p_offset + 2)::bigint * 1099511627776::bigint
+    + pg_catalog.get_byte(p_command, p_offset + 3)::bigint * 4294967296::bigint
+    + pg_catalog.get_byte(p_command, p_offset + 4)::bigint * 16777216::bigint
+    + pg_catalog.get_byte(p_command, p_offset + 5)::bigint * 65536::bigint
+    + pg_catalog.get_byte(p_command, p_offset + 6)::bigint * 256::bigint
+    + pg_catalog.get_byte(p_command, p_offset + 7)::bigint;
+  return v_value;
+end
+$$;
+
+revoke all on function record_platform_internal.record_platform_projection_read_uint64_v1(bytea, integer) from public;
+
+create or replace function record_platform_internal.record_platform_projection_read_token_v1(
+  p_command bytea,
+  p_offset integer,
+  p_prefix text
+)
+returns text
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_token bytea;
+  v_index integer;
+  v_byte integer;
+begin
+  if p_prefix is null or p_prefix not in ('dp-', 'tm-') then
+    raise exception using
+      errcode = '22023',
+      message = 'invalid record-platform projection token prefix';
+  end if;
+
+  v_token := record_platform_internal.record_platform_projection_read_bytes_v1(
+    p_command,
+    p_offset,
+    67
+  );
+  if pg_catalog.substr(v_token, 1, 3) <> pg_catalog.convert_to(p_prefix, 'UTF8') then
+    raise exception using
+      errcode = '22023',
+      message = 'invalid record-platform projection token prefix bytes';
+  end if;
+
+  for v_index in 3..66 loop
+    v_byte := pg_catalog.get_byte(v_token, v_index);
+    if (v_byte < 48 or v_byte > 57) and (v_byte < 97 or v_byte > 102) then
+      raise exception using
+        errcode = '22023',
+        message = 'invalid record-platform projection token bytes';
+    end if;
+  end loop;
+
+  return pg_catalog.convert_from(v_token, 'UTF8');
+end
+$$;
+
+revoke all on function record_platform_internal.record_platform_projection_read_token_v1(bytea, integer, text) from public;
+
+create or replace function record_platform_internal.record_platform_projection_read_profile_v1(
+  p_command bytea,
+  p_offset integer
+)
+returns text
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_profile integer;
+begin
+  v_profile := pg_catalog.get_byte(
+    record_platform_internal.record_platform_projection_read_bytes_v1(p_command, p_offset, 1),
+    0
+  );
+  case v_profile
+    when 1 then return 'postgres_sync';
+    when 2 then return 's3_worm';
+    else
+      raise exception using
+        errcode = '22023',
+        message = 'invalid record-platform projection profile';
+  end case;
+end
+$$;
+
+revoke all on function record_platform_internal.record_platform_projection_read_profile_v1(bytea, integer) from public;
+
+create or replace function record_platform_internal.record_platform_projection_validate_header_v1(
+  p_command bytea,
+  p_operation integer,
+  p_field_count integer,
+  p_exact_length integer
+)
+returns void
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+begin
+  if p_command is null
+    or pg_catalog.octet_length(p_command) <> p_exact_length
+    or pg_catalog.substr(p_command, 1, 33) <> pg_catalog.convert_to('HOUFENG-APP-PROJECTION-COMMAND-V1', 'UTF8')
+    or pg_catalog.get_byte(p_command, 33) <> 0
+    or pg_catalog.get_byte(p_command, 34) <> 1
+    or pg_catalog.get_byte(p_command, 35) <> p_operation
+    or pg_catalog.get_byte(p_command, 36) <> p_field_count then
+    raise exception using
+      errcode = '22023',
+      message = 'invalid record-platform projection command header';
+  end if;
+end
+$$;
+
+revoke all on function record_platform_internal.record_platform_projection_validate_header_v1(bytea, integer, integer, integer) from public;
+
+create or replace function record_platform_internal.record_platform_projection_cas_receipt_v1(
+  p_command bytea
+)
+returns bytea
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+begin
+  if p_command is null then
+    raise exception using
+      errcode = '22023',
+      message = 'record-platform projection command is null';
+  end if;
+  return record_platform_internal.digest(
+    pg_catalog.convert_to('HOUFENG-APP-PROJECTION-CAS-RECEIPT-V1', 'UTF8')
+    || pg_catalog.int4send(pg_catalog.octet_length(p_command))
+    || p_command,
+    'sha256'
+  );
+end
+$$;
+
+revoke all on function record_platform_internal.record_platform_projection_cas_receipt_v1(bytea) from public;
+
+-- External ledger and full-witness proof is verified by the runtime before this
+-- local APP projection CAS function is invoked.
+create or replace function public.record_platform_cas_contract_activation_projection(bytea)
+returns bytea
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  p_command alias for $1;
+  v_deployment_id text;
+  v_active_profile text;
+  v_activation_mutation_id text;
+  v_witnessed_ledger_sequence bigint;
+  v_witnessed_ledger_hash bytea;
+  v_plan_digest bytea;
+  v_authorization_artifact_digest bytea;
+  v_activation_bundle_digest bytea;
+  v_trust_revision bigint;
+  v_trust_head_hash bytea;
+  v_inventory_digest bytea;
+  v_approval_policy_digest bytea;
+  v_adapter_policy_generation bigint;
+  v_adapter_policy_digest bytea;
+  v_drain_receipt_digest bytea;
+  v_identity_set_epoch bigint;
+  v_identity_set_digest bytea;
+  v_minimum_fence_contract_version bigint;
+  v_receipt bytea;
+  v_state public.deployment_contract_state%rowtype;
+begin
+  perform record_platform_internal.record_platform_projection_validate_header_v1(
+    p_command,
+    1,
+    18,
+    532
+  );
+  v_deployment_id := record_platform_internal.record_platform_projection_read_token_v1(p_command, 37, 'dp-');
+  v_active_profile := record_platform_internal.record_platform_projection_read_profile_v1(p_command, 104);
+  v_activation_mutation_id := record_platform_internal.record_platform_projection_read_token_v1(p_command, 105, 'tm-');
+  v_witnessed_ledger_sequence := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 172);
+  v_witnessed_ledger_hash := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 180, 32);
+  v_plan_digest := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 212, 32);
+  v_authorization_artifact_digest := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 244, 32);
+  v_activation_bundle_digest := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 276, 32);
+  v_trust_revision := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 308);
+  v_trust_head_hash := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 316, 32);
+  v_inventory_digest := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 348, 32);
+  v_approval_policy_digest := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 380, 32);
+  v_adapter_policy_generation := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 412);
+  v_adapter_policy_digest := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 420, 32);
+  v_drain_receipt_digest := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 452, 32);
+  v_identity_set_epoch := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 484);
+  v_identity_set_digest := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 492, 32);
+  v_minimum_fence_contract_version := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 524);
+
+  if v_witnessed_ledger_sequence <> 1
+    or v_trust_revision <= 0
+    or v_adapter_policy_generation <> 1
+    or v_identity_set_epoch <> 1
+    or v_minimum_fence_contract_version <= 0 then
+    raise exception using
+      errcode = '22023',
+      message = 'invalid contract activation projection command invariants';
+  end if;
+  v_receipt := record_platform_internal.record_platform_projection_cas_receipt_v1(p_command);
+
+  select *
+  into v_state
+  from public.deployment_contract_state
+  where project_id = 'default'
+  for update;
+  if not found then
+    raise exception using
+      errcode = '55000',
+      message = 'deployment contract singleton is missing';
+  end if;
+
+  if v_state.deployment_id is null then
+    update public.deployment_contract_state
+    set deployment_id = v_deployment_id,
+        active_profile = v_active_profile,
+        activation_sequence = v_witnessed_ledger_sequence,
+        activation_mutation_id = v_activation_mutation_id,
+        activation_plan_digest = v_plan_digest,
+        activation_authorization_artifact_digest = v_authorization_artifact_digest,
+        activation_bundle_digest = v_activation_bundle_digest,
+        trust_revision = v_trust_revision,
+        trust_head_hash = v_trust_head_hash,
+        inventory_digest = v_inventory_digest,
+        approval_policy_digest = v_approval_policy_digest,
+        activation_adapter_policy_digest = v_adapter_policy_digest,
+        activation_adapter_policy_generation = v_adapter_policy_generation,
+        active_adapter_policy_digest = v_adapter_policy_digest,
+        active_adapter_policy_generation = v_adapter_policy_generation,
+        drain_receipt_digest = v_drain_receipt_digest,
+        activation_domain_identity_set_digest = v_identity_set_digest,
+        activation_domain_identity_epoch = v_identity_set_epoch,
+        active_domain_identity_epoch = v_identity_set_epoch,
+        active_domain_identity_set_digest = v_identity_set_digest,
+        last_domain_identity_sequence = v_witnessed_ledger_sequence,
+        last_domain_identity_entry_hash = v_witnessed_ledger_hash,
+        minimum_fence_contract_version = v_minimum_fence_contract_version,
+        witnessed_ledger_sequence = v_witnessed_ledger_sequence,
+        witnessed_ledger_hash = v_witnessed_ledger_hash,
+        updated_at = pg_catalog.transaction_timestamp()
+    where project_id = 'default';
+    return v_receipt;
+  end if;
+
+  if v_state.deployment_id is not distinct from v_deployment_id
+    and v_state.active_profile is not distinct from v_active_profile
+    and v_state.activation_sequence is not distinct from v_witnessed_ledger_sequence
+    and v_state.activation_mutation_id is not distinct from v_activation_mutation_id
+    and v_state.activation_plan_digest is not distinct from v_plan_digest
+    and v_state.activation_authorization_artifact_digest is not distinct from v_authorization_artifact_digest
+    and v_state.activation_bundle_digest is not distinct from v_activation_bundle_digest
+    and v_state.trust_revision is not distinct from v_trust_revision
+    and v_state.trust_head_hash is not distinct from v_trust_head_hash
+    and v_state.inventory_digest is not distinct from v_inventory_digest
+    and v_state.approval_policy_digest is not distinct from v_approval_policy_digest
+    and v_state.activation_adapter_policy_digest is not distinct from v_adapter_policy_digest
+    and v_state.activation_adapter_policy_generation is not distinct from v_adapter_policy_generation
+    and v_state.active_adapter_policy_digest is not distinct from v_adapter_policy_digest
+    and v_state.active_adapter_policy_generation is not distinct from v_adapter_policy_generation
+    and v_state.drain_receipt_digest is not distinct from v_drain_receipt_digest
+    and v_state.activation_domain_identity_set_digest is not distinct from v_identity_set_digest
+    and v_state.activation_domain_identity_epoch is not distinct from v_identity_set_epoch
+    and v_state.active_domain_identity_epoch is not distinct from v_identity_set_epoch
+    and v_state.active_domain_identity_set_digest is not distinct from v_identity_set_digest
+    and v_state.last_domain_identity_sequence is not distinct from v_witnessed_ledger_sequence
+    and v_state.last_domain_identity_entry_hash is not distinct from v_witnessed_ledger_hash
+    and v_state.minimum_fence_contract_version is not distinct from v_minimum_fence_contract_version
+    and v_state.witnessed_ledger_sequence is not distinct from v_witnessed_ledger_sequence
+    and v_state.witnessed_ledger_hash is not distinct from v_witnessed_ledger_hash then
+    return v_receipt;
+  end if;
+
+  raise exception using
+    errcode = '55000',
+    message = 'contract activation projection compare-and-swap conflict';
+end
+$$;
+
+revoke all on function public.record_platform_cas_contract_activation_projection(bytea) from public;
+
+create or replace function public.record_platform_cas_domain_rotation_projection(bytea)
+returns bytea
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  p_command alias for $1;
+  v_deployment_id text;
+  v_active_profile text;
+  v_rotation_mutation_id text;
+  v_expected_witnessed_ledger_sequence bigint;
+  v_expected_witnessed_ledger_hash bytea;
+  v_expected_identity_set_epoch bigint;
+  v_expected_identity_set_digest bytea;
+  v_expected_adapter_policy_generation bigint;
+  v_expected_adapter_policy_digest bytea;
+  v_expected_minimum_fence_contract_version bigint;
+  v_expected_trust_revision bigint;
+  v_expected_trust_head_hash bytea;
+  v_next_witnessed_ledger_sequence bigint;
+  v_next_witnessed_ledger_hash bytea;
+  v_next_identity_set_epoch bigint;
+  v_next_identity_set_digest bytea;
+  v_next_adapter_policy_generation bigint;
+  v_next_adapter_policy_digest bytea;
+  v_next_minimum_fence_contract_version bigint;
+  v_next_trust_revision bigint;
+  v_next_trust_head_hash bytea;
+  v_receipt bytea;
+  v_state public.deployment_contract_state%rowtype;
+begin
+  perform record_platform_internal.record_platform_projection_validate_header_v1(
+    p_command,
+    2,
+    21,
+    508
+  );
+  v_deployment_id := record_platform_internal.record_platform_projection_read_token_v1(p_command, 37, 'dp-');
+  v_active_profile := record_platform_internal.record_platform_projection_read_profile_v1(p_command, 104);
+  v_rotation_mutation_id := record_platform_internal.record_platform_projection_read_token_v1(p_command, 105, 'tm-');
+  v_expected_witnessed_ledger_sequence := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 172);
+  v_expected_witnessed_ledger_hash := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 180, 32);
+  v_expected_identity_set_epoch := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 212);
+  v_expected_identity_set_digest := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 220, 32);
+  v_expected_adapter_policy_generation := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 252);
+  v_expected_adapter_policy_digest := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 260, 32);
+  v_expected_minimum_fence_contract_version := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 292);
+  v_expected_trust_revision := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 300);
+  v_expected_trust_head_hash := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 308, 32);
+  v_next_witnessed_ledger_sequence := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 340);
+  v_next_witnessed_ledger_hash := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 348, 32);
+  v_next_identity_set_epoch := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 380);
+  v_next_identity_set_digest := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 388, 32);
+  v_next_adapter_policy_generation := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 420);
+  v_next_adapter_policy_digest := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 428, 32);
+  v_next_minimum_fence_contract_version := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 460);
+  v_next_trust_revision := record_platform_internal.record_platform_projection_read_uint64_v1(p_command, 468);
+  v_next_trust_head_hash := record_platform_internal.record_platform_projection_read_bytes_v1(p_command, 476, 32);
+
+  if v_expected_witnessed_ledger_sequence <= 0
+    or v_expected_identity_set_epoch <= 0
+    or v_expected_adapter_policy_generation <= 0
+    or v_expected_minimum_fence_contract_version <= 0
+    or v_expected_trust_revision <= 0
+    or v_next_witnessed_ledger_sequence <= 0
+    or v_next_identity_set_epoch <= 0
+    or v_next_adapter_policy_generation <= 0
+    or v_next_minimum_fence_contract_version <= 0
+    or v_next_trust_revision <= 0 then
+    raise exception using
+      errcode = '22023',
+      message = 'invalid domain rotation projection positive integer';
+  end if;
+  if v_next_witnessed_ledger_sequence <= v_expected_witnessed_ledger_sequence then
+    raise exception using
+      errcode = '22023',
+      message = 'domain rotation witnessed ledger sequence must advance';
+  end if;
+  if v_expected_identity_set_epoch >= 9223372036854775807 then
+    raise exception using
+      errcode = '22023',
+      message = 'domain rotation identity epoch cannot advance';
+  end if;
+  if v_next_identity_set_epoch <> v_expected_identity_set_epoch + 1
+    or v_next_identity_set_digest = v_expected_identity_set_digest then
+    raise exception using
+      errcode = '22023',
+      message = 'invalid domain rotation identity transition';
+  end if;
+  if v_next_adapter_policy_generation = v_expected_adapter_policy_generation then
+    if v_next_adapter_policy_digest <> v_expected_adapter_policy_digest then
+      raise exception using
+        errcode = '22023',
+        message = 'unchanged domain rotation policy generation has a changed digest';
+    end if;
+  elsif v_expected_adapter_policy_generation < 9223372036854775807
+    and v_next_adapter_policy_generation = v_expected_adapter_policy_generation + 1 then
+    if v_next_adapter_policy_digest = v_expected_adapter_policy_digest then
+      raise exception using
+        errcode = '22023',
+        message = 'advanced domain rotation policy generation has an unchanged digest';
+    end if;
+  else
+    raise exception using
+      errcode = '22023',
+      message = 'invalid domain rotation policy generation transition';
+  end if;
+  if v_next_minimum_fence_contract_version < v_expected_minimum_fence_contract_version then
+    raise exception using
+      errcode = '22023',
+      message = 'domain rotation minimum fence contract version decreased';
+  end if;
+  if v_next_trust_revision < v_expected_trust_revision
+    or (v_next_trust_revision = v_expected_trust_revision and v_next_trust_head_hash <> v_expected_trust_head_hash) then
+    raise exception using
+      errcode = '22023',
+      message = 'invalid domain rotation trust transition';
+  end if;
+  v_receipt := record_platform_internal.record_platform_projection_cas_receipt_v1(p_command);
+
+  select *
+  into v_state
+  from public.deployment_contract_state
+  where project_id = 'default'
+  for update;
+  if not found then
+    raise exception using
+      errcode = '55000',
+      message = 'deployment contract singleton is missing';
+  end if;
+
+  if v_state.deployment_id is not distinct from v_deployment_id
+    and v_state.active_profile is not distinct from v_active_profile
+    and v_state.witnessed_ledger_sequence is not distinct from v_next_witnessed_ledger_sequence
+    and v_state.witnessed_ledger_hash is not distinct from v_next_witnessed_ledger_hash
+    and v_state.active_domain_identity_epoch is not distinct from v_next_identity_set_epoch
+    and v_state.active_domain_identity_set_digest is not distinct from v_next_identity_set_digest
+    and v_state.active_adapter_policy_generation is not distinct from v_next_adapter_policy_generation
+    and v_state.active_adapter_policy_digest is not distinct from v_next_adapter_policy_digest
+    and v_state.minimum_fence_contract_version is not distinct from v_next_minimum_fence_contract_version
+    and v_state.trust_revision is not distinct from v_next_trust_revision
+    and v_state.trust_head_hash is not distinct from v_next_trust_head_hash
+    and v_state.last_domain_identity_sequence is not distinct from v_next_witnessed_ledger_sequence
+    and v_state.last_domain_identity_entry_hash is not distinct from v_next_witnessed_ledger_hash then
+    return v_receipt;
+  end if;
+
+  if v_state.deployment_id is distinct from v_deployment_id
+    or v_state.active_profile is distinct from v_active_profile
+    or v_state.witnessed_ledger_sequence is distinct from v_expected_witnessed_ledger_sequence
+    or v_state.witnessed_ledger_hash is distinct from v_expected_witnessed_ledger_hash
+    or v_state.active_domain_identity_epoch is distinct from v_expected_identity_set_epoch
+    or v_state.active_domain_identity_set_digest is distinct from v_expected_identity_set_digest
+    or v_state.active_adapter_policy_generation is distinct from v_expected_adapter_policy_generation
+    or v_state.active_adapter_policy_digest is distinct from v_expected_adapter_policy_digest
+    or v_state.minimum_fence_contract_version is distinct from v_expected_minimum_fence_contract_version
+    or v_state.trust_revision is distinct from v_expected_trust_revision
+    or v_state.trust_head_hash is distinct from v_expected_trust_head_hash then
+    raise exception using
+      errcode = '55000',
+      message = 'domain rotation projection compare-and-swap conflict';
+  end if;
+
+  update public.deployment_contract_state
+  set trust_revision = v_next_trust_revision,
+      trust_head_hash = v_next_trust_head_hash,
+      active_adapter_policy_digest = v_next_adapter_policy_digest,
+      active_adapter_policy_generation = v_next_adapter_policy_generation,
+      active_domain_identity_epoch = v_next_identity_set_epoch,
+      active_domain_identity_set_digest = v_next_identity_set_digest,
+      last_domain_identity_sequence = v_next_witnessed_ledger_sequence,
+      last_domain_identity_entry_hash = v_next_witnessed_ledger_hash,
+      minimum_fence_contract_version = v_next_minimum_fence_contract_version,
+      witnessed_ledger_sequence = v_next_witnessed_ledger_sequence,
+      witnessed_ledger_hash = v_next_witnessed_ledger_hash,
+      updated_at = pg_catalog.transaction_timestamp()
+  where project_id = 'default';
+  return v_receipt;
+end
+$$;
+
+revoke all on function public.record_platform_cas_domain_rotation_projection(bytea) from public;
+
 create table if not exists public.record_platform_domain_identity (
   domain_id text primary key check (domain_id ~ '^rd-[0-9a-f]{64}$'),
   domain_kind text not null check (domain_kind = 'application'),

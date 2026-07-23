@@ -3,12 +3,14 @@ package migrate
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -19,6 +21,7 @@ import (
 
 	"houfeng/db/migrations"
 	"houfeng/internal/center/auth"
+	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/store"
 )
 
@@ -469,6 +472,536 @@ func TestPostgresIntegrationRecordPlatformFoundationSchema(t *testing.T) {
 	if !errors.As(err, &pgErr) || pgErr.Code != "55000" {
 		t.Fatalf("delete immutable domain identity error = %v, want SQLSTATE 55000", err)
 	}
+}
+
+func TestPostgresIntegrationRecordPlatformProjectorFunctions(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresDatabase(t, ctx)
+	roles := createProjectorCASTestRoles(t, ctx, db)
+	migratorDB := openPostgresPoolWithRole(t, ctx, db, roles.migrator)
+	if err := Apply(ctx, migratorDB); err != nil {
+		t.Fatalf("Apply() as migrator error = %v", err)
+	}
+
+	databaseName := currentPostgresDatabaseName(t, ctx, db)
+	runtimeDB := openPostgresPoolWithRole(t, ctx, db, roles.runtime)
+	adminDB := openPostgresPoolWithRole(t, ctx, db, roles.admin)
+	configureProjectorCASPrivileges(t, ctx, db, databaseName, roles)
+	assertProjectorCASFunctionCatalog(t, ctx, db, roles.migrator)
+
+	activation := projectorCASActivationCommand()
+	activationBytes, err := activation.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal activation command: %v", err)
+	}
+
+	if _, err := runtimeDB.Exec(ctx, `
+		update public.deployment_contract_state
+		set minimum_fence_contract_version = 1
+		where project_id = 'default'
+	`); !isPostgresInsufficientPrivilege(err) {
+		t.Fatalf("runtime direct deployment_contract_state update error = %v, want SQLSTATE 42501", err)
+	}
+	if _, err := adminDB.Exec(ctx, `select public.record_platform_cas_contract_activation_projection($1)`, activationBytes); !isPostgresInsufficientPrivilege(err) {
+		t.Fatalf("admin activation invoke error = %v, want SQLSTATE 42501", err)
+	}
+
+	malformed := append([]byte(nil), activationBytes...)
+	malformed[0] ^= 0xff
+	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "activation malformed command", "public.record_platform_cas_contract_activation_projection", malformed)
+	invalidDeployment := append([]byte(nil), activationBytes...)
+	invalidDeployment[37+3] = 'A'
+	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "activation invalid deployment token", "public.record_platform_cas_contract_activation_projection", invalidDeployment)
+	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "activation trailing command", "public.record_platform_cas_contract_activation_projection", append(append([]byte(nil), activationBytes...), 0))
+
+	activationReceipt := invokeProjectorCASFunction(t, ctx, runtimeDB, "public.record_platform_cas_contract_activation_projection", activationBytes)
+	assertProjectorCASReceipt(t, activationBytes, activationReceipt)
+	activationRetry := invokeProjectorCASFunction(t, ctx, runtimeDB, "public.record_platform_cas_contract_activation_projection", activationBytes)
+	if !bytes.Equal(activationReceipt, activationRetry) {
+		t.Fatalf("activation retry receipt = %x, want %x", activationRetry, activationReceipt)
+	}
+
+	differentActivation := activation
+	differentActivation.PlanDigest[0] ^= 0xff
+	differentActivationBytes, err := differentActivation.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal different activation command: %v", err)
+	}
+	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "different active activation", "public.record_platform_cas_contract_activation_projection", differentActivationBytes)
+
+	rotation := projectorCASRotationFromActivation(activation)
+	rotationBytes, err := rotation.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal rotation command: %v", err)
+	}
+
+	profileMismatch := rotation
+	profileMismatch.ActiveProfile = recordplatform.ProjectionProfileS3WORM
+	profileMismatchBytes, err := profileMismatch.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal profile-mismatch rotation: %v", err)
+	}
+	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "profile mismatch", "public.record_platform_cas_domain_rotation_projection", profileMismatchBytes)
+
+	staleState := append([]byte(nil), rotationBytes...)
+	staleState[180] ^= 0xff
+	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "stale witnessed hash", "public.record_platform_cas_domain_rotation_projection", staleState)
+
+	lowerFence := append([]byte(nil), rotationBytes...)
+	binary.BigEndian.PutUint64(lowerFence[460:468], rotation.ExpectedMinimumFenceContractVersion-1)
+	assertProjectorCASInvocationFails(t, ctx, runtimeDB, "lower fence", "public.record_platform_cas_domain_rotation_projection", lowerFence)
+
+	rotationReceipt := invokeProjectorCASFunction(t, ctx, runtimeDB, "public.record_platform_cas_domain_rotation_projection", rotationBytes)
+	assertProjectorCASReceipt(t, rotationBytes, rotationReceipt)
+	rotationRetry := invokeProjectorCASFunction(t, ctx, runtimeDB, "public.record_platform_cas_domain_rotation_projection", rotationBytes)
+	if !bytes.Equal(rotationReceipt, rotationRetry) {
+		t.Fatalf("rotation retry receipt = %x, want %x", rotationRetry, rotationReceipt)
+	}
+
+	assertProjectorCASRotationState(t, ctx, db, rotation)
+	assertProjectorCASConcurrentContenders(t, ctx, db, runtimeDB, rotation)
+}
+
+type projectorCASTestRoles struct {
+	migrator string
+	runtime  string
+	admin    string
+	grantor  string
+}
+
+func createProjectorCASTestRoles(t *testing.T, ctx context.Context, db *pgxpool.Pool) projectorCASTestRoles {
+	t.Helper()
+
+	var grantor string
+	if err := db.QueryRow(ctx, `select current_user`).Scan(&grantor); err != nil {
+		t.Fatalf("read role grantor: %v", err)
+	}
+	suffix := fmt.Sprintf("%d_%d", time.Now().UnixNano(), os.Getpid())
+	roles := projectorCASTestRoles{
+		migrator: "houfeng_projector_migrator_" + suffix,
+		runtime:  "houfeng_projector_runtime_" + suffix,
+		admin:    "houfeng_projector_admin_" + suffix,
+		grantor:  grantor,
+	}
+
+	execSQL(t, ctx, db, `create role `+quotePostgresIdentifier(roles.migrator)+` nologin noinherit superuser`)
+	execSQL(t, ctx, db, `create role `+quotePostgresIdentifier(roles.runtime)+` nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls`)
+	execSQL(t, ctx, db, `create role `+quotePostgresIdentifier(roles.admin)+` nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls`)
+	for _, role := range []string{roles.migrator, roles.runtime, roles.admin} {
+		execSQL(t, ctx, db, `grant `+quotePostgresIdentifier(role)+` to `+quotePostgresIdentifier(grantor))
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for _, role := range []string{roles.migrator, roles.runtime, roles.admin} {
+			quotedRole := quotePostgresIdentifier(role)
+			quotedGrantor := quotePostgresIdentifier(grantor)
+			if _, err := db.Exec(cleanupCtx, `reassign owned by `+quotedRole+` to `+quotedGrantor); err != nil {
+				t.Errorf("reassign temporary projector role %q ownership: %v", role, err)
+			}
+			if _, err := db.Exec(cleanupCtx, `drop owned by `+quotedRole); err != nil {
+				t.Errorf("drop temporary projector role %q ownership: %v", role, err)
+			}
+			if _, err := db.Exec(cleanupCtx, `revoke `+quotedRole+` from `+quotedGrantor); err != nil {
+				t.Errorf("revoke temporary projector role %q: %v", role, err)
+			}
+			if _, err := db.Exec(cleanupCtx, `drop role `+quotedRole); err != nil {
+				t.Errorf("drop temporary projector role %q: %v", role, err)
+			}
+		}
+	})
+	return roles
+}
+
+func openPostgresPoolWithRole(t *testing.T, ctx context.Context, base *pgxpool.Pool, role string) *pgxpool.Pool {
+	t.Helper()
+
+	config := base.Config().Copy()
+	config.MaxConns = 4
+	quotedRole := quotePostgresIdentifier(role)
+	config.AfterConnect = func(ctx context.Context, connection *pgx.Conn) error {
+		_, err := connection.Exec(ctx, `set role `+quotedRole)
+		return err
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("open pool as role %q: %v", role, err)
+	}
+	t.Cleanup(pool.Close)
+
+	var currentUser string
+	if err := pool.QueryRow(ctx, `select current_user`).Scan(&currentUser); err != nil {
+		t.Fatalf("read current user as %q: %v", role, err)
+	}
+	if currentUser != role {
+		t.Fatalf("current user = %q, want role %q", currentUser, role)
+	}
+	return pool
+}
+
+func currentPostgresDatabaseName(t *testing.T, ctx context.Context, db *pgxpool.Pool) string {
+	t.Helper()
+
+	var databaseName string
+	if err := db.QueryRow(ctx, `select current_database()`).Scan(&databaseName); err != nil {
+		t.Fatalf("read current database name: %v", err)
+	}
+	if !isSafePostgresIdentifier(databaseName) {
+		t.Fatalf("unsafe current database name %q", databaseName)
+	}
+	return databaseName
+}
+
+func configureProjectorCASPrivileges(t *testing.T, ctx context.Context, db *pgxpool.Pool, databaseName string, roles projectorCASTestRoles) {
+	t.Helper()
+
+	quotedDatabase := quotePostgresIdentifier(databaseName)
+	quotedRuntime := quotePostgresIdentifier(roles.runtime)
+	quotedAdmin := quotePostgresIdentifier(roles.admin)
+	execSQL(t, ctx, db, `revoke all on database `+quotedDatabase+` from public`)
+	execSQL(t, ctx, db, `grant connect on database `+quotedDatabase+` to `+quotedRuntime)
+	execSQL(t, ctx, db, `grant connect on database `+quotedDatabase+` to `+quotedAdmin)
+	execSQL(t, ctx, db, `revoke all on schema public from public`)
+	execSQL(t, ctx, db, `grant usage on schema public to `+quotedRuntime)
+	execSQL(t, ctx, db, `grant usage on schema public to `+quotedAdmin)
+	for _, identity := range []string{
+		"public.record_platform_cas_contract_activation_projection(bytea)",
+		"public.record_platform_cas_domain_rotation_projection(bytea)",
+	} {
+		execSQL(t, ctx, db, `grant execute on function `+identity+` to `+quotedRuntime)
+	}
+}
+
+func assertProjectorCASFunctionCatalog(t *testing.T, ctx context.Context, db *pgxpool.Pool, migrator string) {
+	t.Helper()
+
+	for _, functionName := range []string{
+		"record_platform_cas_contract_activation_projection",
+		"record_platform_cas_domain_rotation_projection",
+	} {
+		var overloadCount int
+		if err := db.QueryRow(ctx, `
+			select count(*)::int
+			from pg_catalog.pg_proc procedure
+			join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
+			where namespace.nspname = 'public'
+			  and procedure.proname = $1
+		`, functionName).Scan(&overloadCount); err != nil {
+			t.Fatalf("count %q overloads: %v", functionName, err)
+		}
+		if overloadCount != 1 {
+			t.Fatalf("%q overload count = %d, want 1", functionName, overloadCount)
+		}
+
+		var identityArguments, owner, kind string
+		var securityDefiner, publicExecute bool
+		var config []string
+		if err := db.QueryRow(ctx, `
+			select pg_catalog.pg_get_function_identity_arguments(procedure.oid),
+			       owner.rolname,
+			       procedure.prokind::text,
+			       procedure.prosecdef,
+			       coalesce(procedure.proconfig, array[]::text[]),
+			       exists (
+			         select 1
+			         from pg_catalog.aclexplode(
+			           coalesce(procedure.proacl, pg_catalog.acldefault('f', procedure.proowner))
+			         ) as acl_entry
+			         where acl_entry.grantee = 0
+			           and acl_entry.privilege_type = 'EXECUTE'
+			       )
+			from pg_catalog.pg_proc procedure
+			join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
+			join pg_catalog.pg_roles owner on owner.oid = procedure.proowner
+			where namespace.nspname = 'public'
+			  and procedure.proname = $1
+		`, functionName).Scan(&identityArguments, &owner, &kind, &securityDefiner, &config, &publicExecute); err != nil {
+			t.Fatalf("read %q catalog row: %v", functionName, err)
+		}
+		if identityArguments != "bytea" || owner != migrator || kind != "f" || !securityDefiner {
+			t.Fatalf("%q catalog = identity=%q owner=%q kind=%q security_definer=%t, want bytea/%q/f/true", functionName, identityArguments, owner, kind, securityDefiner, migrator)
+		}
+		if len(config) != 1 || config[0] != "search_path=pg_catalog" {
+			t.Fatalf("%q proconfig = %#v, want [search_path=pg_catalog]", functionName, config)
+		}
+		if publicExecute {
+			t.Fatalf("%q retains PUBLIC EXECUTE", functionName)
+		}
+	}
+}
+
+func invokeProjectorCASFunction(t *testing.T, ctx context.Context, db *pgxpool.Pool, functionIdentity string, command []byte) []byte {
+	t.Helper()
+
+	var receipt []byte
+	if err := db.QueryRow(ctx, `select `+functionIdentity+`($1)`, command).Scan(&receipt); err != nil {
+		t.Fatalf("invoke %s: %v", functionIdentity, err)
+	}
+	return receipt
+}
+
+func assertProjectorCASInvocationFails(t *testing.T, ctx context.Context, db *pgxpool.Pool, name, functionIdentity string, command []byte) {
+	t.Helper()
+
+	var receipt []byte
+	if err := db.QueryRow(ctx, `select `+functionIdentity+`($1)`, command).Scan(&receipt); err == nil {
+		t.Fatalf("%s unexpectedly returned receipt %x", name, receipt)
+	}
+}
+
+func assertProjectorCASReceipt(t *testing.T, command, receipt []byte) {
+	t.Helper()
+
+	want := recordplatform.ProjectionCASReceiptDigestV1(command)
+	if !bytes.Equal(receipt, want[:]) {
+		t.Fatalf("receipt = %x, want %x", receipt, want)
+	}
+}
+
+func projectorCASActivationCommand() recordplatform.ContractActivationProjectionCommandV1 {
+	return recordplatform.ContractActivationProjectionCommandV1{
+		DeploymentID:                "dp-" + strings.Repeat("a", 64),
+		ActiveProfile:               recordplatform.ProjectionProfilePostgresSync,
+		ActivationMutationID:        "tm-" + strings.Repeat("b", 64),
+		WitnessedLedgerSequence:     1,
+		WitnessedLedgerHash:         projectorCASDigest(1),
+		PlanDigest:                  projectorCASDigest(2),
+		AuthorizationArtifactDigest: projectorCASDigest(3),
+		ActivationBundleDigest:      projectorCASDigest(4),
+		TrustRevision:               1,
+		TrustHeadHash:               projectorCASDigest(5),
+		InventoryDigest:             projectorCASDigest(6),
+		ApprovalPolicyDigest:        projectorCASDigest(7),
+		AdapterPolicyGeneration:     1,
+		AdapterPolicyDigest:         projectorCASDigest(8),
+		DrainReceiptDigest:          projectorCASDigest(9),
+		IdentitySetEpoch:            1,
+		IdentitySetDigest:           projectorCASDigest(10),
+		MinimumFenceContractVersion: 4,
+	}
+}
+
+func projectorCASRotationFromActivation(activation recordplatform.ContractActivationProjectionCommandV1) recordplatform.DomainRotationProjectionCommandV1 {
+	return recordplatform.DomainRotationProjectionCommandV1{
+		DeploymentID:                        activation.DeploymentID,
+		ActiveProfile:                       activation.ActiveProfile,
+		RotationMutationID:                  "tm-" + strings.Repeat("c", 64),
+		ExpectedWitnessedLedgerSequence:     activation.WitnessedLedgerSequence,
+		ExpectedWitnessedLedgerHash:         activation.WitnessedLedgerHash,
+		ExpectedIdentitySetEpoch:            activation.IdentitySetEpoch,
+		ExpectedIdentitySetDigest:           activation.IdentitySetDigest,
+		ExpectedAdapterPolicyGeneration:     activation.AdapterPolicyGeneration,
+		ExpectedAdapterPolicyDigest:         activation.AdapterPolicyDigest,
+		ExpectedMinimumFenceContractVersion: activation.MinimumFenceContractVersion,
+		ExpectedTrustRevision:               activation.TrustRevision,
+		ExpectedTrustHeadHash:               activation.TrustHeadHash,
+		NextWitnessedLedgerSequence:         activation.WitnessedLedgerSequence + 1,
+		NextWitnessedLedgerHash:             projectorCASDigest(11),
+		NextIdentitySetEpoch:                activation.IdentitySetEpoch + 1,
+		NextIdentitySetDigest:               projectorCASDigest(12),
+		NextAdapterPolicyGeneration:         activation.AdapterPolicyGeneration + 1,
+		NextAdapterPolicyDigest:             projectorCASDigest(13),
+		NextMinimumFenceContractVersion:     activation.MinimumFenceContractVersion + 1,
+		NextTrustRevision:                   activation.TrustRevision + 1,
+		NextTrustHeadHash:                   projectorCASDigest(14),
+	}
+}
+
+func assertProjectorCASRotationState(t *testing.T, ctx context.Context, db *pgxpool.Pool, rotation recordplatform.DomainRotationProjectionCommandV1) {
+	t.Helper()
+
+	var witnessedSequence, lastIdentitySequence, identityEpoch, policyGeneration, fence, trustRevision int64
+	var witnessedHash, lastIdentityHash, identityDigest, policyDigest, trustHash []byte
+	if err := db.QueryRow(ctx, `
+		select witnessed_ledger_sequence,
+		       witnessed_ledger_hash,
+		       last_domain_identity_sequence,
+		       last_domain_identity_entry_hash,
+		       active_domain_identity_epoch,
+		       active_domain_identity_set_digest,
+		       active_adapter_policy_generation,
+		       active_adapter_policy_digest,
+		       minimum_fence_contract_version,
+		       trust_revision,
+		       trust_head_hash
+		from public.deployment_contract_state
+		where project_id = 'default'
+	`).Scan(
+		&witnessedSequence,
+		&witnessedHash,
+		&lastIdentitySequence,
+		&lastIdentityHash,
+		&identityEpoch,
+		&identityDigest,
+		&policyGeneration,
+		&policyDigest,
+		&fence,
+		&trustRevision,
+		&trustHash,
+	); err != nil {
+		t.Fatalf("read rotated deployment contract state: %v", err)
+	}
+	if witnessedSequence != int64(rotation.NextWitnessedLedgerSequence) || lastIdentitySequence != int64(rotation.NextWitnessedLedgerSequence) || identityEpoch != int64(rotation.NextIdentitySetEpoch) || policyGeneration != int64(rotation.NextAdapterPolicyGeneration) || fence != int64(rotation.NextMinimumFenceContractVersion) || trustRevision != int64(rotation.NextTrustRevision) {
+		t.Fatalf("rotated numeric state = witness=%d last=%d identity=%d policy=%d fence=%d trust=%d, want %d/%d/%d/%d/%d/%d", witnessedSequence, lastIdentitySequence, identityEpoch, policyGeneration, fence, trustRevision, rotation.NextWitnessedLedgerSequence, rotation.NextWitnessedLedgerSequence, rotation.NextIdentitySetEpoch, rotation.NextAdapterPolicyGeneration, rotation.NextMinimumFenceContractVersion, rotation.NextTrustRevision)
+	}
+	for _, check := range []struct {
+		name string
+		got  []byte
+		want [32]byte
+	}{
+		{name: "witnessed hash", got: witnessedHash, want: rotation.NextWitnessedLedgerHash},
+		{name: "last identity hash", got: lastIdentityHash, want: rotation.NextWitnessedLedgerHash},
+		{name: "identity digest", got: identityDigest, want: rotation.NextIdentitySetDigest},
+		{name: "policy digest", got: policyDigest, want: rotation.NextAdapterPolicyDigest},
+		{name: "trust hash", got: trustHash, want: rotation.NextTrustHeadHash},
+	} {
+		if !bytes.Equal(check.got, check.want[:]) {
+			t.Fatalf("%s = %x, want %x", check.name, check.got, check.want)
+		}
+	}
+}
+
+func assertProjectorCASConcurrentContenders(t *testing.T, ctx context.Context, db, runtimeDB *pgxpool.Pool, previous recordplatform.DomainRotationProjectionCommandV1) {
+	t.Helper()
+
+	first := projectorCASNextRotation(previous, 21, 22)
+	second := projectorCASNextRotation(previous, 31, 32)
+	firstBytes, err := first.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal first concurrent rotation: %v", err)
+	}
+	secondBytes, err := second.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal second concurrent rotation: %v", err)
+	}
+
+	results := invokeProjectorCASConcurrently(t, ctx, runtimeDB, firstBytes, secondBytes)
+	var winner projectorCASConcurrentResult
+	winnerCount := 0
+	for _, result := range results {
+		if result.err == nil {
+			winner = result
+			winnerCount++
+			continue
+		}
+		var pgErr *pgconn.PgError
+		if !errors.As(result.err, &pgErr) || pgErr.Code != "55000" {
+			t.Fatalf("concurrent distinct rotation error = %v, want SQLSTATE 55000", result.err)
+		}
+	}
+	if winnerCount != 1 {
+		t.Fatalf("concurrent distinct rotation successes = %d, want 1", winnerCount)
+	}
+
+	var winningRotation recordplatform.DomainRotationProjectionCommandV1
+	switch {
+	case bytes.Equal(winner.command, firstBytes):
+		winningRotation = first
+	case bytes.Equal(winner.command, secondBytes):
+		winningRotation = second
+	default:
+		t.Fatalf("concurrent winner command = %x, want one submitted command", winner.command)
+	}
+	assertProjectorCASReceipt(t, winner.command, winner.receipt)
+	assertProjectorCASRotationState(t, ctx, db, winningRotation)
+	winningRetry := invokeProjectorCASFunction(t, ctx, runtimeDB, "public.record_platform_cas_domain_rotation_projection", winner.command)
+	if !bytes.Equal(winningRetry, winner.receipt) {
+		t.Fatalf("concurrent winner retry receipt = %x, want %x", winningRetry, winner.receipt)
+	}
+
+	sameCommand := projectorCASNextRotation(winningRotation, 41, 42)
+	sameBytes, err := sameCommand.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal same-byte concurrent rotation: %v", err)
+	}
+	sameResults := invokeProjectorCASConcurrently(t, ctx, runtimeDB, sameBytes, sameBytes)
+	var sameReceipt []byte
+	for _, result := range sameResults {
+		if result.err != nil {
+			t.Fatalf("concurrent same-byte rotation error = %v", result.err)
+		}
+		assertProjectorCASReceipt(t, sameBytes, result.receipt)
+		if sameReceipt == nil {
+			sameReceipt = result.receipt
+			continue
+		}
+		if !bytes.Equal(result.receipt, sameReceipt) {
+			t.Fatalf("concurrent same-byte receipt = %x, want %x", result.receipt, sameReceipt)
+		}
+	}
+	if len(sameResults) != 2 || sameReceipt == nil {
+		t.Fatalf("concurrent same-byte result count = %d, want 2 successful results", len(sameResults))
+	}
+	assertProjectorCASRotationState(t, ctx, db, sameCommand)
+}
+
+type projectorCASConcurrentResult struct {
+	command []byte
+	receipt []byte
+	err     error
+}
+
+func invokeProjectorCASConcurrently(t *testing.T, ctx context.Context, runtimeDB *pgxpool.Pool, commands ...[]byte) []projectorCASConcurrentResult {
+	t.Helper()
+
+	start := make(chan struct{})
+	results := make(chan projectorCASConcurrentResult, len(commands))
+	var wait sync.WaitGroup
+	for _, command := range commands {
+		command := append([]byte(nil), command...)
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			result := projectorCASConcurrentResult{command: command}
+			result.err = runtimeDB.QueryRow(ctx, `select public.record_platform_cas_domain_rotation_projection($1)`, command).Scan(&result.receipt)
+			results <- result
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(results)
+
+	output := make([]projectorCASConcurrentResult, 0, len(commands))
+	for result := range results {
+		output = append(output, result)
+	}
+	return output
+}
+
+func projectorCASNextRotation(previous recordplatform.DomainRotationProjectionCommandV1, ledgerDigest, identityDigest byte) recordplatform.DomainRotationProjectionCommandV1 {
+	return recordplatform.DomainRotationProjectionCommandV1{
+		DeploymentID:                        previous.DeploymentID,
+		ActiveProfile:                       previous.ActiveProfile,
+		RotationMutationID:                  "tm-" + strings.Repeat(string(rune('a'+ledgerDigest%6)), 64),
+		ExpectedWitnessedLedgerSequence:     previous.NextWitnessedLedgerSequence,
+		ExpectedWitnessedLedgerHash:         previous.NextWitnessedLedgerHash,
+		ExpectedIdentitySetEpoch:            previous.NextIdentitySetEpoch,
+		ExpectedIdentitySetDigest:           previous.NextIdentitySetDigest,
+		ExpectedAdapterPolicyGeneration:     previous.NextAdapterPolicyGeneration,
+		ExpectedAdapterPolicyDigest:         previous.NextAdapterPolicyDigest,
+		ExpectedMinimumFenceContractVersion: previous.NextMinimumFenceContractVersion,
+		ExpectedTrustRevision:               previous.NextTrustRevision,
+		ExpectedTrustHeadHash:               previous.NextTrustHeadHash,
+		NextWitnessedLedgerSequence:         previous.NextWitnessedLedgerSequence + 1,
+		NextWitnessedLedgerHash:             projectorCASDigest(ledgerDigest),
+		NextIdentitySetEpoch:                previous.NextIdentitySetEpoch + 1,
+		NextIdentitySetDigest:               projectorCASDigest(identityDigest),
+		NextAdapterPolicyGeneration:         previous.NextAdapterPolicyGeneration,
+		NextAdapterPolicyDigest:             previous.NextAdapterPolicyDigest,
+		NextMinimumFenceContractVersion:     previous.NextMinimumFenceContractVersion,
+		NextTrustRevision:                   previous.NextTrustRevision,
+		NextTrustHeadHash:                   previous.NextTrustHeadHash,
+	}
+}
+
+func projectorCASDigest(value byte) [32]byte {
+	var digest [32]byte
+	for index := range digest {
+		digest[index] = value
+	}
+	return digest
 }
 
 func TestPostgresIntegrationAdoptsNameOnlyMigrationLedger(t *testing.T) {
