@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 
 const canonicalMigrationSetMagic = "HOUFENG-APP-MIGRATION-SET-V1"
 const canonicalPrivilegeSetMagic = "HOUFENG-APP-PRIVILEGE-SET-V1"
+const appACLManifestMagic = "HOUFENG-APP-ACL-MANIFEST-V1"
+const maxCanonicalACLManifestBodyBytes = 4 * 1024 * 1024
 
 // MigrationChecksumEntry is one filename/checksum pair in the application
 // migration ledger. Its checksum is raw SHA-256 bytes, not a hex string.
@@ -523,4 +526,104 @@ func readCanonicalString(body []byte, offset *int, maximumLength int, field stri
 		return "", fmt.Errorf("invalid %s UTF-8", field)
 	}
 	return value, nil
+}
+
+// AppACLManifestPersistedV1 mirrors the content-bearing fields of one
+// app_acl_manifest_revisions row. PostgreSQL stores the same field order in
+// its manifest_digest CHECK constraint.
+type AppACLManifestPersistedV1 struct {
+	ManifestRevision       uint64
+	PreviousManifestDigest [32]byte
+	CanonicalMigrationSet  []byte
+	MigrationSetDigest     [32]byte
+	CanonicalPrivilegeSet  []byte
+	PrivilegeSetDigest     [32]byte
+	ManifestDigest         [32]byte
+}
+
+// NewAppACLManifestPersistedV1 produces a fully bound manifest value from two
+// canonical body bytes. It never derives the revision from migration names.
+func NewAppACLManifestPersistedV1(
+	manifestRevision uint64,
+	previousManifestDigest [32]byte,
+	canonicalMigrationSet []byte,
+	canonicalPrivilegeSet []byte,
+) (AppACLManifestPersistedV1, error) {
+	manifest := AppACLManifestPersistedV1{
+		ManifestRevision:       manifestRevision,
+		PreviousManifestDigest: previousManifestDigest,
+		CanonicalMigrationSet:  append([]byte(nil), canonicalMigrationSet...),
+		CanonicalPrivilegeSet:  append([]byte(nil), canonicalPrivilegeSet...),
+	}
+	manifest.MigrationSetDigest = sha256.Sum256(manifest.CanonicalMigrationSet)
+	manifest.PrivilegeSetDigest = sha256.Sum256(manifest.CanonicalPrivilegeSet)
+	if err := manifest.validateFields(); err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	manifest.ManifestDigest = manifest.computedDigest()
+	return manifest, nil
+}
+
+// Validate checks both sibling digests and the SQL-compatible manifest
+// preimage. It is safe to use before writing or trusting a persisted row.
+func (manifest AppACLManifestPersistedV1) Validate() error {
+	if err := manifest.validateFields(); err != nil {
+		return err
+	}
+	if manifest.ManifestDigest != manifest.computedDigest() {
+		return fmt.Errorf("app ACL manifest digest does not match canonical fields")
+	}
+	return nil
+}
+
+func (manifest AppACLManifestPersistedV1) validateFields() error {
+	if manifest.ManifestRevision < 1 || manifest.ManifestRevision > 999999 {
+		return fmt.Errorf("app ACL manifest revision %d is outside v1 bounds", manifest.ManifestRevision)
+	}
+	if manifest.ManifestRevision == 1 && manifest.PreviousManifestDigest != [32]byte{} {
+		return fmt.Errorf("app ACL manifest genesis revision has a previous digest")
+	}
+	if manifest.ManifestRevision > 1 && manifest.PreviousManifestDigest == [32]byte{} {
+		return fmt.Errorf("app ACL manifest non-genesis revision has no previous digest")
+	}
+	if len(manifest.CanonicalMigrationSet) < 1 || len(manifest.CanonicalMigrationSet) > maxCanonicalACLManifestBodyBytes {
+		return fmt.Errorf("canonical migration set size is outside v1 bounds")
+	}
+	if len(manifest.CanonicalPrivilegeSet) < 1 || len(manifest.CanonicalPrivilegeSet) > maxCanonicalACLManifestBodyBytes {
+		return fmt.Errorf("canonical privilege set size is outside v1 bounds")
+	}
+	if _, err := ParseCanonicalMigrationSetBodyV1(manifest.CanonicalMigrationSet); err != nil {
+		return fmt.Errorf("parse canonical migration set: %w", err)
+	}
+	if _, err := ParseCanonicalPrivilegeSetBodyV1(manifest.CanonicalPrivilegeSet); err != nil {
+		return fmt.Errorf("parse canonical privilege set: %w", err)
+	}
+	if manifest.MigrationSetDigest != sha256.Sum256(manifest.CanonicalMigrationSet) {
+		return fmt.Errorf("migration set sibling digest does not match canonical bytes")
+	}
+	if manifest.PrivilegeSetDigest != sha256.Sum256(manifest.CanonicalPrivilegeSet) {
+		return fmt.Errorf("privilege set sibling digest does not match canonical bytes")
+	}
+	return nil
+}
+
+func (manifest AppACLManifestPersistedV1) computedDigest() [32]byte {
+	preimage := make([]byte, 0,
+		len(appACLManifestMagic)+8+len(manifest.PreviousManifestDigest)+4+len(manifest.CanonicalMigrationSet)+len(manifest.MigrationSetDigest)+4+len(manifest.CanonicalPrivilegeSet)+len(manifest.PrivilegeSetDigest))
+	preimage = append(preimage, appACLManifestMagic...)
+	preimage = appendACLManifestUint64(preimage, manifest.ManifestRevision)
+	preimage = append(preimage, manifest.PreviousManifestDigest[:]...)
+	preimage = appendUint32(preimage, uint32(len(manifest.CanonicalMigrationSet)))
+	preimage = append(preimage, manifest.CanonicalMigrationSet...)
+	preimage = append(preimage, manifest.MigrationSetDigest[:]...)
+	preimage = appendUint32(preimage, uint32(len(manifest.CanonicalPrivilegeSet)))
+	preimage = append(preimage, manifest.CanonicalPrivilegeSet...)
+	preimage = append(preimage, manifest.PrivilegeSetDigest[:]...)
+	return sha256.Sum256(preimage)
+}
+
+func appendACLManifestUint64(body []byte, value uint64) []byte {
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], value)
+	return append(body, encoded[:]...)
 }
