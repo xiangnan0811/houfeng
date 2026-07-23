@@ -8,10 +8,14 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 const canonicalMigrationSetMagic = "HOUFENG-APP-MIGRATION-SET-V1"
+const canonicalPrivilegeSetMagic = "HOUFENG-APP-PRIVILEGE-SET-V1"
 
 // MigrationChecksumEntry is one filename/checksum pair in the application
 // migration ledger. Its checksum is raw SHA-256 bytes, not a hex string.
@@ -130,4 +134,393 @@ func validateMigrationFilename(filename string) error {
 		return fmt.Errorf("invalid migration filename %q", filename)
 	}
 	return nil
+}
+
+// AppACLSubject is a semantic subject in the application ACL manifest.
+type AppACLSubject string
+
+const (
+	AppACLSubjectCenterRuntime AppACLSubject = "center_runtime"
+	AppACLSubjectPlatformAdmin AppACLSubject = "platform_admin"
+)
+
+// AppACLObjectClass identifies the PostgreSQL catalog surface in a privilege
+// tuple. Column entries remain decodable for catalog checks but v1 grants none.
+type AppACLObjectClass string
+
+const (
+	AppACLObjectClassDatabase AppACLObjectClass = "database"
+	AppACLObjectClassSchema   AppACLObjectClass = "schema"
+	AppACLObjectClassTable    AppACLObjectClass = "table"
+	AppACLObjectClassView     AppACLObjectClass = "view"
+	AppACLObjectClassColumn   AppACLObjectClass = "column"
+	AppACLObjectClassSequence AppACLObjectClass = "sequence"
+	AppACLObjectClassFunction AppACLObjectClass = "function"
+)
+
+// AppACLPrivilegeKind is one closed PostgreSQL privilege token.
+type AppACLPrivilegeKind string
+
+const (
+	AppACLPrivilegeConnect AppACLPrivilegeKind = "CONNECT"
+	AppACLPrivilegeUsage   AppACLPrivilegeKind = "USAGE"
+	AppACLPrivilegeSelect  AppACLPrivilegeKind = "SELECT"
+	AppACLPrivilegeInsert  AppACLPrivilegeKind = "INSERT"
+	AppACLPrivilegeUpdate  AppACLPrivilegeKind = "UPDATE"
+	AppACLPrivilegeDelete  AppACLPrivilegeKind = "DELETE"
+	AppACLPrivilegeExecute AppACLPrivilegeKind = "EXECUTE"
+)
+
+// AppACLRoleBinding pins a semantic manifest subject to one catalog role.
+type AppACLRoleBinding struct {
+	Subject     AppACLSubject
+	CatalogRole string
+}
+
+// AppACLPrivilege is one exact catalog privilege tuple. Function identities
+// are stored wholly in ObjectIdentity (for example, public.name(bytea)).
+type AppACLPrivilege struct {
+	Subject        AppACLSubject
+	ObjectClass    AppACLObjectClass
+	SchemaName     string
+	ObjectIdentity string
+	ColumnName     string
+	Privilege      AppACLPrivilegeKind
+	GrantOption    bool
+}
+
+// AppACLPrivilegeSet is the fully decoded canonical privilege-set body.
+type AppACLPrivilegeSet struct {
+	RoleBindings []AppACLRoleBinding
+	Privileges   []AppACLPrivilege
+}
+
+// CanonicalPrivilegeSetBodyV1 serializes the fixed application privilege set.
+// It accepts only the two semantic subjects, normalizes ordering, and rejects
+// grants that cannot be represented by the v1 catalog contract.
+func CanonicalPrivilegeSetBodyV1(bindings []AppACLRoleBinding, privileges []AppACLPrivilege) ([]byte, error) {
+	sortedBindings, err := canonicalRoleBindings(bindings)
+	if err != nil {
+		return nil, err
+	}
+	sortedPrivileges, err := canonicalPrivileges(privileges)
+	if err != nil {
+		return nil, err
+	}
+
+	size := len(canonicalPrivilegeSetMagic) + 4 + 4
+	for _, binding := range sortedBindings {
+		size += 4 + len(binding.Subject) + 4 + len(binding.CatalogRole)
+	}
+	for _, privilege := range sortedPrivileges {
+		size += 4 + len(privilege.Subject) + 4 + len(privilege.ObjectClass) +
+			4 + len(privilege.SchemaName) + 4 + len(privilege.ObjectIdentity) +
+			4 + len(privilege.ColumnName) + 4 + len(privilege.Privilege) + 1
+	}
+
+	body := make([]byte, 0, size)
+	body = append(body, canonicalPrivilegeSetMagic...)
+	body = appendUint32(body, uint32(len(sortedBindings)))
+	for _, binding := range sortedBindings {
+		body = appendLengthPrefixedString(body, string(binding.Subject))
+		body = appendLengthPrefixedString(body, binding.CatalogRole)
+	}
+	body = appendUint32(body, uint32(len(sortedPrivileges)))
+	for _, privilege := range sortedPrivileges {
+		body = appendLengthPrefixedString(body, string(privilege.Subject))
+		body = appendLengthPrefixedString(body, string(privilege.ObjectClass))
+		body = appendLengthPrefixedString(body, privilege.SchemaName)
+		body = appendLengthPrefixedString(body, privilege.ObjectIdentity)
+		body = appendLengthPrefixedString(body, privilege.ColumnName)
+		body = appendLengthPrefixedString(body, string(privilege.Privilege))
+		body = append(body, 0)
+	}
+	return body, nil
+}
+
+// ParseCanonicalPrivilegeSetBodyV1 accepts only canonical v1 privilege body
+// bytes. It rejects duplicate or non-sorted tuples and any trailing bytes.
+func ParseCanonicalPrivilegeSetBodyV1(body []byte) (AppACLPrivilegeSet, error) {
+	if !bytes.HasPrefix(body, []byte(canonicalPrivilegeSetMagic)) {
+		return AppACLPrivilegeSet{}, fmt.Errorf("invalid canonical privilege set magic")
+	}
+	offset := len(canonicalPrivilegeSetMagic)
+	bindingCount, err := readCanonicalUint32(body, &offset, "role binding count")
+	if err != nil {
+		return AppACLPrivilegeSet{}, err
+	}
+	if bindingCount != 2 {
+		return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege set has %d role bindings, want 2", bindingCount)
+	}
+	bindings := make([]AppACLRoleBinding, 0, bindingCount)
+	for range bindingCount {
+		subject, err := readCanonicalString(body, &offset, 64, "role binding subject")
+		if err != nil {
+			return AppACLPrivilegeSet{}, err
+		}
+		catalogRole, err := readCanonicalString(body, &offset, 63, "catalog role")
+		if err != nil {
+			return AppACLPrivilegeSet{}, err
+		}
+		bindings = append(bindings, AppACLRoleBinding{Subject: AppACLSubject(subject), CatalogRole: catalogRole})
+	}
+	if _, err := canonicalRoleBindings(bindings); err != nil {
+		return AppACLPrivilegeSet{}, err
+	}
+	if bindings[0].Subject != AppACLSubjectCenterRuntime || bindings[1].Subject != AppACLSubjectPlatformAdmin {
+		return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege role bindings are not sorted")
+	}
+
+	privilegeCount, err := readCanonicalUint32(body, &offset, "privilege count")
+	if err != nil {
+		return AppACLPrivilegeSet{}, err
+	}
+	if privilegeCount > 65536 {
+		return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege set has too many privileges")
+	}
+	privileges := make([]AppACLPrivilege, 0, privilegeCount)
+	for range privilegeCount {
+		subject, err := readCanonicalString(body, &offset, 64, "privilege subject")
+		if err != nil {
+			return AppACLPrivilegeSet{}, err
+		}
+		objectClass, err := readCanonicalString(body, &offset, 64, "privilege object class")
+		if err != nil {
+			return AppACLPrivilegeSet{}, err
+		}
+		schemaName, err := readCanonicalString(body, &offset, 63, "privilege schema name")
+		if err != nil {
+			return AppACLPrivilegeSet{}, err
+		}
+		objectIdentity, err := readCanonicalString(body, &offset, 256, "privilege object identity")
+		if err != nil {
+			return AppACLPrivilegeSet{}, err
+		}
+		columnName, err := readCanonicalString(body, &offset, 63, "privilege column name")
+		if err != nil {
+			return AppACLPrivilegeSet{}, err
+		}
+		privilegeKind, err := readCanonicalString(body, &offset, 16, "privilege kind")
+		if err != nil {
+			return AppACLPrivilegeSet{}, err
+		}
+		if offset >= len(body) {
+			return AppACLPrivilegeSet{}, fmt.Errorf("truncated privilege grant option")
+		}
+		grantOption := body[offset]
+		offset++
+		if grantOption != 0 {
+			return AppACLPrivilegeSet{}, fmt.Errorf("v1 privilege grant option must be false")
+		}
+		privileges = append(privileges, AppACLPrivilege{
+			Subject:        AppACLSubject(subject),
+			ObjectClass:    AppACLObjectClass(objectClass),
+			SchemaName:     schemaName,
+			ObjectIdentity: objectIdentity,
+			ColumnName:     columnName,
+			Privilege:      AppACLPrivilegeKind(privilegeKind),
+		})
+	}
+	if offset != len(body) {
+		return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege set has trailing bytes")
+	}
+	canonical, err := canonicalPrivileges(privileges)
+	if err != nil {
+		return AppACLPrivilegeSet{}, err
+	}
+	if len(canonical) != len(privileges) {
+		return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege set privilege count changed")
+	}
+	for index := range privileges {
+		if compareAppACLPrivilege(privileges[index], canonical[index]) != 0 {
+			return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege tuples are not sorted")
+		}
+	}
+	return AppACLPrivilegeSet{RoleBindings: bindings, Privileges: privileges}, nil
+}
+
+func canonicalRoleBindings(bindings []AppACLRoleBinding) ([]AppACLRoleBinding, error) {
+	if len(bindings) != 2 {
+		return nil, fmt.Errorf("canonical privilege set requires two role bindings")
+	}
+	sorted := append([]AppACLRoleBinding(nil), bindings...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Subject < sorted[j].Subject
+	})
+	if sorted[0].Subject != AppACLSubjectCenterRuntime || sorted[1].Subject != AppACLSubjectPlatformAdmin {
+		return nil, fmt.Errorf("canonical privilege set has invalid semantic role bindings")
+	}
+	if !validCatalogRoleName(sorted[0].CatalogRole) || !validCatalogRoleName(sorted[1].CatalogRole) {
+		return nil, fmt.Errorf("canonical privilege set has invalid catalog role name")
+	}
+	if sorted[0].CatalogRole == sorted[1].CatalogRole {
+		return nil, fmt.Errorf("canonical privilege set reuses a catalog role")
+	}
+	return sorted, nil
+}
+
+func canonicalPrivileges(privileges []AppACLPrivilege) ([]AppACLPrivilege, error) {
+	sorted := append([]AppACLPrivilege(nil), privileges...)
+	for _, privilege := range sorted {
+		if err := validateAppACLPrivilege(privilege); err != nil {
+			return nil, err
+		}
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return compareAppACLPrivilege(sorted[i], sorted[j]) < 0
+	})
+	for index := 1; index < len(sorted); index++ {
+		if compareAppACLPrivilege(sorted[index-1], sorted[index]) == 0 {
+			return nil, fmt.Errorf("duplicate canonical privilege tuple")
+		}
+	}
+	return sorted, nil
+}
+
+func validateAppACLPrivilege(privilege AppACLPrivilege) error {
+	if privilege.Subject != AppACLSubjectCenterRuntime && privilege.Subject != AppACLSubjectPlatformAdmin {
+		return fmt.Errorf("unknown ACL subject %q", privilege.Subject)
+	}
+	if privilege.GrantOption {
+		return fmt.Errorf("ACL grant option is not supported")
+	}
+	switch privilege.ObjectClass {
+	case AppACLObjectClassDatabase:
+		if privilege.SchemaName != "" || privilege.ColumnName != "" || !validBareCatalogName(privilege.ObjectIdentity) || privilege.Privilege != AppACLPrivilegeConnect {
+			return fmt.Errorf("invalid database ACL tuple")
+		}
+	case AppACLObjectClassSchema:
+		if privilege.SchemaName != "" || privilege.ColumnName != "" || privilege.ObjectIdentity != "public" || privilege.Privilege != AppACLPrivilegeUsage {
+			return fmt.Errorf("invalid schema ACL tuple")
+		}
+	case AppACLObjectClassTable:
+		if !validRelationACLShape(privilege) || !oneOfPrivilege(privilege.Privilege, AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate, AppACLPrivilegeDelete) {
+			return fmt.Errorf("invalid table ACL tuple")
+		}
+	case AppACLObjectClassView:
+		if !validRelationACLShape(privilege) || privilege.Privilege != AppACLPrivilegeSelect {
+			return fmt.Errorf("invalid view ACL tuple")
+		}
+	case AppACLObjectClassSequence:
+		if !validRelationACLShape(privilege) || !oneOfPrivilege(privilege.Privilege, AppACLPrivilegeUsage, AppACLPrivilegeSelect) {
+			return fmt.Errorf("invalid sequence ACL tuple")
+		}
+	case AppACLObjectClassFunction:
+		if privilege.SchemaName != "" || privilege.ColumnName != "" || !validFunctionIdentity(privilege.ObjectIdentity) || privilege.Privilege != AppACLPrivilegeExecute {
+			return fmt.Errorf("invalid function ACL tuple")
+		}
+	case AppACLObjectClassColumn:
+		return fmt.Errorf("v1 ACL manifest must not contain column grants")
+	default:
+		return fmt.Errorf("unknown ACL object class %q", privilege.ObjectClass)
+	}
+	return nil
+}
+
+func validRelationACLShape(privilege AppACLPrivilege) bool {
+	return privilege.SchemaName == "public" && privilege.ColumnName == "" && validBareCatalogName(privilege.ObjectIdentity)
+}
+
+func validFunctionIdentity(identity string) bool {
+	const prefix = "public."
+	const suffix = "(bytea)"
+	if !strings.HasPrefix(identity, prefix) || !strings.HasSuffix(identity, suffix) {
+		return false
+	}
+	return validBareCatalogName(strings.TrimSuffix(strings.TrimPrefix(identity, prefix), suffix))
+}
+
+func validBareCatalogName(value string) bool {
+	if len(value) < 1 || len(value) > 63 || !utf8.ValidString(value) {
+		return false
+	}
+	for index, runeValue := range value {
+		if (index == 0 && !(runeValue == '_' || runeValue >= 'a' && runeValue <= 'z')) ||
+			(index > 0 && !(runeValue == '_' || runeValue >= 'a' && runeValue <= 'z' || runeValue >= '0' && runeValue <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+func validCatalogRoleName(value string) bool {
+	if len(value) < 1 || len(value) > 63 || !utf8.ValidString(value) || !norm.NFC.IsNormalString(value) {
+		return false
+	}
+	for _, runeValue := range value {
+		if runeValue == 0 || unicode.IsControl(runeValue) {
+			return false
+		}
+	}
+	return true
+}
+
+func oneOfPrivilege(got AppACLPrivilegeKind, allowed ...AppACLPrivilegeKind) bool {
+	for _, value := range allowed {
+		if got == value {
+			return true
+		}
+	}
+	return false
+}
+
+func compareAppACLPrivilege(left, right AppACLPrivilege) int {
+	for _, pair := range [][2]string{
+		{string(left.Subject), string(right.Subject)},
+		{string(left.ObjectClass), string(right.ObjectClass)},
+		{left.SchemaName, right.SchemaName},
+		{left.ObjectIdentity, right.ObjectIdentity},
+		{left.ColumnName, right.ColumnName},
+		{string(left.Privilege), string(right.Privilege)},
+	} {
+		if pair[0] < pair[1] {
+			return -1
+		}
+		if pair[0] > pair[1] {
+			return 1
+		}
+	}
+	if left.GrantOption == right.GrantOption {
+		return 0
+	}
+	if !left.GrantOption {
+		return -1
+	}
+	return 1
+}
+
+func appendUint32(body []byte, value uint32) []byte {
+	var encoded [4]byte
+	binary.BigEndian.PutUint32(encoded[:], value)
+	return append(body, encoded[:]...)
+}
+
+func appendLengthPrefixedString(body []byte, value string) []byte {
+	body = appendUint32(body, uint32(len(value)))
+	return append(body, value...)
+}
+
+func readCanonicalUint32(body []byte, offset *int, field string) (uint32, error) {
+	if len(body)-*offset < 4 {
+		return 0, fmt.Errorf("truncated %s", field)
+	}
+	value := binary.BigEndian.Uint32(body[*offset : *offset+4])
+	*offset += 4
+	return value, nil
+}
+
+func readCanonicalString(body []byte, offset *int, maximumLength int, field string) (string, error) {
+	length, err := readCanonicalUint32(body, offset, field+" length")
+	if err != nil {
+		return "", err
+	}
+	if length > uint32(maximumLength) || len(body)-*offset < int(length) {
+		return "", fmt.Errorf("invalid %s length", field)
+	}
+	value := string(body[*offset : *offset+int(length)])
+	*offset += int(length)
+	if !utf8.ValidString(value) {
+		return "", fmt.Errorf("invalid %s UTF-8", field)
+	}
+	return value, nil
 }
