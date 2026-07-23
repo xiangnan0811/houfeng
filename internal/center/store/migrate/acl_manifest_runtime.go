@@ -1,0 +1,79 @@
+package migrate
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io/fs"
+)
+
+// AppACLManifestRuntimeSnapshotV1 is the complete read-only state needed to
+// verify the persisted ACL manifest against the applied and embedded maps.
+// A nil Head represents the nullable fresh-install head row.
+type AppACLManifestRuntimeSnapshotV1 struct {
+	Manifests         []AppACLManifestPersistedV1
+	Head              *AppACLManifestHeadV1
+	AppliedMigrations []MigrationChecksumEntry
+}
+
+// AppACLManifestRuntimeReader loads the persisted application migration ledger
+// and ACL manifest state without applying migrations or changing catalog ACLs.
+type AppACLManifestRuntimeReader interface {
+	ReadAppACLManifestRuntimeSnapshotV1(context.Context) (AppACLManifestRuntimeSnapshotV1, error)
+}
+
+// VerifyPersistedAppACLManifestRuntimeV1 rejects a nullable or drifting
+// manifest head and requires the latest manifest migration and privilege sets
+// to match the applied ledger, embedded migration map, and compiled allowlist.
+func VerifyPersistedAppACLManifestRuntimeV1(
+	ctx context.Context,
+	reader AppACLManifestRuntimeReader,
+	embeddedMigrations fs.FS,
+	compiledPrivilegeSet []byte,
+) (AppACLManifestPersistedV1, error) {
+	if reader == nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("app ACL manifest runtime reader is nil")
+	}
+	if embeddedMigrations == nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("embedded migration filesystem is nil")
+	}
+	if len(compiledPrivilegeSet) < 1 || len(compiledPrivilegeSet) > maxCanonicalACLManifestBodyBytes {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("compiled app ACL privilege set size is outside v1 bounds")
+	}
+	if _, err := ParseCanonicalPrivilegeSetBodyV1(compiledPrivilegeSet); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("validate compiled app ACL privilege set: %w", err)
+	}
+
+	snapshot, err := reader.ReadAppACLManifestRuntimeSnapshotV1(ctx)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("read persisted app ACL manifest snapshot: %w", err)
+	}
+	if snapshot.Head == nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("app ACL manifest head is null")
+	}
+	if err := ValidateAppACLManifestChainV1(snapshot.Manifests, *snapshot.Head); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("validate persisted app ACL manifest chain: %w", err)
+	}
+
+	latest := snapshot.Manifests[len(snapshot.Manifests)-1]
+	embeddedMigrationSet, err := CanonicalMigrationSetFromFS(embeddedMigrations)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("build embedded application migration set: %w", err)
+	}
+	if !bytes.Equal(latest.CanonicalMigrationSet, embeddedMigrationSet) {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("latest app ACL manifest migration set does not match embedded migrations")
+	}
+
+	appliedMigrationSet, err := CanonicalMigrationSetBodyV1(snapshot.AppliedMigrations)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("encode applied application migration ledger: %w", err)
+	}
+	if !bytes.Equal(latest.CanonicalMigrationSet, appliedMigrationSet) {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("latest app ACL manifest migration set does not match applied migration ledger")
+	}
+	if !bytes.Equal(latest.CanonicalPrivilegeSet, compiledPrivilegeSet) {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("latest app ACL manifest privilege set does not match compiled privilege set")
+	}
+
+	return latest, nil
+}

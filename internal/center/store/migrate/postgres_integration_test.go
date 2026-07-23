@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -22,6 +23,85 @@ import (
 )
 
 const postgresIntegrationFlag = "HOUFENG_POSTGRES_INTEGRATION"
+
+func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresDatabase(t, ctx)
+	if err := Apply(ctx, db); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	reader := NewPostgresAppACLManifestRuntimeReader(db)
+	fresh, err := reader.ReadAppACLManifestRuntimeSnapshotV1(ctx)
+	if err != nil {
+		t.Fatalf("ReadAppACLManifestRuntimeSnapshotV1() fresh error = %v", err)
+	}
+	if fresh.Head != nil || len(fresh.Manifests) != 0 || len(fresh.AppliedMigrations) != 52 {
+		t.Fatalf("fresh snapshot = %#v, want null head, zero revisions, and 52 migrations", fresh)
+	}
+
+	migrationBody, err := CanonicalMigrationSetFromFS(migrations.FS)
+	if err != nil {
+		t.Fatalf("CanonicalMigrationSetFromFS() error = %v", err)
+	}
+	privilegeBody, err := CanonicalPrivilegeSetBodyV1(
+		[]AppACLRoleBinding{
+			{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
+			{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("CanonicalPrivilegeSetBodyV1() error = %v", err)
+	}
+	manifest, err := NewAppACLManifestPersistedV1(1, [32]byte{}, migrationBody, privilegeBody)
+	if err != nil {
+		t.Fatalf("NewAppACLManifestPersistedV1() error = %v", err)
+	}
+	if _, err := db.Exec(ctx, `
+		insert into public.app_acl_manifest_revisions (
+			manifest_revision,
+			previous_manifest_digest,
+			canonical_migration_set,
+			sorted_migration_set_digest,
+			canonical_privilege_set,
+			privilege_set_digest,
+			manifest_digest
+		) values ($1, $2, $3, $4, $5, $6, $7)
+	`,
+		int64(manifest.ManifestRevision),
+		manifest.PreviousManifestDigest[:],
+		manifest.CanonicalMigrationSet,
+		manifest.MigrationSetDigest[:],
+		manifest.CanonicalPrivilegeSet,
+		manifest.PrivilegeSetDigest[:],
+		manifest.ManifestDigest[:],
+	); err != nil {
+		t.Fatalf("insert app ACL manifest revision: %v", err)
+	}
+	if _, err := db.Exec(ctx, `
+		update public.app_acl_manifest_head
+		set manifest_revision = $1, manifest_digest = $2
+		where singleton
+	`, int64(manifest.ManifestRevision), manifest.ManifestDigest[:]); err != nil {
+		t.Fatalf("update app ACL manifest head: %v", err)
+	}
+
+	snapshot, err := reader.ReadAppACLManifestRuntimeSnapshotV1(ctx)
+	if err != nil {
+		t.Fatalf("ReadAppACLManifestRuntimeSnapshotV1() error = %v", err)
+	}
+	if snapshot.Head == nil || snapshot.Head.ManifestRevision != manifest.ManifestRevision || snapshot.Head.ManifestDigest != manifest.ManifestDigest {
+		t.Fatalf("snapshot head = %#v, want revision %d digest %x", snapshot.Head, manifest.ManifestRevision, manifest.ManifestDigest)
+	}
+	if len(snapshot.Manifests) != 1 || snapshot.Manifests[0].ManifestDigest != manifest.ManifestDigest ||
+		!bytes.Equal(snapshot.Manifests[0].CanonicalMigrationSet, manifest.CanonicalMigrationSet) ||
+		!bytes.Equal(snapshot.Manifests[0].CanonicalPrivilegeSet, manifest.CanonicalPrivilegeSet) {
+		t.Fatalf("snapshot manifests = %#v, want %#v", snapshot.Manifests, manifest)
+	}
+	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, reader, migrations.FS, privilegeBody); err != nil {
+		t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() error = %v", err)
+	}
+}
 
 func TestPostgresIntegrationAppliesFreshMigrations(t *testing.T) {
 	ctx := context.Background()
