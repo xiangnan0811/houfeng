@@ -53,6 +53,17 @@ func TestVerifyPersistedAppACLManifestRuntimeV1RejectsCompiledPrivilegeSetDrift(
 	}
 }
 
+func TestVerifyPersistedAppACLManifestRuntimeV1RejectsCurrentUserOutsideLatestRuntimeBinding(t *testing.T) {
+	ctx := context.Background()
+	fsys, snapshot, privilegeBody := validAppACLManifestRuntimeFixture(t)
+	snapshot.CurrentUser = "unexpected_runtime"
+
+	_, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, fakeAppACLManifestRuntimeReader{snapshot: snapshot}, fsys, privilegeBody)
+	if err == nil || !strings.Contains(err.Error(), "current user") {
+		t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() error = %v, want current-user binding rejection", err)
+	}
+}
+
 func TestVerifyPersistedAppACLManifestRuntimeV1RejectsNullHead(t *testing.T) {
 	ctx := context.Background()
 	fsys, snapshot, privilegeBody := validAppACLManifestRuntimeFixture(t)
@@ -123,6 +134,7 @@ func validAppACLManifestRuntimeFixture(t *testing.T) (fstest.MapFS, AppACLManife
 		t.Fatalf("NewAppACLManifestPersistedV1() error = %v", err)
 	}
 	return fsys, AppACLManifestRuntimeSnapshotV1{
+		CurrentUser:       "houfeng_center_runtime",
 		Manifests:         []AppACLManifestPersistedV1{manifest},
 		Head:              &AppACLManifestHeadV1{ManifestRevision: 1, ManifestDigest: manifest.ManifestDigest},
 		AppliedMigrations: appliedMigrations,

@@ -11,6 +11,7 @@ import (
 // verify the persisted ACL manifest against the applied and embedded maps.
 // A nil Head represents the nullable fresh-install head row.
 type AppACLManifestRuntimeSnapshotV1 struct {
+	CurrentUser       string
 	Manifests         []AppACLManifestPersistedV1
 	Head              *AppACLManifestHeadV1
 	AppliedMigrations []MigrationChecksumEntry
@@ -56,6 +57,20 @@ func VerifyPersistedAppACLManifestRuntimeV1(
 	}
 
 	latest := snapshot.Manifests[len(snapshot.Manifests)-1]
+	privilegeSet, err := ParseCanonicalPrivilegeSetBodyV1(latest.CanonicalPrivilegeSet)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("parse latest app ACL manifest privilege set: %w", err)
+	}
+	var runtimeRole string
+	for _, binding := range privilegeSet.RoleBindings {
+		if binding.Subject == AppACLSubjectCenterRuntime {
+			runtimeRole = binding.CatalogRole
+			break
+		}
+	}
+	if snapshot.CurrentUser != runtimeRole {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("current user %q does not match latest app ACL manifest center runtime binding", snapshot.CurrentUser)
+	}
 	embeddedMigrationSet, err := CanonicalMigrationSetFromFS(embeddedMigrations)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("build embedded application migration set: %w", err)

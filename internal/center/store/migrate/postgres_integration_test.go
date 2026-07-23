@@ -30,6 +30,10 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 	if err := Apply(ctx, db); err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
+	var currentUser string
+	if err := db.QueryRow(ctx, `select current_user`).Scan(&currentUser); err != nil {
+		t.Fatalf("read current user: %v", err)
+	}
 	reader := NewPostgresAppACLManifestRuntimeReader(db)
 	fresh, err := reader.ReadAppACLManifestRuntimeSnapshotV1(ctx)
 	if err != nil {
@@ -45,7 +49,7 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 	}
 	privilegeBody, err := CanonicalPrivilegeSetBodyV1(
 		[]AppACLRoleBinding{
-			{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
+			{Subject: AppACLSubjectCenterRuntime, CatalogRole: currentUser},
 			{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
 		},
 		nil,
