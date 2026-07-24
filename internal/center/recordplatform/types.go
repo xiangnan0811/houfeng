@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 )
 
@@ -251,7 +252,20 @@ func (lease OwnerLease) Validate() error {
 // token is not live; callers must still rely on the database owner fence for
 // any durable write.
 func (lease OwnerLease) LocallyLive(clock Clock) bool {
-	return clock != nil && lease.Validate() == nil && lease.ExpiresAt.After(clock.Now())
+	return !isNilRecordPlatformDependency(clock) && lease.Validate() == nil && lease.ExpiresAt.After(clock.Now())
+}
+
+func isNilRecordPlatformDependency(dependency any) bool {
+	if dependency == nil {
+		return true
+	}
+	value := reflect.ValueOf(dependency)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // MarshalBinary produces the only v1 request-fingerprint preimage. Fixed

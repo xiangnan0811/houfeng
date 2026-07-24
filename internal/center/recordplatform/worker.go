@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"time"
 )
 
@@ -87,6 +86,9 @@ func (worker *OutboxWorker) Run(ctx context.Context) error {
 	if err := worker.validate(); err != nil {
 		return err
 	}
+	if ctx.Err() != nil {
+		return nil
+	}
 	ticker := time.NewTicker(worker.options.PollInterval)
 	defer ticker.Stop()
 	for {
@@ -109,6 +111,9 @@ func (worker *OutboxWorker) RunOnce(ctx context.Context) error {
 		return ErrInvalidOutboxWorker
 	}
 	if err := worker.validate(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	claim, err := worker.repository.ClaimOutbox(ctx, OutboxClaimInputV1{
@@ -172,14 +177,5 @@ func (worker *OutboxWorker) validate() error {
 }
 
 func isNilOutboxWorkerDependency(dependency any) bool {
-	if dependency == nil {
-		return true
-	}
-	value := reflect.ValueOf(dependency)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
-		return value.IsNil()
-	default:
-		return false
-	}
+	return isNilRecordPlatformDependency(dependency)
 }

@@ -135,6 +135,16 @@ func TestIdempotencyRecordV1RejectsMissingResultBadExpiryAndStaleOwner(t *testin
 	}
 }
 
+func TestRequireLiveOwnerFenceV1RejectsPreRenewExpiryToken(t *testing.T) {
+	now := time.Date(2026, time.July, 24, 11, 0, 0, 0, time.UTC)
+	preRenewOwner := OwnerLease{OwnerID: "worker_01", Generation: 1, ExpiresAt: now.Add(time.Minute)}
+	renewedOwner := OwnerLease{OwnerID: "worker_01", Generation: 1, ExpiresAt: now.Add(2 * time.Minute)}
+
+	if err := RequireLiveOwnerFenceV1(renewedOwner, preRenewOwner, now); !errors.Is(err, ErrLostOwnerLease) {
+		t.Fatalf("RequireLiveOwnerFenceV1() pre-renew expiry error = %v, want ErrLostOwnerLease", err)
+	}
+}
+
 func TestIdempotencyClaimV1RejectsExpiryThatCollapsesToOwnerExpiryAfterMicrosecondNormalization(t *testing.T) {
 	input := IdempotencyClaimInputV1{
 		Key:                IdempotencyKey{ProjectID: ProjectIDDefault, OperationKind: OperationKindRecordCreate, Key: "client-key.1"},

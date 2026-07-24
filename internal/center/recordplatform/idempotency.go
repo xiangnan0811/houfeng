@@ -208,7 +208,7 @@ func RequireLiveOwnerFenceV1(expected, actual OwnerLease, observedDBTime time.Ti
 	if err := expected.Validate(); err != nil {
 		return err
 	}
-	if observedDBTime.IsZero() || actual.Validate() != nil || actual.OwnerID != expected.OwnerID || actual.Generation != expected.Generation || !actual.ExpiresAt.After(observedDBTime) {
+	if observedDBTime.IsZero() || actual.Validate() != nil || actual.OwnerID != expected.OwnerID || actual.Generation != expected.Generation || !actual.ExpiresAt.Equal(expected.ExpiresAt) || !actual.ExpiresAt.After(observedDBTime) {
 		return ErrLostOwnerLease
 	}
 	return nil

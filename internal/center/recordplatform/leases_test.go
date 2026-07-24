@@ -3,6 +3,7 @@ package recordplatform
 import (
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 )
@@ -53,6 +54,56 @@ func TestLeaseWorkGuardV1StopsBeforeObservedExpiryWhenRenewalFails(t *testing.T)
 	if guard.CanContinue() {
 		t.Fatal("failed renewal must stop work before the previous observed expiry")
 	}
+}
+
+func TestLeaseWorkGuardV1RejectsTypedNilClock(t *testing.T) {
+	now := time.Date(2026, time.July, 24, 15, 0, 0, 0, time.UTC)
+	owner := OwnerLease{OwnerID: "worker_01", Generation: 2, ExpiresAt: now.Add(time.Minute)}
+	var clock *fakeLeaseClock
+
+	guard, err := NewLeaseWorkGuardV1(clock, owner)
+	if guard != nil || !errors.Is(err, ErrInvalidLease) {
+		t.Fatalf("NewLeaseWorkGuardV1() = (%#v, %v), want nil, ErrInvalidLease", guard, err)
+	}
+	if owner.LocallyLive(clock) {
+		t.Fatal("OwnerLease.LocallyLive() accepted a typed-nil clock")
+	}
+}
+
+func TestLeaseWorkGuardV1SynchronizesRenewAndCanContinue(t *testing.T) {
+	now := time.Date(2026, time.July, 24, 15, 0, 0, 0, time.UTC)
+	clock := &fakeLeaseClock{now: now}
+	guard, err := NewLeaseWorkGuardV1(clock, OwnerLease{OwnerID: "worker_01", Generation: 2, ExpiresAt: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatalf("NewLeaseWorkGuardV1() error = %v", err)
+	}
+
+	const iterations = 10_000
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	workers.Add(2)
+	go func() {
+		defer workers.Done()
+		<-start
+		for range iterations {
+			if err := guard.Renew(func(owner OwnerLease) (OwnerLease, error) {
+				owner.ExpiresAt = now.Add(time.Hour)
+				return owner, nil
+			}); err != nil {
+				t.Errorf("LeaseWorkGuardV1.Renew() error = %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		<-start
+		for range iterations {
+			_ = guard.CanContinue()
+		}
+	}()
+	close(start)
+	workers.Wait()
 }
 
 func TestDeletionReservationFenceV1RejectsZeroFenceEpoch(t *testing.T) {

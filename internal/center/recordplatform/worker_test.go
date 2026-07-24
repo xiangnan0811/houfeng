@@ -194,7 +194,8 @@ func TestOutboxWorkerDoesNotCompensateForLostOwnerLease(t *testing.T) {
 func TestOutboxWorkerRunLogsOnlySafeFixedFailureMessage(t *testing.T) {
 	var logs bytes.Buffer
 	secret := "drt1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	repository := &fakeOutboxRepository{claimErr: errors.New("dependency failure carries " + secret)}
+	ctx, cancel := context.WithCancel(context.Background())
+	repository := &fakeOutboxRepository{claimErr: errors.New("dependency failure carries " + secret), claimHook: cancel}
 	worker := NewOutboxWorker(
 		repository,
 		freshOutboxAuthorizerFunc(func(context.Context, OutboxEvent) (RenderedDelivery, FreshAuthDecision, error) {
@@ -208,8 +209,6 @@ func TestOutboxWorkerRunLogsOnlySafeFixedFailureMessage(t *testing.T) {
 			Logger:             slog.New(slog.NewTextHandler(&logs, nil)),
 		},
 	)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -244,6 +243,57 @@ func TestOutboxWorkerRejectsNilContext(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOutboxWorkerDoesNotDispatchPreCancelledContext(t *testing.T) {
+	newWorker := func(repository *fakeOutboxRepository, authorizeCalls, sendCalls *int) *OutboxWorker {
+		return NewOutboxWorker(
+			repository,
+			freshOutboxAuthorizerFunc(func(context.Context, OutboxEvent) (RenderedDelivery, FreshAuthDecision, error) {
+				(*authorizeCalls)++
+				return testRenderedDelivery{value: "must-not-dispatch"}, FreshAuthDecision{Allowed: true, CurrentEpoch: 3}, nil
+			}),
+			outboxSenderFunc(func(context.Context, RenderedDelivery) error {
+				(*sendCalls)++
+				return nil
+			}),
+			OutboxWorkerOptions{OwnerID: "worker_01", OwnerLeaseDuration: time.Minute, RetryDelay: time.Second},
+		)
+	}
+
+	t.Run("run once", func(t *testing.T) {
+		claim := testClaimedOutboxEvent(1)
+		repository := &fakeOutboxRepository{claims: []*ClaimedOutboxEventV1{&claim}}
+		authorizeCalls := 0
+		sendCalls := 0
+		worker := newWorker(repository, &authorizeCalls, &sendCalls)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		if err := worker.RunOnce(ctx); !errors.Is(err, context.Canceled) {
+			t.Fatalf("RunOnce() error = %v, want context.Canceled", err)
+		}
+		if len(repository.calls) != 0 || authorizeCalls != 0 || sendCalls != 0 {
+			t.Fatalf("pre-cancelled RunOnce() dispatched repository=%#v authorize=%d send=%d", repository.calls, authorizeCalls, sendCalls)
+		}
+	})
+
+	t.Run("run", func(t *testing.T) {
+		claim := testClaimedOutboxEvent(1)
+		repository := &fakeOutboxRepository{claims: []*ClaimedOutboxEventV1{&claim}}
+		authorizeCalls := 0
+		sendCalls := 0
+		worker := newWorker(repository, &authorizeCalls, &sendCalls)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		if err := worker.Run(ctx); err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+		if len(repository.calls) != 0 || authorizeCalls != 0 || sendCalls != 0 {
+			t.Fatalf("pre-cancelled Run() dispatched repository=%#v authorize=%d send=%d", repository.calls, authorizeCalls, sendCalls)
+		}
+	})
 }
 
 func TestOutboxWorkerRejectsTypedNilDependenciesBeforeDispatch(t *testing.T) {
@@ -358,6 +408,7 @@ type fakeOutboxRepository struct {
 	retryErr          error
 	sentErr           error
 	claimErr          error
+	claimHook         func()
 }
 
 func (repository *fakeOutboxRepository) ClaimOutbox(context.Context, OutboxClaimInputV1) (*ClaimedOutboxEventV1, error) {
@@ -365,6 +416,9 @@ func (repository *fakeOutboxRepository) ClaimOutbox(context.Context, OutboxClaim
 	repository.calls = append(repository.calls, "claim")
 	repository.transactionActive = false
 	repository.claimCommitted = true
+	if repository.claimHook != nil {
+		repository.claimHook()
+	}
 	if repository.claimErr != nil {
 		return nil, repository.claimErr
 	}

@@ -3,6 +3,7 @@ package recordplatform
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -93,9 +94,11 @@ type ExpiredPrimitiveCleanupResultV1 struct {
 // LeaseWorkGuardV1 tracks a locally observed durable owner only for scheduling.
 // It never extends authority locally; a failed store renewal stops work at once.
 type LeaseWorkGuardV1 struct {
-	clock   Clock
-	owner   OwnerLease
-	stopped bool
+	mu       sync.Mutex
+	clock    Clock
+	owner    OwnerLease
+	stopped  bool
+	renewing bool
 }
 
 // Validate rejects claim inputs that cannot be represented by database-time
@@ -110,7 +113,7 @@ func (input LeaseClaimInputV1) Validate() error {
 // NewLeaseWorkGuardV1 creates a conservative scheduling guard for a live
 // observed owner fence.
 func NewLeaseWorkGuardV1(clock Clock, owner OwnerLease) (*LeaseWorkGuardV1, error) {
-	if clock == nil || owner.Validate() != nil {
+	if isNilRecordPlatformDependency(clock) || owner.Validate() != nil {
 		return nil, fmt.Errorf("%w: work guard", ErrInvalidLease)
 	}
 	return &LeaseWorkGuardV1{clock: clock, owner: owner}, nil
@@ -119,20 +122,37 @@ func NewLeaseWorkGuardV1(clock Clock, owner OwnerLease) (*LeaseWorkGuardV1, erro
 // CanContinue reports only whether locally scheduled work must stop. Durable
 // writes still require a live owner predicate inside PostgreSQL.
 func (guard *LeaseWorkGuardV1) CanContinue() bool {
-	return guard != nil && !guard.stopped && guard.owner.LocallyLive(guard.clock)
+	if guard == nil {
+		return false
+	}
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	return guard.canContinueLocked()
 }
 
 // Renew invokes a store-backed renewal callback. Any failure, malformed owner,
 // or owner-identity/generation drift permanently stops this local work guard.
 func (guard *LeaseWorkGuardV1) Renew(renew func(OwnerLease) (OwnerLease, error)) error {
-	if guard == nil || renew == nil || !guard.CanContinue() {
-		if guard != nil {
-			guard.stopped = true
-		}
+	if guard == nil || renew == nil {
 		return ErrLeaseRenewalStopped
 	}
-	renewed, err := renew(guard.owner)
-	if err != nil || renewed.Validate() != nil || renewed.OwnerID != guard.owner.OwnerID || renewed.Generation != guard.owner.Generation || !renewed.LocallyLive(guard.clock) {
+
+	guard.mu.Lock()
+	if guard.renewing || !guard.canContinueLocked() {
+		guard.stopped = true
+		guard.mu.Unlock()
+		return ErrLeaseRenewalStopped
+	}
+	owner := guard.owner
+	guard.renewing = true
+	guard.mu.Unlock()
+
+	renewed, err := renew(owner)
+
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	guard.renewing = false
+	if guard.stopped || err != nil || renewed.Validate() != nil || renewed.OwnerID != owner.OwnerID || renewed.Generation != owner.Generation || !renewed.LocallyLive(guard.clock) {
 		guard.stopped = true
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrLeaseRenewalStopped, err)
@@ -141,6 +161,10 @@ func (guard *LeaseWorkGuardV1) Renew(renew func(OwnerLease) (OwnerLease, error))
 	}
 	guard.owner = renewed
 	return nil
+}
+
+func (guard *LeaseWorkGuardV1) canContinueLocked() bool {
+	return !guard.stopped && !guard.renewing && guard.owner.LocallyLive(guard.clock)
 }
 
 // Validate rejects noncanonical reservation keys and lease durations before a
