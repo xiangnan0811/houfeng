@@ -96,6 +96,15 @@
        -run 'TestPostgresIntegration(AppACL.*(Convergence|Genesis)|ProvisionRoles)' -count=1
    ```
 
+   另行通过 wrapper 执行 legacy ambient-search-path 和 runtime-reader 证明；本地
+   skip 不能作为验收：
+
+   ```bash
+   scripts/test-record-platform-integration.sh postgres -- \
+     go test -v ./internal/center/store/migrate \
+       -run '^(TestPostgresIntegrationLegacyApplyKeepsLedgerAndDDLInAmbientSearchPath|TestPostgresIntegrationAppACLManifestRuntimeReader)$' -count=1
+   ```
+
    Capture the absence of `--- SKIP:` and prove cleanup removes temporary DB roles/databases.
 
 ## Task 4：交付受限 scoped migrator CLI

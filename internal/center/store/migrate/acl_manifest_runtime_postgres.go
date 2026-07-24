@@ -176,7 +176,7 @@ func readAppliedAppMigrationsV1(ctx context.Context, tx pgx.Tx) ([]MigrationChec
 	rows, err := tx.Query(ctx, `
 		select name, checksum
 		from public.schema_migrations
-		order by name
+		order by name::text COLLATE "C"
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("read applied application migration ledger: %w", err)

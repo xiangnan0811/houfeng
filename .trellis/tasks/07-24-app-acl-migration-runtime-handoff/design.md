@@ -69,6 +69,8 @@ The runner snapshots the embedded sources and lexical order before a retry loop.
 5. Revoke each runtime/admin direct privilege on the fixed managed surface, grant only compiler tuples, validate the scoped catalog from the same tx, build the manifest with migrator identity, insert immutable revision, and null-head CAS.
 6. Re-read head/manifest/catalog, then commit. On `40001` (and optional `40P01`) retry the whole closure; any other error rolls back the whole closure. Do not call `migrate.Apply` or `EnsureAppACLManifestGenesisV1`, because both open their own transactions.
 
+The closure normally keeps `SET LOCAL search_path = pg_catalog, public`. Only while applying one trusted embedded legacy source and its ledger row does it temporarily use `public`, so PostgreSQL retains implicit `pg_catalog` lookup precedence while historical unqualified DDL has an explicit `public` target rather than `$user`; it restores the hardened path immediately after every source before any manifest, DCL, or catalog work.
+
 Only a transaction-aware ledger/genesis/catalog API may be shared with the legacy paths. The existing owner auto-migrator is retained only when both flags are off.
 
 ## Runtime admission and process boundaries
@@ -105,3 +107,23 @@ owner, `SECURITY DEFINER`, `search_path`, and ACL state. This preserves strict
 OID opacity for generic extension implementation details while rejecting an
 extra, replaced, or extension-attached projector overload even when it is not
 currently executable.
+
+## 2026-07-24 Task 3 state-proof checkpoint
+
+Root cause: a `state-proof/change-propagation test gap` left the phase-head
+inspection and final head lock semantically coupled without proving that their
+observations still matched. The r1 source set and fresh/adoption state are
+closed-world inputs: any unexpected source, managed state, or phase-to-final
+head change fails closed. Lock order is explicitly tested for exact repeat,
+null-head adoption, and fresh pending-DDL paths; phase inspection never takes
+`FOR UPDATE`, while the final head lock follows ledger proof and revisions
+locking.
+
+State proof is mode-independent: before phase classification, every
+convergence attempt read-only scans fixed managed relation/view/sequence and
+function names across persistent schemas and rejects a name outside its frozen
+managed-surface schema. Fresh is stricter still: any pre-existing public
+`schema_migrations` ledger, including an empty one, is not fresh and fails
+without ledger, DDL, ACL, revision, or head mutation. Correctly placed public
+and `record_platform_internal` inventory remains admissible only for the
+eligible null-head-adoption and exact-r1 paths.

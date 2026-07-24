@@ -70,18 +70,25 @@ func EnsureAppACLManifestGenesisV1(
 		return AppACLManifestPersistedV1{}, fmt.Errorf("applied application migration ledger does not match embedded migrations")
 	}
 
-	head, err := readAppACLManifestHeadForUpdateV1(ctx, tx)
-	if err != nil {
-		return AppACLManifestPersistedV1{}, err
-	}
 	manifests, err := readAppACLManifestRevisionsV1(ctx, tx)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
-	if head == nil {
-		if len(manifests) != 0 {
-			return AppACLManifestPersistedV1{}, fmt.Errorf("app ACL manifest has revisions with a null head")
-		}
+	head, err := readAppACLManifestHeadForUpdateV1(ctx, tx)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	existing, err := checkAppACLManifestGenesisStateV1(
+		manifests,
+		head,
+		embeddedMigrationSet,
+		compiledPrivilegeSet,
+		migratorCatalogRole,
+	)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	if existing == nil {
 		genesis, err := insertAppACLManifestGenesisV1(ctx, tx, embeddedMigrationSet, compiledPrivilegeSet, migratorCatalogRole)
 		if err != nil {
 			return AppACLManifestPersistedV1{}, err
@@ -91,27 +98,46 @@ func EnsureAppACLManifestGenesisV1(
 		}
 		return genesis, nil
 	}
-
-	if err := ValidateAppACLManifestChainV1(manifests, *head); err != nil {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("validate persisted app ACL manifest chain: %w", err)
-	}
-	if head.ManifestRevision != 1 || len(manifests) != 1 {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("app ACL manifest chain is already advanced")
-	}
-	genesis := manifests[0]
-	if !bytes.Equal(genesis.CanonicalMigrationSet, embeddedMigrationSet) {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("persisted app ACL manifest migration set does not match embedded migrations")
-	}
-	if !bytes.Equal(genesis.CanonicalPrivilegeSet, compiledPrivilegeSet) {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("persisted app ACL manifest privilege set does not match compiled privilege set")
-	}
-	if genesis.MigratorCatalogRole != migratorCatalogRole {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("persisted app ACL manifest migrator catalog role does not match expected role")
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("commit read-only app ACL manifest genesis transaction: %w", err)
 	}
-	return genesis, nil
+	return *existing, nil
+}
+
+// checkAppACLManifestGenesisStateV1 determines whether a manifest can be
+// created, or whether the persisted state is the exact immutable r1 result.
+// It performs no writes so a caller can validate its catalog before inserting
+// a revision or advancing the singleton head.
+func checkAppACLManifestGenesisStateV1(
+	manifests []AppACLManifestPersistedV1,
+	head *AppACLManifestHeadV1,
+	embeddedMigrationSet []byte,
+	compiledPrivilegeSet []byte,
+	migratorCatalogRole string,
+) (*AppACLManifestPersistedV1, error) {
+	if head == nil {
+		if len(manifests) != 0 {
+			return nil, fmt.Errorf("app ACL manifest has revisions with a null head")
+		}
+		return nil, nil
+	}
+	if err := ValidateAppACLManifestChainV1(manifests, *head); err != nil {
+		return nil, fmt.Errorf("validate persisted app ACL manifest chain: %w", err)
+	}
+	if head.ManifestRevision != 1 || len(manifests) != 1 {
+		return nil, fmt.Errorf("app ACL manifest chain is already advanced")
+	}
+	genesis := manifests[0]
+	if !bytes.Equal(genesis.CanonicalMigrationSet, embeddedMigrationSet) {
+		return nil, fmt.Errorf("persisted app ACL manifest migration set does not match embedded migrations")
+	}
+	if !bytes.Equal(genesis.CanonicalPrivilegeSet, compiledPrivilegeSet) {
+		return nil, fmt.Errorf("persisted app ACL manifest privilege set does not match compiled privilege set")
+	}
+	if genesis.MigratorCatalogRole != migratorCatalogRole {
+		return nil, fmt.Errorf("persisted app ACL manifest migrator catalog role does not match expected role")
+	}
+	return &genesis, nil
 }
 
 func insertAppACLManifestGenesisV1(

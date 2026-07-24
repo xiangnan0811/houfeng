@@ -22,6 +22,13 @@ create table if not exists schema_migrations (
   applied_at timestamptz not null default now()
 )`
 
+const ensurePublicSchemaMigrationsSQL = `
+create table if not exists public.schema_migrations (
+  name text primary key,
+	checksum text not null check (checksum ~ '^[0-9a-f]{64}$'),
+  applied_at timestamptz not null default now()
+)`
+
 type migrationStore interface {
 	EnsureLedger(ctx context.Context, sources map[string]migrationSource) error
 	Applied(ctx context.Context) (map[string]string, error)
@@ -82,6 +89,45 @@ func migrationSources(fsys fs.FS) (map[string]migrationSource, error) {
 	return sources, nil
 }
 
+// migrationSourceSnapshot is a caller-owned immutable view of one embedded
+// migration filesystem. Scoped convergence creates it before retrying so every
+// SERIALIZABLE attempt sees the same source names, bytes, checksums, and
+// canonical ledger body.
+type migrationSourceSnapshot struct {
+	sources      map[string]migrationSource
+	names        []string
+	canonicalSet []byte
+}
+
+func snapshotMigrationSources(fsys fs.FS) (migrationSourceSnapshot, error) {
+	sources, err := migrationSources(fsys)
+	if err != nil {
+		return migrationSourceSnapshot{}, err
+	}
+	names := make([]string, 0, len(sources))
+	entries := make([]MigrationChecksumEntry, 0, len(sources))
+	for name, source := range sources {
+		names = append(names, name)
+		checksumBytes, err := hex.DecodeString(source.checksum)
+		if err != nil || len(checksumBytes) != 32 {
+			return migrationSourceSnapshot{}, fmt.Errorf("decode migration checksum for %q", name)
+		}
+		var checksum [32]byte
+		copy(checksum[:], checksumBytes)
+		entries = append(entries, MigrationChecksumEntry{Filename: name, Checksum: checksum})
+	}
+	sort.Strings(names)
+	canonicalSet, err := CanonicalMigrationSetBodyV1(entries)
+	if err != nil {
+		return migrationSourceSnapshot{}, fmt.Errorf("build canonical migration source snapshot: %w", err)
+	}
+	return migrationSourceSnapshot{
+		sources:      sources,
+		names:        names,
+		canonicalSet: canonicalSet,
+	}, nil
+}
+
 func applyFS(ctx context.Context, store migrationStore, fsys fs.FS) error {
 	sources, err := migrationSources(fsys)
 	if err != nil {
@@ -126,24 +172,71 @@ func (s poolStore) EnsureLedger(ctx context.Context, sources map[string]migratio
 		return err
 	}
 	defer func() {
-		if err != nil {
-			_ = tx.Rollback(ctx)
-		}
+		_ = tx.Rollback(ctx)
 	}()
 
-	if _, err := tx.Exec(ctx, ensureSchemaMigrationsSQL); err != nil {
+	if err := ensureLegacyMigrationLedgerInTx(ctx, tx, sources); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `alter table schema_migrations add column if not exists checksum text`); err != nil {
-		return err
+	return tx.Commit(ctx)
+}
+
+// ensureMigrationLedgerInTx retains the scoped convergence dependency shape.
+// Its ledger is deliberately public-qualified; legacy Apply uses the separate
+// ambient-search-path helper below.
+func ensureMigrationLedgerInTx(ctx context.Context, tx pgx.Tx, sources map[string]migrationSource) error {
+	return ensurePublicMigrationLedgerInTx(ctx, tx, sources)
+}
+
+func ensurePublicMigrationLedgerInTx(ctx context.Context, tx pgx.Tx, sources map[string]migrationSource) error {
+	return ensureMigrationLedgerAt(ctx, tx, sources, publicMigrationLedgerTarget)
+}
+
+func ensureLegacyMigrationLedgerInTx(ctx context.Context, tx pgx.Tx, sources map[string]migrationSource) error {
+	return ensureMigrationLedgerAt(ctx, tx, sources, legacyMigrationLedgerTarget)
+}
+
+// migrationLedgerTarget is selected only by the fixed legacy/scoped helpers;
+// it is never built from configuration or other caller input.
+type migrationLedgerTarget string
+
+const (
+	legacyMigrationLedgerTarget migrationLedgerTarget = "schema_migrations"
+	publicMigrationLedgerTarget migrationLedgerTarget = "public.schema_migrations"
+)
+
+// ensureMigrationLedgerAt creates, adopts, validates, and locks the selected
+// application migration ledger on a caller-owned transaction. It deliberately
+// never begins or commits a transaction so scoped convergence can retain its
+// public ledger lock through pending DDL, ACL convergence, and manifest
+// publication.
+func ensureMigrationLedgerAt(ctx context.Context, tx pgx.Tx, sources map[string]migrationSource, target migrationLedgerTarget) error {
+	if tx == nil {
+		return fmt.Errorf("migration ledger has no PostgreSQL transaction")
 	}
-	if _, err := tx.Exec(ctx, `lock table schema_migrations in share row exclusive mode`); err != nil {
-		return err
+	var ensureSQL string
+	switch target {
+	case legacyMigrationLedgerTarget:
+		ensureSQL = ensureSchemaMigrationsSQL
+	case publicMigrationLedgerTarget:
+		ensureSQL = ensurePublicSchemaMigrationsSQL
+	default:
+		return fmt.Errorf("unknown migration ledger target %q", target)
+	}
+	if _, err := tx.Exec(ctx, ensureSQL); err != nil {
+		return fmt.Errorf("create migration ledger: %w", err)
+	}
+	ledgerTable := string(target)
+	if _, err := tx.Exec(ctx, `alter table `+ledgerTable+` add column if not exists checksum text`); err != nil {
+		return fmt.Errorf("add migration ledger checksum column: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `lock table `+ledgerTable+` in share row exclusive mode`); err != nil {
+		return fmt.Errorf("lock migration ledger: %w", err)
 	}
 
-	rows, err := tx.Query(ctx, `select name, checksum from schema_migrations order by name`)
+	rows, err := tx.Query(ctx, `select name, checksum from `+ledgerTable+` order by name::text COLLATE "C"`)
 	if err != nil {
-		return err
+		return fmt.Errorf("read migration ledger: %w", err)
 	}
 	defer rows.Close()
 	checksumsToBackfill := make([]migrationLedgerChecksum, 0)
@@ -151,7 +244,7 @@ func (s poolStore) EnsureLedger(ctx context.Context, sources map[string]migratio
 		var name string
 		var checksum *string
 		if err := rows.Scan(&name, &checksum); err != nil {
-			return err
+			return fmt.Errorf("scan migration ledger: %w", err)
 		}
 		source, ok := sources[name]
 		if !ok {
@@ -166,36 +259,36 @@ func (s poolStore) EnsureLedger(ctx context.Context, sources map[string]migratio
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return fmt.Errorf("iterate migration ledger: %w", err)
 	}
 	rows.Close()
 	for _, backfill := range checksumsToBackfill {
-		if _, err := tx.Exec(ctx, `update schema_migrations set checksum = $2 where name = $1`, backfill.name, backfill.checksum); err != nil {
-			return err
+		if _, err := tx.Exec(ctx, `update `+ledgerTable+` set checksum = $2 where name = $1`, backfill.name, backfill.checksum); err != nil {
+			return fmt.Errorf("backfill migration ledger checksum for %q: %w", backfill.name, err)
 		}
 	}
-	if _, err := tx.Exec(ctx, `alter table schema_migrations alter column checksum set not null`); err != nil {
-		return err
+	if _, err := tx.Exec(ctx, `alter table `+ledgerTable+` alter column checksum set not null`); err != nil {
+		return fmt.Errorf("require migration ledger checksum: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`
 		do $$
 		begin
 		  if not exists (
 		    select 1
 		    from pg_constraint
-		    where conrelid = 'schema_migrations'::regclass
+		    where conrelid = '%s'::regclass
 		      and conname = 'schema_migrations_checksum_format'
 		  ) then
-		    alter table schema_migrations
+		    alter table %s
 		      add constraint schema_migrations_checksum_format
 		      check (checksum ~ '^[0-9a-f]{64}$');
 		  end if;
 		end
 		$$
-	`); err != nil {
-		return err
+	`, ledgerTable, ledgerTable)); err != nil {
+		return fmt.Errorf("require migration ledger checksum format: %w", err)
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 type migrationLedgerChecksum struct {
@@ -204,7 +297,7 @@ type migrationLedgerChecksum struct {
 }
 
 func (s poolStore) Applied(ctx context.Context) (map[string]string, error) {
-	rows, err := s.db.Query(ctx, `select name, checksum from schema_migrations`)
+	rows, err := s.db.Query(ctx, `select name, checksum from schema_migrations order by name::text COLLATE "C"`)
 	if err != nil {
 		return nil, err
 	}

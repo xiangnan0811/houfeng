@@ -95,20 +95,11 @@ func ProvisionRoles(ctx context.Context, db *pgxpool.Pool, roles AppRoleSetV1) (
 	if err != nil {
 		return err
 	}
-	for _, role := range roles.names() {
-		if _, ok := attributes[role]; !ok {
-			return fmt.Errorf("missing pre-created app role %q", role)
-		}
+	memberships, err := readAppRoleMemberships(ctx, tx, roles.names())
+	if err != nil {
+		return err
 	}
-	if attributes[roles.Migrator].Inherit {
-		return fmt.Errorf("pre-created app migrator role %q must be NOINHERIT", roles.Migrator)
-	}
-	for _, role := range []string{roles.CenterRuntime, roles.PlatformAdmin} {
-		if err := attributes[role].validateRuntimeOrAdmin(role); err != nil {
-			return err
-		}
-	}
-	if err := rejectAppRoleMembership(ctx, tx, []string{roles.CenterRuntime, roles.PlatformAdmin}); err != nil {
+	if err := validateAppRoleCatalogState(roles, attributes, memberships); err != nil {
 		return err
 	}
 	if err := rejectAppRoleOwnership(ctx, tx, []string{roles.CenterRuntime, roles.PlatformAdmin}); err != nil {
@@ -116,6 +107,36 @@ func ProvisionRoles(ctx context.Context, db *pgxpool.Pool, roles AppRoleSetV1) (
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit app role preflight: %w", err)
+	}
+	return nil
+}
+
+// ProvisionRolesInTx performs the strict direct-login application-role
+// preflight on a caller-owned transaction. It neither begins nor commits a
+// transaction, so a scoped migrator can prove its identity and all role facts
+// in the same SERIALIZABLE closure that changes the APP catalog.
+func ProvisionRolesInTx(ctx context.Context, tx pgx.Tx, roles AppRoleSetV1) error {
+	if tx == nil {
+		return fmt.Errorf("app role preflight has no PostgreSQL transaction")
+	}
+	if err := roles.Validate(); err != nil {
+		return err
+	}
+
+	var sessionUser, currentUser string
+	if err := tx.QueryRow(ctx, `select session_user, current_user`).Scan(&sessionUser, &currentUser); err != nil {
+		return fmt.Errorf("read app role preflight session and current user: %w", err)
+	}
+	attributes, err := readAppRoleAttributes(ctx, tx, roles.names())
+	if err != nil {
+		return err
+	}
+	memberships, err := readAppRoleMemberships(ctx, tx, roles.names())
+	if err != nil {
+		return err
+	}
+	if err := validateDirectRolePreflight(roles, sessionUser, currentUser, attributes, memberships); err != nil {
+		return err
 	}
 	return nil
 }
@@ -130,7 +151,7 @@ type appRoleAttributes struct {
 	BypassRLS   bool
 }
 
-func (attributes appRoleAttributes) validateRuntimeOrAdmin(role string) error {
+func (attributes appRoleAttributes) validateConstrainedAppRole(role string) error {
 	if !attributes.CanLogin || attributes.Inherit || attributes.Superuser || attributes.CreateDB ||
 		attributes.CreateRole || attributes.Replication || attributes.BypassRLS {
 		return fmt.Errorf("pre-created app role %q must be LOGIN, NOINHERIT, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION, and NOBYPASSRLS", role)
@@ -180,29 +201,95 @@ func readAppRoleAttributes(ctx context.Context, tx pgx.Tx, names []string) (map[
 	return attributes, nil
 }
 
-func rejectAppRoleMembership(ctx context.Context, tx pgx.Tx, names []string) error {
+type appRoleMembership struct {
+	MemberRole string
+	ParentRole string
+}
+
+func readAppRoleMemberships(ctx context.Context, tx pgx.Tx, names []string) ([]appRoleMembership, error) {
 	rows, err := tx.Query(ctx, `
+		with recursive membership_paths(member_oid, parent_oid, path) as (
+			select membership.member,
+		       membership.roleid,
+		       array[membership.member, membership.roleid]::oid[]
+			from pg_catalog.pg_auth_members membership
+			union all
+			select membership_paths.member_oid,
+		       next_membership.roleid,
+		       membership_paths.path || next_membership.roleid
+			from membership_paths
+			join pg_catalog.pg_auth_members next_membership
+			  on next_membership.member = membership_paths.parent_oid
+			where not next_membership.roleid = any(membership_paths.path)
+		)
 		select member_role.rolname, parent_role.rolname
-		from pg_auth_members membership
-		join pg_roles member_role on member_role.oid = membership.member
-		join pg_roles parent_role on parent_role.oid = membership.roleid
+		from membership_paths
+		join pg_catalog.pg_roles member_role on member_role.oid = membership_paths.member_oid
+		join pg_catalog.pg_roles parent_role on parent_role.oid = membership_paths.parent_oid
 		where member_role.rolname = any($1::name[])
 		   or parent_role.rolname = any($1::name[])
 		order by member_role.rolname, parent_role.rolname
 	`, names)
 	if err != nil {
-		return fmt.Errorf("read app role memberships: %w", err)
+		return nil, fmt.Errorf("read app role memberships: %w", err)
 	}
 	defer rows.Close()
-	if rows.Next() {
-		var member, parent string
-		if err := rows.Scan(&member, &parent); err != nil {
-			return fmt.Errorf("scan app role membership: %w", err)
+	memberships := make([]appRoleMembership, 0)
+	for rows.Next() {
+		var membership appRoleMembership
+		if err := rows.Scan(&membership.MemberRole, &membership.ParentRole); err != nil {
+			return nil, fmt.Errorf("scan app role membership: %w", err)
 		}
-		return fmt.Errorf("app runtime/admin role membership is forbidden: %q -> %q", member, parent)
+		memberships = append(memberships, membership)
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate app role memberships: %w", err)
+		return nil, fmt.Errorf("iterate app role memberships: %w", err)
+	}
+	return memberships, nil
+}
+
+func validateAppRoleCatalogState(
+	roles AppRoleSetV1,
+	attributes map[string]appRoleAttributes,
+	memberships []appRoleMembership,
+) error {
+	for _, role := range roles.names() {
+		attributes, ok := attributes[role]
+		if !ok {
+			return fmt.Errorf("missing pre-created app role %q", role)
+		}
+		if err := attributes.validateConstrainedAppRole(role); err != nil {
+			return err
+		}
+	}
+	if len(memberships) != 0 {
+		membership := memberships[0]
+		return fmt.Errorf("app role membership is forbidden: %q -> %q", membership.MemberRole, membership.ParentRole)
+	}
+	return nil
+}
+
+func validateDirectRolePreflight(
+	roles AppRoleSetV1,
+	sessionUser string,
+	currentUser string,
+	attributes map[string]appRoleAttributes,
+	memberships []appRoleMembership,
+) error {
+	if err := roles.Validate(); err != nil {
+		return err
+	}
+	if sessionUser != roles.Migrator {
+		return fmt.Errorf("app role preflight session user %q does not match configured migrator role %q", sessionUser, roles.Migrator)
+	}
+	if currentUser != roles.Migrator {
+		return fmt.Errorf("app role preflight current user %q does not match configured migrator role %q", currentUser, roles.Migrator)
+	}
+	if sessionUser != currentUser {
+		return fmt.Errorf("app role preflight session user %q does not match current user %q", sessionUser, currentUser)
+	}
+	if err := validateAppRoleCatalogState(roles, attributes, memberships); err != nil {
+		return err
 	}
 	return nil
 }

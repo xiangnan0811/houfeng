@@ -549,6 +549,92 @@ func TestPostgresIntegrationAppliesFreshMigrations(t *testing.T) {
 	}
 }
 
+func TestPostgresIntegrationLegacyApplyKeepsLedgerAndDDLInAmbientSearchPath(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresDatabase(t, ctx)
+
+	schemaName := fmt.Sprintf("legacy_apply_%d_%d", time.Now().UnixNano(), os.Getpid())
+	if !isSafePostgresIdentifier(schemaName) {
+		t.Fatalf("unsafe generated legacy apply schema name %q", schemaName)
+	}
+	execSQL(t, ctx, db, `create schema `+quotePostgresIdentifier(schemaName))
+
+	legacyConfig := db.Config().Copy()
+	if legacyConfig.ConnConfig.RuntimeParams == nil {
+		legacyConfig.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	legacyConfig.ConnConfig.RuntimeParams["search_path"] = `"$user", ` + quotePostgresIdentifier(schemaName)
+	legacyConfig.MaxConns = 1
+	legacyDB, err := pgxpool.NewWithConfig(ctx, legacyConfig)
+	if err != nil {
+		t.Fatalf("open legacy migration pool: %v", err)
+	}
+	t.Cleanup(legacyDB.Close)
+
+	var currentSchema string
+	if err := legacyDB.QueryRow(ctx, `select current_schema()`).Scan(&currentSchema); err != nil {
+		t.Fatalf("read legacy migration current schema: %v", err)
+	}
+	if currentSchema != schemaName {
+		t.Fatalf("legacy migration current schema = %q, want custom ambient schema %q", currentSchema, schemaName)
+	}
+
+	files := fstest.MapFS{
+		"0001_legacy_ledger.sql": {Data: []byte(`select 1;`)},
+		"0002_legacy_search_path_probe.sql": {Data: []byte(`
+			create table legacy_apply_search_path_probe (
+				id integer primary key
+			)
+		`)},
+	}
+	sources, err := migrationSources(files)
+	if err != nil {
+		t.Fatalf("migrationSources() error = %v", err)
+	}
+
+	// This is the historical pre-checksum ledger shape. The legacy runner must
+	// adopt it in the same ambient schema as its unqualified migration DDL.
+	execSQL(t, ctx, legacyDB, `
+		create table schema_migrations (
+			name text primary key,
+			applied_at timestamptz not null default now()
+		)
+	`)
+	execSQL(t, ctx, legacyDB, `insert into schema_migrations (name) values ('0001_legacy_ledger.sql')`)
+
+	if err := applyFS(ctx, poolStore{db: legacyDB}, files); err != nil {
+		t.Fatalf("legacy applyFS() error = %v", err)
+	}
+
+	quotedSchema := quotePostgresIdentifier(schemaName)
+	var legacyLedgerExists, migrationObjectExists, publicLedgerExists bool
+	if err := legacyDB.QueryRow(ctx, `
+		select pg_catalog.to_regclass($1) is not null,
+		       pg_catalog.to_regclass($2) is not null,
+		       pg_catalog.to_regclass('public.schema_migrations') is not null
+	`, schemaName+`.schema_migrations`, schemaName+`.legacy_apply_search_path_probe`).Scan(
+		&legacyLedgerExists,
+		&migrationObjectExists,
+		&publicLedgerExists,
+	); err != nil {
+		t.Fatalf("read legacy apply relation locations: %v", err)
+	}
+	if !legacyLedgerExists || !migrationObjectExists || publicLedgerExists {
+		t.Fatalf("legacy apply relation locations = ledger:%t migration:%t public-ledger:%t, want true:true:false", legacyLedgerExists, migrationObjectExists, publicLedgerExists)
+	}
+
+	var backfilledChecksum, recordedChecksum string
+	if err := legacyDB.QueryRow(ctx, `
+		select (select checksum from `+quotedSchema+`.schema_migrations where name = '0001_legacy_ledger.sql'),
+		       (select checksum from `+quotedSchema+`.schema_migrations where name = '0002_legacy_search_path_probe.sql')
+	`).Scan(&backfilledChecksum, &recordedChecksum); err != nil {
+		t.Fatalf("read legacy apply checksums: %v", err)
+	}
+	if backfilledChecksum != sources["0001_legacy_ledger.sql"].checksum || recordedChecksum != sources["0002_legacy_search_path_probe.sql"].checksum {
+		t.Fatalf("legacy apply checksums = (%q, %q), want (%q, %q)", backfilledChecksum, recordedChecksum, sources["0001_legacy_ledger.sql"].checksum, sources["0002_legacy_search_path_probe.sql"].checksum)
+	}
+}
+
 func TestPostgresIntegrationRecordPlatformPgcryptoInstallsWithConstrainedDirectMigrator(t *testing.T) {
 	ctx := context.Background()
 	db := openTemporaryPostgresDatabase(t, ctx)

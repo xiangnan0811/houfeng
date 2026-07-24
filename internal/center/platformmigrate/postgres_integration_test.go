@@ -15,8 +15,8 @@ import (
 
 	ledgerMigrations "houfeng/db/deletionledger/migrations"
 	witnessMigrations "houfeng/db/deletionwitness/migrations"
+	applicationMigrations "houfeng/db/migrations"
 	"houfeng/db/recoverycontrol/migrations"
-	appmigrate "houfeng/internal/center/store/migrate"
 )
 
 const postgresIntegrationFlag = "HOUFENG_POSTGRES_INTEGRATION"
@@ -81,13 +81,19 @@ func TestPostgresIntegrationProvisionRolesRequiresPrecreatedNoInheritRoles(t *te
 	}
 
 	schemaName := "rp_roles_" + suffix
-	if _, err := db.Exec(ctx, "create schema "+pgx.Identifier{schemaName}.Sanitize()+" authorization "+pgx.Identifier{roles.CenterRuntime}.Sanitize()); err != nil {
+	quotedSchema := pgx.Identifier{schemaName}.Sanitize()
+	if _, err := db.Exec(ctx, "create schema "+quotedSchema+" authorization "+pgx.Identifier{roles.CenterRuntime}.Sanitize()); err != nil {
 		t.Fatalf("create runtime-owned schema: %v", err)
 	}
+	t.Cleanup(func() {
+		if _, err := db.Exec(context.Background(), "drop schema if exists "+quotedSchema); err != nil {
+			t.Errorf("drop runtime-owned schema %q: %v", schemaName, err)
+		}
+	})
 	if err := ProvisionRoles(ctx, db, roles); err == nil || !strings.Contains(err.Error(), "owns") {
 		t.Fatalf("ProvisionRoles() runtime-owned schema error = %v, want ownership rejection", err)
 	}
-	if _, err := db.Exec(ctx, "drop schema "+pgx.Identifier{schemaName}.Sanitize()); err != nil {
+	if _, err := db.Exec(ctx, "drop schema "+quotedSchema); err != nil {
 		t.Fatalf("drop runtime-owned schema: %v", err)
 	}
 
@@ -233,7 +239,9 @@ func TestPostgresIntegrationProvisionPostgresDomainIdentity(t *testing.T) {
 			env:       "HOUFENG_DATABASE_URL",
 			kind:      DomainKindApplication,
 			wrongKind: DomainKindDeletionLedger,
-			apply:     appmigrate.Apply,
+			apply: func(ctx context.Context, db *pgxpool.Pool) error {
+				return Apply(ctx, db, applicationMigrations.FS)
+			},
 		},
 		{
 			name:      "ledger",

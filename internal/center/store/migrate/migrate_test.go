@@ -5,9 +5,13 @@ import (
 	"errors"
 	"io/fs"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/db/migrations"
 )
@@ -89,6 +93,55 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	}
 	if offset != len(expectedTail) {
 		t.Fatalf("migration names missing expected asset ledger tail order %#v in %#v", expectedTail, names)
+	}
+}
+
+func TestSnapshotMigrationSourcesCapturesExactLexicalEmbeddedSet(t *testing.T) {
+	embeddedEntries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatalf("ReadDir embedded migrations: %v", err)
+	}
+	wantNames := make([]string, 0, len(embeddedEntries))
+	for _, entry := range embeddedEntries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		wantNames = append(wantNames, entry.Name())
+	}
+	sort.Strings(wantNames)
+
+	snapshot, err := snapshotMigrationSources(migrations.FS)
+	if err != nil {
+		t.Fatalf("snapshotMigrationSources() error = %v", err)
+	}
+	if len(snapshot.names) != 52 {
+		t.Fatalf("snapshot migration name count = %d, want 52", len(snapshot.names))
+	}
+	if !reflect.DeepEqual(snapshot.names, wantNames) {
+		t.Fatalf("snapshot migration names = %#v, want embedded lexical names %#v", snapshot.names, wantNames)
+	}
+	for index := 1; index < len(snapshot.names); index++ {
+		if snapshot.names[index-1] >= snapshot.names[index] {
+			t.Fatalf("snapshot migration names are not lexical at %d: %q then %q", index, snapshot.names[index-1], snapshot.names[index])
+		}
+	}
+	if snapshot.names[3] != "0004_add_node_onboarding_binding_state.sql" || snapshot.names[4] != "0004_add_observation_provenance.sql" {
+		t.Fatalf("snapshot duplicate 0004 lexical order = %q, %q", snapshot.names[3], snapshot.names[4])
+	}
+	entries, err := ParseCanonicalMigrationSetBodyV1(snapshot.canonicalSet)
+	if err != nil {
+		t.Fatalf("ParseCanonicalMigrationSetBodyV1() error = %v", err)
+	}
+	if len(entries) != len(snapshot.names) {
+		t.Fatalf("canonical snapshot entries = %d, want %d", len(entries), len(snapshot.names))
+	}
+	for index, entry := range entries {
+		if entry.Filename != snapshot.names[index] {
+			t.Fatalf("canonical snapshot entry %d = %q, want %q", index, entry.Filename, snapshot.names[index])
+		}
+		if snapshot.sources[entry.Filename].checksum == "" {
+			t.Fatalf("snapshot source %q has no checksum", entry.Filename)
+		}
 	}
 }
 
@@ -484,6 +537,85 @@ func TestApplyFSIncludesMigrationNameOnExecFailure(t *testing.T) {
 	}
 }
 
+func TestEnsureMigrationLedgerInTxBackfillsAndLocksOnCallerTransaction(t *testing.T) {
+	ctx := context.Background()
+	checksum := strings.Repeat("a", 64)
+	tx := &fakeMigrationLedgerTx{
+		rows: &fakeMigrationLedgerRows{
+			name:     "0001_initial_schema.sql",
+			checksum: nil,
+		},
+	}
+	sources := map[string]migrationSource{
+		"0001_initial_schema.sql": {checksum: checksum, sql: "create table example();"},
+	}
+
+	if err := ensureMigrationLedgerInTx(ctx, tx, sources); err != nil {
+		t.Fatalf("ensureMigrationLedgerInTx() error = %v", err)
+	}
+	if len(tx.execSQL) < 6 {
+		t.Fatalf("caller transaction Exec calls = %#v, want ledger create, lock, backfill, and constraints", tx.execSQL)
+	}
+	joined := strings.Join(tx.execSQL, "\n")
+	for _, want := range []string{
+		"create table if not exists public.schema_migrations",
+		"alter table public.schema_migrations add column if not exists checksum text",
+		"lock table public.schema_migrations in share row exclusive mode",
+		"update public.schema_migrations set checksum = $2 where name = $1",
+		"alter table public.schema_migrations alter column checksum set not null",
+		"conrelid = 'public.schema_migrations'::regclass",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("caller transaction SQL = %q, want %q", joined, want)
+		}
+	}
+	if got := strings.Join(tx.querySQL, "\n"); !strings.Contains(got, `from public.schema_migrations order by name::text COLLATE "C"`) {
+		t.Fatalf("caller transaction ledger query = %q, want public-qualified C-collated ledger read", got)
+	}
+	if tx.beginCalled {
+		t.Fatal("ensureMigrationLedgerInTx() started a nested transaction")
+	}
+	if tx.updatedName != "0001_initial_schema.sql" || tx.updatedChecksum != checksum {
+		t.Fatalf("ledger checksum backfill = (%q, %q), want (%q, %q)", tx.updatedName, tx.updatedChecksum, "0001_initial_schema.sql", checksum)
+	}
+}
+
+func TestEnsureLegacyMigrationLedgerInTxKeepsAmbientLedgerSQLUnqualified(t *testing.T) {
+	ctx := context.Background()
+	tx := &fakeMigrationLedgerTx{
+		rows: &fakeMigrationLedgerRows{
+			name:     "0001_initial_schema.sql",
+			checksum: nil,
+		},
+	}
+	sources := map[string]migrationSource{
+		"0001_initial_schema.sql": {checksum: strings.Repeat("a", 64), sql: "create table example();"},
+	}
+
+	if err := ensureLegacyMigrationLedgerInTx(ctx, tx, sources); err != nil {
+		t.Fatalf("ensureLegacyMigrationLedgerInTx() error = %v", err)
+	}
+	joined := strings.Join(tx.execSQL, "\n")
+	if strings.Contains(joined, "public.schema_migrations") {
+		t.Fatalf("legacy caller transaction SQL = %q, must not public-qualify the ambient ledger", joined)
+	}
+	for _, want := range []string{
+		"create table if not exists schema_migrations",
+		"alter table schema_migrations add column if not exists checksum text",
+		"lock table schema_migrations in share row exclusive mode",
+		"update schema_migrations set checksum = $2 where name = $1",
+		"alter table schema_migrations alter column checksum set not null",
+		"conrelid = 'schema_migrations'::regclass",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("legacy caller transaction SQL = %q, want %q", joined, want)
+		}
+	}
+	if got := strings.Join(tx.querySQL, "\n"); !strings.Contains(got, `from schema_migrations order by name::text COLLATE "C"`) || strings.Contains(got, "public.schema_migrations") {
+		t.Fatalf("legacy caller transaction ledger query = %q, want unqualified C-collated ledger read", got)
+	}
+}
+
 func TestAssetDecisionFollowupMigrationDropsRecordsViewBeforeChangingShape(t *testing.T) {
 	sqlBytes, err := fs.ReadFile(migrations.FS, "0036_add_asset_decision_member_followups.sql")
 	if err != nil {
@@ -513,6 +645,83 @@ type fakeMigrationStore struct {
 	execSQL     []string
 	recorded    []string
 	execErr     map[string]error
+}
+
+type fakeMigrationLedgerTx struct {
+	pgx.Tx
+	rows            pgx.Rows
+	execSQL         []string
+	querySQL        []string
+	beginCalled     bool
+	updatedName     string
+	updatedChecksum string
+}
+
+func (tx *fakeMigrationLedgerTx) Begin(context.Context) (pgx.Tx, error) {
+	tx.beginCalled = true
+	return tx, nil
+}
+
+func (tx *fakeMigrationLedgerTx) Exec(_ context.Context, sql string, arguments ...any) (pgconn.CommandTag, error) {
+	tx.execSQL = append(tx.execSQL, sql)
+	if strings.Contains(sql, "update schema_migrations set checksum") || strings.Contains(sql, "update public.schema_migrations set checksum") {
+		if len(arguments) != 2 {
+			return pgconn.CommandTag{}, errors.New("unexpected checksum backfill arguments")
+		}
+		name, ok := arguments[0].(string)
+		if !ok {
+			return pgconn.CommandTag{}, errors.New("checksum backfill name is not a string")
+		}
+		checksum, ok := arguments[1].(string)
+		if !ok {
+			return pgconn.CommandTag{}, errors.New("checksum backfill checksum is not a string")
+		}
+		tx.updatedName = name
+		tx.updatedChecksum = checksum
+	}
+	return pgconn.NewCommandTag("UPDATE 1"), nil
+}
+
+func (tx *fakeMigrationLedgerTx) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	tx.querySQL = append(tx.querySQL, sql)
+	return tx.rows, nil
+}
+
+type fakeMigrationLedgerRows struct {
+	name     string
+	checksum *string
+	returned bool
+}
+
+func (rows *fakeMigrationLedgerRows) Close()                                       {}
+func (rows *fakeMigrationLedgerRows) Err() error                                   { return nil }
+func (rows *fakeMigrationLedgerRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (rows *fakeMigrationLedgerRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (rows *fakeMigrationLedgerRows) Values() ([]any, error)                       { return nil, nil }
+func (rows *fakeMigrationLedgerRows) RawValues() [][]byte                          { return nil }
+func (rows *fakeMigrationLedgerRows) Conn() *pgx.Conn                              { return nil }
+func (rows *fakeMigrationLedgerRows) Next() bool {
+	if rows.returned {
+		return false
+	}
+	rows.returned = true
+	return true
+}
+func (rows *fakeMigrationLedgerRows) Scan(dest ...any) error {
+	if len(dest) != 2 {
+		return errors.New("unexpected ledger row scan destination count")
+	}
+	name, ok := dest[0].(*string)
+	if !ok {
+		return errors.New("ledger row name destination is not *string")
+	}
+	checksum, ok := dest[1].(**string)
+	if !ok {
+		return errors.New("ledger row checksum destination is not **string")
+	}
+	*name = rows.name
+	*checksum = rows.checksum
+	return nil
 }
 
 func (f *fakeMigrationStore) EnsureLedger(_ context.Context, sources map[string]migrationSource) error {
