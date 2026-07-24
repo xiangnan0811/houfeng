@@ -20,7 +20,8 @@
   "subtasks": [],
   "children": [
     "07-24-app-acl-migration-runtime-handoff",
-    "07-24-record-platform-recordauth-policy"
+    "07-24-record-platform-recordauth-policy",
+    "07-24-record-platform-delivery-primitives"
   ],
   "parent": "07-13-vps-detail-experience-design",
   "relatedFiles": [],
