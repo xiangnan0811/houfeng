@@ -162,9 +162,10 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		Now:                time.Now,
 		PasswordBcryptCost: cfg.PasswordBcryptCost,
 	})
+	scopeRepo := store.NewPostgresRecordAuthorizationRepository(db.Pool())
 	sessionCleanup := auth.NewSessionCleanupWorker(sessionRepo, slog.Default(), auth.DefaultSessionCleanupInterval)
 	authMiddleware := func(next http.Handler) http.Handler {
-		return centerhttp.RequireSameOrigin(cfg.PublicBaseURL)(centerhttp.RequireSession(authSvc)(next))
+		return centerhttp.RequireSameOrigin(cfg.PublicBaseURL)(centerhttp.RequireSession(authSvc, scopeRepo)(next))
 	}
 
 	router := deps.newRouter(centerhttp.RouterOptions{

@@ -3,6 +3,7 @@ package http_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"houfeng/internal/center/auth"
 	centerhttp "houfeng/internal/center/http"
 	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/center/recordauth"
 )
 
 // memoryUsers is a process-local in-memory UserRepository sufficient for e2e
@@ -76,6 +78,15 @@ func (m *memoryUsers) CountUsers(_ context.Context) (int, error) {
 type memorySessions struct {
 	mu   sync.Mutex
 	byID map[string]auth.Session
+}
+
+type successfulScopeRepository struct{}
+
+func (successfulScopeRepository) ListActorGroupIDs(_ context.Context, projectID recordauth.ProjectID, _ string) ([]string, error) {
+	if projectID != recordauth.ProjectIDDefault {
+		return nil, errors.New("unexpected project")
+	}
+	return []string{"rag_e2e"}, nil
 }
 
 func newMemorySessions() *memorySessions { return &memorySessions{byID: map[string]auth.Session{}} }
@@ -159,7 +170,7 @@ func setupAuthEndToEnd(t *testing.T) (*httptest.Server, func()) {
 		AuthLogoutHandler:         handlers.Logout(svc),
 		AuthMeHandler:             handlers.Me(svc),
 		AuthChangePasswordHandler: handlers.ChangePassword(svc),
-		AuthMiddleware:            centerhttp.RequireSession(svc),
+		AuthMiddleware:            centerhttp.RequireSession(svc, successfulScopeRepository{}),
 	})
 	srv := httptest.NewTLSServer(mux)
 	return srv, srv.Close

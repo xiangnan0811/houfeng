@@ -76,6 +76,7 @@ type SourceAuthorization struct {
 	CaptureScope    VisibilityScope
 	CurrentScope    *VisibilityScope
 	FinalFloor      *AuthorizationFloorSnapshot
+	LastLiveScope   *VisibilityScope
 	CanonicalDigest [32]byte
 }
 
@@ -90,7 +91,7 @@ type Policy interface {
 }
 ```
 
-`ProjectID` 当前固定为 `default`，但进入签名/request fingerprint/ledger namespace；不会新增项目切换 UI。admin 是 project admin，未来 role/group 通过同一接口扩展。`VisibilityScope`、`AuthorizationFloorSnapshot`、role/group ID 与 `SourceAuthorization` 都由 store/adapter 生成而不是接受客户端任意字符串；规范化时校验版本、source kind registry、project、role，排序去重并重算 canonical digest。floor 必须显式保存 `Kind`，因此 `project` 与 role/group 均为空、语义为 deny-all 的 `restricted` 可以从 canonical bytes 独立重建，不能从数组是否为空猜测。shape 是严格 union：`live` 当且仅当 `CurrentScope != nil && FinalFloor == nil`，`tombstoned` 当且仅当 `CurrentScope == nil && FinalFloor != nil`；两者始终保留 capture scope。未知 kind/version、缺 floor、floor hash 不符或 live scope 比 capture scope 更宽都默认拒绝。最终授权严格计算 actor scope、记录 visibility、capture scope 与所选 current scope/final floor 的交集。无权与不存在的外部语义统一为 404；内部保留 allow/deny reason code，不记录资源 stable ID、名称或正文。
+`ProjectID` 当前固定为 `default`，但进入签名/request fingerprint/ledger namespace；不会新增项目切换 UI。admin 是 project admin，未来 role/group 通过同一接口扩展。`VisibilityScope`、`AuthorizationFloorSnapshot`、role/group ID 与 `SourceAuthorization` 都由 store/adapter 生成而不是接受客户端任意字符串；规范化时校验版本、source kind registry、project、role，排序去重并重算 canonical digest。floor 必须显式保存 `Kind`，因此 `project` 与 role/group 均为空、语义为 deny-all 的 `restricted` 可以从 canonical bytes 独立重建，不能从数组是否为空猜测。shape 是严格 union：`live` 当且仅当 `CurrentScope != nil && FinalFloor == nil && LastLiveScope == nil`，`tombstoned` 当且仅当 `CurrentScope == nil && FinalFloor != nil && LastLiveScope != nil`；两者始终保留 capture scope。tombstone 的 `LastLiveScope` 是从最后 canonical live scope 带入的 transition witness，必须不比 capture scope 更宽，且 final floor 不得比它更宽；它与 final floor 一起进入 source canonical digest，但最终 actor 交集只使用 final floor。未知 kind/version、缺 floor/witness、floor/witness hash 不符、live scope 比 capture scope 更宽或 tombstone transition widening 都默认拒绝。最终授权严格计算 actor scope、记录 visibility、capture scope 与所选 current scope/final floor 的交集。无权与不存在的外部语义统一为 404；内部保留 allow/deny reason code，不记录资源 stable ID、名称或正文。
 
 ```go
 type LedgerEntryType string

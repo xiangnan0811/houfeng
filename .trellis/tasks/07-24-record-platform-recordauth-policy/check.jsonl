@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/prd.md", "reason": "Review child requirements, exclusions, acceptance criteria, and non-claims."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/design.md", "reason": "Review trusted data flow, canonicalization, fail-closed behavior, and deferred deletion integration."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/implement.md", "reason": "Review ordered TDD, test gates, and exact owned file set."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../07-14-vps-records-platform-foundation/prd.md", "reason": "Verify parent acceptance and child-admission boundaries are preserved."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../07-14-vps-records-platform-foundation/design.md", "reason": "Verify actor/source visibility intersection matches parent contract."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../../spec/backend/error-handling.md", "reason": "Verify safe error handling and no sensitive/context leakage."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../../spec/backend/quality-guidelines.md", "reason": "Verify focused/full test, formatting, and review evidence."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../../spec/backend/directory-structure.md", "reason": "Verify package ownership and source placement."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../../spec/guides/branch-workflow-governance.md", "reason": "Verify isolated non-main delivery governance."}

@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/prd.md", "reason": "Authoritative child scope, requirements, acceptance criteria, exclusions, and rollback boundary."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/design.md", "reason": "Authoritative boundary, trusted actor construction, canonical scope model, and deferred integration decisions."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/implement.md", "reason": "Ordered test-first implementation, validation, review, and commit gates."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../07-14-vps-records-platform-foundation/prd.md", "reason": "Parent requirements and PF acceptance boundary; child must remain a narrow prerequisite."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../07-14-vps-records-platform-foundation/design.md", "reason": "Parent typed actor, visibility, source-floor, and dependency-direction contract."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../07-14-vps-records-platform-foundation/implement.md", "reason": "Parent Task 2 baseline and revision-checkpoint Task 9 constraints."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../../spec/backend/error-handling.md", "reason": "Fail-closed and safe error-envelope conventions."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../../spec/backend/quality-guidelines.md", "reason": "Go test, formatting, and verification expectations."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../../spec/backend/directory-structure.md", "reason": "Backend package and repository placement conventions."}
+{"file": ".trellis/tasks/07-24-record-platform-recordauth-policy/../../spec/guides/branch-workflow-governance.md", "reason": "Feature-branch, worktree, hook, commit, and remote governance."}

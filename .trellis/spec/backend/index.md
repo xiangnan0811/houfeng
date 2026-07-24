@@ -19,6 +19,7 @@
 | [Directory Structure](./directory-structure.md) | `cmd/`、`agent/`、`internal/center/`、`internal/contracts/`、`db/migrations/` 的目录归属与新增代码落点 | 已填实 |
 | [Database Guidelines](./database-guidelines.md) | PostgreSQL + pgx/v5、手写 SQL、迁移、事务与模型不变量 | 已填实 |
 | [Error Handling](./error-handling.md) | sentinel error、`errors.Is`、HTTP/agent 错误转换与 panic 政策 | 已填实 |
+| [Record Authorization](./record-authorization.md) | `recordauth` 可信 actor、持久化 group hydration、canonical scope/source evidence 与统一资源授权边界 | 已填实 |
 | [Quality Guidelines](./quality-guidelines.md) | Makefile 质量门、测试约定、review checklist 与禁止模式 | 已填实 |
 | [Logging Guidelines](./logging-guidelines.md) | `log/slog` 使用、level、结构化字段、敏感信息与 agent/center 差异 | 已填实 |
 | [Subscription Cost Center](./subscription-cost-center.md) | 订阅成本中枢、汇率、预算、续费提醒、通知审计与 Dashboard 边界 | 已填实 |

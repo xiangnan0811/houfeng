@@ -648,6 +648,31 @@ func TestBootstrapAgentTokenRepositoriesUseConfiguredHMACKey(t *testing.T) {
 	}
 }
 
+func TestBootstrapWiresRequiredRecordAuthorizationScopeRepositoryWithoutFallback(t *testing.T) {
+	body, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatalf("read bootstrap.go: %v", err)
+	}
+	source := string(body)
+
+	for _, want := range []string{
+		"scopeRepo := store.NewPostgresRecordAuthorizationRepository(db.Pool())",
+		"centerhttp.RequireSession(authSvc, scopeRepo)(next)",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("bootstrap.go missing required record authorization wiring %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"RequireSession(authSvc)(next)",
+		"if scopeRepo == nil",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("bootstrap.go retains optional record authorization fallback %q", forbidden)
+		}
+	}
+}
+
 func TestBootstrapWiresSeparateCommandAuditReadRepositoryAndHandler(t *testing.T) {
 	body, err := os.ReadFile("bootstrap.go")
 	if err != nil {
