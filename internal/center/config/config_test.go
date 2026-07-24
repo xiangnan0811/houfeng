@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,115 @@ func setRequiredAuth(t *testing.T) {
 	t.Setenv("HOUFENG_INITIAL_USERNAME", "admin")
 	t.Setenv("HOUFENG_INITIAL_PASSWORD", "correct-horse-battery")
 	t.Setenv("HOUFENG_SESSION_HMAC_KEY", "0123456789abcdef0123456789abcdef")
+}
+
+func TestLoadRecordPlatformMode(t *testing.T) {
+	tests := []struct {
+		name                   string
+		recordsEnabled         string
+		permanentDeleteEnabled string
+		want                   centerconfig.RecordPlatformMode
+		wantErr                string
+	}{
+		{
+			name:                   "legacy flags off",
+			recordsEnabled:         "false",
+			permanentDeleteEnabled: "false",
+			want:                   centerconfig.RecordPlatformModeLegacy,
+		},
+		{
+			name:                   "runtime admission only",
+			recordsEnabled:         "true",
+			permanentDeleteEnabled: "false",
+			want:                   centerconfig.RecordPlatformModeRuntimeAdmission,
+		},
+		{
+			name:                   "permanent delete without records",
+			recordsEnabled:         "false",
+			permanentDeleteEnabled: "true",
+			wantErr:                "HOUFENG_RECORD_PERMANENT_DELETE_ENABLED requires HOUFENG_RECORDS_ENABLED=true",
+		},
+		{
+			name:                   "permanent delete is not admitted",
+			recordsEnabled:         "true",
+			permanentDeleteEnabled: "true",
+			wantErr:                "HOUFENG_RECORD_PERMANENT_DELETE_ENABLED=true is not supported",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOUFENG_RECORDS_ENABLED", tt.recordsEnabled)
+			t.Setenv("HOUFENG_RECORD_PERMANENT_DELETE_ENABLED", tt.permanentDeleteEnabled)
+
+			got, err := centerconfig.LoadRecordPlatformMode()
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("LoadRecordPlatformMode() error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadRecordPlatformMode() error = %v, want nil", err)
+			}
+			if got != tt.want {
+				t.Fatalf("LoadRecordPlatformMode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadCenterConfigRejectsUnsupportedRecordPlatformModeBeforeOtherInput(t *testing.T) {
+	tests := []struct {
+		name                   string
+		recordsEnabled         string
+		permanentDeleteEnabled string
+		wantErr                string
+	}{
+		{
+			name:                   "delete without records",
+			recordsEnabled:         "false",
+			permanentDeleteEnabled: "true",
+			wantErr:                "HOUFENG_RECORD_PERMANENT_DELETE_ENABLED requires HOUFENG_RECORDS_ENABLED=true",
+		},
+		{
+			name:                   "delete with records",
+			recordsEnabled:         "true",
+			permanentDeleteEnabled: "true",
+			wantErr:                "HOUFENG_RECORD_PERMANENT_DELETE_ENABLED=true is not supported",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOUFENG_RECORDS_ENABLED", tt.recordsEnabled)
+			t.Setenv("HOUFENG_RECORD_PERMANENT_DELETE_ENABLED", tt.permanentDeleteEnabled)
+			t.Setenv("HOUFENG_DATABASE_REQUIRE_TLS", "true")
+			t.Setenv("HOUFENG_DATABASE_URL", "postgres://example?sslmode=disable")
+			t.Setenv("HOUFENG_INITIAL_PASSWORD_FILE", filepath.Join(t.TempDir(), "missing-initial-password"))
+			t.Setenv("HOUFENG_SESSION_HMAC_KEY_FILE", filepath.Join(t.TempDir(), "missing-session-hmac-key"))
+
+			_, err := centerconfig.LoadCenterConfig()
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("LoadCenterConfig() error = %v, want record-platform mode rejection before URL or secret input", err)
+			}
+		})
+	}
+}
+
+func TestLoadCenterConfigSelectsRuntimeAdmissionMode(t *testing.T) {
+	setRequiredAuth(t)
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://runtime")
+	t.Setenv("HOUFENG_RECORDS_ENABLED", "true")
+	t.Setenv("HOUFENG_RECORD_PERMANENT_DELETE_ENABLED", "false")
+
+	cfg, err := centerconfig.LoadCenterConfig()
+	if err != nil {
+		t.Fatalf("LoadCenterConfig() error = %v", err)
+	}
+	if cfg.RecordPlatformMode != centerconfig.RecordPlatformModeRuntimeAdmission {
+		t.Fatalf("RecordPlatformMode = %v, want runtime admission", cfg.RecordPlatformMode)
+	}
 }
 
 func TestLoadCenterConfigRequiresDatabaseURL(t *testing.T) {

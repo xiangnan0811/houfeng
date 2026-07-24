@@ -113,6 +113,164 @@ func TestBootstrapCenterClosesDBOnMigrationFailure(t *testing.T) {
 	}
 }
 
+func TestBootstrapCenterRetainsMigrationPathWhenRecordPlatformIsLegacy(t *testing.T) {
+	cfg := config.CenterConfig{HTTPAddr: ":8080", WebDistDir: "web/dist", DatabaseURL: "postgres://center"}
+	db := &fakePostgresDB{}
+	wantErr := errors.New("migrate boom")
+	applyCalls := 0
+	admitCalls := 0
+
+	_, _, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		openPostgres: func(context.Context, string) (postgresDB, error) {
+			return db, nil
+		},
+		applyMigrations: func(context.Context, postgresDB) error {
+			applyCalls++
+			return wantErr
+		},
+		admitRuntime: func(context.Context, postgresDB) error {
+			admitCalls++
+			return nil
+		},
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("bootstrapCenter() error = %v, want wrapped migration failure", err)
+	}
+	if applyCalls != 1 {
+		t.Fatalf("applyMigrations calls = %d, want 1", applyCalls)
+	}
+	if admitCalls != 0 {
+		t.Fatalf("admitRuntime calls = %d, want 0", admitCalls)
+	}
+}
+
+func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing.T) {
+	cfg := config.CenterConfig{
+		RecordPlatformMode: config.RecordPlatformModeRuntimeAdmission,
+		HTTPAddr:           ":8080",
+		WebDistDir:         "web/dist",
+		DatabaseURL:        "postgres://center",
+		SessionHMACKey:     []byte("0123456789abcdef0123456789abcdef"),
+	}
+	db := &fakePostgresDB{}
+	applyCalls := 0
+	admitCalls := 0
+
+	app, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		openPostgres: func(context.Context, string) (postgresDB, error) {
+			return db, nil
+		},
+		applyMigrations: func(context.Context, postgresDB) error {
+			applyCalls++
+			return nil
+		},
+		admitRuntime: func(context.Context, postgresDB) error {
+			admitCalls++
+			return nil
+		},
+		seedInitialUser: func(context.Context, auth.UserRepository, config.CenterConfig) error {
+			return nil
+		},
+		newSessionRepository: func(*pgxpool.Pool, []byte) (auth.SessionRepository, error) {
+			return fakeSessionRepository{}, nil
+		},
+		newRouter: func(centerhttp.RouterOptions) http.Handler {
+			return http.NewServeMux()
+		},
+		newApp: func(string, http.Handler, ...centerapp.Worker) appRunner {
+			return fakeApp{}
+		},
+	})
+	if err != nil {
+		t.Fatalf("bootstrapCenter() error = %v, want nil", err)
+	}
+	if app == nil || cleanup == nil {
+		t.Fatal("bootstrapCenter() returned a nil app or cleanup, want both")
+	}
+	if applyCalls != 0 {
+		t.Fatalf("applyMigrations calls = %d, want 0", applyCalls)
+	}
+	if admitCalls != 1 {
+		t.Fatalf("admitRuntime calls = %d, want 1", admitCalls)
+	}
+	cleanup()
+	if !db.closed {
+		t.Fatal("cleanup() did not close DB")
+	}
+}
+
+func TestBootstrapCenterClosesDBOnRuntimeAdmissionFailure(t *testing.T) {
+	cfg := config.CenterConfig{
+		RecordPlatformMode: config.RecordPlatformModeRuntimeAdmission,
+		HTTPAddr:           ":8080",
+		WebDistDir:         "web/dist",
+		DatabaseURL:        "postgres://center",
+	}
+	db := &fakePostgresDB{}
+	wantErr := errors.New("runtime admission boom")
+	applyCalls := 0
+	admitCalls := 0
+
+	app, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		openPostgres: func(context.Context, string) (postgresDB, error) {
+			return db, nil
+		},
+		applyMigrations: func(context.Context, postgresDB) error {
+			applyCalls++
+			return nil
+		},
+		admitRuntime: func(context.Context, postgresDB) error {
+			admitCalls++
+			return wantErr
+		},
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("bootstrapCenter() error = %v, want wrapped runtime admission failure", err)
+	}
+	if app != nil || cleanup != nil {
+		t.Fatal("bootstrapCenter() returned an app or cleanup, want neither")
+	}
+	if applyCalls != 0 {
+		t.Fatalf("applyMigrations calls = %d, want 0", applyCalls)
+	}
+	if admitCalls != 1 {
+		t.Fatalf("admitRuntime calls = %d, want 1", admitCalls)
+	}
+	if !db.closed {
+		t.Fatal("bootstrapCenter() did not close DB on runtime admission failure")
+	}
+}
+
+func TestBootstrapCenterDefaultRuntimeAdmissionFailsClosed(t *testing.T) {
+	cfg := config.CenterConfig{
+		RecordPlatformMode: config.RecordPlatformModeRuntimeAdmission,
+		HTTPAddr:           ":8080",
+		WebDistDir:         "web/dist",
+		DatabaseURL:        "postgres://center",
+	}
+	db := &fakePostgresDB{}
+	applyCalls := 0
+	deps := (bootstrapDeps{}).withDefaults()
+	deps.openPostgres = func(context.Context, string) (postgresDB, error) {
+		return db, nil
+	}
+	deps.applyMigrations = func(context.Context, postgresDB) error {
+		applyCalls++
+		return nil
+	}
+
+	_, _, err := bootstrapCenter(context.Background(), cfg, "dev", deps)
+	if err == nil || !strings.Contains(err.Error(), "app ACL runtime admission has no PostgreSQL pool") {
+		t.Fatalf("bootstrapCenter() error = %v, want default app ACL runtime admission error", err)
+	}
+	if applyCalls != 0 {
+		t.Fatalf("applyMigrations calls = %d, want 0", applyCalls)
+	}
+	if !db.closed {
+		t.Fatal("bootstrapCenter() did not close DB after default runtime admission failure")
+	}
+}
+
 func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	cfg := config.CenterConfig{
 		HTTPAddr:         ":8080",

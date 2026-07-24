@@ -44,6 +44,19 @@ func VerifyPersistedAppACLManifestRuntimeV1(
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("read persisted app ACL manifest snapshot: %w", err)
 	}
+	return verifyAppACLManifestRuntimeSnapshotV1(snapshot, embeddedMigrations)
+}
+
+// verifyAppACLManifestRuntimeSnapshotV1 verifies a manifest/ledger snapshot
+// already read by a caller-owned transaction. Runtime admission combines this
+// with the scoped catalog reader in one PostgreSQL snapshot.
+func verifyAppACLManifestRuntimeSnapshotV1(
+	snapshot AppACLManifestRuntimeSnapshotV1,
+	embeddedMigrations fs.FS,
+) (AppACLManifestPersistedV1, error) {
+	if embeddedMigrations == nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("embedded migration filesystem is nil")
+	}
 	if snapshot.SessionUser != snapshot.CurrentUser {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("session user %q does not match current user %q", snapshot.SessionUser, snapshot.CurrentUser)
 	}

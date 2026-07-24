@@ -41,6 +41,26 @@ func (reader *PostgresAppACLManifestRuntimeReader) ReadAppACLManifestRuntimeSnap
 		_ = tx.Rollback(ctx)
 	}()
 
+	snapshot, err = readAppACLManifestRuntimeSnapshotInTxV1(ctx, tx)
+	if err != nil {
+		return AppACLManifestRuntimeSnapshotV1{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return AppACLManifestRuntimeSnapshotV1{}, fmt.Errorf("commit read-only app ACL manifest snapshot: %w", err)
+	}
+	return snapshot, nil
+}
+
+// readAppACLManifestRuntimeSnapshotInTxV1 reads the manifest, nullable head,
+// ledger, and direct session identity through a caller-owned transaction.
+// Admission composes it with the effective-catalog reader in one snapshot.
+func readAppACLManifestRuntimeSnapshotInTxV1(
+	ctx context.Context,
+	tx pgx.Tx,
+) (snapshot AppACLManifestRuntimeSnapshotV1, err error) {
+	if tx == nil {
+		return AppACLManifestRuntimeSnapshotV1{}, fmt.Errorf("app ACL manifest runtime reader has no transaction")
+	}
 	if err := tx.QueryRow(ctx, `select current_database(), session_user, current_user`).Scan(&snapshot.DatabaseName, &snapshot.SessionUser, &snapshot.CurrentUser); err != nil {
 		return AppACLManifestRuntimeSnapshotV1{}, fmt.Errorf("read app ACL manifest runtime database and identities: %w", err)
 	}
@@ -52,9 +72,6 @@ func (reader *PostgresAppACLManifestRuntimeReader) ReadAppACLManifestRuntimeSnap
 	}
 	if snapshot.AppliedMigrations, err = readAppliedAppMigrationsV1(ctx, tx); err != nil {
 		return AppACLManifestRuntimeSnapshotV1{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return AppACLManifestRuntimeSnapshotV1{}, fmt.Errorf("commit read-only app ACL manifest snapshot: %w", err)
 	}
 	return snapshot, nil
 }

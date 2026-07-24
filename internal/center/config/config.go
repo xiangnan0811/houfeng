@@ -21,6 +21,7 @@ const (
 )
 
 type CenterConfig struct {
+	RecordPlatformMode    RecordPlatformMode
 	HTTPAddr              string
 	WebDistDir            string
 	DatabaseURL           string
@@ -38,7 +39,45 @@ type CenterConfig struct {
 	PasswordBcryptCost    int
 }
 
+// RecordPlatformMode is the allowed record-platform process boundary.
+// Legacy keeps the existing owner migration path; RuntimeAdmission permits
+// only the direct runtime identity after admission succeeds.
+type RecordPlatformMode uint8
+
+const (
+	RecordPlatformModeLegacy RecordPlatformMode = iota
+	RecordPlatformModeRuntimeAdmission
+)
+
+// LoadRecordPlatformMode parses the record-platform flags before any other
+// center configuration can resolve a URL or read a secret file.
+func LoadRecordPlatformMode() (RecordPlatformMode, error) {
+	recordsEnabled, err := boolEnvOrDefault("HOUFENG_RECORDS_ENABLED", false)
+	if err != nil {
+		return RecordPlatformModeLegacy, err
+	}
+	permanentDeleteEnabled, err := boolEnvOrDefault("HOUFENG_RECORD_PERMANENT_DELETE_ENABLED", false)
+	if err != nil {
+		return RecordPlatformModeLegacy, err
+	}
+	if !recordsEnabled && permanentDeleteEnabled {
+		return RecordPlatformModeLegacy, fmt.Errorf("HOUFENG_RECORD_PERMANENT_DELETE_ENABLED requires HOUFENG_RECORDS_ENABLED=true")
+	}
+	if recordsEnabled && permanentDeleteEnabled {
+		return RecordPlatformModeLegacy, fmt.Errorf("HOUFENG_RECORD_PERMANENT_DELETE_ENABLED=true is not supported")
+	}
+	if recordsEnabled {
+		return RecordPlatformModeRuntimeAdmission, nil
+	}
+	return RecordPlatformModeLegacy, nil
+}
+
 func LoadCenterConfig() (CenterConfig, error) {
+	recordPlatformMode, err := LoadRecordPlatformMode()
+	if err != nil {
+		return CenterConfig{}, err
+	}
+
 	httpAddr, err := envOrDefault("HOUFENG_HTTP_ADDR", defaultHTTPAddr)
 	if err != nil {
 		return CenterConfig{}, err
@@ -115,6 +154,7 @@ func LoadCenterConfig() (CenterConfig, error) {
 	}
 
 	return CenterConfig{
+		RecordPlatformMode:    recordPlatformMode,
 		HTTPAddr:              httpAddr,
 		WebDistDir:            webDistDir,
 		DatabaseURL:           databaseURL,

@@ -13,7 +13,9 @@ import (
 	"syscall"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/config"
 	"houfeng/internal/center/importing"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/store/migrate"
@@ -26,6 +28,15 @@ type cliOptions struct {
 	format   string
 }
 
+type importerDeps struct {
+	openFile        func(string) (io.ReadCloser, error)
+	openPostgres    func(context.Context, string) (*pgxpool.Pool, error)
+	closePostgres   func(*pgxpool.Pool)
+	applyMigrations func(context.Context, *pgxpool.Pool) error
+	admitRuntime    func(context.Context, *pgxpool.Pool) error
+	output          io.Writer
+}
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("import vps json failed", "error", err)
@@ -35,11 +46,34 @@ func main() {
 
 func run() error {
 	opts := parseFlags()
-	if err := validateOptions(opts); err != nil {
+	mode, err := validateAndLoadRecordPlatformMode(opts)
+	if err != nil {
 		return err
 	}
 
-	file, err := os.Open(opts.filePath)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return runWithMode(ctx, opts, mode, importerDeps{})
+}
+
+func runWithDeps(ctx context.Context, opts cliOptions, deps importerDeps) error {
+	mode, err := validateAndLoadRecordPlatformMode(opts)
+	if err != nil {
+		return err
+	}
+	return runWithMode(ctx, opts, mode, deps)
+}
+
+func validateAndLoadRecordPlatformMode(opts cliOptions) (config.RecordPlatformMode, error) {
+	if err := validateOptions(opts); err != nil {
+		return config.RecordPlatformModeLegacy, err
+	}
+	return config.LoadRecordPlatformMode()
+}
+
+func runWithMode(ctx context.Context, opts cliOptions, mode config.RecordPlatformMode, deps importerDeps) error {
+	deps = deps.withDefaults()
+	file, err := deps.openFile(opts.filePath)
 	if err != nil {
 		return fmt.Errorf("open input file: %w", err)
 	}
@@ -50,13 +84,10 @@ func run() error {
 		return err
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	if opts.doImport {
-		return runImport(ctx, records, opts.format, os.Stdout)
+		return runImportWithDeps(ctx, records, opts.format, mode, deps)
 	}
-	return runDryRun(ctx, records, opts.format, os.Stdout)
+	return runDryRunWithDeps(ctx, records, opts.format, mode, deps)
 }
 
 func parseFlags() cliOptions {
@@ -85,14 +116,28 @@ func validateOptions(opts cliOptions) error {
 }
 
 func runDryRun(ctx context.Context, records []importing.InputRecord, format string, output io.Writer) error {
+	return runDryRunWithDeps(ctx, records, format, config.RecordPlatformModeLegacy, importerDeps{output: output})
+}
+
+func runDryRunWithDeps(
+	ctx context.Context,
+	records []importing.InputRecord,
+	format string,
+	mode config.RecordPlatformMode,
+	deps importerDeps,
+) error {
+	deps = deps.withDefaults()
 	databaseURL := strings.TrimSpace(os.Getenv("HOUFENG_DATABASE_URL"))
 	repos := importing.Repositories{}
 	var cleanup func()
 	var dbWarning string
 	if databaseURL != "" {
 		var err error
-		repos, cleanup, err = openRepositories(ctx, databaseURL, false)
+		repos, cleanup, err = openRepositories(ctx, databaseURL, mode, deps)
 		if err != nil {
+			if mode == config.RecordPlatformModeRuntimeAdmission {
+				return err
+			}
 			dbWarning = fmt.Sprintf("database check skipped: %v", err)
 			repos = importing.Repositories{}
 		} else {
@@ -105,23 +150,43 @@ func runDryRun(ctx context.Context, records []importing.InputRecord, format stri
 		return err
 	}
 	report.AddWarning(dbWarning)
-	return importing.WriteReport(output, report, format)
+	return importing.WriteReport(deps.output, report, format)
 }
 
 func runImport(ctx context.Context, records []importing.InputRecord, format string, output io.Writer) error {
+	return runImportWithDeps(ctx, records, format, config.RecordPlatformModeLegacy, importerDeps{output: output})
+}
+
+func runImportWithDeps(
+	ctx context.Context,
+	records []importing.InputRecord,
+	format string,
+	mode config.RecordPlatformMode,
+	deps importerDeps,
+) error {
+	deps = deps.withDefaults()
 	databaseURL := strings.TrimSpace(os.Getenv("HOUFENG_DATABASE_URL"))
 	if databaseURL == "" {
 		return errors.New("HOUFENG_DATABASE_URL must be set for -import")
 	}
 
-	db, err := store.OpenPostgres(ctx, databaseURL)
+	db, err := deps.openPostgres(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("open postgres: %w", err)
 	}
-	defer db.Close()
+	defer deps.closePostgres(db)
 
-	if err := migrate.Apply(ctx, db); err != nil {
-		return fmt.Errorf("apply migrations: %w", err)
+	switch mode {
+	case config.RecordPlatformModeLegacy:
+		if err := deps.applyMigrations(ctx, db); err != nil {
+			return fmt.Errorf("apply migrations: %w", err)
+		}
+	case config.RecordPlatformModeRuntimeAdmission:
+		if err := deps.admitRuntime(ctx, db); err != nil {
+			return fmt.Errorf("admit app runtime: %w", err)
+		}
+	default:
+		return fmt.Errorf("unknown record-platform mode %d", mode)
 	}
 
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
@@ -139,7 +204,7 @@ func runImport(ctx context.Context, records []importing.InputRecord, format stri
 	}, importing.Options{})
 	if err != nil {
 		if errors.Is(err, importing.ErrImportBlocked) {
-			if writeErr := importing.WriteReport(output, report, format); writeErr != nil {
+			if writeErr := importing.WriteReport(deps.output, report, format); writeErr != nil {
 				return writeErr
 			}
 			return fmt.Errorf("%w: resolve validation or duplicate candidates before importing", err)
@@ -149,19 +214,27 @@ func runImport(ctx context.Context, records []importing.InputRecord, format stri
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit vps import transaction: %w", err)
 	}
-	return importing.WriteReport(output, report, format)
+	return importing.WriteReport(deps.output, report, format)
 }
 
-func openRepositories(ctx context.Context, databaseURL string, applyMigrations bool) (importing.Repositories, func(), error) {
-	db, err := store.OpenPostgres(ctx, databaseURL)
+func openRepositories(
+	ctx context.Context,
+	databaseURL string,
+	mode config.RecordPlatformMode,
+	deps importerDeps,
+) (importing.Repositories, func(), error) {
+	db, err := deps.openPostgres(ctx, databaseURL)
 	if err != nil {
 		return importing.Repositories{}, nil, fmt.Errorf("open postgres: %w", err)
 	}
-	if applyMigrations {
-		if err := migrate.Apply(ctx, db); err != nil {
-			db.Close()
-			return importing.Repositories{}, nil, fmt.Errorf("apply migrations: %w", err)
+	if mode == config.RecordPlatformModeRuntimeAdmission {
+		if err := deps.admitRuntime(ctx, db); err != nil {
+			deps.closePostgres(db)
+			return importing.Repositories{}, nil, fmt.Errorf("admit app runtime: %w", err)
 		}
+	} else if mode != config.RecordPlatformModeLegacy {
+		deps.closePostgres(db)
+		return importing.Repositories{}, nil, fmt.Errorf("unknown record-platform mode %d", mode)
 	}
 
 	repos := importing.Repositories{
@@ -170,5 +243,31 @@ func openRepositories(ctx context.Context, databaseURL string, applyMigrations b
 		Subscriptions:       store.NewPostgresSubscriptionRepository(db),
 		MonitoringInstances: store.NewPostgresMonitoringInstanceRepository(db),
 	}
-	return repos, db.Close, nil
+	return repos, func() { deps.closePostgres(db) }, nil
+}
+
+func (d importerDeps) withDefaults() importerDeps {
+	if d.openFile == nil {
+		d.openFile = func(path string) (io.ReadCloser, error) {
+			return os.Open(path)
+		}
+	}
+	if d.openPostgres == nil {
+		d.openPostgres = store.OpenPostgres
+	}
+	if d.closePostgres == nil {
+		d.closePostgres = func(db *pgxpool.Pool) {
+			db.Close()
+		}
+	}
+	if d.applyMigrations == nil {
+		d.applyMigrations = migrate.Apply
+	}
+	if d.admitRuntime == nil {
+		d.admitRuntime = migrate.AdmitAppACLRuntime
+	}
+	if d.output == nil {
+		d.output = os.Stdout
+	}
+	return d
 }
