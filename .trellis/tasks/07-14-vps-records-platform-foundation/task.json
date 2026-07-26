@@ -21,7 +21,8 @@
   "children": [
     "07-24-app-acl-migration-runtime-handoff",
     "07-24-record-platform-recordauth-policy",
-    "07-24-record-platform-delivery-primitives"
+    "07-24-record-platform-delivery-primitives",
+    "07-27-app-acl-r2-privileged-transition"
   ],
   "parent": "07-13-vps-detail-experience-design",
   "relatedFiles": [],

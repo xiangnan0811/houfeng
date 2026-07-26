@@ -1,0 +1,16 @@
+{"file":".trellis/tasks/07-27-app-acl-r2-privileged-transition/prd.md","reason":"Review R2 acceptance criteria, frozen R1 boundary, and non-goals."}
+{"file":".trellis/tasks/07-27-app-acl-r2-privileged-transition/design.md","reason":"Review security-critical catalog, transaction, ACL, and runtime invariants."}
+{"file":".trellis/tasks/07-27-app-acl-r2-privileged-transition/implement.md","reason":"Review slice ordering, validation gates, and two-stage review requirements."}
+{"file":".trellis/tasks/07-27-app-acl-r2-privileged-transition/golden-vectors.md","reason":"Audit literal vector ownership and Slice 3 test isolation."}
+{"file":".trellis/tasks/07-14-vps-records-platform-foundation/prd.md","reason":"Check the child preserves parent frozen-R1 and integration boundaries."}
+{"file":".trellis/tasks/07-14-vps-records-platform-foundation/design.md","reason":"Check the child does not widen parent catalog or identity assumptions."}
+{"file":".trellis/spec/backend/index.md","reason":"Selects applicable backend database and quality standards for review."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Audits migrations, transactions, catalog ownership, and ACL invariants."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Audits fail-closed propagation and secret-safe error handling."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Checks command, migration/store, and test placement."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Sets independent quality gates and review evidence."}
+{"file":".trellis/spec/guides/index.md","reason":"Scopes the governance, reuse, and cross-layer review guides."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Checks non-main branch and delivery safeguards."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Traces CLI, migrator, catalog, and runtime boundary contracts."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Finds duplicated codec, reader, or predicate paths."}
+{"file":".trellis/workflow.md","reason":"Enforces context-manifest convention and spec/quality review phases."}
