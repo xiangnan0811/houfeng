@@ -33,6 +33,20 @@ platform integration fixture, Trellis reviews.
    before starting the next slice.
 
 All work stays on a non-main branch. Do not alter parent status or direct main.
+The remaining slices follow this gate prospectively. Slice 1's completed record
+below is historical: it has retrospective mutation-based RED evidence, not a
+chronological pre-implementation RED run, and that chronology must not be
+rewritten.
+
+### Governance Correction Gate Before Slice 3
+
+This governance correction is a strict serial admission gate. Do not start
+Slice 3 until an independent specification-compliance review of `task.json`,
+`prd.md`, and `implement.md` reports zero P0/P1/P2 findings with final verdict
+`SPEC_COMPLIANT`. Only then run an independent code-quality review of the same
+artifacts; it must report zero P0/P1/P2 findings with final verdict `APPROVE`.
+Resolve any finding and repeat both reviews in that order before admitting Slice
+3.
 
 ### Slice 1: Remove The Draft Atomically
 
@@ -47,14 +61,16 @@ All work stays on a non-main branch. Do not alter parent status or direct main.
 - Remove the related legacy configuration, environment, and CLI paths.
   Recovery-related symbols are not owned here.
 
-- [ ] RED: add tests that root migrations contain no 0052, R1 sees exactly 52,
-  and superseded legacy routes/env lookups are absent. Run:
+- [x] RETROSPECTIVE MUTATION RED ONLY: after the implementation existed,
+  mutation checks proved that reintroduced obsolete root R2 evidence fails the
+  Slice 1 gate. There was no chronological pre-implementation RED run, and none
+  is claimed. The final-state selector is:
 
 ```bash
 go test ./internal/center/store/migrate ./internal/center/platformmigrate ./cmd/houfeng-record-platform-admin -run 'NoRootR2|NoLegacyR2|FrozenR1' -count=1
 ```
 
-- [ ] GREEN: remove every draft occurrence and prove it:
+- [x] GREEN/final gate: remove every draft occurrence and prove it:
 
 ```bash
 go test ./internal/center/store/migrate ./internal/center/platformmigrate ./cmd/houfeng-record-platform-admin -run 'NoRootR2|NoLegacyR2|FrozenR1' -count=1
@@ -83,6 +99,15 @@ if [ -e db/migrations/0052_add_app_extension_hardening_receipt.sql ]; then
 fi
 ```
 
+> Evidence: `6e61bf8f` removed the obsolete root R2 implementation and
+> `e75bde2f` restored the frozen R1 surfaces. `ac3b27f6` made the regression
+> gate identifier-aware, and `328b42b4` is the final hermetic Slice 1 gate.
+> There was no chronological pre-implementation RED; the RED evidence is
+> retrospective mutation evidence only. Final specification-compliance review
+> reported zero P0/P1/P2 findings with final verdict `SPEC_COMPLIANT`; the
+> independent code-quality review reported zero P0/P1/P2 findings with final
+> verdict `APPROVE`.
+
 ### Slice 2: Isolated Source And R2 Canonical Codecs
 
 **Ownership:** Create `db/appaclr2/migrations/{embed.go,embed_test.go,
@@ -92,7 +117,7 @@ app_acl_r2_manifest.go,app_acl_r2_manifest_test.go}`. This slice owns only
 source and manifest vectors; it does not consume the `domain_body` or
 `l2_acl_body` literal corpus or own their decoders, malformed cases, or nesting.
 
-- [ ] RED: test root invisibility, frozen 52 prefix plus exact 0052, altered
+- [x] RED: test root invisibility, frozen 52 prefix plus exact 0052, altered
   bytes, R1 magic, 2/4 bindings, 205/207 tuples, noncanonical ordering, and
   checksum substitution. `app_acl_r2_source_test.go` owns source-set valid hex,
   bad-magic, truncated-length, substituted-digest, duplicate, reorder, and
@@ -101,20 +126,29 @@ source and manifest vectors; it does not consume the `domain_body` or
   ordering, malformed-length, and trailing-byte vectors. The domain/L2 literal
   corpus and all of its decoder, malformed, and nesting coverage are exclusive
   to Slice 3 receipt tests; PostgreSQL tests assert live catalog equality only.
-- [ ] GREEN: implement separate R2 magic/strict EOF parser, 53 source entries,
+- [x] GREEN: implement separate R2 magic/strict EOF parser, 53 source entries,
   three bindings, and the separate 206-tuple body/digest contract without
   calling or widening V1 code. Do not touch `ConvergeAppACLR1`, R1 readers,
   `AdmitAppACLRuntime`, or generic `migrate --scope app`.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 go test ./db/appaclr2/migrations ./internal/center/store/migrate -run 'AppACLR2(Source|Manifest|Privilege)' -count=1
 go test ./internal/center/store/migrate -run 'FrozenR1|Canonical.*V1' -count=1
 ```
 
+> Evidence: `cc8f0565` adds exactly the seven Slice 2 owned files. RED
+> evidence predates implementation; both listed selectors, affected-package
+> full tests, `go vet`, and `gofmt`/`git diff --check` passed. Independent
+> specification and quality reviews each approved with zero P0/P1/P2 findings.
+
 ### Slice 3: Receipt SQL, Snapshot, And Credential-Neutral Frozen R1 State Verification
 
-**Ownership:** Modify isolated 0052; create
+**Ownership:** Modify isolated
+`db/appaclr2/migrations/0052_app_acl_r2_privileged_transition.sql` together
+with `db/appaclr2/migrations/embed_test.go` and
+`internal/center/store/migrate/{app_acl_r2_source.go,
+app_acl_r2_source_test.go}`; create
 `app_acl_r2_receipt.go`, `app_acl_r2_receipt_test.go`,
 `app_acl_r2_receipt_postgres.go`, and
 `app_acl_r2_receipt_postgres_test.go`,
@@ -127,6 +161,12 @@ transaction-bound read helper is genuinely reusable. Slice 3
 `app_acl_r2_receipt_test.go` is the sole consumer of the task-local
 `domain_body`/`l2_acl_body` literal corpus and owns its decoder, malformed, and
 nesting coverage.
+
+Every Slice 3 edit to isolated `0052` is one atomic source-evidence change with
+those three existing files. Refresh and review the complete embedded SQL bytes,
+the full-file SHA-256, the `0052` entry in the fixed 53-source vector, and the
+resulting full source-set digest. Piecemeal edits and stale-vector reuse are not
+authorized.
 
 - [ ] RED: wrong allowed PG16 version/OID/direct session/superuser,
   missing/change domain identity, non-36 member count,
@@ -170,7 +210,8 @@ nesting coverage.
 - [ ] Run:
 
 ```bash
-go test ./internal/center/store/migrate ./internal/center/platformmigrate -run 'AppACLR2Receipt|FrozenAppACLR1State|RequireDirectFrozenAppACLR1Runtime|DomainIdentity|DirectRole' -count=1
+go test ./db/appaclr2/migrations ./internal/center/store/migrate ./internal/center/platformmigrate \
+  -run 'AppACLR2(Source|Receipt)|FrozenAppACLR1State|RequireDirectFrozenAppACLR1Runtime|DomainIdentity|DirectRole' -count=1
 ```
 
 The passing Slice 3 state-verifier gate is a prerequisite for the bootstrap
@@ -222,11 +263,18 @@ go test ./cmd/houfeng-record-platform-admin ./internal/center/platformmigrate ./
 ### Slice 5: Direct-Finalizer M2 Relations, 206-Tuple Catalog, And CAS
 
 **Ownership:** Create `app_acl_r2_finalize.go` and its test; modify isolated
-0052 and admin command files only for the separately named
-`finalize --scope app-acl-r2` route. This slice consumes the passed Slice 4
-reusable L1/M1/L2/M2/control-ACL relation/head predicate and builds finalizer
-behavior on it; it does not recreate catalog predicate or catalog-test
-ownership. The only M2 persistence owned by this slice is new
+`db/appaclr2/migrations/0052_app_acl_r2_privileged_transition.sql`,
+`db/appaclr2/migrations/embed_test.go`,
+`internal/center/store/migrate/{app_acl_r2_source.go,
+app_acl_r2_source_test.go}`, and admin command files only for the separately
+named `finalize --scope app-acl-r2` route. Every Slice 5 edit to isolated `0052`
+is one atomic source-evidence change with those three existing files: refresh
+and review the complete embedded SQL bytes, the full-file SHA-256, the `0052`
+entry in the fixed 53-source vector, and the resulting full source-set digest.
+Piecemeal edits and stale-vector reuse are not authorized. This slice consumes
+the passed Slice 4 reusable L1/M1/L2/M2/control-ACL relation/head predicate and
+builds finalizer behavior on it; it does not recreate catalog predicate or
+catalog-test ownership. The only M2 persistence owned by this slice is new
 `public.app_acl_r2_manifest_revisions` and
 `public.app_acl_r2_manifest_head`; 0051 V1 manifest relations are read-only
 predecessors and are never inserted into, altered, re-owned, or advanced.
@@ -253,7 +301,8 @@ predecessors and are never inserted into, altered, re-owned, or advanced.
 - [ ] Run:
 
 ```bash
-go test ./cmd/houfeng-record-platform-admin ./internal/center/store/migrate -run 'AppACLR2Finalize|AppACLR2Manifest' -count=1
+go test ./db/appaclr2/migrations ./cmd/houfeng-record-platform-admin ./internal/center/store/migrate \
+  -run 'AppACLR2(Source|Finalize|Manifest)' -count=1
 ```
 
 ### Slice 6: Separate R2 Admission And Startup Route
@@ -308,8 +357,8 @@ go test ./internal/center/store/migrate -run 'AppACLR2(State|RuntimeAdmission|St
 `internal/center/store/migrate/app_acl_r2_postgres_integration_test.go`; modify
 `scripts/test-record-platform-integration.sh` to require the exact selected
 PG16 image and reject every fallback; and modify `.github/workflows/ci.yml` to
-add the required three-lane release gate. These are planned ownership paths
-only in this planning task; do not change the Go test, script, or workflow now.
+add the required three-lane release gate. These paths are exclusive to Slice 7;
+Slices 1-6 do not change the Go test, script, or workflow.
 
 - [ ] RED/GREEN: cover R1 -> PREPARED -> FINALIZED; every wrong identity,
   application-source, member/dependency, domain, owner, ACL, and state failure;

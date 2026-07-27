@@ -18,10 +18,9 @@ as a healthy R1 or R2 deployment.
 
 - `0051`, frozen R1 APIs/parsers/runners, the R1 52-source snapshot, and the
   R1 204-tuple contract are immutable.
-- The currently uncommitted root `0052` implementation, receipt grammar/tests,
-  R2 compiler/source delta, and related config/environment/CLI routes are
-  non-authoritative. Future implementation removes/replaces them atomically;
-  it must not adopt them.
+- The obsolete root `0052` draft, receipt grammar/tests, R2 compiler/source
+  delta, and related config/environment/CLI routes were non-authoritative.
+  Slice 1 removed them atomically; they must not be reintroduced or adopted.
 - R2 uses one isolated source boundary that root generic handling and R1
   runners cannot enumerate or apply. Its immutable receipt/ledger retains the
   canonical R1/R2 application source-set bodies and digests, including the
@@ -99,8 +98,10 @@ as a healthy R1 or R2 deployment.
   ownership repair, or clone detection beyond local identity comparison.
 - No change to frozen R1 codecs, APIs, parsers, runners, 52-source contract,
   or 204-tuple compiler.
-- This task authorizes planning only. It remains `planning` until parent review
-  and a later explicit implementation request.
+- Planning completed before task activation. Implementation is authorized and
+  active on the non-main `codex/vps-records-platform-foundation-integration`
+  integration branch. This does not change the parent task's status or
+  authorize direct `main`/`master` work.
 
 ## Acceptance Criteria
 
@@ -175,4 +176,4 @@ as a healthy R1 or R2 deployment.
 
 This child depends on `07-24-app-acl-migration-runtime-handoff` as the frozen
 R1 baseline and on parent `07-14-vps-records-platform-foundation` for
-integration approval. It has no implementation authorization yet.
+integration approval. Parent task status remains unchanged.
