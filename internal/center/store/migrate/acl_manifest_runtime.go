@@ -79,6 +79,13 @@ func verifyAppACLManifestRuntimeSnapshotV1(
 	if !bytes.Equal(latest.CanonicalPrivilegeSet, compiledPrivilegeSet) {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("latest app ACL manifest privilege set does not match frozen r1 compiler output")
 	}
+	frozenR1MigrationSet, err := CanonicalMigrationSetBodyV1(appACLR1MigrationSourceContract[:])
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("build frozen r1 migration source contract: %w", err)
+	}
+	if !bytes.Equal(latest.CanonicalMigrationSet, frozenR1MigrationSet) {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("latest app ACL manifest migration set does not match frozen r1 migration source contract")
+	}
 	var runtimeRole, adminRole string
 	for _, binding := range privilegeSet.RoleBindings {
 		switch binding.Subject {

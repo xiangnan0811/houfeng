@@ -82,7 +82,7 @@ func ConvergeAppACLR1(
 	if db == nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("app ACL convergence has no PostgreSQL pool")
 	}
-	sources, err := snapshotMigrationSources(migrations.FS)
+	sources, err := snapshotMigrationSources(newAppACLR1MigrationFS(migrations.FS))
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("snapshot embedded application migrations: %w", err)
 	}

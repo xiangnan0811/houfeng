@@ -16,16 +16,20 @@ import (
 	"houfeng/db/migrations"
 )
 
-func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
+const frozenR1MigrationSourceCount = 52
+
+func TestNamesListsOnlyFrozenR1LegacySources(t *testing.T) {
 	names, err := Names()
 	if err != nil {
 		t.Fatalf("Names() error = %v", err)
 	}
 
-	if len(names) < 10 {
-		t.Fatalf("len(Names()) = %d, want at least 10", len(names))
+	if got, want := len(names), len(appACLR1MigrationSourceContract); got != want {
+		t.Fatalf("len(Names()) = %d, want frozen r1 source count %d", got, want)
 	}
-
+	if got, want := names[len(names)-1], "0051_create_record_platform_foundation.sql"; got != want {
+		t.Fatalf("final legacy migration = %q, want frozen r1 tail %q", got, want)
+	}
 	if names[0] != "0001_initial_schema.sql" {
 		t.Fatalf("first migration = %q, want %q", names[0], "0001_initial_schema.sql")
 	}
@@ -96,6 +100,56 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	}
 }
 
+func TestNoRootR2Migration(t *testing.T) {
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatalf("ReadDir embedded migrations: %v", err)
+	}
+
+	rootDraftName := strings.Join([]string{"0052", "add", "app", "extension", "hardening", "receipt.sql"}, "_")
+	sqlFiles := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		sqlFiles++
+		if entry.Name() == rootDraftName {
+			t.Fatalf("root migrations expose obsolete draft %q", rootDraftName)
+		}
+	}
+	if got, want := sqlFiles, frozenR1MigrationSourceCount; got != want {
+		t.Fatalf("root migration count = %d, want frozen r1 count %d", got, want)
+	}
+}
+
+func TestFrozenR1SeesExactly52Sources(t *testing.T) {
+	if got, want := len(appACLR1MigrationSourceContract), frozenR1MigrationSourceCount; got != want {
+		t.Fatalf("frozen r1 contract count = %d, want %d", got, want)
+	}
+
+	frozenNames, err := Names()
+	if err != nil {
+		t.Fatalf("Names() error = %v", err)
+	}
+	if got, want := len(frozenNames), frozenR1MigrationSourceCount; got != want {
+		t.Fatalf("frozen r1 source count = %d, want %d", got, want)
+	}
+
+	rootSnapshot, err := snapshotMigrationSources(migrations.FS)
+	if err != nil {
+		t.Fatalf("snapshotMigrationSources(root) error = %v", err)
+	}
+	if got, want := len(rootSnapshot.names), frozenR1MigrationSourceCount; got != want {
+		t.Fatalf("root source count = %d, want frozen r1 count %d", got, want)
+	}
+	if !reflect.DeepEqual(rootSnapshot.names, frozenNames) {
+		t.Fatalf("root source names = %#v, want frozen r1 names %#v", rootSnapshot.names, frozenNames)
+	}
+	if err := validateAppACLR1FrozenSourceSnapshot(rootSnapshot); err != nil {
+		t.Fatalf("validateAppACLR1FrozenSourceSnapshot(root) error = %v", err)
+	}
+}
+
 func TestSnapshotMigrationSourcesCapturesExactLexicalEmbeddedSet(t *testing.T) {
 	embeddedEntries, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
@@ -114,8 +168,8 @@ func TestSnapshotMigrationSourcesCapturesExactLexicalEmbeddedSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("snapshotMigrationSources() error = %v", err)
 	}
-	if len(snapshot.names) != 52 {
-		t.Fatalf("snapshot migration name count = %d, want 52", len(snapshot.names))
+	if got, want := len(snapshot.names), frozenR1MigrationSourceCount; got != want {
+		t.Fatalf("snapshot migration name count = %d, want frozen r1 count %d", got, want)
 	}
 	if !reflect.DeepEqual(snapshot.names, wantNames) {
 		t.Fatalf("snapshot migration names = %#v, want embedded lexical names %#v", snapshot.names, wantNames)
@@ -127,6 +181,9 @@ func TestSnapshotMigrationSourcesCapturesExactLexicalEmbeddedSet(t *testing.T) {
 	}
 	if snapshot.names[3] != "0004_add_node_onboarding_binding_state.sql" || snapshot.names[4] != "0004_add_observation_provenance.sql" {
 		t.Fatalf("snapshot duplicate 0004 lexical order = %q, %q", snapshot.names[3], snapshot.names[4])
+	}
+	if got, want := snapshot.names[len(snapshot.names)-1], appACLR1MigrationSourceContract[len(appACLR1MigrationSourceContract)-1].Filename; got != want {
+		t.Fatalf("snapshot final migration = %q, want frozen r1 tail %q", got, want)
 	}
 	entries, err := ParseCanonicalMigrationSetBodyV1(snapshot.canonicalSet)
 	if err != nil {

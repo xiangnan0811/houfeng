@@ -29,14 +29,15 @@ func AdmitAppACLRuntime(ctx context.Context, db *pgxpool.Pool) error {
 	if db == nil {
 		return fmt.Errorf("app ACL runtime admission has no PostgreSQL pool")
 	}
+	r1Migrations := newAppACLR1MigrationFS(migrations.FS)
 	return admitAppACLRuntimeWithDependencies(ctx, appACLRuntimeAdmissionDependencies{
-		embeddedMigrations: migrations.FS,
+		embeddedMigrations: r1Migrations,
 		beginTx: func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
 			return db.BeginTx(ctx, options)
 		},
 		readManifest: readAppACLManifestRuntimeSnapshotInTxV1,
 		verifyManifest: func(snapshot AppACLManifestRuntimeSnapshotV1) (AppACLManifestPersistedV1, error) {
-			return verifyAppACLManifestRuntimeSnapshotV1(snapshot, migrations.FS)
+			return verifyAppACLManifestRuntimeSnapshotV1(snapshot, r1Migrations)
 		},
 		readCatalog:   readAppACLEffectiveCatalogSnapshotInTxR1,
 		verifyCatalog: VerifyAppACLEffectiveCatalogSnapshotR1,

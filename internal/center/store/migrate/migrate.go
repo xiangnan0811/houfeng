@@ -40,11 +40,31 @@ type poolStore struct {
 }
 
 func Names() ([]string, error) {
-	return namesFromSources(migrations.FS)
+	return namesFromSources(legacyMigrationSources())
 }
 
 func Apply(ctx context.Context, db *pgxpool.Pool) error {
-	return applyFS(ctx, poolStore{db: db}, migrations.FS)
+	return applyLegacyFS(ctx, poolStore{db: db}, legacyMigrationSources())
+}
+
+// legacyMigrationSources is the flags-off APP runner's explicit source
+// boundary. applyFS remains parameterized so a separately admitted future
+// source revision can be introduced without widening the legacy r1 runner.
+func legacyMigrationSources() fs.FS {
+	return newAppACLR1MigrationFS(migrations.FS)
+}
+
+// applyLegacyFS closes the flags-off runner over the frozen r1 source bytes
+// before it creates or adopts the ambient migration ledger.
+func applyLegacyFS(ctx context.Context, store migrationStore, fsys fs.FS) error {
+	snapshot, err := snapshotMigrationSources(fsys)
+	if err != nil {
+		return fmt.Errorf("snapshot legacy r1 migration sources: %w", err)
+	}
+	if err := validateAppACLR1FrozenSourceSnapshot(snapshot); err != nil {
+		return fmt.Errorf("validate legacy r1 migration sources: %w", err)
+	}
+	return applyMigrationSourceSnapshot(ctx, store, snapshot)
 }
 
 func namesFromSources(fsys fs.FS) ([]string, error) {
@@ -129,10 +149,15 @@ func snapshotMigrationSources(fsys fs.FS) (migrationSourceSnapshot, error) {
 }
 
 func applyFS(ctx context.Context, store migrationStore, fsys fs.FS) error {
-	sources, err := migrationSources(fsys)
+	snapshot, err := snapshotMigrationSources(fsys)
 	if err != nil {
 		return err
 	}
+	return applyMigrationSourceSnapshot(ctx, store, snapshot)
+}
+
+func applyMigrationSourceSnapshot(ctx context.Context, store migrationStore, snapshot migrationSourceSnapshot) error {
+	sources := snapshot.sources
 	if err := store.EnsureLedger(ctx, sources); err != nil {
 		return fmt.Errorf("ensure migration ledger: %w", err)
 	}
@@ -146,11 +171,7 @@ func applyFS(ctx context.Context, store migrationStore, fsys fs.FS) error {
 		}
 	}
 
-	names, err := namesFromSources(fsys)
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
+	for _, name := range snapshot.names {
 		source := sources[name]
 		if checksum, ok := applied[name]; ok {
 			if checksum != source.checksum {

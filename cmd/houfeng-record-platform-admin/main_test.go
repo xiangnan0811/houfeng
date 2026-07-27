@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,6 +13,31 @@ import (
 
 	"houfeng/internal/center/platformmigrate"
 )
+
+func TestNoLegacyR2RoutesAndEnvironmentLookups(t *testing.T) {
+	root := filepath.Join("..", "..")
+	paths := []string{
+		filepath.Join(root, "cmd", "houfeng-record-platform-admin", "main.go"),
+		filepath.Join(root, "internal", "center", "platformmigrate", "app_scope_config.go"),
+	}
+	forbidden := []string{
+		strings.Join([]string{"app", "extension", "hardening"}, "-"),
+		strings.Join([]string{"App", "Extension", "Hardening"}, ""),
+		strings.Join([]string{"HOUFENG", "RECORD", "PLATFORM", "APP", "EXTENSION", "HARDENER"}, "_"),
+	}
+
+	for _, path := range paths {
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%q) error = %v", path, err)
+		}
+		for _, token := range forbidden {
+			if strings.Contains(string(contents), token) {
+				t.Fatalf("legacy APP root token %q remains in %q", token, path)
+			}
+		}
+	}
+}
 
 func TestMigrateAppRejectsMissingAllowedConfigurationWithoutLeakingOtherDSN(t *testing.T) {
 	const forbiddenDSN = "postgres://owner:outside-secret@example.invalid/houfeng"

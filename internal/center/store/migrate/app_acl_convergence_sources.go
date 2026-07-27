@@ -63,9 +63,9 @@ var appACLR1MigrationSourceContract = [...]MigrationChecksumEntry{
 	{Filename: "0051_create_record_platform_foundation.sql", Checksum: [32]byte{0x50, 0x3d, 0x58, 0x67, 0x0d, 0xc7, 0x90, 0xc4, 0xb8, 0x52, 0xbf, 0xb5, 0x8c, 0xf9, 0x3d, 0x2b, 0x81, 0x6c, 0x1c, 0xe9, 0x56, 0x95, 0x85, 0x67, 0xdc, 0x60, 0x5c, 0xb2, 0x8d, 0x5c, 0xd2, 0x3f}},
 }
 
-// validateAppACLR1FrozenSourceSnapshot makes the scoped r1 writer a
-// closed-world consumer of the exact 0001...0051 source set. Generic migration
-// discovery intentionally remains dynamic for legacy Apply.
+// validateAppACLR1FrozenSourceSnapshot makes every r1 consumer a closed-world
+// consumer of the exact 0001...0051 source set. Generic applyFS remains
+// parameterized for separately admitted later source revisions.
 func validateAppACLR1FrozenSourceSnapshot(snapshot migrationSourceSnapshot) error {
 	expected := appACLR1MigrationSourceContract[:]
 	if len(snapshot.names) != len(expected) || len(snapshot.sources) != len(expected) {

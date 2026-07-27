@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"io"
 	"io/fs"
+	"math"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -297,7 +299,7 @@ func TestConvergeAppACLR1WithDependenciesRejectsNonR1SourceSetBeforeBeginningTra
 }
 
 func TestConvergeAppACLR1WithDependenciesAcceptsExactR1SourceSetAtTransactionBoundary(t *testing.T) {
-	sources, err := snapshotMigrationSources(migrations.FS)
+	sources, err := snapshotMigrationSources(appACLR1InjectedMigrationFS(t))
 	if err != nil {
 		t.Fatalf("snapshotMigrationSources() error = %v", err)
 	}
@@ -324,22 +326,82 @@ func TestConvergeAppACLR1WithDependenciesAcceptsExactR1SourceSetAtTransactionBou
 
 func appACLR1InjectedMigrationFS(t *testing.T) fstest.MapFS {
 	t.Helper()
-	entries, err := fs.ReadDir(migrations.FS, ".")
-	if err != nil {
-		t.Fatalf("read embedded migration entries: %v", err)
-	}
-	fsys := make(fstest.MapFS, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-		data, err := migrations.FS.ReadFile(entry.Name())
+	fsys := make(fstest.MapFS, len(appACLR1MigrationSourceContract))
+	for _, expected := range appACLR1MigrationSourceContract {
+		data, err := migrations.FS.ReadFile(expected.Filename)
 		if err != nil {
-			t.Fatalf("read embedded migration %q: %v", entry.Name(), err)
+			t.Fatalf("read frozen r1 migration source %q: %v", expected.Filename, err)
 		}
-		fsys[entry.Name()] = &fstest.MapFile{Data: data}
+		fsys[expected.Filename] = &fstest.MapFile{Data: append([]byte(nil), data...)}
 	}
 	return fsys
+}
+
+func TestAppACLR1MigrationFSExposesOnlyFrozenSourceContract(t *testing.T) {
+	r1Migrations := newAppACLR1MigrationFS(migrations.FS)
+	sources, err := snapshotMigrationSources(r1Migrations)
+	if err != nil {
+		t.Fatalf("snapshotMigrationSources() error = %v", err)
+	}
+	if err := validateAppACLR1FrozenSourceSnapshot(sources); err != nil {
+		t.Fatalf("validateAppACLR1FrozenSourceSnapshot() error = %v", err)
+	}
+
+	entries, err := fs.ReadDir(r1Migrations, ".")
+	if err != nil {
+		t.Fatalf("fs.ReadDir() error = %v", err)
+	}
+	if got, want := len(entries), frozenR1MigrationSourceCount; got != want {
+		t.Fatalf("r1 migration directory entries = %d, want %d", got, want)
+	}
+	root, err := r1Migrations.Open(".")
+	if err != nil {
+		t.Fatalf("Open(\".\") error = %v", err)
+	}
+	defer root.Close()
+	directory, ok := root.(fs.ReadDirFile)
+	if !ok {
+		t.Fatalf("Open(\".\") = %T, want fs.ReadDirFile", root)
+	}
+	rootEntries, err := directory.ReadDir(-1)
+	if err != nil {
+		t.Fatalf("ReadDir(-1) error = %v", err)
+	}
+	if got, want := len(rootEntries), frozenR1MigrationSourceCount; got != want {
+		t.Fatalf("root directory entries = %d, want %d", got, want)
+	}
+}
+
+func TestAppACLR1MigrationDirectoryReadDirBoundsLargeCountsWithoutOverflow(t *testing.T) {
+	r1Migrations := newAppACLR1MigrationFS(migrations.FS)
+	root, err := r1Migrations.Open(".")
+	if err != nil {
+		t.Fatalf("Open(\".\") error = %v", err)
+	}
+	defer root.Close()
+	directory, ok := root.(fs.ReadDirFile)
+	if !ok {
+		t.Fatalf("Open(\".\") = %T, want fs.ReadDirFile", root)
+	}
+
+	first, err := directory.ReadDir(1)
+	if err != nil {
+		t.Fatalf("ReadDir(1) error = %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("ReadDir(1) returned %d entries, want 1", len(first))
+	}
+
+	remaining, err := directory.ReadDir(math.MaxInt)
+	if err != nil {
+		t.Fatalf("ReadDir(math.MaxInt) error = %v", err)
+	}
+	if got, want := len(remaining), len(appACLR1MigrationSourceContract)-1; got != want {
+		t.Fatalf("ReadDir(math.MaxInt) returned %d entries, want remaining %d", got, want)
+	}
+	if _, err := directory.ReadDir(1); !errors.Is(err, io.EOF) {
+		t.Fatalf("ReadDir(1) after exhaustion error = %v, want io.EOF", err)
+	}
 }
 
 func TestPendingMigrationSourceNamesRequireExactAppliedPrefix(t *testing.T) {
@@ -538,7 +600,7 @@ func TestAppACLConvergenceDCLStatementsRevokeFixedSurfaceAndGrantOnlyCompilerTup
 
 func TestConvergeAppACLR1WithDependenciesRetriesWholeSerializableTransaction(t *testing.T) {
 	_, runtimeSnapshot, compiledPrivileges := validAppACLManifestRuntimeFixture(t)
-	sources, err := snapshotMigrationSources(migrations.FS)
+	sources, err := snapshotMigrationSources(appACLR1InjectedMigrationFS(t))
 	if err != nil {
 		t.Fatalf("snapshotMigrationSources() error = %v", err)
 	}
