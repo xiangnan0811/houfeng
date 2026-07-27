@@ -114,16 +114,23 @@ func TestCanonicalMigrationSetFromFSCoversEveryEmbeddedMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseCanonicalMigrationSetBodyV1() error = %v", err)
 	}
-	if got, want := len(entries), frozenR1MigrationSourceCount; got != want {
-		t.Fatalf("canonical entry count = %d, want frozen r1 count %d", got, want)
+	names, err := Names()
+	if err != nil {
+		t.Fatalf("Names() error = %v", err)
 	}
-	for _, entry := range entries {
-		payload, err := fs.ReadFile(migrations.FS, entry.Filename)
-		if err != nil {
-			t.Fatalf("read embedded migration %q: %v", entry.Filename, err)
+	if len(entries) != len(names) {
+		t.Fatalf("canonical entry count = %d, want %d embedded migrations", len(entries), len(names))
+	}
+	for index, name := range names {
+		if entries[index].Filename != name {
+			t.Fatalf("canonical entry %d filename = %q, want %q", index, entries[index].Filename, name)
 		}
-		if want := sha256.Sum256(payload); entry.Checksum != want {
-			t.Fatalf("canonical entry %q checksum = %x, want %x", entry.Filename, entry.Checksum, want)
+		payload, err := fs.ReadFile(migrations.FS, name)
+		if err != nil {
+			t.Fatalf("read embedded migration %q: %v", name, err)
+		}
+		if want := sha256.Sum256(payload); entries[index].Checksum != want {
+			t.Fatalf("canonical entry %q checksum = %x, want %x", name, entries[index].Checksum, want)
 		}
 	}
 }

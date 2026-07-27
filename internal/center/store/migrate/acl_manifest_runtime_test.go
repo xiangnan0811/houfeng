@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
-
-	"houfeng/db/migrations"
 )
 
 func TestVerifyPersistedAppACLManifestRuntimeV1AcceptsExactChainAndMigrationMaps(t *testing.T) {
@@ -302,13 +300,8 @@ func TestVerifyPersistedAppACLManifestRuntimeV1RejectsNilEmbeddedMigrationFS(t *
 
 func validAppACLManifestRuntimeFixture(t *testing.T) (fstest.MapFS, AppACLManifestRuntimeSnapshotV1, []byte) {
 	t.Helper()
-	fsys := make(fstest.MapFS, len(appACLR1MigrationSourceContract))
-	for _, expected := range appACLR1MigrationSourceContract {
-		body, err := migrations.FS.ReadFile(expected.Filename)
-		if err != nil {
-			t.Fatalf("read frozen r1 migration source %q: %v", expected.Filename, err)
-		}
-		fsys[expected.Filename] = &fstest.MapFile{Data: append([]byte(nil), body...)}
+	fsys := fstest.MapFS{
+		"0001_create_schema.sql": {Data: []byte("create table example (id bigint primary key);\n")},
 	}
 	migrationBody, err := CanonicalMigrationSetFromFS(fsys)
 	if err != nil {

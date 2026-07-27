@@ -16,25 +16,52 @@ import (
 
 func TestNoLegacyR2RoutesAndEnvironmentLookups(t *testing.T) {
 	root := filepath.Join("..", "..")
-	paths := []string{
-		filepath.Join(root, "cmd", "houfeng-record-platform-admin", "main.go"),
-		filepath.Join(root, "internal", "center", "platformmigrate", "app_scope_config.go"),
-	}
+	underscore := func(parts ...string) string { return strings.Join(parts, "_") }
+	camel := func(parts ...string) string { return strings.Join(parts, "") }
 	forbidden := []string{
+		underscore("0052", "add", "app", "extension", "hardening", "receipt"),
+		underscore("app", "extension", "hardening", "receipt"),
+		camel("App", "Extension", "Hardening"),
+		camel("App", "Extension", "Hardener"),
+		camel("app", "Extension", "Hardening"),
+		camel("app", "Extension", "Hardener"),
+		camel("app", "ACL", "R2", "Migration", "Source", "Contract"),
+		camel("App", "ACL", "R2", "Frozen", "Source", "Snapshot"),
+		camel("validate", "App", "ACL", "R2", "Frozen", "Source", "Snapshot"),
+		camel("App", "ACL", "Privilege", "Set", "R2"),
+		camel("app", "ACL", "Privileges", "R2"),
+		camel("Compile", "App", "ACL", "Privilege", "Set", "R2"),
+		underscore("HOUFENG", "RECORD", "PLATFORM", "APP", "EXTENSION", "HARDENER", "DATABASE", "URL"),
+		underscore("HOUFENG", "RECORD", "PLATFORM", "APP", "EXTENSION", "HARDENER", "ROLE"),
+		underscore("APP", "EXTENSION", "HARDENING"),
+		underscore("APP", "EXTENSION", "HARDENER"),
 		strings.Join([]string{"app", "extension", "hardening"}, "-"),
-		strings.Join([]string{"App", "Extension", "Hardening"}, ""),
-		strings.Join([]string{"HOUFENG", "RECORD", "PLATFORM", "APP", "EXTENSION", "HARDENER"}, "_"),
 	}
 
-	for _, path := range paths {
-		contents, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("ReadFile(%q) error = %v", path, err)
-		}
-		for _, token := range forbidden {
-			if strings.Contains(string(contents), token) {
-				t.Fatalf("legacy APP root token %q remains in %q", token, path)
+	if _, err := os.Stat(filepath.Join(root, "db", "migrations", forbidden[0]+".sql")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("obsolete root migration presence check error = %v, want not exist", err)
+	}
+	for _, searchRoot := range []string{"db", "internal", "cmd"} {
+		searchPath := filepath.Join(root, searchRoot)
+		if err := filepath.Walk(searchPath, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
 			}
+			if info.IsDir() {
+				return nil
+			}
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, token := range forbidden {
+				if strings.Contains(string(contents), token) {
+					t.Errorf("obsolete APP root token %q remains in %q", token, path)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("walk %q: %v", searchPath, err)
 		}
 	}
 }

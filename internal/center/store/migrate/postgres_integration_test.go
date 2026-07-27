@@ -51,36 +51,9 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 		t.Fatalf("fresh runtime snapshot = (%q, %q, %q), want (%q, %q, %q)", fresh.DatabaseName, fresh.SessionUser, fresh.CurrentUser, databaseName, sessionUser, currentUser)
 	}
 
-	unexpectedSourceFS := appACLR1InjectedMigrationFS(t)
-	const unexpectedSourceFilename = "0052_unexpected_app_acl_source.sql"
-	unexpectedSourceFS[unexpectedSourceFilename] = &fstest.MapFile{Data: []byte("-- synthetic source used to prove frozen r1 rejection\nselect 52;\n")}
-
-	migrationBody, err := CanonicalMigrationSetFromFS(unexpectedSourceFS)
+	migrationBody, err := CanonicalMigrationSetFromFS(migrations.FS)
 	if err != nil {
 		t.Fatalf("CanonicalMigrationSetFromFS() error = %v", err)
-	}
-	migrationEntries, err := ParseCanonicalMigrationSetBodyV1(migrationBody)
-	if err != nil {
-		t.Fatalf("ParseCanonicalMigrationSetBodyV1() error = %v", err)
-	}
-	if got, want := len(migrationEntries), frozenR1MigrationSourceCount+1; got != want {
-		t.Fatalf("synthetic migration entry count = %d, want %d", got, want)
-	}
-	var unexpectedSource MigrationChecksumEntry
-	for _, entry := range migrationEntries {
-		if entry.Filename == unexpectedSourceFilename {
-			unexpectedSource = entry
-			break
-		}
-	}
-	if unexpectedSource.Filename == "" {
-		t.Fatalf("synthetic migration source %q was not enumerated", unexpectedSourceFilename)
-	}
-	if _, err := db.Exec(ctx, `
-		insert into schema_migrations (name, checksum)
-		values ($1, $2)
-	`, unexpectedSource.Filename, hexChecksum(unexpectedSource.Checksum)); err != nil {
-		t.Fatalf("insert malformed extra migration ledger entry: %v", err)
 	}
 	privilegeBody, err := CompileAppACLPrivilegeSetR1(databaseName,
 		[]AppACLRoleBinding{
@@ -153,8 +126,8 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 	if snapshot.DatabaseName != databaseName || snapshot.SessionUser != sessionUser || snapshot.CurrentUser != currentUser {
 		t.Fatalf("runtime snapshot = (%q, %q, %q), want (%q, %q, %q)", snapshot.DatabaseName, snapshot.SessionUser, snapshot.CurrentUser, databaseName, sessionUser, currentUser)
 	}
-	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, reader, unexpectedSourceFS); err == nil || !strings.Contains(err.Error(), "frozen r1 migration source contract") {
-		t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() error = %v, want explicit 53-source/r1-catalog hybrid rejection", err)
+	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, reader, migrations.FS); err != nil {
+		t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() error = %v", err)
 	}
 
 	t.Run("rejects SET ROLE identity bypass", func(t *testing.T) {
@@ -351,9 +324,8 @@ func TestPostgresIntegrationAppACLManifestRevisionSQLCheckBindsMigratorCatalogRo
 func TestPostgresIntegrationEnsureAppACLManifestGenesisV1(t *testing.T) {
 	ctx := context.Background()
 	db := openTemporaryPostgresDatabase(t, ctx)
-	r1Migrations := appACLR1InjectedMigrationFS(t)
-	if err := applyFS(ctx, poolStore{db: db}, r1Migrations); err != nil {
-		t.Fatalf("applyFS() error = %v", err)
+	if err := Apply(ctx, db); err != nil {
+		t.Fatalf("Apply() error = %v", err)
 	}
 	var databaseName, sessionUser, currentUser string
 	if err := db.QueryRow(ctx, `select current_database(), session_user, current_user`).Scan(&databaseName, &sessionUser, &currentUser); err != nil {
@@ -372,7 +344,7 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1(t *testing.T) {
 		t.Fatalf("CompileAppACLPrivilegeSetR1() error = %v", err)
 	}
 
-	first, err := EnsureAppACLManifestGenesisV1(ctx, db, r1Migrations, privilegeBody, "houfeng_migrator")
+	first, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody, "houfeng_migrator")
 	if err != nil {
 		t.Fatalf("EnsureAppACLManifestGenesisV1() first error = %v", err)
 	}
@@ -428,11 +400,11 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1(t *testing.T) {
 	if headRevision != 1 || !bytes.Equal(headDigest, first.ManifestDigest[:]) {
 		t.Fatalf("genesis head = (%d, %x), want (1, %x)", headRevision, headDigest, first.ManifestDigest)
 	}
-	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, NewPostgresAppACLManifestRuntimeReader(db), r1Migrations); err != nil {
+	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, NewPostgresAppACLManifestRuntimeReader(db), migrations.FS); err != nil {
 		t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() after genesis error = %v", err)
 	}
 
-	second, err := EnsureAppACLManifestGenesisV1(ctx, db, r1Migrations, privilegeBody, "houfeng_migrator")
+	second, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody, "houfeng_migrator")
 	if err != nil {
 		t.Fatalf("EnsureAppACLManifestGenesisV1() repeat error = %v", err)
 	}
@@ -462,7 +434,7 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalPrivilegeSetBodyV1() drifting error = %v", err)
 	}
-	if _, err := EnsureAppACLManifestGenesisV1(ctx, db, r1Migrations, driftingPrivilegeBody, "houfeng_migrator"); err == nil || !strings.Contains(err.Error(), "does not match") {
+	if _, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, driftingPrivilegeBody, "houfeng_migrator"); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("EnsureAppACLManifestGenesisV1() drifting privilege error = %v, want rejection", err)
 	}
 	assertSingleIntValue(t, ctx, db, `select count(*)::int from public.app_acl_manifest_revisions`, 1)
@@ -470,7 +442,6 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1(t *testing.T) {
 
 func TestPostgresIntegrationEnsureAppACLManifestGenesisV1RejectsLedgerAndAdvancedChain(t *testing.T) {
 	ctx := context.Background()
-	r1Migrations := appACLR1InjectedMigrationFS(t)
 	privilegeBody, err := CanonicalPrivilegeSetBodyV1(
 		[]AppACLRoleBinding{
 			{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
@@ -491,7 +462,7 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1RejectsLedgerAndAdvance
 			t.Fatalf("delete applied migration to simulate drift: %v", err)
 		}
 
-		if _, err := EnsureAppACLManifestGenesisV1(ctx, db, r1Migrations, privilegeBody, "houfeng_migrator"); err == nil || !strings.Contains(err.Error(), "does not match embedded migrations") {
+		if _, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody, "houfeng_migrator"); err == nil || !strings.Contains(err.Error(), "does not match embedded migrations") {
 			t.Fatalf("EnsureAppACLManifestGenesisV1() ledger drift error = %v, want embedded-map rejection", err)
 		}
 		assertSingleIntValue(t, ctx, db, `select count(*)::int from public.app_acl_manifest_revisions`, 0)
@@ -502,7 +473,7 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1RejectsLedgerAndAdvance
 		if err := Apply(ctx, db); err != nil {
 			t.Fatalf("Apply() error = %v", err)
 		}
-		first, err := EnsureAppACLManifestGenesisV1(ctx, db, r1Migrations, privilegeBody, "houfeng_migrator")
+		first, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody, "houfeng_migrator")
 		if err != nil {
 			t.Fatalf("EnsureAppACLManifestGenesisV1() first error = %v", err)
 		}
@@ -547,7 +518,7 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1RejectsLedgerAndAdvance
 			t.Fatalf("advance app ACL manifest head: %v", err)
 		}
 
-		if _, err := EnsureAppACLManifestGenesisV1(ctx, db, r1Migrations, privilegeBody, "houfeng_migrator"); err == nil || !strings.Contains(err.Error(), "already advanced") {
+		if _, err := EnsureAppACLManifestGenesisV1(ctx, db, migrations.FS, privilegeBody, "houfeng_migrator"); err == nil || !strings.Contains(err.Error(), "already advanced") {
 			t.Fatalf("EnsureAppACLManifestGenesisV1() advanced-chain error = %v, want rejection", err)
 		}
 		assertSingleIntValue(t, ctx, db, `select count(*)::int from public.app_acl_manifest_revisions`, 2)
@@ -557,40 +528,12 @@ func TestPostgresIntegrationEnsureAppACLManifestGenesisV1RejectsLedgerAndAdvance
 func TestPostgresIntegrationAppliesFreshMigrations(t *testing.T) {
 	ctx := context.Background()
 	db := openTemporaryPostgresDatabase(t, ctx)
-	type legacyApplyState struct {
-		ledgerCount           int
-		manifestRevisionCount int
-		manifestHeadRowCount  int
-	}
-	readLegacyApplyState := func() legacyApplyState {
-		var state legacyApplyState
-		if err := db.QueryRow(ctx, `
-			select
-				(select count(*)::int from schema_migrations),
-				(select count(*)::int from public.app_acl_manifest_revisions),
-				(select count(*)::int from public.app_acl_manifest_head)
-		`).Scan(
-			&state.ledgerCount,
-			&state.manifestRevisionCount,
-			&state.manifestHeadRowCount,
-		); err != nil {
-			t.Fatalf("read legacy Apply() state: %v", err)
-		}
-		return state
-	}
 
 	if err := Apply(ctx, db); err != nil {
 		t.Fatalf("Apply() on fresh postgres error = %v", err)
 	}
-	firstState := readLegacyApplyState()
-	if firstState.ledgerCount != 52 {
-		t.Fatalf("first legacy Apply() state = %#v, want 52 ledger rows", firstState)
-	}
 	if err := Apply(ctx, db); err != nil {
 		t.Fatalf("Apply() second run on fresh postgres error = %v", err)
-	}
-	if secondState := readLegacyApplyState(); secondState != firstState {
-		t.Fatalf("second legacy Apply() state = %#v, want unchanged %#v", secondState, firstState)
 	}
 
 	assertSingleStringValue(t, ctx, db, "select to_regclass('public.monitoring_instances')::text", "monitoring_instances")
@@ -603,46 +546,6 @@ func TestPostgresIntegrationAppliesFreshMigrations(t *testing.T) {
 		"idx_monitoring_instance_command_action_audit_global_time",
 	} {
 		assertSingleStringValue(t, ctx, db, "select to_regclass('public."+indexName+"')::text", indexName)
-	}
-}
-
-func TestPostgresIntegrationApplyRejectsTamperedFrozenR1SourcesBeforePersistentWrites(t *testing.T) {
-	ctx := context.Background()
-	db := openTemporaryPostgresDatabase(t, ctx)
-	tamperedSources := appACLR1InjectedMigrationFS(t)
-	tamperedSources["0001_initial_schema.sql"].Data = append(
-		append([]byte(nil), tamperedSources["0001_initial_schema.sql"].Data...),
-		[]byte("\n-- tampered after the r1 freeze\n")...,
-	)
-
-	type persistentState struct {
-		ledgerExists     bool
-		publicTableCount int
-	}
-	readPersistentState := func() persistentState {
-		t.Helper()
-		var state persistentState
-		if err := db.QueryRow(ctx, `
-			select
-				pg_catalog.to_regclass('public.schema_migrations') is not null,
-				(select count(*)::int from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE')
-		`).Scan(&state.ledgerExists, &state.publicTableCount); err != nil {
-			t.Fatalf("read persistent migration state: %v", err)
-		}
-		return state
-	}
-
-	before := readPersistentState()
-	err := applyLegacyFS(ctx, poolStore{db: db}, newAppACLR1MigrationFS(tamperedSources))
-	if err == nil || !strings.Contains(err.Error(), "frozen r1 migration source") {
-		t.Fatalf("Apply() tampered r1 source error = %v, want frozen r1 source rejection", err)
-	}
-	after := readPersistentState()
-	if after != before {
-		t.Fatalf("Apply() tampered r1 persistent state = %#v, want unchanged %#v", after, before)
-	}
-	if after.ledgerExists {
-		t.Fatal("Apply() tampered r1 source created schema_migrations")
 	}
 }
 

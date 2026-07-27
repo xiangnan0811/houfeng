@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"houfeng/db/migrations"
 )
 
 func TestPostgresIntegrationAppACLConvergenceFreshDirectMigrator(t *testing.T) {
@@ -27,12 +29,16 @@ func TestPostgresIntegrationAppACLConvergenceFreshDirectMigrator(t *testing.T) {
 		t.Fatalf("fresh converged manifest = %#v, want revision 1 bound to %q", manifest, fixture.migrator)
 	}
 
+	names, err := Names()
+	if err != nil {
+		t.Fatalf("Names() error = %v", err)
+	}
 	var ledgerCount int
 	if err := fixture.db.QueryRow(ctx, `select count(*)::int from public.schema_migrations`).Scan(&ledgerCount); err != nil {
 		t.Fatalf("count converged migration ledger: %v", err)
 	}
-	if ledgerCount != len(appACLR1MigrationSourceContract) {
-		t.Fatalf("converged migration ledger count = %d, want frozen r1 source count %d", ledgerCount, len(appACLR1MigrationSourceContract))
+	if ledgerCount != len(names) {
+		t.Fatalf("converged migration ledger count = %d, want %d", ledgerCount, len(names))
 	}
 	assertSingleIntValue(t, ctx, fixture.db, `select count(*)::int from public.app_acl_manifest_revisions`, 1)
 
@@ -52,7 +58,7 @@ func TestPostgresIntegrationAppACLConvergenceFreshDirectMigrator(t *testing.T) {
 	}
 
 	runtimeDB := fixture.openDirectRolePool(t, ctx, fixture.runtime)
-	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, NewPostgresAppACLManifestRuntimeReader(runtimeDB), appACLR1InjectedMigrationFS(t)); err != nil {
+	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, NewPostgresAppACLManifestRuntimeReader(runtimeDB), migrations.FS); err != nil {
 		t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() direct runtime error = %v", err)
 	}
 	adminDB := fixture.openDirectRolePool(t, ctx, fixture.admin)
@@ -123,16 +129,14 @@ func TestPostgresIntegrationAppACLConvergenceAdoptsEligibleNullHeadAndRepeatsRea
 	fixture := newAppACLConvergencePostgresFixture(t, ctx)
 	migratorDB := fixture.openDirectRolePool(t, ctx, fixture.migrator)
 
-	r1Migrations := appACLR1InjectedMigrationFS(t)
 	if err := Apply(ctx, migratorDB); err != nil {
 		t.Fatalf("Apply() eligible legacy fixture materialization error = %v", err)
 	}
-	assertSingleIntValue(t, ctx, fixture.db, `select count(*)::int from public.schema_migrations`, len(appACLR1MigrationSourceContract))
 	legacySnapshot, err := NewPostgresAppACLManifestRuntimeReader(migratorDB).ReadAppACLManifestRuntimeSnapshotV1(ctx)
 	if err != nil {
 		t.Fatalf("ReadAppACLManifestRuntimeSnapshotV1() eligible legacy fixture error = %v", err)
 	}
-	embeddedMigrations, err := CanonicalMigrationSetFromFS(r1Migrations)
+	embeddedMigrations, err := CanonicalMigrationSetFromFS(migrations.FS)
 	if err != nil {
 		t.Fatalf("CanonicalMigrationSetFromFS() error = %v", err)
 	}
@@ -168,11 +172,8 @@ func TestPostgresIntegrationAppACLConvergenceAdoptsEligibleNullHeadAndRepeatsRea
 	}
 
 	runtimeDB := fixture.openDirectRolePool(t, ctx, fixture.runtime)
-	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, NewPostgresAppACLManifestRuntimeReader(runtimeDB), r1Migrations); err != nil {
+	if _, err := VerifyPersistedAppACLManifestRuntimeV1(ctx, NewPostgresAppACLManifestRuntimeReader(runtimeDB), migrations.FS); err != nil {
 		t.Fatalf("VerifyPersistedAppACLManifestRuntimeV1() adopted direct runtime error = %v", err)
-	}
-	if err := AdmitAppACLRuntime(ctx, runtimeDB); err != nil {
-		t.Fatalf("AdmitAppACLRuntime() adopted direct runtime error = %v", err)
 	}
 	contract, err := CompileAppACLEffectiveCatalogContractR1(fixture.databaseName, []AppACLRoleBinding{
 		{Subject: AppACLSubjectCenterRuntime, CatalogRole: fixture.runtime},
@@ -1386,7 +1387,7 @@ func readAppACLConvergenceManifestRevisionState(t *testing.T, ctx context.Contex
 
 func appACLConvergenceSourcesForPostgresTest(t *testing.T) migrationSourceSnapshot {
 	t.Helper()
-	sources, err := snapshotMigrationSources(appACLR1InjectedMigrationFS(t))
+	sources, err := snapshotMigrationSources(migrations.FS)
 	if err != nil {
 		t.Fatalf("snapshotMigrationSources() error = %v", err)
 	}
