@@ -48,6 +48,10 @@ artifacts; it must report zero P0/P1/P2 findings with final verdict `APPROVE`.
 Resolve any finding and repeat both reviews in that order before admitting Slice
 3.
 
+This gate was satisfied before Slice 3 implementation began. Slice 3 has now
+also passed its own ordered specification and quality reviews recorded below;
+Slice 4 is the next admitted slice.
+
 ### Slice 1: Remove The Draft Atomically
 
 **Ownership:**
@@ -168,26 +172,26 @@ the full-file SHA-256, the `0052` entry in the fixed 53-source vector, and the
 resulting full source-set digest. Piecemeal edits and stale-vector reuse are not
 authorized.
 
-- [ ] RED: wrong allowed PG16 version/OID/direct session/superuser,
+- [x] RED: wrong allowed PG16 version/OID/direct session/superuser,
   missing/change domain identity, non-36 member count,
   `record_platform_internal` member namespace/OID/identity-argument/owner or
   dependency drift, extension version/schema/owner/ACL drift,
   application-source-hash drift, equal-cardinality member substitution, helper
   drift, and direct/effective receipt ACL drift all fail.
-- [ ] RED: consume the task-local fixed `domain_body` and `l2_acl_body`
+- [x] RED: consume the task-local fixed `domain_body` and `l2_acl_body`
   literals only in `app_acl_r2_receipt_test.go`; compare encoder/re-encoder
   bytes and SHA-256 directly to the documented hex/digest, reject every
   documented malformed body, and own all domain/L2 nesting, swap, and digest
   tamper coverage without deriving expectations from a production encoder,
   compiler, parser, or live database.
-- [ ] RED: use one exact frozen R1 catalog/source/ledger/ACL fixture with each
+- [x] RED: use one exact frozen R1 catalog/source/ledger/ACL fixture with each
   direct identity from the identity matrix. The transaction-bound verifier must
   return the same verified state in every row, must not read `session_user` or
   `current_user`, and must not open a pool/second transaction or call frozen
   `AdmitAppACLRuntime`. The separate runtime predicate alone accepts the
   matching center-runtime row and rejects every other row, including the test
   distinct-pair fixture without `SET ROLE`.
-- [ ] GREEN: implement immutable singleton receipt/ledger, bootstrap-owned
+- [x] GREEN: implement immutable singleton receipt/ledger, bootstrap-owned
   helpers, direct/runtime-only receipt SELECT, and fresh exact catalog
   comparison. Bootstrap-superuser preflight reads only the locked local
   PostgreSQL catalog; it records allowed PG16/version and the exact pgcrypto
@@ -207,15 +211,50 @@ authorized.
   catalog/source/ledger/ACL evidence. `RequireDirectFrozenAppACLR1RuntimeInTx`
   is a separate direct-runtime predicate and is the only Slice 3 API allowed to
   inspect `session_user` or `current_user`.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 go test ./db/appaclr2/migrations ./internal/center/store/migrate ./internal/center/platformmigrate \
   -run 'AppACLR2(Source|Receipt)|FrozenAppACLR1State|RequireDirectFrozenAppACLR1Runtime|DomainIdentity|DirectRole' -count=1
 ```
 
-The passing Slice 3 state-verifier gate is a prerequisite for the bootstrap
-and finalizer slices; neither may implement a replacement verifier.
+> Evidence: Slice 3 code commit
+> `b8c057f3e074f1682e87cfb9f04ae23706f8120d` (`feat(record-platform): add app
+> acl r2 bootstrap receipt`) has commit tree
+> `535366c64e10e4e25ea528a4864c1a4ea0b8831e`, identical to the reviewed staged
+> tree. It changes exactly the isolated `0052` SQL,
+> `db/appaclr2/migrations/embed_test.go`, and
+> `internal/center/store/migrate/{app_acl_r2_source.go,
+> app_acl_r2_source_test.go,app_acl_r2_receipt.go,app_acl_r2_receipt_test.go,
+> app_acl_r2_receipt_postgres.go,app_acl_r2_receipt_postgres_test.go,
+> app_acl_r2_frozen_r1_verify.go,app_acl_r2_frozen_r1_verify_test.go}`: ten
+> Slice 3 code paths. The cached patch SHA-256 is
+> `2f0ee9c540de7e80016b40bf4f2579e32117d15a2de651661a92d9e547953753`; the
+> isolated `0052` SQL SHA-256 is
+> `7e15c579cd2055d61d1768c35556032f3ec4c17950c2a15ef7e5e22f4350fc01`; and the
+> canonical 53-source digest is
+> `6a2a82332c9646375434689255528565c612bd86e195aa854357b3f386e242a1`.
+>
+> A fixed `.git`-free snapshot of that tree passed the column-ACL/inheritance
+> focused selector, the required three-package Slice 3 selector, the Frozen
+> R1/Canonical V1 regression selector, full tests for
+> `cmd/houfeng-record-platform-admin`, `internal/center/platformmigrate`, and
+> `internal/center/store/migrate`, `go vet` for those packages, staged Go
+> `gofmt -d`, and `git diff --cached --check`. The live PostgreSQL three-image
+> matrix was not run in Slice 3 and remains intentionally assigned to Slice 7.
+>
+> Earlier P1 findings for pgcrypto inventory/helper exactness, trigger
+> exactness, column ACLs, and bidirectional inheritance were fixed and
+> re-reviewed. The final independent specification review reported zero
+> P0/P1/P2 findings with verdict `SPEC_COMPLIANT`; the final independent quality
+> review reported zero P0/P1/P2 findings with verdict `APPROVE`, re-confirmed
+> the patch/SQL/source hashes and cached diff check, and ran in Codex review
+> session `019fa47a-014d-7e92-87d7-bb14c0ffdbf8`. Neither review changed files
+> or repository state.
+
+The passing Slice 3 state-verifier and review gates are complete and admit
+Slice 4 as the next slice. Bootstrap and finalizer must consume this verifier;
+neither may implement a replacement verifier.
 
 ### Slice 4: Shared State Classifier And Bootstrap
 
