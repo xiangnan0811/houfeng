@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +17,7 @@ import (
 	"houfeng/internal/center/platformmigrate"
 )
 
-func TestLegacyR2TokenMatcherDoesNotTreatVersionedR2CodecsAsLegacy(t *testing.T) {
+func TestNoLegacyR2TokenMatcherDoesNotTreatVersionedR2CodecsAsLegacy(t *testing.T) {
 	camel := func(parts ...string) string { return strings.Join(parts, "") }
 	tests := []struct {
 		token    string
@@ -52,7 +53,7 @@ func TestLegacyR2TokenMatcherDoesNotTreatVersionedR2CodecsAsLegacy(t *testing.T)
 	}
 }
 
-func TestLegacyR2TokenSearchDistinguishesMatchesNoMatchesAndErrors(t *testing.T) {
+func TestNoLegacyR2TokenSearchDistinguishesMatchesNoMatchesAndErrors(t *testing.T) {
 	camel := func(parts ...string) string { return strings.Join(parts, "") }
 	tests := []struct {
 		token    string
@@ -98,6 +99,84 @@ func TestLegacyR2TokenSearchDistinguishesMatchesNoMatchesAndErrors(t *testing.T)
 
 	if _, err := legacyR2TokenSearch(tests[0].token, filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Fatal("search missing source path error = nil, want rg failure")
+	}
+}
+
+func TestNoLegacyR2TokenSearchIgnoresHostRipgrepConfig(t *testing.T) {
+	token := strings.Join([]string{"App", "ACL", "Privilege", "Set", "R2"}, "")
+	root := t.TempDir()
+	source := filepath.Join(root, "r2.go")
+	if err := os.WriteFile(source, []byte(token), 0o600); err != nil {
+		t.Fatalf("write obsolete R2 source: %v", err)
+	}
+	config := filepath.Join(root, "ripgreprc")
+	if err := os.WriteFile(config, []byte("--fixed-strings\n"), 0o600); err != nil {
+		t.Fatalf("write hostile ripgrep configuration: %v", err)
+	}
+	t.Setenv("RIPGREP_CONFIG_PATH", config)
+
+	matched, err := legacyR2TokenSearch(token, source)
+	if err != nil {
+		t.Fatalf("search obsolete R2 source with hostile ripgrep configuration: %v", err)
+	}
+	if !matched {
+		t.Fatalf("search obsolete R2 source did not match token %q with hostile ripgrep configuration", token)
+	}
+}
+
+func TestNoLegacyR2TokenSearchIncludesIgnoredFiles(t *testing.T) {
+	token := strings.Join([]string{"App", "ACL", "Privilege", "Set", "R2"}, "")
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ignored.go"), []byte(token), 0o600); err != nil {
+		t.Fatalf("write ignored obsolete R2 source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".ignore"), []byte("ignored.go\n"), 0o600); err != nil {
+		t.Fatalf("write ripgrep ignore file: %v", err)
+	}
+
+	matched, err := legacyR2TokenSearch(token, root)
+	if err != nil {
+		t.Fatalf("search ignored obsolete R2 source: %v", err)
+	}
+	if !matched {
+		t.Fatalf("search ignored obsolete R2 source did not match token %q", token)
+	}
+}
+
+func TestNoLegacyR2TokenSearchIncludesHiddenFiles(t *testing.T) {
+	token := strings.Join([]string{"App", "ACL", "Privilege", "Set", "R2"}, "")
+	root := t.TempDir()
+	source := filepath.Join(root, ".obsolete", "r2.go")
+	if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
+		t.Fatalf("create hidden source directory: %v", err)
+	}
+	if err := os.WriteFile(source, []byte(token), 0o600); err != nil {
+		t.Fatalf("write hidden obsolete R2 source: %v", err)
+	}
+
+	matched, err := legacyR2TokenSearch(token, root)
+	if err != nil {
+		t.Fatalf("search hidden obsolete R2 source: %v", err)
+	}
+	if !matched {
+		t.Fatalf("search hidden obsolete R2 source did not match token %q", token)
+	}
+}
+
+func TestNoLegacyR2TokenSearchDoesNotRequireRipgrep(t *testing.T) {
+	token := strings.Join([]string{"App", "ACL", "Privilege", "Set", "R2"}, "")
+	source := filepath.Join(t.TempDir(), "r2.go")
+	if err := os.WriteFile(source, []byte(token), 0o600); err != nil {
+		t.Fatalf("write obsolete R2 source: %v", err)
+	}
+	t.Setenv("PATH", t.TempDir())
+
+	matched, err := legacyR2TokenSearch(token, source)
+	if err != nil {
+		t.Fatalf("search obsolete R2 source without ripgrep: %v", err)
+	}
+	if !matched {
+		t.Fatalf("search obsolete R2 source without ripgrep did not match token %q", token)
 	}
 }
 
@@ -148,17 +227,32 @@ func legacyR2TokenPattern(token string) *regexp.Regexp {
 }
 
 func legacyR2TokenSearch(token string, searchPaths ...string) (bool, error) {
-	args := append([]string{"-n", "-e", legacyR2TokenPattern(token).String()}, searchPaths...)
-	output, err := exec.Command("rg", args...).CombinedOutput()
-	if err == nil {
-		return true, nil
-	}
+	pattern := legacyR2TokenPattern(token)
+	matched := false
+	for _, searchPath := range searchPaths {
+		err := filepath.WalkDir(searchPath, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || !entry.Type().IsRegular() {
+				return nil
+			}
 
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-		return false, nil
+			// The gate intentionally scans dot-prefixed paths as well as visible files.
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("read %q: %w", path, err)
+			}
+			if pattern.Match(contents) {
+				matched = true
+			}
+			return nil
+		})
+		if err != nil {
+			return false, fmt.Errorf("search obsolete APP root token %q at %q failed: %w", token, searchPath, err)
+		}
 	}
-	return false, fmt.Errorf("rg search for obsolete APP root token %q failed: %w: %s", token, err, output)
+	return matched, nil
 }
 
 func TestMigrateAppRejectsMissingAllowedConfigurationWithoutLeakingOtherDSN(t *testing.T) {
