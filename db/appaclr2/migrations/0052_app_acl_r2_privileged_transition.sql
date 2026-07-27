@@ -1,0 +1,13 @@
+-- HOUFENG-APP-ACL-R2-PRIVILEGED-TRANSITION-V1
+--
+-- This source is intentionally isolated from the generic application migration
+-- inventory. Later slices replace the marker bodies without exposing 0052 to
+-- the root migration filesystem.
+--
+-- HOUFENG-APP-ACL-R2-BOOTSTRAP-BEGIN
+-- Bootstrap implementation is owned by Slice 3.
+-- HOUFENG-APP-ACL-R2-BOOTSTRAP-END
+--
+-- HOUFENG-APP-ACL-R2-FINALIZE-BEGIN
+-- Finalize implementation is owned by Slice 5.
+-- HOUFENG-APP-ACL-R2-FINALIZE-END
