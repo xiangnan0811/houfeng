@@ -21,7 +21,7 @@ const appACLR2SourceSetVersion uint16 = 1
 const appACLR2SourceSetEntryCount = 53
 const appACLR2RootSourceEntryCount = 52
 const appACLR2MaximumBodyBytes = 4 * 1024 * 1024
-const appACLR2SourceSetDigestHex = "4652949aff2ffaf00ee5e1cf60dfdcd053523ad78629f88845d0eb73ad2e2361"
+const appACLR2SourceSetDigestHex = "6a2a82332c9646375434689255528565c612bd86e195aa854357b3f386e242a1"
 
 // appACLR2SourceContract is an R2-owned closed snapshot. It deliberately does
 // not reference the frozen R1 source variable or any V1 source encoder/parser.
@@ -78,7 +78,7 @@ c3ced98ae37fe0eb0917636f0e68c631755db6550b2eec229edd111051e74c9e 0046_create_com
 e89272ac520969d25f4a68f7c1ec6cecbd5512b8953cb345e95c20b56e7edf05 0049_vps_asset_state_combination_constraint.sql
 bb333c71a9a10e250022a4b5189990aed7344f24920b54916c77eead37736c28 0050_extend_command_action_audit.sql
 503d58670dc790c4b852bfb58cf93d2b816c1ce956958567dc605cb28d5cd23f 0051_create_record_platform_foundation.sql
-8c80d64adfbe80d6bb28c4bbf82bfc0a64560be81615721b8f18f7283d8188ab 0052_app_acl_r2_privileged_transition.sql
+7e15c579cd2055d61d1768c35556032f3ec4c17950c2a15ef7e5e22f4350fc01 0052_app_acl_r2_privileged_transition.sql
 `
 
 // AppACLSourceEntryR2V1 is one filename/full-file-SHA-256 pair in the isolated
