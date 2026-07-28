@@ -40,6 +40,9 @@ as a healthy R1 or R2 deployment.
 - Role membership, `SET ROLE`, ownership transfer, catalog DML, and extension
   drop/recreate are unsupported. Receipt access is direct-migrator/runtime
   `SELECT` only, with no admin/PUBLIC access.
+- Exact L2/M2 ACLs remain unchanged: no additional grants, `SECURITY DEFINER`
+  reader, role membership, `SET ROLE`, ownership transfer, or superuser-based
+  classification is permitted.
 - States are only R1, PREPARED, and FINALIZED. Bootstrap prepares in a
   serializable transaction; finalizer creates the new direct-migrator-owned M2
   revision/head relation pair and commits M2/head in one serializable
@@ -73,12 +76,15 @@ as a healthy R1 or R2 deployment.
    receipt/ledger grammar, protocol-2 manifest, and state dispatcher.
 2. Implement bootstrap and finalize commands with the authority, locking,
    retry, acknowledgement-loss, and fail-closed behavior in `design.md`.
-3. Add new R2-only reader/admitter/startup APIs: credential-neutral
+3. Add new R2-only reader/admitter/startup APIs: identity-blind
    `ClassifyAppACLR2State` and `VerifyFrozenAppACLR1StateInTx(ctx, tx)` prove
    only catalog/source/ledger/ACL evidence for frozen L1/M1/body/chain/head/
-   binding facts. Neither reads `session_user` or `current_user`, and a
-   different session never changes its state result or produces `CORRUPT`.
-   Bootstrap and direct-migrator actor gates, plus
+   binding facts. They never query or branch on `session_user` or
+   `current_user`. Identity-blindness does not grant evidence-reader authority:
+   successful PostgreSQL classification requires the caller transaction to
+   natively possess `SELECT` on every evidence relation that exists for the
+   state. Pure predicate composition alone is identity-invariant across
+   synthetic identities. Bootstrap and direct-migrator actor gates, plus
    `RequireDirectFrozenAppACLR1RuntimeInTx(ctx, tx, state)` for R1 runtime,
    are the only session-identity checks. The R2 routes may classify PREPARED
    solely to reject it and admit R2 only after FINALIZED validation. Frozen
@@ -123,23 +129,39 @@ as a healthy R1 or R2 deployment.
   PREPARED receipt, creates an R2-specific direct-migrator-owned M2
   revision/head relation pair with one M2/one head and a read-only immutable M1
   link, and commits all DDL/DML in one serializable transaction.
-- [ ] State classification and ACK loss accept only exact R1/PREPARED/FINALIZED
-  catalog/source/ledger/ACL predicates. Every other evidence shape rejects
-  without mutation; session identity is not a classifier input and cannot
-  produce `CORRUPT`.
+- [ ] Full state classification, admission, and finalizer ACK loss accept only
+  exact R1/PREPARED/FINALIZED catalog/source/ledger/ACL predicates. The sole
+  bootstrap ACK-loss exception is a private observer that proves only exact R1
+  or exact PREPARED, reads only frozen/L2 evidence plus reserved-object metadata,
+  and fails on every unknown, partial, or M2-reserved shape without reading M2
+  relation contents, taking an M2 table lock, or classifying FINALIZED. Every
+  other evidence shape rejects without mutation. Session identity is not a
+  classifier predicate, but a
+  PostgreSQL evidence-read error propagates rather than becoming `CORRUPT`; an
+  accompanying zero-value `CORRUPT` when `ClassifyAppACLR2State` returns an
+  error is not an evidence verdict.
 - [ ] New R1-only transition route rejects any R2 state without parsing R2
   bytes; the frozen `AdmitAppACLRuntime` remains closed. New R2-aware runtime
   admission accepts exact R1 as R1 before upgrade, rejects PREPARED, and
   accepts only FINALIZED as R2. `ClassifyAppACLR2State` and
-  `VerifyFrozenAppACLR1StateInTx` are credential-neutral in the caller's
-  transaction and prove L1/M1/body/chain/head/binding/catalog facts without
-  inspecting connection identity. An identity-invariant matrix proves that the
-  same evidence returns the same classified and verified state across direct
-  identities. Only bootstrap/direct-migrator actor gates and
+  `VerifyFrozenAppACLR1StateInTx` are identity-blind in the caller's
+  transaction: they never inspect connection identity, while real PostgreSQL
+  calls retain native evidence-relation authority. The pure predicate-
+  composition matrix alone proves identity-invariant state results across
+  synthetic identities. The PG16 authority matrix retains documented behavior
+  for existing authorized R1 evidence readers; permits PREPARED classification
+  only with native L2 `SELECT`; permits FINALIZED classification only for
+  direct migrator and center runtime with native L2/M2 `SELECT`; propagates
+  SQLSTATE `42501` to platform-admin and unrelated callers when a present
+  evidence relation is unreadable; and never maps that error to `CORRUPT`.
+  Bootstrap must not invoke FINALIZED classification because that would rely on
+  superuser bypass. Only bootstrap/direct-migrator actor gates and
   `RequireDirectFrozenAppACLR1RuntimeInTx` enforce session identity;
-  classifier/bootstrap/finalizer use only the state verifier plus their own
-  actor gates. PREPARED may call `ClassifyAppACLR2State` to identify itself, but
-  calls neither `VerifyFrozenAppACLR1StateInTx` nor
+  the classifier and verifier do not inspect it. Ordinary bootstrap/finalizer
+  work uses state verification plus its actor gate; uncertain bootstrap ACK
+  recovery uses only the private observer after the bootstrap actor gate.
+  PREPARED may call `ClassifyAppACLR2State` to identify itself, but calls neither
+  `VerifyFrozenAppACLR1StateInTx` nor
   `RequireDirectFrozenAppACLR1RuntimeInTx`, never calls frozen
   `AdmitAppACLRuntime`, and performs no R2 payload, receipt, or manifest
   parsing or admission.
@@ -154,9 +176,16 @@ as a healthy R1 or R2 deployment.
 - [ ] PostgreSQL 16 tests cover wrong DSN privilege, identity, server/version,
   bootstrap OID, membership, extension member/dependency, ownership, receipt
   ACL, domain, application source, state, and M2 catalog failure without
-  partial mutation. Identity-invariant classifier and state-verifier matrices,
-  plus the separate runtime-predicate matrix and adversarial R1-to-PREPARED
-  race, prove that classification may identify PREPARED but it calls neither
+  partial mutation. The pure predicate-composition matrix is identity-invariant
+  only across synthetic identities. A separate real-reader PG16 authority
+  matrix proves the exact R1, PREPARED, FINALIZED, SQLSTATE `42501`, and
+  bootstrap-no-FINALIZED cases above, including that an error with a zero-value
+  `CORRUPT` result is not an evidence verdict. Bootstrap ACK-recovery tests
+  prove the private observer's exact R1/PREPARED proofs, error-first failure on
+  every unknown/partial/M2-reserved inventory, and the absence of M2
+  relation-content reads or FINALIZED classification. Together with the separate
+  runtime-predicate matrix and adversarial R1-to-PREPARED race, the tests prove
+  that classification may identify PREPARED but it calls neither
   `VerifyFrozenAppACLR1StateInTx` nor
   `RequireDirectFrozenAppACLR1RuntimeInTx`, never calls frozen
   `AdmitAppACLRuntime`, and performs no R2 payload, receipt, or manifest

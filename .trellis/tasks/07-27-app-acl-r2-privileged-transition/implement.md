@@ -146,7 +146,7 @@ go test ./internal/center/store/migrate -run 'FrozenR1|Canonical.*V1' -count=1
 > full tests, `go vet`, and `gofmt`/`git diff --check` passed. Independent
 > specification and quality reviews each approved with zero P0/P1/P2 findings.
 
-### Slice 3: Receipt SQL, Snapshot, And Credential-Neutral Frozen R1 State Verification
+### Slice 3: Receipt SQL, Snapshot, And Identity-Blind Frozen R1 State Verification
 
 **Ownership:** Modify isolated
 `db/appaclr2/migrations/0052_app_acl_r2_privileged_transition.sql` together
@@ -184,13 +184,13 @@ authorized.
   documented malformed body, and own all domain/L2 nesting, swap, and digest
   tamper coverage without deriving expectations from a production encoder,
   compiler, parser, or live database.
-- [x] RED: use one exact frozen R1 catalog/source/ledger/ACL fixture with each
-  direct identity from the identity matrix. The transaction-bound verifier must
-  return the same verified state in every row, must not read `session_user` or
-  `current_user`, and must not open a pool/second transaction or call frozen
-  `AdmitAppACLRuntime`. The separate runtime predicate alone accepts the
-  matching center-runtime row and rejects every other row, including the test
-  distinct-pair fixture without `SET ROLE`.
+- [x] RED: use one exact frozen R1 catalog/source/ledger/ACL fixture. Assert
+  that verification has no `session_user`/`current_user` branch, opens no pool
+  or second transaction, and cannot call frozen `AdmitAppACLRuntime`. The real
+  transaction-bound verifier retains documented authorized-R1-reader authority
+  rather than promising all-identity PostgreSQL success. The separate runtime
+  predicate alone accepts the matching center-runtime row and rejects every
+  other row, including the test distinct-pair fixture without `SET ROLE`.
 - [x] GREEN: implement immutable singleton receipt/ledger, bootstrap-owned
   helpers, direct/runtime-only receipt SELECT, and fresh exact catalog
   comparison. Bootstrap-superuser preflight reads only the locked local
@@ -207,7 +207,7 @@ authorized.
   tamper, wrong member-schema, malformed-length, and trailing-byte coverage. It
   rejects any deviation and never transfers ownership or drops/recreates the
   extension. Before any bootstrap/finalize command exists, implement the
-  credential-neutral frozen R1 verifier over only tx-bound
+  identity-blind frozen R1 verifier over only tx-bound
   catalog/source/ledger/ACL evidence. `RequireDirectFrozenAppACLR1RuntimeInTx`
   is a separate direct-runtime predicate and is the only Slice 3 API allowed to
   inspect `session_user` or `current_user`.
@@ -260,7 +260,10 @@ neither may implement a replacement verifier.
 
 **Ownership:** Create `app_acl_r2_catalog.go`, `app_acl_r2_catalog_test.go`,
 `app_acl_r2_state.go`, `app_acl_r2_state_test.go`, `app_acl_r2_bootstrap.go`,
-and `app_acl_r2_bootstrap_test.go`; create
+and `app_acl_r2_bootstrap_test.go`; for the direct-owner ACL correction only,
+modify `internal/center/store/migrate/{app_acl_r2_manifest.go,
+app_acl_r2_manifest_test.go}` to update the fixed M2 control-ACL value and its
+independent vectors without changing the canonical wire layout; create
 `internal/center/platformmigrate/app_acl_r2_transition_config.go` and its
 test; modify only `cmd/houfeng-record-platform-admin/main.go` and
 `cmd/houfeng-record-platform-admin/main_test.go` to register the new,
@@ -269,34 +272,101 @@ R1 admission, reader, convergence, startup, or generic migration file. This
 slice consumes the passed Slice 3 verifier/predicate gate. Its catalog files
 first own and test the reusable exact L1/M1/L2/M2/control-ACL relation/head
 predicates; `app_acl_r2_state.go` composes them into typed state, and bootstrap
-consumes them. Do not implement the classifier or bootstrap before that catalog
-predicate gate passes.
+consumes the full classifier only after its ordinary-bootstrap metadata-only
+rejection gate. Do not implement the classifier or bootstrap before that
+catalog predicate gate passes.
 
 - [ ] RED: `app_acl_r2_catalog.go` and its test first establish the reusable
   exact L1/M1/L2/M2/control-ACL relation/head predicates, including absent,
   one-sided, extra, wrong-owner, wrong-link, wrong-head, and mixed shapes.
+  Exact M2 coverage must distinguish owner OID from ordinary native access:
+  each table requires exact non-grantable direct-migrator owner-self and
+  center-runtime `SELECT` ACL entries plus true direct/runtime
+  `has_table_privilege(..., 'SELECT')`; the helper requires its exact
+  non-grantable direct-migrator owner-self `EXECUTE` entry plus true
+  `has_function_privilege(..., 'EXECUTE')`. It rejects a correct owner OID
+  with a missing/revoked owner ordinary grant, any owner grant option, an extra
+  ACL entry, or a changed fixed table/helper mask (`0x06`/`0x02`). The exact
+  `aclexplode` assertions include owner rows; they must not filter the owner
+  baseline away. The manifest codec/vector update retains its existing field
+  layout and order while encoding the tag-2 owner self-grants.
   `ClassifyAppACLR2State` in the single state file then recognizes only exact
   R1, PREPARED, FINALIZED, and CORRUPT by composing those predicates; it rejects
-  unknown/mixed object shapes. The identity-invariant classifier matrix runs
-  every direct identity against otherwise identical exact R1, PREPARED, and
-  FINALIZED fixtures and returns the same state without reading
-  `session_user`/`current_user` or turning a wrong session into `CORRUPT`.
+  unknown/mixed object shapes. The identity-invariant classifier matrix is
+  pure predicate composition only: it uses synthetic identity labels with
+  otherwise identical exact R1, PREPARED, and FINALIZED evidence inputs, opens
+  no PostgreSQL transaction, and returns the same state without reading
+  `session_user`/`current_user`. It makes no all-identity real-reader claim;
+  Slice 7 owns the native-ACL PG16 authority matrix.
   Bootstrap reads only
   `HOUFENG_RECORD_PLATFORM_APP_BOOTSTRAP_DATABASE_URL`, rejects unexpected
   lookup before pool open, proves lock order/pre-mutation checks, retries only
-  whole `40001`/`40P01` closure, uses the prebuilt credential-neutral frozen-R1
-  state verifier plus its own OID-10 actor gate, and reclassifies PREPARED ACK
-  loss.
+  whole `40001`/`40P01` closure, applies its OID-10 actor gate before the
+  metadata inventory, uses the prebuilt identity-blind frozen-R1 state verifier
+  only on the post-gate full-classifier path, and recovers uncertain commit
+  acknowledgement only through the private
+  `observeAppACLR2BootstrapACKRecoveryInTx` observer. In its fresh locked
+  SERIALIZABLE recovery closure, that observer reads the frozen verifier and
+  complete `app_acl_r2_*` catalog name/identity inventory; only an exact L2
+  inventory permits it to read the receipt and perform the exact L2/catalog
+  proof. Empty inventory plus frozen R1 is exact R1; exact L2 inventory plus
+  one valid receipt/equality proof is exact PREPARED. Any unknown, incomplete,
+  excessive, mixed, or M2-reserved inventory, any L2 drift, or any read error
+  returns an error with no outcome. Exact PREPARED is success, exact R1 is a
+  retryable prior state, and every error is failure. The observer never calls
+  `ClassifyAppACLR2State` or `ReadAppACLR2CatalogPredicatesInTx`, reads neither
+  M2 relation's contents, takes no M2 table lock, and reads no M2
+  predicate/manifest/control-ACL or helper/trigger-definition data beyond the
+  permitted name/identity inventory. It never invokes FINALIZED classification,
+  which would rely on superuser bypass rather than native M2 `SELECT`. Recovery
+  checks the error before its outcome and never treats a zero-value `CORRUPT`
+  accompanying an error as an evidence verdict. Bootstrap coverage must prove
+  this exact permitted-read/lock trace and every rejection path.
+- [ ] RED: add executable
+  `TestBootstrapAppACLR2OrdersActorInventoryBeforeClassifier` and
+  `TestBootstrapAppACLR2RejectsM2OrUnknownInventoryWithoutClassifierOrM2Access`
+  dependency-trace tests. Ordinary bootstrap must execute exactly `OID-10 actor
+  gate -> reserved-object metadata-only inventory -> reject M2/unknown presence
+  -> only when M2/unknown are absent, invoke the full shared classifier`. The
+  absent-M2/unknown fixture must observe actor gate, then inventory, then one
+  full-classifier call. Each M2-reserved and unknown-reserved fixture must fail
+  closed immediately after inventory and observe zero full-classifier calls,
+  zero M2 content reads, zero M2 table locks, zero M2 scans, zero M2
+  aggregations, and no `FINALIZED` classification. The metadata-only inventory
+  is permitted here as the ordinary-bootstrap actor-gated rejection gate in
+  addition to its use by uncertain ACK recovery; it returns no state and does
+  not weaken the shared classifier contract.
+  After the actor gate and M2/unknown-absent inventory,
+  `TestBootstrapAppACLR2ExactR1ClassifierResultContinuesToVerifierPreflightAndL2DDL`,
+  `TestBootstrapAppACLR2PreparedClassifierResultIsNoMutationRepeat`,
+  `TestBootstrapAppACLR2CorruptClassifierResultRejectsWithoutPostClassifierWork`,
+  and `TestBootstrapAppACLR2ClassifierErrorPropagatesWithoutPostClassifierWork`
+  must prove exact R1 alone invokes the frozen-R1 verifier, PG16 preflight,
+  and L2 DDL; PREPARED is a target-state no-mutation repeat and CORRUPT
+  rejects fail closed, each with zero verifier, preflight, or L2-DDL calls;
+  and a classifier operational error returns the original error with zero of
+  those calls.
 - [ ] GREEN: implement the read-only reusable catalog predicates, then the
-  classifier that composes them. Execute bootstrap only in one serializable
-  transaction; create only receipt/helpers/L2, and leave both
+  classifier that composes them. In the ordinary-bootstrap serializable
+  transaction, implement exactly the actor gate, metadata-only inventory,
+  direct fail-closed M2/unknown rejection, and only-when-absent full-classifier
+  sequence proved by the RED dependency traces. The rejection branch must make
+  none of the forbidden classifier or M2 read/lock/scan/aggregation calls and
+  must not classify `FINALIZED`. After the post-inventory classifier call, only
+  exact R1 may invoke the frozen-R1 verifier, PG16 preflight, and L2 DDL; exact
+  PREPARED is the target-state no-mutation repeat, CORRUPT rejects fail closed,
+  and a classifier operational error propagates unchanged, with those three
+  paths making none of those later calls. Create only receipt/helpers/L2, and
+  leave both
   `app_acl_r2_manifest_revisions` and `app_acl_r2_manifest_head` absent. Never
   create roles, transfer owner, recreate pgcrypto, invoke finalizer, or alter
-  frozen M1.
+  frozen M1. After an uncertain bootstrap commit acknowledgement, invoke only
+  the private ACK observer defined above; do not route that recovery through the
+  public full classifier.
 - [ ] Run:
 
 ```bash
-go test ./cmd/houfeng-record-platform-admin ./internal/center/platformmigrate ./internal/center/store/migrate -run 'AppACLR2(Catalog|State|Bootstrap)|BootstrapAppACLR2|AppACLR2Config' -count=1
+go test ./cmd/houfeng-record-platform-admin ./internal/center/platformmigrate ./internal/center/store/migrate -run 'AppACLR2(Catalog|State|Bootstrap|Manifest)|BootstrapAppACLR2|AppACLR2Config' -count=1
 ```
 
 ### Slice 5: Direct-Finalizer M2 Relations, 206-Tuple Catalog, And CAS
@@ -325,18 +395,29 @@ predecessors and are never inserted into, altered, re-owned, or advanced.
   empty, extra, wrong-owner, wrong-link, or wrong-head M2 shape; rejects
   205/207 catalog; detects stale head CAS; verifies one M2 revision/one true
   singleton head; proves full transaction rollback; and reclassifies FINALIZED
-  ACK loss.
+  ACK loss. Its DCL/readback tests must require the two non-grantable
+  direct-migrator/center-runtime `SELECT` entries on each M2 table and the one
+  non-grantable direct-migrator `EXECUTE` entry on the helper, with direct
+  native table/function probes. They must reject a relation/function with the
+  correct direct-migrator owner OID but a missing or revoked ordinary owner
+  grant, a grant option, or an extra grant; finalizer ACK recovery must not
+  treat owner metadata as M2 read authority.
 - [ ] GREEN: validate receipt and the passed reusable catalog predicate first,
   then execute the finalizer section in one serializable transaction after
-  credential-neutral state verification and its own direct-migrator actor gate
+  identity-blind state verification and its own direct-migrator actor gate
   (the only finalizer session-identity check),
   create the direct-migrator-owned M2 relation pair and immutable triggers with
   plain `CREATE TABLE`, insert exactly one
   `(protocol_version, manifest_revision) = (2, 2)` revision plus exactly one
   true singleton head, bind immutable M1 revision/digest/source/privilege/role
   link fields, store the separate three-binding/206-tuple body/digest, use M1
-  revision/digest CAS, and re-read receipt/catalog/head before commit. Any
-  error rolls back all M2 DDL/DML to exact PREPARED.
+  revision/digest CAS, and re-read receipt/catalog/head before commit. Its
+  revoke-first DCL revokes the five control grantees, then grants no-grant-option
+  table `SELECT` to direct migrator and center runtime and no-grant-option
+  helper `EXECUTE` only to direct migrator. The readback proves owner OID,
+  explicit owner self-ACL, and `has_*_privilege` separately; default-ACL
+  absence never substitutes for the owner self-grants. Any error rolls back all
+  M2 DDL/DML to exact PREPARED.
 - [ ] Run:
 
 ```bash
@@ -368,17 +449,21 @@ route, or generic `migrate --scope app`. There is no
   admission may classify PREPARED to identify it, then rejects it without
   invoking `VerifyFrozenAppACLR1StateInTx`,
   `RequireDirectFrozenAppACLR1RuntimeInTx`, or frozen `AdmitAppACLRuntime` and
-  without R2 payload, receipt, or manifest parsing or admission. The Slice 3
-  identity-invariant verifier/predicate matrix remains its sole owner. The
-  mismatch rows use a test identity fixture, never `SET ROLE`, membership,
-  ownership, or credential handoff.
+  without R2 payload, receipt, or manifest parsing or admission. Slice 4 owns
+  the pure predicate-composition identity-invariant matrix; real PostgreSQL
+  reader authority remains exclusive to Slice 7. The mismatch rows use a test
+  identity fixture, never `SET ROLE`, membership, ownership, or credential
+  handoff.
 - [ ] GREEN: implement only the new R2 admission-wrapper/startup APIs using the
   prebuilt verifier and runtime predicate. Classification and exact R1 state
   verification occur in the same locked
   `REPEATABLE READ, READ ONLY` `pgx.Tx`; direct runtime admission then applies
-  the separate predicate in that same transaction. Bootstrap/finalize use state
-  verification plus their own actor gates inside locked `SERIALIZABLE` `pgx.Tx`
-  closures. PREPARED may be classified to identify it but calls neither
+  the separate predicate in that same transaction. Finalizer uses state
+  verification plus its own actor gate inside a locked `SERIALIZABLE` `pgx.Tx`
+  closure. Ordinary bootstrap uses its OID-10 gate and metadata-only
+  M2/unknown rejection before invoking full classification/state verification
+  inside its locked `SERIALIZABLE` closure. PREPARED may be classified to
+  identify it but calls neither
   `VerifyFrozenAppACLR1StateInTx` nor
   `RequireDirectFrozenAppACLR1RuntimeInTx`, never calls frozen
   `AdmitAppACLRuntime`, and performs no R2 payload, receipt, or manifest
@@ -402,8 +487,45 @@ Slices 1-6 do not change the Go test, script, or workflow.
 - [ ] RED/GREEN: cover R1 -> PREPARED -> FINALIZED; every wrong identity,
   application-source, member/dependency, domain, owner, ACL, and state failure;
   receipt immutability; no membership/role switch/drop/recreate; serializable
-  retry/CAS/ACK loss; the full state/runtime identity matrix; the adversarial
-  R1-to-PREPARED race; and R1/PREPARED/FINALIZED runtime routing. The PG16
+  retry/CAS/ACK loss; the adversarial R1-to-PREPARED race; and
+  R1/PREPARED/FINALIZED runtime routing. Run and reverify the already-owned
+  Slice 4 pure predicate-composition and Slice 3 runtime-predicate unit matrices;
+  Slice 7 neither recreates nor takes ownership of them. Its only new matrix
+  ownership is the real PG16 reader-authority matrix. The real
+  PG16 reader matrix must retain documented authority for existing authorized
+  R1 evidence readers; allow PREPARED only with native L2 `SELECT`; allow
+  FINALIZED only for direct migrator and center runtime with native L2/M2
+  `SELECT`; propagate SQLSTATE `42501` for platform-admin/unrelated callers
+  when a present evidence relation is unreadable without translating it to
+  `CORRUPT`; prove bootstrap does not invoke FINALIZED classification; and
+  treat any zero-value `CORRUPT` accompanying an error as no evidence verdict.
+  In every PG16 lane, assert the exact M2 owner/self-ACL baseline separately:
+  direct migrator and center runtime have native `SELECT` and no other table
+  privilege on both M2 relations; direct migrator alone has native helper
+  `EXECUTE`; and `aclexplode` contains the two non-grantable table entries and
+  the one non-grantable helper entry, including the owner rows. Add owner
+  revocation regressions: revoking direct migrator's ordinary M2 `SELECT` or
+  helper `EXECUTE` while retaining the same relation/function owner OID must
+  make the relevant `has_*_privilege` probe false and cause the exact predicate,
+  classifier, or finalizer ACK-loss recovery to fail error-first rather than
+  accepting owner authority as a native grant. The finalizer ACK-loss success
+  lane must prove its direct-migrator M2 read uses the explicit self-`SELECT`.
+  One real PG16 commit-ACK-loss scenario must let bootstrap commit PREPARED and
+  then have recovery observe that the database has already advanced to exact
+  FINALIZED (or begin recovery against an already exact FINALIZED database).
+  Bootstrap must fail. The fixture query trace must prove that the private
+  bootstrap ACK observer first proves frozen R1 and uses only the complete
+  reserved-object name/identity inventory to reject any M2 presence; it must not
+  read either M2 relation's contents, take an M2 table lock, read any M2
+  predicate/manifest/control-ACL or helper/trigger-definition data, or classify
+  M2/FINALIZED through superuser bypass. The same suite must prove its
+  empty-inventory exact-R1 and exact-L2-inventory/one-receipt exact-PREPARED
+  outcomes, and error-first failure for unknown, partial, excessive, mixed, and
+  every M2-reserved inventory. Observing reserved M2 presence solely to fail is
+  not classification.
+  Any `(CORRUPT, err)` result with `err != nil` is error-only and the zero-value
+  `CORRUPT` must not be accepted as an evidence verdict.
+  The PG16
   catalog matrix must assert allowed server/version, `pgcrypto` v1.3 catalog
   facts, each of the 36 `record_platform_internal` identity/identity-argument
   members, dependency/ACL baseline, direct-migrator extension ownership, OID-10
