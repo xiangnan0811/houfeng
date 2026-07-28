@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -370,6 +371,22 @@ func TestAppACLR2ManifestControlACLCanonicalVectorRoundTrips(t *testing.T) {
 	if parsed.Objects[0].Identity != "app_acl_r2_manifest_head" || parsed.Objects[1].Identity != "app_acl_r2_manifest_revisions" {
 		t.Fatalf("parsed control objects = %#v, want raw-byte key order", parsed.Objects)
 	}
+	for _, object := range parsed.Objects[:2] {
+		wantGrants := []AppACLControlGrantR2V1{
+			{GranteeRole: AppACLControlRoleDirectMigratorR2, Privilege: AppACLControlPrivilegeSelectR2},
+			{GranteeRole: AppACLControlRoleCenterRuntimeR2, Privilege: AppACLControlPrivilegeSelectR2},
+		}
+		if !reflect.DeepEqual(object.ExplicitGrants, wantGrants) {
+			t.Fatalf("M2 table %q grants = %#v, want direct-migrator self SELECT plus center-runtime SELECT", object.Identity, object.ExplicitGrants)
+		}
+	}
+	wantHelperGrants := []AppACLControlGrantR2V1{{
+		GranteeRole: AppACLControlRoleDirectMigratorR2,
+		Privilege:   AppACLControlPrivilegeExecuteR2,
+	}}
+	if !reflect.DeepEqual(parsed.Objects[2].ExplicitGrants, wantHelperGrants) {
+		t.Fatalf("M2 helper grants = %#v, want direct-migrator self EXECUTE", parsed.Objects[2].ExplicitGrants)
+	}
 	reencoded, err := CanonicalAppACLControlACLBodyR2V1(parsed)
 	if err != nil {
 		t.Fatalf("CanonicalAppACLControlACLBodyR2V1(parsed) error = %v", err)
@@ -455,15 +472,15 @@ func appACLR2ControlACLVector(directMigratorOID uint32) testR2ControlACL {
 		objects: []testR2ControlObject{
 			{
 				kind: 1, schema: "public", identity: "app_acl_r2_manifest_head", ownerRole: 2, ownerOID: directMigratorOID,
-				grants: []testR2ControlGrant{{grantee: 3, privilege: 1}}, effectiveMask: 0x06,
+				grants: []testR2ControlGrant{{grantee: 2, privilege: 1}, {grantee: 3, privilege: 1}}, effectiveMask: 0x06,
 			},
 			{
 				kind: 1, schema: "public", identity: "app_acl_r2_manifest_revisions", ownerRole: 2, ownerOID: directMigratorOID,
-				grants: []testR2ControlGrant{{grantee: 3, privilege: 1}}, effectiveMask: 0x06,
+				grants: []testR2ControlGrant{{grantee: 2, privilege: 1}, {grantee: 3, privilege: 1}}, effectiveMask: 0x06,
 			},
 			{
 				kind: 2, schema: internalSchema, identity: rejectIdentity, ownerRole: 2, ownerOID: directMigratorOID,
-				effectiveMask: 0x02,
+				grants: []testR2ControlGrant{{grantee: 2, privilege: 2}}, effectiveMask: 0x02,
 			},
 		},
 		triggers: []testR2ControlTrigger{

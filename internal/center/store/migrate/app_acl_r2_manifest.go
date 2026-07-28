@@ -906,18 +906,25 @@ func appACLR2ControlACLContract(directMigratorOID uint32) AppACLControlACLBodyR2
 			{
 				Kind: AppACLControlObjectTableR2, Schema: "public", Identity: "app_acl_r2_manifest_head",
 				OwnerRole: AppACLControlRoleDirectMigratorR2, OwnerOID: directMigratorOID,
-				ExplicitGrants:                 []AppACLControlGrantR2V1{{GranteeRole: AppACLControlRoleCenterRuntimeR2, Privilege: AppACLControlPrivilegeSelectR2}},
+				ExplicitGrants: []AppACLControlGrantR2V1{
+					{GranteeRole: AppACLControlRoleDirectMigratorR2, Privilege: AppACLControlPrivilegeSelectR2},
+					{GranteeRole: AppACLControlRoleCenterRuntimeR2, Privilege: AppACLControlPrivilegeSelectR2},
+				},
 				EffectiveRelevantPrivilegeMask: 0x06,
 			},
 			{
 				Kind: AppACLControlObjectTableR2, Schema: "public", Identity: "app_acl_r2_manifest_revisions",
 				OwnerRole: AppACLControlRoleDirectMigratorR2, OwnerOID: directMigratorOID,
-				ExplicitGrants:                 []AppACLControlGrantR2V1{{GranteeRole: AppACLControlRoleCenterRuntimeR2, Privilege: AppACLControlPrivilegeSelectR2}},
+				ExplicitGrants: []AppACLControlGrantR2V1{
+					{GranteeRole: AppACLControlRoleDirectMigratorR2, Privilege: AppACLControlPrivilegeSelectR2},
+					{GranteeRole: AppACLControlRoleCenterRuntimeR2, Privilege: AppACLControlPrivilegeSelectR2},
+				},
 				EffectiveRelevantPrivilegeMask: 0x06,
 			},
 			{
 				Kind: AppACLControlObjectFunctionR2, Schema: internalSchema, Identity: rejectIdentity,
 				OwnerRole: AppACLControlRoleDirectMigratorR2, OwnerOID: directMigratorOID,
+				ExplicitGrants:                 []AppACLControlGrantR2V1{{GranteeRole: AppACLControlRoleDirectMigratorR2, Privilege: AppACLControlPrivilegeExecuteR2}},
 				EffectiveRelevantPrivilegeMask: 0x02,
 			},
 		},
