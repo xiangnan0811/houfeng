@@ -432,6 +432,12 @@ go test ./cmd/houfeng-record-platform-admin ./internal/center/platformmigrate ./
 
 ### Slice 5: Direct-Finalizer M2 Relations, 206-Tuple Catalog, And CAS
 
+> **2026-07-29 correction:** This is a pre-code-review PostgreSQL 16
+> specification correction, not Slice 5 completion and not a claim of PG16
+> integration evidence. A SELECT-only, non-owner direct finalizer locks a
+> present bootstrap-owned L2 receipt with `ACCESS SHARE`, not
+> `SHARE ROW EXCLUSIVE`.
+
 **Ownership:** Create `app_acl_r2_finalize.go` and its test; modify isolated
 `db/appaclr2/migrations/0052_app_acl_r2_privileged_transition.sql`,
 `db/appaclr2/migrations/embed_test.go`,
@@ -462,23 +468,33 @@ predecessors and are never inserted into, altered, re-owned, or advanced.
   native table/function probes. They must reject a relation/function with the
   correct direct-migrator owner OID but a missing or revoked ordinary owner
   grant, a grant option, or an extra grant; finalizer ACK recovery must not
-  treat owner metadata as M2 read authority.
+  treat owner metadata as M2 read authority. The direct finalizer must lock a
+  present bootstrap-owned L2 receipt in `ACCESS SHARE`, never a stronger mode,
+  and never grant itself receipt write privilege; all other present state/M2
+  tables retain `SHARE ROW EXCLUSIVE`. The real PostgreSQL 16 lane must prove
+  the SELECT-only direct migrator succeeds with `ACCESS SHARE` and would receive
+  SQLSTATE `42501` under the superseded `SHARE ROW EXCLUSIVE` receipt-lock
+  contract.
 - [ ] GREEN: validate receipt and the passed reusable catalog predicate first,
   then execute the finalizer section in one serializable transaction after
   identity-blind state verification and its own direct-migrator actor gate
-  (the only finalizer session-identity check),
-  create the direct-migrator-owned M2 relation pair and immutable triggers with
-  plain `CREATE TABLE`, insert exactly one
+  (the only finalizer session-identity check). After those pre-mutation checks,
+  the in-transaction mutation/readback sequence is one mandatory ordered
+  contract: (1) DDL creates the direct-migrator-owned M2 relation pair with
+  plain `CREATE TABLE` and creates its immutable triggers; (2) the M2
+  revision/head writes insert exactly one
   `(protocol_version, manifest_revision) = (2, 2)` revision plus exactly one
   true singleton head, bind immutable M1 revision/digest/source/privilege/role
-  link fields, store the separate three-binding/206-tuple body/digest, use M1
-  revision/digest CAS, and re-read receipt/catalog/head before commit. Its
-  revoke-first DCL revokes the five control grantees, then grants no-grant-option
-  table `SELECT` to direct migrator and center runtime and no-grant-option
-  helper `EXECUTE` only to direct migrator. The readback proves owner OID,
-  explicit owner self-ACL, and `has_*_privilege` separately; default-ACL
-  absence never substitutes for the owner self-grants. Any error rolls back all
-  M2 DDL/DML to exact PREPARED.
+  link fields, store the separate three-binding/206-tuple body/digest, and
+  complete the M1 revision/digest CAS; (3) ACL normalization runs revoke-first
+  DCL, revoking the five control grantees, then granting no-grant-option table
+  `SELECT` to direct migrator and center runtime and no-grant-option helper
+  `EXECUTE` only to direct migrator; and (4) only after ACL normalization,
+  FINALIZED readback re-reads receipt/catalog/head before commit. That readback
+  proves owner OID, explicit owner self-ACL, and `has_*_privilege` separately;
+  default-ACL absence never substitutes for the owner self-grants. No FINALIZED
+  readback may occur before ACL normalization. Any error rolls back all M2
+  DDL/DML to exact PREPARED.
 - [ ] Run:
 
 ```bash

@@ -328,15 +328,19 @@ and `public.app_acl_r2_manifest_head.app_acl_r2_manifest_head_immutable`.
 They reject update/delete/truncate. Finalize uses plain CREATE TABLE, never IF
 NOT EXISTS. A pre-existing one-sided, empty, extra, wrong-owner, or wrong-head
 relation is corrupt and not repairable. In one serializable transaction it
-creates both relations/triggers, inserts the one M2 row and one M2 head, sets
-the exact ACLs, re-reads the result, then commits. PostgreSQL DDL is
+follows one mandatory order: (1) DDL creates both relations/triggers; (2) M2
+revision/head writes insert the one M2 row and one M2 head and complete the
+phase-two M1 revision/digest CAS; (3) revoke-first ACL normalization applies
+the exact ACLs; and (4) FINALIZED readback re-reads the result before commit.
+PostgreSQL DDL is
 transactional, so any error rolls back all R2 DDL/DML and leaves exact PREPARED.
 There is no committed rollback: a successful FINALIZED state always contains
 the one revision and one head, both linked to frozen M1 by the immutable fields
 above. No M2 data is ever inserted into the frozen 0051 V1 relations.
 
-Before the M2 row/head are inserted or FINALIZED is accepted, finalize runs
-the same revoke-first proof for its exact surfaces. It revokes all table
+After the M2 revision/head writes and phase-two M1 revision/digest CAS, but
+before FINALIZED readback, finalize runs the same revoke-first proof for its
+exact surfaces. It revokes all table
 privileges on both M2 relations from `PUBLIC`, bootstrap, `direct_migrator`,
 `center_runtime`, and `platform_admin`, then grants no-grant-option `SELECT`
 to both `direct_migrator` and `center_runtime`. It revokes all function
@@ -853,9 +857,16 @@ Bootstrap and finalize each use a fresh SERIALIZABLE closure, SET LOCAL
 search_path = pg_catalog, public, and advisory lock
 houfeng.app-acl-r2-privileged-transition.v1. Finalize's fixed table-lock order
 is M1 head, M1 revisions, domain identity, L1 root ledger, L2 receipt when
-present, M2 revisions when present, then M2 head when present; each is SHARE
-ROW EXCLUSIVE. Ordinary bootstrap first follows its exact OID-10 actor gate and
-metadata-only inventory sequence. M2/unknown presence rejects before its full
+present, M2 revisions when present, then M2 head when present. M1 head, M1
+revisions, domain identity, the L1 root ledger, and present M2 revisions/head
+use `SHARE ROW EXCLUSIVE`. The present bootstrap-owned L2
+`app_acl_r2_bootstrap_receipt` alone uses `ACCESS SHARE`: finalizer is a
+SELECT-only non-owner, for which PostgreSQL 16 permits `SELECT` to lock only
+at `ACCESS SHARE`. The exclusive transition advisory lock plus the immutable,
+fixed-ACL receipt prevent legitimate transition races; this privilege-compatible
+evidence lock does not broaden receipt authority. Ordinary bootstrap first
+follows its exact OID-10 actor gate and metadata-only inventory sequence.
+M2/unknown presence rejects before its full
 classifier or any M2 read, lock, scan, or aggregation; after confirmed absence,
 its applicable table-lock order ends at L2. Absence is checked under the
 advisory lock before a conditional lock. An R2 admission route reserves one
@@ -939,9 +950,12 @@ bootstrap only, creates L2/helpers/inserts/grants/re-reads, and commits; an
 exact PREPARED normal repeat keeps the target-state no-mutation behavior.
 Target PREPARED must leave both M2 relations absent. Finalize
 applies its direct-migrator actor gate, classifies exact PREPARED, verifies the
-receipt/catalog before DDL, executes finalize only, creates the M2 relation
-pair/function/triggers, inserts exactly one M2 revision and one M2 head,
-applies control ACLs, re-reads FINALIZED proof, then commits. Target FINALIZED.
+receipt/catalog before DDL, then executes finalize only in one serializable
+transaction with the same mandatory order: DDL creates the M2 relation
+pair/function/triggers; M2 revision/head writes insert exactly one M2 revision
+and one M2 head and complete the phase-two M1 revision/digest CAS; revoke-first
+control ACL normalization applies the exact ACLs; FINALIZED readback re-reads
+the proof; then it commits. Target FINALIZED.
 
 Only SQLSTATE 40001 and 40P01 retry the entire closure. All other errors roll
 back the full attempt, including every direct-finalizer M2 DDL/DML statement.
