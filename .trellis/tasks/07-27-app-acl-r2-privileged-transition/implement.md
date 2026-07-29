@@ -50,7 +50,10 @@ Resolve any finding and repeat both reviews in that order before admitting Slice
 
 This gate was satisfied before Slice 3 implementation began. Slice 3 has now
 also passed its own ordered specification and quality reviews recorded below;
-Slice 4 is the next admitted slice.
+Slice 4 is closed only by the explicit reviewed governance exception recorded
+in its evidence note below, and Slice 5 is the next admitted slice. This closes
+only the already-completed Slice 4 gate; it does not claim chronological RED
+proof, Child 1 delivery, or delivery of any parent task. Slices 5-7 remain open.
 
 ### Slice 1: Remove The Draft Atomically
 
@@ -252,9 +255,9 @@ go test ./db/appaclr2/migrations ./internal/center/store/migrate ./internal/cent
 > session `019fa47a-014d-7e92-87d7-bb14c0ffdbf8`. Neither review changed files
 > or repository state.
 
-The passing Slice 3 state-verifier and review gates are complete and admit
-Slice 4 as the next slice. Bootstrap and finalizer must consume this verifier;
-neither may implement a replacement verifier.
+The passing Slice 3 state-verifier and review gates historically admitted Slice
+4. Bootstrap and finalizer must consume this verifier; neither may implement a
+replacement verifier.
 
 ### Slice 4: Shared State Classifier And Bootstrap
 
@@ -276,7 +279,11 @@ consumes the full classifier only after its ordinary-bootstrap metadata-only
 rejection gate. Do not implement the classifier or bootstrap before that
 catalog predicate gate passes.
 
-- [ ] RED: `app_acl_r2_catalog.go` and its test first establish the reusable
+- [x] RED gate closed by Slice 4-only governance exception: trustworthy
+  chronological pre-implementation RED proof for this catalog/state/classifier
+  batch is unavailable and is not claimed. Later executable mutation/regression
+  evidence remains retrospective and is never relabeled as chronological RED.
+  `app_acl_r2_catalog.go` and its test establish the reusable
   exact L1/M1/L2/M2/control-ACL relation/head predicates, including absent,
   one-sided, extra, wrong-owner, wrong-link, wrong-head, and mixed shapes.
   Exact M2 coverage must distinguish owner OID from ordinary native access:
@@ -322,7 +329,11 @@ catalog predicate gate passes.
   checks the error before its outcome and never treats a zero-value `CORRUPT`
   accompanying an error as an evidence verdict. Bootstrap coverage must prove
   this exact permitted-read/lock trace and every rejection path.
-- [ ] RED: add executable
+- [x] RED gate closed by Slice 4-only governance exception: trustworthy
+  chronological pre-implementation RED proof for this bootstrap batch is
+  unavailable and is not claimed. Later executable mutation/regression evidence
+  remains retrospective and is never relabeled as chronological RED. Add
+  executable
   `TestBootstrapAppACLR2OrdersActorInventoryBeforeClassifier` and
   `TestBootstrapAppACLR2RejectsM2OrUnknownInventoryWithoutClassifierOrM2Access`
   dependency-trace tests. Ordinary bootstrap must execute exactly `OID-10 actor
@@ -346,7 +357,7 @@ catalog predicate gate passes.
   rejects fail closed, each with zero verifier, preflight, or L2-DDL calls;
   and a classifier operational error returns the original error with zero of
   those calls.
-- [ ] GREEN: implement the read-only reusable catalog predicates, then the
+- [x] GREEN: implement the read-only reusable catalog predicates, then the
   classifier that composes them. In the ordinary-bootstrap serializable
   transaction, implement exactly the actor gate, metadata-only inventory,
   direct fail-closed M2/unknown rejection, and only-when-absent full-classifier
@@ -363,11 +374,61 @@ catalog predicate gate passes.
   frozen M1. After an uncertain bootstrap commit acknowledgement, invoke only
   the private ACK observer defined above; do not route that recovery through the
   public full classifier.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 go test ./cmd/houfeng-record-platform-admin ./internal/center/platformmigrate ./internal/center/store/migrate -run 'AppACLR2(Catalog|State|Bootstrap|Manifest)|BootstrapAppACLR2|AppACLR2Config' -count=1
 ```
+
+> Evidence and governance exception: trustworthy chronological
+> pre-implementation RED proof for the initial Slice 4 catalog/bootstrap work
+> cannot be recovered, is unavailable, and is not claimed. The two RED gates
+> above are closed only for this already-completed slice by an explicit reviewed
+> governance exception. Its substitute record is executable coverage; later
+> real mutation/regression RED evidence only where it genuinely exists, kept
+> retrospective and never relabeled as chronological RED; complete GREEN
+> verification; ordered independent read-only specification and quality
+> approval; and fresh controller reruns. This exception is not prospective and
+> leaves Slices 5-7 open.
+>
+> The exact committed Slice 4 chain is:
+> `b610f591f1805ec990e36409da628c91c9062e8b` (catalog/state predicate and
+> classifier batch, including the direct-owner manifest ACL correction), changing exactly
+> `internal/center/store/migrate/{app_acl_r2_catalog.go,
+> app_acl_r2_catalog_test.go,app_acl_r2_manifest.go,
+> app_acl_r2_manifest_test.go,app_acl_r2_state.go,
+> app_acl_r2_state_test.go}`;
+> `485effd0d62433471cf72d777c899336f322f99c` (Trellis bootstrap-contract
+> alignment/docs checkpoint), changing exactly
+> `.trellis/tasks/07-27-app-acl-r2-privileged-transition/{design.md,
+> implement.md,prd.md}`; then
+> `732298ee6176b7a3b4a988c5b9e8d9114501653f` (bootstrap/config/admin command
+> batch), changing exactly
+> `cmd/houfeng-record-platform-admin/{main.go,main_test.go}`,
+> `internal/center/platformmigrate/{app_acl_r2_transition_config.go,
+> app_acl_r2_transition_config_test.go}`, and
+> `internal/center/store/migrate/{app_acl_r2_bootstrap.go,
+> app_acl_r2_bootstrap_test.go}`.
+>
+> Against the final Slice 4 state at `732298ee6176b7a3b4a988c5b9e8d9114501653f`,
+> read-only specification task `slice4-bootstrap-cleanup-spec-review-0729`
+> preceded the independent read-only quality task
+> `slice4-bootstrap-cleanup-quality-review-0729`. Their final verdicts were
+> respectively `SPEC_REVIEW_PASS` and `QUALITY_REVIEW_PASS`, each with
+> P0=0, P1=0, and P2=0; neither review changed files or repository state.
+>
+> After those reviews, the controller freshly passed the two cleanup
+> regressions
+> `TestAppACLR2BootstrapLockedBeginDiscardsConnectionWhenSessionUnlockFails`
+> and
+> `TestAppACLR2BootstrapLockedBeginDiscardsPostHandoffUnlockFailureWithBoundedContext`,
+> the required three-package focused selector above, full tests for
+> `cmd/houfeng-record-platform-admin`, `internal/center/platformmigrate`, and
+> `internal/center/store/migrate`, `go test ./db/appaclr2/migrations -count=1`,
+> and `go vet` for the three affected packages. `gofmt -d` was empty, tracked
+> and untracked whitespace checks were clean, and immediately before the final
+> commit the staged allowlist was verified as exactly the six files listed for
+> `732298ee6176b7a3b4a988c5b9e8d9114501653f` above.
 
 ### Slice 5: Direct-Finalizer M2 Relations, 206-Tuple Catalog, And CAS
 
