@@ -437,6 +437,15 @@ go test ./cmd/houfeng-record-platform-admin ./internal/center/platformmigrate ./
 > integration evidence. A SELECT-only, non-owner direct finalizer locks a
 > present bootstrap-owned L2 receipt with `ACCESS SHARE`, not
 > `SHARE ROW EXCLUSIVE`.
+>
+> **2026-07-29 prospective P1 correction:** This changes only the unimplemented
+> Slice 5-7 plan. It preserves all checked historical Slice 3/4 checkboxes and
+> evidence and makes no retrospective implementation or PG16-evidence claim.
+> Before implementation, planning review must approve this correction; after
+> implementation, specification review, independent quality review, and full
+> verification must pass in that order. The correction does not authorize a
+> receipt/manifest wire, golden-vector, L2 three-object ACL, M2 SQL/ACL,
+> 53-source, 206-tuple, or hash change.
 
 **Ownership:** Create `app_acl_r2_finalize.go` and its test; modify isolated
 `db/appaclr2/migrations/0052_app_acl_r2_privileged_transition.sql`,
@@ -449,15 +458,40 @@ and review the complete embedded SQL bytes, the full-file SHA-256, the `0052`
 entry in the fixed 53-source vector, and the resulting full source-set digest.
 Piecemeal edits and stale-vector reuse are not authorized. This slice consumes
 the passed Slice 4 reusable L1/M1/L2/M2/control-ACL relation/head predicate and
-builds finalizer behavior on it; it does not recreate catalog predicate or
-catalog-test ownership. The only M2 persistence owned by this slice is new
+builds finalizer behavior on it; it does not create a finalizer-private catalog
+predicate or catalog-test fork. The only M2 persistence owned by this slice is new
 `public.app_acl_r2_manifest_revisions` and
 `public.app_acl_r2_manifest_head`; 0051 V1 manifest relations are read-only
 predecessors and are never inserted into, altered, re-owned, or advanced.
 
+**Temporary P1 correction ownership:** The existing eight Slice 5 paths (the
+two finalizer files, isolated `0052` SQL, `embed_test.go`, the two source files,
+and the two route-specific admin command files) remain owned, and this
+correction additionally permits only
+`internal/center/store/migrate/app_acl_r2_receipt_postgres.go`,
+`internal/center/store/migrate/app_acl_r2_receipt_postgres_test.go`,
+`internal/center/store/migrate/app_acl_r2_catalog.go`,
+`internal/center/store/migrate/app_acl_r2_catalog_test.go`,
+`internal/center/store/migrate/app_acl_r2_bootstrap.go`, and
+`internal/center/store/migrate/app_acl_r2_bootstrap_test.go`. Those temporary
+paths establish one shared constrained post-bootstrap classifier/predicate; they
+do not authorize a finalizer-private classifier, predicate, snapshot, verifier,
+privilege, helper, DSN, or ACL surface.
+
+- [ ] P1 correction RED/TDD plan: prove the OID-10 bootstrap-only live reader
+  calls `pg_control_system()` and rejects a live-system/domain mismatch; prove
+  the shared constrained PREPARED/FINALIZED reader never calls it and succeeds
+  when a direct call would be SQLSTATE `42501`; reject fresh database OID/name
+  drift and receipt/domain disagreement; retain the bootstrap-only live verifier
+  before ordinary PREPARED-repeat and bootstrap ACK-recovery success; and prove
+  finalizer deletes private classifier/predicate/snapshot duplication and uses
+  the shared path for preflight, post-DCL readback, normal repeat, and ACK
+  recovery.
+
 - [ ] RED: finalize reads only
   `HOUFENG_RECORD_PLATFORM_MIGRATOR_APP_DATABASE_URL`, rejects R1/nonexact
-  PREPARED/direct-role/M1/receipt drift through the passed predicate; rejects
+  PREPARED/direct-role/M1/receipt drift through the one shared constrained
+  predicate; rejects
   pre-existing, one-sided,
   empty, extra, wrong-owner, wrong-link, or wrong-head M2 shape; rejects
   205/207 catalog; detects stale head CAS; verifies one M2 revision/one true
@@ -475,11 +509,14 @@ predecessors and are never inserted into, altered, re-owned, or advanced.
   the SELECT-only direct migrator succeeds with `ACCESS SHARE` and would receive
   SQLSTATE `42501` under the superseded `SHARE ROW EXCLUSIVE` receipt-lock
   contract.
-- [ ] GREEN: validate receipt and the passed reusable catalog predicate first,
-  then execute the finalizer section in one serializable transaction after
+- [ ] GREEN: validate receipt through the one shared constrained
+  `ReadAppACLR2CatalogPredicatesInTx`/`ClassifyAppACLR2State` path first, then
+  execute the finalizer section in one serializable transaction after
   identity-blind state verification and its own direct-migrator actor gate
-  (the only finalizer session-identity check). After those pre-mutation checks,
-  the in-transaction mutation/readback sequence is one mandatory ordered
+  (the only finalizer session-identity check). It never calls
+  `pg_control_system()` or creates a private classifier, predicate, snapshot, or
+  verifier. After those pre-mutation checks, the in-transaction mutation/readback
+  sequence is one mandatory ordered
   contract: (1) DDL creates the direct-migrator-owned M2 relation pair with
   plain `CREATE TABLE` and creates its immutable triggers; (2) the M2
   revision/head writes insert exactly one
@@ -490,8 +527,9 @@ predecessors and are never inserted into, altered, re-owned, or advanced.
   DCL, revoking the five control grantees, then granting no-grant-option table
   `SELECT` to direct migrator and center runtime and no-grant-option helper
   `EXECUTE` only to direct migrator; and (4) only after ACL normalization,
-  FINALIZED readback re-reads receipt/catalog/head before commit. That readback
-  proves owner OID, explicit owner self-ACL, and `has_*_privilege` separately;
+  FINALIZED readback re-reads receipt/catalog/head through the same shared
+  constrained path before commit. That readback proves owner OID, explicit owner
+  self-ACL, and `has_*_privilege` separately;
   default-ACL absence never substitutes for the owner self-grants. No FINALIZED
   readback may occur before ACL normalization. Any error rolls back all M2
   DDL/DML to exact PREPARED.
@@ -507,8 +545,10 @@ go test ./db/appaclr2/migrations ./cmd/houfeng-record-platform-admin ./internal/
 **Ownership:** Create `app_acl_r2_runtime_admission.go` and
 `app_acl_r2_runtime_admission_test.go`. The admission file owns the new
 `AdmitAppACLR1OnlyRuntime`, `AdmitAppACLR2Runtime`, and
-`StartAppACLR2Runtime` APIs and consumes the already-tested Slice 3 verifier
-and direct-runtime predicate. `app_acl_r2_runtime_admission_test.go` owns the
+`StartAppACLR2Runtime` APIs and consumes the already-tested Slice 3 verifier,
+direct-runtime predicate, and shared constrained post-bootstrap classifier.
+It adds no private runtime classifier/predicate fork, privilege, helper, or
+DSN. `app_acl_r2_runtime_admission_test.go` owns the
 mandatory adversarial `TestAdmitAppACLR2RuntimeRejectsR1ToPreparedRace` and its
 paired PREPARED-classification-only assertions. No file here edits
 `AdmitAppACLRuntime`, any R1 reader, `ConvergeAppACLR1`, an existing R1 startup
@@ -532,8 +572,9 @@ route, or generic `migrate --scope app`. There is no
   identity fixture, never `SET ROLE`, membership, ownership, or credential
   handoff.
 - [ ] GREEN: implement only the new R2 admission-wrapper/startup APIs using the
-  prebuilt verifier and runtime predicate. Classification and exact R1 state
-  verification occur in the same locked
+  prebuilt verifier, runtime predicate, and shared constrained classifier;
+  never add a runtime-private classifier/predicate, privilege, helper, or DSN.
+  Classification and exact R1 state verification occur in the same locked
   `REPEATABLE READ, READ ONLY` `pgx.Tx`; direct runtime admission then applies
   the separate predicate in that same transaction. Finalizer uses state
   verification plus its own actor gate inside a locked `SERIALIZABLE` `pgx.Tx`
@@ -565,7 +606,15 @@ Slices 1-6 do not change the Go test, script, or workflow.
   application-source, member/dependency, domain, owner, ACL, and state failure;
   receipt immutability; no membership/role switch/drop/recreate; serializable
   retry/CAS/ACK loss; the adversarial R1-to-PREPARED race; and
-  R1/PREPARED/FINALIZED runtime routing. Run and reverify the already-owned
+  R1/PREPARED/FINALIZED runtime routing. Every PG16 lane must prove the OID-10
+  bootstrap-only live binding through `pg_control_system()`, while direct
+  migrator and runtime have no direct or effective `EXECUTE` on
+  `pg_control_system()`, no `pg_monitor` membership,
+  and no `pg_control_system()` query in their PREPARED/FINALIZED classifier,
+  finalizer, or runtime traces. It must prove SQLSTATE `42501` for unreadable
+  present L2/M2 evidence, fresh database OID/name rejection, unchanged
+  206-tuple/L2/M2 contracts, and the accepted residual risk: no clone/restore
+  detection claim. Run and reverify the already-owned
   Slice 4 pure predicate-composition and Slice 3 runtime-predicate unit matrices;
   Slice 7 neither recreates nor takes ownership of them. Its only new matrix
   ownership is the real PG16 reader-authority matrix. The real
@@ -631,14 +680,16 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.12 \
   -run 'TestPostgresIntegrationAppACLR2|TestPostgresIntegration.*AppACLR2' -count=1
 ```
 
-- [ ] Run the final focused/full quality gate:
+- [ ] Perform final spec-compliance review, then independent code-quality review.
+  The prospective P1 planning review must have passed before any Slice 5
+  implementation. Resolve all P0/P1/P2 findings before final verification.
+
+- [ ] After the planning, specification, and quality gates pass, run the final
+  focused/full verification gate and request parent integration review only when
+  it passes:
 
 ```bash
 gofmt -w db/appaclr2/migrations/*.go internal/center/store/migrate/app_acl_r2*.go internal/center/platformmigrate/app_acl_r2*.go cmd/houfeng-record-platform-admin/*.go
 git diff --check
 GOTMPDIR=/home/murray/.codex GOFLAGS=-p=1 make verify-go
 ```
-
-- [ ] Perform final spec-compliance review first, then independent code-quality
-  review. Resolve all P0/P1/P2 findings, rerun the fixture/full Go gate, and
-  request parent integration review only after both pass.

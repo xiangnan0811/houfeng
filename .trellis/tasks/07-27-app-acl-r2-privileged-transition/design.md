@@ -4,8 +4,11 @@
 
 R2 is a forward-only local PostgreSQL catalog-proof transition. It is not a root
 migration, R1 extension, ownership-repair tool, session-drain protocol, or
-clone detector. 0051, the root 52-source ledger, M1, all V1 codecs/readers/
-runners, and frozen AdmitAppACLRuntime remain unchanged.
+clone detector. R2 does not detect a replacement or restored cluster that
+reproduces copied immutable evidence and matching fresh catalog identity;
+physical clone/liveness/attestation is a separate parent gate or future version,
+and R2 admission alone is insufficient. 0051, the root 52-source ledger, M1,
+all V1 codecs/readers/runners, and frozen AdmitAppACLRuntime remain unchanged.
 
 The sole R2 source is
 db/appaclr2/migrations/0052_app_acl_r2_privileged_transition.sql. It is
@@ -123,10 +126,10 @@ identity.
 
 | Actor | Exact proof and authority | Forbidden |
 | --- | --- | --- |
-| Direct migrator | Direct session_user = current_user; constrained LOGIN/NOINHERIT/non-superuser; no recursive membership; owns DB, R1 objects, frozen M1 relations, new R2 relations, domain identity, and pgcrypto; finalize only | SET ROLE, role/membership DDL, owner changes, receipt mutation, extension drop/recreate |
-| Bootstrap superuser | PostgreSQL 16 direct login, role OID 10, rolsuper; owns receipt table and bootstrap helpers, may read its L2 evidence for PREPARED work, and may use the reserved-object metadata-only inventory solely as an actor-gated M2/unknown rejection gate during ordinary bootstrap and uncertain ACK recovery | Direct-migrator DSN, reading, locking, scanning, or aggregating M2 contents, M2 predicate/manifest/control-ACL reads, FINALIZED classification, owner changes, extension drop/recreate |
-| Center runtime | Direct constrained role matching center_runtime; read-only R2 admission | DDL/DCL, receipt mutation, SET ROLE |
-| Platform admin and PUBLIC | No R2 receipt/M2/helper privilege | Every R2 mutation/read/execute grant |
+| Direct migrator | Direct session_user = current_user; constrained LOGIN/NOINHERIT/non-superuser; no recursive membership; owns DB, R1 objects, frozen M1 relations, new R2 relations, domain identity, and pgcrypto; finalize only through shared constrained post-bootstrap continuity; no direct or effective `EXECUTE` on `pg_control_system()` and no `pg_monitor` membership | `SET ROLE`, role/membership DDL, `pg_control_system()` query/grant, owner changes, receipt mutation, extension drop/recreate |
+| Bootstrap superuser | PostgreSQL 16 direct login, role OID 10, rolsuper; owns receipt table and bootstrap helpers; the sole actor permitted to invoke `pg_control_system()` in the bootstrap-only live binding before initial PREPARED commit and before reporting PREPARED repeat/ACK success; may read its L2 evidence for that bootstrap work, and may use the reserved-object metadata-only inventory solely as an actor-gated M2/unknown rejection gate during ordinary bootstrap and uncertain ACK recovery | Direct-migrator DSN, reading, locking, scanning, or aggregating M2 contents, M2 predicate/manifest/control-ACL reads, FINALIZED classification, R2-provided `pg_control_system()` grant or `pg_monitor` membership, owner changes, extension drop/recreate |
+| Center runtime | Direct constrained role matching center_runtime; read-only R2 admission through shared constrained post-bootstrap continuity; no direct or effective `EXECUTE` on `pg_control_system()` and no `pg_monitor` membership | DDL/DCL, receipt mutation, `SET ROLE`, `pg_control_system()` query/grant |
+| Platform admin and PUBLIC | No R2 receipt/M2/helper privilege | Every R2 mutation/read/execute grant, `pg_control_system()` grant, `pg_monitor` membership |
 
 ### PostgreSQL 16 Authority-Aware Reader Matrix
 
@@ -135,13 +138,28 @@ predicate-composition matrix above. It preserves the direct-query API and all
 exact ACLs; it adds no grant, `SECURITY DEFINER` reader, membership, `SET ROLE`,
 ownership change, or superuser-based classification path.
 
+Two noninterchangeable predicates apply. The **bootstrap-only live binding** is
+OID-10 bootstrap work only: it calls `pg_control_system()` without an
+R2-provided `EXECUTE` grant, compares the live system identifier with the
+persisted domain/receipt, and initially binds it with the fresh database OID/name
+before PREPARED commit. The **constrained post-bootstrap continuity** predicate
+is the shared reader used by finalizer and runtime: it checks persisted
+receipt/domain and, when M2 exists, M2-domain equality, plus fresh database
+OID/name, allowed server/version, role/membership,
+extension/member/dependency/owner/ACL, and source facts. It never calls
+`pg_control_system()` or claims a fresh physical system identifier. R2 adds no
+`pg_monitor` membership, `SECURITY DEFINER` helper, second DSN, role membership,
+`SET ROLE`, or ACL surface for either predicate.
+
 | Exact state / caller | Required real-reader result |
 | --- | --- |
 | Exact R1 | Existing authorized R1 evidence readers retain their documented authority behavior. This contract does not infer success for an identity without that native R1 evidence access. |
 | PREPARED | Successful classification requires native L2 `SELECT` in the caller transaction, in addition to the applicable R1 evidence access. |
 | FINALIZED | Only direct migrator and center runtime may successfully classify: both have native L2 `SELECT` and explicit no-grant-option M2 table `SELECT`. Direct migrator's own M2 grants, rather than ownership alone, make its finalizer ACK-loss reclassification a native-reader path. |
+| Direct migrator or center runtime post-bootstrap continuity | The shared reader succeeds from its native evidence access while it has no direct or effective `EXECUTE` on `pg_control_system()`, no `pg_monitor` membership, and no `pg_control_system()` query trace. |
 | Platform admin or unrelated role with an unreadable present evidence relation | The direct PostgreSQL read propagates SQLSTATE `42501`; the classifier must not translate permission denial into `CORRUPT`. |
 | Bootstrap and FINALIZED | Ordinary bootstrap rejects M2/unknown reserved-object presence at its metadata-only gate before any full-classifier call. It therefore never invokes a path that classifies FINALIZED through superuser bypass instead of native M2 `SELECT`. |
+| OID-10 bootstrap PREPARED repeat or ACK recovery | A PREPARED success requires the bootstrap-only live binding in addition to its permitted R1/L2 evidence proof; this is not delegated to the shared constrained reader. |
 | Any reader error | An accompanying zero-value `CORRUPT` result from `ClassifyAppACLR2State` is not an evidence verdict. |
 
 The accepted R1 baseline is exact and is not an R1-to-R2 ownership transition:
@@ -158,7 +176,9 @@ The accepted R1 baseline is exact and is not an R1-to-R2 ownership transition:
 The R2 extension claim is catalog-only. Bootstrap uses no credential beyond
 `HOUFENG_RECORD_PLATFORM_APP_BOOTSTRAP_DATABASE_URL`: the opened bootstrap DSN
 session must be a direct `session_user = current_user` OID-10 superuser session
-and must not use `SET ROLE`. In its locked transaction, it proves only the
+and must not use `SET ROLE`. In its locked transaction, the bootstrap-only live
+binding alone calls `pg_control_system()` before the initial PREPARED commit and
+binds its live identifier with the fresh database OID/name. It also proves the
 allowed PostgreSQL 16 server/version and exact `pgcrypto` extension, member,
 dependency, owner, and ACL baseline:
 
@@ -172,18 +192,22 @@ Bootstrap reads the required local catalog facts (`pg_extension`, `pg_depend`,
 `pg_proc`, `pg_namespace`, `pg_roles`, relation/ACL catalogs, and
 `pg_default_acl`) before R2 DDL. It rejects a missing/wrong allowed server
 version, extension version/schema, extension/member dependency, member
-identity/owner, or ACL baseline. It records only those catalog facts plus the
-application R1/R2 source hashes already defined by this task.
+identity/owner, ACL baseline, live-system/domain mismatch, or database OID/name
+mismatch. It records those catalog facts, the bootstrap-only live-bound domain,
+and the application R1/R2 source hashes already defined by this task.
 
 This local catalog proof does not prove file bytes, filesystem paths, symlink
 resistance, image artifacts, or package provenance. It performs no server-file
 read and has no bootstrap directory configuration. External supply-chain policy
 owns all of those non-catalog claims. Finalize and runtime compare the receipt
-to fresh local catalog facts only: allowed server version, extension
-name/version/schema/OID/owner, the exact 36 `record_platform_internal` member
-identities/OIDs/owners/dependencies, and required ACL/domain facts. A different
-baseline is a hard rejection, never a repair. No helper with an unsafe
-`EXECUTE` grant exists.
+with constrained post-bootstrap continuity only: persisted receipt/domain and,
+when applicable, M2-domain equality plus fresh database OID/name, allowed server
+version, extension name/version/schema/OID/owner, the exact 36
+`record_platform_internal` member identities/OIDs/owners/dependencies, role and
+membership facts, required ACLs, and source facts. They do not reread
+`postgres_system_identifier` through `pg_control_system()`. A different baseline
+is a hard rejection, never a repair. No helper with an unsafe `EXECUTE` grant
+exists.
 
 ### Normative PG16 pgcrypto Contract
 
@@ -241,14 +265,17 @@ not its cardinality, is normative:
 Bootstrap persists the allowed `server_version_num`, `server_version`,
 `extversion = 1.3`, extension/schema/OID/owner/dependency facts,
 identity-set SHA-256, `member_count = 36`, and exact local ACL facts in the
-receipt. It also persists the R1/R2 application source and section hashes
-already defined by this task. It persists no server-file, directory, path,
-image, package, or server-file-hash evidence. Finalize/runtime compare the
-receipt's allowed server/version and catalog facts to a fresh local snapshot,
-including `record_platform_internal`, identity set, extension owner/dependency,
-and every member identity/OID/owner. A 36-row set with a substituted identity
-or identity argument is rejected; equal cardinality is never evidence of
-equivalence.
+receipt. In the bootstrap-only live binding it also binds the live
+`postgres_system_identifier` and fresh database OID/name into the immutable
+domain/receipt before PREPARED commit. It persists the R1/R2 application source
+and section hashes already defined by this task, but no server-file, directory,
+path, image, package, or server-file-hash evidence. Finalize/runtime use shared
+constrained post-bootstrap continuity: persisted receipt/domain and, when
+present, M2-domain equality plus fresh database OID/name, allowed server/version
+and catalog facts, including `record_platform_internal`, identity set, extension
+owner/dependency, and every member identity/OID/owner. They do not reread a
+physical system identifier. A 36-row set with a substituted identity or identity
+argument is rejected; equal cardinality is never evidence of equivalence.
 
 The PostgreSQL 16 catalog matrix is an all-lane requirement, not a generic
 smoke test. The fixture lanes are exactly `postgres:16.0`, `postgres:16.6`, and
@@ -516,7 +543,12 @@ The R2 domain body used by receipt and M2 is
 str16("application") || u64be(identity_epoch=1) || str16("postgres_system")
 || str16(postgres_system_identifier,1..128) || u32be(database_oid) ||
 str16(database_name,1..63)`. Its digest is SHA-256 of that complete body and
-it must equal the one immutable domain row and current local server/database.
+it must equal the one immutable domain row. The OID-10 bootstrap-only live
+binding calls `pg_control_system()` and binds the live identifier before the
+initial PREPARED commit. Thereafter constrained post-bootstrap continuity checks
+the persisted receipt/domain and, when present, M2-domain equality plus fresh
+database OID/name; finalizer and runtime never reread or claim a fresh physical
+system identifier.
 
 Both ACL bodies use the same record grammar. The L2 body magic is
 `HOUFENG-APP-ACL-R2-L2-ACL-V1`; the M2 `control_acl_body` magic is
@@ -573,9 +605,11 @@ owner-authority shortcut. It has the two named immutable M2 triggers and two
 direct-migrator default-ACL absence assertions. SQL catalog checks must prove
 the owner fields, exact `aclexplode` entries including the owner self-entries,
 all unrepresented table privileges false, no PUBLIC (`grantee = 0`) item, and
-the required native effective masks are exact. This changes the fixed M2
-control-ACL value and digest, but not its grammar, magic, version, object
-count, role tags, field order, or masks. `control_acl_digest =
+the required native effective masks are exact. The historical, completed Slice
+4 change established the current fixed M2 control-ACL value and digest. The
+2026-07-29 Decision C correction leaves that resulting value and digest
+unchanged and does not alter its grammar, magic, version, object count, role
+tags, field order, or masks. `control_acl_digest =
 SHA-256(control_acl_body)`.
 
 The literal `domain_body` and `l2_acl_body` decoder, malformed, and nesting
@@ -656,37 +690,44 @@ sole accepted SHA-256 of its raw-byte-sorted UTF-8 lines with a terminal LF per
 line. The extension is `pgcrypto` v1.3 in `record_platform_internal`, owned by
 direct migrator. The helper list is strict `(schema, identity)` order and is
 exactly the two named L2 functions; the one trigger is the L2 trigger record
-above. Receipt parsing checks the allowed server version and the exact extension,
-member/dependency, owner, ACL, domain, and application-source catalog contract
-against a fresh local snapshot. It contains no server filesystem or artifact
+above. Receipt parsing checks the nested receipt contract. The shared constrained
+post-bootstrap continuity predicate checks allowed server version, fresh database
+OID/name, exact extension/member/dependency/owner/ACL, role/membership, domain,
+and application-source facts against the fresh local snapshot, without reading a
+physical system identifier. It contains no server filesystem or artifact
 provenance evidence.
 The 0052 section hashes cover the raw inclusive byte range from the unique
 ASCII `HOUFENG-APP-ACL-R2-BOOTSTRAP-BEGIN/END` and
 `HOUFENG-APP-ACL-R2-FINALIZE-BEGIN/END` markers, respectively, through the
 terminal LF of each END marker. The receipt parser validates every nested body
-and digest, exact EOF, and fresh catalog equality. Its security claim remains
-local catalog equality only, never session drain or physical-clone rejection.
+and digest and exact EOF; the shared constrained predicate validates the
+post-bootstrap fresh catalog continuity facts. Bootstrap-only live binding is a
+separate OID-10 proof. The security claim remains local catalog continuity only,
+never session drain, physical-clone detection, restore detection, or liveness
+attestation.
 
 ## Shared State Classifier
 
 `ClassifyAppACLR2State` is the sole full state classifier, implemented in the
-one R2-only state file `app_acl_r2_state.go`. Its reader is
-`PostgresAppACLR2StateReader`. The reader accepts an already-open PostgreSQL
-transaction and does not start/commit one; the admission caller runs it in one
-`REPEATABLE READ, READ ONLY` transaction after reserving the connection and
-holding the session-level shared transition advisory lock, while
-finalize runs the same predicates inside its serializable closure after
-acquiring the conflicting exclusive lock. Ordinary bootstrap may invoke them
-in its serializable closure only after the exact actor-gated metadata rejection
-sequence below has established that M2/unknown objects are absent. After
-evidence reads succeed the classifier returns exactly `R1`, `PREPARED`,
-`FINALIZED`, or `CORRUPT`; a reader error is returned as an error, and any
-accompanying zero-value `CORRUPT` is not a state verdict. Admission, finalizer,
-finalizer ACK-loss recovery, and the post-gate ordinary-bootstrap path use this
-typed result only after checking the error. The ordinary-bootstrap metadata
-gate returns no state, and the sole bootstrap ACK-loss exception is the private
-observer defined below; neither weakens the full classifier or invents a fifth
-state.
+one R2-only state file `app_acl_r2_state.go`. Its reader,
+`PostgresAppACLR2StateReader`, and the generic
+`ReadAppACLR2CatalogPredicatesInTx` use the one shared constrained
+post-bootstrap continuity predicate. They accept an already-open PostgreSQL
+transaction, do not start/commit one, and never call `pg_control_system()`.
+The admission caller runs them in one `REPEATABLE READ, READ ONLY` transaction
+after reserving the connection and holding the session-level shared transition
+advisory lock, while finalize runs the same shared path inside its serializable
+closure after acquiring the conflicting exclusive lock. Finalizer preflight,
+post-DCL readback, normal repeat, and ACK recovery all use this same path; no
+finalizer-private classifier, predicate, snapshot, or live-system verifier is
+authorized. Ordinary bootstrap may invoke it in its serializable closure only
+after the exact actor-gated metadata rejection sequence below has established
+that M2/unknown objects are absent. After evidence reads succeed the classifier
+returns exactly `R1`, `PREPARED`, `FINALIZED`, or `CORRUPT`; a reader error is
+returned as an error, and any accompanying zero-value `CORRUPT` is not a state
+verdict. The ordinary-bootstrap metadata gate returns no state, and the sole
+bootstrap ACK-loss exception is the private observer defined below; neither
+weakens the full classifier or invents a fifth state.
 
 ### Ordinary Bootstrap Rejection Gate
 
@@ -707,6 +748,12 @@ body, predicate, control ACL, or helper/trigger definition; or classify
 invoke the full shared classifier. All classifier predicates and typed-state
 rules remain unchanged after that gate.
 
+On the permitted ordinary-bootstrap branch, exact R1 runs the bootstrap-only
+live binding before bootstrap DDL, and an exact PREPARED normal repeat runs that
+same live binding before target-state success. The shared classifier supplies
+only constrained post-bootstrap continuity and must not weaken either OID-10
+bootstrap proof.
+
 ### Bootstrap ACK-Recovery Observer
 
 `observeAppACLR2BootstrapACKRecoveryInTx` is a private, bootstrap-only,
@@ -718,14 +765,17 @@ only after the existing direct OID-10 bootstrap actor gate and an uncertain
 bootstrap commit acknowledgement, in a fresh locked SERIALIZABLE recovery
 closure. It acquires only the transition advisory lock for that recovery and
 takes no M2 table lock. It is the sole exception to requiring the full
-classifier for ACK recovery, and it does not classify FINALIZED.
+classifier for ACK recovery, and it does not classify FINALIZED. Its PREPARED
+success additionally requires the bootstrap-only live binding; this is not
+delegated to the shared constrained reader.
 
 The observer may read only the frozen R1 verifier evidence; the complete
 `app_acl_r2_*` name/identity inventory in `pg_class`, `pg_proc`, and
 `pg_trigger` (with their namespaces); and, only when that inventory is exactly
 the five L2 identities, the receipt singleton plus the existing L2 receipt,
-helper, ACL, default-ACL, and fresh bootstrap-catalog comparison. The inventory
-read observes metadata only: it never reads either M2 relation's rows, head,
+helper, ACL, default-ACL, and bootstrap-only live binding plus fresh
+bootstrap-catalog comparison. The inventory read observes metadata only: it
+never reads either M2 relation's rows, head,
 contents, manifest body, control ACL, helper/trigger definition, or M2
 predicate. It never calls `ClassifyAppACLR2State`,
 `ReadAppACLR2CatalogPredicatesInTx`, or any M2 reader.
@@ -734,7 +784,8 @@ It proves `R1` only when the frozen verifier succeeds and the complete reserved
 inventory is empty. It proves `PREPARED` only when the frozen verifier
 succeeds, the inventory is exactly the L2 table, primary-key index, two helpers,
 and receipt trigger, and there is exactly one canonical receipt row whose
-digest, parsed body, and fresh L2/catalog equality proof all succeed. An
+digest, parsed body, bootstrap-only live binding, and fresh L2/catalog proof all
+succeed. An
 unknown reserved object, an incomplete or excessive L2 inventory, any L2 row
 or surface drift, or any single M2 reserved object (including a complete M2
 inventory or an L2/M2 mixture) returns an error. It never chooses a nearest
@@ -749,12 +800,13 @@ Slice 4 first creates and tests the reusable, read-only
 states; it does not duplicate their catalog checks. Ordinary bootstrap consumes
 the full classifier only after its metadata-only rejection gate accepts the
 absence of M2/unknown objects, and the Slice 5 finalizer consumes the same
-predicates, so finalizer logic never rebuilds a parallel M2 relation/head or
-control-ACL check.
+constrained classifier/predicate, so finalizer logic never rebuilds a parallel
+M2 relation/head or control-ACL check or a private continuity snapshot/verifier.
 
-The classifier is identity-blind. It reads only catalog, source, ledger, and
-ACL evidence and never queries or branches on `session_user` or `current_user`;
-bootstrap and direct-migrator actor gates, and
+The classifier is identity-blind. It reads only constrained-continuity catalog,
+source, ledger, and ACL evidence; it never calls `pg_control_system()` or
+queries or branches on `session_user` or `current_user`; bootstrap and
+direct-migrator actor gates, and
 `RequireDirectFrozenAppACLR1RuntimeInTx` for R1 runtime, are the only
 session-identity checks. A successful direct PostgreSQL call still requires
 native `SELECT` on every evidence relation that exists for the state. Pure
@@ -773,7 +825,10 @@ The classifier uses these mechanically exact terms:
   `public.app_acl_r2_bootstrap_receipt`. Its one row contains the canonical
   53-source body/digest, canonical three-binding/206-tuple body/digest,
   receipt digest, allowed PG16 catalog baseline, domain/role facts, and
-  helper/ACL facts; every field must equal a fresh catalog snapshot.
+  helper/ACL facts. Shared constrained post-bootstrap continuity compares its
+  persisted domain to the immutable domain and fresh database OID/name,
+  server/version, role/membership, extension/member/dependency/owner/ACL, and
+  source facts; it does not reread `postgres_system_identifier`.
 - `M2` is only the new pair
   `public.app_acl_r2_manifest_revisions` and
   `public.app_acl_r2_manifest_head`, never a V1 row. Its sole revision has
@@ -781,7 +836,9 @@ The classifier uses these mechanically exact terms:
   are `m1_revision = 1`, `m1_manifest_digest`, `m1_source_set_digest`,
   `m1_privilege_set_digest`, and `m1_migrator_catalog_role`, all equal to the
   fresh M1 values. Its sole head has `singleton = true`, no alternative head,
-  and points to that same revision and M2 digest.
+  and points to that same revision and M2 digest. Its persisted domain must
+  equal the receipt and immutable domain under the same shared continuity
+  predicate.
 
 For receipt identity, the only accepted L2 surface is the table owned by OID
 10; helpers
@@ -811,7 +868,8 @@ revocations, exact owner self-ACL rows, effective-access masks, and default-ACL
 absence assertions must match exactly. Superuser bypass is not an ACL grant and
 is never used by the reader, classifier, or runtime admission. No additional
 grant, `SECURITY DEFINER` reader, membership, `SET ROLE`, or ownership transfer
-may widen these facts. Therefore PREPARED requires native L2 `SELECT`, while
+may widen these facts, and no generic or post-bootstrap reader is authorized to
+call `pg_control_system()`. Therefore PREPARED requires native L2 `SELECT`, while
 FINALIZED requires the L2/M2 intersection held only by direct migrator and
 center runtime; the finalizer's direct-migrator ACK reclassification uses its
 explicit M2 `SELECT`, and bootstrap must not invoke FINALIZED classification
@@ -820,15 +878,15 @@ through superuser bypass.
 | Result | Exhaustive predicate |
 | --- | --- |
 | `R1` | Exact `L1` and `M1`; `L2`, its two helpers, its receipt trigger, both M2 relations, the M2 function, and both M2 triggers are all absent; no other reserved `app_acl_r2_*` catalog object exists. |
-| `PREPARED` | Exact `L1` and `M1`; exactly one valid `L2` row, exact OID-10 helper/trigger identities/owners, receipt-to-live-catalog equality (including allowed PG16 server/version, pgcrypto extension/member/dependency/owner/ACL baseline, and all 36 identities), and exact L2 ACL exceptions; both M2 relations/function/triggers are absent; no unknown reserved object exists. |
-| `FINALIZED` | Every `PREPARED` predicate; both direct-migrator-owned M2 relations/function/triggers exist with their exact identities; revision cardinality is exactly one, head cardinality is exactly one true singleton and zero alternatives, the head links to that one revision, every immutable M1 link equals fresh M1, the M2 digest/body is valid, and its separate three-binding/206-tuple body and control ACL—including direct-migrator owner self-`SELECT`/`EXECUTE` records and native masks—are exact. |
+| `PREPARED` | Exact `L1` and `M1`; exactly one valid `L2` row, exact OID-10 helper/trigger identities/owners, and shared constrained post-bootstrap continuity: receipt/domain equality plus fresh database OID/name, allowed PG16 server/version, roles/memberships, pgcrypto extension/member/dependency/owner/ACL baseline, source facts, and exact L2 ACL exceptions. It does not read a live physical system identifier. Both M2 relations/function/triggers are absent; no unknown reserved object exists. |
+| `FINALIZED` | Every `PREPARED` predicate; persisted receipt, immutable domain, and M2 domain are equal; both direct-migrator-owned M2 relations/function/triggers exist with their exact identities; revision cardinality is exactly one, head cardinality is exactly one true singleton and zero alternatives, the head links to that one revision, every immutable M1 link equals fresh M1, the M2 digest/body is valid, and its separate three-binding/206-tuple body and control ACL—including direct-migrator owner self-`SELECT`/`EXECUTE` records and native masks—are exact. |
 | `CORRUPT` | The complement of the three complete catalog/source/ledger/ACL predicates above after evidence reads succeed. A query or scan error, including SQLSTATE `42501` for an unreadable present evidence relation, propagates as an error rather than becoming a predicate result. Session identity is not a predicate. The classifier does not choose the nearest state. |
 
 Examples of `CORRUPT` include L1 checksum/count/0052 drift; a non-original
 M1/head; L2 absent/duplicate/replaced/stale; wrong receipt helper or trigger
-identity/owner/ACL; wrong allowed PG16 server/version or pgcrypto
-extension/member/dependency/owner/ACL baseline; an equal-cardinality member
-substitution; receipt or M2 ACL
+identity/owner/ACL; receipt/domain disagreement; fresh database OID/name drift;
+wrong allowed PG16 server/version or pgcrypto extension/member/dependency/owner/
+ACL baseline; an equal-cardinality member substitution; receipt or M2 ACL
 exceptions outside the exact set; a one-sided, empty, duplicate, mislinked,
 wrong-owned, wrong-headed, or pre-existing M2 shape; a noncanonical 53/206
 body; missing, revoked, grant-option, or extra M2 direct-migrator owner
@@ -882,7 +940,11 @@ starts after their commit gets a new snapshot and rejects PREPARED rather than
 admitting R1. Neither the ordinary-bootstrap metadata rejection gate nor the
 bootstrap ACK observer takes an M2 table lock or reads, scans, or aggregates M2
 contents; the observer is not a mutation closure and uses only the metadata and
-L2 reads listed in its dedicated contract.
+L2 reads listed in its dedicated contract. Finalizer preflight, post-DCL
+FINALIZED readback, normal repeat, and ACK recovery use only the shared
+`ReadAppACLR2CatalogPredicatesInTx`/`ClassifyAppACLR2State` constrained
+continuity path; no finalizer-private classifier, predicate, snapshot, or
+bootstrap-live verifier is permitted.
 
 `TestAdmitAppACLR2RuntimeRejectsR1ToPreparedRace` is mandatory. It pauses an
 R2 admission immediately after an exact-R1 classification while that route
@@ -904,7 +966,9 @@ For M2 it proves owner OID, owner self-ACL, and ordinary native privilege as
 separate facts: each table needs direct-migrator and center-runtime
 non-grantable `SELECT`, the helper needs direct-migrator non-grantable
 `EXECUTE`, and a correct owner OID with a missing/revoked direct-migrator
-ordinary grant is not exact M2.
+ordinary grant is not exact M2. It also owns shared constrained-continuity
+rows that reject fresh database OID/name drift and receipt/domain or M2-domain
+disagreement without a physical-system read.
 `app_acl_r2_state_test.go` owns only composition of those predicates into typed
 states and the identity-invariant pure predicate-composition matrix. Its
 synthetic identity labels issue no PostgreSQL queries and do not assert any
@@ -913,7 +977,10 @@ dependency traces proving the ordinary-bootstrap call order is exactly OID-10
 actor gate, metadata-only reserved-object inventory, then either direct
 M2/unknown rejection or the full classifier. Its M2/unknown fixtures assert
 zero full-classifier calls and zero M2 content reads, locks, scans, or
-aggregations. `app_acl_r2_frozen_r1_verify_test.go` owns
+aggregations. It also owns bootstrap-only live-binding tests: its OID-10 reader
+calls `pg_control_system()`, rejects live-system/domain mismatch, and is invoked
+before an ordinary PREPARED repeat or ACK-recovery PREPARED success.
+`app_acl_r2_frozen_r1_verify_test.go` owns
 direct transaction-bound exact-R1 verification tests for the existing
 authorized R1 evidence-reader authority and the separate runtime-predicate
 matrix: it proves
@@ -922,13 +989,24 @@ never opens a pool/transaction, does not inspect `session_user` or
 `current_user`, and cannot call frozen or pool-bound `AdmitAppACLRuntime`.
 It separately proves `RequireDirectFrozenAppACLR1RuntimeInTx` accepts only
 `session_user == current_user == state.CenterRuntimeRole`.
-`app_acl_r2_postgres_integration_test.go` owns the real PG16 authority matrix:
-native L2/M2 success cases, SQLSTATE `42501` denial propagation, and the rule
-that bootstrap never invokes FINALIZED classification. It also owns the
-bootstrap ACK-observer query trace: R1/PREPARED proofs use only the permitted
-reads, while unknown, partial, or any M2 reserved inventory fails without an
-M2 relation-content read or FINALIZED classification. `app_acl_r2_bootstrap_test.go`
-owns the corresponding ACK-recovery dependency-level outcome/error matrix.
+`app_acl_r2_finalize_test.go` proves finalizer deletes rather than duplicates
+any private classifier/predicate/snapshot and uses the shared constrained path
+for PREPARED preflight, post-DCL FINALIZED readback, normal repeat, and ACK
+recovery. `app_acl_r2_postgres_integration_test.go` owns the real PG16
+authority matrix. Every PG16 lane proves bootstrap live binding calls
+`pg_control_system()` and rejects live-system/domain mismatch; direct migrator
+and center runtime have no direct or effective `EXECUTE` on it and no
+`pg_monitor` membership; their constrained PREPARED/FINALIZED reader query
+traces contain no `pg_control_system()` call and still succeed where a direct
+call would return SQLSTATE `42501`. It proves SQLSTATE `42501` propagation for
+unreadable present L2/M2 evidence, rejects fresh database OID/name drift and
+receipt/domain disagreement, and preserves the exact 206-tuple, L2
+three-object ACL, and M2 SQL/ACL contracts. It makes no clone/restore detection
+claim. It also owns the bootstrap ACK-observer query trace: R1/PREPARED proofs
+use only the permitted reads and the bootstrap-only live binding, while unknown,
+partial, or any M2 reserved inventory fails without an M2 relation-content read
+or FINALIZED classification. `app_acl_r2_bootstrap_test.go` owns the
+corresponding ACK-recovery dependency-level outcome/error matrix.
 `app_acl_r2_runtime_admission_test.go` owns the adversarial R1-to-PREPARED race
 and PREPARED classification-only test above. Both admission paths may classify
 PREPARED to identify it but, for exact R1 only, run state verification then the
@@ -945,32 +1023,36 @@ For ordinary bootstrap, M2 or unknown presence is a direct fail-closed
 rejection with no full-classifier call, M2 content read, M2 lock, M2 scan, or
 M2 aggregation and no `FINALIZED` classification. After the gate proves both
 are absent, bootstrap invokes the full classifier. Exact R1 then performs the
-catalog-only PG16 preflight and frozen state verification before DDL, executes
-bootstrap only, creates L2/helpers/inserts/grants/re-reads, and commits; an
-exact PREPARED normal repeat keeps the target-state no-mutation behavior.
-Target PREPARED must leave both M2 relations absent. Finalize
-applies its direct-migrator actor gate, classifies exact PREPARED, verifies the
-receipt/catalog before DDL, then executes finalize only in one serializable
-transaction with the same mandatory order: DDL creates the M2 relation
+bootstrap-only live binding, catalog-only PG16 preflight, and frozen state
+verification before DDL, executes bootstrap only, creates L2/helpers/inserts/
+grants/re-reads, and commits; an exact PREPARED normal repeat first runs the
+same bootstrap-only live binding, then keeps the target-state no-mutation
+behavior. Target PREPARED must leave both M2 relations absent. Finalize applies
+its direct-migrator actor gate, classifies exact PREPARED through shared
+constrained continuity, verifies the receipt/catalog through that same path
+before DDL, then executes finalize only in one serializable transaction with
+the mandatory order: DDL creates the M2 relation
 pair/function/triggers; M2 revision/head writes insert exactly one M2 revision
 and one M2 head and complete the phase-two M1 revision/digest CAS; revoke-first
 control ACL normalization applies the exact ACLs; FINALIZED readback re-reads
-the proof; then it commits. Target FINALIZED.
+the same shared constrained proof; then it commits. Target FINALIZED.
 
 Only SQLSTATE 40001 and 40P01 retry the entire closure. All other errors roll
 back the full attempt, including every direct-finalizer M2 DDL/DML statement.
 After uncertain commit acknowledgement, bootstrap invokes only
 `observeAppACLR2BootstrapACKRecoveryInTx`: its exact PREPARED outcome is
-success, its exact R1 outcome is a retryable prior state, and every observer
-error, including any M2 or other reserved-object presence, is bootstrap
-failure. It must not invoke FINALIZED classification, because that would use
+success only after bootstrap-only live binding, its exact R1 outcome is a
+retryable prior state, and every observer error, including any M2 or other
+reserved-object presence, is bootstrap failure. It must not invoke FINALIZED
+classification, because that would use
 superuser bypass instead of native M2 `SELECT`; the permitted metadata
 presence check is solely a rejection path, not a reclassified success. Finalize
-reclassifies with its direct-migrator authority and explicit native M2
-`SELECT`, not owner authority alone: FINALIZED is success, PREPARED is
+reclassifies only through the shared constrained classifier with its
+direct-migrator authority and explicit native M2 `SELECT`, not owner authority
+alone and never `pg_control_system()`: FINALIZED is success, PREPARED is
 retryable prior state, and all else is failure. A missing/revoked owner
 self-`SELECT` is therefore an evidence-read/error or exact-ACL failure, never
-an ACK-loss success. A normal repeat has the same target-state behavior and
+an ACK-loss success. A normal repeat uses that same shared constrained path and
 makes no mutation.
 
 ## Commands And Atomic Supersession
