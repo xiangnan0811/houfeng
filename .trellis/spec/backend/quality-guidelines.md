@@ -619,10 +619,11 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   `TestPostgresIntegrationAppACLR2` 是批准文件中的唯一 top-level PG16
   anchor；subtest 名可附在该 anchor 后。`platformmigrate` 与 record-platform
   admin CLI 不属于这个 command。
-- controller 的 protection payload signature 是
-  `{"strict":true,"checks":[{"context":"<name>","app_id":<number>},...]}`；
-  只 PUT
-  `repos/$OWNER/$REPO/branches/main/protection/required_status_checks`。
+- controller 的 protection read/write signatures 是 `GET` 加 ETag/`If-None-Match`
+  和 scoped `PATCH repos/$OWNER/$REPO/branches/main/protection/required_status_checks`。
+  internal merge 是 `{"strict":true,"checks":[{"context":"<name>","app_id":<number|null>},...]}`；
+  PATCH request 对 null pair 只发送 `{"context":"<name>"}`，numeric binding
+  发送 `{context,app_id}`，绝不发送 deprecated top-level `contexts`。
 
 #### 3. Contracts
 
@@ -651,20 +652,35 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   `internal/center/platformmigrate` 与
   `cmd/houfeng-record-platform-admin` 的回归只能走独立非 PG16
   `go`/`make verify-go` full-test gate。
-- branch protection 是 controller-owned external governance。controller 先
-  fresh GET `.../required_status_checks` 并要求 `strict == true` 与有效的
-  `checks[]`；它保留每一个 `{context, app_id}`。随后在同一 `$HEAD` 的所有
-  check-run pages 中，为三个 named contexts 各取得唯一一条
-  `completed` / `success` 且 numeric `.app.id` 的 run。它只将 existing pairs
-  与 new pairs 合并、按 `[context, app_id]` 去重，并 PUT `{strict:true,checks}`
-  到 required-status-checks 子端点；不得 hard-code 当前四个 context、提交
-  context-only payload、或 PUT 整个 protection object。该 endpoint 不会修改
-  `enforce_admins` 或 required conversation resolution。
+- branch protection 是 controller-owned external governance。controller 必须先
+  取得 auditable external exclusive required-checks mutation lease，覆盖 GitHub
+  UI、owner/admin token、GitHub App 与其他 automation writer，并从 first GET
+  持有到 post-PATCH readback 和释放。GitHub ETag 与 `If-None-Match` 只支持
+  conditional GET；该 endpoint 没有 supported conditional unsafe write，故
+  `If-Match` 不能作为 PATCH CAS。没有该 lease 必须返回 `NEEDS_CONTROLLER`，
+  不能 PATCH。
+- 在租约内，controller first GET `.../required_status_checks`，要求
+  `strict == true` 和合法 `checks[]`，保存 ETag 与 canonical `{strict,checks}`，
+  并读取同一 `$HEAD` 的所有 check-run pages。它以该 ETag conditional GET：
+  只有 304 才可 merge；200、changed ETag 或 changed canonical checks 都必须
+  fresh GET、re-read all pages、re-merge，绝不从旧快照 PATCH。最多三次仍未
+  stable 即 `NEEDS_CONTROLLER`。
+- fresh `checks[]` 的每个 `{context, app_id}` 都保留；numeric app_id 必须保持
+  numeric，合法 `app_id:null`（当前 `web-browser`）在 internal merge 保留 null，
+  PATCH 中只省略该 `checks[]` object 的 app_id。三个 named contexts 只能各取
+  同一 `$HEAD` 上唯一 `completed` / `success` 且 numeric `.app.id` 的 run。
+  existing/new pairs 按 `[context, app_id]` 去重，PATCH `{strict:true,checks}`
+  到该子端点；不得 hard-code 当前四个 context、提交 top-level `contexts`、或
+  PATCH whole protection object。post-readback 必须是 merge 的 exact superset，
+  保持 strict、old numeric/null pairs、future pairs 和三条 new numeric pairs；
+  PATCH transport ambiguity 或任何 validation/readback failure 都
+  `NEEDS_CONTROLLER`，不得 replay。该 endpoint 不会修改 `enforce_admins` 或
+  required conversation resolution。
 - 记录本合同时，`main` 的 `strict=true`、`enforce_admins=true` 与 required
   conversation resolution 已启用，观察到的 contexts 为 `go`、`web`、
   `web-browser`、`docker-image`；这些是 fresh-GET audit facts，不是重建
   required-check payload 的 name list。future existing checks 只能来自刚读取的
-  app-bound `checks[]`。
+  `checks[]`。
 
 #### 4. Validation & Error Matrix
 
@@ -678,8 +694,10 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
 | matrix 添加 `include`、第四个值、shell/default fallback 或不同 entry point | workflow/runner contract review 必须拒绝；CI matrix 不再 deterministic。 |
 | anchored JSON stream 没有 matching `run`/`pass`，或 package 有 `skip`/`fail` event | lane nonzero exit；zero-test、skip 或 fail 不是 PG16 evidence。 |
 | strict PG16 command 包含 `platformmigrate` 或 admin CLI | review 拒绝；该 result 会混入非 Slice 7 file ownership 的 package gate。 |
-| `checks[]` 缺失/无 app binding、`strict` 不为 true，或 target run 的 `head_sha` 不同、未完成、非 success、app id 缺失/歧义 | controller 不得 PUT branch protection。 |
-| 新 head 上三个 exact app-bound contexts 都唯一成功 | controller 可 PUT merged/deduplicated `{strict:true,checks}` 到 required-status-checks，保留所有 future existing pairs。 |
+| lease 缺失，`checks[]` 缺失/非法 app_id，`strict` 不为 true，target run 的 `head_sha` 不同、未完成、非 success、app id 非 numeric/歧义 | `NEEDS_CONTROLLER`；不得 PATCH。 |
+| conditional GET 返回 200、ETag 改变或 canonical `{strict,checks}` 改变 | 回到 first GET，重新读取 pages 并重算；三次仍不 stable 为 `NEEDS_CONTROLLER`，不得 PATCH old snapshot。 |
+| fresh GET 含 `{context,app_id:null}` | internal merge 保留 null，PATCH `checks[]` 以 `{context}` 编码；readback 若未保留 null pair 则 `NEEDS_CONTROLLER`。 |
+| 新 head 上三个 exact numeric-app contexts 都唯一成功、lease held、conditional GET 为 304 | controller 可 PATCH merged/deduplicated `{strict:true,checks}` 到 required-status-checks，并以 strict exact-superset readback 后释放 lease。 |
 
 #### 5. Good / Base / Bad Cases
 
@@ -693,8 +711,15 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   Task 10/14/15/16/17/18 commands。
 - Bad：只在 YAML 中把 `record-platform-pg16-catalog` 标为 "required"，或在
   新 head 的三个 checks 变绿前添加 branch-protection context。
+- Good：controller-held lease 内 first GET 后的 conditional GET 为 304；merge
+  保留 `web-browser` 的 `{context,app_id:null}`，PATCH sends `{context}`, and
+  readback is a strict exact superset before lease release。
+- Base：conditional GET returns 200 while check-run pages are read; controller
+  discards that snapshot and restarts the whole GET/pages/merge cycle。
 - Bad：将当前 `go`、`web`、`web-browser`、`docker-image` strings 重写为
   固定 payload，或只从 context name 推断 app；这会丢失现有或未来的 app binding。
+- Bad：把 ETag 的 `If-None-Match` GET 语义当成 `If-Match` PATCH CAS，或没有
+  all-writer lease 就 PATCH；GitHub 没有提供该 endpoint 的安全条件写。
 
 #### 6. Tests Required
 
@@ -728,20 +753,58 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   skip and zero fail. `platformmigrate` 与 admin CLI 的必要回归在独立
   `go`/`make verify-go` full-test gate 执行；其 green result 不得成为 PG16
   catalog assertion。
-- controller 是 branch-protection 的唯一执行者。任何 PUT 前，它保留 whole
-  protection 的 read-only evidence，并读取 app-bound required checks 和同一
-  new head 的 all check-run pages：
+- branch-protection jq fixture must contain current `web-browser`
+  `{context,app_id:null}`, at least one future numeric pair, and three unique
+  successful same-head PG16 runs. It must assert the internal merge retains all
+  pairs, the PATCH payload omits only the null pair's app_id, and malformed
+  existing pair/non-numeric target app id fails before PATCH.
+- protocol fixture must assert first-GET ETag plus a 304 permits the merge, while
+  200, changed ETag, or changed canonical checks forces a fresh GET/pages/merge;
+  lease absence, retry exhaustion, PATCH ambiguity, or non-superset readback is
+  `NEEDS_CONTROLLER` and never a replay.
+- controller 是 branch-protection 的唯一执行者。测试必须证明：external
+  all-writer mutation lease is present before first GET；the ETag conditional
+  GET is 304 before PATCH；200/changed state restarts the full read/merge;
+  and post-PATCH state is the exact superset before lease release。任何失败为
+  `NEEDS_CONTROLLER`，不得 replay old payload。示例：
 
   ```bash
   set -euo pipefail
   HEAD=$(git rev-parse HEAD)
+  endpoint="repos/$OWNER/$REPO/branches/main/protection/required_status_checks"
+  if [ -z "${REQUIRED_CHECKS_MUTATION_LEASE_ID:-}" ]; then
+    echo "NEEDS_CONTROLLER: required-check mutation lease is absent" >&2
+    exit 1
+  fi
   gh api "repos/$OWNER/$REPO/branches/main/protection" \
     --jq '{enforce_admins, required_conversation_resolution}'
 
-  required_status_checks=$(gh api \
-    "repos/$OWNER/$REPO/branches/main/protection/required_status_checks")
-  check_run_pages=$(gh api --paginate --slurp \
-    "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100")
+  unchanged=0
+  for attempt in 1 2 3; do
+    snapshot=$(mktemp)
+    gh api --include "$endpoint" >"$snapshot"
+    required_etag=$(awk 'BEGIN { IGNORECASE=1 } /^etag:/{sub(/^[^:]*: /, ""); print; exit}' "$snapshot")
+    required_status_checks=$(awk 'BEGIN { body=0 } /^\r?$/{body=1; next} body{print}' "$snapshot")
+    rm -f "$snapshot"
+    test -n "$required_etag"
+    check_run_pages=$(gh api --paginate --slurp \
+      "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100")
+    probe=$(mktemp)
+    set +e
+    gh api --include -H "If-None-Match: $required_etag" "$endpoint" >"$probe" 2>/dev/null
+    set -e
+    case "$(awk 'NR == 1 { print $2; exit }' "$probe")" in
+      304) rm -f "$probe"; unchanged=1; break ;;
+      200) rm -f "$probe"; continue ;;
+      *) rm -f "$probe"
+         echo "NEEDS_CONTROLLER: conditional required-check GET failed" >&2
+         exit 1 ;;
+    esac
+  done
+  test "$unchanged" -eq 1 || {
+    echo "NEEDS_CONTROLLER: required checks changed during all retries" >&2
+    exit 1
+  }
   ```
 
   controller builds and sends exactly this app-bound merge. It retains all fresh
@@ -750,17 +813,21 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
 
   ```bash
   set -euo pipefail
-  payload=$(jq -cen \
+  merged=$(jq -cen \
     --argjson required "$required_status_checks" \
     --argjson pages "$check_run_pages" \
     --arg head "$HEAD" '
-      def app_bound_check:
+      def numeric_app_id:
+        ((.app_id | type) == "number")
+        and (.app_id == (.app_id | floor));
+      def existing_check:
         if type == "object"
           and ((.context | type) == "string")
           and ((.context | length) > 0)
-          and ((.app_id | type) == "number")
+          and has("app_id")
+          and ((.app_id == null) or numeric_app_id)
         then {context, app_id}
-        else error("expected app-bound required check")
+        else error("invalid existing required check")
         end;
       [
         "record-platform-pg16-catalog (postgres:16.0)",
@@ -768,7 +835,7 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
         "record-platform-pg16-catalog (postgres:16.12)"
       ] as $targets
       | ($required.checks
-         | if type == "array" then map(app_bound_check)
+         | if type == "array" then map(existing_check)
            else error("required_status_checks.checks is missing") end) as $existing
       | if $required.strict == true then . else error("strict must remain true") end
       | [ $pages[] | (.check_runs
@@ -779,7 +846,7 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
           | [ $runs[]
               | select(.context == $target and .head_sha == $head
                        and .status == "completed" and .conclusion == "success"
-                       and (.app_id | type) == "number")
+                       and numeric_app_id)
             ] as $matches
           | if ($matches | length) == 1
             then $matches[0] | {context, app_id}
@@ -789,13 +856,48 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
       | {strict: true,
          checks: (($existing + $slice7) | unique_by([.context, .app_id]))}
     ')
-  printf '%s\n' "$payload" | gh api --method PUT \
-    "repos/$OWNER/$REPO/branches/main/protection/required_status_checks" --input -
+  payload=$(jq -ce '
+    def request_check:
+      if .app_id == null then {context} else {context, app_id} end;
+    {strict, checks: (.checks | map(request_check))}
+  ' <<<"$merged")
+  patch_status=0
+  printf '%s\n' "$payload" | gh api --method PATCH "$endpoint" --input - ||
+    patch_status=$?
+  post_status_checks=$(gh api "$endpoint")
+  if ! jq -e --argjson expected "$merged" '
+    def numeric_app_id:
+      ((.app_id | type) == "number")
+      and (.app_id == (.app_id | floor));
+    def existing_check:
+      if type == "object"
+        and ((.context | type) == "string")
+        and ((.context | length) > 0)
+        and has("app_id")
+        and ((.app_id == null) or numeric_app_id)
+      then {context, app_id}
+      else error("invalid post-PATCH required check")
+      end;
+    (if type == "object" and .strict == true and (.checks | type) == "array"
+     then {strict: true, checks: (.checks | map(existing_check))}
+     else error("invalid post-PATCH required-check state")
+     end) as $actual
+    | ($expected.strict == true)
+      and (($expected.checks - $actual.checks) == [])
+  ' <<<"$post_status_checks" >/dev/null; then
+    echo "NEEDS_CONTROLLER: PATCH readback lost or rewrote a required check" >&2
+    exit 1
+  fi
+  test "$patch_status" -eq 0 || {
+    echo "NEEDS_CONTROLLER: PATCH transport result was ambiguous; do not replay" >&2
+    exit 1
+  }
   ```
 
   This subendpoint leaves `enforce_admins` and required conversation resolution
-  untouched; any malformed/ambiguous input is a no-PUT failure. That controller
-  action must not be claimed before it happens.
+  untouched; malformed/stale/ambiguous input is a no-PATCH failure. The null
+  request form is only `{context}` inside `checks[]`, never a top-level contexts
+  replacement. This controller action must not be claimed before it happens.
 
 #### 7. Wrong vs Correct
 
@@ -825,11 +927,11 @@ matrix:
 ```
 
 ```json
-// Wrong: an app-less check can erase existing app bindings.
-{"strict": true, "checks": [{"context": "record-platform-pg16-catalog (postgres:16.0)", "app_id": null}]}
+// Wrong: contexts-only overwrite or unsupported conditional PATCH loses binding/CAS safety.
+{"strict": true, "contexts": ["web-browser", "record-platform-pg16-catalog (postgres:16.0)"]}
 
-// Correct: merge fresh existing checks[] with new app-bound pairs.
-{"strict": true, "checks": [{"context": "<name>", "app_id": 12345}]}
+// Correct: retain GET null internally, then omit only its PATCH app_id field.
+{"strict": true, "checks": [{"context": "web-browser"}, {"context": "record-platform-pg16-catalog (postgres:16.0)", "app_id": 12345}]}
 ```
 
 ---

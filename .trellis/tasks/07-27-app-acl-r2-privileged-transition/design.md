@@ -394,19 +394,51 @@ record-platform-pg16-catalog (postgres:16.12)
 ```
 
 After a new Slice 7 head is pushed, the controller uses that exact `$HEAD`, not
-a previous PR head. It first reads the whole protection only as evidence, then
-reads the app-bound required-check pairs and every check-run page:
+a previous PR head. Before the first read it obtains an auditable external
+exclusive required-checks mutation lease covering every GitHub UI, owner/admin
+token, GitHub App, and automation writer, and holds it through post-PATCH
+readback. GitHub ETag plus `If-None-Match` is a conditional GET validator, not
+a PATCH compare-and-swap: this endpoint has no supported conditional unsafe
+write. If the lease cannot be established, the controller returns
+`NEEDS_CONTROLLER` and does not PATCH.
 
 ```bash
 set -euo pipefail
 HEAD=$(git rev-parse HEAD)
+endpoint="repos/$OWNER/$REPO/branches/main/protection/required_status_checks"
+if [ -z "${REQUIRED_CHECKS_MUTATION_LEASE_ID:-}" ]; then
+  echo "NEEDS_CONTROLLER: required-check mutation lease is absent" >&2
+  exit 1
+fi
 gh api "repos/$OWNER/$REPO/branches/main/protection" \
   --jq '{enforce_admins, required_conversation_resolution}'
 
-required_status_checks=$(gh api \
-  "repos/$OWNER/$REPO/branches/main/protection/required_status_checks")
-check_run_pages=$(gh api --paginate --slurp \
-  "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100")
+unchanged=0
+for attempt in 1 2 3; do
+  snapshot=$(mktemp)
+  gh api --include "$endpoint" >"$snapshot"
+  required_etag=$(awk 'BEGIN { IGNORECASE=1 } /^etag:/{sub(/^[^:]*: /, ""); print; exit}' "$snapshot")
+  required_status_checks=$(awk 'BEGIN { body=0 } /^\r?$/{body=1; next} body{print}' "$snapshot")
+  rm -f "$snapshot"
+  test -n "$required_etag"
+  check_run_pages=$(gh api --paginate --slurp \
+    "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100")
+  probe=$(mktemp)
+  set +e
+  gh api --include -H "If-None-Match: $required_etag" "$endpoint" >"$probe" 2>/dev/null
+  set -e
+  case "$(awk 'NR == 1 { print $2; exit }' "$probe")" in
+    304) rm -f "$probe"; unchanged=1; break ;;
+    200) rm -f "$probe"; continue ;;
+    *) rm -f "$probe"
+       echo "NEEDS_CONTROLLER: conditional required-check GET failed" >&2
+       exit 1 ;;
+  esac
+done
+test "$unchanged" -eq 1 || {
+  echo "NEEDS_CONTROLLER: required checks changed during all retries" >&2
+  exit 1
+}
 ```
 
 At adjudication time the independently read protection has `strict=true`,
@@ -421,17 +453,21 @@ deduplicates by the full pair:
 
 ```bash
 set -euo pipefail
-payload=$(jq -cen \
+merged=$(jq -cen \
   --argjson required "$required_status_checks" \
   --argjson pages "$check_run_pages" \
   --arg head "$HEAD" '
-    def app_bound_check:
+    def numeric_app_id:
+      ((.app_id | type) == "number")
+      and (.app_id == (.app_id | floor));
+    def existing_check:
       if type == "object"
         and ((.context | type) == "string")
         and ((.context | length) > 0)
-        and ((.app_id | type) == "number")
+        and has("app_id")
+        and ((.app_id == null) or numeric_app_id)
       then {context, app_id}
-      else error("expected app-bound required check")
+      else error("invalid existing required check")
       end;
     [
       "record-platform-pg16-catalog (postgres:16.0)",
@@ -439,7 +475,7 @@ payload=$(jq -cen \
       "record-platform-pg16-catalog (postgres:16.12)"
     ] as $targets
     | ($required.checks
-       | if type == "array" then map(app_bound_check)
+       | if type == "array" then map(existing_check)
          else error("required_status_checks.checks is missing") end) as $existing
     | if $required.strict == true then . else error("strict must remain true") end
     | [ $pages[] | (.check_runs
@@ -450,7 +486,7 @@ payload=$(jq -cen \
         | [ $runs[]
             | select(.context == $target and .head_sha == $head
                      and .status == "completed" and .conclusion == "success"
-                     and (.app_id | type) == "number")
+                     and numeric_app_id)
           ] as $matches
         | if ($matches | length) == 1
           then $matches[0] | {context, app_id}
@@ -460,18 +496,60 @@ payload=$(jq -cen \
     | {strict: true,
        checks: (($existing + $slice7) | unique_by([.context, .app_id]))}
   ')
-printf '%s\n' "$payload" | gh api --method PUT \
-  "repos/$OWNER/$REPO/branches/main/protection/required_status_checks" --input -
+payload=$(jq -ce '
+  def request_check:
+    if .app_id == null then {context} else {context, app_id} end;
+  {strict, checks: (.checks | map(request_check))}
+' <<<"$merged")
+patch_status=0
+printf '%s\n' "$payload" | gh api --method PATCH "$endpoint" --input - ||
+  patch_status=$?
+
+# The response must be an exact superset of the fresh merge: every old numeric
+# or null pair and each new numeric pair must remain, with strict still true.
+post_status_checks=$(gh api "$endpoint")
+if ! jq -e --argjson expected "$merged" '
+  def numeric_app_id:
+    ((.app_id | type) == "number")
+    and (.app_id == (.app_id | floor));
+  def existing_check:
+    if type == "object"
+      and ((.context | type) == "string")
+      and ((.context | length) > 0)
+      and has("app_id")
+      and ((.app_id == null) or numeric_app_id)
+    then {context, app_id}
+    else error("invalid post-PATCH required check")
+    end;
+  (if type == "object" and .strict == true and (.checks | type) == "array"
+   then {strict: true, checks: (.checks | map(existing_check))}
+   else error("invalid post-PATCH required-check state")
+   end) as $actual
+  | ($expected.strict == true)
+    and (($expected.checks - $actual.checks) == [])
+' <<<"$post_status_checks" >/dev/null; then
+  echo "NEEDS_CONTROLLER: PATCH readback lost or rewrote a required check" >&2
+  exit 1
+fi
+test "$patch_status" -eq 0 || {
+  echo "NEEDS_CONTROLLER: PATCH transport result was ambiguous; do not replay" >&2
+  exit 1
+}
 ```
 
-The payload shape is always `{strict: true, checks: [{context, app_id}, ...]}`;
-it never reconstructs a fixed list of the four current checks and never sends a
-legacy context-only list. The scoped PUT leaves `enforce_admins` and required
-conversation resolution untouched; the controller must not PUT the whole
-protection object. This task does not perform that PUT and does not claim that
-the contexts are currently required. The local Docker Server is available for
-the three local image lanes, so local execution remains required evidence and
-is not replaced by CI-only evidence.
+The internal merge shape is `{strict: true, checks: [{context, app_id}, ...]}`;
+the PATCH request encodes a null `app_id` only as `{context}` inside `checks[]`.
+It never reconstructs a fixed list of the four current checks and never sends a
+deprecated top-level `contexts` list. A 200 conditional GET, changed ETag, or
+changed canonical checks array restarts at the first GET and re-merges; a bad
+lease, malformed state, ambiguous target run, PATCH error, or failed readback
+returns `NEEDS_CONTROLLER` without replaying the old payload. The scoped PATCH
+leaves `enforce_admins` and required conversation resolution untouched; the
+controller must not PATCH the whole protection object and releases the lease
+only after successful exact-superset readback. This task does not perform that
+PATCH and does not claim that the contexts are currently required. The local
+Docker Server is available for the three local image lanes, so local execution
+remains required evidence and is not replaced by CI-only evidence.
 
 ## M2 Persistence: Separate R2 Relations
 

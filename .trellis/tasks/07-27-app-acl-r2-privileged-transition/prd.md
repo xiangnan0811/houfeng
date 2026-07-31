@@ -173,9 +173,29 @@ the same strict entry point. Its fresh runner must use `ubuntu-latest`,
 Only the controller, after querying the new head and observing all three exact
 successful check-runs, may update `main` branch protection. It first GETs
 `required_status_checks`, retains every current `{context, app_id}` from
-`checks`, takes each new `app.id` from that head's successful check-run, and PUTs
-only `{strict: true, checks: <deduplicated existing-plus-three pairs>}` to the
-`required_status_checks` subendpoint. The payload never hard-codes today's four
+`checks`, takes each new numeric `app.id` from that head's successful check-run,
+and PATCHes only `{strict: true, checks: <deduplicated existing-plus-three
+pairs>}` to the `required_status_checks` subendpoint. A GET pair with
+`app_id: null` is valid (the current `web-browser` case): it stays `null` in the
+internal merge and is serialized as `{"context":"web-browser"}` by omitting
+only that `checks[]` object's `app_id`, which is GitHub's supported request
+form. Numeric bindings remain numeric; the deprecated top-level `contexts`
+field is never used.
+
+The controller must not treat the endpoint ETag as a PATCH compare-and-swap:
+GitHub supports `If-None-Match` conditional GET but does not support conditional
+unsafe-method updates for this endpoint. It therefore requires a controller-held
+exclusive required-checks mutation lease covering every UI, token, App, and
+automation writer before the first GET and through post-PATCH readback. Within
+that lease it GETs a snapshot and ETag, reads all `$HEAD` check-run pages,
+conditionally re-GETs with `If-None-Match`, and restarts from a new GET and
+merge when the ETag or canonical `{strict, checks}` state changes; after three
+unstable attempts it returns `NEEDS_CONTROLLER`. It PATCHes
+only after an unchanged conditional read, then GETs again and verifies
+`strict=true`, all old numeric/null pairs, future pairs, and the three new
+numeric pairs. A missing lease, stale/malformed state, ambiguous run, PATCH
+transport ambiguity, or failed readback is `NEEDS_CONTROLLER` and performs no
+blind retry from an old snapshot. The payload never hard-codes today's four
 contexts and never changes `enforce_admins` or required conversation resolution.
 This planning contract neither changes protection nor claims that any Slice 7
 implementation, CI run, review, or parent acceptance is complete.
