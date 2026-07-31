@@ -882,6 +882,189 @@ func TestReadAppACLR2ReceiptACLInTxPropagatesObjectCatalogCompletionErrorAfterSt
 	}
 }
 
+func TestScriptedAppACLR2ReceiptTxRejectsCallerTransactionLifecycle(t *testing.T) {
+	tx := &scriptedAppACLR2ReceiptTx{}
+	if err := tx.Commit(context.Background()); err == nil {
+		t.Fatal("scripted receipt transaction Commit() returned nil for caller-owned transaction")
+	}
+	if err := tx.Rollback(context.Background()); err == nil {
+		t.Fatal("scripted receipt transaction Rollback() returned nil for caller-owned transaction")
+	}
+}
+
+func TestAppACLR2ReceiptACLReaderNeverOwnsCallerTransaction(t *testing.T) {
+	state := FrozenAppACLR1StateV1{
+		DirectMigratorRole: "direct_migrator",
+		CenterRuntimeRole:  "center_runtime",
+		PlatformAdminRole:  "platform_admin",
+	}
+	completionErr := errors.New("receipt object completion lifecycle sentinel")
+	tests := []struct {
+		name    string
+		queries []scriptedAppACLR2ReceiptQuery
+		wantErr error
+	}{
+		{
+			name: "success",
+			queries: []scriptedAppACLR2ReceiptQuery{
+				{rows: appACLR2ReceiptObjectRows()},
+				{rows: appACLR2ReceiptGrantRows()},
+				{rows: appACLR2ReceiptEffectivePrivilegeRows()},
+				{rows: appACLR2ReceiptTriggerRows()},
+			},
+		},
+		{
+			name: "structural failure",
+			queries: []scriptedAppACLR2ReceiptQuery{{rows: [][]any{
+				{1, "public", "unexpected_receipt_object", int64(10), int64(1003)},
+			}}},
+			wantErr: errors.New("structural failure"),
+		},
+		{
+			name: "completion failure",
+			queries: []scriptedAppACLR2ReceiptQuery{{
+				rows:          appACLR2ReceiptObjectRows(),
+				completionErr: completionErr,
+			}},
+			wantErr: completionErr,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := &scriptedAppACLR2ReceiptTx{
+				queries:   tt.queries,
+				queryRows: []scriptedAppACLR2ReceiptQueryRow{{values: []any{int64(0)}}},
+			}
+			_, err := readAppACLR2ReceiptACLInTx(context.Background(), tx, state)
+			switch {
+			case tt.wantErr == nil && err != nil:
+				t.Fatalf("readAppACLR2ReceiptACLInTx() error = %v", err)
+			case tt.wantErr != nil && err == nil:
+				t.Fatal("readAppACLR2ReceiptACLInTx() error = nil, want failure")
+			case errors.Is(tt.wantErr, completionErr) && !errors.Is(err, completionErr):
+				t.Fatalf("readAppACLR2ReceiptACLInTx() error = %v, want completion sentinel", err)
+			}
+			if tx.commitCalls != 0 || tx.rollbackCalls != 0 {
+				t.Fatalf("readAppACLR2ReceiptACLInTx() transaction lifecycle = commit %d rollback %d, want 0/0", tx.commitCalls, tx.rollbackCalls)
+			}
+		})
+	}
+}
+
+func TestReadAppACLR2ReceiptACLInTxObjectCatalogCompletionMatrix(t *testing.T) {
+	state := FrozenAppACLR1StateV1{
+		DirectMigratorRole: "direct_migrator",
+		CenterRuntimeRole:  "center_runtime",
+		PlatformAdminRole:  "platform_admin",
+	}
+	tests := []struct {
+		name              string
+		mutate            func([][]any) [][]any
+		withCompletionErr bool
+		wantLocalError    string
+	}{
+		{
+			name: "unexpected identity completion priority",
+			mutate: func(rows [][]any) [][]any {
+				rows[0][2] = "unexpected_receipt_object"
+				return rows
+			},
+			withCompletionErr: true,
+		},
+		{
+			name: "duplicate identity completion priority",
+			mutate: func(rows [][]any) [][]any {
+				return append(rows, append([]any(nil), rows[0]...))
+			},
+			withCompletionErr: true,
+		},
+		{
+			name: "scan failure completion priority",
+			mutate: func(rows [][]any) [][]any {
+				rows[0][0] = "not-an-integer"
+				return rows
+			},
+			withCompletionErr: true,
+		},
+		{
+			name: "missing object completion priority",
+			mutate: func(rows [][]any) [][]any {
+				return append(rows[:1], rows[2:]...)
+			},
+			withCompletionErr: true,
+		},
+		{
+			name: "OID range completion priority",
+			mutate: func(rows [][]any) [][]any {
+				rows[0][4] = int64(-1)
+				return rows
+			},
+			withCompletionErr: true,
+		},
+		{
+			name: "missing object witness",
+			mutate: func(rows [][]any) [][]any {
+				return append(rows[:1], rows[2:]...)
+			},
+			wantLocalError: "missing",
+		},
+		{
+			name: "OID range witness",
+			mutate: func(rows [][]any) [][]any {
+				rows[0][4] = int64(-1)
+				return rows
+			},
+			wantLocalError: "outside uint32 bounds",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objectRows := appACLR2ReceiptObjectRows()
+			objectRows = tt.mutate(objectRows)
+			var completionErr *pgconn.PgError
+			if tt.withCompletionErr {
+				completionErr = &pgconn.PgError{Code: "XX000", Message: "receipt object catalog completion sentinel"}
+			}
+			tx := &scriptedAppACLR2ReceiptTx{queries: []scriptedAppACLR2ReceiptQuery{{
+				rows: objectRows,
+			}}}
+			if completionErr != nil {
+				tx.queries[0].completionErr = completionErr
+			}
+			_, err := readAppACLR2ReceiptACLInTx(context.Background(), tx, state)
+			if err == nil {
+				t.Fatal("readAppACLR2ReceiptACLInTx() error = nil, want object-catalog rejection")
+			}
+			if completionErr != nil {
+				if !errors.Is(err, completionErr) {
+					t.Fatalf("readAppACLR2ReceiptACLInTx() error = %v, want errors.Is completion sentinel", err)
+				}
+				var gotCompletion *pgconn.PgError
+				if !errors.As(err, &gotCompletion) || gotCompletion != completionErr {
+					t.Fatalf("readAppACLR2ReceiptACLInTx() error = %v, want errors.As PostgreSQL completion error", err)
+				}
+			} else if !strings.Contains(err.Error(), tt.wantLocalError) {
+				t.Fatalf("readAppACLR2ReceiptACLInTx() error = %v, want %q witness", err, tt.wantLocalError)
+			}
+			if len(tx.queryTexts) != 1 || len(tx.queryRowTexts) != 0 {
+				t.Fatalf("object-catalog rejection ran following privilege probes: queries=%d queryRows=%d", len(tx.queryTexts), len(tx.queryRowTexts))
+			}
+			if len(tx.returnedRows) != 1 {
+				t.Fatalf("object-catalog query returned %d row cursors, want 1", len(tx.returnedRows))
+			}
+			if got := tx.returnedRows[0].nextCalls; got != len(objectRows)+1 {
+				t.Fatalf("object-catalog rows Next() calls = %d, want full drain count %d", got, len(objectRows)+1)
+			}
+			if got := tx.returnedRows[0].index; got != len(objectRows) {
+				t.Fatalf("object-catalog rows consumed = %d, want %d", got, len(objectRows))
+			}
+			if tx.commitCalls != 0 || tx.rollbackCalls != 0 {
+				t.Fatalf("object-catalog rejection transaction lifecycle = commit %d rollback %d, want 0/0", tx.commitCalls, tx.rollbackCalls)
+			}
+		})
+	}
+}
+
 func TestAppACLR2ReceiptACLEffectivePrivilegeQueryUsesVerifiedHelperOIDs(t *testing.T) {
 	state := FrozenAppACLR1StateV1{
 		DirectMigratorRole: "direct_migrator",
@@ -937,6 +1120,51 @@ func TestAppACLR2ReceiptACLEffectivePrivilegeQueryUsesVerifiedHelperOIDs(t *test
 		query string
 	}{
 		{
+			name: "inverted assert helper probe",
+			query: strings.Replace(
+				query,
+				coalescedAssertExecuteCall,
+				"not "+coalescedAssertExecuteCall,
+				1,
+			),
+		},
+		{
+			name: "comment camouflage around assert helper probe",
+			query: strings.Replace(
+				query,
+				coalescedAssertExecuteCall,
+				"/* frozen OID-only probe */ "+coalescedAssertExecuteCall,
+				1,
+			),
+		},
+		{
+			name: "nested boolean assert helper probe",
+			query: strings.Replace(
+				query,
+				coalescedAssertExecuteCall,
+				"("+coalescedAssertExecuteCall+") is true",
+				1,
+			),
+		},
+		{
+			name: "duplicate assert helper probe",
+			query: strings.Replace(
+				query,
+				coalescedAssertExecuteCall,
+				coalescedAssertExecuteCall+", "+coalescedAssertExecuteCall,
+				1,
+			),
+		},
+		{
+			name: "NULL fallback assert helper probe",
+			query: strings.Replace(
+				query,
+				coalescedAssertExecuteCall,
+				strings.Replace(coalescedAssertExecuteCall, ", false)", ", null)", 1),
+				1,
+			),
+		},
+		{
 			name:  "unwrapped assert helper probe",
 			query: strings.Replace(query, coalescedAssertExecuteCall, assertExecuteCall, 1),
 		},
@@ -981,6 +1209,10 @@ func TestAppACLR2ReceiptACLEffectivePrivilegeQueryUsesVerifiedHelperOIDs(t *test
 				t.Fatal("mutated receipt effective ACL query passed the OID-only guard")
 			}
 		})
+	}
+	formatted := strings.ReplaceAll(strings.ToUpper(query), " ", "\n\t")
+	if err := validateAppACLR2ReceiptEffectivePrivilegeOIDQuery(formatted); err != nil {
+		t.Fatalf("case/whitespace-only receipt effective ACL query rejected: %v", err)
 	}
 }
 
@@ -1109,27 +1341,243 @@ func TestAppACLR2ReceiptACLReaderFailsClosedOnHelperAndACLDrift(t *testing.T) {
 }
 
 func validateAppACLR2ReceiptEffectivePrivilegeOIDQuery(query string) error {
-	normalized := strings.Join(strings.Fields(query), " ")
-	lower := strings.ToLower(normalized)
+	lower := strings.ToLower(query)
 	if strings.Contains(lower, "regprocedure") {
 		return fmt.Errorf("uses regprocedure name resolution")
 	}
 	if strings.Contains(lower, "record_platform_internal.") {
 		return fmt.Errorf("uses a schema-qualified helper name")
 	}
-	if count := strings.Count(normalized, "pg_catalog.has_function_privilege("); count != 2 {
-		return fmt.Errorf("has %d function privilege calls, want 2", count)
+	tokens, err := tokenizeAppACLR2ReceiptOIDQuery(query)
+	if err != nil {
+		return err
 	}
-	wantCalls := []string{
-		"coalesce(pg_catalog.has_function_privilege(role.oid, $2::pg_catalog.oid, 'EXECUTE'), false)",
-		"coalesce(pg_catalog.has_function_privilege(role.oid, $3::pg_catalog.oid, 'EXECUTE'), false)",
-	}
-	for _, call := range wantCalls {
-		if strings.Count(normalized, call) != 1 {
-			return fmt.Errorf("does not contain exactly one null-safe OID call %q", call)
+	coalesceCount := 0
+	functionPrivilegeCount := 0
+	for _, token := range tokens {
+		if token.quoted {
+			continue
+		}
+		switch token.text {
+		case "coalesce":
+			coalesceCount++
+		case "has_function_privilege":
+			functionPrivilegeCount++
 		}
 	}
+	if coalesceCount != 2 {
+		return fmt.Errorf("has %d coalesce calls, want 2", coalesceCount)
+	}
+	if functionPrivilegeCount != 2 {
+		return fmt.Errorf("has %d function privilege calls, want 2", functionPrivilegeCount)
+	}
+	selectLists, err := appACLR2ReceiptOIDQuerySelectLists(tokens)
+	if err != nil {
+		return err
+	}
+	seenParameters := make(map[string]bool, 2)
+	coalescedExpressions := 0
+	for _, expression := range selectLists {
+		coalesceIndexes := make([]int, 0, 1)
+		for index, token := range expression {
+			if !token.quoted && token.text == "coalesce" {
+				coalesceIndexes = append(coalesceIndexes, index)
+			}
+		}
+		if len(coalesceIndexes) == 0 {
+			continue
+		}
+		if len(coalesceIndexes) != 1 {
+			return fmt.Errorf("select-list expression contains %d coalesce calls, want 1", len(coalesceIndexes))
+		}
+		parameter, ok := appACLR2ReceiptOIDExpressionParameter(expression)
+		if !ok {
+			return fmt.Errorf("select-list coalesce expression is not an OID-only null-safe privilege probe")
+		}
+		if seenParameters[parameter] {
+			return fmt.Errorf("select-list repeats OID-only privilege probe parameter %s", parameter)
+		}
+		seenParameters[parameter] = true
+		coalescedExpressions++
+	}
+	if coalescedExpressions != 2 || !seenParameters["$2"] || !seenParameters["$3"] {
+		return fmt.Errorf("select-list must contain exactly one OID-only probe for $2 and $3")
+	}
 	return nil
+}
+
+type appACLR2ReceiptOIDQueryToken struct {
+	text   string
+	quoted bool
+}
+
+func tokenizeAppACLR2ReceiptOIDQuery(query string) ([]appACLR2ReceiptOIDQueryToken, error) {
+	tokens := make([]appACLR2ReceiptOIDQueryToken, 0, len(query)/3)
+	for index := 0; index < len(query); {
+		switch {
+		case query[index] == '-' && index+1 < len(query) && query[index+1] == '-':
+			return nil, fmt.Errorf("OID-only privilege query contains a line comment")
+		case query[index] == '/' && index+1 < len(query) && query[index+1] == '*':
+			return nil, fmt.Errorf("OID-only privilege query contains a block comment")
+		case query[index] == '\'' || query[index] == '"':
+			quote := query[index]
+			start := index
+			index++
+			closed := false
+			for index < len(query) {
+				if query[index] != quote {
+					index++
+					continue
+				}
+				if index+1 < len(query) && query[index+1] == quote {
+					index += 2
+					continue
+				}
+				index++
+				closed = true
+				break
+			}
+			if !closed {
+				return nil, fmt.Errorf("OID-only privilege query contains an unterminated quoted literal")
+			}
+			tokens = append(tokens, appACLR2ReceiptOIDQueryToken{text: strings.ToLower(query[start:index]), quoted: quote == '\''})
+		case query[index] == ':' && index+1 < len(query) && query[index+1] == ':':
+			tokens = append(tokens, appACLR2ReceiptOIDQueryToken{text: "::"})
+			index += 2
+		case query[index] == '$':
+			start := index
+			index++
+			for index < len(query) && query[index] >= '0' && query[index] <= '9' {
+				index++
+			}
+			tokens = append(tokens, appACLR2ReceiptOIDQueryToken{text: query[start:index]})
+		case appACLR2ReceiptOIDQueryIdentifierStart(query[index]):
+			start := index
+			index++
+			for index < len(query) && appACLR2ReceiptOIDQueryIdentifierContinue(query[index]) {
+				index++
+			}
+			tokens = append(tokens, appACLR2ReceiptOIDQueryToken{text: strings.ToLower(query[start:index])})
+		case query[index] >= '0' && query[index] <= '9':
+			start := index
+			index++
+			for index < len(query) && query[index] >= '0' && query[index] <= '9' {
+				index++
+			}
+			tokens = append(tokens, appACLR2ReceiptOIDQueryToken{text: query[start:index]})
+		default:
+			if query[index] == ' ' || query[index] == '\n' || query[index] == '\r' || query[index] == '\t' || query[index] == '\f' {
+				index++
+				continue
+			}
+			tokens = append(tokens, appACLR2ReceiptOIDQueryToken{text: strings.ToLower(query[index : index+1])})
+			index++
+		}
+	}
+	return tokens, nil
+}
+
+func appACLR2ReceiptOIDQueryIdentifierStart(value byte) bool {
+	return value == '_' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
+}
+
+func appACLR2ReceiptOIDQueryIdentifierContinue(value byte) bool {
+	return appACLR2ReceiptOIDQueryIdentifierStart(value) || value >= '0' && value <= '9'
+}
+
+func appACLR2ReceiptOIDQuerySelectLists(tokens []appACLR2ReceiptOIDQueryToken) ([][]appACLR2ReceiptOIDQueryToken, error) {
+	selectIndexes := make([]int, 0, 2)
+	depth := 0
+	for index, token := range tokens {
+		switch token.text {
+		case "(":
+			depth++
+		case ")":
+			depth--
+			if depth < 0 {
+				return nil, fmt.Errorf("OID-only privilege query has unbalanced parentheses")
+			}
+		default:
+		}
+		if depth == 0 && !token.quoted && token.text == "select" {
+			selectIndexes = append(selectIndexes, index)
+		}
+	}
+	if depth != 0 || len(selectIndexes) == 0 {
+		return nil, fmt.Errorf("OID-only privilege query has no balanced SELECT list")
+	}
+	selectLists := make([][]appACLR2ReceiptOIDQueryToken, 0, len(selectIndexes))
+	for _, selectIndex := range selectIndexes {
+		depth = 0
+		fromIndex := -1
+		for index := selectIndex + 1; index < len(tokens); index++ {
+			token := tokens[index]
+			switch token.text {
+			case "(":
+				depth++
+			case ")":
+				depth--
+				if depth < 0 {
+					return nil, fmt.Errorf("OID-only privilege query has unbalanced SELECT list parentheses")
+				}
+			default:
+			}
+			if depth == 0 && !token.quoted && token.text == "from" {
+				fromIndex = index
+				break
+			}
+		}
+		if fromIndex < 0 || depth != 0 {
+			return nil, fmt.Errorf("OID-only privilege query SELECT list has no top-level FROM")
+		}
+		selectList := tokens[selectIndex+1 : fromIndex]
+		start := 0
+		depth = 0
+		for index, token := range selectList {
+			switch token.text {
+			case "(":
+				depth++
+			case ")":
+				depth--
+				if depth < 0 {
+					return nil, fmt.Errorf("OID-only privilege query select expression has unbalanced parentheses")
+				}
+			case ",":
+				if depth == 0 {
+					selectLists = append(selectLists, append([]appACLR2ReceiptOIDQueryToken(nil), selectList[start:index]...))
+					start = index + 1
+				}
+			}
+		}
+		if depth != 0 {
+			return nil, fmt.Errorf("OID-only privilege query select expression has unbalanced parentheses")
+		}
+		selectLists = append(selectLists, append([]appACLR2ReceiptOIDQueryToken(nil), selectList[start:]...))
+	}
+	return selectLists, nil
+}
+
+func appACLR2ReceiptOIDExpressionParameter(expression []appACLR2ReceiptOIDQueryToken) (string, bool) {
+	for _, parameter := range []string{"$2", "$3"} {
+		want := []string{
+			"coalesce", "(", "pg_catalog", ".", "has_function_privilege", "(", "role", ".", "oid", ",",
+			parameter, "::", "pg_catalog", ".", "oid", ",", "'execute'", ")", ",", "false", ")",
+		}
+		if len(expression) != len(want) {
+			continue
+		}
+		matches := true
+		for index, token := range expression {
+			if token.text != want[index] {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return parameter, true
+		}
+	}
+	return "", false
 }
 
 func TestAppACLR2ReceiptACLReaderRejectsReturnedInternalTrigger(t *testing.T) {
@@ -1925,6 +2373,7 @@ type scriptedAppACLR2ReceiptTx struct {
 	inheritanceQueryCount int
 	queryTexts            []string
 	queryRowTexts         []string
+	returnedRows          []*scriptedAppACLR2ReceiptRows
 	commitCalls           int
 	rollbackCalls         int
 }
@@ -1956,17 +2405,19 @@ func (tx *scriptedAppACLR2ReceiptTx) Query(_ context.Context, queryText string, 
 			return nil, err
 		}
 	}
-	return &scriptedAppACLR2ReceiptRows{rows: query.rows, err: query.completionErr}, nil
+	rows := &scriptedAppACLR2ReceiptRows{rows: query.rows, err: query.completionErr}
+	tx.returnedRows = append(tx.returnedRows, rows)
+	return rows, nil
 }
 
 func (tx *scriptedAppACLR2ReceiptTx) Commit(context.Context) error {
 	tx.commitCalls++
-	return nil
+	return fmt.Errorf("scripted APP ACL R2 receipt reader fake forbids Commit on caller-owned transaction")
 }
 
 func (tx *scriptedAppACLR2ReceiptTx) Rollback(context.Context) error {
 	tx.rollbackCalls++
-	return nil
+	return fmt.Errorf("scripted APP ACL R2 receipt reader fake forbids Rollback on caller-owned transaction")
 }
 
 func assertScriptedAppACLR2ReceiptRelationQueryArguments(args []any) error {
@@ -2007,9 +2458,10 @@ func (row scriptedAppACLR2ReceiptRow) Scan(destinations ...any) error {
 }
 
 type scriptedAppACLR2ReceiptRows struct {
-	rows  [][]any
-	index int
-	err   error
+	rows      [][]any
+	index     int
+	nextCalls int
+	err       error
 }
 
 func (rows *scriptedAppACLR2ReceiptRows) Close() {}
@@ -2026,6 +2478,7 @@ func (rows *scriptedAppACLR2ReceiptRows) RawValues() [][]byte                   
 func (rows *scriptedAppACLR2ReceiptRows) Conn() *pgx.Conn                              { return nil }
 
 func (rows *scriptedAppACLR2ReceiptRows) Next() bool {
+	rows.nextCalls++
 	if rows.index >= len(rows.rows) {
 		return false
 	}
