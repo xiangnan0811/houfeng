@@ -1414,19 +1414,19 @@ func readAppACLR2ReceiptTableCatalogInTx(ctx context.Context, tx pgx.Tx) (AppACL
 		return AppACLR2ReceiptTableCatalogV1{}, fmt.Errorf("iterate APP ACL R2 receipt table inheritance: %w", err)
 	}
 	constraintRows, err := tx.Query(ctx, `
-		select constraint.contype::text,
-		       pg_catalog.pg_get_constraintdef(constraint.oid, true),
-		       constraint.convalidated,
-		       constraint.conindid::bigint,
+		select constraint_catalog.contype::text,
+		       pg_catalog.pg_get_constraintdef(constraint_catalog.oid, true),
+		       constraint_catalog.convalidated,
+		       constraint_catalog.conindid::bigint,
 		       coalesce(index_catalog.indisprimary, false),
 		       coalesce(index_catalog.indisunique, false),
 		       coalesce(index_catalog.indisvalid, false)
-		from pg_catalog.pg_constraint constraint
+		from pg_catalog.pg_constraint constraint_catalog
 		left join pg_catalog.pg_index index_catalog
-		  on index_catalog.indexrelid = constraint.conindid
-		 and index_catalog.indrelid = constraint.conrelid
-		where constraint.conrelid = $1::pg_catalog.oid
-		order by constraint.contype, pg_catalog.pg_get_constraintdef(constraint.oid, true)
+		  on index_catalog.indexrelid = constraint_catalog.conindid
+		 and index_catalog.indrelid = constraint_catalog.conrelid
+		where constraint_catalog.conrelid = $1::pg_catalog.oid
+		order by constraint_catalog.contype, pg_catalog.pg_get_constraintdef(constraint_catalog.oid, true)
 	`, relationOID)
 	if err != nil {
 		return AppACLR2ReceiptTableCatalogV1{}, fmt.Errorf("read APP ACL R2 receipt table constraints: %w", err)

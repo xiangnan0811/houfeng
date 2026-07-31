@@ -602,6 +602,55 @@ func TestAppACLR2ReceiptPostgresCatalogReadersUseValidCoalesceSyntax(t *testing.
 	}
 }
 
+func TestAppACLR2ReceiptTableConstraintCatalogQueryUsesNonKeywordAlias(t *testing.T) {
+	tx := &scriptedAppACLR2ReceiptTx{
+		queryRows: []scriptedAppACLR2ReceiptQueryRow{{values: appACLR2ReceiptTableRelationRow()}},
+		queries: []scriptedAppACLR2ReceiptQuery{
+			{rows: appACLR2ReceiptTableColumnRows()},
+			{rows: appACLR2ReceiptTableConstraintRows()},
+		},
+	}
+	if _, err := readAppACLR2ReceiptTableCatalogInTx(context.Background(), tx); err != nil {
+		t.Fatalf("readAppACLR2ReceiptTableCatalogInTx() error = %v", err)
+	}
+
+	const selector = "from pg_catalog.pg_constraint"
+	constraintQuery := ""
+	for _, query := range tx.queryTexts {
+		normalized := strings.Join(strings.Fields(strings.ToLower(query)), " ")
+		if strings.Contains(normalized, selector) {
+			constraintQuery = normalized
+			break
+		}
+	}
+	if constraintQuery == "" {
+		t.Fatalf("receipt table catalog queries contain no %q selector: %#v", selector, tx.queryTexts)
+	}
+
+	const alias = "constraint_catalog"
+	for _, want := range []string{
+		selector + " " + alias + " left join pg_catalog.pg_index index_catalog",
+		"select " + alias + ".contype::text",
+		"pg_catalog.pg_get_constraintdef(" + alias + ".oid, true)",
+		alias + ".convalidated",
+		alias + ".conindid::bigint",
+		"index_catalog.indexrelid = " + alias + ".conindid",
+		"index_catalog.indrelid = " + alias + ".conrelid",
+		"where " + alias + ".conrelid = $1::pg_catalog.oid",
+		"order by " + alias + ".contype",
+	} {
+		if !strings.Contains(constraintQuery, want) {
+			t.Fatalf("receipt constraint catalog query = %q, want parseable alias fragment %q", constraintQuery, want)
+		}
+	}
+	if got := strings.Count(constraintQuery, alias+"."); got != 9 {
+		t.Fatalf("receipt constraint catalog query alias references = %d, want all 9 references qualified by %q: %q", got, alias, constraintQuery)
+	}
+	if strings.Contains(constraintQuery, "constraint.") {
+		t.Fatalf("receipt constraint catalog query uses reserved PostgreSQL alias constraint: %q", constraintQuery)
+	}
+}
+
 func TestAppACLR2BootstrapCatalogReaderRejectsPGCryptoRoutineKindDrift(t *testing.T) {
 	frozen := validFrozenAppACLR1StateFixture(t)
 	memberRows := appACLR2PGCryptoMemberCatalogRows()
