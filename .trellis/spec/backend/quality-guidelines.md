@@ -584,6 +584,9 @@ if !(warning < alert && alert < critical) {
   替代父任务的 record-platform fixture modes。
 - 它只覆盖 APP ACL R2 的 PG16 authority/catalog evidence，不改变冻结的
   R1/R2 source、tuple、ACL、data、permission、state 或 clone/restore 合同。
+- 这是 cross-layer runner、Actions job、GitHub app-bound required-check 和
+  `go test -json` evidence contract；实现时四个边界必须一起验证，不能把
+  package compilation 或 zero-test result 标成 PG16 evidence。
 
 #### 2. Signatures
 
@@ -603,6 +606,23 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   `record-platform-pg16-catalog (postgres:16.0)`,
   `record-platform-pg16-catalog (postgres:16.6)`，和
   `record-platform-pg16-catalog (postgres:16.12)`.
+- job 的 fresh-runner signature 是 `runs-on: ubuntu-latest`、
+  `actions/checkout@v6`、`actions/setup-go@v6` + `go-version-file: go.mod`，
+  随后每一个 matrix lane 执行同一个 strict command：
+
+  ```bash
+  scripts/test-record-platform-integration.sh pg16-catalog -- \
+    go test -json ./internal/center/store/migrate \
+    -run '^TestPostgresIntegrationAppACLR2$' -count=1
+  ```
+
+  `TestPostgresIntegrationAppACLR2` 是批准文件中的唯一 top-level PG16
+  anchor；subtest 名可附在该 anchor 后。`platformmigrate` 与 record-platform
+  admin CLI 不属于这个 command。
+- controller 的 protection payload signature 是
+  `{"strict":true,"checks":[{"context":"<name>","app_id":<number>},...]}`；
+  只 PUT
+  `repos/$OWNER/$REPO/branches/main/protection/required_status_checks`。
 
 #### 3. Contracts
 
@@ -620,13 +640,31 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   其他 real-PostgreSQL test 获得此例外。
 - workflow matrix 只能包含三个 quoted literal，不得有 `include`、default
   expression 或不同 entry point；每个 lane 运行同一 `pg16-catalog` command。
-  显式 job name 是三个 check contexts 的 evidence contract；workflow 文件
-  本身不能把 context 设为 required。
-- branch protection 属于 controller-owned external governance。记录本合同时，
-  `main` 为 `strict=true`，contexts 为 `go`、`web`、`web-browser`、
-  `docker-image`，`enforce_admins=true` 且 required conversation resolution
-  已启用。controller 只能在新的 Slice 7 head 上三个 PG16 contexts 全部成功后
-  保留这些设置并添加三个 context。
+  job 必须先 checkout 和按仓库既有 `setup-go@v6`/`go.mod` 模式安装 Go；显式
+  job name 是三个 check contexts 的 evidence contract；workflow 文件本身不能
+  把 context 设为 required。
+- strict child 只运行 migrate package 的 anchored JSON selector。它必须将
+  stdout 保存为 JSONL，并以 `jq -se` 证明匹配
+  `^TestPostgresIntegrationAppACLR2($|/)` 的 `run` 和 `pass` event 各至少一条，
+  且该 package 的 `skip` 和 `fail` event 均为零。runner 的 child exit 和
+  `--- SKIP:` failure 保持有效；event proof 额外拒绝 zero-test false green。
+  `internal/center/platformmigrate` 与
+  `cmd/houfeng-record-platform-admin` 的回归只能走独立非 PG16
+  `go`/`make verify-go` full-test gate。
+- branch protection 是 controller-owned external governance。controller 先
+  fresh GET `.../required_status_checks` 并要求 `strict == true` 与有效的
+  `checks[]`；它保留每一个 `{context, app_id}`。随后在同一 `$HEAD` 的所有
+  check-run pages 中，为三个 named contexts 各取得唯一一条
+  `completed` / `success` 且 numeric `.app.id` 的 run。它只将 existing pairs
+  与 new pairs 合并、按 `[context, app_id]` 去重，并 PUT `{strict:true,checks}`
+  到 required-status-checks 子端点；不得 hard-code 当前四个 context、提交
+  context-only payload、或 PUT 整个 protection object。该 endpoint 不会修改
+  `enforce_admins` 或 required conversation resolution。
+- 记录本合同时，`main` 的 `strict=true`、`enforce_admins=true` 与 required
+  conversation resolution 已启用，观察到的 contexts 为 `go`、`web`、
+  `web-browser`、`docker-image`；这些是 fresh-GET audit facts，不是重建
+  required-check payload 的 name list。future existing checks 只能来自刚读取的
+  app-bound `checks[]`。
 
 #### 4. Validation & Error Matrix
 
@@ -636,14 +674,18 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
 | `pg16-catalog` 使用一个 allowlist image | 用该 exact image 启动四个 fixture database 并执行 child command。 |
 | 调用 `postgres` 或 `postgres-s3` | 保持各自 mode contract；不能仅因为 strict image variable 缺少或不同而拒绝。 |
 | strict child 输出 `--- SKIP:` | cleanup 后 runner nonzero exit；该 lane 不是 evidence。 |
+| fresh job 缺少 `runs-on`、checkout 或按 `go.mod` 的 setup-go，或 lane 运行不同 child command | workflow review 拒绝；不能声称 fresh Actions runner 可执行。 |
 | matrix 添加 `include`、第四个值、shell/default fallback 或不同 entry point | workflow/runner contract review 必须拒绝；CI matrix 不再 deterministic。 |
-| check 名字正确但 `head_sha` 不同、未完成或 conclusion 非 success | controller 不得更新 branch protection。 |
-| 新 head 上三个 exact contexts 都成功 | controller 可更新受保护 `main` 的 required-status-checks，同时保留现有 contexts 和 strict setting。 |
+| anchored JSON stream 没有 matching `run`/`pass`，或 package 有 `skip`/`fail` event | lane nonzero exit；zero-test、skip 或 fail 不是 PG16 evidence。 |
+| strict PG16 command 包含 `platformmigrate` 或 admin CLI | review 拒绝；该 result 会混入非 Slice 7 file ownership 的 package gate。 |
+| `checks[]` 缺失/无 app binding、`strict` 不为 true，或 target run 的 `head_sha` 不同、未完成、非 success、app id 缺失/歧义 | controller 不得 PUT branch protection。 |
+| 新 head 上三个 exact app-bound contexts 都唯一成功 | controller 可 PUT merged/deduplicated `{strict:true,checks}` 到 required-status-checks，保留所有 future existing pairs。 |
 
 #### 5. Good / Base / Bad Cases
 
 - Good：用 `pg16-catalog` 提供 `postgres:16.6`；四个 fixture database 都使用
-  该 literal image，测试不 skip，check context 为
+  该 literal image；fresh job checkout/setup Go 后，migrate anchor 产生
+  nonzero `run`/`pass` 和 zero `skip`/`fail` JSON events，check context 为
   `record-platform-pg16-catalog (postgres:16.6)`。
 - Base：开发者直接运行且没有 fixture environment 时，批准 integration test
   按普通规则 skip；它不是 required-CI result。
@@ -651,33 +693,109 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   Task 10/14/15/16/17/18 commands。
 - Bad：只在 YAML 中把 `record-platform-pg16-catalog` 标为 "required"，或在
   新 head 的三个 checks 变绿前添加 branch-protection context。
+- Bad：将当前 `go`、`web`、`web-browser`、`docker-image` strings 重写为
+  固定 payload，或只从 context name 推断 app；这会丢失现有或未来的 app binding。
 
 #### 6. Tests Required
 
 - 批准 integration file 覆盖 real PG16 authority matrix；由 strict runner 执行
   时不得以 skip 作为 evidence。runner coverage 必须证明三个 allowlist literal、
   missing/invalid input 在 side effect 前拒绝、selected image 传到四个 fixtures、
-  cleanup 与 skip-to-failure behavior。
+  cleanup 与 skip-to-failure behavior。该文件必须声明唯一 top-level
+  `TestPostgresIntegrationAppACLR2` anchor；CI/local selector 完全锚定该名字。
 - 三个 image 都必须在本地运行同一 command；可用 Docker Server 是 local
   evidence，不是把 lane 推给 CI 的理由。随后每个 CI matrix lane 也运行完全相同的
-  strict entry point。
-- controller 是 branch-protection 的唯一执行者。任何 PUT 前，它先保留当前
-  `main` protection 的 read-only evidence；之后才查询新 head：
+  strict entry point。每次运行把 `go test -json` output 保存为 JSONL，并执行：
 
   ```bash
-  gh api "repos/$OWNER/$REPO/branches/main/protection" \
-    --jq '{required_status_checks, enforce_admins, required_conversation_resolution}'
-
-  gh api "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100" --paginate \
-    --jq '.check_runs[] | [.name, .head_sha, .status, .conclusion] | @tsv'
+  # events is the file populated by tee from the strict child command above.
+  jq -se '
+    def package_event:
+      .Package == "houfeng/internal/center/store/migrate";
+    def anchored_event:
+      package_event and
+      ((.Test // "") | test("^TestPostgresIntegrationAppACLR2($|/)"));
+    [.[] | select(package_event)] as $package_events
+    | [$package_events[] | select(anchored_event)] as $anchored_events
+    | (($anchored_events | map(select(.Action == "run")) | length) > 0)
+      and (($anchored_events | map(select(.Action == "pass")) | length) > 0)
+      and (($package_events | map(select(.Action == "skip")) | length) == 0)
+      and (($package_events | map(select(.Action == "fail")) | length) == 0)
+  ' "$events" >/dev/null
   ```
 
-  controller 验证三个 named contexts 都指向该 `$HEAD`、status 为 `completed`
-  且 conclusion 为 `success`，之后才用 `strict=true`、四个 existing contexts
-  和三个 new contexts 更新
-  `repos/$OWNER/$REPO/branches/main/protection/required_status_checks`。该
-  scoped PUT 不修改 `enforce_admins` 或 required conversation resolution；该
-  controller action 前不得声称当前 protection 已改变。
+  Pipeline/runner nonzero exit plus this query proves nonzero execution, zero
+  skip and zero fail. `platformmigrate` 与 admin CLI 的必要回归在独立
+  `go`/`make verify-go` full-test gate 执行；其 green result 不得成为 PG16
+  catalog assertion。
+- controller 是 branch-protection 的唯一执行者。任何 PUT 前，它保留 whole
+  protection 的 read-only evidence，并读取 app-bound required checks 和同一
+  new head 的 all check-run pages：
+
+  ```bash
+  set -euo pipefail
+  HEAD=$(git rev-parse HEAD)
+  gh api "repos/$OWNER/$REPO/branches/main/protection" \
+    --jq '{enforce_admins, required_conversation_resolution}'
+
+  required_status_checks=$(gh api \
+    "repos/$OWNER/$REPO/branches/main/protection/required_status_checks")
+  check_run_pages=$(gh api --paginate --slurp \
+    "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100")
+  ```
+
+  controller builds and sends exactly this app-bound merge. It retains all fresh
+  existing `checks[]` pairs, gets target `app.id` only from unique successful
+  `$HEAD` check-runs, and deduplicates by `[context, app_id]`:
+
+  ```bash
+  set -euo pipefail
+  payload=$(jq -cen \
+    --argjson required "$required_status_checks" \
+    --argjson pages "$check_run_pages" \
+    --arg head "$HEAD" '
+      def app_bound_check:
+        if type == "object"
+          and ((.context | type) == "string")
+          and ((.context | length) > 0)
+          and ((.app_id | type) == "number")
+        then {context, app_id}
+        else error("expected app-bound required check")
+        end;
+      [
+        "record-platform-pg16-catalog (postgres:16.0)",
+        "record-platform-pg16-catalog (postgres:16.6)",
+        "record-platform-pg16-catalog (postgres:16.12)"
+      ] as $targets
+      | ($required.checks
+         | if type == "array" then map(app_bound_check)
+           else error("required_status_checks.checks is missing") end) as $existing
+      | if $required.strict == true then . else error("strict must remain true") end
+      | [ $pages[] | (.check_runs
+          | if type == "array" then . else error("check_runs missing") end)[]
+          | {context: .name, app_id: .app.id, head_sha, status, conclusion}
+        ] as $runs
+      | [ $targets[] as $target
+          | [ $runs[]
+              | select(.context == $target and .head_sha == $head
+                       and .status == "completed" and .conclusion == "success"
+                       and (.app_id | type) == "number")
+            ] as $matches
+          | if ($matches | length) == 1
+            then $matches[0] | {context, app_id}
+            else error("expected one successful app-bound check-run for " + $target)
+            end
+        ] as $slice7
+      | {strict: true,
+         checks: (($existing + $slice7) | unique_by([.context, .app_id]))}
+    ')
+  printf '%s\n' "$payload" | gh api --method PUT \
+    "repos/$OWNER/$REPO/branches/main/protection/required_status_checks" --input -
+  ```
+
+  This subendpoint leaves `enforce_admins` and required conversation resolution
+  untouched; any malformed/ambiguous input is a no-PUT failure. That controller
+  action must not be claimed before it happens.
 
 #### 7. Wrong vs Correct
 
@@ -690,7 +808,9 @@ scripts/test-record-platform-integration.sh postgres -- go test ./...
 ```bash
 # Correct：隔离 strict lane 并提供一个 literal image。
 HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.12 \
-  scripts/test-record-platform-integration.sh pg16-catalog -- go test ./...
+  scripts/test-record-platform-integration.sh pg16-catalog -- \
+  go test -json ./internal/center/store/migrate \
+  -run '^TestPostgresIntegrationAppACLR2$' -count=1
 ```
 
 ```yaml
@@ -702,6 +822,14 @@ matrix:
 # Correct：精确三个 literal value 驱动 named checks。
 matrix:
   postgres_image: ["postgres:16.0", "postgres:16.6", "postgres:16.12"]
+```
+
+```json
+// Wrong: an app-less check can erase existing app bindings.
+{"strict": true, "checks": [{"context": "record-platform-pg16-catalog (postgres:16.0)", "app_id": null}]}
+
+// Correct: merge fresh existing checks[] with new app-bound pairs.
+{"strict": true, "checks": [{"context": "<name>", "app_id": 12345}]}
 ```
 
 ---

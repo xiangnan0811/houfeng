@@ -334,6 +334,7 @@ action. The Slice 7 implementation must create this one matrix job with no
 ```yaml
 record-platform-pg16-catalog:
   name: record-platform-pg16-catalog (${{ matrix.postgres_image }})
+  runs-on: ubuntu-latest
   strategy:
     fail-fast: false
     matrix:
@@ -344,13 +345,44 @@ record-platform-pg16-catalog:
   env:
     HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE: ${{ matrix.postgres_image }}
   steps:
-    - run: >-
-        scripts/test-record-platform-integration.sh pg16-catalog --
-        go test -v ./internal/center/store/migrate
-        ./internal/center/platformmigrate ./cmd/houfeng-record-platform-admin
-        -run 'TestPostgresIntegrationAppACLR2|TestPostgresIntegration.*AppACLR2'
-        -count=1
+    - uses: actions/checkout@v6
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+    - name: Run strict PG16 catalog evidence
+      shell: bash
+      run: |
+        set -euo pipefail
+        events=$(mktemp)
+        trap 'rm -f "$events"' EXIT
+        scripts/test-record-platform-integration.sh pg16-catalog -- \
+          go test -json ./internal/center/store/migrate \
+          -run '^TestPostgresIntegrationAppACLR2$' -count=1 \
+          | tee "$events"
+        jq -se '
+          def package_event:
+            .Package == "houfeng/internal/center/store/migrate";
+          def anchored_event:
+            package_event and
+            ((.Test // "") | test("^TestPostgresIntegrationAppACLR2($|/)"));
+          [.[] | select(package_event)] as $package_events
+          | [$package_events[] | select(anchored_event)] as $anchored_events
+          | (($anchored_events | map(select(.Action == "run")) | length) > 0)
+            and (($anchored_events | map(select(.Action == "pass")) | length) > 0)
+            and (($package_events | map(select(.Action == "skip")) | length) == 0)
+            and (($package_events | map(select(.Action == "fail")) | length) == 0)
+        ' "$events" >/dev/null
 ```
+
+The new test file must expose `TestPostgresIntegrationAppACLR2` as the sole
+top-level PG16 anchor; its subtests may cover the authority matrix. The runner
+already fails on nonzero child exit and `--- SKIP:`; the `go test -json` proof
+adds a machine-checkable nonzero `run`/`pass`, zero `skip`, and zero `fail`
+requirement so an unmatched `-run` selector cannot pass. The command names only
+`./internal/center/store/migrate`; neither `./internal/center/platformmigrate`
+nor `./cmd/houfeng-record-platform-admin` may be folded into a PG16 catalog
+result. Their regressions belong to the independent existing `go` job's
+`make verify-go` full-test gate and must not be described as catalog evidence.
 
 The explicit job name makes the actual expected check contexts stable and
 queryable, rather than relying on GitHub's implicit matrix formatting:
@@ -361,40 +393,85 @@ record-platform-pg16-catalog (postgres:16.6)
 record-platform-pg16-catalog (postgres:16.12)
 ```
 
-After a new Slice 7 head is pushed, the controller queries those exact contexts
-on that SHA, not on a previous PR head:
+After a new Slice 7 head is pushed, the controller uses that exact `$HEAD`, not
+a previous PR head. It first reads the whole protection only as evidence, then
+reads the app-bound required-check pairs and every check-run page:
 
 ```bash
+set -euo pipefail
+HEAD=$(git rev-parse HEAD)
 gh api "repos/$OWNER/$REPO/branches/main/protection" \
-  --jq '{required_status_checks, enforce_admins, required_conversation_resolution}'
+  --jq '{enforce_admins, required_conversation_resolution}'
 
-gh api "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100" --paginate \
-  --jq '.check_runs[] | [.name, .head_sha, .status, .conclusion] | @tsv'
+required_status_checks=$(gh api \
+  "repos/$OWNER/$REPO/branches/main/protection/required_status_checks")
+check_run_pages=$(gh api --paginate --slurp \
+  "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100")
 ```
 
-Only when all three rows name that `$HEAD` and have `completed` / `success` may
-the controller update `main` protection. At adjudication time the independently
-read protection has `strict=true`, contexts `go`, `web`, `web-browser`, and
-`docker-image`, `enforce_admins=true`, and required conversation resolution
-enabled. The controller preserves those settings and adds the three exact new
-contexts through the protected-branch API, for example. The scoped
-`required_status_checks` PUT does not change `enforce_admins` or required
-conversation resolution:
+At adjudication time the independently read protection has `strict=true`,
+`enforce_admins=true`, and required conversation resolution enabled. Its
+observed names are `go`, `web`, `web-browser`, and `docker-image`; those four
+strings are audit facts only, not a future payload template. The controller
+rejects an absent/malformed `required_status_checks.checks`, a non-strict
+response, or anything other than exactly one `completed` / `success` check-run
+on `$HEAD` with a numeric `app.id` for each named PG16 context. It preserves
+every existing `{context, app_id}` pair, appends the three app-bound pairs, and
+deduplicates by the full pair:
 
 ```bash
-gh api --method PUT "repos/$OWNER/$REPO/branches/main/protection/required_status_checks" \
-  -F strict=true \
-  -F 'contexts[]=go' -F 'contexts[]=web' \
-  -F 'contexts[]=web-browser' -F 'contexts[]=docker-image' \
-  -F 'contexts[]=record-platform-pg16-catalog (postgres:16.0)' \
-  -F 'contexts[]=record-platform-pg16-catalog (postgres:16.6)' \
-  -F 'contexts[]=record-platform-pg16-catalog (postgres:16.12)'
+set -euo pipefail
+payload=$(jq -cen \
+  --argjson required "$required_status_checks" \
+  --argjson pages "$check_run_pages" \
+  --arg head "$HEAD" '
+    def app_bound_check:
+      if type == "object"
+        and ((.context | type) == "string")
+        and ((.context | length) > 0)
+        and ((.app_id | type) == "number")
+      then {context, app_id}
+      else error("expected app-bound required check")
+      end;
+    [
+      "record-platform-pg16-catalog (postgres:16.0)",
+      "record-platform-pg16-catalog (postgres:16.6)",
+      "record-platform-pg16-catalog (postgres:16.12)"
+    ] as $targets
+    | ($required.checks
+       | if type == "array" then map(app_bound_check)
+         else error("required_status_checks.checks is missing") end) as $existing
+    | if $required.strict == true then . else error("strict must remain true") end
+    | [ $pages[] | (.check_runs
+        | if type == "array" then . else error("check_runs missing") end)[]
+        | {context: .name, app_id: .app.id, head_sha, status, conclusion}
+      ] as $runs
+    | [ $targets[] as $target
+        | [ $runs[]
+            | select(.context == $target and .head_sha == $head
+                     and .status == "completed" and .conclusion == "success"
+                     and (.app_id | type) == "number")
+          ] as $matches
+        | if ($matches | length) == 1
+          then $matches[0] | {context, app_id}
+          else error("expected one successful app-bound check-run for " + $target)
+          end
+      ] as $slice7
+    | {strict: true,
+       checks: (($existing + $slice7) | unique_by([.context, .app_id]))}
+  ')
+printf '%s\n' "$payload" | gh api --method PUT \
+  "repos/$OWNER/$REPO/branches/main/protection/required_status_checks" --input -
 ```
 
-This task does not perform that PUT and does not claim that the contexts are
-currently required. The local Docker Server is available for the three local
-image lanes, so local execution remains required evidence and is not replaced
-by CI-only evidence.
+The payload shape is always `{strict: true, checks: [{context, app_id}, ...]}`;
+it never reconstructs a fixed list of the four current checks and never sends a
+legacy context-only list. The scoped PUT leaves `enforce_admins` and required
+conversation resolution untouched; the controller must not PUT the whole
+protection object. This task does not perform that PUT and does not claim that
+the contexts are currently required. The local Docker Server is available for
+the three local image lanes, so local execution remains required evidence and
+is not replaced by CI-only evidence.
 
 ## M2 Persistence: Separate R2 Relations
 

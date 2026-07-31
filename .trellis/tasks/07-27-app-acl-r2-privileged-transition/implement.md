@@ -709,7 +709,10 @@ either mode. The strict mode signature is
 It accepts only `postgres:16.0`, `postgres:16.6`, or `postgres:16.12`, and
 rejects missing/other values before `mktemp`, random/password or port work,
 Docker, containers, or fixture exports. These three paths are exclusive to
-Slice 7; Slices 1-6 do not change the Go test, script, or workflow.
+Slice 7; Slices 1-6 do not change the Go test, script, or workflow. The new CI
+job must be executable from a fresh runner: `runs-on: ubuntu-latest`, then
+`actions/checkout@v6`, then `actions/setup-go@v6` with
+`go-version-file: go.mod`, before its exact matrix command.
 
 - [ ] RED/GREEN: cover R1 -> PREPARED -> FINALIZED; every wrong identity,
   application-source, member/dependency, domain, owner, ACL, and state failure;
@@ -778,22 +781,42 @@ Slice 7; Slices 1-6 do not change the Go test, script, or workflow.
   `record-platform-pg16-catalog` matrix job whose explicit job name is
   `record-platform-pg16-catalog (${{ matrix.postgres_image }})`, with exactly
   those three literal image strings and no include/default fallback. Every lane
-  invokes the same `pg16-catalog` entry point with its matrix value.
+  invokes the same `pg16-catalog` entry point with its matrix value after the
+  repository's `ubuntu-latest` / checkout v6 / setup-go v6 with
+  `go-version-file: go.mod` bootstrap. Its child is only
+  `go test -json ./internal/center/store/migrate -run
+  '^TestPostgresIntegrationAppACLR2$' -count=1`; the required new test file
+  provides that exact top-level anchor and may use subtests for its matrix.
 - [ ] Run every real PostgreSQL 16 lane with roles created inside the fixture:
 
 ```bash
-HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.0 \
-  scripts/test-record-platform-integration.sh pg16-catalog -- \
-  go test -v ./internal/center/store/migrate ./internal/center/platformmigrate ./cmd/houfeng-record-platform-admin \
-  -run 'TestPostgresIntegrationAppACLR2|TestPostgresIntegration.*AppACLR2' -count=1
-HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.6 \
-  scripts/test-record-platform-integration.sh pg16-catalog -- \
-  go test -v ./internal/center/store/migrate ./internal/center/platformmigrate ./cmd/houfeng-record-platform-admin \
-  -run 'TestPostgresIntegrationAppACLR2|TestPostgresIntegration.*AppACLR2' -count=1
-HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.12 \
-  scripts/test-record-platform-integration.sh pg16-catalog -- \
-  go test -v ./internal/center/store/migrate ./internal/center/platformmigrate ./cmd/houfeng-record-platform-admin \
-  -run 'TestPostgresIntegrationAppACLR2|TestPostgresIntegration.*AppACLR2' -count=1
+run_pg16_catalog() (
+  set -euo pipefail
+  image=$1
+  events=$(mktemp)
+  trap 'rm -f "$events"' EXIT
+  HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE="$image" \
+    scripts/test-record-platform-integration.sh pg16-catalog -- \
+    go test -json ./internal/center/store/migrate \
+    -run '^TestPostgresIntegrationAppACLR2$' -count=1 \
+    | tee "$events"
+  jq -se '
+    def package_event:
+      .Package == "houfeng/internal/center/store/migrate";
+    def anchored_event:
+      package_event and
+      ((.Test // "") | test("^TestPostgresIntegrationAppACLR2($|/)"));
+    [.[] | select(package_event)] as $package_events
+    | [$package_events[] | select(anchored_event)] as $anchored_events
+    | (($anchored_events | map(select(.Action == "run")) | length) > 0)
+      and (($anchored_events | map(select(.Action == "pass")) | length) > 0)
+      and (($package_events | map(select(.Action == "skip")) | length) == 0)
+      and (($package_events | map(select(.Action == "fail")) | length) == 0)
+  ' "$events" >/dev/null
+)
+run_pg16_catalog postgres:16.0
+run_pg16_catalog postgres:16.6
+run_pg16_catalog postgres:16.12
 ```
 
 #### Slice 7 Admission And Required-Check Order
@@ -811,6 +834,13 @@ effect. Add runner coverage that proves each allowed literal is passed to all
 four fixture databases, and that unset/invalid values invoke no fixture setup.
 The local Docker Server reports `29.6.2`; execute the three commands above
 locally as evidence in addition to CI rather than substituting a CI-only claim.
+The JSON-event assertion is part of each lane: it requires nonzero matching
+`run` and `pass` events and zero package `skip`/`fail` events, so a zero-match
+selector cannot pass. Do not add `internal/center/platformmigrate` or
+`cmd/houfeng-record-platform-admin` to that strict child command. Their
+regressions are independent non-PG16 work and run through the existing `go`
+job's `make verify-go` full-test gate (or an equivalently separate full-test
+gate), never as catalog-lane proof.
 
 The workflow layer must use an explicit job name so its matrix check contexts
 are exactly `record-platform-pg16-catalog (postgres:16.0)`,
@@ -818,24 +848,77 @@ are exactly `record-platform-pg16-catalog (postgres:16.0)`,
 `record-platform-pg16-catalog (postgres:16.12)`. This workflow edit does not
 itself make a GitHub required check. After a newly pushed Slice 7 head has all
 three successful contexts, the controller first retains read-only protection
-evidence and then queries that same head with:
+evidence, fresh app-bound required checks, and all check-run pages for that same
+head:
 
 ```bash
+set -euo pipefail
+HEAD=$(git rev-parse HEAD)
 gh api "repos/$OWNER/$REPO/branches/main/protection" \
-  --jq '{required_status_checks, enforce_admins, required_conversation_resolution}'
+  --jq '{enforce_admins, required_conversation_resolution}'
 
-gh api "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100" --paginate \
-  --jq '.check_runs[] | [.name, .head_sha, .status, .conclusion] | @tsv'
+required_status_checks=$(gh api \
+  "repos/$OWNER/$REPO/branches/main/protection/required_status_checks")
+check_run_pages=$(gh api --paginate --slurp \
+  "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100")
 ```
 
-Only then may the controller update `main` branch protection, preserving its
-current `strict=true`, `go`, `web`, `web-browser`, and `docker-image` contexts,
-`enforce_admins=true`, and required conversation resolution while adding the
-three exact PG16 context names through the scoped `required_status_checks` PUT;
-that endpoint leaves `enforce_admins` and required conversation resolution
-unchanged. This Slice 7 planning update neither performs that protected-branch
-API call nor asserts that a new head, review, CI result, or branch-protection
-update exists.
+Only then may the controller update `main` branch protection. It must require
+`required_status_checks.strict == true`, preserve every existing
+`required_status_checks.checks[]` `{context, app_id}` pair, derive exactly one
+successful `$HEAD` check-run and numeric `app.id` for each new context, and PUT
+the deduplicated JSON shape `{strict: true, checks: [{context, app_id}, ...]}`
+only to `repos/$OWNER/$REPO/branches/main/protection/required_status_checks` via
+`--input -`. It must not substitute a context-only payload, hard-code the four
+currently known names, or PUT the whole protection object. That scoped endpoint
+leaves `enforce_admins` and required conversation resolution unchanged. This
+Slice 7 planning update neither performs that protected-branch API call nor
+asserts that a new head, review, CI result, or branch-protection update exists.
+
+```bash
+set -euo pipefail
+payload=$(jq -cen \
+  --argjson required "$required_status_checks" \
+  --argjson pages "$check_run_pages" \
+  --arg head "$HEAD" '
+    def app_bound_check:
+      if type == "object"
+        and ((.context | type) == "string")
+        and ((.context | length) > 0)
+        and ((.app_id | type) == "number")
+      then {context, app_id}
+      else error("expected app-bound required check")
+      end;
+    [
+      "record-platform-pg16-catalog (postgres:16.0)",
+      "record-platform-pg16-catalog (postgres:16.6)",
+      "record-platform-pg16-catalog (postgres:16.12)"
+    ] as $targets
+    | ($required.checks
+       | if type == "array" then map(app_bound_check)
+         else error("required_status_checks.checks is missing") end) as $existing
+    | if $required.strict == true then . else error("strict must remain true") end
+    | [ $pages[] | (.check_runs
+        | if type == "array" then . else error("check_runs missing") end)[]
+        | {context: .name, app_id: .app.id, head_sha, status, conclusion}
+      ] as $runs
+    | [ $targets[] as $target
+        | [ $runs[]
+            | select(.context == $target and .head_sha == $head
+                     and .status == "completed" and .conclusion == "success"
+                     and (.app_id | type) == "number")
+          ] as $matches
+        | if ($matches | length) == 1
+          then $matches[0] | {context, app_id}
+          else error("expected one successful app-bound check-run for " + $target)
+          end
+      ] as $slice7
+    | {strict: true,
+       checks: (($existing + $slice7) | unique_by([.context, .app_id]))}
+  ')
+printf '%s\n' "$payload" | gh api --method PUT \
+  "repos/$OWNER/$REPO/branches/main/protection/required_status_checks" --input -
+```
 
 - [ ] Perform final spec-compliance review, then independent code-quality review.
   The prospective P1 planning review must have passed before any Slice 5

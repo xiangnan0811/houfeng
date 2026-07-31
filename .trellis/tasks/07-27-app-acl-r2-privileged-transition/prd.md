@@ -152,18 +152,33 @@ the sole name exception to the ordinary `_e2e_test.go` convention. A direct run
 without the fixture environment may use the ordinary skip behavior, but the
 strict runner exports `HOUFENG_POSTGRES_INTEGRATION=1` and treats any
 `--- SKIP:` output as failure. Therefore no required Slice 7 lane can pass by
-skipping.
+skipping. Its only required PG16 selector is the exact migrate-package anchor
+`^TestPostgresIntegrationAppACLR2$`, executed with `go test -json`. The lane
+must retain the JSON event stream and fail unless it shows at least one matching
+`run` and `pass` event, and zero package `skip` and `fail` events. Thus a
+zero-test selector cannot create a green catalog result. `platformmigrate` and
+`cmd/houfeng-record-platform-admin` remain outside this catalog command; any
+regression for them belongs to the independent non-PG16 `go`/`make verify-go`
+full-test gate.
 
 The workflow layer and branch-protection layer are separate acceptance gates.
 The workflow must create the three stable check contexts
 `record-platform-pg16-catalog (postgres:16.0)`,
 `record-platform-pg16-catalog (postgres:16.6)`, and
 `record-platform-pg16-catalog (postgres:16.12)` from one literal matrix and
-the same strict entry point. Only the controller, after querying the new head
-and observing all three contexts successful, may add those contexts to `main`
-branch protection. This planning contract neither changes protection nor claims
-that any Slice 7 implementation, CI run, review, or parent acceptance is
-complete.
+the same strict entry point. Its fresh runner must use `ubuntu-latest`,
+`actions/checkout@v6`, and `actions/setup-go@v6` with
+`go-version-file: go.mod` before that command.
+
+Only the controller, after querying the new head and observing all three exact
+successful check-runs, may update `main` branch protection. It first GETs
+`required_status_checks`, retains every current `{context, app_id}` from
+`checks`, takes each new `app.id` from that head's successful check-run, and PUTs
+only `{strict: true, checks: <deduplicated existing-plus-three pairs>}` to the
+`required_status_checks` subendpoint. The payload never hard-codes today's four
+contexts and never changes `enforce_admins` or required conversation resolution.
+This planning contract neither changes protection nor claims that any Slice 7
+implementation, CI run, review, or parent acceptance is complete.
 
 ## Unsupported States And Non-Goals
 
