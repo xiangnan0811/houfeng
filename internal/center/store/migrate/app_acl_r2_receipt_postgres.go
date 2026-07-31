@@ -1502,33 +1502,46 @@ func readAppACLR2ReceiptACLInTx(ctx context.Context, tx pgx.Tx, state FrozenAppA
 		expected[fmt.Sprintf("%d|%s|%s", objects[index].Kind, objects[index].Schema, objects[index].Identity)] = index
 	}
 	observed := make(map[string]receiptObjectCatalog, len(objects))
+	var objectCatalogErr error
 	for rows.Next() {
+		// Keep consuming rows so a completion error can take precedence over row-local drift.
+		if objectCatalogErr != nil {
+			continue
+		}
 		var kind int
 		var schema, identity string
 		var objectOID, ownerOID int64
 		if err := rows.Scan(&kind, &schema, &identity, &ownerOID, &objectOID); err != nil {
-			return AppACLControlACLBodyR2V1{}, fmt.Errorf("scan APP ACL R2 receipt object catalog: %w", err)
+			objectCatalogErr = fmt.Errorf("scan APP ACL R2 receipt object catalog: %w", err)
+			continue
 		}
 		object, err := appACLR2CatalogUint32(objectOID, "receipt object OID")
 		if err != nil {
-			return AppACLControlACLBodyR2V1{}, err
+			objectCatalogErr = err
+			continue
 		}
 		owner, err := appACLR2CatalogUint32(ownerOID, "receipt object owner OID")
 		if err != nil {
-			return AppACLControlACLBodyR2V1{}, err
+			objectCatalogErr = err
+			continue
 		}
 		key := fmt.Sprintf("%d|%s|%s", kind, schema, identity)
 		_, exists := expected[key]
 		if !exists {
-			return AppACLControlACLBodyR2V1{}, fmt.Errorf("APP ACL R2 receipt object identity %q is unexpected", identity)
+			objectCatalogErr = fmt.Errorf("APP ACL R2 receipt object identity %q is unexpected", identity)
+			continue
 		}
 		if _, exists := observed[key]; exists {
-			return AppACLControlACLBodyR2V1{}, fmt.Errorf("APP ACL R2 receipt object identity %q is duplicate", identity)
+			objectCatalogErr = fmt.Errorf("APP ACL R2 receipt object identity %q is duplicate", identity)
+			continue
 		}
 		observed[key] = receiptObjectCatalog{OID: object, OwnerOID: owner}
 	}
 	if err := rows.Err(); err != nil {
 		return AppACLControlACLBodyR2V1{}, fmt.Errorf("iterate APP ACL R2 receipt object catalog: %w", err)
+	}
+	if objectCatalogErr != nil {
+		return AppACLControlACLBodyR2V1{}, objectCatalogErr
 	}
 	assertHelperKey := fmt.Sprintf("%d|%s|%s", objects[1].Kind, objects[1].Schema, objects[1].Identity)
 	rejectHelperKey := fmt.Sprintf("%d|%s|%s", objects[2].Kind, objects[2].Schema, objects[2].Identity)

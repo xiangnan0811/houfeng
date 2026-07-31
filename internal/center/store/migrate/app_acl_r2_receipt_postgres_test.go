@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -852,6 +853,35 @@ func TestAppACLR2ReservedCatalogObjectReaderRetainsAdditionalPrefixedObjects(t *
 	}
 }
 
+func TestReadAppACLR2ReceiptACLInTxPropagatesObjectCatalogCompletionErrorAfterStructuralRow(t *testing.T) {
+	completionErr := errors.New("receipt object catalog completion sentinel")
+	objectRows := appACLR2ReceiptObjectRows()
+	objectRows[0][2] = "unexpected_receipt_object"
+	tx := &scriptedAppACLR2ReceiptTx{queries: []scriptedAppACLR2ReceiptQuery{{
+		rows:          objectRows,
+		completionErr: completionErr,
+	}}}
+	state := FrozenAppACLR1StateV1{
+		DirectMigratorRole: "direct_migrator",
+		CenterRuntimeRole:  "center_runtime",
+		PlatformAdminRole:  "platform_admin",
+	}
+
+	_, err := readAppACLR2ReceiptACLInTx(context.Background(), tx, state)
+	if !errors.Is(err, completionErr) {
+		t.Fatalf("readAppACLR2ReceiptACLInTx() error = %v, want object-catalog completion error", err)
+	}
+	if len(tx.queryTexts) != 1 {
+		t.Fatalf("readAppACLR2ReceiptACLInTx() query count = %d, want only object catalog", len(tx.queryTexts))
+	}
+	if strings.Contains(strings.ToLower(strings.Join(tx.queryTexts, "\n")), "has_function_privilege") {
+		t.Fatalf("readAppACLR2ReceiptACLInTx() queried effective privileges after structural object row: %#v", tx.queryTexts)
+	}
+	if tx.commitCalls != 0 || tx.rollbackCalls != 0 {
+		t.Fatalf("readAppACLR2ReceiptACLInTx() finished caller transaction: commits=%d rollbacks=%d", tx.commitCalls, tx.rollbackCalls)
+	}
+}
+
 func TestAppACLR2ReceiptACLEffectivePrivilegeQueryUsesVerifiedHelperOIDs(t *testing.T) {
 	state := FrozenAppACLR1StateV1{
 		DirectMigratorRole: "direct_migrator",
@@ -898,10 +928,31 @@ func TestAppACLR2ReceiptACLEffectivePrivilegeQueryUsesVerifiedHelperOIDs(t *test
 	if err := validateAppACLR2ReceiptEffectivePrivilegeOIDQuery(query); err != nil {
 		t.Errorf("receipt effective ACL production query: %v", err)
 	}
+	assertExecuteCall := "pg_catalog.has_function_privilege(role.oid, $2::pg_catalog.oid, 'EXECUTE')"
+	rejectExecuteCall := "pg_catalog.has_function_privilege(role.oid, $3::pg_catalog.oid, 'EXECUTE')"
+	coalescedAssertExecuteCall := "coalesce(" + assertExecuteCall + ", false)"
+	coalescedRejectExecuteCall := "coalesce(" + rejectExecuteCall + ", false)"
 	mutations := []struct {
 		name  string
 		query string
 	}{
+		{
+			name:  "unwrapped assert helper probe",
+			query: strings.Replace(query, coalescedAssertExecuteCall, assertExecuteCall, 1),
+		},
+		{
+			name:  "unwrapped reject helper probe",
+			query: strings.Replace(query, coalescedRejectExecuteCall, rejectExecuteCall, 1),
+		},
+		{
+			name: "all helper probes unwrapped",
+			query: strings.Replace(
+				strings.Replace(query, coalescedAssertExecuteCall, assertExecuteCall, 1),
+				coalescedRejectExecuteCall,
+				rejectExecuteCall,
+				1,
+			),
+		},
 		{
 			name: "schema-qualified regprocedure cast",
 			query: strings.Replace(
@@ -1070,12 +1121,12 @@ func validateAppACLR2ReceiptEffectivePrivilegeOIDQuery(query string) error {
 		return fmt.Errorf("has %d function privilege calls, want 2", count)
 	}
 	wantCalls := []string{
-		"pg_catalog.has_function_privilege(role.oid, $2::pg_catalog.oid, 'EXECUTE')",
-		"pg_catalog.has_function_privilege(role.oid, $3::pg_catalog.oid, 'EXECUTE')",
+		"coalesce(pg_catalog.has_function_privilege(role.oid, $2::pg_catalog.oid, 'EXECUTE'), false)",
+		"coalesce(pg_catalog.has_function_privilege(role.oid, $3::pg_catalog.oid, 'EXECUTE'), false)",
 	}
 	for _, call := range wantCalls {
 		if strings.Count(normalized, call) != 1 {
-			return fmt.Errorf("does not contain exactly one OID call %q", call)
+			return fmt.Errorf("does not contain exactly one null-safe OID call %q", call)
 		}
 	}
 	return nil
@@ -1854,8 +1905,9 @@ func (tx *recordingAppACLR2PGCryptoMemberCatalogTx) Query(_ context.Context, que
 }
 
 type scriptedAppACLR2ReceiptQuery struct {
-	checkArgs func([]any) error
-	rows      [][]any
+	checkArgs     func([]any) error
+	rows          [][]any
+	completionErr error
 }
 
 type scriptedAppACLR2ReceiptQueryRow struct {
@@ -1873,6 +1925,8 @@ type scriptedAppACLR2ReceiptTx struct {
 	inheritanceQueryCount int
 	queryTexts            []string
 	queryRowTexts         []string
+	commitCalls           int
+	rollbackCalls         int
 }
 
 func (tx *scriptedAppACLR2ReceiptTx) Query(_ context.Context, queryText string, args ...any) (pgx.Rows, error) {
@@ -1902,7 +1956,17 @@ func (tx *scriptedAppACLR2ReceiptTx) Query(_ context.Context, queryText string, 
 			return nil, err
 		}
 	}
-	return &scriptedAppACLR2ReceiptRows{rows: query.rows}, nil
+	return &scriptedAppACLR2ReceiptRows{rows: query.rows, err: query.completionErr}, nil
+}
+
+func (tx *scriptedAppACLR2ReceiptTx) Commit(context.Context) error {
+	tx.commitCalls++
+	return nil
+}
+
+func (tx *scriptedAppACLR2ReceiptTx) Rollback(context.Context) error {
+	tx.rollbackCalls++
+	return nil
 }
 
 func assertScriptedAppACLR2ReceiptRelationQueryArguments(args []any) error {
@@ -1945,10 +2009,16 @@ func (row scriptedAppACLR2ReceiptRow) Scan(destinations ...any) error {
 type scriptedAppACLR2ReceiptRows struct {
 	rows  [][]any
 	index int
+	err   error
 }
 
-func (rows *scriptedAppACLR2ReceiptRows) Close()                                       {}
-func (rows *scriptedAppACLR2ReceiptRows) Err() error                                   { return nil }
+func (rows *scriptedAppACLR2ReceiptRows) Close() {}
+func (rows *scriptedAppACLR2ReceiptRows) Err() error {
+	if rows.index < len(rows.rows) {
+		return nil
+	}
+	return rows.err
+}
 func (rows *scriptedAppACLR2ReceiptRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
 func (rows *scriptedAppACLR2ReceiptRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (rows *scriptedAppACLR2ReceiptRows) Values() ([]any, error)                       { return nil, nil }
