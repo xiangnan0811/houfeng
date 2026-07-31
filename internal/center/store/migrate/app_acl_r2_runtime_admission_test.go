@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -216,7 +218,6 @@ func TestAdmitAppACLR2RuntimeRejectsR1ToPreparedRace(t *testing.T) {
 
 	classifiedR1 := make(chan struct{})
 	allowFrozenVerification := make(chan struct{})
-	bootstrapExclusiveAttempted := make(chan struct{}, 1)
 	bootstrapExclusiveAcquired := make(chan struct{}, 1)
 	bootstrapPreparedCommitted := make(chan struct{}, 1)
 	locks := newAppACLR2RuntimeAdmissionRaceLockManager()
@@ -225,6 +226,7 @@ func TestAdmitAppACLR2RuntimeRejectsR1ToPreparedRace(t *testing.T) {
 	admissionConn := &fakeAppACLR2RuntimeAdmissionRaceAdmissionConn{
 		tx:    admissionTx,
 		locks: locks,
+		owner: appACLR2RuntimeAdmissionRaceRuntimeOwner,
 	}
 	admissionBegin := newAppACLR2RuntimeAdmissionSharedTransitionLockedBegin(func(context.Context) (appACLR2BootstrapReservedConn, error) {
 		return admissionConn, nil
@@ -260,16 +262,22 @@ func TestAdmitAppACLR2RuntimeRejectsR1ToPreparedRace(t *testing.T) {
 		t.Fatalf("R1 classification did not reach the pause: %v", ctx.Err())
 	}
 
-	bootstrapLocks := &appACLR2RuntimeAdmissionRaceBootstrapLockState{locks: locks}
+	bootstrapLocks := &appACLR2RuntimeAdmissionRaceBootstrapLockState{
+		locks: locks,
+		owner: appACLR2RuntimeAdmissionRaceBootstrapOwner,
+	}
+	bootstrapBlocked := make(chan error, 1)
+	go func() {
+		bootstrapBlocked <- locks.waitForBlocked(ctx, appACLR2RuntimeAdmissionRaceBootstrapOwner)
+	}()
 	bootstrapTx := &fakeAppACLR2RuntimeAdmissionRaceBootstrapTx{
 		locks:             bootstrapLocks,
+		exclusiveAcquired: bootstrapExclusiveAcquired,
 		preparedCommitted: bootstrapPreparedCommitted,
 	}
 	bootstrapConn := &fakeAppACLR2RuntimeAdmissionRaceBootstrapConn{
-		tx:                 bootstrapTx,
-		locks:              bootstrapLocks,
-		exclusiveAttempted: bootstrapExclusiveAttempted,
-		exclusiveAcquired:  bootstrapExclusiveAcquired,
+		tx:    bootstrapTx,
+		locks: bootstrapLocks,
 	}
 	bootstrapBegin := newAppACLR2BootstrapTransitionLockedBegin(func(context.Context) (appACLR2BootstrapReservedConn, error) {
 		return bootstrapConn, nil
@@ -284,14 +292,16 @@ func TestAdmitAppACLR2RuntimeRejectsR1ToPreparedRace(t *testing.T) {
 	}()
 
 	select {
-	case <-bootstrapExclusiveAttempted:
-	case <-ctx.Done():
-		t.Fatalf("bootstrap did not attempt its exclusive transition lock: %v", ctx.Err())
-	}
-	select {
 	case <-bootstrapExclusiveAcquired:
 		t.Fatal("bootstrap acquired the exclusive transition lock while R1 admission held the shared lock")
-	default:
+	case err := <-bootstrapBlocked:
+		if err != nil {
+			t.Fatalf("bootstrap did not block on the physical transition lock: %v", err)
+		}
+	case err := <-bootstrapDone:
+		t.Fatalf("bootstrap transition failed before blocking on the physical transition lock: %v", err)
+	case <-ctx.Done():
+		t.Fatalf("bootstrap did not block on the physical transition lock: %v", ctx.Err())
 	}
 	if got := bootstrapTx.CommitCalls(); got != 0 {
 		t.Fatalf("bootstrap commit calls = %d while shared lock is held, want 0", got)
@@ -324,6 +334,7 @@ func TestAdmitAppACLR2RuntimeRejectsR1ToPreparedRace(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatalf("bootstrap did not report its PREPARED commit: %v", ctx.Err())
 	}
+	locks.assertReleased(t)
 	assertAppACLR2RuntimeAdmissionTrace(t, admissionTrace, "classify", "verify-frozen", "require-direct-runtime")
 
 	preparedTrace := make([]string, 0, 1)
@@ -747,37 +758,137 @@ const (
 	appACLR2RuntimeAdmissionRaceLockModeExclusive
 )
 
+type appACLR2RuntimeAdmissionRaceLockScope uint8
+
 const (
-	appACLR2RuntimeAdmissionRaceRuntimeOwner   = "runtime-admission"
-	appACLR2RuntimeAdmissionRaceBootstrapOwner = "bootstrap"
+	appACLR2RuntimeAdmissionRaceLockScopeInvalid appACLR2RuntimeAdmissionRaceLockScope = iota
+	appACLR2RuntimeAdmissionRaceLockScopeSession
+	appACLR2RuntimeAdmissionRaceLockScopeTransaction
 )
+
+type appACLR2RuntimeAdmissionRaceAdvisoryFunction uint8
+
+const (
+	appACLR2RuntimeAdmissionRaceAdvisoryFunctionInvalid appACLR2RuntimeAdmissionRaceAdvisoryFunction = iota
+	appACLR2RuntimeAdmissionRaceAdvisoryFunctionLock
+	appACLR2RuntimeAdmissionRaceAdvisoryFunctionUnlock
+)
+
+const (
+	appACLR2RuntimeAdmissionRaceRuntimeOwner       = "runtime-admission-connection"
+	appACLR2RuntimeAdmissionRaceBootstrapOwner     = "bootstrap-connection"
+	appACLR2RuntimeAdmissionRaceTransitionLockSeed = int64(0)
+	appACLR2RuntimeAdmissionRaceTransitionLockKey  = "houfeng.app-acl-r2-privileged-transition.v1"
+)
+
+type appACLR2RuntimeAdmissionRaceLockIdentity struct {
+	seed int64
+	key  string
+}
+
+type appACLR2RuntimeAdmissionRaceLockRequest struct {
+	function appACLR2RuntimeAdmissionRaceAdvisoryFunction
+	mode     appACLR2RuntimeAdmissionRaceLockMode
+	scope    appACLR2RuntimeAdmissionRaceLockScope
+	identity appACLR2RuntimeAdmissionRaceLockIdentity
+}
 
 type appACLR2RuntimeAdmissionRaceLockHold struct {
 	owner string
 	mode  appACLR2RuntimeAdmissionRaceLockMode
+	scope appACLR2RuntimeAdmissionRaceLockScope
 }
 
 type appACLR2RuntimeAdmissionRaceLockManager struct {
 	mu      sync.Mutex
-	held    map[string][]appACLR2RuntimeAdmissionRaceLockHold
+	held    map[appACLR2RuntimeAdmissionRaceLockIdentity][]appACLR2RuntimeAdmissionRaceLockHold
+	waiting map[string]appACLR2RuntimeAdmissionRaceLockRequest
 	changed chan struct{}
 }
 
 func newAppACLR2RuntimeAdmissionRaceLockManager() *appACLR2RuntimeAdmissionRaceLockManager {
 	return &appACLR2RuntimeAdmissionRaceLockManager{
-		held:    make(map[string][]appACLR2RuntimeAdmissionRaceLockHold),
+		held:    make(map[appACLR2RuntimeAdmissionRaceLockIdentity][]appACLR2RuntimeAdmissionRaceLockHold),
+		waiting: make(map[string]appACLR2RuntimeAdmissionRaceLockRequest),
 		changed: make(chan struct{}),
 	}
 }
 
-func (manager *appACLR2RuntimeAdmissionRaceLockManager) acquire(ctx context.Context, owner, key string, mode appACLR2RuntimeAdmissionRaceLockMode) error {
-	if owner == "" || key == "" || mode == appACLR2RuntimeAdmissionRaceLockModeInvalid {
-		return fmt.Errorf("invalid deterministic advisory lock request owner=%q key=%q mode=%d", owner, key, mode)
+func (manager *appACLR2RuntimeAdmissionRaceLockManager) acquire(ctx context.Context, owner string, request appACLR2RuntimeAdmissionRaceLockRequest) error {
+	if owner == "" || request.function != appACLR2RuntimeAdmissionRaceAdvisoryFunctionLock || request.mode == appACLR2RuntimeAdmissionRaceLockModeInvalid || request.scope == appACLR2RuntimeAdmissionRaceLockScopeInvalid || request.identity.key == "" {
+		return fmt.Errorf("invalid physical advisory lock request owner=%q request=%#v", owner, request)
 	}
+	waiting := false
 	for {
 		manager.mu.Lock()
-		if manager.canAcquireLocked(owner, key, mode) {
-			manager.held[key] = append(manager.held[key], appACLR2RuntimeAdmissionRaceLockHold{owner: owner, mode: mode})
+		if manager.canAcquireLocked(owner, request.identity, request.mode) {
+			if waiting {
+				delete(manager.waiting, owner)
+				manager.notifyLocked()
+			}
+			manager.held[request.identity] = append(manager.held[request.identity], appACLR2RuntimeAdmissionRaceLockHold{owner: owner, mode: request.mode, scope: request.scope})
+			manager.mu.Unlock()
+			return nil
+		}
+		if !waiting {
+			manager.waiting[owner] = request
+			waiting = true
+			manager.notifyLocked()
+		}
+		changed := manager.changed
+		manager.mu.Unlock()
+
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			if waiting {
+				manager.mu.Lock()
+				delete(manager.waiting, owner)
+				manager.notifyLocked()
+				manager.mu.Unlock()
+			}
+			return ctx.Err()
+		}
+	}
+}
+
+func (manager *appACLR2RuntimeAdmissionRaceLockManager) canAcquireLocked(owner string, identity appACLR2RuntimeAdmissionRaceLockIdentity, mode appACLR2RuntimeAdmissionRaceLockMode) bool {
+	for _, hold := range manager.held[identity] {
+		if hold.owner == owner {
+			continue
+		}
+		if mode == appACLR2RuntimeAdmissionRaceLockModeShared && hold.mode == appACLR2RuntimeAdmissionRaceLockModeShared {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func (manager *appACLR2RuntimeAdmissionRaceLockManager) release(owner string, identity appACLR2RuntimeAdmissionRaceLockIdentity, mode appACLR2RuntimeAdmissionRaceLockMode, scope appACLR2RuntimeAdmissionRaceLockScope) error {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	holds := manager.held[identity]
+	for index, hold := range holds {
+		if hold.owner != owner || hold.mode != mode || hold.scope != scope {
+			continue
+		}
+		holds = append(holds[:index], holds[index+1:]...)
+		if len(holds) == 0 {
+			delete(manager.held, identity)
+		} else {
+			manager.held[identity] = holds
+		}
+		manager.notifyLocked()
+		return nil
+	}
+	return fmt.Errorf("physical advisory lock %#v mode %d scope %d is not held by %q", identity, mode, scope, owner)
+}
+
+func (manager *appACLR2RuntimeAdmissionRaceLockManager) waitForBlocked(ctx context.Context, owner string) error {
+	for {
+		manager.mu.Lock()
+		if _, ok := manager.waiting[owner]; ok {
 			manager.mu.Unlock()
 			return nil
 		}
@@ -792,39 +903,21 @@ func (manager *appACLR2RuntimeAdmissionRaceLockManager) acquire(ctx context.Cont
 	}
 }
 
-func (manager *appACLR2RuntimeAdmissionRaceLockManager) canAcquireLocked(owner, key string, mode appACLR2RuntimeAdmissionRaceLockMode) bool {
-	for _, hold := range manager.held[key] {
-		if hold.owner == owner {
-			continue
-		}
-		if mode == appACLR2RuntimeAdmissionRaceLockModeShared && hold.mode == appACLR2RuntimeAdmissionRaceLockModeShared {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-func (manager *appACLR2RuntimeAdmissionRaceLockManager) release(owner, key string, mode appACLR2RuntimeAdmissionRaceLockMode) error {
+func (manager *appACLR2RuntimeAdmissionRaceLockManager) assertReleased(t *testing.T) {
+	t.Helper()
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	holds := manager.held[key]
-	for index, hold := range holds {
-		if hold.owner != owner || hold.mode != mode {
-			continue
-		}
-		holds = append(holds[:index], holds[index+1:]...)
-		if len(holds) == 0 {
-			delete(manager.held, key)
-		} else {
-			manager.held[key] = holds
-		}
-		close(manager.changed)
-		manager.changed = make(chan struct{})
-		return nil
+	if len(manager.held) != 0 || len(manager.waiting) != 0 {
+		t.Fatalf("physical advisory lock lifecycle = held %#v waiting %#v, want none", manager.held, manager.waiting)
 	}
-	return fmt.Errorf("deterministic advisory lock %q mode %d is not held by %q", key, mode, owner)
 }
+
+func (manager *appACLR2RuntimeAdmissionRaceLockManager) notifyLocked() {
+	close(manager.changed)
+	manager.changed = make(chan struct{})
+}
+
+var appACLR2RuntimeAdmissionRaceAdvisorySQLPattern = regexp.MustCompile(`(?i)^\s*select\s+pg_catalog\.(pg_advisory_(?:xact_)?lock(?:_shared)?|pg_advisory_unlock(?:_shared)?)\s*\(\s*pg_catalog\.hashtextextended\(\s*\$1\s*,\s*(-?[0-9]+)\s*\)\s*\)\s*$`)
 
 func appACLR2RuntimeAdmissionRaceLockKey(args []any) (string, error) {
 	if len(args) != 1 {
@@ -837,79 +930,149 @@ func appACLR2RuntimeAdmissionRaceLockKey(args []any) (string, error) {
 	return key, nil
 }
 
-func appACLR2RuntimeAdmissionRaceLockModeFromSQL(sql string) (appACLR2RuntimeAdmissionRaceLockMode, error) {
-	switch {
-	case strings.Contains(sql, "pg_advisory_lock_shared("):
-		return appACLR2RuntimeAdmissionRaceLockModeShared, nil
-	case strings.Contains(sql, "pg_advisory_lock("), strings.Contains(sql, "pg_advisory_xact_lock("):
-		return appACLR2RuntimeAdmissionRaceLockModeExclusive, nil
+func appACLR2RuntimeAdmissionRaceAdvisoryRequest(sql string, args []any) (appACLR2RuntimeAdmissionRaceLockRequest, error) {
+	matches := appACLR2RuntimeAdmissionRaceAdvisorySQLPattern.FindStringSubmatch(sql)
+	if matches == nil {
+		return appACLR2RuntimeAdmissionRaceLockRequest{}, fmt.Errorf("unrecognized physical advisory SQL %q", sql)
+	}
+	key, err := appACLR2RuntimeAdmissionRaceLockKey(args)
+	if err != nil {
+		return appACLR2RuntimeAdmissionRaceLockRequest{}, err
+	}
+	seed, err := strconv.ParseInt(matches[2], 10, 64)
+	if err != nil {
+		return appACLR2RuntimeAdmissionRaceLockRequest{}, fmt.Errorf("parse advisory lock hashtextextended seed %q: %w", matches[2], err)
+	}
+	request := appACLR2RuntimeAdmissionRaceLockRequest{
+		identity: appACLR2RuntimeAdmissionRaceLockIdentity{seed: seed, key: key},
+	}
+	switch strings.ToLower(matches[1]) {
+	case "pg_advisory_lock_shared":
+		request.function = appACLR2RuntimeAdmissionRaceAdvisoryFunctionLock
+		request.mode = appACLR2RuntimeAdmissionRaceLockModeShared
+		request.scope = appACLR2RuntimeAdmissionRaceLockScopeSession
+	case "pg_advisory_lock":
+		request.function = appACLR2RuntimeAdmissionRaceAdvisoryFunctionLock
+		request.mode = appACLR2RuntimeAdmissionRaceLockModeExclusive
+		request.scope = appACLR2RuntimeAdmissionRaceLockScopeSession
+	case "pg_advisory_xact_lock_shared":
+		request.function = appACLR2RuntimeAdmissionRaceAdvisoryFunctionLock
+		request.mode = appACLR2RuntimeAdmissionRaceLockModeShared
+		request.scope = appACLR2RuntimeAdmissionRaceLockScopeTransaction
+	case "pg_advisory_xact_lock":
+		request.function = appACLR2RuntimeAdmissionRaceAdvisoryFunctionLock
+		request.mode = appACLR2RuntimeAdmissionRaceLockModeExclusive
+		request.scope = appACLR2RuntimeAdmissionRaceLockScopeTransaction
+	case "pg_advisory_unlock_shared":
+		request.function = appACLR2RuntimeAdmissionRaceAdvisoryFunctionUnlock
+		request.mode = appACLR2RuntimeAdmissionRaceLockModeShared
+		request.scope = appACLR2RuntimeAdmissionRaceLockScopeSession
+	case "pg_advisory_unlock":
+		request.function = appACLR2RuntimeAdmissionRaceAdvisoryFunctionUnlock
+		request.mode = appACLR2RuntimeAdmissionRaceLockModeExclusive
+		request.scope = appACLR2RuntimeAdmissionRaceLockScopeSession
 	default:
-		return appACLR2RuntimeAdmissionRaceLockModeInvalid, fmt.Errorf("unrecognized advisory lock SQL %q", sql)
+		return appACLR2RuntimeAdmissionRaceLockRequest{}, fmt.Errorf("unrecognized physical advisory function %q", matches[1])
 	}
+	return request, nil
 }
 
-func appACLR2RuntimeAdmissionRaceRuntimeSharedLockRequest(sql string, args []any) (string, error) {
-	key, err := appACLR2RuntimeAdmissionRaceLockKey(args)
+func appACLR2RuntimeAdmissionRaceExpectedRequest(
+	sql string,
+	args []any,
+	function appACLR2RuntimeAdmissionRaceAdvisoryFunction,
+	mode appACLR2RuntimeAdmissionRaceLockMode,
+	scope appACLR2RuntimeAdmissionRaceLockScope,
+	actor string,
+) (appACLR2RuntimeAdmissionRaceLockRequest, error) {
+	request, err := appACLR2RuntimeAdmissionRaceAdvisoryRequest(sql, args)
 	if err != nil {
-		return "", err
+		return appACLR2RuntimeAdmissionRaceLockRequest{}, err
 	}
-	mode, err := appACLR2RuntimeAdmissionRaceLockModeFromSQL(sql)
-	if err != nil {
-		return "", err
+	wantIdentity := appACLR2RuntimeAdmissionRaceLockIdentity{
+		seed: appACLR2RuntimeAdmissionRaceTransitionLockSeed,
+		key:  appACLR2RuntimeAdmissionRaceTransitionLockKey,
 	}
-	if mode != appACLR2RuntimeAdmissionRaceLockModeShared {
-		return "", fmt.Errorf("runtime admission advisory lock mode = %d, want shared", mode)
+	if request.function != function || request.mode != mode || request.scope != scope || request.identity != wantIdentity {
+		return appACLR2RuntimeAdmissionRaceLockRequest{}, fmt.Errorf("%s physical advisory request = %#v, want function %d mode %d scope %d identity %#v", actor, request, function, mode, scope, wantIdentity)
 	}
-	return key, nil
+	return request, nil
 }
 
-func appACLR2RuntimeAdmissionRaceBootstrapExclusiveLockRequest(sql string, args []any) (string, error) {
-	key, err := appACLR2RuntimeAdmissionRaceLockKey(args)
-	if err != nil {
-		return "", err
-	}
-	mode, err := appACLR2RuntimeAdmissionRaceLockModeFromSQL(sql)
-	if err != nil {
-		return "", err
-	}
-	if mode != appACLR2RuntimeAdmissionRaceLockModeExclusive {
-		return "", fmt.Errorf("bootstrap advisory lock mode = %d, want exclusive", mode)
-	}
-	return key, nil
+func appACLR2RuntimeAdmissionRaceRuntimeSessionSharedLockRequest(sql string, args []any) (appACLR2RuntimeAdmissionRaceLockRequest, error) {
+	return appACLR2RuntimeAdmissionRaceExpectedRequest(
+		sql,
+		args,
+		appACLR2RuntimeAdmissionRaceAdvisoryFunctionLock,
+		appACLR2RuntimeAdmissionRaceLockModeShared,
+		appACLR2RuntimeAdmissionRaceLockScopeSession,
+		"runtime admission",
+	)
 }
 
-func appACLR2RuntimeAdmissionRaceSharedUnlockKey(sql string, args []any) (string, error) {
-	if !strings.Contains(sql, "pg_advisory_unlock_shared(") {
-		return "", fmt.Errorf("unexpected runtime shared advisory unlock SQL %q", sql)
-	}
-	return appACLR2RuntimeAdmissionRaceLockKey(args)
+func appACLR2RuntimeAdmissionRaceRuntimeSessionSharedUnlockRequest(sql string, args []any) (appACLR2RuntimeAdmissionRaceLockRequest, error) {
+	return appACLR2RuntimeAdmissionRaceExpectedRequest(
+		sql,
+		args,
+		appACLR2RuntimeAdmissionRaceAdvisoryFunctionUnlock,
+		appACLR2RuntimeAdmissionRaceLockModeShared,
+		appACLR2RuntimeAdmissionRaceLockScopeSession,
+		"runtime admission",
+	)
 }
 
-func appACLR2RuntimeAdmissionRaceExclusiveUnlockKey(sql string, args []any) (string, error) {
-	if !strings.Contains(sql, "pg_advisory_unlock(") {
-		return "", fmt.Errorf("unexpected bootstrap exclusive advisory unlock SQL %q", sql)
-	}
-	return appACLR2RuntimeAdmissionRaceLockKey(args)
+func appACLR2RuntimeAdmissionRaceBootstrapSessionExclusiveLockRequest(sql string, args []any) (appACLR2RuntimeAdmissionRaceLockRequest, error) {
+	return appACLR2RuntimeAdmissionRaceExpectedRequest(
+		sql,
+		args,
+		appACLR2RuntimeAdmissionRaceAdvisoryFunctionLock,
+		appACLR2RuntimeAdmissionRaceLockModeExclusive,
+		appACLR2RuntimeAdmissionRaceLockScopeSession,
+		"bootstrap session",
+	)
+}
+
+func appACLR2RuntimeAdmissionRaceBootstrapTransactionExclusiveLockRequest(sql string, args []any) (appACLR2RuntimeAdmissionRaceLockRequest, error) {
+	return appACLR2RuntimeAdmissionRaceExpectedRequest(
+		sql,
+		args,
+		appACLR2RuntimeAdmissionRaceAdvisoryFunctionLock,
+		appACLR2RuntimeAdmissionRaceLockModeExclusive,
+		appACLR2RuntimeAdmissionRaceLockScopeTransaction,
+		"bootstrap transaction",
+	)
+}
+
+func appACLR2RuntimeAdmissionRaceBootstrapSessionExclusiveUnlockRequest(sql string, args []any) (appACLR2RuntimeAdmissionRaceLockRequest, error) {
+	return appACLR2RuntimeAdmissionRaceExpectedRequest(
+		sql,
+		args,
+		appACLR2RuntimeAdmissionRaceAdvisoryFunctionUnlock,
+		appACLR2RuntimeAdmissionRaceLockModeExclusive,
+		appACLR2RuntimeAdmissionRaceLockScopeSession,
+		"bootstrap session",
+	)
 }
 
 type fakeAppACLR2RuntimeAdmissionRaceAdmissionConn struct {
-	tx    pgx.Tx
-	locks *appACLR2RuntimeAdmissionRaceLockManager
-	key   string
+	tx          pgx.Tx
+	locks       *appACLR2RuntimeAdmissionRaceLockManager
+	owner       string
+	sessionLock *appACLR2RuntimeAdmissionRaceLockRequest
 }
 
 func (conn *fakeAppACLR2RuntimeAdmissionRaceAdmissionConn) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	key, err := appACLR2RuntimeAdmissionRaceRuntimeSharedLockRequest(sql, args)
+	request, err := appACLR2RuntimeAdmissionRaceRuntimeSessionSharedLockRequest(sql, args)
 	if err != nil {
 		return pgconn.CommandTag{}, err
 	}
-	if conn.key != "" {
-		return pgconn.CommandTag{}, fmt.Errorf("runtime admission deterministic advisory lock already held for %q", conn.key)
+	if conn.sessionLock != nil {
+		return pgconn.CommandTag{}, fmt.Errorf("runtime admission session shared lock already held for %#v", conn.sessionLock.identity)
 	}
-	if err := conn.locks.acquire(ctx, appACLR2RuntimeAdmissionRaceRuntimeOwner, key, appACLR2RuntimeAdmissionRaceLockModeShared); err != nil {
+	if err := conn.locks.acquire(ctx, conn.owner, request); err != nil {
 		return pgconn.CommandTag{}, err
 	}
-	conn.key = key
+	conn.sessionLock = &request
 	return pgconn.CommandTag{}, nil
 }
 
@@ -918,60 +1081,125 @@ func (conn *fakeAppACLR2RuntimeAdmissionRaceAdmissionConn) BeginTx(context.Conte
 }
 
 func (conn *fakeAppACLR2RuntimeAdmissionRaceAdmissionConn) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
-	key, err := appACLR2RuntimeAdmissionRaceSharedUnlockKey(sql, args)
+	request, err := appACLR2RuntimeAdmissionRaceRuntimeSessionSharedUnlockRequest(sql, args)
 	if err != nil {
 		return fakeAppACLR2RuntimeAdmissionErrorRow{err: err}
 	}
-	if key != conn.key {
-		return fakeAppACLR2RuntimeAdmissionErrorRow{err: fmt.Errorf("runtime shared advisory unlock key = %q, want %q", key, conn.key)}
+	if conn.sessionLock == nil || request.identity != conn.sessionLock.identity {
+		return fakeAppACLR2RuntimeAdmissionErrorRow{err: fmt.Errorf("runtime shared advisory unlock identity = %#v, want held session identity %#v", request.identity, conn.sessionLock)}
 	}
-	if err := conn.locks.release(appACLR2RuntimeAdmissionRaceRuntimeOwner, key, appACLR2RuntimeAdmissionRaceLockModeShared); err != nil {
+	if err := conn.locks.release(conn.owner, conn.sessionLock.identity, conn.sessionLock.mode, conn.sessionLock.scope); err != nil {
 		return fakeAppACLR2RuntimeAdmissionErrorRow{err: err}
 	}
-	conn.key = ""
+	conn.sessionLock = nil
 	return fakeAppACLR2RuntimeAdmissionBoolRow(true)
 }
 
-func (*fakeAppACLR2RuntimeAdmissionRaceAdmissionConn) Release() {}
+func (conn *fakeAppACLR2RuntimeAdmissionRaceAdmissionConn) Release() {
+	if conn.sessionLock != nil {
+		panic(fmt.Sprintf("runtime admission released a connection with a session lock still held: %#v", conn.sessionLock))
+	}
+}
 
 func (conn *fakeAppACLR2RuntimeAdmissionRaceAdmissionConn) Discard(context.Context) error {
-	if conn.key == "" {
+	if conn.sessionLock == nil {
 		return nil
 	}
-	err := conn.locks.release(appACLR2RuntimeAdmissionRaceRuntimeOwner, conn.key, appACLR2RuntimeAdmissionRaceLockModeShared)
-	conn.key = ""
+	err := conn.locks.release(conn.owner, conn.sessionLock.identity, conn.sessionLock.mode, conn.sessionLock.scope)
+	conn.sessionLock = nil
 	return err
 }
 
 type appACLR2RuntimeAdmissionRaceBootstrapLockState struct {
-	locks          *appACLR2RuntimeAdmissionRaceLockManager
-	sessionKey     string
-	transactionKey string
+	locks           *appACLR2RuntimeAdmissionRaceLockManager
+	owner           string
+	sessionLock     *appACLR2RuntimeAdmissionRaceLockRequest
+	transactionLock *appACLR2RuntimeAdmissionRaceLockRequest
+}
+
+func (state *appACLR2RuntimeAdmissionRaceBootstrapLockState) acquireSession(ctx context.Context, sql string, args []any) error {
+	request, err := appACLR2RuntimeAdmissionRaceBootstrapSessionExclusiveLockRequest(sql, args)
+	if err != nil {
+		return err
+	}
+	if state.sessionLock != nil {
+		return fmt.Errorf("bootstrap session exclusive lock already held for %#v", state.sessionLock.identity)
+	}
+	if err := state.locks.acquire(ctx, state.owner, request); err != nil {
+		return err
+	}
+	state.sessionLock = &request
+	return nil
+}
+
+func (state *appACLR2RuntimeAdmissionRaceBootstrapLockState) acquireTransaction(ctx context.Context, sql string, args []any) error {
+	request, err := appACLR2RuntimeAdmissionRaceBootstrapTransactionExclusiveLockRequest(sql, args)
+	if err != nil {
+		return err
+	}
+	if state.sessionLock == nil {
+		return fmt.Errorf("bootstrap transaction exclusive lock acquired without a session handoff lock")
+	}
+	if state.transactionLock != nil {
+		return fmt.Errorf("bootstrap transaction exclusive lock already held for %#v", state.transactionLock.identity)
+	}
+	if err := state.locks.acquire(ctx, state.owner, request); err != nil {
+		return err
+	}
+	state.transactionLock = &request
+	return nil
+}
+
+func (state *appACLR2RuntimeAdmissionRaceBootstrapLockState) releaseSession(sql string, args []any) error {
+	request, err := appACLR2RuntimeAdmissionRaceBootstrapSessionExclusiveUnlockRequest(sql, args)
+	if err != nil {
+		return err
+	}
+	if state.sessionLock == nil || request.identity != state.sessionLock.identity {
+		return fmt.Errorf("bootstrap session advisory unlock identity = %#v, want held session identity %#v", request.identity, state.sessionLock)
+	}
+	if err := state.locks.release(state.owner, state.sessionLock.identity, state.sessionLock.mode, state.sessionLock.scope); err != nil {
+		return err
+	}
+	state.sessionLock = nil
+	return nil
+}
+
+func (state *appACLR2RuntimeAdmissionRaceBootstrapLockState) releaseTransaction() error {
+	if state.transactionLock == nil {
+		return nil
+	}
+	err := state.locks.release(state.owner, state.transactionLock.identity, state.transactionLock.mode, state.transactionLock.scope)
+	state.transactionLock = nil
+	return err
+}
+
+func (state *appACLR2RuntimeAdmissionRaceBootstrapLockState) discard() error {
+	err := state.releaseTransaction()
+	if state.sessionLock != nil {
+		unlockErr := state.locks.release(state.owner, state.sessionLock.identity, state.sessionLock.mode, state.sessionLock.scope)
+		state.sessionLock = nil
+		if err == nil {
+			err = unlockErr
+		}
+	}
+	return err
+}
+
+func (state *appACLR2RuntimeAdmissionRaceBootstrapLockState) assertReleased() {
+	if state.sessionLock != nil || state.transactionLock != nil {
+		panic(fmt.Sprintf("bootstrap released a connection with locks still held: session %#v transaction %#v", state.sessionLock, state.transactionLock))
+	}
 }
 
 type fakeAppACLR2RuntimeAdmissionRaceBootstrapConn struct {
-	tx                 pgx.Tx
-	locks              *appACLR2RuntimeAdmissionRaceBootstrapLockState
-	exclusiveAttempted chan<- struct{}
-	exclusiveAcquired  chan<- struct{}
+	tx    pgx.Tx
+	locks *appACLR2RuntimeAdmissionRaceBootstrapLockState
 }
 
 func (conn *fakeAppACLR2RuntimeAdmissionRaceBootstrapConn) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	key, err := appACLR2RuntimeAdmissionRaceBootstrapExclusiveLockRequest(sql, args)
-	if err != nil {
+	if err := conn.locks.acquireSession(ctx, sql, args); err != nil {
 		return pgconn.CommandTag{}, err
-	}
-	select {
-	case conn.exclusiveAttempted <- struct{}{}:
-	default:
-	}
-	if err := conn.locks.locks.acquire(ctx, appACLR2RuntimeAdmissionRaceBootstrapOwner, key, appACLR2RuntimeAdmissionRaceLockModeExclusive); err != nil {
-		return pgconn.CommandTag{}, err
-	}
-	conn.locks.sessionKey = key
-	select {
-	case conn.exclusiveAcquired <- struct{}{}:
-	default:
 	}
 	return pgconn.CommandTag{}, nil
 }
@@ -981,70 +1209,44 @@ func (conn *fakeAppACLR2RuntimeAdmissionRaceBootstrapConn) BeginTx(context.Conte
 }
 
 func (conn *fakeAppACLR2RuntimeAdmissionRaceBootstrapConn) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
-	key, err := appACLR2RuntimeAdmissionRaceExclusiveUnlockKey(sql, args)
-	if err != nil {
+	if err := conn.locks.releaseSession(sql, args); err != nil {
 		return fakeAppACLR2RuntimeAdmissionErrorRow{err: err}
 	}
-	if key != conn.locks.sessionKey {
-		return fakeAppACLR2RuntimeAdmissionErrorRow{err: fmt.Errorf("bootstrap session advisory unlock key = %q, want %q", key, conn.locks.sessionKey)}
-	}
-	if err := conn.locks.locks.release(appACLR2RuntimeAdmissionRaceBootstrapOwner, key, appACLR2RuntimeAdmissionRaceLockModeExclusive); err != nil {
-		return fakeAppACLR2RuntimeAdmissionErrorRow{err: err}
-	}
-	conn.locks.sessionKey = ""
 	return fakeAppACLR2RuntimeAdmissionBoolRow(true)
 }
 
-func (*fakeAppACLR2RuntimeAdmissionRaceBootstrapConn) Release() {}
+func (conn *fakeAppACLR2RuntimeAdmissionRaceBootstrapConn) Release() {
+	conn.locks.assertReleased()
+}
 
 func (conn *fakeAppACLR2RuntimeAdmissionRaceBootstrapConn) Discard(context.Context) error {
-	var err error
-	if conn.locks.transactionKey != "" {
-		err = conn.locks.locks.release(appACLR2RuntimeAdmissionRaceBootstrapOwner, conn.locks.transactionKey, appACLR2RuntimeAdmissionRaceLockModeExclusive)
-		conn.locks.transactionKey = ""
-	}
-	if conn.locks.sessionKey != "" {
-		unlockErr := conn.locks.locks.release(appACLR2RuntimeAdmissionRaceBootstrapOwner, conn.locks.sessionKey, appACLR2RuntimeAdmissionRaceLockModeExclusive)
-		if err == nil {
-			err = unlockErr
-		}
-		conn.locks.sessionKey = ""
-	}
-	return err
+	return conn.locks.discard()
 }
 
 type fakeAppACLR2RuntimeAdmissionRaceBootstrapTx struct {
 	pgx.Tx
 	locks             *appACLR2RuntimeAdmissionRaceBootstrapLockState
+	exclusiveAcquired chan<- struct{}
 	preparedCommitted chan<- struct{}
 	mu                sync.Mutex
 	commitCalls       int
 }
 
 func (tx *fakeAppACLR2RuntimeAdmissionRaceBootstrapTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	key, err := appACLR2RuntimeAdmissionRaceBootstrapExclusiveLockRequest(sql, args)
-	if err != nil {
+	if err := tx.locks.acquireTransaction(ctx, sql, args); err != nil {
 		return pgconn.CommandTag{}, err
 	}
-	if err := tx.locks.locks.acquire(ctx, appACLR2RuntimeAdmissionRaceBootstrapOwner, key, appACLR2RuntimeAdmissionRaceLockModeExclusive); err != nil {
-		return pgconn.CommandTag{}, err
+	select {
+	case tx.exclusiveAcquired <- struct{}{}:
+	default:
 	}
-	tx.locks.transactionKey = key
 	return pgconn.CommandTag{}, nil
 }
 
 func (tx *fakeAppACLR2RuntimeAdmissionRaceBootstrapTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
-	key, err := appACLR2RuntimeAdmissionRaceExclusiveUnlockKey(sql, args)
-	if err != nil {
+	if err := tx.locks.releaseSession(sql, args); err != nil {
 		return fakeAppACLR2RuntimeAdmissionErrorRow{err: err}
 	}
-	if key != tx.locks.sessionKey {
-		return fakeAppACLR2RuntimeAdmissionErrorRow{err: fmt.Errorf("bootstrap transaction session-unlock key = %q, want %q", key, tx.locks.sessionKey)}
-	}
-	if err := tx.locks.locks.release(appACLR2RuntimeAdmissionRaceBootstrapOwner, key, appACLR2RuntimeAdmissionRaceLockModeExclusive); err != nil {
-		return fakeAppACLR2RuntimeAdmissionErrorRow{err: err}
-	}
-	tx.locks.sessionKey = ""
 	return fakeAppACLR2RuntimeAdmissionBoolRow(true)
 }
 
@@ -1070,12 +1272,7 @@ func (tx *fakeAppACLR2RuntimeAdmissionRaceBootstrapTx) CommitCalls() int {
 }
 
 func (tx *fakeAppACLR2RuntimeAdmissionRaceBootstrapTx) releaseTransactionLock() error {
-	if tx.locks.transactionKey == "" {
-		return nil
-	}
-	err := tx.locks.locks.release(appACLR2RuntimeAdmissionRaceBootstrapOwner, tx.locks.transactionKey, appACLR2RuntimeAdmissionRaceLockModeExclusive)
-	tx.locks.transactionKey = ""
-	return err
+	return tx.locks.releaseTransaction()
 }
 
 type fakeAppACLR2RuntimeAdmissionErrorRow struct{ err error }
