@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"os"
 	"strings"
@@ -134,6 +135,284 @@ func TestClassifyAppACLR2StatePublicBoundaryRejectsUnknownReservedObject(t *test
 		t.Fatalf("ClassifyAppACLR2State() = %v with an unknown reserved object, want CORRUPT", got)
 	}
 	tx.assertCallerOwnedAndComplete(t)
+}
+
+func TestClassifyAppACLR2StateDefaultWiringTransfersReservedFunctionOwnership(t *testing.T) {
+	tests := []struct {
+		name      string
+		finalized bool
+		want      AppACLR2State
+	}{
+		{name: "PREPARED with two bootstrap-owned helpers", want: AppACLR2StatePrepared},
+		{name: "FINALIZED with two bootstrap-owned and one direct-migrator-owned helper", finalized: true, want: AppACLR2StateFinalized},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := newAppACLR2DefaultWiringStateTx(t, tt.finalized, nil, nil, nil)
+			got, err := ClassifyAppACLR2State(context.Background(), tx)
+			if err != nil {
+				t.Fatalf("ClassifyAppACLR2State() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("ClassifyAppACLR2State() = %v, want %v", got, tt.want)
+			}
+			tx.assertCallerOwnedAndComplete(t)
+		})
+	}
+}
+
+func TestClassifyAppACLR2StateDefaultWiringRejectsR2PredicateDrift(t *testing.T) {
+	tests := []struct {
+		name                string
+		finalized           bool
+		mutateInventory     func([]AppACLR2ReservedCatalogObjectV1) []AppACLR2ReservedCatalogObjectV1
+		mutateL2ACLRows     func([][]any)
+		mutateM2FunctionRow func([]any)
+	}{
+		{
+			name: "L2 helper owner drift",
+			mutateL2ACLRows: func(rows [][]any) {
+				rows[1][3] = int64(11)
+			},
+		},
+		{
+			name:      "M2 helper owner drift",
+			finalized: true,
+			mutateM2FunctionRow: func(row []any) {
+				row[1] = int64(22)
+			},
+		},
+		{
+			name: "extra reserved object",
+			mutateInventory: func(objects []AppACLR2ReservedCatalogObjectV1) []AppACLR2ReservedCatalogObjectV1 {
+				return append(objects, AppACLR2ReservedCatalogObjectV1{
+					OID: 9001, Kind: "relation", Schema: "third_party", Identity: "app_acl_r2_extra", Detail: "r",
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := newAppACLR2DefaultWiringStateTx(t, tt.finalized, tt.mutateInventory, tt.mutateL2ACLRows, tt.mutateM2FunctionRow)
+			got, err := ClassifyAppACLR2State(context.Background(), tx)
+			if err != nil {
+				t.Fatalf("ClassifyAppACLR2State() error = %v, want catalog drift classified as CORRUPT", err)
+			}
+			if got != AppACLR2StateCorrupt {
+				t.Fatalf("ClassifyAppACLR2State() = %v, want CORRUPT", got)
+			}
+			tx.assertCallerOwnedAndComplete(t)
+		})
+	}
+}
+
+func newAppACLR2DefaultWiringStateTx(
+	t *testing.T,
+	finalized bool,
+	mutateInventory func([]AppACLR2ReservedCatalogObjectV1) []AppACLR2ReservedCatalogObjectV1,
+	mutateL2ACLRows func([][]any),
+	mutateM2FunctionRow func([]any),
+) *appACLR2PublicR1Tx {
+	t.Helper()
+	shape := appACLR2DefaultWiringCatalogShape(t)
+	reservedObjects := append([]AppACLR2ReservedCatalogObjectV1(nil), shape.ReservedObjects...)
+	if !finalized {
+		reservedObjects = appACLR2FilterReservedObjects(reservedObjects, appACLR2L2ReservedObjects())
+	}
+	if mutateInventory != nil {
+		reservedObjects = mutateInventory(reservedObjects)
+	}
+
+	tx := newAppACLR2PublicR1Tx(t, "center_runtime", "center_runtime", reservedObjects)
+	for _, object := range reservedObjects {
+		if object.Kind != "function" {
+			continue
+		}
+		ownerRole := "postgres"
+		if object.Identity == "record_platform_internal.app_acl_r2_reject_manifest_mutation()" {
+			ownerRole = "direct_migrator"
+		}
+		appendFrozenAppACLR1CatalogFunctionForTest(t, tx, object.Identity, ownerRole)
+	}
+
+	row := shape.L2Rows[0]
+	tx.queryRows = append(tx.queryRows,
+		nil,
+		[][]any{{row.Singleton, int64(len(row.Body)), append([]byte(nil), row.Body...), int64(len(row.Digest)), appACLR2DigestBytes(row.Digest)}},
+	)
+	continuity := newScriptedAppACLR2BootstrapCatalogTx()
+	for _, query := range continuity.queries {
+		tx.queryRows = append(tx.queryRows, query.rows)
+	}
+	for _, query := range continuity.queryRows[:3] {
+		tx.queryRowValues = append(tx.queryRowValues, query.values)
+	}
+
+	receipt := newScriptedAppACLR2ReceiptCatalogTx()
+	l2ACLRows := appACLR2ReceiptObjectRows()
+	if mutateL2ACLRows != nil {
+		mutateL2ACLRows(l2ACLRows)
+	}
+	tx.queryRows = append(tx.queryRows,
+		receipt.queries[0].rows,
+		nil,
+		nil,
+		receipt.queries[1].rows,
+		appACLR2ReservedObjectRowsForStateTest(reservedObjects),
+		l2ACLRows,
+		receipt.queries[4].rows,
+		receipt.queries[5].rows,
+		receipt.queries[6].rows,
+		receipt.queries[7].rows,
+	)
+	for _, query := range receipt.queryRows {
+		tx.queryRowValues = append(tx.queryRowValues, query.values)
+	}
+	if finalized {
+		appendAppACLR2DefaultWiringM2StateEvidence(t, tx, shape, mutateM2FunctionRow)
+	}
+	return tx
+}
+
+func appACLR2DefaultWiringCatalogShape(t *testing.T) appACLR2CatalogShape {
+	t.Helper()
+	shape := validAppACLR2FinalizedCatalogShape(t)
+	frozen := shape.FrozenState
+
+	catalogSeed := newScriptedAppACLR2BootstrapCatalogTx()
+	catalogSeed.queryRows = catalogSeed.queryRows[:3]
+	continuity, err := ReadAppACLR2PostBootstrapCatalogSnapshotInTx(context.Background(), catalogSeed, frozen)
+	if err != nil {
+		t.Fatalf("ReadAppACLR2PostBootstrapCatalogSnapshotInTx() error = %v", err)
+	}
+	if len(catalogSeed.queries) != 0 || len(catalogSeed.queryRows) != 0 {
+		t.Fatalf("post-bootstrap catalog seed left %d query and %d query-row scripts unused", len(catalogSeed.queries), len(catalogSeed.queryRows))
+	}
+	surfaceSeed := newScriptedAppACLR2ReceiptCatalogTx()
+	surface, err := ReadAppACLR2ReceiptCatalogSnapshotInTx(context.Background(), surfaceSeed, frozen)
+	if err != nil {
+		t.Fatalf("ReadAppACLR2ReceiptCatalogSnapshotInTx() error = %v", err)
+	}
+	if len(surfaceSeed.queries) != 0 || len(surfaceSeed.queryRows) != 0 {
+		t.Fatalf("receipt catalog seed left %d query and %d query-row scripts unused", len(surfaceSeed.queries), len(surfaceSeed.queryRows))
+	}
+	receipt, err := compileAppACLR2PostBootstrapReceiptFromCatalogV1(continuity, surface, frozen)
+	if err != nil {
+		t.Fatalf("compileAppACLR2PostBootstrapReceiptFromCatalogV1() error = %v", err)
+	}
+	receiptBody, err := CanonicalAppACLR2BootstrapReceiptBodyV1(receipt)
+	if err != nil {
+		t.Fatalf("CanonicalAppACLR2BootstrapReceiptBodyV1() error = %v", err)
+	}
+	directMigratorOID := uint32(0)
+	for _, role := range receipt.Roles {
+		if role.ControlRole == AppACLControlRoleDirectMigratorR2 {
+			directMigratorOID = role.OID
+		}
+	}
+	if directMigratorOID == 0 {
+		t.Fatal("default-wiring receipt has no direct-migrator OID")
+	}
+	controlACLBody, err := CompileAppACLControlACLBodyR2V1(directMigratorOID)
+	if err != nil {
+		t.Fatalf("CompileAppACLControlACLBodyR2V1() error = %v", err)
+	}
+
+	manifest := shape.M2Revisions[0].Manifest
+	manifest.DirectMigratorOID = directMigratorOID
+	manifest.R2SourceSetBody = append([]byte(nil), receipt.R2SourceBody...)
+	manifest.R2SourceSetDigest = receipt.R2SourceDigest
+	manifest.R2PrivilegeSetBody = append([]byte(nil), receipt.R2PrivilegeBody...)
+	manifest.R2PrivilegeSetDigest = receipt.R2PrivilegeDigest
+	manifest.DomainBody = append([]byte(nil), receipt.DomainBody...)
+	manifest.DomainDigest = receipt.DomainDigest
+	manifest.ReceiptDigest = sha256.Sum256(receiptBody)
+	manifest.ControlACLBody = controlACLBody
+	manifest.ControlACLDigest = sha256.Sum256(controlACLBody)
+	manifestBody, err := CanonicalAppACLManifestR2BodyV1(manifest)
+	if err != nil {
+		t.Fatalf("CanonicalAppACLManifestR2BodyV1() error = %v", err)
+	}
+	manifestDigest := sha256.Sum256(manifestBody)
+
+	shape.L2Rows[0].Body = receiptBody
+	shape.L2Rows[0].Digest = sha256.Sum256(receiptBody)
+	shape.M2Revisions[0] = appACLR2ManifestRowV1{Manifest: manifest, ManifestDigest: manifestDigest}
+	shape.M2Heads[0].ManifestDigest = manifestDigest
+	shape.M2ControlACL = appACLR2ControlACLContract(directMigratorOID)
+	return shape
+}
+
+func appACLR2ReservedObjectRowsForStateTest(objects []AppACLR2ReservedCatalogObjectV1) [][]any {
+	rows := make([][]any, 0, len(objects))
+	for _, object := range objects {
+		rows = append(rows, appACLR2ReservedCatalogObjectRow(object))
+	}
+	return rows
+}
+
+func appendAppACLR2DefaultWiringM2StateEvidence(
+	t *testing.T,
+	tx *appACLR2PublicR1Tx,
+	shape appACLR2CatalogShape,
+	mutateFunctionRow func([]any),
+) {
+	t.Helper()
+	roles := appACLR2M2RoleOIDs{DirectMigrator: 21, CenterRuntime: 20, PlatformAdmin: 22}
+	physicalRows := appACLR2M2PhysicalCatalogQueryRows()
+	directOwner := [7]bool{true, true, true, true, true, true, true}
+	runtimeReader := [7]bool{true}
+	noPrivileges := [7]bool{}
+	tx.queryRows = append(tx.queryRows,
+		nil,
+		[][]any{appACLR2M2ManifestReaderRow(shape.M2Revisions[0])},
+		nil,
+		[][]any{appACLR2M2HeadReaderRow(shape.M2Heads[0])},
+		[][]any{
+			{shape.FrozenState.CenterRuntimeRole, int64(roles.CenterRuntime)},
+			{shape.FrozenState.DirectMigratorRole, int64(roles.DirectMigrator)},
+			{shape.FrozenState.PlatformAdminRole, int64(roles.PlatformAdmin)},
+		},
+		[][]any{
+			{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), "r"},
+			{"app_acl_r2_manifest_revisions", int64(roles.DirectMigrator), "r"},
+		},
+		nil,
+		physicalRows[0],
+		physicalRows[1],
+		physicalRows[2],
+		physicalRows[3],
+		physicalRows[4],
+		[][]any{
+			{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), int64(roles.DirectMigrator), "SELECT", false},
+			{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), int64(roles.CenterRuntime), "SELECT", false},
+			{"app_acl_r2_manifest_revisions", int64(roles.DirectMigrator), int64(roles.DirectMigrator), "SELECT", false},
+			{"app_acl_r2_manifest_revisions", int64(roles.DirectMigrator), int64(roles.CenterRuntime), "SELECT", false},
+		},
+		[][]any{
+			appACLR2M2RelationEffectivePrivilegeRow("app_acl_r2_manifest_head", directOwner, runtimeReader, noPrivileges),
+			appACLR2M2RelationEffectivePrivilegeRow("app_acl_r2_manifest_revisions", directOwner, runtimeReader, noPrivileges),
+		},
+	)
+	functionRow := []any{int64(500), int64(roles.DirectMigrator), "f"}
+	if mutateFunctionRow != nil {
+		mutateFunctionRow(functionRow)
+	}
+	tx.queryRowValues = append(tx.queryRowValues, functionRow)
+	if mutateFunctionRow != nil {
+		return
+	}
+	tx.queryRows = append(tx.queryRows,
+		[][]any{appACLR2M2FunctionProfileRow(appACLR2M2FunctionProfile(roles.DirectMigrator).Source)},
+		[][]any{{int64(roles.DirectMigrator), int64(roles.DirectMigrator), "EXECUTE", false}},
+		appACLR2M2ExactTriggerRows(),
+	)
+	tx.queryRowValues = append(tx.queryRowValues,
+		[]any{true, false, false},
+		[]any{int64(0)},
+	)
 }
 
 func TestPublicAppACLR2StateReadersAreCredentialNeutralAndTransactionBound(t *testing.T) {

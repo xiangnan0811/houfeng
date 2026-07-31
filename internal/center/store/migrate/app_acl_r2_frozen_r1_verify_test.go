@@ -219,6 +219,38 @@ func TestFrozenAppACLR1StateVerifierDelegatesOnlyExactR2ReservedFunctions(t *tes
 	}
 }
 
+func TestFrozenAppACLR2DelegatedFunctionIdentityProtocolIsExact(t *testing.T) {
+	want := map[string]struct{}{
+		"record_platform_internal.app_acl_r2_assert_bootstrap_receipt_insert(bytea, bytea)": {},
+		"record_platform_internal.app_acl_r2_reject_bootstrap_receipt_mutation()":           {},
+		"record_platform_internal.app_acl_r2_reject_manifest_mutation()":                    {},
+	}
+
+	got, err := frozenAppACLR2DelegatedFunctionIdentities()
+	if err != nil {
+		t.Fatalf("frozenAppACLR2DelegatedFunctionIdentities() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("delegated R2 function identities = %#v, want independent protocol-2 literal set %#v", got, want)
+	}
+}
+
+func TestFrozenAppACLR2DelegatedFunctionSelectorRejectsInventoryExpansion(t *testing.T) {
+	objects := append([]AppACLR2ReservedCatalogObjectV1(nil), appACLR2KnownReservedObjects()...)
+	objects = append(objects, AppACLR2ReservedCatalogObjectV1{
+		OID:      9001,
+		Kind:     "function",
+		Schema:   "record_platform_internal",
+		Identity: "record_platform_internal.app_acl_r2_future_helper()",
+		Detail:   "f",
+	})
+
+	_, err := selectFrozenAppACLR2DelegatedFunctionIdentities(objects)
+	if err == nil || !strings.Contains(err.Error(), "has 4 functions, want exactly 3") {
+		t.Fatalf("selectFrozenAppACLR2DelegatedFunctionIdentities() error = %v, want protocol-2 function-count rejection", err)
+	}
+}
+
 func appACLR2ReservedFunctionIdentitiesForFrozenR1Test(t *testing.T, objects []AppACLR2ReservedCatalogObjectV1) []string {
 	t.Helper()
 	identities := make([]string, 0, len(objects))

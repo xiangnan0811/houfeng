@@ -266,8 +266,12 @@ func readFrozenAppACLR1CatalogInTx(
 }
 
 func frozenAppACLR2DelegatedFunctionIdentities() (map[string]struct{}, error) {
+	return selectFrozenAppACLR2DelegatedFunctionIdentities(appACLR2KnownReservedObjects())
+}
+
+func selectFrozenAppACLR2DelegatedFunctionIdentities(objects []AppACLR2ReservedCatalogObjectV1) (map[string]struct{}, error) {
 	identities := make(map[string]struct{})
-	for _, object := range appACLR2KnownReservedObjects() {
+	for _, object := range objects {
 		if object.Kind != "function" {
 			continue
 		}
@@ -280,8 +284,8 @@ func frozenAppACLR2DelegatedFunctionIdentities() (map[string]struct{}, error) {
 		}
 		identities[object.Identity] = struct{}{}
 	}
-	if len(identities) == 0 {
-		return nil, fmt.Errorf("APP ACL R2 reserved catalog has no functions")
+	if len(identities) != 3 {
+		return nil, fmt.Errorf("APP ACL R2 reserved catalog has %d functions, want exactly 3", len(identities))
 	}
 	return identities, nil
 }

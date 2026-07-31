@@ -2767,7 +2767,7 @@ func (tx *appACLR2PublicR1Tx) Exec(ctx context.Context, sql string, _ ...any) (p
 	return pgconn.NewCommandTag("SET"), nil
 }
 
-func (tx *appACLR2PublicR1Tx) Query(ctx context.Context, query string, _ ...any) (pgx.Rows, error) {
+func (tx *appACLR2PublicR1Tx) Query(ctx context.Context, query string, arguments ...any) (pgx.Rows, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -2785,6 +2785,52 @@ func (tx *appACLR2PublicR1Tx) Query(ctx context.Context, query string, _ ...any)
 	}
 	rows := tx.queryRows[0]
 	tx.queryRows = tx.queryRows[1:]
+	normalized := strings.ToLower(query)
+	switch {
+	case strings.Contains(normalized, "pg_get_triggerdef") && strings.Contains(normalized, "limit $3::integer"):
+		if len(arguments) != 3 {
+			return nil, fmt.Errorf("scripted public M2 trigger query has %d arguments, want 3", len(arguments))
+		}
+		definitionMaximum, definitionOK := arguments[0].(int)
+		constraintMaximum, constraintOK := arguments[1].(int)
+		if !definitionOK || !constraintOK {
+			return nil, fmt.Errorf("scripted public M2 trigger bounds have types %T/%T, want int/int", arguments[0], arguments[1])
+		}
+		return &appACLR2BoundedCatalogTextRows{
+			kind:              "trigger",
+			rawRows:           rows,
+			definitionMaximum: definitionMaximum,
+			sourceMaximum:     constraintMaximum,
+		}, nil
+	case strings.Contains(normalized, "pg_get_constraintdef") && strings.Contains(normalized, "limit $3::integer"):
+		if len(arguments) != 3 {
+			return nil, fmt.Errorf("scripted public M2 constraint query has %d arguments, want 3", len(arguments))
+		}
+		definitionMaximum, ok := arguments[1].(int)
+		if !ok {
+			return nil, fmt.Errorf("scripted public M2 constraint bound has type %T, want int", arguments[1])
+		}
+		return &appACLR2BoundedCatalogTextRows{
+			kind:              "constraint",
+			rawRows:           rows,
+			definitionMaximum: definitionMaximum,
+		}, nil
+	case strings.Contains(normalized, "pg_get_functiondef") && strings.Contains(normalized, "app_acl_r2_reject_manifest_mutation"):
+		if len(arguments) != 2 {
+			return nil, fmt.Errorf("scripted public M2 function-profile query has %d arguments, want 2", len(arguments))
+		}
+		definitionMaximum, definitionOK := arguments[0].(int)
+		sourceMaximum, sourceOK := arguments[1].(int)
+		if !definitionOK || !sourceOK {
+			return nil, fmt.Errorf("scripted public M2 function-profile bounds have types %T/%T, want int/int", arguments[0], arguments[1])
+		}
+		return &appACLR2BoundedCatalogTextRows{
+			kind:              "function",
+			rawRows:           rows,
+			definitionMaximum: definitionMaximum,
+			sourceMaximum:     sourceMaximum,
+		}, nil
+	}
 	return &appACLR2M2Rows{rows: rows}, nil
 }
 
