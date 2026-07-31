@@ -856,18 +856,40 @@ a merge gate without replacing existing checks.
 
 Before that POST, the controller verifies repository admin permission, reads all
 repository/parent rulesets with `includes_parents=true`, relevant detailed
-ruleset records, `rules/branches/main`, canonical full
+ruleset records, `--paginate --slurp rules/branches/main?per_page=100`,
+canonical full
 `branches/main/protection`, and all check-run pages for the same new `$HEAD`.
 Any active same-name, same-scope, or same-three-check ruleset is a duplicate or
 concurrent state: return `NEEDS_CONTROLLER` without creating, updating,
-deleting, disabling, or retrying anything.
+deleting, disabling, or retrying anything. The paginated
+`main_rules_before` flatten is the only input for effective-main
+`ruleset_id`, uniqueness, and exact required-status-check decisions; false,
+null, missing, or unreadable admin state and every pagination/shape/flatten
+failure stop before POST.
 
 ```bash
 set -euo pipefail
-gh api "repos/$OWNER/$REPO" --jq '.permissions.admin'
+if ! gh api "repos/$OWNER/$REPO" |
+  jq -e '.permissions.admin == true' >/dev/null; then
+  echo "NEEDS_CONTROLLER: repository admin permission is required" >&2
+  exit 1
+fi
+read_effective_main_rules() {
+  gh api --paginate --slurp \
+    "repos/$OWNER/$REPO/rules/branches/main?per_page=100" |
+    jq -ce '
+      if type == "array" and length > 0 and all(.[]; type == "array")
+      then add
+      else error("effective-main pages must be nonempty arrays")
+      end
+    '
+}
+main_rules_before=$(read_effective_main_rules) || {
+  echo "NEEDS_CONTROLLER: effective-main pagination/shape/flatten failed" >&2
+  exit 1
+}
 gh api --paginate --slurp \
   "repos/$OWNER/$REPO/rulesets?includes_parents=true"
-gh api "repos/$OWNER/$REPO/rules/branches/main"
 gh api "repos/$OWNER/$REPO/branches/main/protection" | jq -cS .
 gh api --paginate --slurp \
   "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100"
@@ -910,12 +932,20 @@ shape placeholder, never a hard-coded integration ID.
 ```
 
 Send that body once to `POST repos/$OWNER/$REPO/rulesets`. Only an
-unambiguous 201 permits a fresh GET of the returned ID, all applicable rulesets,
-and `rules/branches/main`. Those readbacks must prove exactly one active
-matching ruleset with the same ID/name, empty bypass list, exact main ref scope,
-one required-status-check rule, and the three exact
+unambiguous 201 permits a fresh `read_effective_main_rules` call that flattens
+every `rules/branches/main?per_page=100` page into `main_rules_after` before
+the GET of the returned ID and all applicable rulesets. Those readbacks must
+prove exactly one active matching ruleset with the same ID/name, empty bypass
+list, exact main ref scope, one required-status-check rule, and the three exact
 `{context, integration_id}` pairs. The main active evaluation must identify
 that created ruleset; failure to prove it is `NEEDS_CONTROLLER`.
+
+```bash
+main_rules_after=$(read_effective_main_rules) || {
+  echo "NEEDS_CONTROLLER: post-201 effective-main pagination/shape/flatten failed" >&2
+  exit 1
+}
+```
 
 Finally re-GET full `branches/main/protection` and require its canonical body
 to equal the pre-create body. Non-201/ambiguous/validation/duplicate/readback

@@ -180,17 +180,31 @@ and the unique successful same-head check-run's numeric `app.id`, written as
 the ruleset API's `integration_id`.
 
 Before one `POST /repos/$OWNER/$REPO/rulesets`, the controller reads all
-repository/parent rulesets with `includes_parents=true`, the effective
-`rules/branches/main`, and canonical full `branches/main/protection`; it also
-reads every check-run page for that exact `$HEAD`. It fails closed as
-`NEEDS_CONTROLLER` if its token is not an admin, an active rule already uses
-that name, target, or three-check tuple, or any target context lacks exactly one
+repository/parent rulesets with `includes_parents=true`, canonical full
+`branches/main/protection`, and every check-run page for that exact `$HEAD`.
+The repository response must pass
+`jq -e '.permissions.admin == true' >/dev/null`; false, null, missing, or an
+API error is `NEEDS_CONTROLLER` before POST. The effective-main read is
+`gh api --paginate --slurp 'repos/$OWNER/$REPO/rules/branches/main?per_page=100'`;
+its response must be an array of page arrays, flattened with
+`jq -e 'if type == "array" and length > 0 and all(.[]; type == "array") then add else error("effective-main pages must be nonempty arrays") end'`
+before any active/created `ruleset_id`, uniqueness, or exact
+`required_status_checks` decision. Pagination, shape, or flatten uncertainty
+is `NEEDS_CONTROLLER`. The same full-page flatten is required again after
+POST. It also fails closed if an active rule already uses that name, target, or
+three-check tuple, or any target context lacks exactly one
 `completed`/`success` run with a numeric `app.id`. On a non-201 response,
 transport ambiguity, validation error, or possible concurrent/duplicate create,
 it does not retry, delete, or update a ruleset.
 
-After a 201, the controller freshly GETs the created ruleset and
-`rules/branches/main`, verifies exactly one active matching rule and all three
+The governance fixture must prove that only `permissions.admin:true` reaches
+its simulated POST point; false, null, and missing values do not. It must also
+put the target effective-main rule only on page two and prove that flatten finds
+it, while missing, duplicate, or malformed-page inputs fail closed.
+
+After a 201, the controller freshly GETs the created ruleset and repeats the
+same paginated/shape-checked/flattened `rules/branches/main?per_page=100`
+read. It verifies exactly one active matching rule and all three
 `{context, integration_id}` pairs, then re-GETs full branch protection and
 requires its canonical body to be unchanged. Applicable rulesets aggregate with
 existing branch protection, so this is an additive merge gate. In particular,

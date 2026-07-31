@@ -407,20 +407,42 @@ path.
 
 Before the one create request, the controller must make a read-only preflight:
 the token has repository admin permission; every repository/parent ruleset is
-read with `includes_parents=true`; relevant detailed ruleset records and
-`rules/branches/main` are read; and the full `branches/main/protection`
+read with `includes_parents=true`; relevant detailed ruleset records and the
+`--paginate --slurp rules/branches/main?per_page=100` response are read; and
+the full `branches/main/protection`
 response is captured canonically. An active ruleset with the chosen name, the
 same `refs/heads/main` scope, or the same three context/integration pairs is
 a duplicate or concurrent state and is `NEEDS_CONTROLLER`. The controller
 does not create, update, delete, disable, or otherwise alter it; the disabled
-`protect_main` ruleset also remains untouched.
+`protect_main` ruleset also remains untouched. The paginated
+`main_rules_before` flatten is the only input for effective-main
+`ruleset_id`, uniqueness, and exact required-status-check decisions; a false,
+null, missing, or unreadable admin value, or any page/shape/flatten failure,
+stops before POST.
 
 ```bash
 set -euo pipefail
-gh api "repos/$OWNER/$REPO" --jq '.permissions.admin'
+if ! gh api "repos/$OWNER/$REPO" |
+  jq -e '.permissions.admin == true' >/dev/null; then
+  echo "NEEDS_CONTROLLER: repository admin permission is required" >&2
+  exit 1
+fi
+read_effective_main_rules() {
+  gh api --paginate --slurp \
+    "repos/$OWNER/$REPO/rules/branches/main?per_page=100" |
+    jq -ce '
+      if type == "array" and length > 0 and all(.[]; type == "array")
+      then add
+      else error("effective-main pages must be nonempty arrays")
+      end
+    '
+}
+main_rules_before=$(read_effective_main_rules) || {
+  echo "NEEDS_CONTROLLER: effective-main pagination/shape/flatten failed" >&2
+  exit 1
+}
 gh api --paginate --slurp \
   "repos/$OWNER/$REPO/rulesets?includes_parents=true"
-gh api "repos/$OWNER/$REPO/rules/branches/main"
 gh api "repos/$OWNER/$REPO/branches/main/protection" | jq -cS .
 gh api --paginate --slurp \
   "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100"
@@ -464,12 +486,22 @@ required checks:
 The numeric values in the example are shape placeholders: each is the exact
 numeric `.app.id` proved for its matching context on the new `$HEAD`. The
 controller sends this body once with `POST repos/$OWNER/$REPO/rulesets`. Only an
-unambiguous 201 permits readback. It then GETs the returned ruleset by ID, all
-applicable rulesets, and `rules/branches/main`; all must prove exactly one
-active matching ruleset with the same ID/name, empty bypass list, only
+unambiguous 201 permits readback. It then calls
+`read_effective_main_rules` again, flattening every
+`rules/branches/main?per_page=100` page into `main_rules_after` before it
+GETs the returned ruleset by ID and all applicable rulesets. Those readbacks
+must prove exactly one active matching ruleset with the same ID/name, empty
+bypass list, only
 `refs/heads/main`, exactly one required-status-check rule, and the three
 literal `{context, integration_id}` pairs. If the active evaluation cannot
 identify the created ruleset, return `NEEDS_CONTROLLER`.
+
+```bash
+main_rules_after=$(read_effective_main_rules) || {
+  echo "NEEDS_CONTROLLER: post-201 effective-main pagination/shape/flatten failed" >&2
+  exit 1
+}
+```
 
 The controller then freshly GETs full `branches/main/protection` and requires
 its canonical body to equal the pre-create body. A non-201 response,

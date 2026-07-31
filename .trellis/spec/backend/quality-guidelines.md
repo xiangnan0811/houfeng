@@ -626,6 +626,11 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   `ref_name.include:["refs/heads/main"]` 精确限于 main。
   `required_status_checks[].integration_id` 必须是同一新 `$HEAD` 的唯一成功
   check-run numeric `.app.id`；不是 branch-protection `app_id` serialization。
+- controller 的 pre/post effective-main signature 是
+  `gh api --paginate --slurp 'repos/$OWNER/$REPO/rules/branches/main?per_page=100'`
+  pipe 到 `jq -e 'if type == "array" and length > 0 and all(.[]; type == "array") then add else error("effective-main pages must be nonempty arrays") end'`。
+  全部 page arrays 必须先 flatten，再判断 active/created `ruleset_id`、唯一性和
+  exact `required_status_checks`。
 
 #### 3. Contracts
 
@@ -655,11 +660,16 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   `cmd/houfeng-record-platform-admin` 的回归只能走独立非 PG16
   `go`/`make verify-go` full-test gate。
 - external governance is controller-owned but create-only. Before one POST, the
-  controller requires admin permission and reads all repository/parent rulesets
-  with `includes_parents=true`, relevant detailed ruleset IDs,
-  `rules/branches/main`, canonical full `branches/main/protection`, and all
-  check-run pages for one new `$HEAD`. An active same-name, same-main-scope, or
-  same-three-check ruleset is concurrent/duplicate state:
+  controller requires the real failure gate
+  `gh api "repos/$OWNER/$REPO" | jq -e '.permissions.admin == true' >/dev/null`;
+  false, null, missing, or API error is `NEEDS_CONTROLLER` and no POST. It
+  reads all repository/parent rulesets with `includes_parents=true`, relevant
+  detailed ruleset IDs, canonical full `branches/main/protection`, and all
+  check-run pages for one new `$HEAD`. It reads effective main with
+  `--paginate --slurp .../rules/branches/main?per_page=100`, requires a
+  nonempty array of page arrays, and `add`-flattens it before any
+  `ruleset_id`/uniqueness/exact-check decision. An active same-name,
+  same-main-scope, or same-three-check ruleset is concurrent/duplicate state:
   `NEEDS_CONTROLLER`, with no create/update/delete/disable/retry. The disabled
   `protect_main` ruleset is not modified.
 - The body contains one `required_status_checks` rule only:
@@ -669,9 +679,10 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   ref except `refs/heads/main`. It never hard-codes an app ID or derives it
   from a context name.
 - Only an unambiguous 201 permits a fresh GET by returned ID, all applicable
-  rulesets, and `rules/branches/main`. They must prove exactly one active
-  matching ruleset/rule and the three exact `{context, integration_id}` pairs;
-  main's active evaluation must identify the created ID. Then full
+  rulesets, and another `--paginate --slurp ...rules/branches/main?per_page=100`
+  shape-checked `add` flatten. They must prove exactly one active matching
+  ruleset/rule and the three exact `{context, integration_id}` pairs; main's
+  active evaluation must identify the created ID. Then full
   `branches/main/protection` must canonically equal the pre-create response.
   Any non-201, transport ambiguity, validation/readback failure, duplicate, or
   changed protection is `NEEDS_CONTROLLER`, never a replay or compensating
@@ -695,10 +706,12 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
 | matrix 添加 `include`、第四个值、shell/default fallback 或不同 entry point | workflow/runner contract review 必须拒绝；CI matrix 不再 deterministic。 |
 | anchored JSON stream 没有 matching `run`/`pass`，或 package 有 `skip`/`fail` event | lane nonzero exit；zero-test、skip 或 fail 不是 PG16 evidence。 |
 | strict PG16 command 包含 `platformmigrate` 或 admin CLI | review 拒绝；该 result 会混入非 Slice 7 file ownership 的 package gate。 |
-| token 不是 admin；active ruleset 同名、同 main scope 或同三 check tuple；或 active evaluation 不唯一 | `NEEDS_CONTROLLER`；不得 create/update/delete/disable/retry。 |
+| admin response 为 false/null/missing，或 repository API error | `NEEDS_CONTROLLER`；true gate 前零 POST。 |
+| effective-main page 不是非空 array-of-arrays，flatten 失败，或 target 只存在后续 page 但未被发现 | `NEEDS_CONTROLLER`；不得以单页/未 flatten state 判断或 POST。 |
+| token 通过 admin gate 但 active ruleset 同名、同 main scope 或同三 check tuple；或 flattened active evaluation 不唯一 | `NEEDS_CONTROLLER`；不得 create/update/delete/disable/retry。 |
 | target run 的 `head_sha` 不同、未完成、非 success、app id 非 numeric/歧义 | `NEEDS_CONTROLLER`；不得 POST。 |
 | POST 非 201、transport ambiguity、validation error、duplicate/concurrent create | `NEEDS_CONTROLLER`；不得 replay、update 或 delete。 |
-| 201 后按 ID/all-rulesets/main evaluation readback 不精确，或 canonical branch protection 改变 | `NEEDS_CONTROLLER`；不得补偿性修改。 |
+| 201 后按 ID/all-rulesets/full-page flattened main evaluation readback 不精确，或 canonical branch protection 改变 | `NEEDS_CONTROLLER`；不得补偿性修改。 |
 | 三个 exact numeric-app contexts 都唯一成功，preflight 唯一且 POST 201/readback 精确 | 该 active ruleset 是 additive required merge gate；existing branch protection 原样不触碰。 |
 
 #### 5. Good / Base / Bad Cases
@@ -764,6 +777,52 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   three literal `{context, integration_id}` pairs, 201-only progression,
   returned-ID/all-rulesets/main-evaluation proof, and no retry/delete/update on
   ambiguous/non-201/validation/readback failure.
+- The following no-network fixture is required before implementation. It proves
+  the real admin predicate is a boolean gate and that effective-main pagination
+  is flattened before target `ruleset_id` uniqueness is evaluated:
+
+  ```bash
+  set -euo pipefail
+  require_admin() {
+    jq -e '.permissions.admin == true' >/dev/null
+  }
+  post_attempt=0
+  gate_then_post() {
+    require_admin || return 1
+    post_attempt=$((post_attempt + 1))
+  }
+  gate_then_post <<<'{"permissions":{"admin":true}}'
+  test "$post_attempt" -eq 1
+  for denied in '{"permissions":{"admin":false}}' '{"permissions":{"admin":null}}' '{}'; do
+    post_attempt=0
+    if gate_then_post <<<"$denied"; then exit 1; fi
+    test "$post_attempt" -eq 0
+  done
+
+  flatten_main_pages() {
+    jq -e '
+      if type == "array" and length > 0 and all(.[]; type == "array")
+      then add
+      else error("effective-main pages must be nonempty arrays")
+      end
+    '
+  }
+  require_one_target() {
+    jq -e --argjson target_id 42 '
+      [.[] | select(.ruleset_id == $target_id)] as $matches
+      | if ($matches | length) == 1 then true
+        else error("effective-main target is missing or not unique")
+        end
+    ' >/dev/null
+  }
+  page_two='[[{"ruleset_id":1}],[{"ruleset_id":42}]]'
+  printf '%s\n' "$page_two" | flatten_main_pages | require_one_target
+  for denied_pages in '[[{"ruleset_id":1}],[]]' '[[{"ruleset_id":42}],[{"ruleset_id":42}]]' '[[],"bad-page"]'; do
+    if printf '%s\n' "$denied_pages" | flatten_main_pages | require_one_target; then
+      exit 1
+    fi
+  done
+  ```
 - protection fixture must capture a current `web-browser`
   `{context,app_id:null}`, a future numeric binding, and full canonical
   protection before/after. It must prove the create-only operation never
