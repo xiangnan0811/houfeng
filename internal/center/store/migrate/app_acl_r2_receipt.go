@@ -16,7 +16,7 @@ const appACLR2DomainMagic = "HOUFENG-APP-ACL-R2-DOMAIN-V1"
 const appACLR2L2ACLMagic = "HOUFENG-APP-ACL-R2-L2-ACL-V1"
 const appACLR2BootstrapReceiptMagic = "HOUFENG-APP-ACL-R2-BOOTSTRAP-RECEIPT-V1"
 const appACLR2BootstrapReceiptProtocol uint16 = 2
-const appACLR2PGCryptoIdentitySetDigestHex = "c544baa39772e3986e5d2c9202ae74b0027815e7021ab7d891f08d878d3e87f7"
+const appACLR2PGCryptoIdentitySetDigestHex = "57e7ac6a986705d8fa1e5b2260c1836b74dffe1b33bee00d65d1b275284e8196"
 
 const appACLR2MigrationName = "0052_app_acl_r2_privileged_transition.sql"
 const appACLR2BootstrapBeginMarker = "HOUFENG-APP-ACL-R2-BOOTSTRAP-BEGIN"
@@ -41,7 +41,7 @@ var appACLR2PGCryptoIdentityContract = [...]string{
 	"record_platform_internal.gen_salt|text, integer",
 	"record_platform_internal.hmac|bytea, bytea, text",
 	"record_platform_internal.hmac|text, text, text",
-	"record_platform_internal.pgp_armor_headers|text",
+	"record_platform_internal.pgp_armor_headers|text, OUT key text, OUT value text",
 	"record_platform_internal.pgp_key_id|bytea",
 	"record_platform_internal.pgp_pub_decrypt|bytea, bytea",
 	"record_platform_internal.pgp_pub_decrypt|bytea, bytea, text",

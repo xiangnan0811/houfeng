@@ -547,6 +547,31 @@ func TestAppACLR2BootstrapCatalogReaderScansAndValidatesExactPGCryptoMembers(t *
 		t.Fatalf("validateAppACLR2BootstrapCatalog() error = %v", err)
 	}
 
+	member16 := snapshot.Members[16]
+	member16Identity := member16.Schema + "." + member16.Name + "|" + member16.IdentityArguments
+	if member16.OID != 7017 || member16.Schema != "record_platform_internal" || member16.Name != "pgp_armor_headers" ||
+		member16Identity != appACLR2PGCryptoMember16PG16IdentityLiteral {
+		t.Fatalf("pgcrypto member 16 = %#v, want PostgreSQL 16 full-OUT pgp_armor_headers identity", member16)
+	}
+	for _, tt := range []struct {
+		name              string
+		identityArguments string
+	}{
+		{name: "input only", identityArguments: "text"},
+		{name: "OUT name substitution", identityArguments: "text, OUT header text, OUT value text"},
+		{name: "OUT mode substitution", identityArguments: "text, INOUT key text, OUT value text"},
+		{name: "OUT type substitution", identityArguments: "text, OUT key bytea, OUT value text"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mutated := snapshot
+			mutated.Members = append([]AppACLR2PGCryptoMemberCatalogV1(nil), snapshot.Members...)
+			mutated.Members[16].IdentityArguments = tt.identityArguments
+			if _, _, err := validateAppACLR2BootstrapCatalog(mutated, frozen); err == nil || !strings.Contains(err.Error(), "identity set") {
+				t.Fatalf("validateAppACLR2BootstrapCatalog() error = %v, want exact full-OUT identity rejection", err)
+			}
+		})
+	}
+
 	first := snapshot.Members[0]
 	if first.OID != 7001 || first.Schema != "record_platform_internal" || first.Name != "armor" || first.IdentityArguments != "bytea" ||
 		first.OwnerName != "bootstrap_oid10" || first.OwnerOID != 10 || first.ExtensionOID != 500 || first.ExtensionDependencyType != "e" ||
@@ -902,6 +927,22 @@ func TestAppACLR2PGCryptoMemberCatalogReaderEnumeratesEveryExtensionDependencyCl
 	if strings.Contains(query, "from pg_catalog.pg_proc procedure join") {
 		t.Fatalf("pgcrypto member dependency query must not root enumeration at pg_proc: %q", query)
 	}
+	const identityFormatter = "pg_catalog.pg_get_function_identity_arguments(procedure.oid)"
+	if count := strings.Count(query, identityFormatter); count != 1 {
+		t.Fatalf("pgcrypto member dependency query uses %d identity formatters, want exactly one %q: %q", count, identityFormatter, query)
+	}
+	for _, forbidden := range []string{
+		"pg_get_function_arguments",
+		"oidvectortypes",
+		"proargtypes",
+		"proallargtypes",
+		"proargmodes",
+		"proargnames",
+	} {
+		if strings.Contains(query, forbidden) {
+			t.Fatalf("pgcrypto member dependency query uses forbidden input-only or OUT-stripping formatter detail %q: %q", forbidden, query)
+		}
+	}
 }
 
 func validAppACLR2CatalogSnapshotFixture(t *testing.T, frozen FrozenAppACLR1StateV1) (AppACLR2BootstrapCatalogSnapshotV1, AppACLR2ReceiptCatalogSnapshotV1) {
@@ -1096,7 +1137,7 @@ func appACLR2PGCryptoMemberCatalogRows() [][]any {
 		{"pg_catalog.pg_proc", int64(7014), int64(0), int64(0), "e", int64(500), int64(1), "record_platform_internal", "gen_salt", "text, integer", "f", "bootstrap_oid10", int64(10), true},
 		{"pg_catalog.pg_proc", int64(7015), int64(0), int64(0), "e", int64(500), int64(1), "record_platform_internal", "hmac", "bytea, bytea, text", "f", "bootstrap_oid10", int64(10), true},
 		{"pg_catalog.pg_proc", int64(7016), int64(0), int64(0), "e", int64(500), int64(1), "record_platform_internal", "hmac", "text, text, text", "f", "bootstrap_oid10", int64(10), true},
-		{"pg_catalog.pg_proc", int64(7017), int64(0), int64(0), "e", int64(500), int64(1), "record_platform_internal", "pgp_armor_headers", "text", "f", "bootstrap_oid10", int64(10), true},
+		{"pg_catalog.pg_proc", int64(7017), int64(0), int64(0), "e", int64(500), int64(1), "record_platform_internal", "pgp_armor_headers", "text, OUT key text, OUT value text", "f", "bootstrap_oid10", int64(10), true},
 		{"pg_catalog.pg_proc", int64(7018), int64(0), int64(0), "e", int64(500), int64(1), "record_platform_internal", "pgp_key_id", "bytea", "f", "bootstrap_oid10", int64(10), true},
 		{"pg_catalog.pg_proc", int64(7019), int64(0), int64(0), "e", int64(500), int64(1), "record_platform_internal", "pgp_pub_decrypt", "bytea, bytea", "f", "bootstrap_oid10", int64(10), true},
 		{"pg_catalog.pg_proc", int64(7020), int64(0), int64(0), "e", int64(500), int64(1), "record_platform_internal", "pgp_pub_decrypt", "bytea, bytea, text", "f", "bootstrap_oid10", int64(10), true},

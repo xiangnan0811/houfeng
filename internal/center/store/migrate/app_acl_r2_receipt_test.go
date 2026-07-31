@@ -8,6 +8,9 @@ import (
 	"testing"
 )
 
+const appACLR2PGCryptoMember16PG16IdentityLiteral = "record_platform_internal.pgp_armor_headers|text, OUT key text, OUT value text"
+const appACLR2PGCryptoIdentitySetPG16DigestHex = "57e7ac6a986705d8fa1e5b2260c1836b74dffe1b33bee00d65d1b275284e8196"
+
 const appACLR2GoldenDomainBodyHex = "484f5546454e472d4150502d41434c2d52322d444f4d41494e2d56310001004372642d31356361353865326332633764616133636132306634653063366638356166383432353463396136373566326262333039326663626430373339626631613138000b6170706c69636174696f6e0000000000000001000f706f7374677265735f73797374656d0011373236323338353937393033383238353600067932000b686f7566656e675f617070"
 const appACLR2GoldenDomainDigestHex = "cda38896d1735a2dac68acd19e3d0ae19162f1c256efd2a96541903af0323c25"
 const appACLR2GoldenDomainTrailingBodyHex = "484f5546454e472d4150502d41434c2d52322d444f4d41494e2d56310001004372642d31356361353865326332633764616133636132306634653063366638356166383432353463396136373566326262333039326663626430373339626631613138000b6170706c69636174696f6e0000000000000001000f706f7374677265735f73797374656d0011373236323338353937393033383238353600067932000b686f7566656e675f61707000"
@@ -81,6 +84,20 @@ func TestAppACLR2ReceiptPGCryptoIdentityInventoryMatchesFixedDigest(t *testing.T
 	want := mustDecodeAppACLR2LiteralDigest(t, appACLR2PGCryptoIdentitySetDigestHex)
 	if got := appACLR2PGCryptoIdentitySetDigest(appACLR2PGCryptoIdentityContract[:]); got != want {
 		t.Fatalf("pgcrypto identity inventory digest = %x, want fixed %x", got, want)
+	}
+}
+
+func TestAppACLR2ReceiptPGCryptoMember16UsesPG16FullOUTSignature(t *testing.T) {
+	const memberIndex = 16
+	if got := appACLR2PGCryptoIdentityContract[memberIndex]; got != appACLR2PGCryptoMember16PG16IdentityLiteral {
+		t.Fatalf("pgcrypto member %d = %q, want PostgreSQL 16 identity %q", memberIndex, got, appACLR2PGCryptoMember16PG16IdentityLiteral)
+	}
+}
+
+func TestAppACLR2ReceiptPGCryptoIdentityInventoryMatchesPG16LiteralDigest(t *testing.T) {
+	want := mustDecodeAppACLR2LiteralDigest(t, appACLR2PGCryptoIdentitySetPG16DigestHex)
+	if got := appACLR2PGCryptoIdentitySetDigest(appACLR2PGCryptoIdentityContract[:]); got != want {
+		t.Fatalf("pgcrypto identity inventory digest = %x, want PostgreSQL 16 literal %x", got, want)
 	}
 }
 
