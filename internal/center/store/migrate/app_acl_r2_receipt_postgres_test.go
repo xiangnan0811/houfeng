@@ -892,6 +892,33 @@ func TestScriptedAppACLR2ReceiptTxRejectsCallerTransactionLifecycle(t *testing.T
 	}
 }
 
+func TestScriptedAppACLR2ReceiptRowsScanErrorClosesRows(t *testing.T) {
+	rows := &scriptedAppACLR2ReceiptRows{rows: [][]any{
+		{"not-an-integer"},
+		{int64(2)},
+	}}
+	if !rows.Next() {
+		t.Fatal("scripted rows Next() = false, want first row")
+	}
+	var value int
+	scanErr := rows.Scan(&value)
+	if scanErr == nil {
+		t.Fatal("scripted rows Scan() error = nil, want type mismatch")
+	}
+	if !rows.closed || rows.closeCalls != 1 {
+		t.Fatalf("scripted rows scan failure close state = closed %t calls %d, want true/1", rows.closed, rows.closeCalls)
+	}
+	if !errors.Is(rows.Err(), scanErr) {
+		t.Fatalf("scripted rows Err() = %v, want scan error %v", rows.Err(), scanErr)
+	}
+	if rows.Next() {
+		t.Fatal("scripted rows Next() advanced after scan failure")
+	}
+	if rows.index != 1 || rows.nextCalls != 2 || rows.scanCalls != 1 {
+		t.Fatalf("scripted rows access state = index %d Next %d Scan %d, want 1/2/1", rows.index, rows.nextCalls, rows.scanCalls)
+	}
+}
+
 func TestAppACLR2ReceiptACLReaderNeverOwnsCallerTransaction(t *testing.T) {
 	state := FrozenAppACLR1StateV1{
 		DirectMigratorRole: "direct_migrator",
@@ -961,6 +988,7 @@ func TestReadAppACLR2ReceiptACLInTxObjectCatalogCompletionMatrix(t *testing.T) {
 		name              string
 		mutate            func([][]any) [][]any
 		withCompletionErr bool
+		wantScanError     bool
 		wantLocalError    string
 	}{
 		{
@@ -979,12 +1007,12 @@ func TestReadAppACLR2ReceiptACLInTxObjectCatalogCompletionMatrix(t *testing.T) {
 			withCompletionErr: true,
 		},
 		{
-			name: "scan failure completion priority",
+			name: "scan failure is fatal",
 			mutate: func(rows [][]any) [][]any {
 				rows[0][0] = "not-an-integer"
 				return rows
 			},
-			withCompletionErr: true,
+			wantScanError: true,
 		},
 		{
 			name: "missing object completion priority",
@@ -1035,7 +1063,15 @@ func TestReadAppACLR2ReceiptACLInTxObjectCatalogCompletionMatrix(t *testing.T) {
 			if err == nil {
 				t.Fatal("readAppACLR2ReceiptACLInTx() error = nil, want object-catalog rejection")
 			}
-			if completionErr != nil {
+			if tt.wantScanError {
+				if len(tx.returnedRows) != 1 {
+					t.Fatalf("object-catalog query returned %d row cursors, want 1", len(tx.returnedRows))
+				}
+				scanErr := tx.returnedRows[0].Err()
+				if scanErr == nil || !errors.Is(err, scanErr) {
+					t.Fatalf("readAppACLR2ReceiptACLInTx() error = %v, want scripted scan error chain %v", err, scanErr)
+				}
+			} else if completionErr != nil {
 				if !errors.Is(err, completionErr) {
 					t.Fatalf("readAppACLR2ReceiptACLInTx() error = %v, want errors.Is completion sentinel", err)
 				}
@@ -1052,11 +1088,21 @@ func TestReadAppACLR2ReceiptACLInTxObjectCatalogCompletionMatrix(t *testing.T) {
 			if len(tx.returnedRows) != 1 {
 				t.Fatalf("object-catalog query returned %d row cursors, want 1", len(tx.returnedRows))
 			}
-			if got := tx.returnedRows[0].nextCalls; got != len(objectRows)+1 {
-				t.Fatalf("object-catalog rows Next() calls = %d, want full drain count %d", got, len(objectRows)+1)
-			}
-			if got := tx.returnedRows[0].index; got != len(objectRows) {
-				t.Fatalf("object-catalog rows consumed = %d, want %d", got, len(objectRows))
+			if tt.wantScanError {
+				cursor := tx.returnedRows[0]
+				if !cursor.closed || cursor.closeCalls != 1 {
+					t.Fatalf("object-catalog scan failure close state = closed %t calls %d, want true/1", cursor.closed, cursor.closeCalls)
+				}
+				if cursor.nextCalls != 2 || cursor.scanCalls != 1 || cursor.index != 1 {
+					t.Fatalf("object-catalog scan failure access state = Next %d Scan %d consumed %d, want 2/1/1", cursor.nextCalls, cursor.scanCalls, cursor.index)
+				}
+			} else {
+				if got := tx.returnedRows[0].nextCalls; got != len(objectRows)+1 {
+					t.Fatalf("object-catalog rows Next() calls = %d, want full drain count %d", got, len(objectRows)+1)
+				}
+				if got := tx.returnedRows[0].index; got != len(objectRows) {
+					t.Fatalf("object-catalog rows consumed = %d, want %d", got, len(objectRows))
+				}
 			}
 			if tx.commitCalls != 0 || tx.rollbackCalls != 0 {
 				t.Fatalf("object-catalog rejection transaction lifecycle = commit %d rollback %d, want 0/0", tx.commitCalls, tx.rollbackCalls)
@@ -2458,16 +2504,29 @@ func (row scriptedAppACLR2ReceiptRow) Scan(destinations ...any) error {
 }
 
 type scriptedAppACLR2ReceiptRows struct {
-	rows      [][]any
-	index     int
-	nextCalls int
-	err       error
+	rows       [][]any
+	index      int
+	nextCalls  int
+	scanCalls  int
+	closeCalls int
+	closed     bool
+	err        error
+	scanErr    error
 }
 
-func (rows *scriptedAppACLR2ReceiptRows) Close() {}
+func (rows *scriptedAppACLR2ReceiptRows) Close() {
+	if rows.closed {
+		return
+	}
+	rows.closed = true
+	rows.closeCalls++
+}
 func (rows *scriptedAppACLR2ReceiptRows) Err() error {
-	if rows.index < len(rows.rows) {
+	if !rows.closed {
 		return nil
+	}
+	if rows.scanErr != nil {
+		return rows.scanErr
 	}
 	return rows.err
 }
@@ -2479,7 +2538,11 @@ func (rows *scriptedAppACLR2ReceiptRows) Conn() *pgx.Conn                       
 
 func (rows *scriptedAppACLR2ReceiptRows) Next() bool {
 	rows.nextCalls++
+	if rows.closed {
+		return false
+	}
 	if rows.index >= len(rows.rows) {
+		rows.Close()
 		return false
 	}
 	rows.index++
@@ -2487,10 +2550,18 @@ func (rows *scriptedAppACLR2ReceiptRows) Next() bool {
 }
 
 func (rows *scriptedAppACLR2ReceiptRows) Scan(destinations ...any) error {
+	rows.scanCalls++
 	if rows.index == 0 || rows.index > len(rows.rows) {
-		return fmt.Errorf("scan APP ACL R2 receipt row outside iteration")
+		rows.scanErr = fmt.Errorf("scan APP ACL R2 receipt row outside iteration")
+		rows.Close()
+		return rows.scanErr
 	}
-	return scanScriptedAppACLR2ReceiptValues(destinations, rows.rows[rows.index-1])
+	if err := scanScriptedAppACLR2ReceiptValues(destinations, rows.rows[rows.index-1]); err != nil {
+		rows.scanErr = err
+		rows.Close()
+		return err
+	}
+	return nil
 }
 
 func scanScriptedAppACLR2ReceiptValues(destinations []any, values []any) error {
