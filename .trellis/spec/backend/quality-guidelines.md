@@ -117,6 +117,9 @@ web:
 - 单元测试与被测文件**同目录同包**：`store/sync_batches.go` ↔ `store/sync_batches_test.go`。
 - 跨包黑盒测试用 `<package>_test` 包名：`internal/center/http/handlers/monitoring_instances_test.go` 第 1 行 `package handlers_test`。
 - 端到端测试加 `_e2e_test.go` 后缀：唯一例子 `internal/center/http/auth_e2e_test.go`，配套 helper `auth_e2e_helpers_test.go`。
+- 唯一窄例外见下方 APP ACL R2 Slice 7 场景：批准的
+  `internal/center/store/migrate/app_acl_r2_postgres_integration_test.go` 保持
+  该既有所有权名称；它不为任何其他真实数据库测试建立命名先例。
 - 路由级集成测试单独文件：`internal/center/http/router_api_test.go`、`router_test.go`。
 
 ### Table-driven 测试
@@ -568,6 +571,141 @@ if !(warning < alert && alert < critical) {
 
 ---
 
+### Scenario: APP ACL R2 Slice 7 严格 PostgreSQL 16 catalog lane
+
+#### 1. Scope / Trigger
+
+- Trigger：修改
+  `internal/center/store/migrate/app_acl_r2_postgres_integration_test.go`、
+  `scripts/test-record-platform-integration.sh` 的 `pg16-catalog` mode，或
+  `.github/workflows/ci.yml` 的 `record-platform-pg16-catalog` job 时。
+- 本场景是批准文件 `app_acl_r2_postgres_integration_test.go` 的唯一命名
+  例外。它是 required-CI catalog lane，不替代普通 `_e2e_test.go` 测试，也不
+  替代父任务的 record-platform fixture modes。
+- 它只覆盖 APP ACL R2 的 PG16 authority/catalog evidence，不改变冻结的
+  R1/R2 source、tuple、ACL、data、permission、state 或 clone/restore 合同。
+
+#### 2. Signatures
+
+```bash
+HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
+  scripts/test-record-platform-integration.sh pg16-catalog -- <command> [args...]
+```
+
+- `pg16-catalog` 是唯一严格的 Slice 7 mode。`<exact-image>` 只能是
+  `postgres:16.0`、`postgres:16.6` 或 `postgres:16.12`。
+- `postgres` 与 `postgres-s3` 保持原有父任务合同：
+  `scripts/test-record-platform-integration.sh <mode> -- <command> [args...]`。
+  Slice 7 image variable 不对两者施加 validation 或 defaulting。
+- required workflow job id 是 `record-platform-pg16-catalog`；显式 job name
+  是 `record-platform-pg16-catalog (${{ matrix.postgres_image }})`。literal
+  matrix 必须产生以下精确 check contexts：
+  `record-platform-pg16-catalog (postgres:16.0)`,
+  `record-platform-pg16-catalog (postgres:16.6)`，和
+  `record-platform-pg16-catalog (postgres:16.12)`.
+
+#### 3. Contracts
+
+- runner 必须在 `mktemp`、random material、port probing、Docker、container、
+  fixture URL 或 child execution 之前验证 mode、`--`、child argv 和严格 image
+  值。每个被接受的 strict lane 都把所选 image 用于所有
+  APP/ledger/witness/recovery fixture databases。
+- `postgres`、`postgres-s3`、两者名称和未来父任务调用都是 compatibility
+  boundary。加入 `pg16-catalog` 时不得 rename、delete、route through strict
+  allowlist 或以其他方式改变它们。
+- 批准文件只有直接执行且未设置
+  `HOUFENG_POSTGRES_INTEGRATION=1` 时才可走普通 `t.Skip`。strict runner
+  export 该变量；child output 中任意 `--- SKIP:` 都必须使 runner exit 1，
+  enabled-test prerequisite failure 必须使用 `t.Fatal`/error 而非 skip。没有
+  其他 real-PostgreSQL test 获得此例外。
+- workflow matrix 只能包含三个 quoted literal，不得有 `include`、default
+  expression 或不同 entry point；每个 lane 运行同一 `pg16-catalog` command。
+  显式 job name 是三个 check contexts 的 evidence contract；workflow 文件
+  本身不能把 context 设为 required。
+- branch protection 属于 controller-owned external governance。记录本合同时，
+  `main` 为 `strict=true`，contexts 为 `go`、`web`、`web-browser`、
+  `docker-image`，`enforce_admins=true` 且 required conversation resolution
+  已启用。controller 只能在新的 Slice 7 head 上三个 PG16 contexts 全部成功后
+  保留这些设置并添加三个 context。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 预期行为 |
+| --- | --- |
+| `pg16-catalog` 缺少 image，或 image 为 `postgres`、`postgres:16`、`postgres:16-alpine`、其他非 allowlist 值 | 在任何 Docker 或 fixture side effect 前 exit 2。 |
+| `pg16-catalog` 使用一个 allowlist image | 用该 exact image 启动四个 fixture database 并执行 child command。 |
+| 调用 `postgres` 或 `postgres-s3` | 保持各自 mode contract；不能仅因为 strict image variable 缺少或不同而拒绝。 |
+| strict child 输出 `--- SKIP:` | cleanup 后 runner nonzero exit；该 lane 不是 evidence。 |
+| matrix 添加 `include`、第四个值、shell/default fallback 或不同 entry point | workflow/runner contract review 必须拒绝；CI matrix 不再 deterministic。 |
+| check 名字正确但 `head_sha` 不同、未完成或 conclusion 非 success | controller 不得更新 branch protection。 |
+| 新 head 上三个 exact contexts 都成功 | controller 可更新受保护 `main` 的 required-status-checks，同时保留现有 contexts 和 strict setting。 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：用 `pg16-catalog` 提供 `postgres:16.6`；四个 fixture database 都使用
+  该 literal image，测试不 skip，check context 为
+  `record-platform-pg16-catalog (postgres:16.6)`。
+- Base：开发者直接运行且没有 fixture environment 时，批准 integration test
+  按普通规则 skip；它不是 required-CI result。
+- Bad：改变 `postgres` 以拒绝 `postgres:16-alpine`，从而破坏父任务
+  Task 10/14/15/16/17/18 commands。
+- Bad：只在 YAML 中把 `record-platform-pg16-catalog` 标为 "required"，或在
+  新 head 的三个 checks 变绿前添加 branch-protection context。
+
+#### 6. Tests Required
+
+- 批准 integration file 覆盖 real PG16 authority matrix；由 strict runner 执行
+  时不得以 skip 作为 evidence。runner coverage 必须证明三个 allowlist literal、
+  missing/invalid input 在 side effect 前拒绝、selected image 传到四个 fixtures、
+  cleanup 与 skip-to-failure behavior。
+- 三个 image 都必须在本地运行同一 command；可用 Docker Server 是 local
+  evidence，不是把 lane 推给 CI 的理由。随后每个 CI matrix lane 也运行完全相同的
+  strict entry point。
+- controller 是 branch-protection 的唯一执行者。任何 PUT 前，它先保留当前
+  `main` protection 的 read-only evidence；之后才查询新 head：
+
+  ```bash
+  gh api "repos/$OWNER/$REPO/branches/main/protection" \
+    --jq '{required_status_checks, enforce_admins, required_conversation_resolution}'
+
+  gh api "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100" --paginate \
+    --jq '.check_runs[] | [.name, .head_sha, .status, .conclusion] | @tsv'
+  ```
+
+  controller 验证三个 named contexts 都指向该 `$HEAD`、status 为 `completed`
+  且 conclusion 为 `success`，之后才用 `strict=true`、四个 existing contexts
+  和三个 new contexts 更新
+  `repos/$OWNER/$REPO/branches/main/protection/required_status_checks`。该
+  scoped PUT 不修改 `enforce_admins` 或 required conversation resolution；该
+  controller action 前不得声称当前 protection 已改变。
+
+#### 7. Wrong vs Correct
+
+```bash
+# Wrong：劫持 parent mode 并接受 fallback image。
+scripts/test-record-platform-integration.sh postgres -- go test ./...
+# HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE defaults to postgres:16-alpine
+```
+
+```bash
+# Correct：隔离 strict lane 并提供一个 literal image。
+HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.12 \
+  scripts/test-record-platform-integration.sh pg16-catalog -- go test ./...
+```
+
+```yaml
+# Wrong：未固定的 include/default 能创建第四个 context 或 fallback。
+matrix:
+  include:
+    - postgres_image: postgres:16
+
+# Correct：精确三个 literal value 驱动 named checks。
+matrix:
+  postgres_image: ["postgres:16.0", "postgres:16.6", "postgres:16.12"]
+```
+
+---
+
 ## 反模式 / Common Mistakes
 
 - ❌ **跳过 verify 提交**：哪怕"只是改了一行注释"也跑 `make verify-go`，3 秒的事。
@@ -576,7 +714,7 @@ if !(warning < alert && alert < critical) {
 - ❌ **TODO 不带 issue 链接**：`grep -rn "TODO\|FIXME" internal/ agent/ cmd/` 当前为空，保持纪录干净。如果必须 TODO，写完整理由 + 跟踪 issue 编号。
 - ❌ **新增 handler 但不更新 `bootstrap_test.go` 的 nil 断言**：会让"装配缺失"绕过 verify。
 - ❌ **测试用 `time.Sleep(N seconds)` 等 worker tick**：用注入小间隔 + ctx cancel 的 deterministic 模式（参考 `retention/worker_test.go:92`）。
-- ❌ **store 测试为了"覆盖更全"启动真 Postgres**：当前生态依赖 `fakeSyncBatchTx` 风格。如果确实要写真 DB 测试，单独走 `_e2e_test.go` 后缀并默认 `t.Skip` 在 env 缺失时跳过——但这条**目前还没人做过**，先和团队确认再加。
+- ❌ **store 测试为了"覆盖更全"启动真 Postgres**：当前生态依赖 `fakeSyncBatchTx` 风格。如果确实要写真 DB 测试，单独走 `_e2e_test.go` 后缀并默认 `t.Skip` 在 env 缺失时跳过；唯一例外是上方已逐项限定的 APP ACL R2 Slice 7 文件/strict runner，不能外推到其他测试。
 - ❌ **在窗口/过期判断测试里写会过期的固定未来日期**：例如生产逻辑按真实 `time.Now()` 判定 `renew_at` 是否在 30 天内时，测试夹具不能用 `time.Date(2026, time.June, 11, ...)` 表达"7 天后"。用 `time.Now().UTC().AddDate(0, 0, 7)`，或注入时钟后固定测试时钟。
 - ❌ **改 contract 包但不同 PR 改 agent**：`internal/contracts/agentapi/` 的任何 breaking 改动**必须**当 PR 把 agent 也升级，否则 fleet 会立即崩。
 - ❌ **改 `db/migrations/` 已合入的 SQL 文件**：见 `database-guidelines.md`。reviewer 看到这种 diff 应直接 reject。

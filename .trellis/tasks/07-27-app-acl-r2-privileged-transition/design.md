@@ -288,17 +288,113 @@ owner/dependency, and every member identity/OID/owner. They do not reread a
 physical system identifier. A 36-row set with a substituted identity or identity
 argument is rejected; equal cardinality is never evidence of equivalence.
 
+### Slice 7 PG16 Catalog Fixture And Required-Check Adjudication
+
 The PostgreSQL 16 catalog matrix is an all-lane requirement, not a generic
-smoke test. The fixture lanes are exactly `postgres:16.0`, `postgres:16.6`, and
-`postgres:16.12`, selected by
-`HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image>`. The runner rejects
-unset, `postgres`, `postgres:16`, `postgres:16-alpine`, and every value outside
-that three-member fixture allowlist, and uses the selected image for every
-fixture database. Each lane proves only its live allowed server version,
-`extversion`, the exact 36-member inventory/identity-set digest,
-direct-migrator extension owner/dependency, OID-10 member owners, and ACL
-baseline. The fixed fixture image names make the catalog coverage reproducible;
-they do not prove image-artifact or package provenance.
+smoke test. The selected contract is an additional strict runner mode, rather
+than a reinterpretation of the parent record-platform modes:
+
+```bash
+HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
+  scripts/test-record-platform-integration.sh pg16-catalog -- <command> [args...]
+```
+
+`pg16-catalog` accepts only `postgres:16.0`, `postgres:16.6`, and
+`postgres:16.12`. The script validates its positional mode, `--`, child argv,
+and this environment value before `mktemp`, random-password generation, port
+selection, Docker invocation, container creation, or any fixture URL export.
+Missing input, `postgres`, `postgres:16`, `postgres:16-alpine`, or every other
+value exits 2 with no Docker or fixture side effect. An accepted value is used
+for every APP/ledger/witness/recovery PostgreSQL fixture in that run. Each lane
+proves only its live allowed server version, `extversion`, the exact 36-member
+inventory/identity-set digest, direct-migrator extension owner/dependency,
+OID-10 member owners, and ACL baseline. The fixed image names make catalog
+coverage reproducible; they do not prove image-artifact or package provenance.
+
+`postgres` remains the existing general PostgreSQL fixture interface and
+`postgres-s3` remains the parent-owned S3-profile interface. Neither may be
+renamed, removed, constrained by the PG16 image allowlist, or otherwise changed
+as an incidental effect of implementing `pg16-catalog`; their future parent
+calls continue to use `scripts/test-record-platform-integration.sh <mode> --
+<command> [args...]`. The strict dispatcher must preserve those branches before
+adding the new branch.
+
+Two alternatives were rejected. Replacing `postgres` with the three-image
+allowlist would invalidate the parent Task 10/14/15/16/17/18 calls and make the
+general/S3 fixture contracts incompatible. A second standalone Slice 7 runner
+would duplicate lifecycle, cleanup, skip detection, and port/identity behavior,
+and would violate the Slice 7 three-file ownership boundary. The distinct
+`pg16-catalog` mode is the smallest compatible option: it makes the PG16 input
+strict without taking authority over the parent modes.
+
+The workflow defines evidence; branch protection is an external governance
+action. The Slice 7 implementation must create this one matrix job with no
+`include`, no default image value, and no fallback command:
+
+```yaml
+record-platform-pg16-catalog:
+  name: record-platform-pg16-catalog (${{ matrix.postgres_image }})
+  strategy:
+    fail-fast: false
+    matrix:
+      postgres_image:
+        - "postgres:16.0"
+        - "postgres:16.6"
+        - "postgres:16.12"
+  env:
+    HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE: ${{ matrix.postgres_image }}
+  steps:
+    - run: >-
+        scripts/test-record-platform-integration.sh pg16-catalog --
+        go test -v ./internal/center/store/migrate
+        ./internal/center/platformmigrate ./cmd/houfeng-record-platform-admin
+        -run 'TestPostgresIntegrationAppACLR2|TestPostgresIntegration.*AppACLR2'
+        -count=1
+```
+
+The explicit job name makes the actual expected check contexts stable and
+queryable, rather than relying on GitHub's implicit matrix formatting:
+
+```text
+record-platform-pg16-catalog (postgres:16.0)
+record-platform-pg16-catalog (postgres:16.6)
+record-platform-pg16-catalog (postgres:16.12)
+```
+
+After a new Slice 7 head is pushed, the controller queries those exact contexts
+on that SHA, not on a previous PR head:
+
+```bash
+gh api "repos/$OWNER/$REPO/branches/main/protection" \
+  --jq '{required_status_checks, enforce_admins, required_conversation_resolution}'
+
+gh api "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100" --paginate \
+  --jq '.check_runs[] | [.name, .head_sha, .status, .conclusion] | @tsv'
+```
+
+Only when all three rows name that `$HEAD` and have `completed` / `success` may
+the controller update `main` protection. At adjudication time the independently
+read protection has `strict=true`, contexts `go`, `web`, `web-browser`, and
+`docker-image`, `enforce_admins=true`, and required conversation resolution
+enabled. The controller preserves those settings and adds the three exact new
+contexts through the protected-branch API, for example. The scoped
+`required_status_checks` PUT does not change `enforce_admins` or required
+conversation resolution:
+
+```bash
+gh api --method PUT "repos/$OWNER/$REPO/branches/main/protection/required_status_checks" \
+  -F strict=true \
+  -F 'contexts[]=go' -F 'contexts[]=web' \
+  -F 'contexts[]=web-browser' -F 'contexts[]=docker-image' \
+  -F 'contexts[]=record-platform-pg16-catalog (postgres:16.0)' \
+  -F 'contexts[]=record-platform-pg16-catalog (postgres:16.6)' \
+  -F 'contexts[]=record-platform-pg16-catalog (postgres:16.12)'
+```
+
+This task does not perform that PUT and does not claim that the contexts are
+currently required. The local Docker Server is available for the three local
+image lanes, so local execution remains required evidence and is not replaced
+by CI-only evidence.
 
 ## M2 Persistence: Separate R2 Relations
 

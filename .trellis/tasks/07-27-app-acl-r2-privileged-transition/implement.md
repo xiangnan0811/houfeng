@@ -700,10 +700,16 @@ go test ./internal/center/store/migrate -run 'AppACLR2(State|RuntimeAdmission|St
 
 **Ownership:** Create
 `internal/center/store/migrate/app_acl_r2_postgres_integration_test.go`; modify
-`scripts/test-record-platform-integration.sh` to require the exact selected
-PG16 image and reject every fallback; and modify `.github/workflows/ci.yml` to
-add the required three-lane release gate. These paths are exclusive to Slice 7;
-Slices 1-6 do not change the Go test, script, or workflow.
+`scripts/test-record-platform-integration.sh` only to add the strict
+`pg16-catalog` mode; and modify `.github/workflows/ci.yml` to add its three-lane
+catalog job. `postgres` and parent-owned `postgres-s3` retain their existing
+names, signatures, and behavior; Slice 7 does not rename, remove, or tighten
+either mode. The strict mode signature is
+`HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> scripts/test-record-platform-integration.sh pg16-catalog -- <command> [args...]`.
+It accepts only `postgres:16.0`, `postgres:16.6`, or `postgres:16.12`, and
+rejects missing/other values before `mktemp`, random/password or port work,
+Docker, containers, or fixture exports. These three paths are exclusive to
+Slice 7; Slices 1-6 do not change the Go test, script, or workflow.
 
 - [ ] RED/GREEN: cover R1 -> PREPARED -> FINALIZED; every wrong identity,
   application-source, member/dependency, domain, owner, ACL, and state failure;
@@ -762,29 +768,74 @@ Slices 1-6 do not change the Go test, script, or workflow.
   facts, each of the 36 `record_platform_internal` identity/identity-argument
   members, dependency/ACL baseline, direct-migrator extension ownership, OID-10
   member ownership, and rejection of an equal-cardinality substitution. It
-  makes no raw server-file or artifact-provenance assertion. The runner accepts only
-  `postgres:16.0`, `postgres:16.6`, or `postgres:16.12`; unset,
+  makes no raw server-file or artifact-provenance assertion. The
+  `pg16-catalog` runner mode accepts only `postgres:16.0`, `postgres:16.6`, or
+  `postgres:16.12` through `HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE`; unset,
   `postgres`, `postgres:16`, `postgres:16-alpine`, and every other value fail
-  before any fixture starts. `.github/workflows/ci.yml` must define a required
-  `record-platform-pg16-catalog` matrix job with exactly those three literal
-  image strings and no include/default fallback. Every lane invokes this same
-  command with its matrix value.
+  before any fixture starts. Its preflight must run before every fixture or
+  Docker side effect and leave `postgres`/`postgres-s3` outside this allowlist.
+  `.github/workflows/ci.yml` must define a
+  `record-platform-pg16-catalog` matrix job whose explicit job name is
+  `record-platform-pg16-catalog (${{ matrix.postgres_image }})`, with exactly
+  those three literal image strings and no include/default fallback. Every lane
+  invokes the same `pg16-catalog` entry point with its matrix value.
 - [ ] Run every real PostgreSQL 16 lane with roles created inside the fixture:
 
 ```bash
 HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.0 \
-  scripts/test-record-platform-integration.sh postgres:16.0 -- \
+  scripts/test-record-platform-integration.sh pg16-catalog -- \
   go test -v ./internal/center/store/migrate ./internal/center/platformmigrate ./cmd/houfeng-record-platform-admin \
   -run 'TestPostgresIntegrationAppACLR2|TestPostgresIntegration.*AppACLR2' -count=1
 HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.6 \
-  scripts/test-record-platform-integration.sh postgres:16.6 -- \
+  scripts/test-record-platform-integration.sh pg16-catalog -- \
   go test -v ./internal/center/store/migrate ./internal/center/platformmigrate ./cmd/houfeng-record-platform-admin \
   -run 'TestPostgresIntegrationAppACLR2|TestPostgresIntegration.*AppACLR2' -count=1
 HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.12 \
-  scripts/test-record-platform-integration.sh postgres:16.12 -- \
+  scripts/test-record-platform-integration.sh pg16-catalog -- \
   go test -v ./internal/center/store/migrate ./internal/center/platformmigrate ./cmd/houfeng-record-platform-admin \
   -run 'TestPostgresIntegrationAppACLR2|TestPostgresIntegration.*AppACLR2' -count=1
 ```
+
+#### Slice 7 Admission And Required-Check Order
+
+`app_acl_r2_postgres_integration_test.go` is the approved, narrow file-name
+exception. It may retain ordinary direct-invocation `t.Skip` behavior when the
+fixture environment is absent; once the strict runner has exported
+`HOUFENG_POSTGRES_INTEGRATION=1`, a missing prerequisite is a test failure and
+any emitted `--- SKIP:` causes the runner to fail. This does not change the
+ordinary `_e2e_test.go` / optional-environment convention for any other test.
+
+Implement the script dispatcher with the `postgres` and `postgres-s3` branches
+unchanged, then parse the `pg16-catalog` image allowlist before every side
+effect. Add runner coverage that proves each allowed literal is passed to all
+four fixture databases, and that unset/invalid values invoke no fixture setup.
+The local Docker Server reports `29.6.2`; execute the three commands above
+locally as evidence in addition to CI rather than substituting a CI-only claim.
+
+The workflow layer must use an explicit job name so its matrix check contexts
+are exactly `record-platform-pg16-catalog (postgres:16.0)`,
+`record-platform-pg16-catalog (postgres:16.6)`, and
+`record-platform-pg16-catalog (postgres:16.12)`. This workflow edit does not
+itself make a GitHub required check. After a newly pushed Slice 7 head has all
+three successful contexts, the controller first retains read-only protection
+evidence and then queries that same head with:
+
+```bash
+gh api "repos/$OWNER/$REPO/branches/main/protection" \
+  --jq '{required_status_checks, enforce_admins, required_conversation_resolution}'
+
+gh api "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100" --paginate \
+  --jq '.check_runs[] | [.name, .head_sha, .status, .conclusion] | @tsv'
+```
+
+Only then may the controller update `main` branch protection, preserving its
+current `strict=true`, `go`, `web`, `web-browser`, and `docker-image` contexts,
+`enforce_admins=true`, and required conversation resolution while adding the
+three exact PG16 context names through the scoped `required_status_checks` PUT;
+that endpoint leaves `enforce_admins` and required conversation resolution
+unchanged. This Slice 7 planning update neither performs that protected-branch
+API call nor asserts that a new head, review, CI result, or branch-protection
+update exists.
 
 - [ ] Perform final spec-compliance review, then independent code-quality review.
   The prospective P1 planning review must have passed before any Slice 5

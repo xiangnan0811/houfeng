@@ -129,6 +129,42 @@ as a healthy R1 or R2 deployment.
 4. Add unit and PostgreSQL 16 integration coverage for accepted states and
    security-relevant rejections.
 
+### Slice 7 Admission Contract
+
+Slice 7 has one additional, isolated PostgreSQL 16 catalog-fixture entry point:
+
+```bash
+HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
+  scripts/test-record-platform-integration.sh pg16-catalog -- <command> [args...]
+```
+
+`<exact-image>` is exactly one of `postgres:16.0`, `postgres:16.6`, or
+`postgres:16.12`. For `pg16-catalog`, missing or any other value is an exit-2
+configuration error before `mktemp`, port/password generation, Docker, or any
+fixture work. Each accepted lane uses that one image for every fixture database.
+The existing `postgres` and parent-owned `postgres-s3` modes retain their names,
+signatures, and semantics; Slice 7 must not rename, delete, or make either mode
+subject to this image allowlist.
+
+The approved Slice 7 file
+`internal/center/store/migrate/app_acl_r2_postgres_integration_test.go` remains
+the sole name exception to the ordinary `_e2e_test.go` convention. A direct run
+without the fixture environment may use the ordinary skip behavior, but the
+strict runner exports `HOUFENG_POSTGRES_INTEGRATION=1` and treats any
+`--- SKIP:` output as failure. Therefore no required Slice 7 lane can pass by
+skipping.
+
+The workflow layer and branch-protection layer are separate acceptance gates.
+The workflow must create the three stable check contexts
+`record-platform-pg16-catalog (postgres:16.0)`,
+`record-platform-pg16-catalog (postgres:16.6)`, and
+`record-platform-pg16-catalog (postgres:16.12)` from one literal matrix and
+the same strict entry point. Only the controller, after querying the new head
+and observing all three contexts successful, may add those contexts to `main`
+branch protection. This planning contract neither changes protection nor claims
+that any Slice 7 implementation, CI run, review, or parent acceptance is
+complete.
+
 ## Unsupported States And Non-Goals
 
 - Partial receipt, non-exact source, mixed M1/M2, missing/changed domain
