@@ -219,6 +219,10 @@ func readFrozenAppACLR1CatalogInTx(
 	if err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
+	delegatedFunctions, err := frozenAppACLR2DelegatedFunctionIdentities()
+	if err != nil {
+		return AppACLEffectiveCatalogSnapshotR1{}, err
+	}
 	if snapshot.PGCryptoExtension, err = readAppACLEffectiveCatalogPGCryptoExtensionR1(ctx, tx); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
@@ -256,7 +260,47 @@ func readFrozenAppACLR1CatalogInTx(
 	if err := verifyAppACLOpaqueExtensionMemberReachabilityR1(ctx, tx, roleNames[:2]); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
-	return scopeAppACLEffectiveCatalogSnapshotR1(snapshot, scope), nil
+	snapshot = scopeAppACLEffectiveCatalogSnapshotR1(snapshot, scope)
+	// R2 catalog predicates prove these exact helpers; frozen R1 retains every other internal owner.
+	return delegateFrozenAppACLR2FunctionOwners(snapshot, delegatedFunctions), nil
+}
+
+func frozenAppACLR2DelegatedFunctionIdentities() (map[string]struct{}, error) {
+	identities := make(map[string]struct{})
+	for _, object := range appACLR2KnownReservedObjects() {
+		if object.Kind != "function" {
+			continue
+		}
+		schemaName, _, found := appACLFunctionIdentityFromQualifiedIdentityR1(object.Identity)
+		if !found || object.Detail != "f" || object.Schema != appACLManagedInternalSchemaR1 || schemaName != object.Schema {
+			return nil, fmt.Errorf("invalid reserved APP ACL R2 function %q", object.Identity)
+		}
+		if _, duplicate := identities[object.Identity]; duplicate {
+			return nil, fmt.Errorf("duplicate reserved APP ACL R2 function %q", object.Identity)
+		}
+		identities[object.Identity] = struct{}{}
+	}
+	if len(identities) == 0 {
+		return nil, fmt.Errorf("APP ACL R2 reserved catalog has no functions")
+	}
+	return identities, nil
+}
+
+func delegateFrozenAppACLR2FunctionOwners(
+	snapshot AppACLEffectiveCatalogSnapshotR1,
+	identities map[string]struct{},
+) AppACLEffectiveCatalogSnapshotR1 {
+	owners := make([]AppACLEffectiveCatalogObjectOwnerR1, 0, len(snapshot.Owners))
+	for _, owner := range snapshot.Owners {
+		identity := owner.SchemaName + "." + owner.ObjectIdentity
+		_, delegated := identities[identity]
+		if owner.ObjectClass == AppACLObjectClassFunction && delegated {
+			continue
+		}
+		owners = append(owners, owner)
+	}
+	snapshot.Owners = owners
+	return snapshot
 }
 
 // RequireDirectFrozenAppACLR1RuntimeInTx is the separate R1 actor predicate.

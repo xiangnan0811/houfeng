@@ -59,6 +59,49 @@ func TestAppACLR2M2ControlACLBindsDirectOwnerAndOrdinaryReaderPolicySeparately(t
 	}
 }
 
+func TestAppACLR2CatalogStillRejectsDelegatedFunctionOwnerAndInventoryDrift(t *testing.T) {
+	frozen := validFrozenAppACLR1StateFixture(t)
+	bootstrap, validSurface := validAppACLR2CatalogSnapshotFixture(t, frozen)
+	receipt, err := CompileAppACLR2BootstrapReceiptFromCatalogV1(bootstrap, validSurface, frozen)
+	if err != nil {
+		t.Fatalf("CompileAppACLR2BootstrapReceiptFromCatalogV1() error = %v", err)
+	}
+
+	t.Run("L2 helper owner drift", func(t *testing.T) {
+		surface := cloneAppACLR2ReceiptCatalogSnapshot(validSurface)
+		surface.Helpers[0].OwnerOID++
+		err := VerifyAppACLR2BootstrapReceiptCatalogV1(receipt, bootstrap, surface, frozen)
+		if err == nil || !strings.Contains(err.Error(), "helper") {
+			t.Fatalf("VerifyAppACLR2BootstrapReceiptCatalogV1() error = %v, want helper owner rejection", err)
+		}
+	})
+
+	t.Run("M2 helper owner drift", func(t *testing.T) {
+		roles := appACLR2M2RoleOIDs{DirectMigrator: 21, CenterRuntime: 20, PlatformAdmin: 22}
+		tx := newAppACLR2M2FunctionVerifierTx(&scriptedAppACLR2ReceiptTx{
+			queryRows: []scriptedAppACLR2ReceiptQueryRow{{
+				values: []any{int64(500), int64(roles.DirectMigrator + 1), "f"},
+			}},
+		})
+		err := verifyAppACLR2M2FunctionInTx(context.Background(), tx, roles)
+		if err == nil || !strings.Contains(err.Error(), "owner drift") {
+			t.Fatalf("verifyAppACLR2M2FunctionInTx() error = %v, want helper owner rejection", err)
+		}
+	})
+
+	t.Run("extra reserved object", func(t *testing.T) {
+		surface := cloneAppACLR2ReceiptCatalogSnapshot(validSurface)
+		surface.ReservedObjects = append(surface.ReservedObjects, AppACLR2ReservedCatalogObjectV1{
+			OID: 9001, Kind: "function", Schema: "record_platform_internal",
+			Identity: "record_platform_internal.app_acl_r2_unexpected_helper()", Detail: "f",
+		})
+		err := VerifyAppACLR2BootstrapReceiptCatalogV1(receipt, bootstrap, surface, frozen)
+		if err == nil || !strings.Contains(err.Error(), "reserved catalog inventory") {
+			t.Fatalf("VerifyAppACLR2BootstrapReceiptCatalogV1() error = %v, want extra inventory rejection", err)
+		}
+	})
+}
+
 func TestAppACLR2CatalogPredicatesRecognizeExactR1ObjectAbsence(t *testing.T) {
 	predicates := evaluateAppACLR2CatalogShape(appACLR2CatalogShape{})
 
