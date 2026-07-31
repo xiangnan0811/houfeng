@@ -934,6 +934,10 @@ func TestAppACLR2PGCryptoMemberCatalogReaderEnumeratesEveryExtensionDependencyCl
 
 const appACLR2PGCryptoIdentityFormatter = "pg_catalog.pg_get_function_identity_arguments(procedure.oid)"
 const appACLR2PGCryptoIdentityScanProjection = "coalesce(namespace.nspname::text, ''), coalesce(procedure.proname::text, ''), coalesce(pg_catalog.pg_get_function_identity_arguments(procedure.oid), ''), coalesce(procedure.prokind::text, ''), coalesce(owner.rolname, ''), coalesce(owner.oid::bigint, 0), procedure.proacl is null"
+const appACLR2PGCryptoMemberCatalogOuterSelectProjection = "select coalesce(class_namespace.nspname::text || '.' || member_class.relname::text, ''), " +
+	"dependency.objid::bigint, dependency.objsubid::bigint, dependency.refobjsubid::bigint, dependency.deptype::text, extension.oid::bigint, " +
+	"(select pg_catalog.count(*)::bigint from pg_catalog.pg_depend extension_dependency where extension_dependency.classid = dependency.classid and extension_dependency.refclassid = 'pg_catalog.pg_extension'::pg_catalog.regclass and extension_dependency.objid = dependency.objid), " +
+	appACLR2PGCryptoIdentityScanProjection
 
 func TestAppACLR2PGCryptoMemberCatalogQueryRejectsOUTStrippingShapes(t *testing.T) {
 	formatterProjection := "coalesce(" + appACLR2PGCryptoIdentityFormatter + ", '')"
@@ -962,8 +966,20 @@ func TestAppACLR2PGCryptoMemberCatalogQueryRejectsOUTStrippingShapes(t *testing.
 	}
 }
 
+func TestAppACLR2PGCryptoMemberCatalogQueryRejectsNestedCTEOUTStripping(t *testing.T) {
+	query := "with raw (extension_dependency_class, oid, object_sub_id, reference_object_sub_id, dependency_type, extension_oid, extension_dependency_count, schema_name, procedure_name, identity_arguments, routine_kind, owner_name, owner_oid, acl_is_default) as (" +
+		appACLR2PGCryptoMemberCatalogOuterSelectProjection + " from pg_catalog.pg_extension extension) " +
+		"select extension_dependency_class, oid, object_sub_id, reference_object_sub_id, dependency_type, extension_oid, extension_dependency_count, schema_name, procedure_name, split_part(identity_arguments, ',', 1), routine_kind, owner_name, owner_oid, acl_is_default from raw"
+	if err := validateAppACLR2PGCryptoMemberCatalogIdentityFormatterQuery(query); err == nil {
+		t.Fatalf("pgcrypto member identity projection accepted nested CTE OUT-stripping query shape %q", query)
+	}
+}
+
 func validateAppACLR2PGCryptoMemberCatalogIdentityFormatterQuery(query string) error {
 	query = strings.Join(strings.Fields(strings.ToLower(query)), " ")
+	if !strings.HasPrefix(query, appACLR2PGCryptoMemberCatalogOuterSelectProjection) {
+		return fmt.Errorf("pgcrypto member dependency query must begin with the exact direct identity scan projection %q: %q", appACLR2PGCryptoMemberCatalogOuterSelectProjection, query)
+	}
 	if count := strings.Count(query, appACLR2PGCryptoIdentityFormatter); count != 1 {
 		return fmt.Errorf("pgcrypto member dependency query uses %d identity formatters, want exactly one %q: %q", count, appACLR2PGCryptoIdentityFormatter, query)
 	}
