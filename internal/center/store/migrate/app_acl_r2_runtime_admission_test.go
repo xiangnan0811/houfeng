@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"regexp"
 	"strconv"
@@ -117,6 +120,51 @@ func TestStartAppACLR2RuntimeUsesTheR2AdmissionRoute(t *testing.T) {
 			}
 			assertAppACLR2RuntimeAdmissionTrace(t, trace, tt.wantTrace...)
 		})
+	}
+}
+
+func TestStartAppACLR2RuntimeDirectlyDelegatesToR2Admission(t *testing.T) {
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "app_acl_r2_runtime_admission.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse runtime admission source: %v", err)
+	}
+
+	var start *ast.FuncDecl
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if ok && function.Name.Name == "StartAppACLR2Runtime" {
+			start = function
+			break
+		}
+	}
+	if start == nil {
+		t.Fatal("StartAppACLR2Runtime declaration is missing")
+	}
+	if start.Body == nil || len(start.Body.List) != 1 {
+		t.Fatalf("StartAppACLR2Runtime body has %d statements, want one direct return", len(start.Body.List))
+	}
+
+	returnStatement, ok := start.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(returnStatement.Results) != 1 {
+		t.Fatalf("StartAppACLR2Runtime statement = %#v, want one return expression", start.Body.List[0])
+	}
+	call, ok := returnStatement.Results[0].(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("StartAppACLR2Runtime return expression = %#v, want call", returnStatement.Results[0])
+	}
+	callee, ok := call.Fun.(*ast.Ident)
+	if !ok || callee.Name != "AdmitAppACLR2Runtime" {
+		t.Fatalf("StartAppACLR2Runtime callee = %#v, want AdmitAppACLR2Runtime", call.Fun)
+	}
+	if len(call.Args) != 2 {
+		t.Fatalf("StartAppACLR2Runtime argument count = %d, want 2", len(call.Args))
+	}
+	for index, want := range []string{"ctx", "db"} {
+		argument, ok := call.Args[index].(*ast.Ident)
+		if !ok || argument.Name != want {
+			t.Fatalf("StartAppACLR2Runtime argument %d = %#v, want %q", index, call.Args[index], want)
+		}
 	}
 }
 
@@ -488,6 +536,68 @@ func TestAppACLR2RuntimeAdmissionRollbackFaultDiscardsConnection(t *testing.T) {
 	assertAppACLR2RuntimeAdmissionConnectionDiscarded(t, conn)
 	if tx.commitCalls != 0 || tx.rollbackCalls != 1 || conn.unlockCalls != 0 {
 		t.Fatalf("rollback-fault cleanup = commit %d rollback %d unlock %d, want 0/1/0", tx.commitCalls, tx.rollbackCalls, conn.unlockCalls)
+	}
+}
+
+func TestAdmitAppACLR2RuntimePropagatesFrozenVerifierErrorsAndCleansUp(t *testing.T) {
+	verifierErr := errors.New("frozen verifier failed")
+	rollbackErr := errors.New("rollback failed")
+	tests := []struct {
+		name        string
+		rollbackErr error
+		wantUnlocks int
+		wantDiscard bool
+	}{
+		{name: "successful rollback releases", wantUnlocks: 1},
+		{name: "rollback failure discards", rollbackErr: rollbackErr, wantDiscard: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := &fakeAppACLR2RuntimeAdmissionFaultTx{rollbackErr: tt.rollbackErr}
+			conn := &fakeAppACLR2RuntimeAdmissionFaultConn{tx: tx, unlockResult: true}
+			trace := make([]string, 0, 2)
+			predicateCalls := 0
+			dependencies := newAppACLR2RuntimeAdmissionTraceDependencies(&trace, AppACLR2StateR1)
+			dependencies.verifyFrozen = func(context.Context, pgx.Tx) (FrozenAppACLR1StateV1, error) {
+				trace = append(trace, "verify-frozen")
+				return FrozenAppACLR1StateV1{}, verifierErr
+			}
+			dependencies.requireDirectRuntime = func(context.Context, pgx.Tx, FrozenAppACLR1StateV1) error {
+				predicateCalls++
+				return nil
+			}
+
+			state, err := admitAppACLR2RuntimeWithDependencies(
+				context.Background(),
+				newAppACLR2RuntimeAdmissionSharedTransitionLockedBegin(func(context.Context) (appACLR2BootstrapReservedConn, error) { return conn, nil }),
+				dependencies,
+			)
+			if state != AppACLR2StateCorrupt {
+				t.Fatalf("runtime admission state = %v, want CORRUPT", state)
+			}
+			if !errors.Is(err, verifierErr) {
+				t.Fatalf("runtime admission verifier error = %v, want wrapped %v", err, verifierErr)
+			}
+			if tt.rollbackErr != nil && errors.Is(err, tt.rollbackErr) {
+				t.Fatalf("runtime admission error = %v, must not join deferred rollback error %v", err, tt.rollbackErr)
+			}
+			if predicateCalls != 0 {
+				t.Fatalf("runtime predicate calls = %d, want 0 after frozen verifier error", predicateCalls)
+			}
+			assertAppACLR2RuntimeAdmissionTrace(t, trace, "classify", "verify-frozen")
+			if tx.commitCalls != 0 || tx.rollbackCalls != 1 {
+				t.Fatalf("verifier-error transaction lifecycle = commit %d rollback %d, want 0/1", tx.commitCalls, tx.rollbackCalls)
+			}
+			if conn.unlockCalls != tt.wantUnlocks {
+				t.Fatalf("verifier-error unlock calls = %d, want %d", conn.unlockCalls, tt.wantUnlocks)
+			}
+			if tt.wantDiscard {
+				assertAppACLR2RuntimeAdmissionConnectionDiscarded(t, conn)
+			} else {
+				assertAppACLR2RuntimeAdmissionConnectionReleased(t, conn)
+			}
+		})
 	}
 }
 
