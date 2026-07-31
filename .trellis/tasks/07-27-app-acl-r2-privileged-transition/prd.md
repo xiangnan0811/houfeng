@@ -28,9 +28,20 @@ as a healthy R1 or R2 deployment.
 - R2 has exactly 53 canonical sources: frozen R1 52 plus isolated `0052`.
   R2 has exactly 206 canonical privilege tuples: frozen R1 204 plus direct
   migrator `SELECT` and runtime `SELECT` on the bootstrap-owned receipt.
-- This correction leaves the receipt/manifest wire, golden vectors, L2
-  three-object ACL contract, M2 SQL/ACL, 53-source vector, 206-tuple contract,
-  and their hashes unchanged.
+- This correction preserves the protocol-2 receipt/manifest wire layout, the
+  task-local domain/L2 golden vectors, the L2 three-object ACL contract, M2
+  SQL/ACL, the 53-source vector, and the 206-tuple contract. It deliberately
+  changes the pgcrypto member literal and the receipt/M2 digest values derived
+  from that literal; a complete receipt or M2 digest is deployment-derived and
+  is not a fixed golden vector.
+- The one pgcrypto member-signature contract is the exact text PostgreSQL emits
+  from `pg_get_function_identity_arguments(oid)`, including emitted `OUT`
+  modes, names, and types. At zero-based fixed-member index 16,
+  `record_platform_internal.pgp_armor_headers` is exactly
+  `text, OUT key text, OUT value text`; the accepted sorted 36-member digest is
+  `57e7ac6a986705d8fa1e5b2260c1836b74dffe1b33bee00d65d1b275284e8196`.
+  The previous input-only row and digest describe only callable input types and
+  are not an alternate receipt format.
 - R2 has three fixed bindings: `center_runtime`, `platform_admin`, and
   `direct_migrator`. R1 magic and parsers stay closed.
 - Direct migrator owns database, APP schemas/R1 objects, `schema_migrations`,
@@ -71,7 +82,8 @@ as a healthy R1 or R2 deployment.
 - Receipt data binds frozen R1/R2 application source hashes and ACL contracts,
   the domain `postgres_system_identifier`, database OID/name,
   bootstrap/direct/runtime/admin facts, and the local pgcrypto
-  extension/member/dependency/owner/ACL baseline.
+  extension/member/dependency/owner/ACL baseline, including each member's exact
+  server-formatted signature rather than an input-only reconstruction.
 - The bootstrap-only live binding is performed only by the direct OID-10
   bootstrap session: before its initial PREPARED commit it calls
   `pg_control_system()` and binds that live identifier with the fresh database
@@ -222,6 +234,11 @@ implementation, CI run, review, or parent acceptance is complete.
 - Partial receipt, non-exact source, mixed M1/M2, missing/changed domain
   identity, altered extension members, and extra/missing receipt grants fail
   closed without repair.
+- There is no dual-digest, input-only compatibility path, receipt rewrite, or
+  migration rollback. `origin/main`/`v0.59.0` contains no R2 release and PR
+  #384 remains Draft, so no published valid R2 receipt must be retained. Any
+  pre-release input-only receipt is rejected and must not be transformed in
+  place; the corrected catalog baseline is established before bootstrap.
 - PREPARED is never a runtime target. There is no rollback command that deletes
   evidence, rewrites receipt/extension state, or restores an old owner.
 - No platform-admin receipt access, external witness, session drain, or legacy
@@ -332,9 +349,12 @@ implementation, CI run, review, or parent acceptance is complete.
   not a Slice 5 or PostgreSQL 16 completion claim.
 - [ ] A PostgreSQL 16 in-transaction catalog preflight proves the allowed
   server/version, pgcrypto extension/member/dependency/owner/ACL baseline, all
-  36 exact member identities, and OID-10 member owners; a count-preserving
-  substitution is rejected. File, path, image, and package provenance remain
-  external supply-chain policy.
+  36 exact server-formatted member signatures, and OID-10 member owners. It
+  requires the zero-based member-16 `pgp_armor_headers` string
+  `text, OUT key text, OUT value text` and identity-set digest
+  `57e7ac6a986705d8fa1e5b2260c1836b74dffe1b33bee00d65d1b275284e8196`;
+  input-only, result-shape, and any count-preserving substitutions reject.
+  File, path, image, and package provenance remain external supply-chain policy.
 - [ ] PostgreSQL 16 tests cover wrong DSN privilege, identity, server/version,
   bootstrap OID, membership, extension member/dependency, ownership, receipt
   ACL, domain, application source, state, and M2 catalog failure without

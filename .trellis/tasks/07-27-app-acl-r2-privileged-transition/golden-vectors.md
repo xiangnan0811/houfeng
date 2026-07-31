@@ -12,6 +12,17 @@ is over the raw decoded `body_hex` bytes only. The domain fixture is a fixed
 codec fixture, not a claim that a test process is connected to that database.
 Live domain and catalog equality remain a separate PostgreSQL responsibility.
 
+This corpus deliberately contains no pgcrypto identity-set, complete receipt,
+or M2-manifest digest vector. The pgcrypto literal is the full PostgreSQL
+formatter contract in `design.md`: zero-based member index 16 is
+`record_platform_internal.pgp_armor_headers|text, OUT key text, OUT value text`
+and its 36-member digest is
+`57e7ac6a986705d8fa1e5b2260c1836b74dffe1b33bee00d65d1b275284e8196`.
+Receipt and M2 digests are runtime-derived from that contract plus local
+catalog/domain/OID facts and, for M2, `recorded_at`; they must not be fabricated
+as fixed vectors here. Updating the pgcrypto contract therefore leaves every
+literal `domain_body` and `l2_acl_body` byte and digest below unchanged.
+
 ## Literal Acceptance Rule
 
 Receipt unit tests must load these literal expected `body_hex` and `sha256`
@@ -115,8 +126,9 @@ Exact semantic input, in canonical record order:
 | assertion 2 | owner control role `1`, function, `record_platform_internal` namespace |
 
 The function identity strings deliberately include their schemas because the
-grammar defines a function identity as the exact server spelling
-`<schema>.<proname>(<pg_get_function_identity_arguments>)`; the separate
+grammar defines a function identity as the exact server-emitted spelling
+`<schema>.<proname>(<pg_get_function_identity_arguments>)`, including emitted
+`OUT` terms when present; these two helpers have none. The separate
 object/trigger schema field remains required by the record grammar. The two
 objects are sorted table first, then the two functions by raw identity bytes:
 `assert` before `reject`. The two table grants are similarly sorted by

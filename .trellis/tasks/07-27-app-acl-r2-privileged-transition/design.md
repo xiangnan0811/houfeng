@@ -229,10 +229,12 @@ dependency/identity/owner/ACL facts below. This is intentionally a catalog
 definition, not a claim about an extension file, container artifact, or package.
 
 The sole accepted sorted `identity_set_sha256` is
-c544baa39772e3986e5d2c9202ae74b0027815e7021ab7d891f08d878d3e87f7 over
+57e7ac6a986705d8fa1e5b2260c1836b74dffe1b33bee00d65d1b275284e8196 over
 raw-byte-sorted UTF-8 lines
 `record_platform_internal.<proname>|pg_get_function_identity_arguments(oid)`
-followed by LF. OUT arguments are not identity arguments. Unsorted enumeration
+followed by LF. This is PostgreSQL's exact emitted catalog-signature text, not
+an attempted reconstruction of callable input arity: every `OUT` mode, name,
+and type emitted by the formatter is bound byte-for-byte. Unsorted enumeration
 digests are not receipt values and never satisfy an acceptance rule. This list,
 not its cardinality, is normative:
 
@@ -252,7 +254,7 @@ not its cardinality, is normative:
     record_platform_internal.gen_salt|text, integer
     record_platform_internal.hmac|bytea, bytea, text
     record_platform_internal.hmac|text, text, text
-    record_platform_internal.pgp_armor_headers|text
+    record_platform_internal.pgp_armor_headers|text, OUT key text, OUT value text
     record_platform_internal.pgp_key_id|bytea
     record_platform_internal.pgp_pub_decrypt|bytea, bytea
     record_platform_internal.pgp_pub_decrypt|bytea, bytea, text
@@ -272,6 +274,22 @@ not its cardinality, is normative:
     record_platform_internal.pgp_sym_encrypt|text, text, text
     record_platform_internal.pgp_sym_encrypt_bytea|bytea, text
     record_platform_internal.pgp_sym_encrypt_bytea|bytea, text, text
+
+All three accepted images, `postgres:16.0`, `postgres:16.6`, and
+`postgres:16.12`, report pgcrypto `1.3`, the same 36 member rows, and the same
+digest above. For the zero-based member index 16,
+`pgp_armor_headers` has `proargtypes = text`, `pronargs = 1`,
+`proallargtypes = {25,25,25}`, and `proargmodes = {i,o,o}`, while
+`proargnames = {"",key,value}` and
+`pg_get_function_identity_arguments(oid)` emits exactly
+`text, OUT key text, OUT value text`. `proargtypes` is evidence of callable
+input arity, but it is not the stored member-signature string.
+
+The rejected input-only alternative replaces that row with `text`. It is
+rejected because it conflicts with the production reader and drops the record
+result shape. A version-specific allowlist is also rejected: all three allowed
+PostgreSQL 16 images have the same exact row, so multiple accepted digests would
+weaken the immutable receipt without adding compatibility.
 
 Bootstrap persists the allowed `server_version_num`, `server_version`,
 `extversion = 1.3`, extension/schema/OID/owner/dependency facts,
@@ -659,9 +677,11 @@ a 4 MiB maximum. All nonempty text is valid NFC UTF-8, contains no NUL or C0/
 C1 control byte, and is compared as raw UTF-8 bytes. A PostgreSQL role name is
 the lower-case unquoted identifier `[a-z_][a-z0-9_]{0,62}`. A bare catalog name
 uses the same rule. A function identity is the exact server spelling
-`<schema>.<proname>(<pg_get_function_identity_arguments>)`; pgcrypto members
-specifically use `record_platform_internal`, and identities are not
-whitespace-normalized. Every decoder rejects an invalid magic/version, short
+`<schema>.<proname>(<pg_get_function_identity_arguments>)`; when that server
+formatter emits `OUT` terms, those exact bytes are retained rather than reduced
+to `proargtypes`. pgcrypto members specifically use
+`record_platform_internal`, and identities are not whitespace-normalized. Every
+decoder rejects an invalid magic/version, short
 field, oversized field/body, invalid text, unknown enum, noncanonical order,
 duplicate, inconsistent nested digest, trailing byte, or an input whose
 re-encoding differs byte-for-byte.
@@ -756,8 +776,9 @@ identity `public`, USAGE); table (schema `public`, empty column, bare identity,
 SELECT/INSERT/UPDATE/DELETE); view (same shape, SELECT); sequence (same shape,
 USAGE/SELECT); and function (`schema = column = ""`, exact server function
 identity, EXECUTE). A function identity is the exact server spelling
-`<schema>.<proname>(<pg_get_function_identity_arguments>)`, and pgcrypto
-members specifically use `record_platform_internal`; it is not
+`<schema>.<proname>(<pg_get_function_identity_arguments>)`, including any
+`OUT` text PostgreSQL emits; pgcrypto members specifically use
+`record_platform_internal`; it is not
 whitespace-normalized. Object-class tag 7, every unlisted shape, and every
 unknown subject/class/privilege tag reject. The exact tuple membership is the
 frozen R1 204 semantic tuples mapped to subject tags 1/3 plus only these two
@@ -885,6 +906,14 @@ nonnegative UTC Unix microseconds. `m2_digest = SHA-256` over this full
 preimage, excluding the digest column itself. Frozen M1 keeps its original V1
 preimage and is never parsed by an R2 decoder as an M2 value.
 
+Correcting the pgcrypto member signature changes the canonical L2 receipt body
+at both `identity_set_sha256` and the member-16 `identity_arguments` string, so
+its SHA-256 receipt digest changes. That receipt digest is an M2 preimage field
+above, so a finalized M2 digest changes in the same deployment. Neither value
+is a stable vector: receipt fields include local role/OID/domain facts and M2
+also includes `recorded_at`. The protocol-2 field order and all fixed nested
+R1/R2 source, privilege, domain, and control-ACL bytes remain unchanged.
+
 ### Immutable Receipt Canonical Body
 
 The receipt body's SHA-256 is the stored immutable receipt digest. Its full
@@ -927,7 +956,9 @@ are LOGIN/NOINHERIT/non-superuser, platform admin is non-superuser, and every
 role has an empty recursive membership closure. Members are strict ascending
 OID order, all have schema `record_platform_internal`, owner OID 10/name equal
 bootstrap, and their `record_platform_internal.proname|identity_arguments` set
-is exactly the normative 36-member list above; `identity_set_sha256` is the
+is exactly the normative 36-member list above. `identity_arguments` is the
+unmodified `pg_get_function_identity_arguments(oid)` output, including the
+`pgp_armor_headers` `OUT key`/`OUT value` terms; `identity_set_sha256` is the
 sole accepted SHA-256 of its raw-byte-sorted UTF-8 lines with a terminal LF per
 line. The extension is `pgcrypto` v1.3 in `record_platform_internal`, owned by
 direct migrator. The helper list is strict `(schema, identity)` order and is
@@ -947,6 +978,13 @@ post-bootstrap fresh catalog continuity facts. Bootstrap-only live binding is a
 separate OID-10 proof. The security claim remains local catalog continuity only,
 never session drain, physical-clone detection, restore detection, or liveness
 attestation.
+
+There is no input-only receipt compatibility mode. Before this R2 work is
+released, the corrected constant and catalog fixture replace the unreleased
+input-only expectation; after bootstrap, parser and continuity checks admit
+only the full-formatter form. This is not a protocol bump and does not alter
+the frozen `0051` checksum or isolated `0052` source bytes/checksum: neither
+SQL source serializes a fixed pgcrypto identity digest.
 
 ## Shared State Classifier
 

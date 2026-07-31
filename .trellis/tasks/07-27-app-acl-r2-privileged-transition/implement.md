@@ -698,6 +698,72 @@ go test ./internal/center/store/migrate -run 'AppACLR2(State|RuntimeAdmission|St
 
 ### Slice 7: PostgreSQL 16 Evidence And Completion Reviews
 
+#### Immutable pgcrypto receipt-contract repair (must precede Slice 7)
+
+**Single contract:** retain the production reader's exact
+`pg_get_function_identity_arguments(oid)` output. The zero-based member index
+16 is exactly `record_platform_internal.pgp_armor_headers|text, OUT key text,
+OUT value text`, and the sorted 36-member digest is
+`57e7ac6a986705d8fa1e5b2260c1836b74dffe1b33bee00d65d1b275284e8196`.
+Do not derive a different member string from `proargtypes`: it records the
+callable input (`text`) but drops the formatter's bound record result shape.
+
+**Rejected alternatives:** changing the reader to `oidvectortypes(proargtypes)`
+and retaining the prior input-only digest is rejected; it conflicts with the
+exact server formatter and permits result shape drift. A version-specific digest
+allowlist is rejected because
+`postgres:16.0`, `postgres:16.6`, and `postgres:16.12` all have pgcrypto `1.3`,
+the same 36 rows, and the same full-formatter digest.
+
+**Ownership:** before the existing Slice 7 integration/runner/CI work, modify
+only `internal/center/store/migrate/app_acl_r2_receipt.go`,
+`internal/center/store/migrate/app_acl_r2_receipt_postgres.go`,
+`internal/center/store/migrate/app_acl_r2_receipt_test.go`, and
+`internal/center/store/migrate/app_acl_r2_receipt_postgres_test.go`.
+The correction retains the reader and changes its fixed member-16 literal and
+fixed digest, together with direct tests. It must not change `0051`, isolated
+`0052`, the migration/source checksums, protocol number, L2/domain golden
+vectors, SQL, ACLs, runner, workflow, or any frozen R1 surface.
+
+**RED then GREEN:** first prove the old fixed input-only catalog expectation
+rejects the real `pgp_armor_headers` formatter row in each allowed image. The
+static catalog-reader test must assert
+`pg_get_function_identity_arguments(procedure.oid)`, reject an input-only
+`oidvectortypes(procedure.proargtypes)` replacement, and use the exact full
+member-16 fixture. The member validator must reject both the old input-only
+row/digest and equal-cardinality substitutions, including altered `OUT` names,
+modes, or types. Then update only the fixed member/digest expectations and
+watch those tests turn green. The real PG16 coverage must independently assert
+the full 36-member list/digest and both negative forms in
+`postgres:16.0`, `postgres:16.6`, and `postgres:16.12`.
+
+**Receipt and compatibility boundary:** changing this literal changes the
+receipt body and receipt SHA-256; because M2 serializes `receipt_digest`, it
+also changes the deployment's M2 digest. These are runtime-derived values, not
+new literal golden vectors. No released R2 receipt exists on `origin/main` /
+`v0.59.0`, and PR #384 is Draft, so do not introduce a dual parser, receipt
+rewrite, protocol bump, or migration checksum bump. An input-only pre-release
+receipt fails closed. The future implementation must prove unchanged
+`sha256sum` values for `db/migrations/0051_create_record_platform_foundation.sql`
+and `db/appaclr2/migrations/0052_app_acl_r2_privileged_transition.sql`.
+
+**Order:** land this contract correction with its focused unit tests and local
+Go verification first. Then land the existing Slice 7 integration test, strict
+runner, and three-image CI matrix on the corrected contract; only afterward may
+controller-owned push/CI/required-check work begin. This planning entry records
+no RED/GREEN execution, Slice 7 completion, R2 completion, Child 1, PF-AC, or
+parent completion.
+
+After the future GREEN edit, run the focused receipt selectors, affected-package
+tests, `go vet ./internal/center/store/migrate`, empty `gofmt -d` for the four
+owned Go files, and `git diff --check`; then run
+`env GOTMPDIR=/home/murray/.codex GOFLAGS=-p=1 make verify-go`. Exercise each
+real image through the strict later Slice 7 entry point:
+`HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.0 scripts/test-record-platform-integration.sh pg16-catalog -- go test -json ./internal/center/store/migrate -run '^TestPostgresIntegrationAppACLR2$' -count=1`,
+with the same command for `postgres:16.6` and `postgres:16.12`. The RED result
+must be observed before changing the fixed constant; no planning-only result is
+reported as GREEN.
+
 **Ownership:** Create
 `internal/center/store/migrate/app_acl_r2_postgres_integration_test.go`; modify
 `scripts/test-record-platform-integration.sh` only to add the strict
@@ -768,9 +834,13 @@ job must be executable from a fresh runner: `runs-on: ubuntu-latest`, then
   `CORRUPT` must not be accepted as an evidence verdict.
   The PG16
   catalog matrix must assert allowed server/version, `pgcrypto` v1.3 catalog
-  facts, each of the 36 `record_platform_internal` identity/identity-argument
-  members, dependency/ACL baseline, direct-migrator extension ownership, OID-10
-  member ownership, and rejection of an equal-cardinality substitution. It
+  facts, each of the 36 exact server-formatted
+  `record_platform_internal` member signatures, dependency/ACL baseline,
+  direct-migrator extension ownership, OID-10 member ownership, and rejection
+  of an equal-cardinality substitution. It requires the zero-based member-16
+  `pgp_armor_headers` value `text, OUT key text, OUT value text` and digest
+  `57e7ac6a986705d8fa1e5b2260c1836b74dffe1b33bee00d65d1b275284e8196`, and
+  rejects the input-only `text` form as well as result-shape substitutions. It
   makes no raw server-file or artifact-provenance assertion. The
   `pg16-catalog` runner mode accepts only `postgres:16.0`, `postgres:16.6`, or
   `postgres:16.12` through `HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE`; unset,
