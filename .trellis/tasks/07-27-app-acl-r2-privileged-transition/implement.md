@@ -51,9 +51,10 @@ Resolve any finding and repeat both reviews in that order before admitting Slice
 This gate was satisfied before Slice 3 implementation began. Slice 3 has now
 also passed its own ordered specification and quality reviews recorded below;
 Slice 4 is closed only by the explicit reviewed governance exception recorded
-in its evidence note below, and Slice 5 is the next admitted slice. This closes
-only the already-completed Slice 4 gate; it does not claim chronological RED
-proof, Child 1 delivery, or delivery of any parent task. Slices 5-7 remain open.
+in its evidence note below, and Slice 5 was then the next admitted slice. Slice
+6 is closed by the evidence below; Slice 7 is the next admitted slice. This
+does not claim chronological RED proof, Child 1 delivery, or delivery of any
+parent task. Slice 7 remains open.
 
 ### Slice 1: Remove The Draft Atomically
 
@@ -613,7 +614,7 @@ paired PREPARED-classification-only assertions. No file here edits
 route, or generic `migrate --scope app`. There is no
 `app_acl_r2_dispatch.go`.
 
-- [ ] RED: frozen V1 parser/reader/converger and generic app migration receive
+- [x] RED: frozen V1 parser/reader/converger and generic app migration receive
   no R2 bytes or dispatch dependency; `AdmitAppACLR1OnlyRuntime` rejects every
   non-R1 state; `AdmitAppACLR2Runtime` and `StartAppACLR2Runtime` accept exact
   R1 as R1, reject PREPARED/CORRUPT, and admit R2 only after one locked
@@ -629,7 +630,7 @@ route, or generic `migrate --scope app`. There is no
   reader authority remains exclusive to Slice 7. The mismatch rows use a test
   identity fixture, never `SET ROLE`, membership, ownership, or credential
   handoff.
-- [ ] GREEN: implement only the new R2 admission-wrapper/startup APIs using the
+- [x] GREEN: implement only the new R2 admission-wrapper/startup APIs using the
   prebuilt verifier, runtime predicate, and shared constrained classifier;
   never add a runtime-private classifier/predicate, privilege, helper, or DSN.
   Classification and exact R1 state verification occur in the same locked
@@ -645,11 +646,55 @@ route, or generic `migrate --scope app`. There is no
   `AdmitAppACLRuntime`, and performs no R2 payload, receipt, or manifest
   parsing or admission. Preserve all V1 serialization and entry-point behavior
   byte-for-byte.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 go test ./internal/center/store/migrate -run 'AppACLR2(State|RuntimeAdmission|Startup)|AppACLRuntimeAdmission|Canonical.*V1' -count=1
 ```
+
+### Slice 6 Evidence Note — 2026-07-31
+
+- Closed local delivery-candidate chain: production
+  `518b3dfe571ba9329fe4aedf51fceb0378f95249`; cleanup/fault proof
+  `8ea72a30dee9f9153447af0ba0cfdbe158018151`; physical lock-identity proof
+  `9a607d0807b53823b6f8c00867e8f199cc91ab27`; frozen-verifier plus public
+  `StartAppACLR2Runtime` AST proof
+  `a6a2fb68bf17caee289c9569536666dfba7ecedf`; and final code-spec alignment
+  `cc59844fecd5ce96759983cf9255b65279b66e20`. This governance commit starts
+  from the independently reviewed `cc59844f` baseline.
+- Authoritative contracts are unchanged: R1
+  `503d58670dc790c4b852bfb58cf93d2b816c1ce956958567dc605cb28d5cd23f`
+  (52 sources / 204 tuples); R2
+  `23f79c60dcede45a42aae82da5a9de0d3d650d7eef64dbfd7ce96c6dd5d95fff`
+  (53 sources / 206 tuples); canonical 53-source digest
+  `1d9dc20e71e9f319f8b1cef4b22f9dc92051a88dc9cb8a892b69494658c44dd3`.
+- Review trail: initial quality `019fb66e...` FAIL was closed by
+  `019fb68e...` PASS; specification `019fb6a4...` FAIL was adjudicated by
+  `019fb6b2...` and repaired in `019fb6ba...`; final combined review
+  `019fb6c8-df27-7091-8c6b-08133de76c6d` PASS reported
+  Critical/Important/Minor = 0.
+- Three mutation RED checks all failed and were exactly restored: lock seed
+  `0 -> 1`; frozen-verifier error swallowing; and replacement of the public
+  `StartAppACLR2Runtime` delegate.
+- Fresh PASS gates on the reviewed code: (1) required Slice 6 focused selector
+  `go test ./internal/center/store/migrate -run 'AppACLR2(State|RuntimeAdmission|Startup)|AppACLRuntimeAdmission|Canonical.*V1' -count=1`;
+  (2) focused verifier-error/public-Start AST selector
+  `go test ./internal/center/store/migrate -run 'TestAdmitAppACLR2RuntimePropagatesFrozenVerifierErrorsAndCleansUp|TestStartAppACLR2RuntimeDirectlyDelegatesToR2Admission' -count=1`;
+  (3) race selector
+  `go test ./internal/center/store/migrate -run '^TestAdmitAppACLR2RuntimeRejectsR1ToPreparedRace$' -count=1`;
+  (4) full `go test ./internal/center/store/migrate -count=1`; (5)
+  `go vet ./internal/center/store/migrate`; (6) empty
+  `gofmt -d internal/center/store/migrate/app_acl_r2_runtime_admission.go internal/center/store/migrate/app_acl_r2_runtime_admission_test.go`; and (7)
+  `git diff --check`. Immediately before this documentation edit, status was
+  clean and both Slice 6 code blobs equaled their `cc59844f` blobs.
+- Remote boundary: PR #384 is Draft/Open/MERGEABLE, base `main@3a7f31e`, with
+  remote Slice 5 head `codex/app-acl-r2-slice5-finalizer@40c7c8c`; its existing
+  green go/web/web-browser/docker-image checks are Slice 5-only and are not
+  Slice 6 CI. Controller push, new Slice 6 CI, PR verification, and merge are
+  still pending.
+- Boundary: no PostgreSQL 16 Slice 7 reader-authority conclusion; no
+  remote/CI/merge conclusion; and no R2 microtask, Child 1, PF-AC, or parent
+  completion. Slice 7 and all of its checkboxes remain unclaimed.
 
 ### Slice 7: PostgreSQL 16 Evidence And Completion Reviews
 

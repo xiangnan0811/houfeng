@@ -149,10 +149,12 @@ as a healthy R1 or R2 deployment.
   drift but does not claim to confine a hostile direct owner.
 - No change to frozen R1 codecs, APIs, parsers, runners, 52-source contract,
   or 204-tuple compiler.
-- Planning completed before task activation. Implementation is authorized and
-  active on the non-main `codex/app-acl-r2-slice5-finalizer`
-  integration branch. This does not change the parent task's status or
-  authorize direct `main`/`master` work.
+- Planning completed before task activation. The Slice 6 local-gate delivery
+  candidate is authorized on the non-main
+  `codex/app-acl-r2-slice6-runtime-contract-fix` integration branch at
+  `/home/murray/.codex/worktrees/166c/houfeng`. Remote push, a new Slice 6
+  PR/CI run, and merge verification remain controller-owned. This does not
+  change the parent task's status or authorize direct `main`/`master` work.
 
 ## Acceptance Criteria
 
@@ -294,6 +296,45 @@ as a healthy R1 or R2 deployment.
 - Boundary: this note does not check any Slice 6/7, PG16 integration/image
   lane, parent/R2 total acceptance, Child 1, or PF-AC criterion. Persisted
   receipt identity is not a claim of fresh physical identity.
+
+### Slice 6 Evidence Note — 2026-07-31
+
+- Local delivery-candidate chain: `518b3dfe571ba9329fe4aedf51fceb0378f95249`
+  is the production admission/startup implementation;
+  `8ea72a30dee9f9153447af0ba0cfdbe158018151` adds cleanup/fault proof;
+  `9a607d0807b53823b6f8c00867e8f199cc91ab27` proves the physical lock
+  identity; `a6a2fb68bf17caee289c9569536666dfba7ecedf` proves frozen-verifier
+  propagation and the public `StartAppACLR2Runtime` AST binding; and
+  `cc59844fecd5ce96759983cf9255b65279b66e20` is the final code-spec
+  alignment. The local candidate began from that reviewed `cc59844f` commit.
+- Authoritative frozen contracts remain unchanged: R1 SQL digest
+  `503d58670dc790c4b852bfb58cf93d2b816c1ce956958567dc605cb28d5cd23f`
+  (52 sources / 204 tuples); R2 SQL digest
+  `23f79c60dcede45a42aae82da5a9de0d3d650d7eef64dbfd7ce96c6dd5d95fff`
+  (53 sources / 206 tuples); canonical 53-source digest
+  `1d9dc20e71e9f319f8b1cef4b22f9dc92051a88dc9cb8a892b69494658c44dd3`.
+- Review trail: initial quality review `019fb66e...` failed and was closed by
+  `019fb68e...` PASS. Specification review `019fb6a4...` failed, was
+  adjudicated by `019fb6b2...`, repaired in `019fb6ba...`, and the final
+  combined review `019fb6c8-df27-7091-8c6b-08133de76c6d` returned PASS with
+  Critical/Important/Minor = 0.
+- Three mutation RED proofs all failed as intended and were precisely restored:
+  advisory-lock seed `0 -> 1`; a swallowed frozen-verifier error; and a
+  replaced public `StartAppACLR2Runtime` delegate.
+- Fresh local PASS gates on the reviewed code baseline: the required Slice 6
+  focused selector; the focused frozen-verifier-error plus public-Start AST
+  selector; the dedicated R1-to-PREPARED race selector; full
+  `./internal/center/store/migrate` tests; `go vet`; empty `gofmt -d`; and
+  `git diff --check`. Immediately before this evidence edit, `git status` was
+  clean and both Slice 6 code blobs equaled their `cc59844f` blobs.
+- Remote boundary: PR #384 is Draft/Open/MERGEABLE against `main@3a7f31e`
+  with remote Slice 5 head `codex/app-acl-r2-slice5-finalizer@40c7c8c`. Its
+  green go/web/web-browser/docker-image checks apply only to that Slice 5 head,
+  not to Slice 6. Slice 6 remote push, new CI, PR verification, and merge
+  remain for the controller.
+- This records no PostgreSQL 16 Slice 7 reader-authority conclusion, no
+  remote/CI/merge conclusion, and no R2 microtask, Child 1, PF-AC, or parent
+  completion.
 
 ## Parent Dependency
 

@@ -12,15 +12,15 @@
   "assignee": "xiangnan-arch",
   "createdAt": "2026-07-27",
   "completedAt": null,
-  "branch": "codex/app-acl-r2-slice5-finalizer",
+  "branch": "codex/app-acl-r2-slice6-runtime-contract-fix",
   "base_branch": "main",
-  "worktree_path": "/home/murray/code/houfeng/.worktree/app-acl-r2-slice5-finalizer",
+  "worktree_path": "/home/murray/.codex/worktrees/166c/houfeng",
   "commit": null,
   "pr_url": null,
   "subtasks": [],
   "children": [],
   "parent": "07-14-vps-records-platform-foundation",
   "relatedFiles": [],
-  "notes": "Planning artifacts were completed and reviewed before task activation in e55f8fe4. Implementation remains authorized and active on the non-main codex/app-acl-r2-slice5-finalizer branch; execution location was corrected on 2026-07-29. 2026-07-27 review correction: M2 is a new direct-migrator-owned R2 relation pair linked read-only to frozen M1; 0051 V1 relations, R1 admission APIs, and pgcrypto ownership are not changed. No direct main/master work is authorized. Audit: user explicitly delegated ongoing implementation authorization on 2026-07-26.",
+  "notes": "Planning artifacts were completed and reviewed before task activation in e55f8fe4. Slice 6 has passed its local gates and is a delivery candidate on non-main codex/app-acl-r2-slice6-runtime-contract-fix at /home/murray/.codex/worktrees/166c/houfeng; remote push, new Slice 6 CI, PR verification, and merge verification remain controller-owned. PR #384 is Draft/Open/MERGEABLE at main@3a7f31e with remote Slice 5 head codex/app-acl-r2-slice5-finalizer@40c7c8c; its green go/web/web-browser/docker-image checks are not Slice 6 CI. 2026-07-27 review correction: M2 is a new direct-migrator-owned R2 relation pair linked read-only to frozen M1; 0051 V1 relations, R1 admission APIs, and pgcrypto ownership are not changed. No direct main/master work is authorized. Audit: user explicitly delegated ongoing implementation authorization on 2026-07-26.",
   "meta": {}
 }
