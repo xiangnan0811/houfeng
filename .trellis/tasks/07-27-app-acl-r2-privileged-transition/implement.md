@@ -847,153 +847,87 @@ are exactly `record-platform-pg16-catalog (postgres:16.0)`,
 `record-platform-pg16-catalog (postgres:16.6)`, and
 `record-platform-pg16-catalog (postgres:16.12)`. This workflow edit does not
 itself make a GitHub required check. After a newly pushed Slice 7 head has all
-three successful contexts, the controller first obtains an auditable external
-exclusive required-checks mutation lease covering every GitHub UI, owner/admin
-token, GitHub App, and automation writer, and holds it through post-PATCH
-readback. GitHub ETag plus `If-None-Match` is a conditional GET validator, not
-a PATCH compare-and-swap: this endpoint has no supported conditional unsafe
-write. Without that lease, return `NEEDS_CONTROLLER` and do not PATCH.
+three successful contexts, the controller may take exactly one create-only
+additive action: POST the uniquely named repository ruleset
+`app-acl-r2-pg16-catalog-required-v1`. It targets only `refs/heads/main`,
+has no bypass actors, and adds exactly the three app-bound PG16 contexts.
+Applicable rulesets aggregate with existing branch protection, so this creates
+a merge gate without replacing existing checks.
+
+Before that POST, the controller verifies repository admin permission, reads all
+repository/parent rulesets with `includes_parents=true`, relevant detailed
+ruleset records, `rules/branches/main`, canonical full
+`branches/main/protection`, and all check-run pages for the same new `$HEAD`.
+Any active same-name, same-scope, or same-three-check ruleset is a duplicate or
+concurrent state: return `NEEDS_CONTROLLER` without creating, updating,
+deleting, disabling, or retrying anything.
 
 ```bash
 set -euo pipefail
-HEAD=$(git rev-parse HEAD)
-endpoint="repos/$OWNER/$REPO/branches/main/protection/required_status_checks"
-if [ -z "${REQUIRED_CHECKS_MUTATION_LEASE_ID:-}" ]; then
-  echo "NEEDS_CONTROLLER: required-check mutation lease is absent" >&2
-  exit 1
-fi
-gh api "repos/$OWNER/$REPO/branches/main/protection" \
-  --jq '{enforce_admins, required_conversation_resolution}'
+gh api "repos/$OWNER/$REPO" --jq '.permissions.admin'
+gh api --paginate --slurp \
+  "repos/$OWNER/$REPO/rulesets?includes_parents=true"
+gh api "repos/$OWNER/$REPO/rules/branches/main"
+gh api "repos/$OWNER/$REPO/branches/main/protection" | jq -cS .
+gh api --paginate --slurp \
+  "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100"
+```
 
-unchanged=0
-for attempt in 1 2 3; do
-  snapshot=$(mktemp)
-  gh api --include "$endpoint" >"$snapshot"
-  required_etag=$(awk 'BEGIN { IGNORECASE=1 } /^etag:/{sub(/^[^:]*: /, ""); print; exit}' "$snapshot")
-  required_status_checks=$(awk 'BEGIN { body=0 } /^\r?$/{body=1; next} body{print}' "$snapshot")
-  rm -f "$snapshot"
-  test -n "$required_etag"
-  check_run_pages=$(gh api --paginate --slurp \
-    "repos/$OWNER/$REPO/commits/$HEAD/check-runs?per_page=100")
-  probe=$(mktemp)
-  set +e
-  gh api --include -H "If-None-Match: $required_etag" "$endpoint" >"$probe" 2>/dev/null
-  set -e
-  case "$(awk 'NR == 1 { print $2; exit }' "$probe")" in
-    304) rm -f "$probe"; unchanged=1; break ;;
-    200) rm -f "$probe"; continue ;;
-    *) rm -f "$probe"
-       echo "NEEDS_CONTROLLER: conditional required-check GET failed" >&2
-       exit 1 ;;
-  esac
-done
-test "$unchanged" -eq 1 || {
-  echo "NEEDS_CONTROLLER: required checks changed during all retries" >&2
-  exit 1
+For each literal context, require exactly one `completed`/`success` check-run
+with `.head_sha == $HEAD` and a numeric `.app.id`; map that exact value to
+the ruleset field `integration_id`. Missing, duplicate, unsuccessful,
+wrong-head, or nonnumeric evidence is `NEEDS_CONTROLLER` before POST. Build
+only the one active branch ruleset payload below. The example numeric value is a
+shape placeholder, never a hard-coded integration ID.
+
+```json
+{
+  "name": "app-acl-r2-pg16-catalog-required-v1",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/main"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "do_not_enforce_on_create": false,
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          {"context": "record-platform-pg16-catalog (postgres:16.0)", "integration_id": 12345},
+          {"context": "record-platform-pg16-catalog (postgres:16.6)", "integration_id": 12345},
+          {"context": "record-platform-pg16-catalog (postgres:16.12)", "integration_id": 12345}
+        ]
+      }
+    }
+  ]
 }
 ```
 
-Only after a 304 conditional read may the controller update `main` branch
-protection. It requires `required_status_checks.strict == true`, preserves every
-fresh `required_status_checks.checks[]` `{context, app_id}` pair, and derives
-exactly one successful `$HEAD` check-run with numeric `app.id` for each new
-context. Existing `{context, app_id:null}` is valid: retain it during the
-merge and serialize it as `{context}` inside PATCH `checks[]`; preserve every
-numeric binding unchanged. A 200 conditional read, changed ETag, or changed
-canonical checks state restarts at the first GET and re-merges. PATCH only the
-deduplicated `{strict: true, checks: [...]}` body to
-`repos/$OWNER/$REPO/branches/main/protection/required_status_checks` via
-`--input -`; never send deprecated top-level `contexts`, hard-code current
-names, or PATCH the whole protection object. Post-PATCH readback must be an
-exact superset of the merge before releasing the lease. Any malformed/stale/
-ambiguous/failing result is `NEEDS_CONTROLLER` with no replay from an old
-snapshot. That scoped endpoint leaves `enforce_admins` and required conversation
-resolution unchanged. This Slice 7 planning update neither performs that
-protected-branch API call nor asserts that a new head, review, CI result, or
-branch-protection update exists.
+Send that body once to `POST repos/$OWNER/$REPO/rulesets`. Only an
+unambiguous 201 permits a fresh GET of the returned ID, all applicable rulesets,
+and `rules/branches/main`. Those readbacks must prove exactly one active
+matching ruleset with the same ID/name, empty bypass list, exact main ref scope,
+one required-status-check rule, and the three exact
+`{context, integration_id}` pairs. The main active evaluation must identify
+that created ruleset; failure to prove it is `NEEDS_CONTROLLER`.
 
-```bash
-set -euo pipefail
-merged=$(jq -cen \
-  --argjson required "$required_status_checks" \
-  --argjson pages "$check_run_pages" \
-  --arg head "$HEAD" '
-    def numeric_app_id:
-      ((.app_id | type) == "number")
-      and (.app_id == (.app_id | floor));
-    def existing_check:
-      if type == "object"
-        and ((.context | type) == "string")
-        and ((.context | length) > 0)
-        and has("app_id")
-        and ((.app_id == null) or numeric_app_id)
-      then {context, app_id}
-      else error("invalid existing required check")
-      end;
-    [
-      "record-platform-pg16-catalog (postgres:16.0)",
-      "record-platform-pg16-catalog (postgres:16.6)",
-      "record-platform-pg16-catalog (postgres:16.12)"
-    ] as $targets
-    | ($required.checks
-       | if type == "array" then map(existing_check)
-         else error("required_status_checks.checks is missing") end) as $existing
-    | if $required.strict == true then . else error("strict must remain true") end
-    | [ $pages[] | (.check_runs
-        | if type == "array" then . else error("check_runs missing") end)[]
-        | {context: .name, app_id: .app.id, head_sha, status, conclusion}
-      ] as $runs
-    | [ $targets[] as $target
-        | [ $runs[]
-            | select(.context == $target and .head_sha == $head
-                     and .status == "completed" and .conclusion == "success"
-                     and numeric_app_id)
-          ] as $matches
-        | if ($matches | length) == 1
-          then $matches[0] | {context, app_id}
-          else error("expected one successful app-bound check-run for " + $target)
-          end
-      ] as $slice7
-    | {strict: true,
-       checks: (($existing + $slice7) | unique_by([.context, .app_id]))}
-  ')
-payload=$(jq -ce '
-  def request_check:
-    if .app_id == null then {context} else {context, app_id} end;
-  {strict, checks: (.checks | map(request_check))}
-' <<<"$merged")
-patch_status=0
-printf '%s\n' "$payload" | gh api --method PATCH "$endpoint" --input - ||
-  patch_status=$?
-post_status_checks=$(gh api "$endpoint")
-if ! jq -e --argjson expected "$merged" '
-  def numeric_app_id:
-    ((.app_id | type) == "number")
-    and (.app_id == (.app_id | floor));
-  def existing_check:
-    if type == "object"
-      and ((.context | type) == "string")
-      and ((.context | length) > 0)
-      and has("app_id")
-      and ((.app_id == null) or numeric_app_id)
-    then {context, app_id}
-    else error("invalid post-PATCH required check")
-    end;
-  (if type == "object" and .strict == true and (.checks | type) == "array"
-   then {strict: true, checks: (.checks | map(existing_check))}
-   else error("invalid post-PATCH required-check state")
-   end) as $actual
-  | ($expected.strict == true)
-    and (($expected.checks - $actual.checks) == [])
-' <<<"$post_status_checks" >/dev/null; then
-  echo "NEEDS_CONTROLLER: PATCH readback lost or rewrote a required check" >&2
-  exit 1
-fi
-test "$patch_status" -eq 0 || {
-  echo "NEEDS_CONTROLLER: PATCH transport result was ambiguous; do not replay" >&2
-  exit 1
-}
-```
+Finally re-GET full `branches/main/protection` and require its canonical body
+to equal the pre-create body. Non-201/ambiguous/validation/duplicate/readback
+failure or changed protection is `NEEDS_CONTROLLER`; never retry the POST or
+update/delete/disable a ruleset. No Slice 7 path PATCHes
+`required_status_checks`, serializes branch-protection `app_id`, uses ETags,
+leases, or canaries, or changes the existing branch protection. The existing
+`web-browser` `{context, app_id:null}` remains naturally unchanged. A rejected
+branch-protection PATCH alternative would map GET any-app/null to request
+`app_id:-1`, but it is not an executable fallback. This planning update does
+not perform the POST or assert that Slice 7, R2, Child 1, PF-AC, or the parent
+task is complete.
 
 - [ ] Perform final spec-compliance review, then independent code-quality review.
   The prospective P1 planning review must have passed before any Slice 5

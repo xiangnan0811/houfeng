@@ -171,33 +171,36 @@ the same strict entry point. Its fresh runner must use `ubuntu-latest`,
 `go-version-file: go.mod` before that command.
 
 Only the controller, after querying the new head and observing all three exact
-successful check-runs, may update `main` branch protection. It first GETs
-`required_status_checks`, retains every current `{context, app_id}` from
-`checks`, takes each new numeric `app.id` from that head's successful check-run,
-and PATCHes only `{strict: true, checks: <deduplicated existing-plus-three
-pairs>}` to the `required_status_checks` subendpoint. A GET pair with
-`app_id: null` is valid (the current `web-browser` case): it stays `null` in the
-internal merge and is serialized as `{"context":"web-browser"}` by omitting
-only that `checks[]` object's `app_id`, which is GitHub's supported request
-form. Numeric bindings remain numeric; the deprecated top-level `contexts`
-field is never used.
+successful check-runs, may create the one additive repository ruleset
+`app-acl-r2-pg16-catalog-required-v1`. It targets only `refs/heads/main`, is
+`active`, has no bypass actors, and contains one `required_status_checks` rule
+with `strict_required_status_checks_policy: true` and
+`do_not_enforce_on_create: false`. Its three pairs are the literal check context
+and the unique successful same-head check-run's numeric `app.id`, written as
+the ruleset API's `integration_id`.
 
-The controller must not treat the endpoint ETag as a PATCH compare-and-swap:
-GitHub supports `If-None-Match` conditional GET but does not support conditional
-unsafe-method updates for this endpoint. It therefore requires a controller-held
-exclusive required-checks mutation lease covering every UI, token, App, and
-automation writer before the first GET and through post-PATCH readback. Within
-that lease it GETs a snapshot and ETag, reads all `$HEAD` check-run pages,
-conditionally re-GETs with `If-None-Match`, and restarts from a new GET and
-merge when the ETag or canonical `{strict, checks}` state changes; after three
-unstable attempts it returns `NEEDS_CONTROLLER`. It PATCHes
-only after an unchanged conditional read, then GETs again and verifies
-`strict=true`, all old numeric/null pairs, future pairs, and the three new
-numeric pairs. A missing lease, stale/malformed state, ambiguous run, PATCH
-transport ambiguity, or failed readback is `NEEDS_CONTROLLER` and performs no
-blind retry from an old snapshot. The payload never hard-codes today's four
-contexts and never changes `enforce_admins` or required conversation resolution.
-This planning contract neither changes protection nor claims that any Slice 7
+Before one `POST /repos/$OWNER/$REPO/rulesets`, the controller reads all
+repository/parent rulesets with `includes_parents=true`, the effective
+`rules/branches/main`, and canonical full `branches/main/protection`; it also
+reads every check-run page for that exact `$HEAD`. It fails closed as
+`NEEDS_CONTROLLER` if its token is not an admin, an active rule already uses
+that name, target, or three-check tuple, or any target context lacks exactly one
+`completed`/`success` run with a numeric `app.id`. On a non-201 response,
+transport ambiguity, validation error, or possible concurrent/duplicate create,
+it does not retry, delete, or update a ruleset.
+
+After a 201, the controller freshly GETs the created ruleset and
+`rules/branches/main`, verifies exactly one active matching rule and all three
+`{context, integration_id}` pairs, then re-GETs full branch protection and
+requires its canonical body to be unchanged. Applicable rulesets aggregate with
+existing branch protection, so this is an additive merge gate. In particular,
+the existing `web-browser` `{context, app_id:null}` remains untouched rather
+than being serialized or rebound. No Slice 7 action PATCHes
+`required_status_checks`, uses ETags, a mutation lease, a canary, or a
+contexts-only replacement. A branch-protection PATCH alternative would require
+the explicit any-app request mapping `app_id:-1` for a GET `app_id:null`, but it
+is rejected for Slice 7 and is not an executable fallback. This planning
+contract neither changes a ruleset or protection nor claims that any Slice 7
 implementation, CI run, review, or parent acceptance is complete.
 
 ## Unsupported States And Non-Goals
