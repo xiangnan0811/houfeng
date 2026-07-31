@@ -933,63 +933,169 @@ func TestAppACLR2PGCryptoMemberCatalogReaderEnumeratesEveryExtensionDependencyCl
 }
 
 const appACLR2PGCryptoIdentityFormatter = "pg_catalog.pg_get_function_identity_arguments(procedure.oid)"
-const appACLR2PGCryptoIdentityScanProjection = "coalesce(namespace.nspname::text, ''), coalesce(procedure.proname::text, ''), coalesce(pg_catalog.pg_get_function_identity_arguments(procedure.oid), ''), coalesce(procedure.prokind::text, ''), coalesce(owner.rolname, ''), coalesce(owner.oid::bigint, 0), procedure.proacl is null"
-const appACLR2PGCryptoMemberCatalogOuterSelectProjection = "select coalesce(class_namespace.nspname::text || '.' || member_class.relname::text, ''), " +
+const appACLR2PGCryptoIdentityFormatterProjection = "coalesce(" + appACLR2PGCryptoIdentityFormatter + ", '')"
+const appACLR2PGCryptoMemberCatalogDirectOuterSelectPrefix = "select coalesce(class_namespace.nspname::text || '.' || member_class.relname::text, ''), " +
 	"dependency.objid::bigint, dependency.objsubid::bigint, dependency.refobjsubid::bigint, dependency.deptype::text, extension.oid::bigint, " +
 	"(select pg_catalog.count(*)::bigint from pg_catalog.pg_depend extension_dependency where extension_dependency.classid = dependency.classid and extension_dependency.refclassid = 'pg_catalog.pg_extension'::pg_catalog.regclass and extension_dependency.objid = dependency.objid), " +
-	appACLR2PGCryptoIdentityScanProjection
+	"coalesce(namespace.nspname::text, ''), coalesce(procedure.proname::text, ''), "
+const appACLR2PGCryptoMemberCatalogDirectOuterSelectSuffix = ", coalesce(procedure.prokind::text, ''), coalesce(owner.rolname, ''), coalesce(owner.oid::bigint, 0), procedure.proacl is null"
+const appACLR2PGCryptoMemberCatalogOuterSelectProjection = appACLR2PGCryptoMemberCatalogDirectOuterSelectPrefix +
+	appACLR2PGCryptoIdentityFormatterProjection + appACLR2PGCryptoMemberCatalogDirectOuterSelectSuffix
 
-func TestAppACLR2PGCryptoMemberCatalogQueryRejectsOUTStrippingShapes(t *testing.T) {
-	formatterProjection := "coalesce(" + appACLR2PGCryptoIdentityFormatter + ", '')"
+type appACLR2PGCryptoMemberCatalogQueryRejectionRule string
+
+const (
+	appACLR2PGCryptoMemberCatalogQueryDirectOuterProjection appACLR2PGCryptoMemberCatalogQueryRejectionRule = "direct-outer-projection"
+	appACLR2PGCryptoMemberCatalogQueryForbiddenFormatter    appACLR2PGCryptoMemberCatalogQueryRejectionRule = "forbidden-formatter"
+	appACLR2PGCryptoMemberCatalogQueryForbiddenTransform    appACLR2PGCryptoMemberCatalogQueryRejectionRule = "forbidden-transform"
+	appACLR2PGCryptoMemberCatalogQueryForbiddenSpecialCase  appACLR2PGCryptoMemberCatalogQueryRejectionRule = "forbidden-special-case"
+	appACLR2PGCryptoMemberCatalogQueryExactProjection       appACLR2PGCryptoMemberCatalogQueryRejectionRule = "exact-identity-projection"
+)
+
+type appACLR2PGCryptoMemberCatalogQueryValidationError struct {
+	Rule  appACLR2PGCryptoMemberCatalogQueryRejectionRule
+	Query string
+}
+
+func (err appACLR2PGCryptoMemberCatalogQueryValidationError) Error() string {
+	return fmt.Sprintf("pgcrypto member dependency query rejected by %s: %q", err.Rule, err.Query)
+}
+
+func TestAppACLR2PGCryptoMemberCatalogQueryRejectsFullProductionMutationsByRule(t *testing.T) {
+	productionQuery := appACLR2PGCryptoMemberCatalogRecordedQuery(t)
 	for _, tt := range []struct {
-		name  string
-		query string
+		name   string
+		mutate func(*testing.T, string) string
+		want   appACLR2PGCryptoMemberCatalogQueryRejectionRule
 	}{
 		{
-			name:  "regexp replace around formatter",
-			query: strings.Replace(appACLR2PGCryptoIdentityScanProjection, formatterProjection, "regexp_replace("+formatterProjection+", ' OUT [^,]+', '', 'g')", 1),
+			name: "regexp replace around formatter",
+			mutate: func(t *testing.T, query string) string {
+				return appACLR2PGCryptoMemberCatalogReplaceIdentityProjection(t, query, "regexp_replace("+appACLR2PGCryptoIdentityFormatterProjection+", ' OUT [^,]+', '', 'g')")
+			},
+			want: appACLR2PGCryptoMemberCatalogQueryForbiddenTransform,
 		},
 		{
-			name:  "conditional formatter handling",
-			query: strings.Replace(appACLR2PGCryptoIdentityScanProjection, formatterProjection, "case when procedure.proname = 'other' then '' else "+formatterProjection+" end", 1),
+			name: "conditional formatter handling",
+			mutate: func(t *testing.T, query string) string {
+				return appACLR2PGCryptoMemberCatalogReplaceIdentityProjection(t, query, "case when procedure.proname = 'other' then '' else "+appACLR2PGCryptoIdentityFormatterProjection+" end")
+			},
+			want: appACLR2PGCryptoMemberCatalogQueryForbiddenSpecialCase,
 		},
 		{
-			name:  "pgp armor headers special OUT stripping",
-			query: strings.Replace(appACLR2PGCryptoIdentityScanProjection, formatterProjection, "case when procedure.proname = 'pgp_armor_headers' then regexp_replace('text, OUT key text, OUT value text', ' OUT [^,]+', '', 'g') else "+formatterProjection+" end", 1),
+			name: "pgp armor headers special OUT stripping",
+			mutate: func(t *testing.T, query string) string {
+				return appACLR2PGCryptoMemberCatalogReplaceIdentityProjection(t, query, "case when procedure.proname = 'pgp_armor_headers' then regexp_replace('text, OUT key text, OUT value text', ' OUT [^,]+', '', 'g') else "+appACLR2PGCryptoIdentityFormatterProjection+" end")
+			},
+			want: appACLR2PGCryptoMemberCatalogQueryForbiddenSpecialCase,
+		},
+		{
+			name: "pg get function arguments",
+			mutate: func(t *testing.T, query string) string {
+				return appACLR2PGCryptoMemberCatalogReplaceIdentityProjection(t, query, "coalesce(pg_catalog.pg_get_function_arguments(procedure.oid), '')")
+			},
+			want: appACLR2PGCryptoMemberCatalogQueryForbiddenFormatter,
+		},
+		{
+			name: "oidvectortypes proargtypes",
+			mutate: func(t *testing.T, query string) string {
+				return appACLR2PGCryptoMemberCatalogReplaceIdentityProjection(t, query, "coalesce(pg_catalog.oidvectortypes(procedure.proargtypes), '')")
+			},
+			want: appACLR2PGCryptoMemberCatalogQueryForbiddenFormatter,
+		},
+		{
+			name: "proargtypes",
+			mutate: func(t *testing.T, query string) string {
+				return appACLR2PGCryptoMemberCatalogReplaceIdentityProjection(t, query, "coalesce(procedure.proargtypes::text, '')")
+			},
+			want: appACLR2PGCryptoMemberCatalogQueryForbiddenFormatter,
+		},
+		{
+			name: "proallargtypes",
+			mutate: func(t *testing.T, query string) string {
+				return appACLR2PGCryptoMemberCatalogReplaceIdentityProjection(t, query, "coalesce(procedure.proallargtypes::text, '')")
+			},
+			want: appACLR2PGCryptoMemberCatalogQueryForbiddenFormatter,
+		},
+		{
+			name: "proargmodes",
+			mutate: func(t *testing.T, query string) string {
+				return appACLR2PGCryptoMemberCatalogReplaceIdentityProjection(t, query, "coalesce(procedure.proargmodes::text, '')")
+			},
+			want: appACLR2PGCryptoMemberCatalogQueryForbiddenFormatter,
+		},
+		{
+			name: "proargnames",
+			mutate: func(t *testing.T, query string) string {
+				return appACLR2PGCryptoMemberCatalogReplaceIdentityProjection(t, query, "coalesce(procedure.proargnames::text, '')")
+			},
+			want: appACLR2PGCryptoMemberCatalogQueryForbiddenFormatter,
+		},
+		{
+			name:   "nested CTE split part",
+			mutate: appACLR2PGCryptoMemberCatalogNestedCTEOUTStrippingQuery,
+			want:   appACLR2PGCryptoMemberCatalogQueryDirectOuterProjection,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := validateAppACLR2PGCryptoMemberCatalogIdentityFormatterQuery(tt.query); err == nil {
-				t.Fatalf("pgcrypto member identity projection accepted OUT-stripping query shape %q", tt.query)
-			}
+			appACLR2PGCryptoMemberCatalogAssertQueryRejectedByRule(t, tt.mutate(t, productionQuery), tt.want)
 		})
 	}
 }
 
-func TestAppACLR2PGCryptoMemberCatalogQueryRejectsNestedCTEOUTStripping(t *testing.T) {
-	query := "with raw (extension_dependency_class, oid, object_sub_id, reference_object_sub_id, dependency_type, extension_oid, extension_dependency_count, schema_name, procedure_name, identity_arguments, routine_kind, owner_name, owner_oid, acl_is_default) as (" +
-		appACLR2PGCryptoMemberCatalogOuterSelectProjection + " from pg_catalog.pg_extension extension) " +
-		"select extension_dependency_class, oid, object_sub_id, reference_object_sub_id, dependency_type, extension_oid, extension_dependency_count, schema_name, procedure_name, split_part(identity_arguments, ',', 1), routine_kind, owner_name, owner_oid, acl_is_default from raw"
-	if err := validateAppACLR2PGCryptoMemberCatalogIdentityFormatterQuery(query); err == nil {
-		t.Fatalf("pgcrypto member identity projection accepted nested CTE OUT-stripping query shape %q", query)
+func appACLR2PGCryptoMemberCatalogRecordedQuery(t *testing.T) string {
+	t.Helper()
+	tx := &recordingAppACLR2PGCryptoMemberCatalogTx{}
+	if _, err := readAppACLR2PGCryptoMembersInTx(context.Background(), tx); err == nil {
+		t.Fatal("readAppACLR2PGCryptoMembersInTx() error = nil, want query sentinel")
+	}
+	return strings.Join(strings.Fields(strings.ToLower(tx.query)), " ")
+}
+
+func appACLR2PGCryptoMemberCatalogReplaceIdentityProjection(t *testing.T, query, replacement string) string {
+	t.Helper()
+	mutated := strings.Replace(query, appACLR2PGCryptoIdentityFormatterProjection, replacement, 1)
+	if mutated == query {
+		t.Fatalf("pgcrypto member query did not contain formatter projection %q: %q", appACLR2PGCryptoIdentityFormatterProjection, query)
+	}
+	return mutated
+}
+
+func appACLR2PGCryptoMemberCatalogNestedCTEOUTStrippingQuery(t *testing.T, query string) string {
+	t.Helper()
+	return "with raw (extension_dependency_class, oid, object_sub_id, reference_object_sub_id, dependency_type, extension_oid, extension_dependency_count, schema_name, procedure_name, identity_arguments, routine_kind, owner_name, owner_oid, acl_is_default) as (" +
+		query + ") select extension_dependency_class, oid, object_sub_id, reference_object_sub_id, dependency_type, extension_oid, extension_dependency_count, schema_name, procedure_name, split_part(identity_arguments, ',', 1), routine_kind, owner_name, owner_oid, acl_is_default from raw"
+}
+
+func appACLR2PGCryptoMemberCatalogAssertQueryRejectedByRule(t *testing.T, query string, want appACLR2PGCryptoMemberCatalogQueryRejectionRule) {
+	t.Helper()
+	err := validateAppACLR2PGCryptoMemberCatalogIdentityFormatterQuery(query)
+	if err == nil {
+		t.Fatalf("pgcrypto member query accepted mutation, want %s rejection: %q", want, query)
+	}
+	classified, ok := err.(appACLR2PGCryptoMemberCatalogQueryValidationError)
+	if !ok {
+		t.Fatalf("pgcrypto member query rejection is not classified as %s: %v", want, err)
+	}
+	if classified.Rule != want {
+		t.Fatalf("pgcrypto member query rejection rule = %s, want %s: %v", classified.Rule, want, err)
 	}
 }
 
 func validateAppACLR2PGCryptoMemberCatalogIdentityFormatterQuery(query string) error {
 	query = strings.Join(strings.Fields(strings.ToLower(query)), " ")
-	if !strings.HasPrefix(query, appACLR2PGCryptoMemberCatalogOuterSelectProjection) {
-		return fmt.Errorf("pgcrypto member dependency query must begin with the exact direct identity scan projection %q: %q", appACLR2PGCryptoMemberCatalogOuterSelectProjection, query)
-	}
-	if count := strings.Count(query, appACLR2PGCryptoIdentityFormatter); count != 1 {
-		return fmt.Errorf("pgcrypto member dependency query uses %d identity formatters, want exactly one %q: %q", count, appACLR2PGCryptoIdentityFormatter, query)
+	if !strings.HasPrefix(query, appACLR2PGCryptoMemberCatalogDirectOuterSelectPrefix) {
+		return appACLR2PGCryptoMemberCatalogQueryValidationError{Rule: appACLR2PGCryptoMemberCatalogQueryDirectOuterProjection, Query: query}
 	}
 	for _, forbidden := range []string{
-		"pg_get_function_arguments",
-		"oidvectortypes",
-		"proargtypes",
-		"proallargtypes",
-		"proargmodes",
-		"proargnames",
+		"case when ",
+		"pgp_armor_headers",
+	} {
+		if strings.Contains(query, forbidden) {
+			return appACLR2PGCryptoMemberCatalogQueryValidationError{Rule: appACLR2PGCryptoMemberCatalogQueryForbiddenSpecialCase, Query: query}
+		}
+	}
+	for _, forbidden := range []string{
 		"regexp_replace(",
 		"replace(",
 		"trim(",
@@ -998,15 +1104,25 @@ func validateAppACLR2PGCryptoMemberCatalogIdentityFormatterQuery(query string) e
 		"rtrim(",
 		"substring(",
 		"substr(",
-		"case when ",
-		"pgp_armor_headers",
 	} {
 		if strings.Contains(query, forbidden) {
-			return fmt.Errorf("pgcrypto member dependency query uses forbidden input-only, OUT-stripping, or pgp_armor_headers-specific detail %q: %q", forbidden, query)
+			return appACLR2PGCryptoMemberCatalogQueryValidationError{Rule: appACLR2PGCryptoMemberCatalogQueryForbiddenTransform, Query: query}
 		}
 	}
-	if count := strings.Count(query, appACLR2PGCryptoIdentityScanProjection); count != 1 {
-		return fmt.Errorf("pgcrypto member dependency query uses %d exact unwrapped identity scan projections, want one %q: %q", count, appACLR2PGCryptoIdentityScanProjection, query)
+	for _, forbidden := range []string{
+		"pg_get_function_arguments",
+		"oidvectortypes",
+		"proargtypes",
+		"proallargtypes",
+		"proargmodes",
+		"proargnames",
+	} {
+		if strings.Contains(query, forbidden) {
+			return appACLR2PGCryptoMemberCatalogQueryValidationError{Rule: appACLR2PGCryptoMemberCatalogQueryForbiddenFormatter, Query: query}
+		}
+	}
+	if strings.Count(query, appACLR2PGCryptoIdentityFormatter) != 1 || strings.Count(query, appACLR2PGCryptoMemberCatalogOuterSelectProjection) != 1 {
+		return appACLR2PGCryptoMemberCatalogQueryValidationError{Rule: appACLR2PGCryptoMemberCatalogQueryExactProjection, Query: query}
 	}
 	return nil
 }
