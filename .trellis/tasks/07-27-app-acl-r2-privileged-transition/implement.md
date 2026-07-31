@@ -705,13 +705,19 @@ go test ./internal/center/store/migrate -run 'AppACLR2(State|RuntimeAdmission|St
 16 is exactly `record_platform_internal.pgp_armor_headers|text, OUT key text,
 OUT value text`, and the sorted 36-member digest is
 `57e7ac6a986705d8fa1e5b2260c1836b74dffe1b33bee00d65d1b275284e8196`.
-Do not derive a different member string from `proargtypes`: it records the
-callable input (`text`) but drops the formatter's bound record result shape.
+The production member query and its static reader test may use only
+`pg_catalog.pg_get_function_identity_arguments(procedure.oid)`. Do not derive
+a different member string from `proargtypes`: it records the callable input
+(`text`) but drops the formatter's bound record result shape.
 
-**Rejected alternatives:** changing the reader to `oidvectortypes(proargtypes)`
-and retaining the prior input-only digest is rejected; it conflicts with the
-exact server formatter and permits result shape drift. A version-specific digest
-allowlist is rejected because
+**Rejected alternatives:** `pg_catalog.pg_get_function_arguments(procedure.oid)`
+is rejected even if current PostgreSQL 16 output happens to match: it includes
+default-argument semantics and is not the contract's specified formatter.
+Changing the reader to `oidvectortypes(proargtypes)` and retaining the prior
+input-only digest is rejected; it conflicts with the exact server formatter and
+permits result shape drift. Any pgcrypto-specific stripping of formatter-emitted
+`OUT` terms is rejected for the same reason. A version-specific digest allowlist
+is rejected because
 `postgres:16.0`, `postgres:16.6`, and `postgres:16.12` all have pgcrypto `1.3`,
 the same 36 rows, and the same full-formatter digest.
 
@@ -728,13 +734,15 @@ vectors, SQL, ACLs, runner, workflow, or any frozen R1 surface.
 **RED then GREEN:** first prove the old fixed input-only catalog expectation
 rejects the real `pgp_armor_headers` formatter row in each allowed image. The
 static catalog-reader test must assert
-`pg_get_function_identity_arguments(procedure.oid)`, reject an input-only
-`oidvectortypes(procedure.proargtypes)` replacement, and use the exact full
-member-16 fixture. The member validator must reject both the old input-only
-row/digest and equal-cardinality substitutions, including altered `OUT` names,
-modes, or types. Then update only the fixed member/digest expectations and
-watch those tests turn green. The real PG16 coverage must independently assert
-the full 36-member list/digest and both negative forms in
+`pg_get_function_identity_arguments(procedure.oid)`, reject a
+`pg_get_function_arguments(procedure.oid)` replacement, an input-only
+`oidvectortypes(procedure.proargtypes)` replacement, and any pgcrypto-specific
+`OUT` stripping, then use the exact full member-16 fixture. The member validator
+must reject both the old input-only row/digest and equal-cardinality
+substitutions, including altered `OUT` names, modes, or types. Then update only
+the fixed member/digest expectations and watch those tests turn green. The real
+PG16 coverage must independently assert the full 36-member list/digest and all
+three negative forms in
 `postgres:16.0`, `postgres:16.6`, and `postgres:16.12`.
 
 **Receipt and compatibility boundary:** changing this literal changes the

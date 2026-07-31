@@ -234,9 +234,16 @@ raw-byte-sorted UTF-8 lines
 `record_platform_internal.<proname>|pg_get_function_identity_arguments(oid)`
 followed by LF. This is PostgreSQL's exact emitted catalog-signature text, not
 an attempted reconstruction of callable input arity: every `OUT` mode, name,
-and type emitted by the formatter is bound byte-for-byte. Unsorted enumeration
-digests are not receipt values and never satisfy an acceptance rule. This list,
-not its cardinality, is normative:
+and type emitted by the formatter is bound byte-for-byte. The production member
+reader and its static query test may use only
+`pg_catalog.pg_get_function_identity_arguments(procedure.oid)`.
+`pg_catalog.pg_get_function_arguments(procedure.oid)` is rejected even if its
+current PostgreSQL 16 output happens to match: it includes default-argument
+semantics and is not this contract's specified formatter. The reader must also
+reject `oidvectortypes(procedure.proargtypes)` and any pgcrypto-specific
+stripping of emitted `OUT` terms. Unsorted enumeration digests are not receipt
+values and never satisfy an acceptance rule. This list, not its cardinality, is
+normative:
 
     record_platform_internal.armor|bytea
     record_platform_internal.armor|bytea, text[], text[]
@@ -287,9 +294,13 @@ input arity, but it is not the stored member-signature string.
 
 The rejected input-only alternative replaces that row with `text`. It is
 rejected because it conflicts with the production reader and drops the record
-result shape. A version-specific allowlist is also rejected: all three allowed
-PostgreSQL 16 images have the same exact row, so multiple accepted digests would
-weaken the immutable receipt without adding compatibility.
+result shape. The static catalog-reader test must assert the exact
+`pg_get_function_identity_arguments(procedure.oid)` call and reject a
+`pg_get_function_arguments(procedure.oid)` replacement, an
+`oidvectortypes(procedure.proargtypes)` replacement, or any pgcrypto-specific
+`OUT` stripping. A version-specific allowlist is also rejected: all three
+allowed PostgreSQL 16 images have the same exact row, so multiple accepted
+digests would weaken the immutable receipt without adding compatibility.
 
 Bootstrap persists the allowed `server_version_num`, `server_version`,
 `extversion = 1.3`, extension/schema/OID/owner/dependency facts,
