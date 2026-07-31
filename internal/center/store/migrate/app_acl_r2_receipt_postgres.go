@@ -154,6 +154,22 @@ type AppACLR2BootstrapCatalogSnapshotV1 struct {
 	Members                  []AppACLR2PGCryptoMemberCatalogV1
 }
 
+// AppACLR2PostBootstrapCatalogSnapshotV1 is the constrained continuity
+// snapshot shared by direct migrator and runtime readers. Its domain is
+// persisted continuity evidence; it intentionally has no fresh physical
+// system identifier field.
+type AppACLR2PostBootstrapCatalogSnapshotV1 struct {
+	ServerVersionNum         uint32
+	ServerVersion            string
+	DatabaseOID              uint32
+	DatabaseName             string
+	BootstrapDefaultACLCount uint16
+	Domains                  []AppACLDomainR2V1
+	Roles                    []AppACLR2CatalogRoleStateV1
+	Extension                AppACLR2PGCryptoExtensionCatalogV1
+	Members                  []AppACLR2PGCryptoMemberCatalogV1
+}
+
 // AppACLR2ReceiptCatalogSnapshotV1 is the freshly read bootstrap-owned L2
 // surface after its identifier-dependent grants have been applied.
 type AppACLR2ReceiptCatalogSnapshotV1 struct {
@@ -167,6 +183,10 @@ type appACLR2CatalogReadDependencies struct {
 	readSnapshot func(context.Context, pgx.Tx, FrozenAppACLR1StateV1) (AppACLR2BootstrapCatalogSnapshotV1, error)
 }
 
+type appACLR2PostBootstrapCatalogReadDependencies struct {
+	readSnapshot func(context.Context, pgx.Tx, FrozenAppACLR1StateV1) (AppACLR2PostBootstrapCatalogSnapshotV1, error)
+}
+
 // ReadAppACLR2BootstrapCatalogSnapshotInTx reads the bootstrap actor, domain,
 // role, server, and pgcrypto member facts through the caller's transaction.
 func ReadAppACLR2BootstrapCatalogSnapshotInTx(
@@ -176,6 +196,19 @@ func ReadAppACLR2BootstrapCatalogSnapshotInTx(
 ) (AppACLR2BootstrapCatalogSnapshotV1, error) {
 	return readAppACLR2BootstrapCatalogSnapshotInTxWithDependencies(ctx, tx, state, appACLR2CatalogReadDependencies{
 		readSnapshot: readAppACLR2BootstrapCatalogSnapshotPostgres,
+	})
+}
+
+// ReadAppACLR2PostBootstrapCatalogSnapshotInTx reads fresh catalog facts for
+// post-bootstrap continuity. It never queries pg_control_system() and cannot
+// present persisted system-identifier bytes as newly observed physical proof.
+func ReadAppACLR2PostBootstrapCatalogSnapshotInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	state FrozenAppACLR1StateV1,
+) (AppACLR2PostBootstrapCatalogSnapshotV1, error) {
+	return readAppACLR2PostBootstrapCatalogSnapshotInTxWithDependencies(ctx, tx, state, appACLR2PostBootstrapCatalogReadDependencies{
+		readSnapshot: readAppACLR2PostBootstrapCatalogSnapshotPostgres,
 	})
 }
 
@@ -194,6 +227,21 @@ func readAppACLR2BootstrapCatalogSnapshotInTxWithDependencies(
 	return dependencies.readSnapshot(ctx, tx, state)
 }
 
+func readAppACLR2PostBootstrapCatalogSnapshotInTxWithDependencies(
+	ctx context.Context,
+	tx pgx.Tx,
+	state FrozenAppACLR1StateV1,
+	dependencies appACLR2PostBootstrapCatalogReadDependencies,
+) (AppACLR2PostBootstrapCatalogSnapshotV1, error) {
+	if tx == nil {
+		return AppACLR2PostBootstrapCatalogSnapshotV1{}, fmt.Errorf("APP ACL R2 post-bootstrap catalog reader has no transaction")
+	}
+	if dependencies.readSnapshot == nil {
+		return AppACLR2PostBootstrapCatalogSnapshotV1{}, fmt.Errorf("APP ACL R2 post-bootstrap catalog reader dependency is missing")
+	}
+	return dependencies.readSnapshot(ctx, tx, state)
+}
+
 // CompileAppACLR2BootstrapReceiptFromCatalogV1 converts a fresh exact catalog
 // snapshot into the immutable receipt value. It never accepts caller-supplied
 // source, privilege, domain, or L2 bytes without revalidating them.
@@ -202,10 +250,25 @@ func CompileAppACLR2BootstrapReceiptFromCatalogV1(
 	surface AppACLR2ReceiptCatalogSnapshotV1,
 	frozen FrozenAppACLR1StateV1,
 ) (AppACLR2BootstrapReceiptV1, error) {
+	if _, _, err := validateAppACLR2BootstrapCatalog(snapshot, frozen); err != nil {
+		return AppACLR2BootstrapReceiptV1{}, err
+	}
+	return compileAppACLR2PostBootstrapReceiptFromCatalogV1(
+		appACLR2PostBootstrapCatalogSnapshotFromBootstrap(snapshot),
+		surface,
+		frozen,
+	)
+}
+
+func compileAppACLR2PostBootstrapReceiptFromCatalogV1(
+	snapshot AppACLR2PostBootstrapCatalogSnapshotV1,
+	surface AppACLR2ReceiptCatalogSnapshotV1,
+	frozen FrozenAppACLR1StateV1,
+) (AppACLR2BootstrapReceiptV1, error) {
 	if err := validateFrozenAppACLR1StateForReceipt(frozen); err != nil {
 		return AppACLR2BootstrapReceiptV1{}, err
 	}
-	domain, roles, err := validateAppACLR2BootstrapCatalog(snapshot, frozen)
+	domain, roles, err := validateAppACLR2PostBootstrapCatalog(snapshot, frozen)
 	if err != nil {
 		return AppACLR2BootstrapReceiptV1{}, err
 	}
@@ -328,6 +391,50 @@ func VerifyAppACLR2BootstrapReceiptCatalogV1(
 	return nil
 }
 
+// VerifyAppACLR2PostBootstrapReceiptCatalogV1 proves receipt/domain
+// continuity against fresh non-physical catalog facts. Equal system identifiers
+// here are persisted receipt/domain evidence only, never a fresh physical
+// system assertion.
+func VerifyAppACLR2PostBootstrapReceiptCatalogV1(
+	receipt AppACLR2BootstrapReceiptV1,
+	snapshot AppACLR2PostBootstrapCatalogSnapshotV1,
+	surface AppACLR2ReceiptCatalogSnapshotV1,
+	frozen FrozenAppACLR1StateV1,
+) error {
+	expected, err := compileAppACLR2PostBootstrapReceiptFromCatalogV1(snapshot, surface, frozen)
+	if err != nil {
+		return fmt.Errorf("compile constrained APP ACL R2 receipt continuity evidence: %w", err)
+	}
+	actualBody, err := CanonicalAppACLR2BootstrapReceiptBodyV1(receipt)
+	if err != nil {
+		return fmt.Errorf("validate persisted APP ACL R2 receipt: %w", err)
+	}
+	expectedBody, err := CanonicalAppACLR2BootstrapReceiptBodyV1(expected)
+	if err != nil {
+		return fmt.Errorf("encode constrained APP ACL R2 receipt continuity evidence: %w", err)
+	}
+	if !bytes.Equal(actualBody, expectedBody) {
+		return fmt.Errorf("APP ACL R2 receipt does not match constrained post-bootstrap continuity evidence")
+	}
+	return nil
+}
+
+func appACLR2PostBootstrapCatalogSnapshotFromBootstrap(
+	snapshot AppACLR2BootstrapCatalogSnapshotV1,
+) AppACLR2PostBootstrapCatalogSnapshotV1 {
+	return AppACLR2PostBootstrapCatalogSnapshotV1{
+		ServerVersionNum:         snapshot.ServerVersionNum,
+		ServerVersion:            snapshot.ServerVersion,
+		DatabaseOID:              snapshot.DatabaseOID,
+		DatabaseName:             snapshot.DatabaseName,
+		BootstrapDefaultACLCount: snapshot.BootstrapDefaultACLCount,
+		Domains:                  append([]AppACLDomainR2V1(nil), snapshot.Domains...),
+		Roles:                    append([]AppACLR2CatalogRoleStateV1(nil), snapshot.Roles...),
+		Extension:                snapshot.Extension,
+		Members:                  append([]AppACLR2PGCryptoMemberCatalogV1(nil), snapshot.Members...),
+	}
+}
+
 func validateFrozenAppACLR1StateForReceipt(state FrozenAppACLR1StateV1) error {
 	if !validCatalogRoleName(state.DatabaseName) || state.ManifestRevision != 1 || state.ManifestDigest == [32]byte{} {
 		return fmt.Errorf("frozen R1 state identity is invalid")
@@ -361,6 +468,23 @@ func validateFrozenAppACLR1StateForReceipt(state FrozenAppACLR1StateV1) error {
 
 func validateAppACLR2BootstrapCatalog(
 	snapshot AppACLR2BootstrapCatalogSnapshotV1,
+	frozen FrozenAppACLR1StateV1,
+) (AppACLDomainR2V1, map[AppACLControlRoleR2]AppACLR2CatalogRoleStateV1, error) {
+	domain, roles, err := validateAppACLR2PostBootstrapCatalog(
+		appACLR2PostBootstrapCatalogSnapshotFromBootstrap(snapshot),
+		frozen,
+	)
+	if err != nil {
+		return AppACLDomainR2V1{}, nil, err
+	}
+	if domain.PostgresSystemIdentifier != snapshot.PostgresSystemIdentifier {
+		return AppACLDomainR2V1{}, nil, fmt.Errorf("APP ACL R2 bootstrap live system identifier does not match the immutable domain")
+	}
+	return domain, roles, nil
+}
+
+func validateAppACLR2PostBootstrapCatalog(
+	snapshot AppACLR2PostBootstrapCatalogSnapshotV1,
 	frozen FrozenAppACLR1StateV1,
 ) (AppACLDomainR2V1, map[AppACLControlRoleR2]AppACLR2CatalogRoleStateV1, error) {
 	if !appACLR2AllowedServerVersion(snapshot.ServerVersionNum) {
@@ -424,7 +548,7 @@ func validateAppACLR2BootstrapCatalog(
 	if err := validateAppACLR2Domain(domain); err != nil {
 		return AppACLDomainR2V1{}, nil, fmt.Errorf("validate APP ACL R2 catalog domain: %w", err)
 	}
-	if domain.DatabaseOID != snapshot.DatabaseOID || domain.DatabaseName != snapshot.DatabaseName || domain.PostgresSystemIdentifier != snapshot.PostgresSystemIdentifier || domain.DatabaseName != frozen.DatabaseName {
+	if domain.DatabaseOID != snapshot.DatabaseOID || domain.DatabaseName != snapshot.DatabaseName || domain.DatabaseName != frozen.DatabaseName {
 		return AppACLDomainR2V1{}, nil, fmt.Errorf("APP ACL R2 catalog domain does not match the local database identity")
 	}
 	extension := snapshot.Extension
@@ -738,48 +862,90 @@ func readAppACLR2BootstrapCatalogSnapshotPostgres(
 	ctx context.Context,
 	tx pgx.Tx,
 	state FrozenAppACLR1StateV1,
-) (snapshot AppACLR2BootstrapCatalogSnapshotV1, err error) {
+) (AppACLR2BootstrapCatalogSnapshotV1, error) {
+	postBootstrap, err := readAppACLR2PostBootstrapCatalogSnapshotPostgres(ctx, tx, state)
+	if err != nil {
+		return AppACLR2BootstrapCatalogSnapshotV1{}, err
+	}
+	systemIdentifier, err := readAppACLR2BootstrapLiveSystemIdentifierInTx(ctx, tx)
+	if err != nil {
+		return AppACLR2BootstrapCatalogSnapshotV1{}, err
+	}
+	return appACLR2BootstrapCatalogSnapshotFromPostBootstrap(postBootstrap, systemIdentifier), nil
+}
+
+func readAppACLR2PostBootstrapCatalogSnapshotPostgres(
+	ctx context.Context,
+	tx pgx.Tx,
+	state FrozenAppACLR1StateV1,
+) (snapshot AppACLR2PostBootstrapCatalogSnapshotV1, err error) {
 	var serverVersion, databaseOID int64
 	if err := tx.QueryRow(ctx, `
 		select pg_catalog.current_setting('server_version_num')::bigint,
 		       pg_catalog.current_setting('server_version')::text,
 		       database.oid::bigint,
-		       database.datname::text,
-		       control.system_identifier::text
+		       database.datname::text
 		from pg_catalog.pg_database database
-		cross join lateral pg_catalog.pg_control_system() control
 		where database.datname = pg_catalog.current_database()
 	`).Scan(
 		&serverVersion,
 		&snapshot.ServerVersion,
 		&databaseOID,
 		&snapshot.DatabaseName,
-		&snapshot.PostgresSystemIdentifier,
 	); err != nil {
-		return AppACLR2BootstrapCatalogSnapshotV1{}, fmt.Errorf("read APP ACL R2 bootstrap server and database identity: %w", err)
+		return AppACLR2PostBootstrapCatalogSnapshotV1{}, fmt.Errorf("read APP ACL R2 post-bootstrap server and database identity: %w", err)
 	}
 	if snapshot.ServerVersionNum, err = appACLR2CatalogUint32(serverVersion, "server_version_num"); err != nil {
-		return AppACLR2BootstrapCatalogSnapshotV1{}, err
+		return AppACLR2PostBootstrapCatalogSnapshotV1{}, err
 	}
 	if snapshot.DatabaseOID, err = appACLR2CatalogUint32(databaseOID, "database OID"); err != nil {
-		return AppACLR2BootstrapCatalogSnapshotV1{}, err
+		return AppACLR2PostBootstrapCatalogSnapshotV1{}, err
 	}
 	if snapshot.Domains, err = readAppACLR2DomainsInTx(ctx, tx); err != nil {
-		return AppACLR2BootstrapCatalogSnapshotV1{}, err
+		return AppACLR2PostBootstrapCatalogSnapshotV1{}, err
 	}
 	if snapshot.BootstrapDefaultACLCount, err = readAppACLR2BootstrapDefaultACLCountInTx(ctx, tx); err != nil {
-		return AppACLR2BootstrapCatalogSnapshotV1{}, err
+		return AppACLR2PostBootstrapCatalogSnapshotV1{}, err
 	}
 	if snapshot.Roles, err = readAppACLR2TransitionRolesInTx(ctx, tx, state); err != nil {
-		return AppACLR2BootstrapCatalogSnapshotV1{}, err
+		return AppACLR2PostBootstrapCatalogSnapshotV1{}, err
 	}
 	if snapshot.Extension, err = readAppACLR2PGCryptoExtensionInTx(ctx, tx); err != nil {
-		return AppACLR2BootstrapCatalogSnapshotV1{}, err
+		return AppACLR2PostBootstrapCatalogSnapshotV1{}, err
 	}
 	if snapshot.Members, err = readAppACLR2PGCryptoMembersInTx(ctx, tx); err != nil {
-		return AppACLR2BootstrapCatalogSnapshotV1{}, err
+		return AppACLR2PostBootstrapCatalogSnapshotV1{}, err
 	}
 	return snapshot, nil
+}
+
+func readAppACLR2BootstrapLiveSystemIdentifierInTx(ctx context.Context, tx pgx.Tx) (string, error) {
+	var systemIdentifier string
+	if err := tx.QueryRow(ctx, `
+		select control.system_identifier::text
+		from pg_catalog.pg_control_system() control
+	`).Scan(&systemIdentifier); err != nil {
+		return "", fmt.Errorf("read APP ACL R2 bootstrap live system identifier: %w", err)
+	}
+	return systemIdentifier, nil
+}
+
+func appACLR2BootstrapCatalogSnapshotFromPostBootstrap(
+	snapshot AppACLR2PostBootstrapCatalogSnapshotV1,
+	systemIdentifier string,
+) AppACLR2BootstrapCatalogSnapshotV1 {
+	return AppACLR2BootstrapCatalogSnapshotV1{
+		ServerVersionNum:         snapshot.ServerVersionNum,
+		ServerVersion:            snapshot.ServerVersion,
+		DatabaseOID:              snapshot.DatabaseOID,
+		DatabaseName:             snapshot.DatabaseName,
+		PostgresSystemIdentifier: systemIdentifier,
+		BootstrapDefaultACLCount: snapshot.BootstrapDefaultACLCount,
+		Domains:                  append([]AppACLDomainR2V1(nil), snapshot.Domains...),
+		Roles:                    append([]AppACLR2CatalogRoleStateV1(nil), snapshot.Roles...),
+		Extension:                snapshot.Extension,
+		Members:                  append([]AppACLR2PGCryptoMemberCatalogV1(nil), snapshot.Members...),
+	}
 }
 
 func readAppACLR2DomainsInTx(ctx context.Context, tx pgx.Tx) ([]AppACLDomainR2V1, error) {

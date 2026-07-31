@@ -40,6 +40,20 @@ as a healthy R1 or R2 deployment.
   narrow receipt/helper surface. The accepted baseline is
   `pg_extension.extowner = direct_migrator` and every member `proowner = 10`;
   R2 performs no ownership transition.
+- Direct M2 ownership is intentional and its PostgreSQL 16 authority is part of
+  the accepted boundary. For each direct-migrator-owned M2 table, all seven
+  queried native privileges (`SELECT`, `INSERT`, `UPDATE`, `DELETE`,
+  `TRUNCATE`, `REFERENCES`, and `TRIGGER`) are true; the owned M2 helper is
+  natively executable. Center runtime remains table-`SELECT`-only with no
+  helper `EXECUTE`, and platform admin has none of those table/function
+  privileges.
+- Exact non-grantable direct-migrator self-`SELECT`/`EXECUTE` ACL rows remain
+  mandatory `aclexplode` shape evidence even though ownership independently
+  provides native authority. `has_table_privilege` and
+  `has_function_privilege` prove reachability, not grant provenance: revoking
+  an owner self-row leaves owner-native access true but makes the raw ACL shape
+  corrupt. The fixed M2 `0x06`/`0x02` masks describe intended ordinary
+  reader access only; they do not encode the owner's complete capability set.
 - Role membership, `SET ROLE`, ownership transfer, catalog DML, and extension
   drop/recreate are unsupported. Receipt access is direct-migrator/runtime
   `SELECT` only, with no admin/PUBLIC access.
@@ -78,6 +92,12 @@ as a healthy R1 or R2 deployment.
   and runtime must succeed without an `EXECUTE` grant or `pg_monitor`
   membership and never query it. Wrong privilege, OID, allowed server/version,
   member, dependency, role, ACL, or domain state rejects before mutation.
+- Keeping direct ownership explicitly accepts residual owner-bypass risk. A
+  hostile or compromised `direct_migrator` can use its native DDL/DCL/DML
+  authority to alter or drop M2 relations, functions, constraints, or triggers
+  and can grant access. Exact unchanged-shape readback detects resulting drift
+  when it runs, but it cannot confine a hostile owner or establish continuous
+  enforcement between reads.
 - The task-local `golden-vectors.md` is a fixed, pre-existing artifact consumed
   literally by tests. It is the authoritative, implementation-independent
   literal corpus for `domain_body` and `l2_acl_body`, fixing semantic inputs,
@@ -121,6 +141,12 @@ as a healthy R1 or R2 deployment.
   restored cluster that reproduces copied immutable evidence and matching fresh
   catalog identity; physical clone/liveness/attestation is a separate parent
   gate or future version, and R2 admission alone is insufficient.
+- Moving M2 ownership away from `direct_migrator` is out of scope and would be
+  a material architecture redesign. It would require role membership/`SET
+  ROLE`, a privileged helper, a second creator DSN, or bootstrap precreation;
+  each option violates the current single-DSN, no-helper, no-membership, and
+  phase-ownership boundary. The accepted design therefore detects catalog
+  drift but does not claim to confine a hostile direct owner.
 - No change to frozen R1 codecs, APIs, parsers, runners, 52-source contract,
   or 204-tuple compiler.
 - Planning completed before task activation. Implementation is authorized and
@@ -152,6 +178,14 @@ as a healthy R1 or R2 deployment.
   PREPARED receipt, creates an R2-specific direct-migrator-owned M2
   revision/head relation pair with one M2/one head and a read-only immutable M1
   link, and commits all DDL/DML in one serializable transaction.
+- [ ] Finalize applies the fixed revoke-first DCL and proves exact
+  `aclexplode` rows independently from native reachability. PostgreSQL 16 unit
+  and regression coverage proves all seven queried table privileges true for
+  the direct owner, only `SELECT` true for center runtime, none true for
+  platform admin, and owner helper `EXECUTE` true. Removing an owner self-row
+  must still classify the raw ACL as corrupt while leaving owner-native
+  `has_*_privilege` true. The fixed `0x06`/`0x02` bodies, SQL, vectors, and
+  hashes do not change.
 - [ ] Full state classification, admission, and finalizer ACK loss accept only
   exact R1/PREPARED/FINALIZED catalog/source/ledger/ACL predicates. The sole
   bootstrap ACK-loss exception is a private observer that proves only exact R1
@@ -180,12 +214,14 @@ as a healthy R1 or R2 deployment.
   composition matrix alone proves identity-invariant state results across
   synthetic identities. The PG16 authority matrix retains documented behavior
   for existing authorized R1 evidence readers; permits PREPARED classification
-  only with native L2 `SELECT`; permits FINALIZED classification only for
-  direct migrator and center runtime with native L2/M2 `SELECT`; propagates
+  only with native L2 `SELECT`; permits FINALIZED classification only through
+  the authorized direct-migrator and center-runtime paths with
+  native L2/M2 read reachability; propagates
   SQLSTATE `42501` to platform-admin and unrelated callers when a present
   evidence relation is unreadable; and never maps that error to `CORRUPT`.
-  Bootstrap must not invoke FINALIZED classification because that would rely on
-  superuser bypass. Only bootstrap/direct-migrator actor gates and
+  Platform admin retains no such privilege. OID-10 superuser bypass can
+  technically reach M2 but is not ACL evidence; bootstrap must not invoke
+  FINALIZED classification. Only bootstrap/direct-migrator actor gates and
   `RequireDirectFrozenAppACLR1RuntimeInTx` enforce session identity;
   the classifier and verifier do not inspect it. Ordinary bootstrap/finalizer
   work uses state verification plus its actor gate; uncertain bootstrap ACK
@@ -226,6 +262,13 @@ as a healthy R1 or R2 deployment.
   `RequireDirectFrozenAppACLR1RuntimeInTx`, never calls frozen
   `AdmitAppACLRuntime`, and performs no R2 payload, receipt, or manifest
   parsing or admission.
+- [x] Slice 5 resolves its five source-level quality findings with ordered
+  specification and independent quality review: strict explicit finalizer
+  connection source, bounded ACK-retry continuation, real constrained-wrapper
+  instantiation, DDL retry/bounds matrix, and corrected owner-native
+  verifier/tests. This checkbox records only current source, focused Go
+  verification, and the two Slice 5 reviews; it is not PostgreSQL 16,
+  Slice 6/7, R2 total-acceptance, Child 1, or PF-AC evidence.
 - [ ] The fixed, task-local pre-existing `golden-vectors.md` is consumed
   literally by Slice 3 receipt tests for the domain/L2 input-to-hex-to-SHA-256
   vectors and malformed cases. `app_acl_r2_receipt_test.go` solely owns their
@@ -236,6 +279,21 @@ as a healthy R1 or R2 deployment.
   encoder/compiler or live database.
 - [ ] Each implementation slice has a specification review followed by an
   independent code-quality review; no direct main change occurs.
+
+### Slice 5 Evidence Note — 2026-07-31
+
+- Review gates: specification thread `019fb5fd-f639-7fd0-b57c-3676d95ba659`
+  returned `SPEC RESULT PASS` with P0/P1/P2 = 0; independent quality thread
+  `019fb610-234f-7103-9d5d-5bbf045f39a9` returned `QUALITY RESULT PASS` with
+  P0/P1/P2 = 0.
+- Scope evidenced by those reviews: isolated `0052` M2 DDL/source digest,
+  direct-finalizer command/opener, serializable finalizer/ACK path, shared
+  catalog continuity, and owner-self-ACL versus native-privilege verifier
+  tests. The quality gate reported focused selector, affected-package `go vet`,
+  `gofmt -d`, and `git diff --check` exit code 0.
+- Boundary: this note does not check any Slice 6/7, PG16 integration/image
+  lane, parent/R2 total acceptance, Child 1, or PF-AC criterion. Persisted
+  receipt identity is not a claim of fresh physical identity.
 
 ## Parent Dependency
 

@@ -18,6 +18,47 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+func TestAppACLR2M2ControlACLBindsDirectOwnerAndOrdinaryReaderPolicySeparately(t *testing.T) {
+	const directMigratorOID = uint32(4242)
+	contract := appACLR2ControlACLContract(directMigratorOID)
+	if len(contract.Objects) != 3 {
+		t.Fatalf("M2 control object count = %d, want two direct-owned relations and one direct-owned immutable trigger function", len(contract.Objects))
+	}
+
+	for _, object := range contract.Objects {
+		if object.OwnerRole != AppACLControlRoleDirectMigratorR2 || object.OwnerOID != directMigratorOID {
+			t.Fatalf("M2 object %q owner = role %d/OID %d, want direct-migrator role/OID %d", object.Identity, object.OwnerRole, object.OwnerOID, directMigratorOID)
+		}
+		switch object.Kind {
+		case AppACLControlObjectTableR2:
+			want := []AppACLControlGrantR2V1{
+				{GranteeRole: AppACLControlRoleDirectMigratorR2, Privilege: AppACLControlPrivilegeSelectR2},
+				{GranteeRole: AppACLControlRoleCenterRuntimeR2, Privilege: AppACLControlPrivilegeSelectR2},
+			}
+			if !reflect.DeepEqual(object.ExplicitGrants, want) || object.EffectiveRelevantPrivilegeMask != 0x06 {
+				t.Fatalf("M2 table %q ACL = grants %#v/mask %#x, want direct/runtime SELECT and ordinary-reader mask 0x06", object.Identity, object.ExplicitGrants, object.EffectiveRelevantPrivilegeMask)
+			}
+		case AppACLControlObjectFunctionR2:
+			want := []AppACLControlGrantR2V1{{GranteeRole: AppACLControlRoleDirectMigratorR2, Privilege: AppACLControlPrivilegeExecuteR2}}
+			if !reflect.DeepEqual(object.ExplicitGrants, want) || object.EffectiveRelevantPrivilegeMask != 0x02 {
+				t.Fatalf("M2 helper %q ACL = grants %#v/mask %#x, want direct-owner EXECUTE and ordinary-reader mask 0x02", object.Identity, object.ExplicitGrants, object.EffectiveRelevantPrivilegeMask)
+			}
+		default:
+			t.Fatalf("M2 control ACL contains unexpected object kind %d for %q", object.Kind, object.Identity)
+		}
+	}
+	for _, trigger := range contract.Triggers {
+		if trigger.TableOwnerOID != directMigratorOID || trigger.FunctionOwnerOID != directMigratorOID {
+			t.Fatalf("M2 trigger %q owner binding = table %d/function %d, want direct-migrator OID %d", trigger.TriggerName, trigger.TableOwnerOID, trigger.FunctionOwnerOID, directMigratorOID)
+		}
+	}
+	for _, assertion := range contract.DefaultACLAssertions {
+		if assertion.OwnerRole != AppACLControlRoleDirectMigratorR2 {
+			t.Fatalf("M2 default ACL assertion owner = %d, want direct-migrator role", assertion.OwnerRole)
+		}
+	}
+}
+
 func TestAppACLR2CatalogPredicatesRecognizeExactR1ObjectAbsence(t *testing.T) {
 	predicates := evaluateAppACLR2CatalogShape(appACLR2CatalogShape{})
 
@@ -483,10 +524,10 @@ func TestVerifyAppACLR2M2RelationColumnsRejectDroppedColumnResidue(t *testing.T)
 func TestVerifyAppACLR2M2RelationGrantsRequireOwnerSelfACL(t *testing.T) {
 	roles := appACLR2M2RoleOIDs{DirectMigrator: 21, CenterRuntime: 20, PlatformAdmin: 22}
 	tx := &appACLR2M2ACLQueryCaptureTx{relationGrantRows: [][]any{
-		{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), "SELECT", false},
-		{"app_acl_r2_manifest_head", int64(roles.CenterRuntime), "SELECT", false},
-		{"app_acl_r2_manifest_revisions", int64(roles.DirectMigrator), "SELECT", false},
-		{"app_acl_r2_manifest_revisions", int64(roles.CenterRuntime), "SELECT", false},
+		{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), int64(roles.DirectMigrator), "SELECT", false},
+		{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), int64(roles.CenterRuntime), "SELECT", false},
+		{"app_acl_r2_manifest_revisions", int64(roles.DirectMigrator), int64(roles.DirectMigrator), "SELECT", false},
+		{"app_acl_r2_manifest_revisions", int64(roles.DirectMigrator), int64(roles.CenterRuntime), "SELECT", false},
 	}}
 	err := verifyAppACLR2M2RelationGrantsInTx(context.Background(), tx, []string{
 		"app_acl_r2_manifest_head",
@@ -503,8 +544,8 @@ func TestVerifyAppACLR2M2RelationGrantsRequireOwnerSelfACL(t *testing.T) {
 func TestVerifyAppACLR2M2RelationGrantsRejectsRevokedOwnerSelfACL(t *testing.T) {
 	roles := appACLR2M2RoleOIDs{DirectMigrator: 21, CenterRuntime: 20, PlatformAdmin: 22}
 	tx := &appACLR2M2ACLQueryCaptureTx{relationGrantRows: [][]any{
-		{"app_acl_r2_manifest_head", int64(roles.CenterRuntime), "SELECT", false},
-		{"app_acl_r2_manifest_revisions", int64(roles.CenterRuntime), "SELECT", false},
+		{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), int64(roles.CenterRuntime), "SELECT", false},
+		{"app_acl_r2_manifest_revisions", int64(roles.DirectMigrator), int64(roles.CenterRuntime), "SELECT", false},
 	}}
 	err := verifyAppACLR2M2RelationGrantsInTx(context.Background(), tx, []string{
 		"app_acl_r2_manifest_head",
@@ -515,56 +556,86 @@ func TestVerifyAppACLR2M2RelationGrantsRejectsRevokedOwnerSelfACL(t *testing.T) 
 	}
 }
 
-func TestVerifyAppACLR2M2RelationGrantsRequireDirectMigratorEffectiveSelect(t *testing.T) {
+func TestVerifyAppACLR2M2RelationEffectivePrivilegesRequireDirectOwnerNativeVector(t *testing.T) {
 	roles := appACLR2M2RoleOIDs{DirectMigrator: 21, CenterRuntime: 20, PlatformAdmin: 22}
 	names := []string{"app_acl_r2_manifest_head", "app_acl_r2_manifest_revisions"}
+	directOwner := [7]bool{true, true, true, true, true, true, true}
+	runtimeReader := [7]bool{true, false, false, false, false, false, false}
+	noPrivileges := [7]bool{}
 	tx := &appACLR2M2RelationEffectivePrivilegeTx{
 		rows: [][]any{
-			appACLR2M2RelationEffectivePrivilegeRow(names[0], true, true),
-			appACLR2M2RelationEffectivePrivilegeRow(names[1], true, true),
+			appACLR2M2RelationEffectivePrivilegeRow(names[0], directOwner, runtimeReader, noPrivileges),
+			appACLR2M2RelationEffectivePrivilegeRow(names[1], directOwner, runtimeReader, noPrivileges),
 		},
 		wantArgs: []any{int64(roles.DirectMigrator), int64(roles.CenterRuntime), int64(roles.PlatformAdmin), names},
 	}
 	if err := verifyAppACLR2M2RelationEffectivePrivilegesInTx(context.Background(), tx, names, roles); err != nil {
-		t.Fatalf("verifyAppACLR2M2RelationEffectivePrivilegesInTx() error = %v, want direct-migrator and center-runtime native SELECT", err)
+		t.Fatalf("verifyAppACLR2M2RelationEffectivePrivilegesInTx() error = %v, want all seven direct-owner privileges and runtime SELECT only", err)
 	}
 	if !strings.Contains(tx.query, "has_table_privilege($1::pg_catalog.oid") {
 		t.Fatalf("M2 effective table privilege query does not start with direct-migrator probe: %q", tx.query)
 	}
+
+	for index, privilege := range []string{"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"} {
+		t.Run("missing direct owner "+privilege, func(t *testing.T) {
+			missing := directOwner
+			missing[index] = false
+			tx := &appACLR2M2RelationEffectivePrivilegeTx{
+				rows: [][]any{
+					appACLR2M2RelationEffectivePrivilegeRow(names[0], missing, runtimeReader, noPrivileges),
+					appACLR2M2RelationEffectivePrivilegeRow(names[1], missing, runtimeReader, noPrivileges),
+				},
+				wantArgs: []any{int64(roles.DirectMigrator), int64(roles.CenterRuntime), int64(roles.PlatformAdmin), names},
+			}
+			if err := verifyAppACLR2M2RelationEffectivePrivilegesInTx(context.Background(), tx, names, roles); err == nil || !strings.Contains(err.Error(), "effective privilege drift") {
+				t.Fatalf("verifyAppACLR2M2RelationEffectivePrivilegesInTx() error = %v, want missing direct-owner %s rejection", err, privilege)
+			}
+		})
+	}
 }
 
-func TestVerifyAppACLR2M2RelationGrantsRejectRevokedDirectMigratorEffectiveSelect(t *testing.T) {
+func TestVerifyAppACLR2M2RelationGrantsRejectRevokedOwnerSelfACLWhileOwnerNativeAccessRemains(t *testing.T) {
 	roles := appACLR2M2RoleOIDs{DirectMigrator: 21, CenterRuntime: 20, PlatformAdmin: 22}
 	names := []string{"app_acl_r2_manifest_head", "app_acl_r2_manifest_revisions"}
-	tx := &appACLR2M2RelationEffectivePrivilegeTx{
+	rawACLTx := &appACLR2M2ACLQueryCaptureTx{relationGrantRows: [][]any{
+		{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), int64(roles.CenterRuntime), "SELECT", false},
+		{"app_acl_r2_manifest_revisions", int64(roles.DirectMigrator), int64(roles.CenterRuntime), "SELECT", false},
+	}}
+	if err := verifyAppACLR2M2RelationGrantsInTx(context.Background(), rawACLTx, names, roles); err == nil || !strings.Contains(err.Error(), "explicit SELECT grants") {
+		t.Fatalf("verifyAppACLR2M2RelationGrantsInTx() error = %v, want revoked direct-migrator self SELECT raw-ACL rejection", err)
+	}
+
+	directOwner := [7]bool{true, true, true, true, true, true, true}
+	runtimeReader := [7]bool{true, false, false, false, false, false, false}
+	ownerNativeTx := &appACLR2M2RelationEffectivePrivilegeTx{
 		rows: [][]any{
-			appACLR2M2RelationEffectivePrivilegeRow(names[0], false, true),
-			appACLR2M2RelationEffectivePrivilegeRow(names[1], false, true),
+			appACLR2M2RelationEffectivePrivilegeRow(names[0], directOwner, runtimeReader, [7]bool{}),
+			appACLR2M2RelationEffectivePrivilegeRow(names[1], directOwner, runtimeReader, [7]bool{}),
 		},
 		wantArgs: []any{int64(roles.DirectMigrator), int64(roles.CenterRuntime), int64(roles.PlatformAdmin), names},
 	}
-	if err := verifyAppACLR2M2RelationEffectivePrivilegesInTx(context.Background(), tx, names, roles); err == nil || !strings.Contains(err.Error(), "effective privilege drift") {
-		t.Fatalf("verifyAppACLR2M2RelationEffectivePrivilegesInTx() error = %v, want revoked direct-migrator effective SELECT rejection", err)
+	if err := verifyAppACLR2M2RelationEffectivePrivilegesInTx(context.Background(), ownerNativeTx, names, roles); err != nil {
+		t.Fatalf("verifyAppACLR2M2RelationEffectivePrivilegesInTx() error = %v, want owner-native access to remain true after self-ACL revocation", err)
 	}
 }
 
 func TestVerifyAppACLR2M2RelationGrantsRejectsNonOwnerGrantDrift(t *testing.T) {
 	roles := appACLR2M2RoleOIDs{DirectMigrator: 21, CenterRuntime: 20, PlatformAdmin: 22}
 	baseRows := [][]any{
-		{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), "SELECT", false},
-		{"app_acl_r2_manifest_head", int64(roles.CenterRuntime), "SELECT", false},
-		{"app_acl_r2_manifest_revisions", int64(roles.DirectMigrator), "SELECT", false},
-		{"app_acl_r2_manifest_revisions", int64(roles.CenterRuntime), "SELECT", false},
+		{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), int64(roles.DirectMigrator), "SELECT", false},
+		{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), int64(roles.CenterRuntime), "SELECT", false},
+		{"app_acl_r2_manifest_revisions", int64(roles.DirectMigrator), int64(roles.DirectMigrator), "SELECT", false},
+		{"app_acl_r2_manifest_revisions", int64(roles.DirectMigrator), int64(roles.CenterRuntime), "SELECT", false},
 	}
 	for _, tt := range []struct {
 		name string
 		row  []any
 		want string
 	}{
-		{name: "non-owner", row: []any{"app_acl_r2_manifest_head", int64(roles.PlatformAdmin), "SELECT", false}, want: "unexpected ACL grant"},
-		{name: "bootstrap", row: []any{"app_acl_r2_manifest_head", int64(10), "SELECT", false}, want: "unexpected ACL grant"},
-		{name: "PUBLIC", row: []any{"app_acl_r2_manifest_head", int64(0), "SELECT", false}, want: "grantee OID"},
-		{name: "grant option", row: []any{"app_acl_r2_manifest_head", int64(roles.CenterRuntime), "SELECT", true}, want: "unexpected ACL grant"},
+		{name: "non-owner", row: []any{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), int64(roles.PlatformAdmin), "SELECT", false}, want: "unexpected ACL grant"},
+		{name: "bootstrap", row: []any{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), int64(10), "SELECT", false}, want: "unexpected ACL grant"},
+		{name: "PUBLIC", row: []any{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), int64(0), "SELECT", false}, want: "grantee OID"},
+		{name: "grant option", row: []any{"app_acl_r2_manifest_head", int64(roles.DirectMigrator), int64(roles.CenterRuntime), "SELECT", true}, want: "unexpected ACL grant"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			rows := append([][]any(nil), baseRows...)
@@ -581,15 +652,33 @@ func TestVerifyAppACLR2M2RelationGrantsRejectsNonOwnerGrantDrift(t *testing.T) {
 	}
 }
 
+func TestVerifyAppACLR2M2RelationGrantsRejectsGrantorSubstitution(t *testing.T) {
+	roles := appACLR2M2RoleOIDs{DirectMigrator: 21, CenterRuntime: 20, PlatformAdmin: 22}
+	tx := &appACLR2M2ACLGrantorSubstitutionRelationTx{rows: []appACLR2M2ACLGrantorRow{
+		{name: "app_acl_r2_manifest_head", grantor: int64(roles.DirectMigrator), grantee: int64(roles.DirectMigrator), privilege: "SELECT"},
+		{name: "app_acl_r2_manifest_head", grantor: 10, grantee: int64(roles.CenterRuntime), privilege: "SELECT"},
+		{name: "app_acl_r2_manifest_revisions", grantor: int64(roles.DirectMigrator), grantee: int64(roles.DirectMigrator), privilege: "SELECT"},
+		{name: "app_acl_r2_manifest_revisions", grantor: int64(roles.DirectMigrator), grantee: int64(roles.CenterRuntime), privilege: "SELECT"},
+	}}
+
+	err := verifyAppACLR2M2RelationGrantsInTx(context.Background(), tx, []string{
+		"app_acl_r2_manifest_head",
+		"app_acl_r2_manifest_revisions",
+	}, roles)
+	if err == nil || !strings.Contains(err.Error(), "grantor") {
+		t.Fatalf("verifyAppACLR2M2RelationGrantsInTx() error = %v, want substituted table ACL grantor rejection", err)
+	}
+}
+
 // PG16 marks GRANT as RESERVED_KEYWORD; bare unquoted range alias `grant` is a
 // parser error. Relation and helper ACL readers must use a non-reserved alias.
 func TestVerifyAppACLR2M2ACLQueriesAvoidBareGrantRangeAlias(t *testing.T) {
 	relationTx := &appACLR2M2ACLQueryCaptureTx{
 		relationGrantRows: [][]any{
-			{"app_acl_r2_manifest_head", int64(21), "SELECT", false},
-			{"app_acl_r2_manifest_head", int64(20), "SELECT", false},
-			{"app_acl_r2_manifest_revisions", int64(21), "SELECT", false},
-			{"app_acl_r2_manifest_revisions", int64(20), "SELECT", false},
+			{"app_acl_r2_manifest_head", int64(21), int64(21), "SELECT", false},
+			{"app_acl_r2_manifest_head", int64(21), int64(20), "SELECT", false},
+			{"app_acl_r2_manifest_revisions", int64(21), int64(21), "SELECT", false},
+			{"app_acl_r2_manifest_revisions", int64(21), int64(20), "SELECT", false},
 		},
 	}
 	if err := verifyAppACLR2M2RelationGrantsInTx(context.Background(), relationTx, []string{
@@ -613,7 +702,7 @@ func TestVerifyAppACLR2M2ACLQueriesAvoidBareGrantRangeAlias(t *testing.T) {
 		},
 		queries: []scriptedAppACLR2ReceiptQuery{
 			{rows: [][]any{appACLR2M2FunctionProfileRow(appACLR2M2FunctionProfile(roles.DirectMigrator).Source)}},
-			{rows: [][]any{{int64(roles.DirectMigrator), "EXECUTE", false}}},
+			{rows: [][]any{{int64(roles.DirectMigrator), int64(roles.DirectMigrator), "EXECUTE", false}}},
 		},
 	})
 	if err := verifyAppACLR2M2FunctionInTx(context.Background(), functionTx, roles); err != nil {
@@ -666,7 +755,7 @@ func TestVerifyAppACLR2M2FunctionRequiresDirectMigratorEffectiveExecute(t *testi
 		},
 		queries: []scriptedAppACLR2ReceiptQuery{
 			{rows: [][]any{appACLR2M2FunctionProfileRow(appACLR2M2FunctionProfile(roles.DirectMigrator).Source)}},
-			{rows: [][]any{{int64(roles.DirectMigrator), "EXECUTE", false}}},
+			{rows: [][]any{{int64(roles.DirectMigrator), int64(roles.DirectMigrator), "EXECUTE", false}}},
 		},
 	})
 
@@ -684,7 +773,7 @@ func TestVerifyAppACLR2M2FunctionGrantsRequireOwnerSelfACL(t *testing.T) {
 		},
 		queries: []scriptedAppACLR2ReceiptQuery{
 			{rows: [][]any{appACLR2M2FunctionProfileRow(appACLR2M2FunctionProfile(roles.DirectMigrator).Source)}},
-			{rows: [][]any{{int64(roles.DirectMigrator), "EXECUTE", false}}},
+			{rows: [][]any{{int64(roles.DirectMigrator), int64(roles.DirectMigrator), "EXECUTE", false}}},
 		},
 	})
 	if err := verifyAppACLR2M2FunctionInTx(context.Background(), tx, roles); err != nil {
@@ -705,24 +794,62 @@ func TestVerifyAppACLR2M2FunctionGrantsRequireOwnerSelfACL(t *testing.T) {
 	}
 }
 
-func TestVerifyAppACLR2M2FunctionRejectsRevokedOwnerSelfExecute(t *testing.T) {
+func TestVerifyAppACLR2M2FunctionRejectsGrantorSubstitution(t *testing.T) {
 	roles := appACLR2M2RoleOIDs{DirectMigrator: 21, CenterRuntime: 20, PlatformAdmin: 22}
-	tx := newAppACLR2M2FunctionVerifierTx(&scriptedAppACLR2ReceiptTx{
+	tx := &appACLR2M2ACLGrantorSubstitutionFunctionTx{
+		appACLR2M2FunctionVerifierTx: newAppACLR2M2FunctionVerifierTx(&scriptedAppACLR2ReceiptTx{
+			queryRows: []scriptedAppACLR2ReceiptQueryRow{
+				{values: []any{int64(500), int64(roles.DirectMigrator), "f"}},
+				{values: []any{true, false, false}},
+			},
+			queries: []scriptedAppACLR2ReceiptQuery{
+				{rows: [][]any{appACLR2M2FunctionProfileRow(appACLR2M2FunctionProfile(roles.DirectMigrator).Source)}},
+			},
+		}),
+		rows: []appACLR2M2ACLGrantorRow{{
+			grantor:   10,
+			grantee:   int64(roles.DirectMigrator),
+			privilege: "EXECUTE",
+		}},
+	}
+
+	err := verifyAppACLR2M2FunctionInTx(context.Background(), tx, roles)
+	if err == nil || !strings.Contains(err.Error(), "grantor") {
+		t.Fatalf("verifyAppACLR2M2FunctionInTx() error = %v, want substituted helper ACL grantor rejection", err)
+	}
+}
+
+func TestVerifyAppACLR2M2FunctionRejectsRevokedOwnerSelfExecuteWhileOwnerNativeAccessRemains(t *testing.T) {
+	roles := appACLR2M2RoleOIDs{DirectMigrator: 21, CenterRuntime: 20, PlatformAdmin: 22}
+	rawACLTx := newAppACLR2M2FunctionVerifierTx(&scriptedAppACLR2ReceiptTx{
 		queryRows: []scriptedAppACLR2ReceiptQueryRow{
 			{values: []any{int64(500), int64(roles.DirectMigrator), "f"}},
-			{values: []any{false, false, false}},
 		},
 		queries: []scriptedAppACLR2ReceiptQuery{
 			{rows: [][]any{appACLR2M2FunctionProfileRow(appACLR2M2FunctionProfile(roles.DirectMigrator).Source)}},
 			{rows: nil},
 		},
 	})
-	if err := verifyAppACLR2M2FunctionInTx(context.Background(), tx, roles); err == nil || !strings.Contains(err.Error(), "explicit EXECUTE ACL drift") {
+	if err := verifyAppACLR2M2FunctionInTx(context.Background(), rawACLTx, roles); err == nil || !strings.Contains(err.Error(), "explicit EXECUTE ACL drift") {
 		t.Fatalf("verifyAppACLR2M2FunctionInTx() error = %v, want revoked direct-migrator self EXECUTE rejection", err)
+	}
+
+	ownerNativeTx := newAppACLR2M2FunctionVerifierTx(&scriptedAppACLR2ReceiptTx{
+		queryRows: []scriptedAppACLR2ReceiptQueryRow{
+			{values: []any{int64(500), int64(roles.DirectMigrator), "f"}},
+			{values: []any{true, false, false}},
+		},
+		queries: []scriptedAppACLR2ReceiptQuery{
+			{rows: [][]any{appACLR2M2FunctionProfileRow(appACLR2M2FunctionProfile(roles.DirectMigrator).Source)}},
+			{rows: [][]any{{int64(roles.DirectMigrator), int64(roles.DirectMigrator), "EXECUTE", false}}},
+		},
+	})
+	if err := verifyAppACLR2M2FunctionInTx(context.Background(), ownerNativeTx, roles); err != nil {
+		t.Fatalf("verifyAppACLR2M2FunctionInTx() error = %v, want owner-native EXECUTE to remain true independently of the raw ACL self-row", err)
 	}
 }
 
-func TestVerifyAppACLR2M2FunctionRejectsRevokedDirectMigratorEffectiveExecute(t *testing.T) {
+func TestVerifyAppACLR2M2FunctionRejectsDirectMigratorNativeExecuteDrift(t *testing.T) {
 	roles := appACLR2M2RoleOIDs{DirectMigrator: 21, CenterRuntime: 20, PlatformAdmin: 22}
 	tx := newAppACLR2M2FunctionVerifierTx(&scriptedAppACLR2ReceiptTx{
 		queryRows: []scriptedAppACLR2ReceiptQueryRow{
@@ -731,11 +858,11 @@ func TestVerifyAppACLR2M2FunctionRejectsRevokedDirectMigratorEffectiveExecute(t 
 		},
 		queries: []scriptedAppACLR2ReceiptQuery{
 			{rows: [][]any{appACLR2M2FunctionProfileRow(appACLR2M2FunctionProfile(roles.DirectMigrator).Source)}},
-			{rows: [][]any{{int64(roles.DirectMigrator), "EXECUTE", false}}},
+			{rows: [][]any{{int64(roles.DirectMigrator), int64(roles.DirectMigrator), "EXECUTE", false}}},
 		},
 	})
 	if err := verifyAppACLR2M2FunctionInTx(context.Background(), tx, roles); err == nil || !strings.Contains(err.Error(), "effective EXECUTE drift") {
-		t.Fatalf("verifyAppACLR2M2FunctionInTx() error = %v, want revoked direct-migrator effective EXECUTE rejection", err)
+		t.Fatalf("verifyAppACLR2M2FunctionInTx() error = %v, want direct-migrator native EXECUTE rejection", err)
 	}
 }
 
@@ -756,7 +883,7 @@ func TestVerifyAppACLR2M2FunctionRejectsNonOwnerExecuteGrant(t *testing.T) {
 				},
 				queries: []scriptedAppACLR2ReceiptQuery{
 					{rows: [][]any{appACLR2M2FunctionProfileRow(appACLR2M2FunctionProfile(roles.DirectMigrator).Source)}},
-					{rows: [][]any{{tt.grantee, "EXECUTE", false}}},
+					{rows: [][]any{{int64(roles.DirectMigrator), tt.grantee, "EXECUTE", false}}},
 				},
 			})
 			if err := verifyAppACLR2M2FunctionInTx(context.Background(), tx, roles); err == nil || !strings.Contains(err.Error(), "explicit EXECUTE ACL drift") {
@@ -2786,6 +2913,73 @@ func (tx *appACLR2M2ACLQueryCaptureTx) Query(_ context.Context, query string, _ 
 	return &scriptedAppACLR2ReceiptRows{rows: tx.relationGrantRows}, nil
 }
 
+type appACLR2M2ACLGrantorRow struct {
+	name      string
+	grantor   int64
+	grantee   int64
+	privilege string
+	grantable bool
+}
+
+type appACLR2M2ACLGrantorRows struct {
+	pgx.Rows
+	rows  []appACLR2M2ACLGrantorRow
+	index int
+}
+
+func (rows *appACLR2M2ACLGrantorRows) Close() {}
+
+func (rows *appACLR2M2ACLGrantorRows) Err() error { return nil }
+
+func (rows *appACLR2M2ACLGrantorRows) Next() bool {
+	if rows.index >= len(rows.rows) {
+		return false
+	}
+	rows.index++
+	return true
+}
+
+func (rows *appACLR2M2ACLGrantorRows) Scan(destinations ...any) error {
+	if rows.index == 0 || rows.index > len(rows.rows) {
+		return fmt.Errorf("scan APP ACL R2 grantor row outside iteration")
+	}
+	row := rows.rows[rows.index-1]
+	if row.name == "" {
+		if len(destinations) == 3 {
+			return scanScriptedAppACLR2ReceiptValues(destinations, []any{row.grantee, row.privilege, row.grantable})
+		}
+		return scanScriptedAppACLR2ReceiptValues(destinations, []any{row.grantor, row.grantee, row.privilege, row.grantable})
+	}
+	if len(destinations) == 4 {
+		return scanScriptedAppACLR2ReceiptValues(destinations, []any{row.name, row.grantee, row.privilege, row.grantable})
+	}
+	return scanScriptedAppACLR2ReceiptValues(destinations, []any{row.name, row.grantor, row.grantee, row.privilege, row.grantable})
+}
+
+type appACLR2M2ACLGrantorSubstitutionRelationTx struct {
+	pgx.Tx
+	rows []appACLR2M2ACLGrantorRow
+}
+
+func (tx *appACLR2M2ACLGrantorSubstitutionRelationTx) Query(_ context.Context, query string, _ ...any) (pgx.Rows, error) {
+	if !strings.Contains(query, "aclexplode(relation.relacl)") {
+		return nil, fmt.Errorf("unexpected M2 relation grantor query")
+	}
+	return &appACLR2M2ACLGrantorRows{rows: tx.rows}, nil
+}
+
+type appACLR2M2ACLGrantorSubstitutionFunctionTx struct {
+	*appACLR2M2FunctionVerifierTx
+	rows []appACLR2M2ACLGrantorRow
+}
+
+func (tx *appACLR2M2ACLGrantorSubstitutionFunctionTx) Query(ctx context.Context, query string, arguments ...any) (pgx.Rows, error) {
+	if strings.Contains(query, "aclexplode(procedure.proacl)") {
+		return &appACLR2M2ACLGrantorRows{rows: tx.rows}, nil
+	}
+	return tx.appACLR2M2FunctionVerifierTx.Query(ctx, query, arguments...)
+}
+
 type appACLR2M2RelationEffectivePrivilegeTx struct {
 	pgx.Tx
 	rows     [][]any
@@ -2804,12 +2998,12 @@ func (tx *appACLR2M2RelationEffectivePrivilegeTx) Query(_ context.Context, query
 	return &appACLR2M2Rows{rows: tx.rows}, nil
 }
 
-func appACLR2M2RelationEffectivePrivilegeRow(name string, directSelect, runtimeSelect bool) []any {
+func appACLR2M2RelationEffectivePrivilegeRow(name string, direct, runtime, admin [7]bool) []any {
 	row := []any{name}
-	for _, privileges := range [][]bool{
-		{directSelect, false, false, false, false, false, false},
-		{runtimeSelect, false, false, false, false, false, false},
-		{false, false, false, false, false, false, false},
+	for _, privileges := range [][7]bool{
+		direct,
+		runtime,
+		admin,
 	} {
 		for _, privilege := range privileges {
 			row = append(row, privilege)

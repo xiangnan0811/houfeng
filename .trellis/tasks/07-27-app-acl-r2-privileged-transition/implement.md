@@ -446,6 +446,22 @@ go test ./cmd/houfeng-record-platform-admin ./internal/center/platformmigrate ./
 > verification must pass in that order. The correction does not authorize a
 > receipt/manifest wire, golden-vector, L2 three-object ACL, M2 SQL/ACL,
 > 53-source, 206-tuple, or hash change.
+>
+> **2026-07-29 KEEP_DIRECT_OWNER correction:** PostgreSQL 16 owner-native
+> privileges make the earlier revoked-owner expectation invalid. Slice 5 keeps
+> direct M2 ownership, exact `aclexplode` owner self-rows, revoke-first DCL, the
+> fixed `0x06`/`0x02` ordinary-reader body, isolated `0052`, vectors, hashes,
+> one direct-migrator DSN, and no helper or ownership transfer. All seven queried
+> M2 table privileges are true for the direct owner; center runtime remains
+> `SELECT`-only and platform admin has none. `has_*_privilege` proves
+> reachability, not grant provenance. A revoked owner self-row remains corrupt
+> solely because the raw ACL shape is wrong while owner-native reachability
+> remains true. Keeping ownership accepts that a hostile owner can alter/drop
+> M2 objects, functions, constraints, or triggers, perform native DML, and grant
+> access; exact readback detects drift when run but cannot confine that owner.
+> Moving ownership is a material redesign requiring membership/`SET ROLE`, a
+> helper, a second creator DSN, or bootstrap precreation and remains out of
+> scope.
 
 **Ownership:** Create `app_acl_r2_finalize.go` and its test; modify isolated
 `db/appaclr2/migrations/0052_app_acl_r2_privileged_transition.sql`,
@@ -478,6 +494,31 @@ paths establish one shared constrained post-bootstrap classifier/predicate; they
 do not authorize a finalizer-private classifier, predicate, snapshot, verifier,
 privilege, helper, DSN, or ACL surface.
 
+**2026-07-31 Slice 5 source/review evidence:** The five independent findings
+below are checked only for current implementation, focused Go verification, and
+the passed specification/quality reviews. They do not claim a PG16 integration
+lane or any Slice 6/7, parent, Child 1, or PF-AC completion.
+
+- [x] Enforce a strict explicit finalizer connection source. Only
+  `HOUFENG_RECORD_PLATFORM_MIGRATOR_APP_DATABASE_URL` may reach the
+  finalizer-specific opener; reject ambient service/pass/TLS-file/default
+  sources before pool creation and prove there is no generic-opener fallback.
+- [x] Bound ACK-retry continuation within the same total attempt budget as the
+  main finalizer loop. Retryable recovery errors and exact PREPARED recovery
+  results consume attempts and cannot create a nested or unbounded retry loop.
+- [x] Instantiate the real constrained finalizer connection/transaction wrapper
+  in tests and prove the production route reserves one connection and holds its
+  advisory-lock/transaction boundary; a permissive method-compatible fake alone
+  is insufficient evidence.
+- [x] Add the DDL retry/bounds matrix: `40001` and `40P01` during finalizer DDL
+  roll back the whole attempt and retry within the cap; non-retryable DDL errors
+  stop; exhaustion stops; and fixed embedded finalize-section/body cardinality
+  and size bounds reject before mutation.
+- [x] Correct the owner-native verifier and tests: all seven direct-owner table
+  probes and owner helper `EXECUTE` are true, runtime is table-`SELECT`-only,
+  admin has none, and missing owner self-ACL rows fail the raw-ACL predicate
+  while owner-native probes remain true.
+
 - [ ] P1 correction RED/TDD plan: prove the OID-10 bootstrap-only live reader
   calls `pg_control_system()` and rejects a live-system/domain mismatch; prove
   the shared constrained PREPARED/FINALIZED reader never calls it and succeeds
@@ -498,15 +539,19 @@ privilege, helper, DSN, or ACL surface.
   singleton head; proves full transaction rollback; and reclassifies FINALIZED
   ACK loss. Its DCL/readback tests must require the two non-grantable
   direct-migrator/center-runtime `SELECT` entries on each M2 table and the one
-  non-grantable direct-migrator `EXECUTE` entry on the helper, with direct
-  native table/function probes. They must reject a relation/function with the
-  correct direct-migrator owner OID but a missing or revoked ordinary owner
-  grant, a grant option, or an extra grant; finalizer ACK recovery must not
-  treat owner metadata as M2 read authority. The direct finalizer must lock a
+  non-grantable direct-migrator `EXECUTE` entry on the helper. Add RED-first
+  unit cases that expect all seven direct-owner table probes and owner helper
+  `EXECUTE` true, only center-runtime table `SELECT` true, and every queried
+  platform-admin privilege false. The inverse fixtures remove an owner
+  self-`SELECT` or self-`EXECUTE` row while keeping those owner-native probes
+  true; they must fail the exact `aclexplode` predicate, not an effective-access
+  predicate. Grant option and extra-row variants also reject. Finalizer ACK
+  recovery may read through owner-native authority but must reject any raw ACL
+  shape other than the exact self-row baseline. The direct finalizer must lock a
   present bootstrap-owned L2 receipt in `ACCESS SHARE`, never a stronger mode,
   and never grant itself receipt write privilege; all other present state/M2
   tables retain `SHARE ROW EXCLUSIVE`. The real PostgreSQL 16 lane must prove
-  the SELECT-only direct migrator succeeds with `ACCESS SHARE` and would receive
+  the receipt-`SELECT`-only direct migrator succeeds with `ACCESS SHARE` and would receive
   SQLSTATE `42501` under the superseded `SHARE ROW EXCLUSIVE` receipt-lock
   contract.
 - [ ] GREEN: validate receipt through the one shared constrained
@@ -529,7 +574,10 @@ privilege, helper, DSN, or ACL surface.
   `EXECUTE` only to direct migrator; and (4) only after ACL normalization,
   FINALIZED readback re-reads receipt/catalog/head through the same shared
   constrained path before commit. That readback proves owner OID, explicit owner
-  self-ACL, and `has_*_privilege` separately;
+  self-ACL, and `has_*_privilege` separately without treating reachability as
+  ACL provenance. The corrected verifier expects all seven direct-owner table
+  privileges and owner helper `EXECUTE`, center-runtime `SELECT` only, and no
+  platform-admin table/function privilege;
   default-ACL absence never substitutes for the owner self-grants. No FINALIZED
   readback may occur before ACL normalization. Any error rolls back all M2
   DDL/DML to exact PREPARED.
@@ -537,8 +585,18 @@ privilege, helper, DSN, or ACL surface.
 
 ```bash
 go test ./db/appaclr2/migrations ./cmd/houfeng-record-platform-admin ./internal/center/store/migrate \
-  -run 'AppACLR2(Source|Finalize|Manifest)' -count=1
+  -run 'AppACLR2(Source|Finalize|Manifest|M2)|VerifyAppACLR2M2' -count=1
 ```
+
+> **2026-07-31 evidence note:** Specification review
+> `019fb5fd-f639-7fd0-b57c-3676d95ba659` = `SPEC RESULT PASS`, P0/P1/P2 = 0;
+> independent quality review `019fb610-234f-7103-9d5d-5bbf045f39a9` =
+> `QUALITY RESULT PASS`, P0/P1/P2 = 0. Its reported focused selector,
+> affected-package `go vet`, `gofmt -d`, and `git diff --check` all exited 0.
+> Scope is the Slice 5 isolated source/M2 DDL, direct finalizer route,
+> shared continuity, retry/ACK, and owner provenance/reachability checks only.
+> It deliberately leaves every Slice 6/7, PG16, R2 total-acceptance, Child 1,
+> and PF-AC checkbox unclaimed.
 
 ### Slice 6: Separate R2 Admission And Startup Route
 
@@ -613,29 +671,32 @@ Slices 1-6 do not change the Go test, script, or workflow.
   and no `pg_control_system()` query in their PREPARED/FINALIZED classifier,
   finalizer, or runtime traces. It must prove SQLSTATE `42501` for unreadable
   present L2/M2 evidence, fresh database OID/name rejection, unchanged
-  206-tuple/L2/M2 contracts, and the accepted residual risk: no clone/restore
-  detection claim. Run and reverify the already-owned
+  206-tuple/L2/M2 contracts, and both accepted residual risks: no clone/restore
+  detection claim and no confinement claim against the direct M2 owner. Run and
+  reverify the already-owned
   Slice 4 pure predicate-composition and Slice 3 runtime-predicate unit matrices;
   Slice 7 neither recreates nor takes ownership of them. Its only new matrix
   ownership is the real PG16 reader-authority matrix. The real
   PG16 reader matrix must retain documented authority for existing authorized
   R1 evidence readers; allow PREPARED only with native L2 `SELECT`; allow
-  FINALIZED only for direct migrator and center runtime with native L2/M2
-  `SELECT`; propagate SQLSTATE `42501` for platform-admin/unrelated callers
+  FINALIZED only for direct migrator with owner-native M2 authority and center
+  runtime with granted M2 `SELECT`; propagate SQLSTATE `42501` for
+  platform-admin/unrelated callers
   when a present evidence relation is unreadable without translating it to
   `CORRUPT`; prove bootstrap does not invoke FINALIZED classification; and
   treat any zero-value `CORRUPT` accompanying an error as no evidence verdict.
-  In every PG16 lane, assert the exact M2 owner/self-ACL baseline separately:
-  direct migrator and center runtime have native `SELECT` and no other table
-  privilege on both M2 relations; direct migrator alone has native helper
-  `EXECUTE`; and `aclexplode` contains the two non-grantable table entries and
-  the one non-grantable helper entry, including the owner rows. Add owner
-  revocation regressions: revoking direct migrator's ordinary M2 `SELECT` or
-  helper `EXECUTE` while retaining the same relation/function owner OID must
-  make the relevant `has_*_privilege` probe false and cause the exact predicate,
-  classifier, or finalizer ACK-loss recovery to fail error-first rather than
-  accepting owner authority as a native grant. The finalizer ACK-loss success
-  lane must prove its direct-migrator M2 read uses the explicit self-`SELECT`.
+  In every PG16 lane, begin with a normal direct-owner finalization and assert
+  the exact M2 owner/self-ACL baseline separately: `aclexplode` contains the two
+  non-grantable table entries and one non-grantable helper entry, including the
+  owner rows; all seven queried privileges are true for direct migrator on both
+  tables; owner helper `EXECUTE` is true; center runtime has table `SELECT` only
+  and no helper `EXECUTE`; and platform admin has none. Then run inverse owner
+  revocation regressions: remove direct migrator's self-`SELECT` or
+  self-`EXECUTE` row while retaining the same owner OID and prove the relevant
+  owner-native `has_*_privilege` stays true while the exact raw-ACL predicate,
+  classifier, normal repeat, and finalizer ACK-loss recovery reject the shape.
+  The ACK-loss success lane must prove exact self-ACL evidence but must not claim
+  that the self-row, rather than ownership, caused the M2 read.
   One real PG16 commit-ACK-loss scenario must let bootstrap commit PREPARED and
   then have recovery observe that the database has already advanced to exact
   FINALIZED (or begin recovery against an already exact FINALIZED database).

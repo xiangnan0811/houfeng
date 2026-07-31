@@ -225,10 +225,30 @@ func TestBootstrapAppACLR2PreparedClassifierResultIsNoMutationRepeat(t *testing.
 	if err := bootstrapAppACLR2WithDependencies(t.Context(), oneAppACLR2BootstrapTx, deps); err != nil {
 		t.Fatalf("bootstrapAppACLR2WithDependencies() error = %v", err)
 	}
-	if got := appACLR2BootstrapTraceCount(trace, "classifier"); got != 1 {
-		t.Fatalf("classifier calls = %d, want one for PREPARED target state", got)
+	assertAppACLR2BootstrapTraceOrder(t, trace, "classifier", "live-verify")
+	if got := appACLR2BootstrapTraceCount(trace, "live-verify"); got != 1 {
+		t.Fatalf("bootstrap-only live verification calls = %d, want one for PREPARED target state", got)
 	}
 	assertAppACLR2BootstrapTraceAbsent(t, trace, "verify-frozen", "preflight", "bootstrap-sql", "l2-acl", "receipt-surface", "compile-receipt", "encode-receipt", "insert-receipt")
+}
+
+func TestDefaultAppACLR2BootstrapPreparedSuccessPathsUseBootstrapOnlyLiveVerifier(t *testing.T) {
+	assertSameFunction := func(label string, got, want any) {
+		t.Helper()
+		if reflect.ValueOf(got).Pointer() != reflect.ValueOf(want).Pointer() {
+			t.Fatalf("default bootstrap %s does not use the bootstrap-only live verifier", label)
+		}
+	}
+	assertSameFunction(
+		"PREPARED repeat verifier",
+		defaultAppACLR2BootstrapDependencies().verifyPreparedLive,
+		verifyAppACLR2BootstrapPreparedLiveInTx,
+	)
+	assertSameFunction(
+		"PREPARED acknowledgement verifier",
+		defaultAppACLR2BootstrapACKObserverDependencies().verifyPreparedLive,
+		verifyAppACLR2BootstrapLiveL2EvidenceInTx,
+	)
 }
 
 func TestBootstrapAppACLR2CorruptClassifierResultRejectsWithoutPostClassifierWork(t *testing.T) {
@@ -696,6 +716,10 @@ func TestRecoverAppACLR2BootstrapACKUsesSerializableReadOnlyTransaction(t *testi
 			t.Fatal("exact R1 acknowledgement observer verified L2 evidence")
 			return nil
 		},
+		verifyPreparedLive: func(context.Context, pgx.Tx, FrozenAppACLR1StateV1, appACLR2ReceiptRowV1) error {
+			t.Fatal("exact R1 acknowledgement observer verified bootstrap live evidence")
+			return nil
+		},
 	}
 
 	trace := make([]string, 0, 8)
@@ -748,6 +772,9 @@ func TestRecoverAppACLR2BootstrapACKRejectsConcurrentFinalizedAfterLockWait(t *t
 		verifyL2Evidence: func(context.Context, pgx.Tx, FrozenAppACLR1StateV1, appACLR2ReceiptRowV1) error {
 			return nil
 		},
+		verifyPreparedLive: func(context.Context, pgx.Tx, FrozenAppACLR1StateV1, appACLR2ReceiptRowV1) error {
+			return nil
+		},
 	}
 	tx := &fakeAppACLR2BootstrapLockHandoffTx{trace: &trace}
 	conn := &fakeAppACLR2BootstrapReservedConn{
@@ -784,6 +811,7 @@ func TestObserveAppACLR2BootstrapACKRecoveryOnlyProvesR1OrPrepared(t *testing.T)
 		exactRows   bool
 		wantRows    int
 		wantVerify  int
+		wantLive    int
 	}{
 		{name: "exact R1", wantOutcome: appACLR2BootstrapACKOutcomeR1},
 		{
@@ -794,6 +822,7 @@ func TestObserveAppACLR2BootstrapACKRecoveryOnlyProvesR1OrPrepared(t *testing.T)
 			exactRows:   true,
 			wantRows:    1,
 			wantVerify:  1,
+			wantLive:    1,
 		},
 		{
 			name:       "invalid L2 receipt evidence",
@@ -821,6 +850,7 @@ func TestObserveAppACLR2BootstrapACKRecoveryOnlyProvesR1OrPrepared(t *testing.T)
 			trace := make([]string, 0, 10)
 			l2RowsReads := 0
 			l2VerificationCalls := 0
+			liveVerificationCalls := 0
 			deps := appACLR2BootstrapACKObserverDependencies{
 				hardenSearchPath: func(context.Context, pgx.Tx) error {
 					trace = append(trace, "search-path")
@@ -851,14 +881,19 @@ func TestObserveAppACLR2BootstrapACKRecoveryOnlyProvesR1OrPrepared(t *testing.T)
 					trace = append(trace, "verify-l2")
 					return nil
 				},
+				verifyPreparedLive: func(context.Context, pgx.Tx, FrozenAppACLR1StateV1, appACLR2ReceiptRowV1) error {
+					liveVerificationCalls++
+					trace = append(trace, "live-verify")
+					return nil
+				},
 			}
 			outcome, err := observeAppACLR2BootstrapACKRecoveryInTxWithDependencies(t.Context(), &fakeAppACLR2BootstrapTx{}, deps)
 			if tc.wantError {
 				if err == nil {
 					t.Fatalf("observer outcome = %v, error = nil, want inventory failure", outcome)
 				}
-				if l2RowsReads != tc.wantRows || l2VerificationCalls != tc.wantVerify {
-					t.Fatalf("invalid observer L2 reads/verification = %d/%d, want %d/%d; trace=%#v", l2RowsReads, l2VerificationCalls, tc.wantRows, tc.wantVerify, trace)
+				if l2RowsReads != tc.wantRows || l2VerificationCalls != tc.wantVerify || liveVerificationCalls != tc.wantLive {
+					t.Fatalf("invalid observer L2 reads/shared/live verification = %d/%d/%d, want %d/%d/%d; trace=%#v", l2RowsReads, l2VerificationCalls, liveVerificationCalls, tc.wantRows, tc.wantVerify, tc.wantLive, trace)
 				}
 				assertAppACLR2BootstrapTraceAbsent(t, trace, "classifier", "m2-content", "m2-scan", "m2-aggregate", "finalized")
 				return
@@ -867,8 +902,8 @@ func TestObserveAppACLR2BootstrapACKRecoveryOnlyProvesR1OrPrepared(t *testing.T)
 				t.Fatalf("observer outcome/error = %v/%v, want %v/nil", outcome, err, tc.wantOutcome)
 			}
 			assertAppACLR2BootstrapTraceOrder(t, trace, "actor", "inventory")
-			if l2RowsReads != tc.wantRows || l2VerificationCalls != tc.wantVerify {
-				t.Fatalf("observer L2 reads/verification = %d/%d, want %d/%d", l2RowsReads, l2VerificationCalls, tc.wantRows, tc.wantVerify)
+			if l2RowsReads != tc.wantRows || l2VerificationCalls != tc.wantVerify || liveVerificationCalls != tc.wantLive {
+				t.Fatalf("observer L2 reads/shared/live verification = %d/%d/%d, want %d/%d/%d", l2RowsReads, l2VerificationCalls, liveVerificationCalls, tc.wantRows, tc.wantVerify, tc.wantLive)
 			}
 		})
 	}
@@ -901,6 +936,10 @@ func newAppACLR2BootstrapTraceDependencies(trace *[]string, states []AppACLR2Sta
 			state := states[stateIndex]
 			stateIndex++
 			return state, nil
+		},
+		verifyPreparedLive: func(context.Context, pgx.Tx) error {
+			*trace = append(*trace, "live-verify")
+			return nil
 		},
 		verifyFrozen: func(context.Context, pgx.Tx) (FrozenAppACLR1StateV1, error) {
 			*trace = append(*trace, "verify-frozen")

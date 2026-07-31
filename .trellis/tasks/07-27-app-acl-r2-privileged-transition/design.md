@@ -126,7 +126,7 @@ identity.
 
 | Actor | Exact proof and authority | Forbidden |
 | --- | --- | --- |
-| Direct migrator | Direct session_user = current_user; constrained LOGIN/NOINHERIT/non-superuser; no recursive membership; owns DB, R1 objects, frozen M1 relations, new R2 relations, domain identity, and pgcrypto; finalize only through shared constrained post-bootstrap continuity; no direct or effective `EXECUTE` on `pg_control_system()` and no `pg_monitor` membership | `SET ROLE`, role/membership DDL, `pg_control_system()` query/grant, owner changes, receipt mutation, extension drop/recreate |
+| Direct migrator | Direct session_user = current_user; constrained LOGIN/NOINHERIT/non-superuser; no recursive membership; owns DB, R1 objects, frozen M1 relations, new R2 relations, domain identity, and pgcrypto. PostgreSQL 16 ownership gives it native DDL/DCL/DML authority, all seven queried M2 table privileges, and M2-helper `EXECUTE`; explicit self-ACL rows remain separate mandatory shape evidence. Finalize uses only shared constrained post-bootstrap continuity and never calls `pg_control_system()` or joins `pg_monitor`. | Contract-compliant finalizer code must not use `SET ROLE`, role/membership DDL, `pg_control_system()` query/grant, owner changes, receipt mutation, or extension drop/recreate. The catalog proof detects out-of-contract owner mutation when read; it does not technically prevent it. |
 | Bootstrap superuser | PostgreSQL 16 direct login, role OID 10, rolsuper; owns receipt table and bootstrap helpers; the sole actor permitted to invoke `pg_control_system()` in the bootstrap-only live binding before initial PREPARED commit and before reporting PREPARED repeat/ACK success; may read its L2 evidence for that bootstrap work, and may use the reserved-object metadata-only inventory solely as an actor-gated M2/unknown rejection gate during ordinary bootstrap and uncertain ACK recovery | Direct-migrator DSN, reading, locking, scanning, or aggregating M2 contents, M2 predicate/manifest/control-ACL reads, FINALIZED classification, R2-provided `pg_control_system()` grant or `pg_monitor` membership, owner changes, extension drop/recreate |
 | Center runtime | Direct constrained role matching center_runtime; read-only R2 admission through shared constrained post-bootstrap continuity; no direct or effective `EXECUTE` on `pg_control_system()` and no `pg_monitor` membership | DDL/DCL, receipt mutation, `SET ROLE`, `pg_control_system()` query/grant |
 | Platform admin and PUBLIC | No R2 receipt/M2/helper privilege | Every R2 mutation/read/execute grant, `pg_control_system()` grant, `pg_monitor` membership |
@@ -155,12 +155,23 @@ extension/member/dependency/owner/ACL, and source facts. It never calls
 | --- | --- |
 | Exact R1 | Existing authorized R1 evidence readers retain their documented authority behavior. This contract does not infer success for an identity without that native R1 evidence access. |
 | PREPARED | Successful classification requires native L2 `SELECT` in the caller transaction, in addition to the applicable R1 evidence access. |
-| FINALIZED | Only direct migrator and center runtime may successfully classify: both have native L2 `SELECT` and explicit no-grant-option M2 table `SELECT`. Direct migrator's own M2 grants, rather than ownership alone, make its finalizer ACK-loss reclassification a native-reader path. |
+| FINALIZED | The only authorized post-bootstrap classifier callers are direct migrator and center runtime. The direct migrator can read M2 because it owns M2 and consequently has all seven queried native table privileges; center runtime has only native table `SELECT`, and platform admin has none. Exact no-grant-option direct-migrator self-`SELECT`/`EXECUTE` and center-runtime `SELECT` rows are nevertheless mandatory `aclexplode` evidence. `has_*_privilege` proves reachability, not that an ACL row caused it. OID-10 superuser bypass could technically read M2, so the bootstrap route is separately prohibited from invoking FINALIZED classification. |
 | Direct migrator or center runtime post-bootstrap continuity | The shared reader succeeds from its native evidence access while it has no direct or effective `EXECUTE` on `pg_control_system()`, no `pg_monitor` membership, and no `pg_control_system()` query trace. |
 | Platform admin or unrelated role with an unreadable present evidence relation | The direct PostgreSQL read propagates SQLSTATE `42501`; the classifier must not translate permission denial into `CORRUPT`. |
 | Bootstrap and FINALIZED | Ordinary bootstrap rejects M2/unknown reserved-object presence at its metadata-only gate before any full-classifier call. It therefore never invokes a path that classifies FINALIZED through superuser bypass instead of native M2 `SELECT`. |
 | OID-10 bootstrap PREPARED repeat or ACK recovery | A PREPARED success requires the bootstrap-only live binding in addition to its permitted R1/L2 evidence proof; this is not delegated to the shared constrained reader. |
 | Any reader error | An accompanying zero-value `CORRUPT` result from `ClassifyAppACLR2State` is not an evidence verdict. |
+
+Keeping M2 directly owned by `direct_migrator` is an explicit residual-risk
+decision. A hostile or compromised owner can `ALTER` or `DROP` the M2 tables,
+helper, constraints, or triggers, can exercise native DML, and can grant access.
+The unchanged-shape readback and later classification detect a non-exact shape
+when they run, but cannot confine the owner or guarantee that the shape stayed
+unchanged between reads. Moving ownership elsewhere is a material redesign,
+not a local hardening edit: it requires membership/`SET ROLE`, a privileged
+helper, a second creator DSN, or bootstrap precreation. Each alternative breaks
+the current no-membership, no-helper, single-direct-DSN, phase-separated
+boundary and remains out of scope.
 
 The accepted R1 baseline is exact and is not an R1-to-R2 ownership transition:
 
@@ -374,21 +385,26 @@ to both `direct_migrator` and `center_runtime`. It revokes all function
 privileges on `record_platform_internal.app_acl_r2_reject_manifest_mutation()`
 from those same five grantees, then grants no-grant-option `EXECUTE` only to
 `direct_migrator`. The grants use no `WITH GRANT OPTION`. PostgreSQL ownership
-is verified independently through the relation/function owner OID; it retains
-DDL and grant authority but is not evidence that `has_table_privilege(...,
-'SELECT')` or `has_function_privilege(..., 'EXECUTE')` is true after a
-revoke.
+is verified independently through the relation/function owner OID. On
+PostgreSQL 16, ownership itself makes every queried table privilege and the
+helper `EXECUTE` reachable even after an owner self-row is revoked. Therefore
+`has_table_privilege`/`has_function_privilege` cannot establish grant
+provenance; only the separate raw `aclexplode` comparison proves that the
+mandatory owner self-row exists.
 
 The post-DDL catalog proof requires, for each M2 table, exactly two explicit
 no-grant-option `SELECT` ACL entries: the direct-migrator owner self-grant and
 the center-runtime grant. It requires exactly one explicit no-grant-option
 `EXECUTE` ACL entry on the immutable helper, the direct-migrator owner
 self-grant. `aclexplode` checks include the owner entries rather than filtering
-them out. The native probes require `SELECT` and no other table privilege for
-direct migrator and center runtime; no table privilege for bootstrap, platform
-admin, or PUBLIC; `EXECUTE` only for direct migrator on the helper; and no
-effective helper `EXECUTE` for bootstrap, runtime, admin, or PUBLIC. There is
-no PUBLIC ACL item and no extra or grant-option ACL item. It also rejects any
+them out. The native table probes require all seven queried privileges
+(`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`, and
+`TRIGGER`) for direct migrator, only `SELECT` for center runtime, and none for
+platform admin. The helper probe requires direct-migrator `EXECUTE` and rejects
+runtime/admin reachability. Bootstrap's superuser bypass and PUBLIC are not
+ordinary-reader grant provenance and are excluded from these native probes;
+their raw ACL entries must still be absent. There is no PUBLIC ACL item and no
+extra or grant-option ACL item. It also rejects any
 `pg_default_acl` row for the direct-migrator OID applying globally or to
 `public` tables or globally or to `record_platform_internal` functions. Those
 default-ACL absence assertions prevent ambient access; they never replace the
@@ -400,9 +416,14 @@ Direct migrator owns both R2 relations and has an explicit no-grant-option
 self-`SELECT` on both; center runtime has the corresponding explicit
 no-grant-option `SELECT`; and the direct-migrator-owned immutable helper has
 only the explicit direct-migrator self-`EXECUTE`. Bootstrap, platform admin,
-and PUBLIC get no direct or effective M2 table/function privilege. Owner OID,
-owner self-ACL, and native `has_*_privilege` result are three distinct facts,
-all bound by the M2 control ACL and fresh catalog comparison. This
+and PUBLIC have no explicit M2 table/function ACL row; bootstrap superuser
+bypass is intentionally outside the ordinary-reader contract. Owner OID,
+owner self-ACL, and native `has_*_privilege` result are checked separately, but
+the native result proves reachability rather than the self-row's provenance.
+The direct owner must report all seven table privileges plus helper `EXECUTE`;
+removing its self-row leaves those native results true while making the exact
+raw ACL predicate fail. These facts are bound by the M2 control ACL and fresh
+catalog comparison. This
 transition-control ACL is deliberately outside the application privilege
 grammar. The application body remains exactly 206: frozen R1's 204 semantic
 tuples plus only the two receipt SELECT exceptions:
@@ -576,13 +597,15 @@ default_acl_assertion = u8(owner_control_role) || u8(kind: 1=table,2=function)
 Objects are ordered by kind, schema bytes, identity bytes; grants are ordered
 by grantee then privilege; triggers are ordered by target table then trigger;
 default-ACL assertions are ordered by owner, kind, namespace. The effective
-mask bit `tag - 1` states whether that role has the record's relevant ordinary
-privilege: `has_table_privilege(role, relation, 'SELECT')` for a table or
-`has_function_privilege(role, function, 'EXECUTE')` for a function. It does
-not encode the owner's separate ALTER/DROP/grant-option authority. The
+mask bit `tag - 1` records intended ordinary-reader access for the object's one
+relevant read/use operation: table `SELECT` or function `EXECUTE`. It is a fixed
+policy projection, not a complete `has_*_privilege` result set and not grant
+provenance. In particular, it omits the direct owner's other six native table
+privileges, DDL/DCL authority, and any bootstrap-superuser bypass. The
 `owner_control_role` and `owner_oid` fields independently prove ownership. For
-M2, every set direct-migrator owner bit is backed by the corresponding explicit
-no-grant-option owner self-ACL record and both facts are independently checked.
+M2, every set direct-migrator bit is paired with a mandatory explicit
+no-grant-option owner self-ACL record, but ownership remains an independent
+reason the relevant native probe is true.
 Every listed default-ACL assertion means that no matching global or named-schema
 `pg_default_acl` row exists; its appearance in the body proves absence, not a
 grant or a substitute for that owner self-ACL.
@@ -597,15 +620,17 @@ to the first function and two default-ACL absence assertions for bootstrap:
 table/public and function/record_platform_internal. M2 has exactly three
 objects: the direct-migrator-owned revisions and head tables, each with the
 strictly ordered tag-2 direct-migrator and tag-3 center-runtime no-grant-option
-`SELECT` grants and effective mask tags 2/3 (`0x06`); and the
+`SELECT` grants and ordinary-reader mask tags 2/3 (`0x06`); and the
 direct-migrator-owned `app_acl_r2_reject_manifest_mutation()` function with
 its tag-2 direct-migrator no-grant-option `EXECUTE` self-grant and only tag 2
-effective EXECUTE (`0x02`). These are ordinary native privileges, not an
-owner-authority shortcut. It has the two named immutable M2 triggers and two
+intended ordinary-reader `EXECUTE` (`0x02`). These masks preserve the fixed
+ordinary-reader policy and do not describe the owner's complete PostgreSQL
+capability set. It has the two named immutable M2 triggers and two
 direct-migrator default-ACL absence assertions. SQL catalog checks must prove
 the owner fields, exact `aclexplode` entries including the owner self-entries,
-all unrepresented table privileges false, no PUBLIC (`grantee = 0`) item, and
-the required native effective masks are exact. The historical, completed Slice
+no PUBLIC (`grantee = 0`) item, all seven direct-owner table privilege probes
+true, only center-runtime `SELECT` true, all platform-admin probes false, and
+the fixed ordinary-reader masks exact. The historical, completed Slice
 4 change established the current fixed M2 control-ACL value and digest. The
 2026-07-29 Decision C correction leaves that resulting value and digest
 unchanged and does not alter its grammar, magic, version, object count, role
@@ -857,29 +882,35 @@ only the receipt owner's inherent authority plus explicit `SELECT` without
 grant option for `direct_migrator` and `center_runtime`; it has no grant to
 `platform_admin` or `PUBLIC`, and none of those four non-owner roles has
 helper `EXECUTE`. M2 independently proves direct-migrator ownership and the
-ordinary access it needs: each M2 table has exact explicit no-grant-option
+mandatory raw ACL shape: each M2 table has exact explicit no-grant-option
 `SELECT` entries for direct migrator and center runtime, and the immutable
 helper has the exact explicit no-grant-option direct-migrator `EXECUTE` entry.
-An M2 owner OID cannot substitute for either direct-migrator self-ACL entry or
-for its native `has_*_privilege` probe. Bootstrap, platform admin, and PUBLIC
-have no M2 table/function privilege; center runtime has no helper `EXECUTE` or
-table privilege beyond `SELECT`. Its control-ACL body/digest, function
+An M2 owner OID cannot substitute for either mandatory direct-migrator
+self-ACL entry, but it does independently make the owner's native
+`has_*_privilege` probes true. Direct migrator has all seven queried native
+table privileges and helper `EXECUTE`; center runtime has no helper `EXECUTE`
+or table privilege beyond `SELECT`; platform admin has none. Bootstrap and
+PUBLIC have no raw M2 ACL entry, while bootstrap's superuser bypass is outside
+the ordinary-reader model and is never used for classification. The control-ACL
+body/digest, function
 revocations, exact owner self-ACL rows, effective-access masks, and default-ACL
 absence assertions must match exactly. Superuser bypass is not an ACL grant and
-is never used by the reader, classifier, or runtime admission. No additional
+is never used by an authorized post-bootstrap reader/classifier/runtime path.
+No additional
 grant, `SECURITY DEFINER` reader, membership, `SET ROLE`, or ownership transfer
 may widen these facts, and no generic or post-bootstrap reader is authorized to
 call `pg_control_system()`. Therefore PREPARED requires native L2 `SELECT`, while
-FINALIZED requires the L2/M2 intersection held only by direct migrator and
-center runtime; the finalizer's direct-migrator ACK reclassification uses its
-explicit M2 `SELECT`, and bootstrap must not invoke FINALIZED classification
-through superuser bypass.
+authorized FINALIZED classification is limited to direct migrator and center
+runtime. Direct-migrator ownership supplies its M2 read reachability;
+the explicit M2 self-`SELECT` remains independent shape evidence rather than
+the proven cause of that reachability. Bootstrap must not invoke FINALIZED
+classification through superuser bypass.
 
 | Result | Exhaustive predicate |
 | --- | --- |
 | `R1` | Exact `L1` and `M1`; `L2`, its two helpers, its receipt trigger, both M2 relations, the M2 function, and both M2 triggers are all absent; no other reserved `app_acl_r2_*` catalog object exists. |
 | `PREPARED` | Exact `L1` and `M1`; exactly one valid `L2` row, exact OID-10 helper/trigger identities/owners, and shared constrained post-bootstrap continuity: receipt/domain equality plus fresh database OID/name, allowed PG16 server/version, roles/memberships, pgcrypto extension/member/dependency/owner/ACL baseline, source facts, and exact L2 ACL exceptions. It does not read a live physical system identifier. Both M2 relations/function/triggers are absent; no unknown reserved object exists. |
-| `FINALIZED` | Every `PREPARED` predicate; persisted receipt, immutable domain, and M2 domain are equal; both direct-migrator-owned M2 relations/function/triggers exist with their exact identities; revision cardinality is exactly one, head cardinality is exactly one true singleton and zero alternatives, the head links to that one revision, every immutable M1 link equals fresh M1, the M2 digest/body is valid, and its separate three-binding/206-tuple body and control ACL—including direct-migrator owner self-`SELECT`/`EXECUTE` records and native masks—are exact. |
+| `FINALIZED` | Every `PREPARED` predicate; persisted receipt, immutable domain, and M2 domain are equal; both direct-migrator-owned M2 relations/function/triggers exist with their exact identities; revision cardinality is exactly one, head cardinality is exactly one true singleton and zero alternatives, the head links to that one revision, every immutable M1 link equals fresh M1, the M2 digest/body is valid, and its separate three-binding/206-tuple body and control ACL are exact. Exactness includes the direct-migrator owner self-`SELECT`/`EXECUTE` rows, fixed ordinary-reader masks, all seven direct-owner table probes true, center runtime `SELECT`-only, and platform admin with no queried table/function privilege. |
 | `CORRUPT` | The complement of the three complete catalog/source/ledger/ACL predicates above after evidence reads succeed. A query or scan error, including SQLSTATE `42501` for an unreadable present evidence relation, propagates as an error rather than becoming a predicate result. Session identity is not a predicate. The classifier does not choose the nearest state. |
 
 Examples of `CORRUPT` include L1 checksum/count/0052 drift; a non-original
@@ -890,13 +921,21 @@ ACL baseline; an equal-cardinality member substitution; receipt or M2 ACL
 exceptions outside the exact set; a one-sided, empty, duplicate, mislinked,
 wrong-owned, wrong-headed, or pre-existing M2 shape; a noncanonical 53/206
 body; missing, revoked, grant-option, or extra M2 direct-migrator owner
-self-ACL; a native M2 `has_*_privilege` mismatch; unknown R2 object; wrong
+self-ACL; a native M2 `has_*_privilege` mismatch against the owner-all-seven,
+runtime-`SELECT`-only, and admin-none matrix; unknown R2 object; wrong
 role-binding, role-attribute, or membership catalog evidence; and any
 R1/PREPARED/FINALIZED mixed shape. It never
 normalizes, repairs, or mutates a corrupt shape. The pure predicate-composition
 matrix returns the same result for synthetic identity labels; a real direct
 reader follows the native-ACL authority matrix and propagates an unreadable
 evidence relation instead of returning `CORRUPT`.
+
+Revoking a direct-migrator self-`SELECT` or self-`EXECUTE` row is the important
+inverse case: PostgreSQL 16 still reports the corresponding owner-native
+privilege true (and all seven table privileges remain true), so the verifier
+must reject the missing `aclexplode` row as raw ACL corruption. It must not
+expect a false owner `has_*_privilege` result or misclassify the readable shape
+as an evidence-read permission error.
 
 `AdmitAppACLR1OnlyRuntime` accepts only `R1` after
 `VerifyFrozenAppACLR1StateInTx` succeeds in the already-classified snapshot and
@@ -962,11 +1001,14 @@ changing or calling frozen `AdmitAppACLRuntime`.
 
 `app_acl_r2_catalog_test.go` owns the reusable exhaustive L1/M1/L2/M2/
 control-ACL relation/head predicate matrix before the classifier is introduced.
-For M2 it proves owner OID, owner self-ACL, and ordinary native privilege as
-separate facts: each table needs direct-migrator and center-runtime
-non-grantable `SELECT`, the helper needs direct-migrator non-grantable
-`EXECUTE`, and a correct owner OID with a missing/revoked direct-migrator
-ordinary grant is not exact M2. It also owns shared constrained-continuity
+For M2 it proves owner OID, owner self-ACL, and native reachability as separately
+queried facts without treating the native query as grant provenance: each table
+needs direct-migrator and center-runtime non-grantable `SELECT`, the helper
+needs direct-migrator non-grantable `EXECUTE`, all seven direct-owner table
+probes are true, center runtime is `SELECT`-only, and platform admin has none.
+A correct owner OID with a missing/revoked direct-migrator self-row is not exact
+M2 even though the owner-native probes stay true. It also owns shared
+constrained-continuity
 rows that reject fresh database OID/name drift and receipt/domain or M2-domain
 disagreement without a physical-system read.
 `app_acl_r2_state_test.go` owns only composition of those predicates into typed
@@ -1001,8 +1043,12 @@ traces contain no `pg_control_system()` call and still succeed where a direct
 call would return SQLSTATE `42501`. It proves SQLSTATE `42501` propagation for
 unreadable present L2/M2 evidence, rejects fresh database OID/name drift and
 receipt/domain disagreement, and preserves the exact 206-tuple, L2
-three-object ACL, and M2 SQL/ACL contracts. It makes no clone/restore detection
-claim. It also owns the bootstrap ACK-observer query trace: R1/PREPARED proofs
+three-object ACL, and M2 SQL/ACL contracts. Its M2 matrix proves a normal
+direct-owner finalization, exact owner self-ACL rows, all seven owner table
+privileges visible, owner helper `EXECUTE`, runtime `SELECT`-only, and admin
+none. It separately revokes an owner self-row and proves raw-ACL rejection while
+the owner-native result remains true. It makes no clone/restore detection claim.
+It also owns the bootstrap ACK-observer query trace: R1/PREPARED proofs
 use only the permitted reads and the bootstrap-only live binding, while unknown,
 partial, or any M2 reserved inventory fails without an M2 relation-content read
 or FINALIZED classification. `app_acl_r2_bootstrap_test.go` owns the
@@ -1048,12 +1094,47 @@ classification, because that would use
 superuser bypass instead of native M2 `SELECT`; the permitted metadata
 presence check is solely a rejection path, not a reclassified success. Finalize
 reclassifies only through the shared constrained classifier with its
-direct-migrator authority and explicit native M2 `SELECT`, not owner authority
-alone and never `pg_control_system()`: FINALIZED is success, PREPARED is
-retryable prior state, and all else is failure. A missing/revoked owner
-self-`SELECT` is therefore an evidence-read/error or exact-ACL failure, never
-an ACK-loss success. A normal repeat uses that same shared constrained path and
-makes no mutation.
+direct-migrator owner-native M2 read authority and never `pg_control_system()`:
+FINALIZED is success, PREPARED is a retryable prior state, and all else is
+failure. The explicit self-`SELECT` is still mandatory catalog shape, not the
+proven cause of read access. A missing/revoked owner self-`SELECT` remains
+readable by the owner but fails exact raw-ACL classification as `CORRUPT`, so it
+is never an ACK-loss success. A normal repeat uses that same shared constrained
+path and makes no mutation.
+
+### Slice 5 Quality Findings — 2026-07-31 Source/Review Evidence
+
+The following five source-level findings are resolved by the current Slice 5
+implementation and its two passed reviews. Their checkmarks do not assert a
+PostgreSQL 16 integration run or a later Slice/parent acceptance.
+
+- [x] The finalizer connection source is strictly explicit: only the
+   canonical direct-migrator environment value may reach the finalizer-specific
+   opener, with ambient service/pass/TLS-file/default sources rejected before
+   pool creation and with no generic opener fallback.
+- [x] ACK-recovery continuation is bounded by the same total attempt budget
+   as ordinary `40001`/`40P01` retries. Retryable observer failures and an exact
+   PREPARED observer result consume attempts and cannot start an unbounded or
+   nested retry sequence.
+- [x] Tests instantiate the real constrained finalizer connection/transaction
+   wrapper used by the production route, not merely a permissive fake with the
+   same method set, and must prove its single reserved-connection, lock, and
+   transaction boundary.
+- [x] The DDL retry/bounds matrix covers retryable and non-retryable failures
+   at finalizer-section execution, rollback to exact PREPARED, attempt
+   exhaustion, and the fixed embedded section/body cardinality and size bounds.
+- [x] The M2 verifier and its unit coverage implement the corrected
+   owner-native matrix: all seven owner table probes true, owner helper
+   `EXECUTE` true, runtime `SELECT`-only, admin none, and a revoked owner
+   self-row rejected solely by the exact raw ACL predicate while owner-native
+   reachability remains true.
+
+> Evidence boundary (2026-07-31): specification review
+> `019fb5fd-f639-7fd0-b57c-3676d95ba659` and independent quality review
+> `019fb610-234f-7103-9d5d-5bbf045f39a9` both returned PASS with P0/P1/P2 = 0.
+> This records current source and focused Go verification only. The PG16 live
+> authority matrix, Slice 6/7 work, physical-clone/attestation claims, and
+> parent/Child 1/PF-AC completion remain outside this evidence.
 
 ## Commands And Atomic Supersession
 
@@ -1115,9 +1196,11 @@ SHA-256 preimages, helper/default ACL proofs, exact image lanes, same-snapshot
 state verification with isolated R1 runtime identity admission, race exclusion,
 and status-aware obsolete-draft checks are now executable requirements.
 
-2026-07-28 direct-owner ACL correction: PostgreSQL 16 ownership does not by
-itself retain ordinary `SELECT`/`EXECUTE` after self-revocation, so M2's
-revoke-first DCL regrants non-grantable table `SELECT` to direct migrator and
-center runtime and helper `EXECUTE` only to direct migrator. The existing
-control-ACL layout and `0x06`/`0x02` masks remain fixed; exact owner OID,
-explicit owner self-ACL, and native privilege probes are independent evidence.
+2026-07-29 direct-owner semantics correction: this supersedes the incorrect
+claim that PostgreSQL 16 owner-native `SELECT`/`EXECUTE` becomes false after
+self-revocation. Ownership keeps the relevant probes true and gives the owner
+all seven queried table privileges; exact owner self-ACL rows remain mandatory
+raw catalog evidence. The existing revoke-first DCL, control-ACL layout,
+`0x06`/`0x02` ordinary-reader masks, SQL, vectors, and hashes remain fixed. The
+design accepts owner-bypass residual risk rather than adding an incompatible
+ownership-transfer mechanism.

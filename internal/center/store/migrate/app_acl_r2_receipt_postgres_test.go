@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"reflect"
 	"strings"
@@ -174,6 +175,134 @@ func TestAppACLR2ReceiptPostgresCatalogSnapshotRejectsDrift(t *testing.T) {
 				t.Fatalf("CompileAppACLR2BootstrapReceiptFromCatalogV1() error = %v, want %q rejection", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestAppACLR2PostBootstrapCatalogContinuityRejectsPersistedAndFreshIdentityDrift(t *testing.T) {
+	frozen := validFrozenAppACLR1StateFixture(t)
+	bootstrap, surface := validAppACLR2CatalogSnapshotFixture(t, frozen)
+	receipt, err := CompileAppACLR2BootstrapReceiptFromCatalogV1(bootstrap, surface, frozen)
+	if err != nil {
+		t.Fatalf("CompileAppACLR2BootstrapReceiptFromCatalogV1() error = %v", err)
+	}
+
+	continuity := appACLR2PostBootstrapCatalogSnapshotFixture(bootstrap)
+	if err := VerifyAppACLR2PostBootstrapReceiptCatalogV1(receipt, continuity, surface, frozen); err != nil {
+		t.Fatalf("VerifyAppACLR2PostBootstrapReceiptCatalogV1() error = %v", err)
+	}
+	if _, exists := reflect.TypeOf(continuity).FieldByName("PostgresSystemIdentifier"); exists {
+		t.Fatal("post-bootstrap continuity snapshot carries a fresh or caller-supplied physical system identifier")
+	}
+
+	for _, tt := range []struct {
+		name   string
+		mutate func(*AppACLR2PostBootstrapCatalogSnapshotV1)
+	}{
+		{name: "receipt domain disagreement", mutate: func(snapshot *AppACLR2PostBootstrapCatalogSnapshotV1) {
+			snapshot.Domains[0].PostgresSystemIdentifier = "72623859790382857"
+		}},
+		{name: "fresh database OID drift", mutate: func(snapshot *AppACLR2PostBootstrapCatalogSnapshotV1) {
+			snapshot.DatabaseOID++
+		}},
+		{name: "fresh database name drift", mutate: func(snapshot *AppACLR2PostBootstrapCatalogSnapshotV1) {
+			snapshot.DatabaseName = "other_database"
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := appACLR2PostBootstrapCatalogSnapshotFixture(bootstrap)
+			tt.mutate(&snapshot)
+			if err := VerifyAppACLR2PostBootstrapReceiptCatalogV1(receipt, snapshot, surface, frozen); err == nil {
+				t.Fatal("VerifyAppACLR2PostBootstrapReceiptCatalogV1() error = nil, want continuity rejection")
+			}
+		})
+	}
+}
+
+func TestAppACLR2PostBootstrapCatalogReaderDoesNotReadPhysicalSystemIdentifier(t *testing.T) {
+	frozen := validFrozenAppACLR1StateFixture(t)
+	tx := newScriptedAppACLR2BootstrapCatalogTx()
+	tx.queryRows[0].values = []any{int64(160012), "16.12", int64(424242), "houfeng_app"}
+	tx.queryRows = tx.queryRows[:3]
+
+	snapshot, err := ReadAppACLR2PostBootstrapCatalogSnapshotInTx(context.Background(), tx, frozen)
+	if err != nil {
+		t.Fatalf("ReadAppACLR2PostBootstrapCatalogSnapshotInTx() error = %v", err)
+	}
+	if snapshot.DatabaseOID != 424242 || snapshot.DatabaseName != "houfeng_app" || len(snapshot.Domains) != 1 {
+		t.Fatalf("post-bootstrap continuity snapshot = %#v, want fresh database OID/name and one persisted domain", snapshot)
+	}
+	if _, exists := reflect.TypeOf(snapshot).FieldByName("PostgresSystemIdentifier"); exists {
+		t.Fatal("post-bootstrap catalog reader exposes a physical system identifier field")
+	}
+	for _, query := range append(tx.queryTexts, tx.queryRowTexts...) {
+		if strings.Contains(strings.ToLower(query), "pg_control_system") {
+			t.Fatalf("post-bootstrap catalog reader queried bootstrap-only pg_control_system(): %s", query)
+		}
+	}
+	assertScriptedAppACLR2ReceiptQueriesAreIdentityNeutral(t, tx)
+}
+
+func TestAppACLR2SharedL2ContinuityVerifierDoesNotReadPhysicalSystemIdentifier(t *testing.T) {
+	frozen := validFrozenAppACLR1StateFixture(t)
+	catalogSeed := newScriptedAppACLR2BootstrapCatalogTx()
+	catalogSeed.queryRows = catalogSeed.queryRows[:3]
+	continuity, err := ReadAppACLR2PostBootstrapCatalogSnapshotInTx(context.Background(), catalogSeed, frozen)
+	if err != nil {
+		t.Fatalf("ReadAppACLR2PostBootstrapCatalogSnapshotInTx(seed) error = %v", err)
+	}
+	surfaceSeed := newScriptedAppACLR2ReceiptCatalogTx()
+	surface, err := ReadAppACLR2ReceiptCatalogSnapshotInTx(context.Background(), surfaceSeed, frozen)
+	if err != nil {
+		t.Fatalf("ReadAppACLR2ReceiptCatalogSnapshotInTx(seed) error = %v", err)
+	}
+	receipt, err := compileAppACLR2PostBootstrapReceiptFromCatalogV1(continuity, surface, frozen)
+	if err != nil {
+		t.Fatalf("compileAppACLR2PostBootstrapReceiptFromCatalogV1(seed) error = %v", err)
+	}
+	body, err := CanonicalAppACLR2BootstrapReceiptBodyV1(receipt)
+	if err != nil {
+		t.Fatalf("CanonicalAppACLR2BootstrapReceiptBodyV1() error = %v", err)
+	}
+	postBootstrap := newScriptedAppACLR2BootstrapCatalogTx()
+	receiptSurface := newScriptedAppACLR2ReceiptCatalogTx()
+	tx := &scriptedAppACLR2ReceiptTx{
+		queryRows: append(
+			append([]scriptedAppACLR2ReceiptQueryRow(nil), postBootstrap.queryRows[:3]...),
+			receiptSurface.queryRows...,
+		),
+		queries: append(
+			append([]scriptedAppACLR2ReceiptQuery(nil), postBootstrap.queries...),
+			receiptSurface.queries...,
+		),
+	}
+	row := appACLR2ReceiptRowV1{Singleton: true, Body: body, Digest: sha256.Sum256(body)}
+	if err := verifyAppACLR2L2EvidenceInTx(context.Background(), tx, frozen, row); err != nil {
+		t.Fatalf("verifyAppACLR2L2EvidenceInTx() error = %v", err)
+	}
+	for _, query := range append(tx.queryTexts, tx.queryRowTexts...) {
+		if strings.Contains(strings.ToLower(query), "pg_control_system") {
+			t.Fatalf("shared L2 continuity verifier queried bootstrap-only pg_control_system(): %s", query)
+		}
+	}
+	if len(tx.queries) != 0 || len(tx.queryRows) != 0 {
+		t.Fatalf("shared L2 continuity verifier left %d query and %d query-row scripts unused", len(tx.queries), len(tx.queryRows))
+	}
+	assertScriptedAppACLR2ReceiptQueriesAreIdentityNeutral(t, tx)
+}
+
+func appACLR2PostBootstrapCatalogSnapshotFixture(
+	bootstrap AppACLR2BootstrapCatalogSnapshotV1,
+) AppACLR2PostBootstrapCatalogSnapshotV1 {
+	return AppACLR2PostBootstrapCatalogSnapshotV1{
+		ServerVersionNum:         bootstrap.ServerVersionNum,
+		ServerVersion:            bootstrap.ServerVersion,
+		DatabaseOID:              bootstrap.DatabaseOID,
+		DatabaseName:             bootstrap.DatabaseName,
+		BootstrapDefaultACLCount: bootstrap.BootstrapDefaultACLCount,
+		Domains:                  append([]AppACLDomainR2V1(nil), bootstrap.Domains...),
+		Roles:                    append([]AppACLR2CatalogRoleStateV1(nil), bootstrap.Roles...),
+		Extension:                bootstrap.Extension,
+		Members:                  append([]AppACLR2PGCryptoMemberCatalogV1(nil), bootstrap.Members...),
 	}
 }
 
@@ -373,6 +502,38 @@ func TestAppACLR2BootstrapCatalogReaderMapsIdentityNeutralSnapshot(t *testing.T)
 		t.Fatalf("bootstrap catalog reader left %d query and %d query-row scripts unused", len(tx.queries), len(tx.queryRows))
 	}
 	assertScriptedAppACLR2ReceiptQueriesAreIdentityNeutral(t, tx)
+}
+
+func TestAppACLR2BootstrapLiveCatalogReaderCallsPGControlAndRejectsDomainMismatch(t *testing.T) {
+	frozen := validFrozenAppACLR1StateFixture(t)
+	for _, tt := range []struct {
+		name       string
+		liveSystem string
+		wantErr    bool
+	}{
+		{name: "exact live binding", liveSystem: "72623859790382856"},
+		{name: "live domain mismatch", liveSystem: "72623859790382857", wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := newScriptedAppACLR2BootstrapCatalogTx()
+			tx.queryRows[3].values = []any{tt.liveSystem}
+			snapshot, err := ReadAppACLR2BootstrapCatalogSnapshotInTx(context.Background(), tx, frozen)
+			if err != nil {
+				t.Fatalf("ReadAppACLR2BootstrapCatalogSnapshotInTx() error = %v", err)
+			}
+			_, _, err = validateAppACLR2BootstrapCatalog(snapshot, frozen)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateAppACLR2BootstrapCatalog() error = %v, want error=%t", err, tt.wantErr)
+			}
+			queries := strings.ToLower(strings.Join(tx.queryRowTexts, "\n"))
+			if !strings.Contains(queries, "pg_control_system()") {
+				t.Fatalf("bootstrap live catalog reader queries = %q, want direct pg_control_system() call", queries)
+			}
+			if len(tx.queries) != 0 || len(tx.queryRows) != 0 {
+				t.Fatalf("bootstrap live catalog reader left %d query and %d query-row scripts unused", len(tx.queries), len(tx.queryRows))
+			}
+		})
+	}
 }
 
 func TestAppACLR2BootstrapCatalogReaderScansAndValidatesExactPGCryptoMembers(t *testing.T) {
@@ -890,9 +1051,10 @@ func newScriptedAppACLR2BootstrapCatalogTx() *scriptedAppACLR2ReceiptTx {
 func newScriptedAppACLR2BootstrapCatalogTxWithPGCryptoRows(memberRows [][]any) *scriptedAppACLR2ReceiptTx {
 	return &scriptedAppACLR2ReceiptTx{
 		queryRows: []scriptedAppACLR2ReceiptQueryRow{
-			{values: []any{int64(160012), "16.12", int64(424242), "houfeng_app", "72623859790382856"}},
+			{values: []any{int64(160012), "16.12", int64(424242), "houfeng_app"}},
 			{values: []any{int64(0)}},
 			{values: []any{"pgcrypto", int64(500), "record_platform_internal", int64(600), "1.3", "direct_migrator", int64(21)}},
+			{values: []any{"72623859790382856"}},
 		},
 		queries: []scriptedAppACLR2ReceiptQuery{
 			{rows: [][]any{{

@@ -451,7 +451,7 @@ func verifyAppACLR2L2EvidenceInTx(
 	if err != nil {
 		return appACLR2CatalogDrift(fmt.Errorf("parse APP ACL R2 receipt evidence: %w", err))
 	}
-	bootstrap, err := ReadAppACLR2BootstrapCatalogSnapshotInTx(ctx, tx, frozen)
+	continuity, err := ReadAppACLR2PostBootstrapCatalogSnapshotInTx(ctx, tx, frozen)
 	if err != nil {
 		return err
 	}
@@ -460,7 +460,7 @@ func verifyAppACLR2L2EvidenceInTx(
 		return err
 	}
 	surface.ReservedObjects = appACLR2FilterReservedObjects(surface.ReservedObjects, appACLR2L2ReservedObjects())
-	if err := VerifyAppACLR2BootstrapReceiptCatalogV1(receipt, bootstrap, surface, frozen); err != nil {
+	if err := VerifyAppACLR2PostBootstrapReceiptCatalogV1(receipt, continuity, surface, frozen); err != nil {
 		return appACLR2CatalogDrift(err)
 	}
 	return nil
@@ -875,6 +875,7 @@ func verifyAppACLR2M2RelationGrantsInTx(
 ) (err error) {
 	rows, err := tx.Query(ctx, `
 		select relation.relname::text,
+		       acl_grant.grantor::bigint,
 		       acl_grant.grantee::bigint,
 		       acl_grant.privilege_type::text,
 		       acl_grant.is_grantable
@@ -883,7 +884,7 @@ func verifyAppACLR2M2RelationGrantsInTx(
 		cross join lateral pg_catalog.aclexplode(relation.relacl) acl_grant
 		where namespace.nspname = 'public'
 		  and relation.relname = any($1::name[])
-		order by relation.relname, acl_grant.grantee, acl_grant.privilege_type
+		order by relation.relname, acl_grant.grantor, acl_grant.grantee, acl_grant.privilege_type
 	`, names)
 	if err != nil {
 		return fmt.Errorf("read APP ACL R2 M2 relation grants: %w", err)
@@ -895,14 +896,22 @@ func verifyAppACLR2M2RelationGrantsInTx(
 	}
 	for rows.Next() {
 		var name, privilege string
+		var grantor int64
 		var grantee int64
 		var grantable bool
-		if err := rows.Scan(&name, &grantee, &privilege, &grantable); err != nil {
+		if err := rows.Scan(&name, &grantor, &grantee, &privilege, &grantable); err != nil {
 			return fmt.Errorf("scan APP ACL R2 M2 relation grant: %w", err)
+		}
+		grantorOID, err := appACLR2CatalogUint32(grantor, "APP ACL R2 M2 relation grantor OID")
+		if err != nil {
+			return err
 		}
 		granteeOID, err := appACLR2CatalogUint32(grantee, "APP ACL R2 M2 relation grantee OID")
 		if err != nil {
 			return err
+		}
+		if grantorOID != roles.DirectMigrator {
+			return fmt.Errorf("APP ACL R2 M2 relation %q has unexpected ACL grantor", name)
 		}
 		if _, knownRelation := grants[name]; !knownRelation ||
 			(granteeOID != roles.DirectMigrator && granteeOID != roles.CenterRuntime) || privilege != "SELECT" || grantable {
@@ -1410,7 +1419,7 @@ func verifyAppACLR2M2RelationEffectivePrivilegesInTx(
 		); err != nil {
 			return fmt.Errorf("scan APP ACL R2 M2 effective table privilege: %w", err)
 		}
-		if !directSelect || directInsert || directUpdate || directDelete || directTruncate || directReferences || directTrigger ||
+		if !directSelect || !directInsert || !directUpdate || !directDelete || !directTruncate || !directReferences || !directTrigger ||
 			!runtimeSelect || runtimeInsert || runtimeUpdate || runtimeDelete || runtimeTruncate || runtimeReferences || runtimeTrigger ||
 			adminSelect || adminInsert || adminUpdate || adminDelete || adminTruncate || adminReferences || adminTrigger {
 			return fmt.Errorf("APP ACL R2 M2 relation %q has effective privilege drift", name)
@@ -1465,7 +1474,7 @@ func verifyAppACLR2M2FunctionInTx(
 	}
 
 	grantRows, err := tx.Query(ctx, `
-		select acl_grant.grantee::bigint, acl_grant.privilege_type::text, acl_grant.is_grantable
+		select acl_grant.grantor::bigint, acl_grant.grantee::bigint, acl_grant.privilege_type::text, acl_grant.is_grantable
 		from pg_catalog.pg_proc procedure
 		cross join lateral pg_catalog.aclexplode(procedure.proacl) acl_grant
 		where procedure.oid = $1
@@ -1476,15 +1485,23 @@ func verifyAppACLR2M2FunctionInTx(
 	defer appACLR2CatalogFinishRows(grantRows, &err, "iterate APP ACL R2 M2 helper function grants")
 	grantCount := 0
 	for grantRows.Next() {
+		var grantor int64
 		var grantee int64
 		var privilege string
 		var grantable bool
-		if err := grantRows.Scan(&grantee, &privilege, &grantable); err != nil {
+		if err := grantRows.Scan(&grantor, &grantee, &privilege, &grantable); err != nil {
 			return fmt.Errorf("scan APP ACL R2 M2 helper function grant: %w", err)
+		}
+		grantorOID, err := appACLR2CatalogUint32(grantor, "APP ACL R2 M2 helper function grantor OID")
+		if err != nil {
+			return err
 		}
 		granteeOID, err := appACLR2CatalogUint32(grantee, "APP ACL R2 M2 helper function grantee OID")
 		if err != nil {
 			return err
+		}
+		if grantorOID != roles.DirectMigrator {
+			return fmt.Errorf("APP ACL R2 M2 helper function has explicit EXECUTE ACL grantor drift")
 		}
 		if granteeOID != roles.DirectMigrator || privilege != "EXECUTE" || grantable {
 			return fmt.Errorf("APP ACL R2 M2 helper function has explicit EXECUTE ACL drift")

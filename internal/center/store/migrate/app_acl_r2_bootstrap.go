@@ -88,6 +88,7 @@ type appACLR2BootstrapDependencies struct {
 	readReservedObjects          func(context.Context, pgx.Tx) ([]AppACLR2ReservedCatalogObjectV1, error)
 	lockStateTables              func(context.Context, pgx.Tx, bool) error
 	classify                     func(context.Context, pgx.Tx) (AppACLR2State, error)
+	verifyPreparedLive           func(context.Context, pgx.Tx) error
 	verifyFrozen                 func(context.Context, pgx.Tx) (FrozenAppACLR1StateV1, error)
 	readBootstrapCatalog         func(context.Context, pgx.Tx, FrozenAppACLR1StateV1) (AppACLR2BootstrapCatalogSnapshotV1, error)
 	validatePreMutationEvidence  func(AppACLR2BootstrapCatalogSnapshotV1, FrozenAppACLR1StateV1) error
@@ -133,6 +134,7 @@ func defaultAppACLR2BootstrapDependencies() appACLR2BootstrapDependencies {
 		readReservedObjects:         readAppACLR2BootstrapReservedCatalogObjectsInTx,
 		lockStateTables:             lockAppACLR2BootstrapStateTablesInTx,
 		classify:                    ClassifyAppACLR2State,
+		verifyPreparedLive:          verifyAppACLR2BootstrapPreparedLiveInTx,
 		verifyFrozen:                VerifyFrozenAppACLR1StateInTx,
 		readBootstrapCatalog:        ReadAppACLR2BootstrapCatalogSnapshotInTx,
 		validatePreMutationEvidence: validateAppACLR2BootstrapPreMutationEvidence,
@@ -151,7 +153,7 @@ func defaultAppACLR2BootstrapDependencies() appACLR2BootstrapDependencies {
 func (dependencies appACLR2BootstrapDependencies) validate() error {
 	if dependencies.hardenSearchPath == nil || dependencies.requireBootstrapActor == nil ||
 		dependencies.readReservedObjects == nil || dependencies.lockStateTables == nil || dependencies.classify == nil ||
-		dependencies.verifyFrozen == nil || dependencies.readBootstrapCatalog == nil || dependencies.executeBootstrapSection == nil ||
+		dependencies.verifyPreparedLive == nil || dependencies.verifyFrozen == nil || dependencies.readBootstrapCatalog == nil || dependencies.executeBootstrapSection == nil ||
 		dependencies.validatePreMutationEvidence == nil || dependencies.preflightSourceEvidence == nil ||
 		dependencies.applyL2ACL == nil || dependencies.readReceiptSurface == nil || dependencies.compileReceipt == nil ||
 		dependencies.encodeReceipt == nil || dependencies.insertReceipt == nil || dependencies.recoverCommitAcknowledgement == nil ||
@@ -257,12 +259,30 @@ func bootstrapAppACLR2InTx(ctx context.Context, tx pgx.Tx, dependencies appACLR2
 	}
 	switch state {
 	case AppACLR2StatePrepared:
-		return nil
+		return dependencies.verifyPreparedLive(ctx, tx)
 	case AppACLR2StateR1:
 		return bootstrapAppACLR2FromExactR1InTx(ctx, tx, dependencies)
 	default:
 		return fmt.Errorf("APP ACL R2 bootstrap requires exact R1 or PREPARED state")
 	}
+}
+
+// verifyAppACLR2BootstrapPreparedLiveInTx is the OID-10-only PREPARED repeat
+// proof. It rechecks the exact receipt through the bootstrap catalog path,
+// which reads pg_control_system() before accepting the target state.
+func verifyAppACLR2BootstrapPreparedLiveInTx(ctx context.Context, tx pgx.Tx) error {
+	frozen, err := VerifyFrozenAppACLR1StateInTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	rows, err := readAppACLR2ReceiptRowsInTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if !appACLR2ExactL2Rows(rows) {
+		return fmt.Errorf("APP ACL R2 bootstrap PREPARED receipt rows are not exact")
+	}
+	return verifyAppACLR2BootstrapLiveL2EvidenceInTx(ctx, tx, frozen, rows[0])
 }
 
 func bootstrapAppACLR2FromExactR1InTx(ctx context.Context, tx pgx.Tx, dependencies appACLR2BootstrapDependencies) error {
@@ -658,6 +678,7 @@ type appACLR2BootstrapACKObserverDependencies struct {
 	readL2Rows            func(context.Context, pgx.Tx) ([]appACLR2ReceiptRowV1, error)
 	exactL2Rows           func([]appACLR2ReceiptRowV1) bool
 	verifyL2Evidence      func(context.Context, pgx.Tx, FrozenAppACLR1StateV1, appACLR2ReceiptRowV1) error
+	verifyPreparedLive    func(context.Context, pgx.Tx, FrozenAppACLR1StateV1, appACLR2ReceiptRowV1) error
 }
 
 func defaultAppACLR2BootstrapACKObserverDependencies() appACLR2BootstrapACKObserverDependencies {
@@ -669,12 +690,13 @@ func defaultAppACLR2BootstrapACKObserverDependencies() appACLR2BootstrapACKObser
 		readL2Rows:            readAppACLR2ReceiptRowsInTx,
 		exactL2Rows:           appACLR2ExactL2Rows,
 		verifyL2Evidence:      verifyAppACLR2L2EvidenceInTx,
+		verifyPreparedLive:    verifyAppACLR2BootstrapLiveL2EvidenceInTx,
 	}
 }
 
 func (dependencies appACLR2BootstrapACKObserverDependencies) validate() error {
 	if dependencies.hardenSearchPath == nil || dependencies.requireBootstrapActor == nil ||
-		dependencies.readReservedObjects == nil || dependencies.verifyFrozen == nil || dependencies.readL2Rows == nil || dependencies.exactL2Rows == nil || dependencies.verifyL2Evidence == nil {
+		dependencies.readReservedObjects == nil || dependencies.verifyFrozen == nil || dependencies.readL2Rows == nil || dependencies.exactL2Rows == nil || dependencies.verifyL2Evidence == nil || dependencies.verifyPreparedLive == nil {
 		return fmt.Errorf("APP ACL R2 bootstrap acknowledgement observer dependencies are incomplete")
 	}
 	return nil
@@ -758,5 +780,37 @@ func observeAppACLR2BootstrapACKRecoveryInTxWithDependencies(
 	if err := dependencies.verifyL2Evidence(ctx, tx, frozen, rows[0]); err != nil {
 		return appACLR2BootstrapACKOutcomeNone, err
 	}
+	if err := dependencies.verifyPreparedLive(ctx, tx, frozen, rows[0]); err != nil {
+		return appACLR2BootstrapACKOutcomeNone, err
+	}
 	return appACLR2BootstrapACKOutcomePrepared, nil
+}
+
+// verifyAppACLR2BootstrapLiveL2EvidenceInTx is the explicit OID-10-only
+// physical-identity check used before a PREPARED acknowledgement recovery is
+// reported as successful. It is deliberately separate from the shared
+// post-bootstrap continuity verifier.
+func verifyAppACLR2BootstrapLiveL2EvidenceInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	frozen FrozenAppACLR1StateV1,
+	row appACLR2ReceiptRowV1,
+) error {
+	receipt, err := ParseCanonicalAppACLR2BootstrapReceiptBodyV1(row.Body)
+	if err != nil {
+		return fmt.Errorf("parse APP ACL R2 bootstrap live receipt evidence: %w", err)
+	}
+	bootstrap, err := ReadAppACLR2BootstrapCatalogSnapshotInTx(ctx, tx, frozen)
+	if err != nil {
+		return err
+	}
+	surface, err := ReadAppACLR2ReceiptCatalogSnapshotInTx(ctx, tx, frozen)
+	if err != nil {
+		return err
+	}
+	surface.ReservedObjects = appACLR2FilterReservedObjects(surface.ReservedObjects, appACLR2L2ReservedObjects())
+	if err := VerifyAppACLR2BootstrapReceiptCatalogV1(receipt, bootstrap, surface, frozen); err != nil {
+		return fmt.Errorf("verify APP ACL R2 bootstrap live receipt evidence: %w", err)
+	}
+	return nil
 }
