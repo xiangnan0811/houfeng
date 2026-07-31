@@ -1741,7 +1741,7 @@ func (tx *appACLR2FinalizeConstrainedCatalogTx) QueryRow(ctx context.Context, sq
 
 func appACLR2FinalizeBootstrapOnlyProbe(sql string) bool {
 	normalized := strings.ToLower(sql)
-	for _, forbidden := range []string{"pg_control_", "pg_read_file(", "pg_read_binary_file(", "pg_stat_file(", "pg_ls_dir("} {
+	for _, forbidden := range []string{"pg_control_system()", "from pg_catalog.pg_control_", "pg_read_file(", "pg_read_binary_file(", "pg_stat_file(", "pg_ls_dir("} {
 		if strings.Contains(normalized, forbidden) {
 			return true
 		}

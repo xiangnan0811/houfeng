@@ -448,16 +448,15 @@ go test ./cmd/houfeng-record-platform-admin ./internal/center/platformmigrate ./
 > receipt/manifest wire, golden-vector, L2 three-object ACL, M2 SQL/ACL,
 > 53-source, 206-tuple, or hash change.
 >
-> **2026-07-29 KEEP_DIRECT_OWNER correction:** PostgreSQL 16 owner-native
-> privileges make the earlier revoked-owner expectation invalid. Slice 5 keeps
+> **2026-08-01 KEEP_DIRECT_OWNER effective-ACL correction:** Slice 5 keeps
 > direct M2 ownership, exact `aclexplode` owner self-rows, revoke-first DCL, the
 > fixed `0x06`/`0x02` ordinary-reader body, isolated `0052`, vectors, hashes,
-> one direct-migrator DSN, and no helper or ownership transfer. All seven queried
-> M2 table privileges are true for the direct owner; center runtime remains
-> `SELECT`-only and platform admin has none. `has_*_privilege` proves
-> reachability, not grant provenance. A revoked owner self-row remains corrupt
-> solely because the raw ACL shape is wrong while owner-native reachability
-> remains true. Keeping ownership accepts that a hostile owner can alter/drop
+> one direct-migrator DSN, and no helper or ownership transfer. The exact
+> effective vector is `SELECT`-only for both direct owner and center runtime,
+> with all six other table probes false and platform admin all false; only the
+> owner has helper `EXECUTE`. Removing the owner self-`SELECT`/`EXECUTE` row
+> makes both raw and effective evidence false, so exact M2 rejects. Keeping
+> ownership still accepts that a hostile owner can alter/drop
 > M2 objects, functions, constraints, or triggers, perform native DML, and grant
 > access; exact readback detects drift when run but cannot confine that owner.
 > Moving ownership is a material redesign requiring membership/`SET ROLE`, a
@@ -515,15 +514,18 @@ lane or any Slice 6/7, parent, Child 1, or PF-AC completion.
   roll back the whole attempt and retry within the cap; non-retryable DDL errors
   stop; exhaustion stops; and fixed embedded finalize-section/body cardinality
   and size bounds reject before mutation.
-- [x] Correct the owner-native verifier and tests: all seven direct-owner table
-  probes and owner helper `EXECUTE` are true, runtime is table-`SELECT`-only,
-  admin has none, and missing owner self-ACL rows fail the raw-ACL predicate
-  while owner-native probes remain true.
+- [x] Correct the owner/effective verifier and tests: owner and runtime are both
+  table-`SELECT`-only, all six other table probes and every admin probe are
+  false, only owner helper `EXECUTE` is true, and missing owner self-ACL rows
+  make both raw and effective evidence false.
 
-- [ ] P1 correction RED/TDD plan: prove the OID-10 bootstrap-only live reader
-  calls `pg_control_system()` and rejects a live-system/domain mismatch; prove
-  the shared constrained PREPARED/FINALIZED reader never calls it and succeeds
-  when a direct call would be SQLSTATE `42501`; reject fresh database OID/name
+- [ ] P1 correction RED/TDD plan: require deployment-owned pre-R1 provisioning
+  to revoke PUBLIC `EXECUTE` on the exact zero-argument
+  `pg_catalog.pg_control_system()` signature; prove the OID-10 bootstrap-only
+  live reader calls it and rejects a live-system/domain mismatch; prove the
+  shared constrained PREPARED/FINALIZED reader repeats owner/ACL/effective
+  metadata verification without invoking it and succeeds when a direct call
+  would be SQLSTATE `42501`; reject fresh database OID/name
   drift and receipt/domain disagreement; retain the bootstrap-only live verifier
   before ordinary PREPARED-repeat and bootstrap ACK-recovery success; and prove
   finalizer deletes private classifier/predicate/snapshot duplication and uses
@@ -541,14 +543,13 @@ lane or any Slice 6/7, parent, Child 1, or PF-AC completion.
   ACK loss. Its DCL/readback tests must require the two non-grantable
   direct-migrator/center-runtime `SELECT` entries on each M2 table and the one
   non-grantable direct-migrator `EXECUTE` entry on the helper. Add RED-first
-  unit cases that expect all seven direct-owner table probes and owner helper
-  `EXECUTE` true, only center-runtime table `SELECT` true, and every queried
-  platform-admin privilege false. The inverse fixtures remove an owner
-  self-`SELECT` or self-`EXECUTE` row while keeping those owner-native probes
-  true; they must fail the exact `aclexplode` predicate, not an effective-access
-  predicate. Grant option and extra-row variants also reject. Finalizer ACK
-  recovery may read through owner-native authority but must reject any raw ACL
-  shape other than the exact self-row baseline. The direct finalizer must lock a
+  unit cases that expect table `SELECT` only for both direct owner and center
+  runtime, all six other table probes false, every platform-admin probe false,
+  and only owner helper `EXECUTE` true. The inverse fixtures remove an owner
+  self-`SELECT` or self-`EXECUTE` row and require both raw and corresponding
+  effective evidence false; exact M2 rejects. Grant option and extra-row
+  variants also reject. Finalizer ACK recovery must reject any raw or effective
+  ACL shape other than the exact baseline. The direct finalizer must lock a
   present bootstrap-owned L2 receipt in `ACCESS SHARE`, never a stronger mode,
   and never grant itself receipt write privilege; all other present state/M2
   tables retain `SHARE ROW EXCLUSIVE`. The real PostgreSQL 16 lane must prove
@@ -575,10 +576,10 @@ lane or any Slice 6/7, parent, Child 1, or PF-AC completion.
   `EXECUTE` only to direct migrator; and (4) only after ACL normalization,
   FINALIZED readback re-reads receipt/catalog/head through the same shared
   constrained path before commit. That readback proves owner OID, explicit owner
-  self-ACL, and `has_*_privilege` separately without treating reachability as
-  ACL provenance. The corrected verifier expects all seven direct-owner table
-  privileges and owner helper `EXECUTE`, center-runtime `SELECT` only, and no
-  platform-admin table/function privilege;
+  self-ACL, and `has_*_privilege` separately. The corrected verifier expects
+  table `SELECT` only for direct owner and center runtime, all other table probes
+  false, owner helper `EXECUTE` only, and no platform-admin table/function
+  privilege;
   default-ACL absence never substitutes for the owner self-grants. No FINALIZED
   readback may occur before ACL normalization. Any error rolls back all M2
   DDL/DML to exact PREPARED.
@@ -796,8 +797,9 @@ job must be executable from a fresh runner: `runs-on: ubuntu-latest`, then
   bootstrap-only live binding through `pg_control_system()`, while direct
   migrator and runtime have no direct or effective `EXECUTE` on
   `pg_control_system()`, no `pg_monitor` membership,
-  and no `pg_control_system()` query in their PREPARED/FINALIZED classifier,
-  finalizer, or runtime traces. It must prove SQLSTATE `42501` for unreadable
+  and no `pg_control_system()` invocation in their PREPARED/FINALIZED
+  classifier, finalizer, or runtime traces. Catalog-only signature/ACL reads are
+  required. It must prove SQLSTATE `42501` for unreadable
   present L2/M2 evidence, fresh database OID/name rejection, unchanged
   206-tuple/L2/M2 contracts, and both accepted residual risks: no clone/restore
   detection claim and no confinement claim against the direct M2 owner. Run and
@@ -807,8 +809,8 @@ job must be executable from a fresh runner: `runs-on: ubuntu-latest`, then
   ownership is the real PG16 reader-authority matrix. The real
   PG16 reader matrix must retain documented authority for existing authorized
   R1 evidence readers; allow PREPARED only with native L2 `SELECT`; allow
-  FINALIZED only for direct migrator with owner-native M2 authority and center
-  runtime with granted M2 `SELECT`; propagate SQLSTATE `42501` for
+  FINALIZED only for direct migrator and center runtime with exact granted M2
+  `SELECT`; propagate SQLSTATE `42501` for
   platform-admin/unrelated callers
   when a present evidence relation is unreadable without translating it to
   `CORRUPT`; prove bootstrap does not invoke FINALIZED classification; and
@@ -816,15 +818,15 @@ job must be executable from a fresh runner: `runs-on: ubuntu-latest`, then
   In every PG16 lane, begin with a normal direct-owner finalization and assert
   the exact M2 owner/self-ACL baseline separately: `aclexplode` contains the two
   non-grantable table entries and one non-grantable helper entry, including the
-  owner rows; all seven queried privileges are true for direct migrator on both
-  tables; owner helper `EXECUTE` is true; center runtime has table `SELECT` only
-  and no helper `EXECUTE`; and platform admin has none. Then run inverse owner
+  owner rows; direct migrator and center runtime have table `SELECT` only, all
+  other table probes are false, owner helper `EXECUTE` is true, runtime helper
+  `EXECUTE` is false, and platform admin has none. Then run inverse owner
   revocation regressions: remove direct migrator's self-`SELECT` or
   self-`EXECUTE` row while retaining the same owner OID and prove the relevant
-  owner-native `has_*_privilege` stays true while the exact raw-ACL predicate,
-  classifier, normal repeat, and finalizer ACK-loss recovery reject the shape.
-  The ACK-loss success lane must prove exact self-ACL evidence but must not claim
-  that the self-row, rather than ownership, caused the M2 read.
+  corresponding `has_*_privilege` becomes false while the exact raw-ACL
+  predicate, classifier, normal repeat, and finalizer ACK-loss recovery reject
+  the shape. The ACK-loss success lane must prove exact raw and effective
+  self-ACL evidence.
   One real PG16 commit-ACK-loss scenario must let bootstrap commit PREPARED and
   then have recovery observe that the database has already advanced to exact
   FINALIZED (or begin recovery against an already exact FINALIZED database).

@@ -139,6 +139,25 @@ type AppACLR2ReservedCatalogObjectV1 struct {
 	Detail   string
 }
 
+type AppACLR2PGControlSystemGrantCatalogV1 struct {
+	GrantorOID  uint32
+	GranteeOID  uint32
+	Privilege   string
+	GrantOption bool
+}
+
+type AppACLR2PGControlSystemCatalogV1 struct {
+	FunctionCount         uint16
+	OID                   uint32
+	OwnerOID              uint32
+	ACLIsNull             bool
+	Grants                []AppACLR2PGControlSystemGrantCatalogV1
+	BootstrapExecute      bool
+	DirectMigratorExecute bool
+	CenterRuntimeExecute  bool
+	PlatformAdminExecute  bool
+}
+
 // AppACLR2BootstrapCatalogSnapshotV1 is the pre-existing local catalog proof
 // read before the bootstrap-owned L2 surface is created.
 type AppACLR2BootstrapCatalogSnapshotV1 struct {
@@ -150,6 +169,7 @@ type AppACLR2BootstrapCatalogSnapshotV1 struct {
 	BootstrapDefaultACLCount uint16
 	Domains                  []AppACLDomainR2V1
 	Roles                    []AppACLR2CatalogRoleStateV1
+	PGControlSystem          AppACLR2PGControlSystemCatalogV1
 	Extension                AppACLR2PGCryptoExtensionCatalogV1
 	Members                  []AppACLR2PGCryptoMemberCatalogV1
 }
@@ -166,6 +186,7 @@ type AppACLR2PostBootstrapCatalogSnapshotV1 struct {
 	BootstrapDefaultACLCount uint16
 	Domains                  []AppACLDomainR2V1
 	Roles                    []AppACLR2CatalogRoleStateV1
+	PGControlSystem          AppACLR2PGControlSystemCatalogV1
 	Extension                AppACLR2PGCryptoExtensionCatalogV1
 	Members                  []AppACLR2PGCryptoMemberCatalogV1
 }
@@ -200,8 +221,9 @@ func ReadAppACLR2BootstrapCatalogSnapshotInTx(
 }
 
 // ReadAppACLR2PostBootstrapCatalogSnapshotInTx reads fresh catalog facts for
-// post-bootstrap continuity. It never queries pg_control_system() and cannot
-// present persisted system-identifier bytes as newly observed physical proof.
+// post-bootstrap continuity. It reads pg_control_system() ACL metadata but
+// never invokes the function or presents persisted system-identifier bytes as
+// newly observed physical proof.
 func ReadAppACLR2PostBootstrapCatalogSnapshotInTx(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -430,9 +452,15 @@ func appACLR2PostBootstrapCatalogSnapshotFromBootstrap(
 		BootstrapDefaultACLCount: snapshot.BootstrapDefaultACLCount,
 		Domains:                  append([]AppACLDomainR2V1(nil), snapshot.Domains...),
 		Roles:                    append([]AppACLR2CatalogRoleStateV1(nil), snapshot.Roles...),
+		PGControlSystem:          cloneAppACLR2PGControlSystemCatalog(snapshot.PGControlSystem),
 		Extension:                snapshot.Extension,
 		Members:                  append([]AppACLR2PGCryptoMemberCatalogV1(nil), snapshot.Members...),
 	}
+}
+
+func cloneAppACLR2PGControlSystemCatalog(value AppACLR2PGControlSystemCatalogV1) AppACLR2PGControlSystemCatalogV1 {
+	value.Grants = append([]AppACLR2PGControlSystemGrantCatalogV1(nil), value.Grants...)
+	return value
 }
 
 func validateFrozenAppACLR1StateForReceipt(state FrozenAppACLR1StateV1) error {
@@ -538,6 +566,9 @@ func validateAppACLR2PostBootstrapCatalog(
 			return AppACLDomainR2V1{}, nil, fmt.Errorf("APP ACL R2 role %q is not a constrained direct role", role.Name)
 		}
 	}
+	if err := validateAppACLR2PGControlSystemCatalog(snapshot.PGControlSystem, roles); err != nil {
+		return AppACLDomainR2V1{}, nil, err
+	}
 	if snapshot.BootstrapDefaultACLCount != 0 {
 		return AppACLDomainR2V1{}, nil, fmt.Errorf("APP ACL R2 bootstrap owner has %d forbidden default ACL rows", snapshot.BootstrapDefaultACLCount)
 	}
@@ -563,6 +594,30 @@ func validateAppACLR2PostBootstrapCatalog(
 		return AppACLDomainR2V1{}, nil, err
 	}
 	return domain, roles, nil
+}
+
+func validateAppACLR2PGControlSystemCatalog(
+	catalog AppACLR2PGControlSystemCatalogV1,
+	roles map[AppACLControlRoleR2]AppACLR2CatalogRoleStateV1,
+) error {
+	if catalog.FunctionCount != 1 || catalog.OID == 0 {
+		return fmt.Errorf("APP ACL R2 pg_control_system() signature catalog has %d functions, want 1", catalog.FunctionCount)
+	}
+	bootstrap := roles[AppACLControlRoleBootstrapSuperuserR2]
+	if catalog.OwnerOID != 10 || catalog.OwnerOID != bootstrap.OID {
+		return fmt.Errorf("APP ACL R2 pg_control_system() owner is not bootstrap OID 10")
+	}
+	if catalog.ACLIsNull || len(catalog.Grants) != 1 {
+		return fmt.Errorf("APP ACL R2 pg_control_system() ACL is not explicit owner-only EXECUTE")
+	}
+	grant := catalog.Grants[0]
+	if grant.GrantorOID != catalog.OwnerOID || grant.GranteeOID != catalog.OwnerOID || grant.Privilege != "EXECUTE" || grant.GrantOption {
+		return fmt.Errorf("APP ACL R2 pg_control_system() ACL is not explicit owner-only EXECUTE")
+	}
+	if !catalog.BootstrapExecute || catalog.DirectMigratorExecute || catalog.CenterRuntimeExecute || catalog.PlatformAdminExecute {
+		return fmt.Errorf("APP ACL R2 pg_control_system() effective EXECUTE privileges have drift")
+	}
+	return nil
 }
 
 func validateAppACLR2PGCryptoCatalogMembers(
@@ -916,7 +971,109 @@ func readAppACLR2PostBootstrapCatalogSnapshotPostgres(
 	if snapshot.Members, err = readAppACLR2PGCryptoMembersInTx(ctx, tx); err != nil {
 		return AppACLR2PostBootstrapCatalogSnapshotV1{}, err
 	}
+	if snapshot.PGControlSystem, err = readAppACLR2PGControlSystemCatalogInTx(ctx, tx, snapshot.Roles); err != nil {
+		return AppACLR2PostBootstrapCatalogSnapshotV1{}, err
+	}
 	return snapshot, nil
+}
+
+func readAppACLR2PGControlSystemCatalogInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	roles []AppACLR2CatalogRoleStateV1,
+) (catalog AppACLR2PGControlSystemCatalogV1, err error) {
+	if len(roles) != 4 {
+		return AppACLR2PGControlSystemCatalogV1{}, fmt.Errorf("read APP ACL R2 pg_control_system() catalog without exact transition roles")
+	}
+	rows, err := tx.Query(ctx, `
+		select procedure.oid::bigint,
+		       procedure.proowner::bigint,
+		       procedure.proacl is null,
+		       coalesce(acl_grant.grantor::bigint, 0),
+		       coalesce(acl_grant.grantee::bigint, 0),
+		       coalesce(acl_grant.privilege_type::text, ''),
+		       coalesce(acl_grant.is_grantable, false),
+		       pg_catalog.has_function_privilege(10::pg_catalog.oid, procedure.oid, 'EXECUTE'),
+		       pg_catalog.has_function_privilege($1::pg_catalog.oid, procedure.oid, 'EXECUTE'),
+		       pg_catalog.has_function_privilege($2::pg_catalog.oid, procedure.oid, 'EXECUTE'),
+		       pg_catalog.has_function_privilege($3::pg_catalog.oid, procedure.oid, 'EXECUTE')
+		from pg_catalog.pg_proc procedure
+		join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
+		left join lateral pg_catalog.aclexplode(procedure.proacl) acl_grant on true
+		where namespace.nspname = 'pg_catalog'
+		  and procedure.proname = 'pg_control_system'
+		  and pg_catalog.pg_get_function_identity_arguments(procedure.oid) = ''
+		order by procedure.oid, acl_grant.grantee, acl_grant.privilege_type
+	`, int64(roles[1].OID), int64(roles[2].OID), int64(roles[3].OID))
+	if err != nil {
+		return AppACLR2PGControlSystemCatalogV1{}, fmt.Errorf("read APP ACL R2 pg_control_system() catalog: %w", err)
+	}
+	defer appACLR2CatalogFinishRows(rows, &err, "iterate APP ACL R2 pg_control_system() catalog")
+
+	var previousOID uint32
+	for rows.Next() {
+		var oid, ownerOID, grantorOID, granteeOID int64
+		var privilege string
+		var grantOption bool
+		var aclIsNull, bootstrapExecute, directExecute, runtimeExecute, adminExecute bool
+		if err := rows.Scan(
+			&oid,
+			&ownerOID,
+			&aclIsNull,
+			&grantorOID,
+			&granteeOID,
+			&privilege,
+			&grantOption,
+			&bootstrapExecute,
+			&directExecute,
+			&runtimeExecute,
+			&adminExecute,
+		); err != nil {
+			return AppACLR2PGControlSystemCatalogV1{}, fmt.Errorf("scan APP ACL R2 pg_control_system() catalog: %w", err)
+		}
+		functionOID, conversionErr := appACLR2CatalogUint32(oid, "pg_control_system() OID")
+		if conversionErr != nil {
+			return AppACLR2PGControlSystemCatalogV1{}, conversionErr
+		}
+		functionOwnerOID, conversionErr := appACLR2CatalogUint32(ownerOID, "pg_control_system() owner OID")
+		if conversionErr != nil {
+			return AppACLR2PGControlSystemCatalogV1{}, conversionErr
+		}
+		if functionOID != previousOID {
+			if catalog.FunctionCount == ^uint16(0) {
+				return AppACLR2PGControlSystemCatalogV1{}, fmt.Errorf("APP ACL R2 pg_control_system() signature catalog is too large")
+			}
+			catalog.FunctionCount++
+			previousOID = functionOID
+			if catalog.FunctionCount == 1 {
+				catalog.OID = functionOID
+				catalog.OwnerOID = functionOwnerOID
+				catalog.ACLIsNull = aclIsNull
+				catalog.BootstrapExecute = bootstrapExecute
+				catalog.DirectMigratorExecute = directExecute
+				catalog.CenterRuntimeExecute = runtimeExecute
+				catalog.PlatformAdminExecute = adminExecute
+			}
+		}
+		if privilege == "" {
+			continue
+		}
+		grantor, conversionErr := appACLR2CatalogOptionalOID(grantorOID, "pg_control_system() ACL grantor OID")
+		if conversionErr != nil {
+			return AppACLR2PGControlSystemCatalogV1{}, conversionErr
+		}
+		grantee, conversionErr := appACLR2CatalogOptionalOID(granteeOID, "pg_control_system() ACL grantee OID")
+		if conversionErr != nil {
+			return AppACLR2PGControlSystemCatalogV1{}, conversionErr
+		}
+		catalog.Grants = append(catalog.Grants, AppACLR2PGControlSystemGrantCatalogV1{
+			GrantorOID: grantor, GranteeOID: grantee, Privilege: privilege, GrantOption: grantOption,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return AppACLR2PGControlSystemCatalogV1{}, fmt.Errorf("iterate APP ACL R2 pg_control_system() catalog: %w", err)
+	}
+	return catalog, nil
 }
 
 func readAppACLR2BootstrapLiveSystemIdentifierInTx(ctx context.Context, tx pgx.Tx) (string, error) {
@@ -943,6 +1100,7 @@ func appACLR2BootstrapCatalogSnapshotFromPostBootstrap(
 		BootstrapDefaultACLCount: snapshot.BootstrapDefaultACLCount,
 		Domains:                  append([]AppACLDomainR2V1(nil), snapshot.Domains...),
 		Roles:                    append([]AppACLR2CatalogRoleStateV1(nil), snapshot.Roles...),
+		PGControlSystem:          cloneAppACLR2PGControlSystemCatalog(snapshot.PGControlSystem),
 		Extension:                snapshot.Extension,
 		Members:                  append([]AppACLR2PGCryptoMemberCatalogV1(nil), snapshot.Members...),
 	}

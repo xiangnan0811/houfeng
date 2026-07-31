@@ -47,6 +47,40 @@ func TestDockerEntrypointAcceptsSecretFileInputs(t *testing.T) {
 	}
 }
 
+func TestAppACLR2PreR1ProvisioningRevokesPGControlSystemFromPublic(t *testing.T) {
+	root := repoRoot(t)
+	provisioning := readText(t, filepath.Join(root, "docs", "deploy", "app-acl-r2-pre-r1-provisioning.sql"))
+	guide := readText(t, filepath.Join(root, "docs", "deploy", "local-and-systemd.md"))
+	runtimeReader := readText(t, filepath.Join(root, "internal", "center", "store", "migrate", "app_acl_r2_receipt_postgres.go"))
+
+	for _, required := range []string{
+		"REVOKE EXECUTE ON FUNCTION pg_catalog.pg_control_system() FROM PUBLIC;",
+		"pg_catalog.pg_get_function_identity_arguments(procedure.oid) = ''",
+		"procedure.proowner = 10",
+	} {
+		if !strings.Contains(provisioning, required) {
+			t.Fatalf("APP ACL R2 pre-R1 provisioning SQL must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{"0051_create_record_platform_foundation", "0052_app_acl_r2_privileged_transition"} {
+		if strings.Contains(provisioning, forbidden) {
+			t.Fatalf("APP ACL R2 pre-R1 provisioning SQL must not depend on migration %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"docker compose --env-file docs/deploy/compose.env up -d db",
+		"docs/deploy/app-acl-r2-pre-r1-provisioning.sql",
+		"docker compose --env-file docs/deploy/compose.env up -d houfeng",
+	} {
+		if !strings.Contains(guide, required) {
+			t.Fatalf("deployment guide must contain pre-R1 provisioning step %q", required)
+		}
+	}
+	if strings.Contains(strings.ToUpper(runtimeReader), "REVOKE EXECUTE ON FUNCTION PG_CATALOG.PG_CONTROL_SYSTEM") {
+		t.Fatal("APP ACL R2 runtime catalog reader must not repair pg_control_system() privileges")
+	}
+}
+
 func TestComposeUsesNamedLogVolumeForNonRootContainer(t *testing.T) {
 	root := repoRoot(t)
 	compose := readText(t, filepath.Join(root, "compose.yaml"))

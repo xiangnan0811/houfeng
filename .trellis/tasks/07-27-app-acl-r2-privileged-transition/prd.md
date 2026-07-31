@@ -51,20 +51,17 @@ as a healthy R1 or R2 deployment.
   narrow receipt/helper surface. The accepted baseline is
   `pg_extension.extowner = direct_migrator` and every member `proowner = 10`;
   R2 performs no ownership transition.
-- Direct M2 ownership is intentional and its PostgreSQL 16 authority is part of
-  the accepted boundary. For each direct-migrator-owned M2 table, all seven
-  queried native privileges (`SELECT`, `INSERT`, `UPDATE`, `DELETE`,
-  `TRUNCATE`, `REFERENCES`, and `TRIGGER`) are true; the owned M2 helper is
-  natively executable. Center runtime remains table-`SELECT`-only with no
-  helper `EXECUTE`, and platform admin has none of those table/function
-  privileges.
+- Direct M2 ownership is intentional, but ownership is not accepted as an
+  effective-privilege substitute. For each direct-migrator-owned M2 table,
+  direct migrator and center runtime have only `SELECT`; their `INSERT`,
+  `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`, and `TRIGGER` probes are false,
+  and platform admin has none of the seven privileges. Only direct migrator has
+  helper `EXECUTE`.
 - Exact non-grantable direct-migrator self-`SELECT`/`EXECUTE` ACL rows remain
-  mandatory `aclexplode` shape evidence even though ownership independently
-  provides native authority. `has_table_privilege` and
-  `has_function_privilege` prove reachability, not grant provenance: revoking
-  an owner self-row leaves owner-native access true but makes the raw ACL shape
-  corrupt. The fixed M2 `0x06`/`0x02` masks describe intended ordinary
-  reader access only; they do not encode the owner's complete capability set.
+  mandatory `aclexplode` shape evidence. `has_table_privilege` and
+  `has_function_privilege` are separately exact: removing an owner self-row
+  makes both the raw row and its effective `SELECT`/`EXECUTE` false, and exact
+  M2 rejects. The fixed M2 `0x06`/`0x02` masks remain unchanged.
 - Role membership, `SET ROLE`, ownership transfer, catalog DML, and extension
   drop/recreate are unsupported. Receipt access is direct-migrator/runtime
   `SELECT` only, with no admin/PUBLIC access.
@@ -73,6 +70,12 @@ as a healthy R1 or R2 deployment.
   classification is permitted. R2 provides no `EXECUTE` grant on
   `pg_control_system()`, no `pg_monitor` membership, no helper, no second DSN,
   and no new ACL surface for that function.
+- Deployment-owned provisioning must run
+  `docs/deploy/app-acl-r2-pre-r1-provisioning.sql` in every target database as
+  the bootstrap superuser/function owner immediately after database creation
+  and before R1 or any APP credential use. Stock PostgreSQL 16 has
+  `proacl = NULL` with PUBLIC `EXECUTE`; provisioning revokes that grant. R2
+  never repairs it.
 - States are only R1, PREPARED, and FINALIZED. Bootstrap prepares in a
   serializable transaction; finalizer creates the new direct-migrator-owned M2
   revision/head relation pair and commits M2/head in one serializable
@@ -92,7 +95,9 @@ as a healthy R1 or R2 deployment.
   post-bootstrap continuity predicate: persisted receipt/domain and, when M2
   exists, M2-domain equality, plus fresh database OID/name, allowed
   server/version, role/membership, extension/member/dependency/owner/ACL, and
-  source facts. They neither call nor claim a fresh physical system identifier.
+  source facts plus the provisioned `pg_control_system()` owner/ACL/effective
+  privilege contract. They never invoke the function and neither read nor claim
+  a fresh physical system identifier.
 - The R2 PG16/extension proof is only an in-transaction local catalog baseline:
   allowed PostgreSQL 16 version and exact pgcrypto extension/member/dependency/
   owner/ACL facts. It does not prove file bytes, paths or symlink resistance,
@@ -100,10 +105,12 @@ as a healthy R1 or R2 deployment.
   those claims. It also does not promise session drain, physical clone/restore
   detection, or cluster liveness/attestation.
 - Only bootstrap reads a bootstrap DSN and only finalize reads a direct-
-  migrator DSN. Only bootstrap queries `pg_control_system()`; direct migrator
-  and runtime must succeed without an `EXECUTE` grant or `pg_monitor`
-  membership and never query it. Wrong privilege, OID, allowed server/version,
-  member, dependency, role, ACL, or domain state rejects before mutation.
+  migrator DSN. Only bootstrap invokes `pg_control_system()`; shared
+  post-bootstrap readers resolve its exact signature and read ACL/effective
+  metadata without calling it. Direct migrator, runtime, admin, and PUBLIC have
+  no direct or effective `EXECUTE`, and the transition roles have no recursive
+  membership including `pg_monitor`. Wrong privilege is rejected without
+  repair before mutation.
 - Keeping direct ownership explicitly accepts residual owner-bypass risk. A
   hostile or compromised `direct_migrator` can use its native DDL/DCL/DML
   authority to alter or drop M2 relations, functions, constraints, or triggers
@@ -272,27 +279,28 @@ implementation, CI run, review, or parent acceptance is complete.
   duplicate-free tuples; it rejects 205, 207, R1 magic, unknown binding,
   noncanonical ordering, trailing bytes, and checksum substitution.
 - [ ] Bootstrap accepts only a direct PostgreSQL 16 superuser OID 10 session,
-  validates R1/domain before mutation, performs the bootstrap-only live binding
-  through `pg_control_system()` before its initial PREPARED commit, records the
+  validates R1/domain and the externally provisioned owner-only
+  `pg_control_system()` ACL before mutation, performs the bootstrap-only live
+  binding through `pg_control_system()` before its initial PREPARED commit, records the
   immutable receipt/ledger, and grants only direct migrator/runtime receipt
   SELECT.
 - [ ] The shared constrained post-bootstrap continuity predicate proves
   receipt/domain and, for FINALIZED, M2-domain equality plus fresh
   receipt-bound database OID/name, application-source, ACL, role,
-  allowed-PG16/version, extension/member/dependency/owner, helper, and access
-  facts. It does not read a fresh physical system identifier.
+  allowed-PG16/version, extension/member/dependency/owner, helper,
+  `pg_control_system()` ACL/effective access, and other access facts. It does
+  not invoke that function or read a fresh physical system identifier.
 - [ ] Finalize accepts only direct constrained migrator identity, reads exact
   PREPARED receipt, creates an R2-specific direct-migrator-owned M2
   revision/head relation pair with one M2/one head and a read-only immutable M1
   link, and commits all DDL/DML in one serializable transaction.
 - [ ] Finalize applies the fixed revoke-first DCL and proves exact
-  `aclexplode` rows independently from native reachability. PostgreSQL 16 unit
-  and regression coverage proves all seven queried table privileges true for
-  the direct owner, only `SELECT` true for center runtime, none true for
-  platform admin, and owner helper `EXECUTE` true. Removing an owner self-row
-  must still classify the raw ACL as corrupt while leaving owner-native
-  `has_*_privilege` true. The fixed `0x06`/`0x02` bodies, SQL, vectors, and
-  hashes do not change.
+  `aclexplode` rows and the effective vector. PostgreSQL 16 unit and regression
+  coverage proves only `SELECT` true for both direct owner and center runtime,
+  all other table probes false, platform admin all false, and only the owner
+  helper `EXECUTE` true. Removing an owner self-row makes the corresponding raw
+  and effective evidence false and exact M2 rejects. The fixed `0x06`/`0x02`
+  bodies, SQL, vectors, and hashes do not change.
 - [ ] Full state classification, admission, and finalizer ACK loss accept only
   exact R1/PREPARED/FINALIZED catalog/source/ledger/ACL predicates. The sole
   bootstrap ACK-loss exception is a private observer that proves only exact R1
@@ -343,7 +351,8 @@ implementation, CI run, review, or parent acceptance is complete.
   Decision C's constrained-reader/shared-continuity correction remains
   prospective: before Slice 5 finalizer acceptance, the shared classifier is
   corrected and tested so its post-bootstrap continuity path never invokes the
-  bootstrap-only live reader or `pg_control_system()`. Finalizer then consumes
+  bootstrap-only live reader or calls `pg_control_system()`. It still repeats
+  the exact signature/ACL/effective metadata proof. Finalizer then consumes
   that one corrected shared path for preflight, readback, normal repeat, and ACK
   recovery, with no private classifier, predicate, or snapshot fork. This is
   not a Slice 5 or PostgreSQL 16 completion claim.
@@ -375,7 +384,7 @@ implementation, CI run, review, or parent acceptance is complete.
 - [x] Slice 5 resolves its five source-level quality findings with ordered
   specification and independent quality review: strict explicit finalizer
   connection source, bounded ACK-retry continuation, real constrained-wrapper
-  instantiation, DDL retry/bounds matrix, and corrected owner-native
+  instantiation, DDL retry/bounds matrix, and corrected owner/effective
   verifier/tests. This checkbox records only current source, focused Go
   verification, and the two Slice 5 reviews; it is not PostgreSQL 16,
   Slice 6/7, R2 total-acceptance, Child 1, or PF-AC evidence.
@@ -398,7 +407,7 @@ implementation, CI run, review, or parent acceptance is complete.
   P0/P1/P2 = 0.
 - Scope evidenced by those reviews: isolated `0052` M2 DDL/source digest,
   direct-finalizer command/opener, serializable finalizer/ACK path, shared
-  catalog continuity, and owner-self-ACL versus native-privilege verifier
+  catalog continuity, and owner-self-ACL plus effective-privilege verifier
   tests. The quality gate reported focused selector, affected-package `go vet`,
   `gofmt -d`, and `git diff --check` exit code 0.
 - Boundary: this note does not check any Slice 6/7, PG16 integration/image

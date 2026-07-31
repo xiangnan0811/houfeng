@@ -46,6 +46,25 @@ Expected release outputs under `dist/`:
 
 `build-agent-release` stamps the agent heartbeat version with the same `VERSION` value used in the artifact names. The center-served installer script is fetched from the deployed center; GitHub Release is only used for these binary and signed-checksum assets. Maintainers must configure `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY` in GitHub Secrets with the secret key matching the installer-pinned public key before publishing installable agent assets. If the key is encrypted, also set `HOUFENG_RELEASE_MINISIGN_PASSWORD`. Target hosts need `minisign` to verify the signed checksum manifest. The generated command includes `--install-missing-deps`, so if `minisign` is absent the installer downloads the pinned upstream static verifier, checks its SHA256, installs it to `/usr/local/bin/minisign`, and only then verifies Houfeng release assets.
 
+## PostgreSQL pre-R1 provisioning
+
+Every target PostgreSQL database must be provisioned immediately after it is
+created and before R1 migrations or any APP credential is used. Connect as the
+bootstrap superuser or the owner of `pg_catalog.pg_control_system()` and run:
+
+```bash
+psql -X -v ON_ERROR_STOP=1 --dbname "$BOOTSTRAP_DATABASE_URL" \
+  --file docs/deploy/app-acl-r2-pre-r1-provisioning.sql
+```
+
+The provisioning transaction resolves the zero-argument function by catalog
+signature, requires owner OID 10, revokes PUBLIC `EXECUTE`, and verifies the
+resulting explicit owner-only ACL. Stock PostgreSQL 16 grants PUBLIC
+`EXECUTE`; an unprovisioned database is therefore intentionally rejected by
+APP ACL R2 bootstrap. Neither application migrations nor the R2 bootstrap
+repairs this privilege. Repeat this step for every newly created target
+database before distributing direct-migrator, runtime, or admin credentials.
+
 ## Center environment
 
 Minimum `/etc/houfeng/center.env`:
@@ -98,7 +117,11 @@ Prerequisites: Docker with Compose support, and an operator-managed HTTPS revers
 cp docs/deploy/compose.env.example docs/deploy/compose.env
 # edit docs/deploy/compose.env and replace the database/admin passwords and session HMAC key
 # optionally set HOUFENG_PUBLIC_BASE_URL before agent onboarding
-docker compose --env-file docs/deploy/compose.env up -d
+docker compose --env-file docs/deploy/compose.env up -d db
+docker compose --env-file docs/deploy/compose.env exec -T db \
+  psql -X -v ON_ERROR_STOP=1 -U houfeng -d houfeng \
+  < docs/deploy/app-acl-r2-pre-r1-provisioning.sql
+docker compose --env-file docs/deploy/compose.env up -d houfeng
 ```
 
 The default Compose file pulls and runs `linnea7171/houfeng:latest`. The project image contains `houfeng-center`, a small runtime entrypoint, and baked `web/dist`; the image runs as the non-root `houfeng` user by default and ultimately runs only `houfeng-center` with `HOUFENG_HTTP_ADDR=:16001`, `HOUFENG_WEB_DIST_DIR=/app/web/dist`, and `HOUFENG_LOG_FILE=/var/log/houfeng/center.log`, so no host-mounted `web/dist` directory is required. The entrypoint assembles `HOUFENG_DATABASE_URL` from values loaded from `docs/deploy/compose.env`; it does not perform runtime privilege dropping. The root `Dockerfile` is published by the release-only Docker image workflow; the default quick-start still pulls the published image and does not build locally.

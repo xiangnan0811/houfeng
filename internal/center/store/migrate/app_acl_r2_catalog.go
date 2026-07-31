@@ -1419,7 +1419,7 @@ func verifyAppACLR2M2RelationEffectivePrivilegesInTx(
 		); err != nil {
 			return fmt.Errorf("scan APP ACL R2 M2 effective table privilege: %w", err)
 		}
-		if !directSelect || !directInsert || !directUpdate || !directDelete || !directTruncate || !directReferences || !directTrigger ||
+		if !directSelect || directInsert || directUpdate || directDelete || directTruncate || directReferences || directTrigger ||
 			!runtimeSelect || runtimeInsert || runtimeUpdate || runtimeDelete || runtimeTruncate || runtimeReferences || runtimeTrigger ||
 			adminSelect || adminInsert || adminUpdate || adminDelete || adminTruncate || adminReferences || adminTrigger {
 			return fmt.Errorf("APP ACL R2 M2 relation %q has effective privilege drift", name)

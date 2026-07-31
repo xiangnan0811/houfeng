@@ -105,6 +105,33 @@ func TestAppACLR2ReceiptPostgresCatalogSnapshotRejectsDrift(t *testing.T) {
 		{name: "role membership", mutate: func(value *AppACLR2BootstrapCatalogSnapshotV1, _ *AppACLR2ReceiptCatalogSnapshotV1, _ *FrozenAppACLR1StateV1) {
 			value.Roles[2].RecursiveMembershipCount = 1
 		}, want: "membership"},
+		{name: "missing pg_control_system signature", mutate: func(value *AppACLR2BootstrapCatalogSnapshotV1, _ *AppACLR2ReceiptCatalogSnapshotV1, _ *FrozenAppACLR1StateV1) {
+			value.PGControlSystem.FunctionCount = 0
+		}, want: "pg_control_system"},
+		{name: "pg_control_system owner", mutate: func(value *AppACLR2BootstrapCatalogSnapshotV1, _ *AppACLR2ReceiptCatalogSnapshotV1, _ *FrozenAppACLR1StateV1) {
+			value.PGControlSystem.OwnerOID = 11
+		}, want: "owner"},
+		{name: "pg_control_system default ACL", mutate: func(value *AppACLR2BootstrapCatalogSnapshotV1, _ *AppACLR2ReceiptCatalogSnapshotV1, _ *FrozenAppACLR1StateV1) {
+			value.PGControlSystem.ACLIsNull = true
+		}, want: "owner-only"},
+		{name: "pg_control_system PUBLIC grant", mutate: func(value *AppACLR2BootstrapCatalogSnapshotV1, _ *AppACLR2ReceiptCatalogSnapshotV1, _ *FrozenAppACLR1StateV1) {
+			value.PGControlSystem.Grants = append(value.PGControlSystem.Grants, AppACLR2PGControlSystemGrantCatalogV1{GrantorOID: 10, Privilege: "EXECUTE"})
+		}, want: "owner-only"},
+		{name: "pg_control_system owner grant option", mutate: func(value *AppACLR2BootstrapCatalogSnapshotV1, _ *AppACLR2ReceiptCatalogSnapshotV1, _ *FrozenAppACLR1StateV1) {
+			value.PGControlSystem.Grants[0].GrantOption = true
+		}, want: "owner-only"},
+		{name: "pg_control_system bootstrap effective denial", mutate: func(value *AppACLR2BootstrapCatalogSnapshotV1, _ *AppACLR2ReceiptCatalogSnapshotV1, _ *FrozenAppACLR1StateV1) {
+			value.PGControlSystem.BootstrapExecute = false
+		}, want: "effective EXECUTE"},
+		{name: "pg_control_system direct effective grant", mutate: func(value *AppACLR2BootstrapCatalogSnapshotV1, _ *AppACLR2ReceiptCatalogSnapshotV1, _ *FrozenAppACLR1StateV1) {
+			value.PGControlSystem.DirectMigratorExecute = true
+		}, want: "effective EXECUTE"},
+		{name: "pg_control_system runtime effective grant", mutate: func(value *AppACLR2BootstrapCatalogSnapshotV1, _ *AppACLR2ReceiptCatalogSnapshotV1, _ *FrozenAppACLR1StateV1) {
+			value.PGControlSystem.CenterRuntimeExecute = true
+		}, want: "effective EXECUTE"},
+		{name: "pg_control_system admin effective grant", mutate: func(value *AppACLR2BootstrapCatalogSnapshotV1, _ *AppACLR2ReceiptCatalogSnapshotV1, _ *FrozenAppACLR1StateV1) {
+			value.PGControlSystem.PlatformAdminExecute = true
+		}, want: "effective EXECUTE"},
 		{name: "bootstrap default ACL", mutate: func(value *AppACLR2BootstrapCatalogSnapshotV1, _ *AppACLR2ReceiptCatalogSnapshotV1, _ *FrozenAppACLR1StateV1) {
 			value.BootstrapDefaultACLCount = 1
 		}, want: "default ACL"},
@@ -236,8 +263,8 @@ func TestAppACLR2PostBootstrapCatalogReaderDoesNotReadPhysicalSystemIdentifier(t
 		t.Fatal("post-bootstrap catalog reader exposes a physical system identifier field")
 	}
 	for _, query := range append(tx.queryTexts, tx.queryRowTexts...) {
-		if strings.Contains(strings.ToLower(query), "pg_control_system") {
-			t.Fatalf("post-bootstrap catalog reader queried bootstrap-only pg_control_system(): %s", query)
+		if strings.Contains(strings.ToLower(query), "pg_control_system()") {
+			t.Fatalf("post-bootstrap catalog reader invoked bootstrap-only pg_control_system(): %s", query)
 		}
 	}
 	assertScriptedAppACLR2ReceiptQueriesAreIdentityNeutral(t, tx)
@@ -281,8 +308,8 @@ func TestAppACLR2SharedL2ContinuityVerifierDoesNotReadPhysicalSystemIdentifier(t
 		t.Fatalf("verifyAppACLR2L2EvidenceInTx() error = %v", err)
 	}
 	for _, query := range append(tx.queryTexts, tx.queryRowTexts...) {
-		if strings.Contains(strings.ToLower(query), "pg_control_system") {
-			t.Fatalf("shared L2 continuity verifier queried bootstrap-only pg_control_system(): %s", query)
+		if strings.Contains(strings.ToLower(query), "pg_control_system()") {
+			t.Fatalf("shared L2 continuity verifier invoked bootstrap-only pg_control_system(): %s", query)
 		}
 	}
 	if len(tx.queries) != 0 || len(tx.queryRows) != 0 {
@@ -302,6 +329,7 @@ func appACLR2PostBootstrapCatalogSnapshotFixture(
 		BootstrapDefaultACLCount: bootstrap.BootstrapDefaultACLCount,
 		Domains:                  append([]AppACLDomainR2V1(nil), bootstrap.Domains...),
 		Roles:                    append([]AppACLR2CatalogRoleStateV1(nil), bootstrap.Roles...),
+		PGControlSystem:          cloneAppACLR2PGControlSystemCatalog(bootstrap.PGControlSystem),
 		Extension:                bootstrap.Extension,
 		Members:                  append([]AppACLR2PGCryptoMemberCatalogV1(nil), bootstrap.Members...),
 	}
@@ -526,7 +554,17 @@ func TestAppACLR2BootstrapLiveCatalogReaderCallsPGControlAndRejectsDomainMismatc
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("validateAppACLR2BootstrapCatalog() error = %v, want error=%t", err, tt.wantErr)
 			}
-			queries := strings.ToLower(strings.Join(tx.queryRowTexts, "\n"))
+			queries := strings.ToLower(strings.Join(append(append([]string(nil), tx.queryTexts...), tx.queryRowTexts...), "\n"))
+			for _, want := range []string{
+				"procedure.proname = 'pg_control_system'",
+				"pg_get_function_identity_arguments(procedure.oid) = ''",
+				"aclexplode(procedure.proacl)",
+				"has_function_privilege",
+			} {
+				if !strings.Contains(queries, want) {
+					t.Fatalf("bootstrap live catalog reader queries = %q, want pg_control_system preflight fragment %q", queries, want)
+				}
+			}
 			if !strings.Contains(queries, "pg_control_system()") {
 				t.Fatalf("bootstrap live catalog reader queries = %q, want direct pg_control_system() call", queries)
 			}
@@ -1950,6 +1988,20 @@ func validateAppACLR2PGCryptoMemberCatalogIdentityFormatterQuery(query string) e
 	return nil
 }
 
+func appACLR2PGControlSystemCatalogFixture() AppACLR2PGControlSystemCatalogV1 {
+	return AppACLR2PGControlSystemCatalogV1{
+		FunctionCount: 1,
+		OID:           900,
+		OwnerOID:      10,
+		Grants: []AppACLR2PGControlSystemGrantCatalogV1{{
+			GrantorOID: 10,
+			GranteeOID: 10,
+			Privilege:  "EXECUTE",
+		}},
+		BootstrapExecute: true,
+	}
+}
+
 func validAppACLR2CatalogSnapshotFixture(t *testing.T, frozen FrozenAppACLR1StateV1) (AppACLR2BootstrapCatalogSnapshotV1, AppACLR2ReceiptCatalogSnapshotV1) {
 	t.Helper()
 	receipt := validAppACLR2BootstrapReceiptFixture(t)
@@ -1971,8 +2023,9 @@ func validAppACLR2CatalogSnapshotFixture(t *testing.T, frozen FrozenAppACLR1Stat
 	return AppACLR2BootstrapCatalogSnapshotV1{
 			ServerVersionNum: receipt.ServerVersionNum, ServerVersion: receipt.ServerVersion,
 			DatabaseOID: 424242, DatabaseName: "houfeng_app", PostgresSystemIdentifier: "72623859790382856",
-			Domains: []AppACLDomainR2V1{appACLR2GoldenDomainFixture()},
-			Roles:   roles,
+			Domains:         []AppACLDomainR2V1{appACLR2GoldenDomainFixture()},
+			Roles:           roles,
+			PGControlSystem: appACLR2PGControlSystemCatalogFixture(),
 			Extension: AppACLR2PGCryptoExtensionCatalogV1{
 				Name: receipt.ExtensionName, OID: receipt.ExtensionOID, Schema: receipt.ExtensionSchema,
 				SchemaOID: 600, Version: receipt.ExtensionVersion,
@@ -2120,6 +2173,11 @@ func newScriptedAppACLR2BootstrapCatalogTxWithPGCryptoRows(memberRows [][]any) *
 			}},
 			{rows: nil},
 			{rows: memberRows},
+			{rows: [][]any{{
+				int64(900), int64(10), false,
+				int64(10), int64(10), "EXECUTE", false,
+				true, false, false, false,
+			}}},
 		},
 	}
 }
@@ -2358,6 +2416,7 @@ end;
 func cloneAppACLR2BootstrapCatalogSnapshot(value AppACLR2BootstrapCatalogSnapshotV1) AppACLR2BootstrapCatalogSnapshotV1 {
 	value.Domains = append([]AppACLDomainR2V1(nil), value.Domains...)
 	value.Roles = append([]AppACLR2CatalogRoleStateV1(nil), value.Roles...)
+	value.PGControlSystem = cloneAppACLR2PGControlSystemCatalog(value.PGControlSystem)
 	value.Members = append([]AppACLR2PGCryptoMemberCatalogV1(nil), value.Members...)
 	return value
 }

@@ -362,7 +362,7 @@ func appendAppACLR2DefaultWiringM2StateEvidence(
 	t.Helper()
 	roles := appACLR2M2RoleOIDs{DirectMigrator: 21, CenterRuntime: 20, PlatformAdmin: 22}
 	physicalRows := appACLR2M2PhysicalCatalogQueryRows()
-	directOwner := [7]bool{true, true, true, true, true, true, true}
+	directOwner := [7]bool{true}
 	runtimeReader := [7]bool{true}
 	noPrivileges := [7]bool{}
 	tx.queryRows = append(tx.queryRows,
