@@ -1464,12 +1464,13 @@ func readAppACLR2ReceiptACLInTx(ctx context.Context, tx pgx.Tx, state FrozenAppA
 		objects[index].EffectiveRelevantPrivilegeMask = 0
 	}
 	rows, err := tx.Query(ctx, `
-		select object_kind, schema_name, object_identity, owner_oid
+		select object_kind, schema_name, object_identity, owner_oid, object_oid
 		from (
 			select 1::integer as object_kind,
 			       namespace.nspname::text as schema_name,
 			       relation.relname::text as object_identity,
-			       relation.relowner::bigint as owner_oid
+			       relation.relowner::bigint as owner_oid,
+			       relation.oid::bigint as object_oid
 			from pg_catalog.pg_class relation
 			join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
 			where namespace.nspname = 'public'
@@ -1479,7 +1480,8 @@ func readAppACLR2ReceiptACLInTx(ctx context.Context, tx pgx.Tx, state FrozenAppA
 			select 2,
 			       namespace.nspname::text,
 			       namespace.nspname::text || '.' || procedure.proname::text || '(' || pg_catalog.pg_get_function_identity_arguments(procedure.oid) || ')',
-			       procedure.proowner::bigint
+			       procedure.proowner::bigint,
+			       procedure.oid::bigint
 			from pg_catalog.pg_proc procedure
 			join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
 			where namespace.nspname = 'record_platform_internal'
@@ -1491,30 +1493,61 @@ func readAppACLR2ReceiptACLInTx(ctx context.Context, tx pgx.Tx, state FrozenAppA
 		return AppACLControlACLBodyR2V1{}, fmt.Errorf("read APP ACL R2 receipt object catalog: %w", err)
 	}
 	defer rows.Close()
-	observed := make(map[string]uint32, len(objects))
+	type receiptObjectCatalog struct {
+		OID      uint32
+		OwnerOID uint32
+	}
+	expected := make(map[string]int, len(objects))
+	for index := range objects {
+		expected[fmt.Sprintf("%d|%s|%s", objects[index].Kind, objects[index].Schema, objects[index].Identity)] = index
+	}
+	observed := make(map[string]receiptObjectCatalog, len(objects))
 	for rows.Next() {
 		var kind int
 		var schema, identity string
-		var ownerOID int64
-		if err := rows.Scan(&kind, &schema, &identity, &ownerOID); err != nil {
+		var objectOID, ownerOID int64
+		if err := rows.Scan(&kind, &schema, &identity, &ownerOID, &objectOID); err != nil {
 			return AppACLControlACLBodyR2V1{}, fmt.Errorf("scan APP ACL R2 receipt object catalog: %w", err)
 		}
-		oid, err := appACLR2CatalogUint32(ownerOID, "receipt object owner OID")
+		object, err := appACLR2CatalogUint32(objectOID, "receipt object OID")
 		if err != nil {
 			return AppACLControlACLBodyR2V1{}, err
 		}
-		observed[fmt.Sprintf("%d|%s|%s", kind, schema, identity)] = oid
+		owner, err := appACLR2CatalogUint32(ownerOID, "receipt object owner OID")
+		if err != nil {
+			return AppACLControlACLBodyR2V1{}, err
+		}
+		key := fmt.Sprintf("%d|%s|%s", kind, schema, identity)
+		_, exists := expected[key]
+		if !exists {
+			return AppACLControlACLBodyR2V1{}, fmt.Errorf("APP ACL R2 receipt object identity %q is unexpected", identity)
+		}
+		if _, exists := observed[key]; exists {
+			return AppACLControlACLBodyR2V1{}, fmt.Errorf("APP ACL R2 receipt object identity %q is duplicate", identity)
+		}
+		observed[key] = receiptObjectCatalog{OID: object, OwnerOID: owner}
 	}
 	if err := rows.Err(); err != nil {
 		return AppACLControlACLBodyR2V1{}, fmt.Errorf("iterate APP ACL R2 receipt object catalog: %w", err)
 	}
+	assertHelperKey := fmt.Sprintf("%d|%s|%s", objects[1].Kind, objects[1].Schema, objects[1].Identity)
+	rejectHelperKey := fmt.Sprintf("%d|%s|%s", objects[2].Kind, objects[2].Schema, objects[2].Identity)
+	assertHelperCatalog := observed[assertHelperKey]
+	rejectHelperCatalog := observed[rejectHelperKey]
+	var assertHelperOID, rejectHelperOID any
+	if assertHelperCatalog.OwnerOID == objects[1].OwnerOID {
+		assertHelperOID = int64(assertHelperCatalog.OID)
+	}
+	if rejectHelperCatalog.OwnerOID == objects[2].OwnerOID {
+		rejectHelperOID = int64(rejectHelperCatalog.OID)
+	}
 	for index := range objects {
 		key := fmt.Sprintf("%d|%s|%s", objects[index].Kind, objects[index].Schema, objects[index].Identity)
-		ownerOID, exists := observed[key]
+		catalog, exists := observed[key]
 		if !exists {
 			return AppACLControlACLBodyR2V1{}, fmt.Errorf("APP ACL R2 receipt object %s.%s is missing", objects[index].Schema, objects[index].Identity)
 		}
-		objects[index].OwnerOID = ownerOID
+		objects[index].OwnerOID = catalog.OwnerOID
 	}
 
 	roleTags := map[string]AppACLControlRoleR2{
@@ -1609,8 +1642,8 @@ func readAppACLR2ReceiptACLInTx(ctx context.Context, tx pgx.Tx, state FrozenAppA
 		       pg_catalog.has_table_privilege(role.oid, 'public.app_acl_r2_bootstrap_receipt'::pg_catalog.regclass, 'TRUNCATE'),
 		       pg_catalog.has_table_privilege(role.oid, 'public.app_acl_r2_bootstrap_receipt'::pg_catalog.regclass, 'REFERENCES'),
 		       pg_catalog.has_table_privilege(role.oid, 'public.app_acl_r2_bootstrap_receipt'::pg_catalog.regclass, 'TRIGGER'),
-		       pg_catalog.has_function_privilege(role.oid, 'record_platform_internal.app_acl_r2_assert_bootstrap_receipt_insert(bytea,bytea)'::pg_catalog.regprocedure, 'EXECUTE'),
-		       pg_catalog.has_function_privilege(role.oid, 'record_platform_internal.app_acl_r2_reject_bootstrap_receipt_mutation()'::pg_catalog.regprocedure, 'EXECUTE')
+		       coalesce(pg_catalog.has_function_privilege(role.oid, $2::pg_catalog.oid, 'EXECUTE'), false),
+		       coalesce(pg_catalog.has_function_privilege(role.oid, $3::pg_catalog.oid, 'EXECUTE'), false)
 		from pg_catalog.pg_roles role
 		where role.rolname = any($1::name[])
 		union all
@@ -1627,7 +1660,7 @@ func readAppACLR2ReceiptACLInTx(ctx context.Context, tx pgx.Tx, state FrozenAppA
 		from pg_catalog.pg_roles bootstrap
 		where bootstrap.oid = 10
 		order by 1
-	`, roleNames)
+	`, roleNames, assertHelperOID, rejectHelperOID)
 	if err != nil {
 		return AppACLControlACLBodyR2V1{}, fmt.Errorf("read APP ACL R2 receipt effective ACL: %w", err)
 	}

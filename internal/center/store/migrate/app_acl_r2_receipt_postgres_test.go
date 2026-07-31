@@ -852,6 +852,235 @@ func TestAppACLR2ReservedCatalogObjectReaderRetainsAdditionalPrefixedObjects(t *
 	}
 }
 
+func TestAppACLR2ReceiptACLEffectivePrivilegeQueryUsesVerifiedHelperOIDs(t *testing.T) {
+	state := FrozenAppACLR1StateV1{
+		DirectMigratorRole: "direct_migrator",
+		CenterRuntimeRole:  "center_runtime",
+		PlatformAdminRole:  "platform_admin",
+	}
+	var effectiveArgs []any
+	tx := &scriptedAppACLR2ReceiptTx{
+		queries: []scriptedAppACLR2ReceiptQuery{
+			{rows: appACLR2ReceiptObjectRows()},
+			{rows: appACLR2ReceiptGrantRows()},
+			{
+				checkArgs: func(args []any) error {
+					effectiveArgs = append([]any(nil), args...)
+					return nil
+				},
+				rows: appACLR2ReceiptEffectivePrivilegeRows(),
+			},
+			{rows: appACLR2ReceiptTriggerRows()},
+		},
+		queryRows: []scriptedAppACLR2ReceiptQueryRow{{values: []any{int64(0)}}},
+	}
+
+	acl, err := readAppACLR2ReceiptACLInTx(context.Background(), tx, state)
+	if err != nil {
+		t.Fatalf("readAppACLR2ReceiptACLInTx() error = %v", err)
+	}
+	if _, err := CanonicalAppACLL2ACLBodyR2V1(acl); err != nil {
+		t.Fatalf("readAppACLR2ReceiptACLInTx() returned noncanonical ACL: %v", err)
+	}
+	if len(tx.queryTexts) != 4 {
+		t.Fatalf("readAppACLR2ReceiptACLInTx() query count = %d, want 4", len(tx.queryTexts))
+	}
+	wantArgs := []any{
+		[]string{"direct_migrator", "center_runtime", "platform_admin"},
+		int64(1001),
+		int64(1002),
+	}
+	if !reflect.DeepEqual(effectiveArgs, wantArgs) {
+		t.Errorf("receipt effective ACL query arguments = %#v, want verified role/helper OIDs %#v", effectiveArgs, wantArgs)
+	}
+
+	query := tx.queryTexts[2]
+	if err := validateAppACLR2ReceiptEffectivePrivilegeOIDQuery(query); err != nil {
+		t.Errorf("receipt effective ACL production query: %v", err)
+	}
+	mutations := []struct {
+		name  string
+		query string
+	}{
+		{
+			name: "schema-qualified regprocedure cast",
+			query: strings.Replace(
+				query,
+				"$2::pg_catalog.oid",
+				"'record_platform_internal.app_acl_r2_assert_bootstrap_receipt_insert(bytea,bytea)'::pg_catalog.regprocedure",
+				1,
+			),
+		},
+		{
+			name: "schema-qualified text overload",
+			query: strings.Replace(
+				query,
+				"$3::pg_catalog.oid",
+				"'record_platform_internal.app_acl_r2_reject_bootstrap_receipt_mutation()'",
+				1,
+			),
+		},
+	}
+	for _, tt := range mutations {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.query == query {
+				t.Fatal("test mutation did not change the production query")
+			}
+			if err := validateAppACLR2ReceiptEffectivePrivilegeOIDQuery(tt.query); err == nil {
+				t.Fatal("mutated receipt effective ACL query passed the OID-only guard")
+			}
+		})
+	}
+}
+
+func TestAppACLR2ReceiptACLReaderFailsClosedOnHelperAndACLDrift(t *testing.T) {
+	state := FrozenAppACLR1StateV1{
+		DirectMigratorRole: "direct_migrator",
+		CenterRuntimeRole:  "center_runtime",
+		PlatformAdminRole:  "platform_admin",
+	}
+	tests := []struct {
+		name                       string
+		mutateObjects              func([][]any) [][]any
+		mutateGrants               func([][]any) [][]any
+		mutateEffectivePrivileges  func([][]any) [][]any
+		want                       string
+		wantEffectivePrivilegeRead bool
+		wantHelperOIDArgs          []any
+	}{
+		{
+			name: "missing helper",
+			mutateObjects: func(rows [][]any) [][]any {
+				return append(rows[:1], rows[2:]...)
+			},
+			want: "missing",
+		},
+		{
+			name: "duplicate helper",
+			mutateObjects: func(rows [][]any) [][]any {
+				return append(rows, append([]any(nil), rows[1]...))
+			},
+			want: "duplicate",
+		},
+		{
+			name: "helper identity",
+			mutateObjects: func(rows [][]any) [][]any {
+				rows[1][2] = "record_platform_internal.app_acl_r2_assert_bootstrap_receipt_insert(text, text)"
+				return rows
+			},
+			want: "identity",
+		},
+		{
+			name: "helper owner",
+			mutateObjects: func(rows [][]any) [][]any {
+				rows[1][3] = int64(11)
+				return rows
+			},
+			want:                       "L2 ACL",
+			wantEffectivePrivilegeRead: true,
+			wantHelperOIDArgs:          []any{nil, int64(1002)},
+		},
+		{
+			name: "helper direct ACL",
+			mutateGrants: func(rows [][]any) [][]any {
+				return append(rows, []any{2, "record_platform_internal.app_acl_r2_assert_bootstrap_receipt_insert(bytea, bytea)", "center_runtime", "EXECUTE", false})
+			},
+			want:                       "L2 ACL",
+			wantEffectivePrivilegeRead: true,
+			wantHelperOIDArgs:          []any{int64(1001), int64(1002)},
+		},
+		{
+			name: "helper effective ACL",
+			mutateEffectivePrivileges: func(rows [][]any) [][]any {
+				rows[1][8] = true
+				return rows
+			},
+			want:                       "L2 ACL",
+			wantEffectivePrivilegeRead: true,
+			wantHelperOIDArgs:          []any{int64(1001), int64(1002)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objectRows := appACLR2ReceiptObjectRows()
+			grantRows := appACLR2ReceiptGrantRows()
+			effectiveRows := appACLR2ReceiptEffectivePrivilegeRows()
+			if tt.mutateObjects != nil {
+				objectRows = tt.mutateObjects(objectRows)
+			}
+			if tt.mutateGrants != nil {
+				grantRows = tt.mutateGrants(grantRows)
+			}
+			if tt.mutateEffectivePrivileges != nil {
+				effectiveRows = tt.mutateEffectivePrivileges(effectiveRows)
+			}
+			var effectiveArgs []any
+			tx := &scriptedAppACLR2ReceiptTx{
+				queries: []scriptedAppACLR2ReceiptQuery{
+					{rows: objectRows},
+					{rows: grantRows},
+					{
+						checkArgs: func(args []any) error {
+							effectiveArgs = append([]any(nil), args...)
+							return nil
+						},
+						rows: effectiveRows,
+					},
+					{rows: appACLR2ReceiptTriggerRows()},
+				},
+				queryRows: []scriptedAppACLR2ReceiptQueryRow{{values: []any{int64(0)}}},
+			}
+
+			acl, err := readAppACLR2ReceiptACLInTx(context.Background(), tx, state)
+			if err == nil {
+				_, err = CanonicalAppACLL2ACLBodyR2V1(acl)
+				if err != nil {
+					err = fmt.Errorf("APP ACL R2 L2 ACL catalog drift: %w", err)
+				}
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("readAppACLR2ReceiptACLInTx() error = %v, want %q rejection", err, tt.want)
+			}
+			gotEffectivePrivilegeRead := len(tx.queryTexts) >= 3
+			if gotEffectivePrivilegeRead != tt.wantEffectivePrivilegeRead {
+				t.Fatalf("effective privilege query executed = %t, want %t", gotEffectivePrivilegeRead, tt.wantEffectivePrivilegeRead)
+			}
+			if tt.wantEffectivePrivilegeRead {
+				if len(effectiveArgs) != 3 {
+					t.Fatalf("effective privilege query arguments = %#v, want role names plus two helper OIDs", effectiveArgs)
+				}
+				if got := effectiveArgs[1:]; !reflect.DeepEqual(got, tt.wantHelperOIDArgs) {
+					t.Fatalf("effective privilege helper OID arguments = %#v, want %#v", got, tt.wantHelperOIDArgs)
+				}
+			}
+		})
+	}
+}
+
+func validateAppACLR2ReceiptEffectivePrivilegeOIDQuery(query string) error {
+	normalized := strings.Join(strings.Fields(query), " ")
+	lower := strings.ToLower(normalized)
+	if strings.Contains(lower, "regprocedure") {
+		return fmt.Errorf("uses regprocedure name resolution")
+	}
+	if strings.Contains(lower, "record_platform_internal.") {
+		return fmt.Errorf("uses a schema-qualified helper name")
+	}
+	if count := strings.Count(normalized, "pg_catalog.has_function_privilege("); count != 2 {
+		return fmt.Errorf("has %d function privilege calls, want 2", count)
+	}
+	wantCalls := []string{
+		"pg_catalog.has_function_privilege(role.oid, $2::pg_catalog.oid, 'EXECUTE')",
+		"pg_catalog.has_function_privilege(role.oid, $3::pg_catalog.oid, 'EXECUTE')",
+	}
+	for _, call := range wantCalls {
+		if strings.Count(normalized, call) != 1 {
+			return fmt.Errorf("does not contain exactly one OID call %q", call)
+		}
+	}
+	return nil
+}
+
 func TestAppACLR2ReceiptACLReaderRejectsReturnedInternalTrigger(t *testing.T) {
 	state := FrozenAppACLR1StateV1{
 		DirectMigratorRole: "direct_migrator",
@@ -1441,9 +1670,9 @@ func appACLR2ReservedCatalogObjectRow(object AppACLR2ReservedCatalogObjectV1) []
 
 func appACLR2ReceiptObjectRows() [][]any {
 	return [][]any{
-		{1, "public", "app_acl_r2_bootstrap_receipt", int64(10)},
-		{2, "record_platform_internal", "record_platform_internal.app_acl_r2_assert_bootstrap_receipt_insert(bytea, bytea)", int64(10)},
-		{2, "record_platform_internal", "record_platform_internal.app_acl_r2_reject_bootstrap_receipt_mutation()", int64(10)},
+		{1, "public", "app_acl_r2_bootstrap_receipt", int64(10), int64(1003)},
+		{2, "record_platform_internal", "record_platform_internal.app_acl_r2_assert_bootstrap_receipt_insert(bytea, bytea)", int64(10), int64(1001)},
+		{2, "record_platform_internal", "record_platform_internal.app_acl_r2_reject_bootstrap_receipt_mutation()", int64(10), int64(1002)},
 	}
 }
 
