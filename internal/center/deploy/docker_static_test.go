@@ -49,6 +49,179 @@ func TestDockerEntrypointAcceptsSecretFileInputs(t *testing.T) {
 	}
 }
 
+func TestDockerEntrypointExecutesActualScriptWithValidatedDatabaseInputs(t *testing.T) {
+	tests := []struct {
+		name               string
+		environment        map[string]string
+		passwordFile       string
+		passwordFileMode   os.FileMode
+		wantChild          bool
+		wantDatabaseURL    string
+		wantOutputContains string
+	}{
+		{
+			name: "missing database user",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_NAME":     "houfeng",
+				"HOUFENG_DATABASE_PASSWORD": "secret",
+			},
+			wantOutputContains: "HOUFENG_DATABASE_USER is required",
+		},
+		{
+			name: "missing database name",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_USER":     "houfeng",
+				"HOUFENG_DATABASE_PASSWORD": "secret",
+			},
+			wantOutputContains: "HOUFENG_DATABASE_NAME is required",
+		},
+		{
+			name: "missing database password",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_USER": "houfeng",
+				"HOUFENG_DATABASE_NAME": "houfeng",
+			},
+			wantOutputContains: "HOUFENG_DATABASE_PASSWORD or HOUFENG_DATABASE_PASSWORD_FILE is required",
+		},
+		{
+			name: "password file does not exist",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_USER": "houfeng",
+				"HOUFENG_DATABASE_NAME": "houfeng",
+			},
+			passwordFile:       "missing",
+			wantOutputContains: "HOUFENG_DATABASE_PASSWORD_FILE is not readable",
+		},
+		{
+			name: "password file is unreadable",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_USER": "houfeng",
+				"HOUFENG_DATABASE_NAME": "houfeng",
+			},
+			passwordFile:       "file-secret",
+			passwordFileMode:   0,
+			wantOutputContains: "HOUFENG_DATABASE_PASSWORD_FILE is not readable",
+		},
+		{
+			name: "password file is empty",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_USER": "houfeng",
+				"HOUFENG_DATABASE_NAME": "houfeng",
+			},
+			passwordFile:       "",
+			passwordFileMode:   0o600,
+			wantOutputContains: "HOUFENG_DATABASE_PASSWORD or HOUFENG_DATABASE_PASSWORD_FILE is required",
+		},
+		{
+			name: "password file takes precedence over environment",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_USER":     "houfeng",
+				"HOUFENG_DATABASE_NAME":     "houfeng",
+				"HOUFENG_DATABASE_PASSWORD": "environment-secret",
+			},
+			passwordFile:     "file:/? secret",
+			passwordFileMode: 0o600,
+			wantChild:        true,
+			wantDatabaseURL:  "postgres://houfeng:file%3A%2F%3F%20secret@db:5432/houfeng?sslmode=disable",
+		},
+		{
+			name: "explicit database URL bypasses fallback inputs",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_URL": "postgres://explicit.invalid/database?sslmode=require",
+			},
+			wantChild:       true,
+			wantDatabaseURL: "postgres://explicit.invalid/database?sslmode=require",
+		},
+		{
+			name: "reserved URI characters are percent encoded",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_USER":     "app:user",
+				"HOUFENG_DATABASE_NAME":     "db/name?blue",
+				"HOUFENG_DATABASE_PASSWORD": "p@ss:/?#[]%&=+ space",
+			},
+			wantChild:       true,
+			wantDatabaseURL: "postgres://app%3Auser:p%40ss%3A%2F%3F%23%5B%5D%25%26%3D%2B%20space@db:5432/db%2Fname%3Fblue?sslmode=disable",
+		},
+		{
+			name: "ASCII control byte is rejected",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_USER":     "houfeng",
+				"HOUFENG_DATABASE_NAME":     "bad\nname",
+				"HOUFENG_DATABASE_PASSWORD": "secret",
+			},
+			wantOutputContains: "database connection component contains an ASCII control byte",
+		},
+		{
+			name: "NUL byte in password file is rejected",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_USER": "houfeng",
+				"HOUFENG_DATABASE_NAME": "houfeng",
+			},
+			passwordFile:       "before\x00after",
+			passwordFileMode:   0o600,
+			wantOutputContains: "database connection component contains an ASCII control byte",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := runDockerEntrypoint(t, tt.environment, tt.passwordFile, tt.passwordFileMode)
+			if tt.wantChild {
+				if result.err != nil {
+					t.Fatalf("docker entrypoint failed: %v\n%s", result.err, result.output)
+				}
+				if !result.childRan {
+					t.Fatal("docker entrypoint did not execute its child")
+				}
+				if result.databaseURL != tt.wantDatabaseURL {
+					t.Fatalf("child HOUFENG_DATABASE_URL = %q, want %q", result.databaseURL, tt.wantDatabaseURL)
+				}
+				return
+			}
+
+			if result.err == nil {
+				t.Fatalf("docker entrypoint unexpectedly succeeded; output:\n%s", result.output)
+			}
+			if result.childRan {
+				t.Fatal("docker entrypoint executed its child after validation failure")
+			}
+			if !strings.Contains(result.output, tt.wantOutputContains) {
+				t.Fatalf("docker entrypoint output = %q, want substring %q", result.output, tt.wantOutputContains)
+			}
+		})
+	}
+}
+
+func TestComposeApplicationRoleRejectsExistingMembershipBeforeMutation(t *testing.T) {
+	root := repoRoot(t)
+	applicationRoleSQL := readText(t, filepath.Join(root, "docs", "deploy", "compose-application-role.sql"))
+
+	membershipGuard := strings.Index(applicationRoleSQL, "pg_catalog.pg_auth_members")
+	if membershipGuard < 0 {
+		t.Fatal("Compose application-role provisioning must inspect pg_auth_members before mutating an existing role")
+	}
+	for _, required := range []string{
+		`\set ON_ERROR_STOP on`,
+		"RAISE EXCEPTION 'Houfeng application role must not have direct or recursive role membership'",
+	} {
+		if !strings.Contains(applicationRoleSQL, required) {
+			t.Fatalf("Compose application-role membership drift must make psql fail through %q", required)
+		}
+	}
+	if strings.Contains(applicationRoleSQL, `\quit`) {
+		t.Fatal("Compose application-role membership drift must not rely on psql \\quit accepting an exit-status argument")
+	}
+	for _, mutation := range []string{"'ALTER ROLE %I", "'ALTER DATABASE %I OWNER TO %I"} {
+		mutationOffset := strings.Index(applicationRoleSQL, mutation)
+		if mutationOffset < 0 {
+			t.Fatalf("Compose application-role provisioning must contain %q", mutation)
+		}
+		if membershipGuard > mutationOffset {
+			t.Fatalf("Compose application-role membership guard must precede %q", mutation)
+		}
+	}
+}
+
 func TestAppACLR2PreR1ProvisioningRevokesPGControlSystemFromPublic(t *testing.T) {
 	root := repoRoot(t)
 	provisioning := readText(t, filepath.Join(root, "docs", "deploy", "app-acl-r2-pre-r1-provisioning.sql"))
@@ -282,6 +455,73 @@ type composeBootstrapResult struct {
 	events string
 	output string
 	err    error
+}
+
+type dockerEntrypointResult struct {
+	childRan    bool
+	databaseURL string
+	output      string
+	err         error
+}
+
+func runDockerEntrypoint(t *testing.T, values map[string]string, passwordFile string, passwordFileMode os.FileMode) dockerEntrypointResult {
+	t.Helper()
+	root := repoRoot(t)
+	tempDir := t.TempDir()
+	childMarker := filepath.Join(tempDir, "child-ran")
+	databaseURLPath := filepath.Join(tempDir, "database-url")
+	fakeChild := filepath.Join(tempDir, "child")
+	if err := os.WriteFile(fakeChild, []byte(`#!/bin/sh
+set -eu
+printf '%s' child-ran >"$HOUFENG_ENTRYPOINT_CHILD_MARKER"
+printf '%s' "$HOUFENG_DATABASE_URL" >"$HOUFENG_ENTRYPOINT_CHILD_DATABASE_URL"
+`), 0o755); err != nil {
+		t.Fatalf("write fake entrypoint child: %v", err)
+	}
+
+	environment := map[string]string{
+		"PATH":                                  os.Getenv("PATH"),
+		"HOUFENG_INITIAL_PASSWORD":              "admin-secret",
+		"HOUFENG_SESSION_HMAC_KEY":              "0123456789abcdef0123456789abcdef",
+		"HOUFENG_ENTRYPOINT_CHILD_MARKER":       childMarker,
+		"HOUFENG_ENTRYPOINT_CHILD_DATABASE_URL": databaseURLPath,
+	}
+	for key, value := range values {
+		environment[key] = value
+	}
+	if passwordFile != "" || passwordFileMode != 0 {
+		passwordPath := filepath.Join(tempDir, "database-password")
+		if passwordFile == "missing" {
+			passwordPath = filepath.Join(tempDir, "missing-database-password")
+		} else if err := os.WriteFile(passwordPath, []byte(passwordFile), 0o600); err != nil {
+			t.Fatalf("write database password file: %v", err)
+		} else if err := os.Chmod(passwordPath, passwordFileMode); err != nil {
+			t.Fatalf("chmod database password file: %v", err)
+		}
+		environment["HOUFENG_DATABASE_PASSWORD_FILE"] = passwordPath
+	}
+
+	command := exec.Command("/bin/sh", filepath.Join(root, "scripts", "docker-entrypoint.sh"), fakeChild)
+	command.Dir = root
+	command.Env = make([]string, 0, len(environment))
+	for key, value := range environment {
+		command.Env = append(command.Env, key+"="+value)
+	}
+	output, err := command.CombinedOutput()
+	marker, markerErr := os.ReadFile(childMarker)
+	if markerErr != nil && !os.IsNotExist(markerErr) {
+		t.Fatalf("read entrypoint child marker: %v", markerErr)
+	}
+	databaseURL, databaseURLErr := os.ReadFile(databaseURLPath)
+	if databaseURLErr != nil && !os.IsNotExist(databaseURLErr) {
+		t.Fatalf("read child database URL: %v", databaseURLErr)
+	}
+	return dockerEntrypointResult{
+		childRan:    string(marker) == "child-ran",
+		databaseURL: string(databaseURL),
+		output:      string(output),
+		err:         err,
+	}
 }
 
 func runComposeBootstrap(t *testing.T, failure string) composeBootstrapResult {

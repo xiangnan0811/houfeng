@@ -149,6 +149,13 @@ constrained application login and transfers the fresh database to that login.
 Any readiness, identity, provisioning, or application-role error exits nonzero
 before `docker compose ... up -d houfeng` is invoked.
 
+An existing application role is accepted only when it has no direct role
+membership in either direction; that also excludes every recursive membership
+path involving the role. `NOINHERIT` is not a substitute because membership can
+still authorize `SET ROLE`. Membership drift is rejected without cleanup: the
+application-role transaction rolls back, database ownership stays unchanged,
+and Houfeng is not started.
+
 The principal values are consumed by PostgreSQL only during initial database
 creation. A data directory created by an older Compose layout with `houfeng` as
 the OID-10 superuser cannot be made compliant by changing the env file. Back it
@@ -156,7 +163,7 @@ up and initialize a fresh database with this sequence, or use a separately
 reviewed migration plan; do not rename or repurpose the existing OID-10 role in
 place.
 
-The default Compose file pulls and runs `linnea7171/houfeng:latest`. The project image contains `houfeng-center`, a small runtime entrypoint, and baked `web/dist`; the image runs as the non-root `houfeng` user by default and ultimately runs only `houfeng-center` with `HOUFENG_HTTP_ADDR=:16001`, `HOUFENG_WEB_DIST_DIR=/app/web/dist`, and `HOUFENG_LOG_FILE=/var/log/houfeng/center.log`, so no host-mounted `web/dist` directory is required. The entrypoint assembles `HOUFENG_DATABASE_URL` from values loaded from `docs/deploy/compose.env`; it does not perform runtime privilege dropping. The root `Dockerfile` is published by the release-only Docker image workflow; the default quick-start still pulls the published image and does not build locally.
+The default Compose file pulls and runs `linnea7171/houfeng:latest`. The project image contains `houfeng-center`, a small runtime entrypoint, and baked `web/dist`; the image runs as the non-root `houfeng` user by default and ultimately runs only `houfeng-center` with `HOUFENG_HTTP_ADDR=:16001`, `HOUFENG_WEB_DIST_DIR=/app/web/dist`, and `HOUFENG_LOG_FILE=/var/log/houfeng/center.log`, so no host-mounted `web/dist` directory is required. When `HOUFENG_DATABASE_URL` is unset, the entrypoint assembles it from the application user, password-file value, and database name loaded from `docs/deploy/compose.env`. It percent-encodes each component as UTF-8 bytes, so printable URI-reserved characters in strong passwords and catalog names are preserved; it rejects ASCII control bytes and never executes the center on fallback-input failure. The password file takes precedence over `HOUFENG_DATABASE_PASSWORD`. An explicitly supplied `HOUFENG_DATABASE_URL` bypasses fallback assembly unchanged and remains subject to the center's normal URL/TLS validation. The entrypoint does not perform runtime privilege dropping. The root `Dockerfile` is published by the release-only Docker image workflow; the default quick-start still pulls the published image and does not build locally.
 
 Sensitive Compose values remain untracked. The database bootstrap and application passwords live under the ignored `docs/deploy/secrets/` directory and are mounted as service-scoped Docker secrets; the initial admin password and session HMAC key live in the untracked `docs/deploy/compose.env` copied from `docs/deploy/compose.env.example`. The tracked `compose.yaml` contains only secret-file mount paths and intentionally avoids password values or database URLs so repository secret scanners do not flag placeholder deployment configuration.
 
