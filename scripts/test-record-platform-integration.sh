@@ -3,13 +3,41 @@ set -euo pipefail
 
 usage() {
   printf 'usage: %s postgres -- <command> [args...]\n' "$0" >&2
+  printf '       %s pg16-catalog -- <command> [args...]\n' "$0" >&2
 }
 
-if [ "$#" -lt 3 ] || [ "$1" != "postgres" ] || [ "$2" != "--" ]
+if [ "$#" -lt 3 ] || [ "$2" != "--" ]
 then
   usage
   exit 2
 fi
+
+mode=$1
+case "$mode" in
+  postgres)
+    postgres_image=postgres:16-alpine
+    ;;
+  pg16-catalog)
+    if [ -z "${3-}" ]
+    then
+      usage
+      exit 2
+    fi
+    postgres_image=${HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE-}
+    case "$postgres_image" in
+      postgres:16.0|postgres:16.6|postgres:16.12)
+        ;;
+      *)
+        usage
+        exit 2
+        ;;
+    esac
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
 shift 2
 
 workspace=$(mktemp -d "${TMPDIR:-/tmp}/houfeng-record-platform.XXXXXX")
@@ -60,7 +88,7 @@ start_postgres() {
     --network=host \
     --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=512m \
     -e POSTGRES_PASSWORD="$password" \
-    postgres:16-alpine \
+    "$postgres_image" \
     -c port="$port" >/dev/null
   containers+=("$name")
 }
