@@ -519,7 +519,7 @@ lane or any Slice 6/7, parent, Child 1, or PF-AC completion.
   false, only owner helper `EXECUTE` is true, and missing owner self-ACL rows
   make both raw and effective evidence false.
 
-- [ ] P1 correction RED/TDD plan: require deployment-owned pre-R1 provisioning
+- [x] P1 correction RED/TDD plan: require deployment-owned pre-R1 provisioning
   to revoke PUBLIC `EXECUTE` on the exact zero-argument
   `pg_catalog.pg_control_system()` signature; prove the OID-10 bootstrap-only
   live reader calls it and rejects a live-system/domain mismatch; prove the
@@ -532,7 +532,7 @@ lane or any Slice 6/7, parent, Child 1, or PF-AC completion.
   the shared path for preflight, post-DCL readback, normal repeat, and ACK
   recovery.
 
-- [ ] RED: finalize reads only
+- [x] RED: finalize reads only
   `HOUFENG_RECORD_PLATFORM_MIGRATOR_APP_DATABASE_URL`, rejects R1/nonexact
   PREPARED/direct-role/M1/receipt drift through the one shared constrained
   predicate; rejects
@@ -568,7 +568,7 @@ lane or any Slice 6/7, parent, Child 1, or PF-AC completion.
   readback, and the full constrained classifier remain unchanged.
   `ACCESS SHARE` continues to exclude `ACCESS EXCLUSIVE` DDL drift and makes no new
   confinement claim against a hostile database/direct owner.
-- [ ] GREEN: validate receipt through the one shared constrained
+- [x] GREEN: validate receipt through the one shared constrained
   `ReadAppACLR2CatalogPredicatesInTx`/`ClassifyAppACLR2State` path first, then
   execute the finalizer section in one serializable transaction after
   identity-blind state verification and its own direct-migrator actor gate
@@ -595,7 +595,7 @@ lane or any Slice 6/7, parent, Child 1, or PF-AC completion.
   default-ACL absence never substitutes for the owner self-grants. No FINALIZED
   readback may occur before ACL normalization. Any error rolls back all M2
   DDL/DML to exact PREPARED.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 go test ./db/appaclr2/migrations ./cmd/houfeng-record-platform-admin ./internal/center/store/migrate \
@@ -801,7 +801,7 @@ job must be executable from a fresh runner: `runs-on: ubuntu-latest`, then
 `actions/checkout@v6`, then `actions/setup-go@v6` with
 `go-version-file: go.mod`, before its exact matrix command.
 
-- [ ] RED/GREEN: cover R1 -> PREPARED -> FINALIZED; every wrong identity,
+- [x] RED/GREEN: cover R1 -> PREPARED -> FINALIZED; every wrong identity,
   application-source, member/dependency, domain, owner, ACL, and state failure;
   receipt immutability; no membership/role switch/drop/recreate; serializable
   retry/CAS/ACK loss; the adversarial R1-to-PREPARED race; and
@@ -879,7 +879,7 @@ job must be executable from a fresh runner: `runs-on: ubuntu-latest`, then
   `go test -json ./internal/center/store/migrate -run
   '^TestPostgresIntegrationAppACLR2$' -count=1`; the required new test file
   provides that exact top-level anchor and may use subtests for its matrix.
-- [ ] Run every real PostgreSQL 16 lane with roles created inside the fixture:
+- [x] Run every real PostgreSQL 16 lane with roles created inside the fixture:
 
 ```bash
 run_pg16_catalog() (
@@ -1051,11 +1051,11 @@ branch-protection PATCH alternative would map GET any-app/null to request
 not perform the POST or assert that Slice 7, R2, Child 1, PF-AC, or the parent
 task is complete.
 
-- [ ] Perform final spec-compliance review, then independent code-quality review.
+- [x] Perform final spec-compliance review, then independent code-quality review.
   The prospective P1 planning review must have passed before any Slice 5
   implementation. Resolve all P0/P1/P2 findings before final verification.
 
-- [ ] After the planning, specification, and quality gates pass, run the final
+- [x] After the planning, specification, and quality gates pass, run the final
   focused/full verification gate and request parent integration review only when
   it passes:
 
@@ -1064,3 +1064,32 @@ gofmt -w db/appaclr2/migrations/*.go internal/center/store/migrate/app_acl_r2*.g
 git diff --check
 GOTMPDIR=/home/murray/.codex GOFLAGS=-p=1 make verify-go
 ```
+
+## Final Acceptance Evidence - 2026-08-02
+
+- Primary delivery PR #384 (`codex/app-acl-r2-slice5-finalizer` head
+  `99dea1fe73f084589a198c964ee32bd7982e3c88`) merged to protected `main` as
+  `fc4b3386751c95d7598bc21e876f98ffecaf2b4d`. The ordered specification and
+  independent quality reviews resolved all findings before delivery.
+- The cold-cache JSON stream follow-up PR #386 head
+  `5925193faaf917864db7186aa2a3f581cda282d7` merged as
+  `335cdffef05452f967e3e569e3558c51729b7262`. Post-merge main CI run
+  `30710466188` completed successfully with all seven jobs, including the
+  three exact PostgreSQL 16 catalog contexts.
+- Repository ruleset `app-acl-r2-pg16-catalog-required-v1` (ID `20191105`)
+  is active on `refs/heads/main`, has no bypass actors, and requires exactly
+  the `postgres:16.0`, `postgres:16.6`, and `postgres:16.12` catalog contexts
+  with GitHub Actions integration ID `15368`.
+- Local final verification passed `make verify`, ambient-FD `make verify-go`,
+  focused race coverage, and all three real PostgreSQL lanes. Each final local
+  JSON gate recorded anchored run/pass `157/157` and package skip/fail `0/0`.
+- Release PR #385 merged as `a3ab66d63dc83f51764ce1235c55b1861eee73c8`.
+  Main CI run `30710642735`, Release Please, and `publish-images` run
+  `30710650397` all completed successfully. GitHub Release `v0.60.0` and its
+  four signed/checksummed agent assets are published.
+- Docker tags `v0.60.0`, `0.60.0`, and `latest` resolve to the same OCI index
+  digest `sha256:df740d43527771d48ea39d40cbdcdf24a2f5f38d4abfe2f2adc858b475dfae5e`.
+  Its linux/amd64 and linux/arm64 configs both bind revision
+  `a3ab66d63dc83f51764ce1235c55b1861eee73c8` and version `v0.60.0`.
+- This closes only the APP ACL R2 child. The records-platform Foundation parent
+  and its remaining contract work stay independently in progress.

@@ -270,38 +270,38 @@ implementation, CI run, review, or parent acceptance is complete.
 
 ## Acceptance Criteria
 
-- [ ] The superseded root implementation is removed in one replacement slice;
+- [x] The superseded root implementation is removed in one replacement slice;
   no root `0052`, old receipt grammar, old R2 compiler/source, or old
   command/config route remains.
-- [ ] Isolated R2 inventory has exactly 53 entries: frozen R1 52 plus one exact
+- [x] Isolated R2 inventory has exactly 53 entries: frozen R1 52 plus one exact
   `0052`; root generic/R1 discovery and R1 runtime cannot see it.
-- [ ] R2 parser accepts exactly three sorted bindings and exactly 206 sorted,
+- [x] R2 parser accepts exactly three sorted bindings and exactly 206 sorted,
   duplicate-free tuples; it rejects 205, 207, R1 magic, unknown binding,
   noncanonical ordering, trailing bytes, and checksum substitution.
-- [ ] Bootstrap accepts only a direct PostgreSQL 16 superuser OID 10 session,
+- [x] Bootstrap accepts only a direct PostgreSQL 16 superuser OID 10 session,
   validates R1/domain and the externally provisioned owner-only
   `pg_control_system()` ACL before mutation, performs the bootstrap-only live
   binding through `pg_control_system()` before its initial PREPARED commit, records the
   immutable receipt/ledger, and grants only direct migrator/runtime receipt
   SELECT.
-- [ ] The shared constrained post-bootstrap continuity predicate proves
+- [x] The shared constrained post-bootstrap continuity predicate proves
   receipt/domain and, for FINALIZED, M2-domain equality plus fresh
   receipt-bound database OID/name, application-source, ACL, role,
   allowed-PG16/version, extension/member/dependency/owner, helper,
   `pg_control_system()` ACL/effective access, and other access facts. It does
   not invoke that function or read a fresh physical system identifier.
-- [ ] Finalize accepts only direct constrained migrator identity, reads exact
+- [x] Finalize accepts only direct constrained migrator identity, reads exact
   PREPARED receipt, creates an R2-specific direct-migrator-owned M2
   revision/head relation pair with one M2/one head and a read-only immutable M1
   link, and commits all DDL/DML in one serializable transaction.
-- [ ] Finalize applies the fixed revoke-first DCL and proves exact
+- [x] Finalize applies the fixed revoke-first DCL and proves exact
   `aclexplode` rows and the effective vector. PostgreSQL 16 unit and regression
   coverage proves only `SELECT` true for both direct owner and center runtime,
   all other table probes false, platform admin all false, and only the owner
   helper `EXECUTE` true. Removing an owner self-row makes the corresponding raw
   and effective evidence false and exact M2 rejects. The fixed `0x06`/`0x02`
   bodies, SQL, vectors, and hashes do not change.
-- [ ] Full state classification, admission, and finalizer ACK loss accept only
+- [x] Full state classification, admission, and finalizer ACK loss accept only
   exact R1/PREPARED/FINALIZED catalog/source/ledger/ACL predicates. The sole
   bootstrap ACK-loss exception is a private observer that proves only exact R1
   or exact PREPARED. Its permitted reads are limited to frozen/L2 evidence,
@@ -319,7 +319,7 @@ implementation, CI run, review, or parent acceptance is complete.
   PostgreSQL evidence-read error propagates rather than becoming `CORRUPT`; an
   accompanying zero-value `CORRUPT` when `ClassifyAppACLR2State` returns an
   error is not an evidence verdict.
-- [ ] New R1-only transition route rejects any R2 state without parsing R2
+- [x] New R1-only transition route rejects any R2 state without parsing R2
   bytes; the frozen `AdmitAppACLRuntime` remains closed. New R2-aware runtime
   admission accepts exact R1 as R1 before upgrade, rejects PREPARED, and
   accepts only FINALIZED as R2. `ClassifyAppACLR2State` and
@@ -346,7 +346,7 @@ implementation, CI run, review, or parent acceptance is complete.
   `RequireDirectFrozenAppACLR1RuntimeInTx`, never calls frozen
   `AdmitAppACLRuntime`, and performs no R2 payload, receipt, or manifest
   parsing or admission.
-- [ ] Slice 4 historically created and tested the reusable exact L1/M1/L2/M2/
+- [x] Slice 4 historically created and tested the reusable exact L1/M1/L2/M2/
   control-ACL relation/head predicate and typed state-composition foundation.
   Decision C's constrained-reader/shared-continuity correction remains
   prospective: before Slice 5 finalizer acceptance, the shared classifier is
@@ -356,7 +356,7 @@ implementation, CI run, review, or parent acceptance is complete.
   that one corrected shared path for preflight, readback, normal repeat, and ACK
   recovery, with no private classifier, predicate, or snapshot fork. This is
   not a Slice 5 or PostgreSQL 16 completion claim.
-- [ ] A PostgreSQL 16 in-transaction catalog preflight proves the allowed
+- [x] A PostgreSQL 16 in-transaction catalog preflight proves the allowed
   server/version, pgcrypto extension/member/dependency/owner/ACL baseline, all
   36 exact server-formatted member signatures, and OID-10 member owners. It
   requires the zero-based member-16 `pgp_armor_headers` string
@@ -364,7 +364,7 @@ implementation, CI run, review, or parent acceptance is complete.
   `57e7ac6a986705d8fa1e5b2260c1836b74dffe1b33bee00d65d1b275284e8196`;
   input-only, result-shape, and any count-preserving substitutions reject.
   File, path, image, and package provenance remain external supply-chain policy.
-- [ ] PostgreSQL 16 tests cover wrong DSN privilege, identity, server/version,
+- [x] PostgreSQL 16 tests cover wrong DSN privilege, identity, server/version,
   bootstrap OID, membership, extension member/dependency, ownership, receipt
   ACL, domain, application source, state, and M2 catalog failure without
   partial mutation. The pure predicate-composition matrix is identity-invariant
@@ -388,7 +388,7 @@ implementation, CI run, review, or parent acceptance is complete.
   verifier/tests. This checkbox records only current source, focused Go
   verification, and the two Slice 5 reviews; it is not PostgreSQL 16,
   Slice 6/7, R2 total-acceptance, Child 1, or PF-AC evidence.
-- [ ] The fixed, task-local pre-existing `golden-vectors.md` is consumed
+- [x] The fixed, task-local pre-existing `golden-vectors.md` is consumed
   literally by Slice 3 receipt tests for the domain/L2 input-to-hex-to-SHA-256
   vectors and malformed cases. `app_acl_r2_receipt_test.go` solely owns their
   decoder, malformed, nesting, and receipt tamper coverage; Slice 2
@@ -396,7 +396,7 @@ implementation, CI run, review, or parent acceptance is complete.
   tests own live catalog equality only. Literal assertions compare documented
   bytes and digest directly, never a value derived from a production
   encoder/compiler or live database.
-- [ ] Each implementation slice has a specification review followed by an
+- [x] Each implementation slice has a specification review followed by an
   independent code-quality review; no direct main change occurs.
 
 ### Slice 5 Evidence Note — 2026-07-31
