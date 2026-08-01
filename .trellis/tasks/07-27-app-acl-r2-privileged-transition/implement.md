@@ -551,11 +551,23 @@ lane or any Slice 6/7, parent, Child 1, or PF-AC completion.
   variants also reject. Finalizer ACK recovery must reject any raw or effective
   ACL shape other than the exact baseline. The direct finalizer must lock a
   present bootstrap-owned L2 receipt in `ACCESS SHARE`, never a stronger mode,
-  and never grant itself receipt write privilege; all other present state/M2
-  tables retain `SHARE ROW EXCLUSIVE`. The real PostgreSQL 16 lane must prove
-  the receipt-`SELECT`-only direct migrator succeeds with `ACCESS SHARE` and would receive
-  SQLSTATE `42501` under the superseded `SHARE ROW EXCLUSIVE` receipt-lock
-  contract.
+  and never grant itself receipt write privilege. It must retain
+  `SHARE ROW EXCLUSIVE` for the four mutable core state tables (M1 head, M1 revisions,
+  domain identity, and the L1 root ledger/schema_migrations), while present M2
+  revisions/head use `ACCESS SHARE` in the unchanged lock order. L2 and M2 are
+  read-authority-only evidence relations: PostgreSQL 16 must prove their exact
+  `SELECT`-only actor can acquire `ACCESS SHARE`, while the same direct M2 owner
+  deterministically receives SQLSTATE `42501` under the superseded
+  `SHARE ROW EXCLUSIVE` path because owner status does not restore explicitly revoked
+  `UPDATE`/`DELETE`/`TRUNCATE`. RED/GREEN coverage must prove the shared
+  production lock path applies to initial classification and lets both normal
+  exact-FINALIZED repeat and post-commit ACK recovery succeed without expanding
+  the exact raw or effective M2 ACL. This is not an ACK-only exception. Exact
+  PREPARED keeps M2 absent; transition advisory locking, SERIALIZABLE, the four
+  core strong locks, M1/head CAS, mutation DDL/DML locks, post-DCL exact
+  readback, and the full constrained classifier remain unchanged.
+  `ACCESS SHARE` continues to exclude `ACCESS EXCLUSIVE` DDL drift and makes no new
+  confinement claim against a hostile database/direct owner.
 - [ ] GREEN: validate receipt through the one shared constrained
   `ReadAppACLR2CatalogPredicatesInTx`/`ClassifyAppACLR2State` path first, then
   execute the finalizer section in one serializable transaction after

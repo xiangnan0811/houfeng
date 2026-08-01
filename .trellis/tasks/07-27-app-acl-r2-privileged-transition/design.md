@@ -1226,13 +1226,23 @@ search_path = pg_catalog, public, and advisory lock
 houfeng.app-acl-r2-privileged-transition.v1. Finalize's fixed table-lock order
 is M1 head, M1 revisions, domain identity, L1 root ledger, L2 receipt when
 present, M2 revisions when present, then M2 head when present. M1 head, M1
-revisions, domain identity, the L1 root ledger, and present M2 revisions/head
-use `SHARE ROW EXCLUSIVE`. The present bootstrap-owned L2
-`app_acl_r2_bootstrap_receipt` alone uses `ACCESS SHARE`: finalizer is a
-SELECT-only non-owner, for which PostgreSQL 16 permits `SELECT` to lock only
-at `ACCESS SHARE`. The exclusive transition advisory lock plus the immutable,
-fixed-ACL receipt prevent legitimate transition races; this privilege-compatible
-evidence lock does not broaden receipt authority. Ordinary bootstrap first
+revisions, domain identity, and the L1 root ledger use `SHARE ROW EXCLUSIVE`.
+The present bootstrap-owned L2 receipt and present direct-migrator-owned M2
+revisions/head are read-authority-only evidence relations and use
+`ACCESS SHARE`. PostgreSQL 16 permits a `SELECT`-only actor to acquire `ACCESS SHARE`,
+while `SHARE ROW EXCLUSIVE` requires `UPDATE`, `DELETE`, or `TRUNCATE`; a
+relation owner whose ordinary DML privileges were explicitly revoked does not
+bypass that `LOCK TABLE` ACL check. This shared lock contract applies whenever
+present M2 is observed before initial classification, including a normal exact
+FINALIZED repeat and post-commit finalizer ACK recovery; it is not an ACK-only
+exception. The exclusive transition advisory lock, SERIALIZABLE closure, four
+mutable-core `SHARE ROW EXCLUSIVE` locks, and exact classifier prevent
+legitimate transition races without broadening L2/M2 authority. Exact PREPARED
+keeps M2 absent; mutation uses its own DDL/DML locks, M1/head CAS, and post-DCL
+exact readback. `ACCESS SHARE` still excludes concurrent `ACCESS EXCLUSIVE` DDL
+drift. A hostile database/direct owner that re-grants itself privileges remains
+the documented residual risk; a transient stronger table lock would not create
+persistent confinement. Ordinary bootstrap first
 follows its exact OID-10 actor gate and metadata-only inventory sequence.
 M2/unknown presence rejects before its full
 classifier or any M2 read, lock, scan, or aggregation; after confirmed absence,
