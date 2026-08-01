@@ -69,7 +69,7 @@ if [ -z "${HOUFENG_DATABASE_URL:-}" ]; then
 	encoded_database_user=$(uri_encode_component "$HOUFENG_DATABASE_USER") || exit 1
 	encoded_database_password=$(uri_encode_component "$database_password") || exit 1
 	encoded_database_name=$(uri_encode_component "$HOUFENG_DATABASE_NAME") || exit 1
-	database_url=$(printf 'postgres://%s:%s@db:5432/%s?sslmode=disable' "$encoded_database_user" "$encoded_database_password" "$encoded_database_name")
+	database_url=$(printf 'postgres://%s:%s@db:5432/?dbname=%s&sslmode=disable' "$encoded_database_user" "$encoded_database_password" "$encoded_database_name")
 	export HOUFENG_DATABASE_URL="$database_url"
 fi
 

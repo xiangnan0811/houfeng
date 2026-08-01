@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestDockerRuntimeRunsAsHoufengUser(t *testing.T) {
@@ -57,6 +59,7 @@ func TestDockerEntrypointExecutesActualScriptWithValidatedDatabaseInputs(t *test
 		passwordFileMode   os.FileMode
 		wantChild          bool
 		wantDatabaseURL    string
+		wantDatabaseName   string
 		wantOutputContains string
 	}{
 		{
@@ -122,15 +125,17 @@ func TestDockerEntrypointExecutesActualScriptWithValidatedDatabaseInputs(t *test
 			passwordFile:     "file:/? secret",
 			passwordFileMode: 0o600,
 			wantChild:        true,
-			wantDatabaseURL:  "postgres://houfeng:file%3A%2F%3F%20secret@db:5432/houfeng?sslmode=disable",
+			wantDatabaseURL:  "postgres://houfeng:file%3A%2F%3F%20secret@db:5432/?dbname=houfeng&sslmode=disable",
+			wantDatabaseName: "houfeng",
 		},
 		{
 			name: "explicit database URL bypasses fallback inputs",
 			environment: map[string]string{
 				"HOUFENG_DATABASE_URL": "postgres://explicit.invalid/database?sslmode=require",
 			},
-			wantChild:       true,
-			wantDatabaseURL: "postgres://explicit.invalid/database?sslmode=require",
+			wantChild:        true,
+			wantDatabaseURL:  "postgres://explicit.invalid/database?sslmode=require",
+			wantDatabaseName: "database",
 		},
 		{
 			name: "reserved URI characters are percent encoded",
@@ -139,8 +144,31 @@ func TestDockerEntrypointExecutesActualScriptWithValidatedDatabaseInputs(t *test
 				"HOUFENG_DATABASE_NAME":     "db/name?blue",
 				"HOUFENG_DATABASE_PASSWORD": "p@ss:/?#[]%&=+ space",
 			},
-			wantChild:       true,
-			wantDatabaseURL: "postgres://app%3Auser:p%40ss%3A%2F%3F%23%5B%5D%25%26%3D%2B%20space@db:5432/db%2Fname%3Fblue?sslmode=disable",
+			wantChild:        true,
+			wantDatabaseURL:  "postgres://app%3Auser:p%40ss%3A%2F%3F%23%5B%5D%25%26%3D%2B%20space@db:5432/?dbname=db%2Fname%3Fblue&sslmode=disable",
+			wantDatabaseName: "db/name?blue",
+		},
+		{
+			name: "leading slash in database name survives pgx parsing",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_USER":     "houfeng",
+				"HOUFENG_DATABASE_NAME":     "/tenant",
+				"HOUFENG_DATABASE_PASSWORD": "secret",
+			},
+			wantChild:        true,
+			wantDatabaseURL:  "postgres://houfeng:secret@db:5432/?dbname=%2Ftenant&sslmode=disable",
+			wantDatabaseName: "/tenant",
+		},
+		{
+			name: "UTF-8 database name survives pgx parsing",
+			environment: map[string]string{
+				"HOUFENG_DATABASE_USER":     "houfeng",
+				"HOUFENG_DATABASE_NAME":     "数据库/生产",
+				"HOUFENG_DATABASE_PASSWORD": "secret",
+			},
+			wantChild:        true,
+			wantDatabaseURL:  "postgres://houfeng:secret@db:5432/?dbname=%E6%95%B0%E6%8D%AE%E5%BA%93%2F%E7%94%9F%E4%BA%A7&sslmode=disable",
+			wantDatabaseName: "数据库/生产",
 		},
 		{
 			name: "ASCII control byte is rejected",
@@ -172,6 +200,13 @@ func TestDockerEntrypointExecutesActualScriptWithValidatedDatabaseInputs(t *test
 				}
 				if !result.childRan {
 					t.Fatal("docker entrypoint did not execute its child")
+				}
+				config, err := pgxpool.ParseConfig(result.databaseURL)
+				if err != nil {
+					t.Fatalf("pgxpool.ParseConfig(%q) error = %v", result.databaseURL, err)
+				}
+				if config.ConnConfig.Database != tt.wantDatabaseName {
+					t.Fatalf("parsed database name = %q, want %q", config.ConnConfig.Database, tt.wantDatabaseName)
 				}
 				if result.databaseURL != tt.wantDatabaseURL {
 					t.Fatalf("child HOUFENG_DATABASE_URL = %q, want %q", result.databaseURL, tt.wantDatabaseURL)
