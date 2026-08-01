@@ -16,6 +16,8 @@ const (
 	appACLR2ReceiptTriggerDefinitionPG16                                = "CREATE TRIGGER app_acl_r2_bootstrap_receipt_immutable " +
 		"BEFORE DELETE OR UPDATE OR TRUNCATE ON public.app_acl_r2_bootstrap_receipt " +
 		"FOR EACH STATEMENT EXECUTE FUNCTION record_platform_internal.app_acl_r2_reject_bootstrap_receipt_mutation()"
+	appACLR2PGControlSystemIdentityArgumentsPG16 = "OUT pg_control_version integer, OUT catalog_version_no integer, " +
+		"OUT system_identifier bigint, OUT pg_control_last_modified timestamp with time zone"
 )
 
 // AppACLR2CatalogRoleStateV1 records the exact transition-role attributes read
@@ -150,6 +152,7 @@ type AppACLR2PGControlSystemCatalogV1 struct {
 	FunctionCount         uint16
 	OID                   uint32
 	OwnerOID              uint32
+	IdentityArguments     string
 	ACLIsNull             bool
 	Grants                []AppACLR2PGControlSystemGrantCatalogV1
 	BootstrapExecute      bool
@@ -603,6 +606,9 @@ func validateAppACLR2PGControlSystemCatalog(
 	if catalog.FunctionCount != 1 || catalog.OID == 0 {
 		return fmt.Errorf("APP ACL R2 pg_control_system() signature catalog has %d functions, want 1", catalog.FunctionCount)
 	}
+	if catalog.IdentityArguments != appACLR2PGControlSystemIdentityArgumentsPG16 {
+		return fmt.Errorf("APP ACL R2 pg_control_system() identity arguments do not match PostgreSQL 16")
+	}
 	bootstrap := roles[AppACLControlRoleBootstrapSuperuserR2]
 	if catalog.OwnerOID != 10 || catalog.OwnerOID != bootstrap.OID {
 		return fmt.Errorf("APP ACL R2 pg_control_system() owner is not bootstrap OID 10")
@@ -988,6 +994,7 @@ func readAppACLR2PGControlSystemCatalogInTx(
 	rows, err := tx.Query(ctx, `
 		select procedure.oid::bigint,
 		       procedure.proowner::bigint,
+		       pg_catalog.pg_get_function_identity_arguments(procedure.oid),
 		       procedure.proacl is null,
 		       coalesce(acl_grant.grantor::bigint, 0),
 		       coalesce(acl_grant.grantee::bigint, 0),
@@ -1002,7 +1009,7 @@ func readAppACLR2PGControlSystemCatalogInTx(
 		left join lateral pg_catalog.aclexplode(procedure.proacl) acl_grant on true
 		where namespace.nspname = 'pg_catalog'
 		  and procedure.proname = 'pg_control_system'
-		  and pg_catalog.pg_get_function_identity_arguments(procedure.oid) = ''
+		  and procedure.pronargs = 0
 		order by procedure.oid, acl_grant.grantee, acl_grant.privilege_type
 	`, int64(roles[1].OID), int64(roles[2].OID), int64(roles[3].OID))
 	if err != nil {
@@ -1013,12 +1020,13 @@ func readAppACLR2PGControlSystemCatalogInTx(
 	var previousOID uint32
 	for rows.Next() {
 		var oid, ownerOID, grantorOID, granteeOID int64
-		var privilege string
+		var identityArguments, privilege string
 		var grantOption bool
 		var aclIsNull, bootstrapExecute, directExecute, runtimeExecute, adminExecute bool
 		if err := rows.Scan(
 			&oid,
 			&ownerOID,
+			&identityArguments,
 			&aclIsNull,
 			&grantorOID,
 			&granteeOID,
@@ -1048,6 +1056,7 @@ func readAppACLR2PGControlSystemCatalogInTx(
 			if catalog.FunctionCount == 1 {
 				catalog.OID = functionOID
 				catalog.OwnerOID = functionOwnerOID
+				catalog.IdentityArguments = identityArguments
 				catalog.ACLIsNull = aclIsNull
 				catalog.BootstrapExecute = bootstrapExecute
 				catalog.DirectMigratorExecute = directExecute

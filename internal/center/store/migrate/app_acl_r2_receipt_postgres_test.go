@@ -557,7 +557,8 @@ func TestAppACLR2BootstrapLiveCatalogReaderCallsPGControlAndRejectsDomainMismatc
 			queries := strings.ToLower(strings.Join(append(append([]string(nil), tx.queryTexts...), tx.queryRowTexts...), "\n"))
 			for _, want := range []string{
 				"procedure.proname = 'pg_control_system'",
-				"pg_get_function_identity_arguments(procedure.oid) = ''",
+				"procedure.pronargs = 0",
+				"pg_get_function_identity_arguments(procedure.oid)",
 				"aclexplode(procedure.proacl)",
 				"has_function_privilege",
 			} {
@@ -568,10 +569,27 @@ func TestAppACLR2BootstrapLiveCatalogReaderCallsPGControlAndRejectsDomainMismatc
 			if !strings.Contains(queries, "pg_control_system()") {
 				t.Fatalf("bootstrap live catalog reader queries = %q, want direct pg_control_system() call", queries)
 			}
+			if strings.Contains(queries, "pg_get_function_identity_arguments(procedure.oid) = ''") {
+				t.Fatalf("bootstrap live catalog reader selected pg_control_system() by empty formatted arguments: %q", queries)
+			}
 			if len(tx.queries) != 0 || len(tx.queryRows) != 0 {
 				t.Fatalf("bootstrap live catalog reader left %d query and %d query-row scripts unused", len(tx.queries), len(tx.queryRows))
 			}
 		})
+	}
+}
+
+func TestAppACLR2BootstrapCatalogReaderRejectsPGControlSystemIdentityArgumentDrift(t *testing.T) {
+	frozen := validFrozenAppACLR1StateFixture(t)
+	tx := newScriptedAppACLR2BootstrapCatalogTx()
+	tx.queries[4].rows[0][2] = "OUT pg_control_version integer, OUT catalog_version_no integer, OUT system_identifier bigint, OUT pg_control_last_modified timestamp without time zone"
+
+	snapshot, err := readAppACLR2BootstrapCatalogSnapshotPostgres(context.Background(), tx, frozen)
+	if err != nil {
+		t.Fatalf("readAppACLR2BootstrapCatalogSnapshotPostgres() error = %v", err)
+	}
+	if _, _, err := validateAppACLR2BootstrapCatalog(snapshot, frozen); err == nil || !strings.Contains(err.Error(), "identity arguments") {
+		t.Fatalf("validateAppACLR2BootstrapCatalog() error = %v, want pg_control_system() identity-argument rejection", err)
 	}
 }
 
@@ -1990,9 +2008,10 @@ func validateAppACLR2PGCryptoMemberCatalogIdentityFormatterQuery(query string) e
 
 func appACLR2PGControlSystemCatalogFixture() AppACLR2PGControlSystemCatalogV1 {
 	return AppACLR2PGControlSystemCatalogV1{
-		FunctionCount: 1,
-		OID:           900,
-		OwnerOID:      10,
+		FunctionCount:     1,
+		OID:               900,
+		OwnerOID:          10,
+		IdentityArguments: appACLR2PGControlSystemIdentityArgumentsPG16,
 		Grants: []AppACLR2PGControlSystemGrantCatalogV1{{
 			GrantorOID: 10,
 			GranteeOID: 10,
@@ -2174,7 +2193,7 @@ func newScriptedAppACLR2BootstrapCatalogTxWithPGCryptoRows(memberRows [][]any) *
 			{rows: nil},
 			{rows: memberRows},
 			{rows: [][]any{{
-				int64(900), int64(10), false,
+				int64(900), int64(10), "OUT pg_control_version integer, OUT catalog_version_no integer, OUT system_identifier bigint, OUT pg_control_last_modified timestamp with time zone", false,
 				int64(10), int64(10), "EXECUTE", false,
 				true, false, false, false,
 			}}},
