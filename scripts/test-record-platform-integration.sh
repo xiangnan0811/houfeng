@@ -69,7 +69,7 @@ pick_free_port() {
         continue
         ;;
     esac
-    if ! ss -ltn "sport = :${candidate}" | rg -q LISTEN
+    if ! ss -ltn "sport = :${candidate}" | grep -q LISTEN
     then
       selected_ports+=("$candidate")
       picked_port=$candidate
@@ -164,7 +164,7 @@ HOUFENG_RECOVERY_CONTROL_DATABASE_URL="postgres://postgres:${recovery_password}@
 command_status=${PIPESTATUS[0]}
 set -e
 
-if rg -F --quiet -- '--- SKIP:' "$output_file"
+if grep -Fq -- '--- SKIP:' "$output_file"
 then
   printf 'record-platform integration command skipped a test\n' >&2
   exit 1

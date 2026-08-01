@@ -2410,7 +2410,7 @@ func newAppACLR2FakeRunnerToolchain(t *testing.T) *appACLR2FakeRunnerToolchain {
 	if err := os.MkdirAll(toolchain.tmpParent, 0o755); err != nil {
 		t.Fatalf("create fake runner TMPDIR: %v", err)
 	}
-	for _, command := range []string{"od", "seq", "rg", "sort", "wc", "tr", "tee", "rm", "sleep"} {
+	for _, command := range []string{"od", "seq", "grep", "sort", "wc", "tr", "tee", "rm", "sleep"} {
 		target, err := exec.LookPath(command)
 		if err != nil {
 			t.Fatalf("locate host command %q for fake runner: %v", command, err)
