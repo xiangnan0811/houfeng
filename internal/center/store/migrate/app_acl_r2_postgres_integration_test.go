@@ -2406,9 +2406,9 @@ func assertAppACLR2StrictRunnerBehavior(t *testing.T) {
 		fake := newAppACLR2FakeRunnerToolchain(t)
 		image := "postgres:16.12"
 		code, output := runAppACLR2StrictRunner(t, runner, fake, &image, []string{
-			"/bin/sh",
+			"/usr/bin/bash",
 			"-c",
-			"for path in /proc/$$/fd/*; do fd=${path##*/}; if [ \"$fd\" -ge 10 ]; then printf 'unexpected inherited fd %s\\n' \"$fd\" >&2; exit 19; fi; done",
+			"for path in /proc/$$/fd/*; do fd=${path##*/}; if [ \"$fd\" -ge 3 ] && { [ \"$path\" -ef /proc/$$/fd/1 ] || [ \"$path\" -ef /proc/$$/fd/2 ]; }; then printf 'inherited tee sink fd %s\\n' \"$fd\" >&2; exit 19; fi; done",
 		})
 		if code != 0 {
 			t.Fatalf("tee sink descriptor strict-runner exit code = %d, output %q, want 0", code, output)
