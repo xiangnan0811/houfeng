@@ -3,6 +3,8 @@
 > Active task: `.trellis/tasks/07-14-vps-records-platform-foundation`
 > 范围：补齐 r1 必需的 APP projection SQL primitive；不把尚未实现的 ledger/full-witness saga 伪装为已经完成。
 
+> **2026-08-02 status correction.** This is a historical implementation record, not a live migration-edit plan. The projector DDL was subsequently released inside byte-immutable `db/migrations/0051_create_record_platform_foundation.sql` (SHA-256 `503d58670dc790c4b852bfb58cf93d2b816c1ce956958567dc605cb28d5cd23f`). R1/R2 still grant no caller `EXECUTE`; any future trusted caller/ownership transition belongs to additive 0061–0063 and APP V3 admission.
+
 **Goal:** 让真实 `0051` schema 提供两项唯一、migrator-owned、可重试的 APP projection DDL primitive，并以一个闭合的 v1 `bytea` 命令合同驱动 `deployment_contract_state` 的 activation / domain-rotation CAS；r1 不向 runtime/admin 授予调用权。
 
 **Architecture:** 未来受单独准入的 trusted caller 必须先从 primary + full witness 验证外部治理证据；本计划中的 APP 函数只接受已经验证后的 canonical projection command，锁定本地 singleton state，比较完整前态，并原子写入唯一可由 APP 保存的投影。函数返回由 command 派生的确定性 CAS receipt digest，供后续 ledger/witness receipt 持久化；它不声称能跨 DSN 自行验证外部 witness，也不授权现有 runtime/admin 绕过该边界。
@@ -14,8 +16,8 @@
 ## 1. 已确认的边界
 
 - r1 runtime 与 platform-admin 的持久函数 `EXECUTE` 集均为空；两个 projector 仍必须以 migrator owner、`SECURITY DEFINER`、唯一 `bytea` identity 和 `search_path=pg_catalog` 出现在 catalog verifier 中。未来 caller 另行设计并准入。
-- 真实 `0051` 当前缺失这两个函数，现有 catalog fixture 会自行造 no-op 函数，不能证明真实 migration。
-- `0051` 尚未进入 `origin/main` 或远端分支；Task 11 也明确该未发布 0051 baseline 应直接修订，不能新建与其它 Child 所有权冲突的临时 migration。
+- 在本计划最初的 RED cutpoint，0051 尚缺这两个函数且旧 catalog fixture 会自行造 no-op 函数；随后 `d57d65d3` 将真实实现加入 0051，后续发布已固定这些 bytes。
+- 0051 现已进入受保护主线和 release history，包含 whitespace 在内都不得再修订。当前 successor 编号固定为 0061–0063；本计划中的旧“直接修改0051”措辞只描述历史实施顺序，不授予未来编辑权限。
 - 本次不实现 ledger/witness/recovery-control 的 typed entry / receipt 验证、外部 saga 或 production caller wiring。调用者必须在未来实现中先验证 witnessed `(sequence, hash)`，再调用本地 CAS；该依赖要继续作为 Child 1 未完成项保留。
 
 ## 2. `ProjectionCommandV1` 的闭合字节合同
@@ -90,7 +92,7 @@ SQL requires the expected deployment/profile/current ledger tuple/current identi
 
 ## 3. SQL security and receipt contract
 
-- Define both public functions in unreleased `db/migrations/0051_create_record_platform_foundation.sql`, after the singleton state and local internal schema exist.
+- Historical result: both public functions were defined in the then-unreleased 0051 after the singleton state and local internal schema. The released file is now evidence-only；future DDL must use additive successors.
 - Both are `SECURITY DEFINER`, `SET search_path = pg_catalog`, use fully qualified `public.*` / `record_platform_internal.*` references, accept exactly one `bytea`, and have no overload or convenience entrypoint.
 - Internal fixed-width reader helpers are private to `record_platform_internal`, are revoked from `PUBLIC`, and exist only to avoid duplicate byte arithmetic. The two public functions explicitly `REVOKE ALL ... FROM PUBLIC`; r1 scoped manifest convergence grants neither runtime nor admin `EXECUTE`.
 - Each public function locks `public.deployment_contract_state` for `project_id='default'` before deciding apply / exact-retry / conflict. It returns `bytea`:
@@ -119,11 +121,11 @@ SHA-256(
 - [x] Implement the minimal closed types, marshal, parse and validation needed for the tests. No database access or caller wiring belongs in this package.
 - [x] Re-run the focused test command; it must pass before any DDL uses a generated command.
 
-### Task 2: Add real 0051 projector DDL and migration regression
+### Historical Task 2: Add real 0051 projector DDL and migration regression
 
 **Files:**
 
-- Modify: `db/migrations/0051_create_record_platform_foundation.sql`
+- Historical immutable output: `db/migrations/0051_create_record_platform_foundation.sql` (do not modify)
 - Modify: `internal/center/store/migrate/record_platform_migration_test.go`
 
 - [x] Write RED source-level assertions for both exact public identities, security-definer/search-path/PUBLIC revoke fragments and the two closed operation markers.

@@ -32,7 +32,7 @@
 
 | 顺序 | 子任务目录 | 直接依赖 | 合并后提供的稳定边界 |
 |---|---|---|---|
-| 1 | `07-14-vps-records-platform-foundation` | 无 | recordauth policy、outbox/worker、删除账本/full witness、RecoveryTrustStore、首次激活/密钥治理、domain identity rotation/灾难恢复/transfer/typed receipts、八个 retention roots（双分类源、21 lifecycle、24 participant与 executable bindings）、managed filesystem/core-dump 证明、恢复清单、独立 `houfeng-record-platform-admin` 与 fail-closed gate |
+| 1 | `07-14-vps-records-platform-foundation` | 无 | recordauth policy、outbox/worker、删除账本/full witness、RecoveryTrustStore、released R2→atomic APP V3 ownership/admission、首次激活/密钥治理、domain identity rotation/灾难恢复/transfer/typed receipts、八个 retention roots（双分类源、21 lifecycle、24 participant与 executable bindings）、verified-history retention acceptance、managed filesystem/core-dump 证明、恢复清单、独立 `houfeng-record-platform-admin` 与 fail-closed gate |
 | 2 | `07-14-vps-records-core` | 1 | record root、完整修订、私有草稿、类型/状态、引用关系、记录删除 reservation/read fence |
 | 3 | `07-14-vps-records-attachments-storage` | 1, 2 | local/S3 Blob、附件上传/隔离/扫描/配额/下载、GC pin 与 backup/restore adapter |
 | 4 | `07-14-vps-records-evidence-platform` | 1, 2 | evidence kind registry、capture intent、不可变快照与首批来源适配器 |
@@ -52,7 +52,7 @@
 
 | Child / slug | Ordinal | Direct deps | MigrationOwners | PostgreSQLFamilies | CanonicalSchemaFamilies | S3Families | ManagedFilesystemFamilies | ManagedClientFamilies | LifecyclePolicyIDs | PurgeParticipantIDs | Kinds | InitialDeltaRequirement |
 |---|---:|---|---|---|---|---|---|---|---|---|---|---|
-| `1 / vps-records-platform-foundation` | `1` | `[]` | `db/deletionledger/migrations/0001_create_deletion_ledger.sql`<br>`db/deletionwitness/migrations/0001_create_full_witness.sql`<br>`db/migrations/0051_create_record_platform_foundation.sql`<br>`db/recoverycontrol/migrations/0001_create_recovery_control.sql` | `app.record-platform-foundation/v1`<br>`deletion-ledger/v1`<br>`deletion-witness/v1`<br>`recovery-control/v1` | `child-retention-attestation/v1`<br>`deletion-ledger/v1`<br>`domain-identity/v1`<br>`managed-storage-control/v1`<br>`record-platform/v1`<br>`recordauth/v1`<br>`recovery-governance/v1`<br>`retention-control/v1` | `candidate-control/v1`<br>`record-platform-witness/v1` | `platform-admission/v1`<br>`platform-approvals/v1`<br>`platform-backup-control/v1`<br>`platform-candidate/v1`<br>`platform-plans/v1`<br>`platform-restore-control/v1`<br>`platform-telemetry/v1`<br>`platform-transfer/v1` | `[]` | `lc_derived_owner_bound_v1`<br>`lc_ephemeral_absolute_expiry_v1`<br>`lc_permanent_immutable_governance_v1`<br>`lc_permanent_immutable_ledger_v1`<br>`lc_permanent_minimal_audit_v1`<br>`lc_platform_mutation_complete_30d_v1`<br>`lc_recoverability_bound_v1`<br>`lc_storage_control_permanent_v1`<br>`lc_verified_purge_24h_30d_v1` | `pp_deletion_ledger_v1`<br>`pp_record_platform_v1`<br>`pp_recovery_control_v1`<br>`pp_retain_same_v1`<br>`pp_retention_v1` | `C,F,PG,S3` | `required_nonempty` |
+| `1 / vps-records-platform-foundation` | `1` | `[]` | `db/appaclr2/migrations/0052_app_acl_r2_privileged_transition.sql`<br>`db/deletionledger/migrations/0001_create_deletion_ledger.sql`<br>`db/deletionledger/migrations/0002_add_record_platform_governance.sql`<br>`db/deletionwitness/migrations/0001_create_full_witness.sql`<br>`db/deletionwitness/migrations/0002_add_record_platform_governance.sql`<br>`db/migrations/0051_create_record_platform_foundation.sql`<br>`db/migrations/0061_upgrade_record_platform_foundation_to_app_acl_v3.sql`<br>`db/migrations/0062_add_domain_identity_provision_authority_gate.sql`<br>`db/migrations/0063_add_app_acl_v3_readback.sql`<br>`db/recoverycontrol/migrations/0001_create_recovery_control.sql`<br>`db/recoverycontrol/migrations/0002_add_record_platform_governance.sql` | `app.record-platform-foundation/v1`<br>`deletion-ledger/v1`<br>`deletion-witness/v1`<br>`recovery-control/v1` | `child-retention-attestation/v1`<br>`deletion-ledger/v1`<br>`domain-identity/v1`<br>`managed-storage-control/v1`<br>`record-platform/v1`<br>`recordauth/v1`<br>`recovery-governance/v1`<br>`retention-control/v1` | `candidate-control/v1`<br>`record-platform-witness/v1` | `platform-admission/v1`<br>`platform-approvals/v1`<br>`platform-backup-control/v1`<br>`platform-candidate/v1`<br>`platform-plans/v1`<br>`platform-restore-control/v1`<br>`platform-telemetry/v1`<br>`platform-transfer/v1` | `[]` | `lc_derived_owner_bound_v1`<br>`lc_ephemeral_absolute_expiry_v1`<br>`lc_permanent_immutable_governance_v1`<br>`lc_permanent_immutable_ledger_v1`<br>`lc_permanent_minimal_audit_v1`<br>`lc_platform_mutation_complete_30d_v1`<br>`lc_recoverability_bound_v1`<br>`lc_storage_control_permanent_v1`<br>`lc_verified_purge_24h_30d_v1` | `pp_deletion_ledger_v1`<br>`pp_record_platform_v1`<br>`pp_recovery_control_v1`<br>`pp_retain_same_v1`<br>`pp_retention_v1` | `C,F,PG,S3` | `required_nonempty` |
 | `2 / vps-records-core` | `2` | `[1]` | `db/migrations/0052_create_records_core.sql` | `app.records-core/v1` | `record-core-purge-receipt/v1`<br>`record-core/v1`<br>`record-draft/v1`<br>`record-revision/v1`<br>`record-subject-reference/v1` | `[]` | `[]` | `[]` | `lc_derived_owner_bound_v1`<br>`lc_draft_last_activity_90d_v1`<br>`lc_owner_bound_authority_v1`<br>`lc_permanent_minimal_audit_v1`<br>`lc_verified_purge_24h_30d_v1` | `pp_records_core_v1`<br>`pp_retain_same_v1` | `C,PG` | `required_nonempty` |
 | `3 / vps-records-attachments-storage` | `3` | `[1,2]` | `db/migrations/0053_create_record_attachments.sql` | `app.record-attachments/v1` | `attachment-processor/v1`<br>`attachment-purge-receipt/v1`<br>`attachment-upload/v1`<br>`record-attachment/v1`<br>`record-blob/v1` | `record-attachment-preview/v1`<br>`record-blob-final/v1`<br>`record-blob-upload/v1` | `attachment-backup/v1`<br>`attachment-processor/v1`<br>`blob-local/v1` | `[]` | `lc_ephemeral_absolute_expiry_v1`<br>`lc_owner_bound_authority_v1`<br>`lc_owner_reference_zero_24h_v1`<br>`lc_recoverability_bound_v1`<br>`lc_storage_control_permanent_v1`<br>`lc_verified_purge_24h_30d_v1` | `pp_attachments_v1`<br>`pp_blob_gc_v1`<br>`pp_content_processor_v1` | `C,F,PG,S3` | `required_nonempty` |
 | `4 / vps-records-evidence-platform` | `4` | `[1,2]` | `db/migrations/0054_create_record_evidence.sql` | `app.record-evidence/v1` | `asset_history/v1`<br>`command_audit/v1`<br>`evidence-envelope/v1`<br>`evidence-purge-receipt/v1`<br>`ip_quality/v1`<br>`monitoring_event/v1`<br>`monitoring_timeseries/v1`<br>`subscription_budget/v1` | `[]` | `[]` | `[]` | `lc_absolute_15m_v1`<br>`lc_owner_bound_authority_v1`<br>`lc_owner_reference_zero_24h_v1`<br>`lc_verified_purge_24h_30d_v1` | `pp_evidence_payload_gc_v1`<br>`pp_evidence_v1` | `C,PG` | `required_nonempty` |
@@ -72,7 +72,7 @@ Child 5 是 `IndexedDBDraftBufferV1` 与 `indexeddb-record-draft-buffer/v1` 的�
 
 | 子任务 | 计划迁移 |
 |---|---|
-| 1 | `0051_create_record_platform_foundation.sql` |
+| 1 | released `0051_create_record_platform_foundation.sql`；released APP-R2 `db/appaclr2/migrations/0052_app_acl_r2_privileged_transition.sql`；successors `0061_upgrade_record_platform_foundation_to_app_acl_v3.sql`、`0062_add_domain_identity_provision_authority_gate.sql`、`0063_add_app_acl_v3_readback.sql` |
 | 2 | `0052_create_records_core.sql` |
 | 3 | `0053_create_record_attachments.sql` |
 | 4 | `0054_create_record_evidence.sql` |
@@ -82,13 +82,13 @@ Child 5 是 `IndexedDBDraftBufferV1` 与 `indexeddb-record-draft-buffer/v1` 的�
 | 10 | `0058_create_record_portability.sql`、`0059_migrate_experience_logs_to_records.sql` |
 | 11 | `0060_record_platform_cutover.sql`（只收敛 feature/default 与兼容门禁，不删除 legacy） |
 
-任务9按产品依赖先合入`0056`：它只用真实PostgreSQL验证0051–0054后、无0055时应用0056与repeat apply，并用独立migrator fixture证明“ledger已有较大文件名后新增较小文件名仍会被发现”，不得创建或应用真实0055。任务6随后才拥有真实`0055`，由它在ledger已记录0056的数据库上验证补应用0055与repeat apply。当前migrator以完整文件名逐项记账，因此这不是改写历史。每个阶段只顺延尚未发布编号：task9启动时冻结0051–0054；task7启动时冻结0051–0056；task10启动时冻结0051–0057；task11永远只顺延自身尚未合入的0060。若实施前migrator合同发生变化，则先重排当时所有未发布编号和文档，不能改写已合入migration或留下不可升级路径。
+任务9按产品依赖先合入`0056`：它只用真实PostgreSQL验证已有root migration set后、无0055时应用0056与repeat apply，并用独立migrator fixture证明“ledger已有较大文件名后新增较小文件名仍会被发现”，不得创建或应用真实0055。任务6随后才拥有真实`0055`，由它在ledger已记录0056/0061–0063的数据库上验证补应用0055与repeat apply。当前migrator以完整文件名逐项记账，因此较低filename后到不是改写历史。五个released baseline files与foundation 0061–0063编号均已冻结；每个child只可顺延自己尚未发布的编号，不能改写、改名或重新计算任何已合入migration。
 
 独立故障域不复用应用迁移账本：
 
-- `db/deletionledger/migrations/0001_create_deletion_ledger.sql`
-- `db/recoverycontrol/migrations/0001_create_recovery_control.sql`
-- `db/deletionwitness/migrations/0001_create_full_witness.sql`
+- `db/deletionledger/migrations/0001_create_deletion_ledger.sql`（released immutable）→ `0002_add_record_platform_governance.sql`，以后只用下一个 `0002+`
+- `db/recoverycontrol/migrations/0001_create_recovery_control.sql`（released immutable）→ `0002_add_record_platform_governance.sql`，以后只用下一个 `0002+`
+- `db/deletionwitness/migrations/0001_create_full_witness.sql`（released immutable）→ `0002_add_record_platform_governance.sql`，以后只用下一个 `0002+`
 
 ## 3. 固定依赖与准入
 
