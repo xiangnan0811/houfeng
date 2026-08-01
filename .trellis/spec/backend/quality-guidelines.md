@@ -656,6 +656,11 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   `^TestPostgresIntegrationAppACLR2($|/)` 的 `run` 和 `pass` event 各至少一条，
   且该 package 的 `skip` 和 `fail` event 均为零。runner 的 child exit 和
   `--- SKIP:` failure 保持有效；event proof 额外拒绝 zero-test false green。
+  runner 必须保持 child stdout/stderr 为两个独立的外部 stream：两者可分别
+  tee 到内部诊断文件并共同参与 `--- SKIP:` 检查，但必须等两个 tee 完成后再
+  扫描，且不得在 workflow 收集 JSONL 前把 stderr 合并进 stdout。fresh runner
+  的 `go: downloading ...` 等 module/tool diagnostics 继续在 stderr 可见，但
+  绝不能进入 event 文件或让相同提交因 cache 冷热而得到不同的 JSON 解析结果。
   `internal/center/platformmigrate` 与
   `cmd/houfeng-record-platform-admin` 的回归只能走独立非 PG16
   `go`/`make verify-go` full-test gate。
@@ -702,6 +707,7 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
 | `pg16-catalog` 使用一个 allowlist image | 用该 exact image 启动四个 fixture database 并执行 child command。 |
 | 调用 `postgres` 或 `postgres-s3` | 保持各自 mode contract；不能仅因为 strict image variable 缺少或不同而拒绝。 |
 | strict child 输出 `--- SKIP:` | cleanup 后 runner nonzero exit；该 lane 不是 evidence。 |
+| strict child 在 stderr 输出 module/tool diagnostics，同时在 stdout 输出 canonical Go JSON events | diagnostics 保持在 stderr 且 event JSONL 可完整解析；任一 stream 的 `--- SKIP:` 仍使 runner nonzero exit。 |
 | fresh job 缺少 `runs-on`、checkout 或按 `go.mod` 的 setup-go，或 lane 运行不同 child command | workflow review 拒绝；不能声称 fresh Actions runner 可执行。 |
 | matrix 添加 `include`、第四个值、shell/default fallback 或不同 entry point | workflow/runner contract review 必须拒绝；CI matrix 不再 deterministic。 |
 | anchored JSON stream 没有 matching `run`/`pass`，或 package 有 `skip`/`fail` event | lane nonzero exit；zero-test、skip 或 fail 不是 PG16 evidence。 |
@@ -742,7 +748,9 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
 - 批准 integration file 覆盖 real PG16 authority matrix；由 strict runner 执行
   时不得以 skip 作为 evidence。runner coverage 必须证明三个 allowlist literal、
   missing/invalid input 在 side effect 前拒绝、selected image 传到四个 fixtures、
-  cleanup 与 skip-to-failure behavior。该文件必须声明唯一 top-level
+  cleanup 与 skip-to-failure behavior。它还必须用 canonical JSON stdout 加
+  `go: downloading` stderr fixture 证明两个外部 stream 不混合，并分别证明
+  stdout/stderr 中的 skip marker 都 fail closed。该文件必须声明唯一 top-level
   `TestPostgresIntegrationAppACLR2` anchor；CI/local selector 完全锚定该名字。
 - 三个 image 都必须在本地运行同一 command；可用 Docker Server 是 local
   evidence，不是把 lane 推给 CI 的理由。随后每个 CI matrix lane 也运行完全相同的
