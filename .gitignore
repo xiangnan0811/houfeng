@@ -1,6 +1,7 @@
 # env
 .env
 docs/deploy/compose.env
+docs/deploy/secrets/
 
 # Docker Compose local data
 /data/

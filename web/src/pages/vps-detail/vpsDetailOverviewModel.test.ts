@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type {
   AssetDomainRecord,
@@ -205,6 +205,10 @@ function buildModel(overrides: Partial<Parameters<typeof buildVPSDetailOverviewM
 }
 
 describe('vpsDetailOverviewModel', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('formats renewal timing using days first and months after 30 days', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-01T08:00:00Z'))
@@ -218,8 +222,6 @@ describe('vpsDetailOverviewModel', () => {
       renew_at: '2026-07-15',
       ends_at: '2026-07-20',
     })).toBe('已取消自动续费 · 2 个月后到期')
-
-    vi.useRealTimers()
   })
 
   it('builds V17 facts, related items, ledger and IP overview for a stable VPS', () => {
@@ -260,8 +262,6 @@ describe('vpsDetailOverviewModel', () => {
     expect(model.ledger.records[0]?.summary).toBe('晚高峰丢包')
     expect(model.ledger.carriers.map((carrier) => carrier.name)).toEqual(['Blog', 'www.example.com'])
     expect(model.ipOverview.titleValue).toBe('59 · 1 风险 · 1 可用')
-
-    vi.useRealTimers()
   })
 
   it('does not treat subscription load failure as a missing subscription', () => {
@@ -299,6 +299,9 @@ describe('vpsDetailOverviewModel', () => {
   })
 
   it('promotes monitoring attention into the top judgement', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-01T08:00:00Z'))
+
     const model = buildModel({
       detail: {
         ...baseDetail,
@@ -375,7 +378,5 @@ describe('vpsDetailOverviewModel', () => {
       label: '处理取消/退役',
       mode: 'cancellation',
     })
-
-    vi.useRealTimers()
   })
 })

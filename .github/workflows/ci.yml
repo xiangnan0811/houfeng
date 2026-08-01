@@ -16,6 +16,46 @@ jobs:
           go-version-file: go.mod
       - run: make verify-go
 
+  record-platform-pg16-catalog:
+    name: record-platform-pg16-catalog (${{ matrix.postgres_image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres_image:
+          - "postgres:16.0"
+          - "postgres:16.6"
+          - "postgres:16.12"
+    env:
+      HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE: ${{ matrix.postgres_image }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Run strict PG16 catalog evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          events=$(mktemp)
+          trap 'rm -f "$events"' EXIT
+          scripts/test-record-platform-integration.sh pg16-catalog -- \
+            go test -json ./internal/center/store/migrate \
+            -run '^TestPostgresIntegrationAppACLR2$' -count=1 | tee "$events"
+          jq -se '
+            def package_event:
+              .Package == "houfeng/internal/center/store/migrate";
+            def anchored_event:
+              package_event and
+              ((.Test // "") | test("^TestPostgresIntegrationAppACLR2($|/)"));
+            [.[] | select(package_event)] as $package_events
+            | [$package_events[] | select(anchored_event)] as $anchored_events
+            | (($anchored_events | map(select(.Action == "run")) | length) > 0)
+              and (($anchored_events | map(select(.Action == "pass")) | length) > 0)
+              and (($package_events | map(select(.Action == "skip")) | length) == 0)
+              and (($package_events | map(select(.Action == "fail")) | length) == 0)
+          ' "$events" >/dev/null
+
   web:
     runs-on: ubuntu-latest
     steps:

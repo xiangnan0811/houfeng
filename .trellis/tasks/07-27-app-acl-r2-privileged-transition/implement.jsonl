@@ -1,0 +1,16 @@
+{"file":".trellis/tasks/07-27-app-acl-r2-privileged-transition/prd.md","reason":"Defines R2 scope, frozen R1 boundary, acceptance criteria, and non-goals."}
+{"file":".trellis/tasks/07-27-app-acl-r2-privileged-transition/design.md","reason":"Defines R2 catalog, transaction, ACL, and runtime-admission invariants."}
+{"file":".trellis/tasks/07-27-app-acl-r2-privileged-transition/implement.md","reason":"Orders replacement slices, test gates, and review sequencing."}
+{"file":".trellis/tasks/07-27-app-acl-r2-privileged-transition/golden-vectors.md","reason":"Required literal receipt vectors for Slice 3 decoder and tamper tests."}
+{"file":".trellis/tasks/07-14-vps-records-platform-foundation/prd.md","reason":"Supplies parent integration constraints and frozen R1 ACL governance."}
+{"file":".trellis/tasks/07-14-vps-records-platform-foundation/design.md","reason":"Supplies parent catalog and identity invariants that bound this child."}
+{"file":".trellis/spec/backend/index.md","reason":"Routes implementation to applicable backend conventions."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Guides PostgreSQL migrations, transactions, catalog ownership, and ACLs."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Requires fail-closed errors and sensitive connection handling."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Defines command, migration/store, and test ownership boundaries."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines focused/full Go gates, PostgreSQL evidence, and review requirements."}
+{"file":".trellis/spec/guides/index.md","reason":"Routes applicable cross-layer, reuse, and branch-governance guides."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Requires isolated non-main delivery and worktree safeguards."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Frames source, transaction, catalog, and runtime boundary contracts."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Prevents divergent codecs, readers, and transactional predicates."}
+{"file":".trellis/workflow.md","reason":"Defines planning artifacts, context-manifest roles, and review phases."}

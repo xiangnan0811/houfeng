@@ -44,6 +44,7 @@ type postgresDB interface {
 type bootstrapDeps struct {
 	openPostgres         func(context.Context, string) (postgresDB, error)
 	applyMigrations      func(context.Context, postgresDB) error
+	admitRuntime         func(context.Context, postgresDB) error
 	seedInitialUser      func(context.Context, auth.UserRepository, config.CenterConfig) error
 	newSessionRepository func(*pgxpool.Pool, []byte) (auth.SessionRepository, error)
 	newIncidentNotifier  func(config.CenterConfig, centersettings.Repository) incidentservice.Notifier
@@ -67,9 +68,20 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
 
-	if err := deps.applyMigrations(ctx, db); err != nil {
+	switch cfg.RecordPlatformMode {
+	case config.RecordPlatformModeLegacy:
+		if err := deps.applyMigrations(ctx, db); err != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("apply migrations: %w", err)
+		}
+	case config.RecordPlatformModeRuntimeAdmission:
+		if err := deps.admitRuntime(ctx, db); err != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("admit app runtime: %w", err)
+		}
+	default:
 		db.Close()
-		return nil, nil, fmt.Errorf("apply migrations: %w", err)
+		return nil, nil, fmt.Errorf("unknown record-platform mode %d", cfg.RecordPlatformMode)
 	}
 
 	monitoringInstanceRepo := store.NewPostgresMonitoringInstanceRepositoryWithTokenHMACKey(db.Pool(), cfg.SessionHMACKey)
@@ -150,9 +162,10 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		Now:                time.Now,
 		PasswordBcryptCost: cfg.PasswordBcryptCost,
 	})
+	scopeRepo := store.NewPostgresRecordAuthorizationRepository(db.Pool())
 	sessionCleanup := auth.NewSessionCleanupWorker(sessionRepo, slog.Default(), auth.DefaultSessionCleanupInterval)
 	authMiddleware := func(next http.Handler) http.Handler {
-		return centerhttp.RequireSameOrigin(cfg.PublicBaseURL)(centerhttp.RequireSession(authSvc)(next))
+		return centerhttp.RequireSameOrigin(cfg.PublicBaseURL)(centerhttp.RequireSession(authSvc, scopeRepo)(next))
 	}
 
 	router := deps.newRouter(centerhttp.RouterOptions{
@@ -262,6 +275,11 @@ func (d bootstrapDeps) withDefaults() bootstrapDeps {
 	if d.applyMigrations == nil {
 		d.applyMigrations = func(ctx context.Context, db postgresDB) error {
 			return migrate.Apply(ctx, db.Pool())
+		}
+	}
+	if d.admitRuntime == nil {
+		d.admitRuntime = func(ctx context.Context, db postgresDB) error {
+			return migrate.AdmitAppACLRuntime(ctx, db.Pool())
 		}
 	}
 	if d.seedInitialUser == nil {

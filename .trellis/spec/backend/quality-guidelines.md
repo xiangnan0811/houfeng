@@ -117,6 +117,9 @@ web:
 - 单元测试与被测文件**同目录同包**：`store/sync_batches.go` ↔ `store/sync_batches_test.go`。
 - 跨包黑盒测试用 `<package>_test` 包名：`internal/center/http/handlers/monitoring_instances_test.go` 第 1 行 `package handlers_test`。
 - 端到端测试加 `_e2e_test.go` 后缀：唯一例子 `internal/center/http/auth_e2e_test.go`，配套 helper `auth_e2e_helpers_test.go`。
+- 唯一窄例外见下方 APP ACL R2 Slice 7 场景：批准的
+  `internal/center/store/migrate/app_acl_r2_postgres_integration_test.go` 保持
+  该既有所有权名称；它不为任何其他真实数据库测试建立命名先例。
 - 路由级集成测试单独文件：`internal/center/http/router_api_test.go`、`router_test.go`。
 
 ### Table-driven 测试
@@ -568,6 +571,321 @@ if !(warning < alert && alert < critical) {
 
 ---
 
+### Scenario: APP ACL R2 Slice 7 严格 PostgreSQL 16 catalog lane
+
+#### 1. Scope / Trigger
+
+- Trigger：修改
+  `internal/center/store/migrate/app_acl_r2_postgres_integration_test.go`、
+  `scripts/test-record-platform-integration.sh` 的 `pg16-catalog` mode，或
+  `.github/workflows/ci.yml` 的 `record-platform-pg16-catalog` job 时。
+- 本场景是批准文件 `app_acl_r2_postgres_integration_test.go` 的唯一命名
+  例外。它是 required-CI catalog lane，不替代普通 `_e2e_test.go` 测试，也不
+  替代父任务的 record-platform fixture modes。
+- 它只覆盖 APP ACL R2 的 PG16 authority/catalog evidence，不改变冻结的
+  R1/R2 source、tuple、ACL、data、permission、state 或 clone/restore 合同。
+- 这是 cross-layer runner、Actions job、GitHub ruleset required-check 和
+  `go test -json` evidence contract；实现时四个边界必须一起验证，不能把
+  package compilation 或 zero-test result 标成 PG16 evidence。
+
+#### 2. Signatures
+
+```bash
+HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
+  scripts/test-record-platform-integration.sh pg16-catalog -- <command> [args...]
+```
+
+- `pg16-catalog` 是唯一严格的 Slice 7 mode。`<exact-image>` 只能是
+  `postgres:16.0`、`postgres:16.6` 或 `postgres:16.12`。
+- `postgres` 与 `postgres-s3` 保持原有父任务合同：
+  `scripts/test-record-platform-integration.sh <mode> -- <command> [args...]`。
+  Slice 7 image variable 不对两者施加 validation 或 defaulting。
+- required workflow job id 是 `record-platform-pg16-catalog`；显式 job name
+  是 `record-platform-pg16-catalog (${{ matrix.postgres_image }})`。literal
+  matrix 必须产生以下精确 check contexts：
+  `record-platform-pg16-catalog (postgres:16.0)`,
+  `record-platform-pg16-catalog (postgres:16.6)`，和
+  `record-platform-pg16-catalog (postgres:16.12)`.
+- job 的 fresh-runner signature 是 `runs-on: ubuntu-latest`、
+  `actions/checkout@v6`、`actions/setup-go@v6` + `go-version-file: go.mod`，
+  随后每一个 matrix lane 执行同一个 strict command：
+
+  ```bash
+  scripts/test-record-platform-integration.sh pg16-catalog -- \
+    go test -json ./internal/center/store/migrate \
+    -run '^TestPostgresIntegrationAppACLR2$' -count=1
+  ```
+
+  `TestPostgresIntegrationAppACLR2` 是批准文件中的唯一 top-level PG16
+  anchor；subtest 名可附在该 anchor 后。`platformmigrate` 与 record-platform
+  admin CLI 不属于这个 command。
+- controller 的唯一写 signature 是
+  `POST repos/$OWNER/$REPO/rulesets`，body name 为
+  `app-acl-r2-pg16-catalog-required-v1`，`target:"branch"`、
+  `enforcement:"active"`、empty `bypass_actors`，并以
+  `ref_name.include:["refs/heads/main"]` 精确限于 main。
+  `required_status_checks[].integration_id` 必须是同一新 `$HEAD` 的唯一成功
+  check-run numeric `.app.id`；不是 branch-protection `app_id` serialization。
+- controller 的 pre/post effective-main signature 是
+  `gh api --paginate --slurp 'repos/$OWNER/$REPO/rules/branches/main?per_page=100'`
+  pipe 到 `jq -e 'if type == "array" and length > 0 and all(.[]; type == "array") then add else error("effective-main pages must be nonempty arrays") end'`。
+  全部 page arrays 必须先 flatten，再判断 active/created `ruleset_id`、唯一性和
+  exact `required_status_checks`。
+
+#### 3. Contracts
+
+- runner 必须在 `mktemp`、random material、port probing、Docker、container、
+  fixture URL 或 child execution 之前验证 mode、`--`、child argv 和严格 image
+  值。每个被接受的 strict lane 都把所选 image 用于所有
+  APP/ledger/witness/recovery fixture databases。
+- `postgres`、`postgres-s3`、两者名称和未来父任务调用都是 compatibility
+  boundary。加入 `pg16-catalog` 时不得 rename、delete、route through strict
+  allowlist 或以其他方式改变它们。
+- 批准文件只有直接执行且未设置
+  `HOUFENG_POSTGRES_INTEGRATION=1` 时才可走普通 `t.Skip`。strict runner
+  export 该变量；child output 中任意 `--- SKIP:` 都必须使 runner exit 1，
+  enabled-test prerequisite failure 必须使用 `t.Fatal`/error 而非 skip。没有
+  其他 real-PostgreSQL test 获得此例外。
+- workflow matrix 只能包含三个 quoted literal，不得有 `include`、default
+  expression 或不同 entry point；每个 lane 运行同一 `pg16-catalog` command。
+  job 必须先 checkout 和按仓库既有 `setup-go@v6`/`go.mod` 模式安装 Go；显式
+  job name 是三个 check contexts 的 evidence contract；workflow 文件本身不能
+  把 context 设为 required。
+- strict child 只运行 migrate package 的 anchored JSON selector。它必须将
+  stdout 保存为 JSONL，并以 `jq -se` 证明匹配
+  `^TestPostgresIntegrationAppACLR2($|/)` 的 `run` 和 `pass` event 各至少一条，
+  且该 package 的 `skip` 和 `fail` event 均为零。runner 的 child exit 和
+  `--- SKIP:` failure 保持有效；event proof 额外拒绝 zero-test false green。
+  `internal/center/platformmigrate` 与
+  `cmd/houfeng-record-platform-admin` 的回归只能走独立非 PG16
+  `go`/`make verify-go` full-test gate。
+- external governance is controller-owned but create-only. Before one POST, the
+  controller requires the real failure gate
+  `gh api "repos/$OWNER/$REPO" | jq -e '.permissions.admin == true' >/dev/null`;
+  false, null, missing, or API error is `NEEDS_CONTROLLER` and no POST. It
+  reads all repository/parent rulesets with `includes_parents=true`, relevant
+  detailed ruleset IDs, canonical full `branches/main/protection`, and all
+  check-run pages for one new `$HEAD`. It reads effective main with
+  `--paginate --slurp .../rules/branches/main?per_page=100`, requires a
+  nonempty array of page arrays, and `add`-flattens it before any
+  `ruleset_id`/uniqueness/exact-check decision. An active same-name,
+  same-main-scope, or same-three-check ruleset is concurrent/duplicate state:
+  `NEEDS_CONTROLLER`, with no create/update/delete/disable/retry. The disabled
+  `protect_main` ruleset is not modified.
+- The body contains one `required_status_checks` rule only:
+  `do_not_enforce_on_create:false`,
+  `strict_required_status_checks_policy:true`, and the three literal contexts
+  with the observed numeric `integration_id`. It has no bypass actor and no
+  ref except `refs/heads/main`. It never hard-codes an app ID or derives it
+  from a context name.
+- Only an unambiguous 201 permits a fresh GET by returned ID, all applicable
+  rulesets, and another `--paginate --slurp ...rules/branches/main?per_page=100`
+  shape-checked `add` flatten. They must prove exactly one active matching
+  ruleset/rule and the three exact `{context, integration_id}` pairs; main's
+  active evaluation must identify the created ID. Then full
+  `branches/main/protection` must canonically equal the pre-create response.
+  Any non-201, transport ambiguity, validation/readback failure, duplicate, or
+  changed protection is `NEEDS_CONTROLLER`, never a replay or compensating
+  mutation.
+- Existing branch protection is not an input to a write and is never touched:
+  current `web-browser` `{context,app_id:null}`, existing numeric bindings,
+  `strict`, `enforce_admins`, and conversation resolution remain exactly as
+  read. GitHub rules aggregate, so the new ruleset adds rather than overwrites.
+  The rejected PATCH alternative would encode GET any-app/null as
+  `app_id:-1`, but Slice 7 has no PATCH, canary, ETag, or lease fallback.
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 预期行为 |
+| --- | --- |
+| `pg16-catalog` 缺少 image，或 image 为 `postgres`、`postgres:16`、`postgres:16-alpine`、其他非 allowlist 值 | 在任何 Docker 或 fixture side effect 前 exit 2。 |
+| `pg16-catalog` 使用一个 allowlist image | 用该 exact image 启动四个 fixture database 并执行 child command。 |
+| 调用 `postgres` 或 `postgres-s3` | 保持各自 mode contract；不能仅因为 strict image variable 缺少或不同而拒绝。 |
+| strict child 输出 `--- SKIP:` | cleanup 后 runner nonzero exit；该 lane 不是 evidence。 |
+| fresh job 缺少 `runs-on`、checkout 或按 `go.mod` 的 setup-go，或 lane 运行不同 child command | workflow review 拒绝；不能声称 fresh Actions runner 可执行。 |
+| matrix 添加 `include`、第四个值、shell/default fallback 或不同 entry point | workflow/runner contract review 必须拒绝；CI matrix 不再 deterministic。 |
+| anchored JSON stream 没有 matching `run`/`pass`，或 package 有 `skip`/`fail` event | lane nonzero exit；zero-test、skip 或 fail 不是 PG16 evidence。 |
+| strict PG16 command 包含 `platformmigrate` 或 admin CLI | review 拒绝；该 result 会混入非 Slice 7 file ownership 的 package gate。 |
+| admin response 为 false/null/missing，或 repository API error | `NEEDS_CONTROLLER`；true gate 前零 POST。 |
+| effective-main page 不是非空 array-of-arrays，flatten 失败，或 target 只存在后续 page 但未被发现 | `NEEDS_CONTROLLER`；不得以单页/未 flatten state 判断或 POST。 |
+| token 通过 admin gate 但 active ruleset 同名、同 main scope 或同三 check tuple；或 flattened active evaluation 不唯一 | `NEEDS_CONTROLLER`；不得 create/update/delete/disable/retry。 |
+| target run 的 `head_sha` 不同、未完成、非 success、app id 非 numeric/歧义 | `NEEDS_CONTROLLER`；不得 POST。 |
+| POST 非 201、transport ambiguity、validation error、duplicate/concurrent create | `NEEDS_CONTROLLER`；不得 replay、update 或 delete。 |
+| 201 后按 ID/all-rulesets/full-page flattened main evaluation readback 不精确，或 canonical branch protection 改变 | `NEEDS_CONTROLLER`；不得补偿性修改。 |
+| 三个 exact numeric-app contexts 都唯一成功，preflight 唯一且 POST 201/readback 精确 | 该 active ruleset 是 additive required merge gate；existing branch protection 原样不触碰。 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：用 `pg16-catalog` 提供 `postgres:16.6`；四个 fixture database 都使用
+  该 literal image；fresh job checkout/setup Go 后，migrate anchor 产生
+  nonzero `run`/`pass` 和 zero `skip`/`fail` JSON events，check context 为
+  `record-platform-pg16-catalog (postgres:16.6)`。
+- Base：开发者直接运行且没有 fixture environment 时，批准 integration test
+  按普通规则 skip；它不是 required-CI result。
+- Bad：改变 `postgres` 以拒绝 `postgres:16-alpine`，从而破坏父任务
+  Task 10/14/15/16/17/18 commands。
+- Bad：只在 YAML 中把 `record-platform-pg16-catalog` 标为 "required"，或在
+  新 head 的三个 checks 变绿前创建 ruleset。
+- Good：三条同一新 head 的成功 check-run 提供 numeric `integration_id`，一次
+  POST 创建 main-only active ruleset；ID/main readback 精确且完整 branch
+  protection canonical response 不变。
+- Base：preflight 发现同名或同作用域 active ruleset；controller 停在
+  `NEEDS_CONTROLLER`，不猜测其所有者或内容。
+- Bad：用固定当前 `go`、`web`、`web-browser`、`docker-image` strings
+  重写 branch protection，或从 context name 推断 integration ID；两者都会
+  破坏现有/未来绑定。
+- Bad：把 branch-protection PATCH、`app_id` null serialization、ETag/lease
+  protocol 或 canary 保留为 Slice 7 fallback；A 是唯一 active path。
+
+#### 6. Tests Required
+
+- 批准 integration file 覆盖 real PG16 authority matrix；由 strict runner 执行
+  时不得以 skip 作为 evidence。runner coverage 必须证明三个 allowlist literal、
+  missing/invalid input 在 side effect 前拒绝、selected image 传到四个 fixtures、
+  cleanup 与 skip-to-failure behavior。该文件必须声明唯一 top-level
+  `TestPostgresIntegrationAppACLR2` anchor；CI/local selector 完全锚定该名字。
+- 三个 image 都必须在本地运行同一 command；可用 Docker Server 是 local
+  evidence，不是把 lane 推给 CI 的理由。随后每个 CI matrix lane 也运行完全相同的
+  strict entry point。每次运行把 `go test -json` output 保存为 JSONL，并执行：
+
+  ```bash
+  # events is the file populated by tee from the strict child command above.
+  jq -se '
+    def package_event:
+      .Package == "houfeng/internal/center/store/migrate";
+    def anchored_event:
+      package_event and
+      ((.Test // "") | test("^TestPostgresIntegrationAppACLR2($|/)"));
+    [.[] | select(package_event)] as $package_events
+    | [$package_events[] | select(anchored_event)] as $anchored_events
+    | (($anchored_events | map(select(.Action == "run")) | length) > 0)
+      and (($anchored_events | map(select(.Action == "pass")) | length) > 0)
+      and (($package_events | map(select(.Action == "skip")) | length) == 0)
+      and (($package_events | map(select(.Action == "fail")) | length) == 0)
+  ' "$events" >/dev/null
+  ```
+
+  Pipeline/runner nonzero exit plus this query proves nonzero execution, zero
+  skip and zero fail. `platformmigrate` 与 admin CLI 的必要回归在独立
+  `go`/`make verify-go` full-test gate 执行；其 green result 不得成为 PG16
+  catalog assertion。
+- ruleset fixture must contain one active matching candidate, one same-name
+  duplicate, one same-main-scope duplicate, and one same-three-check duplicate.
+  It must prove every duplicate is `NEEDS_CONTROLLER` before POST; it must
+  also reject zero/two/wrong-head/non-success/nonnumeric target runs.
+- POST/readback fixture must assert the exact main-only, no-bypass body, exactly
+  three literal `{context, integration_id}` pairs, 201-only progression,
+  returned-ID/all-rulesets/main-evaluation proof, and no retry/delete/update on
+  ambiguous/non-201/validation/readback failure.
+- The following no-network fixture is required before implementation. It proves
+  the real admin predicate is a boolean gate and that effective-main pagination
+  is flattened before target `ruleset_id` uniqueness is evaluated:
+
+  ```bash
+  set -euo pipefail
+  require_admin() {
+    jq -e '.permissions.admin == true' >/dev/null
+  }
+  post_attempt=0
+  gate_then_post() {
+    require_admin || return 1
+    post_attempt=$((post_attempt + 1))
+  }
+  gate_then_post <<<'{"permissions":{"admin":true}}'
+  test "$post_attempt" -eq 1
+  for denied in '{"permissions":{"admin":false}}' '{"permissions":{"admin":null}}' '{}'; do
+    post_attempt=0
+    if gate_then_post <<<"$denied"; then exit 1; fi
+    test "$post_attempt" -eq 0
+  done
+
+  flatten_main_pages() {
+    jq -e '
+      if type == "array" and length > 0 and all(.[]; type == "array")
+      then add
+      else error("effective-main pages must be nonempty arrays")
+      end
+    '
+  }
+  require_one_target() {
+    jq -e --argjson target_id 42 '
+      [.[] | select(.ruleset_id == $target_id)] as $matches
+      | if ($matches | length) == 1 then true
+        else error("effective-main target is missing or not unique")
+        end
+    ' >/dev/null
+  }
+  page_two='[[{"ruleset_id":1}],[{"ruleset_id":42}]]'
+  printf '%s\n' "$page_two" | flatten_main_pages | require_one_target
+  for denied_pages in '[[{"ruleset_id":1}],[]]' '[[{"ruleset_id":42}],[{"ruleset_id":42}]]' '[[],"bad-page"]'; do
+    if printf '%s\n' "$denied_pages" | flatten_main_pages | require_one_target; then
+      exit 1
+    fi
+  done
+  ```
+- protection fixture must capture a current `web-browser`
+  `{context,app_id:null}`, a future numeric binding, and full canonical
+  protection before/after. It must prove the create-only operation never
+  serializes or mutates those values; a changed body is `NEEDS_CONTROLLER`.
+  The rejected `app_id:-1` PATCH form has no executable test path in Slice 7.
+
+#### 7. Wrong vs Correct
+
+```bash
+# Wrong：劫持 parent mode 并接受 fallback image。
+scripts/test-record-platform-integration.sh postgres -- go test ./...
+# HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE defaults to postgres:16-alpine
+```
+
+```bash
+# Correct：隔离 strict lane 并提供一个 literal image。
+HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.12 \
+  scripts/test-record-platform-integration.sh pg16-catalog -- \
+  go test -json ./internal/center/store/migrate \
+  -run '^TestPostgresIntegrationAppACLR2$' -count=1
+```
+
+```yaml
+# Wrong：未固定的 include/default 能创建第四个 context 或 fallback。
+matrix:
+  include:
+    - postgres_image: postgres:16
+
+# Correct：精确三个 literal value 驱动 named checks。
+matrix:
+  postgres_image: ["postgres:16.0", "postgres:16.6", "postgres:16.12"]
+```
+
+Wrong: mutate existing branch protection or serialize its bindings.
+
+```json
+{"strict": true, "contexts": ["web-browser", "record-platform-pg16-catalog (postgres:16.0)"]}
+```
+
+Correct: create one additive main-only ruleset using app IDs proved from the
+same successful head.
+
+```json
+{
+  "name": "app-acl-r2-pg16-catalog-required-v1",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+  "rules": [{"type": "required_status_checks", "parameters": {
+    "do_not_enforce_on_create": false,
+    "strict_required_status_checks_policy": true,
+    "required_status_checks": [
+      {"context": "record-platform-pg16-catalog (postgres:16.0)", "integration_id": 12345},
+      {"context": "record-platform-pg16-catalog (postgres:16.6)", "integration_id": 12345},
+      {"context": "record-platform-pg16-catalog (postgres:16.12)", "integration_id": 12345}
+    ]
+  }}]
+}
+```
+
+---
+
 ## 反模式 / Common Mistakes
 
 - ❌ **跳过 verify 提交**：哪怕"只是改了一行注释"也跑 `make verify-go`，3 秒的事。
@@ -576,7 +894,7 @@ if !(warning < alert && alert < critical) {
 - ❌ **TODO 不带 issue 链接**：`grep -rn "TODO\|FIXME" internal/ agent/ cmd/` 当前为空，保持纪录干净。如果必须 TODO，写完整理由 + 跟踪 issue 编号。
 - ❌ **新增 handler 但不更新 `bootstrap_test.go` 的 nil 断言**：会让"装配缺失"绕过 verify。
 - ❌ **测试用 `time.Sleep(N seconds)` 等 worker tick**：用注入小间隔 + ctx cancel 的 deterministic 模式（参考 `retention/worker_test.go:92`）。
-- ❌ **store 测试为了"覆盖更全"启动真 Postgres**：当前生态依赖 `fakeSyncBatchTx` 风格。如果确实要写真 DB 测试，单独走 `_e2e_test.go` 后缀并默认 `t.Skip` 在 env 缺失时跳过——但这条**目前还没人做过**，先和团队确认再加。
+- ❌ **store 测试为了"覆盖更全"启动真 Postgres**：当前生态依赖 `fakeSyncBatchTx` 风格。如果确实要写真 DB 测试，单独走 `_e2e_test.go` 后缀并默认 `t.Skip` 在 env 缺失时跳过；唯一例外是上方已逐项限定的 APP ACL R2 Slice 7 文件/strict runner，不能外推到其他测试。
 - ❌ **在窗口/过期判断测试里写会过期的固定未来日期**：例如生产逻辑按真实 `time.Now()` 判定 `renew_at` 是否在 30 天内时，测试夹具不能用 `time.Date(2026, time.June, 11, ...)` 表达"7 天后"。用 `time.Now().UTC().AddDate(0, 0, 7)`，或注入时钟后固定测试时钟。
 - ❌ **改 contract 包但不同 PR 改 agent**：`internal/contracts/agentapi/` 的任何 breaking 改动**必须**当 PR 把 agent 也升级，否则 fleet 会立即崩。
 - ❌ **改 `db/migrations/` 已合入的 SQL 文件**：见 `database-guidelines.md`。reviewer 看到这种 diff 应直接 reject。

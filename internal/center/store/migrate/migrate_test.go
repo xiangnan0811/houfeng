@@ -5,12 +5,18 @@ import (
 	"errors"
 	"io/fs"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"houfeng/db/migrations"
 )
+
+const frozenR1RootSourceCount = 52
 
 func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	names, err := Names()
@@ -89,6 +95,101 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	}
 	if offset != len(expectedTail) {
 		t.Fatalf("migration names missing expected asset ledger tail order %#v in %#v", expectedTail, names)
+	}
+}
+
+func TestNoRootR2Migration(t *testing.T) {
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatalf("ReadDir embedded migrations: %v", err)
+	}
+
+	obsoleteRootName := strings.Join([]string{"0052", "add", "app", "extension", "hardening", "receipt.sql"}, "_")
+	sqlFiles := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		sqlFiles++
+		if entry.Name() == obsoleteRootName {
+			t.Fatalf("root migrations expose obsolete draft %q", obsoleteRootName)
+		}
+	}
+	if got, want := sqlFiles, frozenR1RootSourceCount; got != want {
+		t.Fatalf("root migration count = %d, want frozen r1 count %d", got, want)
+	}
+}
+
+func TestFrozenR1RootSourcesAreExactly52(t *testing.T) {
+	names, err := Names()
+	if err != nil {
+		t.Fatalf("Names() error = %v", err)
+	}
+	if got, want := len(names), frozenR1RootSourceCount; got != want {
+		t.Fatalf("root migration name count = %d, want frozen r1 count %d", got, want)
+	}
+	if got, want := names[len(names)-1], "0051_create_record_platform_foundation.sql"; got != want {
+		t.Fatalf("final root migration = %q, want %q", got, want)
+	}
+
+	snapshot, err := snapshotMigrationSources(migrations.FS)
+	if err != nil {
+		t.Fatalf("snapshotMigrationSources(root) error = %v", err)
+	}
+	if got, want := len(snapshot.names), frozenR1RootSourceCount; got != want {
+		t.Fatalf("root snapshot count = %d, want frozen r1 count %d", got, want)
+	}
+	if !reflect.DeepEqual(snapshot.names, names) {
+		t.Fatalf("root snapshot names = %#v, want Names() %#v", snapshot.names, names)
+	}
+}
+
+func TestSnapshotMigrationSourcesCapturesExactLexicalEmbeddedSet(t *testing.T) {
+	embeddedEntries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatalf("ReadDir embedded migrations: %v", err)
+	}
+	wantNames := make([]string, 0, len(embeddedEntries))
+	for _, entry := range embeddedEntries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		wantNames = append(wantNames, entry.Name())
+	}
+	sort.Strings(wantNames)
+
+	snapshot, err := snapshotMigrationSources(migrations.FS)
+	if err != nil {
+		t.Fatalf("snapshotMigrationSources() error = %v", err)
+	}
+	if len(snapshot.names) != 52 {
+		t.Fatalf("snapshot migration name count = %d, want 52", len(snapshot.names))
+	}
+	if !reflect.DeepEqual(snapshot.names, wantNames) {
+		t.Fatalf("snapshot migration names = %#v, want embedded lexical names %#v", snapshot.names, wantNames)
+	}
+	for index := 1; index < len(snapshot.names); index++ {
+		if snapshot.names[index-1] >= snapshot.names[index] {
+			t.Fatalf("snapshot migration names are not lexical at %d: %q then %q", index, snapshot.names[index-1], snapshot.names[index])
+		}
+	}
+	if snapshot.names[3] != "0004_add_node_onboarding_binding_state.sql" || snapshot.names[4] != "0004_add_observation_provenance.sql" {
+		t.Fatalf("snapshot duplicate 0004 lexical order = %q, %q", snapshot.names[3], snapshot.names[4])
+	}
+	entries, err := ParseCanonicalMigrationSetBodyV1(snapshot.canonicalSet)
+	if err != nil {
+		t.Fatalf("ParseCanonicalMigrationSetBodyV1() error = %v", err)
+	}
+	if len(entries) != len(snapshot.names) {
+		t.Fatalf("canonical snapshot entries = %d, want %d", len(entries), len(snapshot.names))
+	}
+	for index, entry := range entries {
+		if entry.Filename != snapshot.names[index] {
+			t.Fatalf("canonical snapshot entry %d = %q, want %q", index, entry.Filename, snapshot.names[index])
+		}
+		if snapshot.sources[entry.Filename].checksum == "" {
+			t.Fatalf("snapshot source %q has no checksum", entry.Filename)
+		}
 	}
 }
 
@@ -394,11 +495,6 @@ func TestApplyFSExecutesPendingMigrationsInSortedOrder(t *testing.T) {
 		t.Fatalf("ensureCalls = %d, want 1", store.ensureCalls)
 	}
 
-	wantChecks := []string{"0001_initial_schema.sql", "0002_second.sql"}
-	if !reflect.DeepEqual(store.appliedChecks, wantChecks) {
-		t.Fatalf("appliedChecks = %#v, want %#v", store.appliedChecks, wantChecks)
-	}
-
 	wantExec := []string{"select 1;", "select 2;"}
 	if !reflect.DeepEqual(store.execSQL, wantExec) {
 		t.Fatalf("execSQL = %#v, want %#v", store.execSQL, wantExec)
@@ -434,6 +530,40 @@ func TestApplyFSSkipsAlreadyAppliedMigrations(t *testing.T) {
 	}
 }
 
+func TestApplyFSRejectsChecksumMismatchForAppliedMigration(t *testing.T) {
+	const migrationName = "0001_initial_schema.sql"
+	fsys := fstest.MapFS{
+		migrationName: {Data: []byte("select 1;")},
+	}
+	store := &fakeMigrationStore{
+		applied: map[string]bool{migrationName: true},
+		checksums: map[string]string{
+			migrationName: strings.Repeat("0", 64),
+		},
+	}
+
+	err := applyFS(context.Background(), store, fsys)
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("applyFS() error = %v, want checksum mismatch", err)
+	}
+}
+
+func TestApplyFSRejectsUnknownAppliedMigration(t *testing.T) {
+	store := &fakeMigrationStore{
+		applied: map[string]bool{"0000_unknown.sql": true},
+		checksums: map[string]string{
+			"0000_unknown.sql": strings.Repeat("0", 64),
+		},
+	}
+
+	err := applyFS(context.Background(), store, fstest.MapFS{
+		"0001_initial_schema.sql": {Data: []byte("select 1;")},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown applied migration") {
+		t.Fatalf("applyFS() error = %v, want unknown applied migration", err)
+	}
+}
+
 func TestApplyFSIncludesMigrationNameOnExecFailure(t *testing.T) {
 	fsys := fstest.MapFS{
 		"0002_second.sql": {Data: []byte("select 2;")},
@@ -452,6 +582,85 @@ func TestApplyFSIncludesMigrationNameOnExecFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("error %q does not include underlying exec error", err)
+	}
+}
+
+func TestEnsureMigrationLedgerInTxBackfillsAndLocksOnCallerTransaction(t *testing.T) {
+	ctx := context.Background()
+	checksum := strings.Repeat("a", 64)
+	tx := &fakeMigrationLedgerTx{
+		rows: &fakeMigrationLedgerRows{
+			name:     "0001_initial_schema.sql",
+			checksum: nil,
+		},
+	}
+	sources := map[string]migrationSource{
+		"0001_initial_schema.sql": {checksum: checksum, sql: "create table example();"},
+	}
+
+	if err := ensureMigrationLedgerInTx(ctx, tx, sources); err != nil {
+		t.Fatalf("ensureMigrationLedgerInTx() error = %v", err)
+	}
+	if len(tx.execSQL) < 6 {
+		t.Fatalf("caller transaction Exec calls = %#v, want ledger create, lock, backfill, and constraints", tx.execSQL)
+	}
+	joined := strings.Join(tx.execSQL, "\n")
+	for _, want := range []string{
+		"create table if not exists public.schema_migrations",
+		"alter table public.schema_migrations add column if not exists checksum text",
+		"lock table public.schema_migrations in share row exclusive mode",
+		"update public.schema_migrations set checksum = $2 where name = $1",
+		"alter table public.schema_migrations alter column checksum set not null",
+		"conrelid = 'public.schema_migrations'::regclass",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("caller transaction SQL = %q, want %q", joined, want)
+		}
+	}
+	if got := strings.Join(tx.querySQL, "\n"); !strings.Contains(got, `from public.schema_migrations order by name::text COLLATE "C"`) {
+		t.Fatalf("caller transaction ledger query = %q, want public-qualified C-collated ledger read", got)
+	}
+	if tx.beginCalled {
+		t.Fatal("ensureMigrationLedgerInTx() started a nested transaction")
+	}
+	if tx.updatedName != "0001_initial_schema.sql" || tx.updatedChecksum != checksum {
+		t.Fatalf("ledger checksum backfill = (%q, %q), want (%q, %q)", tx.updatedName, tx.updatedChecksum, "0001_initial_schema.sql", checksum)
+	}
+}
+
+func TestEnsureLegacyMigrationLedgerInTxKeepsAmbientLedgerSQLUnqualified(t *testing.T) {
+	ctx := context.Background()
+	tx := &fakeMigrationLedgerTx{
+		rows: &fakeMigrationLedgerRows{
+			name:     "0001_initial_schema.sql",
+			checksum: nil,
+		},
+	}
+	sources := map[string]migrationSource{
+		"0001_initial_schema.sql": {checksum: strings.Repeat("a", 64), sql: "create table example();"},
+	}
+
+	if err := ensureLegacyMigrationLedgerInTx(ctx, tx, sources); err != nil {
+		t.Fatalf("ensureLegacyMigrationLedgerInTx() error = %v", err)
+	}
+	joined := strings.Join(tx.execSQL, "\n")
+	if strings.Contains(joined, "public.schema_migrations") {
+		t.Fatalf("legacy caller transaction SQL = %q, must not public-qualify the ambient ledger", joined)
+	}
+	for _, want := range []string{
+		"create table if not exists schema_migrations",
+		"alter table schema_migrations add column if not exists checksum text",
+		"lock table schema_migrations in share row exclusive mode",
+		"update schema_migrations set checksum = $2 where name = $1",
+		"alter table schema_migrations alter column checksum set not null",
+		"conrelid = 'schema_migrations'::regclass",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("legacy caller transaction SQL = %q, want %q", joined, want)
+		}
+	}
+	if got := strings.Join(tx.querySQL, "\n"); !strings.Contains(got, `from schema_migrations order by name::text COLLATE "C"`) || strings.Contains(got, "public.schema_migrations") {
+		t.Fatalf("legacy caller transaction ledger query = %q, want unqualified C-collated ledger read", got)
 	}
 }
 
@@ -478,33 +687,130 @@ func TestAssetDecisionFollowupMigrationDropsRecordsViewBeforeChangingShape(t *te
 }
 
 type fakeMigrationStore struct {
-	ensureCalls   int
-	applied       map[string]bool
-	appliedChecks []string
-	execSQL       []string
-	recorded      []string
-	execErr       map[string]error
+	ensureCalls int
+	applied     map[string]bool
+	checksums   map[string]string
+	execSQL     []string
+	recorded    []string
+	execErr     map[string]error
 }
 
-func (f *fakeMigrationStore) EnsureLedger(context.Context) error {
-	f.ensureCalls++
+type fakeMigrationLedgerTx struct {
+	pgx.Tx
+	rows            pgx.Rows
+	execSQL         []string
+	querySQL        []string
+	beginCalled     bool
+	updatedName     string
+	updatedChecksum string
+}
+
+func (tx *fakeMigrationLedgerTx) Begin(context.Context) (pgx.Tx, error) {
+	tx.beginCalled = true
+	return tx, nil
+}
+
+func (tx *fakeMigrationLedgerTx) Exec(_ context.Context, sql string, arguments ...any) (pgconn.CommandTag, error) {
+	tx.execSQL = append(tx.execSQL, sql)
+	if strings.Contains(sql, "update schema_migrations set checksum") || strings.Contains(sql, "update public.schema_migrations set checksum") {
+		if len(arguments) != 2 {
+			return pgconn.CommandTag{}, errors.New("unexpected checksum backfill arguments")
+		}
+		name, ok := arguments[0].(string)
+		if !ok {
+			return pgconn.CommandTag{}, errors.New("checksum backfill name is not a string")
+		}
+		checksum, ok := arguments[1].(string)
+		if !ok {
+			return pgconn.CommandTag{}, errors.New("checksum backfill checksum is not a string")
+		}
+		tx.updatedName = name
+		tx.updatedChecksum = checksum
+	}
+	return pgconn.NewCommandTag("UPDATE 1"), nil
+}
+
+func (tx *fakeMigrationLedgerTx) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	tx.querySQL = append(tx.querySQL, sql)
+	return tx.rows, nil
+}
+
+type fakeMigrationLedgerRows struct {
+	name     string
+	checksum *string
+	returned bool
+}
+
+func (rows *fakeMigrationLedgerRows) Close()                                       {}
+func (rows *fakeMigrationLedgerRows) Err() error                                   { return nil }
+func (rows *fakeMigrationLedgerRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (rows *fakeMigrationLedgerRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (rows *fakeMigrationLedgerRows) Values() ([]any, error)                       { return nil, nil }
+func (rows *fakeMigrationLedgerRows) RawValues() [][]byte                          { return nil }
+func (rows *fakeMigrationLedgerRows) Conn() *pgx.Conn                              { return nil }
+func (rows *fakeMigrationLedgerRows) Next() bool {
+	if rows.returned {
+		return false
+	}
+	rows.returned = true
+	return true
+}
+func (rows *fakeMigrationLedgerRows) Scan(dest ...any) error {
+	if len(dest) != 2 {
+		return errors.New("unexpected ledger row scan destination count")
+	}
+	name, ok := dest[0].(*string)
+	if !ok {
+		return errors.New("ledger row name destination is not *string")
+	}
+	checksum, ok := dest[1].(**string)
+	if !ok {
+		return errors.New("ledger row checksum destination is not **string")
+	}
+	*name = rows.name
+	*checksum = rows.checksum
 	return nil
 }
 
-func (f *fakeMigrationStore) HasMigration(_ context.Context, name string) (bool, error) {
-	f.appliedChecks = append(f.appliedChecks, name)
-	return f.applied[name], nil
-}
-
-func (f *fakeMigrationStore) ExecMigration(_ context.Context, sql string) error {
-	f.execSQL = append(f.execSQL, sql)
-	if err := f.execErr[sql]; err != nil {
-		return err
+func (f *fakeMigrationStore) EnsureLedger(_ context.Context, sources map[string]migrationSource) error {
+	f.ensureCalls++
+	if f.applied == nil {
+		f.applied = make(map[string]bool)
+	}
+	if f.checksums == nil {
+		f.checksums = make(map[string]string)
+	}
+	for name, applied := range f.applied {
+		if !applied {
+			continue
+		}
+		if _, alreadyPinned := f.checksums[name]; alreadyPinned {
+			continue
+		}
+		if source, ok := sources[name]; ok {
+			f.checksums[name] = source.checksum
+		}
 	}
 	return nil
 }
 
-func (f *fakeMigrationStore) RecordMigration(_ context.Context, name string) error {
+func (f *fakeMigrationStore) Applied(context.Context) (map[string]string, error) {
+	applied := make(map[string]string, len(f.applied))
+	for name, isApplied := range f.applied {
+		if isApplied {
+			applied[name] = f.checksums[name]
+		}
+	}
+	return applied, nil
+}
+
+func (f *fakeMigrationStore) Apply(_ context.Context, name, checksum, sql string) error {
+	f.execSQL = append(f.execSQL, sql)
+	if err := f.execErr[sql]; err != nil {
+		return err
+	}
+	f.applied[name] = true
+	f.checksums[name] = checksum
 	f.recorded = append(f.recorded, name)
 	return nil
 }

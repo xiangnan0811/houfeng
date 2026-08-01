@@ -11,7 +11,7 @@
 核心约定一句话总结：
 - **driver**：`github.com/jackc/pgx/v5` 与 `github.com/jackc/pgx/v5/pgxpool`，连接池在 `cmd/houfeng-center/bootstrap.go` 内构造（参见 `bootstrap.go:60-69`，调用 `store.OpenPostgres`）。
 - **仓库**：`internal/center/store/` 下一文件一 aggregate（`monitoring_instances.go`、`targets.go`、`incidents.go`、`sync_batches.go` 等）。
-- **schema 演进**：`db/migrations/0001_*.sql` … 当前最大 migration（现为 `0029_rename_nodes_to_monitoring_instances.sql`）+ `db/migrations/embed.go` 用 `embed.FS` 嵌入；启动时由 `internal/center/store/migrate/migrate.go` 中的 `Apply` 顺序应用，状态记在 `schema_migrations` 表。
+- **schema 演进**：`db/migrations/0001_*.sql` … 当前固定 r1 末尾 `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）+ `db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations` 表。两个 record flag 都关闭时，旧 center/importer 启动路径仍由 `internal/center/store/migrate/migrate.go` 的 `Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator 收敛 r1，center/importer 只做运行时 admission，绝不在启动时调用 `Apply`。
 - **事务边界**：写多张表时使用 `pgx.Tx`，参考 `store/sync_batches.go:40-91` 的 `ApplyBatch`（一次同步批次串起 4-5 张表的写入与一次 plan 计算）。
 - **不变量**：领域规则（MonitoringInstance/Target/Probe 语义、健康状态派生、回填观测不告警）必须落到 SQL + 仓库 + 服务层共同遵守，详见后文。
 
@@ -64,16 +64,17 @@
 
 - 文件位置：`db/migrations/<NNNN>_<verb>_<scope>.sql`，纯 SQL，序号 4 位起步从 `0001` 递增。
 - 嵌入：`db/migrations/embed.go` 仅有一行 `//go:embed *.sql`，把所有 `.sql` 打到二进制里。
-- 应用：进程启动时 `cmd/houfeng-center/bootstrap.go:66-69` 调用 `migrate.Apply(ctx, db.Pool())`；后者实现见 `internal/center/store/migrate/migrate.go:48-104`：
+- 应用（仅两个 record flag 都关闭的 legacy 路径）：`cmd/houfeng-center/bootstrap.go` 调用 `migrate.Apply(ctx, db.Pool())`；后者实现见 `internal/center/store/migrate/migrate.go`：
   1. `EnsureLedger` —— 建 `schema_migrations(name primary key, applied_at)` 表
   2. 按文件名排序遍历，逐条 `HasMigration` 检查，未应用则 `ExecMigration` + `RecordMigration`
+- `records-on/delete-off` 不复用这个逐迁移提交的 API：`houfeng-record-platform-admin migrate --scope app` 在一个 scoped `SERIALIZABLE` 事务内处理固定 r1 清单、ACL 和 manifest；center/importer 的启动路径只能执行只读 admission。
 - **每个迁移必须幂等**：`create table if not exists`、`create index if not exists`、`alter table ... add column if not exists` 是基线写法（见 `0001_initial_schema.sql`、`0009_add_observability_filter_indexes.sql`）。
 - **视图列结构变化必须先 drop 再 recreate**：PostgreSQL 的 `CREATE OR REPLACE VIEW` 不能删除列、重排列或在中间插入列；否则会出现类似 `cannot change name of view column "evidence_snapshot" to "followup_todo_count"` 的启动失败。迁移需要使用 `drop view if exists <view_name>;` 后再 `create or replace view ...`，并保证依赖对象可随迁移重建。
 
 ### 流程
 
 1. 想清楚改动是否需要持久化（业务模型变化、查询需要新索引、retention 行为变化等）。
-2. 在 `db/migrations/` 新建下一个未占用序号的文件，例如当前最大为 `0029_rename_nodes_to_monitoring_instances.sql` 时，下一个应为 `0030_<verb>_<scope>.sql`。
+2. 在 `db/migrations/` 新建下一个未占用序号的文件。当前 r1 固定清单末尾是 `0051_create_record_platform_foundation.sql`，因此若没有并发新增文件，下一个候选是 `0052_<verb>_<scope>.sql`；任何 r1 之后的 APP migration 还必须由 scoped migrator 在新 manifest revision 中绑定，不能由 records-on 启动路径补跑。
 3. 文件内只允许 `create / alter / drop / insert` 等 DDL/DML 语句，不要在里面写 Go。
 4. 同时更新对应 `internal/center/store/<aggregate>.go` 的 `select` 列、`insert` / `update` 语句、读写函数签名。
 5. 跑 `make verify-go`（含 `migrate` 包的单测，见 `migrate_test.go`）；接着按 `docs/operations/fresh-install-smoke-run.md` 在真 Postgres 上做 fresh-install smoke。
@@ -99,7 +100,400 @@
 - ❌ 用任何运维脚本 / SQL 客户端直接改线上 schema，必须走迁移文件。
 - ❌ 把测试数据 / seed 数据写进迁移文件——种子用户由 `internal/center/auth/seed.go` 在 bootstrap 阶段执行（`bootstrap.go:104-107`）。
 
-> ⚠️ **已知 gap**：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。前者是历史 Node 命名迁移，当前 schema 由 `0029_rename_nodes_to_monitoring_instances.sql` 迁到 MonitoringInstance 语义；`migrate.Apply` 按文件名字典序排序，二者顺序由后缀决定，并不冲突；但序号撞车违反了"序号唯一"的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（当前最大为 `0029_rename_nodes_to_monitoring_instances.sql`，下一个应为 `0030_*`，如果期间已有新迁移则继续顺延）。
+> ⚠️ **已知 gap**：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。前者是历史 Node 命名迁移，当前 schema 由 `0029_rename_nodes_to_monitoring_instances.sql` 迁到 MonitoringInstance 语义。legacy `migrate.Apply` 按文件名字典序排序，scoped r1 migrator 也把它们作为固定 52-source 清单中的两个独立 checksum source；二者顺序均由后缀决定，并不冲突。序号撞车仍违反“序号唯一”的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（当前固定 r1 末尾为 `0051_create_record_platform_foundation.sql`，若没有并发新增文件，下一个候选为 `0052_*`）。
+
+### Scenario: APP r1 scoped migrator and one-snapshot runtime admission
+
+#### 1. Scope / Trigger
+
+- 触发：修改 `HOUFENG_RECORDS_ENABLED` / `HOUFENG_RECORD_PERMANENT_DELETE_ENABLED` 模式选择、`houfeng-record-platform-admin migrate --scope app`、APP ACL manifest/compiler、`ConvergeAppACLR1`、PostgreSQL managed-surface reader/verifier、`AdmitAppACLRuntime`、center bootstrap、VPS importer，或其 PostgreSQL regression 时。
+- 此场景只覆盖 `records-on/delete-off` 的 APP r1。嵌入 migration source 是固定的 `0001…0051` **52** 文件 filename + raw-byte SHA-256 checksum inventory（包含两个按字典序排列的 `0004_*`）；`0052+`、permanent delete、ledger/witness/recovery、S3 和 projector 的未来 caller 不属于 r1 admission。
+- 两个 record flag 都关闭时保留 legacy owner 自动迁移；records-on/delete-off 必须先运行 scoped migrator，随后 center/importer 只能以 runtime 身份执行 admission。`false/true` 和 `true/true` 在读取 URL、`_FILE` secret、DNS、数据库、输入文件或外部域配置前失败。
+
+#### 2. Signatures
+
+- 模式入口：`config.LoadRecordPlatformMode() (config.RecordPlatformMode, error)`，只返回 `RecordPlatformModeLegacy` 或 `RecordPlatformModeRuntimeAdmission`。
+- Writer：`houfeng-record-platform-admin migrate --scope app` 通过直接 migrator 连接调用 `ConvergeAppACLR1(ctx, ...)`。它是 records-on 的唯一 APP schema/ACL writer；不得调用 `migrate.Apply` 或会另开事务的 genesis helper。
+- Runtime gate：`AdmitAppACLRuntime(ctx context.Context, db *pgxpool.Pool) error` 在构造 repository 前，在同一调用方拥有的事务中组合 `readAppACLManifestRuntimeSnapshotInTxV1(ctx, tx)` 与 `readAppACLEffectiveCatalogSnapshotInTxR1(ctx, tx, input)`。
+- 持久化合同：`AppACLManifestPersistedV1.MigratorCatalogRole` 不可变且在 canonical manifest preimage 中 digest-bound。`NewAppACLEffectiveCatalogVerifierInputR1(contract, manifest.MigratorCatalogRole)` 将其交给 catalog verification；runtime 不得读取 migrator credential/configuration 来推断 projector owner。
+- Catalog 入口：`CompileAppACLEffectiveCatalogContractR1`、`VerifyAppACLEffectiveCatalogSnapshotR1` 与 `VerifyPostgresAppACLEffectiveCatalogR1` 使用同一固定 managed-surface contract。
+
+#### 3. Contracts
+
+- `center_runtime`、`platform_admin` 与 migrator 是三个预创建、两两不同、直接认证的 `LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS` role。三者的直接与递归 membership 均为空；migration 与 runtime admission 都证明 `session_user == current_user`。`SET ROLE`、复用 owner、role membership、default ACL 或共享 login 都不能满足该合同。
+- scoped migrator 只支持 fresh install，或 exact ledger checksum set 的 eligible null-head legacy adoption。adoption 时，当前 database、`public`、`record_platform_internal` 与每个 migration-owned APP object 都必须已由同一直接 migrator owner；runtime/admin 不拥有其中任何对象。它在一个 `SERIALIZABLE` transaction 中取得 advisory lock，执行 `SET LOCAL search_path = pg_catalog, public`，按固定 source 顺序完成 ledger lock/checksum write、ACL convergence、manifest revision insert、null-head CAS、catalog re-read 与 commit。`40001`（以及支持的 `40P01`）重启整个 closure；其他错误全部 rollback DDL/DCL/ledger/ACL/head work。
+- r1 compiler 精确产出 **204** 个 ACL tuple。runtime 与 admin 的 persistent-function `EXECUTE` set 均为空。`public.record_platform_cas_contract_activation_projection(bytea)` 与 `public.record_platform_cas_domain_rotation_projection(bytea)` 仍是 migrator-owned、`SECURITY DEFINER`、唯一 `bytea` overload 的 public function，精确使用 `search_path=pg_catalog` 并显式 revoke `PUBLIC`；它们是 verifier-required object，不是 runtime/admin grant。
+- admission 只验证 migration-owned APP surface：当前 database ACL；`public` 与 `record_platform_internal` schema ACL；固定 `0001…0051` relation/view/sequence/function inventory；`public.schema_migrations`；manifest table；两个 projector；role attribute 与 recursive membership；以及 migrator 的 global、`public`、`record_platform_internal` default ACL。在该 surface 内，unknown object、错误 schema/owner、额外 direct/effective/column privilege、grant option、`PUBLIC` 或 migrator-scoped default ACL 都是 drift。
+- 无关 schema、其 object 与无关 role owner 的 default ACL 必须接受。不得恢复 whole-database non-system-schema scan，也不得拒绝无法影响 managed surface 的第三方 default ACL。
+- PostgreSQL 16 `pgcrypto` 必须安装在 `record_platform_internal`；若 extension 已在其他 schema 则 fail closed。extension-member procedure 按 OID 识别，并对普通 managed owner/direct/effective/function reader 保持 opaque，因为受限 migrator 不能可靠改写 bootstrap-owned member ACL。opacity 绝不产生 reachability：`PUBLIC`、runtime、admin 对 `record_platform_internal` 都没有 `USAGE` 或 `CREATE`；同一 admission snapshot 还会拒绝同时具有 schema `USAGE` 与 function `EXECUTE` 的 reachable opaque member。migrator-owned helper/projector 仍必须显式 revoke `PUBLIC`。
+- `AdmitAppACLRuntime` 精确开启一个 `REPEATABLE READ READ ONLY` transaction。在这个 snapshot 中读取并交叉校验 direct identity、manifest chain/binding、完整 52-entry applied ledger/checksum set 与 scoped effective catalog。它不执行 DDL/DCL、不调用 migration writer；任一 mismatch 都在 repository construction 前返回 error，center/importer 必须关闭 pool，不得回退到 owner auto-migration 或 warning-only dry-run path。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 预期行为 |
+| --- | --- |
+| 两个 flag 都为 false | 选择 legacy path；现有 owner `migrate.Apply` 行为继续允许。 |
+| `false/true` 或 `true/true` flag | 在读取 URL/secret/file/network/external-domain 前 fail；不连接 database，也不执行 migration。 |
+| records-on/delete-off | center/importer 只使用 direct runtime DB identity；禁止 `migrate.Apply`、DDL/DCL、writer fallback 与 owner fallback。 |
+| 任一 role 不是不同的直接 constrained `LOGIN NOINHERIT` role，具有 direct/recursive membership，或 `session_user != current_user` | 在 scoped migration/admission 前 fail closed。`SET ROLE` runtime snapshot 精确拒绝为 `session user %q does not match current user %q`。 |
+| embedded/applied/manifest inventory 不是精确 52 filename/checksum entry，manifest chain/head/binding drift，或 `migrator_catalog_role` 不同 | 拒绝 admission；不得修复或推断 migrator identity。 |
+| compiler output 不是精确 204 tuple，或 runtime/admin 有任何 persistent-function `EXECUTE` | catalog drift，拒绝。runtime/admin 对任意 projector 的 direct call 都返回 SQLSTATE `42501`。 |
+| managed object/grant/column ACL/default ACL/owner 或 projector definition drift | 拒绝；projector 必须 owner-only、唯一 `bytea`、`SECURITY DEFINER`、显式 revoke `PUBLIC`，并使用 `search_path=pg_catalog`。 |
+| 存在 unrelated schema/object 或 unrelated-owner default ACL | 只要不能影响固定 managed surface 就接受。 |
+| `pgcrypto` 位于 `record_platform_internal` 之外 | fail closed（migration/convergence precondition 是 SQLSTATE `55000`）。 |
+| runtime/admin/PUBLIC 取得 `record_platform_internal` 的 `USAGE` 或 `CREATE`，或 opaque extension member 变为 reachable | 拒绝 catalog admission。runtime 对 `record_platform_internal.digest` 的 direct call 返回 SQLSTATE `42501`。 |
+| scoped migrator 收到 serialization failure | rollback 后重试整个 `SERIALIZABLE` closure；任一不可重试错误都不留下 partial ledger、ACL、revision 或 head state。 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：两个 flag 都关闭时，现有 owner bootstrap/importer path 保持 legacy migration 行为；records-on/delete-off 时，直接 migrator 先 create/adopt exact r1，随后 direct runtime login 在任一 repository 打开前通过一次 read-only admission。
+- Base：eligible legacy database 具有 null head、精确 52 filename/checksum ledger，且 `public` / `record_platform_internal` 中的固定 managed object 都由 direct migrator owner。convergence 写入包含 `migrator_catalog_role` 的 immutable r1 manifest；exact repeat 是 read-only。
+- Good：第三方 schema 及其第三方 owner 的 default ACL 可以保留而不扩张 APP role，所以 scoped admission 接受它们。
+- Bad：扫描每个 non-system schema 或每个 owner 的 default ACL，会把 shared database 变成无关的 global-purity requirement，错误拒绝前述 good case。
+- Bad：对任一 projector 给 runtime/admin grant、把通用 `REVOKE EXECUTE ON ALL FUNCTIONS` 当作 PG16 `pgcrypto` hardening evidence，或按 extension-member name 过滤，都会创建 callable privilege 或隐藏 non-extension drift。
+- Bad：分开开启 manifest/catalog transaction、以 member login 后 `SET ROLE`、在 records-on startup 调用 `migrate.Apply`，或把 admission failure 当作 dry-run warning，都会破坏 direct-identity、one-snapshot、fail-closed boundary。
+
+#### 6. Tests Required
+
+- Unit selector 与断言点：
+
+  ```bash
+  go test ./internal/center/config ./internal/center/store/migrate \
+    ./cmd/houfeng-center ./cmd/houfeng-import-vps-json \
+    -run 'AppACL.*Admission|RecordPlatform|Bootstrap|Import' -count=1
+  ```
+
+  断言 `TestAppACLRuntimeAdmissionUsesOneRepeatableReadOnlySnapshot`、`TestAppACLRuntimeAdmissionRejectsLedgerDriftBeforeCatalogRead`、`TestAppACLRuntimeAdmissionRejectsSetRoleIdentityBeforeCatalogRead` 与 `TestAppACLRuntimeAdmissionRejectsProjectorExecuteCatalogDrift`；configuration/bootstrap/importer case 必须证明先读 flag、records-on 恰好调用一次 admission、调用 migration 次数为零、失败时关闭，以及 dry-run/import 不回退。
+- PostgreSQL selector 与断言点：始终经 integration wrapper 运行（locally skipped test 不构成 evidence）：
+
+  ```bash
+  scripts/test-record-platform-integration.sh postgres -- \
+    go test -v ./internal/center/store/migrate \
+    -run 'TestPostgresIntegration(AppACLRuntimeAdmissionDirectLoginAndSetRole|VerifyAppACLEffectiveCatalogR1(TreatsPgcryptoMembersOpaqueAndDeniesDirectRuntimeAdmin|RejectsRuntimeAdminProjectorExecuteGrants|AcceptsUnrelatedSchemaOwnerDefaultACL))$' \
+    -count=1
+  ```
+
+  断言三个 direct constrained login、direct-login/`SET ROLE` rejection、固定 managed-surface acceptance/rejection boundary、`digest` 和两个 projector 的 SQLSTATE `42501` denial、`pgcrypto` OID opacity + schema-access denial，以及 runtime/admin persistent-function `EXECUTE` 为零。
+- 变更 writer/ACL contract 时仍必须运行 convergence integration：
+
+  ```bash
+  scripts/test-record-platform-integration.sh postgres -- \
+    go test -v ./internal/center/store/migrate ./internal/center/platformmigrate \
+    -run 'TestPostgresIntegration(AppACL.*(Convergence|Genesis)|ProvisionRoles)' -count=1
+  ```
+
+  断言 fresh/adoption 都 converge 到相同 52-source r1 与 204 tuple；错误 owner/schema/default ACL drift 在无 repair 下被拒绝；late failure 或 serialization retry 后没有 partial state。
+- Full gate 与 static writer audit：
+
+  ```bash
+  GOTMPDIR=/home/murray/.codex GOFLAGS=-p=1 make verify-go
+  rg -n 'migrate\.Apply\(' cmd/houfeng-center cmd/houfeng-import-vps-json
+  ```
+
+  审查每个剩余 `migrate.Apply` hit 均显式处于 flags-off；records-on production path 必须只做 admission。
+
+#### 7. Wrong vs Correct
+
+```go
+// 错误：records-on startup 复用 owner migration writer。
+if err := migrate.Apply(ctx, db.Pool()); err != nil {
+    return err
+}
+
+// 正确：mode 选择互斥的 legacy migration 或 runtime admission。
+switch cfg.RecordPlatformMode {
+case config.RecordPlatformModeLegacy:
+    err = applyMigrations(ctx, db)
+case config.RecordPlatformModeRuntimeAdmission:
+    err = migrate.AdmitAppACLRuntime(ctx, db.Pool())
+}
+```
+
+```sql
+-- 错误：把每个 persistent schema/default-ACL owner 都视作 APP-managed。
+where namespace.nspname !~ '^pg_'
+  and namespace.nspname <> 'information_schema'
+
+-- 正确：object reader 接收固定 r1 inventory；default-ACL reader 是单独查询，
+-- 并只按 persisted migrator role 限定范围。
+where object_identity = any($1::text[]) -- fixed database/public/internal inventory
+
+-- 单独的 default-ACL query：
+where default_acl.defaclrole = $2
+  and (
+    default_acl.defaclnamespace = 0
+    or namespace.nspname in ('public', 'record_platform_internal')
+  )
+```
+
+```go
+// 错误：每个 reader 各自开启 snapshot，随后 startup 修复 drift。
+manifest := NewPostgresAppACLManifestRuntimeReader(db).ReadAppACLManifestRuntimeSnapshotV1(ctx)
+catalog := VerifyPostgresAppACLEffectiveCatalogR1(ctx, db, input)
+_ = migrate.Apply(ctx, db)
+
+// 正确：一个 direct-runtime REPEATABLE READ READ ONLY transaction 检查
+// identity + manifest + ledger + scoped catalog，然后只会 admit 或 stop。
+if err := migrate.AdmitAppACLRuntime(ctx, db); err != nil {
+	return fmt.Errorf("admit app runtime: %w", err)
+}
+```
+
+---
+
+### Scenario: APP ACL R2 Slice 5 direct finalizer, M2 evidence, and ACL provenance
+
+#### 1. Scope / Trigger
+
+- Trigger：修改隔离的 `db/appaclr2/migrations/0052_app_acl_r2_privileged_transition.sql` 的 finalize section、`internal/center/store/migrate/app_acl_r2_finalize.go`、M2 catalog verifier、或 `houfeng-record-platform-admin finalize --scope app-acl-r2` 时。
+- 此场景只覆盖 Slice 5 从 exact `PREPARED` 到 exact `FINALIZED` 的 direct-migrator writer。它新增的持久化面仅为 `public.app_acl_r2_manifest_revisions`、`public.app_acl_r2_manifest_head` 及其 immutable trigger helper；冻结 M1 relation、R1 writer 和 runtime route 都不是本场景的写入目标。
+- 不把此场景的源码/单元验证当作 PostgreSQL 16 integration evidence，也不把它延伸为 Slice 6/7、R2 总验收、physical clone/restore detection 或 Child 1/PF-AC 的证据。
+
+#### 2. Signatures
+
+- Admin route：`houfeng-record-platform-admin finalize --scope app-acl-r2`；唯一允许的 credential input 是 `HOUFENG_RECORD_PLATFORM_MIGRATOR_APP_DATABASE_URL`。
+- Go entry：`FinalizeAppACLR2(ctx context.Context, db *pgxpool.Pool) error`。它在保留的 direct-migrator connection 上开启 `SERIALIZABLE READ WRITE` transaction，并复用 `ClassifyAppACLR2State(ctx, tx)` 和 `ReadAppACLR2CatalogPredicatesInTx(ctx, tx)`。
+- M2 SQL identity：`public.app_acl_r2_manifest_revisions`、`public.app_acl_r2_manifest_head`、`record_platform_internal.app_acl_r2_reject_manifest_mutation()`；唯一 revision/head 是 `(protocol_version, manifest_revision) = (2, 2)` 与 singleton head。
+
+#### 3. Contracts
+
+- Finalizer 先固定 `search_path`、验证 direct constrained migrator 的 `session_user == current_user` 与冻结 M1 migrator binding、按固定顺序加锁，再只经共享 constrained catalog path 接受 exact `PREPARED`。它不创建 private classifier/predicate/snapshot，也不调用 `pg_control_system()`。
+- **Persisted evidence is not fresh physical identity**：bootstrap 在初始 PREPARED commit 前把 live `postgres_system_identifier` 绑定进 immutable receipt/domain。finalizer 只比较该 persisted receipt/domain（以及 M2-domain）并新鲜读取 database OID/name 与 catalog continuity；它既不重读也不声称证明 fresh physical system identifier。
+- Finalizer 执行 marker-bounded M2 DDL，写入 immutable M1 links、53-source/206-tuple/domain/receipt/control-ACL digest bodies，以 M1 revision/digest 和 empty-head CAS 建立一 revision/one true head，revoke-first 收敛 ACL，随后以同一共享 path 回读 exact `FINALIZED` 才 commit。`40001`/`40P01` 只能重试整个 closure；不确定 commit acknowledgement 只能在同一总 attempt budget 内重新分类 exact `FINALIZED` 或 `PREPARED`。
+- **Owner identity is distinct from explicit ACL and effective privilege**：direct migrator 仍拥有两张 M2 table 和 helper，但 owner OID 不能替代 ACL/effective evidence。revoke-first DCL 必须写入 owner 的 non-grantable self `SELECT`/`EXECUTE` row；effective table vector 对 owner/runtime 都只能是 `SELECT=true`，其余六项为 false，admin 七项全 false；helper 仅 owner `EXECUTE=true`。
+- **Raw ACL provenance and effective reachability must both be exact**：`aclexplode` 精确要求每张 M2 table 有 direct-migrator 与 center-runtime 的 no-grant-option `SELECT`，helper 只有 direct-migrator no-grant-option `EXECUTE`；`has_table_privilege`/`has_function_privilege` 独立探测上述完整向量。删除 owner self row 后 raw 与对应 effective 结果都为 false，Exact M2 必须拒绝。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 预期行为 |
+| --- | --- |
+| route/scope/DSN 不精确，或存在 ambient `PG*`、service/pass/TLS-file source | 在 pool 创建前拒绝；不回退通用 opener。 |
+| 非 direct constrained migrator、R1/CORRUPT/nonexact PREPARED、receipt/M1/source/domain continuity drift | mutation 前 fail closed；不得创建 M2。 |
+| M2 section body/marker/cardinality/digest 不精确，或 M1/head CAS 不是一行 | 拒绝；整个 transaction rollback 到 PREPARED。 |
+| DDL/DCL/readback 的 `40001` 或 `40P01` | 仅在总 attempt budget 内重跑整个 serializable closure；其他错误或耗尽立即停止。 |
+| 缺少/撤销 owner self `SELECT` 或 helper self `EXECUTE` row | raw `aclexplode` 与对应 effective probe 都为 false；不得作为 FINALIZED 或 ACK-recovery success。 |
+| owner/runtime 获得非 `SELECT` table privilege、admin 获得任何 queried M2 privilege，或 owner 缺少 `SELECT`/helper `EXECUTE` | effective privilege drift，拒绝。 |
+| 需要新的 physical-system 读或 PG16 live integration conclusion | 不属于 Slice 5 source contract；不得以 persisted evidence 或 unit test 代替。 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：精确 PREPARED、direct migrator direct login、完整 shared continuity 和 canonical source section 在一个 transaction 中产生两个 direct-owned M2 relations、one revision/head、精确 ACL，readback 为 FINALIZED。
+- Base：已 exact FINALIZED 的 direct-migrator repeat 仅做受约束的分类/验证，不重放 M2 DDL/DML；uncertain ACK 只接受 exact FINALIZED，或在剩余 budget 内从 exact PREPARED 整体重试。
+- Bad：把 receipt 中保存的 system identifier 当成 finalizer 可重新读取的 fresh physical identity；这越过 bootstrap-only boundary。
+- Bad：只检查 owner OID、raw ACL 或 effective privilege 中任一项，因此把缺行、扩权或 grant-option 漂移当作健康；三类证据必须独立核验。
+
+#### 6. Tests Required
+
+- Slice 5 focused unit/source gate：
+
+  ```bash
+  go test ./db/appaclr2/migrations ./cmd/houfeng-record-platform-admin ./internal/center/store/migrate \
+    -run 'AppACLR2(Source|Finalize|Manifest|M2)|VerifyAppACLR2M2' -count=1
+  ```
+
+  断言 strict finalizer DSN/opener、reserved connection + lock/transaction lifecycle、whole-closure retry/ACK bounds、M2 DDL shape/CAS/rollback、owner self-ACL inversion，以及 raw ACL/effective privilege split。
+- 同一三个 package 的 full `go test -count=1`、`go vet`、受影响 Go 文件的 `gofmt -d` 与 `git diff --check HEAD` 是本地 source gate。
+- 真 PostgreSQL 16 authority matrix、OID-10/bootstrap/live-system trace 和 image lanes 仍由 Slice 7 integration tests 负责；未运行该 lane 时不得写成 PG16 evidence。
+
+#### 7. Wrong vs Correct
+
+```go
+// 错误：post-bootstrap writer 重新读取 physical system identity。
+systemID := readPGControlSystem(ctx, tx)
+
+// 正确：只比较 persisted receipt/domain 与 fresh database OID/name/catalog facts。
+state, err := ClassifyAppACLR2State(ctx, tx)
+```
+
+```sql
+-- 错误：用 owner 或 has_table_privilege 取代 raw grant proof。
+select has_table_privilege(:owner_oid, relation_oid, 'SELECT');
+
+-- 正确：先精确检查 aclexplode 的 owner/runtime rows，再独立检查完整 effective vector。
+select grantor, grantee, privilege_type, is_grantable
+from pg_catalog.aclexplode(relacl);
+```
+
+---
+
+### Scenario: APP ACL R2 runtime admission/startup
+
+#### 1. Scope / Trigger
+
+- Trigger：新增或修改 `AdmitAppACLR1OnlyRuntime`、`AdmitAppACLR2Runtime`、`StartAppACLR2Runtime`，或改变其跨 PostgreSQL connection、advisory lock、transaction、classifier、frozen verifier、direct-runtime predicate、startup admission contract 时。本场景命中新公开 API 与跨 DB runtime admission/startup 的 code-spec mandatory trigger。
+- 此场景只定义 transition-aware R2 runtime route：R1-only route 只 admit exact R1；R2/startup route 在 transition 前 admit exact R1、在 shared proof 已完成后 admit exact `FINALIZED`。不得修改冻结的 R1 parser、reader、converger、`AdmitAppACLRuntime`、既有 R1 startup route 或 generic `migrate --scope app`，也不得加入 R2 dispatch dependency。
+- 当前冻结摘要必须按 closed source contract 与独立 vector 使用：R1 `0051_create_record_platform_foundation.sql` SHA-256 为 `503d58670dc790c4b852bfb58cf93d2b816c1ce956958567dc605cb28d5cd23f`，共 52 sources、204 tuples；R2 `0052_app_acl_r2_privileged_transition.sql` SHA-256 为 `23f79c60dcede45a42aae82da5a9de0d3d650d7eef64dbfd7ce96c6dd5d95fff`，53-source digest 为 `1d9dc20e71e9f319f8b1cef4b22f9dc92051a88dc9cb8a892b69494658c44dd3`，共 53 sources、206 tuples。
+
+#### 2. Signatures
+
+```go
+func AdmitAppACLR1OnlyRuntime(ctx context.Context, db *pgxpool.Pool) error
+func AdmitAppACLR2Runtime(ctx context.Context, db *pgxpool.Pool) (AppACLR2State, error)
+func StartAppACLR2Runtime(ctx context.Context, db *pgxpool.Pool) (AppACLR2State, error)
+```
+
+- `StartAppACLR2Runtime` 是 opt-in startup wrapper，必须只委派给 `AdmitAppACLR2Runtime`；它不得创建第二套 classifier、predicate、connection 或 cleanup lifecycle。
+
+#### 3. Contracts
+
+- 必须先 `Acquire` 一个 reserved connection；在该连接的任何 snapshot query 前，以 exact key `houfeng.app-acl-r2-privileged-transition.v1` 和 `hashtextextended($1, 0)` 取得 **session-scoped shared** advisory lock：`pg_advisory_lock_shared(...)`。seed 固定为 `0`，key、shared mode、session scope 与 bootstrap 的 exclusive transition lock 必须是同一物理 lock identity。
+- 同一已锁 connection 只允许开启一个 `pgx.Tx`：`REPEATABLE READ, READ ONLY`。classify、R1 verifier/predicate 与 commit/rollback 都必须在这个 transaction/connection lifecycle 内；不得在 lock 后另取 connection 或另开 snapshot。
+- `R1`：只能按 `ClassifyAppACLR2State(ctx, tx)` -> `VerifyFrozenAppACLR1StateInTx(ctx, tx)` -> `RequireDirectFrozenAppACLR1RuntimeInTx(ctx, tx, frozen)` 的共享顺序在同一 tx 中执行。direct-runtime identity mismatch fail closed。
+- `FINALIZED`：只消费 shared classifier 的 exact finalized result；不得再调用 frozen R1 verifier、direct-runtime predicate、frozen `AdmitAppACLRuntime`、R2 parser 或另一条 R2 admission path。
+- `PREPARED`、`CORRUPT` 和 unknown state 只能由 classifier 识别后 fail closed；它们不得调用 frozen verifier/predicate、frozen `AdmitAppACLRuntime`，也不得进行 R2 payload、receipt 或 manifest parsing/admission。
+- 成功 `Commit` 或 `Rollback` 后必须用相同 key/seed/mode/scope 执行 `pg_advisory_unlock_shared(...)`；unlock 成功才 `Release` connection。任何 lock/begin/finish/unlock 异常都必须 discard reserved connection，不能让可能持有 session lock 的连接回到 pool；discard 使用 fresh、bounded background cleanup context。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 外显结果与 cleanup 不变量 |
+| --- | --- |
+| public API 的 `db == nil` | R1-only 返回 error；R2/startup 返回 `AppACLR2StateCorrupt` + error。不得 acquire connection。 |
+| nil begin dependency，或 classifier/verifier/predicate dependency 不完整 | fail closed（内部 state 为 `AppACLR2StateCorrupt`；R1-only 对外仅返回 error）；不得 reserve、lock 或 begin tx。 |
+| acquire error 或 acquire 返回 nil connection | 返回 wrapped reserve error；没有可 cleanup 的 connection，不得 begin tx。 |
+| session shared lock error | 返回 lock error；不得 begin/unlock/release，已 reserve 的 connection 必须 discard。 |
+| begin error 或 begin 返回 nil tx | 返回 wrapped begin/nil-tx error；在已取得 lock 的连接上尝试 matching unlock，unlock 成功才 release，否则 discard。 |
+| classifier、frozen verifier 或 direct-runtime predicate error | fail closed；primary body error 对外返回。deferred rollback 必须尝试完成 locked tx；rollback 成功时 matching unlock + release，rollback failure 使连接状态不确定并 discard，不使用 `errors.Join` 返回 rollback error。 |
+| commit error | explicit `Commit` finish API error 返回给其 caller；admission 返回 `AppACLR2StateCorrupt` + wrapped commit error；不执行 unlock/release，直接 discard connection。 |
+| rollback finish error | explicit `Rollback` finish API error 返回给其 caller；admission 的 deferred rollback 保留 primary body error，对 rollback failure 只 discard connection，不使用 `errors.Join`。 |
+| unlock query error 或 unlock 返回 `false` | 返回 unlock error（`false` 也不是成功）；不 release，必须 discard connection。 |
+| request context 在 finish 前取消 | 返回 cancellation error；不得把 canceled request context 用于回收。discard 必须使用 fresh、bounded `context.Background()` timeout。 |
+| 同一个 wrapped tx double finish | 第二次返回 `pgx.ErrTxClosed`；不得重复底层 commit/rollback、unlock、release 或 discard。 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：shared classifier 在 locked read-only snapshot 中返回 exact `FINALIZED`；R2/startup route 不调用 R1 verifier/predicate，commit、matching session-shared unlock、release 各一次。
+- Base：shared classifier 返回 exact `R1`；同一 locked `REPEATABLE READ, READ ONLY` tx 依次完成 frozen verifier 与 direct-runtime predicate，再 commit/unlock/release。
+- Bad：`PREPARED` 或 `CORRUPT` 被 classifier 识别后仍调用 frozen verifier、direct-runtime predicate、R2 parser 或 admission；必须拒绝且这些额外调用次数为零。
+- Bad：R1 direct-runtime identity mismatch，或 lock key、seed、mode、scope、owner lifecycle 任一漂移；必须 fail closed，不得让 connection 以可复用状态返回 pool。
+
+#### 6. Tests Required
+
+```bash
+go test ./internal/center/store/migrate \
+  -run 'AppACLR2(State|RuntimeAdmission|Startup)|AppACLRuntimeAdmission|Canonical.*V1' -count=1
+```
+
+- Focused unit tests 必须断言三个 public API 的 exact-state routing、single reserved connection、lock-before-snapshot、一个 `REPEATABLE READ, READ ONLY` tx、R1 同-tx shared classifier/verifier/predicate，以及 FINALIZED 的 classifier-only trace。
+- 必须保留 adversarial `TestAdmitAppACLR2RuntimeRejectsR1ToPreparedRace`：R1 classifier 暂停于 shared lock 持有期间时，bootstrap exclusive transition 不能 acquire/commit；admission 结束后 bootstrap 才能 commit `PREPARED`；随后 fresh admission 只能 classify 后拒绝，且 paired PREPARED assertion 证明没有额外 frozen/R2 call。
+- exact-R1 frozen verifier error propagation 是当前 Slice 6 gate：injected sentinel 必须返回 `AppACLR2StateCorrupt`，`errors.Is` 保留 primary error，direct-runtime predicate 调用次数为零；deferred rollback 成功时 unlock/release，rollback failure 只 discard，不能以 `errors.Join` 对外返回 deferred rollback error。
+- `StartAppACLR2Runtime` 必须有 `go/parser` AST static binding proof：其 sole return expression 直接调用 `AdmitAppACLR2Runtime(ctx, db)`，不得只做 source substring assertion，也不得依赖 production seam。
+- public nil-pool defensive check 可保留。nil dependency、acquire/nil connection、session-lock、begin/nil tx、classifier/predicate injection、commit/rollback/unlock/cancel/double-finish 等 internal seam fault cases 是 optional hardening，不是当前 Slice 6 acceptance gate；保留现有 race、lock-identity 与 fault tests 时，不得把它们扩写为新公开合同。
+- Lock mutation tests 必须对 key、mode、seed、scope 和 owner lifecycle 敏感；race fixture 只用于证明这些要求和并发阻塞，不能作为生产 PostgreSQL semantics 的来源。
+- 真 PostgreSQL 16 authority/physical-lock evidence 明确属于 Slice 7；在该 lane 未运行时，不得写成已验证的 PG16 结论。
+
+#### 7. Wrong vs Correct
+
+##### Wrong
+
+- 创建 runtime-private classifier，或让 `FINALIZED` 调用 R1 verifier/direct-runtime predicate。
+- 先开始 snapshot 再加锁，或用 xact advisory lock 代替 session-shared lock。
+- 只比较锁名称、未同时绑定 exact key/seed/mode/scope，或让 unlock 使用不同 lock identity。
+- 在 caller cancellation 后用其 canceled context release/discard connection，随后把污染连接交回 pool。
+
+##### Correct
+
+- 只复用 shared classifier；exact R1 在一个 locked snapshot 中串联 frozen verifier 与 direct-runtime predicate，`FINALIZED` 只消费 classifier。
+- 在第一个 snapshot query 前，用 exact key + seed `0` 的 session-shared lock 固定单一 connection/`REPEATABLE READ, READ ONLY` snapshot。
+- 对 key/mode/seed/scope/owner lifecycle 做精确匹配；每次成功 finish 后 matching unlock 再 release，任何异常走 fresh bounded discard cleanup。
+
+---
+
+### Scenario: Record-platform delivery primitives 的 opaque identity 与 owner fencing
+
+#### 1. Scope / Trigger
+
+- Trigger：修改 `internal/center/recordplatform/` 的 deletion-request token、request fingerprint、outbox worker、identity mutation guard、content lease，或 `internal/center/store/record_platform*.go` 的 idempotency/outbox/lease/reservation-fence transaction 时。
+- 此场景只覆盖 r1 已有 APP 表上的可复用 delivery primitive。它不新增 migration、不实现 `deployment_membership` 的 writer/heartbeat/readiness、不注册 bootstrap worker，也不决定 deletion 的 committed/not-committed、ledger/witness/recovery 或 records 业务事实。
+
+#### 2. Signatures
+
+```go
+func NewIssuedDeletionRequestTokenV1() (IssuedDeletionRequestTokenV1, error)
+func ParseDeletionRequestTokenTransportV1(string) (DeletionRequestTokenTransportV1, error)
+func FingerprintRequestV1(RequestFingerprintInputV1) (RequestFingerprintV1, error)
+func ParseTrustedPersistedRequestFingerprintV1([]byte) (PersistedRequestFingerprintV1, error)
+
+func NewPostgresRecordPlatformRepository(*pgxpool.Pool, AdmissionGate) *PostgresRecordPlatformRepository
+func (r *PostgresRecordPlatformRepository) RunRecordPlatformTransaction(context.Context, RecordPlatformTransactionCallback) error
+```
+
+- `RecordPlatformTransaction` 只暴露 transaction-scoped primitive 方法；不暴露任意 SQL、network sender、HTTP client、renderer callback 或正文/recipient 持久化入口。
+- `OutboxWorker` 只接收 `FreshOutboxAuthorizer` 与 `OutboxSender`；其 `RenderedDelivery` 是 transient opaque value，不能跨入 store API。
+
+#### 3. Contracts
+
+- `drt1_` transport 只接受无 padding base64url 的 32-byte canonical spelling。issued token 由 `crypto/rand` 生成，只有 issued capability 能计算 deployment/project-bound commitment；parsed transport 不能产生可持久化 commitment。普通 formatting 必须 redacted。
+- durable primitive identifier（idempotency key、object/client/mutation、outbox subject 等）不得包含 canonical token 或可解码的 noncanonical `drt1_` alias 子串。拒绝发生在 SQL 前；不得把 raw token、正文或 stable object ID 写入普通日志。
+- `RequestFingerprintV1` 只能由固定字段顺序、length-prefix v1 codec 产生。`PersistedRequestFingerprintV1` 是独立的 readback-only sealed type：trusted DB readback 可用于 replay 比较，但不能转换为 claim/complete 所需的 canonical write fingerprint。
+- 每个 idempotency/outbox/guard/lease/reservation owner transition 必须同时比较 owner ID、generation、调用方持有的精确 DB-observed expiry 和对应的 `> transaction_timestamp()` live predicate。任何 0-row result 都映射为 lost/stale owner，不能补写；claim/takeover 递增 generation。
+- idempotency mismatch 永远是只读 conflict；completed row 必须有结果 fingerprint，idempotency expiry 必须严格晚于 active owner expiry。cleanup 只能删除无 live owner 的过期 primitive，不能删除 reservation/ledger/evidence。
+- 所有 claim/finalize 在同一 `pgx.Tx` 内先调用 injected `AdmissionGate`。nil/error gate 必须拒绝且产生 0 primitive write/0 send；Child 1 不实现 concrete membership SQL。
+- outbox 顺序固定为 `gate + claim + commit -> fresh authorize/render -> network send -> gate + fenced terminal/retry`。只有 allow 且 current epoch 等于 captured authorization epoch 时可发送；deny/mismatch/missing handler cancel，temporary error retry；ordinary worker logs 只允许固定安全分类，不得记录 dependency error 本文。`Run`/`RunOnce` 的 nil context 直接返回 invalid-worker error，不得 panic。
+- `RunOnce` 在依赖校验后必须先返回已取消的 context，`Run` 在启动 pass 前必须安静退出已取消的 context；pre-cancelled worker 不得 claim、authorize 或 send。`LeaseWorkGuardV1` 必须拒绝 typed-nil `Clock`，并同步 `CanContinue` 与 `Renew` 对 owner/stopped state 的访问，避免并发复活本地 authority 或 data race。
+- `DeletionReservationFenceV1` 的成功 fence epoch 至少为 1；reservation/epoch/deletion-fence/object-content lock 顺序不变。client-content lease 没有 object identity，不能单独授权 serving。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 预期行为 |
+| --- | --- |
+| token grammar/长度/canonical spelling 不合法，或 durable identifier 含 token-shaped substring | 返回 input sentinel；不执行 SQL、不持久化或日志化 secret。 |
+| caller 试图以 persisted readback 作为 canonical request fingerprint | 类型边界阻断；claim/complete 只接受 sealed `RequestFingerprintV1`。 |
+| owner 续租后，旧 expiry token 尝试 renew/release/complete/sent/retry/cancel/assert | SQL 0 row，返回 `ErrLostOwnerLease`；不得补偿写入。 |
+| nil/error admission gate | `ErrRecordPlatformAdmissionUnavailable`；0 primitive write，worker 不 authorize/send。 |
+| outbox authorizer deny/epoch mismatch/missing handler | fenced cancel，0 send。 |
+| outbox temporary authorizer/render/sender failure | fenced retry；下一 claim 必须重新授权。 |
+| nil worker context 或 zero `FenceEpoch` | `ErrInvalidOutboxWorker` 或 `ErrInvalidReservationFence`；不得 panic/写库。 |
+| typed-nil clock、pre-cancelled worker 或 concurrent renewal | 拒绝/停止本地 work；不得 panic、claim、authorize、send 或产生 data race。 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：同 fingerprint 的 completed idempotency request 返回原 result digest；相同 owner/generation 但已续租前的旧 expiry 不能完成或释放新 lease。
+- Good：业务 callback、idempotency 和 identity-only outbox enqueue 在一个 admitted transaction 中一起 commit 或 rollback；网络发送只在 claim commit 后运行。
+- Base：object epoch 已存在为 0 时，fence 操作把它递增为 1，并以同一 owner/generation 写入 reservation 与 deletion-fence lease。
+- Bad：只比较 owner ID/generation 而忽略 observed expiry，会让同一 owner 的旧 token 在 renew 后继续写入。
+- Bad：记录 `%w` dependency error、把 transport parser 的 raw token 当 commitment capability，或让 client lease 代替 object serving check，都会越过 secret/authorization boundary。
+
+#### 6. Tests Required
+
+```bash
+GOTMPDIR=/home/murray/.codex GOFLAGS=-p=1 \
+go test ./internal/center/recordplatform ./internal/center/store \
+  -run 'Idempotency|Outbox|Guard|Lease|Serving|DeletionFence|Token' -count=1
+
+GOTMPDIR=/home/murray/.codex GOFLAGS=-p=1 \
+go test -race ./internal/center/recordplatform ./internal/center/store \
+  -run 'RecordPlatform|Idempotency|Outbox|Guard|Lease' -count=10
+
+scripts/test-record-platform-integration.sh postgres -- \
+  go test -v ./internal/center/store \
+  -run '^TestPostgresIntegrationRecordPlatform' -count=1
+```
+
+- Unit/store tests 必须覆盖 canonical/noncanonical token alias、persisted fingerprint 不可写、old-expiry fencing、nil gate/context、typed-nil clock、pre-cancelled worker、fixed-safe worker log、guard `Renew`/`CanContinue` race、零 fence epoch、0-row lost owner。
+- PostgreSQL selector 不能以 `SKIP` 作为 acceptance evidence；必须覆盖并发 claim、expired takeover、stale finalizer、atomic rollback 和 reservation/epoch/object lease serialization。
+
+#### 7. Wrong vs Correct
+
+```sql
+-- 错误：同一 owner renew 后，旧 token 仍可使用。
+where owner_id = $1
+  and owner_generation = $2
+  and expires_at > transaction_timestamp()
+
+-- 正确：同时绑定 DB readback 的 exact expiry 与当前 live predicate。
+where owner_id = $1
+  and owner_generation = $2
+  and expires_at = $3
+  and expires_at > transaction_timestamp()
+```
+
+```go
+// 错误：dependency error 不受 worker 的日志安全合同约束。
+logger.Error("record outbox pass failed", "error", err)
+
+// 正确：日志不携带任意 dependency error 文本。
+logger.Error("record outbox pass failed")
+```
 
 ---
 

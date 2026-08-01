@@ -61,11 +61,16 @@ A Docker Compose center quick start is also available:
 
 ```bash
 cp docs/deploy/compose.env.example docs/deploy/compose.env
-# edit docs/deploy/compose.env and replace the database/admin passwords and session HMAC key
-docker compose --env-file docs/deploy/compose.env up -d
+install -d -m 700 docs/deploy/secrets
+umask 077
+openssl rand -hex 32 > docs/deploy/secrets/postgres-bootstrap-password
+openssl rand -hex 32 > docs/deploy/secrets/houfeng-database-password
+# edit docs/deploy/compose.env and replace the admin password and session HMAC key
+set -eu
+scripts/compose-up.sh docs/deploy/compose.env
 ```
 
-The Compose stack contains only the project image (`linnea7171/houfeng:latest`, with `houfeng-center`, a small runtime entrypoint, and baked `web/dist`) as service `houfeng` and PostgreSQL. It binds Houfeng to `127.0.0.1:16001` by default for an operator-managed HTTPS reverse proxy, persists PostgreSQL data under `./data/postgres/` for easier migration, runs the project container as the non-root `houfeng` user, stores center file logs in the `houfeng_logs` named Docker volume, and does not containerize agents. Sensitive values live in the untracked `docs/deploy/compose.env`; the tracked Compose file avoids password-like `HOUFENG_DATABASE_URL`, `POSTGRES_PASSWORD`, `HOUFENG_INITIAL_PASSWORD`, and `HOUFENG_SESSION_HMAC_KEY` assignments so repository secret scanners do not flag placeholder configuration. Release Please opens or updates release PRs for eligible conventional changes on `main`; merging a release PR publishes a GitHub Release, which then publishes Docker images to `linnea7171/houfeng`. One-command agent onboarding still requires a center image built with a real release version and matching Linux agent release assets.
+The Compose stack contains only the project image (`linnea7171/houfeng:latest`, with `houfeng-center`, a small runtime entrypoint, and baked `web/dist`) as service `houfeng` and PostgreSQL. The database bootstrap principal is distinct from the Houfeng application principal, and their untracked password files are mounted only into the services that need them. The fail-stop launcher waits for database readiness, runs the required pre-R1 provisioning as the bootstrap principal, rejects any existing application-role membership drift without transferring database ownership, creates or tightens the application login only when exact, and only then starts Houfeng. The entrypoint percent-encodes fallback DSN components, so printable URI-reserved characters in strong application passwords are supported. It binds Houfeng to `127.0.0.1:16001` by default for an operator-managed HTTPS reverse proxy, persists PostgreSQL data under `./data/postgres/` for easier migration, runs the project container as the non-root `houfeng` user, stores center file logs in the `houfeng_logs` named Docker volume, and does not containerize agents. Release Please opens or updates release PRs for eligible conventional changes on `main`; merging a release PR publishes a GitHub Release, which then publishes Docker images to `linnea7171/houfeng`. One-command agent onboarding still requires a center image built with a real release version and matching Linux agent release assets.
 
 For a real Linux agent onboarding run, follow `docs/deploy/local-and-systemd.md`. One-command installation depends on a center-generated command, an externally reachable `HOUFENG_PUBLIC_BASE_URL`, and Linux agent release assets built with a real version tag:
 

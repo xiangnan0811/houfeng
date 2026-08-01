@@ -9,6 +9,9 @@ services:
       db:
         condition: service_healthy
     environment:
+      HOUFENG_DATABASE_USER: "${HOUFENG_DATABASE_USER:?set HOUFENG_DATABASE_USER in docs/deploy/compose.env}"
+      HOUFENG_DATABASE_NAME: "${HOUFENG_DATABASE_NAME:-houfeng}"
+      HOUFENG_DATABASE_PASSWORD_FILE: /run/secrets/houfeng_database_password
       HOUFENG_HTTP_ADDR: ":16001"
       HOUFENG_WEB_DIST_DIR: /app/web/dist
       HOUFENG_LOG_FILE: /var/log/houfeng/center.log
@@ -16,20 +19,25 @@ services:
       - "127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001"
     volumes:
       - houfeng_logs:/var/log/houfeng
+    secrets:
+      - houfeng_database_password
 
   db:
-    image: postgres:16-alpine
+    image: postgres:16.12
     restart: unless-stopped
-    env_file:
-      - path: docs/deploy/compose.env
-        required: false
     environment:
-      POSTGRES_USER: houfeng
-      POSTGRES_DB: houfeng
+      POSTGRES_USER: "${POSTGRES_BOOTSTRAP_USER:?set POSTGRES_BOOTSTRAP_USER in docs/deploy/compose.env}"
+      POSTGRES_DB: "${HOUFENG_DATABASE_NAME:-houfeng}"
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_bootstrap_password
+      HOUFENG_DATABASE_USER: "${HOUFENG_DATABASE_USER:?set HOUFENG_DATABASE_USER in docs/deploy/compose.env}"
+      HOUFENG_DATABASE_PASSWORD_FILE: /run/secrets/houfeng_database_password
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
+    secrets:
+      - postgres_bootstrap_password
+      - houfeng_database_password
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U houfeng -d houfeng"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -37,3 +45,9 @@ services:
 
 volumes:
   houfeng_logs:
+
+secrets:
+  postgres_bootstrap_password:
+    file: "${POSTGRES_BOOTSTRAP_PASSWORD_FILE:?set POSTGRES_BOOTSTRAP_PASSWORD_FILE in docs/deploy/compose.env}"
+  houfeng_database_password:
+    file: "${HOUFENG_DATABASE_PASSWORD_FILE:?set HOUFENG_DATABASE_PASSWORD_FILE in docs/deploy/compose.env}"
