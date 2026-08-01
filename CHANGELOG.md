@@ -1,5 +1,89 @@
 # Changelog
 
+## [0.60.0](https://github.com/xiangnan0811/houfeng/compare/v0.59.0...v0.60.0) (2026-08-01)
+
+
+### Features
+
+* **record-platform:** add app ACL R2 bootstrap command ([732298e](https://github.com/xiangnan0811/houfeng/commit/732298ee6176b7a3b4a988c5b9e8d9114501653f))
+* **record-platform:** add app acl r2 bootstrap receipt ([b8c057f](https://github.com/xiangnan0811/houfeng/commit/b8c057f3e074f1682e87cfb9f04ae23706f8120d))
+* **record-platform:** add app ACL R2 catalog state classifier ([b610f59](https://github.com/xiangnan0811/houfeng/commit/b610f591f1805ec990e36409da628c91c9062e8b))
+* **record-platform:** add app ACL R2 finalizer ([40c7c8c](https://github.com/xiangnan0811/houfeng/commit/40c7c8c19f7eeed62cf4a57f32e7c1c5274c7120))
+* **record-platform:** add APP ACL R2 privileged transition ([fc4b338](https://github.com/xiangnan0811/houfeng/commit/fc4b3386751c95d7598bc21e876f98ffecaf2b4d))
+* **record-platform:** add app ACL R2 runtime admission ([518b3df](https://github.com/xiangnan0811/houfeng/commit/518b3dfe571ba9329fe4aedf51fceb0378f95249))
+* **record-platform:** add delivery primitives ([0f64de8](https://github.com/xiangnan0811/houfeng/commit/0f64de8328742f8112f8a6d1d3cd4481fa6b1233))
+* **record-platform:** add isolated app acl r2 codecs ([cc8f056](https://github.com/xiangnan0811/houfeng/commit/cc8f05651fd8b79a7fd942217661565bc52658d1))
+* **record-platform:** add isolated migration foundation ([b3c8ecf](https://github.com/xiangnan0811/houfeng/commit/b3c8ecfcc5ca5f1d9637956da5378010efb81aba))
+* **record-platform:** add projection CAS functions ([d57d65d](https://github.com/xiangnan0811/houfeng/commit/d57d65d3855b422e63cc250514696e1de4e17bf1))
+* **record-platform:** add scoped app migrator CLI ([14618bc](https://github.com/xiangnan0811/houfeng/commit/14618bce8c481def036ebee15505529711c4a1d3))
+* **record-platform:** admit direct runtime sessions ([80b563e](https://github.com/xiangnan0811/houfeng/commit/80b563eef6adfe25f569339782411447ab710fe1))
+* **record-platform:** bind ACL runtime verifier identity ([e8712f8](https://github.com/xiangnan0811/houfeng/commit/e8712f8682c166d67230af551ad9c0ca4427f772))
+* **record-platform:** bind persisted ACL manifests ([2264610](https://github.com/xiangnan0811/houfeng/commit/2264610fb6f9d9d5f11dc61475142f6d242e02c5))
+* **record-platform:** compile expected ACL catalog contract ([af06bb6](https://github.com/xiangnan0811/houfeng/commit/af06bb674ad63ff2313addcd5375290b9007323a))
+* **record-platform:** compile r1 ACL allowlist ([d72fd64](https://github.com/xiangnan0811/houfeng/commit/d72fd6428e208331e312632e9973eb7cc942bcbe))
+* **record-platform:** converge app ACL migrations atomically ([39926d8](https://github.com/xiangnan0811/houfeng/commit/39926d877d9b27d193fc279ddcc590f2f741bee0))
+* **record-platform:** encode ACL migration manifests ([5badc74](https://github.com/xiangnan0811/houfeng/commit/5badc74defd352735ee57d9bf428723de3cdebe3))
+* **record-platform:** encode ACL privilege manifests ([8fa7591](https://github.com/xiangnan0811/houfeng/commit/8fa759133df0a5eb344ba5b8286f16650f2ffebe))
+* **record-platform:** harden r1 ACL catalog admission ([d5f1390](https://github.com/xiangnan0811/houfeng/commit/d5f13904ee41c8b483604cb96cd555b5a6333998))
+* **record-platform:** initialize ACL manifest genesis ([34e7a06](https://github.com/xiangnan0811/houfeng/commit/34e7a06a4c1457f40559a5307b378485790c1f4a))
+* **record-platform:** provision local domain identity ([44ecde2](https://github.com/xiangnan0811/houfeng/commit/44ecde2842b916a14ef006e7b49219a8c0c382d1))
+* **record-platform:** validate ACL manifest chains ([21acda4](https://github.com/xiangnan0811/houfeng/commit/21acda40729b1f5b98b333612dd6a3ed003afd64))
+* **record-platform:** validate precreated app roles ([0294b46](https://github.com/xiangnan0811/houfeng/commit/0294b46aea7078ea50ca2a3f1d44d2fc0b574de0))
+* **record-platform:** verify effective ACL catalog ([97b679d](https://github.com/xiangnan0811/houfeng/commit/97b679d96ae4de076e42e223d22f8e1a1472c3a0))
+* **record-platform:** verify migration ledger checksums ([d1a2d79](https://github.com/xiangnan0811/houfeng/commit/d1a2d79f5e4fd46ffbc257813c898d3a3431793e))
+* **record-platform:** verify persisted ACL manifest runtime state ([9af16b7](https://github.com/xiangnan0811/houfeng/commit/9af16b7a0fc89d7d4193d1415ad121ddbbd7e032))
+* **recordauth:** add trusted actor policy boundary ([383763f](https://github.com/xiangnan0811/houfeng/commit/383763f14a23a0c2bd448b79e9a57d226ab8eab7))
+
+
+### Bug Fixes
+
+* **app-acl-r2:** enforce production privilege contracts ([842b5a6](https://github.com/xiangnan0811/houfeng/commit/842b5a6d8e1ac97165ad0449ab3d29e8ff975814))
+* **ci:** preserve PG16 JSON event stream ([335cdff](https://github.com/xiangnan0811/houfeng/commit/335cdffef05452f967e3e569e3558c51729b7262))
+* **ci:** preserve PG16 JSON event stream ([98544e5](https://github.com/xiangnan0811/houfeng/commit/98544e56ba70b3db25581df4af9fc740e296d997))
+* **ci:** remove PG16 runner ripgrep dependency ([99dea1f](https://github.com/xiangnan0811/houfeng/commit/99dea1fe73f084589a198c964ee32bd7982e3c88))
+* **deploy:** harden compose role and DSN setup ([45ff6b7](https://github.com/xiangnan0811/houfeng/commit/45ff6b7f25e6cc25731b9fa00a7bc6c096a0fefe))
+* **deploy:** preserve database name round trips ([6f2a88e](https://github.com/xiangnan0811/houfeng/commit/6f2a88e73caa5015c3708b7296bc778c59af91eb))
+* **deploy:** separate compose database principals ([66ddfa4](https://github.com/xiangnan0811/houfeng/commit/66ddfa48e9591e28f14521ed6140d04fcb107dd2))
+* **migrate:** use read-compatible M2 finalizer locks ([3dc3c48](https://github.com/xiangnan0811/houfeng/commit/3dc3c481d0f2d948dd493ace1a7a78080327c5f5))
+* **migrate:** verify all application ACL namespaces ([0984540](https://github.com/xiangnan0811/houfeng/commit/09845403df0380a93113716cba8004ec068bbfa8))
+* **record-platform:** align pgcrypto receipt identity ([fb22b93](https://github.com/xiangnan0811/houfeng/commit/fb22b93ee0ecb3833362c63ea3645dc47bec5b86))
+* **record-platform:** avoid reserved constraint alias ([cd21f39](https://github.com/xiangnan0811/houfeng/commit/cd21f394f3ab5324d8dc25f105148f707623b42b))
+* **record-platform:** bind ACL runtime session identity ([b85fc56](https://github.com/xiangnan0811/houfeng/commit/b85fc56b83cf90c9f41c6cc9eaf5434e8de28896))
+* **record-platform:** freeze legacy app ACL r1 sources ([6e61bf8](https://github.com/xiangnan0811/houfeng/commit/6e61bf8f8c0c56e317aec1e15086d49f66fd1e7b))
+* **record-platform:** harden delivery primitives ([d1ec0c5](https://github.com/xiangnan0811/houfeng/commit/d1ec0c5698d3ec9e7f9f7fc9bcca49823c243fb3))
+* **record-platform:** harden R2 verifier ownership boundary ([734a19d](https://github.com/xiangnan0811/houfeng/commit/734a19dd931cf42bb6fcfe00109081403ae6038b))
+* **record-platform:** preserve frozen r1 acl surfaces ([e75bde2](https://github.com/xiangnan0811/houfeng/commit/e75bde2f8dbf065ce2b7d733d588cc00dfea598d))
+* **record-platform:** preserve R2 catalog read errors ([0ea37e5](https://github.com/xiangnan0811/houfeng/commit/0ea37e53db3fa1b77b20787b62743917b4ba92f0))
+* **record-platform:** read R2 helper ACLs by OID ([393d7f3](https://github.com/xiangnan0811/houfeng/commit/393d7f3932058b22d87a1f938a0b662da42aa16a))
+* **record-platform:** separate R2 objects from frozen R1 ownership ([5582560](https://github.com/xiangnan0811/houfeng/commit/55825606b825a39a426f993378c249994023a3af))
+
+
+### Documentation
+
+* **record-platform:** align pgcrypto receipt contract ([13a7892](https://github.com/xiangnan0811/houfeng/commit/13a78925e48cf1b4d9945e4c284af0067f53fdfb))
+* **record-platform:** pin pgcrypto identity formatter ([2fad6d5](https://github.com/xiangnan0811/houfeng/commit/2fad6d547e6d726de3b57047291b666f690de917))
+* **spec:** align app ACL runtime error contract ([cc59844](https://github.com/xiangnan0811/houfeng/commit/cc59844fecd5ce96759983cf9255b65279b66e20))
+* **trellis:** align app ACL R2 bootstrap contract ([485effd](https://github.com/xiangnan0811/houfeng/commit/485effd0d62433471cf72d777c899336f322f99c))
+* **trellis:** align app ACL R2 execution governance ([d107a96](https://github.com/xiangnan0811/houfeng/commit/d107a9626cb971e7c7b04d17c34eb11b96453d08))
+* **trellis:** align R2 finalizer read locks ([5d5cd92](https://github.com/xiangnan0811/houfeng/commit/5d5cd9280a04b3571a21474f2f3c17ae17e93f6f))
+* **trellis:** capture ACL catalog verifier contract ([c1b0b3d](https://github.com/xiangnan0811/houfeng/commit/c1b0b3d36c810a8bada14e30c644e0d1ae320fe1))
+* **trellis:** clarify ACL owner checks ([891fdf2](https://github.com/xiangnan0811/houfeng/commit/891fdf2a27d63766f1685e0c90fd0147edf53fe2))
+* **trellis:** close Slice 7 ruleset preflight gaps ([f573cda](https://github.com/xiangnan0811/houfeng/commit/f573cdaa83c8b097b342a0bf64cfe8ff06acb151))
+* **trellis:** correct app ACL R2 finalizer ordering ([5aa9fd6](https://github.com/xiangnan0811/houfeng/commit/5aa9fd668ec748088b2e0f6bfc462c66b54ae34d))
+* **trellis:** define app acl r2 continuity boundary ([d56f3ab](https://github.com/xiangnan0811/houfeng/commit/d56f3ab5a16e37fb59fa33f9c9580a06da343e53))
+* **trellis:** define app projector CAS contract ([a670c5a](https://github.com/xiangnan0811/houfeng/commit/a670c5a9ca4f7716ebc416f2f30bae7c8515c78c))
+* **trellis:** fix app ACL R2 Slice 7 admission ([36dbd18](https://github.com/xiangnan0811/houfeng/commit/36dbd18e63a01299604fa0de99fa6c4cedfee9e2))
+* **trellis:** fix app ACL R2 Slice 7 required checks ([3f92645](https://github.com/xiangnan0811/houfeng/commit/3f926451c46a9f9fecb3958a77a1754fd0a7215e))
+* **trellis:** make Slice 7 protection additive ([8250f3a](https://github.com/xiangnan0811/houfeng/commit/8250f3a7facd6d9b7452a6d36631655d595d989f))
+* **trellis:** persist VPS detail experience plan ([ff12678](https://github.com/xiangnan0811/houfeng/commit/ff12678713c2e563fcb8625fef3a8572cc0b2121))
+* **trellis:** plan app ACL R2 privileged transition ([ee80fd4](https://github.com/xiangnan0811/houfeng/commit/ee80fd40cc20dfc8e136ff393ef90f2b64177fa3))
+* **trellis:** plan app ACL runtime handoff ([fa7ed0e](https://github.com/xiangnan0811/houfeng/commit/fa7ed0e4b386819f8da3f241b4e731bb77ddf5dc))
+* **trellis:** record app acl r2 slice 3 evidence ([683af52](https://github.com/xiangnan0811/houfeng/commit/683af52ac63c42fac078e3d5543d57e45c48d726))
+* **trellis:** record app ACL R2 slice 4 evidence ([0102490](https://github.com/xiangnan0811/houfeng/commit/0102490da96803f985ae44ba54a6fe78a2d4841f))
+* **trellis:** record app ACL R2 slice 6 evidence ([e6b500e](https://github.com/xiangnan0811/houfeng/commit/e6b500e135b1785a83cefd38f829fa4cb0e43bbd))
+* **trellis:** record projector CAS evidence ([e7a4e5c](https://github.com/xiangnan0811/houfeng/commit/e7a4e5c8e56c5d5ba2a2030756f3114e51afa3e2))
+* **trellis:** resolve app ACL R2 Slice 7 admission ([5ba10ad](https://github.com/xiangnan0811/houfeng/commit/5ba10ad638047f00543d0608166a87b36f6c1bae))
+
 ## [0.59.0](https://github.com/xiangnan0811/houfeng/compare/v0.58.9...v0.59.0) (2026-07-12)
 
 
