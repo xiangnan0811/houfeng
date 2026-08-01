@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -2350,6 +2351,7 @@ func assertAppACLR2StrictRunnerBehavior(t *testing.T) {
 	}
 	t.Run("turns a child skip into failure and still cleans up", func(t *testing.T) {
 		fake := newAppACLR2FakeRunnerToolchain(t)
+		delayAppACLR2FakeRunnerTee(t, fake)
 		image := "postgres:16.12"
 		code, output := runAppACLR2StrictRunner(t, runner, fake, &image, []string{
 			"/bin/sh",
@@ -2361,6 +2363,55 @@ func assertAppACLR2StrictRunnerBehavior(t *testing.T) {
 		}
 		if !strings.Contains(string(output), "--- SKIP: nested strict-runner fixture") {
 			t.Fatalf("child skip output = %q, want the emitted skip marker", output)
+		}
+		assertAppACLR2FakeRunnerLifecycle(t, fake, image)
+	})
+	t.Run("turns a child stderr skip into failure and still cleans up", func(t *testing.T) {
+		fake := newAppACLR2FakeRunnerToolchain(t)
+		delayAppACLR2FakeRunnerTee(t, fake)
+		image := "postgres:16.12"
+		code, output := runAppACLR2StrictRunner(t, runner, fake, &image, []string{
+			"/bin/sh",
+			"-c",
+			"printf '%s\\n' '--- SKIP: nested strict-runner stderr fixture' >&2",
+		})
+		if code != 1 {
+			t.Fatalf("child stderr skip strict-runner exit code = %d, output %q, want 1", code, output)
+		}
+		if !strings.Contains(string(output), "--- SKIP: nested strict-runner stderr fixture") {
+			t.Fatalf("child stderr skip output = %q, want the emitted skip marker", output)
+		}
+		assertAppACLR2FakeRunnerLifecycle(t, fake, image)
+	})
+	t.Run("preserves child stdout and stderr as separate streams", func(t *testing.T) {
+		fake := newAppACLR2FakeRunnerToolchain(t)
+		image := "postgres:16.12"
+		code, stdout, stderr := runAppACLR2StrictRunnerStreams(t, runner, fake, &image, []string{
+			"/bin/sh",
+			"-c",
+			"printf '%s\\n' '{\"Action\":\"pass\"}'; printf '%s\\n' 'go: downloading fixture' >&2",
+		})
+		if code != 0 {
+			t.Fatalf("child stream strict-runner exit code = %d, stdout %q, stderr %q", code, stdout, stderr)
+		}
+		if got, want := string(stdout), "{\"Action\":\"pass\"}\n"; got != want {
+			t.Fatalf("child stream strict-runner stdout = %q, want %q", got, want)
+		}
+		if got, want := string(stderr), "go: downloading fixture\n"; got != want {
+			t.Fatalf("child stream strict-runner stderr = %q, want %q", got, want)
+		}
+		assertAppACLR2FakeRunnerLifecycle(t, fake, image)
+	})
+	t.Run("does not leak tee sink descriptors into the child", func(t *testing.T) {
+		fake := newAppACLR2FakeRunnerToolchain(t)
+		image := "postgres:16.12"
+		code, output := runAppACLR2StrictRunner(t, runner, fake, &image, []string{
+			"/bin/sh",
+			"-c",
+			"for path in /proc/$$/fd/*; do fd=${path##*/}; if [ \"$fd\" -ge 10 ]; then printf 'unexpected inherited fd %s\\n' \"$fd\" >&2; exit 19; fi; done",
+		})
+		if code != 0 {
+			t.Fatalf("tee sink descriptor strict-runner exit code = %d, output %q, want 0", code, output)
 		}
 		assertAppACLR2FakeRunnerLifecycle(t, fake, image)
 	})
@@ -2490,6 +2541,22 @@ esac
 	return toolchain
 }
 
+func delayAppACLR2FakeRunnerTee(t *testing.T, fake *appACLR2FakeRunnerToolchain) {
+	t.Helper()
+	path := filepath.Join(fake.bin, "tee")
+	target, err := os.Readlink(path)
+	if err != nil {
+		t.Fatalf("read fake runner tee target: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove fake runner tee link: %v", err)
+	}
+	body := fmt.Sprintf("#!/usr/bin/bash\nset -euo pipefail\nsleep 0.2\nexec %q \"$@\"\n", target)
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write delayed fake runner tee: %v", err)
+	}
+}
+
 func runAppACLR2StrictRunner(
 	t *testing.T,
 	runner string,
@@ -2498,19 +2565,34 @@ func runAppACLR2StrictRunner(
 	child []string,
 ) (int, []byte) {
 	t.Helper()
+	code, stdout, stderr := runAppACLR2StrictRunnerStreams(t, runner, fake, image, child)
+	return code, append(stdout, stderr...)
+}
+
+func runAppACLR2StrictRunnerStreams(
+	t *testing.T,
+	runner string,
+	fake *appACLR2FakeRunnerToolchain,
+	image *string,
+	child []string,
+) (int, []byte, []byte) {
+	t.Helper()
 	args := append([]string{runner, "pg16-catalog", "--"}, child...)
 	command := exec.Command("/usr/bin/bash", args...)
 	command.Env = appACLR2StrictRunnerEnvironment(fake, image)
-	output, err := command.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	err := command.Run()
 	if err == nil {
-		return 0, output
+		return 0, stdout.Bytes(), stderr.Bytes()
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode(), output
+		return exitErr.ExitCode(), stdout.Bytes(), stderr.Bytes()
 	}
 	t.Fatalf("run strict record-platform runner: %v", err)
-	return -1, output
+	return -1, nil, nil
 }
 
 func appACLR2StrictRunnerEnvironment(fake *appACLR2FakeRunnerToolchain, image *string) []string {

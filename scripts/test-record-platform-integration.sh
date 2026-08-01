@@ -153,18 +153,31 @@ then
   exit 1
 fi
 
-output_file="$workspace/child-output.log"
+stdout_file="$workspace/child-stdout.log"
+stderr_file="$workspace/child-stderr.log"
+exec {stdout_tee_fd}> >(tee "$stdout_file")
+stdout_tee_pid=$!
+exec {stderr_tee_fd}> >(tee "$stderr_file" >&2)
+stderr_tee_pid=$!
 set +e
-HOUFENG_POSTGRES_INTEGRATION=1 \
-HOUFENG_DATABASE_URL="postgres://postgres:${app_password}@127.0.0.1:${app_port}/postgres?sslmode=disable" \
-HOUFENG_DELETION_LEDGER_DATABASE_URL="postgres://postgres:${ledger_password}@127.0.0.1:${ledger_port}/postgres?sslmode=disable" \
-HOUFENG_DELETION_WITNESS_DATABASE_URL="postgres://postgres:${witness_password}@127.0.0.1:${witness_port}/postgres?sslmode=disable" \
-HOUFENG_RECOVERY_CONTROL_DATABASE_URL="postgres://postgres:${recovery_password}@127.0.0.1:${recovery_port}/postgres?sslmode=disable" \
-"$@" 2>&1 | tee "$output_file"
-command_status=${PIPESTATUS[0]}
+(
+  exec {stdout_tee_fd}>&-
+  exec {stderr_tee_fd}>&-
+  HOUFENG_POSTGRES_INTEGRATION=1 \
+  HOUFENG_DATABASE_URL="postgres://postgres:${app_password}@127.0.0.1:${app_port}/postgres?sslmode=disable" \
+  HOUFENG_DELETION_LEDGER_DATABASE_URL="postgres://postgres:${ledger_password}@127.0.0.1:${ledger_port}/postgres?sslmode=disable" \
+  HOUFENG_DELETION_WITNESS_DATABASE_URL="postgres://postgres:${witness_password}@127.0.0.1:${witness_port}/postgres?sslmode=disable" \
+  HOUFENG_RECOVERY_CONTROL_DATABASE_URL="postgres://postgres:${recovery_password}@127.0.0.1:${recovery_port}/postgres?sslmode=disable" \
+  "$@"
+) >&"$stdout_tee_fd" 2>&"$stderr_tee_fd"
+command_status=$?
+exec {stdout_tee_fd}>&-
+exec {stderr_tee_fd}>&-
+wait "$stdout_tee_pid"
+wait "$stderr_tee_pid"
 set -e
 
-if grep -Fq -- '--- SKIP:' "$output_file"
+if grep -Fq -- '--- SKIP:' "$stdout_file" "$stderr_file"
 then
   printf 'record-platform integration command skipped a test\n' >&2
   exit 1
