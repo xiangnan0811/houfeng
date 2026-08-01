@@ -398,6 +398,53 @@ func TestAppACLR2FinalizeDefaultAcknowledgementRecoveryUsesNativeM2Reclassificat
 	}
 }
 
+func TestAppACLR2FinalizeDefaultFinalizedPathsAcceptSelectOnlyM2Owner(t *testing.T) {
+	newTx := func(t *testing.T) *fakeAppACLR2FinalizeSelectOnlyM2Tx {
+		t.Helper()
+		return &fakeAppACLR2FinalizeSelectOnlyM2Tx{
+			fakeAppACLR2FinalizeDefaultACKTx: &fakeAppACLR2FinalizeDefaultACKTx{
+				appACLR2PublicR1Tx: newAppACLR2DefaultWiringStateTx(t, true, nil, nil, nil),
+				receiptPresent:     true,
+				m2RevisionsPresent: true,
+				m2HeadPresent:      true,
+			},
+			m2OwnerSelectOnly: true,
+		}
+	}
+
+	t.Run("acknowledgement recovery", func(t *testing.T) {
+		tx := newTx(t)
+		dependencies := defaultAppACLR2FinalizeACKDependencies()
+		var options []pgx.TxOptions
+		state, err := recoverAppACLR2FinalizeACKWithDependencies(t.Context(), func(_ context.Context, got pgx.TxOptions) (pgx.Tx, error) {
+			options = append(options, got)
+			return tx, nil
+		}, dependencies)
+		if err != nil || state != AppACLR2StateFinalized {
+			t.Fatalf("default acknowledgement recovery state/error = %v/%v, want FINALIZED/nil", state, err)
+		}
+		assertAppACLR2FinalizeSerializableReadWriteOptions(t, options, 1)
+		tx.appACLR2PublicR1Tx.assertCallerOwnedAndComplete(t)
+		if tx.actorCalls != 1 || tx.presenceCalls != 1 || tx.commits != 1 || tx.rollbacks != 1 {
+			t.Fatalf("default acknowledgement recovery calls = actor:%d presence:%d commit:%d rollback:%d, want 1/1/1/1", tx.actorCalls, tx.presenceCalls, tx.commits, tx.rollbacks)
+		}
+	})
+
+	t.Run("normal repeat", func(t *testing.T) {
+		tx := newTx(t)
+		dependencies := defaultAppACLR2FinalizeDependencies(func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return nil, errors.New("normal FINALIZED repeat must stay in the caller transaction")
+		})
+		if err := finalizeAppACLR2InTx(t.Context(), tx, dependencies); err != nil {
+			t.Fatalf("default normal FINALIZED repeat error = %v, want nil", err)
+		}
+		tx.appACLR2PublicR1Tx.assertCallerOwnedAndComplete(t)
+		if tx.actorCalls != 1 || tx.presenceCalls != 1 || tx.commits != 0 || tx.rollbacks != 0 {
+			t.Fatalf("default normal FINALIZED repeat calls = actor:%d presence:%d commit:%d rollback:%d, want 1/1/0/0", tx.actorCalls, tx.presenceCalls, tx.commits, tx.rollbacks)
+		}
+	})
+}
+
 func TestAppACLR2FinalizeUsesFrozenEvidenceFromSharedPreparedPredicate(t *testing.T) {
 	fixture, dependencies := newAppACLR2FinalizePreMutationFixture(t)
 	fixture.predicates.FrozenState.SourceSetDigest[0] ^= 0xff
@@ -1360,8 +1407,8 @@ func TestAppACLR2FinalizeStateTableLockOrderIncludesPresentM2Relations(t *testin
 		"lock table public.record_platform_domain_identity in share row exclusive mode",
 		"lock table public.schema_migrations in share row exclusive mode",
 		"lock table public.app_acl_r2_bootstrap_receipt in access share mode",
-		"lock table public.app_acl_r2_manifest_revisions in share row exclusive mode",
-		"lock table public.app_acl_r2_manifest_head in share row exclusive mode",
+		"lock table public.app_acl_r2_manifest_revisions in access share mode",
+		"lock table public.app_acl_r2_manifest_head in access share mode",
 	}
 	if !reflect.DeepEqual(tx.execSQL, want) {
 		t.Fatalf("finalizer state locks = %#v, want %#v", tx.execSQL, want)
@@ -1763,6 +1810,24 @@ type fakeAppACLR2FinalizeDefaultACKTx struct {
 	commits            int
 	rollbacks          int
 	lockSQL            []string
+}
+
+type fakeAppACLR2FinalizeSelectOnlyM2Tx struct {
+	*fakeAppACLR2FinalizeDefaultACKTx
+	m2OwnerSelectOnly bool
+}
+
+func (tx *fakeAppACLR2FinalizeSelectOnlyM2Tx) Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error) {
+	normalized := strings.ToLower(strings.TrimSpace(sql))
+	if tx.m2OwnerSelectOnly && strings.Contains(normalized, "lock table public.app_acl_r2_manifest_") &&
+		strings.Contains(normalized, "in share row exclusive mode") {
+		relation := "app_acl_r2_manifest_revisions"
+		if strings.Contains(normalized, "app_acl_r2_manifest_head") {
+			relation = "app_acl_r2_manifest_head"
+		}
+		return pgconn.CommandTag{}, &pgconn.PgError{Code: "42501", Message: "permission denied for table " + relation}
+	}
+	return tx.fakeAppACLR2FinalizeDefaultACKTx.Exec(ctx, sql, arguments...)
 }
 
 func (tx *fakeAppACLR2FinalizeDefaultACKTx) Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error) {

@@ -320,12 +320,12 @@ func lockAppACLR2FinalizeStateTablesInTx(ctx context.Context, tx pgx.Tx) error {
 		}
 	}
 	if revisionsPresent {
-		if _, err := tx.Exec(ctx, "lock table public.app_acl_r2_manifest_revisions in share row exclusive mode"); err != nil {
+		if _, err := tx.Exec(ctx, "lock table public.app_acl_r2_manifest_revisions in access share mode"); err != nil {
 			return fmt.Errorf("lock APP ACL R2 finalizer state table: %w", err)
 		}
 	}
 	if headPresent {
-		if _, err := tx.Exec(ctx, "lock table public.app_acl_r2_manifest_head in share row exclusive mode"); err != nil {
+		if _, err := tx.Exec(ctx, "lock table public.app_acl_r2_manifest_head in access share mode"); err != nil {
 			return fmt.Errorf("lock APP ACL R2 finalizer state table: %w", err)
 		}
 	}
