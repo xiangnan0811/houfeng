@@ -1,5 +1,9 @@
 # 活动投影、单主体页面与 VPS 概览设计
 
+## 0. Development rebaseline
+
+`0057` 与 current APP ACL fragment 是一个原子交付。activity 只消费当前 Records/Collaboration/Evidence 和现有权威系统事实，不接入 `experience_logs`。feature flag 是开发期集成/回滚工具，不承担 staging cutover 或旧数据 compatibility。
+
 ## 1. 边界与依赖
 
 本任务新增 `internal/center/activity/` 和 `internal/center/vpsoverview/` 两个单向依赖模块：activity 只把已授权的权威 source event 投影为可重建 read model；vpsoverview 只聚合 VPS 身份/健康/续费/关系与 activity 首屏，不拥有任何写操作。HTTP handler 只解析协议，PostgreSQL 查询位于 `internal/center/store/`，Web route controller 位于 `web/src/pages/`。
@@ -77,7 +81,7 @@ type ActivityExportReader interface {
 
 评论/行动项由 task 9 写入 `record_domain_activities`，并绑定事件发生时的 revision/subject snapshot，因此 activity projector 不读取 mutable current record 猜历史主体。纠正产生新的 source version 和 `corrects_activity_id`。所有时间转 UTC；`recorded_at` 始终是候风接受/保存该 source event 的时间。`recorded_at > event_at` 且来源为 migration、晚到系统事实或晚捕获证据时标 `backfilled=true`，但普通保存延迟不凭时间差自动推断。
 
-本任务不直接投影 legacy `experience_logs`，否则 task 10 迁移后会出现旧行与 record revision 双份事件。task 10 以 legacy origin identity 生成 backfilled `record_domain_activities`；现有 projector 自动摄取，并由 source unique key 保证重复迁移不产生第二项。
+本任务不投影 `experience_logs`，Child 10 也不会转换它。backfilled 仅表示当前权威系统 source 的晚到/修正事实，不表示 legacy Records 迁移。
 
 projector 使用 platform worker lease 和 source checkpoint，先在head外准备canonical batch，再在短final transaction中锁定generation head行、对candidate unique keys做locked existing/hash分类、只给missing rows分配连续范围并用严格insert，随后原子写subjects/intervals/checkpoint/`published_ingest_sequence`；final publish禁止`ON CONFLICT DO NOTHING`。record/evidence transaction 的 outbox 触发低延迟增量，周期扫描修复丢失触发。任务携带 source version、reservation epoch 和 deletion fence；最终 insert 前复查，旧 epoch 迟到任务只清理/告警，不能复活已删除 projection。并发测试必须让worker A持有head锁和低range后延迟、worker B尝试发布高range，证明B不能先commit且任何first-page as-of都不包含空洞；另以全重复/部分重复retry证明existing rows不消费序号，published range始终无洞。
 
@@ -156,7 +160,7 @@ Web 新增三个复用同一 controller/query codec 的 route page：`SubjectAct
 - cursor/source/auth/fence 失败：分别使用稳定错误码；权限拒绝与不存在统一 404。
 - overview section failure：显示最后成功与 retry；若影响总体判断，anomaly 只给一次简短影响说明。
 - revoke/permanent delete：client content lease shell 先遮蔽，停止请求并清 route state；focus/pageshow/reconnect 重鉴权后才恢复。
-- rollout：API、routes 和 new VPS page 受 `records_v2_read` 服务端 capability 控制，默认关闭；staging 对照后由 task 11 切默认。
+- integration：API、routes 和 new VPS page 受 `records_v2_read` 服务端 capability 控制；Child 11 在完整功能矩阵通过后验证默认行为，不需要 staging 对照。
 - rollback：停止 projector并关闭 capability即可恢复 legacy page/API；0057 与 projection 保留。不得执行 down migration、删除新 records/evidence，或用旧五数组 timeline 伪装 canonical projection。
 
 在线永久删除由 `activity.DeletionAdapter`拥有本领域范围：在record reservation/epoch生效后阻止新projector publish，等待旧batch退出，删除目标record关联的presentation主行、全部subject relations、revision intervals和overview recent/summary cache，再独立verify零命中并返回无内容receipt。它不删除records/evidence/collaboration/search权威或投影。`activity.RecoveryAdapter`只在隔离恢复中清空/重建activity域；两者都读取core tombstone/fence，旧checkpoint或outbox不能重新发布已删内容。

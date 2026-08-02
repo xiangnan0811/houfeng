@@ -4,6 +4,10 @@
 
 交付可深链、可审计的 2–6 项横向比较工作台：用户先确认不可变 record revision/evidence snapshot，再由 evidence kind 合同执行时间、覆盖、schema 与单位对齐；系统可验证差异与人工结论严格分开，并可原子另存为新记录。
 
+## 2026-08-02 Development Rebaseline
+
+本任务不创建 root migration，依赖已合入的 Child 2/4/5/7。只实现当前开发版比较与 save-as-record；不承担旧数据库、legacy、staging/release 或跨版本 token compatibility。已保存的 `comparison.result/v1` schema/renderer compatibility 仍是新功能自身必须保留的合同。
+
 ## Requirements
 
 - 父设计：`../07-13-vps-detail-experience-design/design.md` §8、§12、§15、§18–§21、§24–§25；视觉基线：`../07-13-vps-detail-experience-design/research/visual-design-contract.md` Artifact `vps-records-visual-contract/v1` §4、§6。
@@ -64,4 +68,4 @@
 
 ## Execution Gate
 
-- 保持 `planning`；直接依赖、父顺序集成面和用户独立执行授权全部满足后才可运行 `task.py start`。
+- 保持 `planning`；Child 2/4/5/7 合入、实际 evidence/record contracts 与容量边界复核、用户执行授权缺一不可。

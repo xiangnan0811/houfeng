@@ -1,8 +1,8 @@
 {
   "id": "vps-records-portability-migration",
   "name": "vps-records-portability-migration",
-  "title": "导入导出与 legacy 迁移",
-  "description": "实现安全/敏感双模式导出、机器归档、隔离 dry-run 导入、防复活身份守卫及 experience_logs 幂等迁移。",
+  "title": "记录导入、导出与可移植性",
+  "description": "实现安全/敏感双模式导出、机器归档、隔离 dry-run 导入、防复活身份守卫、来源追踪与重映射。",
   "status": "planning",
   "dev_type": null,
   "scope": null,

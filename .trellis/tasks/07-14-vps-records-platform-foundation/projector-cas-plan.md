@@ -3,7 +3,14 @@
 > Active task: `.trellis/tasks/07-14-vps-records-platform-foundation`
 > 范围：补齐 r1 必需的 APP projection SQL primitive；不把尚未实现的 ledger/full-witness saga 伪装为已经完成。
 
-> **2026-08-02 status correction.** This is a historical implementation record, not a live migration-edit plan. The projector DDL was subsequently released inside byte-immutable `db/migrations/0051_create_record_platform_foundation.sql` (SHA-256 `503d58670dc790c4b852bfb58cf93d2b816c1ce956958567dc605cb28d5cd23f`). R1/R2 still grant no caller `EXECUTE`; any future trusted caller/ownership transition belongs to additive 0061–0063 and APP V3 admission.
+> **2026-08-02 historical notice.** This is a completed implementation record,
+> not an active plan. The authoritative current scope is the parent
+> `research/development-rebaseline-2026-08-02.md` plus this child's `prd.md`,
+> `design.md`, and `implement.md`. They explicitly remove APP V3 and the former
+> `0061`-`0063` successor direction. The projector DDL is already frozen inside
+> `db/migrations/0051_create_record_platform_foundation.sql` (SHA-256
+> `503d58670dc790c4b852bfb58cf93d2b816c1ce956958567dc605cb28d5cd23f`), and
+> R1/R2 still grant no caller `EXECUTE`.
 
 **Goal:** 让真实 `0051` schema 提供两项唯一、migrator-owned、可重试的 APP projection DDL primitive，并以一个闭合的 v1 `bytea` 命令合同驱动 `deployment_contract_state` 的 activation / domain-rotation CAS；r1 不向 runtime/admin 授予调用权。
 
@@ -17,8 +24,8 @@
 
 - r1 runtime 与 platform-admin 的持久函数 `EXECUTE` 集均为空；两个 projector 仍必须以 migrator owner、`SECURITY DEFINER`、唯一 `bytea` identity 和 `search_path=pg_catalog` 出现在 catalog verifier 中。未来 caller 另行设计并准入。
 - 在本计划最初的 RED cutpoint，0051 尚缺这两个函数且旧 catalog fixture 会自行造 no-op 函数；随后 `d57d65d3` 将真实实现加入 0051，后续发布已固定这些 bytes。
-- 0051 现已进入受保护主线和 release history，包含 whitespace 在内都不得再修订。当前 successor 编号固定为 0061–0063；本计划中的旧“直接修改0051”措辞只描述历史实施顺序，不授予未来编辑权限。
-- 本次不实现 ledger/witness/recovery-control 的 typed entry / receipt 验证、外部 saga 或 production caller wiring。调用者必须在未来实现中先验证 witnessed `(sequence, hash)`，再调用本地 CAS；该依赖要继续作为 Child 1 未完成项保留。
+- 0051 现已进入受保护主线和 release history，包含 whitespace 在内都不得再修订。历史上曾把 successor 编号设为 0061–0063；2026-08-02 重基线已经移除该方向。本计划中的旧“直接修改0051”措辞只描述历史实施顺序，不授予未来编辑权限。
+- 本历史切片没有实现 ledger/witness/recovery-control 的 typed entry / receipt 验证、外部 saga 或 production caller wiring。当时曾把这些列为 Child 1 后续依赖；2026-08-02 重基线已将其从 Child 1 当前完成条件移除。
 
 ## 2. `ProjectionCommandV1` 的闭合字节合同
 

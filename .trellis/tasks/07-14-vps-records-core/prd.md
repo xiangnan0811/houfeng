@@ -4,6 +4,10 @@
 
 实现稳定记录根、不可变完整修订、私有草稿、类型状态、生命周期、并发保存与记录永久删除核心。
 
+## 2026-08-02 Development Rebaseline
+
+本任务是 Child 1 关闭后的首个功能实现，拥有 `0052_create_records_core.sql`。只支持 fresh/current development database 与 exact repeat；`0052` 必须在同一 PR 登记 current APP ACL managed objects/privileges/admission tests。旧 `experience_logs` 不迁移、不回填、不双写，也不再作为生产兼容验收来源。
+
 ## Requirements
 
 - 父设计：`../07-13-vps-detail-experience-design/design.md` §9–§11、§15、§19–§22。
@@ -15,7 +19,7 @@
 - 类型化状态、统一状态组、可选版本化 Markdown 模板和无状态类型不渲染空状态。
 - 文档生命周期只有 active/archived；restore old revision 复制成新 revision，不覆盖历史。
 - 实现 record permanent-delete preview/operation/core purge adapter，复用子任务 1 reservation/ledger/fence；所有其他 adapter 未注册前 capability 保持关闭。
-- 旧 `experience_logs` 仍是生产兼容来源，本任务不迁移或双写。
+- 旧 `experience_logs` 不迁移、不回填、不双写；现有表/代码可暂时保留，但新 Records 合同不读取它。
 - 提供版本化 record/draft/revision API DTO：canonical类型追加到现有 `web/src/lib/types.ts`；仅被lazy records routes消费的transport放在 `web/src/lib/recordsApi.ts` 并提供fresh bundle证明，不交付完整页面。AppShell-eager能力不得导入该domain façade。
 
 ## Acceptance Criteria
@@ -28,11 +32,11 @@
 - [ ] preview 后撤权、依赖变化、幂等 key 复用、ledger unknown/not-committed 状态符合父合同。
 - [ ] `/api/records`、draft/revision/archive/permanent-delete endpoints 受统一 auth middleware保护并有 response allowlist。
 - [ ] feature 默认关闭时旧 VPS experience/timeline API 与 UI 行为完全不变。
-- [ ] `make verify-go`、focused Web API tests 与 PostgreSQL fresh/upgrade/repeat migration 通过。
+- [ ] `make verify-go`、focused Web API tests、PostgreSQL fresh/repeat migration 与 current APP ACL/admission 通过。
 
 ## Out of Scope
 
-- Blob bytes、附件处理、证据 capture、全文搜索、评论/行动项、导入导出和 legacy 转换分别由后续子任务实现。
+- Blob bytes、附件处理、证据 capture、全文搜索、评论/行动项和导入导出分别由后续子任务实现；本程序不包含 legacy 转换。
 - 不开放用户入口或切换旧 experience 写路径。
 
 ## Execution Gate

@@ -10,6 +10,12 @@
 
 ---
 
+## 2026-08-02 execution override
+
+- 子任务 1/2 必须已在 protected main 完成。
+- `0054` 同时交付 current APP ACL managed surface/privileges/admission tests。
+- 只验证 fresh/repeat；返回不含 `0054` 的代码版本时重建开发数据库。
+
 ## Preconditions
 
 - [ ] 子任务1/2已合入main；确认0054可用；读取IP/成本专项spec与backend/web规范。
@@ -29,7 +35,7 @@
 
 - [ ] migration RED断言logical/payload/ref/intent/lineage/TTL/unique，不允许source cascade。
 - [ ] 实现preview intent 15m、payload put、logical snapshot与revision participant。
-- [ ] real PG tests覆盖drift/rollback/orphan/copy auth/delete；GREEN。
+- [ ] 实现 `0054` current APP ACL fragment；real PG tests覆盖fresh/repeat admission、drift/rollback/orphan/copy auth/delete；GREEN。
 
 ## Task 3: IP与监控时序adapter
 
@@ -72,5 +78,5 @@
 
 ## Rollback
 
-- 0054 additive；关闭evidence capability，不删除已捕获快照。
+- 关闭 evidence capability 不删除已捕获快照，不执行 down migration；返回不含 `0054` 的代码版本时重建开发数据库。
 - adapter不稳定时只禁用对应kind；权威unknown contract使evidence protected capability失败关闭，外部unsupported metadata只由task10 quarantine拥有，任何普通路径都无通用渲染。

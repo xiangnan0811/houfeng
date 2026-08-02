@@ -1,5 +1,9 @@
 # 证据注册表与首批适配器设计
 
+## 0. Development rebaseline
+
+`0054` 与其 current APP ACL fragment 是一个原子交付。保留 schema registry、可信来源、敏感分类和 bounded capture；不承担旧数据转换或 staging/release。
+
 ## 1. 存储与registry
 
 `0054_create_record_evidence.sql` 创建 `evidence_snapshots`、`evidence_payloads`、`record_revision_evidence`、`evidence_capture_intents`、`evidence_copy_lineage` 与 receipts。payload是确定性canonical bytes的gzip/bytea，digest唯一；logical snapshot保存owner/auth/source/provenance，不共享。

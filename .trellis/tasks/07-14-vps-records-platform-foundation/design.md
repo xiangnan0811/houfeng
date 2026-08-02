@@ -1,340 +1,175 @@
-# 统一授权与平台基础设计
+# Unified Authorization and Platform Foundation Design
 
-## 1. 边界与现状
+## 1. Boundary
 
-当前 session 只在 `internal/center/http/sessionctx/sessionctx.go` 暴露 user ID，`auth.RoleAdmin` 是唯一角色；没有 capability、group、outbox、通用幂等、Blob、删除账本或恢复控制面。`cmd/houfeng-center/bootstrap.go` 显式装配 5 个 worker，`app.Run` 会把非取消 worker error 视为进程错误。新平台基础必须保留显式装配，并区分启动硬门禁、可重试 worker 与局部 capability unavailable。
+Child 1 no longer owns a future production migration governance platform. It
+owns the reusable foundation already on main and one bridge from frozen APP R1
+to the exact migration set embedded in the current development build.
 
-## 2. 包与依赖方向
+The full repository status and scope decisions are in the parent
+`research/development-rebaseline-2026-08-02.md`.
+
+## 2. Existing contracts retained
+
+The following are retained and tested:
+
+- canonical migration/privilege encodings and immutable manifest chain;
+- direct migrator, direct runtime, and platform admin role separation;
+- effective catalog ownership/ACL verification;
+- `recordauth.Policy` and actor scope;
+- idempotency, outbox, identity guard, deletion and delivery leases;
+- foundation deletion/recovery interfaces used by later children;
+- frozen APP R1 and isolated R2 code as historical contracts.
+
+R2 bootstrap/finalize/transition code is not deleted in this slice. No current
+product entry point calls it to advance Records migrations.
+
+## 3. Current-development contract
+
+Introduce an unversioned current-build compiler beside the frozen compilers.
+
+```go
+type AppACLCurrentFunctionContract struct {
+	SchemaName      string
+	Identity        string
+	Kind            string
+	SecurityDefiner bool
+	Config          []string
+}
+
+type AppACLCurrentMigrationFragment struct {
+	Migration  string
+	Objects    []AppACLManagedObjectR1
+	Privileges func(databaseName string) []AppACLPrivilege
+	Functions  []AppACLCurrentFunctionContract
+}
+```
+
+The production registry has the frozen `0001...0051` surface as its base and one
+explicit fragment for every later embedded migration. Registration is
+closed-world:
+
+- embedded post-`0051` migration without a fragment: reject;
+- fragment without an embedded migration: reject;
+- duplicate migration/object/privilege: reject;
+- privilege for an unmanaged object or unknown subject: reject;
+- function hardening for an unmanaged function, or a new managed function
+  without an exact hardening contract: reject;
+- migration with no APP object: explicit empty fragment.
+
+The compiler returns a slice-backed internal contract containing database, the
+two role bindings, all privileges, all managed objects, and persistent function
+expectations. Frozen R1 wrappers convert their fixed arrays to the same internal
+verification engine, preserving exported R1 comparability and tests.
+
+This extraction avoids two divergent catalog verifiers. The R1 wrapper still
+validates the exact frozen checksum set; the current compiler uses the exact
+bytes discovered from `migrations.FS` plus the explicit fragment registry.
+
+## 4. Supported database states
+
+The current path recognizes only:
+
+| State | Migrate behavior | Runtime behavior |
+|---|---|---|
+| Fresh: no APP ledger/manifest/managed objects | apply all sources, converge catalog, insert genesis | unavailable until migrate completes |
+| Exact current: ledger + manifest + catalog equal this build | verify and return without mutation | admit read-only |
+| Different development baseline | return rebuild-required before mutation | reject with rebuild-required |
+| Malformed/partial/drifting current state | fail closed before repair | fail closed |
+
+A nullable historical head, a legacy public ledger, an R1 manifest whose source
+set differs from the current build, or any successor state is a different
+development baseline. The current path does not adopt, upgrade, repair, or
+append a successor. The operator recreates the database.
+
+Frozen `ConvergeAppACLR1` keeps its historical adoption behavior for its tests
+and isolated callers; production APP migration switches to the current path.
+
+## 5. Convergence data flow
 
 ```text
-auth/sessionctx ──> recordauth
-                     ↑
-records/evidence/attachments/search/activity/notify/portability
-                     ↓
-recordplatform(outbox/idempotency/guard/lease)
-                     ↓
-deletionledger(primary + full witness)   recovery(control + trust + inventory)
+migrations.FS
+  -> snapshot exact SQL/checksums
+  -> compile current fragments + base R1 catalog
+  -> preflight database state
+     -> fresh: serializable apply -> DCL -> catalog verify -> genesis
+     -> exact: catalog/manifest verify -> no mutation
+     -> other: ErrDevelopmentDatabaseRebuildRequired
 ```
 
-- `recordauth` 不依赖任一业务包。
-- `recordplatform` 定义通用事务/worker 契约，不读取记录正文。
-- `deletionledger` 与 `recovery` 不依赖应用数据库作为权威来源；应用 store 只持 projection/reservation。
-- handler 只转换 HTTP；授权、append/reconcile、manifest 验签和状态机位于 service。
+The current convergence engine continues to use one direct-migrator
+`SERIALIZABLE` transaction, advisory lock, hardened search path, checksum ledger,
+DCL revocation before allowlisted grants, catalog verification, and immutable
+manifest insertion.
 
-## 3. 核心接口
+The refactor supplies a compiled slice-backed contract/surface to the shared
+engine instead of making the engine call frozen R1 globals internally.
+
+## 6. Runtime admission
+
+`AdmitAppACLCurrentRuntime` performs one `REPEATABLE READ READ ONLY` transaction:
+
+1. read database/session/current identity, ledger, manifest, and head;
+2. compile the expected current source and privilege contract;
+3. reject a different baseline with the typed rebuild-required error;
+4. read only the compiled managed catalog scope;
+5. verify direct login, roles, ownership, direct/effective ACL, column/default
+   ACL absence, and required function hardening;
+6. commit the read-only transaction.
+
+The existing `AdmitAppACLRuntime` remains the frozen R1 entry point for
+historical tests. Center bootstrap switches to the current entry point.
+
+## 7. Error contract
+
+Expose a sentinel or typed error:
 
 ```go
-type ActorScope struct {
-	UserID    string
-	Role      string
-	ProjectID string
-	GroupIDs  []string
-}
-
-type Capability string
-
-type VisibilityKind string
-
-const (
-	VisibilityProject    VisibilityKind = "project"
-	VisibilityRestricted VisibilityKind = "restricted"
+var ErrDevelopmentDatabaseRebuildRequired = errors.New(
+	"development database must be recreated for the current embedded migrations",
 )
-
-type VisibilityScope struct {
-	Version        uint16
-	Kind           VisibilityKind
-	ProjectID      string
-	AllowedRoles   []string
-	AllowedGroupIDs []string
-	PolicyVersion  uint64
-	PolicyRevision uint64
-}
-
-type SourceAuthorizationState string
-
-const (
-	SourceAuthorizationLive       SourceAuthorizationState = "live"
-	SourceAuthorizationTombstoned SourceAuthorizationState = "tombstoned"
-)
-
-type AuthorizationFloorSnapshot struct {
-	Version         uint16
-	Kind            VisibilityKind
-	ProjectID       string
-	AllowedRoles   []string
-	AllowedGroupIDs []string
-	PolicyVersion  uint64
-	PolicyRevision uint64
-	CanonicalHash  [32]byte
-}
-
-type SourceAuthorization struct {
-	Version         uint16
-	SourceKind      string
-	SourceStableID  string
-	State           SourceAuthorizationState
-	CaptureScope    VisibilityScope
-	CurrentScope    *VisibilityScope
-	FinalFloor      *AuthorizationFloorSnapshot
-	LastLiveScope   *VisibilityScope
-	CanonicalDigest [32]byte
-}
-
-type ResourceScope struct {
-	ProjectID     string
-	Visibility    VisibilityScope
-	SourceACLs    []SourceAuthorization
-}
-
-type Policy interface {
-	Authorize(context.Context, ActorScope, Capability, ResourceScope) error
-}
 ```
 
-`ProjectID` 当前固定为 `default`，但进入签名/request fingerprint/ledger namespace；不会新增项目切换 UI。admin 是 project admin，未来 role/group 通过同一接口扩展。`VisibilityScope`、`AuthorizationFloorSnapshot`、role/group ID 与 `SourceAuthorization` 都由 store/adapter 生成而不是接受客户端任意字符串；规范化时校验版本、source kind registry、project、role，排序去重并重算 canonical digest。floor 必须显式保存 `Kind`，因此 `project` 与 role/group 均为空、语义为 deny-all 的 `restricted` 可以从 canonical bytes 独立重建，不能从数组是否为空猜测。shape 是严格 union：`live` 当且仅当 `CurrentScope != nil && FinalFloor == nil && LastLiveScope == nil`，`tombstoned` 当且仅当 `CurrentScope == nil && FinalFloor != nil && LastLiveScope != nil`；两者始终保留 capture scope。tombstone 的 `LastLiveScope` 是从最后 canonical live scope 带入的 transition witness，必须不比 capture scope 更宽，且 final floor 不得比它更宽；它与 final floor 一起进入 source canonical digest，但最终 actor 交集只使用 final floor。未知 kind/version、缺 floor/witness、floor/witness hash 不符、live scope 比 capture scope 更宽或 tombstone transition widening 都默认拒绝。最终授权严格计算 actor scope、记录 visibility、capture scope 与所选 current scope/final floor 的交集。无权与不存在的外部语义统一为 404；内部保留 allow/deny reason code，不记录资源 stable ID、名称或正文。
+Internal errors wrap this value and retain the observed/expected reason without
+including connection strings, credentials, raw SQL, or role passwords. The CLI
+must wrap, not replace, the convergence error so the actionable message reaches
+stderr. Center bootstrap keeps the same cause in its startup error chain.
 
-```go
-type LedgerEntryType string
+Catalog corruption that could also occur on an exact current set remains a
+specific fail-closed catalog error; it must not be mislabeled as a harmless
+rebuild mismatch after mutation has begun.
 
-const (
-	DeleteCommit           LedgerEntryType = "delete_commit"
-	AttemptNotCommitted    LedgerEntryType = "attempt_not_committed"
-	ContractActivation     LedgerEntryType = "contract_activation"
-	DomainIdentityRotation LedgerEntryType = "domain_identity_rotation"
-)
+## 8. Child-owned extension rule
 
-type FullWitness interface {
-	Confirm(context.Context, CanonicalEntry) error
-	ReadHead(context.Context) (Head, error)
-	ReadRange(context.Context, uint64, uint64) ([]CanonicalEntry, error)
-}
-```
+Every later migration-owning child modifies the current fragment registry in
+the same PR as its SQL migration and tests. Its fragment is part of that child's
+acceptance. Child 1 owns the registry/compiler mechanism and base through
+`0051`, not the objects introduced by Children 2-10.
 
-`CanonicalEntry` 是按 `entry_type` 判别的 union，而不是把所有列伪装成共同必填字段。共同 body 字段只有 version、sequence、deployment/project namespace、稳定 operation identity、confirmed-at 与 previous hash；current/entry hash 是 body 编码后的派生 wrapper 字段，绝不进入自己的 preimage。`delete_commit` 要求 actor/route/object/idempotency/fingerprint、deletion contract/reason，并按注册来源类型要求 origin 与含显式 visibility kind 的完整 authorization floor；`attempt_not_committed` 要求同一 deletion request identity 与正数 release epoch，禁止 origin/floor/删除合同；`contract_activation` 固定 sequence 1/zero previous hash，最终 payload 绑定 plan/bundle/authorization artifact、trust/inventory/approval-policy/drain/domain-identity-set digests 与 minimum fence，禁止 actor/route/object/idempotency/fingerprint/origin/floor/release 字段；`domain_identity_rotation` 固定 sequence >1，绑定 current/candidate set digest+相邻 epoch、current approval、candidate possession、intent/cutover bundle、copy/drain digest 与不下降的 minimum fence，并禁止全部删除请求字段。rotation entry 之后产生的 projection、old-domain retirement 与 final-proof 只进入绑定该 ledger hash 的 completion receipt，不能反向进入已提交 entry。每个 entry 恰有一个与 type 相同的 payload；nil 与 empty bytes 不等价。Go body/record encoder、PostgreSQL primary/witness parser + CHECK/窄写函数与 S3 decoder 使用同一 `entry_type × object_kind` 真值表，未知 kind/version 不进入“其他”分支。
+This is intentionally a development-build contract, not an extensible plugin
+API. Fragments are compile-time values in `internal/center/store/migrate`.
 
-`Confirm` 的成功语义不是“目标行存在”或“head 相同”。无论新写、ack-loss 重试还是已存在快路径，它都必须逐字读回目标 entry，枚举 immutable tail，从 genesis 到 tail 验证无缺口 hash chain，并拒绝 head 落后于 far tail；PostgreSQL 与 S3 profile 使用同一 conformance suite。数据库窄函数必须严格解析 canonical body、逐字段比对 typed columns、重算 floor/body/entry hash，并在同一事务锁 head、校验 expected sequence/hash、append 与 CAS；只分别检查“列合法”和“bytes digest 合法”不构成绑定。S3 还把 object-key sequence、body sequence、receipt sequence 与 runtime/activation/rotation prefix exact-match，并拒绝 trailing bytes、非 canonical encoding、跨 prefix type 或同 sequence 双份 entry。
+## 9. Compatibility and rollback
 
-canonical bytes 使用确定性字段顺序和 length-prefix 编码后 SHA-256 chain；不依赖 map JSON 排序。永久删除 preview 使用 `crypto/rand` 生成 32-byte `DeletionRequestTokenV1`，只接受 `drt1_<43-char-base64url-no-pad>` canonical transport；账本保存 `SHA-256("houfeng-deletion-request-token-v1" NUL deployment_id NUL project_id NUL raw32)` commitment与 request fingerprint，raw token 不写数据库、filesystem、日志、遥测或备份。首次 intent 前 token 还必须与未过期 preview authorization exact-match；首次 intent 后同 token 只能 constant-time 匹配并恢复同 fingerprint operation。错格式、低熵调用方 key、文本 token 参与 preimage、跨 scope replay和同 commitment 不同 fingerprint均在写前拒绝。该 public commitment无需服务端 verify secret，因此没有永久 HMAC keyring、第 65 次轮换或旧 key 销毁矛盾。
+There is no database rollback or down migration. Before later Records migrations,
+disabling the new current production routing returns the code to frozen R1
+behavior on a fresh R1 database. After later migrations land, rollback means
+rebuilding the development database with the selected code version.
 
-## 4. 存储边界
+If the extraction breaks a frozen R1/R2 test, fix the shared engine while
+preserving the frozen wrapper; do not weaken the historical invariant or route
+through R2.
 
-### 应用数据库已发布基线与 V3 successor
+## 10. Verification
 
-- `record_access_groups`、`record_access_group_members`（为 policy 提供未来 group scope；当前无用户管理 UI）；
-- `record_outbox`、`record_idempotency_keys`、`identity_mutation_guards`；
-- `deletion_reservations`、`record_purge_operations`、`record_deletion_audits`；
-- `deletion_fence_leases`、`object_content_leases`、`client_content_leases`、`content_delivery_epochs`；
-- `backup_epochs`、`recovery_inventory_projection`、`deletion_replay_state`、`deployment_membership`；
-- `source_deletion_tombstones`、`deployment_contract_state`；
-- APP-local `public.record_platform_domain_identity`、`public.record_platform_domain_attestations`；
-- `app_acl_manifest_revisions`、`app_acl_manifest_head`。
+Required evidence:
 
-已发布的 `db/migrations/0051_create_record_platform_foundation.sql` 精确创建上述 22 张 public 应用/治理表；runner-owned `schema_migrations` 与 `record_platform_internal` schema 不计入 22。它及已发布的 `db/appaclr2/migrations/0052_app_acl_r2_privileged_transition.sql` 均逐字不可变，包含 whitespace；初始 R1 manifest migration set 仍是 0001…0051 的 52 个 SQL 文件，因为两个不同的 0004 文件都保留。对象型表以 `(project_id, object_kind, object_id)` 作为无 FK identity；records 表在子任务 2 才出现，避免逆向依赖。
+- pure compiler/registry tests, including injected future migrations;
+- frozen R1/R2 regression tests;
+- current convergence unit cutpoint tests;
+- current runtime read-only admission tests;
+- real PostgreSQL fresh/exact-repeat/rebuild-required tests;
+- CLI error-chain and bootstrap routing tests;
+- full Go repository verification.
 
-旧 foundation draft 不是已发布 0051 的追加 suffix。应用域修复因此固定为三个新 migration：`0061_upgrade_record_platform_foundation_to_app_acl_v3.sql` 执行 released-schema-to-V3 的真实 object/data/ownership 转换，`0062_add_domain_identity_provision_authority_gate.sql` 加入 provision authority gate，`0063_add_app_acl_v3_readback.sql` 加入 V3 manifest/catalog readback。Children 2–11 仍拥有 root `0052–0060`；later-lower filenames 可由完整 filename ledger 追加，但任何路径都不能改名、改写或重算已发布 0051/R2 0052。
-
-### 独立数据库
-
-- `db/deletionledger/migrations/0001_create_deletion_ledger.sql` 是已发布 append-only entry/head/checkpoint 与 local domain-identity baseline；foundation governance/typed-command additions 进入 `0002_add_record_platform_governance.sql` 或其后的 additive successor。
-- `db/deletionwitness/migrations/0001_create_full_witness.sql` 是已发布 ledger/trust witness baseline；完整 plan/authorization/bundle/completion、identity-set/rotation 与 typed confirm additions 进入 `0002_add_record_platform_governance.sql` 或其后的 additive successor。S3 profile 不要求 witness PostgreSQL，而在 locked bucket 中使用独立 immutable namespace。
-- `db/recoverycontrol/migrations/0001_create_recovery_control.sql` 是已发布 trust/inventory/backup/restore baseline；platform mutation saga、typed governance artifacts、identity-set/rotation 与 completion additions 进入 `0002_add_record_platform_governance.sql` 或其后的 additive successor。
-
-三个 `0001` 文件及其 checksum 均逐字不可变。每个后续 isolated migration 只能在该域自己的 ledger 中使用下一个未占用的 `0002+` filename；不得以“fresh install 更清晰”为理由回填或整理 0001。
-
-三个独立 runner 各自持 `schema_migrations`，不得通过应用 `migrate.Apply` 或应用备份恢复；`s3_worm` 部署只执行 ledger/recovery 两个外部 runner，witness runner 仍由 fresh/repeat integration 单独验证。
-
-canonical namespace 只有一套生产 validator：`DeploymentIDV1` 是 ASCII `dp-[0-9a-f]{64}`，v1 `ProjectIDV1` 精确为 `default`；配置、SQL CHECK、canonical encoder、签名、scope-hash 与 S3/IAM key builder 共用 exact bytes，拒绝 trim/case-fold、NUL/control、Unicode 与别名。四个已发布 PostgreSQL baseline migration 已各自创建本地、同形但不共享的 `public.record_platform_domain_identity`、`public.record_platform_domain_attestations` 与 immutable triggers/helpers；successor migrations 只能扩展各自数据库，任何 grant、probe 或 planner read 都不得依赖另一数据库的副本。`public.record_platform_domain_identity` 以 domain ID 为主键，固定 domain kind、member identity epoch、database OID/name，以及 `postgres_system` 或 `external_attestation` 二选一的物理域身份；database name 只接受 1…63-byte ASCII `[a-z][a-z0-9_]{0,62}`，system identifier 只接受 canonical unsigned decimal。`public.record_platform_domain_attestations` 保存单调 generation、stable identity digest、bounded canonical signed attestation、signature-set digest/count 和有效窗口。migrator 首次 provision 时优先从 `pg_control_system()` 取得 system identifier 并以 `crypto/rand` 生成 domain ID；同一物理域只 exact-match，新物理域必须以 candidate 身份并存且只能由 witnessed rotation 激活。托管服务不允许读取 system identifier 时，adapter 先规范化 provider/account/cluster/physical storage/snapshot policy/restore authority，再分别使用字段专属 domain separator 计算 fixed 32-byte digest；不可变表、identity set 与 attestation 只保存这些 digest，不保存 raw URL/path/identifier/free text。stable identity digest 在续签时不变、generation 只增不减。短期 attestation 到期只使受保护能力关闭，不能改写已激活的稳定身份。URL、database name、DNS alias 或不同 attestation nonce 不构成独立恢复域；选定 profile 的 PostgreSQL system identifier/stable physical identity digest 必须 pairwise distinct。
-
-`s3_worm` 在 recovery-control 中另有 immutable、以 domain ID 为键的 `record_platform_s3_witness_identities` 与 append-only attestation 表，允许 current/candidate 并存但不允许覆盖。一次性 migrator 使用第三组只读 S3 control-plane identity（不能写 witness 对象）验证 TLS/SPKI、provider/account、bucket/namespace、versioning、Object Lock COMPLIANCE、默认 retention、legal-hold policy、lifecycle/noncurrent/delete-marker/replication 与 restore authority；持久化时 endpoint 只保存 canonical HTTPS authority digest+TLS/SPKI，provider/account/cluster/storage/snapshot/restore authority 只保存字段专属 digest。`HTTPSAuthorityV1` 的 raw input 只允许 exact `https`、无 userinfo/query/fragment/percent/control，path 只能为空或单个 `/` 并规范为空；host 是 lowercase ASCII DNS 或 `netip` canonical IP（IPv6带括号），默认 443 规范为零，其他端口是无前导零的 1…65535。digest preimage 精确为 `HOUFENG-HTTPS-AUTHORITY-V1 || u16be(1) || u32be(len(host)) || host || u16be(port-or-zero-for-443)`。基础设施 adapter kind 使用闭合 registry，`AdapterNormalizationVersion` v1 精确为 1；版本变化必须走 domain rotation，不能在 renewal 中漂移。`S3BucketNameV1` 为 3…63-byte lowercase ASCII DNS token，首尾字母数字、内部仅字母数字/`.`/`-`，拒绝相邻点、点横线相邻和 IPv4 literal；`S3NamespaceV1` 是 0…8 个 length-prefixed segment 的 tuple，每段 1…63-byte `[a-z0-9][a-z0-9._-]{0,62}`，拒绝空、`.`、`..`、slash、percent/query/fragment，key builder 是唯一插入 `/` 的位置。表保存 canonical bucket、namespace tuple bytes及其 digest，不保存 raw URL/path。后续 attestation 只能为相同 stable digest 续期。S3 identity 不能与任一受管应用备份/日志/restore workspace 位置或其复制目标重合。activation planner 将 active profile、四个 PostgreSQL domain（S3 profile 为三个）与 S3 identity 规范化为 epoch 1 `DomainIdentitySetBodyV1`；body 自身固定 deployment/project/profile、set epoch、previous-set digest、domain-attestation policy digest 与按 domain kind 排序的闭合 member union，不含自己的 digest。其 canonical bytes 只位于 pre-entry `contract_activation_payload`，digest 由 `DomainIdentitySetV1` 外层保存并进入最终 sequence-1 entry、projection 与 full witness。identity-set body、`IdentitySetPrimaryReceiptV1` 与 `IdentitySetWitnessReceiptV1` 是三个独立 magic/version/decoder schema；witness receipt 逐字绑定 primary receipt digest。PostgreSQL full witness 必须同时保存 canonical set、完整 canonical primary receipt、其 digest和 canonical witness receipt，S3 则保存三个独立 Object-Locked object，因此 primary 丢失时任一 profile 都能重建三者，不能以 generic receipt bytes或只有 digest 的行代替。可续签的 attestation generation/digest/expiry 与 live-probe digest 属于独立 `DomainLivenessSnapshot`，绝不进入 stable identity-set digest，因而续签不会使 witnessed activation 漂移。运行时每次 admission 将 fresh liveness snapshot 的 stable digest 与由完整 ledger 链折叠出的最新 witnessed identity set exact-match，防止切换到另一个“也合法”的集群或 bucket、旧配置回滚或 alias 绕过。
-
-部署治理 policy 文件固定为 LF 文本 `HOUFENG-RECORD-PLATFORM-DOMAIN-ATTESTATION-POLICY-V1`、唯一 `threshold=<1..64>`、按 `dk-sha256-<64 lowercase hex>` 严格升序且无重复的 `key=<id>:<64 lowercase hex Ed25519 public key>` 行和 final newline；regular/no-follow/bounded 0400 loader 拒绝空白、注释、CRLF、未知/缺失/重复/乱序行、ID 与 public key 不匹配、阈值越界或超过 64 keys。canonical policy bytes/digest 进入 activation bundle/identity set，后续 renewal exact-match witnessed digest；治理 policy 改变必须作为 domain rotation candidate policy，同时满足 witnessed current threshold、candidate threshold 与每个 candidate-only key possession signature，不能通过替换本地 trust file生效。
-
-`SignedAdmissionAdapterPolicyV1` 也遵循单调 witnessed current→sealed candidate 转换。rotation intent逐字内嵌current与candidate wrapper；无变更时二者byte-identical，变更时candidate generation=current+1、previous digest=current并同时满足current/candidate domain-governance thresholds。rotation ledger、identity-set primary set+receipt、full-witness set+primary-receipt copy+witness receipt和全部readback完成前，LB/queue/copy-replay的drain、continuation、cutover snapshot只能绑定current witnessed policy，candidate signer成功数必须为0。identity projection CAS在同一原子状态转换中写active adapter digest/generation，并把typed `AdapterPolicyActivationReceiptV1`嵌入既有`projection` rotation receipt；该receipt full-witness/readback后，后续retirement/final liveness才必须使用candidate policy。旧current policy只保留为immutable evidence，不再授权新snapshot；policy validity必须覆盖其snapshot validity，future/not-yet-active/expired/cross-purpose signature全部拒绝。
-
-`DomainAttestationBodyV1` 使用固定 magic/version/field-count 的 length-prefix binary body，按顺序绑定 purpose=`provision|renew|rotation_candidate|retirement`、严格 `DeploymentIDV1/ProjectIDV1`、profile、domain kind/ID/member epoch、identity mode、六个 `ExternalInfrastructureIdentityDigestsV1`（provider/account/cluster/physical-storage/snapshot-policy/restore-authority）、PostgreSQL canonical system identifier+database OID/name 或 S3 HTTPS-authority digest/TLS-SPKI/canonical bucket+namespace tuple+Object-Lock stable fields、stable identity digest、set epoch/digest（provision 时为 candidate activation set）、generation、32-byte cryptographic challenge、issued/valid-from/expires-at和 policy digest；body 不含 raw endpoint/path/free text、signer 或自己的 digest。`SignedDomainAttestationV1` wrapper 保存该 body、外层 body digest，以及 1…64 个按 key ID 严格升序且无重复的 `DomainAttestationSignatureV1`；每个签名以 domain-separated magic 绑定 body digest、policy digest与 signer key ID，完整 wrapper digest仍是外层派生值。验证必须 exact-match witnessed/pinned policy、满足 threshold，并拒绝未在 policy 中的 signer。所有 token 使用各自 closed ASCII grammar，fixed-width digest/nonce 不经字符串规范化；body ≤64 KiB、完整 wrapper ≤128 KiB，时间是 UTC microseconds，generation/epoch 均正数。renew 必须保持 stable identity fields 与 `stable_identity_digest` 不变，只允许 generation/challenge/time/wrapper digest 前移；rotation admission顺序先执行 read-only `control-policy draft → current/candidate governance sign → seal → current publish/full-witness`，再执行 `challenge draft(policy-bound) → current governance sign/seal → prepare(policy exact-match) → candidate attestation/preparation sign/seal → plan`。rotation possession 必须在 PostgreSQL candidate-only staging surface，或与 WORM witness root 分离、可清理的 S3 candidate-control namespace 做 nonce write/read-back；proof与control-policy signatures都不计入mutation approval threshold。
-
-active identity set 不可原地改写。`domain identity rotate` v1 一次只替换当前 profile 中一个 member，candidate global/member epoch 都严格为 current+1，其余 member canonical bytes逐字不变；profile 变化稳定拒绝。planned 模式从 surviving current authority 复制并用 current-authoritative append-only 双写追平；disaster 模式以独立 `unreachable draft → governance threshold sign → seal → current resume` 产生并 full-witness 的 current-unreachable/quarantine proof 替代双写，但仍必须有 current full witness/注册恢复源的完整 genesis 链，且 lost-domain adapter 调用数为 0。两种模式都从 genesis 复制 ledger/trust、plan/authorization/bundle/completion、signed inventory/manifest 和 receipts；应用/recovery 数据用逻辑 snapshot+WAL/LSN catch-up，最终 drain 后重放 deletion fence。candidate ahead、gap/far tail、单字节差异、retention/hold 降级或 unresolved workspace/mutation 全部关闭能力。
-
-rotation intent 与 cutover 分成两个具名、可独立解码的无环 bundle。`DomainRotationIntentV1` 逐字内嵌完整 sealed challenge/preparation wrappers、current/candidate set bodies、current approval policy、current/candidate domain-governance policies、新 key possession proofs、witnessed transfer signer、candidate receipt signer、copy source/policy 和 drain scope；只保存 wrapper digest 不足以支持 artifact-loss recovery。`DomainRotationCutoverV1` 只能在 copy、mode proof、final drain、`candidate_import_applied` 与 `candidate_import_revoked` receipts 都由 current primary/full witness read back 后生成，并绑定 intent digest、截止该点的实际 receipt-chain head 和 pre-entry rotation payload。两个 bundle 都固定 magic/version/field order/size/decoder，不含自己、完整 plan/authorization bytes、最终 trust/ledger head 或未来 receipt；cutover 的 pre-entry payload 显式绑定既有 `plan_digest` 与 `authorization_artifact_digest`。最终 `domain_identity_rotation` ledger body 才绑定 plan/authorization/intent/cutover bundle、current/candidate set、copy/drain 与 trust head；其后产生的 candidate cutover execution、projection、retirement、final proof、credential teardown与workspace purge只进入 append-only receipt chain 和 immutable completion receipt，不能反向进入已提交 entry。full witness durable 后 projector CAS active set epoch，撤销旧域 write/EXECUTE/IAM、路由和连接；旧域只可留作只读审计，重新成为可写或重新出现即 admission fail closed。durable intent 前可放弃 candidate；其后即使本地 challenge/preparation/cleanup artifacts 与 recovery-control 丢失，也必须只凭 mutation ID 从 intent primary/full witness 重建并 exact retry，旧域 retirement 后永不回滚。`recovery_domain_identity_sets`及其 typed primary/witness receipts、rotation saga/append-only receipt chain 与 `deployment_contract_state.active_domain_identity_*` 共同保存此单调历史。
-
-runtime/admin 不直接写 immutable ledger/trust/witness entry 或 head。migrator-owner 创建固定 `search_path=pg_catalog`、撤销 `PUBLIC`、校验 expected head/sequence、entry kind、canonical bytes/digest 的 role-specific `SECURITY DEFINER` 函数；所有可授权持久 mutator 只接受一个 bounded canonical `bytea` command，完整 identity 固定为 `public.name(bytea)`且禁止裸名、额外 overload 与多参数入口：runtime 只能 append/confirm `delete_commit|attempt_not_committed`，admin 只能 append/confirm sequence-1 `contract_activation`、`domain_identity_rotation` 及 trust mutation/governance artifact；head CAS 只能发生在函数事务内部。应用与 recovery-control 的普通可变表使用逐表逐动词 ACL。S3 允许共享只读，但写入拆为 runtime-only `ledger/runtime/`、`heads/runtime/` 与 admin-only `ledger/activation/`、`ledger/rotation/`、`heads/activation/`、`heads/rotation/`、`trust/`、`trust-heads/`、`plans/`、`authorizations/`、`bundles/`、`completion/`、`identity-sets/`、`rotations/`。所有对象都位于唯一 canonical root `record-platform/v1/<scope_hash>/`，后续 family key 禁止再次出现 scope hash；`scope_hash=sha256("houfeng-record-platform-scope-v1" NUL deployment_id NUL project_id)`，禁止 record/object ID 作 preimage。identity set 精确使用 `record-platform/v1/<scope_hash>/identity-sets/<20-digit-epoch>/<set|primary-receipt|witness-receipt>`，epoch 1 activation与后续 rotation共用；challenge fence 精确使用 `record-platform/v1/<scope_hash>/bundles/<tm-id>/candidate_control_challenge/<fence|primary-receipt|witness-receipt>`，recovery request 精确使用 `record-platform/v1/<scope_hash>/bundles/<tm-id>/candidate_recovery_request/<20-digit-generation>/<abandon|import|cutover_apply|revoke_import|revoke_cutover|cleanup>/<request|primary-receipt|witness-receipt>`，purpose token只接受这里的下划线 canonical 值。所有 head/set/challenge/request receipt 都按其 sequence/epoch/generation Object-Locked immutable，metadata 的 schema/kind/checksum/digest 必须与 key 和实际 body exact-match，retain-until 由对象 family 的 witnessed profile floor 与当前 UTC 秒向上取整公式派生，legal hold 原子保持 ON。bucket versioning、Object-Lock default、COMPLIANCE、noncurrent/delete-marker、replication和无 lifecycle expiry 都进入控制面扫描；`ReadHead` 从连续 typed receipts 和完整 entries/sets 推导，不存在 runtime/admin 共享可覆盖 head key。
-
-WORM witness bucket/root 只保存 immutable witness artifacts，闭合 family 为 `ledger|heads|trust|trust-heads|plans|authorizations|bundles|completion|identity-sets|rotations`，绝无 `candidate/` staging family。candidate prepare/import/cutover/cleanup staging、credential bundle、transfer scratch 与 nonce workspace 使用物理身份独立的 candidate-control bucket/namespace并登记为 `ephemeral_registered`。每个 mutation 只有一条 `prepare→import→cutover→cleanup` 单调 signed policy chain；每代固定从current witnessed trust继承且覆盖mutation deadline的recovery-request signer descriptor、phase credential identity commitment、exact IAM-policy digest/expiry、TLS/SPKI、control bucket/namespace identity、versioning enabled、Object Lock/default retention/legal hold/lifecycle/replication disabled、backup/snapshot exclusion、encryption-at-rest policy、cleanup-verifier identity、容量和 absolute TTL。第一份 read-only policy draft 创建 mutation ID，使用 current witness read 与 candidate read-control probe、持有零 candidate write credential；`domain governance sign --purpose candidate-control-policy --scope current|candidate`分别离线签名，seal 独立验证两个 threshold。current-side publish 将完整 signed policy append 到 recovery-control/full witness 的 immutable `candidate_control_policy/<generation>` artifact，任何 prepare/import/cutover/cleanup 写都必须在对应 generation 完整 readback 后才可发生。same-phase renewal与phase advance都绑定上一份 witnessed digest并重复 draft/sign/seal/publish；旧 policy/credential立即失权。challenge draft先把完整signature-free body及digest通过monotonic root CAS做primary/full-witness 2+3 challenge-start fence publication/readback，再输出并逐字绑定published prepare policy，preparation/intent保留同一 wrapper。startup、write/readback、inventory 和 final cleanup 都 exact-match live control plane；强制 retention、复制、未知 lifecycle、凭据/prefix复用或任一 drift 在 byte 1 前失败关闭。durable intent 前的 candidate possession/nonce bytes 始终留在 candidate-control，只有完整 sealed preparation/intent 将其 canonical proof固化到 primary/full witness。durable intent 后导入的 ledger/trust artifacts成为不可清理的 candidate-domain WORM evidence；candidate 产生的普通 signed phase receipt返回 current-side resume，只有 current append 的 canonical `DomainRotationReceiptV1` 进入 current WORM `rotations/<mutation-id>/receipts/<ordinal>/receipt`。candidate 永不写 current recovery-control/current WORM，candidate-control也永不作为 witness fallback。
-
-candidate-control 不是 opaque blob escape hatch。`CandidateEphemeralStoragePolicyBodyV1 → SignedCandidateEphemeralStoragePolicyV1` 使用 body/body-digest、current+candidate governance threshold authorization和 outer digest；raw access-key ID/ARN/path 不进入任何 canonical bytes，phase credential只保存按 adapter/version/domain 分离的 fixed-width identity commitment。`CandidateEphemeralObjectBodyV1 → CandidateEphemeralObjectEnvelopeV1` 固定 mutation/scope/domain/phase/artifact ID/ordinal、closed payload kind、唯一 typed arm+digest、created/expiry与storage-policy digest。payload kind 只允许 `nonce_challenge|possession_observation|encrypted_phase_credential_bundle|transfer_scratch|cutover_command|phase_receipt|inventory`，每个映射唯一具名 decoder。AEAD nonce reservation只覆盖`encrypted_phase_credential_bundle|transfer_scratch`两类encrypted payload，使用policy-bound独立nonce-reservation signer和单独的 `SignedCandidateAEADNonceReservationV1` schema与物理唯一 key，不伪装成普通 payload；最终 purge/workspace-zero receipt不属于该 union，也从不写正在被证明为空的 candidate-control surface。
-
-credential bundle 和可选落盘 transfer scratch 使用同一 per-mutation AES-256-GCM envelope。key source严格 XOR：显式 regular/no-follow/bounded 0400 raw 32-byte local key，或 pinned KMS adapter/version、digested KEK identity、完整 canonical encryption context与 bounded wrapped 32-byte DEK；路径、raw KEK ID和明文均不序列化。wrapped DEK使用独立 `encrypted_key_material` semantic，只能位于有绝对到期、库存和销毁证明的 `ephemeral_registered` surface。每个对象在加密前先以 domain-separated `(mutation,key-identity-digest,nonce)` digest派生物理 reservation key，并使用 S3 `If-None-Match:*`、filesystem `O_EXCL` 或 PostgreSQL unique insert 持久化由purpose `candidate_aead_nonce_reservation_v1`专用、与candidate receipt signer不同的nonce key签名的12-byte CSPRNG reservation；artifact envelope只引用reservation digest。ack-loss只能read+exact-match，同 key/nonce被另一artifact占用即失败。AAD exact绑定mutation/deployment/project/domain/phase/artifact/sequence/kind、policy/key/reservation/plaintext-manifest digests、length和expiry。wrong-key/AAD/tag、nonce重复、同artifact不同plaintext、missing reservation均输出0 plaintext/0 committed object。cleanup销毁local key/wrapped DEK/缓存并生成typed key-destruction receipt；local/KMS destruction proof分别要求不适用的identity/digest为零并exact-match descriptor inventory。恰有六个byte-handling命令——candidate prepare、transfer import、cutover apply、credential revoke、candidate abandon、candidate cleanup——分别在任何stat/KMS/plaintext/write前exact-one解析`--aead-local-key-file`或`--aead-kms-config`+`--aead-kms-credential-file`；其他scope拒绝这些flag，任一policy phase不得切换arm。
-
-最终 `CandidateEphemeralPurgeReceiptBodyV1` 内嵌完整 signed storage policy、before/after inventory和unsigned typed AEAD/wrapped-DEK/nonce key-destruction evidence，remaining live object/version/delete-marker/multipart、AEAD key与nonce-signing key counts必须全0；wrapper以closed context exact-one绑定sealed preparation或witnessed abandon authorization，再固定body digest、cleanup-verifier purge-purpose signature和outer receipt digest。cleanup verifier v1使用单独 one-shot parser/process与 strict regular/no-follow/bounded 0400 Ed25519 key；公开 descriptor绑定adapter/version、purpose、key ID/public key、domain-separated identity digest、有效期和live `SignedFilesystemExclusionProofV1` digest，并逐字进入published policy、preparation、intent和plan。私钥只在verifier环境，物理上不在center/admin/candidate phase env、control/workspace或受管备份恢复面；verifier只有read-control和inherited request/receipt FD，没有current/candidate写权。丢失、错key、proof drift、deadline过期或不可用保持fail closed；Final绑定当时完整policy-chain head和verifier descriptor；Final后primary/PostgreSQL-witness/S3均要求adapter/purpose/key/public identity/exclusion-proof/validity逐字不变。nonce reservation只接受独立nonce signer，import/cutover/revocation phase receipt只接受candidate receipt signer，purge/workspace-zero只接受cleanup verifier，key-destruction evidence不另签名，交叉用途稳定拒绝。receipt经protected FD直接交current append/full-witness/readback。ack-loss先从primary/full witness解析singleton；只有证明未append才允许fresh observation。未知kind、generic bytes、同一路径多schema、trailing bytes、raw credential identity、policy/envelope/key/metadata/AAD不一致在byte 1前拒绝。
-
-generation-1 prepare `control-policy draft` 必须显式读取 nonce-reservation signer 与 cleanup-verifier 两个独立、regular/no-follow/bounded strict-0400 canonical public descriptor 文件，从 current witnessed trust 读取 purpose 固定为 `candidate_recovery_request_v1` 的 recovery-request signer descriptor，并固定不超过30天的 immutable mutation deadline；文件不含私钥或本地路径，三份 descriptor validity 都覆盖 deadline。完整三份 descriptor 逐字进入 published policy、challenge fence、sealed preparation、`DomainRotationIntentV1`和plan。所有 same-phase renewal 与 `prepare→import→cutover→cleanup` phase advance 只能从完整 witnessed previous policy 逐字继承 deadline 和三份 descriptor；两个显式 descriptor 的 reinjection flag 与任何 request-signer 覆盖输入都必须在 stat 前拒绝。challenge后 deadline/descriptor 过期是 terminal fail-closed；不能以 renewal 换 key、identity、exclusion proof 或 validity。
-
-nonce private key 只在prepare/import/cutover进程暴露purpose-locked reservation signer；credential revoke不打开它，abandon/cleanup可以定位、派生identity、核验并销毁但不装配signer，调用数为0。六个candidate encrypt/decrypt/destroy命令使用exact-one local/KMS arm，其余scope在stat前拒绝。post-intent命令只信任current从primary/full witness导出的typed recovery-request FD，本地policy/preparation只可选exact-match；pre-intent abandon先CAS no-intent fence并2+3 witness authorization，清零后再2+3 witness abandon completion，完全位于正常phase chain和15-kind rotation receipts之外。
-
-recovery-request canonical body使用六个exact-one prerequisite arm和闭合phase映射：`abandon→prepare`、`import|revoke_import→import`、`cutover_apply→cutover`、`revoke_cutover|cleanup→cleanup`；各arm分别携带完整abandon authorization、intent+transfer start、intent+import-applied、intent+import-revoked+Cutover receipt+cutover command、intent+final proof或intent+final proof+cutover-revoked。`cutover_apply` 的 `required head` 必须等于 witnessed `Cutover.ReceiptHash`，且该 receipt 的 `Body.PreviousReceiptHash` 与 `Payload.Cutover.PreCutoverReceiptChainHead` 都必须逐字等于内嵌 `candidate_import_revoked.ReceiptHash`；其他 arm 的 receipt kind/hash 同样必须等于 full-witness-derived required head。request 的 purpose-bound signed core 与 typed primary receipt 先进入 primary，full witness 再保存 byte-identical signed core、canonical primary-receipt copy 与 typed witness receipt；五个物理工件完整 readback 后才组装含 publication receipts 的 FD transport wrapper。signed core 上限 32 MiB、每份 primary/witness publication receipt 上限 64 KiB、最终 FD wrapper 上限 33 MiB；Go、primary SQL、PostgreSQL witness、S3 与 inherited-FD decoder 都必须在 allocation 前拒绝 +1 byte。nil/both/wrong arm、wrong phase、未签名/自哈希/未发布、wrong head 或 cross-mutation 均在 candidate stat/KMS/network/write 前拒绝。purge context是exact-one完整sealed-preparation或含typed primary/witness receipts的witnessed-abandon-authorization结构联合，context bytes进入verifier签名，不接受开放kind+digest。
-
-## 5. 配置与健康门禁
-
-新增配置族：
-
-- `HOUFENG_RECORDS_ENABLED`（默认 false，最终切换前仅 staging 打开）；
-- `HOUFENG_RECORD_PERMANENT_DELETE_ENABLED`（默认 false）；
-- `HOUFENG_DELETION_LEDGER_DATABASE_URL`；
-- `HOUFENG_DELETION_WITNESS_MODE=postgres_sync|s3_worm` 与 profile-specific 参数；这是 center/admin/migrator 唯一合法 mode 名，`HOUFENG_RECORD_PLATFORM_WITNESS_MODE` 等别名均拒绝；
-- `HOUFENG_RECOVERY_CONTROL_DATABASE_URL`；
-- center 的 `HOUFENG_RECOVERY_TRUST_SIGNING_KEY_FILE`；recovery file 只能是 32-byte Ed25519 seed 或 second half 与派生 public key 一致的 64-byte private key，拒绝 text/hex/base64、空、mismatch 或 oversized。center 只在 full witness 已证明本地 public key 为 active 且 runtime gate 完整时签后续 inventory/manifest，revision 0 或 key mismatch 时绝不 seed trust；每个产生 signed transfer stream、cutover command 或 candidate recovery request 的管理 CLI 都必须显式接收 `--recovery-signing-key PATH`，在写任何输出前派生 key ID/public key 并与 witnessed intent/policy signer exact-match，不从 center env 暗取；永久删除 token commitment 不读取任何 secret/keyring 文件；
-- `HOUFENG_RECORD_PLATFORM_DEPLOYMENT_ID`、固定 `ProjectID=default`、`HOUFENG_MINIMUM_FENCE_CONTRACT_VERSION`、membership heartbeat/lease limits；
-- `HOUFENG_BACKUP_RECOVERABILITY=none|managed` 与显式 inventory policy。
-- `postgres_sync`：center/admin/migrator 各需要 APP、LEDGER、WITNESS、RECOVERY 四个独立 PostgreSQL identity；
-- `s3_worm`：center/admin/migrator 各只需要 APP、LEDGER、RECOVERY 三个 PostgreSQL identity；center/admin 使用两组不相交写 prefix 的 S3 credential files，migrator 使用第三组只能读取 bucket identity/Object-Lock control plane 的 credential files；WITNESS DSN 即使存在也拒绝读取；
-- `HOUFENG_RECORD_PLATFORM_ADMIN_{APP,LEDGER,WITNESS,RECOVERY}_DATABASE_URL` 与 `HOUFENG_RECORD_PLATFORM_ADMIN_WITNESS_S3_*` 只进入管理 CLI 环境；
-- `HOUFENG_RECORD_PLATFORM_MIGRATOR_{APP,LEDGER,WITNESS,RECOVERY}_DATABASE_URL`、domain attestation/trust-root、显式 runtime/admin role names与 profile-specific S3 identity-probe files 只进入一次性 migrate/attestation-refresh 环境。
-
-center、platform admin 与 migrator 使用三组不相交的数据库身份和三个长期 base env 文件（`center.env`、`record-platform-admin.env`、`record-platform-migrator.env`）；center 环境不出现 admin/migrator DSN，admin apply 不持 owner，migrator 只在显式一次性命令中打开并在退出前关闭。域轮换另挂载第四个短期 `record-platform-candidate.env` credential bundle：prepare 阶段只含 candidate-only provision/nonce 权限、独立 0400 pinned-current governance policy、nonce-reservation signing key、candidate receipt-signing material，以及exact-one local raw-key或KMS config+credential key-source arm；完成目标 schema/ACL 后撤销高权限并原子替换为彼此分离的 import-only、mutation-scoped cutover 与 cleanup arms。它不进入前三个 base 文件；import arm只有在 importer 生成 preparation-key-signed `candidate_import_applied`、current side append/full-witness/readback 后才可撤销，并必须再产生绑定 applied receipt hash 的 `candidate_import_revoked`；cutover arm保留到 final proof witnessed 后撤销，cleanup arm只能撤权与销毁 bundle/workspace，不能持 cleanup-verifier私钥。verifier由同一管理binary的唯一one-shot parser在单独sandbox/env中运行，只读取candidate-control control plane、strict-0400 verifier key和inherited FD；该key/credential不进入前三个base文件或candidate bundle。nonce signer只签两类encrypted-payload reservation，candidate receipt signer只签import/cutover phase receipts，verifier只签purge/workspace-zero。所有 teardown receipts 被 active full witness read back 后才能写 completion 与 `complete`；durable intent 前放弃也必须产生完整 witnessed abandon completion，而不是复用 post-intent cleanup receipt。source export 使用 admin env 的只读代码路径和显式 recovery signing key，candidate import/cutover 使用该 bundle，二者以分离 OS 进程和签名有界帧流通信，不让任一进程同时持 current 写权与 candidate 写权。配置是严格的 flags × profile × command scope parser/open 矩阵：
-
-| `HOUFENG_RECORDS_ENABLED` | `HOUFENG_RECORD_PERMANENT_DELETE_ENABLED` | APP 身份与迁移 | 外部域行为 |
-|---|---|---|---|
-| false | false | 保留 0.59 legacy APP owner/auto-migration | 不读取 witness mode、ledger/witness/recovery/S3/keyring/平台 signing 变量或文件 |
-| true | false | `HOUFENG_DATABASE_URL` 必须是 APP runtime；center 只校验 migration checksum set + 当前 `app_acl_manifest_rNNNNNN` digest | 不读取或打开 ledger/witness/recovery/S3/keyring；永久删除明确 unavailable |
-| true | true | APP runtime；任一 pending/unknown/tampered migration 或 ACL 漂移都 fail closed | 必须提供唯一 `HOUFENG_DELETION_WITNESS_MODE`，只打开该 profile 的三/四个 runtime 域 |
-| false | true | 配置错误 | 所有平台域保持未打开 |
-
-任一 record flag 开启时只有 one-shot migrator 写 schema/ACL。`migrate --scope app` 不读取 witness mode，只打开 APP migrator identity 并拒绝全部 ledger/witness/recovery/S3 输入；`migrate --scope permanent-delete` 要求唯一 witness mode，先验证 APP，再只打开选定 profile 的外部 migrator identities/control-plane probe。records 可启用而永久删除关闭；一旦 contract activation 写入 ledger，低于 minimum version 的 binary 不能取得流量/队列 admission。相同/alias domain、未知 TLS、witness stale、inventory 无界或 trust chain 断裂只关闭受保护记录域；health/readiness 返回安全代码而不是原配置/凭据。进程已观察到的 minimum fence-contract version 是单调安全水位，后续空结果、旧投影或依赖不可达只能继续 fail closed，不能把 readiness 恢复为较低版本。API 与每类 worker 各自持 membership；LB 只使用 bodyless、exact-204 的 `/api/system/record-platform/admission`，该私有运维端点绕过用户 session 但受 network allowlist 保护，不经过 JSON error wrapper、redirect、compression 或 cache middleware，204/503 都无 body并返回 `Cache-Control: no-store`。它要求本进程 live API membership，不能以旧 binary 的普通 `/ready` 200 代替。LB/queue admission 只有在 replay watermark、fence projection、最新 active identity epoch 和 signed inventory 连续追平 fresh witness head 后才生成，所有 claim/lease acquire 在事务内重新校验活跃 membership、deployment epoch、capability 与合同版本。
-
-APP R1/R2 权限由已发布的 versioned manifest chain 管理，不使用 `ALL TABLES`、default privileges 或 owner membership。R1 精确绑定 0001…0051 的 52 个 SQL 文件、22 张 0051 public 表、4 条 sequence `USAGE`、204 个 runtime/admin ACL tuples，并绑定 `migrator_catalog_role`；runtime 与 platform-admin 的 persistent-function `EXECUTE` 集都精确为空。0051 的两个 public projector 保持 migrator-owned、`SECURITY DEFINER`、固定 `search_path`、PUBLIC-revoked 且 verifier-required，但 R1/R2 没有 caller。R2 append-only receipt/M2 evidence在历史 chain 上继续；runtime verifier 只覆盖 migration-owned database/`public`/`record_platform_internal` inventory 与该 migrator 的 default ACL，接受 unrelated schemas/default-ACL owners。PostgreSQL 16 `pgcrypto` extension members视为 opaque；安全边界是 runtime/admin/PUBLIC 对 internal schema 无 `USAGE|CREATE`，而不是尝试改写 bootstrap-owned extension function ACL。
-
-### 5.1 已发布 R2 到 APP V3 的单一转换
-
-V3 不允许在 R1/R2 上追加 projector grant。upgrade 先取得 released R2 使用的 `houfeng.app-acl-r2-privileged-transition.v1` advisory lock，在同一 reserved connection 上以 constrained direct migrator 开启 `SERIALIZABLE READ WRITE`。preflight 只能接受 shared classifier 给出的 exact `FINALIZED`；`R1|PREPARED|CORRUPT`、partial relation、receipt/M2/content/owner/raw-or-effective-ACL drift 都在任何 DDL 前拒绝。然后一个 forward-only closure 依序应用 0061–0063、执行 released-schema-to-V3 data/owner transform、收敛 caller/definer/default ACL、append V3 evidence/head 并完成 exact catalog/data readback；任一 migration-ledger、DDL、data、ownership、ACL、manifest/head 或 readback failure 回滚整个 closure。普通 40001/40P01 只重放完整 closure；Commit 返回普通错误时只运行 exact V3 ACK classifier，exact V3 才成功，R2 prior state或 drift均失败且不得重放 DDL。
-
-V3 steady-state owner graph有两个互不相连的 `NOLOGIN NOINHERIT` roles：`schema_owner` 拥有 database、schemas、relations、sequences、types、extensions和internal helpers，`definer_owner`只拥有闭合 public `SECURITY DEFINER` mutators及其 exact dependencies且不拥有 relation。runtime、platform-admin、normal migrator、validator和未来 trusted projector caller都是 distinct `LOGIN NOINHERIT` operational roles，拥有对象数与到两个 owner 的 direct/recursive membership path都为0；caller grants与definer dependencies分别进入 V3 manifest/readback。短期 `bootstrap_provisioner` 是唯一可执行 owner phases/ownership transfer 的外部 DBA identity，只进入 explicit bootstrap parser；commit 后必须撤销，残留 identity 会使 admission fail closed。`0061` 必须真实转换 released 0051 object graph，不能复制旧 prototype migration或以 post-hoc grant/owner transfer代替。
-
-V3 append-only evidence保留并逐字重验所有 R1/R2 migration receipts、R2 M2 rows/head、source digests与 ACL evidence，任何历史 byte 不能被覆盖或重编码。转换成功后 V3 runtime admission exact-accept，新 binary 的 legacy R1/R2 admission及 released R1/R2 binary都把 successor判为不可服务；转换提交前仍可恢复 released R2，提交后只允许 forward repair。真实 upgrade matrix固定 PostgreSQL 16.0、16.6、16.12，并覆盖 exact R2 FINALIZED、每个 failpoint、ACK loss、owner/default-ACL drift、bootstrap identity残留和 old/new admission truth table。
-
-## 6. 状态机与 worker
-
-- `OutboxWorker`：claim → fresh authorize/render → send → terminal/retry；payload 只存 event identity/无内容参数。claim 绑定 owner ID、单调 generation 和 live expiry，expired processing 可接管，旧 owner 的 sent/retry/cancel finalize 必须影响 0 行。idempotency 与 identity guard 使用相同 fencing，idempotency TTL 必须晚于 owner expiry，janitor 不删除任何 live owner/reservation。
-- `LedgerReconciler`：处理 commit_unknown、补 witness、权威 not-committed outcome 与连续 checkpoint。
-- `FenceProjector`：把 witness-confirmed entry 物化到 app fence，维护 deployment membership。
-- `RecoveryInventoryWorker`：枚举有效恢复点/partial/workspace、签名 checkpoint、核验 expiry。
-- `PlatformJanitor`：按 24h/30d 合同去关联详细引用；不删除 ledger/witness canonical entries。
-
-worker 使用数据库 lease、attempt、`next_attempt_at` 和 fake clock 测试。任何 fence/witness 刷新失败让记录内容域读写失败关闭，不让 worker error 直接终止无关监控采集。
-
-## 7. 兼容与发布
-
-本任务合入时默认关闭 records/permanent-delete，现有 API 行为不变。Compose 增加独立 ledger/witness/recovery-control services 和 volumes；systemd 文档要求外部独立 PostgreSQL/S3 WORM。没有满足独立恢复域的部署可以使用记录基础功能，但永久删除 capability 永远不可用并明确显示原因。
-
-## 8. 验证重点
-
-- session scope、capability deny-by-default、查询过滤与 worker fresh authorization；
-- primary/witness 每个 append/ack 崩溃点、sequence/hash/key rotation；
-- trust store full-witness-only rebuild、retired/compromised key；
-- external DB fresh/repeat migration、相同 DSN/rollback/断链拒绝；
-- membership/readiness/queue admission 与详细元数据 TTL。
-
-## 9. 首次信任激活与 key 生命周期管理
-
-普通 `houfeng-center` 永远不会在 revision 0 的空 `RecoveryTrustStore` 中自动信任配置私钥。空 trust head、缺少 initial signed inventory 或 activation 未完成都只是安全的局部 unavailable；加载私钥不等于授权它成为信任根。首次启用与后续 key mutation 由独立 `houfeng-record-platform-admin` 完成，禁止手工 SQL。
-
-### 9.1 批准策略与 mutation envelope
-
-管理员 CLI 使用严格读取的 bootstrap approval policy。v1 policy 是无重复、按 key ID 升序的固定 LF 行格式：第一行精确为 `HOUFENG-RECORD-PLATFORM-APPROVAL-POLICY-V1`，随后依次为唯一 `local_tty=deny|allow`、唯一 `threshold=<N>`、一个或多个 `key=<key_id>:<64-lowercase-hex-ed25519-public-key>`，最后必须有 newline；缺省语义只存在于生成器，parser 不接受省略行。未知/空白/注释/CRLF 行、重复 key、threshold 越界、乱序、非 regular/no-follow 文件或权限不符合部署 profile 均拒绝。approver key ID 固定为 `ak-sha256-<lowercase sha256(public-key)>`，policy digest 覆盖完整 canonical policy；它与 recovery signing key 独立。canonical policy bytes 进入受保护 plan 和 immutable mutation bundle，因此 apply 与 full-witness rebuild 不依赖一个只剩 digest 的外部文件。
-
-自动化只接受一个或多个 detached approval envelope，每个 envelope 固定绑定 plan digest、`current|candidate` scope、对应 policy digest、approver key ID、UTC signed/expires 时间与 Ed25519 signature；expiry 不得晚于 plan expiry，future signed-at 或 plan 窗口外签名拒绝。bootstrap 只计算 candidate scope；普通 key lifecycle 只计算 witnessed current scope；approval-policy rotation 分别满足 current/candidate threshold。CLI 对两个 scope 分别规范化，同一 key 若要在两个 policy 中计数必须生成两个 scoped envelope；重复签名不累计，同一 envelope 不跨 scope 双计。policy rotation 的每个 candidate-only 新 key即使超过 candidate threshold 数量也必须各有 candidate-scope signature，作为 possession proof。`approval sign` 是完全离线的子命令，只读取权威 plan、显式 scope和 0400 approver private key；private key 与 recovery loader 一样只接受 raw 32-byte seed 或 public half 匹配的 64-byte Ed25519 key，拒绝 text/hex/base64/PEM。命令以 0600 exclusive create 输出短期 envelope，不打开数据库或网络。GitOps 将 plan/approval 放在受保护、带到期清理的 artifact store，不把 recovery/approver private key 或可重复使用的无限期批准提交到仓库。首次 durable intent 前 plan、原 drain receipt 和 approvals 必须按数据库选择的 `intent_recorded_at` 有效。
-
-交互模式要求真实 TTY、重新输入完整 64 位 SHA-256 digest，并从 root-owned、版本化 OS credential map 生成 `op-sha256-<64 lowercase hex>` canonical principal；自由文本 actor 只能作非权威显示字段。action/mode 是严格矩阵：bootstrap 可用 candidate approval policy 明确允许的 TTY 或 candidate detached threshold；add/rotate/retire/remove 可用 witnessed current approval policy 明确允许的 TTY 或 current detached threshold；compromise、approval-policy rotation 与 domain identity rotation 一律 detached-only，分别满足 current、current+candidate、current approval scope。TTY 与 detached 不得在同一 mutation 混用。domain identity rotation 的 candidate-domain possession 与可选 domain-attestation governance-policy 变更是独立治理证明：后者还必须同时满足 witnessed-current 与 candidate domain-attestation policy thresholds以及每个 candidate-only governance key 的 possession signature，但不计入 approval envelope threshold。candidate recovery key 的 self-signature只证明持有私钥，不能授权自身成为根。bootstrap approval policy 由 OS/configuration-management 作为 out-of-band root 预置，plan 读取后把完整 canonical bytes 与 digest 固定；activation 后二者进入 trust/full witness。apply 不重新相信路径上的替换文件，只验证 plan 内 policy、plan digest 和当前输入授权；后续 mutation 的 current policy 必须与 witnessed bytes/digest exact-match。
-
-所有动作使用版本化 `PlatformMutationPlanBody`，kind 为 `bootstrap|add|rotate|retire|compromise|remove|approval_policy_rotate|domain_identity_rotate`，固定由 `crypto/rand` 生成的 `tm-<64 lowercase hex>` mutation ID、deployment/project、expected primary+witness heads、active profile 与当前 identity-set digest/epoch、action-specific key/policy/domain fields、inventory、drain和 minimum fence。plan/bundle 中使用 `TrustMutationPreEntryBody` 与 `ContractActivationPreEntryBody`；pre-entry body 禁止 plan/bundle/authorization digest、final trust head、previous/current entry hash。bootstrap bundle 按 kind 固定排序只保存 trust pre-entry、candidate approval policy、domain-attestation policy、admission drain receipt、activation inventory、signed inventory、activation manifest 与 contract-activation pre-entry；canonical domain identity set body只在该 contract payload 中序列化一次，digest 是外层派生字段。`DomainIdentitySet`、drain、inventory等 body 也不序列化自己的 digest。
-
-bootstrap/普通 trust mutation 的 commitment DAG 固定为：leaf canonical bodies → ordered bundle bytes `B`/`bundle_digest` → 完整 plan bytes `P`/`plan_digest` → detached 或 TTY canonical authorization envelope → `AuthorizationArtifact(P, authorization, intent_recorded_at)`/`authorization_artifact_digest` → final trust entry body/chain hash → bootstrap-only final ledger body/chain hash → completion receipt。`ContractActivationPreEntryBody` 可声明目标 trust revision，但绝不含 `TrustHeadHash`；最终 ledger body才绑定 resulting trust revision/head。每个 digest/hash 都是 body 外层派生值，不能出现在自己的 preimage。full witness逐字保存 plan、authorization artifact、bundle、final entry和completion receipt，验证时按反方向重建整张 DAG。
-
-domain rotation 使用另一张仍然无环的 DAG，因为 copy/drain 事实只能在 durable authorization 之后产生：完整 signed challenge/preparation、current/candidate typed identity-set body、candidate possession/governance proof、copy policy 与 drain scope → typed rotation intent bundle `I` → raw plan `P` → current-scope detached authorization artifact `A` → append-only typed pre-cutover receipt chain `R_pre`（copy + planned dual-write 或 threshold-sealed disaster unreachable/quarantine + final drain + candidate import applied + import revoked）→ typed cutover bundle `C(I,R_pre,pre-entry rotation body)` → append/full-witness/readback `Cutover(C,R_pre.head)` receipt → keyless rotation trust entry → `domain_identity_rotation` ledger entry → `CandidateCutoverApplied → Projection → OldDomainRetired → FinalProof → CandidateCutoverRevoked → CandidateArtifactsPurged → WorkspaceZero` receipts → witnessed completion receipt。plan 只内嵌 `I`；identity-set body 只在 `I` 各出现一次，plan 顶层只重复 outer digest/epoch。`I` 的 primary/full-witness bytes 是本地 challenge/preparation 丢失后的唯一权威重建源；`C` 与 Cutover receipt 不进入 `P/A/I`，post-ledger/future receipts 不进入 final ledger preimage，completion 也不进入 final-proof preimage。`removed` 是不可逆终态；普通日志只记录 action、安全 reason code和短期 request ID，不记录 key bytes、对象 identity或自由文本。
-
-首次 intent 将授权模式规范化为严格 union：detached artifact 保存按 scope/policy/key ID 排序的完整 bounded approval envelope bytes和 approval-set digest；TTY artifact 保存 plan digest、policy digest、`op-sha256-*` principal、完整确认事实与数据库 intent time，不保存终端输入或 OS 用户名。两者都连同完整 canonical plan进入 `recovery_mutation_authorizations`，并与 bundle/trust head在 recovery-control 单事务 insert-or-exact-match；PostgreSQL witness在一个事务确认 plan/auth/bundle/trust，S3按 immutable plan → authorization → bundle → trust entry → sequence receipt 顺序推进。最终 trust与activation entry都绑定 plan、bundle、authorization digest。durable 后本地 plan/approval/TTY环境可以全部丢失，`status|resume --mutation-id` 从 primary与full witness逐字恢复并验证“intent 时有效”；若输入了本地artifact，只能exact-match，不能重新授权或替换。canonical非秘密治理bytes永久保留，30天后只清路径/文件元数据、parsed approval query projection、attempt/error/cutpoint detail。
-
-### 9.2 `activation plan`
-
-`plan` 严格只读，不创建 DB 行或对象：
-
-1. 从 primary 和 full witness 读取并完整验证 trust revision 0/zero hash 与 deletion ledger sequence 0/zero hash/minimum version 0，并证明没有 far tail；非空 trust head、非零 ledger head 或既有 `contract_activation` 都不能再次 bootstrap。首次 `contract_activation` 固定成为 ledger sequence 1。同时读取 `activation drain` 根据严格 LB/queue adapters 产生的两份完整 `SignedAdmissionSnapshotV1` wrapper 与短期 canonical drain receipt；receipt 逐字内嵌两份 wrapper、完整 `AdmissionAdapterPolicyV1`、body/wrapper digests、签名集和 fresh target/connection/consumer/lease inventories，验证 deployment/project/epoch/minimum version、exact-204 config 与四类 live count 均为 0。receipt lifetime 固定为两个 snapshot expiry 与 observed-at+15m 的最小值，本地 snapshot 文件不属于恢复依赖。
-2. 通过注册的恢复源 inventory adapters 枚举全部 pre-activation 数据库备份、PITR/WAL、卷快照、Blob/S3 version/Object Lock 与 partial/workspace。`managed` 下 unknown/unbounded 数必须为 0；`none` 必须证明没有仍有效的受管恢复点。
-3. 以 0400/no-follow/bounded loader 读取 recovery 私钥；文件必须是 32-byte Ed25519 seed 或 second half 与派生 public key 一致的 64-byte private key，只派生 public key、`rk-sha256-<lowercase sha256(public-key)>` key ID 与 possession signature；私钥/seed 不进入 plan、stdout、DB 或日志。
-4. 固定 mutation ID、deployment/project、active/signed/expiry 时间、expected heads、active profile、完整 candidate approval/domain-attestation policy bytes、drain scope/receipt、canonical activation inventory、initial signed inventory、activation `RecoveryPointManifest`、minimum fence version和 pre-entry activation bundle。canonical domain identity set body只在 bundle 的 contract-activation pre-entry payload 中出现，外层保存 digest/epoch；plan不含自己的 digest、authorization artifact、final trust/ledger entry或 trust head。权威 plan 使用版本化固定字段的 length-prefix binary encoding，以 `0600` + exclusive create 写入；JSON/text 只作非权威派生摘要，digest 始终是原始 plan bytes 的完整 `sha256:<64 hex>`。plan expiry 是 generated-at+15m 与 drain receipt expiry 的较早值。
-
-若 expiry 前没有任何 durable mutation，过期后拒绝并要求新 mutation/plan。若相同 mutation ID + plan digest 已 durable，则 witnessed authorization artifact digest 必须 exact-match；即使 plan/approval/原 receipt 后来到期也只能 reconciliation 同一 canonical mutation，不能创建替代 plan。operator 可以删除本地artifact并以 `--mutation-id` 从 primary/full witness恢复；activation manifest 是信任/基线证明，不计作 `none` 策略下的可恢复数据点。
-
-### 9.3 `activation apply` 与可恢复 saga
-
-交互 apply 要求 `--plan` 与完整 `--confirm sha256:<64 hex>`；自动化要求 `--plan` 与满足 threshold 的 `--approval`，不提供 `--yes` 或 digest 前缀。跨恢复域不伪装成分布式原子事务，而使用只前进、可证明的 mutation saga：
-
-1. 首次 durable intent 前重新验证原 drain receipt 内两份 signed snapshot wrappers、policy、inventory 与 expiry 仍有效，外部 target/consumer inventory 与 config 未变化；数据库选定 `intent_recorded_at` 并验证 plan/authorization 在该时刻有效，recovery-control 单事务 insert-or-exact-match mutation、完整 canonical plan/authorization artifact/bundle、immutable activation inventory与 final trust revision 1/head；durable intent 后每次续跑使用 `activation drain --continue-mutation` 生成的 fresh continuation，逐字内嵌新 LB/queue signed wrappers、fresh target/connection/consumer/lease inventories、policy 与上一 continuation digest，必须绑定相同 mutation/plan/drain scope、deployment epoch、exact-204 与四类零计数；primary/full witness 保存完整 continuation，liveness 证明不改变原 plan/bundle/authorization；
-2. 将相同 canonical plan、authorization artifact、bundle 和 trust entry写入 PostgreSQL full witness，或依序写入 S3 WORM admin-only `plans/authorizations/bundles/trust` prefix 后才追加 immutable receipt；逐字 read-back并验证全链；
-3. 只从 fresh witness 重建 trust，验签并幂等发布 activation manifest 与 initial signed inventory；`none` 也发布零恢复点签名 inventory；
-4. 用稳定 operation identity append ledger `contract_activation`，entry 绑定 plan、authorization artifact、activation bundle、trust revision/head hash、inventory/policy/drain 与 domain-identity-set digest；
-5. full witness 确认完整 ledger entry；
-6. FenceProjector 连续应用 activation receipt、minimum fence 与 API/worker membership gate；
-7. 重新读取两组 primary/witness 全链和全部 canonical artifact，生成绑定 required receipts、projection/replay和 workspace-zero 的 immutable completion receipt；窄函数验证逐字一致且 replay watermark 追平后才把 mutation标为 complete。
-
-bootstrap 任一阶段崩溃或 ack 丢失只留下 `intent|trust_primary_unknown|trust_witness_pending|inventory_pending|ledger_primary_unknown|ledger_witness_pending|projection_pending|complete` 中的安全状态；普通 trust/key/policy mutation 只允许其 kind 所需的 `intent → trust_primary_unknown → trust_witness_pending → optional inventory_pending → projection_pending → complete`，禁止伪造 ledger/activation 阶段或跳过 required receipt。能力始终关闭。重试先按 mutation identity 读取已持久 canonical bytes，完全相同才返回或继续，digest/expected head 不同稳定冲突。旧 target/consumer 重新出现时 saga 暂停；重新排空并取得相同 scope/config 的 fresh continuation 后继续同一 mutation。已 witness 的 entry、bundle 或 activation 不回滚、不覆盖、不删除。
-
-mutation saga 只有 `complete` 是可压缩终态；没有可用来丢弃未解决冲突的泛化 `terminal`。各 mutation kind 的 required primary/witness/inventory/projection receipt、连续 checkpoint、无活动 workspace 全部进入 immutable completion receipt后，`details_delete_after` 必须精确等于 `completed_at + 30d`。窄 cleanup 函数锁 parent、逐项验证 receipt 与时间后，只删除 parsed approval/attempt/error/cutpoint query detail并清空 bounded error code。canonical plan、canonical authorization bytes（不是原路径/文件元数据）、bundle、trust/ledger entries、identity-set/rotation和completion proof永久保留；它们禁止 record/object ID、内容、私钥、argv、路径或自由文本。
-
-retention 合同由 `RetentionRegistryStateV1` 的八个独立版本化 root 组成，只有两个分类权威：`CanonicalSchemaRegistryV1` 只能由生产 bounded encoder/decoder/storage codec 登记精确 magic/version/discriminator/ordered leaf；人工审阅的 `RetentionPolicyRegistryV1` 才能为具体 surface 指定 `RetentionClassV1 × AllowedSemanticV1` 与逐阶段participant、exact `(surface kind, action, required proof kind+schema set)` capability tuple、survivor与typed residue。`RetentionLifecycleRegistryV1` 仅含复用的 trigger/clock template，policy stage binding提供具体anchor/expiry surface；`PurgeParticipantRegistryV1`固定owner、exact tuple capability和binding ID，并与Go/Web executable dispatch set全等；其余roots是S3、managed filesystem/terminal和managed client精确inventory grammar。初始程序清单固定21个lifecycle与24个participant，由first-owner child按merge ordinal add-only引入。class 明确区分 `live_product_authority|live_product_derived|draft_product|managed_client_buffer` 与 immutable/minimal/operational/recoverability/storage/ephemeral；正常产品标题、Markdown、附件、证据、投影、文件名和safe URL只可登记在对应live/draft/client class，owner永久删除前仍是合法内容，删除后必须转为survivor none。独立surface/action/proof/schema数组只可作为exact tuple set的审计投影，绝不授权Cartesian product；一个surface只绑定实际适用stage，未绑定stage不产生隐式动作，每个template stage全局至少有一个reverse consumer。禁止内容/URL/path/free-text只针对immutable governance、minimal survivor、operational telemetry及具体transition后的residue，不得误伤正常产品行。
-
-每个 policy row 使用exact-one `RetentionSurfaceAddressV1`，地址arm只允许 PostgreSQL column、canonical leaf、S3 key segment/metadata/control property、managed file或managed client leaf，并绑定closed lifecycle policy ID与owner child；每个适用stage分别绑定trigger/deadline、purge participant、capability ID、完整proof requirement set、survivor和typed forbidden residue。dispatch必须接收typed request，包含operation/owner identity、closed target selector、expected owner version、reservation fence epoch、lifecycle stage、deadline和exact capability，并返回typed proof set；旧owner或过期fence在最终提交前再次校验并失败。生成器只能逐项求交，禁止从字段名、数据库类型、tuple 位置或 decoder 自行推断语义，并与 PostgreSQL `information_schema`、S3 control/object inventory、受管 filesystem inventory和managed-client store/codec inventory双向全等。`ManagedClientStorageRegistryV1`只是canonical registry producer，不是第三个policy source；v1唯一内容codec是same-origin `IndexedDBDraftBufferV1`，exact database/version/store/key `(deployment,project,user,draft)`、≤256 KiB、`expires_at<=updated_at+24h`，不含附件/证据bytes。sync/discard/logout/user-switch/revoke/owner-delete/TTL清理；online tabs用lease+BroadcastChannel ack，offline设备只披露`client_ack_or_expiry`，不得声称远程zero。local/session storage、CacheStorage和service-worker cache的内容命中必须为0。
-
-每个 PostgreSQL 普通/generated/storage-only字段、每个 decoded canonical leaf、S3 key segment/metadata/storage property，以及 `/var/lib/houfeng/record-platform/{plans,approvals,candidate,transfer,backup,restore,processor,telemetry,archive}`、对应 `/run` 临时 roots 都必须有逐字段/逐属性条目；candidate-control policy/envelope/payload/nonce/key-destruction 与每个 managed-file terminal 必须一对一路由到具名 decoder，unknown/opaque/extra/unscannable surface关闭永久删除。固定32-byte challenge使用独立`cryptographic_challenge` semantic；wrapped DEK使用只允许ephemeral_registered且最终zero的`encrypted_key_material`。未登记 writable surface 需要 `SignedFilesystemExclusionProofV1`：bootstrap 使用 activation bundle 内完整 candidate governance policy 的 1…64 sorted threshold signatures，完整 proof进入 activation inventory/primary/full witness；后续 generation 绑定 previous proof digest并 exact-match witnessed current policy，完整续证进入 signed recovery inventory/checkpoint，缺代/到期/drift关闭能力。core dump另需逐层证明process `RLIMIT_CORE=0`、systemd `LimitCORE=0`、container core ulimit、kernel/helper和所有可写目标不会产生dump；无法证明的目标必须登记为受管telemetry/archive/backup surface。
-
-逐 relation/object-kind lifecycle matrix规定closed state、absolute eligibility time与唯一survivor fields：live authority/derived在owner deletion reservation后阻止重建并由exact purge participant证明zero；draft按save/discard/delete或90天默认设置清理；client buffer最长24小时。lease/guard/member/content epoch在24h去关联，purge/import/export/processor/backup/ordinary-restore的无内容运维详情在verified receipt后最多30d；telemetry固定`raw_event_delete_at=min(captured_at+configured_sink_ttl,captured_at+30d)`并把同一绝对deadline施加到online sink、spool、archive、backup和replica；记录存在时notification/delivery固定`product_expires_at=min(created_at+configured_ttl,created_at+180d)`，永久删除立即清content及record/revision/object/recipient/integration/provider-message/channel关联，verified purge后claim/lease 24h、identity-free detail最多30d；forensic restore只到原source recoverable-until且不可重置，销毁receipt后才进入30d。不能把mutation `complete`规则泛化到其他对象。长期route只能是闭合route-template code，deletion/trust reason使用分域闭合ASCII enum。`RequiredForbiddenAfterTransitionV1` 是由 `(class, semantic, lifecycle policy, stage ordinal, survivor)` 唯一生成的穷举表，覆盖product content/filename/safe URL/raw path/free text/credential及record/origin/actor/governance/operation/recovery-source/external-delivery identity；stage binding中的typed `ForbiddenAfterTransition`只是该结果的canonical回显，必须与生成值逐项全等，不能由作者选择subset或用额外类别掩盖错误。S3 multipart upload与phase credential authority必须分别由closed abort/revoke action和multipart-zero/authority-zero proof闭合；普通控制属性只能通过具名retain/transition tuple处理。每个enum都有“删去恰一必需类别即build/readiness失败”的负向fixture；deadline后在primary、PostgreSQL witness、S3、filesystem和managed client的非法位置命中数均为0。
-
-registry供应链证明分两阶段，避免在child PR内签一个尚不存在的merge commit。PR/merge-queue required check用policy-pinned scanner生成确定性`ChildRetentionSourceClaimV1`且只上传短期CI artifact，不写回被哈希source tree；它绑定repository/program、child/merge ordinal、exact base/source commit+tree、owner-matrix/entry digest、previous acceptance、registry before/nonempty delta/after、scanner identity/version/binary+rules digest、production-input Merkle digest和base/source observed inventory。首轮11个child都固定`registry_delta|required_nonempty`，`no_new_surface`只对后续维护开放。feature只允许双亲`merge_commit`，branch protection要求claim对应的base/source仍是最终双亲。
-
-protected main acceptance job只接受刚产生的feature merge commit：first parent必须等于claim base，second parent必须等于claim source；required-check snapshot必须属于exact source/base，并对每个context选择全体attempt中编号最高者，只有该attempt completed+success才合法；child-owned production inputs在merge resolution后必须与claim tree delta一致。checked-in policy固定 repository numeric ID `1232752877`、target `refs/heads/main`、merge method `merge_commit`、merge order `1,2,3,4,9,5,6,7,8,10,11`，以及 raw-byte-sorted contexts `docker-image|go|record-retention/source-claim|web|web-browser` 的 workflow blob/action-set和 issuer App ID `15368`。三个 `record-platform-pg16-catalog (postgres:16.0|16.6|16.12)` checks由独立ruleset治理，既不能替代也不能扩充五-context policy。job以policy固定digest的scanner artifact重新扫描merge tree，验证owner entry、`registry before + exact delta = registry after`、observed inventory和previous acceptance连续，再把完整source claim放进`SignedChildRetentionMergeAcceptanceV1` body。隔离 signer使用另一个policy固定digest的最小二进制，不执行merge-tree代码、无网络，只从bounded canonical report FD读取；专用Ed25519私钥只在受保护环境内以regular/no-follow/bounded 0400文件挂给该进程，普通runner、feature代码和scanner均不能stat/open。
-
-`acceptance-policy.v1`与`genesis-approver-policy.v1`是一个atomic authority pair：loader先以no-follow exact regular files读完两者、拒绝任一缺失/provisioning marker/partial replacement，再在暴露policy前互验genesis-policy digest。genesis threshold精确为2，approver key ID精确使用`gapk-sha256-<64 lowercase hex>`并与public key匹配；`gak-*`或单签名均无效。acceptance policy按key ID保存完整active/retired/compromised history且恰一active；history只能由完整canonical policy加previous rotation/acceptance chain验证得到。production API返回不可构造的`VerifiedRetentionAcceptanceHistoryV1` capability，scanner/signer/metadata verifier只能消费该capability，不能传入caller-built key slice、伪造retired window或跳过previous chain。policy digest进入签名preimage，retired key只验其原有效窗口内已存在receipt，不能新签；compromised/unknown/reused key均拒绝。
-
-受保护job不把CI artifact store当作长期证据。它以feature merge SHA派生唯一metadata branch，并创建只含`attestations/record-retention/v1/<two-digit-ordinal>-<canonical-slug>/<40-lowercase-hex-feature-merge-sha>.acceptance.v1`的PR；path parser按component逐段验证，拒绝nested path、empty component、uppercase、underscore、bad ordinal或short/noncanonical SHA，并要求exact-one non-symlink regular blob。文件完整保存source claim与signed acceptance。metadata PR的独立required check不生成child claim，只允许该exact-one file，验证路径/body、feature merge ancestry、atomic authority pair、policy/workflow/scanner/signer digests、signature、previous digest、owner entry和registry chain，且拒绝任何production/registry/workflow/policy改动。ack-loss重试按feature merge SHA读取已存在branch/PR/file并byte-exact-match，不能产生第二份receipt。metadata PR合入后才允许下一child以它为base；task11 PR只验证主线中的1–10 acceptances及自身source claim，task11 merge后才产生并入库第11份，父最终gate先按merge ordinal验证1–11 chain，再计算按child ID排序唯一的registry union。missing/stale/wrong-tree/replay、base/result gap、错误key/policy/workflow/scanner digest、路径漂移或task11替owner补delta都失败关闭；acceptance是交付供应链证据，runtime readiness仍由最终compiled registry与live inventory exact join决定。
-
-### 9.4 后续 key mutation
-
-`add/rotate` 同时要求旧 active key 对 mutation 授权和新 key possession proof；新 key witness durable 后才用于新 manifest。`retire` 绑定最新签名依赖 inventory，旧 key 在原有效区间继续可验。`compromise` 不信任疑似泄露 key 的签名，必须满足 activation 中锚定的离线 approver threshold，并默认让相关 manifest 失去受支持恢复资格。`remove` 只在新签名 inventory 证明所有 recovery point、PITR sidecar 和 activation manifest 对该 key 的依赖均为 0 后允许；它追加 `removed` 终态而不物理修改历史 witness，运行时重建后拒绝该 key，compromise/删除审计继续保留。
-
-`approval_policy_rotate` 同时要求当前 policy threshold 批准和 candidate policy threshold/各新 key possession proof；新 policy digest 只有 full witness durable 后才生效。若当前 policy 的授权 quorum 全部丢失或被怀疑 compromised，系统没有自动信任新 policy 的捷径：永久删除与 trust mutation 保持关闭，只能按隔离取证/人工恢复治理处理，不能退回 TOFU 或单管理员覆盖。
-
-### 9.5 `domain identity rotate` 与受支持灾难恢复
-
-candidate-side signer集合是闭合三元组，而不是只列candidate receipt signer与cleanup verifier；另有一个current-side recovery-request signer：generation-1 policy由显式`--nonce-reservation-signer-descriptor PATH`和`--cleanup-verifier-descriptor PATH`建立candidate-side两份public descriptor，并从current witnessed trust读取purpose固定为`candidate_recovery_request_v1`的request-signer descriptor；published policy、challenge fence、sealed preparation、typed intent与其内嵌plan均逐字携带完整nonce/cleanup/request-signer descriptors；preparation另携带candidate receipt signer。后续policy draft使用`--previous-policy PATH`继承三份policy descriptor，任何重新传入或 byte drift 都在文件 stat/live probe 前拒绝。
-
-sequence-1 `contract_activation` 永久固定 epoch 1；当前有效 identity set 由完整 ledger 链折叠得出，后续每个 `domain_identity_rotation` 只把 epoch `N` 推进为 `N+1`。v1 plan 一次只替换 active profile 中一个 logical domain，未替换成员 canonical bytes逐字不变，target member 的 domain ID/stable physical digest 与 member epoch都必须改变且与现域、备份、日志、workspace和复制目标 pairwise distinct。`postgres_system` 的原物理快照恢复保留 system identifier，属于同域恢复；新的物理域必须 logical transplant。`postgres_sync ↔ s3_worm` 或一次替换多个 member稳定拒绝，不能伪装成普通 rotation。
-
-candidate admission 在 durable intent 前使用可离线认证的 `control-policy draft→current+candidate threshold sign→seal→publish/readback→challenge draft→current-threshold sign/seal→prepare→candidate attestation/preparation threshold sign/seal→plan` 流程。generation-1 prepare control-policy draft只读生成唯一 cryptographic mutation ID；其完整published wrapper在后续每个artifact中复用。current admin 的`domain candidate challenge draft`不再生成ID，而是从已witnessed prepare policy读取并原样采用该mutation ID，另生成32-byte nonce；在输出前，完整body及digest必须由窄CAS把root从`policy_prepared`推进到`challenge_started`并完成typed primary/full-witness 2+3 challenge-fence readback，ack-loss只可读回同一body；body绑定完整published policy、current identity set/epoch、mode/target/profile、current approval/domain-governance policy digests、primary/full-witness heads、copy/drain scope、witnessed active recovery transfer signer和15分钟expiry。离线`domain governance sign`对`candidate_control_policy|candidate_challenge|candidate_preparation|current_unreachable`四种闭合purpose生成`DomainGovernanceSignatureV1`；其中`candidate_control_policy`强制exact `--scope current|candidate`并分别计threshold，其余purpose拒绝scope参数。它 生成 `DomainGovernanceSignatureV1`；`domain attestation sign` 只对 `candidate_attestation` 生成 `DomainAttestationSignatureV1`，两类输出不能由一个未定义分支混用。`domain candidate challenge seal` 只接受满足 witnessed-current domain-governance threshold 的排序 signature set；candidate 用第四 env 中独立 pinned-current 0400 policy exact-match并验签，绝不信任 challenge 自带 policy或仅凭 0600 文件。`domain candidate prepare` 只能写 candidate staging/nonce，读取 governance 私钥数为 0，并输出同时含 signature-free `DomainAttestationBodyV1` 与 preparation body 的 draft；preparation body 绑定完整 challenge wrapper digest、candidate stable identity/possession、schema+ACL manifest、copy exclusion、import/cutover/cleanup principals、credential-bundle manifest、provision-revocation与 cleanup-handle digests和 candidate receipt signer。`domain candidate preparation seal` 把 attestation/preparation signature sets 都放在 body 外层，逐组排序去重并验证 candidate policy threshold，因此待签 body 不内嵌已签 wrapper且 DAG 无环。最终 `domain identity plan --challenge --candidate-preparation` 验证两个完整 wrapper、原样采用control-policy/challenge mutation ID并重新读取 current heads；intent/plan同时绑定二者完整 canonical wrappers、outer digests、transfer signer与candidate receipt signer。首次 durable intent 将完整 wrappers 逐字写入 typed intent primary/full witness；challenge/preparation不是 mutation approval，不能替代 current-scope plan authorization。任何ID/scope/expiry/policy/byte不同或replay journal冲突都拒绝；durable intent前的prepare/plan失败必须走challenge-state-aware的no-intent fence→2+3 abandon authorization→`domain candidate abandon`→candidate zero→purge/workspace-zero→内嵌完整signed receipts的2+3 abandon completion，`domain candidate cleanup`只用于post-intent final-proof teardown，不能用新plan套用旧possession。
-
-candidate-control root 的唯一状态边为 `policy_prepared → challenge_started → intent_bound → complete` 与 `policy_prepared|challenge_started → abandoning → abandoned`。`challenge_started` 允许表达 primary 2 已 durable、witness 3 或 ack 尚未完成的 publication cutpoint；在 exact primary 2 + witness 3 readback 与 ack 前，challenge 输出、intent bind 和 abandon reservation 全部禁止。只有 `policy_prepared` 或 fully acknowledged `challenge_started` 可进入 witnessed abandon，只有 `abandoned` 才允许用新 mutation/descriptors 重建 candidate。
-
-PostgreSQL prepare 只在 candidate 安装目标域的当前 schema/migration ledger、预创建 runtime/admin/import/cutover/cleanup roles 与 exact ACL，然后撤销 provision owner并把短期 credential bundle原子降权。S3 prepare 同时但分权验证两个预创建 surface：candidate target WORM bucket 只验证 distinct stable identity、versioning、Object Lock COMPLIANCE/default retention/legal hold 和 immutable target prefix；prepare nonce、credential bundle、staging 与 transfer scratch 只写另一 candidate-control bucket/namespace，后者必须无 Object Lock/default retention、可按 absolute TTL purge且与 current/target/backup/replica 不重叠。prepare/import/cutover/cleanup 均获得成对且 phase-specific 的 target+control arms，credential 或 prefix 复用失败。copy/catch-up/dual-write 使用两个 OS 隔离进程：current-side exporter只读 admin source并显式读取 `--recovery-signing-key PATH`，candidate-side importer只持 import-only credential；exporter 在输出任何字节前 exact-match witnessed transfer signer。二者只经受保护 pipe/socket或已登记、可 purge的加密 transfer workspace通信。frame协议是严格 `Start|ObjectStart|ObjectChunk|ObjectEnd|Checkpoint|End` union，共同 scope绑定 mutation/plan/authorization/intent/preparation digests、stream ID、phase=`copy|dual_write|cutover`、generation、sequence与previous wrapper digest。ObjectStart 固定 closed object kind、identity/body digest、总长与 chunk count；每个 ObjectChunk 固定同一 identity、从零连续的 index、exact offset、chunk digest与有界 bytes；ObjectEnd复述总长/count/body digest并只在完整重组、production decoder exhaustive-consume 后提交。每帧 ≤4 MiB；plan、bundle、inventory 的 object 上限分别为 24 MiB、20 MiB、8 MiB，均可跨多个 chunk，stream 仍受签名 policy 与硬上限双重约束；v1不压缩。closed object-kind 只承载具名治理 schema，`managed_postgresql_row_v1|managed_s3_object_v1` 明确未知；应用/recovery 数据分别由 logical snapshot+WAL/LSN 与 exact key/body adapters 复制并生成 typed inventory/checkpoint receipts，不能塞入 opaque canonical bytes。candidate在分配前检查 frame/object/stream/copy-policy 总量，持久化 `(mutation,phase,generation,sequence,digest)` insert-or-exact-match journal，拒绝gap、overlap、冲突duplicate、跨phase/mutation replay、截断、trailing bytes、chunk digest/offset/count或无End。stream End绑定总frames/objects/bytes、chain head与完整inventory后才可生成由preparation绑定candidate receipt key签名的 `candidate_import_applied`；current-side append/full-witness/readback 后才允许 cleanup 撤销 import credential并产生绑定 applied receipt hash 的 `candidate_import_revoked`。没有进程同时持current写权和candidate写权。
-
-`domain identity plan` 只读固定 mode=`planned_migration|disaster_recovery`、完整 challenge/preparation wrappers 与 digests、current/candidate set outer digest+相邻 epoch、唯一 target、current witnessed approval/domain-attestation policy、candidate possession与receipt signer、copy source inventory/policy、expected trust/ledger/full-witness heads、drain scope和 minimum fence。current/candidate `DomainIdentitySetBodyV1` 各只在内嵌 `DomainRotationIntentV1` 序列化一次；plan 顶层不再保存第二份 body。identity-set body包含domain-attestation policy digest；通常current/candidate相同，若一并轮换governance policy，则candidate digest改变且intent保存完整candidate policy与current+candidate threshold/新key possession proof。plan/intent不含plan digest、authorization digest、cutover bundle、最终trust/ledger hash或未来receipt。authorization只接受current-scope detached approval threshold，candidate domain possession与治理policy proofs是独立证明且不计入approval threshold。planned mode要求current-authoritative `dual_write_checkpoint`；disaster mode禁止伪造双写，要求 `domain identity unreachable draft` 从 surviving current/full-witness facts 生成 signature-free body、离线 governance threshold sign、`unreachable seal` 验证并输出唯一 wrapper，再由 `resume --unreachable-proof` append/full-witness/readback；quarantine与完整replay checkpoint都在 body 内，lost-domain adapter调用数为0。两者严格 XOR。
-
-apply 状态固定为 `intent → copy_pending → dual_write_pending|current_unreachable_pending → drain_pending → import_revoke_pending → trust_primary_unknown → trust_witness_pending → ledger_primary_unknown → ledger_witness_pending → candidate_cutover_pending → cutover_projection_pending → retirement_pending → final_proof_pending → candidate_teardown_pending → completion_pending → complete`。copy 从genesis分块复制ledger/trust、canonical plan/authorization/bundle/completion evidence、signed inventory/manifest与receipt；PostgreSQL比较逻辑canonical bytes并用snapshot+WAL/LSN catch-up，S3比较exact key/body/digest且candidate retention不得更短、legal hold必须开启。只有current authority可以产生planned-mode新append，candidate只能镜像相同bytes；candidate ahead、far tail、gap或单字节不同都暂停。receipt chain 的强制局部顺序是 `DrainContinuation* → CandidateImportApplied → CandidateImportRevoked → Cutover`：最终 import stream End 后先由 current append/full-witness/readback applied，revocation 再绑定 applied receipt hash并完成相同 readback；二者完成后才可构造 cutover bundle并追加 Cutover，final drain后不再允许import write。15 个 receipt kind 在 Go、primary SQL、PostgreSQL witness SQL 与 S3 decoder 使用同一闭合枚举，只有 `DrainContinuation` 可重复。
-
-`domain identity drain --mutation-id` 是 rotation final-drain 的唯一 producer。它从 full witness 重建 plan/authorization/intent，读取严格 LB、queue `SignedAdmissionSnapshotV1` 与 `SignedCopyReplaySnapshotV1` wrappers，输出有界 canonical receipt：mutation/plan/target/current+candidate set digest、deployment epoch/minimum fence、三份完整 wrapper canonical bytes/body+wrapper digests、exact signer policy bytes/digest、fresh LB/queue config、旧/新 target+connection+consumer+lease inventories与零计数、copy/replay/inventory heads和 observed/expires time；只保存三个 adapter signature digest 明确无效。receipt 生命周期是各 snapshot expiry 与 observed+15m 的最小值；过期或旧目标重现时只能用 `--continue-mutation` 为同 scope/config 追加新的三-wrapper `drain_continuation`，generation 递增并绑定上一份 drain/continuation hash，不能改 plan/candidate或复用旧 inventory。完整 receipt 进入 primary/full witness，因此本地 snapshot 清理后仍可验签。所有旧 receipt 永久保留，cutover 只绑定最新仍 live 的 proof。apply 再生成只包含实际 copy/dual-write-or-unreachable/final-drain receipt chain与 pre-entry rotation payload的 cutover bundle。
-
-cutover 也使用显式双端协议。current-side `domain transfer cutover export --recovery-signing-key PATH` 从 full witness 重建 mutation DAG，在输出前 exact-match witnessed transfer signer，并根据 mode×target 唯一派生 `app_projection_cas|ledger_append|witness_confirm|recovery_trust_append` payload；CLI不能选择 operation。command frame 绑定 plan/authorization/intent/cutover/preparation、candidate domain/set、expected before head、exact typed canonical payload/digest和 minimum fence，并由 witnessed transfer signer签名。current先为`cutover_apply`发布并2+3 readback一个signed recovery request，其required chain head必须是witnessed `Cutover` receipt，且该receipt的`PreCutoverReceiptChainHead`逐字绑定request内的`candidate_import_revoked`；candidate-side `domain transfer cutover apply`只持 mutation-scoped cutover arm，验证完整 frame chain后调用唯一 target-specific definer function/object policy；它返回 `applied|exact_match`、before/after head和result digest，由 preparation绑定的candidate receipt key签名。current-side `domain identity resume --receipt-fd FD` 验证并将 receipt append/full-witness 到同 mutation；candidate进程不能写 current recovery-control。planned APP projection proof恰含current runtime authoritative CAS与candidate exact mirror两臂；disaster APP恰含candidate一臂且old APP调用为0；非APP恰含current projector一臂。任一多余/缺失臂、admin伪造current runtime receipt或candidate选择不同bytes/head都失败。
-
-写入权威按 mode × target 固定，不能把丢失域假设为可写：
-
-| mode / target | rotation trust primary | rotation ledger primary | full-witness confirmation 与重建权威 |
-|---|---|---|---|
-| planned / application | current recovery-control | current ledger | current active witness；candidate app 只接收 data/replay |
-| planned / deletion-ledger | current recovery-control | current ledger，随后 byte-identical mirror 到 candidate ledger | current active witness；candidate ledger 在 cutover 前含新 entry 且无 far tail |
-| planned / deletion-witness | current recovery-control | current ledger | current 与 candidate witness 都从 genesis 确认完整链 |
-| planned / recovery-control | current recovery-control，随后 byte-identical mirror 到 candidate recovery | current ledger | current active witness |
-| disaster / application | current recovery-control | current ledger | current active witness；应用数据只从签名恢复源重建 |
-| disaster / deletion-ledger | current recovery-control | 从 surviving full witness 重建并锁定的 candidate ledger | current active witness确认 candidate 新 entry；旧 ledger 有 witnessed unreachable/quarantine proof |
-| disaster / deletion-witness | current recovery-control | current ledger | 从 current ledger、recovery-control governance artifacts与注册不可变恢复源重建的 candidate witness；旧 witness 不参与 confirm |
-| disaster / recovery-control | 从 surviving full witness 重建并锁定的 candidate recovery | current ledger | current active witness确认 candidate trust 与 ledger entry |
-
-任何 disaster 行缺少从 genesis 重建所需的 surviving full witness/primary/注册恢复源组合就停止；不得用单一可变 primary 自证完整。witnessed effective minimum 定义为从 genesis 连续折叠所有 `contract_activation|domain_identity_rotation` minimum 的单调最大值；`delete_commit|attempt_not_committed` 没有 minimum，不会把水位清零。plan固定 witnessed `(sequence, hash, effective minimum)`。primary append前服务必须完整验证该tuple，primary SQL只原子比较自身expected head与自身effective minimum；PostgreSQL witness confirm锁真实witness head并比较真实effective minimum，S3从连续immutable entry/receipt推导同值。planned双witness两侧都验证，disaster只按上表对surviving/rebuilt authority验证；concurrent higher fence、stale tuple或new minimum降低均拒绝。`domain_identity_rotation` entry按上表追加后由所有仍属权威的 witness逐字确认；projector随后CAS `deployment_contract_state.active_domain_identity_epoch/digest`并只按 witnessed domain ID+live stable digest启用candidate，不能按“primary URL”标签选择。
-
-retirement receipt证明旧域 write/EXECUTE/IAM撤销、零连接/writer、移出LB/queue和配置；retirement不是立即物理删除，旧介质可按依赖库存与保留合同只读审计。complete前必须依序证明candidate从genesis至rotation entry的最终全链、projection/replay/inventory追平、fresh candidate liveness、old-domain retirement与final proof都已进入新full witness并完整 read back；Final canonical body同时携带candidate-control policy-chain head和完整cleanup-verifier descriptor，随后进入`candidate_teardown_pending`。每种recovery request都由current从primary/full witness重建，使用generation-1 policy中固定的current request signer和显式strict-0400`--recovery-signing-key PATH`做purpose-bound签名，并以`(mutation,purpose,policy generation)`为immutable identity完成primary 2 + PostgreSQL/S3 witness 3 publication/readback后才写FD；自哈希receipt、未签名或未发布FD均不具授权力。current先输出full-witness-derived revoke-cutover request；candidate credential-revoke进程只撤销credential并以preparation-bound candidate receipt signer经FD返回`candidate_cutover_revoked`，不销毁signer、bundle或workspace。只有current-side ingest/full-witness/readback该receipt后，新的cleanup request才授权candidate cleanup销毁receipt key/bundle、transfer workspace、local/wrapped per-mutation DEK与nonce signer并清除candidate-control全部live object/version/delete marker/multipart。独立one-shot cleanup verifier只持read-control identity、外部strict-0400 Ed25519 key、live filesystem exclusion proof与inherited FD，在零状态形成后分别签`candidate_artifacts_purged`和`workspace_zero`；AEAD/wrapped-DEK/nonce销毁事实是不另签名的typed evidence，由purge wrapper覆盖。这两个wrapper从不写入被证明为空的candidate-control/workspace，phase signer不能签，Final后不能替换verifier signer。current-side `domain identity resume --receipt-fd`逐个验签、append、full-witness并read back后才进入`completion_pending`。completion receipt最后绑定最终receipt-chain head、candidate import-applied/import-revoked/cutover/cutover-revoke/purge/workspace-zero digests、identity-set primary/witness receipts、显式candidate-control policy-head generation/digest及其最终primary/witness publication receipt digests，通过 typed primary/full-witness functions持久化并readback整张DAG后才把state置为`complete`。旧域重新出现或仍可写时立即关闭admission。首次durable intent前只能用独立`abandon`终态：current以no-intent fence CAS并full-witness authorization，candidate按witnessed prepare policy清零，abandon completion的canonical body内嵌完整signed purge与workspace-zero wrappers及其digests，PostgreSQL primary/witness逐字复核nested bytes，S3 completion对象可独立重建；该completion完成2+3 readback后才能置abandoned；它不使用final-proof cleanup phase或第16种rotation receipt。intent后只能按同mutation exact retry，首个rotation trust/full-witness事实后不可回滚。若current full witness/注册恢复源缺任一genesis artifact、存在未解决workspace/mutation或无法形成一致cross-bound chain，灾难恢复没有override并保持fail closed。
+No release, staging, mixed-version, or old-database upgrade evidence is required.
