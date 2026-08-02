@@ -145,6 +145,53 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 			}},
 			want: "managed function has no hardening contract",
 		},
+		{
+			name: "invalid_function_identity",
+			fragments: []AppACLCurrentMigrationFragment{{
+				Migration: futureMigration,
+				Objects: []AppACLManagedObjectR1{{
+					ObjectClass:    AppACLObjectClassFunction,
+					SchemaName:     "public",
+					ObjectIdentity: "future_function((text)",
+				}},
+				Privileges: emptyPrivileges,
+				Functions: []AppACLCurrentFunctionContract{{
+					SchemaName: "public",
+					Identity:   "future_function((text)",
+					Kind:       "f",
+				}},
+			}},
+			want: "invalid function object",
+		},
+		{
+			name: "invalid_function_kind",
+			fragments: []AppACLCurrentMigrationFragment{{
+				Migration:  futureMigration,
+				Objects:    []AppACLManagedObjectR1{newFunction},
+				Privileges: emptyPrivileges,
+				Functions: []AppACLCurrentFunctionContract{{
+					SchemaName: "public",
+					Identity:   "future_function()",
+					Kind:       "p",
+				}},
+			}},
+			want: "unsupported kind",
+		},
+		{
+			name: "invalid_function_config",
+			fragments: []AppACLCurrentMigrationFragment{{
+				Migration:  futureMigration,
+				Objects:    []AppACLManagedObjectR1{newFunction},
+				Privileges: emptyPrivileges,
+				Functions: []AppACLCurrentFunctionContract{{
+					SchemaName: "public",
+					Identity:   "future_function()",
+					Kind:       "f",
+					Config:     []string{"search_path=pg_catalog\x00public"},
+				}},
+			}},
+			want: "invalid configuration",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fsys := appACLCurrentTestMigrationFS(t)

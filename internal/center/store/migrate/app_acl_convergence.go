@@ -520,9 +520,10 @@ func compileAppACLManagedPlacementInventory(
 	return inventory, nil
 }
 
-// rejectMisplacedAppACLManagedObjectInTx runs before phase classification in
-// every convergence mode. It admits a fixed managed name only in the schema
-// the frozen r1 managed surface assigns to it.
+// rejectMisplacedAppACLManagedObjectInTx admits a fixed managed name only in
+// the schema the frozen r1 managed surface assigns to it. Frozen R1 runs it
+// before phase classification; current convergence first classifies a
+// different source baseline so the rebuild-required cause cannot be masked.
 func rejectMisplacedAppACLManagedObjectInTx(ctx context.Context, tx pgx.Tx, databaseName string) error {
 	if tx == nil {
 		return fmt.Errorf("detect misplaced app ACL managed object has no PostgreSQL transaction")
@@ -1286,19 +1287,9 @@ func appACLConvergenceGrantTarget(privilege AppACLPrivilege) (string, error) {
 }
 
 func appACLConvergenceFunctionIdentity(schemaName string, identity string) (string, error) {
-	name, arguments, found := strings.Cut(identity, "(")
-	if !found || !validBareCatalogName(schemaName) || !validBareCatalogName(name) || !strings.HasSuffix(arguments, ")") {
+	name, arguments, valid := appACLCurrentFunctionIdentityParts(identity)
+	if !valid || !validBareCatalogName(schemaName) {
 		return "", fmt.Errorf("invalid managed APP function identity %q", identity)
-	}
-	arguments = strings.TrimSuffix(arguments, ")")
-	for _, character := range arguments {
-		if (character >= 'a' && character <= 'z') ||
-			(character >= 'A' && character <= 'Z') ||
-			(character >= '0' && character <= '9') ||
-			strings.ContainsRune("_ ,.[]", character) {
-			continue
-		}
-		return "", fmt.Errorf("invalid managed APP function identity arguments %q", arguments)
 	}
 	return pgx.Identifier{schemaName, name}.Sanitize() + "(" + arguments + ")", nil
 }

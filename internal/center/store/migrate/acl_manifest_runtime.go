@@ -141,6 +141,11 @@ func verifyAppACLCurrentManifestRuntimeSnapshot(
 	snapshot AppACLManifestRuntimeSnapshotV1,
 	source appACLCurrentSourceContract,
 ) (AppACLManifestPersistedV1, appACLEffectiveCatalogContract, error) {
+	if snapshot.Head == nil {
+		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, appACLDevelopmentDatabaseRebuildError(
+			"APP manifest head is null",
+		)
+	}
 	envelope, err := validateAppACLManifestRuntimeEnvelope(snapshot)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err

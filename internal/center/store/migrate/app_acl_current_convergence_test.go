@@ -69,6 +69,21 @@ func TestConvergeAppACLCurrentRegisteredFutureMigrationReachesBeginTx(t *testing
 	}
 }
 
+func TestConvergeAppACLCurrentRejectsNilTransaction(t *testing.T) {
+	_, err := convergeAppACLCurrentWithDependencies(
+		context.Background(),
+		func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return nil, nil },
+		"houfeng_center_runtime",
+		"houfeng_platform_admin",
+		appACLCurrentTestMigrationFS(t),
+		nil,
+		appACLCurrentConvergenceTestDependencies(),
+	)
+	if err == nil || !strings.Contains(err.Error(), "begin current app ACL convergence transaction returned nil transaction") {
+		t.Fatalf("nil transaction error = %v, want defensive rejection", err)
+	}
+}
+
 func TestConvergeAppACLCurrentDifferentBaselineRequiresRebuildBeforeMutation(t *testing.T) {
 	fsys, fragments := appACLCurrentConvergenceFutureSource(t)
 	priorSources, err := snapshotMigrationSources(migrations.FS)
@@ -96,6 +111,14 @@ func TestConvergeAppACLCurrentDifferentBaselineRequiresRebuildBeforeMutation(t *
 	}
 	dependencies.readManifests = func(context.Context, pgx.Tx) ([]AppACLManifestPersistedV1, error) {
 		return []AppACLManifestPersistedV1{priorGenesis}, nil
+	}
+	dependencies.rejectMisplaced = func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error {
+		t.Fatal("different baseline must be classified before managed-object placement preflight")
+		return nil
+	}
+	dependencies.rejectLegacy = func(context.Context, pgx.Tx, migrationSourceSnapshot, appACLEffectiveCatalogContract, string) error {
+		t.Fatal("different baseline must be classified before legacy-ledger preflight")
+		return nil
 	}
 	dependencies.rejectFresh = func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error {
 		t.Fatal("different baseline must not enter fresh preflight")
@@ -144,6 +167,96 @@ func TestConvergeAppACLCurrentDifferentBaselineRequiresRebuildBeforeMutation(t *
 	}
 }
 
+func TestCompareAppACLCurrentMigrationEntriesChecksumMismatchRequiresRebuild(t *testing.T) {
+	sources, err := snapshotMigrationSources(migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := ParseCanonicalMigrationSetBodyV1(sources.canonicalSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual[len(actual)-1].Checksum[0] ^= 0xff
+
+	err = compareAppACLCurrentMigrationEntries(sources.canonicalSet, actual, "applied migration ledger")
+	if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+		t.Fatalf("checksum mismatch error = %v, want rebuild-required sentinel", err)
+	}
+}
+
+func TestCompareAppACLCurrentMigrationEntriesFilenameMismatchRequiresRebuild(t *testing.T) {
+	sources, err := snapshotMigrationSources(migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := ParseCanonicalMigrationSetBodyV1(sources.canonicalSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual[len(actual)-1].Filename = "0051_different_baseline.sql"
+
+	err = compareAppACLCurrentMigrationEntries(sources.canonicalSet, actual, "persisted manifest")
+	if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+		t.Fatalf("filename mismatch error = %v, want rebuild-required sentinel", err)
+	}
+}
+
+func TestConvergeAppACLCurrentSuccessorManifestRequiresRebuildBeforeCatalogRead(t *testing.T) {
+	fsys := appACLCurrentTestMigrationFS(t)
+	sources, _, compiledPrivileges := appACLCurrentConvergenceExpected(t, fsys, nil)
+	genesis, err := NewAppACLManifestPersistedV1(1, "houfeng_migrator", [32]byte{}, sources.sources.canonicalSet, compiledPrivileges)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor, err := NewAppACLManifestPersistedV1(2, "houfeng_migrator", genesis.ManifestDigest, sources.sources.canonicalSet, compiledPrivileges)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, err := ParseCanonicalMigrationSetBodyV1(sources.sources.canonicalSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := &AppACLManifestHeadV1{ManifestRevision: 2, ManifestDigest: successor.ManifestDigest}
+	tx := &recordingAppACLCurrentConvergenceTx{fakeAppACLConvergenceTx: &fakeAppACLConvergenceTx{}}
+	dependencies := appACLCurrentConvergenceTestDependencies()
+	dependencies.readPhaseState = func(context.Context, pgx.Tx) (appACLConvergencePhaseState, error) {
+		return appACLConvergencePhaseState{LedgerExists: true, ManifestRevisionsExists: true, ManifestHeadExists: true}, nil
+	}
+	dependencies.readApplied = func(context.Context, pgx.Tx) ([]MigrationChecksumEntry, error) { return applied, nil }
+	dependencies.readHead = func(context.Context, pgx.Tx) (*AppACLManifestHeadV1, error) {
+		return cloneAppACLManifestHeadForTest(head), nil
+	}
+	dependencies.readManifests = func(context.Context, pgx.Tx) ([]AppACLManifestPersistedV1, error) {
+		return []AppACLManifestPersistedV1{genesis, successor}, nil
+	}
+	dependencies.rejectFresh = currentUnexpectedRejectFresh(t, "successor manifest")
+	dependencies.ensureLedger = currentUnexpectedEnsureLedger(t, "successor manifest")
+	dependencies.applyPending = currentUnexpectedApplyPending(t, "successor manifest")
+	dependencies.applyDCL = currentUnexpectedApplyDCL(t, "successor manifest")
+	dependencies.insertGenesis = currentUnexpectedInsertGenesis(t, "successor manifest")
+	dependencies.readHeadForUpdate = currentUnexpectedHeadForUpdate(t, "successor manifest")
+	dependencies.readCatalog = func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error) {
+		t.Fatal("successor manifest must fail before catalog read")
+		return AppACLEffectiveCatalogSnapshotR1{}, nil
+	}
+
+	_, err = convergeAppACLCurrentWithDependencies(
+		context.Background(),
+		func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
+		"houfeng_center_runtime",
+		"houfeng_platform_admin",
+		fsys,
+		nil,
+		dependencies,
+	)
+	if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+		t.Fatalf("successor manifest error = %v, want rebuild-required sentinel", err)
+	}
+	if !tx.rollbackCalled || tx.commitCalled {
+		t.Fatalf("successor manifest commit/rollback = %v/%v, want false/true", tx.commitCalled, tx.rollbackCalled)
+	}
+}
+
 func TestConvergeAppACLCurrentExactRepeatOmitsMutation(t *testing.T) {
 	fsys, fragments := appACLCurrentConvergenceFutureSource(t)
 	sources, _, compiledPrivileges := appACLCurrentConvergenceExpected(t, fsys, fragments)
@@ -174,6 +287,15 @@ func TestConvergeAppACLCurrentExactRepeatOmitsMutation(t *testing.T) {
 	dependencies.applyDCL = currentUnexpectedApplyDCL(t, "exact repeat")
 	dependencies.insertGenesis = currentUnexpectedInsertGenesis(t, "exact repeat")
 	dependencies.readHeadForUpdate = currentUnexpectedHeadForUpdate(t, "exact repeat")
+	preflightCalls := 0
+	dependencies.rejectMisplaced = func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error {
+		preflightCalls++
+		return nil
+	}
+	dependencies.rejectLegacy = func(context.Context, pgx.Tx, migrationSourceSnapshot, appACLEffectiveCatalogContract, string) error {
+		preflightCalls++
+		return nil
+	}
 	catalogReads := 0
 	dependencies.readCatalog = func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error) {
 		catalogReads++
@@ -193,8 +315,8 @@ func TestConvergeAppACLCurrentExactRepeatOmitsMutation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convergeAppACLCurrentWithDependencies() error = %v", err)
 	}
-	if result.ManifestDigest != genesis.ManifestDigest || !tx.commitCalled || options.IsoLevel != pgx.Serializable || catalogReads != 1 {
-		t.Fatalf("exact repeat result/commit/isolation/catalog reads = %x/%v/%v/%d", result.ManifestDigest, tx.commitCalled, options.IsoLevel, catalogReads)
+	if result.ManifestDigest != genesis.ManifestDigest || !tx.commitCalled || options.IsoLevel != pgx.Serializable || preflightCalls != 2 || catalogReads != 1 {
+		t.Fatalf("exact repeat result/commit/isolation/preflight/catalog reads = %x/%v/%v/%d/%d", result.ManifestDigest, tx.commitCalled, options.IsoLevel, preflightCalls, catalogReads)
 	}
 }
 

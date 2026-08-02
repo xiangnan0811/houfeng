@@ -157,6 +157,14 @@ func validateAppACLCurrentFragments(fragments []AppACLCurrentMigrationFragment) 
 			if err := validateAppACLManagedObject(object); err != nil {
 				return fmt.Errorf("current APP ACL fragment %q function hardening: %w", fragment.Migration, err)
 			}
+			if function.Kind != "f" {
+				return fmt.Errorf("current APP ACL fragment %q function %s.%s has unsupported kind %q", fragment.Migration, function.SchemaName, function.Identity, function.Kind)
+			}
+			for _, setting := range function.Config {
+				if strings.ContainsRune(setting, '\x00') {
+					return fmt.Errorf("current APP ACL fragment %q function %s.%s has invalid configuration", fragment.Migration, function.SchemaName, function.Identity)
+				}
+			}
 			if _, managed := newFunctions[object]; !managed {
 				return fmt.Errorf("current APP ACL fragment %q function hardening references unmanaged function %#v", fragment.Migration, object)
 			}
@@ -199,8 +207,26 @@ func validateAppACLManagedObject(object AppACLManagedObjectR1) error {
 }
 
 func validAppACLCurrentFunctionIdentity(identity string) bool {
+	_, _, valid := appACLCurrentFunctionIdentityParts(identity)
+	return valid
+}
+
+func appACLCurrentFunctionIdentityParts(identity string) (name string, arguments string, valid bool) {
 	name, arguments, found := strings.Cut(identity, "(")
-	return found && validBareCatalogName(name) && strings.HasSuffix(arguments, ")") && !strings.ContainsRune(arguments, '\x00')
+	if !found || !validBareCatalogName(name) || !strings.HasSuffix(arguments, ")") {
+		return "", "", false
+	}
+	arguments = strings.TrimSuffix(arguments, ")")
+	for _, character := range arguments {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			strings.ContainsRune("_ ,.[]", character) {
+			continue
+		}
+		return "", "", false
+	}
+	return name, arguments, true
 }
 
 func appACLCurrentManagedObjectFromPrivilege(privilege AppACLPrivilege) (AppACLManagedObjectR1, error) {

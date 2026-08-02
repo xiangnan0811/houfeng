@@ -114,6 +114,36 @@ func TestAdmitAppACLCurrentRuntimeSourceMismatchRequiresRebuildBeforeCatalogRead
 	}
 }
 
+func TestAdmitAppACLCurrentRuntimeNullHeadRequiresRebuildBeforeCatalogRead(t *testing.T) {
+	futureFS, fragments := appACLCurrentConvergenceFutureSource(t)
+	manifestSnapshot, _, _ := appACLCurrentRuntimeAdmissionFixture(t, futureFS, fragments)
+	manifestSnapshot.Head = nil
+	tx := &fakeAppACLRuntimeAdmissionTx{}
+
+	err := admitAppACLCurrentRuntimeWithDependencies(
+		context.Background(),
+		futureFS,
+		fragments,
+		appACLCurrentRuntimeAdmissionDependencies{
+			beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
+			readManifest: func(context.Context, pgx.Tx) (AppACLManifestRuntimeSnapshotV1, error) {
+				return manifestSnapshot, nil
+			},
+			readCatalog: func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error) {
+				t.Fatal("null historical head must fail before catalog read")
+				return AppACLEffectiveCatalogSnapshotR1{}, nil
+			},
+			verifyCatalog: verifyAppACLEffectiveCatalogSnapshot,
+		},
+	)
+	if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+		t.Fatalf("current null-head error = %v, want rebuild-required sentinel", err)
+	}
+	if tx.commitCalls != 0 || tx.rollbackCalls != 1 {
+		t.Fatalf("null-head lifecycle = commit %d rollback %d, want 0/1", tx.commitCalls, tx.rollbackCalls)
+	}
+}
+
 func TestAdmitAppACLCurrentRuntimeRejectsSetRoleBeforeCatalogRead(t *testing.T) {
 	futureFS, fragments := appACLCurrentConvergenceFutureSource(t)
 	manifestSnapshot, _, _ := appACLCurrentRuntimeAdmissionFixture(t, futureFS, fragments)

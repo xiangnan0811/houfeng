@@ -107,6 +107,9 @@ func convergeAppACLCurrentWithDependencies(
 		if err != nil {
 			return fmt.Errorf("begin current app ACL convergence transaction: %w", err)
 		}
+		if tx == nil {
+			return fmt.Errorf("begin current app ACL convergence transaction returned nil transaction")
+		}
 		defer func() {
 			_ = tx.Rollback(ctx)
 		}()
@@ -172,12 +175,6 @@ func convergeAppACLCurrentInTx(
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("build current app ACL catalog verifier input: %w", err)
 	}
-	if err := dependencies.rejectMisplaced(ctx, tx, contract); err != nil {
-		return AppACLManifestPersistedV1{}, err
-	}
-	if err := dependencies.rejectLegacy(ctx, tx, source.sources, contract, roles.Migrator); err != nil {
-		return AppACLManifestPersistedV1{}, err
-	}
 	phase, err := dependencies.readPhaseState(ctx, tx)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, err
@@ -187,6 +184,12 @@ func convergeAppACLCurrentInTx(
 	exactCandidate := phase.LedgerExists && phase.ManifestRevisionsExists && phase.ManifestHeadExists
 	switch {
 	case fresh:
+		if err := dependencies.rejectMisplaced(ctx, tx, contract); err != nil {
+			return AppACLManifestPersistedV1{}, err
+		}
+		if err := dependencies.rejectLegacy(ctx, tx, source.sources, contract, roles.Migrator); err != nil {
+			return AppACLManifestPersistedV1{}, err
+		}
 		if err := dependencies.rejectFresh(ctx, tx, contract); err != nil {
 			return AppACLManifestPersistedV1{}, err
 		}
@@ -232,7 +235,7 @@ func verifyExactAppACLCurrentInTx(
 		return AppACLManifestPersistedV1{}, fmt.Errorf("validate current app ACL manifest chain: %w", err)
 	}
 	if len(manifests) != 1 || head.ManifestRevision != 1 {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("current app ACL manifest chain is already advanced")
+		return AppACLManifestPersistedV1{}, appACLDevelopmentDatabaseRebuildError("APP manifest chain is already advanced")
 	}
 	manifestEntries, err := ParseCanonicalMigrationSetBodyV1(manifests[0].CanonicalMigrationSet)
 	if err != nil {
@@ -253,6 +256,12 @@ func verifyExactAppACLCurrentInTx(
 	}
 	if existing == nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("current app ACL exact state has no genesis manifest")
+	}
+	if err := dependencies.rejectMisplaced(ctx, tx, verifierInput.Contract); err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	if err := dependencies.rejectLegacy(ctx, tx, source.sources, verifierInput.Contract, migratorRole); err != nil {
+		return AppACLManifestPersistedV1{}, err
 	}
 	if err := verifyAppACLCurrentConvergenceCatalog(ctx, tx, verifierInput, dependencies); err != nil {
 		return AppACLManifestPersistedV1{}, err
@@ -354,7 +363,7 @@ func compareAppACLCurrentMigrationEntries(
 			return appACLDevelopmentDatabaseRebuildError("%s migration %d is %q, current build requires %q", observedState, index+1, actual[index].Filename, expected[index].Filename)
 		}
 		if actual[index].Checksum != expected[index].Checksum {
-			return fmt.Errorf("%s checksum mismatch for %q", observedState, expected[index].Filename)
+			return appACLDevelopmentDatabaseRebuildError("%s checksum mismatch for %q", observedState, expected[index].Filename)
 		}
 	}
 	return nil
