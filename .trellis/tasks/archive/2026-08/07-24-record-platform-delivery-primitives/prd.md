@@ -26,14 +26,14 @@
 
 ## Acceptance Criteria
 
-- [ ] token/fingerprint golden 与 negative corpus 覆盖 exact token grammar、CSPRNG path、canonical decode/re-encode、domain separation、wrong deployment/project、trailing byte、非 canonical transport、错误长度和 raw-token 零持久化/零日志；同 logical request 的 canonical fingerprint 稳定，字段/长度/版本漂移拒绝。
-- [ ] same-key/same-fingerprint completed replay 返回原 result fingerprint；same-key/different-fingerprint 不改变原 row 并返回 conflict；过期 owner takeover generation 严格增加，所有旧 owner finalization/renew/release 的 affected rows 为 0。
-- [ ] 同一 store transaction 中业务 callback、idempotency claim 与 outbox enqueue 全部成功或全部 rollback；repository interface 没有 network sender 参数。
-- [ ] outbox live claim、expired takeover、fresh authorization deny cancel、sender error retry、sender success sent 与 old-owner fenced finalization 都通过；每次 send/retry 都重新授权，worker 不把网络调用包进 pgx transaction。
-- [ ] guard 和三个 lease table 的 acquire/renew/release 使用 DB-time owner triple predicate；相同 key 的并发 claimant 至多一个获胜，expired takeover 可获胜，续租丢失前停止工作；多键锁定以固定排序避免逆序。
-- [ ] reservation fence 在 existing epoch 上原子地增量、绑定 `fence_epoch`、拒绝 live object lease 并使旧 serving permit 失效；缺 epoch、live deletion fence、client lease 单独授权 object serving、final deletion state/ledger transition 均 fail closed 或不在本切片发生。
-- [ ] 所有 claim/finalize 在 caller transaction 内调用 injected `AdmissionGate`；没有 live gate 时为 0 claim / 0 send，但本切片没有 `deployment_membership` writer/heartbeat/readiness 实现。
-- [ ] focused unit/store/real PostgreSQL selectors、`go test -race ... -count=10`、`make verify-go`、`gofmt` 和 `git diff --check` 均有可复核 PASS 证据。
+- [x] token/fingerprint golden 与 negative corpus 覆盖 exact token grammar、CSPRNG path、canonical decode/re-encode、domain separation、wrong deployment/project、trailing byte、非 canonical transport、错误长度和 raw-token 零持久化/零日志；同 logical request 的 canonical fingerprint 稳定，字段/长度/版本漂移拒绝。
+- [x] same-key/same-fingerprint completed replay 返回原 result fingerprint；same-key/different-fingerprint 不改变原 row 并返回 conflict；过期 owner takeover generation 严格增加，所有旧 owner finalization/renew/release 的 affected rows 为 0。
+- [x] 同一 store transaction 中业务 callback、idempotency claim 与 outbox enqueue 全部成功或全部 rollback；repository interface 没有 network sender 参数。
+- [x] outbox live claim、expired takeover、fresh authorization deny cancel、sender error retry、sender success sent 与 old-owner fenced finalization 都通过；每次 send/retry 都重新授权，worker 不把网络调用包进 pgx transaction。
+- [x] guard 和三个 lease table 的 acquire/renew/release 使用 DB-time owner triple predicate；相同 key 的并发 claimant 至多一个获胜，expired takeover 可获胜，续租丢失前停止工作；多键锁定以固定排序避免逆序。
+- [x] reservation fence 在 existing epoch 上原子地增量、绑定 `fence_epoch`、拒绝 live object lease 并使旧 serving permit 失效；缺 epoch、live deletion fence、client lease 单独授权 object serving、final deletion state/ledger transition 均 fail closed 或不在本切片发生。
+- [x] 所有 claim/finalize 在 caller transaction 内调用 injected `AdmissionGate`；没有 live gate 时为 0 claim / 0 send，但本切片没有 `deployment_membership` writer/heartbeat/readiness 实现。
+- [x] focused unit/store/real PostgreSQL selectors、`go test -race ... -count=10`、`make verify-go`、`gofmt` 和 `git diff --check` 均有可复核 PASS 证据。
 
 ## Out of scope
 
