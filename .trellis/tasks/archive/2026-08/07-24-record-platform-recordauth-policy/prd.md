@@ -25,13 +25,13 @@
 
 ## Acceptance Criteria
 
-- [ ] `recordauth` table-driven tests 覆盖 project admin、viewer role、viewer group allow、角色/组/来源交集拒绝、cross-project 拒绝、未知 capability/kind/version/visibility、restricted deny-all、live widening、缺失/篡改 tombstone floor 或 `LastLiveScope`、`capture=project → last live=restricted → final floor=project` reopening 拒绝，以及 canonical digest 漂移。
-- [ ] 规范化在不接受宽松字符串的前提下稳定排序和去重 group/role 输入；同一 logical scope 得到相同 canonical bytes/hash，project 与 empty restricted scope 不可混淆。
-- [ ] scope repository 的 SQL 只返回 stable group IDs，带 project/user 参数；查询错误、scan 错误和非法 DB 值均 fail closed。
-- [ ] 成功 session 请求的 handler 能观察到 `{UserID, RoleProjectAdmin, ProjectIDDefault, sorted group IDs}`；`X-Project-ID`、`X-Role`、`X-Group-ID` 对该值没有影响。
-- [ ] scope repository 不可用时 middleware 返回安全 503；缺失/失效 session 仍返回既有 401；不出现空 actor 或 client-controlled fallback。
-- [ ] 现有非 records HTTP handlers 仍能通过 `UserIDFromContext` 工作；bootstrap 使用 production repository，且不存在 nil/optional production fallback。
-- [ ] focused tests、全包相关测试、`gofmt` 与 `git diff --check` 有可复核 PASS 证据，并经 spec-compliance 与 code-quality 两阶段审查。
+- [x] `recordauth` table-driven tests 覆盖 project admin、viewer role、viewer group allow、角色/组/来源交集拒绝、cross-project 拒绝、未知 capability/kind/version/visibility、restricted deny-all、live widening、缺失/篡改 tombstone floor 或 `LastLiveScope`、`capture=project → last live=restricted → final floor=project` reopening 拒绝，以及 canonical digest 漂移。
+- [x] 规范化在不接受宽松字符串的前提下稳定排序和去重 group/role 输入；同一 logical scope 得到相同 canonical bytes/hash，project 与 empty restricted scope 不可混淆。
+- [x] scope repository 的 SQL 只返回 stable group IDs，带 project/user 参数；查询错误、scan 错误和非法 DB 值均 fail closed。
+- [x] 成功 session 请求的 handler 能观察到 `{UserID, RoleProjectAdmin, ProjectIDDefault, sorted group IDs}`；`X-Project-ID`、`X-Role`、`X-Group-ID` 对该值没有影响。
+- [x] scope repository 不可用时 middleware 返回安全 503；缺失/失效 session 仍返回既有 401；不出现空 actor 或 client-controlled fallback。
+- [x] 现有非 records HTTP handlers 仍能通过 `UserIDFromContext` 工作；bootstrap 使用 production repository，且不存在 nil/optional production fallback。
+- [x] focused tests、全包相关测试、`gofmt` 与 `git diff --check` 有可复核 PASS 证据，并经 spec-compliance 与 code-quality 两阶段审查。
 
 ## Out of scope
 
