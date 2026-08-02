@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.61.0](https://github.com/xiangnan0811/houfeng/compare/v0.60.1...v0.61.0) (2026-08-02)
+
+
+### Features
+
+* admit current app runtime contract ([12ceaa0](https://github.com/xiangnan0811/houfeng/commit/12ceaa01d4a90d8e71c614ed1d6d1f340f6830fa))
+* converge current app ACL contract ([2cbeb1b](https://github.com/xiangnan0811/houfeng/commit/2cbeb1bbc28faa97b07320086304a0e5ac8f4826))
+* converge current app migration baseline ([f2fec02](https://github.com/xiangnan0811/houfeng/commit/f2fec02ea73e30c9036f4142034ebd3b9b5fbb48))
+* route app startup through current acl ([0bf7c83](https://github.com/xiangnan0811/houfeng/commit/0bf7c83b34eecf6f8b162c3f65f3aebf92a3dddb))
+
+
+### Bug Fixes
+
+* harden current app acl review boundaries ([109bc13](https://github.com/xiangnan0811/houfeng/commit/109bc137f28b46c53c08fe7a45d4ae4660c7f35b))
+* harden current app acl state classification ([2e6a45a](https://github.com/xiangnan0811/houfeng/commit/2e6a45a2a6f6530e19a221ab0f95afa79b63bf0a))
+
+
+### Documentation
+
+* **trellis:** rebaseline VPS records program ([d38a8ca](https://github.com/xiangnan0811/houfeng/commit/d38a8cad382667822059188e46afc31f096f8916))
+* **trellis:** rebaseline VPS records program ([166b5c0](https://github.com/xiangnan0811/houfeng/commit/166b5c03c9ec62530c800562f185ec9d08e4870f))
+* **trellis:** record current app acl closeout evidence ([4798ad4](https://github.com/xiangnan0811/houfeng/commit/4798ad42edd6f445b5e8d050a3699961594414b5))
+
+
+### CI
+
+* verify current app acl on pg16 ([7858b30](https://github.com/xiangnan0811/houfeng/commit/7858b30c1b4a48eac3d926caababc153790982d0))
+
 ## [0.60.1](https://github.com/xiangnan0811/houfeng/compare/v0.60.0...v0.60.1) (2026-08-02)
 
 
