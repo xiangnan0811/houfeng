@@ -280,3 +280,51 @@ Implemented and comprehensively reviewed the global command audit center, reran 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 242: Close out published Foundation child tasks
+
+**Date**: 2026-08-02
+**Task**: Close out published Foundation child tasks
+**Branch**: `codex/vps-foundation-historical-child-closeout`
+
+### Summary
+
+Archived the APP runtime handoff, recordauth policy, and delivery primitives without completing Foundation or admitting Child 2-11.
+
+### Main Changes
+
+Archived the three already-published Foundation child tasks after independent closeout review.
+
+Evidence:
+- PR 384 and PR 386 delivered the APP runtime handoff and recordauth policy with all required checks.
+- PR 390 fixed and re-reviewed the delivery guard nil-renewal latch.
+- Releases v0.60.0 and v0.60.1, post-merge main CI, publish run 30732758601, and multi-architecture images passed.
+- Foundation remains in_progress; PF-AC-001 through PF-AC-019 remain unchecked; Child 2-11 remain frozen.
+
+Verification:
+- task.py validation passed before archive.
+- git diff --check passed.
+- make verify-go passed on origin/main plus the task-only archive commits.
+- Independent closeout audit returned READY_TO_ARCHIVE with no findings.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `80b563eef6adfe25f569339782411447ab710fe1` | (see git log) |
+| `383763f14a23a0c2bd448b79e9a57d226ab8eab7` | (see git log) |
+| `112356a53cc1bc2df73e66c0a9ee9ba0a7b46c9e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
