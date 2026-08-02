@@ -73,15 +73,15 @@ started again:
 - [x] Update only executable specs established by the resulting implementation.
 - [x] Confirm the slice does not touch Records Core, introduce a root `0052`, or
   require a successor database state; stop for review if any boundary changes.
-- [ ] After protected-main merge and CI, archive Child 1 and update the parent
+- [x] After protected-main merge and CI, archive Child 1 and update the parent
   progress table. Do not start Child 2 in the same unchecked continuation.
 
 ## Local execution record
 
-The implementation is on
+The implementation was delivered from
 `codex/vps-records-platform-current-app-acl`, based on
-`origin/main@d38a8cad`, in the dedicated selected worktree. Eight local code
-commits currently implement the slice:
+`origin/main@d38a8cad`, in the dedicated selected worktree. Ten selected code
+and CI commits implement the slice:
 
 ```text
 cfc5cd69 refactor: compile current app migration fragments
@@ -92,6 +92,8 @@ f2fec02e feat: converge current app migration baseline
 eccb22d6 test: prove current app acl on postgres
 0bf7c83b feat: route app startup through current acl
 2e6a45a2 fix: harden current app acl state classification
+109bc137 fix: harden current app acl review boundaries
+7858b30c ci: verify current app acl on pg16
 ```
 
 The final local verification used workspace-backed `TMPDIR`/`GOTMPDIR` and
@@ -102,10 +104,14 @@ root migration set still ends at `0051`, the frozen R1/R2 exports remain, all
 Records-enabled product defaults route through current entry points, and the
 four archived descendants exist on `origin/main`.
 
-This is a local review checkpoint, not task completion. The branch is not
-pushed, no PR or remote CI exists, protected main does not contain these
-commits, Child 1 is not archived, the parent remains `0/11`, and Child 2 has not
-started.
+PR #394 required CI run `30750684376` passed all seven jobs. The final
+independent review of `7858b30c` reported Critical/Important/Minor = `0/0/0`.
+PR #394 merged as `2cbeb1bb`, and protected-main CI run `30751460764` passed all
+seven jobs. Child 1 is therefore archived by this closeout and the parent moves
+to `1/11`; Child 2 has not started. Separately, repository delivery governance
+completed through release PR #393, GitHub Release `v0.61.0`, release main CI
+run `30751815869`, and successful multi-architecture image run `30751821903`.
+Release publication is recorded evidence, not a Child 1 acceptance gate.
 
 ## Required commands
 
@@ -127,9 +133,8 @@ database environment. A skipped PostgreSQL suite is not passing evidence.
 - No old-database upgrader or null-head adoption in the current path.
 - No Records Core migration, API, domain, or UI.
 - No edits to the dirty primary checkout or stale worktrees.
-- The rebaseline implementation approval has been consumed. Stop at this local
-  review checkpoint before push/PR; do not infer approval to merge, archive, or
-  start Child 2.
+- Child 1 delivery approval has been consumed. This closeout does not authorize
+  starting Child 2.
 
 ## Rollback
 

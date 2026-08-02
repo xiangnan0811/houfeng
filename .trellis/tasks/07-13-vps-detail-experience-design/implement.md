@@ -22,9 +22,8 @@ storage, Vitest, Playwright, and Trellis child-task workflow.
 
 - Read `research/development-rebaseline-2026-08-02.md` before any child work.
 - Parent status remains `planning`; it is not an implementation target.
-- Current program completion is `0/11` children closed.
-- Child 1 is `in_progress` because earlier implementation is on main; it has one
-  bounded closeout slice left.
+- Current program completion is `1/11` children closed.
+- Child 1 is complete and archived after PR #394 plus protected-main CI.
 - Children 2-11 remain `planning` and require individual plan review before
   `task.py start`.
 - The old 121-item matrix is historical risk coverage, not a current
@@ -78,14 +77,18 @@ Every migration-owning child must add a current APP ACL fragment and prove:
 
 ### Slice 1: Close Child 1
 
-- Execute the plan in
+- [x] Execute the plan in
   `../07-14-vps-records-platform-foundation/research/current-app-migration-baseline-plan.md`.
-- Do not add Records Core schema or UI.
-- Run focused migration/admission/CLI/bootstrap tests, PostgreSQL integration,
+- [x] Do not add Records Core schema or UI.
+- [x] Run focused migration/admission/CLI/bootstrap tests, PostgreSQL integration,
   full Go verification, and `trellis-check`.
-- Audit Child 1 acceptance against behavior already on main plus this slice.
-- Update specs only for contracts that the resulting code actually establishes.
-- Merge and archive Child 1 before starting Child 2.
+- [x] Audit Child 1 acceptance against behavior already on main plus this slice.
+- [x] Update specs only for contracts that the resulting code actually establishes.
+- [x] Merge and archive Child 1 before starting Child 2.
+
+Completion evidence: PR #394 merged as `2cbeb1bb`; required PR CI run
+`30750684376`, final independent review, and protected-main CI run `30751460764`
+all passed. Parent progress is now `1/11`; Child 2 remains planning.
 
 ### Child 2: Records core
 

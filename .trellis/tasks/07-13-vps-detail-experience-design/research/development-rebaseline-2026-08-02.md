@@ -8,8 +8,9 @@ upgrade compatibility, mixed-version deployment, staging cutover, release
 receipts, and APP ACL successor work. The approved product design remains the
 target except where this document narrows the current development scope.
 
-This is a planning snapshot, not implementation approval. Task statuses stay
-unchanged until the relevant child plan is reviewed and explicitly started.
+This began as a planning snapshot, not implementation approval. Child 1 was
+subsequently reviewed, explicitly approved, delivered through protected main,
+and archived. Children 2-11 still require their own reviewed start gates.
 
 ## Confirmed product context
 
@@ -106,14 +107,14 @@ or cross-domain disaster-recovery governance.
 
 ## Honest progress snapshot
 
-The parent remains `0/11` complete. Child 1 is materially implemented but not
-closed; Children 2-11 have planning artifacts but no accepted product
-implementation. Therefore the user-facing VPS detail/Records experience is
-still largely unimplemented even though the foundation is substantial.
+The parent is `1/11` complete. Child 1 is accepted, merged, and archived;
+Children 2-11 have planning artifacts but no accepted product implementation.
+Therefore the user-facing VPS detail/Records experience is still largely
+unimplemented even though its platform foundation is closed.
 
 | Child | Current evidence | Remaining exit gate |
 |---|---|---|
-| 1. Platform foundation | Four merged/archived children, `0051`, ACL/auth/delivery primitives | Current-development migration/admission slice, focused verification, audit, close |
+| 1. Platform foundation | `0051`, ACL/auth/delivery primitives, current migration/admission contract, PR #394 and main CI | Closed and archived; no remaining Child 1 exit gate |
 | 2. Records core | Planning only | Records, revisions, drafts, lifecycle, API, core deletion adapter |
 | 3. Attachments | Planning only | `0053`, local/S3 blob, scan/quota/download, adapters |
 | 4. Evidence | Planning only | `0054`, registry, initial source adapters, capture and rendering |
@@ -219,20 +220,15 @@ its objects.
 - Do not change task status, commit, push, or open a PR merely because this
   rebaseline is written. Planning review comes first.
 
-## Immediate next slice
+## Completed slice: Child 1
 
-Child 1 has one bounded closeout slice:
+Child 1 delivered the seven items in the original bounded slice through PR #394
+and protected-main merge `2cbeb1bb`. Required PR CI, final independent review,
+and post-merge main CI passed. The child is archived without adding Records Core
+schema or UI.
 
-1. Keep frozen APP R1/R2 entry points and tests as historical contracts.
-2. Add a current-development APP migration/ACL contract that consumes the
-   exact embedded migration set and explicit per-migration ACL fragments.
-3. Make `houfeng-record-platform-admin migrate --scope app` converge a fresh
-   database to that current contract and repeat safely on the exact same build.
-4. Make Records-enabled center startup admit that same current contract.
-5. Reject older or otherwise different development databases before mutation
-   with an actionable rebuild-required error; do not build a successor.
-6. Prove an injected future migration is rejected without its ACL fragment and
-   accepted when the fragment is registered.
-7. Verify the focused and full Go gates, then audit and close Child 1.
+## Next planning checkpoint
 
-No Records Core schema or user-facing feature is part of that slice.
+Child 2 Records Core is next in the reviewed dependency order, but it remains
+`planning`. Reconcile its plan with `main@b7d9bc0c`, review the bounded scope,
+and obtain a separate start approval before changing status or implementation.

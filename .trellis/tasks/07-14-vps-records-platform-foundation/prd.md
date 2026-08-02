@@ -7,21 +7,24 @@ for the current early-development migration set, while preserving the
 authorization, idempotency, delivery, deletion, and recovery primitives already
 merged on main.
 
-## 2026-08-02 status
+## 2026-08-02 completion status
 
-This child remains `in_progress`. Four bounded descendants are archived and
-merged:
+All Child 1 acceptance is present on protected main. Four bounded descendants
+were previously archived and merged:
 
 - `07-24-app-acl-migration-runtime-handoff`;
 - `07-24-record-platform-recordauth-policy`;
 - `07-24-record-platform-delivery-primitives`;
 - `07-27-app-acl-r2-privileged-transition`.
 
-The bounded current-development migration/admission slice is implemented and
-locally verified on `codex/vps-records-platform-current-app-acl`. It has not been
-pushed, opened as a PR, run through remote CI, merged to protected main, or
-archived. The previous APP V3 owner-transfer, approval, drain, rotation, and
-advanced disaster-recovery expansion is removed from this child.
+The bounded current-development migration/admission slice was delivered from
+`codex/vps-records-platform-current-app-acl` through PR #394. Final head
+`7858b30c` passed required CI and an independent post-fix review with no
+Critical, Important, or Minor findings. PR #394 merged to protected main as
+`2cbeb1bb`; main CI run `30751460764` then passed all seven jobs. This closeout
+archives the child and credits the parent as `1/11`. The previous APP V3
+owner-transfer, approval, drain, rotation, and advanced disaster-recovery
+expansion remains outside this child.
 
 ## Confirmed delivered baseline
 
@@ -34,14 +37,14 @@ advanced disaster-recovery expansion is removed from this child.
 - isolated APP ACL R2 transition code and tests;
 - archived descendant acceptance present on protected main.
 
-Delivered code is still subject to the final child audit. This list does not
-mean the child is complete.
+The final child audit confirmed this delivered baseline and the current APP
+contract below without adding Records Core functionality.
 
-## 2026-08-02 local closeout evidence
+## 2026-08-02 delivery evidence
 
 The selected worktree is
 `/home/murray/code/houfeng/.worktree/vps-records-platform-current-app-acl`, based
-on `origin/main@d38a8cad`. The local implementation commits are:
+on `origin/main@d38a8cad`. The selected implementation and CI commits are:
 
 - `cfc5cd69` compile current migration fragments;
 - `d023d651` share the APP ACL catalog contract;
@@ -50,7 +53,10 @@ on `origin/main@d38a8cad`. The local implementation commits are:
 - `12ceaa01` add current runtime admission;
 - `eccb22d6` add real PostgreSQL evidence;
 - `0bf7c83b` route product callers through current entry points;
-- `2e6a45a2` harden state classification and fragment/transaction preflight.
+- `2e6a45a2` harden state classification and fragment/transaction preflight;
+- `109bc137` close the independent review findings and tuple-aware current
+  inventory boundary;
+- `7858b30c` enforce both R2 and Current PostgreSQL anchors in CI.
 
 Fresh local evidence after the review fixes:
 
@@ -64,6 +70,18 @@ Fresh local evidence after the review fixes:
   `0051_create_record_platform_foundation.sql`;
 - all four archived descendants and their completed task metadata are present
   on `origin/main`.
+- PR #394 required CI run `30750684376` passed all seven jobs, including strict
+  R2 and Current anchors on PostgreSQL `16.0`, `16.6`, and `16.12`;
+- the independent final review of `7858b30c` reported no remaining findings;
+- protected-main CI run `30751460764` passed all seven jobs after merge commit
+  `2cbeb1bb`.
+- repository delivery governance also completed without becoming a Child 1
+  acceptance gate: release PR #393 merged as `b7d9bc0c`, release main CI run
+  `30751815869` passed, GitHub Release `v0.61.0` was published, and
+  `publish-images` run `30751821903` published `v0.61.0`, `0.61.0`, and
+  `latest` as OCI index
+  `sha256:64232681e235676b58b81ca0adf6752b225d72d59a23f1627b9d89e1bf2190c7`
+  with Linux amd64 and arm64 images.
 
 | Local acceptance area | Code and test evidence |
 | --- | --- |
@@ -74,9 +92,9 @@ Fresh local evidence after the review fixes:
 | One-snapshot runtime admission | `app_acl_current_runtime_admission.go` and its tests |
 | Product routing and safe error chain | admin, center, and importer `main`/`bootstrap` tests |
 
-Checkboxes below record local branch evidence only. Child 1 is not complete
-until the selected commits pass PR review/CI and are integrated into protected
-main; the parent therefore remains `0/11`, and Child 2 has not started.
+The checkboxes below now map the accepted behavior to protected-main evidence.
+Archiving this child changes the parent to `1/11`; Child 2 remains planning and
+has not started.
 
 ## Requirements
 
@@ -130,7 +148,7 @@ main; the parent therefore remains `0/11`, and Child 2 has not started.
   the path for Records migrations.
 - [x] Focused unit tests, APP PostgreSQL integration, CLI/bootstrap tests, full
   Go verification, `git diff --check`, and `trellis-check` pass.
-- [ ] The final audit maps all surviving Child 1 acceptance to code/tests on
+- [x] The final audit maps all surviving Child 1 acceptance to code/tests on
   protected main, removes stale APP V3 requirements from active planning, and
   closes this child without adding Records Core functionality.
 
@@ -146,7 +164,7 @@ main; the parent therefore remains `0/11`, and Child 2 has not started.
 
 ## Execution Gate
 
-The 2026-08-02 rebaseline and detailed closeout plan were reviewed and execution
-was explicitly approved. The bounded slice has reached its local review
-checkpoint. Do not push, open a PR, merge/archive Child 1, or continue into
-Child 2 until this checkpoint is reviewed.
+The approved Child 1 execution and delivery gate has been consumed: PR #394 is
+merged and protected-main CI is green. This closeout authorizes only task
+evidence, archive, and parent `1/11` bookkeeping. It does not authorize starting
+Child 2.

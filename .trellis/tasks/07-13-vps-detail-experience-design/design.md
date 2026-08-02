@@ -1209,7 +1209,7 @@ vps_overview__submitting_or_background
 
 | 序号 | 子任务 | 直接依赖 | 独立验收焦点 |
 |---|---|---|---|
-| 1 | 统一授权与平台基础 | 无 | 已合入 auth/idempotency/outbox/deletion/delivery primitives；补 current-development migration/ACL admission 后审计关闭，不继续 APP V3 successor |
+| 1 | 统一授权与平台基础 | 无 | 已关闭：auth/idempotency/outbox/deletion/delivery primitives 与 current-development migration/ACL admission 均已合入；不继续 APP V3 successor |
 | 2 | 记录、修订、草稿与状态核心 | 1 | schema、CAS、完整修订、草稿、生命周期、read fence、record purge saga 和审计投影 |
 | 3 | Blob、附件、配额与扫描 | 1, 2 | local/S3、上传状态机、准入、配额、GC pin、无宽限 purge、下载授权与 Blob backup/restore adapter |
 | 4 | 证据注册表与首批适配器 | 1, 2 | IP/监控/事件/成本/命令 schema、捕获、脱敏、可信度修复 |
@@ -1243,11 +1243,11 @@ vps_overview__submitting_or_background
 
 明确不建设：通用项目管理器、聊天系统、所见即所得私有文档格式、跨证据总分、自动业务执行、命令输出长期归档、匿名共享、自动抓取远程 URL、逐记录 KMS/Vault 密钥销毁、备份保留窗口内的即时密码学擦除、对用户外部归档的召回承诺。
 
-## 28. 书面审阅门槛
+## 28. 后续子任务审阅门槛
 
-当前规划审阅遵守：
+Child 1 closeout 后遵守：
 
-- 父任务保持 `planning`，Child 1 维持既有 `in_progress` 状态但本轮不恢复生产实现；
-- 本轮不修改产品代码、数据库迁移或部署配置；
-- 用户审阅重基线后，再决定何时执行 Child 1 的有界 closeout slice；
+- 父任务保持 `planning`，Child 1 已完成并归档，父任务进度为 `1/11`；
+- 当前 closeout 不修改产品代码、数据库迁移或部署配置；
+- Child 2 仍须先与最新 main 对齐规划并获得单独启动批准；
 - 旧总控 goal、旧 worktree 或旧 branch 的存在不构成执行授权或进度证据。
