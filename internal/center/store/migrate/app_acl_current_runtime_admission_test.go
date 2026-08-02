@@ -144,6 +144,81 @@ func TestAdmitAppACLCurrentRuntimeNullHeadRequiresRebuildBeforeCatalogRead(t *te
 	}
 }
 
+func TestAdmitAppACLCurrentRuntimeSuccessorRequiresRebuildBeforeRoleOrCatalogRead(t *testing.T) {
+	futureFS, fragments := appACLCurrentConvergenceFutureSource(t)
+
+	for _, tc := range []struct {
+		name                 string
+		successorRuntimeRole string
+	}{
+		{name: "unchanged latest binding", successorRuntimeRole: "houfeng_center_runtime"},
+		{name: "changed latest binding", successorRuntimeRole: "successor_center_runtime"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manifestSnapshot, _, _ := appACLCurrentRuntimeAdmissionFixture(t, futureFS, fragments)
+			manifestSnapshot = appACLCurrentRuntimeSuccessorSnapshot(t, manifestSnapshot, tc.successorRuntimeRole, false)
+			tx := &fakeAppACLRuntimeAdmissionTx{}
+			catalogReads := 0
+
+			err := admitAppACLCurrentRuntimeWithDependencies(
+				context.Background(),
+				futureFS,
+				fragments,
+				appACLCurrentRuntimeAdmissionDependencies{
+					beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
+					readManifest: func(context.Context, pgx.Tx) (AppACLManifestRuntimeSnapshotV1, error) {
+						return manifestSnapshot, nil
+					},
+					readCatalog: func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error) {
+						catalogReads++
+						return AppACLEffectiveCatalogSnapshotR1{}, nil
+					},
+					verifyCatalog: verifyAppACLEffectiveCatalogSnapshot,
+				},
+			)
+			if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+				t.Fatalf("current successor error = %v, want rebuild-required sentinel", err)
+			}
+			if catalogReads != 0 {
+				t.Fatalf("current successor catalog reads = %d, want 0", catalogReads)
+			}
+			if tx.commitCalls != 0 || tx.rollbackCalls != 1 {
+				t.Fatalf("current successor lifecycle = commit %d rollback %d, want 0/1", tx.commitCalls, tx.rollbackCalls)
+			}
+		})
+	}
+}
+
+func TestAdmitAppACLCurrentRuntimeMalformedSuccessorRetainsChainError(t *testing.T) {
+	futureFS, fragments := appACLCurrentConvergenceFutureSource(t)
+	manifestSnapshot, _, _ := appACLCurrentRuntimeAdmissionFixture(t, futureFS, fragments)
+	manifestSnapshot = appACLCurrentRuntimeSuccessorSnapshot(t, manifestSnapshot, "successor_center_runtime", true)
+	tx := &fakeAppACLRuntimeAdmissionTx{}
+
+	err := admitAppACLCurrentRuntimeWithDependencies(
+		context.Background(),
+		futureFS,
+		fragments,
+		appACLCurrentRuntimeAdmissionDependencies{
+			beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
+			readManifest: func(context.Context, pgx.Tx) (AppACLManifestRuntimeSnapshotV1, error) {
+				return manifestSnapshot, nil
+			},
+			readCatalog: func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error) {
+				t.Fatal("malformed successor must fail before catalog read")
+				return AppACLEffectiveCatalogSnapshotR1{}, nil
+			},
+			verifyCatalog: verifyAppACLEffectiveCatalogSnapshot,
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "does not bind the previous manifest digest") {
+		t.Fatalf("malformed current successor error = %v, want chain binding rejection", err)
+	}
+	if errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+		t.Fatalf("malformed current successor error = %v, must not be rebuild-required", err)
+	}
+}
+
 func TestAdmitAppACLCurrentRuntimeRejectsSetRoleBeforeCatalogRead(t *testing.T) {
 	futureFS, fragments := appACLCurrentConvergenceFutureSource(t)
 	manifestSnapshot, _, _ := appACLCurrentRuntimeAdmissionFixture(t, futureFS, fragments)
@@ -322,4 +397,47 @@ func appACLCurrentRuntimeAdmissionFixture(
 		Head:              &AppACLManifestHeadV1{ManifestRevision: 1, ManifestDigest: manifest.ManifestDigest},
 		AppliedMigrations: applied,
 	}, catalog, catalogSnapshot
+}
+
+func appACLCurrentRuntimeSuccessorSnapshot(
+	t *testing.T,
+	snapshot AppACLManifestRuntimeSnapshotV1,
+	runtimeRole string,
+	malformedChain bool,
+) AppACLManifestRuntimeSnapshotV1 {
+	t.Helper()
+	genesis := snapshot.Manifests[0]
+	privilegeSet, err := ParseCanonicalPrivilegeSetBodyV1(genesis.CanonicalPrivilegeSet)
+	if err != nil {
+		t.Fatalf("parse current runtime genesis privileges: %v", err)
+	}
+	for index := range privilegeSet.RoleBindings {
+		if privilegeSet.RoleBindings[index].Subject == AppACLSubjectCenterRuntime {
+			privilegeSet.RoleBindings[index].CatalogRole = runtimeRole
+		}
+	}
+	privileges, err := CanonicalPrivilegeSetBodyV1(privilegeSet.RoleBindings, privilegeSet.Privileges)
+	if err != nil {
+		t.Fatalf("compile current runtime successor privileges: %v", err)
+	}
+	previousDigest := genesis.ManifestDigest
+	if malformedChain {
+		previousDigest = [32]byte{1}
+	}
+	successor, err := NewAppACLManifestPersistedV1(
+		2,
+		genesis.MigratorCatalogRole,
+		previousDigest,
+		genesis.CanonicalMigrationSet,
+		privileges,
+	)
+	if err != nil {
+		t.Fatalf("build current runtime successor manifest: %v", err)
+	}
+	snapshot.Manifests = []AppACLManifestPersistedV1{genesis, successor}
+	snapshot.Head = &AppACLManifestHeadV1{
+		ManifestRevision: successor.ManifestRevision,
+		ManifestDigest:   successor.ManifestDigest,
+	}
+	return snapshot
 }

@@ -150,13 +150,13 @@ func verifyAppACLCurrentManifestRuntimeSnapshot(
 	if err != nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err
 	}
-	if err := validateAppACLManifestRuntimeRoles(snapshot, envelope); err != nil {
-		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err
-	}
 	if len(snapshot.Manifests) != 1 || snapshot.Head.ManifestRevision != 1 {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, appACLDevelopmentDatabaseRebuildError(
 			"APP manifest chain is not the current genesis revision",
 		)
+	}
+	if err := validateAppACLManifestRuntimeRoles(snapshot, envelope); err != nil {
+		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err
 	}
 
 	manifestMigrations, err := ParseCanonicalMigrationSetBodyV1(envelope.Latest.CanonicalMigrationSet)

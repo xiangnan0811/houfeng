@@ -38,6 +38,112 @@ func TestCompileAppACLCurrentSourceContractAcceptsRegisteredFutureMigration(t *t
 	}
 }
 
+func TestCompileAppACLCurrentSourceContractMaterializesPrivilegesOnce(t *testing.T) {
+	newTable, _, privilege, _ := appACLCurrentCatalogTestExtension()
+	futureFS := appACLCurrentTestMigrationFS(t)
+	futureFS["0052_future.sql"] = &fstest.MapFile{Data: []byte("select 'future';")}
+	callbackCalls := 0
+
+	source, err := compileAppACLCurrentSourceContract(futureFS, []AppACLCurrentMigrationFragment{{
+		Migration: "0052_future.sql",
+		Objects:   []AppACLManagedObjectR1{newTable},
+		Privileges: func(string) []AppACLPrivilege {
+			callbackCalls++
+			result := privilege
+			if callbackCalls > 1 {
+				result.ObjectIdentity = "stateful_unmanaged_table"
+			}
+			return []AppACLPrivilege{result}
+		},
+	}})
+	if err != nil {
+		t.Fatalf("compileAppACLCurrentSourceContract() error = %v", err)
+	}
+	if callbackCalls != 1 {
+		t.Fatalf("source privilege callback calls = %d, want 1", callbackCalls)
+	}
+
+	contract, err := compileAppACLCurrentCatalogContract(
+		source,
+		"houfeng",
+		appACLCurrentCatalogTestBindings(),
+		"houfeng_migrator",
+	)
+	if err != nil {
+		t.Fatalf("compileAppACLCurrentCatalogContract() error = %v", err)
+	}
+	if callbackCalls != 1 {
+		t.Fatalf("source privilege callback calls after catalog compile = %d, want 1", callbackCalls)
+	}
+	if !containsAppACLCurrentPrivilege(contract.Privileges, privilege) {
+		t.Fatalf("current privileges = %#v, want first materialized privilege %#v", contract.Privileges, privilege)
+	}
+}
+
+func TestCompileAppACLCurrentSourceContractCopiesMaterializedPrivilegeSlice(t *testing.T) {
+	newTable, _, privilege, _ := appACLCurrentCatalogTestExtension()
+	privileges := []AppACLPrivilege{privilege}
+	futureFS := appACLCurrentTestMigrationFS(t)
+	futureFS["0052_future.sql"] = &fstest.MapFile{Data: []byte("select 'future';")}
+
+	source, err := compileAppACLCurrentSourceContract(futureFS, []AppACLCurrentMigrationFragment{{
+		Migration: "0052_future.sql",
+		Objects:   []AppACLManagedObjectR1{newTable},
+		Privileges: func(string) []AppACLPrivilege {
+			return privileges
+		},
+	}})
+	if err != nil {
+		t.Fatalf("compileAppACLCurrentSourceContract() error = %v", err)
+	}
+	privileges[0].ObjectIdentity = "mutated_unmanaged_table"
+
+	contract, err := compileAppACLCurrentCatalogContract(
+		source,
+		"houfeng",
+		appACLCurrentCatalogTestBindings(),
+		"houfeng_migrator",
+	)
+	if err != nil {
+		t.Fatalf("compileAppACLCurrentCatalogContract() error = %v", err)
+	}
+	if !containsAppACLCurrentPrivilege(contract.Privileges, privilege) {
+		t.Fatalf("current privileges = %#v, want copied privilege %#v", contract.Privileges, privilege)
+	}
+}
+
+func TestAppACLCurrentPrivilegesForDatabaseReplacesOnlyDatabasePlaceholder(t *testing.T) {
+	template := []AppACLPrivilege{
+		{
+			Subject:        AppACLSubjectCenterRuntime,
+			ObjectClass:    AppACLObjectClassDatabase,
+			ObjectIdentity: appACLCurrentValidationDatabase,
+			Privilege:      AppACLPrivilegeConnect,
+		},
+		{
+			Subject:        AppACLSubjectCenterRuntime,
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     "public",
+			ObjectIdentity: appACLCurrentValidationDatabase,
+			Privilege:      AppACLPrivilegeSelect,
+		},
+	}
+
+	got, err := appACLCurrentPrivilegesForDatabase(template, "houfeng")
+	if err != nil {
+		t.Fatalf("appACLCurrentPrivilegesForDatabase() error = %v", err)
+	}
+	if got[0].ObjectIdentity != "houfeng" {
+		t.Fatalf("database privilege identity = %q, want houfeng", got[0].ObjectIdentity)
+	}
+	if got[1].ObjectIdentity != appACLCurrentValidationDatabase {
+		t.Fatalf("non-database privilege identity = %q, want unchanged placeholder text", got[1].ObjectIdentity)
+	}
+	if template[0].ObjectIdentity != appACLCurrentValidationDatabase {
+		t.Fatalf("input database privilege identity mutated to %q", template[0].ObjectIdentity)
+	}
+}
+
 func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T) {
 	const futureMigration = "0052_future.sql"
 	newTable := AppACLManagedObjectR1{
@@ -347,8 +453,12 @@ func TestCompileAppACLCurrentCatalogContractRejectsDuplicateBaseValues(t *testin
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := base
-			source.fragments = []AppACLCurrentMigrationFragment{tc.fragment}
-			_, err := compileAppACLCurrentCatalogContract(
+			compiledFragment, err := compileAppACLCurrentMigrationFragment(tc.fragment)
+			if err != nil {
+				t.Fatalf("compile synthetic current fragment: %v", err)
+			}
+			source.fragments = []appACLCurrentCompiledMigrationFragment{compiledFragment}
+			_, err = compileAppACLCurrentCatalogContract(
 				source,
 				"houfeng",
 				appACLCurrentCatalogTestBindings(),

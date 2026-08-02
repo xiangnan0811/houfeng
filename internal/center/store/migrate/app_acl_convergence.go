@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -543,11 +544,209 @@ func rejectMisplacedAppACLManagedObjectForContractInTx(
 	if tx == nil {
 		return fmt.Errorf("detect misplaced current app ACL managed object has no PostgreSQL transaction")
 	}
-	inventory, err := compileAppACLManagedPlacementInventory(contract.ManagedObjects)
+	inventory, err := compileAppACLManagedContractPlacementInventory(contract)
 	if err != nil {
 		return err
 	}
-	return rejectMisplacedAppACLManagedObjectWithInventoryInTx(ctx, tx, inventory)
+	return rejectConflictingAppACLManagedObjectTuplesInTx(ctx, tx, inventory)
+}
+
+type appACLManagedPlacementKey struct {
+	schemaName     string
+	objectIdentity string
+}
+
+type appACLManagedContractPlacementInventory struct {
+	managedSchemas   []string
+	managedSchemaSet map[string]struct{}
+	objectSchemas    []string
+	relationSchemas  []string
+	relationNames    []string
+	relationClasses  map[appACLManagedPlacementKey]AppACLObjectClass
+	functionSchemas  []string
+	functionNames    []string
+	functionKinds    map[appACLManagedPlacementKey]string
+}
+
+func compileAppACLManagedContractPlacementInventory(
+	contract appACLEffectiveCatalogContract,
+) (appACLManagedContractPlacementInventory, error) {
+	inventory := appACLManagedContractPlacementInventory{
+		managedSchemas:   make([]string, 0),
+		managedSchemaSet: make(map[string]struct{}),
+		objectSchemas:    make([]string, 0),
+		relationSchemas:  make([]string, 0),
+		relationNames:    make([]string, 0),
+		relationClasses:  make(map[appACLManagedPlacementKey]AppACLObjectClass),
+		functionSchemas:  make([]string, 0),
+		functionNames:    make([]string, 0),
+		functionKinds:    make(map[appACLManagedPlacementKey]string),
+	}
+	relationSchemas := make(map[string]struct{})
+	relationNames := make(map[string]struct{})
+	for _, object := range contract.ManagedObjects {
+		if err := validateAppACLManagedObject(object); err != nil {
+			return appACLManagedContractPlacementInventory{}, fmt.Errorf("compile current app ACL managed placement inventory: %w", err)
+		}
+		switch object.ObjectClass {
+		case AppACLObjectClassSchema:
+			if _, exists := inventory.managedSchemaSet[object.SchemaName]; exists {
+				continue
+			}
+			inventory.managedSchemaSet[object.SchemaName] = struct{}{}
+			inventory.managedSchemas = append(inventory.managedSchemas, object.SchemaName)
+		case AppACLObjectClassTable, AppACLObjectClassView, AppACLObjectClassSequence:
+			// The ledger has a dedicated phase-shape preflight and remains a common
+			// shared-database name outside the current managed tuple scan.
+			if object.ObjectClass == AppACLObjectClassTable && object.ObjectIdentity == "schema_migrations" {
+				continue
+			}
+			key := appACLManagedPlacementKey{schemaName: object.SchemaName, objectIdentity: object.ObjectIdentity}
+			if _, duplicate := inventory.relationClasses[key]; duplicate {
+				return appACLManagedContractPlacementInventory{}, fmt.Errorf("duplicate current app ACL managed relation placement %s.%s", object.SchemaName, object.ObjectIdentity)
+			}
+			inventory.relationClasses[key] = object.ObjectClass
+			relationSchemas[object.SchemaName] = struct{}{}
+			relationNames[object.ObjectIdentity] = struct{}{}
+		}
+	}
+	for schemaName := range relationSchemas {
+		inventory.relationSchemas = append(inventory.relationSchemas, schemaName)
+	}
+	for relationName := range relationNames {
+		inventory.relationNames = append(inventory.relationNames, relationName)
+	}
+
+	functionSchemas := make(map[string]struct{})
+	functionNames := make(map[string]struct{})
+	for _, function := range contract.ExpectedFunctions {
+		name, _, valid := appACLCurrentFunctionIdentityParts(function.Identity)
+		if !valid {
+			return appACLManagedContractPlacementInventory{}, fmt.Errorf("invalid current app ACL managed function placement %s.%s", function.SchemaName, function.Identity)
+		}
+		key := appACLManagedPlacementKey{schemaName: function.SchemaName, objectIdentity: function.Identity}
+		if _, duplicate := inventory.functionKinds[key]; duplicate {
+			return appACLManagedContractPlacementInventory{}, fmt.Errorf("duplicate current app ACL managed function placement %s.%s", function.SchemaName, function.Identity)
+		}
+		inventory.functionKinds[key] = function.Kind
+		functionSchemas[function.SchemaName] = struct{}{}
+		functionNames[name] = struct{}{}
+	}
+	for schemaName := range functionSchemas {
+		inventory.functionSchemas = append(inventory.functionSchemas, schemaName)
+	}
+	for functionName := range functionNames {
+		inventory.functionNames = append(inventory.functionNames, functionName)
+	}
+
+	objectSchemas := make(map[string]struct{}, len(relationSchemas)+len(functionSchemas))
+	for schemaName := range relationSchemas {
+		objectSchemas[schemaName] = struct{}{}
+	}
+	for schemaName := range functionSchemas {
+		objectSchemas[schemaName] = struct{}{}
+	}
+	for schemaName := range objectSchemas {
+		inventory.objectSchemas = append(inventory.objectSchemas, schemaName)
+	}
+
+	sort.Strings(inventory.managedSchemas)
+	sort.Strings(inventory.objectSchemas)
+	sort.Strings(inventory.relationSchemas)
+	sort.Strings(inventory.relationNames)
+	sort.Strings(inventory.functionSchemas)
+	sort.Strings(inventory.functionNames)
+	return inventory, nil
+}
+
+func rejectConflictingAppACLManagedObjectTuplesInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	inventory appACLManagedContractPlacementInventory,
+) error {
+	relationRows, err := tx.Query(ctx, `
+		select namespace.nspname,
+		       relation.relkind::text,
+		       relation.relname::text
+		from pg_catalog.pg_class relation
+		join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
+		where namespace.nspname = any($1::text[])
+		  and relation.relname = any($2::text[])
+		  and relation.relkind in ('r', 'p', 'v', 'm', 'S', 'f')
+		order by namespace.nspname::text collate "C", relation.relkind, relation.relname::text collate "C"
+	`, inventory.relationSchemas, inventory.relationNames)
+	if err != nil {
+		return fmt.Errorf("read current app ACL managed relation tuples: %w", err)
+	}
+	defer relationRows.Close()
+	for relationRows.Next() {
+		var schemaName, relationKind, relationName string
+		if err := relationRows.Scan(&schemaName, &relationKind, &relationName); err != nil {
+			return fmt.Errorf("scan current app ACL managed relation tuple: %w", err)
+		}
+		expectedClass, managed := inventory.relationClasses[appACLManagedPlacementKey{
+			schemaName:     schemaName,
+			objectIdentity: relationName,
+		}]
+		if !managed {
+			continue
+		}
+		actualClass, ok := appACLManagedRelationClassFromKind(relationKind)
+		if !ok || actualClass != expectedClass {
+			return fmt.Errorf("current app ACL managed relation %s has catalog kind %q, want object class %q", pgx.Identifier{schemaName, relationName}.Sanitize(), relationKind, expectedClass)
+		}
+	}
+	if err := relationRows.Err(); err != nil {
+		return fmt.Errorf("iterate current app ACL managed relation tuples: %w", err)
+	}
+
+	functionRows, err := tx.Query(ctx, `
+		select namespace.nspname,
+		       procedure.proname::text,
+		       pg_catalog.pg_get_function_identity_arguments(procedure.oid),
+		       procedure.prokind::text
+		from pg_catalog.pg_proc procedure
+		join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
+		where namespace.nspname = any($1::text[])
+		  and procedure.proname = any($2::text[])
+		order by namespace.nspname::text collate "C", procedure.proname::text collate "C",
+		         pg_catalog.pg_get_function_identity_arguments(procedure.oid) collate "C"
+	`, inventory.functionSchemas, inventory.functionNames)
+	if err != nil {
+		return fmt.Errorf("read current app ACL managed function tuples: %w", err)
+	}
+	defer functionRows.Close()
+	for functionRows.Next() {
+		var schemaName, functionName, identityArguments, functionKind string
+		if err := functionRows.Scan(&schemaName, &functionName, &identityArguments, &functionKind); err != nil {
+			return fmt.Errorf("scan current app ACL managed function tuple: %w", err)
+		}
+		identity := functionName + "(" + identityArguments + ")"
+		expectedKind, managed := inventory.functionKinds[appACLManagedPlacementKey{
+			schemaName:     schemaName,
+			objectIdentity: identity,
+		}]
+		if managed && functionKind != expectedKind {
+			return fmt.Errorf("current app ACL managed function %s has catalog kind %q, want %q", pgx.Identifier{schemaName, identity}.Sanitize(), functionKind, expectedKind)
+		}
+	}
+	if err := functionRows.Err(); err != nil {
+		return fmt.Errorf("iterate current app ACL managed function tuples: %w", err)
+	}
+	return nil
+}
+
+func appACLManagedRelationClassFromKind(relationKind string) (AppACLObjectClass, bool) {
+	switch relationKind {
+	case "r", "p", "f":
+		return AppACLObjectClassTable, true
+	case "v", "m":
+		return AppACLObjectClassView, true
+	case "S":
+		return AppACLObjectClassSequence, true
+	default:
+		return "", false
+	}
 }
 
 func rejectMisplacedAppACLManagedObjectWithInventoryInTx(
@@ -651,11 +850,52 @@ func rejectFreshAppACLManagedStateForContractInTx(
 	if tx == nil {
 		return fmt.Errorf("detect fresh current app ACL managed state has no PostgreSQL transaction")
 	}
-	inventory, err := compileAppACLManagedPlacementInventory(contract.ManagedObjects)
+	inventory, err := compileAppACLManagedContractPlacementInventory(contract)
 	if err != nil {
 		return err
 	}
-	return rejectFreshAppACLManagedStateWithInventoryInTx(ctx, tx, inventory)
+	return rejectFreshAppACLManagedStateWithContractInventoryInTx(ctx, tx, inventory)
+}
+
+func rejectFreshAppACLManagedStateWithContractInventoryInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	inventory appACLManagedContractPlacementInventory,
+) error {
+	for _, schemaName := range inventory.managedSchemas {
+		if schemaName == appACLManagedPublicSchemaR1 {
+			continue
+		}
+
+		var schemaExists bool
+		if err := tx.QueryRow(ctx, `
+			select exists (
+				select 1
+				from pg_catalog.pg_namespace
+				where nspname = $1
+			)
+		`, schemaName).Scan(&schemaExists); err != nil {
+			return fmt.Errorf("read fresh current app ACL managed schema %q state: %w", schemaName, err)
+		}
+		if schemaExists {
+			return fmt.Errorf("fresh current app ACL convergence cannot adopt existing managed schema %q", schemaName)
+		}
+	}
+
+	for _, schemaName := range inventory.objectSchemas {
+		object, err := describeAppACLManagedContractObjectInSchemaInTx(ctx, tx, schemaName, inventory)
+		if err != nil {
+			return err
+		}
+		if object == "" {
+			continue
+		}
+		if schemaName == appACLManagedPublicSchemaR1 {
+			return fmt.Errorf("fresh current app ACL convergence cannot adopt managed public object %s without public-ledger/manifest adoption state", object)
+		}
+		return fmt.Errorf("fresh current app ACL convergence cannot adopt managed object %s without public-ledger/manifest adoption state", object)
+	}
+	return nil
 }
 
 func rejectFreshAppACLManagedStateWithInventoryInTx(
@@ -737,11 +977,57 @@ func rejectNonPublicAppACLLegacyLedgerForContractInTx(
 	if tx == nil {
 		return fmt.Errorf("detect non-public current app migration ledger has no PostgreSQL transaction")
 	}
-	inventory, err := compileAppACLManagedPlacementInventory(contract.ManagedObjects)
+	inventory, err := compileAppACLManagedContractPlacementInventory(contract)
 	if err != nil {
 		return err
 	}
-	return rejectNonPublicAppACLLegacyLedgerWithInventoryInTx(ctx, tx, sources, inventory, migratorRole)
+	return rejectNonPublicAppACLLegacyLedgerWithContractInventoryInTx(ctx, tx, sources, inventory, migratorRole)
+}
+
+func rejectNonPublicAppACLLegacyLedgerWithContractInventoryInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	sources migrationSourceSnapshot,
+	inventory appACLManagedContractPlacementInventory,
+	migratorRole string,
+) error {
+	candidates, err := readAppACLNonPublicMigrationLedgerCandidatesInTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range candidates {
+		if candidate.OwnerRole == migratorRole && candidate.RowSecurityEnabled && candidate.RowSecurityForced {
+			return fmt.Errorf("non-public application migration ledger in schema %q is owned by direct migrator role %q with forced row security", candidate.SchemaName, migratorRole)
+		}
+		if _, managed := inventory.managedSchemaSet[candidate.SchemaName]; managed {
+			return fmt.Errorf("non-public application migration ledger in managed schema %q", candidate.SchemaName)
+		}
+		object, err := describeAppACLManagedContractObjectInSchemaInTx(ctx, tx, candidate.SchemaName, inventory)
+		if err != nil {
+			return err
+		}
+		if object != "" {
+			if candidate.OwnerRole != migratorRole {
+				return fmt.Errorf("non-public application migration ledger in schema %q is owned by %q, want direct migrator role %q", candidate.SchemaName, candidate.OwnerRole, migratorRole)
+			}
+			return fmt.Errorf("non-public application migration ledger in schema %q contains managed object %s", candidate.SchemaName, object)
+		}
+		embeddedName, err := readEmbeddedMigrationNameFromNonPublicLedgerInTx(ctx, tx, candidate.SchemaName, sources)
+		if err != nil {
+			if candidate.OwnerRole != migratorRole && isAppACLNonPublicLedgerProbePermissionDenied(err) {
+				continue
+			}
+			return err
+		}
+		if embeddedName == "" {
+			continue
+		}
+		if candidate.OwnerRole != migratorRole {
+			return fmt.Errorf("non-public application migration ledger in schema %q is owned by %q, want direct migrator role %q", candidate.SchemaName, candidate.OwnerRole, migratorRole)
+		}
+		return fmt.Errorf("non-public application migration ledger in schema %q contains embedded migration %q", candidate.SchemaName, embeddedName)
+	}
+	return nil
 }
 
 func rejectNonPublicAppACLLegacyLedgerWithInventoryInTx(
@@ -909,6 +1195,79 @@ func readAppACLNonPublicMigrationLedgerCandidatesInTx(ctx context.Context, tx pg
 		return nil, fmt.Errorf("iterate non-public migration ledger candidates: %w", err)
 	}
 	return candidates, nil
+}
+
+func describeAppACLManagedContractObjectInSchemaInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	schemaName string,
+	inventory appACLManagedContractPlacementInventory,
+) (string, error) {
+	if len(inventory.relationNames) > 0 {
+		rows, err := tx.Query(ctx, `
+			select relation.relkind::text,
+			       relation.relname::text
+			from pg_catalog.pg_class relation
+			join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
+			where namespace.nspname = $1
+			  and relation.relkind in ('r', 'p', 'v', 'm', 'S', 'f')
+			  and relation.relname = any($2::text[])
+			order by relation.relname::text collate "C", relation.relkind
+		`, schemaName, inventory.relationNames)
+		if err != nil {
+			return "", fmt.Errorf("read current app ACL managed relation surface in schema %q: %w", schemaName, err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var relationKind, name string
+			if err := rows.Scan(&relationKind, &name); err != nil {
+				return "", fmt.Errorf("scan current app ACL managed relation surface in schema %q: %w", schemaName, err)
+			}
+			if _, managed := inventory.relationClasses[appACLManagedPlacementKey{
+				schemaName:     schemaName,
+				objectIdentity: name,
+			}]; managed {
+				return relationKind + " " + pgx.Identifier{schemaName, name}.Sanitize(), nil
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return "", fmt.Errorf("iterate current app ACL managed relation surface in schema %q: %w", schemaName, err)
+		}
+	}
+
+	if len(inventory.functionNames) > 0 {
+		rows, err := tx.Query(ctx, `
+			select procedure.proname::text,
+			       pg_catalog.pg_get_function_identity_arguments(procedure.oid)
+			from pg_catalog.pg_proc procedure
+			join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
+			where namespace.nspname = $1
+			  and procedure.proname = any($2::text[])
+			order by procedure.proname::text collate "C",
+			         pg_catalog.pg_get_function_identity_arguments(procedure.oid) collate "C"
+		`, schemaName, inventory.functionNames)
+		if err != nil {
+			return "", fmt.Errorf("read current app ACL managed function surface in schema %q: %w", schemaName, err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name, identityArguments string
+			if err := rows.Scan(&name, &identityArguments); err != nil {
+				return "", fmt.Errorf("scan current app ACL managed function surface in schema %q: %w", schemaName, err)
+			}
+			identity := name + "(" + identityArguments + ")"
+			if _, managed := inventory.functionKinds[appACLManagedPlacementKey{
+				schemaName:     schemaName,
+				objectIdentity: identity,
+			}]; managed {
+				return "function " + pgx.Identifier{schemaName, identity}.Sanitize(), nil
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return "", fmt.Errorf("iterate current app ACL managed function surface in schema %q: %w", schemaName, err)
+		}
+	}
+	return "", nil
 }
 
 func describeAppACLManagedObjectInSchemaInTx(ctx context.Context, tx pgx.Tx, databaseName string, schemaName string) (string, error) {

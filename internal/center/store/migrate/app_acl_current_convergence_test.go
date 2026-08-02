@@ -489,6 +489,109 @@ func TestAppACLCurrentConvergencePlacementPreflightUsesCompiledContract(t *testi
 	if !containsString(tx.relationNames, futureTable) {
 		t.Fatalf("current placement relation names = %#v, want %q", tx.relationNames, futureTable)
 	}
+	if !containsString(tx.relationSchemas, appACLManagedPublicSchemaR1) {
+		t.Fatalf("current placement relation schemas = %#v, want %q", tx.relationSchemas, appACLManagedPublicSchemaR1)
+	}
+}
+
+func TestAppACLCurrentConvergencePreflightsScopeSameNamedRelationsBySchemaTuple(t *testing.T) {
+	const sharedTable = "records_current_preflight"
+	contract := appACLEffectiveCatalogContract{
+		DatabaseName: "houfeng",
+		ManagedObjects: []AppACLManagedObjectR1{
+			{
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     "records_current_a",
+				ObjectIdentity: sharedTable,
+			},
+			{
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     "records_current_b",
+				ObjectIdentity: sharedTable,
+			},
+		},
+	}
+
+	t.Run("fresh", func(t *testing.T) {
+		err := rejectFreshAppACLManagedStateForContractInTx(
+			context.Background(),
+			&appACLCurrentPreflightTx{},
+			contract,
+		)
+		if err != nil {
+			t.Fatalf("current fresh tuple-scoped preflight error = %v", err)
+		}
+	})
+
+	t.Run("legacy", func(t *testing.T) {
+		err := rejectNonPublicAppACLLegacyLedgerForContractInTx(
+			context.Background(),
+			&appACLCurrentLegacyPreflightTx{},
+			migrationSourceSnapshot{},
+			contract,
+			"houfeng_migrator",
+		)
+		if err != nil {
+			t.Fatalf("current legacy tuple-scoped preflight error = %v", err)
+		}
+	})
+}
+
+func TestAppACLCurrentConvergenceLegacyPreflightIgnoresSameNamedRelationOutsideManagedTuple(t *testing.T) {
+	const sharedTable = "records_current_preflight"
+	contract := appACLEffectiveCatalogContract{
+		DatabaseName: "houfeng",
+		ManagedObjects: []AppACLManagedObjectR1{{
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     "records_current",
+			ObjectIdentity: sharedTable,
+		}},
+	}
+	tx := &appACLCurrentLegacyPreflightTx{
+		managedSchema:   "third_party_private_history",
+		managedRelation: sharedTable,
+	}
+
+	err := rejectNonPublicAppACLLegacyLedgerForContractInTx(
+		context.Background(),
+		tx,
+		migrationSourceSnapshot{},
+		contract,
+		"houfeng_migrator",
+	)
+	if err != nil {
+		t.Fatalf("current legacy unrelated tuple preflight error = %v", err)
+	}
+	if tx.ledgerProbeCalls != 1 {
+		t.Fatalf("current legacy ledger probe calls = %d, want 1 for unrelated tuple", tx.ledgerProbeCalls)
+	}
+}
+
+func TestAppACLCurrentConvergenceLegacyPreflightRejectsLedgerInCompiledManagedSchema(t *testing.T) {
+	const managedSchema = "third_party_private_history"
+	contract := appACLEffectiveCatalogContract{
+		DatabaseName: "houfeng",
+		ManagedObjects: []AppACLManagedObjectR1{{
+			ObjectClass:    AppACLObjectClassSchema,
+			SchemaName:     managedSchema,
+			ObjectIdentity: managedSchema,
+		}},
+	}
+	tx := &appACLCurrentLegacyPreflightTx{}
+
+	err := rejectNonPublicAppACLLegacyLedgerForContractInTx(
+		context.Background(),
+		tx,
+		migrationSourceSnapshot{},
+		contract,
+		"houfeng_migrator",
+	)
+	if err == nil || !strings.Contains(err.Error(), "managed schema") {
+		t.Fatalf("current legacy managed-schema preflight error = %v, want managed schema rejection", err)
+	}
+	if tx.ledgerProbeCalls != 0 {
+		t.Fatalf("current legacy ledger probe calls = %d, want 0 for managed schema", tx.ledgerProbeCalls)
+	}
 }
 
 func TestAppACLCurrentConvergenceFreshPreflightUsesCompiledContract(t *testing.T) {
@@ -685,6 +788,7 @@ type appACLCurrentPreflightTx struct {
 	existingSchema         string
 	existingRelationSchema string
 	existingRelation       string
+	relationSchemas        []string
 	relationNames          []string
 }
 
@@ -711,6 +815,13 @@ func (tx *appACLCurrentPreflightTx) QueryRow(_ context.Context, _ string, argume
 }
 
 func (tx *appACLCurrentPreflightTx) Query(_ context.Context, sql string, arguments ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "namespace.nspname = any($1::text[])") && strings.Contains(sql, "relation.relname = any($2::text[])") {
+		tx.relationSchemas, _ = arguments[0].([]string)
+		tx.relationSchemas = append([]string(nil), tx.relationSchemas...)
+		tx.relationNames, _ = arguments[1].([]string)
+		tx.relationNames = append([]string(nil), tx.relationNames...)
+		return emptyAppACLConvergenceRows{}, nil
+	}
 	if strings.Contains(sql, "relation.relname = any($1::text[])") {
 		tx.relationNames, _ = arguments[0].([]string)
 		tx.relationNames = append([]string(nil), tx.relationNames...)

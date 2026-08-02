@@ -19,6 +19,7 @@ func TestPostgresIntegrationAppACLCurrent(t *testing.T) {
 	t.Run("fresh_and_runtime", testPostgresIntegrationAppACLCurrentFreshAndRuntime)
 	t.Run("exact_repeat_is_read_only", testPostgresIntegrationAppACLCurrentExactRepeat)
 	t.Run("prior_baseline_requires_rebuild_without_mutation", testPostgresIntegrationAppACLCurrentPriorBaseline)
+	t.Run("unrelated_same_name_objects_are_ignored", testPostgresIntegrationAppACLCurrentUnrelatedSameNames)
 }
 
 func testPostgresIntegrationAppACLCurrentFreshAndRuntime(t *testing.T) {
@@ -37,6 +38,9 @@ func testPostgresIntegrationAppACLCurrentFreshAndRuntime(t *testing.T) {
 	}
 	if len(snapshot.Manifest.AppliedMigrations) != len(source.sources.names) {
 		t.Fatalf("fresh ledger source count = %d, want %d", len(snapshot.Manifest.AppliedMigrations), len(source.sources.names))
+	}
+	if len(snapshot.Ledger) != len(source.sources.names) {
+		t.Fatalf("fresh durable ledger row count = %d, want %d", len(snapshot.Ledger), len(source.sources.names))
 	}
 	if len(snapshot.Manifest.Manifests) != 1 || snapshot.Manifest.Head == nil || snapshot.Manifest.Head.ManifestRevision != 1 {
 		t.Fatalf("fresh manifest revisions/head = %#v/%#v, want one genesis", snapshot.Manifest.Manifests, snapshot.Manifest.Head)
@@ -129,10 +133,56 @@ func testPostgresIntegrationAppACLCurrentPriorBaseline(t *testing.T) {
 	}
 }
 
+func testPostgresIntegrationAppACLCurrentUnrelatedSameNames(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		createSQL string
+	}{
+		{
+			name:      "relation",
+			createSQL: `create table third_party_current.monitoring_instances (id bigint primary key)`,
+		},
+		{
+			name: "function",
+			createSQL: `
+				create function third_party_current.record_platform_cas_contract_activation_projection(bytea)
+				returns bytea language sql immutable as $$ select $1 $$
+			`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newAppACLConvergencePostgresFixture(t, ctx)
+			migratorDB := fixture.openDirectRolePool(t, ctx, fixture.migrator)
+			if _, err := migratorDB.Exec(ctx, `create schema third_party_current`); err != nil {
+				t.Fatalf("create unrelated current schema: %v", err)
+			}
+			if _, err := migratorDB.Exec(ctx, tc.createSQL); err != nil {
+				t.Fatalf("create unrelated same-name %s: %v", tc.name, err)
+			}
+
+			if _, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtime, fixture.admin); err != nil {
+				t.Fatalf("ConvergeAppACLCurrent() with unrelated same-name %s error = %v", tc.name, err)
+			}
+			runtimeDB := fixture.openDirectRolePool(t, ctx, fixture.runtime)
+			if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
+				t.Fatalf("AdmitAppACLCurrentRuntime() with unrelated same-name %s error = %v", tc.name, err)
+			}
+		})
+	}
+}
+
 type appACLCurrentPostgresDurableSnapshot struct {
 	Manifest      AppACLManifestRuntimeSnapshotV1
 	Catalog       AppACLEffectiveCatalogSnapshotR1
+	Ledger        []appACLCurrentPostgresLedgerRow
 	HeadUpdatedAt time.Time
+}
+
+type appACLCurrentPostgresLedgerRow struct {
+	Name      string
+	Checksum  string
+	AppliedAt time.Time
 }
 
 func appACLCurrentPostgresContract(
@@ -181,6 +231,28 @@ func readAppACLCurrentPostgresDurableSnapshot(
 	if err != nil {
 		t.Fatalf("read current durable catalog snapshot: %v", err)
 	}
+	ledgerRows, err := tx.Query(ctx, `
+		select name, checksum, applied_at
+		from public.schema_migrations
+		order by name::text collate "C"
+	`)
+	if err != nil {
+		t.Fatalf("read current durable ledger rows: %v", err)
+	}
+	ledger := make([]appACLCurrentPostgresLedgerRow, 0, len(manifest.AppliedMigrations))
+	for ledgerRows.Next() {
+		var row appACLCurrentPostgresLedgerRow
+		if err := ledgerRows.Scan(&row.Name, &row.Checksum, &row.AppliedAt); err != nil {
+			ledgerRows.Close()
+			t.Fatalf("scan current durable ledger row: %v", err)
+		}
+		ledger = append(ledger, row)
+	}
+	if err := ledgerRows.Err(); err != nil {
+		ledgerRows.Close()
+		t.Fatalf("iterate current durable ledger rows: %v", err)
+	}
+	ledgerRows.Close()
 	var headUpdatedAt time.Time
 	if err := tx.QueryRow(ctx, `
 		select updated_at
@@ -195,6 +267,7 @@ func readAppACLCurrentPostgresDurableSnapshot(
 	return appACLCurrentPostgresDurableSnapshot{
 		Manifest:      manifest,
 		Catalog:       catalog,
+		Ledger:        ledger,
 		HeadUpdatedAt: headUpdatedAt,
 	}
 }

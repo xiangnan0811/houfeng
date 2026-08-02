@@ -29,7 +29,14 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{}
 
 type appACLCurrentSourceContract struct {
 	sources   migrationSourceSnapshot
-	fragments []AppACLCurrentMigrationFragment
+	fragments []appACLCurrentCompiledMigrationFragment
+}
+
+type appACLCurrentCompiledMigrationFragment struct {
+	Migration  string
+	Objects    []AppACLManagedObjectR1
+	Privileges []AppACLPrivilege
+	Functions  []AppACLCurrentFunctionContract
 }
 
 func compileAppACLCurrentSourceContract(
@@ -75,32 +82,59 @@ func compileAppACLCurrentSourceContract(
 		}
 		orderedFragments = append(orderedFragments, fragment)
 	}
-	if err := validateAppACLCurrentFragments(orderedFragments); err != nil {
+	compiledFragments := make([]appACLCurrentCompiledMigrationFragment, 0, len(orderedFragments))
+	for _, fragment := range orderedFragments {
+		compiled, err := compileAppACLCurrentMigrationFragment(fragment)
+		if err != nil {
+			return appACLCurrentSourceContract{}, err
+		}
+		compiledFragments = append(compiledFragments, compiled)
+	}
+	if err := validateAppACLCurrentFragments(compiledFragments); err != nil {
 		return appACLCurrentSourceContract{}, err
 	}
 
-	return appACLCurrentSourceContract{sources: sources, fragments: orderedFragments}, nil
+	return appACLCurrentSourceContract{sources: sources, fragments: compiledFragments}, nil
 }
 
 func cloneAppACLCurrentMigrationFragment(fragment AppACLCurrentMigrationFragment) AppACLCurrentMigrationFragment {
 	cloned := AppACLCurrentMigrationFragment{
-		Migration: fragment.Migration,
-		Objects:   append([]AppACLManagedObjectR1(nil), fragment.Objects...),
-		Functions: append([]AppACLCurrentFunctionContract(nil), fragment.Functions...),
+		Migration:  fragment.Migration,
+		Objects:    append([]AppACLManagedObjectR1(nil), fragment.Objects...),
+		Privileges: fragment.Privileges,
+		Functions:  append([]AppACLCurrentFunctionContract(nil), fragment.Functions...),
 	}
 	for index := range cloned.Functions {
 		cloned.Functions[index].Config = append([]string(nil), cloned.Functions[index].Config...)
 	}
-	if fragment.Privileges != nil {
-		compilePrivileges := fragment.Privileges
-		cloned.Privileges = func(databaseName string) []AppACLPrivilege {
-			return append([]AppACLPrivilege(nil), compilePrivileges(databaseName)...)
-		}
+	return cloned
+}
+
+func compileAppACLCurrentMigrationFragment(
+	fragment AppACLCurrentMigrationFragment,
+) (appACLCurrentCompiledMigrationFragment, error) {
+	if fragment.Privileges == nil {
+		return appACLCurrentCompiledMigrationFragment{}, fmt.Errorf("current APP ACL fragment %q has no privilege compiler", fragment.Migration)
+	}
+	return appACLCurrentCompiledMigrationFragment{
+		Migration:  fragment.Migration,
+		Objects:    append([]AppACLManagedObjectR1(nil), fragment.Objects...),
+		Privileges: append([]AppACLPrivilege(nil), fragment.Privileges(appACLCurrentValidationDatabase)...),
+		Functions:  cloneAppACLCurrentFunctionContracts(fragment.Functions),
+	}, nil
+}
+
+func cloneAppACLCurrentFunctionContracts(
+	functions []AppACLCurrentFunctionContract,
+) []AppACLCurrentFunctionContract {
+	cloned := append([]AppACLCurrentFunctionContract(nil), functions...)
+	for index := range cloned {
+		cloned[index].Config = append([]string(nil), cloned[index].Config...)
 	}
 	return cloned
 }
 
-func validateAppACLCurrentFragments(fragments []AppACLCurrentMigrationFragment) error {
+func validateAppACLCurrentFragments(fragments []appACLCurrentCompiledMigrationFragment) error {
 	baseSurface, err := CompileAppACLManagedSurfaceR1(appACLCurrentValidationDatabase)
 	if err != nil {
 		return fmt.Errorf("compile frozen r1 managed surface for current APP ACL fragments: %w", err)
@@ -127,11 +161,7 @@ func validateAppACLCurrentFragments(fragments []AppACLCurrentMigrationFragment) 
 
 	privileges := appACLPrivilegesR1(appACLCurrentValidationDatabase)
 	for _, fragment := range fragments {
-		if fragment.Privileges == nil {
-			return fmt.Errorf("current APP ACL fragment %q has no privilege compiler", fragment.Migration)
-		}
-		fragmentPrivileges := fragment.Privileges(appACLCurrentValidationDatabase)
-		for _, privilege := range fragmentPrivileges {
+		for _, privilege := range fragment.Privileges {
 			object, err := appACLCurrentManagedObjectFromPrivilege(privilege)
 			if err != nil {
 				return fmt.Errorf("current APP ACL fragment %q privilege: %w", fragment.Migration, err)
@@ -140,7 +170,7 @@ func validateAppACLCurrentFragments(fragments []AppACLCurrentMigrationFragment) 
 				return fmt.Errorf("current APP ACL fragment %q privilege references unmanaged object %#v", fragment.Migration, object)
 			}
 		}
-		privileges = append(privileges, fragmentPrivileges...)
+		privileges = append(privileges, fragment.Privileges...)
 	}
 	if _, err := canonicalPrivileges(privileges); err != nil {
 		return fmt.Errorf("validate current APP ACL fragment privileges: %w", err)
@@ -286,10 +316,11 @@ func compileAppACLCurrentCatalogContract(
 				fragmentFunctions[object] = struct{}{}
 			}
 		}
-		if fragment.Privileges == nil {
-			return appACLEffectiveCatalogContract{}, fmt.Errorf("current APP ACL fragment %q has no privilege compiler", fragment.Migration)
+		fragmentPrivileges, err := appACLCurrentPrivilegesForDatabase(fragment.Privileges, databaseName)
+		if err != nil {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("materialize current APP ACL fragment %q privileges: %w", fragment.Migration, err)
 		}
-		contract.Privileges = append(contract.Privileges, fragment.Privileges(databaseName)...)
+		contract.Privileges = append(contract.Privileges, fragmentPrivileges...)
 		for _, function := range fragment.Functions {
 			contract.ExpectedFunctions = append(contract.ExpectedFunctions, appACLEffectiveCatalogFunctionContract{
 				SchemaName:      function.SchemaName,
@@ -353,6 +384,23 @@ func compileAppACLCurrentCatalogContract(
 		}
 	}
 	return contract, nil
+}
+
+func appACLCurrentPrivilegesForDatabase(
+	template []AppACLPrivilege,
+	databaseName string,
+) ([]AppACLPrivilege, error) {
+	if !validBareCatalogName(databaseName) {
+		return nil, fmt.Errorf("invalid app ACL database name")
+	}
+	privileges := append([]AppACLPrivilege(nil), template...)
+	for index := range privileges {
+		if privileges[index].ObjectClass == AppACLObjectClassDatabase &&
+			privileges[index].ObjectIdentity == appACLCurrentValidationDatabase {
+			privileges[index].ObjectIdentity = databaseName
+		}
+	}
+	return privileges, nil
 }
 
 func canonicalAppACLEffectiveCatalogFunctionContracts(
