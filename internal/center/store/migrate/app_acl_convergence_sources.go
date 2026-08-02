@@ -97,3 +97,35 @@ func validateAppACLR1FrozenSourceSnapshot(snapshot migrationSourceSnapshot) erro
 	}
 	return nil
 }
+
+// validateAppACLR1FrozenSourcePrefix preserves the exact frozen R1 bytes while
+// allowing the current-development contract to append explicit migrations.
+func validateAppACLR1FrozenSourcePrefix(snapshot migrationSourceSnapshot) error {
+	prefixLength := len(appACLR1MigrationSourceContract)
+	if len(snapshot.names) < prefixLength || len(snapshot.sources) < prefixLength {
+		return fmt.Errorf("current migration source count is %d names/%d sources, want at least frozen r1 prefix length %d", len(snapshot.names), len(snapshot.sources), prefixLength)
+	}
+
+	prefix := migrationSourceSnapshot{
+		sources: make(map[string]migrationSource, prefixLength),
+		names:   append([]string(nil), snapshot.names[:prefixLength]...),
+	}
+	entries := make([]MigrationChecksumEntry, 0, prefixLength)
+	for _, name := range prefix.names {
+		source, ok := snapshot.sources[name]
+		if !ok {
+			return fmt.Errorf("current migration source prefix %q is missing", name)
+		}
+		prefix.sources[name] = source
+		entries = append(entries, MigrationChecksumEntry{
+			Filename: name,
+			Checksum: sha256.Sum256([]byte(source.sql)),
+		})
+	}
+	canonicalSet, err := CanonicalMigrationSetBodyV1(entries)
+	if err != nil {
+		return fmt.Errorf("build current migration source r1 prefix: %w", err)
+	}
+	prefix.canonicalSet = canonicalSet
+	return validateAppACLR1FrozenSourceSnapshot(prefix)
+}
