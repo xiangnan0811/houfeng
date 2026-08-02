@@ -100,7 +100,8 @@ func TestPostgresAppACLEffectiveCatalogReaderR1UsesManagedScope(t *testing.T) {
 		t.Fatal("managed APP catalog reader must not scan every persistent non-system schema")
 	}
 	for _, want := range []string{
-		"namespace.nspname in ('public', 'record_platform_internal')",
+		"namespace.nspname = any($",
+		"scope.managedSchemaNames()",
 		"default_acl.defaclrole = (select role.oid from pg_catalog.pg_roles role where role.rolname = $1)",
 		"default_acl.defaclnamespace = 0",
 		"pg_catalog.pg_depend dependency",
@@ -129,6 +130,68 @@ func TestVerifyAppACLEffectiveCatalogSnapshotR1AcceptsCompilerDerivedCompleteCon
 
 	if err := VerifyAppACLEffectiveCatalogSnapshotR1(snapshot, input); err != nil {
 		t.Fatalf("VerifyAppACLEffectiveCatalogSnapshotR1() error = %v", err)
+	}
+}
+
+func TestAppACLCurrentCatalogVerifierAcceptsCompleteExtension(t *testing.T) {
+	input, snapshot := validAppACLCurrentCatalogVerifierFixture(t)
+	if err := verifyAppACLEffectiveCatalogSnapshot(snapshot, input); err != nil {
+		t.Fatalf("verifyAppACLEffectiveCatalogSnapshot() error = %v", err)
+	}
+}
+
+func TestAppACLCurrentCatalogVerifierRejectsMissingOrDriftingExtension(t *testing.T) {
+	newTable, _, _, _ := appACLCurrentCatalogTestExtension()
+	for _, tc := range []struct {
+		name   string
+		mutate func(*AppACLEffectiveCatalogSnapshotR1)
+		want   string
+	}{
+		{
+			name: "missing_table_owner",
+			mutate: func(snapshot *AppACLEffectiveCatalogSnapshotR1) {
+				for index, owner := range snapshot.Owners {
+					if owner.ObjectClass == newTable.ObjectClass && owner.SchemaName == newTable.SchemaName && owner.ObjectIdentity == newTable.ObjectIdentity {
+						snapshot.Owners = append(snapshot.Owners[:index], snapshot.Owners[index+1:]...)
+						return
+					}
+				}
+			},
+			want: "managed object owner is missing",
+		},
+		{
+			name: "missing_function",
+			mutate: func(snapshot *AppACLEffectiveCatalogSnapshotR1) {
+				for index, function := range snapshot.Functions {
+					if function.Identity == "public.future_function()" {
+						snapshot.Functions = append(snapshot.Functions[:index], snapshot.Functions[index+1:]...)
+						return
+					}
+				}
+			},
+			want: "has 0 overloads",
+		},
+		{
+			name: "function_hardening",
+			mutate: func(snapshot *AppACLEffectiveCatalogSnapshotR1) {
+				for index := range snapshot.Functions {
+					if snapshot.Functions[index].Identity == "public.future_function()" {
+						snapshot.Functions[index].SecurityDefiner = false
+						return
+					}
+				}
+			},
+			want: "SECURITY DEFINER",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input, snapshot := validAppACLCurrentCatalogVerifierFixture(t)
+			tc.mutate(&snapshot)
+			err := verifyAppACLEffectiveCatalogSnapshot(snapshot, input)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("verifyAppACLEffectiveCatalogSnapshot() error = %v, want %q rejection", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -381,6 +444,69 @@ func validAppACLEffectiveCatalogVerifierFixture(t *testing.T) (AppACLEffectiveCa
 		t.Fatalf("CompileAppACLManagedSurfaceR1() error = %v", err)
 	}
 	for _, object := range surface.Objects {
+		snapshot.Owners = append(snapshot.Owners, AppACLEffectiveCatalogObjectOwnerR1{
+			ObjectClass:    object.ObjectClass,
+			SchemaName:     object.SchemaName,
+			ObjectIdentity: object.ObjectIdentity,
+			OwnerRole:      input.MigratorRole,
+		})
+	}
+	return input, snapshot
+}
+
+func validAppACLCurrentCatalogVerifierFixture(t *testing.T) (appACLEffectiveCatalogVerifierInput, AppACLEffectiveCatalogSnapshotR1) {
+	t.Helper()
+	contract := appACLCurrentCatalogTestContract(t)
+	input := appACLEffectiveCatalogVerifierInput{
+		Contract:     contract,
+		MigratorRole: "houfeng_migrator",
+	}
+	roleBySubject := make(map[AppACLSubject]string, len(contract.RoleBindings))
+	for _, binding := range contract.RoleBindings {
+		roleBySubject[binding.Subject] = binding.CatalogRole
+	}
+	snapshot := AppACLEffectiveCatalogSnapshotR1{
+		DatabaseName: contract.DatabaseName,
+		PGCryptoExtension: AppACLEffectiveCatalogExtensionR1{
+			ExtensionName: "pgcrypto",
+			SchemaName:    appACLManagedInternalSchemaR1,
+		},
+		Roles: []AppACLEffectiveCatalogRoleStateR1{
+			{Name: roleBySubject[AppACLSubjectCenterRuntime], Login: true},
+			{Name: roleBySubject[AppACLSubjectPlatformAdmin], Login: true},
+			{Name: input.MigratorRole, Login: true},
+		},
+	}
+	for _, privilege := range contract.Privileges {
+		observation := AppACLEffectiveCatalogPrivilegeObservationR1{
+			Grantee:        roleBySubject[privilege.Subject],
+			ObjectClass:    privilege.ObjectClass,
+			SchemaName:     privilege.SchemaName,
+			ObjectIdentity: privilege.ObjectIdentity,
+			ColumnName:     privilege.ColumnName,
+			Privilege:      privilege.Privilege,
+		}
+		snapshot.DirectPrivileges = append(snapshot.DirectPrivileges, observation)
+		snapshot.EffectivePrivileges = append(snapshot.EffectivePrivileges, observation)
+	}
+	for _, expected := range contract.ExpectedFunctions {
+		name, arguments, found := strings.Cut(expected.Identity, "(")
+		if !found {
+			t.Fatalf("expected function identity %q has no arguments", expected.Identity)
+		}
+		arguments = strings.TrimSuffix(arguments, ")")
+		snapshot.Functions = append(snapshot.Functions, AppACLEffectiveCatalogFunctionR1{
+			SchemaName:        expected.SchemaName,
+			Name:              name,
+			IdentityArguments: arguments,
+			Identity:          expected.SchemaName + "." + expected.Identity,
+			OwnerRole:         expected.OwnerRole,
+			Kind:              expected.Kind,
+			SecurityDefiner:   expected.SecurityDefiner,
+			Config:            append([]string(nil), expected.Config...),
+		})
+	}
+	for _, object := range contract.ManagedObjects {
 		snapshot.Owners = append(snapshot.Owners, AppACLEffectiveCatalogObjectOwnerR1{
 			ObjectClass:    object.ObjectClass,
 			SchemaName:     object.SchemaName,

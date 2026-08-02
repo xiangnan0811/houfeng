@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -23,6 +24,87 @@ type AppACLEffectiveCatalogVerifierInputR1 struct {
 	Contract          AppACLEffectiveCatalogContractR1
 	MigratorRole      string
 	ExpectedFunctions [2]AppACLEffectiveCatalogExpectedFunctionR1
+}
+
+type appACLEffectiveCatalogVerifierInput struct {
+	Contract     appACLEffectiveCatalogContract
+	MigratorRole string
+}
+
+func newAppACLEffectiveCatalogVerifierInput(
+	contract appACLEffectiveCatalogContract,
+	migratorRole string,
+) (appACLEffectiveCatalogVerifierInput, error) {
+	input := appACLEffectiveCatalogVerifierInput{Contract: contract, MigratorRole: migratorRole}
+	if err := input.Validate(); err != nil {
+		return appACLEffectiveCatalogVerifierInput{}, err
+	}
+	return input, nil
+}
+
+func (input appACLEffectiveCatalogVerifierInput) Validate() error {
+	if !validCatalogRoleName(input.MigratorRole) {
+		return fmt.Errorf("invalid app ACL migrator role")
+	}
+	canonicalBody, err := CanonicalPrivilegeSetBodyV1(input.Contract.RoleBindings, input.Contract.Privileges)
+	if err != nil {
+		return fmt.Errorf("canonicalize app ACL catalog privileges: %w", err)
+	}
+	canonicalSet, err := ParseCanonicalPrivilegeSetBodyV1(canonicalBody)
+	if err != nil {
+		return fmt.Errorf("parse app ACL catalog privileges: %w", err)
+	}
+	if input.Contract.DatabaseName == "" ||
+		!reflect.DeepEqual(input.Contract.RoleBindings, canonicalSet.RoleBindings) ||
+		!reflect.DeepEqual(input.Contract.Privileges, canonicalSet.Privileges) {
+		return fmt.Errorf("app ACL catalog contract is not canonical")
+	}
+	for _, binding := range input.Contract.RoleBindings {
+		if binding.CatalogRole == input.MigratorRole {
+			return fmt.Errorf("app ACL migrator role reuses %s catalog role %q", binding.Subject, binding.CatalogRole)
+		}
+	}
+	managedObjects, err := canonicalAppACLManagedObjects(input.Contract.ManagedObjects)
+	if err != nil {
+		return fmt.Errorf("canonicalize app ACL managed objects: %w", err)
+	}
+	if !reflect.DeepEqual(input.Contract.ManagedObjects, managedObjects) {
+		return fmt.Errorf("app ACL managed objects are not canonical")
+	}
+	expectedFunctions, err := canonicalAppACLEffectiveCatalogFunctionContracts(input.Contract.ExpectedFunctions)
+	if err != nil {
+		return fmt.Errorf("canonicalize app ACL expected functions: %w", err)
+	}
+	if !reflect.DeepEqual(input.Contract.ExpectedFunctions, expectedFunctions) {
+		return fmt.Errorf("app ACL expected functions are not canonical")
+	}
+	managed := make(map[AppACLManagedObjectR1]struct{}, len(input.Contract.ManagedObjects))
+	for _, object := range input.Contract.ManagedObjects {
+		managed[object] = struct{}{}
+	}
+	for _, privilege := range input.Contract.Privileges {
+		object, err := appACLCurrentManagedObjectFromPrivilege(privilege)
+		if err != nil {
+			return fmt.Errorf("map app ACL privilege to managed object: %w", err)
+		}
+		if _, ok := managed[object]; !ok {
+			return fmt.Errorf("app ACL privilege references unmanaged object %#v", object)
+		}
+	}
+	for _, function := range input.Contract.ExpectedFunctions {
+		if function.OwnerRole != input.MigratorRole {
+			return fmt.Errorf("app ACL function %s.%s owner %q does not match migrator role %q", function.SchemaName, function.Identity, function.OwnerRole, input.MigratorRole)
+		}
+		object := AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassFunction,
+			SchemaName:     function.SchemaName,
+			ObjectIdentity: function.Identity,
+		}
+		if _, ok := managed[object]; !ok {
+			return fmt.Errorf("app ACL function hardening references unmanaged function %#v", object)
+		}
+	}
+	return nil
 }
 
 // AppACLEffectiveCatalogRoleStateR1 is the catalog state relevant to one
@@ -197,12 +279,39 @@ func appACLEffectiveCatalogExpectedFunctionsR1(
 	}, nil
 }
 
+func appACLEffectiveCatalogVerifierInputFromR1(
+	input AppACLEffectiveCatalogVerifierInputR1,
+) (appACLEffectiveCatalogVerifierInput, error) {
+	if err := input.Validate(); err != nil {
+		return appACLEffectiveCatalogVerifierInput{}, err
+	}
+	contract, err := appACLEffectiveCatalogContractFromR1(input.Contract, input.MigratorRole)
+	if err != nil {
+		return appACLEffectiveCatalogVerifierInput{}, err
+	}
+	return newAppACLEffectiveCatalogVerifierInput(contract, input.MigratorRole)
+}
+
 // VerifyAppACLEffectiveCatalogSnapshotR1 compares one PostgreSQL snapshot to
 // the closed r1 compiled privilege contract and static projector inventory.
 // Missing, duplicate, unknown, or malformed catalog facts are all rejected.
 func VerifyAppACLEffectiveCatalogSnapshotR1(
 	snapshot AppACLEffectiveCatalogSnapshotR1,
 	input AppACLEffectiveCatalogVerifierInputR1,
+) error {
+	if err := input.Validate(); err != nil {
+		return fmt.Errorf("validate app ACL effective catalog verifier input: %w", err)
+	}
+	generic, err := appACLEffectiveCatalogVerifierInputFromR1(input)
+	if err != nil {
+		return fmt.Errorf("adapt app ACL effective catalog verifier input: %w", err)
+	}
+	return verifyAppACLEffectiveCatalogSnapshot(snapshot, generic)
+}
+
+func verifyAppACLEffectiveCatalogSnapshot(
+	snapshot AppACLEffectiveCatalogSnapshotR1,
+	input appACLEffectiveCatalogVerifierInput,
 ) error {
 	if err := input.Validate(); err != nil {
 		return fmt.Errorf("validate app ACL effective catalog verifier input: %w", err)
@@ -248,7 +357,7 @@ func VerifyAppACLEffectiveCatalogSnapshotR1(
 		return fmt.Errorf("app ACL role membership is forbidden: %q -> %q", membership.MemberRole, membership.ParentRole)
 	}
 
-	if err := verifyAppACLManagedObjectOwnersR1(snapshot.Owners, input); err != nil {
+	if err := verifyAppACLManagedObjectOwners(snapshot.Owners, input); err != nil {
 		return err
 	}
 	for _, binding := range input.Contract.RoleBindings {
@@ -270,18 +379,27 @@ func VerifyAppACLEffectiveCatalogSnapshotR1(
 		columnACL := snapshot.ColumnACLs[0]
 		return fmt.Errorf("column ACL drift on %s.%s(%s)", columnACL.SchemaName, columnACL.RelationName, columnACL.ColumnName)
 	}
+	scope, err := newAppACLManagedSurfaceScope(input.Contract)
+	if err != nil {
+		return fmt.Errorf("compile app ACL managed surface scope: %w", err)
+	}
+	managedSchemas := make(map[string]struct{}, len(scope.schemaNames))
+	for _, schemaName := range scope.schemaNames {
+		managedSchemas[schemaName] = struct{}{}
+	}
 	for _, defaultACL := range snapshot.DefaultACLs {
-		if defaultACL.OwnerRole == input.MigratorRole && (defaultACL.SchemaName == "" || defaultACL.SchemaName == appACLManagedPublicSchemaR1 || defaultACL.SchemaName == appACLManagedInternalSchemaR1) {
+		_, managedSchema := managedSchemas[defaultACL.SchemaName]
+		if defaultACL.OwnerRole == input.MigratorRole && (defaultACL.SchemaName == "" || managedSchema) {
 			return fmt.Errorf("default ACL drift for migrator owner %q and grantee %q", defaultACL.OwnerRole, defaultACL.Grantee)
 		}
 	}
-	if err := verifyAppACLEffectiveCatalogFunctionsR1(snapshot.Functions, input.ExpectedFunctions); err != nil {
+	if err := verifyAppACLEffectiveCatalogFunctions(snapshot.Functions, input.Contract.ExpectedFunctions); err != nil {
 		return err
 	}
-	if err := verifyAppACLEffectiveCatalogPrivilegesR1("direct", snapshot.DirectPrivileges, input.Contract); err != nil {
+	if err := verifyAppACLEffectiveCatalogPrivileges("direct", snapshot.DirectPrivileges, input.Contract); err != nil {
 		return err
 	}
-	if err := verifyAppACLEffectiveCatalogPrivilegesR1("effective", snapshot.EffectivePrivileges, input.Contract); err != nil {
+	if err := verifyAppACLEffectiveCatalogPrivileges("effective", snapshot.EffectivePrivileges, input.Contract); err != nil {
 		return err
 	}
 	return nil
@@ -297,16 +415,12 @@ func verifyAppACLEffectiveCatalogPGCryptoExtensionR1(extension AppACLEffectiveCa
 	return nil
 }
 
-func verifyAppACLManagedObjectOwnersR1(
+func verifyAppACLManagedObjectOwners(
 	owners []AppACLEffectiveCatalogObjectOwnerR1,
-	input AppACLEffectiveCatalogVerifierInputR1,
+	input appACLEffectiveCatalogVerifierInput,
 ) error {
-	surface, err := CompileAppACLManagedSurfaceR1(input.Contract.DatabaseName)
-	if err != nil {
-		return fmt.Errorf("compile app ACL managed surface: %w", err)
-	}
-	expected := make(map[AppACLManagedObjectR1]struct{}, len(surface.Objects))
-	for _, object := range surface.Objects {
+	expected := make(map[AppACLManagedObjectR1]struct{}, len(input.Contract.ManagedObjects))
+	for _, object := range input.Contract.ManagedObjects {
 		expected[object] = struct{}{}
 	}
 	actual := make(map[AppACLManagedObjectR1]AppACLEffectiveCatalogObjectOwnerR1, len(owners))
@@ -335,7 +449,7 @@ func verifyAppACLManagedObjectOwnersR1(
 	if databaseOwner.OwnerRole != input.MigratorRole {
 		return fmt.Errorf("managed database owner %q for %s does not match migrator role %q", databaseOwner.OwnerRole, databaseObject.ObjectIdentity, input.MigratorRole)
 	}
-	for _, object := range surface.Objects {
+	for _, object := range input.Contract.ManagedObjects {
 		owner := actual[object]
 		if object.ObjectClass == AppACLObjectClassSchema && object.SchemaName == appACLManagedPublicSchemaR1 && object.ObjectIdentity == appACLManagedPublicSchemaR1 && owner.OwnerRole == appACLEffectiveCatalogPublicSchemaDatabaseOwnerRoleR1 {
 			// PostgreSQL's bootstrap public schema is commonly owned by the
@@ -353,45 +467,53 @@ func verifyAppACLManagedObjectOwnersR1(
 	return nil
 }
 
-func verifyAppACLEffectiveCatalogFunctionsR1(
+func verifyAppACLEffectiveCatalogFunctions(
 	functions []AppACLEffectiveCatalogFunctionR1,
-	expected [2]AppACLEffectiveCatalogExpectedFunctionR1,
+	expected []appACLEffectiveCatalogFunctionContract,
 ) error {
 	for _, want := range expected {
-		name := strings.TrimSuffix(strings.TrimPrefix(want.Identity, "public."), "(bytea)")
+		name, arguments, found := strings.Cut(want.Identity, "(")
+		if !found || !strings.HasSuffix(arguments, ")") {
+			return fmt.Errorf("invalid expected function identity %q.%q", want.SchemaName, want.Identity)
+		}
+		arguments = strings.TrimSuffix(arguments, ")")
+		qualifiedIdentity := want.SchemaName + "." + want.Identity
 		matches := make([]AppACLEffectiveCatalogFunctionR1, 0, 1)
 		for _, function := range functions {
-			if function.SchemaName == "public" && function.Name == name {
+			if function.SchemaName == want.SchemaName && function.Name == name {
 				matches = append(matches, function)
 			}
 		}
 		if len(matches) != 1 {
-			return fmt.Errorf("function %q has %d overloads, want exactly one", want.Identity, len(matches))
+			return fmt.Errorf("function %q has %d overloads, want exactly one", qualifiedIdentity, len(matches))
 		}
 		function := matches[0]
-		if function.Identity != want.Identity || function.IdentityArguments != "bytea" {
-			return fmt.Errorf("function %q does not have the exact bytea identity", want.Identity)
+		if function.Identity != qualifiedIdentity || function.IdentityArguments != arguments {
+			return fmt.Errorf("function %q does not have the exact identity", qualifiedIdentity)
 		}
 		if function.OwnerRole != want.OwnerRole {
-			return fmt.Errorf("function %q owner %q does not match migrator role %q", want.Identity, function.OwnerRole, want.OwnerRole)
+			return fmt.Errorf("function %q owner %q does not match migrator role %q", qualifiedIdentity, function.OwnerRole, want.OwnerRole)
 		}
-		if function.Kind != "f" {
-			return fmt.Errorf("function %q has prokind %q, want f", want.Identity, function.Kind)
+		if function.Kind != want.Kind {
+			return fmt.Errorf("function %q has prokind %q, want %s", qualifiedIdentity, function.Kind, want.Kind)
 		}
-		if !function.SecurityDefiner {
-			return fmt.Errorf("function %q must be SECURITY DEFINER", want.Identity)
+		if function.SecurityDefiner != want.SecurityDefiner {
+			if want.SecurityDefiner {
+				return fmt.Errorf("function %q must be SECURITY DEFINER", qualifiedIdentity)
+			}
+			return fmt.Errorf("function %q must be SECURITY INVOKER", qualifiedIdentity)
 		}
-		if len(function.Config) != 1 || function.Config[0] != "search_path=pg_catalog" {
-			return fmt.Errorf("function %q must have search_path=pg_catalog", want.Identity)
+		if !reflect.DeepEqual(function.Config, want.Config) {
+			return fmt.Errorf("function %q configuration %#v does not match expected %#v", qualifiedIdentity, function.Config, want.Config)
 		}
 	}
 	return nil
 }
 
-func verifyAppACLEffectiveCatalogPrivilegesR1(
+func verifyAppACLEffectiveCatalogPrivileges(
 	kind string,
 	observed []AppACLEffectiveCatalogPrivilegeObservationR1,
-	contract AppACLEffectiveCatalogContractR1,
+	contract appACLEffectiveCatalogContract,
 ) error {
 	bindings := make(map[string]AppACLSubject, len(contract.RoleBindings))
 	for _, binding := range contract.RoleBindings {

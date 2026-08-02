@@ -1024,17 +1024,51 @@ func appACLConvergenceDCLStatements(contract AppACLEffectiveCatalogContractR1) (
 	if err != nil {
 		return nil, fmt.Errorf("compile app ACL convergence managed surface: %w", err)
 	}
+	return appACLConvergenceDCLStatementsForContract(appACLEffectiveCatalogContract{
+		DatabaseName:   contract.DatabaseName,
+		RoleBindings:   append([]AppACLRoleBinding(nil), contract.RoleBindings[:]...),
+		Privileges:     append([]AppACLPrivilege(nil), contract.Privileges[:]...),
+		ManagedObjects: append([]AppACLManagedObjectR1(nil), surface.Objects...),
+	})
+}
 
-	rolesBySubject := make(map[AppACLSubject]string, len(contract.RoleBindings))
-	grantees := make([]string, 0, len(contract.RoleBindings)+1)
+func appACLConvergenceDCLStatementsForContract(contract appACLEffectiveCatalogContract) ([]string, error) {
+	canonicalBody, err := CanonicalPrivilegeSetBodyV1(contract.RoleBindings, contract.Privileges)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize app ACL convergence contract: %w", err)
+	}
+	canonicalSet, err := ParseCanonicalPrivilegeSetBodyV1(canonicalBody)
+	if err != nil {
+		return nil, fmt.Errorf("parse app ACL convergence contract: %w", err)
+	}
+	managedObjects, err := canonicalAppACLManagedObjects(contract.ManagedObjects)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize app ACL convergence managed surface: %w", err)
+	}
+	managed := make(map[AppACLManagedObjectR1]struct{}, len(managedObjects))
+	for _, object := range managedObjects {
+		managed[object] = struct{}{}
+	}
+	for _, privilege := range canonicalSet.Privileges {
+		object, err := appACLCurrentManagedObjectFromPrivilege(privilege)
+		if err != nil {
+			return nil, fmt.Errorf("map app ACL convergence privilege: %w", err)
+		}
+		if _, ok := managed[object]; !ok {
+			return nil, fmt.Errorf("app ACL convergence privilege references unmanaged object %#v", object)
+		}
+	}
+
+	rolesBySubject := make(map[AppACLSubject]string, len(canonicalSet.RoleBindings))
+	grantees := make([]string, 0, len(canonicalSet.RoleBindings)+1)
 	grantees = append(grantees, "PUBLIC")
-	for _, binding := range contract.RoleBindings {
+	for _, binding := range canonicalSet.RoleBindings {
 		rolesBySubject[binding.Subject] = binding.CatalogRole
 		grantees = append(grantees, pgx.Identifier{binding.CatalogRole}.Sanitize())
 	}
 
-	statements := make([]string, 0, len(surface.Objects)*len(grantees)+len(contract.Privileges))
-	for _, object := range surface.Objects {
+	statements := make([]string, 0, len(managedObjects)*len(grantees)+len(canonicalSet.Privileges))
+	for _, object := range managedObjects {
 		target, err := appACLConvergenceRevokeTarget(object)
 		if err != nil {
 			return nil, err
@@ -1043,7 +1077,7 @@ func appACLConvergenceDCLStatements(contract AppACLEffectiveCatalogContractR1) (
 			statements = append(statements, "revoke all privileges "+target+" from "+grantee)
 		}
 	}
-	for _, privilege := range contract.Privileges {
+	for _, privilege := range canonicalSet.Privileges {
 		role, ok := rolesBySubject[privilege.Subject]
 		if !ok {
 			return nil, fmt.Errorf("app ACL compiler emitted an unbound subject %q", privilege.Subject)
@@ -1120,19 +1154,19 @@ func appACLConvergenceGrantTarget(privilege AppACLPrivilege) (string, error) {
 }
 
 func appACLConvergenceFunctionIdentity(schemaName string, identity string) (string, error) {
-	known := false
-	for _, function := range appACLManagedFunctionsR1() {
-		if function.schemaName == schemaName && function.identity == identity {
-			known = true
-			break
-		}
-	}
-	if !known {
-		return "", fmt.Errorf("unknown managed APP function %q.%s", schemaName, identity)
-	}
 	name, arguments, found := strings.Cut(identity, "(")
-	if !found || name == "" || !strings.HasSuffix(arguments, ")") {
+	if !found || !validBareCatalogName(schemaName) || !validBareCatalogName(name) || !strings.HasSuffix(arguments, ")") {
 		return "", fmt.Errorf("invalid managed APP function identity %q", identity)
 	}
-	return pgx.Identifier{schemaName, name}.Sanitize() + "(" + strings.TrimSuffix(arguments, ")") + ")", nil
+	arguments = strings.TrimSuffix(arguments, ")")
+	for _, character := range arguments {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			strings.ContainsRune("_ ,.[]", character) {
+			continue
+		}
+		return "", fmt.Errorf("invalid managed APP function identity arguments %q", arguments)
+	}
+	return pgx.Identifier{schemaName, name}.Sanitize() + "(" + arguments + ")", nil
 }

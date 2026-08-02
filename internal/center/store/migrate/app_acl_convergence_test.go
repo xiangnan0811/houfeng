@@ -536,6 +536,40 @@ func TestAppACLConvergenceDCLStatementsRevokeFixedSurfaceAndGrantOnlyCompilerTup
 	}
 }
 
+func TestAppACLConvergenceDCLStatementsForContractRevokesCurrentSurfaceAndGrantsOnlyCompiledPrivileges(t *testing.T) {
+	contract := appACLCurrentCatalogTestContract(t)
+	statements, err := appACLConvergenceDCLStatementsForContract(contract)
+	if err != nil {
+		t.Fatalf("appACLConvergenceDCLStatementsForContract() error = %v", err)
+	}
+	joined := strings.Join(statements, "\n")
+	for _, want := range []string{
+		`revoke all privileges on table "public"."future_records" from PUBLIC`,
+		`revoke all privileges on table "public"."future_records" from "houfeng_center_runtime"`,
+		`revoke all privileges on table "public"."future_records" from "houfeng_platform_admin"`,
+		`revoke all privileges on function "public"."future_function"() from PUBLIC`,
+		`revoke all privileges on function "public"."future_function"() from "houfeng_center_runtime"`,
+		`revoke all privileges on function "public"."future_function"() from "houfeng_platform_admin"`,
+		`grant SELECT on table "public"."future_records" to "houfeng_center_runtime"`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("current DCL statements do not contain %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, `grant EXECUTE on function "public"."future_function"()`) {
+		t.Fatalf("current DCL granted uncompiled function EXECUTE:\n%s", joined)
+	}
+	grantCount := 0
+	for _, statement := range statements {
+		if strings.HasPrefix(statement, "grant ") {
+			grantCount++
+		}
+	}
+	if grantCount != appACLEffectiveCatalogR1PrivilegeCount+1 {
+		t.Fatalf("current DCL grant count = %d, want %d", grantCount, appACLEffectiveCatalogR1PrivilegeCount+1)
+	}
+}
+
 func TestConvergeAppACLR1WithDependenciesRetriesWholeSerializableTransaction(t *testing.T) {
 	_, runtimeSnapshot, compiledPrivileges := validAppACLManifestRuntimeFixture(t)
 	sources, err := snapshotMigrationSources(migrations.FS)

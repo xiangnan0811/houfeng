@@ -387,6 +387,29 @@ func appACLCurrentCatalogTestBindings() []AppACLRoleBinding {
 	}
 }
 
+func appACLCurrentCatalogTestContract(t *testing.T) appACLEffectiveCatalogContract {
+	t.Helper()
+	newTable, newFunction, privilege, function := appACLCurrentCatalogTestExtension()
+	source := appACLCurrentTestSourceContract(t, []AppACLCurrentMigrationFragment{{
+		Migration: "0052_future.sql",
+		Objects:   []AppACLManagedObjectR1{newTable, newFunction},
+		Privileges: func(string) []AppACLPrivilege {
+			return []AppACLPrivilege{privilege}
+		},
+		Functions: []AppACLCurrentFunctionContract{function},
+	}})
+	contract, err := compileAppACLCurrentCatalogContract(
+		source,
+		"houfeng",
+		appACLCurrentCatalogTestBindings(),
+		"houfeng_migrator",
+	)
+	if err != nil {
+		t.Fatalf("compile current catalog test contract: %v", err)
+	}
+	return contract
+}
+
 func containsAppACLCurrentManagedObject(objects []AppACLManagedObjectR1, want AppACLManagedObjectR1) bool {
 	for _, object := range objects {
 		if object == want {
