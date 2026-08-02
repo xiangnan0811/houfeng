@@ -56,6 +56,104 @@ func TestLeaseWorkGuardV1StopsBeforeObservedExpiryWhenRenewalFails(t *testing.T)
 	}
 }
 
+func TestLeaseWorkGuardV1NilRenewerPermanentlyStopsWork(t *testing.T) {
+	now := time.Date(2026, time.July, 24, 15, 0, 0, 0, time.UTC)
+	clock := &fakeLeaseClock{now: now}
+	guard, err := NewLeaseWorkGuardV1(clock, OwnerLease{OwnerID: "worker_01", Generation: 2, ExpiresAt: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatalf("NewLeaseWorkGuardV1() error = %v", err)
+	}
+
+	if err := guard.Renew(nil); !errors.Is(err, ErrLeaseRenewalStopped) {
+		t.Fatalf("LeaseWorkGuardV1.Renew(nil) error = %v, want ErrLeaseRenewalStopped", err)
+	}
+	if guard.CanContinue() {
+		t.Fatal("nil renewal callback must permanently stop work before the observed expiry")
+	}
+
+	renewCalled := false
+	err = guard.Renew(func(owner OwnerLease) (OwnerLease, error) {
+		renewCalled = true
+		owner.ExpiresAt = now.Add(2 * time.Minute)
+		return owner, nil
+	})
+	if !errors.Is(err, ErrLeaseRenewalStopped) {
+		t.Fatalf("LeaseWorkGuardV1.Renew() after nil renewer error = %v, want ErrLeaseRenewalStopped", err)
+	}
+	if renewCalled {
+		t.Fatal("stopped work guard must not invoke a later renewal callback")
+	}
+	if guard.CanContinue() {
+		t.Fatal("successful renewal attempt must not revive work after a nil renewal callback")
+	}
+}
+
+func TestLeaseWorkGuardV1NilRenewerStopsInFlightRenewal(t *testing.T) {
+	now := time.Date(2026, time.July, 24, 15, 0, 0, 0, time.UTC)
+	clock := &fakeLeaseClock{now: now}
+	guard, err := NewLeaseWorkGuardV1(clock, OwnerLease{OwnerID: "worker_01", Generation: 2, ExpiresAt: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatalf("NewLeaseWorkGuardV1() error = %v", err)
+	}
+
+	renewStarted := make(chan struct{})
+	finishRenewal := make(chan struct{})
+	renewResult := make(chan error, 1)
+	go func() {
+		renewResult <- guard.Renew(func(owner OwnerLease) (OwnerLease, error) {
+			close(renewStarted)
+			<-finishRenewal
+			owner.ExpiresAt = now.Add(2 * time.Minute)
+			return owner, nil
+		})
+	}()
+	<-renewStarted
+
+	nilRenewResult := make(chan error, 1)
+	go func() {
+		nilRenewResult <- guard.Renew(nil)
+	}()
+
+	select {
+	case err = <-nilRenewResult:
+	case <-time.After(time.Second):
+		close(finishRenewal)
+		t.Fatal("LeaseWorkGuardV1.Renew(nil) blocked behind an in-flight renewal")
+	}
+	close(finishRenewal)
+	if !errors.Is(err, ErrLeaseRenewalStopped) {
+		t.Fatalf("LeaseWorkGuardV1.Renew(nil) error = %v, want ErrLeaseRenewalStopped", err)
+	}
+	if err = <-renewResult; !errors.Is(err, ErrLeaseRenewalStopped) {
+		t.Fatalf("in-flight LeaseWorkGuardV1.Renew() error = %v, want ErrLeaseRenewalStopped", err)
+	}
+	if guard.CanContinue() {
+		t.Fatal("successful in-flight renewal must not revive work after a nil renewal callback")
+	}
+}
+
+func TestLeaseWorkGuardV1NilReceiverFailsClosed(t *testing.T) {
+	var guard *LeaseWorkGuardV1
+	if guard.CanContinue() {
+		t.Fatal("nil LeaseWorkGuardV1 receiver must not allow work")
+	}
+	if err := guard.Renew(nil); !errors.Is(err, ErrLeaseRenewalStopped) {
+		t.Fatalf("nil LeaseWorkGuardV1.Renew(nil) error = %v, want ErrLeaseRenewalStopped", err)
+	}
+
+	renewCalled := false
+	err := guard.Renew(func(owner OwnerLease) (OwnerLease, error) {
+		renewCalled = true
+		return owner, nil
+	})
+	if !errors.Is(err, ErrLeaseRenewalStopped) {
+		t.Fatalf("nil LeaseWorkGuardV1.Renew() error = %v, want ErrLeaseRenewalStopped", err)
+	}
+	if renewCalled {
+		t.Fatal("nil LeaseWorkGuardV1 receiver must not invoke renewal callback")
+	}
+}
+
 func TestLeaseWorkGuardV1RejectsTypedNilClock(t *testing.T) {
 	now := time.Date(2026, time.July, 24, 15, 0, 0, 0, time.UTC)
 	owner := OwnerLease{OwnerID: "worker_01", Generation: 2, ExpiresAt: now.Add(time.Minute)}

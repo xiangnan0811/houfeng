@@ -429,7 +429,7 @@ func (r *PostgresRecordPlatformRepository) RunRecordPlatformTransaction(context.
 - idempotency mismatch 永远是只读 conflict；completed row 必须有结果 fingerprint，idempotency expiry 必须严格晚于 active owner expiry。cleanup 只能删除无 live owner 的过期 primitive，不能删除 reservation/ledger/evidence。
 - 所有 claim/finalize 在同一 `pgx.Tx` 内先调用 injected `AdmissionGate`。nil/error gate 必须拒绝且产生 0 primitive write/0 send；Child 1 不实现 concrete membership SQL。
 - outbox 顺序固定为 `gate + claim + commit -> fresh authorize/render -> network send -> gate + fenced terminal/retry`。只有 allow 且 current epoch 等于 captured authorization epoch 时可发送；deny/mismatch/missing handler cancel，temporary error retry；ordinary worker logs 只允许固定安全分类，不得记录 dependency error 本文。`Run`/`RunOnce` 的 nil context 直接返回 invalid-worker error，不得 panic。
-- `RunOnce` 在依赖校验后必须先返回已取消的 context，`Run` 在启动 pass 前必须安静退出已取消的 context；pre-cancelled worker 不得 claim、authorize 或 send。`LeaseWorkGuardV1` 必须拒绝 typed-nil `Clock`，并同步 `CanContinue` 与 `Renew` 对 owner/stopped state 的访问，避免并发复活本地 authority 或 data race。
+- `RunOnce` 在依赖校验后必须先返回已取消的 context，`Run` 在启动 pass 前必须安静退出已取消的 context；pre-cancelled worker 不得 claim、authorize 或 send。`LeaseWorkGuardV1` 必须拒绝 typed-nil `Clock`，并同步 `CanContinue` 与 `Renew` 对 owner/stopped state 的访问，避免并发复活本地 authority 或 data race。nil renew callback 也属于 renewal failure：非 nil guard 必须先在 mutex 下永久置为 stopped 再返回 `ErrLeaseRenewalStopped`，后续有效 callback 不得恢复本地 work。
 - `DeletionReservationFenceV1` 的成功 fence epoch 至少为 1；reservation/epoch/deletion-fence/object-content lock 顺序不变。client-content lease 没有 object identity，不能单独授权 serving。
 
 #### 4. Validation & Error Matrix
@@ -443,7 +443,7 @@ func (r *PostgresRecordPlatformRepository) RunRecordPlatformTransaction(context.
 | outbox authorizer deny/epoch mismatch/missing handler | fenced cancel，0 send。 |
 | outbox temporary authorizer/render/sender failure | fenced retry；下一 claim 必须重新授权。 |
 | nil worker context 或 zero `FenceEpoch` | `ErrInvalidOutboxWorker` 或 `ErrInvalidReservationFence`；不得 panic/写库。 |
-| typed-nil clock、pre-cancelled worker 或 concurrent renewal | 拒绝/停止本地 work；不得 panic、claim、authorize、send 或产生 data race。 |
+| typed-nil clock、nil renew callback、pre-cancelled worker 或 concurrent renewal | 拒绝/永久停止本地 work；不得 panic、claim、authorize、send、恢复 authority 或产生 data race。 |
 
 #### 5. Good / Base / Bad Cases
 
@@ -469,7 +469,7 @@ scripts/test-record-platform-integration.sh postgres -- \
   -run '^TestPostgresIntegrationRecordPlatform' -count=1
 ```
 
-- Unit/store tests 必须覆盖 canonical/noncanonical token alias、persisted fingerprint 不可写、old-expiry fencing、nil gate/context、typed-nil clock、pre-cancelled worker、fixed-safe worker log、guard `Renew`/`CanContinue` race、零 fence epoch、0-row lost owner。
+- Unit/store tests 必须覆盖 canonical/noncanonical token alias、persisted fingerprint 不可写、old-expiry fencing、nil gate/context、typed-nil clock、nil renew callback 的永久 stop、pre-cancelled worker、fixed-safe worker log、guard `Renew`/`CanContinue` race、零 fence epoch、0-row lost owner。
 - PostgreSQL selector 不能以 `SKIP` 作为 acceptance evidence；必须覆盖并发 claim、expired takeover、stale finalizer、atomic rollback 和 reservation/epoch/object lease serialization。
 
 #### 7. Wrong vs Correct
