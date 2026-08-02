@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.60.1](https://github.com/xiangnan0811/houfeng/compare/v0.60.0...v0.60.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **recordplatform:** stop guards on nil renewal ([6584542](https://github.com/xiangnan0811/houfeng/commit/65845425d99be89b1569c37f6b07344a6b916160))
+* **recordplatform:** stop guards on nil renewal ([112356a](https://github.com/xiangnan0811/houfeng/commit/112356a53cc1bc2df73e66c0a9ee9ba0a7b46c9e))
+
+
+### Documentation
+
+* **trellis:** correct foundation migration contract ([92fa271](https://github.com/xiangnan0811/houfeng/commit/92fa271bce320ee9d7184674b9d02da338f55a57))
+* **trellis:** correct foundation migration contract ([3251e21](https://github.com/xiangnan0811/houfeng/commit/3251e21ac5a93be4203515f3c295a4a30ffa3961))
+
 ## [0.60.0](https://github.com/xiangnan0811/houfeng/compare/v0.59.0...v0.60.0) (2026-08-01)
 
 
