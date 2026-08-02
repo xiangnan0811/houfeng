@@ -33,16 +33,16 @@
 
 ## Acceptance Criteria
 
-- [ ] AC-01：flags-off 不改变现有 center/importer 自动迁移行为；`false/true` 与 `true/true` 在读取外部域输入前明确拒绝；`true/false` 不调用 `migrate.Apply`。
-- [ ] AC-02：`migrate --scope app` 的环境和参数 allowlist 仅接受 APP migrator URL、runtime role、admin role；禁止输入不被读取，命令的成功和失败路径均关闭连接且不泄漏 DSN。
-- [ ] AC-03：真实 PostgreSQL 覆盖三个独立 direct-login role，证明所有属性、`session_user == current_user`、无递归 membership、runtime/admin 不拥有受管对象，且错误 schema/owner 的 legacy state 被拒绝。
-- [ ] AC-04：受限 direct migrator 的 fresh install 与 eligible null-head adoption 在单个 transaction 中产生同一 r1、52 个 filename/checksum、204 tuple compiler ACL、migrator role binding 和 repeat read-only 结果；任一 late cutpoint、ACL/catalog drift、head drift 或 serialization retry 不留下部分 SQL、ledger、ACL、revision 或 head。
-- [ ] AC-05：r1 migrator identity 被 canonical codec、SQL schema/CHECK、persisted reader 与 runtime admission 逐字验证；篡改 role、manifest、ledger、受管 catalog、migrator-scoped default ACL、membership、`PUBLIC`、column/sequence/function privilege 或 owner 都 fail closed；无关 schema/default ACL 不导致失败。
-- [ ] AC-06：真实 schema 上 runtime/admin 没有 persistent-function `EXECUTE`，调用两个 projector 和 `record_platform_internal.digest` 均返回 SQLSTATE `42501`；catalog verifier 仍验证两 projector 的 hardened definition。
-- [ ] AC-07：records-on/delete-off 的 center 与 importer 只允许直接 runtime 登录通过 one-snapshot admission 后使用 repository；pending/unknown migration 和 `SET ROLE` 均被拒绝，且不发生 writer fallback。
-- [ ] AC-08：unit、真实 PostgreSQL、业务 smoke 和完整 Go gate 都有可复核 PASS 证据；不得把 locally skipped integration 当作验收。
-- [ ] AC-09：Child 1 保持 `in_progress`，Child 2–11 保持不准入。
-- [ ] AC-10：`.trellis/spec/backend/database-guidelines.md` 的 APP ACL 场景改为本任务的 managed-surface、one-snapshot 与 PG16 `pgcrypto` 合同；不得保留“扫描所有非系统 schema / 所有 owner default ACL”的相互矛盾规则。
+- [x] AC-01：flags-off 不改变现有 center/importer 自动迁移行为；`false/true` 与 `true/true` 在读取外部域输入前明确拒绝；`true/false` 不调用 `migrate.Apply`。
+- [x] AC-02：`migrate --scope app` 的环境和参数 allowlist 仅接受 APP migrator URL、runtime role、admin role；禁止输入不被读取，命令的成功和失败路径均关闭连接且不泄漏 DSN。
+- [x] AC-03：真实 PostgreSQL 覆盖三个独立 direct-login role，证明所有属性、`session_user == current_user`、无递归 membership、runtime/admin 不拥有受管对象，且错误 schema/owner 的 legacy state 被拒绝。
+- [x] AC-04：受限 direct migrator 的 fresh install 与 eligible null-head adoption 在单个 transaction 中产生同一 r1、52 个 filename/checksum、204 tuple compiler ACL、migrator role binding 和 repeat read-only 结果；任一 late cutpoint、ACL/catalog drift、head drift 或 serialization retry 不留下部分 SQL、ledger、ACL、revision 或 head。
+- [x] AC-05：r1 migrator identity 被 canonical codec、SQL schema/CHECK、persisted reader 与 runtime admission 逐字验证；篡改 role、manifest、ledger、受管 catalog、migrator-scoped default ACL、membership、`PUBLIC`、column/sequence/function privilege 或 owner 都 fail closed；无关 schema/default ACL 不导致失败。
+- [x] AC-06：真实 schema 上 runtime/admin 没有 persistent-function `EXECUTE`，调用两个 projector 和 `record_platform_internal.digest` 均返回 SQLSTATE `42501`；catalog verifier 仍验证两 projector 的 hardened definition。
+- [x] AC-07：records-on/delete-off 的 center 与 importer 只允许直接 runtime 登录通过 one-snapshot admission 后使用 repository；pending/unknown migration 和 `SET ROLE` 均被拒绝，且不发生 writer fallback。
+- [x] AC-08：unit、真实 PostgreSQL、业务 smoke 和完整 Go gate 都有可复核 PASS 证据；不得把 locally skipped integration 当作验收。
+- [x] AC-09：Child 1 保持 `in_progress`，Child 2–11 保持不准入。
+- [x] AC-10：`.trellis/spec/backend/database-guidelines.md` 的 APP ACL 场景改为本任务的 managed-surface、one-snapshot 与 PG16 `pgcrypto` 合同；不得保留“扫描所有非系统 schema / 所有 owner default ACL”的相互矛盾规则。
 
 ## 非目标
 
