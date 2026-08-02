@@ -133,7 +133,13 @@ func (guard *LeaseWorkGuardV1) CanContinue() bool {
 // Renew invokes a store-backed renewal callback. Any failure, malformed owner,
 // or owner-identity/generation drift permanently stops this local work guard.
 func (guard *LeaseWorkGuardV1) Renew(renew func(OwnerLease) (OwnerLease, error)) error {
-	if guard == nil || renew == nil {
+	if guard == nil {
+		return ErrLeaseRenewalStopped
+	}
+	if renew == nil {
+		guard.mu.Lock()
+		guard.stopped = true
+		guard.mu.Unlock()
 		return ErrLeaseRenewalStopped
 	}
 
