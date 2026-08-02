@@ -26,6 +26,15 @@ code.
 The matching `docs/superpowers/plans/` file is the local writing-plans mirror
 because the repository intentionally ignores that directory.
 
+## Completion note
+
+This execution recipe is complete. Its implementation was delivered through
+PR #394 at head `7858b30c`, merged to protected main as `2cbeb1bb`, and passed
+post-merge main CI run `30751460764`. Unchecked boxes and local-checkpoint
+language below preserve the original reviewed execution gates; they are not the
+current task or parent status. The current status is recorded in the child
+`prd.md` and `implement.md`: Child 1 is archived and the parent is `1/11`.
+
 ---
 
 ## Execution Boundary

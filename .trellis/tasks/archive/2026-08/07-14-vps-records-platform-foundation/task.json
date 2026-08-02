@@ -3,7 +3,7 @@
   "name": "vps-records-platform-foundation",
   "title": "统一授权与平台基础",
   "description": "建立记录平台统一授权、outbox/worker、删除账本、恢复信任与备份恢复控制面的 fail-closed 基础。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,12 +11,12 @@
   "creator": "xiangnan-arch",
   "assignee": "xiangnan-arch",
   "createdAt": "2026-07-14",
-  "completedAt": null,
-  "branch": null,
+  "completedAt": "2026-08-02",
+  "branch": "codex/vps-records-platform-current-app-acl",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "7858b30c1b4a48eac3d926caababc153790982d0",
+  "pr_url": "https://github.com/xiangnan0811/houfeng/pull/394",
   "subtasks": [],
   "children": [
     "07-24-app-acl-migration-runtime-handoff",
@@ -26,6 +26,6 @@
   ],
   "parent": "07-13-vps-detail-experience-design",
   "relatedFiles": [],
-  "notes": "",
+  "notes": "Delivered through PR #394 at head 7858b30c1b4a48eac3d926caababc153790982d0 and merged to protected main as 2cbeb1bbc28faa97b07320086304a0e5ac8f4826. Required PR CI run 30750684376 and post-merge main CI run 30751460764 passed all seven jobs; the final independent review reported no Critical, Important, or Minor findings. Repository delivery also completed through release PR #393, GitHub Release v0.61.0, release main CI run 30751815869, and publish-images run 30751821903. This completion does not start Child 2.",
   "meta": {}
 }

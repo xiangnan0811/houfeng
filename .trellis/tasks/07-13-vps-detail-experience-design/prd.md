@@ -4,7 +4,7 @@
 
 基于 0.59.0 staging 的真实使用流程、现有代码与数据能力，完整审查 VPS 详情页在功能、信息架构、视觉层级、交互可发现性、资产历史和经验记录方面的问题，并形成一套克制、清晰、适合长期运维使用的重构设计。设计应同时降低首次使用门槛和高频用户的操作成本，但不以装饰性视觉或不必要功能换取“丰富感”。
 
-完整书面设计已由用户于 2026-07-14 明确批准；当前只进入实施计划与 11 个子任务的规划阶段，未经后续明确批准仍不开始产品实现。
+完整书面设计已由用户于 2026-07-14 明确批准。当前按 11 个可独立验收的子任务实现：Child 1 已完成并合入 protected main，父任务进度为 `1/11`；Children 2–11 仍须分别审阅和明确启动，不能把 Child 1 的授权延伸为后续实现授权。
 
 ## 2026-08-02 Development Rebaseline (authoritative)
 
@@ -389,7 +389,7 @@
 
 ## Current Program Acceptance Criteria (authoritative)
 
-- [ ] `RBL-AC-01` Child 1 的当前开发版 migration/ACL convergence 与 runtime admission 支持精确 embedded source set；新鲜数据库可构建，完全相同的当前数据库可重复启动，旧开发数据库在任何 DDL/DCL/ledger mutation 前返回明确重建错误。
+- [x] `RBL-AC-01` Child 1 的当前开发版 migration/ACL convergence 与 runtime admission 支持精确 embedded source set；新鲜数据库可构建，完全相同的当前数据库可重复启动，旧开发数据库在任何 DDL/DCL/ledger mutation 前返回明确重建错误。
 - [ ] `RBL-AC-02` Child 2–10 分别交付记录核心、附件、证据、Markdown、搜索、活动/概览、比较、协作和可移植性；每个 child 的功能验收、focused tests、全量相关门和 protected-main integration 均通过。
 - [ ] `RBL-AC-03` migration 编号固定为 Child 2 `0052`、Child 3 `0053`、Child 4 `0054`、Child 9 `0055`、Child 6 `0056`、Child 7 `0057`、Child 10 `0058`；每个新增 root object 同时进入 managed surface、ACL compiler 和 runtime admission tests。
 - [ ] `RBL-AC-04` VPS 概览、项目记录中心、单主体时间线、Markdown 工作区、证据选择器和比较工作台达到批准设计的稳定/异常、loading/empty/error/revoked/deleted、desktop/390px、keyboard 和 accessibility 合同。
@@ -531,10 +531,10 @@
 - [ ] `P-AC-121` `prd.md` 与复杂任务所需的设计资料经过自审，无未解释的占位符、互相矛盾或可产生两种解释的关键要求。
 ## Open Questions
 
-- 无阻塞产品取舍。当前等待用户审阅 2026-08-02 重基线和 Child 1 有界切片计划。
+- 无阻塞产品取舍。Child 2 启动前仍需把既有规划与最新 protected main 对齐并单独审阅。
 
 ## Execution Gate
 
-- 本轮只重写规划工件，不改变任何 task status，不开始生产实现。
-- 父任务保持 `planning`；后续只 start 拥有下一项交付的 child。
-- Child 1 的新切片需经本轮规划审阅后再开始。旧总控 goal 保持暂停，不作为恢复入口。
+- 父任务保持 `planning`；Child 1 已完成并归档，当前总进度为 `1/11`。
+- Children 2–11 仍只 start 拥有下一项交付且经过单独审阅的 child；当前 closeout 不启动 Child 2。
+- 旧总控 goal 保持暂停，不作为恢复入口。
