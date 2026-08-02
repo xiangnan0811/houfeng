@@ -36,6 +36,23 @@ type AppACLEffectiveCatalogContractR1 struct {
 	RolePolicies [2]AppACLEffectiveCatalogRolePolicyR1
 }
 
+type appACLEffectiveCatalogFunctionContract struct {
+	SchemaName      string
+	Identity        string
+	OwnerRole       string
+	Kind            string
+	SecurityDefiner bool
+	Config          []string
+}
+
+type appACLEffectiveCatalogContract struct {
+	DatabaseName      string
+	RoleBindings      []AppACLRoleBinding
+	Privileges        []AppACLPrivilege
+	ManagedObjects    []AppACLManagedObjectR1
+	ExpectedFunctions []appACLEffectiveCatalogFunctionContract
+}
+
 // CompileAppACLEffectiveCatalogContractR1 derives the r1 expected catalog
 // contract from the sole canonical application privilege-set compiler.
 func CompileAppACLEffectiveCatalogContractR1(databaseName string, bindings []AppACLRoleBinding) (AppACLEffectiveCatalogContractR1, error) {
@@ -66,4 +83,50 @@ func CompileAppACLEffectiveCatalogContractR1(databaseName string, bindings []App
 		}
 	}
 	return contract, nil
+}
+
+func appACLEffectiveCatalogContractFromR1(
+	r1 AppACLEffectiveCatalogContractR1,
+	migratorRole string,
+) (appACLEffectiveCatalogContract, error) {
+	if !validCatalogRoleName(migratorRole) {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("invalid app ACL migrator role")
+	}
+	compiled, err := CompileAppACLEffectiveCatalogContractR1(r1.DatabaseName, r1.RoleBindings[:])
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("compile frozen r1 catalog contract: %w", err)
+	}
+	if compiled != r1 {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("app ACL r1 catalog contract does not match compiler output")
+	}
+	for _, binding := range r1.RoleBindings {
+		if binding.CatalogRole == migratorRole {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("app ACL migrator role reuses %s catalog role %q", binding.Subject, binding.CatalogRole)
+		}
+	}
+	surface, err := CompileAppACLManagedSurfaceR1(r1.DatabaseName)
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("compile frozen r1 managed surface: %w", err)
+	}
+
+	projectors := appACLProjectorFunctionsR1()
+	expectedFunctions := make([]appACLEffectiveCatalogFunctionContract, 0, len(projectors))
+	for _, projector := range projectors {
+		expectedFunctions = append(expectedFunctions, appACLEffectiveCatalogFunctionContract{
+			SchemaName:      projector.schemaName,
+			Identity:        projector.identity,
+			OwnerRole:       migratorRole,
+			Kind:            "f",
+			SecurityDefiner: true,
+			Config:          []string{"search_path=pg_catalog"},
+		})
+	}
+
+	return appACLEffectiveCatalogContract{
+		DatabaseName:      r1.DatabaseName,
+		RoleBindings:      append([]AppACLRoleBinding(nil), r1.RoleBindings[:]...),
+		Privileges:        append([]AppACLPrivilege(nil), r1.Privileges[:]...),
+		ManagedObjects:    append([]AppACLManagedObjectR1(nil), surface.Objects...),
+		ExpectedFunctions: expectedFunctions,
+	}, nil
 }

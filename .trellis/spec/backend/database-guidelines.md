@@ -11,7 +11,7 @@
 核心约定一句话总结：
 - **driver**：`github.com/jackc/pgx/v5` 与 `github.com/jackc/pgx/v5/pgxpool`，连接池在 `cmd/houfeng-center/bootstrap.go` 内构造（参见 `bootstrap.go:60-69`，调用 `store.OpenPostgres`）。
 - **仓库**：`internal/center/store/` 下一文件一 aggregate（`monitoring_instances.go`、`targets.go`、`incidents.go`、`sync_batches.go` 等）。
-- **schema 演进**：`db/migrations/0001_*.sql` … 当前固定 r1 末尾 `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）+ `db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations` 表。两个 record flag 都关闭时，旧 center/importer 启动路径仍由 `internal/center/store/migrate/migrate.go` 的 `Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator 收敛 r1，center/importer 只做运行时 admission，绝不在启动时调用 `Apply`。
+- **schema 演进**：`db/migrations/0001_*.sql` … 当前固定 r1 末尾 `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）+ `db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations` 表。两个 record flag 都关闭时，旧 center/importer 启动路径仍由 `internal/center/store/migrate/migrate.go` 的 `Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator 收敛当前 build 的 exact embedded set，center/importer 只做 current runtime admission，绝不在启动时调用 `Apply`。
 - **事务边界**：写多张表时使用 `pgx.Tx`，参考 `store/sync_batches.go:40-91` 的 `ApplyBatch`（一次同步批次串起 4-5 张表的写入与一次 plan 计算）。
 - **不变量**：领域规则（MonitoringInstance/Target/Probe 语义、健康状态派生、回填观测不告警）必须落到 SQL + 仓库 + 服务层共同遵守，详见后文。
 
@@ -67,7 +67,7 @@
 - 应用（仅两个 record flag 都关闭的 legacy 路径）：`cmd/houfeng-center/bootstrap.go` 调用 `migrate.Apply(ctx, db.Pool())`；后者实现见 `internal/center/store/migrate/migrate.go`：
   1. `EnsureLedger` —— 建 `schema_migrations(name primary key, applied_at)` 表
   2. 按文件名排序遍历，逐条 `HasMigration` 检查，未应用则 `ExecMigration` + `RecordMigration`
-- `records-on/delete-off` 不复用这个逐迁移提交的 API：`houfeng-record-platform-admin migrate --scope app` 在一个 scoped `SERIALIZABLE` 事务内处理固定 r1 清单、ACL 和 manifest；center/importer 的启动路径只能执行只读 admission。
+- `records-on/delete-off` 不复用这个逐迁移提交的 API：`houfeng-record-platform-admin migrate --scope app` 先编译 exact embedded set 与 post-`0051` fragment registry，再在一个 scoped `SERIALIZABLE` 事务内处理 migration、ACL 和 manifest；center/importer 的启动路径只能执行 current read-only admission。
 - **每个迁移必须幂等**：`create table if not exists`、`create index if not exists`、`alter table ... add column if not exists` 是基线写法（见 `0001_initial_schema.sql`、`0009_add_observability_filter_indexes.sql`）。
 - **视图列结构变化必须先 drop 再 recreate**：PostgreSQL 的 `CREATE OR REPLACE VIEW` 不能删除列、重排列或在中间插入列；否则会出现类似 `cannot change name of view column "evidence_snapshot" to "followup_todo_count"` 的启动失败。迁移需要使用 `drop view if exists <view_name>;` 后再 `create or replace view ...`，并保证依赖对象可随迁移重建。
 
@@ -102,31 +102,33 @@
 
 > ⚠️ **已知 gap**：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。前者是历史 Node 命名迁移，当前 schema 由 `0029_rename_nodes_to_monitoring_instances.sql` 迁到 MonitoringInstance 语义。legacy `migrate.Apply` 按文件名字典序排序，scoped r1 migrator 也把它们作为固定 52-source 清单中的两个独立 checksum source；二者顺序均由后缀决定，并不冲突。序号撞车仍违反“序号唯一”的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（当前固定 r1 末尾为 `0051_create_record_platform_foundation.sql`，若没有并发新增文件，下一个候选为 `0052_*`）。
 
-### Scenario: APP r1 scoped migrator and one-snapshot runtime admission
+### Scenario: APP current-development scoped migrator and one-snapshot runtime admission
 
 #### 1. Scope / Trigger
 
-- 触发：修改 `HOUFENG_RECORDS_ENABLED` / `HOUFENG_RECORD_PERMANENT_DELETE_ENABLED` 模式选择、`houfeng-record-platform-admin migrate --scope app`、APP ACL manifest/compiler、`ConvergeAppACLR1`、PostgreSQL managed-surface reader/verifier、`AdmitAppACLRuntime`、center bootstrap、VPS importer，或其 PostgreSQL regression 时。
-- 此场景只覆盖 `records-on/delete-off` 的 APP r1。嵌入 migration source 是固定的 `0001…0051` **52** 文件 filename + raw-byte SHA-256 checksum inventory（包含两个按字典序排列的 `0004_*`）；`0052+`、permanent delete、ledger/witness/recovery、S3 和 projector 的未来 caller 不属于 r1 admission。
-- 两个 record flag 都关闭时保留 legacy owner 自动迁移；records-on/delete-off 必须先运行 scoped migrator，随后 center/importer 只能以 runtime 身份执行 admission。`false/true` 和 `true/true` 在读取 URL、`_FILE` secret、DNS、数据库、输入文件或外部域配置前失败。
+- 触发：修改 `HOUFENG_RECORDS_ENABLED` / `HOUFENG_RECORD_PERMANENT_DELETE_ENABLED` 模式选择、`houfeng-record-platform-admin migrate --scope app`、root migration、current APP fragment/compiler、manifest/catalog verifier、`ConvergeAppACLCurrent`、`AdmitAppACLCurrentRuntime`、center bootstrap、VPS importer，或其 PostgreSQL regression 时。
+- current contract 的前 52 个 source 必须 byte-for-byte 等于冻结 `0001…0051` r1 inventory（包含两个按文件名字典序排列的 `0004_*`）。每个后来 embedded migration 必须在同一个 PR 注册一个 exact `AppACLCurrentMigrationFragment`；无 APP object 也必须注册 explicit empty fragment。当前 root set 仍止于 `0051`，所以 production registry 为空。
+- 两个 record flag 都关闭时保留 legacy owner `migrate.Apply`。`records-on/delete-off` 必须先运行 current scoped migrator，随后 center/importer 只能以 runtime 身份执行 current admission。`false/true` 和 `true/true` 在读取 URL、`_FILE` secret、DNS、数据库、输入文件或外部域配置前失败。
+- `ConvergeAppACLR1`、`AdmitAppACLRuntime` 与 isolated APP R2 bootstrap/finalize/runtime API 是冻结历史合同；保留其导出签名和 regression，但 product migration/startup 不再默认调用它们。
 
 #### 2. Signatures
 
 - 模式入口：`config.LoadRecordPlatformMode() (config.RecordPlatformMode, error)`，只返回 `RecordPlatformModeLegacy` 或 `RecordPlatformModeRuntimeAdmission`。
-- Writer：`houfeng-record-platform-admin migrate --scope app` 通过直接 migrator 连接调用 `ConvergeAppACLR1(ctx, ...)`。它是 records-on 的唯一 APP schema/ACL writer；不得调用 `migrate.Apply` 或会另开事务的 genesis helper。
-- Runtime gate：`AdmitAppACLRuntime(ctx context.Context, db *pgxpool.Pool) error` 在构造 repository 前，在同一调用方拥有的事务中组合 `readAppACLManifestRuntimeSnapshotInTxV1(ctx, tx)` 与 `readAppACLEffectiveCatalogSnapshotInTxR1(ctx, tx, input)`。
-- 持久化合同：`AppACLManifestPersistedV1.MigratorCatalogRole` 不可变且在 canonical manifest preimage 中 digest-bound。`NewAppACLEffectiveCatalogVerifierInputR1(contract, manifest.MigratorCatalogRole)` 将其交给 catalog verification；runtime 不得读取 migrator credential/configuration 来推断 projector owner。
-- Catalog 入口：`CompileAppACLEffectiveCatalogContractR1`、`VerifyAppACLEffectiveCatalogSnapshotR1` 与 `VerifyPostgresAppACLEffectiveCatalogR1` 使用同一固定 managed-surface contract。
+- Writer：`ConvergeAppACLCurrent(ctx context.Context, db *pgxpool.Pool, runtimeRole, adminRole string) (AppACLManifestPersistedV1, error)`；`houfeng-record-platform-admin migrate --scope app` 是 records-on 的唯一 APP schema/ACL writer。
+- Runtime gate：`AdmitAppACLCurrentRuntime(ctx context.Context, db *pgxpool.Pool) error`；center/importer 在构造任何 repository 前调用。
+- Extension contract：`AppACLCurrentMigrationFragment{Migration, Objects, Privileges, Functions}`；fragment registry 与 `migrations.FS` 在 transaction 前 closed-world compile，later migration 与 fragment 必须一一对应。
+- Typed cause：`migrate.ErrDevelopmentDatabaseRebuildRequired`。admin CLI 只允许该 safe sentinel 穿过 redaction boundary；任意数据库 error、raw SQL、role password 或 DSN 仍统一屏蔽。
+- 持久化合同：`AppACLManifestPersistedV1.MigratorCatalogRole` 不可变且 digest-bound；runtime 从 persisted binding 构造 current catalog verifier，不读取 migrator credential/configuration。
 
 #### 3. Contracts
 
 - `center_runtime`、`platform_admin` 与 migrator 是三个预创建、两两不同、直接认证的 `LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS` role。三者的直接与递归 membership 均为空；migration 与 runtime admission 都证明 `session_user == current_user`。`SET ROLE`、复用 owner、role membership、default ACL 或共享 login 都不能满足该合同。
-- scoped migrator 只支持 fresh install，或 exact ledger checksum set 的 eligible null-head legacy adoption。adoption 时，当前 database、`public`、`record_platform_internal` 与每个 migration-owned APP object 都必须已由同一直接 migrator owner；runtime/admin 不拥有其中任何对象。它在一个 `SERIALIZABLE` transaction 中取得 advisory lock，执行 `SET LOCAL search_path = pg_catalog, public`，按固定 source 顺序完成 ledger lock/checksum write、ACL convergence、manifest revision insert、null-head CAS、catalog re-read 与 commit。`40001`（以及支持的 `40P01`）重启整个 closure；其他错误全部 rollback DDL/DCL/ledger/ACL/head work。
-- r1 compiler 精确产出 **204** 个 ACL tuple。runtime 与 admin 的 persistent-function `EXECUTE` set 均为空。`public.record_platform_cas_contract_activation_projection(bytea)` 与 `public.record_platform_cas_domain_rotation_projection(bytea)` 仍是 migrator-owned、`SECURITY DEFINER`、唯一 `bytea` overload 的 public function，精确使用 `search_path=pg_catalog` 并显式 revoke `PUBLIC`；它们是 verifier-required object，不是 runtime/admin grant。
-- admission 只验证 migration-owned APP surface：当前 database ACL；`public` 与 `record_platform_internal` schema ACL；固定 `0001…0051` relation/view/sequence/function inventory；`public.schema_migrations`；manifest table；两个 projector；role attribute 与 recursive membership；以及 migrator 的 global、`public`、`record_platform_internal` default ACL。在该 surface 内，unknown object、错误 schema/owner、额外 direct/effective/column privilege、grant option、`PUBLIC` 或 migrator-scoped default ACL 都是 drift。
-- 无关 schema、其 object 与无关 role owner 的 default ACL 必须接受。不得恢复 whole-database non-system-schema scan，也不得拒绝无法影响 managed surface 的第三方 default ACL。
+- source/fragment compiler 必须在 `BeginTx` 前拒绝 missing/extra/duplicate fragment、duplicate object/privilege、unknown subject、unmanaged privilege/function hardening，以及新 function 缺少 exact hardening。每个 fragment 的 `Privileges(databaseName)` callback 只在 source compile 时用固定验证数据库占位符求值一次；结果、fragment input 和 nested function config 都必须 defensive-copy。后续 catalog compile 只能复制已物化 privilege template，并替换 `database` tuple 的占位符，不能再次调用 callback。
+- current convergence 只支持 fresh 与 exact-current。fresh 在一个 `SERIALIZABLE` transaction 中取得 advisory lock、固定 search path、apply exact source、revoke-first DCL、catalog verify 并插入一个 genesis manifest；exact repeat 只验证，不改变 ledger、manifest/head、owner、ACL 或 function state。null-head adoption、old source upgrade、repair 和 successor append 全部禁止；冻结 R1 wrapper 单独保留其历史 null-head adoption。
+- current catalog 以冻结 r1 base（当前为 **204** ACL tuple）加 ordered fragment object/privilege/function hardening 编译。`public.record_platform_cas_contract_activation_projection(bytea)` 与 `public.record_platform_cas_domain_rotation_projection(bytea)` 仍是 migrator-owned、`SECURITY DEFINER`、唯一 `bytea` overload、`search_path=pg_catalog` 且显式 revoke `PUBLIC`。
+- admission 只验证 compiled migration-owned surface：database、managed schema、relation/view/sequence/function、ledger/manifest、role attributes/membership、owner、direct/effective/column/default ACL 和 function hardening。current convergence 的 placement、fresh-state 与 legacy-ledger companion-object preflight 均以完整 `(schema, object identity)` tuple 检查 relation/function；不同 managed schema 可声明同名对象，无关 schema 中的同名 relation、同名 function 或其他 overload 也不属于 managed tuple。冻结 R1 的历史裸名称 shadow rejection 保持不变。managed private schema 内 unknown object 仍是 drift；无关 schema/object 与 unrelated-owner default ACL 必须接受。
 - PostgreSQL 16 `pgcrypto` 必须安装在 `record_platform_internal`；若 extension 已在其他 schema 则 fail closed。extension-member procedure 按 OID 识别，并对普通 managed owner/direct/effective/function reader 保持 opaque，因为受限 migrator 不能可靠改写 bootstrap-owned member ACL。opacity 绝不产生 reachability：`PUBLIC`、runtime、admin 对 `record_platform_internal` 都没有 `USAGE` 或 `CREATE`；同一 admission snapshot 还会拒绝同时具有 schema `USAGE` 与 function `EXECUTE` 的 reachable opaque member。migrator-owned helper/projector 仍必须显式 revoke `PUBLIC`。
-- `AdmitAppACLRuntime` 精确开启一个 `REPEATABLE READ READ ONLY` transaction。在这个 snapshot 中读取并交叉校验 direct identity、manifest chain/binding、完整 52-entry applied ledger/checksum set 与 scoped effective catalog。它不执行 DDL/DCL、不调用 migration writer；任一 mismatch 都在 repository construction 前返回 error，center/importer 必须关闭 pool，不得回退到 owner auto-migration 或 warning-only dry-run path。
+- `AdmitAppACLCurrentRuntime` 精确开启一个 `REPEATABLE READ READ ONLY` transaction。在同一 snapshot 中交叉校验 direct identity、manifest/head、exact applied source、current privileges 与 compiled catalog。它不执行 DDL/DCL、不调用 writer；失败时 center/importer 关闭 pool，不得回退到 owner migration 或 warning-only dry-run。
 
 #### 4. Validation & Error Matrix
 
@@ -134,63 +136,66 @@
 | --- | --- |
 | 两个 flag 都为 false | 选择 legacy path；现有 owner `migrate.Apply` 行为继续允许。 |
 | `false/true` 或 `true/true` flag | 在读取 URL/secret/file/network/external-domain 前 fail；不连接 database，也不执行 migration。 |
-| records-on/delete-off | center/importer 只使用 direct runtime DB identity；禁止 `migrate.Apply`、DDL/DCL、writer fallback 与 owner fallback。 |
+| records-on/delete-off | admin 默认调用 `ConvergeAppACLCurrent`；center/importer 默认调用 `AdmitAppACLCurrentRuntime`；禁止 product fallback 到 frozen R1、R2 或 `migrate.Apply`。 |
+| embedded post-`0051` migration 缺 fragment，或 fragment extra/duplicate/invalid | transaction 前拒绝；`BeginTx` 调用次数为 0。 |
+| fragment privilege callback 有状态，或 callback 返回的 captured slice 在 source compile 后被修改 | callback 调用次数固定为 1；catalog/manifest 使用 source compile 时深拷贝的 template，后续状态不能改变合同。 |
+| fresh：无 ledger/manifest/managed object | apply exact current set、DCL/catalog verify、一个 genesis，全 transaction atomic。 |
+| exact current：source/manifest/catalog 全匹配 | migrate 与 runtime 都成功；repeat 前后 durable snapshot 深相等。 |
+| applied/manifest source 数量、filename 或 raw-byte checksum 不同 | `errors.Is(err, ErrDevelopmentDatabaseRebuildRequired)`；catalog read 与所有 durable write 为 0。 |
+| nullable historical head 或有效 successor revision | rebuild-required；不得 adopt、append、repair 或读取 catalog。 |
+| malformed manifest chain、exact-source catalog/owner/ACL/function drift | 返回具体 fail-closed corruption/catalog error；不得误标为 rebuild-required。 |
 | 任一 role 不是不同的直接 constrained `LOGIN NOINHERIT` role，具有 direct/recursive membership，或 `session_user != current_user` | 在 scoped migration/admission 前 fail closed。`SET ROLE` runtime snapshot 精确拒绝为 `session user %q does not match current user %q`。 |
-| embedded/applied/manifest inventory 不是精确 52 filename/checksum entry，manifest chain/head/binding drift，或 `migrator_catalog_role` 不同 | 拒绝 admission；不得修复或推断 migrator identity。 |
-| compiler output 不是精确 204 tuple，或 runtime/admin 有任何 persistent-function `EXECUTE` | catalog drift，拒绝。runtime/admin 对任意 projector 的 direct call 都返回 SQLSTATE `42501`。 |
+| current compiler output 与 persisted privileges 不同，或 runtime/admin 取得未编译 privilege | catalog/manifest drift，拒绝。runtime/admin 对 base projector 的 direct call 返回 SQLSTATE `42501`。 |
 | managed object/grant/column ACL/default ACL/owner 或 projector definition drift | 拒绝；projector 必须 owner-only、唯一 `bytea`、`SECURITY DEFINER`、显式 revoke `PUBLIC`，并使用 `search_path=pg_catalog`。 |
-| 存在 unrelated schema/object 或 unrelated-owner default ACL | 只要不能影响固定 managed surface 就接受。 |
+| 不同 compiled managed schema 声明同名 relation/function tuple | 独立编译并按 exact tuple 检查；fresh/legacy preflight 不得因裸名称冲突拒绝。 |
+| unrelated schema 中存在 managed relation/function 的同名对象或其他 overload，或存在 unrelated-owner default ACL | 只要完整 tuple 不能影响 compiled managed surface 就接受；冻结 R1 regression 继续保留历史 shadow rejection。 |
 | `pgcrypto` 位于 `record_platform_internal` 之外 | fail closed（migration/convergence precondition 是 SQLSTATE `55000`）。 |
 | runtime/admin/PUBLIC 取得 `record_platform_internal` 的 `USAGE` 或 `CREATE`，或 opaque extension member 变为 reachable | 拒绝 catalog admission。runtime 对 `record_platform_internal.digest` 的 direct call 返回 SQLSTATE `42501`。 |
 | scoped migrator 收到 serialization failure | rollback 后重试整个 `SERIALIZABLE` closure；任一不可重试错误都不留下 partial ledger、ACL、revision 或 head state。 |
+| `BeginTx` 异常返回 `(nil, nil)` | 返回 defensive error；禁止注册 nil transaction rollback 导致 panic。 |
 
 #### 5. Good / Base / Bad Cases
 
-- Good：两个 flag 都关闭时，现有 owner bootstrap/importer path 保持 legacy migration 行为；records-on/delete-off 时，直接 migrator 先 create/adopt exact r1，随后 direct runtime login 在任一 repository 打开前通过一次 read-only admission。
-- Base：eligible legacy database 具有 null head、精确 52 filename/checksum ledger，且 `public` / `record_platform_internal` 中的固定 managed object 都由 direct migrator owner。convergence 写入包含 `migrator_catalog_role` 的 immutable r1 manifest；exact repeat 是 read-only。
+- Good：两个 flag 都关闭时保留 legacy migration；records-on/delete-off 时 direct migrator fresh converge exact current，direct runtime 在 repository 打开前通过 current one-snapshot admission。
+- Base：当前 embedded set 仍是冻结 52-source r1 prefix、fragment registry 为空；fresh convergence 写入一个 current genesis，exact repeat 和 direct runtime admission 均不改 durable state。
+- Good：未来 child 同 PR 添加 `0052+` SQL 与 exact fragment；compiler 在 transaction 前证明一一覆盖，fresh database 自动消费新 source 与 catalog contract。
+- Good：fragment callback 在 source compile 返回 privilege slice 后，调用方修改 captured slice 或 callback 自身状态；current catalog 仍使用首次物化的深拷贝结果，callback 不会再次执行。
 - Good：第三方 schema 及其第三方 owner 的 default ACL 可以保留而不扩张 APP role，所以 scoped admission 接受它们。
-- Bad：扫描每个 non-system schema 或每个 owner 的 default ACL，会把 shared database 变成无关的 global-purity requirement，错误拒绝前述 good case。
+- Good：第三方 schema 可以拥有 `monitoring_instances` 或 `record_platform_cas_contract_activation_projection(bytea)` 同名对象；current path 只检查 compiled schema/identity tuple，fresh convergence 与 runtime admission 仍成功。
+- Bad：把 old checksum、null head 或 successor revision 当作 generic error，CLI 会丢失唯一安全可操作的 rebuild cause；只测 migration 数量变化不能覆盖该状态矩阵。
 - Bad：对任一 projector 给 runtime/admin grant、把通用 `REVOKE EXECUTE ON ALL FUNCTIONS` 当作 PG16 `pgcrypto` hardening evidence，或按 extension-member name 过滤，都会创建 callable privilege 或隐藏 non-extension drift。
-- Bad：分开开启 manifest/catalog transaction、以 member login 后 `SET ROLE`、在 records-on startup 调用 `migrate.Apply`，或把 admission failure 当作 dry-run warning，都会破坏 direct-identity、one-snapshot、fail-closed boundary。
+- Bad：分开开启 manifest/catalog transaction、以 member login 后 `SET ROLE`、product route 调用 frozen R1/R2 或 `migrate.Apply`、admission failure warning-only，都会破坏 exact-current boundary。
+- Bad：source preflight 调用一次 `Privileges(validationDatabase)`，catalog compile 又调用一次 `Privileges(actualDatabase)`；stateful callback 或 captured slice 可以让事务前验证与实际 privilege contract 不一致。
 
 #### 6. Tests Required
 
-- Unit selector 与断言点：
+- Current compiler/convergence/runtime 与 caller selector：
 
   ```bash
-  go test ./internal/center/config ./internal/center/store/migrate \
-    ./cmd/houfeng-center ./cmd/houfeng-import-vps-json \
-    -run 'AppACL.*Admission|RecordPlatform|Bootstrap|Import' -count=1
+  go test ./internal/center/store/migrate ./cmd/houfeng-record-platform-admin \
+    ./cmd/houfeng-center ./cmd/houfeng-import-vps-json -count=1
   ```
 
-  断言 `TestAppACLRuntimeAdmissionUsesOneRepeatableReadOnlySnapshot`、`TestAppACLRuntimeAdmissionRejectsLedgerDriftBeforeCatalogRead`、`TestAppACLRuntimeAdmissionRejectsSetRoleIdentityBeforeCatalogRead` 与 `TestAppACLRuntimeAdmissionRejectsProjectorExecuteCatalogDrift`；configuration/bootstrap/importer case 必须证明先读 flag、records-on 恰好调用一次 admission、调用 migration 次数为零、失败时关闭，以及 dry-run/import 不回退。
-- PostgreSQL selector 与断言点：始终经 integration wrapper 运行（locally skipped test 不构成 evidence）：
-
-  ```bash
-  scripts/test-record-platform-integration.sh postgres -- \
-    go test -v ./internal/center/store/migrate \
-    -run 'TestPostgresIntegration(AppACLRuntimeAdmissionDirectLoginAndSetRole|VerifyAppACLEffectiveCatalogR1(TreatsPgcryptoMembersOpaqueAndDeniesDirectRuntimeAdmin|RejectsRuntimeAdminProjectorExecuteGrants|AcceptsUnrelatedSchemaOwnerDefaultACL))$' \
-    -count=1
-  ```
-
-  断言三个 direct constrained login、direct-login/`SET ROLE` rejection、固定 managed-surface acceptance/rejection boundary、`digest` 和两个 projector 的 SQLSTATE `42501` denial、`pgcrypto` OID opacity + schema-access denial，以及 runtime/admin persistent-function `EXECUTE` 为零。
-- 变更 writer/ACL contract 时仍必须运行 convergence integration：
+  必须覆盖 missing/registered fragment、invalid/duplicate fragment、privilege callback 单次求值与 materialized slice defensive copy、跨 managed schema 同名 tuple、unrelated ledger companion、future managed private schema、fresh/exact transaction cutpoint、count/name/checksum mismatch、null head、successor revision、SET ROLE、catalog drift、nil transaction、admin safe sentinel、legacy `Apply` 保留和三个 current 默认 binding。每个 mismatch test 同时断言 catalog/write seam 未调用。
+- Real PostgreSQL current suite 必须经 strict wrapper 运行；locally skipped test 不构成 evidence：
 
   ```bash
   scripts/test-record-platform-integration.sh postgres -- \
-    go test -v ./internal/center/store/migrate ./internal/center/platformmigrate \
-    -run 'TestPostgresIntegration(AppACL.*(Convergence|Genesis)|ProvisionRoles)' -count=1
+    go test ./internal/center/store/migrate \
+    -run '^TestPostgresIntegrationAppACLCurrent$' -count=1
   ```
 
-  断言 fresh/adoption 都 converge 到相同 52-source r1 与 204 tuple；错误 owner/schema/default ACL drift 在无 repair 下被拒绝；late failure 或 serialization retry 后没有 partial state。
+  断言 fresh + direct runtime、exact repeat 的 ledger `name/checksum/applied_at` 与其余 durable snapshot 深相等、unrelated schema 中同名 relation/function 被接受、injected future source 对 prior baseline 返回 rebuild sentinel 且前后 snapshot 深相等；wrapper 输出不得含 `SKIP`。
+- Frozen regression：完整 migrate package run 必须保留 `ConvergeAppACLR1` null-head adoption、`AdmitAppACLRuntime` one-snapshot，以及 isolated R2 bootstrap/finalize/runtime suites；current product caller 不得路由到它们。
 - Full gate 与 static writer audit：
 
   ```bash
-  GOTMPDIR=/home/murray/.codex GOFLAGS=-p=1 make verify-go
-  rg -n 'migrate\.Apply\(' cmd/houfeng-center cmd/houfeng-import-vps-json
+  make verify-go
+  rg -n 'ConvergeAppACLR1|ConvergeAppACLCurrent|AdmitAppACLRuntime|AdmitAppACLCurrentRuntime|migrate\.Apply' \
+    cmd/houfeng-record-platform-admin cmd/houfeng-center cmd/houfeng-import-vps-json
   ```
 
-  审查每个剩余 `migrate.Apply` hit 均显式处于 flags-off；records-on production path 必须只做 admission。
+  审查 `migrate.Apply` 仅位于 legacy defaults，current writer/runtime 是 records-enabled product defaults，R2 commands 仍独立。
 
 #### 7. Wrong vs Correct
 
@@ -200,12 +205,12 @@ if err := migrate.Apply(ctx, db.Pool()); err != nil {
     return err
 }
 
-// 正确：mode 选择互斥的 legacy migration 或 runtime admission。
+// 正确：mode 选择互斥的 legacy migration 或 current runtime admission。
 switch cfg.RecordPlatformMode {
 case config.RecordPlatformModeLegacy:
     err = applyMigrations(ctx, db)
 case config.RecordPlatformModeRuntimeAdmission:
-    err = migrate.AdmitAppACLRuntime(ctx, db.Pool())
+    err = migrate.AdmitAppACLCurrentRuntime(ctx, db.Pool())
 }
 ```
 
@@ -214,15 +219,15 @@ case config.RecordPlatformModeRuntimeAdmission:
 where namespace.nspname !~ '^pg_'
   and namespace.nspname <> 'information_schema'
 
--- 正确：object reader 接收固定 r1 inventory；default-ACL reader 是单独查询，
+-- 正确：object reader 接收 compiled current inventory；default-ACL reader 是单独查询，
 -- 并只按 persisted migrator role 限定范围。
-where object_identity = any($1::text[]) -- fixed database/public/internal inventory
+where namespace.nspname = any($1::name[]) -- compiled managed schema inventory
 
 -- 单独的 default-ACL query：
 where default_acl.defaclrole = $2
   and (
     default_acl.defaclnamespace = 0
-    or namespace.nspname in ('public', 'record_platform_internal')
+    or namespace.nspname = any($3::name[])
   )
 ```
 
@@ -234,9 +239,25 @@ _ = migrate.Apply(ctx, db)
 
 // 正确：一个 direct-runtime REPEATABLE READ READ ONLY transaction 检查
 // identity + manifest + ledger + scoped catalog，然后只会 admit 或 stop。
-if err := migrate.AdmitAppACLRuntime(ctx, db); err != nil {
+if err := migrate.AdmitAppACLCurrentRuntime(ctx, db); err != nil {
 	return fmt.Errorf("admit app runtime: %w", err)
 }
+```
+
+```go
+// 错误：不同 source 只给 generic error，caller 无法安全提示重建。
+return fmt.Errorf("checksum mismatch for %q", filename)
+
+// 正确：count/name/checksum、null head、valid successor 都保留 typed cause。
+return fmt.Errorf("%w: checksum mismatch for %q", ErrDevelopmentDatabaseRebuildRequired, filename)
+```
+
+```go
+// 错误：transaction-specific catalog compile 再次调用 public callback。
+privileges := fragment.Privileges(databaseName)
+
+// 正确：source compile 已物化并深拷贝 template；这里只替换 database tuple 占位符。
+privileges, err := appACLCurrentPrivilegesForDatabase(fragment.Privileges, databaseName)
 ```
 
 ---

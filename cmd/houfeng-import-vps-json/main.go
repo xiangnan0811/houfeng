@@ -264,7 +264,7 @@ func (d importerDeps) withDefaults() importerDeps {
 		d.applyMigrations = migrate.Apply
 	}
 	if d.admitRuntime == nil {
-		d.admitRuntime = migrate.AdmitAppACLRuntime
+		d.admitRuntime = migrate.AdmitAppACLCurrentRuntime
 	}
 	if d.output == nil {
 		d.output = os.Stdout

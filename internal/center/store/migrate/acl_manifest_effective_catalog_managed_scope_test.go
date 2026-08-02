@@ -238,3 +238,46 @@ func TestAppACLEffectiveCatalogManagedSurfaceScopeR1RetainsUnknownInternalObject
 		t.Fatalf("unrelated public function %#v was included in the managed catalog scope", publicFunction)
 	}
 }
+
+func TestAppACLCurrentCatalogManagedSurfaceScopeRetainsExtensionAndExcludesUnrelatedPublicObjects(t *testing.T) {
+	contract := appACLCurrentCatalogTestContract(t)
+	scope, err := newAppACLManagedSurfaceScope(contract)
+	if err != nil {
+		t.Fatalf("newAppACLManagedSurfaceScope() error = %v", err)
+	}
+
+	newTable, newFunction, _, _ := appACLCurrentCatalogTestExtension()
+	owner := AppACLEffectiveCatalogObjectOwnerR1{
+		ObjectClass:    newTable.ObjectClass,
+		SchemaName:     newTable.SchemaName,
+		ObjectIdentity: newTable.ObjectIdentity,
+	}
+	functionOwner := AppACLEffectiveCatalogObjectOwnerR1{
+		ObjectClass:    newFunction.ObjectClass,
+		SchemaName:     newFunction.SchemaName,
+		ObjectIdentity: newFunction.ObjectIdentity,
+	}
+	privilege := AppACLEffectiveCatalogPrivilegeObservationR1{
+		ObjectClass:    newTable.ObjectClass,
+		SchemaName:     newTable.SchemaName,
+		ObjectIdentity: newTable.ObjectIdentity,
+		Privilege:      AppACLPrivilegeSelect,
+	}
+	function := AppACLEffectiveCatalogFunctionR1{
+		SchemaName:        newFunction.SchemaName,
+		Name:              "future_function",
+		IdentityArguments: "",
+		Identity:          "public.future_function()",
+	}
+	if !scope.containsOwner(owner) || !scope.containsOwner(functionOwner) || !scope.containsPrivilege(privilege) || !scope.containsFunction(function) {
+		t.Fatalf("current scope excluded extension owner/privilege/function")
+	}
+
+	unrelatedOwner := owner
+	unrelatedOwner.ObjectIdentity = "unrelated_public_table"
+	unrelatedPrivilege := privilege
+	unrelatedPrivilege.ObjectIdentity = unrelatedOwner.ObjectIdentity
+	if scope.containsOwner(unrelatedOwner) || scope.containsPrivilege(unrelatedPrivilege) {
+		t.Fatalf("current scope included unrelated public object")
+	}
+}

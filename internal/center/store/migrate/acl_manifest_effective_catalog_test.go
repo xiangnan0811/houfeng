@@ -121,3 +121,53 @@ func TestCompileAppACLEffectiveCatalogContractR1IsComparableAndBindingSensitive(
 		t.Fatal("different role bindings produced an equal effective catalog contract")
 	}
 }
+
+func TestAppACLEffectiveCatalogContractFromR1PreservesFrozenContract(t *testing.T) {
+	bindings := []AppACLRoleBinding{
+		{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
+		{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+	}
+	r1, err := CompileAppACLEffectiveCatalogContractR1("houfeng", bindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generic, err := appACLEffectiveCatalogContractFromR1(r1, "houfeng_migrator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(generic.RoleBindings) != 2 || len(generic.Privileges) != appACLEffectiveCatalogR1PrivilegeCount {
+		t.Fatalf("generic R1 sizes = %d/%d, want 2/%d", len(generic.RoleBindings), len(generic.Privileges), appACLEffectiveCatalogR1PrivilegeCount)
+	}
+	if !reflect.DeepEqual(generic.RoleBindings, r1.RoleBindings[:]) || !reflect.DeepEqual(generic.Privileges, r1.Privileges[:]) {
+		t.Fatalf("generic R1 bindings/privileges differ from frozen contract")
+	}
+	surface, err := CompileAppACLManagedSurfaceR1("houfeng")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(generic.ManagedObjects, surface.Objects) {
+		t.Fatalf("generic R1 managed objects differ from frozen surface")
+	}
+	projectors := appACLProjectorFunctionsR1()
+	wantFunctions := []appACLEffectiveCatalogFunctionContract{
+		{
+			SchemaName:      projectors[0].schemaName,
+			Identity:        projectors[0].identity,
+			OwnerRole:       "houfeng_migrator",
+			Kind:            "f",
+			SecurityDefiner: true,
+			Config:          []string{"search_path=pg_catalog"},
+		},
+		{
+			SchemaName:      projectors[1].schemaName,
+			Identity:        projectors[1].identity,
+			OwnerRole:       "houfeng_migrator",
+			Kind:            "f",
+			SecurityDefiner: true,
+			Config:          []string{"search_path=pg_catalog"},
+		},
+	}
+	if !reflect.DeepEqual(generic.ExpectedFunctions, wantFunctions) {
+		t.Fatalf("generic R1 expected functions = %#v, want %#v", generic.ExpectedFunctions, wantFunctions)
+	}
+}

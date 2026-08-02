@@ -2,21 +2,62 @@ package migrate
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
-// appACLManagedSurfaceScopeR1 turns the fixed migration inventory into the
+// appACLManagedSurfaceScope turns one compiled migration inventory into the
 // only object filter used by the catalog reader. Objects in public are not
-// automatically APP objects: unrelated shared-database objects must never
+// automatically APP objects: unrelated shared-database objects never
 // participate in APP admission.
-type appACLManagedSurfaceScopeR1 struct {
+type appACLManagedSurfaceScope struct {
 	objects        map[AppACLManagedObjectR1]struct{}
-	projectorNames map[appACLManagedFunctionNameR1]struct{}
+	functionNames  map[appACLManagedFunctionName]struct{}
+	managedSchemas map[string]struct{}
+	schemaNames    []string
 }
 
-type appACLManagedFunctionNameR1 struct {
+type appACLManagedFunctionName struct {
 	schemaName string
 	name       string
+}
+
+type appACLManagedSurfaceScopeR1 = appACLManagedSurfaceScope
+type appACLManagedFunctionNameR1 = appACLManagedFunctionName
+
+func newAppACLManagedSurfaceScope(contract appACLEffectiveCatalogContract) (appACLManagedSurfaceScope, error) {
+	objects, err := canonicalAppACLManagedObjects(contract.ManagedObjects)
+	if err != nil {
+		return appACLManagedSurfaceScope{}, fmt.Errorf("canonicalize app ACL managed surface: %w", err)
+	}
+	scope := appACLManagedSurfaceScope{
+		objects:        make(map[AppACLManagedObjectR1]struct{}, len(objects)),
+		functionNames:  make(map[appACLManagedFunctionName]struct{}, len(contract.ExpectedFunctions)),
+		managedSchemas: make(map[string]struct{}),
+	}
+	schemaSet := make(map[string]struct{})
+	for _, object := range objects {
+		scope.objects[object] = struct{}{}
+		if object.SchemaName != "" {
+			schemaSet[object.SchemaName] = struct{}{}
+		}
+		if object.ObjectClass == AppACLObjectClassSchema && object.SchemaName != appACLManagedPublicSchemaR1 {
+			scope.managedSchemas[object.SchemaName] = struct{}{}
+		}
+	}
+	for _, function := range contract.ExpectedFunctions {
+		name, _, found := strings.Cut(function.Identity, "(")
+		if !found || name == "" || !validBareCatalogName(function.SchemaName) {
+			return appACLManagedSurfaceScope{}, fmt.Errorf("invalid app ACL managed function identity %q.%q", function.SchemaName, function.Identity)
+		}
+		scope.functionNames[appACLManagedFunctionName{schemaName: function.SchemaName, name: name}] = struct{}{}
+		schemaSet[function.SchemaName] = struct{}{}
+	}
+	for schemaName := range schemaSet {
+		scope.schemaNames = append(scope.schemaNames, schemaName)
+	}
+	sort.Strings(scope.schemaNames)
+	return scope, nil
 }
 
 func newAppACLManagedSurfaceScopeR1(databaseName string) (appACLManagedSurfaceScopeR1, error) {
@@ -24,25 +65,21 @@ func newAppACLManagedSurfaceScopeR1(databaseName string) (appACLManagedSurfaceSc
 	if err != nil {
 		return appACLManagedSurfaceScopeR1{}, fmt.Errorf("compile app ACL managed surface: %w", err)
 	}
-	scope := appACLManagedSurfaceScopeR1{
-		objects:        make(map[AppACLManagedObjectR1]struct{}, len(surface.Objects)),
-		projectorNames: make(map[appACLManagedFunctionNameR1]struct{}, len(appACLProjectorFunctionsR1())),
-	}
-	for _, object := range surface.Objects {
-		scope.objects[object] = struct{}{}
+	contract := appACLEffectiveCatalogContract{
+		DatabaseName:   databaseName,
+		ManagedObjects: surface.Objects,
 	}
 	for _, projector := range appACLProjectorFunctionsR1() {
-		name, _, found := strings.Cut(projector.identity, "(")
-		if !found || name == "" {
-			return appACLManagedSurfaceScopeR1{}, fmt.Errorf("invalid app ACL projector identity %q", projector.identity)
-		}
-		scope.projectorNames[appACLManagedFunctionNameR1{schemaName: projector.schemaName, name: name}] = struct{}{}
+		contract.ExpectedFunctions = append(contract.ExpectedFunctions, appACLEffectiveCatalogFunctionContract{
+			SchemaName: projector.schemaName,
+			Identity:   projector.identity,
+		})
 	}
-	return scope, nil
+	return newAppACLManagedSurfaceScope(contract)
 }
 
-func (scope appACLManagedSurfaceScopeR1) containsOwner(owner AppACLEffectiveCatalogObjectOwnerR1) bool {
-	if appACLManagedInternalObjectClassR1(owner.ObjectClass, owner.SchemaName) {
+func (scope appACLManagedSurfaceScope) containsOwner(owner AppACLEffectiveCatalogObjectOwnerR1) bool {
+	if scope.containsManagedSchemaObjectClass(owner.ObjectClass, owner.SchemaName) {
 		return true
 	}
 	object := AppACLManagedObjectR1{
@@ -54,10 +91,10 @@ func (scope appACLManagedSurfaceScopeR1) containsOwner(owner AppACLEffectiveCata
 	return ok
 }
 
-func (scope appACLManagedSurfaceScopeR1) containsPrivilege(privilege AppACLEffectiveCatalogPrivilegeObservationR1) bool {
+func (scope appACLManagedSurfaceScope) containsPrivilege(privilege AppACLEffectiveCatalogPrivilegeObservationR1) bool {
 	if privilege.ObjectClass == AppACLObjectClassFunction {
 		schemaName, name, found := appACLFunctionNameFromQualifiedIdentityR1(privilege.ObjectIdentity)
-		if found && scope.containsProjectorName(schemaName, name) {
+		if found && scope.containsFunctionName(schemaName, name) {
 			return true
 		}
 	}
@@ -65,15 +102,15 @@ func (scope appACLManagedSurfaceScopeR1) containsPrivilege(privilege AppACLEffec
 	if !found {
 		return false
 	}
-	if appACLManagedInternalObjectClassR1(object.ObjectClass, object.SchemaName) {
+	if scope.containsManagedSchemaObjectClass(object.ObjectClass, object.SchemaName) {
 		return true
 	}
 	_, ok := scope.objects[object]
 	return ok
 }
 
-func (scope appACLManagedSurfaceScopeR1) containsColumnACL(columnACL AppACLEffectiveCatalogColumnACLR1) bool {
-	if columnACL.SchemaName == appACLManagedInternalSchemaR1 {
+func (scope appACLManagedSurfaceScope) containsColumnACL(columnACL AppACLEffectiveCatalogColumnACLR1) bool {
+	if _, managed := scope.managedSchemas[columnACL.SchemaName]; managed {
 		return true
 	}
 	for _, objectClass := range []AppACLObjectClass{AppACLObjectClassTable, AppACLObjectClassView} {
@@ -88,11 +125,11 @@ func (scope appACLManagedSurfaceScopeR1) containsColumnACL(columnACL AppACLEffec
 	return false
 }
 
-func (scope appACLManagedSurfaceScopeR1) containsFunction(function AppACLEffectiveCatalogFunctionR1) bool {
-	if scope.containsProjectorName(function.SchemaName, function.Name) {
+func (scope appACLManagedSurfaceScope) containsFunction(function AppACLEffectiveCatalogFunctionR1) bool {
+	if scope.containsFunctionName(function.SchemaName, function.Name) {
 		return true
 	}
-	if appACLManagedInternalObjectClassR1(AppACLObjectClassFunction, function.SchemaName) {
+	if scope.containsManagedSchemaObjectClass(AppACLObjectClassFunction, function.SchemaName) {
 		return true
 	}
 	object := AppACLManagedObjectR1{
@@ -116,19 +153,36 @@ func appACLManagedInternalObjectClassR1(objectClass AppACLObjectClass, schemaNam
 	}
 }
 
-func (scope appACLManagedSurfaceScopeR1) containsProjectorName(schemaName, name string) bool {
-	_, ok := scope.projectorNames[appACLManagedFunctionNameR1{schemaName: schemaName, name: name}]
+func (scope appACLManagedSurfaceScope) containsManagedSchemaObjectClass(objectClass AppACLObjectClass, schemaName string) bool {
+	if _, managed := scope.managedSchemas[schemaName]; !managed {
+		return false
+	}
+	switch objectClass {
+	case AppACLObjectClassTable, AppACLObjectClassView, AppACLObjectClassSequence, AppACLObjectClassFunction:
+		return true
+	default:
+		return false
+	}
+}
+
+func (scope appACLManagedSurfaceScope) containsFunctionName(schemaName, name string) bool {
+	_, ok := scope.functionNames[appACLManagedFunctionName{schemaName: schemaName, name: name}]
 	return ok
 }
 
-func (scope appACLManagedSurfaceScopeR1) publicProjectorFunctionNames() []string {
-	names := make([]string, 0, len(scope.projectorNames))
-	for projector := range scope.projectorNames {
-		if projector.schemaName == appACLManagedPublicSchemaR1 {
-			names = append(names, projector.name)
+func (scope appACLManagedSurfaceScope) publicProjectorFunctionNames() []string {
+	names := make([]string, 0, len(scope.functionNames))
+	for function := range scope.functionNames {
+		if function.schemaName == appACLManagedPublicSchemaR1 {
+			names = append(names, function.name)
 		}
 	}
+	sort.Strings(names)
 	return names
+}
+
+func (scope appACLManagedSurfaceScope) managedSchemaNames() []string {
+	return append([]string(nil), scope.schemaNames...)
 }
 
 func appACLManagedObjectFromPrivilegeR1(privilege AppACLEffectiveCatalogPrivilegeObservationR1) (AppACLManagedObjectR1, bool) {
@@ -180,14 +234,14 @@ func appACLFunctionNameFromQualifiedIdentityR1(identity string) (schemaName, nam
 	return schemaName, name, found && name != ""
 }
 
-func scopeAppACLEffectiveCatalogSnapshotR1(
+func scopeAppACLEffectiveCatalogSnapshot(
 	snapshot AppACLEffectiveCatalogSnapshotR1,
-	scope appACLManagedSurfaceScopeR1,
+	scope appACLManagedSurfaceScope,
 ) AppACLEffectiveCatalogSnapshotR1 {
 	snapshot.Owners = scope.filterOwners(snapshot.Owners)
 
-	snapshot.DirectPrivileges = scopeAppACLEffectiveCatalogPrivilegesR1(snapshot.DirectPrivileges, scope)
-	snapshot.EffectivePrivileges = scopeAppACLEffectiveCatalogPrivilegesR1(snapshot.EffectivePrivileges, scope)
+	snapshot.DirectPrivileges = scopeAppACLEffectiveCatalogPrivileges(snapshot.DirectPrivileges, scope)
+	snapshot.EffectivePrivileges = scopeAppACLEffectiveCatalogPrivileges(snapshot.EffectivePrivileges, scope)
 
 	snapshot.ColumnACLs = scope.filterColumnACLs(snapshot.ColumnACLs)
 	snapshot.Functions = scope.filterFunctions(snapshot.Functions)
@@ -195,7 +249,14 @@ func scopeAppACLEffectiveCatalogSnapshotR1(
 	return snapshot
 }
 
-func (scope appACLManagedSurfaceScopeR1) filterOwners(owners []AppACLEffectiveCatalogObjectOwnerR1) []AppACLEffectiveCatalogObjectOwnerR1 {
+func scopeAppACLEffectiveCatalogSnapshotR1(
+	snapshot AppACLEffectiveCatalogSnapshotR1,
+	scope appACLManagedSurfaceScopeR1,
+) AppACLEffectiveCatalogSnapshotR1 {
+	return scopeAppACLEffectiveCatalogSnapshot(snapshot, scope)
+}
+
+func (scope appACLManagedSurfaceScope) filterOwners(owners []AppACLEffectiveCatalogObjectOwnerR1) []AppACLEffectiveCatalogObjectOwnerR1 {
 	filtered := make([]AppACLEffectiveCatalogObjectOwnerR1, 0, len(owners))
 	for _, owner := range owners {
 		if scope.containsOwner(owner) {
@@ -205,7 +266,7 @@ func (scope appACLManagedSurfaceScopeR1) filterOwners(owners []AppACLEffectiveCa
 	return filtered
 }
 
-func (scope appACLManagedSurfaceScopeR1) filterColumnACLs(columnACLs []AppACLEffectiveCatalogColumnACLR1) []AppACLEffectiveCatalogColumnACLR1 {
+func (scope appACLManagedSurfaceScope) filterColumnACLs(columnACLs []AppACLEffectiveCatalogColumnACLR1) []AppACLEffectiveCatalogColumnACLR1 {
 	filtered := make([]AppACLEffectiveCatalogColumnACLR1, 0, len(columnACLs))
 	for _, columnACL := range columnACLs {
 		if scope.containsColumnACL(columnACL) {
@@ -215,7 +276,7 @@ func (scope appACLManagedSurfaceScopeR1) filterColumnACLs(columnACLs []AppACLEff
 	return filtered
 }
 
-func (scope appACLManagedSurfaceScopeR1) filterFunctions(functions []AppACLEffectiveCatalogFunctionR1) []AppACLEffectiveCatalogFunctionR1 {
+func (scope appACLManagedSurfaceScope) filterFunctions(functions []AppACLEffectiveCatalogFunctionR1) []AppACLEffectiveCatalogFunctionR1 {
 	filtered := make([]AppACLEffectiveCatalogFunctionR1, 0, len(functions))
 	for _, function := range functions {
 		if scope.containsFunction(function) {
@@ -225,9 +286,9 @@ func (scope appACLManagedSurfaceScopeR1) filterFunctions(functions []AppACLEffec
 	return filtered
 }
 
-func scopeAppACLEffectiveCatalogPrivilegesR1(
+func scopeAppACLEffectiveCatalogPrivileges(
 	privileges []AppACLEffectiveCatalogPrivilegeObservationR1,
-	scope appACLManagedSurfaceScopeR1,
+	scope appACLManagedSurfaceScope,
 ) []AppACLEffectiveCatalogPrivilegeObservationR1 {
 	filtered := make([]AppACLEffectiveCatalogPrivilegeObservationR1, 0, len(privileges))
 	for _, privilege := range privileges {
@@ -236,4 +297,11 @@ func scopeAppACLEffectiveCatalogPrivilegesR1(
 		}
 	}
 	return filtered
+}
+
+func scopeAppACLEffectiveCatalogPrivilegesR1(
+	privileges []AppACLEffectiveCatalogPrivilegeObservationR1,
+	scope appACLManagedSurfaceScopeR1,
+) []AppACLEffectiveCatalogPrivilegeObservationR1 {
+	return scopeAppACLEffectiveCatalogPrivileges(privileges, scope)
 }

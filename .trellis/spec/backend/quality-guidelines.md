@@ -117,9 +117,10 @@ web:
 - 单元测试与被测文件**同目录同包**：`store/sync_batches.go` ↔ `store/sync_batches_test.go`。
 - 跨包黑盒测试用 `<package>_test` 包名：`internal/center/http/handlers/monitoring_instances_test.go` 第 1 行 `package handlers_test`。
 - 端到端测试加 `_e2e_test.go` 后缀：唯一例子 `internal/center/http/auth_e2e_test.go`，配套 helper `auth_e2e_helpers_test.go`。
-- 唯一窄例外见下方 APP ACL R2 Slice 7 场景：批准的
-  `internal/center/store/migrate/app_acl_r2_postgres_integration_test.go` 保持
-  该既有所有权名称；它不为任何其他真实数据库测试建立命名先例。
+- 唯一窄例外见下方 APP ACL PG16 catalog lane 场景：批准的
+  `internal/center/store/migrate/app_acl_r2_postgres_integration_test.go` 与
+  `internal/center/store/migrate/app_acl_current_postgres_integration_test.go`
+  保持各自既有所有权名称；它们不为其他真实数据库测试建立命名先例。
 - 路由级集成测试单独文件：`internal/center/http/router_api_test.go`、`router_test.go`。
 
 ### Table-driven 测试
@@ -571,19 +572,21 @@ if !(warning < alert && alert < critical) {
 
 ---
 
-### Scenario: APP ACL R2 Slice 7 严格 PostgreSQL 16 catalog lane
+### Scenario: APP ACL 严格 PostgreSQL 16 catalog lane
 
 #### 1. Scope / Trigger
 
 - Trigger：修改
   `internal/center/store/migrate/app_acl_r2_postgres_integration_test.go`、
+  `internal/center/store/migrate/app_acl_current_postgres_integration_test.go`、
   `scripts/test-record-platform-integration.sh` 的 `pg16-catalog` mode，或
   `.github/workflows/ci.yml` 的 `record-platform-pg16-catalog` job 时。
-- 本场景是批准文件 `app_acl_r2_postgres_integration_test.go` 的唯一命名
-  例外。它是 required-CI catalog lane，不替代普通 `_e2e_test.go` 测试，也不
-  替代父任务的 record-platform fixture modes。
-- 它只覆盖 APP ACL R2 的 PG16 authority/catalog evidence，不改变冻结的
-  R1/R2 source、tuple、ACL、data、permission、state 或 clone/restore 合同。
+- 本场景的两个批准 integration 文件是唯一命名例外。该 required-CI catalog
+  lane 不替代普通 `_e2e_test.go` 测试，也不替代父任务的 record-platform
+  fixture modes。
+- 它同时覆盖冻结 APP ACL R2 authority/catalog evidence 与 current-build
+  migration/admission evidence，不改变冻结的 R1/R2 source、tuple、ACL、data、
+  permission、state 或 clone/restore 合同。
 - 这是 cross-layer runner、Actions job、GitHub ruleset required-check 和
   `go test -json` evidence contract；实现时四个边界必须一起验证，不能把
   package compilation 或 zero-test result 标成 PG16 evidence。
@@ -613,12 +616,13 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   ```bash
   scripts/test-record-platform-integration.sh pg16-catalog -- \
     go test -json ./internal/center/store/migrate \
-    -run '^TestPostgresIntegrationAppACLR2$' -count=1
+    -run '^(TestPostgresIntegrationAppACLR2|TestPostgresIntegrationAppACLCurrent)$' -count=1
   ```
 
-  `TestPostgresIntegrationAppACLR2` 是批准文件中的唯一 top-level PG16
-  anchor；subtest 名可附在该 anchor 后。`platformmigrate` 与 record-platform
-  admin CLI 不属于这个 command。
+  `TestPostgresIntegrationAppACLR2` 与
+  `TestPostgresIntegrationAppACLCurrent` 是两个必需的 top-level PG16
+  anchor；subtest 名可附在各自 anchor 后。`platformmigrate` 与
+  record-platform admin CLI 不属于这个 command。
 - controller 的唯一写 signature 是
   `POST repos/$OWNER/$REPO/rulesets`，body name 为
   `app-acl-r2-pg16-catalog-required-v1`，`target:"branch"`、
@@ -652,9 +656,10 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   job name 是三个 check contexts 的 evidence contract；workflow 文件本身不能
   把 context 设为 required。
 - strict child 只运行 migrate package 的 anchored JSON selector。它必须将
-  stdout 保存为 JSONL，并以 `jq -se` 证明匹配
-  `^TestPostgresIntegrationAppACLR2($|/)` 的 `run` 和 `pass` event 各至少一条，
-  且该 package 的 `skip` 和 `fail` event 均为零。runner 的 child exit 和
+  stdout 保存为 JSONL，并以 `jq -se` 分别证明匹配
+  `^TestPostgresIntegrationAppACLR2($|/)` 与
+  `^TestPostgresIntegrationAppACLCurrent($|/)` 的 `run` 和 `pass` event
+  各至少一条，且该 package 的 `skip` 和 `fail` event 均为零。runner 的 child exit 和
   `--- SKIP:` failure 保持有效；event proof 额外拒绝 zero-test false green。
   runner 必须保持 child stdout/stderr 为两个独立的外部 stream：两者可分别
   tee 到内部诊断文件并共同参与 `--- SKIP:` 检查，但必须等两个 tee 完成后再
@@ -745,13 +750,14 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
 
 #### 6. Tests Required
 
-- 批准 integration file 覆盖 real PG16 authority matrix；由 strict runner 执行
+- 两个批准 integration file 覆盖 real PG16 authority/current matrix；由 strict runner 执行
   时不得以 skip 作为 evidence。runner coverage 必须证明三个 allowlist literal、
   missing/invalid input 在 side effect 前拒绝、selected image 传到四个 fixtures、
   cleanup 与 skip-to-failure behavior。它还必须用 canonical JSON stdout 加
   `go: downloading` stderr fixture 证明两个外部 stream 不混合，并分别证明
-  stdout/stderr 中的 skip marker 都 fail closed。该文件必须声明唯一 top-level
-  `TestPostgresIntegrationAppACLR2` anchor；CI/local selector 完全锚定该名字。
+  stdout/stderr 中的 skip marker 都 fail closed。两个文件必须分别声明
+  `TestPostgresIntegrationAppACLR2` 与 `TestPostgresIntegrationAppACLCurrent`
+  top-level anchor；CI/local selector 必须同时锚定这两个名字。
 - 三个 image 都必须在本地运行同一 command；可用 Docker Server 是 local
   evidence，不是把 lane 推给 CI 的理由。随后每个 CI matrix lane 也运行完全相同的
   strict entry point。每次运行把 `go test -json` output 保存为 JSONL，并执行：
@@ -761,13 +767,14 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   jq -se '
     def package_event:
       .Package == "houfeng/internal/center/store/migrate";
-    def anchored_event:
-      package_event and
-      ((.Test // "") | test("^TestPostgresIntegrationAppACLR2($|/)"));
     [.[] | select(package_event)] as $package_events
-    | [$package_events[] | select(anchored_event)] as $anchored_events
-    | (($anchored_events | map(select(.Action == "run")) | length) > 0)
-      and (($anchored_events | map(select(.Action == "pass")) | length) > 0)
+    | ["TestPostgresIntegrationAppACLR2", "TestPostgresIntegrationAppACLCurrent"] as $anchors
+    | (all($anchors[];
+        . as $anchor
+        | [$package_events[] | select(((.Test // "") | test("^" + $anchor + "($|/)")))] as $anchor_events
+        | (($anchor_events | map(select(.Action == "run")) | length) > 0)
+          and (($anchor_events | map(select(.Action == "pass")) | length) > 0)
+      ))
       and (($package_events | map(select(.Action == "skip")) | length) == 0)
       and (($package_events | map(select(.Action == "fail")) | length) == 0)
   ' "$events" >/dev/null
@@ -850,7 +857,7 @@ scripts/test-record-platform-integration.sh postgres -- go test ./...
 HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.12 \
   scripts/test-record-platform-integration.sh pg16-catalog -- \
   go test -json ./internal/center/store/migrate \
-  -run '^TestPostgresIntegrationAppACLR2$' -count=1
+  -run '^(TestPostgresIntegrationAppACLR2|TestPostgresIntegrationAppACLCurrent)$' -count=1
 ```
 
 ```yaml

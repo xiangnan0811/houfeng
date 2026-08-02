@@ -73,11 +73,29 @@ func readAppACLEffectiveCatalogSnapshotInTxR1(
 	if err := input.Validate(); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, fmt.Errorf("validate app ACL effective catalog verifier input: %w", err)
 	}
+	generic, err := appACLEffectiveCatalogVerifierInputFromR1(input)
+	if err != nil {
+		return AppACLEffectiveCatalogSnapshotR1{}, fmt.Errorf("adapt app ACL effective catalog verifier input: %w", err)
+	}
+	return readAppACLEffectiveCatalogSnapshotInTx(ctx, tx, generic)
+}
+
+func readAppACLEffectiveCatalogSnapshotInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	input appACLEffectiveCatalogVerifierInput,
+) (snapshot AppACLEffectiveCatalogSnapshotR1, err error) {
+	if err := input.Validate(); err != nil {
+		return AppACLEffectiveCatalogSnapshotR1{}, fmt.Errorf("validate app ACL effective catalog verifier input: %w", err)
+	}
 
 	if err := tx.QueryRow(ctx, `select pg_catalog.current_database(), session_user, current_user`).Scan(&snapshot.DatabaseName, &snapshot.SessionUser, &snapshot.CurrentUser); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, fmt.Errorf("read app ACL catalog database name: %w", err)
 	}
-	scope, err := newAppACLManagedSurfaceScopeR1(snapshot.DatabaseName)
+	if snapshot.DatabaseName != input.Contract.DatabaseName {
+		return AppACLEffectiveCatalogSnapshotR1{}, fmt.Errorf("app ACL catalog snapshot database %q does not match expected database %q", snapshot.DatabaseName, input.Contract.DatabaseName)
+	}
+	scope, err := newAppACLManagedSurfaceScope(input.Contract)
 	if err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
@@ -110,7 +128,7 @@ func readAppACLEffectiveCatalogSnapshotInTxR1(
 	if snapshot.ColumnACLs, err = readAppACLEffectiveCatalogColumnACLsR1(ctx, tx, scope); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
-	if snapshot.DefaultACLs, err = readAppACLEffectiveCatalogDefaultACLsR1(ctx, tx, input.MigratorRole); err != nil {
+	if snapshot.DefaultACLs, err = readAppACLEffectiveCatalogDefaultACLsForScope(ctx, tx, input.MigratorRole, scope); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
 	if snapshot.Functions, err = readAppACLEffectiveCatalogFunctionsR1(ctx, tx, scope); err != nil {
@@ -119,10 +137,10 @@ func readAppACLEffectiveCatalogSnapshotInTxR1(
 	if err := verifyAppACLPublicProjectorStructureR1(ctx, tx, scope); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
-	if err := verifyAppACLOpaqueExtensionMemberReachabilityR1(ctx, tx, roleNames[:2]); err != nil {
+	if err := verifyAppACLOpaqueExtensionMemberReachabilityForScope(ctx, tx, roleNames[:2], scope); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
-	snapshot = scopeAppACLEffectiveCatalogSnapshotR1(snapshot, scope)
+	snapshot = scopeAppACLEffectiveCatalogSnapshot(snapshot, scope)
 	return snapshot, nil
 }
 
@@ -205,6 +223,19 @@ func verifyAppACLOpaqueExtensionMemberReachabilityR1(
 	tx pgx.Tx,
 	roleNames []string,
 ) error {
+	scope, err := newAppACLManagedSurfaceScopeR1("app_acl_extension_scope")
+	if err != nil {
+		return err
+	}
+	return verifyAppACLOpaqueExtensionMemberReachabilityForScope(ctx, tx, roleNames, scope)
+}
+
+func verifyAppACLOpaqueExtensionMemberReachabilityForScope(
+	ctx context.Context,
+	tx pgx.Tx,
+	roleNames []string,
+	scope appACLManagedSurfaceScope,
+) error {
 	rows, err := tx.Query(ctx, `
 		with target_roles as (
 			select role.oid, role.rolname
@@ -216,7 +247,7 @@ func verifyAppACLOpaqueExtensionMemberReachabilityR1(
 		       procedure.proname::text || '(' || pg_catalog.pg_get_function_identity_arguments(procedure.oid) || ')'
 		from target_roles role
 		join pg_catalog.pg_namespace namespace
-		  on namespace.nspname in ('public', 'record_platform_internal')
+		  on namespace.nspname = any($2::name[])
 		join pg_catalog.pg_proc procedure on procedure.pronamespace = namespace.oid
 		where pg_catalog.has_schema_privilege(role.oid, namespace.oid, 'USAGE')
 		  and pg_catalog.has_function_privilege(role.oid, procedure.oid, 'EXECUTE')
@@ -231,7 +262,7 @@ func verifyAppACLOpaqueExtensionMemberReachabilityR1(
 		  )
 		order by role.rolname, namespace.nspname, procedure.proname,
 		         pg_catalog.pg_get_function_identity_arguments(procedure.oid)
-	`, roleNames)
+	`, roleNames, scope.managedSchemaNames())
 	if err != nil {
 		return fmt.Errorf("read app ACL opaque extension-member reachability: %w", err)
 	}
@@ -362,7 +393,7 @@ func readAppACLEffectiveCatalogOwnersR1(
 		with application_namespaces as (
 			select namespace.oid, namespace.nspname, namespace.nspowner
 			from pg_catalog.pg_namespace namespace
-			where namespace.nspname in ('public', 'record_platform_internal')
+			where namespace.nspname = any($2::name[])
 		)
 		select object_class, schema_name, object_identity, owner_role
 		from (
@@ -412,7 +443,7 @@ func readAppACLEffectiveCatalogOwnersR1(
 			)
 		) owners
 		order by object_class, schema_name, object_identity, owner_role
-	`, databaseName)
+	`, databaseName, scope.managedSchemaNames())
 	if err != nil {
 		return nil, fmt.Errorf("read app ACL object owners: %w", err)
 	}
@@ -447,7 +478,7 @@ func readAppACLEffectiveCatalogDirectPrivilegesR1(
 		with application_namespaces as (
 			select namespace.oid, namespace.nspname, namespace.nspowner, namespace.nspacl
 			from pg_catalog.pg_namespace namespace
-			where namespace.nspname in ('public', 'record_platform_internal')
+			where namespace.nspname = any($2::name[])
 		), direct_grants as (
 			select 'database'::text as object_class,
 		       ''::text as schema_name,
@@ -527,7 +558,7 @@ func readAppACLEffectiveCatalogDirectPrivilegesR1(
 		from direct_grants
 		order by object_class, schema_name, object_identity, column_name,
 		         grantee_name, privilege_type, is_grantable
-	`, databaseName)
+	`, databaseName, scope.managedSchemaNames())
 	if err != nil {
 		return nil, fmt.Errorf("read direct app ACL catalog privileges: %w", err)
 	}
@@ -571,7 +602,7 @@ func readAppACLEffectiveCatalogEffectivePrivilegesR1(
 		with application_namespaces as (
 			select namespace.oid, namespace.nspname
 			from pg_catalog.pg_namespace namespace
-			where namespace.nspname in ('public', 'record_platform_internal')
+			where namespace.nspname = any($3::name[])
 		), target_roles as (
 			select role.oid, role.rolname
 			from pg_catalog.pg_roles role
@@ -650,7 +681,7 @@ func readAppACLEffectiveCatalogEffectivePrivilegesR1(
 		select grantee_name, object_class, schema_name, object_identity, column_name, privilege_type
 		from effective_privileges
 		order by grantee_name, object_class, schema_name, object_identity, column_name, privilege_type
-	`, roleNames, databaseName)
+	`, roleNames, databaseName, scope.managedSchemaNames())
 	if err != nil {
 		return nil, fmt.Errorf("read effective app ACL catalog privileges: %w", err)
 	}
@@ -691,7 +722,7 @@ func readAppACLEffectiveCatalogColumnACLsR1(
 		with application_namespaces as (
 			select namespace.oid, namespace.nspname
 			from pg_catalog.pg_namespace namespace
-			where namespace.nspname in ('public', 'record_platform_internal')
+			where namespace.nspname = any($1::name[])
 		)
 		select namespace.nspname,
 		       relation.relname,
@@ -710,7 +741,7 @@ func readAppACLEffectiveCatalogColumnACLsR1(
 		  and not attribute.attisdropped
 		order by namespace.nspname, relation.relname, attribute.attname,
 		         grantee.rolname nulls first, acl_entry.privilege_type, acl_entry.is_grantable
-	`)
+	`, scope.managedSchemaNames())
 	if err != nil {
 		return nil, fmt.Errorf("read app ACL column grants: %w", err)
 	}
@@ -745,6 +776,19 @@ func readAppACLEffectiveCatalogDefaultACLsR1(
 	tx pgx.Tx,
 	migratorRole string,
 ) ([]AppACLEffectiveCatalogDefaultACLR1, error) {
+	scope, err := newAppACLManagedSurfaceScopeR1("app_acl_default_scope")
+	if err != nil {
+		return nil, err
+	}
+	return readAppACLEffectiveCatalogDefaultACLsForScope(ctx, tx, migratorRole, scope)
+}
+
+func readAppACLEffectiveCatalogDefaultACLsForScope(
+	ctx context.Context,
+	tx pgx.Tx,
+	migratorRole string,
+	scope appACLManagedSurfaceScope,
+) ([]AppACLEffectiveCatalogDefaultACLR1, error) {
 	rows, err := tx.Query(ctx, `
 		select owner.rolname,
 		       coalesce(namespace.nspname, ''),
@@ -761,11 +805,11 @@ func readAppACLEffectiveCatalogDefaultACLsR1(
 		where default_acl.defaclrole = (select role.oid from pg_catalog.pg_roles role where role.rolname = $1)
 		  and (
 			default_acl.defaclnamespace = 0
-			or namespace.nspname in ('public', 'record_platform_internal')
+			or namespace.nspname = any($2::name[])
 		  )
 		order by owner.rolname, namespace.nspname nulls first, default_acl.defaclobjtype,
 		         grantee.rolname nulls first, acl_entry.privilege_type, acl_entry.is_grantable
-	`, migratorRole)
+	`, migratorRole, scope.managedSchemaNames())
 	if err != nil {
 		return nil, fmt.Errorf("read app ACL default grants: %w", err)
 	}
@@ -808,7 +852,7 @@ func readAppACLEffectiveCatalogFunctionsR1(
 		from pg_catalog.pg_proc procedure
 		join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
 		join pg_catalog.pg_roles owner on owner.oid = procedure.proowner
-		where namespace.nspname in ('public', 'record_platform_internal')
+		where namespace.nspname = any($1::name[])
 		  and not exists (
 			select 1
 			from pg_catalog.pg_depend dependency
@@ -820,7 +864,7 @@ func readAppACLEffectiveCatalogFunctionsR1(
 		  )
 		order by namespace.nspname, procedure.proname,
 		         pg_catalog.pg_get_function_identity_arguments(procedure.oid)
-	`)
+	`, scope.managedSchemaNames())
 	if err != nil {
 		return nil, fmt.Errorf("read app ACL function catalog: %w", err)
 	}

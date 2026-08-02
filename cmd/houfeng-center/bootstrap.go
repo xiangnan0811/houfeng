@@ -279,7 +279,7 @@ func (d bootstrapDeps) withDefaults() bootstrapDeps {
 	}
 	if d.admitRuntime == nil {
 		d.admitRuntime = func(ctx context.Context, db postgresDB) error {
-			return migrate.AdmitAppACLRuntime(ctx, db.Pool())
+			return migrate.AdmitAppACLCurrentRuntime(ctx, db.Pool())
 		}
 	}
 	if d.seedInitialUser == nil {

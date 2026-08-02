@@ -184,8 +184,8 @@ func TestRunWithDepsRecordsOnImportUsesDefaultRuntimeAdmission(t *testing.T) {
 			return nil
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "app ACL runtime admission has no PostgreSQL pool") {
-		t.Fatalf("runWithDeps() error = %v, want default app ACL runtime admission error", err)
+	if err == nil || !strings.Contains(err.Error(), "current app ACL runtime admission has no PostgreSQL pool") {
+		t.Fatalf("runWithDeps() error = %v, want default current app ACL runtime admission error", err)
 	}
 	if applyCalls != 0 {
 		t.Fatalf("applyMigrations calls = %d, want 0", applyCalls)

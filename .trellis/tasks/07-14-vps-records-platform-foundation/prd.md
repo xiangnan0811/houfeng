@@ -9,17 +9,19 @@ merged on main.
 
 ## 2026-08-02 status
 
-This child is `in_progress` and materially implemented. Four bounded descendants
-are archived and merged:
+This child remains `in_progress`. Four bounded descendants are archived and
+merged:
 
 - `07-24-app-acl-migration-runtime-handoff`;
 - `07-24-record-platform-recordauth-policy`;
 - `07-24-record-platform-delivery-primitives`;
 - `07-27-app-acl-r2-privileged-transition`.
 
-The remaining work is one current-development migration/admission slice plus a
-closeout audit. The previous APP V3 owner-transfer, approval, drain, rotation,
-and advanced disaster-recovery expansion is removed from this child.
+The bounded current-development migration/admission slice is implemented and
+locally verified on `codex/vps-records-platform-current-app-acl`. It has not been
+pushed, opened as a PR, run through remote CI, merged to protected main, or
+archived. The previous APP V3 owner-transfer, approval, drain, rotation, and
+advanced disaster-recovery expansion is removed from this child.
 
 ## Confirmed delivered baseline
 
@@ -34,6 +36,47 @@ and advanced disaster-recovery expansion is removed from this child.
 
 Delivered code is still subject to the final child audit. This list does not
 mean the child is complete.
+
+## 2026-08-02 local closeout evidence
+
+The selected worktree is
+`/home/murray/code/houfeng/.worktree/vps-records-platform-current-app-acl`, based
+on `origin/main@d38a8cad`. The local implementation commits are:
+
+- `cfc5cd69` compile current migration fragments;
+- `d023d651` share the APP ACL catalog contract;
+- `ef3609eb` share catalog verification;
+- `f2fec02e` add strict current convergence;
+- `12ceaa01` add current runtime admission;
+- `eccb22d6` add real PostgreSQL evidence;
+- `0bf7c83b` route product callers through current entry points;
+- `2e6a45a2` harden state classification and fragment/transaction preflight.
+
+Fresh local evidence after the review fixes:
+
+- `go test ./internal/center/store/migrate -count=1`;
+- strict `TestPostgresIntegrationAppACLCurrent` through
+  `scripts/test-record-platform-integration.sh postgres` with no skip;
+- `go test` for record-platform admin, center, importer, and migrate packages;
+- `make verify-go` (`fmt-go`, `vet-go`, and all Go tests);
+- `git diff --check` and Trellis task validation for this child and its parent;
+- root migrations remain 52 files ending at
+  `0051_create_record_platform_foundation.sql`;
+- all four archived descendants and their completed task metadata are present
+  on `origin/main`.
+
+| Local acceptance area | Code and test evidence |
+| --- | --- |
+| Frozen R1/R2 compatibility | existing exported R1/R2 entry points plus the complete `internal/center/store/migrate` package run |
+| Source/fragment closed world | `app_acl_current_contract.go` and `app_acl_current_contract_test.go` |
+| Fresh/exact/different convergence | `app_acl_current_convergence.go` and `app_acl_current_convergence_test.go` |
+| Real database behavior | `app_acl_current_postgres_integration_test.go` strict PostgreSQL suite |
+| One-snapshot runtime admission | `app_acl_current_runtime_admission.go` and its tests |
+| Product routing and safe error chain | admin, center, and importer `main`/`bootstrap` tests |
+
+Checkboxes below record local branch evidence only. Child 1 is not complete
+until the selected commits pass PR review/CI and are integrated into protected
+main; the parent therefore remains `0/11`, and Child 2 has not started.
 
 ## Requirements
 
@@ -64,28 +107,28 @@ mean the child is complete.
 
 ## Acceptance Criteria
 
-- [ ] The frozen `ConvergeAppACLR1` and isolated R2 suites retain their exact
+- [x] The frozen `ConvergeAppACLR1` and isolated R2 suites retain their exact
   historical behavior.
-- [ ] A future migration injected in tests is rejected before `BeginTx` when its
+- [x] A future migration injected in tests is rejected before `BeginTx` when its
   current-development ACL fragment is absent.
-- [ ] The same injected migration reaches the transaction boundary when an exact
+- [x] The same injected migration reaches the transaction boundary when an exact
   fragment is registered, and mismatched/duplicate/unknown fragments fail.
-- [ ] Fresh PostgreSQL convergence uses the exact embedded canonical migration
+- [x] Fresh PostgreSQL convergence uses the exact embedded canonical migration
   set, creates the expected current managed surface, applies only compiled
   privileges, and persists one genesis manifest.
-- [ ] Exact repeat convergence is read-only with respect to ledger, manifest
+- [x] Exact repeat convergence is read-only with respect to ledger, manifest
   head/revisions, ownership, and ACL.
-- [ ] Current runtime admission verifies manifest, ledger, embedded sources,
+- [x] Current runtime admission verifies manifest, ledger, embedded sources,
   direct-login identity, ownership, and direct/effective privileges in one
   repeatable-read read-only snapshot.
-- [ ] A prior/different development database returns an
+- [x] A prior/different development database returns an
   `errors.Is(..., ErrDevelopmentDatabaseRebuildRequired)`-compatible error before
   mutation; the CLI and center startup surface a message that tells the operator
   to recreate the development database.
-- [ ] `cmd/houfeng-record-platform-admin` and `cmd/houfeng-center/bootstrap.go`
+- [x] `cmd/houfeng-record-platform-admin` and `cmd/houfeng-center/bootstrap.go`
   use the current entry points; no product bootstrap/finalize R2 route becomes
   the path for Records migrations.
-- [ ] Focused unit tests, APP PostgreSQL integration, CLI/bootstrap tests, full
+- [x] Focused unit tests, APP PostgreSQL integration, CLI/bootstrap tests, full
   Go verification, `git diff --check`, and `trellis-check` pass.
 - [ ] The final audit maps all surviving Child 1 acceptance to code/tests on
   protected main, removes stale APP V3 requirements from active planning, and
@@ -103,7 +146,7 @@ mean the child is complete.
 
 ## Execution Gate
 
-The child retains its existing `in_progress` state, but production implementation
-does not resume until the 2026-08-02 rebaseline and detailed closeout plan are
-reviewed. Execute only the bounded current-development slice, then stop for
-audit; do not continue directly into Child 2.
+The 2026-08-02 rebaseline and detailed closeout plan were reviewed and execution
+was explicitly approved. The bounded slice has reached its local review
+checkpoint. Do not push, open a PR, merge/archive Child 1, or continue into
+Child 2 until this checkpoint is reviewed.

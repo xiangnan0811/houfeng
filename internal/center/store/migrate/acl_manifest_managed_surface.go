@@ -66,6 +66,30 @@ func CompileAppACLManagedSurfaceR1(databaseName string) (AppACLManagedSurfaceR1,
 	return AppACLManagedSurfaceR1{DatabaseName: databaseName, Objects: ordered}, nil
 }
 
+func canonicalAppACLManagedObjects(objects []AppACLManagedObjectR1) ([]AppACLManagedObjectR1, error) {
+	ordered := append([]AppACLManagedObjectR1(nil), objects...)
+	for _, object := range ordered {
+		if err := validateAppACLManagedObject(object); err != nil {
+			return nil, err
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].ObjectClass != ordered[j].ObjectClass {
+			return ordered[i].ObjectClass < ordered[j].ObjectClass
+		}
+		if ordered[i].SchemaName != ordered[j].SchemaName {
+			return ordered[i].SchemaName < ordered[j].SchemaName
+		}
+		return ordered[i].ObjectIdentity < ordered[j].ObjectIdentity
+	})
+	for index := 1; index < len(ordered); index++ {
+		if ordered[index-1] == ordered[index] {
+			return nil, fmt.Errorf("duplicate managed object %#v", ordered[index])
+		}
+	}
+	return ordered, nil
+}
+
 type appACLManagedRelationR1 struct {
 	objectClass AppACLObjectClass
 	schemaName  string
