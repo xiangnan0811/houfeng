@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"io/fs"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -175,4 +176,245 @@ func appACLCurrentTestMigrationFS(t *testing.T) fstest.MapFS {
 		fsys[entry.Name()] = &fstest.MapFile{Data: append([]byte(nil), data...)}
 	}
 	return fsys
+}
+
+func TestCompileAppACLCurrentCatalogContractMergesFragment(t *testing.T) {
+	newTable, newFunction, privilege, function := appACLCurrentCatalogTestExtension()
+	source := appACLCurrentTestSourceContract(t, []AppACLCurrentMigrationFragment{{
+		Migration: "0052_future.sql",
+		Objects:   []AppACLManagedObjectR1{newTable, newFunction},
+		Privileges: func(string) []AppACLPrivilege {
+			return []AppACLPrivilege{privilege}
+		},
+		Functions: []AppACLCurrentFunctionContract{function},
+	}})
+
+	contract, err := compileAppACLCurrentCatalogContract(
+		source,
+		"houfeng",
+		appACLCurrentCatalogTestBindings(),
+		"houfeng_migrator",
+	)
+	if err != nil {
+		t.Fatalf("compileAppACLCurrentCatalogContract() error = %v", err)
+	}
+	if len(contract.ManagedObjects) != 87 || !containsAppACLCurrentManagedObject(contract.ManagedObjects, newTable) || !containsAppACLCurrentManagedObject(contract.ManagedObjects, newFunction) {
+		t.Fatalf("current managed objects = %d, want frozen 85 plus exact extension objects", len(contract.ManagedObjects))
+	}
+	if len(contract.Privileges) != appACLEffectiveCatalogR1PrivilegeCount+1 || !containsAppACLCurrentPrivilege(contract.Privileges, privilege) {
+		t.Fatalf("current privileges = %d, want frozen %d plus exact extension privilege", len(contract.Privileges), appACLEffectiveCatalogR1PrivilegeCount)
+	}
+	wantFunction := appACLEffectiveCatalogFunctionContract{
+		SchemaName:      function.SchemaName,
+		Identity:        function.Identity,
+		OwnerRole:       "houfeng_migrator",
+		Kind:            function.Kind,
+		SecurityDefiner: function.SecurityDefiner,
+		Config:          function.Config,
+	}
+	if len(contract.ExpectedFunctions) != 3 || !containsAppACLCurrentFunction(contract.ExpectedFunctions, wantFunction) {
+		t.Fatalf("current expected functions = %#v, want frozen projectors plus %#v", contract.ExpectedFunctions, wantFunction)
+	}
+}
+
+func TestCompileAppACLCurrentCatalogContractDefensivelyCopiesInputs(t *testing.T) {
+	newTable, newFunction, privilege, function := appACLCurrentCatalogTestExtension()
+	objects := []AppACLManagedObjectR1{newTable, newFunction}
+	privileges := []AppACLPrivilege{privilege}
+	functions := []AppACLCurrentFunctionContract{function}
+	source := appACLCurrentTestSourceContract(t, []AppACLCurrentMigrationFragment{{
+		Migration: "0052_future.sql",
+		Objects:   objects,
+		Privileges: func(string) []AppACLPrivilege {
+			return privileges
+		},
+		Functions: functions,
+	}})
+	bindings := appACLCurrentCatalogTestBindings()
+
+	contract, err := compileAppACLCurrentCatalogContract(source, "houfeng", bindings, "houfeng_migrator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects[0].ObjectIdentity = "mutated_input"
+	privileges[0].ObjectIdentity = "mutated_input"
+	functions[0].Identity = "mutated_input()"
+	functions[0].Config[0] = "search_path=mutated_input"
+	bindings[0].CatalogRole = "mutated_input"
+	source.fragments[0].Objects[0].ObjectIdentity = "mutated_source"
+	source.fragments[0].Functions[0].Config[0] = "search_path=mutated_source"
+
+	if !containsAppACLCurrentManagedObject(contract.ManagedObjects, newTable) || !containsAppACLCurrentPrivilege(contract.Privileges, privilege) {
+		t.Fatalf("compiled current contract changed after caller mutation")
+	}
+	wantFunction := appACLEffectiveCatalogFunctionContract{
+		SchemaName:      function.SchemaName,
+		Identity:        function.Identity,
+		OwnerRole:       "houfeng_migrator",
+		Kind:            function.Kind,
+		SecurityDefiner: function.SecurityDefiner,
+		Config:          []string{"search_path=pg_catalog"},
+	}
+	if !containsAppACLCurrentFunction(contract.ExpectedFunctions, wantFunction) {
+		t.Fatalf("compiled current function hardening changed after caller mutation: %#v", contract.ExpectedFunctions)
+	}
+	if got := contract.RoleBindings[0].CatalogRole; got != "houfeng_center_runtime" {
+		t.Fatalf("compiled current role binding changed to %q after caller mutation", got)
+	}
+}
+
+func TestCompileAppACLCurrentCatalogContractRejectsDuplicateBaseValues(t *testing.T) {
+	base, err := compileAppACLCurrentSourceContract(appACLCurrentTestMigrationFS(t), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	basePrivilege := appACLPrivilegesR1("houfeng")[0]
+	for _, tc := range []struct {
+		name     string
+		fragment AppACLCurrentMigrationFragment
+		want     string
+	}{
+		{
+			name: "managed_object",
+			fragment: AppACLCurrentMigrationFragment{
+				Migration: "0052_synthetic.sql",
+				Objects: []AppACLManagedObjectR1{{
+					ObjectClass:    AppACLObjectClassTable,
+					SchemaName:     "public",
+					ObjectIdentity: "schema_migrations",
+				}},
+				Privileges: func(string) []AppACLPrivilege { return nil },
+			},
+			want: "duplicate managed object",
+		},
+		{
+			name: "privilege",
+			fragment: AppACLCurrentMigrationFragment{
+				Migration: "0052_synthetic.sql",
+				Privileges: func(string) []AppACLPrivilege {
+					return []AppACLPrivilege{basePrivilege}
+				},
+			},
+			want: "duplicate canonical privilege tuple",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := base
+			source.fragments = []AppACLCurrentMigrationFragment{tc.fragment}
+			_, err := compileAppACLCurrentCatalogContract(
+				source,
+				"houfeng",
+				appACLCurrentCatalogTestBindings(),
+				"houfeng_migrator",
+			)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("compileAppACLCurrentCatalogContract() error = %v, want %q rejection", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestCompileAppACLCurrentCatalogContractExplicitEmptyFragmentChangesOnlySources(t *testing.T) {
+	baseSource, err := compileAppACLCurrentSourceContract(appACLCurrentTestMigrationFS(t), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	futureSource := appACLCurrentTestSourceContract(t, []AppACLCurrentMigrationFragment{{
+		Migration:  "0052_future.sql",
+		Privileges: func(string) []AppACLPrivilege { return nil },
+	}})
+	if reflect.DeepEqual(baseSource.sources.canonicalSet, futureSource.sources.canonicalSet) {
+		t.Fatal("explicit empty future fragment did not change the canonical migration source set")
+	}
+
+	baseCatalog, err := compileAppACLCurrentCatalogContract(baseSource, "houfeng", appACLCurrentCatalogTestBindings(), "houfeng_migrator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	futureCatalog, err := compileAppACLCurrentCatalogContract(futureSource, "houfeng", appACLCurrentCatalogTestBindings(), "houfeng_migrator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(baseCatalog, futureCatalog) {
+		t.Fatalf("explicit empty fragment changed catalog contract\nbase: %#v\nfuture: %#v", baseCatalog, futureCatalog)
+	}
+}
+
+func appACLCurrentCatalogTestExtension() (
+	AppACLManagedObjectR1,
+	AppACLManagedObjectR1,
+	AppACLPrivilege,
+	AppACLCurrentFunctionContract,
+) {
+	return AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     "public",
+			ObjectIdentity: "future_records",
+		}, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassFunction,
+			SchemaName:     "public",
+			ObjectIdentity: "future_function()",
+		}, AppACLPrivilege{
+			Subject:        AppACLSubjectCenterRuntime,
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     "public",
+			ObjectIdentity: "future_records",
+			Privilege:      AppACLPrivilegeSelect,
+		}, AppACLCurrentFunctionContract{
+			SchemaName:      "public",
+			Identity:        "future_function()",
+			Kind:            "f",
+			SecurityDefiner: true,
+			Config:          []string{"search_path=pg_catalog"},
+		}
+}
+
+func appACLCurrentTestSourceContract(t *testing.T, fragments []AppACLCurrentMigrationFragment) appACLCurrentSourceContract {
+	t.Helper()
+	fsys := appACLCurrentTestMigrationFS(t)
+	fsys["0052_future.sql"] = &fstest.MapFile{Data: []byte("select 'future';")}
+	contract, err := compileAppACLCurrentSourceContract(fsys, fragments)
+	if err != nil {
+		t.Fatalf("compile current test source contract: %v", err)
+	}
+	return contract
+}
+
+func appACLCurrentCatalogTestBindings() []AppACLRoleBinding {
+	return []AppACLRoleBinding{
+		{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
+		{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+	}
+}
+
+func containsAppACLCurrentManagedObject(objects []AppACLManagedObjectR1, want AppACLManagedObjectR1) bool {
+	for _, object := range objects {
+		if object == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAppACLCurrentPrivilege(privileges []AppACLPrivilege, want AppACLPrivilege) bool {
+	for _, privilege := range privileges {
+		if privilege == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAppACLCurrentFunction(functions []appACLEffectiveCatalogFunctionContract, want appACLEffectiveCatalogFunctionContract) bool {
+	for _, function := range functions {
+		if function.SchemaName == want.SchemaName &&
+			function.Identity == want.Identity &&
+			function.OwnerRole == want.OwnerRole &&
+			function.Kind == want.Kind &&
+			function.SecurityDefiner == want.SecurityDefiner &&
+			reflect.DeepEqual(function.Config, want.Config) {
+			return true
+		}
+	}
+	return false
 }

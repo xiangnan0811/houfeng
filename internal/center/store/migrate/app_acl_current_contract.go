@@ -3,6 +3,7 @@ package migrate
 import (
 	"fmt"
 	"io/fs"
+	"sort"
 	"strings"
 )
 
@@ -111,7 +112,7 @@ func validateAppACLCurrentFragments(fragments []AppACLCurrentMigrationFragment) 
 	newFunctions := make(map[AppACLManagedObjectR1]struct{})
 	for _, fragment := range fragments {
 		for _, object := range fragment.Objects {
-			if err := validateAppACLCurrentManagedObject(object); err != nil {
+			if err := validateAppACLManagedObject(object); err != nil {
 				return fmt.Errorf("current APP ACL fragment %q managed object: %w", fragment.Migration, err)
 			}
 			if _, duplicate := managedObjects[object]; duplicate {
@@ -153,7 +154,7 @@ func validateAppACLCurrentFragments(fragments []AppACLCurrentMigrationFragment) 
 				SchemaName:     function.SchemaName,
 				ObjectIdentity: function.Identity,
 			}
-			if err := validateAppACLCurrentManagedObject(object); err != nil {
+			if err := validateAppACLManagedObject(object); err != nil {
 				return fmt.Errorf("current APP ACL fragment %q function hardening: %w", fragment.Migration, err)
 			}
 			if _, managed := newFunctions[object]; !managed {
@@ -173,7 +174,7 @@ func validateAppACLCurrentFragments(fragments []AppACLCurrentMigrationFragment) 
 	return nil
 }
 
-func validateAppACLCurrentManagedObject(object AppACLManagedObjectR1) error {
+func validateAppACLManagedObject(object AppACLManagedObjectR1) error {
 	switch object.ObjectClass {
 	case AppACLObjectClassDatabase:
 		if object.SchemaName != "" || !validBareCatalogName(object.ObjectIdentity) {
@@ -234,4 +235,136 @@ func appACLCurrentManagedObjectFromPrivilege(privilege AppACLPrivilege) (AppACLM
 	default:
 		return AppACLManagedObjectR1{}, fmt.Errorf("unsupported privilege object class %q", privilege.ObjectClass)
 	}
+}
+
+func compileAppACLCurrentCatalogContract(
+	source appACLCurrentSourceContract,
+	databaseName string,
+	bindings []AppACLRoleBinding,
+	migratorRole string,
+) (appACLEffectiveCatalogContract, error) {
+	r1, err := CompileAppACLEffectiveCatalogContractR1(databaseName, bindings)
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("compile frozen r1 catalog base: %w", err)
+	}
+	contract, err := appACLEffectiveCatalogContractFromR1(r1, migratorRole)
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("adapt frozen r1 catalog base: %w", err)
+	}
+
+	fragmentFunctions := make(map[AppACLManagedObjectR1]struct{})
+	for _, fragment := range source.fragments {
+		contract.ManagedObjects = append(contract.ManagedObjects, fragment.Objects...)
+		for _, object := range fragment.Objects {
+			if object.ObjectClass == AppACLObjectClassFunction {
+				fragmentFunctions[object] = struct{}{}
+			}
+		}
+		if fragment.Privileges == nil {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("current APP ACL fragment %q has no privilege compiler", fragment.Migration)
+		}
+		contract.Privileges = append(contract.Privileges, fragment.Privileges(databaseName)...)
+		for _, function := range fragment.Functions {
+			contract.ExpectedFunctions = append(contract.ExpectedFunctions, appACLEffectiveCatalogFunctionContract{
+				SchemaName:      function.SchemaName,
+				Identity:        function.Identity,
+				OwnerRole:       migratorRole,
+				Kind:            function.Kind,
+				SecurityDefiner: function.SecurityDefiner,
+				Config:          append([]string(nil), function.Config...),
+			})
+		}
+	}
+
+	canonicalBody, err := CanonicalPrivilegeSetBodyV1(contract.RoleBindings, contract.Privileges)
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonicalize current APP ACL privileges: %w", err)
+	}
+	canonicalSet, err := ParseCanonicalPrivilegeSetBodyV1(canonicalBody)
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("parse current APP ACL privileges: %w", err)
+	}
+	contract.RoleBindings = append([]AppACLRoleBinding(nil), canonicalSet.RoleBindings...)
+	contract.Privileges = append([]AppACLPrivilege(nil), canonicalSet.Privileges...)
+
+	contract.ManagedObjects, err = canonicalAppACLManagedObjects(contract.ManagedObjects)
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonicalize current APP ACL managed objects: %w", err)
+	}
+	contract.ExpectedFunctions, err = canonicalAppACLEffectiveCatalogFunctionContracts(contract.ExpectedFunctions)
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonicalize current APP ACL function hardening: %w", err)
+	}
+
+	managed := make(map[AppACLManagedObjectR1]struct{}, len(contract.ManagedObjects))
+	for _, object := range contract.ManagedObjects {
+		managed[object] = struct{}{}
+	}
+	for _, privilege := range contract.Privileges {
+		object, err := appACLCurrentManagedObjectFromPrivilege(privilege)
+		if err != nil {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("map current APP ACL privilege to managed object: %w", err)
+		}
+		if _, ok := managed[object]; !ok {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("current APP ACL privilege references unmanaged object %#v", object)
+		}
+	}
+	expectedFunctions := make(map[AppACLManagedObjectR1]struct{}, len(contract.ExpectedFunctions))
+	for _, function := range contract.ExpectedFunctions {
+		object := AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassFunction,
+			SchemaName:     function.SchemaName,
+			ObjectIdentity: function.Identity,
+		}
+		if _, ok := managed[object]; !ok {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("current APP ACL function hardening references unmanaged function %#v", object)
+		}
+		expectedFunctions[object] = struct{}{}
+	}
+	for function := range fragmentFunctions {
+		if _, ok := expectedFunctions[function]; !ok {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("current APP ACL managed function has no hardening contract: %#v", function)
+		}
+	}
+	return contract, nil
+}
+
+func canonicalAppACLEffectiveCatalogFunctionContracts(
+	functions []appACLEffectiveCatalogFunctionContract,
+) ([]appACLEffectiveCatalogFunctionContract, error) {
+	ordered := append([]appACLEffectiveCatalogFunctionContract(nil), functions...)
+	for index := range ordered {
+		ordered[index].Config = append([]string(nil), ordered[index].Config...)
+		object := AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassFunction,
+			SchemaName:     ordered[index].SchemaName,
+			ObjectIdentity: ordered[index].Identity,
+		}
+		if err := validateAppACLManagedObject(object); err != nil {
+			return nil, err
+		}
+		if !validCatalogRoleName(ordered[index].OwnerRole) {
+			return nil, fmt.Errorf("invalid function owner role %q", ordered[index].OwnerRole)
+		}
+		if ordered[index].Kind != "f" {
+			return nil, fmt.Errorf("function %s.%s has unsupported kind %q", ordered[index].SchemaName, ordered[index].Identity, ordered[index].Kind)
+		}
+		for _, setting := range ordered[index].Config {
+			if strings.ContainsRune(setting, '\x00') {
+				return nil, fmt.Errorf("function %s.%s has invalid configuration", ordered[index].SchemaName, ordered[index].Identity)
+			}
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].SchemaName != ordered[j].SchemaName {
+			return ordered[i].SchemaName < ordered[j].SchemaName
+		}
+		return ordered[i].Identity < ordered[j].Identity
+	})
+	for index := 1; index < len(ordered); index++ {
+		if ordered[index-1].SchemaName == ordered[index].SchemaName && ordered[index-1].Identity == ordered[index].Identity {
+			return nil, fmt.Errorf("duplicate function hardening for %s.%s", ordered[index].SchemaName, ordered[index].Identity)
+		}
+	}
+	return ordered, nil
 }
