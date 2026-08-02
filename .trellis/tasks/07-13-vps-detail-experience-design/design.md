@@ -3,10 +3,10 @@
 ## 1. 文档状态
 
 - 任务：`07-13-vps-detail-experience-design`
-- 状态：产品、视觉和技术设计已于 2026-07-14 获用户整文批准；实施规划编写中。
-- 设计基线：候风 `v0.59.0`。
-- 本文不是实现批准。用户已授权创建 `implement.md` 和 11 个 planning 子任务；再次明确批准前不得执行 `task.py start`。
-- 本文描述完整目标形态。实施顺序只控制依赖和风险，不把任一已确认能力降为可选 MVP。
+- 状态：产品、视觉和技术设计已于 2026-07-14 获用户整文批准；2026-08-02 已按早期开发现状重划执行边界。
+- 历史设计基线：候风 `v0.59.0`；当前代码基线与执行事实见 `research/development-rebaseline-2026-08-02.md`。
+- 本文不是实现批准。父任务保持 planning，后续只启动拥有下一项交付的 child。
+- 本文描述完整目标形态；涉及旧数据库升级、legacy backfill、APP V3、staging/cutover/release 的段落只保留为历史风险研究，不再构成当前执行合同。
 
 ## 2. 依据与问题定义
 
@@ -950,7 +950,11 @@ sequenceDiagram
 
 ## 22. 迁移与兼容
 
-### 22.1 增量步骤
+2026-08-02 起，本项目没有用户或部署，开发数据库允许重建。当前只支持“新鲜数据库建立当前 embedded migrations 的精确 manifest/catalog”和“相同 build 重复启动”；任何不同 migration set 的旧开发数据库在 mutation 前明确要求重建。每个新增 root migration 同时登记 owned objects、runtime/admin privileges 与 admission tests。
+
+不迁移、回填或双写 `experience_logs`。不提供混合 binary/schema 版本、滚动升级或 release 周期 compatibility adapter。下列旧增量/cutover与 legacy 方案仅保存设计风险，不是当前 implementation gate。
+
+### 22.1 Historical incremental/cutover design (non-gating)
 
 1. 建立独立删除账本数据库、专用角色、独立备份流、受保护 deployment membership、minimum fence-contract version 和启动/流量/queue gate；在账本健康、全部可达成员版本合格、备份窗口可计算及恢复重放演练通过前，不启用永久删除。
 2. 增加统一授权接口、记录/修订/草稿、outbox/idempotency、Blob 和搜索 schema；旧页面不变。
@@ -962,7 +966,7 @@ sequenceDiagram
 
 不做新旧双写。回退通过前端/路由flag和向前修复完成，不执行破坏性down migration。回退旧页面时新记录仍保留，不能被旧页面改写；账本激活后禁止部署低于minimum fence-contract version的旧backend/worker，旧页面只能指向fence-aware API。滚动发布期间，永久删除只在LB/queue membership能证明所有可达成员均已登记且达标时开放。任一staging修复必须回到新非main分支，重新走受保护PR→main CI→release/image→all-flags-off精确digest部署并使旧receipt失效，禁止现场热补或branch image。
 
-### 22.2 legacy experience
+### 22.2 Historical legacy experience design (non-gating)
 
 每条旧记录以 `(legacy_source_type, legacy_source_id)` 唯一映射：
 
@@ -1201,9 +1205,11 @@ vps_overview__submitting_or_background
 
 当前任务成为父任务，拥有完整需求、任务图、跨子任务验收和最终集成审查，不直接承载实现。
 
+2026-08-02 重基线后的默认执行顺序为 `1 -> 2 -> 3 -> 4 -> 9 -> 5 -> 6 -> 7 -> 8 -> 10 -> 11`。这是依赖和评审顺序，不要求同时维护多个分支或 worktree。
+
 | 序号 | 子任务 | 直接依赖 | 独立验收焦点 |
 |---|---|---|---|
-| 1 | 统一授权与平台基础 | 无 | actor/group policy、outbox/idempotency、worker/config、独立删除账本及 postgres_sync/s3_worm full witness、RecoveryTrustStore/activation/key governance、domain identity rotation/灾难恢复/transfer/typed receipts、八个 retention roots及21/24 lifecycle/participant程序清单与binding harness、managed filesystem/core-dump 证明、各来源 RecoveryPointManifest/inventory、backup attempt/workspace、recovery-control、restore/replay 编排基础、现有来源永久删除适配和 fail-closed 启动 gate |
+| 1 | 统一授权与平台基础 | 无 | 已合入 auth/idempotency/outbox/deletion/delivery primitives；补 current-development migration/ACL admission 后审计关闭，不继续 APP V3 successor |
 | 2 | 记录、修订、草稿与状态核心 | 1 | schema、CAS、完整修订、草稿、生命周期、read fence、record purge saga 和审计投影 |
 | 3 | Blob、附件、配额与扫描 | 1, 2 | local/S3、上传状态机、准入、配额、GC pin、无宽限 purge、下载授权与 Blob backup/restore adapter |
 | 4 | 证据注册表与首批适配器 | 1, 2 | IP/监控/事件/成本/命令 schema、捕获、脱敏、可信度修复 |
@@ -1212,8 +1218,8 @@ vps_overview__submitting_or_background
 | 7 | 活动投影、单主体页面与 VPS 概览 | 2, 4, 6, 9 | 合流排序、评论/行动项活动、局部错误、稳定/异常概览和主体路由；Artifact v1 VPS 两态与单主体时间线 |
 | 8 | 横向比较工作台 | 2, 4, 5, 7 | 主体证据入口、可比性、图表/矩阵、部分覆盖和保存记录；Artifact v1 比较工作台桌面/390px 合同 |
 | 9 | 负责人、行动项、评论、关注与通知 | 1, 2 | 独立活动、提及/聚合、inbox、外部安全摘要 |
-| 10 | 导入导出与 legacy 迁移 | 2, 3, 4, 5, 6, 7, 8, 9 | 双轨导出、比较证据、投影 participant、服务端产物 purge、删除 ID 导入防复活、dry-run、幂等迁移、未解析来源 |
-| 11 | 集成切换、安全、性能、备份恢复与终验 | 1–10 | 接入各对象 backup/restore/replay adapter，完成跨存储恢复运行时、workspace janitor、删除不复活/故障演练和最终 gate；同时覆盖 flag 切换、全链路安全/容量/性能、Artifact v1 桌面/390px 语义/几何/overflow/focus/Axe 基线、短期人工视觉评审、五个页面组×六种状态的30个fixture、纯键盘、44px 与 staging，不引入像素 golden |
+| 10 | 导入导出与可移植性 | 2, 3, 4, 5, 6, 7, 8, 9 | human/machine export、安全 import、可追溯 origin、服务端产物 purge 和删除后防复活；不转换 `experience_logs` |
+| 11 | 集成验证、备份恢复与终验 | 1–10 | 接入全部 backup/restore/replay adapter，完成真实跨存储恢复、删除不复活、安全/容量/性能、desktop/390px、keyboard/Axe 和最终功能 gate；不承担 staging/release cutover |
 
 所有子任务均为必交付范围。依赖写入每个子任务 `prd.md` / `implement.md`，不靠树位置暗示。父任务只有在全部子任务独立验收和跨层验收通过后关闭。
 
@@ -1230,7 +1236,7 @@ vps_overview__submitting_or_background
 | 搜索 | PostgreSQL trigram + tsvector | 浏览器全量过滤不可扩展；外部搜索服务暂无必要 |
 | 文件 | 内容寻址 Blob + 逻辑附件 | PostgreSQL JSON/容器临时盘不适合文件 |
 | 写一致性 | 修订强事务 + outbox | 全异步会出现“已保存但材料缺失” |
-| 迁移 | 增量、幂等、无双写 | 双写会形成不可调和的两套修订事实 |
+| 迁移 | 当前开发基线、fresh/repeat、无 legacy backfill | 尚无用户/部署，旧库 successor 与双写只增加复杂度 |
 | 永久删除 | 在线清除 + 独立追加账本 + 备份窗口披露 | 绝对“即时不可恢复”无法覆盖保留中的原始备份；逐记录密钥销毁引入不必要 KMS/Vault 硬依赖 |
 | 协作 | 评论、关注、轻量行动项 | 聊天、看板、Sprint、工时、无限子任务超出运维记录边界 |
 | 权限 | 项目角色/组 + 来源交集 | 逐用户临时 ACL 难审计；匿名公开链接泄露风险高 |
@@ -1239,9 +1245,9 @@ vps_overview__submitting_or_background
 
 ## 28. 书面审阅门槛
 
-本文没有保留待实现阶段再决定的产品语义。用户已批准把具体依赖版本、文件列表和命令写入父/子 `implement.md`，并创建 11 个 planning 子任务；平台基础旧合同曾启动，但方案 A 修订后其未提交实现分支已冻结。当前规划审阅遵守：
+当前规划审阅遵守：
 
-- 父任务与平台子任务保持 `planning`；旧启动授权不覆盖方案 A 修订，最终批准后恢复同一平台分支而不重复 start；
-- 不修改产品代码、数据库迁移或部署配置；
-- 本轮不执行 `task.py start`；
-- 不把整文批准或实施计划批准解释为执行授权。
+- 父任务保持 `planning`，Child 1 维持既有 `in_progress` 状态但本轮不恢复生产实现；
+- 本轮不修改产品代码、数据库迁移或部署配置；
+- 用户审阅重基线后，再决定何时执行 Child 1 的有界 closeout slice；
+- 旧总控 goal、旧 worktree 或旧 branch 的存在不构成执行授权或进度证据。

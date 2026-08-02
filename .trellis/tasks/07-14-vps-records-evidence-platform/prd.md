@@ -4,6 +4,10 @@
 
 实现证据 kind 注册表与 IP 质量、监控、事件、订阅预算、命令审计首批不可变快照适配器。
 
+## 2026-08-02 Development Rebaseline
+
+本任务拥有 `0054_create_record_evidence.sql`，只支持 fresh/current development database 与 exact repeat。`0054` 的 managed objects/privileges/admission tests 必须与 migration 同一交付；不提供旧库 upgrade、legacy evidence backfill 或 release cutover。
+
 ## Requirements
 
 - 父设计：`../07-13-vps-detail-experience-design/design.md` §8、§12、§15、§20、§25。
@@ -20,6 +24,7 @@
 
 ## Acceptance Criteria
 
+- [ ] `0054` fresh/repeat migration 与 current APP ACL/convergence/runtime admission 通过。
 - [ ] 每个kind通过最小envelope、禁止字段、确定性canonicalization、大小、未知版本、复制/删除/权限、导入导出和比较compatibility tests。
 - [ ] Preview DTO与最终snapshot逐字段一致；补传/retention/权限/计算版本漂移不会静默保存。
 - [ ] 30天监控窗口、无完整覆盖、截断、缺口、维护与补传在快照和UI中可辨，趋势不补零/外推。

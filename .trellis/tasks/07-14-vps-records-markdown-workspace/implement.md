@@ -10,9 +10,15 @@
 
 ---
 
+## 2026-08-02 execution override
+
+- 从已接受的 Child 2/3/4/9 protected main 开始，不创建 migration。
+- Collaboration migration 为 `0055`；本任务只消费其稳定 API/组件/corpus。
+- 不做 old-database/legacy/staging/release work；Node 22 是 Web 验证工具链。
+
 ## Preconditions
 
-- [ ] 子任务2/3/4/9已合入main；确认0056、协作API/组件与comment Markdown corpus可用；Node22 active；读取web component/state/styling/quality规范。
+- [ ] 子任务2/3/4/9已合入main；确认 `0055` collaboration API/组件与comment Markdown corpus可用；Node22 active；读取web component/state/styling/quality规范。
 - [ ] 运行Go/Web baseline并记录entry/max-async bundle预算；不得用抬预算解决依赖体积。
 
 ## Task 1: 跨语言Markdown v1 corpus与服务端render
@@ -75,3 +81,4 @@
 
 - route flag关闭编辑/阅读UI；raw Markdown/revisions保持可读，不删除数据。
 - sanitizer/parser升级只能新增version并保留旧revision renderer，不原地重解释历史。
+- 返回更早代码版本时可重建开发数据库，不增加 legacy database adapter。

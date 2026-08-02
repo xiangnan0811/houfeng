@@ -10,9 +10,16 @@
 
 ---
 
+## 2026-08-02 execution override
+
+- 从 Child 2/4/5/7 已接受的 protected main 开始。
+- 不创建 migration；不做 old-database/legacy/staging/release work。
+- 保留 bounded comparison memory/admission、安全 intent 和 saved-result
+  renderer/exporter，因为它们直接保护当前功能正确性。
+
 ## Preconditions
 
-- [ ] 直接依赖子任务 2、4、5、7 已合入 `main` 且 post-merge CI 通过；task 6 通过 task 7 已可用。确认 record material participant、evidence copy lineage、renderer/exporter、record center/revision/subject evidence pages 的实际合同未漂移。
+- [ ] 直接依赖子任务 2、4、5、7 已合入 `main` 且 post-merge CI 通过；确认 record material participant、evidence copy lineage、renderer/exporter、record center/revision/subject evidence pages 的实际合同未漂移。
 - [ ] 从最新受保护主线创建非 `main` 分支，运行 `sh scripts/setup-git-hooks.sh`，再运行 `trellis-before-dev` 读取 backend/web/cross-layer 规范。
 - [ ] 确认本任务不创建 migration；记录 task 4 kind conformance、task 5 revision save 和现有 `/monitoring/compare` baseline。运行 `make verify-go`、`make verify-web` 与 `NODE_ENV=test npm --prefix web run test -- --run src/pages/MonitoringComparePage.test.tsx`，预期全部 GREEN。
 

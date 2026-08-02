@@ -10,11 +10,18 @@
 
 ---
 
+## 2026-08-02 execution override
+
+- 从 Child 2/4/6/9 已接受的 protected main 开始。
+- `0057` 同时交付 current APP ACL managed surface/privileges/admission tests。
+- 只验证 fresh/repeat；不做 old-database/`experience_logs`/staging/release work。
+- 保留固定水位、授权、局部失败、性能和响应式门，因为它们是当前功能正确性。
+
 ## Preconditions
 
 - [ ] 直接依赖子任务 2、4、6、9 已合入 `main` 且 CI 通过；`record_domain_activities` 能承载真实 comment/action events。
 - [ ] 从最新受保护主线创建非 `main` 分支，运行 `sh scripts/setup-git-hooks.sh`，再运行 `trellis-before-dev` 读取 backend/web 与 cross-layer 规范。
-- [ ] 检查当前 migration 序列并记录0051–0056文件hash为不可变，确认 `0057_create_record_activity.sql` 可用；若冲突，只按父 `implement.md` 顺延尚未发布的0057–0060及全部测试引用，禁止修改已合入0051–0056。
+- [ ] 检查当前 migration 序列，确认 `0057_create_record_activity.sql` 可用；若冲突，停止并回到父任务统一重划尚未实施编号。
 - [ ] 记录 baseline：`make verify-go`、`make verify-web`、`go test ./internal/center/http/handlers ./internal/center/store -run 'VPSTimeline|Experience' -count=1`；旧 timeline/experience 必须保持 GREEN。
 
 ## Task 1: 0057 schema、envelope、event-time 与 cursor
@@ -33,7 +40,7 @@
 
 - [ ] 写 RED tests 固定 non-null slices、source identity→deterministic activity ID golden、empty rebuild后业务全序等价但projection generation递增/旧cursor过期、correction、event/recorded time、backfilled、confidential cursor namespace/query/auth/generation/as-of/full sort tuple、revision validity interval无重叠/连续推进，以及0057 published-head行锁、relation全过滤字段冗余hash/索引/CHECK/unique/no-cascade合同。运行 `go test ./internal/center/activity ./internal/center/store/migrate -run 'Activity|RecordActivity' -count=1`，预期因类型和 migration 不存在而 FAIL。
 - [ ] 实现 immutable value types、UTC normalization、task 6 `recordcursor` confidential codec adapter 与幂等0057 migration；响应和日志不暴露global generation/head/checkpoint，presentation只允许注册版本，拒绝 arbitrary map/raw payload。
-- [ ] 运行 `go test ./internal/center/activity ./internal/center/store/migrate -run 'Activity|RecordActivity' -count=1`，预期 PASS。使用已设置的 `HOUFENG_DATABASE_URL` 运行 `HOUFENG_POSTGRES_INTEGRATION=1 go test ./internal/center/store/migrate -run 'RecordActivity' -count=1 -v`，预期 fresh/0055+0056-upgrade/repeat 全 PASS 且没有该测试的 SKIP。
+- [ ] 运行 `go test ./internal/center/activity ./internal/center/store/migrate -run 'Activity|RecordActivity' -count=1`，预期 PASS。使用已设置的 `HOUFENG_DATABASE_URL` 运行 `HOUFENG_POSTGRES_INTEGRATION=1 go test ./internal/center/store/migrate -run 'RecordActivity|AppACLCurrent' -count=1 -v`，预期 fresh/repeat/current admission 全 PASS 且没有该测试的 SKIP。
 
 ## Task 2: Source adapters、projector、checkpoint 与 deletion fence
 
@@ -198,11 +205,11 @@
 - [ ] 扩展 overview healthy/anomaly 和 subject timeline 的 desktop/390、loading/empty/no-result/local-error/lag/revoke fixtures；浏览器断言 semantic geometry/overflow，不新增与当前 Web spec 冲突的 tracked pixel baseline。
 - [ ] 运行 `npm --prefix web run test:e2e -- --grep "VPS 概览|单主体时间线"`，预期 Artifact v1、Axe、keyboard/focus/44px、document overflow、console/network/CSP 全 PASS。
 - [ ] fresh 运行 `go test -race ./internal/center/activity/... ./internal/center/vpsoverview ./internal/center/store ./internal/center/http/handlers -run 'Activity|Overview' -count=10`、`make verify-go`、Node 22 `make verify-web`、`npm --prefix web run test:e2e`、`git diff --check`，预期全部 exit 0。
-- [ ] 执行 `trellis-check`、更新 activity/VPS overview 可执行 spec、开 PR 并监控 required CI/post-merge CI；`records_v2_read` 仍默认关闭，最终默认切换留给子任务 11。
+- [ ] 执行 `trellis-check`、更新 activity/VPS overview 可执行 spec、开 PR 并监控 required CI/post-merge CI；`records_v2_read` 的完整集成默认行为由子任务 11 验证。
 
 ## Review and rollback points
 
 - Task 2 review：逐 source 审查 event-time、identity snapshot、auth scope 和禁止字段；发现同 identity/hash 漂移先修 source，禁止让 projector UPDATE 覆盖。
 - Task 4 review：用 healthy fixture 人工检查 API `anomalies=[]` 和 DOM absence；任何常驻异常槽都阻断合并。
 - Task 6 review：legacy feature-off suite 必须 fresh GREEN；不能用新 API 失败后静默 fallback 模糊真实错误。
-- Rollback：关闭 `records_v2_read`、停止 activity worker并恢复 legacy composition；0057 additive projection 保留，可从权威 sources 幂等补建。禁止 down migration、删除新 records/evidence 或重启 legacy double-write。
+- Rollback：关闭 `records_v2_read`、停止 activity worker并恢复当前旧页面 composition；0057 projection 保留，可从权威 sources 幂等补建。不执行 down migration；返回不含 `0057` 的代码版本时重建开发数据库。

@@ -10,6 +10,13 @@
 
 ---
 
+## 2026-08-02 execution override
+
+- 只从 Child 1 已关闭的 protected main 开始。
+- `0052` 与 current APP ACL fragment/admission tests 是同一交付。
+- 不做 upgrade fixture、legacy mapping、`experience_logs` 回填/双写或 staging cutover。
+- 计划中 “feature off” 只表示开发回滚，不是旧数据兼容承诺。
+
 ## Preconditions
 
 - [ ] `07-14-vps-records-platform-foundation` 已合入 main，ledger/auth/outbox/guard contracts 可用。
@@ -28,7 +35,7 @@
 **Files:** Create `db/migrations/0052_create_records_core.sql`; modify migrate tests.
 
 - [ ] source test RED：表、FK/unique/check/current pointer、无 cascade source、draft author/recovery indexes。
-- [ ] 实现幂等 migration，添加 pgx real upgrade/repeat apply；运行 migration unit + PostgreSQL 16 integration GREEN。
+- [ ] 实现幂等 migration并登记 exact current APP ACL objects/privileges；添加 pgx real fresh/repeat convergence/admission，运行 migration unit + PostgreSQL 16 integration GREEN。
 
 ## Task 3: record/revision store transaction
 
@@ -73,13 +80,13 @@
 - [ ] 实现 lazy-consumer façade，复用 `requestJSON/withQuery`，不直接 fetch。
 - [ ] 写source/bundle RED test禁止AppShell/TopBar/Sidebar/eager `api.ts`导入`recordsApi`，并证明records transport只出现在lazy chunks；`NODE_ENV=test npm --prefix web run test -- --run src/lib/recordsApi.test.ts` 和 build/bundle GREEN。
 
-## Task 8: 质量门与兼容回归
+## Task 8: 质量门与现有功能回归
 
-- [ ] 旧 `VPSExperienceLogs`/timeline handler/store/Web tests fresh 通过，确认无双写/route切换。
+- [ ] 现有非 Records VPS/renewal/monitoring tests 通过，确认本任务没有写入或读取 `experience_logs`。
 - [ ] 运行 PG integration、`make verify-go`、Node22 `make verify-web`、`git diff --check`。
 - [ ] `trellis-check` + spec update；提交/PR/required CI，保持 records feature off。
 
 ## Rollback
 
-- 0052 additive；关闭 feature 即回到旧路径，不执行 down migration。
-- 已写入的新 records 数据不可由旧 binary 改写；回退只读保留，向前修复。
+- 关闭 feature 停止新 Records 入口，不执行 down migration。
+- 返回不含 `0052` 的代码版本时重建开发数据库；不构造旧 binary 兼容路径。

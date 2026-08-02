@@ -1,8 +1,8 @@
 {
   "id": "vps-records-integration-rollout",
   "name": "vps-records-integration-rollout",
-  "title": "集成切换、安全、性能、备份恢复与终验",
-  "description": "接入全部适配器，完成跨存储备份恢复运行时、删除不复活、性能安全视觉验收、staging 切换与回退。",
+  "title": "集成验证、备份恢复与最终功能验收",
+  "description": "接入全部适配器，完成同构建跨存储备份恢复、删除不复活、安全、性能、浏览器与最终功能验收。",
   "status": "planning",
   "dev_type": null,
   "scope": null,

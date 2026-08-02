@@ -1,5 +1,9 @@
 # Markdown 编辑、阅读、差异与材料设计
 
+## 0. Development rebaseline
+
+本任务没有 migration。历史 revision 的 Markdown dialect/version compatibility 保留，因为它是新功能自身的数据合同；旧 application database 或 `experience_logs` compatibility 不保留。feature flag 只用于开发期回滚。
+
 ## 1. Markdown v1方言
 
 服务端 `internal/center/records/markdown.go` 使用 Goldmark 1.8.4，启用GFM/footnote/代码扩展，禁用raw HTML；Bluemonday 1.0.27使用显式tag/attribute/scheme allowlist。Web使用react-markdown 10.1.0 + remark-gfm 4.0.1 + rehype-sanitize 6.0.0，不启用rehype-raw。双方消费 `testdata/markdown/houfeng-v1.json`。

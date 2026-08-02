@@ -1,34 +1,97 @@
-# 搜索、记录中心与全局搜索设计
+# Search, Records Center, and Global Search Design
 
-## 1. Search projection
+## 1. Boundary
 
-`0055_create_record_search.sql`启用`pg_trgm`并创建`record_search_documents`、`record_search_subjects`、projection watermark/rebuild jobs。document保存revision ID、normalized plaintext、tsvector、current/archive flags、结构化筛选列和auth scope digest；不是业务权威。
+Search is a derived projection of authoritative current Records revisions and
+collaboration facts. The Records Center reads that projection; record detail and
+revision history continue to read Records Core.
 
-records revision participant在同事务upsert current document。Markdown plaintext只调用task5的versioned parser/render model，不另写会把HTML、引用label或代码语义解析不同的stripper。owner/participant/follow-up从current revision projection读取，action筛选调用task9的结构化`EXISTS`合同；评论/行动项正文和通知摘要不进入全文document。history projection按需/异步构建但cursor固定as-of；rebuild从revision/relations/material summary重建并对canonical hash。
+## 2. Migration 0056
 
-父执行顺序会先合入不依赖search表的0056 collaboration，再合入0055 search。此时0051–0054与0056已冻结；任务外冲突只可顺延仍未发布的search/0057–0060，不能动0056。保留号可用时，当前migrator按migration name逐项记录并可应用较小编号的missing migration；0055必须同时验证普通0051–0054路径与已有0056 ledger路径，且不得改写0056。
+`0056_create_record_search.sql` enables approved PostgreSQL text extensions and
+creates:
 
-## 2. Query/cursor
+- `record_search_documents` with current revision, normalized plain text,
+  vectors/trigrams, lifecycle, structured filter columns, auth digest, and hash;
+- `record_search_subjects` for typed subject/ref filtering;
+- `record_search_generations` and `record_search_rebuild_jobs`;
+- indexes matching the reviewed filter/sort/query shapes.
+
+The migration does not copy drafts, comments, attachment bytes, evidence
+payloads, or activity rows. Its current APP ACL fragment grants only the
+operations used by the runtime projector/query path.
+
+## 3. Projection
+
+`SearchRevisionParticipant` receives the committed complete revision plus
+collaboration projection and writes one current document in the same
+transaction. Markdown normalization uses the shared dialect parser and a
+server-owned plain-text extractor.
+
+Rebuild reads authoritative rows in a fixed generation, writes a shadow
+generation, validates count/hash/authorization coverage, and atomically
+publishes it. Concurrent commits either join the new generation through a
+journal/watermark contract or force retry; no incomplete generation is queried.
+
+Archive keeps the document with lifecycle filter; permanent delete removes it
+under fence. Import and restore rebuild from authoritative rows.
+
+## 4. Query and cursor
 
 ```go
-type Query struct {
-	Text string
-	Scope Scope // current|archive|history
-	Filters Filters
-	Sort Sort
-	Limit int
-	Cursor string
+type RecordSearchQuery struct {
+	Text             string
+	Types            []string
+	Statuses         []string
+	StatusGroups     []string
+	Lifecycles       []string
+	SubjectRefs      []SubjectRef
+	OwnerIDs         []string
+	ParticipantIDs   []string
+	Followup          TimeStateFilter
+	Action            ActionFilter
+	Tags              []string
+	Occurred          TimeRange
+	Updated           TimeRange
+	Sort              RecordSearchSort
+	PageSize          int
+	Cursor            string
 }
 ```
 
-首次请求固定upper bound/as-of watermark与normalized query digest。task 6 同时提供共享的 `internal/center/recordcursor` confidential codec：cursor内部含version/purpose/digest/auth scope hash/watermark/last rank+updated_at+record_id，但外层使用跨实例共享0400 keyring的AES-256-GCM随机nonce加密认证，并按固定长度桶padding后base64url编码；仅HMAC签名的可解码JSON、可比较的明文水位或在日志中展开token均禁止。namespace/purpose阻止search与activity token混用，TTL固定一小时；轮换先全员分发新decrypt key、验证membership digest，再切current，旧key保留到最后签发时间+TTL+2分钟skew。客户端只把token当不可比较字符串。cursor续页不能携其他query；SQL先通过recordauth可见scope候选，再trigram/tsvector rank、limit+1。
+Values within one repeated field are OR; distinct fields are AND. Action
+matching uses `EXISTS` so one record returns once. Query normalization is shared
+by cursor signing and Web URL encoding.
 
-## 3. Web
+Cursor payload binds version, query digest, authorization namespace, published
+generation, page size, expiry, and the full sort tuple. It is opaque to Web.
 
-`RecordsPage`是唯一controller/composition；private `pages/records/query`解析URL与draft filters。静态`/records/drafts`在dynamic record route前。筛选drawer复用Modal；宽表只有named local scroll。Sidebar一级“记录”在最终gate前可feature隐藏。
+The store applies authorization before returning IDs, fields, snippets, counts,
+or facets. Unauthorized and missing resources are indistinguishable.
 
-`GlobalSearch`新增record endpoint请求，与其他资产结果并发但有Abort/latest-request guard；显示最多5条record current summary和“在记录中心查看全部”。
+## 5. HTTP and Web
 
-## 4. 安全/状态
+Server endpoints provide records, drafts, filter metadata, and bounded global
+search results. DTOs use response allowlists.
 
-snippet由服务端从授权document生成并转义；禁止前端切全文。权限撤销使result移除且不泄露count。首次空库与query无结果不同；projector lag显示watermark/刷新而不是空。
+`/records` and `/records/drafts` are lazy routes with canonical URL state.
+First-empty differs from query-no-results. Local source errors remain local and
+do not render stale results as current. Global search displays a bounded Records
+group with an explicit link to the full filtered route.
+
+## 6. Security and operations
+
+No query text or result content is logged. Metrics use bounded query class,
+latency, count bucket, and reason code. Rate/size/page limits apply before
+expensive work.
+
+Search health exposes generation/lag/failure without record IDs or text.
+Permanent delete readiness requires the search adapter. Backup excludes derived
+documents and rebuilds after restore.
+
+## 7. Compatibility and rollback
+
+The current development database can be rebuilt; no prior migration ordering or
+legacy content compatibility is supported. Disabling search routes/projector
+leaves authoritative Records intact. `0056` is additive and no down migration is
+run.

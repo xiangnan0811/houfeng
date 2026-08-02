@@ -10,6 +10,12 @@
 
 ---
 
+## 2026-08-02 execution override
+
+- 子任务 1/2 必须已在 protected main 完成。
+- `0053` 同时交付 current APP ACL managed surface/privileges/admission tests。
+- 只验证 fresh/repeat；回退旧代码时重建开发数据库。
+
 ## Preconditions
 
 - [ ] 子任务 1/2 已合入 main；确认 0053 migration可用，重新运行 baseline/hook/spec。
@@ -20,7 +26,7 @@
 **Files:** Create `0053_create_record_attachments.sql`; `internal/center/attachments/{types,validate,quota}.go`; store `attachments.go`; tests.
 
 - [ ] 先写 migration/domain RED tests覆盖状态转换、hash/size、logical/physical quota、revision ref/pin/receipt constraints。
-- [ ] 实现 schema 与纯状态机；非法回退/available前引用/重复逻辑计费稳定拒绝。
+- [ ] 实现 schema、纯状态机与 `0053` current APP ACL fragment；非法回退/available前引用/重复逻辑计费稳定拒绝。
 - [ ] 真实 PG repeated migration 与并发 reserve/complete quota tests GREEN。
 
 ## Task 2: BlobStore local/S3 conformance
@@ -73,5 +79,5 @@
 
 ## Rollback
 
-- feature off停止新upload；已available bytes继续只读，不能删数据或down migration。
+- feature off停止新upload；不执行 down migration。返回不含 `0053` 的代码版本时重建开发数据库。
 - processor故障只让新复杂材料隔离，已有安全附件仍按授权可读。

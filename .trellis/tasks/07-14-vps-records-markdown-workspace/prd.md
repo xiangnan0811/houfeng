@@ -4,6 +4,10 @@
 
 实现 Markdown 权威源文、模板、引用块、安全阅读、材料选择、草稿状态、修订差异与冲突合并工作区。
 
+## 2026-08-02 Development Rebaseline
+
+本任务不创建 root migration。按默认顺序从已合入 Child 2/3/4/9 的 protected main 开始，复用 `0055` collaboration 合同；只要求当前开发版功能，不承担旧数据库、legacy experience、staging 或 release 兼容。
+
 ## Requirements
 
 - 父设计：`../07-13-vps-detail-experience-design/design.md` §9、§12.6、§13、§19–§21、§24。
@@ -41,4 +45,4 @@
 
 ## Execution Gate
 
-- 保持planning；依赖合入和用户执行授权后才start。
+- 保持 planning；Child 2/3/4/9 合入、实际 Markdown/comment/material API 复核和用户执行授权后才 start。

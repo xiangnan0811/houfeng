@@ -1,5 +1,9 @@
 # 横向比较工作台设计
 
+## 0. Development rebaseline
+
+本任务没有 migration。comparison intent 只需当前 build 内跨实例稳定并保留短 TTL/key rotation 安全；不为旧 binary 或 released database 建 successor。关闭 capability 是开发回滚，不删除已保存的 versioned comparison evidence。
+
 ## 1. 模块边界与持久化决策
 
 comparison 属于 `internal/center/evidence/`，因为只有 evidence kind registry 能判断 schema、单位、覆盖与重聚合是否兼容；不新建平行 backend package，也不读取 raw source tables。HTTP 只解析 candidate/compare 请求，store 只批量解析 immutable revision/snapshot refs，Web 只渲染服务端 allowlisted result。

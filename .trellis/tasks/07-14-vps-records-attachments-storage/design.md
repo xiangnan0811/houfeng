@@ -1,5 +1,9 @@
 # Blob、附件、配额与扫描设计
 
+## 0. Development rebaseline
+
+`0053` 与其 current APP ACL fragment 是一个原子交付；没有 old-database upgrade。local/S3 conformance、内容安全、删除和恢复语义保留，staging/release 不属于本任务。
+
 ## 1. 数据与接口
 
 `0053_create_record_attachments.sql` 创建 `blob_objects`、`record_attachments`、`attachment_uploads`、`attachment_upload_parts`、`record_revision_attachments`、`processor_workspaces`、`blob_gc_pins` 和 receipts。logical attachment 保存名称/MIME/大小/author/security state；Blob key 为 digest，不含原文件名。

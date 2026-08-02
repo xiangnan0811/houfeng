@@ -6,6 +6,12 @@
 
 完整书面设计已由用户于 2026-07-14 明确批准；当前只进入实施计划与 11 个子任务的规划阶段，未经后续明确批准仍不开始产品实现。
 
+## 2026-08-02 Development Rebaseline (authoritative)
+
+`research/development-rebaseline-2026-08-02.md` 是当前执行权威。项目没有用户或部署，当前程序不支持 `v0.60.1` 及以前数据库的原地升级；开发数据库可重建。功能正确性、权限、安全、数据一致性、删除和恢复语义继续作为门槛，但旧数据库兼容、混合版本、`experience_logs` 回填、APP V3 successor、staging/cutover/release receipt 不再属于本任务当前范围。
+
+下面的完整设计继续描述目标产品。凡与 2026-08-02 重基线冲突的升级、发布、切换或治理要求，均以重基线为准。实施按 11 个可独立验收的子任务推进；默认一次只启动一个有界子任务或切片，父任务保持 planning，不以巨型 goal 执行。
+
 ## Requirements
 
 ### 用户已报告的问题
@@ -345,7 +351,7 @@
 - 用户确认保持 Go/React 单体并在进程内按记录、证据、附件、授权、投影/通知、可移植性和 VPS 概览读模型分模块；证据使用 schema 专属注册表而非任意 JSON 渲染，前端使用独立路由工作区并拆解当前巨型 VPS 详情状态。
 - 用户确认增量迁移与向前修复方案：旧 experience 幂等转为记录且不双写，资产历史保持系统活动，短期 feature flag 对照后切换；中文搜索使用 pg_trgm/tsvector，Blob 配置/备份/恢复与后台任务可观测，第二角色必须等待统一授权基础。
 - 用户确认八层验收矩阵、可用性/可访问性/性能/迁移/备份量化门槛，以及当前任务作为父任务、11 个完整能力子任务按显式依赖独立交付并最终跨层验收的拆分。
-- 用户再次确认完整规划与设计，并授权由 Codex 自主选择后续会话编排；采用当前长会话总控、每个子任务独立新会话和隔离 worktree 串行实施。各新会话的主代理按 inline 模式直接实现与正式检查，subagent 仅可承担有界只读调查，不负责实现或质量门；该编排确认不自动构成任一 `task.py start` 授权。
+- 历史编排记录（已被 2026-08-02 重基线覆盖）：当时采用长会话总控、每个子任务独立新会话和隔离 worktree 串行实施，并限制 subagent 只读调查。该编排不再约束当前执行；goal、会话和子智能体只按有界工作与评审需要选择，且任何编排都不自动构成 `task.py start` 授权。
 - 用户随后明确要求开始实施，平台基础子任务曾在隔离分支推进并完成一轮验证；方案 A 审查发现首次信任、恢复域身份、drain/approval 与 full-witness 合同需升级，因此该分支保留未提交且冻结。当前控制会话先完成修订规划，旧授权不自动批准修订合同。
 - 用户进一步明确：无异常时不得展示异常操作、按钮或占位；有异常时才展示对应异常状态和动作，正常状态展示常规内容。
 - 用户提出记录能力应升级为侧边栏一级页面，同时保留从单台 VPS 进入其记录页面的路径，以支持跨 VPS 横向比较和单 VPS 纵向回顾。
@@ -381,7 +387,22 @@
 - 当前只有 admin 角色，监控 API 没有对象级权限。完整设计不应伪造尚不存在的 RBAC，但必须保留作者/捕获者、主体范围与未来统一授权边界。
 - `users.role` 字段已存在，但领域常量只有 `admin`；`RequireSession` 仅在请求上下文放入 `user_id`，没有放入 role/scope 或执行对象级授权。前端条件隐藏不能成为记录/证据权限边界。
 
-## Acceptance Criteria
+## Current Program Acceptance Criteria (authoritative)
+
+- [ ] `RBL-AC-01` Child 1 的当前开发版 migration/ACL convergence 与 runtime admission 支持精确 embedded source set；新鲜数据库可构建，完全相同的当前数据库可重复启动，旧开发数据库在任何 DDL/DCL/ledger mutation 前返回明确重建错误。
+- [ ] `RBL-AC-02` Child 2–10 分别交付记录核心、附件、证据、Markdown、搜索、活动/概览、比较、协作和可移植性；每个 child 的功能验收、focused tests、全量相关门和 protected-main integration 均通过。
+- [ ] `RBL-AC-03` migration 编号固定为 Child 2 `0052`、Child 3 `0053`、Child 4 `0054`、Child 9 `0055`、Child 6 `0056`、Child 7 `0057`、Child 10 `0058`；每个新增 root object 同时进入 managed surface、ACL compiler 和 runtime admission tests。
+- [ ] `RBL-AC-04` VPS 概览、项目记录中心、单主体时间线、Markdown 工作区、证据选择器和比较工作台达到批准设计的稳定/异常、loading/empty/error/revoked/deleted、desktop/390px、keyboard 和 accessibility 合同。
+- [ ] `RBL-AC-05` 权限、CAS/idempotency/outbox、immutable history、source deletion、附件准入、import/export integrity 和 response allowlist 由各 owning child 的单元与真实集成测试证明。
+- [ ] `RBL-AC-06` permanent delete 在全部 content-owning adapter 与 Child 11 backup/restore deletion replay 闭合前保持关闭；闭合后永久删除不会被官方恢复路径复活。
+- [ ] `RBL-AC-07` Child 11 在当前 main-compatible build 上完成真实 PostgreSQL、local/S3、processor、backup/restore、security、performance、browser 和 failure-path 集成终验；不以 staging 发布或 release automation 作为完成前提。
+- [ ] `RBL-AC-08` 旧 `experience_logs` 不回填、不双写、不转换；旧表/代码仅在不妨碍新功能时保留，最终入口切换不需要 legacy 数据迁移。
+- [ ] `RBL-AC-09` 进度只按 child acceptance 与集成状态报告；旧 branch/worktree、计划行数、goal 运行时间和未合入代码不计为完成功能。
+- [ ] `RBL-AC-10` 所有 11 个 child 已归档并合入 protected main，父级跨 child 功能、数据流和回归检查通过后，父任务才可完成。
+
+## Historical Design and Risk Inventory (non-gating)
+
+以下 `P-AC-001…P-AC-121` 保存原设计审查的覆盖面和风险提示。它们不是当前逐条发布门，也不要求在本轮生成 staging、release、人工研究或旧数据库升级证据。各 child 只吸收与其当前功能合同直接相关的条目。
 
 - [ ] `P-AC-001` 已实际走查 staging 的核心与次要交互，并记录可复核的证据、严重度、影响用户和触发场景。
 - [ ] `P-AC-002` 已核对相关前后端实现、数据模型、接口、权限、响应式行为与测试，研究结论能区分已验证事实和待验证假设。
@@ -510,8 +531,10 @@
 - [ ] `P-AC-121` `prd.md` 与复杂任务所需的设计资料经过自审，无未解释的占位符、互相矛盾或可产生两种解释的关键要求。
 ## Open Questions
 
-- 无尚待产品取舍的开放问题。当前门槛是完成并复核方案 A 修订后的父/平台子任务 `prd.md`、`design.md`、`implement.md`。全部规划产物再次交付用户审阅后，仍需独立明确批准，才可恢复已冻结的平台基础实施分支；不重复 start 父任务或其他子任务。
+- 无阻塞产品取舍。当前等待用户审阅 2026-08-02 重基线和 Child 1 有界切片计划。
 
 ## Execution Gate
 
-- 用户已于 2026-07-14 明确批准完整设计并曾授权启动平台基础旧合同；方案 A 修订后产品分支重新冻结，当前只修改规划工件，不重复 `task.py start`。2026-07-15 用户已审阅并明确批准方案 A 修订后的父/平台子任务规划工件，可在既有冻结的平台基础工作树中按该合同恢复实施；父任务与其他子任务不重复启动。该治理状态不是第 122 条产品验收标准；父级产品验收集合固定为 `P-AC-001…P-AC-121`。
+- 本轮只重写规划工件，不改变任何 task status，不开始生产实现。
+- 父任务保持 `planning`；后续只 start 拥有下一项交付的 child。
+- Child 1 的新切片需经本轮规划审阅后再开始。旧总控 goal 保持暂停，不作为恢复入口。

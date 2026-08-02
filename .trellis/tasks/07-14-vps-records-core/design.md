@@ -1,5 +1,9 @@
 # 记录、修订、草稿与状态核心设计
 
+## 0. Development rebaseline
+
+`0052` 是 fresh/current development baseline 的下一条 root migration，并由本任务同时扩展 current APP ACL fragment。没有旧库 upgrader、`experience_logs` mapping、双写或 cutover。本任务关闭 feature 仅作为开发回滚，不承诺旧数据兼容。
+
 ## 1. 文件与模块边界
 
 - Domain：`internal/center/records/`（types/validation/templates/service/drafts/revisions）。
@@ -53,4 +57,4 @@ core adapter 删除 revisions/drafts/core relations/domain activities/current pr
 
 ## 7. 兼容
 
-不改 `renewals.ExperienceLogRecord`、`store/renewal_decisions.go` 或旧 routes。新 feature flag off；task 10 负责 mapping/migration，task 11 负责切换。
+现有 experience 代码可在增量开发期间保持未触碰，但新 Records 不读取或迁移其数据。feature flag off 可用于开发回滚；返回不含 `0052` 的代码版本时重建开发数据库。Child 10 只实现 Records 导入导出，Child 11 只做集成/备份恢复终验。

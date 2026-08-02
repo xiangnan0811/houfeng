@@ -4,6 +4,10 @@
 
 实现 local/S3 Blob、附件准入扫描、配额、引用与回收、下载授权及备份恢复适配。
 
+## 2026-08-02 Development Rebaseline
+
+本任务拥有 `0053_create_record_attachments.sql`，只支持 fresh/current development database 与 exact repeat。`0053` 的 tables/sequences/functions 和 runtime/admin grants 必须在同一 PR 加入 current APP ACL fragment/admission tests；不提供旧库 upgrade 或 release cutover。
+
 ## Requirements
 
 - 父设计：`../07-13-vps-detail-experience-design/design.md` §13、§15、§21、§23。
@@ -20,6 +24,7 @@
 
 ## Acceptance Criteria
 
+- [ ] `0053` fresh/repeat migration 与 current APP ACL/convergence/runtime admission 通过。
 - [ ] local/MinIO 对同一 contract 的上传、dedupe、range/download、hash、delete、version mismatch 结果一致。
 - [ ] MIME spoof、超限、zip-slip、duplicate path、symlink/hardlink、炸弹、加密包、恶意扫描命中均 fail closed。
 - [ ] scanner unavailable 状态不会被误标 rejected/available，重试/超时/expired 后 workspace/parts 残留为0并有receipt。
