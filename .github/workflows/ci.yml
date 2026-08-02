@@ -41,17 +41,18 @@ jobs:
           trap 'rm -f "$events"' EXIT
           scripts/test-record-platform-integration.sh pg16-catalog -- \
             go test -json ./internal/center/store/migrate \
-            -run '^TestPostgresIntegrationAppACLR2$' -count=1 | tee "$events"
+            -run '^(TestPostgresIntegrationAppACLR2|TestPostgresIntegrationAppACLCurrent)$' -count=1 | tee "$events"
           jq -se '
             def package_event:
               .Package == "houfeng/internal/center/store/migrate";
-            def anchored_event:
-              package_event and
-              ((.Test // "") | test("^TestPostgresIntegrationAppACLR2($|/)"));
             [.[] | select(package_event)] as $package_events
-            | [$package_events[] | select(anchored_event)] as $anchored_events
-            | (($anchored_events | map(select(.Action == "run")) | length) > 0)
-              and (($anchored_events | map(select(.Action == "pass")) | length) > 0)
+            | ["TestPostgresIntegrationAppACLR2", "TestPostgresIntegrationAppACLCurrent"] as $anchors
+            | (all($anchors[];
+                . as $anchor
+                | [$package_events[] | select(((.Test // "") | test("^" + $anchor + "($|/)")))] as $anchor_events
+                | (($anchor_events | map(select(.Action == "run")) | length) > 0)
+                  and (($anchor_events | map(select(.Action == "pass")) | length) > 0)
+              ))
               and (($package_events | map(select(.Action == "skip")) | length) == 0)
               and (($package_events | map(select(.Action == "fail")) | length) == 0)
           ' "$events" >/dev/null
