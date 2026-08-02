@@ -108,7 +108,7 @@ func defaultAppMigrationDependencies() appMigrationDependencies {
 			pool.Close()
 		},
 		converge: func(ctx context.Context, pool *pgxpool.Pool, runtimeRole, adminRole string) error {
-			_, err := migrate.ConvergeAppACLR1(ctx, pool, runtimeRole, adminRole)
+			_, err := migrate.ConvergeAppACLCurrent(ctx, pool, runtimeRole, adminRole)
 			return err
 		},
 	}
@@ -167,6 +167,9 @@ func runWithDeps(ctx context.Context, args []string, deps appMigrationDependenci
 		return errOpenAppMigratorPool
 	}
 	if err := deps.converge(ctx, pool, config.RuntimeRole, config.AdminRole); err != nil {
+		if errors.Is(err, migrate.ErrDevelopmentDatabaseRebuildRequired) {
+			return fmt.Errorf("%w: %w", errConvergeAppMigration, migrate.ErrDevelopmentDatabaseRebuildRequired)
+		}
 		return errConvergeAppMigration
 	}
 	return nil

@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/platformmigrate"
+	"houfeng/internal/center/store/migrate"
 )
 
 type fakeAppACLR2FinalizePoolHandle struct {
@@ -315,6 +316,18 @@ func TestMigrateAppMasksMigratorPoolOpenFailure(t *testing.T) {
 	}
 }
 
+func TestDefaultAppMigrationDependenciesUseCurrentConvergence(t *testing.T) {
+	deps := defaultAppMigrationDependencies()
+
+	err := deps.converge(t.Context(), nil, "houfeng_center_runtime", "houfeng_platform_admin")
+	if err == nil {
+		t.Fatal("default converge() error = nil, want nil-pool rejection")
+	}
+	if got, want := err.Error(), "current app ACL convergence has no PostgreSQL pool"; got != want {
+		t.Fatalf("default converge() error = %q, want %q", got, want)
+	}
+}
+
 func TestMigrateAppRejectsForbiddenArgumentsBeforeLoadingEnvironment(t *testing.T) {
 	for _, args := range [][]string{
 		{"status", "--scope", "app"},
@@ -410,11 +423,53 @@ func TestMigrateAppClosesPoolAndMasksConvergenceFailure(t *testing.T) {
 	if !errors.Is(err, errConvergeAppMigration) {
 		t.Fatalf("runWithDeps() error = %v, want redacted convergence error", err)
 	}
+	if errors.Is(err, convergenceErr) {
+		t.Fatalf("runWithDeps() error retained arbitrary database failure: %v", err)
+	}
 	if strings.Contains(err.Error(), migratorDSN) {
 		t.Fatalf("runWithDeps() error leaked APP migrator DSN: %q", err)
 	}
 	if closed != 1 {
 		t.Fatalf("closePool() calls = %d, want one after convergence failure", closed)
+	}
+}
+
+func TestMigrateAppPreservesOnlyRebuildRequiredConvergenceCause(t *testing.T) {
+	const migratorDSN = "postgres://migrator:app-only-secret@example.invalid/houfeng"
+	pool := &pgxpool.Pool{}
+	closed := 0
+	convergenceErr := fmt.Errorf(
+		"inspect prior baseline for %s: %w",
+		migratorDSN,
+		migrate.ErrDevelopmentDatabaseRebuildRequired,
+	)
+
+	err := runWithDeps(t.Context(), []string{"migrate", "--scope", "app"}, appMigrationDependencies{
+		lookupEnv: appScopeLookup(t, migratorDSN, "houfeng_center_runtime", "houfeng_platform_admin"),
+		openPostgres: func(context.Context, string) (*pgxpool.Pool, error) {
+			return pool, nil
+		},
+		closePool: func(*pgxpool.Pool) {
+			closed++
+		},
+		converge: func(context.Context, *pgxpool.Pool, string, string) error {
+			return convergenceErr
+		},
+	})
+	if !errors.Is(err, errConvergeAppMigration) {
+		t.Fatalf("runWithDeps() error = %v, want command convergence error", err)
+	}
+	if !errors.Is(err, migrate.ErrDevelopmentDatabaseRebuildRequired) {
+		t.Fatalf("runWithDeps() error = %v, want rebuild-required cause", err)
+	}
+	if got, want := err.Error(), errConvergeAppMigration.Error()+": "+migrate.ErrDevelopmentDatabaseRebuildRequired.Error(); got != want {
+		t.Fatalf("runWithDeps() error = %q, want safe actionable error %q", got, want)
+	}
+	if strings.Contains(err.Error(), migratorDSN) {
+		t.Fatalf("runWithDeps() error leaked APP migrator DSN: %q", err)
+	}
+	if closed != 1 {
+		t.Fatalf("closePool() calls = %d, want one after rebuild-required failure", closed)
 	}
 }
 
