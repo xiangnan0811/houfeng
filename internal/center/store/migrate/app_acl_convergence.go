@@ -442,25 +442,49 @@ type appACLNonPublicMigrationLedgerCandidate struct {
 	RowSecurityForced  bool
 }
 
-type appACLManagedPlacementInventoryR1 struct {
+type appACLManagedPlacementInventory struct {
 	relationNames   []string
 	relationSchemas map[string]string
 	functionNames   []string
 	functionSchemas map[string]string
+	managedSchemas  []string
+	objectSchemas   []string
 }
 
-func compileAppACLManagedPlacementInventoryR1(databaseName string) (appACLManagedPlacementInventoryR1, error) {
+func compileAppACLManagedPlacementInventoryR1(databaseName string) (appACLManagedPlacementInventory, error) {
 	surface, err := CompileAppACLManagedSurfaceR1(databaseName)
 	if err != nil {
-		return appACLManagedPlacementInventoryR1{}, fmt.Errorf("compile app ACL managed surface for placement check: %w", err)
+		return appACLManagedPlacementInventory{}, fmt.Errorf("compile app ACL managed surface for placement check: %w", err)
 	}
-	inventory := appACLManagedPlacementInventoryR1{
+	return compileAppACLManagedPlacementInventory(surface.Objects)
+}
+
+func compileAppACLManagedPlacementInventory(
+	objects []AppACLManagedObjectR1,
+) (appACLManagedPlacementInventory, error) {
+	inventory := appACLManagedPlacementInventory{
 		relationSchemas: make(map[string]string),
 		functionSchemas: make(map[string]string),
 	}
-	for _, object := range surface.Objects {
+	managedSchemas := make(map[string]struct{})
+	objectSchemas := make(map[string]struct{})
+	for _, object := range objects {
+		if err := validateAppACLManagedObject(object); err != nil {
+			return appACLManagedPlacementInventory{}, fmt.Errorf("compile app ACL managed placement inventory: %w", err)
+		}
 		switch object.ObjectClass {
+		case AppACLObjectClassDatabase:
+		case AppACLObjectClassSchema:
+			if _, exists := managedSchemas[object.SchemaName]; exists {
+				continue
+			}
+			managedSchemas[object.SchemaName] = struct{}{}
+			inventory.managedSchemas = append(inventory.managedSchemas, object.SchemaName)
 		case AppACLObjectClassTable, AppACLObjectClassView, AppACLObjectClassSequence:
+			if _, exists := objectSchemas[object.SchemaName]; !exists {
+				objectSchemas[object.SchemaName] = struct{}{}
+				inventory.objectSchemas = append(inventory.objectSchemas, object.SchemaName)
+			}
 			// schema_migrations is a common shared-database name. Its placement and
 			// contents remain governed by the dedicated ledger preflight.
 			if object.ObjectClass == AppACLObjectClassTable && object.ObjectIdentity == "schema_migrations" {
@@ -468,20 +492,24 @@ func compileAppACLManagedPlacementInventoryR1(databaseName string) (appACLManage
 			}
 			if expectedSchema, exists := inventory.relationSchemas[object.ObjectIdentity]; exists {
 				if expectedSchema != object.SchemaName {
-					return appACLManagedPlacementInventoryR1{}, fmt.Errorf("managed relation %q has conflicting expected schemas %q and %q", object.ObjectIdentity, expectedSchema, object.SchemaName)
+					return appACLManagedPlacementInventory{}, fmt.Errorf("managed relation %q has conflicting expected schemas %q and %q", object.ObjectIdentity, expectedSchema, object.SchemaName)
 				}
 				continue
 			}
 			inventory.relationSchemas[object.ObjectIdentity] = object.SchemaName
 			inventory.relationNames = append(inventory.relationNames, object.ObjectIdentity)
 		case AppACLObjectClassFunction:
+			if _, exists := objectSchemas[object.SchemaName]; !exists {
+				objectSchemas[object.SchemaName] = struct{}{}
+				inventory.objectSchemas = append(inventory.objectSchemas, object.SchemaName)
+			}
 			name, _, found := strings.Cut(object.ObjectIdentity, "(")
 			if !found || name == "" {
-				return appACLManagedPlacementInventoryR1{}, fmt.Errorf("managed function identity %q has no name", object.ObjectIdentity)
+				return appACLManagedPlacementInventory{}, fmt.Errorf("managed function identity %q has no name", object.ObjectIdentity)
 			}
 			if expectedSchema, exists := inventory.functionSchemas[name]; exists {
 				if expectedSchema != object.SchemaName {
-					return appACLManagedPlacementInventoryR1{}, fmt.Errorf("managed function %q has conflicting expected schemas %q and %q", name, expectedSchema, object.SchemaName)
+					return appACLManagedPlacementInventory{}, fmt.Errorf("managed function %q has conflicting expected schemas %q and %q", name, expectedSchema, object.SchemaName)
 				}
 				continue
 			}
@@ -503,6 +531,29 @@ func rejectMisplacedAppACLManagedObjectInTx(ctx context.Context, tx pgx.Tx, data
 	if err != nil {
 		return err
 	}
+	return rejectMisplacedAppACLManagedObjectWithInventoryInTx(ctx, tx, inventory)
+}
+
+func rejectMisplacedAppACLManagedObjectForContractInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	contract appACLEffectiveCatalogContract,
+) error {
+	if tx == nil {
+		return fmt.Errorf("detect misplaced current app ACL managed object has no PostgreSQL transaction")
+	}
+	inventory, err := compileAppACLManagedPlacementInventory(contract.ManagedObjects)
+	if err != nil {
+		return err
+	}
+	return rejectMisplacedAppACLManagedObjectWithInventoryInTx(ctx, tx, inventory)
+}
+
+func rejectMisplacedAppACLManagedObjectWithInventoryInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	inventory appACLManagedPlacementInventory,
+) error {
 
 	relationRows, err := tx.Query(ctx, `
 		select namespace.nspname,
@@ -584,27 +635,68 @@ func rejectFreshAppACLManagedStateInTx(ctx context.Context, tx pgx.Tx, databaseN
 	if tx == nil {
 		return fmt.Errorf("detect fresh app ACL managed state has no PostgreSQL transaction")
 	}
+	inventory, err := compileAppACLManagedPlacementInventoryR1(databaseName)
+	if err != nil {
+		return err
+	}
+	return rejectFreshAppACLManagedStateWithInventoryInTx(ctx, tx, inventory)
+}
 
-	var internalSchemaExists bool
-	if err := tx.QueryRow(ctx, `
+func rejectFreshAppACLManagedStateForContractInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	contract appACLEffectiveCatalogContract,
+) error {
+	if tx == nil {
+		return fmt.Errorf("detect fresh current app ACL managed state has no PostgreSQL transaction")
+	}
+	inventory, err := compileAppACLManagedPlacementInventory(contract.ManagedObjects)
+	if err != nil {
+		return err
+	}
+	return rejectFreshAppACLManagedStateWithInventoryInTx(ctx, tx, inventory)
+}
+
+func rejectFreshAppACLManagedStateWithInventoryInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	inventory appACLManagedPlacementInventory,
+) error {
+	for _, schemaName := range inventory.managedSchemas {
+		if schemaName == appACLManagedPublicSchemaR1 {
+			continue
+		}
+
+		var schemaExists bool
+		if err := tx.QueryRow(ctx, `
 		select exists (
 			select 1
 			from pg_catalog.pg_namespace
 			where nspname = $1
 		)
-	`, appACLManagedInternalSchemaR1).Scan(&internalSchemaExists); err != nil {
-		return fmt.Errorf("read fresh app ACL managed internal schema state: %w", err)
-	}
-	if internalSchemaExists {
-		return fmt.Errorf("fresh app ACL convergence cannot adopt existing managed internal schema %q", appACLManagedInternalSchemaR1)
+	`, schemaName).Scan(&schemaExists); err != nil {
+			return fmt.Errorf("read fresh app ACL managed schema %q state: %w", schemaName, err)
+		}
+		if schemaExists {
+			if schemaName == appACLManagedInternalSchemaR1 {
+				return fmt.Errorf("fresh app ACL convergence cannot adopt existing managed internal schema %q", schemaName)
+			}
+			return fmt.Errorf("fresh app ACL convergence cannot adopt existing managed schema %q", schemaName)
+		}
 	}
 
-	publicObject, err := describeAppACLManagedObjectInSchemaInTx(ctx, tx, databaseName, appACLManagedPublicSchemaR1)
-	if err != nil {
-		return err
-	}
-	if publicObject != "" {
-		return fmt.Errorf("fresh app ACL convergence cannot adopt managed public object %s without public-ledger/manifest adoption state", publicObject)
+	for _, schemaName := range inventory.objectSchemas {
+		object, err := describeAppACLManagedObjectInSchemaWithInventoryInTx(ctx, tx, schemaName, inventory)
+		if err != nil {
+			return err
+		}
+		if object == "" {
+			continue
+		}
+		if schemaName == appACLManagedPublicSchemaR1 {
+			return fmt.Errorf("fresh app ACL convergence cannot adopt managed public object %s without public-ledger/manifest adoption state", object)
+		}
+		return fmt.Errorf("fresh app ACL convergence cannot adopt managed object %s without public-ledger/manifest adoption state", object)
 	}
 	return nil
 }
@@ -627,6 +719,37 @@ func rejectNonPublicAppACLLegacyLedgerInTx(
 	if tx == nil {
 		return fmt.Errorf("detect non-public app migration ledger has no PostgreSQL transaction")
 	}
+	inventory, err := compileAppACLManagedPlacementInventoryR1(databaseName)
+	if err != nil {
+		return err
+	}
+	return rejectNonPublicAppACLLegacyLedgerWithInventoryInTx(ctx, tx, sources, inventory, migratorRole)
+}
+
+func rejectNonPublicAppACLLegacyLedgerForContractInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	sources migrationSourceSnapshot,
+	contract appACLEffectiveCatalogContract,
+	migratorRole string,
+) error {
+	if tx == nil {
+		return fmt.Errorf("detect non-public current app migration ledger has no PostgreSQL transaction")
+	}
+	inventory, err := compileAppACLManagedPlacementInventory(contract.ManagedObjects)
+	if err != nil {
+		return err
+	}
+	return rejectNonPublicAppACLLegacyLedgerWithInventoryInTx(ctx, tx, sources, inventory, migratorRole)
+}
+
+func rejectNonPublicAppACLLegacyLedgerWithInventoryInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	sources migrationSourceSnapshot,
+	inventory appACLManagedPlacementInventory,
+	migratorRole string,
+) error {
 	candidates, err := readAppACLNonPublicMigrationLedgerCandidatesInTx(ctx, tx)
 	if err != nil {
 		return err
@@ -635,7 +758,7 @@ func rejectNonPublicAppACLLegacyLedgerInTx(
 		if candidate.OwnerRole == migratorRole && candidate.RowSecurityEnabled && candidate.RowSecurityForced {
 			return fmt.Errorf("non-public application migration ledger in schema %q is owned by direct migrator role %q with forced row security", candidate.SchemaName, migratorRole)
 		}
-		object, err := describeAppACLManagedObjectInSchemaInTx(ctx, tx, databaseName, candidate.SchemaName)
+		object, err := describeAppACLManagedObjectInSchemaWithInventoryInTx(ctx, tx, candidate.SchemaName, inventory)
 		if err != nil {
 			return err
 		}
@@ -792,6 +915,15 @@ func describeAppACLManagedObjectInSchemaInTx(ctx context.Context, tx pgx.Tx, dat
 	if err != nil {
 		return "", err
 	}
+	return describeAppACLManagedObjectInSchemaWithInventoryInTx(ctx, tx, schemaName, inventory)
+}
+
+func describeAppACLManagedObjectInSchemaWithInventoryInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	schemaName string,
+	inventory appACLManagedPlacementInventory,
+) (string, error) {
 	rows, err := tx.Query(ctx, `
 		select relation.relkind::text,
 		       relation.relname::text
