@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/db/migrations"
@@ -68,6 +69,89 @@ func testPostgresIntegrationAppACLCurrentFreshAndRuntime(t *testing.T) {
 	runtimeDB := fixture.openDirectRolePool(t, ctx, fixture.runtime)
 	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
 		t.Fatalf("AdmitAppACLCurrentRuntime() direct runtime error = %v", err)
+	}
+	assertRecordsCoreAppACLCurrentRolePrivileges(t, ctx, &fixture, runtimeDB)
+}
+
+func assertRecordsCoreAppACLCurrentRolePrivileges(
+	t *testing.T,
+	ctx context.Context,
+	fixture *appACLConvergencePostgresFixture,
+	runtimeDB *pgxpool.Pool,
+) {
+	t.Helper()
+
+	if _, err := runtimeDB.Exec(ctx, `insert into public.records (record_id) values ('rec_acl')`); err != nil {
+		t.Fatalf("runtime insert records-core root: %v", err)
+	}
+	revisionTx, err := runtimeDB.Begin(ctx)
+	if err != nil {
+		t.Fatalf("runtime begin records-core revision transaction: %v", err)
+	}
+	defer func() { _ = revisionTx.Rollback(ctx) }()
+	if _, err := revisionTx.Exec(ctx, `
+		insert into public.record_revisions (
+			revision_id, record_id, revision_no, title, body_markdown,
+			markdown_dialect_version, record_type, impact_level,
+			visibility_scope, visibility_digest, author_id, canonical_hash
+		) values (
+			'rrv_acl', 'rec_acl', 1, 'ACL', '# ACL', 1, 'note', 'informational',
+			'{}'::jsonb, decode(repeat('41', 32), 'hex'), 'usr_acl', decode(repeat('42', 32), 'hex')
+		)
+	`); err != nil {
+		t.Fatalf("runtime insert immutable records-core revision: %v", err)
+	}
+	if _, err := revisionTx.Exec(ctx, `
+		insert into public.record_revision_subjects (
+			revision_id, ordinal, registry_version, subject_kind, relation_role,
+			source_id, is_primary, identity_snapshot, capture_authorization,
+			capture_authorization_digest
+		) values (
+			'rrv_acl', 0, 1, 'vps', 'affected', 'vps_acl', true,
+			'{}'::jsonb, '{}'::jsonb, decode(repeat('43', 32), 'hex')
+		)
+	`); err != nil {
+		t.Fatalf("runtime insert records-core primary subject: %v", err)
+	}
+	if err := revisionTx.Commit(ctx); err != nil {
+		t.Fatalf("runtime commit records-core revision transaction: %v", err)
+	}
+
+	_, err = runtimeDB.Exec(ctx, `update public.record_revisions set title = 'mutated' where revision_id = 'rrv_acl'`)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+		t.Fatalf("runtime update immutable records-core revision error = %v, want SQLSTATE 42501", err)
+	}
+
+	purgeTx, err := runtimeDB.Begin(ctx)
+	if err != nil {
+		t.Fatalf("runtime begin records-core purge transaction: %v", err)
+	}
+	defer func() { _ = purgeTx.Rollback(ctx) }()
+	for _, statement := range []string{
+		`delete from public.record_revision_subjects where revision_id = 'rrv_acl'`,
+		`delete from public.record_revisions where revision_id = 'rrv_acl'`,
+		`delete from public.records where record_id = 'rec_acl'`,
+	} {
+		if _, err := purgeTx.Exec(ctx, statement); err != nil {
+			t.Fatalf("runtime execute records-core purge statement %q: %v", statement, err)
+		}
+	}
+	if err := purgeTx.Commit(ctx); err != nil {
+		t.Fatalf("runtime commit records-core purge transaction: %v", err)
+	}
+
+	adminDB := fixture.openDirectRolePool(t, ctx, fixture.admin)
+	var receiptCount int
+	if err := adminDB.QueryRow(ctx, `select count(*)::int from public.record_core_purge_receipts`).Scan(&receiptCount); err != nil {
+		t.Fatalf("platform admin read content-free records-core purge receipts: %v", err)
+	}
+	if receiptCount != 0 {
+		t.Fatalf("fresh records-core purge receipt count = %d, want 0", receiptCount)
+	}
+	_, err = adminDB.Exec(ctx, `select record_id from public.records limit 1`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+		t.Fatalf("platform admin read records-core content table error = %v, want SQLSTATE 42501", err)
 	}
 }
 

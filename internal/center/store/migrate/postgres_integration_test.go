@@ -44,8 +44,8 @@ func TestPostgresIntegrationAppACLManifestRuntimeReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadAppACLManifestRuntimeSnapshotV1() fresh error = %v", err)
 	}
-	if fresh.Head != nil || len(fresh.Manifests) != 0 || len(fresh.AppliedMigrations) != 52 {
-		t.Fatalf("fresh snapshot = %#v, want null head, zero revisions, and 52 migrations", fresh)
+	if fresh.Head != nil || len(fresh.Manifests) != 0 || len(fresh.AppliedMigrations) != currentRootSourceCount {
+		t.Fatalf("fresh snapshot = %#v, want null head, zero revisions, and %d migrations", fresh, currentRootSourceCount)
 	}
 	if fresh.DatabaseName != databaseName || fresh.SessionUser != sessionUser || fresh.CurrentUser != currentUser {
 		t.Fatalf("fresh runtime snapshot = (%q, %q, %q), want (%q, %q, %q)", fresh.DatabaseName, fresh.SessionUser, fresh.CurrentUser, databaseName, sessionUser, currentUser)
@@ -540,6 +540,7 @@ func TestPostgresIntegrationAppliesFreshMigrations(t *testing.T) {
 	assertSingleStringValue(t, ctx, db, "select to_regclass('public.vps_monitoring_instance_links')::text", "vps_monitoring_instance_links")
 	assertSingleIntValue(t, ctx, db, "select count(*)::int from schema_migrations where name = '0030_vps_first_status_semantics.sql'", 1)
 	assertSingleIntValue(t, ctx, db, "select count(*)::int from schema_migrations where name = '0050_extend_command_action_audit.sql'", 1)
+	assertSingleIntValue(t, ctx, db, "select count(*)::int from schema_migrations where name = '0052_create_records_core.sql'", 1)
 	for _, indexName := range []string{
 		"idx_monitoring_instance_command_action_audit_instance_time",
 		"idx_monitoring_instance_command_action_audit_action_time",
@@ -758,8 +759,6 @@ func TestPostgresIntegrationRecordPlatformFoundationSchema(t *testing.T) {
 	} {
 		assertSingleStringValue(t, ctx, db, "select to_regclass('public."+table+"')::text", table)
 	}
-	assertSingleStringValue(t, ctx, db, "select coalesce(to_regclass('public.records')::text, '')", "")
-	assertSingleStringValue(t, ctx, db, "select coalesce(to_regclass('public.record_revisions')::text, '')", "")
 	assertSingleIntValue(t, ctx, db,
 		"select count(*)::int from schema_migrations where name = '0051_create_record_platform_foundation.sql'", 1)
 
@@ -804,6 +803,227 @@ func TestPostgresIntegrationRecordPlatformFoundationSchema(t *testing.T) {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "55000" {
 		t.Fatalf("delete immutable domain identity error = %v, want SQLSTATE 55000", err)
+	}
+}
+
+func TestPostgresIntegrationRecordsCoreSchema(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresDatabase(t, ctx)
+
+	if err := Apply(ctx, db); err != nil {
+		t.Fatalf("Apply() records-core migration error = %v", err)
+	}
+	if err := Apply(ctx, db); err != nil {
+		t.Fatalf("Apply() records-core exact repeat error = %v", err)
+	}
+
+	for _, table := range []string{
+		"records",
+		"record_revisions",
+		"record_revision_subjects",
+		"record_revision_tags",
+		"record_revision_participants",
+		"record_drafts",
+		"record_draft_checkpoints",
+		"record_domain_activities",
+		"record_core_purge_receipts",
+	} {
+		assertSingleStringValue(t, ctx, db, "select to_regclass('public."+table+"')::text", table)
+	}
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from public.schema_migrations
+		where name = '0052_create_records_core.sql'
+	`, 1)
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from pg_catalog.pg_constraint
+		where conname = 'records_current_revision_same_record_fk'
+		  and conrelid = 'public.records'::regclass
+		  and condeferrable
+		  and condeferred
+		  and confdeltype = 'r'
+	`, 1)
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from pg_catalog.pg_indexes
+		where schemaname = 'public'
+		  and indexname = 'uq_record_revision_subjects_primary'
+		  and lower(indexdef) like '%unique%'
+		  and lower(indexdef) like '%where is_primary%'
+	`, 1)
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from pg_catalog.pg_constraint
+		where contype = 'f'
+		  and connamespace = 'public'::regnamespace
+		  and conrelid in (
+		    'public.records'::regclass,
+		    'public.record_revisions'::regclass,
+		    'public.record_revision_subjects'::regclass,
+		    'public.record_revision_tags'::regclass,
+		    'public.record_revision_participants'::regclass,
+		    'public.record_drafts'::regclass,
+		    'public.record_draft_checkpoints'::regclass,
+		    'public.record_domain_activities'::regclass,
+		    'public.record_core_purge_receipts'::regclass
+		  )
+		  and confdeltype <> 'r'
+	`, 0)
+
+	for _, table := range []string{
+		"record_revisions",
+		"record_revision_subjects",
+		"record_revision_tags",
+		"record_revision_participants",
+		"record_draft_checkpoints",
+		"record_domain_activities",
+		"record_core_purge_receipts",
+	} {
+		var triggerCount int
+		if err := db.QueryRow(ctx, `
+			select count(*)::int
+			from pg_catalog.pg_trigger trigger_catalog
+			join pg_catalog.pg_class relation on relation.oid = trigger_catalog.tgrelid
+			join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
+			join pg_catalog.pg_proc procedure on procedure.oid = trigger_catalog.tgfoid
+			join pg_catalog.pg_namespace procedure_namespace on procedure_namespace.oid = procedure.pronamespace
+			where namespace.nspname = 'public'
+			  and relation.relname = $1
+			  and trigger_catalog.tgname = $1 || '_reject_update'
+			  and not trigger_catalog.tgisinternal
+			  and procedure_namespace.nspname = 'record_platform_internal'
+			  and procedure.proname = 'reject_immutable_mutation'
+		`, table).Scan(&triggerCount); err != nil {
+			t.Fatalf("query immutable trigger for %q: %v", table, err)
+		}
+		if triggerCount != 1 {
+			t.Fatalf("immutable trigger count for %q = %d, want 1", table, triggerCount)
+		}
+	}
+
+	execSQL(t, ctx, db, `
+		insert into public.records (record_id) values ('rec_a'), ('rec_b'), ('rec_missingprimary')
+	`)
+
+	missingPrimaryTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin missing-primary revision transaction: %v", err)
+	}
+	if _, err := missingPrimaryTx.Exec(ctx, `
+		insert into public.record_revisions (
+			revision_id, record_id, revision_no, title, body_markdown,
+			markdown_dialect_version, record_type, impact_level,
+			visibility_scope, visibility_digest, author_id, canonical_hash
+		) values (
+			'rrv_missingprimary', 'rec_missingprimary', 1, 'Missing', '# Missing',
+			1, 'note', 'informational', '{}'::jsonb,
+			decode(repeat('10', 32), 'hex'), 'usr_author', decode(repeat('20', 32), 'hex')
+		)
+	`); err != nil {
+		_ = missingPrimaryTx.Rollback(ctx)
+		t.Fatalf("insert missing-primary revision before deferred check: %v", err)
+	}
+	err = missingPrimaryTx.Commit(ctx)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("missing-primary revision commit error = %v, want SQLSTATE 23514", err)
+	}
+
+	revisionTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin complete revision transaction: %v", err)
+	}
+	defer func() { _ = revisionTx.Rollback(ctx) }()
+	if _, err := revisionTx.Exec(ctx, `
+		insert into public.record_revisions (
+			revision_id, record_id, revision_no, title, body_markdown,
+			markdown_dialect_version, record_type, impact_level,
+			visibility_scope, visibility_digest, author_id, canonical_hash
+		) values
+			('rrv_a', 'rec_a', 1, 'A', '# A', 1, 'note', 'informational',
+			 '{}'::jsonb, decode(repeat('11', 32), 'hex'), 'usr_author', decode(repeat('21', 32), 'hex')),
+			('rrv_b', 'rec_b', 1, 'B', '# B', 1, 'note', 'informational',
+			 '{}'::jsonb, decode(repeat('12', 32), 'hex'), 'usr_author', decode(repeat('22', 32), 'hex'))
+	`); err != nil {
+		t.Fatalf("insert complete revisions: %v", err)
+	}
+	if _, err := revisionTx.Exec(ctx, `
+		insert into public.record_revision_subjects (
+			revision_id, ordinal, registry_version, subject_kind, relation_role,
+			source_id, is_primary, identity_snapshot, capture_authorization,
+			capture_authorization_digest
+		) values
+			('rrv_a', 0, 1, 'vps', 'affected', 'vps_a', true,
+			 '{}'::jsonb, '{}'::jsonb, decode(repeat('31', 32), 'hex')),
+			('rrv_b', 0, 1, 'vps', 'affected', 'vps_b', true,
+			 '{}'::jsonb, '{}'::jsonb, decode(repeat('33', 32), 'hex'))
+	`); err != nil {
+		t.Fatalf("insert complete revision primary subjects: %v", err)
+	}
+	if err := revisionTx.Commit(ctx); err != nil {
+		t.Fatalf("commit complete revisions: %v", err)
+	}
+	execSQL(t, ctx, db, `
+		update public.records
+		set current_revision_id = 'rrv_a',
+		    current_title = 'A',
+		    current_record_type = 'note',
+		    current_impact_level = 'informational',
+		    current_visibility_scope = '{}'::jsonb,
+		    current_visibility_digest = decode(repeat('11', 32), 'hex'),
+		    lock_version = 1
+		where record_id = 'rec_a'
+	`)
+
+	_, err = db.Exec(ctx, `
+		update public.records
+		set current_revision_id = 'rrv_b'
+		where record_id = 'rec_a'
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" || pgErr.ConstraintName != "records_current_revision_same_record_fk" {
+		t.Fatalf("cross-record current revision update error = %v, want same-record foreign-key rejection", err)
+	}
+
+	_, err = db.Exec(ctx, `
+		insert into public.record_revision_subjects (
+			revision_id, ordinal, registry_version, subject_kind, relation_role,
+			source_id, is_primary, identity_snapshot, capture_authorization,
+			capture_authorization_digest
+		) values (
+			'rrv_a', 1, 1, 'target', 'context', 'target_a', true,
+			'{}'::jsonb, '{}'::jsonb, decode(repeat('32', 32), 'hex')
+		)
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" || pgErr.ConstraintName != "uq_record_revision_subjects_primary" {
+		t.Fatalf("second primary subject insert error = %v, want partial-unique rejection", err)
+	}
+
+	_, err = db.Exec(ctx, `update public.record_revisions set title = 'mutated' where revision_id = 'rrv_a'`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "55000" {
+		t.Fatalf("immutable revision update error = %v, want SQLSTATE 55000", err)
+	}
+
+	_, err = db.Exec(ctx, `delete from public.records where record_id = 'rec_b'`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("record delete with owned revision error = %v, want explicit-cleanup foreign-key rejection", err)
+	}
+	purgeTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin explicit records-core purge transaction: %v", err)
+	}
+	defer func() { _ = purgeTx.Rollback(ctx) }()
+	for _, statement := range []string{
+		`delete from public.record_revision_subjects where revision_id = 'rrv_b'`,
+		`delete from public.record_revisions where revision_id = 'rrv_b'`,
+		`delete from public.records where record_id = 'rec_b'`,
+	} {
+		if _, err := purgeTx.Exec(ctx, statement); err != nil {
+			t.Fatalf("execute explicit records-core purge statement %q: %v", statement, err)
+		}
+	}
+	if err := purgeTx.Commit(ctx); err != nil {
+		t.Fatalf("commit explicit records-core purge transaction: %v", err)
 	}
 }
 
@@ -1402,7 +1622,7 @@ func TestPostgresIntegrationAdoptsNameOnlyMigrationLedger(t *testing.T) {
 	if !after.Equal(before) {
 		t.Fatalf("adopted applied_at = %s, want preserved %s", after, before)
 	}
-	assertSingleIntValue(t, ctx, db, `select count(*)::int from schema_migrations`, 52)
+	assertSingleIntValue(t, ctx, db, `select count(*)::int from schema_migrations`, currentRootSourceCount)
 	assertSingleIntValue(t, ctx, db, `
 		select count(*)::int
 		from information_schema.columns

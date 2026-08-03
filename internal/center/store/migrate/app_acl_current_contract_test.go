@@ -319,7 +319,7 @@ func appACLCurrentTestMigrationFS(t *testing.T) fstest.MapFS {
 	}
 	fsys := make(fstest.MapFS, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") || entry.Name() > appACLCurrentR1BoundaryMigration {
 			continue
 		}
 		data, err := fs.ReadFile(migrations.FS, entry.Name())

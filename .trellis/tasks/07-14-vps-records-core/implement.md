@@ -29,9 +29,10 @@
 - Modify: `internal/center/store/migrate/migrate_test.go`
 - Modify: `internal/center/store/migrate/postgres_integration_test.go`
 
-- [ ] Add source tests that require exactly these owned tables: `records`, `record_revisions`, `record_revision_subjects`, `record_revision_tags`, `record_revision_participants`, `record_drafts`, `record_draft_checkpoints`, `record_domain_activities`, `record_core_purge_receipts`.
-- [ ] Assert no `participant_ids` revision column, no `record_draft_recovery_points`, exactly one-primary support, same-record current pointer, monotonic revision/index constraints, draft author/checkpoint retention indexes and no source-domain cascade.
-- [ ] Run `go test ./internal/center/store/migrate -run 'RecordsCore|MigrationFiles' -count=1`; expect RED because `0052_create_records_core.sql` is absent.
+- [x] Add source tests that require exactly these owned tables: `records`, `record_revisions`, `record_revision_subjects`, `record_revision_tags`, `record_revision_participants`, `record_drafts`, `record_draft_checkpoints`, `record_domain_activities`, `record_core_purge_receipts`.
+- [x] Assert no `participant_ids` revision column, no `record_draft_recovery_points`, partial-unique plus deferred exactly-one-primary enforcement, same-record current pointer, monotonic revision/index constraints, draft author/checkpoint retention indexes and no source-domain cascade.
+- [x] Run `go test ./internal/center/store/migrate -run 'RecordsCore|MigrationFiles' -count=1`; verified RED because `0052_create_records_core.sql` was absent, then GREEN after the schema implementation.
+- [x] Add a real PostgreSQL RED proving a revision without a primary previously committed; implement the hardened deferred validator on revision/subject mutations, then verify missing-primary `23514`, second-primary `23505` and single-transaction explicit purge GREEN.
 
 ### Task 1.2: Implement `0052` and current APP ACL as one unit
 
@@ -42,11 +43,11 @@
 - Modify: `internal/center/store/migrate/app_acl_current_postgres_integration_test.go`
 - Modify: `internal/center/store/migrate/app_acl_current_runtime_admission_test.go`
 
-- [ ] Implement the nine-table schema and explicit constraints/indexes from `design.md` §2 using idempotent current migration conventions.
-- [ ] Register one exact `AppACLCurrentMigrationFragment` for `0052_create_records_core.sql`; enumerate every new managed table/sequence and only required center-runtime/platform-admin privileges.
-- [ ] Add RED then GREEN tests for missing/extra objects, missing fragment, convergence, catalog privilege admission and exact repeat.
-- [ ] Run `go test ./internal/center/store/migrate -run 'RecordsCore|AppACLCurrent' -count=1`; expect GREEN.
-- [ ] Run `scripts/test-record-platform-integration.sh postgres -- go test ./internal/center/store/migrate -run '^TestPostgresIntegrationAppACLCurrent$' -count=1`; require GREEN with no `SKIP`.
+- [x] Implement the nine-table schema and explicit constraints/indexes from `design.md` §2 using idempotent current migration conventions.
+- [x] Register one exact `AppACLCurrentMigrationFragment` for `0052_create_records_core.sql`; enumerate nine tables plus the primary-subject validator function, its exact hardening, and only required center-runtime/platform-admin privileges.
+- [x] Add RED then GREEN tests for missing/extra objects, missing fragment, convergence, catalog privilege admission and exact repeat.
+- [x] Run `go test ./internal/center/store/migrate -run 'RecordsCore|AppACLCurrent' -count=1`; GREEN.
+- [x] Run `scripts/test-record-platform-integration.sh postgres -- go test ./internal/center/store/migrate -run '^TestPostgresIntegrationAppACLCurrent$' -count=1`; GREEN with no `SKIP`.
 
 ### Task 1.3: Implement immutable revision/type/template contracts
 
@@ -58,10 +59,11 @@
 - Create: `internal/center/records/validation.go`
 - Create: `internal/center/records/validation_test.go`
 
-- [ ] Write compile/table RED tests for all revision-authoritative fields, lifecycle, canonical status groups, seven builtin types, state transitions, no-state types, template provenance/diff and deterministic canonical hash.
-- [ ] Write mutation tests proving constructor inputs and returned slices/maps cannot mutate stored normalized values; assert UTC time normalization and duplicate relation/tag/participant rejection.
-- [ ] Implement minimal immutable value types, closed registries and validation to turn the tests GREEN; do not parse or render Markdown here.
-- [ ] Run `go test -race ./internal/center/records -run 'Revision|Lifecycle|Status|Template|Canonical' -count=10`; expect GREEN.
+- [x] Write compile/table RED tests for all revision-authoritative fields, lifecycle, canonical status groups, seven builtin types, state transitions, no-state types, template provenance/diff and deterministic canonical hash.
+- [x] Write mutation tests proving constructor inputs and returned slices/maps cannot mutate stored normalized values; assert UTC time normalization and duplicate relation/tag/participant rejection.
+- [x] Implement minimal immutable value types, closed registries and validation to turn the tests GREEN; do not parse or render Markdown here.
+- [x] Verify RED then GREEN that the server-owned template registry rejects non-UTF-8 Markdown instead of allowing later JSON/render corruption.
+- [x] Run `go test -race ./internal/center/records -run 'Revision|Lifecycle|Status|Template|Canonical' -count=10`; GREEN.
 
 ### Task 1.4: Define subject adapter and authorization contracts
 
@@ -71,15 +73,27 @@
 - Create: `internal/center/records/authorization.go`
 - Create: `internal/center/records/authorization_test.go`
 
-- [ ] Write RED tests for registry version, `vps|monitoring_instance|target`, `affected|context|evidence_source`, exactly one primary, server-owned snapshot, project match and adapter duplicate/unknown behavior.
-- [ ] Add live/tombstoned authorization cases covering capture/current intersection, current widening, missing floor, unknown floor kind/version, deleted live route, multi-source narrowing and external no-leak denial.
-- [ ] Implement `SubjectSourceAdapter`, closed registry, `ResolvedSubject`, immutable safe snapshot and `recordauth.Policy` integration without adding production repository adapters yet.
-- [ ] Run `go test -race ./internal/center/records -run 'Subject|Authorization|Tombstone' -count=10`; expect GREEN.
+- [x] Write RED tests for registry version, `vps|monitoring_instance|target`, `affected|context|evidence_source`, exactly one primary, server-owned immutable snapshot/capture evidence, project match and adapter duplicate/unknown behavior.
+- [x] Add live/tombstoned authorization cases covering capture/current intersection, current widening, missing floor, unknown floor kind/version, deleted live route, multi-source narrowing and external no-leak denial.
+- [x] Implement `SubjectSourceAdapter`, closed registry, `ResolvedSubject`, immutable safe snapshot and `recordauth.Policy` integration without adding production repository adapters yet.
+- [x] Verify RED then GREEN that complete revision normalization accepts canonical full-witness tombstoned authorization as well as live authorization, while retaining digest/kind/source fail-closed checks.
+- [x] Run `go test -race ./internal/center/records -run 'Subject|Authorization|Tombstone' -count=10`; GREEN.
 
 ### Checkpoint 1 gate
 
-- [ ] Run focused migration/domain suites, real PostgreSQL fresh/repeat/current APP ACL admission, `make verify-go`, and `git diff --check`.
-- [ ] Confirm `rg -n 'record_draft_recovery_points|participant_ids|experience_logs' db/migrations/0052_create_records_core.sql internal/center/records internal/center/store/migrate` has no forbidden production match.
+- [x] Run focused migration/domain suites, real PostgreSQL fresh/repeat/current APP ACL admission, `make verify-go`, and `git diff --check`; 2026-08-03 evidence is GREEN, the PostgreSQL anchors executed with zero `SKIP`, and the domain race selector passed 10 iterations.
+- [x] Run the production-only forbidden scans below; 2026-08-03 both returned zero matches. Frozen migration history and negative-test fixtures are intentionally outside the match surface:
+
+  ```bash
+  set -o pipefail
+  if rg -n -g '!**/*_test.go' \
+    'record_draft_recovery_points|participant_ids|experience_logs' \
+    db/migrations/0052_create_records_core.sql internal/center/records; then exit 1; fi
+  if git diff --unified=0 origin/main -- \
+    'internal/center/store/migrate/*.go' \
+    ':(exclude)internal/center/store/migrate/*_test.go' \
+    | rg -n '^\+[^+].*(record_draft_recovery_points|participant_ids|experience_logs)'; then exit 1; fi
+  ```
 - [ ] Commit checkpoint 1 separately, report behavior/tests/open risks, then push and open the approved Draft PR.
 
 ## Checkpoint 2: revision, draft, API behavior
@@ -95,7 +109,7 @@
 
 - [ ] Write adapter RED tests for VPS/monitoring-instance/Target project identity, current ACL revision, safe snapshot, route and not-found/deleted behavior using existing repository seams.
 - [ ] Add only the narrow read methods needed to resolve subject authorization; never accept project/snapshot/scope from the client.
-- [ ] Implement adapters and tombstone input seam; source deletion clears live routing without cascading revision rows.
+- [ ] Implement adapters and tombstone input seam; each read derives live routing or witnessed tombstone floor without updating/cascading immutable revision rows.
 - [ ] Run focused store/records tests with `-race`; expect GREEN.
 
 ### Task 2.2: Implement the atomic record/revision transaction

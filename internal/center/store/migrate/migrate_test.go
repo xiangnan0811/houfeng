@@ -17,6 +17,7 @@ import (
 )
 
 const frozenR1RootSourceCount = 52
+const currentRootSourceCount = frozenR1RootSourceCount + 1
 
 func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	names, err := Names()
@@ -98,7 +99,7 @@ func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	}
 }
 
-func TestNoRootR2Migration(t *testing.T) {
+func TestRootMigrationsExcludeObsoleteAppExtensionDraft(t *testing.T) {
 	entries, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
 		t.Fatalf("ReadDir embedded migrations: %v", err)
@@ -115,29 +116,32 @@ func TestNoRootR2Migration(t *testing.T) {
 			t.Fatalf("root migrations expose obsolete draft %q", obsoleteRootName)
 		}
 	}
-	if got, want := sqlFiles, frozenR1RootSourceCount; got != want {
-		t.Fatalf("root migration count = %d, want frozen r1 count %d", got, want)
+	if got, want := sqlFiles, currentRootSourceCount; got != want {
+		t.Fatalf("root migration count = %d, want current count %d", got, want)
 	}
 }
 
-func TestFrozenR1RootSourcesAreExactly52(t *testing.T) {
+func TestFrozenR1RootSourcesRemainExactPrefix(t *testing.T) {
 	names, err := Names()
 	if err != nil {
 		t.Fatalf("Names() error = %v", err)
 	}
-	if got, want := len(names), frozenR1RootSourceCount; got != want {
-		t.Fatalf("root migration name count = %d, want frozen r1 count %d", got, want)
+	if got, want := len(names), currentRootSourceCount; got != want {
+		t.Fatalf("root migration name count = %d, want current count %d", got, want)
 	}
-	if got, want := names[len(names)-1], "0051_create_record_platform_foundation.sql"; got != want {
-		t.Fatalf("final root migration = %q, want %q", got, want)
+	if got, want := names[frozenR1RootSourceCount-1], "0051_create_record_platform_foundation.sql"; got != want {
+		t.Fatalf("final frozen r1 migration = %q, want %q", got, want)
+	}
+	if got, want := names[frozenR1RootSourceCount], "0052_create_records_core.sql"; got != want {
+		t.Fatalf("first current extension migration = %q, want %q", got, want)
 	}
 
 	snapshot, err := snapshotMigrationSources(migrations.FS)
 	if err != nil {
 		t.Fatalf("snapshotMigrationSources(root) error = %v", err)
 	}
-	if got, want := len(snapshot.names), frozenR1RootSourceCount; got != want {
-		t.Fatalf("root snapshot count = %d, want frozen r1 count %d", got, want)
+	if got, want := len(snapshot.names), currentRootSourceCount; got != want {
+		t.Fatalf("root snapshot count = %d, want current count %d", got, want)
 	}
 	if !reflect.DeepEqual(snapshot.names, names) {
 		t.Fatalf("root snapshot names = %#v, want Names() %#v", snapshot.names, names)
@@ -162,8 +166,8 @@ func TestSnapshotMigrationSourcesCapturesExactLexicalEmbeddedSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("snapshotMigrationSources() error = %v", err)
 	}
-	if len(snapshot.names) != 52 {
-		t.Fatalf("snapshot migration name count = %d, want 52", len(snapshot.names))
+	if len(snapshot.names) != currentRootSourceCount {
+		t.Fatalf("snapshot migration name count = %d, want %d", len(snapshot.names), currentRootSourceCount)
 	}
 	if !reflect.DeepEqual(snapshot.names, wantNames) {
 		t.Fatalf("snapshot migration names = %#v, want embedded lexical names %#v", snapshot.names, wantNames)

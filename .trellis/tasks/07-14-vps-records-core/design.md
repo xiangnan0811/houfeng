@@ -25,7 +25,7 @@
 
 - `records`: stable `record_id`, `project_id`, `lifecycle`, `current_revision_id`, `lock_version`, query-oriented current projection, `authorization_epoch`, `archived_at`, timestamps. Root projection is rebuildable and never replaces revision authority.
 - `record_revisions`: monotonic `revision_no`, full title/Markdown/dialect/type/status/status-group/impact/time/visibility/owner/follow-up/template/authorship/reason/base/hash fields. Insert-only.
-- `record_revision_subjects`: ordered primary/related rows with registry version, subject kind, relation role, stable source ID, capture authorization digest/evidence, identity snapshot, nullable live route and tombstone state. One primary per revision; source deletion never cascades.
+- `record_revision_subjects`: ordered primary/related rows with registry version, subject kind, relation role, stable source ID, immutable capture authorization evidence/digest and identity snapshot. One primary per revision; source deletion never cascades. Current live route/scope or witnessed tombstone floor is resolved at read/save time and is not an updatable historical column.
 - `record_revision_tags`: ordered normalized tag values.
 - `record_revision_participants`: ordered stable participant IDs and identity snapshots. No participant array exists in `record_revisions`.
 - `record_drafts`: author-private mutable complete input, nullable target record/base revision, independent ETag/version, activity/expiry/warning timestamps.
@@ -79,7 +79,7 @@ Each revision has exactly one primary and zero or more related subjects. Registr
 
 Builtin record types are `troubleshooting|maintenance|migration|provider_communication|billing|important_finding|note`. The registry maps allowed business states to the canonical groups `pending|in_progress|waiting|verification|completed|cancelled`; finding/note have no business state. Completion/cancellation invariants and non-default transitions are validated in domain code. Template `(id,version)` is optional provenance; template application returns suggestions/diff and never mutates an existing body implicitly.
 
-All input slices/maps are defensively copied, strings/IDs are normalized once, Markdown stays opaque UTF-8 at this layer, and canonical hashing covers every revision-authoritative field in deterministic order.
+All input slices/maps are defensively copied, strings/IDs are normalized once, and Markdown stays opaque UTF-8 at this layer. The persisted `canonical_hash` is the deterministic content hash used for no-change detection: it covers every normalized content-authority field from title through template provenance, including ordered relations/tags/participants and canonical authorization evidence. `author_id` and `save_reason` remain immutable persisted commit metadata but are deliberately outside this hash, so a retry by another authorized actor or with a different explanatory reason cannot manufacture a content revision when the content is unchanged.
 
 ## 5. Source adapters and authorization
 
@@ -108,7 +108,7 @@ Production adapters wrap current authoritative repositories:
 
 The client sends kind/stable ID/relation intent only. The adapter loads project and current scope, creates canonical capture evidence, and returns a server-owned snapshot. Save and read authorization evaluates record visibility intersected with every source capture scope and live current scope through `recordauth.Policy`.
 
-When a source delete commit is witnessed, the source-deletion integration nulls the live route/reference and binds the full-witness `authorization_floor_snapshot`. Reads then use the strict tombstoned `SourceAuthorization` union. Missing/unknown/widening evidence, wrong project or unverifiable witness fails closed. Historical display uses the immutable safe snapshot and never reconnects by name.
+For every save/read the adapter combines the immutable capture evidence with either the current live source scope/route or the full-witness `authorization_floor_snapshot` from source-deletion authority. Reads then use the strict live/tombstoned `SourceAuthorization` union. A source delete never updates `record_revision_subjects`; the derived live route simply disappears and the witnessed floor becomes authoritative. Missing/unknown/widening evidence, wrong project or unverifiable witness fails closed. Historical display uses the immutable safe snapshot and never reconnects by name. This keeps runtime ACL on revision subject rows at `SELECT|INSERT|DELETE` and never grants whole-table `UPDATE` over history.
 
 ## 6. Revision transaction
 

@@ -1387,7 +1387,7 @@ func readAppACLConvergenceManifestRevisionState(t *testing.T, ctx context.Contex
 
 func appACLConvergenceSourcesForPostgresTest(t *testing.T) migrationSourceSnapshot {
 	t.Helper()
-	sources, err := snapshotMigrationSources(migrations.FS)
+	sources, err := snapshotAppACLR1MigrationSources(migrations.FS)
 	if err != nil {
 		t.Fatalf("snapshotMigrationSources() error = %v", err)
 	}

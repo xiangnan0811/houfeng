@@ -13,6 +13,11 @@ import (
 
 const appACLR2IsolatedMigrationName = "0052_app_acl_r2_privileged_transition.sql"
 
+const (
+	appACLR2FrozenRootMigrationCount = 52
+	appACLR2FrozenRootMigrationTail  = "0051_create_record_platform_foundation.sql"
+)
+
 const appACLR2IsolatedMigrationSQL = `-- HOUFENG-APP-ACL-R2-PRIVILEGED-TRANSITION-V1
 --
 -- This source is intentionally isolated from the generic application migration
@@ -174,18 +179,26 @@ func TestAppACLR2SourceEmbeddedInventoryIsIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDir(root migrations) error = %v", err)
 	}
-	rootSQLCount := 0
+	rootSQLNames := make([]string, 0, len(rootEntries))
 	for _, entry := range rootEntries {
 		if entry.IsDir() || len(entry.Name()) < 4 || entry.Name()[len(entry.Name())-4:] != ".sql" {
 			continue
 		}
-		rootSQLCount++
+		rootSQLNames = append(rootSQLNames, entry.Name())
 		if entry.Name() == appACLR2IsolatedMigrationName {
 			t.Fatalf("root migration filesystem exposes isolated %q", entry.Name())
 		}
 	}
-	if rootSQLCount != 52 {
-		t.Fatalf("root SQL inventory count = %d, want frozen 52", rootSQLCount)
+	if len(rootSQLNames) < appACLR2FrozenRootMigrationCount {
+		t.Fatalf("root SQL inventory count = %d, want at least frozen prefix %d", len(rootSQLNames), appACLR2FrozenRootMigrationCount)
+	}
+	if got := rootSQLNames[appACLR2FrozenRootMigrationCount-1]; got != appACLR2FrozenRootMigrationTail {
+		t.Fatalf("frozen root SQL tail = %q, want %q", got, appACLR2FrozenRootMigrationTail)
+	}
+	for _, name := range rootSQLNames[appACLR2FrozenRootMigrationCount:] {
+		if name <= appACLR2FrozenRootMigrationTail {
+			t.Fatalf("current root migration %q is not appended after frozen tail %q", name, appACLR2FrozenRootMigrationTail)
+		}
 	}
 	if _, err := fs.ReadFile(rootmigrations.FS, appACLR2IsolatedMigrationName); err == nil {
 		t.Fatalf("ReadFile(root, %q) error = nil, want invisibility", appACLR2IsolatedMigrationName)

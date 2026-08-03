@@ -93,17 +93,18 @@ type AppACLSourceSetR2V1 struct {
 	Entries []AppACLSourceEntryR2V1
 }
 
-// CompileAppACLSourceSetR2V1 verifies both embedded filesystems against the
-// R2-owned snapshot before returning its canonical body.
+// CompileAppACLSourceSetR2V1 verifies the frozen root prefix and isolated R2
+// filesystem against the R2-owned snapshot before returning its canonical
+// body. Current migrations after 0051 are outside the historical R2 source.
 func CompileAppACLSourceSetR2V1() ([]byte, error) {
 	expected, err := appACLR2ExpectedSourceEntries()
 	if err != nil {
 		return nil, err
 	}
-	if err := verifyAppACLR2EmbeddedSource(rootmigrations.FS, expected[:appACLR2RootSourceEntryCount], "root"); err != nil {
+	if err := verifyAppACLR2EmbeddedSource(rootmigrations.FS, expected[:appACLR2RootSourceEntryCount], "root", true); err != nil {
 		return nil, err
 	}
-	if err := verifyAppACLR2EmbeddedSource(appaclr2migrations.FS, expected[appACLR2RootSourceEntryCount:], "isolated"); err != nil {
+	if err := verifyAppACLR2EmbeddedSource(appaclr2migrations.FS, expected[appACLR2RootSourceEntryCount:], "isolated", false); err != nil {
 		return nil, err
 	}
 	return CanonicalAppACLSourceSetR2BodyV1(expected)
@@ -234,7 +235,12 @@ func appACLR2ExpectedSourceEntries() ([]AppACLSourceEntryR2V1, error) {
 	return entries, nil
 }
 
-func verifyAppACLR2EmbeddedSource(fsys fs.FS, expected []AppACLSourceEntryR2V1, label string) error {
+func verifyAppACLR2EmbeddedSource(
+	fsys fs.FS,
+	expected []AppACLSourceEntryR2V1,
+	label string,
+	allowTrailing bool,
+) error {
 	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return fmt.Errorf("read %s APP ACL R2 source filesystem: %w", label, err)
@@ -246,7 +252,7 @@ func verifyAppACLR2EmbeddedSource(fsys fs.FS, expected []AppACLSourceEntryR2V1, 
 		}
 		actualNames = append(actualNames, entry.Name())
 	}
-	if len(actualNames) != len(expected) {
+	if len(actualNames) < len(expected) || (!allowTrailing && len(actualNames) != len(expected)) {
 		return fmt.Errorf("%s APP ACL R2 source inventory has %d SQL files, want %d", label, len(actualNames), len(expected))
 	}
 	for index, expectedEntry := range expected {
