@@ -16,7 +16,7 @@
 - [x] hooks 已配置为 `.githooks`；`make verify-go` 与 Node 22 `make verify-web` baseline 已通过。
 - [x] 用户批准一个 Child 2 task、一个 branch/worktree、一个早期 Draft PR 和三个硬检查点。
 - [x] 规划/激活先单独提交；之后每个检查点至少一个独立提交、完整 focused verification 和用户进度报告。
-- [ ] 检查点 1 完成后 push 并创建 Draft PR；检查点 2/3 继续在同一 PR。
+- [x] 检查点 1 完成后 push 并创建 Draft PR；检查点 2/3 继续在同一 PR。
 - [ ] 三检查点未整体闭合前不合并，不把 `0052` 当作不可再改的发布历史。
 - [ ] 不读取、迁移、回填或双写 `experience_logs`；不触碰主检出目录的弃用 `0052_add_app_extension_hardening_receipt.sql`。
 
@@ -94,7 +94,7 @@
     ':(exclude)internal/center/store/migrate/*_test.go' \
     | rg -n '^\+[^+].*(record_draft_recovery_points|participant_ids|experience_logs)'; then exit 1; fi
   ```
-- [ ] Commit checkpoint 1 separately, report behavior/tests/open risks, then push and open the approved Draft PR.
+- [x] Commit checkpoint 1 separately, report behavior/tests/open risks, then push and open the approved Draft PR.
 
 ## Checkpoint 2: revision, draft, API behavior
 
@@ -107,10 +107,10 @@
 - Modify: `internal/center/store/monitoring_instances.go`
 - Modify: `internal/center/store/targets.go`
 
-- [ ] Write adapter RED tests for VPS/monitoring-instance/Target project identity, current ACL revision, safe snapshot, route and not-found/deleted behavior using existing repository seams.
-- [ ] Add only the narrow read methods needed to resolve subject authorization; never accept project/snapshot/scope from the client.
-- [ ] Implement adapters and tombstone input seam; each read derives live routing or witnessed tombstone floor without updating/cascading immutable revision rows.
-- [ ] Run focused store/records tests with `-race`; expect GREEN.
+- [x] Write adapter RED tests for VPS/monitoring-instance/Target project identity, current ACL revision, safe snapshot, route and not-found/deleted behavior using existing repository seams.
+- [x] Add only the narrow read methods needed to resolve subject authorization; never accept project/snapshot/scope from the client.
+- [x] Implement adapters and tombstone input seam; each read derives live routing or witnessed tombstone floor without updating/cascading immutable revision rows.
+- [x] Run focused store/records tests with `-race`; 2026-08-03 full-package race and 10-iteration focused race are GREEN.
 
 ### Task 2.2: Implement the atomic record/revision transaction
 
@@ -123,11 +123,11 @@
 - Create: `internal/center/records/revisions.go`
 - Create: `internal/center/records/revisions_test.go`
 
-- [ ] Write fake transaction RED tests fixing admission/idempotency/fence/lock/CAS/insert/current/activity/participant/outbox/complete/commit order and rollback at every cut point.
-- [ ] Implement deterministic `RevisionParticipant` registry and reuse Child 1 idempotency/outbox primitives inside the caller-owned transaction; external calls stay outside.
-- [ ] Add RED/GREEN tests for create revision 1, revise, restore old revision, archive/restore, no-change `created=false`, same-key replay and same-key/different-fingerprint rejection.
-- [ ] Add real PostgreSQL races proving one winner for the same base revision, no duplicate revision under retry, current projection/root reconciliation and no half-commit.
-- [ ] Run `go test -race ./internal/center/records ./internal/center/store -run 'Record|Revision|Archive|Idempotency' -count=10`; expect GREEN.
+- [x] Write fake transaction RED tests fixing admission/idempotency/fence/lock/CAS/insert/current/activity/participant/outbox/complete/commit order and rollback at every cut point.
+- [x] Implement deterministic `RevisionParticipant` registry and reuse Child 1 idempotency/outbox primitives inside the caller-owned transaction; external calls stay outside.
+- [x] Add RED/GREEN tests for create revision 1, revise, restore old revision, archive/restore, no-change `created=false`, same-key replay and same-key/different-fingerprint rejection.
+- [x] Add real PostgreSQL races proving one winner for the same base revision, no duplicate revision under retry, current projection/root reconciliation and no half-commit; 2026-08-03 five fresh/current PostgreSQL tests are GREEN with no `SKIP`.
+- [x] Run `go test -race ./internal/center/records ./internal/center/store -run 'Record|Revision|Archive|Idempotency' -count=10`; 2026-08-03 GREEN, followed by full-package race, `make verify-go`, `git diff --check` and production forbidden scans GREEN.
 
 ### Task 2.3: Implement private drafts and bounded checkpoints
 
@@ -137,10 +137,10 @@
 - Create: `internal/center/records/drafts.go`
 - Create: `internal/center/records/drafts_test.go`
 
-- [ ] Write RED tests for author isolation, exact ETag, two-client conflict, base revision advancement, new versus existing-record drafts, five-minute bucket, newest 20/seven-day checkpoints, 90-day TTL/seven-day warning and publish/discard/revoke cleanup.
-- [ ] Implement draft service/store with fake-clock seams; no draft path may call revision participants, activity, outbox, search or notifications.
-- [ ] Add real PostgreSQL tests for concurrent PATCH, checkpoint pruning and cleanup claims.
-- [ ] Run `go test -race ./internal/center/records ./internal/center/store -run 'Draft|Checkpoint' -count=10`; expect GREEN.
+- [x] Write RED tests for author isolation, exact ETag, two-client conflict, base revision advancement, new versus existing-record drafts, five-minute bucket, newest 20/seven-day checkpoints, 90-day TTL/seven-day warning and publish/discard/revoke cleanup; 2026-08-03 unit RED/GREEN covers PATCH/no-change/conflict, cleanup, expiry claims and atomic publish create/update/no-change/conflict/replay/rollback.
+- [x] Implement draft service/store with database-time retention seams; no draft path calls revision participants, activity, outbox, search or notifications, while publish cleanup runs only inside the formal revision transaction after successful mutation/no-change handling.
+- [x] Add real PostgreSQL tests for concurrent PATCH, checkpoint pruning and cleanup claims; 2026-08-03 all five `TestPostgresIntegrationRecordDraft*` cases passed through the no-SKIP project runner, including reserved existing-draft routing/operation zero-hit behavior, publish/discard/revoke cleanup and zero ordinary-draft activity/outbox rows.
+- [x] Run `go test -race ./internal/center/records ./internal/center/store -run 'Draft|Checkpoint' -count=10`; 2026-08-03 GREEN.
 
 ### Task 2.4: Add record/draft/revision HTTP behavior
 
@@ -154,16 +154,16 @@
 - Modify: `cmd/houfeng-center/bootstrap.go`
 - Modify: `cmd/houfeng-center/bootstrap_test.go`
 
-- [ ] Write route/handler RED matrices for §19.1 non-deletion endpoints, session/actor middleware, static-path precedence, allowlisted nested DTO, `If-Match`, `Idempotency-Key`, 400/404/409/413/422/503 and feature-off behavior.
-- [ ] Implement transport-only DTO mapping and bootstrap wiring; do not serialize store/domain structs or expose source authorization evidence.
-- [ ] Prove every read/write reauthorizes all live/tombstoned sources and checks the reservation fence before content/cache access.
-- [ ] Run focused handler/router/bootstrap tests and legacy VPS experience/timeline regression tests; expect GREEN.
+- [x] Write route/handler RED matrices for §19.1 non-deletion endpoints, session/actor middleware, static-path precedence, handler-owned nested DTO allowlists, exact `If-Match`, `Idempotency-Key`, 400/404/409/413/422/503, feature-off behavior and `Cache-Control: private, no-store`; persisted/typed-recovery unknown draft fields now have explicit 500/no-leak regressions.
+- [x] Implement transport-only DTO mapping and bootstrap wiring; response construction copies allowlisted fields, revalidates every outbound draft payload and never serializes store/domain authority or source authorization evidence. Production bootstrap deliberately keeps the not-yet-owned admission gate nil, so registered routes fail closed rather than bypassing admission.
+- [x] Prove every read/write reauthorizes all live/tombstoned sources and checks the reservation fence before content/cache access. Current/historical authorization snapshots now load only after admission + read fence; record candidates and author-scoped draft routing atomically filter `fenced|committed` reservations before row scan/limit and retain in-transaction race rechecks; historical reads also bind current visibility and exact current tuple before content.
+- [x] Run focused handler/router/bootstrap tests and legacy VPS experience/timeline regression tests; 2026-08-03 full HTTP/records/store race suites, targeted timeline/experience regressions and `trellis-check` are GREEN.
 
 ### Checkpoint 2 gate
 
-- [ ] Run focused unit/race/real PostgreSQL suites, `make verify-go`, and `git diff --check`.
-- [ ] Reconcile root/current revision differences to zero and prove drafts produce zero activity/outbox rows.
-- [ ] Commit checkpoint 2 separately and report behavior/tests/open risks before starting deletion work.
+- [x] Run focused unit/race/real PostgreSQL suites, `make verify-go`, and `git diff --check`; 2026-08-03 handler/router/bootstrap plus records/store race suites passed, all 12 `TestPostgresIntegrationRecord(Read|Draft|Revision)` scenarios passed through the no-SKIP runner, and the final full Go gate/forbidden scans/diff check are GREEN.
+- [x] Reconcile root/current revision differences to zero and prove drafts produce zero activity/outbox rows; the PostgreSQL concurrent revision/restore assertions and five draft scenarios verify exact projection reconciliation, ordinary-draft 0/0 side effects, publish 1/1 formal side effects and reserved draft preservation until purge.
+- [x] Commit checkpoint 2 separately and report behavior/tests/open risks before starting deletion work; 2026-08-03 the isolated Checkpoint 2 commit contains Task 2.1-2.4 only, remains on the existing Draft PR and does not start deletion work.
 
 ## Checkpoint 3: permanent deletion, Web transport, full acceptance
 

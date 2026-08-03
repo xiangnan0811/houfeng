@@ -188,6 +188,26 @@ func (r *PostgresVPSAssetRepository) GetVPSAsset(ctx context.Context, vpsID stri
 	return record, nil
 }
 
+func (r *PostgresVPSAssetRepository) loadVPSRecordSubject(ctx context.Context, vpsID string) (vpsRecordSubject, error) {
+	var subject vpsRecordSubject
+	err := r.db.QueryRow(ctx, `
+		select vps_id, display_name, provider_name, region
+		from vps_assets
+		where vps_id = $1`, vpsID).Scan(
+		&subject.VPSID,
+		&subject.DisplayName,
+		&subject.Provider,
+		&subject.Region,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return vpsRecordSubject{}, vpsassets.ErrVPSAssetNotFound
+	}
+	if err != nil {
+		return vpsRecordSubject{}, fmt.Errorf("query VPS record subject: %w", err)
+	}
+	return subject, nil
+}
+
 func (r *PostgresVPSAssetRepository) CreateVPSAsset(ctx context.Context, input vpsassets.CreateInput) (vpsassets.Record, error) {
 	input = vpsassets.NormalizeCreateInput(input)
 	if err := vpsassets.ValidateCreateInput(input); err != nil {

@@ -169,11 +169,11 @@ func normalizeRevisionTags(values []string) ([]string, error) {
 	return normalized, nil
 }
 
-func normalizeRevisionParticipants(values []RevisionParticipant) ([]RevisionParticipant, error) {
+func normalizeRevisionParticipants(values []RevisionParticipantSnapshot) ([]RevisionParticipantSnapshot, error) {
 	if len(values) == 0 {
 		return nil, nil
 	}
-	normalized := make([]RevisionParticipant, 0, len(values))
+	normalized := make([]RevisionParticipantSnapshot, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
 		if err := recordauth.ValidateActorUserID(value.ParticipantID); err != nil {
@@ -187,7 +187,7 @@ func normalizeRevisionParticipants(values []RevisionParticipant) ([]RevisionPart
 		if err != nil {
 			return nil, invalidRevisionInput("participant identity snapshot")
 		}
-		normalized = append(normalized, RevisionParticipant{
+		normalized = append(normalized, RevisionParticipantSnapshot{
 			ParticipantID:    value.ParticipantID,
 			IdentitySnapshot: snapshot,
 		})
@@ -265,11 +265,11 @@ func cloneRevisionSubjects(values []RevisionSubject) []RevisionSubject {
 	return cloned
 }
 
-func cloneRevisionParticipants(values []RevisionParticipant) []RevisionParticipant {
+func cloneRevisionParticipants(values []RevisionParticipantSnapshot) []RevisionParticipantSnapshot {
 	if len(values) == 0 {
 		return nil
 	}
-	cloned := make([]RevisionParticipant, len(values))
+	cloned := make([]RevisionParticipantSnapshot, len(values))
 	for index, value := range values {
 		cloned[index] = value
 		cloned[index].IdentitySnapshot = cloneStringMap(value.IdentitySnapshot)

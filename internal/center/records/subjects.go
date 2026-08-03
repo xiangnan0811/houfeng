@@ -79,7 +79,7 @@ func NormalizeSubjectReferences(input []SubjectReference) ([]SubjectReference, e
 	seen := make(map[subjectReferenceKey]struct{}, len(input))
 	primaryCount := 0
 	for _, reference := range input {
-		if err := validateSubjectReference(reference); err != nil {
+		if err := ValidateSubjectReference(reference); err != nil {
 			return nil, err
 		}
 		key := subjectReferenceKey{kind: reference.Kind, role: reference.Role, sourceID: reference.SourceID}
@@ -146,7 +146,7 @@ func (registry SubjectAdapterRegistry) Resolve(
 	if err != nil {
 		return ResolvedSubject{}, fmt.Errorf("%w: actor", ErrInvalidResolvedSubject)
 	}
-	if err := validateSubjectReference(reference); err != nil {
+	if err := ValidateSubjectReference(reference); err != nil {
 		return ResolvedSubject{}, err
 	}
 	adapter, ok := registry.adapters[reference.Kind]
@@ -167,7 +167,9 @@ type subjectReferenceKey struct {
 	sourceID string
 }
 
-func validateSubjectReference(reference SubjectReference) error {
+// ValidateSubjectReference checks the closed registry, role, and stable source
+// identifier without applying list-level primary-cardinality rules.
+func ValidateSubjectReference(reference SubjectReference) error {
 	if reference.RegistryVersion != SubjectRegistryVersionV1 {
 		return fmt.Errorf("%w: registry version", ErrInvalidSubjectReference)
 	}

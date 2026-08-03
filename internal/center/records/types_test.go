@@ -196,7 +196,7 @@ func TestCompleteRevisionCanonicalHashIsDeterministicAndContentScoped(t *testing
 		{name: "tag order", mutate: func(values *CompleteRevisionValues) { values.Tags[0], values.Tags[1] = values.Tags[1], values.Tags[0] }},
 		{name: "subject snapshot", mutate: func(values *CompleteRevisionValues) { values.Subjects[0].IdentitySnapshot["provider"] = "Other Cloud" }},
 		{name: "participant order", mutate: func(values *CompleteRevisionValues) {
-			values.Participants = append(values.Participants, RevisionParticipant{ParticipantID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", IdentitySnapshot: map[string]string{"display_name": "Operator Three"}})
+			values.Participants = append(values.Participants, RevisionParticipantSnapshot{ParticipantID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", IdentitySnapshot: map[string]string{"display_name": "Operator Three"}})
 		}},
 		{name: "template", mutate: func(values *CompleteRevisionValues) { values.Template.Version++ }},
 	}

@@ -276,6 +276,25 @@ func (r *PostgresTargetRepository) GetTarget(ctx context.Context, targetID strin
 	return record, nil
 }
 
+func (r *PostgresTargetRepository) loadTargetRecordSubject(ctx context.Context, targetID string) (targetRecordSubject, error) {
+	var subject targetRecordSubject
+	err := r.db.QueryRow(ctx, `
+		select target_id, name, target_type
+		from targets
+		where target_id = $1`, targetID).Scan(
+		&subject.TargetID,
+		&subject.DisplayName,
+		&subject.TargetType,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return targetRecordSubject{}, targets.ErrTargetNotFound
+	}
+	if err != nil {
+		return targetRecordSubject{}, fmt.Errorf("query target record subject: %w", err)
+	}
+	return subject, nil
+}
+
 func (r *PostgresTargetRepository) CreateTarget(ctx context.Context, input targets.CreateTargetInput) (targets.TargetRecord, error) {
 	targetID, err := ids.New("tg")
 	if err != nil {

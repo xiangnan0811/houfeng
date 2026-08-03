@@ -79,6 +79,92 @@ writeError(w, http.StatusInternalServerError, "internal server error")
 - 405 走 `writeError(w, http.StatusMethodNotAllowed, "method not allowed")`（参考 `targets.go:41`）。
 - 同一 handler 内出现 2 个以上 sentinel 分支时使用 `switch { case errors.Is(...) }`（参考 `internal/center/http/handlers/auth.go:128-131`、`runtime_controls.go:63-66`）。
 
+### Scenario: Records versioned transport errors and opaque resource denial
+
+#### 1. Scope / Trigger
+
+- Trigger：新增或修改 `/api/records`、`/api/record-drafts`、revision/lifecycle/permanent-delete endpoint，或扩展 Records 领域 sentinel、conflict recovery、request body/header validation 时。
+- Records family 是普通 center API 的版本化例外：它使用稳定 `code/message/field_errors/recovery` DTO；其他既有普通 handler 继续使用 `writeError` 的 `{"error":"..."}`，不得借此全仓改写错误格式。
+
+#### 2. Signatures
+
+```go
+type recordErrorResponse struct {
+	Code        string             `json:"code"`
+	Message     string             `json:"message"`
+	FieldErrors []recordFieldError `json:"field_errors"`
+	Recovery    any                `json:"recovery,omitempty"`
+}
+
+func writeRecordError(http.ResponseWriter, int, string, string, any)
+func writeRecordsApplicationError(http.ResponseWriter, error)
+```
+
+- `field_errors` 即使为空也必须编码为 `[]`，不能是 `null`；`recovery` 只允许 handler-owned typed DTO，非 conflict 时省略。
+- `decodeRecordsRequestJSON` 统一执行 body limit、unknown/trailing JSON 拒绝；`If-Match` 与 `Idempotency-Key` 由各 mutation endpoint 在调用 application 前校验。
+
+#### 3. Contracts
+
+- handler 只通过 `sessionctx.ActorScopeFromContext` 取得可信 actor；不得从 header/query/body 构造 project、role、group 或 source scope。
+- `recordauth.ErrDenied`、record/draft/source not found 与 deletion reservation fence 对外统一为 `404 resource_not_found`，message 固定且不包含 record/source ID；客户端不能区分不存在与无权访问。
+- application/store error 一律用 `errors.Is` / `errors.As` 翻译。不得返回原始 `err.Error()`，不得序列化 domain/store error、authorization evidence、canonical hash、fence/ledger detail。
+- draft/revision conflict 的 `recovery` 只能包含客户端恢复所需的 allowlisted draft/revision metadata 与 payload；不得整体序列化领域结构体。未知 error 固定为 `500 internal_error`。
+- record/draft handler 在任何 actor、application、path 或 method 分支前设置精确 `Cache-Control: private, no-store`；成功、opaque 404、conflict、unavailable 与 204 都不得被共享或浏览器缓存复用。
+- 所有出站 draft payload（普通 item、list、publish 读取、typed conflict 的 server/local payload）必须重新通过 transport allowlist decoder。持久化 payload 即使是合法 canonical JSON，只要包含未知字段、缺必填 array 或 array 为 `null`，就返回不带原 payload/ETag 的 `500 internal_error`，不能当作客户端 400/422，也不能原样回显。
+- 缺失/格式错误的请求 header、query 或 JSON 是 transport validation；它们在 application 调用前返回 400/413。领域内容校验是 422；并发/idempotency 状态是 409；admission/source/reservation dependency unavailable 是 503。
+- 所有 Records list、nested DTO 与 `field_errors` slice 在 JSON 边界显式初始化为空 slice，保证 `[]` 而不是 `null`。draft transport 的必填 array 字段同样拒绝 `null`/缺失。
+
+#### 4. Validation & Error Matrix
+
+| Condition | HTTP status / code |
+| --- | --- |
+| malformed/unknown/trailing JSON | `400 invalid_json` |
+| missing/invalid `If-Match`、`Idempotency-Key`、cursor/query | `400 invalid_request` 或 cursor 专用 `400 cursor_invalid` |
+| request body 超过 limit | `413 request_too_large` |
+| denied、not found、deletion reserved、source gone | opaque `404 resource_not_found` |
+| draft ETag conflict | `409 draft_conflict` + allowlisted recovery（如有 typed conflict） |
+| record/base revision/CAS conflict | `409 record_revision_conflict` + allowlisted recovery（如有 typed conflict） |
+| idempotency key reuse/in-progress 或 record already exists | 对应稳定 `409` code |
+| revision/draft/lifecycle semantic validation | `422 record_invalid` |
+| runtime admission、source resolution 或 reservation dependency unavailable | `503 record_service_unavailable` |
+| handler context 缺 typed actor | `503 authorization_unavailable`；正常缺失/过期 session 仍由 middleware 在 handler 前返回 401 |
+| persisted/typed recovery draft payload 不符合 transport allowlist | `500 internal_error`；response 不含未知字段、原 payload 或 ETag |
+| 未识别 error | `500 internal_error` |
+
+#### 5. Good/Base/Bad Cases
+
+- Good：viewer 无权读取某 record；policy 返回 `recordauth.ErrDenied`，handler 与真正不存在时都返回完全相同的 `404 resource_not_found`。
+- Good：stale draft PATCH 返回 `409 draft_conflict`，`field_errors:[]`，recovery 只含 server draft、local payload 和允许的 metadata。
+- Base：feature 已注册但 production transaction admission gate 尚未就绪；repository fail closed，handler 稳定返回 `503 record_service_unavailable`。
+- Bad：把 `capture_authorization`、source floor、project ID 或 store row 塞入 recovery，或通过 `err.Error()` 泄露 SQL/资源身份。
+- Bad：把 Records 专用 DTO 推广到所有旧 API，造成既有 Web/agent 错误解析合同漂移。
+
+#### 6. Tests Required
+
+- `internal/center/http/handlers/records_test.go`、`record_drafts_test.go`：覆盖 400/404/409/413/422/503、200/404/409/503/204 的 exact no-store header、typed recovery allowlist、persisted server/local unknown payload fail-closed、unknown/nested trusted field、数组 `[]`/`null`、raw error/evidence 禁泄露以及 application 零调用。
+- `internal/center/http/router_test.go`：覆盖 session middleware、feature-off API 404/SPA 隔离、static/prefix route dispatch。
+- `cmd/houfeng-center/bootstrap_test.go`：覆盖 legacy mode 不构造 Records handler、RuntimeAdmission mode 显式接线，以及 transaction admission 未就绪时稳定 503。
+- 提交前至少运行：
+
+  ```bash
+  go test -race ./internal/center/http/handlers ./internal/center/http ./cmd/houfeng-center -count=1
+  git diff --check
+  ```
+
+#### 7. Wrong vs Correct
+
+```go
+// 错误：泄露底层错误并让授权拒绝可与不存在区分。
+if errors.Is(err, recordauth.ErrDenied) {
+	writeRecordError(w, http.StatusForbidden, "record_denied", err.Error(), resource)
+}
+
+// 正确：统一 opaque 404；recovery 只由明确的 typed conflict 分支构造。
+if errors.Is(err, recordauth.ErrDenied) || errors.Is(err, records.ErrRecordNotFound) {
+	writeRecordNotFound(w)
+}
+```
+
 ### MonitoringInstance onboarding install-command endpoint
 
 `POST /api/monitoring-instances/{monitoring_instance_id}/install-command` 是登录用户触发的普通 center API，不是 agent contract endpoint。它仍走 `writeError`，但有两个配置类 409 是产品契约，不能降级成 500：

@@ -171,7 +171,7 @@ func validCompleteRevisionValues(t *testing.T) CompleteRevisionValues {
 		},
 		Tags:    []string{" Network ", "PROVIDER"},
 		OwnerID: testRecordOwnerID,
-		Participants: []RevisionParticipant{
+		Participants: []RevisionParticipantSnapshot{
 			{ParticipantID: testRecordParticipantID, IdentitySnapshot: map[string]string{"display_name": "Operator Two"}},
 		},
 		FollowUpAt: &followUpAt,
@@ -229,7 +229,7 @@ func cloneRevisionSubjectForTest(subject RevisionSubject) RevisionSubject {
 	return cloned
 }
 
-func cloneRevisionParticipantForTest(participant RevisionParticipant) RevisionParticipant {
+func cloneRevisionParticipantForTest(participant RevisionParticipantSnapshot) RevisionParticipantSnapshot {
 	cloned := participant
 	cloned.IdentitySnapshot = cloneStringMap(participant.IdentitySnapshot)
 	return cloned

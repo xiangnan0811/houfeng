@@ -44,6 +44,21 @@ func TestSubjectRegistryNormalizesClosedOrderedReferences(t *testing.T) {
 	}
 }
 
+func TestValidateSubjectReferenceDoesNotApplyListPrimaryCardinality(t *testing.T) {
+	t.Parallel()
+
+	reference := SubjectReference{
+		RegistryVersion: SubjectRegistryVersionV1,
+		Kind:            SubjectKindTarget,
+		Role:            RelationRoleContext,
+		SourceID:        testRecordTargetID,
+		Primary:         false,
+	}
+	if err := ValidateSubjectReference(reference); err != nil {
+		t.Fatalf("ValidateSubjectReference() error = %v", err)
+	}
+}
+
 func TestSubjectRegistryRejectsUnknownDuplicateAndInvalidPrimaryShapes(t *testing.T) {
 	t.Parallel()
 

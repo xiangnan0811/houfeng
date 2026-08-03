@@ -790,6 +790,20 @@ type recordPlatformPostgresFixture struct {
 
 func newRecordPlatformPostgresFixture(t *testing.T, ctx context.Context) recordPlatformPostgresFixture {
 	t.Helper()
+	fixture := newRecordPlatformPostgresBaseFixture(t, ctx)
+	migratorPool := fixture.openDirectRolePool(t, ctx, fixture.migrator, "record-platform-migrator", 1)
+	if _, err := storemigrate.ConvergeAppACLR1(ctx, migratorPool, fixture.runtime, fixture.admin); err != nil {
+		t.Fatalf("ConvergeAppACLR1() for record platform integration: %v", err)
+	}
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-platform-runtime-admission", 1)
+	if err := storemigrate.AdmitAppACLRuntime(ctx, runtimePool); err != nil {
+		t.Fatalf("AdmitAppACLRuntime() for direct runtime integration role: %v", err)
+	}
+	return fixture
+}
+
+func newRecordPlatformPostgresBaseFixture(t *testing.T, ctx context.Context) recordPlatformPostgresFixture {
+	t.Helper()
 	db := openRecordPlatformTemporaryPostgresDatabase(t, ctx)
 	fixture := recordPlatformPostgresFixture{
 		db:        db,
@@ -825,14 +839,6 @@ func newRecordPlatformPostgresFixture(t *testing.T, ctx context.Context) recordP
 		}
 	})
 
-	migratorPool := fixture.openDirectRolePool(t, ctx, fixture.migrator, "record-platform-migrator", 1)
-	if _, err := storemigrate.ConvergeAppACLR1(ctx, migratorPool, fixture.runtime, fixture.admin); err != nil {
-		t.Fatalf("ConvergeAppACLR1() for record platform integration: %v", err)
-	}
-	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-platform-runtime-admission", 1)
-	if err := storemigrate.AdmitAppACLRuntime(ctx, runtimePool); err != nil {
-		t.Fatalf("AdmitAppACLRuntime() for direct runtime integration role: %v", err)
-	}
 	return fixture
 }
 

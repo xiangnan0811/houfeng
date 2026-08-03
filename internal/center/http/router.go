@@ -16,6 +16,9 @@ type RouterOptions struct {
 	CommandAuditsHandler                          stdhttp.Handler
 	IncidentsHandler                              stdhttp.Handler
 	SettingsHandler                               stdhttp.Handler
+	RecordsEnabled                                bool
+	RecordsHandler                                stdhttp.Handler
+	RecordDraftsHandler                           stdhttp.Handler
 	AssetDomainsCollectionHandler                 stdhttp.Handler
 	AssetServicesCollectionHandler                stdhttp.Handler
 	AssetDecisionOverviewHandler                  stdhttp.Handler
@@ -142,6 +145,16 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.SettingsHandler != nil {
 		mux.Handle("/api/settings", protect(opts.SettingsHandler))
+	}
+	if opts.RecordsEnabled && opts.RecordsHandler != nil {
+		handler := protect(opts.RecordsHandler)
+		mux.Handle("/api/records", handler)
+		mux.Handle("/api/records/", handler)
+	}
+	if opts.RecordsEnabled && opts.RecordDraftsHandler != nil {
+		handler := protect(opts.RecordDraftsHandler)
+		mux.Handle("/api/record-drafts", handler)
+		mux.Handle("/api/record-drafts/", handler)
 	}
 	if opts.AssetDomainsCollectionHandler != nil {
 		mux.Handle("/api/domains", protect(opts.AssetDomainsCollectionHandler))

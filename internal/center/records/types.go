@@ -59,7 +59,7 @@ type RevisionSubject struct {
 	CaptureAuthorization recordauth.SourceAuthorization
 }
 
-type RevisionParticipant struct {
+type RevisionParticipantSnapshot struct {
 	ParticipantID    string
 	IdentitySnapshot map[string]string
 }
@@ -77,7 +77,7 @@ type CompleteRevisionValues struct {
 	Subjects               []RevisionSubject
 	Tags                   []string
 	OwnerID                string
-	Participants           []RevisionParticipant
+	Participants           []RevisionParticipantSnapshot
 	FollowUpAt             *time.Time
 	Template               *TemplateProvenance
 	AuthorID               string
@@ -100,7 +100,7 @@ type CompleteRevisionInput struct {
 	subjects               []RevisionSubject
 	tags                   []string
 	ownerID                string
-	participants           []RevisionParticipant
+	participants           []RevisionParticipantSnapshot
 	followUpAt             *time.Time
 	template               *TemplateProvenance
 	authorID               string
@@ -160,7 +160,7 @@ func (input CompleteRevisionInput) OwnerID() string {
 	return input.ownerID
 }
 
-func (input CompleteRevisionInput) Participants() []RevisionParticipant {
+func (input CompleteRevisionInput) Participants() []RevisionParticipantSnapshot {
 	return cloneRevisionParticipants(input.participants)
 }
 
