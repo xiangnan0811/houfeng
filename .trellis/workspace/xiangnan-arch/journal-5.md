@@ -361,3 +361,41 @@ Delivered and archived the platform-foundation child after PR #394, protected-ma
 ### Next Steps
 
 - None - task complete
+
+
+## Session 244: Close VPS Records Child 2
+
+**Date**: 2026-08-04
+**Task**: Close VPS Records Child 2
+**Branch**: `codex/vps-records-core-closeout`
+
+### Summary
+
+Delivered and archived the Records core child after final-review remediation, PR #397 required CI, protected-main CI, v0.62.0 release publication, signed agent assets, and multi-architecture image verification; updated the parent to 2/11 and left the remaining nine children planning.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c032a1d5715865f4999954375b5c0a9bc196424b` | (see git log) |
+| `1ade5e8678de548274c013e10979f16d8b73684c` | (see git log) |
+| `4b0a6b41121a5e391d1bd78a9d7aefac12304229` | (see git log) |
+| `0a9994775d0618a3f728854ae30446b136d4ec46` | (see git log) |
+| `11d7cfabf695f6eaacc8c5b5d362c59975bdb36e` | (see git log) |
+| `ba5f2d8d21cc09d1a47318b6ecbe1239aa60a331` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
