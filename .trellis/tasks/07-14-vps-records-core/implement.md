@@ -17,8 +17,8 @@
 - [x] 用户批准一个 Child 2 task、一个 branch/worktree、一个早期 Draft PR 和三个硬检查点。
 - [x] 规划/激活先单独提交；之后每个检查点至少一个独立提交、完整 focused verification 和用户进度报告。
 - [x] 检查点 1 完成后 push 并创建 Draft PR；检查点 2/3 继续在同一 PR。
-- [ ] 三检查点未整体闭合前不合并，不把 `0052` 当作不可再改的发布历史。
-- [ ] 不读取、迁移、回填或双写 `experience_logs`；不触碰主检出目录的弃用 `0052_add_app_extension_hardening_receipt.sql`。
+- [x] 三检查点未整体闭合前不合并，不把 `0052` 当作不可再改的发布历史；2026-08-04 三个检查点及审查发现已整体闭合，Checkpoint 3 首轮 Draft PR required CI 7/7 GREEN，PR 仍为 Draft 且未合并。
+- [x] 不读取、迁移、回填或双写 `experience_logs`；不触碰主检出目录的弃用 `0052_add_app_extension_hardening_receipt.sql`；2026-08-04 production forbidden scan 与该弃用路径的 branch diff/history 检查均为零结果。
 
 ## Checkpoint 1: `0052`, current APP ACL, domain contracts
 
@@ -246,7 +246,7 @@
 - [x] Run `env PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH make verify-web`; 2026-08-04 Node 22.23.1 passed 126/126 files and 883/883 tests plus coverage, ESLint, strict TypeScript/Vite build, bundle and CSS budgets (`entryJsGzipBytes=110716`, `maxAsyncJsGzipBytes=31903`).
 - [x] Run `git diff --check` and scan production code for legacy `experience_logs` access or forbidden eager `recordsApi` imports; 2026-08-04 tracked/untracked whitespace, conflict-marker, legacy production access, eager import, raw Records fetch and forbidden schema-name scans all returned zero findings.
 - [x] Load and run `trellis-check`; 2026-08-04 cross-layer Store -> Service/Worker -> HTTP -> lazy Web DTO flow, closed adapter/state/survivor sets, reuse/import direction, legacy API compatibility and bundle isolation are coherent. Phase 3.3 also captured the permanent-deletion/core-purge/recovery contract in the backend database spec; no code fix was required.
-- [ ] Commit checkpoint 3 separately, push, monitor Draft PR required CI and keep the PR unmerged until all three checkpoints and review findings are coherent.
+- [x] Commit checkpoint 3 separately, push, monitor Draft PR required CI and keep the PR unmerged until all three checkpoints and review findings are coherent; 2026-08-04 Checkpoint 3 commit `0a999477` was pushed separately, and Draft PR #397 completed 7/7 required checks GREEN with zero failure/skip while remaining unmerged.
 
 ## Rollback
 
