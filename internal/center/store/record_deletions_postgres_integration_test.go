@@ -389,10 +389,10 @@ func TestPostgresIntegrationRecordDeletionDeleteCommitPurgesCoreAndDeliveryEpoch
 		         where project_id = 'default' and object_kind = 'record' and object_id = $1),
 		       (select count(*)::int
 		          from public.record_core_purge_receipts
-		         where operation_id = $2 and record_id = $1),
+		         where operation_id = $2),
 		       (select removed_row_count
 		          from public.record_core_purge_receipts
-		         where operation_id = $2 and record_id = $1),
+		         where operation_id = $2),
 		       (select state
 		          from public.deletion_reservations
 		         where reservation_id = $3)`,

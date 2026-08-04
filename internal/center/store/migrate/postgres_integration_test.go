@@ -830,6 +830,12 @@ func TestPostgresIntegrationRecordsCoreSchema(t *testing.T) {
 	} {
 		assertSingleStringValue(t, ctx, db, "select to_regclass('public."+table+"')::text", table)
 	}
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'record_core_purge_receipts'
+	`, "operation_id,adapter_name,removed_surface_digest,receipt_digest,removed_row_count,verified_absent_at,created_at")
 	assertSingleIntValue(t, ctx, db, `
 		select count(*)::int
 		from public.schema_migrations

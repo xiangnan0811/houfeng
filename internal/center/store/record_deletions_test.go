@@ -1337,6 +1337,18 @@ func TestPostgresRecordDeletionPurgeRecordCoreDeletesExactSurfacesBeforeReceipt(
 	if len(tx.querySQL) != 4 || !strings.Contains(tx.querySQL[len(tx.querySQL)-1], "insert into public.record_core_purge_receipts") {
 		t.Fatalf("core purge queries = %#v, want lock/receipt/absence/receipt-insert", tx.querySQL)
 	}
+	receiptInsertSQL := strings.ToLower(tx.querySQL[len(tx.querySQL)-1])
+	for _, forbidden := range []string{"project_id", "record_id"} {
+		if strings.Contains(receiptInsertSQL, forbidden) {
+			t.Errorf("core purge receipt insert persists object identity field %q:\n%s", forbidden, receiptInsertSQL)
+		}
+	}
+	receiptInsertArgs := tx.queryArgs[len(tx.queryArgs)-1]
+	for _, forbidden := range []string{operation.Object.ProjectID, operation.Object.ObjectID} {
+		if storeDeletionArgumentsContain(receiptInsertArgs, forbidden) {
+			t.Errorf("core purge receipt insert persists object identity argument %q: %#v", forbidden, receiptInsertArgs)
+		}
+	}
 	absenceSQL := strings.ToLower(tx.querySQL[2])
 	for _, fragment := range []string{
 		"from public.content_delivery_epochs",
@@ -1434,6 +1446,21 @@ func TestPostgresRecordDeletionPurgeRecordCoreDeletesExactSurfacesBeforeReceipt(
 				t.Fatalf("replay execs=%d committed=%t, want 0/%t", len(replayTx.execSQL), replayTx.committed, tt.wantCommit)
 			}
 		})
+	}
+}
+
+func TestRecordCorePurgeReceiptDigestDoesNotRetainObjectIdentity(t *testing.T) {
+	t.Parallel()
+
+	operation := testStoreDeletionOperation(recorddeletion.DeletionStateOnlinePurging)
+	surfaceDigest := recorddeletion.RecordCoreSurfaceDigest()
+	want := digestRecordCorePurgeReceipt(operation, surfaceDigest, 9)
+
+	otherObject := operation
+	otherObject.Object.ProjectID = "another_project"
+	otherObject.Object.ObjectID = "rec_anotherpurge01"
+	if got := digestRecordCorePurgeReceipt(otherObject, surfaceDigest, 9); got != want {
+		t.Fatal("content-free core purge receipt digest changes with project/record identity")
 	}
 }
 

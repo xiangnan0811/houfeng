@@ -122,6 +122,7 @@
 - `(record_id,current_revision_id)` 使用 initially-deferred same-record FK。revision subject 使用 partial unique index 保证至多一个 primary，并由两个 initially-deferred constraint trigger 覆盖 revision insert 与 subject insert/delete，在 commit 时保证每个仍存在的 revision 恰有一个 primary。受控 purge 同事务删除 subject 与 revision 时 validator 看到 revision 已消失并允许提交。
 - immutable history tables没有 APP `UPDATE` grant，并复用 `reject_immutable_mutation()` 拒绝 owner/migrator update；delete 仅用于受控显式 purge。
 - current fragment 精确登记九张 table 加 primary-subject validator function。`center_runtime` 只取得 Records 在线读写/显式 purge 所需 table privilege；`platform_admin` 只能读取无内容的 `record_core_purge_receipts`，不能读取 Records content table；validator 没有额外 direct APP EXECUTE tuple。
+- `record_core_purge_receipts` 的 schema、insert 参数和 receipt digest 都只能保存 operation-scoped proof：不得包含或散列 `project_id`、`record_id`、revision ID 或业务内容。需要在 preview 中关联对象时，经 `record_purge_operations -> deletion_reservations` 读取当前 operation binding，不能把对象身份反规范化回 receipt。
 - `record_draft_checkpoints` 是唯一恢复点名称；revision participant 只存在于独立 `record_revision_participants`，不得出现 `participant_ids` 或 `record_draft_recovery_points`。
 - production current/historical authorization snapshot loader 必须在 admitted pgx transaction 中先执行 record read fence，再读取 root、visibility、identity snapshot、capture authorization 或 subject rows；直接 DB loader 只允许作为注入式单元测试 seam，不能由 production constructor 绑定。
 - record candidate list 必须在同一条 SQL 中以 correlated `not exists` 排除 `fenced|committed` deletion reservation，并在过滤之后应用 `order by/limit`；后续 authorization snapshot 与 revision content read 仍各自 recheck fence，以关闭查询之间的 reservation race。
@@ -157,7 +158,7 @@ scripts/test-record-platform-integration.sh postgres -- \
   -run '^(TestPostgresIntegrationRecordsCoreSchema|TestPostgresIntegrationAppACLCurrent)$' -count=1
 ```
 
-- PostgreSQL test 必须覆盖 fresh/exact repeat、无 primary 的 commit-time `23514`、第二 primary `23505`、same-record FK、immutable update、单事务显式 purge，以及 runtime/admin exact privilege；不得以 `SKIP` 作为证据。
+- PostgreSQL test 必须覆盖 fresh/exact repeat、无 primary 的 commit-time `23514`、第二 primary `23505`、same-record FK、immutable update、单事务显式 purge、receipt 的 exact content-free column set，以及 runtime/admin exact privilege；不得以 `SKIP` 作为证据。
 
 #### 7. Wrong vs Correct
 
@@ -216,6 +217,7 @@ type RevisionCommitCommand struct {
 - discard/revoke 与 publish cleanup 都先删除 checkpoints 再删除 draft。publish 必须在现有 revision transaction 内锁定作者 draft，校验 exact ETag 及 create/new-draft 或 update/same-record-and-base shape，在 formal revision/no-change 成功后、idempotency complete 前 cleanup。任一 conflict 或 cleanup error 回滚正式事实并保留 draft。
 - completed idempotency replay 在 draft validation/cleanup 之前返回 persisted revision result；首次 publish 已删除 draft 后，同 key/same fingerprint replay 仍必须成功。request fingerprint 绑定 `DraftID` 与强 ETag，换 draft 或换 version 不能复用同 key。
 - 普通 draft create/read/PATCH/discard/revoke/expiry cleanup 不写 `record_domain_activities`、`record_outbox`、search 或 notification；只有 publish 成功产生正式 revision 既有的 activity/outbox。
+- `ClaimExpiredDrafts` 必须在 claim SQL 中、`order by/limit` 之前以 correlated `not exists` 排除 existing-record draft 的 `fenced|committed` reservation，同时返回 nullable `record_id`。claim 完成后、任何 checkpoint/draft delete 之前，对去重后的每个非空 record ID 再执行 mutation-fence recheck；并发 reservation 命中时整批 rollback。`record_id is null` 的 new-record draft 不受对象 reservation 过滤影响。
 - duration 以 Go `time.Duration.Microseconds()` 作为 `bigint` 传入。一个 bind 参数乘 interval 可沿用现有 SQL；两个参数先做减法时必须显式 cast 两侧为 `bigint`，否则 PostgreSQL parse 会对 `unknown - unknown` 返回 `42725`。
 
 #### 4. Validation & Error Matrix
@@ -231,15 +233,19 @@ type RevisionCommitCommand struct {
 | PATCH payload 未变化 | version/ETag/payload 不变，只刷新 90-day TTL 与 7-day warning；0 checkpoint。 |
 | checkpoint ID、insert、retention prune 或 publish cleanup 任一步失败 | 整个 transaction rollback；不得留下半份 draft 或半份 formal revision。 |
 | expiry cleanup limit 为 0 或大于 100 | `ErrInvalidDraftCommand`；不开始 transaction。 |
+| existing-record draft 在 expiry claim 前已有 `fenced|committed` reservation | claim SQL 返回 0 row；expired draft/checkpoint 保留，且不占 batch limit。 |
+| reservation 在 expiry row claim 后并发建立 | mutation-fence recheck 返回 `ErrRecordDeletionReserved`；整批 0 checkpoint/draft delete。 |
 | 两个 cleanup worker 同时运行 | `FOR UPDATE SKIP LOCKED` 使 claimed ID 集合不相交；每个 batch 原子删除 checkpoints/drafts。 |
 
 #### 5. Good / Base / Bad Cases
 
 - Good：两个客户端持有相同 ETag；先取得 row lock 的请求推进到 v2 并写一个 bucket checkpoint，后取得锁的请求读到 v2 typed conflict 且不覆盖。
 - Good：publish 创建 revision/activity/outbox 后在同一 transaction 删除 checkpoint/draft并完成 idempotency；同 key retry 不再要求 draft 存在。
+- Good：expiry worker 的首条 SQL 跳过已经 reserved 的 existing-record draft；claim 后出现 reservation 时，二次 mutation fence 在 delete 前中止并回滚整批。
 - Base：autosave 内容与 server canonical payload 相同，仅刷新 inactivity TTL，避免 version 与 recovery history 噪音。
 - Bad：formal revision 先 commit，再调用独立 `DeleteDraft`；cleanup failure 会留下“已发布但仍可编辑”的 server draft，retry 也无法证明单一结果。
 - Bad：用 `limit` 但没有 `SKIP LOCKED` 或跨 transaction claim/delete；并发 worker 会阻塞、重复 claim 或留下部分 cleanup。
+- Bad：expiry cleanup 只按 `expires_at` claim 后直接 delete；它会绕过 permanent-delete reservation，或者在 claim 与 delete 之间吞掉刚被 fenced 的 draft。
 
 #### 6. Tests Required
 
@@ -253,7 +259,7 @@ scripts/test-record-platform-integration.sh postgres -- \
 ```
 
 - Unit/race 必须覆盖 immutable payload/ETag、作者隔离、two-client conflict、no-change TTL、checkpoint SQL、discard/revoke、expired batch grammar、publish create/update/no-change/conflict/rollback/replay。
-- 真实 PostgreSQL 必须覆盖并发 PATCH 单赢家、五分钟 bucket/newest 20/seven-day retention、并发 cleanup claim 不相交、publish/discard/revoke cleanup，以及普通 draft 操作的 activity/outbox 零行；runner 不接受 `SKIP`。
+- 真实 PostgreSQL 必须覆盖并发 PATCH 单赢家、五分钟 bucket/newest 20/seven-day retention、并发 cleanup claim 不相交、`fenced|committed` 过期 existing-record draft/checkpoint 均保留、publish/discard/revoke cleanup，以及普通 draft 操作的 activity/outbox 零行；runner 不接受 `SKIP`。
 
 #### 7. Wrong vs Correct
 
@@ -277,6 +283,16 @@ if err == nil {
 // 正确：revision store 在 caller-owned admitted pgx.Tx 内完成 formal writes、
 // draft checkpoint/draft cleanup 和 idempotency complete，再统一 commit/rollback。
 result, err := revisions.CommitRevision(ctx, commandWithDraftIDAndExactETag)
+```
+
+```sql
+-- 错误：过期即 claim，随后没有对象 mutation-fence recheck。
+select draft_id from public.record_drafts
+where expires_at <= transaction_timestamp()
+for update skip locked limit $1;
+
+-- 正确：claim SQL 先排除 fenced|committed reservation；scan 完 record_id 后，
+-- application 在任何 delete 前对去重的非空 record ID 调用 assertRecordMutationFence。
 ```
 
 ### Scenario: APP current-development scoped migrator and one-snapshot runtime admission
@@ -751,6 +767,7 @@ func NewPostgresRecordDeletionRepository(
 - `record_core` 只拥有 `records`、revisions/subjects/tags/participants、drafts/checkpoints、`record_domain_activities`、`record_core_purge_receipts` 与该对象的 `content_delivery_epochs`。它在一个 transaction 内清除 current projection 与 exact surfaces、写无正文 receipt，并在 commit 前后验证 absence；不得宣称后续 child 的内容表已清除。
 - Recovery 按 ledger sequence/hash 连续 replay，绑定 previous hash、witness proof、request fingerprint bytes、entry-type 对应的固定 surface allowlist 与 surface digest。delete commit replay 原子重建 terminal projection并清除 core；`attempt_not_committed` replay只建立/修正 terminal projection并释放 fence，不得 purge content。
 - recovery 必须覆盖 existing operation、preview-only reservation 和无本地 projection 三种 cut point；重复同一 entry 幂等，identity/cursor/receipt/audit/fence 任一分歧都保持 fail closed，不推进 cursor。
+- existing operation 从 `fenced` 进入 recovery terminal state 时，只能失效该 projection 读取到的 exact deletion-fence owner tuple（owner ID、generation、observed expiry）。已终态 operation、preview-only reservation、synthetic projection 和幂等 replay 不得按对象释放 fence；verification 也不得要求对象全局不存在 active fence。另一个较新 operation 的 fence 必须原样保留并继续阻止内容读取。
 - 所有 PostgreSQL mutation 先执行 injected `AdmissionGate`，nil/error gate 产生 0 write。operation status 本地 row 缺失且 ledger+witness fallback 尚未证明不存在时返回 unavailable，不能伪装成 not-found 或完成。
 
 #### 4. Validation & Error Matrix
@@ -764,6 +781,8 @@ func NewPostgresRecordDeletionRepository(
 | sealed absence 未证明或 `attempt_not_committed` 未 witness | 不释放 reservation/fence、不恢复普通读写。 |
 | core receipt 含正文、identity 漂移、surface/receipt digest 不符或仍有 owned row | rollback/verification error；operation 不得进入 `online_purged`。 |
 | recovery cursor 不连续、previous hash/witness/fingerprint/surface digest 不符 | `ErrRecoveryContractUnavailable`；0 content/projection/cursor change。 |
+| recovery 要释放的 exact owner tuple 已被续租、替换或不存在 | `ErrRecoveryContractUnavailable`；transaction rollback，不得触碰当前 fence。 |
+| terminal/idempotent replay 时对象存在另一个 active fence | replay 按自身 receipt/audit/cursor 合同成功；另一个 fence 的 owner/generation/expiry 完全不变。 |
 | status projection missing 且无 authoritative fallback | `ErrDeletionStatusUnavailable`，由 HTTP 映射为 opaque 503。 |
 
 #### 5. Good / Base / Bad Cases
@@ -772,7 +791,9 @@ func NewPostgresRecordDeletionRepository(
 - Good：ledger 明确证明 delete 未提交，worker 追加并见证 `attempt_not_committed` 后释放 provisional fence；record 内容完全保留，同 token replay 仍返回同一 `not_committed` operation。
 - Base：当前 production 只注册 core adapter；即使所有 core 表为空，readiness 仍为 false，preview 不签发 token。
 - Base：应用投影丢失后 recovery 从连续 ledger cursor 重建 terminal projection；重复 replay 不重复 receipt/audit，也不跳过未知 entry。
+- Good：operation A 已终态后 operation B 建立新 fence；A 的幂等或延迟 replay 不更新 B 的 fence，B 继续让 Records read 返回 reserved。
 - Bad：以“后续表当前为空”省略 adapter，收到 ledger timeout 就释放 fence，或仅凭 `record_purge_operations` 无 row 返回 404；这些都会把未知状态误当作安全结论。
+- Bad：recovery 以 `(project, kind, object)` 无条件 expire fence，或在幂等验证中要求 active fence count 为零；前者会破坏较新 operation，后者会让合法旧 entry replay 永久卡住。
 
 #### 6. Tests Required
 
@@ -787,7 +808,7 @@ scripts/test-record-platform-integration.sh postgres -- \
 
 - Registry/service tests必须覆盖 exact nine-adapter readiness、preview reauthorization/CAS/digest drift、same-key replay/reuse、unknown ledger outcome、witness pending 和 sealed-absence-only release。
 - Worker/store tests必须覆盖每个 durable cut point、stale owner、permanent fence、retry stage、content-free receipt、core exact ownership 和 purge rollback。
-- Recovery PostgreSQL tests必须覆盖 existing operation、preview-only reservation、synthetic terminal projection、delete/not-committed replay、连续 cursor、幂等重放和 receipt failure 全事务回滚；runner 中任何 `SKIP` 都不能作为验收证据。
+- Recovery PostgreSQL tests必须覆盖 existing operation、preview-only reservation、synthetic terminal projection、delete/not-committed replay、连续 cursor、幂等重放、较新/无关 active fence 的 exact tuple 保留，以及 receipt failure 全事务回滚；runner 中任何 `SKIP` 都不能作为验收证据。
 
 #### 7. Wrong vs Correct
 
@@ -813,6 +834,16 @@ snapshot, err := registry.RequireReady(ctx)
 if err != nil || !snapshot.Ready() {
 	return ErrDeletionSafetyUnavailable
 }
+```
+
+```sql
+-- 错误：按对象释放，可能命中另一个 operation 的新 fence。
+update public.deletion_fence_leases
+set expires_at = transaction_timestamp()
+where project_id = $1 and object_kind = $2 and object_id = $3;
+
+-- 正确：仅当原 recovery projection 仍是 fenced 时，绑定它读取到的
+-- owner_id、owner_generation 与 exact expires_at；terminal replay 不执行该 SQL。
 ```
 
 ---

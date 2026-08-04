@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"houfeng/internal/center/recorddeletion"
 	"houfeng/internal/center/recordplatform"
@@ -183,8 +184,7 @@ func TestPostgresIntegrationRecordDeletionRecoveryDeleteCommitIsAtomicIdempotent
 		           and audit.event_kind = 'committed'),
 		       (select count(*)::int
 		          from public.record_core_purge_receipts receipt
-		         where receipt.operation_id = operation.operation_id
-		           and receipt.record_id = reservation.object_id),
+		         where receipt.operation_id = operation.operation_id),
 		       replay.applied_ledger_sequence,
 		       replay.applied_ledger_hash
 		from public.record_purge_operations operation
@@ -247,15 +247,44 @@ func TestPostgresIntegrationRecordDeletionRecoveryDeleteCommitIsAtomicIdempotent
 		t.Fatalf("stale recovery operation count = %d, want 0", staleOperationCount)
 	}
 
-	if _, err := fixture.db.Exec(ctx, `
+	var (
+		activeFenceOwner      string
+		activeFenceGeneration int64
+		activeFenceExpiresAt  time.Time
+	)
+	if err := fixture.db.QueryRow(ctx, `
 		insert into public.deletion_fence_leases (
 			project_id, object_kind, object_id, owner_id, owner_generation, expires_at, created_at
 		) values ('default', 'record', $1, 'recovery_corrupt_fence', 1,
-			transaction_timestamp() + interval '1 minute', transaction_timestamp())`, created.RecordID); err != nil {
+			transaction_timestamp() + interval '1 minute', transaction_timestamp())
+		returning owner_id, owner_generation, expires_at`, created.RecordID).Scan(
+		&activeFenceOwner,
+		&activeFenceGeneration,
+		&activeFenceExpiresAt,
+	); err != nil {
 		t.Fatalf("insert active fence for idempotent verification: %v", err)
 	}
-	if _, err := adapter.Replay(ctx, replayRequest); !errors.Is(err, recorddeletion.ErrRecoveryContractUnavailable) {
-		t.Fatalf("Replay(idempotent with active fence) error = %v, want ErrRecoveryContractUnavailable", err)
+	if _, err := adapter.Replay(ctx, replayRequest); err != nil {
+		t.Fatalf("Replay(idempotent with unrelated active fence) error = %v", err)
+	}
+	var (
+		preservedFenceOwner      string
+		preservedFenceGeneration int64
+		preservedFenceExpiresAt  time.Time
+	)
+	if err := fixture.db.QueryRow(ctx, `
+		select owner_id, owner_generation, expires_at
+		from public.deletion_fence_leases
+		where project_id = 'default' and object_kind = 'record' and object_id = $1`,
+		created.RecordID,
+	).Scan(&preservedFenceOwner, &preservedFenceGeneration, &preservedFenceExpiresAt); err != nil {
+		t.Fatalf("read active fence after idempotent replay: %v", err)
+	}
+	if preservedFenceOwner != activeFenceOwner || preservedFenceGeneration != activeFenceGeneration ||
+		!preservedFenceExpiresAt.Equal(activeFenceExpiresAt) {
+		t.Fatalf("active fence changed across idempotent replay: got %q/%d/%s, want %q/%d/%s",
+			preservedFenceOwner, preservedFenceGeneration, preservedFenceExpiresAt,
+			activeFenceOwner, activeFenceGeneration, activeFenceExpiresAt)
 	}
 	if _, err := fixture.db.Exec(ctx, `
 		delete from public.deletion_fence_leases
@@ -522,14 +551,97 @@ func TestPostgresIntegrationRecordDeletionRecoveryNotCommittedReleasesExistingFe
 			recoveryReplayed, reservationState, reservationEpoch, operationState, operationEpoch,
 			activeFenceCount, rootCount, revisionCount, deliveryCount, coreReceiptCount, auditCount, cursorSequence)
 	}
+
+	var currentDeliveryEpoch int64
+	if err := fixture.db.QueryRow(ctx, `
+		select delivery_epoch
+		from public.content_delivery_epochs
+		where project_id = $1 and object_kind = $2 and object_id = $3`,
+		recordplatform.ProjectIDDefault,
+		operation.Object.ObjectKind,
+		operation.Object.ObjectID,
+	).Scan(&currentDeliveryEpoch); err != nil {
+		t.Fatalf("read current content delivery epoch: %v", err)
+	}
+	newCreateCommand, _ := recordsPostgresDeletionPreviewCommand(t, created, deploymentID)
+	newCreateCommand.Record.ContentDeliveryEpoch = recordplatform.ContentEpoch(currentDeliveryEpoch)
+	repository.newReservationID = func() (string, error) { return "drs_pgrecoverynewer", nil }
+	repository.newOperationID = func() (string, error) { return "rpo_pgrecoverynewer", nil }
+	repository.newAuditID = func() (string, error) { return "rda_pgrecoverynewer", nil }
+	newPreview, err := repository.CreatePreview(ctx, newCreateCommand)
+	if err != nil {
+		t.Fatalf("CreatePreview(newer operation) error = %v", err)
+	}
+	newReserveCommand := recordsPostgresDeletionReserveCommand(newCreateCommand, newPreview, deploymentID)
+	newReserveCommand.OwnerID = "recovery_newer_owner"
+	newOperation, err := repository.ReservePreview(ctx, newReserveCommand)
+	if err != nil {
+		t.Fatalf("ReservePreview(newer operation) error = %v", err)
+	}
+
+	var (
+		newFenceOwner      string
+		newFenceGeneration int64
+		newFenceExpiresAt  time.Time
+	)
+	if err := fixture.db.QueryRow(ctx, `
+		select owner_id, owner_generation, expires_at
+		from public.deletion_fence_leases
+		where project_id = $1 and object_kind = $2 and object_id = $3`,
+		newOperation.Object.ProjectID,
+		newOperation.Object.ObjectKind,
+		newOperation.Object.ObjectID,
+	).Scan(&newFenceOwner, &newFenceGeneration, &newFenceExpiresAt); err != nil {
+		t.Fatalf("read newer deletion fence: %v", err)
+	}
+
+	if _, err := adapter.Replay(ctx, replayRequest); err != nil {
+		t.Fatalf("Replay(applied outcome with newer fence) error = %v", err)
+	}
+
+	if _, err := fixture.db.Exec(ctx, `
+		update public.deletion_replay_state
+		set applied_ledger_sequence = $2, applied_ledger_hash = $3
+		where project_id = $1`,
+		recordplatform.ProjectIDDefault,
+		int64(cursor.Sequence),
+		cursor.EntryHash[:],
+	); err != nil {
+		t.Fatalf("rewind recovery cursor before delayed outcome replay: %v", err)
+	}
+	if _, err := adapter.Replay(ctx, replayRequest); err != nil {
+		t.Fatalf("Replay(delayed outcome with newer fence) error = %v", err)
+	}
+
+	var (
+		preservedOwner      string
+		preservedGeneration int64
+		preservedExpiresAt  time.Time
+	)
+	if err := fixture.db.QueryRow(ctx, `
+		select owner_id, owner_generation, expires_at
+		from public.deletion_fence_leases
+		where project_id = $1 and object_kind = $2 and object_id = $3`,
+		newOperation.Object.ProjectID,
+		newOperation.Object.ObjectKind,
+		newOperation.Object.ObjectID,
+	).Scan(&preservedOwner, &preservedGeneration, &preservedExpiresAt); err != nil {
+		t.Fatalf("read newer deletion fence after delayed replay: %v", err)
+	}
+	if preservedOwner != newFenceOwner || preservedGeneration != newFenceGeneration ||
+		!preservedExpiresAt.Equal(newFenceExpiresAt) {
+		t.Fatalf("newer deletion fence changed across old outcome replay: got %q/%d/%s, want %q/%d/%s",
+			preservedOwner, preservedGeneration, preservedExpiresAt,
+			newFenceOwner, newFenceGeneration, newFenceExpiresAt)
+	}
 	if _, err := recordRepository.ReadRecordRevision(ctx, records.StoredRecordRevisionRequest{
 		RecordID:           created.RecordID,
 		RevisionID:         created.RevisionID,
 		CurrentRevisionID:  created.RevisionID,
 		LockVersion:        created.LockVersion,
 		AuthorizationEpoch: created.AuthorizationEpoch,
-	}); err != nil {
-		t.Fatalf("ReadRecordRevision() after recovery outcome error = %v", err)
+	}); !errors.Is(err, records.ErrRecordDeletionReserved) {
+		t.Fatalf("ReadRecordRevision() with preserved newer fence error = %v, want ErrRecordDeletionReserved", err)
 	}
 }
 

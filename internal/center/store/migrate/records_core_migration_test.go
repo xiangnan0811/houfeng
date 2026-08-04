@@ -285,6 +285,21 @@ func TestRecordsCoreMigrationKeepsDomainActivityAndPurgeReceiptContentFree(t *te
 			t.Errorf("0052 records-core migration missing activity/receipt field %q", want)
 		}
 	}
+
+	receiptStart := strings.Index(sql, "create table if not exists public.record_core_purge_receipts (")
+	if receiptStart < 0 {
+		t.Fatal("0052 records-core migration missing purge receipt table")
+	}
+	receiptEnd := strings.Index(sql[receiptStart:], ");")
+	if receiptEnd < 0 {
+		t.Fatal("0052 records-core migration has unterminated purge receipt table")
+	}
+	receiptSQL := sql[receiptStart : receiptStart+receiptEnd]
+	for _, forbidden := range []string{"project_id", "record_id"} {
+		if strings.Contains(receiptSQL, forbidden) {
+			t.Errorf("0052 content-free purge receipt persists object identity field %q", forbidden)
+		}
+	}
 }
 
 func TestRecordsCoreMigrationRejectsUpdatesToImmutableRows(t *testing.T) {

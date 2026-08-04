@@ -712,9 +712,71 @@ func TestPostgresRecordDraftRepositoryClaimsExpiredDraftsInBoundedSkipLockedBatc
 		}
 	})
 
+	t.Run("reserved existing draft is not claimed or deleted", func(t *testing.T) {
+		const (
+			draftID  = "rdf_0000000000000001"
+			recordID = "rec_0000000000000001"
+		)
+		tx := newFakeRecordDraftTx(now)
+		tx.expiredDraftIDs = []string{draftID}
+		tx.expiredDraftRecordIDs = map[string]string{draftID: recordID}
+		tx.fencedRecordIDs = map[string]bool{recordID: true}
+		repository := NewPostgresRecordDraftRepository(nil, allowRecordPlatformAdmissionGate)
+		repository.platform.beginTx = func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }
+
+		claimed, err := repository.ClaimExpiredDrafts(context.Background(), 10)
+		if err != nil {
+			t.Fatalf("ClaimExpiredDrafts() error = %v", err)
+		}
+		if len(claimed) != 0 {
+			t.Fatalf("ClaimExpiredDrafts() = %#v, want reserved draft omitted", claimed)
+		}
+		if len(tx.execSQL) != 0 {
+			t.Fatalf("reserved cleanup writes = %#v, want none", tx.execSQL)
+		}
+		claimSQL := strings.ToLower(tx.querySQL[0])
+		for _, fragment := range []string{
+			"drafts.record_id is null",
+			"not exists",
+			"from public.deletion_reservations",
+			"state in ('fenced', 'committed')",
+		} {
+			if !strings.Contains(claimSQL, fragment) {
+				t.Errorf("reserved cleanup claim SQL missing %q:\n%s", fragment, claimSQL)
+			}
+		}
+	})
+
+	t.Run("reservation racing after claim aborts before cleanup writes", func(t *testing.T) {
+		const (
+			draftID  = "rdf_0000000000000002"
+			recordID = "rec_0000000000000002"
+		)
+		tx := newFakeRecordDraftTx(now)
+		tx.expiredDraftIDs = []string{draftID}
+		tx.expiredDraftRecordIDs = map[string]string{draftID: recordID}
+		tx.fencedRecordIDs = make(map[string]bool)
+		tx.afterExpiredDraftScan = func() { tx.fencedRecordIDs[recordID] = true }
+		repository := NewPostgresRecordDraftRepository(nil, allowRecordPlatformAdmissionGate)
+		repository.platform.beginTx = func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }
+
+		_, err := repository.ClaimExpiredDrafts(context.Background(), 10)
+		if !errors.Is(err, records.ErrRecordDeletionReserved) {
+			t.Fatalf("ClaimExpiredDrafts() error = %v, want ErrRecordDeletionReserved", err)
+		}
+		for _, sql := range tx.execSQL {
+			if strings.Contains(strings.ToLower(sql), "delete from public.record_draft") {
+				t.Fatalf("racing reservation allowed cleanup write:\n%s", sql)
+			}
+		}
+	})
+
 	t.Run("claims and deletes atomically", func(t *testing.T) {
 		tx := newFakeRecordDraftTx(now)
 		tx.expiredDraftIDs = []string{"rdf_0000000000000001", "rdf_0000000000000002"}
+		tx.expiredDraftRecordIDs = map[string]string{
+			"rdf_0000000000000001": "rec_0000000000000001",
+		}
 		repository := NewPostgresRecordDraftRepository(nil, allowRecordPlatformAdmissionGate)
 		repository.platform.beginTx = func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }
 
@@ -725,13 +787,19 @@ func TestPostgresRecordDraftRepositoryClaimsExpiredDraftsInBoundedSkipLockedBatc
 		if strings.Join(claimed, ",") != strings.Join(tx.expiredDraftIDs, ",") {
 			t.Fatalf("ClaimExpiredDrafts() = %#v, want %#v", claimed, tx.expiredDraftIDs)
 		}
-		if len(tx.querySQL) != 1 || len(tx.queryArgs) != 1 || len(tx.queryArgs[0]) != 1 || tx.queryArgs[0][0] != int64(2) {
+		if len(tx.queryArgs) != 1 || len(tx.queryArgs[0]) != 2 ||
+			tx.queryArgs[0][0] != int64(2) || tx.queryArgs[0][1] != recordObjectKind {
 			t.Fatalf("cleanup claim query = sql %#v args %#v", tx.querySQL, tx.queryArgs)
 		}
 		claimSQL := strings.ToLower(tx.querySQL[0])
 		for _, fragment := range []string{
+			"select drafts.draft_id, drafts.record_id",
 			"expires_at <= transaction_timestamp()",
-			"order by expires_at, draft_id",
+			"drafts.record_id is null",
+			"not exists",
+			"from public.deletion_reservations",
+			"state in ('fenced', 'committed')",
+			"order by drafts.expires_at, drafts.draft_id",
 			"for update skip locked",
 			"limit $1",
 		} {
@@ -745,8 +813,19 @@ func TestPostgresRecordDraftRepositoryClaimsExpiredDraftsInBoundedSkipLockedBatc
 			t.Fatalf("cleanup writes = %#v", tx.execSQL)
 		}
 		for _, sql := range tx.execSQL {
-			if !strings.Contains(strings.ToLower(sql), "any($1::text[])") {
+			if strings.Contains(strings.ToLower(sql), "delete from public.record_draft") &&
+				!strings.Contains(strings.ToLower(sql), "any($1::text[])") {
 				t.Fatalf("cleanup delete is not bound to claimed IDs:\n%s", sql)
+			}
+		}
+		joinedQueries := strings.ToLower(strings.Join(tx.querySQL, "\n"))
+		for _, fragment := range []string{
+			"from public.deletion_reservations",
+			"from public.content_delivery_epochs",
+			"from public.deletion_fence_leases",
+		} {
+			if !strings.Contains(joinedQueries, fragment) {
+				t.Errorf("expired cleanup mutation fence missing %q:\n%s", fragment, joinedQueries)
 			}
 		}
 		joinedSQL := strings.ToLower(strings.Join(tx.allSQL(), "\n"))
@@ -760,19 +839,21 @@ func TestPostgresRecordDraftRepositoryClaimsExpiredDraftsInBoundedSkipLockedBatc
 
 type fakeRecordDraftTx struct {
 	*fakeRecordRevisionTx
-	now               time.Time
-	querySQL          []string
-	execSQL           []string
-	commitCalls       int
-	rollbackCalls     int
-	currentRevisionID string
-	currentLifecycle  string
-	storedDraft       *records.Draft
-	routingDrafts     []records.Draft
-	routingScans      int
-	fencedRecordIDs   map[string]bool
-	expiredDraftIDs   []string
-	queryArgs         [][]any
+	now                   time.Time
+	querySQL              []string
+	execSQL               []string
+	commitCalls           int
+	rollbackCalls         int
+	currentRevisionID     string
+	currentLifecycle      string
+	storedDraft           *records.Draft
+	routingDrafts         []records.Draft
+	routingScans          int
+	fencedRecordIDs       map[string]bool
+	expiredDraftIDs       []string
+	expiredDraftRecordIDs map[string]string
+	afterExpiredDraftScan func()
+	queryArgs             [][]any
 }
 
 func (tx *fakeRecordDraftTx) Commit(context.Context) error {
@@ -910,7 +991,19 @@ func (tx *fakeRecordDraftTx) Query(_ context.Context, sql string, args ...any) (
 		}
 		return &fakeRecordDraftRows{routings: routings, routingScans: &tx.routingScans}, nil
 	}
-	return &fakeRecordDraftRows{draftIDs: append([]string(nil), tx.expiredDraftIDs...)}, nil
+	draftIDs := make([]string, 0, len(tx.expiredDraftIDs))
+	for _, draftID := range tx.expiredDraftIDs {
+		recordID := tx.expiredDraftRecordIDs[draftID]
+		if recordID != "" && strings.Contains(compact, "deletion_reservations") && tx.fencedRecordIDs[recordID] {
+			continue
+		}
+		draftIDs = append(draftIDs, draftID)
+	}
+	return &fakeRecordDraftRows{
+		draftIDs:              draftIDs,
+		draftRecordIDs:        tx.expiredDraftRecordIDs,
+		afterExpiredDraftScan: tx.afterExpiredDraftScan,
+	}, nil
 }
 
 func scanFakeStoredDraft(draft records.Draft, dest ...any) error {
@@ -979,10 +1072,12 @@ type fakeRecordDraftRow struct {
 }
 
 type fakeRecordDraftRows struct {
-	draftIDs     []string
-	routings     []records.DraftRouting
-	routingScans *int
-	index        int
+	draftIDs              []string
+	draftRecordIDs        map[string]string
+	afterExpiredDraftScan func()
+	routings              []records.DraftRouting
+	routingScans          *int
+	index                 int
 }
 
 func (*fakeRecordDraftRows) Close() {}
@@ -1039,10 +1134,23 @@ func (rows *fakeRecordDraftRows) Scan(dest ...any) error {
 		*(dest[5].(*time.Time)) = routing.UpdatedAt
 		return nil
 	}
-	if len(dest) != 1 || rows.index == 0 || rows.index > len(rows.draftIDs) {
+	if (len(dest) != 1 && len(dest) != 2) || rows.index == 0 || rows.index > len(rows.draftIDs) {
 		return errors.New("invalid record draft cleanup scan")
 	}
-	*(dest[0].(*string)) = rows.draftIDs[rows.index-1]
+	draftID := rows.draftIDs[rows.index-1]
+	*(dest[0].(*string)) = draftID
+	if len(dest) == 2 {
+		recordID := rows.draftRecordIDs[draftID]
+		if recordID == "" {
+			*(dest[1].(**string)) = nil
+		} else {
+			*(dest[1].(**string)) = &recordID
+		}
+	}
+	if rows.index == len(rows.draftIDs) && rows.afterExpiredDraftScan != nil {
+		rows.afterExpiredDraftScan()
+		rows.afterExpiredDraftScan = nil
+	}
 	return nil
 }
 

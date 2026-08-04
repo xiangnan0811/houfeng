@@ -1945,6 +1945,7 @@ const recordCoreHealthSQL = `
 const previewRecordCoreSQL = `
 	with root as (
 		select root.record_id,
+		       root.project_id,
 		       root.lifecycle,
 		       root.current_revision_id,
 		       root.lock_version,
@@ -2018,7 +2019,14 @@ const previewRecordCoreSQL = `
 		), '[]'::jsonb) as material,
 		count(*)::bigint as row_count
 		from public.record_core_purge_receipts receipt
-		join root on root.record_id = receipt.record_id
+		join public.record_purge_operations operation
+		  on operation.operation_id = receipt.operation_id
+		join public.deletion_reservations reservation
+		  on reservation.reservation_id = operation.reservation_id
+		 and reservation.project_id = operation.project_id
+		join root
+		  on root.project_id = operation.project_id
+		 and root.record_id = reservation.object_id
 	)
 	select pg_catalog.convert_to(jsonb_build_object(
 		'record_id', root.record_id,
@@ -2070,9 +2078,7 @@ const loadRecordCorePurgeReceiptSQL = `
 	       verified_absent_at
 	from public.record_core_purge_receipts
 	where operation_id = $1
-	  and adapter_name = 'record_core'
-	  and project_id = $2
-	  and record_id = $3`
+	  and adapter_name = 'record_core'`
 
 const clearRecordCoreCurrentProjectionSQL = `
 	update public.records
@@ -2162,13 +2168,11 @@ const insertRecordCorePurgeReceiptSQL = `
 	insert into public.record_core_purge_receipts (
 		operation_id,
 		adapter_name,
-		project_id,
-		record_id,
 		removed_surface_digest,
 		receipt_digest,
 		removed_row_count,
 		verified_absent_at
-	) values ($1, 'record_core', $2, $3, $4, $5, $6, transaction_timestamp())
+	) values ($1, 'record_core', $2, $3, $4, transaction_timestamp())
 	returning verified_absent_at`
 
 func (repository *PostgresRecordDeletionRepository) RecordCoreHealth(
@@ -2343,8 +2347,6 @@ func (repository *PostgresRecordDeletionRepository) PurgeRecordCore(
 		var verifiedAbsentAt time.Time
 		if err := transaction.tx.QueryRow(ctx, insertRecordCorePurgeReceiptSQL,
 			operation.OperationID,
-			operation.Object.ProjectID,
-			operation.Object.ObjectID,
 			command.SurfaceDigest[:],
 			receiptDigest[:],
 			int64(removedRowCount),
@@ -2420,8 +2422,6 @@ func loadRecordCorePurgeReceipt(
 	var verifiedAbsentAt time.Time
 	if err := tx.QueryRow(ctx, loadRecordCorePurgeReceiptSQL,
 		operation.OperationID,
-		operation.Object.ProjectID,
-		operation.Object.ObjectID,
 	).Scan(&surfaceDigestBytes, &receiptDigestBytes, &removedRowCount, &verifiedAbsentAt); err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, err
 	}
@@ -2451,8 +2451,6 @@ func digestRecordCorePurgeReceipt(
 	payload = appendStoreDeletionLengthPrefixed(payload, corePurgeReceiptDigestDomainV1)
 	payload = appendStoreDeletionUint64(payload, 1)
 	payload = appendStoreDeletionLengthPrefixed(payload, operation.OperationID)
-	payload = appendStoreDeletionLengthPrefixed(payload, operation.Object.ProjectID)
-	payload = appendStoreDeletionLengthPrefixed(payload, operation.Object.ObjectID)
 	payload = append(payload, surfaceDigest[:]...)
 	payload = appendStoreDeletionUint64(payload, removedRowCount)
 	return sha256.Sum256(payload)

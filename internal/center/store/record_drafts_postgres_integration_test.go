@@ -371,6 +371,155 @@ func TestPostgresIntegrationRecordDraftConcurrentExpiredCleanupClaimsAreDisjoint
 	assertRecordsPostgresDraftFormalSideEffects(t, ctx, fixture.db, 0, 0)
 }
 
+func TestPostgresIntegrationRecordDraftExpiredCleanupPreservesFencedAndCommittedDrafts(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-reserved-cleanup", 2)
+	recordRepository := newRecordsPostgresRepository(t, runtimePool)
+	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
+
+	tests := []struct {
+		name              string
+		suffix            string
+		reservationState  string
+		reservationDigest string
+	}{
+		{name: "fenced", suffix: "fenced", reservationState: "fenced", reservationDigest: "61"},
+		{name: "committed", suffix: "committed", reservationState: "committed", reservationDigest: "71"},
+	}
+	wantDraftIDs := make([]string, 0, len(tests))
+	for _, tt := range tests {
+		recordID := "rec_pgcleanup" + tt.suffix
+		created, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
+			t,
+			recordplatform.OperationKindRecordCreate,
+			recordID,
+			"",
+			0,
+			0,
+			recordsPostgresCompleteRevisionInput(t, "Reserved cleanup "+tt.name),
+			"record-draft-reserved-cleanup-"+tt.name,
+		))
+		if err != nil {
+			t.Fatalf("CommitRevision(%s) error = %v", tt.name, err)
+		}
+
+		draftID := "rdf_pgcleanup" + tt.suffix
+		payload := recordsPostgresDraftPayload(t, "Reserved cleanup "+tt.name)
+		draft, err := draftRepository.CreateDraft(ctx, records.DraftCreateCommand{
+			DraftID:        draftID,
+			ProjectID:      recordauth.ProjectIDDefault,
+			RecordID:       recordID,
+			BaseRevisionID: created.RevisionID,
+			AuthorID:       recordsPostgresDraftAuthorID,
+			Payload:        payload,
+			Policy:         records.DefaultDraftRetentionPolicy(),
+		})
+		if err != nil {
+			t.Fatalf("CreateDraft(%s) error = %v", tt.name, err)
+		}
+		payloadHash := draft.Payload.Hash()
+		if _, err := fixture.db.Exec(ctx, `
+			update public.record_drafts
+			set updated_at = transaction_timestamp() - interval '91 days',
+			    warning_at = transaction_timestamp() - interval '8 days',
+			    expires_at = transaction_timestamp() - interval '1 day'
+			where draft_id = $1`, draftID); err != nil {
+			t.Fatalf("expire reserved draft (%s): %v", tt.name, err)
+		}
+		if _, err := fixture.db.Exec(ctx, `
+			insert into public.record_draft_checkpoints (
+				checkpoint_id, draft_id, checkpoint_bucket,
+				checkpoint_payload, checkpoint_payload_hash, checkpoint_draft_version,
+				created_at, checkpoint_expires_at
+			) values (
+				$1, $2, transaction_timestamp() - interval '8 days',
+				$3::jsonb, $4, 1,
+				transaction_timestamp() - interval '8 days',
+				transaction_timestamp() - interval '1 day'
+			)`,
+			"rdc_pgcleanup"+tt.suffix,
+			draftID,
+			string(draft.Payload.JSON()),
+			payloadHash[:],
+		); err != nil {
+			t.Fatalf("seed expired reserved checkpoint (%s): %v", tt.name, err)
+		}
+
+		if _, err := fixture.db.Exec(ctx, `
+			insert into public.deletion_reservations (
+				reservation_id, project_id, object_kind, object_id,
+				deletion_token_commitment, request_fingerprint,
+				actor_scope_digest, preview_binding_digest,
+				preview_current_revision_id, preview_lock_version,
+				preview_authorization_epoch, preview_content_delivery_epoch,
+				preview_dependency_graph_digest, preview_backup_inventory_digest,
+				preview_processor_inventory_digest, adapter_readiness_digest,
+				adapter_preview_digest, preview_witness_sequence,
+				preview_witness_entry_hash, state, fence_epoch,
+				owner_id, owner_generation, owner_expires_at,
+				expires_at, completed_at
+			) values (
+				$1, 'default', 'record', $2,
+				decode(repeat($3, 32), 'hex'), decode(repeat($4, 32), 'hex'),
+				decode(repeat($5, 32), 'hex'), decode(repeat($6, 32), 'hex'),
+				$7, $8, $9, 0,
+				decode(repeat($10, 32), 'hex'), decode(repeat($11, 32), 'hex'),
+				decode(repeat($12, 32), 'hex'), decode(repeat($13, 32), 'hex'),
+				decode(repeat($14, 32), 'hex'), 1,
+				decode(repeat($15, 32), 'hex'), $16,
+				case when $16 = 'fenced' then 1 else 0 end,
+				case when $16 = 'fenced' then 'reserved_cleanup_owner' else '' end,
+				case when $16 = 'fenced' then 1 else 0 end,
+				case when $16 = 'fenced' then transaction_timestamp() + interval '5 minutes' end,
+				transaction_timestamp() + interval '10 minutes',
+				case when $16 = 'committed' then transaction_timestamp() end
+			)`,
+			"drs_pgcleanup"+tt.suffix,
+			recordID,
+			tt.reservationDigest,
+			fmt.Sprintf("%x", 0x80+len(tt.suffix)),
+			fmt.Sprintf("%x", 0x90+len(tt.suffix)),
+			fmt.Sprintf("%x", 0xa0+len(tt.suffix)),
+			created.RevisionID,
+			created.LockVersion,
+			created.AuthorizationEpoch,
+			fmt.Sprintf("%x", 0xb0+len(tt.suffix)),
+			fmt.Sprintf("%x", 0xc0+len(tt.suffix)),
+			fmt.Sprintf("%x", 0xd0+len(tt.suffix)),
+			fmt.Sprintf("%x", 0xe0+len(tt.suffix)),
+			fmt.Sprintf("%x", 0xf0+len(tt.suffix)),
+			fmt.Sprintf("%x", 0x50+len(tt.suffix)),
+			tt.reservationState,
+		); err != nil {
+			t.Fatalf("seed %s deletion reservation: %v", tt.name, err)
+		}
+		wantDraftIDs = append(wantDraftIDs, draftID)
+	}
+
+	claimed, err := draftRepository.ClaimExpiredDrafts(ctx, 10)
+	if err != nil {
+		t.Fatalf("ClaimExpiredDrafts() error = %v", err)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("ClaimExpiredDrafts() = %#v, want reserved drafts omitted", claimed)
+	}
+
+	var draftCount int
+	var checkpointCount int
+	if err := fixture.db.QueryRow(ctx, `
+		select (select count(*)::int from public.record_drafts where draft_id = any($1::text[])),
+		       (select count(*)::int from public.record_draft_checkpoints where draft_id = any($1::text[]))`,
+		wantDraftIDs,
+	).Scan(&draftCount, &checkpointCount); err != nil {
+		t.Fatalf("count preserved reserved cleanup rows: %v", err)
+	}
+	if draftCount != len(tests) || checkpointCount != len(tests) {
+		t.Fatalf("reserved cleanup rows = drafts %d checkpoints %d, want %d/%d",
+			draftCount, checkpointCount, len(tests), len(tests))
+	}
+}
+
 func TestPostgresIntegrationRecordDraftPublishDiscardAndRevokeCleanupAreAtomic(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)

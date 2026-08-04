@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"houfeng/internal/center/recorddeletion"
+	"houfeng/internal/center/recordplatform"
 )
 
 const (
@@ -43,6 +44,9 @@ const loadRecordDeletionRecoveryProjectionSQL = `
 	       reservation.state,
 	       reservation.fence_epoch,
 	       reservation.release_epoch,
+	       reservation.owner_id,
+	       reservation.owner_generation,
+	       reservation.owner_expires_at,
 	       operation.deployment_id,
 	       operation.actor_id,
 	       operation.reason_code,
@@ -173,7 +177,9 @@ const expireRecordDeletionRecoveryFenceSQL = `
 	where project_id = $1
 	  and object_kind = $2
 	  and object_id = $3
-	  and expires_at > transaction_timestamp()`
+	  and owner_id = $4
+	  and owner_generation = $5
+	  and expires_at = $6`
 
 const insertRecordDeletionRecoveryAuditSQL = `
 	insert into public.record_deletion_audits (
@@ -186,14 +192,6 @@ const loadRecordDeletionRecoveryAuditSQL = `
 	from public.record_deletion_audits
 	where operation_id = $1
 	  and event_kind = $2`
-
-const loadRecordDeletionRecoveryFenceCountSQL = `
-	select count(*)::bigint
-	from public.deletion_fence_leases
-	where project_id = $1
-	  and object_kind = $2
-	  and object_id = $3
-	  and expires_at > transaction_timestamp()`
 
 const advanceRecordDeletionRecoveryCursorSQL = `
 	update public.deletion_replay_state
@@ -215,6 +213,9 @@ type recordDeletionRecoveryProjection struct {
 	reservationState   string
 	fenceEpoch         int64
 	reservationRelease int64
+	ownerID            string
+	ownerGeneration    int64
+	ownerExpiresAt     *time.Time
 	deploymentID       string
 	actorID            string
 	reasonCode         string
@@ -397,20 +398,27 @@ func (repository *PostgresRecordDeletionRepository) ApplyRecoveryEntry(
 			return err
 		}
 
-		if _, err := transaction.tx.Exec(ctx, expireRecordDeletionRecoveryFenceSQL,
-			command.Entry.Request.Object.ProjectID,
-			command.Entry.Request.Object.ObjectKind,
-			command.Entry.Request.Object.ObjectID,
-		); err != nil {
-			return fmt.Errorf("expire record deletion recovery fence: %w", err)
+		if found && projection.reservationState == "fenced" {
+			fenceResult, err := transaction.tx.Exec(ctx, expireRecordDeletionRecoveryFenceSQL,
+				command.Entry.Request.Object.ProjectID,
+				command.Entry.Request.Object.ObjectKind,
+				command.Entry.Request.Object.ObjectID,
+				projection.ownerID,
+				projection.ownerGeneration,
+				*projection.ownerExpiresAt,
+			)
+			if err != nil {
+				return fmt.Errorf("expire record deletion recovery fence: %w", err)
+			}
+			if fenceResult.RowsAffected() != 1 {
+				return recorddeletion.ErrRecoveryContractUnavailable
+			}
 		}
 
 		if coreReceipt != nil && coreReceipt.VerifiedAbsentAt.IsZero() {
 			var verifiedAbsentAt time.Time
 			if err := transaction.tx.QueryRow(ctx, insertRecordCorePurgeReceiptSQL,
 				command.Entry.Request.OperationID,
-				command.Entry.Request.Object.ProjectID,
-				command.Entry.Request.Object.ObjectID,
 				coreReceipt.SurfaceDigest[:],
 				coreReceipt.ReceiptDigest[:],
 				int64(coreReceipt.RemovedRowCount),
@@ -505,6 +513,9 @@ func loadRecordDeletionRecoveryProjection(
 		&projection.reservationState,
 		&projection.fenceEpoch,
 		&projection.reservationRelease,
+		&projection.ownerID,
+		&projection.ownerGeneration,
+		&projection.ownerExpiresAt,
 		&projection.deploymentID,
 		&projection.actorID,
 		&projection.reasonCode,
@@ -588,6 +599,21 @@ func (projection recordDeletionRecoveryProjection) validateIdentity(command reco
 		projection.actorID != request.ActorID || projection.reasonCode != string(request.ReasonCode) ||
 		projection.deletionContract != int64(recorddeletion.RecordDeletionContractVersionV1) ||
 		projection.ledgerSequence < 0 || projection.operationRelease < 0 {
+		return recorddeletion.ErrRecoveryContractUnavailable
+	}
+	if projection.reservationState == "fenced" {
+		if projection.ownerGeneration <= 0 || projection.ownerExpiresAt == nil {
+			return recorddeletion.ErrRecoveryContractUnavailable
+		}
+		owner := recordplatform.OwnerLease{
+			OwnerID:    projection.ownerID,
+			Generation: uint64(projection.ownerGeneration),
+			ExpiresAt:  projection.ownerExpiresAt.UTC(),
+		}
+		if owner.Validate() != nil {
+			return recorddeletion.ErrRecoveryContractUnavailable
+		}
+	} else if projection.ownerID != "" || projection.ownerGeneration != 0 || projection.ownerExpiresAt != nil {
 		return recorddeletion.ErrRecoveryContractUnavailable
 	}
 	hasLedger := projection.ledgerEntryType != "" || projection.ledgerSequence != 0 || len(projection.ledgerEntryHash) != 0
@@ -850,17 +876,6 @@ func verifyRecordDeletionRecoveryApplied(
 		return fmt.Errorf("verify applied recovery audit: %w", err)
 	}
 	if storedReasonCode != string(command.Entry.Request.ReasonCode) {
-		return recorddeletion.ErrRecoveryContractUnavailable
-	}
-	var activeFenceCount int64
-	if err := tx.QueryRow(ctx, loadRecordDeletionRecoveryFenceCountSQL,
-		command.Entry.Request.Object.ProjectID,
-		command.Entry.Request.Object.ObjectKind,
-		command.Entry.Request.Object.ObjectID,
-	).Scan(&activeFenceCount); err != nil {
-		return fmt.Errorf("verify recovery fence release: %w", err)
-	}
-	if activeFenceCount != 0 {
 		return recorddeletion.ErrRecoveryContractUnavailable
 	}
 	if command.PurgeContent {

@@ -623,31 +623,60 @@ func (repository *PostgresRecordDraftRepository) ClaimExpiredDrafts(
 	claimed := make([]string, 0, limit)
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		rows, err := transaction.tx.Query(ctx, `
-			select draft_id
-			from public.record_drafts
-			where expires_at <= transaction_timestamp()
-			order by expires_at, draft_id
+			select drafts.draft_id, drafts.record_id
+			from public.record_drafts drafts
+			where drafts.expires_at <= transaction_timestamp()
+			  and (
+				drafts.record_id is null
+				or not exists (
+					select 1
+					from public.deletion_reservations reservations
+					where reservations.project_id = drafts.project_id
+					  and reservations.object_kind = $2
+					  and reservations.object_id = drafts.record_id
+					  and reservations.state in ('fenced', 'committed')
+				)
+			  )
+			order by drafts.expires_at, drafts.draft_id
 			for update skip locked
-			limit $1`, int64(limit))
+			limit $1`, int64(limit), recordObjectKind)
 		if err != nil {
 			return fmt.Errorf("claim expired record drafts: %w", err)
 		}
 		defer rows.Close()
+		recordIDs := make([]string, 0, limit)
+		seenRecordIDs := make(map[string]struct{})
 		for rows.Next() {
 			var draftID string
-			if err := rows.Scan(&draftID); err != nil {
+			var recordID *string
+			if err := rows.Scan(&draftID, &recordID); err != nil {
 				return fmt.Errorf("scan expired record draft: %w", err)
 			}
 			if err := records.ValidateDraftID(draftID); err != nil {
 				return fmt.Errorf("validate expired record draft: %w", err)
+			}
+			if recordID != nil {
+				if !validStoredRecordIdentity(*recordID, "rec_") {
+					return fmt.Errorf("%w: cleanup record identity", records.ErrInvalidDraftCommand)
+				}
+				if _, exists := seenRecordIDs[*recordID]; !exists {
+					seenRecordIDs[*recordID] = struct{}{}
+					recordIDs = append(recordIDs, *recordID)
+				}
 			}
 			claimed = append(claimed, draftID)
 		}
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("iterate expired record drafts: %w", err)
 		}
+		rows.Close()
 		if len(claimed) == 0 {
 			return nil
+		}
+		for _, recordID := range recordIDs {
+			if err := assertRecordMutationFence(ctx, transaction.tx, recordID); err != nil {
+				return err
+			}
 		}
 
 		if _, err := transaction.tx.Exec(ctx, `

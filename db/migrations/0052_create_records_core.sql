@@ -367,8 +367,6 @@ create table if not exists public.record_core_purge_receipts (
   operation_id text primary key check (operation_id ~ '^rpo_[a-z0-9]{1,64}$'),
   adapter_name text not null default 'record_core'
     check (adapter_name = 'record_core'),
-  project_id text not null default 'default' check (project_id = 'default'),
-  record_id text not null check (record_id ~ '^rec_[a-z0-9]{1,64}$'),
   removed_surface_digest bytea not null
     check (octet_length(removed_surface_digest) = 32),
   receipt_digest bytea not null check (octet_length(receipt_digest) = 32),
