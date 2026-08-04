@@ -27,6 +27,7 @@ type AppACLCurrentMigrationFragment struct {
 
 var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	recordsCoreAppACLCurrentMigrationFragment(),
+	recordAttachmentsAppACLCurrentMigrationFragment(),
 }
 
 func recordsCoreAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -102,6 +103,79 @@ func recordsCoreAppACLCurrentPrivileges(string) []AppACLPrivilege {
 	appendTable(runtime, "record_core_purge_receipts",
 		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
 	appendTable(AppACLSubjectPlatformAdmin, "record_core_purge_receipts", AppACLPrivilegeSelect)
+	return privileges
+}
+
+func recordAttachmentsAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	objects := make([]AppACLManagedObjectR1, 0, 11)
+	for _, table := range []string{
+		"blob_objects",
+		"attachment_quota_accounts",
+		"record_attachments",
+		"attachment_uploads",
+		"attachment_upload_parts",
+		"record_revision_attachments",
+		"attachment_processor_jobs",
+		"content_processor_workspaces",
+		"blob_gc_pins",
+		"attachment_purge_receipts",
+		"content_workspace_purge_receipts",
+	} {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: table,
+		})
+	}
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0053_create_record_attachments.sql",
+		Objects:    objects,
+		Privileges: recordAttachmentsAppACLCurrentPrivileges,
+	}
+}
+
+func recordAttachmentsAppACLCurrentPrivileges(string) []AppACLPrivilege {
+	privileges := make([]AppACLPrivilege, 0, 38)
+	appendTable := func(subject AppACLSubject, table string, kinds ...AppACLPrivilegeKind) {
+		for _, kind := range kinds {
+			privileges = append(privileges, AppACLPrivilege{
+				Subject:        subject,
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     appACLManagedPublicSchemaR1,
+				ObjectIdentity: table,
+				Privilege:      kind,
+			})
+		}
+	}
+
+	runtime := AppACLSubjectCenterRuntime
+	for _, table := range []string{
+		"blob_objects",
+		"attachment_upload_parts",
+		"record_revision_attachments",
+		"blob_gc_pins",
+	} {
+		appendTable(runtime, table,
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeDelete)
+	}
+	for _, table := range []string{
+		"attachment_quota_accounts",
+		"record_attachments",
+		"attachment_uploads",
+		"attachment_processor_jobs",
+		"content_processor_workspaces",
+	} {
+		appendTable(runtime, table,
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert,
+			AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
+	}
+	for _, table := range []string{
+		"attachment_purge_receipts",
+		"content_workspace_purge_receipts",
+	} {
+		appendTable(runtime, table, AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+		appendTable(AppACLSubjectPlatformAdmin, table, AppACLPrivilegeSelect)
+	}
 	return privileges
 }
 
