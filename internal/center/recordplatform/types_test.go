@@ -67,6 +67,39 @@ func TestDeletionRequestTokenTransportV1CannotProducePersistentCommitment(t *tes
 	}
 }
 
+func TestDeletionRequestTokenTransportV1MatchesIssuedCommitmentWithoutExposingIt(t *testing.T) {
+	t.Parallel()
+
+	deploymentID := DeploymentID("dp-" + strings.Repeat("a", 64))
+	issued, err := NewIssuedDeletionRequestTokenV1()
+	if err != nil {
+		t.Fatalf("NewIssuedDeletionRequestTokenV1() error = %v", err)
+	}
+	commitment, err := issued.Commitment(deploymentID, ProjectIDDefault)
+	if err != nil {
+		t.Fatalf("Commitment() error = %v", err)
+	}
+	transport, err := ParseDeletionRequestTokenTransportV1(issued.Transport())
+	if err != nil {
+		t.Fatalf("ParseDeletionRequestTokenTransportV1() error = %v", err)
+	}
+
+	if !transport.MatchesCommitment(deploymentID, ProjectIDDefault, commitment) {
+		t.Fatal("MatchesCommitment() = false for the issued token commitment")
+	}
+	wrongCommitment := commitment
+	wrongCommitment[0] ^= 0xff
+	if transport.MatchesCommitment(deploymentID, ProjectIDDefault, wrongCommitment) {
+		t.Fatal("MatchesCommitment() = true for a different commitment")
+	}
+	if transport.MatchesCommitment(DeploymentID("dp-"+strings.Repeat("b", 64)), ProjectIDDefault, commitment) {
+		t.Fatal("MatchesCommitment() accepted a different deployment scope")
+	}
+	if transport.MatchesCommitment(deploymentID, ProjectID("other"), commitment) {
+		t.Fatal("MatchesCommitment() accepted an invalid project scope")
+	}
+}
+
 func TestDeletionRequestTokenV1CommitmentDomainSeparatesDeploymentAndProject(t *testing.T) {
 	var raw [deletionRequestTokenV1RawLength]byte
 	for index := range raw {

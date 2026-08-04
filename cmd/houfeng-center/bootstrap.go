@@ -171,8 +171,9 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	recordsEnabled := cfg.RecordPlatformMode == config.RecordPlatformModeRuntimeAdmission
 	var recordsHandler http.Handler
 	var recordDraftsHandler http.Handler
+	var recordDeletionsHandler http.Handler
 	if recordsEnabled {
-		recordsHandler, recordDraftsHandler, err = newRecordsHTTPHandlers(
+		recordsHandler, recordDraftsHandler, recordDeletionsHandler, err = newRecordsHTTPHandlers(
 			db.Pool(),
 			vpsAssetRepo,
 			monitoringInstanceRepo,
@@ -195,6 +196,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		RecordsEnabled:                              recordsEnabled,
 		RecordsHandler:                              recordsHandler,
 		RecordDraftsHandler:                         recordDraftsHandler,
+		RecordDeletionsHandler:                      recordDeletionsHandler,
 		AssetDomainsCollectionHandler:               handlers.AssetDomainsCollection(assetDomainRepo),
 		AssetServicesCollectionHandler:              handlers.AssetServicesCollection(assetServiceRepo),
 		AssetDecisionOverviewHandler:                handlers.AssetDecisionOverview(assetDecisionRepo),
@@ -286,14 +288,14 @@ func newRecordsHTTPHandlers(
 	vpsRepository *store.PostgresVPSAssetRepository,
 	monitoringInstanceRepository *store.PostgresMonitoringInstanceRepository,
 	targetRepository *store.PostgresTargetRepository,
-) (http.Handler, http.Handler, error) {
+) (http.Handler, http.Handler, http.Handler, error) {
 	subjects, err := centerrecords.NewSubjectAdapterRegistry([]centerrecords.SubjectSourceAdapter{
 		store.NewVPSRecordSubjectAdapter(vpsRepository),
 		store.NewMonitoringInstanceRecordSubjectAdapter(monitoringInstanceRepository),
 		store.NewTargetRecordSubjectAdapter(targetRepository),
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("create record subject registry: %w", err)
+		return nil, nil, nil, fmt.Errorf("create record subject registry: %w", err)
 	}
 	subjectResolver := store.NewRecordSubjectReadResolver(subjects, nil)
 	authorizations := store.NewPostgresCurrentRecordAuthorizationSource(pool, subjectResolver, nil)
@@ -303,25 +305,25 @@ func newRecordsHTTPHandlers(
 	// remains fail closed with ErrRecordPlatformAdmissionUnavailable.
 	recordRepository, err := store.NewPostgresRecordRepository(pool, nil, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create record repository: %w", err)
+		return nil, nil, nil, fmt.Errorf("create record repository: %w", err)
 	}
 	draftRepository := store.NewPostgresRecordDraftRepository(pool, nil)
 
 	readService, err := centerrecords.NewRecordReadService(authorizations, authorizations, recordRepository)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create record read service: %w", err)
+		return nil, nil, nil, fmt.Errorf("create record read service: %w", err)
 	}
 	revisionService, err := centerrecords.NewRevisionService(subjects, authorizations, recordRepository)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create record revision service: %w", err)
+		return nil, nil, nil, fmt.Errorf("create record revision service: %w", err)
 	}
 	lifecycleService, err := centerrecords.NewRecordLifecycleService(authorizations, recordRepository)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create record lifecycle service: %w", err)
+		return nil, nil, nil, fmt.Errorf("create record lifecycle service: %w", err)
 	}
 	draftService, err := centerrecords.NewDraftService(draftRepository, authorizations)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create record draft service: %w", err)
+		return nil, nil, nil, fmt.Errorf("create record draft service: %w", err)
 	}
 	application, err := centerrecords.NewApplication(
 		readService,
@@ -336,9 +338,12 @@ func newRecordsHTTPHandlers(
 		},
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create records application: %w", err)
+		return nil, nil, nil, fmt.Errorf("create records application: %w", err)
 	}
-	return handlers.Records(application), handlers.RecordDrafts(application), nil
+	// Later Records children own the remaining deletion adapters and the
+	// independent ledger/witness clients. Until all of them are wired and
+	// healthy, the production deletion transport remains explicitly closed.
+	return handlers.Records(application), handlers.RecordDrafts(application), handlers.RecordDeletions(nil), nil
 }
 
 func (d bootstrapDeps) withDefaults() bootstrapDeps {

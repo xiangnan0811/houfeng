@@ -1,3 +1,153 @@
+alter table public.deletion_reservations
+  add column if not exists actor_scope_digest bytea
+    check (octet_length(actor_scope_digest) = 32),
+  add column if not exists preview_binding_digest bytea
+    check (octet_length(preview_binding_digest) = 32),
+  add column if not exists preview_current_revision_id text
+    check (preview_current_revision_id ~ '^rrv_[a-z0-9]{1,64}$'),
+  add column if not exists preview_lock_version bigint
+    check (preview_lock_version > 0),
+  add column if not exists preview_authorization_epoch bigint
+    check (preview_authorization_epoch > 0),
+  add column if not exists preview_content_delivery_epoch bigint
+    check (preview_content_delivery_epoch >= 0),
+  add column if not exists preview_dependency_graph_digest bytea
+    check (octet_length(preview_dependency_graph_digest) = 32),
+  add column if not exists preview_backup_inventory_digest bytea
+    check (octet_length(preview_backup_inventory_digest) = 32),
+  add column if not exists preview_processor_inventory_digest bytea
+    check (octet_length(preview_processor_inventory_digest) = 32),
+  add column if not exists adapter_readiness_digest bytea
+    check (octet_length(adapter_readiness_digest) = 32),
+  add column if not exists adapter_preview_digest bytea
+    check (octet_length(adapter_preview_digest) = 32),
+  add column if not exists preview_witness_sequence bigint
+    check (preview_witness_sequence > 0),
+  add column if not exists preview_witness_entry_hash bytea
+    check (octet_length(preview_witness_entry_hash) = 32),
+  add column if not exists release_epoch bigint not null default 0
+    check (release_epoch >= 0),
+  add column if not exists recovery_replayed boolean not null default false;
+
+alter table public.deletion_reservations
+  drop constraint if exists deletion_reservations_preview_or_recovery_check;
+
+alter table public.deletion_reservations
+  add constraint deletion_reservations_preview_or_recovery_check
+    check ((not recovery_replayed
+        and actor_scope_digest is not null
+        and preview_binding_digest is not null
+        and preview_current_revision_id is not null
+        and preview_lock_version is not null
+        and preview_authorization_epoch is not null
+        and preview_content_delivery_epoch is not null
+        and preview_dependency_graph_digest is not null
+        and preview_backup_inventory_digest is not null
+        and preview_processor_inventory_digest is not null
+        and adapter_readiness_digest is not null
+        and adapter_preview_digest is not null
+        and preview_witness_sequence is not null
+        and preview_witness_entry_hash is not null)
+      or (recovery_replayed
+        and state in ('committed', 'not_committed')
+        and actor_scope_digest is null
+        and preview_binding_digest is null
+        and preview_current_revision_id is null
+        and preview_lock_version is null
+        and preview_authorization_epoch is null
+        and preview_content_delivery_epoch is null
+        and preview_dependency_graph_digest is null
+        and preview_backup_inventory_digest is null
+        and preview_processor_inventory_digest is null
+        and adapter_readiness_digest is null
+        and adapter_preview_digest is null
+        and preview_witness_sequence is null
+        and preview_witness_entry_hash is null
+        and owner_id = ''
+        and owner_generation = 0
+        and owner_expires_at is null
+        and completed_at is not null));
+
+alter table public.record_purge_operations
+  add column if not exists deployment_id text not null
+    check (deployment_id ~ '^dp-[0-9a-f]{64}$'),
+  add column if not exists actor_id text not null
+    check (actor_id ~ '^usr_[a-z0-9]{1,64}$'),
+  add column if not exists reason_code text not null
+    check (reason_code in ('user_confirmed', 'source_removed', 'retention_replay')),
+  add column if not exists deletion_contract_version bigint not null
+    check (deletion_contract_version = 1),
+  add column if not exists ledger_entry_type text
+    check (ledger_entry_type in ('delete_commit', 'attempt_not_committed')),
+  add column if not exists witness_proof_digest bytea
+    check (witness_proof_digest is null or octet_length(witness_proof_digest) = 32),
+  add column if not exists release_epoch bigint not null default 0
+    check (release_epoch >= 0),
+  add column if not exists receipt_digest bytea
+    check (receipt_digest is null or octet_length(receipt_digest) = 32),
+  add column if not exists retry_from text
+    check (retry_from is null or retry_from in ('promote_permanent_fence',
+      'propagate_permanent_fence', 'begin_online_purge', 'purge_online')),
+  add column if not exists owner_id text not null default ''
+    check (owner_id = '' or owner_id ~ '^[a-z0-9_-]{1,128}$'),
+  add column if not exists owner_generation bigint not null default 0
+    check (owner_generation >= 0),
+  add column if not exists owner_expires_at timestamptz,
+  add column if not exists updated_at timestamptz not null default now();
+
+alter table public.record_purge_operations
+  drop constraint if exists record_purge_operations_operation_state_check,
+  drop constraint if exists record_purge_operations_check,
+  drop constraint if exists record_purge_operations_check1;
+
+alter table public.record_purge_operations
+  add constraint record_purge_operations_state_check
+    check (operation_state in ('provisional_fenced', 'ledger_commit_unknown',
+      'witness_pending', 'delete_requested', 'fence_propagating', 'read_fenced',
+      'online_purging', 'online_purged', 'release_pending', 'not_committed',
+      'retry_required')),
+  add constraint record_purge_operations_ledger_tuple_check
+    check ((ledger_sequence is null) = (ledger_entry_hash is null)
+      and (ledger_sequence is null) = (ledger_entry_type is null)),
+  add constraint record_purge_operations_release_check
+    check ((release_epoch > 0) =
+      (operation_state in ('release_pending', 'not_committed'))),
+  add constraint record_purge_operations_retry_check
+    check ((retry_from is not null) = (operation_state = 'retry_required')),
+  add constraint record_purge_operations_receipt_check
+    check ((receipt_digest is not null) = (operation_state = 'online_purged')),
+  add constraint record_purge_operations_completed_check
+    check ((completed_at is not null) =
+      (operation_state in ('online_purged', 'not_committed'))),
+  add constraint record_purge_operations_owner_tuple_check
+    check ((owner_id = '') =
+      (owner_generation = 0 and owner_expires_at is null)),
+  add constraint record_purge_operations_terminal_owner_check
+    check ((operation_state in ('online_purged', 'not_committed')) =
+      (owner_id = '')),
+  add constraint record_purge_operations_ledger_state_check
+    check (
+      (operation_state in ('provisional_fenced', 'ledger_commit_unknown')
+        and ledger_entry_type is null and witness_proof_digest is null)
+      or (operation_state = 'witness_pending'
+        and ledger_entry_type = 'delete_commit' and witness_proof_digest is null)
+      or (operation_state in ('delete_requested', 'fence_propagating',
+            'read_fenced', 'online_purging', 'online_purged', 'retry_required')
+        and ledger_entry_type = 'delete_commit' and witness_proof_digest is not null)
+      or (operation_state = 'release_pending'
+        and ((ledger_entry_type is null and witness_proof_digest is null)
+          or ledger_entry_type = 'attempt_not_committed'))
+      or (operation_state = 'not_committed'
+        and ledger_entry_type = 'attempt_not_committed'
+        and witness_proof_digest is not null)
+    ),
+  add constraint record_purge_operations_details_retention_check
+    check (details_delete_after is null or completed_at is not null);
+
+create index if not exists idx_record_purge_operations_work
+  on public.record_purge_operations(operation_state, owner_expires_at,
+    started_at, operation_id);
+
 create table if not exists public.records (
   record_id text primary key check (record_id ~ '^rec_[a-z0-9]{1,64}$'),
   project_id text not null default 'default' check (project_id = 'default'),

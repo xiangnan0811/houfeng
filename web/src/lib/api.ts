@@ -93,7 +93,7 @@ import type {
   VPSSummary,
   VPSTimeline,
 } from './types'
-import { postJSON, postJSONBody, requestEmpty, requestJSON } from './apiRequest'
+import { jsonBodyInit, postJSON, postJSONBody, requestEmpty, requestJSON, withQuery } from './apiRequest'
 
 export {
   ApiError,
@@ -102,6 +102,7 @@ export {
   requestEmpty,
   requestJSON,
   setUnauthorizedHandler,
+  withQuery,
 } from './apiRequest'
 
 type PatchJSONOptions = {
@@ -109,38 +110,9 @@ type PatchJSONOptions = {
 }
 
 function patchJSONBody<T>(path: string, body: unknown, options: PatchJSONOptions = {}): Promise<T> {
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-    'Content-Type': 'application/json',
-  }
-  if (options.ifMatch) {
-    headers['If-Match'] = `"${options.ifMatch}"`
-  }
-
-  return requestJSON<T>(path, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify(body),
-  })
-}
-
-export function withQuery(
-  path: string,
-  filter?: Record<string, string | number | boolean | null | undefined>,
-): string {
-  if (!filter) return path
-
-  const query = new URLSearchParams()
-  for (const [key, value] of Object.entries(filter)) {
-    if (value == null) continue
-    if (typeof value === 'boolean' && !value) continue
-    const normalized = typeof value === 'string' ? value.trim() : String(value)
-    if (!normalized) continue
-    query.set(key, normalized)
-  }
-
-  const suffix = query.toString()
-  return suffix ? `${path}?${suffix}` : path
+  return requestJSON<T>(path, jsonBodyInit('PATCH', body, options.ifMatch
+    ? { 'If-Match': `"${options.ifMatch}"` }
+    : undefined))
 }
 
 export function listMonitoringInstances(scope?: MonitoringInstanceListScope) {
@@ -342,14 +314,10 @@ export function updateProbeItem(
   probeItemId: string,
   input: UpdateProbeItemInput,
 ): Promise<ProbeItemRecord> {
-  return requestJSON<ProbeItemRecord>(`/api/targets/${targetId}/probe-items/${probeItemId}`, {
-    method: 'PUT',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(input),
-  })
+  return requestJSON<ProbeItemRecord>(
+    `/api/targets/${targetId}/probe-items/${probeItemId}`,
+    jsonBodyInit('PUT', input),
+  )
 }
 
 export function deleteProbeItem(targetId: string, probeItemId: string): Promise<void> {
@@ -395,14 +363,7 @@ export function getSettings() {
 }
 
 export function updateSettings(settings: SettingsUpdateInput) {
-  return requestJSON<SettingsRecord>('/api/settings', {
-    method: 'PUT',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(settings),
-  })
+  return requestJSON<SettingsRecord>('/api/settings', jsonBodyInit('PUT', settings))
 }
 
 export type MonitoringInstanceActionOptions = {
@@ -801,14 +762,7 @@ export function getSubscriptionCostSettings() {
 }
 
 export function updateSubscriptionCostSettings(input: SubscriptionCostSettingsUpdateInput) {
-  return requestJSON<SubscriptionCostSettings>('/api/subscriptions/settings', {
-    method: 'PUT',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(input),
-  })
+  return requestJSON<SubscriptionCostSettings>('/api/subscriptions/settings', jsonBodyInit('PUT', input))
 }
 
 export function refreshSubscriptionExchangeRates() {
@@ -839,14 +793,10 @@ export function listSubscriptionMonthlyBudgets() {
 
 export function upsertSubscriptionMonthlyBudget(month: string, input: UpsertSubscriptionMonthlyBudgetInput) {
   const normalizedMonth = month.trim().slice(0, 7)
-  return requestJSON<SubscriptionMonthlyBudgetRecord>(`/api/subscription-monthly-budgets/${encodeURIComponent(normalizedMonth)}`, {
-    method: 'PUT',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(input),
-  })
+  return requestJSON<SubscriptionMonthlyBudgetRecord>(
+    `/api/subscription-monthly-budgets/${encodeURIComponent(normalizedMonth)}`,
+    jsonBodyInit('PUT', input),
+  )
 }
 
 export function bulkUpsertSubscriptionMonthlyBudgets(input: BulkUpsertSubscriptionMonthlyBudgetInput) {

@@ -8,7 +8,7 @@
 
 候风前端**当前没有引入任何第三方状态管理库**（`web/package.json` `dependencies` 仅 `react`、`react-dom`、`react-router-dom`，**无** Redux / Zustand / Jotai / Recoil / React Query / SWR）。整体策略：
 
-- **数据获取**集中在 `web/src/lib/`：`apiRequest.ts` 拥有 transport/error/401/JSON primitives，`api.ts` 拥有启动路径与通用业务 endpoint façade；只有在 production bundle 证据要求保持 route-lazy 边界时，才使用同目录的 domain façade（当前为 `observabilityApi.ts`）。`auth-client.ts` 复用同一 transport，返回类型从 `types.ts` 引用。
+- **数据获取**集中在 `web/src/lib/`：`apiRequest.ts` 拥有 transport/error/401/JSON/query primitives，`api.ts` 拥有启动路径与通用业务 endpoint façade；只有在 production bundle 证据要求保持 route-lazy 边界时，才使用同目录的 domain façade（当前为 `observabilityApi.ts`，以及尚无 production consumer 的 `recordsApi.ts` transport contract）。`auth-client.ts` 复用同一 transport，返回类型从 `types.ts` 引用。
 - **本地组件状态**使用 React 内建 hooks（主用 `useState` + `useEffect`，少量 `useRef`；当前未发现 `useReducer`）。
 - **跨组件 / 跨页状态**仅由两个 React Context 承担：`AuthProvider` (`web/src/lib/auth-context.tsx`) 与 `ThemeProvider` (`web/src/lib/theme-context.tsx`)；两者都在 `web/src/main.tsx:15-23` 一次性挂载。
 - **URL 状态**走 `react-router-dom@7` 的路由参数（`useParams`、`useNavigate`），不另起 store。
@@ -21,8 +21,8 @@
 
 ### API client
 
-- **业务 `/api/*` 调用一律由 `web/src/lib/` 下的 façade 暴露**。默认 owner 是 `api.ts`；只有全部 production consumer 都位于 lazy route、且 fresh build 证明入口预算需要隔离时，才按领域拆出 façade。当前 `observabilityApi.ts` 拥有 `listEvents`、`listIncidents`、`listHistoricalIncidents`、`listCommandAudits`。业务函数使用动词 + 资源命名并返回 `Promise<T>`，T 来自 `lib/types.ts`。
-- **transport 唯一 owner 是 `web/src/lib/apiRequest.ts`**：默认 `credentials: 'include'`、`Accept: application/json`、`cache: 'no-store'`；401 触发共享 unauthorized handler 并抛 `ApiError(401)`；非 2xx 只从 error/message 文本生成 `ApiError(status, message)`。`api.ts` re-export 兼容 primitives 并拥有 `withQuery`；domain façade 只能复用这些 primitive/helper，不得复制 fetch wrapper。
+- **业务 `/api/*` 调用一律由 `web/src/lib/` 下的 façade 暴露**。默认 owner 是 `api.ts`；只有全部 production consumer 都位于 lazy route、且 fresh build 证明入口预算需要隔离时，才按领域拆出 façade。当前 `observabilityApi.ts` 拥有 observability helpers；`recordsApi.ts` 拥有 Records/draft/permanent-deletion transport，但在正式 Records lazy route 出现前不得被 production 入口消费。业务函数使用动词 + 资源命名并返回 `Promise<T>`，T 来自 `lib/types.ts`。
+- **transport 唯一 owner 是 `web/src/lib/apiRequest.ts`**：默认 `credentials: 'include'`、`Accept: application/json`、`cache: 'no-store'`；401 触发共享 unauthorized handler 并抛 `ApiError(401)`；非 2xx 默认只从 `error/message` 生成 legacy `status/message`，领域 façade 可通过显式 `ApiErrorDecoder` seam追加 allowlisted metadata。当前只有 lazy-only `recordsApi.ts` 静态组合 `apiError.ts` decoder，生成 `code/field_errors/recovery` 且不把 decoder 带入 eager graph。`apiRequest.ts` 同时拥有 `withQuery`；`api.ts` 只为兼容现有调用 re-export transport/query primitives。domain façade 复用这些 primitives，不得复制 fetch wrapper。
 - **`/api/auth/*` 走 `web/src/lib/auth-client.ts`**，并复用 `apiRequest.ts` 的 primitives 与 401 hook。不要新增第二套 fetch 包装。
 - `If-Match` 乐观锁仍由业务 façade 的 `patchJSONBody(path, body, { ifMatch })` 表达，传入上一次拿到的 `updated_at`；transport seam 不改变 method/header/body/wire shape。
 - **不要在 page / component 里直接 `fetch()`**。业务请求必须进入 `web/src/lib/` façade 再由 page / component 调用；`MonitoringPage` 的历史直连 `fetch('/api/monitoring-instances')` 已偿还为 `createMonitoringInstance` API helper，新代码不要恢复这条路径。
@@ -45,13 +45,19 @@
 #### 2. Signatures
 
 - Transport: `apiRequest.ts` 的 `requestJSON/requestEmpty/postJSON/postJSONBody`。
-- Query helper: `api.ts` 的 `withQuery(path, filter)`。
-- Shared/eager façade: `api.ts`；lazy observability façade: `observabilityApi.ts`。
+- Query/error: `apiRequest.ts` 的 `withQuery(path, filter)`、`ApiError<TRecovery = unknown>` 与可选 `ApiErrorDecoder` seam；`apiError.ts` 是 Records allowlist decoder；`api.ts` 保留兼容 re-export。
+- Shared/eager façade: `api.ts`；lazy observability façade: `observabilityApi.ts`；lazy-only Records transport: `recordsApi.ts`。
 - `observabilityApi.ts` exports: `listEvents`、`listIncidents`、`listHistoricalIncidents`、`listCommandAudits`。
+- `recordsApi.ts` exports: record list/read/revision/lifecycle、draft CRUD、permanent-delete preview/execute/status helpers；canonical DTO 位于 `types.ts`。
 
 #### 3. Contracts
 
-- domain façade 必须位于 `web/src/lib/`，只组合 `apiRequest.ts` primitives、`api.ts` 的 `withQuery` 和 `types.ts`；不得拥有第二套 `fetch`、401 hook、错误解析或 credentials 默认值。
+- domain façade 必须位于 `web/src/lib/`，只组合 `apiRequest.ts` primitives/query helper 和 `types.ts` type-only imports；需要领域 recovery metadata 时可静态组合一个纯 allowlist decoder，并通过 transport 的 `ApiErrorDecoder` seam 注入。既有 façade 可经 `api.ts` compatibility re-export 逐步迁移，但新 façade 不得反向依赖 eager `api.ts`。不得拥有第二套 `fetch`、401 hook、response reader、credentials 默认值或绕过 decoder seam 的错误路径。
+- **设计决策**：domain-only decoder 不得从 shared eager transport 动态导入；即使 decoder 实现位于 async chunk，dynamic-import loader 与 hashed chunk name 仍会进入 entry。由 lazy façade 静态拥有 decoder、再显式注入 shared transport，才能让当前无 consumer 的整个领域 transport 从 production graph 消失，并避免依赖 hash 压缩波动碰 bundle ratchet。
+- `withQuery` 按对象插入顺序编码；string 先 trim，省略空 string、`null`、`undefined` 和 `false`，保留 `true`、数字与 `0`。移动 owner 或新增 façade 不得改变该规则。
+- `ApiError` 始终保留 `status/message`；默认 transport 不把业务 metadata带入 eager path。显式 decoder 中 `code` 只接受 string，`field_errors` 只复制 string `field/message` 项，`recovery` 默认类型为 `unknown`，领域消费者需要时使用对应 DTO 泛型/收窄。未知 JSON 顶层字段不得通过对象 spread 进入错误实例。
+- `CreateRecordDraftInput` 是关闭联合：新记录草稿只发送 `payload`，已有记录草稿必须同时发送 `record_id` 与 `base_revision_id`；不得在 TypeScript contract 中强迫新草稿伪造空 ID，也不得允许两个 routing fields 只出现一个。
+- Records 草稿 PATCH 原样发送响应中的 `If-Match: <draft-etag>`，不得套用 legacy metadata helper 的额外引号；formal mutation 使用独立 `Idempotency-Key`。permanent-delete execute 的 `DeletionRequestTokenV1` 是唯一 `Idempotency-Key`，JSON body 只能含 `reservation_id`。
 - 只有所有 production consumer 都位于 lazy route 时才允许拆分。AppShell、auth、router bootstrap 等启动路径使用的 helper 留在 `api.ts`，不能为了数字好看制造首屏 waterfall。
 - helper 移动不得改变 method、path、query 顺序/省略规则、body 或 response 解包；原有 API/page tests 必须继续覆盖 wire shape。
 - 每次拆分先 fresh production build，再运行 `bundle:check`；入口与最大 async 两项都必须在现有 ratchet 内。预算只能随有证据的清理降低，不能抬高掩盖回退。
@@ -63,19 +69,30 @@
 | --- | --- |
 | route-private helper 加入 eager `api.ts` 后 entry 超预算 | 移入已有 domain façade或先回到设计；不得抬预算 |
 | helper 仍被 AppShell/启动路径使用 | 保留在 `api.ts`，不引入启动期动态请求 |
-| domain façade 复制 fetch/error parsing | review/source gate 阻断，改为复用 transport primitive |
+| domain façade 复制 fetch/response reader 或绕过 decoder seam | review/source gate 阻断，改为复用 transport primitive与显式 decoder |
+| `api.ts`/AppShell/TopBar/Sidebar/eager router graph 导入 `recordsApi.ts` | AST contract 阻断；在拥有正式 lazy route 前保持无 production consumer |
+| 新记录草稿携带一个或伪造两个空 routing fields | TypeScript union/source review 阻断；body 只含 `payload` |
+| Records draft PATCH 给 ETag 增加引号 | 后端 exact `If-Match` 拒绝；原样发送 draft response 的 `etag` |
+| deletion token 同时进入 header 和 JSON body | body unknown-field decode 失败；只保留 header token 与 body `reservation_id` |
+| Records error body 含 malformed `code/field_errors` 或未知 debug 字段 | 显式 decoder 保留 status/message，忽略 malformed/未知元数据；`recovery` 仍按 unknown 处理 |
 | entry 降低但 max async 超预算 | 拆分不通过，调整 chunk ownership 后重新 fresh build |
 
 #### 5. Good/Base/Bad Cases
 
 - Good: command audit、events 与 incident helper 进入 `observabilityApi.ts`，三个既有 lazy detail/events route 和新 audit route 共享一个小 async chunk，entry 与 max async 均通过。
+- Good: `recordsApi.ts` 直接 type-import canonical DTO、复用 `apiRequest.ts` 并显式组合 `apiError.ts`；当前 fresh production build 中两者都完全不存在，synthetic lazy consumer 只把两者放进同一个 dynamic chunk。
 - Base: 同时被 AppShell 和 DashboardPage 使用的 `getDashboard` 留在 `api.ts`。
 - Bad: 页面为了懒加载直接 `fetch('/api/command-audits')`，复制 credentials/error 处理。
+- Bad: 从 `api.ts` re-export `recordsApi.ts` helpers，导致无页面的 transport 先进入 eager graph。
 - Bad: 把所有 endpoint 机械拆成几十个文件，却没有 consumer/bundle 证据。
 
 #### 6. Tests Required
 
 - API wire tests继续断言 default、filters、cursor、incident/event query 与错误 transport 行为。
+- `apiRequest.test.ts` 断言 query normalization、JSON body init、legacy status/message 默认路径，以及显式 decoder 的 allowlisted structured error / unknown recovery。
+- `recordsApi.test.ts` 固定所有 Records URLs/methods、cursor/query、新/已有记录草稿 routing body、exact `If-Match`、普通/deletion idempotency header、body allowlist，以及 404/409/503 shape。
+- `recordsTransportArchitectureContract.test.ts` 使用 TypeScript AST 和静态依赖图固定唯一 runtime dependencies `apiRequest.ts|apiError.ts`，禁止 raw fetch/UI/import drift 与 eager Records edge；negative fixture 必须证明可捕获 direct re-export 和 transitive import。
+- `bundleBudgetContract.test.ts` 必须 fresh-build当前真实 app，证明 unconsumed `recordsApi.ts` 与 `apiError.ts` 均不属于任何 chunk；另用 synthetic dynamic import 证明未来 lazy consumer 把两者放在同一个 dynamic chunk且不进入 entry。
 - 受影响 page tests继续覆盖 loading/error/data 与请求 inventory。
 - `NODE_ENV=production npm --prefix web run build` 后运行 `npm --prefix web run bundle:check`，记录 entry/max async 实测值。
 
@@ -88,11 +105,20 @@ export function listCommandAudits(...) { ... }
 ```
 
 ```ts
-// 正确：lazy domain façade复用唯一 transport/query owner。
-// observabilityApi.ts
-import { requestJSON, withQuery } from './api'
-export function listCommandAudits(filter?: CommandAuditListFilter) {
-  return requestJSON<CommandAuditListResponse>(withQuery('/api/command-audits', filter))
+// 正确：新的 lazy domain façade直接复用唯一 transport/query owner并显式注入领域 decoder。
+// recordsApi.ts
+import allowlistedApiError from './apiError'
+import { requestJSON as transportRequestJSON, withQuery } from './apiRequest'
+import type { RecordListFilter, RecordListResponse } from './types'
+function requestJSON<T>(path: string, init?: RequestInit) {
+  return transportRequestJSON<T>(path, init, allowlistedApiError)
+}
+export function listRecords(filter?: RecordListFilter) {
+  return requestJSON<RecordListResponse>(withQuery('/api/records', filter ? {
+    q: filter.q,
+    lifecycle: filter.lifecycle,
+    cursor: filter.cursor,
+  } : undefined))
 }
 ```
 
@@ -1465,7 +1491,7 @@ setExpandedChannels((prev) => new Set(Array.from(prev).filter((channel) => reset
 
 > 用于后续任务评审；若形成可复用规则，更新 `.trellis/spec/` 或当前 active docs。
 
-1. **认证请求与业务请求共享 `apiRequest.ts` 的 transport primitives 和 401 hook**；`api.ts` 拥有 eager/shared endpoint façade、`withQuery` 与兼容 re-export，bundle-evidenced domain façade只做 endpoint 组合，新代码不要再加第二套 fetch 包装。
+1. **认证请求与业务请求共享 `apiRequest.ts` 的 transport primitives、`withQuery` 和 401 hook**；`api.ts` 拥有 eager/shared endpoint façade与兼容 re-export，bundle-evidenced domain façade只做 endpoint/显式 decoder 组合，新代码不要再加第二套 fetch 包装。
 2. **类型与 Go contract 全靠手维护**——没有 codegen。前后端字段如有漂移，依赖测试 + 运行期 `unknown` 解析报错暴露。
 3. **当前没有任何状态库 / 数据缓存层**：CLAUDE.md 也没要求引入。本 spec 把"暂不引入"作为现行约束写明。
 

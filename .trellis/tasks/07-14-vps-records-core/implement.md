@@ -175,9 +175,9 @@
 - Create: `internal/center/recorddeletion/registry.go`
 - Create: `internal/center/recorddeletion/registry_test.go`
 
-- [ ] Write RED tests for exact adapter names/surfaces, duplicate/missing/extra adapters, health snapshots and complete production readiness.
-- [ ] Implement the closed exact set `record_core|record_attachments|record_evidence|record_markdown_client|record_search|record_activity_projection|record_comparison|record_collaboration|record_portability`. The production set stays incomplete until later children register; test fixtures may explicitly supply all nine adapters.
-- [ ] Prove core-only or empty-table states keep permanent-delete capability false and return `deletion_safety_unavailable` without reservation/ledger mutation.
+- [x] Write RED tests for exact adapter names/surfaces, duplicate/missing/extra adapters, health snapshots and complete production readiness; 2026-08-03 RED failed on the absent contracts, then focused and 10-iteration race suites passed after the minimal implementation.
+- [x] Implement the closed exact set `record_core|record_attachments|record_evidence|record_markdown_client|record_search|record_activity_projection|record_comparison|record_collaboration|record_portability`. The production set stays incomplete until later children register; test fixtures may explicitly supply all nine adapters. Descriptors are construction-time snapshots, surfaces have exact-one ownership, and readiness digests use the fixed adapter order.
+- [x] Prove core-only or empty-table states keep permanent-delete capability false and return `deletion_safety_unavailable` without reservation/ledger mutation; `RequireReady` admits only an explicit complete, healthy nine-adapter fixture, while missing/unhealthy/error/cancelled/invalid health states fail closed before any caller mutation.
 
 ### Task 3.2: Implement deletion orchestration and core purge
 
@@ -193,12 +193,14 @@
 - Create: `internal/center/store/record_deletions.go`
 - Create: `internal/center/store/record_deletions_test.go`
 - Create: `internal/center/store/record_deletions_postgres_integration_test.go`
+- Create: `internal/center/store/record_deletion_recovery.go`
+- Create: `internal/center/store/record_deletion_recovery_postgres_integration_test.go`
 
-- [ ] Write state/cut-point RED tests for preview CAS, authorization revocation, dependency drift, reservation/lease drain, ledger commit unknown, witness pending, permanent fence, retry, `attempt_not_committed`, same-key replay/reuse and content-free receipt.
-- [ ] Implement preview/execute/status/worker over Child 1 reservation, ledger, witness, lease and fence interfaces; never infer deletion outcome from timeout or transport error.
-- [ ] Implement core purge exact ownership and verified absence. Recovery adapter replays only root/revision/draft/checkpoint/relations/reservation/outcome/minimal audit; unknown contracts fail closed.
-- [ ] Add real PostgreSQL concurrency tests proving reservation-after core new reads/writes are zero, not-committed releases safely and stale workers cannot resurrect content.
-- [ ] Run `go test -race ./internal/center/recorddeletion ./internal/center/store -run 'Deletion|Purge|Recovery|Reservation' -count=10`; expect GREEN.
+- [x] Write state/cut-point RED tests for preview CAS, authorization revocation, dependency drift, reservation/lease drain, ledger commit unknown, witness pending, permanent fence, retry, `attempt_not_committed`, same-key replay/reuse and content-free receipt; 2026-08-03 focused unit matrices cover every durable worker state plus post-commit `retry_required` transitions.
+- [x] Implement preview/execute/worker over Child 1 reservation, ledger, witness, lease and fence interfaces; timeout/transport ambiguity remains fenced, sealed absence alone permits the witnessed `attempt_not_committed` branch, and stale owner CAS cannot finalize or resurrect work. The HTTP-owned status read seam originally listed here was completed with Task 3.3 so its authorization and 404/503 transport contract could be verified end to end.
+- [x] Implement core purge exact ownership and verified absence. Recovery replay is continuous, idempotent and transaction-atomic; it handles existing operation, preview-only reservation and synthetic terminal projection backup cut points, while unknown identity/cursor/receipt/audit/fence contracts fail closed.
+- [x] Add real PostgreSQL concurrency tests proving reservation-after core new reads/writes are zero, not-committed releases safely and stale workers cannot resurrect content; 2026-08-03 all nine deletion/recovery PostgreSQL cases passed through the no-SKIP runner, including purge rollback and preview-only recovery.
+- [x] Run `go test -race ./internal/center/recorddeletion ./internal/center/store -run 'Deletion|Purge|Recovery|Reservation' -count=10`; 2026-08-03 GREEN, followed by full package tests, real PostgreSQL schema verification, `make verify-go`, forbidden scans and `git diff --check` GREEN.
 
 ### Task 3.3: Add deletion HTTP contracts
 
@@ -210,9 +212,9 @@
 - Modify: `cmd/houfeng-center/bootstrap.go`
 - Modify: `cmd/houfeng-center/bootstrap_test.go`
 
-- [ ] Write RED matrices for preview/execute/status authorization, no-leak 404, stale 409, unavailable 503, pending 202, `not_committed` 200, same operation replay and response allowlists.
-- [ ] Wire production readiness so incomplete later adapters expose no permanent-delete capability and no token; do not create a test-only bypass in production bootstrap.
-- [ ] Run focused handler/router/bootstrap tests; expect GREEN.
+- [x] Write RED matrices for preview/execute/status authorization, no-leak 404, stale 409, unavailable 503, pending 202, `not_committed` 200, same operation replay and response allowlists. The header-only token RED first returned 400 while a body token still reached application; the safety-summary RED then failed on absent domain/DTO fields. GREEN fixes make the canonical `DeletionRequestTokenV1` the sole `Idempotency-Key`, keep execute body reservation-only, and expose only ordered identity-free survivor/backup/ledger-health fields.
+- [x] Wire production readiness so incomplete later adapters expose no permanent-delete capability and no token; do not create a test-only bypass in production bootstrap. Runtime-admission bootstrap registers the deletion transport with a nil application, so preview/execute return `503 deletion_safety_unavailable`, status returns `503 deletion_status_unavailable`, and legacy mode registers no deletion routes.
+- [x] Run focused handler/router/bootstrap tests; 2026-08-03 affected-package tests, both 10-iteration race groups, the real PostgreSQL preview/reservation/replay anchor, `make verify-go`, production forbidden scans, tracked plus untracked whitespace checks, and Trellis cross-layer review are GREEN.
 
 ### Task 3.4: Add lazy Web DTO and transport contract
 
@@ -222,25 +224,28 @@
 - Create: `web/src/lib/recordsApi.test.ts`
 - Modify: `web/src/lib/apiRequest.ts`
 - Modify: `web/src/lib/apiRequest.test.ts`
+- Create: `web/src/lib/apiError.ts`
 - Modify: `web/src/lib/api.ts`
 - Modify: `web/src/lib/api.test.ts`
+- Modify: `web/src/lib/auth-client.ts`
 - Create: `web/src/security/recordsTransportArchitectureContract.test.ts`
 - Modify: `web/src/security/bundleBudgetContract.test.ts`
+- Modify: `.trellis/spec/web/state-and-data.md`
 
-- [ ] Write RED tests fixing all Child 2 URLs, methods, cursor/query normalization, `If-Match`, `Idempotency-Key`, allowlisted responses and 404/409/503 recovery shapes.
-- [ ] Move the existing `withQuery` implementation from `api.ts` into `apiRequest.ts`, preserve all legacy API tests, and extend `ApiError` with allowlisted `code`, field errors and recovery while retaining status/message compatibility.
-- [ ] Implement the façade by reusing `requestJSON`, body helpers and `withQuery` from `apiRequest.ts`; no raw `fetch`, React, route or UI code.
-- [ ] Add an AST/source RED test forbidding imports from `web/src/app/layout/AppShell.tsx`, `TopBar.tsx`, `Sidebar.tsx`, `web/src/lib/api.ts` and the eager router dependency graph. Because Child 2 creates no Records page, the production build must tree-shake the unconsumed transport from all current chunks; a test fixture with a synthetic lazy consumer proves it enters only that lazy chunk.
-- [ ] Run `env PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH NODE_ENV=test npm --prefix web run test -- --run src/lib/recordsApi.test.ts` plus lint/build/bundle tests; expect GREEN.
+- [x] Write RED tests fixing all Child 2 URLs, methods, cursor/query normalization, `If-Match`, `Idempotency-Key`, allowlisted responses and 404/409/503 recovery shapes; 2026-08-04 the seven façade cases cover all 17 exact exports, including payload-only new-record drafts and paired existing-record routing fields.
+- [x] Move the existing `withQuery` implementation from `api.ts` into `apiRequest.ts`, preserve all legacy API tests, and extend `ApiError` with allowlisted `code`, field errors and recovery while retaining status/message compatibility; structured metadata is an explicit decoder seam owned by the lazy Records façade, while default eager transport remains legacy message-only.
+- [x] Implement the façade by reusing `requestJSON`, `requestEmpty`, `jsonBodyInit` and `withQuery` from `apiRequest.ts`; production scans and AST tests prove there is no raw `fetch`, React, route, UI or eager `api.ts` dependency, and shared JSON request initialization has one owner.
+- [x] Add an AST/source RED test forbidding imports from `web/src/app/layout/AppShell.tsx`, `TopBar.tsx`, `Sidebar.tsx`, `web/src/lib/api.ts` and the eager router dependency graph. The fresh production fixture contains neither `recordsApi.ts` nor `apiError.ts`; the synthetic lazy consumer places both in the same dynamic-only chunk.
+- [x] Run `env PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH NODE_ENV=test npm --prefix web run test -- --run src/lib/recordsApi.test.ts` plus lint/build/bundle tests; 2026-08-04 the focused façade suite is 7/7 GREEN and fresh `make verify-web` is 126/126 files, 883/883 tests, coverage/build/CSS GREEN, with entry JS `110716 <= 110738` and max async JS `31903 <= 32052`.
 
 ### Task 3.5: Full acceptance and PR closure gate
 
-- [ ] Run all focused race tests and repository PostgreSQL migration/records/deletion integration suites.
-- [ ] Run `HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.12 scripts/test-record-platform-integration.sh pg16-catalog -- go test -json ./internal/center/store/migrate -run '^(TestPostgresIntegrationAppACLR2|TestPostgresIntegrationAppACLCurrent)$' -count=1`; require both anchors GREEN with no `SKIP`.
-- [ ] Run `make verify-go`.
-- [ ] Run `env PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH make verify-web`.
-- [ ] Run `git diff --check` and scan production code for legacy `experience_logs` access or forbidden eager `recordsApi` imports.
-- [ ] Load and run `trellis-check`; fix spec drift, type/lint/test/data-flow/reuse/bundle findings on the same branch.
+- [x] Run all focused race tests and repository PostgreSQL migration/records/deletion integration suites; 2026-08-04 three 10-iteration race groups passed for Records/store, deletion/recovery and HTTP/router/bootstrap, followed by fresh/`0052` migration and 30 RecordPlatform/revision/read/draft/deletion/recovery PostgreSQL scenarios with zero `SKIP`.
+- [x] Run `HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=postgres:16.12 scripts/test-record-platform-integration.sh pg16-catalog -- go test -json ./internal/center/store/migrate -run '^(TestPostgresIntegrationAppACLR2|TestPostgresIntegrationAppACLCurrent)$' -count=1`; 2026-08-04 both anchors passed with no `skip`/`fail` JSON events.
+- [x] Run `make verify-go`; 2026-08-04 repository fmt, vet and complete Go test gate passed.
+- [x] Run `env PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:$PATH make verify-web`; 2026-08-04 Node 22.23.1 passed 126/126 files and 883/883 tests plus coverage, ESLint, strict TypeScript/Vite build, bundle and CSS budgets (`entryJsGzipBytes=110716`, `maxAsyncJsGzipBytes=31903`).
+- [x] Run `git diff --check` and scan production code for legacy `experience_logs` access or forbidden eager `recordsApi` imports; 2026-08-04 tracked/untracked whitespace, conflict-marker, legacy production access, eager import, raw Records fetch and forbidden schema-name scans all returned zero findings.
+- [x] Load and run `trellis-check`; 2026-08-04 cross-layer Store -> Service/Worker -> HTTP -> lazy Web DTO flow, closed adapter/state/survivor sets, reuse/import direction, legacy API compatibility and bundle isolation are coherent. Phase 3.3 also captured the permanent-deletion/core-purge/recovery contract in the backend database spec; no code fix was required.
 - [ ] Commit checkpoint 3 separately, push, monitor Draft PR required CI and keep the PR unmerged until all three checkpoints and review findings are coherent.
 
 ## Rollback

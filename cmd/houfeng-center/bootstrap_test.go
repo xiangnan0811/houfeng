@@ -197,12 +197,14 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	if admitCalls != 1 {
 		t.Fatalf("admitRuntime calls = %d, want 1", admitCalls)
 	}
-	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil || gotRouterOptions.RecordDraftsHandler == nil {
+	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
+		gotRouterOptions.RecordDraftsHandler == nil || gotRouterOptions.RecordDeletionsHandler == nil {
 		t.Fatalf(
-			"runtime Records router options = enabled:%t records:%v drafts:%v, want enabled and non-nil handlers",
+			"runtime Records router options = enabled:%t records:%v drafts:%v deletions:%v, want enabled and non-nil handlers",
 			gotRouterOptions.RecordsEnabled,
 			gotRouterOptions.RecordsHandler,
 			gotRouterOptions.RecordDraftsHandler,
+			gotRouterOptions.RecordDeletionsHandler,
 		)
 	}
 	if gotRouterOptions.VPSTimelineHandler == nil || gotRouterOptions.VPSExperienceLogsHandler == nil {
@@ -210,21 +212,28 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	}
 	actor := mustBootstrapRecordsActor(t)
 	for _, handlerCase := range []struct {
-		name    string
-		path    string
-		handler http.Handler
+		name     string
+		method   string
+		path     string
+		handler  http.Handler
+		wantCode string
 	}{
-		{name: "records", path: "/api/records", handler: gotRouterOptions.RecordsHandler},
-		{name: "drafts", path: "/api/record-drafts", handler: gotRouterOptions.RecordDraftsHandler},
+		{name: "records", method: http.MethodGet, path: "/api/records", handler: gotRouterOptions.RecordsHandler, wantCode: "record_service_unavailable"},
+		{name: "drafts", method: http.MethodGet, path: "/api/record-drafts", handler: gotRouterOptions.RecordDraftsHandler, wantCode: "record_service_unavailable"},
+		{name: "deletion preview", method: http.MethodPost, path: "/api/records/rec_httpcontract/permanent-delete-preview", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_safety_unavailable"},
+		{name: "deletion status", method: http.MethodGet, path: "/api/record-deletions/rpo_httpcontract", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_status_unavailable"},
 	} {
 		t.Run(handlerCase.name+" fails closed without transaction admission", func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, handlerCase.path, nil)
+			request := httptest.NewRequest(handlerCase.method, handlerCase.path, nil)
 			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
 			recorder := httptest.NewRecorder()
 			handlerCase.handler.ServeHTTP(recorder, request)
 			if recorder.Code != http.StatusServiceUnavailable ||
-				!strings.Contains(recorder.Body.String(), `"code":"record_service_unavailable"`) {
-				t.Fatalf("status = %d body=%s, want stable Records 503", recorder.Code, recorder.Body.String())
+				!strings.Contains(recorder.Body.String(), `"code":"`+handlerCase.wantCode+`"`) {
+				t.Fatalf("status = %d body=%s, want stable %s 503", recorder.Code, recorder.Body.String(), handlerCase.wantCode)
+			}
+			if strings.Contains(recorder.Body.String(), "drt1_") {
+				t.Fatalf("fail-closed handler returned deletion token: %s", recorder.Body.String())
 			}
 		})
 	}
@@ -392,12 +401,14 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.SettingsHandler == nil {
 		t.Fatal("router settings handler = nil, want non-nil")
 	}
-	if gotOpts.RecordsEnabled || gotOpts.RecordsHandler != nil || gotOpts.RecordDraftsHandler != nil {
+	if gotOpts.RecordsEnabled || gotOpts.RecordsHandler != nil || gotOpts.RecordDraftsHandler != nil ||
+		gotOpts.RecordDeletionsHandler != nil {
 		t.Fatalf(
-			"legacy Records router options = enabled:%t records:%v drafts:%v, want disabled and nil handlers",
+			"legacy Records router options = enabled:%t records:%v drafts:%v deletions:%v, want disabled and nil handlers",
 			gotOpts.RecordsEnabled,
 			gotOpts.RecordsHandler,
 			gotOpts.RecordDraftsHandler,
+			gotOpts.RecordDeletionsHandler,
 		)
 	}
 	if gotOpts.AssetDomainsCollectionHandler == nil {

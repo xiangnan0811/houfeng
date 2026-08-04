@@ -1,4 +1,4 @@
-import { ApiError, postJSONBody, requestEmpty, requestJSON } from './api'
+import { ApiError, jsonBodyInit, postJSONBody, requestEmpty, requestJSON } from './apiRequest'
 
 export interface User {
   user_id: string
@@ -36,12 +36,8 @@ function isUser(v: unknown): v is User {
 }
 
 export async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
-  await requestEmpty('/api/auth/password', {
-    method: 'PUT',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
-  })
+  await requestEmpty(
+    '/api/auth/password',
+    jsonBodyInit('PUT', { old_password: oldPassword, new_password: newPassword }),
+  )
 }

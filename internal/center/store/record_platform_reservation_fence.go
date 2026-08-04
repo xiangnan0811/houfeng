@@ -182,7 +182,40 @@ func (repository *PostgresRecordPlatformRepository) FenceDeletionReservation(ctx
 	if err := repository.admit(ctx, tx); err != nil {
 		return recordplatform.DeletionReservationFenceV1{}, err
 	}
+	fence, err := repository.fenceDeletionReservationInTransaction(ctx, tx, input)
+	if err != nil {
+		return recordplatform.DeletionReservationFenceV1{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return recordplatform.DeletionReservationFenceV1{}, fmt.Errorf("commit deletion reservation fence transaction: %w", err)
+	}
+	return fence, nil
+}
 
+// FenceDeletionReservation advances the compound fence inside an already-open
+// admitted business transaction. Callers can atomically bind the fence to
+// their own durable operation without exposing arbitrary SQL.
+func (transaction *RecordPlatformTransaction) FenceDeletionReservation(
+	ctx context.Context,
+	input recordplatform.ReservationFenceInputV1,
+) (recordplatform.DeletionReservationFenceV1, error) {
+	if transaction == nil || transaction.repository == nil || transaction.tx == nil {
+		return recordplatform.DeletionReservationFenceV1{}, recordplatform.ErrInvalidReservationFence
+	}
+	if err := input.Validate(); err != nil {
+		return recordplatform.DeletionReservationFenceV1{}, err
+	}
+	if err := transaction.repository.admit(ctx, transaction.tx); err != nil {
+		return recordplatform.DeletionReservationFenceV1{}, err
+	}
+	return transaction.repository.fenceDeletionReservationInTransaction(ctx, transaction.tx, input)
+}
+
+func (repository *PostgresRecordPlatformRepository) fenceDeletionReservationInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+	input recordplatform.ReservationFenceInputV1,
+) (recordplatform.DeletionReservationFenceV1, error) {
 	reservation, err := lockPreviewedDeletionReservationForFence(ctx, tx, input.ReservationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return recordplatform.DeletionReservationFenceV1{}, recordplatform.ErrDeletionReservationUnavailable
@@ -268,9 +301,6 @@ func (repository *PostgresRecordPlatformRepository) FenceDeletionReservation(ctx
 	}
 	if err := fence.Validate(); err != nil {
 		return recordplatform.DeletionReservationFenceV1{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return recordplatform.DeletionReservationFenceV1{}, fmt.Errorf("commit deletion reservation fence transaction: %w", err)
 	}
 	return fence, nil
 }

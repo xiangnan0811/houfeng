@@ -2431,3 +2431,320 @@ export type SettingsUpdateInput = {
   ip_quality_settings: IPQualitySettings
   subscription_cost_settings?: SubscriptionCostSettingsUpdateInput
 }
+
+// Records v1 transport contracts.
+export type RecordLifecycle = 'active' | 'archived'
+
+export type RecordType =
+  | 'troubleshooting'
+  | 'maintenance'
+  | 'migration'
+  | 'provider_communication'
+  | 'billing'
+  | 'important_finding'
+  | 'note'
+
+export type RecordBusinessStatus =
+  | 'pending_investigation'
+  | 'investigating'
+  | 'verifying'
+  | 'resolved'
+  | 'closed'
+  | 'cancelled'
+  | 'planned'
+  | 'executing'
+  | 'completed'
+  | 'pending_contact'
+  | 'waiting_provider'
+  | 'waiting_internal'
+  | 'pending_review'
+  | 'processing'
+
+export type RecordStatusGroup =
+  | 'pending'
+  | 'in_progress'
+  | 'waiting'
+  | 'verification'
+  | 'completed'
+  | 'cancelled'
+
+export type RecordSubjectKind = 'vps' | 'monitoring_instance' | 'target'
+export type RecordRelationRole = 'affected' | 'context' | 'evidence_source'
+export type RecordVisibilityKind = 'project' | 'restricted'
+export type RecordVisibilityRole = 'project_admin' | 'viewer'
+export type RecordSort = 'updated_at_desc' | 'updated_at_asc'
+
+export type RecordVisibility = {
+  kind: RecordVisibilityKind
+  allowed_roles: RecordVisibilityRole[]
+  allowed_group_ids: string[]
+}
+
+export type RecordSubjectReference = {
+  registry_version: number
+  kind: RecordSubjectKind
+  role: RecordRelationRole
+  source_id: string
+  primary: boolean
+}
+
+export type RecordTemplate = {
+  id: string
+  version: number
+}
+
+export type RecordDraftPayload = {
+  title: string
+  body_markdown: string
+  markdown_dialect_version: 1
+  record_type: RecordType
+  business_status: RecordBusinessStatus | ''
+  impact_level: string
+  occurred_at?: string | null
+  completed_at?: string | null
+  visibility: RecordVisibility
+  subjects: RecordSubjectReference[]
+  tags: string[]
+  owner_id: string
+  participant_ids: string[]
+  follow_up_at?: string | null
+  template?: RecordTemplate | null
+  save_reason: string
+}
+
+export type RecordSubjectIdentity = {
+  display_name: string
+  provider?: string
+  region?: string
+  purpose?: string
+  version?: string
+  target_type?: string
+}
+
+export type RecordSubject = RecordSubjectReference & {
+  identity: RecordSubjectIdentity
+}
+
+export type RecordParticipant = {
+  participant_id: string
+  display_name: string
+}
+
+export type RecordRevision = {
+  record_id: string
+  revision_id: string
+  base_revision_id?: string
+  revision_no: number
+  title: string
+  body_markdown: string
+  markdown_dialect_version: 1
+  record_type: RecordType
+  business_status?: RecordBusinessStatus
+  status_group?: RecordStatusGroup
+  impact_level: string
+  occurred_at?: string
+  completed_at?: string
+  visibility: RecordVisibility
+  subjects: RecordSubject[]
+  tags: string[]
+  owner_id?: string
+  participants: RecordParticipant[]
+  follow_up_at?: string
+  template?: RecordTemplate
+  author_id: string
+  save_reason: string
+  created_at: string
+}
+
+export type RecordCapabilities = {
+  read: boolean
+  update: boolean
+  archive: boolean
+  restore: boolean
+  draft: boolean
+  permanent_delete: boolean
+}
+
+export type RecordDetail = {
+  record_id: string
+  lifecycle: RecordLifecycle
+  current_revision_id: string
+  lock_version: number
+  authorization_epoch: number
+  current: RecordRevision
+  capabilities: RecordCapabilities
+  created_at: string
+  updated_at: string
+  archived_at?: string
+}
+
+export type RecordListResponse = {
+  items: RecordDetail[]
+  next_cursor?: string
+}
+
+export type RecordRevisionListResponse = {
+  items: RecordRevision[]
+}
+
+export type RecordMutationResult = {
+  record_id: string
+  revision_id: string
+  revision_no: number
+  lock_version: number
+  authorization_epoch: number
+  lifecycle: RecordLifecycle
+  created: boolean
+  replayed: boolean
+  committed_at: string
+}
+
+export type RecordLifecycleResult = {
+  record_id: string
+  current_revision_id: string
+  lock_version: number
+  authorization_epoch: number
+  lifecycle: RecordLifecycle
+  replayed: boolean
+  changed_at: string
+}
+
+export type RecordDraft = {
+  draft_id: string
+  record_id?: string
+  base_revision_id?: string
+  payload: RecordDraftPayload
+  version: number
+  etag: string
+  warning_at: string
+  created_at: string
+  updated_at: string
+  expires_at: string
+}
+
+export type RecordDraftListResponse = {
+  items: RecordDraft[]
+}
+
+export type RecordListFilter = {
+  q?: string
+  lifecycle?: RecordLifecycle
+  record_type?: RecordType
+  sort?: RecordSort
+  limit?: number
+  cursor?: string
+}
+
+export type RecordRevisionListFilter = {
+  limit?: number
+}
+
+export type RecordDraftListFilter = {
+  limit?: number
+}
+
+export type CreateRecordDraftInput = ({
+  record_id?: never
+  base_revision_id?: never
+} | {
+  record_id: string
+  base_revision_id: string
+}) & {
+  payload: RecordDraftPayload
+}
+
+export type PatchRecordDraftInput = {
+  payload: RecordDraftPayload
+}
+
+export type PublishRecordInput = {
+  draft_id: string
+  draft_etag: string
+}
+
+export type PublishRecordRevisionInput = PublishRecordInput & {
+  base_revision_id: string
+  lock_version: number
+  authorization_epoch: number
+}
+
+export type RestoreRecordRevisionInput = {
+  save_reason: string
+}
+
+export type RecordDraftConflictRecovery = {
+  server_draft: RecordDraft
+  local_payload: RecordDraftPayload
+}
+
+export type RecordRevisionConflictRecovery = {
+  server_revision_id: string
+  server_lock_version: number
+  server_authorization_epoch: number
+  draft: RecordDraft
+}
+
+export type RecordErrorRecovery = RecordDraftConflictRecovery | RecordRevisionConflictRecovery
+
+export type RecordDeletionScope =
+  | 'record_core'
+  | 'record_attachments'
+  | 'record_evidence'
+  | 'record_markdown_client'
+  | 'record_search'
+  | 'record_activity_projection'
+  | 'record_comparison'
+  | 'record_collaboration'
+  | 'record_portability'
+
+export type RecordSurvivingCopyKind =
+  | 'other_record'
+  | 'delivered_export'
+  | 'delivered_notification'
+  | 'offline_browser_buffer'
+  | 'possible_external_delivery'
+
+export type RecordDeletionSurvivingCopy = {
+  scope: RecordDeletionScope
+  kind: RecordSurvivingCopyKind
+  copy_count: number
+}
+
+export type RecordDeletionManagedBackup = {
+  retained_copy_count: number
+  maximum_retention_days: number
+  latest_expires_at: string | null
+}
+
+export type RecordDeletionPreview = {
+  reservation_id: string
+  deletion_request_token: string
+  expires_at: string
+  online_purge_scopes: RecordDeletionScope[]
+  surviving_copies: RecordDeletionSurvivingCopy[]
+  managed_backup: RecordDeletionManagedBackup
+  ledger_health: 'healthy'
+}
+
+export type RecordDeletionExecuteInput = {
+  reservation_id: string
+  deletion_request_token: string
+}
+
+export type RecordDeletionState =
+  | 'provisional_fenced'
+  | 'ledger_commit_unknown'
+  | 'witness_pending'
+  | 'delete_requested'
+  | 'fence_propagating'
+  | 'read_fenced'
+  | 'online_purging'
+  | 'online_purged'
+  | 'release_pending'
+  | 'not_committed'
+  | 'retry_required'
+
+export type RecordDeletionOperation = {
+  operation_id: string
+  state: RecordDeletionState
+}

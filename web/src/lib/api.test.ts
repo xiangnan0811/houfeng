@@ -82,6 +82,7 @@ import {
   updateSubscription,
   updateTargetMetadata,
   updateVPSAsset,
+  withQuery,
   listVPSAssets,
   listVPSForMonitoringInstance,
   listVPSMonitoringInstances,
@@ -91,6 +92,7 @@ import {
   createVPSDomain,
   createVPSSubscription,
 } from './api'
+import { withQuery as transportWithQuery } from './apiRequest'
 import { listCommandAudits, listEvents, listIncidents } from './observabilityApi'
 import type { CommandAuditListFilter } from './types'
 import type {
@@ -324,6 +326,10 @@ const settingsUpdateBody = {
 describe('api helpers', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('re-exports the transport-owned query helper for compatibility', () => {
+    expect(withQuery).toBe(transportWithQuery)
   })
 
   it('surfaces plain-text non-JSON error bodies as ApiError messages', async () => {

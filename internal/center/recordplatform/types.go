@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -198,6 +199,28 @@ func (token IssuedDeletionRequestTokenV1) Commitment(deploymentID DeploymentID, 
 	if !token.issued {
 		return [sha256.Size]byte{}, invalidDeletionRequestToken()
 	}
+	return deletionRequestTokenCommitmentV1(token.raw, deploymentID, projectID)
+}
+
+// MatchesCommitment verifies a persisted commitment in constant time without
+// turning caller-supplied transport back into a write-capable commitment.
+func (token DeletionRequestTokenTransportV1) MatchesCommitment(
+	deploymentID DeploymentID,
+	projectID ProjectID,
+	expected [sha256.Size]byte,
+) bool {
+	commitment, err := deletionRequestTokenCommitmentV1(token.raw, deploymentID, projectID)
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare(commitment[:], expected[:]) == 1
+}
+
+func deletionRequestTokenCommitmentV1(
+	raw [deletionRequestTokenV1RawLength]byte,
+	deploymentID DeploymentID,
+	projectID ProjectID,
+) ([sha256.Size]byte, error) {
 	if err := ValidateDeploymentID(deploymentID); err != nil {
 		return [sha256.Size]byte{}, err
 	}
@@ -205,14 +228,14 @@ func (token IssuedDeletionRequestTokenV1) Commitment(deploymentID DeploymentID, 
 		return [sha256.Size]byte{}, err
 	}
 
-	preimage := make([]byte, 0, len(deletionRequestTokenV1Domain)+1+len(deploymentID)+1+len(projectID)+1+len(token.raw))
+	preimage := make([]byte, 0, len(deletionRequestTokenV1Domain)+1+len(deploymentID)+1+len(projectID)+1+len(raw))
 	preimage = append(preimage, deletionRequestTokenV1Domain...)
 	preimage = append(preimage, 0)
 	preimage = append(preimage, string(deploymentID)...)
 	preimage = append(preimage, 0)
 	preimage = append(preimage, string(projectID)...)
 	preimage = append(preimage, 0)
-	preimage = append(preimage, token.raw[:]...)
+	preimage = append(preimage, raw[:]...)
 	return sha256.Sum256(preimage), nil
 }
 
@@ -320,6 +343,12 @@ func (fingerprint RequestFingerprintV1) Validate() error {
 // Equal compares two issued fingerprints without exposing either digest.
 func (fingerprint RequestFingerprintV1) Equal(other RequestFingerprintV1) bool {
 	return fingerprint.sealed && other.sealed && fingerprint.digest == other.digest
+}
+
+// MatchesPersisted compares a canonical request fingerprint with trusted
+// storage readback without making the readback value write-capable.
+func (fingerprint RequestFingerprintV1) MatchesPersisted(other PersistedRequestFingerprintV1) bool {
+	return requestFingerprintV1MatchesPersisted(fingerprint, other)
 }
 
 // PersistedBytes returns an immutable fixed-size copy for the storage boundary.

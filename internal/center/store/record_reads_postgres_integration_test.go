@@ -133,12 +133,25 @@ func TestPostgresIntegrationRecordReadFenceBlocksRevisionAndHistoryContent(t *te
 	if _, err := runtimePool.Exec(ctx, `
 		insert into public.deletion_reservations (
 			reservation_id, project_id, object_kind, object_id,
-			deletion_token_commitment, request_fingerprint, state, expires_at, completed_at
+			deletion_token_commitment, request_fingerprint,
+			actor_scope_digest, preview_binding_digest,
+			preview_current_revision_id, preview_lock_version,
+			preview_authorization_epoch, preview_content_delivery_epoch,
+			preview_dependency_graph_digest, preview_backup_inventory_digest,
+			preview_processor_inventory_digest, adapter_readiness_digest,
+			adapter_preview_digest, preview_witness_sequence,
+			preview_witness_entry_hash, state, expires_at, completed_at
 		) values (
 			'drs_readfenced', 'default', 'record', $1,
-			decode(repeat('31', 32), 'hex'), decode(repeat('32', 32), 'hex'), 'committed',
+			decode(repeat('31', 32), 'hex'), decode(repeat('32', 32), 'hex'),
+			decode(repeat('33', 32), 'hex'), decode(repeat('34', 32), 'hex'),
+			$2, $3, $4, 0,
+			decode(repeat('35', 32), 'hex'), decode(repeat('36', 32), 'hex'),
+			decode(repeat('37', 32), 'hex'), decode(repeat('38', 32), 'hex'),
+			decode(repeat('39', 32), 'hex'), 1,
+			decode(repeat('3a', 32), 'hex'), 'committed',
 			transaction_timestamp() + interval '5 minutes', transaction_timestamp()
-		)`, recordID); err != nil {
+		)`, recordID, created.RevisionID, created.LockVersion, created.AuthorizationEpoch); err != nil {
 		t.Fatalf("seed committed deletion reservation: %v", err)
 	}
 
