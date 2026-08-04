@@ -10,6 +10,8 @@ import (
 	"testing/fstest"
 
 	"github.com/jackc/pgx/v5"
+
+	"houfeng/db/migrations"
 )
 
 func TestAdmitAppACLCurrentRuntimeRejectsMissingFragmentBeforeBeginTx(t *testing.T) {
@@ -33,6 +35,37 @@ func TestAdmitAppACLCurrentRuntimeRejectsMissingFragmentBeforeBeginTx(t *testing
 	}
 	if beginCalls != 0 {
 		t.Fatalf("current runtime BeginTx calls = %d, want 0", beginCalls)
+	}
+}
+
+func TestAdmitAppACLCurrentRuntimeAcceptsProductionRecordsCoreContract(t *testing.T) {
+	manifestSnapshot, _, catalogSnapshot := appACLCurrentRuntimeAdmissionFixture(
+		t,
+		migrations.FS,
+		appACLCurrentMigrationFragments,
+	)
+	tx := &fakeAppACLRuntimeAdmissionTx{}
+
+	err := admitAppACLCurrentRuntimeWithDependencies(
+		context.Background(),
+		migrations.FS,
+		appACLCurrentMigrationFragments,
+		appACLCurrentRuntimeAdmissionDependencies{
+			beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
+			readManifest: func(context.Context, pgx.Tx) (AppACLManifestRuntimeSnapshotV1, error) {
+				return manifestSnapshot, nil
+			},
+			readCatalog: func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error) {
+				return catalogSnapshot, nil
+			},
+			verifyCatalog: verifyAppACLEffectiveCatalogSnapshot,
+		},
+	)
+	if err != nil {
+		t.Fatalf("admit production records-core APP ACL runtime: %v", err)
+	}
+	if tx.commitCalls != 1 || tx.rollbackCalls != 1 {
+		t.Fatalf("production records-core runtime lifecycle = commit %d rollback %d, want 1/1", tx.commitCalls, tx.rollbackCalls)
 	}
 }
 

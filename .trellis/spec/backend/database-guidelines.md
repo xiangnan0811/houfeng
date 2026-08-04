@@ -11,7 +11,7 @@
 核心约定一句话总结：
 - **driver**：`github.com/jackc/pgx/v5` 与 `github.com/jackc/pgx/v5/pgxpool`，连接池在 `cmd/houfeng-center/bootstrap.go` 内构造（参见 `bootstrap.go:60-69`，调用 `store.OpenPostgres`）。
 - **仓库**：`internal/center/store/` 下一文件一 aggregate（`monitoring_instances.go`、`targets.go`、`incidents.go`、`sync_batches.go` 等）。
-- **schema 演进**：`db/migrations/0001_*.sql` … 当前固定 r1 末尾 `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）+ `db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations` 表。两个 record flag 都关闭时，旧 center/importer 启动路径仍由 `internal/center/store/migrate/migrate.go` 的 `Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator 收敛当前 build 的 exact embedded set，center/importer 只做 current runtime admission，绝不在启动时调用 `Apply`。
+- **schema 演进**：冻结 R1 source prefix 仍为 `0001_*.sql` … `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）；current development root 再包含 `0052_create_records_core.sql`，共 53 个 source。`db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations` 表。两个 record flag 都关闭时，旧 center/importer 启动路径仍由 `internal/center/store/migrate/migrate.go` 的 `Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator 收敛当前 build 的 exact embedded set，center/importer 只做 current runtime admission，绝不在启动时调用 `Apply`。
 - **事务边界**：写多张表时使用 `pgx.Tx`，参考 `store/sync_batches.go:40-91` 的 `ApplyBatch`（一次同步批次串起 4-5 张表的写入与一次 plan 计算）。
 - **不变量**：领域规则（MonitoringInstance/Target/Probe 语义、健康状态派生、回填观测不告警）必须落到 SQL + 仓库 + 服务层共同遵守，详见后文。
 
@@ -74,7 +74,7 @@
 ### 流程
 
 1. 想清楚改动是否需要持久化（业务模型变化、查询需要新索引、retention 行为变化等）。
-2. 在 `db/migrations/` 新建下一个未占用序号的文件。当前 r1 固定清单末尾是 `0051_create_record_platform_foundation.sql`，因此若没有并发新增文件，下一个候选是 `0052_<verb>_<scope>.sql`；任何 r1 之后的 APP migration 还必须由 scoped migrator 在新 manifest revision 中绑定，不能由 records-on 启动路径补跑。
+2. 在 `db/migrations/` 新建下一个未占用序号的文件。冻结 r1 固定清单末尾是 `0051_create_record_platform_foundation.sql`，current development root 已到 `0052_create_records_core.sql`，因此若没有并发新增文件，下一个候选是 `0053_<verb>_<scope>.sql`；任何 r1 之后的 APP migration 还必须在同一 PR 注册 exact current fragment，不能由 records-on 启动路径补跑。
 3. 文件内只允许 `create / alter / drop / insert` 等 DDL/DML 语句，不要在里面写 Go。
 4. 同时更新对应 `internal/center/store/<aggregate>.go` 的 `select` 列、`insert` / `update` 语句、读写函数签名。
 5. 跑 `make verify-go`（含 `migrate` 包的单测，见 `migrate_test.go`）；接着按 `docs/operations/fresh-install-smoke-run.md` 在真 Postgres 上做 fresh-install smoke。
@@ -100,16 +100,210 @@
 - ❌ 用任何运维脚本 / SQL 客户端直接改线上 schema，必须走迁移文件。
 - ❌ 把测试数据 / seed 数据写进迁移文件——种子用户由 `internal/center/auth/seed.go` 在 bootstrap 阶段执行（`bootstrap.go:104-107`）。
 
-> ⚠️ **已知 gap**：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。前者是历史 Node 命名迁移，当前 schema 由 `0029_rename_nodes_to_monitoring_instances.sql` 迁到 MonitoringInstance 语义。legacy `migrate.Apply` 按文件名字典序排序，scoped r1 migrator 也把它们作为固定 52-source 清单中的两个独立 checksum source；二者顺序均由后缀决定，并不冲突。序号撞车仍违反“序号唯一”的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（当前固定 r1 末尾为 `0051_create_record_platform_foundation.sql`，若没有并发新增文件，下一个候选为 `0052_*`）。
+> ⚠️ **已知 gap**：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。前者是历史 Node 命名迁移，当前 schema 由 `0029_rename_nodes_to_monitoring_instances.sql` 迁到 MonitoringInstance 语义。legacy `migrate.Apply` 按文件名字典序排序，scoped r1 migrator 也把它们作为固定 52-source 清单中的两个独立 checksum source；二者顺序均由后缀决定，并不冲突。序号撞车仍违反“序号唯一”的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（current development root 已到 `0052_create_records_core.sql`，若没有并发新增文件，下一个候选为 `0053_*`）。
+
+### Scenario: Records core `0052` schema and exact APP ACL fragment
+
+#### 1. Scope / Trigger
+
+- 触发：修改 `0052_create_records_core.sql`、`internal/center/records/`、Records store transaction、current APP ACL fragment，或任何 Records core purge/readiness 路径时。
+- 项目当前只支持 fresh/current development database 与 exact repeat；不为 `experience_logs`、旧 `0052`、混合版本或部分升级建设 backfill/upgrader。`0052` 合并后按普通迁移不可修改，后续 schema 变化使用 `0053+`。
+
+#### 2. Signatures
+
+- Root migration：`db/migrations/0052_create_records_core.sql`。
+- Current fragment：`recordsCoreAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment`，migration name 必须精确为 `0052_create_records_core.sql`。
+- Deferred validator：`record_platform_internal.validate_record_revision_primary_subject() returns trigger`，`SECURITY INVOKER`、`search_path=pg_catalog`、显式 revoke `PUBLIC`。
+- 九张 owned table：`records`、`record_revisions`、`record_revision_subjects`、`record_revision_tags`、`record_revision_participants`、`record_drafts`、`record_draft_checkpoints`、`record_domain_activities`、`record_core_purge_receipts`。
+
+#### 3. Contracts
+
+- `records` 是稳定 root/current projection；`record_revisions` 与 subjects/tags/participants 是只插入的完整历史。来源删除不能 cascade Records；所有 record-owned 清理由 core purge adapter 在一个事务中显式执行。
+- `(record_id,current_revision_id)` 使用 initially-deferred same-record FK。revision subject 使用 partial unique index 保证至多一个 primary，并由两个 initially-deferred constraint trigger 覆盖 revision insert 与 subject insert/delete，在 commit 时保证每个仍存在的 revision 恰有一个 primary。受控 purge 同事务删除 subject 与 revision 时 validator 看到 revision 已消失并允许提交。
+- immutable history tables没有 APP `UPDATE` grant，并复用 `reject_immutable_mutation()` 拒绝 owner/migrator update；delete 仅用于受控显式 purge。
+- current fragment 精确登记九张 table 加 primary-subject validator function。`center_runtime` 只取得 Records 在线读写/显式 purge 所需 table privilege；`platform_admin` 只能读取无内容的 `record_core_purge_receipts`，不能读取 Records content table；validator 没有额外 direct APP EXECUTE tuple。
+- `record_core_purge_receipts` 的 schema、insert 参数和 receipt digest 都只能保存 operation-scoped proof：不得包含或散列 `project_id`、`record_id`、revision ID 或业务内容。需要在 preview 中关联对象时，经 `record_purge_operations -> deletion_reservations` 读取当前 operation binding，不能把对象身份反规范化回 receipt。
+- `record_draft_checkpoints` 是唯一恢复点名称；revision participant 只存在于独立 `record_revision_participants`，不得出现 `participant_ids` 或 `record_draft_recovery_points`。
+- production current/historical authorization snapshot loader 必须在 admitted pgx transaction 中先执行 record read fence，再读取 root、visibility、identity snapshot、capture authorization 或 subject rows；直接 DB loader 只允许作为注入式单元测试 seam，不能由 production constructor 绑定。
+- record candidate list 必须在同一条 SQL 中以 correlated `not exists` 排除 `fenced|committed` deletion reservation，并在过滤之后应用 `order by/limit`；后续 authorization snapshot 与 revision content read 仍各自 recheck fence，以关闭查询之间的 reservation race。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 预期行为 |
+| --- | --- |
+| revision transaction 在 commit 时没有 primary subject | deferred validator 返回 SQLSTATE `23514`；revision/relations 整体回滚。 |
+| 同 revision 插入第二个 primary | partial unique index 返回 SQLSTATE `23505`。 |
+| root 指向另一 record 的 revision | same-record FK 在约束检查时返回 SQLSTATE `23503`。 |
+| 单独删除唯一 primary 而保留 revision | commit 返回 SQLSTATE `23514`；不得留下无 primary 历史。 |
+| 同事务显式删除 subject、revision 与 root | validator 跳过已删除 revision，事务可以提交。 |
+| runtime 尝试 UPDATE immutable revision | ACL 先返回 SQLSTATE `42501`；owner/migrator 直接 update 由 immutable trigger 返回 `55000`。 |
+| `0052` 缺 fragment、function hardening 或任一 managed object/privilege | current source/catalog compile 在 transaction 前 fail closed。 |
+| authorization admission 不可用或 record 已 reserved | admission 前 0 DB read；reserved 时只运行 fence read，0 root/subject/live resolver read。 |
+| candidate 对应 `fenced|committed` reservation | SQL 返回 0 candidate row；record ID 不进入 application scan，也不能成为外部 cursor。 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：同一 admitted transaction 先插 revision，再插恰好一个 primary 和任意 related subject，commit 时统一验证。
+- Base：fresh apply 后 exact repeat 不改变 migration ledger、manifest、owner、ACL、function 或 trigger state。
+- Bad：只建 `where is_primary` partial unique index并声称“恰好一个”；它只能拒绝第二个 primary，完全没有 subject 的 revision 仍可提交。
+- Bad：为了绕开 deferred check 把 subject/revision/root 分成多个 purge transaction；第一笔 subject delete 必须失败，而不是制造暂时不合法状态。
+
+#### 6. Tests Required
+
+```bash
+go test ./internal/center/store/migrate -run 'RecordsCore|AppACLCurrent' -count=1
+go test -race ./internal/center/records -run 'Revision|Lifecycle|Status|Template|Canonical|Subject|Authorization|Tombstone' -count=10
+scripts/test-record-platform-integration.sh postgres -- \
+  go test -v ./internal/center/store/migrate \
+  -run '^(TestPostgresIntegrationRecordsCoreSchema|TestPostgresIntegrationAppACLCurrent)$' -count=1
+```
+
+- PostgreSQL test 必须覆盖 fresh/exact repeat、无 primary 的 commit-time `23514`、第二 primary `23505`、same-record FK、immutable update、单事务显式 purge、receipt 的 exact content-free column set，以及 runtime/admin exact privilege；不得以 `SKIP` 作为证据。
+
+#### 7. Wrong vs Correct
+
+```sql
+-- 错误：只能保证至多一个 primary。
+create unique index uq_record_revision_subjects_primary
+  on record_revision_subjects(revision_id) where is_primary;
+
+-- 正确：保留 partial unique，并对 revision insert 和 subject insert/delete
+-- 注册 initially-deferred constraint trigger，在 transaction commit 检查恰好一个。
+create constraint trigger record_revisions_require_primary_subject
+after insert on public.record_revisions
+deferrable initially deferred
+for each row execute function
+  record_platform_internal.validate_record_revision_primary_subject();
+```
+
+### Scenario: Records private drafts, bounded checkpoints, and atomic publish cleanup
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `internal/center/records/drafts.go`、`internal/center/store/record_drafts.go`、revision command 的 draft publication 字段、`record_drafts` / `record_draft_checkpoints` SQL，或 draft expiry cleanup 时。
+- 该场景覆盖作者私有 server draft、精确 ETag PATCH、bounded checkpoint、显式 discard/revoke，以及与正式 revision transaction 同生共死的 publish cleanup；浏览器 buffer、Records HTTP DTO 与永久删除 core purge 由各自 owner 继续闭合。
+
+#### 2. Signatures
+
+```go
+type DraftRepository interface {
+	GetDraft(context.Context, string, string) (Draft, error)
+	CreateDraft(context.Context, DraftCreateCommand) (Draft, error)
+	PatchDraft(context.Context, DraftPatchCommand) (Draft, error)
+	DeleteDraft(context.Context, DraftDeleteCommand) error
+}
+
+func (r *PostgresRecordDraftRepository) ClaimExpiredDrafts(
+	context.Context,
+	uint64,
+) ([]string, error)
+
+type RevisionCommitCommand struct {
+	// Existing revision fields omitted.
+	DraftID   string
+	DraftETag DraftETag
+}
+```
+
+- `DraftID` / `DraftETag` 是 optional pair：两者同时为空表示非 draft 正式保存；两者同时有效表示 publish。
+- `ClaimExpiredDrafts` 的 `limit` 闭合为 `1..100`，返回同一事务实际删除的 draft IDs。
+
+#### 3. Contracts
+
+- draft payload 是 immutable canonical JSON object；payload hash 与 ETag 必须从 persisted payload、draft ID、author、version 重新计算验证，不能信任数据库中的摘要列或客户端项目/作者字段。
+- `GetDraft`、list、PATCH 与作者操作的 cleanup 使用 author-scoped routing SQL；该 SQL 必须在返回 metadata row 前以 correlated `not exists` 排除 existing-record draft 的 `fenced|committed` reservation，并在过滤之后应用 list `limit`。错误作者与已 reserved 的 existing-record draft 在 payload read 前得到 `ErrDraftNotFound`；`record_id is null` 的 new-record draft 保持可见。
+- routing SQL 的原子 reservation filter 不能替代 race recheck。PATCH 在一个 admitted pgx transaction 中按 `atomic routing -> optional mutation-fence recheck -> author row FOR UPDATE -> exact ETag -> update -> checkpoint -> expiry prune -> newest-20 prune` 执行；Get/list 使用 read-fence recheck。相同 canonical payload 只续 `updated_at/warning_at/expires_at`，不增加 version、发行 checkpoint ID 或写 checkpoint。
+- 内容变化时每个 `date_bin(..., 5 minutes, fixed origin)` bucket 最多一个 immutable checkpoint；保留最新 20 个并删除 `checkpoint_expires_at <= transaction_timestamp()` 的行。draft inactivity TTL 为 90 天，warning boundary 为 expiry 前 7 天；所有时间以 database transaction time 为准。
+- discard/revoke 与 publish cleanup 都先删除 checkpoints 再删除 draft。publish 必须在现有 revision transaction 内锁定作者 draft，校验 exact ETag 及 create/new-draft 或 update/same-record-and-base shape，在 formal revision/no-change 成功后、idempotency complete 前 cleanup。任一 conflict 或 cleanup error 回滚正式事实并保留 draft。
+- completed idempotency replay 在 draft validation/cleanup 之前返回 persisted revision result；首次 publish 已删除 draft 后，同 key/same fingerprint replay 仍必须成功。request fingerprint 绑定 `DraftID` 与强 ETag，换 draft 或换 version 不能复用同 key。
+- 普通 draft create/read/PATCH/discard/revoke/expiry cleanup 不写 `record_domain_activities`、`record_outbox`、search 或 notification；只有 publish 成功产生正式 revision 既有的 activity/outbox。
+- `ClaimExpiredDrafts` 必须在 claim SQL 中、`order by/limit` 之前以 correlated `not exists` 排除 existing-record draft 的 `fenced|committed` reservation，同时返回 nullable `record_id`。claim 完成后、任何 checkpoint/draft delete 之前，对去重后的每个非空 record ID 再执行 mutation-fence recheck；并发 reservation 命中时整批 rollback。`record_id is null` 的 new-record draft 不受对象 reservation 过滤影响。
+- duration 以 Go `time.Duration.Microseconds()` 作为 `bigint` 传入。一个 bind 参数乘 interval 可沿用现有 SQL；两个参数先做减法时必须显式 cast 两侧为 `bigint`，否则 PostgreSQL parse 会对 `unknown - unknown` 返回 `42725`。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 预期行为 |
+| --- | --- |
+| draft ID、author、payload、policy 或 optional publish pair 非法 | 对应 `ErrInvalidDraftCommand` / `ErrInvalidRevisionCommand`；SQL 前拒绝。 |
+| lookup author 不匹配 | `ErrDraftNotFound`；只执行 author-scoped routing lookup，0 payload read/0 draft write。 |
+| existing-record draft 在 routing query 前已有 `fenced|committed` reservation | correlated filter 返回 0 row / `ErrDraftNotFound`；0 routing metadata row、0 payload read、0 draft write。 |
+| reservation 在 routing row 返回后并发建立 | transaction 内 read/mutation fence recheck 返回 `ErrRecordDeletionReserved`；0 payload read、0 draft write。 |
+| PATCH / publish ETag 已推进 | `ErrDraftConflict`；PATCH typed error携带 current server draft 与 local payload；0 draft/checkpoint write。 |
+| existing draft base/current lifecycle 已推进 | create/prepare/publish 返回 `ErrDraftRevisionConflict`；draft 保留。 |
+| PATCH payload 未变化 | version/ETag/payload 不变，只刷新 90-day TTL 与 7-day warning；0 checkpoint。 |
+| checkpoint ID、insert、retention prune 或 publish cleanup 任一步失败 | 整个 transaction rollback；不得留下半份 draft 或半份 formal revision。 |
+| expiry cleanup limit 为 0 或大于 100 | `ErrInvalidDraftCommand`；不开始 transaction。 |
+| existing-record draft 在 expiry claim 前已有 `fenced|committed` reservation | claim SQL 返回 0 row；expired draft/checkpoint 保留，且不占 batch limit。 |
+| reservation 在 expiry row claim 后并发建立 | mutation-fence recheck 返回 `ErrRecordDeletionReserved`；整批 0 checkpoint/draft delete。 |
+| 两个 cleanup worker 同时运行 | `FOR UPDATE SKIP LOCKED` 使 claimed ID 集合不相交；每个 batch 原子删除 checkpoints/drafts。 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：两个客户端持有相同 ETag；先取得 row lock 的请求推进到 v2 并写一个 bucket checkpoint，后取得锁的请求读到 v2 typed conflict 且不覆盖。
+- Good：publish 创建 revision/activity/outbox 后在同一 transaction 删除 checkpoint/draft并完成 idempotency；同 key retry 不再要求 draft 存在。
+- Good：expiry worker 的首条 SQL 跳过已经 reserved 的 existing-record draft；claim 后出现 reservation 时，二次 mutation fence 在 delete 前中止并回滚整批。
+- Base：autosave 内容与 server canonical payload 相同，仅刷新 inactivity TTL，避免 version 与 recovery history 噪音。
+- Bad：formal revision 先 commit，再调用独立 `DeleteDraft`；cleanup failure 会留下“已发布但仍可编辑”的 server draft，retry 也无法证明单一结果。
+- Bad：用 `limit` 但没有 `SKIP LOCKED` 或跨 transaction claim/delete；并发 worker 会阻塞、重复 claim 或留下部分 cleanup。
+- Bad：expiry cleanup 只按 `expires_at` claim 后直接 delete；它会绕过 permanent-delete reservation，或者在 claim 与 delete 之间吞掉刚被 fenced 的 draft。
+
+#### 6. Tests Required
+
+```bash
+go test -race ./internal/center/records ./internal/center/store \
+  -run 'Draft|Checkpoint' -count=10
+
+scripts/test-record-platform-integration.sh postgres -- \
+  go test -v ./internal/center/store \
+  -run '^TestPostgresIntegrationRecordDraft' -count=1
+```
+
+- Unit/race 必须覆盖 immutable payload/ETag、作者隔离、two-client conflict、no-change TTL、checkpoint SQL、discard/revoke、expired batch grammar、publish create/update/no-change/conflict/rollback/replay。
+- 真实 PostgreSQL 必须覆盖并发 PATCH 单赢家、五分钟 bucket/newest 20/seven-day retention、并发 cleanup claim 不相交、`fenced|committed` 过期 existing-record draft/checkpoint 均保留、publish/discard/revoke cleanup，以及普通 draft 操作的 activity/outbox 零行；runner 不接受 `SKIP`。
+
+#### 7. Wrong vs Correct
+
+```sql
+-- 错误：两个 bind 参数都是 unknown，PostgreSQL parse 返回 42725。
+warning_at = transaction_timestamp()
+  + (($9 - $10) * interval '1 microsecond')
+
+-- 正确：明确声明 duration microseconds 的 bigint 运算域。
+warning_at = transaction_timestamp()
+  + (($9::bigint - $10::bigint) * interval '1 microsecond')
+```
+
+```go
+// 错误：formal commit 与 draft cleanup 分属两个 transaction。
+result, err := revisions.CommitRevision(ctx, command)
+if err == nil {
+	err = drafts.DeleteDraft(ctx, deleteCommand)
+}
+
+// 正确：revision store 在 caller-owned admitted pgx.Tx 内完成 formal writes、
+// draft checkpoint/draft cleanup 和 idempotency complete，再统一 commit/rollback。
+result, err := revisions.CommitRevision(ctx, commandWithDraftIDAndExactETag)
+```
+
+```sql
+-- 错误：过期即 claim，随后没有对象 mutation-fence recheck。
+select draft_id from public.record_drafts
+where expires_at <= transaction_timestamp()
+for update skip locked limit $1;
+
+-- 正确：claim SQL 先排除 fenced|committed reservation；scan 完 record_id 后，
+-- application 在任何 delete 前对去重的非空 record ID 调用 assertRecordMutationFence。
+```
 
 ### Scenario: APP current-development scoped migrator and one-snapshot runtime admission
 
 #### 1. Scope / Trigger
 
 - 触发：修改 `HOUFENG_RECORDS_ENABLED` / `HOUFENG_RECORD_PERMANENT_DELETE_ENABLED` 模式选择、`houfeng-record-platform-admin migrate --scope app`、root migration、current APP fragment/compiler、manifest/catalog verifier、`ConvergeAppACLCurrent`、`AdmitAppACLCurrentRuntime`、center bootstrap、VPS importer，或其 PostgreSQL regression 时。
-- current contract 的前 52 个 source 必须 byte-for-byte 等于冻结 `0001…0051` r1 inventory（包含两个按文件名字典序排列的 `0004_*`）。每个后来 embedded migration 必须在同一个 PR 注册一个 exact `AppACLCurrentMigrationFragment`；无 APP object 也必须注册 explicit empty fragment。当前 root set 仍止于 `0051`，所以 production registry 为空。
+- current contract 的前 52 个 source 必须 byte-for-byte 等于冻结 `0001…0051` r1 inventory（包含两个按文件名字典序排列的 `0004_*`）。每个后来 embedded migration 必须在同一个 PR 注册一个 exact `AppACLCurrentMigrationFragment`；无 APP object 也必须注册 explicit empty fragment。当前 root set 有 53 个 source并止于 `0052_create_records_core.sql`，production registry 恰有一个 `0052` fragment。
 - 两个 record flag 都关闭时保留 legacy owner `migrate.Apply`。`records-on/delete-off` 必须先运行 current scoped migrator，随后 center/importer 只能以 runtime 身份执行 current admission。`false/true` 和 `true/true` 在读取 URL、`_FILE` secret、DNS、数据库、输入文件或外部域配置前失败。
 - `ConvergeAppACLR1`、`AdmitAppACLRuntime` 与 isolated APP R2 bootstrap/finalize/runtime API 是冻结历史合同；保留其导出签名和 regression，但 product migration/startup 不再默认调用它们。
+- frozen `AdmitAppACLRuntime` 必须在开启 transaction 前通过 `snapshotAppACLR1MigrationSources(migrations.FS)` 取得并验证 exact R1 prefix，再把已 canonicalize 的 frozen set 交给 manifest verifier。它不得把 R1 manifest/ledger 与会随 `0052+` 增长的完整 `CanonicalMigrationSetFromFS(migrations.FS)` 比较；后者会让新增 current migration 反向破坏冻结 R1 admission。
 
 #### 2. Signatures
 
@@ -126,6 +320,7 @@
 - source/fragment compiler 必须在 `BeginTx` 前拒绝 missing/extra/duplicate fragment、duplicate object/privilege、unknown subject、unmanaged privilege/function hardening，以及新 function 缺少 exact hardening。每个 fragment 的 `Privileges(databaseName)` callback 只在 source compile 时用固定验证数据库占位符求值一次；结果、fragment input 和 nested function config 都必须 defensive-copy。后续 catalog compile 只能复制已物化 privilege template，并替换 `database` tuple 的占位符，不能再次调用 callback。
 - current convergence 只支持 fresh 与 exact-current。fresh 在一个 `SERIALIZABLE` transaction 中取得 advisory lock、固定 search path、apply exact source、revoke-first DCL、catalog verify 并插入一个 genesis manifest；exact repeat 只验证，不改变 ledger、manifest/head、owner、ACL 或 function state。null-head adoption、old source upgrade、repair 和 successor append 全部禁止；冻结 R1 wrapper 单独保留其历史 null-head adoption。
 - current catalog 以冻结 r1 base（当前为 **204** ACL tuple）加 ordered fragment object/privilege/function hardening 编译。`public.record_platform_cas_contract_activation_projection(bytea)` 与 `public.record_platform_cas_domain_rotation_projection(bytea)` 仍是 migrator-owned、`SECURITY DEFINER`、唯一 `bytea` overload、`search_path=pg_catalog` 且显式 revoke `PUBLIC`。
+- production `0052` fragment 增加九张 Records core table、一个 `record_platform_internal.validate_record_revision_primary_subject()` hardened function 与 29 个精确 APP privilege tuple；current expected-function catalog 是冻结两个 projector 加该 validator。不得给 platform admin Records content table读取权，也不得给 immutable history table `UPDATE`。
 - admission 只验证 compiled migration-owned surface：database、managed schema、relation/view/sequence/function、ledger/manifest、role attributes/membership、owner、direct/effective/column/default ACL 和 function hardening。current convergence 的 placement、fresh-state 与 legacy-ledger companion-object preflight 均以完整 `(schema, object identity)` tuple 检查 relation/function；不同 managed schema 可声明同名对象，无关 schema 中的同名 relation、同名 function 或其他 overload 也不属于 managed tuple。冻结 R1 的历史裸名称 shadow rejection 保持不变。managed private schema 内 unknown object 仍是 drift；无关 schema/object 与 unrelated-owner default ACL 必须接受。
 - PostgreSQL 16 `pgcrypto` 必须安装在 `record_platform_internal`；若 extension 已在其他 schema 则 fail closed。extension-member procedure 按 OID 识别，并对普通 managed owner/direct/effective/function reader 保持 opaque，因为受限 migrator 不能可靠改写 bootstrap-owned member ACL。opacity 绝不产生 reachability：`PUBLIC`、runtime、admin 对 `record_platform_internal` 都没有 `USAGE` 或 `CREATE`；同一 admission snapshot 还会拒绝同时具有 schema `USAGE` 与 function `EXECUTE` 的 reachable opaque member。migrator-owned helper/projector 仍必须显式 revoke `PUBLIC`。
 - `AdmitAppACLCurrentRuntime` 精确开启一个 `REPEATABLE READ READ ONLY` transaction。在同一 snapshot 中交叉校验 direct identity、manifest/head、exact applied source、current privileges 与 compiled catalog。它不执行 DDL/DCL、不调用 writer；失败时 center/importer 关闭 pool，不得回退到 owner migration 或 warning-only dry-run。
@@ -137,6 +332,8 @@
 | 两个 flag 都为 false | 选择 legacy path；现有 owner `migrate.Apply` 行为继续允许。 |
 | `false/true` 或 `true/true` flag | 在读取 URL/secret/file/network/external-domain 前 fail；不连接 database，也不执行 migration。 |
 | records-on/delete-off | admin 默认调用 `ConvergeAppACLCurrent`；center/importer 默认调用 `AdmitAppACLCurrentRuntime`；禁止 product fallback 到 frozen R1、R2 或 `migrate.Apply`。 |
+| embedded root set 追加 `0052+`，数据库仍为 exact R1 manifest/ledger | frozen `AdmitAppACLRuntime` 只验证已固定的 `0001...0051` prefix 并成功；新增 current source 不得改变 R1 admission 结果。 |
+| frozen R1 prefix 缺失、顺序变化或 SQL bytes 漂移 | `AdmitAppACLRuntime` 在 `BeginTx` 前 fail closed；不得退化为完整 embedded set 或跳过 checksum contract。 |
 | embedded post-`0051` migration 缺 fragment，或 fragment extra/duplicate/invalid | transaction 前拒绝；`BeginTx` 调用次数为 0。 |
 | fragment privilege callback 有状态，或 callback 返回的 captured slice 在 source compile 后被修改 | callback 调用次数固定为 1；catalog/manifest 使用 source compile 时深拷贝的 template，后续状态不能改变合同。 |
 | fresh：无 ledger/manifest/managed object | apply exact current set、DCL/catalog verify、一个 genesis，全 transaction atomic。 |
@@ -157,14 +354,16 @@
 #### 5. Good / Base / Bad Cases
 
 - Good：两个 flag 都关闭时保留 legacy migration；records-on/delete-off 时 direct migrator fresh converge exact current，direct runtime 在 repository 打开前通过 current one-snapshot admission。
-- Base：当前 embedded set 仍是冻结 52-source r1 prefix、fragment registry 为空；fresh convergence 写入一个 current genesis，exact repeat 和 direct runtime admission 均不改 durable state。
-- Good：未来 child 同 PR 添加 `0052+` SQL 与 exact fragment；compiler 在 transaction 前证明一一覆盖，fresh database 自动消费新 source 与 catalog contract。
+- Base：当前 embedded set 是冻结 52-source r1 prefix 加 `0052_create_records_core.sql`，fragment registry 恰有一个 exact `0052` fragment；fresh convergence 写入一个 current genesis，exact repeat 和 direct runtime admission均不改 durable state。
+- Good：未来 child 同 PR 添加 `0053+` SQL 与 exact fragment；compiler 在 transaction 前证明一一覆盖，fresh database 自动消费新 source 与 catalog contract。
+- Good：binary 已嵌入 `0052+`，strict R2 PostgreSQL anchor 中的 R1 fixture 仍可调用 frozen `AdmitAppACLRuntime`；admission 只消费 validated R1 prefix，而 current admission 独立消费完整 current set。
 - Good：fragment callback 在 source compile 返回 privilege slice 后，调用方修改 captured slice 或 callback 自身状态；current catalog 仍使用首次物化的深拷贝结果，callback 不会再次执行。
 - Good：第三方 schema 及其第三方 owner 的 default ACL 可以保留而不扩张 APP role，所以 scoped admission 接受它们。
 - Good：第三方 schema 可以拥有 `monitoring_instances` 或 `record_platform_cas_contract_activation_projection(bytea)` 同名对象；current path 只检查 compiled schema/identity tuple，fresh convergence 与 runtime admission 仍成功。
 - Bad：把 old checksum、null head 或 successor revision 当作 generic error，CLI 会丢失唯一安全可操作的 rebuild cause；只测 migration 数量变化不能覆盖该状态矩阵。
 - Bad：对任一 projector 给 runtime/admin grant、把通用 `REVOKE EXECUTE ON ALL FUNCTIONS` 当作 PG16 `pgcrypto` hardening evidence，或按 extension-member name 过滤，都会创建 callable privilege 或隐藏 non-extension drift。
 - Bad：分开开启 manifest/catalog transaction、以 member login 后 `SET ROLE`、product route 调用 frozen R1/R2 或 `migrate.Apply`、admission failure warning-only，都会破坏 exact-current boundary。
+- Bad：frozen `AdmitAppACLRuntime` 的 verifier closure 直接捕获 `migrations.FS` 并调用 full-set verifier；第一次追加 current migration 后，exact R1 manifest 会被误报为 `latest app ACL manifest migration set does not match embedded migrations`。
 - Bad：source preflight 调用一次 `Privileges(validationDatabase)`，catalog compile 又调用一次 `Privileges(actualDatabase)`；stateful callback 或 captured slice 可以让事务前验证与实际 privilege contract 不一致。
 
 #### 6. Tests Required
@@ -186,7 +385,7 @@
   ```
 
   断言 fresh + direct runtime、exact repeat 的 ledger `name/checksum/applied_at` 与其余 durable snapshot 深相等、unrelated schema 中同名 relation/function 被接受、injected future source 对 prior baseline 返回 rebuild sentinel 且前后 snapshot 深相等；wrapper 输出不得含 `SKIP`。
-- Frozen regression：完整 migrate package run 必须保留 `ConvergeAppACLR1` null-head adoption、`AdmitAppACLRuntime` one-snapshot，以及 isolated R2 bootstrap/finalize/runtime suites；current product caller 不得路由到它们。
+- Frozen regression：完整 migrate package run 必须保留 `ConvergeAppACLR1` null-head adoption、`AdmitAppACLRuntime` one-snapshot，以及 isolated R2 bootstrap/finalize/runtime suites；current product caller 不得路由到它们。strict `TestPostgresIntegrationAppACLR2` 的 R1 reader/runtime subtest 必须在 binary 已嵌入 `0052+` 时实际调用 `AdmitAppACLRuntime` 并通过，不能只测 injected verifier 或 zero-test compile。
 - Full gate 与 static writer audit：
 
   ```bash
@@ -242,6 +441,18 @@ _ = migrate.Apply(ctx, db)
 if err := migrate.AdmitAppACLCurrentRuntime(ctx, db); err != nil {
 	return fmt.Errorf("admit app runtime: %w", err)
 }
+```
+
+```go
+// 错误：冻结 R1 admission 读取会增长的完整 embedded set。
+return verifyAppACLManifestRuntimeSnapshotV1(snapshot, migrations.FS)
+
+// 正确：先验证并截取 exact frozen prefix，再复用已 canonicalize 的 set。
+frozenSources, err := snapshotAppACLR1MigrationSources(migrations.FS)
+if err != nil {
+	return err
+}
+return verifyAppACLManifestRuntimeSnapshotWithMigrationSetV1(snapshot, frozenSources.canonicalSet)
 ```
 
 ```go
@@ -514,6 +725,125 @@ logger.Error("record outbox pass failed", "error", err)
 
 // 正确：日志不携带任意 dependency error 文本。
 logger.Error("record outbox pass failed")
+```
+
+---
+
+### Scenario: Records permanent deletion、core purge 与连续 recovery
+
+#### 1. Scope / Trigger
+
+- Trigger：修改 `internal/center/recorddeletion/`、`internal/center/store/record_deletions*.go`、`record_deletion_recovery*.go`、`0052_create_records_core.sql` 的删除投影/恢复字段，或后续 Records child 注册新的 permanent-delete adapter 时。
+- 本场景建立在上一节的 reservation、fence、opaque token、owner lease 与 admission primitive 之上；它拥有 Records 删除编排、core 在线清除和 ledger replay recovery，但不拥有独立 deletion ledger/witness 服务或后续 attachment/evidence/search/activity/collaboration/portability 的内容表。
+
+#### 2. Signatures
+
+```go
+func NewRegistry([]Adapter) (Registry, error)
+func (Registry) RequireReady(context.Context) (ReadinessSnapshot, error)
+func NewService(recordplatform.DeploymentID, Registry,
+    DeletionRecordSnapshotSource, DeletionWitnessSource,
+    DeletionPreviewRepository, ServiceOptions) (*Service, error)
+func NewDeletionWorker(DeletionWorkerRepository, DeletionLedger,
+    DeletionEntryWitness, DeletionOnlinePurger,
+    DeletionWorkerOptions) *DeletionWorker
+func NewCoreAdapter(RecordCoreStore) (*CoreAdapter, error)
+func NewRecoveryAdapter(RecoveryStore) (*RecoveryAdapter, error)
+
+func NewPostgresRecordDeletionRepository(
+    *pgxpool.Pool, AdmissionGate,
+) *PostgresRecordDeletionRepository
+```
+
+- Production readiness 的 adapter 名称闭合集固定为 `record_core|record_attachments|record_evidence|record_markdown_client|record_search|record_activity_projection|record_comparison|record_collaboration|record_portability`，顺序同时参与 readiness/preview digest。
+- `record_purge_operations` 只是可重建应用投影；primary ledger + full witness 才能证明 delete commit、`attempt_not_committed` 或 operation 不存在。
+
+#### 3. Contracts
+
+- Preview 在任何 reservation/operation 写入前要求九个 adapter 全部注册且 health proof 有效，并重新授权 current record。它绑定 actor scope、record/current revision、lock/auth/content-delivery epoch、dependency/backup/processor inventory、adapter readiness/preview 和 witness head；任一未知、缺失或漂移都 fail closed。
+- Execute 只接受同一 preview 的 opaque token commitment/request fingerprint，重新授权并重新计算全部 binding 后才建立 provisional fence。相同 token/fingerprint replay 返回同一 operation；token 复用到不同 binding 是只读 conflict。
+- delete worker 的 durable 顺序固定为 provisional fence -> append/resolve delete commit -> witness -> permanent fence -> propagate/read fence -> online purge -> content-free receipt。ledger append/outcome 不确定时持续保留 fence，不能猜测成功或补偿释放。
+- 只有 sealed ledger absence proof 才能追加 `attempt_not_committed`；该 outcome 经 witness durable 后，才能以单调 `release_epoch` 释放 provisional reservation/fence。旧 owner/generation/observed-expiry 不能完成、释放或复活新 owner 的 operation。
+- `record_core` 只拥有 `records`、revisions/subjects/tags/participants、drafts/checkpoints、`record_domain_activities`、`record_core_purge_receipts` 与该对象的 `content_delivery_epochs`。它在一个 transaction 内清除 current projection 与 exact surfaces、写无正文 receipt，并在 commit 前后验证 absence；不得宣称后续 child 的内容表已清除。
+- Recovery 按 ledger sequence/hash 连续 replay，绑定 previous hash、witness proof、request fingerprint bytes、entry-type 对应的固定 surface allowlist 与 surface digest。delete commit replay 原子重建 terminal projection并清除 core；`attempt_not_committed` replay只建立/修正 terminal projection并释放 fence，不得 purge content。
+- recovery 必须覆盖 existing operation、preview-only reservation 和无本地 projection 三种 cut point；重复同一 entry 幂等，identity/cursor/receipt/audit/fence 任一分歧都保持 fail closed，不推进 cursor。
+- existing operation 从 `fenced` 进入 recovery terminal state 时，只能失效该 projection 读取到的 exact deletion-fence owner tuple（owner ID、generation、observed expiry）。已终态 operation、preview-only reservation、synthetic projection 和幂等 replay 不得按对象释放 fence；verification 也不得要求对象全局不存在 active fence。另一个较新 operation 的 fence 必须原样保留并继续阻止内容读取。
+- 所有 PostgreSQL mutation 先执行 injected `AdmissionGate`，nil/error gate 产生 0 write。operation status 本地 row 缺失且 ledger+witness fallback 尚未证明不存在时返回 unavailable，不能伪装成 not-found 或完成。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 预期行为 |
+| --- | --- |
+| adapter 缺失/重复/额外、surface 重复、health error/unknown/unhealthy | `ErrDeletionSafetyUnavailable`；0 preview reservation、0 ledger mutation。 |
+| preview 后授权、record CAS、dependency/inventory、adapter digest 或 witness head 漂移 | stale/conflict；不建立 provisional fence。 |
+| delete append/resolve 或 outcome append 结果未知 | operation 保持 `ledger_commit_unknown` / `release_pending` 且 fence 保留；等待 authoritative resolution。 |
+| delete commit 已 witness，purge/fence propagation/receipt 失败 | `retry_required` 记录 exact retry stage；不得回退为未删除或释放 fence。 |
+| sealed absence 未证明或 `attempt_not_committed` 未 witness | 不释放 reservation/fence、不恢复普通读写。 |
+| core receipt 含正文、identity 漂移、surface/receipt digest 不符或仍有 owned row | rollback/verification error；operation 不得进入 `online_purged`。 |
+| recovery cursor 不连续、previous hash/witness/fingerprint/surface digest 不符 | `ErrRecoveryContractUnavailable`；0 content/projection/cursor change。 |
+| recovery 要释放的 exact owner tuple 已被续租、替换或不存在 | `ErrRecoveryContractUnavailable`；transaction rollback，不得触碰当前 fence。 |
+| terminal/idempotent replay 时对象存在另一个 active fence | replay 按自身 receipt/audit/cursor 合同成功；另一个 fence 的 owner/generation/expiry 完全不变。 |
+| status projection missing 且无 authoritative fallback | `ErrDeletionStatusUnavailable`，由 HTTP 映射为 opaque 503。 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：delete commit 已 witness，worker 先永久 fence，再逐 adapter purge/verify；core receipt 不含 record/revision ID 或任何业务内容，最终 operation 为 `online_purged`。
+- Good：ledger 明确证明 delete 未提交，worker 追加并见证 `attempt_not_committed` 后释放 provisional fence；record 内容完全保留，同 token replay 仍返回同一 `not_committed` operation。
+- Base：当前 production 只注册 core adapter；即使所有 core 表为空，readiness 仍为 false，preview 不签发 token。
+- Base：应用投影丢失后 recovery 从连续 ledger cursor 重建 terminal projection；重复 replay 不重复 receipt/audit，也不跳过未知 entry。
+- Good：operation A 已终态后 operation B 建立新 fence；A 的幂等或延迟 replay 不更新 B 的 fence，B 继续让 Records read 返回 reserved。
+- Bad：以“后续表当前为空”省略 adapter，收到 ledger timeout 就释放 fence，或仅凭 `record_purge_operations` 无 row 返回 404；这些都会把未知状态误当作安全结论。
+- Bad：recovery 以 `(project, kind, object)` 无条件 expire fence，或在幂等验证中要求 active fence count 为零；前者会破坏较新 operation，后者会让合法旧 entry replay 永久卡住。
+
+#### 6. Tests Required
+
+```bash
+go test -race ./internal/center/recorddeletion ./internal/center/store \
+  -run 'Deletion|Purge|Recovery|Reservation' -count=10
+
+scripts/test-record-platform-integration.sh postgres -- \
+  go test ./internal/center/store \
+  -run '^TestPostgresIntegrationRecord(Platform|Deletion)' -count=1
+```
+
+- Registry/service tests必须覆盖 exact nine-adapter readiness、preview reauthorization/CAS/digest drift、same-key replay/reuse、unknown ledger outcome、witness pending 和 sealed-absence-only release。
+- Worker/store tests必须覆盖每个 durable cut point、stale owner、permanent fence、retry stage、content-free receipt、core exact ownership 和 purge rollback。
+- Recovery PostgreSQL tests必须覆盖 existing operation、preview-only reservation、synthetic terminal projection、delete/not-committed replay、连续 cursor、幂等重放、较新/无关 active fence 的 exact tuple 保留，以及 receipt failure 全事务回滚；runner 中任何 `SKIP` 都不能作为验收证据。
+
+#### 7. Wrong vs Correct
+
+```go
+// 错误：本地没有 operation row 就把不可证明状态当成权威不存在。
+if errors.Is(err, pgx.ErrNoRows) {
+	return ErrDeletionOperationNotFound
+}
+
+// 正确：ledger + full witness 未证明不存在时保持 unavailable。
+if errors.Is(err, pgx.ErrNoRows) {
+	return ErrDeletionStatusUnavailable
+}
+```
+
+```go
+// 错误：只注册当前已有数据的 core adapter，就开放不可逆删除。
+registry, _ := NewRegistry([]Adapter{core})
+_ = startPermanentDelete(registry)
+
+// 正确：完整闭合集和每个 health proof 都通过后才允许 preview/execute。
+snapshot, err := registry.RequireReady(ctx)
+if err != nil || !snapshot.Ready() {
+	return ErrDeletionSafetyUnavailable
+}
+```
+
+```sql
+-- 错误：按对象释放，可能命中另一个 operation 的新 fence。
+update public.deletion_fence_leases
+set expires_at = transaction_timestamp()
+where project_id = $1 and object_kind = $2 and object_id = $3;
+
+-- 正确：仅当原 recovery projection 仍是 fenced 时，绑定它读取到的
+-- owner_id、owner_generation 与 exact expires_at；terminal replay 不执行该 SQL。
 ```
 
 ---

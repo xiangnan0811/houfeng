@@ -57,6 +57,20 @@ func verifyAppACLManifestRuntimeSnapshotV1(
 	if embeddedMigrations == nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("embedded migration filesystem is nil")
 	}
+	embeddedMigrationSet, err := CanonicalMigrationSetFromFS(embeddedMigrations)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("build embedded application migration set: %w", err)
+	}
+	return verifyAppACLManifestRuntimeSnapshotWithMigrationSetV1(snapshot, embeddedMigrationSet)
+}
+
+func verifyAppACLManifestRuntimeSnapshotWithMigrationSetV1(
+	snapshot AppACLManifestRuntimeSnapshotV1,
+	embeddedMigrationSet []byte,
+) (AppACLManifestPersistedV1, error) {
+	if len(embeddedMigrationSet) == 0 {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("embedded migration set is empty")
+	}
 	envelope, err := validateAppACLManifestRuntimeEnvelope(snapshot)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, err
@@ -70,10 +84,6 @@ func verifyAppACLManifestRuntimeSnapshotV1(
 	}
 	if err := validateAppACLManifestRuntimeRoles(snapshot, envelope); err != nil {
 		return AppACLManifestPersistedV1{}, err
-	}
-	embeddedMigrationSet, err := CanonicalMigrationSetFromFS(embeddedMigrations)
-	if err != nil {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("build embedded application migration set: %w", err)
 	}
 	if !bytes.Equal(envelope.Latest.CanonicalMigrationSet, embeddedMigrationSet) {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("latest app ACL manifest migration set does not match embedded migrations")

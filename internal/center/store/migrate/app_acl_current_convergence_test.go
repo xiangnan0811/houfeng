@@ -407,7 +407,7 @@ func TestConvergeAppACLCurrentFreshUsesSerializableTransaction(t *testing.T) {
 }
 
 func TestConvergeAppACLR1RetainsNullHeadAdoption(t *testing.T) {
-	sources, err := snapshotMigrationSources(migrations.FS)
+	sources, err := snapshotAppACLR1MigrationSources(migrations.FS)
 	if err != nil {
 		t.Fatal(err)
 	}

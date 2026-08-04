@@ -297,7 +297,7 @@ func TestConvergeAppACLR1WithDependenciesRejectsNonR1SourceSetBeforeBeginningTra
 }
 
 func TestConvergeAppACLR1WithDependenciesAcceptsExactR1SourceSetAtTransactionBoundary(t *testing.T) {
-	sources, err := snapshotMigrationSources(migrations.FS)
+	sources, err := snapshotAppACLR1MigrationSources(migrations.FS)
 	if err != nil {
 		t.Fatalf("snapshotMigrationSources() error = %v", err)
 	}
@@ -572,7 +572,7 @@ func TestAppACLConvergenceDCLStatementsForContractRevokesCurrentSurfaceAndGrants
 
 func TestConvergeAppACLR1WithDependenciesRetriesWholeSerializableTransaction(t *testing.T) {
 	_, runtimeSnapshot, compiledPrivileges := validAppACLManifestRuntimeFixture(t)
-	sources, err := snapshotMigrationSources(migrations.FS)
+	sources, err := snapshotAppACLR1MigrationSources(migrations.FS)
 	if err != nil {
 		t.Fatalf("snapshotMigrationSources() error = %v", err)
 	}
@@ -738,7 +738,7 @@ func TestConvergeAppACLR1WithDependenciesRetriesWholeSerializableTransaction(t *
 
 func TestConvergeAppACLR1InTxRejectsPhaseHeadChangeAfterLedgerProof(t *testing.T) {
 	_, _, compiledPrivileges := validAppACLManifestRuntimeFixture(t)
-	sources, err := snapshotMigrationSources(migrations.FS)
+	sources, err := snapshotAppACLR1MigrationSources(migrations.FS)
 	if err != nil {
 		t.Fatalf("snapshotMigrationSources() error = %v", err)
 	}
@@ -1045,7 +1045,7 @@ func TestConvergeAppACLR1InTxRejectsFreshPhaseHeadChangeBeforeDCL(t *testing.T) 
 
 func TestConvergeAppACLR1InTxAdoptsNullHeadAfterLedgerProof(t *testing.T) {
 	_, _, compiledPrivileges := validAppACLManifestRuntimeFixture(t)
-	sources, err := snapshotMigrationSources(migrations.FS)
+	sources, err := snapshotAppACLR1MigrationSources(migrations.FS)
 	if err != nil {
 		t.Fatalf("snapshotMigrationSources() error = %v", err)
 	}

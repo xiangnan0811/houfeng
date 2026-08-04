@@ -22,6 +22,7 @@ import (
 	incidentservice "houfeng/internal/center/incidents"
 	"houfeng/internal/center/installer"
 	"houfeng/internal/center/notify"
+	centerrecords "houfeng/internal/center/records"
 	"houfeng/internal/center/retention"
 	"houfeng/internal/center/runtimefacts"
 	centersettings "houfeng/internal/center/settings"
@@ -167,6 +168,22 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	authMiddleware := func(next http.Handler) http.Handler {
 		return centerhttp.RequireSameOrigin(cfg.PublicBaseURL)(centerhttp.RequireSession(authSvc, scopeRepo)(next))
 	}
+	recordsEnabled := cfg.RecordPlatformMode == config.RecordPlatformModeRuntimeAdmission
+	var recordsHandler http.Handler
+	var recordDraftsHandler http.Handler
+	var recordDeletionsHandler http.Handler
+	if recordsEnabled {
+		recordsHandler, recordDraftsHandler, recordDeletionsHandler, err = newRecordsHTTPHandlers(
+			db.Pool(),
+			vpsAssetRepo,
+			monitoringInstanceRepo,
+			targetRepo,
+		)
+		if err != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("create records handlers: %w", err)
+		}
+	}
 
 	router := deps.newRouter(centerhttp.RouterOptions{
 		Version:                                     version,
@@ -176,6 +193,10 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		CommandAuditsHandler:                        handlers.CommandAudits(commandAuditRepo),
 		IncidentsHandler:                            handlers.Incidents(incidentRepo),
 		SettingsHandler:                             handlers.Settings(settingsHandlerRepo),
+		RecordsEnabled:                              recordsEnabled,
+		RecordsHandler:                              recordsHandler,
+		RecordDraftsHandler:                         recordDraftsHandler,
+		RecordDeletionsHandler:                      recordDeletionsHandler,
 		AssetDomainsCollectionHandler:               handlers.AssetDomainsCollection(assetDomainRepo),
 		AssetServicesCollectionHandler:              handlers.AssetServicesCollection(assetServiceRepo),
 		AssetDecisionOverviewHandler:                handlers.AssetDecisionOverview(assetDecisionRepo),
@@ -260,6 +281,69 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	router = centerhttp.RequireAllowedHost(cfg.PublicBaseURL)(router)
 
 	return deps.newApp(cfg.HTTPAddr, router, incidentSvc, retentionWorker, sessionCleanup, exchangeRateWorker, subscriptionReminderWorker), db.Close, nil
+}
+
+func newRecordsHTTPHandlers(
+	pool *pgxpool.Pool,
+	vpsRepository *store.PostgresVPSAssetRepository,
+	monitoringInstanceRepository *store.PostgresMonitoringInstanceRepository,
+	targetRepository *store.PostgresTargetRepository,
+) (http.Handler, http.Handler, http.Handler, error) {
+	subjects, err := centerrecords.NewSubjectAdapterRegistry([]centerrecords.SubjectSourceAdapter{
+		store.NewVPSRecordSubjectAdapter(vpsRepository),
+		store.NewMonitoringInstanceRecordSubjectAdapter(monitoringInstanceRepository),
+		store.NewTargetRecordSubjectAdapter(targetRepository),
+	})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("create record subject registry: %w", err)
+	}
+	subjectResolver := store.NewRecordSubjectReadResolver(subjects, nil)
+	authorizations := store.NewPostgresCurrentRecordAuthorizationSource(pool, subjectResolver, nil)
+
+	// Task 10 owns the concrete production transaction admission gate. Keeping
+	// it nil here registers the transport contract while every store operation
+	// remains fail closed with ErrRecordPlatformAdmissionUnavailable.
+	recordRepository, err := store.NewPostgresRecordRepository(pool, nil, nil)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("create record repository: %w", err)
+	}
+	draftRepository := store.NewPostgresRecordDraftRepository(pool, nil)
+
+	readService, err := centerrecords.NewRecordReadService(authorizations, authorizations, recordRepository)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("create record read service: %w", err)
+	}
+	revisionService, err := centerrecords.NewRevisionService(subjects, authorizations, recordRepository)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("create record revision service: %w", err)
+	}
+	lifecycleService, err := centerrecords.NewRecordLifecycleService(authorizations, recordRepository)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("create record lifecycle service: %w", err)
+	}
+	draftService, err := centerrecords.NewDraftService(draftRepository, authorizations)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("create record draft service: %w", err)
+	}
+	application, err := centerrecords.NewApplication(
+		readService,
+		revisionService,
+		lifecycleService,
+		draftService,
+		centerrecords.ApplicationOptions{
+			IdempotencyOwnerID: "records_api",
+			OwnerLeaseDuration: time.Minute,
+			IdempotencyTTL:     24 * time.Hour,
+			OutboxTTL:          24 * time.Hour,
+		},
+	)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("create records application: %w", err)
+	}
+	// Later Records children own the remaining deletion adapters and the
+	// independent ledger/witness clients. Until all of them are wired and
+	// healthy, the production deletion transport remains explicitly closed.
+	return handlers.Records(application), handlers.RecordDrafts(application), handlers.RecordDeletions(nil), nil
 }
 
 func (d bootstrapDeps) withDefaults() bootstrapDeps {

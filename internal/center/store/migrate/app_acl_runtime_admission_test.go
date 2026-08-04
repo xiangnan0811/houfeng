@@ -20,7 +20,6 @@ func TestAppACLRuntimeAdmissionUsesOneRepeatableReadOnlySnapshot(t *testing.T) {
 	var readTransactions []pgx.Tx
 
 	err := admitAppACLRuntimeWithDependencies(context.Background(), appACLRuntimeAdmissionDependencies{
-		embeddedMigrations: embeddedMigrations,
 		beginTx: func(_ context.Context, options pgx.TxOptions) (pgx.Tx, error) {
 			beginOptions = append(beginOptions, options)
 			return tx, nil
@@ -68,7 +67,6 @@ func TestAppACLRuntimeAdmissionRejectsLedgerDriftBeforeCatalogRead(t *testing.T)
 	catalogRead := false
 
 	err := admitAppACLRuntimeWithDependencies(context.Background(), appACLRuntimeAdmissionDependencies{
-		embeddedMigrations: embeddedMigrations,
 		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
 			return tx, nil
 		},
@@ -105,7 +103,6 @@ func TestAppACLRuntimeAdmissionRejectsSetRoleIdentityBeforeCatalogRead(t *testin
 	catalogRead := false
 
 	err := admitAppACLRuntimeWithDependencies(context.Background(), appACLRuntimeAdmissionDependencies{
-		embeddedMigrations: embeddedMigrations,
 		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
 			return tx, nil
 		},
@@ -148,7 +145,6 @@ func TestAppACLRuntimeAdmissionRejectsProjectorExecuteCatalogDrift(t *testing.T)
 	tx := &fakeAppACLRuntimeAdmissionTx{}
 
 	err := admitAppACLRuntimeWithDependencies(context.Background(), appACLRuntimeAdmissionDependencies{
-		embeddedMigrations: embeddedMigrations,
 		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
 			return tx, nil
 		},

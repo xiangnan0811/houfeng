@@ -6,7 +6,7 @@
 
 ### 1. Scope / Trigger
 
-- Trigger：新增或修改 records 的身份派生、group 查询、visibility/source evidence、资源读写授权，或接入 records API、store、worker。
+- Trigger：新增或修改 records 的身份派生、group 查询、visibility/source evidence、`internal/center/records` revision/subject 输入、资源读写授权，或接入 records API、store、worker。
 - `internal/center/recordauth` 是唯一的 v1 授权模型和 `Policy`，只能导入 Go 标准库；不得反向依赖 `auth`、HTTP、`store`、数据库驱动或未来业务包。
 - 本切片只落地可信 session seam、只读 group repository 和可复用 policy；**尚无** records endpoint 或当前 deletion adapter。后续 API/store/worker 必须复用本 policy，不能各自重述 visibility；将 `recordauth.ErrDenied` 转换为不暴露资源存在性的 opaque 404。
 
@@ -25,6 +25,9 @@ func NormalizeVisibilityScope(VisibilityScope) (VisibilityScope, error)
 func NormalizeSourceAuthorization(SourceAuthorization) (SourceAuthorization, error)
 func (Policy) Authorize(ActorScope, Capability, ResourceScope) error
 func Authorize(ActorScope, Capability, ResourceScope) error
+
+func records.NormalizeCompleteRevisionInput(records.CompleteRevisionValues) (records.CompleteRevisionInput, error)
+func records.AuthorizeRecordResource(ActorScope, Capability, records.RecordAuthorizationEvidence) error
 ```
 
 - `sessionctx.WithActorScope` / `ActorScopeFromContext` 存取 typed actor 的防御性副本；`WithUserID` / `UserIDFromContext` 继续保留旧 user-id context 合同。
@@ -46,6 +49,7 @@ order by g.group_id asc
 - 除服务端验证 session cookie 取得 `auth.User` 外，任何客户端 header、query、body 或其他 cookie 字段都不能决定 project、role、group、visibility、source floor 或 capability；`X-Project-ID`、`X-Role`、`X-Group-ID` 等即使出现也必须无效。成功时同时写 typed actor 与 legacy user ID；没有 optional/nil scope repository 或“空 group 降级”路径。
 - `VisibilityScope` 用固定字段顺序、长度前缀的 canonical bytes 计算 SHA-256；角色/group 规范化为排序去重。`project` 不得携带 grant；空 `restricted` 是 deny-all，绝不等价于 project-wide。Policy 要求输入仍等于 canonical 形态及其 hash，不能信任 JSON、map 或调用方给出的摘要。
 - `SourceAuthorization` 是严格 tagged union：`live` 当且仅当 `CurrentScope != nil` 且 `FinalFloor == nil && LastLiveScope == nil`；`tombstoned` 当且仅当 `CurrentScope == nil` 且 `FinalFloor != nil && LastLiveScope != nil`。tombstone 的 canonical `LastLiveScope` 是 transition witness，不是另一次可跳过的授权范围。
+- `records.NormalizeCompleteRevisionInput` 只能接受服务端 adapter 解析并已经 canonical/digest-checked 的 source authorization，但必须接受完整 `live|tombstoned` 两种 union；不得在 `recordauth.NormalizeSourceAuthorization` 之上再叠加 live-only 条件。来源删除后的新修订继续保存 immutable capture scope，并以 witnessed final floor/last-live evidence 完成授权；live route 必须为空。历史 row 中的 evidence 不得当作 current scope cache，后续保存/读取仍由 adapter 重新解析 live 或 witnessed tombstone。
 - 每个 source 的 capture/current/floor/witness 必须同 project。live 必须满足 `CurrentScope <= CaptureScope`；tombstone 必须满足 `LastLiveScope <= CaptureScope` 且 `FinalFloor <= LastLiveScope`。source digest 覆盖 kind、ID、state、capture 以及 live current 或 tombstone floor + witness，因此不得跨 source/state/transition 重放。
 - `Policy.Authorize` 依次验证 actor、capability、canonical resource、project 相等、role-capability、resource visibility、每个 source 的 capture，及每个 live `CurrentScope` 或 tombstone `FinalFloor`。`project_admin` 拥有全部**已知** capability，但没有资源 scope、跨项目、union 完整性或 digest 的 bypass；所有交集都必须允许才可放行。
 
@@ -60,6 +64,8 @@ order by g.group_id asc
 | 未知 role、capability、project、visibility/source kind/state/version、malformed ID、非 canonical scope/hash，或 resource 无 source | `Policy` 返回满足 `errors.Is(err, ErrDenied)` 的资源无关拒绝 reason。 |
 | actor 与 resource project 不同，viewer 不具备 capability，或任一 visibility/capture/current/final floor 不允许 actor | `ErrDenied`；不可因 project admin 身份绕过 restricted scope。 |
 | `restricted` 无 role/group grant，live/tombstone union 混用/缺字段，live widening，`LastLiveScope > CaptureScope`，或 `FinalFloor > LastLiveScope` | 拒绝；特别禁止 `capture=project → last live=restricted → final floor=project` 重新放宽。 |
+| revision 输入携带 canonical witnessed tombstone，kind/source/project/digest 都匹配 | 接受并保留完整 tombstoned union；不得因 `State != live` 拒绝。 |
+| revision 输入携带 adapter 未规范化、digest 漂移、live route 非空的 tombstone，或缺 floor/last-live witness | `ErrInvalidRevisionInput` / `ErrInvalidResolvedSubject`；正式保存前 fail closed。 |
 | visibility hash、source digest 或 tombstone witness 被篡改/漂移 | 拒绝且错误中不得包含资源 ID、正文、scope grant 或 source ID。 |
 | 未来 records HTTP 调用者收到 `ErrDenied` | 返回与不存在资源相同的 opaque 404；内部可通过 `DenialReasonFromError` 记录无资源细节的分类。 |
 
@@ -67,6 +73,7 @@ order by g.group_id asc
 
 - Good：已认证的 `auth.RoleAdmin` 在 `default` project 查询到 `rag_beta, rag_alpha, rag_beta`；context 中得到 `RoleProjectAdmin` 与排序去重后的 `rag_alpha, rag_beta`，legacy user ID 仍可被旧 handler 读取。
 - Good：viewer 对 record read 的 role/group grant 同时通过 resource、capture 和 live/final floor，或显式获授 `project_admin` role 的 restricted scope，才由 policy 放行。
+- Good：来源已删除但 full witness 给出 canonical final floor/last-live scope；adapter 返回空 route，revision normalization 与统一 policy 都接受该 tombstoned evidence，同时继续应用 capture/floor 交集。
 - Base：用户没有任何 group membership 时仍创建合法 typed actor（空 group）；它只能依靠 role/project visibility，不可由客户端补 group。空 `restricted` 对所有 actor 仍为 deny-all。
 - Bad：从 `X-Role` / `X-Group-ID` 构造 actor，查询 group 显示字段，或 repository 故障时把 groups 当作空数组继续执行。
 - Bad：仅因 project admin 直接放行，或 tombstone 删除后把 final floor 放宽为 capture project；两者都会绕过强制交集/单调性证据。
@@ -78,12 +85,14 @@ order by g.group_id asc
 - `internal/center/store/record_auth_test.go`：精确 SQL（仅两张 ACL 表及 `group_id`）、`default`/user 参数、排序结果、query/scan/rows 错误和非法 DB group ID 全部 fail closed。
 - `internal/center/http/middleware_test.go`、`internal/center/http/auth_e2e_test.go`：typed actor + legacy user context、伪造 headers 无效、缺失/过期 session 为 401、scope repository/非法 persisted group 为不泄露的 503。
 - `cmd/houfeng-center/bootstrap_test.go`：APP runtime pool 构造 `NewPostgresRecordAuthorizationRepository` 并以两个参数调用 `RequireSession`，没有 nil/旧一参数 fallback。
+- `internal/center/records/validation_test.go`、`authorization_test.go`：revision input 同时覆盖 canonical live 与 witnessed tombstoned union、digest 篡改、缺 floor/witness、live widening、删除 route 为空和多来源交集。
 
 ```sh
 go test ./internal/center/recordauth -run RecordAuth -count=1
 go test ./internal/center/store -run RecordAuth -count=1
 go test ./internal/center/http -run 'SessionScope|RequireSession' -count=1
 go test ./cmd/houfeng-center -run 'Bootstrap|Router' -count=1
+go test -race ./internal/center/records -run 'Revision|Subject|Authorization|Tombstone' -count=10
 git diff --check
 ```
 
@@ -99,6 +108,11 @@ actor := recordauth.ActorScope{
 }
 if actor.Role == recordauth.RoleProjectAdmin {
 	return nil
+}
+
+// records revision normalization：错误地覆盖 recordauth 的合法 tombstone union。
+if authorization.State != recordauth.SourceStateLive {
+	return records.ErrInvalidRevisionInput
 }
 ```
 
@@ -118,5 +132,12 @@ if err != nil { writeAuthorizationUnavailable(w); return }
 if err := (recordauth.Policy{}).Authorize(actor, recordauth.CapabilityRecordRead, resource); err != nil {
 	if errors.Is(err, recordauth.ErrDenied) { writeNotFound(w); return }
 	return err
+}
+
+// records revision normalization：唯一 normalizer 已验证 strict union 与 digest；
+// records 层只再核对 subject kind/source identity，不增加 live-only 分支。
+authorization, err := recordauth.NormalizeSourceAuthorization(input.CaptureAuthorization)
+if err != nil || authorization.Digest != input.CaptureAuthorization.Digest {
+	return records.ErrInvalidRevisionInput
 }
 ```

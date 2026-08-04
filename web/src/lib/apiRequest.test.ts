@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   ApiError,
+  jsonBodyInit,
   postJSON,
   postJSONBody,
   requestEmpty,
   requestJSON,
   setUnauthorizedHandler,
+  withQuery,
 } from './apiRequest'
+import allowlistedApiError from './apiError'
 
 afterEach(() => {
   setUnauthorizedHandler(undefined)
@@ -15,6 +18,34 @@ afterEach(() => {
 })
 
 describe('API request transport', () => {
+  it('builds JSON request init with shared and caller-owned headers', () => {
+    expect(jsonBodyInit('PATCH', { name: 'candidate' }, {
+      'If-Match': 'draft-etag',
+    })).toEqual({
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'If-Match': 'draft-etag',
+      },
+      body: JSON.stringify({ name: 'candidate' }),
+    })
+  })
+
+  it('normalizes shared query values without changing insertion order', () => {
+    expect(withQuery('/api/example', {
+      q: '  record title  ',
+      lifecycle: undefined,
+      include_archived: false,
+      include_related: true,
+      limit: 0,
+      cursor: '   ',
+      owner_id: null,
+    })).toBe('/api/example?q=record+title&include_related=true&limit=0')
+    expect(withQuery('/api/example')).toBe('/api/example')
+    expect(withQuery('/api/example', {})).toBe('/api/example')
+  })
+
   it('uses the shared JSON, cache and credential defaults', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
@@ -93,6 +124,70 @@ describe('API request transport', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 400 }))
 
     await expect(requestJSON('/api/failure')).rejects.toMatchObject({ message: body })
+  })
+
+  it('keeps structured error metadata opt-in and allowlists it through a decoder', async () => {
+    const recovery = {
+      server_revision_id: 'rrv_server',
+      server_lock_version: 7,
+    }
+    const response = JSON.stringify({
+      code: 'record_revision_conflict',
+      message: 'record revision changed',
+      field_errors: [
+        { field: 'draft_etag', message: 'draft changed' },
+        { field: 42, message: 'ignored' },
+      ],
+      recovery,
+      internal_debug: 'must not escape',
+    })
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(response, { status: 409 }))
+      .mockResolvedValueOnce(new Response(response, { status: 409 }))
+
+    const defaultError = await requestJSON('/api/failure').catch((reason: unknown) => reason)
+    expect(defaultError).toMatchObject({
+      status: 409,
+      message: 'record revision changed',
+      field_errors: [],
+    })
+    expect(defaultError).not.toHaveProperty('code')
+    expect(defaultError).not.toHaveProperty('recovery')
+
+    const error = await requestJSON(
+      '/api/failure',
+      undefined,
+      allowlistedApiError,
+    ).catch((reason: unknown) => reason)
+
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).toMatchObject({
+      status: 409,
+      message: 'record revision changed',
+      code: 'record_revision_conflict',
+      field_errors: [{ field: 'draft_etag', message: 'draft changed' }],
+      recovery,
+    })
+    expect(error).not.toHaveProperty('internal_debug')
+
+    const typed = error as ApiError<typeof recovery>
+    expect(typed.recovery?.server_lock_version).toBe(7)
+  })
+
+  it('ignores malformed structured error metadata', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      code: 409,
+      error: 'legacy message',
+      field_errors: { field: 'title', message: 'invalid' },
+    }), { status: 409 }))
+
+    await expect(requestJSON('/api/failure', undefined, allowlistedApiError)).rejects.toMatchObject({
+      status: 409,
+      message: 'legacy message',
+      code: undefined,
+      field_errors: [],
+      recovery: undefined,
+    })
   })
 
   it('propagates malformed successful JSON instead of inventing a value', async () => {

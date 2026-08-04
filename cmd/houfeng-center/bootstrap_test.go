@@ -18,7 +18,9 @@ import (
 	"houfeng/internal/center/auth"
 	"houfeng/internal/center/config"
 	centerhttp "houfeng/internal/center/http"
+	"houfeng/internal/center/http/sessionctx"
 	incidentservice "houfeng/internal/center/incidents"
+	"houfeng/internal/center/recordauth"
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/targets"
 )
@@ -155,6 +157,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	db := &fakePostgresDB{}
 	applyCalls := 0
 	admitCalls := 0
+	var gotRouterOptions centerhttp.RouterOptions
 
 	app, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
 		openPostgres: func(context.Context, string) (postgresDB, error) {
@@ -174,7 +177,8 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		newSessionRepository: func(*pgxpool.Pool, []byte) (auth.SessionRepository, error) {
 			return fakeSessionRepository{}, nil
 		},
-		newRouter: func(centerhttp.RouterOptions) http.Handler {
+		newRouter: func(options centerhttp.RouterOptions) http.Handler {
+			gotRouterOptions = options
 			return http.NewServeMux()
 		},
 		newApp: func(string, http.Handler, ...centerapp.Worker) appRunner {
@@ -192,6 +196,46 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	}
 	if admitCalls != 1 {
 		t.Fatalf("admitRuntime calls = %d, want 1", admitCalls)
+	}
+	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
+		gotRouterOptions.RecordDraftsHandler == nil || gotRouterOptions.RecordDeletionsHandler == nil {
+		t.Fatalf(
+			"runtime Records router options = enabled:%t records:%v drafts:%v deletions:%v, want enabled and non-nil handlers",
+			gotRouterOptions.RecordsEnabled,
+			gotRouterOptions.RecordsHandler,
+			gotRouterOptions.RecordDraftsHandler,
+			gotRouterOptions.RecordDeletionsHandler,
+		)
+	}
+	if gotRouterOptions.VPSTimelineHandler == nil || gotRouterOptions.VPSExperienceLogsHandler == nil {
+		t.Fatal("runtime admission removed legacy VPS timeline or experience handler")
+	}
+	actor := mustBootstrapRecordsActor(t)
+	for _, handlerCase := range []struct {
+		name     string
+		method   string
+		path     string
+		handler  http.Handler
+		wantCode string
+	}{
+		{name: "records", method: http.MethodGet, path: "/api/records", handler: gotRouterOptions.RecordsHandler, wantCode: "record_service_unavailable"},
+		{name: "drafts", method: http.MethodGet, path: "/api/record-drafts", handler: gotRouterOptions.RecordDraftsHandler, wantCode: "record_service_unavailable"},
+		{name: "deletion preview", method: http.MethodPost, path: "/api/records/rec_httpcontract/permanent-delete-preview", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_safety_unavailable"},
+		{name: "deletion status", method: http.MethodGet, path: "/api/record-deletions/rpo_httpcontract", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_status_unavailable"},
+	} {
+		t.Run(handlerCase.name+" fails closed without transaction admission", func(t *testing.T) {
+			request := httptest.NewRequest(handlerCase.method, handlerCase.path, nil)
+			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+			recorder := httptest.NewRecorder()
+			handlerCase.handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusServiceUnavailable ||
+				!strings.Contains(recorder.Body.String(), `"code":"`+handlerCase.wantCode+`"`) {
+				t.Fatalf("status = %d body=%s, want stable %s 503", recorder.Code, recorder.Body.String(), handlerCase.wantCode)
+			}
+			if strings.Contains(recorder.Body.String(), "drt1_") {
+				t.Fatalf("fail-closed handler returned deletion token: %s", recorder.Body.String())
+			}
+		})
 	}
 	cleanup()
 	if !db.closed {
@@ -356,6 +400,16 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	}
 	if gotOpts.SettingsHandler == nil {
 		t.Fatal("router settings handler = nil, want non-nil")
+	}
+	if gotOpts.RecordsEnabled || gotOpts.RecordsHandler != nil || gotOpts.RecordDraftsHandler != nil ||
+		gotOpts.RecordDeletionsHandler != nil {
+		t.Fatalf(
+			"legacy Records router options = enabled:%t records:%v drafts:%v deletions:%v, want disabled and nil handlers",
+			gotOpts.RecordsEnabled,
+			gotOpts.RecordsHandler,
+			gotOpts.RecordDraftsHandler,
+			gotOpts.RecordDeletionsHandler,
+		)
 	}
 	if gotOpts.AssetDomainsCollectionHandler == nil {
 		t.Fatal("router asset domains collection handler = nil, want non-nil")
@@ -592,6 +646,20 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if !db.closed {
 		t.Fatal("cleanup() did not close DB")
 	}
+}
+
+func mustBootstrapRecordsActor(t *testing.T) recordauth.ActorScope {
+	t.Helper()
+	actor, err := recordauth.NormalizeActorScope(recordauth.ActorScope{
+		UserID:    "usr_0123456789abcdef01234567",
+		Role:      recordauth.RoleProjectAdmin,
+		ProjectID: recordauth.ProjectIDDefault,
+		GroupIDs:  make([]string, 0),
+	})
+	if err != nil {
+		t.Fatalf("NormalizeActorScope() error = %v", err)
+	}
+	return actor
 }
 
 func TestBootstrapDefaultSeedInitialUserUsesConfiguredBcryptCost(t *testing.T) {

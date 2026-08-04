@@ -44,7 +44,7 @@ type frozenAppACLR1VerifyDependencies struct {
 func VerifyFrozenAppACLR1StateInTx(ctx context.Context, tx pgx.Tx) (FrozenAppACLR1StateV1, error) {
 	return verifyFrozenAppACLR1StateInTxWithDependencies(ctx, tx, frozenAppACLR1VerifyDependencies{
 		loadSources: func() (migrationSourceSnapshot, error) {
-			return snapshotMigrationSources(rootmigrations.FS)
+			return snapshotAppACLR1MigrationSources(rootmigrations.FS)
 		},
 		readEvidence:  readFrozenAppACLR1EvidenceInTx,
 		readCatalog:   readFrozenAppACLR1CatalogInTx,

@@ -1262,3 +1262,179 @@ func TestRouterHealthzAndAgentRoutesBypassAuthMiddleware(t *testing.T) {
 		t.Fatal("sync handler not reached")
 	}
 }
+
+func TestRouterKeepsRecordsRoutesAbsentWhenFeatureIsOff(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("spa fallback"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+	recordsCalls := 0
+	draftCalls := 0
+	deletionCalls := 0
+	handler := newTestRouter(centerhttp.RouterOptions{
+		WebDistDir:     dir,
+		RecordsEnabled: false,
+		RecordsHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			recordsCalls++
+		}),
+		RecordDraftsHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			draftCalls++
+		}),
+		RecordDeletionsHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			deletionCalls++
+		}),
+	})
+
+	for _, path := range []string{
+		"/api/records",
+		"/api/records/rec_httpcontract",
+		"/api/record-drafts",
+		"/api/record-drafts/rdf_httpcontract",
+		"/api/records/rec_httpcontract/permanent-delete-preview",
+		"/api/records/rec_httpcontract/permanent-delete",
+		"/api/record-deletions/rpo_httpcontract",
+	} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusNotFound || strings.Contains(recorder.Body.String(), "spa fallback") {
+			t.Fatalf("GET %s status = %d body=%q, want API 404 without SPA fallback", path, recorder.Code, recorder.Body.String())
+		}
+	}
+	if recordsCalls != 0 || draftCalls != 0 || deletionCalls != 0 {
+		t.Fatalf("feature-off handler calls: records=%d drafts=%d deletions=%d, want zero", recordsCalls, draftCalls, deletionCalls)
+	}
+}
+
+func TestRouterProtectsDeletionRoutesAndPrefersActionsOverRecordSubtree(t *testing.T) {
+	t.Parallel()
+
+	recordsCalls := 0
+	deletionPaths := make([]string, 0, 3)
+	middlewareCalls := 0
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		RecordsEnabled: true,
+		RecordsHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			recordsCalls++
+			w.WriteHeader(http.StatusTeapot)
+		}),
+		RecordDeletionsHandler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			deletionPaths = append(deletionPaths, request.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		}),
+		AuthMiddleware: func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				middlewareCalls++
+				next.ServeHTTP(w, request)
+			})
+		},
+	})
+
+	for _, path := range []string{
+		"/api/records/rec_httpcontract/permanent-delete-preview",
+		"/api/records/rec_httpcontract/permanent-delete",
+		"/api/record-deletions/rpo_httpcontract",
+	} {
+		request := httptest.NewRequest(http.MethodPost, path, nil)
+		if strings.HasPrefix(path, "/api/record-deletions/") {
+			request.Method = http.MethodGet
+		}
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusNoContent {
+			t.Fatalf("%s status=%d, want %d", path, recorder.Code, http.StatusNoContent)
+		}
+	}
+	if recordsCalls != 0 {
+		t.Fatalf("generic records handler calls = %d, want zero", recordsCalls)
+	}
+	if middlewareCalls != 3 || len(deletionPaths) != 3 {
+		t.Fatalf("middleware=%d deletion paths=%#v", middlewareCalls, deletionPaths)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/record-deletions/rpo_httpcontract/secret", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("unknown deletion subtree status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestRouterProtectsAndDispatchesEnabledRecordsRoutes(t *testing.T) {
+	recordsPaths := make([]string, 0)
+	draftPaths := make([]string, 0)
+	middlewareCalls := 0
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		RecordsEnabled: true,
+		RecordsHandler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			recordsPaths = append(recordsPaths, request.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		}),
+		RecordDraftsHandler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			draftPaths = append(draftPaths, request.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		}),
+		AuthMiddleware: func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				middlewareCalls++
+				next.ServeHTTP(w, request)
+			})
+		},
+	})
+
+	for _, path := range []string{
+		"/api/records",
+		"/api/records/rec_httpcontract/revisions",
+		"/api/record-drafts",
+		"/api/record-drafts/rdf_httpcontract",
+	} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusNoContent {
+			t.Fatalf("GET %s status = %d, want %d", path, recorder.Code, http.StatusNoContent)
+		}
+	}
+	if middlewareCalls != 4 {
+		t.Fatalf("middleware calls = %d, want 4", middlewareCalls)
+	}
+	if got, want := strings.Join(recordsPaths, ","), "/api/records,/api/records/rec_httpcontract/revisions"; got != want {
+		t.Fatalf("records paths = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(draftPaths, ","), "/api/record-drafts,/api/record-drafts/rdf_httpcontract"; got != want {
+		t.Fatalf("draft paths = %q, want %q", got, want)
+	}
+}
+
+func TestRouterEnabledRecordsRoutesFailClosedWithoutAuthMiddleware(t *testing.T) {
+	innerCalls := 0
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		RecordsEnabled: true,
+		RecordsHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			innerCalls++
+		}),
+		RecordDraftsHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			innerCalls++
+		}),
+		RecordDeletionsHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			innerCalls++
+		}),
+	})
+
+	for _, path := range []string{
+		"/api/records",
+		"/api/record-drafts/rdf_httpcontract",
+		"/api/records/rec_httpcontract/permanent-delete-preview",
+		"/api/record-deletions/rpo_httpcontract",
+	} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusInternalServerError {
+			t.Fatalf("GET %s status = %d, want %d", path, recorder.Code, http.StatusInternalServerError)
+		}
+	}
+	if innerCalls != 0 {
+		t.Fatalf("inner handler calls = %d, want 0", innerCalls)
+	}
+}

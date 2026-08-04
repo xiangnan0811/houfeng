@@ -25,7 +25,85 @@ type AppACLCurrentMigrationFragment struct {
 	Functions  []AppACLCurrentFunctionContract
 }
 
-var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{}
+var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
+	recordsCoreAppACLCurrentMigrationFragment(),
+}
+
+func recordsCoreAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	objects := make([]AppACLManagedObjectR1, 0, 10)
+	for _, table := range []string{
+		"records",
+		"record_revisions",
+		"record_revision_subjects",
+		"record_revision_tags",
+		"record_revision_participants",
+		"record_drafts",
+		"record_draft_checkpoints",
+		"record_domain_activities",
+		"record_core_purge_receipts",
+	} {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: table,
+		})
+	}
+	objects = append(objects, AppACLManagedObjectR1{
+		ObjectClass:    AppACLObjectClassFunction,
+		SchemaName:     appACLManagedInternalSchemaR1,
+		ObjectIdentity: "validate_record_revision_primary_subject()",
+	})
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0052_create_records_core.sql",
+		Objects:    objects,
+		Privileges: recordsCoreAppACLCurrentPrivileges,
+		Functions: []AppACLCurrentFunctionContract{
+			{
+				SchemaName:      appACLManagedInternalSchemaR1,
+				Identity:        "validate_record_revision_primary_subject()",
+				Kind:            "f",
+				SecurityDefiner: false,
+				Config:          []string{"search_path=pg_catalog"},
+			},
+		},
+	}
+}
+
+func recordsCoreAppACLCurrentPrivileges(string) []AppACLPrivilege {
+	privileges := make([]AppACLPrivilege, 0, 29)
+	appendTable := func(subject AppACLSubject, table string, kinds ...AppACLPrivilegeKind) {
+		for _, kind := range kinds {
+			privileges = append(privileges, AppACLPrivilege{
+				Subject:        subject,
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     appACLManagedPublicSchemaR1,
+				ObjectIdentity: table,
+				Privilege:      kind,
+			})
+		}
+	}
+
+	runtime := AppACLSubjectCenterRuntime
+	appendTable(runtime, "records",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
+	for _, table := range []string{
+		"record_revisions",
+		"record_revision_subjects",
+		"record_revision_tags",
+		"record_revision_participants",
+		"record_draft_checkpoints",
+		"record_domain_activities",
+	} {
+		appendTable(runtime, table,
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeDelete)
+	}
+	appendTable(runtime, "record_drafts",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
+	appendTable(runtime, "record_core_purge_receipts",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+	appendTable(AppACLSubjectPlatformAdmin, "record_core_purge_receipts", AppACLPrivilegeSelect)
+	return privileges
+}
 
 type appACLCurrentSourceContract struct {
 	sources   migrationSourceSnapshot

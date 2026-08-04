@@ -1,12 +1,26 @@
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { build, type Plugin } from 'vite'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const REPOSITORY_ROOT = resolve(process.cwd(), '..')
+const WEB_ROOT = resolve(REPOSITORY_ROOT, 'web')
 const CHECKER_PATH = resolve(REPOSITORY_ROOT, 'scripts/check-web-bundle-budget.mjs')
+const RECORDS_LAZY_MODULES = [
+  { name: 'apiError', path: resolve(WEB_ROOT, 'src/lib/apiError.ts') },
+  { name: 'recordsApi', path: resolve(WEB_ROOT, 'src/lib/recordsApi.ts') },
+] as const
+const RECORDS_API_PATH = RECORDS_LAZY_MODULES[1].path
 const temporaryRoots: string[] = []
+
+type RecordsModulePlacement = {
+  module: typeof RECORDS_LAZY_MODULES[number]['name']
+  fileName: string
+  isEntry: boolean
+  isDynamicEntry: boolean
+}
 
 type FixtureOptions = {
   html?: string
@@ -48,6 +62,79 @@ function runChecker(dist: string, budgetPath: string, ...extraArgs: string[]) {
     '--budget', budgetPath,
     ...extraArgs,
   ], { encoding: 'utf8' })
+}
+
+function recordsModuleCapture(placements: RecordsModulePlacement[]): Plugin {
+  return {
+    name: 'records-module-capture',
+    generateBundle(_options, bundle) {
+      for (const output of Object.values(bundle)) {
+        if (output.type !== 'chunk') continue
+        const modulePaths = new Set(Object.keys(output.modules).map((moduleId) => moduleId.split('?')[0]))
+        for (const recordsModule of RECORDS_LAZY_MODULES) {
+          if (!modulePaths.has(recordsModule.path)) continue
+          placements.push({
+            module: recordsModule.name,
+            fileName: output.fileName,
+            isEntry: output.isEntry,
+            isDynamicEntry: output.isDynamicEntry,
+          })
+        }
+      }
+    },
+  }
+}
+
+function temporaryBuildRoot(prefix: string): string {
+  const root = mkdtempSync(join(tmpdir(), prefix))
+  temporaryRoots.push(root)
+  return root
+}
+
+async function buildCurrentApplication(placements: RecordsModulePlacement[]) {
+  const outputRoot = temporaryBuildRoot('houfeng-records-production-build-')
+  await build({
+    root: WEB_ROOT,
+    configFile: resolve(WEB_ROOT, 'vite.config.ts'),
+    mode: 'production',
+    logLevel: 'silent',
+    plugins: [recordsModuleCapture(placements)],
+    build: {
+      outDir: join(outputRoot, 'dist'),
+      emptyOutDir: true,
+    },
+  })
+}
+
+async function buildSyntheticLazyConsumer(placements: RecordsModulePlacement[]) {
+  const root = temporaryBuildRoot('houfeng-records-lazy-build-')
+  const sourceRoot = join(root, 'src')
+  mkdirSync(sourceRoot, { recursive: true })
+  writeFileSync(
+    join(root, 'index.html'),
+    '<main>entry</main><script type="module" src="/src/main.ts"></script>',
+  )
+  const relativeRecordsApi = relative(sourceRoot, RECORDS_API_PATH)
+  const recordsApiSpecifier = relativeRecordsApi.startsWith('.')
+    ? relativeRecordsApi
+    : `./${relativeRecordsApi}`
+  writeFileSync(join(sourceRoot, 'main.ts'), [
+    "document.body.addEventListener('click', () => {",
+    `  void import(${JSON.stringify(recordsApiSpecifier)}).then(({ listRecords }) => listRecords())`,
+    '})',
+  ].join('\n'))
+
+  await build({
+    root,
+    configFile: false,
+    mode: 'production',
+    logLevel: 'silent',
+    plugins: [recordsModuleCapture(placements)],
+    build: {
+      outDir: join(root, 'dist'),
+      emptyOutDir: true,
+    },
+  })
 }
 
 afterEach(() => {
@@ -169,5 +256,28 @@ describe('bundle budget checker', () => {
     expect(result.status, result.stderr).toBe(0)
     const report = JSON.parse(result.stdout) as { metrics: Record<string, number> }
     expect(JSON.parse(readFileSync(fixture.budgetPath, 'utf8'))).toEqual(report.metrics)
+  })
+
+  it('tree-shakes the unconsumed Records transport from the current production build', async () => {
+    const placements: RecordsModulePlacement[] = []
+
+    await buildCurrentApplication(placements)
+
+    expect(placements).toEqual([])
+  })
+
+  it('places a synthetic Records consumer only in its lazy chunk', async () => {
+    const placements: RecordsModulePlacement[] = []
+
+    await buildSyntheticLazyConsumer(placements)
+
+    expect(placements.map((placement) => placement.module).sort()).toEqual([
+      'apiError',
+      'recordsApi',
+    ])
+    expect(new Set(placements.map((placement) => placement.fileName))).toHaveLength(1)
+    expect(placements.every((placement) => (
+      !placement.isEntry && placement.isDynamicEntry
+    ))).toBe(true)
   })
 })

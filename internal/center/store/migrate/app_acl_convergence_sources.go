@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
+	"io/fs"
 )
 
 // appACLR1MigrationSourceContract freezes the unshipped r1 source set. The
@@ -101,9 +102,22 @@ func validateAppACLR1FrozenSourceSnapshot(snapshot migrationSourceSnapshot) erro
 // validateAppACLR1FrozenSourcePrefix preserves the exact frozen R1 bytes while
 // allowing the current-development contract to append explicit migrations.
 func validateAppACLR1FrozenSourcePrefix(snapshot migrationSourceSnapshot) error {
+	_, err := appACLR1FrozenSourcePrefix(snapshot)
+	return err
+}
+
+func snapshotAppACLR1MigrationSources(fsys fs.FS) (migrationSourceSnapshot, error) {
+	snapshot, err := snapshotMigrationSources(fsys)
+	if err != nil {
+		return migrationSourceSnapshot{}, err
+	}
+	return appACLR1FrozenSourcePrefix(snapshot)
+}
+
+func appACLR1FrozenSourcePrefix(snapshot migrationSourceSnapshot) (migrationSourceSnapshot, error) {
 	prefixLength := len(appACLR1MigrationSourceContract)
 	if len(snapshot.names) < prefixLength || len(snapshot.sources) < prefixLength {
-		return fmt.Errorf("current migration source count is %d names/%d sources, want at least frozen r1 prefix length %d", len(snapshot.names), len(snapshot.sources), prefixLength)
+		return migrationSourceSnapshot{}, fmt.Errorf("current migration source count is %d names/%d sources, want at least frozen r1 prefix length %d", len(snapshot.names), len(snapshot.sources), prefixLength)
 	}
 
 	prefix := migrationSourceSnapshot{
@@ -114,7 +128,7 @@ func validateAppACLR1FrozenSourcePrefix(snapshot migrationSourceSnapshot) error 
 	for _, name := range prefix.names {
 		source, ok := snapshot.sources[name]
 		if !ok {
-			return fmt.Errorf("current migration source prefix %q is missing", name)
+			return migrationSourceSnapshot{}, fmt.Errorf("current migration source prefix %q is missing", name)
 		}
 		prefix.sources[name] = source
 		entries = append(entries, MigrationChecksumEntry{
@@ -124,8 +138,11 @@ func validateAppACLR1FrozenSourcePrefix(snapshot migrationSourceSnapshot) error 
 	}
 	canonicalSet, err := CanonicalMigrationSetBodyV1(entries)
 	if err != nil {
-		return fmt.Errorf("build current migration source r1 prefix: %w", err)
+		return migrationSourceSnapshot{}, fmt.Errorf("build current migration source r1 prefix: %w", err)
 	}
 	prefix.canonicalSet = canonicalSet
-	return validateAppACLR1FrozenSourceSnapshot(prefix)
+	if err := validateAppACLR1FrozenSourceSnapshot(prefix); err != nil {
+		return migrationSourceSnapshot{}, err
+	}
+	return prefix, nil
 }

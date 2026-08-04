@@ -418,6 +418,36 @@ func (r *PostgresMonitoringInstanceRepository) GetMonitoringInstance(ctx context
 	return record, nil
 }
 
+func (r *PostgresMonitoringInstanceRepository) loadMonitoringRecordSubject(
+	ctx context.Context,
+	monitoringInstanceID string,
+) (monitoringRecordSubject, error) {
+	var subject monitoringRecordSubject
+	err := r.db.QueryRow(ctx, `
+		select mi.monitoring_instance_id,
+		       mi.display_name,
+		       coalesce((
+		         select heartbeat.agent_version
+		         from monitoring_instance_heartbeats heartbeat
+		         where heartbeat.monitoring_instance_id = mi.monitoring_instance_id
+		         order by heartbeat.observed_at desc, heartbeat.id desc
+		         limit 1
+		       ), '')
+		from monitoring_instances mi
+		where mi.monitoring_instance_id = $1`, monitoringInstanceID).Scan(
+		&subject.MonitoringInstanceID,
+		&subject.DisplayName,
+		&subject.AgentVersion,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return monitoringRecordSubject{}, monitoringinstances.ErrMonitoringInstanceNotFound
+	}
+	if err != nil {
+		return monitoringRecordSubject{}, fmt.Errorf("query monitoring-instance record subject: %w", err)
+	}
+	return subject, nil
+}
+
 func (r *PostgresMonitoringInstanceRepository) GetMonitoringInstanceManagementReview(ctx context.Context, monitoringInstanceID string) (monitoringinstances.ManagementReview, error) {
 	record, err := r.GetMonitoringInstance(ctx, monitoringInstanceID)
 	if err != nil {

@@ -3,7 +3,6 @@ package migrate
 import (
 	"context"
 	"fmt"
-	"io/fs"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,12 +13,11 @@ import (
 type appACLRuntimeAdmissionBeginTx func(context.Context, pgx.TxOptions) (pgx.Tx, error)
 
 type appACLRuntimeAdmissionDependencies struct {
-	embeddedMigrations fs.FS
-	beginTx            appACLRuntimeAdmissionBeginTx
-	readManifest       func(context.Context, pgx.Tx) (AppACLManifestRuntimeSnapshotV1, error)
-	verifyManifest     func(AppACLManifestRuntimeSnapshotV1) (AppACLManifestPersistedV1, error)
-	readCatalog        func(context.Context, pgx.Tx, AppACLEffectiveCatalogVerifierInputR1) (AppACLEffectiveCatalogSnapshotR1, error)
-	verifyCatalog      func(AppACLEffectiveCatalogSnapshotR1, AppACLEffectiveCatalogVerifierInputR1) error
+	beginTx        appACLRuntimeAdmissionBeginTx
+	readManifest   func(context.Context, pgx.Tx) (AppACLManifestRuntimeSnapshotV1, error)
+	verifyManifest func(AppACLManifestRuntimeSnapshotV1) (AppACLManifestPersistedV1, error)
+	readCatalog    func(context.Context, pgx.Tx, AppACLEffectiveCatalogVerifierInputR1) (AppACLEffectiveCatalogSnapshotR1, error)
+	verifyCatalog  func(AppACLEffectiveCatalogSnapshotR1, AppACLEffectiveCatalogVerifierInputR1) error
 }
 
 // AdmitAppACLRuntime verifies that a direct runtime login may use the APP
@@ -29,14 +27,17 @@ func AdmitAppACLRuntime(ctx context.Context, db *pgxpool.Pool) error {
 	if db == nil {
 		return fmt.Errorf("app ACL runtime admission has no PostgreSQL pool")
 	}
+	frozenSources, err := snapshotAppACLR1MigrationSources(migrations.FS)
+	if err != nil {
+		return fmt.Errorf("snapshot frozen R1 application migrations for runtime admission: %w", err)
+	}
 	return admitAppACLRuntimeWithDependencies(ctx, appACLRuntimeAdmissionDependencies{
-		embeddedMigrations: migrations.FS,
 		beginTx: func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
 			return db.BeginTx(ctx, options)
 		},
 		readManifest: readAppACLManifestRuntimeSnapshotInTxV1,
 		verifyManifest: func(snapshot AppACLManifestRuntimeSnapshotV1) (AppACLManifestPersistedV1, error) {
-			return verifyAppACLManifestRuntimeSnapshotV1(snapshot, migrations.FS)
+			return verifyAppACLManifestRuntimeSnapshotWithMigrationSetV1(snapshot, frozenSources.canonicalSet)
 		},
 		readCatalog:   readAppACLEffectiveCatalogSnapshotInTxR1,
 		verifyCatalog: VerifyAppACLEffectiveCatalogSnapshotR1,
@@ -101,9 +102,6 @@ func admitAppACLRuntimeWithDependencies(
 }
 
 func (dependencies appACLRuntimeAdmissionDependencies) validate() error {
-	if dependencies.embeddedMigrations == nil {
-		return fmt.Errorf("app ACL runtime admission embedded migration filesystem is nil")
-	}
 	if dependencies.beginTx == nil {
 		return fmt.Errorf("app ACL runtime admission transaction opener is nil")
 	}
