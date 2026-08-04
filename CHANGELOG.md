@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.62.0](https://github.com/xiangnan0811/houfeng/compare/v0.61.0...v0.62.0) (2026-08-04)
+
+
+### Features
+
+* **records:** add permanent deletion and web transport ([0a99947](https://github.com/xiangnan0811/houfeng/commit/0a9994775d0618a3f728854ae30446b136d4ec46))
+* **records:** add records core schema and domain contracts ([c032a1d](https://github.com/xiangnan0811/houfeng/commit/c032a1d5715865f4999954375b5c0a9bc196424b))
+* **records:** add records core, drafts, and deletion ([2279a7f](https://github.com/xiangnan0811/houfeng/commit/2279a7fdee837fdab9c714e12b0651367e0a0875))
+* **records:** add revision draft and HTTP behavior ([4b0a6b4](https://github.com/xiangnan0811/houfeng/commit/4b0a6b41121a5e391d1bd78a9d7aefac12304229))
+
+
+### Bug Fixes
+
+* **migrate:** preserve frozen r1 runtime admission ([1ade5e8](https://github.com/xiangnan0811/houfeng/commit/1ade5e8678de548274c013e10979f16d8b73684c))
+* **records:** close deletion review findings ([ba5f2d8](https://github.com/xiangnan0811/houfeng/commit/ba5f2d8d21cc09d1a47318b6ecbe1239aa60a331))
+
+
+### Documentation
+
+* **trellis:** activate VPS records core ([afe21ab](https://github.com/xiangnan0811/houfeng/commit/afe21ab37e92e4a3a9fe4e51cbbf81e0a9fac396))
+* **trellis:** close VPS records foundation ([51c24f7](https://github.com/xiangnan0811/houfeng/commit/51c24f752e96669cecf79fed1ffa55ee8a1e742f))
+* **trellis:** close VPS records foundation ([dc0951a](https://github.com/xiangnan0811/houfeng/commit/dc0951a98b752ec93a48c19524288ffa242fbbab))
+* **trellis:** record checkpoint 3 CI ([11d7cfa](https://github.com/xiangnan0811/houfeng/commit/11d7cfabf695f6eaacc8c5b5d362c59975bdb36e))
+
 ## [0.61.0](https://github.com/xiangnan0811/houfeng/compare/v0.60.1...v0.61.0) (2026-08-02)
 
 
