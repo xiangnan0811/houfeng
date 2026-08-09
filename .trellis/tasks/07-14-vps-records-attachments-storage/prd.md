@@ -56,7 +56,7 @@
 ### 5. 授权、下载与接缝
 
 - 草稿 attachment 只允许作者访问；record attachment 使用统一 `recordauth.Policy` 结果，并与当前 source authorization、record visibility、attachment ownership 和 deletion fence 取交集。
-- preview/download 每次重新鉴权并取得短 content stream lease。permission revoke 或 deletion reservation 后禁止新 stream/presign/complete，已开始 stream 必须被取消并不再发送后续 bytes。
+- preview/download 每次重新鉴权并取得短 content stream lease。permission revoke 或 deletion reservation 后禁止新 stream/presign/complete。每个输出 chunk 在调用 writer 前必须完成最终 serving assertion；该 assertion 的权威数据库成功读取是 chunk 的线性化点。已在 fence/revoke 前线性化的单个 chunk 可以完成，但 fence/revoke 后的 assertion 必须失败，且不得开始任何后续 chunk。合同不以网络 flush 的物理时刻为线性化点，也不允许为了 writer 串行而跨任意网络 I/O 持有数据库锁。
 - 响应使用安全展示名、allowlisted `Content-Type`、`Content-Disposition`、`nosniff` 与受限 CSP；未知状态或处理合同失败关闭。
 - Child 3 提供 Blob inventory、exact version/hash enumeration、pin、purge 和 restore verification 接口；Child 11 负责全局 `RecoveryPointManifest`、跨存储复制、删除 replay 与真实恢复控制器。
 - Web 只提供 lazy records API、DTO、上传 queue/controller、状态展示和 authorized download primitives；不得在 page/component 直接 `fetch`。完整编辑器、材料侧栏与 390px drawer integration 属于 Child 5。
@@ -71,10 +71,10 @@
 
 ### Checkpoint 2: secure upload and content data plane
 
-- [ ] 五个 attachment endpoints 覆盖 local/S3 transport、配额、幂等 complete、状态和稳定 400/404/409/413/422/503 错误。
-- [ ] MIME spoof、超限、zip-slip、duplicate path、symlink/hardlink、炸弹、加密包、主动内容和 malware 全部 fail closed。
-- [ ] scanner unavailable 不会误标 rejected/available；重试、超时、expired 和 crash 后 parts/workspace/cache 残留为 0 且有 receipt。
-- [ ] record/draft authorization、range/preview/download headers、stream lease、revoke 和 deletion reservation tests 证明 fence 后不再发送新 bytes。
+- [x] 五个 attachment endpoints 覆盖 local/S3 transport、配额、幂等 complete、状态和稳定 400/404/409/413/422/503 错误。
+- [x] MIME spoof、超限、zip-slip、duplicate path、symlink/hardlink、炸弹、加密包、主动内容和 malware 全部 fail closed。
+- [x] scanner unavailable 不会误标 rejected/available；重试、超时、expired 和 crash 后 parts/workspace/cache 残留为 0 且有 receipt。
+- [x] record/draft authorization、range/preview/download headers、stream lease、revoke 和 deletion reservation tests 证明每个 chunk 都由最终 assertion 授权；并发 fence 最多允许一个已在线性化点通过的 chunk 完成，failed assertion/renewal 或本地终态之后不得开始下一 chunk。
 
 ### Checkpoint 3: Records integration and delivery seams
 

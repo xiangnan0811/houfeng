@@ -126,10 +126,10 @@
 - Extend: `internal/center/store/attachments.go`
 - Extend: `internal/center/store/attachments_postgres_integration_test.go`
 
-- [ ] Write RED service tests for draft-owner authorization, quota reservation, local upload target, S3 temporary instructions, state CAS, content length/hash/version, idempotent complete, expiry and stable conflicts. S3 cases must prove the random temporary key is persisted before `BlobStore.Put`, reused across retries and never replaced by an in-memory-only key.
-- [ ] Confirm RED with `go test ./internal/center/attachments -run 'TestUploadService' -count=1`.
-- [ ] Implement orchestration through narrow authorization/store/Blob interfaces. Persist the S3 temporary key before object I/O, pass it through `PutRequest.TemporaryKey`, and CAS the exact observed temporary/final version identities. Complete performs server-side byte verification and enqueues processing; it does not scan synchronously.
-- [ ] Re-run service and real store/backend integration tests; expect GREEN.
+- [x] Write RED service tests for draft-owner authorization, quota reservation, local upload target, S3 temporary instructions, state CAS, content length/hash/version, idempotent complete, expiry and stable conflicts. S3 cases must prove the random temporary key is persisted before `BlobStore.Put`, reused across retries and never replaced by an in-memory-only key.
+- [x] Confirm RED with `go test ./internal/center/attachments -run 'TestUploadService' -count=1`.
+- [x] Implement orchestration through narrow authorization/store/Blob interfaces. Persist the S3 temporary key before object I/O, pass it through `PutRequest.TemporaryKey`, and CAS the exact observed temporary/final version identities. Complete performs server-side byte verification and enqueues processing; it does not scan synchronously.
+- [x] Re-run service and real store/backend integration tests; expect GREEN.
 
 ## Task 2.2: Attachment HTTP API
 
@@ -142,10 +142,10 @@
 - Modify: `cmd/houfeng-center/bootstrap.go`
 - Modify: `cmd/houfeng-center/bootstrap_test.go`
 
-- [ ] Write RED handler/router/bootstrap tests for the five fixed endpoints, exact DTO arrays, local streaming/S3 instructions, request limits separate from 256 KiB JSON, and 400/404/409/413/422/503 mapping.
-- [ ] Confirm RED with focused handler/router/bootstrap commands.
-- [ ] Implement resource handlers and explicit wiring; use shared JSON/session/error patterns and never log display name, object key, upload URL or content.
-- [ ] Re-run focused HTTP tests and existing records/router/bootstrap regressions; expect GREEN.
+- [x] Write RED handler/router/bootstrap tests for the five fixed endpoints, exact DTO arrays, local streaming/S3 instructions, request limits separate from 256 KiB JSON, and 400/404/409/413/422/503 mapping.
+- [x] Confirm RED with focused handler/router/bootstrap commands.
+- [x] Implement resource handlers and explicit wiring; use shared JSON/session/error patterns and never log display name, object key, upload URL or content.
+- [x] Re-run focused HTTP tests and existing records/router/bootstrap regressions; expect GREEN.
 
 ## Task 2.3: Content admission and hostile archive corpus
 
@@ -157,10 +157,10 @@
 - Create: `internal/center/attachments/archive_test.go`
 - Create: `internal/center/attachments/testdata/` hostile and golden fixtures
 
-- [ ] Add minimal generated/binary fixtures and RED tests for magic/MIME/extension spoof, invalid UTF-8, image dimensions, PDF complexity, zip-slip, duplicate normalized path, symlink/hardlink, encryption, nested/expanded size bombs, unsupported active content and archive scanner unavailable-before-bytes.
-- [ ] Confirm each test fails for the missing classifier/validator, not malformed fixture setup.
-- [ ] Implement streaming/bounded classifiers and structural archive inspection with standard parsers; do not extract archive members to shared disk and do not invoke shell.
-- [ ] Re-run hostile corpus with time/memory bounds and fuzz seeds; all dangerous cases must fail closed.
+- [x] Add minimal generated/binary fixtures and RED tests for magic/MIME/extension spoof, invalid UTF-8, image dimensions, PDF complexity, zip-slip, duplicate normalized path, symlink/hardlink, encryption, nested/expanded size bombs, unsupported active content and archive scanner unavailable-before-bytes.
+- [x] Confirm each test fails for the missing classifier/validator, not malformed fixture setup.
+- [x] Implement streaming/bounded classifiers and structural archive inspection with standard parsers; do not extract archive members to shared disk and do not invoke shell.
+- [x] Re-run hostile corpus with time/memory bounds and fuzz seeds; all dangerous cases must fail closed.
 
 ## Task 2.4: Isolated processor, scanner, preview and janitor
 
@@ -177,11 +177,55 @@
 - Create: `cmd/houfeng-content-processor/main.go`
 - Create: `cmd/houfeng-content-processor/bootstrap.go`
 - Create: `cmd/houfeng-content-processor/bootstrap_test.go`
+- Modify: `db/migrations/0053_create_record_attachments.sql`
+- Modify: `internal/center/store/migrate/record_attachments_migration_test.go`
+- Modify: `internal/center/store/migrate/postgres_integration_test.go`
+- Extend: `internal/center/store/attachments.go`
+- Extend: `internal/center/store/attachments_test.go`
+- Extend: `internal/center/store/attachments_postgres_integration_test.go`
 
-- [ ] Write RED tests for database claim/lease/attempt, ClamAV INSTREAM framing and limits, fixed Poppler/image/text profiles, typed results, retry/expiry, crash cutpoints and idempotent workspace purge receipts. Include restart reconciliation for a persisted S3 temporary key whose `VersionID` was not committed before the crash.
-- [ ] Confirm RED with focused package/command tests.
-- [ ] Implement worker orchestration and fixed external command runners via `exec.CommandContext`; no shell, arbitrary args, external network, shared profile/cache or content-bearing logs. Janitor cleanup resolves only the persisted temporary key's current version, CASes the observed identity and exact-deletes that version without object/version listing; ambiguous or replaced identity fails closed.
-- [ ] Run real/fake-protocol scanner tests plus processor integration profile; kill each registered cutpoint and verify workspace/part/cache residue is zero with one terminal receipt.
+### Slice 2.4.A: Durable processor result and preview contract
+
+- [x] Write RED domain and migration tests for closed processor result codes, canonical typed-result digesting, optional preview validation, and the all-null/all-present preview Blob identity. Prove the current schema cannot durably distinguish original from preview or explain a retry/terminal result.
+- [x] Confirm RED with `go test ./internal/center/attachments ./internal/center/store/migrate -run 'Test(ProcessorResult|RecordAttachmentsMigration.*Processor|RecordAttachmentsMigration.*Preview)' -count=1`.
+- [x] Add the minimal typed result/preview contract in `processor.go` and extend the still-unmerged `0053` current-development migration with preview Blob identity/media/size plus a closed content-free processor result code. Keep the original Blob identity unchanged; add exact FK/check/index/source assertions and no free-text processor output.
+- [x] Re-run focused domain/migration tests, fresh/repeat PostgreSQL migration tests, `go test ./internal/center/store/migrate -count=1`, `go vet ./internal/center/attachments ./internal/center/store/migrate`, and `git diff --check`.
+
+### Slice 2.4.B: Bounded ClamAV INSTREAM protocol
+
+- [x] Write RED fake TCP/Unix protocol tests for exact `zINSTREAM\0` command, big-endian bounded chunks, zero terminator, clean/malware/error replies, truncated/oversized replies, input limit, unavailable endpoint, deadline and cancellation. Add an opt-in real ClamAV probe that uses the same scanner contract.
+- [x] Confirm RED with `go test ./internal/center/attachments -run 'TestClamAVScanner' -count=1`.
+- [x] Implement a narrow scanner with fixed network/address/timeout/chunk/input/response bounds. It must stream once, never invoke a shell, never include daemon reply/content/object identity in errors or logs, and close the connection on every terminal path.
+- [x] Re-run focused scanner tests at `-count=20`, focused race tests, `go vet ./internal/center/attachments`, and the opt-in real scanner probe when configured.
+
+### Slice 2.4.C: Durable claim, lease, attempt and workspace state
+
+- [x] Write RED repository and real PostgreSQL tests for `FOR UPDATE SKIP LOCKED` claim ordering, exact owner/generation/observed-expiry fencing, attempt increment, lease renewal, stale-lease reclaim, due retry, max-attempt/overall expiry, workspace registration-before-materialization, result replay and terminal upload/quota transitions. Scanner unavailable must remain quarantined while retryable and become expired, never available, at its bound.
+- [x] Confirm RED with focused store unit tests and `scripts/test-record-platform-integration.sh postgres -- go test ./internal/center/store -run '^TestPostgresIntegrationAttachmentProcessor' -count=1`.
+- [x] Implement the processor repository methods in `internal/center/store/attachments.go`. A clean result atomically commits the exact original and optional preview Blob identities, result digest, available state and quota; malware/unsafe results reject and release reservation; unavailable/timeout/processing failures retry or expire according to the claimed attempt and job deadline.
+- [x] Re-run focused unit/PostgreSQL tests plus `go test -race ./internal/center/attachments ./internal/center/store -run 'Processor|Workspace' -count=1`, `go vet`, and `git diff --check`.
+
+### Slice 2.4.D: Fixed preview profiles and idempotent workspace janitor
+
+- [x] Write RED tests for a private derived workspace path, symlink/path escape rejection, register/materialize/purge transitions, idempotent content-free purge receipts, and cleanup after cancellation/timeout. Add golden profile tests for metadata-free bounded PNG image output, fixed first-page Poppler PNG arguments/output bounds, bounded UTF-8 text preview and archive-without-preview.
+- [x] Confirm RED with `go test ./internal/center/attachments -run 'Test(Preview|ContentProcessorWorkspace|WorkspaceJanitor)' -count=1`.
+- [x] Implement image/text processing in-process and invoke only fixed `pdfinfo`/`pdftoppm` argument shapes through `exec.CommandContext`; binary paths are configuration, content paths are workspace-derived, and callers cannot supply flags. No shell, external URL, shared cache/profile, stdout/stderr logging or content-bearing receipt is allowed.
+- [x] Re-run focused tests, race tests and the opt-in real Poppler profile. Verify every success/error/cancel replay removes the registered workspace tree and produces exactly one immutable receipt.
+
+### Slice 2.4.E: Worker, restart reconciliation and command wiring
+
+- [x] Write RED orchestration/bootstrap tests for claim -> materialize -> scan/preview -> typed completion -> janitor, bounded backoff, shutdown cancellation, secret/content-free logs and startup cleanup. Register cutpoints after claim, mkdir, source materialization, processing, result commit and physical purge. Include a persisted S3 temporary key whose `VersionID` was not committed before restart.
+- [x] Confirm RED with `go test ./internal/center/attachments ./cmd/houfeng-content-processor -run 'Test(ContentProcessor|Bootstrap|RestartReconciliation|CrashCutpoint)' -count=1`.
+- [x] Implement thin `cmd/houfeng-content-processor` wiring around domain/store interfaces. Startup reconciliation resolves only the persisted temporary key's current version, CASes that observed version and exact-deletes it; it never lists objects/versions or uses an unversioned delete, and missing/replaced/ambiguous identity remains bounded and fail closed.
+- [x] Run fake/real protocol and PostgreSQL/local/MinIO processor integration profiles. Kill and restart at every registered cutpoint; after convergence, workspace/part/cache residue must be zero and each registered workspace must have exactly one terminal purge receipt. Finish with focused race/vet, `make verify-go`, module checks and `git diff --check` before checking Task 2.4 complete.
+
+#### Slice 2.4.E verification evidence (2026-08-07)
+
+- `go test ./cmd/houfeng-content-processor -run 'Test(ContentProcessor|ProcessorReconcilerGroup|Bootstrap|RestartReconciliation|CrashCutpoint)' -count=1`, package `-count=10`, package race and package vet all passed.
+- Focused processor/workspace/reconciliation/ClamAV/preview tests passed across `internal/center/attachments`, `internal/center/store` and `cmd/houfeng-content-processor`; worker/reconciler tests passed at `-count=10`, followed by focused race and vet across all three packages.
+- The real PostgreSQL crash/restart test passed all six `os.Exit` cutpoints: after claim, mkdir, source materialization, processing, result commit and physical purge. The complete `^TestPostgresIntegrationAttachmentProcessor` selector passed all 19 top-level processor integration tests.
+- The real MinIO `^TestS3` suite and the real PostgreSQL + MinIO `TestPostgresMinIOIntegrationAttachmentProcessorS3WorkspaceWorkflow` both passed. The restart bootstrap test proves an unresolved persisted S3 key remains versionless after the first process interruption, then a new bootstrap performs one observed-version CAS, one exact-version delete and replay with no additional I/O.
+- `make verify-go`, `go mod verify` and `git diff --check` passed. The opt-in real ClamAV probe was not configured in this environment and is not claimed as executed; the fake TCP/Unix INSTREAM protocol suite remains the deterministic protocol evidence.
 
 ## Task 2.5: Authorized preview/download and GC worker
 
@@ -194,18 +238,90 @@
 - Extend: `internal/center/http/handlers/attachments.go`
 - Extend: `internal/center/http/handlers/attachments_test.go`
 - Extend: `internal/center/store/attachments.go`
+- Create: `internal/center/attachments/publication.go`
+- Create: `internal/center/attachments/publication_test.go`
+- Create: `internal/center/store/attachments_publication.go`
+- Create: `internal/center/store/attachments_publication_test.go`
+- Extend: `internal/center/attachments/reconciliation.go`
+- Extend: `internal/center/attachments/reconciliation_test.go`
+- Modify: `db/migrations/0053_create_record_attachments.sql`
+- Extend: `internal/center/store/migrate/record_attachments_migration_test.go`
+- Extend: `internal/center/store/migrate/postgres_integration_test.go`
+- Extend: `internal/center/store/migrate/app_acl_current_contract.go`
 
-- [ ] Write RED tests for draft/record authorization, source/visibility intersection, safe filename/headers, original-vs-preview enum, byte ranges, 5 MiB text preview, lease expiry, revoke/reservation during stream, 24-hour orphan watermark, pin/ref CAS and physical delete receipts.
-- [ ] Confirm RED in domain/handler/store tests.
-- [ ] Implement per-request authorization and short stream leases, checking cancellation before writes. Implement ordinary GC and permanent-purge primitive separately so only the time watermark differs.
-- [ ] Re-run focused tests including slow-reader cancellation and real local/MinIO GC; prove no new bytes after fence and no referenced/pinned Blob deletion.
+### Slice 2.5.A: Authorized stream and renewable lease
+
+- [x] Write and confirm RED tests for draft/record authorization, source/visibility intersection, safe filename/headers, closed original/preview variant, byte ranges, 5 MiB text preview, a reader blocked longer than one lease, background renewal, renewal failure/owner drift cancellation before expiry, the strict one-second maximum, final assertion before every chunk, and concurrent renewal/close without database I/O under the state mutex.
+- [x] Implement per-request authorization and a delivery-owned renewal/cancel loop. Serving renewal must atomically re-check the captured epoch, absence of a live deletion fence and the exact owner tuple under the canonical lock order. The authoritative successful database read inside the final serving assertion is the chunk linearization point; a pre-fence assertion may authorize its one in-flight chunk, but every later chunk must assert again. Provisional deletion fencing may commit while the old content lease is live so it becomes the durable cancellation marker; deletion work cannot append to the ledger until that lease is released or expired. Close cancels in-flight renewal, waits for its bounded completion and releases the latest exact owner tuple. Database and delivery-state locks never span arbitrary writer I/O.
+- [x] Run focused attachment/handler/store tests, race coverage and real PostgreSQL renewal-vs-reservation/drain cases; verify zero new bytes after a failed assertion or renewal, at most one already-linearized chunk across a concurrent fence, and no ledger append claim while a content lease is live.
+
+#### Slice 2.5.A verification evidence (2026-08-07)
+
+- The download-only file-list suite passed fresh, at `-count=20`, and under `-race -count=5`. The exact file-list command intentionally compiles all production attachment files plus only `download_test.go`, because Slice 2.5.C keeps package-level publication tests RED until its missing contract is implemented.
+- `go test ./internal/center/http/handlers -run '^TestAttachmentsDownload' -count=20` and the same selector under `-race -count=1` passed. The partial-stream and pre-first-byte fixtures now inject at assertions four and three respectively, matching the two assertions performed by `Open`.
+- `go test ./internal/center/store -run 'RecordPlatform|RecordDeletion' -count=1` and the same selector under `-race -count=5` passed.
+- The strict PostgreSQL `^TestPostgresIntegrationRecord(Platform|Deletion)` selector passed all 18 top-level tests, including `RecordPlatformReservationFenceCancelsServingRenewal`, serving-lease database state, provisional deletion reservation, stale-owner takeover, delete commit and recovery paths.
+- Focused download, handler and store vet plus `git diff --check` passed. No package-wide attachment GREEN claim is made while Slice 2.5.C remains intentionally RED.
+
+#### Slice 2.5.A concurrent-fence contract correction (2026-08-09)
+
+- [x] User approved the final serving assertion's authoritative database read as the chunk linearization point instead of the later physical network flush timestamp.
+- [x] Add a deterministic interleaving test in which the first assertion observes admissible pre-fence state, the fence commits before that assertion returns, exactly that chunk completes, and the next assertion rejects the next chunk.
+- [x] Confirm the current short critical-section state machine already implements the approved contract, or make only the minimal production change exposed by the new test. Re-run focused normal/race download and handler suites, then obtain specification and independent quality approval.
+
+#### Slice 2.5.A concurrent-fence correction verification evidence (2026-08-09)
+
+- `TestContentDeliveryAllowsOnlyChunkLinearizedBeforeConcurrentFence` deterministically snapshots the first serving assertion's pre-fence read, commits the fence before that assertion returns, then proves exactly one 4-byte writer call and a second assertion rejected with both `ErrContentDeliveryRevoked` and `recordplatform.ErrLostOwnerLease`. The exact test passed at `-count=100` and under `-race -count=20`.
+- The current production order was already `assert -> beginWrite -> writer.Write`, so the approved contract required no production-code change. Focused download tests passed at `-count=20` and under `-race -count=5`; handler download tests passed at `-count=20` and under `-race -count=1`.
+- Complete attachment, content-processor command, store, migration and center HTTP/bootstrap package tests passed both normally and under the race detector where applicable. Focused vet, `gofmt -d`, tracked/untracked whitespace checks passed. Separate read-only specification and independent quality reviews both approved the correction with zero Critical, Important or Minor findings.
+
+### Slice 2.5.B: Durable Blob GC protocol
+
+- [x] Write and confirm RED tests for ordinary/permanent candidates, 24-hour database watermark, original/preview/revision/upload-part/pin blockers, durable claim/retry/takeover/completion, exact deletion receipt and one-time physical quota decrement.
+- [x] Implement `blob_gc_deletions`, exact-version external delete outside PostgreSQL and generation-fenced replay. Do not use `FOR UPDATE` on immutable `blob_objects`; serialize publication through the documented table-lock order.
+- [x] Run focused store/domain tests and real PostgreSQL/local/MinIO GC paths.
+
+### Slice 2.5.C: Final-object publication intent and reconciliation
+
+- [x] Write RED domain/migration/store tests for owner-bound prepared/published/cleanup/retry/terminal states, one active intent per digest key, exact version CAS, metadata-transaction consumption, GC exclusion and stale-owner rejection.
+- [x] Implement the `blob_publication_intents` schema/current APP ACL inventory and repository state machine. Intent creation locks `blob_objects` then `attachment_upload_parts`, rejects an active GC fence and persists before any final-object I/O.
+- [x] Add an exact-key resolver for local/S3 and a restart reconciler with claim generation, lease, retry and exact-version delete. It may close an intent as consumed when a durable reference exists; it must never list keys/versions or perform an unversioned delete.
+- [x] Integrate local upload, direct S3 complete and processor preview publication. Each path records the exact returned version and consumes the intent in the same transaction that creates the first durable upload-part/Blob metadata reference.
+- [x] Run crash cutpoints before publish, after publish, after version CAS, after metadata commit and after physical cleanup across fake/local/PostgreSQL/MinIO profiles. Prove no untracked final object, stale metadata publisher or referenced-object deletion remains.
+
+#### Slice 2.5.C verification evidence (2026-08-08)
+
+- Focused publication domain/store/bootstrap tests passed across `internal/center/attachments`, `internal/center/store` and `cmd/houfeng-content-processor`; the same selector passed under `-race`. Focused `blob_publication_intents` migration, exact owned-table/DDL inventory and current APP ACL fragment source tests also passed.
+- The default processor bootstrap now constructs the publication reconciler for both local and S3, fails closed when cleanup-repository or exact-key resolver contracts are missing, and orders reconciliation as workspace -> publication -> optional S3 temporary cleanup.
+- The real PostgreSQL + local crash/restart test passed all five stages: before publish, after physical publication, after exact-version CAS, after metadata commit and after physical cleanup. Fresh repository/Blob/reconciler instances prove exact-key resolution, exact-version deletion, consumed-reference preservation, expired-lease takeover, stale-owner rejection and idempotent `already_absent` convergence.
+- The same backend-neutral five-stage runner passed twice against real PostgreSQL + versioned MinIO in one fresh invocation (`-count=2`). Every S3 stage first persists `ReserveUpload -> PrepareUpload` with an exact `temporary/<64 lowercase hex>` key and null temporary version, then uses only the returned key; no `RecordTemporaryObjectVersion`, object/version listing or unversioned delete is used by the publication test/reconciler path.
+- Focused `go vet`, `gofmt -d`, tracked/untracked whitespace checks and temporary MinIO cleanup checks passed. Specification review returned `✅ Spec compliant`; quality review found no Critical/Important issue, and its one Minor helper-naming concern was fixed and re-reviewed closed.
+
+### Task 2.5 verification evidence
+
+- Durable GC and Slice 2.5.A are GREEN with replacement RED/GREEN, repeated race coverage and the full real PostgreSQL platform/deletion selector. The reopened defects were closed by a strict one-second maximum, delivery-owned background renewal/cancellation, reservation-aware atomic renewal, provisional fence cancellation and mutex-free database I/O.
+- Slice 2.5.C now closes the final-object publish-before-metadata crash window with durable intent, exact-version reconciliation and symmetric real local/MinIO restart evidence. All Task 2.5 implementation slices are GREEN, but Task 2.5 closeout and Checkpoint 2 remain open until the complete attachment/processor integration, full Go and affected Docker/static gates below pass fresh.
+
+#### Checkpoint 2 reopened-defect closure evidence (2026-08-09)
+
+- Processor preview publication takeover now rebinds the same prepared/published intent only for a strictly newer claim generation, preserving the immutable target and deadline. Version recording and consumption retain exact generation fences; prepared and published takeover plus stale-version rejection tests pass.
+- Expired abandoned `created`/`uploading` sessions are now reclaimed by the processor loop through one backend-neutral transaction. The transaction locks the existing project quota row, claims one expired upload without a processor job, updates upload and logical attachment state to `expired`, and releases the exact reservation once. Local and S3 real PostgreSQL tests pass, including replay and the `SKIP LOCKED` candidate-selection contract.
+- An expired S3 upload whose temporary key is persisted but whose version is still null can now record the resolver's exact version after expiry and enter temporary-object cleanup; the exact-key/version cleanup claim path passes real PostgreSQL evidence.
+- ClamAV daemon `ERROR` replies now return `scanner_unavailable`, matching the worker error mapping and bounded retry contract; the fake TCP/Unix protocol suite and race selector pass. The opt-in real ClamAV probe remains unconfigured and is not claimed.
+
+#### Checkpoint 2 final commit gate evidence (2026-08-09)
+
+- `make verify-go`, `go mod verify`, the trimmed `houfeng-content-processor` build and `go test ./internal/center/deploy -count=1` passed fresh.
+- The affected command, attachment, HTTP, handler, store and migration packages passed one fresh combined race run.
+- The real PostgreSQL selector covering every attachment processor integration test plus abandoned `created`/`uploading` expiry and expired S3 exact-version cleanup passed fresh.
+- The four Checkpoint 2 PRD acceptance criteria were reconciled to the completed endpoint, hostile-corpus, scanner/processor restart and content-delivery evidence before commit.
 
 ## Checkpoint 2 gate
 
-- [ ] Run attachment HTTP/admission/processor/download/GC unit, race and local/MinIO/processor integration tests fresh.
-- [ ] Run `make verify-go` and Docker/static tests affected by the new processor binary.
-- [ ] Review diff against Checkpoint 2; verify no Records canonical DTO or full Web drawer implementation leaked in.
-- [ ] Commit Checkpoint 2 and report behavior evidence, hostile corpus coverage and remaining Checkpoint 3 integration risks.
+- [x] Run attachment HTTP/admission/processor/download/GC unit, race and local/MinIO/processor integration tests fresh.
+- [x] Run `make verify-go` and Docker/static tests affected by the new processor binary.
+- [x] Review diff against Checkpoint 2; verify no Records canonical DTO or full Web drawer implementation leaked in.
+- [x] Commit Checkpoint 2 and report behavior evidence, hostile corpus coverage and remaining Checkpoint 3 integration risks.
 
 ---
 

@@ -363,6 +363,77 @@ func (repository *PostgresRecordPlatformRepository) RenewObjectContentLease(ctx 
 	return recordplatform.ObjectContentLeaseV1{Object: object, Owner: renewed}, nil
 }
 
+// RenewServingLease extends an exact serving owner only after serializing with
+// reservation fencing under the epoch -> deletion fence -> content lease lock
+// order. The captured epoch and absence of a live fence are checked in the
+// same admitted transaction as the owner-expiry update.
+func (repository *PostgresRecordPlatformRepository) RenewServingLease(ctx context.Context, serving recordplatform.ServingLeaseV1, duration time.Duration) (recordplatform.ServingLeaseV1, error) {
+	if err := serving.Validate(); err != nil {
+		return recordplatform.ServingLeaseV1{}, err
+	}
+	if err := validateLeaseRenewal(serving.Owner, duration); err != nil {
+		return recordplatform.ServingLeaseV1{}, err
+	}
+	tx, err := repository.startTransaction(ctx)
+	if err != nil {
+		return recordplatform.ServingLeaseV1{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := repository.admit(ctx, tx); err != nil {
+		return recordplatform.ServingLeaseV1{}, err
+	}
+	epoch, err := lockContentDeliveryEpochForFence(ctx, tx, serving.Object)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return recordplatform.ServingLeaseV1{}, recordplatform.ErrLostOwnerLease
+	}
+	if err != nil {
+		return recordplatform.ServingLeaseV1{}, fmt.Errorf("lock content delivery epoch for serving lease renewal: %w", err)
+	}
+	if recordplatform.ContentEpoch(epoch) != serving.CapturedEpoch {
+		return recordplatform.ServingLeaseV1{}, recordplatform.ErrLostOwnerLease
+	}
+	deletionFence, err := lockDeletionFenceLeaseForFence(ctx, tx, serving.Object)
+	if err != nil {
+		return recordplatform.ServingLeaseV1{}, fmt.Errorf("lock deletion fence for serving lease renewal: %w", err)
+	}
+	if deletionFence.live {
+		return recordplatform.ServingLeaseV1{}, recordplatform.ErrLostOwnerLease
+	}
+	contentLease, err := lockObjectContentLeaseForFence(ctx, tx, serving.Object)
+	if err != nil {
+		return recordplatform.ServingLeaseV1{}, fmt.Errorf("lock object content lease for serving lease renewal: %w", err)
+	}
+	if !contentLease.live || contentLease.owner != serving.Owner {
+		return recordplatform.ServingLeaseV1{}, recordplatform.ErrLostOwnerLease
+	}
+	renewedOwner, err := scanRenewedOwnerLease(tx.QueryRow(ctx, renewObjectContentLeaseSQL,
+		serving.Object.ProjectID,
+		serving.Object.ObjectKind,
+		serving.Object.ObjectID,
+		serving.Owner.OwnerID,
+		serving.Owner.Generation,
+		duration.Microseconds(),
+		serving.Owner.ExpiresAt,
+	))
+	if err != nil {
+		return recordplatform.ServingLeaseV1{}, fmt.Errorf("renew serving object content lease: %w", err)
+	}
+	renewed, err := recordplatform.NewServingLeaseV1(
+		recordplatform.ObjectContentLeaseV1{Object: serving.Object, Owner: renewedOwner},
+		serving.CapturedEpoch,
+	)
+	if err != nil {
+		return recordplatform.ServingLeaseV1{}, err
+	}
+	if err := assertServingLeaseInTransaction(ctx, tx, renewed); err != nil {
+		return recordplatform.ServingLeaseV1{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return recordplatform.ServingLeaseV1{}, fmt.Errorf("commit serving lease renewal transaction: %w", err)
+	}
+	return renewed, nil
+}
+
 // ReleaseObjectContentLease removes the exact live object-content owner.
 func (repository *PostgresRecordPlatformRepository) ReleaseObjectContentLease(ctx context.Context, object recordplatform.ObjectRef, owner recordplatform.OwnerLease) error {
 	return repository.releaseObjectLease(ctx, object, owner, releaseObjectContentLeaseSQL)

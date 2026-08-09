@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,6 +22,39 @@ func TestLocalBlobStoreConformance(t *testing.T) {
 		}
 		return store
 	})
+}
+
+func TestLocalBlobStorePutRejectsTypedNilReaderBeforeFilesystemSideEffects(t *testing.T) {
+	t.Parallel()
+
+	cutpointCalls := 0
+	store, err := newLocalBlobStore(t.TempDir(), localBlobHooks{
+		cutpoint: func(localBlobCutpoint) error {
+			cutpointCalls++
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("newLocalBlobStore() error = %v", err)
+	}
+	content := []byte("typed-nil local Blob reader")
+	var typedNil *bytes.Reader
+	var reader io.Reader = typedNil
+
+	err, panicValue := captureAttachmentCallPanic(func() error {
+		_, err := store.Put(context.Background(), blobPutRequest(content), reader)
+		return err
+	})
+	if panicValue != nil {
+		t.Fatalf("Put(typed-nil reader) panic = %v after %d filesystem cutpoints; want ErrInvalidBlobRequest before side effects",
+			panicValue, cutpointCalls)
+	}
+	if !errors.Is(err, ErrInvalidBlobRequest) {
+		t.Fatalf("Put(typed-nil reader) error = %v, want ErrInvalidBlobRequest", err)
+	}
+	if cutpointCalls != 0 {
+		t.Fatalf("Put(typed-nil reader) filesystem cutpoint calls = %d, want 0", cutpointCalls)
+	}
 }
 
 func TestLocalBlobStoreUsesPrivateModesAndSingleConditionalPublish(t *testing.T) {

@@ -20,6 +20,7 @@ const (
 	s3BlobCleanupTimeout                = 30 * time.Second
 	s3BlobConditionalConflictAttempts   = 4
 	s3BlobConditionalConflictRetryDelay = 50 * time.Millisecond
+	s3BlobMaximumPresignedUploadTTL     = time.Hour
 )
 
 type S3BlobStore struct {
@@ -30,6 +31,8 @@ type S3BlobStore struct {
 
 var _ BlobStore = (*S3BlobStore)(nil)
 var _ TemporaryObjectStore = (*S3BlobStore)(nil)
+var _ TemporaryUploadPresigner = (*S3BlobStore)(nil)
+var _ BlobPublicationResolver = (*S3BlobStore)(nil)
 
 func NewS3BlobStore(client *minio.Client, bucket string) (*S3BlobStore, error) {
 	if client == nil || strings.TrimSpace(bucket) != bucket || s3utils.CheckValidBucketNameStrict(bucket) != nil {
@@ -40,6 +43,28 @@ func NewS3BlobStore(client *minio.Client, bucket string) (*S3BlobStore, error) {
 		core:   minio.Core{Client: client},
 		bucket: bucket,
 	}, nil
+}
+
+func (store *S3BlobStore) PresignTemporaryUpload(
+	ctx context.Context,
+	temporaryObjectKey string,
+	ttl time.Duration,
+) (string, string, []string, error) {
+	if ctx == nil || store == nil || store.client == nil || !validS3BlobTemporaryKey(temporaryObjectKey) ||
+		ttl < time.Second || ttl > s3BlobMaximumPresignedUploadTTL {
+		return "", "", nil, ErrInvalidBlobRequest
+	}
+	if err := ctx.Err(); err != nil {
+		return "", "", nil, err
+	}
+	if err := store.verifyBucketContract(ctx); err != nil {
+		return "", "", nil, err
+	}
+	uploadURL, err := store.client.PresignedPutObject(ctx, store.bucket, temporaryObjectKey, ttl)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("presign S3 Blob temporary upload: %w", err)
+	}
+	return uploadURL.String(), http.MethodPut, []string{}, nil
 }
 
 func (store *S3BlobStore) ResolveTemporaryVersion(
@@ -68,6 +93,77 @@ func (store *S3BlobStore) ResolveTemporaryVersion(
 	return TemporaryObjectVersion{Key: key, VersionID: info.VersionID}, nil
 }
 
+func (store *S3BlobStore) OpenTemporaryVersion(
+	ctx context.Context,
+	request TemporaryObjectReadRequest,
+) (io.ReadCloser, error) {
+	if ctx == nil || store == nil || store.client == nil || request.Validate() != nil ||
+		!validS3BlobTemporaryKey(request.Version.Key) || !validS3BlobVersionID(request.Version.VersionID) {
+		return nil, ErrInvalidBlobRequest
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := store.verifyBucketContract(ctx); err != nil {
+		return nil, err
+	}
+	if err := store.verifyCurrentTemporaryVersion(ctx, request.Version); err != nil {
+		return nil, err
+	}
+	object, info, _, err := store.core.GetObject(ctx, store.bucket, request.Version.Key, minio.GetObjectOptions{
+		VersionID: request.Version.VersionID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open exact S3 Blob temporary version: %w", store.mapS3BlobReadError(ctx, err))
+	}
+	if info.IsDeleteMarker || info.VersionID != request.Version.VersionID {
+		_ = object.Close()
+		return nil, ErrBlobVersionMismatch
+	}
+	if info.Size != request.ExpectedSizeBytes {
+		_ = object.Close()
+		return nil, ErrBlobSizeMismatch
+	}
+	return object, nil
+}
+
+func (store *S3BlobStore) PublishTemporaryVersion(
+	ctx context.Context,
+	request TemporaryObjectPublishRequest,
+) (ObjectVersion, error) {
+	if ctx == nil || store == nil || store.client == nil || request.Validate() != nil ||
+		!validS3BlobTemporaryKey(request.Version.Key) || !validS3BlobVersionID(request.Version.VersionID) {
+		return ObjectVersion{}, ErrInvalidBlobRequest
+	}
+	if err := ctx.Err(); err != nil {
+		return ObjectVersion{}, err
+	}
+	if err := store.verifyBucketContract(ctx); err != nil {
+		return ObjectVersion{}, err
+	}
+	if err := store.verifyCurrentTemporaryVersion(ctx, request.Version); err != nil {
+		return ObjectVersion{}, err
+	}
+	putRequest := PutRequest{
+		ExpectedSHA256: request.ExpectedSHA256, ExpectedSizeBytes: request.ExpectedSizeBytes,
+		TemporaryKey: request.Version.Key,
+	}
+	temporary := ObjectVersion{
+		Key: request.Version.Key, VersionID: request.Version.VersionID,
+		SHA256: request.ExpectedSHA256, SizeBytes: request.ExpectedSizeBytes,
+	}
+	published, err := store.publishExactTemporary(
+		ctx, temporary, "sha256/"+hexDigest(request.ExpectedSHA256), putRequest,
+	)
+	if err != nil {
+		return ObjectVersion{}, err
+	}
+	if err := store.verifyCurrentTemporaryVersion(ctx, request.Version); err != nil {
+		return ObjectVersion{}, err
+	}
+	return published, nil
+}
+
 func (store *S3BlobStore) DeleteTemporaryVersion(
 	ctx context.Context,
 	version TemporaryObjectVersion,
@@ -82,7 +178,9 @@ func (store *S3BlobStore) DeleteTemporaryVersion(
 	if err := store.verifyBucketContract(ctx); err != nil {
 		return err
 	}
-	if err := store.verifyCurrentTemporaryVersion(ctx, version); err != nil {
+	if err := store.verifyCurrentTemporaryVersion(ctx, version); errors.Is(err, ErrBlobNotFound) {
+		return nil
+	} else if err != nil {
 		return err
 	}
 	return store.removeTemporary(ctx, version.Key, version.VersionID)
@@ -122,7 +220,7 @@ func (store *S3BlobStore) Put(
 	request PutRequest,
 	reader io.Reader,
 ) (version ObjectVersion, resultErr error) {
-	if ctx == nil || store == nil || store.client == nil || reader == nil || request.Validate() != nil ||
+	if ctx == nil || store == nil || store.client == nil || nilUploadServiceDependency(reader) || request.Validate() != nil ||
 		!validS3BlobTemporaryKey(request.TemporaryKey) {
 		return ObjectVersion{}, ErrInvalidBlobRequest
 	}
@@ -135,6 +233,9 @@ func (store *S3BlobStore) Put(
 	temporaryKey := request.TemporaryKey
 	temporaryVersionID := ""
 	defer func() {
+		if !validS3BlobCleanupVersionID(temporaryVersionID) {
+			return
+		}
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s3BlobCleanupTimeout)
 		defer cancel()
 		if cleanupErr := store.removeTemporary(cleanupCtx, temporaryKey, temporaryVersionID); cleanupErr != nil {
@@ -263,6 +364,29 @@ func (store *S3BlobStore) Stat(ctx context.Context, version ObjectVersion) (Obje
 		return ObjectInfo{}, err
 	}
 	return ObjectInfo{Version: version}, nil
+}
+
+// ResolveBlobPublicationObject performs one exact final-key lookup and then
+// re-verifies the bytes under the observed current version.  It deliberately
+// does not list keys or versions.
+func (store *S3BlobStore) ResolveBlobPublicationObject(
+	ctx context.Context,
+	target BlobPublicationTarget,
+) (ObjectVersion, error) {
+	if ctx == nil || store == nil || store.client == nil || target.Validate() != nil ||
+		target.BackendKind != BackendKindS3 {
+		return ObjectVersion{}, ErrInvalidBlobPublicationRequest
+	}
+	if err := store.verifyBucketContract(ctx); err != nil {
+		return ObjectVersion{}, err
+	}
+	version, err := store.existingDigestVersion(ctx, target.Key, PutRequest{
+		ExpectedSHA256: target.SHA256, ExpectedSizeBytes: target.SizeBytes,
+	})
+	if err != nil {
+		return ObjectVersion{}, err
+	}
+	return version, nil
 }
 
 func (store *S3BlobStore) Delete(
@@ -574,25 +698,15 @@ func (store *S3BlobStore) verifyExactVersion(
 }
 
 func (store *S3BlobStore) removeTemporary(ctx context.Context, key, versionID string) error {
-	if versionID == "" {
-		info, err := store.client.StatObject(ctx, store.bucket, key, minio.StatObjectOptions{})
-		if err != nil {
-			if isS3CurrentObjectMissing(err) {
-				return store.verifyBucketVersioning(ctx)
-			}
-			return fmt.Errorf("stat S3 Blob temporary object for cleanup: %w", err)
-		}
-		versionID = info.VersionID
+	if !validS3BlobCleanupVersionID(versionID) {
+		return ErrInvalidBlobStoreConfig
 	}
-	if validS3BlobCleanupVersionID(versionID) {
-		if err := store.client.RemoveObject(ctx, store.bucket, key, minio.RemoveObjectOptions{
-			VersionID: versionID,
-		}); err != nil {
-			return fmt.Errorf("remove exact S3 Blob temporary version: %w", err)
-		}
-		return store.requireVersionAbsent(ctx, key, versionID)
+	if err := store.client.RemoveObject(ctx, store.bucket, key, minio.RemoveObjectOptions{
+		VersionID: versionID,
+	}); err != nil {
+		return fmt.Errorf("remove exact S3 Blob temporary version: %w", err)
 	}
-	return ErrInvalidBlobStoreConfig
+	return store.requireVersionAbsent(ctx, key, versionID)
 }
 
 func (store *S3BlobStore) requireVersionAbsent(ctx context.Context, key, versionID string) error {

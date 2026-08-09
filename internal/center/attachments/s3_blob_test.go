@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -45,6 +46,131 @@ func TestNewS3BlobStoreRejectsInvalidConfiguration(t *testing.T) {
 				t.Fatalf("NewS3BlobStore() error = %v, want ErrInvalidBlobStoreConfig", err)
 			}
 		})
+	}
+}
+
+func TestS3BlobStorePutRejectsTypedNilReaderBeforeBackendAccess(t *testing.T) {
+	t.Parallel()
+
+	backendRequests := 0
+	client, err := minio.New("s3.example.test", &minio.Options{
+		Creds: credentials.NewStaticV4("test-access", "test-secret", ""),
+		Transport: s3BlobRoundTripperFunc(func(*http.Request) (*http.Response, error) {
+			backendRequests++
+			return nil, errors.New("unexpected backend access")
+		}),
+		MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("minio.New() error = %v", err)
+	}
+	store, err := NewS3BlobStore(client, "houfeng-blobs")
+	if err != nil {
+		t.Fatalf("NewS3BlobStore() error = %v", err)
+	}
+	content := []byte("typed-nil S3 Blob reader")
+	request := blobPutRequest(content)
+	request.TemporaryKey = s3BlobTemporaryPrefix + strings.Repeat("4", sha256.Size*2)
+	var typedNil *bytes.Reader
+	var reader io.Reader = typedNil
+
+	err, panicValue := captureAttachmentCallPanic(func() error {
+		_, err := store.Put(context.Background(), request, reader)
+		return err
+	})
+	if panicValue != nil {
+		t.Fatalf("Put(typed-nil reader) panic = %v after %d backend requests; want ErrInvalidBlobRequest before backend access",
+			panicValue, backendRequests)
+	}
+	if !errors.Is(err, ErrInvalidBlobRequest) {
+		t.Fatalf("Put(typed-nil reader) error = %v, want ErrInvalidBlobRequest", err)
+	}
+	if backendRequests != 0 {
+		t.Fatalf("Put(typed-nil reader) backend requests = %d, want 0", backendRequests)
+	}
+}
+
+func TestS3BlobStorePresignTemporaryUploadRejectsSubSecondTTLBeforeBackendCall(t *testing.T) {
+	backendCalls := 0
+	client, err := minio.New("s3.invalid", &minio.Options{
+		Creds: credentials.NewStaticV4("test-access", "test-secret", ""),
+		Transport: s3BlobRoundTripperFunc(func(*http.Request) (*http.Response, error) {
+			backendCalls++
+			return nil, errors.New("unexpected backend call")
+		}),
+	})
+	if err != nil {
+		t.Fatalf("minio.New() error = %v", err)
+	}
+	store, err := NewS3BlobStore(client, "houfeng-blobs")
+	if err != nil {
+		t.Fatalf("NewS3BlobStore() error = %v", err)
+	}
+	const temporaryKey = "temporary/4444444444444444444444444444444444444444444444444444444444444444"
+
+	uploadURL, method, requiredHeaders, err := store.PresignTemporaryUpload(
+		context.Background(), temporaryKey, 500*time.Millisecond,
+	)
+	if !errors.Is(err, ErrInvalidBlobRequest) {
+		t.Fatalf("PresignTemporaryUpload(sub-second TTL) error = %v, want ErrInvalidBlobRequest", err)
+	}
+	if uploadURL != "" || method != "" || requiredHeaders != nil || backendCalls != 0 {
+		t.Fatalf("PresignTemporaryUpload(sub-second TTL) = %q/%q/%#v backendCalls=%d",
+			uploadURL, method, requiredHeaders, backendCalls)
+	}
+}
+
+func TestS3BlobStorePresignedTemporaryUploadAcceptsUnauthenticatedPut(t *testing.T) {
+	requireMinIOIntegration(t)
+	client, bucket := newMinIOBlobFixture(t)
+	store, err := NewS3BlobStore(client, bucket)
+	if err != nil {
+		t.Fatalf("NewS3BlobStore() error = %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	const temporaryKey = "temporary/3333333333333333333333333333333333333333333333333333333333333333"
+
+	uploadURL, method, requiredHeaders, err := store.PresignTemporaryUpload(ctx, temporaryKey, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("PresignTemporaryUpload() error = %v", err)
+	}
+	if uploadURL == "" || method != http.MethodPut || requiredHeaders == nil || len(requiredHeaders) != 0 {
+		t.Fatalf("PresignTemporaryUpload() = %q/%q/%#v", uploadURL, method, requiredHeaders)
+	}
+	content := []byte("presigned temporary upload bytes")
+	request, err := http.NewRequestWithContext(ctx, method, uploadURL, bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("http.NewRequestWithContext() error = %v", err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("unauthenticated presigned PUT error = %v", err)
+	}
+	if response.Body != nil {
+		defer response.Body.Close()
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("unauthenticated presigned PUT status = %d body=%q", response.StatusCode, body)
+	}
+	resolved, err := store.ResolveTemporaryVersion(ctx, temporaryKey)
+	if err != nil {
+		t.Fatalf("ResolveTemporaryVersion() error = %v", err)
+	}
+	if resolved.Key != temporaryKey || resolved.VersionID == "" {
+		t.Fatalf("ResolveTemporaryVersion() = %#v, want exact key and version", resolved)
+	}
+	reader, err := store.OpenTemporaryVersion(ctx, TemporaryObjectReadRequest{
+		Version: resolved, ExpectedSizeBytes: int64(len(content)),
+	})
+	if err != nil {
+		t.Fatalf("OpenTemporaryVersion() error = %v", err)
+	}
+	got, readErr := io.ReadAll(reader)
+	closeErr := reader.Close()
+	if readErr != nil || closeErr != nil || !bytes.Equal(got, content) {
+		t.Fatalf("presigned temporary bytes = %q, read/close errors = %v/%v", got, readErr, closeErr)
 	}
 }
 
@@ -374,6 +500,95 @@ func TestS3TemporaryObjectStoreResolvesKnownKeyAndDeletesExactVersion(t *testing
 		t.Fatalf("DeleteTemporaryVersion() error = %v", err)
 	}
 	assertNoS3TemporaryVersions(t, client, bucket)
+	if err := store.DeleteTemporaryVersion(context.Background(), resolved); err != nil {
+		t.Fatalf("DeleteTemporaryVersion(replay) error = %v", err)
+	}
+}
+
+func TestS3TemporaryObjectStoreReadsAndPublishesExactVersionWithoutDeletingSource(t *testing.T) {
+	requireMinIOIntegration(t)
+	client, bucket := newMinIOBlobFixture(t)
+	store, err := NewS3BlobStore(client, bucket)
+	if err != nil {
+		t.Fatalf("NewS3BlobStore() error = %v", err)
+	}
+	key, err := newS3BlobTemporaryKey()
+	if err != nil {
+		t.Fatalf("newS3BlobTemporaryKey() error = %v", err)
+	}
+	content := []byte("direct upload exact temporary publication")
+	upload, err := client.PutObject(
+		context.Background(), bucket, key, bytes.NewReader(content), int64(len(content)),
+		minio.PutObjectOptions{ContentType: "application/octet-stream"},
+	)
+	if err != nil {
+		t.Fatalf("PutObject(temporary) error = %v", err)
+	}
+	temporary := TemporaryObjectVersion{Key: key, VersionID: upload.VersionID}
+	reader, err := store.OpenTemporaryVersion(context.Background(), TemporaryObjectReadRequest{
+		Version: temporary, ExpectedSizeBytes: int64(len(content)),
+	})
+	if err != nil {
+		t.Fatalf("OpenTemporaryVersion() error = %v", err)
+	}
+	read, readErr := io.ReadAll(reader)
+	closeErr := reader.Close()
+	if readErr != nil || closeErr != nil || !bytes.Equal(read, content) {
+		t.Fatalf("OpenTemporaryVersion() = (%q, %v, %v)", read, readErr, closeErr)
+	}
+	digest := sha256.Sum256(content)
+	published, err := store.PublishTemporaryVersion(context.Background(), TemporaryObjectPublishRequest{
+		Version: temporary, ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(content)),
+	})
+	if err != nil {
+		t.Fatalf("PublishTemporaryVersion() error = %v", err)
+	}
+	if published.Key != "sha256/"+hexDigest(digest) || published.SHA256 != digest ||
+		published.SizeBytes != int64(len(content)) {
+		t.Fatalf("PublishTemporaryVersion() = %#v", published)
+	}
+	current, err := store.ResolveTemporaryVersion(context.Background(), key)
+	if err != nil || current != temporary {
+		t.Fatalf("ResolveTemporaryVersion(after publish) = (%#v, %v), want %#v", current, err, temporary)
+	}
+}
+
+func TestS3TemporaryObjectStoreRejectsReplacedVersionBeforeReadOrPublish(t *testing.T) {
+	requireMinIOIntegration(t)
+	client, bucket := newMinIOBlobFixture(t)
+	store, err := NewS3BlobStore(client, bucket)
+	if err != nil {
+		t.Fatalf("NewS3BlobStore() error = %v", err)
+	}
+	key, err := newS3BlobTemporaryKey()
+	if err != nil {
+		t.Fatalf("newS3BlobTemporaryKey() error = %v", err)
+	}
+	put := func(content []byte) minio.UploadInfo {
+		t.Helper()
+		upload, putErr := client.PutObject(
+			context.Background(), bucket, key, bytes.NewReader(content), int64(len(content)),
+			minio.PutObjectOptions{ContentType: "application/octet-stream"},
+		)
+		if putErr != nil {
+			t.Fatalf("PutObject(temporary) error = %v", putErr)
+		}
+		return upload
+	}
+	staleContent := []byte("stale direct upload")
+	stale := put(staleContent)
+	_ = put([]byte("replacement direct upload"))
+	version := TemporaryObjectVersion{Key: key, VersionID: stale.VersionID}
+	if _, err := store.OpenTemporaryVersion(context.Background(), TemporaryObjectReadRequest{
+		Version: version, ExpectedSizeBytes: int64(len(staleContent)),
+	}); !errors.Is(err, ErrBlobVersionMismatch) {
+		t.Fatalf("OpenTemporaryVersion(stale) error = %v, want ErrBlobVersionMismatch", err)
+	}
+	if _, err := store.PublishTemporaryVersion(context.Background(), TemporaryObjectPublishRequest{
+		Version: version, ExpectedSHA256: sha256.Sum256(staleContent), ExpectedSizeBytes: int64(len(staleContent)),
+	}); !errors.Is(err, ErrBlobVersionMismatch) {
+		t.Fatalf("PublishTemporaryVersion(stale) error = %v, want ErrBlobVersionMismatch", err)
+	}
 }
 
 func TestS3TemporaryObjectStoreRejectsMissingExactVersionBeforeBackendAccess(t *testing.T) {
@@ -1051,7 +1266,8 @@ func TestS3BlobStoreRemovesExactNullTemporaryVersion(t *testing.T) {
 	assertNoS3TemporaryVersions(t, client, bucket)
 }
 
-func TestS3BlobStoreTemporaryCleanupNeverDeletesWithoutExactVersion(t *testing.T) {
+func TestS3BlobStoreTemporaryCleanupNeverResolvesOrDeletesWithoutExactVersion(t *testing.T) {
+	currentStatRequests := 0
 	deleteRequests := 0
 	client, err := minio.New("s3.example.test", &minio.Options{
 		Creds:        credentials.NewStaticV4("test-access", "test-secret", ""),
@@ -1059,19 +1275,26 @@ func TestS3BlobStoreTemporaryCleanupNeverDeletesWithoutExactVersion(t *testing.T
 		Region:       "us-east-1",
 		BucketLookup: minio.BucketLookupPath,
 		Transport: s3BlobRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
-			switch request.Method {
-			case http.MethodHead:
+			switch {
+			case request.Method == http.MethodGet && request.URL.Query().Has("versioning"):
+				body := `<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`
+				return s3BlobTestXMLResponse(request, http.StatusOK, body), nil
+			case request.Method == http.MethodHead && request.URL.Query().Has("versionId"):
+				return s3BlobTestErrorResponse(request, http.StatusNotFound, minio.NoSuchVersion), nil
+			case request.Method == http.MethodHead:
+				currentStatRequests++
 				return &http.Response{
 					StatusCode: http.StatusOK,
 					Header: http.Header{
-						"Content-Length": {"0"},
-						"ETag":           {`"empty"`},
-						"Last-Modified":  {"Tue, 04 Aug 2026 00:00:00 GMT"},
+						"Content-Length":   {"11"},
+						"ETag":             {`"replacement"`},
+						"Last-Modified":    {"Tue, 04 Aug 2026 00:00:00 GMT"},
+						"X-Amz-Version-Id": {"replacement-version"},
 					},
 					Body:    http.NoBody,
 					Request: request,
 				}, nil
-			case http.MethodDelete:
+			case request.Method == http.MethodDelete:
 				deleteRequests++
 				return &http.Response{
 					StatusCode: http.StatusNoContent,
@@ -1093,12 +1316,93 @@ func TestS3BlobStoreTemporaryCleanupNeverDeletesWithoutExactVersion(t *testing.T
 		t.Fatalf("NewS3BlobStore() error = %v", err)
 	}
 
-	err = store.removeTemporary(context.Background(), s3BlobTemporaryPrefix+"unknown-version", "")
+	err = store.removeTemporary(
+		context.Background(),
+		s3BlobTemporaryPrefix+strings.Repeat("0", sha256.Size*2),
+		"",
+	)
 	if !errors.Is(err, ErrInvalidBlobStoreConfig) {
 		t.Fatalf("removeTemporary(missing exact version) error = %v, want ErrInvalidBlobStoreConfig", err)
 	}
+	if currentStatRequests != 0 {
+		t.Fatalf("removeTemporary(missing exact version) current Stat requests = %d, want 0", currentStatRequests)
+	}
 	if deleteRequests != 0 {
 		t.Fatalf("removeTemporary(missing exact version) DELETE requests = %d, want 0", deleteRequests)
+	}
+}
+
+func TestS3BlobStorePutUnknownTemporaryVersionLeavesCurrentObjectForRecovery(t *testing.T) {
+	const bucket = "houfeng-blobs"
+	currentStatRequests := 0
+	deleteRequests := 0
+	client, err := minio.New("s3.example.test", &minio.Options{
+		Creds:        credentials.NewStaticV4("test-access", "test-secret", ""),
+		Secure:       true,
+		Region:       "us-east-1",
+		BucketLookup: minio.BucketLookupPath,
+		Transport: s3BlobRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
+			switch {
+			case request.Method == http.MethodGet && request.URL.Query().Has("versioning"):
+				body := `<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`
+				return s3BlobTestXMLResponse(request, http.StatusOK, body), nil
+			case request.Method == http.MethodGet && request.URL.Query().Has("object-lock"):
+				return s3BlobTestErrorResponse(request, http.StatusNotFound, "ObjectLockConfigurationNotFoundError"), nil
+			case request.Method == http.MethodPut:
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"ETag": {`"committed-with-unknown-version"`}},
+					Body:       http.NoBody,
+					Request:    request,
+				}, nil
+			case request.Method == http.MethodHead && request.URL.Query().Has("versionId"):
+				return s3BlobTestErrorResponse(request, http.StatusNotFound, minio.NoSuchVersion), nil
+			case request.Method == http.MethodHead:
+				currentStatRequests++
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header: http.Header{
+						"Content-Length":   {"11"},
+						"ETag":             {`"replacement"`},
+						"Last-Modified":    {"Tue, 04 Aug 2026 00:00:00 GMT"},
+						"X-Amz-Version-Id": {"replacement-version"},
+					},
+					Body:    http.NoBody,
+					Request: request,
+				}, nil
+			case request.Method == http.MethodDelete:
+				deleteRequests++
+				return &http.Response{
+					StatusCode: http.StatusNoContent,
+					Header:     make(http.Header),
+					Body:       http.NoBody,
+					Request:    request,
+				}, nil
+			default:
+				return nil, fmt.Errorf("unexpected S3 request: %s %s", request.Method, request.URL.Redacted())
+			}
+		}),
+		MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("minio.New() error = %v", err)
+	}
+	store, err := NewS3BlobStore(client, bucket)
+	if err != nil {
+		t.Fatalf("NewS3BlobStore() error = %v", err)
+	}
+	content := []byte("unknown temporary version")
+	request := blobPutRequest(content)
+	request.TemporaryKey = s3BlobTemporaryPrefix + strings.Repeat("1", sha256.Size*2)
+
+	if _, err := store.Put(context.Background(), request, bytes.NewReader(content)); !errors.Is(err, ErrInvalidBlobStoreConfig) {
+		t.Fatalf("Put(unknown temporary version) error = %v, want ErrInvalidBlobStoreConfig", err)
+	}
+	if currentStatRequests != 0 {
+		t.Fatalf("Put(unknown temporary version) current Stat requests = %d, want 0", currentStatRequests)
+	}
+	if deleteRequests != 0 {
+		t.Fatalf("Put(unknown temporary version) DELETE requests = %d, want 0", deleteRequests)
 	}
 }
 
@@ -1227,6 +1531,88 @@ func TestS3BlobStoreConcurrentPublicationCreatesOneDigestVersion(t *testing.T) {
 	assertNoS3TemporaryVersions(t, client, bucket)
 }
 
+func TestS3BlobStorePublicationResolverUsesExactCurrentVersion(t *testing.T) {
+	requireMinIOIntegration(t)
+	client, bucket := newMinIOBlobFixture(t)
+	store, err := NewS3BlobStore(client, bucket)
+	if err != nil {
+		t.Fatalf("NewS3BlobStore() error = %v", err)
+	}
+	ctx := context.Background()
+	putCurrent := func(t *testing.T, key string, content []byte) minio.UploadInfo {
+		t.Helper()
+		info, err := client.PutObject(ctx, bucket, key, bytes.NewReader(content), int64(len(content)), minio.PutObjectOptions{
+			ContentType: "application/octet-stream",
+		})
+		if err != nil {
+			t.Fatalf("PutObject(%q) error = %v", key, err)
+		}
+		if info.VersionID == "" {
+			t.Fatalf("PutObject(%q) returned empty VersionID", key)
+		}
+		return info
+	}
+	targetFor := func(content []byte) BlobPublicationTarget {
+		digest := sha256.Sum256(content)
+		return BlobPublicationTarget{
+			Key: "sha256/" + hexDigest(digest), SHA256: digest,
+			SizeBytes: int64(len(content)), BackendKind: BackendKindS3,
+		}
+	}
+
+	t.Run("exact key missing", func(t *testing.T) {
+		target := targetFor([]byte("missing publication object"))
+		if _, err := store.ResolveBlobPublicationObject(ctx, target); !errors.Is(err, ErrBlobNotFound) {
+			t.Fatalf("ResolveBlobPublicationObject(missing) error = %v, want ErrBlobNotFound", err)
+		}
+	})
+
+	t.Run("size mismatch", func(t *testing.T) {
+		content := []byte("publication resolver size mismatch")
+		target := targetFor(content)
+		putCurrent(t, target.Key, content)
+		target.SizeBytes++
+		_, err := store.ResolveBlobPublicationObject(ctx, target)
+		if !errors.Is(err, ErrBlobConflict) || !errors.Is(err, ErrBlobSizeMismatch) {
+			t.Fatalf("ResolveBlobPublicationObject(size mismatch) error = %v, want ErrBlobConflict + ErrBlobSizeMismatch", err)
+		}
+	})
+
+	t.Run("hash mismatch", func(t *testing.T) {
+		content := []byte("publication resolver hash mismatch")
+		target := targetFor(content)
+		corrupt := bytes.Repeat([]byte{'x'}, len(content))
+		putCurrent(t, target.Key, corrupt)
+		_, err := store.ResolveBlobPublicationObject(ctx, target)
+		if !errors.Is(err, ErrBlobConflict) || !errors.Is(err, ErrBlobHashMismatch) {
+			t.Fatalf("ResolveBlobPublicationObject(hash mismatch) error = %v, want ErrBlobConflict + ErrBlobHashMismatch", err)
+		}
+	})
+
+	t.Run("current version drift", func(t *testing.T) {
+		content := []byte("publication resolver current version")
+		target := targetFor(content)
+		first := putCurrent(t, target.Key, content)
+		second := putCurrent(t, target.Key, content)
+		if first.VersionID == second.VersionID {
+			t.Fatalf("versioned MinIO overwrites returned identical VersionID %q", first.VersionID)
+		}
+		resolved, err := store.ResolveBlobPublicationObject(ctx, target)
+		if err != nil {
+			t.Fatalf("ResolveBlobPublicationObject(current version) error = %v", err)
+		}
+		if resolved.VersionID != second.VersionID || resolved.Key != target.Key ||
+			resolved.SHA256 != target.SHA256 || resolved.SizeBytes != target.SizeBytes {
+			t.Fatalf("resolved current object = %#v, want VersionID %q and target %#v", resolved, second.VersionID, target)
+		}
+		old := resolved
+		old.VersionID = first.VersionID
+		if _, err := store.Stat(ctx, old); !errors.Is(err, ErrBlobVersionMismatch) {
+			t.Fatalf("Stat(noncurrent publication version) error = %v, want ErrBlobVersionMismatch", err)
+		}
+	})
+}
+
 func requireMinIOIntegration(t *testing.T) {
 	t.Helper()
 	if os.Getenv(minIOIntegrationEnvironment) != "1" {
@@ -1272,6 +1658,28 @@ func newMinIOBlobFixtureWithOptions(t *testing.T, objectLocking bool) (*minio.Cl
 	if err := client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{ObjectLocking: objectLocking}); err != nil {
 		t.Fatalf("MakeBucket() error = %v", err)
 	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		for object := range client.ListObjects(cleanupCtx, bucket, minio.ListObjectsOptions{
+			Recursive:    true,
+			WithVersions: true,
+		}) {
+			if object.Err != nil {
+				t.Errorf("ListObjects(cleanup) error = %v", object.Err)
+				continue
+			}
+			if err := client.RemoveObject(cleanupCtx, bucket, object.Key, minio.RemoveObjectOptions{
+				VersionID:        object.VersionID,
+				GovernanceBypass: true,
+			}); err != nil {
+				t.Errorf("RemoveObject(cleanup) error = %v", err)
+			}
+		}
+		if err := client.RemoveBucket(cleanupCtx, bucket); err != nil {
+			t.Errorf("RemoveBucket(cleanup) error = %v", err)
+		}
+	})
 	if !objectLocking {
 		if err := client.EnableVersioning(ctx, bucket); err != nil {
 			t.Fatalf("EnableVersioning() error = %v", err)
@@ -1297,29 +1705,6 @@ func newMinIOBlobFixtureWithOptions(t *testing.T, objectLocking bool) (*minio.Cl
 	}(); err != nil {
 		t.Fatalf("verify MinIO fixture bucket versioning: %v", err)
 	}
-
-	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cleanupCancel()
-		for object := range client.ListObjects(cleanupCtx, bucket, minio.ListObjectsOptions{
-			Recursive:    true,
-			WithVersions: true,
-		}) {
-			if object.Err != nil {
-				t.Errorf("ListObjects(cleanup) error = %v", object.Err)
-				continue
-			}
-			if err := client.RemoveObject(cleanupCtx, bucket, object.Key, minio.RemoveObjectOptions{
-				VersionID:        object.VersionID,
-				GovernanceBypass: true,
-			}); err != nil {
-				t.Errorf("RemoveObject(cleanup) error = %v", err)
-			}
-		}
-		if err := client.RemoveBucket(cleanupCtx, bucket); err != nil {
-			t.Errorf("RemoveBucket(cleanup) error = %v", err)
-		}
-	})
 	return client, bucket
 }
 

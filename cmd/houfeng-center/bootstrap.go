@@ -172,6 +172,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	var recordsHandler http.Handler
 	var recordDraftsHandler http.Handler
 	var recordDeletionsHandler http.Handler
+	var attachmentUploadsHandler http.Handler
+	var attachmentsHandler http.Handler
 	if recordsEnabled {
 		recordsHandler, recordDraftsHandler, recordDeletionsHandler, err = newRecordsHTTPHandlers(
 			db.Pool(),
@@ -183,6 +185,11 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 			db.Close()
 			return nil, nil, fmt.Errorf("create records handlers: %w", err)
 		}
+		// Storage configuration and production upload/read dependencies are
+		// wired by later attachment tasks. Register the transport now but keep
+		// every operation explicitly unavailable until those dependencies exist.
+		attachmentUploadsHandler = handlers.AttachmentUploads(nil)
+		attachmentsHandler = handlers.Attachments()
 	}
 
 	router := deps.newRouter(centerhttp.RouterOptions{
@@ -197,6 +204,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		RecordsHandler:                              recordsHandler,
 		RecordDraftsHandler:                         recordDraftsHandler,
 		RecordDeletionsHandler:                      recordDeletionsHandler,
+		AttachmentUploadsHandler:                    attachmentUploadsHandler,
+		AttachmentsHandler:                          attachmentsHandler,
 		AssetDomainsCollectionHandler:               handlers.AssetDomainsCollection(assetDomainRepo),
 		AssetServicesCollectionHandler:              handlers.AssetServicesCollection(assetServiceRepo),
 		AssetDecisionOverviewHandler:                handlers.AssetDecisionOverview(assetDecisionRepo),

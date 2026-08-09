@@ -107,7 +107,7 @@ func recordsCoreAppACLCurrentPrivileges(string) []AppACLPrivilege {
 }
 
 func recordAttachmentsAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
-	objects := make([]AppACLManagedObjectR1, 0, 11)
+	objects := make([]AppACLManagedObjectR1, 0, 13)
 	for _, table := range []string{
 		"blob_objects",
 		"attachment_quota_accounts",
@@ -118,6 +118,8 @@ func recordAttachmentsAppACLCurrentMigrationFragment() AppACLCurrentMigrationFra
 		"attachment_processor_jobs",
 		"content_processor_workspaces",
 		"blob_gc_pins",
+		"blob_gc_deletions",
+		"blob_publication_intents",
 		"attachment_purge_receipts",
 		"content_workspace_purge_receipts",
 	} {
@@ -135,7 +137,7 @@ func recordAttachmentsAppACLCurrentMigrationFragment() AppACLCurrentMigrationFra
 }
 
 func recordAttachmentsAppACLCurrentPrivileges(string) []AppACLPrivilege {
-	privileges := make([]AppACLPrivilege, 0, 38)
+	privileges := make([]AppACLPrivilege, 0, 46)
 	appendTable := func(subject AppACLSubject, table string, kinds ...AppACLPrivilegeKind) {
 		for _, kind := range kinds {
 			privileges = append(privileges, AppACLPrivilege{
@@ -169,6 +171,10 @@ func recordAttachmentsAppACLCurrentPrivileges(string) []AppACLPrivilege {
 			AppACLPrivilegeSelect, AppACLPrivilegeInsert,
 			AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
 	}
+	appendTable(runtime, "blob_gc_deletions",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
+	appendTable(runtime, "blob_publication_intents",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
 	for _, table := range []string{
 		"attachment_purge_receipts",
 		"content_workspace_purge_receipts",
@@ -176,6 +182,8 @@ func recordAttachmentsAppACLCurrentPrivileges(string) []AppACLPrivilege {
 		appendTable(runtime, table, AppACLPrivilegeSelect, AppACLPrivilegeInsert)
 		appendTable(AppACLSubjectPlatformAdmin, table, AppACLPrivilegeSelect)
 	}
+	appendTable(AppACLSubjectPlatformAdmin, "blob_gc_deletions", AppACLPrivilegeSelect)
+	appendTable(AppACLSubjectPlatformAdmin, "blob_publication_intents", AppACLPrivilegeSelect)
 	return privileges
 }
 

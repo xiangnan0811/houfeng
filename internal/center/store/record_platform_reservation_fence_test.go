@@ -12,7 +12,7 @@ import (
 	"houfeng/internal/center/recordplatform"
 )
 
-func TestPostgresRecordPlatformFenceDeletionReservationLocksInRequiredOrderAndBindsOneGeneration(t *testing.T) {
+func TestPostgresRecordPlatformFenceDeletionReservationPersistsCancellationFenceWithLiveContentLease(t *testing.T) {
 	now := time.Date(2026, time.July, 24, 17, 0, 0, 0, time.UTC)
 	tx := &fakeRecordPlatformTx{}
 	tx.queryRow = func(_ context.Context, sql string, _ ...any) pgx.Row {
@@ -42,7 +42,7 @@ func TestPostgresRecordPlatformFenceDeletionReservationLocksInRequiredOrderAndBi
 				return nil
 			}}
 		case strings.Contains(sql, "from public.object_content_leases"):
-			return fakeRecordPlatformRow{scan: func(...any) error { return pgx.ErrNoRows }}
+			return liveObjectLeaseRow(now)
 		case strings.Contains(sql, "update public.content_delivery_epochs"):
 			return fakeRecordPlatformRow{scan: func(dest ...any) error {
 				*(dest[0].(*int64)) = 4
@@ -104,18 +104,16 @@ func TestPostgresRecordPlatformFenceDeletionReservationLocksInRequiredOrderAndBi
 	}
 }
 
-func TestPostgresRecordPlatformFenceDeletionReservationFailsClosedForMissingEpochAndLiveLeases(t *testing.T) {
+func TestPostgresRecordPlatformFenceDeletionReservationFailsClosedForMissingEpochAndLiveDeletionFence(t *testing.T) {
 	now := time.Date(2026, time.July, 24, 17, 0, 0, 0, time.UTC)
 	for _, test := range []struct {
 		name         string
 		wantErr      error
 		fenceLease   bool
-		objectLease  bool
 		missingEpoch bool
 	}{
 		{name: "missing content epoch", wantErr: recordplatform.ErrContentDeliveryEpochMissing, missingEpoch: true},
 		{name: "live deletion fence", wantErr: recordplatform.ErrDeletionFenceLeaseLive, fenceLease: true},
-		{name: "live object content lease", wantErr: recordplatform.ErrObjectContentLeaseLive, objectLease: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tx := &fakeRecordPlatformTx{}
@@ -134,10 +132,7 @@ func TestPostgresRecordPlatformFenceDeletionReservationFailsClosedForMissingEpoc
 					}
 					return liveDeletionFenceLeaseRow(now)
 				case strings.Contains(sql, "from public.object_content_leases"):
-					if !test.objectLease {
-						return fakeRecordPlatformRow{scan: func(...any) error { return pgx.ErrNoRows }}
-					}
-					return liveObjectLeaseRow(now)
+					return fakeRecordPlatformRow{scan: func(...any) error { return pgx.ErrNoRows }}
 				default:
 					return fakeRecordPlatformRow{scan: func(...any) error { return errors.New("unexpected mutation after fail-closed state") }}
 				}

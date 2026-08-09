@@ -77,6 +77,7 @@ Attachment references are ordered because the later material UI and Markdown ref
 - `attachment_processor_jobs`
 - `content_processor_workspaces`
 - `blob_gc_pins`
+- `blob_gc_deletions`
 - `attachment_purge_receipts`
 - `content_workspace_purge_receipts`
 
@@ -93,9 +94,25 @@ The migration uses checks/FKs/unique indexes for:
 - pins with bounded owner kind/expiry and exact object version;
 - one immutable purge receipt per operation/surface/object version.
 
+The original attachment Blob and the managed preview Blob are distinct durable
+identities. `record_attachments.blob_key/blob_object_version` remains the exact
+authorized original. Previewable profiles may additionally persist one primary
+managed preview through `preview_blob_key/preview_blob_object_version`, its
+allowlisted media type and exact byte size; those fields are all-null or
+all-present and reference `blob_objects`. This is the durable hand-off required
+by the later closed `original|preview` download variant. In this checkpoint the
+primary preview is a bounded metadata-free PNG for images, a bounded first-page
+PNG for PDF, and a bounded UTF-8 prefix for text; archives have no preview.
+
+Processor outcomes also persist a closed, content-free result code separately
+from `result_digest`. Retryable outcomes can therefore remain observable without
+storing scanner text, filenames, command output or content in PostgreSQL or
+logs. The allowed codes distinguish clean, malware, unsafe content, scanner
+unavailability, timeout and internal processing failure.
+
 `copied_from_attachment_id` and `content_workspace_purge_receipts.workspace_id` are detached provenance rather than live-row foreign keys. A source logical attachment may be purged while an authorized cross-record copy survives on the shared Blob, and an immutable workspace purge receipt survives terminal workspace/job/upload cleanup. Reverse indexes cover Blob-to-attachment, copy-source-to-copy, attachment-to-revision and Blob-to-pin lookups used by later quota, GC and deletion transactions.
 
-`0053` and the exact `AppACLCurrentMigrationFragment` are one atomic delivery. The exact 11 new tables are registered in the current managed surface; this migration adds no sequence or SQL function. Runtime/admin privileges, convergence, effective catalog and runtime admission tests change in the same checkpoint. There is no old-database upgrade route.
+`0053` and the exact `AppACLCurrentMigrationFragment` are one atomic delivery. The exact 12 new tables are registered in the current managed surface; this migration adds no sequence or SQL function. Runtime/admin privileges, convergence, effective catalog and runtime admission tests change in the same checkpoint. There is no old-database upgrade route.
 
 ## 4. Quota model
 
@@ -151,6 +168,13 @@ Admission first classifies extension + magic + MIME, applies byte and complexity
 - structurally inspect ZIP/TAR/GZIP/Zstandard, reject unsafe path, duplicate, link, encryption, nesting and expansion limits, then require ClamAV;
 - reject active/unknown content before publishing availability.
 
+The processor result binds the source Blob identity, profile, outcome code and
+optional preview Blob identity in a canonical digest. A successful image/PDF/text
+job cannot mark the logical attachment available until its required primary
+preview has been published and committed with that exact result. Archive success
+has no preview and requires a clean scanner verdict. The original object remains
+the downloadable source; a preview never silently replaces it.
+
 `cmd/houfeng-content-processor` only contains entrypoint and wiring. Domain behavior lives under `internal/center/attachments`. External commands use `exec.CommandContext` with fixed binaries/arguments and never invoke a shell. Processor workspaces are registered before any materialization; the worker claims with lease/attempt, writes only to its private workspace, publishes typed results, and leaves cleanup to an idempotent janitor that records a receipt for every terminal path.
 
 Compose/systemd configure non-root, read-only root, `cap_drop: ALL`, tmpfs workspace, disabled core dumps, no unnecessary network and health endpoints. A required scanner that is absent/unhealthy causes archive session creation to return stable unavailable before accepting bytes.
@@ -164,7 +188,9 @@ Compose/systemd configure non-root, read-only root, `cap_drop: ALL`, tmpfs works
 
 `POST .../complete` verifies backend version, actual bytes and idempotency, then queues processing; it never blocks on scanning. `GET /api/attachments/:id` returns safe metadata/status only. `GET .../content` returns original download or managed preview based on a closed query enum; it reauthorizes every request.
 
-Draft reads require the author. Record attachment reads resolve the owning record through existing current/historical authorization evidence and obtain a short content delivery lease. Revoke/reservation advances the delivery epoch and cancels streams. The handler checks cancellation before each write and never converts a partial forbidden stream into success. Headers use an ASCII/UTF-8 safe filename encoder, allowlisted content type, `Content-Disposition`, `X-Content-Type-Options: nosniff`, private no-store caching and restricted CSP.
+Draft reads require the author. Record attachment reads resolve the owning record through existing current/historical authorization evidence and obtain a content delivery lease whose duration never exceeds one second. A delivery-owned background renewal/cancel loop renews before expiry even while the Blob reader is blocked; renewal failure, owner/epoch drift, reservation, shutdown or expiry cancels and closes the source reader before another write. Database renewal uses the same content-epoch -> deletion-fence -> object-content-lease lock order as acquisition and reservation fencing, and atomically checks the captured epoch, absence of a live deletion fence and the exact owner tuple before extending it. After each bounded read, the delivery performs one final serving assertion before authorizing that chunk. The authoritative successful database read inside that final assertion is the chunk linearization point: a chunk whose assertion observed the pre-fence state may finish even if the concurrent fence commits before `writer.Write`, while every later chunk must obtain a new assertion. No database I/O is performed while holding the delivery state mutex, and neither a database lock nor that mutex is held across arbitrary writer I/O.
+
+Deletion execution may establish the provisional reservation/deletion fence while the old object-content lease is still live. That durable fence advances the delivery epoch and makes every later renewal/assertion fail, which actively drains the stream instead of waiting for a renewal loop to stop by accident. A final assertion that already linearized against the pre-fence state may authorize exactly that in-flight chunk; the fence forbids the next assertion and therefore the next chunk. Local `revoke`/`Close` linearizes through the delivery terminal state and prevents a chunk whose final assertion has not yet acquired write authorization, without waiting for a writer already in progress. This contract deliberately does not claim zero physical network bytes after the wall-clock fence commit, because satisfying that stronger claim would require a durable permit and cancellable transport held across arbitrary writer I/O. The deletion worker must not claim the provisional operation for ledger append until the exact object-content lease has been released or expired; with the one-second maximum this leaves a bounded crash path while preserving the rule that ledger append starts only after content delivery is drained. The handler checks cancellation before each write and never converts a partial forbidden stream into success. Headers use an ASCII/UTF-8 safe filename encoder, allowlisted content type, `Content-Disposition`, `X-Content-Type-Options: nosniff`, private no-store caching and restricted CSP.
 
 ## 8. Records Core integration
 
@@ -186,7 +212,39 @@ The attachment deletion adapter implements the existing closed name `record_atta
 
 Terminal cleanup is explicit and dependency-ordered: workspace, processor job, upload parts, upload and logical attachment rows are removed before an unselected expired draft is deleted. Content-free workspace purge receipts are intentionally independent of those mutable rows and remain as cleanup evidence.
 
-Ordinary GC uses a 24-hour orphan watermark and CAS against object version/ref/pin counts. Permanent deletion bypasses only the time watermark, never reference or pin checks.
+Blob GC uses the durable `blob_gc_deletions` protocol; external Blob deletion never runs while a PostgreSQL transaction holds locks:
+
+1. The claim transaction uses database time, serializes final-metadata and upload-part publication with table locks, rejects original/preview/revision/upload-part/active-pin references, removes only expired pins, and persists the exact key/version/hash/size/backend deletion fence.
+2. The same claim transaction deletes the exact `blob_objects` metadata and commits. Existing foreign keys plus the publication fence prevent new logical metadata, upload-part or pin references from crossing the claim.
+3. The worker performs exact-version `BlobStore.Delete` outside PostgreSQL. Exact absence is an idempotent physical success; any other failure retains the durable fence and schedules a bounded retry. A due retry or expired lease increments attempt and owner generation, so an old owner cannot complete a replacement claim.
+4. Completion compares deletion ID, owner, generation, observed lease and the complete Blob identity, then stores a content-free receipt digest and decrements physical quota in the same transaction. Completion replay does not decrement quota again, and `ResolveBlobGC` reads the terminal receipt after an uncertain commit acknowledgement.
+
+Ordinary GC requires both the caller watermark and the database-enforced 24-hour watermark. The permanent primitive targets one exact object and bypasses only this time predicate; it never bypasses references, pins or owner fencing. Ordinary GC receipts remain in `blob_gc_deletions`; they do not fabricate a `record_purge_operations` identity or reuse `attachment_purge_receipts`. The latter remains operation-scoped evidence owned by the Task 3.3 deletion adapter.
+
+This protocol is complete for objects whose final identity has been persisted in `blob_objects`. It does not yet discover a physical final object published before its metadata transaction crashed, nor prevent a publisher that began before claim from persisting the same identity after the deletion reached `completed`. A bounded final-object publication intent/reconciliation slice must close that window before Task 2.5 and Checkpoint 2 are marked complete; bucket/version listing remains forbidden.
+
+Final-object publication therefore uses durable `blob_publication_intents` for
+the three current publishers: local/S3 upload source and processor preview. A
+publisher first persists an owner-bound exact digest key, hash, size, backend
+and bounded publication expiry before external I/O. Only one nonterminal intent
+may own a digest key at a time. After `BlobStore.Put` or direct S3 publication,
+the publisher CASes the exact observed object version into the same intent;
+`attachment_upload_parts` insertion or preview `blob_objects` insertion then
+marks that exact intent consumed in the same metadata transaction. GC excludes
+every nonterminal intent by digest key, and intent creation uses the same
+`blob_objects` then `attachment_upload_parts` table-lock order as GC.
+
+An expired intent is handled by the existing processor reconciliation loop. It
+first serializes against metadata publication and closes the intent as consumed
+when a durable Blob/upload-part reference already exists. Otherwise it claims a
+generation-fenced cleanup lease, resolves at most the one persisted digest key
+when the exact version was not acknowledged, CASes that version, and performs
+only exact-version deletion. Delete/retry/completion are durable and replayable;
+absence is terminal only after the exact-key lookup or exact-version delete says
+the object is absent. The reconciler never lists bucket keys or versions. A live
+publisher cannot resume once cleanup is claimed, and a completed GC cannot be
+crossed by a publisher that started earlier because that publisher's intent was
+already visible to the GC candidate transaction.
 
 Child 3 defines typed seams for:
 
@@ -217,7 +275,7 @@ Child 3 provides controlled, reusable primitives for upload queue state, retry/c
 | required archive scanner unavailable before receive | 503, no accepted bytes/reservation leak |
 | processor crash/timeout | job retry or terminal expiry; janitor receipt and zero workspace residue |
 | revision transaction failure | no revision ref, no ownership transfer, draft attachment retained |
-| permission revoke/deletion reservation | no new stream/complete; active stream cancelled before further bytes |
+| permission revoke/deletion reservation | no new stream/complete; at most the chunk whose final assertion already linearized may finish, and no later chunk may start |
 | Blob backend unavailable | new material operation fails; existing text-only revision remains possible |
 | unknown object/processor/replay contract | fail closed |
 

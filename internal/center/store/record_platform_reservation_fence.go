@@ -246,9 +246,7 @@ func (repository *PostgresRecordPlatformRepository) fenceDeletionReservationInTr
 	if err != nil {
 		return recordplatform.DeletionReservationFenceV1{}, fmt.Errorf("lock object content lease for fence: %w", err)
 	}
-	if objectLease.live {
-		return recordplatform.DeletionReservationFenceV1{}, recordplatform.ErrObjectContentLeaseLive
-	}
+	_ = objectLease // The committed fence cancels renewal; the worker drains this exact lease before ledger append.
 
 	generation, err := nextReservationFenceGeneration(reservation.ownerGeneration, deletionFence.generation)
 	if err != nil {
@@ -456,7 +454,8 @@ type lockedDeletionFenceLeaseForFence struct {
 }
 
 type lockedObjectContentLeaseForFence struct {
-	live bool
+	owner recordplatform.OwnerLease
+	live  bool
 }
 
 func lockPreviewedDeletionReservationForFence(ctx context.Context, tx pgx.Tx, reservationID string) (lockedDeletionReservationForFence, error) {
@@ -533,7 +532,11 @@ func lockObjectContentLeaseForFence(ctx context.Context, tx pgx.Tx, object recor
 	if generation < 1 || expiresAt.IsZero() || !recordPlatformOwnerIDValid(ownerID) {
 		return lockedObjectContentLeaseForFence{}, fmt.Errorf("%w: observed object content lease", recordplatform.ErrInvalidReservationFence)
 	}
-	return lockedObjectContentLeaseForFence{live: live}, nil
+	owner := recordplatform.OwnerLease{OwnerID: ownerID, Generation: uint64(generation), ExpiresAt: expiresAt}
+	if owner.Validate() != nil {
+		return lockedObjectContentLeaseForFence{}, fmt.Errorf("%w: observed object content lease owner", recordplatform.ErrInvalidReservationFence)
+	}
+	return lockedObjectContentLeaseForFence{owner: owner, live: live}, nil
 }
 
 func incrementContentDeliveryEpochForFence(ctx context.Context, tx pgx.Tx, object recordplatform.ObjectRef) (int64, error) {

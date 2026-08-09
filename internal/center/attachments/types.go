@@ -473,12 +473,13 @@ func (command ReleaseBlobGCPinCommand) Validate() error {
 }
 
 type BlobProtection struct {
-	BlobKey                string
-	BlobObjectVersion      string
-	LogicalAttachmentCount int64
-	RevisionReferenceCount int64
-	ActivePinCount         int64
-	Protected              bool
+	BlobKey                  string
+	BlobObjectVersion        string
+	LogicalAttachmentCount   int64
+	RevisionReferenceCount   int64
+	UploadPartReferenceCount int64
+	ActivePinCount           int64
+	Protected                bool
 }
 
 func validBlobGCPinOwnerKind(kind BlobGCPinOwnerKind) bool {

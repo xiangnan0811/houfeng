@@ -100,7 +100,7 @@ func TestRecordAttachmentsAppACLImmutableTablesNeverReceiveUpdate(t *testing.T) 
 }
 
 func recordAttachmentsExpectedAppACLObjects() []AppACLManagedObjectR1 {
-	objects := make([]AppACLManagedObjectR1, 0, 11)
+	objects := make([]AppACLManagedObjectR1, 0, 13)
 	for _, table := range []string{
 		"blob_objects",
 		"attachment_quota_accounts",
@@ -111,6 +111,8 @@ func recordAttachmentsExpectedAppACLObjects() []AppACLManagedObjectR1 {
 		"attachment_processor_jobs",
 		"content_processor_workspaces",
 		"blob_gc_pins",
+		"blob_gc_deletions",
+		"blob_publication_intents",
 		"attachment_purge_receipts",
 		"content_workspace_purge_receipts",
 	} {
@@ -124,7 +126,7 @@ func recordAttachmentsExpectedAppACLObjects() []AppACLManagedObjectR1 {
 }
 
 func recordAttachmentsExpectedAppACLPrivileges() []AppACLPrivilege {
-	privileges := make([]AppACLPrivilege, 0, 38)
+	privileges := make([]AppACLPrivilege, 0, 46)
 	appendTable := func(subject AppACLSubject, table string, kinds ...AppACLPrivilegeKind) {
 		for _, kind := range kinds {
 			privileges = append(privileges, AppACLPrivilege{
@@ -144,9 +146,13 @@ func recordAttachmentsExpectedAppACLPrivileges() []AppACLPrivilege {
 	for _, table := range []string{"attachment_quota_accounts", "record_attachments", "attachment_uploads", "attachment_processor_jobs", "content_processor_workspaces"} {
 		appendTable(runtime, table, AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
 	}
+	appendTable(runtime, "blob_gc_deletions", AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
+	appendTable(runtime, "blob_publication_intents", AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
 	appendTable(runtime, "attachment_purge_receipts", AppACLPrivilegeSelect, AppACLPrivilegeInsert)
 	appendTable(runtime, "content_workspace_purge_receipts", AppACLPrivilegeSelect, AppACLPrivilegeInsert)
 	appendTable(AppACLSubjectPlatformAdmin, "attachment_purge_receipts", AppACLPrivilegeSelect)
 	appendTable(AppACLSubjectPlatformAdmin, "content_workspace_purge_receipts", AppACLPrivilegeSelect)
+	appendTable(AppACLSubjectPlatformAdmin, "blob_gc_deletions", AppACLPrivilegeSelect)
+	appendTable(AppACLSubjectPlatformAdmin, "blob_publication_intents", AppACLPrivilegeSelect)
 	return privileges
 }

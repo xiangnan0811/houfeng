@@ -876,6 +876,12 @@ func TestPostgresIntegrationRecordsCoreSchema(t *testing.T) {
 		  )
 		  and confdeltype <> 'r'
 	`, 0)
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from pg_catalog.pg_constraint
+		where contype = 'f'
+		  and conrelid = 'public.blob_publication_intents'::regclass
+	`, 0)
 	for _, table := range []string{
 		"record_revisions",
 		"record_revision_subjects",
@@ -1053,6 +1059,8 @@ func TestPostgresIntegrationRecordAttachmentsSchema(t *testing.T) {
 		"attachment_processor_jobs",
 		"content_processor_workspaces",
 		"blob_gc_pins",
+		"blob_gc_deletions",
+		"blob_publication_intents",
 		"attachment_purge_receipts",
 		"content_workspace_purge_receipts",
 	} {
@@ -1063,6 +1071,36 @@ func TestPostgresIntegrationRecordAttachmentsSchema(t *testing.T) {
 		from public.schema_migrations
 		where name = '0053_create_record_attachments.sql'
 	`, 1)
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'blob_gc_deletions'
+	`, "deletion_id,project_id,purge_mode,blob_key,sha256_digest,object_version,size_bytes,backend_kind,blob_created_at,deletion_state,owner_id,owner_generation,attempt,lease_expires_at,retry_at,physical_delete_result,receipt_digest,completed_at,created_at,updated_at")
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'blob_publication_intents'
+	`, "publication_id,project_id,owner_kind,owner_id,owner_generation,blob_key,sha256_digest,size_bytes,backend_kind,object_version,publication_state,publish_expires_at,cleanup_owner_id,cleanup_generation,attempt,cleanup_lease_expires_at,retry_at,completion_outcome,receipt_digest,completed_at,created_at,updated_at")
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'record_attachments'
+	`, "attachment_id,project_id,record_id,draft_id,origin_draft_id,copied_from_attachment_id,attachment_state,display_name,media_type,logical_size_bytes,blob_key,blob_object_version,preview_blob_key,preview_blob_object_version,preview_media_type,preview_size_bytes,created_by,created_at,updated_at")
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'attachment_processor_jobs'
+	`, "processor_job_id,upload_id,attachment_id,processor_state,processor_profile,attempt,max_attempts,owner_id,owner_generation,lease_expires_at,retry_at,result_code,result_digest,result_owner_id,result_lease_expires_at,created_at,updated_at,expires_at")
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'attachment_uploads'
+	`, "upload_id,project_id,attachment_id,origin_draft_id,author_id,upload_state,transport_kind,declared_size_bytes,reserved_size_bytes,actual_size_bytes,actual_sha256_digest,temporary_object_key,temporary_object_version,temporary_object_cleanup_retry_at,temporary_object_deleted_at,completion_fingerprint,completed_at,created_at,updated_at,expires_at")
 	assertSingleStringValue(t, ctx, db, `
 		select string_agg(column_name, ',' order by ordinal_position)
 		from information_schema.columns
@@ -1096,8 +1134,11 @@ func TestPostgresIntegrationRecordAttachmentsSchema(t *testing.T) {
 	for indexName, wantColumns := range map[string]string{
 		"idx_record_attachments_blob":                "blob_key,blob_object_version,attachment_id",
 		"idx_record_attachments_copied_from":         "copied_from_attachment_id,attachment_id",
+		"idx_record_attachments_preview_blob":        "preview_blob_key,preview_blob_object_version,attachment_id",
 		"idx_record_revision_attachments_attachment": "attachment_id,record_id,revision_id,ordinal",
 		"idx_blob_gc_pins_blob":                      "blob_key,blob_object_version,expires_at,pin_id",
+		"idx_blob_gc_deletions_claim":                "deletion_state,retry_at,lease_expires_at,backend_kind,blob_created_at,deletion_id",
+		"idx_blob_publication_intents_claim":         "publication_state,retry_at,cleanup_lease_expires_at,publish_expires_at,backend_kind,publication_id",
 	} {
 		var gotColumns string
 		if err := db.QueryRow(ctx, `
@@ -1114,6 +1155,26 @@ func TestPostgresIntegrationRecordAttachmentsSchema(t *testing.T) {
 			t.Fatalf("attachment reverse index %q columns = %q, want %q", indexName, gotColumns, wantColumns)
 		}
 	}
+	assertSingleStringValue(t, ctx, db, `
+		select case
+		  when index_catalog.indisunique
+		   and pg_get_expr(index_catalog.indpred, index_catalog.indrelid) = '(deletion_state <> ''completed''::text)'
+		  then 'unique-active'
+		  else 'invalid'
+		end
+		from pg_catalog.pg_index index_catalog
+		where index_catalog.indexrelid = 'public.uq_blob_gc_deletions_active'::regclass
+	`, "unique-active")
+	assertSingleStringValue(t, ctx, db, `
+		select case
+		  when index_catalog.indisunique
+		   and pg_get_expr(index_catalog.indpred, index_catalog.indrelid) = '(publication_state <> ''completed''::text)'
+		  then 'unique-active'
+		  else 'invalid'
+		end
+		from pg_catalog.pg_index index_catalog
+		where index_catalog.indexrelid = 'public.uq_blob_publication_intents_active_key'::regclass
+	`, "unique-active")
 
 	for _, table := range []string{
 		"blob_objects",
@@ -1166,6 +1227,14 @@ func TestPostgresIntegrationRecordAttachmentsSchema(t *testing.T) {
 		) values (
 			'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
 			decode(repeat('bb', 32), 'hex'), 'local-v1', 9, 'local'
+		)
+	`)
+	execSQL(t, ctx, db, `
+		insert into public.blob_objects (
+			blob_key, sha256_digest, object_version, size_bytes, backend_kind
+		) values (
+			'sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+			decode(repeat('aa', 32), 'hex'), 'preview-v1', 7, 'local'
 		)
 	`)
 	_, err := db.Exec(ctx, `
@@ -1232,6 +1301,22 @@ func TestPostgresIntegrationRecordAttachmentsSchema(t *testing.T) {
 			origin_draft_id, media_type, logical_size_bytes, created_by
 		) values ('att_upload', 'rdf_att', 'created', 'upload.txt',
 			'rdf_att', 'text/plain', 9, 'usr_att')
+	`)
+	_, err = db.Exec(ctx, `
+		update public.record_attachments
+		set preview_blob_key = 'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+		    preview_blob_object_version = 'local-v1',
+		    preview_media_type = 'text/plain; charset=utf-8', preview_size_bytes = 9
+		where attachment_id = 'att_upload'
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Errorf("preview on non-available attachment error = %v, want SQLSTATE 23514", err)
+	}
+	execSQL(t, ctx, db, `
+		update public.record_attachments
+		set preview_blob_key = null, preview_blob_object_version = null,
+		    preview_media_type = null, preview_size_bytes = null
+		where attachment_id = 'att_upload'
 	`)
 	execSQL(t, ctx, db, `
 		insert into public.record_attachments (
@@ -1332,9 +1417,244 @@ func TestPostgresIntegrationRecordAttachmentsSchema(t *testing.T) {
 	execSQL(t, ctx, db, `
 		insert into public.attachment_processor_jobs (
 			processor_job_id, upload_id, attachment_id, processor_state,
-			processor_profile, max_attempts, expires_at
+			processor_profile, max_attempts, result_code, result_digest,
+			result_owner_id, result_lease_expires_at, expires_at
 		) values ('apj_other', 'aup_other', 'att_other', 'expired',
-			'text', 3, now() + interval '1 hour')
+			'text', 3, 'processing_error', decode(repeat('1b', 32), 'hex'),
+			'processor_seed', now() + interval '5 minutes', now() + interval '1 hour')
+	`)
+
+	for _, invalid := range []struct {
+		name      string
+		statement string
+	}{
+		{
+			name: "unknown result code",
+			statement: `update public.attachment_processor_jobs
+				set result_code = 'unknown', result_digest = decode(repeat('20', 32), 'hex')
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "queued result",
+			statement: `update public.attachment_processor_jobs
+				set result_code = 'clean', result_digest = decode(repeat('21', 32), 'hex')
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "retry with clean result",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'clean',
+				    result_digest = decode(repeat('22', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "retry without digest",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+				    result_digest = null, result_owner_id = 'worker1',
+				    result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "succeeded malware result",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'succeeded', result_code = 'malware',
+				    result_digest = decode(repeat('23', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "rejected clean result",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'rejected', result_code = 'clean',
+				    result_digest = decode(repeat('24', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "expired malware result",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'expired', result_code = 'malware',
+				    result_digest = decode(repeat('25', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "retry missing retry at",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+				    result_digest = decode(repeat('2d', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "retry missing result claim token",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+				    retry_at = now() + interval '10 minutes',
+				    result_digest = decode(repeat('29', 32), 'hex')
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "retry partial result owner token",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+				    retry_at = now() + interval '10 minutes',
+				    result_digest = decode(repeat('2a', 32), 'hex'), result_owner_id = 'worker1'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "retry partial result expiry token",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+				    retry_at = now() + interval '10 minutes',
+				    result_digest = decode(repeat('2b', 32), 'hex'),
+				    result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "queued retained result claim token",
+			statement: `update public.attachment_processor_jobs
+				set result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "unsafe result owner grammar",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+				    retry_at = now() + interval '10 minutes',
+				    result_digest = decode(repeat('2c', 32), 'hex'),
+				    result_owner_id = 'Worker!', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+	} {
+		_, err := db.Exec(ctx, invalid.statement)
+		if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+			t.Fatalf("processor %s mapping error = %v, want SQLSTATE 23514", invalid.name, err)
+		}
+	}
+	for _, invalid := range []struct {
+		name      string
+		statement string
+	}{
+		{
+			name: "queued with retry at",
+			statement: `update public.attachment_processor_jobs
+				set retry_at = now() + interval '10 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "claimed with retry at",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'claimed', owner_id = 'worker1', owner_generation = 1,
+				    lease_expires_at = now() + interval '5 minutes',
+				    retry_at = now() + interval '10 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "succeeded with retry at",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'succeeded', retry_at = now() + interval '10 minutes',
+				    result_code = 'clean', result_digest = decode(repeat('2e', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "rejected with retry at",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'rejected', retry_at = now() + interval '10 minutes',
+				    result_code = 'unsafe_content', result_digest = decode(repeat('2f', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "expired with retry at",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'expired', retry_at = now() + interval '10 minutes',
+				    result_code = 'timeout', result_digest = decode(repeat('30', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+	} {
+		_, err := db.Exec(ctx, invalid.statement)
+		if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+			t.Fatalf("processor %s mapping error = %v, want SQLSTATE 23514", invalid.name, err)
+		}
+	}
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'claimed', owner_id = 'worker1', owner_generation = 1,
+		    lease_expires_at = now() + interval '5 minutes',
+		    result_owner_id = '', result_lease_expires_at = null
+		where processor_job_id = 'apj_good'
+	`)
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'queued', owner_id = '', owner_generation = 0,
+		    lease_expires_at = null, result_owner_id = '', result_lease_expires_at = null
+		where processor_job_id = 'apj_good'
+	`)
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+		    retry_at = now() + interval '10 minutes',
+		    result_digest = decode(repeat('26', 32), 'hex'), result_owner_id = 'worker1',
+		    result_lease_expires_at = now() + interval '5 minutes'
+		where processor_job_id = 'apj_good'
+	`)
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', processor_state, result_code, octet_length(result_digest)::text,
+		  result_owner_id, (result_lease_expires_at is not null)::text,
+		  (retry_at is not null)::text)
+		from public.attachment_processor_jobs where processor_job_id = 'apj_good'
+	`, "retry_wait,scanner_unavailable,32,worker1,true,true")
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'queued', retry_at = null,
+		    result_code = null, result_digest = null,
+		    result_owner_id = '', result_lease_expires_at = null
+		where processor_job_id = 'apj_good'
+	`)
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', processor_state, (retry_at is null)::text,
+		  (result_code is null)::text, result_owner_id)
+		from public.attachment_processor_jobs where processor_job_id = 'apj_good'
+	`, "queued,true,true,")
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'succeeded', result_code = 'clean',
+		    result_digest = decode(repeat('27', 32), 'hex'), result_owner_id = 'worker1',
+		    result_lease_expires_at = now() + interval '5 minutes'
+		where processor_job_id = 'apj_good'
+	`)
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', processor_state, result_code, octet_length(result_digest)::text,
+		  result_owner_id, (result_lease_expires_at is not null)::text)
+		from public.attachment_processor_jobs where processor_job_id = 'apj_good'
+	`, "succeeded,clean,32,worker1,true")
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'rejected', result_code = 'unsafe_content',
+		    result_digest = decode(repeat('28', 32), 'hex'), result_owner_id = 'worker1',
+		    result_lease_expires_at = now() + interval '5 minutes'
+		where processor_job_id = 'apj_good'
+	`)
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', processor_state, result_code, octet_length(result_digest)::text,
+		  result_owner_id, (result_lease_expires_at is not null)::text)
+		from public.attachment_processor_jobs where processor_job_id = 'apj_good'
+	`, "rejected,unsafe_content,32,worker1,true")
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', processor_state, result_code, octet_length(result_digest)::text,
+		  result_owner_id, (result_lease_expires_at is not null)::text)
+		from public.attachment_processor_jobs where processor_job_id = 'apj_other'
+	`, "expired,processing_error,32,processor_seed,true")
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'queued', result_code = null, result_digest = null,
+		    result_owner_id = '', result_lease_expires_at = null
+		where processor_job_id = 'apj_good'
 	`)
 
 	_, err = db.Exec(ctx, `
@@ -1582,6 +1902,95 @@ func TestPostgresIntegrationRecordAttachmentsSchema(t *testing.T) {
 		from public.record_attachments
 		where attachment_id = 'att_upload'
 	`, "rec_atta,rdf_att,true")
+	for _, partial := range []struct {
+		name      string
+		statement string
+	}{
+		{
+			name: "key only",
+			statement: `update public.record_attachments
+				set preview_blob_key = 'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+				where attachment_id = 'att_upload'`,
+		},
+		{
+			name: "version only",
+			statement: `update public.record_attachments set preview_blob_object_version = 'local-v1'
+				where attachment_id = 'att_upload'`,
+		},
+		{
+			name: "media only",
+			statement: `update public.record_attachments set preview_media_type = 'text/plain; charset=utf-8'
+				where attachment_id = 'att_upload'`,
+		},
+		{
+			name: "size only",
+			statement: `update public.record_attachments set preview_size_bytes = 9
+				where attachment_id = 'att_upload'`,
+		},
+	} {
+		_, err := db.Exec(ctx, partial.statement)
+		if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+			t.Fatalf("partial preview tuple %s error = %v, want SQLSTATE 23514", partial.name, err)
+		}
+	}
+	_, err = db.Exec(ctx, `
+		update public.record_attachments
+		set preview_blob_key = 'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+		    preview_blob_object_version = 'local-v1', preview_media_type = 'image/jpeg',
+		    preview_size_bytes = 9
+		where attachment_id = 'att_upload'
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("preview disallowed media type error = %v, want SQLSTATE 23514", err)
+	}
+	_, err = db.Exec(ctx, `
+		update public.record_attachments
+		set preview_blob_key = 'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+		    preview_blob_object_version = 'local-v1',
+		    preview_media_type = 'text/plain; charset=utf-8', preview_size_bytes = 0
+		where attachment_id = 'att_upload'
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("preview non-positive size error = %v, want SQLSTATE 23514", err)
+	}
+	_, err = db.Exec(ctx, `
+		update public.record_attachments
+		set preview_blob_key = 'sha256/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+		    preview_blob_object_version = 'missing-v1',
+		    preview_media_type = 'text/plain; charset=utf-8', preview_size_bytes = 9
+		where attachment_id = 'att_upload'
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("preview missing Blob error = %v, want SQLSTATE 23503", err)
+	}
+	_, err = db.Exec(ctx, `
+		update public.record_attachments
+		set preview_blob_key = 'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+		    preview_blob_object_version = 'local-v1',
+		    preview_media_type = 'text/plain; charset=utf-8', preview_size_bytes = 8
+		where attachment_id = 'att_upload'
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Errorf("preview Blob size mismatch error = %v, want SQLSTATE 23503", err)
+	}
+	execSQL(t, ctx, db, `
+		update public.record_attachments
+		set preview_blob_key = 'sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+		    preview_blob_object_version = 'preview-v1',
+		    preview_media_type = 'text/plain; charset=utf-8', preview_size_bytes = 7
+		where attachment_id = 'att_upload'
+	`)
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', attachment.blob_key, attachment.blob_object_version,
+		  original_blob.size_bytes::text, attachment.preview_blob_key,
+		  attachment.preview_blob_object_version, attachment.preview_media_type,
+		  attachment.preview_size_bytes::text)
+		from public.record_attachments attachment
+		join public.blob_objects original_blob
+		  on original_blob.blob_key = attachment.blob_key
+		 and original_blob.object_version = attachment.blob_object_version
+		where attachment.attachment_id = 'att_upload'
+	`, "sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,local-v1,9,sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,preview-v1,text/plain; charset=utf-8,7")
 	assertSingleIntValue(t, ctx, db, `
 		select
 		  (select count(*) from public.attachment_uploads where upload_id = 'aup_good') +

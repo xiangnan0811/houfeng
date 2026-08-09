@@ -8,7 +8,8 @@ create table if not exists public.blob_objects (
   size_bytes bigint not null check (size_bytes > 0),
   backend_kind text not null check (backend_kind in ('local', 's3')),
   created_at timestamptz not null default now(),
-  unique (blob_key, object_version)
+  unique (blob_key, object_version),
+  unique (blob_key, object_version, size_bytes)
 );
 
 create table if not exists public.attachment_quota_accounts (
@@ -38,6 +39,10 @@ create table if not exists public.record_attachments (
   logical_size_bytes bigint not null check (logical_size_bytes > 0),
   blob_key text,
   blob_object_version text,
+  preview_blob_key text,
+  preview_blob_object_version text,
+  preview_media_type text,
+  preview_size_bytes bigint,
   created_by text not null check (created_by ~ '^usr_[a-z0-9]{1,64}$'),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -45,6 +50,20 @@ create table if not exists public.record_attachments (
   check (draft_id is null or origin_draft_id is null
     or draft_id = origin_draft_id),
   check ((blob_key is null) = (blob_object_version is null)),
+  check ((preview_blob_key is null
+      and preview_blob_object_version is null
+      and preview_media_type is null
+      and preview_size_bytes is null)
+    or (preview_blob_key is not null
+      and preview_blob_object_version is not null
+      and preview_media_type is not null
+      and preview_size_bytes is not null)),
+  check (preview_media_type is null
+    or (char_length(preview_media_type) between 1 and 255
+      and preview_media_type in
+        ('image/png', 'text/plain; charset=utf-8'))),
+  check (preview_size_bytes is null or preview_size_bytes > 0),
+  check (preview_blob_key is null or attachment_state = 'available'),
   check ((attachment_state = 'available') = (blob_key is not null)),
   foreign key (record_id) references public.records(record_id)
     on delete restrict,
@@ -52,6 +71,9 @@ create table if not exists public.record_attachments (
     on delete restrict,
   foreign key (blob_key, blob_object_version)
     references public.blob_objects(blob_key, object_version)
+    on delete restrict,
+  foreign key (preview_blob_key, preview_blob_object_version, preview_size_bytes)
+    references public.blob_objects(blob_key, object_version, size_bytes)
     on delete restrict,
   unique (record_id, attachment_id),
   unique (attachment_id, origin_draft_id)
@@ -65,6 +87,10 @@ create index if not exists idx_record_attachments_record_state
 
 create index if not exists idx_record_attachments_blob
   on public.record_attachments(blob_key, blob_object_version, attachment_id);
+
+create index if not exists idx_record_attachments_preview_blob
+  on public.record_attachments(preview_blob_key, preview_blob_object_version,
+    attachment_id);
 
 create index if not exists idx_record_attachments_copied_from
   on public.record_attachments(copied_from_attachment_id, attachment_id);
@@ -93,6 +119,8 @@ create table if not exists public.attachment_uploads (
   temporary_object_version text
     check (temporary_object_version is null
       or char_length(temporary_object_version) between 1 and 1024),
+  temporary_object_cleanup_retry_at timestamptz,
+  temporary_object_deleted_at timestamptz,
   completion_fingerprint bytea
     check (completion_fingerprint is null
       or octet_length(completion_fingerprint) = 32),
@@ -102,6 +130,9 @@ create table if not exists public.attachment_uploads (
   expires_at timestamptz not null,
   check ((actual_size_bytes is null) = (actual_sha256_digest is null)),
   check (temporary_object_version is null or temporary_object_key is not null),
+  check (temporary_object_cleanup_retry_at is null or temporary_object_key is not null),
+  check (temporary_object_deleted_at is null
+    or (temporary_object_key is not null and temporary_object_version is not null)),
   check (expires_at > created_at),
   unique (attachment_id),
   unique (upload_id, attachment_id),
@@ -116,6 +147,12 @@ create index if not exists idx_attachment_uploads_expiry
 
 create index if not exists idx_attachment_uploads_draft_state
   on public.attachment_uploads(origin_draft_id, upload_state, upload_id);
+
+create index if not exists idx_attachment_uploads_temporary_cleanup
+  on public.attachment_uploads(temporary_object_cleanup_retry_at, expires_at, upload_id)
+  where transport_kind = 's3'
+    and temporary_object_key is not null
+    and temporary_object_deleted_at is null;
 
 create table if not exists public.attachment_upload_parts (
   upload_id text not null,
@@ -171,13 +208,41 @@ create table if not exists public.attachment_processor_jobs (
   owner_generation bigint not null default 0 check (owner_generation >= 0),
   lease_expires_at timestamptz,
   retry_at timestamptz,
+  result_code text
+    check (result_code is null or result_code in
+      ('clean', 'malware', 'unsafe_content', 'scanner_unavailable', 'timeout',
+        'processing_error')),
   result_digest bytea
     check (result_digest is null or octet_length(result_digest) = 32),
+  result_owner_id text not null default ''
+    check (result_owner_id = '' or result_owner_id ~ '^[a-z0-9_-]{1,128}$'),
+  result_lease_expires_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   expires_at timestamptz not null,
   check ((processor_state = 'claimed') =
     (owner_id <> '' and owner_generation > 0 and lease_expires_at is not null)),
+  check ((processor_state = 'retry_wait') = (retry_at is not null)),
+  check (((processor_state in ('queued', 'claimed'))
+      and result_code is null
+      and result_digest is null)
+    or (result_code is not null
+      and result_digest is not null
+      and ((processor_state = 'retry_wait'
+          and result_code in
+            ('scanner_unavailable', 'timeout', 'processing_error'))
+        or (processor_state = 'succeeded' and result_code = 'clean')
+        or (processor_state = 'rejected'
+          and result_code in ('malware', 'unsafe_content'))
+        or (processor_state = 'expired'
+          and result_code in
+            ('scanner_unavailable', 'timeout', 'processing_error'))))),
+  check (((processor_state in ('queued', 'claimed'))
+      and result_owner_id = ''
+      and result_lease_expires_at is null)
+    or ((processor_state in ('retry_wait', 'succeeded', 'rejected', 'expired'))
+      and result_owner_id <> ''
+      and result_lease_expires_at is not null)),
   check (expires_at > created_at),
   foreign key (upload_id, attachment_id)
     references public.attachment_uploads(upload_id, attachment_id)
@@ -237,6 +302,128 @@ create index if not exists idx_blob_gc_pins_expiry
 
 create index if not exists idx_blob_gc_pins_blob
   on public.blob_gc_pins(blob_key, blob_object_version, expires_at, pin_id);
+
+create table if not exists public.blob_gc_deletions (
+  deletion_id text primary key
+    check (deletion_id ~ '^bgd_[a-z0-9]{1,64}$'),
+  project_id text not null default 'default' check (project_id = 'default'),
+  purge_mode text not null check (purge_mode in ('ordinary', 'permanent')),
+  blob_key text not null check (blob_key ~ '^sha256/[0-9a-f]{64}$'),
+  sha256_digest bytea not null
+    check (octet_length(sha256_digest) = 32),
+  check (blob_key = 'sha256/' || encode(sha256_digest, 'hex')),
+  object_version text not null
+    check (char_length(object_version) between 1 and 1024),
+  size_bytes bigint not null check (size_bytes > 0),
+  backend_kind text not null check (backend_kind in ('local', 's3')),
+  blob_created_at timestamptz not null,
+  deletion_state text not null
+    check (deletion_state in ('claimed', 'retry_wait', 'completed')),
+  owner_id text not null
+    check (owner_id ~ '^[a-z0-9_-]{1,128}$'),
+  owner_generation bigint not null check (owner_generation > 0),
+  attempt bigint not null check (attempt > 0),
+  lease_expires_at timestamptz not null,
+  retry_at timestamptz,
+  physical_delete_result text
+    check (physical_delete_result is null
+      or physical_delete_result in ('deleted', 'already_absent')),
+  receipt_digest bytea
+    check (receipt_digest is null or octet_length(receipt_digest) = 32),
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check ((deletion_state = 'claimed'
+      and retry_at is null
+      and physical_delete_result is null
+      and receipt_digest is null
+      and completed_at is null)
+    or (deletion_state = 'retry_wait'
+      and retry_at is not null
+      and physical_delete_result is null
+      and receipt_digest is null
+      and completed_at is null)
+    or (deletion_state = 'completed'
+      and retry_at is null
+      and physical_delete_result is not null
+      and receipt_digest is not null
+      and completed_at is not null))
+);
+
+create unique index if not exists uq_blob_gc_deletions_active
+  on public.blob_gc_deletions(blob_key, object_version)
+  where deletion_state <> 'completed';
+
+create index if not exists idx_blob_gc_deletions_claim
+  on public.blob_gc_deletions(deletion_state, retry_at, lease_expires_at,
+    backend_kind, blob_created_at, deletion_id);
+
+create table if not exists public.blob_publication_intents (
+  publication_id text primary key
+    check (publication_id ~ '^bpi_[a-z0-9]{1,64}$'),
+  project_id text not null default 'default' check (project_id = 'default'),
+  owner_kind text not null check (owner_kind in ('upload', 'processor_preview')),
+  owner_id text not null,
+  owner_generation bigint not null check (owner_generation > 0),
+  check ((owner_kind = 'upload'
+      and owner_id ~ '^aup_[a-z0-9]{1,64}$'
+      and owner_generation = 1)
+    or (owner_kind = 'processor_preview'
+      and owner_id ~ '^apj_[a-z0-9]{1,64}$')),
+  blob_key text not null check (blob_key ~ '^sha256/[0-9a-f]{64}$'),
+  sha256_digest bytea not null check (octet_length(sha256_digest) = 32),
+  check (blob_key = 'sha256/' || encode(sha256_digest, 'hex')),
+  size_bytes bigint not null check (size_bytes > 0),
+  backend_kind text not null check (backend_kind in ('local', 's3')),
+  object_version text
+    check (object_version is null or char_length(object_version) between 1 and 1024),
+  publication_state text not null
+    check (publication_state in ('prepared', 'published', 'cleanup_claimed',
+      'retry_wait', 'completed')),
+  publish_expires_at timestamptz not null,
+  cleanup_owner_id text not null default ''
+    check (cleanup_owner_id = '' or cleanup_owner_id ~ '^[a-z0-9_-]{1,128}$'),
+  cleanup_generation bigint not null default 0 check (cleanup_generation >= 0),
+  attempt bigint not null default 0 check (attempt >= 0),
+  cleanup_lease_expires_at timestamptz,
+  retry_at timestamptz,
+  completion_outcome text
+    check (completion_outcome is null or completion_outcome in
+      ('consumed', 'deleted', 'already_absent')),
+  receipt_digest bytea
+    check (receipt_digest is null or octet_length(receipt_digest) = 32),
+  completed_at timestamptz,
+  check ((cleanup_owner_id = '' and cleanup_generation = 0 and attempt = 0
+      and cleanup_lease_expires_at is null)
+    or (cleanup_owner_id <> '' and cleanup_generation > 0 and attempt > 0
+      and cleanup_lease_expires_at is not null)),
+  check ((publication_state in ('prepared', 'published') and cleanup_owner_id = '')
+    or (publication_state in ('cleanup_claimed', 'retry_wait')
+      and cleanup_owner_id <> '')
+    or publication_state = 'completed'),
+  check ((publication_state = 'prepared' and object_version is null)
+    or (publication_state = 'published' and object_version is not null)
+    or publication_state in ('cleanup_claimed', 'retry_wait')
+    or (publication_state = 'completed'
+      and (completion_outcome = 'already_absent' or object_version is not null))),
+  check ((publication_state = 'retry_wait') = (retry_at is not null)),
+  check ((publication_state = 'completed') =
+    (completion_outcome is not null and receipt_digest is not null
+      and completed_at is not null)),
+  check (publication_state <> 'completed'
+    or (completion_outcome = 'consumed' and cleanup_owner_id = '')
+    or (completion_outcome in ('deleted', 'already_absent')
+      and cleanup_owner_id <> '')),
+  unique (owner_kind, owner_id, owner_generation, blob_key)
+);
+
+create unique index if not exists uq_blob_publication_intents_active_key
+  on public.blob_publication_intents(blob_key)
+  where publication_state <> 'completed';
+
+create index if not exists idx_blob_publication_intents_claim
+  on public.blob_publication_intents(publication_state, retry_at,
+    cleanup_lease_expires_at, publish_expires_at, backend_kind, publication_id);
 
 create table if not exists public.attachment_purge_receipts (
   operation_id text not null check (operation_id ~ '^rpo_[a-z0-9]{1,64}$'),

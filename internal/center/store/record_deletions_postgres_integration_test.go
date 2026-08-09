@@ -59,6 +59,14 @@ func TestPostgresIntegrationRecordDeletionPreviewReserveAndExpiredReplay(t *test
 		!createCommand.RequestFingerprint.MatchesPersisted(resolved.RequestFingerprint) {
 		t.Fatalf("ResolvePreview() before reserve = %#v", resolved)
 	}
+	platformRepository := NewPostgresRecordPlatformRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	serving, err := platformRepository.AcquireServingLease(ctx, createCommand.Object, recordplatform.LeaseClaimInputV1{
+		OwnerID:       "attachment_delivery_pgdeletepreview",
+		LeaseDuration: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("AcquireServingLease() before reserve error = %v", err)
+	}
 
 	reserveCommand := recordsPostgresDeletionReserveCommand(createCommand, resolved, deploymentID)
 	operation, err := repository.ReservePreview(ctx, reserveCommand)
@@ -69,6 +77,30 @@ func TestPostgresIntegrationRecordDeletionPreviewReserveAndExpiredReplay(t *test
 		operation.State != recorddeletion.DeletionStateProvisionalFenced || operation.FenceEpoch != 1 ||
 		operation.Validate() != nil {
 		t.Fatalf("ReservePreview() = %#v", operation)
+	}
+	claimInput := recorddeletion.DeletionWorkClaimInput{
+		OwnerID:            reserveCommand.OwnerID,
+		OwnerLeaseDuration: reserveCommand.OwnerLeaseDuration,
+	}
+	claim, err := repository.ClaimDeletionWork(ctx, claimInput)
+	if err != nil {
+		t.Fatalf("ClaimDeletionWork() while content lease is live error = %v", err)
+	}
+	if claim != nil {
+		t.Fatalf("ClaimDeletionWork() while content lease is live = %#v, want nil drain wait", claim)
+	}
+	if _, err := platformRepository.RenewServingLease(ctx, serving, time.Second); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+		t.Fatalf("RenewServingLease() after provisional fence error = %v, want ErrLostOwnerLease", err)
+	}
+	if err := platformRepository.ReleaseObjectContentLease(ctx, serving.Object, serving.Owner); err != nil {
+		t.Fatalf("ReleaseObjectContentLease() drain error = %v", err)
+	}
+	claim, err = repository.ClaimDeletionWork(ctx, claimInput)
+	if err != nil {
+		t.Fatalf("ClaimDeletionWork() after content drain error = %v", err)
+	}
+	if claim == nil || claim.Stage != recorddeletion.DeletionWorkAppendDeleteCommit || claim.Operation != operation {
+		t.Fatalf("ClaimDeletionWork() after content drain = %#v, want append-delete claim for %#v", claim, operation)
 	}
 	status, err := repository.ResolveOperationStatus(ctx, recordplatform.ProjectIDDefault, operation.OperationID)
 	if err != nil {

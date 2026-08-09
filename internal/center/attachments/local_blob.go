@@ -33,6 +33,7 @@ type LocalBlobStore struct {
 }
 
 var _ BlobStore = (*LocalBlobStore)(nil)
+var _ BlobPublicationResolver = (*LocalBlobStore)(nil)
 
 func NewLocalBlobStore(root string) (*LocalBlobStore, error) {
 	return newLocalBlobStore(root, localBlobHooks{})
@@ -77,7 +78,7 @@ func (store *LocalBlobStore) Put(
 	request PutRequest,
 	reader io.Reader,
 ) (ObjectVersion, error) {
-	if ctx == nil || store == nil || reader == nil || request.Validate() != nil {
+	if ctx == nil || store == nil || nilUploadServiceDependency(reader) || request.Validate() != nil {
 		return ObjectVersion{}, ErrInvalidBlobRequest
 	}
 	if err := ctx.Err(); err != nil {
@@ -241,6 +242,27 @@ func (store *LocalBlobStore) Stat(ctx context.Context, version ObjectVersion) (O
 		return ObjectInfo{}, fmt.Errorf("close local Blob after stat: %w", err)
 	}
 	return ObjectInfo{Version: version}, nil
+}
+
+// ResolveBlobPublicationObject resolves the deterministic local final key
+// without scanning the Blob directory.  The digest-derived version is part of
+// the local backend contract, so Stat still performs the full byte/integrity
+// verification before the version is returned to the reconciler.
+func (store *LocalBlobStore) ResolveBlobPublicationObject(
+	ctx context.Context,
+	target BlobPublicationTarget,
+) (ObjectVersion, error) {
+	if ctx == nil || store == nil || target.Validate() != nil || target.BackendKind != BackendKindLocal {
+		return ObjectVersion{}, ErrInvalidBlobPublicationRequest
+	}
+	version := ObjectVersion{
+		Key: target.Key, VersionID: "local-v1-" + hexDigest(target.SHA256),
+		SHA256: target.SHA256, SizeBytes: target.SizeBytes,
+	}
+	if _, err := store.Stat(ctx, version); err != nil {
+		return ObjectVersion{}, err
+	}
+	return version, nil
 }
 
 func (store *LocalBlobStore) Delete(

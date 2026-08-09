@@ -230,7 +230,7 @@ func assertRecordAttachmentsAppACLCurrentRolePrivileges(
 	}
 
 	adminDB := fixture.openDirectRolePool(t, ctx, fixture.admin)
-	for _, table := range []string{"attachment_purge_receipts", "content_workspace_purge_receipts"} {
+	for _, table := range []string{"blob_gc_deletions", "blob_publication_intents", "attachment_purge_receipts", "content_workspace_purge_receipts"} {
 		var count int
 		if err := adminDB.QueryRow(ctx, `select count(*)::int from public.`+table).Scan(&count); err != nil {
 			t.Fatalf("platform admin read content-free %s: %v", table, err)

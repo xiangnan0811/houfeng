@@ -776,6 +776,41 @@ func TestPostgresIntegrationRecordPlatformServingLeaseUsesDatabaseState(t *testi
 	}
 }
 
+func TestPostgresIntegrationRecordPlatformReservationFenceCancelsServingRenewal(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordPlatformPostgresFixture(t, ctx)
+	object := recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: "rec_serving_drain"}
+	fixture.seedFenceObjectLeaseRace(t, ctx, object)
+	repository := NewPostgresRecordPlatformRepository(
+		fixture.openDirectRuntimePool(t, ctx, "record-platform-serving-drain", 2),
+		allowRecordPlatformAdmissionGate,
+	)
+	serving, err := repository.AcquireServingLease(ctx, object, recordplatform.LeaseClaimInputV1{
+		OwnerID:       "serving_owner",
+		LeaseDuration: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("AcquireServingLease() error = %v", err)
+	}
+	if _, err := repository.FenceDeletionReservation(ctx, recordplatform.ReservationFenceInputV1{
+		ReservationID:      "drs_fencerace",
+		Object:             object,
+		OwnerID:            "deletion_owner",
+		OwnerLeaseDuration: time.Minute,
+	}); err != nil {
+		t.Fatalf("FenceDeletionReservation() with live serving lease error = %v", err)
+	}
+	if _, err := repository.RenewServingLease(ctx, serving, time.Second); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+		t.Fatalf("RenewServingLease() after reservation fence error = %v, want ErrLostOwnerLease", err)
+	}
+	if err := repository.AssertServingLease(ctx, serving); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+		t.Fatalf("AssertServingLease() after reservation fence error = %v, want ErrLostOwnerLease", err)
+	}
+	if err := repository.ReleaseObjectContentLease(ctx, serving.Object, serving.Owner); err != nil {
+		t.Fatalf("ReleaseObjectContentLease() drained serving owner error = %v", err)
+	}
+}
+
 var allowRecordPlatformAdmissionGate = AdmissionGateFunc(func(context.Context, pgx.Tx) error { return nil })
 
 type recordPlatformPostgresFixture struct {

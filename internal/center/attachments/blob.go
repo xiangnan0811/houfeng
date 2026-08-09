@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"math"
+	"reflect"
+	"time"
 )
 
 var (
@@ -69,9 +71,42 @@ func (version TemporaryObjectVersion) Validate() error {
 	return nil
 }
 
+type TemporaryObjectReadRequest struct {
+	Version           TemporaryObjectVersion
+	ExpectedSizeBytes int64
+}
+
+func (request TemporaryObjectReadRequest) Validate() error {
+	if request.Version.Validate() != nil || request.ExpectedSizeBytes <= 0 || request.ExpectedSizeBytes == math.MaxInt64 {
+		return ErrInvalidBlobRequest
+	}
+	return nil
+}
+
+type TemporaryObjectPublishRequest struct {
+	Version           TemporaryObjectVersion
+	ExpectedSHA256    [sha256.Size]byte
+	ExpectedSizeBytes int64
+}
+
+func (request TemporaryObjectPublishRequest) Validate() error {
+	if request.Version.Validate() != nil || (PutRequest{
+		ExpectedSHA256: request.ExpectedSHA256, ExpectedSizeBytes: request.ExpectedSizeBytes,
+	}).Validate() != nil {
+		return ErrInvalidBlobRequest
+	}
+	return nil
+}
+
 type TemporaryObjectStore interface {
 	ResolveTemporaryVersion(context.Context, string) (TemporaryObjectVersion, error)
+	OpenTemporaryVersion(context.Context, TemporaryObjectReadRequest) (io.ReadCloser, error)
+	PublishTemporaryVersion(context.Context, TemporaryObjectPublishRequest) (ObjectVersion, error)
 	DeleteTemporaryVersion(context.Context, TemporaryObjectVersion) error
+}
+
+type TemporaryUploadPresigner interface {
+	PresignTemporaryUpload(context.Context, string, time.Duration) (string, string, []string, error)
 }
 
 type ByteRange struct {
@@ -120,6 +155,19 @@ type BlobStore interface {
 	Open(context.Context, ObjectVersion, ByteRange) (io.ReadCloser, error)
 	Stat(context.Context, ObjectVersion) (ObjectInfo, error)
 	Delete(context.Context, ObjectVersion) (DeletionReceipt, error)
+}
+
+func nilUploadServiceDependency(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
 }
 
 func hexDigest(digest [sha256.Size]byte) string {
