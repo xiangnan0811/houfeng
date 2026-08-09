@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -93,6 +94,31 @@ func TestPostgresRecordReadCandidateQueryExcludesReservedRecordsAtomically(t *te
 	}
 }
 
+func TestLoadStoredRecordRevisionAttachmentIDsPreservesOrdinalOrder(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeRecordRevisionAttachmentReadTx{rows: &fakeRecordRevisionAttachmentRows{
+		attachmentIDs: []string{"att_readfirst", "att_readsecond"},
+	}}
+	got, err := loadStoredRecordRevisionAttachmentIDs(context.Background(), tx, "rrv_readattachments")
+	if err != nil {
+		t.Fatalf("loadStoredRecordRevisionAttachmentIDs() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, []string{"att_readfirst", "att_readsecond"}) {
+		t.Fatalf("loadStoredRecordRevisionAttachmentIDs() = %#v", got)
+	}
+	compact := strings.ToLower(strings.Join(strings.Fields(tx.querySQL), " "))
+	for _, fragment := range []string{
+		"from public.record_revision_attachments",
+		"where revision_id = $1",
+		"order by ordinal asc",
+	} {
+		if !strings.Contains(compact, fragment) {
+			t.Fatalf("attachment query missing %q: %s", fragment, tx.querySQL)
+		}
+	}
+}
+
 type fakeRecordReadFenceTx struct {
 	pgx.Tx
 	reservationState string
@@ -152,6 +178,45 @@ func (*fakeRecordReadFenceTx) Exec(context.Context, string, ...any) (pgconn.Comm
 type fakeRecordReadRow struct {
 	scan func(...any) error
 	err  error
+}
+
+type fakeRecordRevisionAttachmentReadTx struct {
+	pgx.Tx
+	rows     pgx.Rows
+	querySQL string
+}
+
+func (tx *fakeRecordRevisionAttachmentReadTx) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	tx.querySQL = sql
+	return tx.rows, nil
+}
+
+type fakeRecordRevisionAttachmentRows struct {
+	attachmentIDs []string
+	index         int
+}
+
+func (*fakeRecordRevisionAttachmentRows) Close()                                       {}
+func (*fakeRecordRevisionAttachmentRows) Err() error                                   { return nil }
+func (*fakeRecordRevisionAttachmentRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (*fakeRecordRevisionAttachmentRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (*fakeRecordRevisionAttachmentRows) RawValues() [][]byte                          { return nil }
+func (*fakeRecordRevisionAttachmentRows) Values() ([]any, error)                       { return nil, nil }
+func (*fakeRecordRevisionAttachmentRows) Conn() *pgx.Conn                              { return nil }
+func (rows *fakeRecordRevisionAttachmentRows) Next() bool {
+	if rows.index >= len(rows.attachmentIDs) {
+		return false
+	}
+	rows.index++
+	return true
+}
+func (rows *fakeRecordRevisionAttachmentRows) Scan(dest ...any) error {
+	if len(dest) != 2 || rows.index == 0 || rows.index > len(rows.attachmentIDs) {
+		return errors.New("invalid record revision attachment scan")
+	}
+	*(dest[0].(*int64)) = int64(rows.index - 1)
+	*(dest[1].(*string)) = rows.attachmentIDs[rows.index-1]
+	return nil
 }
 
 func (row fakeRecordReadRow) Scan(dest ...any) error {

@@ -59,12 +59,32 @@ var recordCoreSurfaceNames = []SurfaceName{
 	"records",
 }
 
+var recordAttachmentsSurfaceNames = []SurfaceName{
+	"attachment_processor_jobs",
+	"attachment_purge_receipts",
+	"attachment_quota_accounts",
+	"attachment_upload_parts",
+	"attachment_uploads",
+	"blob_gc_deletions",
+	"blob_gc_pins",
+	"blob_objects",
+	"blob_publication_intents",
+	"content_processor_workspaces",
+	"content_workspace_purge_receipts",
+	"record_attachments",
+	"record_revision_attachments",
+}
+
 func RequiredAdapterNames() []AdapterName {
 	return append([]AdapterName(nil), requiredAdapterNames...)
 }
 
 func RecordCoreSurfaceNames() []SurfaceName {
 	return append([]SurfaceName(nil), recordCoreSurfaceNames...)
+}
+
+func RecordAttachmentsSurfaceNames() []SurfaceName {
+	return append([]SurfaceName(nil), recordAttachmentsSurfaceNames...)
 }
 
 type AdapterDescriptor struct {
@@ -107,6 +127,9 @@ func (descriptor AdapterDescriptor) validate() error {
 	if descriptor.name == AdapterNameRecordCore && !slices.Equal(descriptor.surfaces, recordCoreSurfaceNames) {
 		return fmt.Errorf("%w: record_core surfaces", ErrInvalidAdapterDescriptor)
 	}
+	if descriptor.name == AdapterNameRecordAttachments && !slices.Equal(descriptor.surfaces, recordAttachmentsSurfaceNames) {
+		return fmt.Errorf("%w: record_attachments surfaces", ErrInvalidAdapterDescriptor)
+	}
 	return nil
 }
 
@@ -138,6 +161,10 @@ func (snapshot AdapterHealthSnapshot) Revision() uint64 {
 
 func (snapshot AdapterHealthSnapshot) ProofDigest() [sha256.Size]byte {
 	return snapshot.proofDigest
+}
+
+func (snapshot AdapterHealthSnapshot) Validate() error {
+	return snapshot.validate()
 }
 
 func (snapshot AdapterHealthSnapshot) validate() error {

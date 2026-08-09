@@ -5,12 +5,14 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/auth"
 )
 
@@ -18,6 +20,12 @@ const (
 	defaultHTTPAddr              = ":8080"
 	defaultWebDistDir            = "web/dist"
 	defaultIncidentSweepInterval = 5 * time.Second
+
+	defaultAttachmentProcessorMaxAttempts = 3
+	defaultClamAVDialTimeout              = 5 * time.Second
+	defaultClamAVOperationTimeout         = 2 * time.Minute
+	defaultClamAVChunkSize                = 64 * 1024
+	defaultClamAVResponseLimit            = 4 * 1024
 )
 
 type CenterConfig struct {
@@ -37,6 +45,27 @@ type CenterConfig struct {
 	SessionTTL            time.Duration
 	SessionHMACKey        []byte
 	PasswordBcryptCost    int
+	Attachment            AttachmentConfig
+}
+
+type AttachmentConfig struct {
+	BlobBackend attachments.BackendKind
+	BlobRoot    string
+	S3Endpoint  string
+	S3AccessKey string
+	S3SecretKey string
+	S3Bucket    string
+	S3Secure    bool
+
+	ClamAVNetwork          string
+	ClamAVAddress          string
+	ClamAVDialTimeout      time.Duration
+	ClamAVOperationTimeout time.Duration
+	ClamAVChunkSize        int
+	ClamAVResponseLimit    int
+
+	ProcessorMaxAttempts int64
+	Limits               attachments.Limits
 }
 
 // RecordPlatformMode is the allowed record-platform process boundary.
@@ -152,6 +181,13 @@ func LoadCenterConfig() (CenterConfig, error) {
 	if passwordBcryptCost < bcrypt.MinCost || passwordBcryptCost > bcrypt.MaxCost {
 		return CenterConfig{}, fmt.Errorf("HOUFENG_PASSWORD_BCRYPT_COST must be between %d and %d", bcrypt.MinCost, bcrypt.MaxCost)
 	}
+	var attachmentConfig AttachmentConfig
+	if recordPlatformMode == RecordPlatformModeRuntimeAdmission {
+		attachmentConfig, err = LoadAttachmentConfig()
+		if err != nil {
+			return CenterConfig{}, err
+		}
+	}
 
 	return CenterConfig{
 		RecordPlatformMode:    recordPlatformMode,
@@ -170,7 +206,104 @@ func LoadCenterConfig() (CenterConfig, error) {
 		SessionTTL:            sessionTTL,
 		SessionHMACKey:        []byte(sessionHMACKey),
 		PasswordBcryptCost:    passwordBcryptCost,
+		Attachment:            attachmentConfig,
 	}, nil
+}
+
+func LoadAttachmentConfig() (AttachmentConfig, error) {
+	backendValue, err := requiredEnv("HOUFENG_ATTACHMENT_BLOB_BACKEND")
+	if err != nil {
+		return AttachmentConfig{}, err
+	}
+	processorMaxAttempts, err := intEnvOrDefault("HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS", defaultAttachmentProcessorMaxAttempts)
+	if err != nil {
+		return AttachmentConfig{}, err
+	}
+	if processorMaxAttempts <= 0 || processorMaxAttempts > 100 {
+		return AttachmentConfig{}, fmt.Errorf("HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS must be between 1 and 100")
+	}
+
+	attachmentConfig := AttachmentConfig{
+		BlobBackend:          attachments.BackendKind(strings.ToLower(backendValue)),
+		ProcessorMaxAttempts: int64(processorMaxAttempts),
+		Limits:               attachments.DefaultLimits(),
+	}
+	switch attachmentConfig.BlobBackend {
+	case attachments.BackendKindLocal:
+		attachmentConfig.BlobRoot, err = requiredEnv("HOUFENG_ATTACHMENT_BLOB_ROOT")
+		if err == nil && (!filepath.IsAbs(attachmentConfig.BlobRoot) || isBroadAttachmentPath(attachmentConfig.BlobRoot)) {
+			err = fmt.Errorf("HOUFENG_ATTACHMENT_BLOB_ROOT must be an absolute private directory")
+		}
+	case attachments.BackendKindS3:
+		attachmentConfig.S3Endpoint, err = requiredEnv("HOUFENG_ATTACHMENT_S3_ENDPOINT")
+		if err == nil {
+			attachmentConfig.S3AccessKey, err = secretEnvOrFile("HOUFENG_ATTACHMENT_S3_ACCESS_KEY")
+		}
+		if err == nil {
+			attachmentConfig.S3SecretKey, err = secretEnvOrFile("HOUFENG_ATTACHMENT_S3_SECRET_KEY")
+		}
+		if err == nil {
+			attachmentConfig.S3Bucket, err = requiredEnv("HOUFENG_ATTACHMENT_S3_BUCKET")
+		}
+		if err == nil {
+			attachmentConfig.S3Secure, err = boolEnvOrDefault("HOUFENG_ATTACHMENT_S3_SECURE", false)
+		}
+		if err == nil && (strings.Contains(attachmentConfig.S3Endpoint, "://") ||
+			strings.TrimSpace(attachmentConfig.S3Endpoint) != attachmentConfig.S3Endpoint ||
+			strings.TrimSpace(attachmentConfig.S3Bucket) != attachmentConfig.S3Bucket) {
+			err = fmt.Errorf("HOUFENG_ATTACHMENT_S3_ENDPOINT and HOUFENG_ATTACHMENT_S3_BUCKET must be canonical")
+		}
+	default:
+		err = fmt.Errorf("HOUFENG_ATTACHMENT_BLOB_BACKEND must be local or s3")
+	}
+	if err != nil {
+		return AttachmentConfig{}, err
+	}
+
+	attachmentConfig.ClamAVAddress = strings.TrimSpace(os.Getenv("HOUFENG_CLAMAV_ADDRESS"))
+	if attachmentConfig.ClamAVAddress == "" {
+		if strings.TrimSpace(os.Getenv("HOUFENG_CLAMAV_NETWORK")) != "" {
+			return AttachmentConfig{}, fmt.Errorf("HOUFENG_CLAMAV_ADDRESS must be set when HOUFENG_CLAMAV_NETWORK is configured")
+		}
+		return attachmentConfig, nil
+	}
+	attachmentConfig.ClamAVNetwork, err = envOrDefault("HOUFENG_CLAMAV_NETWORK", "unix")
+	if err == nil && attachmentConfig.ClamAVNetwork != "tcp" && attachmentConfig.ClamAVNetwork != "unix" {
+		err = fmt.Errorf("HOUFENG_CLAMAV_NETWORK must be tcp or unix")
+	}
+	if err == nil {
+		attachmentConfig.ClamAVDialTimeout, err = durationEnvOrDefault("HOUFENG_CLAMAV_DIAL_TIMEOUT", defaultClamAVDialTimeout)
+	}
+	if err == nil && (attachmentConfig.ClamAVDialTimeout <= 0 || attachmentConfig.ClamAVDialTimeout > time.Minute) {
+		err = fmt.Errorf("HOUFENG_CLAMAV_DIAL_TIMEOUT must be greater than zero and at most 1m")
+	}
+	if err == nil {
+		attachmentConfig.ClamAVOperationTimeout, err = durationEnvOrDefault("HOUFENG_CLAMAV_OPERATION_TIMEOUT", defaultClamAVOperationTimeout)
+	}
+	if err == nil && (attachmentConfig.ClamAVOperationTimeout <= 0 || attachmentConfig.ClamAVOperationTimeout > time.Hour) {
+		err = fmt.Errorf("HOUFENG_CLAMAV_OPERATION_TIMEOUT must be greater than zero and at most 1h")
+	}
+	if err == nil {
+		attachmentConfig.ClamAVChunkSize, err = intEnvOrDefault("HOUFENG_CLAMAV_CHUNK_SIZE", defaultClamAVChunkSize)
+	}
+	if err == nil && (attachmentConfig.ClamAVChunkSize <= 0 || int64(attachmentConfig.ClamAVChunkSize) > attachments.MiB) {
+		err = fmt.Errorf("HOUFENG_CLAMAV_CHUNK_SIZE must be between 1 byte and 1 MiB")
+	}
+	if err == nil {
+		attachmentConfig.ClamAVResponseLimit, err = intEnvOrDefault("HOUFENG_CLAMAV_RESPONSE_LIMIT", defaultClamAVResponseLimit)
+	}
+	if err == nil && (attachmentConfig.ClamAVResponseLimit <= 0 || int64(attachmentConfig.ClamAVResponseLimit) > attachments.MiB) {
+		err = fmt.Errorf("HOUFENG_CLAMAV_RESPONSE_LIMIT must be between 1 byte and 1 MiB")
+	}
+	if err != nil {
+		return AttachmentConfig{}, err
+	}
+	return attachmentConfig, nil
+}
+
+func isBroadAttachmentPath(path string) bool {
+	cleaned := filepath.Clean(path)
+	return cleaned == filepath.VolumeName(cleaned)+string(filepath.Separator) || filepath.Dir(cleaned) == cleaned
 }
 
 func cidrListEnv(key string) ([]string, error) {

@@ -1122,6 +1122,51 @@ func TestLoadContentProcessorConfigRejectsIncompleteS3Secrets(t *testing.T) {
 	}
 }
 
+func TestLoadContentProcessorConfigRequiresExplicitBlobBackend(t *testing.T) {
+	clearProcessorEnv(t)
+	unsetProcessorEnv(t, "HOUFENG_ATTACHMENT_BLOB_BACKEND")
+	setProcessorEnv(t, map[string]string{
+		"HOUFENG_DATABASE_URL":                     "postgres://processor",
+		"HOUFENG_ATTACHMENT_BLOB_ROOT":             "/var/lib/houfeng-test/attachments",
+		"HOUFENG_CONTENT_PROCESSOR_WORKSPACE_ROOT": "/var/lib/houfeng-test/processor-workdir",
+	})
+
+	if _, err := loadContentProcessorConfig(); err == nil || !strings.Contains(err.Error(), "HOUFENG_ATTACHMENT_BLOB_BACKEND") {
+		t.Fatalf("loadContentProcessorConfig() error = %v, want explicit Blob backend requirement", err)
+	}
+}
+
+func TestLoadContentProcessorConfigUsesSharedAttachmentBounds(t *testing.T) {
+	clearProcessorEnv(t)
+	setProcessorEnv(t, map[string]string{
+		"HOUFENG_DATABASE_URL":                     "postgres://processor",
+		"HOUFENG_ATTACHMENT_BLOB_BACKEND":          "local",
+		"HOUFENG_ATTACHMENT_BLOB_ROOT":             "/var/lib/houfeng-test/attachments",
+		"HOUFENG_CONTENT_PROCESSOR_WORKSPACE_ROOT": "/var/lib/houfeng-test/processor-workdir",
+		"HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS":   "9",
+		"HOUFENG_CLAMAV_NETWORK":                   "tcp",
+		"HOUFENG_CLAMAV_ADDRESS":                   "clamav.internal:3310",
+		"HOUFENG_CLAMAV_DIAL_TIMEOUT":              "4s",
+		"HOUFENG_CLAMAV_OPERATION_TIMEOUT":         "50s",
+		"HOUFENG_CLAMAV_CHUNK_SIZE":                "16384",
+		"HOUFENG_CLAMAV_RESPONSE_LIMIT":            "1024",
+	})
+
+	cfg, err := loadContentProcessorConfig()
+	if err != nil {
+		t.Fatalf("loadContentProcessorConfig() error = %v", err)
+	}
+	if cfg.BlobBackend != attachments.BackendKindLocal || cfg.BlobRoot != "/var/lib/houfeng-test/attachments" ||
+		cfg.ProcessorMaxAttempts != 9 || cfg.Limits != attachments.DefaultLimits() {
+		t.Fatalf("shared attachment config = %#v", cfg)
+	}
+	if cfg.ClamAVNetwork != "tcp" || cfg.ClamAVAddress != "clamav.internal:3310" ||
+		cfg.ClamAVDialTimeout != 4*time.Second || cfg.ClamAVOperationTimeout != 50*time.Second ||
+		cfg.ClamAVChunkSize != 16384 || cfg.ClamAVResponseLimit != 1024 {
+		t.Fatalf("shared scanner config = %#v", cfg)
+	}
+}
+
 func TestProcessorErrorClassDoesNotExposeDetails(t *testing.T) {
 	secret := "super-secret-value"
 	wrapped := errors.New(secret)
@@ -1184,6 +1229,10 @@ func clearProcessorEnv(t *testing.T) {
 		"HOUFENG_DATABASE_URL", "HOUFENG_ATTACHMENT_BLOB_BACKEND", "HOUFENG_ATTACHMENT_BLOB_ROOT",
 		"HOUFENG_ATTACHMENT_S3_ENDPOINT", "HOUFENG_ATTACHMENT_S3_ACCESS_KEY", "HOUFENG_ATTACHMENT_S3_SECRET_KEY",
 		"HOUFENG_ATTACHMENT_S3_BUCKET", "HOUFENG_ATTACHMENT_S3_SECURE", "HOUFENG_CONTENT_PROCESSOR_WORKSPACE_ROOT",
+		"HOUFENG_ATTACHMENT_S3_ACCESS_KEY_FILE", "HOUFENG_ATTACHMENT_S3_SECRET_KEY_FILE",
+		"HOUFENG_CLAMAV_NETWORK", "HOUFENG_CLAMAV_ADDRESS",
+		"HOUFENG_CLAMAV_DIAL_TIMEOUT", "HOUFENG_CLAMAV_OPERATION_TIMEOUT", "HOUFENG_CLAMAV_CHUNK_SIZE",
+		"HOUFENG_CLAMAV_RESPONSE_LIMIT",
 	} {
 		t.Setenv(key, "")
 	}
@@ -1194,4 +1243,19 @@ func setProcessorEnv(t *testing.T, values map[string]string) {
 	for key, value := range values {
 		t.Setenv(key, value)
 	}
+}
+
+func unsetProcessorEnv(t *testing.T, key string) {
+	t.Helper()
+	value, existed := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if existed {
+			_ = os.Setenv(key, value)
+			return
+		}
+		_ = os.Unsetenv(key)
+	})
 }

@@ -340,10 +340,16 @@
 - Modify: `internal/center/records/application.go`
 - Modify: `internal/center/records/application_test.go`
 
-- [ ] Write RED tests for ordered/duplicate-free `AttachmentIDs`, defensive copies, canonical hash changes, equivalent normalization, request fingerprint, `RevisionCommitted.DraftID` and restore round trip.
-- [ ] Confirm RED with focused records tests.
-- [ ] Add the minimal immutable contract and canonical encoder field. Preserve existing author/save-reason metadata semantics and ensure an empty list has a stable encoding.
-- [ ] Re-run all `internal/center/records` tests; expect GREEN.
+- [x] Write RED tests for ordered/duplicate-free `AttachmentIDs`, defensive copies, canonical hash changes, equivalent normalization, request fingerprint, `RevisionCommitted.DraftID` and restore round trip.
+- [x] Confirm RED with focused records tests.
+- [x] Add the minimal immutable contract and canonical encoder field. Preserve existing author/save-reason metadata semantics and ensure an empty list has a stable encoding.
+- [x] Re-run all `internal/center/records` tests; expect GREEN.
+
+#### Task 3.1 verification evidence (2026-08-09)
+
+- The focused RED selector failed only because `CompleteRevisionValues.AttachmentIDs`, immutable `CompleteRevisionInput.AttachmentIDs()` and `RevisionCommitted.DraftID` did not exist.
+- The minimal GREEN reuses `attachments.NormalizeAttachmentReferences`, preserves caller order, returns defensive non-nil empty slices, adds the ordered IDs to the canonical encoder and copies historical IDs during restore without adding author/save-reason metadata to the content hash.
+- Focused tests, the complete `internal/center/records` package, the package race run and vet passed fresh. Store/HTTP/handler compile-only checks and `git diff --check HEAD` also passed.
 
 ## Task 3.2: Integrate draft/HTTP/store revision transaction
 
@@ -356,13 +362,27 @@
 - Modify: `internal/center/store/records.go`
 - Modify: `internal/center/store/records_test.go`
 - Modify: `internal/center/store/records_postgres_integration_test.go`
+- Modify: `internal/center/store/record_reads.go`
+- Modify: `internal/center/store/record_reads_test.go`
+- Modify: `internal/center/store/record_reads_postgres_integration_test.go`
 - Create: `internal/center/attachments/revision_participant.go`
 - Create: `internal/center/attachments/revision_participant_test.go`
+- Create: `internal/center/store/record_attachment_participant.go`
+- Create: `internal/center/store/record_attachment_participant_test.go`
+- Modify: `cmd/houfeng-center/bootstrap.go`
+- Modify: `cmd/houfeng-center/bootstrap_test.go`
 
-- [ ] Write RED tests that require non-null `attachment_ids` in draft/revision DTOs, preserve order through publish/read/restore, transfer exact draft-owned available attachments, permit same-record existing refs, reject foreign/pending/reserved refs and roll back every core/attachment write on failure.
-- [ ] Confirm RED across handler/store/attachment packages and real PostgreSQL transaction tests.
-- [ ] Implement transport mapping, ordered ref reads and the transaction-only participant. Register it in `NewPostgresRecordRepository` bootstrap wiring without adding network calls to the transaction.
-- [ ] Re-run complete Records Core and attachment PostgreSQL tests; verify no-change and idempotency behavior with empty/same/changed attachment lists.
+- [x] Write RED tests that require non-null `attachment_ids` in draft/revision DTOs, preserve order through publish/read/restore, transfer exact draft-owned available attachments, permit same-record existing refs, reject foreign/pending/reserved refs and roll back every core/attachment write on failure.
+- [x] Confirm RED across handler/store/attachment packages and real PostgreSQL transaction tests.
+- [x] Implement transport mapping, ordered ref reads and the transaction-only participant. Register it in `NewPostgresRecordRepository` bootstrap wiring without adding network calls to the transaction.
+- [x] Re-run complete Records Core and attachment PostgreSQL tests; verify no-change and idempotency behavior with empty/same/changed attachment lists.
+
+#### Task 3.2 verification evidence (2026-08-09)
+
+- Focused handler RED proved `attachment_ids` was unknown/missing from draft decode, publish mapping and revision responses; focused read, participant, `RevisionCommitted.DraftID` forwarding and bootstrap tests each failed for the absent contract before the minimal GREEN.
+- Because `records` already imports `attachments` for canonical reference normalization, a direct `attachments -> records` participant would create an import cycle. The transaction-only SQL behavior remains in `attachments/revision_participant.go`; the thin `store/record_attachment_participant.go` adapter converts the existing Records callback without duplicating validation or performing external I/O.
+- The real PostgreSQL transaction test was run once with attachment IDs deliberately removed from the adapter and failed at draft cleanup with the expected untransferred-owner FK; after restoring the adapter it passed ordered draft transfer, same-record reduced/restored refs, historical preservation, read round trip and full rollback after an available row was followed by a quarantined row.
+- Complete affected package tests, the affected package race run, focused vet, the full real PostgreSQL `Record(Attachment|Draft|Read|Revision)` selector and whitespace checks passed fresh. Database failures remain internal errors; only typed attachment validation/ownership/state conflicts are classified as Records semantic input failures.
 
 ## Task 3.3: Implement `record_attachments` deletion adapter and recovery seams
 
@@ -376,10 +396,17 @@
 - Extend: `internal/center/store/attachments_postgres_integration_test.go`
 - Modify: `internal/center/recorddeletion/types_test.go`
 
-- [ ] Write RED tests for exact descriptor surfaces, deterministic health proof, preview/surviving copies, cancel/purge/verify, cross-record dedupe, pins, immediate exclusive Blob delete, idempotent receipts, exact inventory ordering and restore hash/version mismatch.
-- [ ] Confirm RED independently of the incomplete production adapter registry.
-- [ ] Implement the closed-name adapter and typed inventory/pin/restore verifier interfaces. Do not create a global RecoveryPointManifest or open production permanent deletion.
-- [ ] Re-run adapter/store/local/MinIO tests and existing `recorddeletion` registry tests; expect missing later adapters to remain fail closed.
+- [x] Write RED tests for exact descriptor surfaces, deterministic health proof, preview/surviving copies, cancel/purge/verify, cross-record dedupe, pins, immediate exclusive Blob delete, idempotent receipts, exact inventory ordering and restore hash/version mismatch.
+- [x] Confirm RED independently of the incomplete production adapter registry.
+- [x] Implement the closed-name adapter and typed inventory/pin/restore verifier interfaces. Do not create a global RecoveryPointManifest or open production permanent deletion.
+- [x] Re-run adapter/store/local/MinIO tests and existing `recorddeletion` registry tests; expect missing later adapters to remain fail closed.
+
+#### Task 3.3 verification evidence (2026-08-09)
+
+- The deletion adapter owns the exact `record_attachments` surfaces and exposes deterministic health/preview proofs. PostgreSQL purge removes target logical/ref/terminal-partial rows in dependency order, retains shared cross-record Blobs, rejects live pins and nonterminal upload/processor/workspace/publication work, commits a permanent exact-version GC claim before external deletion, verifies completed physical proof and replays immutable receipts idempotently. Registry readiness and aggregate receipt encoding remain root-first while purge/verify run in reverse dependency order so `record_core` executes last.
+- Recovery inventory uses one `REPEATABLE READ READ ONLY` snapshot, preserves non-nil empty collections and deterministic Blob/upload/job/workspace ordering, reuses bounded GC pins, and rejects expected/actual key, version, hash, size or backend drift before verifying PostgreSQL Blob metadata. The later recovery controller remains responsible for supplying `actual` from byte-verifying local/S3 `BlobStore.Stat`; no global `RecoveryPointManifest` or production deletion bypass was added.
+- Fresh `go test ./internal/center/attachments ./internal/center/recorddeletion ./internal/center/store -count=1`, focused `go vet`, and the same three-package `go test -race ... -count=1` passed. The real PostgreSQL `^TestPostgresIntegrationAttachment(Deletion|Recovery)` selector passed, including active publication rollback and a completed/consumed publication positive control.
+- A fresh versioned MinIO `RELEASE.2025-04-22T22-12-26Z` plus PostgreSQL run passed `TestPostgresMinIOIntegrationAttachmentDeletionPurgesExclusiveExactVersion`; the temporary MinIO container was removed afterward. `gofmt -d` and `git diff --check HEAD` passed, and the incomplete nine-adapter production registry remains fail closed.
 
 ## Task 3.4: Add lazy Web DTO/API/queue primitives
 
@@ -395,10 +422,18 @@
 - Create: `web/src/pages/asset-decisions/AuthorizedAttachmentDownload.tsx`
 - Create: `web/src/pages/asset-decisions/AuthorizedAttachmentDownload.test.tsx`
 
-- [ ] Write RED contract/controller/component tests for non-null ordered IDs, local/S3 instructions, upload/poll state transitions, retry/cancel/remove, revoked/denied download, object URL cleanup, unmount and 390px no-overflow primitive layout.
-- [ ] Confirm RED with focused Vitest files and architecture tests; components must not call raw `fetch`.
-- [ ] Implement lazy records attachment facade and controlled primitives using existing request/error patterns. Do not integrate a full editor/material drawer or evidence picker.
-- [ ] Run focused Vitest, ESLint, TypeScript, production build, bundle and CSS budgets; verify attachment code remains out of the entry chunk.
+- [x] Write RED contract/controller/component tests for non-null ordered IDs, local/S3 instructions, upload/poll state transitions, retry/cancel/remove, revoked/denied download, object URL cleanup, unmount and 390px no-overflow primitive layout.
+- [x] Confirm RED with focused Vitest files and architecture tests; components must not call raw `fetch`.
+- [x] Implement lazy records attachment facade and controlled primitives using existing request/error patterns. Do not integrate a full editor/material drawer or evidence picker.
+- [x] Run focused Vitest, ESLint, TypeScript, production build, bundle and CSS budgets; verify attachment code remains out of the entry chunk.
+
+#### Task 3.4 verification evidence (2026-08-09)
+
+- RED first proved that required non-null ordered `attachment_ids`, the five attachment façade exports, queue/controller behavior and controlled upload/download components were absent. The initial CSS addition also exceeded the existing ratchets; the final implementation reuses the existing Asset Decisions layout primitives and raises no budget.
+- The final shared transport keeps JSON, empty and Blob responses behind `apiRequest.ts`; local uploads send only instructed draft/hash/content headers, S3 uploads use `credentials: 'omit'` and reject unsupported required headers, and authorized content remains a Blob response. The controller recreates sessions on retry, treats cancel as frontend abort, only removes terminal queue entries and aborts/suppresses work after disposal.
+- Focused ESLint and `tsc -b` passed. The six attachment transport/controller/component Vitest files passed all 42 tests; the fresh complete coverage run passed 129 files and 897 tests. `apiRequest.ts` retained 100% statements, branches, functions and lines, above its 90% critical branch ratchet.
+- A fresh Node 22 production build, `bundle:check`, `css:analyze` and `git diff --check HEAD` passed. Exact bundle results were entry JS `110733 / 110738`, entry CSS `37125 / 37125`, max async JS `31902 / 32052` and fonts `139072 / 139072`; the CSS analyzer passed without source or budget changes. No attachment API/controller/component identifier appeared in any built JS chunk, proving the unconsumed façade and primitives remain tree-shaken until a future lazy consumer.
+- Node 22 `make verify-web` then passed the complete lint, 129-file/897-test coverage, strict TypeScript production build, bundle/font and CSS gates again. `npm ci` reported the existing audit inventory of one moderate and six high findings; no automatic audit mutation was made. A browser route gate was not claimed because Task 3.4 intentionally has no production page consumer and does not integrate the later Child 5 drawer.
 
 ## Task 3.5: Configuration, Compose/systemd and final integration
 
@@ -415,20 +450,35 @@
 - Create: `docs/deploy/systemd/houfeng-content-processor.service`
 - Modify: `internal/center/deploy/docker_static_test.go`
 
-- [ ] Write RED config/static tests for explicit backend, persistent local path, private S3 settings, scanner/processor readiness, tmpfs/read-only/non-root/cap-drop/core=0, bounded queue/workspace and secret-free diagnostics.
-- [ ] Confirm RED in config/bootstrap/deploy tests.
-- [ ] Implement explicit configuration and wiring. Local Compose profile is a development/conformance topology and must not claim an independent production recovery domain.
-- [ ] Run config/bootstrap/static tests, Compose config validation, processor/center Docker builds and focused local/MinIO/processor end-to-end workflow.
+- [x] Write RED config/static tests for explicit backend, persistent local path, private S3 settings, scanner/processor readiness, tmpfs/read-only/non-root/cap-drop/core=0, bounded queue/workspace and secret-free diagnostics.
+- [x] Confirm RED in config/bootstrap/deploy tests.
+- [x] Implement explicit configuration and wiring. Local Compose profile is a development/conformance topology and must not claim an independent production recovery domain.
+- [x] Run config/bootstrap/static tests, Compose config validation, processor/center Docker builds and focused local/MinIO/processor end-to-end workflow.
+
+#### Task 3.5 verification evidence (2026-08-09)
+
+- RED config/bootstrap/deploy contracts failed for the absent shared attachment config, implicit processor local fallback, missing production draft authorizer and upload/download/scanner wiring, missing processor/systemd deployment, and stale two-service recovery claims. The new Compose service-block helper was separately corrected after it initially truncated at the first nested YAML line; focused RED then represented the production contract rather than fixture setup.
+- `LoadAttachmentConfig` now requires explicit local/S3 backend configuration, rejects broad/non-absolute local roots, honors S3 `_FILE` secrets, centralizes ClamAV limits and processor attempts, and is shared by center and processor. Center wires real Blob/scanner/upload/download services only in Records runtime-admission mode; legacy mode remains compatible and the still-unowned transaction admission gate remains fail closed.
+- Fresh config, center/processor bootstrap, draft authorization/store and deploy tests passed. `docker compose --env-file docs/deploy/compose.env.example -f compose.yaml config --quiet` passed with exact services `db`, pinned healthy `clamav`, `houfeng`, and `houfeng-content-processor`. The pinned ClamAV 1.4.3 image contains its configured healthcheck, and an opt-in real TCP scanner clean probe passed.
+- `go build -trimpath -o /dev/null` passed for center and processor. `docker build --build-arg VERSION=dev -t houfeng:task-3-5 .` passed; runtime inspection proved UID/GID 10001, both binaries, `pdfinfo`/`pdftoppm`, and a mode-0700 Blob root. Processor entrypoint runs without center-only admin/session secrets.
+- Real PostgreSQL local processor/revision/deletion/recovery focused workflows passed. A temporary real versioned MinIO `RELEASE.2025-04-22T22-12-26Z` passed S3 direct upload, processor workspace, exact-version GC, publication crash/restart and permanent deletion selectors; the temporary MinIO and ClamAV containers were stopped and auto-removed afterward.
+- `make verify-go`, `go mod verify`, the affected eleven-package race run, Node 22 `make verify-web` (129 files / 897 tests plus TypeScript/build/bundle/CSS), fresh deploy/static tests, `gofmt -d`, Compose validation and `git diff --check HEAD` passed. `npm ci` retained the existing one moderate/six high audit inventory; no automatic audit mutation was made.
+
+#### Checkpoint 3 final quality review evidence (2026-08-09)
+
+- The required full-scope Trellis 2.2 review re-read every applicable backend/Web quality contract and traced configuration, authorization, ordered attachment IDs, revision transaction participation, deletion/recovery seams, lazy Web transport, Compose and systemd across the complete branch diff. Every Checkpoint 3 PRD acceptance criterion was reconciled to the focused, race, real PostgreSQL/MinIO/ClamAV, Docker and Web evidence above; no Critical or Important finding remained.
+- The complete branch diff against `origin/main` contains 135 task-owned source/spec/test/deployment paths. It contains no generated build output, screenshot manifest, bulk raster artifact, credential value or content-bearing diagnostic. Processor logging remains limited to fixed lifecycle messages and a closed error class; the only production Web `fetch` owners remain the shared transport façade, including the credential-omitting S3 request helper.
+- Primary-checkout state was inspected read-only and left unchanged; all task edits remain confined to `/home/murray/code/houfeng/.worktree/vps-records-attachments-storage`. A final light gate passed `go test ./internal/center/deploy -count=1`, Compose config validation with the exact four services, and `git diff --check HEAD`.
 
 ## Checkpoint 3 and PR gate
 
-- [ ] Run all focused Records/attachment/deletion/Web tests fresh.
-- [ ] Run `go test -race` for changed Go packages and real PostgreSQL/local/MinIO/processor integration profiles.
-- [ ] Run `make verify-go`.
-- [ ] Use Node 22 and run `make verify-web`; record files/tests/typecheck/build/bundle/CSS results and existing audit findings without automatic audit fixes.
-- [ ] Run Docker static tests, Compose validation and required image builds.
-- [ ] Run Trellis spec/quality/cross-layer review and reconcile every PRD acceptance criterion to evidence.
-- [ ] Review the complete diff for scope, generated artifacts, secrets/content logs and primary-checkout isolation.
+- [x] Run all focused Records/attachment/deletion/Web tests fresh.
+- [x] Run `go test -race` for changed Go packages and real PostgreSQL/local/MinIO/processor integration profiles.
+- [x] Run `make verify-go`.
+- [x] Use Node 22 and run `make verify-web`; record files/tests/typecheck/build/bundle/CSS results and existing audit findings without automatic audit fixes.
+- [x] Run Docker static tests, Compose validation and required image builds.
+- [x] Run Trellis spec/quality/cross-layer review and reconcile every PRD acceptance criterion to evidence.
+- [x] Review the complete diff for scope, generated artifacts, secrets/content logs and primary-checkout isolation.
 - [ ] Commit Checkpoint 3, push the feature branch, open one PR, monitor required CI, fix failures on the same branch and proceed through merge/post-merge/release only with fresh evidence and repository policy.
 
 ## Rollback

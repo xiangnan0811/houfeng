@@ -11,7 +11,8 @@ import (
 func TestNewRegistryRejectsNilDuplicateExtraAndOverlappingAdapters(t *testing.T) {
 	t.Parallel()
 
-	attachments := newReadinessAdapterStub(t, AdapterNameRecordAttachments, []SurfaceName{"fixture.attachments"}, true, 1)
+	attachmentSurfaces := RecordAttachmentsSurfaceNames()
+	attachments := newReadinessAdapterStub(t, AdapterNameRecordAttachments, attachmentSurfaces, true, 1)
 	evidence := newReadinessAdapterStub(t, AdapterNameRecordEvidence, []SurfaceName{"fixture.evidence"}, true, 2)
 	var nilAdapter *readinessAdapterStub
 
@@ -28,7 +29,7 @@ func TestNewRegistryRejectsNilDuplicateExtraAndOverlappingAdapters(t *testing.T)
 			name: "overlapping surface",
 			adapters: []Adapter{
 				attachments,
-				&readinessAdapterStub{descriptor: mustAdapterDescriptor(t, AdapterNameRecordEvidence, []SurfaceName{"fixture.attachments"}), health: mustHealthSnapshot(t, true, 3)},
+				&readinessAdapterStub{descriptor: mustAdapterDescriptor(t, AdapterNameRecordEvidence, []SurfaceName{attachmentSurfaces[0]}), health: mustHealthSnapshot(t, true, 3)},
 			},
 		},
 		{name: "valid controls", adapters: []Adapter{attachments, evidence}},
@@ -138,7 +139,7 @@ func TestRegistryCapturesDescriptorAtConstruction(t *testing.T) {
 	adapter := newReadinessAdapterStub(
 		t,
 		AdapterNameRecordAttachments,
-		[]SurfaceName{"fixture.attachments"},
+		RecordAttachmentsSurfaceNames(),
 		true,
 		1,
 	)
@@ -152,7 +153,7 @@ func TestRegistryCapturesDescriptorAtConstruction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadinessSnapshot() error = %v", err)
 	}
-	if got := snapshot.Adapters()[0].Surfaces(); !reflect.DeepEqual(got, []SurfaceName{"fixture.attachments"}) {
+	if got := snapshot.Adapters()[0].Surfaces(); !reflect.DeepEqual(got, RecordAttachmentsSurfaceNames()) {
 		t.Fatalf("registered descriptor surfaces = %#v, want construction-time snapshot", got)
 	}
 }
@@ -316,8 +317,11 @@ func completeReadinessAdapters(t *testing.T) []Adapter {
 	adapters := make([]Adapter, 0, len(names))
 	for index, name := range names {
 		surfaces := []SurfaceName{SurfaceName(fmt.Sprintf("fixture.%s", name))}
-		if name == AdapterNameRecordCore {
+		switch name {
+		case AdapterNameRecordCore:
 			surfaces = RecordCoreSurfaceNames()
+		case AdapterNameRecordAttachments:
+			surfaces = RecordAttachmentsSurfaceNames()
 		}
 		adapters = append(adapters, newReadinessAdapterStub(t, name, surfaces, true, byte(index+1)))
 	}

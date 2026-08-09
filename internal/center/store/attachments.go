@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,9 +26,11 @@ type attachmentTx interface {
 }
 
 type PostgresAttachmentRepository struct {
-	beginTx              func(context.Context, pgx.TxOptions) (attachmentTx, error)
-	newBlobGCDeletionID  func() (string, error)
-	newBlobPublicationID func() (string, error)
+	beginTx                      func(context.Context, pgx.TxOptions) (attachmentTx, error)
+	newBlobGCDeletionID          func() (string, error)
+	newBlobPublicationID         func() (string, error)
+	attachmentDeletionBlobMu     sync.RWMutex
+	attachmentDeletionBlobStores map[attachments.BackendKind]attachments.BlobStore
 }
 
 func NewPostgresAttachmentRepository(pool *pgxpool.Pool) *PostgresAttachmentRepository {
@@ -41,6 +44,7 @@ func NewPostgresAttachmentRepository(pool *pgxpool.Pool) *PostgresAttachmentRepo
 		newBlobPublicationID: func() (string, error) {
 			return ids.New("bpi")
 		},
+		attachmentDeletionBlobStores: make(map[attachments.BackendKind]attachments.BlobStore),
 	}
 }
 

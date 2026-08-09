@@ -627,8 +627,11 @@ func deletionTestRegistry(t *testing.T) (Registry, []*deletionServiceAdapterStub
 	registered := make([]Adapter, 0, len(RequiredAdapterNames()))
 	for index, name := range RequiredAdapterNames() {
 		surfaces := []SurfaceName{SurfaceName("fixture." + string(name))}
-		if name == AdapterNameRecordCore {
+		switch name {
+		case AdapterNameRecordCore:
 			surfaces = RecordCoreSurfaceNames()
+		case AdapterNameRecordAttachments:
+			surfaces = RecordAttachmentsSurfaceNames()
 		}
 		adapter := newDeletionServiceAdapterStub(t, name, surfaces, byte(index+1))
 		adapters = append(adapters, adapter)

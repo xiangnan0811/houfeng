@@ -281,8 +281,10 @@ func TestPostgresRecordRepositoryPublishesDraftAfterFormalSideEffectsInSameTrans
 		currentRevisionCreatedAt: &currentRevisionCreatedAt,
 		publishedDraft:           &publishedDraft,
 	}
-	participant := &storeRevisionParticipantStub{name: "search", apply: func(context.Context, pgx.Tx, records.RevisionCommitted) error {
+	var participantDraftID string
+	participant := &storeRevisionParticipantStub{name: "search", apply: func(_ context.Context, _ pgx.Tx, committed records.RevisionCommitted) error {
 		steps = append(steps, "transaction_participant")
+		participantDraftID = committed.DraftID
 		return nil
 	}}
 	repository := newRecordRevisionTestRepository(t, tx, &steps, participant)
@@ -293,6 +295,9 @@ func TestPostgresRecordRepositoryPublishesDraftAfterFormalSideEffectsInSameTrans
 	}
 	if !result.Created || result.RevisionNo != 2 {
 		t.Fatalf("CommitRevision() = %#v, want created revision 2", result)
+	}
+	if participantDraftID != command.DraftID {
+		t.Fatalf("participant DraftID = %q, want %q", participantDraftID, command.DraftID)
 	}
 	want := []string{
 		"begin",

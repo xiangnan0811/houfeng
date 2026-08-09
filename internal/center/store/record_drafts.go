@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/records"
@@ -22,6 +23,7 @@ type PostgresRecordDraftRepository struct {
 }
 
 var _ records.DraftRepository = (*PostgresRecordDraftRepository)(nil)
+var _ attachments.DraftAttachmentUploadAuthorizer = (*PostgresRecordDraftRepository)(nil)
 
 const maxExpiredDraftCleanupBatchSize = uint64(100)
 
@@ -32,6 +34,25 @@ func NewPostgresRecordDraftRepository(pool *pgxpool.Pool, gate AdmissionGate) *P
 			return ids.New("rdc")
 		},
 	}
+}
+
+func (repository *PostgresRecordDraftRepository) AuthorizeDraftAttachmentUpload(
+	ctx context.Context,
+	actor recordauth.ActorScope,
+	draftID string,
+) error {
+	normalized, err := recordauth.NormalizeActorScope(actor)
+	if err != nil {
+		return fmt.Errorf("%w: invalid attachment upload actor", recordauth.ErrDenied)
+	}
+	routing, err := repository.GetDraftRouting(ctx, draftID, normalized.UserID)
+	if err != nil {
+		return err
+	}
+	if routing.ProjectID != normalized.ProjectID {
+		return fmt.Errorf("%w: attachment upload project mismatch", recordauth.ErrDenied)
+	}
+	return nil
 }
 
 func (repository *PostgresRecordDraftRepository) GetDraftRouting(

@@ -101,11 +101,15 @@ func TestNormalizeCompleteRevisionInputKeepsFieldsImmutableAndUTC(t *testing.T) 
 	if tags := got.Tags(); !slices.Equal(tags, []string{"network", "provider"}) {
 		t.Fatalf("Tags() = %#v", tags)
 	}
+	if attachmentIDs := got.AttachmentIDs(); !slices.Equal(attachmentIDs, []string{testRecordAttachmentID1, testRecordAttachmentID2}) {
+		t.Fatalf("AttachmentIDs() = %#v", attachmentIDs)
+	}
 
 	values.Subjects[0].IdentitySnapshot["display_name"] = "input mutation"
 	values.Subjects[0].CaptureAuthorization.CurrentScope.AllowedGroupIDs[0] = "rag_mutated"
 	values.Tags[0] = "input mutation"
 	values.Participants[0].IdentitySnapshot["display_name"] = "input mutation"
+	values.AttachmentIDs[0] = "att_inputmutation"
 	values.VisibilityScope.AllowedGroupIDs[0] = "rag_mutated"
 	values.Template.ID = "input_mutation"
 	*values.OccurredAt = values.OccurredAt.Add(24 * time.Hour)
@@ -128,6 +132,8 @@ func TestNormalizeCompleteRevisionInputKeepsFieldsImmutableAndUTC(t *testing.T) 
 	participants[0].IdentitySnapshot["display_name"] = "return mutation"
 	tags := got.Tags()
 	tags[0] = "return mutation"
+	attachmentIDs := got.AttachmentIDs()
+	attachmentIDs[0] = "att_returnmutation"
 	visibility := got.VisibilityScope()
 	visibility.AllowedGroupIDs[0] = "rag_returned"
 	template := got.Template()
@@ -144,6 +150,9 @@ func TestNormalizeCompleteRevisionInputKeepsFieldsImmutableAndUTC(t *testing.T) 
 	}
 	if again := got.Tags(); !slices.Equal(again, []string{"network", "provider"}) {
 		t.Fatalf("stored tags changed through returned copy mutation: %#v", again)
+	}
+	if again := got.AttachmentIDs(); !slices.Equal(again, []string{testRecordAttachmentID1, testRecordAttachmentID2}) {
+		t.Fatalf("stored attachment IDs changed through slice mutation: %#v", again)
 	}
 	if again := got.VisibilityScope(); again.AllowedGroupIDs[0] != testRecordGroupID {
 		t.Fatalf("stored visibility changed through returned copy mutation: %#v", again)
@@ -198,6 +207,10 @@ func TestCompleteRevisionCanonicalHashIsDeterministicAndContentScoped(t *testing
 		{name: "participant order", mutate: func(values *CompleteRevisionValues) {
 			values.Participants = append(values.Participants, RevisionParticipantSnapshot{ParticipantID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", IdentitySnapshot: map[string]string{"display_name": "Operator Three"}})
 		}},
+		{name: "attachment order", mutate: func(values *CompleteRevisionValues) {
+			values.AttachmentIDs[0], values.AttachmentIDs[1] = values.AttachmentIDs[1], values.AttachmentIDs[0]
+		}},
+		{name: "attachment identity", mutate: func(values *CompleteRevisionValues) { values.AttachmentIDs[0] = "att_changed" }},
 		{name: "template", mutate: func(values *CompleteRevisionValues) { values.Template.Version++ }},
 	}
 	for _, tt := range contentMutations {
@@ -209,5 +222,23 @@ func TestCompleteRevisionCanonicalHashIsDeterministicAndContentScoped(t *testing
 				t.Fatalf("%s mutation did not change canonical hash %x", tt.name, base.CanonicalHash())
 			}
 		})
+	}
+}
+
+func TestCompleteRevisionEmptyAttachmentIDsHaveStableNonNilEncoding(t *testing.T) {
+	t.Parallel()
+
+	nilValues := validCompleteRevisionValues(t)
+	nilValues.AttachmentIDs = nil
+	emptyValues := validCompleteRevisionValues(t)
+	emptyValues.AttachmentIDs = []string{}
+
+	nilInput := mustCompleteRevisionInput(t, nilValues)
+	emptyInput := mustCompleteRevisionInput(t, emptyValues)
+	if nilInput.AttachmentIDs() == nil || emptyInput.AttachmentIDs() == nil {
+		t.Fatalf("empty AttachmentIDs() must be non-nil: nil=%#v empty=%#v", nilInput.AttachmentIDs(), emptyInput.AttachmentIDs())
+	}
+	if nilInput.CanonicalHash() != emptyInput.CanonicalHash() {
+		t.Fatalf("nil and empty attachment IDs have different hashes: %x != %x", nilInput.CanonicalHash(), emptyInput.CanonicalHash())
 	}
 }

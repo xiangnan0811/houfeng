@@ -295,13 +295,15 @@ func TestRevisionParticipantRegistryAppliesInDeterministicNameOrder(t *testing.T
 	t.Parallel()
 
 	var applied []string
+	var attachmentDraftID string
 	registry, err := NewRevisionParticipantRegistry([]RevisionParticipant{
 		&revisionParticipantStub{name: "search", apply: func(context.Context, pgx.Tx, RevisionCommitted) error {
 			applied = append(applied, "search")
 			return nil
 		}},
-		&revisionParticipantStub{name: "attachments", apply: func(context.Context, pgx.Tx, RevisionCommitted) error {
+		&revisionParticipantStub{name: "attachments", apply: func(_ context.Context, _ pgx.Tx, committed RevisionCommitted) error {
 			applied = append(applied, "attachments")
+			attachmentDraftID = committed.DraftID
 			return nil
 		}},
 		&revisionParticipantStub{name: "activity_projection", apply: func(context.Context, pgx.Tx, RevisionCommitted) error {
@@ -316,17 +318,44 @@ func TestRevisionParticipantRegistryAppliesInDeterministicNameOrder(t *testing.T
 	if got := registry.Names(); !reflect.DeepEqual(got, []string{"activity_projection", "attachments", "search"}) {
 		t.Fatalf("Names() = %#v, want deterministic sorted names", got)
 	}
-	if err := registry.ApplyRevision(context.Background(), revisionParticipantTxStub{}, RevisionCommitted{}); err != nil {
+	if err := registry.ApplyRevision(context.Background(), revisionParticipantTxStub{}, RevisionCommitted{DraftID: "rdf_participant"}); err != nil {
 		t.Fatalf("ApplyRevision() error = %v", err)
 	}
 	if !reflect.DeepEqual(applied, []string{"activity_projection", "attachments", "search"}) {
 		t.Fatalf("participant order = %#v, want sorted order", applied)
+	}
+	if attachmentDraftID != "rdf_participant" {
+		t.Fatalf("participant DraftID = %q, want published draft identity", attachmentDraftID)
 	}
 
 	names := registry.Names()
 	names[0] = "mutated"
 	if got := registry.Names()[0]; got != "activity_projection" {
 		t.Fatalf("Names() changed through returned slice mutation: %q", got)
+	}
+}
+
+func TestRevisionRequestFingerprintChangesWithOrderedAttachmentIDs(t *testing.T) {
+	t.Parallel()
+
+	firstValues := validCompleteRevisionValues(t)
+	secondValues := validCompleteRevisionValues(t)
+	secondValues.AttachmentIDs[0], secondValues.AttachmentIDs[1] = secondValues.AttachmentIDs[1], secondValues.AttachmentIDs[0]
+	firstInput := mustCompleteRevisionInput(t, firstValues)
+	secondInput := mustCompleteRevisionInput(t, secondValues)
+
+	first := mustRevisionCommandFingerprint(t, recordplatform.OperationKindRecordUpdate, firstInput.CanonicalHash())
+	second := mustRevisionCommandFingerprint(t, recordplatform.OperationKindRecordUpdate, secondInput.CanonicalHash())
+	firstBytes, err := first.PersistedBytes()
+	if err != nil {
+		t.Fatalf("first fingerprint PersistedBytes() error = %v", err)
+	}
+	secondBytes, err := second.PersistedBytes()
+	if err != nil {
+		t.Fatalf("second fingerprint PersistedBytes() error = %v", err)
+	}
+	if reflect.DeepEqual(firstBytes, secondBytes) {
+		t.Fatalf("ordered attachment changes produced identical request fingerprints: %x", firstBytes)
 	}
 }
 

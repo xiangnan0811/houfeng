@@ -44,6 +44,14 @@ func (receipt AdapterPurgeReceipt) validate(target PurgeTarget, descriptor Adapt
 	return nil
 }
 
+func ValidateAdapterPurgeReceipt(
+	receipt AdapterPurgeReceipt,
+	target PurgeTarget,
+	descriptor AdapterDescriptor,
+) error {
+	return receipt.validate(target, descriptor)
+}
+
 type CorePurgeCommand struct {
 	Operation     DeletionOperation
 	SurfaceDigest [sha256.Size]byte
@@ -177,7 +185,12 @@ func (purger *RegistryPurger) PurgeOnline(ctx context.Context, operation Deletio
 	payload = appendLengthPrefixed(payload, onlinePurgeDigestDomainV1)
 	payload = appendUint64(payload, 1)
 	payload = appendLengthPrefixed(payload, operation.OperationID)
-	for _, name := range requiredAdapterNames {
+	receipts := make(map[AdapterName]AdapterPurgeReceipt, len(requiredAdapterNames))
+	// Readiness and receipt encoding keep the closed root-first order. Purge runs
+	// in reverse so dependent child surfaces release their restrictive references
+	// before record_core removes revisions, drafts, and the record root.
+	for index := len(requiredAdapterNames) - 1; index >= 0; index-- {
+		name := requiredAdapterNames[index]
 		registered, exists := purger.registry.adapters[name]
 		if !exists {
 			return OnlinePurgeReceipt{}, ErrDeletionSafetyUnavailable
@@ -199,6 +212,10 @@ func (purger *RegistryPurger) PurgeOnline(ctx context.Context, operation Deletio
 		if err := adapter.VerifyDeletion(ctx, target, receipt); err != nil {
 			return OnlinePurgeReceipt{}, fmt.Errorf("%w: adapter %q verify: %v", ErrDeletionSafetyUnavailable, name, err)
 		}
+		receipts[name] = receipt
+	}
+	for _, name := range requiredAdapterNames {
+		receipt := receipts[name]
 		payload = appendLengthPrefixed(payload, string(name))
 		payload = append(payload, receipt.SurfaceDigest[:]...)
 		payload = append(payload, receipt.ReceiptDigest[:]...)
@@ -223,6 +240,14 @@ func digestAdapterSurfaces(descriptor AdapterDescriptor) [sha256.Size]byte {
 // persistence adapters without exposing the descriptor's internal storage.
 func RecordCoreSurfaceDigest() [sha256.Size]byte {
 	descriptor, err := NewAdapterDescriptor(AdapterNameRecordCore, RecordCoreSurfaceNames())
+	if err != nil {
+		return [sha256.Size]byte{}
+	}
+	return digestAdapterSurfaces(descriptor)
+}
+
+func RecordAttachmentsSurfaceDigest() [sha256.Size]byte {
+	descriptor, err := NewAdapterDescriptor(AdapterNameRecordAttachments, RecordAttachmentsSurfaceNames())
 	if err != nil {
 		return [sha256.Size]byte{}
 	}

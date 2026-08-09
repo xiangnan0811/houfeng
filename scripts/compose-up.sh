@@ -81,4 +81,4 @@ compose exec -T db sh -ceu '
   exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ' < "$repo_root/docs/deploy/compose-application-role.sql"
 
-compose up -d houfeng
+compose up -d houfeng houfeng-content-processor

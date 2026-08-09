@@ -3,11 +3,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from './apiRequest'
 import {
   archiveRecord,
+  completeAttachmentUpload,
+  createAttachmentUpload,
   createRecord,
   createRecordDraft,
   createRecordRevision,
   discardRecordDraft,
   executeRecordPermanentDeletion,
+  getAttachmentContent,
+  getAttachmentMetadata,
   getRecord,
   getRecordDeletionOperation,
   getRecordDraft,
@@ -19,8 +23,12 @@ import {
   previewRecordPermanentDeletion,
   restoreRecord,
   restoreRecordRevision,
+  uploadAttachmentContent,
 } from './recordsApi'
 import type {
+  AttachmentMetadata,
+  AttachmentUploadCompletion,
+  AttachmentUploadSession,
   CreateRecordDraftInput,
   PublishRecordInput,
   PublishRecordRevisionInput,
@@ -74,6 +82,7 @@ const payload = {
   },
   subjects: [subjectReference],
   tags: ['provider'],
+  attachment_ids: ['att_contract_first', 'att_contract_second'],
   owner_id: 'usr_owner',
   participant_ids: ['usr_participant'],
   follow_up_at: '2026-08-04T10:00:00Z',
@@ -104,6 +113,7 @@ const revision = {
     },
   }],
   tags: payload.tags,
+  attachment_ids: payload.attachment_ids,
   owner_id: payload.owner_id,
   participants: [{ participant_id: 'usr_participant', display_name: 'Operator' }],
   follow_up_at: payload.follow_up_at,
@@ -150,6 +160,185 @@ afterEach(() => {
 })
 
 describe('Records API transport', () => {
+  it('preserves non-null ordered attachment IDs in draft and revision DTOs', () => {
+    expect(draft.payload.attachment_ids).toEqual([
+      'att_contract_first',
+      'att_contract_second',
+    ])
+    expect(revision.attachment_ids).toEqual(draft.payload.attachment_ids)
+    expect({ ...draft.payload, attachment_ids: [] }.attachment_ids).toEqual([])
+  })
+
+  it('follows a local attachment instruction through complete and metadata polling', async () => {
+    const session = {
+      upload_id: 'aup_contract',
+      attachment_id: 'att_contract',
+      state: 'created',
+      expires_at: '2026-08-09T20:00:00Z',
+      quota: {
+        logical_bytes: 0,
+        reserved_bytes: 12,
+        physical_bytes: 0,
+        effective_record_bytes: 12,
+        project_warning: false,
+      },
+      target: {
+        transport: 'local',
+        upload_url: '/api/attachment-uploads/aup_contract/content',
+        method: 'PUT',
+        required_headers: ['X-Houfeng-Draft-ID', 'X-Content-SHA256'],
+      },
+    } satisfies AttachmentUploadSession
+    const completion = {
+      upload_id: session.upload_id,
+      attachment_id: session.attachment_id,
+      state: 'quarantined',
+      quota: session.quota,
+    } satisfies AttachmentUploadCompletion
+    const metadata = {
+      attachment_id: session.attachment_id,
+      state: 'available',
+      display_name: 'incident.txt',
+      media_type: 'text/plain',
+      size_bytes: 12,
+      preview_available: true,
+    } satisfies AttachmentMetadata
+    const content = new Blob(['safe content'], { type: 'text/plain' })
+    const sha256 = 'a'.repeat(64)
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(mockResponse(201, session))
+      .mockResolvedValueOnce(mockResponse(200, {
+        upload_id: session.upload_id,
+        attachment_id: session.attachment_id,
+        size_bytes: content.size,
+        sha256,
+      }))
+      .mockResolvedValueOnce(mockResponse(202, completion))
+      .mockResolvedValueOnce(mockResponse(200, metadata))
+
+    await expect(createAttachmentUpload({
+      draft_id: 'rdf_contract',
+      display_name: metadata.display_name,
+      media_type: metadata.media_type,
+      declared_size_bytes: content.size,
+    })).resolves.toEqual(session)
+    await uploadAttachmentContent(session, 'rdf_contract', sha256, content)
+    await expect(completeAttachmentUpload(session.upload_id, 'rdf_contract')).resolves.toEqual(completion)
+    await expect(getAttachmentMetadata(session.attachment_id)).resolves.toEqual(metadata)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, session.target.upload_url, {
+      cache: 'no-store',
+      credentials: 'include',
+      method: 'PUT',
+      headers: {
+        Accept: 'application/json',
+        'X-Houfeng-Draft-ID': 'rdf_contract',
+        'X-Content-SHA256': sha256,
+      },
+      body: content,
+    })
+  })
+
+  it('uses an S3 instruction without forwarding first-party credentials', async () => {
+    const session = {
+      upload_id: 'aup_s3contract',
+      attachment_id: 'att_s3contract',
+      state: 'uploading',
+      expires_at: '2026-08-09T20:00:00Z',
+      quota: {
+        logical_bytes: 0,
+        reserved_bytes: 4,
+        physical_bytes: 0,
+        effective_record_bytes: 4,
+        project_warning: false,
+      },
+      target: {
+        transport: 's3',
+        upload_url: 'https://objects.example.test/private-upload',
+        method: 'PUT',
+        required_headers: [],
+        temporary_object_key: 'temporary/' + 'b'.repeat(64),
+      },
+    } satisfies AttachmentUploadSession
+    const content = new Blob(['safe'], { type: 'text/plain' })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }))
+
+    await uploadAttachmentContent(session, 'rdf_contract', 'c'.repeat(64), content)
+
+    expect(fetchMock).toHaveBeenCalledWith(session.target.upload_url, {
+      cache: 'no-store',
+      credentials: 'omit',
+      method: 'PUT',
+      headers: {},
+      body: content,
+    })
+  })
+
+  it('fetches authorized attachment bytes through the shared transport', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('preview', {
+      status: 200,
+      headers: { 'Content-Type': 'text/plain' },
+    }))
+
+    const result = await getAttachmentContent('att /contract', 'preview')
+
+    expect(result.type).toBe('text/plain')
+    await expect(result.text()).resolves.toBe('preview')
+    expect(fetchMock).toHaveBeenCalledWith('/api/attachments/att%20%2Fcontract/content?variant=preview', {
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { Accept: 'application/octet-stream' },
+    })
+  })
+
+  it('decodes an opaque authorized attachment denial through the shared error contract', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(404, {
+      code: 'resource_not_found',
+      message: 'resource not found',
+      field_errors: [],
+    }))
+
+    await expect(getAttachmentContent('att_denied')).rejects.toMatchObject({
+      status: 404,
+      code: 'resource_not_found',
+      message: 'resource not found',
+    })
+  })
+
+  it('fails a rejected S3 instruction without converting it into a successful upload', async () => {
+    const session = {
+      upload_id: 'aup_s3denied',
+      attachment_id: 'att_s3denied',
+      state: 'uploading',
+      expires_at: '2026-08-09T20:00:00Z',
+      quota: {
+        logical_bytes: 0,
+        reserved_bytes: 4,
+        physical_bytes: 0,
+        effective_record_bytes: 4,
+        project_warning: false,
+      },
+      target: {
+        transport: 's3',
+        upload_url: 'https://objects.example.test/rejected-upload',
+        method: 'PUT',
+        required_headers: [],
+        temporary_object_key: 'temporary/' + 'd'.repeat(64),
+      },
+    } satisfies AttachmentUploadSession
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 503 }))
+
+    await expect(uploadAttachmentContent(
+      session,
+      'rdf_contract',
+      'e'.repeat(64),
+      new Blob(['safe']),
+    )).rejects.toMatchObject({
+      status: 503,
+      message: 'Request failed: 503',
+    })
+  })
+
   it('normalizes record list filters and preserves the server cursor response', async () => {
     const response = { items: [record], next_cursor: ' cursor-next ' } satisfies RecordListResponse
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, response))

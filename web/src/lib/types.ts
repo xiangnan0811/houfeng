@@ -2493,6 +2493,70 @@ export type RecordTemplate = {
   version: number
 }
 
+export type AttachmentUploadState =
+  | 'created'
+  | 'uploading'
+  | 'quarantined'
+  | 'available'
+  | 'rejected'
+  | 'expired'
+
+export type AttachmentQuota = {
+  logical_bytes: number
+  reserved_bytes: number
+  physical_bytes: number
+  effective_record_bytes: number
+  project_warning: boolean
+}
+
+type AttachmentUploadTargetBase = {
+  upload_url: string
+  method: 'PUT'
+  required_headers: string[]
+}
+
+export type AttachmentUploadTarget = AttachmentUploadTargetBase & ({
+  transport: 'local'
+  temporary_object_key?: never
+} | {
+  transport: 's3'
+  temporary_object_key: string
+})
+
+export type CreateAttachmentUploadInput = {
+  draft_id: string
+  display_name: string
+  media_type: string
+  declared_size_bytes: number
+}
+
+export type AttachmentUploadSession = {
+  upload_id: string
+  attachment_id: string
+  state: 'created' | 'uploading'
+  expires_at: string
+  quota: AttachmentQuota
+  target: AttachmentUploadTarget
+}
+
+export type AttachmentUploadCompletion = {
+  upload_id: string
+  attachment_id: string
+  state: 'quarantined' | 'available'
+  quota: AttachmentQuota
+}
+
+export type AttachmentMetadata = {
+  attachment_id: string
+  state: AttachmentUploadState
+  display_name: string
+  media_type: string
+  size_bytes: number
+  preview_available: boolean
+}
+
+export type AttachmentContentVariant = 'original' | 'preview'
+
 export type RecordDraftPayload = {
   title: string
   body_markdown: string
@@ -2505,6 +2569,7 @@ export type RecordDraftPayload = {
   visibility: RecordVisibility
   subjects: RecordSubjectReference[]
   tags: string[]
+  attachment_ids: string[]
   owner_id: string
   participant_ids: string[]
   follow_up_at?: string | null
@@ -2547,6 +2612,7 @@ export type RecordRevision = {
   visibility: RecordVisibility
   subjects: RecordSubject[]
   tags: string[]
+  attachment_ids: string[]
   owner_id?: string
   participants: RecordParticipant[]
   follow_up_at?: string

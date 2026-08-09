@@ -18,6 +18,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"houfeng/internal/center/attachments"
+	centerconfig "houfeng/internal/center/config"
 	"houfeng/internal/center/store"
 )
 
@@ -28,12 +29,7 @@ const (
 	defaultProcessorReconciliationItems  = 100
 	defaultProcessorReconciliationWindow = 30 * time.Second
 	defaultProcessorReconciliationRetry  = time.Second
-	defaultProcessorMaxAttempts          = int64(3)
 	defaultProcessorJobTTL               = 24 * time.Hour
-	defaultClamAVDialTimeout             = 5 * time.Second
-	defaultClamAVOperationTimeout        = 2 * time.Minute
-	defaultClamAVChunkSize               = 64 * 1024
-	defaultClamAVResponseLimit           = 4 * 1024
 )
 
 type contentProcessorConfig struct {
@@ -592,7 +588,7 @@ func loadContentProcessorConfig() (contentProcessorConfig, error) {
 	if err != nil {
 		return contentProcessorConfig{}, err
 	}
-	backendValue, err := processorEnvOrDefault("HOUFENG_ATTACHMENT_BLOB_BACKEND", string(attachments.BackendKindLocal))
+	attachmentConfig, err := centerconfig.LoadAttachmentConfig()
 	if err != nil {
 		return contentProcessorConfig{}, err
 	}
@@ -601,7 +597,14 @@ func loadContentProcessorConfig() (contentProcessorConfig, error) {
 		return contentProcessorConfig{}, err
 	}
 	config := contentProcessorConfig{
-		DatabaseURL: databaseURL, BlobBackend: attachments.BackendKind(strings.ToLower(backendValue)),
+		DatabaseURL:              databaseURL,
+		BlobBackend:              attachmentConfig.BlobBackend,
+		BlobRoot:                 attachmentConfig.BlobRoot,
+		S3Endpoint:               attachmentConfig.S3Endpoint,
+		S3AccessKey:              attachmentConfig.S3AccessKey,
+		S3SecretKey:              attachmentConfig.S3SecretKey,
+		S3Bucket:                 attachmentConfig.S3Bucket,
+		S3Secure:                 attachmentConfig.S3Secure,
 		WorkspaceRoot:            workspaceRoot,
 		PDFInfoBinary:            processorOptionalEnv("HOUFENG_PDFINFO_BINARY", "/usr/bin/pdfinfo"),
 		PDFToPPMBinary:           processorOptionalEnv("HOUFENG_PDFTOPPM_BINARY", "/usr/bin/pdftoppm"),
@@ -611,9 +614,15 @@ func loadContentProcessorConfig() (contentProcessorConfig, error) {
 		ReconciliationMaxItems:   defaultProcessorReconciliationItems,
 		ReconciliationMaxRuntime: defaultProcessorReconciliationWindow,
 		ReconciliationRetryDelay: defaultProcessorReconciliationRetry,
-		ProcessorMaxAttempts:     defaultProcessorMaxAttempts,
+		ClamAVNetwork:            attachmentConfig.ClamAVNetwork,
+		ClamAVAddress:            attachmentConfig.ClamAVAddress,
+		ClamAVDialTimeout:        attachmentConfig.ClamAVDialTimeout,
+		ClamAVOperationTimeout:   attachmentConfig.ClamAVOperationTimeout,
+		ClamAVChunkSize:          attachmentConfig.ClamAVChunkSize,
+		ClamAVResponseLimit:      attachmentConfig.ClamAVResponseLimit,
+		ProcessorMaxAttempts:     attachmentConfig.ProcessorMaxAttempts,
 		ProcessorJobTTL:          defaultProcessorJobTTL,
-		Limits:                   attachments.DefaultLimits(),
+		Limits:                   attachmentConfig.Limits,
 	}
 	if config.OwnerLeaseDuration, err = processorDurationEnv("HOUFENG_CONTENT_PROCESSOR_LEASE_DURATION", config.OwnerLeaseDuration); err != nil {
 		return contentProcessorConfig{}, err
@@ -630,53 +639,8 @@ func loadContentProcessorConfig() (contentProcessorConfig, error) {
 	if config.ReconciliationRetryDelay, err = processorDurationEnv("HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_RETRY_DELAY", config.ReconciliationRetryDelay); err != nil {
 		return contentProcessorConfig{}, err
 	}
-	if config.ProcessorMaxAttempts, err = processorInt64Env("HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS", config.ProcessorMaxAttempts); err != nil {
-		return contentProcessorConfig{}, err
-	}
 	if config.ProcessorJobTTL, err = processorDurationEnv("HOUFENG_CONTENT_PROCESSOR_JOB_TTL", config.ProcessorJobTTL); err != nil {
 		return contentProcessorConfig{}, err
-	}
-
-	switch config.BlobBackend {
-	case attachments.BackendKindLocal:
-		config.BlobRoot, err = requiredProcessorEnv("HOUFENG_ATTACHMENT_BLOB_ROOT")
-	case attachments.BackendKindS3:
-		config.S3Endpoint, err = requiredProcessorEnv("HOUFENG_ATTACHMENT_S3_ENDPOINT")
-		if err == nil {
-			config.S3AccessKey, err = processorSecretEnvOrFile("HOUFENG_ATTACHMENT_S3_ACCESS_KEY")
-		}
-		if err == nil {
-			config.S3SecretKey, err = processorSecretEnvOrFile("HOUFENG_ATTACHMENT_S3_SECRET_KEY")
-		}
-		if err == nil {
-			config.S3Bucket, err = requiredProcessorEnv("HOUFENG_ATTACHMENT_S3_BUCKET")
-		}
-		if err == nil {
-			config.S3Secure, err = processorBoolEnv("HOUFENG_ATTACHMENT_S3_SECURE", false)
-		}
-	default:
-		err = errors.New("HOUFENG_ATTACHMENT_BLOB_BACKEND must be local or s3")
-	}
-	if err != nil {
-		return contentProcessorConfig{}, err
-	}
-
-	config.ClamAVAddress = strings.TrimSpace(os.Getenv("HOUFENG_CLAMAV_ADDRESS"))
-	if config.ClamAVAddress != "" {
-		config.ClamAVNetwork = processorOptionalEnv("HOUFENG_CLAMAV_NETWORK", "unix")
-		config.ClamAVDialTimeout, err = processorDurationEnv("HOUFENG_CLAMAV_DIAL_TIMEOUT", defaultClamAVDialTimeout)
-		if err == nil {
-			config.ClamAVOperationTimeout, err = processorDurationEnv("HOUFENG_CLAMAV_OPERATION_TIMEOUT", defaultClamAVOperationTimeout)
-		}
-		if err == nil {
-			config.ClamAVChunkSize, err = processorIntEnv("HOUFENG_CLAMAV_CHUNK_SIZE", defaultClamAVChunkSize)
-		}
-		if err == nil {
-			config.ClamAVResponseLimit, err = processorIntEnv("HOUFENG_CLAMAV_RESPONSE_LIMIT", defaultClamAVResponseLimit)
-		}
-		if err != nil {
-			return contentProcessorConfig{}, err
-		}
 	}
 	if err := config.validate(); err != nil {
 		return contentProcessorConfig{}, err

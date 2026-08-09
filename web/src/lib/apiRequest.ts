@@ -69,22 +69,19 @@ async function request(
   path: string,
   init?: RequestInit,
   decodeError?: ApiErrorDecoder,
-): Promise<string> {
+): Promise<Response> {
   const response = await fetch(path, {
     headers: { Accept: 'application/json' },
     cache: 'no-store',
     credentials: 'include',
     ...init,
   })
-
-  const rawBody = await response.text()
-
   if (response.status === 401) {
     onUnauthorized?.()
     throw new ApiError(401, 'unauthenticated')
   }
-
   if (!response.ok) {
+    const rawBody = await response.text()
     let message = `Request failed: ${response.status}`
     let details: ApiErrorDetails<unknown> | undefined
     if (rawBody.trim()) {
@@ -101,8 +98,7 @@ async function request(
     }
     throw new ApiError(response.status, message, details)
   }
-
-  return rawBody
+  return response
 }
 
 export async function requestJSON<T>(
@@ -110,8 +106,8 @@ export async function requestJSON<T>(
   init?: RequestInit,
   decodeError?: ApiErrorDecoder,
 ): Promise<T> {
-  const rawBody = await request(path, init, decodeError)
-  return JSON.parse(rawBody) as T
+  const response = await request(path, init, decodeError)
+  return JSON.parse(await response.text()) as T
 }
 
 export async function requestEmpty(
@@ -120,6 +116,26 @@ export async function requestEmpty(
   decodeError?: ApiErrorDecoder,
 ): Promise<void> {
   await request(path, init, decodeError)
+}
+
+export async function requestBlob(
+  path: string,
+  init?: RequestInit,
+  decodeError?: ApiErrorDecoder,
+): Promise<Blob> {
+  const response = await request(path, init, decodeError)
+  return response.blob()
+}
+
+export async function requestExternalEmpty(path: string, init: RequestInit): Promise<void> {
+  const response = await fetch(path, {
+    cache: 'no-store',
+    credentials: 'omit',
+    ...init,
+  })
+  if (!response.ok) {
+    throw new ApiError(response.status, `Request failed: ${response.status}`)
+  }
 }
 
 export function postJSON<T>(path: string): Promise<T> {

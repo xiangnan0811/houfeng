@@ -78,12 +78,12 @@
 
 ### Checkpoint 3: Records integration and delivery seams
 
-- [ ] attachment IDs 在 draft -> HTTP -> normalized input -> canonical hash -> revision refs -> read/restore -> Web DTO 全链路无损，空数组不变成 `null`。
-- [ ] revision transaction rollback、历史引用、current 移除、跨记录 copied logical attachment、global dedupe 和 permanent purge 无宽限语义通过真实 PostgreSQL/MinIO tests。
-- [ ] `record_attachments` deletion adapter 的 descriptor、health、preview、purge、verify 与 backup/restore inventory seams 可由后续任务注册；缺少其他 adapter 时 production deletion 仍 fail closed。
-- [ ] Web lazy transport、queue/controller、状态/重试/取消/移除和 authorized download primitives 通过 focused Vitest、lint、build、bundle 与 CSS gates；本任务不伪造完整 drawer。
-- [ ] local 持久目录、S3、processor、scanner、容量/队列/失败健康在 Compose/systemd config/static tests 可验证。
-- [ ] `make verify-go`、Node 22 `make verify-web`、local/MinIO/processor integration、Docker static/build 和 Trellis quality review 通过。
+- [x] attachment IDs 在 draft -> HTTP -> normalized input -> canonical hash -> revision refs -> read/restore -> Web DTO 全链路无损，空数组不变成 `null`。
+- [x] revision transaction rollback、历史引用、current 移除、跨记录 copied logical attachment、global dedupe 和 permanent purge 无宽限语义通过真实 PostgreSQL/MinIO tests。
+- [x] `record_attachments` deletion adapter 的 descriptor、health、preview、purge、verify 与 backup/restore inventory seams 可由后续任务注册；缺少其他 adapter 时 production deletion 仍 fail closed。
+- [x] Web lazy transport、queue/controller、状态/重试/取消/移除和 authorized download primitives 通过 focused Vitest、lint、build、bundle 与 CSS gates；本任务不伪造完整 drawer。
+- [x] local 持久目录、S3、processor、scanner、容量/队列/失败健康在 Compose/systemd config/static tests 可验证。
+- [x] `make verify-go`、Node 22 `make verify-web`、local/MinIO/processor integration、Docker static/build 和 Trellis quality review 通过。
 
 ## Out of Scope
 

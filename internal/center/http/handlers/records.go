@@ -391,6 +391,7 @@ type recordDraftPayloadInput struct {
 	Tags                   []string                       `json:"tags"`
 	OwnerID                string                         `json:"owner_id"`
 	ParticipantIDs         []string                       `json:"participant_ids"`
+	AttachmentIDs          []string                       `json:"attachment_ids"`
 	FollowUpAt             *time.Time                     `json:"follow_up_at,omitempty"`
 	Template               *recordTemplateInput           `json:"template,omitempty"`
 	SaveReason             string                         `json:"save_reason"`
@@ -459,7 +460,7 @@ func decodeRecordDraftPayload(raw []byte) (recordDraftPayloadInput, error) {
 		return recordDraftPayloadInput{}, fmt.Errorf("decode record draft payload: %w", err)
 	}
 	if input.Visibility.AllowedRoles == nil || input.Visibility.AllowedGroupIDs == nil ||
-		input.Subjects == nil || input.Tags == nil || input.ParticipantIDs == nil {
+		input.Subjects == nil || input.Tags == nil || input.ParticipantIDs == nil || input.AttachmentIDs == nil {
 		return recordDraftPayloadInput{}, errors.New("record draft payload arrays must not be null")
 	}
 	return input, nil
@@ -516,6 +517,7 @@ func (input recordDraftPayloadInput) toDomain(
 		Tags:                   append([]string{}, input.Tags...),
 		OwnerID:                input.OwnerID,
 		Participants:           participants,
+		AttachmentIDs:          append([]string{}, input.AttachmentIDs...),
 		FollowUpAt:             input.FollowUpAt,
 		Template:               template,
 		SaveReason:             input.SaveReason,
@@ -572,6 +574,7 @@ type recordRevisionResponse struct {
 	Tags            []string                       `json:"tags"`
 	OwnerID         string                         `json:"owner_id,omitempty"`
 	Participants    []recordParticipantResponse    `json:"participants"`
+	AttachmentIDs   []string                       `json:"attachment_ids"`
 	FollowUpAt      *time.Time                     `json:"follow_up_at,omitempty"`
 	Template        *recordTemplateResponse        `json:"template,omitempty"`
 	AuthorID        string                         `json:"author_id"`
@@ -669,7 +672,8 @@ func newRecordRevisionResponse(revision records.RecordRevision) recordRevisionRe
 		},
 		Subjects: make([]recordSubjectResponse, 0), Tags: append([]string{}, input.Tags()...),
 		OwnerID: input.OwnerID(), Participants: make([]recordParticipantResponse, 0),
-		FollowUpAt: utcTimePointer(input.FollowUpAt()), AuthorID: input.AuthorID(),
+		AttachmentIDs: append([]string{}, input.AttachmentIDs()...),
+		FollowUpAt:    utcTimePointer(input.FollowUpAt()), AuthorID: input.AuthorID(),
 		SaveReason: input.SaveReason(), CreatedAt: revision.CreatedAt.UTC(),
 	}
 	for _, subject := range input.Subjects() {

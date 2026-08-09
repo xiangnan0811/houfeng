@@ -22,11 +22,15 @@ const EAGER_ROOTS = [
 
 const EXPECTED_EXPORTS = [
   'archiveRecord',
+  'completeAttachmentUpload',
+  'createAttachmentUpload',
   'createRecord',
   'createRecordDraft',
   'createRecordRevision',
   'discardRecordDraft',
   'executeRecordPermanentDeletion',
+  'getAttachmentContent',
+  'getAttachmentMetadata',
   'getRecord',
   'getRecordDeletionOperation',
   'getRecordDraft',
@@ -38,6 +42,7 @@ const EXPECTED_EXPORTS = [
   'previewRecordPermanentDeletion',
   'restoreRecord',
   'restoreRecordRevision',
+  'uploadAttachmentContent',
 ].sort()
 
 type SourceMap = Readonly<Record<string, string>>

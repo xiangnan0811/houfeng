@@ -131,7 +131,7 @@ func TestCoreAdapterRejectsInvalidStoreResultsAndTypedNilStore(t *testing.T) {
 	}
 }
 
-func TestRegistryPurgerUsesFixedAdapterOrderAndVerifiesEachReceiptBeforeNext(t *testing.T) {
+func TestRegistryPurgerUsesDependencySafeReverseOrderAndVerifiesEachReceiptBeforeNext(t *testing.T) {
 	t.Parallel()
 
 	registry, adapters := deletionTestRegistry(t)
@@ -159,7 +159,9 @@ func TestRegistryPurgerUsesFixedAdapterOrderAndVerifiesEachReceiptBeforeNext(t *
 		t.Fatalf("PurgeOnline() = %#v", receipt)
 	}
 	wantCalls := make([]string, 0, 2*len(adapters))
-	for _, name := range RequiredAdapterNames() {
+	names := RequiredAdapterNames()
+	for index := len(names) - 1; index >= 0; index-- {
+		name := names[index]
 		wantCalls = append(wantCalls, "purge:"+string(name), "verify:"+string(name))
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
@@ -193,8 +195,8 @@ func TestRegistryPurgerStopsAtFirstPurgeOrVerificationFailure(t *testing.T) {
 			if _, err := purger.PurgeOnline(context.Background(), operation); !errors.Is(err, ErrDeletionSafetyUnavailable) {
 				t.Fatalf("PurgeOnline() error = %v, want ErrDeletionSafetyUnavailable", err)
 			}
-			if adapters[3].purgeCalls != 0 {
-				t.Fatalf("adapter after failure purge calls = %d, want zero", adapters[3].purgeCalls)
+			if adapters[1].purgeCalls != 0 {
+				t.Fatalf("adapter after failure purge calls = %d, want zero", adapters[1].purgeCalls)
 			}
 		})
 	}

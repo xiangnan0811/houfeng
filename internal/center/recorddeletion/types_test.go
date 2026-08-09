@@ -32,16 +32,51 @@ func TestRequiredAdapterNamesAreClosedOrderedAndDefensivelyCopied(t *testing.T) 
 	}
 }
 
+func TestRecordAttachmentsSurfaceNamesAreClosedOrderedAndDefensivelyCopied(t *testing.T) {
+	t.Parallel()
+
+	want := []SurfaceName{
+		"attachment_processor_jobs",
+		"attachment_purge_receipts",
+		"attachment_quota_accounts",
+		"attachment_upload_parts",
+		"attachment_uploads",
+		"blob_gc_deletions",
+		"blob_gc_pins",
+		"blob_objects",
+		"blob_publication_intents",
+		"content_processor_workspaces",
+		"content_workspace_purge_receipts",
+		"record_attachments",
+		"record_revision_attachments",
+	}
+	got := RecordAttachmentsSurfaceNames()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("RecordAttachmentsSurfaceNames() = %#v, want %#v", got, want)
+	}
+	got[0] = "tampered"
+	if fresh := RecordAttachmentsSurfaceNames(); !reflect.DeepEqual(fresh, want) {
+		t.Fatalf("RecordAttachmentsSurfaceNames() after mutation = %#v", fresh)
+	}
+	descriptor, err := NewAdapterDescriptor(AdapterNameRecordAttachments, want)
+	if err != nil {
+		t.Fatalf("NewAdapterDescriptor() error = %v", err)
+	}
+	if gotDigest := RecordAttachmentsSurfaceDigest(); gotDigest == ([sha256.Size]byte{}) || gotDigest != digestAdapterSurfaces(descriptor) {
+		t.Fatalf("RecordAttachmentsSurfaceDigest() = %x", gotDigest)
+	}
+}
+
 func TestNewAdapterDescriptorNormalizesAndProtectsOwnedSurfaces(t *testing.T) {
 	t.Parallel()
 
 	input := []SurfaceName{"fixture.surface_z", "fixture.surface_a"}
-	descriptor, err := NewAdapterDescriptor(AdapterNameRecordAttachments, input)
+	descriptor, err := NewAdapterDescriptor(AdapterNameRecordSearch, input)
 	if err != nil {
 		t.Fatalf("NewAdapterDescriptor() error = %v", err)
 	}
-	if descriptor.Name() != AdapterNameRecordAttachments {
-		t.Fatalf("descriptor.Name() = %q, want %q", descriptor.Name(), AdapterNameRecordAttachments)
+	if descriptor.Name() != AdapterNameRecordSearch {
+		t.Fatalf("descriptor.Name() = %q, want %q", descriptor.Name(), AdapterNameRecordSearch)
 	}
 	wantSurfaces := []SurfaceName{"fixture.surface_a", "fixture.surface_z"}
 	if got := descriptor.Surfaces(); !reflect.DeepEqual(got, wantSurfaces) {
