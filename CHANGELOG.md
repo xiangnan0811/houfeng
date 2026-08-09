@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.63.0](https://github.com/xiangnan0811/houfeng/compare/v0.62.0...v0.63.0) (2026-08-09)
+
+
+### Features
+
+* **attachments:** add secure content data plane ([b510b31](https://github.com/xiangnan0811/houfeng/commit/b510b3198395efbdee86dd428b6af2fa3a361919))
+* **attachments:** add secure storage and delivery ([#400](https://github.com/xiangnan0811/houfeng/issues/400)) ([78bf44c](https://github.com/xiangnan0811/houfeng/commit/78bf44c16e5dbd93f5a238d1442021702d000f2d))
+* **attachments:** add storage foundation ([2b1ecfa](https://github.com/xiangnan0811/houfeng/commit/2b1ecfa360204b120a41d06ac659ac64d205aaa3))
+* **attachments:** integrate records lifecycle and delivery ([1887821](https://github.com/xiangnan0811/houfeng/commit/1887821ceed82cc1e01ec829be0c70923cf5203c))
+
+
+### Documentation
+
+* **trellis:** close VPS records core child ([db8bca6](https://github.com/xiangnan0811/houfeng/commit/db8bca6936ea25b90e588a818839bffcf6ea85ea))
+
 ## [0.62.0](https://github.com/xiangnan0811/houfeng/compare/v0.61.0...v0.62.0) (2026-08-04)
 
 
