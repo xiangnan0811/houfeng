@@ -399,3 +399,37 @@ Delivered and archived the Records core child after final-review remediation, PR
 ### Next Steps
 
 - None - task complete
+
+
+## Session 245: Complete VPS Records Child 3 Task 2.4.E
+
+**Date**: 2026-08-07
+**Task**: `.trellis/tasks/07-14-vps-records-attachments-storage` Task 2.4.E
+**Branch**: `codex/vps-records-attachments-storage`
+
+### Summary
+
+Completed the bounded content-processor worker, restart reconciliation and command-wiring slice without entering Task 2.5. Added direct restart evidence for a persisted S3 temporary key whose version was not committed before the first process stopped.
+
+### Main Changes
+
+- Wired workspace and S3 temporary-object reconcilers into startup and continuous processor reconciliation.
+- Added six real subprocess `os.Exit` cutpoints and PostgreSQL convergence checks for workspace cleanup, unique receipts and zero local temporary residue.
+- Added a restart bootstrap test proving unresolved S3 version recovery uses known-key resolve, durable CAS, exact-version delete and idempotent replay.
+
+### Testing
+
+- [OK] Focused processor/reconciliation tests, worker/reconciler `-count=10`, focused race and vet.
+- [OK] Real PostgreSQL six-cutpoint crash/restart test and complete 19-test attachment processor selector.
+- [OK] Real MinIO S3 suite and PostgreSQL + MinIO processor workspace workflow.
+- [OK] `make verify-go`, `go mod verify`, and `git diff --check`.
+- [LIMIT] The opt-in real ClamAV probe was not configured and is not claimed; deterministic fake TCP/Unix INSTREAM coverage passed.
+- [NOTE] One initial complete PostgreSQL-selector attempt reached the child before its fixture TCP endpoint was available and failed only with connection refusals; an immediate isolated rerun passed all 19 tests. No product change was made for the non-reproduced fixture event.
+
+### Status
+
+[OK] **Task 2.4.E complete; Child 3 remains in progress**
+
+### Next Steps
+
+- Stop before Task 2.5. Review the completed 2.4 boundary and current dirty worktree before starting authorized preview/download and GC work.

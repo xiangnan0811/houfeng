@@ -356,6 +356,7 @@ func completeRevisionValuesForRestore(input CompleteRevisionInput, saveReason st
 		Tags:                   input.Tags(),
 		OwnerID:                input.OwnerID(),
 		Participants:           input.Participants(),
+		AttachmentIDs:          input.AttachmentIDs(),
 		FollowUpAt:             input.FollowUpAt(),
 		Template:               input.Template(),
 		SaveReason:             saveReason,

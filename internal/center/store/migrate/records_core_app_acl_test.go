@@ -12,12 +12,17 @@ func TestRecordsCoreAppACLFragmentRegistersExactObjectsAndPrivileges(t *testing.
 	if err != nil {
 		t.Fatalf("compile production current APP ACL source contract: %v", err)
 	}
-	if len(source.fragments) != 1 {
-		t.Fatalf("production current APP ACL fragments = %d, want 1", len(source.fragments))
+	var fragment appACLCurrentCompiledMigrationFragment
+	found := false
+	for _, candidate := range source.fragments {
+		if candidate.Migration == "0052_create_records_core.sql" {
+			fragment = candidate
+			found = true
+			break
+		}
 	}
-	fragment := source.fragments[0]
-	if fragment.Migration != "0052_create_records_core.sql" {
-		t.Fatalf("production current APP ACL fragment migration = %q, want records-core migration", fragment.Migration)
+	if !found {
+		t.Fatal("production current APP ACL fragments are missing records-core migration")
 	}
 
 	wantObjects, err := canonicalAppACLManagedObjects(recordsCoreExpectedAppACLObjects())
@@ -67,10 +72,10 @@ func TestRecordsCoreAppACLFragmentExtendsCatalogWithPrimaryValidationFunctionAnd
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(contract.ManagedObjects), len(base.Objects)+10; got != want {
+	if got, want := len(contract.ManagedObjects), len(base.Objects)+10+len(recordAttachmentsExpectedAppACLObjects()); got != want {
 		t.Fatalf("production current managed objects = %d, want %d", got, want)
 	}
-	if got, want := len(contract.Privileges), len(appACLPrivilegesR1("houfeng"))+len(recordsCoreExpectedAppACLPrivileges()); got != want {
+	if got, want := len(contract.Privileges), len(appACLPrivilegesR1("houfeng"))+len(recordsCoreExpectedAppACLPrivileges())+len(recordAttachmentsExpectedAppACLPrivileges()); got != want {
 		t.Fatalf("production current privileges = %d, want %d", got, want)
 	}
 	if got := len(contract.ExpectedFunctions); got != 3 {

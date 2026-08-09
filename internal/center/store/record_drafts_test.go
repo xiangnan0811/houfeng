@@ -116,6 +116,39 @@ func TestPostgresRecordDraftRoutingReadsNoPayloadAndChecksReadFence(t *testing.T
 	}
 }
 
+func TestPostgresRecordDraftRepositoryAuthorizesAttachmentUploadForExactAuthor(t *testing.T) {
+	now := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
+	ownerID := "usr_0123456789abcdef01234567"
+	tx := newFakeRecordDraftTx(now)
+	tx.storedDraft = &records.Draft{
+		DraftID:   "rdf_0123456789abcdef",
+		ProjectID: recordauth.ProjectIDDefault,
+		AuthorID:  ownerID,
+		UpdatedAt: now,
+	}
+	repository := NewPostgresRecordDraftRepository(nil, allowRecordPlatformAdmissionGate)
+	repository.platform.beginTx = func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }
+	actor, err := recordauth.NormalizeActorScope(recordauth.ActorScope{
+		UserID: ownerID, Role: recordauth.RoleProjectAdmin, ProjectID: recordauth.ProjectIDDefault,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeActorScope() error = %v", err)
+	}
+
+	if err := repository.AuthorizeDraftAttachmentUpload(context.Background(), actor, tx.storedDraft.DraftID); err != nil {
+		t.Fatalf("AuthorizeDraftAttachmentUpload() error = %v", err)
+	}
+
+	foreignActor := actor.Clone()
+	foreignActor.UserID = "usr_abcdef0123456789abcdef01"
+	if err := repository.AuthorizeDraftAttachmentUpload(context.Background(), foreignActor, tx.storedDraft.DraftID); !errors.Is(err, records.ErrDraftNotFound) {
+		t.Fatalf("foreign AuthorizeDraftAttachmentUpload() error = %v, want opaque draft not found", err)
+	}
+	if err := repository.AuthorizeDraftAttachmentUpload(context.Background(), recordauth.ActorScope{}, tx.storedDraft.DraftID); !errors.Is(err, recordauth.ErrDenied) {
+		t.Fatalf("invalid actor AuthorizeDraftAttachmentUpload() error = %v, want ErrDenied", err)
+	}
+}
+
 func TestPostgresRecordDraftRoutingFiltersReservedRecordBeforeReturningMetadata(t *testing.T) {
 	now := time.Date(2026, time.August, 3, 12, 0, 0, 0, time.UTC)
 	ownerID := "usr_0123456789abcdef01234567"

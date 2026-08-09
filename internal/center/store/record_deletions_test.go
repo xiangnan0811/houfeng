@@ -570,6 +570,9 @@ func TestPostgresRecordDeletionClaimWorkTakesOverExpiredCompoundFence(t *testing
 		"operation.owner_id = $1",
 		"operation.owner_expires_at <= transaction_timestamp()",
 		"order by operation.started_at, operation.operation_id",
+		"operation.operation_state <> 'provisional_fenced'",
+		"from public.object_content_leases as content_lease",
+		"content_lease.expires_at > transaction_timestamp()",
 	} {
 		if !strings.Contains(selection, fragment) {
 			t.Errorf("claim selection SQL missing %q:\n%s", fragment, tx.querySQL[0])

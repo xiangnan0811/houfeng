@@ -8,6 +8,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      clamav:
+        condition: service_healthy
     environment:
       HOUFENG_DATABASE_USER: "${HOUFENG_DATABASE_USER:?set HOUFENG_DATABASE_USER in docs/deploy/compose.env}"
       HOUFENG_DATABASE_NAME: "${HOUFENG_DATABASE_NAME:-houfeng}"
@@ -15,12 +17,83 @@ services:
       HOUFENG_HTTP_ADDR: ":16001"
       HOUFENG_WEB_DIST_DIR: /app/web/dist
       HOUFENG_LOG_FILE: /var/log/houfeng/center.log
+      HOUFENG_ATTACHMENT_BLOB_BACKEND: "${HOUFENG_ATTACHMENT_BLOB_BACKEND:-local}"
+      HOUFENG_ATTACHMENT_BLOB_ROOT: "${HOUFENG_ATTACHMENT_BLOB_ROOT:-/var/lib/houfeng/attachments}"
+      HOUFENG_CLAMAV_NETWORK: "${HOUFENG_CLAMAV_NETWORK:-tcp}"
+      HOUFENG_CLAMAV_ADDRESS: "${HOUFENG_CLAMAV_ADDRESS:-clamav:3310}"
+      HOUFENG_CLAMAV_DIAL_TIMEOUT: "${HOUFENG_CLAMAV_DIAL_TIMEOUT:-5s}"
+      HOUFENG_CLAMAV_OPERATION_TIMEOUT: "${HOUFENG_CLAMAV_OPERATION_TIMEOUT:-2m}"
+      HOUFENG_CLAMAV_CHUNK_SIZE: "${HOUFENG_CLAMAV_CHUNK_SIZE:-65536}"
+      HOUFENG_CLAMAV_RESPONSE_LIMIT: "${HOUFENG_CLAMAV_RESPONSE_LIMIT:-4096}"
+      HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS: "${HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS:-3}"
     ports:
       - "127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001"
     volumes:
       - houfeng_logs:/var/log/houfeng
+      - houfeng_blobs:/var/lib/houfeng/attachments
     secrets:
       - houfeng_database_password
+
+  houfeng-content-processor:
+    image: linnea7171/houfeng:latest
+    command: ["/usr/local/bin/houfeng-content-processor"]
+    user: "houfeng:houfeng"
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    environment:
+      HOUFENG_DATABASE_USER: "${HOUFENG_DATABASE_USER:?set HOUFENG_DATABASE_USER in docs/deploy/compose.env}"
+      HOUFENG_DATABASE_NAME: "${HOUFENG_DATABASE_NAME:-houfeng}"
+      HOUFENG_DATABASE_PASSWORD_FILE: /run/secrets/houfeng_database_password
+      HOUFENG_ATTACHMENT_BLOB_BACKEND: "${HOUFENG_ATTACHMENT_BLOB_BACKEND:-local}"
+      HOUFENG_ATTACHMENT_BLOB_ROOT: "${HOUFENG_ATTACHMENT_BLOB_ROOT:-/var/lib/houfeng/attachments}"
+      HOUFENG_CLAMAV_NETWORK: "${HOUFENG_CLAMAV_NETWORK:-tcp}"
+      HOUFENG_CLAMAV_ADDRESS: "${HOUFENG_CLAMAV_ADDRESS:-clamav:3310}"
+      HOUFENG_CLAMAV_DIAL_TIMEOUT: "${HOUFENG_CLAMAV_DIAL_TIMEOUT:-5s}"
+      HOUFENG_CLAMAV_OPERATION_TIMEOUT: "${HOUFENG_CLAMAV_OPERATION_TIMEOUT:-2m}"
+      HOUFENG_CLAMAV_CHUNK_SIZE: "${HOUFENG_CLAMAV_CHUNK_SIZE:-65536}"
+      HOUFENG_CLAMAV_RESPONSE_LIMIT: "${HOUFENG_CLAMAV_RESPONSE_LIMIT:-4096}"
+      HOUFENG_CONTENT_PROCESSOR_WORKSPACE_ROOT: /var/lib/houfeng/processor-workspace
+      HOUFENG_CONTENT_PROCESSOR_OWNER_ID: compose-processor
+      HOUFENG_CONTENT_PROCESSOR_LEASE_DURATION: "${HOUFENG_CONTENT_PROCESSOR_LEASE_DURATION:-5m}"
+      HOUFENG_CONTENT_PROCESSOR_CLEANUP_TIMEOUT: "${HOUFENG_CONTENT_PROCESSOR_CLEANUP_TIMEOUT:-30s}"
+      HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_ITEMS: "${HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_ITEMS:-100}"
+      HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_RUNTIME: "${HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_RUNTIME:-30s}"
+      HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_RETRY_DELAY: "${HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_RETRY_DELAY:-1s}"
+      HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS: "${HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS:-3}"
+      HOUFENG_CONTENT_PROCESSOR_JOB_TTL: "${HOUFENG_CONTENT_PROCESSOR_JOB_TTL:-24h}"
+      HOUFENG_PDFINFO_BINARY: /usr/bin/pdfinfo
+      HOUFENG_PDFTOPPM_BINARY: /usr/bin/pdftoppm
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
+    tmpfs:
+      - /var/lib/houfeng/processor-workspace:rw,noexec,nosuid,nodev,size=536870912,mode=0700,uid=10001,gid=10001
+    volumes:
+      - houfeng_blobs:/var/lib/houfeng/attachments
+    secrets:
+      - houfeng_database_password
+
+  clamav:
+    image: clamav/clamav:1.4.3
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    volumes:
+      - clamav_data:/var/lib/clamav
 
   db:
     image: postgres:16.12
@@ -45,6 +118,8 @@ services:
 
 volumes:
   houfeng_logs:
+  houfeng_blobs:
+  clamav_data:
 
 secrets:
   postgres_bootstrap_password:

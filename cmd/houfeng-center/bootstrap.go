@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,8 +13,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	centerapp "houfeng/internal/center/app"
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/auth"
 	"houfeng/internal/center/config"
 	"houfeng/internal/center/enrollment"
@@ -172,12 +176,16 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	var recordsHandler http.Handler
 	var recordDraftsHandler http.Handler
 	var recordDeletionsHandler http.Handler
+	var attachmentUploadsHandler http.Handler
+	var attachmentsHandler http.Handler
 	if recordsEnabled {
-		recordsHandler, recordDraftsHandler, recordDeletionsHandler, err = newRecordsHTTPHandlers(
+		recordsHandler, recordDraftsHandler, recordDeletionsHandler,
+			attachmentUploadsHandler, attachmentsHandler, err = newRecordsHTTPHandlers(
 			db.Pool(),
 			vpsAssetRepo,
 			monitoringInstanceRepo,
 			targetRepo,
+			cfg.Attachment,
 		)
 		if err != nil {
 			db.Close()
@@ -197,6 +205,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		RecordsHandler:                              recordsHandler,
 		RecordDraftsHandler:                         recordDraftsHandler,
 		RecordDeletionsHandler:                      recordDeletionsHandler,
+		AttachmentUploadsHandler:                    attachmentUploadsHandler,
+		AttachmentsHandler:                          attachmentsHandler,
 		AssetDomainsCollectionHandler:               handlers.AssetDomainsCollection(assetDomainRepo),
 		AssetServicesCollectionHandler:              handlers.AssetServicesCollection(assetServiceRepo),
 		AssetDecisionOverviewHandler:                handlers.AssetDecisionOverview(assetDecisionRepo),
@@ -288,14 +298,15 @@ func newRecordsHTTPHandlers(
 	vpsRepository *store.PostgresVPSAssetRepository,
 	monitoringInstanceRepository *store.PostgresMonitoringInstanceRepository,
 	targetRepository *store.PostgresTargetRepository,
-) (http.Handler, http.Handler, http.Handler, error) {
+	attachmentConfig config.AttachmentConfig,
+) (http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, error) {
 	subjects, err := centerrecords.NewSubjectAdapterRegistry([]centerrecords.SubjectSourceAdapter{
 		store.NewVPSRecordSubjectAdapter(vpsRepository),
 		store.NewMonitoringInstanceRecordSubjectAdapter(monitoringInstanceRepository),
 		store.NewTargetRecordSubjectAdapter(targetRepository),
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create record subject registry: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("create record subject registry: %w", err)
 	}
 	subjectResolver := store.NewRecordSubjectReadResolver(subjects, nil)
 	authorizations := store.NewPostgresCurrentRecordAuthorizationSource(pool, subjectResolver, nil)
@@ -303,27 +314,63 @@ func newRecordsHTTPHandlers(
 	// Task 10 owns the concrete production transaction admission gate. Keeping
 	// it nil here registers the transport contract while every store operation
 	// remains fail closed with ErrRecordPlatformAdmissionUnavailable.
-	recordRepository, err := store.NewPostgresRecordRepository(pool, nil, nil)
+	recordRepository, err := store.NewPostgresRecordRepository(pool, nil, []centerrecords.RevisionParticipant{
+		store.NewRecordAttachmentRevisionParticipant(),
+	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create record repository: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("create record repository: %w", err)
 	}
 	draftRepository := store.NewPostgresRecordDraftRepository(pool, nil)
+	attachmentRepository := store.NewPostgresAttachmentRepository(pool)
+	contentLeaseRepository := store.NewPostgresRecordPlatformRepository(pool, nil)
+	blob, err := newAttachmentBlobStore(attachmentConfig)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("create attachment Blob store: %w", err)
+	}
+	scanner, err := newAttachmentScanner(attachmentConfig)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("create attachment scanner readiness: %w", err)
+	}
+	uploadService, err := attachments.NewUploadService(
+		draftRepository,
+		attachmentRepository,
+		blob,
+		attachments.UploadServiceOptions{
+			TransportKind:           attachments.TransportKind(attachmentConfig.BlobBackend),
+			Limits:                  attachmentConfig.Limits,
+			ArchiveScannerReadiness: newArchiveScannerReadiness(scanner),
+			ProcessorMaxAttempts:    attachmentConfig.ProcessorMaxAttempts,
+		},
+	)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("create attachment upload service: %w", err)
+	}
+	downloadService, err := attachments.NewDownloadService(
+		attachmentRepository,
+		authorizations,
+		contentLeaseRepository,
+		blob,
+		attachments.DownloadServiceOptions{Limits: attachmentConfig.Limits},
+	)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("create attachment download service: %w", err)
+	}
 
 	readService, err := centerrecords.NewRecordReadService(authorizations, authorizations, recordRepository)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create record read service: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("create record read service: %w", err)
 	}
 	revisionService, err := centerrecords.NewRevisionService(subjects, authorizations, recordRepository)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create record revision service: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("create record revision service: %w", err)
 	}
 	lifecycleService, err := centerrecords.NewRecordLifecycleService(authorizations, recordRepository)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create record lifecycle service: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("create record lifecycle service: %w", err)
 	}
 	draftService, err := centerrecords.NewDraftService(draftRepository, authorizations)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create record draft service: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("create record draft service: %w", err)
 	}
 	application, err := centerrecords.NewApplication(
 		readService,
@@ -338,12 +385,63 @@ func newRecordsHTTPHandlers(
 		},
 	)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create records application: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("create records application: %w", err)
 	}
 	// Later Records children own the remaining deletion adapters and the
 	// independent ledger/witness clients. Until all of them are wired and
 	// healthy, the production deletion transport remains explicitly closed.
-	return handlers.Records(application), handlers.RecordDrafts(application), handlers.RecordDeletions(nil), nil
+	return handlers.Records(application), handlers.RecordDrafts(application), handlers.RecordDeletions(nil),
+		handlers.AttachmentUploads(uploadService), handlers.AttachmentsWithOptions(downloadService), nil
+}
+
+func newAttachmentBlobStore(attachmentConfig config.AttachmentConfig) (attachments.BlobStore, error) {
+	switch attachmentConfig.BlobBackend {
+	case attachments.BackendKindLocal:
+		return attachments.NewLocalBlobStore(attachmentConfig.BlobRoot)
+	case attachments.BackendKindS3:
+		client, err := minio.New(attachmentConfig.S3Endpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(attachmentConfig.S3AccessKey, attachmentConfig.S3SecretKey, ""),
+			Secure: attachmentConfig.S3Secure,
+		})
+		if err != nil {
+			return nil, errors.New("create S3 client")
+		}
+		return attachments.NewS3BlobStore(client, attachmentConfig.S3Bucket)
+	default:
+		return nil, errors.New("unsupported attachment Blob backend")
+	}
+}
+
+func newAttachmentScanner(attachmentConfig config.AttachmentConfig) (attachments.ProcessorScanner, error) {
+	if attachmentConfig.ClamAVAddress == "" {
+		return nil, nil
+	}
+	scanner, err := attachments.NewClamAVScanner(attachments.ClamAVScannerConfig{
+		Network:          attachmentConfig.ClamAVNetwork,
+		Address:          attachmentConfig.ClamAVAddress,
+		DialTimeout:      attachmentConfig.ClamAVDialTimeout,
+		OperationTimeout: attachmentConfig.ClamAVOperationTimeout,
+		ChunkSize:        attachmentConfig.ClamAVChunkSize,
+		MaxInputBytes:    attachmentConfig.Limits.MaxFileBytes,
+		MaxResponseBytes: attachmentConfig.ClamAVResponseLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return attachments.ProcessorScanner(scanner.Scan), nil
+}
+
+func newArchiveScannerReadiness(scanner attachments.ProcessorScanner) attachments.ArchiveScannerReadiness {
+	if scanner == nil {
+		return nil
+	}
+	return func(ctx context.Context) (attachments.ScannerStatus, error) {
+		code, err := scanner(ctx, bytes.NewReader(nil))
+		if err != nil || code != attachments.ProcessorResultCodeClean {
+			return attachments.ScannerStatusUnhealthy, nil
+		}
+		return attachments.ScannerStatusHealthy, nil
+	}
 }
 
 func (d bootstrapDeps) withDefaults() bootstrapDeps {

@@ -717,6 +717,17 @@ const claimRecordDeletionWorkSQL = `
 		operation.owner_id = $1
 		or operation.owner_expires_at <= transaction_timestamp()
 	  )
+	  and (
+		operation.operation_state <> 'provisional_fenced'
+		or not exists (
+			select 1
+			from public.object_content_leases as content_lease
+			where content_lease.project_id = reservation.project_id
+			  and content_lease.object_kind = reservation.object_kind
+			  and content_lease.object_id = reservation.object_id
+			  and content_lease.expires_at > transaction_timestamp()
+		)
+	  )
 	order by operation.started_at, operation.operation_id
 	for update of operation, reservation skip locked
 	limit 1`

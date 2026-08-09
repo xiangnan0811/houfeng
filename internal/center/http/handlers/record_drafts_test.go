@@ -146,6 +146,7 @@ func TestRecordDraftsHandlerMapsConflictsWithAllowlistedRecovery(t *testing.T) {
 		"tags":[],
 		"owner_id":"",
 		"participant_ids":[],
+		"attachment_ids":[],
 		"save_reason":"local edit"
 	}`))
 	if err != nil {
@@ -244,6 +245,7 @@ func TestRecordDraftsHandlerRejectsUntrustedPayloadAndMapsNoLeakErrors(t *testin
 			{name: "subjects", payload: `{"title":"draft","visibility":{"kind":"project","allowed_roles":[],"allowed_group_ids":[]},"subjects":null,"tags":[],"participant_ids":[]}`},
 			{name: "tags", payload: `{"title":"draft","visibility":{"kind":"project","allowed_roles":[],"allowed_group_ids":[]},"subjects":[],"tags":null,"participant_ids":[]}`},
 			{name: "participant IDs", payload: `{"title":"draft","visibility":{"kind":"project","allowed_roles":[],"allowed_group_ids":[]},"subjects":[],"tags":[],"participant_ids":null}`},
+			{name: "attachment IDs", payload: `{"title":"draft","visibility":{"kind":"project","allowed_roles":[],"allowed_group_ids":[]},"subjects":[],"tags":[],"participant_ids":[],"attachment_ids":null}`},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
 				calls := 0

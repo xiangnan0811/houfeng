@@ -98,10 +98,11 @@ func TestRecordsHandlerGetsAllowlistedCurrentRecordWithoutAuthorizationEvidence(
 	var response struct {
 		RecordID string `json:"record_id"`
 		Current  struct {
-			RevisionID string   `json:"revision_id"`
-			Title      string   `json:"title"`
-			Tags       []string `json:"tags"`
-			Subjects   []struct {
+			RevisionID    string   `json:"revision_id"`
+			Title         string   `json:"title"`
+			Tags          []string `json:"tags"`
+			AttachmentIDs []string `json:"attachment_ids"`
+			Subjects      []struct {
 				SourceID string `json:"source_id"`
 				Identity struct {
 					DisplayName string `json:"display_name"`
@@ -120,7 +121,8 @@ func TestRecordsHandlerGetsAllowlistedCurrentRecordWithoutAuthorizationEvidence(
 		response.Current.Subjects[0].SourceID != "vps_0123456789abcdef" ||
 		response.Current.Subjects[0].Identity.DisplayName != "VPS Alpha" ||
 		response.Current.Subjects[0].Identity.Provider != "Example Cloud" ||
-		response.Current.Participants == nil {
+		response.Current.Participants == nil || response.Current.AttachmentIDs == nil ||
+		!reflect.DeepEqual(response.Current.AttachmentIDs, []string{"att_httpfirst", "att_httpsecond"}) {
 		t.Fatalf("response = %#v", response)
 	}
 }
@@ -146,7 +148,8 @@ func TestRecordsHandlerCreatesRecordFromTrustedDraftPayloadAndHeaders(t *testing
 				request.SubjectReferences[0].SourceID != "vps_0123456789abcdef" ||
 				request.Values.VisibilityScope.ProjectID != actor.ProjectID ||
 				request.Values.VisibilityScope.CanonicalHashValue() != request.Values.VisibilityScope.CanonicalHash ||
-				request.Values.Tags == nil || request.Values.Participants == nil {
+				request.Values.Tags == nil || request.Values.Participants == nil ||
+				!reflect.DeepEqual(request.Values.AttachmentIDs, []string{"att_httpfirst", "att_httpsecond"}) {
 				t.Fatalf("CreateRecord() mapped values = %#v, subjects %#v", request.Values, request.SubjectReferences)
 			}
 			return records.RevisionCommitResult{
@@ -184,6 +187,47 @@ func TestRecordsHandlerCreatesRecordFromTrustedDraftPayloadAndHeaders(t *testing
 	}
 	if response.RecordID != "rec_httpcontract" || response.RevisionID != "rrv_httpcontract" || !response.Created {
 		t.Fatalf("response = %#v", response)
+	}
+}
+
+func TestRecordDraftPayloadRequiresAndMapsOrderedAttachmentIDs(t *testing.T) {
+	t.Parallel()
+
+	actor := mustRecordsHandlerActor(t)
+	raw := []byte(`{
+		"title":"Attachment order",
+		"body_markdown":"body",
+		"markdown_dialect_version":1,
+		"record_type":"note",
+		"business_status":"",
+		"impact_level":"high",
+		"visibility":{"kind":"project","allowed_roles":[],"allowed_group_ids":[]},
+		"subjects":[],
+		"tags":[],
+		"owner_id":"",
+		"participant_ids":[],
+		"attachment_ids":["att_httpfirst","att_httpsecond"],
+		"save_reason":"ordered attachments"
+	}`)
+	decoded, err := decodeRecordDraftPayload(raw)
+	if err != nil {
+		t.Fatalf("decodeRecordDraftPayload() error = %v", err)
+	}
+	values, _, err := decoded.toDomain(actor)
+	if err != nil {
+		t.Fatalf("toDomain() error = %v", err)
+	}
+	if !reflect.DeepEqual(values.AttachmentIDs, []string{"att_httpfirst", "att_httpsecond"}) {
+		t.Fatalf("toDomain().AttachmentIDs = %#v", values.AttachmentIDs)
+	}
+
+	for _, invalid := range [][]byte{
+		[]byte(strings.ReplaceAll(string(raw), `"attachment_ids":["att_httpfirst","att_httpsecond"],`, "")),
+		[]byte(strings.ReplaceAll(string(raw), `"attachment_ids":["att_httpfirst","att_httpsecond"]`, `"attachment_ids":null`)),
+	} {
+		if _, err := decodeRecordDraftPayload(invalid); err == nil {
+			t.Fatalf("decodeRecordDraftPayload(%s) error = nil", invalid)
+		}
 	}
 }
 
@@ -753,10 +797,11 @@ func mustRecordsHandlerRecord(t *testing.T, actor recordauth.ActorScope) records
 			IdentitySnapshot:     map[string]string{"display_name": "VPS Alpha", "provider": "Example Cloud"},
 			CaptureAuthorization: authorization,
 		}},
-		Tags:         make([]string, 0),
-		Participants: make([]records.RevisionParticipantSnapshot, 0),
-		AuthorID:     actor.UserID,
-		SaveReason:   "initial record",
+		Tags:          make([]string, 0),
+		Participants:  make([]records.RevisionParticipantSnapshot, 0),
+		AttachmentIDs: []string{"att_httpfirst", "att_httpsecond"},
+		AuthorID:      actor.UserID,
+		SaveReason:    "initial record",
 	})
 	if err != nil {
 		t.Fatalf("NormalizeCompleteRevisionInput() error = %v", err)
@@ -800,6 +845,7 @@ func mustRecordsHandlerDraft(
 		"tags":[],
 		"owner_id":"",
 		"participant_ids":[],
+		"attachment_ids":["att_httpfirst","att_httpsecond"],
 		"save_reason":"initial record"
 	}`))
 	if err != nil {

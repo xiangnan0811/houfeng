@@ -60,6 +60,9 @@ func TestApplicationRestoreRevisionCopiesHistoricalContentThroughFreshSubjectRef
 				request.Values.SaveReason != "restore historical revision" {
 				t.Fatalf("SaveRevision() transport-owned values = %#v", request.Values)
 			}
+			if !reflect.DeepEqual(request.Values.AttachmentIDs, historicalInput.AttachmentIDs()) {
+				t.Fatalf("SaveRevision() attachment IDs = %#v, want %#v", request.Values.AttachmentIDs, historicalInput.AttachmentIDs())
+			}
 			wantReferences := []SubjectReference{{
 				RegistryVersion: historicalInput.Subjects()[0].RegistryVersion,
 				Kind:            historicalInput.Subjects()[0].Kind,

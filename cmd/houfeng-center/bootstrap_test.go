@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	centerapp "houfeng/internal/center/app"
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/auth"
 	"houfeng/internal/center/config"
 	centerhttp "houfeng/internal/center/http"
@@ -153,6 +155,12 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		WebDistDir:         "web/dist",
 		DatabaseURL:        "postgres://center",
 		SessionHMACKey:     []byte("0123456789abcdef0123456789abcdef"),
+		Attachment: config.AttachmentConfig{
+			BlobBackend:          attachments.BackendKindLocal,
+			BlobRoot:             t.TempDir(),
+			Limits:               attachments.DefaultLimits(),
+			ProcessorMaxAttempts: 3,
+		},
 	}
 	db := &fakePostgresDB{}
 	applyCalls := 0
@@ -198,13 +206,16 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		t.Fatalf("admitRuntime calls = %d, want 1", admitCalls)
 	}
 	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
-		gotRouterOptions.RecordDraftsHandler == nil || gotRouterOptions.RecordDeletionsHandler == nil {
+		gotRouterOptions.RecordDraftsHandler == nil || gotRouterOptions.RecordDeletionsHandler == nil ||
+		gotRouterOptions.AttachmentUploadsHandler == nil || gotRouterOptions.AttachmentsHandler == nil {
 		t.Fatalf(
-			"runtime Records router options = enabled:%t records:%v drafts:%v deletions:%v, want enabled and non-nil handlers",
+			"runtime Records router options = enabled:%t records:%v drafts:%v deletions:%v uploads:%v attachments:%v, want enabled and non-nil handlers",
 			gotRouterOptions.RecordsEnabled,
 			gotRouterOptions.RecordsHandler,
 			gotRouterOptions.RecordDraftsHandler,
 			gotRouterOptions.RecordDeletionsHandler,
+			gotRouterOptions.AttachmentUploadsHandler,
+			gotRouterOptions.AttachmentsHandler,
 		)
 	}
 	if gotRouterOptions.VPSTimelineHandler == nil || gotRouterOptions.VPSExperienceLogsHandler == nil {
@@ -215,6 +226,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		name     string
 		method   string
 		path     string
+		body     string
 		handler  http.Handler
 		wantCode string
 	}{
@@ -222,9 +234,13 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		{name: "drafts", method: http.MethodGet, path: "/api/record-drafts", handler: gotRouterOptions.RecordDraftsHandler, wantCode: "record_service_unavailable"},
 		{name: "deletion preview", method: http.MethodPost, path: "/api/records/rec_httpcontract/permanent-delete-preview", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_safety_unavailable"},
 		{name: "deletion status", method: http.MethodGet, path: "/api/record-deletions/rpo_httpcontract", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_status_unavailable"},
+		{name: "attachment upload", method: http.MethodPost, path: "/api/attachment-uploads", body: `{"draft_id":"rdf_httpcontract0001","display_name":"notes.txt","declared_size_bytes":4,"media_type":"text/plain"}`, handler: gotRouterOptions.AttachmentUploadsHandler, wantCode: "attachment_service_unavailable"},
 	} {
 		t.Run(handlerCase.name+" fails closed without transaction admission", func(t *testing.T) {
-			request := httptest.NewRequest(handlerCase.method, handlerCase.path, nil)
+			request := httptest.NewRequest(handlerCase.method, handlerCase.path, strings.NewReader(handlerCase.body))
+			if handlerCase.body != "" {
+				request.Header.Set("Content-Type", "application/json")
+			}
 			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
 			recorder := httptest.NewRecorder()
 			handlerCase.handler.ServeHTTP(recorder, request)
@@ -402,13 +418,16 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		t.Fatal("router settings handler = nil, want non-nil")
 	}
 	if gotOpts.RecordsEnabled || gotOpts.RecordsHandler != nil || gotOpts.RecordDraftsHandler != nil ||
-		gotOpts.RecordDeletionsHandler != nil {
+		gotOpts.RecordDeletionsHandler != nil || gotOpts.AttachmentUploadsHandler != nil ||
+		gotOpts.AttachmentsHandler != nil {
 		t.Fatalf(
-			"legacy Records router options = enabled:%t records:%v drafts:%v deletions:%v, want disabled and nil handlers",
+			"legacy Records router options = enabled:%t records:%v drafts:%v deletions:%v uploads:%v attachments:%v, want disabled and nil handlers",
 			gotOpts.RecordsEnabled,
 			gotOpts.RecordsHandler,
 			gotOpts.RecordDraftsHandler,
 			gotOpts.RecordDeletionsHandler,
+			gotOpts.AttachmentUploadsHandler,
+			gotOpts.AttachmentsHandler,
 		)
 	}
 	if gotOpts.AssetDomainsCollectionHandler == nil {
@@ -738,6 +757,75 @@ func TestBootstrapWiresRequiredRecordAuthorizationScopeRepositoryWithoutFallback
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("bootstrap.go retains optional record authorization fallback %q", forbidden)
 		}
+	}
+}
+
+func TestBootstrapRegistersRecordAttachmentRevisionParticipant(t *testing.T) {
+	body, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatalf("read bootstrap.go: %v", err)
+	}
+	source := string(body)
+	if !strings.Contains(source, "store.NewRecordAttachmentRevisionParticipant()") {
+		t.Fatal("bootstrap.go does not register the attachment revision participant")
+	}
+	if strings.Contains(source, "store.NewPostgresRecordRepository(pool, nil, nil)") {
+		t.Fatal("bootstrap.go still constructs the Records repository without participants")
+	}
+}
+
+func TestBootstrapWiresConfiguredAttachmentServices(t *testing.T) {
+	body, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatalf("read bootstrap.go: %v", err)
+	}
+	source := string(body)
+	for _, required := range []string{
+		"store.NewPostgresAttachmentRepository",
+		"attachments.NewUploadService",
+		"attachments.NewDownloadService",
+		"handlers.AttachmentUploads(uploadService)",
+		"handlers.AttachmentsWithOptions(downloadService)",
+		"newArchiveScannerReadiness",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("bootstrap.go does not contain configured attachment wiring %q", required)
+		}
+	}
+	for _, forbidden := range []string{"handlers.AttachmentUploads(nil)", "handlers.Attachments()"} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("bootstrap.go retains fail-closed placeholder %q", forbidden)
+		}
+	}
+}
+
+func TestArchiveScannerReadinessUsesLiveFunctionalProbe(t *testing.T) {
+	if readiness := newArchiveScannerReadiness(nil); readiness != nil {
+		t.Fatal("newArchiveScannerReadiness(nil) must leave archive admission fail closed")
+	}
+	probeCalls := 0
+	readiness := newArchiveScannerReadiness(attachments.ProcessorScanner(func(_ context.Context, source io.Reader) (attachments.ProcessorResultCode, error) {
+		probeCalls++
+		body, err := io.ReadAll(source)
+		if err != nil {
+			t.Fatalf("read readiness probe: %v", err)
+		}
+		if len(body) != 0 {
+			t.Fatalf("readiness probe bytes = %d, want empty functional probe", len(body))
+		}
+		return attachments.ProcessorResultCodeClean, nil
+	}))
+	status, err := readiness(context.Background())
+	if err != nil || status != attachments.ScannerStatusHealthy || probeCalls != 1 {
+		t.Fatalf("readiness() = (%q, %v), calls %d, want healthy functional probe", status, err, probeCalls)
+	}
+
+	readiness = newArchiveScannerReadiness(attachments.ProcessorScanner(func(context.Context, io.Reader) (attachments.ProcessorResultCode, error) {
+		return "", errors.New("daemon detail that must stay internal")
+	}))
+	status, err = readiness(context.Background())
+	if err != nil || status != attachments.ScannerStatusUnhealthy {
+		t.Fatalf("unhealthy readiness() = (%q, %v), want content-free unhealthy status", status, err)
 	}
 }
 

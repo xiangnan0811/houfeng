@@ -1,0 +1,39 @@
+[Unit]
+Description=Houfeng attachment content processor
+Documentation=file:/opt/houfeng/docs/deploy/local-and-systemd.md
+After=network-online.target postgresql.service clamav-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=houfeng
+Group=houfeng
+WorkingDirectory=/opt/houfeng
+EnvironmentFile=/etc/houfeng/content-processor.env
+ExecStart=/usr/local/bin/houfeng-content-processor
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitCORE=0
+StateDirectory=houfeng
+StateDirectoryMode=0700
+RuntimeDirectory=houfeng-content-processor
+RuntimeDirectoryMode=0700
+ReadWritePaths=/var/lib/houfeng/attachments /run/houfeng-content-processor
+
+[Install]
+WantedBy=multi-user.target

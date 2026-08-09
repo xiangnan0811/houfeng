@@ -73,18 +73,22 @@ if [ -z "${HOUFENG_DATABASE_URL:-}" ]; then
 	export HOUFENG_DATABASE_URL="$database_url"
 fi
 
-if [ -z "${HOUFENG_INITIAL_USERNAME:-}" ]; then
-	export HOUFENG_INITIAL_USERNAME=admin
-fi
+case "${1:-}" in
+*/houfeng-center|houfeng-center)
+	if [ -z "${HOUFENG_INITIAL_USERNAME:-}" ]; then
+		export HOUFENG_INITIAL_USERNAME=admin
+	fi
 
-if [ -z "${HOUFENG_INITIAL_PASSWORD:-}" ] && [ -z "${HOUFENG_INITIAL_PASSWORD_FILE:-}" ]; then
-	printf '%s\n' "houfeng container entrypoint: HOUFENG_INITIAL_PASSWORD or HOUFENG_INITIAL_PASSWORD_FILE is required in docs/deploy/compose.env" >&2
-	exit 1
-fi
+	if [ -z "${HOUFENG_INITIAL_PASSWORD:-}" ] && [ -z "${HOUFENG_INITIAL_PASSWORD_FILE:-}" ]; then
+		printf '%s\n' "houfeng container entrypoint: HOUFENG_INITIAL_PASSWORD or HOUFENG_INITIAL_PASSWORD_FILE is required in docs/deploy/compose.env" >&2
+		exit 1
+	fi
 
-if [ -z "${HOUFENG_SESSION_HMAC_KEY:-}" ] && [ -z "${HOUFENG_SESSION_HMAC_KEY_FILE:-}" ]; then
-	printf '%s\n' "houfeng container entrypoint: HOUFENG_SESSION_HMAC_KEY or HOUFENG_SESSION_HMAC_KEY_FILE is required in docs/deploy/compose.env" >&2
-	exit 1
-fi
+	if [ -z "${HOUFENG_SESSION_HMAC_KEY:-}" ] && [ -z "${HOUFENG_SESSION_HMAC_KEY_FILE:-}" ]; then
+		printf '%s\n' "houfeng container entrypoint: HOUFENG_SESSION_HMAC_KEY or HOUFENG_SESSION_HMAC_KEY_FILE is required in docs/deploy/compose.env" >&2
+		exit 1
+	fi
+	;;
+esac
 
 exec "$@"

@@ -78,6 +78,7 @@ type CompleteRevisionValues struct {
 	Tags                   []string
 	OwnerID                string
 	Participants           []RevisionParticipantSnapshot
+	AttachmentIDs          []string
 	FollowUpAt             *time.Time
 	Template               *TemplateProvenance
 	AuthorID               string
@@ -101,6 +102,7 @@ type CompleteRevisionInput struct {
 	tags                   []string
 	ownerID                string
 	participants           []RevisionParticipantSnapshot
+	attachmentIDs          []string
 	followUpAt             *time.Time
 	template               *TemplateProvenance
 	authorID               string
@@ -162,6 +164,10 @@ func (input CompleteRevisionInput) OwnerID() string {
 
 func (input CompleteRevisionInput) Participants() []RevisionParticipantSnapshot {
 	return cloneRevisionParticipants(input.participants)
+}
+
+func (input CompleteRevisionInput) AttachmentIDs() []string {
+	return append([]string{}, input.attachmentIDs...)
 }
 
 func (input CompleteRevisionInput) FollowUpAt() *time.Time {

@@ -282,6 +282,88 @@ func TestPostgresRecordPlatformServingLeaseIsCapturedAndAssertedFromOneAdmittedD
 	}
 }
 
+func TestPostgresRecordPlatformRenewServingLeaseAtomicallyChecksEpochFenceAndOwner(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	oldExpiry := time.Date(2026, time.August, 7, 23, 30, 0, 0, time.UTC)
+	newExpiry := oldExpiry.Add(time.Second)
+	serving := recordplatform.ServingLeaseV1{
+		Object: recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: "rec_01"},
+		Owner: recordplatform.OwnerLease{
+			OwnerID: "serving_worker", Generation: 2, ExpiresAt: oldExpiry,
+		},
+		CapturedEpoch: 4,
+	}
+	tx := &fakeRecordPlatformTx{}
+	tx.queryRow = func(_ context.Context, sql string, _ ...any) pgx.Row {
+		switch {
+		case strings.Contains(sql, "from public.content_delivery_epochs") && strings.Contains(sql, "for update"):
+			return fakeRecordPlatformRow{scan: func(dest ...any) error {
+				*dest[0].(*int64) = 4
+				return nil
+			}}
+		case strings.Contains(sql, "from public.deletion_fence_leases") && strings.Contains(sql, "for update"):
+			return fakeRecordPlatformRow{scan: func(...any) error { return pgx.ErrNoRows }}
+		case strings.Contains(sql, "from public.object_content_leases") && strings.Contains(sql, "for update"):
+			return fakeRecordPlatformRow{scan: func(dest ...any) error {
+				*dest[0].(*string) = serving.Owner.OwnerID
+				*dest[1].(*int64) = int64(serving.Owner.Generation)
+				*dest[2].(*time.Time) = serving.Owner.ExpiresAt
+				*dest[3].(*bool) = true
+				return nil
+			}}
+		case strings.Contains(sql, "update public.object_content_leases"):
+			return fakeRecordPlatformRow{scan: func(dest ...any) error {
+				*dest[0].(*string) = serving.Owner.OwnerID
+				*dest[1].(*int64) = int64(serving.Owner.Generation)
+				*dest[2].(*time.Time) = newExpiry
+				return nil
+			}}
+		case strings.Contains(sql, "from public.object_content_leases as object_lease"):
+			return fakeRecordPlatformRow{scan: func(dest ...any) error {
+				*dest[0].(*int) = 1
+				return nil
+			}}
+		default:
+			return fakeRecordPlatformRow{scan: func(...any) error { return errors.New("unexpected serving renewal query") }}
+		}
+	}
+	repository := &PostgresRecordPlatformRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
+		gate:    AdmissionGateFunc(func(context.Context, pgx.Tx) error { return nil }),
+	}
+
+	renewed, err := repository.RenewServingLease(ctx, serving, time.Second)
+	if err != nil {
+		t.Fatalf("RenewServingLease() error = %v", err)
+	}
+	if renewed.Object != serving.Object || renewed.CapturedEpoch != serving.CapturedEpoch ||
+		renewed.Owner.OwnerID != serving.Owner.OwnerID || renewed.Owner.Generation != serving.Owner.Generation ||
+		!renewed.Owner.ExpiresAt.Equal(newExpiry) {
+		t.Fatalf("RenewServingLease() = %#v, want exact renewed serving owner", renewed)
+	}
+	if !tx.committed {
+		t.Fatal("RenewServingLease() did not commit its admitted transaction")
+	}
+	if len(tx.querySQL) != 5 {
+		t.Fatalf("RenewServingLease() queries = %#v, want epoch/fence/object/renew/assert", tx.querySQL)
+	}
+	for index, relation := range []string{
+		"public.content_delivery_epochs",
+		"public.deletion_fence_leases",
+		"public.object_content_leases",
+	} {
+		if !strings.Contains(tx.querySQL[index], relation) || !strings.Contains(tx.querySQL[index], "for update") {
+			t.Fatalf("RenewServingLease() lock %d = %q, want %s FOR UPDATE", index, tx.querySQL[index], relation)
+		}
+	}
+	if !strings.Contains(tx.querySQL[3], "update public.object_content_leases") ||
+		!strings.Contains(tx.querySQL[4], "from public.object_content_leases as object_lease") {
+		t.Fatalf("RenewServingLease() terminal queries = %#v, want exact renewal then assertion", tx.querySQL[3:])
+	}
+}
+
 func TestPostgresRecordPlatformDeletionFenceAndClientContentLeaseUseTheirOwnRelations(t *testing.T) {
 	expiresAt := time.Date(2026, time.July, 24, 16, 1, 0, 0, time.UTC)
 	tx := &fakeRecordPlatformTx{}

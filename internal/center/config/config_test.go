@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"houfeng/internal/center/attachments"
 	centerconfig "houfeng/internal/center/config"
 )
 
@@ -18,6 +19,14 @@ func setRequiredAuth(t *testing.T) {
 	t.Setenv("HOUFENG_INITIAL_USERNAME", "admin")
 	t.Setenv("HOUFENG_INITIAL_PASSWORD", "correct-horse-battery")
 	t.Setenv("HOUFENG_SESSION_HMAC_KEY", "0123456789abcdef0123456789abcdef")
+}
+
+func setRequiredLocalAttachments(t *testing.T) string {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "attachment-blobs")
+	t.Setenv("HOUFENG_ATTACHMENT_BLOB_BACKEND", string(attachments.BackendKindLocal))
+	t.Setenv("HOUFENG_ATTACHMENT_BLOB_ROOT", root)
+	return root
 }
 
 func TestLoadRecordPlatformMode(t *testing.T) {
@@ -116,6 +125,7 @@ func TestLoadCenterConfigRejectsUnsupportedRecordPlatformModeBeforeOtherInput(t 
 
 func TestLoadCenterConfigSelectsRuntimeAdmissionMode(t *testing.T) {
 	setRequiredAuth(t)
+	wantBlobRoot := setRequiredLocalAttachments(t)
 	t.Setenv("HOUFENG_DATABASE_URL", "postgres://runtime")
 	t.Setenv("HOUFENG_RECORDS_ENABLED", "true")
 	t.Setenv("HOUFENG_RECORD_PERMANENT_DELETE_ENABLED", "false")
@@ -126,6 +136,110 @@ func TestLoadCenterConfigSelectsRuntimeAdmissionMode(t *testing.T) {
 	}
 	if cfg.RecordPlatformMode != centerconfig.RecordPlatformModeRuntimeAdmission {
 		t.Fatalf("RecordPlatformMode = %v, want runtime admission", cfg.RecordPlatformMode)
+	}
+	if cfg.Attachment.BlobBackend != attachments.BackendKindLocal || cfg.Attachment.BlobRoot != wantBlobRoot {
+		t.Fatalf("Attachment = %#v, want configured local backend", cfg.Attachment)
+	}
+}
+
+func TestLoadCenterConfigRequiresAttachmentConfigurationOnlyForRecordsRuntime(t *testing.T) {
+	setRequiredAuth(t)
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://runtime")
+	t.Setenv("HOUFENG_RECORDS_ENABLED", "true")
+	t.Setenv("HOUFENG_RECORD_PERMANENT_DELETE_ENABLED", "false")
+	t.Setenv("HOUFENG_ATTACHMENT_BLOB_BACKEND", "")
+
+	if _, err := centerconfig.LoadCenterConfig(); err == nil || !strings.Contains(err.Error(), "HOUFENG_ATTACHMENT_BLOB_BACKEND") {
+		t.Fatalf("LoadCenterConfig() error = %v, want missing explicit attachment backend", err)
+	}
+
+	t.Setenv("HOUFENG_RECORDS_ENABLED", "false")
+	if _, err := centerconfig.LoadCenterConfig(); err != nil {
+		t.Fatalf("LoadCenterConfig() legacy error = %v, want attachment config ignored", err)
+	}
+}
+
+func TestLoadAttachmentConfigLoadsPrivateLocalStorageAndSharedBounds(t *testing.T) {
+	wantRoot := setRequiredLocalAttachments(t)
+	t.Setenv("HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS", "7")
+	t.Setenv("HOUFENG_CLAMAV_NETWORK", "tcp")
+	t.Setenv("HOUFENG_CLAMAV_ADDRESS", "clamav.internal:3310")
+	t.Setenv("HOUFENG_CLAMAV_DIAL_TIMEOUT", "3s")
+	t.Setenv("HOUFENG_CLAMAV_OPERATION_TIMEOUT", "45s")
+	t.Setenv("HOUFENG_CLAMAV_CHUNK_SIZE", "32768")
+	t.Setenv("HOUFENG_CLAMAV_RESPONSE_LIMIT", "2048")
+
+	cfg, err := centerconfig.LoadAttachmentConfig()
+	if err != nil {
+		t.Fatalf("LoadAttachmentConfig() error = %v", err)
+	}
+	if cfg.BlobBackend != attachments.BackendKindLocal || cfg.BlobRoot != wantRoot {
+		t.Fatalf("local storage = (%q, %q), want (%q, %q)", cfg.BlobBackend, cfg.BlobRoot, attachments.BackendKindLocal, wantRoot)
+	}
+	if cfg.ProcessorMaxAttempts != 7 || cfg.Limits != attachments.DefaultLimits() {
+		t.Fatalf("processor bounds = attempts %d limits %#v", cfg.ProcessorMaxAttempts, cfg.Limits)
+	}
+	if cfg.ClamAVNetwork != "tcp" || cfg.ClamAVAddress != "clamav.internal:3310" ||
+		cfg.ClamAVDialTimeout != 3*time.Second || cfg.ClamAVOperationTimeout != 45*time.Second ||
+		cfg.ClamAVChunkSize != 32768 || cfg.ClamAVResponseLimit != 2048 {
+		t.Fatalf("ClamAV config = %#v, want configured bounded probe", cfg)
+	}
+}
+
+func TestLoadAttachmentConfigReadsS3SecretsFromFiles(t *testing.T) {
+	t.Setenv("HOUFENG_ATTACHMENT_BLOB_BACKEND", string(attachments.BackendKindS3))
+	t.Setenv("HOUFENG_ATTACHMENT_S3_ENDPOINT", "minio.internal:9000")
+	t.Setenv("HOUFENG_ATTACHMENT_S3_ACCESS_KEY", "environment-access-must-not-win")
+	t.Setenv("HOUFENG_ATTACHMENT_S3_SECRET_KEY", "environment-secret-must-not-win")
+	t.Setenv("HOUFENG_ATTACHMENT_S3_BUCKET", "houfeng-attachments")
+	t.Setenv("HOUFENG_ATTACHMENT_S3_SECURE", "true")
+	accessPath := filepath.Join(t.TempDir(), "s3-access-key")
+	secretPath := filepath.Join(t.TempDir(), "s3-secret-key")
+	if err := os.WriteFile(accessPath, []byte(" file-access \n"), 0o600); err != nil {
+		t.Fatalf("write S3 access key: %v", err)
+	}
+	if err := os.WriteFile(secretPath, []byte(" file-secret \n"), 0o600); err != nil {
+		t.Fatalf("write S3 secret key: %v", err)
+	}
+	t.Setenv("HOUFENG_ATTACHMENT_S3_ACCESS_KEY_FILE", accessPath)
+	t.Setenv("HOUFENG_ATTACHMENT_S3_SECRET_KEY_FILE", secretPath)
+
+	cfg, err := centerconfig.LoadAttachmentConfig()
+	if err != nil {
+		t.Fatalf("LoadAttachmentConfig() error = %v", err)
+	}
+	if cfg.S3Endpoint != "minio.internal:9000" || cfg.S3AccessKey != "file-access" ||
+		cfg.S3SecretKey != "file-secret" || cfg.S3Bucket != "houfeng-attachments" || !cfg.S3Secure {
+		t.Fatalf("S3 config = %#v, want file-backed private credentials", cfg)
+	}
+}
+
+func TestLoadAttachmentConfigRejectsUnsafeOrUnboundedValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		values  map[string]string
+		wantErr string
+	}{
+		{name: "backend is explicit", values: map[string]string{"HOUFENG_ATTACHMENT_BLOB_BACKEND": ""}, wantErr: "HOUFENG_ATTACHMENT_BLOB_BACKEND"},
+		{name: "local root is absolute", values: map[string]string{"HOUFENG_ATTACHMENT_BLOB_ROOT": "relative/blobs"}, wantErr: "HOUFENG_ATTACHMENT_BLOB_ROOT"},
+		{name: "local root is not filesystem root", values: map[string]string{"HOUFENG_ATTACHMENT_BLOB_ROOT": "/"}, wantErr: "HOUFENG_ATTACHMENT_BLOB_ROOT"},
+		{name: "attempts are positive", values: map[string]string{"HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS": "0"}, wantErr: "HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS"},
+		{name: "attempts are bounded", values: map[string]string{"HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS": "101"}, wantErr: "HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS"},
+		{name: "scanner network is closed", values: map[string]string{"HOUFENG_CLAMAV_ADDRESS": "clamav:3310", "HOUFENG_CLAMAV_NETWORK": "udp"}, wantErr: "HOUFENG_CLAMAV_NETWORK"},
+		{name: "scanner timeout is positive", values: map[string]string{"HOUFENG_CLAMAV_ADDRESS": "clamav:3310", "HOUFENG_CLAMAV_NETWORK": "tcp", "HOUFENG_CLAMAV_DIAL_TIMEOUT": "0s"}, wantErr: "HOUFENG_CLAMAV_DIAL_TIMEOUT"},
+		{name: "scanner chunk is bounded", values: map[string]string{"HOUFENG_CLAMAV_ADDRESS": "clamav:3310", "HOUFENG_CLAMAV_NETWORK": "tcp", "HOUFENG_CLAMAV_CHUNK_SIZE": "1048577"}, wantErr: "HOUFENG_CLAMAV_CHUNK_SIZE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setRequiredLocalAttachments(t)
+			for key, value := range tt.values {
+				t.Setenv(key, value)
+			}
+			if _, err := centerconfig.LoadAttachmentConfig(); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("LoadAttachmentConfig() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 

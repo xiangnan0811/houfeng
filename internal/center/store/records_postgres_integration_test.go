@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
@@ -314,6 +316,134 @@ func TestPostgresIntegrationRecordRevisionParticipantFailureLeavesNoHalfCommit(t
 		participantCount != 0 || activityCount != 0 || projectionCount != 0 || outboxCount != 0 || idempotencyCount != 0 {
 		t.Fatalf("participant rollback counts = root %d revision %d subject %d tag %d participant %d activity %d projection %d outbox %d idempotency %d, want all 0",
 			rootCount, revisionCount, subjectCount, tagCount, participantCount, activityCount, projectionCount, outboxCount, idempotencyCount)
+	}
+}
+
+func TestPostgresIntegrationRecordAttachmentRevisionParticipantTransfersAndRollsBackAtomically(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "records-attachment-participant", 2)
+	draftRepository := NewPostgresRecordDraftRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	participant := NewRecordAttachmentRevisionParticipant()
+	repository := newRecordsPostgresRepository(t, runtimePool, participant)
+
+	draft := createRecordsPostgresDraft(
+		t, ctx, draftRepository, "rdf_pgattachmentpublish", recordsPostgresDraftPayload(t, "Attachment publish"),
+	)
+	seedRecordsPostgresRevisionAttachment(t, ctx, fixture, "att_pgattachmentfirst", draft.DraftID, attachments.UploadStateAvailable, "41")
+	seedRecordsPostgresRevisionAttachment(t, ctx, fixture, "att_pgattachmentsecond", draft.DraftID, attachments.UploadStateAvailable, "42")
+	input := recordsPostgresCompleteRevisionInput(
+		t, "Attachment publish", "att_pgattachmentsecond", "att_pgattachmentfirst",
+	)
+	command := recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordCreate, "rec_pgattachmentpublish", "", 0, 0,
+		input, "records-attachment-publish",
+	)
+	command.DraftID = draft.DraftID
+	command.DraftETag = draft.ETag
+	committed, err := repository.CommitRevision(ctx, command)
+	if err != nil {
+		t.Fatalf("CommitRevision(attachment publish) error = %v", err)
+	}
+	var ordered []string
+	if err := fixture.db.QueryRow(ctx, `
+		select array_agg(attachment_id order by ordinal)
+		from public.record_revision_attachments
+		where record_id = $1 and revision_id = $2`, committed.RecordID, committed.RevisionID).Scan(&ordered); err != nil {
+		t.Fatalf("read ordered revision attachments: %v", err)
+	}
+	if len(ordered) != 2 || ordered[0] != "att_pgattachmentsecond" || ordered[1] != "att_pgattachmentfirst" {
+		t.Fatalf("ordered revision attachments = %#v", ordered)
+	}
+	var transferred int
+	if err := fixture.db.QueryRow(ctx, `
+		select count(*)::int
+		from public.record_attachments
+		where record_id = $1 and draft_id is null
+		  and attachment_id = any($2::text[])`, committed.RecordID, ordered).Scan(&transferred); err != nil {
+		t.Fatalf("count transferred attachments: %v", err)
+	}
+	if transferred != 2 {
+		t.Fatalf("transferred attachments = %d, want 2", transferred)
+	}
+	stored, err := repository.ReadRecordRevision(ctx, records.StoredRecordRevisionRequest{
+		RecordID: committed.RecordID, RevisionID: committed.RevisionID,
+		CurrentRevisionID: committed.RevisionID, LockVersion: committed.LockVersion,
+		AuthorizationEpoch: committed.AuthorizationEpoch,
+	})
+	if err != nil {
+		t.Fatalf("ReadRecordRevision() error = %v", err)
+	}
+	if got := stored.Input.AttachmentIDs(); len(got) != 2 || got[0] != ordered[0] || got[1] != ordered[1] {
+		t.Fatalf("ReadRecordRevision().AttachmentIDs = %#v", got)
+	}
+
+	reducedInput := recordsPostgresCompleteRevisionInput(t, "Attachment publish reduced", "att_pgattachmentfirst")
+	reduced, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordUpdate, committed.RecordID, committed.RevisionID,
+		committed.LockVersion, committed.AuthorizationEpoch, reducedInput, "records-attachment-reduced",
+	))
+	if err != nil {
+		t.Fatalf("CommitRevision(same-record reduced attachments) error = %v", err)
+	}
+	restoredInput := recordsPostgresCompleteRevisionInput(
+		t, "Attachment publish restored", "att_pgattachmentsecond", "att_pgattachmentfirst",
+	)
+	restored, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordUpdate, reduced.RecordID, reduced.RevisionID,
+		reduced.LockVersion, reduced.AuthorizationEpoch, restoredInput, "records-attachment-restored",
+	))
+	if err != nil {
+		t.Fatalf("CommitRevision(same-record restored attachments) error = %v", err)
+	}
+	var historicalFirstRefs, reducedRefs, restoredRefs []string
+	if err := fixture.db.QueryRow(ctx, `
+		select
+		  array(select attachment_id from public.record_revision_attachments where revision_id = $1 order by ordinal),
+		  array(select attachment_id from public.record_revision_attachments where revision_id = $2 order by ordinal),
+		  array(select attachment_id from public.record_revision_attachments where revision_id = $3 order by ordinal)`,
+		committed.RevisionID, reduced.RevisionID, restored.RevisionID,
+	).Scan(&historicalFirstRefs, &reducedRefs, &restoredRefs); err != nil {
+		t.Fatalf("read historical/reduced/restored attachment refs: %v", err)
+	}
+	if len(historicalFirstRefs) != 2 || historicalFirstRefs[0] != "att_pgattachmentsecond" || historicalFirstRefs[1] != "att_pgattachmentfirst" ||
+		len(reducedRefs) != 1 || reducedRefs[0] != "att_pgattachmentfirst" ||
+		len(restoredRefs) != 2 || restoredRefs[0] != "att_pgattachmentsecond" || restoredRefs[1] != "att_pgattachmentfirst" {
+		t.Fatalf("historical/reduced/restored refs = %#v / %#v / %#v", historicalFirstRefs, reducedRefs, restoredRefs)
+	}
+
+	rollbackDraft := createRecordsPostgresDraft(
+		t, ctx, draftRepository, "rdf_pgattachmentrollback", recordsPostgresDraftPayload(t, "Attachment rollback"),
+	)
+	seedRecordsPostgresRevisionAttachment(t, ctx, fixture, "att_pgrollbackavailable", rollbackDraft.DraftID, attachments.UploadStateAvailable, "43")
+	seedRecordsPostgresRevisionAttachment(t, ctx, fixture, "att_pgrollbackpending", rollbackDraft.DraftID, attachments.UploadStateQuarantined, "44")
+	rollbackCommand := recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordCreate, "rec_pgattachmentrollback", "", 0, 0,
+		recordsPostgresCompleteRevisionInput(
+			t, "Attachment rollback", "att_pgrollbackavailable", "att_pgrollbackpending",
+		),
+		"records-attachment-rollback",
+	)
+	rollbackCommand.DraftID = rollbackDraft.DraftID
+	rollbackCommand.DraftETag = rollbackDraft.ETag
+	if result, err := repository.CommitRevision(ctx, rollbackCommand); !errors.Is(err, attachments.ErrAttachmentConflict) {
+		t.Fatalf("CommitRevision(attachment rollback) = (%#v, %v), want ErrAttachmentConflict", result, err)
+	}
+	var rootCount, revisionCount, refCount, retainedDraftOwnerCount int
+	if err := fixture.db.QueryRow(ctx, `
+		select
+		  (select count(*)::int from public.records where record_id = $1),
+		  (select count(*)::int from public.record_revisions where record_id = $1),
+		  (select count(*)::int from public.record_revision_attachments where record_id = $1),
+		  (select count(*)::int from public.record_attachments
+		    where draft_id = $2 and record_id is null
+		      and attachment_id in ('att_pgrollbackavailable', 'att_pgrollbackpending'))`,
+		rollbackCommand.RecordID, rollbackDraft.DraftID,
+	).Scan(&rootCount, &revisionCount, &refCount, &retainedDraftOwnerCount); err != nil {
+		t.Fatalf("read attachment rollback state: %v", err)
+	}
+	if rootCount != 0 || revisionCount != 0 || refCount != 0 || retainedDraftOwnerCount != 2 {
+		t.Fatalf("rollback state = root/revision/ref/draft-owner %d/%d/%d/%d", rootCount, revisionCount, refCount, retainedDraftOwnerCount)
 	}
 }
 
@@ -669,7 +799,7 @@ func newRecordsPostgresRepository(t *testing.T, pool *pgxpool.Pool, participants
 	return repository
 }
 
-func recordsPostgresCompleteRevisionInput(t *testing.T, title string) records.CompleteRevisionInput {
+func recordsPostgresCompleteRevisionInput(t *testing.T, title string, attachmentIDs ...string) records.CompleteRevisionInput {
 	t.Helper()
 	visibility, err := recordauth.NormalizeVisibilityScope(recordauth.VisibilityScope{
 		Version:        recordauth.VisibilityScopeVersionV1,
@@ -714,12 +844,56 @@ func recordsPostgresCompleteRevisionInput(t *testing.T, title string) records.Co
 			ParticipantID:    "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
 			IdentitySnapshot: map[string]string{"display_name": "PostgreSQL Operator"},
 		}},
-		AuthorID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa",
+		AttachmentIDs: attachmentIDs,
+		AuthorID:      "usr_aaaaaaaaaaaaaaaaaaaaaaaa",
 	})
 	if err != nil {
 		t.Fatalf("NormalizeCompleteRevisionInput() error = %v", err)
 	}
 	return input
+}
+
+func seedRecordsPostgresRevisionAttachment(
+	t *testing.T,
+	ctx context.Context,
+	fixture recordPlatformPostgresFixture,
+	attachmentID string,
+	draftID string,
+	state attachments.UploadState,
+	digestByte string,
+) {
+	t.Helper()
+	if state == attachments.UploadStateAvailable {
+		blobKey := "sha256/" + strings.Repeat(digestByte, 32)
+		if _, err := fixture.db.Exec(ctx, `
+			insert into public.blob_objects (
+				blob_key, sha256_digest, object_version, size_bytes, backend_kind
+			) values ($1, decode($2, 'hex'), $3, 1, 'local')`,
+			blobKey, strings.Repeat(digestByte, 32), "local-"+attachmentID,
+		); err != nil {
+			t.Fatalf("seed available revision attachment Blob %q: %v", attachmentID, err)
+		}
+		if _, err := fixture.db.Exec(ctx, `
+			insert into public.record_attachments (
+				attachment_id, project_id, draft_id, origin_draft_id, attachment_state,
+				display_name, media_type, logical_size_bytes, blob_key,
+				blob_object_version, created_by
+			) values ($1, 'default', $2, $2, $3, $1 || '.txt', 'text/plain', 1, $4, $5,
+				'usr_aaaaaaaaaaaaaaaaaaaaaaaa')`,
+			attachmentID, draftID, state, blobKey, "local-"+attachmentID,
+		); err != nil {
+			t.Fatalf("seed available revision attachment %q: %v", attachmentID, err)
+		}
+		return
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.record_attachments (
+			attachment_id, project_id, draft_id, origin_draft_id, attachment_state,
+			display_name, media_type, logical_size_bytes, created_by
+		) values ($1, 'default', $2, $2, $3, $1 || '.txt', 'text/plain', 1,
+			'usr_aaaaaaaaaaaaaaaaaaaaaaaa')`, attachmentID, draftID, state); err != nil {
+		t.Fatalf("seed pending revision attachment %q: %v", attachmentID, err)
+	}
 }
 
 func recordsPostgresRevisionCommand(

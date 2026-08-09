@@ -14,6 +14,8 @@ const (
 	testRecordParticipantID = "usr_fedcba987654321001234567"
 	testRecordGroupID       = "rag_records"
 	testRecordVPSID         = "vps_0123456789abcdef"
+	testRecordAttachmentID1 = "att_0123456789abcdef"
+	testRecordAttachmentID2 = "att_fedcba9876543210"
 )
 
 func TestNormalizeCompleteRevisionInputRejectsContradictoryOrDuplicateValues(t *testing.T) {
@@ -70,6 +72,10 @@ func TestNormalizeCompleteRevisionInputRejectsContradictoryOrDuplicateValues(t *
 		{name: "invalid participant", mutate: func(values *CompleteRevisionValues) { values.Participants[0].ParticipantID = "usr_invalid" }},
 		{name: "duplicate participant", mutate: func(values *CompleteRevisionValues) {
 			values.Participants = append(values.Participants, cloneRevisionParticipantForTest(values.Participants[0]))
+		}},
+		{name: "invalid attachment", mutate: func(values *CompleteRevisionValues) { values.AttachmentIDs[0] = "att_INVALID" }},
+		{name: "duplicate attachment", mutate: func(values *CompleteRevisionValues) {
+			values.AttachmentIDs = append(values.AttachmentIDs, values.AttachmentIDs[0])
 		}},
 		{name: "invalid owner", mutate: func(values *CompleteRevisionValues) { values.OwnerID = "usr_invalid" }},
 		{name: "invalid author", mutate: func(values *CompleteRevisionValues) { values.AuthorID = "usr_invalid" }},
@@ -174,10 +180,11 @@ func validCompleteRevisionValues(t *testing.T) CompleteRevisionValues {
 		Participants: []RevisionParticipantSnapshot{
 			{ParticipantID: testRecordParticipantID, IdentitySnapshot: map[string]string{"display_name": "Operator Two"}},
 		},
-		FollowUpAt: &followUpAt,
-		Template:   &template,
-		AuthorID:   testRecordAuthorID,
-		SaveReason: "  provider confirmed resolution  ",
+		AttachmentIDs: []string{testRecordAttachmentID1, testRecordAttachmentID2},
+		FollowUpAt:    &followUpAt,
+		Template:      &template,
+		AuthorID:      testRecordAuthorID,
+		SaveReason:    "  provider confirmed resolution  ",
 	}
 }
 

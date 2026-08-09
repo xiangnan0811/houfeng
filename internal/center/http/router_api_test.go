@@ -1084,3 +1084,116 @@ func TestRouterKeepsTargetRuntimeFactsOutOfSPAFallback(t *testing.T) {
 		t.Fatalf("expected target runtime facts payload, got %q", string(body))
 	}
 }
+
+func TestRouterRegistersExactAuthenticatedAttachmentRoutesInRecordsMode(t *testing.T) {
+	authCalls := 0
+	attachmentUploads := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("attachment-uploads"))
+	})
+	attachments := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("attachments"))
+	})
+	handler := centerhttp.New(centerhttp.RouterOptions{
+		Version:                  "dev",
+		WebDistDir:               "testdata/web",
+		RecordsEnabled:           true,
+		AttachmentUploadsHandler: attachmentUploads,
+		AttachmentsHandler:       attachments,
+		AuthMiddleware: func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				authCalls++
+				next.ServeHTTP(w, request)
+			})
+		},
+	})
+	tests := []struct {
+		name     string
+		method   string
+		path     string
+		wantBody string
+	}{
+		{name: "create upload", method: http.MethodPost, path: "/api/attachment-uploads", wantBody: "attachment-uploads"},
+		{name: "put upload content", method: http.MethodPut, path: "/api/attachment-uploads/aup_httpcontract/content", wantBody: "attachment-uploads"},
+		{name: "complete upload", method: http.MethodPost, path: "/api/attachment-uploads/aup_httpcontract/complete", wantBody: "attachment-uploads"},
+		{name: "attachment metadata", method: http.MethodGet, path: "/api/attachments/att_httpcontract", wantBody: "attachments"},
+		{name: "attachment content", method: http.MethodGet, path: "/api/attachments/att_httpcontract/content", wantBody: "attachments"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			beforeAuth := authCalls
+			request := httptest.NewRequest(tt.method, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusOK || recorder.Body.String() != tt.wantBody {
+				t.Fatalf("status = %d body=%q, want 200 %q", recorder.Code, recorder.Body.String(), tt.wantBody)
+			}
+			if authCalls != beforeAuth+1 {
+				t.Fatalf("auth calls = %d, want %d", authCalls, beforeAuth+1)
+			}
+		})
+	}
+}
+
+func TestRouterKeepsUnknownAttachmentSubtreesOutOfSPAFallback(t *testing.T) {
+	handler := newTestRouter(centerhttp.RouterOptions{
+		Version:                  "dev",
+		WebDistDir:               "testdata/web",
+		RecordsEnabled:           true,
+		AttachmentUploadsHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
+		AttachmentsHandler:       http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
+	})
+	paths := []string{
+		"/api/attachment-uploads/aup_httpcontract",
+		"/api/attachment-uploads/aup_httpcontract/content/deeper",
+		"/api/attachment-uploads/aup_httpcontract/unknown",
+		"/api/attachments",
+		"/api/attachments/att_httpcontract/content/deeper",
+		"/api/attachments/att_httpcontract/unknown",
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("status = %d body=%q, want 404", recorder.Code, recorder.Body.String())
+			}
+			if strings.TrimSpace(recorder.Body.String()) == spaShell {
+				t.Fatalf("unknown attachment API path returned SPA fallback: %q", recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestRouterOmitsAttachmentRoutesOutsideRecordsMode(t *testing.T) {
+	handler := newTestRouter(centerhttp.RouterOptions{
+		Version:                  "dev",
+		WebDistDir:               "testdata/web",
+		AttachmentUploadsHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
+		AttachmentsHandler:       http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
+	})
+	paths := []string{
+		"/api/attachment-uploads",
+		"/api/attachment-uploads/aup_httpcontract/content",
+		"/api/attachment-uploads/aup_httpcontract/complete",
+		"/api/attachments/att_httpcontract",
+		"/api/attachments/att_httpcontract/content",
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("status = %d body=%q, want 404", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}

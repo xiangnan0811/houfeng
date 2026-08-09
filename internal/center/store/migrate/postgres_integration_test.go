@@ -876,7 +876,12 @@ func TestPostgresIntegrationRecordsCoreSchema(t *testing.T) {
 		  )
 		  and confdeltype <> 'r'
 	`, 0)
-
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from pg_catalog.pg_constraint
+		where contype = 'f'
+		  and conrelid = 'public.blob_publication_intents'::regclass
+	`, 0)
 	for _, table := range []string{
 		"record_revisions",
 		"record_revision_subjects",
@@ -1030,6 +1035,1029 @@ func TestPostgresIntegrationRecordsCoreSchema(t *testing.T) {
 	}
 	if err := purgeTx.Commit(ctx); err != nil {
 		t.Fatalf("commit explicit records-core purge transaction: %v", err)
+	}
+}
+
+func TestPostgresIntegrationRecordAttachmentsSchema(t *testing.T) {
+	ctx := context.Background()
+	db := openTemporaryPostgresDatabase(t, ctx)
+
+	if err := Apply(ctx, db); err != nil {
+		t.Fatalf("Apply() record-attachments migration error = %v", err)
+	}
+	if err := Apply(ctx, db); err != nil {
+		t.Fatalf("Apply() record-attachments exact repeat error = %v", err)
+	}
+
+	for _, table := range []string{
+		"blob_objects",
+		"attachment_quota_accounts",
+		"record_attachments",
+		"attachment_uploads",
+		"attachment_upload_parts",
+		"record_revision_attachments",
+		"attachment_processor_jobs",
+		"content_processor_workspaces",
+		"blob_gc_pins",
+		"blob_gc_deletions",
+		"blob_publication_intents",
+		"attachment_purge_receipts",
+		"content_workspace_purge_receipts",
+	} {
+		assertSingleStringValue(t, ctx, db, "select to_regclass('public."+table+"')::text", table)
+	}
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from public.schema_migrations
+		where name = '0053_create_record_attachments.sql'
+	`, 1)
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'blob_gc_deletions'
+	`, "deletion_id,project_id,purge_mode,blob_key,sha256_digest,object_version,size_bytes,backend_kind,blob_created_at,deletion_state,owner_id,owner_generation,attempt,lease_expires_at,retry_at,physical_delete_result,receipt_digest,completed_at,created_at,updated_at")
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'blob_publication_intents'
+	`, "publication_id,project_id,owner_kind,owner_id,owner_generation,blob_key,sha256_digest,size_bytes,backend_kind,object_version,publication_state,publish_expires_at,cleanup_owner_id,cleanup_generation,attempt,cleanup_lease_expires_at,retry_at,completion_outcome,receipt_digest,completed_at,created_at,updated_at")
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'record_attachments'
+	`, "attachment_id,project_id,record_id,draft_id,origin_draft_id,copied_from_attachment_id,attachment_state,display_name,media_type,logical_size_bytes,blob_key,blob_object_version,preview_blob_key,preview_blob_object_version,preview_media_type,preview_size_bytes,created_by,created_at,updated_at")
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'attachment_processor_jobs'
+	`, "processor_job_id,upload_id,attachment_id,processor_state,processor_profile,attempt,max_attempts,owner_id,owner_generation,lease_expires_at,retry_at,result_code,result_digest,result_owner_id,result_lease_expires_at,created_at,updated_at,expires_at")
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'attachment_uploads'
+	`, "upload_id,project_id,attachment_id,origin_draft_id,author_id,upload_state,transport_kind,declared_size_bytes,reserved_size_bytes,actual_size_bytes,actual_sha256_digest,temporary_object_key,temporary_object_version,temporary_object_cleanup_retry_at,temporary_object_deleted_at,completion_fingerprint,completed_at,created_at,updated_at,expires_at")
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'attachment_purge_receipts'
+	`, "operation_id,surface_kind,object_version_digest,adapter_name,removed_surface_digest,receipt_digest,removed_row_count,verified_absent_at,created_at")
+	assertSingleStringValue(t, ctx, db, `
+		select string_agg(column_name, ',' order by ordinal_position)
+		from information_schema.columns
+		where table_schema = 'public'
+		  and table_name = 'content_workspace_purge_receipts'
+	`, "workspace_id,removed_surface_digest,receipt_digest,removed_row_count,verified_absent_at,created_at")
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from pg_catalog.pg_constraint
+		where contype = 'f'
+		  and connamespace = 'public'::regnamespace
+		  and conrelid in (
+		    'public.record_attachments'::regclass,
+		    'public.attachment_uploads'::regclass,
+		    'public.attachment_upload_parts'::regclass,
+		    'public.record_revision_attachments'::regclass,
+		    'public.attachment_processor_jobs'::regclass,
+		    'public.content_processor_workspaces'::regclass,
+		    'public.blob_gc_pins'::regclass,
+		    'public.attachment_purge_receipts'::regclass,
+		    'public.content_workspace_purge_receipts'::regclass
+		  )
+		  and confdeltype <> 'r'
+	`, 0)
+	for indexName, wantColumns := range map[string]string{
+		"idx_record_attachments_blob":                "blob_key,blob_object_version,attachment_id",
+		"idx_record_attachments_copied_from":         "copied_from_attachment_id,attachment_id",
+		"idx_record_attachments_preview_blob":        "preview_blob_key,preview_blob_object_version,attachment_id",
+		"idx_record_revision_attachments_attachment": "attachment_id,record_id,revision_id,ordinal",
+		"idx_blob_gc_pins_blob":                      "blob_key,blob_object_version,expires_at,pin_id",
+		"idx_blob_gc_deletions_claim":                "deletion_state,retry_at,lease_expires_at,backend_kind,blob_created_at,deletion_id",
+		"idx_blob_publication_intents_claim":         "publication_state,retry_at,cleanup_lease_expires_at,publish_expires_at,backend_kind,publication_id",
+	} {
+		var gotColumns string
+		if err := db.QueryRow(ctx, `
+			select string_agg(pg_get_indexdef(index_catalog.indexrelid, ordinal, true), ',' order by ordinal)
+			from pg_catalog.pg_index index_catalog
+			cross join lateral generate_series(1, index_catalog.indnkeyatts) ordinal
+			where index_catalog.indexrelid = ('public.' || $1)::regclass
+			  and not index_catalog.indisunique
+			  and index_catalog.indpred is null
+		`, indexName).Scan(&gotColumns); err != nil {
+			t.Fatalf("query attachment reverse index %q: %v", indexName, err)
+		}
+		if gotColumns != wantColumns {
+			t.Fatalf("attachment reverse index %q columns = %q, want %q", indexName, gotColumns, wantColumns)
+		}
+	}
+	assertSingleStringValue(t, ctx, db, `
+		select case
+		  when index_catalog.indisunique
+		   and pg_get_expr(index_catalog.indpred, index_catalog.indrelid) = '(deletion_state <> ''completed''::text)'
+		  then 'unique-active'
+		  else 'invalid'
+		end
+		from pg_catalog.pg_index index_catalog
+		where index_catalog.indexrelid = 'public.uq_blob_gc_deletions_active'::regclass
+	`, "unique-active")
+	assertSingleStringValue(t, ctx, db, `
+		select case
+		  when index_catalog.indisunique
+		   and pg_get_expr(index_catalog.indpred, index_catalog.indrelid) = '(publication_state <> ''completed''::text)'
+		  then 'unique-active'
+		  else 'invalid'
+		end
+		from pg_catalog.pg_index index_catalog
+		where index_catalog.indexrelid = 'public.uq_blob_publication_intents_active_key'::regclass
+	`, "unique-active")
+
+	for _, table := range []string{
+		"blob_objects",
+		"attachment_upload_parts",
+		"record_revision_attachments",
+		"blob_gc_pins",
+		"attachment_purge_receipts",
+		"content_workspace_purge_receipts",
+	} {
+		var triggerCount int
+		if err := db.QueryRow(ctx, `
+			select count(*)::int
+			from pg_catalog.pg_trigger trigger_catalog
+			join pg_catalog.pg_class relation on relation.oid = trigger_catalog.tgrelid
+			join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
+			join pg_catalog.pg_proc procedure on procedure.oid = trigger_catalog.tgfoid
+			join pg_catalog.pg_namespace procedure_namespace on procedure_namespace.oid = procedure.pronamespace
+			where namespace.nspname = 'public'
+			  and relation.relname = $1
+			  and trigger_catalog.tgname = $1 || '_reject_update'
+			  and not trigger_catalog.tgisinternal
+			  and procedure_namespace.nspname = 'record_platform_internal'
+			  and procedure.proname = 'reject_immutable_mutation'
+		`, table).Scan(&triggerCount); err != nil {
+			t.Fatalf("query attachment immutable trigger for %q: %v", table, err)
+		}
+		if triggerCount != 1 {
+			t.Fatalf("attachment immutable trigger count for %q = %d, want 1", table, triggerCount)
+		}
+	}
+
+	execSQL(t, ctx, db, `insert into public.records (record_id) values ('rec_atta'), ('rec_attb')`)
+	execSQL(t, ctx, db, `
+		insert into public.record_drafts (
+			draft_id, author_id, payload, payload_hash, draft_version,
+			etag_digest, warning_at, expires_at
+		) values
+		(
+			'rdf_att', 'usr_att', '{}'::jsonb, decode(repeat('01', 32), 'hex'), 1,
+			decode(repeat('02', 32), 'hex'), now() + interval '1 hour', now() + interval '2 hours'
+		),
+		(
+			'rdf_other', 'usr_att', '{}'::jsonb, decode(repeat('15', 32), 'hex'), 1,
+			decode(repeat('16', 32), 'hex'), now() + interval '1 hour', now() + interval '2 hours'
+		)
+	`)
+	execSQL(t, ctx, db, `
+		insert into public.blob_objects (
+			blob_key, sha256_digest, object_version, size_bytes, backend_kind
+		) values (
+			'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+			decode(repeat('bb', 32), 'hex'), 'local-v1', 9, 'local'
+		)
+	`)
+	execSQL(t, ctx, db, `
+		insert into public.blob_objects (
+			blob_key, sha256_digest, object_version, size_bytes, backend_kind
+		) values (
+			'sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+			decode(repeat('aa', 32), 'hex'), 'preview-v1', 7, 'local'
+		)
+	`)
+	_, err := db.Exec(ctx, `
+		insert into public.blob_objects (
+			blob_key, sha256_digest, object_version, size_bytes, backend_kind
+		) values (
+			'sha256/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+			decode(repeat('dd', 32), 'hex'), 'local-v1', 9, 'local'
+		)
+	`)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("mismatched Blob key and digest error = %v, want SQLSTATE 23514", err)
+	}
+	_, err = db.Exec(ctx, `
+		insert into public.blob_objects (
+			blob_key, sha256_digest, object_version, size_bytes, backend_kind
+		) values (
+			'sha256/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+			decode(repeat('ee', 32), 'hex'), 'local-v1', 0, 'local'
+		)
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("zero-size Blob error = %v, want SQLSTATE 23514", err)
+	}
+	execSQL(t, ctx, db, `insert into public.attachment_quota_accounts (project_id) values ('default')`)
+	for _, statement := range []string{
+		`update public.attachment_quota_accounts set logical_bytes = -1 where project_id = 'default'`,
+		`update public.attachment_quota_accounts set reserved_bytes = -1 where project_id = 'default'`,
+		`update public.attachment_quota_accounts set physical_bytes = -1 where project_id = 'default'`,
+	} {
+		_, err := db.Exec(ctx, statement)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+			t.Fatalf("negative attachment quota mutation %q error = %v, want SQLSTATE 23514", statement, err)
+		}
+	}
+
+	_, err = db.Exec(ctx, `
+		insert into public.record_attachments (
+			attachment_id, record_id, draft_id, attachment_state, display_name,
+			origin_draft_id, media_type, logical_size_bytes, created_by
+		) values ('att_badowner', 'rec_atta', 'rdf_att', 'created', 'bad.txt',
+			'rdf_att', 'text/plain', 9, 'usr_att')
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("attachment dual-owner insert error = %v, want SQLSTATE 23514", err)
+	}
+
+	_, err = db.Exec(ctx, `
+		insert into public.record_attachments (
+			attachment_id, draft_id, attachment_state, display_name,
+			origin_draft_id, media_type, logical_size_bytes, created_by
+		) values ('att_noblob', 'rdf_att', 'available', 'missing.txt',
+			'rdf_att', 'text/plain', 9, 'usr_att')
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("available attachment without blob error = %v, want SQLSTATE 23514", err)
+	}
+
+	execSQL(t, ctx, db, `
+		insert into public.record_attachments (
+			attachment_id, draft_id, attachment_state, display_name,
+			origin_draft_id, media_type, logical_size_bytes, created_by
+		) values ('att_upload', 'rdf_att', 'created', 'upload.txt',
+			'rdf_att', 'text/plain', 9, 'usr_att')
+	`)
+	_, err = db.Exec(ctx, `
+		update public.record_attachments
+		set preview_blob_key = 'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+		    preview_blob_object_version = 'local-v1',
+		    preview_media_type = 'text/plain; charset=utf-8', preview_size_bytes = 9
+		where attachment_id = 'att_upload'
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Errorf("preview on non-available attachment error = %v, want SQLSTATE 23514", err)
+	}
+	execSQL(t, ctx, db, `
+		update public.record_attachments
+		set preview_blob_key = null, preview_blob_object_version = null,
+		    preview_media_type = null, preview_size_bytes = null
+		where attachment_id = 'att_upload'
+	`)
+	execSQL(t, ctx, db, `
+		insert into public.record_attachments (
+			attachment_id, draft_id, attachment_state, display_name,
+			origin_draft_id, media_type, logical_size_bytes, created_by
+		) values ('att_other', 'rdf_other', 'created', 'other.txt',
+			'rdf_other', 'text/plain', 9, 'usr_att')
+	`)
+	_, err = db.Exec(ctx, `
+		insert into public.attachment_uploads (
+			upload_id, attachment_id, origin_draft_id, author_id, upload_state,
+			transport_kind, declared_size_bytes, reserved_size_bytes, expires_at
+		) values ('aup_badstate', 'att_upload', 'rdf_att', 'usr_att', 'unknown',
+			'local', 9, 9, now() + interval '1 hour')
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("attachment upload unknown state error = %v, want SQLSTATE 23514", err)
+	}
+	execSQL(t, ctx, db, `
+		insert into public.attachment_uploads (
+			upload_id, attachment_id, origin_draft_id, author_id, upload_state,
+			transport_kind, declared_size_bytes, reserved_size_bytes, expires_at
+		) values ('aup_good', 'att_upload', 'rdf_att', 'usr_att', 'created',
+			'local', 9, 9, now() + interval '1 hour')
+	`)
+	const persistedTemporaryKey = "temporary/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	execSQL(t, ctx, db, `
+		update public.attachment_uploads
+		set temporary_object_key = $1
+		where upload_id = 'aup_good'
+	`, persistedTemporaryKey)
+	_, err = db.Exec(ctx, `
+		update public.attachment_uploads
+		set temporary_object_key = null, temporary_object_version = 'temporary-v1'
+		where upload_id = 'aup_good'
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("temporary version without persisted key error = %v, want SQLSTATE 23514", err)
+	}
+	result, err := db.Exec(ctx, `
+		update public.attachment_uploads
+		set temporary_object_version = 'temporary-v1'
+		where upload_id = 'aup_good'
+		  and temporary_object_key = $1
+		  and temporary_object_version is null
+	`, persistedTemporaryKey)
+	if err != nil {
+		t.Fatalf("CAS persisted temporary object version: %v", err)
+	}
+	if result.RowsAffected() != 1 {
+		t.Fatalf("CAS persisted temporary object version rows = %d, want 1", result.RowsAffected())
+	}
+	execSQL(t, ctx, db, `
+		insert into public.attachment_uploads (
+			upload_id, attachment_id, origin_draft_id, author_id, upload_state,
+			transport_kind, declared_size_bytes, reserved_size_bytes, expires_at
+		) values ('aup_other', 'att_other', 'rdf_other', 'usr_att', 'expired',
+			'local', 9, 9, now() + interval '1 hour')
+	`)
+	execSQL(t, ctx, db, `
+		insert into public.attachment_upload_parts (
+			upload_id, part_number, size_bytes, sha256_digest, object_version
+		) values ('aup_good', 1, 9, decode(repeat('06', 32), 'hex'), 'part-v1')
+	`)
+	execSQL(t, ctx, db, `
+		insert into public.attachment_upload_parts (
+			upload_id, part_number, size_bytes, sha256_digest, object_version
+		) values ('aup_other', 1, 9, decode(repeat('17', 32), 'hex'), 'part-v1')
+	`)
+
+	_, err = db.Exec(ctx, `
+		insert into public.attachment_processor_jobs (
+			processor_job_id, upload_id, attachment_id, processor_state,
+			processor_profile, max_attempts, expires_at
+		) values ('apj_badstate', 'aup_good', 'att_upload', 'unknown',
+			'text', 3, now() + interval '1 hour')
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("attachment processor unknown state error = %v, want SQLSTATE 23514", err)
+	}
+	_, err = db.Exec(ctx, `
+		insert into public.attachment_processor_jobs (
+			processor_job_id, upload_id, attachment_id, processor_state,
+			processor_profile, max_attempts, expires_at
+		) values ('apj_mismatch', 'aup_good', 'att_other', 'queued',
+			'text', 3, now() + interval '1 hour')
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("processor upload/attachment mismatch error = %v, want SQLSTATE 23503", err)
+	}
+	execSQL(t, ctx, db, `
+		insert into public.attachment_processor_jobs (
+			processor_job_id, upload_id, attachment_id, processor_state,
+			processor_profile, max_attempts, expires_at
+		) values ('apj_good', 'aup_good', 'att_upload', 'queued',
+			'text', 3, now() + interval '1 hour')
+	`)
+	execSQL(t, ctx, db, `
+		insert into public.attachment_processor_jobs (
+			processor_job_id, upload_id, attachment_id, processor_state,
+			processor_profile, max_attempts, result_code, result_digest,
+			result_owner_id, result_lease_expires_at, expires_at
+		) values ('apj_other', 'aup_other', 'att_other', 'expired',
+			'text', 3, 'processing_error', decode(repeat('1b', 32), 'hex'),
+			'processor_seed', now() + interval '5 minutes', now() + interval '1 hour')
+	`)
+
+	for _, invalid := range []struct {
+		name      string
+		statement string
+	}{
+		{
+			name: "unknown result code",
+			statement: `update public.attachment_processor_jobs
+				set result_code = 'unknown', result_digest = decode(repeat('20', 32), 'hex')
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "queued result",
+			statement: `update public.attachment_processor_jobs
+				set result_code = 'clean', result_digest = decode(repeat('21', 32), 'hex')
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "retry with clean result",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'clean',
+				    result_digest = decode(repeat('22', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "retry without digest",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+				    result_digest = null, result_owner_id = 'worker1',
+				    result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "succeeded malware result",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'succeeded', result_code = 'malware',
+				    result_digest = decode(repeat('23', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "rejected clean result",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'rejected', result_code = 'clean',
+				    result_digest = decode(repeat('24', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "expired malware result",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'expired', result_code = 'malware',
+				    result_digest = decode(repeat('25', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "retry missing retry at",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+				    result_digest = decode(repeat('2d', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "retry missing result claim token",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+				    retry_at = now() + interval '10 minutes',
+				    result_digest = decode(repeat('29', 32), 'hex')
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "retry partial result owner token",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+				    retry_at = now() + interval '10 minutes',
+				    result_digest = decode(repeat('2a', 32), 'hex'), result_owner_id = 'worker1'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "retry partial result expiry token",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+				    retry_at = now() + interval '10 minutes',
+				    result_digest = decode(repeat('2b', 32), 'hex'),
+				    result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "queued retained result claim token",
+			statement: `update public.attachment_processor_jobs
+				set result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "unsafe result owner grammar",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+				    retry_at = now() + interval '10 minutes',
+				    result_digest = decode(repeat('2c', 32), 'hex'),
+				    result_owner_id = 'Worker!', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+	} {
+		_, err := db.Exec(ctx, invalid.statement)
+		if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+			t.Fatalf("processor %s mapping error = %v, want SQLSTATE 23514", invalid.name, err)
+		}
+	}
+	for _, invalid := range []struct {
+		name      string
+		statement string
+	}{
+		{
+			name: "queued with retry at",
+			statement: `update public.attachment_processor_jobs
+				set retry_at = now() + interval '10 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "claimed with retry at",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'claimed', owner_id = 'worker1', owner_generation = 1,
+				    lease_expires_at = now() + interval '5 minutes',
+				    retry_at = now() + interval '10 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "succeeded with retry at",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'succeeded', retry_at = now() + interval '10 minutes',
+				    result_code = 'clean', result_digest = decode(repeat('2e', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "rejected with retry at",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'rejected', retry_at = now() + interval '10 minutes',
+				    result_code = 'unsafe_content', result_digest = decode(repeat('2f', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+		{
+			name: "expired with retry at",
+			statement: `update public.attachment_processor_jobs
+				set processor_state = 'expired', retry_at = now() + interval '10 minutes',
+				    result_code = 'timeout', result_digest = decode(repeat('30', 32), 'hex'),
+				    result_owner_id = 'worker1', result_lease_expires_at = now() + interval '5 minutes'
+				where processor_job_id = 'apj_good'`,
+		},
+	} {
+		_, err := db.Exec(ctx, invalid.statement)
+		if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+			t.Fatalf("processor %s mapping error = %v, want SQLSTATE 23514", invalid.name, err)
+		}
+	}
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'claimed', owner_id = 'worker1', owner_generation = 1,
+		    lease_expires_at = now() + interval '5 minutes',
+		    result_owner_id = '', result_lease_expires_at = null
+		where processor_job_id = 'apj_good'
+	`)
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'queued', owner_id = '', owner_generation = 0,
+		    lease_expires_at = null, result_owner_id = '', result_lease_expires_at = null
+		where processor_job_id = 'apj_good'
+	`)
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'retry_wait', result_code = 'scanner_unavailable',
+		    retry_at = now() + interval '10 minutes',
+		    result_digest = decode(repeat('26', 32), 'hex'), result_owner_id = 'worker1',
+		    result_lease_expires_at = now() + interval '5 minutes'
+		where processor_job_id = 'apj_good'
+	`)
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', processor_state, result_code, octet_length(result_digest)::text,
+		  result_owner_id, (result_lease_expires_at is not null)::text,
+		  (retry_at is not null)::text)
+		from public.attachment_processor_jobs where processor_job_id = 'apj_good'
+	`, "retry_wait,scanner_unavailable,32,worker1,true,true")
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'queued', retry_at = null,
+		    result_code = null, result_digest = null,
+		    result_owner_id = '', result_lease_expires_at = null
+		where processor_job_id = 'apj_good'
+	`)
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', processor_state, (retry_at is null)::text,
+		  (result_code is null)::text, result_owner_id)
+		from public.attachment_processor_jobs where processor_job_id = 'apj_good'
+	`, "queued,true,true,")
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'succeeded', result_code = 'clean',
+		    result_digest = decode(repeat('27', 32), 'hex'), result_owner_id = 'worker1',
+		    result_lease_expires_at = now() + interval '5 minutes'
+		where processor_job_id = 'apj_good'
+	`)
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', processor_state, result_code, octet_length(result_digest)::text,
+		  result_owner_id, (result_lease_expires_at is not null)::text)
+		from public.attachment_processor_jobs where processor_job_id = 'apj_good'
+	`, "succeeded,clean,32,worker1,true")
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'rejected', result_code = 'unsafe_content',
+		    result_digest = decode(repeat('28', 32), 'hex'), result_owner_id = 'worker1',
+		    result_lease_expires_at = now() + interval '5 minutes'
+		where processor_job_id = 'apj_good'
+	`)
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', processor_state, result_code, octet_length(result_digest)::text,
+		  result_owner_id, (result_lease_expires_at is not null)::text)
+		from public.attachment_processor_jobs where processor_job_id = 'apj_good'
+	`, "rejected,unsafe_content,32,worker1,true")
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', processor_state, result_code, octet_length(result_digest)::text,
+		  result_owner_id, (result_lease_expires_at is not null)::text)
+		from public.attachment_processor_jobs where processor_job_id = 'apj_other'
+	`, "expired,processing_error,32,processor_seed,true")
+	execSQL(t, ctx, db, `
+		update public.attachment_processor_jobs
+		set processor_state = 'queued', result_code = null, result_digest = null,
+		    result_owner_id = '', result_lease_expires_at = null
+		where processor_job_id = 'apj_good'
+	`)
+
+	_, err = db.Exec(ctx, `
+		insert into public.content_processor_workspaces (
+			workspace_id, processor_job_id, attempt, workspace_state,
+			workspace_path_digest, expires_at
+		) values ('cpw_badstate', 'apj_good', 0, 'unknown',
+			decode(repeat('07', 32), 'hex'), now() + interval '1 hour')
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("content workspace unknown state error = %v, want SQLSTATE 23514", err)
+	}
+	execSQL(t, ctx, db, `
+		insert into public.content_processor_workspaces (
+			workspace_id, processor_job_id, attempt, workspace_state,
+			workspace_path_digest, expires_at
+		) values ('cpw_good', 'apj_good', 0, 'registered',
+			decode(repeat('07', 32), 'hex'), now() + interval '1 hour')
+	`)
+	execSQL(t, ctx, db, `
+		insert into public.content_processor_workspaces (
+			workspace_id, processor_job_id, attempt, workspace_state,
+			workspace_path_digest, expires_at, purged_at
+		) values ('cpw_other', 'apj_other', 0, 'purged',
+			decode(repeat('18', 32), 'hex'), now() + interval '1 hour', now())
+	`)
+
+	_, err = db.Exec(ctx, `
+		insert into public.blob_gc_pins (
+			pin_id, pin_owner_kind, pin_owner_id, blob_key,
+			blob_object_version, expires_at
+		) values (
+			'bgp_badkind', 'unknown', 'manifest1',
+			'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+			'local-v1', now() + interval '1 hour'
+		)
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("attachment pin unknown owner kind error = %v, want SQLSTATE 23514", err)
+	}
+	_, err = db.Exec(ctx, `
+		insert into public.blob_gc_pins (
+			pin_id, pin_owner_kind, pin_owner_id, blob_key,
+			blob_object_version, expires_at
+		) values (
+			'bgp_badversion', 'backup_manifest', 'manifest1',
+			'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+			'unknown-v1', now() + interval '1 hour'
+		)
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("attachment pin unknown object version error = %v, want SQLSTATE 23503", err)
+	}
+	execSQL(t, ctx, db, `
+		insert into public.blob_gc_pins (
+			pin_id, pin_owner_kind, pin_owner_id, blob_key,
+			blob_object_version, expires_at
+		) values (
+			'bgp_good', 'backup_manifest', 'manifest1',
+			'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+			'local-v1', now() + interval '1 hour'
+		)
+	`)
+
+	revisionTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin attachment revision fixture: %v", err)
+	}
+	defer func() { _ = revisionTx.Rollback(ctx) }()
+	if _, err := revisionTx.Exec(ctx, `
+		insert into public.record_revisions (
+			revision_id, record_id, revision_no, title, body_markdown,
+			markdown_dialect_version, record_type, impact_level,
+			visibility_scope, visibility_digest, author_id, canonical_hash
+		) values (
+			'rrv_atta', 'rec_atta', 1, 'A', '# A', 1, 'note', 'informational',
+			'{}'::jsonb, decode(repeat('03', 32), 'hex'), 'usr_att', decode(repeat('04', 32), 'hex')
+		)
+	`); err != nil {
+		t.Fatalf("insert attachment revision fixture: %v", err)
+	}
+	if _, err := revisionTx.Exec(ctx, `
+		insert into public.record_revision_subjects (
+			revision_id, ordinal, registry_version, subject_kind, relation_role,
+			source_id, is_primary, identity_snapshot, capture_authorization,
+			capture_authorization_digest
+		) values (
+			'rrv_atta', 0, 1, 'vps', 'affected', 'vps_att', true,
+			'{}'::jsonb, '{}'::jsonb, decode(repeat('05', 32), 'hex')
+		)
+	`); err != nil {
+		t.Fatalf("insert attachment revision primary subject: %v", err)
+	}
+	if err := revisionTx.Commit(ctx); err != nil {
+		t.Fatalf("commit attachment revision fixture: %v", err)
+	}
+
+	for _, attachment := range []struct {
+		id       string
+		recordID string
+	}{
+		{id: "att_recorda", recordID: "rec_atta"},
+		{id: "att_recordb", recordID: "rec_attb"},
+	} {
+		if _, err := db.Exec(ctx, `
+			insert into public.record_attachments (
+				attachment_id, record_id, attachment_state, display_name, media_type,
+				logical_size_bytes, blob_key, blob_object_version, created_by
+			) values (
+				$1, $2, 'available', 'record.txt', 'text/plain', 9,
+				'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+				'local-v1', 'usr_att'
+			)
+		`, attachment.id, attachment.recordID); err != nil {
+			t.Fatalf("insert record attachment %q: %v", attachment.id, err)
+		}
+	}
+	execSQL(t, ctx, db, `
+		insert into public.record_revision_attachments (
+			record_id, revision_id, ordinal, attachment_id
+		) values ('rec_atta', 'rrv_atta', 0, 'att_recorda')
+	`)
+	_, err = db.Exec(ctx, `
+		insert into public.record_revision_attachments (
+			record_id, revision_id, ordinal, attachment_id
+		) values ('rec_atta', 'rrv_atta', 0, 'att_recordb')
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		t.Fatalf("duplicate attachment revision ordinal error = %v, want SQLSTATE 23505", err)
+	}
+	_, err = db.Exec(ctx, `
+		insert into public.record_revision_attachments (
+			record_id, revision_id, ordinal, attachment_id
+		) values ('rec_atta', 'rrv_atta', 1, 'att_recorda')
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		t.Fatalf("duplicate revision attachment ID error = %v, want SQLSTATE 23505", err)
+	}
+
+	crossRecordTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin cross-record attachment reference: %v", err)
+	}
+	if _, err := crossRecordTx.Exec(ctx, `
+		insert into public.record_revision_attachments (
+			record_id, revision_id, ordinal, attachment_id
+		) values ('rec_atta', 'rrv_atta', 1, 'att_recordb')
+	`); err != nil {
+		_ = crossRecordTx.Rollback(ctx)
+		t.Fatalf("insert cross-record attachment before deferred check: %v", err)
+	}
+	err = crossRecordTx.Commit(ctx)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("cross-record attachment reference commit error = %v, want SQLSTATE 23503", err)
+	}
+
+	execSQL(t, ctx, db, `
+		insert into public.deletion_reservations (
+			reservation_id, object_kind, object_id, deletion_token_commitment,
+			request_fingerprint, state, expires_at, completed_at, recovery_replayed
+		) values (
+			'drs_att', 'record', 'rec_atta', decode(repeat('08', 32), 'hex'),
+			decode(repeat('09', 32), 'hex'), 'committed', now() + interval '1 hour',
+			now(), true
+		)
+	`)
+	execSQL(t, ctx, db, `
+		insert into public.record_purge_operations (
+			operation_id, reservation_id, operation_state, ledger_sequence,
+			ledger_entry_hash, completed_at, deployment_id, actor_id,
+			reason_code, deletion_contract_version, ledger_entry_type,
+			witness_proof_digest, release_epoch
+		) values (
+			'rpo_att', 'drs_att', 'not_committed', 1,
+			decode(repeat('0a', 32), 'hex'), now(),
+			'dp-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+			'usr_att', 'user_confirmed', 1, 'attempt_not_committed',
+			decode(repeat('0b', 32), 'hex'), 1
+		)
+	`)
+	for _, receipt := range []struct {
+		objectVersionDigest string
+		receiptDigest       string
+	}{
+		{objectVersionDigest: "0c", receiptDigest: "0d"},
+		{objectVersionDigest: "0e", receiptDigest: "0f"},
+	} {
+		if _, err := db.Exec(ctx, `
+			insert into public.attachment_purge_receipts (
+				operation_id, surface_kind, object_version_digest,
+				removed_surface_digest, receipt_digest, removed_row_count,
+				verified_absent_at
+			) values (
+				'rpo_att', 'blob_object', decode(repeat($1, 32), 'hex'),
+				decode(repeat('10', 32), 'hex'), decode(repeat($2, 32), 'hex'),
+				1, now()
+			)
+		`, receipt.objectVersionDigest, receipt.receiptDigest); err != nil {
+			t.Fatalf("insert attachment purge receipt for object version %q: %v", receipt.objectVersionDigest, err)
+		}
+	}
+	_, err = db.Exec(ctx, `
+		insert into public.attachment_purge_receipts (
+			operation_id, surface_kind, object_version_digest,
+			removed_surface_digest, receipt_digest, removed_row_count,
+			verified_absent_at
+		) values (
+			'rpo_att', 'blob_object', decode(repeat('0c', 32), 'hex'),
+			decode(repeat('11', 32), 'hex'), decode(repeat('12', 32), 'hex'),
+			1, now()
+		)
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		t.Fatalf("duplicate attachment purge surface/version error = %v, want SQLSTATE 23505", err)
+	}
+	execSQL(t, ctx, db, `
+		insert into public.content_workspace_purge_receipts (
+			workspace_id, removed_surface_digest, receipt_digest,
+			removed_row_count, verified_absent_at
+		) values (
+			'cpw_good', decode(repeat('13', 32), 'hex'),
+			decode(repeat('14', 32), 'hex'), 1, now()
+		)
+	`)
+	execSQL(t, ctx, db, `
+		insert into public.content_workspace_purge_receipts (
+			workspace_id, removed_surface_digest, receipt_digest,
+			removed_row_count, verified_absent_at
+		) values (
+			'cpw_other', decode(repeat('19', 32), 'hex'),
+			decode(repeat('1a', 32), 'hex'), 1, now()
+		)
+	`)
+
+	execSQL(t, ctx, db, `
+		update public.record_attachments
+		set record_id = 'rec_atta', draft_id = null, attachment_state = 'available',
+		    blob_key = 'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+		    blob_object_version = 'local-v1'
+		where attachment_id = 'att_upload'
+	`)
+	execSQL(t, ctx, db, `delete from public.record_drafts where draft_id = 'rdf_att'`)
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', record_id, origin_draft_id, (draft_id is null)::text)
+		from public.record_attachments
+		where attachment_id = 'att_upload'
+	`, "rec_atta,rdf_att,true")
+	for _, partial := range []struct {
+		name      string
+		statement string
+	}{
+		{
+			name: "key only",
+			statement: `update public.record_attachments
+				set preview_blob_key = 'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+				where attachment_id = 'att_upload'`,
+		},
+		{
+			name: "version only",
+			statement: `update public.record_attachments set preview_blob_object_version = 'local-v1'
+				where attachment_id = 'att_upload'`,
+		},
+		{
+			name: "media only",
+			statement: `update public.record_attachments set preview_media_type = 'text/plain; charset=utf-8'
+				where attachment_id = 'att_upload'`,
+		},
+		{
+			name: "size only",
+			statement: `update public.record_attachments set preview_size_bytes = 9
+				where attachment_id = 'att_upload'`,
+		},
+	} {
+		_, err := db.Exec(ctx, partial.statement)
+		if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+			t.Fatalf("partial preview tuple %s error = %v, want SQLSTATE 23514", partial.name, err)
+		}
+	}
+	_, err = db.Exec(ctx, `
+		update public.record_attachments
+		set preview_blob_key = 'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+		    preview_blob_object_version = 'local-v1', preview_media_type = 'image/jpeg',
+		    preview_size_bytes = 9
+		where attachment_id = 'att_upload'
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("preview disallowed media type error = %v, want SQLSTATE 23514", err)
+	}
+	_, err = db.Exec(ctx, `
+		update public.record_attachments
+		set preview_blob_key = 'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+		    preview_blob_object_version = 'local-v1',
+		    preview_media_type = 'text/plain; charset=utf-8', preview_size_bytes = 0
+		where attachment_id = 'att_upload'
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("preview non-positive size error = %v, want SQLSTATE 23514", err)
+	}
+	_, err = db.Exec(ctx, `
+		update public.record_attachments
+		set preview_blob_key = 'sha256/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+		    preview_blob_object_version = 'missing-v1',
+		    preview_media_type = 'text/plain; charset=utf-8', preview_size_bytes = 9
+		where attachment_id = 'att_upload'
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("preview missing Blob error = %v, want SQLSTATE 23503", err)
+	}
+	_, err = db.Exec(ctx, `
+		update public.record_attachments
+		set preview_blob_key = 'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+		    preview_blob_object_version = 'local-v1',
+		    preview_media_type = 'text/plain; charset=utf-8', preview_size_bytes = 8
+		where attachment_id = 'att_upload'
+	`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Errorf("preview Blob size mismatch error = %v, want SQLSTATE 23503", err)
+	}
+	execSQL(t, ctx, db, `
+		update public.record_attachments
+		set preview_blob_key = 'sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+		    preview_blob_object_version = 'preview-v1',
+		    preview_media_type = 'text/plain; charset=utf-8', preview_size_bytes = 7
+		where attachment_id = 'att_upload'
+	`)
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', attachment.blob_key, attachment.blob_object_version,
+		  original_blob.size_bytes::text, attachment.preview_blob_key,
+		  attachment.preview_blob_object_version, attachment.preview_media_type,
+		  attachment.preview_size_bytes::text)
+		from public.record_attachments attachment
+		join public.blob_objects original_blob
+		  on original_blob.blob_key = attachment.blob_key
+		 and original_blob.object_version = attachment.blob_object_version
+		where attachment.attachment_id = 'att_upload'
+	`, "sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,local-v1,9,sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,preview-v1,text/plain; charset=utf-8,7")
+	assertSingleIntValue(t, ctx, db, `
+		select
+		  (select count(*) from public.attachment_uploads where upload_id = 'aup_good') +
+		  (select count(*) from public.attachment_processor_jobs where processor_job_id = 'apj_good') +
+		  (select count(*) from public.content_processor_workspaces where workspace_id = 'cpw_good') +
+		  (select count(*) from public.content_workspace_purge_receipts where workspace_id = 'cpw_good')
+	`, 4)
+
+	execSQL(t, ctx, db, `delete from public.content_processor_workspaces where workspace_id = 'cpw_other'`)
+	execSQL(t, ctx, db, `delete from public.attachment_processor_jobs where processor_job_id = 'apj_other'`)
+	execSQL(t, ctx, db, `delete from public.attachment_upload_parts where upload_id = 'aup_other'`)
+	execSQL(t, ctx, db, `delete from public.attachment_uploads where upload_id = 'aup_other'`)
+	execSQL(t, ctx, db, `delete from public.record_attachments where attachment_id = 'att_other'`)
+	execSQL(t, ctx, db, `delete from public.record_drafts where draft_id = 'rdf_other'`)
+	assertSingleIntValue(t, ctx, db, `
+		select count(*)::int
+		from public.content_workspace_purge_receipts
+		where workspace_id = 'cpw_other'
+	`, 1)
+
+	execSQL(t, ctx, db, `
+		insert into public.record_attachments (
+			attachment_id, record_id, copied_from_attachment_id, attachment_state,
+			display_name, media_type, logical_size_bytes, blob_key,
+			blob_object_version, created_by
+		) values
+		(
+			'att_copysource', 'rec_atta', null, 'available', 'source.txt',
+			'text/plain', 9,
+			'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+			'local-v1', 'usr_att'
+		),
+		(
+			'att_copysurvivor', 'rec_attb', 'att_copysource', 'available', 'copy.txt',
+			'text/plain', 9,
+			'sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+			'local-v1', 'usr_att'
+		)
+	`)
+	execSQL(t, ctx, db, `delete from public.record_attachments where attachment_id = 'att_copysource'`)
+	assertSingleStringValue(t, ctx, db, `
+		select concat_ws(',', copied_from_attachment_id, blob_key, blob_object_version)
+		from public.record_attachments
+		where attachment_id = 'att_copysurvivor'
+	`, "att_copysource,sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,local-v1")
+
+	for _, mutation := range []struct {
+		name      string
+		statement string
+	}{
+		{name: "blob object", statement: `update public.blob_objects set size_bytes = 10 where blob_key like 'sha256/%'`},
+		{name: "attachment origin draft", statement: `update public.record_attachments set origin_draft_id = 'rdf_changed' where attachment_id = 'att_upload'`},
+		{name: "upload part", statement: `update public.attachment_upload_parts set size_bytes = 10 where upload_id = 'aup_good'`},
+		{name: "revision attachment", statement: `update public.record_revision_attachments set ordinal = 2 where revision_id = 'rrv_atta'`},
+		{name: "Blob pin", statement: `update public.blob_gc_pins set expires_at = expires_at + interval '1 hour' where pin_id = 'bgp_good'`},
+		{name: "attachment purge receipt", statement: `update public.attachment_purge_receipts set removed_row_count = 2 where operation_id = 'rpo_att'`},
+		{name: "workspace purge receipt", statement: `update public.content_workspace_purge_receipts set removed_row_count = 2 where workspace_id = 'cpw_good'`},
+	} {
+		_, err := db.Exec(ctx, mutation.statement)
+		if !errors.As(err, &pgErr) || pgErr.Code != "55000" {
+			t.Fatalf("immutable %s update error = %v, want SQLSTATE 55000", mutation.name, err)
+		}
+	}
+
+	_, err = db.Exec(ctx, `delete from public.blob_objects where blob_key like 'sha256/%'`)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("referenced blob delete error = %v, want SQLSTATE 23503", err)
 	}
 }
 

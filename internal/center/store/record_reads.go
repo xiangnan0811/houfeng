@@ -408,6 +408,10 @@ func loadStoredRecordRevision(
 	if err != nil {
 		return records.StoredRecordRevision{}, err
 	}
+	attachmentIDs, err := loadStoredRecordRevisionAttachmentIDs(ctx, tx, request.RevisionID)
+	if err != nil {
+		return records.StoredRecordRevision{}, err
+	}
 	values := records.CompleteRevisionValues{
 		Title:                  title,
 		BodyMarkdown:           bodyMarkdown,
@@ -420,6 +424,7 @@ func loadStoredRecordRevision(
 		Subjects:               subjects,
 		Tags:                   tags,
 		Participants:           participants,
+		AttachmentIDs:          attachmentIDs,
 		FollowUpAt:             followUpAt,
 		AuthorID:               authorID,
 		SaveReason:             saveReason,
@@ -466,6 +471,37 @@ func loadStoredRecordRevision(
 		return records.StoredRecordRevision{}, records.ErrInvalidRecordReadRequest
 	}
 	return result, nil
+}
+
+func loadStoredRecordRevisionAttachmentIDs(ctx context.Context, tx pgx.Tx, revisionID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		select ordinal, attachment_id
+		from public.record_revision_attachments
+		where revision_id = $1
+		order by ordinal asc`, revisionID)
+	if err != nil {
+		return nil, fmt.Errorf("load record revision attachments: %w", err)
+	}
+	if rows == nil {
+		return nil, records.ErrInvalidRecordReadRequest
+	}
+	defer rows.Close()
+	attachmentIDs := make([]string, 0)
+	for expected := int64(0); rows.Next(); expected++ {
+		var ordinal int64
+		var attachmentID string
+		if err := rows.Scan(&ordinal, &attachmentID); err != nil {
+			return nil, fmt.Errorf("scan record revision attachment: %w", err)
+		}
+		if ordinal != expected {
+			return nil, records.ErrInvalidRecordReadRequest
+		}
+		attachmentIDs = append(attachmentIDs, attachmentID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate record revision attachments: %w", err)
+	}
+	return attachmentIDs, nil
 }
 
 func loadStoredRecordRevisionTags(ctx context.Context, tx pgx.Tx, revisionID string) ([]string, error) {

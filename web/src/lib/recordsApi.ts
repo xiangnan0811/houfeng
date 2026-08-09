@@ -1,11 +1,19 @@
 import allowlistedApiError from './apiError'
 import {
+  ApiError,
   jsonBodyInit,
+  requestBlob as transportRequestBlob,
   requestEmpty as transportRequestEmpty,
+  requestExternalEmpty,
   requestJSON as transportRequestJSON,
   withQuery,
 } from './apiRequest'
 import type {
+  AttachmentContentVariant,
+  AttachmentMetadata,
+  AttachmentUploadCompletion,
+  AttachmentUploadSession,
+  CreateAttachmentUploadInput,
   CreateRecordDraftInput,
   PatchRecordDraftInput,
   PublishRecordInput,
@@ -39,6 +47,37 @@ function requestEmpty(path: string, init?: RequestInit): Promise<void> {
   return transportRequestEmpty(path, init, allowlistedApiError)
 }
 
+function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  return transportRequestBlob(path, init, allowlistedApiError)
+}
+
+function attachmentUploadHeaders(
+  requiredHeaders: readonly string[],
+  draftId: string,
+  sha256: string,
+  content: Blob,
+): Record<string, string> {
+  const headers: Record<string, string> = {}
+  for (const header of requiredHeaders) {
+    switch (header.toLowerCase()) {
+      case 'x-houfeng-draft-id':
+        headers[header] = draftId
+        break
+      case 'x-content-sha256':
+        headers[header] = sha256
+        break
+      case 'content-type':
+        headers[header] = content.type || 'application/octet-stream'
+        break
+      default:
+        throw new ApiError(503, 'unsupported attachment upload instruction', {
+          code: 'attachment_service_unavailable',
+        })
+    }
+  }
+  return headers
+}
+
 function postIdempotentJSON<T>(path: string, body: unknown, idempotencyKey: string): Promise<T> {
   return requestJSON<T>(path, jsonBodyInit('POST', body, {
     'Idempotency-Key': idempotencyKey,
@@ -70,6 +109,76 @@ export function listRecords(filter?: RecordListFilter): Promise<RecordListRespon
         cursor: filter.cursor,
       }
     : undefined))
+}
+
+export function createAttachmentUpload(
+  input: CreateAttachmentUploadInput,
+  signal?: AbortSignal,
+): Promise<AttachmentUploadSession> {
+  const init = jsonBodyInit('POST', input)
+  if (signal) init.signal = signal
+  return requestJSON<AttachmentUploadSession>(
+    '/api/attachment-uploads',
+    init,
+  )
+}
+
+export async function uploadAttachmentContent(
+  session: AttachmentUploadSession,
+  draftId: string,
+  sha256: string,
+  content: Blob,
+  signal?: AbortSignal,
+): Promise<void> {
+  const headers = attachmentUploadHeaders(session.target.required_headers, draftId, sha256, content)
+  if (session.target.transport === 'local') headers.Accept = 'application/json'
+  const init: RequestInit = {
+    method: session.target.method,
+    headers,
+    body: content,
+  }
+  if (signal) init.signal = signal
+
+  if (session.target.transport === 's3') {
+    await requestExternalEmpty(session.target.upload_url, init)
+    return
+  }
+  await requestJSON<unknown>(session.target.upload_url, init)
+}
+
+export function completeAttachmentUpload(
+  uploadId: string,
+  draftId: string,
+  signal?: AbortSignal,
+): Promise<AttachmentUploadCompletion> {
+  const init = jsonBodyInit('POST', { draft_id: draftId })
+  if (signal) init.signal = signal
+  return requestJSON<AttachmentUploadCompletion>(
+    `/api/attachment-uploads/${encoded(uploadId)}/complete`,
+    init,
+  )
+}
+
+export function getAttachmentMetadata(
+  attachmentId: string,
+  signal?: AbortSignal,
+): Promise<AttachmentMetadata> {
+  const init: RequestInit = {}
+  if (signal) init.signal = signal
+  return requestJSON<AttachmentMetadata>(`/api/attachments/${encoded(attachmentId)}`, init)
+}
+
+export function getAttachmentContent(
+  attachmentId: string,
+  variant: AttachmentContentVariant = 'original',
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const init: RequestInit = { headers: { Accept: 'application/octet-stream' } }
+  if (signal) init.signal = signal
+  return requestBlob(withQuery(
+    `/api/attachments/${encoded(attachmentId)}/content`,
+    variant === 'original' ? undefined : { variant },
+  ), init)
 }
 
 export function getRecord(recordId: string): Promise<RecordDetail> {

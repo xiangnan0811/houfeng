@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/recordauth"
 )
 
@@ -69,6 +70,10 @@ func NormalizeCompleteRevisionInput(values CompleteRevisionValues) (CompleteRevi
 	if err != nil {
 		return CompleteRevisionInput{}, err
 	}
+	attachmentIDs, err := normalizeRevisionAttachmentIDs(values.AttachmentIDs)
+	if err != nil {
+		return CompleteRevisionInput{}, err
+	}
 	followUpAt := normalizedUTCTime(values.FollowUpAt)
 	template, err := normalizeTemplateProvenance(values.Template)
 	if err != nil {
@@ -100,6 +105,7 @@ func NormalizeCompleteRevisionInput(values CompleteRevisionValues) (CompleteRevi
 		tags:                   tags,
 		ownerID:                values.OwnerID,
 		participants:           participants,
+		attachmentIDs:          attachmentIDs,
 		followUpAt:             followUpAt,
 		template:               template,
 		authorID:               values.AuthorID,
@@ -107,6 +113,22 @@ func NormalizeCompleteRevisionInput(values CompleteRevisionValues) (CompleteRevi
 	}
 	input.canonicalHash = canonicalRevisionHash(input)
 	return input, nil
+}
+
+func normalizeRevisionAttachmentIDs(values []string) ([]string, error) {
+	references := make([]attachments.AttachmentReference, len(values))
+	for index, attachmentID := range values {
+		references[index] = attachments.AttachmentReference{AttachmentID: attachmentID}
+	}
+	normalized, err := attachments.NormalizeAttachmentReferences(references)
+	if err != nil {
+		return nil, invalidRevisionInput("attachment ids")
+	}
+	attachmentIDs := make([]string, len(normalized))
+	for index, reference := range normalized {
+		attachmentIDs[index] = reference.AttachmentID
+	}
+	return attachmentIDs, nil
 }
 
 func normalizeRevisionSubjects(values []RevisionSubject) ([]RevisionSubject, error) {
@@ -309,6 +331,10 @@ func canonicalRevisionHash(input CompleteRevisionInput) [sha256.Size]byte {
 	for _, participant := range input.participants {
 		encoder.string(participant.ParticipantID)
 		encoder.stringMap(participant.IdentitySnapshot)
+	}
+	encoder.length(len(input.attachmentIDs))
+	for _, attachmentID := range input.attachmentIDs {
+		encoder.string(attachmentID)
 	}
 	encoder.optionalTime(input.followUpAt)
 	if input.template == nil {

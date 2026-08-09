@@ -85,8 +85,9 @@ type RecordLifecycleResult struct {
 // revision participants after revision authority and the current projection
 // have been written.
 type RevisionCommitted struct {
-	Result RevisionCommitResult
-	Input  CompleteRevisionInput
+	DraftID string
+	Result  RevisionCommitResult
+	Input   CompleteRevisionInput
 }
 
 func (command RevisionCommitCommand) Validate() error {

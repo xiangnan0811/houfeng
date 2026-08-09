@@ -51,6 +51,125 @@ func TestDockerEntrypointAcceptsSecretFileInputs(t *testing.T) {
 	}
 }
 
+func TestDockerEntrypointDoesNotRequireCenterSecretsForProcessor(t *testing.T) {
+	result := runDockerEntrypoint(t, map[string]string{
+		"HOUFENG_DATABASE_USER":     "houfeng",
+		"HOUFENG_DATABASE_NAME":     "houfeng",
+		"HOUFENG_DATABASE_PASSWORD": "processor-database-password",
+		"HOUFENG_INITIAL_PASSWORD":  "",
+		"HOUFENG_SESSION_HMAC_KEY":  "",
+	}, "", 0)
+	if result.err != nil {
+		t.Fatalf("processor entrypoint failed on center-only secrets: %v\n%s", result.err, result.output)
+	}
+	if !result.childRan {
+		t.Fatal("processor entrypoint did not execute its child")
+	}
+}
+
+func TestAttachmentRuntimeDeploymentIsPersistentAndIsolated(t *testing.T) {
+	root := repoRoot(t)
+	dockerfile := readText(t, filepath.Join(root, "Dockerfile"))
+	compose := readText(t, filepath.Join(root, "compose.yaml"))
+	envExample := readText(t, filepath.Join(root, "docs", "deploy", "compose.env.example"))
+	guide := readText(t, filepath.Join(root, "docs", "deploy", "local-and-systemd.md"))
+	processorUnit := readText(t, filepath.Join(root, "docs", "deploy", "systemd", "houfeng-content-processor.service"))
+
+	for _, required := range []string{
+		"-o /out/houfeng-content-processor ./cmd/houfeng-content-processor",
+		"poppler-utils",
+		"/out/houfeng-content-processor /usr/local/bin/houfeng-content-processor",
+	} {
+		if !strings.Contains(dockerfile, required) {
+			t.Fatalf("Dockerfile must contain attachment processor runtime contract %q", required)
+		}
+	}
+
+	center := composeServiceBlock(t, compose, "houfeng")
+	processor := composeServiceBlock(t, compose, "houfeng-content-processor")
+	clamav := composeServiceBlock(t, compose, "clamav")
+	for _, block := range []string{center, processor} {
+		for _, required := range []string{
+			"houfeng_blobs:/var/lib/houfeng/attachments",
+			"HOUFENG_ATTACHMENT_BLOB_BACKEND",
+			"HOUFENG_ATTACHMENT_BLOB_ROOT",
+		} {
+			if !strings.Contains(block, required) {
+				t.Fatalf("center/processor must share persistent attachment config %q:\n%s", required, block)
+			}
+		}
+	}
+	for _, required := range []string{
+		`command: ["/usr/local/bin/houfeng-content-processor"]`,
+		`user: "houfeng:houfeng"`,
+		"read_only: true",
+		"cap_drop:",
+		"- ALL",
+		"no-new-privileges:true",
+		"tmpfs:",
+		"HOUFENG_CONTENT_PROCESSOR_WORKSPACE_ROOT",
+		"HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_ITEMS",
+		"HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_RUNTIME",
+		"HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS",
+		"HOUFENG_CONTENT_PROCESSOR_JOB_TTL",
+		"core:",
+		"soft: 0",
+		"hard: 0",
+	} {
+		if !strings.Contains(processor, required) {
+			t.Fatalf("processor Compose service must contain isolation/bound %q:\n%s", required, processor)
+		}
+	}
+	for _, required := range []string{"image: clamav/clamav:", "healthcheck:", "clamdcheck.sh"} {
+		if !strings.Contains(clamav, required) {
+			t.Fatalf("ClamAV Compose service must contain pinned readiness contract %q:\n%s", required, clamav)
+		}
+	}
+	if strings.Contains(clamav, "clamav/clamav:latest") {
+		t.Fatal("ClamAV image must use a pinned version, not latest")
+	}
+	if !strings.Contains(compose, "\n  houfeng_blobs:\n") {
+		t.Fatal("compose.yaml must declare the persistent houfeng_blobs volume")
+	}
+
+	for _, required := range []string{
+		"HOUFENG_ATTACHMENT_BLOB_BACKEND=local",
+		"HOUFENG_ATTACHMENT_BLOB_ROOT=/var/lib/houfeng/attachments",
+		"HOUFENG_CLAMAV_NETWORK=tcp",
+		"HOUFENG_CLAMAV_ADDRESS=clamav:3310",
+		"HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS=3",
+	} {
+		if !strings.Contains(envExample, required) {
+			t.Fatalf("compose.env.example must contain explicit attachment setting %q", required)
+		}
+	}
+	for _, forbidden := range []string{"HOUFENG_ATTACHMENT_S3_ACCESS_KEY=", "HOUFENG_ATTACHMENT_S3_SECRET_KEY="} {
+		if strings.Contains(envExample, forbidden) {
+			t.Fatalf("tracked env example must not contain S3 credential value carrier %q", forbidden)
+		}
+	}
+	if !strings.Contains(guide, "development/conformance topology") || !strings.Contains(guide, "independent production recovery domain") {
+		t.Fatal("deployment guide must bound Compose attachment storage to development/conformance and avoid production recovery claims")
+	}
+
+	for _, required := range []string{
+		"User=houfeng",
+		"Group=houfeng",
+		"ExecStart=/usr/local/bin/houfeng-content-processor",
+		"NoNewPrivileges=true",
+		"PrivateTmp=true",
+		"ProtectSystem=strict",
+		"LimitCORE=0",
+		"RuntimeDirectory=houfeng-content-processor",
+		"RuntimeDirectoryMode=0700",
+		"ReadWritePaths=/var/lib/houfeng/attachments /run/houfeng-content-processor",
+	} {
+		if !strings.Contains(processorUnit, required) {
+			t.Fatalf("processor systemd unit must contain %q", required)
+		}
+	}
+}
+
 func TestDockerEntrypointExecutesActualScriptWithValidatedDatabaseInputs(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -468,6 +587,25 @@ func readText(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(body)
+}
+
+func composeServiceBlock(t *testing.T, body, service string) string {
+	t.Helper()
+	marker := "\n  " + service + ":\n"
+	start := strings.Index("\n"+body, marker)
+	if start < 0 {
+		t.Fatalf("compose.yaml must define service %q", service)
+	}
+	remaining := ("\n" + body)[start+len(marker):]
+	lines := strings.Split(remaining, "\n")
+	end := len(lines)
+	for index, line := range lines {
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") {
+			end = index
+			break
+		}
+	}
+	return marker + strings.Join(lines[:end], "\n")
 }
 
 func dotenvValue(t *testing.T, body, key string) string {

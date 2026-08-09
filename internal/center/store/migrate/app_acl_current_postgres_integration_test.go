@@ -116,6 +116,7 @@ func assertRecordsCoreAppACLCurrentRolePrivileges(
 	if err := revisionTx.Commit(ctx); err != nil {
 		t.Fatalf("runtime commit records-core revision transaction: %v", err)
 	}
+	assertRecordAttachmentsAppACLCurrentRolePrivileges(t, ctx, fixture, runtimeDB)
 
 	_, err = runtimeDB.Exec(ctx, `update public.record_revisions set title = 'mutated' where revision_id = 'rrv_acl'`)
 	var pgErr *pgconn.PgError
@@ -152,6 +153,96 @@ func assertRecordsCoreAppACLCurrentRolePrivileges(
 	_, err = adminDB.Exec(ctx, `select record_id from public.records limit 1`)
 	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
 		t.Fatalf("platform admin read records-core content table error = %v, want SQLSTATE 42501", err)
+	}
+}
+
+func assertRecordAttachmentsAppACLCurrentRolePrivileges(
+	t *testing.T,
+	ctx context.Context,
+	fixture *appACLConvergencePostgresFixture,
+	runtimeDB *pgxpool.Pool,
+) {
+	t.Helper()
+
+	if _, err := runtimeDB.Exec(ctx, `
+		insert into public.blob_objects (
+			blob_key, sha256_digest, object_version, size_bytes, backend_kind
+		) values (
+			'sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+			decode(repeat('aa', 32), 'hex'), 'local-v1', 7, 'local'
+		)
+	`); err != nil {
+		t.Fatalf("runtime insert attachment blob: %v", err)
+	}
+	if _, err := runtimeDB.Exec(ctx, `insert into public.attachment_quota_accounts (project_id) values ('default')`); err != nil {
+		t.Fatalf("runtime insert attachment quota account: %v", err)
+	}
+	if _, err := runtimeDB.Exec(ctx, `
+		update public.attachment_quota_accounts
+		set logical_bytes = 7, physical_bytes = 7, quota_version = quota_version + 1
+		where project_id = 'default'
+	`); err != nil {
+		t.Fatalf("runtime update attachment quota account: %v", err)
+	}
+	if _, err := runtimeDB.Exec(ctx, `
+		insert into public.record_attachments (
+			attachment_id, record_id, attachment_state, display_name, media_type,
+			logical_size_bytes, blob_key, blob_object_version, created_by
+		) values (
+			'att_acl', 'rec_acl', 'available', 'acl.txt', 'text/plain', 7,
+			'sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+			'local-v1', 'usr_acl'
+		)
+	`); err != nil {
+		t.Fatalf("runtime insert logical attachment: %v", err)
+	}
+	if _, err := runtimeDB.Exec(ctx, `
+		insert into public.record_revision_attachments (
+			record_id, revision_id, ordinal, attachment_id
+		) values ('rec_acl', 'rrv_acl', 0, 'att_acl')
+	`); err != nil {
+		t.Fatalf("runtime insert immutable revision attachment: %v", err)
+	}
+
+	for _, mutation := range []struct {
+		name      string
+		statement string
+	}{
+		{name: "blob", statement: `update public.blob_objects set size_bytes = 8 where blob_key like 'sha256/%'`},
+		{name: "revision reference", statement: `update public.record_revision_attachments set ordinal = 1 where revision_id = 'rrv_acl'`},
+	} {
+		_, err := runtimeDB.Exec(ctx, mutation.statement)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Fatalf("runtime update immutable attachment %s error = %v, want SQLSTATE 42501", mutation.name, err)
+		}
+	}
+
+	for _, statement := range []string{
+		`delete from public.record_revision_attachments where revision_id = 'rrv_acl'`,
+		`delete from public.record_attachments where attachment_id = 'att_acl'`,
+		`delete from public.blob_objects where blob_key like 'sha256/%'`,
+		`delete from public.attachment_quota_accounts where project_id = 'default'`,
+	} {
+		if _, err := runtimeDB.Exec(ctx, statement); err != nil {
+			t.Fatalf("runtime clean attachment ACL fixture with %q: %v", statement, err)
+		}
+	}
+
+	adminDB := fixture.openDirectRolePool(t, ctx, fixture.admin)
+	for _, table := range []string{"blob_gc_deletions", "blob_publication_intents", "attachment_purge_receipts", "content_workspace_purge_receipts"} {
+		var count int
+		if err := adminDB.QueryRow(ctx, `select count(*)::int from public.`+table).Scan(&count); err != nil {
+			t.Fatalf("platform admin read content-free %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("fresh %s count = %d, want 0", table, count)
+		}
+	}
+	_, err := adminDB.Exec(ctx, `select blob_key from public.blob_objects limit 1`)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+		t.Fatalf("platform admin read attachment content table error = %v, want SQLSTATE 42501", err)
 	}
 }
 
