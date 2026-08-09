@@ -479,7 +479,14 @@
 - [x] Run Docker static tests, Compose validation and required image builds.
 - [x] Run Trellis spec/quality/cross-layer review and reconcile every PRD acceptance criterion to evidence.
 - [x] Review the complete diff for scope, generated artifacts, secrets/content logs and primary-checkout isolation.
-- [ ] Commit Checkpoint 3, push the feature branch, open one PR, monitor required CI, fix failures on the same branch and proceed through merge/post-merge/release only with fresh evidence and repository policy.
+- [x] Commit Checkpoint 3, push the feature branch, open one PR, monitor required CI, fix failures on the same branch and proceed through merge/post-merge/release only with fresh evidence and repository policy.
+
+#### Final delivery evidence (2026-08-09)
+
+- Checkpoint 3 committed as `1887821c`; the three task commits were pushed on `codex/vps-records-attachments-storage`. PR #400 passed all seven required checks and merged at the exact reviewed head as `78bf44c1`.
+- Protected-main CI run `31317881804` passed all seven Go, Web, browser, Docker and PostgreSQL 16.0/16.6/16.12 jobs. Release Please updated PR #399 for `v0.63.0`; that PR passed the same seven checks and merged as `541bd7aa`.
+- Release `v0.63.0` targets `541bd7aa` and contains signed/checksummed linux/amd64 and linux/arm64 agent assets. Publish run `31318104764` passed asset publication plus amd64/arm64 image builds and manifest inspection; `v0.63.0`, `0.63.0` and `latest` resolve to multi-architecture digest `sha256:8b4a6980573eb8d819327a2575ed09d35669ceac29d8bfef4853ba613be0085b`.
+- The release merge's protected-main CI run `31318098864` also passed all seven jobs. The dedicated task worktree remains clean apart from this Trellis closeout record and was not switched, reset or cleaned.
 
 ## Rollback
 

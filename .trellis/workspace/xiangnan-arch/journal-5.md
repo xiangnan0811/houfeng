@@ -433,3 +433,38 @@ Completed the bounded content-processor worker, restart reconciliation and comma
 ### Next Steps
 
 - Stop before Task 2.5. Review the completed 2.4 boundary and current dirty worktree before starting authorized preview/download and GC work.
+
+
+## Session 245: Complete VPS Records attachment storage delivery
+
+**Date**: 2026-08-09
+**Task**: Complete VPS Records attachment storage delivery
+**Branch**: `codex/vps-records-attachments-storage`
+
+### Summary
+
+Delivered migration 0053, local and S3 Blob storage, attachment admission and scanning, quota, revision integration, authorized delivery, deletion and recovery adapters, Web primitives, and hardened deployment. PR #400 and release PR #399 merged with all required checks green; v0.63.0 assets and the amd64/arm64 image manifest were published and verified.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2b1ecfa3` | (see git log) |
+| `b510b319` | (see git log) |
+| `1887821c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
