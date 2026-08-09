@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.63.1](https://github.com/xiangnan0811/houfeng/compare/v0.63.0...v0.63.1) (2026-08-09)
+
+
+### Documentation
+
+* **trellis:** close VPS attachment storage child ([#401](https://github.com/xiangnan0811/houfeng/issues/401)) ([c945b0c](https://github.com/xiangnan0811/houfeng/commit/c945b0c0a4a9879344257a14f3d545c7d6e98448))
+
 ## [0.63.0](https://github.com/xiangnan0811/houfeng/compare/v0.62.0...v0.63.0) (2026-08-09)
 
 
