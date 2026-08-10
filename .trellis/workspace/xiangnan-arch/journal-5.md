@@ -468,3 +468,37 @@ Delivered migration 0053, local and S3 Blob storage, attachment admission and sc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 246: Upgrade Trellis to 0.6.14 native auto
+
+**Date**: 2026-08-10
+**Task**: Upgrade Trellis to 0.6.14 native auto
+**Branch**: `codex/trellis-0.6.14-upgrade`
+
+### Summary
+
+Upgraded global and project Trellis to 0.6.14, retained the native workflow, enabled Codex auto subagent dispatch, preserved worktree-safe hooks, and kept channel optional.
+
+### Main Changes
+
+- Updated managed Trellis scripts, workflow, skills, version metadata, and journal merge attributes to 0.6.14.
+- Configured codex.dispatch_mode auto and preserved UserPromptSubmit/SubagentStart worktree-safe local hooks.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `14f45348` | (see git log) |
+
+### Testing
+
+- [OK] make verify-go; go test ./... -count=1; Python compileall; Trellis task/update/hook simulations; git diff --check.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Resume VPS detail refactoring from Child 4 only after an explicit user decision.
