@@ -15,7 +15,7 @@
 - 建立版本化 evidence kind registry；每个 kind 必须实现 validate/preview/capture/redact/summarize/compare/export/renderer contract 和 conformance suite。
 - 最小 envelope 固化 subject/source identity snapshot、requested/actual/observed/captured/referenced 四类时间、source revision/watermark、producer/calculation version、单位/质量/敏感等级、canonical hash和体积。
 - preview/capture intent 有15分钟有效期；正式保存重读源事实并逐字段校验，覆盖/桶数/质量/schema/敏感结果/体积漂移返回 409。
-- 首批 kind：IP质量、监控时序、监控事件、订阅/预算、资产历史、命令审计metadata；未来 route/performance 必须只通过registry接入。
+- 首批 kind 必须严格对齐父设计 §12.2：`ip_quality.report/v1`、`monitoring.host/v1`、`monitoring.probe/v2`、`monitoring.event/v2`、`subscription.cost/v1`、`command.audit/v1`；资产历史（续费/价格/IP/规格）作为权威 source/activity adapter 覆盖，不在本任务擅自新增 `asset.history/*` registry kind。未来 route/performance 必须只通过 registry 接入。
 - 监控证据使用绝对窗口与实际覆盖，保存样本数/缺口/维护/补传/最值/分位/有界峰值，不直接复制会补零且缺覆盖的 sparkline/runtime响应。
 - IP stale policy、成本汇率/日期/基准货币、事件修正/回填、命令 output 24h语义均在快照中显式固化；stdout/stderr 永久禁止。
 - 普通/敏感拓扑/永久禁止三级分类由服务端 schema决定；客户端改名不能绕过。
@@ -43,4 +43,4 @@
 
 ## Execution Gate
 
-- 保持 planning；依赖与用户执行授权完成后才start。
+- 保持 planning；依赖、规划材料和用户执行授权完成后才 start。当前 Trellis 使用 native/auto 子智能体 workflow；production evidence capture/save 在 Child 10 提供 AdmissionGate 前必须 fail closed。
