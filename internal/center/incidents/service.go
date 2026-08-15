@@ -573,14 +573,21 @@ func (s *Service) applyAdministrativeRecovery(ctx context.Context, objectType Ob
 	events := make([]StateChangeEventRecord, 0, len(previous))
 	for _, incident := range previous {
 		events = append(events, StateChangeEventRecord{
-			IncidentID:    incident.IncidentID,
-			IncidentClass: incident.IncidentClass,
-			ObjectType:    objectType,
-			ObjectID:      objectID,
-			EventType:     EventIncidentRecovered,
-			Severity:      incident.Severity,
-			Summary:       summary,
-			CreatedAt:     now,
+			IncidentID:          incident.IncidentID,
+			IncidentClass:       incident.IncidentClass,
+			ObjectType:          objectType,
+			ObjectID:            objectID,
+			EventType:           EventIncidentRecovered,
+			Severity:            incident.Severity,
+			Summary:             summary,
+			CreatedAt:           canonicalMonitoringEventTime(now),
+			IsBackfilled:        false,
+			Provenance:          MonitoringEventProvenanceCenter,
+			ProducerVersion:     MonitoringEventProducerVersion,
+			RuleVersion:         MonitoringEventIncidentRuleVersion,
+			PriorState:          monitoringEventIncidentState(incident.Severity),
+			ResultingState:      "normal",
+			CorrectionOfEventID: "",
 		})
 	}
 	return s.writer.ApplyIncidentMutation(ctx, IncidentMutation{
@@ -1014,6 +1021,7 @@ func evaluateTargetProbeFailureAcrossSeries(previous *IncidentRecord, targetID s
 	activeResults := make([]EvaluationResult, 0)
 	recoveryEligibleCount := 0
 	recoverySuppressed := false
+	recoveryBackfilled := false
 	latestObservedAt := time.Time{}
 	tcpMonitoringInstances := map[string]struct{}{}
 	httpProbeItems := map[string]struct{}{}
@@ -1034,6 +1042,7 @@ func evaluateTargetProbeFailureAcrossSeries(previous *IncidentRecord, targetID s
 		}
 		if consecutiveResults(series, agentapi.ProbeResultSuccess) >= 2 {
 			recoveryEligibleCount++
+			recoveryBackfilled = recoveryBackfilled || series[0].IsBackfilled
 			if observationSeriesSuppressed(series) {
 				recoverySuppressed = true
 			}
@@ -1042,7 +1051,7 @@ func evaluateTargetProbeFailureAcrossSeries(previous *IncidentRecord, targetID s
 
 	if len(activeResults) == 0 {
 		if previous != nil && recoveryEligibleCount == len(grouped) && len(grouped) > 0 {
-			result := recoverIfNeeded(previous, latestObservedAt, "探针已连续成功恢复")
+			result := recoverIfNeeded(previous, latestObservedAt, "探针已连续成功恢复", MonitoringEventProvenanceAgentSync, recoveryBackfilled)
 			if recoverySuppressed {
 				return suppressNotification(result)
 			}
@@ -1067,7 +1076,7 @@ func evaluateTargetProbeFailureAcrossSeries(previous *IncidentRecord, targetID s
 		severity = SeverityCritical
 		summary = "HTTP 多个 ProbeItem 同时异常"
 	}
-	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetProbeFailure, severity, latestObservedAt, summary)
+	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetProbeFailure, severity, latestObservedAt, summary, MonitoringEventProvenanceAgentSync)
 }
 
 func evaluateTargetTLSExpiryAcrossSeries(previous *IncidentRecord, targetID string, observations []runtimefacts.ProbeObservation) EvaluationResult {
@@ -1084,6 +1093,7 @@ func evaluateTargetTLSExpiryAcrossSeries(previous *IncidentRecord, targetID stri
 	activeResults := make([]EvaluationResult, 0)
 	recoveryEligibleCount := 0
 	recoverySuppressed := false
+	recoveryBackfilled := false
 	latestObservedAt := time.Time{}
 
 	for _, series := range grouped {
@@ -1096,6 +1106,7 @@ func evaluateTargetTLSExpiryAcrossSeries(previous *IncidentRecord, targetID stri
 		}
 		if len(series) > 0 && series[0].TLSExpiryDays != nil && *series[0].TLSExpiryDays > 30 {
 			recoveryEligibleCount++
+			recoveryBackfilled = recoveryBackfilled || series[0].IsBackfilled
 			if observationSeriesSuppressed(series) {
 				recoverySuppressed = true
 			}
@@ -1104,7 +1115,7 @@ func evaluateTargetTLSExpiryAcrossSeries(previous *IncidentRecord, targetID stri
 
 	if len(activeResults) == 0 {
 		if previous != nil && recoveryEligibleCount == len(grouped) && len(grouped) > 0 {
-			result := recoverIfNeeded(previous, latestObservedAt, "TLS 到期风险解除")
+			result := recoverIfNeeded(previous, latestObservedAt, "TLS 到期风险解除", MonitoringEventProvenanceAgentSync, recoveryBackfilled)
 			if recoverySuppressed {
 				return suppressNotification(result)
 			}
@@ -1121,7 +1132,7 @@ func evaluateTargetTLSExpiryAcrossSeries(previous *IncidentRecord, targetID stri
 			summary = result.Current.SourceSummary
 		}
 	}
-	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetTLSExpiry, severity, latestObservedAt, summary)
+	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetTLSExpiry, severity, latestObservedAt, summary, MonitoringEventProvenanceAgentSync)
 }
 
 func groupProbeSeries(observations []runtimefacts.ProbeObservation) [][]runtimefacts.ProbeObservation {

@@ -212,7 +212,7 @@ func qualifiedMonitoringInstanceSelectColumns(alias string) string {
 	return strings.Join(parts, ",\n\t\t")
 }
 
-func scanMonitoringInstanceWithPreviousMonitoringStatus(row monitoringInstanceScanner) (monitoringinstances.Record, string, error) {
+func scanMonitoringInstanceWithPreviousState(row monitoringInstanceScanner) (monitoringinstances.Record, string, error) {
 	var (
 		record                 monitoringinstances.Record
 		priorState             string
@@ -468,24 +468,36 @@ func (r *PostgresMonitoringInstanceRepository) RetireMonitoringInstance(ctx cont
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
-		update monitoring_instances
-		set lifecycle_status = '已退役',
-			monitoring_status = '暂停',
-			enrollment_token_hash = null,
-			enrollment_token_issued_at = null,
-			enrollment_token_consumed_at = null,
-			sync_token_hash = '',
-			pending_binding_fingerprint = null,
-			pending_binding_first_seen_at = null,
-			pending_binding_last_seen_at = null,
-			pending_binding_attempt_count = 0,
-			pending_action_id = null,
-			pending_action_command_id = null,
-			updated_at = now()
-		where monitoring_instance_id = $1
-			and archived_at is null
-		returning `+monitoringInstanceSelectColumns,
+	record, previousLifecycleStatus, err := scanMonitoringInstanceWithPreviousState(tx.QueryRow(ctx, `
+		with prior as (
+			select lifecycle_status
+			from monitoring_instances
+			where monitoring_instance_id = $1
+			for update
+		),
+		updated as (
+			update monitoring_instances
+			set lifecycle_status = '已退役',
+				monitoring_status = '暂停',
+				enrollment_token_hash = null,
+				enrollment_token_issued_at = null,
+				enrollment_token_consumed_at = null,
+				sync_token_hash = '',
+				pending_binding_fingerprint = null,
+				pending_binding_first_seen_at = null,
+				pending_binding_last_seen_at = null,
+				pending_binding_attempt_count = 0,
+				pending_action_id = null,
+				pending_action_command_id = null,
+				updated_at = now()
+			where monitoring_instance_id = $1
+				and archived_at is null
+				and lifecycle_status = (select lifecycle_status from prior)
+			returning *
+		)
+		select `+qualifiedMonitoringInstanceSelectColumns("updated")+`, prior.lifecycle_status
+		from updated
+		join prior on true`,
 		monitoringInstanceID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -494,7 +506,7 @@ func (r *PostgresMonitoringInstanceRepository) RetireMonitoringInstance(ctx cont
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("retire monitoring instance %q: %w", monitoringInstanceID, err)
 	}
-	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, record, incidents.EventMonitoringInstanceRetired, "监控实例已退役并暂停监控", reason); err != nil {
+	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, record, incidents.EventMonitoringInstanceRetired, "监控实例已退役并暂停监控", reason, previousLifecycleStatus, record.LifecycleStatus, monitoringEventProvenanceWeb); err != nil {
 		return monitoringinstances.Record{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -532,7 +544,7 @@ func (r *PostgresMonitoringInstanceRepository) RestoreMonitoringInstanceLifecycl
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("restore monitoring instance lifecycle %q: %w", monitoringInstanceID, err)
 	}
-	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, record, incidents.EventMonitoringInstanceRestoredToObserving, "监控实例已恢复到观察中并保持暂停", reason); err != nil {
+	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, record, incidents.EventMonitoringInstanceRestoredToObserving, "监控实例已恢复到观察中并保持暂停", reason, monitoringinstances.LifecycleRetired, record.LifecycleStatus, monitoringEventProvenanceWeb); err != nil {
 		return monitoringinstances.Record{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -606,7 +618,7 @@ func (r *PostgresMonitoringInstanceRepository) ArchiveMonitoringInstance(ctx con
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("archive monitoring instance %q: %w", monitoringInstanceID, err)
 	}
-	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, record, incidents.EventMonitoringInstanceLifecycleUpdated, "监控实例已归档", reason); err != nil {
+	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, record, incidents.EventMonitoringInstanceLifecycleUpdated, "监控实例已归档", reason, "unarchived", "archived", monitoringEventProvenanceWeb); err != nil {
 		return monitoringinstances.Record{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -1206,17 +1218,31 @@ func insertMonitoringInstanceBindingEvent(
 	record monitoringinstances.Record,
 	eventType incidents.EventType,
 	summary string,
+	priorState string,
+	provenance monitoringEventProvenance,
 ) error {
 	eventID, err := ids.New("evt")
 	if err != nil {
 		return fmt.Errorf("generate binding event id: %w", err)
 	}
 
-	payload, err := json.Marshal(map[string]string{
-		"binding_status": record.BindingStatus,
+	eventAt := canonicalTask4MonitoringEventTimestamp(record.UpdatedAt)
+	payload, err := marshalTask4MonitoringEventPayload(task4MonitoringEventPayload{
+		ObjectType:          incidents.ObjectTypeMonitoringInstance,
+		EventType:           eventType,
+		EventAt:             eventAt,
+		RecordedAt:          eventAt,
+		IsBackfilled:        false,
+		Provenance:          provenance,
+		ProducerVersion:     monitoringEventProducerVersion,
+		RuleVersion:         monitoringEventBindingRuleVersion,
+		PriorState:          priorState,
+		ResultingState:      record.BindingStatus,
+		CorrectionOfEventID: "",
+		BindingStatus:       record.BindingStatus,
 	})
 	if err != nil {
-		return fmt.Errorf("marshal binding event payload: %w", err)
+		return fmt.Errorf("build binding event payload: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -1237,7 +1263,7 @@ func insertMonitoringInstanceBindingEvent(
 		"",
 		summary,
 		payload,
-		time.Now().UTC(),
+		eventAt,
 	); err != nil {
 		return fmt.Errorf("insert binding event for monitoring instance %q: %w", record.MonitoringInstanceID, err)
 	}
@@ -1297,6 +1323,8 @@ func (r *PostgresMonitoringInstanceRepository) ConfirmMonitoringInstanceRebind(c
 		record,
 		incidents.EventMonitoringInstanceBindingRebindConfirmed,
 		"监控实例已确认新的绑定指纹并等待重新建立稳定观测",
+		monitoringinstances.BindingPendingConfirmation,
+		monitoringEventProvenanceWeb,
 	); err != nil {
 		return monitoringinstances.Record{}, err
 	}
@@ -1354,6 +1382,8 @@ func (r *PostgresMonitoringInstanceRepository) RejectPendingFingerprint(ctx cont
 		record,
 		incidents.EventMonitoringInstanceBindingPendingRejected,
 		"监控实例已拒绝待确认指纹并保留当前绑定",
+		monitoringinstances.BindingPendingConfirmation,
+		monitoringEventProvenanceWeb,
 	); err != nil {
 		return monitoringinstances.Record{}, err
 	}
@@ -1373,22 +1403,34 @@ func (r *PostgresMonitoringInstanceRepository) ResetMonitoringInstanceBinding(ct
 		_ = tx.Rollback(ctx)
 	}()
 
-	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
-		update monitoring_instances
-		set binding_status = '未绑定',
-			binding_fingerprint = '',
-			binding_epoch_started_at = null,
-			pending_binding_fingerprint = null,
-			pending_binding_first_seen_at = null,
-			pending_binding_last_seen_at = null,
-			pending_binding_attempt_count = 0,
-			sync_token_hash = '',
-			last_heartbeat_at = null,
-			last_sync_at = null,
-			updated_at = now()
-		where monitoring_instance_id = $1
-			and archived_at is null
-		returning `+monitoringInstanceSelectColumns,
+	record, previousBindingStatus, err := scanMonitoringInstanceWithPreviousState(tx.QueryRow(ctx, `
+		with prior as (
+			select binding_status
+			from monitoring_instances
+			where monitoring_instance_id = $1
+			for update
+		),
+		updated as (
+			update monitoring_instances
+			set binding_status = '未绑定',
+				binding_fingerprint = '',
+				binding_epoch_started_at = null,
+				pending_binding_fingerprint = null,
+				pending_binding_first_seen_at = null,
+				pending_binding_last_seen_at = null,
+				pending_binding_attempt_count = 0,
+				sync_token_hash = '',
+				last_heartbeat_at = null,
+				last_sync_at = null,
+				updated_at = now()
+			where monitoring_instance_id = $1
+				and archived_at is null
+				and binding_status = (select binding_status from prior)
+			returning *
+		)
+		select `+qualifiedMonitoringInstanceSelectColumns("updated")+`, prior.binding_status
+		from updated
+		join prior on true`,
 		monitoringInstanceID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1411,6 +1453,8 @@ func (r *PostgresMonitoringInstanceRepository) ResetMonitoringInstanceBinding(ct
 		record,
 		incidents.EventMonitoringInstanceBindingReset,
 		"监控实例已重置绑定并等待重新接入",
+		previousBindingStatus,
+		monitoringEventProvenanceWeb,
 	); err != nil {
 		return monitoringinstances.Record{}, err
 	}
@@ -1428,21 +1472,33 @@ func insertMonitoringInstanceLifecycleEvent(
 	eventType incidents.EventType,
 	summary string,
 	reason string,
+	priorState string,
+	resultingState string,
+	provenance monitoringEventProvenance,
 ) error {
 	eventID, err := ids.New("evt")
 	if err != nil {
 		return fmt.Errorf("generate monitoring instance lifecycle event id: %w", err)
 	}
 
-	payloadMap := map[string]string{
-		"lifecycle_status": record.LifecycleStatus,
-	}
-	if reason = strings.TrimSpace(reason); reason != "" {
-		payloadMap["reason"] = reason
-	}
-	payload, err := json.Marshal(payloadMap)
+	eventAt := canonicalTask4MonitoringEventTimestamp(record.UpdatedAt)
+	payload, err := marshalTask4MonitoringEventPayload(task4MonitoringEventPayload{
+		ObjectType:          incidents.ObjectTypeMonitoringInstance,
+		EventType:           eventType,
+		EventAt:             eventAt,
+		RecordedAt:          eventAt,
+		IsBackfilled:        false,
+		Provenance:          provenance,
+		ProducerVersion:     monitoringEventProducerVersion,
+		RuleVersion:         monitoringEventLifecycleRuleVersion,
+		PriorState:          priorState,
+		ResultingState:      resultingState,
+		CorrectionOfEventID: "",
+		LifecycleStatus:     record.LifecycleStatus,
+		Reason:              strings.TrimSpace(reason),
+	})
 	if err != nil {
-		return fmt.Errorf("marshal monitoring instance lifecycle event payload: %w", err)
+		return fmt.Errorf("build monitoring instance lifecycle event payload: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -1463,7 +1519,7 @@ func insertMonitoringInstanceLifecycleEvent(
 		"",
 		summary,
 		payload,
-		time.Now().UTC(),
+		eventAt,
 	); err != nil {
 		return fmt.Errorf("insert lifecycle event for monitoring instance %q: %w", record.MonitoringInstanceID, err)
 	}
@@ -1477,17 +1533,31 @@ func insertMonitoringInstanceRuntimeEvent(
 	record monitoringinstances.Record,
 	eventType incidents.EventType,
 	summary string,
+	priorState string,
+	provenance monitoringEventProvenance,
 ) error {
 	eventID, err := ids.New("evt")
 	if err != nil {
 		return fmt.Errorf("generate monitoring instance runtime event id: %w", err)
 	}
 
-	payload, err := json.Marshal(map[string]string{
-		"monitoring_status": record.MonitoringStatus,
+	eventAt := canonicalTask4MonitoringEventTimestamp(record.UpdatedAt)
+	payload, err := marshalTask4MonitoringEventPayload(task4MonitoringEventPayload{
+		ObjectType:          incidents.ObjectTypeMonitoringInstance,
+		EventType:           eventType,
+		EventAt:             eventAt,
+		RecordedAt:          eventAt,
+		IsBackfilled:        false,
+		Provenance:          provenance,
+		ProducerVersion:     monitoringEventProducerVersion,
+		RuleVersion:         monitoringEventRuntimeRuleVersion,
+		PriorState:          priorState,
+		ResultingState:      record.MonitoringStatus,
+		CorrectionOfEventID: "",
+		MonitoringStatus:    record.MonitoringStatus,
 	})
 	if err != nil {
-		return fmt.Errorf("marshal monitoring instance runtime event payload: %w", err)
+		return fmt.Errorf("build monitoring instance runtime event payload: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -1508,7 +1578,7 @@ func insertMonitoringInstanceRuntimeEvent(
 		"",
 		summary,
 		payload,
-		time.Now().UTC(),
+		eventAt,
 	); err != nil {
 		return fmt.Errorf("insert runtime event for monitoring instance %q: %w", record.MonitoringInstanceID, err)
 	}
@@ -1549,7 +1619,7 @@ func (r *PostgresMonitoringInstanceRepository) SetMonitoringInstanceMonitoringMa
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("set monitoring instance maintenance for %q: %w", monitoringInstanceID, err)
 	}
-	if err := insertMonitoringInstanceRuntimeEvent(ctx, tx, record, incidents.EventMonitoringInstanceMonitoringMaintenanceEntered, "监控实例已进入维护"); err != nil {
+	if err := insertMonitoringInstanceRuntimeEvent(ctx, tx, record, incidents.EventMonitoringInstanceMonitoringMaintenanceEntered, "监控实例已进入维护", monitoringinstances.MonitoringEnabled, monitoringEventProvenanceWeb); err != nil {
 		return monitoringinstances.Record{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -1565,14 +1635,26 @@ func (r *PostgresMonitoringInstanceRepository) PauseMonitoringInstanceMonitoring
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
-		update monitoring_instances
-		set monitoring_status = '暂停',
-			updated_at = now()
-		where monitoring_instance_id = $1
-			and monitoring_status in ('启用', '维护中')
-			and archived_at is null
-		returning `+monitoringInstanceSelectColumns,
+	record, previousStatus, err := scanMonitoringInstanceWithPreviousState(tx.QueryRow(ctx, `
+		with prior as (
+			select monitoring_status
+			from monitoring_instances
+			where monitoring_instance_id = $1
+			for update
+		),
+		updated as (
+			update monitoring_instances
+			set monitoring_status = '暂停',
+				updated_at = now()
+			where monitoring_instance_id = $1
+				and monitoring_status in ('启用', '维护中')
+				and archived_at is null
+				and monitoring_status = (select monitoring_status from prior)
+			returning *
+		)
+		select `+qualifiedMonitoringInstanceSelectColumns("updated")+`, prior.monitoring_status
+		from updated
+		join prior on true`,
 		monitoringInstanceID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1591,7 +1673,7 @@ func (r *PostgresMonitoringInstanceRepository) PauseMonitoringInstanceMonitoring
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("pause monitoring instance monitoring for %q: %w", monitoringInstanceID, err)
 	}
-	if err := insertMonitoringInstanceRuntimeEvent(ctx, tx, record, incidents.EventMonitoringInstanceMonitoringPaused, "监控实例监控已暂停"); err != nil {
+	if err := insertMonitoringInstanceRuntimeEvent(ctx, tx, record, incidents.EventMonitoringInstanceMonitoringPaused, "监控实例监控已暂停", previousStatus, monitoringEventProvenanceWeb); err != nil {
 		return monitoringinstances.Record{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -1607,11 +1689,12 @@ func (r *PostgresMonitoringInstanceRepository) ResumeMonitoringInstanceMonitorin
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	record, previousStatus, err := scanMonitoringInstanceWithPreviousMonitoringStatus(tx.QueryRow(ctx, `
+	record, previousStatus, err := scanMonitoringInstanceWithPreviousState(tx.QueryRow(ctx, `
 		with prior as (
 			select monitoring_status
 			from monitoring_instances
 			where monitoring_instance_id = $1
+			for update
 		),
 		updated as (
 			update monitoring_instances
@@ -1620,7 +1703,8 @@ func (r *PostgresMonitoringInstanceRepository) ResumeMonitoringInstanceMonitorin
 			where monitoring_instance_id = $1
 				and monitoring_status in ('维护中', '暂停')
 				and archived_at is null
-			returning `+monitoringInstanceSelectColumns+`
+				and monitoring_status = (select monitoring_status from prior)
+			returning *
 		)
 		select `+qualifiedMonitoringInstanceSelectColumns("updated")+`, prior.monitoring_status
 		from updated
@@ -1650,7 +1734,7 @@ func (r *PostgresMonitoringInstanceRepository) ResumeMonitoringInstanceMonitorin
 		eventType = incidents.EventMonitoringInstanceMonitoringMaintenanceExited
 		summary = "监控实例已退出维护"
 	}
-	if err := insertMonitoringInstanceRuntimeEvent(ctx, tx, record, eventType, summary); err != nil {
+	if err := insertMonitoringInstanceRuntimeEvent(ctx, tx, record, eventType, summary, previousStatus, monitoringEventProvenanceWeb); err != nil {
 		return monitoringinstances.Record{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {

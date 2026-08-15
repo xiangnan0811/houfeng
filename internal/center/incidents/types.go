@@ -1,6 +1,11 @@
 package incidents
 
-import "time"
+import (
+	"time"
+
+	"houfeng/internal/center/monitoringinstances"
+	"houfeng/internal/center/targets"
+)
 
 type IncidentClass string
 
@@ -29,14 +34,21 @@ type IncidentRecord struct {
 }
 
 type StateChangeEventRecord struct {
-	IncidentID    string        `json:"incident_id"`
-	IncidentClass IncidentClass `json:"incident_class"`
-	ObjectType    ObjectType    `json:"object_type"`
-	ObjectID      string        `json:"object_id"`
-	EventType     EventType     `json:"event_type"`
-	Severity      Severity      `json:"severity"`
-	Summary       string        `json:"summary"`
-	CreatedAt     time.Time     `json:"created_at"`
+	IncidentID          string        `json:"incident_id"`
+	IncidentClass       IncidentClass `json:"incident_class"`
+	ObjectType          ObjectType    `json:"object_type"`
+	ObjectID            string        `json:"object_id"`
+	EventType           EventType     `json:"event_type"`
+	Severity            Severity      `json:"severity"`
+	Summary             string        `json:"summary"`
+	CreatedAt           time.Time     `json:"created_at"`
+	IsBackfilled        bool          `json:"is_backfilled,omitempty"`
+	Provenance          string        `json:"provenance,omitempty"`
+	ProducerVersion     string        `json:"producer_version,omitempty"`
+	RuleVersion         string        `json:"rule_version,omitempty"`
+	PriorState          string        `json:"prior_state,omitempty"`
+	ResultingState      string        `json:"resulting_state,omitempty"`
+	CorrectionOfEventID string        `json:"correction_of_event_id,omitempty"`
 }
 
 type NotificationDecision struct {
@@ -255,7 +267,214 @@ const (
 	EventTargetResumed                                  EventType = "target_resumed"
 	EventTargetArchived                                 EventType = "target_archived"
 	EventTargetRestoredToPaused                         EventType = "target_restored_to_paused"
+	EventCorrected                                      EventType = "event_corrected"
 )
+
+const (
+	MonitoringEventProvenanceAgentSync         = "agent_sync"
+	MonitoringEventProvenanceCenter            = "center"
+	MonitoringEventProvenanceWeb               = "web"
+	MonitoringEventProvenanceRetentionBackfill = "retention_backfill"
+	MonitoringEventProvenanceManualCorrection  = "manual_correction"
+
+	MonitoringEventProducerVersion       = "center-monitoring-events/v1"
+	MonitoringEventIncidentRuleVersion   = "incident-rules/v1"
+	MonitoringEventBindingRuleVersion    = "monitoring-binding-rules/v1"
+	MonitoringEventLifecycleRuleVersion  = "monitoring-lifecycle-rules/v1"
+	MonitoringEventRuntimeRuleVersion    = "monitoring-runtime-rules/v1"
+	MonitoringEventTargetRuleVersion     = "target-runtime-rules/v1"
+	MonitoringEventEvidenceSourceVersion = "state-change-events/v2"
+)
+
+// ValidMonitoringEventMetadata is the closed semantic contract shared by
+// persistence writers and the monitoring-event evidence adapter. It rejects
+// new event, rule, state, provenance, and correction semantics until they are
+// deliberately added here.
+func ValidMonitoringEventMetadata(
+	objectType ObjectType,
+	eventType EventType,
+	severity Severity,
+	isBackfilled bool,
+	provenance string,
+	producerVersion string,
+	ruleVersion string,
+	priorState string,
+	resultingState string,
+	correctionOfEventID string,
+) bool {
+	switch provenance {
+	case MonitoringEventProvenanceAgentSync,
+		MonitoringEventProvenanceCenter,
+		MonitoringEventProvenanceWeb,
+		MonitoringEventProvenanceRetentionBackfill,
+		MonitoringEventProvenanceManualCorrection:
+	default:
+		return false
+	}
+	if producerVersion != MonitoringEventProducerVersion || (provenance == MonitoringEventProvenanceRetentionBackfill && !isBackfilled) {
+		return false
+	}
+	if eventType == EventCorrected {
+		if provenance != MonitoringEventProvenanceManualCorrection || correctionOfEventID == "" {
+			return false
+		}
+	} else if provenance == MonitoringEventProvenanceManualCorrection || correctionOfEventID != "" {
+		return false
+	}
+
+	states := map[string]struct{}{}
+	validEventType := false
+	switch ruleVersion {
+	case MonitoringEventIncidentRuleVersion:
+		if objectType != ObjectTypeMonitoringInstance && objectType != ObjectTypeTarget {
+			return false
+		}
+		validEventType = eventType == EventIncidentStarted || eventType == EventIncidentEscalated || eventType == EventIncidentRecovered || eventType == EventCorrected
+		states = map[string]struct{}{"normal": {}, "notice": {}, "alert": {}, "critical": {}}
+	case MonitoringEventBindingRuleVersion:
+		if objectType != ObjectTypeMonitoringInstance {
+			return false
+		}
+		validEventType = eventType == EventMonitoringInstanceBindingRebindConfirmed || eventType == EventMonitoringInstanceBindingPendingRejected || eventType == EventMonitoringInstanceBindingReset || eventType == EventCorrected
+		states = map[string]struct{}{monitoringinstances.BindingUnbound: {}, monitoringinstances.BindingBound: {}, monitoringinstances.BindingPendingConfirmation: {}}
+	case MonitoringEventLifecycleRuleVersion:
+		if objectType != ObjectTypeMonitoringInstance {
+			return false
+		}
+		validEventType = eventType == EventMonitoringInstanceLifecycleUpdated || eventType == EventMonitoringInstanceRetired || eventType == EventMonitoringInstanceRestoredToObserving || eventType == EventCorrected
+		states = map[string]struct{}{
+			monitoringinstances.LifecyclePendingEnrollment: {},
+			monitoringinstances.LifecycleInUse:             {},
+			monitoringinstances.LifecycleObserving:         {},
+			monitoringinstances.LifecycleNoRenewal:         {},
+			monitoringinstances.LifecycleRetired:           {},
+			"unarchived":                                   {},
+			"archived":                                     {},
+		}
+	case MonitoringEventRuntimeRuleVersion:
+		if objectType != ObjectTypeMonitoringInstance {
+			return false
+		}
+		validEventType = eventType == EventMonitoringInstanceMonitoringMaintenanceEntered || eventType == EventMonitoringInstanceMonitoringMaintenanceExited || eventType == EventMonitoringInstanceMonitoringPaused || eventType == EventMonitoringInstanceMonitoringResumed || eventType == EventCorrected
+		states = map[string]struct{}{monitoringinstances.MonitoringEnabled: {}, monitoringinstances.MonitoringMaintenance: {}, monitoringinstances.MonitoringPaused: {}}
+	case MonitoringEventTargetRuleVersion:
+		if objectType != ObjectTypeTarget {
+			return false
+		}
+		validEventType = eventType == EventTargetMaintenanceEntered || eventType == EventTargetMaintenanceExited || eventType == EventTargetPaused || eventType == EventTargetResumed || eventType == EventTargetArchived || eventType == EventTargetRestoredToPaused || eventType == EventCorrected
+		states = map[string]struct{}{targets.RunStatusEnabled: {}, targets.RunStatusMaintenance: {}, targets.RunStatusPaused: {}, targets.RunStatusArchived: {}}
+	default:
+		return false
+	}
+	if !validEventType {
+		return false
+	}
+	_, validPrior := states[priorState]
+	_, validResult := states[resultingState]
+	if !validPrior || !validResult {
+		return false
+	}
+	if ruleVersion == MonitoringEventLifecycleRuleVersion && !validMonitoringEventLifecycleStateDomain(priorState, resultingState) {
+		return false
+	}
+	if eventType == EventCorrected {
+		if ruleVersion == MonitoringEventIncidentRuleVersion {
+			return monitoringEventIncidentState(severity) == resultingState
+		}
+		return severity == ""
+	}
+
+	switch ruleVersion {
+	case MonitoringEventIncidentRuleVersion:
+		switch eventType {
+		case EventIncidentStarted:
+			return priorState == "normal" && resultingState != "normal" && monitoringEventIncidentState(severity) == resultingState
+		case EventIncidentEscalated:
+			return monitoringEventIncidentStateRank(resultingState) > monitoringEventIncidentStateRank(priorState) && monitoringEventIncidentState(severity) == resultingState
+		case EventIncidentRecovered:
+			return priorState != "normal" && resultingState == "normal" && monitoringEventIncidentState(severity) == priorState
+		}
+	case MonitoringEventBindingRuleVersion:
+		if severity != "" {
+			return false
+		}
+		switch eventType {
+		case EventMonitoringInstanceBindingRebindConfirmed, EventMonitoringInstanceBindingPendingRejected:
+			return priorState == monitoringinstances.BindingPendingConfirmation && resultingState == monitoringinstances.BindingBound
+		case EventMonitoringInstanceBindingReset:
+			return resultingState == monitoringinstances.BindingUnbound
+		}
+	case MonitoringEventLifecycleRuleVersion:
+		if severity != "" {
+			return false
+		}
+		switch eventType {
+		case EventMonitoringInstanceLifecycleUpdated:
+			return priorState != resultingState
+		case EventMonitoringInstanceRetired:
+			return resultingState == monitoringinstances.LifecycleRetired
+		case EventMonitoringInstanceRestoredToObserving:
+			return priorState == monitoringinstances.LifecycleRetired && resultingState == monitoringinstances.LifecycleObserving
+		}
+	case MonitoringEventRuntimeRuleVersion:
+		if severity != "" {
+			return false
+		}
+		switch eventType {
+		case EventMonitoringInstanceMonitoringMaintenanceEntered:
+			return priorState == monitoringinstances.MonitoringEnabled && resultingState == monitoringinstances.MonitoringMaintenance
+		case EventMonitoringInstanceMonitoringMaintenanceExited:
+			return priorState == monitoringinstances.MonitoringMaintenance && resultingState == monitoringinstances.MonitoringEnabled
+		case EventMonitoringInstanceMonitoringPaused:
+			return (priorState == monitoringinstances.MonitoringEnabled || priorState == monitoringinstances.MonitoringMaintenance) && resultingState == monitoringinstances.MonitoringPaused
+		case EventMonitoringInstanceMonitoringResumed:
+			return priorState == monitoringinstances.MonitoringPaused && resultingState == monitoringinstances.MonitoringEnabled
+		}
+	case MonitoringEventTargetRuleVersion:
+		if severity != "" {
+			return false
+		}
+		switch eventType {
+		case EventTargetMaintenanceEntered:
+			return priorState == targets.RunStatusEnabled && resultingState == targets.RunStatusMaintenance
+		case EventTargetMaintenanceExited:
+			return priorState == targets.RunStatusMaintenance && resultingState == targets.RunStatusEnabled
+		case EventTargetPaused:
+			return (priorState == targets.RunStatusEnabled || priorState == targets.RunStatusMaintenance) && resultingState == targets.RunStatusPaused
+		case EventTargetResumed:
+			return priorState == targets.RunStatusPaused && resultingState == targets.RunStatusEnabled
+		case EventTargetArchived:
+			return priorState != targets.RunStatusArchived && resultingState == targets.RunStatusArchived
+		case EventTargetRestoredToPaused:
+			return priorState == targets.RunStatusArchived && resultingState == targets.RunStatusPaused
+		}
+	}
+	return false
+}
+
+func validMonitoringEventLifecycleStateDomain(priorState, resultingState string) bool {
+	priorIsArchiveMarker := priorState == "unarchived" || priorState == "archived"
+	resultIsArchiveMarker := resultingState == "unarchived" || resultingState == "archived"
+	if !priorIsArchiveMarker && !resultIsArchiveMarker {
+		return true
+	}
+	return priorState == "unarchived" && resultingState == "archived"
+}
+
+func monitoringEventIncidentStateRank(state string) int {
+	switch state {
+	case "normal":
+		return 1
+	case "notice":
+		return 2
+	case "alert":
+		return 3
+	case "critical":
+		return 4
+	default:
+		return 0
+	}
+}
 
 const (
 	NotificationReasonStarted   NotificationReason = "started"

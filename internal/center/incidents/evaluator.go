@@ -21,9 +21,9 @@ func EvaluateMonitoringInstanceHeartbeatMissing(previous *IncidentRecord, monito
 	}
 	severity, summary, active := heartbeatSeverity(missed, threshold)
 	if !active {
-		return recoverIfNeeded(previous, now, "心跳已恢复")
+		return recoverIfNeeded(previous, now, "心跳已恢复", MonitoringEventProvenanceCenter, false)
 	}
-	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceHeartbeatMissing, severity, now, summary)
+	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceHeartbeatMissing, severity, now, summary, MonitoringEventProvenanceCenter)
 }
 
 func EvaluateMonitoringInstanceDiskPressure(previous *IncidentRecord, monitoringInstanceID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
@@ -76,7 +76,7 @@ func EvaluateMonitoringInstanceResourcePressure(previous *IncidentRecord, monito
 		if previous != nil && !spansMonitoringInstanceResourceWindow(nodeResourceSamplesWithin(samples, referenceTime, recoveryWindow), recoveryWindow) {
 			return noop(previous)
 		}
-		result := recoverIfNeeded(previous, referenceTime, "资源压力恢复到安全区间")
+		result := recoverIfNeeded(previous, referenceTime, "资源压力恢复到安全区间", MonitoringEventProvenanceAgentSync, samples[0].IsBackfilled)
 		if suppressed {
 			return suppressNotification(result)
 		}
@@ -85,7 +85,7 @@ func EvaluateMonitoringInstanceResourcePressure(previous *IncidentRecord, monito
 	if suppressed {
 		return skip(previous)
 	}
-	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceResourcePressure, severity, referenceTime, summary)
+	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceResourcePressure, severity, referenceTime, summary, MonitoringEventProvenanceAgentSync)
 }
 
 func EvaluateTargetProbeFailure(previous *IncidentRecord, targetID string, recent []runtimefacts.ProbeObservation) EvaluationResult {
@@ -99,7 +99,7 @@ func EvaluateTargetProbeFailure(previous *IncidentRecord, targetID string, recen
 	failureCount := len(failureWindow)
 	successCount := consecutiveResults(recent, agentapi.ProbeResultSuccess)
 	if previous != nil && successCount >= 2 {
-		result := recoverIfNeeded(previous, recent[0].ObservedAt, "探针已连续成功恢复")
+		result := recoverIfNeeded(previous, recent[0].ObservedAt, "探针已连续成功恢复", MonitoringEventProvenanceAgentSync, recent[0].IsBackfilled)
 		if suppressed {
 			return suppressNotification(result)
 		}
@@ -116,7 +116,7 @@ func EvaluateTargetProbeFailure(previous *IncidentRecord, targetID string, recen
 	if recent[0].ErrorSummary != "" {
 		summary = fmt.Sprintf("%s（%s）", summary, recent[0].ErrorSummary)
 	}
-	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetProbeFailure, severity, recent[0].ObservedAt, summary)
+	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetProbeFailure, severity, recent[0].ObservedAt, summary, MonitoringEventProvenanceAgentSync)
 }
 
 func EvaluateTargetTLSExpiry(previous *IncidentRecord, targetID string, recent []runtimefacts.ProbeObservation) EvaluationResult {
@@ -130,7 +130,7 @@ func EvaluateTargetTLSExpiry(previous *IncidentRecord, targetID string, recent [
 	}
 	severity, active := tlsExpirySeverity(*recent[0].TLSExpiryDays)
 	if !active {
-		result := recoverIfNeeded(previous, recent[0].ObservedAt, "TLS 到期风险解除")
+		result := recoverIfNeeded(previous, recent[0].ObservedAt, "TLS 到期风险解除", MonitoringEventProvenanceAgentSync, recent[0].IsBackfilled)
 		if suppressed {
 			return suppressNotification(result)
 		}
@@ -140,7 +140,7 @@ func EvaluateTargetTLSExpiry(previous *IncidentRecord, targetID string, recent [
 		return skip(previous)
 	}
 	summary := fmt.Sprintf("TLS 证书剩余 %d 天", *recent[0].TLSExpiryDays)
-	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetTLSExpiry, severity, recent[0].ObservedAt, summary)
+	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetTLSExpiry, severity, recent[0].ObservedAt, summary, MonitoringEventProvenanceAgentSync)
 }
 
 func EvaluateMonitoringInstanceTrendDegradation(previous *IncidentRecord, monitoringInstanceID string, samples []MonitoringInstanceResourceSample, baselines []MonitoringInstanceHostDailyAggregate) EvaluationResult {
@@ -180,14 +180,14 @@ func EvaluateMonitoringInstanceTrendDegradation(previous *IncidentRecord, monito
 		if previous != nil && !spansMonitoringInstanceResourceWindow(usableCurrent, 30*time.Minute) {
 			return noop(previous)
 		}
-		return recoverIfNeeded(previous, referenceTime, "监控实例趋势已恢复到安全区间")
+		return recoverIfNeeded(previous, referenceTime, "监控实例趋势已恢复到安全区间", MonitoringEventProvenanceAgentSync, false)
 	}
 
 	severity := SeverityNotice
 	if len(degradedMetrics) >= 2 {
 		severity = SeverityAlert
 	}
-	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceTrendDegradation, severity, referenceTime, fmt.Sprintf("监控实例趋势劣化：%s", joinMetricLabels(degradedMetrics)))
+	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceTrendDegradation, severity, referenceTime, fmt.Sprintf("监控实例趋势劣化：%s", joinMetricLabels(degradedMetrics)), MonitoringEventProvenanceAgentSync)
 }
 
 func EvaluateTargetLatencyTrendDegradationAcrossSeries(previous *IncidentRecord, targetID string, observations []runtimefacts.ProbeObservation, baselines []TargetProbeDailyAggregate) EvaluationResult {
@@ -234,7 +234,7 @@ func EvaluateTargetLatencyTrendDegradationAcrossSeries(previous *IncidentRecord,
 		if previous != nil && !hasSustainedTargetLatencyRecoveryEvidence(series, usableBaselines, 30*time.Minute) {
 			return noop(previous)
 		}
-		return recoverIfNeeded(previous, referenceTime, "目标延迟趋势已恢复到安全区间")
+		return recoverIfNeeded(previous, referenceTime, "目标延迟趋势已恢复到安全区间", MonitoringEventProvenanceAgentSync, false)
 	}
 
 	severity := SeverityNotice
@@ -242,7 +242,7 @@ func EvaluateTargetLatencyTrendDegradationAcrossSeries(previous *IncidentRecord,
 		severity = SeverityAlert
 	}
 	sort.Strings(degradedProbeItems)
-	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetLatencyTrendDegradation, severity, referenceTime, fmt.Sprintf("目标延迟趋势劣化：%s", joinMetricLabels(degradedProbeItems)))
+	return evaluateTransition(previous, ObjectTypeTarget, targetID, IncidentTargetLatencyTrendDegradation, severity, referenceTime, fmt.Sprintf("目标延迟趋势劣化：%s", joinMetricLabels(degradedProbeItems)), MonitoringEventProvenanceAgentSync)
 }
 
 func noop(previous *IncidentRecord) EvaluationResult {
@@ -270,22 +270,22 @@ func suppressNotification(result EvaluationResult) EvaluationResult {
 func evaluateMonitoringInstanceDiskPressure(previous *IncidentRecord, monitoringInstanceID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
 	severity, active := fastThresholdSeverity(sample.DiskUsedPct, float64(thresholds.DiskWarningPct), float64(thresholds.DiskAlertPct), float64(thresholds.DiskCriticalPct))
 	if !active {
-		return recoverIfNeeded(previous, sample.ObservedAt, "磁盘使用率恢复到安全区间")
+		return recoverIfNeeded(previous, sample.ObservedAt, "磁盘使用率恢复到安全区间", MonitoringEventProvenanceAgentSync, sample.IsBackfilled)
 	}
 	summary := fmt.Sprintf("磁盘使用率 %.1f%%", sample.DiskUsedPct)
-	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceDiskPressure, severity, sample.ObservedAt, summary)
+	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceDiskPressure, severity, sample.ObservedAt, summary, MonitoringEventProvenanceAgentSync)
 }
 
 func evaluateMonitoringInstanceInodePressure(previous *IncidentRecord, monitoringInstanceID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
 	severity, active := fastThresholdSeverity(sample.InodeUsedPct, float64(thresholds.InodeWarningPct), float64(thresholds.InodeAlertPct), float64(thresholds.InodeCriticalPct))
 	if !active {
-		return recoverIfNeeded(previous, sample.ObservedAt, "inode 使用率恢复到安全区间")
+		return recoverIfNeeded(previous, sample.ObservedAt, "inode 使用率恢复到安全区间", MonitoringEventProvenanceAgentSync, sample.IsBackfilled)
 	}
 	summary := fmt.Sprintf("inode 使用率 %.1f%%", sample.InodeUsedPct)
-	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceInodePressure, severity, sample.ObservedAt, summary)
+	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceInodePressure, severity, sample.ObservedAt, summary, MonitoringEventProvenanceAgentSync)
 }
 
-func recoverIfNeeded(previous *IncidentRecord, when time.Time, summary string) EvaluationResult {
+func recoverIfNeeded(previous *IncidentRecord, when time.Time, summary, provenance string, isBackfilled bool) EvaluationResult {
 	if previous == nil {
 		return EvaluationResult{Transition: TransitionNoop}
 	}
@@ -295,14 +295,21 @@ func recoverIfNeeded(previous *IncidentRecord, when time.Time, summary string) E
 	return EvaluationResult{
 		Transition: TransitionRecovered,
 		Event: &StateChangeEventRecord{
-			IncidentID:    previous.IncidentID,
-			IncidentClass: previous.IncidentClass,
-			ObjectType:    previous.ObjectType,
-			ObjectID:      previous.ObjectID,
-			EventType:     EventIncidentRecovered,
-			Severity:      previous.Severity,
-			Summary:       summary,
-			CreatedAt:     when,
+			IncidentID:          previous.IncidentID,
+			IncidentClass:       previous.IncidentClass,
+			ObjectType:          previous.ObjectType,
+			ObjectID:            previous.ObjectID,
+			EventType:           EventIncidentRecovered,
+			Severity:            previous.Severity,
+			Summary:             summary,
+			CreatedAt:           canonicalMonitoringEventTime(when),
+			IsBackfilled:        isBackfilled,
+			Provenance:          provenance,
+			ProducerVersion:     MonitoringEventProducerVersion,
+			RuleVersion:         MonitoringEventIncidentRuleVersion,
+			PriorState:          monitoringEventIncidentState(previous.Severity),
+			ResultingState:      "normal",
+			CorrectionOfEventID: "",
 		},
 		Notification: &NotificationDecision{
 			ShouldSend: true,
@@ -314,7 +321,7 @@ func recoverIfNeeded(previous *IncidentRecord, when time.Time, summary string) E
 	}
 }
 
-func evaluateTransition(previous *IncidentRecord, objectType ObjectType, objectID string, class IncidentClass, severity Severity, when time.Time, summary string) EvaluationResult {
+func evaluateTransition(previous *IncidentRecord, objectType ObjectType, objectID string, class IncidentClass, severity Severity, when time.Time, summary, provenance string) EvaluationResult {
 	current := &IncidentRecord{
 		IncidentID:      incidentID(objectType, objectID, class),
 		ObjectType:      objectType,
@@ -330,7 +337,7 @@ func evaluateTransition(previous *IncidentRecord, objectType ObjectType, objectI
 		return EvaluationResult{
 			Current:      current,
 			Transition:   TransitionStarted,
-			Event:        &StateChangeEventRecord{IncidentID: current.IncidentID, IncidentClass: class, ObjectType: objectType, ObjectID: objectID, EventType: EventIncidentStarted, Severity: severity, Summary: summary, CreatedAt: when},
+			Event:        newIncidentStateChangeEvent(current, EventIncidentStarted, severity, summary, when, provenance, "normal", monitoringEventIncidentState(severity)),
 			Notification: &NotificationDecision{ShouldSend: true, Channel: NotificationChannelTelegram, Reason: NotificationReasonStarted, Severity: severity, Summary: summary},
 		}
 	}
@@ -339,11 +346,50 @@ func evaluateTransition(previous *IncidentRecord, objectType ObjectType, objectI
 		return EvaluationResult{
 			Current:      current,
 			Transition:   TransitionEscalated,
-			Event:        &StateChangeEventRecord{IncidentID: current.IncidentID, IncidentClass: class, ObjectType: objectType, ObjectID: objectID, EventType: EventIncidentEscalated, Severity: severity, Summary: summary, CreatedAt: when},
+			Event:        newIncidentStateChangeEvent(current, EventIncidentEscalated, severity, summary, when, provenance, monitoringEventIncidentState(previous.Severity), monitoringEventIncidentState(severity)),
 			Notification: &NotificationDecision{ShouldSend: true, Channel: NotificationChannelTelegram, Reason: NotificationReasonEscalated, Severity: severity, Summary: summary},
 		}
 	}
 	return EvaluationResult{Current: current, Transition: TransitionNoop}
+}
+
+func newIncidentStateChangeEvent(incident *IncidentRecord, eventType EventType, severity Severity, summary string, when time.Time, provenance, priorState, resultingState string) *StateChangeEventRecord {
+	return &StateChangeEventRecord{
+		IncidentID:          incident.IncidentID,
+		IncidentClass:       incident.IncidentClass,
+		ObjectType:          incident.ObjectType,
+		ObjectID:            incident.ObjectID,
+		EventType:           eventType,
+		Severity:            severity,
+		Summary:             summary,
+		CreatedAt:           canonicalMonitoringEventTime(when),
+		IsBackfilled:        false,
+		Provenance:          provenance,
+		ProducerVersion:     MonitoringEventProducerVersion,
+		RuleVersion:         MonitoringEventIncidentRuleVersion,
+		PriorState:          priorState,
+		ResultingState:      resultingState,
+		CorrectionOfEventID: "",
+	}
+}
+
+func canonicalMonitoringEventTime(value time.Time) time.Time {
+	return value.UTC().Truncate(time.Microsecond)
+}
+
+func monitoringEventIncidentState(severity Severity) string {
+	switch severity {
+	case SeverityNormal:
+		return "normal"
+	case SeverityNotice:
+		return "notice"
+	case SeverityAlert:
+		return "alert"
+	case SeverityCritical:
+		return "critical"
+	default:
+		return ""
+	}
 }
 
 func incidentID(objectType ObjectType, objectID string, class IncidentClass) string {

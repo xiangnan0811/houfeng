@@ -305,8 +305,9 @@ func TestPostgresDashboardRepositoryBuildsVisibleCurrentRuntimeCountQuery(t *tes
 		"from visible_targets where current_health_status <> '正常'",
 		"from visible_monitoring_instances where monitoring_status = '维护中'",
 		"from visible_targets where run_status = '维护中'",
-		"from visible_events where event_type = 'incident_started'",
-		"from visible_events where event_type = 'incident_recovered'",
+		"from visible_events e where event_type = 'incident_started'",
+		"from visible_events e where event_type = 'incident_recovered'",
+		"e.payload ->> 'event_at'",
 	} {
 		if !strings.Contains(capturedSQL, want) {
 			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
@@ -341,6 +342,7 @@ func TestLoadDashboardTrends24hDefaultsToCurrentAssetVisibility(t *testing.T) {
 		"from asset_services",
 		"from asset_domains",
 		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"date_trunc('hour', case when jsonb_typeof(e.payload -> 'event_at') = 'string' then (e.payload ->> 'event_at')::timestamptz else e.created_at end)",
 	} {
 		if !strings.Contains(capturedSQL, want) {
 			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
@@ -626,8 +628,10 @@ func TestPostgresDashboardRepositoryListEventsBuildsAdvancedContextFilters(t *te
 		t.Fatalf("ListEvents() error = %v", err)
 	}
 	for _, want := range []string{
-		"e.created_at >= $1",
-		"e.created_at <= $2",
+		"case when jsonb_typeof(e.payload -> 'event_at') = 'string' then (e.payload ->> 'event_at')::timestamptz else e.created_at end >= $1",
+		"case when jsonb_typeof(e.payload -> 'event_at') = 'string' then (e.payload ->> 'event_at')::timestamptz else e.created_at end <= $2",
+		"e.payload, case when jsonb_typeof(e.payload -> 'event_at') = 'string' then (e.payload ->> 'event_at')::timestamptz else e.created_at end",
+		"order by case when jsonb_typeof(e.payload -> 'event_at') = 'string' then (e.payload ->> 'event_at')::timestamptz else e.created_at end desc",
 		"n.labels @> array[$3]::text[]",
 		"t.labels @> array[$3]::text[]",
 		"from notification_records nr",
@@ -699,13 +703,15 @@ func TestPostgresDashboardRepositoryListEventsExcludesBackfilledEventsByDefault(
 	}
 	for _, want := range []string{
 		"not (",
+		"jsonb_typeof(e.payload -> 'is_backfilled') = 'boolean'",
+		"(e.payload ->> 'is_backfilled')::boolean",
 		"from monitoring_instance_heartbeats nh",
 		"nh.is_backfilled",
 		"from host_samples hs",
 		"hs.is_backfilled",
 		"from probe_observations po",
 		"po.is_backfilled",
-		"observed_at = e.created_at",
+		"observed_at = case when jsonb_typeof(e.payload -> 'event_at') = 'string' then (e.payload ->> 'event_at')::timestamptz else e.created_at end",
 	} {
 		if !containsSQL([]string{capturedSQL}, want) {
 			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)

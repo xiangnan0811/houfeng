@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -370,17 +369,31 @@ func insertTargetRuntimeEvent(
 	record targets.TargetRecord,
 	eventType incidents.EventType,
 	summary string,
+	priorState string,
+	provenance monitoringEventProvenance,
 ) error {
 	eventID, err := ids.New("evt")
 	if err != nil {
 		return fmt.Errorf("generate target runtime event id: %w", err)
 	}
 
-	payload, err := json.Marshal(map[string]string{
-		"run_status": record.RunStatus,
+	eventAt := canonicalTask4MonitoringEventTimestamp(record.UpdatedAt)
+	payload, err := marshalTask4MonitoringEventPayload(task4MonitoringEventPayload{
+		ObjectType:          incidents.ObjectTypeTarget,
+		EventType:           eventType,
+		EventAt:             eventAt,
+		RecordedAt:          eventAt,
+		IsBackfilled:        false,
+		Provenance:          provenance,
+		ProducerVersion:     monitoringEventProducerVersion,
+		RuleVersion:         monitoringEventTargetRuleVersion,
+		PriorState:          priorState,
+		ResultingState:      record.RunStatus,
+		CorrectionOfEventID: "",
+		RunStatus:           record.RunStatus,
 	})
 	if err != nil {
-		return fmt.Errorf("marshal target runtime event payload: %w", err)
+		return fmt.Errorf("build target runtime event payload: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -401,7 +414,7 @@ func insertTargetRuntimeEvent(
 		"",
 		summary,
 		payload,
-		time.Now().UTC(),
+		eventAt,
 	); err != nil {
 		return fmt.Errorf("insert runtime event for target %q: %w", record.TargetID, err)
 	}
@@ -437,7 +450,7 @@ func (r *PostgresTargetRepository) SetTargetMaintenance(ctx context.Context, tar
 	if err != nil {
 		return targets.TargetRecord{}, fmt.Errorf("set target maintenance for %q: %w", targetID, err)
 	}
-	if err := insertTargetRuntimeEvent(ctx, tx, record, incidents.EventTargetMaintenanceEntered, "目标运行已进入维护"); err != nil {
+	if err := insertTargetRuntimeEvent(ctx, tx, record, incidents.EventTargetMaintenanceEntered, "目标运行已进入维护", targets.RunStatusEnabled, monitoringEventProvenanceWeb); err != nil {
 		return targets.TargetRecord{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -453,13 +466,25 @@ func (r *PostgresTargetRepository) PauseTargetRun(ctx context.Context, targetID 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	record, err := scanTarget(tx.QueryRow(ctx, `
-		update targets
-		set run_status = '暂停',
-			updated_at = now()
-		where target_id = $1
-			and run_status in ('启用', '维护中')
-		returning `+targetSelectColumns,
+	record, previousStatus, err := scanTargetWithPreviousRunStatus(tx.QueryRow(ctx, `
+		with prior as (
+			select run_status
+			from targets
+			where target_id = $1
+			for update
+		),
+		updated as (
+			update targets
+			set run_status = '暂停',
+				updated_at = now()
+			where target_id = $1
+				and run_status in ('启用', '维护中')
+				and run_status = (select run_status from prior)
+			returning *
+		)
+		select `+qualifiedTargetSelectColumns("updated")+`, prior.run_status
+		from updated
+		join prior on true`,
 		targetID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -475,7 +500,7 @@ func (r *PostgresTargetRepository) PauseTargetRun(ctx context.Context, targetID 
 	if err != nil {
 		return targets.TargetRecord{}, fmt.Errorf("pause target %q: %w", targetID, err)
 	}
-	if err := insertTargetRuntimeEvent(ctx, tx, record, incidents.EventTargetPaused, "目标运行已暂停"); err != nil {
+	if err := insertTargetRuntimeEvent(ctx, tx, record, incidents.EventTargetPaused, "目标运行已暂停", previousStatus, monitoringEventProvenanceWeb); err != nil {
 		return targets.TargetRecord{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -496,6 +521,7 @@ func (r *PostgresTargetRepository) ResumeTargetRun(ctx context.Context, targetID
 			select run_status
 			from targets
 			where target_id = $1
+			for update
 		),
 		updated as (
 			update targets
@@ -503,7 +529,8 @@ func (r *PostgresTargetRepository) ResumeTargetRun(ctx context.Context, targetID
 				updated_at = now()
 			where target_id = $1
 				and run_status in ('维护中', '暂停')
-			returning `+targetSelectColumns+`
+				and run_status = (select run_status from prior)
+			returning *
 		)
 		select `+qualifiedTargetSelectColumns("updated")+`, prior.run_status
 		from updated
@@ -530,7 +557,7 @@ func (r *PostgresTargetRepository) ResumeTargetRun(ctx context.Context, targetID
 		eventType = incidents.EventTargetMaintenanceExited
 		summary = "目标运行已退出维护"
 	}
-	if err := insertTargetRuntimeEvent(ctx, tx, record, eventType, summary); err != nil {
+	if err := insertTargetRuntimeEvent(ctx, tx, record, eventType, summary, previousStatus, monitoringEventProvenanceWeb); err != nil {
 		return targets.TargetRecord{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -546,13 +573,25 @@ func (r *PostgresTargetRepository) ArchiveTarget(ctx context.Context, targetID s
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	record, err := scanTarget(tx.QueryRow(ctx, `
-		update targets
-		set run_status = '已归档',
-			updated_at = now()
-		where target_id = $1
-			and run_status in ('启用', '维护中', '暂停')
-		returning `+targetSelectColumns,
+	record, previousStatus, err := scanTargetWithPreviousRunStatus(tx.QueryRow(ctx, `
+		with prior as (
+			select run_status
+			from targets
+			where target_id = $1
+			for update
+		),
+		updated as (
+			update targets
+			set run_status = '已归档',
+				updated_at = now()
+			where target_id = $1
+				and run_status in ('启用', '维护中', '暂停')
+				and run_status = (select run_status from prior)
+			returning *
+		)
+		select `+qualifiedTargetSelectColumns("updated")+`, prior.run_status
+		from updated
+		join prior on true`,
 		targetID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -568,7 +607,7 @@ func (r *PostgresTargetRepository) ArchiveTarget(ctx context.Context, targetID s
 	if err != nil {
 		return targets.TargetRecord{}, fmt.Errorf("archive target %q: %w", targetID, err)
 	}
-	if err := insertTargetRuntimeEvent(ctx, tx, record, incidents.EventTargetArchived, "目标已归档"); err != nil {
+	if err := insertTargetRuntimeEvent(ctx, tx, record, incidents.EventTargetArchived, "目标已归档", previousStatus, monitoringEventProvenanceWeb); err != nil {
 		return targets.TargetRecord{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -606,7 +645,7 @@ func (r *PostgresTargetRepository) RestoreArchivedTargetToPaused(ctx context.Con
 	if err != nil {
 		return targets.TargetRecord{}, fmt.Errorf("restore archived target %q: %w", targetID, err)
 	}
-	if err := insertTargetRuntimeEvent(ctx, tx, record, incidents.EventTargetRestoredToPaused, "目标已恢复到暂停"); err != nil {
+	if err := insertTargetRuntimeEvent(ctx, tx, record, incidents.EventTargetRestoredToPaused, "目标已恢复到暂停", targets.RunStatusArchived, monitoringEventProvenanceWeb); err != nil {
 		return targets.TargetRecord{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {

@@ -17,6 +17,7 @@ import (
 
 func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 	t.Parallel()
+	eventAt := time.Date(2026, time.July, 1, 20, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 
 	tests := []struct {
 		name            string
@@ -61,6 +62,8 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 				"set run_status = '启用'",
 				"where target_id = $1",
 				"run_status in ('维护中', '暂停')",
+				"for update",
+				"run_status = (select run_status from prior)",
 			},
 		},
 		{
@@ -78,6 +81,8 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 				"set run_status = '暂停'",
 				"where target_id = $1",
 				"run_status in ('启用', '维护中')",
+				"for update",
+				"run_status = (select run_status from prior)",
 			},
 		},
 		{
@@ -95,6 +100,8 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 				"set run_status = '启用'",
 				"where target_id = $1",
 				"run_status in ('维护中', '暂停')",
+				"for update",
+				"run_status = (select run_status from prior)",
 			},
 		},
 		{
@@ -112,6 +119,8 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 				"set run_status = '暂停'",
 				"where target_id = $1",
 				"run_status in ('启用', '维护中')",
+				"for update",
+				"run_status = (select run_status from prior)",
 			},
 		},
 		{
@@ -129,6 +138,8 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 				"set run_status = '已归档'",
 				"where target_id = $1",
 				"run_status in ('启用', '维护中', '暂停')",
+				"for update",
+				"run_status = (select run_status from prior)",
 			},
 		},
 		{
@@ -167,7 +178,7 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 						t.Fatalf("QueryRow args = %#v, want target id %q", args, tt.targetID)
 					}
 					return fakeTargetRow{scan: func(dest ...any) error {
-						scanTargetRecordDestinations(dest, targets.TargetRecord{TargetID: tt.targetID, RunStatus: tt.returnedStatus})
+						scanTargetRecordDestinations(dest, targets.TargetRecord{TargetID: tt.targetID, RunStatus: tt.returnedStatus, UpdatedAt: eventAt})
 						if len(dest) > 17 {
 							*(dest[17].(*string)) = tt.sourceStatus
 						}
