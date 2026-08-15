@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordplatform"
 )
 
@@ -296,6 +297,11 @@ func TestRevisionParticipantRegistryAppliesInDeterministicNameOrder(t *testing.T
 
 	var applied []string
 	var attachmentDraftID string
+	preparation, err := evidence.NewRevisionPreparation("rec_participant1", evidence.RevisionPreparationValues{})
+	if err != nil {
+		t.Fatalf("NewRevisionPreparation() error = %v", err)
+	}
+	var participantPreparation evidence.RevisionPreparation
 	registry, err := NewRevisionParticipantRegistry([]RevisionParticipant{
 		&revisionParticipantStub{name: "search", apply: func(context.Context, pgx.Tx, RevisionCommitted) error {
 			applied = append(applied, "search")
@@ -310,22 +316,32 @@ func TestRevisionParticipantRegistryAppliesInDeterministicNameOrder(t *testing.T
 			applied = append(applied, "activity_projection")
 			return nil
 		}},
+		&revisionParticipantStub{name: "evidence", apply: func(_ context.Context, _ pgx.Tx, committed RevisionCommitted) error {
+			applied = append(applied, "evidence")
+			participantPreparation = committed.EvidencePreparation
+			return nil
+		}},
 	})
 	if err != nil {
 		t.Fatalf("NewRevisionParticipantRegistry() error = %v", err)
 	}
 
-	if got := registry.Names(); !reflect.DeepEqual(got, []string{"activity_projection", "attachments", "search"}) {
+	if got := registry.Names(); !reflect.DeepEqual(got, []string{"activity_projection", "attachments", "evidence", "search"}) {
 		t.Fatalf("Names() = %#v, want deterministic sorted names", got)
 	}
-	if err := registry.ApplyRevision(context.Background(), revisionParticipantTxStub{}, RevisionCommitted{DraftID: "rdf_participant"}); err != nil {
+	if err := registry.ApplyRevision(context.Background(), revisionParticipantTxStub{}, RevisionCommitted{
+		DraftID: "rdf_participant", EvidencePreparation: preparation,
+	}); err != nil {
 		t.Fatalf("ApplyRevision() error = %v", err)
 	}
-	if !reflect.DeepEqual(applied, []string{"activity_projection", "attachments", "search"}) {
+	if !reflect.DeepEqual(applied, []string{"activity_projection", "attachments", "evidence", "search"}) {
 		t.Fatalf("participant order = %#v, want sorted order", applied)
 	}
 	if attachmentDraftID != "rdf_participant" {
 		t.Fatalf("participant DraftID = %q, want published draft identity", attachmentDraftID)
+	}
+	if !reflect.DeepEqual(participantPreparation, preparation) {
+		t.Fatalf("participant evidence preparation = %#v, want explicit committed preparation %#v", participantPreparation, preparation)
 	}
 
 	names := registry.Names()
@@ -356,6 +372,40 @@ func TestRevisionRequestFingerprintChangesWithOrderedAttachmentIDs(t *testing.T)
 	}
 	if reflect.DeepEqual(firstBytes, secondBytes) {
 		t.Fatalf("ordered attachment changes produced identical request fingerprints: %x", firstBytes)
+	}
+}
+
+func TestRevisionRequestFingerprintChangesWithOrderedEvidenceSnapshotIDs(t *testing.T) {
+	t.Parallel()
+
+	baseValues := validCompleteRevisionValues(t)
+	orderedValues := validCompleteRevisionValues(t)
+	baseValues.EvidenceSnapshotIDs = []string{testRecordEvidenceID1, testRecordEvidenceID2}
+	orderedValues.EvidenceSnapshotIDs = []string{testRecordEvidenceID1, testRecordEvidenceID2}
+	orderedValues.EvidenceSnapshotIDs[0], orderedValues.EvidenceSnapshotIDs[1] =
+		orderedValues.EvidenceSnapshotIDs[1], orderedValues.EvidenceSnapshotIDs[0]
+	identityValues := validCompleteRevisionValues(t)
+	identityValues.EvidenceSnapshotIDs = []string{"evs_changed", testRecordEvidenceID2}
+
+	inputs := []CompleteRevisionInput{
+		mustCompleteRevisionInput(t, baseValues),
+		mustCompleteRevisionInput(t, orderedValues),
+		mustCompleteRevisionInput(t, identityValues),
+	}
+	fingerprints := make([][32]byte, len(inputs))
+	for index, input := range inputs {
+		fingerprint := mustRevisionCommandFingerprint(t, recordplatform.OperationKindRecordUpdate, input.CanonicalHash())
+		persisted, err := fingerprint.PersistedBytes()
+		if err != nil {
+			t.Fatalf("fingerprint[%d].PersistedBytes() error = %v", index, err)
+		}
+		fingerprints[index] = persisted
+	}
+	if reflect.DeepEqual(fingerprints[0], fingerprints[1]) {
+		t.Fatalf("evidence snapshot order produced identical request fingerprints: %x", fingerprints[0])
+	}
+	if reflect.DeepEqual(fingerprints[0], fingerprints[2]) {
+		t.Fatalf("evidence snapshot identity produced identical request fingerprints: %x", fingerprints[0])
 	}
 }
 

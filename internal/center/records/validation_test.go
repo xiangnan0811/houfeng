@@ -16,6 +16,8 @@ const (
 	testRecordVPSID         = "vps_0123456789abcdef"
 	testRecordAttachmentID1 = "att_0123456789abcdef"
 	testRecordAttachmentID2 = "att_fedcba9876543210"
+	testRecordEvidenceID1   = "evs_0123456789abcdef"
+	testRecordEvidenceID2   = "evs_fedcba9876543210"
 )
 
 func TestNormalizeCompleteRevisionInputRejectsContradictoryOrDuplicateValues(t *testing.T) {
@@ -76,6 +78,10 @@ func TestNormalizeCompleteRevisionInputRejectsContradictoryOrDuplicateValues(t *
 		{name: "invalid attachment", mutate: func(values *CompleteRevisionValues) { values.AttachmentIDs[0] = "att_INVALID" }},
 		{name: "duplicate attachment", mutate: func(values *CompleteRevisionValues) {
 			values.AttachmentIDs = append(values.AttachmentIDs, values.AttachmentIDs[0])
+		}},
+		{name: "invalid evidence snapshot", mutate: func(values *CompleteRevisionValues) { values.EvidenceSnapshotIDs = []string{"evs_INVALID"} }},
+		{name: "duplicate evidence snapshot", mutate: func(values *CompleteRevisionValues) {
+			values.EvidenceSnapshotIDs = []string{testRecordEvidenceID1, testRecordEvidenceID1}
 		}},
 		{name: "invalid owner", mutate: func(values *CompleteRevisionValues) { values.OwnerID = "usr_invalid" }},
 		{name: "invalid author", mutate: func(values *CompleteRevisionValues) { values.AuthorID = "usr_invalid" }},

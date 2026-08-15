@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
@@ -412,6 +413,10 @@ func loadStoredRecordRevision(
 	if err != nil {
 		return records.StoredRecordRevision{}, err
 	}
+	evidenceSnapshotIDs, err := loadStoredRecordRevisionEvidenceSnapshotIDs(ctx, tx, request.RevisionID)
+	if err != nil {
+		return records.StoredRecordRevision{}, err
+	}
 	values := records.CompleteRevisionValues{
 		Title:                  title,
 		BodyMarkdown:           bodyMarkdown,
@@ -425,6 +430,7 @@ func loadStoredRecordRevision(
 		Tags:                   tags,
 		Participants:           participants,
 		AttachmentIDs:          attachmentIDs,
+		EvidenceSnapshotIDs:    evidenceSnapshotIDs,
 		FollowUpAt:             followUpAt,
 		AuthorID:               authorID,
 		SaveReason:             saveReason,
@@ -471,6 +477,37 @@ func loadStoredRecordRevision(
 		return records.StoredRecordRevision{}, records.ErrInvalidRecordReadRequest
 	}
 	return result, nil
+}
+
+func loadStoredRecordRevisionEvidenceSnapshotIDs(ctx context.Context, tx pgx.Tx, revisionID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		select ordinal, snapshot_id
+		from public.record_revision_evidence
+		where revision_id = $1
+		order by ordinal asc`, revisionID)
+	if err != nil {
+		return nil, fmt.Errorf("load record revision evidence: %w", err)
+	}
+	if rows == nil {
+		return nil, records.ErrInvalidRecordReadRequest
+	}
+	defer rows.Close()
+	evidenceSnapshotIDs := make([]string, 0)
+	for expected := int64(0); rows.Next(); expected++ {
+		var ordinal int64
+		var snapshotID string
+		if err := rows.Scan(&ordinal, &snapshotID); err != nil {
+			return nil, fmt.Errorf("scan record revision evidence: %w", err)
+		}
+		if ordinal != expected || !evidence.ValidSnapshotID(snapshotID) {
+			return nil, records.ErrInvalidRecordReadRequest
+		}
+		evidenceSnapshotIDs = append(evidenceSnapshotIDs, snapshotID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate record revision evidence: %w", err)
+	}
+	return evidenceSnapshotIDs, nil
 }
 
 func loadStoredRecordRevisionAttachmentIDs(ctx context.Context, tx pgx.Tx, revisionID string) ([]string, error) {

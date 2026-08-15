@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
+	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
 )
@@ -169,34 +171,37 @@ func (application *Application) PreparePublish(
 }
 
 type RecordRestoreRequest struct {
-	Actor          recordauth.ActorScope
-	RecordID       string
-	RevisionID     string
-	SaveReason     string
-	IdempotencyKey string
+	Actor               recordauth.ActorScope
+	RecordID            string
+	RevisionID          string
+	SaveReason          string
+	EvidencePreparation evidence.RevisionPreparation
+	IdempotencyKey      string
 }
 
 type RecordCreateRequest struct {
-	Actor             recordauth.ActorScope
-	RecordID          string
-	DraftID           string
-	DraftETag         DraftETag
-	Values            CompleteRevisionValues
-	SubjectReferences []SubjectReference
-	IdempotencyKey    string
+	Actor               recordauth.ActorScope
+	RecordID            string
+	DraftID             string
+	DraftETag           DraftETag
+	Values              CompleteRevisionValues
+	SubjectReferences   []SubjectReference
+	EvidencePreparation evidence.RevisionPreparation
+	IdempotencyKey      string
 }
 
 type RecordRevisionCreateRequest struct {
-	Actor              recordauth.ActorScope
-	RecordID           string
-	BaseRevisionID     string
-	LockVersion        uint64
-	AuthorizationEpoch uint64
-	DraftID            string
-	DraftETag          DraftETag
-	Values             CompleteRevisionValues
-	SubjectReferences  []SubjectReference
-	IdempotencyKey     string
+	Actor               recordauth.ActorScope
+	RecordID            string
+	BaseRevisionID      string
+	LockVersion         uint64
+	AuthorizationEpoch  uint64
+	DraftID             string
+	DraftETag           DraftETag
+	Values              CompleteRevisionValues
+	SubjectReferences   []SubjectReference
+	EvidencePreparation evidence.RevisionPreparation
+	IdempotencyKey      string
 }
 
 type RecordLifecycleChangeRequest struct {
@@ -211,14 +216,15 @@ func (application *Application) CreateRecord(
 	request RecordCreateRequest,
 ) (RevisionCommitResult, error) {
 	return application.saveRevision(ctx, RevisionSaveRequest{
-		Actor:             request.Actor,
-		RecordID:          request.RecordID,
-		DraftID:           request.DraftID,
-		DraftETag:         request.DraftETag,
-		Values:            request.Values,
-		SubjectReferences: request.SubjectReferences,
-		ActivityKind:      DomainActivityRecordCreated,
-		IdempotencyKey:    request.IdempotencyKey,
+		Actor:               request.Actor,
+		RecordID:            request.RecordID,
+		DraftID:             request.DraftID,
+		DraftETag:           request.DraftETag,
+		Values:              request.Values,
+		SubjectReferences:   request.SubjectReferences,
+		EvidencePreparation: request.EvidencePreparation,
+		ActivityKind:        DomainActivityRecordCreated,
+		IdempotencyKey:      request.IdempotencyKey,
 	})
 }
 
@@ -227,17 +233,18 @@ func (application *Application) CreateRevision(
 	request RecordRevisionCreateRequest,
 ) (RevisionCommitResult, error) {
 	return application.saveRevision(ctx, RevisionSaveRequest{
-		Actor:              request.Actor,
-		RecordID:           request.RecordID,
-		BaseRevisionID:     request.BaseRevisionID,
-		LockVersion:        request.LockVersion,
-		AuthorizationEpoch: request.AuthorizationEpoch,
-		DraftID:            request.DraftID,
-		DraftETag:          request.DraftETag,
-		Values:             request.Values,
-		SubjectReferences:  request.SubjectReferences,
-		ActivityKind:       DomainActivityRecordRevised,
-		IdempotencyKey:     request.IdempotencyKey,
+		Actor:               request.Actor,
+		RecordID:            request.RecordID,
+		BaseRevisionID:      request.BaseRevisionID,
+		LockVersion:         request.LockVersion,
+		AuthorizationEpoch:  request.AuthorizationEpoch,
+		DraftID:             request.DraftID,
+		DraftETag:           request.DraftETag,
+		Values:              request.Values,
+		SubjectReferences:   request.SubjectReferences,
+		EvidencePreparation: request.EvidencePreparation,
+		ActivityKind:        DomainActivityRecordRevised,
+		IdempotencyKey:      request.IdempotencyKey,
 	})
 }
 
@@ -310,6 +317,9 @@ func (application *Application) RestoreRevision(
 		historical.RevisionNo == 0 || historical.Input.Title() == "" || historical.CreatedAt.IsZero() {
 		return RevisionCommitResult{}, ErrRecordRevisionConflict
 	}
+	if !slices.Equal(request.EvidencePreparation.SnapshotIDs(), historical.Input.EvidenceSnapshotIDs()) {
+		return RevisionCommitResult{}, fmt.Errorf("%w: evidence preparation", ErrInvalidApplicationRequest)
+	}
 
 	current, err := application.read.GetRecord(ctx, RecordGetRequest{
 		Actor:    actor.Clone(),
@@ -326,19 +336,20 @@ func (application *Application) RestoreRevision(
 	values := completeRevisionValuesForRestore(historical.Input, request.SaveReason)
 	references := subjectReferencesForRestore(historical.Input.Subjects())
 	return application.revisions.SaveRevision(ctx, RevisionSaveRequest{
-		Actor:              actor,
-		RecordID:           current.RecordID,
-		BaseRevisionID:     current.CurrentRevisionID,
-		LockVersion:        current.LockVersion,
-		AuthorizationEpoch: current.AuthorizationEpoch,
-		Values:             values,
-		SubjectReferences:  references,
-		ActivityKind:       DomainActivityRecordRestored,
-		IdempotencyKey:     request.IdempotencyKey,
-		IdempotencyOwnerID: application.options.IdempotencyOwnerID,
-		OwnerLeaseDuration: application.options.OwnerLeaseDuration,
-		IdempotencyTTL:     application.options.IdempotencyTTL,
-		OutboxTTL:          application.options.OutboxTTL,
+		Actor:               actor,
+		RecordID:            current.RecordID,
+		BaseRevisionID:      current.CurrentRevisionID,
+		LockVersion:         current.LockVersion,
+		AuthorizationEpoch:  current.AuthorizationEpoch,
+		Values:              values,
+		SubjectReferences:   references,
+		EvidencePreparation: request.EvidencePreparation,
+		ActivityKind:        DomainActivityRecordRestored,
+		IdempotencyKey:      request.IdempotencyKey,
+		IdempotencyOwnerID:  application.options.IdempotencyOwnerID,
+		OwnerLeaseDuration:  application.options.OwnerLeaseDuration,
+		IdempotencyTTL:      application.options.IdempotencyTTL,
+		OutboxTTL:           application.options.OutboxTTL,
 	})
 }
 

@@ -2,11 +2,13 @@ package records
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"reflect"
 	"testing"
 	"time"
 
+	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
 )
@@ -270,6 +272,134 @@ func TestRevisionServiceRejectsClientOwnedSubjectEvidence(t *testing.T) {
 	if adapter.calls != 0 || store.calls != 0 {
 		t.Fatalf("client-owned evidence reached adapter/store: adapter=%d store=%d", adapter.calls, store.calls)
 	}
+}
+
+func TestRevisionServiceCarriesExplicitEvidencePreparationIntoInputCommandAndFingerprint(t *testing.T) {
+	t.Parallel()
+
+	actor := mustRecordActor(t)
+	request, resolved := testRevisionServiceRequest(t, actor, DomainActivityRecordCreated)
+	firstPreparation := mustRevisionEvidencePreparation(t, actor, request.RecordID,
+		[]string{testRecordEvidenceID1, testRecordEvidenceID2})
+	secondPreparation := mustRevisionEvidencePreparation(t, actor, request.RecordID,
+		[]string{testRecordEvidenceID2, testRecordEvidenceID1})
+	thirdPreparation := mustRevisionEvidencePreparation(t, actor, request.RecordID,
+		[]string{"evs_changed", testRecordEvidenceID2})
+
+	adapter := &revisionServiceSubjectAdapter{kind: SubjectKindVPS, resolved: resolved}
+	registry, err := NewSubjectAdapterRegistry([]SubjectSourceAdapter{adapter})
+	if err != nil {
+		t.Fatalf("NewSubjectAdapterRegistry() error = %v", err)
+	}
+	store := &revisionCommitStoreStub{result: RevisionCommitResult{RecordID: request.RecordID, RevisionNo: 1, Created: true}}
+	service, err := NewRevisionService(registry, &currentRecordAuthorizationSourceStub{}, store)
+	if err != nil {
+		t.Fatalf("NewRevisionService() error = %v", err)
+	}
+
+	fingerprints := make([][sha256.Size]byte, 0, 3)
+	for _, preparation := range []evidence.RevisionPreparation{firstPreparation, secondPreparation, thirdPreparation} {
+		request.EvidencePreparation = preparation
+		if _, err := service.SaveRevision(context.Background(), request); err != nil {
+			t.Fatalf("SaveRevision() error = %v", err)
+		}
+		if got := store.command.Input.EvidenceSnapshotIDs(); !reflect.DeepEqual(got, preparation.SnapshotIDs()) {
+			t.Fatalf("command evidence IDs = %#v, want %#v", got, preparation.SnapshotIDs())
+		}
+		if got := store.command.EvidencePreparation.SnapshotIDs(); !reflect.DeepEqual(got, preparation.SnapshotIDs()) {
+			t.Fatalf("command preparation IDs = %#v, want %#v", got, preparation.SnapshotIDs())
+		}
+		fingerprint, err := store.command.Idempotency.RequestFingerprint.PersistedBytes()
+		if err != nil {
+			t.Fatalf("PersistedBytes() error = %v", err)
+		}
+		fingerprints = append(fingerprints, fingerprint)
+	}
+	if fingerprints[0] == fingerprints[1] {
+		t.Fatal("prepared evidence order did not change service request fingerprint")
+	}
+	if fingerprints[0] == fingerprints[2] {
+		t.Fatal("prepared evidence identity did not change service request fingerprint")
+	}
+
+	request.Values.EvidenceSnapshotIDs = []string{testRecordEvidenceID1}
+	adapterCalls := adapter.calls
+	storeCalls := store.calls
+	if _, err := service.SaveRevision(context.Background(), request); !errors.Is(err, ErrInvalidRevisionServiceRequest) {
+		t.Fatalf("SaveRevision(client evidence IDs) error = %v, want ErrInvalidRevisionServiceRequest", err)
+	}
+	if adapter.calls != adapterCalls || store.calls != storeCalls {
+		t.Fatalf("client evidence IDs reached adapter/store: adapter=%d store=%d", adapter.calls-adapterCalls, store.calls-storeCalls)
+	}
+
+	request.Values.EvidenceSnapshotIDs = nil
+	otherActor := actor.Clone()
+	otherActor.UserID = "usr_bbbbbbbbbbbbbbbbbbbbbbbb"
+	otherActor, err = recordauth.NormalizeActorScope(otherActor)
+	if err != nil {
+		t.Fatalf("NormalizeActorScope(other) error = %v", err)
+	}
+	request.EvidencePreparation = mustRevisionEvidencePreparation(t, otherActor, request.RecordID,
+		[]string{testRecordEvidenceID1})
+	adapterCalls = adapter.calls
+	storeCalls = store.calls
+	if _, err := service.SaveRevision(context.Background(), request); !errors.Is(err, ErrInvalidRevisionServiceRequest) {
+		t.Fatalf("SaveRevision(actor-mismatched preparation) error = %v, want ErrInvalidRevisionServiceRequest", err)
+	}
+	if adapter.calls != adapterCalls || store.calls != storeCalls {
+		t.Fatalf("actor-mismatched preparation reached adapter/store: adapter=%d store=%d", adapter.calls-adapterCalls, store.calls-storeCalls)
+	}
+}
+
+func mustRevisionEvidencePreparation(
+	t *testing.T,
+	actor recordauth.ActorScope,
+	recordID string,
+	orderedSnapshotIDs []string,
+) evidence.RevisionPreparation {
+	t.Helper()
+	references := make([]evidence.PreparedReference, 0, len(orderedSnapshotIDs))
+	for _, snapshotID := range orderedSnapshotIDs {
+		authorization := mustRecordSourceAuthorization(t, mustRecordVisibility(t))
+		source := revisionEvidenceReferenceSourceStub{state: evidence.ExistingSnapshotReferenceState{
+			RecordID:                   recordID,
+			SnapshotID:                 snapshotID,
+			Key:                        evidence.IPQualityReportV1Key(),
+			SourceType:                 string(authorization.Kind),
+			SourceID:                   authorization.SourceID,
+			CaptureAuthorizationDigest: authorization.Digest,
+			PayloadDigest:              sha256.Sum256([]byte("payload:" + snapshotID)),
+			Authorization:              authorization,
+		}}
+		prepared, err := evidence.PrepareExistingSnapshotReference(
+			context.Background(), &source, actor, recordID, snapshotID,
+		)
+		if err != nil {
+			t.Fatalf("PrepareExistingSnapshotReference(%q) error = %v", snapshotID, err)
+		}
+		references = append(references, prepared)
+	}
+	prepared, err := evidence.NewRevisionPreparation(recordID, evidence.RevisionPreparationValues{
+		References:         references,
+		OrderedSnapshotIDs: orderedSnapshotIDs,
+	})
+	if err != nil {
+		t.Fatalf("NewRevisionPreparation() error = %v", err)
+	}
+	return prepared
+}
+
+type revisionEvidenceReferenceSourceStub struct {
+	state evidence.ExistingSnapshotReferenceState
+}
+
+func (source *revisionEvidenceReferenceSourceStub) ReauthorizeExistingSnapshot(
+	context.Context,
+	evidence.ActorScope,
+	string,
+	string,
+) (evidence.ExistingSnapshotReferenceState, error) {
+	return source.state, nil
 }
 
 func testRevisionServiceRequest(

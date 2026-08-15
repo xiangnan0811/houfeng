@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
 )
@@ -36,16 +37,17 @@ const (
 )
 
 type RevisionCommitCommand struct {
-	RecordID           string
-	BaseRevisionID     string
-	LockVersion        uint64
-	AuthorizationEpoch uint64
-	DraftID            string
-	DraftETag          DraftETag
-	Input              CompleteRevisionInput
-	ActivityKind       DomainActivityKind
-	OutboxTTL          time.Duration
-	Idempotency        recordplatform.IdempotencyClaimInputV1
+	RecordID            string
+	BaseRevisionID      string
+	LockVersion         uint64
+	AuthorizationEpoch  uint64
+	DraftID             string
+	DraftETag           DraftETag
+	Input               CompleteRevisionInput
+	EvidencePreparation evidence.RevisionPreparation
+	ActivityKind        DomainActivityKind
+	OutboxTTL           time.Duration
+	Idempotency         recordplatform.IdempotencyClaimInputV1
 }
 
 type RevisionCommitResult struct {
@@ -85,9 +87,10 @@ type RecordLifecycleResult struct {
 // revision participants after revision authority and the current projection
 // have been written.
 type RevisionCommitted struct {
-	DraftID string
-	Result  RevisionCommitResult
-	Input   CompleteRevisionInput
+	DraftID             string
+	Result              RevisionCommitResult
+	Input               CompleteRevisionInput
+	EvidencePreparation evidence.RevisionPreparation
 }
 
 func (command RevisionCommitCommand) Validate() error {
@@ -109,6 +112,10 @@ func (command RevisionCommitCommand) Validate() error {
 	}
 	if command.Input.title == "" || command.Input.canonicalHash == [32]byte{} {
 		return fmt.Errorf("%w: input", ErrInvalidRevisionCommand)
+	}
+	if err := command.EvidencePreparation.ValidateForRecord(command.RecordID); err != nil ||
+		!reflect.DeepEqual(command.EvidencePreparation.SnapshotIDs(), command.Input.EvidenceSnapshotIDs()) {
+		return fmt.Errorf("%w: evidence preparation", ErrInvalidRevisionCommand)
 	}
 	_, draftETagErr := command.DraftETag.Digest()
 	hasDraftID := command.DraftID != ""

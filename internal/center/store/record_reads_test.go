@@ -119,6 +119,53 @@ func TestLoadStoredRecordRevisionAttachmentIDsPreservesOrdinalOrder(t *testing.T
 	}
 }
 
+func TestLoadStoredRecordRevisionEvidenceSnapshotIDsPreservesOrdinalOrder(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeRecordRevisionEvidenceReadTx{rows: &fakeRecordRevisionEvidenceRows{
+		snapshotIDs: []string{"evs_readfirst", "evs_readsecond"},
+	}}
+	got, err := loadStoredRecordRevisionEvidenceSnapshotIDs(context.Background(), tx, "rrv_readevidence")
+	if err != nil {
+		t.Fatalf("loadStoredRecordRevisionEvidenceSnapshotIDs() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, []string{"evs_readfirst", "evs_readsecond"}) {
+		t.Fatalf("loadStoredRecordRevisionEvidenceSnapshotIDs() = %#v", got)
+	}
+	compact := strings.ToLower(strings.Join(strings.Fields(tx.querySQL), " "))
+	for _, fragment := range []string{
+		"from public.record_revision_evidence",
+		"where revision_id = $1",
+		"order by ordinal asc",
+	} {
+		if !strings.Contains(compact, fragment) {
+			t.Fatalf("evidence query missing %q: %s", fragment, tx.querySQL)
+		}
+	}
+}
+
+func TestLoadStoredRecordRevisionEvidenceSnapshotIDsRejectsNonCanonicalRows(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name        string
+		ordinals    []int64
+		snapshotIDs []string
+	}{
+		{name: "ordinal gap", ordinals: []int64{1}, snapshotIDs: []string{"evs_readfirst"}},
+		{name: "invalid snapshot ID", ordinals: []int64{0}, snapshotIDs: []string{"evs_INVALID"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tx := &fakeRecordRevisionEvidenceReadTx{rows: &fakeRecordRevisionEvidenceRows{
+				ordinals: test.ordinals, snapshotIDs: test.snapshotIDs,
+			}}
+			if _, err := loadStoredRecordRevisionEvidenceSnapshotIDs(context.Background(), tx, "rrv_readevidence"); !errors.Is(err, records.ErrInvalidRecordReadRequest) {
+				t.Fatalf("loadStoredRecordRevisionEvidenceSnapshotIDs() error = %v, want ErrInvalidRecordReadRequest", err)
+			}
+		})
+	}
+}
+
 type fakeRecordReadFenceTx struct {
 	pgx.Tx
 	reservationState string
@@ -194,6 +241,50 @@ func (tx *fakeRecordRevisionAttachmentReadTx) Query(_ context.Context, sql strin
 type fakeRecordRevisionAttachmentRows struct {
 	attachmentIDs []string
 	index         int
+}
+
+type fakeRecordRevisionEvidenceReadTx struct {
+	pgx.Tx
+	rows     pgx.Rows
+	querySQL string
+}
+
+func (tx *fakeRecordRevisionEvidenceReadTx) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	tx.querySQL = sql
+	return tx.rows, nil
+}
+
+type fakeRecordRevisionEvidenceRows struct {
+	ordinals    []int64
+	snapshotIDs []string
+	index       int
+}
+
+func (*fakeRecordRevisionEvidenceRows) Close()                                       {}
+func (*fakeRecordRevisionEvidenceRows) Err() error                                   { return nil }
+func (*fakeRecordRevisionEvidenceRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (*fakeRecordRevisionEvidenceRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (*fakeRecordRevisionEvidenceRows) RawValues() [][]byte                          { return nil }
+func (*fakeRecordRevisionEvidenceRows) Values() ([]any, error)                       { return nil, nil }
+func (*fakeRecordRevisionEvidenceRows) Conn() *pgx.Conn                              { return nil }
+func (rows *fakeRecordRevisionEvidenceRows) Next() bool {
+	if rows.index >= len(rows.snapshotIDs) {
+		return false
+	}
+	rows.index++
+	return true
+}
+func (rows *fakeRecordRevisionEvidenceRows) Scan(dest ...any) error {
+	if len(dest) != 2 || rows.index == 0 || rows.index > len(rows.snapshotIDs) {
+		return errors.New("invalid record revision evidence scan")
+	}
+	ordinal := int64(rows.index - 1)
+	if len(rows.ordinals) != 0 {
+		ordinal = rows.ordinals[rows.index-1]
+	}
+	*(dest[0].(*int64)) = ordinal
+	*(dest[1].(*string)) = rows.snapshotIDs[rows.index-1]
+	return nil
 }
 
 func (*fakeRecordRevisionAttachmentRows) Close()                                       {}

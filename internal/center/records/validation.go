@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"houfeng/internal/center/attachments"
+	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
 )
 
@@ -74,6 +75,10 @@ func NormalizeCompleteRevisionInput(values CompleteRevisionValues) (CompleteRevi
 	if err != nil {
 		return CompleteRevisionInput{}, err
 	}
+	evidenceSnapshotIDs, err := normalizeRevisionEvidenceSnapshotIDs(values.EvidenceSnapshotIDs)
+	if err != nil {
+		return CompleteRevisionInput{}, err
+	}
 	followUpAt := normalizedUTCTime(values.FollowUpAt)
 	template, err := normalizeTemplateProvenance(values.Template)
 	if err != nil {
@@ -106,6 +111,7 @@ func NormalizeCompleteRevisionInput(values CompleteRevisionValues) (CompleteRevi
 		ownerID:                values.OwnerID,
 		participants:           participants,
 		attachmentIDs:          attachmentIDs,
+		evidenceSnapshotIDs:    evidenceSnapshotIDs,
 		followUpAt:             followUpAt,
 		template:               template,
 		authorID:               values.AuthorID,
@@ -129,6 +135,22 @@ func normalizeRevisionAttachmentIDs(values []string) ([]string, error) {
 		attachmentIDs[index] = reference.AttachmentID
 	}
 	return attachmentIDs, nil
+}
+
+func normalizeRevisionEvidenceSnapshotIDs(values []string) ([]string, error) {
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, snapshotID := range values {
+		if !evidence.ValidSnapshotID(snapshotID) {
+			return nil, invalidRevisionInput("evidence snapshot ids")
+		}
+		if _, exists := seen[snapshotID]; exists {
+			return nil, invalidRevisionInput("duplicate evidence snapshot")
+		}
+		seen[snapshotID] = struct{}{}
+		normalized = append(normalized, snapshotID)
+	}
+	return normalized, nil
 }
 
 func normalizeRevisionSubjects(values []RevisionSubject) ([]RevisionSubject, error) {
@@ -335,6 +357,13 @@ func canonicalRevisionHash(input CompleteRevisionInput) [sha256.Size]byte {
 	encoder.length(len(input.attachmentIDs))
 	for _, attachmentID := range input.attachmentIDs {
 		encoder.string(attachmentID)
+	}
+	if len(input.evidenceSnapshotIDs) > 0 {
+		encoder.string("houfeng.records.revision-evidence-snapshot-ids.v1")
+		encoder.length(len(input.evidenceSnapshotIDs))
+		for _, snapshotID := range input.evidenceSnapshotIDs {
+			encoder.string(snapshotID)
+		}
 	}
 	encoder.optionalTime(input.followUpAt)
 	if input.template == nil {

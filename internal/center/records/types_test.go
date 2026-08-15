@@ -1,6 +1,7 @@
 package records
 
 import (
+	"encoding/hex"
 	"errors"
 	"slices"
 	"testing"
@@ -61,6 +62,7 @@ func TestNormalizeCompleteRevisionInputKeepsFieldsImmutableAndUTC(t *testing.T) 
 	t.Parallel()
 
 	values := validCompleteRevisionValues(t)
+	values.EvidenceSnapshotIDs = []string{testRecordEvidenceID1, testRecordEvidenceID2}
 	wantOccurredAt := values.OccurredAt.UTC()
 	wantCompletedAt := values.CompletedAt.UTC()
 	wantFollowUpAt := values.FollowUpAt.UTC()
@@ -104,12 +106,16 @@ func TestNormalizeCompleteRevisionInputKeepsFieldsImmutableAndUTC(t *testing.T) 
 	if attachmentIDs := got.AttachmentIDs(); !slices.Equal(attachmentIDs, []string{testRecordAttachmentID1, testRecordAttachmentID2}) {
 		t.Fatalf("AttachmentIDs() = %#v", attachmentIDs)
 	}
+	if evidenceSnapshotIDs := got.EvidenceSnapshotIDs(); !slices.Equal(evidenceSnapshotIDs, []string{testRecordEvidenceID1, testRecordEvidenceID2}) {
+		t.Fatalf("EvidenceSnapshotIDs() = %#v", evidenceSnapshotIDs)
+	}
 
 	values.Subjects[0].IdentitySnapshot["display_name"] = "input mutation"
 	values.Subjects[0].CaptureAuthorization.CurrentScope.AllowedGroupIDs[0] = "rag_mutated"
 	values.Tags[0] = "input mutation"
 	values.Participants[0].IdentitySnapshot["display_name"] = "input mutation"
 	values.AttachmentIDs[0] = "att_inputmutation"
+	values.EvidenceSnapshotIDs[0] = "evs_inputmutation"
 	values.VisibilityScope.AllowedGroupIDs[0] = "rag_mutated"
 	values.Template.ID = "input_mutation"
 	*values.OccurredAt = values.OccurredAt.Add(24 * time.Hour)
@@ -134,6 +140,8 @@ func TestNormalizeCompleteRevisionInputKeepsFieldsImmutableAndUTC(t *testing.T) 
 	tags[0] = "return mutation"
 	attachmentIDs := got.AttachmentIDs()
 	attachmentIDs[0] = "att_returnmutation"
+	evidenceSnapshotIDs := got.EvidenceSnapshotIDs()
+	evidenceSnapshotIDs[0] = "evs_returnmutation"
 	visibility := got.VisibilityScope()
 	visibility.AllowedGroupIDs[0] = "rag_returned"
 	template := got.Template()
@@ -154,6 +162,9 @@ func TestNormalizeCompleteRevisionInputKeepsFieldsImmutableAndUTC(t *testing.T) 
 	if again := got.AttachmentIDs(); !slices.Equal(again, []string{testRecordAttachmentID1, testRecordAttachmentID2}) {
 		t.Fatalf("stored attachment IDs changed through slice mutation: %#v", again)
 	}
+	if again := got.EvidenceSnapshotIDs(); !slices.Equal(again, []string{testRecordEvidenceID1, testRecordEvidenceID2}) {
+		t.Fatalf("stored evidence snapshot IDs changed through slice mutation: %#v", again)
+	}
 	if again := got.VisibilityScope(); again.AllowedGroupIDs[0] != testRecordGroupID {
 		t.Fatalf("stored visibility changed through returned copy mutation: %#v", again)
 	}
@@ -169,9 +180,11 @@ func TestCompleteRevisionCanonicalHashIsDeterministicAndContentScoped(t *testing
 	t.Parallel()
 
 	baseValues := validCompleteRevisionValues(t)
+	baseValues.EvidenceSnapshotIDs = []string{testRecordEvidenceID1, testRecordEvidenceID2}
 	base := mustCompleteRevisionInput(t, baseValues)
 
 	equivalentValues := validCompleteRevisionValues(t)
+	equivalentValues.EvidenceSnapshotIDs = []string{testRecordEvidenceID1, testRecordEvidenceID2}
 	utcOccurredAt := equivalentValues.OccurredAt.UTC()
 	utcCompletedAt := equivalentValues.CompletedAt.UTC()
 	utcFollowUpAt := equivalentValues.FollowUpAt.UTC()
@@ -188,6 +201,7 @@ func TestCompleteRevisionCanonicalHashIsDeterministicAndContentScoped(t *testing
 	}
 
 	metadataOnlyValues := validCompleteRevisionValues(t)
+	metadataOnlyValues.EvidenceSnapshotIDs = []string{testRecordEvidenceID1, testRecordEvidenceID2}
 	metadataOnlyValues.AuthorID = "usr_aaaaaaaaaaaaaaaaaaaaaaaa"
 	metadataOnlyValues.SaveReason = "different immutable commit metadata"
 	metadataOnly := mustCompleteRevisionInput(t, metadataOnlyValues)
@@ -211,11 +225,19 @@ func TestCompleteRevisionCanonicalHashIsDeterministicAndContentScoped(t *testing
 			values.AttachmentIDs[0], values.AttachmentIDs[1] = values.AttachmentIDs[1], values.AttachmentIDs[0]
 		}},
 		{name: "attachment identity", mutate: func(values *CompleteRevisionValues) { values.AttachmentIDs[0] = "att_changed" }},
+		{name: "evidence snapshot order", mutate: func(values *CompleteRevisionValues) {
+			values.EvidenceSnapshotIDs = []string{testRecordEvidenceID1, testRecordEvidenceID2}
+			values.EvidenceSnapshotIDs[0], values.EvidenceSnapshotIDs[1] = values.EvidenceSnapshotIDs[1], values.EvidenceSnapshotIDs[0]
+		}},
+		{name: "evidence snapshot identity", mutate: func(values *CompleteRevisionValues) {
+			values.EvidenceSnapshotIDs = []string{"evs_changed", testRecordEvidenceID2}
+		}},
 		{name: "template", mutate: func(values *CompleteRevisionValues) { values.Template.Version++ }},
 	}
 	for _, tt := range contentMutations {
 		t.Run(tt.name, func(t *testing.T) {
 			values := validCompleteRevisionValues(t)
+			values.EvidenceSnapshotIDs = []string{testRecordEvidenceID1, testRecordEvidenceID2}
 			tt.mutate(&values)
 			mutated := mustCompleteRevisionInput(t, values)
 			if base.CanonicalHash() == mutated.CanonicalHash() {
@@ -240,5 +262,39 @@ func TestCompleteRevisionEmptyAttachmentIDsHaveStableNonNilEncoding(t *testing.T
 	}
 	if nilInput.CanonicalHash() != emptyInput.CanonicalHash() {
 		t.Fatalf("nil and empty attachment IDs have different hashes: %x != %x", nilInput.CanonicalHash(), emptyInput.CanonicalHash())
+	}
+}
+
+func TestCompleteRevisionEmptyEvidenceSnapshotIDsHaveStableNonNilEncoding(t *testing.T) {
+	t.Parallel()
+
+	nilValues := validCompleteRevisionValues(t)
+	nilValues.EvidenceSnapshotIDs = nil
+	emptyValues := validCompleteRevisionValues(t)
+	emptyValues.EvidenceSnapshotIDs = []string{}
+
+	nilInput := mustCompleteRevisionInput(t, nilValues)
+	emptyInput := mustCompleteRevisionInput(t, emptyValues)
+	if nilInput.EvidenceSnapshotIDs() == nil || emptyInput.EvidenceSnapshotIDs() == nil {
+		t.Fatalf("empty EvidenceSnapshotIDs() must be non-nil: nil=%#v empty=%#v", nilInput.EvidenceSnapshotIDs(), emptyInput.EvidenceSnapshotIDs())
+	}
+	if nilInput.CanonicalHash() != emptyInput.CanonicalHash() {
+		t.Fatalf("nil and empty evidence snapshot IDs have different hashes: %x != %x", nilInput.CanonicalHash(), emptyInput.CanonicalHash())
+	}
+}
+
+func TestCompleteRevisionEmptyEvidenceSnapshotIDsPreserveLegacyCanonicalHash(t *testing.T) {
+	t.Parallel()
+
+	values := validCompleteRevisionValues(t)
+	values.EvidenceSnapshotIDs = nil
+	input := mustCompleteRevisionInput(t, values)
+	legacyHash, err := hex.DecodeString("933598be8c412a4ff9cb2d4003d67f566530d523908ba14163b2d89a0a250978")
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v", err)
+	}
+	got := input.CanonicalHash()
+	if !slices.Equal(got[:], legacyHash) {
+		t.Fatalf("empty evidence canonical hash = %x, want legacy %x", got, legacyHash)
 	}
 }

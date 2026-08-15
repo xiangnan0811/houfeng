@@ -28,6 +28,7 @@ type AppACLCurrentMigrationFragment struct {
 var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	recordsCoreAppACLCurrentMigrationFragment(),
 	recordAttachmentsAppACLCurrentMigrationFragment(),
+	recordEvidenceAppACLCurrentMigrationFragment(),
 }
 
 func recordsCoreAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -184,6 +185,65 @@ func recordAttachmentsAppACLCurrentPrivileges(string) []AppACLPrivilege {
 	}
 	appendTable(AppACLSubjectPlatformAdmin, "blob_gc_deletions", AppACLPrivilegeSelect)
 	appendTable(AppACLSubjectPlatformAdmin, "blob_publication_intents", AppACLPrivilegeSelect)
+	return privileges
+}
+
+func recordEvidenceAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	objects := make([]AppACLManagedObjectR1, 0, 7)
+	for _, table := range []string{
+		"evidence_payloads",
+		"evidence_snapshots",
+		"evidence_capture_intents",
+		"record_revision_evidence",
+		"evidence_copy_lineage",
+		"evidence_purge_receipts",
+		"evidence_payload_gc_receipts",
+	} {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: table,
+		})
+	}
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0054_create_record_evidence.sql",
+		Objects:    objects,
+		Privileges: recordEvidenceAppACLCurrentPrivileges,
+	}
+}
+
+func recordEvidenceAppACLCurrentPrivileges(string) []AppACLPrivilege {
+	privileges := make([]AppACLPrivilege, 0, 21)
+	appendTable := func(subject AppACLSubject, table string, kinds ...AppACLPrivilegeKind) {
+		for _, kind := range kinds {
+			privileges = append(privileges, AppACLPrivilege{
+				Subject:        subject,
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     appACLManagedPublicSchemaR1,
+				ObjectIdentity: table,
+				Privilege:      kind,
+			})
+		}
+	}
+
+	runtime := AppACLSubjectCenterRuntime
+	for _, table := range []string{
+		"evidence_payloads",
+		"evidence_snapshots",
+		"evidence_capture_intents",
+		"record_revision_evidence",
+		"evidence_copy_lineage",
+	} {
+		appendTable(runtime, table,
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeDelete)
+	}
+	for _, table := range []string{
+		"evidence_purge_receipts",
+		"evidence_payload_gc_receipts",
+	} {
+		appendTable(runtime, table, AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+		appendTable(AppACLSubjectPlatformAdmin, table, AppACLPrivilegeSelect)
+	}
 	return privileges
 }
 

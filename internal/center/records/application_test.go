@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -14,7 +15,10 @@ func TestApplicationRestoreRevisionCopiesHistoricalContentThroughFreshSubjectRef
 	t.Parallel()
 
 	actor := mustRecordActor(t)
-	historicalInput := mustCompleteRevisionInput(t, validCompleteRevisionValues(t))
+	historicalValues := validCompleteRevisionValues(t)
+	historicalValues.EvidenceSnapshotIDs = []string{testRecordEvidenceID1, testRecordEvidenceID2}
+	historicalInput := mustCompleteRevisionInput(t, historicalValues)
+	evidencePreparation := mustRevisionEvidencePreparation(t, actor, "rec_restoreapp", historicalInput.EvidenceSnapshotIDs())
 	steps := make([]string, 0, 3)
 	read := &recordApplicationReadStub{
 		getRevision: func(_ context.Context, request RecordRevisionGetRequest) (RecordRevision, error) {
@@ -63,6 +67,12 @@ func TestApplicationRestoreRevisionCopiesHistoricalContentThroughFreshSubjectRef
 			if !reflect.DeepEqual(request.Values.AttachmentIDs, historicalInput.AttachmentIDs()) {
 				t.Fatalf("SaveRevision() attachment IDs = %#v, want %#v", request.Values.AttachmentIDs, historicalInput.AttachmentIDs())
 			}
+			if len(request.Values.EvidenceSnapshotIDs) != 0 {
+				t.Fatalf("SaveRevision() accepted client-owned evidence snapshot IDs = %#v", request.Values.EvidenceSnapshotIDs)
+			}
+			if !slices.Equal(request.EvidencePreparation.SnapshotIDs(), historicalInput.EvidenceSnapshotIDs()) {
+				t.Fatalf("SaveRevision() evidence preparation IDs = %#v, want %#v", request.EvidencePreparation.SnapshotIDs(), historicalInput.EvidenceSnapshotIDs())
+			}
 			wantReferences := []SubjectReference{{
 				RegistryVersion: historicalInput.Subjects()[0].RegistryVersion,
 				Kind:            historicalInput.Subjects()[0].Kind,
@@ -76,6 +86,7 @@ func TestApplicationRestoreRevisionCopiesHistoricalContentThroughFreshSubjectRef
 
 			copied := request.Values
 			copied.Subjects = historicalInput.Subjects()
+			copied.EvidenceSnapshotIDs = request.EvidencePreparation.SnapshotIDs()
 			copied.AuthorID = actor.UserID
 			input, err := NormalizeCompleteRevisionInput(copied)
 			if err != nil {
@@ -112,11 +123,12 @@ func TestApplicationRestoreRevisionCopiesHistoricalContentThroughFreshSubjectRef
 	}
 
 	result, err := application.RestoreRevision(context.Background(), RecordRestoreRequest{
-		Actor:          actor,
-		RecordID:       "rec_restoreapp",
-		RevisionID:     "rrv_historicalapp",
-		SaveReason:     "restore historical revision",
-		IdempotencyKey: "restore-app-key",
+		Actor:               actor,
+		RecordID:            "rec_restoreapp",
+		RevisionID:          "rrv_historicalapp",
+		EvidencePreparation: evidencePreparation,
+		SaveReason:          "restore historical revision",
+		IdempotencyKey:      "restore-app-key",
 	})
 	if err != nil {
 		t.Fatalf("RestoreRevision() error = %v", err)
@@ -127,6 +139,21 @@ func TestApplicationRestoreRevisionCopiesHistoricalContentThroughFreshSubjectRef
 	if want := []string{"historical_read", "current_read", "revision_save"}; !reflect.DeepEqual(steps, want) {
 		t.Fatalf("RestoreRevision() steps = %#v, want %#v", steps, want)
 	}
+
+	steps = steps[:0]
+	_, err = application.RestoreRevision(context.Background(), RecordRestoreRequest{
+		Actor:          actor,
+		RecordID:       "rec_restoreapp",
+		RevisionID:     "rrv_historicalapp",
+		SaveReason:     "restore without prepared evidence",
+		IdempotencyKey: "restore-app-missing-evidence",
+	})
+	if !errors.Is(err, ErrInvalidApplicationRequest) {
+		t.Fatalf("RestoreRevision(missing evidence preparation) error = %v, want ErrInvalidApplicationRequest", err)
+	}
+	if want := []string{"historical_read"}; !reflect.DeepEqual(steps, want) {
+		t.Fatalf("RestoreRevision(missing evidence preparation) steps = %#v, want %#v", steps, want)
+	}
 }
 
 func TestApplicationMutationEntryPointsSetKindsAndInternalOptions(t *testing.T) {
@@ -135,6 +162,7 @@ func TestApplicationMutationEntryPointsSetKindsAndInternalOptions(t *testing.T) 
 	actor := mustRecordActor(t)
 	values := validCompleteRevisionValues(t)
 	references := subjectReferencesForRestore(values.Subjects)
+	evidencePreparation := mustRevisionEvidencePreparation(t, actor, "rec_applicationcreate", []string{testRecordEvidenceID1})
 	values.Subjects = nil
 	values.AuthorID = ""
 	payload, err := NewDraftPayload([]byte(`{"title":"application draft"}`))
@@ -173,28 +201,30 @@ func TestApplicationMutationEntryPointsSetKindsAndInternalOptions(t *testing.T) 
 	}
 
 	_, err = application.CreateRecord(context.Background(), RecordCreateRequest{
-		Actor:             actor,
-		RecordID:          "rec_applicationcreate",
-		DraftID:           "rdf_application",
-		DraftETag:         draftETag,
-		Values:            values,
-		SubjectReferences: references,
-		IdempotencyKey:    "application-create",
+		Actor:               actor,
+		RecordID:            "rec_applicationcreate",
+		DraftID:             "rdf_application",
+		DraftETag:           draftETag,
+		Values:              values,
+		SubjectReferences:   references,
+		EvidencePreparation: evidencePreparation,
+		IdempotencyKey:      "application-create",
 	})
 	if err != nil {
 		t.Fatalf("CreateRecord() error = %v", err)
 	}
 	_, err = application.CreateRevision(context.Background(), RecordRevisionCreateRequest{
-		Actor:              actor,
-		RecordID:           "rec_applicationcreate",
-		BaseRevisionID:     "rrv_applicationbase",
-		LockVersion:        7,
-		AuthorizationEpoch: 5,
-		DraftID:            "rdf_application",
-		DraftETag:          draftETag,
-		Values:             values,
-		SubjectReferences:  references,
-		IdempotencyKey:     "application-revise",
+		Actor:               actor,
+		RecordID:            "rec_applicationcreate",
+		BaseRevisionID:      "rrv_applicationbase",
+		LockVersion:         7,
+		AuthorizationEpoch:  5,
+		DraftID:             "rdf_application",
+		DraftETag:           draftETag,
+		Values:              values,
+		SubjectReferences:   references,
+		EvidencePreparation: evidencePreparation,
+		IdempotencyKey:      "application-revise",
 	})
 	if err != nil {
 		t.Fatalf("CreateRevision() error = %v", err)
@@ -227,7 +257,8 @@ func TestApplicationMutationEntryPointsSetKindsAndInternalOptions(t *testing.T) 
 			request.IdempotencyTTL != 24*time.Hour || request.OutboxTTL != 24*time.Hour ||
 			request.DraftID != "rdf_application" || request.DraftETag != draftETag ||
 			!reflect.DeepEqual(request.Actor, actor) || !reflect.DeepEqual(request.Values, values) ||
-			!reflect.DeepEqual(request.SubjectReferences, references) {
+			!reflect.DeepEqual(request.SubjectReferences, references) ||
+			!slices.Equal(request.EvidencePreparation.SnapshotIDs(), evidencePreparation.SnapshotIDs()) {
 			t.Fatalf("SaveRevision() request = %#v", request)
 		}
 	}
