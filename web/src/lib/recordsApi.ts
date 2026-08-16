@@ -15,6 +15,9 @@ import type {
   AttachmentUploadSession,
   CreateAttachmentUploadInput,
   CreateRecordDraftInput,
+  EvidenceCapturePreview,
+  EvidenceCapturePreviewInput,
+  EvidenceSnapshotRead,
   PatchRecordDraftInput,
   PublishRecordInput,
   PublishRecordRevisionInput,
@@ -109,6 +112,38 @@ export function listRecords(filter?: RecordListFilter): Promise<RecordListRespon
         cursor: filter.cursor,
       }
     : undefined))
+}
+
+export function captureEvidencePreview(
+  input: EvidenceCapturePreviewInput,
+  signal?: AbortSignal,
+): Promise<EvidenceCapturePreview> {
+  const body: EvidenceCapturePreviewInput = {
+    kind: input.kind,
+    schema_version: input.schema_version,
+    source_type: input.source_type,
+    source_id: input.source_id,
+    requested_window: {
+      start: input.requested_window.start,
+      end: input.requested_window.end,
+    },
+    metrics: [...input.metrics],
+    precision_seconds: input.precision_seconds,
+    sensitive_topology_fields: [...input.sensitive_topology_fields],
+  }
+  if (input.record_id !== undefined) body.record_id = input.record_id
+  const init = jsonBodyInit('POST', body)
+  if (signal) init.signal = signal
+  return requestJSON<EvidenceCapturePreview>('/api/evidence/capture-previews', init)
+}
+
+export function getEvidenceSnapshot(
+  snapshotId: string,
+  signal?: AbortSignal,
+): Promise<EvidenceSnapshotRead> {
+  const init: RequestInit = {}
+  if (signal) init.signal = signal
+  return requestJSON<EvidenceSnapshotRead>(`/api/evidence/${encoded(snapshotId)}`, init)
 }
 
 export function createAttachmentUpload(

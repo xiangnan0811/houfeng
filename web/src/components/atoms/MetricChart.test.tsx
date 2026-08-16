@@ -267,4 +267,36 @@ describe('MetricChart', () => {
     expect(polyline).toBeTruthy()
     expect(polyline!.getAttribute('stroke')).toBe('var(--color-state-critical)')
   })
+
+  it('splits the trend at explicit gaps without synthesizing zero-valued samples', () => {
+    const samples: MetricChartSample[] = [
+      { value: 12, observedAt: '2026-04-30T08:00:00Z' },
+      { value: 18, observedAt: '2026-04-30T08:05:00Z' },
+      { value: 31, observedAt: '2026-04-30T08:20:00Z', gapBefore: true },
+      { value: 27, observedAt: '2026-04-30T08:25:00Z' },
+    ]
+
+    const { container } = render(<MetricChart samples={samples} width={360} />)
+
+    const polylines = Array.from(container.querySelectorAll('polyline'))
+    expect(polylines).toHaveLength(2)
+    expect(polylines.map((line) => new Set(line.getAttribute('points')?.split(' ')).size)).toEqual([2, 2])
+    expect(container).not.toHaveTextContent('0.0')
+  })
+
+  it('keeps isolated samples visible when gaps create one-point segments', () => {
+    const samples: MetricChartSample[] = [
+      { value: 12, observedAt: '2026-04-30T08:00:00Z' },
+      { value: 31, observedAt: '2026-04-30T08:20:00Z', gapBefore: true },
+      { value: 27, observedAt: '2026-04-30T08:25:00Z' },
+    ]
+
+    const { container } = render(<MetricChart samples={samples} width={360} />)
+
+    const polylines = Array.from(container.querySelectorAll('polyline'))
+    expect(polylines).toHaveLength(2)
+    const isolatedPoints = polylines[0]?.getAttribute('points')?.split(' ')
+    expect(isolatedPoints).toHaveLength(2)
+    expect(new Set(isolatedPoints).size).toBe(1)
+  })
 })

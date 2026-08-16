@@ -134,6 +134,33 @@ func DecodeCanonicalPayload(descriptor Descriptor, encoded []byte) (CanonicalPay
 	return reencoded, nil
 }
 
+// RestoreCanonicalSnapshot reconstructs one immutable logical snapshot from
+// its persisted, canonical payload bytes and envelope. It never accepts a raw
+// JSON fallback: the descriptor key, canonicalization version, byte-for-byte
+// encoding, digest, size, and complete envelope are all revalidated.
+func RestoreCanonicalSnapshot(
+	descriptor Descriptor,
+	envelope SnapshotEnvelope,
+	encoded []byte,
+) (CanonicalSnapshot, error) {
+	payload, err := DecodeCanonicalPayload(descriptor, encoded)
+	if err != nil {
+		return CanonicalSnapshot{}, err
+	}
+	if envelope.CanonicalHash != payload.Hash() || envelope.CanonicalSize != payload.Size() {
+		return CanonicalSnapshot{}, fmt.Errorf("%w: canonical payload binding", ErrInvalidSnapshotEnvelope)
+	}
+	normalized, err := normalizeSnapshotEnvelope(descriptor, envelope)
+	if err != nil {
+		return CanonicalSnapshot{}, err
+	}
+	snapshot := CanonicalSnapshot{envelope: normalized, payload: payload}
+	if err := snapshot.Validate(descriptor); err != nil {
+		return CanonicalSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
 func NewCanonicalSnapshot(
 	descriptor Descriptor,
 	envelope SnapshotEnvelope,
@@ -816,7 +843,7 @@ func validatePreviewQuotaOutcome(outcome QuotaOutcome) error {
 		if outcome.Reason != "" {
 			return ErrInvalidSnapshotEnvelope
 		}
-	case QuotaExceeded, QuotaUnavailable:
+	case QuotaWarning, QuotaExceeded, QuotaUnavailable:
 		if strings.TrimSpace(outcome.Reason) == "" || !validEnvelopeString(outcome.Reason) {
 			return ErrInvalidSnapshotEnvelope
 		}
@@ -827,7 +854,8 @@ func validatePreviewQuotaOutcome(outcome QuotaOutcome) error {
 }
 
 func validateCapturedQuotaOutcome(outcome QuotaOutcome) error {
-	if err := validatePreviewQuotaOutcome(outcome); err != nil || outcome.Status != QuotaAllowed {
+	if err := validatePreviewQuotaOutcome(outcome); err != nil ||
+		(outcome.Status != QuotaAllowed && outcome.Status != QuotaWarning) {
 		return ErrInvalidSnapshotEnvelope
 	}
 	return nil

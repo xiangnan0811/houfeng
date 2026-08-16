@@ -20,6 +20,7 @@ type RouterOptions struct {
 	RecordsHandler                                stdhttp.Handler
 	RecordDraftsHandler                           stdhttp.Handler
 	RecordDeletionsHandler                        stdhttp.Handler
+	EvidenceHandler                               stdhttp.Handler
 	AttachmentUploadsHandler                      stdhttp.Handler
 	AttachmentsHandler                            stdhttp.Handler
 	AssetDomainsCollectionHandler                 stdhttp.Handler
@@ -164,6 +165,11 @@ func New(opts RouterOptions) stdhttp.Handler {
 		mux.Handle("/api/records/{record_id}/permanent-delete-preview", handler)
 		mux.Handle("/api/records/{record_id}/permanent-delete", handler)
 		mux.Handle("/api/record-deletions/{operation_id}", handler)
+	}
+	if opts.RecordsEnabled && opts.EvidenceHandler != nil {
+		handler := protect(opts.EvidenceHandler)
+		mux.Handle("/api/evidence/capture-previews", handler)
+		mux.Handle("/api/evidence/{evidence_id}", handler)
 	}
 	if opts.RecordsEnabled && opts.AttachmentUploadsHandler != nil {
 		handler := protect(opts.AttachmentUploadsHandler)

@@ -253,3 +253,11 @@ func RecordAttachmentsSurfaceDigest() [sha256.Size]byte {
 	}
 	return digestAdapterSurfaces(descriptor)
 }
+
+func RecordEvidenceSurfaceDigest() [sha256.Size]byte {
+	descriptor, err := NewAdapterDescriptor(AdapterNameRecordEvidence, RecordEvidenceSurfaceNames())
+	if err != nil {
+		return [sha256.Size]byte{}
+	}
+	return digestAdapterSurfaces(descriptor)
+}

@@ -207,9 +207,11 @@ type kindStub struct {
 	authorization    AuthorizationScope
 	snapshot         CanonicalSnapshot
 	previewCalled    bool
+	previewErr       error
 	authorizeCalled  bool
 	selectionChecked bool
 	captureCalled    bool
+	exportCalls      int
 	exportMaterial   *ExportMaterial
 	summary          *Summary
 	comparison       *Comparison
@@ -224,7 +226,7 @@ func (stub *kindStub) ValidateSelection(context.Context, ActorScope, Selection) 
 
 func (stub *kindStub) PreviewCapture(context.Context, ActorScope, Selection) (Preview, error) {
 	stub.previewCalled = true
-	return stub.preview, nil
+	return stub.preview, stub.previewErr
 }
 
 func (stub *kindStub) Capture(context.Context, ActorScope, Intent) (CanonicalSnapshot, error) {
@@ -241,7 +243,7 @@ func (stub *kindStub) Summarize(CanonicalSnapshot) Summary {
 	if stub.summary != nil {
 		return *stub.summary
 	}
-	return Summary{Key: stub.descriptor.Key, RendererVersion: stub.descriptor.Conformance.RendererVersion, Title: "summary", SearchText: "summary", ReadModel: map[string]any{"status": "ok"}}
+	return Summary{Key: stub.descriptor.Key, RendererVersion: stub.descriptor.Conformance.RendererVersion, Title: "summary", SearchText: "summary", ReadModel: map[string]any{"version": "test_read_model/v1", "status": "ok"}}
 }
 
 func (stub *kindStub) Compare(CanonicalSnapshot, CanonicalSnapshot, Alignment) Comparison {
@@ -252,6 +254,7 @@ func (stub *kindStub) Compare(CanonicalSnapshot, CanonicalSnapshot, Alignment) C
 }
 
 func (stub *kindStub) Export(CanonicalSnapshot, ExportMode) ExportMaterial {
+	stub.exportCalls++
 	if stub.exportMaterial != nil {
 		return *stub.exportMaterial
 	}

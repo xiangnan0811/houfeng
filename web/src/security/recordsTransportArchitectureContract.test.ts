@@ -22,6 +22,7 @@ const EAGER_ROOTS = [
 
 const EXPECTED_EXPORTS = [
   'archiveRecord',
+  'captureEvidencePreview',
   'completeAttachmentUpload',
   'createAttachmentUpload',
   'createRecord',
@@ -31,6 +32,7 @@ const EXPECTED_EXPORTS = [
   'executeRecordPermanentDeletion',
   'getAttachmentContent',
   'getAttachmentMetadata',
+  'getEvidenceSnapshot',
   'getRecord',
   'getRecordDeletionOperation',
   'getRecordDraft',

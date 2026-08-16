@@ -435,6 +435,18 @@ func TestPostgresEvidenceRepositoryNilTypedNilAndFailingAdmissionMakeZeroPrimiti
 				_, err := repository.CollectUnreferencedPayloads(context.Background(), 10)
 				return err
 			}},
+			{name: "project capacity", run: func(repository *PostgresEvidenceRepository) error {
+				_, err := repository.ReadProjectEvidenceCapacity(context.Background(), string(recordauth.ProjectIDDefault))
+				return err
+			}},
+			{name: "capacity aggregate", run: func(repository *PostgresEvidenceRepository) error {
+				_, err := repository.ReadEvidenceCapacityAggregate(context.Background())
+				return err
+			}},
+			{name: "lifecycle backlog", run: func(repository *PostgresEvidenceRepository) error {
+				_, err := repository.ReadEvidenceLifecycleBacklog(context.Background(), 10)
+				return err
+			}},
 		} {
 			t.Run(gate.name+"/"+operation.name, func(t *testing.T) {
 				tx := &fakeRecordPlatformTx{}
@@ -493,9 +505,8 @@ func storeEvidenceIntentFixture() (evidence.Intent, evidence.Preview) {
 	return intent, preview
 }
 
-func storeEvidenceSnapshotFixture(t *testing.T, value string) evidence.CanonicalSnapshot {
-	t.Helper()
-	descriptor := evidence.Descriptor{
+func storeEvidenceDescriptor() evidence.Descriptor {
+	return evidence.Descriptor{
 		Key:    evidence.MonitoringHostV1Key(),
 		Fields: []evidence.FieldDefinition{{Path: "value", Sensitivity: evidence.SensitivityNormal}},
 		Conformance: evidence.ConformanceMetadata{
@@ -504,6 +515,11 @@ func storeEvidenceSnapshotFixture(t *testing.T, value string) evidence.Canonical
 			RendererVersion:         "renderer.v1", MaxCanonicalBytes: evidence.MaxCanonicalPayloadBytes,
 		},
 	}
+}
+
+func storeEvidenceSnapshotFixture(t *testing.T, value string) evidence.CanonicalSnapshot {
+	t.Helper()
+	descriptor := storeEvidenceDescriptor()
 	visibility, err := recordauth.NormalizeVisibilityScope(recordauth.VisibilityScope{
 		Version: recordauth.VisibilityScopeVersionV1, Kind: recordauth.VisibilityKindProject,
 		ProjectID: recordauth.ProjectIDDefault, PolicyVersion: recordauth.PolicyVersionV1, PolicyRevision: 1,

@@ -80,24 +80,34 @@ Task 4 evidence (2026-08-16): native `trellis-implement` 以 RED 固定 event/ba
 
 **Files:** Create handlers `evidence.go`; create `internal/center/evidence/{deletion_adapter,recovery_adapter,export_adapter}.go` and colocated tests; modify router/bootstrap.
 
-- [ ] handler RED matrix覆盖preview/read、unknown kind、source unstable、preview stale、permission intersection、response allowlist。
-- [ ] 实现 `/api/evidence/capture-previews`、`GET /api/evidence/:id`和records save hook。
-- [ ] deletion清logical refs/owned snapshots并保留其他copy；export只调用kind.Export。
-- [ ] `evidence.NewRecoveryAdapter`重放logical snapshot/payload/intent/source floor与`comparison.result/*` kind，基于恢复后全局引用GC；unknown kind/version失败关闭而非通用JSON。
+- [x] handler RED matrix覆盖preview/read、unknown kind、source unstable、preview stale、permission intersection、response allowlist。
+- [x] 实现 `/api/evidence/capture-previews`、`GET /api/evidence/:id`和records save hook。
+- [x] deletion清logical refs/owned snapshots并保留其他copy；export只调用kind.Export。
+- [x] `evidence.NewRecoveryAdapter`重放logical snapshot/payload/intent/source floor与`comparison.result/*` kind，基于恢复后全局引用GC；unknown kind/version失败关闭而非通用JSON。
+
+Task 5 evidence (2026-08-16): native `trellis-implement` 先以RED固定preview/read、unknown kind/version、source unstable、preview stale、record+source授权交集、strict response allowlist，以及create/revise/restore有序evidence preparation；GREEN新增Evidence service/handler、router/bootstrap稳定失败关闭接线、Records save hook与revision response snapshot IDs，并复用既有`RevisionPreparer`和transaction participant。新增closed `record_evidence` deletion surfaces、schema-aware export和deterministic recovery inventory/replay；删除只清record-owned refs/intents/logical snapshots并在全局无引用时清payload，显式copy及lineage存活；export只调用registered `kind.Export`并在runtime复核forbidden corpus；恢复重放canonical gzip payload、logical snapshot、intent、revision ref、source authorization floor和lineage，仅接受registry显式注册kind，`comparison.result/*`不按prefix放行，完成后做全局引用GC。独立`trellis-check`以真实PostgreSQL RED修复删除receipt与recovery replay不可重试、恢复inventory orphan payload、浅拷贝TOCTOU、offset/亚微秒时间规范化、Records非空items被错误preparer静默丢弃、read DTO parity及runtime versioned read-model/export allowlist；同时将PG fixture改为production revision participant和公开RecoveryAdapter路径，重试相同输入幂等、分歧输入失败关闭。主会话最终独立复验严格Docker-backed Task 5 deletion/recovery与完整record-evidence participant矩阵全部PASS且无`SKIP`，`make verify-go`、`go test ./... -count=1`、七包affected race、`go vet ./...`、`go mod verify`、全部改动Go文件`gofmt -d`、`git diff --check 425a758df86c4d138ba80d376e66d10274ff28ae`和`task.py validate`均通过。Child 10真实AdmissionGate/source resolver/read/reference production composition未提前接线，nil/typed-nil production capture/save继续稳定503；Task 2B production gate保持未勾选，Task 6/7未推进。
 
 ## Task 6: Web selector与renderer registry
 
 **Files:** Create `pages/records/evidence/EvidenceRendererRegistry.tsx`, kind renderers, `EvidenceCapturePicker.tsx` + tests; extend lazy `web/src/lib/recordsApi.ts` and canonical DTOs in `web/src/lib/types.ts`.
 
-- [ ] RED tests覆盖selector顺序、preview fields/stale、sensitive explicit choice、权威unknown schema fail-closed且payload/metadata不进入普通UI、趋势缺口不连线；external quarantine fallback不在本任务实现。
-- [ ] 实现allowlisted renderers并复用MetricChart；禁止`JSON.stringify(payload)` fallback。
-- [ ] Vitest/lint/build/bundle/CSS GREEN。
+- [x] RED tests覆盖selector顺序、preview fields/stale、sensitive explicit choice、权威unknown schema fail-closed且payload/metadata不进入普通UI、趋势缺口不连线；external quarantine fallback不在本任务实现。
+- [x] 实现allowlisted renderers并复用MetricChart；禁止`JSON.stringify(payload)` fallback。
+- [x] Vitest/lint/build/bundle/CSS GREEN。
+
+Task 6 evidence (2026-08-16): native `trellis-implement`新增纯注入、未挂载route的ordered capture picker、lazy-only records API DTO/transport，以及六个exact `(kind, schema, renderer, read_model.version)` renderer registry；native `trellis-check`以RED补齐preview source/window parity、稳定clock与async abort/reset、深层bounded fail-closed decoder、hostile nested fields、精确UTC/枚举/数值/chronology语义、provider identity去重、monitoring跨gap/缺bucket分段与单点gap可见性，普通路径无arbitrary JSON renderer/export/fallback。Node 22 focused Task 6/architecture/bundle/CSS矩阵`9 files / 94 tests`通过；完整`make verify-web`以clean install通过ESLint、`131 files / 939 tests`、coverage、TypeScript/Vite build、bundle（entry JS gzip `110734 <= 110738`，CSS `37125 <= 37125`，max async `31904 <= 32052`）和CSS analyze/budget。Task 6仅为前端数据/展示路径，不需要PostgreSQL；Task 7与Child 10未推进。
 
 ## Task 7: 容量、janitor与完整门
 
-- [ ] 实现evidence独立capacity/alerts、intent/payload orphan janitor与metrics；不受附件quota阻断。
-- [ ] 运行determinism/fuzz、race、真实PG、`make verify-go`、Node22 `make verify-web`、`trellis-check`。
-- [ ] 更新IP质量/数据库/Web state spec，提交PR/CI；feature仍off。
+- [x] 实现evidence独立capacity/alerts、intent/payload orphan janitor与metrics；不受附件quota阻断。
+- [x] 运行determinism/fuzz、race、真实PG、`make verify-go`、Node22 `make verify-web`、`trellis-check`。
+- [x] 更新IP质量/数据库/Web state spec，提交PR/CI；feature仍off。
+
+Task 7 implementation evidence (2026-08-16): native `trellis-implement`以RED固定独立10 GiB/80%可调capacity policy、warning可确认而exceeded/unavailable不可持久化、project logical snapshot accounting、existing-reference exemption、事务内project advisory lock与最终quota复核、bounded janitor顺序/批次、aggregate metrics/alerts/backlog、typed-nil production bootstrap和Web quota response parity；GREEN复用既有expired-intent与24小时全局无引用payload GC primitives，不查询attachment quota、不增加migration。严格Docker PostgreSQL矩阵覆盖exact boundary、超限回滚、global-reference lifecycle和同project并发oversubscription，全部PASS且无`SKIP`；worker `-count=10`、capacity fuzz（约50.8万次执行）、affected race、focused Go/Web、`make verify-go`、`go test ./... -count=1`、`go vet ./...`、`go mod verify`、`gofmt -d`、diff/migration检查，以及Node 22 `make verify-web`（`131 files / 944 tests`、coverage、TypeScript/Vite build、bundle与CSS budget）均通过。evidence、database、IP quality与Web state specs已更新；production nil/typed-nil AdmissionGate不注册worker且capture/save继续稳定关闭；该实现交接时Child 10 composition、独立`trellis-check`、commit/PR/CI仍未执行。
+
+Task 7 independent check evidence (2026-08-16): native `trellis-check`不信任实现摘要，逐文件审查并用RED→GREEN修复五组Important：production participant constructor的`panic`与非整数warning threshold向下取整；capacity接受unknown project及logical/physical不可能组合；maintenance在后段失败时丢失已完成cleanup metrics、覆盖既有capacity alert、记录无结构错误、接受超batch/非canonical或重复GC receipt、矛盾backlog/aggregate并在中途取消后继续stage；real gate配nil pool仍构造worker；Web接受任意非空quota reason并把dependency/identity文本渲染成可确认warning。project ID现在复用`recordauth`闭合registry，threshold采用无overflow向上取整，worker校验有界结果并在取消时保留已完成aggregate而不制造failure alert，quota status/reason使用三组固定文本。另新增公开repository/participant路径的双capture同事务累计真实PG覆盖；跨warning状态的sibling capture按spec要求视为exact-preview stale而非静默重写。最终严格Docker PostgreSQL五项全部实际`RUN/PASS`且无`SKIP`；maintenance `-count=10`、capacity matrix `-count=100`、10秒fuzz `2,428,493 execs`、affected race、`make verify-go`、uncached `go test ./... -count=1`、`go vet ./...`、`go mod verify`、changed-Go `gofmt -d`与diff check全部通过。Node 22 `make verify-web` clean install后通过ESLint、`131 files / 945 tests`、coverage、TypeScript/Vite、entry/bundle/font预算和CSS analyze/budget。Task 7独立审查与完整门已闭环；第三项仍因commit/PR/CI尚未执行保持未勾选，production feature继续关闭且未推进Child 10。
+
+Task 7 delivery evidence (2026-08-16): Tasks 5–7以六个分层实现/规格commit推送到`codex/vps-records-evidence-platform-task5`并创建ready PR [#406](https://github.com/xiangnan0811/houfeng/pull/406)。首轮GitHub Actions run `31954830084`的`go`、`web`、`web-browser`、`docker-image`及`record-platform-pg16-catalog` PostgreSQL `16.0`/`16.6`/`16.12`七项全部PASS；该证据提交后仍需以同一PR最终head的CI再次确认。production feature继续关闭，真实AdmissionGate/source composition仍由Child 10拥有。
 
 ## Rollback
 

@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"houfeng/internal/center/recordauth"
 )
 
 func TestRevisionPreparerPreparesFreshCaptureAndExistingReferenceInRequestOrder(t *testing.T) {
@@ -35,7 +37,8 @@ func TestRevisionPreparerPreparesFreshCaptureAndExistingReferenceInRequestOrder(
 	referenceState := testExistingSnapshotReferenceState(t, "evs_reference1")
 	referenceState.RecordID = inputs.recordID
 	referenceSource := &revisionPreparationReferenceSourceStub{state: referenceState, events: &events}
-	preparer, err := NewRevisionPreparer(registry, intentSource, payloadSink, referenceSource)
+	preparer, err := NewRevisionPreparer(registry, intentSource, payloadSink, referenceSource,
+		mustPreparationCapacity(t, actor.ProjectID, 0, DefaultProjectEvidenceCapacityBytes, 80))
 	if err != nil {
 		t.Fatalf("NewRevisionPreparer() error = %v", err)
 	}
@@ -92,6 +95,7 @@ func TestRevisionPreparerRejectsCaptureDriftBeforePersistingPayload(t *testing.T
 		}},
 		sink,
 		&revisionPreparationReferenceSourceStub{},
+		mustPreparationCapacity(t, testActor(t).ProjectID, 0, DefaultProjectEvidenceCapacityBytes, 80),
 	)
 	if err != nil {
 		t.Fatalf("NewRevisionPreparer() error = %v", err)
@@ -127,6 +131,7 @@ func TestRevisionPreparerDoesNotConstructCaptureWhenPayloadPersistenceFails(t *t
 		}},
 		&capturePayloadSinkStub{err: persistErr},
 		&revisionPreparationReferenceSourceStub{},
+		mustPreparationCapacity(t, testActor(t).ProjectID, 0, DefaultProjectEvidenceCapacityBytes, 80),
 	)
 	if err != nil {
 		t.Fatalf("NewRevisionPreparer() error = %v", err)
@@ -232,7 +237,8 @@ func TestRevisionPreparerRejectsNoncanonicalRawBindingTimestampsBeforeAdapters(t
 				}
 				source := &captureIntentBindingSourceStub{binding: binding, events: &events}
 				sink := &capturePayloadSinkStub{events: &events}
-				preparer, err := NewRevisionPreparer(registry, source, sink, &revisionPreparationReferenceSourceStub{})
+				preparer, err := NewRevisionPreparer(registry, source, sink, &revisionPreparationReferenceSourceStub{},
+					mustPreparationCapacity(t, testActor(t).ProjectID, 0, DefaultProjectEvidenceCapacityBytes, 80))
 				if err != nil {
 					t.Fatalf("NewRevisionPreparer() error = %v", err)
 				}
@@ -253,6 +259,73 @@ func TestRevisionPreparerRejectsNoncanonicalRawBindingTimestampsBeforeAdapters(t
 			})
 		}
 	}
+}
+
+func TestRevisionPreparerFinalCapacityRecheckAndExistingReferenceExemption(t *testing.T) {
+	actor := testActor(t)
+	inputs := newPreparedCaptureTestInputs(t)
+	kind := &revisionPreparationKindStub{kindStub: &kindStub{
+		descriptor: inputs.descriptor, authorization: inputs.authorization, snapshot: inputs.snapshot,
+	}}
+	registry, err := NewRegistry([]Kind{kind})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	source := &projectCapacitySourceStub{usage: ProjectCapacityUsage{
+		ProjectID: string(actor.ProjectID), LogicalSnapshotCount: 1, LogicalSnapshotBytes: 1_000,
+		PhysicalPayloadCount: 1, PhysicalCanonicalBytes: 1_000, PhysicalCompressedBytes: 1_000,
+	}}
+	capacity, err := NewCapacityEnforcer(CapacityPolicy{ProjectLimitBytes: 1_000, WarningPercent: 80}, source)
+	if err != nil {
+		t.Fatalf("NewCapacityEnforcer() error = %v", err)
+	}
+	sink := &capturePayloadSinkStub{}
+	preparer, err := NewRevisionPreparer(
+		registry,
+		&captureIntentBindingSourceStub{binding: CaptureIntentBinding{
+			RecordID: inputs.recordID, SnapshotID: inputs.snapshotID, Intent: inputs.intent, Preview: inputs.preview,
+		}},
+		sink,
+		&revisionPreparationReferenceSourceStub{},
+		capacity,
+	)
+	if err != nil {
+		t.Fatalf("NewRevisionPreparer() error = %v", err)
+	}
+	if _, err := preparer.Prepare(context.Background(), actor, RevisionPreparationRequest{
+		RecordID: inputs.recordID, Items: []RevisionPreparationItem{{CaptureIntentID: inputs.intent.ID}},
+	}); !errors.Is(err, ErrPreviewStale) {
+		t.Fatalf("Prepare(stale capacity) error = %v, want ErrPreviewStale", err)
+	}
+	if sink.calls != 0 {
+		t.Fatalf("payload calls = %d, want zero on capacity denial", sink.calls)
+	}
+
+	reference := testExistingSnapshotReferenceState(t, "evs_referencequota")
+	reference.RecordID = inputs.recordID
+	referenceSource := &revisionPreparationReferenceSourceStub{state: reference}
+	preparer, err = NewRevisionPreparer(registry, &captureIntentBindingSourceStub{}, sink, referenceSource, capacity)
+	if err != nil {
+		t.Fatalf("NewRevisionPreparer(reference) error = %v", err)
+	}
+	beforeCapacityCalls := source.calls
+	prepared, err := preparer.Prepare(context.Background(), actor, RevisionPreparationRequest{
+		RecordID: inputs.recordID, Items: []RevisionPreparationItem{{ExistingSnapshotID: reference.SnapshotID}},
+	})
+	if err != nil || len(prepared.References()) != 1 || source.calls != beforeCapacityCalls {
+		t.Fatalf("Prepare(existing reference) = %#v, %v; capacity calls %d -> %d", prepared, err, beforeCapacityCalls, source.calls)
+	}
+}
+
+func mustPreparationCapacity(
+	t *testing.T,
+	projectID recordauth.ProjectID,
+	logicalBytes uint64,
+	limitBytes uint64,
+	warningPercent uint8,
+) *CapacityEnforcer {
+	t.Helper()
+	return mustTestCapacityEnforcer(t, string(projectID), logicalBytes, limitBytes, warningPercent)
 }
 
 func equivalentMonotonicTime(value time.Time) time.Time {

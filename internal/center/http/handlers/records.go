@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/recordauth"
@@ -41,7 +42,12 @@ type recordHandlerApplication interface {
 }
 
 type RecordHandlerOptions struct {
-	NewRecordID func() (string, error)
+	NewRecordID      func() (string, error)
+	EvidencePreparer recordEvidencePreparationService
+}
+
+type recordEvidencePreparationService interface {
+	Prepare(context.Context, evidence.ActorScope, evidence.RevisionPreparationRequest) (evidence.RevisionPreparation, error)
 }
 
 func Records(application recordHandlerApplication) http.Handler {
@@ -68,7 +74,7 @@ func RecordsWithOptions(application recordHandlerApplication, options RecordHand
 			handleRecordsCollection(w, request, actor, application, options)
 			return
 		}
-		handleRecordSubtree(w, request, actor, application)
+		handleRecordSubtree(w, request, actor, application, options)
 	})
 }
 
@@ -122,19 +128,33 @@ func handleRecordsCollection(
 			writeRecordsApplicationError(w, records.ErrDraftRevisionConflict)
 			return
 		}
-		recordID, err := options.NewRecordID()
-		if err != nil || !validRecordTransportID(recordID) {
-			writeRecordError(w, http.StatusInternalServerError, "internal_error", "internal server error", nil)
+		recordID := input.RecordID
+		if recordID == "" {
+			var err error
+			recordID, err = options.NewRecordID()
+			if err != nil || !validRecordTransportID(recordID) {
+				writeRecordError(w, http.StatusInternalServerError, "internal_error", "internal server error", nil)
+				return
+			}
+		} else if !validRecordTransportID(recordID) || len(input.EvidenceItems) == 0 {
+			writeRecordError(w, http.StatusBadRequest, "invalid_request", "invalid server-owned record identity", nil)
+			return
+		}
+		evidencePreparation, ok := prepareRecordEvidence(
+			w, request, actor, options.EvidencePreparer, recordID, input.EvidenceItems,
+		)
+		if !ok {
 			return
 		}
 		result, err := application.CreateRecord(request.Context(), records.RecordCreateRequest{
-			Actor:             actor,
-			RecordID:          recordID,
-			DraftID:           draft.DraftID,
-			DraftETag:         etag,
-			Values:            values,
-			SubjectReferences: references,
-			IdempotencyKey:    idempotencyKey,
+			Actor:               actor,
+			RecordID:            recordID,
+			DraftID:             draft.DraftID,
+			DraftETag:           etag,
+			Values:              values,
+			SubjectReferences:   references,
+			EvidencePreparation: evidencePreparation,
+			IdempotencyKey:      idempotencyKey,
 		})
 		if err != nil {
 			writeRecordsApplicationError(w, err)
@@ -155,6 +175,7 @@ func handleRecordSubtree(
 	request *http.Request,
 	actor recordauth.ActorScope,
 	application recordHandlerApplication,
+	options RecordHandlerOptions,
 ) {
 	segments, ok := recordPathSegments(request.URL.Path)
 	if !ok {
@@ -175,7 +196,7 @@ func handleRecordSubtree(
 		}
 		writeJSON(w, http.StatusOK, newRecordResponse(record))
 	case len(segments) == 2 && segments[1] == "revisions":
-		handleRecordRevisions(w, request, actor, application, recordID)
+		handleRecordRevisions(w, request, actor, application, options, recordID)
 	case len(segments) == 3 && segments[1] == "revisions" && validRevisionTransportID(segments[2]):
 		if request.Method != http.MethodGet {
 			writeRecordError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
@@ -190,7 +211,7 @@ func handleRecordSubtree(
 		}
 		writeJSON(w, http.StatusOK, newRecordRevisionResponse(revision))
 	case len(segments) == 4 && segments[1] == "revisions" && validRevisionTransportID(segments[2]) && segments[3] == "restore":
-		handleRecordRevisionRestore(w, request, actor, application, recordID, segments[2])
+		handleRecordRevisionRestore(w, request, actor, application, options, recordID, segments[2])
 	case len(segments) == 2 && (segments[1] == "archive" || segments[1] == "restore"):
 		handleRecordLifecycle(w, request, actor, application, recordID, segments[1])
 	default:
@@ -203,6 +224,7 @@ func handleRecordRevisions(
 	request *http.Request,
 	actor recordauth.ActorScope,
 	application recordHandlerApplication,
+	options RecordHandlerOptions,
 	recordID string,
 ) {
 	switch request.Method {
@@ -243,17 +265,24 @@ func handleRecordRevisions(
 			writeRecordsApplicationError(w, records.ErrDraftRevisionConflict)
 			return
 		}
+		evidencePreparation, ok := prepareRecordEvidence(
+			w, request, actor, options.EvidencePreparer, recordID, input.EvidenceItems,
+		)
+		if !ok {
+			return
+		}
 		result, err := application.CreateRevision(request.Context(), records.RecordRevisionCreateRequest{
-			Actor:              actor,
-			RecordID:           recordID,
-			BaseRevisionID:     input.BaseRevisionID,
-			LockVersion:        input.LockVersion,
-			AuthorizationEpoch: input.AuthorizationEpoch,
-			DraftID:            draft.DraftID,
-			DraftETag:          etag,
-			Values:             values,
-			SubjectReferences:  references,
-			IdempotencyKey:     idempotencyKey,
+			Actor:               actor,
+			RecordID:            recordID,
+			BaseRevisionID:      input.BaseRevisionID,
+			LockVersion:         input.LockVersion,
+			AuthorizationEpoch:  input.AuthorizationEpoch,
+			DraftID:             draft.DraftID,
+			DraftETag:           etag,
+			Values:              values,
+			SubjectReferences:   references,
+			EvidencePreparation: evidencePreparation,
+			IdempotencyKey:      idempotencyKey,
 		})
 		if err != nil {
 			writeRecordsApplicationError(w, err)
@@ -274,6 +303,7 @@ func handleRecordRevisionRestore(
 	request *http.Request,
 	actor recordauth.ActorScope,
 	application recordHandlerApplication,
+	options RecordHandlerOptions,
 	recordID string,
 	revisionID string,
 ) {
@@ -290,9 +320,27 @@ func handleRecordRevisionRestore(
 	if !decodeRecordsRequestJSON(w, request, &input) {
 		return
 	}
+	historical, err := application.GetRevision(request.Context(), records.RecordRevisionGetRequest{
+		Actor: actor, RecordID: recordID, RevisionID: revisionID,
+	})
+	if err != nil {
+		writeRecordsApplicationError(w, err)
+		return
+	}
+	historicalSnapshotIDs := historical.Input.EvidenceSnapshotIDs()
+	evidenceItems := make([]recordEvidenceItemInput, 0, len(historicalSnapshotIDs))
+	for _, snapshotID := range historicalSnapshotIDs {
+		evidenceItems = append(evidenceItems, recordEvidenceItemInput{ExistingSnapshotID: snapshotID})
+	}
+	evidencePreparation, ok := prepareRecordEvidence(
+		w, request, actor, options.EvidencePreparer, recordID, evidenceItems,
+	)
+	if !ok {
+		return
+	}
 	result, err := application.RestoreRevision(request.Context(), records.RecordRestoreRequest{
 		Actor: actor, RecordID: recordID, RevisionID: revisionID,
-		SaveReason: input.SaveReason, IdempotencyKey: idempotencyKey,
+		SaveReason: input.SaveReason, EvidencePreparation: evidencePreparation, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
 		writeRecordsApplicationError(w, err)
@@ -341,8 +389,15 @@ func handleRecordLifecycle(
 }
 
 type recordPublishRequest struct {
-	DraftID   string `json:"draft_id"`
-	DraftETag string `json:"draft_etag"`
+	RecordID      string                    `json:"record_id,omitempty"`
+	DraftID       string                    `json:"draft_id"`
+	DraftETag     string                    `json:"draft_etag"`
+	EvidenceItems []recordEvidenceItemInput `json:"evidence_items,omitempty"`
+}
+
+type recordEvidenceItemInput struct {
+	CaptureIntentID    string `json:"capture_intent_id,omitempty"`
+	ExistingSnapshotID string `json:"existing_snapshot_id,omitempty"`
 }
 
 type recordRevisionPublishRequest struct {
@@ -354,11 +409,12 @@ type recordRevisionPublishRequest struct {
 
 func (input *recordRevisionPublishRequest) UnmarshalJSON(data []byte) error {
 	type revisionPublishAlias struct {
-		DraftID            string `json:"draft_id"`
-		DraftETag          string `json:"draft_etag"`
-		BaseRevisionID     string `json:"base_revision_id"`
-		LockVersion        uint64 `json:"lock_version"`
-		AuthorizationEpoch uint64 `json:"authorization_epoch"`
+		DraftID            string                    `json:"draft_id"`
+		DraftETag          string                    `json:"draft_etag"`
+		BaseRevisionID     string                    `json:"base_revision_id"`
+		LockVersion        uint64                    `json:"lock_version"`
+		AuthorizationEpoch uint64                    `json:"authorization_epoch"`
+		EvidenceItems      []recordEvidenceItemInput `json:"evidence_items,omitempty"`
 	}
 	var decoded revisionPublishAlias
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -366,11 +422,72 @@ func (input *recordRevisionPublishRequest) UnmarshalJSON(data []byte) error {
 	if err := decoder.Decode(&decoded); err != nil {
 		return err
 	}
-	input.recordPublishRequest = recordPublishRequest{DraftID: decoded.DraftID, DraftETag: decoded.DraftETag}
+	input.recordPublishRequest = recordPublishRequest{
+		DraftID: decoded.DraftID, DraftETag: decoded.DraftETag,
+		EvidenceItems: append([]recordEvidenceItemInput(nil), decoded.EvidenceItems...),
+	}
 	input.BaseRevisionID = decoded.BaseRevisionID
 	input.LockVersion = decoded.LockVersion
 	input.AuthorizationEpoch = decoded.AuthorizationEpoch
 	return nil
+}
+
+func prepareRecordEvidence(
+	w http.ResponseWriter,
+	request *http.Request,
+	actor recordauth.ActorScope,
+	preparer recordEvidencePreparationService,
+	recordID string,
+	inputs []recordEvidenceItemInput,
+) (evidence.RevisionPreparation, bool) {
+	items := make([]evidence.RevisionPreparationItem, 0, len(inputs))
+	for _, input := range inputs {
+		hasIntent := input.CaptureIntentID != ""
+		hasSnapshot := input.ExistingSnapshotID != ""
+		if hasIntent == hasSnapshot || (hasIntent && !evidence.ValidCaptureIntentID(input.CaptureIntentID)) ||
+			(hasSnapshot && !evidence.ValidSnapshotID(input.ExistingSnapshotID)) {
+			writeRecordError(w, http.StatusBadRequest, "invalid_request", "invalid evidence reference", nil)
+			return evidence.RevisionPreparation{}, false
+		}
+		items = append(items, evidence.RevisionPreparationItem{
+			CaptureIntentID: input.CaptureIntentID, ExistingSnapshotID: input.ExistingSnapshotID,
+		})
+	}
+	if nilEvidenceHandlerDependency(preparer) {
+		if len(items) != 0 {
+			writeRecordError(w, http.StatusServiceUnavailable, "record_service_unavailable", "record service unavailable", nil)
+			return evidence.RevisionPreparation{}, false
+		}
+		prepared, err := evidence.NewRevisionPreparation(recordID, evidence.RevisionPreparationValues{})
+		if err != nil {
+			writeRecordInternalError(w)
+			return evidence.RevisionPreparation{}, false
+		}
+		return prepared, true
+	}
+	prepared, err := preparer.Prepare(request.Context(), actor, evidence.RevisionPreparationRequest{
+		RecordID: recordID, Items: items,
+	})
+	if err != nil {
+		writeRecordsApplicationError(w, err)
+		return evidence.RevisionPreparation{}, false
+	}
+	if err := prepared.ValidateForRecord(recordID); err != nil {
+		writeRecordInternalError(w)
+		return evidence.RevisionPreparation{}, false
+	}
+	preparedSnapshotIDs := prepared.SnapshotIDs()
+	if len(preparedSnapshotIDs) != len(items) {
+		writeRecordInternalError(w)
+		return evidence.RevisionPreparation{}, false
+	}
+	for index, input := range inputs {
+		if input.ExistingSnapshotID != "" && preparedSnapshotIDs[index] != input.ExistingSnapshotID {
+			writeRecordInternalError(w)
+			return evidence.RevisionPreparation{}, false
+		}
+	}
+	return prepared, true
 }
 
 type recordRestoreRequest struct {
@@ -556,30 +673,31 @@ type recordCapabilities struct {
 }
 
 type recordRevisionResponse struct {
-	RecordID        string                         `json:"record_id"`
-	RevisionID      string                         `json:"revision_id"`
-	BaseRevisionID  string                         `json:"base_revision_id,omitempty"`
-	RevisionNo      uint64                         `json:"revision_no"`
-	Title           string                         `json:"title"`
-	BodyMarkdown    string                         `json:"body_markdown"`
-	MarkdownDialect records.MarkdownDialectVersion `json:"markdown_dialect_version"`
-	RecordType      records.RecordType             `json:"record_type"`
-	BusinessStatus  records.BusinessStatus         `json:"business_status,omitempty"`
-	StatusGroup     records.StatusGroup            `json:"status_group,omitempty"`
-	ImpactLevel     records.ImpactLevel            `json:"impact_level"`
-	OccurredAt      *time.Time                     `json:"occurred_at,omitempty"`
-	CompletedAt     *time.Time                     `json:"completed_at,omitempty"`
-	Visibility      recordVisibilityResponse       `json:"visibility"`
-	Subjects        []recordSubjectResponse        `json:"subjects"`
-	Tags            []string                       `json:"tags"`
-	OwnerID         string                         `json:"owner_id,omitempty"`
-	Participants    []recordParticipantResponse    `json:"participants"`
-	AttachmentIDs   []string                       `json:"attachment_ids"`
-	FollowUpAt      *time.Time                     `json:"follow_up_at,omitempty"`
-	Template        *recordTemplateResponse        `json:"template,omitempty"`
-	AuthorID        string                         `json:"author_id"`
-	SaveReason      string                         `json:"save_reason"`
-	CreatedAt       time.Time                      `json:"created_at"`
+	RecordID            string                         `json:"record_id"`
+	RevisionID          string                         `json:"revision_id"`
+	BaseRevisionID      string                         `json:"base_revision_id,omitempty"`
+	RevisionNo          uint64                         `json:"revision_no"`
+	Title               string                         `json:"title"`
+	BodyMarkdown        string                         `json:"body_markdown"`
+	MarkdownDialect     records.MarkdownDialectVersion `json:"markdown_dialect_version"`
+	RecordType          records.RecordType             `json:"record_type"`
+	BusinessStatus      records.BusinessStatus         `json:"business_status,omitempty"`
+	StatusGroup         records.StatusGroup            `json:"status_group,omitempty"`
+	ImpactLevel         records.ImpactLevel            `json:"impact_level"`
+	OccurredAt          *time.Time                     `json:"occurred_at,omitempty"`
+	CompletedAt         *time.Time                     `json:"completed_at,omitempty"`
+	Visibility          recordVisibilityResponse       `json:"visibility"`
+	Subjects            []recordSubjectResponse        `json:"subjects"`
+	Tags                []string                       `json:"tags"`
+	OwnerID             string                         `json:"owner_id,omitempty"`
+	Participants        []recordParticipantResponse    `json:"participants"`
+	AttachmentIDs       []string                       `json:"attachment_ids"`
+	EvidenceSnapshotIDs []string                       `json:"evidence_snapshot_ids"`
+	FollowUpAt          *time.Time                     `json:"follow_up_at,omitempty"`
+	Template            *recordTemplateResponse        `json:"template,omitempty"`
+	AuthorID            string                         `json:"author_id"`
+	SaveReason          string                         `json:"save_reason"`
+	CreatedAt           time.Time                      `json:"created_at"`
 }
 
 type recordVisibilityResponse struct {
@@ -672,8 +790,9 @@ func newRecordRevisionResponse(revision records.RecordRevision) recordRevisionRe
 		},
 		Subjects: make([]recordSubjectResponse, 0), Tags: append([]string{}, input.Tags()...),
 		OwnerID: input.OwnerID(), Participants: make([]recordParticipantResponse, 0),
-		AttachmentIDs: append([]string{}, input.AttachmentIDs()...),
-		FollowUpAt:    utcTimePointer(input.FollowUpAt()), AuthorID: input.AuthorID(),
+		AttachmentIDs:       append([]string{}, input.AttachmentIDs()...),
+		EvidenceSnapshotIDs: append([]string{}, input.EvidenceSnapshotIDs()...),
+		FollowUpAt:          utcTimePointer(input.FollowUpAt()), AuthorID: input.AuthorID(),
 		SaveReason: input.SaveReason(), CreatedAt: revision.CreatedAt.UTC(),
 	}
 	for _, subject := range input.Subjects() {
@@ -780,8 +899,14 @@ func writeRecordsApplicationError(w http.ResponseWriter, err error) {
 	case errors.Is(err, recordplatform.ErrIdempotencyInProgress):
 		writeRecordError(w, http.StatusConflict, "record_operation_in_progress", "record operation is in progress", nil)
 	case errors.Is(err, store.ErrRecordPlatformAdmissionUnavailable), errors.Is(err, store.ErrRecordSubjectUnavailable),
-		errors.Is(err, recordplatform.ErrDeletionReservationUnavailable):
+		errors.Is(err, recordplatform.ErrDeletionReservationUnavailable), errors.Is(err, evidence.ErrInvalidRevisionPreparer),
+		errors.Is(err, evidence.ErrKindNotRegistered), errors.Is(err, evidence.ErrUnknownKindVersion):
 		writeRecordError(w, http.StatusServiceUnavailable, "record_service_unavailable", "record service unavailable", nil)
+	case errors.Is(err, evidence.ErrPreviewStale), errors.Is(err, evidence.ErrCaptureIntentUnavailable),
+		errors.Is(err, evidence.ErrInvalidPreparedCapture), errors.Is(err, evidence.ErrInvalidCaptureIntentBinding):
+		writeRecordError(w, http.StatusConflict, "evidence_preview_stale", "evidence preview is stale", nil)
+	case errors.Is(err, evidence.ErrSourceUnstable):
+		writeRecordError(w, http.StatusConflict, "evidence_source_unstable", "evidence source is unstable", nil)
 	case recordSemanticValidationError(err):
 		writeRecordError(w, http.StatusUnprocessableEntity, "record_invalid", "record content is invalid", nil)
 	default:
@@ -806,6 +931,7 @@ func recordSemanticValidationError(err error) bool {
 		errors.Is(err, records.ErrInvalidRecordLifecycleRequest) ||
 		errors.Is(err, records.ErrInvalidRecordLifecycleCommand) ||
 		errors.Is(err, records.ErrInvalidApplicationRequest) ||
+		errors.Is(err, evidence.ErrInvalidRevisionPreparationRequest) ||
 		errors.Is(err, recordplatform.ErrInvalidIdempotencyKey) ||
 		errors.Is(err, recordplatform.ErrInvalidIdempotencyClaim)
 }
