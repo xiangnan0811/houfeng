@@ -1,9 +1,12 @@
-{"file":".trellis/spec/backend/index.md","reason":"后端 evidence/store/migration 规范索引；reviewer 按需读取具体大文件。"}
-{"file":".trellis/spec/backend/record-authorization.md","reason":"existing snapshot reuse 必须绑定可信 actor、source authorization 与 revision authority。"}
-{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"复核Task 4 source→writer→canonical→summary/compare/export闭环及失败关闭边界。"}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"审查 source→canonical→summary/compare/export 的跨层合同和 round-trip。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/design.md","reason":"已批准 prepared reference、显式 revision 输入、有序 snapshot IDs 与 participant 边界。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"Task 2B RED/GREEN gate、已有 slice evidence 与保守勾选状态。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/authoritative-sources-current-main.md","reason":"六个注册 kind 的 source contract、禁止字段和 asset history decision。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/plan-audit-current-main.md","reason":"当前 main、native/auto workflow、kind 命名和 Task 1 scope 审计。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-2b-capture-transaction-contract.md","reason":"Task 2B two-phase capture、existing reference reuse、ordered hash/fingerprint 与后续 transaction participant 合同。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/design.md","reason":"审查Task 5 two-phase capture、registry-only read/export、copy ownership与fail-closed边界。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"逐项核对Task 5 RED matrix、API/save hook、deletion/export/recovery，不扩大到Task 6/7。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-5-preflight.md","reason":"对照实施前的现有seam、production nil gate、store/PG语义和最小验证矩阵。"}
+{"file":".trellis/spec/backend/index.md","reason":"后端evidence/store/HTTP规范索引。"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"审查handler/domain/store/bootstrap责任边界与复用。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"审查删除顺序、copy survival、恢复与全局引用GC。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"审查稳定错误、opaque denial、strict DTO与503失败关闭。"}
+{"file":".trellis/spec/backend/record-authorization.md","reason":"审查record/revision/source授权交集和source floor。"}
+{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"审查known kind、canonical/read/export allowlist及unknown kind/version失败关闭。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"审查handler/router/bootstrap矩阵、race/vet和真实PostgreSQL覆盖。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"审查request→preparer→revision participant→SQL与恢复/导出round-trip。"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"确认工作仅发生在Task 5 feature分支且不触碰main/PR/merge。"}

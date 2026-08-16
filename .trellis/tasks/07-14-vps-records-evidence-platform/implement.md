@@ -80,10 +80,12 @@ Task 4 evidence (2026-08-16): native `trellis-implement` 以 RED 固定 event/ba
 
 **Files:** Create handlers `evidence.go`; create `internal/center/evidence/{deletion_adapter,recovery_adapter,export_adapter}.go` and colocated tests; modify router/bootstrap.
 
-- [ ] handler RED matrix覆盖preview/read、unknown kind、source unstable、preview stale、permission intersection、response allowlist。
-- [ ] 实现 `/api/evidence/capture-previews`、`GET /api/evidence/:id`和records save hook。
-- [ ] deletion清logical refs/owned snapshots并保留其他copy；export只调用kind.Export。
-- [ ] `evidence.NewRecoveryAdapter`重放logical snapshot/payload/intent/source floor与`comparison.result/*` kind，基于恢复后全局引用GC；unknown kind/version失败关闭而非通用JSON。
+- [x] handler RED matrix覆盖preview/read、unknown kind、source unstable、preview stale、permission intersection、response allowlist。
+- [x] 实现 `/api/evidence/capture-previews`、`GET /api/evidence/:id`和records save hook。
+- [x] deletion清logical refs/owned snapshots并保留其他copy；export只调用kind.Export。
+- [x] `evidence.NewRecoveryAdapter`重放logical snapshot/payload/intent/source floor与`comparison.result/*` kind，基于恢复后全局引用GC；unknown kind/version失败关闭而非通用JSON。
+
+Task 5 evidence (2026-08-16): native `trellis-implement` 先以RED固定preview/read、unknown kind/version、source unstable、preview stale、record+source授权交集、strict response allowlist，以及create/revise/restore有序evidence preparation；GREEN新增Evidence service/handler、router/bootstrap稳定失败关闭接线、Records save hook与revision response snapshot IDs，并复用既有`RevisionPreparer`和transaction participant。新增closed `record_evidence` deletion surfaces、schema-aware export和deterministic recovery inventory/replay；删除只清record-owned refs/intents/logical snapshots并在全局无引用时清payload，显式copy及lineage存活；export只调用registered `kind.Export`并在runtime复核forbidden corpus；恢复重放canonical gzip payload、logical snapshot、intent、revision ref、source authorization floor和lineage，仅接受registry显式注册kind，`comparison.result/*`不按prefix放行，完成后做全局引用GC。独立`trellis-check`以真实PostgreSQL RED修复删除receipt与recovery replay不可重试、恢复inventory orphan payload、浅拷贝TOCTOU、offset/亚微秒时间规范化、Records非空items被错误preparer静默丢弃、read DTO parity及runtime versioned read-model/export allowlist；同时将PG fixture改为production revision participant和公开RecoveryAdapter路径，重试相同输入幂等、分歧输入失败关闭。主会话最终独立复验严格Docker-backed Task 5 deletion/recovery与完整record-evidence participant矩阵全部PASS且无`SKIP`，`make verify-go`、`go test ./... -count=1`、七包affected race、`go vet ./...`、`go mod verify`、全部改动Go文件`gofmt -d`、`git diff --check 425a758df86c4d138ba80d376e66d10274ff28ae`和`task.py validate`均通过。Child 10真实AdmissionGate/source resolver/read/reference production composition未提前接线，nil/typed-nil production capture/save继续稳定503；Task 2B production gate保持未勾选，Task 6/7未推进。
 
 ## Task 6: Web selector与renderer registry
 

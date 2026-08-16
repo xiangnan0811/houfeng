@@ -1,10 +1,13 @@
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/design.md","reason":"已批准的两阶段capture、prepared input、事务participant、existing snapshot reuse和24h orphan边界。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"Task 2A reopened defect及Task 2B RED/GREEN gate。"}
-{"file":".trellis/spec/backend/index.md","reason":"实现前按Trellis路由加载database、quality和records相关规范。"}
-{"file":".trellis/spec/backend/record-authorization.md","reason":"record/revision/source evidence授权交集、source snapshot和fail-closed合同。"}
-{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"Task 4 authoritative source、canonical adapter、monitoring-event producer与敏感字段失败关闭合同。"}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"锁定Go intent identity与SQL grammar等跨层合同。"}
-{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"保留当前feature分支现场、hooks和禁止直接修改main的治理。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/preconditions-current-main.md","reason":"0051-0053 predecessor、0054顺序和current APP ACL前置证据。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/plan-audit-current-main.md","reason":"Child 4范围、native/auto dispatch和Task 2A边界审计。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-2b-capture-transaction-contract.md","reason":"reopened intent ID defect、approved two-phase flow、source map和required behavior tests。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/design.md","reason":"Task 5 authoritative two-phase capture、ordered existing references、registry-only renderer/export与fail-closed生产边界。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"Task 5 files、RED matrix、API/save hook、deletion/export/recovery范围及Task 1–4完成证据。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-5-preflight.md","reason":"Task 5当前代码seam、HTTP/save合同、production gate、adapter/PG验证的有界预检。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-2b-capture-transaction-contract.md","reason":"复用已批准的intent binding、pre-transaction recapture、ordered participant和24h orphan合同。"}
+{"file":".trellis/spec/backend/index.md","reason":"实现前按Trellis路由加载后端规范。"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"新增handler、evidence domain adapter与store实现的分层边界。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"logical snapshot ownership、永久删除/恢复、全局引用GC与真实PostgreSQL要求。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Records/Evidence transport的稳定错误、opaque denial和503失败关闭合同。"}
+{"file":".trellis/spec/backend/record-authorization.md","reason":"record/revision/source evidence授权交集与source authorization floor。"}
+{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"六个authoritative kind、canonical snapshot、敏感字段与unknown kind失败关闭合同。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"handler/router/bootstrap测试模式、race/vet/PG质量门。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"锁定HTTP DTO→preparer→transaction participant→DB的跨层数据流。"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"保留feature分支、hooks且禁止直接修改main。"}
