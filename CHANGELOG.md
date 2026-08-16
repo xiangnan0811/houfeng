@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.64.0](https://github.com/xiangnan0811/houfeng/compare/v0.63.1...v0.64.0) (2026-08-16)
+
+
+### Features
+
+* **evidence:** add initial authoritative adapters ([c0d27ad](https://github.com/xiangnan0811/houfeng/commit/c0d27ad6830c65eeb169575d4f4debb610614e91))
+* **records:** add evidence snapshot foundation ([7229a9c](https://github.com/xiangnan0811/houfeng/commit/7229a9c10226ef5a31cbdd1e240312b3e74d4c3c))
+* **records:** add evidence snapshot foundation and authoritative adapters ([1637848](https://github.com/xiangnan0811/houfeng/commit/1637848e78729408cf8d111d998cc5d0c0ff1435))
+
+
+### Documentation
+
+* **trellis:** record evidence platform progress ([8eda170](https://github.com/xiangnan0811/houfeng/commit/8eda17043a73857dbf35bc628cad028e9b9efa06))
+
 ## [0.63.1](https://github.com/xiangnan0811/houfeng/compare/v0.63.0...v0.63.1) (2026-08-09)
 
 
