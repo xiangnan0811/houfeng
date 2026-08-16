@@ -1,13 +1,13 @@
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/design.md","reason":"Task 5 authoritative two-phase capture、ordered existing references、registry-only renderer/export与fail-closed生产边界。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"Task 5 files、RED matrix、API/save hook、deletion/export/recovery范围及Task 1–4完成证据。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-5-preflight.md","reason":"Task 5当前代码seam、HTTP/save合同、production gate、adapter/PG验证的有界预检。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-2b-capture-transaction-contract.md","reason":"复用已批准的intent binding、pre-transaction recapture、ordered participant和24h orphan合同。"}
-{"file":".trellis/spec/backend/index.md","reason":"实现前按Trellis路由加载后端规范。"}
-{"file":".trellis/spec/backend/directory-structure.md","reason":"新增handler、evidence domain adapter与store实现的分层边界。"}
-{"file":".trellis/spec/backend/database-guidelines.md","reason":"logical snapshot ownership、永久删除/恢复、全局引用GC与真实PostgreSQL要求。"}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Records/Evidence transport的稳定错误、opaque denial和503失败关闭合同。"}
-{"file":".trellis/spec/backend/record-authorization.md","reason":"record/revision/source evidence授权交集与source authorization floor。"}
-{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"六个authoritative kind、canonical snapshot、敏感字段与unknown kind失败关闭合同。"}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"handler/router/bootstrap测试模式、race/vet/PG质量门。"}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"锁定HTTP DTO→preparer→transaction participant→DB的跨层数据流。"}
-{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"保留feature分支、hooks且禁止直接修改main。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/design.md","reason":"Task 6 exact renderer registry、ordered picker与unknown authoritative kind/schema失败关闭设计。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"Task 6 files、RED matrix、MetricChart复用与Web质量门；明确不进入Task 7。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-6-preflight.md","reason":"Task 6当前Web seam、六个exact renderer tuple、lazy boundary、gap与验证矩阵。"}
+{"file":".trellis/spec/web/index.md","reason":"实现前按Trellis路由加载Web规范。"}
+{"file":".trellis/spec/web/directory-structure.md","reason":"route-private records/evidence组件、lazy lib facade与canonical DTO落点。"}
+{"file":".trellis/spec/web/component-conventions.md","reason":"纯组件、可访问语义、BEM/tokens及测试合同。"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"recordsApi lazy-only边界、transport唯一owner、snake_case DTO与bundle合同。"}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"shared-atoms-page owner、禁止组件CSS/inline style及CSS budget。"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Node22、Vitest/coverage、lint/build/bundle/CSS正式门。"}
+{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"六个authoritative kind/read-model/renderer版本与unknown kind失败关闭合同。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"核对Go response allowlist到Web DTO、picker request及renderer数据流。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"复用MetricChart、现有Records transport和CSS owner而不复制基础设施。"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"同一feature分支继续Task 6且不触碰main/PR/merge。"}

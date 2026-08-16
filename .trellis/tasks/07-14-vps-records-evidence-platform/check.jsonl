@@ -1,12 +1,13 @@
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/design.md","reason":"审查Task 5 two-phase capture、registry-only read/export、copy ownership与fail-closed边界。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"逐项核对Task 5 RED matrix、API/save hook、deletion/export/recovery，不扩大到Task 6/7。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-5-preflight.md","reason":"对照实施前的现有seam、production nil gate、store/PG语义和最小验证矩阵。"}
-{"file":".trellis/spec/backend/index.md","reason":"后端evidence/store/HTTP规范索引。"}
-{"file":".trellis/spec/backend/directory-structure.md","reason":"审查handler/domain/store/bootstrap责任边界与复用。"}
-{"file":".trellis/spec/backend/database-guidelines.md","reason":"审查删除顺序、copy survival、恢复与全局引用GC。"}
-{"file":".trellis/spec/backend/error-handling.md","reason":"审查稳定错误、opaque denial、strict DTO与503失败关闭。"}
-{"file":".trellis/spec/backend/record-authorization.md","reason":"审查record/revision/source授权交集和source floor。"}
-{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"审查known kind、canonical/read/export allowlist及unknown kind/version失败关闭。"}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"审查handler/router/bootstrap矩阵、race/vet和真实PostgreSQL覆盖。"}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"审查request→preparer→revision participant→SQL与恢复/导出round-trip。"}
-{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"确认工作仅发生在Task 5 feature分支且不触碰main/PR/merge。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/design.md","reason":"审查Task 6 exact registry、ordered picker、客户端无payload与unknown schema失败关闭。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"逐项核对Task 6 RED matrix、allowlisted renderers、MetricChart gap和Web gate，不扩大Task 7。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-6-preflight.md","reason":"对照实施前lazy facade、六tuple、DTO allowlist、gap和最终验证矩阵。"}
+{"file":".trellis/spec/web/index.md","reason":"Web组件/API/样式/质量规范索引。"}
+{"file":".trellis/spec/web/directory-structure.md","reason":"审查route-private组件与lib/types分层。"}
+{"file":".trellis/spec/web/component-conventions.md","reason":"审查纯组件、a11y、BEM/tokens、无inline style。"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"审查recordsApi依赖/eager graph、transport错误与canonical DTO。"}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"审查CSS唯一owner、reachability与budget。"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"审查focused/full Vitest、coverage、lint/build/bundle/CSS和Node22。"}
+{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"审查renderer/read-model版本、敏感/禁止字段及unknown authoritative kind关闭。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"审查capture preview和read DTO端到端字段与失败路径。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"审查MetricChart与现有transport/style复用，避免新fallback基础设施。"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"确认只在Task 6 feature分支且不触碰Task 7/PR/merge。"}

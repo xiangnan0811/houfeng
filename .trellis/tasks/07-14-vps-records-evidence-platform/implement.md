@@ -91,9 +91,11 @@ Task 5 evidence (2026-08-16): native `trellis-implement` 先以RED固定preview/
 
 **Files:** Create `pages/records/evidence/EvidenceRendererRegistry.tsx`, kind renderers, `EvidenceCapturePicker.tsx` + tests; extend lazy `web/src/lib/recordsApi.ts` and canonical DTOs in `web/src/lib/types.ts`.
 
-- [ ] RED tests覆盖selector顺序、preview fields/stale、sensitive explicit choice、权威unknown schema fail-closed且payload/metadata不进入普通UI、趋势缺口不连线；external quarantine fallback不在本任务实现。
-- [ ] 实现allowlisted renderers并复用MetricChart；禁止`JSON.stringify(payload)` fallback。
-- [ ] Vitest/lint/build/bundle/CSS GREEN。
+- [x] RED tests覆盖selector顺序、preview fields/stale、sensitive explicit choice、权威unknown schema fail-closed且payload/metadata不进入普通UI、趋势缺口不连线；external quarantine fallback不在本任务实现。
+- [x] 实现allowlisted renderers并复用MetricChart；禁止`JSON.stringify(payload)` fallback。
+- [x] Vitest/lint/build/bundle/CSS GREEN。
+
+Task 6 evidence (2026-08-16): native `trellis-implement`新增纯注入、未挂载route的ordered capture picker、lazy-only records API DTO/transport，以及六个exact `(kind, schema, renderer, read_model.version)` renderer registry；native `trellis-check`以RED补齐preview source/window parity、稳定clock与async abort/reset、深层bounded fail-closed decoder、hostile nested fields、精确UTC/枚举/数值/chronology语义、provider identity去重、monitoring跨gap/缺bucket分段与单点gap可见性，普通路径无arbitrary JSON renderer/export/fallback。Node 22 focused Task 6/architecture/bundle/CSS矩阵`9 files / 94 tests`通过；完整`make verify-web`以clean install通过ESLint、`131 files / 939 tests`、coverage、TypeScript/Vite build、bundle（entry JS gzip `110734 <= 110738`，CSS `37125 <= 37125`，max async `31904 <= 32052`）和CSS analyze/budget。Task 6仅为前端数据/展示路径，不需要PostgreSQL；Task 7与Child 10未推进。
 
 ## Task 7: 容量、janitor与完整门
 
