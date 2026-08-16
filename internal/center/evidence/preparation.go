@@ -100,6 +100,7 @@ type RevisionPreparer struct {
 	intents    CaptureIntentBindingSource
 	payloads   CapturePayloadSink
 	references ExistingSnapshotReferenceSource
+	capacity   *CapacityEnforcer
 }
 
 func NewRevisionPreparer(
@@ -107,13 +108,15 @@ func NewRevisionPreparer(
 	intents CaptureIntentBindingSource,
 	payloads CapturePayloadSink,
 	references ExistingSnapshotReferenceSource,
+	capacity *CapacityEnforcer,
 ) (*RevisionPreparer, error) {
 	if len(registry.kinds) == 0 || nilRevisionPreparationDependency(intents) ||
-		nilRevisionPreparationDependency(payloads) || nilExistingSnapshotReferenceSource(references) {
+		nilRevisionPreparationDependency(payloads) || nilExistingSnapshotReferenceSource(references) ||
+		capacity == nil || capacity.policy.Validate() != nil || nilCapacityDependency(capacity.source) {
 		return nil, ErrInvalidRevisionPreparer
 	}
 	return &RevisionPreparer{
-		registry: registry, intents: intents, payloads: payloads, references: references,
+		registry: registry, intents: intents, payloads: payloads, references: references, capacity: capacity,
 	}, nil
 }
 
@@ -124,7 +127,8 @@ func (preparer *RevisionPreparer) Prepare(
 ) (RevisionPreparation, error) {
 	if ctx == nil || preparer == nil || len(preparer.registry.kinds) == 0 ||
 		nilRevisionPreparationDependency(preparer.intents) || nilRevisionPreparationDependency(preparer.payloads) ||
-		nilExistingSnapshotReferenceSource(preparer.references) {
+		nilExistingSnapshotReferenceSource(preparer.references) || preparer.capacity == nil ||
+		preparer.capacity.policy.Validate() != nil || nilCapacityDependency(preparer.capacity.source) {
 		return RevisionPreparation{}, ErrInvalidRevisionPreparer
 	}
 	normalizedActor, err := recordauth.NormalizeActorScope(actor)
@@ -139,12 +143,15 @@ func (preparer *RevisionPreparer) Prepare(
 	references := make([]PreparedReference, 0, len(request.Items))
 	orderedSnapshotIDs := make([]string, 0, len(request.Items))
 	preparedSnapshotIDs := make(map[string]struct{}, len(request.Items))
+	var additionalLogicalBytes uint64
 	for _, item := range request.Items {
 		if err := ctx.Err(); err != nil {
 			return RevisionPreparation{}, err
 		}
 		if item.CaptureIntentID != "" {
-			capture, err := preparer.prepareCapture(ctx, normalizedActor, request.RecordID, item.CaptureIntentID)
+			capture, err := preparer.prepareCapture(
+				ctx, normalizedActor, request.RecordID, item.CaptureIntentID, additionalLogicalBytes,
+			)
 			if err != nil {
 				return RevisionPreparation{}, err
 			}
@@ -153,6 +160,10 @@ func (preparer *RevisionPreparer) Prepare(
 			}
 			captures = append(captures, capture)
 			orderedSnapshotIDs = append(orderedSnapshotIDs, capture.SnapshotID())
+			if capture.Snapshot().Size() > ^uint64(0)-additionalLogicalBytes {
+				return RevisionPreparation{}, ErrCapacityArithmetic
+			}
+			additionalLogicalBytes += capture.Snapshot().Size()
 			continue
 		}
 
@@ -183,6 +194,7 @@ func (preparer *RevisionPreparer) prepareCapture(
 	actor ActorScope,
 	recordID string,
 	intentID string,
+	priorAdditionalBytes uint64,
 ) (PreparedCapture, error) {
 	binding, err := preparer.intents.LoadCaptureIntentBinding(ctx, recordID, intentID)
 	if err != nil {
@@ -215,6 +227,24 @@ func (preparer *RevisionPreparer) prepareCapture(
 	if err != nil {
 		return PreparedCapture{}, fmt.Errorf("recapture evidence source: %w", err)
 	}
+	if snapshot.Size() > ^uint64(0)-priorAdditionalBytes {
+		return PreparedCapture{}, ErrCapacityArithmetic
+	}
+	capacity, err := preparer.capacity.Evaluate(
+		ctx,
+		string(actor.ProjectID),
+		priorAdditionalBytes+snapshot.Size(),
+	)
+	if err != nil || capacity.Outcome.Status == QuotaUnavailable {
+		return PreparedCapture{}, ErrCapacityUnavailable
+	}
+	if capacity.Outcome.Status == QuotaExceeded || capacity.Outcome != binding.Preview.QuotaOutcome {
+		return PreparedCapture{}, ErrPreviewStale
+	}
+	snapshot, err = withSnapshotQuotaOutcome(snapshot, binding.Preview.QuotaOutcome)
+	if err != nil {
+		return PreparedCapture{}, preparedCaptureError("capacity outcome", err)
+	}
 	if err := validatePreparedCapture(
 		binding.RecordID,
 		binding.SnapshotID,
@@ -238,6 +268,15 @@ func (preparer *RevisionPreparer) prepareCapture(
 		authorization,
 		snapshot,
 	)
+}
+
+func withSnapshotQuotaOutcome(snapshot CanonicalSnapshot, outcome QuotaOutcome) (CanonicalSnapshot, error) {
+	if err := validateCapturedQuotaOutcome(outcome); err != nil {
+		return CanonicalSnapshot{}, err
+	}
+	cloned := cloneCanonicalSnapshot(snapshot)
+	cloned.envelope.QuotaOutcome = outcome
+	return cloned, nil
 }
 
 func validateRevisionPreparationRequest(request RevisionPreparationRequest) error {

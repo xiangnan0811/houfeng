@@ -24,6 +24,7 @@ import (
 	incidentservice "houfeng/internal/center/incidents"
 	"houfeng/internal/center/recordauth"
 	centersettings "houfeng/internal/center/settings"
+	"houfeng/internal/center/store"
 	"houfeng/internal/center/targets"
 )
 
@@ -166,6 +167,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	applyCalls := 0
 	admitCalls := 0
 	var gotRouterOptions centerhttp.RouterOptions
+	var gotWorkers []centerapp.Worker
 
 	app, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
 		openPostgres: func(context.Context, string) (postgresDB, error) {
@@ -189,7 +191,8 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 			gotRouterOptions = options
 			return http.NewServeMux()
 		},
-		newApp: func(string, http.Handler, ...centerapp.Worker) appRunner {
+		newApp: func(_ string, _ http.Handler, workers ...centerapp.Worker) appRunner {
+			gotWorkers = append([]centerapp.Worker(nil), workers...)
 			return fakeApp{}
 		},
 	})
@@ -204,6 +207,9 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	}
 	if admitCalls != 1 {
 		t.Fatalf("admitRuntime calls = %d, want 1", admitCalls)
+	}
+	if len(gotWorkers) != 5 {
+		t.Fatalf("runtime workers = %d, want evidence maintenance disabled until Child 10 supplies admission", len(gotWorkers))
 	}
 	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
 		gotRouterOptions.RecordDraftsHandler == nil || gotRouterOptions.RecordDeletionsHandler == nil ||
@@ -259,6 +265,43 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	cleanup()
 	if !db.closed {
 		t.Fatal("cleanup() did not close DB")
+	}
+}
+
+func TestEvidenceMaintenanceRuntimeFailsClosedWithoutAdmission(t *testing.T) {
+	type typedNilGate struct{ store.AdmissionGate }
+	var typedNil *typedNilGate
+	for _, test := range []struct {
+		name string
+		gate store.AdmissionGate
+	}{
+		{name: "nil"},
+		{name: "typed nil", gate: typedNil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			worker, observer := newEvidenceMaintenanceRuntime(nil, test.gate)
+			if worker != nil || observer == nil {
+				t.Fatalf("newEvidenceMaintenanceRuntime() = (%T, %T), want disabled worker and observer", worker, observer)
+			}
+			metrics := observer.Snapshot()
+			if metrics.PassAttempts != 0 || metrics.PassFailures != 0 || metrics.PassSuccesses != 0 ||
+				metrics.DeletedIntentCount != 0 || metrics.ReclaimedPayloadCount != 0 {
+				t.Fatalf("disabled maintenance metrics = %#v", metrics)
+			}
+		})
+	}
+
+	worker, observer := newEvidenceMaintenanceRuntime(nil, store.AdmissionGateFunc(func(context.Context, pgx.Tx) error {
+		return nil
+	}))
+	if worker != nil || observer == nil {
+		t.Fatal("nil pool constructed an evidence maintenance worker")
+	}
+	worker, observer = newEvidenceMaintenanceRuntime(&pgxpool.Pool{}, store.AdmissionGateFunc(func(context.Context, pgx.Tx) error {
+		return nil
+	}))
+	if worker == nil || observer == nil {
+		t.Fatal("real admission composition did not construct evidence maintenance")
 	}
 }
 

@@ -201,6 +201,90 @@ describe('EvidenceCapturePicker', () => {
     expect(requestPreview).toHaveBeenCalledTimes(1)
   })
 
+  it.each([
+    ['warning', 'project evidence quota warning threshold reached', true],
+    ['exceeded', 'project evidence quota exceeded', false],
+    ['unavailable', 'project evidence capacity unavailable', false],
+  ] as const)('treats server quota status %s as confirmable=%s', async (status, reason, confirmable) => {
+    const onConfirm = vi.fn()
+    const quotaPreview = {
+      ...preview,
+      quota: {
+        status: status as EvidenceCapturePreview['quota']['status'],
+        reason,
+      },
+    }
+    render(
+      <EvidenceCapturePicker
+        options={captureOptions}
+        requestPreview={vi.fn().mockResolvedValue(quotaPreview)}
+        onConfirm={onConfirm}
+        now={() => new Date('2026-08-16T02:01:00Z')}
+      />,
+    )
+
+    fillRequiredWorkflow()
+    fireEvent.click(screen.getByRole('button', { name: '生成预览' }))
+    await screen.findByText(reason)
+    const confirm = screen.getByRole('button', { name: '确认引用' })
+    if (confirmable) {
+      expect(confirm).toBeEnabled()
+      fireEvent.click(confirm)
+      expect(onConfirm).toHaveBeenCalledTimes(1)
+    } else {
+      expect(confirm).toBeDisabled()
+      expect(onConfirm).not.toHaveBeenCalled()
+    }
+  })
+
+  it.each([
+    ['unknown', { status: 'future', reason: 'future quota' }],
+    ['missing', undefined],
+  ] as const)('rejects a %s server quota shape without rendering a confirmable preview', async (_name, quota) => {
+    const onConfirm = vi.fn()
+    const response = { ...preview, quota } as unknown as EvidenceCapturePreview
+    render(
+      <EvidenceCapturePicker
+        options={captureOptions}
+        requestPreview={vi.fn().mockResolvedValue(response)}
+        onConfirm={onConfirm}
+        now={() => new Date('2026-08-16T02:01:00Z')}
+      />,
+    )
+
+    fillRequiredWorkflow()
+    fireEvent.click(screen.getByRole('button', { name: '生成预览' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('预览响应与当前选择不一致。')
+    expect(screen.queryByLabelText('证据预览')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认引用' })).toBeDisabled()
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
+  it('rejects a noncanonical quota reason without rendering dependency or identity material', async () => {
+    const onConfirm = vi.fn()
+    render(
+      <EvidenceCapturePicker
+        options={captureOptions}
+        requestPreview={vi.fn().mockResolvedValue({
+          ...preview,
+          quota: { status: 'warning', reason: 'intent=evi_secret dependency unavailable' },
+        })}
+        onConfirm={onConfirm}
+        now={() => new Date('2026-08-16T02:01:00Z')}
+      />,
+    )
+
+    fillRequiredWorkflow()
+    fireEvent.click(screen.getByRole('button', { name: '生成预览' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('预览响应与当前选择不一致。')
+    expect(screen.queryByText(/evi_secret/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('证据预览')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认引用' })).toBeDisabled()
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
   it('expires a preview against the stable default clock without another user event', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-16T02:01:00Z'))

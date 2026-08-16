@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
 	"slices"
 	"time"
@@ -14,18 +15,32 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"houfeng/internal/center/evidence"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/records"
 )
 
-type recordEvidenceRevisionParticipant struct{}
+const evidenceProjectCapacityLockDomain = "houfeng.evidence.capacity.project.v1:"
+
+type recordEvidenceRevisionParticipant struct {
+	capacityPolicy evidence.CapacityPolicy
+}
 
 func NewRecordEvidenceRevisionParticipant() records.RevisionParticipant {
-	return recordEvidenceRevisionParticipant{}
+	return recordEvidenceRevisionParticipant{capacityPolicy: evidence.DefaultCapacityPolicy()}
+}
+
+func NewRecordEvidenceRevisionParticipantWithCapacityPolicy(
+	policy evidence.CapacityPolicy,
+) (records.RevisionParticipant, error) {
+	if err := policy.Validate(); err != nil {
+		return nil, err
+	}
+	return recordEvidenceRevisionParticipant{capacityPolicy: policy}, nil
 }
 
 func (recordEvidenceRevisionParticipant) Name() string { return "evidence" }
 
-func (recordEvidenceRevisionParticipant) ApplyRevision(
+func (participant recordEvidenceRevisionParticipant) ApplyRevision(
 	ctx context.Context,
 	tx pgx.Tx,
 	committed records.RevisionCommitted,
@@ -39,7 +54,18 @@ func (recordEvidenceRevisionParticipant) ApplyRevision(
 		return fmt.Errorf("%w: evidence preparation", records.ErrInvalidRevisionCommand)
 	}
 
-	for _, capture := range preparation.Captures() {
+	captures := preparation.Captures()
+	for _, capture := range captures {
+		if capture.Validate() != nil || !evidenceParticipantCaptureTimestampsExact(capture) {
+			return fmt.Errorf("%w: prepared capture", records.ErrInvalidRevisionCommand)
+		}
+	}
+	if len(captures) > 0 {
+		if err := participant.enforceProjectCapacity(ctx, tx, committed.Result.RecordID, captures); err != nil {
+			return err
+		}
+	}
+	for _, capture := range captures {
 		if err := consumeEvidenceCaptureIntent(ctx, tx, capture); err != nil {
 			return err
 		}
@@ -68,6 +94,59 @@ func (recordEvidenceRevisionParticipant) ApplyRevision(
 		if inserted.RowsAffected() != 1 {
 			return ErrEvidencePersistenceConflict
 		}
+	}
+	return nil
+}
+
+func (participant recordEvidenceRevisionParticipant) enforceProjectCapacity(
+	ctx context.Context,
+	tx pgx.Tx,
+	recordID string,
+	captures []evidence.PreparedCapture,
+) error {
+	if participant.capacityPolicy.Validate() != nil {
+		return evidence.ErrCapacityUnavailable
+	}
+	var projectID string
+	if err := tx.QueryRow(ctx, `
+		select project_id
+		from public.records
+		where record_id = $1`, recordID).Scan(&projectID); err != nil {
+		return fmt.Errorf("%w: resolve evidence capacity project: %w", evidence.ErrCapacityUnavailable, err)
+	}
+	if recordauth.ValidateProjectID(recordauth.ProjectID(projectID)) != nil {
+		return evidence.ErrCapacityUnavailable
+	}
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, evidenceProjectCapacityLockDomain+projectID); err != nil {
+		return fmt.Errorf("%w: lock evidence project capacity: %w", evidence.ErrCapacityUnavailable, err)
+	}
+	var usedLogicalBytes int64
+	if err := tx.QueryRow(ctx, `
+		select coalesce(sum(snapshot.logical_size_bytes), 0)::bigint
+		from public.evidence_snapshots as snapshot
+		join public.records as record on record.record_id = snapshot.record_id
+		where record.project_id = $1`, projectID).Scan(&usedLogicalBytes); err != nil {
+		return fmt.Errorf("%w: read evidence project capacity: %w", evidence.ErrCapacityUnavailable, err)
+	}
+	if usedLogicalBytes < 0 {
+		return ErrEvidencePersistenceConflict
+	}
+	used := uint64(usedLogicalBytes)
+	for _, capture := range captures {
+		additional := capture.Snapshot().Size()
+		if additional == 0 || additional > math.MaxInt64 {
+			return ErrEvidencePersistenceConflict
+		}
+		evaluation, err := participant.capacityPolicy.Evaluate(used, additional)
+		if err != nil {
+			return fmt.Errorf("%w: evaluate final evidence capacity: %w", ErrEvidencePersistenceConflict, err)
+		}
+		if evaluation.Outcome != capture.Preview().QuotaOutcome ||
+			evaluation.Outcome.Status == evidence.QuotaExceeded ||
+			evaluation.Outcome.Status == evidence.QuotaUnavailable {
+			return fmt.Errorf("%w: %w", ErrEvidencePersistenceConflict, evidence.ErrPreviewStale)
+		}
+		used = evaluation.ProjectedBytes
 	}
 	return nil
 }

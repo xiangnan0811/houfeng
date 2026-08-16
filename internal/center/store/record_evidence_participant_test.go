@@ -6,7 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +23,35 @@ import (
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/records"
 )
+
+func TestRecordEvidenceRevisionParticipantProductionFileContainsNoPanic(t *testing.T) {
+	t.Parallel()
+
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve participant test source")
+	}
+	productionFile := filepath.Join(filepath.Dir(testFile), "record_evidence_participant.go")
+	parsed, err := parser.ParseFile(token.NewFileSet(), productionFile, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", productionFile, err)
+	}
+	var panicCalls int
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		identifier, ok := call.Fun.(*ast.Ident)
+		if ok && identifier.Name == "panic" {
+			panicCalls++
+		}
+		return true
+	})
+	if panicCalls != 0 {
+		t.Fatalf("%s contains %d panic call(s); production store code must fail closed", productionFile, panicCalls)
+	}
+}
 
 func TestRecordEvidenceRevisionParticipantConsumesCaptureAndWritesOrderedReference(t *testing.T) {
 	prepared := storePreparedEvidenceCapture(t, "rec_evidenceparticipant", "evs_captureparticipant", "evi_aaaaaaaaaaaaaaaaaaaaaaaa", time.Date(2026, 8, 14, 8, 0, 0, 0, time.UTC))
@@ -38,8 +72,8 @@ func TestRecordEvidenceRevisionParticipantConsumesCaptureAndWritesOrderedReferen
 	if participant.Name() != "evidence" {
 		t.Fatalf("participant name = %q, want evidence", participant.Name())
 	}
-	if tx.queryRowCalls != 1 || !reflect.DeepEqual(tx.execKinds, []string{"snapshot", "reference"}) {
-		t.Fatalf("participant calls = query:%d exec:%#v, want one atomic consume then snapshot/reference", tx.queryRowCalls, tx.execKinds)
+	if tx.queryRowCalls != 3 || tx.capacityLockCalls != 1 || !reflect.DeepEqual(tx.execKinds, []string{"snapshot", "reference"}) {
+		t.Fatalf("participant calls = query:%d locks:%d exec:%#v, want capacity check then atomic consume/snapshot/reference", tx.queryRowCalls, tx.capacityLockCalls, tx.execKinds)
 	}
 	if tx.referenceOrdinal != 0 || tx.referenceSnapshotID != prepared.SnapshotID() {
 		t.Fatalf("revision reference = ordinal:%d snapshot:%q", tx.referenceOrdinal, tx.referenceSnapshotID)
@@ -48,6 +82,77 @@ func TestRecordEvidenceRevisionParticipantConsumesCaptureAndWritesOrderedReferen
 		!strings.Contains(tx.querySQL, "valid_until > transaction_timestamp()") ||
 		!strings.Contains(tx.querySQL, "returning") {
 		t.Fatalf("intent consume SQL is not a live DELETE ... RETURNING:\n%s", tx.querySQL)
+	}
+}
+
+func TestRecordEvidenceRevisionParticipantRechecksCapacityBeforeConsumingIntent(t *testing.T) {
+	prepared := storePreparedEvidenceCapture(
+		t, "rec_evidencecapacity", "evs_evidencecapacity", "evi_dddddddddddddddddddddddd",
+		time.Date(2026, 8, 14, 8, 30, 0, 0, time.UTC),
+	)
+	preparation := storeEvidenceRevisionPreparation(
+		t, prepared.RecordID(), []evidence.PreparedCapture{prepared}, nil, []string{prepared.SnapshotID()},
+	)
+	tx := newFakeRecordEvidenceParticipantTx(t, prepared)
+	tx.usedLogicalBytes = int64(evidence.DefaultProjectEvidenceCapacityBytes)
+
+	err := NewRecordEvidenceRevisionParticipant().ApplyRevision(context.Background(), tx, records.RevisionCommitted{
+		Result: records.RevisionCommitResult{RecordID: prepared.RecordID(), RevisionID: "rrv_evidencecapacity"},
+		Input: recordsPostgresCompleteRevisionInputWithEvidence(
+			t, "Evidence capacity", preparation.SnapshotIDs(),
+		),
+		EvidencePreparation: preparation,
+	})
+	if !errors.Is(err, evidence.ErrPreviewStale) || !errors.Is(err, ErrEvidencePersistenceConflict) {
+		t.Fatalf("ApplyRevision() error = %v, want stale-preview persistence conflict", err)
+	}
+	if tx.capacityLockCalls != 1 || tx.queryRowCalls != 2 {
+		t.Fatalf("capacity checks = locks:%d queries:%d, want project read/lock/usage read", tx.capacityLockCalls, tx.queryRowCalls)
+	}
+	if len(tx.execKinds) != 0 || strings.Contains(tx.querySQL, "delete from public.evidence_capture_intents") {
+		t.Fatalf("quota denial consumed intent or wrote logical rows: query=%q exec=%#v", tx.querySQL, tx.execKinds)
+	}
+}
+
+func TestRecordEvidenceRevisionParticipantCapacityPolicyIsExplicitAndValidated(t *testing.T) {
+	policy := evidence.CapacityPolicy{ProjectLimitBytes: 4096, WarningPercent: 75}
+	participant, err := NewRecordEvidenceRevisionParticipantWithCapacityPolicy(policy)
+	if err != nil || participant == nil {
+		t.Fatalf("NewRecordEvidenceRevisionParticipantWithCapacityPolicy() = (%#v, %v)", participant, err)
+	}
+	if _, err := NewRecordEvidenceRevisionParticipantWithCapacityPolicy(evidence.CapacityPolicy{}); !errors.Is(err, evidence.ErrInvalidCapacityPolicy) {
+		t.Fatalf("invalid policy error = %v, want ErrInvalidCapacityPolicy", err)
+	}
+}
+
+func TestRecordEvidenceRevisionParticipantAcceptsCanonicalWarningAtExactBoundary(t *testing.T) {
+	prepared := storePreparedEvidenceCaptureWithQuota(
+		t, "rec_evidencewarning", "evs_evidencewarning", "evi_eeeeeeeeeeeeeeeeeeeeeeee",
+		time.Date(2026, 8, 14, 8, 45, 0, 0, time.UTC),
+		evidence.QuotaOutcome{Status: evidence.QuotaWarning, Reason: "project evidence quota warning threshold reached"},
+	)
+	policy := evidence.CapacityPolicy{ProjectLimitBytes: prepared.Snapshot().Size(), WarningPercent: 80}
+	participant, err := NewRecordEvidenceRevisionParticipantWithCapacityPolicy(policy)
+	if err != nil {
+		t.Fatalf("NewRecordEvidenceRevisionParticipantWithCapacityPolicy() error = %v", err)
+	}
+	preparation := storeEvidenceRevisionPreparation(
+		t, prepared.RecordID(), []evidence.PreparedCapture{prepared}, nil, []string{prepared.SnapshotID()},
+	)
+	tx := newFakeRecordEvidenceParticipantTx(t, prepared)
+	err = participant.ApplyRevision(context.Background(), tx, records.RevisionCommitted{
+		Result: records.RevisionCommitResult{RecordID: prepared.RecordID(), RevisionID: "rrv_evidencewarning"},
+		Input: recordsPostgresCompleteRevisionInputWithEvidence(
+			t, "Evidence warning", preparation.SnapshotIDs(),
+		),
+		EvidencePreparation: preparation,
+	})
+	if err != nil {
+		t.Fatalf("ApplyRevision() error = %v", err)
+	}
+	if tx.capacityLockCalls != 1 || tx.queryRowCalls != 3 ||
+		!reflect.DeepEqual(tx.execKinds, []string{"snapshot", "reference"}) {
+		t.Fatalf("warning capture calls = locks:%d queries:%d exec:%#v", tx.capacityLockCalls, tx.queryRowCalls, tx.execKinds)
 	}
 }
 
@@ -131,6 +236,9 @@ func TestRecordEvidenceRevisionParticipantValidatesExistingReferenceWithoutPaylo
 	if !reflect.DeepEqual(tx.execKinds, []string{"reference"}) {
 		t.Fatalf("existing reference writes = %#v, want revision reference only", tx.execKinds)
 	}
+	if tx.capacityLockCalls != 0 {
+		t.Fatalf("existing reference acquired capacity lock %d times", tx.capacityLockCalls)
+	}
 	for _, sql := range tx.execSQL {
 		if strings.Contains(sql, "evidence_payloads") || strings.Contains(sql, "evidence_snapshots") {
 			t.Fatalf("existing reference duplicated payload or snapshot:\n%s", sql)
@@ -179,6 +287,34 @@ func storePreparedEvidenceCaptureWithSnapshotTimeOffset(
 	previewedAt time.Time,
 	snapshotTimeOffset time.Duration,
 ) evidence.PreparedCapture {
+	return storePreparedEvidenceCaptureWithQuotaAndSnapshotTimeOffset(
+		t, recordID, snapshotID, intentID, previewedAt,
+		evidence.QuotaOutcome{Status: evidence.QuotaAllowed}, snapshotTimeOffset,
+	)
+}
+
+func storePreparedEvidenceCaptureWithQuota(
+	t *testing.T,
+	recordID string,
+	snapshotID string,
+	intentID string,
+	previewedAt time.Time,
+	quota evidence.QuotaOutcome,
+) evidence.PreparedCapture {
+	return storePreparedEvidenceCaptureWithQuotaAndSnapshotTimeOffset(
+		t, recordID, snapshotID, intentID, previewedAt, quota, 0,
+	)
+}
+
+func storePreparedEvidenceCaptureWithQuotaAndSnapshotTimeOffset(
+	t *testing.T,
+	recordID string,
+	snapshotID string,
+	intentID string,
+	previewedAt time.Time,
+	quota evidence.QuotaOutcome,
+	snapshotTimeOffset time.Duration,
+) evidence.PreparedCapture {
 	t.Helper()
 	descriptor := storeEvidenceParticipantDescriptor()
 	authorization := storeEvidenceParticipantAuthorization(t)
@@ -207,7 +343,7 @@ func storePreparedEvidenceCaptureWithSnapshotTimeOffset(
 		Sensitivity:     evidence.SensitivityNormal,
 		ActualPrecision: evidence.DurationSemantics{Applicable: true, Value: time.Minute},
 		BucketWidth:     evidence.DurationSemantics{Applicable: true, Value: time.Minute},
-		QuotaOutcome:    evidence.QuotaOutcome{Status: evidence.QuotaAllowed},
+		QuotaOutcome:    quota,
 		Retention: evidence.RetentionSemantics{
 			Immutable: true, Scope: evidence.RetentionScopeRecordRevision,
 			SourceDeletion: evidence.SourceDeletionSnapshotRetained,
@@ -414,16 +550,42 @@ type fakeRecordEvidenceParticipantTx struct {
 	execSQL             []string
 	referenceOrdinal    int64
 	referenceSnapshotID string
+	projectID           string
+	usedLogicalBytes    int64
+	capacityLockCalls   int
 }
 
 func newFakeRecordEvidenceParticipantTx(t *testing.T, prepared evidence.PreparedCapture) *fakeRecordEvidenceParticipantTx {
 	t.Helper()
-	return &fakeRecordEvidenceParticipantTx{intentRow: fakeRecordEvidenceIntentRowFromPrepared(t, prepared)}
+	return &fakeRecordEvidenceParticipantTx{
+		intentRow: fakeRecordEvidenceIntentRowFromPrepared(t, prepared),
+		projectID: string(recordauth.ProjectIDDefault),
+	}
 }
 
 func (tx *fakeRecordEvidenceParticipantTx) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
 	tx.queryRowCalls++
 	tx.querySQL = strings.ToLower(strings.Join(strings.Fields(sql), " "))
+	if strings.Contains(tx.querySQL, "select project_id") && strings.Contains(tx.querySQL, "from public.records") {
+		projectID := tx.projectID
+		if projectID == "" {
+			projectID = string(recordauth.ProjectIDDefault)
+		}
+		return fakeRecordPlatformRow{scan: func(dest ...any) error {
+			if len(dest) != 1 {
+				return errors.New("unexpected evidence project scan destination count")
+			}
+			target, ok := dest[0].(*string)
+			if !ok {
+				return errors.New("unexpected evidence project scan destination type")
+			}
+			*target = projectID
+			return nil
+		}}
+	}
+	if strings.Contains(tx.querySQL, "sum(snapshot.logical_size_bytes)") {
+		return evidenceCapacityInt64Row(tx.usedLogicalBytes)
+	}
 	if strings.Contains(tx.querySQL, "delete from public.evidence_capture_intents") {
 		return tx.intentRow
 	}
@@ -437,6 +599,9 @@ func (tx *fakeRecordEvidenceParticipantTx) Exec(_ context.Context, sql string, a
 	compact := strings.ToLower(strings.Join(strings.Fields(sql), " "))
 	tx.execSQL = append(tx.execSQL, compact)
 	switch {
+	case strings.Contains(compact, "pg_advisory_xact_lock"):
+		tx.capacityLockCalls++
+		return pgconn.NewCommandTag("SELECT 1"), nil
 	case strings.Contains(compact, "insert into public.evidence_snapshots"):
 		tx.execKinds = append(tx.execKinds, "snapshot")
 	case strings.Contains(compact, "insert into public.record_revision_evidence"):

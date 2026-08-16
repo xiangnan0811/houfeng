@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"houfeng/internal/center/auth"
 	"houfeng/internal/center/config"
 	"houfeng/internal/center/enrollment"
+	centerevidence "houfeng/internal/center/evidence"
 	centerhttp "houfeng/internal/center/http"
 	"houfeng/internal/center/http/handlers"
 	incidentservice "houfeng/internal/center/incidents"
@@ -292,7 +294,53 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	router = centerhttp.SecurityHeaders(strings.HasPrefix(cfg.PublicBaseURL, "https://"))(router)
 	router = centerhttp.RequireAllowedHost(cfg.PublicBaseURL)(router)
 
-	return deps.newApp(cfg.HTTPAddr, router, incidentSvc, retentionWorker, sessionCleanup, exchangeRateWorker, subscriptionReminderWorker), db.Close, nil
+	workers := []centerapp.Worker{
+		incidentSvc,
+		retentionWorker,
+		sessionCleanup,
+		exchangeRateWorker,
+		subscriptionReminderWorker,
+	}
+	if recordsEnabled {
+		evidenceMaintenance, _ := newEvidenceMaintenanceRuntime(db.Pool(), nil)
+		if evidenceMaintenance != nil {
+			workers = append(workers, evidenceMaintenance)
+		}
+	}
+	return deps.newApp(cfg.HTTPAddr, router, workers...), db.Close, nil
+}
+
+func newEvidenceMaintenanceRuntime(
+	pool *pgxpool.Pool,
+	gate store.AdmissionGate,
+) (*centerevidence.MaintenanceWorker, *centerevidence.MaintenanceObserver) {
+	observer := centerevidence.NewMaintenanceObserver()
+	if pool == nil || nilBootstrapAdmissionGate(gate) {
+		return nil, observer
+	}
+	repository := store.NewPostgresEvidenceRepository(pool, gate)
+	worker := centerevidence.NewMaintenanceWorker(repository, observer, centerevidence.MaintenanceWorkerOptions{
+		Interval:          centerevidence.DefaultMaintenanceInterval,
+		IntentBatchLimit:  centerevidence.MaxMaintenanceBatchSize,
+		PayloadBatchLimit: centerevidence.MaxMaintenanceBatchSize,
+		BacklogProbeLimit: centerevidence.MaxMaintenanceBatchSize,
+		CapacityPolicy:    centerevidence.DefaultCapacityPolicy(),
+		Logger:            slog.Default(),
+	})
+	return worker, observer
+}
+
+func nilBootstrapAdmissionGate(gate store.AdmissionGate) bool {
+	if gate == nil {
+		return true
+	}
+	value := reflect.ValueOf(gate)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func newRecordsHTTPHandlers(

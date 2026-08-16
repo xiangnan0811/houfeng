@@ -70,6 +70,23 @@ function previewIsStale(preview: EvidenceCapturePreview, now: Date): boolean {
   return Number.isNaN(validUntil) || validUntil <= now.getTime()
 }
 
+function previewQuotaIsConfirmable(preview: EvidenceCapturePreview): boolean {
+  if (!previewQuotaIsValid(preview)) return false
+  return preview.quota.status === 'allowed' || preview.quota.status === 'warning'
+}
+
+function previewQuotaIsValid(preview: EvidenceCapturePreview): boolean {
+  const quota = (preview as { quota?: unknown }).quota
+  if (typeof quota !== 'object' || quota === null) return false
+  const status = (quota as { status?: unknown }).status
+  const reason = (quota as { reason?: unknown }).reason
+  if (status === 'allowed') return reason === undefined
+  if (status === 'warning') return reason === 'project evidence quota warning threshold reached'
+  if (status === 'exceeded') return reason === 'project evidence quota exceeded'
+  if (status === 'unavailable') return reason === 'project evidence capacity unavailable'
+  return false
+}
+
 function utcInstantMicros(value: string): number {
   const match = /^(.*?)(?:\.(\d{1,6}))?Z$/.exec(value)
   if (!match?.[1]) return Number.NaN
@@ -117,6 +134,7 @@ export function EvidenceCapturePicker({
   )
   const canRequestPreview = selectedSource !== undefined && validWindow && metricsComplete && precisionComplete
   const stalePreview = preview === null || previewIsStale(preview, now())
+  const confirmablePreview = preview !== null && !stalePreview && previewQuotaIsConfirmable(preview)
 
   const invalidatePreview = () => {
     previewRequestRef.current?.abort()
@@ -218,7 +236,7 @@ export function EvidenceCapturePicker({
         result.source.type !== input.source_type || result.source.id !== input.source_id ||
         !sameUTCInstant(result.requested_window.start, input.requested_window.start) ||
         !sameUTCInstant(result.requested_window.end, input.requested_window.end) ||
-        result.record_id === '' || result.capture_intent_id === '') {
+        result.record_id === '' || result.capture_intent_id === '' || !previewQuotaIsValid(result)) {
         setPreviewError('预览响应与当前选择不一致。')
         return
       }
@@ -234,7 +252,7 @@ export function EvidenceCapturePicker({
   }
 
   const handleConfirm = () => {
-    if (!preview || previewIsStale(preview, now())) return
+    if (!preview || previewIsStale(preview, now()) || !previewQuotaIsConfirmable(preview)) return
     onConfirm({
       record_id: preview.record_id,
       capture_intent_id: preview.capture_intent_id,
@@ -341,7 +359,9 @@ export function EvidenceCapturePicker({
               <div><dt>实际窗口</dt><dd>{preview.actual_window.start} — {preview.actual_window.end}</dd></div>
               <div><dt>质量</dt><dd>{preview.quality.status}</dd></div>
               <div><dt>预计大小</dt><dd>{preview.estimated_canonical_bytes} bytes</dd></div>
+              <div><dt>证据容量</dt><dd>{preview.quota.status}</dd></div>
             </dl>
+            {preview.quota.reason ? <p>{preview.quota.reason}</p> : null}
             <p>预览有效至 {preview.valid_until}</p>
             {stalePreview ? <p className="evidence-picker__error">该预览已过期，请重新生成。</p> : null}
           </section>
@@ -350,7 +370,7 @@ export function EvidenceCapturePicker({
 
       <fieldset className="page-panel evidence-picker__step" aria-label="8. 确认">
         <legend>8. 确认</legend>
-        <Button onClick={handleConfirm} disabled={!preview || stalePreview}>确认引用</Button>
+        <Button onClick={handleConfirm} disabled={!confirmablePreview}>确认引用</Button>
       </fieldset>
     </section>
   )

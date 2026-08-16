@@ -169,6 +169,7 @@ type QuotaStatus string
 
 const (
 	QuotaAllowed     QuotaStatus = "allowed"
+	QuotaWarning     QuotaStatus = "warning"
 	QuotaExceeded    QuotaStatus = "exceeded"
 	QuotaUnavailable QuotaStatus = "unavailable"
 )

@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/evidence"
+	"houfeng/internal/center/recordauth"
 )
 
 const (
@@ -43,11 +44,7 @@ type EvidencePayloadMetadata struct {
 	CompressedSizeBytes uint64
 }
 
-type EvidencePayloadGCReceipt struct {
-	PayloadVersionDigest [sha256.Size]byte
-	ReceiptDigest        [sha256.Size]byte
-	DeletedAt            time.Time
-}
+type EvidencePayloadGCReceipt = evidence.PayloadGCReceipt
 
 // PostgresEvidenceRepository owns capture-intent and content-addressed payload
 // lifecycle primitives. Worker scheduling and revision participation live at
@@ -59,6 +56,8 @@ type PostgresEvidenceRepository struct {
 var (
 	_ evidence.CaptureIntentBindingSource = (*PostgresEvidenceRepository)(nil)
 	_ evidence.CapturePayloadSink         = (*PostgresEvidenceRepository)(nil)
+	_ evidence.ProjectCapacitySource      = (*PostgresEvidenceRepository)(nil)
+	_ evidence.MaintenanceRepository      = (*PostgresEvidenceRepository)(nil)
 )
 
 func NewPostgresEvidenceRepository(pool *pgxpool.Pool, gate AdmissionGate) *PostgresEvidenceRepository {
@@ -305,6 +304,208 @@ func (repository *PostgresEvidenceRepository) PersistCapturePayload(
 	return err
 }
 
+func (repository *PostgresEvidenceRepository) ReadProjectEvidenceCapacity(
+	ctx context.Context,
+	projectID string,
+) (evidence.ProjectCapacityUsage, error) {
+	if ctx == nil || recordauth.ValidateProjectID(recordauth.ProjectID(projectID)) != nil {
+		return evidence.ProjectCapacityUsage{}, ErrInvalidEvidencePersistence
+	}
+	tx, err := repository.startAdmittedTransaction(ctx)
+	if err != nil {
+		return evidence.ProjectCapacityUsage{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var values [8]int64
+	err = tx.QueryRow(ctx, `
+		with project_snapshots as materialized (
+			select snapshot.logical_size_bytes, snapshot.payload_digest
+			from public.evidence_snapshots as snapshot
+			join public.records as record on record.record_id = snapshot.record_id
+			where record.project_id = $1
+		), project_payloads as materialized (
+			select distinct snapshot.payload_digest,
+			       payload.canonical_size_bytes, payload.compressed_size_bytes
+			from public.evidence_snapshots as snapshot
+			join public.records as record on record.record_id = snapshot.record_id
+			join public.evidence_payloads as payload on payload.payload_digest = snapshot.payload_digest
+			where record.project_id = $1
+		), global_orphans as materialized (
+			select payload.canonical_size_bytes, payload.compressed_size_bytes
+			from public.evidence_payloads as payload
+			where not exists (
+				select 1 from public.evidence_snapshots as snapshot
+				where snapshot.payload_digest = payload.payload_digest
+			)
+		)
+		select
+			(select count(*)::bigint from project_snapshots),
+			(select coalesce(sum(logical_size_bytes), 0)::bigint from project_snapshots),
+			(select count(*)::bigint from project_payloads),
+			(select coalesce(sum(canonical_size_bytes), 0)::bigint from project_payloads),
+			(select coalesce(sum(compressed_size_bytes), 0)::bigint from project_payloads),
+			(select count(*)::bigint from global_orphans),
+			(select coalesce(sum(canonical_size_bytes), 0)::bigint from global_orphans),
+			(select coalesce(sum(compressed_size_bytes), 0)::bigint from global_orphans)`,
+		projectID,
+	).Scan(
+		&values[0], &values[1], &values[2], &values[3],
+		&values[4], &values[5], &values[6], &values[7],
+	)
+	if err != nil {
+		return evidence.ProjectCapacityUsage{}, fmt.Errorf("read project evidence capacity: %w", err)
+	}
+	unsigned, err := evidenceAccountingUint64(values[:]...)
+	if err != nil {
+		return evidence.ProjectCapacityUsage{}, err
+	}
+	usage := evidence.ProjectCapacityUsage{
+		ProjectID:            projectID,
+		LogicalSnapshotCount: unsigned[0], LogicalSnapshotBytes: unsigned[1],
+		PhysicalPayloadCount: unsigned[2], PhysicalCanonicalBytes: unsigned[3], PhysicalCompressedBytes: unsigned[4],
+		OrphanPayloadCount: unsigned[5], OrphanCanonicalBytes: unsigned[6], OrphanCompressedBytes: unsigned[7],
+	}
+	if usage.Validate(projectID) != nil {
+		return evidence.ProjectCapacityUsage{}, ErrEvidencePersistenceConflict
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return evidence.ProjectCapacityUsage{}, fmt.Errorf("commit project evidence capacity read: %w", err)
+	}
+	return usage, nil
+}
+
+func (repository *PostgresEvidenceRepository) ReadEvidenceCapacityAggregate(
+	ctx context.Context,
+) (evidence.EvidenceCapacityAggregate, error) {
+	if ctx == nil {
+		return evidence.EvidenceCapacityAggregate{}, ErrInvalidEvidencePersistence
+	}
+	tx, err := repository.startAdmittedTransaction(ctx)
+	if err != nil {
+		return evidence.EvidenceCapacityAggregate{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var values [8]int64
+	err = tx.QueryRow(ctx, `
+		with project_totals as materialized (
+			select record.project_id,
+			       coalesce(sum(snapshot.logical_size_bytes), 0)::bigint as logical_size_bytes
+			from public.records as record
+			left join public.evidence_snapshots as snapshot on snapshot.record_id = record.record_id
+			group by record.project_id
+		), referenced_payloads as materialized (
+			select distinct snapshot.payload_digest,
+			       payload.canonical_size_bytes, payload.compressed_size_bytes
+			from public.evidence_snapshots as snapshot
+			join public.evidence_payloads as payload on payload.payload_digest = snapshot.payload_digest
+		), global_orphans as materialized (
+			select payload.canonical_size_bytes, payload.compressed_size_bytes
+			from public.evidence_payloads as payload
+			where not exists (
+				select 1 from public.evidence_snapshots as snapshot
+				where snapshot.payload_digest = payload.payload_digest
+			)
+		)
+		select
+			(select count(*)::bigint from project_totals),
+			(select coalesce(sum(logical_size_bytes), 0)::bigint from project_totals),
+			(select coalesce(max(logical_size_bytes), 0)::bigint from project_totals),
+			(select coalesce(sum(canonical_size_bytes), 0)::bigint from referenced_payloads),
+			(select coalesce(sum(compressed_size_bytes), 0)::bigint from referenced_payloads),
+			(select count(*)::bigint from global_orphans),
+			(select coalesce(sum(canonical_size_bytes), 0)::bigint from global_orphans),
+			(select coalesce(sum(compressed_size_bytes), 0)::bigint from global_orphans)`,
+	).Scan(
+		&values[0], &values[1], &values[2], &values[3],
+		&values[4], &values[5], &values[6], &values[7],
+	)
+	if err != nil {
+		return evidence.EvidenceCapacityAggregate{}, fmt.Errorf("read evidence capacity aggregate: %w", err)
+	}
+	unsigned, err := evidenceAccountingUint64(values[:]...)
+	if err != nil {
+		return evidence.EvidenceCapacityAggregate{}, err
+	}
+	aggregate := evidence.EvidenceCapacityAggregate{
+		ProjectCount: unsigned[0], LogicalSnapshotBytes: unsigned[1], HighestProjectLogicalBytes: unsigned[2],
+		PhysicalCanonicalBytes: unsigned[3], PhysicalCompressedBytes: unsigned[4],
+		OrphanPayloadCount: unsigned[5], OrphanCanonicalBytes: unsigned[6], OrphanCompressedBytes: unsigned[7],
+	}
+	if aggregate.Validate() != nil {
+		return evidence.EvidenceCapacityAggregate{}, ErrEvidencePersistenceConflict
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return evidence.EvidenceCapacityAggregate{}, fmt.Errorf("commit evidence capacity aggregate read: %w", err)
+	}
+	return aggregate, nil
+}
+
+func (repository *PostgresEvidenceRepository) ReadEvidenceLifecycleBacklog(
+	ctx context.Context,
+	limit uint64,
+) (evidence.EvidenceLifecycleBacklog, error) {
+	if ctx == nil || limit == 0 || limit > maxEvidenceLifecycleBatchSize {
+		return evidence.EvidenceLifecycleBacklog{}, ErrInvalidEvidencePersistence
+	}
+	tx, err := repository.startAdmittedTransaction(ctx)
+	if err != nil {
+		return evidence.EvidenceLifecycleBacklog{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	probeLimit := int64(limit + 1)
+	var expiredCount, orphanCount int64
+	err = tx.QueryRow(ctx, `
+		with expired_intents as materialized (
+			select intent_id
+			from public.evidence_capture_intents
+			where valid_until <= transaction_timestamp()
+			order by valid_until, intent_id
+			limit $1
+		), eligible_orphans as materialized (
+			select payload.payload_digest
+			from public.evidence_payloads as payload
+			where payload.created_at <= transaction_timestamp() - ($2 * interval '1 microsecond')
+			  and not exists (
+				select 1 from public.evidence_snapshots as snapshot
+				where snapshot.payload_digest = payload.payload_digest
+			  )
+			order by payload.created_at, payload.payload_digest
+			limit $1
+		)
+		select (select count(*)::bigint from expired_intents),
+		       (select count(*)::bigint from eligible_orphans)`,
+		probeLimit,
+		EvidencePayloadOrphanGracePeriod.Microseconds(),
+	).Scan(&expiredCount, &orphanCount)
+	if err != nil {
+		return evidence.EvidenceLifecycleBacklog{}, fmt.Errorf("read evidence lifecycle backlog: %w", err)
+	}
+	if expiredCount < 0 || orphanCount < 0 || expiredCount > probeLimit || orphanCount > probeLimit {
+		return evidence.EvidenceLifecycleBacklog{}, ErrEvidencePersistenceConflict
+	}
+	backlog := evidence.EvidenceLifecycleBacklog{
+		ExpiredIntentCount:         min(uint64(expiredCount), limit),
+		EligibleOrphanPayloadCount: min(uint64(orphanCount), limit),
+		MoreExpiredIntents:         uint64(expiredCount) > limit,
+		MoreEligibleOrphanPayloads: uint64(orphanCount) > limit,
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return evidence.EvidenceLifecycleBacklog{}, fmt.Errorf("commit evidence lifecycle backlog read: %w", err)
+	}
+	return backlog, nil
+}
+
+func evidenceAccountingUint64(values ...int64) ([]uint64, error) {
+	converted := make([]uint64, len(values))
+	for index, value := range values {
+		if value < 0 {
+			return nil, ErrEvidencePersistenceConflict
+		}
+		converted[index] = uint64(value)
+	}
+	return converted, nil
+}
+
 func (repository *PostgresEvidenceRepository) DeleteExpiredCaptureIntents(
 	ctx context.Context,
 	limit uint64,
@@ -447,6 +648,8 @@ func (repository *PostgresEvidenceRepository) CollectUnreferencedPayloads(
 			PayloadVersionDigest: versionDigest,
 			ReceiptDigest:        receiptDigest,
 			DeletedAt:            item.deletedAt,
+			CanonicalSizeBytes:   item.canonicalSize,
+			CompressedSizeBytes:  item.compressedSize,
 		})
 	}
 	if err := tx.Commit(ctx); err != nil {

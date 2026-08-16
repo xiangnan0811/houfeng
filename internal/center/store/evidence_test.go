@@ -435,6 +435,18 @@ func TestPostgresEvidenceRepositoryNilTypedNilAndFailingAdmissionMakeZeroPrimiti
 				_, err := repository.CollectUnreferencedPayloads(context.Background(), 10)
 				return err
 			}},
+			{name: "project capacity", run: func(repository *PostgresEvidenceRepository) error {
+				_, err := repository.ReadProjectEvidenceCapacity(context.Background(), string(recordauth.ProjectIDDefault))
+				return err
+			}},
+			{name: "capacity aggregate", run: func(repository *PostgresEvidenceRepository) error {
+				_, err := repository.ReadEvidenceCapacityAggregate(context.Background())
+				return err
+			}},
+			{name: "lifecycle backlog", run: func(repository *PostgresEvidenceRepository) error {
+				_, err := repository.ReadEvidenceLifecycleBacklog(context.Background(), 10)
+				return err
+			}},
 		} {
 			t.Run(gate.name+"/"+operation.name, func(t *testing.T) {
 				tx := &fakeRecordPlatformTx{}

@@ -843,7 +843,7 @@ func validatePreviewQuotaOutcome(outcome QuotaOutcome) error {
 		if outcome.Reason != "" {
 			return ErrInvalidSnapshotEnvelope
 		}
-	case QuotaExceeded, QuotaUnavailable:
+	case QuotaWarning, QuotaExceeded, QuotaUnavailable:
 		if strings.TrimSpace(outcome.Reason) == "" || !validEnvelopeString(outcome.Reason) {
 			return ErrInvalidSnapshotEnvelope
 		}
@@ -854,7 +854,8 @@ func validatePreviewQuotaOutcome(outcome QuotaOutcome) error {
 }
 
 func validateCapturedQuotaOutcome(outcome QuotaOutcome) error {
-	if err := validatePreviewQuotaOutcome(outcome); err != nil || outcome.Status != QuotaAllowed {
+	if err := validatePreviewQuotaOutcome(outcome); err != nil ||
+		(outcome.Status != QuotaAllowed && outcome.Status != QuotaWarning) {
 		return ErrInvalidSnapshotEnvelope
 	}
 	return nil

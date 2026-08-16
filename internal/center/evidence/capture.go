@@ -116,7 +116,7 @@ func validatePreparedCapture(
 	if err := validateConformancePreview(descriptor, intent.Selection, preview); err != nil {
 		return preparedCaptureError("preview", err)
 	}
-	if preview.QuotaOutcome.Status != QuotaAllowed {
+	if preview.QuotaOutcome.Status != QuotaAllowed && preview.QuotaOutcome.Status != QuotaWarning {
 		return preparedCaptureError("preview quota", ErrInvalidSnapshotEnvelope)
 	}
 	if err := validateConformanceIntent(descriptor, intent.Selection, preview, intent); err != nil {

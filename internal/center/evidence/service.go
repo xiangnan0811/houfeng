@@ -79,13 +79,21 @@ type Service struct {
 	registry  Registry
 	intents   CaptureIntentStore
 	snapshots SnapshotReadSource
+	capacity  *CapacityEnforcer
 }
 
-func NewService(registry Registry, intents CaptureIntentStore, snapshots SnapshotReadSource) (*Service, error) {
-	if len(registry.kinds) == 0 || nilRevisionPreparationDependency(intents) || nilRevisionPreparationDependency(snapshots) {
+func NewService(
+	registry Registry,
+	intents CaptureIntentStore,
+	snapshots SnapshotReadSource,
+	capacity *CapacityEnforcer,
+) (*Service, error) {
+	if len(registry.kinds) == 0 || nilRevisionPreparationDependency(intents) ||
+		nilRevisionPreparationDependency(snapshots) || capacity == nil ||
+		capacity.policy.Validate() != nil || nilCapacityDependency(capacity.source) {
 		return nil, ErrEvidenceServiceUnavailable
 	}
-	return &Service{registry: registry, intents: intents, snapshots: snapshots}, nil
+	return &Service{registry: registry, intents: intents, snapshots: snapshots, capacity: capacity}, nil
 }
 
 func (service *Service) CapturePreview(
@@ -114,6 +122,11 @@ func (service *Service) CapturePreview(
 	if err != nil {
 		return CapturePreviewResult{}, err
 	}
+	capacity, err := service.capacity.Evaluate(ctx, string(actor.ProjectID), preview.EstimatedCanonicalBytes)
+	if err != nil {
+		return CapturePreviewResult{}, fmt.Errorf("%w: capacity", ErrEvidenceServiceUnavailable)
+	}
+	preview.QuotaOutcome = capacity.Outcome
 	if err := validateConformancePreview(kind.Descriptor(), selection, preview); err != nil {
 		return CapturePreviewResult{}, fmt.Errorf("%w: preview", ErrEvidenceServiceUnavailable)
 	}
@@ -128,12 +141,16 @@ func (service *Service) CapturePreview(
 	if err := validateConformanceIntent(kind.Descriptor(), selection, preview, intent); err != nil {
 		return CapturePreviewResult{}, fmt.Errorf("%w: intent", ErrEvidenceServiceUnavailable)
 	}
+	result := CapturePreviewResult{
+		RecordID: request.RecordID, SnapshotID: request.SnapshotID, Preview: clonePreview(preview),
+	}
+	if preview.QuotaOutcome.Status == QuotaExceeded || preview.QuotaOutcome.Status == QuotaUnavailable {
+		return result, nil
+	}
 	if err := service.intents.PersistCaptureIntent(ctx, request.RecordID, request.SnapshotID, intent, preview); err != nil {
 		return CapturePreviewResult{}, err
 	}
-	return CapturePreviewResult{
-		RecordID: request.RecordID, SnapshotID: request.SnapshotID, Preview: clonePreview(preview),
-	}, nil
+	return result, nil
 }
 
 func (service *Service) ReadSnapshot(

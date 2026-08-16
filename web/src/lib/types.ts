@@ -2477,7 +2477,7 @@ export type EvidenceUnits = {
 }
 
 export type EvidenceQuota = {
-  status: 'allowed' | 'exceeded' | 'unavailable'
+  status: 'allowed' | 'warning' | 'exceeded' | 'unavailable'
   reason?: string
 }
 
