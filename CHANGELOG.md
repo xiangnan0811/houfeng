@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.65.0](https://github.com/xiangnan0811/houfeng/compare/v0.64.0...v0.65.0) (2026-08-16)
+
+
+### Features
+
+* **evidence:** add capture APIs and lifecycle adapters ([530f9b4](https://github.com/xiangnan0811/houfeng/commit/530f9b485c1b7a0aa128e62204c0cb41a68d0265))
+* **evidence:** add web capture picker and renderers ([c871866](https://github.com/xiangnan0811/houfeng/commit/c871866b5ebe1ac0daa826dcbf9c05e0ea79c6db))
+* **evidence:** enforce capacity and schedule maintenance ([020ae7c](https://github.com/xiangnan0811/houfeng/commit/020ae7cc7cec22306fb9b080de30c8ed1d9cca0e))
+* **records:** add evidence capture and lifecycle platform ([e47f3da](https://github.com/xiangnan0811/houfeng/commit/e47f3da3055a761c4d00c14ef03447b7f45ba204))
+
+
+### Documentation
+
+* **trellis:** record evidence Task 5 contracts ([af56988](https://github.com/xiangnan0811/houfeng/commit/af56988460d78571e16f96579278a32fd9a2a632))
+* **trellis:** record evidence Task 6 contracts ([0142cf2](https://github.com/xiangnan0811/houfeng/commit/0142cf22cba63b0fef8dbfe51f3f1848017a0443))
+* **trellis:** record evidence Task 7 contracts ([65eefa7](https://github.com/xiangnan0811/houfeng/commit/65eefa71bcf741cca1866f9a114a8433fef54aa0))
+* **trellis:** record Task 7 delivery evidence ([38f2096](https://github.com/xiangnan0811/houfeng/commit/38f2096d5159743400e23be12f83589c6a625822))
+
 ## [0.64.0](https://github.com/xiangnan0811/houfeng/compare/v0.63.1...v0.64.0) (2026-08-16)
 
 
