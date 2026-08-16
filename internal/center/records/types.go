@@ -79,6 +79,7 @@ type CompleteRevisionValues struct {
 	OwnerID                string
 	Participants           []RevisionParticipantSnapshot
 	AttachmentIDs          []string
+	EvidenceSnapshotIDs    []string
 	FollowUpAt             *time.Time
 	Template               *TemplateProvenance
 	AuthorID               string
@@ -103,6 +104,7 @@ type CompleteRevisionInput struct {
 	ownerID                string
 	participants           []RevisionParticipantSnapshot
 	attachmentIDs          []string
+	evidenceSnapshotIDs    []string
 	followUpAt             *time.Time
 	template               *TemplateProvenance
 	authorID               string
@@ -168,6 +170,10 @@ func (input CompleteRevisionInput) Participants() []RevisionParticipantSnapshot 
 
 func (input CompleteRevisionInput) AttachmentIDs() []string {
 	return append([]string{}, input.attachmentIDs...)
+}
+
+func (input CompleteRevisionInput) EvidenceSnapshotIDs() []string {
+	return append([]string{}, input.evidenceSnapshotIDs...)
 }
 
 func (input CompleteRevisionInput) FollowUpAt() *time.Time {

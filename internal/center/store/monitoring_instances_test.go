@@ -1173,6 +1173,7 @@ func TestBindingConfirmRebindMovesPendingFingerprintIntoActiveBinding(t *testing
 		execArgs  []any
 		committed bool
 	)
+	eventAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
 	tx := &fakeMonitoringInstanceTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
@@ -1184,6 +1185,7 @@ func TestBindingConfirmRebindMovesPendingFingerprintIntoActiveBinding(t *testing
 					MonitoringInstanceID: "mi_002",
 					BindingStatus:        monitoringinstances.BindingBound,
 					BindingFingerprint:   "fp-pending",
+					UpdatedAt:            eventAt,
 				})
 				return nil
 			}}
@@ -1311,6 +1313,7 @@ func TestBindingRejectPendingClearsPendingMetadataAndKeepsActiveBinding(t *testi
 		execArgs  []any
 		committed bool
 	)
+	eventAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
 	tx := &fakeMonitoringInstanceTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
@@ -1320,6 +1323,7 @@ func TestBindingRejectPendingClearsPendingMetadataAndKeepsActiveBinding(t *testi
 					BindingStatus:              monitoringinstances.BindingBound,
 					BindingFingerprint:         "fp-active",
 					PendingBindingAttemptCount: 0,
+					UpdatedAt:                  eventAt,
 				})
 				return nil
 			}}
@@ -1430,6 +1434,7 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 		execArgs  []any
 		committed bool
 	)
+	eventAt := time.Date(2026, time.July, 1, 20, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 	tx := &fakeMonitoringInstanceTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			gotSQL = sql
@@ -1437,7 +1442,11 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
 					MonitoringInstanceID: "mi_004",
 					BindingStatus:        monitoringinstances.BindingUnbound,
+					UpdatedAt:            eventAt,
 				})
+				if len(dest) > 32 {
+					*(dest[32].(*string)) = monitoringinstances.BindingBound
+				}
 				return nil
 			}}
 		},
@@ -1472,6 +1481,8 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 		"sync_token_hash = ''",
 		"last_heartbeat_at = null",
 		"last_sync_at = null",
+		"for update",
+		"binding_status = (select binding_status from prior)",
 	} {
 		if !strings.Contains(gotSQL, snippet) {
 			t.Fatalf("ResetMonitoringInstanceBinding() SQL missing %q", snippet)
@@ -1547,6 +1558,7 @@ func TestStoreSourceIncludesSyncTokenValidationForHeartbeatWrites(t *testing.T) 
 
 func TestMonitoringInstanceRuntimeControlTransitionsWriteEvents(t *testing.T) {
 	t.Parallel()
+	eventAt := time.Date(2026, time.July, 1, 20, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 
 	tests := []struct {
 		name                 string
@@ -1591,6 +1603,8 @@ func TestMonitoringInstanceRuntimeControlTransitionsWriteEvents(t *testing.T) {
 				"set monitoring_status = '启用'",
 				"where monitoring_instance_id = $1",
 				"monitoring_status in ('维护中', '暂停')",
+				"for update",
+				"monitoring_status = (select monitoring_status from prior)",
 			},
 		},
 		{
@@ -1608,6 +1622,8 @@ func TestMonitoringInstanceRuntimeControlTransitionsWriteEvents(t *testing.T) {
 				"set monitoring_status = '暂停'",
 				"where monitoring_instance_id = $1",
 				"monitoring_status in ('启用', '维护中')",
+				"for update",
+				"monitoring_status = (select monitoring_status from prior)",
 			},
 		},
 		{
@@ -1625,6 +1641,8 @@ func TestMonitoringInstanceRuntimeControlTransitionsWriteEvents(t *testing.T) {
 				"set monitoring_status = '启用'",
 				"where monitoring_instance_id = $1",
 				"monitoring_status in ('维护中', '暂停')",
+				"for update",
+				"monitoring_status = (select monitoring_status from prior)",
 			},
 		},
 		{
@@ -1642,6 +1660,8 @@ func TestMonitoringInstanceRuntimeControlTransitionsWriteEvents(t *testing.T) {
 				"set monitoring_status = '暂停'",
 				"where monitoring_instance_id = $1",
 				"monitoring_status in ('启用', '维护中')",
+				"for update",
+				"monitoring_status = (select monitoring_status from prior)",
 			},
 		},
 	}
@@ -1663,7 +1683,7 @@ func TestMonitoringInstanceRuntimeControlTransitionsWriteEvents(t *testing.T) {
 						t.Fatalf("QueryRow args = %#v, want monitoringInstance id %q", args, tt.monitoringInstanceID)
 					}
 					return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
-						scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{MonitoringInstanceID: tt.monitoringInstanceID, MonitoringStatus: tt.returnedStatus})
+						scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{MonitoringInstanceID: tt.monitoringInstanceID, MonitoringStatus: tt.returnedStatus, UpdatedAt: eventAt})
 						if len(dest) > 32 {
 							*(dest[32].(*string)) = tt.sourceStatus
 						}
@@ -1744,7 +1764,11 @@ func TestMonitoringInstanceRuntimeControlResumePreservesNullSafeSelectColumns(t 
 						return errors.New("missing null-safe qualified select columns")
 					}
 				}
-				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{MonitoringInstanceID: "mi_resume_nulls", MonitoringStatus: monitoringinstances.MonitoringEnabled})
+				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
+					MonitoringInstanceID: "mi_resume_nulls",
+					MonitoringStatus:     monitoringinstances.MonitoringEnabled,
+					UpdatedAt:            time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC),
+				})
 				*(dest[32].(*string)) = monitoringInstanceMonitoringStatusMaintenance
 				return nil
 			}}
@@ -2043,6 +2067,7 @@ func TestMonitoringInstanceManagementReviewMarksEmptyMistakeCandidate(t *testing
 
 func TestRetireMonitoringInstancePausesAndRevokesTokens(t *testing.T) {
 	t.Parallel()
+	eventAt := time.Date(2026, time.July, 1, 20, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 
 	var (
 		updateSQL string
@@ -2063,7 +2088,11 @@ func TestRetireMonitoringInstancePausesAndRevokesTokens(t *testing.T) {
 					MonitoringStatus:     monitoringinstances.MonitoringPaused,
 					BindingStatus:        monitoringinstances.BindingBound,
 					CurrentHealthStatus:  monitoringinstances.HealthNormal,
+					UpdatedAt:            eventAt,
 				})
+				if len(dest) > 32 {
+					*(dest[32].(*string)) = monitoringinstances.LifecycleInUse
+				}
 				return nil
 			}}
 		},
@@ -2098,6 +2127,8 @@ func TestRetireMonitoringInstancePausesAndRevokesTokens(t *testing.T) {
 		"pending_action_id = null",
 		"pending_action_command_id = null",
 		"archived_at is null",
+		"for update",
+		"lifecycle_status = (select lifecycle_status from prior)",
 	} {
 		if !strings.Contains(updateSQL, snippet) {
 			t.Fatalf("retire SQL = %q, missing %q", updateSQL, snippet)
@@ -2113,6 +2144,7 @@ func TestRetireMonitoringInstancePausesAndRevokesTokens(t *testing.T) {
 
 func TestRestoreMonitoringInstanceLifecycleReturnsToObservingPaused(t *testing.T) {
 	t.Parallel()
+	eventAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
 
 	var updateSQL string
 	tx := &fakeMonitoringInstanceTx{
@@ -2127,6 +2159,7 @@ func TestRestoreMonitoringInstanceLifecycleReturnsToObservingPaused(t *testing.T
 					LifecycleStatus:      monitoringinstances.LifecycleObserving,
 					MonitoringStatus:     monitoringinstances.MonitoringPaused,
 					CurrentHealthStatus:  monitoringinstances.HealthNormal,
+					UpdatedAt:            eventAt,
 				})
 				return nil
 			}}
@@ -2163,6 +2196,7 @@ func TestRestoreMonitoringInstanceLifecycleReturnsToObservingPaused(t *testing.T
 
 func TestArchiveMonitoringInstanceRequiresReviewWithoutBlockers(t *testing.T) {
 	t.Parallel()
+	eventAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
 
 	var (
 		queryRows []string
@@ -2213,6 +2247,7 @@ func TestArchiveMonitoringInstanceRequiresReviewWithoutBlockers(t *testing.T) {
 						CurrentHealthStatus:  monitoringinstances.HealthNormal,
 						ArchivedAt:           &archivedAt,
 						ArchivedReason:       "duplicate",
+						UpdatedAt:            eventAt,
 					})
 					return nil
 				}}

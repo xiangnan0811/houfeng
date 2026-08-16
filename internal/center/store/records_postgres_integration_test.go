@@ -800,6 +800,23 @@ func newRecordsPostgresRepository(t *testing.T, pool *pgxpool.Pool, participants
 }
 
 func recordsPostgresCompleteRevisionInput(t *testing.T, title string, attachmentIDs ...string) records.CompleteRevisionInput {
+	return recordsPostgresCompleteRevisionInputValues(t, title, attachmentIDs, nil)
+}
+
+func recordsPostgresCompleteRevisionInputWithEvidence(
+	t *testing.T,
+	title string,
+	evidenceSnapshotIDs []string,
+) records.CompleteRevisionInput {
+	return recordsPostgresCompleteRevisionInputValues(t, title, nil, evidenceSnapshotIDs)
+}
+
+func recordsPostgresCompleteRevisionInputValues(
+	t *testing.T,
+	title string,
+	attachmentIDs []string,
+	evidenceSnapshotIDs []string,
+) records.CompleteRevisionInput {
 	t.Helper()
 	visibility, err := recordauth.NormalizeVisibilityScope(recordauth.VisibilityScope{
 		Version:        recordauth.VisibilityScopeVersionV1,
@@ -844,8 +861,9 @@ func recordsPostgresCompleteRevisionInput(t *testing.T, title string, attachment
 			ParticipantID:    "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
 			IdentitySnapshot: map[string]string{"display_name": "PostgreSQL Operator"},
 		}},
-		AttachmentIDs: attachmentIDs,
-		AuthorID:      "usr_aaaaaaaaaaaaaaaaaaaaaaaa",
+		AttachmentIDs:       attachmentIDs,
+		EvidenceSnapshotIDs: evidenceSnapshotIDs,
+		AuthorID:            "usr_aaaaaaaaaaaaaaaaaaaaaaaa",
 	})
 	if err != nil {
 		t.Fatalf("NormalizeCompleteRevisionInput() error = %v", err)

@@ -1459,7 +1459,7 @@ func applyMonitoringInstanceLifecycleStatus(ctx context.Context, tx pgx.Tx, acti
 		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, fmt.Errorf("update monitoring instance %q lifecycle for asset lifecycle action: %w", current.MonitoringInstanceID, err)
 	}
 	eventType, summary := monitoringInstanceLifecycleEventForStatus(nextStatus)
-	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, updated, eventType, summary, ""); err != nil {
+	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, updated, eventType, summary, "", current.LifecycleStatus, updated.LifecycleStatus, monitoringEventProvenanceCenter); err != nil {
 		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, err
 	}
 	after := map[string]any{"lifecycle_status": updated.LifecycleStatus}
@@ -1490,7 +1490,7 @@ func applyMonitoringInstanceMonitoringStatus(ctx context.Context, tx pgx.Tx, act
 		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, fmt.Errorf("update monitoring instance %q monitoring for asset lifecycle action: %w", current.MonitoringInstanceID, err)
 	}
 	eventType, summary := monitoringInstanceMonitoringEventForStatus(current.MonitoringStatus, nextStatus)
-	if err := insertMonitoringInstanceRuntimeEvent(ctx, tx, updated, eventType, summary); err != nil {
+	if err := insertMonitoringInstanceRuntimeEvent(ctx, tx, updated, eventType, summary, current.MonitoringStatus, monitoringEventProvenanceCenter); err != nil {
 		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, err
 	}
 	after := map[string]any{"monitoring_status": updated.MonitoringStatus}
@@ -1549,7 +1549,7 @@ func applyTargetLifecycleAction(ctx context.Context, tx pgx.Tx, actionID, vpsID 
 		return assetlifecycle.LifecycleActionStep{}, fmt.Errorf("update target %q for asset lifecycle action: %w", current.TargetID, err)
 	}
 	eventType, summary := targetRuntimeEventForStatus(current.RunStatus, input.RunStatus)
-	if err := insertTargetRuntimeEvent(ctx, tx, updated, eventType, summary); err != nil {
+	if err := insertTargetRuntimeEvent(ctx, tx, updated, eventType, summary, current.RunStatus, monitoringEventProvenanceCenter); err != nil {
 		return assetlifecycle.LifecycleActionStep{}, err
 	}
 	after := map[string]any{"run_status": updated.RunStatus}

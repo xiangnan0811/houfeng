@@ -148,9 +148,10 @@ func (repository *PostgresRecordRepository) CommitRevision(
 			CommittedAt:        createdAt,
 		}
 		if err := repository.participants.ApplyRevision(ctx, transaction.tx, records.RevisionCommitted{
-			Result:  result,
-			Input:   command.Input,
-			DraftID: command.DraftID,
+			Result:              result,
+			Input:               command.Input,
+			DraftID:             command.DraftID,
+			EvidencePreparation: command.EvidencePreparation,
 		}); err != nil {
 			return err
 		}

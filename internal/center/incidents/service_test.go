@@ -1402,6 +1402,70 @@ func TestServiceDoesNotRecoverTargetProbeFailureUntilAllSeriesRecover(t *testing
 	}
 }
 
+func TestMultiSeriesRecoveriesRecordAnyBackfilledContributor(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	previousProbe := &IncidentRecord{
+		IncidentID:    "inc_target_tg_probe_target_probe_failure",
+		ObjectType:    ObjectTypeTarget,
+		ObjectID:      "tg_probe",
+		IncidentClass: IncidentTargetProbeFailure,
+		Severity:      SeverityAlert,
+		Status:        IncidentStatusActive,
+	}
+	previousTLS := &IncidentRecord{
+		IncidentID:    "inc_target_tg_tls_target_tls_expiry",
+		ObjectType:    ObjectTypeTarget,
+		ObjectID:      "tg_tls",
+		IncidentClass: IncidentTargetTLSExpiry,
+		Severity:      SeverityAlert,
+		Status:        IncidentStatusActive,
+	}
+	safeDays := 45
+
+	tests := []struct {
+		name     string
+		evaluate func() EvaluationResult
+	}{
+		{
+			name: "probe failure",
+			evaluate: func() EvaluationResult {
+				return evaluateTargetProbeFailureAcrossSeries(previousProbe, "tg_probe", []runtimefacts.ProbeObservation{
+					{ObservedAt: now, TargetID: "tg_probe", ProbeItemID: "pb_current", MonitoringInstanceID: "mi_current", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess},
+					{ObservedAt: now.Add(-time.Minute), TargetID: "tg_probe", ProbeItemID: "pb_current", MonitoringInstanceID: "mi_current", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess},
+					{ObservedAt: now.Add(-2 * time.Minute), TargetID: "tg_probe", ProbeItemID: "pb_backfill", MonitoringInstanceID: "mi_backfill", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, IsBackfilled: true},
+					{ObservedAt: now.Add(-3 * time.Minute), TargetID: "tg_probe", ProbeItemID: "pb_backfill", MonitoringInstanceID: "mi_backfill", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, IsBackfilled: true},
+				})
+			},
+		},
+		{
+			name: "TLS expiry",
+			evaluate: func() EvaluationResult {
+				return evaluateTargetTLSExpiryAcrossSeries(previousTLS, "tg_tls", []runtimefacts.ProbeObservation{
+					{ObservedAt: now, TargetID: "tg_tls", ProbeItemID: "pb_current", MonitoringInstanceID: "mi_current", ProbeKind: agentapi.ProbeKindTLS, ResultKind: agentapi.ProbeResultSuccess, TLSExpiryDays: &safeDays},
+					{ObservedAt: now.Add(-2 * time.Minute), TargetID: "tg_tls", ProbeItemID: "pb_backfill", MonitoringInstanceID: "mi_backfill", ProbeKind: agentapi.ProbeKindTLS, ResultKind: agentapi.ProbeResultSuccess, TLSExpiryDays: &safeDays, IsBackfilled: true},
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.evaluate()
+			if result.Event == nil || result.Event.EventType != EventIncidentRecovered {
+				t.Fatalf("event = %#v, want recovery", result.Event)
+			}
+			if !result.Event.IsBackfilled {
+				t.Fatalf("event = %#v, want backfilled=true when any recovery contributor is backfilled", result.Event)
+			}
+			if result.Notification == nil || result.Notification.ShouldSend {
+				t.Fatalf("notification = %#v, want suppressed backfilled recovery", result.Notification)
+			}
+		})
+	}
+}
+
 func TestServiceAfterSuccessfulSyncDoesNotNotifyForBackfilledProbeFailure(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}

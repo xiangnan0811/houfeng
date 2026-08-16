@@ -1,1 +1,9 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/backend/index.md","reason":"后端 evidence/store/migration 规范索引；reviewer 按需读取具体大文件。"}
+{"file":".trellis/spec/backend/record-authorization.md","reason":"existing snapshot reuse 必须绑定可信 actor、source authorization 与 revision authority。"}
+{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"复核Task 4 source→writer→canonical→summary/compare/export闭环及失败关闭边界。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"审查 source→canonical→summary/compare/export 的跨层合同和 round-trip。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/design.md","reason":"已批准 prepared reference、显式 revision 输入、有序 snapshot IDs 与 participant 边界。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"Task 2B RED/GREEN gate、已有 slice evidence 与保守勾选状态。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/authoritative-sources-current-main.md","reason":"六个注册 kind 的 source contract、禁止字段和 asset history decision。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/plan-audit-current-main.md","reason":"当前 main、native/auto workflow、kind 命名和 Task 1 scope 审计。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-2b-capture-transaction-contract.md","reason":"Task 2B two-phase capture、existing reference reuse、ordered hash/fingerprint 与后续 transaction participant 合同。"}

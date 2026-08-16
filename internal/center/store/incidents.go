@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -225,12 +224,25 @@ func insertStateChangeEvents(ctx context.Context, tx incidentStoreTx, events []i
 		if err != nil {
 			return fmt.Errorf("generate event id: %w", err)
 		}
-		payload, err := json.Marshal(map[string]string{
-			"incident_id":    event.IncidentID,
-			"incident_class": string(event.IncidentClass),
+		recordedAt := time.Now().UTC().Truncate(time.Microsecond)
+		payload, err := marshalTask4MonitoringEventPayload(task4MonitoringEventPayload{
+			ObjectType:          event.ObjectType,
+			EventType:           event.EventType,
+			Severity:            event.Severity,
+			EventAt:             event.CreatedAt,
+			RecordedAt:          recordedAt,
+			IsBackfilled:        event.IsBackfilled,
+			Provenance:          monitoringEventProvenance(event.Provenance),
+			ProducerVersion:     event.ProducerVersion,
+			RuleVersion:         event.RuleVersion,
+			PriorState:          event.PriorState,
+			ResultingState:      event.ResultingState,
+			CorrectionOfEventID: event.CorrectionOfEventID,
+			IncidentID:          event.IncidentID,
+			IncidentClass:       string(event.IncidentClass),
 		})
 		if err != nil {
-			return fmt.Errorf("marshal event payload: %w", err)
+			return fmt.Errorf("build event payload: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `
 			insert into state_change_events (
@@ -250,7 +262,7 @@ func insertStateChangeEvents(ctx context.Context, tx incidentStoreTx, events []i
 			string(event.Severity),
 			event.Summary,
 			payload,
-			event.CreatedAt,
+			recordedAt,
 		); err != nil {
 			return fmt.Errorf("insert state change event %q: %w", eventID, err)
 		}

@@ -24,6 +24,7 @@
 | [Logging Guidelines](./logging-guidelines.md) | `log/slog` 使用、level、结构化字段、敏感信息与 agent/center 差异 | 已填实 |
 | [Subscription Cost Center](./subscription-cost-center.md) | 订阅成本中枢、汇率、预算、续费提醒、通知审计与 Dashboard 边界 | 已填实 |
 | [IP Quality Contract](./ip-quality-contract.md) | VPS IP 质量低频采集、agent sync、center 入库/API、资产决策证据与 raw JSON 安全边界 | 已填实 |
+| [Evidence Snapshot Contract](./evidence-snapshot-contract.md) | evidence authoritative source、canonical adapter、监控事件 producer、成本/命令/资产历史失败关闭合同 | 已填实 |
 
 ---
 

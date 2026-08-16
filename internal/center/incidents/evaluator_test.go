@@ -22,6 +22,9 @@ func TestEvaluateMonitoringInstanceHeartbeatMissingStartsAndEscalates(t *testing
 	if started.Notification == nil || started.Notification.Reason != NotificationReasonStarted {
 		t.Fatalf("Notification = %#v, want started notification", started.Notification)
 	}
+	if started.Event == nil || started.Event.Provenance != MonitoringEventProvenanceCenter || started.Event.ProducerVersion != MonitoringEventProducerVersion || started.Event.RuleVersion != MonitoringEventIncidentRuleVersion || started.Event.PriorState != "normal" || started.Event.ResultingState != "alert" || started.Event.IsBackfilled || started.Event.CorrectionOfEventID != "" {
+		t.Fatalf("started Event = %#v, want explicit center incident transition metadata", started.Event)
+	}
 
 	previous := started.Current
 	olderHeartbeat := now.Add(-5 * time.Minute)
@@ -34,6 +37,9 @@ func TestEvaluateMonitoringInstanceHeartbeatMissingStartsAndEscalates(t *testing
 	}
 	if escalated.Notification == nil || escalated.Notification.Reason != NotificationReasonEscalated {
 		t.Fatalf("Notification = %#v, want escalated notification", escalated.Notification)
+	}
+	if escalated.Event == nil || escalated.Event.PriorState != "alert" || escalated.Event.ResultingState != "critical" {
+		t.Fatalf("escalated Event = %#v, want alert-to-critical transition", escalated.Event)
 	}
 }
 
@@ -313,6 +319,9 @@ func TestMaintenanceAndBackfillSuppressesStartsButAllowsSilentRecovery(t *testin
 	}
 	if probe.Event == nil || probe.Event.EventType != EventIncidentRecovered {
 		t.Fatalf("Event = %#v, want recovered event", probe.Event)
+	}
+	if !probe.Event.IsBackfilled || probe.Event.Provenance != MonitoringEventProvenanceAgentSync || probe.Event.PriorState != "alert" || probe.Event.ResultingState != "normal" {
+		t.Fatalf("Event = %#v, want explicit backfilled recovery provenance and states", probe.Event)
 	}
 	if probe.Notification == nil {
 		t.Fatal("Notification = nil, want suppressed recovery notification")

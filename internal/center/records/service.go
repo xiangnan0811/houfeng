@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"time"
 
+	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
 )
@@ -20,21 +21,22 @@ const (
 var ErrInvalidRevisionServiceRequest = errors.New("invalid revision service request")
 
 type RevisionSaveRequest struct {
-	Actor              recordauth.ActorScope
-	RecordID           string
-	BaseRevisionID     string
-	LockVersion        uint64
-	AuthorizationEpoch uint64
-	DraftID            string
-	DraftETag          DraftETag
-	Values             CompleteRevisionValues
-	SubjectReferences  []SubjectReference
-	ActivityKind       DomainActivityKind
-	IdempotencyKey     string
-	IdempotencyOwnerID string
-	OwnerLeaseDuration time.Duration
-	IdempotencyTTL     time.Duration
-	OutboxTTL          time.Duration
+	Actor               recordauth.ActorScope
+	RecordID            string
+	BaseRevisionID      string
+	LockVersion         uint64
+	AuthorizationEpoch  uint64
+	DraftID             string
+	DraftETag           DraftETag
+	Values              CompleteRevisionValues
+	SubjectReferences   []SubjectReference
+	EvidencePreparation evidence.RevisionPreparation
+	ActivityKind        DomainActivityKind
+	IdempotencyKey      string
+	IdempotencyOwnerID  string
+	OwnerLeaseDuration  time.Duration
+	IdempotencyTTL      time.Duration
+	OutboxTTL           time.Duration
 }
 
 type CurrentRecordAuthorization struct {
@@ -101,6 +103,10 @@ func (service *RevisionService) SaveRevision(
 			return RevisionCommitResult{}, err
 		}
 	}
+	if err := request.EvidencePreparation.ValidateForRecord(request.RecordID); err != nil ||
+		request.EvidencePreparation.ValidateReferencesForActor(actor) != nil {
+		return RevisionCommitResult{}, fmt.Errorf("%w: evidence preparation", ErrInvalidRevisionServiceRequest)
+	}
 
 	resolvedSubjects := make([]RevisionSubject, 0, len(references))
 	sourceAuthorizations := make([]recordauth.SourceAuthorization, 0, len(references))
@@ -124,6 +130,7 @@ func (service *RevisionService) SaveRevision(
 	values := request.Values
 	values.AuthorID = actor.UserID
 	values.Subjects = resolvedSubjects
+	values.EvidenceSnapshotIDs = request.EvidencePreparation.SnapshotIDs()
 	input, err := NormalizeCompleteRevisionInput(values)
 	if err != nil {
 		return RevisionCommitResult{}, err
@@ -148,15 +155,16 @@ func (service *RevisionService) SaveRevision(
 		return RevisionCommitResult{}, fmt.Errorf("%w: fingerprint", ErrInvalidRevisionServiceRequest)
 	}
 	command := RevisionCommitCommand{
-		RecordID:           request.RecordID,
-		BaseRevisionID:     request.BaseRevisionID,
-		LockVersion:        request.LockVersion,
-		AuthorizationEpoch: request.AuthorizationEpoch,
-		DraftID:            request.DraftID,
-		DraftETag:          request.DraftETag,
-		Input:              input,
-		ActivityKind:       request.ActivityKind,
-		OutboxTTL:          request.OutboxTTL,
+		RecordID:            request.RecordID,
+		BaseRevisionID:      request.BaseRevisionID,
+		LockVersion:         request.LockVersion,
+		AuthorizationEpoch:  request.AuthorizationEpoch,
+		DraftID:             request.DraftID,
+		DraftETag:           request.DraftETag,
+		Input:               input,
+		EvidencePreparation: request.EvidencePreparation,
+		ActivityKind:        request.ActivityKind,
+		OutboxTTL:           request.OutboxTTL,
 		Idempotency: recordplatform.IdempotencyClaimInputV1{
 			Key: recordplatform.IdempotencyKey{
 				ProjectID:     recordplatform.ProjectID(actor.ProjectID),
@@ -182,7 +190,7 @@ func validateRevisionSaveRequest(
 	if err != nil {
 		return recordauth.ActorScope{}, nil, "", "", fmt.Errorf("%w: actor", ErrInvalidRevisionServiceRequest)
 	}
-	if !validRecordRootID(request.RecordID) || len(request.Values.Subjects) != 0 {
+	if !validRecordRootID(request.RecordID) || len(request.Values.Subjects) != 0 || len(request.Values.EvidenceSnapshotIDs) != 0 {
 		return recordauth.ActorScope{}, nil, "", "", fmt.Errorf("%w: record or client subject evidence", ErrInvalidRevisionServiceRequest)
 	}
 	_, draftETagErr := request.DraftETag.Digest()

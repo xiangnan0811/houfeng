@@ -3,9 +3,15 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"houfeng/internal/center/evidence"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
@@ -107,6 +113,152 @@ func TestPostgresIntegrationRecordReadRoundTripsCurrentAndHistoricalRevisions(t 
 			}
 		})
 	}
+}
+
+func TestPostgresIntegrationRecordReadRoundTripsOrderedEvidenceSnapshotIDs(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-read-evidence", 2)
+	repository := newRecordsPostgresRepository(t, runtimePool, recordReadEvidenceParticipant{})
+	recordID := "rec_readevidence"
+
+	first, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t,
+		recordplatform.OperationKindRecordCreate,
+		recordID,
+		"",
+		0,
+		0,
+		recordsPostgresCompleteRevisionInput(t, "Evidence revision base"),
+		"record-read-evidence-create",
+	))
+	if err != nil {
+		t.Fatalf("CommitRevision(first) error = %v", err)
+	}
+
+	var databaseNow time.Time
+	if err := fixture.db.QueryRow(ctx, `select transaction_timestamp()`).Scan(&databaseNow); err != nil {
+		t.Fatalf("read database time: %v", err)
+	}
+	snapshot := storeEvidenceSnapshotFixture(t, "record revision evidence read")
+	seedEvidencePayloadAt(t, ctx, fixture, snapshot, databaseNow)
+	seedEvidenceSnapshotReference(t, ctx, fixture, recordID, snapshot, databaseNow)
+
+	actor := mustStoreRecordActor(t)
+	visibility := recordsPostgresCompleteRevisionInput(t, "authorization fixture").VisibilityScope()
+	authorization, err := recordauth.NormalizeSourceAuthorization(recordauth.SourceAuthorization{
+		Version:      recordauth.SourceAuthorizationVersionV1,
+		Kind:         recordauth.SourceKindMonitoringInstance,
+		SourceID:     "mi_0123456789abcdef",
+		State:        recordauth.SourceStateLive,
+		CaptureScope: visibility,
+		CurrentScope: &visibility,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeSourceAuthorization() error = %v", err)
+	}
+	const snapshotID = "evs_evidencegc"
+	var captureAuthorizationDigest [32]byte
+	for index := range captureAuthorizationDigest {
+		captureAuthorizationDigest[index] = 0x11
+	}
+	preparedReference, err := evidence.PrepareExistingSnapshotReference(
+		ctx,
+		recordReadExistingSnapshotSource{state: evidence.ExistingSnapshotReferenceState{
+			RecordID:                   recordID,
+			SnapshotID:                 snapshotID,
+			Key:                        evidence.MonitoringHostV1Key(),
+			SourceType:                 string(authorization.Kind),
+			SourceID:                   authorization.SourceID,
+			CaptureAuthorizationDigest: captureAuthorizationDigest,
+			PayloadDigest:              snapshot.Hash(),
+			Authorization:              authorization,
+		}},
+		actor,
+		recordID,
+		snapshotID,
+	)
+	if err != nil {
+		t.Fatalf("PrepareExistingSnapshotReference() error = %v", err)
+	}
+	preparation, err := evidence.NewRevisionPreparation(recordID, evidence.RevisionPreparationValues{
+		References:         []evidence.PreparedReference{preparedReference},
+		OrderedSnapshotIDs: []string{snapshotID},
+	})
+	if err != nil {
+		t.Fatalf("NewRevisionPreparation() error = %v", err)
+	}
+	secondInput := recordsPostgresCompleteRevisionInputWithEvidence(
+		t, "Evidence revision", preparation.SnapshotIDs(),
+	)
+	command := recordsPostgresRevisionCommand(
+		t,
+		recordplatform.OperationKindRecordUpdate,
+		recordID,
+		first.RevisionID,
+		first.LockVersion,
+		first.AuthorizationEpoch,
+		secondInput,
+		"record-read-evidence-update",
+	)
+	command.EvidencePreparation = preparation
+	second, err := repository.CommitRevision(ctx, command)
+	if err != nil {
+		t.Fatalf("CommitRevision(second) error = %v", err)
+	}
+
+	stored, err := repository.ReadRecordRevision(ctx, records.StoredRecordRevisionRequest{
+		RecordID:           recordID,
+		RevisionID:         second.RevisionID,
+		CurrentRevisionID:  second.RevisionID,
+		LockVersion:        second.LockVersion,
+		AuthorizationEpoch: second.AuthorizationEpoch,
+	})
+	if err != nil {
+		t.Fatalf("ReadRecordRevision() error = %v", err)
+	}
+	if !reflect.DeepEqual(stored.Input, secondInput) ||
+		!reflect.DeepEqual(stored.Input.EvidenceSnapshotIDs(), []string{snapshotID}) {
+		t.Fatalf("ReadRecordRevision().Input = %#v, want ordered evidence input %#v", stored.Input, secondInput)
+	}
+}
+
+type recordReadEvidenceParticipant struct{}
+
+func (recordReadEvidenceParticipant) Name() string { return "evidence" }
+
+func (recordReadEvidenceParticipant) ApplyRevision(
+	ctx context.Context,
+	tx pgx.Tx,
+	committed records.RevisionCommitted,
+) error {
+	for ordinal, snapshotID := range committed.EvidencePreparation.SnapshotIDs() {
+		if _, err := tx.Exec(ctx, `
+			insert into public.record_revision_evidence (
+				record_id, revision_id, ordinal, snapshot_id
+			) values ($1, $2, $3, $4)`,
+			committed.Result.RecordID,
+			committed.Result.RevisionID,
+			int64(ordinal),
+			snapshotID,
+		); err != nil {
+			return fmt.Errorf("insert test revision evidence reference: %w", err)
+		}
+	}
+	return nil
+}
+
+type recordReadExistingSnapshotSource struct {
+	state evidence.ExistingSnapshotReferenceState
+}
+
+func (source recordReadExistingSnapshotSource) ReauthorizeExistingSnapshot(
+	context.Context,
+	evidence.ActorScope,
+	string,
+	string,
+) (evidence.ExistingSnapshotReferenceState, error) {
+	return source.state, nil
 }
 
 func TestPostgresIntegrationRecordReadFenceBlocksRevisionAndHistoryContent(t *testing.T) {

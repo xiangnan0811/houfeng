@@ -72,10 +72,10 @@ func TestRecordsCoreAppACLFragmentExtendsCatalogWithPrimaryValidationFunctionAnd
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(contract.ManagedObjects), len(base.Objects)+10+len(recordAttachmentsExpectedAppACLObjects()); got != want {
+	if got, want := len(contract.ManagedObjects), len(base.Objects)+len(recordsCoreExpectedAppACLObjects())+len(recordAttachmentsExpectedAppACLObjects())+len(recordEvidenceExpectedAppACLObjects()); got != want {
 		t.Fatalf("production current managed objects = %d, want %d", got, want)
 	}
-	if got, want := len(contract.Privileges), len(appACLPrivilegesR1("houfeng"))+len(recordsCoreExpectedAppACLPrivileges())+len(recordAttachmentsExpectedAppACLPrivileges()); got != want {
+	if got, want := len(contract.Privileges), len(appACLPrivilegesR1("houfeng"))+len(recordsCoreExpectedAppACLPrivileges())+len(recordAttachmentsExpectedAppACLPrivileges())+len(recordEvidenceExpectedAppACLPrivileges()); got != want {
 		t.Fatalf("production current privileges = %d, want %d", got, want)
 	}
 	if got := len(contract.ExpectedFunctions); got != 3 {

@@ -313,13 +313,13 @@ func loadDashboardTrends24h(ctx context.Context, queryer dashboardQueryer) ([]in
 				select count(*)::int
 				from visible_events e
 				where e.event_type = 'incident_started'
-					and date_trunc('hour', e.created_at) = hb.bucket_start
+					and date_trunc('hour', `+monitoringEventOccurredAtSQL("e")+`) = hb.bucket_start
 			), 0),
 			coalesce((
 				select count(*)::int
 				from visible_events e
 				where e.event_type = 'incident_recovered'
-					and date_trunc('hour', e.created_at) = hb.bucket_start
+					and date_trunc('hour', `+monitoringEventOccurredAtSQL("e")+`) = hb.bucket_start
 			), 0)
 		from hour_buckets hb
 		order by hb.bucket_start asc`)
@@ -376,8 +376,8 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 			(select count(*)::int from visible_monitoring_instances where lifecycle_status = '已退役'),
 			(select count(*)::int from visible_targets where run_status = '暂停'),
 			(select count(*)::int from visible_targets where run_status = '已归档'),
-			(select count(*)::int from visible_events where event_type = 'incident_started' and created_at >= now() - interval '24 hours'),
-			(select count(*)::int from visible_events where event_type = 'incident_recovered' and created_at >= now() - interval '24 hours')
+			(select count(*)::int from visible_events e where event_type = 'incident_started' and `+monitoringEventOccurredAtSQL("e")+` >= now() - interval '24 hours'),
+			(select count(*)::int from visible_events e where event_type = 'incident_recovered' and `+monitoringEventOccurredAtSQL("e")+` >= now() - interval '24 hours')
 	`).Scan(
 		&overview.TotalMonitoringInstanceCount,
 		&overview.TotalTargetCount,
@@ -667,11 +667,11 @@ func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter Eve
 	}
 	if filter.CreatedFrom != nil {
 		args = append(args, *filter.CreatedFrom)
-		conditions = append(conditions, fmt.Sprintf("e.created_at >= $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("%s >= $%d", monitoringEventOccurredAtSQL("e"), len(args)))
 	}
 	if filter.CreatedTo != nil {
 		args = append(args, *filter.CreatedTo)
-		conditions = append(conditions, fmt.Sprintf("e.created_at <= $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("%s <= $%d", monitoringEventOccurredAtSQL("e"), len(args)))
 	}
 	if filter.Label != "" {
 		args = append(args, filter.Label)
@@ -718,12 +718,12 @@ func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter Eve
 			from state_change_events e
 			where ` + dashboardCurrentEventVisibilitySQL("e") + `
 		)
-		select e.event_id, e.object_type, e.object_id, e.event_type, coalesce(e.severity, ''), e.summary, e.payload, e.created_at
+		select e.event_id, e.object_type, e.object_id, e.event_type, coalesce(e.severity, ''), e.summary, e.payload, ` + monitoringEventOccurredAtSQL("e") + `
 		from visible_events e`
 	if len(conditions) > 0 {
 		query += " where " + strings.Join(conditions, " and ")
 	}
-	query += fmt.Sprintf(" order by e.created_at desc limit $%d", limitArg)
+	query += fmt.Sprintf(" order by %s desc limit $%d", monitoringEventOccurredAtSQL("e"), limitArg)
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
@@ -770,22 +770,26 @@ func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter Eve
 	return events, nil
 }
 
+func monitoringEventOccurredAtSQL(alias string) string {
+	return fmt.Sprintf("case when jsonb_typeof(%[1]s.payload -> 'event_at') = 'string' then (%[1]s.payload ->> 'event_at')::timestamptz else %[1]s.created_at end", alias)
+}
+
 func backfilledEventConditionSQL() string {
-	return `(
+	legacyCondition := `(
 		(e.object_type = 'monitoring_instance' and (
 			exists (
 				select 1
 				from monitoring_instance_heartbeats nh
 				where nh.monitoring_instance_id = e.object_id
 					and nh.is_backfilled
-					and nh.observed_at = e.created_at
+					and nh.observed_at = ` + monitoringEventOccurredAtSQL("e") + `
 			)
 			or exists (
 				select 1
 				from host_samples hs
 				where hs.monitoring_instance_id = e.object_id
 					and hs.is_backfilled
-					and hs.observed_at = e.created_at
+					and hs.observed_at = ` + monitoringEventOccurredAtSQL("e") + `
 			)
 		))
 		or
@@ -794,7 +798,11 @@ func backfilledEventConditionSQL() string {
 			from probe_observations po
 			where po.target_id = e.object_id
 				and po.is_backfilled
-				and po.observed_at = e.created_at
+				and po.observed_at = ` + monitoringEventOccurredAtSQL("e") + `
 		))
 	)`
+	return `(case
+		when jsonb_typeof(e.payload -> 'is_backfilled') = 'boolean' then (e.payload ->> 'is_backfilled')::boolean
+		else ` + legacyCondition + `
+	end)`
 }
