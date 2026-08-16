@@ -334,6 +334,17 @@ func TestRegistryConformanceScansEveryOutboundSurface(t *testing.T) {
 	}
 }
 
+func TestRegistryConformanceRejectsUnversionedSummaryReadModel(t *testing.T) {
+	stub, fixture := testConformingKind(t)
+	stub.summary = &Summary{
+		Key: stub.descriptor.Key, RendererVersion: stub.descriptor.Conformance.RendererVersion,
+		Title: "safe", SearchText: "safe", ReadModel: map[string]any{"status": "ok"},
+	}
+	if err := VerifyKindConformance(context.Background(), stub, fixture); !errors.Is(err, ErrKindConformance) {
+		t.Fatalf("VerifyKindConformance(unversioned summary) error = %v, want ErrKindConformance", err)
+	}
+}
+
 func TestRegistryConformanceRejectsPGPPrivateKeyBlockAcrossOutboundSurfaces(t *testing.T) {
 	hostile := []string{
 		"-----BEGIN PGP PRIVATE KEY BLOCK-----",

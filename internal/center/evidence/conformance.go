@@ -92,6 +92,9 @@ func VerifyKindConformance(ctx context.Context, kind Kind, fixture ConformanceFi
 	if err := validateSafeStructuredValue(summary.ReadModel, "summary"); err != nil {
 		return conformanceError("summary", err)
 	}
+	if !validVersionedReadModel(summary.ReadModel) {
+		return conformanceError("summary", ErrInvalidCanonicalPayload)
+	}
 
 	if fixture.Alignment.Mode != AlignmentExact {
 		return conformanceError("alignment", ErrInvalidCanonicalPayload)

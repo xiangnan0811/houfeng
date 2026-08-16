@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,12 +12,276 @@ import (
 	"testing"
 	"time"
 
+	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store"
 )
+
+func TestRecordsHandlerPreparesOrderedEvidenceBeforeCreate(t *testing.T) {
+	actor := mustRecordsHandlerActor(t)
+	draft := mustRecordsHandlerDraft(t, actor, "", "")
+	preparer := &recordEvidencePreparerStub{t: t}
+	application := &recordsHandlerApplicationStub{
+		preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) {
+			return draft, nil
+		},
+		createRecord: func(_ context.Context, request records.RecordCreateRequest) (records.RevisionCommitResult, error) {
+			if request.RecordID != "rec_previewowned" || request.EvidencePreparation.ValidateForRecord(request.RecordID) != nil {
+				t.Fatalf("CreateRecord evidence request = %#v", request)
+			}
+			if got, want := request.EvidencePreparation.SnapshotIDs(), []string{"evs_prepareda", "evs_httpcontract"}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("CreateRecord evidence order = %#v, want %#v", got, want)
+			}
+			return records.RevisionCommitResult{
+				RecordID: request.RecordID, RevisionID: "rrv_httpcontract", RevisionNo: 1,
+				LockVersion: 1, AuthorizationEpoch: 1, Lifecycle: records.LifecycleActive,
+				Created: true, CommittedAt: time.Date(2026, time.August, 16, 3, 0, 0, 0, time.UTC),
+			}, nil
+		},
+	}
+	handler := RecordsWithOptions(application, RecordHandlerOptions{
+		NewRecordID:      func() (string, error) { return "rec_shouldnotreplace", nil },
+		EvidencePreparer: preparer,
+	})
+	body := `{"record_id":"rec_previewowned","draft_id":"` + draft.DraftID + `","draft_etag":` + strconvQuote(draft.ETag.String()) + `,"evidence_items":[{"capture_intent_id":"evi_0123456789abcdef01234567"},{"existing_snapshot_id":"evs_httpcontract"}]}`
+	request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", body)
+	request.Header.Set("Idempotency-Key", "create-http-evidence")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d body=%s, want 201", recorder.Code, recorder.Body.String())
+	}
+	if preparer.calls != 1 || preparer.request.RecordID != "rec_previewowned" ||
+		!reflect.DeepEqual(preparer.request.Items, []evidence.RevisionPreparationItem{
+			{CaptureIntentID: "evi_0123456789abcdef01234567"},
+			{ExistingSnapshotID: "evs_httpcontract"},
+		}) {
+		t.Fatalf("Prepare request/calls = %#v/%d", preparer.request, preparer.calls)
+	}
+}
+
+func TestRecordsHandlerPreparesEvidenceBeforeReviseAndReauthorizesHistoricalEvidenceBeforeRestore(t *testing.T) {
+	actor := mustRecordsHandlerActor(t)
+	draft := mustRecordsHandlerDraft(t, actor, "rec_httpcontract", "rrv_httpbase")
+
+	t.Run("revise", func(t *testing.T) {
+		preparer := &recordEvidencePreparerStub{t: t}
+		application := &recordsHandlerApplicationStub{
+			preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) {
+				return draft, nil
+			},
+			createRevision: func(_ context.Context, request records.RecordRevisionCreateRequest) (records.RevisionCommitResult, error) {
+				if request.RecordID != "rec_httpcontract" ||
+					request.EvidencePreparation.ValidateForRecord(request.RecordID) != nil {
+					t.Fatalf("CreateRevision evidence request = %#v", request)
+				}
+				if got, want := request.EvidencePreparation.SnapshotIDs(), []string{"evs_prepareda"}; !reflect.DeepEqual(got, want) {
+					t.Fatalf("CreateRevision evidence order = %#v, want %#v", got, want)
+				}
+				return records.RevisionCommitResult{RecordID: request.RecordID, RevisionID: "rrv_httpnext", Created: true}, nil
+			},
+		}
+		handler := RecordsWithOptions(application, RecordHandlerOptions{EvidencePreparer: preparer})
+		body := `{"base_revision_id":"rrv_httpbase","lock_version":7,"authorization_epoch":5,"draft_id":"` +
+			draft.DraftID + `","draft_etag":` + strconvQuote(draft.ETag.String()) +
+			`,"evidence_items":[{"capture_intent_id":"evi_0123456789abcdef01234567"}]}`
+		request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records/rec_httpcontract/revisions", body)
+		request.Header.Set("Idempotency-Key", "revise-http-evidence")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("status = %d body=%s, want 201", recorder.Code, recorder.Body.String())
+		}
+		if preparer.calls != 1 || !reflect.DeepEqual(preparer.request.Items, []evidence.RevisionPreparationItem{{
+			CaptureIntentID: "evi_0123456789abcdef01234567",
+		}}) {
+			t.Fatalf("revise Prepare request/calls = %#v/%d", preparer.request, preparer.calls)
+		}
+	})
+
+	t.Run("restore", func(t *testing.T) {
+		preparer := &recordEvidencePreparerStub{t: t}
+		historical := mustRecordsHandlerRecord(t, actor).Current
+		application := &recordsHandlerApplicationStub{
+			getRevision: func(context.Context, records.RecordRevisionGetRequest) (records.RecordRevision, error) {
+				return historical, nil
+			},
+			restoreRevision: func(_ context.Context, request records.RecordRestoreRequest) (records.RevisionCommitResult, error) {
+				if request.RecordID != historical.RecordID || request.RevisionID != historical.RevisionID ||
+					request.EvidencePreparation.ValidateForRecord(request.RecordID) != nil {
+					t.Fatalf("RestoreRevision evidence request = %#v", request)
+				}
+				if got, want := request.EvidencePreparation.SnapshotIDs(), []string{"evs_httpcontract"}; !reflect.DeepEqual(got, want) {
+					t.Fatalf("RestoreRevision evidence order = %#v, want %#v", got, want)
+				}
+				return records.RevisionCommitResult{RecordID: request.RecordID, RevisionID: "rrv_httprestored", Created: true}, nil
+			},
+		}
+		handler := RecordsWithOptions(application, RecordHandlerOptions{EvidencePreparer: preparer})
+		request := recordsHandlerRequest(
+			t, actor, http.MethodPost,
+			"/api/records/"+historical.RecordID+"/revisions/"+historical.RevisionID+"/restore",
+			`{"save_reason":"restore evidence"}`,
+		)
+		request.Header.Set("Idempotency-Key", "restore-http-evidence")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("status = %d body=%s, want 201", recorder.Code, recorder.Body.String())
+		}
+		if preparer.calls != 1 || !reflect.DeepEqual(preparer.request.Items, []evidence.RevisionPreparationItem{{
+			ExistingSnapshotID: "evs_httpcontract",
+		}}) {
+			t.Fatalf("restore Prepare request/calls = %#v/%d", preparer.request, preparer.calls)
+		}
+	})
+}
+
+func TestRecordsHandlerEvidenceSaveFailsClosedWhenPreparerUnavailableOrStale(t *testing.T) {
+	actor := mustRecordsHandlerActor(t)
+	draft := mustRecordsHandlerDraft(t, actor, "", "")
+	for _, test := range []struct {
+		name       string
+		preparer   recordEvidencePreparerTestContract
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "unavailable", wantStatus: http.StatusServiceUnavailable, wantCode: "record_service_unavailable"},
+		{name: "stale", preparer: &recordEvidencePreparerStub{err: evidence.ErrPreviewStale}, wantStatus: http.StatusConflict, wantCode: "evidence_preview_stale"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			createCalls := 0
+			application := &recordsHandlerApplicationStub{
+				preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) { return draft, nil },
+				createRecord: func(context.Context, records.RecordCreateRequest) (records.RevisionCommitResult, error) {
+					createCalls++
+					return records.RevisionCommitResult{}, nil
+				},
+			}
+			handler := RecordsWithOptions(application, RecordHandlerOptions{EvidencePreparer: test.preparer})
+			body := `{"record_id":"rec_previewowned","draft_id":"` + draft.DraftID + `","draft_etag":` + strconvQuote(draft.ETag.String()) + `,"evidence_items":[{"capture_intent_id":"evi_0123456789abcdef01234567"}]}`
+			request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", body)
+			request.Header.Set("Idempotency-Key", "create-http-evidence")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != test.wantStatus || !strings.Contains(recorder.Body.String(), `"code":"`+test.wantCode+`"`) {
+				t.Fatalf("status/body = %d %s, want %d/%s", recorder.Code, recorder.Body.String(), test.wantStatus, test.wantCode)
+			}
+			if createCalls != 0 {
+				t.Fatalf("CreateRecord calls = %d, want 0", createCalls)
+			}
+		})
+	}
+}
+
+func TestRecordsHandlerRejectsPreparationThatDropsRequestedEvidence(t *testing.T) {
+	actor := mustRecordsHandlerActor(t)
+	draft := mustRecordsHandlerDraft(t, actor, "", "")
+	createCalls := 0
+	handler := RecordsWithOptions(&recordsHandlerApplicationStub{
+		preparePublish: func(context.Context, records.DraftPublishRequest) (records.Draft, error) { return draft, nil },
+		createRecord: func(context.Context, records.RecordCreateRequest) (records.RevisionCommitResult, error) {
+			createCalls++
+			return records.RevisionCommitResult{Created: true}, nil
+		},
+	}, RecordHandlerOptions{EvidencePreparer: &recordEvidencePreparerStub{}})
+	body := `{"record_id":"rec_previewowned","draft_id":"` + draft.DraftID + `","draft_etag":` +
+		strconvQuote(draft.ETag.String()) +
+		`,"evidence_items":[{"capture_intent_id":"evi_0123456789abcdef01234567"}]}`
+	request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/records", body)
+	request.Header.Set("Idempotency-Key", "create-http-dropped-evidence")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	assertRecordsHandlerError(t, recorder, http.StatusInternalServerError, "internal_error")
+	if createCalls != 0 {
+		t.Fatalf("CreateRecord calls = %d, want 0", createCalls)
+	}
+}
+
+type recordEvidencePreparerTestContract interface {
+	Prepare(context.Context, evidence.ActorScope, evidence.RevisionPreparationRequest) (evidence.RevisionPreparation, error)
+}
+
+type recordEvidencePreparerStub struct {
+	t       *testing.T
+	calls   int
+	request evidence.RevisionPreparationRequest
+	err     error
+}
+
+func (stub *recordEvidencePreparerStub) Prepare(
+	_ context.Context,
+	actor evidence.ActorScope,
+	request evidence.RevisionPreparationRequest,
+) (evidence.RevisionPreparation, error) {
+	stub.calls++
+	stub.request = request
+	if stub.err != nil {
+		return evidence.RevisionPreparation{}, stub.err
+	}
+	if stub.t != nil {
+		return mustRecordEvidenceTestPreparation(stub.t, actor, request), nil
+	}
+	return evidence.NewRevisionPreparation(request.RecordID, evidence.RevisionPreparationValues{})
+}
+
+func mustRecordEvidenceTestPreparation(
+	t *testing.T,
+	actor evidence.ActorScope,
+	request evidence.RevisionPreparationRequest,
+) evidence.RevisionPreparation {
+	t.Helper()
+	authorization := mustRecordsHandlerRecord(t, actor).Current.Input.Subjects()[0].CaptureAuthorization
+	references := make([]evidence.PreparedReference, 0, len(request.Items))
+	ordered := make([]string, 0, len(request.Items))
+	for index, item := range request.Items {
+		snapshotID := item.ExistingSnapshotID
+		if snapshotID == "" {
+			snapshotID = "evs_prepared" + strings.Repeat("a", index+1)
+		}
+		state := evidence.ExistingSnapshotReferenceState{
+			RecordID: request.RecordID, SnapshotID: snapshotID, Key: evidence.MonitoringHostV1Key(),
+			SourceType: string(authorization.Kind), SourceID: authorization.SourceID,
+			CaptureAuthorizationDigest: authorization.Digest,
+			PayloadDigest:              sha256.Sum256([]byte("handler evidence " + snapshotID)),
+			Authorization:              authorization,
+		}
+		prepared, err := evidence.PrepareExistingSnapshotReference(
+			context.Background(), recordEvidenceReferenceSourceStub{state: state}, actor,
+			request.RecordID, snapshotID,
+		)
+		if err != nil {
+			t.Fatalf("PrepareExistingSnapshotReference() error = %v", err)
+		}
+		references = append(references, prepared)
+		ordered = append(ordered, snapshotID)
+	}
+	prepared, err := evidence.NewRevisionPreparation(request.RecordID, evidence.RevisionPreparationValues{
+		References: references, OrderedSnapshotIDs: ordered,
+	})
+	if err != nil {
+		t.Fatalf("NewRevisionPreparation() error = %v", err)
+	}
+	return prepared
+}
+
+type recordEvidenceReferenceSourceStub struct {
+	state evidence.ExistingSnapshotReferenceState
+}
+
+func (stub recordEvidenceReferenceSourceStub) ReauthorizeExistingSnapshot(
+	context.Context,
+	evidence.ActorScope,
+	string,
+	string,
+) (evidence.ExistingSnapshotReferenceState, error) {
+	return stub.state, nil
+}
 
 func TestRecordsHandlerListsThroughTrustedActorAndReturnsOwnedDTO(t *testing.T) {
 	actor := mustRecordsHandlerActor(t)
@@ -98,11 +363,12 @@ func TestRecordsHandlerGetsAllowlistedCurrentRecordWithoutAuthorizationEvidence(
 	var response struct {
 		RecordID string `json:"record_id"`
 		Current  struct {
-			RevisionID    string   `json:"revision_id"`
-			Title         string   `json:"title"`
-			Tags          []string `json:"tags"`
-			AttachmentIDs []string `json:"attachment_ids"`
-			Subjects      []struct {
+			RevisionID          string   `json:"revision_id"`
+			Title               string   `json:"title"`
+			Tags                []string `json:"tags"`
+			AttachmentIDs       []string `json:"attachment_ids"`
+			EvidenceSnapshotIDs []string `json:"evidence_snapshot_ids"`
+			Subjects            []struct {
 				SourceID string `json:"source_id"`
 				Identity struct {
 					DisplayName string `json:"display_name"`
@@ -122,7 +388,8 @@ func TestRecordsHandlerGetsAllowlistedCurrentRecordWithoutAuthorizationEvidence(
 		response.Current.Subjects[0].Identity.DisplayName != "VPS Alpha" ||
 		response.Current.Subjects[0].Identity.Provider != "Example Cloud" ||
 		response.Current.Participants == nil || response.Current.AttachmentIDs == nil ||
-		!reflect.DeepEqual(response.Current.AttachmentIDs, []string{"att_httpfirst", "att_httpsecond"}) {
+		!reflect.DeepEqual(response.Current.AttachmentIDs, []string{"att_httpfirst", "att_httpsecond"}) ||
+		!reflect.DeepEqual(response.Current.EvidenceSnapshotIDs, []string{"evs_httpcontract"}) {
 		t.Fatalf("response = %#v", response)
 	}
 }
@@ -797,11 +1064,12 @@ func mustRecordsHandlerRecord(t *testing.T, actor recordauth.ActorScope) records
 			IdentitySnapshot:     map[string]string{"display_name": "VPS Alpha", "provider": "Example Cloud"},
 			CaptureAuthorization: authorization,
 		}},
-		Tags:          make([]string, 0),
-		Participants:  make([]records.RevisionParticipantSnapshot, 0),
-		AttachmentIDs: []string{"att_httpfirst", "att_httpsecond"},
-		AuthorID:      actor.UserID,
-		SaveReason:    "initial record",
+		Tags:                make([]string, 0),
+		Participants:        make([]records.RevisionParticipantSnapshot, 0),
+		AttachmentIDs:       []string{"att_httpfirst", "att_httpsecond"},
+		EvidenceSnapshotIDs: []string{"evs_httpcontract"},
+		AuthorID:            actor.UserID,
+		SaveReason:          "initial record",
 	})
 	if err != nil {
 		t.Fatalf("NormalizeCompleteRevisionInput() error = %v", err)

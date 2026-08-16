@@ -1271,6 +1271,7 @@ func TestRouterKeepsRecordsRoutesAbsentWhenFeatureIsOff(t *testing.T) {
 	recordsCalls := 0
 	draftCalls := 0
 	deletionCalls := 0
+	evidenceCalls := 0
 	handler := newTestRouter(centerhttp.RouterOptions{
 		WebDistDir:     dir,
 		RecordsEnabled: false,
@@ -1283,6 +1284,7 @@ func TestRouterKeepsRecordsRoutesAbsentWhenFeatureIsOff(t *testing.T) {
 		RecordDeletionsHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			deletionCalls++
 		}),
+		EvidenceHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { evidenceCalls++ }),
 	})
 
 	for _, path := range []string{
@@ -1293,6 +1295,8 @@ func TestRouterKeepsRecordsRoutesAbsentWhenFeatureIsOff(t *testing.T) {
 		"/api/records/rec_httpcontract/permanent-delete-preview",
 		"/api/records/rec_httpcontract/permanent-delete",
 		"/api/record-deletions/rpo_httpcontract",
+		"/api/evidence/capture-previews",
+		"/api/evidence/evs_httpcontract",
 	} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		recorder := httptest.NewRecorder()
@@ -1301,8 +1305,8 @@ func TestRouterKeepsRecordsRoutesAbsentWhenFeatureIsOff(t *testing.T) {
 			t.Fatalf("GET %s status = %d body=%q, want API 404 without SPA fallback", path, recorder.Code, recorder.Body.String())
 		}
 	}
-	if recordsCalls != 0 || draftCalls != 0 || deletionCalls != 0 {
-		t.Fatalf("feature-off handler calls: records=%d drafts=%d deletions=%d, want zero", recordsCalls, draftCalls, deletionCalls)
+	if recordsCalls != 0 || draftCalls != 0 || deletionCalls != 0 || evidenceCalls != 0 {
+		t.Fatalf("feature-off handler calls: records=%d drafts=%d deletions=%d evidence=%d, want zero", recordsCalls, draftCalls, deletionCalls, evidenceCalls)
 	}
 }
 
@@ -1363,6 +1367,7 @@ func TestRouterProtectsDeletionRoutesAndPrefersActionsOverRecordSubtree(t *testi
 func TestRouterProtectsAndDispatchesEnabledRecordsRoutes(t *testing.T) {
 	recordsPaths := make([]string, 0)
 	draftPaths := make([]string, 0)
+	evidencePaths := make([]string, 0)
 	middlewareCalls := 0
 	handler := centerhttp.New(centerhttp.RouterOptions{
 		RecordsEnabled: true,
@@ -1372,6 +1377,10 @@ func TestRouterProtectsAndDispatchesEnabledRecordsRoutes(t *testing.T) {
 		}),
 		RecordDraftsHandler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 			draftPaths = append(draftPaths, request.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		}),
+		EvidenceHandler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			evidencePaths = append(evidencePaths, request.URL.Path)
 			w.WriteHeader(http.StatusNoContent)
 		}),
 		AuthMiddleware: func(next http.Handler) http.Handler {
@@ -1387,6 +1396,8 @@ func TestRouterProtectsAndDispatchesEnabledRecordsRoutes(t *testing.T) {
 		"/api/records/rec_httpcontract/revisions",
 		"/api/record-drafts",
 		"/api/record-drafts/rdf_httpcontract",
+		"/api/evidence/capture-previews",
+		"/api/evidence/evs_httpcontract",
 	} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		recorder := httptest.NewRecorder()
@@ -1395,14 +1406,17 @@ func TestRouterProtectsAndDispatchesEnabledRecordsRoutes(t *testing.T) {
 			t.Fatalf("GET %s status = %d, want %d", path, recorder.Code, http.StatusNoContent)
 		}
 	}
-	if middlewareCalls != 4 {
-		t.Fatalf("middleware calls = %d, want 4", middlewareCalls)
+	if middlewareCalls != 6 {
+		t.Fatalf("middleware calls = %d, want 6", middlewareCalls)
 	}
 	if got, want := strings.Join(recordsPaths, ","), "/api/records,/api/records/rec_httpcontract/revisions"; got != want {
 		t.Fatalf("records paths = %q, want %q", got, want)
 	}
 	if got, want := strings.Join(draftPaths, ","), "/api/record-drafts,/api/record-drafts/rdf_httpcontract"; got != want {
 		t.Fatalf("draft paths = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(evidencePaths, ","), "/api/evidence/capture-previews,/api/evidence/evs_httpcontract"; got != want {
+		t.Fatalf("evidence paths = %q, want %q", got, want)
 	}
 }
 
@@ -1419,6 +1433,7 @@ func TestRouterEnabledRecordsRoutesFailClosedWithoutAuthMiddleware(t *testing.T)
 		RecordDeletionsHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			innerCalls++
 		}),
+		EvidenceHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { innerCalls++ }),
 	})
 
 	for _, path := range []string{
@@ -1426,6 +1441,8 @@ func TestRouterEnabledRecordsRoutesFailClosedWithoutAuthMiddleware(t *testing.T)
 		"/api/record-drafts/rdf_httpcontract",
 		"/api/records/rec_httpcontract/permanent-delete-preview",
 		"/api/record-deletions/rpo_httpcontract",
+		"/api/evidence/capture-previews",
+		"/api/evidence/evs_httpcontract",
 	} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		recorder := httptest.NewRecorder()

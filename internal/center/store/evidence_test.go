@@ -493,9 +493,8 @@ func storeEvidenceIntentFixture() (evidence.Intent, evidence.Preview) {
 	return intent, preview
 }
 
-func storeEvidenceSnapshotFixture(t *testing.T, value string) evidence.CanonicalSnapshot {
-	t.Helper()
-	descriptor := evidence.Descriptor{
+func storeEvidenceDescriptor() evidence.Descriptor {
+	return evidence.Descriptor{
 		Key:    evidence.MonitoringHostV1Key(),
 		Fields: []evidence.FieldDefinition{{Path: "value", Sensitivity: evidence.SensitivityNormal}},
 		Conformance: evidence.ConformanceMetadata{
@@ -504,6 +503,11 @@ func storeEvidenceSnapshotFixture(t *testing.T, value string) evidence.Canonical
 			RendererVersion:         "renderer.v1", MaxCanonicalBytes: evidence.MaxCanonicalPayloadBytes,
 		},
 	}
+}
+
+func storeEvidenceSnapshotFixture(t *testing.T, value string) evidence.CanonicalSnapshot {
+	t.Helper()
+	descriptor := storeEvidenceDescriptor()
 	visibility, err := recordauth.NormalizeVisibilityScope(recordauth.VisibilityScope{
 		Version: recordauth.VisibilityScopeVersionV1, Kind: recordauth.VisibilityKindProject,
 		ProjectID: recordauth.ProjectIDDefault, PolicyVersion: recordauth.PolicyVersionV1, PolicyRevision: 1,

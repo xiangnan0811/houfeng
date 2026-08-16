@@ -75,6 +75,16 @@ var recordAttachmentsSurfaceNames = []SurfaceName{
 	"record_revision_attachments",
 }
 
+var recordEvidenceSurfaceNames = []SurfaceName{
+	"evidence_capture_intents",
+	"evidence_copy_lineage",
+	"evidence_payload_gc_receipts",
+	"evidence_payloads",
+	"evidence_purge_receipts",
+	"evidence_snapshots",
+	"record_revision_evidence",
+}
+
 func RequiredAdapterNames() []AdapterName {
 	return append([]AdapterName(nil), requiredAdapterNames...)
 }
@@ -85,6 +95,10 @@ func RecordCoreSurfaceNames() []SurfaceName {
 
 func RecordAttachmentsSurfaceNames() []SurfaceName {
 	return append([]SurfaceName(nil), recordAttachmentsSurfaceNames...)
+}
+
+func RecordEvidenceSurfaceNames() []SurfaceName {
+	return append([]SurfaceName(nil), recordEvidenceSurfaceNames...)
 }
 
 type AdapterDescriptor struct {
@@ -129,6 +143,9 @@ func (descriptor AdapterDescriptor) validate() error {
 	}
 	if descriptor.name == AdapterNameRecordAttachments && !slices.Equal(descriptor.surfaces, recordAttachmentsSurfaceNames) {
 		return fmt.Errorf("%w: record_attachments surfaces", ErrInvalidAdapterDescriptor)
+	}
+	if descriptor.name == AdapterNameRecordEvidence && !slices.Equal(descriptor.surfaces, recordEvidenceSurfaceNames) {
+		return fmt.Errorf("%w: record_evidence surfaces", ErrInvalidAdapterDescriptor)
 	}
 	return nil
 }

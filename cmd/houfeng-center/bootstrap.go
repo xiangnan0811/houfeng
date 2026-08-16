@@ -176,10 +176,11 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	var recordsHandler http.Handler
 	var recordDraftsHandler http.Handler
 	var recordDeletionsHandler http.Handler
+	var evidenceHandler http.Handler
 	var attachmentUploadsHandler http.Handler
 	var attachmentsHandler http.Handler
 	if recordsEnabled {
-		recordsHandler, recordDraftsHandler, recordDeletionsHandler,
+		recordsHandler, recordDraftsHandler, recordDeletionsHandler, evidenceHandler,
 			attachmentUploadsHandler, attachmentsHandler, err = newRecordsHTTPHandlers(
 			db.Pool(),
 			vpsAssetRepo,
@@ -205,6 +206,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		RecordsHandler:                              recordsHandler,
 		RecordDraftsHandler:                         recordDraftsHandler,
 		RecordDeletionsHandler:                      recordDeletionsHandler,
+		EvidenceHandler:                             evidenceHandler,
 		AttachmentUploadsHandler:                    attachmentUploadsHandler,
 		AttachmentsHandler:                          attachmentsHandler,
 		AssetDomainsCollectionHandler:               handlers.AssetDomainsCollection(assetDomainRepo),
@@ -299,14 +301,14 @@ func newRecordsHTTPHandlers(
 	monitoringInstanceRepository *store.PostgresMonitoringInstanceRepository,
 	targetRepository *store.PostgresTargetRepository,
 	attachmentConfig config.AttachmentConfig,
-) (http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, error) {
+) (http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, error) {
 	subjects, err := centerrecords.NewSubjectAdapterRegistry([]centerrecords.SubjectSourceAdapter{
 		store.NewVPSRecordSubjectAdapter(vpsRepository),
 		store.NewMonitoringInstanceRecordSubjectAdapter(monitoringInstanceRepository),
 		store.NewTargetRecordSubjectAdapter(targetRepository),
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("create record subject registry: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("create record subject registry: %w", err)
 	}
 	subjectResolver := store.NewRecordSubjectReadResolver(subjects, nil)
 	authorizations := store.NewPostgresCurrentRecordAuthorizationSource(pool, subjectResolver, nil)
@@ -316,20 +318,21 @@ func newRecordsHTTPHandlers(
 	// remains fail closed with ErrRecordPlatformAdmissionUnavailable.
 	recordRepository, err := store.NewPostgresRecordRepository(pool, nil, []centerrecords.RevisionParticipant{
 		store.NewRecordAttachmentRevisionParticipant(),
+		store.NewRecordEvidenceRevisionParticipant(),
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("create record repository: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("create record repository: %w", err)
 	}
 	draftRepository := store.NewPostgresRecordDraftRepository(pool, nil)
 	attachmentRepository := store.NewPostgresAttachmentRepository(pool)
 	contentLeaseRepository := store.NewPostgresRecordPlatformRepository(pool, nil)
 	blob, err := newAttachmentBlobStore(attachmentConfig)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("create attachment Blob store: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("create attachment Blob store: %w", err)
 	}
 	scanner, err := newAttachmentScanner(attachmentConfig)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("create attachment scanner readiness: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("create attachment scanner readiness: %w", err)
 	}
 	uploadService, err := attachments.NewUploadService(
 		draftRepository,
@@ -343,7 +346,7 @@ func newRecordsHTTPHandlers(
 		},
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("create attachment upload service: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("create attachment upload service: %w", err)
 	}
 	downloadService, err := attachments.NewDownloadService(
 		attachmentRepository,
@@ -353,24 +356,24 @@ func newRecordsHTTPHandlers(
 		attachments.DownloadServiceOptions{Limits: attachmentConfig.Limits},
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("create attachment download service: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("create attachment download service: %w", err)
 	}
 
 	readService, err := centerrecords.NewRecordReadService(authorizations, authorizations, recordRepository)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("create record read service: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("create record read service: %w", err)
 	}
 	revisionService, err := centerrecords.NewRevisionService(subjects, authorizations, recordRepository)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("create record revision service: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("create record revision service: %w", err)
 	}
 	lifecycleService, err := centerrecords.NewRecordLifecycleService(authorizations, recordRepository)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("create record lifecycle service: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("create record lifecycle service: %w", err)
 	}
 	draftService, err := centerrecords.NewDraftService(draftRepository, authorizations)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("create record draft service: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("create record draft service: %w", err)
 	}
 	application, err := centerrecords.NewApplication(
 		readService,
@@ -385,12 +388,13 @@ func newRecordsHTTPHandlers(
 		},
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("create records application: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("create records application: %w", err)
 	}
 	// Later Records children own the remaining deletion adapters and the
 	// independent ledger/witness clients. Until all of them are wired and
 	// healthy, the production deletion transport remains explicitly closed.
-	return handlers.Records(application), handlers.RecordDrafts(application), handlers.RecordDeletions(nil),
+	return handlers.RecordsWithOptions(application, handlers.RecordHandlerOptions{EvidencePreparer: nil}),
+		handlers.RecordDrafts(application), handlers.RecordDeletions(nil), handlers.Evidence(nil),
 		handlers.AttachmentUploads(uploadService), handlers.AttachmentsWithOptions(downloadService), nil
 }
 

@@ -207,13 +207,14 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	}
 	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
 		gotRouterOptions.RecordDraftsHandler == nil || gotRouterOptions.RecordDeletionsHandler == nil ||
-		gotRouterOptions.AttachmentUploadsHandler == nil || gotRouterOptions.AttachmentsHandler == nil {
+		gotRouterOptions.EvidenceHandler == nil || gotRouterOptions.AttachmentUploadsHandler == nil || gotRouterOptions.AttachmentsHandler == nil {
 		t.Fatalf(
-			"runtime Records router options = enabled:%t records:%v drafts:%v deletions:%v uploads:%v attachments:%v, want enabled and non-nil handlers",
+			"runtime Records router options = enabled:%t records:%v drafts:%v deletions:%v evidence:%v uploads:%v attachments:%v, want enabled and non-nil handlers",
 			gotRouterOptions.RecordsEnabled,
 			gotRouterOptions.RecordsHandler,
 			gotRouterOptions.RecordDraftsHandler,
 			gotRouterOptions.RecordDeletionsHandler,
+			gotRouterOptions.EvidenceHandler,
 			gotRouterOptions.AttachmentUploadsHandler,
 			gotRouterOptions.AttachmentsHandler,
 		)
@@ -234,6 +235,8 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		{name: "drafts", method: http.MethodGet, path: "/api/record-drafts", handler: gotRouterOptions.RecordDraftsHandler, wantCode: "record_service_unavailable"},
 		{name: "deletion preview", method: http.MethodPost, path: "/api/records/rec_httpcontract/permanent-delete-preview", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_safety_unavailable"},
 		{name: "deletion status", method: http.MethodGet, path: "/api/record-deletions/rpo_httpcontract", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_status_unavailable"},
+		{name: "evidence preview", method: http.MethodPost, path: "/api/evidence/capture-previews", body: `{}`, handler: gotRouterOptions.EvidenceHandler, wantCode: "evidence_service_unavailable"},
+		{name: "evidence read", method: http.MethodGet, path: "/api/evidence/evs_httpcontract", handler: gotRouterOptions.EvidenceHandler, wantCode: "evidence_service_unavailable"},
 		{name: "attachment upload", method: http.MethodPost, path: "/api/attachment-uploads", body: `{"draft_id":"rdf_httpcontract0001","display_name":"notes.txt","declared_size_bytes":4,"media_type":"text/plain"}`, handler: gotRouterOptions.AttachmentUploadsHandler, wantCode: "attachment_service_unavailable"},
 	} {
 		t.Run(handlerCase.name+" fails closed without transaction admission", func(t *testing.T) {
@@ -418,14 +421,15 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		t.Fatal("router settings handler = nil, want non-nil")
 	}
 	if gotOpts.RecordsEnabled || gotOpts.RecordsHandler != nil || gotOpts.RecordDraftsHandler != nil ||
-		gotOpts.RecordDeletionsHandler != nil || gotOpts.AttachmentUploadsHandler != nil ||
+		gotOpts.RecordDeletionsHandler != nil || gotOpts.EvidenceHandler != nil || gotOpts.AttachmentUploadsHandler != nil ||
 		gotOpts.AttachmentsHandler != nil {
 		t.Fatalf(
-			"legacy Records router options = enabled:%t records:%v drafts:%v deletions:%v uploads:%v attachments:%v, want disabled and nil handlers",
+			"legacy Records router options = enabled:%t records:%v drafts:%v deletions:%v evidence:%v uploads:%v attachments:%v, want disabled and nil handlers",
 			gotOpts.RecordsEnabled,
 			gotOpts.RecordsHandler,
 			gotOpts.RecordDraftsHandler,
 			gotOpts.RecordDeletionsHandler,
+			gotOpts.EvidenceHandler,
 			gotOpts.AttachmentUploadsHandler,
 			gotOpts.AttachmentsHandler,
 		)

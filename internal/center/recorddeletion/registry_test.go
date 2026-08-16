@@ -13,7 +13,7 @@ func TestNewRegistryRejectsNilDuplicateExtraAndOverlappingAdapters(t *testing.T)
 
 	attachmentSurfaces := RecordAttachmentsSurfaceNames()
 	attachments := newReadinessAdapterStub(t, AdapterNameRecordAttachments, attachmentSurfaces, true, 1)
-	evidence := newReadinessAdapterStub(t, AdapterNameRecordEvidence, []SurfaceName{"fixture.evidence"}, true, 2)
+	evidence := newReadinessAdapterStub(t, AdapterNameRecordEvidence, RecordEvidenceSurfaceNames(), true, 2)
 	var nilAdapter *readinessAdapterStub
 
 	tests := []struct {
@@ -29,7 +29,7 @@ func TestNewRegistryRejectsNilDuplicateExtraAndOverlappingAdapters(t *testing.T)
 			name: "overlapping surface",
 			adapters: []Adapter{
 				attachments,
-				&readinessAdapterStub{descriptor: mustAdapterDescriptor(t, AdapterNameRecordEvidence, []SurfaceName{attachmentSurfaces[0]}), health: mustHealthSnapshot(t, true, 3)},
+				&readinessAdapterStub{descriptor: AdapterDescriptor{name: AdapterNameRecordEvidence, surfaces: []SurfaceName{attachmentSurfaces[0]}}, health: mustHealthSnapshot(t, true, 3)},
 			},
 		},
 		{name: "valid controls", adapters: []Adapter{attachments, evidence}},
@@ -322,6 +322,8 @@ func completeReadinessAdapters(t *testing.T) []Adapter {
 			surfaces = RecordCoreSurfaceNames()
 		case AdapterNameRecordAttachments:
 			surfaces = RecordAttachmentsSurfaceNames()
+		case AdapterNameRecordEvidence:
+			surfaces = RecordEvidenceSurfaceNames()
 		}
 		adapters = append(adapters, newReadinessAdapterStub(t, name, surfaces, true, byte(index+1)))
 	}

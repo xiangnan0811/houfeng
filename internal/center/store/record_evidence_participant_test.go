@@ -180,19 +180,7 @@ func storePreparedEvidenceCaptureWithSnapshotTimeOffset(
 	snapshotTimeOffset time.Duration,
 ) evidence.PreparedCapture {
 	t.Helper()
-	descriptor := evidence.Descriptor{
-		Key: evidence.MonitoringProbeV2Key(),
-		Fields: []evidence.FieldDefinition{
-			{Path: "metric_name", Sensitivity: evidence.SensitivityNormal},
-			{Path: "metric_value", Sensitivity: evidence.SensitivityNormal},
-		},
-		Conformance: evidence.ConformanceMetadata{
-			CanonicalizationVersion: evidence.CanonicalizationVersionV1,
-			ForbiddenCorpusVersion:  evidence.ForbiddenCorpusVersionV1,
-			RendererVersion:         "renderer.v1",
-			MaxCanonicalBytes:       evidence.MaxCanonicalPayloadBytes,
-		},
-	}
+	descriptor := storeEvidenceParticipantDescriptor()
 	authorization := storeEvidenceParticipantAuthorization(t)
 	window := evidence.TimeWindow{Start: previewedAt.Add(-time.Hour), End: previewedAt}
 	selection := evidence.Selection{
@@ -255,6 +243,22 @@ func storePreparedEvidenceCaptureWithSnapshotTimeOffset(
 		t.Fatalf("PrepareCapture() error = %v", err)
 	}
 	return prepared
+}
+
+func storeEvidenceParticipantDescriptor() evidence.Descriptor {
+	return evidence.Descriptor{
+		Key: evidence.MonitoringProbeV2Key(),
+		Fields: []evidence.FieldDefinition{
+			{Path: "metric_name", Sensitivity: evidence.SensitivityNormal},
+			{Path: "metric_value", Sensitivity: evidence.SensitivityNormal},
+		},
+		Conformance: evidence.ConformanceMetadata{
+			CanonicalizationVersion: evidence.CanonicalizationVersionV1,
+			ForbiddenCorpusVersion:  evidence.ForbiddenCorpusVersionV1,
+			RendererVersion:         "renderer.v1",
+			MaxCanonicalBytes:       evidence.MaxCanonicalPayloadBytes,
+		},
+	}
 }
 
 func storeEvidenceParticipantAuthorization(t *testing.T) evidence.AuthorizationScope {
