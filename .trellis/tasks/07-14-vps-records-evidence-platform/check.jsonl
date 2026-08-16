@@ -1,13 +1,16 @@
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/design.md","reason":"审查Task 6 exact registry、ordered picker、客户端无payload与unknown schema失败关闭。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"逐项核对Task 6 RED matrix、allowlisted renderers、MetricChart gap和Web gate，不扩大Task 7。"}
-{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-6-preflight.md","reason":"对照实施前lazy facade、六tuple、DTO allowlist、gap和最终验证矩阵。"}
-{"file":".trellis/spec/web/index.md","reason":"Web组件/API/样式/质量规范索引。"}
-{"file":".trellis/spec/web/directory-structure.md","reason":"审查route-private组件与lib/types分层。"}
-{"file":".trellis/spec/web/component-conventions.md","reason":"审查纯组件、a11y、BEM/tokens、无inline style。"}
-{"file":".trellis/spec/web/state-and-data.md","reason":"审查recordsApi依赖/eager graph、transport错误与canonical DTO。"}
-{"file":".trellis/spec/web/styling-guidelines.md","reason":"审查CSS唯一owner、reachability与budget。"}
-{"file":".trellis/spec/web/quality-guidelines.md","reason":"审查focused/full Vitest、coverage、lint/build/bundle/CSS和Node22。"}
-{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"审查renderer/read-model版本、敏感/禁止字段及unknown authoritative kind关闭。"}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"审查capture preview和read DTO端到端字段与失败路径。"}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"审查MetricChart与现有transport/style复用，避免新fallback基础设施。"}
-{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"确认只在Task 6 feature分支且不触碰Task 7/PR/merge。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/design.md","reason":"Audit Task 7 ownership of scheduling、metrics、capacity、alerts and Child 10 fail-closed boundary。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"Check all Task 7 checklist items、full gates、spec and delivery evidence。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-2b-capture-transaction-contract.md","reason":"Ensure janitor reuses the exact Task 2B lifecycle primitives and 24h global-reference semantics。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-7-preflight.md","reason":"Audit quota concurrency、bounded worker、metrics/alerts、no migration and PR/CI matrix。"}
+{"file":".trellis/spec/backend/index.md","reason":"Backend review routing index。"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Review domain/store/bootstrap ownership and dependency direction。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Review project-scoped logical aggregation、atomic transaction enforcement and strict PG evidence。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review sentinels、typed-nil and context/error wrapping。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Review alert levels and absence of sensitive/high-cardinality values。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review worker determinism、race、bootstrap、strict PG and full gates。"}
+{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"Review preview/final quota parity、existing-ref exemption and lifecycle semantics。"}
+{"file":".trellis/spec/backend/ip-quality-contract.md","reason":"Ensure IP quality remains a source contract rather than capacity fallback。"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Ensure Web consumes server-owned quota outcomes without global state/polling/inference。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review PostgreSQL to domain/worker/observer data flow and failure paths。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Review reuse of existing lifecycle and worker primitives。"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Verify branch、PR、CI、merge and post-merge delivery evidence。"}

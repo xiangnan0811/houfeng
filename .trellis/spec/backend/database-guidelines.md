@@ -729,6 +729,57 @@ logger.Error("record outbox pass failed")
 
 ---
 
+### Scenario: Evidence project logical capacity 与 lifecycle maintenance
+
+#### 1. Scope / Trigger
+
+- Trigger：修改`evidence_snapshots.logical_size_bytes`的核算、`PostgresEvidenceRepository` capacity/backlog query、`RecordEvidenceRevisionParticipant` final quota check、`EvidenceMaintenanceWorker` composition或lifecycle primitive scheduling时。
+- 此场景只使用已应用的`0054_create_record_evidence.sql`；capacity不新增counter/settings migration，不修改0054，不读取attachment quota/table。
+
+#### 2. Signatures
+
+```go
+func (r *PostgresEvidenceRepository) ReadProjectEvidenceCapacity(context.Context, string) (evidence.ProjectCapacityUsage, error)
+func (r *PostgresEvidenceRepository) ReadEvidenceCapacityAggregate(context.Context) (evidence.EvidenceCapacityAggregate, error)
+func (r *PostgresEvidenceRepository) ReadEvidenceLifecycleBacklog(context.Context, uint64) (evidence.EvidenceLifecycleBacklog, error)
+func NewRecordEvidenceRevisionParticipantWithCapacityPolicy(evidence.CapacityPolicy) (records.RevisionParticipant, error)
+```
+
+#### 3. Contracts
+
+- project logical usage是`sum(evidence_snapshots.logical_size_bytes)`，必须通过`evidence_snapshots.record_id = records.record_id`并按`records.project_id`过滤。physical stats只对该project引用的distinct payload计一次；global orphan stats独立报告，不能抵扣logical usage。
+- project ID服从`recordauth`闭合registry；unknown project在SQL前拒绝。全部capacity/backlog read仍需真实`AdmissionGate`，nil/error/typed-nil gate在query/exec前失败关闭。
+- final new-capture check与revision write共用caller transaction：解析record project后取得`pg_advisory_xact_lock(hashtextextended('houfeng.evidence.capacity.project.v1:' || project_id, 0))`等价的稳定project lock，再执行fresh logical sum。lock必须早于intent `DELETE ... RETURNING`和snapshot insert。
+- transaction采用PostgreSQL READ COMMITTED statement snapshot；等待project lock后执行的sum必须看到先前winner commit。preview-boundquota发生任何status/reason漂移、limit超出或read失败都回滚revision、snapshot、reference与intent消费。
+- existing snapshot reference不创建logical row，因此不得取得capacity lock或查询usage。text-only、reference removal和继续reuse在warning/exceeded状态仍可用。
+- backlog query只探测`limit+1`并返回capped count+more bit；limit为`1..100`。expired intent以`valid_until <= transaction_timestamp()`判定；eligible orphan以`created_at <= transaction_timestamp()-24h`且global `NOT EXISTS evidence_snapshots`判定。
+- GC candidate与最终DELETE都必须做global reference check；返回给worker的receipt只被聚合为count/canonical/compressed bytes，不能成为高cardinality metric label。每个bounded primitive返回行数不得超过传入limit；receipt的version/receipt digest、deleted-at UTC微秒时间及bytes必须闭合有效且批内唯一，否则worker按janitor failure失败关闭。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 预期行为 |
+| --- | --- |
+| projected bytes `< warning` | `allowed`；可persist intent/snapshot |
+| projected bytes `>= warning`且`<= limit` | canonical `warning`；仍可确认并persist |
+| projected bytes `> limit` | stale/conflict；revision回滚，intent保留 |
+| 两个同project transaction各自单独可fit但合计超限 | project lock序列化；恰好一个成功 |
+| existing ref / empty capture list | 0 capacity lock/query，正常保存 |
+| capacity row负数/计数字节不一致/sum cast失败 | persistence conflict/capacity unavailable，不提交 |
+| nil/typed-nil production gate | 不注册maintenance worker；0 cleanup pass、0 log loop |
+
+#### 5. Tests Required
+
+```bash
+go test ./internal/center/evidence ./internal/center/store ./cmd/houfeng-center -count=1
+go test -race ./internal/center/evidence ./internal/center/store ./cmd/houfeng-center -count=1
+sh scripts/test-record-platform-integration.sh postgres -- \
+  go test -v ./internal/center/store -run '^TestPostgresIntegrationEvidenceCapacity' -count=1
+```
+
+Strict PostgreSQL输出必须实际运行exact-boundary、over-boundary rollback/intent preservation和concurrent oversubscription tests；任何`SKIP`不构成evidence。既有24h orphan/global-reference lifecycle integration test必须同样通过。
+
+---
+
 ### Scenario: Records permanent deletion、core purge 与连续 recovery
 
 #### 1. Scope / Trigger
