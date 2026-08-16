@@ -4,6 +4,7 @@ import { ApiError } from './apiRequest'
 import {
   archiveRecord,
   completeAttachmentUpload,
+  captureEvidencePreview,
   createAttachmentUpload,
   createRecord,
   createRecordDraft,
@@ -12,6 +13,7 @@ import {
   executeRecordPermanentDeletion,
   getAttachmentContent,
   getAttachmentMetadata,
+  getEvidenceSnapshot,
   getRecord,
   getRecordDeletionOperation,
   getRecordDraft,
@@ -29,6 +31,9 @@ import type {
   AttachmentMetadata,
   AttachmentUploadCompletion,
   AttachmentUploadSession,
+  EvidenceCapturePreview,
+  EvidenceCapturePreviewInput,
+  EvidenceSnapshotRead,
   CreateRecordDraftInput,
   PublishRecordInput,
   PublishRecordRevisionInput,
@@ -155,11 +160,152 @@ const draft = {
   expires_at: '2026-11-01T10:00:00Z',
 } satisfies RecordDraft
 
+type EvidenceEnvelopeFixture = Omit<
+  EvidenceCapturePreview,
+  'capture_intent_id' | 'estimated_canonical_bytes' | 'previewed_at' | 'valid_until'
+>
+
+const evidenceEnvelope: EvidenceEnvelopeFixture = {
+  record_id: 'rec_contract',
+  snapshot_id: 'evs_contract',
+  kind: 'monitoring.host',
+  schema_version: 1,
+  subject: { type: 'vps', id: 'vps_contract', display_name: 'Contract VPS' },
+  source: { type: 'monitoring_instance', id: 'mon_contract', display_name: 'Primary monitor' },
+  requested_window: { start: '2026-08-16T01:00:00Z', end: '2026-08-16T02:00:00Z' },
+  actual_window: { start: '2026-08-16T01:00:00Z', end: '2026-08-16T02:00:00Z' },
+  observed_at: '2026-08-16T02:00:00Z',
+  source_revision: 'source-revision',
+  source_watermark: 'source-watermark',
+  producer_version: 'producer-v1',
+  calculation_version: 'calculation-v1',
+  units: { status: 'applicable', values: { cpu_usage_pct: 'percent' } },
+  quality: {
+    status: 'complete',
+    sample_count: 12,
+    gap_count: 0,
+    maintenance_count: 0,
+    backfilled_count: 0,
+    bucket_count: 12,
+    data_point_count: 12,
+    peak_count: 1,
+    truncated: false,
+    partial: false,
+  },
+  sensitivity: 'normal',
+  actual_precision_seconds: 300,
+  bucket_width_seconds: 300,
+  quota: { status: 'allowed' },
+  retention: {
+    immutable: true,
+    scope: 'record_revision',
+    source_deletion: 'snapshot_retained_source_unavailable',
+  },
+  redaction: [],
+  renderer_version: 'monitoring_host_v1',
+}
+
+const evidencePreviewResponse = {
+  ...evidenceEnvelope,
+  capture_intent_id: 'eci_contract',
+  estimated_canonical_bytes: 4096,
+  previewed_at: '2026-08-16T02:00:01Z',
+  valid_until: '2026-08-16T02:05:01Z',
+} satisfies EvidenceCapturePreview
+
+const evidenceReadResponse = {
+  ...evidenceEnvelope,
+  captured_at: '2026-08-16T02:00:01Z',
+  referenced_at: '2026-08-16T02:01:00Z',
+  source_available: true,
+  title: 'Monitoring host evidence',
+  read_model: { version: 'monitoring_host_read_model/v1' },
+} satisfies EvidenceSnapshotRead
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
 describe('Records API transport', () => {
+  it('captures an evidence preview with an allowlisted body and abort signal', async () => {
+    const input = {
+      record_id: 'rec_contract',
+      kind: 'monitoring.host',
+      schema_version: 1,
+      source_type: 'monitoring_instance',
+      source_id: 'mon /contract',
+      requested_window: {
+        start: '2026-08-16T01:00:00Z',
+        end: '2026-08-16T02:00:00Z',
+      },
+      metrics: ['cpu_usage_pct'],
+      precision_seconds: 300,
+      sensitive_topology_fields: [],
+      payload: 'must-not-leave-the-client',
+      authorization: 'must-not-leave-the-client',
+    } satisfies EvidenceCapturePreviewInput & { payload: string; authorization: string }
+    const response = evidencePreviewResponse
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(201, response))
+    const controller = new AbortController()
+
+    await expect(captureEvidencePreview(input, controller.signal)).resolves.toEqual(response)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [path, init] = fetchMock.mock.calls[0] ?? []
+    expect(path).toBe('/api/evidence/capture-previews')
+    expect(init).toMatchObject({
+      method: 'POST',
+      signal: controller.signal,
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    })
+    expect(JSON.parse(String(init?.body))).toEqual({
+      record_id: 'rec_contract',
+      kind: 'monitoring.host',
+      schema_version: 1,
+      source_type: 'monitoring_instance',
+      source_id: 'mon /contract',
+      requested_window: input.requested_window,
+      metrics: ['cpu_usage_pct'],
+      precision_seconds: 300,
+      sensitive_topology_fields: [],
+    })
+  })
+
+  it('reads an encoded evidence snapshot through the shared records transport', async () => {
+    const response = { ...evidenceReadResponse, snapshot_id: 'evs /contract' }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, response))
+    const controller = new AbortController()
+
+    await expect(getEvidenceSnapshot('evs /contract', controller.signal)).resolves.toEqual(response)
+    expect(fetchMock).toHaveBeenCalledWith('/api/evidence/evs%20%2Fcontract', {
+      ...requestDefaults,
+      signal: controller.signal,
+    })
+  })
+
+  it.each([
+    [409, 'evidence_preview_stale'],
+    [503, 'evidence_service_unavailable'],
+  ])('keeps evidence failure metadata allowlisted for HTTP %i', async (status, code) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(status, {
+      code,
+      message: 'evidence unavailable',
+      metadata: 'must-not-enter-error',
+      authorization: 'must-not-enter-error',
+    }))
+
+    await expect(captureEvidencePreview({
+      kind: 'monitoring.host',
+      schema_version: 1,
+      source_type: 'monitoring_instance',
+      source_id: 'mon_contract',
+      requested_window: { start: '2026-08-16T01:00:00Z', end: '2026-08-16T02:00:00Z' },
+      metrics: ['cpu_usage_pct'],
+      precision_seconds: 300,
+      sensitive_topology_fields: [],
+    })).rejects.toMatchObject({ status, code, message: 'evidence unavailable' })
+  })
+
   it('preserves non-null ordered attachment IDs in draft and revision DTOs', () => {
     expect(draft.payload.attachment_ids).toEqual([
       'att_contract_first',

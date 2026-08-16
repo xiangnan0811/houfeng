@@ -2433,6 +2433,123 @@ export type SettingsUpdateInput = {
 }
 
 // Records v1 transport contracts.
+export type EvidenceKindName =
+  | 'ip_quality.report'
+  | 'monitoring.host'
+  | 'monitoring.probe'
+  | 'monitoring.event'
+  | 'subscription.cost'
+  | 'command.audit'
+
+export type EvidenceTimeWindow = {
+  start: string
+  end: string
+}
+
+export type EvidenceIdentitySnapshot = {
+  type: string
+  id: string
+  display_name?: string
+  provider?: string
+  region?: string
+  purpose?: string
+  version?: string
+  target_type?: string
+}
+
+export type EvidenceQuality = {
+  status: 'complete' | 'partial' | 'degraded' | 'unknown'
+  sample_count: number
+  gap_count: number
+  maintenance_count: number
+  backfilled_count: number
+  bucket_count: number
+  data_point_count: number
+  peak_count: number
+  truncated: boolean
+  partial: boolean
+}
+
+export type EvidenceUnits = {
+  status: 'applicable' | 'not_applicable'
+  values: Record<string, string>
+  reason?: string
+}
+
+export type EvidenceQuota = {
+  status: 'allowed' | 'exceeded' | 'unavailable'
+  reason?: string
+}
+
+export type EvidenceRetention = {
+  immutable: boolean
+  scope: 'record_revision'
+  source_deletion: 'snapshot_retained_source_unavailable'
+}
+
+export type EvidenceFieldDecision = {
+  path: string
+  sensitivity: 'normal' | 'sensitive_topology' | 'forbidden'
+  action: 'included' | 'stripped' | 'masked' | 'forbidden'
+}
+
+export type EvidenceCapturePreviewInput = {
+  record_id?: string
+  kind: EvidenceKindName
+  schema_version: number
+  source_type: string
+  source_id: string
+  requested_window: EvidenceTimeWindow
+  metrics: string[]
+  precision_seconds: number
+  sensitive_topology_fields: string[]
+}
+
+type EvidenceEnvelopeTransport = {
+  record_id: string
+  snapshot_id: string
+  kind: EvidenceKindName
+  schema_version: number
+  subject: EvidenceIdentitySnapshot
+  source: EvidenceIdentitySnapshot
+  requested_window: EvidenceTimeWindow
+  actual_window: EvidenceTimeWindow
+  observed_at: string
+  source_revision: string
+  source_watermark: string
+  producer_version: string
+  calculation_version: string
+  units: EvidenceUnits
+  quality: EvidenceQuality
+  sensitivity: 'normal' | 'sensitive_topology' | 'forbidden'
+  actual_precision_seconds: number
+  bucket_width_seconds: number
+  quota: EvidenceQuota
+  retention: EvidenceRetention
+  redaction: EvidenceFieldDecision[]
+  renderer_version: string
+}
+
+export type EvidenceCapturePreview = EvidenceEnvelopeTransport & {
+  capture_intent_id: string
+  estimated_canonical_bytes: number
+  previewed_at: string
+  valid_until: string
+}
+
+export type EvidenceSnapshotRead = EvidenceEnvelopeTransport & {
+  captured_at: string
+  referenced_at: string
+  source_available: boolean
+  title: string
+  read_model: unknown
+}
+
+export type EvidenceCaptureReference = {
+  record_id: string
+  capture_intent_id: string
+}
+
 export type RecordLifecycle = 'active' | 'archived'
 
 export type RecordType =

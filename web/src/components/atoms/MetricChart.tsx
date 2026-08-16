@@ -11,6 +11,8 @@ export type MetricChartTone =
 export type MetricChartSample = {
   value: number
   observedAt: string
+  /** Start a new line segment before this sample; values remain authoritative. */
+  gapBefore?: boolean
 }
 
 export type MetricChartThreshold = {
@@ -88,33 +90,25 @@ function formatAxisTime(iso: string): string {
  * Returns approximately `targetCount` ticks; always includes domain endpoints
  * (caller may render them as-is or snap to round numbers later).
  */
-function computeYTicks(min: number, max: number, targetCount = 4): number[] {
-  if (max <= min) {
-    return [min]
-  }
-  const ticks: number[] = []
-  const step = (max - min) / (targetCount - 1)
-  for (let i = 0; i < targetCount; i += 1) {
-    ticks.push(min + step * i)
-  }
-  return ticks
+function computeYTicks(min: number, max: number): number[] {
+  if (max <= min) return [min]
+  const step = (max - min) / 3
+  return Array.from({ length: 4 }, (_, index) => min + step * index)
 }
 
 /**
  * Pick `targetCount` evenly-spaced sample indices for X-axis tick labels.
  * Always includes 0 and last index.
  */
-function computeXTickIndices(sampleCount: number, targetCount = 5): number[] {
+function computeXTickIndices(sampleCount: number): number[] {
   if (sampleCount <= 1) return [0]
-  if (sampleCount <= targetCount) {
+  if (sampleCount <= 5) {
     return Array.from({ length: sampleCount }, (_, i) => i)
   }
-  const indices: number[] = []
-  for (let i = 0; i < targetCount; i += 1) {
-    const ratio = i / (targetCount - 1)
-    indices.push(Math.round(ratio * (sampleCount - 1)))
-  }
-  return indices
+  return Array.from(
+    { length: 5 },
+    (_, index) => Math.round((index / 4) * (sampleCount - 1)),
+  )
 }
 
 function indexForObservedAt(samples: MetricChartSample[], observedAt: string | null | undefined): number | null {
@@ -230,8 +224,12 @@ export function MetricChart({
   const isSingle = samples.length === 1
 
   // Derive Y range
-  const dataMin = Math.min(...samples.map((s) => s.value))
-  const dataMax = Math.max(...samples.map((s) => s.value))
+  let dataMin = firstSample.value
+  let dataMax = firstSample.value
+  for (const sample of samples) {
+    dataMin = Math.min(dataMin, sample.value)
+    dataMax = Math.max(dataMax, sample.value)
+  }
   let effectiveYMin = yMin ?? dataMin
   let effectiveYMax = yMax ?? dataMax
   if (effectiveYMax <= effectiveYMin) {
@@ -257,9 +255,12 @@ export function MetricChart({
     return PADDING.top + (1 - (clamped - effectiveYMin) / yRange) * innerH
   }
 
-  const polylinePoints = samples
-    .map((s, i) => `${projectX(i).toFixed(2)},${projectY(s.value).toFixed(2)}`)
-    .join(' ')
+  const lineSegments: string[] = []
+  samples.forEach((sample, index) => {
+    const point = `${projectX(index).toFixed(2)},${projectY(sample.value).toFixed(2)}`
+    if (index === 0 || sample.gapBefore) lineSegments.push(point)
+    else lineSegments[lineSegments.length - 1] += ` ${point}`
+  })
 
   const lastIdx = samples.length - 1
   const sampleAt = (index: number) => samples[index] ?? firstSample
@@ -270,7 +271,7 @@ export function MetricChart({
   const effectiveHoverIndex = isControlledHover ? indexForObservedAt(samples, hoveredAt) : hoverIndex
 
   // Y ticks (deduplicated by formatted string)
-  const rawYTicks = computeYTicks(effectiveYMin, effectiveYMax, 4)
+  const rawYTicks = computeYTicks(effectiveYMin, effectiveYMax)
   const uniqueYTicksMap = new Map<string, number>()
   rawYTicks.forEach((t) => {
     const s = formatAxisValue(t)
@@ -283,9 +284,13 @@ export function MetricChart({
   const yTicks = Array.from(uniqueYTicksMap.values())
 
   // X ticks (sample indices)
-  const xTickIndices = computeXTickIndices(samples.length, 5)
+  const xTickIndices = computeXTickIndices(samples.length)
 
   // Handle hover
+  const selectIndex = (index: number) => {
+    if (isControlledHover) onHoverAtChange?.(sampleAt(index).observedAt)
+    else setHoverIndex(index)
+  }
   const handleMove = (e: MouseEvent<SVGSVGElement>) => {
     if (isSingle) return
     const rect = e.currentTarget.getBoundingClientRect()
@@ -295,20 +300,16 @@ export function MetricChart({
     const vbX = (relX / rect.width) * width
     // Convert vbX into sample index, accounting for left padding
     if (vbX < PADDING.left) {
-      if (isControlledHover) onHoverAtChange?.(firstSample.observedAt)
-      else setHoverIndex(0)
+      selectIndex(0)
       return
     }
     if (vbX > PADDING.left + innerW) {
-      if (isControlledHover) onHoverAtChange?.(lastSample.observedAt)
-      else setHoverIndex(lastIdx)
+      selectIndex(lastIdx)
       return
     }
     const dataX = vbX - PADDING.left
     const idx = Math.round((dataX / innerW) * (samples.length - 1))
-    const nextIndex = Math.max(0, Math.min(lastIdx, idx))
-    if (isControlledHover) onHoverAtChange?.(sampleAt(nextIndex).observedAt)
-    else setHoverIndex(nextIndex)
+    selectIndex(Math.max(0, Math.min(lastIdx, idx)))
   }
 
   const handleLeave = () => {
@@ -427,8 +428,6 @@ export function MetricChart({
               y={y}
               textAnchor="end"
               dominantBaseline="middle"
-              fontSize={10}
-              fill="var(--text-muted)"
               opacity={0.8}
             >
               {formatAxisValue(tickValue)}
@@ -453,8 +452,6 @@ export function MetricChart({
             y={PADDING.top + innerH + 14}
             textAnchor={anchor}
             dominantBaseline="hanging"
-            fontSize={10}
-            fill="var(--text-muted)"
             opacity={0.8}
           >
             {formatTime(sample.observedAt)}
@@ -462,17 +459,18 @@ export function MetricChart({
         )
       })}
 
-      {/* Polyline */}
-      {!isSingle && (
+      {/* Gaps split the line. Isolated samples duplicate one coordinate for a visible rounded zero-length stroke. */}
+      {!isSingle && lineSegments.map((points) => (
         <polyline
+          key={points}
           fill="none"
           stroke={stroke}
           strokeWidth={1.5}
           strokeLinecap="round"
           strokeLinejoin="round"
-          points={polylinePoints}
+          points={points.includes(' ') ? points : `${points} ${points}`}
         />
-      )}
+      ))}
 
       {/* Threshold lines */}
       {thresholds?.map((t, i) => {
