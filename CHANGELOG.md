@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.66.0](https://github.com/xiangnan0811/houfeng/compare/v0.65.0...v0.66.0) (2026-08-17)
+
+
+### Features
+
+* **evidence:** wire production composition boundary ([6a0122a](https://github.com/xiangnan0811/houfeng/commit/6a0122a7fd6aa86145e4e7d6ac70609ab8f59f22))
+* **evidence:** wire production composition boundary ([9ac3e25](https://github.com/xiangnan0811/houfeng/commit/9ac3e255bcb62389ee9d6fde1fe3d294d9e59bd9))
+
 ## [0.65.0](https://github.com/xiangnan0811/houfeng/compare/v0.64.0...v0.65.0) (2026-08-16)
 
 
