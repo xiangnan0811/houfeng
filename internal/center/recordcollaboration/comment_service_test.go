@@ -71,6 +71,42 @@ func TestCommentServiceRejectsMarkdownOnlyAfterFailClosedCurrentResolution(t *te
 	}
 }
 
+func TestCommentServiceNormalizesMalformedReplyOnlyAfterCurrentAuthorization(t *testing.T) {
+	actor, current := testActionAuthorization(t, recordauth.RoleProjectAdmin)
+	current.RecordID = "rec_commentparent1"
+	request := CommentCreateRequest{
+		Actor: actor, RecordID: current.RecordID, BodyMarkdown: "Safe reply.", ReplyToCommentID: "not-a-comment-id",
+		IdempotencyKey: "comment-create-reply", IdempotencyOwnerID: "comment_api", OwnerLeaseDuration: time.Minute,
+		IdempotencyTTL: time.Hour, OutboxTTL: time.Hour,
+	}
+
+	t.Run("authorized malformed reply", func(t *testing.T) {
+		currentSource := &commentCurrentSourceStub{result: current}
+		store := &commentCommandStoreStub{}
+		service, err := NewCommentService(currentSource, store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := service.CreateComment(context.Background(), request)
+		if !errors.Is(err, ErrInvalidCommentContent) || result != (CommentMutationResult{}) || currentSource.calls != 1 || store.calls != 0 {
+			t.Fatalf("CreateComment() result/error/calls = %#v/%v current=%d store=%d", result, err, currentSource.calls, store.calls)
+		}
+	})
+
+	t.Run("missing record stays opaque", func(t *testing.T) {
+		currentSource := &commentCurrentSourceStub{err: records.ErrRecordNotFound}
+		store := &commentCommandStoreStub{}
+		service, err := NewCommentService(currentSource, store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := service.CreateComment(context.Background(), request)
+		if !errors.Is(err, records.ErrRecordNotFound) || result != (CommentMutationResult{}) || currentSource.calls != 1 || store.calls != 0 {
+			t.Fatalf("CreateComment() result/error/calls = %#v/%v current=%d store=%d", result, err, currentSource.calls, store.calls)
+		}
+	})
+}
+
 func TestCommentServiceEditRedactAndListUseClosedOperations(t *testing.T) {
 	actor, current := testActionAuthorization(t, recordauth.RoleProjectAdmin)
 	current.RecordID = "rec_commentparent1"

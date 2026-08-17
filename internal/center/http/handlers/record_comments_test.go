@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"houfeng/internal/center/http/sessionctx"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordcollaboration"
+	"houfeng/internal/center/records"
 )
 
 func TestRecordCommentsHandlerUsesTrustedActorAndClosedMutationResponse(t *testing.T) {
@@ -164,6 +166,56 @@ func TestRecordCommentsHandlerRoutesEditRedactAndMapsMarkdownSentinel(t *testing
 	}
 }
 
+func TestRecordCommentsHandlerMapsMalformedReplyAfterOpaqueAuthorization(t *testing.T) {
+	actor := testRecordActionActor(t)
+	visibility, err := recordauth.NormalizeVisibilityScope(recordauth.VisibilityScope{
+		Version: recordauth.VisibilityScopeVersionV1, Kind: recordauth.VisibilityKindProject,
+		ProjectID: recordauth.ProjectIDDefault, PolicyVersion: recordauth.PolicyVersionV1, PolicyRevision: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := recordauth.NormalizeSourceAuthorization(recordauth.SourceAuthorization{
+		Version: recordauth.SourceAuthorizationVersionV1, Kind: recordauth.SourceKindVPS,
+		SourceID: "vps_0123456789abcdef", State: recordauth.SourceStateLive,
+		CaptureScope: visibility, CurrentScope: &visibility,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentSource := &recordCommentHandlerCurrentSourceStub{result: records.CurrentRecordAuthorization{
+		RecordID: "rec_commentparent1", CurrentRevisionID: "rrv_current1", LockVersion: 7,
+		AuthorizationEpoch: 9, Lifecycle: records.LifecycleActive,
+		Evidence: records.RecordAuthorizationEvidence{
+			ProjectID: recordauth.ProjectIDDefault, Visibility: visibility, Sources: []recordauth.SourceAuthorization{source},
+		},
+	}}
+	store := &recordCommentHandlerStoreStub{}
+	service, err := recordcollaboration.NewCommentService(currentSource, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, err := recordcollaboration.NewCommentApplication(service, recordcollaboration.CommentApplicationOptions{
+		IdempotencyOwnerID: "record_comments_api", OwnerLeaseDuration: time.Minute,
+		IdempotencyTTL: time.Hour, OutboxTTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/records/rec_commentparent1/comments",
+		strings.NewReader(`{"body_markdown":"Safe reply.","reply_to_comment_id":"not-a-comment-id","mention_user_ids":[]}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "comment-malformed-reply")
+	request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+	recorder := httptest.NewRecorder()
+	RecordComments(application).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnprocessableEntity || recorder.Header().Get("Cache-Control") != recordPrivateCacheControl ||
+		!strings.Contains(recorder.Body.String(), `"code":"comment_invalid"`) || currentSource.calls != 1 || store.calls != 0 {
+		t.Fatalf("status=%d headers=%#v current/store=%d/%d body=%s", recorder.Code, recorder.Header(), currentSource.calls, store.calls, recorder.Body.String())
+	}
+}
+
 func TestRecordCommentsHandlerRejectsInvalidCommentUnicodeBeforeApplication(t *testing.T) {
 	actor := testRecordActionActor(t)
 	invalidUTF8 := append([]byte(`{"body_markdown":"`), 0xff)
@@ -280,6 +332,30 @@ type recordCommentHandlerStub struct {
 	comments                                       []recordcollaboration.CommentRecord
 	err                                            error
 	createCalls, editCalls, redactCalls, listCalls int
+}
+
+type recordCommentHandlerCurrentSourceStub struct {
+	result records.CurrentRecordAuthorization
+	err    error
+	calls  int
+}
+
+func (stub *recordCommentHandlerCurrentSourceStub) ResolveCurrentRecordAuthorization(context.Context, recordauth.ActorScope, string) (records.CurrentRecordAuthorization, error) {
+	stub.calls++
+	return stub.result, stub.err
+}
+
+type recordCommentHandlerStoreStub struct {
+	calls int
+}
+
+func (stub *recordCommentHandlerStoreStub) CommitComment(context.Context, recordcollaboration.CommentCommand) (recordcollaboration.CommentMutationResult, error) {
+	stub.calls++
+	return recordcollaboration.CommentMutationResult{}, nil
+}
+
+func (*recordCommentHandlerStoreStub) ListComments(context.Context, recordcollaboration.CommentReadCommand) ([]recordcollaboration.CommentRecord, error) {
+	return nil, nil
 }
 
 func (stub *recordCommentHandlerStub) CreateComment(_ context.Context, request recordcollaboration.CommentCreateApplicationRequest) (recordcollaboration.CommentMutationResult, error) {

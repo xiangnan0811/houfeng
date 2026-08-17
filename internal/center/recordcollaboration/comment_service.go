@@ -207,6 +207,9 @@ func (service *CommentService) commit(
 	if err != nil {
 		return CommentMutationResult{}, err
 	}
+	if kind == CommentMutationCreate && replyTo != "" && ValidateCommentID(replyTo) != nil {
+		return CommentMutationResult{}, ErrInvalidCommentContent
+	}
 	var content CommentContent
 	if kind != CommentMutationRedact {
 		content, err = NewCommentContent(bodyMarkdown)
