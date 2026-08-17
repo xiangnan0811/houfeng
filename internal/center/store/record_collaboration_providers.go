@@ -35,25 +35,64 @@ func (provider *PostgresRecordCollaborationProvider) ReadCollaborationActivityFa
 		return nil, err
 	}
 	rows, err := tx.Query(ctx, `
-		select activity_id, record_id, coalesce(revision_id, ''), event_kind,
-		       source_event_id, source_version, actor_id, authorization_epoch,
-		       record_lock_version, event_at
-		from public.record_domain_activities
-		where project_id = $1 and record_id = $2
-		  and event_kind = any($3::text[])
-		order by event_at, activity_id
-		limit $4`, binding.ProjectID(), binding.RecordID(), collaborationActivityFactKinds(), recordcollaboration.MaxCollaborationActivityFacts+1)
+		with bounded as (
+		  select activity_id, record_id, revision_id, event_kind, source_event_id,
+		         source_version, actor_id, authorization_epoch, record_lock_version, event_at
+		  from public.record_domain_activities
+		  where project_id = $1 and record_id = $2
+		    and event_kind = any($3::text[])
+		  order by event_at, activity_id
+		  limit $4
+		)
+		select activity.activity_id, activity.record_id, coalesce(activity.revision_id, ''), activity.event_kind,
+		       activity.source_event_id, activity.source_version, activity.actor_id, activity.authorization_epoch,
+		       activity.record_lock_version, activity.event_at,
+		       case
+		         when activity.event_kind in ('record_owner_changed', 'record_participant_changed', 'record_follow_up_changed') then revisions.revision_no
+		         when activity.event_kind in ('action_created', 'action_updated', 'action_completed', 'action_cancelled', 'action_reopened') then action_events.action_version
+		         when activity.event_kind in ('comment_created', 'comment_edited') then comment_revisions.comment_version
+		         when activity.event_kind = 'comment_redacted' then tombstones.tombstone_version
+		       end as persisted_source_version,
+		       coalesce(action_events.event_kind, '') as persisted_source_kind,
+		       case
+		         when activity.event_kind in ('record_owner_changed', 'record_participant_changed', 'record_follow_up_changed') then revisions.author_id
+		         when activity.event_kind in ('action_created', 'action_updated', 'action_completed', 'action_cancelled', 'action_reopened') then action_events.actor_id
+		         when activity.event_kind in ('comment_created', 'comment_edited') then comment_revisions.edited_by
+		         when activity.event_kind = 'comment_redacted' then tombstones.deleted_by
+		       end as persisted_actor_id,
+		       case
+		         when activity.event_kind in ('record_owner_changed', 'record_participant_changed', 'record_follow_up_changed') then revisions.created_at
+		         when activity.event_kind in ('action_created', 'action_updated', 'action_completed', 'action_cancelled', 'action_reopened') then action_events.occurred_at
+		         when activity.event_kind in ('comment_created', 'comment_edited') then comment_revisions.created_at
+		         when activity.event_kind = 'comment_redacted' then tombstones.deleted_at
+		       end as persisted_event_at
+		from bounded as activity
+		left join public.record_revisions as revisions
+		  on activity.event_kind in ('record_owner_changed', 'record_participant_changed', 'record_follow_up_changed')
+		 and revisions.record_id = activity.record_id and revisions.revision_id = activity.revision_id
+		left join public.record_action_events as action_events
+		  on activity.event_kind in ('action_created', 'action_updated', 'action_completed', 'action_cancelled', 'action_reopened')
+		 and action_events.record_id = activity.record_id and action_events.action_event_id = activity.source_event_id
+		left join public.record_comment_revisions as comment_revisions
+		  on activity.event_kind in ('comment_created', 'comment_edited')
+		 and comment_revisions.record_id = activity.record_id and comment_revisions.comment_revision_id = activity.source_event_id
+		left join public.record_comment_tombstones as tombstones
+		  on activity.event_kind = 'comment_redacted'
+		 and tombstones.record_id = activity.record_id and tombstones.tombstone_id = activity.source_event_id
+		order by activity.event_at, activity.activity_id`, binding.ProjectID(), binding.RecordID(), collaborationActivityFactKinds(), recordcollaboration.MaxCollaborationActivityFacts+1)
 	if err != nil {
 		return nil, fmt.Errorf("query collaboration activity facts: %w", err)
 	}
 	facts := make([]recordcollaboration.ActivityFact, 0)
+	proofs := make([]collaborationActivitySourceProof, 0)
 	for rows.Next() {
 		var fact recordcollaboration.ActivityFact
+		var proof collaborationActivitySourceProof
 		var sourceVersion, authorizationEpoch, lockVersion int64
 		if err := rows.Scan(
 			&fact.ActivityID, &fact.RecordID, &fact.RevisionID, &fact.Kind,
 			&fact.SourceEventID, &sourceVersion, &fact.ActorID, &authorizationEpoch,
-			&lockVersion, &fact.EventAt,
+			&lockVersion, &fact.EventAt, &proof.version, &proof.kind, &proof.actor, &proof.occurredAt,
 		); err != nil || sourceVersion <= 0 || authorizationEpoch <= 0 || lockVersion <= 0 {
 			rows.Close()
 			return nil, recordcollaboration.ErrInvalidActivityFact
@@ -62,110 +101,66 @@ func (provider *PostgresRecordCollaborationProvider) ReadCollaborationActivityFa
 		fact.AuthorizationEpoch = uint64(authorizationEpoch)
 		fact.RecordLockVersion = uint64(lockVersion)
 		fact.EventAt = fact.EventAt.UTC()
-		if fact.Validate() != nil {
-			rows.Close()
-			return nil, recordcollaboration.ErrInvalidActivityFact
-		}
 		facts = append(facts, fact)
+		proofs = append(proofs, proof)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
 		return nil, fmt.Errorf("iterate collaboration activity facts: %w", err)
 	}
 	rows.Close()
-	for _, fact := range facts {
-		if err := validatePersistedCollaborationActivityFact(ctx, tx, fact); err != nil {
-			return nil, err
+	if len(facts) > recordcollaboration.MaxCollaborationActivityFacts {
+		return nil, recordcollaboration.ErrInvalidActivityFact
+	}
+	for index, fact := range facts {
+		if fact.Validate() != nil || validatePersistedCollaborationActivityFact(fact, proofs[index]) != nil {
+			return nil, recordcollaboration.ErrInvalidActivityFact
 		}
 	}
 	return facts, nil
 }
 
-func validatePersistedCollaborationActivityFact(ctx context.Context, tx pgx.Tx, fact recordcollaboration.ActivityFact) error {
+type collaborationActivitySourceProof struct {
+	version    *int64
+	kind       string
+	actor      *string
+	occurredAt *time.Time
+}
+
+func validatePersistedCollaborationActivityFact(fact recordcollaboration.ActivityFact, proof collaborationActivitySourceProof) error {
+	if proof.version == nil || proof.actor == nil || proof.occurredAt == nil ||
+		*proof.version != int64(fact.SourceVersion) || *proof.actor != fact.ActorID || !proof.occurredAt.Equal(fact.EventAt) {
+		return recordcollaboration.ErrInvalidActivityFact
+	}
 	switch fact.Kind {
 	case recordcollaboration.ActivityFactRecordOwnerChanged,
 		recordcollaboration.ActivityFactRecordParticipantChanged,
 		recordcollaboration.ActivityFactRecordFollowUpChanged:
-		var version int64
-		var actor string
-		var occurredAt time.Time
-		err := tx.QueryRow(ctx, `
-			select revision_no, author_id, created_at
-			from public.record_revisions
-			where record_id = $1 and revision_id = $2`, fact.RecordID, fact.RevisionID,
-		).Scan(&version, &actor, &occurredAt)
-		if err != nil {
-			return invalidCollaborationActivitySource(err)
-		}
-		if version != int64(fact.SourceVersion) || actor != fact.ActorID || !occurredAt.Equal(fact.EventAt) ||
-			collaborationRevisionActivityID(fact.RevisionID, recordcollaboration.RevisionActivityKind(fact.Kind)) != fact.ActivityID {
+		if collaborationRevisionActivityID(fact.RevisionID, recordcollaboration.RevisionActivityKind(fact.Kind)) != fact.ActivityID {
 			return recordcollaboration.ErrInvalidActivityFact
 		}
 	case recordcollaboration.ActivityFactActionCreated, recordcollaboration.ActivityFactActionUpdated,
 		recordcollaboration.ActivityFactActionCompleted, recordcollaboration.ActivityFactActionCancelled,
 		recordcollaboration.ActivityFactActionReopened:
-		var version int64
-		var kind, actor string
-		var occurredAt time.Time
-		err := tx.QueryRow(ctx, `
-			select action_version, event_kind, actor_id, occurred_at
-			from public.record_action_events
-			where record_id = $1 and action_event_id = $2`, fact.RecordID, fact.SourceEventID,
-		).Scan(&version, &kind, &actor, &occurredAt)
-		if err != nil {
-			return invalidCollaborationActivitySource(err)
-		}
-		if version != int64(fact.SourceVersion) || actor != fact.ActorID || !occurredAt.Equal(fact.EventAt) ||
-			recordActionActivityID(fact.SourceEventID) != fact.ActivityID || actionActivityFactKind(kind) != fact.Kind {
+		if recordActionActivityID(fact.SourceEventID) != fact.ActivityID || actionActivityFactKind(proof.kind) != fact.Kind {
 			return recordcollaboration.ErrInvalidActivityFact
 		}
 	case recordcollaboration.ActivityFactCommentCreated, recordcollaboration.ActivityFactCommentEdited:
-		var version int64
-		var actor string
-		var occurredAt time.Time
-		err := tx.QueryRow(ctx, `
-			select comment_version, edited_by, created_at
-			from public.record_comment_revisions
-			where record_id = $1 and comment_revision_id = $2`, fact.RecordID, fact.SourceEventID,
-		).Scan(&version, &actor, &occurredAt)
-		if err != nil {
-			return invalidCollaborationActivitySource(err)
-		}
 		kind := recordcollaboration.ActivityFactCommentEdited
-		if version == 1 {
+		if *proof.version == 1 {
 			kind = recordcollaboration.ActivityFactCommentCreated
 		}
-		if version != int64(fact.SourceVersion) || actor != fact.ActorID || !occurredAt.Equal(fact.EventAt) ||
-			recordCommentActivityID(fact.SourceEventID) != fact.ActivityID || kind != fact.Kind {
+		if recordCommentActivityID(fact.SourceEventID) != fact.ActivityID || kind != fact.Kind {
 			return recordcollaboration.ErrInvalidActivityFact
 		}
 	case recordcollaboration.ActivityFactCommentRedacted:
-		var version int64
-		var actor string
-		var occurredAt time.Time
-		err := tx.QueryRow(ctx, `
-			select tombstone_version, deleted_by, deleted_at
-			from public.record_comment_tombstones
-			where record_id = $1 and tombstone_id = $2`, fact.RecordID, fact.SourceEventID,
-		).Scan(&version, &actor, &occurredAt)
-		if err != nil {
-			return invalidCollaborationActivitySource(err)
-		}
-		if version != int64(fact.SourceVersion) || actor != fact.ActorID || !occurredAt.Equal(fact.EventAt) ||
-			recordCommentActivityID(fact.SourceEventID) != fact.ActivityID {
+		if recordCommentActivityID(fact.SourceEventID) != fact.ActivityID {
 			return recordcollaboration.ErrInvalidActivityFact
 		}
 	default:
 		return recordcollaboration.ErrInvalidActivityFact
 	}
 	return nil
-}
-
-func invalidCollaborationActivitySource(err error) error {
-	if errors.Is(err, pgx.ErrNoRows) {
-		return recordcollaboration.ErrInvalidActivityFact
-	}
-	return fmt.Errorf("read collaboration activity source: %w", err)
 }
 
 func actionActivityFactKind(kind string) recordcollaboration.ActivityFactKind {

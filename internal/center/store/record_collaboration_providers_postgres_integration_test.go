@@ -78,12 +78,16 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 	if err != nil {
 		t.Fatalf("NewActivityProvider() error = %v", err)
 	}
-	facts, err := activityProvider.ListFacts(ctx, tx, binding)
+	countedActivityTx := &collaborationProviderCountingTx{Tx: tx}
+	facts, err := activityProvider.ListFacts(ctx, countedActivityTx, binding)
 	if err != nil {
 		t.Fatalf("ListFacts() error = %v", err)
 	}
 	if len(facts) < 3 {
 		t.Fatalf("ListFacts() = %#v, want revision/action/comment facts", facts)
+	}
+	if countedActivityTx.queryCalls != 1 || countedActivityTx.queryRowCalls != 5 {
+		t.Fatalf("ListFacts() SQL calls query/query-row = %d/%d, want fixed 1/5", countedActivityTx.queryCalls, countedActivityTx.queryRowCalls)
 	}
 	for _, fact := range facts {
 		if fact.RecordID != parent.RecordID || fact.Validate() != nil {
@@ -228,6 +232,63 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 	if _, err := activityProvider.ListFacts(ctx, tx, binding); !errors.Is(err, recordcollaboration.ErrInvalidActivityFact) {
 		t.Fatalf("ListFacts(forged source) error = %v, want ErrInvalidActivityFact", err)
 	}
+}
+
+func TestPostgresIntegrationCollaborationActivityRejectsOverCapWithFixedSQLCalls(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	parent := seedPostgresActionParent(t, ctx, fixture, "rec_provideractivitycap", "provider-activity-cap-parent")
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-collaboration-activity-cap", 2)
+	tx, err := runtimePool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		insert into public.record_domain_activities (
+		  activity_id, project_id, record_id, revision_id, event_kind, source_event_id,
+		  source_version, actor_id, authorization_epoch, record_lock_version, event_at
+		)
+		select 'rac_overcap' || lpad(value::text, 5, '0'), 'default', $1, $2,
+		       'action_created', 'raev_overcap' || lpad(value::text, 5, '0'),
+		       1, 'usr_records1', $3, $4, transaction_timestamp() + value * interval '1 microsecond'
+		from generate_series(1, $5::int) as value`,
+		parent.RecordID, parent.RevisionID, int64(parent.AuthorizationEpoch), int64(parent.LockVersion),
+		recordcollaboration.MaxCollaborationActivityFacts+1,
+	); err != nil {
+		t.Fatalf("seed over-cap activity rows: %v", err)
+	}
+	binding, err := recordcollaboration.NewRecordFenceBinding(recordplatform.ProjectIDDefault, parent.RecordID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activityProvider, err := recordcollaboration.NewActivityProvider(NewPostgresRecordCollaborationProvider())
+	if err != nil {
+		t.Fatal(err)
+	}
+	countedTx := &collaborationProviderCountingTx{Tx: tx}
+	if _, err := activityProvider.ListFacts(ctx, countedTx, binding); !errors.Is(err, recordcollaboration.ErrInvalidActivityFact) {
+		t.Fatalf("ListFacts(over cap) error = %v, want ErrInvalidActivityFact", err)
+	}
+	if countedTx.queryCalls != 1 || countedTx.queryRowCalls != 5 {
+		t.Fatalf("ListFacts(over cap) SQL calls query/query-row = %d/%d, want fixed 1/5", countedTx.queryCalls, countedTx.queryRowCalls)
+	}
+}
+
+type collaborationProviderCountingTx struct {
+	pgx.Tx
+	queryCalls    int
+	queryRowCalls int
+}
+
+func (tx *collaborationProviderCountingTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	tx.queryCalls++
+	return tx.Tx.Query(ctx, sql, args...)
+}
+
+func (tx *collaborationProviderCountingTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	tx.queryRowCalls++
+	return tx.Tx.QueryRow(ctx, sql, args...)
 }
 
 func TestPostgresIntegrationCollaborationAuditRestoreRejectsConflictAndStaleEpochWithoutMutation(t *testing.T) {
