@@ -729,6 +729,13 @@ logger.Error("record outbox pass failed")
 
 ---
 
+### Scenario: Evidence production read/reference authorization 与 metadata binding
+
+- `PostgresEvidenceRepository`的ordinary read/export/existing-reference必须先经真实`AdmissionGate`读取opaque record binding并完成current record/source授权，随后才解析registry kind/schema或读取payload bytes；denied actor不能用unknown kind、坏envelope或坏gzip区分资源存在性。
+- existing-reference SQL必须inner join `evidence_payloads`并校验payload encoding、digest、canonical size和compressed size，但query不得选择`compressed_payload`。ordinary read/export仅在授权后读取/解压payload，并把授权前metadata与payload read返回的全部split-column metadata精确比较。
+- JSONB解码后可重建的唯一非持久化状态是`SourceAuthorization`内部canonical-byte cache；所有公开authorization字段、时间、envelope字段和split digest/size必须保持canonical exact，不能靠normalize修复corruption。
+- 真实PostgreSQL测试必须从participant写入logical snapshot，再经public read/service/export/existing-reference路径读回；missing payload、unknown schema、permission intersection与corrupt metadata/payload都必须失败关闭，不允许仅插fixture绕过writer。
+
 ### Scenario: Evidence project logical capacity 与 lifecycle maintenance
 
 #### 1. Scope / Trigger

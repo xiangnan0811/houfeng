@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"houfeng/internal/center/recordauth"
 )
 
 func TestCanonicalDeterministicBytesAndHash(t *testing.T) {
@@ -491,6 +493,69 @@ func TestCanonicalRejectsInvalidEnvelopeTimes(t *testing.T) {
 	if _, _, err := NewCanonicalSnapshot(descriptor, envelope, map[string]any{"metric_name": "latency_ms"}, RedactionNormalOnly); !errors.Is(err, ErrInvalidSnapshotEnvelope) {
 		t.Fatalf("NewCanonicalSnapshot(invalid actual window) error = %v, want ErrInvalidSnapshotEnvelope", err)
 	}
+}
+
+func TestRestoreSnapshotEnvelopeMetadataRehydratesOnlyAuthorizationCanonicalCache(t *testing.T) {
+	descriptor := testDescriptor(t, MonitoringProbeV2Key())
+	visibility, err := recordauth.NormalizeVisibilityScope(recordauth.VisibilityScope{
+		Version: recordauth.VisibilityScopeVersionV1, Kind: recordauth.VisibilityKindRestricted,
+		ProjectID:       recordauth.ProjectIDDefault,
+		AllowedRoles:    []recordauth.Role{recordauth.RoleProjectAdmin, recordauth.RoleViewer},
+		AllowedGroupIDs: []string{"rag_bbbbbbbbbbbbbbbb", "rag_aaaaaaaaaaaaaaaa"},
+		PolicyVersion:   recordauth.PolicyVersionV1, PolicyRevision: 1,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeVisibilityScope() error = %v", err)
+	}
+	authorization, err := recordauth.NormalizeSourceAuthorization(recordauth.SourceAuthorization{
+		Version: recordauth.SourceAuthorizationVersionV1, Kind: recordauth.SourceKindTarget,
+		SourceID: "tg_0123456789abcdef", State: recordauth.SourceStateLive,
+		CaptureScope: visibility, CurrentScope: &visibility,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeSourceAuthorization() error = %v", err)
+	}
+	envelope := testEnvelope(t, descriptor.Key)
+	envelope.Authorization = authorization
+	snapshot, _, err := NewCanonicalSnapshot(
+		descriptor, envelope, map[string]any{"metric_name": "latency_ms"}, RedactionNormalOnly,
+	)
+	if err != nil {
+		t.Fatalf("NewCanonicalSnapshot() error = %v", err)
+	}
+
+	persisted := snapshot.Envelope()
+	encodedAuthorization, err := json.Marshal(persisted.Authorization)
+	if err != nil {
+		t.Fatalf("json.Marshal(authorization) error = %v", err)
+	}
+	if err := json.Unmarshal(encodedAuthorization, &persisted.Authorization); err != nil {
+		t.Fatalf("json.Unmarshal(authorization) error = %v", err)
+	}
+	restored, err := RestoreSnapshotEnvelopeMetadata(descriptor, persisted)
+	if err != nil {
+		t.Fatalf("RestoreSnapshotEnvelopeMetadata(JSON round trip) error = %v", err)
+	}
+	if !reflect.DeepEqual(restored, snapshot.Envelope()) {
+		t.Fatalf("RestoreSnapshotEnvelopeMetadata() = %#v, want canonical envelope", restored)
+	}
+
+	t.Run("offset time", func(t *testing.T) {
+		nonCanonical := persisted
+		nonCanonical.ObservedAt = nonCanonical.ObservedAt.In(time.FixedZone("offset", 5*60*60+30*60))
+		if _, err := RestoreSnapshotEnvelopeMetadata(descriptor, nonCanonical); !errors.Is(err, ErrInvalidSnapshotEnvelope) {
+			t.Fatalf("RestoreSnapshotEnvelopeMetadata(offset) error = %v, want ErrInvalidSnapshotEnvelope", err)
+		}
+	})
+
+	t.Run("non canonical authorization order", func(t *testing.T) {
+		nonCanonical := persisted
+		nonCanonical.Authorization.CaptureScope.AllowedRoles[0], nonCanonical.Authorization.CaptureScope.AllowedRoles[1] =
+			nonCanonical.Authorization.CaptureScope.AllowedRoles[1], nonCanonical.Authorization.CaptureScope.AllowedRoles[0]
+		if _, err := RestoreSnapshotEnvelopeMetadata(descriptor, nonCanonical); !errors.Is(err, ErrInvalidSnapshotEnvelope) {
+			t.Fatalf("RestoreSnapshotEnvelopeMetadata(authorization order) error = %v, want ErrInvalidSnapshotEnvelope", err)
+		}
+	})
 }
 
 func TestCanonicalRejectsContentFreeCapture(t *testing.T) {

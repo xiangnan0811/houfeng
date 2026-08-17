@@ -109,6 +109,17 @@ Task 7 independent check evidence (2026-08-16): native `trellis-check`不信任�
 
 Task 7 delivery evidence (2026-08-16): Tasks 5–7以六个分层实现/规格commit推送到`codex/vps-records-evidence-platform-task5`并创建ready PR [#406](https://github.com/xiangnan0811/houfeng/pull/406)。首轮GitHub Actions run `31954830084`的`go`、`web`、`web-browser`、`docker-image`及`record-platform-pg16-catalog` PostgreSQL `16.0`/`16.6`/`16.12`七项全部PASS；该证据提交后仍需以同一PR最终head的CI再次确认。production feature继续关闭，真实AdmissionGate/source composition仍由Child 10拥有。
 
+## Child 4 production composition closeout
+
+- [x] RED覆盖closed source resolver、snapshot read/export/existing-reference store、六kind exact registry、nil/typed-nil admission和injected composition。
+- [x] GREEN补齐可注入的source/read/reference/service/preparer/handler/worker组合；不得伪造尚未交付的deployment-membership gate，默认production继续零写失败关闭。
+- [x] 严格真实PostgreSQL端到端、affected race/full Go、必要时Node22 Web判断与独立`trellis-check`通过；不进入Child 9/Child 5。
+- [ ] production composition分支PR/CI/merge全部通过。
+
+Child 4 production composition implementation evidence (2026-08-17): native `trellis-implement`先以focused RED固定四组production边界：`go test ./internal/center/evidence/adapters -run TestRecordEvidenceSourceResolverClosedMatrix -count=1`因closed resolver seam尚不存在而编译失败；store focused matrix因read-source constructors/methods尚不存在而编译失败；composition focused matrix因production composition seam尚不存在而编译失败；随后metadata-only payload-row完整性、capture-authorization split digest、denied actor对unknown/corrupt envelope/payload不可区分等安全回归均先观察到预期失败。GREEN新增closed `RecordEvidenceSourceResolver`、PostgreSQL `SnapshotReadSource`/`AuthorizedSnapshotSource`/`ExistingSnapshotReferenceSource`、metadata-first授权与授权后payload读取、exact六kind registry，以及显式注入的service/preparer/handler/worker/adapters composition；metadata-only路径只证明payload行与encoding/size/digest自洽，不读取或解压payload bytes。default nil/typed-nil `AdmissionGate`仍不构造evidence composition、handler保持稳定503且不注册worker/写入；仅显式非nil gate进入真实组合，production代码未引入`store.AdmissionGateFunc`、deployment-membership替身、generic JSON、quarantine、新kind或migration。严格Docker PostgreSQL `sh scripts/test-record-platform-integration.sh postgres -- go test ./internal/center/store -run '^TestPostgresIntegrationEvidenceProductionReadExportAndReferenceReuse$' -count=1`实际PASS且无`SKIP`，覆盖capture/participant commit/read/kind-only export/existing-reference reuse、permission intersection、unknown schema、corrupt envelope与missing payload row；最终affected五包race、`make verify-go`、uncached `go test ./... -count=1`、`go vet ./...`、`go mod verify`、changed-Go `gofmt -d`、`git diff --check`和Trellis validation均PASS。未修改Web，因此无需Node22 Web gate；在implement阶段结束时独立`trellis-check`及PR/CI/merge仍待执行，未进入Child 9/Child 5。
+
+Child 4 production composition independent check evidence (2026-08-17): native `trellis-check` RED→GREEN修复两个Important：full read曾在record/source授权前解压payload，opaque-denial RED得到503；现改为metadata→授权→kind/envelope→payload并精确绑定两次metadata。canonical RED证明offset time与非canonical public authorization排序会被静默normalize；现只重建authorization私有cache，其余变化按corruption拒绝。Minor删除无production caller的重复maintenance测试seam；新测试继续证明nil/typed-nil gate零worker/稳定503。严格Docker PostgreSQL focused与13-test source/intent/capacity/participant/deletion/recovery矩阵PASS且无`SKIP`；focused、五包race、`make verify-go`、uncached全Go、vet、mod、gofmt、diff与Trellis validation均PASS。Web无diff，故无需Node22。source-deletion witness与deployment-membership gate仍为外部依赖；PR/CI/merge未执行，delivery项保持未勾选，未进入Child 9/Child 5。
+
 ## Rollback
 
 - 关闭 evidence capability 不删除已捕获快照，不执行 down migration；返回不含 `0054` 的代码版本时重建开发数据库。

@@ -2,6 +2,7 @@
 {"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"Task 7 exact checklist、full gates、spec updates and PR/CI delivery。"}
 {"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-2b-capture-transaction-contract.md","reason":"Reuse existing bounded intent-expiry and 24h orphan-GC primitives; Task 7 only schedules and observes them。"}
 {"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-7-preflight.md","reason":"Current capacity/enforcement/worker seams、no-new-migration boundary、RED and delivery matrix。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/production-composition-preflight.md","reason":"Child 4 final production composition seams, exact RED matrix, and external deployment-membership AdmissionGate stop boundary。"}
 {"file":".trellis/spec/backend/index.md","reason":"Backend implementation routing index。"}
 {"file":".trellis/spec/backend/directory-structure.md","reason":"Evidence domain/store/worker and explicit bootstrap ownership。"}
 {"file":".trellis/spec/backend/database-guidelines.md","reason":"pgx transaction、project-scoped aggregate query、atomic quota and real PostgreSQL requirements。"}

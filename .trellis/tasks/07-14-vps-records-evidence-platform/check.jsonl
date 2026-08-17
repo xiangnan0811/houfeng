@@ -2,6 +2,7 @@
 {"file":".trellis/tasks/07-14-vps-records-evidence-platform/implement.md","reason":"Check all Task 7 checklist items、full gates、spec and delivery evidence。"}
 {"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-2b-capture-transaction-contract.md","reason":"Ensure janitor reuses the exact Task 2B lifecycle primitives and 24h global-reference semantics。"}
 {"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/task-7-preflight.md","reason":"Audit quota concurrency、bounded worker、metrics/alerts、no migration and PR/CI matrix。"}
+{"file":".trellis/tasks/07-14-vps-records-evidence-platform/research/production-composition-preflight.md","reason":"Audit Child 4 production source/read/reference composition and prove the external deployment-membership gate remains fail closed。"}
 {"file":".trellis/spec/backend/index.md","reason":"Backend review routing index。"}
 {"file":".trellis/spec/backend/directory-structure.md","reason":"Review domain/store/bootstrap ownership and dependency direction。"}
 {"file":".trellis/spec/backend/database-guidelines.md","reason":"Review project-scoped logical aggregation、atomic transaction enforcement and strict PG evidence。"}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -72,6 +73,15 @@ type ResolvedSubject struct {
 
 type SubjectAdapterRegistry struct {
 	adapters map[SubjectKind]SubjectSourceAdapter
+}
+
+func (registry SubjectAdapterRegistry) Kinds() []SubjectKind {
+	kinds := make([]SubjectKind, 0, len(registry.adapters))
+	for kind := range registry.adapters {
+		kinds = append(kinds, kind)
+	}
+	sort.Slice(kinds, func(left, right int) bool { return kinds[left] < kinds[right] })
+	return kinds
 }
 
 func NormalizeSubjectReferences(input []SubjectReference) ([]SubjectReference, error) {
