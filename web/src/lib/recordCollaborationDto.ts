@@ -114,7 +114,7 @@ function decodeItems<T>(value: unknown, maximum: number, decode: (item: unknown)
 
 export function decodeRecordAction(value: unknown): RecordAction {
   const item = objectValue(value, [
-    'action_id', 'assignee_id', 'completed_at', 'created_at', 'due_at', 'record_id',
+		'action_id', 'assignee_id', 'completed_at', 'created_at', 'details', 'due_at', 'record_id',
     'status', 'subject_revision_id', 'title', 'updated_at', 'version',
   ])
   const status = enumValue(item.status, ['open', 'completed', 'cancelled'])
@@ -122,16 +122,19 @@ export function decodeRecordAction(value: unknown): RecordAction {
   const updatedAt = timestamp(item.updated_at)
   const completedAt = nullableTimestamp(item.completed_at)
   const title = text(item.title, false)
+	const details = text(item.details)
   if (timestampOrder(updatedAt) < timestampOrder(createdAt) ||
     (status === 'completed') !== (completedAt !== null) ||
     (completedAt !== null && timestampOrder(completedAt) < timestampOrder(createdAt)) ||
-    title.trim() !== title || Array.from(title).length > 512 || hasControlCharacter(title)) invalid()
+		title.trim() !== title || Array.from(title).length > 512 || hasControlCharacter(title) ||
+		Array.from(details).length > 4_096 || hasDisallowedMultilineControl(details)) invalid()
   return {
     action_id: prefixedID(item.action_id, 'ract_'),
     record_id: prefixedID(item.record_id, 'rec_'),
     version: integer(item.version),
     status,
     title,
+		details,
     assignee_id: userID(item.assignee_id, true),
     due_at: nullableTimestamp(item.due_at),
     completed_at: completedAt,
@@ -191,7 +194,7 @@ export function decodeRecordComment(value: unknown): RecordComment {
 
 export function decodeRecordCommentList(value: unknown): RecordCommentListResponse {
   const response = objectValue(value, ['comments'])
-  return { comments: decodeItems(response.comments, 100, decodeRecordComment) }
+	return { comments: decodeItems(response.comments, 200, decodeRecordComment) }
 }
 
 export function decodeRecordCommentMutation(value: unknown): RecordCommentMutation {
@@ -297,4 +300,11 @@ function hasControlCharacter(value: string): boolean {
     const code = character.codePointAt(0) ?? 0
     return code < 0x20 || code === 0x7f
   })
+}
+
+function hasDisallowedMultilineControl(value: string): boolean {
+	return Array.from(value).some((character) => {
+		const code = character.codePointAt(0) ?? 0
+		return (code < 0x20 && character !== '\n' && character !== '\t') || code === 0x7f
+	})
 }

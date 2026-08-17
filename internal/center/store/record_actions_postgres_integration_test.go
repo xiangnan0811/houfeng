@@ -86,7 +86,8 @@ func TestPostgresIntegrationRecordActionsLifecycleReplayAndRootIsolation(t *test
 		t.Fatalf("ListActions() error = %v", err)
 	}
 	if len(actions) != 1 || actions[0].ActionID != "ract_pgflow" || actions[0].Version != 5 ||
-		actions[0].Title != "Verify private resolution" || actions[0].Status != recordcollaboration.ActionStatusCancelled ||
+		actions[0].Title != "Verify private resolution" || actions[0].Details != "private verification details" ||
+		actions[0].Status != recordcollaboration.ActionStatusCancelled ||
 		actions[0].AssigneeID != "usr_bbbbbbbbbbbbbbbbbbbbbbbb" || actions[0].SubjectRevisionID != parent.RevisionID ||
 		actions[0].DueAt == nil || !actions[0].DueAt.Equal(dueAt) || actions[0].CompletedAt != nil {
 		t.Fatalf("ListActions() = %#v, want bounded current state", actions)

@@ -24,15 +24,16 @@ var (
 	ErrInvalidActionFields = errors.New("invalid record action fields")
 )
 
-// ActionRecord is the bounded current-state read model used by the Web
-// collaboration surface. It deliberately omits action details and immutable
-// event history; downstream activity consumers use typed activity facts.
+// ActionRecord is the bounded current-state read model used by the authorized
+// Web collaboration surface. It omits immutable event history; downstream
+// activity consumers use typed activity facts.
 type ActionRecord struct {
 	ActionID          string
 	RecordID          string
 	Version           uint64
 	Status            ActionStatus
 	Title             string
+	Details           string
 	AssigneeID        string
 	DueAt             *time.Time
 	CompletedAt       *time.Time
@@ -45,6 +46,7 @@ func (record ActionRecord) Validate() error {
 	if ValidateActionID(record.ActionID) != nil || !validRecordID(record.RecordID) ||
 		record.Version == 0 || record.Version > MaxActionVersion || !validActionStatus(record.Status) ||
 		!validActionText(record.Title, MaxActionTitleRunes, false) ||
+		!validActionText(record.Details, MaxActionDetailsRunes, true) ||
 		(record.AssigneeID != "" && recordauth.ValidateActorUserID(record.AssigneeID) != nil) ||
 		(record.SubjectRevisionID != "" && !validCollaborationRevisionIdentity(record.SubjectRevisionID)) ||
 		record.CreatedAt.IsZero() || record.UpdatedAt.Before(record.CreatedAt) ||

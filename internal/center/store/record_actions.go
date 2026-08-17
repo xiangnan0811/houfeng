@@ -222,7 +222,7 @@ func (repository *PostgresRecordActionRepository) ListActions(ctx context.Contex
 
 func listRecordActions(ctx context.Context, tx pgx.Tx, recordID string, binding recordcollaboration.RecordFenceBinding, limit uint64) ([]recordcollaboration.ActionRecord, error) {
 	rows, err := tx.Query(ctx, `
-		select action_id, record_id, action_version, status, title, assignee_id,
+		select action_id, record_id, action_version, status, title, details, assignee_id,
 		       due_at, completed_at, subject_revision_id, created_at, updated_at
 		from public.record_actions
 		where record_id = $1 and record_fence_epoch = $2
@@ -238,7 +238,7 @@ func listRecordActions(ctx context.Context, tx pgx.Tx, recordID string, binding 
 		var version int64
 		var status string
 		var assigneeID, subjectRevisionID *string
-		if err := rows.Scan(&action.ActionID, &action.RecordID, &version, &status, &action.Title,
+		if err := rows.Scan(&action.ActionID, &action.RecordID, &version, &status, &action.Title, &action.Details,
 			&assigneeID, &action.DueAt, &action.CompletedAt, &subjectRevisionID, &action.CreatedAt, &action.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan record action: %w", err)
 		}

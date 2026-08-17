@@ -50,6 +50,7 @@ type recordActionReadResponse struct {
 	Version           uint64                           `json:"version"`
 	Status            recordcollaboration.ActionStatus `json:"status"`
 	Title             string                           `json:"title"`
+	Details           string                           `json:"details"`
 	AssigneeID        string                           `json:"assignee_id"`
 	DueAt             *time.Time                       `json:"due_at"`
 	CompletedAt       *time.Time                       `json:"completed_at"`
@@ -246,7 +247,7 @@ func writeRecordActionList(w http.ResponseWriter, recordID string, actions []rec
 		}
 		response[index] = recordActionReadResponse{
 			ActionID: action.ActionID, RecordID: action.RecordID, Version: action.Version,
-			Status: action.Status, Title: action.Title, AssigneeID: action.AssigneeID,
+			Status: action.Status, Title: action.Title, Details: action.Details, AssigneeID: action.AssigneeID,
 			DueAt: action.DueAt, CompletedAt: action.CompletedAt, SubjectRevisionID: action.SubjectRevisionID,
 			CreatedAt: action.CreatedAt.UTC(), UpdatedAt: action.UpdatedAt.UTC(),
 		}

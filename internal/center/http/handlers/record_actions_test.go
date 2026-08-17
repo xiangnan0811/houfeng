@@ -72,7 +72,7 @@ func TestRecordActionsHandlerListsCurrentActions(t *testing.T) {
 	updatedAt := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
 	application := &recordActionHandlerStub{listResult: []recordcollaboration.ActionRecord{{
 		ActionID: "ract_action1", RecordID: "rec_actionparent1", Version: 2,
-		Status: recordcollaboration.ActionStatusOpen, Title: "复核证据窗口",
+		Status: recordcollaboration.ActionStatusOpen, Title: "复核证据窗口", Details: "仅授权协作者可见的排查步骤",
 		AssigneeID: "usr_0123456789abcdef01234567", DueAt: &dueAt,
 		SubjectRevisionID: "rrv_actionrevision1", CreatedAt: createdAt, UpdatedAt: updatedAt,
 	}}}
@@ -98,12 +98,12 @@ func TestRecordActionsHandlerListsCurrentActions(t *testing.T) {
 	if len(body.Items) != 1 {
 		t.Fatalf("items = %#v, want one", body.Items)
 	}
-	wantKeys := []string{"action_id", "assignee_id", "completed_at", "created_at", "due_at", "record_id", "status", "subject_revision_id", "title", "updated_at", "version"}
+	wantKeys := []string{"action_id", "assignee_id", "completed_at", "created_at", "details", "due_at", "record_id", "status", "subject_revision_id", "title", "updated_at", "version"}
 	gotKeys := make([]string, 0, len(body.Items[0]))
 	for key := range body.Items[0] {
 		gotKeys = append(gotKeys, key)
 	}
-	if !sameSortedStrings(gotKeys, wantKeys) || bytes.Contains(recorder.Body.Bytes(), []byte("details")) {
+	if !sameSortedStrings(gotKeys, wantKeys) || body.Items[0]["details"] != "仅授权协作者可见的排查步骤" {
 		t.Fatalf("action list allowlist keys = %#v, want %#v; body=%s", gotKeys, wantKeys, recorder.Body.String())
 	}
 }

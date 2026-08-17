@@ -77,6 +77,23 @@ func TestRecordInboxHandlerRejectsNonCanonicalListQueryBeforeApplication(t *test
 	}
 }
 
+func TestRecordInboxHandlerRejectsUnreadCountQueryBeforeApplication(t *testing.T) {
+	actor := testRecordActionActor(t)
+	for _, rawQuery := range []string{"private=1", "limit=1", "limit=%zz"} {
+		t.Run(rawQuery, func(t *testing.T) {
+			application := &recordInboxHandlerStub{}
+			request := httptest.NewRequest(http.MethodGet, "/api/record-notifications/unread-count?"+rawQuery, nil)
+			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+			recorder := httptest.NewRecorder()
+			RecordInbox(application).ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusBadRequest || application.countCalls != 0 {
+				t.Fatalf("query %q status/count calls = %d/%d, want 400/0; body=%s", rawQuery, recorder.Code, application.countCalls, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestRecordInboxHandlerUsesOpaqueNotFoundForItemAndTarget(t *testing.T) {
 	actor := testRecordActionActor(t)
 	for _, suffix := range []string{"", "/target", "/read"} {
@@ -160,6 +177,7 @@ type recordInboxHandlerStub struct {
 	item        recordcollaboration.InboxItem
 	target      recordcollaboration.InboxDeepLinkTarget
 	count       int
+	countCalls  int
 	err         error
 	listCalls   int
 	transitions []recordcollaboration.InboxTransitionRequest
@@ -180,6 +198,7 @@ func (stub *recordInboxHandlerStub) TransitionInbox(_ context.Context, request r
 	return stub.item, stub.err
 }
 func (stub *recordInboxHandlerStub) CountUnreadInbox(context.Context, recordcollaboration.InboxListRequest) (int, error) {
+	stub.countCalls++
 	return stub.count, stub.err
 }
 

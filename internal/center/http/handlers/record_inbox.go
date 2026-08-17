@@ -75,6 +75,10 @@ func RecordInbox(application recordInboxApplication) http.Handler {
 				return
 			}
 			if action == "unread-count" {
+				if request.URL.RawQuery != "" {
+					writeRecordError(w, http.StatusBadRequest, "invalid_request", "invalid unread count request", nil)
+					return
+				}
 				count, err := application.CountUnreadInbox(request.Context(), recordcollaboration.InboxListRequest{Actor: actor, Limit: 100})
 				if err != nil {
 					writeRecordInboxError(w, err)

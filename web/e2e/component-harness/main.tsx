@@ -20,6 +20,7 @@ const members = [
 
 const baseAction: RecordAction = {
   action_id: 'ract_browser1', record_id: 'rec_browser1', version: 2, status: 'open', title: '复核异常证据',
+	details: '在授权协作面板中保留的排查步骤。',
   assignee_id: members[1]!.id, due_at: '2026-08-20T09:00:00Z', completed_at: null,
   subject_revision_id: 'rrv_browser1', created_at: '2026-08-17T09:00:00Z', updated_at: '2026-08-17T10:00:00Z',
 }

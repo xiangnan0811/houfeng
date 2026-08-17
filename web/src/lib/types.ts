@@ -2943,6 +2943,7 @@ export type RecordAction = {
   version: number
   status: RecordActionStatus
   title: string
+	details: string
   assignee_id: string
   due_at: string | null
   completed_at: string | null

@@ -9,7 +9,7 @@ import { Button, Input, Select } from './atoms'
 
 export type RecordActionCreateValues = {
   title: string
-  details: ''
+	details: string
   assignee_id: string
   due_at: string | null
   subject_revision_id: string
@@ -17,6 +17,7 @@ export type RecordActionCreateValues = {
 
 export type RecordActionUpdateValues = {
   title: string
+	details: string
   assignee_id: string
   due_at: string | null
   subject_revision_id: string
@@ -34,16 +35,22 @@ type RecordActionPanelProps = {
 }
 
 export function RecordActionPanel({ state, actions, members, busy, onCreate, onUpdate, onTransition }: RecordActionPanelProps) {
+	if (state === 'loading' || state === 'error' || state === 'revoked' || state === 'deleted') {
+		return <RecordCollaborationState state={state} loadingTitle="正在读取行动项" emptyTitle="暂无行动项" errorTitle="行动项暂不可用" />
+	}
+	const freshStateKey = `${state}:${actions.map((action) => `${action.action_id}:${action.version}:${action.status}`).join(',')}`
+	return <ReadyRecordActionPanel key={freshStateKey} state={state} actions={actions} members={members} busy={busy}
+		onCreate={onCreate} onUpdate={onUpdate} onTransition={onTransition} />
+}
+
+function ReadyRecordActionPanel({ state, actions, members, busy, onCreate, onUpdate, onTransition }: RecordActionPanelProps) {
   const [title, setTitle] = useState('')
+	const [details, setDetails] = useState('')
   const [assigneeId, setAssigneeId] = useState('')
   const [dueAt, setDueAt] = useState('')
   const [subjectRevisionId, setSubjectRevisionId] = useState('')
   const [editingActionId, setEditingActionId] = useState('')
   const editingAction = actions.find((action) => action.action_id === editingActionId) ?? null
-
-  if (state === 'loading' || state === 'error' || state === 'revoked' || state === 'deleted') {
-    return <RecordCollaborationState state={state} loadingTitle="正在读取行动项" emptyTitle="暂无行动项" errorTitle="行动项暂不可用" />
-  }
 
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -51,6 +58,7 @@ export function RecordActionPanel({ state, actions, members, busy, onCreate, onU
     if (!normalizedTitle || busy) return
     const values = {
       title: normalizedTitle,
+			details,
       assignee_id: assigneeId,
       due_at: dueAt ? new Date(dueAt).toISOString() : null,
       subject_revision_id: subjectRevisionId,
@@ -61,13 +69,13 @@ export function RecordActionPanel({ state, actions, members, busy, onCreate, onU
     }
     onCreate({
       ...values,
-      details: '',
     })
   }
 
   function beginEdit(action: RecordAction) {
     setEditingActionId(action.action_id)
     setTitle(action.title)
+		setDetails(action.details)
     setAssigneeId(action.assignee_id)
     setDueAt(toDateTimeLocal(action.due_at))
     setSubjectRevisionId(action.subject_revision_id)
@@ -76,6 +84,7 @@ export function RecordActionPanel({ state, actions, members, busy, onCreate, onU
   function resetComposer() {
     setEditingActionId('')
     setTitle('')
+		setDetails('')
     setAssigneeId('')
     setDueAt('')
     setSubjectRevisionId('')
@@ -118,6 +127,9 @@ export function RecordActionPanel({ state, actions, members, busy, onCreate, onU
       <form className="record-collaboration-composer record-action-composer vps-create-form__row" onSubmit={submit}>
         <Input label="行动标题" value={title} maxLength={512} required disabled={busy}
           onChange={(event) => setTitle(event.target.value)} />
+		<label className="input-field__label" htmlFor="record-action-details">行动详情</label>
+		<textarea id="record-action-details" className="input" rows={3} value={details} maxLength={4_096} disabled={busy}
+			onChange={(event) => setDetails(event.target.value)} />
         <Select label="指派给" value={assigneeId} disabled={busy} onChange={(event) => setAssigneeId(event.target.value)}>
           <option value="">暂不指派</option>
           {members.map((member) => <option key={member.id} value={member.id}>{member.label}</option>)}

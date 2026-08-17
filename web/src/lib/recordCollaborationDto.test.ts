@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   decodeRecordAction,
   decodeRecordComment,
+  decodeRecordCommentList,
   decodeRecordNotification,
   decodeRecordNotificationTarget,
   decodeRecordWatch,
@@ -14,6 +15,7 @@ const timestamp = '2026-08-17T06:00:00Z'
 
 const action = {
   action_id: 'ract_action1', record_id: 'rec_record1', version: 1, status: 'open', title: '排查告警',
+	 details: '先核对源端，再执行恢复。',
   assignee_id: userID, due_at: null, completed_at: null, subject_revision_id: 'rrv_revision1',
   created_at: timestamp, updated_at: timestamp,
 }
@@ -72,6 +74,14 @@ describe('record collaboration DTO decoders', () => {
     expect(() => decodeRecordComment({ ...comment, mention_user_ids: [userID, userID] })).toThrow()
     expect(() => decodeRecordComment({ ...comment, state: 'redacted', redacted_at: timestamp })).toThrow()
   })
+
+	it.each([100, 101, 200])('accepts the backend comment list boundary %i', (count) => {
+		expect(decodeRecordCommentList({ comments: Array.from({ length: count }, () => comment) }).comments).toHaveLength(count)
+	})
+
+	it('rejects comment lists above the backend limit', () => {
+		expect(() => decodeRecordCommentList({ comments: Array.from({ length: 201 }, () => comment) })).toThrow()
+	})
 
   it('enforces notification event, subject, reason, mandatory, and timeline relationships', () => {
     expect(() => decodeRecordNotification({ ...notification, subject_kind: 'action', subject_id: 'ract_action1' })).toThrow()
