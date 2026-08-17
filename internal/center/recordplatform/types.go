@@ -72,6 +72,7 @@ const (
 	OperationKindRecordCommentCreate   OperationKind = "record_comment_create"
 	OperationKindRecordCommentEdit     OperationKind = "record_comment_edit"
 	OperationKindRecordCommentRedact   OperationKind = "record_comment_redact"
+	OperationKindRecordWatchPreference OperationKind = "record_watch_preference"
 )
 
 // RequestFingerprintVersion identifies the binary request-identity codec.
@@ -469,7 +470,8 @@ func ValidateOperationKind(operationKind OperationKind) error {
 		OperationKindRecordActionReopen,
 		OperationKindRecordCommentCreate,
 		OperationKindRecordCommentEdit,
-		OperationKindRecordCommentRedact:
+		OperationKindRecordCommentRedact,
+		OperationKindRecordWatchPreference:
 		return nil
 	default:
 		return fmt.Errorf("%w: operation kind", ErrInvalidRecordPlatformInput)

@@ -74,7 +74,7 @@ func TestPostgresIntegrationRecordCommentRedactionActivityFailureRollsBackAllCon
 	}
 	if state != string(recordcollaboration.CommentStateActive) || version != 1 || body != create.Content.Source() ||
 		contractVersion != recordcollaboration.CommentRenderContractVersionV1 || renderModel == "" || len(bodyDigest) != 32 ||
-		redactedAt != nil || revisionCount != 1 || activeRevisionCount != 1 || tombstoneCount != 0 || outboxCount != 1 || idempotencyCount != 0 {
+		redactedAt != nil || revisionCount != 1 || activeRevisionCount != 1 || tombstoneCount != 0 || outboxCount != 2 || idempotencyCount != 0 {
 		t.Fatalf("redaction rollback state=%q/%d/%q/%q model=%q digest=%x redacted=%v revisions=%d/%d tombstone/outbox/key=%d/%d/%d",
 			state, version, body, contractVersion, renderModel, bodyDigest, redactedAt,
 			revisionCount, activeRevisionCount, tombstoneCount, outboxCount, idempotencyCount)
@@ -611,7 +611,7 @@ func TestPostgresIntegrationRecordCommentsLifecycleReplayAndOneWayRedaction(t *t
 	}
 	if state != string(recordcollaboration.CommentStateRedacted) || version != 3 || body != nil || contractVersion != nil ||
 		renderModel != nil || bodyDigest != nil || replyTo != createParent.CommentID || revisionCount != 2 ||
-		clearedRevisionCount != 2 || tombstoneCount != 1 || activityCount != 4 || outboxCount != 4 || idempotencyCount != 4 {
+		clearedRevisionCount != 2 || tombstoneCount != 1 || activityCount != 4 || outboxCount != 7 || idempotencyCount != 4 {
 		t.Fatalf("redacted durable state=%q/%d/%v/%v/%v/%x reply=%q revisions=%d/%d tombstones=%d activity/outbox/keys=%d/%d/%d",
 			state, version, body, contractVersion, renderModel, bodyDigest, replyTo, revisionCount, clearedRevisionCount,
 			tombstoneCount, activityCount, outboxCount, idempotencyCount)

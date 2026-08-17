@@ -83,11 +83,14 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 		var currentStatus recordcollaboration.ActionStatus
 		var version uint64
 		var subjectRevisionID string
+		var previousAssigneeID string
+		var currentAssigneeID string
 		switch command.Kind {
 		case recordcollaboration.ActionMutationCreate:
 			version = 1
 			currentStatus = recordcollaboration.ActionStatusOpen
 			subjectRevisionID = command.Fields.SubjectRevisionID()
+			currentAssigneeID = command.Fields.AssigneeID()
 			if err := insertRecordAction(ctx, transaction.tx, command, binding); err != nil {
 				return err
 			}
@@ -100,12 +103,15 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 				return recordcollaboration.ErrActionConflict
 			}
 			status := persisted.status
+			previousAssigneeID = persisted.assigneeID
+			currentAssigneeID = persisted.assigneeID
 			previousStatus = &status
 			version = persisted.version + 1
 			currentStatus = persisted.status
 			subjectRevisionID = persisted.subjectRevisionID
 			if command.Kind == recordcollaboration.ActionMutationUpdate {
 				subjectRevisionID = command.Fields.SubjectRevisionID()
+				currentAssigneeID = command.Fields.AssigneeID()
 			} else {
 				currentStatus = targetActionStatus(command.Kind)
 				if err := recordcollaboration.ValidateActionMutationTransition(command.Kind, persisted.status, currentStatus); err != nil {
@@ -118,7 +124,7 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 		}
 
 		eventID := recordActionEventID(command.ActionID, version, command.Kind)
-		occurredAt, err := insertRecordActionEvent(ctx, transaction.tx, command, binding, eventID, version, previousStatus, currentStatus)
+		occurredAt, err := insertRecordActionEvent(ctx, transaction.tx, command, binding, eventID, version, previousStatus, currentStatus, currentAssigneeID)
 		if err != nil {
 			return err
 		}
@@ -129,15 +135,31 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 		if err := insertRecordActionActivity(ctx, transaction.tx, command, eventID, version, subjectRevisionID, activityKind, occurredAt); err != nil {
 			return err
 		}
-		if _, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
-			Event: recordplatform.OutboxEvent{
-				ProjectID: string(recordplatform.ProjectIDDefault), EventKind: recordActionOutboxKind(command.Kind),
-				SubjectKind: recordplatform.OutboxSubjectKindAction, SubjectID: command.ActionID,
-				AuthorizationEpoch: command.AuthorizationEpoch,
-			},
-			ExpiresAfter: command.OutboxTTL,
-		}); err != nil {
+		automaticSources := []collaborationAutomaticFollowerSources{{userID: command.Actor.UserID, action: true}}
+		if currentAssigneeID != "" {
+			automaticSources = append(automaticSources, collaborationAutomaticFollowerSources{userID: currentAssigneeID, action: true})
+		}
+		if err := upsertCollaborationAutomaticFollowerSources(ctx, transaction.tx, binding, automaticSources); err != nil {
 			return err
+		}
+		for _, outboxKind := range recordActionNotificationOutboxKinds(command.Kind, previousAssigneeID, currentAssigneeID) {
+			sourceVersion := uint64(0)
+			if outboxKind == recordplatform.OutboxEventKindRecordActionAssigned ||
+				outboxKind == recordplatform.OutboxEventKindRecordActionCompleted ||
+				outboxKind == recordplatform.OutboxEventKindRecordActionCancelled {
+				sourceVersion = version
+			}
+			if _, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
+				Event: recordplatform.OutboxEvent{
+					ProjectID: string(recordplatform.ProjectIDDefault), EventKind: outboxKind,
+					SubjectKind: recordplatform.OutboxSubjectKindAction, SubjectID: command.ActionID,
+					SourceVersion:      sourceVersion,
+					AuthorizationEpoch: command.AuthorizationEpoch,
+				},
+				ExpiresAfter: command.OutboxTTL,
+			}); err != nil {
+				return err
+			}
 		}
 		if err := transaction.CompleteIdempotency(ctx, command.Idempotency.Key, *claim.Owner, command.ResultFingerprint); err != nil {
 			return err
@@ -315,21 +337,25 @@ func updateRecordAction(ctx context.Context, tx pgx.Tx, command recordcollaborat
 	return nil
 }
 
-func insertRecordActionEvent(ctx context.Context, tx pgx.Tx, command recordcollaboration.ActionCommand, binding recordcollaboration.RecordFenceBinding, eventID string, version uint64, previous *recordcollaboration.ActionStatus, current recordcollaboration.ActionStatus) (time.Time, error) {
+func insertRecordActionEvent(ctx context.Context, tx pgx.Tx, command recordcollaboration.ActionCommand, binding recordcollaboration.RecordFenceBinding, eventID string, version uint64, previous *recordcollaboration.ActionStatus, current recordcollaboration.ActionStatus, assigneeID string) (time.Time, error) {
 	var previousValue any
 	if previous != nil {
 		previousValue = string(*previous)
+	}
+	var assigneeValue any
+	if assigneeID != "" {
+		assigneeValue = assigneeID
 	}
 	var occurredAt time.Time
 	err := tx.QueryRow(ctx, `
 		insert into public.record_action_events (
 			action_event_id, project_id, record_id, action_id, action_version,
-			event_kind, previous_status, current_status, actor_id,
+			event_kind, previous_status, current_status, actor_id, assignee_id,
 			record_fence_epoch, occurred_at
-		) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, transaction_timestamp())
+		) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, transaction_timestamp())
 		returning occurred_at`, eventID, recordplatform.ProjectIDDefault, command.RecordID,
 		command.ActionID, int64(version), string(command.Kind), previousValue, string(current),
-		command.Actor.UserID, int64(binding.Epoch())).Scan(&occurredAt)
+		command.Actor.UserID, assigneeValue, int64(binding.Epoch())).Scan(&occurredAt)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("insert record action event: %w", err)
 	}
@@ -417,6 +443,19 @@ func recordActionOutboxKind(kind recordcollaboration.ActionMutationKind) string 
 	default:
 		return ""
 	}
+}
+
+func recordActionNotificationOutboxKinds(kind recordcollaboration.ActionMutationKind, previousAssigneeID, currentAssigneeID string) []string {
+	base := recordActionOutboxKind(kind)
+	if base == "" {
+		return nil
+	}
+	kinds := []string{base}
+	if (kind == recordcollaboration.ActionMutationCreate || kind == recordcollaboration.ActionMutationUpdate) &&
+		currentAssigneeID != "" && currentAssigneeID != previousAssigneeID {
+		kinds = append(kinds, recordplatform.OutboxEventKindRecordActionAssigned)
+	}
+	return kinds
 }
 
 func recordActionEventID(actionID string, version uint64, kind recordcollaboration.ActionMutationKind) string {

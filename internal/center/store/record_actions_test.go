@@ -33,7 +33,7 @@ func TestPostgresRecordActionRepositoryCommitsOrderedIdentityOnlyFactsWithoutMut
 		result.Status != recordcollaboration.ActionStatusOpen || result.EventKind != recordcollaboration.ActionMutationCreate {
 		t.Fatalf("result = %#v", result)
 	}
-	want := []string{"begin", "admission", "admission", "idempotency_lock", "idempotency_claim", "reservation_lock", "epoch_init", "epoch_lock", "fence_lock", "reservation_recheck", "epoch_lock", "root_lock", "action_create", "action_event", "activity", "outbox", "admission", "idempotency_complete", "commit", "rollback_cleanup"}
+	want := []string{"begin", "admission", "admission", "idempotency_lock", "idempotency_claim", "reservation_lock", "epoch_init", "epoch_lock", "fence_lock", "reservation_recheck", "epoch_lock", "root_lock", "action_create", "action_event", "activity", "follower_source", "outbox", "admission", "idempotency_complete", "commit", "rollback_cleanup"}
 	if !reflect.DeepEqual(tx.steps, want) {
 		t.Fatalf("steps = %#v, want %#v", tx.steps, want)
 	}
@@ -273,8 +273,10 @@ type fakeRecordActionTx struct {
 	persistedTitle                string
 	persistedDetails              string
 	activityKind                  string
+	actionEventAssignee           string
 	outboxSubjectKind             string
 	outboxSubjectID               string
+	outboxEvents                  []recordplatform.OutboxEvent
 	recordRootUpdates             int
 }
 
@@ -366,12 +368,18 @@ func (tx *fakeRecordActionTx) QueryRow(_ context.Context, sql string, args ...an
 	case "action_update":
 		return fakeRecordRevisionRow{values: []any{tx.now}}
 	case "action_event":
+		tx.actionEventAssignee = fmt.Sprint(args[9])
 		return fakeRecordRevisionRow{values: []any{tx.now}}
 	case "activity":
 		tx.activityKind = fmt.Sprint(args[4])
 		return fakeRecordRevisionRow{values: []any{tx.now}}
 	case "outbox":
 		tx.outboxSubjectKind, tx.outboxSubjectID = fmt.Sprint(args[2]), fmt.Sprint(args[3])
+		tx.outboxEvents = append(tx.outboxEvents, recordplatform.OutboxEvent{
+			ProjectID: fmt.Sprint(args[0]), EventKind: fmt.Sprint(args[1]),
+			SubjectKind: fmt.Sprint(args[2]), SubjectID: fmt.Sprint(args[3]),
+			SourceVersion: args[4].(uint64), AuthorizationEpoch: args[5].(uint64),
+		})
 		return fakeRecordRevisionRow{values: []any{int64(51)}}
 	default:
 		return fakeRecordRevisionRow{err: fmt.Errorf("unexpected row SQL: %s", step)}
@@ -417,6 +425,8 @@ func recordActionSQLStep(sql string) string {
 		return "action_replay"
 	case strings.Contains(compact, "insert into public.record_domain_activities"):
 		return "activity"
+	case strings.Contains(compact, "insert into public.record_followers"):
+		return "follower_source"
 	case strings.Contains(compact, "insert into public.record_outbox"):
 		return "outbox"
 	case strings.Contains(compact, "update public.record_idempotency_keys"):
@@ -510,3 +520,49 @@ func storeActionAuthorization(t *testing.T) (recordauth.ActorScope, records.Reco
 }
 
 var errRecordActionCutPoint = errors.New("record action cut point")
+
+func TestRecordActionNotificationOutboxKindsEmitAssignmentOnlyForNewAssignee(t *testing.T) {
+	tests := []struct {
+		name, previous, current string
+		kind                    recordcollaboration.ActionMutationKind
+		want                    []string
+	}{
+		{name: "create without assignee", kind: recordcollaboration.ActionMutationCreate, want: []string{recordplatform.OutboxEventKindRecordActionCreated}},
+		{name: "create with assignee", kind: recordcollaboration.ActionMutationCreate, current: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", want: []string{recordplatform.OutboxEventKindRecordActionCreated, recordplatform.OutboxEventKindRecordActionAssigned}},
+		{name: "unchanged assignee edit", kind: recordcollaboration.ActionMutationUpdate, previous: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", current: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", want: []string{recordplatform.OutboxEventKindRecordActionUpdated}},
+		{name: "changed assignee edit", kind: recordcollaboration.ActionMutationUpdate, previous: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", current: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", want: []string{recordplatform.OutboxEventKindRecordActionUpdated, recordplatform.OutboxEventKindRecordActionAssigned}},
+		{name: "cleared assignee edit", kind: recordcollaboration.ActionMutationUpdate, previous: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", want: []string{recordplatform.OutboxEventKindRecordActionUpdated}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := recordActionNotificationOutboxKinds(tt.kind, tt.previous, tt.current); !slices.Equal(got, tt.want) {
+				t.Fatalf("recordActionNotificationOutboxKinds() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPostgresRecordActionRepositoryPersistsRawSubjectAndExactTypedSourceVersion(t *testing.T) {
+	actor, _ := storeActionAuthorization(t)
+	command := testStoreActionCommand(t, recordcollaboration.ActionMutationCreate, 0, mustStoreActionFields(t, "Assign", "safe", actor.UserID))
+	tx := newFakeRecordActionTx(command)
+	repository := newRecordActionTestRepository(tx, &recordActionMembershipStub{actor: actor})
+
+	result, err := repository.CommitAction(context.Background(), command)
+	if err != nil {
+		t.Fatalf("CommitAction() error = %v", err)
+	}
+	if result.Version != 1 {
+		t.Fatalf("CommitAction() version = %d, want 1", result.Version)
+	}
+	want := []recordplatform.OutboxEvent{
+		{ProjectID: "default", EventKind: recordplatform.OutboxEventKindRecordActionCreated, SubjectKind: "action", SubjectID: command.ActionID, AuthorizationEpoch: command.AuthorizationEpoch},
+		{ProjectID: "default", EventKind: recordplatform.OutboxEventKindRecordActionAssigned, SubjectKind: "action", SubjectID: command.ActionID, SourceVersion: 1, AuthorizationEpoch: command.AuthorizationEpoch},
+	}
+	if !reflect.DeepEqual(tx.outboxEvents, want) {
+		t.Fatalf("outbox events = %#v, want %#v", tx.outboxEvents, want)
+	}
+	if tx.actionEventAssignee != actor.UserID {
+		t.Fatalf("action event assignee = %q, want %q", tx.actionEventAssignee, actor.UserID)
+	}
+}

@@ -77,6 +77,18 @@ func TestRecordCollaborationMigrationReusesFoundationPrimitives(t *testing.T) {
 	}
 }
 
+func TestRecordCollaborationMigrationExtendsExistingOutboxWithIdentityOnlySourceVersion(t *testing.T) {
+	normalized := normalizedRecordCollaborationMigrationSQL(t)
+	for _, want := range []string{
+		"alter table public.record_outbox add column if not exists source_version bigint not null default 0",
+		"check (source_version >= 0)",
+	} {
+		if !strings.Contains(normalized, want) {
+			t.Fatalf("0055 existing-outbox source-version extension missing %q", want)
+		}
+	}
+}
+
 func TestRecordCollaborationMigrationBindsEveryRecordSurfaceToFenceEpoch(t *testing.T) {
 	sql := recordCollaborationMigrationSQL(t)
 	for _, table := range []string{
@@ -144,6 +156,7 @@ func TestRecordCollaborationMigrationEnforcesActionStateAndAppendOnlyHistory(t *
 
 	eventSQL := normalizedRecordCollaborationTableDefinition(t, sql, "record_action_events")
 	for _, want := range []string{
+		"assignee_id text check (assignee_id is null or assignee_id ~ '^usr_[a-z0-9]{1,64}$')",
 		"event_kind text not null check (event_kind in ('created', 'updated', 'completed', 'cancelled', 'reopened'))",
 		"previous_status text check (previous_status is null or previous_status in ('open', 'completed', 'cancelled'))",
 		"current_status text not null check (current_status in ('open', 'completed', 'cancelled'))",

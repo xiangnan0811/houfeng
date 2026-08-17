@@ -97,7 +97,8 @@ func TestCollaborationRevisionParticipantAppliesMembershipFenceFollowersActiviti
 		}
 	}
 	if len(outbox.inputs) != 2 || outbox.inputs[0].Event.AuthorizationEpoch != 1 ||
-		outbox.inputs[0].Event.SubjectID != "rec_collaboration" || outbox.inputs[0].ExpiresAfter != time.Hour {
+		outbox.inputs[0].Event.SubjectID != "rec_collaboration" || outbox.inputs[0].Event.SourceVersion != 1 ||
+		outbox.inputs[0].ExpiresAfter != time.Hour {
 		t.Fatalf("outbox inputs = %#v", outbox.inputs)
 	}
 }

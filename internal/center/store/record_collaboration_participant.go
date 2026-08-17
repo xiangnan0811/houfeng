@@ -99,6 +99,7 @@ func (participant *collaborationRevisionParticipant) ApplyRevision(
 				EventKind:          outboxKind,
 				SubjectKind:        recordplatform.OutboxSubjectKindRecord,
 				SubjectID:          committed.Result.RecordID,
+				SourceVersion:      committed.Result.RevisionNo,
 				AuthorizationEpoch: committed.Result.AuthorizationEpoch,
 			},
 			ExpiresAfter: committed.OutboxTTL,

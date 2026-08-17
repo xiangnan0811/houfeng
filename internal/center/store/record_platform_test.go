@@ -601,11 +601,12 @@ func TestPostgresRecordPlatformClaimOutboxCommitsDatabaseTimeFencedClaim(t *test
 			*(dest[2].(*string)) = string(recordplatform.OutboxEventKindRecordCreated)
 			*(dest[3].(*string)) = string(recordplatform.OutboxSubjectKindRecord)
 			*(dest[4].(*string)) = "rec_01"
-			*(dest[5].(*int64)) = 3
-			*(dest[6].(*string)) = "worker_01"
-			*(dest[7].(*int64)) = 2
-			*(dest[8].(*time.Time)) = ownerExpiry
-			*(dest[9].(*time.Time)) = eventExpiry
+			*(dest[5].(*int64)) = 0
+			*(dest[6].(*int64)) = 3
+			*(dest[7].(*string)) = "worker_01"
+			*(dest[8].(*int64)) = 2
+			*(dest[9].(*time.Time)) = ownerExpiry
+			*(dest[10].(*time.Time)) = eventExpiry
 			return nil
 		}}
 	}
@@ -650,6 +651,64 @@ func TestPostgresRecordPlatformClaimOutboxCommitsDatabaseTimeFencedClaim(t *test
 		if !strings.Contains(tx.querySQL[0], fragment) {
 			t.Fatalf("claim SQL missing %q:\n%s", fragment, tx.querySQL[0])
 		}
+	}
+}
+
+func TestObservedOutboxClaimPreservesTypedSourceVersion(t *testing.T) {
+	row := observedOutboxClaimRow{
+		rowID: 42, projectID: "default", eventKind: recordplatform.OutboxEventKindRecordActionAssigned,
+		subjectKind: "action", subjectID: "ract_version", sourceVersion: 7, authorizationEpoch: 3,
+		ownerID: "worker_01", ownerGeneration: 2,
+		ownerExpiresAt: time.Date(2026, 8, 17, 1, 0, 0, 0, time.UTC),
+		expiresAt:      time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC),
+	}
+	claim, err := row.claim()
+	if err != nil {
+		t.Fatalf("claim() error = %v", err)
+	}
+	if claim.Event.SubjectID != "ract_version" || claim.Event.SourceVersion != 7 {
+		t.Fatalf("claim event = %#v, want raw subject and source version 7", claim.Event)
+	}
+}
+
+func TestRecordPlatformTransactionAssertOutboxClaimFencesProjectionWithExactLiveOwner(t *testing.T) {
+	claim := recordplatform.ClaimedOutboxEventV1{
+		Event:     recordplatform.OutboxEvent{RowID: 42, ProjectID: "default", EventKind: recordplatform.OutboxEventKindRecordActionAssigned, SubjectKind: "action", SubjectID: "ract_projection", SourceVersion: 7, AuthorizationEpoch: 3},
+		Owner:     recordplatform.OwnerLease{OwnerID: "notification_worker", Generation: 2, ExpiresAt: time.Date(2026, 8, 17, 1, 0, 0, 0, time.UTC)},
+		ExpiresAt: time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC),
+	}
+	for _, tt := range []struct {
+		name    string
+		rowErr  error
+		wantErr error
+	}{
+		{name: "exact live owner"},
+		{name: "expired or taken over", rowErr: pgx.ErrNoRows, wantErr: recordplatform.ErrLostOwnerLease},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := &fakeRecordPlatformTx{}
+			tx.queryRow = func(_ context.Context, sql string, args ...any) pgx.Row {
+				for _, want := range []string{"status = 'processing'", "owner_id = $2", "owner_generation = $3", "owner_expires_at = $4", "owner_expires_at > transaction_timestamp()", "for update"} {
+					if !strings.Contains(sql, want) {
+						t.Fatalf("assert SQL missing %q: %s", want, sql)
+					}
+				}
+				if !reflect.DeepEqual(args, []any{claim.Event.RowID, claim.Owner.OwnerID, claim.Owner.Generation, claim.Owner.ExpiresAt}) {
+					t.Fatalf("assert args = %#v", args)
+				}
+				return fakeRecordPlatformRow{scan: func(dest ...any) error {
+					if tt.rowErr != nil {
+						return tt.rowErr
+					}
+					*(dest[0].(*int)) = 1
+					return nil
+				}}
+			}
+			transaction := &RecordPlatformTransaction{repository: &PostgresRecordPlatformRepository{gate: allowRecordPlatformAdmissionGate}, tx: tx}
+			if err := transaction.AssertOutboxClaim(context.Background(), claim); !errors.Is(err, tt.wantErr) {
+				t.Fatalf("AssertOutboxClaim() error = %v, want %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 

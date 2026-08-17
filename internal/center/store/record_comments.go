@@ -139,15 +139,32 @@ func (repository *PostgresRecordCommentRepository) CommitComment(ctx context.Con
 		if err := insertRecordCommentActivity(ctx, transaction.tx, command, sourceEventID, version, activityKind, changedAt); err != nil {
 			return err
 		}
-		if _, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
-			Event: recordplatform.OutboxEvent{
-				ProjectID: string(recordplatform.ProjectIDDefault), EventKind: recordCommentOutboxKind(command.Kind),
-				SubjectKind: recordplatform.OutboxSubjectKindComment, SubjectID: command.CommentID,
-				AuthorizationEpoch: command.AuthorizationEpoch,
-			},
-			ExpiresAfter: command.OutboxTTL,
-		}); err != nil {
+		automaticSources := []collaborationAutomaticFollowerSources{{userID: command.Actor.UserID, comment: true}}
+		for _, mentionedUserID := range command.MentionUserIDs {
+			automaticSources = append(automaticSources, collaborationAutomaticFollowerSources{userID: mentionedUserID, mention: true})
+		}
+		if err := upsertCollaborationAutomaticFollowerSources(ctx, transaction.tx, binding, automaticSources); err != nil {
 			return err
+		}
+		for _, outboxKind := range recordCommentNotificationOutboxKinds(
+			command.Kind, command.ReplyToCommentID != "", len(command.MentionUserIDs) != 0,
+		) {
+			sourceVersion := uint64(0)
+			if outboxKind == recordplatform.OutboxEventKindRecordCommentReplied ||
+				outboxKind == recordplatform.OutboxEventKindRecordCommentMentioned {
+				sourceVersion = version
+			}
+			if _, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
+				Event: recordplatform.OutboxEvent{
+					ProjectID: string(recordplatform.ProjectIDDefault), EventKind: outboxKind,
+					SubjectKind: recordplatform.OutboxSubjectKindComment, SubjectID: command.CommentID,
+					SourceVersion:      sourceVersion,
+					AuthorizationEpoch: command.AuthorizationEpoch,
+				},
+				ExpiresAfter: command.OutboxTTL,
+			}); err != nil {
+				return err
+			}
 		}
 		if err := transaction.CompleteIdempotency(ctx, command.Idempotency.Key, *claim.Owner, command.ResultFingerprint); err != nil {
 			return err
@@ -650,6 +667,21 @@ func recordCommentOutboxKind(kind recordcollaboration.CommentMutationKind) strin
 	default:
 		return ""
 	}
+}
+
+func recordCommentNotificationOutboxKinds(kind recordcollaboration.CommentMutationKind, replied, mentioned bool) []string {
+	base := recordCommentOutboxKind(kind)
+	if base == "" {
+		return nil
+	}
+	kinds := []string{base}
+	if kind == recordcollaboration.CommentMutationCreate && replied {
+		kinds = append(kinds, recordplatform.OutboxEventKindRecordCommentReplied)
+	}
+	if (kind == recordcollaboration.CommentMutationCreate || kind == recordcollaboration.CommentMutationEdit) && mentioned {
+		kinds = append(kinds, recordplatform.OutboxEventKindRecordCommentMentioned)
+	}
+	return kinds
 }
 
 var _ recordcollaboration.CommentStore = (*PostgresRecordCommentRepository)(nil)

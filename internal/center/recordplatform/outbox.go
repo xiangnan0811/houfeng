@@ -3,6 +3,7 @@ package recordplatform
 import (
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -20,12 +21,15 @@ const (
 	OutboxEventKindRecordParticipantChanged = "record_participant_changed"
 	OutboxEventKindRecordActionCreated      = "record_action_created"
 	OutboxEventKindRecordActionUpdated      = "record_action_updated"
+	OutboxEventKindRecordActionAssigned     = "record_action_assigned"
 	OutboxEventKindRecordActionCompleted    = "record_action_completed"
 	OutboxEventKindRecordActionCancelled    = "record_action_cancelled"
 	OutboxEventKindRecordActionReopened     = "record_action_reopened"
 	OutboxEventKindRecordCommentCreated     = "record_comment_created"
 	OutboxEventKindRecordCommentEdited      = "record_comment_edited"
 	OutboxEventKindRecordCommentRedacted    = "record_comment_redacted"
+	OutboxEventKindRecordCommentReplied     = "record_comment_replied"
+	OutboxEventKindRecordCommentMentioned   = "record_comment_mentioned"
 )
 
 const (
@@ -43,6 +47,7 @@ type OutboxEvent struct {
 	EventKind          string
 	SubjectKind        string
 	SubjectID          string
+	SourceVersion      uint64
 	AuthorizationEpoch uint64
 }
 
@@ -94,7 +99,25 @@ func (event OutboxEvent) Validate() error {
 	if !validOutboxSubjectID(event.SubjectID) {
 		return fmt.Errorf("%w: subject id", ErrInvalidOutboxEvent)
 	}
+	if event.SourceVersion > math.MaxInt64 || notificationProducingOutboxEventKind(event.EventKind) != (event.SourceVersion > 0) {
+		return fmt.Errorf("%w: source version", ErrInvalidOutboxEvent)
+	}
 	return nil
+}
+
+func notificationProducingOutboxEventKind(kind string) bool {
+	switch kind {
+	case OutboxEventKindRecordOwnerChanged,
+		OutboxEventKindRecordParticipantChanged,
+		OutboxEventKindRecordActionAssigned,
+		OutboxEventKindRecordActionCompleted,
+		OutboxEventKindRecordActionCancelled,
+		OutboxEventKindRecordCommentReplied,
+		OutboxEventKindRecordCommentMentioned:
+		return true
+	default:
+		return false
+	}
 }
 
 // Validate rejects durations PostgreSQL cannot represent in the transaction
@@ -149,13 +172,16 @@ func outboxSubjectKindForEventKind(kind string) (string, bool) {
 		return OutboxSubjectKindRecord, true
 	case OutboxEventKindRecordActionCreated,
 		OutboxEventKindRecordActionUpdated,
+		OutboxEventKindRecordActionAssigned,
 		OutboxEventKindRecordActionCompleted,
 		OutboxEventKindRecordActionCancelled,
 		OutboxEventKindRecordActionReopened:
 		return OutboxSubjectKindAction, true
 	case OutboxEventKindRecordCommentCreated,
 		OutboxEventKindRecordCommentEdited,
-		OutboxEventKindRecordCommentRedacted:
+		OutboxEventKindRecordCommentRedacted,
+		OutboxEventKindRecordCommentReplied,
+		OutboxEventKindRecordCommentMentioned:
 		return OutboxSubjectKindComment, true
 	default:
 		return "", false

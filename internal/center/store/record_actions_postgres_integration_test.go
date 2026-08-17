@@ -358,7 +358,7 @@ func assertPostgresActionLifecycleState(t *testing.T, ctx context.Context, fixtu
 	if version != 5 || title != "Verify private resolution" || details != "private verification details" ||
 		status != string(recordcollaboration.ActionStatusCancelled) || assigneeID != "usr_bbbbbbbbbbbbbbbbbbbbbbbb" ||
 		subjectRevisionID != parent.RevisionID || !persistedDueAt.Equal(dueAt) || completedAt != nil ||
-		actionCount != 1 || eventCount != 5 || activityCount != 5 || outboxCount != 5 || idempotencyCount != 5 {
+		actionCount != 1 || eventCount != 5 || activityCount != 5 || outboxCount != 6 || idempotencyCount != 5 {
 		t.Fatalf("action lifecycle state version/title/details/status/assignee/subject/due/completed/counts=%d/%q/%q/%q/%q/%q/%v/%v/%d/%d/%d/%d/%d",
 			version, title, details, status, assigneeID, subjectRevisionID, persistedDueAt, completedAt,
 			actionCount, eventCount, activityCount, outboxCount, idempotencyCount)

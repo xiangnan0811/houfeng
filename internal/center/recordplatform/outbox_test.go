@@ -57,7 +57,7 @@ func TestOutboxEventV1AcceptsClosedCollaborationRevisionKinds(t *testing.T) {
 		event := OutboxEvent{
 			ProjectID: string(ProjectIDDefault), EventKind: kind,
 			SubjectKind: OutboxSubjectKindRecord, SubjectID: "rec_collaboration",
-			AuthorizationEpoch: 7,
+			SourceVersion: 1, AuthorizationEpoch: 7,
 		}
 		if err := event.Validate(); err != nil {
 			t.Fatalf("OutboxEvent.Validate(%q) error = %v", kind, err)
@@ -71,8 +71,6 @@ func TestOutboxEventV1AcceptsClosedActionIdentityKinds(t *testing.T) {
 	for _, kind := range []string{
 		OutboxEventKindRecordActionCreated,
 		OutboxEventKindRecordActionUpdated,
-		OutboxEventKindRecordActionCompleted,
-		OutboxEventKindRecordActionCancelled,
 		OutboxEventKindRecordActionReopened,
 	} {
 		event := OutboxEvent{
@@ -92,6 +90,54 @@ func TestOutboxEventV1AcceptsClosedActionIdentityKinds(t *testing.T) {
 		if err := event.Validate(); !errors.Is(err, ErrInvalidOutboxEvent) {
 			t.Fatalf("OutboxEvent.Validate(%q) error = %v, want closed registry rejection", kind, err)
 		}
+	}
+}
+
+func TestOutboxEventV1AcceptsOnlyClosedNotificationProducerKinds(t *testing.T) {
+	tests := []struct {
+		kind    string
+		subject string
+		id      string
+	}{
+		{kind: OutboxEventKindRecordActionAssigned, subject: OutboxSubjectKindAction, id: "ract_identityonly"},
+		{kind: OutboxEventKindRecordCommentReplied, subject: OutboxSubjectKindComment, id: "rcm_identityonly"},
+		{kind: OutboxEventKindRecordCommentMentioned, subject: OutboxSubjectKindComment, id: "rcm_identityonly"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.kind, func(t *testing.T) {
+			event := OutboxEvent{ProjectID: string(ProjectIDDefault), EventKind: tt.kind, SubjectKind: tt.subject, SubjectID: tt.id, SourceVersion: 7, AuthorizationEpoch: 1}
+			if err := event.Validate(); err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestOutboxEventV1RequiresExactSourceVersionOnlyForNotificationProducerKinds(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []string{
+		OutboxEventKindRecordOwnerChanged,
+		OutboxEventKindRecordParticipantChanged,
+		OutboxEventKindRecordActionAssigned,
+		OutboxEventKindRecordActionCompleted,
+		OutboxEventKindRecordActionCancelled,
+		OutboxEventKindRecordCommentReplied,
+		OutboxEventKindRecordCommentMentioned,
+	} {
+		subjectKind, ok := outboxSubjectKindForEventKind(kind)
+		if !ok {
+			t.Fatalf("missing subject kind for %q", kind)
+		}
+		event := OutboxEvent{ProjectID: string(ProjectIDDefault), EventKind: kind, SubjectKind: subjectKind, SubjectID: map[string]string{OutboxSubjectKindRecord: "rec_version", OutboxSubjectKindAction: "ract_version", OutboxSubjectKindComment: "rcm_version"}[subjectKind]}
+		if err := event.Validate(); !errors.Is(err, ErrInvalidOutboxEvent) {
+			t.Fatalf("OutboxEvent{%q, SourceVersion: 0}.Validate() error = %v, want ErrInvalidOutboxEvent", kind, err)
+		}
+	}
+
+	legacy := OutboxEvent{ProjectID: string(ProjectIDDefault), EventKind: OutboxEventKindRecordCreated, SubjectKind: OutboxSubjectKindRecord, SubjectID: "rec_version", SourceVersion: 1}
+	if err := legacy.Validate(); !errors.Is(err, ErrInvalidOutboxEvent) {
+		t.Fatalf("generic event with source version error = %v, want ErrInvalidOutboxEvent", err)
 	}
 }
 

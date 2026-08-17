@@ -1,3 +1,7 @@
+alter table public.record_outbox
+  add column if not exists source_version bigint not null default 0
+  check (source_version >= 0);
+
 create table if not exists public.record_actions (
   action_id text primary key check (action_id ~ '^ract_[a-z0-9]{1,64}$'),
   project_id text not null default 'default' check (project_id = 'default'),
@@ -47,6 +51,7 @@ create table if not exists public.record_action_events (
   current_status text not null
     check (current_status in ('open', 'completed', 'cancelled')),
   actor_id text not null check (actor_id ~ '^usr_[a-z0-9]{1,64}$'),
+  assignee_id text check (assignee_id is null or assignee_id ~ '^usr_[a-z0-9]{1,64}$'),
   record_fence_epoch bigint not null check (record_fence_epoch >= 0),
   occurred_at timestamptz not null,
   created_at timestamptz not null default now(),
