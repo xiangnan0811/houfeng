@@ -283,8 +283,9 @@ create table if not exists public.record_notification_deliveries (
   channel text not null check (channel in ('telegram', 'feishu')),
   binding_id text not null check (binding_id ~ '^[a-z0-9_-]{1,128}$'),
   delivery_state text not null default 'pending'
-    check (delivery_state in ('pending', 'processing', 'retry_wait', 'sent', 'cancelled', 'permanent_failure')),
+    check (delivery_state in ('pending', 'processing', 'retry_wait', 'sent', 'cancelled', 'permanent_failure', 'unknown_outcome')),
   attempt_count integer not null default 0 check (attempt_count between 0 and 8),
+  attempt_started_at timestamptz,
   next_attempt_at timestamptz,
   reason_code text not null default ''
     check (reason_code = '' or reason_code ~ '^[a-z0-9_]{1,64}$'),
@@ -297,6 +298,7 @@ create table if not exists public.record_notification_deliveries (
   unique (record_id, delivery_id),
   unique (notification_id, recipient_user_id, channel),
   unique (record_id, delivery_id, notification_id, recipient_user_id, record_fence_epoch),
+  constraint record_notification_deliveries_processing_check check ((delivery_state = 'processing') = (attempt_started_at is not null)),
   constraint record_notification_deliveries_retry_check check ((delivery_state = 'retry_wait') = (next_attempt_at is not null)),
   constraint record_notification_deliveries_sent_check check ((delivery_state = 'sent') = (sent_at is not null)),
   check ((delivery_state = 'cancelled') = (cancelled_at is not null)),
@@ -321,7 +323,7 @@ create table if not exists public.record_notification_delivery_attempts (
   recipient_user_id text not null check (recipient_user_id ~ '^usr_[a-z0-9]{1,64}$'),
   attempt_no integer not null check (attempt_no between 1 and 8),
   outcome text not null
-    check (outcome in ('sent', 'temporary_failure', 'permanent_failure', 'cancelled')),
+    check (outcome in ('sent', 'temporary_failure', 'permanent_failure', 'cancelled', 'unknown_outcome')),
   reason_code text not null default ''
     check (reason_code = '' or reason_code ~ '^[a-z0-9_]{1,64}$'),
   authorization_epoch bigint not null check (authorization_epoch >= 0),

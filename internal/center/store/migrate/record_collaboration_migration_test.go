@@ -262,12 +262,14 @@ func TestRecordCollaborationMigrationBoundsNotificationRetentionAndRetries(t *te
 	sql := normalizedRecordCollaborationMigrationSQL(t)
 	for _, want := range []string{
 		"check (details_delete_after > created_at)",
-		"delivery_state text not null default 'pending' check (delivery_state in ('pending', 'processing', 'retry_wait', 'sent', 'cancelled', 'permanent_failure'))",
+		"delivery_state text not null default 'pending' check (delivery_state in ('pending', 'processing', 'retry_wait', 'sent', 'cancelled', 'permanent_failure', 'unknown_outcome'))",
 		"attempt_count integer not null default 0 check (attempt_count between 0 and 8)",
+		"attempt_started_at timestamptz",
+		"constraint record_notification_deliveries_processing_check check ((delivery_state = 'processing') = (attempt_started_at is not null))",
 		"constraint record_notification_deliveries_retry_check check ((delivery_state = 'retry_wait') = (next_attempt_at is not null))",
 		"constraint record_notification_deliveries_sent_check check ((delivery_state = 'sent') = (sent_at is not null))",
 		"attempt_no integer not null check (attempt_no between 1 and 8)",
-		"outcome text not null check (outcome in ('sent', 'temporary_failure', 'permanent_failure', 'cancelled'))",
+		"outcome text not null check (outcome in ('sent', 'temporary_failure', 'permanent_failure', 'cancelled', 'unknown_outcome'))",
 		"unique (delivery_id, attempt_no)",
 		"create index if not exists idx_record_notifications_retention on public.record_notifications(details_delete_after, notification_id)",
 		"create index if not exists idx_record_notification_deliveries_retry on public.record_notification_deliveries(delivery_state, next_attempt_at, delivery_id)",
@@ -276,8 +278,21 @@ func TestRecordCollaborationMigrationBoundsNotificationRetentionAndRetries(t *te
 			t.Errorf("0055 notification retention/retry missing invariant %q", want)
 		}
 	}
+	deliverySQL := recordCollaborationTableDefinition(t, recordCollaborationMigrationSQL(t), "record_notification_deliveries")
+	for _, forbidden := range []string{
+		"owner_id", "owner_generation", "owner_expires_at",
+		"payload", "body", "title", "markdown", "render_model", "evidence", "attachment",
+		"credential", "secret", "provider_error", "provider_response", "json",
+	} {
+		if strings.Contains(deliverySQL, forbidden) {
+			t.Errorf("0055 delivery row retains forbidden owner/content/provider field %q", forbidden)
+		}
+	}
 	attemptSQL := recordCollaborationTableDefinition(t, recordCollaborationMigrationSQL(t), "record_notification_delivery_attempts")
-	for _, forbidden := range []string{"payload", "body", "comment_markdown", "render_model", "provider_error", "response"} {
+	for _, forbidden := range []string{
+		"payload", "body", "title", "markdown", "render_model", "evidence", "attachment",
+		"credential", "secret", "provider_error", "provider_response", "json",
+	} {
 		if strings.Contains(attemptSQL, forbidden) {
 			t.Errorf("0055 delivery-attempt audit retains forbidden content field %q", forbidden)
 		}

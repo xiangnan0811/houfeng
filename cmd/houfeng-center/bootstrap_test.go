@@ -888,6 +888,9 @@ func TestBootstrapWiresRecordWatchesInboxAndProjectionThroughSharedFailClosedDep
 	for _, forbidden := range []string{
 		"NewPostgresRecordWatchRepository(pool, store.AdmissionGateFunc",
 		"NewPostgresRecordNotificationRepository(pool, store.AdmissionGateFunc",
+		"NewPostgresRecordNotificationRepositoryWithExternalBindings(",
+		"NewNotificationProjectorWithExternalDelivery(",
+		"NewScopedExternalDeliveryProcessor(",
 		"NewOutboxWorker(",
 		"OutboxSender",
 	} {

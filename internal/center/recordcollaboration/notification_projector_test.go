@@ -75,6 +75,64 @@ func TestNotificationProjectorReusesClaimProjectionAndOwnerFencedFinalize(t *tes
 	}
 }
 
+func TestNotificationProjectorRoutesClosedDeliveryEventThroughSameClaimOwner(t *testing.T) {
+	claim := testNotificationClaim(recordplatform.OutboxEventKindRecordNotificationDelivery, 7)
+	queue := &notificationQueueStub{claim: &claim}
+	projection := &notificationProjectionStub{}
+	delivery := &externalDeliveryProcessorStub{result: ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete}}
+	projector, err := NewNotificationProjectorWithExternalDelivery(queue, projection, delivery, time.Second)
+	if err != nil {
+		t.Fatalf("NewNotificationProjectorWithExternalDelivery() error = %v", err)
+	}
+
+	processed, err := projector.ProjectNext(context.Background(), recordplatform.OutboxClaimInputV1{OwnerID: "notification_worker", OwnerLeaseDuration: time.Minute})
+	if err != nil || !processed {
+		t.Fatalf("ProjectNext() = (%v, %v)", processed, err)
+	}
+	if !reflect.DeepEqual(queue.steps, []string{"claim", "sent"}) || projection.calls != 0 || delivery.calls != 1 || delivery.claim != claim {
+		t.Fatalf("steps=%#v projection_calls=%d delivery=%#v", queue.steps, projection.calls, delivery)
+	}
+}
+
+func TestNotificationProjectorCancelsDeliveryEventWhenOptionalProcessorIsUnconfigured(t *testing.T) {
+	claim := testNotificationClaim(recordplatform.OutboxEventKindRecordNotificationDelivery, 7)
+	queue := &notificationQueueStub{claim: &claim}
+	projector, err := NewNotificationProjector(queue, &notificationProjectionStub{}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := projector.ProjectNext(context.Background(), recordplatform.OutboxClaimInputV1{OwnerID: "notification_worker", OwnerLeaseDuration: time.Minute})
+	if err != nil || !processed || !reflect.DeepEqual(queue.steps, []string{"claim", "cancel"}) {
+		t.Fatalf("ProjectNext()=(%v,%v) steps=%#v", processed, err, queue.steps)
+	}
+}
+
+func TestNotificationProjectorUsesDeliveryRetryAndCancelDisposition(t *testing.T) {
+	tests := []struct {
+		name   string
+		result ExternalDeliveryOutboxResult
+		steps  []string
+	}{
+		{name: "retry", result: ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxRetry, RetryAfter: 17 * time.Second}, steps: []string{"claim", "retry"}},
+		{name: "cancel", result: ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxCancel}, steps: []string{"claim", "cancel"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			claim := testNotificationClaim(recordplatform.OutboxEventKindRecordNotificationDelivery, 7)
+			queue := &notificationQueueStub{claim: &claim}
+			delivery := &externalDeliveryProcessorStub{result: test.result}
+			projector, err := NewNotificationProjectorWithExternalDelivery(queue, &notificationProjectionStub{}, delivery, time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			processed, err := projector.ProjectNext(context.Background(), recordplatform.OutboxClaimInputV1{OwnerID: "notification_worker", OwnerLeaseDuration: time.Minute})
+			if err != nil || !processed || !reflect.DeepEqual(queue.steps, test.steps) {
+				t.Fatalf("ProjectNext()=(%v,%v) steps=%#v want=%#v", processed, err, queue.steps, test.steps)
+			}
+		})
+	}
+}
+
 func TestNotificationProjectorCancelsUnsupportedAndMissingExactSources(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -156,6 +214,19 @@ type notificationProjectionStub struct {
 	calls  int
 }
 
+type externalDeliveryProcessorStub struct {
+	claim  recordplatform.ClaimedOutboxEventV1
+	result ExternalDeliveryOutboxResult
+	err    error
+	calls  int
+}
+
+func (processor *externalDeliveryProcessorStub) ProcessExternalDelivery(_ context.Context, claim recordplatform.ClaimedOutboxEventV1) (ExternalDeliveryOutboxResult, error) {
+	processor.calls++
+	processor.claim = claim
+	return processor.result, processor.err
+}
+
 func (projection *notificationProjectionStub) ProjectNotification(_ context.Context, claim recordplatform.ClaimedOutboxEventV1) (NotificationProjectionResult, error) {
 	projection.calls++
 	projection.event = claim.Event
@@ -170,6 +241,8 @@ func testNotificationClaim(kind string, sourceVersion uint64) recordplatform.Cla
 		subjectKind, subjectID = recordplatform.OutboxSubjectKindAction, "ract_projector"
 	case recordplatform.OutboxEventKindRecordCommentMentioned:
 		subjectKind, subjectID = recordplatform.OutboxSubjectKindComment, "rcm_projector"
+	case recordplatform.OutboxEventKindRecordNotificationDelivery:
+		subjectKind, subjectID = recordplatform.OutboxSubjectKindDelivery, "rnd_0123456789abcdef"
 	}
 	ownerExpiry := time.Date(2026, 8, 17, 11, 0, 0, 0, time.UTC)
 	return recordplatform.ClaimedOutboxEventV1{

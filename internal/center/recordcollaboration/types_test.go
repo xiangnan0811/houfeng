@@ -139,6 +139,7 @@ func TestNotificationDeliveryStateMachine(t *testing.T) {
 		{NotificationDeliveryProcessing, NotificationDeliverySent},
 		{NotificationDeliveryProcessing, NotificationDeliveryRetryWait},
 		{NotificationDeliveryProcessing, NotificationDeliveryPermanentFailure},
+		{NotificationDeliveryProcessing, NotificationDeliveryUnknownOutcome},
 		{NotificationDeliveryProcessing, NotificationDeliveryCancelled},
 		{NotificationDeliveryRetryWait, NotificationDeliveryProcessing},
 		{NotificationDeliveryRetryWait, NotificationDeliveryPermanentFailure},
@@ -154,6 +155,7 @@ func TestNotificationDeliveryStateMachine(t *testing.T) {
 		{NotificationDeliverySent, NotificationDeliveryRetryWait},
 		{NotificationDeliveryCancelled, NotificationDeliveryProcessing},
 		{NotificationDeliveryPermanentFailure, NotificationDeliveryProcessing},
+		{NotificationDeliveryUnknownOutcome, NotificationDeliveryProcessing},
 		{NotificationDeliveryState("unknown"), NotificationDeliveryPending},
 	}
 	for _, transition := range invalid {

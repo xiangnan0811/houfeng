@@ -188,6 +188,7 @@ const (
 	NotificationDeliverySent             NotificationDeliveryState = "sent"
 	NotificationDeliveryCancelled        NotificationDeliveryState = "cancelled"
 	NotificationDeliveryPermanentFailure NotificationDeliveryState = "permanent_failure"
+	NotificationDeliveryUnknownOutcome   NotificationDeliveryState = "unknown_outcome"
 )
 
 func ValidateNotificationDeliveryStateTransition(from, to NotificationDeliveryState) error {
@@ -197,7 +198,8 @@ func ValidateNotificationDeliveryStateTransition(from, to NotificationDeliverySt
 		valid = to == NotificationDeliveryProcessing || to == NotificationDeliveryCancelled
 	case NotificationDeliveryProcessing:
 		valid = to == NotificationDeliverySent || to == NotificationDeliveryRetryWait ||
-			to == NotificationDeliveryPermanentFailure || to == NotificationDeliveryCancelled
+			to == NotificationDeliveryPermanentFailure || to == NotificationDeliveryCancelled ||
+			to == NotificationDeliveryUnknownOutcome
 	case NotificationDeliveryRetryWait:
 		valid = to == NotificationDeliveryProcessing || to == NotificationDeliveryPermanentFailure ||
 			to == NotificationDeliveryCancelled

@@ -46,6 +46,7 @@ type NotificationOutboxQueue interface {
 type NotificationProjector struct {
 	queue      NotificationOutboxQueue
 	projection NotificationProjectionStore
+	delivery   ExternalDeliveryProcessor
 	retryAfter time.Duration
 }
 
@@ -106,10 +107,21 @@ func (worker *NotificationProjectionWorker) Run(ctx context.Context) error {
 }
 
 func NewNotificationProjector(queue NotificationOutboxQueue, projection NotificationProjectionStore, retryAfter time.Duration) (*NotificationProjector, error) {
+	return newNotificationProjector(queue, projection, nil, retryAfter)
+}
+
+func NewNotificationProjectorWithExternalDelivery(queue NotificationOutboxQueue, projection NotificationProjectionStore, delivery ExternalDeliveryProcessor, retryAfter time.Duration) (*NotificationProjector, error) {
+	if delivery != nil && nilNotificationDependency(delivery) {
+		return nil, ErrInvalidNotificationProjector
+	}
+	return newNotificationProjector(queue, projection, delivery, retryAfter)
+}
+
+func newNotificationProjector(queue NotificationOutboxQueue, projection NotificationProjectionStore, delivery ExternalDeliveryProcessor, retryAfter time.Duration) (*NotificationProjector, error) {
 	if nilNotificationDependency(queue) || nilNotificationDependency(projection) || retryAfter.Microseconds() <= 0 {
 		return nil, ErrInvalidNotificationProjector
 	}
-	return &NotificationProjector{queue: queue, projection: projection, retryAfter: retryAfter}, nil
+	return &NotificationProjector{queue: queue, projection: projection, delivery: delivery, retryAfter: retryAfter}, nil
 }
 
 func (projector *NotificationProjector) ProjectNext(ctx context.Context, input recordplatform.OutboxClaimInputV1) (bool, error) {
@@ -125,6 +137,9 @@ func (projector *NotificationProjector) ProjectNext(ctx context.Context, input r
 	}
 	if claim.Validate() != nil {
 		return true, ErrInvalidNotificationProjector
+	}
+	if claim.Event.EventKind == recordplatform.OutboxEventKindRecordNotificationDelivery {
+		return true, projector.processExternalDelivery(ctx, *claim)
 	}
 	if _, ok := NotificationEventKindFromOutbox(claim.Event.EventKind); !ok {
 		return true, projector.queue.CancelOutbox(ctx, *claim)
@@ -146,6 +161,35 @@ func (projector *NotificationProjector) ProjectNext(ctx context.Context, input r
 		return true, ErrInvalidNotificationProjector
 	}
 	return true, projector.queue.MarkOutboxSent(ctx, *claim)
+}
+
+func (projector *NotificationProjector) processExternalDelivery(ctx context.Context, claim recordplatform.ClaimedOutboxEventV1) error {
+	if nilNotificationDependency(projector.delivery) {
+		return projector.queue.CancelOutbox(ctx, claim)
+	}
+	result, err := projector.delivery.ProcessExternalDelivery(ctx, claim)
+	if err != nil {
+		if retryErr := projector.queue.RetryOutbox(ctx, claim, projector.retryAfter); retryErr != nil {
+			return errors.Join(err, retryErr)
+		}
+		return err
+	}
+	if result.Validate() != nil {
+		if retryErr := projector.queue.RetryOutbox(ctx, claim, projector.retryAfter); retryErr != nil {
+			return errors.Join(ErrInvalidExternalDeliveryResult, retryErr)
+		}
+		return ErrInvalidExternalDeliveryResult
+	}
+	switch result.Disposition {
+	case ExternalDeliveryOutboxComplete:
+		return projector.queue.MarkOutboxSent(ctx, claim)
+	case ExternalDeliveryOutboxRetry:
+		return projector.queue.RetryOutbox(ctx, claim, result.RetryAfter)
+	case ExternalDeliveryOutboxCancel:
+		return projector.queue.CancelOutbox(ctx, claim)
+	default:
+		return ErrInvalidExternalDeliveryResult
+	}
 }
 
 func NotificationEventKindFromOutbox(kind string) (NotificationEventKind, bool) {

@@ -556,6 +556,435 @@ func TestPostgresIntegrationRecordNotificationProjectionFencesTakeoverAndReplays
 	}
 }
 
+func TestPostgresIntegrationRecordNotificationProjectionEnqueuesScopedDeliveryWithoutInboxCoupling(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		bindingReader *notificationBindingListerStub
+		wantDelivery  int
+	}{
+		{
+			name: "exact scoped binding",
+			bindingReader: &notificationBindingListerStub{byUser: map[string][]recordcollaboration.ScopedTransportBindingRef{
+				"usr_bbbbbbbbbbbbbbbbbbbbbbbb": {{
+					ProjectID: recordauth.ProjectIDDefault, RecipientUserID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
+					Channel: recordcollaboration.NotificationDeliveryTelegram, BindingID: "telegram_primary",
+				}},
+			}},
+			wantDelivery: 1,
+		},
+		{
+			name:          "binding source unavailable keeps inbox",
+			bindingReader: &notificationBindingListerStub{err: errors.New("scoped binding unavailable")},
+			wantDelivery:  0,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newRecordsPostgresFixture(t, ctx)
+			seedCollaborationRevisionUsers(t, ctx, fixture)
+			runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-delivery-projection", 4)
+			input := collaborationRevisionInput(t, collaborationRevisionInputValues{
+				ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
+			})
+			created, err := newRecordsPostgresRepository(
+				t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
+			).CommitRevision(ctx, recordsPostgresRevisionCommand(
+				t, recordplatform.OperationKindRecordCreate, "rec_pgdeliveryprojection", "", 0, 0, input, "delivery-projection-parent",
+			))
+			if err != nil {
+				t.Fatalf("CommitRevision() error = %v", err)
+			}
+			baseProjection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+			projection := NewPostgresRecordNotificationRepositoryWithExternalBindings(
+				runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+				baseProjection.authorization, 30*24*time.Hour, test.bindingReader,
+			)
+			claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "delivery_projection_owner")
+			result, err := projection.ProjectNotification(ctx, claim)
+			if err != nil || result.RecipientCount != 2 {
+				t.Fatalf("ProjectNotification() = (%#v, %v), want inbox success", result, err)
+			}
+			if _, err := projection.ProjectNotification(ctx, claim); err != nil {
+				t.Fatalf("ProjectNotification(replay) error = %v", err)
+			}
+			assertPostgresNotificationCounts(t, ctx, fixture, created.RecordID, 1, 2)
+
+			var deliveries, deliveryOutbox int
+			var deliveryID, bindingID, channel string
+			if err := fixture.db.QueryRow(ctx, `
+				select count(*)::int, coalesce(min(delivery_id), ''), coalesce(min(binding_id), ''), coalesce(min(channel), '')
+				from public.record_notification_deliveries where record_id = $1`, created.RecordID).Scan(
+				&deliveries, &deliveryID, &bindingID, &channel,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.db.QueryRow(ctx, `
+				select count(*)::int from public.record_outbox
+				where event_kind = 'record_notification_delivery' and subject_kind = 'delivery'
+				  and source_version = $1 and authorization_epoch = $2 and record_fence_epoch = $3`,
+				int64(claim.Event.SourceVersion), int64(claim.Event.AuthorizationEpoch), int64(claim.Event.RecordFenceEpoch),
+			).Scan(&deliveryOutbox); err != nil {
+				t.Fatal(err)
+			}
+			if deliveries != test.wantDelivery || deliveryOutbox != test.wantDelivery {
+				t.Fatalf("delivery rows/outbox = %d/%d, want %d/%d", deliveries, deliveryOutbox, test.wantDelivery, test.wantDelivery)
+			}
+			if test.wantDelivery == 1 {
+				if recordcollaboration.ValidateNotificationDeliveryID(deliveryID) != nil || bindingID != "telegram_primary" || channel != "telegram" {
+					t.Fatalf("delivery identity = %q/%q/%q", deliveryID, bindingID, channel)
+				}
+			}
+		})
+	}
+}
+
+func TestPostgresIntegrationRecordExternalDeliveryUsesOutboxOwnerForAttemptAndTakeover(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		takeover bool
+	}{
+		{name: "sent"},
+		{name: "expired processing becomes unknown without resend", takeover: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newRecordsPostgresFixture(t, ctx)
+			seedCollaborationRevisionUsers(t, ctx, fixture)
+			runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-external-delivery", 4)
+			input := collaborationRevisionInput(t, collaborationRevisionInputValues{
+				ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
+			})
+			created, err := newRecordsPostgresRepository(
+				t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
+			).CommitRevision(ctx, recordsPostgresRevisionCommand(
+				t, recordplatform.OperationKindRecordCreate, "rec_pgexternaldelivery", "", 0, 0, input, "external-delivery-parent",
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			base, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+			provider := &notificationBindingProviderStub{}
+			bindings := &notificationBindingListerStub{
+				provider: provider,
+				byUser: map[string][]recordcollaboration.ScopedTransportBindingRef{
+					"usr_bbbbbbbbbbbbbbbbbbbbbbbb": {{
+						ProjectID: recordauth.ProjectIDDefault, RecipientUserID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
+						Channel: recordcollaboration.NotificationDeliveryTelegram, BindingID: "telegram_primary",
+					}},
+				},
+			}
+			repository := NewPostgresRecordNotificationRepositoryWithExternalBindings(
+				runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+				base.authorization, 30*24*time.Hour, bindings,
+			)
+			parentClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "external_parent")
+			if _, err := repository.ProjectNotification(ctx, parentClaim); err != nil {
+				t.Fatal(err)
+			}
+			if err := queue.MarkOutboxSent(ctx, parentClaim); err != nil {
+				t.Fatal(err)
+			}
+			claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordNotificationDelivery, "external_delivery_a")
+			preparation, err := repository.PrepareExternalDelivery(ctx, claim, "https://houfeng.example")
+			if err != nil || preparation.Prepared == nil || preparation.Validate() != nil {
+				t.Fatalf("PrepareExternalDelivery() = (%#v, %v)", preparation, err)
+			}
+			if preparation.Prepared.Attempt.RecordID != created.RecordID || preparation.Prepared.Binding.Provider != provider {
+				t.Fatalf("prepared exact scope = %#v", preparation.Prepared)
+			}
+
+			if !test.takeover {
+				result, err := repository.FinalizeExternalDelivery(
+					ctx, claim, preparation.Prepared.Attempt, recordcollaboration.ExternalDeliveryProviderSent, 0,
+				)
+				if err != nil || result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
+					t.Fatalf("FinalizeExternalDelivery(sent) = (%#v, %v)", result, err)
+				}
+				if err := queue.MarkOutboxSent(ctx, claim); err != nil {
+					t.Fatal(err)
+				}
+				assertExternalDeliveryState(t, ctx, fixture, claim.Event.SubjectID, "sent", "sent", 1)
+				return
+			}
+
+			expireNotificationClaim(t, ctx, fixture, claim.Event.RowID)
+			takeover := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordNotificationDelivery, "external_delivery_b")
+			replay, err := repository.PrepareExternalDelivery(ctx, takeover, "https://houfeng.example")
+			if err != nil || replay.Prepared != nil || replay.Result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
+				t.Fatalf("PrepareExternalDelivery(takeover) = (%#v, %v)", replay, err)
+			}
+			if _, err := repository.FinalizeExternalDelivery(
+				ctx, claim, preparation.Prepared.Attempt, recordcollaboration.ExternalDeliveryProviderSent, 0,
+			); !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+				t.Fatalf("stale FinalizeExternalDelivery() error = %v, want ErrLostOwnerLease", err)
+			}
+			if err := queue.MarkOutboxSent(ctx, takeover); err != nil {
+				t.Fatal(err)
+			}
+			assertExternalDeliveryState(t, ctx, fixture, claim.Event.SubjectID, "unknown_outcome", "unknown_outcome", 1)
+		})
+	}
+}
+
+func TestPostgresIntegrationRecordExternalDeliveryCrashTakeoverOverlapsStaleFinalizer(t *testing.T) {
+	harness := newPostgresExternalDeliveryHarness(t)
+	preparation, err := harness.repository.PrepareExternalDelivery(harness.ctx, harness.claim, "https://houfeng.example")
+	if err != nil || preparation.Prepared == nil {
+		t.Fatalf("PrepareExternalDelivery() = (%#v, %v)", preparation, err)
+	}
+	attempt := preparation.Prepared.Attempt
+	expireNotificationClaim(t, harness.ctx, harness.fixture, harness.claim.Event.RowID)
+
+	takeoverPool := harness.fixture.openDirectRuntimePool(t, harness.ctx, "record-external-delivery-live-takeover", 1)
+	for _, statement := range []string{
+		`create table public.test_record_external_delivery_takeover_latch (latch_id integer primary key)`,
+		`insert into public.test_record_external_delivery_takeover_latch (latch_id) values (1)`,
+		`create function record_platform_internal.test_record_external_delivery_takeover_overlap() returns trigger
+		 language plpgsql security definer set search_path = pg_catalog as $$
+		 begin
+		   perform latch_id from public.test_record_external_delivery_takeover_latch where latch_id = 1 for update;
+		   return new;
+		 end
+		 $$`,
+		`create trigger test_record_external_delivery_takeover_overlap after update on public.record_outbox
+		 for each row when (new.owner_id = 'external_delivery_takeover_owner' and new.owner_generation > old.owner_generation)
+		 execute function record_platform_internal.test_record_external_delivery_takeover_overlap()`,
+	} {
+		if _, err := harness.fixture.db.Exec(harness.ctx, statement); err != nil {
+			t.Fatalf("install external delivery takeover overlap latch: %v", err)
+		}
+	}
+	controlTx, err := harness.fixture.db.Begin(harness.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = controlTx.Rollback(context.Background()) }()
+	var controlPID, latchID, takeoverPID int
+	if err := controlTx.QueryRow(harness.ctx, `select pg_backend_pid()`).Scan(&controlPID); err != nil {
+		t.Fatal(err)
+	}
+	if err := controlTx.QueryRow(harness.ctx, `
+		select latch_id from public.test_record_external_delivery_takeover_latch
+		where latch_id = 1 for update`).Scan(&latchID); err != nil || latchID != 1 {
+		t.Fatalf("lock external delivery takeover latch = %d/%v", latchID, err)
+	}
+	if err := takeoverPool.QueryRow(harness.ctx, `select pg_backend_pid()`).Scan(&takeoverPID); err != nil {
+		t.Fatal(err)
+	}
+	type claimOutcome struct {
+		claim *recordplatform.ClaimedOutboxEventV1
+		err   error
+	}
+	raceCtx, cancelRace := context.WithTimeout(harness.ctx, 10*time.Second)
+	defer cancelRace()
+	takeoverResults := make(chan claimOutcome, 1)
+	go func() {
+		claim, err := NewPostgresRecordPlatformRepository(takeoverPool, allowRecordPlatformAdmissionGate).ClaimOutbox(
+			raceCtx,
+			recordplatform.OutboxClaimInputV1{OwnerID: "external_delivery_takeover_owner", OwnerLeaseDuration: time.Minute},
+		)
+		takeoverResults <- claimOutcome{claim: claim, err: err}
+	}()
+	waitForPostgresBlockingPID(t, raceCtx, harness.fixture.db, takeoverPID, controlPID)
+
+	staleResults := make(chan error, 1)
+	go func() {
+		_, err := harness.repository.FinalizeExternalDelivery(
+			raceCtx, harness.claim, attempt, recordcollaboration.ExternalDeliveryProviderSent, 0,
+		)
+		staleResults <- err
+	}()
+	select {
+	case err := <-staleResults:
+		if !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+			t.Fatalf("overlapped stale delivery finalizer error = %v, want ErrLostOwnerLease", err)
+		}
+	case <-raceCtx.Done():
+		t.Fatalf("stale delivery finalizer did not reject while takeover was in flight: %v", raceCtx.Err())
+	}
+	if err := controlTx.Commit(harness.ctx); err != nil {
+		t.Fatalf("release external delivery takeover latch: %v", err)
+	}
+	takeover := <-takeoverResults
+	if takeover.err != nil || takeover.claim == nil || takeover.claim.Event.SubjectID != harness.claim.Event.SubjectID ||
+		takeover.claim.Owner.Generation != harness.claim.Owner.Generation+1 {
+		t.Fatalf("external delivery takeover claim = (%#v, %v)", takeover.claim, takeover.err)
+	}
+	result, err := newPostgresExternalDeliveryProcessor(t, harness.repository).ProcessExternalDelivery(harness.ctx, *takeover.claim)
+	if err != nil || result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
+		t.Fatalf("ProcessExternalDelivery(takeover) = (%#v, %v)", result, err)
+	}
+	if harness.provider.calls != 0 {
+		t.Fatalf("provider calls after uncertain takeover = %d, want zero", harness.provider.calls)
+	}
+	if err := harness.queue.MarkOutboxSent(harness.ctx, *takeover.claim); err != nil {
+		t.Fatal(err)
+	}
+	assertExternalDeliveryState(t, harness.ctx, harness.fixture, harness.claim.Event.SubjectID, "unknown_outcome", "unknown_outcome", 1)
+}
+
+func TestPostgresIntegrationRecordExternalDeliveryBoundsRetriesAndTerminalOutcomes(t *testing.T) {
+	t.Run("temporary failures stop after eight sends", func(t *testing.T) {
+		harness := newPostgresExternalDeliveryHarness(t)
+		harness.provider.outcome = recordcollaboration.ExternalDeliveryProviderTemporaryFailure
+		claim := harness.claim
+		for attempt := 1; attempt <= int(recordcollaboration.MaxNotificationDeliveryAttempts); attempt++ {
+			processor := newPostgresExternalDeliveryProcessor(t, harness.repository)
+			result, err := processor.ProcessExternalDelivery(harness.ctx, claim)
+			if err != nil {
+				t.Fatalf("attempt %d ProcessExternalDelivery() error = %v", attempt, err)
+			}
+			if attempt < int(recordcollaboration.MaxNotificationDeliveryAttempts) {
+				if result.Disposition != recordcollaboration.ExternalDeliveryOutboxRetry || result.RetryAfter <= 0 {
+					t.Fatalf("attempt %d result = %#v, want retry", attempt, result)
+				}
+				if err := harness.queue.RetryOutbox(harness.ctx, claim, result.RetryAfter); err != nil {
+					t.Fatal(err)
+				}
+				forceExternalDeliveryRetryDue(t, harness, claim.Event.RowID)
+				claim = claimNotificationOutboxKind(t, harness.ctx, harness.queue, recordplatform.OutboxEventKindRecordNotificationDelivery, fmt.Sprintf("external_retry_%d", attempt+1))
+				continue
+			}
+			if result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
+				t.Fatalf("attempt eight result = %#v, want complete terminal", result)
+			}
+			if err := harness.queue.MarkOutboxSent(harness.ctx, claim); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if harness.provider.calls != int(recordcollaboration.MaxNotificationDeliveryAttempts) {
+			t.Fatalf("provider calls = %d, want %d", harness.provider.calls, recordcollaboration.MaxNotificationDeliveryAttempts)
+		}
+		assertExternalDeliveryState(t, harness.ctx, harness.fixture, claim.Event.SubjectID, "permanent_failure", "temporary_failure", int(recordcollaboration.MaxNotificationDeliveryAttempts))
+		var exhaustedReason string
+		if err := harness.fixture.db.QueryRow(harness.ctx, `select reason_code from public.record_notification_deliveries where delivery_id = $1`, claim.Event.SubjectID).Scan(&exhaustedReason); err != nil {
+			t.Fatal(err)
+		}
+		if exhaustedReason != "attempts_exhausted" {
+			t.Fatalf("terminal reason = %q, want attempts_exhausted", exhaustedReason)
+		}
+	})
+
+	for _, test := range []struct {
+		name      string
+		outcome   recordcollaboration.ExternalDeliveryProviderOutcome
+		wantState string
+	}{
+		{name: "permanent", outcome: recordcollaboration.ExternalDeliveryProviderPermanentFailure, wantState: "permanent_failure"},
+		{name: "provider unknown", outcome: recordcollaboration.ExternalDeliveryProviderUnknownOutcome, wantState: "unknown_outcome"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			harness := newPostgresExternalDeliveryHarness(t)
+			harness.provider.outcome = test.outcome
+			result, err := newPostgresExternalDeliveryProcessor(t, harness.repository).ProcessExternalDelivery(harness.ctx, harness.claim)
+			if err != nil || result.Disposition != recordcollaboration.ExternalDeliveryOutboxComplete {
+				t.Fatalf("ProcessExternalDelivery() = (%#v, %v)", result, err)
+			}
+			if err := harness.queue.MarkOutboxSent(harness.ctx, harness.claim); err != nil {
+				t.Fatal(err)
+			}
+			assertExternalDeliveryState(t, harness.ctx, harness.fixture, harness.claim.Event.SubjectID, test.wantState, string(test.outcome), 1)
+		})
+	}
+}
+
+func TestPostgresIntegrationRecordExternalDeliveryRechecksEveryPreSendAuthority(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		mutate     func(*testing.T, *postgresExternalDeliveryHarness)
+		wantError  bool
+		wantState  string
+		wantOutbox recordcollaboration.ExternalDeliveryOutboxDisposition
+	}{
+		{
+			name: "membership revoked",
+			mutate: func(t *testing.T, harness *postgresExternalDeliveryHarness) {
+				if _, err := harness.fixture.db.Exec(harness.ctx, `update public.users set role = 'viewer' where user_id = 'usr_bbbbbbbbbbbbbbbbbbbbbbbb'`); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantState: "cancelled", wantOutbox: recordcollaboration.ExternalDeliveryOutboxCancel,
+		},
+		{
+			name: "authorization epoch stale",
+			mutate: func(t *testing.T, harness *postgresExternalDeliveryHarness) {
+				if _, err := harness.fixture.db.Exec(harness.ctx, `update public.records set authorization_epoch = authorization_epoch + 1 where record_id = $1`, harness.created.RecordID); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantState: "cancelled", wantOutbox: recordcollaboration.ExternalDeliveryOutboxCancel,
+		},
+		{
+			name: "record fence stale",
+			mutate: func(t *testing.T, harness *postgresExternalDeliveryHarness) {
+				harness.fixture.advanceContentDeliveryEpoch(t, harness.ctx, recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: harness.created.RecordID})
+			},
+			wantState: "cancelled", wantOutbox: recordcollaboration.ExternalDeliveryOutboxCancel,
+		},
+		{
+			name: "current source unavailable",
+			mutate: func(_ *testing.T, harness *postgresExternalDeliveryHarness) {
+				harness.resolver.err = errors.New("source dependency unavailable: credential=secret")
+			},
+			wantError: true, wantState: "pending",
+		},
+		{
+			name: "source authorization revoked",
+			mutate: func(t *testing.T, harness *postgresExternalDeliveryHarness) {
+				restricted := collaborationVisibility(t, recordauth.VisibilityKindRestricted, []string{"rag_revoked"})
+				harness.resolver.resolved.CaptureAuthorization = collaborationSourceAuthorization(t,
+					harness.resolver.resolved.CaptureAuthorization.CaptureScope, restricted, recordauth.SourceStateTombstoned,
+				)
+			},
+			wantState: "cancelled", wantOutbox: recordcollaboration.ExternalDeliveryOutboxCancel,
+		},
+		{
+			name: "record deletion reserved",
+			mutate: func(t *testing.T, harness *postgresExternalDeliveryHarness) {
+				seedExternalDeliveryDeletionReservation(t, harness)
+			},
+			wantState: "cancelled", wantOutbox: recordcollaboration.ExternalDeliveryOutboxCancel,
+		},
+		{
+			name: "binding unbound",
+			mutate: func(_ *testing.T, harness *postgresExternalDeliveryHarness) {
+				harness.bindings.byUser = nil
+			},
+			wantState: "cancelled", wantOutbox: recordcollaboration.ExternalDeliveryOutboxCancel,
+		},
+		{
+			name: "binding dependency unavailable",
+			mutate: func(_ *testing.T, harness *postgresExternalDeliveryHarness) {
+				harness.bindings.resolveErr = errors.New("binding backend unavailable: credential=secret")
+			},
+			wantError: true, wantState: "pending",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			harness := newPostgresExternalDeliveryHarness(t)
+			test.mutate(t, harness)
+			result, err := newPostgresExternalDeliveryProcessor(t, harness.repository).ProcessExternalDelivery(harness.ctx, harness.claim)
+			if test.wantError {
+				if !errors.Is(err, recordcollaboration.ErrExternalDeliveryUnavailable) || strings.Contains(err.Error(), "secret") {
+					t.Fatalf("ProcessExternalDelivery() error = %v, want sanitized dependency unavailable", err)
+				}
+			} else if err != nil || result.Disposition != test.wantOutbox {
+				t.Fatalf("ProcessExternalDelivery() = (%#v, %v), want %q", result, err, test.wantOutbox)
+			}
+			if harness.provider.calls != 0 {
+				t.Fatalf("provider calls = %d, want zero", harness.provider.calls)
+			}
+			var state string
+			if err := harness.fixture.db.QueryRow(harness.ctx, `select delivery_state from public.record_notification_deliveries where delivery_id = $1`, harness.claim.Event.SubjectID).Scan(&state); err != nil {
+				t.Fatal(err)
+			}
+			if state != test.wantState {
+				t.Fatalf("delivery state = %q, want %q", state, test.wantState)
+			}
+		})
+	}
+}
+
 func TestPostgresIntegrationRecordInboxRecomputesCurrentRecipientAndProjectionReconciles(t *testing.T) {
 	t.Run("mute hides optional but preserves mandatory", func(t *testing.T) {
 		ctx := context.Background()
@@ -1261,6 +1690,192 @@ type countingCollaborationMembershipReader struct {
 	calls    int
 }
 
+type notificationBindingListerStub struct {
+	byUser     map[string][]recordcollaboration.ScopedTransportBindingRef
+	err        error
+	resolveErr error
+	provider   recordcollaboration.ExternalDeliveryProvider
+}
+
+func (reader *notificationBindingListerStub) ListScopedTransportBindings(
+	_ context.Context,
+	_ pgx.Tx,
+	projectID recordauth.ProjectID,
+	recipientUserID string,
+) ([]recordcollaboration.ScopedTransportBindingRef, error) {
+	if reader.err != nil {
+		return nil, reader.err
+	}
+	if projectID != recordauth.ProjectIDDefault {
+		return nil, errors.New("unexpected project")
+	}
+	return append([]recordcollaboration.ScopedTransportBindingRef(nil), reader.byUser[recipientUserID]...), nil
+}
+
+func (reader *notificationBindingListerStub) ResolveScopedTransportBinding(
+	_ context.Context,
+	_ pgx.Tx,
+	want recordcollaboration.ScopedTransportBindingRef,
+) (recordcollaboration.ScopedTransportBinding, error) {
+	if reader.resolveErr != nil {
+		return recordcollaboration.ScopedTransportBinding{}, reader.resolveErr
+	}
+	for _, candidate := range reader.byUser[want.RecipientUserID] {
+		if candidate == want {
+			return recordcollaboration.ScopedTransportBinding{
+				ProjectID: candidate.ProjectID, RecipientUserID: candidate.RecipientUserID,
+				Channel: candidate.Channel, BindingID: candidate.BindingID, Provider: reader.provider,
+			}, nil
+		}
+	}
+	return recordcollaboration.ScopedTransportBinding{}, recordcollaboration.ErrScopedTransportBindingNotFound
+}
+
+type notificationBindingProviderStub struct {
+	outcome  recordcollaboration.ExternalDeliveryProviderOutcome
+	calls    int
+	messages []recordcollaboration.SafeExternalDelivery
+}
+
+func (provider *notificationBindingProviderStub) SendExternalDelivery(_ context.Context, message recordcollaboration.SafeExternalDelivery) recordcollaboration.ExternalDeliveryProviderOutcome {
+	provider.calls++
+	provider.messages = append(provider.messages, message)
+	if provider.outcome == "" {
+		return recordcollaboration.ExternalDeliveryProviderSent
+	}
+	return provider.outcome
+}
+
+type postgresExternalDeliveryHarness struct {
+	ctx        context.Context
+	fixture    recordPlatformPostgresFixture
+	repository *PostgresRecordNotificationRepository
+	queue      *PostgresRecordPlatformRepository
+	claim      recordplatform.ClaimedOutboxEventV1
+	provider   *notificationBindingProviderStub
+	bindings   *notificationBindingListerStub
+	resolver   *fakeCurrentRecordSubjectResolver
+	created    records.RevisionCommitResult
+}
+
+func newPostgresExternalDeliveryHarness(t *testing.T) *postgresExternalDeliveryHarness {
+	t.Helper()
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-external-delivery-matrix", 5)
+	input := collaborationRevisionInput(t, collaborationRevisionInputValues{
+		ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
+	})
+	created, err := newRecordsPostgresRepository(
+		t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
+	).CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordCreate, "rec_pgexternalmatrix", "", 0, 0, input, "external-delivery-matrix-parent",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedSubject := input.Subjects()[0]
+	identity, err := records.NewSubjectIdentitySnapshot(storedSubject.Kind, storedSubject.IdentitySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &fakeCurrentRecordSubjectResolver{resolved: records.ResolvedSubject{
+		ProjectID: recordauth.ProjectIDDefault, StableID: storedSubject.SourceID,
+		IdentitySnapshot: identity, LiveRoute: "/vps/" + storedSubject.SourceID,
+		CaptureAuthorization: storedSubject.CaptureAuthorization,
+	}}
+	authorization := newPostgresCurrentRecordAuthorizationSource(runtimePool, resolver, allowRecordPlatformAdmissionGate)
+	provider := &notificationBindingProviderStub{}
+	bindings := &notificationBindingListerStub{
+		provider: provider,
+		byUser: map[string][]recordcollaboration.ScopedTransportBindingRef{
+			"usr_bbbbbbbbbbbbbbbbbbbbbbbb": {{
+				ProjectID: recordauth.ProjectIDDefault, RecipientUserID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
+				Channel: recordcollaboration.NotificationDeliveryTelegram, BindingID: "telegram_primary",
+			}},
+		},
+	}
+	repository := NewPostgresRecordNotificationRepositoryWithExternalBindings(
+		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+		authorization, 30*24*time.Hour, bindings,
+	)
+	queue := NewPostgresRecordPlatformRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	parentClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "external_matrix_parent")
+	if _, err := repository.ProjectNotification(ctx, parentClaim); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.MarkOutboxSent(ctx, parentClaim); err != nil {
+		t.Fatal(err)
+	}
+	claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordNotificationDelivery, "external_matrix_delivery")
+	return &postgresExternalDeliveryHarness{
+		ctx: ctx, fixture: fixture, repository: repository, queue: queue, claim: claim,
+		provider: provider, bindings: bindings, resolver: resolver, created: created,
+	}
+}
+
+type postgresExternalDeliveryClock struct{}
+
+func (postgresExternalDeliveryClock) Now() time.Time { return time.Now().UTC() }
+
+func newPostgresExternalDeliveryProcessor(t *testing.T, repository *PostgresRecordNotificationRepository) *recordcollaboration.ScopedExternalDeliveryProcessor {
+	t.Helper()
+	processor, err := recordcollaboration.NewScopedExternalDeliveryProcessor(
+		repository,
+		recordcollaboration.ScopedExternalDeliveryProcessorOptions{
+			PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
+			Clock: postgresExternalDeliveryClock{},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return processor
+}
+
+func forceExternalDeliveryRetryDue(t *testing.T, harness *postgresExternalDeliveryHarness, outboxRowID int64) {
+	t.Helper()
+	if _, err := harness.fixture.db.Exec(harness.ctx, `
+		update public.record_outbox set next_attempt_at = transaction_timestamp() - interval '1 second'
+		where outbox_row_id = $1`, outboxRowID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := harness.fixture.db.Exec(harness.ctx, `
+		update public.record_notification_deliveries set next_attempt_at = transaction_timestamp() - interval '1 second'
+		where delivery_id = $1`, harness.claim.Event.SubjectID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func seedExternalDeliveryDeletionReservation(t *testing.T, harness *postgresExternalDeliveryHarness) {
+	t.Helper()
+	if _, err := harness.fixture.db.Exec(harness.ctx, `
+		insert into public.deletion_reservations (
+			reservation_id, project_id, object_kind, object_id,
+			deletion_token_commitment, request_fingerprint,
+			actor_scope_digest, preview_binding_digest,
+			preview_current_revision_id, preview_lock_version,
+			preview_authorization_epoch, preview_content_delivery_epoch,
+			preview_dependency_graph_digest, preview_backup_inventory_digest,
+			preview_processor_inventory_digest, adapter_readiness_digest,
+			adapter_preview_digest, preview_witness_sequence,
+			preview_witness_entry_hash, state, expires_at, completed_at
+		) values (
+			'drs_externaldelivery', 'default', 'record', $1,
+			decode(repeat('41', 32), 'hex'), decode(repeat('42', 32), 'hex'),
+			decode(repeat('43', 32), 'hex'), decode(repeat('44', 32), 'hex'),
+			$2, $3, $4, 0,
+			decode(repeat('45', 32), 'hex'), decode(repeat('46', 32), 'hex'),
+			decode(repeat('47', 32), 'hex'), decode(repeat('48', 32), 'hex'),
+			decode(repeat('49', 32), 'hex'), 1,
+			decode(repeat('4a', 32), 'hex'), 'committed',
+			transaction_timestamp() + interval '5 minutes', transaction_timestamp()
+		)`, harness.created.RecordID, harness.created.RevisionID, harness.created.LockVersion, harness.created.AuthorizationEpoch); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (reader *countingCollaborationMembershipReader) ReadMemberActor(ctx context.Context, tx pgx.Tx, projectID recordauth.ProjectID, userID string) (recordauth.ActorScope, error) {
 	reader.calls++
 	return reader.delegate.ReadMemberActor(ctx, tx, projectID, userID)
@@ -1337,5 +1952,30 @@ func assertPostgresNotificationCounts(t *testing.T, ctx context.Context, fixture
 	}
 	if notifications != wantNotifications || recipients != wantRecipients {
 		t.Fatalf("projected notifications/recipients = %d/%d, want %d/%d", notifications, recipients, wantNotifications, wantRecipients)
+	}
+}
+
+func assertExternalDeliveryState(
+	t *testing.T,
+	ctx context.Context,
+	fixture recordPlatformPostgresFixture,
+	deliveryID, wantState, wantOutcome string,
+	wantAttempts int,
+) {
+	t.Helper()
+	var state string
+	var attemptCount, attempts int
+	var outcome string
+	if err := fixture.db.QueryRow(ctx, `
+		select delivery_state, attempt_count,
+		       (select count(*)::int from public.record_notification_delivery_attempts where delivery_id = $1),
+		       coalesce((select max(outcome) from public.record_notification_delivery_attempts where delivery_id = $1), '')
+		from public.record_notification_deliveries where delivery_id = $1`, deliveryID).Scan(
+		&state, &attemptCount, &attempts, &outcome,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if state != wantState || attemptCount != wantAttempts || attempts != wantAttempts || outcome != wantOutcome {
+		t.Fatalf("delivery state/count/attempts/outcome = %q/%d/%d/%q, want %q/%d/%d/%q", state, attemptCount, attempts, outcome, wantState, wantAttempts, wantAttempts, wantOutcome)
 	}
 }

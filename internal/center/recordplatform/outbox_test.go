@@ -113,6 +113,30 @@ func TestOutboxEventV1AcceptsOnlyClosedNotificationProducerKinds(t *testing.T) {
 	}
 }
 
+func TestOutboxEventV1AcceptsClosedExternalDeliveryIdentity(t *testing.T) {
+	event := OutboxEvent{
+		ProjectID: string(ProjectIDDefault), EventKind: OutboxEventKindRecordNotificationDelivery,
+		SubjectKind: OutboxSubjectKindDelivery, SubjectID: "rnd_0123456789abcdef",
+		SourceVersion: 7, AuthorizationEpoch: 11, RecordFenceEpoch: 13,
+	}
+	if err := event.Validate(); err != nil {
+		t.Fatalf("Validate(delivery) error = %v", err)
+	}
+
+	for _, mutate := range []func(*OutboxEvent){
+		func(value *OutboxEvent) { value.SubjectKind = OutboxSubjectKindRecord },
+		func(value *OutboxEvent) { value.SubjectID = "rnt_0123456789abcdef" },
+		func(value *OutboxEvent) { value.SourceVersion = 0 },
+		func(value *OutboxEvent) { value.AuthorizationEpoch = 0 },
+	} {
+		candidate := event
+		mutate(&candidate)
+		if err := candidate.Validate(); !errors.Is(err, ErrInvalidOutboxEvent) {
+			t.Errorf("Validate(%#v) error = %v, want ErrInvalidOutboxEvent", candidate, err)
+		}
+	}
+}
+
 func TestOutboxEventV1RequiresExactSourceVersionOnlyForNotificationProducerKinds(t *testing.T) {
 	t.Parallel()
 

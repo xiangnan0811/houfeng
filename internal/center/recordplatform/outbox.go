@@ -14,28 +14,30 @@ var (
 )
 
 const (
-	OutboxEventKindRecordCreated            = "record_created"
-	OutboxEventKindRecordUpdated            = "record_updated"
-	OutboxEventKindRecordDeleted            = "record_deleted"
-	OutboxEventKindRecordOwnerChanged       = "record_owner_changed"
-	OutboxEventKindRecordParticipantChanged = "record_participant_changed"
-	OutboxEventKindRecordActionCreated      = "record_action_created"
-	OutboxEventKindRecordActionUpdated      = "record_action_updated"
-	OutboxEventKindRecordActionAssigned     = "record_action_assigned"
-	OutboxEventKindRecordActionCompleted    = "record_action_completed"
-	OutboxEventKindRecordActionCancelled    = "record_action_cancelled"
-	OutboxEventKindRecordActionReopened     = "record_action_reopened"
-	OutboxEventKindRecordCommentCreated     = "record_comment_created"
-	OutboxEventKindRecordCommentEdited      = "record_comment_edited"
-	OutboxEventKindRecordCommentRedacted    = "record_comment_redacted"
-	OutboxEventKindRecordCommentReplied     = "record_comment_replied"
-	OutboxEventKindRecordCommentMentioned   = "record_comment_mentioned"
+	OutboxEventKindRecordCreated              = "record_created"
+	OutboxEventKindRecordUpdated              = "record_updated"
+	OutboxEventKindRecordDeleted              = "record_deleted"
+	OutboxEventKindRecordOwnerChanged         = "record_owner_changed"
+	OutboxEventKindRecordParticipantChanged   = "record_participant_changed"
+	OutboxEventKindRecordActionCreated        = "record_action_created"
+	OutboxEventKindRecordActionUpdated        = "record_action_updated"
+	OutboxEventKindRecordActionAssigned       = "record_action_assigned"
+	OutboxEventKindRecordActionCompleted      = "record_action_completed"
+	OutboxEventKindRecordActionCancelled      = "record_action_cancelled"
+	OutboxEventKindRecordActionReopened       = "record_action_reopened"
+	OutboxEventKindRecordCommentCreated       = "record_comment_created"
+	OutboxEventKindRecordCommentEdited        = "record_comment_edited"
+	OutboxEventKindRecordCommentRedacted      = "record_comment_redacted"
+	OutboxEventKindRecordCommentReplied       = "record_comment_replied"
+	OutboxEventKindRecordCommentMentioned     = "record_comment_mentioned"
+	OutboxEventKindRecordNotificationDelivery = "record_notification_delivery"
 )
 
 const (
-	OutboxSubjectKindRecord  = "record"
-	OutboxSubjectKindAction  = "action"
-	OutboxSubjectKindComment = "comment"
+	OutboxSubjectKindRecord   = "record"
+	OutboxSubjectKindAction   = "action"
+	OutboxSubjectKindComment  = "comment"
+	OutboxSubjectKindDelivery = "delivery"
 )
 
 // OutboxEvent contains only durable identity and authorization epoch data. It
@@ -97,12 +99,16 @@ func (event OutboxEvent) Validate() error {
 	if event.SubjectKind != expectedSubjectKind {
 		return fmt.Errorf("%w: subject kind", ErrInvalidOutboxEvent)
 	}
-	if !validOutboxSubjectID(event.SubjectID) {
+	if !validOutboxSubjectID(event.SubjectID) ||
+		(event.SubjectKind == OutboxSubjectKindDelivery && !validDeliveryOutboxSubjectID(event.SubjectID)) {
 		return fmt.Errorf("%w: subject id", ErrInvalidOutboxEvent)
 	}
 	notification := notificationProducingOutboxEventKind(event.EventKind)
 	if event.SourceVersion > math.MaxInt64 || notification != (event.SourceVersion > 0) {
 		return fmt.Errorf("%w: source version", ErrInvalidOutboxEvent)
+	}
+	if notification && (event.AuthorizationEpoch == 0 || event.AuthorizationEpoch > math.MaxInt64) {
+		return fmt.Errorf("%w: authorization epoch", ErrInvalidOutboxEvent)
 	}
 	if event.RecordFenceEpoch > math.MaxInt64 || (!notification && event.RecordFenceEpoch != 0) {
 		return fmt.Errorf("%w: record fence epoch", ErrInvalidOutboxEvent)
@@ -118,7 +124,8 @@ func notificationProducingOutboxEventKind(kind string) bool {
 		OutboxEventKindRecordActionCompleted,
 		OutboxEventKindRecordActionCancelled,
 		OutboxEventKindRecordCommentReplied,
-		OutboxEventKindRecordCommentMentioned:
+		OutboxEventKindRecordCommentMentioned,
+		OutboxEventKindRecordNotificationDelivery:
 		return true
 	default:
 		return false
@@ -188,9 +195,24 @@ func outboxSubjectKindForEventKind(kind string) (string, bool) {
 		OutboxEventKindRecordCommentReplied,
 		OutboxEventKindRecordCommentMentioned:
 		return OutboxSubjectKindComment, true
+	case OutboxEventKindRecordNotificationDelivery:
+		return OutboxSubjectKindDelivery, true
 	default:
 		return "", false
 	}
+}
+
+func validDeliveryOutboxSubjectID(value string) bool {
+	const prefix = "rnd_"
+	if len(value) < len(prefix)+1 || len(value) > len(prefix)+64 || value[:len(prefix)] != prefix {
+		return false
+	}
+	for _, character := range value[len(prefix):] {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func validOutboxSubjectID(value string) bool {

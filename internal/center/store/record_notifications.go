@@ -21,6 +21,20 @@ type PostgresRecordNotificationRepository struct {
 	members       CollaborationMembershipReader
 	authorization *PostgresCurrentRecordAuthorizationSource
 	retention     time.Duration
+	bindings      ScopedTransportBindingSource
+}
+
+type ScopedTransportBindingLister interface {
+	ListScopedTransportBindings(context.Context, pgx.Tx, recordauth.ProjectID, string) ([]recordcollaboration.ScopedTransportBindingRef, error)
+}
+
+type ScopedTransportBindingResolver interface {
+	ResolveScopedTransportBinding(context.Context, pgx.Tx, recordcollaboration.ScopedTransportBindingRef) (recordcollaboration.ScopedTransportBinding, error)
+}
+
+type ScopedTransportBindingSource interface {
+	ScopedTransportBindingLister
+	ScopedTransportBindingResolver
 }
 
 func NewPostgresRecordNotificationRepository(
@@ -30,9 +44,31 @@ func NewPostgresRecordNotificationRepository(
 	authorization *PostgresCurrentRecordAuthorizationSource,
 	retention time.Duration,
 ) *PostgresRecordNotificationRepository {
+	return newPostgresRecordNotificationRepository(pool, gate, members, authorization, retention, nil)
+}
+
+func NewPostgresRecordNotificationRepositoryWithExternalBindings(
+	pool *pgxpool.Pool,
+	gate AdmissionGate,
+	members CollaborationMembershipReader,
+	authorization *PostgresCurrentRecordAuthorizationSource,
+	retention time.Duration,
+	bindings ScopedTransportBindingSource,
+) *PostgresRecordNotificationRepository {
+	return newPostgresRecordNotificationRepository(pool, gate, members, authorization, retention, bindings)
+}
+
+func newPostgresRecordNotificationRepository(
+	pool *pgxpool.Pool,
+	gate AdmissionGate,
+	members CollaborationMembershipReader,
+	authorization *PostgresCurrentRecordAuthorizationSource,
+	retention time.Duration,
+	bindings ScopedTransportBindingSource,
+) *PostgresRecordNotificationRepository {
 	return &PostgresRecordNotificationRepository{
 		platform: NewPostgresRecordPlatformRepository(pool, gate), members: members,
-		authorization: authorization, retention: retention,
+		authorization: authorization, retention: retention, bindings: bindings,
 	}
 }
 
@@ -47,14 +83,17 @@ func (repository *PostgresRecordNotificationRepository) ProjectNotification(ctx 
 		return recordcollaboration.NotificationProjectionResult{}, recordcollaboration.ErrNotificationSourceMissing
 	}
 	var result recordcollaboration.NotificationProjectionResult
+	var facts recordcollaboration.NotificationEventFacts
+	var allowed []recordcollaboration.NotificationRecipientFacts
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		if err := transaction.AssertOutboxClaim(ctx, claim); err != nil {
 			return err
 		}
-		facts, direct, err := loadNotificationSourceFacts(ctx, transaction.tx, claim.Event, kind)
-		if err != nil {
-			return err
+		loadedFacts, direct, loadErr := loadNotificationSourceFacts(ctx, transaction.tx, claim.Event, kind)
+		if loadErr != nil {
+			return loadErr
 		}
+		facts = loadedFacts
 		if err := assertRecordReadFence(ctx, transaction.tx, facts.RecordID); err != nil {
 			return err
 		}
@@ -77,7 +116,7 @@ func (repository *PostgresRecordNotificationRepository) ProjectNotification(ctx 
 		if err != nil {
 			return err
 		}
-		allowed := make([]recordcollaboration.NotificationRecipientFacts, 0, len(candidates))
+		allowed = make([]recordcollaboration.NotificationRecipientFacts, 0, len(candidates))
 		for _, candidate := range candidates {
 			actor, err := repository.members.ReadMemberActor(ctx, transaction.tx, recordauth.ProjectIDDefault, candidate.UserID)
 			if errors.Is(err, recordcollaboration.ErrMembershipDenied) {
@@ -115,7 +154,105 @@ func (repository *PostgresRecordNotificationRepository) ProjectNotification(ctx 
 	if err != nil {
 		return recordcollaboration.NotificationProjectionResult{}, err
 	}
+	if result.RecipientCount > 0 && !nilCollaborationDependency(repository.bindings) {
+		_ = repository.scheduleExternalNotificationDeliveries(ctx, facts, result.NotificationID, allowed)
+	}
 	return result, nil
+}
+
+func (repository *PostgresRecordNotificationRepository) scheduleExternalNotificationDeliveries(
+	ctx context.Context,
+	facts recordcollaboration.NotificationEventFacts,
+	notificationID string,
+	recipients []recordcollaboration.NotificationRecipientFacts,
+) error {
+	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.bindings) ||
+		facts.Validate() != nil || notificationID != facts.NotificationID() || repository.retention.Microseconds() <= 0 {
+		return recordcollaboration.ErrInvalidNotificationProjector
+	}
+	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		for _, recipient := range recipients {
+			if recipient.Validate() != nil {
+				return recordcollaboration.ErrInvalidNotificationFacts
+			}
+			bindings, err := repository.bindings.ListScopedTransportBindings(
+				ctx, transaction.tx, recordauth.ProjectIDDefault, recipient.UserID,
+			)
+			if err != nil {
+				return fmt.Errorf("list scoped record notification bindings: %w", err)
+			}
+			seenChannels := make(map[recordcollaboration.NotificationDeliveryChannel]struct{}, len(bindings))
+			for _, binding := range bindings {
+				if binding.Validate() != nil || binding.ProjectID != recordauth.ProjectIDDefault || binding.RecipientUserID != recipient.UserID {
+					return recordcollaboration.ErrInvalidScopedTransportBinding
+				}
+				if _, exists := seenChannels[binding.Channel]; exists {
+					return recordcollaboration.ErrInvalidScopedTransportBinding
+				}
+				seenChannels[binding.Channel] = struct{}{}
+				if err := scheduleExternalNotificationDelivery(ctx, transaction, facts, notificationID, binding, repository.retention); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+func scheduleExternalNotificationDelivery(
+	ctx context.Context,
+	transaction *RecordPlatformTransaction,
+	facts recordcollaboration.NotificationEventFacts,
+	notificationID string,
+	binding recordcollaboration.ScopedTransportBindingRef,
+	retention time.Duration,
+) error {
+	deliveryID := recordcollaboration.NotificationDeliveryID(notificationID, binding.RecipientUserID, binding.Channel, binding.BindingID)
+	if transaction == nil || transaction.tx == nil || deliveryID == "" {
+		return recordcollaboration.ErrInvalidScopedTransportBinding
+	}
+	result, err := transaction.tx.Exec(ctx, `
+		insert into public.record_notification_deliveries (
+			delivery_id, record_id, notification_id, recipient_user_id, channel,
+			binding_id, authorization_epoch, record_fence_epoch
+		) values ($1, $2, $3, $4, $5, $6, $7, $8)
+		on conflict (notification_id, recipient_user_id, channel) do nothing`,
+		deliveryID, facts.RecordID, notificationID, binding.RecipientUserID, string(binding.Channel),
+		binding.BindingID, int64(facts.AuthorizationEpoch), int64(facts.RecordFenceEpoch),
+	)
+	if err != nil {
+		return fmt.Errorf("insert scoped record notification delivery: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		var existingDeliveryID, recordID, bindingID string
+		var authorizationEpoch, recordFenceEpoch int64
+		if err := transaction.tx.QueryRow(ctx, `
+			select delivery_id, record_id, binding_id, authorization_epoch, record_fence_epoch
+			from public.record_notification_deliveries
+			where notification_id = $1 and recipient_user_id = $2 and channel = $3`,
+			notificationID, binding.RecipientUserID, string(binding.Channel),
+		).Scan(&existingDeliveryID, &recordID, &bindingID, &authorizationEpoch, &recordFenceEpoch); err != nil {
+			return fmt.Errorf("verify scoped record notification delivery: %w", err)
+		}
+		if existingDeliveryID != deliveryID || recordID != facts.RecordID || bindingID != binding.BindingID ||
+			authorizationEpoch != int64(facts.AuthorizationEpoch) || recordFenceEpoch != int64(facts.RecordFenceEpoch) {
+			return recordcollaboration.ErrInvalidScopedTransportBinding
+		}
+		return nil
+	}
+	_, err = transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
+		Event: recordplatform.OutboxEvent{
+			ProjectID: string(recordplatform.ProjectIDDefault), EventKind: recordplatform.OutboxEventKindRecordNotificationDelivery,
+			SubjectKind: recordplatform.OutboxSubjectKindDelivery, SubjectID: deliveryID,
+			SourceVersion: facts.SourceVersion, AuthorizationEpoch: facts.AuthorizationEpoch,
+			RecordFenceEpoch: facts.RecordFenceEpoch,
+		},
+		ExpiresAfter: retention,
+	})
+	if err != nil {
+		return fmt.Errorf("enqueue scoped record notification delivery: %w", err)
+	}
+	return nil
 }
 
 func (repository *PostgresRecordNotificationRepository) resolveCurrentAuthorizationInTransaction(ctx context.Context, tx pgx.Tx, actor recordauth.ActorScope, recordID string) (records.CurrentRecordAuthorization, error) {
