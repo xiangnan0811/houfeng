@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"houfeng/internal/center/notify"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
 )
@@ -20,6 +21,10 @@ const safeExternalDeliverySummary = "A Houfeng Record collaboration update is av
 const notificationDeliveryIdentityDomainV1 = "houfeng.record-collaboration.notification-delivery.v1"
 
 const notificationDeliveryAttemptIdentityDomainV1 = "houfeng.record-collaboration.notification-delivery-attempt.v1"
+
+const MaxExternalDeliverySendTimeout = 30 * time.Second
+
+const externalDeliveryLeaseSafetyMargin = time.Millisecond
 
 var (
 	ErrInvalidScopedTransportBinding    = errors.New("invalid scoped record notification transport binding")
@@ -36,17 +41,24 @@ type SafeExternalDelivery struct {
 }
 
 func (delivery SafeExternalDelivery) Validate() error {
-	if delivery.Summary != safeExternalDeliverySummary {
+	if delivery.Summary != safeExternalDeliverySummary || len(delivery.Link) == 0 || len(delivery.Link) > 2048 {
 		return ErrInvalidSafeExternalDelivery
 	}
 	parsed, err := url.Parse(delivery.Link)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" ||
+		parsed.Opaque != "" || parsed.RawPath != "" || parsed.ForceQuery ||
 		!strings.HasPrefix(parsed.Path, "/records/") || len(strings.TrimPrefix(parsed.Path, "/records/")) == 0 {
 		return ErrInvalidSafeExternalDelivery
 	}
 	recordID := strings.TrimPrefix(parsed.Path, "/records/")
-	notificationID := parsed.Query().Get("notification")
-	if !validRecordID(recordID) || !validNotificationID(notificationID) || len(parsed.Query()) != 1 {
+	values := parsed.Query()
+	notificationValues, exists := values["notification"]
+	if !validRecordID(recordID) || !exists || len(values) != 1 || len(notificationValues) != 1 ||
+		!validNotificationID(notificationValues[0]) {
+		return ErrInvalidSafeExternalDelivery
+	}
+	canonicalQuery := url.Values{"notification": []string{notificationValues[0]}}.Encode()
+	if parsed.Path != "/records/"+recordID || parsed.RawQuery != canonicalQuery || parsed.String() != delivery.Link {
 		return ErrInvalidSafeExternalDelivery
 	}
 	return nil
@@ -95,7 +107,18 @@ func (provider ScopedNotifierProvider) SendExternalDelivery(ctx context.Context,
 		return ExternalDeliveryProviderUnknownOutcome
 	}
 	if err := provider.notifier.Send(ctx, delivery.Summary+"\n"+delivery.Link); err != nil {
-		return ExternalDeliveryProviderUnknownOutcome
+		failureClass, classified := notify.ClassifySendFailure(err)
+		if !classified {
+			return ExternalDeliveryProviderUnknownOutcome
+		}
+		switch failureClass {
+		case notify.SendFailureTemporary:
+			return ExternalDeliveryProviderTemporaryFailure
+		case notify.SendFailurePermanent:
+			return ExternalDeliveryProviderPermanentFailure
+		default:
+			return ExternalDeliveryProviderUnknownOutcome
+		}
 	}
 	return ExternalDeliveryProviderSent
 }
@@ -158,7 +181,7 @@ func RenderSafeExternalDelivery(baseURL, recordID, notificationID string) (SafeE
 	parsed, err := url.Parse(baseURL)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil ||
 		parsed.Opaque != "" || (parsed.Path != "" && parsed.Path != "/") || parsed.RawPath != "" ||
-		parsed.RawQuery != "" || parsed.Fragment != "" {
+		parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
 		return SafeExternalDelivery{}, ErrInvalidSafeExternalDelivery
 	}
 	parsed.Path = "/records/" + recordID
@@ -314,6 +337,7 @@ type ExternalDeliveryStore interface {
 type ScopedExternalDeliveryProcessorOptions struct {
 	PublicBaseURL  string
 	RetryBaseDelay time.Duration
+	SendTimeout    time.Duration
 	Clock          recordplatform.Clock
 }
 
@@ -323,7 +347,11 @@ type ScopedExternalDeliveryProcessor struct {
 }
 
 func NewScopedExternalDeliveryProcessor(store ExternalDeliveryStore, options ScopedExternalDeliveryProcessorOptions) (*ScopedExternalDeliveryProcessor, error) {
-	if nilExternalDeliveryDependency(store) || nilExternalDeliveryDependency(options.Clock) || options.RetryBaseDelay.Microseconds() <= 0 {
+	if nilExternalDeliveryDependency(store) || nilExternalDeliveryDependency(options.Clock) || options.RetryBaseDelay.Microseconds() <= 0 ||
+		options.SendTimeout.Microseconds() <= 0 || options.SendTimeout > MaxExternalDeliverySendTimeout {
+		return nil, ErrInvalidExternalDeliveryProcessor
+	}
+	if _, retryable := ExternalDeliveryRetryDelay(options.RetryBaseDelay, MaxNotificationDeliveryAttempts-1); !retryable {
 		return nil, ErrInvalidExternalDeliveryProcessor
 	}
 	if _, err := RenderSafeExternalDelivery(options.PublicBaseURL, "rec_validation", "rnt_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"); err != nil {
@@ -354,17 +382,38 @@ func (processor *ScopedExternalDeliveryProcessor) ProcessExternalDelivery(ctx co
 		prepared.Attempt.AuthorizationEpoch != claim.Event.AuthorizationEpoch || prepared.Attempt.RecordFenceEpoch != claim.Event.RecordFenceEpoch {
 		return ExternalDeliveryOutboxResult{}, ErrInvalidExternalDeliveryResult
 	}
+	sealedMessage, err := RenderSafeExternalDelivery(
+		processor.options.PublicBaseURL, prepared.Attempt.RecordID, prepared.Attempt.NotificationID,
+	)
+	if err != nil || prepared.Message != sealedMessage {
+		return ExternalDeliveryOutboxResult{}, ErrInvalidExternalDeliveryResult
+	}
 	guard, err := recordplatform.NewLeaseWorkGuardV1(processor.options.Clock, claim.Owner)
 	if err != nil || !guard.CanContinue() {
 		return ExternalDeliveryOutboxResult{}, recordplatform.ErrLeaseRenewalStopped
 	}
-	outcome := prepared.Binding.Provider.SendExternalDelivery(ctx, prepared.Message)
+	now := processor.options.Clock.Now()
+	leaseDeadline := claim.Owner.ExpiresAt.Add(-externalDeliveryLeaseSafetyMargin)
+	if !leaseDeadline.After(now) {
+		return ExternalDeliveryOutboxResult{}, recordplatform.ErrLeaseRenewalStopped
+	}
+	sendDeadline := now.Add(processor.options.SendTimeout)
+	if sendDeadline.After(leaseDeadline) {
+		sendDeadline = leaseDeadline
+	}
+	sendContext, cancelSend := context.WithDeadline(ctx, sendDeadline)
+	outcome := prepared.Binding.Provider.SendExternalDelivery(sendContext, sealedMessage)
+	cancelSend()
 	if outcome.Validate() != nil {
 		outcome = ExternalDeliveryProviderUnknownOutcome
 	}
 	retryAfter := time.Duration(0)
-	if outcome == ExternalDeliveryProviderTemporaryFailure {
-		retryAfter, _ = ExternalDeliveryRetryDelay(processor.options.RetryBaseDelay, prepared.Attempt.Attempt)
+	if outcome == ExternalDeliveryProviderTemporaryFailure && prepared.Attempt.Attempt < MaxNotificationDeliveryAttempts {
+		var retryable bool
+		retryAfter, retryable = ExternalDeliveryRetryDelay(processor.options.RetryBaseDelay, prepared.Attempt.Attempt)
+		if !retryable {
+			return ExternalDeliveryOutboxResult{}, ErrInvalidExternalDeliveryResult
+		}
 	}
 	return processor.store.FinalizeExternalDelivery(ctx, claim, prepared.Attempt, outcome, retryAfter)
 }

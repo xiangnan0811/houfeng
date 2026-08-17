@@ -2,8 +2,10 @@ package notify_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"houfeng/internal/center/notify"
@@ -27,28 +29,53 @@ func TestFeishuNotifierPostsMessage(t *testing.T) {
 	}
 }
 
-func TestFeishuNotifierReturnsErrorForBadStatus(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte("invalid webhook"))
-	}))
-	defer ts.Close()
+func TestFeishuNotifierReturnsTypedContentFreeHTTPFailures(t *testing.T) {
+	for _, test := range []struct {
+		status int
+		want   notify.SendFailureClass
+	}{
+		{status: http.StatusTooManyRequests, want: notify.SendFailureTemporary},
+		{status: http.StatusServiceUnavailable, want: notify.SendFailureTemporary},
+		{status: http.StatusForbidden, want: notify.SendFailurePermanent},
+	} {
+		t.Run(http.StatusText(test.status), func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte("provider response credential=secret"))
+			}))
+			defer ts.Close()
 
-	notifier := notify.NewFeishuNotifierWithClient(ts.URL, ts.Client())
-	if err := notifier.Send(context.Background(), "incident started"); err == nil {
-		t.Fatal("Send() error = nil, want non-nil")
+			notifier := notify.NewFeishuNotifierWithClient(ts.URL+"/credential-secret", ts.Client())
+			err := notifier.Send(context.Background(), "incident started")
+			assertFeishuSendFailure(t, err, test.want)
+		})
 	}
 }
 
-func TestFeishuNotifierReturnsErrorOnConnectionFailure(t *testing.T) {
-	// Use a server that closes immediately to simulate connection failure.
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Do nothing; the client will time out or get a connection reset.
-	}))
-	ts.Close() // close to cause connection refused
+func TestFeishuNotifierReturnsContentFreeUnknownForTransportFailure(t *testing.T) {
+	client := &http.Client{Transport: feishuRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("transport credential=secret")
+	})}
+	notifier := notify.NewFeishuNotifierWithClient("https://feishu.invalid/credential-secret", client)
+	err := notifier.Send(context.Background(), "incident started")
+	assertFeishuSendFailure(t, err, notify.SendFailureUnknown)
+}
 
-	notifier := notify.NewFeishuNotifierWithClient(ts.URL, ts.Client())
-	if err := notifier.Send(context.Background(), "incident started"); err == nil {
-		t.Fatal("Send() error = nil, want non-nil (connection refused)")
+type feishuRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (roundTrip feishuRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTrip(request)
+}
+
+func assertFeishuSendFailure(t *testing.T, err error, want notify.SendFailureClass) {
+	t.Helper()
+	got, ok := notify.ClassifySendFailure(err)
+	if !ok || got != want {
+		t.Fatalf("ClassifySendFailure(%v) = (%q, %t), want (%q, true)", err, got, ok, want)
+	}
+	for _, forbidden := range []string{"secret", "credential", "provider response", "feishu.invalid"} {
+		if strings.Contains(strings.ToLower(err.Error()), forbidden) {
+			t.Fatalf("typed send failure leaked %q in %q", forbidden, err.Error())
+		}
 	}
 }

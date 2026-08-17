@@ -3,8 +3,10 @@ package notify_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"houfeng/internal/center/notify"
@@ -35,15 +37,53 @@ func TestTelegramNotifierPostsMessage(t *testing.T) {
 	}
 }
 
-func TestTelegramNotifierReturnsErrorForBadStatus(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadGateway)
-		_, _ = w.Write([]byte("upstream unavailable"))
-	}))
-	defer ts.Close()
+func TestTelegramNotifierReturnsTypedContentFreeHTTPFailures(t *testing.T) {
+	for _, test := range []struct {
+		status int
+		want   notify.SendFailureClass
+	}{
+		{status: http.StatusTooManyRequests, want: notify.SendFailureTemporary},
+		{status: http.StatusBadGateway, want: notify.SendFailureTemporary},
+		{status: http.StatusBadRequest, want: notify.SendFailurePermanent},
+	} {
+		t.Run(http.StatusText(test.status), func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte("provider response credential=secret"))
+			}))
+			defer ts.Close()
 
-	notifier := notify.NewTelegramNotifierWithBaseURL("bot-token", "chat-001", ts.URL, ts.Client())
-	if err := notifier.Send(context.Background(), "incident started"); err == nil {
-		t.Fatal("Send() error = nil, want non-nil")
+			notifier := notify.NewTelegramNotifierWithBaseURL("bot-token-secret", "chat-001", ts.URL, ts.Client())
+			err := notifier.Send(context.Background(), "incident started")
+			assertTelegramSendFailure(t, err, test.want)
+		})
+	}
+}
+
+func TestTelegramNotifierReturnsContentFreeUnknownForTransportFailure(t *testing.T) {
+	client := &http.Client{Transport: telegramRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("transport credential=secret")
+	})}
+	notifier := notify.NewTelegramNotifierWithBaseURL("bot-token-secret", "chat-001", "https://telegram.invalid", client)
+	err := notifier.Send(context.Background(), "incident started")
+	assertTelegramSendFailure(t, err, notify.SendFailureUnknown)
+}
+
+type telegramRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (roundTrip telegramRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTrip(request)
+}
+
+func assertTelegramSendFailure(t *testing.T, err error, want notify.SendFailureClass) {
+	t.Helper()
+	got, ok := notify.ClassifySendFailure(err)
+	if !ok || got != want {
+		t.Fatalf("ClassifySendFailure(%v) = (%q, %t), want (%q, true)", err, got, ok, want)
+	}
+	for _, forbidden := range []string{"secret", "credential", "provider response", "telegram.invalid", "bot-token"} {
+		if strings.Contains(strings.ToLower(err.Error()), forbidden) {
+			t.Fatalf("typed send failure leaked %q in %q", forbidden, err.Error())
+		}
 	}
 }

@@ -3,10 +3,13 @@ package recordcollaboration
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"houfeng/internal/center/notify"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
 )
@@ -30,6 +33,16 @@ type recordingExternalDeliveryProvider struct {
 
 func (provider *recordingExternalDeliveryProvider) SendExternalDelivery(_ context.Context, delivery SafeExternalDelivery) ExternalDeliveryProviderOutcome {
 	provider.messages = append(provider.messages, delivery)
+	return provider.outcome
+}
+
+type deadlineRecordingExternalDeliveryProvider struct {
+	deadline time.Time
+	outcome  ExternalDeliveryProviderOutcome
+}
+
+func (provider *deadlineRecordingExternalDeliveryProvider) SendExternalDelivery(ctx context.Context, _ SafeExternalDelivery) ExternalDeliveryProviderOutcome {
+	provider.deadline, _ = ctx.Deadline()
 	return provider.outcome
 }
 
@@ -94,6 +107,29 @@ func TestRenderSafeExternalDeliveryHasClosedContentFreeShape(t *testing.T) {
 	}
 }
 
+func TestSafeExternalDeliveryRejectsNonCanonicalOrOversizedLinks(t *testing.T) {
+	canonical, err := RenderSafeExternalDelivery("https://houfeng.example", externalDeliveryTestRecordID, externalDeliveryTestNotification)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		link string
+	}{
+		{name: "duplicate notification", link: canonical.Link + "&notification=" + externalDeliveryTestNotification},
+		{name: "escaped path", link: strings.Replace(canonical.Link, "/records/rec_", "/records/%72ec_", 1)},
+		{name: "escaped query", link: strings.Replace(canonical.Link, "notification=rnt_", "notification=%72nt_", 1)},
+		{name: "oversized", link: "https://" + strings.Repeat("a", 2048) + "/records/" + externalDeliveryTestRecordID + "?notification=" + externalDeliveryTestNotification},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := SafeExternalDelivery{Summary: canonical.Summary, Link: test.link}
+			if err := candidate.Validate(); !errors.Is(err, ErrInvalidSafeExternalDelivery) {
+				t.Fatalf("Validate(%s) error = %v, want ErrInvalidSafeExternalDelivery", test.name, err)
+			}
+		})
+	}
+}
+
 func TestExternalDeliveryRetryDelayIsDeterministicAndAttemptBounded(t *testing.T) {
 	base := 5 * time.Second
 	for attempt := uint8(1); attempt < MaxNotificationDeliveryAttempts; attempt++ {
@@ -109,6 +145,28 @@ func TestExternalDeliveryRetryDelayIsDeterministicAndAttemptBounded(t *testing.T
 	for _, invalid := range uint8Slice(0, MaxNotificationDeliveryAttempts+1) {
 		if got, retry := ExternalDeliveryRetryDelay(base, invalid); retry || got != 0 {
 			t.Errorf("ExternalDeliveryRetryDelay(%d) = (%s,%t), want (0,false)", invalid, got, retry)
+		}
+	}
+}
+
+func TestScopedExternalDeliveryProcessorRejectsRetryBackoffThatOverflowsBeforeAttemptLimit(t *testing.T) {
+	processor, err := NewScopedExternalDeliveryProcessor(&externalDeliveryStoreStub{}, ScopedExternalDeliveryProcessorOptions{
+		PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Duration(math.MaxInt64),
+		SendTimeout: time.Second, Clock: fixedExternalDeliveryClock{now: time.Now().UTC()},
+	})
+	if processor != nil || !errors.Is(err, ErrInvalidExternalDeliveryProcessor) {
+		t.Fatalf("NewScopedExternalDeliveryProcessor(overflow) = (%#v, %v), want (nil, ErrInvalidExternalDeliveryProcessor)", processor, err)
+	}
+}
+
+func TestScopedExternalDeliveryProcessorRequiresBoundedSendTimeout(t *testing.T) {
+	for _, timeout := range []time.Duration{0, MaxExternalDeliverySendTimeout + time.Nanosecond} {
+		processor, err := NewScopedExternalDeliveryProcessor(&externalDeliveryStoreStub{}, ScopedExternalDeliveryProcessorOptions{
+			PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
+			SendTimeout: timeout, Clock: fixedExternalDeliveryClock{now: time.Now().UTC()},
+		})
+		if processor != nil || !errors.Is(err, ErrInvalidExternalDeliveryProcessor) {
+			t.Fatalf("NewScopedExternalDeliveryProcessor(timeout=%s) = (%#v, %v), want invalid", timeout, processor, err)
 		}
 	}
 }
@@ -141,7 +199,7 @@ func TestScopedExternalDeliveryProcessorSendsOnlyPreparedSafeMessageAndFinalizes
 	}
 	processor, err := NewScopedExternalDeliveryProcessor(store, ScopedExternalDeliveryProcessorOptions{
 		PublicBaseURL: "https://houfeng.example", RetryBaseDelay: 5 * time.Second,
-		Clock: fixedExternalDeliveryClock{now: startedAt},
+		SendTimeout: 10 * time.Second, Clock: fixedExternalDeliveryClock{now: startedAt},
 	})
 	if err != nil {
 		t.Fatalf("NewScopedExternalDeliveryProcessor() error = %v", err)
@@ -163,7 +221,7 @@ func TestScopedExternalDeliveryProcessorNeverSendsCancelledOrUnknownPreparation(
 		}}
 		processor, err := NewScopedExternalDeliveryProcessor(store, ScopedExternalDeliveryProcessorOptions{
 			PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
-			Clock: fixedExternalDeliveryClock{now: claim.Owner.ExpiresAt.Add(-time.Second)},
+			SendTimeout: time.Second, Clock: fixedExternalDeliveryClock{now: claim.Owner.ExpiresAt.Add(-time.Second)},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -183,7 +241,7 @@ func TestScopedExternalDeliveryProcessorTreatsInvalidProviderOutcomeAsUnknown(t 
 	store.finalResult = ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete}
 	processor, err := NewScopedExternalDeliveryProcessor(store, ScopedExternalDeliveryProcessorOptions{
 		PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
-		Clock: fixedExternalDeliveryClock{now: startedAt},
+		SendTimeout: 10 * time.Second, Clock: fixedExternalDeliveryClock{now: startedAt},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +261,7 @@ func TestScopedExternalDeliveryProcessorStopsBeforeNetworkWhenClaimIsLocallyStal
 	store := externalDeliveryPreparedStore(t, claim, startedAt, provider)
 	processor, err := NewScopedExternalDeliveryProcessor(store, ScopedExternalDeliveryProcessorOptions{
 		PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
-		Clock: fixedExternalDeliveryClock{now: claim.Owner.ExpiresAt},
+		SendTimeout: 10 * time.Second, Clock: fixedExternalDeliveryClock{now: claim.Owner.ExpiresAt},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -213,6 +271,65 @@ func TestScopedExternalDeliveryProcessorStopsBeforeNetworkWhenClaimIsLocallyStal
 	}
 	if len(provider.messages) != 0 || !reflect.DeepEqual(store.steps, []string{"prepare"}) {
 		t.Fatalf("stale provider messages/steps = %#v/%#v", provider.messages, store.steps)
+	}
+}
+
+func TestScopedExternalDeliveryProcessorBoundsSendDeadlineBeforeOwnerLeaseExpiry(t *testing.T) {
+	now := time.Now().UTC()
+	claim := externalDeliveryTestClaim(now.Add(5 * time.Second))
+	provider := &deadlineRecordingExternalDeliveryProvider{outcome: ExternalDeliveryProviderSent}
+	store := externalDeliveryPreparedStore(t, claim, now, provider)
+	store.finalResult = ExternalDeliveryOutboxResult{Disposition: ExternalDeliveryOutboxComplete}
+	processor, err := NewScopedExternalDeliveryProcessor(store, ScopedExternalDeliveryProcessorOptions{
+		PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
+		SendTimeout: 30 * time.Second, Clock: fixedExternalDeliveryClock{now: now},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := processor.ProcessExternalDelivery(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+	if provider.deadline.IsZero() || !provider.deadline.After(now) || !provider.deadline.Before(claim.Owner.ExpiresAt) {
+		t.Fatalf("provider deadline = %s, want (%s,%s)", provider.deadline, now, claim.Owner.ExpiresAt)
+	}
+}
+
+func TestScopedExternalDeliveryProcessorRejectsPreparedMessageIdentityOrOriginDriftBeforeNetwork(t *testing.T) {
+	startedAt := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	claim := externalDeliveryTestClaim(startedAt.Add(time.Minute))
+	for _, test := range []struct {
+		name           string
+		baseURL        string
+		recordID       string
+		notificationID string
+	}{
+		{name: "record", baseURL: "https://houfeng.example", recordID: "rec_bbbbbbbbbbbbbbbbbbbbbbbb", notificationID: externalDeliveryTestNotification},
+		{name: "notification", baseURL: "https://houfeng.example", recordID: externalDeliveryTestRecordID, notificationID: "rnt_1111111111111111111111111111111111111111111111111111111111111111"},
+		{name: "origin", baseURL: "https://other.example", recordID: externalDeliveryTestRecordID, notificationID: externalDeliveryTestNotification},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			provider := &recordingExternalDeliveryProvider{outcome: ExternalDeliveryProviderSent}
+			store := externalDeliveryPreparedStore(t, claim, startedAt, provider)
+			drifted, err := RenderSafeExternalDelivery(test.baseURL, test.recordID, test.notificationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store.preparation.Prepared.Message = drifted
+			processor, err := NewScopedExternalDeliveryProcessor(store, ScopedExternalDeliveryProcessorOptions{
+				PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
+				SendTimeout: 10 * time.Second, Clock: fixedExternalDeliveryClock{now: startedAt},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := processor.ProcessExternalDelivery(context.Background(), claim); !errors.Is(err, ErrInvalidExternalDeliveryResult) {
+				t.Fatalf("ProcessExternalDelivery(drifted %s) error = %v, want ErrInvalidExternalDeliveryResult", test.name, err)
+			}
+			if len(provider.messages) != 0 || !reflect.DeepEqual(store.steps, []string{"prepare"}) {
+				t.Fatalf("drifted %s provider messages/steps = %#v/%#v, want zero network", test.name, provider.messages, store.steps)
+			}
+		})
 	}
 }
 
@@ -234,6 +351,34 @@ func TestScopedNotifierProviderUsesOnlySafeSummaryAndDiscardsProviderError(t *te
 	}
 	if reflect.TypeOf(provider).NumField() != 1 {
 		t.Fatalf("scoped notifier adapter fields = %d, want only notifier", reflect.TypeOf(provider).NumField())
+	}
+}
+
+func TestScopedNotifierProviderMapsTypedContentFreeFailureClasses(t *testing.T) {
+	message, err := RenderSafeExternalDelivery("https://houfeng.example", externalDeliveryTestRecordID, externalDeliveryTestNotification)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		err  error
+		want ExternalDeliveryProviderOutcome
+	}{
+		{name: "temporary", err: notify.NewSendFailure(notify.SendFailureTemporary), want: ExternalDeliveryProviderTemporaryFailure},
+		{name: "permanent", err: notify.NewSendFailure(notify.SendFailurePermanent), want: ExternalDeliveryProviderPermanentFailure},
+		{name: "unknown", err: notify.NewSendFailure(notify.SendFailureUnknown), want: ExternalDeliveryProviderUnknownOutcome},
+		{name: "untyped", err: errors.New("unsafe provider detail"), want: ExternalDeliveryProviderUnknownOutcome},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			notifier := &externalDeliveryNotifierStub{err: test.err}
+			provider, err := NewScopedNotifierProvider(notifier)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := provider.SendExternalDelivery(context.Background(), message); got != test.want {
+				t.Fatalf("SendExternalDelivery() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

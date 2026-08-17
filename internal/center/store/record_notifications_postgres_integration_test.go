@@ -2124,7 +2124,7 @@ func newPostgresExternalDeliveryProcessor(t *testing.T, repository *PostgresReco
 	processor, err := recordcollaboration.NewScopedExternalDeliveryProcessor(
 		repository,
 		recordcollaboration.ScopedExternalDeliveryProcessorOptions{
-			PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second,
+			PublicBaseURL: "https://houfeng.example", RetryBaseDelay: time.Second, SendTimeout: 10 * time.Second,
 			Clock: postgresExternalDeliveryClock{},
 		},
 	)
