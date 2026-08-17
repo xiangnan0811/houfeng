@@ -223,7 +223,7 @@ export function decodeRecordWatch(value: unknown): RecordWatch {
   const hasSources = Object.values(decodedSources).some(Boolean)
   if (version === 0) {
     if (preference !== 'default' || hasSources || updatedAt !== null) invalid()
-  } else if (updatedAt === null || (preference === 'default' && !hasSources)) invalid()
+	} else if (updatedAt === null) invalid()
   return {
     record_id: prefixedID(item.record_id, 'rec_'), user_id: userID(item.user_id), version, preference,
     sources: decodedSources, updated_at: updatedAt,

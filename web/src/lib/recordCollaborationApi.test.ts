@@ -43,6 +43,14 @@ const notification = {
 afterEach(() => vi.restoreAllMocks())
 
 describe('record collaboration lazy transport', () => {
+	it('decodes the versioned default watch anchor returned by an initial PATCH', async () => {
+		const anchor = {
+			...watch, version: 1, updated_at: '2026-08-17T09:00:00Z',
+		}
+		vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(anchor))
+		await expect(setRecordWatch('rec_one', 'default', 0, 'watch-default-key')).resolves.toEqual(anchor)
+	})
+
   it('lists the bounded action/comment/inbox read models', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response({ items: [] }))

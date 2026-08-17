@@ -99,4 +99,14 @@ describe('record collaboration DTO decoders', () => {
     expect(decodeRecordWatch(emptyWatch)).toEqual(emptyWatch)
     expect(() => decodeRecordWatch({ ...emptyWatch, preference: 'watching' })).toThrow()
   })
+
+	it('accepts a positive-version default watch replay anchor without automatic sources', () => {
+		const anchor = {
+			record_id: 'rec_record1', user_id: userID, version: 1, preference: 'default',
+			sources: { author: false, owner: false, participant: false, comment: false, mention: false, action: false },
+			updated_at: timestamp,
+		}
+		expect(decodeRecordWatch(anchor)).toEqual(anchor)
+		expect(() => decodeRecordWatch({ ...anchor, updated_at: null })).toThrow()
+	})
 })
