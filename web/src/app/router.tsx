@@ -39,6 +39,9 @@ const monitoringPage = lazy(() =>
 const providersPage = lazy(() =>
   import('../pages/ProvidersPage').then((module) => ({ default: module.ProvidersPage })),
 )
+const recordInboxPage = lazy(() =>
+  import('../pages/RecordInboxPage').then((module) => ({ default: module.RecordInboxPage })),
+)
 const settingsPage = lazy(() =>
   import('../pages/SettingsPage').then((module) => ({ default: module.SettingsPage })),
 )
@@ -90,6 +93,7 @@ export const appRoutes: RouteObject[] = [
           { path: 'archive', element: routeElement(archivePage, '正在加载归档资产') },
           { path: 'archive/:vpsId', element: routeElement(archiveDetailPage, '正在加载归档详情') },
           { path: 'providers', element: routeElement(providersPage, '正在加载服务商') },
+          { path: 'record-inbox', element: routeElement(recordInboxPage, '正在加载记录通知') },
           { path: 'subscriptions', element: routeElement(subscriptionsPage, '正在加载订阅') },
           {
             path: 'asset-decisions',

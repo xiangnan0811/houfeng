@@ -17,6 +17,7 @@
     "test:coverage": "vitest --run --coverage",
     "pretest:e2e": "npm run build",
     "test:e2e": "playwright test",
+    "test:e2e:components": "playwright test --config playwright.components.config.ts",
     "test:e2e:staging": "playwright test --config playwright.staging.config.ts"
   },
   "dependencies": {

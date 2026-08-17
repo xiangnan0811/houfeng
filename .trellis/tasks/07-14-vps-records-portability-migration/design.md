@@ -9,6 +9,14 @@ own mutable search/activity projections.
 The child depends on domain-owned providers and participants rather than reading
 another package's tables directly.
 
+This child also closes the production authority deferred by earlier Records
+children: a concrete transaction-scoped deployment-membership
+`store.AdmissionGate`, witnessed source-deletion tombstone reads, and the
+integrity-valid external evidence quarantine. These contracts bind the external
+deletion-ledger/contract-activation identity; they are not inferred from APP ACL
+state, local digests, archive claims, or test adapters. Child 11 composes and
+verifies them before enabling protected capabilities.
+
 ## 2. Modules
 
 - `internal/center/portability`: archive, preview, export/import services, plans,
@@ -127,6 +135,20 @@ Backup includes only declared published artifacts and active recoverable jobs.
 Temporary/quarantine/workspace data is either excluded with a cleanup contract
 or inventoried explicitly. Restore verifies object version/hash, then replays
 deletion outcomes before traffic.
+
+The source-deletion witness returns a typed final source identity and
+authorization floor bound to the witnessed ledger entry. Missing, stale,
+unknown-version, discontinuous, or unreachable witness state fails closed; a
+local digest-only tombstone is never a substitute. The deployment-membership
+gate reads the existing `0051` `deployment_membership` and
+`deployment_contract_state` authority in every admitted transaction, uses the
+same activated deployment identity, and rejects nil/typed-nil or drift before
+any business write. `0058` does not duplicate those authority tables.
+
+Unsupported external evidence remains quarantine-only after the archive and
+entry integrity layers succeed. Only allowlisted kind/schema/time/size/digest
+metadata may be shown; payload bytes never reach a generic JSON renderer and the
+entry cannot be applied, compared, copied, or re-exported as trusted evidence.
 
 ## 9. Compatibility
 

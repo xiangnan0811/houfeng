@@ -1,3 +1,5 @@
+import type { CommentRenderModelV1 } from './commentMarkdown'
+
 export type MonitoringInstanceRecord = {
   monitoring_instance_id: string
   display_name: string
@@ -2930,4 +2932,117 @@ export type RecordDeletionState =
 export type RecordDeletionOperation = {
   operation_id: string
   state: RecordDeletionState
+}
+
+export type RecordActionStatus = 'open' | 'completed' | 'cancelled'
+export type RecordActionTransition = 'complete' | 'cancel' | 'reopen'
+
+export type RecordAction = {
+  action_id: string
+  record_id: string
+  version: number
+  status: RecordActionStatus
+  title: string
+	details: string
+  assignee_id: string
+  due_at: string | null
+  completed_at: string | null
+  subject_revision_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type RecordActionListResponse = { items: RecordAction[] }
+
+export type RecordActionInput = {
+  title: string
+  details: string
+  assignee_id: string
+  due_at: string | null
+  subject_revision_id: string
+}
+
+export type RecordActionMutation = {
+  action_id: string
+  record_id: string
+  version: number
+  status: RecordActionStatus
+  event_kind: 'created' | 'updated' | 'completed' | 'cancelled' | 'reopened'
+  replayed: boolean
+  changed_at: string
+}
+
+export type RecordCommentState = 'active' | 'redacted'
+
+export type RecordComment = {
+  comment_id: string
+  record_id: string
+  author_id: string
+  version: number
+  state: RecordCommentState
+  body_markdown: string | null
+  render_model: CommentRenderModelV1 | null
+  reply_to_comment_id: string
+  mention_user_ids: string[]
+  created_at: string
+  updated_at: string
+  redacted_at: string | null
+}
+
+export type RecordCommentListResponse = { comments: RecordComment[] }
+
+export type RecordCommentInput = {
+  body_markdown: string
+  reply_to_comment_id: string
+  mention_user_ids: string[]
+}
+
+export type RecordCommentMutation = {
+  comment_id: string
+  record_id: string
+  version: number
+  state: RecordCommentState
+  event_kind: 'created' | 'edited' | 'redacted'
+  replayed: boolean
+  changed_at: string
+}
+
+export type RecordFollowerPreference = 'default' | 'watching' | 'muted'
+
+export type RecordWatch = {
+  record_id: string
+  user_id: string
+  version: number
+  preference: RecordFollowerPreference
+  sources: {
+    author: boolean
+    owner: boolean
+    participant: boolean
+    comment: boolean
+    mention: boolean
+    action: boolean
+  }
+  updated_at: string | null
+}
+
+export type RecordNotification = {
+  notification_id: string
+  record_id: string
+  event_kind: 'record_owner_changed' | 'record_participant_changed' | 'record_follow_up_due' | 'action_assigned' | 'action_completed' | 'action_cancelled' | 'comment_replied' | 'comment_mentioned' | 'security_access_revoked'
+  subject_kind: 'record' | 'action' | 'comment'
+  subject_id: string
+  source_version: number
+  reason: 'owner' | 'participant' | 'assignee' | 'mention' | 'reply' | 'follower' | 'security'
+  mandatory: boolean
+  event_at: string
+  read_at: string | null
+  dismissed_at: string | null
+}
+
+export type RecordNotificationListResponse = { items: RecordNotification[] }
+export type RecordNotificationUnreadResponse = { unread_count: number }
+export type RecordNotificationTarget = {
+  record_id: string
+  subject_kind: 'record' | 'action' | 'comment'
+  subject_id: string
 }

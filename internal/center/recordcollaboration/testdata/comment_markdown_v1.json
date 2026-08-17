@@ -1,0 +1,289 @@
+{
+  "contract_version": "comment_markdown/v1",
+  "cases": [
+    {
+      "name": "plain paragraph",
+      "source": "Service recovered.",
+      "valid": true,
+      "model": {
+        "version": "comment_markdown/v1",
+        "nodes": [
+          {"type": "paragraph", "children": [{"type": "text", "text": "Service recovered."}]}
+        ]
+      }
+    },
+    {
+      "name": "closed inline registry",
+      "source": "Use *care*, **verify**, ~~retire~~, `status`, and [runbook](https://example.com/runbook).",
+      "valid": true,
+      "model": {
+        "version": "comment_markdown/v1",
+        "nodes": [
+          {
+            "type": "paragraph",
+            "children": [
+              {"type": "text", "text": "Use "},
+              {"type": "emphasis", "children": [{"type": "text", "text": "care"}]},
+              {"type": "text", "text": ", "},
+              {"type": "strong", "children": [{"type": "text", "text": "verify"}]},
+              {"type": "text", "text": ", "},
+              {"type": "strikethrough", "children": [{"type": "text", "text": "retire"}]},
+              {"type": "text", "text": ", "},
+              {"type": "inline_code", "text": "status"},
+              {"type": "text", "text": ", and "},
+              {"type": "link", "href": "https://example.com/runbook", "children": [{"type": "text", "text": "runbook"}]},
+              {"type": "text", "text": "."}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "line break and encoded hostile text",
+      "source": "first line\n&amp;lt;script&amp;gt; stays text",
+      "valid": true,
+      "model": {
+        "version": "comment_markdown/v1",
+        "nodes": [
+          {
+            "type": "paragraph",
+            "children": [
+              {"type": "text", "text": "first line"},
+              {"type": "line_break"},
+              {"type": "text", "text": "&amp;lt;script&amp;gt; stays text"}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "fenced code",
+      "source": "```go\nfmt.Println(\"safe\")\n```",
+      "valid": true,
+      "model": {
+        "version": "comment_markdown/v1",
+        "nodes": [
+          {"type": "fenced_code", "text": "fmt.Println(\"safe\")\n"}
+        ]
+      }
+    },
+    {
+      "name": "empty fenced code",
+      "source": "```\n```",
+      "valid": true,
+      "model": {
+        "version": "comment_markdown/v1",
+        "nodes": [
+          {"type": "fenced_code", "text": ""}
+        ]
+      }
+    },
+    {
+      "name": "canonical DNS and IP link hosts",
+      "source": "[dns](http://123.example.com/) [ipv4](http://127.0.0.1/) [ipv6](http://[::1]/)",
+      "valid": true,
+      "model": {
+        "version": "comment_markdown/v1",
+        "nodes": [
+          {
+            "type": "paragraph",
+            "children": [
+              {"type": "link", "href": "http://123.example.com/", "children": [{"type": "text", "text": "dns"}]},
+              {"type": "text", "text": " "},
+              {"type": "link", "href": "http://127.0.0.1/", "children": [{"type": "text", "text": "ipv4"}]},
+              {"type": "text", "text": " "},
+              {"type": "link", "href": "http://[::1]/", "children": [{"type": "text", "text": "ipv6"}]}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "canonical nondefault link port",
+      "source": "[service](https://example.com:444/path) [ipv6](http://[::1]:8080/path)",
+      "valid": true,
+      "model": {
+        "version": "comment_markdown/v1",
+        "nodes": [
+          {
+            "type": "paragraph",
+            "children": [
+              {"type": "link", "href": "https://example.com:444/path", "children": [{"type": "text", "text": "service"}]},
+              {"type": "text", "text": " "},
+              {"type": "link", "href": "http://[::1]:8080/path", "children": [{"type": "text", "text": "ipv6"}]}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "ordered and unordered lists",
+      "source": "- inspect\n- repair\n\n3. verify\n4. close",
+      "valid": true,
+      "model": {
+        "version": "comment_markdown/v1",
+        "nodes": [
+          {
+            "type": "unordered_list",
+            "items": [
+              [{"type": "text", "text": "inspect"}],
+              [{"type": "text", "text": "repair"}]
+            ]
+          },
+          {
+            "type": "ordered_list",
+            "start": 3,
+            "items": [
+              [{"type": "text", "text": "verify"}],
+              [{"type": "text", "text": "close"}]
+            ]
+          }
+        ]
+      }
+    },
+    {"name": "empty", "source": "", "valid": false},
+    {"name": "raw html", "source": "before <script>alert(1)</script>", "valid": false},
+    {"name": "html comment", "source": "<!-- hidden -->", "valid": false},
+    {"name": "image", "source": "![secret](https://example.com/a.png)", "valid": false},
+    {"name": "heading", "source": "# document heading", "valid": false},
+    {"name": "setext heading", "source": "Heading\n===", "valid": false},
+    {"name": "table", "source": "a | b\n--- | ---\n1 | 2", "valid": false},
+    {"name": "leading pipe table", "source": "a | b\n| --- | --- |\n1 | 2", "valid": false},
+    {"name": "task list", "source": "- [x] execute", "valid": false},
+    {"name": "ordered task list", "source": "1. [x] execute", "valid": false},
+    {"name": "footnote", "source": "note[^1]\n\n[^1]: hidden", "valid": false},
+    {"name": "blockquote", "source": "> quoted", "valid": false},
+    {"name": "thematic break", "source": "---", "valid": false},
+    {"name": "javascript link", "source": "[run](javascript:alert(1))", "valid": false},
+    {"name": "data link", "source": "[run](data:text/html,boom)", "valid": false},
+    {"name": "relative link", "source": "[run](/relative)", "valid": false},
+    {"name": "link userinfo", "source": "[run](https://user:pass@example.com/path)", "valid": false},
+    {"name": "noncanonical uppercase host", "source": "[run](https://EXAMPLE.com/path)", "valid": false},
+    {"name": "noncanonical dot segment", "source": "[run](https://example.com/a/../b)", "valid": false},
+    {"name": "legacy short IPv4 host", "source": "[run](http://127.1)", "valid": false},
+    {"name": "legacy hexadecimal IPv4 host", "source": "[run](http://0x7f000001/)", "valid": false},
+    {"name": "legacy decimal IPv4 host", "source": "[run](http://2130706433/)", "valid": false},
+    {"name": "legacy octal IPv4 host", "source": "[run](http://0177.0.0.1/)", "valid": false},
+    {"name": "all numeric DNS shaped host", "source": "[run](http://1.2.3.4.5/)", "valid": false},
+    {"name": "zero-padded default port", "source": "[run](http://example.com:00080/path)", "valid": false},
+    {"name": "zero-padded nondefault port", "source": "[run](https://example.com:00444/path)", "valid": false},
+    {"name": "empty link port", "source": "[run](https://example.com:/path)", "valid": false},
+    {"name": "zero link port", "source": "[run](https://example.com:0/path)", "valid": false},
+    {"name": "out of range link port", "source": "[run](https://example.com:65536/path)", "valid": false},
+    {"name": "attachment reference", "source": "[[attachment:att_01]]", "valid": false},
+    {"name": "evidence reference", "source": "[[evidence:ev_01]]", "valid": false},
+    {"name": "invalid utf8", "source_base64": "/w==", "valid": false},
+    {
+      "name": "source byte limit",
+      "source_template": {"repeat": "a", "count": 16385},
+      "valid": false
+    },
+    {
+      "name": "render node limit",
+      "source_template": {"repeat": "x\n\n", "count": 257},
+      "valid": false
+    },
+    {
+      "name": "render depth limit",
+      "source": "**************deep**************",
+      "valid": false
+    },
+    {
+      "name": "serialized link limit",
+      "source_template": {
+        "prefix": "[run](https://example.com/",
+        "repeat": "a",
+        "count": 2030,
+        "suffix": ")"
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid DNS label underscore",
+      "source": "[run](https://foo_bar.example/)",
+      "valid": false
+    }
+  ],
+  "hostile_models": [
+    {
+      "name": "unknown html node",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"html","text":"<script>alert(1)</script>"}]}
+    },
+    {
+      "name": "unknown field",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"text","text":"safe","html":"<b>unsafe</b>"}]}]}
+    },
+    {
+      "name": "unsafe active link",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"javascript:alert(1)","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "noncanonical link host",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://EXAMPLE.com/path","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "invalid DNS label underscore",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://foo_bar.example/","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "noncanonical link dot segment",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://example.com/a/../b","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "legacy short IPv4 link host",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://127.1","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "legacy hexadecimal IPv4 link host",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://0x7f000001/","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "legacy decimal IPv4 link host",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://2130706433/","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "legacy octal IPv4 link host",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://0177.0.0.1/","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "all numeric DNS shaped link host",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://1.2.3.4.5/","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "zero-padded default link port",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://example.com:00080/path","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "zero-padded nondefault link port",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://example.com:00444/path","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "empty link port",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://example.com:/path","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "zero link port",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://example.com:0/path","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "out of range link port",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://example.com:65536/path","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "line break disallowed text key",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"line_break","text":""}]}]}
+    },
+    {
+      "name": "fenced code null text",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"fenced_code","text":null}]}
+    },
+    {
+      "name": "inline node at model root",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"text","text":"not a block"}]}
+    },
+    {
+      "name": "arbitrary object fallback",
+      "model": {"html":"<img src=x onerror=alert(1)>"}
+    }
+  ]
+}

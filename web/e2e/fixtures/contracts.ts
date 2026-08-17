@@ -8,6 +8,7 @@ export type ApiFixtureResponse = {
   waitFor?: Promise<void>
   headers?: Readonly<Record<string, string>>
   expectedBodyKeys?: readonly string[]
+  expectNoBody?: true
 }
 
 export type ApiFixtureProfile = Readonly<Record<ApiRouteKey, ApiFixtureResponse>>

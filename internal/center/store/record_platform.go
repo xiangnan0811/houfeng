@@ -155,18 +155,22 @@ func (transaction *RecordPlatformTransaction) EnqueueOutbox(ctx context.Context,
 			event_kind,
 			subject_kind,
 			subject_id,
+			source_version,
 			authorization_epoch,
+			record_fence_epoch,
 			expires_at
 		) values (
-			$1, $2, $3, $4, $5,
-			transaction_timestamp() + ($6 * interval '1 microsecond')
+			$1, $2, $3, $4, $5, $6, $7,
+			transaction_timestamp() + ($8 * interval '1 microsecond')
 		)
 		returning outbox_row_id`,
 		input.Event.ProjectID,
 		input.Event.EventKind,
 		input.Event.SubjectKind,
 		input.Event.SubjectID,
+		input.Event.SourceVersion,
 		input.Event.AuthorizationEpoch,
+		input.Event.RecordFenceEpoch,
 		input.ExpiresAfter.Microseconds(),
 	).Scan(&rowID); err != nil {
 		return recordplatform.OutboxEventRecordV1{}, fmt.Errorf("enqueue outbox event: %w", err)
@@ -177,6 +181,53 @@ func (transaction *RecordPlatformTransaction) EnqueueOutbox(ctx context.Context,
 	event := input.Event
 	event.RowID = rowID
 	return recordplatform.OutboxEventRecordV1{Event: event}, nil
+}
+
+// AssertOutboxClaim locks the exact currently-live outbox owner tuple inside
+// the caller's transaction. Projection writes must call it before deriving or
+// inserting any recipient state so a stale worker cannot project after a
+// takeover, cancellation, or database-time lease expiry.
+func (transaction *RecordPlatformTransaction) AssertOutboxClaim(ctx context.Context, claim recordplatform.ClaimedOutboxEventV1) error {
+	if ctx == nil || transaction == nil || transaction.repository == nil || transaction.tx == nil || claim.Validate() != nil {
+		return recordplatform.ErrInvalidOutboxClaim
+	}
+	if err := transaction.repository.admit(ctx, transaction.tx); err != nil {
+		return err
+	}
+	var present int
+	err := transaction.tx.QueryRow(ctx, `
+		select 1
+		from public.record_outbox
+		where outbox_row_id = $1
+		  and status = 'processing'
+		  and owner_id = $2
+		  and owner_generation = $3
+		  and owner_expires_at = $4
+		  and project_id = $5
+		  and event_kind = $6
+		  and subject_kind = $7
+		  and subject_id = $8
+		  and source_version = $9
+		  and authorization_epoch = $10
+		  and record_fence_epoch = $11
+		  and expires_at = $12
+		  and owner_expires_at > transaction_timestamp()
+		  and expires_at > transaction_timestamp()
+		for update`,
+		claim.Event.RowID, claim.Owner.OwnerID, claim.Owner.Generation, claim.Owner.ExpiresAt,
+		claim.Event.ProjectID, claim.Event.EventKind, claim.Event.SubjectKind, claim.Event.SubjectID,
+		claim.Event.SourceVersion, claim.Event.AuthorizationEpoch, claim.Event.RecordFenceEpoch, claim.ExpiresAt,
+	).Scan(&present)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return recordplatform.ErrLostOwnerLease
+	}
+	if err != nil {
+		return fmt.Errorf("assert outbox projection owner: %w", err)
+	}
+	if present != 1 {
+		return recordplatform.ErrLostOwnerLease
+	}
+	return nil
 }
 
 // ClaimOutbox atomically claims the next pending or expired-processing event.
@@ -313,7 +364,9 @@ func claimOutboxInTransaction(ctx context.Context, tx pgx.Tx, input recordplatfo
 		          outbox.event_kind,
 		          outbox.subject_kind,
 		          outbox.subject_id,
+		          outbox.source_version,
 		          outbox.authorization_epoch,
+		          outbox.record_fence_epoch,
 		          outbox.owner_id,
 		          outbox.owner_generation,
 		          outbox.owner_expires_at,
@@ -326,7 +379,9 @@ func claimOutboxInTransaction(ctx context.Context, tx pgx.Tx, input recordplatfo
 		&row.eventKind,
 		&row.subjectKind,
 		&row.subjectID,
+		&row.sourceVersion,
 		&row.authorizationEpoch,
+		&row.recordFenceEpoch,
 		&row.ownerID,
 		&row.ownerGeneration,
 		&row.ownerExpiresAt,
@@ -753,7 +808,9 @@ type observedOutboxClaimRow struct {
 	eventKind          string
 	subjectKind        string
 	subjectID          string
+	sourceVersion      int64
 	authorizationEpoch int64
+	recordFenceEpoch   int64
 	ownerID            string
 	ownerGeneration    int64
 	ownerExpiresAt     time.Time
@@ -761,7 +818,7 @@ type observedOutboxClaimRow struct {
 }
 
 func (row observedOutboxClaimRow) claim() (recordplatform.ClaimedOutboxEventV1, error) {
-	if row.authorizationEpoch < 0 || row.ownerGeneration < 1 {
+	if row.sourceVersion < 0 || row.authorizationEpoch < 0 || row.recordFenceEpoch < 0 || row.ownerGeneration < 1 {
 		return recordplatform.ClaimedOutboxEventV1{}, fmt.Errorf("%w: observed claim generation or epoch", recordplatform.ErrInvalidOutboxClaim)
 	}
 	claim := recordplatform.ClaimedOutboxEventV1{
@@ -771,7 +828,9 @@ func (row observedOutboxClaimRow) claim() (recordplatform.ClaimedOutboxEventV1, 
 			EventKind:          row.eventKind,
 			SubjectKind:        row.subjectKind,
 			SubjectID:          row.subjectID,
+			SourceVersion:      uint64(row.sourceVersion),
 			AuthorizationEpoch: uint64(row.authorizationEpoch),
+			RecordFenceEpoch:   uint64(row.recordFenceEpoch),
 		},
 		Owner: recordplatform.OwnerLease{
 			OwnerID:    row.ownerID,

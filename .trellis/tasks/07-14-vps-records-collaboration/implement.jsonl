@@ -1,1 +1,10 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/tasks/07-14-vps-records-collaboration/research/current-main-rebaseline-2026-08-17.md","reason":"Current protected-main baseline, existing Core/platform contracts, corrected Child 9/5 ownership, and Child 10/11 fail-closed boundary."}
+{"file":".trellis/spec/backend/index.md","reason":"Route implementation to the complete backend directory/database/error/auth/logging/quality guides without truncated injection."}
+{"file":".trellis/spec/backend/record-authorization.md","reason":"Canonical actor/resource/source authorization, opaque denials, membership distinction, and revoke behavior."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Stable sentinel errors, HTTP mapping, fail-closed dependency errors, and zero-panic production contract."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Comment/action/notification content and identifiers must remain outside logs, errors, and worker telemetry."}
+{"file":".trellis/spec/web/index.md","reason":"Route implementation to the complete Web component/state/styling/quality guides without truncated injection."}
+{"file":".trellis/spec/web/directory-structure.md","reason":"Lazy route-private collaboration file ownership and colocated test conventions."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Dark-first shared CSS ownership, desktop/390px layout, focus, and bundle/CSS budget constraints."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Map database/domain/API/worker/Web DTO and error boundaries before each Child 9 slice."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Use a non-main branch, hooks, protected-main PR/CI delivery, and separate Child 9/5 integration."}

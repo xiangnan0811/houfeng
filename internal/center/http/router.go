@@ -18,6 +18,10 @@ type RouterOptions struct {
 	SettingsHandler                               stdhttp.Handler
 	RecordsEnabled                                bool
 	RecordsHandler                                stdhttp.Handler
+	RecordActionsHandler                          stdhttp.Handler
+	RecordCommentsHandler                         stdhttp.Handler
+	RecordWatchesHandler                          stdhttp.Handler
+	RecordInboxHandler                            stdhttp.Handler
 	RecordDraftsHandler                           stdhttp.Handler
 	RecordDeletionsHandler                        stdhttp.Handler
 	EvidenceHandler                               stdhttp.Handler
@@ -154,6 +158,24 @@ func New(opts RouterOptions) stdhttp.Handler {
 		handler := protect(opts.RecordsHandler)
 		mux.Handle("/api/records", handler)
 		mux.Handle("/api/records/", handler)
+	}
+	if opts.RecordsEnabled && opts.RecordActionsHandler != nil {
+		handler := protect(opts.RecordActionsHandler)
+		mux.Handle("/api/records/{record_id}/actions", handler)
+		mux.Handle("/api/records/{record_id}/actions/", handler)
+	}
+	if opts.RecordsEnabled && opts.RecordCommentsHandler != nil {
+		handler := protect(opts.RecordCommentsHandler)
+		mux.Handle("/api/records/{record_id}/comments", handler)
+		mux.Handle("/api/records/{record_id}/comments/", handler)
+	}
+	if opts.RecordsEnabled && opts.RecordWatchesHandler != nil {
+		mux.Handle("/api/records/{record_id}/watch", protect(opts.RecordWatchesHandler))
+	}
+	if opts.RecordsEnabled && opts.RecordInboxHandler != nil {
+		handler := protect(opts.RecordInboxHandler)
+		mux.Handle("/api/record-notifications", handler)
+		mux.Handle("/api/record-notifications/", handler)
 	}
 	if opts.RecordsEnabled && opts.RecordDraftsHandler != nil {
 		handler := protect(opts.RecordDraftsHandler)

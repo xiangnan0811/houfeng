@@ -25,6 +25,18 @@ function mockJSONResponse(body: unknown, status = 200) {
   } as Response
 }
 
+function stubDashboardFetch(
+  dashboardFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+) {
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const path = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (path === '/api/record-notifications/unread-count') {
+      return Promise.resolve(mockJSONResponse({ unread_count: 0 }))
+    }
+    return dashboardFetch(input, init)
+  }))
+}
+
 function baseOverview(overrides: Record<string, unknown> = {}) {
   return {
     snapshot_generated_at: new Date(Date.now() - 60_000).toISOString(),
@@ -92,7 +104,7 @@ describe('AppShell', () => {
   })
 
   it('renders sidebar chrome and sets document title when authenticated', () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
+    stubDashboardFetch(vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
     const { container } = renderAuthenticatedAppShell()
 
     expect(container.querySelector('#main-content')).toBeInTheDocument()
@@ -108,7 +120,7 @@ describe('AppShell', () => {
   })
 
   it('starts authenticated keyboard navigation with a skip link to a focusable main', () => {
-    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})))
+    stubDashboardFetch(vi.fn().mockReturnValue(new Promise(() => {})))
     const { container } = renderAuthenticatedAppShell()
 
     const skipLink = screen.getByRole('link', { name: '跳到主内容' })
@@ -120,7 +132,7 @@ describe('AppShell', () => {
   })
 
   it('does not surface single-user phrasing', () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
+    stubDashboardFetch(vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
 
     renderAuthenticatedAppShell()
     const layout = document.querySelector('.layout')
@@ -128,21 +140,21 @@ describe('AppShell', () => {
     expect(layout!.textContent).not.toMatch(/单用户|全权限|个人系统|V1 冻结基线/)
   })
 
-  it('links the notification control to filtered events without a fake count', () => {
-    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})))
+  it('links the notification control to the private record inbox without an invented count', () => {
+    stubDashboardFetch(vi.fn().mockReturnValue(new Promise(() => {})))
 
     renderAuthenticatedAppShell()
 
-    expect(screen.getByRole('link', { name: '查看通知事件' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '记录通知，正在更新未读数' })).toHaveAttribute(
       'href',
-      '/events?notification_only=1',
+      '/record-inbox',
     )
     expect(document.querySelector('.notif-count')).toBeNull()
   })
 
   it('requests dashboard summary when authenticated and shows loading as degraded', () => {
     const fetchMock = vi.fn().mockReturnValue(new Promise(() => {}))
-    vi.stubGlobal('fetch', fetchMock)
+    stubDashboardFetch(fetchMock)
 
     renderAuthenticatedAppShell()
 
@@ -158,8 +170,7 @@ describe('AppShell', () => {
   })
 
   it('shows degraded sync when severe objects exist', async () => {
-    vi.stubGlobal(
-      'fetch',
+    stubDashboardFetch(
       vi.fn().mockResolvedValue(
         mockJSONResponse(
           baseOverview({
@@ -182,8 +193,7 @@ describe('AppShell', () => {
   })
 
   it('shows degraded sync when only non-severe anomalies exist', async () => {
-    vi.stubGlobal(
-      'fetch',
+    stubDashboardFetch(
       vi.fn().mockResolvedValue(
         mockJSONResponse(
           baseOverview({
@@ -204,8 +214,7 @@ describe('AppShell', () => {
   })
 
   it('shows dashboard anomaly counts in sidebar after summary loads', async () => {
-    vi.stubGlobal(
-      'fetch',
+    stubDashboardFetch(
       vi.fn().mockResolvedValue(
         mockJSONResponse(
           baseOverview({
@@ -240,7 +249,7 @@ describe('AppShell', () => {
         ),
       )
       .mockReturnValueOnce(new Promise(() => {}))
-    vi.stubGlobal('fetch', fetchMock)
+    stubDashboardFetch(fetchMock)
 
     const { unmount } = renderAuthenticatedAppShell()
     await waitFor(() => {
@@ -260,8 +269,7 @@ describe('AppShell', () => {
   })
 
   it('marks loaded summaries with active anomalies as degraded', async () => {
-    vi.stubGlobal(
-      'fetch',
+    stubDashboardFetch(
       vi.fn().mockResolvedValue(
         mockJSONResponse(
           baseOverview({
@@ -283,8 +291,7 @@ describe('AppShell', () => {
 
   it('describes a clear dashboard snapshot without claiming the system is healthy', async () => {
     const generatedAt = new Date(Date.now() - 60_000).toISOString()
-    vi.stubGlobal(
-      'fetch',
+    stubDashboardFetch(
       vi.fn().mockResolvedValue(
         mockJSONResponse(baseOverview({ snapshot_generated_at: generatedAt })),
       ),
@@ -305,8 +312,7 @@ describe('AppShell', () => {
   it('marks a dashboard snapshot stale after the freshness window expires', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-25T08:30:00Z'))
-    vi.stubGlobal(
-      'fetch',
+    stubDashboardFetch(
       vi.fn().mockResolvedValue(
         mockJSONResponse(baseOverview({ snapshot_generated_at: '2026-04-25T08:30:00Z' })),
       ),
@@ -336,7 +342,7 @@ describe('AppShell', () => {
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(baseOverview()))
       .mockReturnValueOnce(refreshResponse)
-    vi.stubGlobal('fetch', fetchMock)
+    stubDashboardFetch(fetchMock)
 
     renderAuthenticatedAppShell()
     await waitFor(() => {
@@ -380,7 +386,7 @@ describe('AppShell', () => {
         ),
       )
       .mockResolvedValueOnce(mockJSONResponse({ error: 'dashboard unavailable' }, 503))
-    vi.stubGlobal('fetch', fetchMock)
+    stubDashboardFetch(fetchMock)
 
     renderAuthenticatedAppShell()
     await waitFor(() => {
@@ -399,8 +405,7 @@ describe('AppShell', () => {
   })
 
   it('shows dashboard unavailable when the shell summary request fails', async () => {
-    vi.stubGlobal(
-      'fetch',
+    stubDashboardFetch(
       vi.fn().mockResolvedValue(mockJSONResponse({ error: 'dashboard unavailable' }, 503)),
     )
 

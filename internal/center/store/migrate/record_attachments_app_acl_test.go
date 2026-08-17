@@ -12,8 +12,8 @@ func TestRecordAttachmentsAppACLFragmentRegistersExactObjectsAndPrivileges(t *te
 	if err != nil {
 		t.Fatalf("compile production current APP ACL source contract: %v", err)
 	}
-	if len(source.fragments) != 3 {
-		t.Fatalf("production current APP ACL fragments = %d, want records-core, attachments, and evidence", len(source.fragments))
+	if len(source.fragments) != 4 {
+		t.Fatalf("production current APP ACL fragments = %d, want records-core, attachments, evidence, and collaboration", len(source.fragments))
 	}
 	fragment := source.fragments[1]
 	if fragment.Migration != "0053_create_record_attachments.sql" {
@@ -61,14 +61,14 @@ func TestRecordAttachmentsAppACLFragmentExtendsCatalogWithoutSequencesOrFunction
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(contract.ManagedObjects), len(base.Objects)+len(recordsCoreExpectedAppACLObjects())+len(recordAttachmentsExpectedAppACLObjects())+len(recordEvidenceExpectedAppACLObjects()); got != want {
+	if got, want := len(contract.ManagedObjects), len(base.Objects)+len(recordsCoreExpectedAppACLObjects())+len(recordAttachmentsExpectedAppACLObjects())+len(recordEvidenceExpectedAppACLObjects())+len(recordCollaborationExpectedAppACLObjects()); got != want {
 		t.Fatalf("production current managed objects = %d, want %d", got, want)
 	}
-	if got, want := len(contract.Privileges), len(appACLPrivilegesR1("houfeng"))+len(recordsCoreExpectedAppACLPrivileges())+len(recordAttachmentsExpectedAppACLPrivileges())+len(recordEvidenceExpectedAppACLPrivileges()); got != want {
+	if got, want := len(contract.Privileges), len(appACLPrivilegesR1("houfeng"))+len(recordsCoreExpectedAppACLPrivileges())+len(recordAttachmentsExpectedAppACLPrivileges())+len(recordEvidenceExpectedAppACLPrivileges())+len(recordCollaborationExpectedAppACLPrivileges()); got != want {
 		t.Fatalf("production current privileges = %d, want %d", got, want)
 	}
-	if got := len(contract.ExpectedFunctions); got != 3 {
-		t.Fatalf("production current expected functions = %d, want frozen projectors plus records-core validator", got)
+	if got, want := len(contract.ExpectedFunctions), len(appACLProjectorFunctionsR1())+1+len(recordCollaborationExpectedFunctionContracts()); got != want {
+		t.Fatalf("production current expected functions = %d, want %d frozen projectors, records-core validator, and collaboration mutation guards", got, want)
 	}
 	for _, object := range contract.ManagedObjects {
 		if object.SchemaName != "public" {

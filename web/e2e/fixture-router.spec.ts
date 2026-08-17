@@ -55,6 +55,27 @@ test('requires every mutation fixture to declare its exact body keys', async ({ 
   )
 })
 
+test('accepts an explicitly declared empty mutation body', async ({ page }) => {
+  const api = await installRouter(page)
+  api.useProfile({
+    ...unauthenticatedProfile,
+    [apiRouteKey('PUT', '/api/contract-empty-mutation')]: {
+      status: 200,
+      body: { ok: true },
+      expectNoBody: true as const,
+    },
+  })
+  await page.goto('/login')
+
+  const result = await page.evaluate(async () => {
+    const response = await fetch('/api/contract-empty-mutation', { method: 'PUT' })
+    return { status: response.status, body: await response.json() as unknown }
+  })
+
+  expect(result).toEqual({ status: 200, body: { ok: true } })
+  expect(() => api.assertNoUnexpectedRequests()).not.toThrow()
+})
+
 test('matches query parameters by canonical key order', async ({ page }) => {
   const api = await installRouter(page)
   api.useProfile({

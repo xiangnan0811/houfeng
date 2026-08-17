@@ -4,6 +4,10 @@ import { GlobalSearch } from './GlobalSearch'
 import { useThemeOptional } from '../../lib/theme-context'
 import { SyncStatus, type SyncStatusProps } from './SyncStatus'
 import type { User } from '../../lib/auth-client'
+import {
+  getRecordNotificationUnreadCount,
+  RECORD_INBOX_UNREAD_INVALIDATED_EVENT,
+} from '../../lib/recordInboxUnreadApi'
 
 const PAGE_TITLES: Record<string, string> = {
   '/': '工作台',
@@ -14,6 +18,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/providers': '服务商',
   '/subscriptions': '订阅',
   '/asset-decisions': '资产决策',
+  '/record-inbox': '记录通知',
   '/settings': '设置',
 }
 
@@ -184,17 +189,52 @@ function ThemeSwitcher() {
 }
 
 function NotificationBell() {
+  const pathname = useLocation().pathname
+  const [unreadCount, setUnreadCount] = useState<number | null | undefined>(undefined)
+  const requestGeneration = useRef(0)
+
+  useEffect(() => {
+    let active = true
+    const refresh = () => {
+      const generation = requestGeneration.current + 1
+      requestGeneration.current = generation
+      getRecordNotificationUnreadCount()
+        .then(({ unread_count }) => {
+          if (active && requestGeneration.current === generation) setUnreadCount(unread_count)
+        })
+        .catch(() => {
+          if (active && requestGeneration.current === generation) setUnreadCount(null)
+        })
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    window.addEventListener(RECORD_INBOX_UNREAD_INVALIDATED_EVENT, refresh)
+    return () => {
+      active = false
+      requestGeneration.current += 1
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener(RECORD_INBOX_UNREAD_INVALIDATED_EVENT, refresh)
+    }
+  }, [pathname])
+
+  const label = unreadCount === null ? '记录通知，未读数暂不可用'
+    : unreadCount === undefined ? '记录通知，正在更新未读数'
+      : unreadCount > 0 ? `记录通知，${unreadCount} 条未读` : '记录通知，无未读'
   return (
     <Link
-      className="tp-icon-btn"
-      to="/events?notification_only=1"
-      aria-label="查看通知事件"
-      title="通知事件"
+      className="tp-icon-btn tp-record-inbox"
+      to="/record-inbox"
+      aria-label={label}
+      title={label}
     >
-      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
-        <path d="M4 6a4 4 0 018 0c0 4 2 5 2 5H2s2-1 2-5" />
-        <path d="M6.5 13a1.5 1.5 0 003 0" />
-      </svg>
+      {typeof unreadCount === 'number' && unreadCount > 0 ? (
+        <span className="badge badge--count" aria-hidden="true">{unreadCount > 99 ? '99+' : unreadCount}</span>
+      ) : (
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+          <path d="M4 6a4 4 0 018 0c0 4 2 5 2 5H2s2-1 2-5" />
+          <path d="M6.5 13a1.5 1.5 0 003 0" />
+        </svg>
+      )}
     </Link>
   )
 }

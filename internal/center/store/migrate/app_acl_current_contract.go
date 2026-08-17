@@ -29,6 +29,7 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	recordsCoreAppACLCurrentMigrationFragment(),
 	recordAttachmentsAppACLCurrentMigrationFragment(),
 	recordEvidenceAppACLCurrentMigrationFragment(),
+	recordCollaborationAppACLCurrentMigrationFragment(),
 }
 
 func recordsCoreAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -243,6 +244,122 @@ func recordEvidenceAppACLCurrentPrivileges(string) []AppACLPrivilege {
 	} {
 		appendTable(runtime, table, AppACLPrivilegeSelect, AppACLPrivilegeInsert)
 		appendTable(AppACLSubjectPlatformAdmin, table, AppACLPrivilegeSelect)
+	}
+	return privileges
+}
+
+func recordCollaborationAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	objects := make([]AppACLManagedObjectR1, 0, 15)
+	for _, table := range []string{
+		"record_actions",
+		"record_action_events",
+		"record_comments",
+		"record_comment_revisions",
+		"record_comment_tombstones",
+		"record_comment_replies",
+		"record_comment_mentions",
+		"record_followers",
+		"record_notifications",
+		"record_notification_recipients",
+		"record_notification_deliveries",
+		"record_notification_delivery_attempts",
+		"record_notification_audit_summaries",
+		"record_collaboration_purge_receipts",
+	} {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: table,
+		})
+	}
+	functions := []AppACLCurrentFunctionContract{
+		{
+			SchemaName:      appACLManagedInternalSchemaR1,
+			Identity:        "enforce_record_comment_mutation()",
+			Kind:            "f",
+			SecurityDefiner: false,
+			Config:          []string{"search_path=pg_catalog"},
+		},
+		{
+			SchemaName:      appACLManagedInternalSchemaR1,
+			Identity:        "enforce_record_comment_revision_mutation()",
+			Kind:            "f",
+			SecurityDefiner: false,
+			Config:          []string{"search_path=pg_catalog"},
+		},
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "purge_record_collaboration(text, text, text, text, bigint, bigint, bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "prune_record_revision_followers(text, text[], bigint)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "prune_record_notification_recipients(text, text, text[], bigint)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_collaboration_purge(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_collaboration_prune_revision_followers(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_collaboration_prune_notification_recipients(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+	}
+	for _, function := range functions {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassFunction,
+			SchemaName:     function.SchemaName,
+			ObjectIdentity: function.Identity,
+		})
+	}
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0055_create_record_collaboration.sql",
+		Objects:    objects,
+		Privileges: recordCollaborationAppACLCurrentPrivileges,
+		Functions:  functions,
+	}
+}
+
+func recordCollaborationAppACLCurrentPrivileges(string) []AppACLPrivilege {
+	privileges := make([]AppACLPrivilege, 0, 35)
+	appendTable := func(subject AppACLSubject, table string, kinds ...AppACLPrivilegeKind) {
+		for _, kind := range kinds {
+			privileges = append(privileges, AppACLPrivilege{
+				Subject:        subject,
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     appACLManagedPublicSchemaR1,
+				ObjectIdentity: table,
+				Privilege:      kind,
+			})
+		}
+	}
+
+	runtime := AppACLSubjectCenterRuntime
+	for _, table := range []string{
+		"record_actions",
+		"record_comments",
+		"record_comment_revisions",
+		"record_notification_deliveries",
+	} {
+		appendTable(runtime, table,
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
+	}
+	appendTable(runtime, "record_notification_recipients",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert,
+		AppACLPrivilegeUpdate)
+	appendTable(runtime, "record_followers",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert,
+		AppACLPrivilegeUpdate)
+	for _, table := range []string{
+		"record_action_events",
+		"record_comment_tombstones",
+		"record_comment_replies",
+		"record_comment_mentions",
+		"record_notifications",
+		"record_notification_delivery_attempts",
+		"record_notification_audit_summaries",
+	} {
+		appendTable(runtime, table,
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+	}
+	appendTable(runtime, "record_collaboration_purge_receipts",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+	appendTable(AppACLSubjectPlatformAdmin, "record_collaboration_purge_receipts", AppACLPrivilegeSelect)
+	for _, function := range []string{
+		"public.record_collaboration_purge(bytea)",
+		"public.record_collaboration_prune_revision_followers(bytea)",
+		"public.record_collaboration_prune_notification_recipients(bytea)",
+	} {
+		privileges = append(privileges, AppACLPrivilege{Subject: runtime, ObjectClass: AppACLObjectClassFunction, ObjectIdentity: function, Privilege: AppACLPrivilegeExecute})
 	}
 	return privileges
 }

@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"time"
 )
@@ -13,6 +11,10 @@ import (
 type FeishuNotifier struct {
 	webhookURL string
 	client     *http.Client
+}
+
+type feishuProviderResponse struct {
+	Code *int `json:"code"`
 }
 
 func NewFeishuNotifier(webhookURL string) *FeishuNotifier {
@@ -38,24 +40,30 @@ func (n *FeishuNotifier) Send(ctx context.Context, summary string) error {
 	}
 	data, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("feishu: marshal: %w", err)
+		return NewSendFailure(SendFailurePermanent)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.webhookURL, bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("feishu: build request: %w", err)
+		return NewSendFailure(SendFailurePermanent)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := n.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("feishu: post: %w", err)
+		return NewSendFailure(SendFailureUnknown)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("feishu: unexpected status %d: %s", resp.StatusCode, string(bodyBytes))
+	if failureClass, failed := classifyProviderHTTPStatus(resp.StatusCode); failed {
+		return NewSendFailure(failureClass)
 	}
-	return nil
+	var providerResponse feishuProviderResponse
+	if !decodeBoundedProviderResponse(resp.Body, &providerResponse) || providerResponse.Code == nil {
+		return NewSendFailure(SendFailureUnknown)
+	}
+	if *providerResponse.Code == 0 {
+		return nil
+	}
+	return NewSendFailure(SendFailureUnknown)
 }

@@ -98,6 +98,12 @@ export class ApiFixtureController {
     fixture: ApiFixtureResponse,
     key: string,
   ): boolean {
+    if (fixture.expectNoBody) {
+      const body = request.postData()
+      if (body === null || body.length === 0) return true
+      this.unexpectedRequests.push(`${key} body must be empty`)
+      return false
+    }
     if (!fixture.expectedBodyKeys) {
       this.unexpectedRequests.push(`${key} must declare expectedBodyKeys`)
       return false

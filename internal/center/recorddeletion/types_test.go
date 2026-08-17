@@ -159,6 +159,49 @@ func TestRecordCoreDescriptorRequiresExactOwnedTables(t *testing.T) {
 	}
 }
 
+func TestRecordCollaborationDescriptorRequiresExactOwnedTables(t *testing.T) {
+	t.Parallel()
+
+	want := []SurfaceName{
+		"record_action_events",
+		"record_actions",
+		"record_collaboration_purge_receipts",
+		"record_comment_mentions",
+		"record_comment_replies",
+		"record_comment_revisions",
+		"record_comment_tombstones",
+		"record_comments",
+		"record_followers",
+		"record_notification_audit_summaries",
+		"record_notification_deliveries",
+		"record_notification_delivery_attempts",
+		"record_notification_recipients",
+		"record_notifications",
+	}
+	if got := RecordCollaborationSurfaceNames(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("RecordCollaborationSurfaceNames() = %#v, want %#v", got, want)
+	}
+	descriptor, err := NewAdapterDescriptor(AdapterNameRecordCollaboration, want)
+	if err != nil {
+		t.Fatalf("NewAdapterDescriptor(record_collaboration) error = %v", err)
+	}
+	if got := RecordCollaborationSurfaceDigest(); got == ([sha256.Size]byte{}) || got != digestAdapterSurfaces(descriptor) {
+		t.Fatalf("RecordCollaborationSurfaceDigest() = %x", got)
+	}
+	if _, err := NewAdapterDescriptor(AdapterNameRecordCollaboration, want[1:]); !errors.Is(err, ErrInvalidAdapterDescriptor) {
+		t.Fatalf("missing collaboration surface error = %v", err)
+	}
+	extra := append(RecordCollaborationSurfaceNames(), "record_outbox")
+	if _, err := NewAdapterDescriptor(AdapterNameRecordCollaboration, extra); !errors.Is(err, ErrInvalidAdapterDescriptor) {
+		t.Fatalf("extra collaboration surface error = %v", err)
+	}
+	returned := RecordCollaborationSurfaceNames()
+	returned[0] = "tampered"
+	if fresh := RecordCollaborationSurfaceNames(); !reflect.DeepEqual(fresh, want) {
+		t.Fatalf("RecordCollaborationSurfaceNames() after mutation = %#v", fresh)
+	}
+}
+
 func TestAdapterHealthSnapshotRequiresVersionedProof(t *testing.T) {
 	t.Parallel()
 

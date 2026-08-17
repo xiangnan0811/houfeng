@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ThemeProvider } from '../../lib/theme-context'
+import { invalidateRecordNotificationUnreadCount } from '../../lib/recordInboxUnreadApi'
 import { TopBar } from './TopBar'
 
 const sync = { state: 'clear' as const, label: '摘要无异常' }
@@ -19,9 +20,51 @@ function renderTopBar() {
 }
 
 describe('TopBar theme menu', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ unread_count: 0 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+  })
+
   afterEach(() => {
+    vi.unstubAllGlobals()
     localStorage.clear()
     document.documentElement.className = ''
+  })
+
+  it('links to the private record inbox and renders its bounded unread count', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ unread_count: 12 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    renderTopBar()
+
+    const inbox = await screen.findByRole('link', { name: '记录通知，12 条未读' })
+    expect(inbox).toHaveAttribute('href', '/record-inbox')
+    await waitFor(() => expect(inbox).toHaveTextContent('12'))
+  })
+
+  it('shows unread availability failures explicitly instead of a false zero', async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('unavailable'))
+    renderTopBar()
+
+    expect(await screen.findByRole('link', { name: '记录通知，未读数暂不可用' })).toHaveAttribute('href', '/record-inbox')
+    expect(screen.queryByRole('link', { name: '记录通知' })).not.toBeInTheDocument()
+  })
+
+  it('refreshes the narrow unread seam on focus and inbox invalidation', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ unread_count: 1 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ unread_count: 2 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ unread_count: 3 }), { status: 200 }))
+    renderTopBar()
+    expect(await screen.findByRole('link', { name: '记录通知，1 条未读' })).toBeInTheDocument()
+
+    fireEvent.focus(window)
+    expect(await screen.findByRole('link', { name: '记录通知，2 条未读' })).toBeInTheDocument()
+    invalidateRecordNotificationUnreadCount()
+    expect(await screen.findByRole('link', { name: '记录通知，3 条未读' })).toBeInTheDocument()
   })
 
   it('exposes menu button state and four radio menu items', () => {

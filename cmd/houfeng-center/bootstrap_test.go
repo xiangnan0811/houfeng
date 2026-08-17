@@ -211,6 +211,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		t.Fatalf("runtime workers = %d, want evidence maintenance disabled until Child 10 supplies admission", len(gotWorkers))
 	}
 	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
+		gotRouterOptions.RecordWatchesHandler == nil || gotRouterOptions.RecordInboxHandler == nil ||
 		gotRouterOptions.RecordDraftsHandler == nil || gotRouterOptions.RecordDeletionsHandler == nil ||
 		gotRouterOptions.EvidenceHandler == nil || gotRouterOptions.AttachmentUploadsHandler == nil || gotRouterOptions.AttachmentsHandler == nil {
 		t.Fatalf(
@@ -237,6 +238,8 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		wantCode string
 	}{
 		{name: "records", method: http.MethodGet, path: "/api/records", handler: gotRouterOptions.RecordsHandler, wantCode: "record_service_unavailable"},
+		{name: "watch", method: http.MethodGet, path: "/api/records/rec_httpcontract/watch", handler: gotRouterOptions.RecordWatchesHandler, wantCode: "record_service_unavailable"},
+		{name: "inbox", method: http.MethodGet, path: "/api/record-notifications", handler: gotRouterOptions.RecordInboxHandler, wantCode: "record_service_unavailable"},
 		{name: "drafts", method: http.MethodGet, path: "/api/record-drafts", handler: gotRouterOptions.RecordDraftsHandler, wantCode: "record_service_unavailable"},
 		{name: "deletion preview", method: http.MethodPost, path: "/api/records/rec_httpcontract/permanent-delete-preview", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_safety_unavailable"},
 		{name: "deletion status", method: http.MethodGet, path: "/api/record-deletions/rpo_httpcontract", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_status_unavailable"},
@@ -780,6 +783,120 @@ func TestBootstrapRegistersRecordAttachmentRevisionParticipant(t *testing.T) {
 	}
 	if strings.Contains(source, "store.NewPostgresRecordRepository(pool, nil, nil)") {
 		t.Fatal("bootstrap.go still constructs the Records repository without participants")
+	}
+}
+
+func TestBootstrapRegistersRecordCollaborationRevisionParticipantWithoutAdmissionFallback(t *testing.T) {
+	body, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatalf("read bootstrap.go: %v", err)
+	}
+	source := string(body)
+	for _, required := range []string{
+		"store.NewCollaborationRevisionParticipant(",
+		"store.NewPostgresCollaborationMembershipReader()",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("bootstrap.go missing collaboration revision wiring %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"store.AdmissionGateFunc(",
+		"NewCollaborationRevisionParticipant(nil)",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("bootstrap.go contains collaboration admission fallback %q", forbidden)
+		}
+	}
+}
+
+func TestBootstrapWiresRecordActionsThroughSharedAuthorizationMembershipAndAdmission(t *testing.T) {
+	source, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"store.NewPostgresRecordActionRepository(pool, effectiveGate, collaborationMembers, authorizations)",
+		"recordcollaboration.NewActionService(authorizations, actionRepository)",
+		"recordcollaboration.NewActionApplication(",
+		"handlers.RecordActions(actionApplication)",
+		"RecordActionsHandler:",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("bootstrap missing record action wiring %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"NewPostgresRecordActionRepository(pool, store.AdmissionGateFunc",
+		"NewPostgresRecordActionRepository(pool, allow",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("bootstrap contains forbidden record action admission bypass %q", forbidden)
+		}
+	}
+}
+
+func TestBootstrapWiresRecordCommentsThroughSharedAuthorizationMembershipAndAdmission(t *testing.T) {
+	source, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"store.NewPostgresRecordCommentRepository(pool, effectiveGate, collaborationMembers, authorizations)",
+		"recordcollaboration.NewCommentService(authorizations, commentRepository)",
+		"recordcollaboration.NewCommentApplication(",
+		"handlers.RecordComments(commentApplication)",
+		"RecordCommentsHandler:",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("bootstrap missing record comment wiring %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"NewPostgresRecordCommentRepository(pool, store.AdmissionGateFunc",
+		"NewPostgresRecordCommentRepository(pool, allow",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("bootstrap contains forbidden record comment admission bypass %q", forbidden)
+		}
+	}
+}
+
+func TestBootstrapWiresRecordWatchesInboxAndProjectionThroughSharedFailClosedDependencies(t *testing.T) {
+	source, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"store.NewPostgresRecordWatchRepository(pool, effectiveGate, collaborationMembers, authorizations)",
+		"recordcollaboration.NewWatchService(authorizations, watchRepository)",
+		"handlers.RecordWatches(watchApplication)",
+		"store.NewPostgresRecordNotificationRepository(",
+		"recordcollaboration.NewNotificationProjector(",
+		"recordcollaboration.NewNotificationProjectionWorker(",
+		"handlers.RecordInbox(notificationRepository)",
+		"RecordWatchesHandler:",
+		"RecordInboxHandler:",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("bootstrap missing record notification wiring %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"NewPostgresRecordWatchRepository(pool, store.AdmissionGateFunc",
+		"NewPostgresRecordNotificationRepository(pool, store.AdmissionGateFunc",
+		"NewPostgresRecordNotificationRepositoryWithExternalBindings(",
+		"NewNotificationProjectorWithExternalDelivery(",
+		"NewScopedExternalDeliveryProcessor(",
+		"NewOutboxWorker(",
+		"OutboxSender",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("bootstrap contains forbidden notification fallback/delivery primitive %q", forbidden)
+		}
 	}
 }
 

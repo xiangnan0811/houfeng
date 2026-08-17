@@ -20,6 +20,7 @@ import (
 	"houfeng/internal/center/evidence/adapters"
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordcollaboration"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store"
 )
@@ -28,13 +29,14 @@ func TestRecordsBootstrapEvidenceGateBoundary(t *testing.T) {
 	t.Parallel()
 
 	type result struct {
-		evidence http.Handler
-		worker   *evidence.MaintenanceWorker
-		err      error
+		evidence   http.Handler
+		projection *recordcollaboration.NotificationProjectionWorker
+		worker     *evidence.MaintenanceWorker
+		err        error
 	}
 	build := func(gate store.AdmissionGate, sources productionEvidenceSources) result {
 		pool := &pgxpool.Pool{}
-		_, _, _, evidenceHandler, _, _, worker, err := newRecordsHTTPHandlers(
+		_, _, _, _, _, evidenceHandler, _, _, collaboration, worker, err := newRecordsHTTPHandlers(
 			pool,
 			store.NewPostgresVPSAssetRepository(pool),
 			store.NewPostgresMonitoringInstanceRepository(pool),
@@ -46,7 +48,7 @@ func TestRecordsBootstrapEvidenceGateBoundary(t *testing.T) {
 			sources,
 			gate,
 		)
-		return result{evidence: evidenceHandler, worker: worker, err: err}
+		return result{evidence: evidenceHandler, projection: collaboration.projectionWorker, worker: worker, err: err}
 	}
 	var typedNilGate *compositionAdmissionGate
 	for _, test := range []struct {
@@ -59,7 +61,7 @@ func TestRecordsBootstrapEvidenceGateBoundary(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			built := build(test.gate, productionEvidenceSources{})
-			if built.err != nil || built.evidence == nil || built.worker != nil {
+			if built.err != nil || built.evidence == nil || built.projection != nil || built.worker != nil {
 				t.Fatalf("newRecordsHTTPHandlers() = handler:%T worker:%T error:%v, want stable handler and zero worker", built.evidence, built.worker, built.err)
 			}
 			recorder := exerciseEvidenceBootstrapHandler(t, built.evidence)
@@ -73,7 +75,7 @@ func TestRecordsBootstrapEvidenceGateBoundary(t *testing.T) {
 	built := build(&compositionAdmissionGate{}, productionEvidenceSources{
 		IPQuality: source, Monitoring: source, Events: source, SubscriptionCosts: source, CommandAudits: source,
 	})
-	if built.err != nil || built.evidence == nil || built.worker == nil {
+	if built.err != nil || built.evidence == nil || built.projection == nil || built.worker == nil {
 		t.Fatalf("injected newRecordsHTTPHandlers() = handler:%T worker:%T error:%v", built.evidence, built.worker, built.err)
 	}
 	recorder := exerciseEvidenceBootstrapHandler(t, built.evidence)

@@ -17,74 +17,96 @@ adapter, React/TypeScript, Vitest/Playwright/Axe.
 
 ## Preconditions
 
-- [ ] Foundation/Core and earlier planned dependencies are accepted on protected
-  main.
-- [ ] Run `trellis-before-dev` for backend database/auth/http and Web
+- [x] Foundation/Core/Attachments/Evidence are accepted on protected main at
+  the `2e6aa62a` / `v0.66.0` planning baseline.
+- [x] Run `trellis-before-dev` for backend database/auth/http and Web
   component/state/security guidance.
-- [ ] Confirm `0055` is free and current APP ACL fragments are available.
-- [ ] Reconcile the actual Core RevisionParticipant/activity/outbox/auth APIs.
-- [ ] Baseline Go/Web/notification tests with Node 22.
+- [x] Confirm `0055` is free and current APP ACL fragments are available.
+- [x] Reconcile the actual Core `RevisionParticipant`, `recordplatform`
+  admission/idempotency/outbox/lease, `recordauth`, and deletion registry APIs;
+  findings are recorded in `research/current-main-rebaseline-2026-08-17.md`.
+- [x] Baseline Go/Web/notification tests with Node 22.
 
 ## Task 1: 0055 schema, types, and ACL fragment
 
-- [ ] Write RED migration/domain tests for all state/history/idempotency/
-  retention/redaction constraints and no source cascade.
-- [ ] Implement `0055`, immutable values/state machines, and exact current APP
-  managed objects/privileges.
-- [ ] Run fresh/repeat migration, current admission, and real PostgreSQL tests.
+- [x] Write RED migration/domain tests for all state/history/retention/redaction
+  constraints, deletion-fence binding, no source cascade, and the explicit
+  absence of duplicate idempotency/outbox/lease/authorization tables.
+- [x] Implement `0055`, immutable values/state machines, and exact current APP
+  managed objects/privileges without cloning existing foundation idempotency,
+  outbox, lease, authorization, or deletion state.
+- [x] Run fresh/repeat migration, current admission, and real PostgreSQL tests.
 
 ## Task 2: Revision collaboration participant
 
-- [ ] Test owner/participant membership, post-save visibility/source floor,
-  follow-up, restore-old-revision, follower sources, activity/outbox order, and
-  rollback at each failure.
-- [ ] Implement and register `CollaborationRevisionParticipant`.
-- [ ] Expose normalized filter facts for Search without creating Search tables.
+- [x] Test the exact `default`-project membership matrix (present admin only;
+  missing/malformed/other-role/unavailable fail closed), post-save visibility/
+  source floor, deletion fence, follow-up, restore-old-revision, follower
+  sources, typed activity/outbox order, and rollback at each failure.
+- [x] Implement and register `CollaborationRevisionParticipant`.
+- [x] Expose normalized filter facts for Search without creating Search tables.
 
 ## Task 3: Action service
 
-- [ ] Test command idempotency/fingerprint, `If-Match`, permissions, transitions,
+- [x] Test command idempotency/fingerprint, `If-Match`, permissions, transitions,
   assignee/due filters, activity/outbox, and races.
-- [ ] Implement store/service/handlers and response allowlists.
-- [ ] Prove actions do not update Record/business status implicitly.
+- [x] Implement store/service/handlers and response allowlists.
+- [x] Prove actions do not update Record/business status implicitly.
 
 ## Task 4: Comment, reply, mention, and redaction
 
-- [ ] Run shared Markdown/XSS corpus for create/edit/reply/mention/render/export.
-- [ ] Test idempotency/CAS, author/moderator policy, reply integrity, mention
+- [x] Define the exact `comment_markdown/v1` nodes, canonical HTTP(S)-link rule,
+  16,384-byte source/512-node/depth-8/2,048-byte-link bounds, and exact 422
+  `invalid_comment_markdown`; run one shared server/Web
+  Markdown/XSS corpus for create/edit/reply/mention/render/export and prove
+  document-only/active/unsafe/invalid inputs cannot enter comments.
+- [x] Test idempotency/CAS, author/moderator policy, reply integrity, mention
   auth, tombstone, and database one-way redaction against stale writers.
-- [ ] Implement comment service/handlers and safe rendering.
+- [x] Implement comment service/handlers and safe rendering.
 
 ## Task 5: Watches, recipient decisions, and inbox
 
-- [ ] Test automatic/manual/mandatory follower matrix, self-noise, grouping,
+- [x] Test automatic/manual/mandatory follower matrix, self-noise, grouping,
   unread state, revoke/delete, and deterministic recipient deduplication.
-- [ ] Implement recipient policy, inbox projection/query/read state, and worker.
-- [ ] Recheck policy on each inbox read and deep-link target.
+- [x] Implement recipient policy, inbox projection/query/read state, and worker.
+- [x] Recheck policy on each inbox read and deep-link target.
 
 ## Task 6: Optional external delivery
 
-- [ ] Define scoped transport binding and content-safe render contract.
-- [ ] Test disabled/unconfigured/success/retry/permanent-failure/revoke/delete/
+- [x] Define scoped transport binding and content-safe render contract.
+- [x] Test disabled/unconfigured/success/retry/permanent-failure/revoke/delete/
   unbind paths and no business rollback.
-- [ ] Adapt existing transports without reusing incident data semantics.
+- [x] Keep no-binding production valid and disabled by default; adapt an existing
+  transport only behind the scoped interface without reusing incident data
+  semantics or making provider availability a completion dependency.
 
 ## Task 7: Web components and adapters
 
-- [ ] Build revision owner/follow-up controls, actions, comments, watch control,
+- [x] Build revision owner/follow-up controls, actions, comments, watch control,
   inbox, and minimal unread badge through correct lazy/eager boundaries.
-- [ ] Test loading/empty/error/revoked/deleted, desktop/390px, keyboard/focus,
+- [x] Test loading/empty/error/revoked/deleted, desktop/390px, keyboard/focus,
   touch, Axe, and bundle/CSS budgets.
-- [ ] Register Activity, Portability, deletion, backup, and restore adapters with
-  focused conformance tests.
+- [x] Publish normalized filter facts, typed Activity/Portability providers, and
+  exact deletion/backup/restore adapters with focused conformance tests; create
+  no Child 6/7/10/11 root tables, projections, jobs, pages, or orchestration.
 
 ## Task 8: Quality and handoff
 
-- [ ] Run focused race/real PostgreSQL/worker/security and Web/browser tests.
-- [ ] Run full Go/Web/browser gates, `git diff --check`, and `trellis-check`.
-- [ ] Update implemented collaboration/notification specs.
+- [x] Run focused race/real PostgreSQL/worker/security and Web/browser tests.
+- [x] Run full Go/Web/browser gates, `git diff --check`, and `trellis-check`.
+- [x] Update implemented collaboration/notification specs.
 - [ ] Merge through protected main and archive before Search/Activity/Portability
   final integration.
+
+## Planning review gate
+
+- [x] Current-main code/spec/task audit completed without product-code edits.
+- [x] Child 9/5 Markdown ownership and downstream contract boundaries are
+  explicit with no blocking open product question.
+- [x] Curated `implement.jsonl` and `check.jsonl` validate without injection
+  truncation warnings.
+- [x] Present the final planning summary and stop. Run `task.py start` only after
+  a subsequent explicit user approval of these updated artifacts.
 
 ## Rollback
 

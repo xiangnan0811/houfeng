@@ -27,6 +27,9 @@ This child owns:
 - restore followed by deletion replay and projection rebuild;
 - end-to-end product, security, performance, browser, and recovery acceptance;
 - the final decision to enable or keep permanent delete disabled.
+- aggregate construction and live verification of Child 10's real
+  deployment-membership gate, witnessed source-deletion authority, and
+  quarantine contract before any protected Records capability is enabled.
 
 It does not silently implement a missing domain adapter. A missing or unhealthy
 adapter blocks acceptance and returns work to the owning child.
@@ -88,6 +91,9 @@ adapter blocks acceptance and returns work to the owning child.
   database URL is emitted.
 - Verify all feature workers and routes stop or fail closed when their required
   adapter/store/source is unavailable.
+- Verify nil/typed-nil, stale, wrong-deployment, discontinuous, and unavailable
+  membership/tombstone authority keeps writes, source-deleted reads, quarantine
+  apply, and permanent delete closed without an allow-all fallback.
 
 ### Performance and UI
 
@@ -112,6 +118,10 @@ adapter blocks acceptance and returns work to the owning child.
   the last child-owned root migration (`0058` in the planned sequence).
 - [ ] The adapter registry has an exact expected set and fails on missing,
   duplicate, unknown, version-incompatible, or unhealthy entries.
+- [ ] The real deployment-membership gate and source-deletion witness are
+  composed on the exact build/deployment identity; all negative authority cases
+  fail before serving or business writes, and no test gate is reachable in
+  production wiring.
 - [ ] Backup plan/create/verify and restore plan/apply/verify work for local and
   S3-compatible profiles with deterministic typed manifests and exact hashes.
 - [ ] Every destructive/failure cutpoint leaves either a valid published backup/

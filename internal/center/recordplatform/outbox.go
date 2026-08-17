@@ -3,6 +3,7 @@ package recordplatform
 import (
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -13,12 +14,31 @@ var (
 )
 
 const (
-	OutboxEventKindRecordCreated = "record_created"
-	OutboxEventKindRecordUpdated = "record_updated"
-	OutboxEventKindRecordDeleted = "record_deleted"
+	OutboxEventKindRecordCreated              = "record_created"
+	OutboxEventKindRecordUpdated              = "record_updated"
+	OutboxEventKindRecordDeleted              = "record_deleted"
+	OutboxEventKindRecordOwnerChanged         = "record_owner_changed"
+	OutboxEventKindRecordParticipantChanged   = "record_participant_changed"
+	OutboxEventKindRecordActionCreated        = "record_action_created"
+	OutboxEventKindRecordActionUpdated        = "record_action_updated"
+	OutboxEventKindRecordActionAssigned       = "record_action_assigned"
+	OutboxEventKindRecordActionCompleted      = "record_action_completed"
+	OutboxEventKindRecordActionCancelled      = "record_action_cancelled"
+	OutboxEventKindRecordActionReopened       = "record_action_reopened"
+	OutboxEventKindRecordCommentCreated       = "record_comment_created"
+	OutboxEventKindRecordCommentEdited        = "record_comment_edited"
+	OutboxEventKindRecordCommentRedacted      = "record_comment_redacted"
+	OutboxEventKindRecordCommentReplied       = "record_comment_replied"
+	OutboxEventKindRecordCommentMentioned     = "record_comment_mentioned"
+	OutboxEventKindRecordNotificationDelivery = "record_notification_delivery"
 )
 
-const OutboxSubjectKindRecord = "record"
+const (
+	OutboxSubjectKindRecord   = "record"
+	OutboxSubjectKindAction   = "action"
+	OutboxSubjectKindComment  = "comment"
+	OutboxSubjectKindDelivery = "delivery"
+)
 
 // OutboxEvent contains only durable identity and authorization epoch data. It
 // intentionally cannot retain a payload, recipient, rendered body, or sender
@@ -29,7 +49,9 @@ type OutboxEvent struct {
 	EventKind          string
 	SubjectKind        string
 	SubjectID          string
+	SourceVersion      uint64
 	AuthorizationEpoch uint64
+	RecordFenceEpoch   uint64
 }
 
 // OutboxEnqueueInputV1 requests an identity-only outbox row. PostgreSQL
@@ -70,16 +92,44 @@ func (event OutboxEvent) Validate() error {
 	if err := ValidateProjectID(ProjectID(event.ProjectID)); err != nil {
 		return fmt.Errorf("%w: project", ErrInvalidOutboxEvent)
 	}
-	if !validOutboxEventKind(event.EventKind) {
+	expectedSubjectKind, ok := outboxSubjectKindForEventKind(event.EventKind)
+	if !ok {
 		return fmt.Errorf("%w: event kind", ErrInvalidOutboxEvent)
 	}
-	if event.SubjectKind != OutboxSubjectKindRecord {
+	if event.SubjectKind != expectedSubjectKind {
 		return fmt.Errorf("%w: subject kind", ErrInvalidOutboxEvent)
 	}
-	if !validOutboxSubjectID(event.SubjectID) {
+	if !validOutboxSubjectID(event.SubjectID) ||
+		(event.SubjectKind == OutboxSubjectKindDelivery && !validDeliveryOutboxSubjectID(event.SubjectID)) {
 		return fmt.Errorf("%w: subject id", ErrInvalidOutboxEvent)
 	}
+	notification := notificationProducingOutboxEventKind(event.EventKind)
+	if event.SourceVersion > math.MaxInt64 || notification != (event.SourceVersion > 0) {
+		return fmt.Errorf("%w: source version", ErrInvalidOutboxEvent)
+	}
+	if notification && (event.AuthorizationEpoch == 0 || event.AuthorizationEpoch > math.MaxInt64) {
+		return fmt.Errorf("%w: authorization epoch", ErrInvalidOutboxEvent)
+	}
+	if event.RecordFenceEpoch > math.MaxInt64 || (!notification && event.RecordFenceEpoch != 0) {
+		return fmt.Errorf("%w: record fence epoch", ErrInvalidOutboxEvent)
+	}
 	return nil
+}
+
+func notificationProducingOutboxEventKind(kind string) bool {
+	switch kind {
+	case OutboxEventKindRecordOwnerChanged,
+		OutboxEventKindRecordParticipantChanged,
+		OutboxEventKindRecordActionAssigned,
+		OutboxEventKindRecordActionCompleted,
+		OutboxEventKindRecordActionCancelled,
+		OutboxEventKindRecordCommentReplied,
+		OutboxEventKindRecordCommentMentioned,
+		OutboxEventKindRecordNotificationDelivery:
+		return true
+	default:
+		return false
+	}
 }
 
 // Validate rejects durations PostgreSQL cannot represent in the transaction
@@ -124,13 +174,45 @@ func (claim ClaimedOutboxEventV1) Validate() error {
 	return nil
 }
 
-func validOutboxEventKind(kind string) bool {
+func outboxSubjectKindForEventKind(kind string) (string, bool) {
 	switch kind {
-	case OutboxEventKindRecordCreated, OutboxEventKindRecordUpdated, OutboxEventKindRecordDeleted:
-		return true
+	case OutboxEventKindRecordCreated,
+		OutboxEventKindRecordUpdated,
+		OutboxEventKindRecordDeleted,
+		OutboxEventKindRecordOwnerChanged,
+		OutboxEventKindRecordParticipantChanged:
+		return OutboxSubjectKindRecord, true
+	case OutboxEventKindRecordActionCreated,
+		OutboxEventKindRecordActionUpdated,
+		OutboxEventKindRecordActionAssigned,
+		OutboxEventKindRecordActionCompleted,
+		OutboxEventKindRecordActionCancelled,
+		OutboxEventKindRecordActionReopened:
+		return OutboxSubjectKindAction, true
+	case OutboxEventKindRecordCommentCreated,
+		OutboxEventKindRecordCommentEdited,
+		OutboxEventKindRecordCommentRedacted,
+		OutboxEventKindRecordCommentReplied,
+		OutboxEventKindRecordCommentMentioned:
+		return OutboxSubjectKindComment, true
+	case OutboxEventKindRecordNotificationDelivery:
+		return OutboxSubjectKindDelivery, true
 	default:
+		return "", false
+	}
+}
+
+func validDeliveryOutboxSubjectID(value string) bool {
+	const prefix = "rnd_"
+	if len(value) < len(prefix)+1 || len(value) > len(prefix)+64 || value[:len(prefix)] != prefix {
 		return false
 	}
+	for _, character := range value[len(prefix):] {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func validOutboxSubjectID(value string) bool {

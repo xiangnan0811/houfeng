@@ -9,6 +9,12 @@ cross-domain acceptance.
 
 It adds no root migration and does not deploy a release.
 
+Child 10 supplies the concrete deployment-membership gate, witnessed
+source-deletion authority, and unsupported-evidence quarantine. Child 11 owns
+their aggregate bootstrap/readiness composition and proves that no test gate,
+typed-nil bypass, local tombstone substitute, or partial registry can enable a
+protected capability.
+
 ## 2. Integration topology
 
 The reproducible test topology contains:
@@ -48,6 +54,11 @@ the domain owner.
 
 Permanent-delete readiness consumes this exact registry plus live health. It is
 not a feature flag that bypasses incomplete adapters.
+
+Records write/read readiness also consumes the real deployment-membership and
+source-deletion authority health. Their deployment identity, contract epoch,
+and witness continuity must match the current build manifest; any mismatch or
+unavailable dependency keeps routes/workers closed before traffic.
 
 ## 4. Backup manifest
 
