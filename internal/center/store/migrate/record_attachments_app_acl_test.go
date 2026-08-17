@@ -67,8 +67,8 @@ func TestRecordAttachmentsAppACLFragmentExtendsCatalogWithoutSequencesOrFunction
 	if got, want := len(contract.Privileges), len(appACLPrivilegesR1("houfeng"))+len(recordsCoreExpectedAppACLPrivileges())+len(recordAttachmentsExpectedAppACLPrivileges())+len(recordEvidenceExpectedAppACLPrivileges())+len(recordCollaborationExpectedAppACLPrivileges()); got != want {
 		t.Fatalf("production current privileges = %d, want %d", got, want)
 	}
-	if got := len(contract.ExpectedFunctions); got != 5 {
-		t.Fatalf("production current expected functions = %d, want frozen projectors, records-core validator, and collaboration mutation guards", got)
+	if got, want := len(contract.ExpectedFunctions), len(appACLProjectorFunctionsR1())+1+len(recordCollaborationExpectedFunctionContracts()); got != want {
+		t.Fatalf("production current expected functions = %d, want %d frozen projectors, records-core validator, and collaboration mutation guards", got, want)
 	}
 	for _, object := range contract.ManagedObjects {
 		if object.SchemaName != "public" {
