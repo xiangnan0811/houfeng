@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -151,6 +152,51 @@ func TestPortabilitySnapshotRejectsPerSurfaceOverflow(t *testing.T) {
 	}
 	if err := tooMany.Validate(); !errors.Is(err, ErrInvalidPortabilitySnapshot) {
 		t.Fatalf("Validate(per-surface overflow) error = %v, want ErrInvalidPortabilitySnapshot", err)
+	}
+}
+
+func TestPortabilitySnapshotRejectsNotificationAuditBigintAndSubtotalOverflow(t *testing.T) {
+	t.Parallel()
+
+	base := PortableNotificationAudit{
+		NotificationID: "rnt_" + strings.Repeat("a", 64),
+		Kind:           NotificationEventRecordOwnerChanged, SubjectKind: NotificationSubjectRecord,
+		SourceVersion: 1, EventAt: time.Date(2026, time.August, 17, 18, 30, 0, 0, time.UTC),
+		RecipientCount: 3, DeliveryCount: 3, SentCount: 1, UnknownCount: 1, PermanentFailed: 1,
+	}
+	cases := map[string]func(*PortableNotificationAudit){
+		"recipient exceeds bigint": func(audit *PortableNotificationAudit) { audit.RecipientCount = math.MaxUint64 },
+		"delivery exceeds bigint":  func(audit *PortableNotificationAudit) { audit.DeliveryCount = math.MaxUint64 },
+		"sent exceeds bigint": func(audit *PortableNotificationAudit) {
+			audit.DeliveryCount, audit.SentCount = math.MaxUint64, math.MaxUint64
+		},
+		"unknown exceeds bigint": func(audit *PortableNotificationAudit) {
+			audit.DeliveryCount, audit.UnknownCount = math.MaxUint64, math.MaxUint64
+		},
+		"permanent failed exceeds bigint": func(audit *PortableNotificationAudit) {
+			audit.DeliveryCount, audit.PermanentFailed = math.MaxUint64, math.MaxUint64
+		},
+		"delivery subtotal overflows uint64": func(audit *PortableNotificationAudit) {
+			audit.DeliveryCount, audit.SentCount, audit.UnknownCount, audit.PermanentFailed =
+				math.MaxInt64, math.MaxInt64, math.MaxInt64, 2
+		},
+	}
+	for name, mutate := range cases {
+		name, mutate := name, mutate
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			audit := base
+			mutate(&audit)
+			snapshot := PortabilitySnapshot{
+				Actions: []PortableAction{}, ActionEvents: []PortableActionEvent{}, Comments: []PortableComment{},
+				CommentRevisions: []PortableCommentRevision{}, Tombstones: []PortableCommentTombstone{},
+				Replies: []PortableCommentReply{}, Mentions: []PortableCommentMention{}, Followers: []PortableFollower{},
+				NotificationAudits: []PortableNotificationAudit{audit},
+			}
+			if err := snapshot.Validate(); !errors.Is(err, ErrInvalidPortabilitySnapshot) {
+				t.Fatalf("Validate() error = %v, want ErrInvalidPortabilitySnapshot", err)
+			}
+		})
 	}
 }
 

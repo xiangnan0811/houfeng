@@ -574,7 +574,21 @@ func validatePortableNotificationAudit(audit PortableNotificationAudit) error {
 		!validNotificationEventKindPortable(audit.Kind) || audit.SubjectKind != expectedSubject ||
 		!validNotificationSubjectKindPortable(audit.SubjectKind) || audit.SourceVersion == 0 ||
 		audit.SourceVersion > math.MaxInt64 || !portableTimeCanonical(audit.EventAt) ||
-		audit.SentCount+audit.UnknownCount+audit.PermanentFailed > audit.DeliveryCount {
+		audit.RecipientCount > math.MaxInt64 || audit.DeliveryCount > math.MaxInt64 ||
+		audit.SentCount > math.MaxInt64 || audit.UnknownCount > math.MaxInt64 ||
+		audit.PermanentFailed > math.MaxInt64 {
+		return ErrInvalidPortabilitySnapshot
+	}
+	remainingDeliveries := audit.DeliveryCount
+	if audit.SentCount > remainingDeliveries {
+		return ErrInvalidPortabilitySnapshot
+	}
+	remainingDeliveries -= audit.SentCount
+	if audit.UnknownCount > remainingDeliveries {
+		return ErrInvalidPortabilitySnapshot
+	}
+	remainingDeliveries -= audit.UnknownCount
+	if audit.PermanentFailed > remainingDeliveries {
 		return ErrInvalidPortabilitySnapshot
 	}
 	return nil
