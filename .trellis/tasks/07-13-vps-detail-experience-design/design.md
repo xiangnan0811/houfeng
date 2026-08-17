@@ -1207,19 +1207,21 @@ vps_overview__submitting_or_background
 
 2026-08-02 重基线后的默认执行顺序为 `1 -> 2 -> 3 -> 4 -> 9 -> 5 -> 6 -> 7 -> 8 -> 10 -> 11`。这是依赖和评审顺序，不要求同时维护多个分支或 worktree。
 
+2026-08-17 交付重基线确认顺序不变：Children 1–3 已归档，Child 4 已经 PR/CI/merge 并随 `v0.66.0` 发布，下一项是 Child 9，Child 5 只能从 Child 9 合入后的 protected main 开始。Child 9 只为 Child 6/7/10/11 发布 typed filter/activity/portability/recovery contracts，不提前实现这些下游页面、投影、任务或恢复编排；它拥有最小 comment-safe Markdown 合同与共享 hostile corpus，Child 5 在同一合同上扩展完整文档方言和编辑器。Child 10 拥有真实 deployment-membership admission、witnessed source-deletion tombstone 与外部 unsupported evidence quarantine，Child 11 拥有 aggregate composition/readiness 和最终启用证据；在此前所有 Records 写路径继续失败关闭。
+
 | 序号 | 子任务 | 直接依赖 | 独立验收焦点 |
 |---|---|---|---|
 | 1 | 统一授权与平台基础 | 无 | 已关闭：auth/idempotency/outbox/deletion/delivery primitives 与 current-development migration/ACL admission 均已合入；不继续 APP V3 successor |
 | 2 | 记录、修订、草稿与状态核心 | 1 | schema、CAS、完整修订、草稿、生命周期、read fence、record purge saga 和审计投影 |
 | 3 | Blob、附件、配额与扫描 | 1, 2 | local/S3、上传状态机、准入、配额、GC pin、无宽限 purge、下载授权与 Blob backup/restore adapter |
 | 4 | 证据注册表与首批适配器 | 1, 2 | IP/监控/事件/成本/命令 schema、捕获、脱敏、可信度修复 |
-| 5 | Markdown 编辑、阅读、差异与材料 | 2, 3, 4, 9 | 方言、引用、协作组件集成、编辑/预览、修订、冲突和 tombstone；Artifact v1 编辑器/证据选择器桌面与 390px 合同 |
+| 5 | Markdown 编辑、阅读、差异与材料 | 2, 3, 4, 9 | 复用 Child 9 comment-safe Markdown 合同并扩展文档方言、引用、协作组件集成、编辑/预览、修订、冲突和 tombstone；Artifact v1 编辑器/证据选择器桌面与 390px 合同 |
 | 6 | 搜索、记录中心与全局搜索 | 1, 2, 5, 9 | Markdown 纯文本、协作筛选、pg_trgm/tsvector、游标、URL、历史范围和权限；Artifact v1 记录中心桌面/390px 与列表状态 |
 | 7 | 活动投影、单主体页面与 VPS 概览 | 2, 4, 6, 9 | 合流排序、评论/行动项活动、局部错误、稳定/异常概览和主体路由；Artifact v1 VPS 两态与单主体时间线 |
 | 8 | 横向比较工作台 | 2, 4, 5, 7 | 主体证据入口、可比性、图表/矩阵、部分覆盖和保存记录；Artifact v1 比较工作台桌面/390px 合同 |
-| 9 | 负责人、行动项、评论、关注与通知 | 1, 2 | 独立活动、提及/聚合、inbox、外部安全摘要 |
-| 10 | 导入导出与可移植性 | 2, 3, 4, 5, 6, 7, 8, 9 | human/machine export、安全 import、可追溯 origin、服务端产物 purge 和删除后防复活；不转换 `experience_logs` |
-| 11 | 集成验证、备份恢复与终验 | 1–10 | 接入全部 backup/restore/replay adapter，完成真实跨存储恢复、删除不复活、安全/容量/性能、desktop/390px、keyboard/Axe 和最终功能 gate；不承担 staging/release cutover |
+| 9 | 负责人、行动项、评论、关注与通知 | 1, 2 | revision participant、最小安全评论 Markdown、独立活动 facts、提及/聚合、inbox、默认关闭的外部安全摘要；下游只消费 typed contracts |
+| 10 | 导入导出与可移植性 | 2, 3, 4, 5, 6, 7, 8, 9 | human/machine export、安全 import、可追溯 origin、真实 deployment/source-deletion authority、integrity-valid quarantine、服务端产物 purge 和删除后防复活；不转换 `experience_logs` |
+| 11 | 集成验证、备份恢复与终验 | 1–10 | 接入全部 backup/restore/replay adapter 与真实 admission/witness authority，完成 readiness、跨存储恢复、删除不复活、安全/容量/性能、desktop/390px、keyboard/Axe 和最终功能 gate；不承担 staging/release cutover |
 
 所有子任务均为必交付范围。依赖写入每个子任务 `prd.md` / `implement.md`，不靠树位置暗示。父任务只有在全部子任务独立验收和跨层验收通过后关闭。
 

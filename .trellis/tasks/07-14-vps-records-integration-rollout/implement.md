@@ -24,6 +24,9 @@ processor/scanner, shell integration harness, React/Playwright/Axe.
   quality/e2e guidance.
 - [ ] Inventory actual adapter kinds, worker constructors, integration helpers,
   feature flags, and test commands; revise paths below before start.
+- [ ] Inventory and verify Child 10's concrete deployment-membership gate,
+  source-deletion witness, and quarantine constructors; production composition
+  must have no test-gate or local-tombstone fallback.
 - [ ] Confirm no root migration is added and the current migration maximum is
   the planned `0058` (or the globally rebaselined equivalent).
 - [ ] Establish clean Go/Web/PostgreSQL/local/MinIO baselines with Node 22 and
@@ -35,6 +38,9 @@ processor/scanner, shell integration harness, React/Playwright/Axe.
   incompatible/unhealthy adapters and permanent-delete readiness.
 - [ ] Implement aggregate registry and content-safe status matrix.
 - [ ] Wire child-owned adapters without moving their domain logic into Child 11.
+- [ ] Compose membership/witness authority into bootstrap/readiness and prove
+  nil/typed-nil, stale, wrong-deployment, discontinuous, and outage cases remain
+  closed before any business write or protected read.
 - [ ] Run focused registry/bootstrap tests; return missing contracts to owners.
 
 ## Task 2: Typed backup manifest and staging

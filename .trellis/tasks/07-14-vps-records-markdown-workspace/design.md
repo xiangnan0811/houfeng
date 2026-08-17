@@ -4,9 +4,14 @@
 
 本任务没有 migration。历史 revision 的 Markdown dialect/version compatibility 保留，因为它是新功能自身的数据合同；旧 application database 或 `experience_logs` compatibility 不保留。feature flag 只用于开发期回滚。
 
+Child 9 先交付较小的 `comment_markdown/v1` 闭合render model与共享
+hostile/golden corpus。本文档方言将其作为子集并扩展，而不是复制依赖、分叉
+sanitizer规则或替换历史评论renderer；任何共同语义必须由跨合同conformance
+测试证明一致。
+
 ## 1. Markdown v1方言
 
-服务端 `internal/center/records/markdown.go` 使用 Goldmark 1.8.4，启用GFM/footnote/代码扩展，禁用raw HTML；Bluemonday 1.0.27使用显式tag/attribute/scheme allowlist。Web使用react-markdown 10.1.0 + remark-gfm 4.0.1 + rehype-sanitize 6.0.0，不启用rehype-raw。双方消费 `testdata/markdown/houfeng-v1.json`。
+服务端 `internal/center/records/markdown.go` 使用 Goldmark 1.8.4，启用GFM/footnote/代码扩展，禁用raw HTML；Bluemonday 1.0.27使用显式tag/attribute/scheme allowlist。Web使用react-markdown 10.1.0 + remark-gfm 4.0.1 + rehype-sanitize 6.0.0，不启用rehype-raw。双方消费 `testdata/markdown/houfeng-v1.json`，并复用 Child 9 `comment_markdown/v1` corpus 中的共同case。
 
 引用语法：
 

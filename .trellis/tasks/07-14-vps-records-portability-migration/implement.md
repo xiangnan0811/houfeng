@@ -24,6 +24,10 @@ ArtifactStore, isolated Chromium PDF renderer, React/TypeScript.
   component/state/quality guidance.
 - [ ] Confirm `0058` is free and all owning domain provider/participant APIs
   exist; update this plan to their actual signatures before start.
+- [ ] Reconcile the external deletion-ledger/contract-activation implementation
+  and define the real deployment-membership gate plus witnessed source-deletion
+  reader against existing `0051` authority; do not create duplicate authority
+  tables or use an APP-local/test gate in production.
 - [ ] Run supported Go/Web baseline and hooks in a clean non-main worktree.
 
 ## Task 1: Archive types and hostile conformance
@@ -45,6 +49,8 @@ and migration tests.
 
 - [ ] Write RED schema/constraint/index/TTL/content-allowlist tests.
 - [ ] Add the `0058` fragment with exact objects and runtime/admin privileges.
+- [ ] Prove `0058` contains no duplicate `deployment_membership` or
+  `deployment_contract_state` authority.
 - [ ] Implement store CAS/idempotency operations and typed row mapping.
 - [ ] Run fresh/repeat migration, current convergence/admission, and real
   PostgreSQL store tests.
@@ -102,6 +108,18 @@ one conformance suite.
 - [ ] Register deletion, backup, restore, and janitor adapters.
 - [ ] Prove permanent deletion plus official restore/re-import cannot resurrect
   target content.
+
+## Task 8A: Production admission, source witness, and quarantine
+
+- [ ] RED covers nil/typed-nil/stale/wrong-deployment membership, missing or
+  discontinuous source tombstones, witness outage, archive/entry corruption,
+  unknown required schema, and forbidden generic render/apply/export paths.
+- [ ] Implement the concrete transaction-scoped `store.AdmissionGate`, witnessed
+  source-deletion authorization-floor reader, and integrity-valid allowlisted
+  external evidence quarantine without changing ordinary evidence registry
+  behavior.
+- [ ] Run strict real PostgreSQL/witness integration, replay, readiness, hostile
+  archive, and bootstrap tests; leave final aggregate enablement to Child 11.
 
 ## Task 9: Quality and handoff
 

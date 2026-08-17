@@ -22,9 +22,13 @@ storage, Vitest, Playwright, and Trellis child-task workflow.
 
 - Read `research/development-rebaseline-2026-08-02.md` before any child work.
 - Parent status remains `planning`; it is not an implementation target.
-- Current program completion is `1/11` children closed.
-- Child 1 is complete and archived after PR #394 plus protected-main CI.
-- Children 2-11 remain `planning` and require individual plan review before
+- Current delivered program completion is `4/11`: Children 1–3 are archived,
+  and Child 4 was merged through PR #408, verified on protected main, and
+  published in `v0.66.0`. Its task archive is part of the 2026-08-17 planning
+  rebaseline.
+- Child 9 Collaboration is next. Child 5 remains planning until Child 9 is
+  independently reviewed and merged to protected main.
+- Children 5–11 require individual current-main plan reconciliation before
   `task.py start`.
 - The old 121-item matrix is historical risk coverage, not a current
   line-by-line release gate.
@@ -116,6 +120,12 @@ all passed. Parent progress is now `1/11`; Child 2 remains planning.
 
 - Deliver `0055`, owners/participants, actions, comments, watches, inbox, and
   permission-safe notifications.
+- Reuse Core revision participants, `recordplatform` admission/idempotency/
+  identity-only outbox, `recordauth`, and the existing deletion registry; do not
+  introduce parallel platform primitives.
+- Own a minimal versioned comment-safe Markdown renderer and hostile corpus.
+  Publish only typed filter/activity/portability/recovery contracts to later
+  children; do not build their tables, projections, jobs, pages, or orchestration.
 - Exit with transaction, recipient, revocation, deletion, and notification
   retry tests; external delivery is optional unless configured.
 
@@ -124,6 +134,8 @@ all passed. Parent progress is now `1/11`; Child 2 remains planning.
 - Start only after Children 2, 3, 4, and 9 are integrated on protected main.
 - Deliver the safe Markdown dialect, preview/read model, editor, drafts,
   revision diff/conflict, references, and material workspace.
+- Reuse and extend Child 9's comment-safe Markdown contract/corpus; do not create
+  a second incompatible comment renderer.
 - Integrate attachments, evidence, and collaboration only through their public
   contracts.
 - Exit with XSS corpus, editor state, desktop/390px, keyboard, and bundle tests.
@@ -153,6 +165,9 @@ all passed. Parent progress is now `1/11`; Child 2 remains planning.
 
 - Deliver `0058`, human export, canonical machine archive, safe import dry-run
   and apply, origin remapping, authorization, and deletion/recovery adapters.
+- Deliver the real deployment-membership admission implementation, witnessed
+  source-deletion tombstone authority, and integrity-valid unsupported evidence
+  quarantine required by the already fail-closed Records composition.
 - Do not create `0059` or convert `experience_logs`.
 - Exit with archive conformance, hostile input, local/S3 artifact, atomic import,
   idempotency, source deletion, and no-resurrection tests.
@@ -160,6 +175,9 @@ all passed. Parent progress is now `1/11`; Child 2 remains planning.
 ### Child 11: Integration verification
 
 - Register and verify every child-owned backup/restore/replay adapter.
+- Compose the real admission/tombstone authority, prove readiness and fail-closed
+  behavior, and enable protected capabilities only after the aggregate gate is
+  complete.
 - Exercise PostgreSQL, local and S3-compatible storage, processor, worker,
   security, capacity, failure injection, browser, accessibility, and recovery.
 - Validate permanent deletion only after all adapter and replay gates are green.

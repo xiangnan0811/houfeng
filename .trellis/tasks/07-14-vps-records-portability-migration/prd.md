@@ -27,6 +27,12 @@ Children 2-9 must be merged and accepted before this child starts:
 - Platform foundation supplies auth, idempotency, outbox, deletion fence, and
   current migration/ACL admission.
 
+The 2026-08-17 rebaseline also assigns this child the real
+deployment-membership `store.AdmissionGate`, witnessed source-deletion
+tombstone authority, and integrity-valid external unsupported-evidence
+quarantine required by the fail-closed Records composition. Child 11 owns their
+aggregate composition/readiness and final enablement evidence.
+
 ## Requirements
 
 - Create `0058_create_record_portability.sql` for export/import jobs, artifacts,
@@ -55,6 +61,15 @@ Children 2-9 must be merged and accepted before this child starts:
   participate in permanent-delete preview, purge, backup inventory, and restore.
 - An origin tombstone prevents an officially restored or re-imported archive
   from resurrecting a permanently deleted target.
+- The production deployment-membership gate reuses the existing `0051`
+  `deployment_membership` plus `deployment_contract_state` authority; `0058`
+  creates no duplicate gate table. That gate and the source-deletion witness bind
+  the external deletion-ledger/contract-activation identity and fail closed on
+  nil, typed-nil, stale, incomplete, or unreachable authority. No APP-local
+  allow-all or digest-only tombstone can satisfy the contract.
+- External unsupported evidence may expose only locally derived allowlisted
+  envelope metadata after archive/entry integrity succeeds; it cannot create a
+  record/snapshot, render/compare/apply, or be re-exported as trusted evidence.
 - Local and S3-compatible ArtifactStore implementations pass one conformance
   suite.
 - No `0059` migration, no `experience_logs` reader, no text heuristic conversion,
@@ -75,6 +90,9 @@ Children 2-9 must be merged and accepted before this child starts:
   comparison references atomically, idempotently, and without actor escalation.
 - [ ] Unsupported required schemas block apply; optional opaque material remains
   quarantined and cannot render, compare, or re-export as trusted evidence.
+- [ ] Real deployment-membership admission and witnessed source-deletion
+  tombstones satisfy transaction/readiness/replay contracts; nil, stale,
+  incomplete, or unavailable authority keeps writes and affected reads closed.
 - [ ] Source deletion, target archive, permission revoke, cancellation, expiry,
   crash, and janitor paths leave no unauthorized download or orphan workspace.
 - [ ] Permanent delete purges owned content/artifacts and keeps only the minimal
@@ -94,6 +112,8 @@ Children 2-9 must be merged and accepted before this child starts:
 - Anonymous/public links or permanent bearer downloads.
 - Executing imported code, SQL, macros, remote URLs, or active content.
 - A general backup product; Child 11 owns end-to-end backup/restore validation.
+- Aggregate production readiness/enablement; Child 11 owns final composition and
+  keeps protected capabilities disabled if any authority or adapter is missing.
 - Release, staging, or cutover orchestration.
 
 ## Execution Gate

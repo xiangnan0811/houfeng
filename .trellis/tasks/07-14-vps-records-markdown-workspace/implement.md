@@ -14,18 +14,20 @@
 
 - 从已接受的 Child 2/3/4/9 protected main 开始，不创建 migration。
 - Collaboration migration 为 `0055`；本任务只消费其稳定 API/组件/corpus。
+- `comment_markdown/v1` 是完整文档方言的安全子集；复用其共同case与renderer
+  contract，不重新实现或迁移评论。
 - 不做 old-database/legacy/staging/release work；Node 22 是 Web 验证工具链。
 
 ## Preconditions
 
-- [ ] 子任务2/3/4/9已合入main；确认 `0055` collaboration API/组件与comment Markdown corpus可用；Node22 active；读取web component/state/styling/quality规范。
+- [ ] 子任务2/3/4/9已合入main；确认 `0055` collaboration API/组件与 `comment_markdown/v1` corpus/renderer contract可用；Node22 active；读取web component/state/styling/quality规范。
 - [ ] 运行Go/Web baseline并记录entry/max-async bundle预算；不得用抬预算解决依赖体积。
 
 ## Task 1: 跨语言Markdown v1 corpus与服务端render
 
 **Files:** Create `testdata/markdown/houfeng-v1.json`; `internal/center/records/{markdown,render,references}.go` + tests; modify go.mod/sum.
 
-- [ ] 先写golden/hostile RED tests，覆盖GFM/脚注/代码/HTML/XSS/URL/ref/tombstone。
+- [ ] 先复用Child 9共同case并写文档扩展golden/hostile RED tests，覆盖GFM/脚注/代码/HTML/XSS/URL/ref/tombstone；共同语义不得漂移。
 - [ ] 固定Goldmark/Bluemonday版本并实现parser/sanitizer/render model；原始HTML永不透传。
 - [ ] fuzz URL/ref parser并跑Go tests GREEN。
 

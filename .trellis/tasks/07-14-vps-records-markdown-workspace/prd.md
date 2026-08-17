@@ -8,6 +8,11 @@
 
 本任务不创建 root migration。按默认顺序从已合入 Child 2/3/4/9 的 protected main 开始，复用 `0055` collaboration 合同；只要求当前开发版功能，不承担旧数据库、legacy experience、staging 或 release 兼容。
 
+2026-08-17 责任边界重基线：Child 9 先交付最小版本化
+`comment_markdown/v1` server/Web renderer 与 hostile/golden corpus。本任务必须
+复用该合同，并在其上扩展完整文档方言、引用和编辑器；不得另建第二套评论
+renderer或原地重解释历史评论。
+
 ## Requirements
 
 - 父设计：`../07-13-vps-detail-experience-design/design.md` §9、§12.6、§13、§19–§21、§24。
@@ -18,7 +23,7 @@
 - 提供新建、阅读、编辑、历史revision、restore、三模式编辑/分栏/预览、工具栏/快捷键、模板与材料侧栏/390px抽屉。
 - 自动草稿与正式保存分离；服务端同步失败保留本地未同步字段/Markdown，IndexedDB按user/draft隔离≤24h且不含材料bytes。
 - 正式保存冲突展示字段和Markdown差异，用户人工合并；权限撤销/永久删除立即清内存/IndexedDB/object URL并显示无内容shell。
-- 安全渲染在服务端Goldmark+Bluemonday和Web react-markdown/rehype-sanitize双层执行，并共享恶意/golden corpus。
+- 安全渲染在服务端Goldmark+Bluemonday和Web react-markdown/rehype-sanitize双层执行；文档 corpus 包含并扩展 Child 9 comment-safe corpus，评论和文档的共同语义必须保持等价。
 - 阅读面明确区分系统证据、用户附件和作者判断；引用失效显示tombstone，不留空白/坏卡。
 - 阅读/编辑工作区复用子任务9的负责人/参与者/跟进、行动项、评论和关注组件；桌面材料侧栏与390px抽屉包含实际行动项入口，阅读面保留评论时间线。Markdown task checklist只有经过显式预览/确认才提升为结构化行动项。
 - Markdown目录导出和PDF可复用服务端render model，但真正export job由子任务10实现。
@@ -41,6 +46,7 @@
 ## Out of Scope
 
 - 不构建WYSIWYG私有文档模型、实时多人协同编辑或自动从Markdown提取业务事实。
+- 不重新实现评论持久化、评论renderer或评论安全状态机；这些由已合入的Child 9合同提供。
 - Markdown task checkbox不自动变行动项；子任务9拥有提升命令和组件，本任务只把已合入合同接入编辑器并验证往返/焦点/权限。
 
 ## Execution Gate

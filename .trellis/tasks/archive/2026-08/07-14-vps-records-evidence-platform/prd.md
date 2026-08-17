@@ -24,16 +24,16 @@
 
 ## Acceptance Criteria
 
-- [ ] `0054` fresh/repeat migration 与 current APP ACL/convergence/runtime admission 通过。
-- [ ] 每个kind通过最小envelope、禁止字段、确定性canonicalization、大小、未知版本、复制/删除/权限、导入导出和比较compatibility tests。
-- [ ] Preview DTO与最终snapshot逐字段一致；补传/retention/权限/计算版本漂移不会静默保存。
-- [ ] 30天监控窗口、无完整覆盖、截断、缺口、维护与补传在快照和UI中可辨，趋势不补零/外推。
-- [ ] IP、成本、事件、命令快照在源历史归档/删除后仍按记录授权可读并显示source unavailable。
-- [ ] secret/command-output/raw-JSON corpus经所有adapter后永久禁止字段命中为0；敏感拓扑默认关闭并有预览。
-- [ ] 同payload跨记录复制产生新logical snapshot与独立auth/audit；删除来源记录不删除已显式复制的其他快照。
-- [ ] capture与record revision事务要么全部成功，要么只有可回收孤立payload；没有半份revision引用。
-- [ ] 本实例权威库中出现unknown kind/schema时registry/readiness与普通读取失败关闭，不创建/复制/比较/导出且不调用通用JSON渲染；外部never-supported schema的安全envelope metadata只属于task10 integrity-valid quarantine/dry-run，不进入本任务普通证据UI。
-- [ ] focused Go/Web、真实PostgreSQL、determinism/fuzz、`make verify-go`/Node22 `make verify-web`通过。
+- [x] `0054` fresh/repeat migration 与 current APP ACL/convergence/runtime admission 通过。
+- [x] 每个kind通过最小envelope、禁止字段、确定性canonicalization、大小、未知版本、复制/删除/权限、导入导出和比较compatibility tests。
+- [x] Preview DTO与最终snapshot逐字段一致；补传/retention/权限/计算版本漂移不会静默保存。
+- [x] 30天监控窗口、无完整覆盖、截断、缺口、维护与补传在快照和UI中可辨，趋势不补零/外推。
+- [x] IP、成本、事件、命令快照在源历史归档/删除后仍按记录授权可读并显示source unavailable。
+- [x] secret/command-output/raw-JSON corpus经所有adapter后永久禁止字段命中为0；敏感拓扑默认关闭并有预览。
+- [x] 同payload跨记录复制产生新logical snapshot与独立auth/audit；删除来源记录不删除已显式复制的其他快照。
+- [x] capture与record revision事务要么全部成功，要么只有可回收孤立payload；没有半份revision引用。
+- [x] 本实例权威库中出现unknown kind/schema时registry/readiness与普通读取失败关闭，不创建/复制/比较/导出且不调用通用JSON渲染；外部never-supported schema的安全envelope metadata只属于task10 integrity-valid quarantine/dry-run，不进入本任务普通证据UI。
+- [x] focused Go/Web、真实PostgreSQL、determinism/fuzz、`make verify-go`/Node22 `make verify-web`通过。
 
 ## Out of Scope
 
@@ -41,6 +41,11 @@
 - 不在本任务交付横向比较页面；只实现kind compare contract，子任务8编排。
 - 不实现未来路由/性能kind，但 conformance必须保证可扩展。
 
-## Execution Gate
+## Delivery State
 
-- 保持 planning；依赖、规划材料和用户执行授权完成后才 start。当前 Trellis 使用 native/auto 子智能体 workflow；production evidence capture/save 在 Child 10 提供 AdmissionGate 前必须 fail closed。
+- Child 4 已经通过 PR #408、protected-main CI、release PR #409 与
+  `v0.66.0` 发布完成。真实 deployment-membership AdmissionGate、witnessed
+  source-deletion tombstone 与 external unsupported quarantine 明确转交
+  Child 10；Child 11 负责 aggregate composition/readiness 与最终启用验证。
+  在此前 production evidence capture/save 继续稳定失败关闭，这属于已交付
+  的安全边界而不是 Child 4 未完成实现。
