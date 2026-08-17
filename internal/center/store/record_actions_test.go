@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -179,6 +180,31 @@ func TestPostgresRecordActionRepositoryIdempotencyConflictAndInProgressStopBefor
 				t.Fatalf("failure transaction = steps:%#v committed:%v rolledBack:%v", tx.steps, tx.committed, tx.rolledBack)
 			}
 		})
+	}
+}
+
+func TestPostgresRecordActionRepositoryPersistedMaximumVersionConflictsBeforeWrites(t *testing.T) {
+	command := testStoreActionCommand(t, recordcollaboration.ActionMutationComplete, recordcollaboration.MaxActionVersion-1, recordcollaboration.ActionFields{})
+	tx := newFakeRecordActionTx(command)
+	tx.persistedVersion = recordcollaboration.MaxActionVersion
+	repository := newRecordActionTestRepository(tx, &recordActionMembershipStub{})
+
+	result, err := repository.CommitAction(context.Background(), command)
+	if !errors.Is(err, recordcollaboration.ErrActionConflict) || result != (recordcollaboration.ActionMutationResult{}) {
+		t.Fatalf("CommitAction() result=%#v error=%v, want stable version conflict", result, err)
+	}
+	want := []string{
+		"begin", "admission", "admission", "idempotency_lock", "idempotency_claim",
+		"reservation_lock", "epoch_init", "epoch_lock", "fence_lock", "reservation_recheck",
+		"epoch_lock", "root_lock", "action_lock", "rollback_cleanup",
+	}
+	if !reflect.DeepEqual(tx.steps, want) || tx.committed || !tx.rolledBack || tx.recordRootUpdates != 0 {
+		t.Fatalf("maximum-version conflict transaction steps=%#v committed=%v rolledBack=%v rootUpdates=%d", tx.steps, tx.committed, tx.rolledBack, tx.recordRootUpdates)
+	}
+	for _, forbidden := range []string{"action_update", "action_event", "activity", "outbox", "idempotency_complete"} {
+		if slices.Contains(tx.steps, forbidden) {
+			t.Fatalf("maximum-version conflict reached forbidden step %q: %#v", forbidden, tx.steps)
+		}
 	}
 }
 

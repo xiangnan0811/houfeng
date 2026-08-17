@@ -87,7 +87,8 @@ type ActionMutationResult struct {
 
 func (result ActionMutationResult) Validate() error {
 	if ValidateActionID(result.ActionID) != nil || !validRecordID(result.RecordID) ||
-		result.Version == 0 || !validActionStatus(result.Status) || !validActionMutationKind(result.EventKind) ||
+		result.Version == 0 || result.Version > MaxActionVersion ||
+		!validActionStatus(result.Status) || !validActionMutationKind(result.EventKind) ||
 		result.ChangedAt.IsZero() {
 		return ErrInvalidActionCommand
 	}
@@ -108,7 +109,7 @@ func (command ActionCommand) Validate() error {
 		if command.ExpectedVersion != 0 || command.Fields.Title() == "" {
 			return ErrInvalidActionCommand
 		}
-	} else if command.ExpectedVersion == 0 {
+	} else if !IsIncrementableActionVersion(command.ExpectedVersion) {
 		return ErrInvalidActionCommand
 	}
 	if command.Kind == ActionMutationUpdate && command.Fields.Title() == "" {
@@ -189,7 +190,7 @@ func (service *ActionService) commit(
 ) (ActionMutationResult, error) {
 	if ctx == nil || service == nil || nilActionDependency(service.current) || nilActionDependency(service.store) ||
 		!validActionMutationKind(kind) || !validRecordID(recordID) ||
-		(kind != ActionMutationCreate && (ValidateActionID(actionID) != nil || expectedVersion == 0)) {
+		(kind != ActionMutationCreate && (ValidateActionID(actionID) != nil || !IsIncrementableActionVersion(expectedVersion))) {
 		return ActionMutationResult{}, ErrInvalidActionRequest
 	}
 	actor, err := recordauth.NormalizeActorScope(actorInput)

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +132,39 @@ func TestRecordActionsHandlerRoutesUpdateAndTransitionsWithExactCAS(t *testing.T
 			}
 			if application.lastKind != test.kind || application.lastExpectedVersion != 7 {
 				t.Fatalf("kind/version = %q/%d", application.lastKind, application.lastExpectedVersion)
+			}
+		})
+	}
+}
+
+func TestRecordActionsHandlerBoundsIfMatchToPostgresActionVersion(t *testing.T) {
+	actor := testRecordActionActor(t)
+	tests := []struct {
+		name    string
+		version uint64
+		status  int
+		calls   int
+	}{
+		{name: "maximum incrementable", version: recordcollaboration.MaxActionVersion - 1, status: http.StatusOK, calls: 1},
+		{name: "maximum bigint cannot increment", version: recordcollaboration.MaxActionVersion, status: http.StatusBadRequest},
+		{name: "above maximum bigint", version: recordcollaboration.MaxActionVersion + 1, status: http.StatusBadRequest},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			application := &recordActionHandlerStub{result: recordcollaboration.ActionMutationResult{
+				ActionID: "ract_action1", RecordID: "rec_actionparent1", Version: recordcollaboration.MaxActionVersion,
+				Status: recordcollaboration.ActionStatusCompleted, EventKind: recordcollaboration.ActionMutationComplete,
+				ChangedAt: time.Now().UTC(),
+			}}
+			request := httptest.NewRequest(http.MethodPost, "/api/records/rec_actionparent1/actions/ract_action1/complete", strings.NewReader(`{}`))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Idempotency-Key", "bounded-version")
+			request.Header.Set("If-Match", `"`+strconv.FormatUint(test.version, 10)+`"`)
+			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+			recorder := httptest.NewRecorder()
+			RecordActions(application).ServeHTTP(recorder, request)
+			if recorder.Code != test.status || application.calls() != test.calls {
+				t.Fatalf("version=%d status/calls=%d/%d, want %d/%d; body=%s", test.version, recorder.Code, application.calls(), test.status, test.calls, recorder.Body.String())
 			}
 		})
 	}

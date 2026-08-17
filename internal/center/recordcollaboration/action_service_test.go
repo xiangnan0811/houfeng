@@ -187,6 +187,54 @@ func TestActionServiceBuildsUpdateAndClosedTransitionCommands(t *testing.T) {
 	}
 }
 
+func TestActionCommandAndServiceRejectNonIncrementableExpectedVersion(t *testing.T) {
+	actor, current := testActionAuthorization(t, recordauth.RoleProjectAdmin)
+	validStore := &actionCommandStoreStub{}
+	service, err := NewActionService(&actionCurrentSourceStub{result: current}, validStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CompleteAction(context.Background(), testActionCommandRequest(
+		actor, current.RecordID, "ract_action1", MaxActionVersion-1, "key-maximum-incrementable",
+	)); err != nil {
+		t.Fatalf("maximum incrementable service request error = %v", err)
+	}
+	command := validStore.command
+	if err := command.Validate(); err != nil {
+		t.Fatalf("maximum incrementable command error = %v", err)
+	}
+	for _, test := range []struct {
+		name    string
+		version uint64
+	}{
+		{name: "maximum bigint", version: MaxActionVersion},
+		{name: "above maximum bigint", version: MaxActionVersion + 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			invalid := command
+			invalid.ExpectedVersion = test.version
+			if err := invalid.Validate(); !errors.Is(err, ErrInvalidActionCommand) {
+				t.Fatalf("ActionCommand.Validate(%d) error = %v, want ErrInvalidActionCommand", test.version, err)
+			}
+
+			currentSource := &actionCurrentSourceStub{result: current}
+			rejectedStore := &actionCommandStoreStub{}
+			service, err := NewActionService(currentSource, rejectedStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.CompleteAction(context.Background(), testActionCommandRequest(
+				actor, current.RecordID, "ract_action1", test.version, "key-non-incrementable",
+			)); !errors.Is(err, ErrInvalidActionRequest) {
+				t.Fatalf("service request version %d error = %v, want ErrInvalidActionRequest", test.version, err)
+			}
+			if currentSource.calls != 0 || rejectedStore.calls != 0 {
+				t.Fatalf("non-incrementable request reached dependencies: current=%d store=%d", currentSource.calls, rejectedStore.calls)
+			}
+		})
+	}
+}
+
 func TestActionServiceFailsClosedBeforeStore(t *testing.T) {
 	admin, current := testActionAuthorization(t, recordauth.RoleProjectAdmin)
 	viewer, _ := testActionAuthorization(t, recordauth.RoleViewer)

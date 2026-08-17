@@ -224,7 +224,7 @@ func recordActionIfMatch(request *http.Request) (uint64, bool) {
 		return 0, false
 	}
 	version, err := strconv.ParseUint(raw, 10, 64)
-	return version, err == nil && version > 0
+	return version, err == nil && recordcollaboration.IsIncrementableActionVersion(version)
 }
 
 func writeRecordActionResult(w http.ResponseWriter, status int, result recordcollaboration.ActionMutationResult) {

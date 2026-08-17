@@ -218,6 +218,59 @@ func TestPostgresIntegrationRecordActionEventFailureRollsBackActionAndPlatformFa
 	}
 }
 
+func TestPostgresIntegrationRecordActionMaximumPersistedVersionConflictsWithoutWrites(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgactionmaxver", "actions-maxver-parent")
+	repository := NewPostgresRecordActionRepository(
+		fixture.openDirectRuntimePool(t, ctx, "record-actions-maxver", 1),
+		allowRecordPlatformAdmissionGate,
+		NewPostgresCollaborationMembershipReader(),
+	)
+	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgmaxver", 0,
+		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Maximum version"}), "actions-maxver-create")
+	if _, err := repository.CommitAction(ctx, create); err != nil {
+		t.Fatalf("CommitAction(create) error = %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		update public.record_actions
+		set action_version = $2
+		where action_id = $1`, create.ActionID, int64(recordcollaboration.MaxActionVersion)); err != nil {
+		t.Fatalf("seed maximum persisted action version: %v", err)
+	}
+	rootBefore := readPostgresActionRoot(t, ctx, fixture, parent.RecordID)
+
+	complete := postgresActionCommand(t, parent, recordcollaboration.ActionMutationComplete, create.ActionID,
+		recordcollaboration.MaxActionVersion-1, recordcollaboration.ActionFields{}, "actions-maxver-complete")
+	if result, err := repository.CommitAction(ctx, complete); !errors.Is(err, recordcollaboration.ErrActionConflict) || result != (recordcollaboration.ActionMutationResult{}) {
+		t.Fatalf("CommitAction(maximum persisted version) result=%#v error=%v, want stable conflict", result, err)
+	}
+
+	var version int64
+	var status string
+	var completedAt *time.Time
+	var eventCount, activityCount, outboxCount, idempotencyCount int
+	if err := fixture.db.QueryRow(ctx, `
+		select action_version, status, completed_at,
+		       (select count(*)::int from public.record_action_events where action_id = $1),
+		       (select count(*)::int from public.record_domain_activities where record_id = $2 and source_event_id like 'raev_%'),
+		       (select count(*)::int from public.record_outbox where subject_kind = 'action' and subject_id = $1),
+		       (select count(*)::int from public.record_idempotency_keys where idempotency_key = 'actions-maxver-complete')
+		from public.record_actions where action_id = $1`, create.ActionID, parent.RecordID).Scan(
+		&version, &status, &completedAt, &eventCount, &activityCount, &outboxCount, &idempotencyCount,
+	); err != nil {
+		t.Fatalf("read maximum-version action state: %v", err)
+	}
+	if version != int64(recordcollaboration.MaxActionVersion) || status != string(recordcollaboration.ActionStatusOpen) || completedAt != nil ||
+		eventCount != 1 || activityCount != 1 || outboxCount != 1 || idempotencyCount != 0 {
+		t.Fatalf("maximum-version durable state version/status/completed/events/activity/outbox/key=%d/%q/%v/%d/%d/%d/%d",
+			version, status, completedAt, eventCount, activityCount, outboxCount, idempotencyCount)
+	}
+	if rootAfter := readPostgresActionRoot(t, ctx, fixture, parent.RecordID); !reflect.DeepEqual(rootAfter, rootBefore) {
+		t.Fatalf("maximum-version conflict mutated root: before=%#v after=%#v", rootBefore, rootAfter)
+	}
+}
+
 type postgresActionRootState struct {
 	RevisionID         string
 	LockVersion        int64

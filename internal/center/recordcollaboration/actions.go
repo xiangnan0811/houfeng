@@ -3,6 +3,7 @@ package recordcollaboration
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 	"unicode"
@@ -14,6 +15,9 @@ import (
 const (
 	MaxActionTitleRunes   = 512
 	MaxActionDetailsRunes = 4096
+	// MaxActionVersion is the largest action version representable by the
+	// signed PostgreSQL bigint persistence contract.
+	MaxActionVersion uint64 = math.MaxInt64
 )
 
 var (
@@ -181,4 +185,10 @@ func validActionStatus(status ActionStatus) bool {
 	default:
 		return false
 	}
+}
+
+// IsIncrementableActionVersion accepts only positive persisted versions that
+// can advance once without crossing the signed bigint boundary.
+func IsIncrementableActionVersion(version uint64) bool {
+	return version > 0 && version < MaxActionVersion
 }
