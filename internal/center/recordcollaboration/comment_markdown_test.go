@@ -67,6 +67,14 @@ func TestCommentMarkdownV1SharedCorpus(t *testing.T) {
 			if err := model.Validate(); err != nil {
 				t.Fatalf("Validate() error = %v", err)
 			}
+			encoded, err := json.Marshal(model)
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+			roundTrip, err := DecodeCommentRenderModelV1(encoded)
+			if err != nil || !model.Equal(roundTrip) {
+				t.Fatalf("render-model round trip = %#v, %v; encoded=%s", roundTrip, err, encoded)
+			}
 			clone := model.Clone()
 			if !model.Equal(clone) {
 				t.Fatal("Clone() changed model")

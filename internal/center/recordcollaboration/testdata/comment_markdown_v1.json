@@ -68,6 +68,17 @@
       }
     },
     {
+      "name": "empty fenced code",
+      "source": "```\n```",
+      "valid": true,
+      "model": {
+        "version": "comment_markdown/v1",
+        "nodes": [
+          {"type": "fenced_code", "text": ""}
+        ]
+      }
+    },
+    {
       "name": "ordered and unordered lists",
       "source": "- inspect\n- repair\n\n3. verify\n4. close",
       "valid": true,
@@ -164,6 +175,14 @@
     {
       "name": "line break disallowed text key",
       "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"line_break","text":""}]}]}
+    },
+    {
+      "name": "fenced code null text",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"fenced_code","text":null}]}
+    },
+    {
+      "name": "inline node at model root",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"text","text":"not a block"}]}
     },
     {
       "name": "arbitrary object fallback",

@@ -56,6 +56,48 @@ type CommentRenderNode struct {
 	Items    [][]CommentRenderNode `json:"items,omitempty"`
 }
 
+func (node CommentRenderNode) MarshalJSON() ([]byte, error) {
+	count := 0
+	if err := validateCommentRenderNode(node, 1, &count, false); err != nil {
+		return nil, err
+	}
+	switch node.Type {
+	case CommentRenderNodeParagraph, CommentRenderNodeEmphasis, CommentRenderNodeStrong, CommentRenderNodeStrikethrough:
+		return json.Marshal(struct {
+			Type     string              `json:"type"`
+			Children []CommentRenderNode `json:"children"`
+		}{Type: node.Type, Children: node.Children})
+	case CommentRenderNodeText, CommentRenderNodeInlineCode, CommentRenderNodeFencedCode:
+		return json.Marshal(struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}{Type: node.Type, Text: node.Text})
+	case CommentRenderNodeLineBreak:
+		return json.Marshal(struct {
+			Type string `json:"type"`
+		}{Type: node.Type})
+	case CommentRenderNodeOrderedList:
+		return json.Marshal(struct {
+			Type  string                `json:"type"`
+			Start uint64                `json:"start"`
+			Items [][]CommentRenderNode `json:"items"`
+		}{Type: node.Type, Start: node.Start, Items: node.Items})
+	case CommentRenderNodeUnorderedList:
+		return json.Marshal(struct {
+			Type  string                `json:"type"`
+			Items [][]CommentRenderNode `json:"items"`
+		}{Type: node.Type, Items: node.Items})
+	case CommentRenderNodeLink:
+		return json.Marshal(struct {
+			Type     string              `json:"type"`
+			Href     string              `json:"href"`
+			Children []CommentRenderNode `json:"children"`
+		}{Type: node.Type, Href: node.Href, Children: node.Children})
+	default:
+		return nil, ErrInvalidCommentMarkdown
+	}
+}
+
 func (node *CommentRenderNode) UnmarshalJSON(raw []byte) error {
 	var fields map[string]json.RawMessage
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -103,7 +145,18 @@ func commentRenderNodeHasExactKeys(fields map[string]json.RawMessage, nodeType s
 			return false
 		}
 	}
+	switch nodeType {
+	case CommentRenderNodeText, CommentRenderNodeInlineCode, CommentRenderNodeFencedCode:
+		return commentJSONRawString(fields["text"])
+	case CommentRenderNodeLink:
+		return commentJSONRawString(fields["href"])
+	}
 	return true
+}
+
+func commentJSONRawString(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) >= 2 && trimmed[0] == '"'
 }
 
 func (model CommentRenderModel) Validate() error {
@@ -112,6 +165,11 @@ func (model CommentRenderModel) Validate() error {
 	}
 	count := 0
 	for _, node := range model.Nodes {
+		switch node.Type {
+		case CommentRenderNodeParagraph, CommentRenderNodeFencedCode, CommentRenderNodeOrderedList, CommentRenderNodeUnorderedList:
+		default:
+			return ErrInvalidCommentMarkdown
+		}
 		if err := validateCommentRenderNode(node, 1, &count, false); err != nil {
 			return err
 		}
