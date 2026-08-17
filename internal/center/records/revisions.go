@@ -88,9 +88,20 @@ type RecordLifecycleResult struct {
 // have been written.
 type RevisionCommitted struct {
 	DraftID             string
+	BaseRevisionID      string
 	Result              RevisionCommitResult
 	Input               CompleteRevisionInput
 	EvidencePreparation evidence.RevisionPreparation
+	ActivityKind        DomainActivityKind
+	OutboxTTL           time.Duration
+	Outbox              RevisionOutbox
+}
+
+// RevisionOutbox is the named transaction-bound recordplatform primitive
+// exposed to revision participants. It has no generic SQL, renderer, sender,
+// or network callback surface.
+type RevisionOutbox interface {
+	EnqueueOutbox(context.Context, recordplatform.OutboxEnqueueInputV1) (recordplatform.OutboxEventRecordV1, error)
 }
 
 func (command RevisionCommitCommand) Validate() error {

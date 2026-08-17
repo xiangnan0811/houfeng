@@ -45,6 +45,24 @@ func TestOutboxEventV1AcceptsOnlyClosedIdentityFields(t *testing.T) {
 	}
 }
 
+func TestOutboxEventV1AcceptsClosedCollaborationRevisionKinds(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []string{
+		OutboxEventKindRecordOwnerChanged,
+		OutboxEventKindRecordParticipantChanged,
+	} {
+		event := OutboxEvent{
+			ProjectID: string(ProjectIDDefault), EventKind: kind,
+			SubjectKind: OutboxSubjectKindRecord, SubjectID: "rec_collaboration",
+			AuthorizationEpoch: 7,
+		}
+		if err := event.Validate(); err != nil {
+			t.Fatalf("OutboxEvent.Validate(%q) error = %v", kind, err)
+		}
+	}
+}
+
 func TestOutboxEnqueueInputV1RequiresPositiveMicrosecondExpiry(t *testing.T) {
 	event := OutboxEvent{
 		ProjectID:          string(ProjectIDDefault),

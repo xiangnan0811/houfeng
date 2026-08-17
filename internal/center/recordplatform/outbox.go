@@ -13,9 +13,11 @@ var (
 )
 
 const (
-	OutboxEventKindRecordCreated = "record_created"
-	OutboxEventKindRecordUpdated = "record_updated"
-	OutboxEventKindRecordDeleted = "record_deleted"
+	OutboxEventKindRecordCreated            = "record_created"
+	OutboxEventKindRecordUpdated            = "record_updated"
+	OutboxEventKindRecordDeleted            = "record_deleted"
+	OutboxEventKindRecordOwnerChanged       = "record_owner_changed"
+	OutboxEventKindRecordParticipantChanged = "record_participant_changed"
 )
 
 const OutboxSubjectKindRecord = "record"
@@ -126,7 +128,11 @@ func (claim ClaimedOutboxEventV1) Validate() error {
 
 func validOutboxEventKind(kind string) bool {
 	switch kind {
-	case OutboxEventKindRecordCreated, OutboxEventKindRecordUpdated, OutboxEventKindRecordDeleted:
+	case OutboxEventKindRecordCreated,
+		OutboxEventKindRecordUpdated,
+		OutboxEventKindRecordDeleted,
+		OutboxEventKindRecordOwnerChanged,
+		OutboxEventKindRecordParticipantChanged:
 		return true
 	default:
 		return false

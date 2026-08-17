@@ -151,7 +151,11 @@ func (repository *PostgresRecordRepository) CommitRevision(
 			Result:              result,
 			Input:               command.Input,
 			DraftID:             command.DraftID,
+			BaseRevisionID:      command.BaseRevisionID,
 			EvidencePreparation: command.EvidencePreparation,
+			ActivityKind:        command.ActivityKind,
+			OutboxTTL:           command.OutboxTTL,
+			Outbox:              transaction,
 		}); err != nil {
 			return err
 		}

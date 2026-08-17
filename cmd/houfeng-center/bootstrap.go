@@ -368,6 +368,7 @@ func newRecordsHTTPHandlers(
 	// evidence operation remains closed.
 	recordRepository, err := store.NewPostgresRecordRepository(pool, effectiveGate, []centerrecords.RevisionParticipant{
 		store.NewRecordAttachmentRevisionParticipant(),
+		store.NewCollaborationRevisionParticipant(store.NewPostgresCollaborationMembershipReader()),
 		store.NewRecordEvidenceRevisionParticipant(),
 	})
 	if err != nil {

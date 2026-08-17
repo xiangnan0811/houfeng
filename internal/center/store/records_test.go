@@ -23,12 +23,16 @@ func TestPostgresRecordRepositoryCreateRevisionUsesFixedAtomicOrder(t *testing.T
 	now := time.Date(2026, time.August, 3, 12, 0, 0, 0, time.UTC)
 	steps := make([]string, 0, 32)
 	tx := &fakeRecordRevisionTx{now: now, steps: &steps}
-	participant := &storeRevisionParticipantStub{name: "search", apply: func(context.Context, pgx.Tx, records.RevisionCommitted) error {
+	command := testRecordRevisionCommitCommand(t, now)
+	participant := &storeRevisionParticipantStub{name: "search", apply: func(_ context.Context, _ pgx.Tx, committed records.RevisionCommitted) error {
 		steps = append(steps, "transaction_participant")
+		if committed.BaseRevisionID != command.BaseRevisionID || committed.ActivityKind != command.ActivityKind ||
+			committed.OutboxTTL != command.OutboxTTL || committed.Outbox == nil {
+			t.Fatalf("RevisionCommitted transaction metadata = %#v", committed)
+		}
 		return nil
 	}}
 	repository := newRecordRevisionTestRepository(t, tx, &steps, participant)
-	command := testRecordRevisionCommitCommand(t, now)
 
 	result, err := repository.CommitRevision(context.Background(), command)
 	if err != nil {

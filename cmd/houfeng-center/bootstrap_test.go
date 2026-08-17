@@ -783,6 +783,30 @@ func TestBootstrapRegistersRecordAttachmentRevisionParticipant(t *testing.T) {
 	}
 }
 
+func TestBootstrapRegistersRecordCollaborationRevisionParticipantWithoutAdmissionFallback(t *testing.T) {
+	body, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatalf("read bootstrap.go: %v", err)
+	}
+	source := string(body)
+	for _, required := range []string{
+		"store.NewCollaborationRevisionParticipant(",
+		"store.NewPostgresCollaborationMembershipReader()",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("bootstrap.go missing collaboration revision wiring %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"store.AdmissionGateFunc(",
+		"NewCollaborationRevisionParticipant(nil)",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("bootstrap.go contains collaboration admission fallback %q", forbidden)
+		}
+	}
+}
+
 func TestBootstrapWiresConfiguredAttachmentServices(t *testing.T) {
 	body, err := os.ReadFile("bootstrap.go")
 	if err != nil {
