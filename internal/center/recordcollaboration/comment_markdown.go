@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"net/url"
 	"reflect"
 	"regexp"
@@ -590,6 +591,9 @@ func validateCanonicalCommentLink(href string) error {
 		parsed.Host == "" || parsed.Hostname() == "" || parsed.Host != strings.ToLower(parsed.Host) || parsed.String() != href {
 		return ErrInvalidCommentMarkdown
 	}
+	if !isCanonicalCommentHost(parsed.Hostname()) {
+		return ErrInvalidCommentMarkdown
+	}
 	if hasCommentDotPathSegment(parsed.EscapedPath()) {
 		return ErrInvalidCommentMarkdown
 	}
@@ -597,6 +601,68 @@ func validateCanonicalCommentLink(href string) error {
 		return ErrInvalidCommentMarkdown
 	}
 	return nil
+}
+
+func isCanonicalCommentHost(host string) bool {
+	if address, err := netip.ParseAddr(host); err == nil {
+		return address.Zone() == "" && address.String() == host
+	}
+	if isLegacyNumericCommentHost(host) {
+		return false
+	}
+	name := strings.TrimSuffix(host, ".")
+	if name == "" || len(name) > 253 || (name != host && len(host) > 254) {
+		return false
+	}
+	for _, label := range strings.Split(name, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for index := range label {
+			character := label[index]
+			if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isLegacyNumericCommentHost(host string) bool {
+	candidate := strings.TrimSuffix(host, ".")
+	parts := strings.Split(candidate, ".")
+	if candidate == "" {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		if strings.HasPrefix(part, "0x") {
+			if len(part) == 2 || !isCommentHostDigits(part[2:], 16) {
+				return false
+			}
+			continue
+		}
+		if !isCommentHostDigits(part, 10) {
+			return false
+		}
+	}
+	return true
+}
+
+func isCommentHostDigits(value string, base int) bool {
+	for index := range value {
+		character := value[index]
+		if character >= '0' && character <= '9' {
+			continue
+		}
+		if base == 16 && character >= 'a' && character <= 'f' {
+			continue
+		}
+		return false
+	}
+	return value != ""
 }
 
 func hasCommentDotPathSegment(escapedPath string) bool {

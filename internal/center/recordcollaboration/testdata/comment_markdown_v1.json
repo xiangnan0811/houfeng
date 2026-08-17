@@ -79,6 +79,26 @@
       }
     },
     {
+      "name": "canonical DNS and IP link hosts",
+      "source": "[dns](http://123.example.com/) [ipv4](http://127.0.0.1/) [ipv6](http://[::1]/)",
+      "valid": true,
+      "model": {
+        "version": "comment_markdown/v1",
+        "nodes": [
+          {
+            "type": "paragraph",
+            "children": [
+              {"type": "link", "href": "http://123.example.com/", "children": [{"type": "text", "text": "dns"}]},
+              {"type": "text", "text": " "},
+              {"type": "link", "href": "http://127.0.0.1/", "children": [{"type": "text", "text": "ipv4"}]},
+              {"type": "text", "text": " "},
+              {"type": "link", "href": "http://[::1]/", "children": [{"type": "text", "text": "ipv6"}]}
+            ]
+          }
+        ]
+      }
+    },
+    {
       "name": "ordered and unordered lists",
       "source": "- inspect\n- repair\n\n3. verify\n4. close",
       "valid": true,
@@ -122,6 +142,11 @@
     {"name": "link userinfo", "source": "[run](https://user:pass@example.com/path)", "valid": false},
     {"name": "noncanonical uppercase host", "source": "[run](https://EXAMPLE.com/path)", "valid": false},
     {"name": "noncanonical dot segment", "source": "[run](https://example.com/a/../b)", "valid": false},
+    {"name": "legacy short IPv4 host", "source": "[run](http://127.1)", "valid": false},
+    {"name": "legacy hexadecimal IPv4 host", "source": "[run](http://0x7f000001/)", "valid": false},
+    {"name": "legacy decimal IPv4 host", "source": "[run](http://2130706433/)", "valid": false},
+    {"name": "legacy octal IPv4 host", "source": "[run](http://0177.0.0.1/)", "valid": false},
+    {"name": "all numeric DNS shaped host", "source": "[run](http://1.2.3.4.5/)", "valid": false},
     {"name": "attachment reference", "source": "[[attachment:att_01]]", "valid": false},
     {"name": "evidence reference", "source": "[[evidence:ev_01]]", "valid": false},
     {"name": "invalid utf8", "source_base64": "/w==", "valid": false},
@@ -171,6 +196,26 @@
     {
       "name": "noncanonical link dot segment",
       "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://example.com/a/../b","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "legacy short IPv4 link host",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://127.1","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "legacy hexadecimal IPv4 link host",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://0x7f000001/","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "legacy decimal IPv4 link host",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://2130706433/","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "legacy octal IPv4 link host",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://0177.0.0.1/","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "all numeric DNS shaped link host",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://1.2.3.4.5/","children":[{"type":"text","text":"run"}]}]}]}
     },
     {
       "name": "line break disallowed text key",

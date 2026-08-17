@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -235,7 +236,15 @@ func decodeRecordCommentRequestJSON(w http.ResponseWriter, request *http.Request
 		writeRecordError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request", nil)
 		return false
 	}
-	if !utf8.Valid(raw) || hasInvalidCommentJSONUnicode(raw) {
+	if !utf8.Valid(raw) {
+		writeRecordCommentApplicationError(w, recordcollaboration.ErrInvalidCommentMarkdown)
+		return false
+	}
+	if !json.Valid(raw) {
+		writeRecordError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request", nil)
+		return false
+	}
+	if hasInvalidCommentJSONUnicode(raw) {
 		writeRecordCommentApplicationError(w, recordcollaboration.ErrInvalidCommentMarkdown)
 		return false
 	}

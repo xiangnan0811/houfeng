@@ -169,13 +169,14 @@ func TestRecordCommentsHandlerRejectsInvalidCommentUnicodeBeforeApplication(t *t
 	invalidUTF8 := append([]byte(`{"body_markdown":"`), 0xff)
 	invalidUTF8 = append(invalidUTF8, []byte(`"}`)...)
 	for _, test := range []struct {
-		name string
-		body []byte
+		name, code string
+		body       []byte
+		status     int
 	}{
-		{name: "raw invalid UTF-8", body: invalidUTF8},
-		{name: "lone escaped surrogate", body: []byte(`{"body_markdown":"\ud800"}`)},
-		{name: "isolated low surrogate", body: []byte(`{"body_markdown":"\udc00"}`)},
-		{name: "malformed unicode escape", body: []byte(`{"body_markdown":"\uZZZZ"}`)},
+		{name: "raw invalid UTF-8", body: invalidUTF8, status: http.StatusUnprocessableEntity, code: "invalid_comment_markdown"},
+		{name: "lone escaped surrogate", body: []byte(`{"body_markdown":"\ud800"}`), status: http.StatusUnprocessableEntity, code: "invalid_comment_markdown"},
+		{name: "isolated low surrogate", body: []byte(`{"body_markdown":"\udc00"}`), status: http.StatusUnprocessableEntity, code: "invalid_comment_markdown"},
+		{name: "malformed unicode escape", body: []byte(`{"body_markdown":"\uZZZZ"}`), status: http.StatusBadRequest, code: "invalid_json"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			application := &recordCommentHandlerStub{}
@@ -186,8 +187,8 @@ func TestRecordCommentsHandlerRejectsInvalidCommentUnicodeBeforeApplication(t *t
 			recorder := httptest.NewRecorder()
 			RecordComments(application).ServeHTTP(recorder, request)
 
-			if recorder.Code != http.StatusUnprocessableEntity || recorder.Header().Get("Cache-Control") != recordPrivateCacheControl ||
-				!strings.Contains(recorder.Body.String(), `"code":"invalid_comment_markdown"`) {
+			if recorder.Code != test.status || recorder.Header().Get("Cache-Control") != recordPrivateCacheControl ||
+				!strings.Contains(recorder.Body.String(), `"code":"`+test.code+`"`) {
 				t.Fatalf("status=%d headers=%#v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
 			}
 			if application.createCalls != 0 || application.editCalls != 0 || application.redactCalls != 0 || application.listCalls != 0 {
