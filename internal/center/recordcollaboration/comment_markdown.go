@@ -594,10 +594,10 @@ func validateCanonicalCommentLink(href string) error {
 	if !isCanonicalCommentHost(parsed.Hostname()) {
 		return ErrInvalidCommentMarkdown
 	}
-	if hasCommentDotPathSegment(parsed.EscapedPath()) {
+	if !isCanonicalCommentPort(parsed.Scheme, parsed.Host) {
 		return ErrInvalidCommentMarkdown
 	}
-	if (parsed.Scheme == "http" && parsed.Port() == "80") || (parsed.Scheme == "https" && parsed.Port() == "443") {
+	if hasCommentDotPathSegment(parsed.EscapedPath()) {
 		return ErrInvalidCommentMarkdown
 	}
 	return nil
@@ -663,6 +663,51 @@ func isCommentHostDigits(value string, base int) bool {
 		return false
 	}
 	return value != ""
+}
+
+func isCanonicalCommentPort(scheme, authority string) bool {
+	port, present, ok := commentAuthorityPort(authority)
+	if !ok || (present && (port == "" || (len(port) > 1 && port[0] == '0'))) {
+		return false
+	}
+	if !present {
+		return true
+	}
+	for index := range port {
+		if port[index] < '0' || port[index] > '9' {
+			return false
+		}
+	}
+	value, err := strconv.ParseUint(port, 10, 16)
+	if err != nil || value == 0 || (scheme == "http" && value == 80) || (scheme == "https" && value == 443) {
+		return false
+	}
+	return true
+}
+
+func commentAuthorityPort(authority string) (string, bool, bool) {
+	if strings.HasPrefix(authority, "[") {
+		closing := strings.LastIndexByte(authority, ']')
+		if closing < 0 {
+			return "", false, false
+		}
+		suffix := authority[closing+1:]
+		if suffix == "" {
+			return "", false, true
+		}
+		if suffix[0] != ':' {
+			return "", false, false
+		}
+		return suffix[1:], true, true
+	}
+	colon := strings.LastIndexByte(authority, ':')
+	if colon < 0 {
+		return "", false, true
+	}
+	if strings.ContainsRune(authority[:colon], ':') {
+		return "", false, false
+	}
+	return authority[colon+1:], true, true
 }
 
 func hasCommentDotPathSegment(escapedPath string) bool {

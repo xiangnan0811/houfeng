@@ -99,6 +99,24 @@
       }
     },
     {
+      "name": "canonical nondefault link port",
+      "source": "[service](https://example.com:444/path) [ipv6](http://[::1]:8080/path)",
+      "valid": true,
+      "model": {
+        "version": "comment_markdown/v1",
+        "nodes": [
+          {
+            "type": "paragraph",
+            "children": [
+              {"type": "link", "href": "https://example.com:444/path", "children": [{"type": "text", "text": "service"}]},
+              {"type": "text", "text": " "},
+              {"type": "link", "href": "http://[::1]:8080/path", "children": [{"type": "text", "text": "ipv6"}]}
+            ]
+          }
+        ]
+      }
+    },
+    {
       "name": "ordered and unordered lists",
       "source": "- inspect\n- repair\n\n3. verify\n4. close",
       "valid": true,
@@ -147,6 +165,11 @@
     {"name": "legacy decimal IPv4 host", "source": "[run](http://2130706433/)", "valid": false},
     {"name": "legacy octal IPv4 host", "source": "[run](http://0177.0.0.1/)", "valid": false},
     {"name": "all numeric DNS shaped host", "source": "[run](http://1.2.3.4.5/)", "valid": false},
+    {"name": "zero-padded default port", "source": "[run](http://example.com:00080/path)", "valid": false},
+    {"name": "zero-padded nondefault port", "source": "[run](https://example.com:00444/path)", "valid": false},
+    {"name": "empty link port", "source": "[run](https://example.com:/path)", "valid": false},
+    {"name": "zero link port", "source": "[run](https://example.com:0/path)", "valid": false},
+    {"name": "out of range link port", "source": "[run](https://example.com:65536/path)", "valid": false},
     {"name": "attachment reference", "source": "[[attachment:att_01]]", "valid": false},
     {"name": "evidence reference", "source": "[[evidence:ev_01]]", "valid": false},
     {"name": "invalid utf8", "source_base64": "/w==", "valid": false},
@@ -216,6 +239,26 @@
     {
       "name": "all numeric DNS shaped link host",
       "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://1.2.3.4.5/","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "zero-padded default link port",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"http://example.com:00080/path","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "zero-padded nondefault link port",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://example.com:00444/path","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "empty link port",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://example.com:/path","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "zero link port",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://example.com:0/path","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "out of range link port",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://example.com:65536/path","children":[{"type":"text","text":"run"}]}]}]}
     },
     {
       "name": "line break disallowed text key",

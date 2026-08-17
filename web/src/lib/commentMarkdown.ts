@@ -167,7 +167,7 @@ function expectCanonicalHTTPLink(value: unknown): string {
   const authority = authorityMatch[2]
   const suffix = authorityMatch[3]
   if (authority === undefined || scheme === undefined || suffix === undefined || authority.includes('@') || authority !== authority.toLowerCase()) invalid()
-  if ((scheme === 'http' && hasPort(authority, '80')) || (scheme === 'https' && hasPort(authority, '443'))) invalid()
+  expectCanonicalPort(scheme, authority)
   if (hasDotPathSegment(suffix)) invalid()
   let parsed: URL
   try {
@@ -191,9 +191,24 @@ function hasDotPathSegment(suffix: string): boolean {
   })
 }
 
-function hasPort(authority: string, port: string): boolean {
-  if (authority.startsWith('[')) return authority.endsWith(`]:${port}`)
-  return authority.endsWith(`:${port}`)
+function expectCanonicalPort(scheme: string, authority: string): void {
+  let rawPort: string | undefined
+  if (authority.startsWith('[')) {
+    const closing = authority.lastIndexOf(']')
+    if (closing < 0) invalid()
+    const suffix = authority.slice(closing + 1)
+    if (suffix === '') return
+    if (!suffix.startsWith(':')) invalid()
+    rawPort = suffix.slice(1)
+  } else {
+    const colon = authority.lastIndexOf(':')
+    if (colon < 0) return
+    if (authority.slice(0, colon).includes(':')) invalid()
+    rawPort = authority.slice(colon + 1)
+  }
+  if (!/^[1-9][0-9]*$/u.test(rawPort) || rawPort.length > 5) invalid()
+  const port = Number(rawPort)
+  if (port > 65_535 || (scheme === 'http' && port === 80) || (scheme === 'https' && port === 443)) invalid()
 }
 
 function isWellFormedUnicode(value: string): boolean {
