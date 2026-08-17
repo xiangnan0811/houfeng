@@ -80,6 +80,14 @@ func TestRecordCollaborationAppACLRestrictsAdminAndOneWayHistoryUpdates(t *testi
 	}
 }
 
+func TestRecordCollaborationAppACLDoesNotPregrantDirectPurgeOrHistoryReplacement(t *testing.T) {
+	for _, privilege := range recordCollaborationAppACLCurrentPrivileges("") {
+		if privilege.Privilege == AppACLPrivilegeDelete && privilege.ObjectIdentity != "record_followers" {
+			t.Errorf("runtime receives premature direct DELETE on collaboration table %q", privilege.ObjectIdentity)
+		}
+	}
+}
+
 func TestRecordCollaborationMissingFragmentFailsBeforeBeginTx(t *testing.T) {
 	fsys := appACLCurrentTestMigrationFS(t)
 	for _, name := range []string{
@@ -196,7 +204,7 @@ func recordCollaborationExpectedFunctionContracts() []AppACLCurrentFunctionContr
 }
 
 func recordCollaborationExpectedAppACLPrivileges() []AppACLPrivilege {
-	privileges := make([]AppACLPrivilege, 0, 45)
+	privileges := make([]AppACLPrivilege, 0, 34)
 	appendTable := func(subject AppACLSubject, table string, kinds ...AppACLPrivilegeKind) {
 		for _, kind := range kinds {
 			privileges = append(privileges, AppACLPrivilege{
@@ -214,14 +222,15 @@ func recordCollaborationExpectedAppACLPrivileges() []AppACLPrivilege {
 		"record_actions",
 		"record_comments",
 		"record_comment_revisions",
-		"record_followers",
 		"record_notification_recipients",
 		"record_notification_deliveries",
 	} {
 		appendTable(runtime, table,
-			AppACLPrivilegeSelect, AppACLPrivilegeInsert,
-			AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
 	}
+	appendTable(runtime, "record_followers",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert,
+		AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
 	for _, table := range []string{
 		"record_action_events",
 		"record_comment_tombstones",
@@ -230,8 +239,7 @@ func recordCollaborationExpectedAppACLPrivileges() []AppACLPrivilege {
 		"record_notifications",
 		"record_notification_delivery_attempts",
 	} {
-		appendTable(runtime, table,
-			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeDelete)
+		appendTable(runtime, table, AppACLPrivilegeSelect, AppACLPrivilegeInsert)
 	}
 	appendTable(runtime, "record_collaboration_purge_receipts",
 		AppACLPrivilegeSelect, AppACLPrivilegeInsert)

@@ -113,6 +113,7 @@ create table if not exists public.record_comment_revisions (
   record_fence_epoch bigint not null check (record_fence_epoch >= 0),
   created_at timestamptz not null default now(),
   unique (comment_id, comment_version),
+  unique (record_id, comment_id, comment_version, record_fence_epoch),
   constraint record_comment_revisions_redaction_shape_check check ((redacted_at is null and body_markdown is not null and render_contract_version = 'comment_markdown/v1' and render_model is not null and jsonb_typeof(render_model) = 'object' and body_digest is not null and tombstone_id is null) or (redacted_at is not null and body_markdown is null and render_contract_version is null and render_model is null and body_digest is null and tombstone_id is not null)),
   check (redacted_at is null or redacted_at >= created_at),
   foreign key (record_id) references public.records(record_id)
@@ -174,8 +175,8 @@ create table if not exists public.record_comment_mentions (
   primary key (comment_id, comment_version, mentioned_user_id),
   foreign key (record_id) references public.records(record_id)
     on delete restrict,
-  foreign key (comment_id, comment_version)
-    references public.record_comment_revisions(comment_id, comment_version)
+  foreign key (record_id, comment_id, comment_version, record_fence_epoch)
+    references public.record_comment_revisions(record_id, comment_id, comment_version, record_fence_epoch)
     on delete restrict
 );
 
@@ -251,6 +252,7 @@ create table if not exists public.record_notification_recipients (
   read_at timestamptz,
   dismissed_at timestamptz,
   primary key (notification_id, recipient_user_id),
+  unique (record_id, notification_id, recipient_user_id, record_fence_epoch),
   constraint record_notification_recipients_mandatory_check check (mandatory = (reason_kind in ('assignee', 'mention', 'security'))),
   check (read_at is null or read_at >= created_at),
   check (dismissed_at is null or (read_at is not null and dismissed_at >= read_at)),
@@ -285,6 +287,7 @@ create table if not exists public.record_notification_deliveries (
   updated_at timestamptz not null default now(),
   unique (record_id, delivery_id),
   unique (notification_id, recipient_user_id, channel),
+  unique (record_id, delivery_id, notification_id, recipient_user_id, record_fence_epoch),
   constraint record_notification_deliveries_retry_check check ((delivery_state = 'retry_wait') = (next_attempt_at is not null)),
   constraint record_notification_deliveries_sent_check check ((delivery_state = 'sent') = (sent_at is not null)),
   check ((delivery_state = 'cancelled') = (cancelled_at is not null)),
@@ -293,8 +296,8 @@ create table if not exists public.record_notification_deliveries (
   check (updated_at >= created_at),
   foreign key (record_id) references public.records(record_id)
     on delete restrict,
-  foreign key (notification_id, recipient_user_id)
-    references public.record_notification_recipients(notification_id, recipient_user_id)
+  foreign key (record_id, notification_id, recipient_user_id, record_fence_epoch)
+    references public.record_notification_recipients(record_id, notification_id, recipient_user_id, record_fence_epoch)
     on delete restrict
 );
 
@@ -321,11 +324,8 @@ create table if not exists public.record_notification_delivery_attempts (
   check (completed_at >= started_at),
   foreign key (record_id) references public.records(record_id)
     on delete restrict,
-  foreign key (notification_id, recipient_user_id)
-    references public.record_notification_recipients(notification_id, recipient_user_id)
-    on delete restrict,
-  foreign key (record_id, delivery_id)
-    references public.record_notification_deliveries(record_id, delivery_id)
+  foreign key (record_id, delivery_id, notification_id, recipient_user_id, record_fence_epoch)
+    references public.record_notification_deliveries(record_id, delivery_id, notification_id, recipient_user_id, record_fence_epoch)
     on delete restrict
 );
 
@@ -394,6 +394,7 @@ begin
   end if;
 
   if new.comment_state <> 'redacted'
+    or exists (select 1 from public.record_comment_revisions as revision where revision.record_id = new.record_id and revision.comment_id = new.comment_id and revision.redacted_at is null)
     or not exists (
       select 1
       from public.record_comment_tombstones as tombstone
@@ -428,10 +429,11 @@ begin
   end if;
 
   if tg_op = 'INSERT' then
-    if new.redacted_at is not null then
+    perform 1 from public.record_comments as comment where comment.record_id = new.record_id and comment.comment_id = new.comment_id and comment.project_id = new.project_id and comment.comment_state = 'active' for update;
+    if not found or new.redacted_at is not null then
       raise exception using
         errcode = '55000',
-        message = 'record comment revision must be inserted unredacted';
+        message = 'record comment revision requires an active parent';
     end if;
     return new;
   end if;

@@ -193,6 +193,9 @@ func TestRecordCollaborationMigrationEnforcesOneWayCommentRedaction(t *testing.T
 		"create trigger record_comments_enforce_mutation before update on public.record_comments for each row execute function record_platform_internal.enforce_record_comment_mutation()",
 		"create trigger record_comment_revisions_enforce_mutation before update on public.record_comment_revisions for each row execute function record_platform_internal.enforce_record_comment_revision_mutation()",
 		"create trigger record_comment_tombstones_reject_update before update on public.record_comment_tombstones for each row execute function record_platform_internal.reject_immutable_mutation()",
+		"or exists (select 1 from public.record_comment_revisions as revision where revision.record_id = new.record_id and revision.comment_id = new.comment_id and revision.redacted_at is null)",
+		"perform 1 from public.record_comments as comment where comment.record_id = new.record_id and comment.comment_id = new.comment_id and comment.project_id = new.project_id and comment.comment_state = 'active' for update",
+		"if not found or new.redacted_at is not null then",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("0055 comment redaction missing database enforcement %q", want)
@@ -202,6 +205,22 @@ func TestRecordCollaborationMigrationEnforcesOneWayCommentRedaction(t *testing.T
 	wantTombstoneColumns := []string{"tombstone_id", "record_id", "comment_id", "tombstone_version", "deleted_by", "reason_code", "deleted_at", "record_fence_epoch", "created_at"}
 	if !reflect.DeepEqual(tombstoneColumns, wantTombstoneColumns) {
 		t.Errorf("0055 minimal comment tombstone columns = %#v, want %#v", tombstoneColumns, wantTombstoneColumns)
+	}
+}
+
+func TestRecordCollaborationMigrationBindsChildIdentityAndFenceToItsParent(t *testing.T) {
+	sql := normalizedRecordCollaborationMigrationSQL(t)
+	for _, want := range []string{
+		"unique (record_id, comment_id, comment_version, record_fence_epoch)",
+		"foreign key (record_id, comment_id, comment_version, record_fence_epoch) references public.record_comment_revisions(record_id, comment_id, comment_version, record_fence_epoch) on delete restrict",
+		"unique (record_id, notification_id, recipient_user_id, record_fence_epoch)",
+		"foreign key (record_id, notification_id, recipient_user_id, record_fence_epoch) references public.record_notification_recipients(record_id, notification_id, recipient_user_id, record_fence_epoch) on delete restrict",
+		"unique (record_id, delivery_id, notification_id, recipient_user_id, record_fence_epoch)",
+		"foreign key (record_id, delivery_id, notification_id, recipient_user_id, record_fence_epoch) references public.record_notification_deliveries(record_id, delivery_id, notification_id, recipient_user_id, record_fence_epoch) on delete restrict",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("0055 collaboration parent identity/fence binding missing %q", want)
+		}
 	}
 }
 

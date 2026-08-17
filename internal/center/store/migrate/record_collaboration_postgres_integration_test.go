@@ -14,6 +14,15 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	runtimeDB *pgxpool.Pool,
 ) {
 	t.Helper()
+	const redactCommentSQL = `
+		update public.record_comments
+		set comment_state = 'redacted', comment_version = 2, body_markdown = null,
+			render_contract_version = null, render_model = null, body_digest = null,
+			tombstone_id = 'rct_acl',
+			redacted_at = (select deleted_at from public.record_comment_tombstones where tombstone_id = 'rct_acl'),
+			updated_at = clock_timestamp()
+		where comment_id = 'rcm_acl'
+	`
 
 	if _, err := runtimeDB.Exec(ctx, `
 		insert into public.record_actions (
@@ -79,6 +88,15 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	`); err != nil {
 		t.Fatalf("runtime insert collaboration comment tombstone: %v", err)
 	}
+	t.Run("parent redaction rejects unredacted history", func(t *testing.T) {
+		tx, err := runtimeDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin parent-redaction bypass transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, redactCommentSQL)
+		requirePostgresSQLState(t, err, "55000")
+	})
 	if _, err := runtimeDB.Exec(ctx, `
 		update public.record_comment_revisions
 		set body_markdown = null, render_contract_version = null, render_model = null,
@@ -88,17 +106,50 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	`); err != nil {
 		t.Fatalf("runtime redact collaboration comment revision: %v", err)
 	}
-	if _, err := runtimeDB.Exec(ctx, `
-		update public.record_comments
-		set comment_state = 'redacted', comment_version = 2, body_markdown = null,
-			render_contract_version = null, render_model = null, body_digest = null,
-			tombstone_id = 'rct_acl',
-			redacted_at = (select deleted_at from public.record_comment_tombstones where tombstone_id = 'rct_acl'),
-			updated_at = clock_timestamp()
-		where comment_id = 'rcm_acl'
-	`); err != nil {
+	if _, err := runtimeDB.Exec(ctx, redactCommentSQL); err != nil {
 		t.Fatalf("runtime redact collaboration comment: %v", err)
 	}
+	t.Run("redacted parent rejects new active revision", func(t *testing.T) {
+		tx, err := runtimeDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin post-redaction revision bypass transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, `
+			insert into public.record_comment_revisions (
+				comment_revision_id, record_id, comment_id, comment_version, edited_by,
+				body_markdown, render_contract_version, render_model, body_digest,
+				record_fence_epoch
+			) values ('rcr_afterredaction', 'rec_acl', 'rcm_acl', 2, 'usr_acl', 'restored',
+				'comment_markdown/v1', '{"type":"paragraph"}'::jsonb,
+				decode(repeat('53', 32), 'hex'), 0)
+		`)
+		requirePostgresSQLState(t, err, "55000")
+	})
+	t.Run("runtime cannot delete and reinsert redacted history", func(t *testing.T) {
+		tx, err := runtimeDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin delete-reinsert bypass transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err = tx.Exec(ctx, `delete from public.record_comment_revisions where comment_revision_id = 'rcr_acl'`); err != nil {
+			requirePostgresSQLState(t, err, "42501")
+			return
+		}
+		_, err = tx.Exec(ctx, `
+			insert into public.record_comment_revisions (
+				comment_revision_id, record_id, comment_id, comment_version, edited_by,
+				body_markdown, render_contract_version, render_model, body_digest,
+				record_fence_epoch
+			) values ('rcr_acl', 'rec_acl', 'rcm_acl', 1, 'usr_acl', 'restored',
+				'comment_markdown/v1', '{"type":"paragraph"}'::jsonb,
+				decode(repeat('54', 32), 'hex'), 0)
+		`)
+		if err == nil {
+			t.Fatal("runtime DELETE plus INSERT restored redacted revision content")
+		}
+		t.Fatalf("runtime DELETE was allowed before replacement failed: %v", err)
+	})
 	_, err = runtimeDB.Exec(ctx, `
 		update public.record_comments
 		set comment_state = 'active', comment_version = 3, body_markdown = 'restore',
@@ -122,6 +173,23 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	`); err != nil {
 		t.Fatalf("runtime insert collaboration follower: %v", err)
 	}
+	if _, err := runtimeDB.Exec(ctx, `insert into public.records (record_id) values ('rec_aclother')`); err != nil {
+		t.Fatalf("runtime insert collaboration cross-record root: %v", err)
+	}
+	t.Run("mention rejects cross-record and cross-fence revision", func(t *testing.T) {
+		tx, err := runtimeDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin cross-record mention transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, `
+			insert into public.record_comment_mentions (
+				record_id, comment_id, comment_version, mentioned_user_id,
+				record_fence_epoch
+			) values ('rec_aclother', 'rcm_acl', 1, 'usr_recipient', 1)
+		`)
+		requirePostgresSQLState(t, err, "23503")
+	})
 
 	_, err = runtimeDB.Exec(ctx, `
 		insert into public.record_notifications (
@@ -159,6 +227,55 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	`); err != nil {
 		t.Fatalf("runtime insert collaboration notification delivery: %v", err)
 	}
+	t.Run("delivery rejects cross-record and cross-fence recipient", func(t *testing.T) {
+		tx, err := runtimeDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin cross-record delivery transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, `
+			insert into public.record_notification_deliveries (
+				delivery_id, record_id, notification_id, recipient_user_id, channel,
+				binding_id, authorization_epoch, record_fence_epoch
+			) values ('rnd_cross', 'rec_aclother', 'rnt_acl', 'usr_recipient', 'feishu',
+				'binding_cross', 0, 1)
+		`)
+		requirePostgresSQLState(t, err, "23503")
+	})
+	if _, err := runtimeDB.Exec(ctx, `
+		insert into public.record_notifications (
+			notification_id, record_id, event_kind, subject_kind, subject_id,
+			source_version, actor_id, authorization_epoch, record_fence_epoch,
+			event_at, details_delete_after
+		) values ('rnt_aclother', 'rec_acl', 'comment_mentioned', 'comment', 'rcm_acl',
+			3, 'usr_acl', 0, 0, clock_timestamp(), clock_timestamp() + interval '1 hour')
+	`); err != nil {
+		t.Fatalf("runtime insert second collaboration notification: %v", err)
+	}
+	if _, err := runtimeDB.Exec(ctx, `
+		insert into public.record_notification_recipients (
+			notification_id, record_id, recipient_user_id, reason_kind, mandatory,
+			authorization_epoch, record_fence_epoch
+		) values ('rnt_aclother', 'rec_acl', 'usr_other', 'mention', true, 0, 0)
+	`); err != nil {
+		t.Fatalf("runtime insert second collaboration notification recipient: %v", err)
+	}
+	t.Run("attempt rejects tuple from another notification recipient", func(t *testing.T) {
+		tx, err := runtimeDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin cross-delivery attempt transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, `
+			insert into public.record_notification_delivery_attempts (
+				attempt_id, record_id, delivery_id, notification_id, recipient_user_id,
+				attempt_no, outcome, authorization_epoch, record_fence_epoch,
+				started_at, completed_at
+			) values ('rna_cross', 'rec_acl', 'rnd_acl', 'rnt_aclother', 'usr_other',
+				2, 'temporary_failure', 0, 0, statement_timestamp(), statement_timestamp())
+		`)
+		requirePostgresSQLState(t, err, "23503")
+	})
 	_, err = runtimeDB.Exec(ctx, `
 		insert into public.record_notification_delivery_attempts (
 			attempt_id, record_id, delivery_id, notification_id, recipient_user_id,
@@ -222,8 +339,8 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	for _, statement := range []string{
 		`delete from public.record_notification_delivery_attempts where attempt_id = 'rna_acl'`,
 		`delete from public.record_notification_deliveries where delivery_id = 'rnd_acl'`,
-		`delete from public.record_notification_recipients where notification_id = 'rnt_acl'`,
-		`delete from public.record_notifications where notification_id = 'rnt_acl'`,
+		`delete from public.record_notification_recipients where notification_id in ('rnt_acl', 'rnt_aclother')`,
+		`delete from public.record_notifications where notification_id in ('rnt_acl', 'rnt_aclother')`,
 		`delete from public.record_followers where record_id = 'rec_acl'`,
 		`delete from public.record_comment_revisions where comment_revision_id = 'rcr_acl'`,
 		`delete from public.record_comment_tombstones where tombstone_id = 'rct_acl'`,
@@ -231,8 +348,11 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		`delete from public.record_action_events where action_event_id = 'raev_acl'`,
 		`delete from public.record_actions where action_id = 'ract_acl'`,
 	} {
-		if _, err := runtimeDB.Exec(ctx, statement); err != nil {
-			t.Fatalf("runtime clean collaboration ACL fixture with %q: %v", statement, err)
+		if _, err := migratorDB.Exec(ctx, statement); err != nil {
+			t.Fatalf("migrator clean collaboration ACL fixture with %q: %v", statement, err)
 		}
+	}
+	if _, err := runtimeDB.Exec(ctx, `delete from public.records where record_id = 'rec_aclother'`); err != nil {
+		t.Fatalf("runtime clean collaboration cross-record root: %v", err)
 	}
 }
