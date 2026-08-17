@@ -29,6 +29,9 @@ func TestActivityProviderReturnsClosedTypedDefensiveFacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewActivityProvider() error = %v", err)
 	}
+	if provider.ContractVersion() != CollaborationActivityContractVersionV1 {
+		t.Fatalf("ContractVersion() = %d", provider.ContractVersion())
+	}
 	tx := &collaborationProviderTxStub{}
 	facts, err := provider.ListFacts(context.Background(), tx, binding)
 	if err != nil || len(facts) != 1 || facts[0] != fact {
@@ -74,6 +77,9 @@ func TestPortabilityAdapterRejectsRedactedContentAndClonesBackupRestore(t *testi
 	adapter, err := NewPortabilityAdapter(store)
 	if err != nil {
 		t.Fatalf("NewPortabilityAdapter() error = %v", err)
+	}
+	if adapter.ContractVersion() != CollaborationPortabilityContractVersionV1 {
+		t.Fatalf("ContractVersion() = %d", adapter.ContractVersion())
 	}
 	tx := &collaborationProviderTxStub{}
 	backup, err := adapter.Backup(context.Background(), tx, binding)

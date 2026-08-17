@@ -22,6 +22,11 @@ var (
 	ErrInvalidPortabilityAdapter  = errors.New("invalid collaboration portability adapter")
 )
 
+const (
+	CollaborationActivityContractVersionV1    uint64 = 1
+	CollaborationPortabilityContractVersionV1 uint64 = 1
+)
+
 type ActivityFactKind string
 
 const (
@@ -61,6 +66,9 @@ func (fact ActivityFact) Validate() error {
 		!portableTimeCanonical(fact.EventAt) {
 		return ErrInvalidActivityFact
 	}
+	if !validActivityFactSource(fact) {
+		return ErrInvalidActivityFact
+	}
 	return nil
 }
 
@@ -77,6 +85,10 @@ func NewActivityProvider(source ActivityFactSource) (*ActivityProvider, error) {
 		return nil, ErrInvalidActivityProvider
 	}
 	return &ActivityProvider{source: source}, nil
+}
+
+func (provider *ActivityProvider) ContractVersion() uint64 {
+	return CollaborationActivityContractVersionV1
 }
 
 func (provider *ActivityProvider) ListFacts(
@@ -361,6 +373,10 @@ func NewPortabilityAdapter(store PortabilityStore) (*PortabilityAdapter, error) 
 	return &PortabilityAdapter{store: store}, nil
 }
 
+func (adapter *PortabilityAdapter) ContractVersion() uint64 {
+	return CollaborationPortabilityContractVersionV1
+}
+
 func (adapter *PortabilityAdapter) Backup(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -474,6 +490,9 @@ func validatePortableComment(comment PortableComment) error {
 		!portableTimeCanonical(*comment.RedactedAt) {
 		return ErrInvalidPortabilitySnapshot
 	}
+	if comment.RedactedAt.Before(comment.CreatedAt) {
+		return ErrInvalidPortabilitySnapshot
+	}
 	return nil
 }
 
@@ -494,6 +513,9 @@ func validatePortableCommentRevision(revision PortableCommentRevision) error {
 	if revision.BodyMarkdown != "" || revision.RenderModel.Version != "" || len(revision.RenderModel.Nodes) != 0 ||
 		revision.BodyDigest != ([sha256.Size]byte{}) || !validPortableID(revision.TombstoneID, "rct_") ||
 		!portableTimeCanonical(*revision.RedactedAt) {
+		return ErrInvalidPortabilitySnapshot
+	}
+	if revision.RedactedAt.Before(revision.CreatedAt) {
 		return ErrInvalidPortabilitySnapshot
 	}
 	return nil
@@ -525,13 +547,35 @@ func validatePortableFollower(follower PortableFollower) error {
 }
 
 func validatePortableNotificationAudit(audit PortableNotificationAudit) error {
-	if ValidateNotificationID(audit.NotificationID) != nil || !validNotificationEventKindPortable(audit.Kind) ||
+	expectedSubject, known := notificationSubjectForEvent(audit.Kind)
+	if ValidateNotificationID(audit.NotificationID) != nil || !known ||
+		!validNotificationEventKindPortable(audit.Kind) || audit.SubjectKind != expectedSubject ||
 		!validNotificationSubjectKindPortable(audit.SubjectKind) || audit.SourceVersion == 0 ||
 		audit.SourceVersion > math.MaxInt64 || !portableTimeCanonical(audit.EventAt) ||
 		audit.SentCount+audit.UnknownCount+audit.PermanentFailed > audit.DeliveryCount {
 		return ErrInvalidPortabilitySnapshot
 	}
 	return nil
+}
+
+func validActivityFactSource(fact ActivityFact) bool {
+	switch fact.Kind {
+	case ActivityFactRecordOwnerChanged:
+		return fact.RevisionID != "" && fact.SourceEventID == fact.RevisionID+":"+string(RevisionFieldOwner)
+	case ActivityFactRecordParticipantChanged:
+		return fact.RevisionID != "" && fact.SourceEventID == fact.RevisionID+":"+string(RevisionFieldParticipants)
+	case ActivityFactRecordFollowUpChanged:
+		return fact.RevisionID != "" && fact.SourceEventID == fact.RevisionID+":"+string(RevisionFieldFollowUp)
+	case ActivityFactActionCreated, ActivityFactActionUpdated, ActivityFactActionCompleted,
+		ActivityFactActionCancelled, ActivityFactActionReopened:
+		return validPortableID(fact.SourceEventID, "raev_")
+	case ActivityFactCommentCreated, ActivityFactCommentEdited:
+		return validPortableID(fact.SourceEventID, "rcr_")
+	case ActivityFactCommentRedacted:
+		return validPortableID(fact.SourceEventID, "rct_")
+	default:
+		return false
+	}
 }
 
 func validActivityFactKind(kind ActivityFactKind) bool {

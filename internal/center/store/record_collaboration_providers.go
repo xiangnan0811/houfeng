@@ -571,7 +571,10 @@ func restorePortableComments(ctx context.Context, tx pgx.Tx, binding recordcolla
 	comments := make(map[string]recordcollaboration.PortableComment, len(snapshot.Comments))
 	for _, comment := range snapshot.Comments {
 		comments[comment.CommentID] = comment
-		body, render, digest := portableCommentInsertContent(comment.BodyMarkdown, comment.RenderModel, comment.BodyDigest, comment.State == recordcollaboration.CommentStateRedacted)
+		body, render, digest, err := portableCommentInsertContent(comment.BodyMarkdown, comment.RenderModel, comment.BodyDigest, comment.State == recordcollaboration.CommentStateRedacted)
+		if err != nil {
+			return err
+		}
 		insertVersion := comment.Version
 		insertUpdatedAt := comment.UpdatedAt
 		if comment.State == recordcollaboration.CommentStateRedacted {
@@ -603,7 +606,10 @@ func restorePortableComments(ctx context.Context, tx pgx.Tx, binding recordcolla
 		if exists {
 			continue
 		}
-		body, render, digest := portableCommentInsertContent(revision.BodyMarkdown, revision.RenderModel, revision.BodyDigest, revision.RedactedAt != nil)
+		body, render, digest, err := portableCommentInsertContent(revision.BodyMarkdown, revision.RenderModel, revision.BodyDigest, revision.RedactedAt != nil)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 			insert into public.record_comment_revisions (
 				comment_revision_id, project_id, record_id, comment_id, comment_version,
@@ -698,15 +704,24 @@ func restorePortableFollowers(ctx context.Context, tx pgx.Tx, binding recordcoll
 	return nil
 }
 
-func portableCommentInsertContent(source string, model recordcollaboration.CommentRenderModel, digest [sha256.Size]byte, redacted bool) (string, []byte, []byte) {
+func portableCommentInsertContent(source string, model recordcollaboration.CommentRenderModel, digest [sha256.Size]byte, redacted bool) (string, []byte, []byte, error) {
 	if redacted {
-		content, _ := recordcollaboration.NewCommentContent("redacted")
-		encoded, _ := json.Marshal(content.Model())
+		content, err := recordcollaboration.NewCommentContent("redacted")
+		if err != nil {
+			return "", nil, nil, recordcollaboration.ErrInvalidPortabilitySnapshot
+		}
+		encoded, err := json.Marshal(content.Model())
+		if err != nil {
+			return "", nil, nil, recordcollaboration.ErrInvalidPortabilitySnapshot
+		}
 		value := content.Digest()
-		return content.Source(), encoded, value[:]
+		return content.Source(), encoded, value[:], nil
 	}
-	encoded, _ := json.Marshal(model)
-	return source, encoded, digest[:]
+	encoded, err := json.Marshal(model)
+	if err != nil {
+		return "", nil, nil, recordcollaboration.ErrInvalidPortabilitySnapshot
+	}
+	return source, encoded, digest[:], nil
 }
 
 func decodePortableCommentContent(body *string, render, digest []byte, source *string, model *recordcollaboration.CommentRenderModel, targetDigest *[sha256.Size]byte) bool {
