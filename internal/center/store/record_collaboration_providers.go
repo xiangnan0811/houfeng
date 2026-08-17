@@ -146,6 +146,9 @@ func assertCollaborationProviderBinding(
 	tx pgx.Tx,
 	binding recordcollaboration.RecordFenceBinding,
 ) error {
+	if err := assertRecordReadFence(ctx, tx, binding.RecordID()); err != nil {
+		return err
+	}
 	persisted, err := loadCollaborationRecordReadFenceBinding(ctx, tx, binding.RecordID())
 	if err != nil {
 		return fmt.Errorf("read collaboration provider fence: %w", err)

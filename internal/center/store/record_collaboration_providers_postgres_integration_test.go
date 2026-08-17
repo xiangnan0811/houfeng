@@ -6,8 +6,11 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
 	"houfeng/internal/center/recordcollaboration"
 	"houfeng/internal/center/recordplatform"
+	"houfeng/internal/center/records"
 )
 
 func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripRedactedSafeSnapshot(t *testing.T) {
@@ -147,5 +150,63 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 	}
 	if _, err := activityProvider.ListFacts(ctx, tx, stale); !errors.Is(err, recordcollaboration.ErrInvalidRecordFenceBinding) {
 		t.Fatalf("ListFacts(stale epoch) error = %v, want ErrInvalidRecordFenceBinding", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		insert into public.deletion_reservations (
+			reservation_id, project_id, object_kind, object_id,
+			deletion_token_commitment, request_fingerprint,
+			actor_scope_digest, preview_binding_digest,
+			preview_current_revision_id, preview_lock_version,
+			preview_authorization_epoch, preview_content_delivery_epoch,
+			preview_dependency_graph_digest, preview_backup_inventory_digest,
+			preview_processor_inventory_digest, adapter_readiness_digest,
+			adapter_preview_digest, preview_witness_sequence,
+			preview_witness_entry_hash, state, expires_at, completed_at
+		) values (
+			'drs_providerfenced', 'default', 'record', $1,
+			decode(repeat('41', 32), 'hex'), decode(repeat('42', 32), 'hex'),
+			decode(repeat('43', 32), 'hex'), decode(repeat('44', 32), 'hex'),
+			$2, $3, $4, 0,
+			decode(repeat('45', 32), 'hex'), decode(repeat('46', 32), 'hex'),
+			decode(repeat('47', 32), 'hex'), decode(repeat('48', 32), 'hex'),
+			decode(repeat('49', 32), 'hex'), 1,
+			decode(repeat('4a', 32), 'hex'), 'committed',
+			transaction_timestamp() + interval '5 minutes', transaction_timestamp()
+		)`, parent.RecordID, parent.RevisionID, parent.LockVersion, parent.AuthorizationEpoch); err != nil {
+		t.Fatalf("seed committed provider deletion reservation: %v", err)
+	}
+	assertCollaborationProvidersDeletionReserved(t, ctx, activityProvider, portability, tx, binding, snapshot)
+	if _, err := tx.Exec(ctx, `delete from public.deletion_reservations where reservation_id = 'drs_providerfenced'`); err != nil {
+		t.Fatalf("remove committed provider deletion reservation: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into public.deletion_fence_leases (
+			project_id, object_kind, object_id, owner_id, owner_generation, expires_at, created_at
+		) values ('default', 'record', $1, 'provider-fence-owner', 1,
+			transaction_timestamp() + interval '5 minutes', transaction_timestamp())`, parent.RecordID); err != nil {
+		t.Fatalf("seed live provider deletion fence: %v", err)
+	}
+	assertCollaborationProvidersDeletionReserved(t, ctx, activityProvider, portability, tx, binding, snapshot)
+}
+
+func assertCollaborationProvidersDeletionReserved(
+	t *testing.T,
+	ctx context.Context,
+	activityProvider *recordcollaboration.ActivityProvider,
+	portability *recordcollaboration.PortabilityAdapter,
+	tx pgx.Tx,
+	binding recordcollaboration.RecordFenceBinding,
+	snapshot recordcollaboration.PortabilitySnapshot,
+) {
+	t.Helper()
+	if _, err := activityProvider.ListFacts(ctx, tx, binding); !errors.Is(err, records.ErrRecordDeletionReserved) {
+		t.Fatalf("ListFacts(deletion reserved) error = %v, want ErrRecordDeletionReserved", err)
+	}
+	if _, err := portability.Backup(ctx, tx, binding); !errors.Is(err, records.ErrRecordDeletionReserved) {
+		t.Fatalf("Backup(deletion reserved) error = %v, want ErrRecordDeletionReserved", err)
+	}
+	if err := portability.Restore(ctx, tx, binding, snapshot); !errors.Is(err, records.ErrRecordDeletionReserved) {
+		t.Fatalf("Restore(deletion reserved) error = %v, want ErrRecordDeletionReserved", err)
 	}
 }

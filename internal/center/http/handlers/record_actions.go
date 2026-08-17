@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -233,7 +234,10 @@ func handleRecordActionRoute(w http.ResponseWriter, request *http.Request, actor
 }
 
 func recordActionLimit(request *http.Request) (uint64, bool) {
-	query := request.URL.Query()
+	query, err := url.ParseQuery(request.URL.RawQuery)
+	if err != nil {
+		return 0, false
+	}
 	for key := range query {
 		if key != "limit" {
 			return 0, false

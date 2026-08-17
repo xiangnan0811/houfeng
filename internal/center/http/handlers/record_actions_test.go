@@ -108,6 +108,20 @@ func TestRecordActionsHandlerListsCurrentActions(t *testing.T) {
 	}
 }
 
+func TestRecordActionsHandlerRejectsMalformedListQueryBeforeApplication(t *testing.T) {
+	actor := testRecordActionActor(t)
+	application := &recordActionHandlerStub{}
+	request := httptest.NewRequest(http.MethodGet, "/api/records/rec_actionparent1/actions?limit=%zz", nil)
+	request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+	recorder := httptest.NewRecorder()
+
+	RecordActions(application).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest || application.listCalls != 0 {
+		t.Fatalf("malformed query status/list calls = %d/%d, want 400/0; body=%s", recorder.Code, application.listCalls, recorder.Body.String())
+	}
+}
+
 func TestRecordActionsHandlerRequiresCanonicalHeadersBeforeApplication(t *testing.T) {
 	actor := testRecordActionActor(t)
 	tests := []struct {
