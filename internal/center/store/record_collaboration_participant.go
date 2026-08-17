@@ -291,15 +291,20 @@ func reconcileCollaborationRevisionFollowers(
 			return fmt.Errorf("reconcile collaboration revision follower: %w", err)
 		}
 	}
-	if _, err := tx.Exec(ctx, `
-		delete from public.record_followers
-		where record_id = $1
-		  and not (user_id = any($2::text[]))
-		  and manual_preference = 'default'
-		  and not follows_comment and not follows_mention and not follows_action`,
-		binding.RecordID(), userIDs,
-	); err != nil {
+	var pruned int64
+	encoded, err := encodeCollaborationDeleteCommand(collaborationPruneRevisionFollowersFunctionCommand{
+		RecordID: binding.RecordID(), KeepUserIDs: userIDs, FenceEpoch: int64(binding.Epoch()),
+	})
+	if err != nil {
+		return recordcollaboration.ErrRevisionParticipationUnavailable
+	}
+	if err := tx.QueryRow(ctx, `
+		select public.record_collaboration_prune_revision_followers($1)`, encoded,
+	).Scan(&pruned); err != nil {
 		return fmt.Errorf("delete stale collaboration revision follower: %w", err)
+	}
+	if pruned < 0 {
+		return recordcollaboration.ErrRevisionParticipationUnavailable
 	}
 	if _, err := tx.Exec(ctx, `
 		update public.record_followers

@@ -173,26 +173,14 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		`)
 		requirePostgresSQLState(t, err, "55000")
 	})
-	t.Run("adapter delete privilege cannot reinsert redacted history", func(t *testing.T) {
+	t.Run("runtime cannot raw delete redacted history", func(t *testing.T) {
 		tx, err := runtimeDB.Begin(ctx)
 		if err != nil {
 			t.Fatalf("begin delete-reinsert bypass transaction: %v", err)
 		}
 		defer func() { _ = tx.Rollback(ctx) }()
-		deleted, err := tx.Exec(ctx, `delete from public.record_comment_revisions where comment_revision_id = 'rcr_acl'`)
-		if err != nil || deleted.RowsAffected() != 1 {
-			t.Fatalf("delete redacted revision for adapter transaction = %d/%v, want 1/nil", deleted.RowsAffected(), err)
-		}
-		_, err = tx.Exec(ctx, `
-			insert into public.record_comment_revisions (
-				comment_revision_id, record_id, comment_id, comment_version, edited_by,
-				body_markdown, render_contract_version, render_model, body_digest,
-				record_fence_epoch
-			) values ('rcr_acl', 'rec_acl', 'rcm_acl', 1, 'usr_acl', 'restored',
-				'comment_markdown/v1', '{"type":"paragraph"}'::jsonb,
-				decode(repeat('54', 32), 'hex'), 0)
-		`)
-		requirePostgresSQLState(t, err, "55000")
+		_, err = tx.Exec(ctx, `delete from public.record_comment_revisions where comment_revision_id = 'rcr_acl'`)
+		requirePostgresSQLState(t, err, "42501")
 	})
 	_, err = runtimeDB.Exec(ctx, `
 		update public.record_comments
@@ -388,16 +376,14 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	`); err != nil {
 		t.Fatalf("runtime insert collaboration notification delivery attempt: %v", err)
 	}
-	deletedRecipient, err := runtimeDB.Exec(ctx, `
+	_, err = runtimeDB.Exec(ctx, `
 		delete from public.record_notification_recipients
 		where notification_id = 'rnt_0000000000000000000000000000000000000000000000000000000000000002' and recipient_user_id = 'usr_other'`)
-	if err != nil || deletedRecipient.RowsAffected() != 1 {
-		t.Fatalf("runtime narrow recipient reconciliation delete = %d/%v, want 1/nil", deletedRecipient.RowsAffected(), err)
-	}
-	deletedMissing, err := runtimeDB.Exec(ctx, `delete from public.record_comments where comment_id = 'rcm_missing'`)
-	if err != nil || deletedMissing.RowsAffected() != 0 {
-		t.Fatalf("runtime collaboration adapter DELETE privilege = %d/%v, want 0/nil", deletedMissing.RowsAffected(), err)
-	}
+	requirePostgresSQLState(t, err, "42501")
+	_, err = runtimeDB.Exec(ctx, `delete from public.record_comments where comment_id = 'rcm_missing'`)
+	requirePostgresSQLState(t, err, "42501")
+	_, err = runtimeDB.Exec(ctx, `select public.record_collaboration_purge(convert_to('{}', 'UTF8'))`)
+	requirePostgresSQLState(t, err, "55000")
 
 	_, err = runtimeDB.Exec(ctx, `update public.record_action_events set actor_id = 'usr_changed' where action_event_id = 'raev_acl'`)
 	requirePostgresSQLState(t, err, "42501")
@@ -423,8 +409,8 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		`delete from public.record_followers where record_id = 'rec_collabdelete'`,
 		`delete from public.records where record_id = 'rec_collabdelete'`,
 	} {
-		if _, err := runtimeDB.Exec(ctx, statement); err != nil {
-			t.Fatalf("runtime clean collaboration no-cascade fixture with %q: %v", statement, err)
+		if _, err := migratorDB.Exec(ctx, statement); err != nil {
+			t.Fatalf("migrator clean collaboration no-cascade fixture with %q: %v", statement, err)
 		}
 	}
 

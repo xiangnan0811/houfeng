@@ -328,6 +328,12 @@ func (tx *fakeCollaborationParticipantTx) QueryRow(_ context.Context, sql string
 			return collaborationParticipantRow{err: tx.failErr}
 		}
 		return collaborationParticipantRow{values: []any{time.Date(2026, time.August, 17, 8, 0, 0, 0, time.UTC)}}
+	case strings.Contains(compact, "public.record_collaboration_prune_revision_followers"):
+		tx.appendStep("follower_delete_stale")
+		if tx.shouldFail("follower_delete_stale") {
+			return collaborationParticipantRow{err: tx.failErr}
+		}
+		return collaborationParticipantRow{values: []any{int64(0)}}
 	default:
 		return collaborationParticipantRow{err: errors.New("unexpected collaboration QueryRow SQL")}
 	}

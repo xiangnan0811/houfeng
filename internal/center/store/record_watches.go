@@ -89,14 +89,20 @@ func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, c
 				return err
 			}
 			if remove {
-				tag, err := transaction.tx.Exec(ctx, `
-					delete from public.record_followers
-					where record_id = $1 and user_id = $2 and follower_version = $3`,
-					command.RecordID, command.Actor.UserID, int64(current.Version))
+				var removed int64
+				encoded, err := encodeCollaborationDeleteCommand(collaborationRemoveFollowerFunctionCommand{
+					RecordID: command.RecordID, UserID: command.Actor.UserID,
+					Version: int64(current.Version), FenceEpoch: int64(binding.Epoch()),
+				})
+				if err != nil {
+					return recordcollaboration.ErrWatchConflict
+				}
+				err = transaction.tx.QueryRow(ctx, `
+					select public.record_collaboration_remove_follower($1)`, encoded).Scan(&removed)
 				if err != nil {
 					return fmt.Errorf("delete empty record watch preference: %w", err)
 				}
-				if tag.RowsAffected() != 1 {
+				if removed != 1 {
 					return recordcollaboration.ErrWatchConflict
 				}
 				result = next

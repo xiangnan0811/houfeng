@@ -203,34 +203,32 @@ func (repository *PostgresRecordDeletionRepository) PurgeRecordCollaboration(
 			return err
 		}
 		if found {
+			if err := assertRecordCollaborationSurfacesAbsent(ctx, transaction.tx, command.Operation.Object.ObjectID); err != nil {
+				return err
+			}
 			receipt = existing
 			return nil
 		}
 		var removed int64
-		statements := []string{
-			`delete from public.record_notification_delivery_attempts where record_id = $1`,
-			`delete from public.record_notification_deliveries where record_id = $1`,
-			`delete from public.record_notification_recipients where record_id = $1`,
-			`delete from public.record_notifications where record_id = $1`,
-			`delete from public.record_comment_mentions where record_id = $1`,
-			`delete from public.record_comment_replies where record_id = $1`,
-			`delete from public.record_comment_revisions where record_id = $1`,
-			`delete from public.record_comment_tombstones where record_id = $1`,
-			`delete from public.record_comments where record_id = $1`,
-			`delete from public.record_action_events where record_id = $1`,
-			`delete from public.record_actions where record_id = $1`,
-			`delete from public.record_followers where record_id = $1`,
+		encoded, err := encodeCollaborationDeleteCommand(collaborationPurgeFunctionCommand{
+			OperationID: command.Operation.OperationID, ReservationID: command.Operation.ReservationID,
+			ProjectID: command.Operation.Object.ProjectID, RecordID: command.Operation.Object.ObjectID,
+			FenceEpoch: int64(command.Operation.FenceEpoch), LedgerSequence: int64(command.Operation.LedgerSequence),
+			LedgerEntryHash: encodeCollaborationLedgerHash(command.Operation.LedgerEntryHash),
+		})
+		if err != nil {
+			return recorddeletion.ErrDeletionSafetyUnavailable
 		}
-		for _, statement := range statements {
-			result, err := transaction.tx.Exec(ctx, statement, command.Operation.Object.ObjectID)
-			if err != nil {
-				return fmt.Errorf("purge record collaboration: %w", err)
-			}
-			rows := result.RowsAffected()
-			if rows < 0 || removed > math.MaxInt64-rows {
-				return recorddeletion.ErrDeletionSafetyUnavailable
-			}
-			removed += rows
+		if err := transaction.tx.QueryRow(ctx, `
+			select public.record_collaboration_purge($1)`, encoded,
+		).Scan(&removed); err != nil {
+			return fmt.Errorf("purge record collaboration through constrained function: %w", err)
+		}
+		if removed < 0 {
+			return recorddeletion.ErrDeletionSafetyUnavailable
+		}
+		if err := assertRecordCollaborationSurfacesAbsent(ctx, transaction.tx, command.Operation.Object.ObjectID); err != nil {
+			return err
 		}
 		removedRows := uint64(removed)
 		receiptDigest := collaborationDeletionReceiptDigest(command, removedRows)
@@ -297,30 +295,33 @@ func (repository *PostgresRecordDeletionRepository) VerifyRecordCollaborationPur
 			!equalCollaborationDeletionDigest(rawReceipt, receipt.ReceiptDigest) {
 			return recorddeletion.ErrDeletionSafetyUnavailable
 		}
-		var remaining int64
-		if err := transaction.tx.QueryRow(ctx, `
-			select
-			  (select count(*) from public.record_action_events where record_id = $1) +
-			  (select count(*) from public.record_actions where record_id = $1) +
-			  (select count(*) from public.record_comment_mentions where record_id = $1) +
-			  (select count(*) from public.record_comment_replies where record_id = $1) +
-			  (select count(*) from public.record_comment_revisions where record_id = $1) +
-			  (select count(*) from public.record_comment_tombstones where record_id = $1) +
-			  (select count(*) from public.record_comments where record_id = $1) +
-			  (select count(*) from public.record_followers where record_id = $1) +
-			  (select count(*) from public.record_notification_deliveries where record_id = $1) +
-			  (select count(*) from public.record_notification_delivery_attempts where record_id = $1) +
-			  (select count(*) from public.record_notification_recipients where record_id = $1) +
-			  (select count(*) from public.record_notifications where record_id = $1)`,
-			command.Operation.Object.ObjectID,
-		).Scan(&remaining); err != nil {
-			return fmt.Errorf("verify record collaboration purge: %w", err)
-		}
-		if remaining != 0 {
-			return recorddeletion.ErrDeletionSafetyUnavailable
-		}
-		return nil
+		return assertRecordCollaborationSurfacesAbsent(ctx, transaction.tx, command.Operation.Object.ObjectID)
 	})
+}
+
+func assertRecordCollaborationSurfacesAbsent(ctx context.Context, tx pgx.Tx, recordID string) error {
+	var remaining int64
+	if err := tx.QueryRow(ctx, `
+		select
+		  (select count(*) from public.record_action_events where record_id = $1) +
+		  (select count(*) from public.record_actions where record_id = $1) +
+		  (select count(*) from public.record_comment_mentions where record_id = $1) +
+		  (select count(*) from public.record_comment_replies where record_id = $1) +
+		  (select count(*) from public.record_comment_revisions where record_id = $1) +
+		  (select count(*) from public.record_comment_tombstones where record_id = $1) +
+		  (select count(*) from public.record_comments where record_id = $1) +
+		  (select count(*) from public.record_followers where record_id = $1) +
+		  (select count(*) from public.record_notification_deliveries where record_id = $1) +
+		  (select count(*) from public.record_notification_delivery_attempts where record_id = $1) +
+		  (select count(*) from public.record_notification_recipients where record_id = $1) +
+		  (select count(*) from public.record_notifications where record_id = $1)`, recordID,
+	).Scan(&remaining); err != nil {
+		return fmt.Errorf("verify record collaboration purge absence: %w", err)
+	}
+	if remaining != 0 {
+		return recorddeletion.ErrDeletionSafetyUnavailable
+	}
+	return nil
 }
 
 func loadCollaborationPurgeReceipt(

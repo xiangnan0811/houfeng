@@ -286,6 +286,14 @@ func recordCollaborationAppACLCurrentMigrationFragment() AppACLCurrentMigrationF
 			SecurityDefiner: false,
 			Config:          []string{"search_path=pg_catalog"},
 		},
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "purge_record_collaboration(text, text, text, text, bigint, bigint, bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "remove_record_follower(text, text, bigint, bigint)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "prune_record_revision_followers(text, text[], bigint)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "prune_record_notification_recipients(text, text, text[], bigint)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_collaboration_purge(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_collaboration_remove_follower(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_collaboration_prune_revision_followers(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_collaboration_prune_notification_recipients(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
 	}
 	for _, function := range functions {
 		objects = append(objects, AppACLManagedObjectR1{
@@ -324,15 +332,14 @@ func recordCollaborationAppACLCurrentPrivileges(string) []AppACLPrivilege {
 		"record_notification_deliveries",
 	} {
 		appendTable(runtime, table,
-			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate,
-			AppACLPrivilegeDelete)
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
 	}
 	appendTable(runtime, "record_notification_recipients",
 		AppACLPrivilegeSelect, AppACLPrivilegeInsert,
-		AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
+		AppACLPrivilegeUpdate)
 	appendTable(runtime, "record_followers",
 		AppACLPrivilegeSelect, AppACLPrivilegeInsert,
-		AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
+		AppACLPrivilegeUpdate)
 	for _, table := range []string{
 		"record_action_events",
 		"record_comment_tombstones",
@@ -342,11 +349,19 @@ func recordCollaborationAppACLCurrentPrivileges(string) []AppACLPrivilege {
 		"record_notification_delivery_attempts",
 	} {
 		appendTable(runtime, table,
-			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeDelete)
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert)
 	}
 	appendTable(runtime, "record_collaboration_purge_receipts",
 		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
 	appendTable(AppACLSubjectPlatformAdmin, "record_collaboration_purge_receipts", AppACLPrivilegeSelect)
+	for _, function := range []string{
+		"public.record_collaboration_purge(bytea)",
+		"public.record_collaboration_remove_follower(bytea)",
+		"public.record_collaboration_prune_revision_followers(bytea)",
+		"public.record_collaboration_prune_notification_recipients(bytea)",
+	} {
+		privileges = append(privileges, AppACLPrivilege{Subject: runtime, ObjectClass: AppACLObjectClassFunction, ObjectIdentity: function, Privilege: AppACLPrivilegeExecute})
+	}
 	return privileges
 }
 

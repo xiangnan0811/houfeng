@@ -199,3 +199,54 @@ func TestPostgresIntegrationRecordCollaborationDeletionPurgesExactOwnedSurfacesA
 		t.Fatalf("remaining/receipts = %d/%d, want 0/1", remaining, receipts)
 	}
 }
+
+func TestPostgresIntegrationRecordCollaborationDeletionDoesNotCommitReceiptBeforeExactAbsence(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	parent := seedPostgresActionParent(t, ctx, fixture, "rec_collabblocked", "collaboration-deletion-blocked-parent")
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.record_followers (
+			record_id, user_id, follower_version, manual_preference, record_fence_epoch
+		) values ($1, 'usr_records1', 1, 'watching', 0)`, parent.RecordID); err != nil {
+		t.Fatalf("seed blocked collaboration follower: %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		create or replace function record_platform_internal.suppress_collaboration_follower_delete()
+		returns trigger language plpgsql security invoker set search_path = pg_catalog
+		as $$ begin return null; end $$;
+		create trigger suppress_collaboration_follower_delete
+		before delete on public.record_followers
+		for each row execute function record_platform_internal.suppress_collaboration_follower_delete()`); err != nil {
+		t.Fatalf("install blocked collaboration delete trigger: %v", err)
+	}
+	operation := recorddeletion.DeletionOperation{
+		OperationID: "rpo_collabblocked", ReservationID: "drs_collabblocked",
+		Object:     recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: parent.RecordID},
+		ReasonCode: recorddeletion.DeletionReasonUserConfirmed, State: recorddeletion.DeletionStateOnlinePurging,
+		FenceEpoch: 7, LedgerSequence: 12, LedgerEntryHash: sha256.Sum256([]byte("blocked collaboration deletion ledger")),
+	}
+	seedAttachmentDeletionOperation(t, ctx, fixture, operation, parent.RevisionID)
+	repository := NewPostgresRecordDeletionRepository(
+		fixture.openDirectRuntimePool(t, ctx, "record-collaboration-blocked-deletion", 2),
+		allowRecordPlatformAdmissionGate,
+	)
+	adapter, err := recordcollaboration.NewDeletionAdapter(repository)
+	if err != nil {
+		t.Fatalf("NewDeletionAdapter() error = %v", err)
+	}
+	if _, err := adapter.PurgeDeletion(ctx, recorddeletion.PurgeTarget{Operation: operation}); err == nil {
+		t.Fatal("PurgeDeletion(suppressed owned row) error = nil, want fail closed")
+	}
+	var blockedRows, blockedReceipts int
+	if err := fixture.db.QueryRow(ctx, `
+		select
+		  (select count(*)::int from public.record_followers where record_id = $1),
+		  (select count(*)::int from public.record_collaboration_purge_receipts where operation_id = $2)`,
+		parent.RecordID, operation.OperationID,
+	).Scan(&blockedRows, &blockedReceipts); err != nil {
+		t.Fatalf("read blocked collaboration purge state: %v", err)
+	}
+	if blockedRows != 1 || blockedReceipts != 0 {
+		t.Fatalf("blocked collaboration rows/receipts = %d/%d, want 1/0 rollback", blockedRows, blockedReceipts)
+	}
+}

@@ -534,11 +534,21 @@ func insertNotificationProjection(ctx context.Context, tx pgx.Tx, facts recordco
 			return fmt.Errorf("insert record notification recipient: %w", err)
 		}
 	}
-	if _, err := tx.Exec(ctx, `
-		delete from public.record_notification_recipients
-		where notification_id = $1
-		  and not (recipient_user_id = any($2::text[]))`, notificationID, recipientIDs); err != nil {
+	var pruned int64
+	encoded, err := encodeCollaborationDeleteCommand(collaborationPruneNotificationRecipientsFunctionCommand{
+		NotificationID: notificationID, RecordID: facts.RecordID,
+		KeepUserIDs: recipientIDs, FenceEpoch: int64(facts.RecordFenceEpoch),
+	})
+	if err != nil {
+		return recordcollaboration.ErrInvalidNotificationFacts
+	}
+	if err := tx.QueryRow(ctx, `
+		select public.record_collaboration_prune_notification_recipients($1)`, encoded,
+	).Scan(&pruned); err != nil {
 		return fmt.Errorf("reconcile record notification recipients: %w", err)
+	}
+	if pruned < 0 {
+		return recordcollaboration.ErrInvalidNotificationFacts
 	}
 	return nil
 }
