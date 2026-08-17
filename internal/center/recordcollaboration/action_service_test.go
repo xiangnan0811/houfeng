@@ -46,6 +46,36 @@ func TestActionServiceCreateBuildsAuthorizedContentBoundCommand(t *testing.T) {
 	}
 }
 
+func TestActionServiceListsBoundedCurrentStateThroughReadAuthorization(t *testing.T) {
+	actor, current := testActionAuthorization(t, recordauth.RoleProjectAdmin)
+	createdAt := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	store := &actionCommandStoreStub{list: []ActionRecord{{
+		ActionID: "ract_result1", RecordID: current.RecordID, Version: 1, Status: ActionStatusOpen,
+		Title: "Review", CreatedAt: createdAt, UpdatedAt: createdAt,
+	}}}
+	service, err := NewActionService(&actionCurrentSourceStub{result: current}, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.ListActions(context.Background(), ActionListRequest{
+		Actor: actor, RecordID: current.RecordID, Limit: 25,
+	})
+	if err != nil {
+		t.Fatalf("ListActions() error = %v", err)
+	}
+	if len(result) != 1 || result[0].Title != "Review" || store.readCommand.Limit != 25 ||
+		store.readCommand.CurrentRevisionID != current.CurrentRevisionID ||
+		store.readCommand.RecordLockVersion != current.LockVersion ||
+		store.readCommand.AuthorizationEpoch != current.AuthorizationEpoch {
+		t.Fatalf("ListActions() result=%#v command=%#v", result, store.readCommand)
+	}
+	store.list[0].Title = "mutated"
+	if result[0].Title != "Review" {
+		t.Fatal("ListActions() returned mutable store storage")
+	}
+}
+
 func TestActionServiceFingerprintBindsExactCommandWithoutContentResult(t *testing.T) {
 	actor, current := testActionAuthorization(t, recordauth.RoleProjectAdmin)
 	makeCommand := func(request ActionCreateRequest) ActionCommand {
@@ -290,16 +320,24 @@ func (source *actionCurrentSourceStub) ResolveCurrentRecordAuthorization(context
 }
 
 type actionCommandStoreStub struct {
-	command ActionCommand
-	result  ActionMutationResult
-	err     error
-	calls   int
+	command     ActionCommand
+	readCommand ActionReadCommand
+	result      ActionMutationResult
+	list        []ActionRecord
+	err         error
+	calls       int
 }
 
 func (store *actionCommandStoreStub) CommitAction(_ context.Context, command ActionCommand) (ActionMutationResult, error) {
 	store.calls++
 	store.command = command
 	return store.result, store.err
+}
+
+func (store *actionCommandStoreStub) ListActions(_ context.Context, command ActionReadCommand) ([]ActionRecord, error) {
+	store.calls++
+	store.readCommand = command
+	return store.list, store.err
 }
 
 func testActionCreateRequest(actor recordauth.ActorScope, recordID string) ActionCreateRequest {

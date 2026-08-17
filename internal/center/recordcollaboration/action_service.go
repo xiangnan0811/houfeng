@@ -56,6 +56,12 @@ type ActionUpdateRequest struct {
 	Fields ActionFieldValues
 }
 
+type ActionListRequest struct {
+	Actor    recordauth.ActorScope
+	RecordID string
+	Limit    uint64
+}
+
 // ActionCommand is the transport-neutral, fully authorized storage command.
 // Evidence is canonical policy input, while result identity is a sealed,
 // content-free fingerprint.
@@ -126,6 +132,25 @@ func (command ActionCommand) Validate() error {
 
 type ActionCommandStore interface {
 	CommitAction(context.Context, ActionCommand) (ActionMutationResult, error)
+	ListActions(context.Context, ActionReadCommand) ([]ActionRecord, error)
+}
+
+type ActionReadCommand struct {
+	Actor                 recordauth.ActorScope
+	RecordID              string
+	CurrentRevisionID     string
+	RecordLockVersion     uint64
+	AuthorizationEpoch    uint64
+	AuthorizationEvidence records.RecordAuthorizationEvidence
+	Limit                 uint64
+}
+
+func (command ActionReadCommand) Validate() error {
+	if !validRecordID(command.RecordID) || !validCollaborationRevisionIdentity(command.CurrentRevisionID) ||
+		command.RecordLockVersion == 0 || command.AuthorizationEpoch == 0 || command.Limit == 0 || command.Limit > 100 {
+		return ErrInvalidActionRequest
+	}
+	return records.AuthorizeRecordResource(command.Actor, recordauth.CapabilityRecordRead, command.AuthorizationEvidence)
 }
 
 type ActionService struct {
@@ -167,6 +192,48 @@ func (service *ActionService) CancelAction(ctx context.Context, request ActionCo
 
 func (service *ActionService) ReopenAction(ctx context.Context, request ActionCommandRequest) (ActionMutationResult, error) {
 	return service.commitCommand(ctx, ActionMutationReopen, request, ActionFields{})
+}
+
+func (service *ActionService) ListActions(ctx context.Context, request ActionListRequest) ([]ActionRecord, error) {
+	if ctx == nil || service == nil || nilActionDependency(service.current) || nilActionDependency(service.store) ||
+		!validRecordID(request.RecordID) || request.Limit == 0 || request.Limit > 100 {
+		return nil, ErrInvalidActionRequest
+	}
+	actor, err := recordauth.NormalizeActorScope(request.Actor)
+	if err != nil {
+		return nil, ErrInvalidActionRequest
+	}
+	current, err := service.current.ResolveCurrentRecordAuthorization(ctx, actor.Clone(), request.RecordID)
+	if err != nil {
+		return nil, err
+	}
+	if current.RecordID != request.RecordID || !validCollaborationRevisionIdentity(current.CurrentRevisionID) ||
+		current.LockVersion == 0 || current.AuthorizationEpoch == 0 || current.Lifecycle != records.LifecycleActive {
+		return nil, ErrActionConflict
+	}
+	if err := records.AuthorizeRecordResource(actor, recordauth.CapabilityRecordRead, current.Evidence); err != nil {
+		return nil, err
+	}
+	command := ActionReadCommand{
+		Actor: actor, RecordID: request.RecordID, CurrentRevisionID: current.CurrentRevisionID,
+		RecordLockVersion: current.LockVersion, AuthorizationEpoch: current.AuthorizationEpoch,
+		AuthorizationEvidence: cloneActionAuthorizationEvidence(current.Evidence), Limit: request.Limit,
+	}
+	if command.Validate() != nil {
+		return nil, ErrInvalidActionRequest
+	}
+	loaded, err := service.store.ListActions(ctx, command)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ActionRecord, len(loaded))
+	for index := range loaded {
+		if loaded[index].Validate() != nil || loaded[index].RecordID != request.RecordID {
+			return nil, ErrActionConflict
+		}
+		result[index] = loaded[index].Clone()
+	}
+	return result, nil
 }
 
 func (service *ActionService) commitCommand(ctx context.Context, kind ActionMutationKind, request ActionCommandRequest, fields ActionFields) (ActionMutationResult, error) {

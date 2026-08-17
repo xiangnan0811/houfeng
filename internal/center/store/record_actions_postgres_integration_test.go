@@ -76,6 +76,21 @@ func TestPostgresIntegrationRecordActionsLifecycleReplayAndRootIsolation(t *test
 		t.Fatalf("record root mutated by action lifecycle: before=%#v after=%#v", rootBefore, rootAfter)
 	}
 	assertPostgresActionLifecycleState(t, ctx, fixture, parent, dueAt)
+	actor, evidence := storeActionAuthorization(t)
+	actions, err := repository.ListActions(ctx, recordcollaboration.ActionReadCommand{
+		Actor: actor, RecordID: parent.RecordID, CurrentRevisionID: parent.RevisionID,
+		RecordLockVersion: parent.LockVersion, AuthorizationEpoch: parent.AuthorizationEpoch,
+		AuthorizationEvidence: evidence, Limit: 25,
+	})
+	if err != nil {
+		t.Fatalf("ListActions() error = %v", err)
+	}
+	if len(actions) != 1 || actions[0].ActionID != "ract_pgflow" || actions[0].Version != 5 ||
+		actions[0].Title != "Verify private resolution" || actions[0].Status != recordcollaboration.ActionStatusCancelled ||
+		actions[0].AssigneeID != "usr_bbbbbbbbbbbbbbbbbbbbbbbb" || actions[0].SubjectRevisionID != parent.RevisionID ||
+		actions[0].DueAt == nil || !actions[0].DueAt.Equal(dueAt) || actions[0].CompletedAt != nil {
+		t.Fatalf("ListActions() = %#v, want bounded current state", actions)
+	}
 }
 
 func TestPostgresIntegrationRecordActionsConcurrentSameVersionHasOneWinner(t *testing.T) {

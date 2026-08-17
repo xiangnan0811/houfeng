@@ -65,6 +65,49 @@ func TestRecordActionsHandlerUsesTrustedActorAndResponseAllowlist(t *testing.T) 
 	}
 }
 
+func TestRecordActionsHandlerListsCurrentActions(t *testing.T) {
+	actor := testRecordActionActor(t)
+	dueAt := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
+	createdAt := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	application := &recordActionHandlerStub{listResult: []recordcollaboration.ActionRecord{{
+		ActionID: "ract_action1", RecordID: "rec_actionparent1", Version: 2,
+		Status: recordcollaboration.ActionStatusOpen, Title: "复核证据窗口",
+		AssigneeID: "usr_0123456789abcdef01234567", DueAt: &dueAt,
+		SubjectRevisionID: "rrv_actionrevision1", CreatedAt: createdAt, UpdatedAt: updatedAt,
+	}}}
+	request := httptest.NewRequest(http.MethodGet, "/api/records/rec_actionparent1/actions?limit=25", nil)
+	request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+	recorder := httptest.NewRecorder()
+
+	RecordActions(application).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET action list status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if application.listCalls != 1 || application.list.Actor.UserID != actor.UserID ||
+		application.list.RecordID != "rec_actionparent1" || application.list.Limit != 25 {
+		t.Fatalf("list application request = %#v calls=%d", application.list, application.listCalls)
+	}
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 1 {
+		t.Fatalf("items = %#v, want one", body.Items)
+	}
+	wantKeys := []string{"action_id", "assignee_id", "completed_at", "created_at", "due_at", "record_id", "status", "subject_revision_id", "title", "updated_at", "version"}
+	gotKeys := make([]string, 0, len(body.Items[0]))
+	for key := range body.Items[0] {
+		gotKeys = append(gotKeys, key)
+	}
+	if !sameSortedStrings(gotKeys, wantKeys) || bytes.Contains(recorder.Body.Bytes(), []byte("details")) {
+		t.Fatalf("action list allowlist keys = %#v, want %#v; body=%s", gotKeys, wantKeys, recorder.Body.String())
+	}
+}
+
 func TestRecordActionsHandlerRequiresCanonicalHeadersBeforeApplication(t *testing.T) {
 	actor := testRecordActionActor(t)
 	tests := []struct {
@@ -210,11 +253,20 @@ type recordActionHandlerStub struct {
 	create                                    recordcollaboration.ActionCreateApplicationRequest
 	update                                    recordcollaboration.ActionUpdateApplicationRequest
 	transition                                recordcollaboration.ActionTransitionApplicationRequest
+	list                                      recordcollaboration.ActionListApplicationRequest
 	result                                    recordcollaboration.ActionMutationResult
+	listResult                                []recordcollaboration.ActionRecord
 	err                                       error
 	createCalls, updateCalls, transitionCalls int
+	listCalls                                 int
 	lastKind                                  recordcollaboration.ActionMutationKind
 	lastExpectedVersion                       uint64
+}
+
+func (stub *recordActionHandlerStub) ListActions(_ context.Context, request recordcollaboration.ActionListApplicationRequest) ([]recordcollaboration.ActionRecord, error) {
+	stub.listCalls++
+	stub.list = request
+	return stub.listResult, stub.err
 }
 
 func (stub *recordActionHandlerStub) CreateAction(_ context.Context, request recordcollaboration.ActionCreateApplicationRequest) (recordcollaboration.ActionMutationResult, error) {
@@ -247,7 +299,7 @@ func (stub *recordActionHandlerStub) transitionCall(kind recordcollaboration.Act
 	return stub.result, stub.err
 }
 func (stub *recordActionHandlerStub) calls() int {
-	return stub.createCalls + stub.updateCalls + stub.transitionCalls
+	return stub.createCalls + stub.updateCalls + stub.transitionCalls + stub.listCalls
 }
 
 func testRecordActionActor(t *testing.T) recordauth.ActorScope {

@@ -48,6 +48,12 @@ type ActionTransitionApplicationRequest struct {
 	IdempotencyKey  string
 }
 
+type ActionListApplicationRequest struct {
+	Actor    recordauth.ActorScope
+	RecordID string
+	Limit    uint64
+}
+
 type ActionApplication struct {
 	service *ActionService
 	options ActionApplicationOptions
@@ -91,6 +97,15 @@ func (application *ActionApplication) CancelAction(ctx context.Context, request 
 
 func (application *ActionApplication) ReopenAction(ctx context.Context, request ActionTransitionApplicationRequest) (ActionMutationResult, error) {
 	return application.transition(ctx, request, (*ActionService).ReopenAction)
+}
+
+func (application *ActionApplication) ListActions(ctx context.Context, request ActionListApplicationRequest) ([]ActionRecord, error) {
+	if ctx == nil || application == nil || application.service == nil || application.options.validate() != nil {
+		return nil, ErrInvalidActionRequest
+	}
+	return application.service.ListActions(ctx, ActionListRequest{
+		Actor: request.Actor, RecordID: request.RecordID, Limit: request.Limit,
+	})
 }
 
 func (application *ActionApplication) transition(ctx context.Context, request ActionTransitionApplicationRequest, operation func(*ActionService, context.Context, ActionCommandRequest) (ActionMutationResult, error)) (ActionMutationResult, error) {

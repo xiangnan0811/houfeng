@@ -179,6 +179,101 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 	return result, nil
 }
 
+func (repository *PostgresRecordActionRepository) ListActions(ctx context.Context, command recordcollaboration.ActionReadCommand) ([]recordcollaboration.ActionRecord, error) {
+	if ctx == nil || repository == nil || repository.platform == nil {
+		return nil, recordcollaboration.ErrInvalidActionRequest
+	}
+	if err := command.Validate(); err != nil {
+		return nil, err
+	}
+	var result []recordcollaboration.ActionRecord
+	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		if err := assertRecordReadFence(ctx, transaction.tx, command.RecordID); err != nil {
+			return err
+		}
+		binding, err := loadCollaborationRecordReadFenceBinding(ctx, transaction.tx, command.RecordID)
+		if err != nil {
+			return err
+		}
+		root, err := lockRecordRootForCommentRead(ctx, transaction.tx, command.RecordID)
+		if err != nil {
+			return err
+		}
+		if root.currentRevisionID == nil || *root.currentRevisionID != command.CurrentRevisionID ||
+			root.lockVersion != command.RecordLockVersion || root.authorizationEpoch != command.AuthorizationEpoch ||
+			root.lifecycle != records.LifecycleActive || root.projectID != string(recordplatform.ProjectIDDefault) {
+			return recordcollaboration.ErrActionConflict
+		}
+		if err := records.AuthorizeRecordResource(command.Actor, recordauth.CapabilityRecordRead, command.AuthorizationEvidence); err != nil {
+			return err
+		}
+		loaded, err := listRecordActions(ctx, transaction.tx, command.RecordID, binding, command.Limit)
+		if err != nil {
+			return err
+		}
+		result = loaded
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func listRecordActions(ctx context.Context, tx pgx.Tx, recordID string, binding recordcollaboration.RecordFenceBinding, limit uint64) ([]recordcollaboration.ActionRecord, error) {
+	rows, err := tx.Query(ctx, `
+		select action_id, record_id, action_version, status, title, assignee_id,
+		       due_at, completed_at, subject_revision_id, created_at, updated_at
+		from public.record_actions
+		where record_id = $1 and record_fence_epoch = $2
+		order by (status = 'open') desc, due_at asc nulls last, updated_at desc, action_id
+		limit $3`, recordID, int64(binding.Epoch()), int64(limit))
+	if err != nil {
+		return nil, fmt.Errorf("list record actions: %w", err)
+	}
+	defer rows.Close()
+	result := make([]recordcollaboration.ActionRecord, 0)
+	for rows.Next() {
+		var action recordcollaboration.ActionRecord
+		var version int64
+		var status string
+		var assigneeID, subjectRevisionID *string
+		if err := rows.Scan(&action.ActionID, &action.RecordID, &version, &status, &action.Title,
+			&assigneeID, &action.DueAt, &action.CompletedAt, &subjectRevisionID, &action.CreatedAt, &action.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan record action: %w", err)
+		}
+		if version <= 0 {
+			return nil, recordcollaboration.ErrActionConflict
+		}
+		action.Version = uint64(version)
+		action.Status = recordcollaboration.ActionStatus(status)
+		if assigneeID != nil {
+			action.AssigneeID = *assigneeID
+		}
+		if subjectRevisionID != nil {
+			action.SubjectRevisionID = *subjectRevisionID
+		}
+		action.CreatedAt = action.CreatedAt.UTC()
+		action.UpdatedAt = action.UpdatedAt.UTC()
+		if action.DueAt != nil {
+			value := action.DueAt.UTC()
+			action.DueAt = &value
+		}
+		if action.CompletedAt != nil {
+			value := action.CompletedAt.UTC()
+			action.CompletedAt = &value
+		}
+		if action.Validate() != nil {
+			return nil, recordcollaboration.ErrActionConflict
+		}
+		result = append(result, action)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate record actions: %w", err)
+	}
+	return result, nil
+}
+
 func (repository *PostgresRecordActionRepository) validateActionFieldsInTransaction(ctx context.Context, tx pgx.Tx, command recordcollaboration.ActionCommand, binding recordcollaboration.RecordFenceBinding) error {
 	if command.Fields.SubjectRevisionID() != "" {
 		var present int

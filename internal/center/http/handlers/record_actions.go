@@ -23,6 +23,7 @@ type recordActionHandlerApplication interface {
 	CompleteAction(context.Context, recordcollaboration.ActionTransitionApplicationRequest) (recordcollaboration.ActionMutationResult, error)
 	CancelAction(context.Context, recordcollaboration.ActionTransitionApplicationRequest) (recordcollaboration.ActionMutationResult, error)
 	ReopenAction(context.Context, recordcollaboration.ActionTransitionApplicationRequest) (recordcollaboration.ActionMutationResult, error)
+	ListActions(context.Context, recordcollaboration.ActionListApplicationRequest) ([]recordcollaboration.ActionRecord, error)
 }
 
 type recordActionInput struct {
@@ -41,6 +42,20 @@ type recordActionMutationResponse struct {
 	EventKind recordcollaboration.ActionMutationKind `json:"event_kind"`
 	Replayed  bool                                   `json:"replayed"`
 	ChangedAt time.Time                              `json:"changed_at"`
+}
+
+type recordActionReadResponse struct {
+	ActionID          string                           `json:"action_id"`
+	RecordID          string                           `json:"record_id"`
+	Version           uint64                           `json:"version"`
+	Status            recordcollaboration.ActionStatus `json:"status"`
+	Title             string                           `json:"title"`
+	AssigneeID        string                           `json:"assignee_id"`
+	DueAt             *time.Time                       `json:"due_at"`
+	CompletedAt       *time.Time                       `json:"completed_at"`
+	SubjectRevisionID string                           `json:"subject_revision_id"`
+	CreatedAt         time.Time                        `json:"created_at"`
+	UpdatedAt         time.Time                        `json:"updated_at"`
 }
 
 func RecordActions(application recordActionHandlerApplication) http.Handler {
@@ -109,6 +124,22 @@ func recordActionRouteFromPath(path string) (recordActionRoute, bool) {
 func handleRecordActionRoute(w http.ResponseWriter, request *http.Request, actor recordauth.ActorScope, application recordActionHandlerApplication, route recordActionRoute) {
 	switch {
 	case route.actionID == "" && route.transition == "":
+		if request.Method == http.MethodGet {
+			limit, ok := recordActionLimit(request)
+			if !ok {
+				writeRecordError(w, http.StatusBadRequest, "invalid_request", "invalid action list request", nil)
+				return
+			}
+			actions, err := application.ListActions(request.Context(), recordcollaboration.ActionListApplicationRequest{
+				Actor: actor, RecordID: route.recordID, Limit: limit,
+			})
+			if err != nil {
+				writeRecordActionApplicationError(w, err)
+				return
+			}
+			writeRecordActionList(w, route.recordID, actions)
+			return
+		}
 		if request.Method != http.MethodPost {
 			writeRecordError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
@@ -199,6 +230,44 @@ func handleRecordActionRoute(w http.ResponseWriter, request *http.Request, actor
 		}
 		writeRecordActionResult(w, http.StatusOK, result)
 	}
+}
+
+func recordActionLimit(request *http.Request) (uint64, bool) {
+	query := request.URL.Query()
+	for key := range query {
+		if key != "limit" {
+			return 0, false
+		}
+	}
+	values, ok := query["limit"]
+	if !ok {
+		return 50, true
+	}
+	if len(values) != 1 || values[0] == "" || (len(values[0]) > 1 && values[0][0] == '0') {
+		return 0, false
+	}
+	limit, err := strconv.ParseUint(values[0], 10, 64)
+	return limit, err == nil && limit > 0 && limit <= 100
+}
+
+func writeRecordActionList(w http.ResponseWriter, recordID string, actions []recordcollaboration.ActionRecord) {
+	response := make([]recordActionReadResponse, len(actions))
+	for index := range actions {
+		action := actions[index].Clone()
+		if action.Validate() != nil || action.RecordID != recordID {
+			writeRecordInternalError(w)
+			return
+		}
+		response[index] = recordActionReadResponse{
+			ActionID: action.ActionID, RecordID: action.RecordID, Version: action.Version,
+			Status: action.Status, Title: action.Title, AssigneeID: action.AssigneeID,
+			DueAt: action.DueAt, CompletedAt: action.CompletedAt, SubjectRevisionID: action.SubjectRevisionID,
+			CreatedAt: action.CreatedAt.UTC(), UpdatedAt: action.UpdatedAt.UTC(),
+		}
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Items []recordActionReadResponse `json:"items"`
+	}{Items: response})
 }
 
 func recordActionFields(input recordActionInput) recordcollaboration.ActionFieldValues {

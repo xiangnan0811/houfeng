@@ -24,6 +24,49 @@ var (
 	ErrInvalidActionFields = errors.New("invalid record action fields")
 )
 
+// ActionRecord is the bounded current-state read model used by the Web
+// collaboration surface. It deliberately omits action details and immutable
+// event history; downstream activity consumers use typed activity facts.
+type ActionRecord struct {
+	ActionID          string
+	RecordID          string
+	Version           uint64
+	Status            ActionStatus
+	Title             string
+	AssigneeID        string
+	DueAt             *time.Time
+	CompletedAt       *time.Time
+	SubjectRevisionID string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+func (record ActionRecord) Validate() error {
+	if ValidateActionID(record.ActionID) != nil || !validRecordID(record.RecordID) ||
+		record.Version == 0 || record.Version > MaxActionVersion || !validActionStatus(record.Status) ||
+		!validActionText(record.Title, MaxActionTitleRunes, false) ||
+		(record.AssigneeID != "" && recordauth.ValidateActorUserID(record.AssigneeID) != nil) ||
+		(record.SubjectRevisionID != "" && !validCollaborationRevisionIdentity(record.SubjectRevisionID)) ||
+		record.CreatedAt.IsZero() || record.UpdatedAt.Before(record.CreatedAt) ||
+		(record.Status == ActionStatusCompleted) != (record.CompletedAt != nil) {
+		return ErrInvalidActionFields
+	}
+	if record.DueAt != nil && normalizeActionTime(record.DueAt) == nil {
+		return ErrInvalidActionFields
+	}
+	if record.CompletedAt != nil && (record.CompletedAt.Before(record.CreatedAt) || normalizeActionTime(record.CompletedAt) == nil) {
+		return ErrInvalidActionFields
+	}
+	return nil
+}
+
+func (record ActionRecord) Clone() ActionRecord {
+	cloned := record
+	cloned.DueAt = normalizeActionTime(record.DueAt)
+	cloned.CompletedAt = normalizeActionTime(record.CompletedAt)
+	return cloned
+}
+
 // ActionActivityKind is the closed typed fact registry consumed by the later
 // Activity child. The action service only appends facts to the existing Core
 // activity relation; it creates no projection or downstream job.
