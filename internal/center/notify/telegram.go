@@ -16,6 +16,11 @@ type TelegramNotifier struct {
 	httpClient *http.Client
 }
 
+type telegramProviderResponse struct {
+	OK        *bool `json:"ok"`
+	ErrorCode *int  `json:"error_code"`
+}
+
 func NewTelegramNotifier(botToken, chatID string) *TelegramNotifier {
 	return NewTelegramNotifierWithBaseURL(botToken, chatID, "https://api.telegram.org", &http.Client{Timeout: 10 * time.Second})
 }
@@ -53,11 +58,20 @@ func (n *TelegramNotifier) Send(ctx context.Context, summary string) error {
 	}
 	defer response.Body.Close()
 
-	if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError {
-		return NewSendFailure(SendFailureTemporary)
+	if failureClass, failed := classifyProviderHTTPStatus(response.StatusCode); failed {
+		return NewSendFailure(failureClass)
 	}
-	if response.StatusCode >= http.StatusMultipleChoices {
-		return NewSendFailure(SendFailurePermanent)
+	var providerResponse telegramProviderResponse
+	if !decodeBoundedProviderResponse(response.Body, &providerResponse) || providerResponse.OK == nil {
+		return NewSendFailure(SendFailureUnknown)
 	}
-	return nil
+	if *providerResponse.OK {
+		return nil
+	}
+	if providerResponse.ErrorCode != nil {
+		if failureClass, closed := classifyClosedProviderCode(*providerResponse.ErrorCode); closed {
+			return NewSendFailure(failureClass)
+		}
+	}
+	return NewSendFailure(SendFailureUnknown)
 }

@@ -13,6 +13,10 @@ type FeishuNotifier struct {
 	client     *http.Client
 }
 
+type feishuProviderResponse struct {
+	Code *int `json:"code"`
+}
+
 func NewFeishuNotifier(webhookURL string) *FeishuNotifier {
 	return NewFeishuNotifierWithClient(webhookURL, &http.Client{Timeout: 10 * time.Second})
 }
@@ -51,11 +55,15 @@ func (n *FeishuNotifier) Send(ctx context.Context, summary string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
-		return NewSendFailure(SendFailureTemporary)
+	if failureClass, failed := classifyProviderHTTPStatus(resp.StatusCode); failed {
+		return NewSendFailure(failureClass)
 	}
-	if resp.StatusCode >= http.StatusMultipleChoices {
-		return NewSendFailure(SendFailurePermanent)
+	var providerResponse feishuProviderResponse
+	if !decodeBoundedProviderResponse(resp.Body, &providerResponse) || providerResponse.Code == nil {
+		return NewSendFailure(SendFailureUnknown)
 	}
-	return nil
+	if *providerResponse.Code == 0 {
+		return nil
+	}
+	return NewSendFailure(SendFailureUnknown)
 }

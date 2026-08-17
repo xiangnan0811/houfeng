@@ -603,7 +603,7 @@ func TestPostgresIntegrationRecordNotificationProjectionEnqueuesScopedDeliveryWi
 			)
 			claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "delivery_projection_owner")
 			result, err := projection.ProjectNotification(ctx, claim)
-			if test.wantErr == nil && err != nil || test.wantErr != nil && err == nil || result.RecipientCount != 2 {
+			if test.wantErr == nil && err != nil || test.wantErr != nil && !errors.Is(err, test.wantErr) || result.RecipientCount != 2 {
 				t.Fatalf("ProjectNotification() = (%#v, %v), want committed inbox and planning error=%v", result, err, test.wantErr)
 			}
 			if test.wantErr == nil {
@@ -659,7 +659,7 @@ func TestPostgresIntegrationRecordNotificationPlanningFailureRetriesParentWithou
 		t.Fatal(err)
 	}
 	base, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
-	planningErr := errors.New("scoped binding planner unavailable")
+	planningErr := errors.New("credential=secret webhook=https://provider.invalid/hook response=provider-body")
 	bindings := &notificationBindingListerStub{
 		err: planningErr,
 		byUser: map[string][]recordcollaboration.ScopedTransportBindingRef{
@@ -681,8 +681,13 @@ func TestPostgresIntegrationRecordNotificationPlanningFailureRetriesParentWithou
 		t.Fatal(err)
 	}
 	processed, err := projector.ProjectNext(ctx, recordplatform.OutboxClaimInputV1{OwnerID: "unused_preclaimed", OwnerLeaseDuration: time.Minute})
-	if !processed || !errors.Is(err, planningErr) {
-		t.Fatalf("ProjectNext(planning unavailable) = (%t, %v), want processed dependency error", processed, err)
+	if !processed || !errors.Is(err, recordcollaboration.ErrExternalDeliveryUnavailable) || errors.Is(err, planningErr) {
+		t.Fatalf("ProjectNext(planning unavailable) = (%t, %v), want closed ErrExternalDeliveryUnavailable", processed, err)
+	}
+	for _, forbidden := range []string{"credential", "secret", "webhook", "provider.invalid", "provider-body"} {
+		if strings.Contains(strings.ToLower(err.Error()), forbidden) {
+			t.Fatalf("closed planning error leaked %q in %q", forbidden, err.Error())
+		}
 	}
 	assertPostgresNotificationCounts(t, ctx, fixture, created.RecordID, 1, 2)
 	var parentStatus string

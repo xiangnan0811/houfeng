@@ -204,7 +204,7 @@ func (repository *PostgresRecordNotificationRepository) scheduleExternalNotifica
 				ctx, transaction.tx, recordauth.ProjectIDDefault, recipient.UserID,
 			)
 			if err != nil {
-				return fmt.Errorf("list scoped record notification bindings: %w", err)
+				return recordcollaboration.ErrExternalDeliveryUnavailable
 			}
 			seenChannels := make(map[recordcollaboration.NotificationDeliveryChannel]struct{}, len(bindings))
 			for _, binding := range bindings {
