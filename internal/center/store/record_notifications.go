@@ -55,6 +55,9 @@ func NewPostgresRecordNotificationRepositoryWithExternalBindings(
 	retention time.Duration,
 	bindings ScopedTransportBindingSource,
 ) *PostgresRecordNotificationRepository {
+	if nilCollaborationDependency(bindings) {
+		return nil
+	}
 	return newPostgresRecordNotificationRepository(pool, gate, members, authorization, retention, bindings)
 }
 
@@ -83,62 +86,13 @@ func (repository *PostgresRecordNotificationRepository) ProjectNotification(ctx 
 		return recordcollaboration.NotificationProjectionResult{}, recordcollaboration.ErrNotificationSourceMissing
 	}
 	var result recordcollaboration.NotificationProjectionResult
-	var facts recordcollaboration.NotificationEventFacts
-	var allowed []recordcollaboration.NotificationRecipientFacts
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		if err := transaction.AssertOutboxClaim(ctx, claim); err != nil {
 			return err
 		}
-		loadedFacts, direct, loadErr := loadNotificationSourceFacts(ctx, transaction.tx, claim.Event, kind)
-		if loadErr != nil {
-			return loadErr
-		}
-		facts = loadedFacts
-		if err := assertRecordReadFence(ctx, transaction.tx, facts.RecordID); err != nil {
-			return err
-		}
-		binding, err := loadCollaborationRecordReadFenceBinding(ctx, transaction.tx, facts.RecordID)
+		facts, allowed, err := repository.loadCurrentNotificationRecipients(ctx, transaction.tx, claim.Event, kind)
 		if err != nil {
 			return err
-		}
-		root, err := lockRecordRootForCommentRead(ctx, transaction.tx, facts.RecordID)
-		if err != nil {
-			return err
-		}
-		if facts.AuthorizationEpoch != root.authorizationEpoch || facts.RecordFenceEpoch != uint64(binding.Epoch()) {
-			return recordcollaboration.ErrNotificationSourceStale
-		}
-		followers, err := loadNotificationFollowers(ctx, transaction.tx, facts.RecordID, facts.RecordFenceEpoch)
-		if err != nil {
-			return err
-		}
-		candidates, err := recordcollaboration.NormalizeNotificationRecipients(facts, followers, direct)
-		if err != nil {
-			return err
-		}
-		allowed = make([]recordcollaboration.NotificationRecipientFacts, 0, len(candidates))
-		for _, candidate := range candidates {
-			actor, err := repository.members.ReadMemberActor(ctx, transaction.tx, recordauth.ProjectIDDefault, candidate.UserID)
-			if errors.Is(err, recordcollaboration.ErrMembershipDenied) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			current, err := repository.resolveCurrentAuthorizationInTransaction(ctx, transaction.tx, actor, facts.RecordID)
-			if err != nil {
-				return err
-			}
-			if current.Lifecycle != records.LifecycleActive || records.AuthorizeRecordResource(actor, recordauth.CapabilityNotificationRead, current.Evidence) != nil {
-				continue
-			}
-			if current.AuthorizationEpoch != facts.AuthorizationEpoch {
-				return recordcollaboration.ErrNotificationSourceStale
-			}
-			allowed = append(allowed, candidate)
-		}
-		if facts.Validate() != nil {
-			return recordcollaboration.ErrInvalidNotificationFacts
 		}
 		notificationID := facts.NotificationID()
 		if err := insertNotificationProjection(ctx, transaction.tx, facts, notificationID, repository.retention, allowed); err != nil {
@@ -155,22 +109,93 @@ func (repository *PostgresRecordNotificationRepository) ProjectNotification(ctx 
 		return recordcollaboration.NotificationProjectionResult{}, err
 	}
 	if result.RecipientCount > 0 && !nilCollaborationDependency(repository.bindings) {
-		_ = repository.scheduleExternalNotificationDeliveries(ctx, facts, result.NotificationID, allowed)
+		if err := repository.scheduleExternalNotificationDeliveries(ctx, claim, kind, result.NotificationID); err != nil {
+			return result, err
+		}
 	}
 	return result, nil
 }
 
+func (repository *PostgresRecordNotificationRepository) loadCurrentNotificationRecipients(
+	ctx context.Context,
+	tx pgx.Tx,
+	event recordplatform.OutboxEvent,
+	kind recordcollaboration.NotificationEventKind,
+) (recordcollaboration.NotificationEventFacts, []recordcollaboration.NotificationRecipientFacts, error) {
+	facts, direct, err := loadNotificationSourceFacts(ctx, tx, event, kind)
+	if err != nil {
+		return recordcollaboration.NotificationEventFacts{}, nil, err
+	}
+	if err := assertRecordReadFence(ctx, tx, facts.RecordID); err != nil {
+		return recordcollaboration.NotificationEventFacts{}, nil, err
+	}
+	binding, err := loadCollaborationRecordReadFenceBinding(ctx, tx, facts.RecordID)
+	if err != nil {
+		return recordcollaboration.NotificationEventFacts{}, nil, err
+	}
+	root, err := lockRecordRootForCommentRead(ctx, tx, facts.RecordID)
+	if err != nil {
+		return recordcollaboration.NotificationEventFacts{}, nil, err
+	}
+	if facts.AuthorizationEpoch != root.authorizationEpoch || facts.RecordFenceEpoch != uint64(binding.Epoch()) {
+		return recordcollaboration.NotificationEventFacts{}, nil, recordcollaboration.ErrNotificationSourceStale
+	}
+	followers, err := loadNotificationFollowers(ctx, tx, facts.RecordID, facts.RecordFenceEpoch)
+	if err != nil {
+		return recordcollaboration.NotificationEventFacts{}, nil, err
+	}
+	candidates, err := recordcollaboration.NormalizeNotificationRecipients(facts, followers, direct)
+	if err != nil {
+		return recordcollaboration.NotificationEventFacts{}, nil, err
+	}
+	allowed := make([]recordcollaboration.NotificationRecipientFacts, 0, len(candidates))
+	for _, candidate := range candidates {
+		actor, err := repository.members.ReadMemberActor(ctx, tx, recordauth.ProjectIDDefault, candidate.UserID)
+		if errors.Is(err, recordcollaboration.ErrMembershipDenied) {
+			continue
+		}
+		if err != nil {
+			return recordcollaboration.NotificationEventFacts{}, nil, err
+		}
+		current, err := repository.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, facts.RecordID)
+		if err != nil {
+			return recordcollaboration.NotificationEventFacts{}, nil, err
+		}
+		if current.Lifecycle != records.LifecycleActive || records.AuthorizeRecordResource(actor, recordauth.CapabilityNotificationRead, current.Evidence) != nil {
+			continue
+		}
+		if current.AuthorizationEpoch != facts.AuthorizationEpoch {
+			return recordcollaboration.NotificationEventFacts{}, nil, recordcollaboration.ErrNotificationSourceStale
+		}
+		allowed = append(allowed, candidate)
+	}
+	if facts.Validate() != nil {
+		return recordcollaboration.NotificationEventFacts{}, nil, recordcollaboration.ErrInvalidNotificationFacts
+	}
+	return facts, allowed, nil
+}
+
 func (repository *PostgresRecordNotificationRepository) scheduleExternalNotificationDeliveries(
 	ctx context.Context,
-	facts recordcollaboration.NotificationEventFacts,
+	claim recordplatform.ClaimedOutboxEventV1,
+	kind recordcollaboration.NotificationEventKind,
 	notificationID string,
-	recipients []recordcollaboration.NotificationRecipientFacts,
 ) error {
 	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.bindings) ||
-		facts.Validate() != nil || notificationID != facts.NotificationID() || repository.retention.Microseconds() <= 0 {
+		claim.Validate() != nil || notificationID == "" || repository.retention.Microseconds() <= 0 {
 		return recordcollaboration.ErrInvalidNotificationProjector
 	}
 	return repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		if err := transaction.AssertOutboxClaim(ctx, claim); err != nil {
+			return err
+		}
+		facts, recipients, err := repository.loadCurrentNotificationRecipients(ctx, transaction.tx, claim.Event, kind)
+		if err != nil {
+			return err
+		}
+		if notificationID != facts.NotificationID() {
+			return recordcollaboration.ErrInvalidNotificationFacts
+		}
 		for _, recipient := range recipients {
 			if recipient.Validate() != nil {
 				return recordcollaboration.ErrInvalidNotificationFacts

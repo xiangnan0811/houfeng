@@ -307,8 +307,8 @@ create table if not exists public.record_notification_deliveries (
   check (updated_at >= created_at),
   foreign key (record_id) references public.records(record_id)
     on delete restrict,
-  foreign key (record_id, notification_id, recipient_user_id, record_fence_epoch)
-    references public.record_notification_recipients(record_id, notification_id, recipient_user_id, record_fence_epoch)
+  foreign key (record_id, notification_id)
+    references public.record_notifications(record_id, notification_id)
     on delete restrict
 );
 

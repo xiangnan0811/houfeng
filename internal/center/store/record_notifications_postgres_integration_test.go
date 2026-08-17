@@ -561,6 +561,7 @@ func TestPostgresIntegrationRecordNotificationProjectionEnqueuesScopedDeliveryWi
 		name          string
 		bindingReader *notificationBindingListerStub
 		wantDelivery  int
+		wantErr       error
 	}{
 		{
 			name: "exact scoped binding",
@@ -576,6 +577,7 @@ func TestPostgresIntegrationRecordNotificationProjectionEnqueuesScopedDeliveryWi
 			name:          "binding source unavailable keeps inbox",
 			bindingReader: &notificationBindingListerStub{err: errors.New("scoped binding unavailable")},
 			wantDelivery:  0,
+			wantErr:       recordcollaboration.ErrExternalDeliveryUnavailable,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -601,11 +603,13 @@ func TestPostgresIntegrationRecordNotificationProjectionEnqueuesScopedDeliveryWi
 			)
 			claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "delivery_projection_owner")
 			result, err := projection.ProjectNotification(ctx, claim)
-			if err != nil || result.RecipientCount != 2 {
-				t.Fatalf("ProjectNotification() = (%#v, %v), want inbox success", result, err)
+			if test.wantErr == nil && err != nil || test.wantErr != nil && err == nil || result.RecipientCount != 2 {
+				t.Fatalf("ProjectNotification() = (%#v, %v), want committed inbox and planning error=%v", result, err, test.wantErr)
 			}
-			if _, err := projection.ProjectNotification(ctx, claim); err != nil {
-				t.Fatalf("ProjectNotification(replay) error = %v", err)
+			if test.wantErr == nil {
+				if _, err := projection.ProjectNotification(ctx, claim); err != nil {
+					t.Fatalf("ProjectNotification(replay) error = %v", err)
+				}
 			}
 			assertPostgresNotificationCounts(t, ctx, fixture, created.RecordID, 1, 2)
 
@@ -636,6 +640,302 @@ func TestPostgresIntegrationRecordNotificationProjectionEnqueuesScopedDeliveryWi
 			}
 		})
 	}
+}
+
+func TestPostgresIntegrationRecordNotificationPlanningFailureRetriesParentWithoutRollingBackInbox(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-planning-retry", 4)
+	input := collaborationRevisionInput(t, collaborationRevisionInputValues{
+		ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
+	})
+	created, err := newRecordsPostgresRepository(
+		t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
+	).CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordCreate, "rec_pgdeliveryretry", "", 0, 0, input, "delivery-planning-retry-parent",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+	planningErr := errors.New("scoped binding planner unavailable")
+	bindings := &notificationBindingListerStub{
+		err: planningErr,
+		byUser: map[string][]recordcollaboration.ScopedTransportBindingRef{
+			"usr_bbbbbbbbbbbbbbbbbbbbbbbb": {{
+				ProjectID: recordauth.ProjectIDDefault, RecipientUserID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
+				Channel: recordcollaboration.NotificationDeliveryTelegram, BindingID: "telegram_primary",
+			}},
+		},
+	}
+	projection := NewPostgresRecordNotificationRepositoryWithExternalBindings(
+		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+		base.authorization, 30*24*time.Hour, bindings,
+	)
+	claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "delivery_planning_first")
+	projector, err := recordcollaboration.NewNotificationProjector(
+		&notificationPreclaimedQueue{claim: &claim, queue: queue}, projection, time.Second,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := projector.ProjectNext(ctx, recordplatform.OutboxClaimInputV1{OwnerID: "unused_preclaimed", OwnerLeaseDuration: time.Minute})
+	if !processed || !errors.Is(err, planningErr) {
+		t.Fatalf("ProjectNext(planning unavailable) = (%t, %v), want processed dependency error", processed, err)
+	}
+	assertPostgresNotificationCounts(t, ctx, fixture, created.RecordID, 1, 2)
+	var parentStatus string
+	if err := fixture.db.QueryRow(ctx, `select status from public.record_outbox where outbox_row_id = $1`, claim.Event.RowID).Scan(&parentStatus); err != nil {
+		t.Fatal(err)
+	}
+	if parentStatus != "pending" {
+		t.Fatalf("parent outbox status = %q, want pending retry", parentStatus)
+	}
+	bindings.err = nil
+	if _, err := fixture.db.Exec(ctx, `
+		update public.record_outbox set next_attempt_at = transaction_timestamp() - interval '1 second'
+		where outbox_row_id = $1`, claim.Event.RowID); err != nil {
+		t.Fatal(err)
+	}
+	recoveryClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "delivery_planning_recovery")
+	recoveryProjector, err := recordcollaboration.NewNotificationProjector(
+		&notificationPreclaimedQueue{claim: &recoveryClaim, queue: queue}, projection, time.Second,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed, err := recoveryProjector.ProjectNext(ctx, recordplatform.OutboxClaimInputV1{OwnerID: "unused_preclaimed", OwnerLeaseDuration: time.Minute}); err != nil || !processed {
+		t.Fatalf("ProjectNext(recovered planner) = (%t, %v)", processed, err)
+	}
+	assertPostgresNotificationCounts(t, ctx, fixture, created.RecordID, 1, 2)
+	var deliveries, deliveryOutbox int
+	if err := fixture.db.QueryRow(ctx, `
+		select (select count(*)::int from public.record_notification_deliveries where record_id = $1),
+		       (select count(*)::int from public.record_outbox where event_kind = 'record_notification_delivery')`,
+		created.RecordID,
+	).Scan(&deliveries, &deliveryOutbox); err != nil {
+		t.Fatal(err)
+	}
+	if deliveries != 1 || deliveryOutbox != 1 {
+		t.Fatalf("recovered deliveries/outbox = %d/%d, want exact 1/1", deliveries, deliveryOutbox)
+	}
+}
+
+func TestPostgresIntegrationRecordNotificationPlanningRechecksPolicyAndOwnerBetweenTransactions(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		drift  func(*testing.T, context.Context, recordPlatformPostgresFixture, records.RevisionCommitResult, *PostgresRecordPlatformRepository, recordplatform.ClaimedOutboxEventV1) *recordplatform.ClaimedOutboxEventV1
+		assert func(*testing.T, error)
+	}{
+		{
+			name: "policy muted",
+			drift: func(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, created records.RevisionCommitResult, _ *PostgresRecordPlatformRepository, _ recordplatform.ClaimedOutboxEventV1) *recordplatform.ClaimedOutboxEventV1 {
+				if _, err := fixture.db.Exec(ctx, `
+					update public.record_followers
+					set manual_preference = 'muted', follower_version = follower_version + 1
+					where record_id = $1 and user_id = 'usr_bbbbbbbbbbbbbbbbbbbbbbbb'`, created.RecordID); err != nil {
+					t.Fatal(err)
+				}
+				return nil
+			},
+			assert: func(t *testing.T, err error) {
+				if err != nil {
+					t.Fatalf("ProjectNotification(policy drift) error = %v", err)
+				}
+			},
+		},
+		{
+			name: "membership revoked",
+			drift: func(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, _ records.RevisionCommitResult, _ *PostgresRecordPlatformRepository, _ recordplatform.ClaimedOutboxEventV1) *recordplatform.ClaimedOutboxEventV1 {
+				if _, err := fixture.db.Exec(ctx, `update public.users set role = 'viewer' where user_id = 'usr_bbbbbbbbbbbbbbbbbbbbbbbb'`); err != nil {
+					t.Fatal(err)
+				}
+				return nil
+			},
+			assert: func(t *testing.T, err error) {
+				if err != nil {
+					t.Fatalf("ProjectNotification(membership drift) error = %v", err)
+				}
+			},
+		},
+		{
+			name: "outbox takeover",
+			drift: func(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, _ records.RevisionCommitResult, queue *PostgresRecordPlatformRepository, claim recordplatform.ClaimedOutboxEventV1) *recordplatform.ClaimedOutboxEventV1 {
+				expireNotificationClaim(t, ctx, fixture, claim.Event.RowID)
+				takeover := claimNotificationOutboxKind(t, ctx, queue, claim.Event.EventKind, "delivery_planning_takeover")
+				return &takeover
+			},
+			assert: func(t *testing.T, err error) {
+				if !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+					t.Fatalf("ProjectNotification(takeover drift) error = %v, want ErrLostOwnerLease", err)
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newRecordsPostgresFixture(t, ctx)
+			seedCollaborationRevisionUsers(t, ctx, fixture)
+			runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-planning-recheck", 6)
+			input := collaborationRevisionInput(t, collaborationRevisionInputValues{
+				ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
+			})
+			created, err := newRecordsPostgresRepository(
+				t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
+			).CommitRevision(ctx, recordsPostgresRevisionCommand(
+				t, recordplatform.OperationKindRecordCreate, "rec_pgdeliveryrecheck", "", 0, 0, input, "delivery-planning-recheck-parent",
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			base, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+			bindings := &notificationBindingListerStub{byUser: map[string][]recordcollaboration.ScopedTransportBindingRef{
+				"usr_bbbbbbbbbbbbbbbbbbbbbbbb": {{
+					ProjectID: recordauth.ProjectIDDefault, RecipientUserID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
+					Channel: recordcollaboration.NotificationDeliveryTelegram, BindingID: "telegram_primary",
+				}},
+			}}
+			enteredPlanning := make(chan struct{})
+			releasePlanning := make(chan struct{})
+			var admissions atomic.Int32
+			gate := AdmissionGateFunc(func(ctx context.Context, _ pgx.Tx) error {
+				if admissions.Add(1) == 3 {
+					close(enteredPlanning)
+					select {
+					case <-releasePlanning:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+				return nil
+			})
+			projection := NewPostgresRecordNotificationRepositoryWithExternalBindings(
+				runtimePool, gate, NewPostgresCollaborationMembershipReader(),
+				base.authorization, 30*24*time.Hour, bindings,
+			)
+			claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "delivery_planning_interphase")
+			type projectionOutcome struct {
+				result recordcollaboration.NotificationProjectionResult
+				err    error
+			}
+			outcomes := make(chan projectionOutcome, 1)
+			go func() {
+				result, err := projection.ProjectNotification(ctx, claim)
+				outcomes <- projectionOutcome{result: result, err: err}
+			}()
+			select {
+			case <-enteredPlanning:
+			case <-time.After(10 * time.Second):
+				t.Fatal("second planning transaction did not reach admission latch")
+			}
+			released := false
+			defer func() {
+				if !released {
+					close(releasePlanning)
+				}
+			}()
+			takeover := test.drift(t, ctx, fixture, created, queue, claim)
+			close(releasePlanning)
+			released = true
+			outcome := <-outcomes
+			if outcome.result.RecipientCount != 2 {
+				t.Fatalf("committed inbox result = %#v, want two initial recipients", outcome.result)
+			}
+			test.assert(t, outcome.err)
+			assertPostgresNotificationCounts(t, ctx, fixture, created.RecordID, 1, 2)
+			var deliveries, deliveryOutbox int
+			if err := fixture.db.QueryRow(ctx, `
+				select (select count(*)::int from public.record_notification_deliveries where record_id = $1),
+				       (select count(*)::int from public.record_outbox where event_kind = 'record_notification_delivery')`,
+				created.RecordID,
+			).Scan(&deliveries, &deliveryOutbox); err != nil {
+				t.Fatal(err)
+			}
+			if deliveries != 0 || deliveryOutbox != 0 {
+				t.Fatalf("drifted planning deliveries/outbox = %d/%d, want zero", deliveries, deliveryOutbox)
+			}
+			if takeover != nil {
+				replay, err := projection.ProjectNotification(ctx, *takeover)
+				if err != nil || replay.RecipientCount != 2 {
+					t.Fatalf("ProjectNotification(takeover replay) = (%#v, %v)", replay, err)
+				}
+				if err := queue.MarkOutboxSent(ctx, *takeover); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestPostgresIntegrationRecordNotificationTakeoverReconcilesRecipientWithoutDeletingDeliveryAudit(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-recipient-reconcile", 5)
+	input := collaborationRevisionInput(t, collaborationRevisionInputValues{
+		ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: []string{"usr_cccccccccccccccccccccccc"},
+	})
+	created, err := newRecordsPostgresRepository(
+		t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
+	).CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordCreate, "rec_pgdeliveryreconcile", "", 0, 0, input, "delivery-recipient-reconcile-parent",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+	provider := &notificationBindingProviderStub{}
+	bindings := &notificationBindingListerStub{
+		provider: provider,
+		byUser: map[string][]recordcollaboration.ScopedTransportBindingRef{
+			"usr_bbbbbbbbbbbbbbbbbbbbbbbb": {{
+				ProjectID: recordauth.ProjectIDDefault, RecipientUserID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
+				Channel: recordcollaboration.NotificationDeliveryTelegram, BindingID: "telegram_primary",
+			}},
+		},
+	}
+	projection := NewPostgresRecordNotificationRepositoryWithExternalBindings(
+		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+		base.authorization, 30*24*time.Hour, bindings,
+	)
+	claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "delivery_reconcile_first")
+	first, err := projection.ProjectNotification(ctx, claim)
+	if err != nil || first.RecipientCount != 2 {
+		t.Fatalf("ProjectNotification(first) = (%#v, %v)", first, err)
+	}
+	var deliveryID string
+	if err := fixture.db.QueryRow(ctx, `select delivery_id from public.record_notification_deliveries where record_id = $1`, created.RecordID).Scan(&deliveryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		update public.record_followers
+		set manual_preference = 'muted', follower_version = follower_version + 1
+		where record_id = $1 and user_id = 'usr_bbbbbbbbbbbbbbbbbbbbbbbb'`, created.RecordID); err != nil {
+		t.Fatal(err)
+	}
+	expireNotificationClaim(t, ctx, fixture, claim.Event.RowID)
+	takeover := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "delivery_reconcile_takeover")
+	replay, err := projection.ProjectNotification(ctx, takeover)
+	if err != nil || replay.RecipientCount != 1 || replay.NotificationID != first.NotificationID {
+		t.Fatalf("ProjectNotification(takeover reconcile) = (%#v, %v), want one current recipient", replay, err)
+	}
+	assertPostgresNotificationCounts(t, ctx, fixture, created.RecordID, 1, 1)
+	if err := queue.MarkOutboxSent(ctx, takeover); err != nil {
+		t.Fatal(err)
+	}
+	deliveryClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordNotificationDelivery, "delivery_reconcile_worker")
+	result, err := newPostgresExternalDeliveryProcessor(t, projection).ProcessExternalDelivery(ctx, deliveryClaim)
+	if err != nil || result.Disposition != recordcollaboration.ExternalDeliveryOutboxCancel {
+		t.Fatalf("ProcessExternalDelivery(reconciled recipient) = (%#v, %v), want cancel", result, err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider calls after recipient reconcile = %d, want zero", provider.calls)
+	}
+	if err := queue.CancelOutbox(ctx, deliveryClaim); err != nil {
+		t.Fatal(err)
+	}
+	assertExternalDeliveryState(t, ctx, fixture, deliveryID, "cancelled", "cancelled", 1)
 }
 
 func TestPostgresIntegrationRecordExternalDeliveryUsesOutboxOwnerForAttemptAndTakeover(t *testing.T) {

@@ -229,13 +229,19 @@ func TestRecordCollaborationMigrationBindsChildIdentityAndFenceToItsParent(t *te
 		"unique (record_id, comment_id, comment_version, record_fence_epoch)",
 		"foreign key (record_id, comment_id, comment_version, record_fence_epoch) references public.record_comment_revisions(record_id, comment_id, comment_version, record_fence_epoch) on delete restrict",
 		"unique (record_id, notification_id, recipient_user_id, record_fence_epoch)",
-		"foreign key (record_id, notification_id, recipient_user_id, record_fence_epoch) references public.record_notification_recipients(record_id, notification_id, recipient_user_id, record_fence_epoch) on delete restrict",
 		"unique (record_id, delivery_id, notification_id, recipient_user_id, record_fence_epoch)",
 		"foreign key (record_id, delivery_id, notification_id, recipient_user_id, record_fence_epoch) references public.record_notification_deliveries(record_id, delivery_id, notification_id, recipient_user_id, record_fence_epoch) on delete restrict",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("0055 collaboration parent identity/fence binding missing %q", want)
 		}
+	}
+	deliverySQL := normalizedRecordCollaborationTableDefinition(t, sql, "record_notification_deliveries")
+	if !strings.Contains(deliverySQL, "foreign key (record_id, notification_id) references public.record_notifications(record_id, notification_id) on delete restrict") {
+		t.Fatal("0055 delivery audit must retain its immutable notification identity")
+	}
+	if strings.Contains(deliverySQL, "references public.record_notification_recipients") {
+		t.Fatal("0055 delivery audit must not depend on mutable current recipient rows")
 	}
 }
 

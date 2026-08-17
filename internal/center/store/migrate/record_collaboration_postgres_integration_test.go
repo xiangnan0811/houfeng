@@ -305,20 +305,22 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		`)
 		requirePostgresSQLState(t, err, "23503")
 	})
-	t.Run("delivery rejects same-record wrong-fence recipient", func(t *testing.T) {
+	t.Run("delivery retains captured recipient and fence after current recipient changes", func(t *testing.T) {
 		tx, err := runtimeDB.Begin(ctx)
 		if err != nil {
-			t.Fatalf("begin wrong-fence delivery transaction: %v", err)
+			t.Fatalf("begin captured delivery audit transaction: %v", err)
 		}
 		defer func() { _ = tx.Rollback(ctx) }()
 		_, err = tx.Exec(ctx, `
 			insert into public.record_notification_deliveries (
 				delivery_id, record_id, notification_id, recipient_user_id, channel,
 				binding_id, authorization_epoch, record_fence_epoch
-			) values ('rnd_wrongfence', 'rec_acl', 'rnt_0000000000000000000000000000000000000000000000000000000000000001', 'usr_recipient', 'feishu',
-				'binding_wrongfence', 0, 1)
+			) values ('rnd_capturedaudit', 'rec_acl', 'rnt_0000000000000000000000000000000000000000000000000000000000000001', 'usr_historical', 'feishu',
+				'binding_capturedaudit', 7, 9)
 		`)
-		requirePostgresSQLState(t, err, "23503")
+		if err != nil {
+			t.Fatalf("insert captured delivery audit independent of current recipient: %v", err)
+		}
 	})
 	if _, err := runtimeDB.Exec(ctx, `
 		insert into public.record_notifications (

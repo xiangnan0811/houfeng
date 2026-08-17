@@ -10,8 +10,29 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordcollaboration"
 )
+
+func TestExternalBindingConstructorFailsClosedForExplicitTypedNil(t *testing.T) {
+	var bindings *typedNilScopedTransportBindingSource
+	if repository := NewPostgresRecordNotificationRepositoryWithExternalBindings(nil, nil, nil, nil, time.Second, bindings); repository != nil {
+		t.Fatalf("NewPostgresRecordNotificationRepositoryWithExternalBindings(typed nil) = %#v, want nil", repository)
+	}
+	if repository := NewPostgresRecordNotificationRepository(nil, nil, nil, nil, time.Second); repository == nil {
+		t.Fatal("plain unconfigured constructor = nil, want valid disabled repository")
+	}
+}
+
+type typedNilScopedTransportBindingSource struct{}
+
+func (*typedNilScopedTransportBindingSource) ListScopedTransportBindings(context.Context, pgx.Tx, recordauth.ProjectID, string) ([]recordcollaboration.ScopedTransportBindingRef, error) {
+	return nil, nil
+}
+
+func (*typedNilScopedTransportBindingSource) ResolveScopedTransportBinding(context.Context, pgx.Tx, recordcollaboration.ScopedTransportBindingRef) (recordcollaboration.ScopedTransportBinding, error) {
+	return recordcollaboration.ScopedTransportBinding{}, nil
+}
 
 func TestQueryInboxCandidatePageUsesStableKeysetAndSQLLimit(t *testing.T) {
 	cursor := inboxQueryCursor{
