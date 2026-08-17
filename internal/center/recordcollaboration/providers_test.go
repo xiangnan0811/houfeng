@@ -58,7 +58,11 @@ func TestPortabilityAdapterRejectsRedactedContentAndClonesBackupRestore(t *testi
 			State: CommentStateRedacted, TombstoneID: "rct_provider01",
 			CreatedAt: redactedAt.Add(-time.Minute), UpdatedAt: redactedAt, RedactedAt: &redactedAt,
 		}},
-		CommentRevisions: []PortableCommentRevision{}, Tombstones: []PortableCommentTombstone{{
+		CommentRevisions: []PortableCommentRevision{{
+			RevisionID: "rcr_provider01", CommentID: "rcm_provider01", Version: 1,
+			EditedBy: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", TombstoneID: "rct_provider01",
+			CreatedAt: redactedAt.Add(-time.Minute), RedactedAt: &redactedAt,
+		}}, Tombstones: []PortableCommentTombstone{{
 			TombstoneID: "rct_provider01", CommentID: "rcm_provider01", Version: 2,
 			DeletedBy: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", ReasonCode: PortableTombstoneAuthorDeleted, DeletedAt: redactedAt,
 		}},
@@ -200,6 +204,98 @@ func TestPortabilitySnapshotRejectsNotificationAuditBigintAndSubtotalOverflow(t 
 	}
 }
 
+func TestPortabilitySnapshotRejectsSparseOrDriftedAggregateHistory(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]func(*PortabilitySnapshot){
+		"sparse action versions": func(snapshot *PortabilitySnapshot) { snapshot.Actions[0].Version = 5 },
+		"action status chain drift": func(snapshot *PortabilitySnapshot) {
+			cancelled := ActionStatusCancelled
+			snapshot.ActionEvents[1].Kind = ActionMutationReopen
+			snapshot.ActionEvents[1].PreviousStatus = &cancelled
+			snapshot.ActionEvents[1].CurrentStatus = ActionStatusOpen
+			snapshot.Actions[0].Status = ActionStatusOpen
+			snapshot.Actions[0].CompletedAt = nil
+		},
+		"action final status drift": func(snapshot *PortabilitySnapshot) {
+			snapshot.Actions[0].Status = ActionStatusCancelled
+			snapshot.Actions[0].CompletedAt = nil
+		},
+		"action final actor drift": func(snapshot *PortabilitySnapshot) {
+			snapshot.Actions[0].UpdatedBy = "usr_cccccccccccccccccccccccc"
+		},
+		"sparse comment versions": func(snapshot *PortabilitySnapshot) { snapshot.Comments[0].Version = 5 },
+		"comment latest content drift": func(snapshot *PortabilitySnapshot) {
+			snapshot.CommentRevisions[1].BodyMarkdown = snapshot.CommentRevisions[0].BodyMarkdown
+			snapshot.CommentRevisions[1].RenderModel = snapshot.CommentRevisions[0].RenderModel.Clone()
+			snapshot.CommentRevisions[1].BodyDigest = snapshot.CommentRevisions[0].BodyDigest
+		},
+		"orphan action event":     func(snapshot *PortabilitySnapshot) { snapshot.ActionEvents[1].ActionID = "ract_missing" },
+		"orphan comment revision": func(snapshot *PortabilitySnapshot) { snapshot.CommentRevisions[1].CommentID = "rcm_missing" },
+		"orphan reply parent": func(snapshot *PortabilitySnapshot) {
+			snapshot.Replies = append(snapshot.Replies, PortableCommentReply{
+				ChildCommentID: snapshot.Comments[0].CommentID, ParentCommentID: "rcm_missing", CreatedAt: snapshot.Comments[0].CreatedAt,
+			})
+		},
+		"mention missing revision": func(snapshot *PortabilitySnapshot) {
+			snapshot.Mentions = append(snapshot.Mentions, PortableCommentMention{
+				CommentID: snapshot.Comments[0].CommentID, CommentVersion: 3,
+				MentionedUser: "usr_cccccccccccccccccccccccc", CreatedAt: snapshot.Comments[0].UpdatedAt,
+			})
+		},
+	}
+	for name, mutate := range cases {
+		name, mutate := name, mutate
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			snapshot := validPortableAggregateSnapshot(t)
+			mutate(&snapshot)
+			if err := snapshot.Validate(); !errors.Is(err, ErrInvalidPortabilitySnapshot) {
+				t.Fatalf("Validate() error = %v, want ErrInvalidPortabilitySnapshot", err)
+			}
+		})
+	}
+}
+
+func TestPortabilitySnapshotRejectsNestedAndCyclicReplies(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name  string
+		cycle bool
+	}{
+		{name: "nested reply"},
+		{name: "equal-time cycle", cycle: true},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			snapshot := validPortableAggregateSnapshot(t)
+			createdAt := snapshot.Comments[0].CreatedAt.Add(2 * time.Minute)
+			appendPortableTestComment(t, &snapshot, "rcm_nestedb", "rcr_nestedb", createdAt)
+			secondCreatedAt := createdAt.Add(time.Minute)
+			if test.cycle {
+				secondCreatedAt = createdAt
+			}
+			appendPortableTestComment(t, &snapshot, "rcm_nestedc", "rcr_nestedc", secondCreatedAt)
+			if test.cycle {
+				snapshot.Replies = []PortableCommentReply{
+					{ChildCommentID: "rcm_nestedb", ParentCommentID: "rcm_nestedc", CreatedAt: createdAt},
+					{ChildCommentID: "rcm_nestedc", ParentCommentID: "rcm_nestedb", CreatedAt: secondCreatedAt},
+				}
+			} else {
+				snapshot.Replies = []PortableCommentReply{
+					{ChildCommentID: "rcm_nestedb", ParentCommentID: "rcm_aggregate", CreatedAt: createdAt},
+					{ChildCommentID: "rcm_nestedc", ParentCommentID: "rcm_nestedb", CreatedAt: secondCreatedAt},
+				}
+			}
+			if err := snapshot.Validate(); !errors.Is(err, ErrInvalidPortabilitySnapshot) {
+				t.Fatalf("Validate() error = %v, want ErrInvalidPortabilitySnapshot", err)
+			}
+		})
+	}
+}
+
 func TestPortableNotificationAuditHasContentFreeClosedSchema(t *testing.T) {
 	t.Parallel()
 
@@ -212,6 +308,67 @@ func TestPortableNotificationAuditHasContentFreeClosedSchema(t *testing.T) {
 			}
 		}
 	}
+}
+
+func validPortableAggregateSnapshot(t *testing.T) PortabilitySnapshot {
+	t.Helper()
+	t0 := time.Date(2026, time.August, 17, 18, 45, 0, 0, time.UTC)
+	t1 := t0.Add(time.Minute)
+	completed := ActionStatusCompleted
+	firstContent, err := NewCommentContent("First comment body.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondContent, err := NewCommentContent("Second **comment** body.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return PortabilitySnapshot{
+		Actions: []PortableAction{{
+			ActionID: "ract_aggregate", Version: 2, Title: "Aggregate action", Status: ActionStatusCompleted,
+			CompletedAt: &t1, CreatedBy: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", UpdatedBy: "usr_bbbbbbbbbbbbbbbbbbbbbbbb",
+			CreatedAt: t0, UpdatedAt: t1,
+		}},
+		ActionEvents: []PortableActionEvent{
+			{EventID: "raev_aggregate01", ActionID: "ract_aggregate", Version: 1, Kind: ActionMutationCreate,
+				CurrentStatus: ActionStatusOpen, ActorID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", OccurredAt: t0, CreatedAt: t0},
+			{EventID: "raev_aggregate02", ActionID: "ract_aggregate", Version: 2, Kind: ActionMutationComplete,
+				PreviousStatus: func() *ActionStatus { value := ActionStatusOpen; return &value }(), CurrentStatus: completed,
+				ActorID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", OccurredAt: t1, CreatedAt: t1},
+		},
+		Comments: []PortableComment{{
+			CommentID: "rcm_aggregate", AuthorID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", Version: 2,
+			State: CommentStateActive, BodyMarkdown: secondContent.Source(), RenderModel: secondContent.Model(),
+			BodyDigest: secondContent.Digest(), CreatedAt: t0, UpdatedAt: t1,
+		}},
+		CommentRevisions: []PortableCommentRevision{
+			{RevisionID: "rcr_aggregate01", CommentID: "rcm_aggregate", Version: 1,
+				EditedBy: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", BodyMarkdown: firstContent.Source(),
+				RenderModel: firstContent.Model(), BodyDigest: firstContent.Digest(), CreatedAt: t0},
+			{RevisionID: "rcr_aggregate02", CommentID: "rcm_aggregate", Version: 2,
+				EditedBy: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", BodyMarkdown: secondContent.Source(),
+				RenderModel: secondContent.Model(), BodyDigest: secondContent.Digest(), CreatedAt: t1},
+		},
+		Tombstones: []PortableCommentTombstone{}, Replies: []PortableCommentReply{},
+		Mentions: []PortableCommentMention{}, Followers: []PortableFollower{}, NotificationAudits: []PortableNotificationAudit{},
+	}
+}
+
+func appendPortableTestComment(t *testing.T, snapshot *PortabilitySnapshot, commentID, revisionID string, createdAt time.Time) {
+	t.Helper()
+	content, err := NewCommentContent("Comment for " + commentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Comments = append(snapshot.Comments, PortableComment{
+		CommentID: commentID, AuthorID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", Version: 1,
+		State: CommentStateActive, BodyMarkdown: content.Source(), RenderModel: content.Model(), BodyDigest: content.Digest(),
+		CreatedAt: createdAt, UpdatedAt: createdAt,
+	})
+	snapshot.CommentRevisions = append(snapshot.CommentRevisions, PortableCommentRevision{
+		RevisionID: revisionID, CommentID: commentID, Version: 1, EditedBy: "usr_aaaaaaaaaaaaaaaaaaaaaaaa",
+		BodyMarkdown: content.Source(), RenderModel: content.Model(), BodyDigest: content.Digest(), CreatedAt: createdAt,
+	})
 }
 
 type providerStoreStub struct {

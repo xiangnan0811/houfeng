@@ -323,6 +323,9 @@ func (snapshot PortabilitySnapshot) Validate() error {
 			return ErrInvalidPortabilitySnapshot
 		}
 	}
+	if validatePortableAggregateRelationships(snapshot, tombstones) != nil {
+		return ErrInvalidPortabilitySnapshot
+	}
 	for index, follower := range snapshot.Followers {
 		if validatePortableFollower(follower) != nil ||
 			(index > 0 && snapshot.Followers[index-1].UserID >= follower.UserID) {
@@ -592,6 +595,160 @@ func validatePortableNotificationAudit(audit PortableNotificationAudit) error {
 		return ErrInvalidPortabilitySnapshot
 	}
 	return nil
+}
+
+func validatePortableAggregateRelationships(
+	snapshot PortabilitySnapshot,
+	tombstones map[string]PortableCommentTombstone,
+) error {
+	actions := make(map[string]PortableAction, len(snapshot.Actions))
+	for _, action := range snapshot.Actions {
+		actions[action.ActionID] = action
+	}
+	events := make(map[string]map[uint64]PortableActionEvent, len(actions))
+	for _, event := range snapshot.ActionEvents {
+		if _, exists := actions[event.ActionID]; !exists {
+			return ErrInvalidPortabilitySnapshot
+		}
+		versions := events[event.ActionID]
+		if versions == nil {
+			versions = make(map[uint64]PortableActionEvent)
+			events[event.ActionID] = versions
+		}
+		if _, duplicate := versions[event.Version]; duplicate {
+			return ErrInvalidPortabilitySnapshot
+		}
+		versions[event.Version] = event
+	}
+	for _, action := range snapshot.Actions {
+		versions := events[action.ActionID]
+		if uint64(len(versions)) != action.Version {
+			return ErrInvalidPortabilitySnapshot
+		}
+		var previous PortableActionEvent
+		var completedAt *time.Time
+		for version := uint64(1); version <= uint64(len(versions)); version++ {
+			event, exists := versions[version]
+			if !exists || !event.CreatedAt.Equal(event.OccurredAt) {
+				return ErrInvalidPortabilitySnapshot
+			}
+			if version == 1 {
+				if event.ActorID != action.CreatedBy || !event.OccurredAt.Equal(action.CreatedAt) {
+					return ErrInvalidPortabilitySnapshot
+				}
+			} else if event.PreviousStatus == nil || *event.PreviousStatus != previous.CurrentStatus ||
+				event.OccurredAt.Before(previous.OccurredAt) {
+				return ErrInvalidPortabilitySnapshot
+			}
+			switch event.Kind {
+			case ActionMutationComplete:
+				value := event.OccurredAt
+				completedAt = &value
+			case ActionMutationCancel, ActionMutationReopen:
+				completedAt = nil
+			}
+			previous = event
+		}
+		if previous.CurrentStatus != action.Status || previous.AssigneeID != action.AssigneeID ||
+			previous.ActorID != action.UpdatedBy || !previous.OccurredAt.Equal(action.UpdatedAt) ||
+			!portableOptionalTimesEqual(completedAt, action.CompletedAt) {
+			return ErrInvalidPortabilitySnapshot
+		}
+	}
+
+	comments := make(map[string]PortableComment, len(snapshot.Comments))
+	for _, comment := range snapshot.Comments {
+		comments[comment.CommentID] = comment
+	}
+	revisions := make(map[string]map[uint64]PortableCommentRevision, len(comments))
+	for _, revision := range snapshot.CommentRevisions {
+		if _, exists := comments[revision.CommentID]; !exists {
+			return ErrInvalidPortabilitySnapshot
+		}
+		versions := revisions[revision.CommentID]
+		if versions == nil {
+			versions = make(map[uint64]PortableCommentRevision)
+			revisions[revision.CommentID] = versions
+		}
+		if _, duplicate := versions[revision.Version]; duplicate {
+			return ErrInvalidPortabilitySnapshot
+		}
+		versions[revision.Version] = revision
+	}
+	for _, tombstone := range snapshot.Tombstones {
+		comment, exists := comments[tombstone.CommentID]
+		if !exists || comment.State != CommentStateRedacted || comment.TombstoneID != tombstone.TombstoneID ||
+			comment.Version != tombstone.Version || comment.RedactedAt == nil ||
+			!comment.RedactedAt.Equal(tombstone.DeletedAt) || !comment.UpdatedAt.Equal(tombstone.DeletedAt) {
+			return ErrInvalidPortabilitySnapshot
+		}
+	}
+	for _, comment := range snapshot.Comments {
+		expectedRevisionCount := comment.Version
+		if comment.State == CommentStateRedacted {
+			expectedRevisionCount--
+		}
+		versions := revisions[comment.CommentID]
+		if uint64(len(versions)) != expectedRevisionCount {
+			return ErrInvalidPortabilitySnapshot
+		}
+		var previous PortableCommentRevision
+		for version := uint64(1); version <= uint64(len(versions)); version++ {
+			revision, exists := versions[version]
+			if !exists || (version > 1 && revision.CreatedAt.Before(previous.CreatedAt)) {
+				return ErrInvalidPortabilitySnapshot
+			}
+			if version == 1 && (revision.EditedBy != comment.AuthorID || !revision.CreatedAt.Equal(comment.CreatedAt)) {
+				return ErrInvalidPortabilitySnapshot
+			}
+			if comment.State == CommentStateActive && revision.RedactedAt != nil {
+				return ErrInvalidPortabilitySnapshot
+			}
+			if comment.State == CommentStateRedacted {
+				tombstone, exists := tombstones[comment.TombstoneID]
+				if !exists || revision.RedactedAt == nil || !revision.RedactedAt.Equal(tombstone.DeletedAt) ||
+					revision.TombstoneID != tombstone.TombstoneID || revision.CreatedAt.After(tombstone.DeletedAt) {
+					return ErrInvalidPortabilitySnapshot
+				}
+			}
+			previous = revision
+		}
+		if comment.State == CommentStateActive {
+			latest := versions[comment.Version]
+			if latest.RedactedAt != nil || latest.BodyMarkdown != comment.BodyMarkdown ||
+				!latest.RenderModel.Equal(comment.RenderModel) || latest.BodyDigest != comment.BodyDigest ||
+				!latest.CreatedAt.Equal(comment.UpdatedAt) {
+				return ErrInvalidPortabilitySnapshot
+			}
+		}
+	}
+	replyChildren := make(map[string]struct{}, len(snapshot.Replies))
+	for _, reply := range snapshot.Replies {
+		replyChildren[reply.ChildCommentID] = struct{}{}
+	}
+	for _, reply := range snapshot.Replies {
+		child, childExists := comments[reply.ChildCommentID]
+		parent, parentExists := comments[reply.ParentCommentID]
+		_, parentIsReply := replyChildren[reply.ParentCommentID]
+		if !childExists || !parentExists || parentIsReply || !reply.CreatedAt.Equal(child.CreatedAt) || child.CreatedAt.Before(parent.CreatedAt) {
+			return ErrInvalidPortabilitySnapshot
+		}
+	}
+	for _, mention := range snapshot.Mentions {
+		commentVersions, exists := revisions[mention.CommentID]
+		revision, revisionExists := commentVersions[mention.CommentVersion]
+		if !exists || !revisionExists || !mention.CreatedAt.Equal(revision.CreatedAt) {
+			return ErrInvalidPortabilitySnapshot
+		}
+	}
+	return nil
+}
+
+func portableOptionalTimesEqual(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
 }
 
 func validActivityFactSource(fact ActivityFact) bool {

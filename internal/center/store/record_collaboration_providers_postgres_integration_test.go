@@ -33,6 +33,13 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 	if _, err := actionRepository.CommitAction(ctx, action); err != nil {
 		t.Fatalf("CommitAction() error = %v", err)
 	}
+	completeAction := postgresActionCommand(
+		t, parent, recordcollaboration.ActionMutationComplete, action.ActionID, 1,
+		recordcollaboration.ActionFields{}, "provider-action-complete",
+	)
+	if _, err := actionRepository.CommitAction(ctx, completeAction); err != nil {
+		t.Fatalf("CommitAction(complete) error = %v", err)
+	}
 	commentRepository := NewPostgresRecordCommentRepository(
 		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
 	)
@@ -103,7 +110,9 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 	if err != nil {
 		t.Fatalf("Backup() error = %v", err)
 	}
-	if len(snapshot.Actions) != 1 || snapshot.Actions[0].Details != "private portable action details" ||
+	if len(snapshot.Actions) != 1 || snapshot.Actions[0].Version != 2 ||
+		snapshot.Actions[0].Status != recordcollaboration.ActionStatusCompleted ||
+		snapshot.Actions[0].Details != "private portable action details" || len(snapshot.ActionEvents) != 2 ||
 		len(snapshot.Comments) != 1 || snapshot.Comments[0].State != recordcollaboration.CommentStateRedacted ||
 		snapshot.Comments[0].BodyMarkdown != "" || snapshot.Comments[0].BodyDigest != ([32]byte{}) ||
 		len(snapshot.CommentRevisions) != 1 || snapshot.CommentRevisions[0].BodyMarkdown != "" ||
@@ -132,6 +141,39 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 		if _, err := fixture.db.Exec(ctx, statement, parent.RecordID); err != nil {
 			t.Fatalf("clear restorable collaboration state: %v", err)
 		}
+	}
+	for name, mutate := range map[string]func(*recordcollaboration.PortabilitySnapshot){
+		"sparse action history":  func(candidate *recordcollaboration.PortabilitySnapshot) { candidate.Actions[0].Version += 4 },
+		"sparse comment history": func(candidate *recordcollaboration.PortabilitySnapshot) { candidate.Comments[0].Version += 4 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalidTx, err := runtimePool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate := snapshot.Clone()
+			mutate(&candidate)
+			if err := portability.Restore(ctx, invalidTx, binding, candidate); !errors.Is(err, recordcollaboration.ErrInvalidPortabilitySnapshot) {
+				t.Fatalf("Restore(malformed aggregate) error = %v, want ErrInvalidPortabilitySnapshot", err)
+			}
+			var actionCount, eventCount, commentCount, revisionCount int
+			if err := invalidTx.QueryRow(ctx, `
+				select
+				  (select count(*)::int from public.record_actions where record_id = $1),
+				  (select count(*)::int from public.record_action_events where record_id = $1),
+				  (select count(*)::int from public.record_comments where record_id = $1),
+				  (select count(*)::int from public.record_comment_revisions where record_id = $1)`,
+				parent.RecordID,
+			).Scan(&actionCount, &eventCount, &commentCount, &revisionCount); err != nil {
+				t.Fatal(err)
+			}
+			if actionCount != 0 || eventCount != 0 || commentCount != 0 || revisionCount != 0 {
+				t.Fatalf("malformed restore left action/event/comment/revision rows = %d/%d/%d/%d", actionCount, eventCount, commentCount, revisionCount)
+			}
+			if err := invalidTx.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 	tx, err = runtimePool.Begin(ctx)
 	if err != nil {
