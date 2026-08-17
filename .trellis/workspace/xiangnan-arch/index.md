@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 246
-- **Last Active**: 2026-08-10
+- **Total Sessions**: 247
+- **Last Active**: 2026-08-18
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~504 | Active |
+| `journal-5.md` | ~526 | Active |
 | `journal-4.md` | ~1998 | Archived |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 247 | 2026-08-18 | Deliver VPS Records collaboration platform | `a3137864`, `ee208be1` | `codex/vps-records-collaboration-archive` |
 | 246 | 2026-08-10 | Upgrade Trellis to 0.6.14 native auto | `14f45348` | `codex/trellis-0.6.14-upgrade` |
 | 245 | 2026-08-09 | Complete VPS Records attachment storage delivery | `2b1ecfa3`, `b510b319`, `1887821c` | `codex/vps-records-attachments-storage` |
 | 244 | 2026-08-04 | Close VPS Records Child 2 | `c032a1d5715865f4999954375b5c0a9bc196424b`, `1ade5e8678de548274c013e10979f16d8b73684c`, `4b0a6b41121a5e391d1bd78a9d7aefac12304229`, `0a9994775d0618a3f728854ae30446b136d4ec46`, `11d7cfabf695f6eaacc8c5b5d362c59975bdb36e`, `ba5f2d8d21cc09d1a47318b6ecbe1239aa60a331` | `codex/vps-records-core-closeout` |
