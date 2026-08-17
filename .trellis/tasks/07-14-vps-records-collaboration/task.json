@@ -3,7 +3,7 @@
   "name": "vps-records-collaboration",
   "title": "负责人、行动项、评论、关注与通知",
   "description": "实现轻量运维协作层，包括负责人/参与者、跟进、行动项、评论、关注、站内通知与安全外投。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
