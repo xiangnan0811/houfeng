@@ -80,10 +80,11 @@ func (event OutboxEvent) Validate() error {
 	if err := ValidateProjectID(ProjectID(event.ProjectID)); err != nil {
 		return fmt.Errorf("%w: project", ErrInvalidOutboxEvent)
 	}
-	if !validOutboxEventKind(event.EventKind) {
+	expectedSubjectKind, ok := outboxSubjectKindForEventKind(event.EventKind)
+	if !ok {
 		return fmt.Errorf("%w: event kind", ErrInvalidOutboxEvent)
 	}
-	if event.SubjectKind != OutboxSubjectKindRecord && event.SubjectKind != OutboxSubjectKindAction {
+	if event.SubjectKind != expectedSubjectKind {
 		return fmt.Errorf("%w: subject kind", ErrInvalidOutboxEvent)
 	}
 	if !validOutboxSubjectID(event.SubjectID) {
@@ -134,21 +135,22 @@ func (claim ClaimedOutboxEventV1) Validate() error {
 	return nil
 }
 
-func validOutboxEventKind(kind string) bool {
+func outboxSubjectKindForEventKind(kind string) (string, bool) {
 	switch kind {
 	case OutboxEventKindRecordCreated,
 		OutboxEventKindRecordUpdated,
 		OutboxEventKindRecordDeleted,
 		OutboxEventKindRecordOwnerChanged,
-		OutboxEventKindRecordParticipantChanged,
-		OutboxEventKindRecordActionCreated,
+		OutboxEventKindRecordParticipantChanged:
+		return OutboxSubjectKindRecord, true
+	case OutboxEventKindRecordActionCreated,
 		OutboxEventKindRecordActionUpdated,
 		OutboxEventKindRecordActionCompleted,
 		OutboxEventKindRecordActionCancelled,
 		OutboxEventKindRecordActionReopened:
-		return true
+		return OutboxSubjectKindAction, true
 	default:
-		return false
+		return "", false
 	}
 }
 

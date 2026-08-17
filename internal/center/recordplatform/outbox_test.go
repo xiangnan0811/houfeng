@@ -36,6 +36,8 @@ func TestOutboxEventV1AcceptsOnlyClosedIdentityFields(t *testing.T) {
 		{ProjectID: "other", EventKind: OutboxEventKindRecordCreated, SubjectKind: OutboxSubjectKindRecord, SubjectID: "rec_01"},
 		{ProjectID: string(ProjectIDDefault), EventKind: "record_rendered", SubjectKind: OutboxSubjectKindRecord, SubjectID: "rec_01"},
 		{ProjectID: string(ProjectIDDefault), EventKind: OutboxEventKindRecordCreated, SubjectKind: "record_body", SubjectID: "rec_01"},
+		{ProjectID: string(ProjectIDDefault), EventKind: OutboxEventKindRecordActionCreated, SubjectKind: OutboxSubjectKindRecord, SubjectID: "ract_01"},
+		{ProjectID: string(ProjectIDDefault), EventKind: OutboxEventKindRecordCreated, SubjectKind: OutboxSubjectKindAction, SubjectID: "rec_01"},
 		{ProjectID: string(ProjectIDDefault), EventKind: OutboxEventKindRecordCreated, SubjectKind: OutboxSubjectKindRecord, SubjectID: "REC_01"},
 		{ProjectID: string(ProjectIDDefault), EventKind: OutboxEventKindRecordCreated, SubjectKind: OutboxSubjectKindRecord, SubjectID: ""},
 	} {
