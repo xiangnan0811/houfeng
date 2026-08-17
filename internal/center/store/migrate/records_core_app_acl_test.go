@@ -72,14 +72,14 @@ func TestRecordsCoreAppACLFragmentExtendsCatalogWithPrimaryValidationFunctionAnd
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(contract.ManagedObjects), len(base.Objects)+len(recordsCoreExpectedAppACLObjects())+len(recordAttachmentsExpectedAppACLObjects())+len(recordEvidenceExpectedAppACLObjects()); got != want {
+	if got, want := len(contract.ManagedObjects), len(base.Objects)+len(recordsCoreExpectedAppACLObjects())+len(recordAttachmentsExpectedAppACLObjects())+len(recordEvidenceExpectedAppACLObjects())+len(recordCollaborationExpectedAppACLObjects()); got != want {
 		t.Fatalf("production current managed objects = %d, want %d", got, want)
 	}
-	if got, want := len(contract.Privileges), len(appACLPrivilegesR1("houfeng"))+len(recordsCoreExpectedAppACLPrivileges())+len(recordAttachmentsExpectedAppACLPrivileges())+len(recordEvidenceExpectedAppACLPrivileges()); got != want {
+	if got, want := len(contract.Privileges), len(appACLPrivilegesR1("houfeng"))+len(recordsCoreExpectedAppACLPrivileges())+len(recordAttachmentsExpectedAppACLPrivileges())+len(recordEvidenceExpectedAppACLPrivileges())+len(recordCollaborationExpectedAppACLPrivileges()); got != want {
 		t.Fatalf("production current privileges = %d, want %d", got, want)
 	}
-	if got := len(contract.ExpectedFunctions); got != 3 {
-		t.Fatalf("production current expected functions = %d, want frozen two projectors plus records-core validator", got)
+	if got := len(contract.ExpectedFunctions); got != 5 {
+		t.Fatalf("production current expected functions = %d, want frozen projectors, records-core validator, and collaboration mutation guards", got)
 	}
 	for _, object := range contract.ManagedObjects {
 		if object.ObjectClass == AppACLObjectClassSequence && object.SchemaName == "public" &&

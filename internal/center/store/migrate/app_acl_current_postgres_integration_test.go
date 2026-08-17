@@ -117,6 +117,7 @@ func assertRecordsCoreAppACLCurrentRolePrivileges(
 		t.Fatalf("runtime commit records-core revision transaction: %v", err)
 	}
 	assertRecordAttachmentsAppACLCurrentRolePrivileges(t, ctx, fixture, runtimeDB)
+	assertRecordCollaborationAppACLCurrentRolePrivileges(t, ctx, fixture, runtimeDB)
 
 	_, err = runtimeDB.Exec(ctx, `update public.record_revisions set title = 'mutated' where revision_id = 'rrv_acl'`)
 	var pgErr *pgconn.PgError
