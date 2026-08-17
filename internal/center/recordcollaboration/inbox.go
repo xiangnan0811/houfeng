@@ -12,6 +12,7 @@ import (
 var (
 	ErrInvalidInboxRequest = errors.New("invalid record inbox request")
 	ErrInboxNotFound       = errors.New("record inbox item not found")
+	ErrInboxUnavailable    = errors.New("record inbox unavailable")
 )
 
 type InboxItem struct {

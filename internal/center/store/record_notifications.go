@@ -749,7 +749,13 @@ func (repository *PostgresRecordNotificationRepository) authorizeInboxCandidate(
 		RecordFenceEpoch: candidate.recordFenceEpoch,
 	}
 	facts, direct, err := loadNotificationSourceFacts(ctx, tx, event, candidate.item.EventKind)
-	if err != nil || facts.RecordID != candidate.item.RecordID || facts.SubjectKind != candidate.item.SubjectKind ||
+	if err != nil {
+		if errors.Is(err, recordcollaboration.ErrNotificationSourceMissing) || errors.Is(err, recordcollaboration.ErrInvalidNotificationFacts) {
+			return inboxCandidate{}, recordcollaboration.ErrInboxNotFound
+		}
+		return inboxCandidate{}, fmt.Errorf("%w: load notification source facts: %w", recordcollaboration.ErrInboxUnavailable, err)
+	}
+	if facts.RecordID != candidate.item.RecordID || facts.SubjectKind != candidate.item.SubjectKind ||
 		facts.SubjectID != candidate.item.SubjectID || facts.SourceVersion != candidate.item.SourceVersion ||
 		facts.AuthorizationEpoch != candidate.authorizationEpoch || facts.RecordFenceEpoch != candidate.recordFenceEpoch {
 		return inboxCandidate{}, recordcollaboration.ErrInboxNotFound

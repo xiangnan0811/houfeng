@@ -845,6 +845,79 @@ func TestPostgresIntegrationRecordInboxScanBudgetCachesAndStableMultiRecordOrder
 	}
 }
 
+func TestPostgresIntegrationRecordInboxSourceDependencyFailureIsUnavailableForEveryOperation(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-inbox-source-dependency", 3)
+	input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
+	parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordCreate, "rec_pginboxdependency", "", 0, 0, input, "inbox-dependency-parent",
+	))
+	if err != nil {
+		t.Fatalf("CommitRevision(parent) error = %v", err)
+	}
+	actionRepository := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pginboxdependency", 0,
+		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Dependency failure", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}),
+		"inbox-dependency-action")
+	if _, err := actionRepository.CommitAction(ctx, create); err != nil {
+		t.Fatalf("CommitAction() error = %v", err)
+	}
+	projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+	claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionAssigned, "inbox_dependency_worker")
+	projected, err := projection.ProjectNotification(ctx, claim)
+	if err != nil || projected.RecipientCount == 0 {
+		t.Fatalf("ProjectNotification() = (%#v, %v), want recipients", projected, err)
+	}
+	if err := queue.MarkOutboxSent(ctx, claim); err != nil {
+		t.Fatalf("MarkOutboxSent() error = %v", err)
+	}
+	actor := collaborationActor(t, "usr_bbbbbbbbbbbbbbbbbbbbbbbb", nil)
+	itemRequest := recordcollaboration.InboxItemRequest{Actor: actor, NotificationID: projected.NotificationID}
+	if _, err := projection.GetInboxItem(ctx, itemRequest); err != nil {
+		t.Fatalf("otherwise-authorized inbox item unavailable before dependency failure: %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `alter table public.record_action_events rename to test_record_action_events_unavailable`); err != nil {
+		t.Fatalf("install source dependency failure: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := fixture.db.Exec(context.Background(), `alter table public.test_record_action_events_unavailable rename to record_action_events`); err != nil {
+			t.Errorf("restore source dependency table: %v", err)
+		}
+	})
+
+	operations := []struct {
+		name string
+		call func() error
+	}{
+		{name: "item", call: func() error { _, err := projection.GetInboxItem(ctx, itemRequest); return err }},
+		{name: "list", call: func() error {
+			_, err := projection.ListInbox(ctx, recordcollaboration.InboxListRequest{Actor: actor, Limit: 10})
+			return err
+		}},
+		{name: "count", call: func() error {
+			_, err := projection.CountUnreadInbox(ctx, recordcollaboration.InboxListRequest{Actor: actor, Limit: 10})
+			return err
+		}},
+		{name: "target", call: func() error { _, err := projection.GetInboxDeepLink(ctx, itemRequest); return err }},
+		{name: "transition", call: func() error {
+			_, err := projection.TransitionInbox(ctx, recordcollaboration.InboxTransitionRequest{
+				Actor: actor, NotificationID: projected.NotificationID, Kind: recordcollaboration.InboxTransitionRead,
+			})
+			return err
+		}},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			err := operation.call()
+			if !errors.Is(err, recordcollaboration.ErrInboxUnavailable) || errors.Is(err, recordcollaboration.ErrInboxNotFound) {
+				t.Fatalf("source dependency error = %v, want ErrInboxUnavailable only", err)
+			}
+		})
+	}
+}
+
 func TestPostgresIntegrationRecordNotificationActionMappingMandatoryMuteAndReasonPrecedence(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)

@@ -86,6 +86,34 @@ func TestRecordInboxHandlerUsesOpaqueNotFoundForItemAndTarget(t *testing.T) {
 	}
 }
 
+func TestRecordInboxHandlerMapsSourceDependencyUnavailableWithoutLeaking(t *testing.T) {
+	actor := testRecordActionActor(t)
+	for _, test := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/api/record-notifications"},
+		{method: http.MethodGet, path: "/api/record-notifications/unread-count"},
+		{method: http.MethodGet, path: "/api/record-notifications/" + testInboxNotificationID},
+		{method: http.MethodGet, path: "/api/record-notifications/" + testInboxNotificationID + "/target"},
+		{method: http.MethodPut, path: "/api/record-notifications/" + testInboxNotificationID + "/read"},
+	} {
+		application := &recordInboxHandlerStub{err: errors.Join(
+			recordcollaboration.ErrInboxUnavailable,
+			errors.New("source database details secret"),
+		)}
+		request := httptest.NewRequest(test.method, test.path, nil)
+		request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+		recorder := httptest.NewRecorder()
+		RecordInbox(application).ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusServiceUnavailable || recorder.Header().Get("Cache-Control") != recordPrivateCacheControl ||
+			!strings.Contains(recorder.Body.String(), `"code":"record_service_unavailable"`) ||
+			strings.Contains(recorder.Body.String(), "source database details secret") {
+			t.Fatalf("source dependency response %s %s = %d %#v %s", test.method, test.path, recorder.Code, recorder.Header(), recorder.Body.String())
+		}
+	}
+}
+
 func TestRecordInboxHandlerRejectsEveryNonEmptyTransitionBodyWithoutCallingApplication(t *testing.T) {
 	actor := testRecordActionActor(t)
 	for _, test := range []struct {

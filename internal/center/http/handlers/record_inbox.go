@@ -228,7 +228,8 @@ func writeRecordInboxError(w http.ResponseWriter, err error) {
 	case errors.Is(err, recordcollaboration.ErrInvalidInboxRequest):
 		writeRecordError(w, http.StatusUnprocessableEntity, "inbox_invalid", "inbox request is invalid", nil)
 	case errors.Is(err, store.ErrRecordPlatformAdmissionUnavailable), errors.Is(err, store.ErrRecordSubjectUnavailable),
-		errors.Is(err, recordcollaboration.ErrMembershipUnavailable), errors.Is(err, recordplatform.ErrDeletionReservationUnavailable):
+		errors.Is(err, recordcollaboration.ErrMembershipUnavailable), errors.Is(err, recordcollaboration.ErrInboxUnavailable),
+		errors.Is(err, recordplatform.ErrDeletionReservationUnavailable):
 		writeRecordError(w, http.StatusServiceUnavailable, "record_service_unavailable", "record service unavailable", nil)
 	default:
 		writeRecordInternalError(w)
