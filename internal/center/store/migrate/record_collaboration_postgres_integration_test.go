@@ -173,15 +173,15 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		`)
 		requirePostgresSQLState(t, err, "55000")
 	})
-	t.Run("runtime cannot delete and reinsert redacted history", func(t *testing.T) {
+	t.Run("adapter delete privilege cannot reinsert redacted history", func(t *testing.T) {
 		tx, err := runtimeDB.Begin(ctx)
 		if err != nil {
 			t.Fatalf("begin delete-reinsert bypass transaction: %v", err)
 		}
 		defer func() { _ = tx.Rollback(ctx) }()
-		if _, err = tx.Exec(ctx, `delete from public.record_comment_revisions where comment_revision_id = 'rcr_acl'`); err != nil {
-			requirePostgresSQLState(t, err, "42501")
-			return
+		deleted, err := tx.Exec(ctx, `delete from public.record_comment_revisions where comment_revision_id = 'rcr_acl'`)
+		if err != nil || deleted.RowsAffected() != 1 {
+			t.Fatalf("delete redacted revision for adapter transaction = %d/%v, want 1/nil", deleted.RowsAffected(), err)
 		}
 		_, err = tx.Exec(ctx, `
 			insert into public.record_comment_revisions (
@@ -192,10 +192,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 				'comment_markdown/v1', '{"type":"paragraph"}'::jsonb,
 				decode(repeat('54', 32), 'hex'), 0)
 		`)
-		if err == nil {
-			t.Fatal("runtime DELETE plus INSERT restored redacted revision content")
-		}
-		t.Fatalf("runtime DELETE was allowed before replacement failed: %v", err)
+		requirePostgresSQLState(t, err, "55000")
 	})
 	_, err = runtimeDB.Exec(ctx, `
 		update public.record_comments
