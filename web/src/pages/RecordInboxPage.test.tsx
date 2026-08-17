@@ -136,6 +136,49 @@ describe('RecordInboxPage', () => {
     expect(screen.queryByText('目标：评论 rcm_001')).not.toBeInTheDocument()
   })
 
+	it('does not expose a pending target after a same-item dismiss supersedes it', async () => {
+		const pendingTarget = deferred<{ record_id: string; subject_kind: 'comment'; subject_id: string }>()
+		const pendingDismiss = deferred<RecordNotification>()
+		api.list.mockResolvedValue({ items: [unreadNotification] })
+		api.target.mockReturnValue(pendingTarget.promise)
+		api.dismiss.mockReturnValue(pendingDismiss.promise)
+		renderPage()
+		await screen.findByText('评论提及')
+
+		const viewButton = screen.getByRole('button', { name: '查看“评论提及”的对象' })
+		const dismissButton = screen.getByRole('button', { name: '移除“评论提及”' })
+		act(() => {
+			viewButton.click()
+			dismissButton.click()
+		})
+		expect(api.target).toHaveBeenCalledTimes(1)
+		expect(api.dismiss).toHaveBeenCalledTimes(1)
+		await act(async () => pendingTarget.resolve({ record_id: 'rec_001', subject_kind: 'comment', subject_id: 'rcm_001' }))
+		expect(screen.queryByText('目标：评论 rcm_001')).not.toBeInTheDocument()
+		await act(async () => pendingDismiss.resolve({ ...unreadNotification, dismissed_at: '2026-08-17T10:01:00Z' }))
+		expect(await screen.findByText('当前没有待处理通知')).toBeInTheDocument()
+	})
+
+	it('does not let a superseded target failure overwrite a successful dismiss', async () => {
+		const pendingTarget = deferred<{ record_id: string; subject_kind: 'comment'; subject_id: string }>()
+		const pendingDismiss = deferred<RecordNotification>()
+		api.list.mockResolvedValue({ items: [unreadNotification] })
+		api.target.mockReturnValue(pendingTarget.promise)
+		api.dismiss.mockReturnValue(pendingDismiss.promise)
+		renderPage()
+		await screen.findByText('评论提及')
+
+		act(() => {
+			screen.getByRole('button', { name: '查看“评论提及”的对象' }).click()
+			screen.getByRole('button', { name: '移除“评论提及”' }).click()
+		})
+		await act(async () => pendingDismiss.resolve({ ...unreadNotification, dismissed_at: '2026-08-17T10:01:00Z' }))
+		expect(await screen.findByText('当前没有待处理通知')).toBeInTheDocument()
+		await act(async () => pendingTarget.reject(new ApiError(503, 'private target failure')))
+		expect(screen.getByText('当前没有待处理通知')).toBeInTheDocument()
+		expect(screen.queryByText('记录通知暂不可用')).not.toBeInTheDocument()
+	})
+
   it('keeps a newer item busy when an older operation settles', async () => {
     const first = deferred<RecordNotification>()
     const second = deferred<RecordNotification>()
