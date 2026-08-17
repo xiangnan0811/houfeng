@@ -64,6 +64,11 @@ const (
 	OperationKindRecordPermanentDelete OperationKind = "record_permanent_delete"
 	OperationKindDeletionPreview       OperationKind = "deletion_preview"
 	OperationKindDeletionFence         OperationKind = "deletion_fence"
+	OperationKindRecordActionCreate    OperationKind = "record_action_create"
+	OperationKindRecordActionUpdate    OperationKind = "record_action_update"
+	OperationKindRecordActionComplete  OperationKind = "record_action_complete"
+	OperationKindRecordActionCancel    OperationKind = "record_action_cancel"
+	OperationKindRecordActionReopen    OperationKind = "record_action_reopen"
 )
 
 // RequestFingerprintVersion identifies the binary request-identity codec.
@@ -453,7 +458,12 @@ func ValidateOperationKind(operationKind OperationKind) error {
 		OperationKindRecordDelete,
 		OperationKindRecordPermanentDelete,
 		OperationKindDeletionPreview,
-		OperationKindDeletionFence:
+		OperationKindDeletionFence,
+		OperationKindRecordActionCreate,
+		OperationKindRecordActionUpdate,
+		OperationKindRecordActionComplete,
+		OperationKindRecordActionCancel,
+		OperationKindRecordActionReopen:
 		return nil
 	default:
 		return fmt.Errorf("%w: operation kind", ErrInvalidRecordPlatformInput)

@@ -807,6 +807,33 @@ func TestBootstrapRegistersRecordCollaborationRevisionParticipantWithoutAdmissio
 	}
 }
 
+func TestBootstrapWiresRecordActionsThroughSharedAuthorizationMembershipAndAdmission(t *testing.T) {
+	source, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"store.NewPostgresRecordActionRepository(pool, effectiveGate, collaborationMembers)",
+		"recordcollaboration.NewActionService(authorizations, actionRepository)",
+		"recordcollaboration.NewActionApplication(",
+		"handlers.RecordActions(actionApplication)",
+		"RecordActionsHandler:",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("bootstrap missing record action wiring %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"NewPostgresRecordActionRepository(pool, store.AdmissionGateFunc",
+		"NewPostgresRecordActionRepository(pool, allow",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("bootstrap contains forbidden record action admission bypass %q", forbidden)
+		}
+	}
+}
+
 func TestBootstrapWiresConfiguredAttachmentServices(t *testing.T) {
 	body, err := os.ReadFile("bootstrap.go")
 	if err != nil {

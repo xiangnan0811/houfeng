@@ -63,6 +63,36 @@ func TestOutboxEventV1AcceptsClosedCollaborationRevisionKinds(t *testing.T) {
 	}
 }
 
+func TestOutboxEventV1AcceptsClosedActionIdentityKinds(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []string{
+		OutboxEventKindRecordActionCreated,
+		OutboxEventKindRecordActionUpdated,
+		OutboxEventKindRecordActionCompleted,
+		OutboxEventKindRecordActionCancelled,
+		OutboxEventKindRecordActionReopened,
+	} {
+		event := OutboxEvent{
+			ProjectID: string(ProjectIDDefault), EventKind: kind,
+			SubjectKind: OutboxSubjectKindAction, SubjectID: "ract_identityonly",
+			AuthorizationEpoch: 7,
+		}
+		if err := event.Validate(); err != nil {
+			t.Fatalf("OutboxEvent.Validate(%q) error = %v", kind, err)
+		}
+	}
+	for _, kind := range []string{"record_action_deleted", "record_action_notified"} {
+		event := OutboxEvent{
+			ProjectID: string(ProjectIDDefault), EventKind: kind,
+			SubjectKind: OutboxSubjectKindAction, SubjectID: "ract_identityonly",
+		}
+		if err := event.Validate(); !errors.Is(err, ErrInvalidOutboxEvent) {
+			t.Fatalf("OutboxEvent.Validate(%q) error = %v, want closed registry rejection", kind, err)
+		}
+	}
+}
+
 func TestOutboxEnqueueInputV1RequiresPositiveMicrosecondExpiry(t *testing.T) {
 	event := OutboxEvent{
 		ProjectID:          string(ProjectIDDefault),

@@ -18,9 +18,17 @@ const (
 	OutboxEventKindRecordDeleted            = "record_deleted"
 	OutboxEventKindRecordOwnerChanged       = "record_owner_changed"
 	OutboxEventKindRecordParticipantChanged = "record_participant_changed"
+	OutboxEventKindRecordActionCreated      = "record_action_created"
+	OutboxEventKindRecordActionUpdated      = "record_action_updated"
+	OutboxEventKindRecordActionCompleted    = "record_action_completed"
+	OutboxEventKindRecordActionCancelled    = "record_action_cancelled"
+	OutboxEventKindRecordActionReopened     = "record_action_reopened"
 )
 
-const OutboxSubjectKindRecord = "record"
+const (
+	OutboxSubjectKindRecord = "record"
+	OutboxSubjectKindAction = "action"
+)
 
 // OutboxEvent contains only durable identity and authorization epoch data. It
 // intentionally cannot retain a payload, recipient, rendered body, or sender
@@ -75,7 +83,7 @@ func (event OutboxEvent) Validate() error {
 	if !validOutboxEventKind(event.EventKind) {
 		return fmt.Errorf("%w: event kind", ErrInvalidOutboxEvent)
 	}
-	if event.SubjectKind != OutboxSubjectKindRecord {
+	if event.SubjectKind != OutboxSubjectKindRecord && event.SubjectKind != OutboxSubjectKindAction {
 		return fmt.Errorf("%w: subject kind", ErrInvalidOutboxEvent)
 	}
 	if !validOutboxSubjectID(event.SubjectID) {
@@ -132,7 +140,12 @@ func validOutboxEventKind(kind string) bool {
 		OutboxEventKindRecordUpdated,
 		OutboxEventKindRecordDeleted,
 		OutboxEventKindRecordOwnerChanged,
-		OutboxEventKindRecordParticipantChanged:
+		OutboxEventKindRecordParticipantChanged,
+		OutboxEventKindRecordActionCreated,
+		OutboxEventKindRecordActionUpdated,
+		OutboxEventKindRecordActionCompleted,
+		OutboxEventKindRecordActionCancelled,
+		OutboxEventKindRecordActionReopened:
 		return true
 	default:
 		return false
