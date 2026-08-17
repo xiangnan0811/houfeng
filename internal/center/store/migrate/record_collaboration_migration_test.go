@@ -77,11 +77,13 @@ func TestRecordCollaborationMigrationReusesFoundationPrimitives(t *testing.T) {
 	}
 }
 
-func TestRecordCollaborationMigrationExtendsExistingOutboxWithIdentityOnlySourceVersion(t *testing.T) {
+func TestRecordCollaborationMigrationExtendsExistingOutboxWithIdentityOnlySourceVersionAndFence(t *testing.T) {
 	normalized := normalizedRecordCollaborationMigrationSQL(t)
 	for _, want := range []string{
 		"alter table public.record_outbox add column if not exists source_version bigint not null default 0",
 		"check (source_version >= 0)",
+		"alter table public.record_outbox add column if not exists record_fence_epoch bigint not null default 0",
+		"check (record_fence_epoch >= 0)",
 	} {
 		if !strings.Contains(normalized, want) {
 			t.Fatalf("0055 existing-outbox source-version extension missing %q", want)

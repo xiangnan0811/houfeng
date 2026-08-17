@@ -101,6 +101,7 @@ func (participant *collaborationRevisionParticipant) ApplyRevision(
 				SubjectID:          committed.Result.RecordID,
 				SourceVersion:      committed.Result.RevisionNo,
 				AuthorizationEpoch: committed.Result.AuthorizationEpoch,
+				RecordFenceEpoch:   uint64(binding.Epoch()),
 			},
 			ExpiresAfter: committed.OutboxTTL,
 		}); err != nil {

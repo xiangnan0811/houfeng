@@ -49,6 +49,7 @@ type OutboxEvent struct {
 	SubjectID          string
 	SourceVersion      uint64
 	AuthorizationEpoch uint64
+	RecordFenceEpoch   uint64
 }
 
 // OutboxEnqueueInputV1 requests an identity-only outbox row. PostgreSQL
@@ -99,8 +100,12 @@ func (event OutboxEvent) Validate() error {
 	if !validOutboxSubjectID(event.SubjectID) {
 		return fmt.Errorf("%w: subject id", ErrInvalidOutboxEvent)
 	}
-	if event.SourceVersion > math.MaxInt64 || notificationProducingOutboxEventKind(event.EventKind) != (event.SourceVersion > 0) {
+	notification := notificationProducingOutboxEventKind(event.EventKind)
+	if event.SourceVersion > math.MaxInt64 || notification != (event.SourceVersion > 0) {
 		return fmt.Errorf("%w: source version", ErrInvalidOutboxEvent)
+	}
+	if event.RecordFenceEpoch > math.MaxInt64 || (!notification && event.RecordFenceEpoch != 0) {
+		return fmt.Errorf("%w: record fence epoch", ErrInvalidOutboxEvent)
 	}
 	return nil
 }

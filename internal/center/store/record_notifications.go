@@ -62,7 +62,13 @@ func (repository *PostgresRecordNotificationRepository) ProjectNotification(ctx 
 		if err != nil {
 			return err
 		}
-		facts.RecordFenceEpoch = uint64(binding.Epoch())
+		root, err := lockRecordRootForCommentRead(ctx, transaction.tx, facts.RecordID)
+		if err != nil {
+			return err
+		}
+		if facts.AuthorizationEpoch != root.authorizationEpoch || facts.RecordFenceEpoch != uint64(binding.Epoch()) {
+			return recordcollaboration.ErrNotificationSourceStale
+		}
 		followers, err := loadNotificationFollowers(ctx, transaction.tx, facts.RecordID, facts.RecordFenceEpoch)
 		if err != nil {
 			return err
@@ -72,7 +78,6 @@ func (repository *PostgresRecordNotificationRepository) ProjectNotification(ctx 
 			return err
 		}
 		allowed := make([]recordcollaboration.NotificationRecipientFacts, 0, len(candidates))
-		var currentEpoch uint64
 		for _, candidate := range candidates {
 			actor, err := repository.members.ReadMemberActor(ctx, transaction.tx, recordauth.ProjectIDDefault, candidate.UserID)
 			if errors.Is(err, recordcollaboration.ErrMembershipDenied) {
@@ -88,17 +93,15 @@ func (repository *PostgresRecordNotificationRepository) ProjectNotification(ctx 
 			if current.Lifecycle != records.LifecycleActive || records.AuthorizeRecordResource(actor, recordauth.CapabilityNotificationRead, current.Evidence) != nil {
 				continue
 			}
-			if currentEpoch != 0 && currentEpoch != current.AuthorizationEpoch {
-				return recordcollaboration.ErrInvalidNotificationFacts
+			if current.AuthorizationEpoch != facts.AuthorizationEpoch {
+				return recordcollaboration.ErrNotificationSourceStale
 			}
-			currentEpoch = current.AuthorizationEpoch
 			allowed = append(allowed, candidate)
 		}
 		if len(allowed) == 0 {
 			result = recordcollaboration.NotificationProjectionResult{}
 			return nil
 		}
-		facts.AuthorizationEpoch = currentEpoch
 		if facts.Validate() != nil {
 			return recordcollaboration.ErrInvalidNotificationFacts
 		}
@@ -141,7 +144,7 @@ func loadNotificationSourceFacts(ctx context.Context, tx pgx.Tx, event recordpla
 	facts := recordcollaboration.NotificationEventFacts{
 		Kind: kind, SubjectKind: recordcollaboration.NotificationSubjectKind(event.SubjectKind),
 		SubjectID: event.SubjectID, SourceVersion: event.SourceVersion,
-		AuthorizationEpoch: event.AuthorizationEpoch,
+		AuthorizationEpoch: event.AuthorizationEpoch, RecordFenceEpoch: event.RecordFenceEpoch,
 	}
 	var direct []recordcollaboration.NotificationRecipientCandidate
 	switch kind {
@@ -198,11 +201,14 @@ func loadNotificationSourceFacts(ctx context.Context, tx pgx.Tx, event recordpla
 		}
 		if (kind == recordcollaboration.NotificationEventActionAssigned && mutationKind != "created" && mutationKind != "updated") ||
 			(kind == recordcollaboration.NotificationEventActionCompleted && mutationKind != "completed") ||
-			(kind == recordcollaboration.NotificationEventActionCancelled && mutationKind != "cancelled") || assigneeID == nil {
+			(kind == recordcollaboration.NotificationEventActionCancelled && mutationKind != "cancelled") ||
+			(kind == recordcollaboration.NotificationEventActionAssigned && assigneeID == nil) {
 			return facts, nil, recordcollaboration.ErrNotificationSourceMissing
 		}
 		facts.ActorID = actorID
-		direct = append(direct, recordcollaboration.NotificationRecipientCandidate{UserID: *assigneeID, Reason: recordcollaboration.NotificationReasonAssignee})
+		if assigneeID != nil {
+			direct = append(direct, recordcollaboration.NotificationRecipientCandidate{UserID: *assigneeID, Reason: recordcollaboration.NotificationReasonAssignee})
+		}
 	case recordcollaboration.NotificationEventCommentReplied, recordcollaboration.NotificationEventCommentMentioned:
 		var actorID string
 		err := tx.QueryRow(ctx, `

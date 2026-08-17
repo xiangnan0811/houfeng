@@ -80,6 +80,68 @@ func TestPostgresIntegrationRecordAutomaticFollowerSourcesRollbackWithProducerTr
 	}
 }
 
+func TestPostgresIntegrationRecordNotificationCancelsCapturedAuthorizationAndFenceEpochMismatch(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		slug   string
+		mutate func(*testing.T, context.Context, recordPlatformPostgresFixture, records.RevisionCommitResult)
+	}{
+		{
+			name: "authorization epoch", slug: "auth",
+			mutate: func(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, created records.RevisionCommitResult) {
+				if _, err := fixture.db.Exec(ctx, `update public.records set authorization_epoch = authorization_epoch + 1 where record_id = $1`, created.RecordID); err != nil {
+					t.Fatalf("advance authorization epoch: %v", err)
+				}
+			},
+		},
+		{
+			name: "record fence epoch", slug: "fence",
+			mutate: func(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, created records.RevisionCommitResult) {
+				fixture.advanceContentDeliveryEpoch(t, ctx, recordplatform.ObjectRef{ProjectID: string(recordplatform.ProjectIDDefault), ObjectKind: "record", ObjectID: created.RecordID})
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newRecordsPostgresFixture(t, ctx)
+			seedCollaborationRevisionUsers(t, ctx, fixture)
+			runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-stale-"+test.slug, 3)
+			input := collaborationRevisionInput(t, collaborationRevisionInputValues{ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"})
+			created, err := newRecordsPostgresRepository(
+				t, runtimePool, NewCollaborationRevisionParticipant(NewPostgresCollaborationMembershipReader()),
+			).CommitRevision(ctx, recordsPostgresRevisionCommand(
+				t, recordplatform.OperationKindRecordCreate, "rec_pgnotifystale"+test.slug, "", 0, 0, input, "notification-stale-"+test.slug,
+			))
+			if err != nil {
+				t.Fatalf("CommitRevision() error = %v", err)
+			}
+			projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+			claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordOwnerChanged, "notification_stale_claim")
+			if claim.Event.AuthorizationEpoch != created.AuthorizationEpoch || claim.Event.RecordFenceEpoch != 0 {
+				t.Fatalf("captured epochs = auth %d/fence %d, want %d/0", claim.Event.AuthorizationEpoch, claim.Event.RecordFenceEpoch, created.AuthorizationEpoch)
+			}
+			test.mutate(t, ctx, fixture, created)
+			preclaimed := &notificationPreclaimedQueue{claim: &claim, queue: queue}
+			projector, err := recordcollaboration.NewNotificationProjector(preclaimed, projection, time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			processed, err := projector.ProjectNext(ctx, recordplatform.OutboxClaimInputV1{OwnerID: "notification_stale_worker", OwnerLeaseDuration: time.Minute})
+			if err != nil || !processed {
+				t.Fatalf("ProjectNext(stale epochs) = (%v, %v)", processed, err)
+			}
+			assertPostgresNotificationCounts(t, ctx, fixture, created.RecordID, 0, 0)
+			var status string
+			if err := fixture.db.QueryRow(ctx, `select status from public.record_outbox where outbox_row_id = $1`, claim.Event.RowID).Scan(&status); err != nil {
+				t.Fatalf("read stale outbox status: %v", err)
+			}
+			if status != "cancelled" {
+				t.Fatalf("stale outbox status = %q, want cancelled", status)
+			}
+		})
+	}
+}
+
 func TestPostgresIntegrationRecordNotificationProjectionFencesTakeoverAndReplaysAtomically(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
@@ -410,6 +472,125 @@ func TestPostgresIntegrationRecordNotificationActionMappingMandatoryMuteAndReaso
 	}
 }
 
+func TestPostgresIntegrationRecordNotificationUnassignedCompletionAndCancellationReachOptionalWatcher(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-unassigned-action", 3)
+	input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
+	parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordCreate, "rec_pgnotifyunassigned", "", 0, 0, input, "notification-unassigned-parent",
+	))
+	if err != nil {
+		t.Fatalf("CommitRevision(parent) error = %v", err)
+	}
+	seedNotificationPreferences(t, ctx, fixture, parent.RecordID, map[string]string{"usr_bbbbbbbbbbbbbbbbbbbbbbbb": "watching"})
+	repository := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgnotifyunassigned", 0,
+		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Unassigned action"}), "notification-unassigned-create")
+	complete := postgresActionCommand(t, parent, recordcollaboration.ActionMutationComplete, create.ActionID, 1, recordcollaboration.ActionFields{}, "notification-unassigned-complete")
+	reopen := postgresActionCommand(t, parent, recordcollaboration.ActionMutationReopen, create.ActionID, 2, recordcollaboration.ActionFields{}, "notification-unassigned-reopen")
+	cancel := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCancel, create.ActionID, 3, recordcollaboration.ActionFields{}, "notification-unassigned-cancel")
+	for _, command := range []recordcollaboration.ActionCommand{create, complete, reopen, cancel} {
+		if _, err := repository.CommitAction(ctx, command); err != nil {
+			t.Fatalf("CommitAction(%s) error = %v", command.Kind, err)
+		}
+	}
+	projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+	for _, want := range []struct {
+		kind    string
+		version uint64
+	}{
+		{kind: recordplatform.OutboxEventKindRecordActionCompleted, version: 2},
+		{kind: recordplatform.OutboxEventKindRecordActionCancelled, version: 4},
+	} {
+		claim := claimNotificationOutboxKind(t, ctx, queue, want.kind, "notification_unassigned_"+want.kind)
+		if claim.Event.SubjectID != create.ActionID || claim.Event.SourceVersion != want.version || claim.Event.RecordFenceEpoch != 0 {
+			t.Fatalf("unassigned %q claim = %#v", want.kind, claim.Event)
+		}
+		result, err := projection.ProjectNotification(ctx, claim)
+		if err != nil || result.RecipientCount != 1 {
+			t.Fatalf("ProjectNotification(%q) = (%#v, %v), want one optional watcher", want.kind, result, err)
+		}
+		var recipient, reason string
+		var mandatory bool
+		if err := fixture.db.QueryRow(ctx, `
+			select recipient_user_id, reason_kind, mandatory
+			from public.record_notification_recipients where notification_id = $1`, result.NotificationID).Scan(&recipient, &reason, &mandatory); err != nil {
+			t.Fatalf("read unassigned %q recipient: %v", want.kind, err)
+		}
+		if recipient != "usr_bbbbbbbbbbbbbbbbbbbbbbbb" || reason != "follower" || mandatory {
+			t.Fatalf("unassigned %q recipient = %q/%q/%v", want.kind, recipient, reason, mandatory)
+		}
+		if err := queue.MarkOutboxSent(ctx, claim); err != nil {
+			t.Fatalf("MarkOutboxSent(%q) error = %v", want.kind, err)
+		}
+	}
+}
+
+func TestPostgresIntegrationRecordNotificationSuppressesSelfAssignmentAndSelfMention(t *testing.T) {
+	t.Run("self assignment", func(t *testing.T) {
+		ctx := context.Background()
+		fixture := newRecordsPostgresFixture(t, ctx)
+		seedCollaborationRevisionUsers(t, ctx, fixture)
+		runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-self-assign", 3)
+		input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
+		parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
+			t, recordplatform.OperationKindRecordCreate, "rec_pgnotifyselfassign", "", 0, 0, input, "notification-self-assign-parent",
+		))
+		if err != nil {
+			t.Fatalf("CommitRevision(parent) error = %v", err)
+		}
+		repository := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+		command := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgnotifyselfassign", 0,
+			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Self assignment", AssigneeID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa"}), "notification-self-assign-create")
+		command.Actor = mustPostgresCommentActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", recordauth.RoleProjectAdmin)
+		if _, err := repository.CommitAction(ctx, command); err != nil {
+			t.Fatalf("CommitAction(self assignment) error = %v", err)
+		}
+		projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+		claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionAssigned, "notification_self_assign")
+		result, err := projection.ProjectNotification(ctx, claim)
+		if err != nil || result != (recordcollaboration.NotificationProjectionResult{}) {
+			t.Fatalf("ProjectNotification(self assignment) = (%#v, %v), want empty result", result, err)
+		}
+		assertPostgresNotificationCounts(t, ctx, fixture, parent.RecordID, 0, 0)
+		if err := queue.MarkOutboxSent(ctx, claim); err != nil {
+			t.Fatalf("MarkOutboxSent(self assignment) error = %v", err)
+		}
+	})
+
+	t.Run("self mention", func(t *testing.T) {
+		ctx := context.Background()
+		fixture := newRecordsPostgresFixture(t, ctx)
+		seedCollaborationRevisionUsers(t, ctx, fixture)
+		runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-self-mention", 3)
+		input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
+		parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
+			t, recordplatform.OperationKindRecordCreate, "rec_pgnotifyselfmention", "", 0, 0, input, "notification-self-mention-parent",
+		))
+		if err != nil {
+			t.Fatalf("CommitRevision(parent) error = %v", err)
+		}
+		repository := NewPostgresRecordCommentRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+		command := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate, "rcm_pgnotifyselfmention", 0,
+			"Self mention.", "", []string{"usr_aaaaaaaaaaaaaaaaaaaaaaaa"}, "notification-self-mention-create")
+		if _, err := repository.CommitComment(ctx, command); err != nil {
+			t.Fatalf("CommitComment(self mention) error = %v", err)
+		}
+		projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+		claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordCommentMentioned, "notification_self_mention")
+		result, err := projection.ProjectNotification(ctx, claim)
+		if err != nil || result != (recordcollaboration.NotificationProjectionResult{}) {
+			t.Fatalf("ProjectNotification(self mention) = (%#v, %v), want empty result", result, err)
+		}
+		assertPostgresNotificationCounts(t, ctx, fixture, parent.RecordID, 0, 0)
+		if err := queue.MarkOutboxSent(ctx, claim); err != nil {
+			t.Fatalf("MarkOutboxSent(self mention) error = %v", err)
+		}
+	})
+}
+
 func TestPostgresIntegrationRecordNotificationCommentReplyMentionMapping(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
@@ -526,6 +707,29 @@ func newPostgresNotificationProjectionHarness(t *testing.T, pool *pgxpool.Pool, 
 	authorization := newPostgresCurrentRecordAuthorizationSource(pool, resolver, allowRecordPlatformAdmissionGate)
 	return NewPostgresRecordNotificationRepository(pool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(), authorization, 30*24*time.Hour),
 		NewPostgresRecordPlatformRepository(pool, allowRecordPlatformAdmissionGate)
+}
+
+type notificationPreclaimedQueue struct {
+	claim *recordplatform.ClaimedOutboxEventV1
+	queue *PostgresRecordPlatformRepository
+}
+
+func (queue *notificationPreclaimedQueue) ClaimOutbox(context.Context, recordplatform.OutboxClaimInputV1) (*recordplatform.ClaimedOutboxEventV1, error) {
+	claim := queue.claim
+	queue.claim = nil
+	return claim, nil
+}
+
+func (queue *notificationPreclaimedQueue) CancelOutbox(ctx context.Context, claim recordplatform.ClaimedOutboxEventV1) error {
+	return queue.queue.CancelOutbox(ctx, claim)
+}
+
+func (queue *notificationPreclaimedQueue) RetryOutbox(ctx context.Context, claim recordplatform.ClaimedOutboxEventV1, delay time.Duration) error {
+	return queue.queue.RetryOutbox(ctx, claim, delay)
+}
+
+func (queue *notificationPreclaimedQueue) MarkOutboxSent(ctx context.Context, claim recordplatform.ClaimedOutboxEventV1) error {
+	return queue.queue.MarkOutboxSent(ctx, claim)
 }
 
 func seedNotificationPreferences(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, recordID string, preferences map[string]string) {

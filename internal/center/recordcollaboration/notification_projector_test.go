@@ -84,6 +84,7 @@ func TestNotificationProjectorCancelsUnsupportedAndMissingExactSources(t *testin
 	}{
 		{name: "unsupported generic event", claim: testNotificationClaim(recordplatform.OutboxEventKindRecordActionUpdated, 0)},
 		{name: "missing exact source", claim: testNotificationClaim(recordplatform.OutboxEventKindRecordCommentMentioned, 4), projectErr: ErrNotificationSourceMissing, wantCalls: 1},
+		{name: "stale authorization or fence source", claim: testNotificationClaim(recordplatform.OutboxEventKindRecordActionAssigned, 4), projectErr: ErrNotificationSourceStale, wantCalls: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

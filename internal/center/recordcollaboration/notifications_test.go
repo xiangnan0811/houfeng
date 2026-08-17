@@ -23,6 +23,8 @@ func TestNormalizeNotificationRecipientsAppliesMandatoryOptionalAndSelfNoisePoli
 		{UserID: "usr_ffffffffffffffffffffffff", Version: 1, Preference: FollowerPreferenceWatching},
 	}
 	direct := []NotificationRecipientCandidate{
+		{UserID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", Reason: NotificationReasonAssignee},
+		{UserID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", Reason: NotificationReasonSecurity},
 		{UserID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", Reason: NotificationReasonFollower},
 		{UserID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", Reason: NotificationReasonAssignee},
 		{UserID: "usr_cccccccccccccccccccccccc", Reason: NotificationReasonParticipant},

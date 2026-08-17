@@ -57,7 +57,7 @@ func TestOutboxEventV1AcceptsClosedCollaborationRevisionKinds(t *testing.T) {
 		event := OutboxEvent{
 			ProjectID: string(ProjectIDDefault), EventKind: kind,
 			SubjectKind: OutboxSubjectKindRecord, SubjectID: "rec_collaboration",
-			SourceVersion: 1, AuthorizationEpoch: 7,
+			SourceVersion: 1, AuthorizationEpoch: 7, RecordFenceEpoch: 9,
 		}
 		if err := event.Validate(); err != nil {
 			t.Fatalf("OutboxEvent.Validate(%q) error = %v", kind, err)
@@ -105,7 +105,7 @@ func TestOutboxEventV1AcceptsOnlyClosedNotificationProducerKinds(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.kind, func(t *testing.T) {
-			event := OutboxEvent{ProjectID: string(ProjectIDDefault), EventKind: tt.kind, SubjectKind: tt.subject, SubjectID: tt.id, SourceVersion: 7, AuthorizationEpoch: 1}
+			event := OutboxEvent{ProjectID: string(ProjectIDDefault), EventKind: tt.kind, SubjectKind: tt.subject, SubjectID: tt.id, SourceVersion: 7, AuthorizationEpoch: 1, RecordFenceEpoch: 4}
 			if err := event.Validate(); err != nil {
 				t.Fatalf("Validate() error = %v", err)
 			}
@@ -138,6 +138,24 @@ func TestOutboxEventV1RequiresExactSourceVersionOnlyForNotificationProducerKinds
 	legacy := OutboxEvent{ProjectID: string(ProjectIDDefault), EventKind: OutboxEventKindRecordCreated, SubjectKind: OutboxSubjectKindRecord, SubjectID: "rec_version", SourceVersion: 1}
 	if err := legacy.Validate(); !errors.Is(err, ErrInvalidOutboxEvent) {
 		t.Fatalf("generic event with source version error = %v, want ErrInvalidOutboxEvent", err)
+	}
+}
+
+func TestOutboxEventV1RetainsFenceOnlyForNotificationProducerKinds(t *testing.T) {
+	notification := OutboxEvent{
+		ProjectID: string(ProjectIDDefault), EventKind: OutboxEventKindRecordActionAssigned,
+		SubjectKind: OutboxSubjectKindAction, SubjectID: "ract_fence", SourceVersion: 1,
+		AuthorizationEpoch: 3, RecordFenceEpoch: 8,
+	}
+	if err := notification.Validate(); err != nil {
+		t.Fatalf("notification fence Validate() error = %v", err)
+	}
+	generic := OutboxEvent{
+		ProjectID: string(ProjectIDDefault), EventKind: OutboxEventKindRecordActionCreated,
+		SubjectKind: OutboxSubjectKindAction, SubjectID: "ract_fence", RecordFenceEpoch: 8,
+	}
+	if err := generic.Validate(); !errors.Is(err, ErrInvalidOutboxEvent) {
+		t.Fatalf("generic fence Validate() error = %v, want ErrInvalidOutboxEvent", err)
 	}
 }
 

@@ -378,7 +378,7 @@ func (tx *fakeRecordActionTx) QueryRow(_ context.Context, sql string, args ...an
 		tx.outboxEvents = append(tx.outboxEvents, recordplatform.OutboxEvent{
 			ProjectID: fmt.Sprint(args[0]), EventKind: fmt.Sprint(args[1]),
 			SubjectKind: fmt.Sprint(args[2]), SubjectID: fmt.Sprint(args[3]),
-			SourceVersion: args[4].(uint64), AuthorizationEpoch: args[5].(uint64),
+			SourceVersion: args[4].(uint64), AuthorizationEpoch: args[5].(uint64), RecordFenceEpoch: args[6].(uint64),
 		})
 		return fakeRecordRevisionRow{values: []any{int64(51)}}
 	default:
@@ -557,7 +557,7 @@ func TestPostgresRecordActionRepositoryPersistsRawSubjectAndExactTypedSourceVers
 	}
 	want := []recordplatform.OutboxEvent{
 		{ProjectID: "default", EventKind: recordplatform.OutboxEventKindRecordActionCreated, SubjectKind: "action", SubjectID: command.ActionID, AuthorizationEpoch: command.AuthorizationEpoch},
-		{ProjectID: "default", EventKind: recordplatform.OutboxEventKindRecordActionAssigned, SubjectKind: "action", SubjectID: command.ActionID, SourceVersion: 1, AuthorizationEpoch: command.AuthorizationEpoch},
+		{ProjectID: "default", EventKind: recordplatform.OutboxEventKindRecordActionAssigned, SubjectKind: "action", SubjectID: command.ActionID, SourceVersion: 1, AuthorizationEpoch: command.AuthorizationEpoch, RecordFenceEpoch: 0},
 	}
 	if !reflect.DeepEqual(tx.outboxEvents, want) {
 		t.Fatalf("outbox events = %#v, want %#v", tx.outboxEvents, want)

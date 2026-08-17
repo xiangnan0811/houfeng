@@ -2,6 +2,10 @@ alter table public.record_outbox
   add column if not exists source_version bigint not null default 0
   check (source_version >= 0);
 
+alter table public.record_outbox
+  add column if not exists record_fence_epoch bigint not null default 0
+  check (record_fence_epoch >= 0);
+
 create table if not exists public.record_actions (
   action_id text primary key check (action_id ~ '^ract_[a-z0-9]{1,64}$'),
   project_id text not null default 'default' check (project_id = 'default'),

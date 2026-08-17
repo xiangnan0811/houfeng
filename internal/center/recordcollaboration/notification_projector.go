@@ -14,6 +14,7 @@ import (
 var (
 	ErrInvalidNotificationProjector = errors.New("invalid record notification projector")
 	ErrNotificationSourceMissing    = errors.New("record notification source missing")
+	ErrNotificationSourceStale      = errors.New("record notification source stale")
 )
 
 type NotificationProjectionResult struct {
@@ -129,7 +130,7 @@ func (projector *NotificationProjector) ProjectNext(ctx context.Context, input r
 		return true, projector.queue.CancelOutbox(ctx, *claim)
 	}
 	result, err := projector.projection.ProjectNotification(ctx, *claim)
-	if errors.Is(err, ErrNotificationSourceMissing) || errors.Is(err, ErrInvalidNotificationFacts) {
+	if errors.Is(err, ErrNotificationSourceMissing) || errors.Is(err, ErrNotificationSourceStale) || errors.Is(err, ErrInvalidNotificationFacts) {
 		return true, projector.queue.CancelOutbox(ctx, *claim)
 	}
 	if err != nil {

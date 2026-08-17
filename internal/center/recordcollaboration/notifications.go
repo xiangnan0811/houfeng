@@ -178,11 +178,11 @@ func NormalizeNotificationRecipients(
 		if recordauth.ValidateActorUserID(candidate.UserID) != nil || ValidateNotificationReason(candidate.Reason) != nil {
 			return nil, ErrInvalidNotificationFacts
 		}
+		if candidate.UserID == event.ActorID {
+			continue
+		}
 		mandatory := candidate.Reason.Mandatory()
 		if !mandatory {
-			if candidate.UserID == event.ActorID {
-				continue
-			}
 			if follower, ok := followerByUser[candidate.UserID]; ok && follower.Preference == FollowerPreferenceMuted {
 				continue
 			}

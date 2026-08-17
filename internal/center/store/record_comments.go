@@ -150,9 +150,11 @@ func (repository *PostgresRecordCommentRepository) CommitComment(ctx context.Con
 			command.Kind, command.ReplyToCommentID != "", len(command.MentionUserIDs) != 0,
 		) {
 			sourceVersion := uint64(0)
+			recordFenceEpoch := uint64(0)
 			if outboxKind == recordplatform.OutboxEventKindRecordCommentReplied ||
 				outboxKind == recordplatform.OutboxEventKindRecordCommentMentioned {
 				sourceVersion = version
+				recordFenceEpoch = uint64(binding.Epoch())
 			}
 			if _, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
 				Event: recordplatform.OutboxEvent{
@@ -160,6 +162,7 @@ func (repository *PostgresRecordCommentRepository) CommitComment(ctx context.Con
 					SubjectKind: recordplatform.OutboxSubjectKindComment, SubjectID: command.CommentID,
 					SourceVersion:      sourceVersion,
 					AuthorizationEpoch: command.AuthorizationEpoch,
+					RecordFenceEpoch:   recordFenceEpoch,
 				},
 				ExpiresAfter: command.OutboxTTL,
 			}); err != nil {

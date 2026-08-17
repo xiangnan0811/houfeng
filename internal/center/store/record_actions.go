@@ -144,10 +144,12 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 		}
 		for _, outboxKind := range recordActionNotificationOutboxKinds(command.Kind, previousAssigneeID, currentAssigneeID) {
 			sourceVersion := uint64(0)
+			recordFenceEpoch := uint64(0)
 			if outboxKind == recordplatform.OutboxEventKindRecordActionAssigned ||
 				outboxKind == recordplatform.OutboxEventKindRecordActionCompleted ||
 				outboxKind == recordplatform.OutboxEventKindRecordActionCancelled {
 				sourceVersion = version
+				recordFenceEpoch = uint64(binding.Epoch())
 			}
 			if _, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
 				Event: recordplatform.OutboxEvent{
@@ -155,6 +157,7 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 					SubjectKind: recordplatform.OutboxSubjectKindAction, SubjectID: command.ActionID,
 					SourceVersion:      sourceVersion,
 					AuthorizationEpoch: command.AuthorizationEpoch,
+					RecordFenceEpoch:   recordFenceEpoch,
 				},
 				ExpiresAfter: command.OutboxTTL,
 			}); err != nil {

@@ -603,10 +603,11 @@ func TestPostgresRecordPlatformClaimOutboxCommitsDatabaseTimeFencedClaim(t *test
 			*(dest[4].(*string)) = "rec_01"
 			*(dest[5].(*int64)) = 0
 			*(dest[6].(*int64)) = 3
-			*(dest[7].(*string)) = "worker_01"
-			*(dest[8].(*int64)) = 2
-			*(dest[9].(*time.Time)) = ownerExpiry
-			*(dest[10].(*time.Time)) = eventExpiry
+			*(dest[7].(*int64)) = 0
+			*(dest[8].(*string)) = "worker_01"
+			*(dest[9].(*int64)) = 2
+			*(dest[10].(*time.Time)) = ownerExpiry
+			*(dest[11].(*time.Time)) = eventExpiry
 			return nil
 		}}
 	}
@@ -657,7 +658,7 @@ func TestPostgresRecordPlatformClaimOutboxCommitsDatabaseTimeFencedClaim(t *test
 func TestObservedOutboxClaimPreservesTypedSourceVersion(t *testing.T) {
 	row := observedOutboxClaimRow{
 		rowID: 42, projectID: "default", eventKind: recordplatform.OutboxEventKindRecordActionAssigned,
-		subjectKind: "action", subjectID: "ract_version", sourceVersion: 7, authorizationEpoch: 3,
+		subjectKind: "action", subjectID: "ract_version", sourceVersion: 7, authorizationEpoch: 3, recordFenceEpoch: 5,
 		ownerID: "worker_01", ownerGeneration: 2,
 		ownerExpiresAt: time.Date(2026, 8, 17, 1, 0, 0, 0, time.UTC),
 		expiresAt:      time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC),
@@ -666,8 +667,8 @@ func TestObservedOutboxClaimPreservesTypedSourceVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim() error = %v", err)
 	}
-	if claim.Event.SubjectID != "ract_version" || claim.Event.SourceVersion != 7 {
-		t.Fatalf("claim event = %#v, want raw subject and source version 7", claim.Event)
+	if claim.Event.SubjectID != "ract_version" || claim.Event.SourceVersion != 7 || claim.Event.RecordFenceEpoch != 5 {
+		t.Fatalf("claim event = %#v, want raw subject, source version 7, and fence 5", claim.Event)
 	}
 }
 
