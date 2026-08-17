@@ -49,6 +49,34 @@ func TestNormalizeRevisionFilterFactsSortsDeduplicatesAndCopies(t *testing.T) {
 	}
 }
 
+func TestNormalizeRevisionFilterFactsMatchesPostgresMicrosecondPrecision(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		nanosecond int
+		want       int
+	}{
+		{name: "below one microsecond", nanosecond: 999, want: 0},
+		{name: "exact microsecond", nanosecond: 1000, want: 1000},
+		{name: "between microseconds", nanosecond: 123456789, want: 123456000},
+		{name: "last nanosecond", nanosecond: 999999999, want: 999999000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := time.Date(2026, time.August, 18, 9, 30, 0, tt.nanosecond, time.FixedZone("UTC+8", 8*60*60))
+			facts, err := NormalizeRevisionFilterFacts(RevisionFilterFactValues{FollowUpAt: &input})
+			if err != nil {
+				t.Fatalf("NormalizeRevisionFilterFacts() error = %v", err)
+			}
+			got := facts.FollowUpAt()
+			if got == nil || got.Location() != time.UTC || got.Nanosecond() != tt.want {
+				t.Fatalf("FollowUpAt() = %v, want UTC nanosecond %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeRevisionFilterFactsRejectsMalformedOwnerOrParticipant(t *testing.T) {
 	t.Parallel()
 

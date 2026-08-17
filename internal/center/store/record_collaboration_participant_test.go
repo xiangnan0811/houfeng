@@ -425,6 +425,7 @@ func (rows *fakeCollaborationParticipantRows) Scan(dest ...any) error {
 }
 
 type collaborationRevisionInputValues struct {
+	title          string
 	ownerID        string
 	participantIDs []string
 	followUpAt     *time.Time
@@ -458,12 +459,16 @@ func collaborationRevisionInputWithAuthorization(
 	authorization recordauth.SourceAuthorization,
 ) records.CompleteRevisionInput {
 	t.Helper()
+	title := values.title
+	if title == "" {
+		title = "Collaboration revision"
+	}
 	participants := make([]records.RevisionParticipantSnapshot, 0, len(values.participantIDs))
 	for _, participantID := range values.participantIDs {
 		participants = append(participants, records.RevisionParticipantSnapshot{ParticipantID: participantID, IdentitySnapshot: map[string]string{"display_name": "Operator"}})
 	}
 	input, err := records.NormalizeCompleteRevisionInput(records.CompleteRevisionValues{
-		Title: "Collaboration revision", BodyMarkdown: "Collaboration revision body",
+		Title: title, BodyMarkdown: "Collaboration revision body",
 		MarkdownDialectVersion: records.MarkdownDialectVersionV1,
 		RecordType:             records.RecordTypeNote, ImpactLevel: "informational",
 		VisibilityScope: visibility,

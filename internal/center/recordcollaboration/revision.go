@@ -104,6 +104,6 @@ func collaborationUTCTimePointer(value *time.Time) *time.Time {
 	if value == nil {
 		return nil
 	}
-	utc := value.UTC()
+	utc := value.UTC().Truncate(time.Microsecond)
 	return &utc
 }
