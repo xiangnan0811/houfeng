@@ -30,3 +30,16 @@ describe('command audit route', () => {
     })).toBe(true)
   })
 })
+
+describe('record inbox route', () => {
+  it('is registered below the private route boundary', () => {
+    const matches = matchRoutes(appRoutes, '/record-inbox')
+
+    expect(matches).not.toBeNull()
+    expect(matches?.some(({ route }) => route.path === 'record-inbox')).toBe(true)
+    expect(matches?.some(({ route }) => {
+      const element = route.element as { type?: unknown } | undefined
+      return element?.type === RequireAuth
+    })).toBe(true)
+  })
+})

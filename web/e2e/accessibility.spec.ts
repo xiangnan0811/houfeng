@@ -12,6 +12,7 @@ const AXE_SURFACES = [
   { name: 'VPS', path: '/vps', heading: /^VPS 资产$/ },
   { name: 'Asset Decisions', path: '/asset-decisions', heading: /^资产组合决策$/ },
   { name: 'Command Audit', path: '/command-audit', heading: /^命令审计$/ },
+  { name: 'Record Inbox', path: '/record-inbox', heading: /^记录协作收件箱$/ },
 ] as const
 
 for (const surface of AXE_SURFACES) {

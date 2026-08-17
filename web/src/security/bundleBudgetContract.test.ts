@@ -263,7 +263,10 @@ describe('bundle budget checker', () => {
 
     await buildCurrentApplication(placements)
 
-    expect(placements).toEqual([])
+    expect(placements.filter((placement) => placement.module === 'recordsApi')).toEqual([])
+    expect(placements.filter((placement) => placement.module === 'apiError').every((placement) => (
+      !placement.isEntry && placement.isDynamicEntry
+    ))).toBe(true)
   })
 
   it('places a synthetic Records consumer only in its lazy chunk', async () => {

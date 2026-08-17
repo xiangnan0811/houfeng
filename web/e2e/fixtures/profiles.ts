@@ -7,6 +7,7 @@ import type {
   DashboardOverview,
   MonitoringInstanceSparklinesResponse,
   ProviderRecord,
+  RecordNotification,
   SettingsRecord,
   SubscriptionOverview,
   SubscriptionRecord,
@@ -28,6 +29,20 @@ const AUTHENTICATED_USER = {
   role: 'admin',
   display_name: 'E2E Admin',
 } satisfies User
+
+const RECORD_NOTIFICATION = {
+  notification_id: 'rnt_e2e_001',
+  record_id: 'rec_e2e_001',
+  event_kind: 'record_comment_mentioned',
+  subject_kind: 'comment',
+  subject_id: 'rcm_e2e_001',
+  source_version: 3,
+  reason: 'mention',
+  mandatory: true,
+  event_at: '2026-08-17T09:30:00Z',
+  read_at: null,
+  dismissed_at: null,
+} satisfies RecordNotification
 
 const PROVIDER = {
   provider_id: 'pv_001',
@@ -256,6 +271,7 @@ export type CoreRoutePath =
   | '/targets'
   | '/events'
   | '/command-audit'
+  | '/record-inbox'
   | '/providers'
   | '/subscriptions'
   | '/settings'
@@ -279,6 +295,10 @@ export function authenticatedProfile(
     [apiRouteKey('GET', '/api/dashboard')]: {
       status: 200,
       body: dashboard,
+    },
+    [apiRouteKey('GET', '/api/record-notifications/unread-count')]: {
+      status: 200,
+      body: { unread_count: 1 },
     },
     ...routes,
   }
@@ -376,6 +396,31 @@ export function coreRouteProfile(path: CoreRoutePath): ApiFixtureProfile {
         [apiRouteKey('GET', '/api/command-audits')]: {
           status: 200,
           body: COMMAND_AUDIT_RESPONSE,
+        },
+      })
+    case '/record-inbox':
+      return authenticatedProfile({
+        [apiRouteKey('GET', '/api/record-notifications?limit=50')]: {
+          status: 200,
+          body: { items: [RECORD_NOTIFICATION] },
+        },
+        [apiRouteKey('GET', `/api/record-notifications/${RECORD_NOTIFICATION.notification_id}/target`)]: {
+          status: 200,
+          body: {
+            record_id: RECORD_NOTIFICATION.record_id,
+            subject_kind: RECORD_NOTIFICATION.subject_kind,
+            subject_id: RECORD_NOTIFICATION.subject_id,
+          },
+        },
+        [apiRouteKey('PUT', `/api/record-notifications/${RECORD_NOTIFICATION.notification_id}/read`)]: {
+          status: 200,
+          body: { ...RECORD_NOTIFICATION, read_at: '2026-08-17T10:00:00Z' },
+          expectNoBody: true as const,
+        },
+        [apiRouteKey('PUT', `/api/record-notifications/${RECORD_NOTIFICATION.notification_id}/dismiss`)]: {
+          status: 200,
+          body: { ...RECORD_NOTIFICATION, dismissed_at: '2026-08-17T10:01:00Z' },
+          expectNoBody: true as const,
         },
       })
     case '/providers':

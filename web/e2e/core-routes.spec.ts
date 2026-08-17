@@ -17,6 +17,7 @@ const CORE_ROUTES = [
   { name: 'Targets', path: '/targets', heading: /^入口探测$/, workflow: { role: 'link', name: '组合决策' } },
   { name: 'Events', path: '/events', heading: /^事件流$/, workflow: { role: 'button', name: '高级筛选' } },
   { name: 'Command Audit', path: '/command-audit', heading: /^命令审计$/, workflow: { role: 'button', name: '高级筛选' } },
+  { name: 'Record Inbox', path: '/record-inbox', heading: /^记录协作收件箱$/, workflow: { role: 'button', name: '查看“评论提及”的对象' } },
   { name: 'Providers', path: '/providers', heading: /服务商目录$/, workflow: { role: 'button', name: '新建服务商' } },
   { name: 'Subscriptions', path: '/subscriptions', heading: /订阅成本中枢$/, workflow: { role: 'button', name: '新建订阅' } },
   { name: 'Settings', path: '/settings', heading: /^系统设置$/, workflow: { role: 'tab', name: '监控策略' } },

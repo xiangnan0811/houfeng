@@ -4,6 +4,7 @@ import { GlobalSearch } from './GlobalSearch'
 import { useThemeOptional } from '../../lib/theme-context'
 import { SyncStatus, type SyncStatusProps } from './SyncStatus'
 import type { User } from '../../lib/auth-client'
+import { getRecordNotificationUnreadCount } from '../../lib/recordInboxUnreadApi'
 
 const PAGE_TITLES: Record<string, string> = {
   '/': '工作台',
@@ -14,6 +15,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/providers': '服务商',
   '/subscriptions': '订阅',
   '/asset-decisions': '资产决策',
+  '/record-inbox': '记录通知',
   '/settings': '设置',
 }
 
@@ -184,17 +186,36 @@ function ThemeSwitcher() {
 }
 
 function NotificationBell() {
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  useEffect(() => {
+    let active = true
+    getRecordNotificationUnreadCount()
+      .then(({ unread_count }) => {
+        if (active) setUnreadCount(Math.max(0, Math.trunc(unread_count)))
+      })
+      .catch(() => {
+        if (active) setUnreadCount(0)
+      })
+    return () => { active = false }
+  }, [])
+
+  const label = unreadCount > 0 ? `记录通知，${unreadCount} 条未读` : '记录通知'
   return (
     <Link
-      className="tp-icon-btn"
-      to="/events?notification_only=1"
-      aria-label="查看通知事件"
-      title="通知事件"
+      className="tp-icon-btn tp-record-inbox"
+      to="/record-inbox"
+      aria-label={label}
+      title={label}
     >
-      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
-        <path d="M4 6a4 4 0 018 0c0 4 2 5 2 5H2s2-1 2-5" />
-        <path d="M6.5 13a1.5 1.5 0 003 0" />
-      </svg>
+      {unreadCount > 0 ? (
+        <span className="badge badge--count" aria-hidden="true">{unreadCount > 99 ? '99+' : unreadCount}</span>
+      ) : (
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+          <path d="M4 6a4 4 0 018 0c0 4 2 5 2 5H2s2-1 2-5" />
+          <path d="M6.5 13a1.5 1.5 0 003 0" />
+        </svg>
+      )}
     </Link>
   )
 }

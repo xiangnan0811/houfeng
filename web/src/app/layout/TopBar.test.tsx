@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ThemeProvider } from '../../lib/theme-context'
 import { TopBar } from './TopBar'
@@ -19,9 +19,29 @@ function renderTopBar() {
 }
 
 describe('TopBar theme menu', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ unread_count: 0 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+  })
+
   afterEach(() => {
+    vi.unstubAllGlobals()
     localStorage.clear()
     document.documentElement.className = ''
+  })
+
+  it('links to the private record inbox and renders its bounded unread count', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ unread_count: 12 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    renderTopBar()
+
+    const inbox = await screen.findByRole('link', { name: '记录通知，12 条未读' })
+    expect(inbox).toHaveAttribute('href', '/record-inbox')
+    await waitFor(() => expect(inbox).toHaveTextContent('12'))
   })
 
   it('exposes menu button state and four radio menu items', () => {
