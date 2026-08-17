@@ -95,7 +95,7 @@ adapter, React/TypeScript, Vitest/Playwright/Axe.
 - [x] Run focused race/real PostgreSQL/worker/security and Web/browser tests.
 - [x] Run full Go/Web/browser gates, `git diff --check`, and `trellis-check`.
 - [x] Update implemented collaboration/notification specs.
-- [ ] Merge through protected main and archive before Search/Activity/Portability
+- [x] Merge through protected main and archive before Search/Activity/Portability
   final integration.
 
 ## Planning review gate
