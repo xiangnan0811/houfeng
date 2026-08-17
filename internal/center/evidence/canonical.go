@@ -150,7 +150,7 @@ func RestoreCanonicalSnapshot(
 	if envelope.CanonicalHash != payload.Hash() || envelope.CanonicalSize != payload.Size() {
 		return CanonicalSnapshot{}, fmt.Errorf("%w: canonical payload binding", ErrInvalidSnapshotEnvelope)
 	}
-	normalized, err := normalizeSnapshotEnvelope(descriptor, envelope)
+	normalized, err := RestoreSnapshotEnvelopeMetadata(descriptor, envelope)
 	if err != nil {
 		return CanonicalSnapshot{}, err
 	}
@@ -159,6 +159,30 @@ func RestoreCanonicalSnapshot(
 		return CanonicalSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+// RestoreSnapshotEnvelopeMetadata validates and rehydrates the complete
+// immutable envelope without requiring payload bytes. JSON persistence omits
+// the authorization scope's private canonical-byte cache, so metadata-only
+// authorization paths must use the returned canonical value. This is not a
+// payload or renderer fallback and does not weaken RestoreCanonicalSnapshot's
+// byte validation.
+func RestoreSnapshotEnvelopeMetadata(descriptor Descriptor, envelope SnapshotEnvelope) (SnapshotEnvelope, error) {
+	normalized, err := normalizeSnapshotEnvelope(descriptor, envelope)
+	if err != nil {
+		return SnapshotEnvelope{}, err
+	}
+	persistedAuthorization, persistedErr := json.Marshal(envelope.Authorization)
+	canonicalAuthorization, canonicalErr := json.Marshal(normalized.Authorization)
+	if persistedErr != nil || canonicalErr != nil || !bytes.Equal(persistedAuthorization, canonicalAuthorization) {
+		return SnapshotEnvelope{}, fmt.Errorf("%w: non-canonical authorization", ErrInvalidSnapshotEnvelope)
+	}
+	rehydrated := envelope
+	rehydrated.Authorization = normalized.Authorization
+	if !reflect.DeepEqual(rehydrated, normalized) {
+		return SnapshotEnvelope{}, fmt.Errorf("%w: non-canonical envelope", ErrInvalidSnapshotEnvelope)
+	}
+	return normalized, nil
 }
 
 func NewCanonicalSnapshot(

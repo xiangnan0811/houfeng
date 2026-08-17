@@ -50,7 +50,11 @@ type EvidencePayloadGCReceipt = evidence.PayloadGCReceipt
 // lifecycle primitives. Worker scheduling and revision participation live at
 // higher layers.
 type PostgresEvidenceRepository struct {
-	platform *PostgresRecordPlatformRepository
+	platform             *PostgresRecordPlatformRepository
+	registry             evidence.Registry
+	current              evidenceCurrentRecordAuthorizationSource
+	subjects             currentRecordSubjectResolver
+	loadEvidenceSnapshot func(context.Context, string, bool) (persistedEvidenceSnapshot, error)
 }
 
 var (

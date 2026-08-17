@@ -37,8 +37,9 @@ POST /api/evidence/capture-previews
   -> RecordEvidenceRevisionParticipant inside caller pgx.Tx takes project lock and rechecks capacity
 
 GET /api/evidence/{snapshot_id}
-  -> exact registered kind + canonical reconstruction
+  -> opaque snapshot-to-record binding
   -> current record/revision AND current-or-final-source-floor authorization
+  -> exact registered kind + canonical reconstruction + authorized payload read
   -> versioned allowlisted Summary DTO
 ```
 
@@ -93,9 +94,11 @@ GET /api/evidence/{snapshot_id}
 - `POST /api/evidence/capture-previews` 只接受selection，不接受payload、digest、authorization或客户端指定的新snapshot identity。新record的`record_id`由server预分配；Records create只在非空`evidence_items`经`RevisionPreparer`证明intent与该record绑定时接受该ID。
 - create/revise请求的`evidence_items`是严格有序tagged union：每项恰有一个`capture_intent_id`或`existing_snapshot_id`。prepared snapshot数量必须等于请求数量；existing identity必须逐位置相等，不能静默丢弃或重排。
 - restore从历史revision重建同序existing snapshot items，并在新revision提交前重新授权。空evidence仍构造合法empty preparation，不能绕过participant合同。
-- `GET /api/evidence/{snapshot_id}`先按registry精确解析kind/schema并重建canonical snapshot，再同时执行current record/revision权限和current live source或tombstone final floor权限。denied与not-found对外保持opaque。
+- `GET /api/evidence/{snapshot_id}`先取得opaque snapshot-to-record binding，再执行current record/revision与current live source或tombstone final floor权限；只有授权成功后才允许registry解析kind/schema、读取/解压payload并重建canonical snapshot。denied与not-found对外保持opaque，坏payload不能成为权限oracle。
+- existing-reference路径必须用`evidence_snapshots` inner join `evidence_payloads`读取encoding/digest/canonical/compressed size等完整metadata并验证split-column绑定，但不得select、解压或复制`compressed_payload`。完整read/export在授权后重新读取payload时必须把两次metadata逐字段精确绑定。
+- JSONB round-trip只允许`SourceAuthorization`私有canonical-byte cache被`RestoreSnapshotEnvelopeMetadata`重建；offset time、非canonical public authorization slice顺序或其他可被normalize改变的持久化metadata一律视为corruption，禁止静默修正。
 - HTTP response由transport-owned显式DTO构建，只含allowlisted envelope、preview-bound precision/bucket/quota/retention/redaction、`renderer_version`和显式版本化`read_model`；禁止canonical payload、authorization digest、任意metadata或generic JSON fallback。
-- production bootstrap在Child 10提供真实`AdmissionGate`、source resolver及read/reference composition前必须以nil/typed-nil依赖稳定503；禁止allow-all fallback或仅为演示打开feature。
+- production bootstrap已具备closed source resolver与read/reference composition，但真实deployment-membership `AdmissionGate`和witnessed source-deletion authority仍是外部依赖；gate为nil/typed-nil时必须稳定503、零worker/零写，禁止allow-all fallback或仅为演示打开feature。
 
 ### 3.6 Deletion、export 与 recovery
 
@@ -130,7 +133,7 @@ GET /api/evidence/{snapshot_id}
 | Asset history | 四类 facts 合计在全局 cap 内 | 超 cap 后继续 query、复制 hostile oversized slice |
 | Canonical ordering | source facts clone 后按稳定键排序 | 依赖数据库或 custom source 当前顺序产生 hash |
 | Preview/save | server-owned ID、ordered tagged union、prepared count/identity精确一致 | 客户端payload、空preparer吞掉非空items、重排snapshot |
-| Read | exact registry、record+source授权交集、versioned allowlist | unknown kind/version、raw payload/authorization/generic JSON |
+| Read | record+source授权先于kind/payload、exact registry、strict metadata/payload binding、versioned allowlist | denied actor区分unknown/corrupt payload、metadata-only读取payload bytes、静默normalize持久化envelope、raw payload/authorization/generic JSON |
 | Deletion/export | owned logical rows删除、global-ref payload GC、`kind.Export` | 删除其他copy、raw JSON export、不可重试receipt |
 | Recovery | deep-cloned reachable inventory、exact timestamp、同输入幂等 | orphan payload、浅拷贝TOCTOU、prefix kind放行、分歧replay |
 | Capacity | project logical bytes、warning可确认、exact boundary、existing ref豁免 | attachment quota、physical dedup折扣、stale/exceeded/unavailable写intent或snapshot |
