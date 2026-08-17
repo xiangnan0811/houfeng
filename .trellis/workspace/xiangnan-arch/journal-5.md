@@ -502,3 +502,25 @@ Upgraded global and project Trellis to 0.6.14, retained the native workflow, ena
 ### Next Steps
 
 - Resume VPS detail refactoring from Child 4 only after an explicit user decision.
+
+
+## Session 247: Deliver VPS Records collaboration platform
+
+**Date**: 2026-08-18
+**Task**: Deliver VPS Records collaboration platform
+**Branch**: `codex/vps-records-collaboration-archive`
+
+### Summary
+
+Implemented and independently reviewed Child 9 collaboration, notifications, optional scoped delivery, controlled Web surfaces, and downstream adapters; merged PR #410, released v0.67.0 through PR #411, verified post-merge CI, signed assets, and multi-arch image publication, then archived the task without starting Child 5.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a3137864` | (see git log) |
+| `ee208be1` | (see git log) |
+
+### Status
+
+[OK] **Completed**
