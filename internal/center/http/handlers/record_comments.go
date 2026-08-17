@@ -1,13 +1,16 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/recordauth"
@@ -132,7 +135,7 @@ func handleRecordCommentRoute(w http.ResponseWriter, request *http.Request, acto
 			return
 		}
 		var input recordCommentInput
-		if !decodeRecordsRequestJSON(w, request, &input) {
+		if !decodeRecordCommentRequestJSON(w, request, &input) {
 			return
 		}
 		result, err := application.CreateComment(request.Context(), recordcollaboration.CommentCreateApplicationRequest{
@@ -157,7 +160,7 @@ func handleRecordCommentRoute(w http.ResponseWriter, request *http.Request, acto
 			return
 		}
 		var input recordCommentInput
-		if !decodeRecordsRequestJSON(w, request, &input) {
+		if !decodeRecordCommentRequestJSON(w, request, &input) {
 			return
 		}
 		if input.ReplyToCommentID != "" {
@@ -181,7 +184,7 @@ func handleRecordCommentRoute(w http.ResponseWriter, request *http.Request, acto
 			return
 		}
 		var input struct{}
-		if !decodeRecordsRequestJSON(w, request, &input) {
+		if !decodeRecordCommentRequestJSON(w, request, &input) {
 			return
 		}
 		result, err := application.RedactComment(request.Context(), recordcollaboration.CommentRedactApplicationRequest{
@@ -218,6 +221,86 @@ func recordCommentLimit(request *http.Request) (uint64, bool) {
 func recordCommentIfMatch(request *http.Request) (uint64, bool) {
 	version, ok := recordActionIfMatch(request)
 	return version, ok && recordcollaboration.IsIncrementableCommentVersion(version)
+}
+
+func decodeRecordCommentRequestJSON(w http.ResponseWriter, request *http.Request, destination any) bool {
+	request.Body = http.MaxBytesReader(w, request.Body, DefaultJSONBodyLimit)
+	raw, err := io.ReadAll(request.Body)
+	var maxBytesError *http.MaxBytesError
+	if errors.As(err, &maxBytesError) {
+		writeRecordError(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body is too large", nil)
+		return false
+	}
+	if err != nil {
+		writeRecordError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request", nil)
+		return false
+	}
+	if !utf8.Valid(raw) || hasInvalidCommentJSONUnicode(raw) {
+		writeRecordCommentApplicationError(w, recordcollaboration.ErrInvalidCommentMarkdown)
+		return false
+	}
+	if err := decodeJSONValue(bytes.NewReader(raw), destination); err != nil {
+		writeRecordError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request", nil)
+		return false
+	}
+	return true
+}
+
+func hasInvalidCommentJSONUnicode(raw []byte) bool {
+	for index := 0; index < len(raw); index++ {
+		if raw[index] != '"' {
+			continue
+		}
+		for index++; index < len(raw) && raw[index] != '"'; index++ {
+			if raw[index] != '\\' {
+				continue
+			}
+			if index+1 >= len(raw) || raw[index+1] != 'u' {
+				index++
+				continue
+			}
+			value, ok := commentJSONHex16(raw, index+2)
+			if !ok {
+				return true
+			}
+			index += 5
+			switch {
+			case value >= 0xd800 && value <= 0xdbff:
+				if index+6 >= len(raw) || raw[index+1] != '\\' || raw[index+2] != 'u' {
+					return true
+				}
+				low, lowOK := commentJSONHex16(raw, index+3)
+				if !lowOK || low < 0xdc00 || low > 0xdfff {
+					return true
+				}
+				index += 6
+			case value >= 0xdc00 && value <= 0xdfff:
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func commentJSONHex16(raw []byte, start int) (uint16, bool) {
+	if start+4 > len(raw) {
+		return 0, false
+	}
+	var value uint16
+	for _, digit := range raw[start : start+4] {
+		value <<= 4
+		switch {
+		case digit >= '0' && digit <= '9':
+			value |= uint16(digit - '0')
+		case digit >= 'a' && digit <= 'f':
+			value |= uint16(digit-'a') + 10
+		case digit >= 'A' && digit <= 'F':
+			value |= uint16(digit-'A') + 10
+		default:
+			return 0, false
+		}
+	}
+	return value, true
 }
 
 func writeRecordCommentResult(w http.ResponseWriter, status int, result recordcollaboration.CommentMutationResult) {
@@ -262,9 +345,9 @@ func writeRecordCommentApplicationError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, recordauth.ErrDenied), errors.Is(err, records.ErrRecordNotFound),
 		errors.Is(err, records.ErrRecordDeletionReserved), errors.Is(err, recordcollaboration.ErrCommentNotFound),
-		errors.Is(err, store.ErrRecordSubjectNotFound):
+		errors.Is(err, recordcollaboration.ErrCommentPolicyDenied), errors.Is(err, store.ErrRecordSubjectNotFound):
 		writeRecordNotFound(w)
-	case errors.Is(err, recordcollaboration.ErrCommentConflict), errors.Is(err, recordcollaboration.ErrCommentPolicyDenied):
+	case errors.Is(err, recordcollaboration.ErrCommentConflict):
 		writeRecordError(w, http.StatusConflict, "comment_conflict", "comment changed", nil)
 	case errors.Is(err, recordplatform.ErrIdempotencyKeyReused), errors.Is(err, recordplatform.ErrIdempotencyConflictState):
 		writeRecordError(w, http.StatusConflict, "idempotency_key_reused", "idempotency key was reused", nil)

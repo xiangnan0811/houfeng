@@ -164,6 +164,112 @@ func TestRecordCommentsHandlerRoutesEditRedactAndMapsMarkdownSentinel(t *testing
 	}
 }
 
+func TestRecordCommentsHandlerRejectsInvalidCommentUnicodeBeforeApplication(t *testing.T) {
+	actor := testRecordActionActor(t)
+	invalidUTF8 := append([]byte(`{"body_markdown":"`), 0xff)
+	invalidUTF8 = append(invalidUTF8, []byte(`"}`)...)
+	for _, test := range []struct {
+		name string
+		body []byte
+	}{
+		{name: "raw invalid UTF-8", body: invalidUTF8},
+		{name: "lone escaped surrogate", body: []byte(`{"body_markdown":"\ud800"}`)},
+		{name: "isolated low surrogate", body: []byte(`{"body_markdown":"\udc00"}`)},
+		{name: "malformed unicode escape", body: []byte(`{"body_markdown":"\uZZZZ"}`)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			application := &recordCommentHandlerStub{}
+			request := httptest.NewRequest(http.MethodPost, "/api/records/rec_commentparent1/comments", bytes.NewReader(test.body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Idempotency-Key", "comment-invalid-unicode")
+			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+			recorder := httptest.NewRecorder()
+			RecordComments(application).ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusUnprocessableEntity || recorder.Header().Get("Cache-Control") != recordPrivateCacheControl ||
+				!strings.Contains(recorder.Body.String(), `"code":"invalid_comment_markdown"`) {
+				t.Fatalf("status=%d headers=%#v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
+			}
+			if application.createCalls != 0 || application.editCalls != 0 || application.redactCalls != 0 || application.listCalls != 0 {
+				t.Fatalf("application calls = create:%d edit:%d redact:%d list:%d", application.createCalls, application.editCalls, application.redactCalls, application.listCalls)
+			}
+		})
+	}
+}
+
+func TestRecordCommentsHandlerAcceptsPairedEscapedSurrogate(t *testing.T) {
+	actor := testRecordActionActor(t)
+	application := &recordCommentHandlerStub{result: recordcollaboration.CommentMutationResult{
+		CommentID: "rcm_comment1", RecordID: "rec_commentparent1", Version: 1,
+		State: recordcollaboration.CommentStateActive, EventKind: recordcollaboration.CommentMutationCreate, ChangedAt: time.Now().UTC(),
+	}}
+	request := httptest.NewRequest(http.MethodPost, "/api/records/rec_commentparent1/comments",
+		strings.NewReader(`{"body_markdown":"Safe \ud83d\ude00","reply_to_comment_id":"","mention_user_ids":[]}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "comment-valid-unicode")
+	request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+	recorder := httptest.NewRecorder()
+	RecordComments(application).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated || application.createCalls != 1 || application.create.BodyMarkdown != "Safe 😀" {
+		t.Fatalf("status=%d calls=%d markdown=%q body=%s", recorder.Code, application.createCalls, application.create.BodyMarkdown, recorder.Body.String())
+	}
+}
+
+func TestRecordCommentsHandlerPreservesJSONBoundAndStrictness(t *testing.T) {
+	actor := testRecordActionActor(t)
+	for _, test := range []struct {
+		name, body, code string
+		status           int
+	}{
+		{name: "body bound", body: `{"body_markdown":"` + strings.Repeat("a", DefaultJSONBodyLimit) + `"}`, status: http.StatusRequestEntityTooLarge, code: "request_too_large"},
+		{name: "unknown field", body: `{"body_markdown":"Safe.","html":"<b>unsafe</b>"}`, status: http.StatusBadRequest, code: "invalid_json"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			application := &recordCommentHandlerStub{}
+			request := httptest.NewRequest(http.MethodPost, "/api/records/rec_commentparent1/comments", strings.NewReader(test.body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Idempotency-Key", "comment-json-bound")
+			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+			recorder := httptest.NewRecorder()
+			RecordComments(application).ServeHTTP(recorder, request)
+
+			if recorder.Code != test.status || !strings.Contains(recorder.Body.String(), `"code":"`+test.code+`"`) || application.createCalls != 0 {
+				t.Fatalf("status=%d calls=%d body=%s", recorder.Code, application.createCalls, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestRecordCommentsHandlerKeepsPolicyDenialOpaqueFromMissingComment(t *testing.T) {
+	actor := testRecordActionActor(t)
+	responses := make([][]byte, 0, 2)
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "policy denied", err: recordcollaboration.ErrCommentPolicyDenied},
+		{name: "comment missing", err: recordcollaboration.ErrCommentNotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			application := &recordCommentHandlerStub{err: test.err}
+			request := httptest.NewRequest(http.MethodGet, "/api/records/rec_commentparent1/comments", nil)
+			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+			recorder := httptest.NewRecorder()
+			RecordComments(application).ServeHTTP(recorder, request)
+			responses = append(responses, append([]byte(nil), recorder.Body.Bytes()...))
+
+			if recorder.Code != http.StatusNotFound || recorder.Header().Get("Cache-Control") != recordPrivateCacheControl ||
+				!strings.Contains(recorder.Body.String(), `"code":"resource_not_found"`) {
+				t.Fatalf("status=%d headers=%#v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
+			}
+		})
+	}
+	if !bytes.Equal(responses[0], responses[1]) {
+		t.Fatalf("policy and missing responses differ: %s != %s", responses[0], responses[1])
+	}
+}
+
 type recordCommentHandlerStub struct {
 	create                                         recordcollaboration.CommentCreateApplicationRequest
 	edit                                           recordcollaboration.CommentEditApplicationRequest
