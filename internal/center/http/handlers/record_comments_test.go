@@ -89,6 +89,23 @@ func TestRecordCommentsHandlerReadAllowlistReturnsOnlyControlledRenderModel(t *t
 	}
 }
 
+func TestRecordCommentsHandlerRejectsNonCanonicalListQueryBeforeApplication(t *testing.T) {
+	actor := testRecordActionActor(t)
+	for _, rawQuery := range []string{"limit=%zz", "private=1", "limit=50&limit=51", "limit=050"} {
+		t.Run(rawQuery, func(t *testing.T) {
+			application := &recordCommentHandlerStub{}
+			request := httptest.NewRequest(http.MethodGet, "/api/records/rec_commentparent1/comments?"+rawQuery, nil)
+			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+			recorder := httptest.NewRecorder()
+			RecordComments(application).ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusBadRequest || application.listCalls != 0 {
+				t.Fatalf("query %q status/list calls = %d/%d, want 400/0; body=%s", rawQuery, recorder.Code, application.listCalls, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestRecordCommentsHandlerSerializesRedactedContentAsNullAndMentionsAsArray(t *testing.T) {
 	actor := testRecordActionActor(t)
 	now := time.Date(2026, 8, 17, 15, 2, 0, 0, time.UTC)

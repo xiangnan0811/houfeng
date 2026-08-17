@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -202,21 +201,7 @@ func handleRecordCommentRoute(w http.ResponseWriter, request *http.Request, acto
 }
 
 func recordCommentLimit(request *http.Request) (uint64, bool) {
-	query := request.URL.Query()
-	for key := range query {
-		if key != "limit" {
-			return 0, false
-		}
-	}
-	values, ok := query["limit"]
-	if !ok {
-		return 100, true
-	}
-	if len(values) != 1 || values[0] == "" || (len(values[0]) > 1 && values[0][0] == '0') {
-		return 0, false
-	}
-	limit, err := strconv.ParseUint(values[0], 10, 64)
-	return limit, err == nil && limit > 0 && limit <= 200
+	return recordListLimit(request, 100, 200)
 }
 
 func recordCommentIfMatch(request *http.Request) (uint64, bool) {

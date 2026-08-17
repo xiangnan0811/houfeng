@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -234,24 +233,7 @@ func handleRecordActionRoute(w http.ResponseWriter, request *http.Request, actor
 }
 
 func recordActionLimit(request *http.Request) (uint64, bool) {
-	query, err := url.ParseQuery(request.URL.RawQuery)
-	if err != nil {
-		return 0, false
-	}
-	for key := range query {
-		if key != "limit" {
-			return 0, false
-		}
-	}
-	values, ok := query["limit"]
-	if !ok {
-		return 50, true
-	}
-	if len(values) != 1 || values[0] == "" || (len(values[0]) > 1 && values[0][0] == '0') {
-		return 0, false
-	}
-	limit, err := strconv.ParseUint(values[0], 10, 64)
-	return limit, err == nil && limit > 0 && limit <= 100
+	return recordListLimit(request, 50, 100)
 }
 
 func writeRecordActionList(w http.ResponseWriter, recordID string, actions []recordcollaboration.ActionRecord) {

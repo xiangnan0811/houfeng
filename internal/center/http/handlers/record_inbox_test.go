@@ -60,6 +60,23 @@ func TestRecordInboxHandlerReturnsNoStoreClosedShapesAndNonNilCollections(t *tes
 	}
 }
 
+func TestRecordInboxHandlerRejectsNonCanonicalListQueryBeforeApplication(t *testing.T) {
+	actor := testRecordActionActor(t)
+	for _, rawQuery := range []string{"limit=%zz", "private=1", "limit=50&limit=51", "limit=050"} {
+		t.Run(rawQuery, func(t *testing.T) {
+			application := &recordInboxHandlerStub{}
+			request := httptest.NewRequest(http.MethodGet, "/api/record-notifications?"+rawQuery, nil)
+			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+			recorder := httptest.NewRecorder()
+			RecordInbox(application).ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusBadRequest || application.listCalls != 0 {
+				t.Fatalf("query %q status/list calls = %d/%d, want 400/0; body=%s", rawQuery, recorder.Code, application.listCalls, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestRecordInboxHandlerUsesOpaqueNotFoundForItemAndTarget(t *testing.T) {
 	actor := testRecordActionActor(t)
 	for _, suffix := range []string{"", "/target", "/read"} {
@@ -144,10 +161,12 @@ type recordInboxHandlerStub struct {
 	target      recordcollaboration.InboxDeepLinkTarget
 	count       int
 	err         error
+	listCalls   int
 	transitions []recordcollaboration.InboxTransitionRequest
 }
 
 func (stub *recordInboxHandlerStub) ListInbox(context.Context, recordcollaboration.InboxListRequest) ([]recordcollaboration.InboxItem, error) {
+	stub.listCalls++
 	return stub.items, stub.err
 }
 func (stub *recordInboxHandlerStub) GetInboxItem(context.Context, recordcollaboration.InboxItemRequest) (recordcollaboration.InboxItem, error) {

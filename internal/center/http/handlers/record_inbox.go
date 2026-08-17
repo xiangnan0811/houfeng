@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -84,16 +83,12 @@ func RecordInbox(application recordInboxApplication) http.Handler {
 				writeJSON(w, http.StatusOK, recordInboxUnreadResponse{UnreadCount: count})
 				return
 			}
-			limit := 50
-			if raw := request.URL.Query().Get("limit"); raw != "" {
-				parsed, err := strconv.Atoi(raw)
-				if err != nil || parsed < 1 || parsed > 100 {
-					writeRecordError(w, http.StatusBadRequest, "invalid_request", "invalid inbox limit", nil)
-					return
-				}
-				limit = parsed
+			limit, ok := recordListLimit(request, 50, 100)
+			if !ok {
+				writeRecordError(w, http.StatusBadRequest, "invalid_request", "invalid inbox limit", nil)
+				return
 			}
-			items, err := application.ListInbox(request.Context(), recordcollaboration.InboxListRequest{Actor: actor, Limit: limit})
+			items, err := application.ListInbox(request.Context(), recordcollaboration.InboxListRequest{Actor: actor, Limit: int(limit)})
 			if err != nil {
 				writeRecordInboxError(w, err)
 				return
