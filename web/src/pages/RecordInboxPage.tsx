@@ -103,10 +103,9 @@ export function RecordInboxPage() {
     setState(closedFailureState(error))
   }
 
-	function invalidateTargetFor(notificationId: string) {
-		targetGenerationRef.current += 1
-		setTarget((current) => current?.notificationId === notificationId ? null : current)
-	}
+  function invalidateTargetFor(notificationId: string) {
+    setTarget((current) => current?.notificationId === notificationId ? null : current)
+  }
 
   function replaceItem(next: RecordNotification) {
     setItems((current) => current.map((item) => item.notification_id === next.notification_id ? next : item))
@@ -114,14 +113,14 @@ export function RecordInboxPage() {
 
   async function changeReadState(item: RecordNotification) {
     const token = beginBusy(item.notification_id)
-		invalidateTargetFor(item.notification_id)
+    invalidateTargetFor(item.notification_id)
     try {
       const next = item.read_at === null
         ? await markRecordNotificationRead(item.notification_id)
         : await markRecordNotificationUnread(item.notification_id)
       if (!sameNotificationIdentity(item, next)) throw new Error('record_notification_identity_mismatch')
       if (mountedRef.current && operationTokensRef.current.get(item.notification_id) === token) {
-				invalidateTargetFor(item.notification_id)
+        invalidateTargetFor(item.notification_id)
         replaceItem(next)
         invalidateRecordNotificationUnreadCount()
       }
@@ -134,14 +133,14 @@ export function RecordInboxPage() {
 
   async function dismiss(item: RecordNotification) {
     const token = beginBusy(item.notification_id)
-		invalidateTargetFor(item.notification_id)
+    invalidateTargetFor(item.notification_id)
     try {
       const next = await dismissRecordNotification(item.notification_id)
       if (!sameNotificationIdentity(item, next) || next.dismissed_at === null) {
         throw new Error('record_notification_identity_mismatch')
       }
       if (!mountedRef.current || operationTokensRef.current.get(item.notification_id) !== token) return
-		invalidateTargetFor(item.notification_id)
+      invalidateTargetFor(item.notification_id)
       setItems((current) => {
         const next = current.filter((candidate) => candidate.notification_id !== item.notification_id)
         if (next.length === 0) setState('empty')
@@ -164,13 +163,12 @@ export function RecordInboxPage() {
       if (value.record_id !== item.record_id || value.subject_kind !== item.subject_kind || value.subject_id !== item.subject_id) {
         throw new Error('record_notification_target_mismatch')
       }
-			if (mountedRef.current && targetGenerationRef.current === generation &&
-				operationTokensRef.current.get(item.notification_id) === token) {
+      if (mountedRef.current && targetGenerationRef.current === generation &&
+        operationTokensRef.current.get(item.notification_id) === token) {
         setTarget({ notificationId: item.notification_id, value })
       }
     } catch (error: unknown) {
-			if (mountedRef.current && targetGenerationRef.current === generation &&
-				operationTokensRef.current.get(item.notification_id) === token) failClosed(error)
+      if (mountedRef.current && operationTokensRef.current.get(item.notification_id) === token) failClosed(error)
     } finally {
       finishBusy(item.notification_id, token)
     }

@@ -179,6 +179,44 @@ describe('RecordInboxPage', () => {
 		expect(screen.queryByText('记录通知暂不可用')).not.toBeInTheDocument()
 	})
 
+  it.each([
+    [404, '收件箱访问已撤销'],
+    [503, '记录通知暂不可用'],
+  ])('does not suppress target A failure after unrelated item B mutation (%i)', async (status, expectedState) => {
+    const pendingTarget = deferred<{ record_id: string; subject_kind: 'comment'; subject_id: string }>()
+    api.list.mockResolvedValue({ items: [unreadNotification, actionNotification] })
+    api.target.mockReturnValue(pendingTarget.promise)
+    api.dismiss.mockResolvedValue({ ...actionNotification, dismissed_at: '2026-08-17T10:01:00Z' })
+    renderPage()
+    await screen.findByText('评论提及')
+
+    fireEvent.click(screen.getByRole('button', { name: '查看“评论提及”的对象' }))
+    fireEvent.click(screen.getByRole('button', { name: '移除“行动指派”' }))
+    await waitFor(() => expect(screen.queryByText('行动指派')).not.toBeInTheDocument())
+    await act(async () => pendingTarget.reject(new ApiError(status, 'private target failure')))
+
+    expect(await screen.findByText(expectedState)).toBeInTheDocument()
+    expect(screen.getByLabelText('通知摘要')).toHaveTextContent('0')
+  })
+
+  it('does not suppress target A failure after selecting unrelated target B', async () => {
+    const pendingTargetA = deferred<{ record_id: string; subject_kind: 'comment'; subject_id: string }>()
+    api.list.mockResolvedValue({ items: [unreadNotification, actionNotification] })
+    api.target
+      .mockReturnValueOnce(pendingTargetA.promise)
+      .mockResolvedValueOnce({ record_id: 'rec_001', subject_kind: 'action', subject_id: 'ract_002' })
+    renderPage()
+    await screen.findByText('评论提及')
+
+    fireEvent.click(screen.getByRole('button', { name: '查看“评论提及”的对象' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看“行动指派”的对象' }))
+    expect(await screen.findByText('目标：行动 ract_002')).toBeInTheDocument()
+    await act(async () => pendingTargetA.reject(new ApiError(404, 'private target failure')))
+
+    expect(await screen.findByText('收件箱访问已撤销')).toBeInTheDocument()
+    expect(screen.getByLabelText('通知摘要')).toHaveTextContent('0')
+  })
+
   it('keeps a newer item busy when an older operation settles', async () => {
     const first = deferred<RecordNotification>()
     const second = deferred<RecordNotification>()
