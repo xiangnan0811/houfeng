@@ -145,7 +145,7 @@ describe('AppShell', () => {
 
     renderAuthenticatedAppShell()
 
-    expect(screen.getByRole('link', { name: '记录通知' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '记录通知，正在更新未读数' })).toHaveAttribute(
       'href',
       '/record-inbox',
     )

@@ -11,6 +11,7 @@ import {
   listRecordNotifications,
   setRecordWatch,
   transitionRecordAction,
+  updateRecordAction,
 } from './recordCollaborationApi'
 
 function response(body: unknown, status = 200): Response {
@@ -29,12 +30,12 @@ const commentMutation = {
   replayed: false, changed_at: '2026-08-17T09:00:00Z',
 }
 const watch = {
-  record_id: 'rec_one', user_id: 'usr_one', version: 0, preference: 'default',
-  sources: { author: false, owner: true, participant: false, comment: false, mention: false, action: false },
+  record_id: 'rec_one', user_id: 'usr_0123456789abcdef01234567', version: 0, preference: 'default',
+  sources: { author: false, owner: false, participant: false, comment: false, mention: false, action: false },
   updated_at: null,
 }
 const notification = {
-  notification_id: 'rnt_one', record_id: 'rec_one', event_kind: 'record_comment_mentioned',
+  notification_id: `rnt_${'a'.repeat(64)}`, record_id: 'rec_one', event_kind: 'comment_mentioned',
   subject_kind: 'comment', subject_id: 'rcm_one', source_version: 1, reason: 'mention', mandatory: true,
   event_at: '2026-08-17T09:00:00Z', read_at: null, dismissed_at: null,
 }
@@ -108,12 +109,27 @@ describe('record collaboration lazy transport', () => {
     expect(dismissCall?.[1]).not.toHaveProperty('body')
   })
 
-  it('decodes a closed notification DTO and rejects nil collection fallbacks', async () => {
+  it('sends action updates with the current version and exact bounded body', async () => {
+    const input = { title: '复核新证据', details: '', assignee_id: '', due_at: null, subject_revision_id: 'rrv_two' }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({
+      ...actionMutation, version: 3, event_kind: 'updated',
+    }))
+
+    await updateRecordAction('rec_one', 'ract_one', input, 2, 'update-key')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/records/rec_one/actions/ract_one', expect.objectContaining({
+      method: 'PATCH',
+      headers: expect.objectContaining({ 'Idempotency-Key': 'update-key', 'If-Match': '"2"' }),
+      body: JSON.stringify(input),
+    }))
+  })
+
+  it('rejects over-broad and nil notification responses', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response({ items: [{ ...notification, private_record_title: 'do not render' }] }))
       .mockResolvedValueOnce(response({ items: null }))
 
-    await expect(listRecordNotifications()).resolves.toEqual({ items: [notification] })
+    await expect(listRecordNotifications()).rejects.toThrow('invalid_record_collaboration_response')
     await expect(listRecordNotifications()).rejects.toThrow('invalid_record_collaboration_response')
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })

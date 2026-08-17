@@ -4,7 +4,10 @@ import { GlobalSearch } from './GlobalSearch'
 import { useThemeOptional } from '../../lib/theme-context'
 import { SyncStatus, type SyncStatusProps } from './SyncStatus'
 import type { User } from '../../lib/auth-client'
-import { getRecordNotificationUnreadCount } from '../../lib/recordInboxUnreadApi'
+import {
+  getRecordNotificationUnreadCount,
+  RECORD_INBOX_UNREAD_INVALIDATED_EVENT,
+} from '../../lib/recordInboxUnreadApi'
 
 const PAGE_TITLES: Record<string, string> = {
   '/': '工作台',
@@ -186,21 +189,37 @@ function ThemeSwitcher() {
 }
 
 function NotificationBell() {
-  const [unreadCount, setUnreadCount] = useState(0)
+  const pathname = useLocation().pathname
+  const [unreadCount, setUnreadCount] = useState<number | null | undefined>(undefined)
+  const requestGeneration = useRef(0)
 
   useEffect(() => {
     let active = true
-    getRecordNotificationUnreadCount()
-      .then(({ unread_count }) => {
-        if (active) setUnreadCount(Math.max(0, Math.trunc(unread_count)))
-      })
-      .catch(() => {
-        if (active) setUnreadCount(0)
-      })
-    return () => { active = false }
-  }, [])
+    const refresh = () => {
+      const generation = requestGeneration.current + 1
+      requestGeneration.current = generation
+      getRecordNotificationUnreadCount()
+        .then(({ unread_count }) => {
+          if (active && requestGeneration.current === generation) setUnreadCount(unread_count)
+        })
+        .catch(() => {
+          if (active && requestGeneration.current === generation) setUnreadCount(null)
+        })
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    window.addEventListener(RECORD_INBOX_UNREAD_INVALIDATED_EVENT, refresh)
+    return () => {
+      active = false
+      requestGeneration.current += 1
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener(RECORD_INBOX_UNREAD_INVALIDATED_EVENT, refresh)
+    }
+  }, [pathname])
 
-  const label = unreadCount > 0 ? `记录通知，${unreadCount} 条未读` : '记录通知'
+  const label = unreadCount === null ? '记录通知，未读数暂不可用'
+    : unreadCount === undefined ? '记录通知，正在更新未读数'
+      : unreadCount > 0 ? `记录通知，${unreadCount} 条未读` : '记录通知，无未读'
   return (
     <Link
       className="tp-icon-btn tp-record-inbox"
@@ -208,7 +227,7 @@ function NotificationBell() {
       aria-label={label}
       title={label}
     >
-      {unreadCount > 0 ? (
+      {typeof unreadCount === 'number' && unreadCount > 0 ? (
         <span className="badge badge--count" aria-hidden="true">{unreadCount > 99 ? '99+' : unreadCount}</span>
       ) : (
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">

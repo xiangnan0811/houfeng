@@ -25,4 +25,10 @@ describe('RecordWatchControl', () => {
     expect(screen.getByText('正在读取关注状态')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '关注全部更新' })).not.toBeInTheDocument()
   })
+
+  it('shows an explicit empty state without treating it as an error', () => {
+    render(<RecordWatchControl state="empty" watch={null} busy={false} onChange={vi.fn()} />)
+    expect(screen.getByText('暂无关注状态')).toBeInTheDocument()
+    expect(screen.queryByText('关注状态暂不可用')).not.toBeInTheDocument()
+  })
 })

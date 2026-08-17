@@ -41,4 +41,13 @@ describe('RecordRevisionCollaborationControls', () => {
     expect(screen.getByRole('status')).toHaveTextContent('协作权限已撤销')
     expect(screen.queryByLabelText('负责人')).not.toBeInTheDocument()
   })
+
+  it('renders an explicit empty state without revision controls', () => {
+    render(<RecordRevisionCollaborationControls
+      state="empty" members={[]} ownerId="" participantIds={[]}
+      followUpAt="" onOwnerChange={vi.fn()} onParticipantToggle={vi.fn()} onFollowUpChange={vi.fn()}
+    />)
+    expect(screen.getByText('暂无协作字段')).toBeInTheDocument()
+    expect(screen.queryByLabelText('负责人')).not.toBeInTheDocument()
+  })
 })

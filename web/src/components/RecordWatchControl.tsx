@@ -4,7 +4,7 @@ import { RecordCollaborationState } from './RecordCollaborationState'
 import { Button } from './atoms'
 
 type RecordWatchControlProps = {
-  state: Exclude<RecordCollaborationSurfaceState, 'empty'>
+  state: RecordCollaborationSurfaceState
   watch: RecordWatch | null
   busy: boolean
   onChange: (preference: RecordFollowerPreference) => void

@@ -8,7 +8,7 @@ export type RecordCollaborationMemberOption = {
 }
 
 type RecordRevisionCollaborationControlsProps = {
-  state: Exclude<RecordCollaborationSurfaceState, 'empty'>
+  state: RecordCollaborationSurfaceState
   members: readonly RecordCollaborationMemberOption[]
   ownerId: string
   participantIds: readonly string[]

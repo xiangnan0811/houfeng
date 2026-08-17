@@ -13,9 +13,10 @@ const action: RecordAction = {
 describe('RecordActionPanel', () => {
   it('creates a bounded action and exposes native transition commands', () => {
     const onCreate = vi.fn()
+    const onUpdate = vi.fn()
     const onTransition = vi.fn()
     render(<RecordActionPanel state="ready" actions={[action]} members={[{ id: 'usr_peer', label: '周衡' }]}
-      busy={false} onCreate={onCreate} onTransition={onTransition} />)
+      busy={false} onCreate={onCreate} onUpdate={onUpdate} onTransition={onTransition} />)
 
     fireEvent.change(screen.getByLabelText('行动标题'), { target: { value: '确认修复窗口' } })
     fireEvent.change(screen.getByLabelText('指派给'), { target: { value: 'usr_peer' } })
@@ -24,6 +25,16 @@ describe('RecordActionPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '完成“复核证据”' }))
     expect(onTransition).toHaveBeenCalledWith(action, 'complete')
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑“复核证据”' }))
+    expect(screen.getByLabelText('行动标题')).toHaveValue('复核证据')
+    fireEvent.change(screen.getByLabelText('行动标题'), { target: { value: '复核新证据' } })
+    fireEvent.change(screen.getByLabelText('关联修订'), { target: { value: 'rrv_two' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存行动' }))
+    expect(onUpdate).toHaveBeenCalledWith(action, {
+      title: '复核新证据', assignee_id: 'usr_peer', due_at: '2026-08-20T09:00:00.000Z',
+      subject_revision_id: 'rrv_two', version: 2,
+    })
   })
 
   it.each([
@@ -33,7 +44,7 @@ describe('RecordActionPanel', () => {
     ['deleted', '记录已删除'],
   ] as const)('renders %s without action commands', (state, label) => {
     render(<RecordActionPanel state={state} actions={[]} members={[]} busy={false}
-      onCreate={vi.fn()} onTransition={vi.fn()} />)
+      onCreate={vi.fn()} onUpdate={vi.fn()} onTransition={vi.fn()} />)
     expect(screen.getByText(label)).toBeInTheDocument()
   })
 })

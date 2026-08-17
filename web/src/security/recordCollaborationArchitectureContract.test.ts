@@ -6,6 +6,7 @@ describe('record collaboration chunk architecture', () => {
     const router = readFileSync('src/app/router.tsx', 'utf8')
     expect(router).toContain("import('../pages/RecordInboxPage')")
     expect(router).not.toMatch(/import\s+\{[^}]*RecordInboxPage[^}]*\}\s+from/)
+    expect(router).not.toContain('component-harness')
   })
 
   it('keeps the eager shell on the bounded unread-count transport only', () => {

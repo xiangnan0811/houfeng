@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { RecordComment } from '../lib/types'
@@ -13,7 +13,7 @@ const comment: RecordComment = {
 }
 
 describe('RecordCommentThread', () => {
-  it('supports reply, mention, edit, and explicit redaction confirmation', () => {
+  it('supports reply, mention, fresh replacement edit, and modal redaction confirmation', async () => {
     const onSubmit = vi.fn()
     const onRedact = vi.fn()
     render(<RecordCommentThread state="ready" comments={[comment]} currentUserId="usr_self"
@@ -28,11 +28,23 @@ describe('RecordCommentThread', () => {
       body_markdown: '收到，继续跟进。', reply_to_comment_id: 'rcm_one', mention_user_ids: ['usr_peer'] })
 
     fireEvent.click(screen.getByRole('button', { name: '编辑该评论' }))
-    expect(screen.getByLabelText('评论内容')).toHaveValue('**已验证**')
+    expect(screen.getByLabelText('评论内容')).toHaveValue('')
+    fireEvent.change(screen.getByLabelText('评论内容'), { target: { value: '替换后的内容' } })
     fireEvent.click(screen.getByRole('button', { name: '保存编辑' }))
-    expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'edit', comment_id: 'rcm_one', version: 2 }))
+    expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({
+      mode: 'edit', comment_id: 'rcm_one', version: 2, body_markdown: '替换后的内容',
+    }))
 
-    fireEvent.click(screen.getByRole('button', { name: '请求遮盖该评论' }))
+    const trigger = screen.getByRole('button', { name: '请求遮盖该评论' })
+    trigger.focus()
+    fireEvent.click(trigger)
+    const dialog = screen.getByRole('alertdialog', { name: '确认永久遮盖评论' })
+    await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
+
+    fireEvent.click(trigger)
     fireEvent.click(screen.getByRole('button', { name: '确认永久遮盖' }))
     expect(onRedact).toHaveBeenCalledWith(comment)
   })
@@ -43,5 +55,23 @@ describe('RecordCommentThread', () => {
       currentUserId="usr_self" members={[]} busy={false} onSubmit={vi.fn()} onRedact={vi.fn()} />)
     expect(screen.getByText('评论内容已永久遮盖')).toBeInTheDocument()
     expect(screen.queryByText('**已验证**')).not.toBeInTheDocument()
+  })
+
+  it('clears composer and redaction state when access leaves ready', () => {
+    const props = {
+      comments: [comment], currentUserId: 'usr_self', members: [], busy: false,
+      onSubmit: vi.fn(), onRedact: vi.fn(),
+    }
+    const { rerender } = render(<RecordCommentThread state="ready" {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '编辑该评论' }))
+    fireEvent.change(screen.getByLabelText('评论内容'), { target: { value: '仅本地草稿' } })
+    fireEvent.click(screen.getByRole('button', { name: '请求遮盖该评论' }))
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+
+    rerender(<RecordCommentThread state="revoked" {...props} />)
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    rerender(<RecordCommentThread state="ready" {...props} />)
+    expect(screen.getByLabelText('评论内容')).toHaveValue('')
+    expect(screen.getByText('发布新评论')).toBeInTheDocument()
   })
 })

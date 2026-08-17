@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ThemeProvider } from '../../lib/theme-context'
+import { invalidateRecordNotificationUnreadCount } from '../../lib/recordInboxUnreadApi'
 import { TopBar } from './TopBar'
 
 const sync = { state: 'clear' as const, label: '摘要无异常' }
@@ -42,6 +43,28 @@ describe('TopBar theme menu', () => {
     const inbox = await screen.findByRole('link', { name: '记录通知，12 条未读' })
     expect(inbox).toHaveAttribute('href', '/record-inbox')
     await waitFor(() => expect(inbox).toHaveTextContent('12'))
+  })
+
+  it('shows unread availability failures explicitly instead of a false zero', async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('unavailable'))
+    renderTopBar()
+
+    expect(await screen.findByRole('link', { name: '记录通知，未读数暂不可用' })).toHaveAttribute('href', '/record-inbox')
+    expect(screen.queryByRole('link', { name: '记录通知' })).not.toBeInTheDocument()
+  })
+
+  it('refreshes the narrow unread seam on focus and inbox invalidation', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ unread_count: 1 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ unread_count: 2 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ unread_count: 3 }), { status: 200 }))
+    renderTopBar()
+    expect(await screen.findByRole('link', { name: '记录通知，1 条未读' })).toBeInTheDocument()
+
+    fireEvent.focus(window)
+    expect(await screen.findByRole('link', { name: '记录通知，2 条未读' })).toBeInTheDocument()
+    invalidateRecordNotificationUnreadCount()
+    expect(await screen.findByRole('link', { name: '记录通知，3 条未读' })).toBeInTheDocument()
   })
 
   it('exposes menu button state and four radio menu items', () => {

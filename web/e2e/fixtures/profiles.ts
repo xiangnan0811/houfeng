@@ -31,11 +31,11 @@ const AUTHENTICATED_USER = {
 } satisfies User
 
 const RECORD_NOTIFICATION = {
-  notification_id: 'rnt_e2e_001',
-  record_id: 'rec_e2e_001',
-  event_kind: 'record_comment_mentioned',
+  notification_id: `rnt_${'a'.repeat(64)}`,
+  record_id: 'rec_e2e001',
+  event_kind: 'comment_mentioned',
   subject_kind: 'comment',
-  subject_id: 'rcm_e2e_001',
+  subject_id: 'rcm_e2e001',
   source_version: 3,
   reason: 'mention',
   mandatory: true,
@@ -419,7 +419,7 @@ export function coreRouteProfile(path: CoreRoutePath): ApiFixtureProfile {
         },
         [apiRouteKey('PUT', `/api/record-notifications/${RECORD_NOTIFICATION.notification_id}/dismiss`)]: {
           status: 200,
-          body: { ...RECORD_NOTIFICATION, dismissed_at: '2026-08-17T10:01:00Z' },
+          body: { ...RECORD_NOTIFICATION, read_at: '2026-08-17T10:00:00Z', dismissed_at: '2026-08-17T10:01:00Z' },
           expectNoBody: true as const,
         },
       })

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -25,7 +25,7 @@ vi.mock('../lib/recordCollaborationApi', () => ({
 const unreadNotification: RecordNotification = {
   notification_id: 'rnt_001',
   record_id: 'rec_001',
-  event_kind: 'record_comment_mentioned',
+  event_kind: 'comment_mentioned',
   subject_kind: 'comment',
   subject_id: 'rcm_001',
   source_version: 3,
@@ -34,6 +34,25 @@ const unreadNotification: RecordNotification = {
   event_at: '2026-08-17T09:30:00Z',
   read_at: null,
   dismissed_at: null,
+}
+
+const actionNotification: RecordNotification = {
+  ...unreadNotification,
+  notification_id: 'rnt_002',
+  event_kind: 'action_assigned',
+  subject_kind: 'action',
+  subject_id: 'ract_002',
+  reason: 'assignee',
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 function renderPage() {
@@ -65,6 +84,8 @@ describe('RecordInboxPage', () => {
   })
 
   it('updates read state and removes a dismissed item without exposing mutable record content', async () => {
+    const invalidated = vi.fn()
+    window.addEventListener('houfeng:record-inbox-unread-invalidated', invalidated)
     api.list.mockResolvedValue({ items: [unreadNotification] })
     renderPage()
     await screen.findByText('评论提及')
@@ -72,10 +93,13 @@ describe('RecordInboxPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '标记“评论提及”为已读' }))
     await waitFor(() => expect(screen.getByText('已读')).toBeInTheDocument())
     expect(api.read).toHaveBeenCalledWith('rnt_001')
+    expect(invalidated).toHaveBeenCalledTimes(1)
 
     fireEvent.click(screen.getByRole('button', { name: '移除“评论提及”' }))
     expect(await screen.findByText('当前没有待处理通知')).toBeInTheDocument()
     expect(api.dismiss).toHaveBeenCalledWith('rnt_001')
+    expect(invalidated).toHaveBeenCalledTimes(2)
+    window.removeEventListener('houfeng:record-inbox-unread-invalidated', invalidated)
   })
 
   it('renders explicit empty, revoked, and opaque error states', async () => {
@@ -94,5 +118,64 @@ describe('RecordInboxPage', () => {
     renderPage()
     expect(await screen.findByRole('alert')).toHaveTextContent('记录通知暂不可用')
     expect(screen.queryByText(/postgres\.internal/)).not.toBeInTheDocument()
+  })
+
+  it('does not let an older target response overwrite the latest selection', async () => {
+    const first = deferred<{ record_id: string; subject_kind: 'comment'; subject_id: string }>()
+    const second = deferred<{ record_id: string; subject_kind: 'action'; subject_id: string }>()
+    api.list.mockResolvedValue({ items: [unreadNotification, actionNotification] })
+    api.target.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    renderPage()
+    await screen.findByText('评论提及')
+
+    fireEvent.click(screen.getByRole('button', { name: '查看“评论提及”的对象' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看“行动指派”的对象' }))
+    await act(async () => second.resolve({ record_id: 'rec_001', subject_kind: 'action', subject_id: 'ract_002' }))
+    expect(await screen.findByText('目标：行动 ract_002')).toBeInTheDocument()
+    await act(async () => first.resolve({ record_id: 'rec_001', subject_kind: 'comment', subject_id: 'rcm_001' }))
+    expect(screen.queryByText('目标：评论 rcm_001')).not.toBeInTheDocument()
+  })
+
+  it('keeps a newer item busy when an older operation settles', async () => {
+    const first = deferred<RecordNotification>()
+    const second = deferred<RecordNotification>()
+    api.list.mockResolvedValue({ items: [unreadNotification, actionNotification] })
+    api.read.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    renderPage()
+    await screen.findByText('评论提及')
+
+    const firstButton = screen.getByRole('button', { name: '标记“评论提及”为已读' })
+    const secondButton = screen.getByRole('button', { name: '标记“行动指派”为已读' })
+    fireEvent.click(firstButton)
+    fireEvent.click(secondButton)
+    expect(secondButton).toBeDisabled()
+    await act(async () => first.resolve({ ...unreadNotification, read_at: '2026-08-17T10:00:00Z' }))
+    expect(secondButton).toBeDisabled()
+    await act(async () => second.resolve({ ...actionNotification, read_at: '2026-08-17T10:00:00Z' }))
+    await waitFor(() => expect(secondButton).not.toBeDisabled())
+  })
+
+  it('clears prior items and target on a revoked transition', async () => {
+    api.list.mockResolvedValue({ items: [unreadNotification] })
+    api.read.mockRejectedValue(new ApiError(404, 'private target'))
+    renderPage()
+    await screen.findByText('评论提及')
+    fireEvent.click(screen.getByRole('button', { name: '查看“评论提及”的对象' }))
+    expect(await screen.findByText('目标：评论 rcm_001')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '标记“评论提及”为已读' }))
+
+    expect(await screen.findByText('收件箱访问已撤销')).toBeInTheDocument()
+    expect(screen.getByLabelText('通知摘要')).toHaveTextContent('0')
+  })
+
+  it('fails closed when a target response does not match the selected notification', async () => {
+    api.list.mockResolvedValue({ items: [unreadNotification] })
+    api.target.mockResolvedValue({ record_id: 'rec_other', subject_kind: 'comment', subject_id: 'rcm_001' })
+    renderPage()
+    await screen.findByText('评论提及')
+    fireEvent.click(screen.getByRole('button', { name: '查看“评论提及”的对象' }))
+
+    expect(await screen.findByText('记录通知暂不可用')).toBeInTheDocument()
+    expect(screen.getByLabelText('通知摘要')).toHaveTextContent('0')
   })
 })

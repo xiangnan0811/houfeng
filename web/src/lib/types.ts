@@ -1,3 +1,5 @@
+import type { CommentRenderModelV1 } from './commentMarkdown'
+
 export type MonitoringInstanceRecord = {
   monitoring_instance_id: string
   display_name: string
@@ -2978,7 +2980,7 @@ export type RecordComment = {
   version: number
   state: RecordCommentState
   body_markdown: string | null
-  render_model: unknown | null
+  render_model: CommentRenderModelV1 | null
   reply_to_comment_id: string
   mention_user_ids: string[]
   created_at: string
@@ -3025,8 +3027,8 @@ export type RecordWatch = {
 export type RecordNotification = {
   notification_id: string
   record_id: string
-  event_kind: 'record_action_assigned' | 'record_action_completed' | 'record_action_cancelled' | 'record_comment_replied' | 'record_comment_mentioned'
-  subject_kind: 'action' | 'comment'
+  event_kind: 'record_owner_changed' | 'record_participant_changed' | 'record_follow_up_due' | 'action_assigned' | 'action_completed' | 'action_cancelled' | 'comment_replied' | 'comment_mentioned' | 'security_access_revoked'
+  subject_kind: 'record' | 'action' | 'comment'
   subject_id: string
   source_version: number
   reason: 'owner' | 'participant' | 'assignee' | 'mention' | 'reply' | 'follower' | 'security'
@@ -3040,6 +3042,6 @@ export type RecordNotificationListResponse = { items: RecordNotification[] }
 export type RecordNotificationUnreadResponse = { unread_count: number }
 export type RecordNotificationTarget = {
   record_id: string
-  subject_kind: 'action' | 'comment'
+  subject_kind: 'record' | 'action' | 'comment'
   subject_id: string
 }

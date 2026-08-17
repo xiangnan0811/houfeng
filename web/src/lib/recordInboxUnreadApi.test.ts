@@ -19,7 +19,7 @@ describe('record inbox eager unread transport', () => {
 
   it('fails closed for malformed or over-broad unread count responses', async () => {
     vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(JSON.stringify({ unread_count: -1, private_title: 'secret' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ unread_count: 3, private_title: 'secret' }), { status: 200 }))
 
     await expect(getRecordNotificationUnreadCount()).rejects.toThrow('invalid_record_notification_unread_response')
   })

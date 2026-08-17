@@ -6,7 +6,7 @@ import { RecordCommentMarkdown } from './RecordCommentMarkdown'
 import type { RecordCollaborationMemberOption } from './RecordRevisionCollaborationControls'
 import type { RecordCollaborationSurfaceState } from './RecordCollaborationState'
 import { RecordCollaborationState } from './RecordCollaborationState'
-import { Button } from './atoms'
+import { Button, Modal } from './atoms'
 
 export type RecordCommentSubmit = {
   mode: 'create' | 'edit'
@@ -28,15 +28,22 @@ type RecordCommentThreadProps = {
 }
 
 export function RecordCommentThread({ state, comments, currentUserId, members, busy, onSubmit, onRedact }: RecordCommentThreadProps) {
-  const [body, setBody] = useState('')
-  const [replyTo, setReplyTo] = useState('')
-  const [editing, setEditing] = useState<RecordComment | null>(null)
-  const [mentions, setMentions] = useState<string[]>([])
-  const [redactCandidate, setRedactCandidate] = useState<RecordComment | null>(null)
-
   if (state === 'loading' || state === 'error' || state === 'revoked' || state === 'deleted') {
     return <RecordCollaborationState state={state} loadingTitle="正在读取评论" emptyTitle="暂无评论" errorTitle="评论暂不可用" />
   }
+  const freshStateKey = `${state}:${comments.map((comment) => `${comment.comment_id}:${comment.state}`).join(',')}`
+  return <ReadyRecordCommentThread key={freshStateKey} state={state} comments={comments} currentUserId={currentUserId}
+    members={members} busy={busy} onSubmit={onSubmit} onRedact={onRedact} />
+}
+
+function ReadyRecordCommentThread({ state, comments, currentUserId, members, busy, onSubmit, onRedact }: RecordCommentThreadProps) {
+  const [body, setBody] = useState('')
+  const [replyTo, setReplyTo] = useState('')
+  const [editingId, setEditingId] = useState('')
+  const [mentions, setMentions] = useState<string[]>([])
+  const [redactCandidateId, setRedactCandidateId] = useState('')
+  const editing = comments.find((comment) => comment.comment_id === editingId && comment.state === 'active') ?? null
+  const redactCandidate = comments.find((comment) => comment.comment_id === redactCandidateId && comment.state === 'active') ?? null
 
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -49,17 +56,24 @@ export function RecordCommentThread({ state, comments, currentUserId, members, b
   }
 
   function beginReply(comment: RecordComment) {
-    setEditing(null)
+    setEditingId('')
     setReplyTo(comment.comment_id)
     setBody('')
     setMentions([])
   }
 
   function beginEdit(comment: RecordComment) {
-    setEditing(comment)
+    setEditingId(comment.comment_id)
     setReplyTo('')
-    setBody(comment.body_markdown ?? '')
-    setMentions([...comment.mention_user_ids])
+    setBody('')
+    setMentions([])
+  }
+
+  function cancelComposer() {
+    setEditingId('')
+    setReplyTo('')
+    setBody('')
+    setMentions([])
   }
 
   function toggleMention(userId: string, selected: boolean) {
@@ -95,7 +109,7 @@ export function RecordCommentThread({ state, comments, currentUserId, members, b
                     {comment.author_id === currentUserId
                       ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => beginEdit(comment)}>编辑该评论</Button>
                       : null}
-                    <Button size="sm" variant="danger" disabled={busy} onClick={() => setRedactCandidate(comment)}>请求遮盖该评论</Button>
+                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => setRedactCandidateId(comment.comment_id)}>请求遮盖该评论</Button>
                   </div>
                 ) : null}
               </li>
@@ -123,16 +137,22 @@ export function RecordCommentThread({ state, comments, currentUserId, members, b
         </fieldset>
         <div className="record-collaboration-composer__commands page-form-actions">
           <Button type="submit" disabled={busy || !body.trim()}>{editing ? '保存编辑' : replyTo ? '发布回复' : '发布评论'}</Button>
-          {editing || replyTo ? <Button variant="ghost" disabled={busy} onClick={() => { setEditing(null); setReplyTo(''); setBody(''); setMentions([]) }}>取消</Button> : null}
+          {editing || replyTo ? <Button variant="ghost" disabled={busy} onClick={cancelComposer}>取消</Button> : null}
         </div>
       </form>
-      {redactCandidate ? (
-        <div className="record-comment-redaction inline-alert danger page-form-actions" role="alert">
-          <p>遮盖不可撤销；正文、历史渲染与摘要都将被清除。</p>
-          <Button variant="danger" disabled={busy} onClick={() => { onRedact(redactCandidate); setRedactCandidate(null) }}>确认永久遮盖</Button>
-          <Button variant="ghost" disabled={busy} onClick={() => setRedactCandidate(null)}>取消遮盖</Button>
-        </div>
-      ) : null}
+      <Modal open={redactCandidate !== null} onClose={() => setRedactCandidateId('')}
+        title="确认永久遮盖评论" dialogRole="alertdialog" size="sm" persistent={busy}
+        footer={<>
+          <Button variant="ghost" disabled={busy} onClick={() => setRedactCandidateId('')}>取消遮盖</Button>
+          <Button variant="secondary" disabled={busy} onClick={() => {
+            if (redactCandidate === null) return
+            onRedact(redactCandidate)
+            setRedactCandidateId('')
+          }}>确认永久遮盖</Button>
+        </>}
+      >
+        <p className="inline-alert warn">遮盖不可撤销；正文、历史渲染与摘要都将被清除。</p>
+      </Modal>
     </section>
   )
 }

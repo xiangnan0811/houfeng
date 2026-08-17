@@ -12,7 +12,15 @@ export type RecordActionCreateValues = {
   details: ''
   assignee_id: string
   due_at: string | null
-  subject_revision_id: ''
+  subject_revision_id: string
+}
+
+export type RecordActionUpdateValues = {
+  title: string
+  assignee_id: string
+  due_at: string | null
+  subject_revision_id: string
+  version: number
 }
 
 type RecordActionPanelProps = {
@@ -21,13 +29,17 @@ type RecordActionPanelProps = {
   members: readonly RecordCollaborationMemberOption[]
   busy: boolean
   onCreate: (values: RecordActionCreateValues) => void
+  onUpdate: (action: RecordAction, values: RecordActionUpdateValues) => void
   onTransition: (action: RecordAction, transition: RecordActionTransition) => void
 }
 
-export function RecordActionPanel({ state, actions, members, busy, onCreate, onTransition }: RecordActionPanelProps) {
+export function RecordActionPanel({ state, actions, members, busy, onCreate, onUpdate, onTransition }: RecordActionPanelProps) {
   const [title, setTitle] = useState('')
   const [assigneeId, setAssigneeId] = useState('')
   const [dueAt, setDueAt] = useState('')
+  const [subjectRevisionId, setSubjectRevisionId] = useState('')
+  const [editingActionId, setEditingActionId] = useState('')
+  const editingAction = actions.find((action) => action.action_id === editingActionId) ?? null
 
   if (state === 'loading' || state === 'error' || state === 'revoked' || state === 'deleted') {
     return <RecordCollaborationState state={state} loadingTitle="正在读取行动项" emptyTitle="暂无行动项" errorTitle="行动项暂不可用" />
@@ -37,13 +49,36 @@ export function RecordActionPanel({ state, actions, members, busy, onCreate, onT
     event.preventDefault()
     const normalizedTitle = title.trim()
     if (!normalizedTitle || busy) return
-    onCreate({
+    const values = {
       title: normalizedTitle,
-      details: '',
       assignee_id: assigneeId,
       due_at: dueAt ? new Date(dueAt).toISOString() : null,
-      subject_revision_id: '',
+      subject_revision_id: subjectRevisionId,
+    }
+    if (editingAction) {
+      onUpdate(editingAction, { ...values, version: editingAction.version })
+      return
+    }
+    onCreate({
+      ...values,
+      details: '',
     })
+  }
+
+  function beginEdit(action: RecordAction) {
+    setEditingActionId(action.action_id)
+    setTitle(action.title)
+    setAssigneeId(action.assignee_id)
+    setDueAt(toDateTimeLocal(action.due_at))
+    setSubjectRevisionId(action.subject_revision_id)
+  }
+
+  function resetComposer() {
+    setEditingActionId('')
+    setTitle('')
+    setAssigneeId('')
+    setDueAt('')
+    setSubjectRevisionId('')
   }
 
   return (
@@ -64,6 +99,8 @@ export function RecordActionPanel({ state, actions, members, busy, onCreate, onT
                   <span>{action.assignee_id || '未指派'} · {action.due_at ? formatDateTime(action.due_at) : '无截止时间'}</span>
                 </div>
                 <div className="record-action__commands page-form-actions">
+                  <Button size="sm" variant="ghost" disabled={busy} aria-label={`编辑“${action.title}”`}
+                    onClick={() => beginEdit(action)}>编辑</Button>
                   {action.status === 'open' ? <>
                     <Button size="sm" variant="secondary" disabled={busy} aria-label={`完成“${action.title}”`}
                       onClick={() => onTransition(action, 'complete')}>完成</Button>
@@ -87,8 +124,18 @@ export function RecordActionPanel({ state, actions, members, busy, onCreate, onT
         </Select>
         <Input label="截止时间" type="datetime-local" value={dueAt} disabled={busy}
           onChange={(event) => setDueAt(event.target.value)} />
-        <Button type="submit" disabled={busy || !title.trim()}>新增行动</Button>
+        <Input label="关联修订" value={subjectRevisionId} disabled={busy}
+          onChange={(event) => setSubjectRevisionId(event.target.value)} />
+        <Button type="submit" disabled={busy || !title.trim()}>{editingAction ? '保存行动' : '新增行动'}</Button>
+        {editingAction ? <Button variant="ghost" disabled={busy} onClick={resetComposer}>取消编辑</Button> : null}
       </form>
     </section>
   )
+}
+
+function toDateTimeLocal(value: string | null): string {
+  if (value === null) return ''
+  const date = new Date(value)
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }

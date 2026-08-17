@@ -16,7 +16,7 @@ test('record inbox remains keyboard-operable, touch-reachable, and closed at 390
   await expectLocatorNotClipped(inspect)
   await inspect.focus()
   await page.keyboard.press('Enter')
-  await expect(page.getByText('目标：评论 rcm_e2e_001')).toBeVisible()
+  await expect(page.getByText('目标：评论 rcm_e2e001')).toBeVisible()
 
   const read = page.getByRole('button', { name: '标记“评论提及”为已读' })
   await read.scrollIntoViewIfNeeded()
