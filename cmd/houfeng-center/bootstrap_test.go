@@ -844,7 +844,7 @@ func TestBootstrapWiresRecordCommentsThroughSharedAuthorizationMembershipAndAdmi
 	}
 	text := string(source)
 	for _, required := range []string{
-		"store.NewPostgresRecordCommentRepository(pool, effectiveGate, collaborationMembers)",
+		"store.NewPostgresRecordCommentRepository(pool, effectiveGate, collaborationMembers, authorizations)",
 		"recordcollaboration.NewCommentService(authorizations, commentRepository)",
 		"recordcollaboration.NewCommentApplication(",
 		"handlers.RecordComments(commentApplication)",

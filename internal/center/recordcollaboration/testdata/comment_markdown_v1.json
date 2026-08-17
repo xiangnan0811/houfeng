@@ -197,6 +197,11 @@
         "suffix": ")"
       },
       "valid": false
+    },
+    {
+      "name": "invalid DNS label underscore",
+      "source": "[run](https://foo_bar.example/)",
+      "valid": false
     }
   ],
   "hostile_models": [
@@ -215,6 +220,10 @@
     {
       "name": "noncanonical link host",
       "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://EXAMPLE.com/path","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "invalid DNS label underscore",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://foo_bar.example/","children":[{"type":"text","text":"run"}]}]}]}
     },
     {
       "name": "noncanonical link dot segment",

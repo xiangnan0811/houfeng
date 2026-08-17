@@ -31,7 +31,7 @@ export function RecordCommentThread({ state, comments, currentUserId, members, b
   if (state === 'loading' || state === 'error' || state === 'revoked' || state === 'deleted') {
     return <RecordCollaborationState state={state} loadingTitle="正在读取评论" emptyTitle="暂无评论" errorTitle="评论暂不可用" />
   }
-  const freshStateKey = `${state}:${comments.map((comment) => `${comment.comment_id}:${comment.state}`).join(',')}`
+  const freshStateKey = `${state}:${comments.map((comment) => `${comment.comment_id}:${comment.state}:${comment.version}`).join(',')}`
   return <ReadyRecordCommentThread key={freshStateKey} state={state} comments={comments} currentUserId={currentUserId}
     members={members} busy={busy} onSubmit={onSubmit} onRedact={onRedact} />
 }

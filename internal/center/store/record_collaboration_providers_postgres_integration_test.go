@@ -38,9 +38,7 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 	if _, err := actionRepository.CommitAction(ctx, completeAction); err != nil {
 		t.Fatalf("CommitAction(complete) error = %v", err)
 	}
-	commentRepository := NewPostgresRecordCommentRepository(
-		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
-	)
+	commentRepository := newPostgresCommentRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
 	createComment := postgresCommentCommand(
 		t, parent, recordcollaboration.CommentMutationCreate, "rcm_providerroundtrip", 0,
 		"Private portability body.", "", nil, "provider-comment-create",

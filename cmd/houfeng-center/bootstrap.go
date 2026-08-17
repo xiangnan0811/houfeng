@@ -476,7 +476,7 @@ func newRecordsHTTPHandlers(
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record action application: %w", err)
 	}
-	commentRepository := store.NewPostgresRecordCommentRepository(pool, effectiveGate, collaborationMembers)
+	commentRepository := store.NewPostgresRecordCommentRepository(pool, effectiveGate, collaborationMembers, authorizations)
 	commentService, err := recordcollaboration.NewCommentService(authorizations, commentRepository)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record comment service: %w", err)

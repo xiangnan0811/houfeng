@@ -74,4 +74,29 @@ describe('RecordCommentThread', () => {
     expect(screen.getByLabelText('评论内容')).toHaveValue('')
     expect(screen.getByText('发布新评论')).toBeInTheDocument()
   })
+
+  it('discards stale edit and redaction state when the active comment version advances', () => {
+    const onSubmit = vi.fn()
+    const props = {
+      currentUserId: 'usr_self', members: [], busy: false, onSubmit, onRedact: vi.fn(),
+    }
+    const { rerender } = render(<RecordCommentThread state="ready" comments={[comment]} {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '编辑该评论' }))
+    fireEvent.change(screen.getByLabelText('评论内容'), { target: { value: '基于 v2 的旧草稿' } })
+    fireEvent.click(screen.getByRole('button', { name: '请求遮盖该评论' }))
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+
+    rerender(<RecordCommentThread state="ready" comments={[{
+      ...comment,
+      version: 3,
+      body_markdown: '服务端已更新',
+      updated_at: '2026-08-17T10:05:00Z',
+    }]} {...props} />)
+
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(screen.getByText('发布新评论')).toBeInTheDocument()
+    expect(screen.getByLabelText('评论内容')).toHaveValue('')
+    fireEvent.click(screen.getByRole('button', { name: '发布评论' }))
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
 })

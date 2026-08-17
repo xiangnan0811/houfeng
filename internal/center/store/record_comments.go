@@ -22,16 +22,25 @@ import (
 // primitives with the 0055 comment relations. It stores no alternate
 // idempotency, authorization, outbox, lease, or deletion authority.
 type PostgresRecordCommentRepository struct {
-	platform *PostgresRecordPlatformRepository
-	members  CollaborationMembershipReader
+	platform      *PostgresRecordPlatformRepository
+	members       CollaborationMembershipReader
+	authorization *PostgresCurrentRecordAuthorizationSource
 }
 
-func NewPostgresRecordCommentRepository(pool *pgxpool.Pool, gate AdmissionGate, members CollaborationMembershipReader) *PostgresRecordCommentRepository {
-	return &PostgresRecordCommentRepository{platform: NewPostgresRecordPlatformRepository(pool, gate), members: members}
+func NewPostgresRecordCommentRepository(
+	pool *pgxpool.Pool,
+	gate AdmissionGate,
+	members CollaborationMembershipReader,
+	authorization *PostgresCurrentRecordAuthorizationSource,
+) *PostgresRecordCommentRepository {
+	return &PostgresRecordCommentRepository{
+		platform: NewPostgresRecordPlatformRepository(pool, gate), members: members, authorization: authorization,
+	}
 }
 
 func (repository *PostgresRecordCommentRepository) CommitComment(ctx context.Context, command recordcollaboration.CommentCommand) (recordcollaboration.CommentMutationResult, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) {
+	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) ||
+		nilRecordSubjectDependency(repository.authorization) {
 		return recordcollaboration.CommentMutationResult{}, recordcollaboration.ErrInvalidCommentCommand
 	}
 	if err := command.Validate(); err != nil {
@@ -63,17 +72,15 @@ func (repository *PostgresRecordCommentRepository) CommitComment(ctx context.Con
 			root.lifecycle != records.LifecycleActive || root.projectID != string(recordplatform.ProjectIDDefault) {
 			return recordcollaboration.ErrCommentConflict
 		}
-		persistedActor, err := repository.members.ReadMemberActor(
-			ctx, transaction.tx, command.Actor.ProjectID, command.Actor.UserID,
+		persistedActor, currentAuthorization, err := repository.loadCurrentCommentAuthorization(
+			ctx, transaction.tx, command.Actor, command.RecordID, recordauth.CapabilityRecordUpdate,
 		)
 		if err != nil {
 			return err
 		}
-		if persistedActor.UserID != command.Actor.UserID || persistedActor.ProjectID != command.Actor.ProjectID {
-			return recordcollaboration.ErrMembershipDenied
-		}
-		if err := records.AuthorizeRecordResource(persistedActor, recordauth.CapabilityRecordUpdate, command.AuthorizationEvidence); err != nil {
-			return err
+		if !currentRecordAuthorizationMatchesExpected(currentAuthorization, command.RecordID, command.CurrentRevisionID,
+			command.RecordLockVersion, command.AuthorizationEpoch, command.AuthorizationEvidence) {
+			return recordcollaboration.ErrCommentConflict
 		}
 		if claim.ReplayResult != nil {
 			if !command.ResultFingerprint.MatchesPersisted(*claim.ReplayResult) {
@@ -91,7 +98,9 @@ func (repository *PostgresRecordCommentRepository) CommitComment(ctx context.Con
 		var changedAt time.Time
 		switch command.Kind {
 		case recordcollaboration.CommentMutationCreate:
-			if err := repository.validateCommentRelationsInTransaction(ctx, transaction.tx, command, binding); err != nil {
+			if err := repository.validateCommentRelationsInTransaction(
+				ctx, transaction.tx, command, binding, currentAuthorization.Evidence,
+			); err != nil {
 				return err
 			}
 			sourceEventID = recordCommentRevisionID(command.CommentID, version)
@@ -107,7 +116,9 @@ func (repository *PostgresRecordCommentRepository) CommitComment(ctx context.Con
 			if persisted.state != recordcollaboration.CommentStateActive || persisted.authorID != command.Actor.UserID {
 				return recordcollaboration.ErrCommentPolicyDenied
 			}
-			if err := repository.validateCommentMentionsInTransaction(ctx, transaction.tx, command, binding); err != nil {
+			if err := repository.validateCommentMentionsInTransaction(
+				ctx, transaction.tx, command, binding, currentAuthorization.Evidence,
+			); err != nil {
 				return err
 			}
 			sourceEventID = recordCommentRevisionID(command.CommentID, version)
@@ -189,7 +200,8 @@ func (repository *PostgresRecordCommentRepository) CommitComment(ctx context.Con
 }
 
 func (repository *PostgresRecordCommentRepository) ListComments(ctx context.Context, command recordcollaboration.CommentReadCommand) ([]recordcollaboration.CommentRecord, error) {
-	if ctx == nil || repository == nil || repository.platform == nil {
+	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) ||
+		nilRecordSubjectDependency(repository.authorization) {
 		return nil, recordcollaboration.ErrInvalidCommentRequest
 	}
 	if err := command.Validate(); err != nil {
@@ -213,8 +225,15 @@ func (repository *PostgresRecordCommentRepository) ListComments(ctx context.Cont
 			root.lifecycle != records.LifecycleActive || root.projectID != string(recordplatform.ProjectIDDefault) {
 			return recordcollaboration.ErrCommentConflict
 		}
-		if err := records.AuthorizeRecordResource(command.Actor, recordauth.CapabilityRecordRead, command.AuthorizationEvidence); err != nil {
+		_, currentAuthorization, err := repository.loadCurrentCommentAuthorization(
+			ctx, transaction.tx, command.Actor, command.RecordID, recordauth.CapabilityRecordRead,
+		)
+		if err != nil {
 			return err
+		}
+		if !currentRecordAuthorizationMatchesExpected(currentAuthorization, command.RecordID, command.CurrentRevisionID,
+			command.RecordLockVersion, command.AuthorizationEpoch, command.AuthorizationEvidence) {
+			return recordcollaboration.ErrCommentConflict
 		}
 		loaded, err := listRecordComments(ctx, transaction.tx, command.RecordID, binding, command.Limit)
 		if err != nil {
@@ -229,7 +248,40 @@ func (repository *PostgresRecordCommentRepository) ListComments(ctx context.Cont
 	return result, nil
 }
 
-func (repository *PostgresRecordCommentRepository) validateCommentRelationsInTransaction(ctx context.Context, tx pgx.Tx, command recordcollaboration.CommentCommand, binding recordcollaboration.RecordFenceBinding) error {
+func (repository *PostgresRecordCommentRepository) loadCurrentCommentAuthorization(
+	ctx context.Context,
+	tx pgx.Tx,
+	actorInput recordauth.ActorScope,
+	recordID string,
+	capability recordauth.Capability,
+) (recordauth.ActorScope, records.CurrentRecordAuthorization, error) {
+	actor, err := repository.members.ReadMemberActor(ctx, tx, actorInput.ProjectID, actorInput.UserID)
+	if errors.Is(err, recordcollaboration.ErrMembershipDenied) {
+		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, recordauth.ErrDenied
+	}
+	if err != nil {
+		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, err
+	}
+	if actor.UserID != actorInput.UserID || actor.ProjectID != actorInput.ProjectID || actor.Role != actorInput.Role {
+		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, recordauth.ErrDenied
+	}
+	current, err := repository.authorization.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, recordID)
+	if err != nil {
+		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, err
+	}
+	if err := records.AuthorizeRecordResource(actor, capability, current.Evidence); err != nil {
+		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, err
+	}
+	return actor, current, nil
+}
+
+func (repository *PostgresRecordCommentRepository) validateCommentRelationsInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+	command recordcollaboration.CommentCommand,
+	binding recordcollaboration.RecordFenceBinding,
+	currentEvidence records.RecordAuthorizationEvidence,
+) error {
 	if command.ReplyToCommentID != "" {
 		if command.ReplyToCommentID == command.CommentID {
 			return recordcollaboration.ErrInvalidCommentContent
@@ -252,10 +304,16 @@ func (repository *PostgresRecordCommentRepository) validateCommentRelationsInTra
 			return recordcollaboration.ErrInvalidCommentContent
 		}
 	}
-	return repository.validateCommentMentionsInTransaction(ctx, tx, command, binding)
+	return repository.validateCommentMentionsInTransaction(ctx, tx, command, binding, currentEvidence)
 }
 
-func (repository *PostgresRecordCommentRepository) validateCommentMentionsInTransaction(ctx context.Context, tx pgx.Tx, command recordcollaboration.CommentCommand, binding recordcollaboration.RecordFenceBinding) error {
+func (repository *PostgresRecordCommentRepository) validateCommentMentionsInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+	command recordcollaboration.CommentCommand,
+	binding recordcollaboration.RecordFenceBinding,
+	currentEvidence records.RecordAuthorizationEvidence,
+) error {
 	if binding.Validate() != nil || binding.RecordID() != command.RecordID {
 		return recordcollaboration.ErrInvalidCommentCommand
 	}
@@ -264,7 +322,7 @@ func (repository *PostgresRecordCommentRepository) validateCommentMentionsInTran
 		if err != nil {
 			return err
 		}
-		if err := records.AuthorizeRecordResource(member, recordauth.CapabilityRecordRead, command.AuthorizationEvidence); err != nil {
+		if err := records.AuthorizeRecordResource(member, recordauth.CapabilityRecordRead, currentEvidence); err != nil {
 			return recordcollaboration.ErrMembershipDenied
 		}
 	}

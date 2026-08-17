@@ -176,11 +176,38 @@ function expectCanonicalHTTPLink(value: unknown): string {
     return invalid()
   }
   if (parsed.protocol !== `${scheme}:` || parsed.username !== '' || parsed.password !== '' || parsed.hostname === '') invalid()
+  expectCanonicalHostname(parsed.hostname)
   const browserCanonical = suffix === '' || suffix.startsWith('?') || suffix.startsWith('#')
     ? `${scheme}://${authority}/${suffix}`
     : href
   if (parsed.href !== browserCanonical) invalid()
   return href
+}
+
+function expectCanonicalHostname(browserHostname: string): void {
+  if (browserHostname.startsWith('[')) {
+    if (!browserHostname.endsWith(']') || !browserHostname.slice(1, -1).includes(':')) invalid()
+    return
+  }
+  const host = browserHostname
+  if (isCanonicalIPv4Host(host)) return
+  if (isLegacyNumericHostname(host)) invalid()
+  const name = host.endsWith('.') ? host.slice(0, -1) : host
+  if (name.length === 0 || name.length > 253 || (name !== host && host.length > 254)) invalid()
+  for (const label of name.split('.')) {
+    if (label.length === 0 || label.length > 63 || label.startsWith('-') || label.endsWith('-') || !/^[a-z0-9-]+$/u.test(label)) invalid()
+  }
+}
+
+function isCanonicalIPv4Host(host: string): boolean {
+  const parts = host.split('.')
+  return parts.length === 4 && parts.every((part) => /^[0-9]+$/u.test(part) && String(Number(part)) === part && Number(part) <= 255)
+}
+
+function isLegacyNumericHostname(host: string): boolean {
+  const candidate = host.endsWith('.') ? host.slice(0, -1) : host
+  if (candidate === '') return false
+  return candidate.split('.').every((part) => /^[0-9]+$/u.test(part) || /^0x[0-9a-f]+$/u.test(part))
 }
 
 function hasDotPathSegment(suffix: string): boolean {

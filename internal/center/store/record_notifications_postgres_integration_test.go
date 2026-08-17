@@ -40,8 +40,8 @@ func TestPostgresIntegrationRecordAutomaticFollowerSourcesRollbackWithProducerTr
 			commit: func(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, parent records.RevisionCommitResult, gate AdmissionGate) (string, error) {
 				command := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate, "rcm_pgsourcerollback", 0,
 					"Rollback source.", "", []string{"usr_bbbbbbbbbbbbbbbbbbbbbbbb"}, "notification-source-comment-rollback")
-				_, err := NewPostgresRecordCommentRepository(
-					fixture.openDirectRuntimePool(t, ctx, "record-source-comment-rollback", 1), gate, NewPostgresCollaborationMembershipReader(),
+				_, err := newPostgresCommentRepositoryForTest(t,
+					fixture.openDirectRuntimePool(t, ctx, "record-source-comment-rollback", 1), gate,
 				).CommitComment(ctx, command)
 				return command.Idempotency.Key.Key, err
 			},
@@ -1848,7 +1848,7 @@ func TestPostgresIntegrationRecordNotificationSuppressesSelfAssignmentAndSelfMen
 		if err != nil {
 			t.Fatalf("CommitRevision(parent) error = %v", err)
 		}
-		repository := NewPostgresRecordCommentRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+		repository := newPostgresCommentRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
 		command := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate, "rcm_pgnotifyselfmention", 0,
 			"Self mention.", "", []string{"usr_aaaaaaaaaaaaaaaaaaaaaaaa"}, "notification-self-mention-create")
 		if _, err := repository.CommitComment(ctx, command); err != nil {
@@ -1884,7 +1884,7 @@ func TestPostgresIntegrationRecordNotificationCommentReplyMentionMapping(t *test
 		"usr_cccccccccccccccccccccccc": "muted",
 		"usr_dddddddddddddddddddddddd": "watching",
 	})
-	commentRepository := NewPostgresRecordCommentRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+	commentRepository := newPostgresCommentRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
 	parentComment := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate, "rcm_pgnotifyparent", 0, "Parent", "", nil, "notification-comment-create-parent")
 	parentComment.Actor = mustPostgresCommentActor(t, "usr_bbbbbbbbbbbbbbbbbbbbbbbb", recordauth.RoleProjectAdmin)
 	if _, err := commentRepository.CommitComment(ctx, parentComment); err != nil {
