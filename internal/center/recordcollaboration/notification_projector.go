@@ -183,13 +183,5 @@ func nilNotificationDependency(dependency any) bool {
 }
 
 func validNotificationID(value string) bool {
-	if len(value) < 5 || len(value) > 68 || value[:4] != "rnt_" {
-		return false
-	}
-	for _, character := range value[4:] {
-		if (character < 'a' || character > 'z') && (character < '0' || character > '9') {
-			return false
-		}
-	}
-	return true
+	return ValidateNotificationID(value) == nil
 }

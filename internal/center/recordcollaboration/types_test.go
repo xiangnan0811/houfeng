@@ -22,12 +22,14 @@ func TestRecordCollaborationIdentityValidators(t *testing.T) {
 		{name: "comment", value: "rcm_0123456789abcdef", validate: ValidateCommentID},
 		{name: "comment revision", value: "rcr_0123456789abcdef", validate: ValidateCommentRevisionID},
 		{name: "comment tombstone", value: "rct_0123456789abcdef", validate: ValidateCommentTombstoneID},
-		{name: "notification", value: "rnt_0123456789abcdef", validate: ValidateNotificationID},
+		{name: "notification", value: "rnt_" + strings.Repeat("a", 64), validate: ValidateNotificationID},
 		{name: "notification delivery", value: "rnd_0123456789abcdef", validate: ValidateNotificationDeliveryID},
 		{name: "delivery attempt", value: "rna_0123456789abcdef", validate: ValidateNotificationDeliveryAttemptID},
 		{name: "wrong action prefix", value: "rcm_abc", validate: ValidateActionID, wantErr: ErrInvalidActionID},
 		{name: "uppercase comment", value: "rcm_ABC", validate: ValidateCommentID, wantErr: ErrInvalidCommentID},
 		{name: "empty notification", validate: ValidateNotificationID, wantErr: ErrInvalidNotificationID},
+		{name: "short notification", value: "rnt_0123456789abcdef", validate: ValidateNotificationID, wantErr: ErrInvalidNotificationID},
+		{name: "non hex notification", value: "rnt_" + strings.Repeat("g", 64), validate: ValidateNotificationID, wantErr: ErrInvalidNotificationID},
 		{name: "long delivery", value: "rnd_" + strings.Repeat("a", 65), validate: ValidateNotificationDeliveryID, wantErr: ErrInvalidNotificationDeliveryID},
 	}
 	for _, tt := range tests {

@@ -674,7 +674,7 @@ func TestObservedOutboxClaimPreservesTypedSourceVersion(t *testing.T) {
 
 func TestRecordPlatformTransactionAssertOutboxClaimFencesProjectionWithExactLiveOwner(t *testing.T) {
 	claim := recordplatform.ClaimedOutboxEventV1{
-		Event:     recordplatform.OutboxEvent{RowID: 42, ProjectID: "default", EventKind: recordplatform.OutboxEventKindRecordActionAssigned, SubjectKind: "action", SubjectID: "ract_projection", SourceVersion: 7, AuthorizationEpoch: 3},
+		Event:     recordplatform.OutboxEvent{RowID: 42, ProjectID: "default", EventKind: recordplatform.OutboxEventKindRecordActionAssigned, SubjectKind: "action", SubjectID: "ract_projection", SourceVersion: 7, AuthorizationEpoch: 3, RecordFenceEpoch: 5},
 		Owner:     recordplatform.OwnerLease{OwnerID: "notification_worker", Generation: 2, ExpiresAt: time.Date(2026, 8, 17, 1, 0, 0, 0, time.UTC)},
 		ExpiresAt: time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC),
 	}
@@ -689,12 +689,21 @@ func TestRecordPlatformTransactionAssertOutboxClaimFencesProjectionWithExactLive
 		t.Run(tt.name, func(t *testing.T) {
 			tx := &fakeRecordPlatformTx{}
 			tx.queryRow = func(_ context.Context, sql string, args ...any) pgx.Row {
-				for _, want := range []string{"status = 'processing'", "owner_id = $2", "owner_generation = $3", "owner_expires_at = $4", "owner_expires_at > transaction_timestamp()", "for update"} {
+				for _, want := range []string{
+					"status = 'processing'", "owner_id = $2", "owner_generation = $3", "owner_expires_at = $4",
+					"project_id = $5", "event_kind = $6", "subject_kind = $7", "subject_id = $8",
+					"source_version = $9", "authorization_epoch = $10", "record_fence_epoch = $11", "expires_at = $12",
+					"owner_expires_at > transaction_timestamp()", "for update",
+				} {
 					if !strings.Contains(sql, want) {
 						t.Fatalf("assert SQL missing %q: %s", want, sql)
 					}
 				}
-				if !reflect.DeepEqual(args, []any{claim.Event.RowID, claim.Owner.OwnerID, claim.Owner.Generation, claim.Owner.ExpiresAt}) {
+				if !reflect.DeepEqual(args, []any{
+					claim.Event.RowID, claim.Owner.OwnerID, claim.Owner.Generation, claim.Owner.ExpiresAt,
+					claim.Event.ProjectID, claim.Event.EventKind, claim.Event.SubjectKind, claim.Event.SubjectID,
+					claim.Event.SourceVersion, claim.Event.AuthorizationEpoch, claim.Event.RecordFenceEpoch, claim.ExpiresAt,
+				}) {
 					t.Fatalf("assert args = %#v", args)
 				}
 				return fakeRecordPlatformRow{scan: func(dest ...any) error {

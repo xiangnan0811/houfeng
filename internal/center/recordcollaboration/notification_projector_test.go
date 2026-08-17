@@ -60,7 +60,7 @@ func TestNotificationProjectionWorkerRejectsClosedConfiguration(t *testing.T) {
 func TestNotificationProjectorReusesClaimProjectionAndOwnerFencedFinalize(t *testing.T) {
 	claim := testNotificationClaim(recordplatform.OutboxEventKindRecordActionAssigned, 7)
 	queue := &notificationQueueStub{claim: &claim}
-	projection := &notificationProjectionStub{result: NotificationProjectionResult{NotificationID: "rnt_result", RecipientCount: 2}}
+	projection := &notificationProjectionStub{result: NotificationProjectionResult{NotificationID: "rnt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RecipientCount: 2}}
 	projector, err := NewNotificationProjector(queue, projection, time.Second)
 	if err != nil {
 		t.Fatalf("NewNotificationProjector() error = %v", err)

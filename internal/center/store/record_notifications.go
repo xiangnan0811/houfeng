@@ -98,16 +98,16 @@ func (repository *PostgresRecordNotificationRepository) ProjectNotification(ctx 
 			}
 			allowed = append(allowed, candidate)
 		}
-		if len(allowed) == 0 {
-			result = recordcollaboration.NotificationProjectionResult{}
-			return nil
-		}
 		if facts.Validate() != nil {
 			return recordcollaboration.ErrInvalidNotificationFacts
 		}
 		notificationID := facts.NotificationID()
 		if err := insertNotificationProjection(ctx, transaction.tx, facts, notificationID, repository.retention, allowed); err != nil {
 			return err
+		}
+		if len(allowed) == 0 {
+			result = recordcollaboration.NotificationProjectionResult{}
+			return nil
 		}
 		result = recordcollaboration.NotificationProjectionResult{NotificationID: notificationID, RecipientCount: len(allowed)}
 		return result.Validate()
@@ -313,56 +313,70 @@ func loadNotificationFollowers(ctx context.Context, tx pgx.Tx, recordID string, 
 }
 
 func insertNotificationProjection(ctx context.Context, tx pgx.Tx, facts recordcollaboration.NotificationEventFacts, notificationID string, retention time.Duration, recipients []recordcollaboration.NotificationRecipientFacts) error {
-	if facts.Validate() != nil || notificationID != facts.NotificationID() || retention.Microseconds() <= 0 || len(recipients) == 0 {
+	if facts.Validate() != nil || notificationID != facts.NotificationID() || retention.Microseconds() <= 0 {
 		return recordcollaboration.ErrInvalidNotificationFacts
 	}
-	_, err := tx.Exec(ctx, `
-		insert into public.record_notifications (
-			notification_id, project_id, record_id, event_kind, subject_kind,
-			subject_id, source_version, actor_id, authorization_epoch,
-			record_fence_epoch, event_at, details_delete_after
-		) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-			transaction_timestamp() + ($12 * interval '1 microsecond'))
-		on conflict (notification_id) do nothing`,
-		notificationID, recordplatform.ProjectIDDefault, facts.RecordID, string(facts.Kind), string(facts.SubjectKind),
-		facts.SubjectID, int64(facts.SourceVersion), facts.ActorID, int64(facts.AuthorizationEpoch),
-		int64(facts.RecordFenceEpoch), facts.OccurredAt, retention.Microseconds(),
-	)
-	if err != nil {
-		return fmt.Errorf("insert record notification: %w", err)
+	if len(recipients) != 0 {
+		_, err := tx.Exec(ctx, `
+			insert into public.record_notifications (
+				notification_id, project_id, record_id, event_kind, subject_kind,
+				subject_id, source_version, actor_id, authorization_epoch,
+				record_fence_epoch, event_at, details_delete_after
+			) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+				transaction_timestamp() + ($12 * interval '1 microsecond'))
+			on conflict (notification_id) do nothing`,
+			notificationID, recordplatform.ProjectIDDefault, facts.RecordID, string(facts.Kind), string(facts.SubjectKind),
+			facts.SubjectID, int64(facts.SourceVersion), facts.ActorID, int64(facts.AuthorizationEpoch),
+			int64(facts.RecordFenceEpoch), facts.OccurredAt, retention.Microseconds(),
+		)
+		if err != nil {
+			return fmt.Errorf("insert record notification: %w", err)
+		}
+		var recordID, eventKind, subjectKind, subjectID, actorID string
+		var sourceVersion, authorizationEpoch, recordFenceEpoch int64
+		if err := tx.QueryRow(ctx, `
+			select record_id, event_kind, subject_kind, subject_id, source_version, actor_id,
+			       authorization_epoch, record_fence_epoch
+			from public.record_notifications where notification_id = $1`, notificationID).Scan(
+			&recordID, &eventKind, &subjectKind, &subjectID, &sourceVersion, &actorID,
+			&authorizationEpoch, &recordFenceEpoch,
+		); err != nil {
+			return fmt.Errorf("verify record notification identity: %w", err)
+		}
+		if recordID != facts.RecordID || eventKind != string(facts.Kind) || subjectKind != string(facts.SubjectKind) ||
+			subjectID != facts.SubjectID || sourceVersion != int64(facts.SourceVersion) || actorID != facts.ActorID ||
+			authorizationEpoch != int64(facts.AuthorizationEpoch) || recordFenceEpoch != int64(facts.RecordFenceEpoch) {
+			return recordcollaboration.ErrInvalidNotificationFacts
+		}
 	}
-	var recordID, eventKind, subjectKind, subjectID, actorID string
-	var sourceVersion, authorizationEpoch, recordFenceEpoch int64
-	if err := tx.QueryRow(ctx, `
-		select record_id, event_kind, subject_kind, subject_id, source_version, actor_id,
-		       authorization_epoch, record_fence_epoch
-		from public.record_notifications where notification_id = $1`, notificationID).Scan(
-		&recordID, &eventKind, &subjectKind, &subjectID, &sourceVersion, &actorID,
-		&authorizationEpoch, &recordFenceEpoch,
-	); err != nil {
-		return fmt.Errorf("verify record notification identity: %w", err)
-	}
-	if recordID != facts.RecordID || eventKind != string(facts.Kind) || subjectKind != string(facts.SubjectKind) ||
-		subjectID != facts.SubjectID || sourceVersion != int64(facts.SourceVersion) || actorID != facts.ActorID ||
-		authorizationEpoch != int64(facts.AuthorizationEpoch) || recordFenceEpoch != int64(facts.RecordFenceEpoch) {
-		return recordcollaboration.ErrInvalidNotificationFacts
-	}
+	recipientIDs := make([]string, 0, len(recipients))
 	for _, recipient := range recipients {
 		if recipient.Validate() != nil {
 			return recordcollaboration.ErrInvalidNotificationFacts
 		}
+		recipientIDs = append(recipientIDs, recipient.UserID)
 		_, err := tx.Exec(ctx, `
 			insert into public.record_notification_recipients (
 				notification_id, record_id, recipient_user_id, reason_kind, mandatory,
 				authorization_epoch, record_fence_epoch
 			) values ($1, $2, $3, $4, $5, $6, $7)
-			on conflict (notification_id, recipient_user_id) do nothing`,
+			on conflict (notification_id, recipient_user_id) do update set
+				reason_kind = excluded.reason_kind,
+				mandatory = excluded.mandatory,
+				authorization_epoch = excluded.authorization_epoch,
+				record_fence_epoch = excluded.record_fence_epoch`,
 			notificationID, facts.RecordID, recipient.UserID, string(recipient.Reason), recipient.Mandatory,
 			int64(facts.AuthorizationEpoch), int64(facts.RecordFenceEpoch),
 		)
 		if err != nil {
 			return fmt.Errorf("insert record notification recipient: %w", err)
 		}
+	}
+	if _, err := tx.Exec(ctx, `
+		delete from public.record_notification_recipients
+		where notification_id = $1
+		  and not (recipient_user_id = any($2::text[]))`, notificationID, recipientIDs); err != nil {
+		return fmt.Errorf("reconcile record notification recipients: %w", err)
 	}
 	return nil
 }
@@ -375,27 +389,79 @@ type inboxCandidate struct {
 	recordFenceEpoch   uint64
 }
 
+type inboxRecordAuthorization struct {
+	binding recordcollaboration.RecordFenceBinding
+	current records.CurrentRecordAuthorization
+	err     error
+}
+
+type inboxAuthorizationCache struct {
+	memberLoaded bool
+	member       recordauth.ActorScope
+	memberErr    error
+	records      map[string]inboxRecordAuthorization
+	followers    map[string][]recordcollaboration.FollowerFacts
+}
+
+const (
+	inboxScanPageSize = 100
+	inboxScanBudget   = 500
+)
+
+type inboxQueryKind uint8
+
+const (
+	inboxQueryActive inboxQueryKind = iota + 1
+	inboxQueryUnread
+)
+
+type inboxQueryCursor struct {
+	EventAt        time.Time
+	NotificationID string
+}
+
+func newInboxAuthorizationCache() *inboxAuthorizationCache {
+	return &inboxAuthorizationCache{
+		records: make(map[string]inboxRecordAuthorization), followers: make(map[string][]recordcollaboration.FollowerFacts),
+	}
+}
+
 func (repository *PostgresRecordNotificationRepository) ListInbox(ctx context.Context, request recordcollaboration.InboxListRequest) ([]recordcollaboration.InboxItem, error) {
 	if ctx == nil || repository == nil || repository.platform == nil || request.Validate() != nil {
 		return nil, recordcollaboration.ErrInvalidInboxRequest
 	}
 	result := make([]recordcollaboration.InboxItem, 0)
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		candidates, err := queryInboxCandidates(ctx, transaction.tx, request.Actor.UserID, "and recipients.dismissed_at is null")
-		if err != nil {
-			return err
-		}
-		for _, candidate := range candidates {
-			if len(result) == request.Limit {
-				break
-			}
-			if err := repository.authorizeInboxCandidate(ctx, transaction.tx, request.Actor, candidate); err != nil {
-				if errors.Is(err, recordcollaboration.ErrInboxNotFound) {
-					continue
-				}
+		cache := newInboxAuthorizationCache()
+		cursor := inboxQueryCursor{}
+		for scanned := 0; scanned < inboxScanBudget && len(result) < request.Limit; {
+			pageLimit := min(inboxScanPageSize, inboxScanBudget-scanned)
+			candidates, err := queryInboxCandidatePage(ctx, transaction.tx, request.Actor.UserID, inboxQueryActive, cursor, pageLimit)
+			if err != nil {
 				return err
 			}
-			result = append(result, candidate.item)
+			if len(candidates) == 0 {
+				break
+			}
+			scanned += len(candidates)
+			last := candidates[len(candidates)-1].item
+			cursor = inboxQueryCursor{EventAt: last.EventAt, NotificationID: last.NotificationID}
+			for _, candidate := range candidates {
+				if len(result) == request.Limit {
+					break
+				}
+				authorized, err := repository.authorizeInboxCandidate(ctx, transaction.tx, request.Actor, candidate, cache)
+				if err != nil {
+					if errors.Is(err, recordcollaboration.ErrInboxNotFound) {
+						continue
+					}
+					return err
+				}
+				result = append(result, authorized.item)
+			}
+			if len(candidates) < pageLimit {
+				break
+			}
 		}
 		return nil
 	})
@@ -411,11 +477,13 @@ func (repository *PostgresRecordNotificationRepository) GetInboxItem(ctx context
 	}
 	var result recordcollaboration.InboxItem
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		cache := newInboxAuthorizationCache()
 		candidate, err := queryInboxCandidate(ctx, transaction.tx, request.Actor.UserID, request.NotificationID, false)
 		if err != nil {
 			return err
 		}
-		if err := repository.authorizeInboxCandidate(ctx, transaction.tx, request.Actor, candidate); err != nil {
+		candidate, err = repository.authorizeInboxCandidate(ctx, transaction.tx, request.Actor, candidate, cache)
+		if err != nil {
 			return err
 		}
 		result = candidate.item
@@ -445,11 +513,13 @@ func (repository *PostgresRecordNotificationRepository) TransitionInbox(ctx cont
 	}
 	var result recordcollaboration.InboxItem
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		cache := newInboxAuthorizationCache()
 		candidate, err := queryInboxCandidate(ctx, transaction.tx, request.Actor.UserID, request.NotificationID, true)
 		if err != nil {
 			return err
 		}
-		if err := repository.authorizeInboxCandidate(ctx, transaction.tx, request.Actor, candidate); err != nil {
+		candidate, err = repository.authorizeInboxCandidate(ctx, transaction.tx, request.Actor, candidate, cache)
+		if err != nil {
 			return err
 		}
 		var updateSQL string
@@ -486,26 +556,52 @@ func (repository *PostgresRecordNotificationRepository) CountUnreadInbox(ctx con
 	}
 	count := 0
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		candidates, err := queryInboxCandidates(ctx, transaction.tx, request.Actor.UserID, "and recipients.read_at is null and recipients.dismissed_at is null")
-		if err != nil {
-			return err
-		}
-		for _, candidate := range candidates {
-			if err := repository.authorizeInboxCandidate(ctx, transaction.tx, request.Actor, candidate); err != nil {
-				if errors.Is(err, recordcollaboration.ErrInboxNotFound) {
-					continue
-				}
+		cache := newInboxAuthorizationCache()
+		cursor := inboxQueryCursor{}
+		for scanned := 0; scanned < inboxScanBudget && count < request.Limit; {
+			pageLimit := min(inboxScanPageSize, inboxScanBudget-scanned)
+			candidates, err := queryInboxCandidatePage(ctx, transaction.tx, request.Actor.UserID, inboxQueryUnread, cursor, pageLimit)
+			if err != nil {
 				return err
 			}
-			count++
+			if len(candidates) == 0 {
+				break
+			}
+			scanned += len(candidates)
+			last := candidates[len(candidates)-1].item
+			cursor = inboxQueryCursor{EventAt: last.EventAt, NotificationID: last.NotificationID}
+			for _, candidate := range candidates {
+				if count == request.Limit {
+					break
+				}
+				if _, err := repository.authorizeInboxCandidate(ctx, transaction.tx, request.Actor, candidate, cache); err != nil {
+					if errors.Is(err, recordcollaboration.ErrInboxNotFound) {
+						continue
+					}
+					return err
+				}
+				count++
+			}
+			if len(candidates) < pageLimit {
+				break
+			}
 		}
 		return nil
 	})
 	return count, err
 }
 
-func queryInboxCandidates(ctx context.Context, tx pgx.Tx, userID, predicate string) ([]inboxCandidate, error) {
-	rows, err := tx.Query(ctx, `
+func queryInboxCandidatePage(ctx context.Context, tx pgx.Tx, userID string, kind inboxQueryKind, cursor inboxQueryCursor, limit int) ([]inboxCandidate, error) {
+	if ctx == nil || tx == nil || recordauth.ValidateActorUserID(userID) != nil || limit < 1 || limit > inboxScanPageSize {
+		return nil, recordcollaboration.ErrInvalidInboxRequest
+	}
+	predicate := "and recipients.dismissed_at is null"
+	if kind == inboxQueryUnread {
+		predicate = "and recipients.read_at is null and recipients.dismissed_at is null"
+	} else if kind != inboxQueryActive {
+		return nil, recordcollaboration.ErrInvalidInboxRequest
+	}
+	query := `
 		select notifications.notification_id, notifications.record_id, notifications.event_kind,
 		       notifications.subject_kind, notifications.subject_id, notifications.source_version,
 		       recipients.reason_kind, recipients.mandatory, notifications.event_at,
@@ -513,8 +609,25 @@ func queryInboxCandidates(ctx context.Context, tx pgx.Tx, userID, predicate stri
 		       recipients.authorization_epoch, recipients.record_fence_epoch
 		from public.record_notification_recipients recipients
 		join public.record_notifications notifications on notifications.notification_id = recipients.notification_id
-		where recipients.recipient_user_id = $1 `+predicate+`
-		order by notifications.event_at desc, notifications.notification_id`, userID)
+		where recipients.recipient_user_id = $1 ` + predicate
+	args := []any{userID}
+	if !cursor.EventAt.IsZero() || cursor.NotificationID != "" {
+		if cursor.EventAt.IsZero() || recordcollaboration.ValidateInboxNotificationID(cursor.NotificationID) != nil {
+			return nil, recordcollaboration.ErrInvalidInboxRequest
+		}
+		query += `
+		  and (notifications.event_at < $2
+		       or (notifications.event_at = $2 and notifications.notification_id > $3))
+		order by notifications.event_at desc, notifications.notification_id
+		limit $4`
+		args = append(args, cursor.EventAt, cursor.NotificationID, limit)
+	} else {
+		query += `
+		order by notifications.event_at desc, notifications.notification_id
+		limit $2`
+		args = append(args, limit)
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list record notification inbox: %w", err)
 	}
@@ -592,39 +705,130 @@ func scanInboxCandidate(scanner inboxScanner) (inboxCandidate, error) {
 	return candidate, nil
 }
 
-func (repository *PostgresRecordNotificationRepository) authorizeInboxCandidate(ctx context.Context, tx pgx.Tx, actorInput recordauth.ActorScope, candidate inboxCandidate) error {
-	actor, err := repository.members.ReadMemberActor(ctx, tx, actorInput.ProjectID, actorInput.UserID)
-	if errors.Is(err, recordcollaboration.ErrMembershipDenied) {
-		return recordcollaboration.ErrInboxNotFound
+func (repository *PostgresRecordNotificationRepository) authorizeInboxCandidate(
+	ctx context.Context,
+	tx pgx.Tx,
+	actorInput recordauth.ActorScope,
+	candidate inboxCandidate,
+	cache *inboxAuthorizationCache,
+) (inboxCandidate, error) {
+	if cache == nil {
+		return inboxCandidate{}, recordcollaboration.ErrInvalidInboxRequest
 	}
-	if err != nil {
-		return err
-	}
-	if actor.UserID != actorInput.UserID || actor.ProjectID != recordauth.ProjectIDDefault {
-		return recordcollaboration.ErrInboxNotFound
-	}
-	if err := assertRecordReadFence(ctx, tx, candidate.item.RecordID); err != nil {
-		if errors.Is(err, records.ErrRecordDeletionReserved) || errors.Is(err, records.ErrRecordNotFound) {
-			return recordcollaboration.ErrInboxNotFound
+	if !cache.memberLoaded {
+		cache.memberLoaded = true
+		cache.member, cache.memberErr = repository.members.ReadMemberActor(ctx, tx, actorInput.ProjectID, actorInput.UserID)
+		if errors.Is(cache.memberErr, recordcollaboration.ErrMembershipDenied) {
+			cache.memberErr = recordcollaboration.ErrInboxNotFound
 		}
-		return err
+		if cache.memberErr == nil && (cache.member.UserID != actorInput.UserID || cache.member.ProjectID != recordauth.ProjectIDDefault) {
+			cache.memberErr = recordcollaboration.ErrInboxNotFound
+		}
 	}
-	binding, err := loadCollaborationRecordReadFenceBinding(ctx, tx, candidate.item.RecordID)
+	if cache.memberErr != nil {
+		return inboxCandidate{}, cache.memberErr
+	}
+	access, ok := cache.records[candidate.item.RecordID]
+	if !ok {
+		access = repository.loadInboxRecordAuthorization(ctx, tx, cache.member, candidate.item.RecordID)
+		cache.records[candidate.item.RecordID] = access
+	}
+	if access.err != nil {
+		return inboxCandidate{}, access.err
+	}
+	if candidate.recordFenceEpoch != uint64(access.binding.Epoch()) || candidate.authorizationEpoch != access.current.AuthorizationEpoch {
+		return inboxCandidate{}, recordcollaboration.ErrInboxNotFound
+	}
+	if err := authorizeInboxSubjectIdentity(ctx, tx, candidate, uint64(access.binding.Epoch())); err != nil {
+		return inboxCandidate{}, err
+	}
+	event := recordplatform.OutboxEvent{
+		ProjectID: string(recordplatform.ProjectIDDefault), EventKind: notificationOutboxKind(candidate.item.EventKind),
+		SubjectKind: string(candidate.item.SubjectKind), SubjectID: candidate.item.SubjectID,
+		SourceVersion: candidate.item.SourceVersion, AuthorizationEpoch: candidate.authorizationEpoch,
+		RecordFenceEpoch: candidate.recordFenceEpoch,
+	}
+	facts, direct, err := loadNotificationSourceFacts(ctx, tx, event, candidate.item.EventKind)
+	if err != nil || facts.RecordID != candidate.item.RecordID || facts.SubjectKind != candidate.item.SubjectKind ||
+		facts.SubjectID != candidate.item.SubjectID || facts.SourceVersion != candidate.item.SourceVersion ||
+		facts.AuthorizationEpoch != candidate.authorizationEpoch || facts.RecordFenceEpoch != candidate.recordFenceEpoch {
+		return inboxCandidate{}, recordcollaboration.ErrInboxNotFound
+	}
+	followers, ok := cache.followers[candidate.item.RecordID]
+	if !ok {
+		followers, err = loadNotificationFollowers(ctx, tx, candidate.item.RecordID, candidate.recordFenceEpoch)
+		if err != nil {
+			return inboxCandidate{}, err
+		}
+		cache.followers[candidate.item.RecordID] = followers
+	}
+	recipients, err := recordcollaboration.NormalizeNotificationRecipients(facts, followers, direct)
 	if err != nil {
-		return err
+		return inboxCandidate{}, err
 	}
-	if candidate.recordFenceEpoch != uint64(binding.Epoch()) {
-		return recordcollaboration.ErrInboxNotFound
+	for _, recipient := range recipients {
+		if recipient.UserID == cache.member.UserID {
+			candidate.item.Reason = recipient.Reason
+			candidate.item.Mandatory = recipient.Mandatory
+			return candidate, nil
+		}
 	}
-	current, err := repository.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, candidate.item.RecordID)
+	return inboxCandidate{}, recordcollaboration.ErrInboxNotFound
+}
+
+func (repository *PostgresRecordNotificationRepository) loadInboxRecordAuthorization(ctx context.Context, tx pgx.Tx, actor recordauth.ActorScope, recordID string) inboxRecordAuthorization {
+	access := inboxRecordAuthorization{}
+	if err := assertRecordReadFence(ctx, tx, recordID); err != nil {
+		if errors.Is(err, records.ErrRecordDeletionReserved) || errors.Is(err, records.ErrRecordNotFound) {
+			access.err = recordcollaboration.ErrInboxNotFound
+		} else {
+			access.err = err
+		}
+		return access
+	}
+	binding, err := loadCollaborationRecordReadFenceBinding(ctx, tx, recordID)
 	if err != nil {
-		return err
+		access.err = err
+		return access
 	}
-	if current.AuthorizationEpoch != candidate.authorizationEpoch || current.Lifecycle != records.LifecycleActive ||
-		records.AuthorizeRecordResource(actor, recordauth.CapabilityNotificationRead, current.Evidence) != nil {
-		return recordcollaboration.ErrInboxNotFound
+	current, err := repository.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, recordID)
+	if err != nil {
+		access.err = err
+		return access
 	}
+	if current.Lifecycle != records.LifecycleActive || records.AuthorizeRecordResource(actor, recordauth.CapabilityNotificationRead, current.Evidence) != nil {
+		access.err = recordcollaboration.ErrInboxNotFound
+		return access
+	}
+	access.binding = binding
+	access.current = current
+	return access
+}
+
+func notificationOutboxKind(kind recordcollaboration.NotificationEventKind) string {
+	switch kind {
+	case recordcollaboration.NotificationEventRecordOwnerChanged:
+		return recordplatform.OutboxEventKindRecordOwnerChanged
+	case recordcollaboration.NotificationEventRecordParticipantChanged:
+		return recordplatform.OutboxEventKindRecordParticipantChanged
+	case recordcollaboration.NotificationEventActionAssigned:
+		return recordplatform.OutboxEventKindRecordActionAssigned
+	case recordcollaboration.NotificationEventActionCompleted:
+		return recordplatform.OutboxEventKindRecordActionCompleted
+	case recordcollaboration.NotificationEventActionCancelled:
+		return recordplatform.OutboxEventKindRecordActionCancelled
+	case recordcollaboration.NotificationEventCommentReplied:
+		return recordplatform.OutboxEventKindRecordCommentReplied
+	case recordcollaboration.NotificationEventCommentMentioned:
+		return recordplatform.OutboxEventKindRecordCommentMentioned
+	default:
+		return ""
+	}
+}
+
+func authorizeInboxSubjectIdentity(ctx context.Context, tx pgx.Tx, candidate inboxCandidate, fenceEpoch uint64) error {
 	var present int
+	var err error
 	switch candidate.item.SubjectKind {
 	case recordcollaboration.NotificationSubjectRecord:
 		if candidate.item.SubjectID != candidate.item.RecordID {
@@ -633,18 +837,21 @@ func (repository *PostgresRecordNotificationRepository) authorizeInboxCandidate(
 		present = 1
 	case recordcollaboration.NotificationSubjectAction:
 		err = tx.QueryRow(ctx, `select 1 from public.record_actions where record_id = $1 and action_id = $2 and record_fence_epoch = $3`,
-			candidate.item.RecordID, candidate.item.SubjectID, int64(binding.Epoch())).Scan(&present)
+			candidate.item.RecordID, candidate.item.SubjectID, int64(fenceEpoch)).Scan(&present)
 	case recordcollaboration.NotificationSubjectComment:
 		err = tx.QueryRow(ctx, `select 1 from public.record_comments where record_id = $1 and comment_id = $2 and record_fence_epoch = $3`,
-			candidate.item.RecordID, candidate.item.SubjectID, int64(binding.Epoch())).Scan(&present)
+			candidate.item.RecordID, candidate.item.SubjectID, int64(fenceEpoch)).Scan(&present)
 	default:
 		return recordcollaboration.ErrInboxNotFound
 	}
-	if errors.Is(err, pgx.ErrNoRows) || present != 1 {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return recordcollaboration.ErrInboxNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("authorize inbox subject identity: %w", err)
+	}
+	if present != 1 {
+		return recordcollaboration.ErrInboxNotFound
 	}
 	return nil
 }

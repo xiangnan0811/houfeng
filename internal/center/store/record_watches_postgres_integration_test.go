@@ -130,25 +130,72 @@ func TestPostgresIntegrationRecordWatchConcurrentSameCASHasOneWinner(t *testing.
 		postgresWatchCommand(t, parent, 1, recordcollaboration.FollowerPreferenceMuted, "watch-race-muted", 0x32),
 		postgresWatchCommand(t, parent, 1, recordcollaboration.FollowerPreferenceWatching, "watch-race-watching", 0x33),
 	}
+	for _, statement := range []string{
+		`create table public.test_record_watch_overlap_latch (latch_id integer primary key)`,
+		`insert into public.test_record_watch_overlap_latch (latch_id) values (1)`,
+		`create function record_platform_internal.test_record_watch_overlap() returns trigger
+		 language plpgsql security definer set search_path = pg_catalog as $$
+		 begin
+		   perform latch_id from public.test_record_watch_overlap_latch where latch_id = 1 for update;
+		   return new;
+		 end
+		 $$`,
+		`create trigger test_record_watch_overlap after update on public.record_followers
+		 for each row when (new.record_id = 'rec_pgwatchrace')
+		 execute function record_platform_internal.test_record_watch_overlap()`,
+	} {
+		if _, err := fixture.db.Exec(ctx, statement); err != nil {
+			t.Fatalf("install watch overlap latch: %v", err)
+		}
+	}
+	controlTx, err := fixture.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = controlTx.Rollback(context.Background()) }()
+	var controlPID, latchID int
+	if err := controlTx.QueryRow(ctx, `select pg_backend_pid()`).Scan(&controlPID); err != nil {
+		t.Fatal(err)
+	}
+	if err := controlTx.QueryRow(ctx, `select latch_id from public.test_record_watch_overlap_latch where latch_id = 1 for update`).Scan(&latchID); err != nil || latchID != 1 {
+		t.Fatalf("lock watch overlap latch = %d/%v", latchID, err)
+	}
 	type outcome struct {
 		status recordcollaboration.WatchStatus
 		err    error
 	}
 	results := make(chan outcome, len(commands))
-	start := make(chan struct{})
-	for index, command := range commands {
-		repository := NewPostgresRecordWatchRepository(
-			fixture.openDirectRuntimePool(t, ctx, fmt.Sprintf("record-watch-race-%d", index), 1),
+	repositories := make([]*PostgresRecordWatchRepository, 0, len(commands))
+	workerPIDs := make([]int, 0, len(commands))
+	for index := range commands {
+		pool := fixture.openDirectRuntimePool(t, ctx, fmt.Sprintf("record-watch-race-%d", index), 1)
+		var pid int
+		if err := pool.QueryRow(ctx, `select pg_backend_pid()`).Scan(&pid); err != nil {
+			t.Fatal(err)
+		}
+		workerPIDs = append(workerPIDs, pid)
+		repositories = append(repositories, NewPostgresRecordWatchRepository(
+			pool,
 			allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
-		)
-		command := command
+		))
+	}
+	raceCtx, cancelRace := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelRace()
+	for index := range commands {
+		index := index
 		go func() {
-			<-start
-			status, err := repository.SetWatch(context.Background(), command)
+			status, err := repositories[index].SetWatch(raceCtx, commands[index])
 			results <- outcome{status: status, err: err}
 		}()
+		if index == 0 {
+			waitForPostgresBlockingPID(t, raceCtx, fixture.db, workerPIDs[0], controlPID)
+		} else {
+			waitForPostgresBlockingPID(t, raceCtx, fixture.db, workerPIDs[1], workerPIDs[0])
+		}
 	}
-	close(start)
+	if err := controlTx.Commit(ctx); err != nil {
+		t.Fatalf("release watch overlap latch: %v", err)
+	}
 	winners, conflicts := 0, 0
 	for range commands {
 		result := <-results
@@ -219,5 +266,26 @@ func assertPostgresWatchRowAndKeyCounts(t *testing.T, ctx context.Context, fixtu
 	}
 	if rows != wantRows || keys != wantKeys {
 		t.Fatalf("watch rows/keys = %d/%d, want %d/%d", rows, keys, wantRows, wantKeys)
+	}
+}
+
+type postgresBlockingPIDQueryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func waitForPostgresBlockingPID(t *testing.T, ctx context.Context, db postgresBlockingPIDQueryer, blockedPID, blockerPID int) {
+	t.Helper()
+	for {
+		var observed bool
+		err := db.QueryRow(ctx, `select $2::integer = any(pg_blocking_pids($1::integer))`, blockedPID, blockerPID).Scan(&observed)
+		if err != nil {
+			t.Fatalf("observe PostgreSQL blocker %d <- %d: %v", blockedPID, blockerPID, err)
+		}
+		if observed {
+			return
+		}
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("PostgreSQL blocker %d <- %d not observed: %v", blockedPID, blockerPID, err)
+		}
 	}
 }

@@ -189,7 +189,7 @@ func TestPostgresIntegrationRecordPlatformConcurrentIdempotencyClaimHasOneFenced
 func TestPostgresIntegrationRecordPlatformConcurrentOutboxAndLeaseClaimsHaveOneWinner(t *testing.T) {
 	ctx := context.Background()
 	t.Run("outbox", func(t *testing.T) {
-		fixture := newRecordPlatformPostgresFixture(t, ctx)
+		fixture := newRecordsPostgresFixture(t, ctx)
 		seedRepository := NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-outbox-seed", 1), allowRecordPlatformAdmissionGate)
 		if err := seedRepository.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 			_, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
@@ -358,7 +358,7 @@ func TestPostgresIntegrationRecordPlatformRejectsRawDeletionTokenTransportBefore
 
 func TestPostgresIntegrationRecordPlatformTransactionRollsBackBusinessIdempotencyAndOutbox(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordPlatformPostgresFixture(t, ctx)
+	fixture := newRecordsPostgresFixture(t, ctx)
 	fixture.installAtomicBusinessFactTable(t, ctx)
 	repository := NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-atomic-rollback", 1), allowRecordPlatformAdmissionGate)
 	const (
@@ -464,7 +464,7 @@ func TestPostgresIntegrationRecordPlatformExpiredTakeoverFencesStaleFinalizers(t
 	})
 
 	t.Run("outbox sent finalization", func(t *testing.T) {
-		fixture := newRecordPlatformPostgresFixture(t, ctx)
+		fixture := newRecordsPostgresFixture(t, ctx)
 		repository := NewPostgresRecordPlatformRepository(fixture.openDirectRuntimePool(t, ctx, "record-platform-outbox-takeover", 1), allowRecordPlatformAdmissionGate)
 		if err := repository.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 			_, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{

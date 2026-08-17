@@ -86,6 +86,30 @@ func TestRecordInboxHandlerUsesOpaqueNotFoundForItemAndTarget(t *testing.T) {
 	}
 }
 
+func TestRecordInboxHandlerRejectsEveryNonEmptyTransitionBodyWithoutCallingApplication(t *testing.T) {
+	actor := testRecordActionActor(t)
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "json value", body: `{}`},
+		{name: "trailing bytes", body: "{} trailing"},
+		{name: "whitespace", body: "\n"},
+		{name: "oversized", body: strings.Repeat("x", DefaultJSONBodyLimit+1)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			application := &recordInboxHandlerStub{item: testInboxItem()}
+			request := httptest.NewRequest(http.MethodPut, "/api/record-notifications/"+testInboxNotificationID+"/read", strings.NewReader(test.body))
+			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+			recorder := httptest.NewRecorder()
+			RecordInbox(application).ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusBadRequest || len(application.transitions) != 0 {
+				t.Fatalf("nonempty transition body status/calls = %d/%d, want 400/0", recorder.Code, len(application.transitions))
+			}
+		})
+	}
+}
+
 type recordInboxHandlerStub struct {
 	items       []recordcollaboration.InboxItem
 	item        recordcollaboration.InboxItem

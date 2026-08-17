@@ -54,7 +54,16 @@ func ValidateCommentTombstoneID(value string) error {
 }
 
 func ValidateNotificationID(value string) error {
-	return validateCollaborationID(value, "rnt_", ErrInvalidNotificationID)
+	const prefix = "rnt_"
+	if len(value) != len(prefix)+64 || value[:len(prefix)] != prefix {
+		return ErrInvalidNotificationID
+	}
+	for _, character := range value[len(prefix):] {
+		if (character < 'a' || character > 'f') && (character < '0' || character > '9') {
+			return ErrInvalidNotificationID
+		}
+	}
+	return nil
 }
 
 func ValidateNotificationDeliveryID(value string) error {

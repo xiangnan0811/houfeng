@@ -219,7 +219,7 @@ create index if not exists idx_record_followers_user
   on public.record_followers(user_id, record_id);
 
 create table if not exists public.record_notifications (
-  notification_id text primary key check (notification_id ~ '^rnt_[a-z0-9]{1,64}$'),
+  notification_id text primary key check (notification_id ~ '^rnt_[0-9a-f]{64}$'),
   project_id text not null default 'default' check (project_id = 'default'),
   record_id text not null,
   event_kind text not null

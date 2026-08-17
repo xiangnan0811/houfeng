@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -148,6 +149,10 @@ func RecordInbox(application recordInboxApplication) http.Handler {
 				writeRecordError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 				return
 			}
+			if !recordInboxTransitionBodyEmpty(request) {
+				writeRecordError(w, http.StatusBadRequest, "invalid_request", "transition body must be empty", nil)
+				return
+			}
 			item, err := application.TransitionInbox(request.Context(), recordcollaboration.InboxTransitionRequest{
 				Actor: actor, NotificationID: notificationID, Kind: recordcollaboration.InboxTransitionKind(action),
 			})
@@ -165,6 +170,14 @@ func RecordInbox(application recordInboxApplication) http.Handler {
 			writeRecordNotFound(w)
 		}
 	})
+}
+
+func recordInboxTransitionBodyEmpty(request *http.Request) bool {
+	if request == nil || request.Body == nil {
+		return request != nil
+	}
+	body, err := io.ReadAll(io.LimitReader(request.Body, 1))
+	return err == nil && len(body) == 0
 }
 
 func recordInboxRoute(path string) (string, string, bool) {

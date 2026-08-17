@@ -242,6 +242,7 @@ func TestRecordCollaborationMigrationBindsChildIdentityAndFenceToItsParent(t *te
 func TestRecordCollaborationMigrationEnforcesReplyMentionFollowerAndInboxIdentity(t *testing.T) {
 	sql := normalizedRecordCollaborationMigrationSQL(t)
 	for _, want := range []string{
+		"notification_id text primary key check (notification_id ~ '^rnt_[0-9a-f]{64}$')",
 		"check (child_comment_id <> parent_comment_id)",
 		"primary key (comment_id, comment_version, mentioned_user_id)",
 		"manual_preference text not null default 'default' check (manual_preference in ('default', 'watching', 'muted'))",

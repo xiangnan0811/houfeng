@@ -259,7 +259,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 			notification_id, record_id, event_kind, subject_kind, subject_id,
 			source_version, actor_id, authorization_epoch, record_fence_epoch,
 			event_at, created_at, details_delete_after
-		) values ('rnt_invalid', 'rec_acl', 'comment_mentioned', 'comment', 'rcm_acl',
+		) values ('rnt_0000000000000000000000000000000000000000000000000000000000000000', 'rec_acl', 'comment_mentioned', 'comment', 'rcm_acl',
 			2, 'usr_acl', 0, 0, clock_timestamp(), statement_timestamp(), statement_timestamp())
 	`)
 	requirePostgresSQLState(t, err, "23514")
@@ -268,7 +268,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 			notification_id, record_id, event_kind, subject_kind, subject_id,
 			source_version, actor_id, authorization_epoch, record_fence_epoch,
 			event_at, details_delete_after
-		) values ('rnt_acl', 'rec_acl', 'comment_mentioned', 'comment', 'rcm_acl',
+		) values ('rnt_0000000000000000000000000000000000000000000000000000000000000001', 'rec_acl', 'comment_mentioned', 'comment', 'rcm_acl',
 			2, 'usr_acl', 0, 0, clock_timestamp(), clock_timestamp() + interval '1 hour')
 	`); err != nil {
 		t.Fatalf("runtime insert collaboration notification: %v", err)
@@ -277,7 +277,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		insert into public.record_notification_recipients (
 			notification_id, record_id, recipient_user_id, reason_kind, mandatory,
 			authorization_epoch, record_fence_epoch
-		) values ('rnt_acl', 'rec_acl', 'usr_recipient', 'mention', true, 0, 0)
+		) values ('rnt_0000000000000000000000000000000000000000000000000000000000000001', 'rec_acl', 'usr_recipient', 'mention', true, 0, 0)
 	`); err != nil {
 		t.Fatalf("runtime insert collaboration notification recipient: %v", err)
 	}
@@ -285,7 +285,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		insert into public.record_notification_deliveries (
 			delivery_id, record_id, notification_id, recipient_user_id, channel,
 			binding_id, authorization_epoch, record_fence_epoch
-		) values ('rnd_acl', 'rec_acl', 'rnt_acl', 'usr_recipient', 'telegram',
+		) values ('rnd_acl', 'rec_acl', 'rnt_0000000000000000000000000000000000000000000000000000000000000001', 'usr_recipient', 'telegram',
 			'binding_acl', 0, 0)
 	`); err != nil {
 		t.Fatalf("runtime insert collaboration notification delivery: %v", err)
@@ -300,7 +300,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 			insert into public.record_notification_deliveries (
 				delivery_id, record_id, notification_id, recipient_user_id, channel,
 				binding_id, authorization_epoch, record_fence_epoch
-			) values ('rnd_cross', 'rec_aclother', 'rnt_acl', 'usr_recipient', 'feishu',
+			) values ('rnd_cross', 'rec_aclother', 'rnt_0000000000000000000000000000000000000000000000000000000000000001', 'usr_recipient', 'feishu',
 				'binding_cross', 0, 1)
 		`)
 		requirePostgresSQLState(t, err, "23503")
@@ -315,7 +315,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 			insert into public.record_notification_deliveries (
 				delivery_id, record_id, notification_id, recipient_user_id, channel,
 				binding_id, authorization_epoch, record_fence_epoch
-			) values ('rnd_wrongfence', 'rec_acl', 'rnt_acl', 'usr_recipient', 'feishu',
+			) values ('rnd_wrongfence', 'rec_acl', 'rnt_0000000000000000000000000000000000000000000000000000000000000001', 'usr_recipient', 'feishu',
 				'binding_wrongfence', 0, 1)
 		`)
 		requirePostgresSQLState(t, err, "23503")
@@ -325,7 +325,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 			notification_id, record_id, event_kind, subject_kind, subject_id,
 			source_version, actor_id, authorization_epoch, record_fence_epoch,
 			event_at, details_delete_after
-		) values ('rnt_aclother', 'rec_acl', 'comment_mentioned', 'comment', 'rcm_acl',
+		) values ('rnt_0000000000000000000000000000000000000000000000000000000000000002', 'rec_acl', 'comment_mentioned', 'comment', 'rcm_acl',
 			3, 'usr_acl', 0, 0, clock_timestamp(), clock_timestamp() + interval '1 hour')
 	`); err != nil {
 		t.Fatalf("runtime insert second collaboration notification: %v", err)
@@ -334,7 +334,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		insert into public.record_notification_recipients (
 			notification_id, record_id, recipient_user_id, reason_kind, mandatory,
 			authorization_epoch, record_fence_epoch
-		) values ('rnt_aclother', 'rec_acl', 'usr_other', 'mention', true, 0, 0)
+		) values ('rnt_0000000000000000000000000000000000000000000000000000000000000002', 'rec_acl', 'usr_other', 'mention', true, 0, 0)
 	`); err != nil {
 		t.Fatalf("runtime insert second collaboration notification recipient: %v", err)
 	}
@@ -349,7 +349,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 				attempt_id, record_id, delivery_id, notification_id, recipient_user_id,
 				attempt_no, outcome, authorization_epoch, record_fence_epoch,
 				started_at, completed_at
-			) values ('rna_cross', 'rec_acl', 'rnd_acl', 'rnt_aclother', 'usr_other',
+			) values ('rna_cross', 'rec_acl', 'rnd_acl', 'rnt_0000000000000000000000000000000000000000000000000000000000000002', 'usr_other',
 				2, 'temporary_failure', 0, 0, statement_timestamp(), statement_timestamp())
 		`)
 		requirePostgresSQLState(t, err, "23503")
@@ -365,7 +365,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 				attempt_id, record_id, delivery_id, notification_id, recipient_user_id,
 				attempt_no, outcome, authorization_epoch, record_fence_epoch,
 				started_at, completed_at
-			) values ('rna_wrongfence', 'rec_acl', 'rnd_acl', 'rnt_acl', 'usr_recipient',
+			) values ('rna_wrongfence', 'rec_acl', 'rnd_acl', 'rnt_0000000000000000000000000000000000000000000000000000000000000001', 'usr_recipient',
 				2, 'temporary_failure', 0, 1, statement_timestamp(), statement_timestamp())
 		`)
 		requirePostgresSQLState(t, err, "23503")
@@ -375,7 +375,7 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 			attempt_id, record_id, delivery_id, notification_id, recipient_user_id,
 			attempt_no, outcome, authorization_epoch, record_fence_epoch,
 			started_at, completed_at
-		) values ('rna_invalid', 'rec_acl', 'rnd_acl', 'rnt_acl', 'usr_recipient',
+		) values ('rna_invalid', 'rec_acl', 'rnd_acl', 'rnt_0000000000000000000000000000000000000000000000000000000000000001', 'usr_recipient',
 			9, 'temporary_failure', 0, 0, clock_timestamp(), clock_timestamp())
 	`)
 	requirePostgresSQLState(t, err, "23514")
@@ -384,11 +384,19 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 			attempt_id, record_id, delivery_id, notification_id, recipient_user_id,
 			attempt_no, outcome, authorization_epoch, record_fence_epoch,
 			started_at, completed_at
-		) values ('rna_acl', 'rec_acl', 'rnd_acl', 'rnt_acl', 'usr_recipient',
+		) values ('rna_acl', 'rec_acl', 'rnd_acl', 'rnt_0000000000000000000000000000000000000000000000000000000000000001', 'usr_recipient',
 			1, 'temporary_failure', 0, 0, statement_timestamp(), statement_timestamp())
 	`); err != nil {
 		t.Fatalf("runtime insert collaboration notification delivery attempt: %v", err)
 	}
+	deletedRecipient, err := runtimeDB.Exec(ctx, `
+		delete from public.record_notification_recipients
+		where notification_id = 'rnt_0000000000000000000000000000000000000000000000000000000000000002' and recipient_user_id = 'usr_other'`)
+	if err != nil || deletedRecipient.RowsAffected() != 1 {
+		t.Fatalf("runtime narrow recipient reconciliation delete = %d/%v, want 1/nil", deletedRecipient.RowsAffected(), err)
+	}
+	_, err = runtimeDB.Exec(ctx, `delete from public.record_comments where comment_id = 'rcm_acl'`)
+	requirePostgresSQLState(t, err, "42501")
 
 	_, err = runtimeDB.Exec(ctx, `update public.record_action_events set actor_id = 'usr_changed' where action_event_id = 'raev_acl'`)
 	requirePostgresSQLState(t, err, "42501")
@@ -433,8 +441,8 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	for _, statement := range []string{
 		`delete from public.record_notification_delivery_attempts where attempt_id = 'rna_acl'`,
 		`delete from public.record_notification_deliveries where delivery_id = 'rnd_acl'`,
-		`delete from public.record_notification_recipients where notification_id in ('rnt_acl', 'rnt_aclother')`,
-		`delete from public.record_notifications where notification_id in ('rnt_acl', 'rnt_aclother')`,
+		`delete from public.record_notification_recipients where notification_id in ('rnt_0000000000000000000000000000000000000000000000000000000000000001', 'rnt_0000000000000000000000000000000000000000000000000000000000000002')`,
+		`delete from public.record_notifications where notification_id in ('rnt_0000000000000000000000000000000000000000000000000000000000000001', 'rnt_0000000000000000000000000000000000000000000000000000000000000002')`,
 		`delete from public.record_followers where record_id = 'rec_acl'`,
 		`delete from public.record_comment_revisions where comment_revision_id = 'rcr_acl'`,
 		`delete from public.record_comment_tombstones where tombstone_id = 'rct_acl'`,

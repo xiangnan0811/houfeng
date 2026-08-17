@@ -203,10 +203,20 @@ func (transaction *RecordPlatformTransaction) AssertOutboxClaim(ctx context.Cont
 		  and owner_id = $2
 		  and owner_generation = $3
 		  and owner_expires_at = $4
+		  and project_id = $5
+		  and event_kind = $6
+		  and subject_kind = $7
+		  and subject_id = $8
+		  and source_version = $9
+		  and authorization_epoch = $10
+		  and record_fence_epoch = $11
+		  and expires_at = $12
 		  and owner_expires_at > transaction_timestamp()
 		  and expires_at > transaction_timestamp()
 		for update`,
 		claim.Event.RowID, claim.Owner.OwnerID, claim.Owner.Generation, claim.Owner.ExpiresAt,
+		claim.Event.ProjectID, claim.Event.EventKind, claim.Event.SubjectKind, claim.Event.SubjectID,
+		claim.Event.SourceVersion, claim.Event.AuthorizationEpoch, claim.Event.RecordFenceEpoch, claim.ExpiresAt,
 	).Scan(&present)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return recordplatform.ErrLostOwnerLease

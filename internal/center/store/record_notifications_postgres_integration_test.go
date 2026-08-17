@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -142,6 +144,180 @@ func TestPostgresIntegrationRecordNotificationCancelsCapturedAuthorizationAndFen
 	}
 }
 
+func TestPostgresIntegrationRecordPlatformAssertOutboxClaimRejectsImmutableTupleDrift(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-outbox-tuple-drift", 2)
+	repository := NewPostgresRecordPlatformRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	for index, test := range []struct {
+		name   string
+		mutate func(*testing.T, int64)
+	}{
+		{name: "event kind", mutate: func(t *testing.T, rowID int64) {
+			_, err := fixture.db.Exec(ctx, `update public.record_outbox set event_kind = 'record_action_completed' where outbox_row_id = $1`, rowID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "subject kind", mutate: func(t *testing.T, rowID int64) {
+			_, err := fixture.db.Exec(ctx, `update public.record_outbox set subject_kind = 'comment' where outbox_row_id = $1`, rowID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "subject id", mutate: func(t *testing.T, rowID int64) {
+			_, err := fixture.db.Exec(ctx, `update public.record_outbox set subject_id = 'ract_tuple_changed' where outbox_row_id = $1`, rowID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "source version", mutate: func(t *testing.T, rowID int64) {
+			_, err := fixture.db.Exec(ctx, `update public.record_outbox set source_version = source_version + 1 where outbox_row_id = $1`, rowID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "authorization epoch", mutate: func(t *testing.T, rowID int64) {
+			_, err := fixture.db.Exec(ctx, `update public.record_outbox set authorization_epoch = authorization_epoch + 1 where outbox_row_id = $1`, rowID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "record fence epoch", mutate: func(t *testing.T, rowID int64) {
+			_, err := fixture.db.Exec(ctx, `update public.record_outbox set record_fence_epoch = record_fence_epoch + 1 where outbox_row_id = $1`, rowID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "event expiry", mutate: func(t *testing.T, rowID int64) {
+			_, err := fixture.db.Exec(ctx, `update public.record_outbox set expires_at = expires_at + interval '1 minute' where outbox_row_id = $1`, rowID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			subjectID := fmt.Sprintf("ract_tuple%d", index)
+			if err := repository.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+				_, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
+					Event: recordplatform.OutboxEvent{
+						ProjectID: string(recordplatform.ProjectIDDefault), EventKind: recordplatform.OutboxEventKindRecordActionAssigned,
+						SubjectKind: recordplatform.OutboxSubjectKindAction, SubjectID: subjectID,
+						SourceVersion: 1, AuthorizationEpoch: 3, RecordFenceEpoch: 0,
+					},
+					ExpiresAfter: time.Hour,
+				})
+				return err
+			}); err != nil {
+				t.Fatalf("enqueue tuple fixture: %v", err)
+			}
+			claim := claimNotificationOutboxKind(t, ctx, repository, recordplatform.OutboxEventKindRecordActionAssigned, fmt.Sprintf("tuple_drift_%d", index))
+			test.mutate(t, claim.Event.RowID)
+			err := repository.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+				return transaction.AssertOutboxClaim(ctx, claim)
+			})
+			if !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+				t.Fatalf("AssertOutboxClaim(tuple drift) error = %v, want ErrLostOwnerLease", err)
+			}
+		})
+	}
+}
+
+func TestPostgresIntegrationRecordNotificationTakeoverOverlapsAndRejectsStaleFinalizer(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	stalePool := fixture.openDirectRuntimePool(t, ctx, "record-notification-stale-finalizer", 1)
+	takeoverPool := fixture.openDirectRuntimePool(t, ctx, "record-notification-live-takeover", 1)
+	staleQueue := NewPostgresRecordPlatformRepository(stalePool, allowRecordPlatformAdmissionGate)
+	if err := staleQueue.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		_, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
+			Event: recordplatform.OutboxEvent{
+				ProjectID: string(recordplatform.ProjectIDDefault), EventKind: recordplatform.OutboxEventKindRecordActionAssigned,
+				SubjectKind: recordplatform.OutboxSubjectKindAction, SubjectID: "ract_takeover_overlap",
+				SourceVersion: 1, AuthorizationEpoch: 3,
+			},
+			ExpiresAfter: time.Hour,
+		})
+		return err
+	}); err != nil {
+		t.Fatalf("enqueue takeover overlap event: %v", err)
+	}
+	staleClaim := claimNotificationOutboxKind(t, ctx, staleQueue, recordplatform.OutboxEventKindRecordActionAssigned, "notification_stale_owner")
+	expireNotificationClaim(t, ctx, fixture, staleClaim.Event.RowID)
+	for _, statement := range []string{
+		`create table public.test_record_notification_takeover_latch (latch_id integer primary key)`,
+		`insert into public.test_record_notification_takeover_latch (latch_id) values (1)`,
+		`create function record_platform_internal.test_record_notification_takeover_overlap() returns trigger
+		 language plpgsql security definer set search_path = pg_catalog as $$
+		 begin
+		   perform latch_id from public.test_record_notification_takeover_latch where latch_id = 1 for update;
+		   return new;
+		 end
+		 $$`,
+		`create trigger test_record_notification_takeover_overlap after update on public.record_outbox
+		 for each row when (new.owner_id = 'notification_takeover_owner' and new.owner_generation > old.owner_generation)
+		 execute function record_platform_internal.test_record_notification_takeover_overlap()`,
+	} {
+		if _, err := fixture.db.Exec(ctx, statement); err != nil {
+			t.Fatalf("install notification takeover overlap latch: %v", err)
+		}
+	}
+	controlTx, err := fixture.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = controlTx.Rollback(context.Background()) }()
+	var controlPID, latchID, takeoverPID int
+	if err := controlTx.QueryRow(ctx, `select pg_backend_pid()`).Scan(&controlPID); err != nil {
+		t.Fatal(err)
+	}
+	if err := controlTx.QueryRow(ctx, `select latch_id from public.test_record_notification_takeover_latch where latch_id = 1 for update`).Scan(&latchID); err != nil || latchID != 1 {
+		t.Fatalf("lock notification takeover latch = %d/%v", latchID, err)
+	}
+	if err := takeoverPool.QueryRow(ctx, `select pg_backend_pid()`).Scan(&takeoverPID); err != nil {
+		t.Fatal(err)
+	}
+	type claimOutcome struct {
+		claim *recordplatform.ClaimedOutboxEventV1
+		err   error
+	}
+	raceCtx, cancelRace := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelRace()
+	takeoverResults := make(chan claimOutcome, 1)
+	go func() {
+		claim, err := NewPostgresRecordPlatformRepository(takeoverPool, allowRecordPlatformAdmissionGate).ClaimOutbox(raceCtx, recordplatform.OutboxClaimInputV1{
+			OwnerID: "notification_takeover_owner", OwnerLeaseDuration: time.Minute,
+		})
+		takeoverResults <- claimOutcome{claim: claim, err: err}
+	}()
+	waitForPostgresBlockingPID(t, raceCtx, fixture.db, takeoverPID, controlPID)
+	staleResults := make(chan error, 1)
+	go func() { staleResults <- staleQueue.MarkOutboxSent(raceCtx, staleClaim) }()
+	select {
+	case err := <-staleResults:
+		if !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+			t.Fatalf("overlapped stale finalizer error = %v, want ErrLostOwnerLease", err)
+		}
+	case <-raceCtx.Done():
+		t.Fatalf("stale finalizer did not reject while takeover was in flight: %v", raceCtx.Err())
+	}
+	if err := controlTx.Commit(ctx); err != nil {
+		t.Fatalf("release notification takeover latch: %v", err)
+	}
+	takeover := <-takeoverResults
+	if takeover.err != nil || takeover.claim == nil || takeover.claim.Owner.Generation != staleClaim.Owner.Generation+1 {
+		t.Fatalf("takeover claim = (%#v, %v)", takeover.claim, takeover.err)
+	}
+	var status, ownerID string
+	var generation int64
+	if err := fixture.db.QueryRow(ctx, `select status, owner_id, owner_generation from public.record_outbox where outbox_row_id = $1`, staleClaim.Event.RowID).Scan(&status, &ownerID, &generation); err != nil {
+		t.Fatal(err)
+	}
+	if status != "processing" || ownerID != "notification_takeover_owner" || generation != int64(takeover.claim.Owner.Generation) {
+		t.Fatalf("overlap durable owner = %q/%q/%d", status, ownerID, generation)
+	}
+}
+
 func TestPostgresIntegrationRecordNotificationProjectionFencesTakeoverAndReplaysAtomically(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
@@ -244,6 +420,10 @@ func TestPostgresIntegrationRecordNotificationProjectionFencesTakeoverAndReplays
 	count, err := projection.CountUnreadInbox(ctx, listRequest)
 	if err != nil || count != 2 {
 		t.Fatalf("CountUnreadInbox() = (%d, %v), want 2", count, err)
+	}
+	count, err = projection.CountUnreadInbox(ctx, recordcollaboration.InboxListRequest{Actor: actor, Limit: 1})
+	if err != nil || count != 1 {
+		t.Fatalf("CountUnreadInbox(limit 1) = (%d, %v), want capped 1", count, err)
 	}
 	itemRequest := recordcollaboration.InboxItemRequest{Actor: actor, NotificationID: items[0].NotificationID}
 	if got, err := projection.GetInboxItem(ctx, itemRequest); err != nil || got != items[0] {
@@ -373,6 +553,295 @@ func TestPostgresIntegrationRecordNotificationProjectionFencesTakeoverAndReplays
 	}
 	if _, err := projection.TransitionInbox(ctx, recordcollaboration.InboxTransitionRequest{Actor: actor, NotificationID: items[0].NotificationID, Kind: recordcollaboration.InboxTransitionRead}); !errors.Is(err, recordcollaboration.ErrInboxNotFound) {
 		t.Fatalf("TransitionInbox(after fence advance) error = %v, want opaque not found", err)
+	}
+}
+
+func TestPostgresIntegrationRecordInboxRecomputesCurrentRecipientAndProjectionReconciles(t *testing.T) {
+	t.Run("mute hides optional but preserves mandatory", func(t *testing.T) {
+		ctx := context.Background()
+		fixture := newRecordsPostgresFixture(t, ctx)
+		seedCollaborationRevisionUsers(t, ctx, fixture)
+		runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-inbox-current-mute", 4)
+		input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
+		parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
+			t, recordplatform.OperationKindRecordCreate, "rec_pginboxcurrentmute", "", 0, 0, input, "inbox-current-mute-parent",
+		))
+		if err != nil {
+			t.Fatalf("CommitRevision(parent) error = %v", err)
+		}
+		seedNotificationPreferences(t, ctx, fixture, parent.RecordID, map[string]string{"usr_bbbbbbbbbbbbbbbbbbbbbbbb": "watching"})
+		actions := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+		optionalCreate := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pginboxoptional", 0,
+			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Optional completion"}), "inbox-current-optional-create")
+		optionalComplete := postgresActionCommand(t, parent, recordcollaboration.ActionMutationComplete, optionalCreate.ActionID, 1,
+			recordcollaboration.ActionFields{}, "inbox-current-optional-complete")
+		mandatoryCreate := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pginboxmandatory", 0,
+			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Mandatory assignment", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}), "inbox-current-mandatory-create")
+		for _, command := range []recordcollaboration.ActionCommand{optionalCreate, optionalComplete, mandatoryCreate} {
+			if _, err := actions.CommitAction(ctx, command); err != nil {
+				t.Fatalf("CommitAction(%s/%s) error = %v", command.ActionID, command.Kind, err)
+			}
+		}
+		projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+		optionalClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionCompleted, "inbox_current_optional_a")
+		optionalResult, err := projection.ProjectNotification(ctx, optionalClaim)
+		if err != nil || optionalResult.RecipientCount != 1 {
+			t.Fatalf("ProjectNotification(optional) = (%#v, %v)", optionalResult, err)
+		}
+		mandatoryClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionAssigned, "inbox_current_mandatory")
+		mandatoryResult, err := projection.ProjectNotification(ctx, mandatoryClaim)
+		if err != nil || mandatoryResult.RecipientCount != 1 {
+			t.Fatalf("ProjectNotification(mandatory) = (%#v, %v)", mandatoryResult, err)
+		}
+		if err := queue.MarkOutboxSent(ctx, mandatoryClaim); err != nil {
+			t.Fatal(err)
+		}
+		actor := collaborationActor(t, "usr_bbbbbbbbbbbbbbbbbbbbbbbb", nil)
+		optionalRequest := recordcollaboration.InboxItemRequest{Actor: actor, NotificationID: optionalResult.NotificationID}
+		dismissed, err := projection.TransitionInbox(ctx, recordcollaboration.InboxTransitionRequest{
+			Actor: actor, NotificationID: optionalResult.NotificationID, Kind: recordcollaboration.InboxTransitionDismiss,
+		})
+		if err != nil || dismissed.ReadAt == nil || dismissed.DismissedAt == nil {
+			t.Fatalf("TransitionInbox(optional dismiss) = (%#v, %v)", dismissed, err)
+		}
+		expireNotificationClaim(t, ctx, fixture, optionalClaim.Event.RowID)
+		preserveClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionCompleted, "inbox_current_optional_b")
+		if replay, err := projection.ProjectNotification(ctx, preserveClaim); err != nil || replay != optionalResult {
+			t.Fatalf("ProjectNotification(valid replay) = (%#v, %v), want %#v", replay, err, optionalResult)
+		}
+		preserved, err := projection.GetInboxItem(ctx, optionalRequest)
+		if err != nil || preserved.ReadAt == nil || preserved.DismissedAt == nil ||
+			!preserved.ReadAt.Equal(*dismissed.ReadAt) || !preserved.DismissedAt.Equal(*dismissed.DismissedAt) {
+			t.Fatalf("valid replay did not preserve inbox state: (%#v, %v)", preserved, err)
+		}
+		expireNotificationClaim(t, ctx, fixture, preserveClaim.Event.RowID)
+		muteClaim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionCompleted, "inbox_current_optional_c")
+		if _, err := fixture.db.Exec(ctx, `update public.record_followers set manual_preference = 'muted' where record_id = $1 and user_id = $2`, parent.RecordID, actor.UserID); err != nil {
+			t.Fatalf("mute projected optional recipient: %v", err)
+		}
+		for _, statement := range []string{
+			`create function record_platform_internal.test_notification_reconcile_rollback() returns trigger
+			 language plpgsql as $$ begin raise exception using errcode = 'P0001', message = 'notification recipient reconcile cut point'; end $$`,
+			`create trigger test_notification_reconcile_rollback before delete on public.record_notification_recipients
+			 for each row execute function record_platform_internal.test_notification_reconcile_rollback()`,
+		} {
+			if _, err := fixture.db.Exec(ctx, statement); err != nil {
+				t.Fatalf("install notification reconcile rollback cut point: %v", err)
+			}
+		}
+		if replay, err := projection.ProjectNotification(ctx, muteClaim); err == nil || replay != (recordcollaboration.NotificationProjectionResult{}) || !strings.Contains(err.Error(), "notification recipient reconcile cut point") {
+			t.Fatalf("ProjectNotification(reconcile cut point) = (%#v, %v)", replay, err)
+		}
+		var rollbackReadAt, rollbackDismissedAt *time.Time
+		if err := fixture.db.QueryRow(ctx, `select read_at, dismissed_at from public.record_notification_recipients where notification_id = $1 and recipient_user_id = $2`, optionalResult.NotificationID, actor.UserID).Scan(&rollbackReadAt, &rollbackDismissedAt); err != nil {
+			t.Fatalf("read reconcile rollback recipient: %v", err)
+		}
+		if rollbackReadAt == nil || rollbackDismissedAt == nil || !rollbackReadAt.Equal(*dismissed.ReadAt) || !rollbackDismissedAt.Equal(*dismissed.DismissedAt) {
+			t.Fatalf("reconcile rollback lost read/dismiss state: %v/%v", rollbackReadAt, rollbackDismissedAt)
+		}
+		if _, err := fixture.db.Exec(ctx, `drop trigger test_notification_reconcile_rollback on public.record_notification_recipients`); err != nil {
+			t.Fatal(err)
+		}
+		if replay, err := projection.ProjectNotification(ctx, muteClaim); err != nil || replay != (recordcollaboration.NotificationProjectionResult{}) {
+			t.Fatalf("ProjectNotification(muted replay) = (%#v, %v), want empty", replay, err)
+		}
+		var optionalRecipients int
+		if err := fixture.db.QueryRow(ctx, `select count(*)::int from public.record_notification_recipients where notification_id = $1`, optionalResult.NotificationID).Scan(&optionalRecipients); err != nil {
+			t.Fatal(err)
+		}
+		if optionalRecipients != 0 {
+			t.Fatalf("muted replay recipients = %d, want exact zero reconciliation", optionalRecipients)
+		}
+		listRequest := recordcollaboration.InboxListRequest{Actor: actor, Limit: 100}
+		items, err := projection.ListInbox(ctx, listRequest)
+		if err != nil || len(items) != 1 || items[0].NotificationID != mandatoryResult.NotificationID || !items[0].Mandatory {
+			t.Fatalf("ListInbox(after mute) = (%#v, %v), want only mandatory", items, err)
+		}
+		if count, err := projection.CountUnreadInbox(ctx, listRequest); err != nil || count != 1 {
+			t.Fatalf("CountUnreadInbox(after mute) = (%d, %v), want 1", count, err)
+		}
+		for _, operation := range []struct {
+			name string
+			call func() error
+		}{
+			{name: "item", call: func() error { _, err := projection.GetInboxItem(ctx, optionalRequest); return err }},
+			{name: "target", call: func() error { _, err := projection.GetInboxDeepLink(ctx, optionalRequest); return err }},
+			{name: "transition", call: func() error {
+				_, err := projection.TransitionInbox(ctx, recordcollaboration.InboxTransitionRequest{Actor: actor, NotificationID: optionalResult.NotificationID, Kind: recordcollaboration.InboxTransitionRead})
+				return err
+			}},
+		} {
+			if err := operation.call(); !errors.Is(err, recordcollaboration.ErrInboxNotFound) {
+				t.Fatalf("%s muted optional error = %v, want opaque not found", operation.name, err)
+			}
+		}
+		if _, err := projection.GetInboxItem(ctx, recordcollaboration.InboxItemRequest{Actor: actor, NotificationID: mandatoryResult.NotificationID}); err != nil {
+			t.Fatalf("mandatory item hidden by mute: %v", err)
+		}
+	})
+
+	t.Run("unwatch hides manual optional recipient", func(t *testing.T) {
+		ctx := context.Background()
+		fixture := newRecordsPostgresFixture(t, ctx)
+		seedCollaborationRevisionUsers(t, ctx, fixture)
+		runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-inbox-current-unwatch", 3)
+		input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
+		parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
+			t, recordplatform.OperationKindRecordCreate, "rec_pginboxcurrentunwatch", "", 0, 0, input, "inbox-current-unwatch-parent",
+		))
+		if err != nil {
+			t.Fatal(err)
+		}
+		watcherID := "usr_bbbbbbbbbbbbbbbbbbbbbbbb"
+		seedNotificationPreferences(t, ctx, fixture, parent.RecordID, map[string]string{watcherID: "watching"})
+		actions := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+		create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pginboxunwatch", 0,
+			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Manual watcher"}), "inbox-unwatch-create")
+		complete := postgresActionCommand(t, parent, recordcollaboration.ActionMutationComplete, create.ActionID, 1,
+			recordcollaboration.ActionFields{}, "inbox-unwatch-complete")
+		for _, command := range []recordcollaboration.ActionCommand{create, complete} {
+			if _, err := actions.CommitAction(ctx, command); err != nil {
+				t.Fatal(err)
+			}
+		}
+		projection, queue := newPostgresNotificationProjectionHarness(t, runtimePool, input)
+		claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionCompleted, "inbox_unwatch_optional")
+		result, err := projection.ProjectNotification(ctx, claim)
+		if err != nil || result.RecipientCount != 1 {
+			t.Fatalf("ProjectNotification(optional) = (%#v, %v)", result, err)
+		}
+		if err := queue.MarkOutboxSent(ctx, claim); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fixture.db.Exec(ctx, `delete from public.record_followers where record_id = $1 and user_id = $2`, parent.RecordID, watcherID); err != nil {
+			t.Fatalf("unwatch manual recipient: %v", err)
+		}
+		actor := collaborationActor(t, watcherID, nil)
+		listRequest := recordcollaboration.InboxListRequest{Actor: actor, Limit: 100}
+		if items, err := projection.ListInbox(ctx, listRequest); err != nil || items == nil || len(items) != 0 {
+			t.Fatalf("ListInbox(after unwatch) = (%#v, %v), want nonnil empty", items, err)
+		}
+		if count, err := projection.CountUnreadInbox(ctx, listRequest); err != nil || count != 0 {
+			t.Fatalf("CountUnreadInbox(after unwatch) = (%d, %v), want 0", count, err)
+		}
+		itemRequest := recordcollaboration.InboxItemRequest{Actor: actor, NotificationID: result.NotificationID}
+		if _, err := projection.GetInboxItem(ctx, itemRequest); !errors.Is(err, recordcollaboration.ErrInboxNotFound) {
+			t.Fatalf("GetInboxItem(after unwatch) error = %v", err)
+		}
+		if _, err := projection.GetInboxDeepLink(ctx, itemRequest); !errors.Is(err, recordcollaboration.ErrInboxNotFound) {
+			t.Fatalf("GetInboxDeepLink(after unwatch) error = %v", err)
+		}
+		if _, err := projection.TransitionInbox(ctx, recordcollaboration.InboxTransitionRequest{Actor: actor, NotificationID: result.NotificationID, Kind: recordcollaboration.InboxTransitionRead}); !errors.Is(err, recordcollaboration.ErrInboxNotFound) {
+			t.Fatalf("TransitionInbox(after unwatch) error = %v", err)
+		}
+	})
+}
+
+func TestPostgresIntegrationRecordInboxScanBudgetCachesAndStableMultiRecordOrder(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-inbox-bounded", 4)
+	inputs := []records.CompleteRevisionInput{
+		collaborationRevisionInput(t, collaborationRevisionInputValues{title: "Bounded inbox A"}),
+		collaborationRevisionInput(t, collaborationRevisionInputValues{title: "Bounded inbox B"}),
+	}
+	recordRepository := newRecordsPostgresRepository(t, runtimePool)
+	parents := make([]records.RevisionCommitResult, 0, 2)
+	for index, recordID := range []string{"rec_pginboxboundeda", "rec_pginboxboundedb"} {
+		input := inputs[index]
+		parent, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
+			t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0, input, fmt.Sprintf("inbox-bounded-parent-%d", index),
+		))
+		if err != nil {
+			t.Fatalf("CommitRevision(%s) error = %v", recordID, err)
+		}
+		parents = append(parents, parent)
+		command := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, fmt.Sprintf("ract_pginboxbounded%d", index), 0,
+			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Bounded inbox", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}), fmt.Sprintf("inbox-bounded-action-%d", index))
+		if _, err := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader()).CommitAction(ctx, command); err != nil {
+			t.Fatalf("CommitAction(%d) error = %v", index, err)
+		}
+	}
+	storedSubject := inputs[0].Subjects()[0]
+	identity, err := records.NewSubjectIdentitySnapshot(storedSubject.Kind, storedSubject.IdentitySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &fakeCurrentRecordSubjectResolver{resolved: records.ResolvedSubject{
+		ProjectID: recordauth.ProjectIDDefault, StableID: storedSubject.SourceID,
+		IdentitySnapshot: identity, LiveRoute: "/vps/" + storedSubject.SourceID,
+		CaptureAuthorization: storedSubject.CaptureAuthorization,
+	}}
+	members := &countingCollaborationMembershipReader{delegate: NewPostgresCollaborationMembershipReader()}
+	projection := NewPostgresRecordNotificationRepository(
+		runtimePool, allowRecordPlatformAdmissionGate, members,
+		newPostgresCurrentRecordAuthorizationSource(runtimePool, resolver, allowRecordPlatformAdmissionGate), 30*24*time.Hour,
+	)
+	queue := NewPostgresRecordPlatformRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	validIDs := make([]string, 0, 2)
+	for index := range parents {
+		claim := claimNotificationOutboxKind(t, ctx, queue, recordplatform.OutboxEventKindRecordActionAssigned, fmt.Sprintf("inbox_bounded_project_%d", index))
+		result, err := projection.ProjectNotification(ctx, claim)
+		if err != nil || result.RecipientCount != 1 {
+			t.Fatalf("ProjectNotification(%d) = (%#v, %v)", index, result, err)
+		}
+		validIDs = append(validIDs, result.NotificationID)
+		if err := queue.MarkOutboxSent(ctx, claim); err != nil {
+			t.Fatal(err)
+		}
+	}
+	actor := collaborationActor(t, "usr_bbbbbbbbbbbbbbbbbbbbbbbb", nil)
+	staleEpoch := int64(parents[0].AuthorizationEpoch + 1)
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.record_notifications (
+			notification_id, project_id, record_id, event_kind, subject_kind, subject_id,
+			source_version, actor_id, authorization_epoch, record_fence_epoch, event_at, details_delete_after
+		)
+		select 'rnt_' || lpad(to_hex(1000 + series), 64, '0'), 'default', $1,
+		       'record_owner_changed', 'record', $1, 1000 + series, 'usr_aaaaaaaaaaaaaaaaaaaaaaaa', $2, 0,
+		       transaction_timestamp() + (series * interval '1 second'), transaction_timestamp() + interval '30 days'
+		from generate_series(1, $3) series`, parents[0].RecordID, staleEpoch, inboxScanBudget); err != nil {
+		t.Fatalf("seed hidden inbox budget window notifications: %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.record_notification_recipients (
+			notification_id, record_id, recipient_user_id, reason_kind, mandatory, authorization_epoch, record_fence_epoch
+		)
+		select notification_id, record_id, $3, 'follower', false, authorization_epoch, record_fence_epoch
+		from public.record_notifications
+		where record_id = $1 and authorization_epoch = $2`, parents[0].RecordID, staleEpoch, actor.UserID); err != nil {
+		t.Fatalf("seed hidden inbox budget window recipients: %v", err)
+	}
+	members.calls, resolver.calls = 0, 0
+	items, err := projection.ListInbox(ctx, recordcollaboration.InboxListRequest{Actor: actor, Limit: 100})
+	if err != nil || items == nil || len(items) != 0 {
+		t.Fatalf("ListInbox(over budget) = (%#v, %v), want bounded nonnil empty", items, err)
+	}
+	if members.calls != 1 || resolver.calls != 1 {
+		t.Fatalf("bounded hidden authorization calls membership/resolver = %d/%d, want 1/1", members.calls, resolver.calls)
+	}
+	for _, notificationID := range validIDs {
+		if _, err := projection.GetInboxItem(ctx, recordcollaboration.InboxItemRequest{Actor: actor, NotificationID: notificationID}); err != nil {
+			t.Fatalf("valid item beyond scan window %s unavailable directly: %v", notificationID, err)
+		}
+	}
+	if _, err := fixture.db.Exec(ctx, `delete from public.record_notification_recipients where record_id = $1 and authorization_epoch = $2`, parents[0].RecordID, staleEpoch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.db.Exec(ctx, `delete from public.record_notifications where record_id = $1 and authorization_epoch = $2`, parents[0].RecordID, staleEpoch); err != nil {
+		t.Fatal(err)
+	}
+	members.calls, resolver.calls = 0, 0
+	items, err = projection.ListInbox(ctx, recordcollaboration.InboxListRequest{Actor: actor, Limit: 100})
+	if err != nil || len(items) != 2 {
+		t.Fatalf("ListInbox(multi record) = (%#v, %v), want 2", items, err)
+	}
+	if items[0].EventAt.Before(items[1].EventAt) || (items[0].EventAt.Equal(items[1].EventAt) && items[0].NotificationID > items[1].NotificationID) {
+		t.Fatalf("multi-record stable order = %#v", items)
+	}
+	if members.calls != 1 || resolver.calls != 2 {
+		t.Fatalf("multi-record authorization calls membership/resolver = %d/%d, want 1/2", members.calls, resolver.calls)
 	}
 }
 
@@ -712,6 +1181,16 @@ func newPostgresNotificationProjectionHarness(t *testing.T, pool *pgxpool.Pool, 
 type notificationPreclaimedQueue struct {
 	claim *recordplatform.ClaimedOutboxEventV1
 	queue *PostgresRecordPlatformRepository
+}
+
+type countingCollaborationMembershipReader struct {
+	delegate CollaborationMembershipReader
+	calls    int
+}
+
+func (reader *countingCollaborationMembershipReader) ReadMemberActor(ctx context.Context, tx pgx.Tx, projectID recordauth.ProjectID, userID string) (recordauth.ActorScope, error) {
+	reader.calls++
+	return reader.delegate.ReadMemberActor(ctx, tx, projectID, userID)
 }
 
 func (queue *notificationPreclaimedQueue) ClaimOutbox(context.Context, recordplatform.OutboxClaimInputV1) (*recordplatform.ClaimedOutboxEventV1, error) {
