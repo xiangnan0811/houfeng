@@ -211,6 +211,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		t.Fatalf("runtime workers = %d, want evidence maintenance disabled until Child 10 supplies admission", len(gotWorkers))
 	}
 	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
+		gotRouterOptions.RecordWatchesHandler == nil || gotRouterOptions.RecordInboxHandler == nil ||
 		gotRouterOptions.RecordDraftsHandler == nil || gotRouterOptions.RecordDeletionsHandler == nil ||
 		gotRouterOptions.EvidenceHandler == nil || gotRouterOptions.AttachmentUploadsHandler == nil || gotRouterOptions.AttachmentsHandler == nil {
 		t.Fatalf(
@@ -237,6 +238,8 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		wantCode string
 	}{
 		{name: "records", method: http.MethodGet, path: "/api/records", handler: gotRouterOptions.RecordsHandler, wantCode: "record_service_unavailable"},
+		{name: "watch", method: http.MethodGet, path: "/api/records/rec_httpcontract/watch", handler: gotRouterOptions.RecordWatchesHandler, wantCode: "record_service_unavailable"},
+		{name: "inbox", method: http.MethodGet, path: "/api/record-notifications", handler: gotRouterOptions.RecordInboxHandler, wantCode: "record_service_unavailable"},
 		{name: "drafts", method: http.MethodGet, path: "/api/record-drafts", handler: gotRouterOptions.RecordDraftsHandler, wantCode: "record_service_unavailable"},
 		{name: "deletion preview", method: http.MethodPost, path: "/api/records/rec_httpcontract/permanent-delete-preview", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_safety_unavailable"},
 		{name: "deletion status", method: http.MethodGet, path: "/api/record-deletions/rpo_httpcontract", handler: gotRouterOptions.RecordDeletionsHandler, wantCode: "deletion_status_unavailable"},
@@ -857,6 +860,39 @@ func TestBootstrapWiresRecordCommentsThroughSharedAuthorizationMembershipAndAdmi
 	} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("bootstrap contains forbidden record comment admission bypass %q", forbidden)
+		}
+	}
+}
+
+func TestBootstrapWiresRecordWatchesInboxAndProjectionThroughSharedFailClosedDependencies(t *testing.T) {
+	source, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"store.NewPostgresRecordWatchRepository(pool, effectiveGate, collaborationMembers)",
+		"recordcollaboration.NewWatchService(authorizations, watchRepository)",
+		"handlers.RecordWatches(watchApplication)",
+		"store.NewPostgresRecordNotificationRepository(",
+		"recordcollaboration.NewNotificationProjector(",
+		"recordcollaboration.NewNotificationProjectionWorker(",
+		"handlers.RecordInbox(notificationRepository)",
+		"RecordWatchesHandler:",
+		"RecordInboxHandler:",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("bootstrap missing record notification wiring %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"NewPostgresRecordWatchRepository(pool, store.AdmissionGateFunc",
+		"NewPostgresRecordNotificationRepository(pool, store.AdmissionGateFunc",
+		"NewOutboxWorker(",
+		"OutboxSender",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("bootstrap contains forbidden notification fallback/delivery primitive %q", forbidden)
 		}
 	}
 }
