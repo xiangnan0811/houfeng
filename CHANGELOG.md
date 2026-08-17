@@ -1,5 +1,72 @@
 # Changelog
 
+## [0.67.0](https://github.com/xiangnan0811/houfeng/compare/v0.66.0...v0.67.0) (2026-08-17)
+
+
+### Features
+
+* **records:** add bounded action list seam ([ec2c351](https://github.com/xiangnan0811/houfeng/commit/ec2c351a5fc9e5dd8c44eff1ab622a5fc3fc8f03))
+* **records:** add collaboration and notification platform ([a313786](https://github.com/xiangnan0811/houfeng/commit/a3137864e475bec27efb7c173099a2d2a9c57701))
+* **records:** add collaboration deletion adapter ([b1e4c0b](https://github.com/xiangnan0811/houfeng/commit/b1e4c0b13d0fa9b98ea9c373b5789f9e0e040b79))
+* **records:** add collaboration revision participant ([e73f628](https://github.com/xiangnan0811/houfeng/commit/e73f628c647f5e5d60b8c473bd876b087532a0af))
+* **records:** add collaboration schema foundation ([8ec7d31](https://github.com/xiangnan0811/houfeng/commit/8ec7d31c5df277320941d143d7dd2e5d5776b5e3))
+* **records:** add controlled collaboration surfaces ([5bfd4df](https://github.com/xiangnan0811/houfeng/commit/5bfd4dfe98ade9227715604ac3a31f2d7935f312))
+* **records:** add idempotent record actions ([594f7af](https://github.com/xiangnan0811/houfeng/commit/594f7af1149df0e5c6ddbd0fc0b627ee007e04fe))
+* **records:** add notification recipient facts ([8c94ee4](https://github.com/xiangnan0811/houfeng/commit/8c94ee49ef2c9220d9f43943f33658f486161580))
+* **records:** add scoped external notification delivery ([d9040aa](https://github.com/xiangnan0811/houfeng/commit/d9040aa37a17ab9ed468c10302ca220e3b52a3d6))
+* **records:** add watch preferences ([2173bbb](https://github.com/xiangnan0811/houfeng/commit/2173bbbe539103ce005a33c1b803846108c28489))
+* **records:** define safe comment markdown contract ([f00cbe3](https://github.com/xiangnan0811/houfeng/commit/f00cbe306aaa0f5317d74878417bd88dbca47795))
+* **records:** expose protected comment endpoints ([06bc2a4](https://github.com/xiangnan0811/houfeng/commit/06bc2a46eb1ff37ae2f0aa264d9bdad5e1b5fcac))
+* **records:** persist collaborative comment lifecycle ([0603034](https://github.com/xiangnan0811/houfeng/commit/06030346558af03d663356b53425aa9e698c5608))
+* **records:** project collaboration inbox ([f95a3d9](https://github.com/xiangnan0811/houfeng/commit/f95a3d96a9262c4ccc355a45c44891463750323f))
+* **records:** publish collaboration providers ([b9fe57c](https://github.com/xiangnan0811/houfeng/commit/b9fe57ce6ab84d61cca915c9c35e6020db194bb8))
+
+
+### Bug Fixes
+
+* **recordplatform:** bind outbox events to subjects ([10500a9](https://github.com/xiangnan0811/houfeng/commit/10500a945ba74ecd443fb356666762162b07b8e5))
+* **records:** align comment validation classifications ([96ff5f8](https://github.com/xiangnan0811/houfeng/commit/96ff5f8db053f7e8c2d6937f829dda37d64accb5))
+* **records:** anchor initial watch preference ([20f8a72](https://github.com/xiangnan0811/houfeng/commit/20f8a7255f620c0ca0667edaa3d8b863bf689c6b))
+* **records:** batch activity provenance validation ([4467e14](https://github.com/xiangnan0811/houfeng/commit/4467e144fbbe5441134722c4bdd5ad112bbb18b0))
+* **records:** bind notifications to source epochs ([05e7945](https://github.com/xiangnan0811/houfeng/commit/05e7945e3ecee909f6314a6c0fe223a41d6b8ea7))
+* **records:** bound action versions to bigint ([7cb8807](https://github.com/xiangnan0811/houfeng/commit/7cb88077161b29441bee9c9444834ce7b37040bf))
+* **records:** bound collaboration provider publications ([1365250](https://github.com/xiangnan0811/houfeng/commit/13652502b8082a9c3dd07ac212272fc4af4bd673))
+* **records:** bound portable audit counters ([09c91c8](https://github.com/xiangnan0811/houfeng/commit/09c91c86240cdc15a30f7e19d0156be0e6034433))
+* **records:** close collaboration read fences ([ac9ac39](https://github.com/xiangnan0811/houfeng/commit/ac9ac39a03f05b34f010d3ebe4210418dc300c04))
+* **records:** close collaboration redaction bypasses ([c8bd3da](https://github.com/xiangnan0811/houfeng/commit/c8bd3da55363fd9bb1a8176220927776de462c05))
+* **records:** close comment collaboration refresh gaps ([dcaf031](https://github.com/xiangnan0811/houfeng/commit/dcaf0314a796d97ab371571b14b86edce5df65f9))
+* **records:** close comment markdown parser gaps ([3c07cd7](https://github.com/xiangnan0811/houfeng/commit/3c07cd71835ec4c1616a68a98e46a61c72d38a60))
+* **records:** close external provider responses ([7cbe507](https://github.com/xiangnan0811/houfeng/commit/7cbe50756ecd7ed43f39bbd0120b5652dc7e99c8))
+* **records:** constrain collaboration deletion privileges ([ec6c5b6](https://github.com/xiangnan0811/houfeng/commit/ec6c5b64aa73c9c084d9712b9fde0e601c588186))
+* **records:** fence external delivery planning ([0dec449](https://github.com/xiangnan0811/houfeng/commit/0dec44997c0ef731ad4f6acf79e401c2268c3cae))
+* **records:** harden collaboration persistence bounds ([15a7b9b](https://github.com/xiangnan0811/houfeng/commit/15a7b9bb924af761841d999cbfd039a3d3baa361))
+* **records:** harden collaboration provider contracts ([1587b8a](https://github.com/xiangnan0811/houfeng/commit/1587b8ae4626b0b4dee4008732159e4bd822263c))
+* **records:** harden collaboration web surfaces ([c1231b3](https://github.com/xiangnan0811/houfeng/commit/c1231b3bd5937e97d0be7c30c582737e98902fcf))
+* **records:** isolate inbox target failures ([ee5b880](https://github.com/xiangnan0811/houfeng/commit/ee5b880d4da0f36d170b0050f8ac989084fb3f39))
+* **records:** normalize malformed comment replies ([fb904fd](https://github.com/xiangnan0811/houfeng/commit/fb904fd1976f0fd133f798ed02c34b88fa94bd19))
+* **records:** preserve authorized action details ([28c24c0](https://github.com/xiangnan0811/houfeng/commit/28c24c07e0c886f5e9ecf8b32c8344038e268296))
+* **records:** preserve collaboration replay bounds ([9c1c649](https://github.com/xiangnan0811/houfeng/commit/9c1c649624f339d188347be9d09716be548d9237))
+* **records:** preserve exact comment render shapes ([a27b2fa](https://github.com/xiangnan0811/houfeng/commit/a27b2fa24d86ce13d9687e3f94d1b9adf1ada8f3))
+* **records:** preserve portable notification audits ([5d4aff1](https://github.com/xiangnan0811/houfeng/commit/5d4aff147be09955d86e1582b2780e4f013ea166))
+* **records:** refresh action authorization ([1102940](https://github.com/xiangnan0811/houfeng/commit/1102940cdfb4394f050d855cf491faf81d89921b))
+* **records:** refresh watch authorization ([74da8e6](https://github.com/xiangnan0811/houfeng/commit/74da8e60f9cb50c8dd792ec10f58adc42a6087d3))
+* **records:** reject ambiguous collaboration queries ([28f73e4](https://github.com/xiangnan0811/houfeng/commit/28f73e407848e7a57f4ba1706e1e0f27f849e13a))
+* **records:** reject invalid comment request encoding ([052ef5e](https://github.com/xiangnan0811/houfeng/commit/052ef5e55d672d26488ac423ac3d56e872dae31c))
+* **records:** revalidate inbox recipients ([f2072a7](https://github.com/xiangnan0811/houfeng/commit/f2072a7ac5aba1f520a03d9de331c515639f91b0))
+* **records:** seal external provider delivery ([71a3c1f](https://github.com/xiangnan0811/houfeng/commit/71a3c1f8dbbe9c2c21e53f786baece5bf6d6afb4))
+* **records:** stabilize collaboration revision guarantees ([de172cd](https://github.com/xiangnan0811/houfeng/commit/de172cd6a815154df11aa4e430c56b3826385b1e))
+* **records:** supersede stale inbox targets ([d62950f](https://github.com/xiangnan0811/houfeng/commit/d62950f77fd274b3bc5494882baf10ec56190536))
+* **records:** surface inbox source outages ([42429f3](https://github.com/xiangnan0811/houfeng/commit/42429f34f51ea66d6fa6a169a9f52a951bcbd461))
+* **records:** validate canonical comment link ports ([0011282](https://github.com/xiangnan0811/houfeng/commit/0011282eaae74b85ea20e6ae3c8c6428bd522640))
+* **records:** validate portable collaboration history ([ce1698d](https://github.com/xiangnan0811/houfeng/commit/ce1698d184f70b374c703d0ba08e7a22f66c1bc2))
+* **web:** decode versioned watch anchors ([0494966](https://github.com/xiangnan0811/houfeng/commit/049496645ed422def83310d1616460fdf7e43995))
+
+
+### Documentation
+
+* **trellis:** finalize records collaboration handoff ([c6742c3](https://github.com/xiangnan0811/houfeng/commit/c6742c3c27d33a8c065b6471255c9bea2269a5e5))
+* **trellis:** rebaseline records collaboration ([f25d750](https://github.com/xiangnan0811/houfeng/commit/f25d750858c0643c54857321ee859363cffe01ad))
+
 ## [0.66.0](https://github.com/xiangnan0811/houfeng/compare/v0.65.0...v0.66.0) (2026-08-17)
 
 
