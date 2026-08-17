@@ -2,6 +2,7 @@ package recordcollaboration
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -64,6 +65,24 @@ func TestRecordFenceBindingIsValidatedAndImmutable(t *testing.T) {
 	}
 	if _, err := NewRecordFenceBinding(recordplatform.ProjectIDDefault, "bad", 1); !errors.Is(err, ErrInvalidRecordFenceBinding) {
 		t.Fatalf("malformed record binding error = %v, want ErrInvalidRecordFenceBinding", err)
+	}
+}
+
+func TestRecordFenceBindingEpochFitsPostgresBigint(t *testing.T) {
+	t.Parallel()
+	if _, err := NewRecordFenceBinding(
+		recordplatform.ProjectIDDefault,
+		"rec_0123456789abcdef",
+		recordplatform.ContentEpoch(math.MaxInt64),
+	); err != nil {
+		t.Fatalf("NewRecordFenceBinding(MaxInt64) error = %v", err)
+	}
+	if _, err := NewRecordFenceBinding(
+		recordplatform.ProjectIDDefault,
+		"rec_0123456789abcdef",
+		recordplatform.ContentEpoch(uint64(math.MaxInt64)+1),
+	); !errors.Is(err, ErrInvalidRecordFenceBinding) {
+		t.Fatalf("NewRecordFenceBinding(MaxInt64+1) error = %v, want ErrInvalidRecordFenceBinding", err)
 	}
 }
 

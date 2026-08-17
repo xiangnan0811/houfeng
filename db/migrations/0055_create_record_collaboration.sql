@@ -51,7 +51,7 @@ create table if not exists public.record_action_events (
   occurred_at timestamptz not null,
   created_at timestamptz not null default now(),
   unique (action_id, action_version),
-  constraint record_action_events_transition_check check ((event_kind = 'created' and action_version = 1 and previous_status is null and current_status = 'open') or (event_kind = 'updated' and previous_status = current_status) or (event_kind = 'completed' and previous_status = 'open' and current_status = 'completed') or (event_kind = 'cancelled' and previous_status = 'open' and current_status = 'cancelled') or (event_kind = 'reopened' and previous_status in ('completed', 'cancelled') and current_status = 'open')),
+  constraint record_action_events_transition_check check (((event_kind = 'created' and action_version = 1 and previous_status is null and current_status = 'open') or (event_kind = 'updated' and previous_status = current_status) or (event_kind = 'completed' and previous_status = 'open' and current_status = 'completed') or (event_kind = 'cancelled' and previous_status = 'open' and current_status = 'cancelled') or (event_kind = 'reopened' and previous_status in ('completed', 'cancelled') and current_status = 'open')) is true),
   foreign key (record_id) references public.records(record_id)
     on delete restrict,
   foreign key (record_id, action_id)
@@ -84,7 +84,7 @@ create table if not exists public.record_comments (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (record_id, comment_id),
-  constraint record_comments_redaction_shape_check check ((comment_state = 'active' and body_markdown is not null and render_contract_version = 'comment_markdown/v1' and render_model is not null and jsonb_typeof(render_model) = 'object' and body_digest is not null and tombstone_id is null and redacted_at is null) or (comment_state = 'redacted' and body_markdown is null and render_contract_version is null and render_model is null and body_digest is null and tombstone_id is not null and redacted_at is not null)),
+  constraint record_comments_redaction_shape_check check (((comment_state = 'active' and body_markdown is not null and render_contract_version = 'comment_markdown/v1' and render_model is not null and jsonb_typeof(render_model) = 'object' and body_digest is not null and tombstone_id is null and redacted_at is null) or (comment_state = 'redacted' and body_markdown is null and render_contract_version is null and render_model is null and body_digest is null and tombstone_id is not null and redacted_at is not null)) is true),
   check (updated_at >= created_at),
   check (redacted_at is null or redacted_at >= created_at),
   foreign key (record_id) references public.records(record_id)
@@ -114,7 +114,7 @@ create table if not exists public.record_comment_revisions (
   created_at timestamptz not null default now(),
   unique (comment_id, comment_version),
   unique (record_id, comment_id, comment_version, record_fence_epoch),
-  constraint record_comment_revisions_redaction_shape_check check ((redacted_at is null and body_markdown is not null and render_contract_version = 'comment_markdown/v1' and render_model is not null and jsonb_typeof(render_model) = 'object' and body_digest is not null and tombstone_id is null) or (redacted_at is not null and body_markdown is null and render_contract_version is null and render_model is null and body_digest is null and tombstone_id is not null)),
+  constraint record_comment_revisions_redaction_shape_check check (((redacted_at is null and body_markdown is not null and render_contract_version = 'comment_markdown/v1' and render_model is not null and jsonb_typeof(render_model) = 'object' and body_digest is not null and tombstone_id is null) or (redacted_at is not null and body_markdown is null and render_contract_version is null and render_model is null and body_digest is null and tombstone_id is not null)) is true),
   check (redacted_at is null or redacted_at >= created_at),
   foreign key (record_id) references public.records(record_id)
     on delete restrict,

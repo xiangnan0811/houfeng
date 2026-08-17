@@ -5,6 +5,7 @@ package recordcollaboration
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"houfeng/internal/center/recordplatform"
 )
@@ -114,7 +115,8 @@ func (binding RecordFenceBinding) Epoch() recordplatform.ContentEpoch {
 
 func (binding RecordFenceBinding) Validate() error {
 	if !binding.sealed || recordplatform.ValidateProjectID(binding.projectID) != nil ||
-		!validRecordID(binding.recordID) {
+		!validRecordID(binding.recordID) ||
+		binding.epoch > recordplatform.ContentEpoch(math.MaxInt64) {
 		return ErrInvalidRecordFenceBinding
 	}
 	return nil

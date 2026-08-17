@@ -50,6 +50,37 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 			'completed', 'usr_acl', 0, clock_timestamp())
 	`)
 	requirePostgresSQLState(t, err, "23514")
+	t.Run("non-created action event rejects null previous status", func(t *testing.T) {
+		tx, err := runtimeDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin null previous-status action event transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, `
+			insert into public.record_action_events (
+				action_event_id, record_id, action_id, action_version, event_kind,
+				previous_status, current_status, actor_id, record_fence_epoch, occurred_at
+			) values ('raev_nullprevious', 'rec_acl', 'ract_acl', 2, 'completed', null,
+				'completed', 'usr_acl', 0, clock_timestamp())
+		`)
+		requirePostgresSQLState(t, err, "23514")
+	})
+
+	t.Run("active comment rejects null render contract", func(t *testing.T) {
+		tx, err := runtimeDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin null render-contract comment transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, `
+			insert into public.record_comments (
+				comment_id, record_id, author_id, comment_version, body_markdown,
+				render_contract_version, render_model, body_digest, record_fence_epoch
+			) values ('rcm_nullrender', 'rec_acl', 'usr_acl', 1, 'unsafe shape', null,
+				'{"type":"paragraph"}'::jsonb, decode(repeat('50', 32), 'hex'), 0)
+		`)
+		requirePostgresSQLState(t, err, "23514")
+	})
 
 	if _, err := runtimeDB.Exec(ctx, `
 		insert into public.record_comments (
@@ -61,6 +92,22 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	`); err != nil {
 		t.Fatalf("runtime insert collaboration comment: %v", err)
 	}
+	t.Run("active comment revision rejects null render contract", func(t *testing.T) {
+		tx, err := runtimeDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin null render-contract comment revision transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, `
+			insert into public.record_comment_revisions (
+				comment_revision_id, record_id, comment_id, comment_version, edited_by,
+				body_markdown, render_contract_version, render_model, body_digest,
+				record_fence_epoch
+			) values ('rcr_nullrender', 'rec_acl', 'rcm_acl', 1, 'usr_acl', 'unsafe shape',
+				null, '{"type":"paragraph"}'::jsonb, decode(repeat('50', 32), 'hex'), 0)
+		`)
+		requirePostgresSQLState(t, err, "23514")
+	})
 	if _, err := runtimeDB.Exec(ctx, `
 		insert into public.record_comment_revisions (
 			comment_revision_id, record_id, comment_id, comment_version, edited_by,

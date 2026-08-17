@@ -148,7 +148,7 @@ func TestRecordCollaborationMigrationEnforcesActionStateAndAppendOnlyHistory(t *
 		"previous_status text check (previous_status is null or previous_status in ('open', 'completed', 'cancelled'))",
 		"current_status text not null check (current_status in ('open', 'completed', 'cancelled'))",
 		"unique (action_id, action_version)",
-		"constraint record_action_events_transition_check check ((event_kind = 'created' and action_version = 1 and previous_status is null and current_status = 'open') or (event_kind = 'updated' and previous_status = current_status) or (event_kind = 'completed' and previous_status = 'open' and current_status = 'completed') or (event_kind = 'cancelled' and previous_status = 'open' and current_status = 'cancelled') or (event_kind = 'reopened' and previous_status in ('completed', 'cancelled') and current_status = 'open'))",
+		"constraint record_action_events_transition_check check (((event_kind = 'created' and action_version = 1 and previous_status is null and current_status = 'open') or (event_kind = 'updated' and previous_status = current_status) or (event_kind = 'completed' and previous_status = 'open' and current_status = 'completed') or (event_kind = 'cancelled' and previous_status = 'open' and current_status = 'cancelled') or (event_kind = 'reopened' and previous_status in ('completed', 'cancelled') and current_status = 'open')) is true)",
 	} {
 		if !strings.Contains(eventSQL, want) {
 			t.Errorf("0055 record_action_events missing invariant %q", want)
@@ -170,7 +170,7 @@ func TestRecordCollaborationMigrationEnforcesOneWayCommentRedaction(t *testing.T
 		"render_contract_version text",
 		"render_model jsonb",
 		"body_digest bytea check (body_digest is null or octet_length(body_digest) = 32)",
-		"constraint record_comments_redaction_shape_check check ((comment_state = 'active' and body_markdown is not null and render_contract_version = 'comment_markdown/v1' and render_model is not null and jsonb_typeof(render_model) = 'object' and body_digest is not null and tombstone_id is null and redacted_at is null) or (comment_state = 'redacted' and body_markdown is null and render_contract_version is null and render_model is null and body_digest is null and tombstone_id is not null and redacted_at is not null))",
+		"constraint record_comments_redaction_shape_check check (((comment_state = 'active' and body_markdown is not null and render_contract_version = 'comment_markdown/v1' and render_model is not null and jsonb_typeof(render_model) = 'object' and body_digest is not null and tombstone_id is null and redacted_at is null) or (comment_state = 'redacted' and body_markdown is null and render_contract_version is null and render_model is null and body_digest is null and tombstone_id is not null and redacted_at is not null)) is true)",
 	} {
 		if !strings.Contains(commentSQL, want) {
 			t.Errorf("0055 record_comments missing redaction invariant %q", want)
@@ -179,7 +179,7 @@ func TestRecordCollaborationMigrationEnforcesOneWayCommentRedaction(t *testing.T
 	revisionSQL := normalizedRecordCollaborationTableDefinition(t, recordCollaborationMigrationSQL(t), "record_comment_revisions")
 	for _, want := range []string{
 		"unique (comment_id, comment_version)",
-		"constraint record_comment_revisions_redaction_shape_check check ((redacted_at is null and body_markdown is not null and render_contract_version = 'comment_markdown/v1' and render_model is not null and jsonb_typeof(render_model) = 'object' and body_digest is not null and tombstone_id is null) or (redacted_at is not null and body_markdown is null and render_contract_version is null and render_model is null and body_digest is null and tombstone_id is not null))",
+		"constraint record_comment_revisions_redaction_shape_check check (((redacted_at is null and body_markdown is not null and render_contract_version = 'comment_markdown/v1' and render_model is not null and jsonb_typeof(render_model) = 'object' and body_digest is not null and tombstone_id is null) or (redacted_at is not null and body_markdown is null and render_contract_version is null and render_model is null and body_digest is null and tombstone_id is not null)) is true)",
 	} {
 		if !strings.Contains(revisionSQL, want) {
 			t.Errorf("0055 record_comment_revisions missing redaction invariant %q", want)
