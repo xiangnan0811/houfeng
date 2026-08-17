@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -81,7 +82,8 @@ func TestPostgresIntegrationRecordCommentRedactionActivityFailureRollsBackAllCon
 }
 
 func TestPostgresIntegrationRecordCommentsConcurrentSameVersionHasOneWinner(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 	fixture := newRecordsPostgresFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
 	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgcommentrace", "comments-race-parent")
@@ -97,53 +99,125 @@ func TestPostgresIntegrationRecordCommentsConcurrentSameVersionHasOneWinner(t *t
 	}
 	rootBefore := readPostgresActionRoot(t, ctx, fixture, parent.RecordID)
 
-	commands := []recordcollaboration.CommentCommand{
-		postgresCommentCommand(t, parent, recordcollaboration.CommentMutationEdit,
-			create.CommentID, 1, "Winner A.", "", nil, "comments-race-a"),
-		postgresCommentCommand(t, parent, recordcollaboration.CommentMutationEdit,
-			create.CommentID, 1, "Winner B.", "", nil, "comments-race-b"),
+	const holdLock int64 = 917_004_002
+	if _, err := fixture.db.Exec(ctx, fmt.Sprintf(`
+		create function public.houfeng_test_hold_record_comment_race() returns trigger
+		language plpgsql
+		set search_path = pg_catalog
+		as $function$
+		begin
+		  perform pg_catalog.pg_advisory_xact_lock(%d);
+		  return new;
+		end
+		$function$`, holdLock)); err != nil {
+		t.Fatalf("create comment race hold function: %v", err)
 	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if _, err := fixture.db.Exec(cleanupCtx, `drop trigger if exists houfeng_test_hold_record_comment_race on public.record_comment_revisions`); err != nil {
+			t.Errorf("drop comment race hold trigger: %v", err)
+		}
+		if _, err := fixture.db.Exec(cleanupCtx, `drop function if exists public.houfeng_test_hold_record_comment_race()`); err != nil {
+			t.Errorf("drop comment race hold function: %v", err)
+		}
+	})
+	if _, err := fixture.db.Exec(ctx, `
+		create trigger houfeng_test_hold_record_comment_race
+		after insert on public.record_comment_revisions
+		for each row
+		when (new.comment_id = 'rcm_pgrace' and new.comment_version = 2 and new.body_markdown = 'Winner A.')
+		execute function public.houfeng_test_hold_record_comment_race()`); err != nil {
+		t.Fatalf("create comment race hold trigger: %v", err)
+	}
+
+	blocker, err := fixture.db.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire comment race hold connection: %v", err)
+	}
+	holdReleased := false
+	defer func() {
+		if !holdReleased {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cleanupCancel()
+			_, _ = blocker.Exec(cleanupCtx, `select pg_catalog.pg_advisory_unlock($1)`, holdLock)
+		}
+		blocker.Release()
+	}()
+	if _, err := blocker.Exec(ctx, `select pg_catalog.pg_advisory_lock($1)`, holdLock); err != nil {
+		t.Fatalf("acquire comment race hold lock: %v", err)
+	}
+	var blockerPID int32
+	if err := blocker.QueryRow(ctx, `select pg_backend_pid()`).Scan(&blockerPID); err != nil {
+		t.Fatalf("read comment race hold backend PID: %v", err)
+	}
+
+	firstPool := fixture.openDirectRuntimePool(t, ctx, "record-comments-race-first", 1)
+	secondPool := fixture.openDirectRuntimePool(t, ctx, "record-comments-race-second", 1)
+	firstPID := postgresCollaborationBackendPID(t, ctx, firstPool)
+	secondPID := postgresCollaborationBackendPID(t, ctx, secondPool)
+	firstRepository := NewPostgresRecordCommentRepository(firstPool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+	secondRepository := NewPostgresRecordCommentRepository(secondPool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+	firstCommand := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationEdit,
+		create.CommentID, 1, "Winner A.", "", nil, "comments-race-a")
+	secondCommand := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationEdit,
+		create.CommentID, 1, "Winner B.", "", nil, "comments-race-b")
 	type outcome struct {
 		result recordcollaboration.CommentMutationResult
 		err    error
 	}
-	outcomes := make(chan outcome, len(commands))
-	start := make(chan struct{})
-	for index, command := range commands {
-		repository := NewPostgresRecordCommentRepository(
-			fixture.openDirectRuntimePool(t, ctx, fmt.Sprintf("record-comments-race-%d", index), 1),
-			allowRecordPlatformAdmissionGate,
-			NewPostgresCollaborationMembershipReader(),
-		)
-		command := command
-		go func() {
-			<-start
-			result, err := repository.CommitComment(context.Background(), command)
-			outcomes <- outcome{result: result, err: err}
-		}()
+	firstResult := make(chan outcome, 1)
+	go func() {
+		result, err := firstRepository.CommitComment(ctx, firstCommand)
+		firstResult <- outcome{result: result, err: err}
+	}()
+	firstBlockers := waitForPostgresCollaborationBlocker(t, ctx, fixture, firstPID, blockerPID)
+	if !slices.Contains(firstBlockers, blockerPID) {
+		t.Fatalf("first comment backend blockers = %#v, want hold backend %d", firstBlockers, blockerPID)
 	}
-	close(start)
-	winners, conflicts := 0, 0
-	for range commands {
-		select {
-		case got := <-outcomes:
-			switch {
-			case got.err == nil:
-				winners++
-				if got.result.Version != 2 || got.result.State != recordcollaboration.CommentStateActive {
-					t.Fatalf("winner result = %#v", got.result)
-				}
-			case errors.Is(got.err, recordcollaboration.ErrCommentConflict):
-				conflicts++
-			default:
-				t.Fatalf("concurrent CommitComment() result=%#v error=%v", got.result, got.err)
-			}
-		case <-time.After(10 * time.Second):
-			t.Fatal("timed out waiting for concurrent comment commits")
-		}
+
+	secondResult := make(chan outcome, 1)
+	secondStarted := make(chan struct{})
+	go func() {
+		close(secondStarted)
+		result, err := secondRepository.CommitComment(ctx, secondCommand)
+		secondResult <- outcome{result: result, err: err}
+	}()
+	select {
+	case <-secondStarted:
+	case <-ctx.Done():
+		t.Fatalf("second comment edit did not start: %v", ctx.Err())
 	}
-	if winners != 1 || conflicts != 1 {
-		t.Fatalf("concurrent outcomes winners/conflicts = %d/%d", winners, conflicts)
+	secondBlockers := waitForPostgresCollaborationBlocker(t, ctx, fixture, secondPID, firstPID)
+	if !slices.Contains(secondBlockers, firstPID) {
+		t.Fatalf("second comment backend blockers = %#v, want first backend %d", secondBlockers, firstPID)
+	}
+	select {
+	case got := <-secondResult:
+		t.Fatalf("second comment edit completed before first release: %#v", got)
+	default:
+	}
+	if _, err := blocker.Exec(ctx, `select pg_catalog.pg_advisory_unlock($1)`, holdLock); err != nil {
+		t.Fatalf("release comment race hold lock: %v", err)
+	}
+	holdReleased = true
+
+	var first, second outcome
+	select {
+	case first = <-firstResult:
+	case <-ctx.Done():
+		t.Fatalf("first comment edit did not finish: %v", ctx.Err())
+	}
+	select {
+	case second = <-secondResult:
+	case <-ctx.Done():
+		t.Fatalf("second comment edit did not finish: %v", ctx.Err())
+	}
+	if first.err != nil || first.result.Version != 2 || first.result.State != recordcollaboration.CommentStateActive {
+		t.Fatalf("first comment edit result/error = %#v/%v", first.result, first.err)
+	}
+	if !errors.Is(second.err, recordcollaboration.ErrCommentConflict) || second.result != (recordcollaboration.CommentMutationResult{}) {
+		t.Fatalf("second comment edit result/error = %#v/%v, want conflict", second.result, second.err)
 	}
 	var version, revisionCount, activityCount, outboxCount, idempotencyCount int
 	if err := fixture.db.QueryRow(ctx, `
