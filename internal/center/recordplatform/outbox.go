@@ -23,11 +23,15 @@ const (
 	OutboxEventKindRecordActionCompleted    = "record_action_completed"
 	OutboxEventKindRecordActionCancelled    = "record_action_cancelled"
 	OutboxEventKindRecordActionReopened     = "record_action_reopened"
+	OutboxEventKindRecordCommentCreated     = "record_comment_created"
+	OutboxEventKindRecordCommentEdited      = "record_comment_edited"
+	OutboxEventKindRecordCommentRedacted    = "record_comment_redacted"
 )
 
 const (
-	OutboxSubjectKindRecord = "record"
-	OutboxSubjectKindAction = "action"
+	OutboxSubjectKindRecord  = "record"
+	OutboxSubjectKindAction  = "action"
+	OutboxSubjectKindComment = "comment"
 )
 
 // OutboxEvent contains only durable identity and authorization epoch data. It
@@ -149,6 +153,10 @@ func outboxSubjectKindForEventKind(kind string) (string, bool) {
 		OutboxEventKindRecordActionCancelled,
 		OutboxEventKindRecordActionReopened:
 		return OutboxSubjectKindAction, true
+	case OutboxEventKindRecordCommentCreated,
+		OutboxEventKindRecordCommentEdited,
+		OutboxEventKindRecordCommentRedacted:
+		return OutboxSubjectKindComment, true
 	default:
 		return "", false
 	}
