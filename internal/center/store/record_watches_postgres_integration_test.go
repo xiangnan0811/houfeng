@@ -133,9 +133,7 @@ func TestPostgresIntegrationRecordWatchReplayFailsClosedAfterAutomaticSourceMuta
 	action := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgwatchsource", 0,
 		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Automatic watch source"}), "watch-source-action")
 	action.Actor = watch.Actor
-	if _, err := NewPostgresRecordActionRepository(
-		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
-	).CommitAction(ctx, action); err != nil {
+	if _, err := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate).CommitAction(ctx, action); err != nil {
 		t.Fatalf("CommitAction() error = %v", err)
 	}
 	var version, keyCount int

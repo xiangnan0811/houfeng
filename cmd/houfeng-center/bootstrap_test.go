@@ -817,7 +817,7 @@ func TestBootstrapWiresRecordActionsThroughSharedAuthorizationMembershipAndAdmis
 	}
 	text := string(source)
 	for _, required := range []string{
-		"store.NewPostgresRecordActionRepository(pool, effectiveGate, collaborationMembers)",
+		"store.NewPostgresRecordActionRepository(pool, effectiveGate, collaborationMembers, authorizations)",
 		"recordcollaboration.NewActionService(authorizations, actionRepository)",
 		"recordcollaboration.NewActionApplication(",
 		"handlers.RecordActions(actionApplication)",

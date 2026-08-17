@@ -20,9 +20,7 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 	seedCollaborationRevisionUsers(t, ctx, fixture)
 	parent := seedPostgresActionParent(t, ctx, fixture, "rec_providerroundtrip", "provider-roundtrip-parent")
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-collaboration-providers", 3)
-	actionRepository := NewPostgresRecordActionRepository(
-		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
-	)
+	actionRepository := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
 	action := postgresActionCommand(
 		t, parent, recordcollaboration.ActionMutationCreate, "ract_providerroundtrip", 0,
 		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{

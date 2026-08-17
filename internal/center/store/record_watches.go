@@ -85,7 +85,7 @@ func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, c
 		if err := records.AuthorizeRecordResource(member, recordauth.CapabilityNotificationManage, currentAuthorization.Evidence); err != nil {
 			return err
 		}
-		if !recordWatchCurrentAuthorizationMatchesCommand(currentAuthorization, command.RecordID, command.CurrentRevisionID, command.RecordLockVersion,
+		if !currentRecordAuthorizationMatchesExpected(currentAuthorization, command.RecordID, command.CurrentRevisionID, command.RecordLockVersion,
 			command.AuthorizationEpoch, command.AuthorizationEvidence) {
 			return recordcollaboration.ErrWatchConflict
 		}
@@ -236,7 +236,7 @@ func (repository *PostgresRecordWatchRepository) GetWatch(ctx context.Context, c
 		if err := records.AuthorizeRecordResource(member, recordauth.CapabilityNotificationRead, currentAuthorization.Evidence); err != nil {
 			return err
 		}
-		if !recordWatchCurrentAuthorizationMatchesCommand(currentAuthorization, command.RecordID, command.CurrentRevisionID, command.RecordLockVersion,
+		if !currentRecordAuthorizationMatchesExpected(currentAuthorization, command.RecordID, command.CurrentRevisionID, command.RecordLockVersion,
 			command.AuthorizationEpoch, command.AuthorizationEvidence) {
 			return recordcollaboration.ErrWatchConflict
 		}
@@ -249,7 +249,7 @@ func (repository *PostgresRecordWatchRepository) GetWatch(ctx context.Context, c
 	return result, nil
 }
 
-func recordWatchCurrentAuthorizationMatchesCommand(
+func currentRecordAuthorizationMatchesExpected(
 	current records.CurrentRecordAuthorization,
 	recordID string,
 	currentRevisionID string,

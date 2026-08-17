@@ -21,16 +21,29 @@ import (
 // transaction primitives with the 0055 action tables. It owns no alternate
 // idempotency, authorization, outbox, lease, or deletion mechanism.
 type PostgresRecordActionRepository struct {
-	platform *PostgresRecordPlatformRepository
-	members  CollaborationMembershipReader
+	platform      *PostgresRecordPlatformRepository
+	members       CollaborationMembershipReader
+	authorization currentRecordAuthorizationTransactionResolver
 }
 
-func NewPostgresRecordActionRepository(pool *pgxpool.Pool, gate AdmissionGate, members CollaborationMembershipReader) *PostgresRecordActionRepository {
-	return &PostgresRecordActionRepository{platform: NewPostgresRecordPlatformRepository(pool, gate), members: members}
+type currentRecordAuthorizationTransactionResolver interface {
+	resolveCurrentAuthorizationInTransaction(context.Context, pgx.Tx, recordauth.ActorScope, string) (records.CurrentRecordAuthorization, error)
+}
+
+func NewPostgresRecordActionRepository(
+	pool *pgxpool.Pool,
+	gate AdmissionGate,
+	members CollaborationMembershipReader,
+	authorization *PostgresCurrentRecordAuthorizationSource,
+) *PostgresRecordActionRepository {
+	return &PostgresRecordActionRepository{
+		platform: NewPostgresRecordPlatformRepository(pool, gate), members: members, authorization: authorization,
+	}
 }
 
 func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Context, command recordcollaboration.ActionCommand) (recordcollaboration.ActionMutationResult, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) {
+	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) ||
+		nilRecordSubjectDependency(repository.authorization) {
 		return recordcollaboration.ActionMutationResult{}, recordcollaboration.ErrInvalidActionCommand
 	}
 	if err := command.Validate(); err != nil {
@@ -62,8 +75,15 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 			root.lifecycle != records.LifecycleActive || root.projectID != string(recordplatform.ProjectIDDefault) {
 			return recordcollaboration.ErrActionConflict
 		}
-		if err := records.AuthorizeRecordResource(command.Actor, recordauth.CapabilityRecordUpdate, command.AuthorizationEvidence); err != nil {
+		actor, currentAuthorization, err := repository.loadCurrentActionAuthorization(
+			ctx, transaction.tx, command.Actor, command.RecordID, recordauth.CapabilityRecordUpdate,
+		)
+		if err != nil {
 			return err
+		}
+		if !currentRecordAuthorizationMatchesExpected(currentAuthorization, command.RecordID, command.CurrentRevisionID,
+			command.RecordLockVersion, command.AuthorizationEpoch, command.AuthorizationEvidence) {
+			return recordcollaboration.ErrActionConflict
 		}
 		if claim.ReplayResult != nil {
 			if !command.ResultFingerprint.MatchesPersisted(*claim.ReplayResult) {
@@ -74,7 +94,7 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 		}
 
 		if command.Kind == recordcollaboration.ActionMutationCreate || command.Kind == recordcollaboration.ActionMutationUpdate {
-			if err := repository.validateActionFieldsInTransaction(ctx, transaction.tx, command, binding); err != nil {
+			if err := repository.validateActionFieldsInTransaction(ctx, transaction.tx, command, binding, currentAuthorization.Evidence); err != nil {
 				return err
 			}
 		}
@@ -135,7 +155,7 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 		if err := insertRecordActionActivity(ctx, transaction.tx, command, eventID, version, subjectRevisionID, activityKind, occurredAt); err != nil {
 			return err
 		}
-		automaticSources := []collaborationAutomaticFollowerSources{{userID: command.Actor.UserID, action: true}}
+		automaticSources := []collaborationAutomaticFollowerSources{{userID: actor.UserID, action: true}}
 		if currentAssigneeID != "" {
 			automaticSources = append(automaticSources, collaborationAutomaticFollowerSources{userID: currentAssigneeID, action: true})
 		}
@@ -180,7 +200,8 @@ func (repository *PostgresRecordActionRepository) CommitAction(ctx context.Conte
 }
 
 func (repository *PostgresRecordActionRepository) ListActions(ctx context.Context, command recordcollaboration.ActionReadCommand) ([]recordcollaboration.ActionRecord, error) {
-	if ctx == nil || repository == nil || repository.platform == nil {
+	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) ||
+		nilRecordSubjectDependency(repository.authorization) {
 		return nil, recordcollaboration.ErrInvalidActionRequest
 	}
 	if err := command.Validate(); err != nil {
@@ -204,8 +225,15 @@ func (repository *PostgresRecordActionRepository) ListActions(ctx context.Contex
 			root.lifecycle != records.LifecycleActive || root.projectID != string(recordplatform.ProjectIDDefault) {
 			return recordcollaboration.ErrActionConflict
 		}
-		if err := records.AuthorizeRecordResource(command.Actor, recordauth.CapabilityRecordRead, command.AuthorizationEvidence); err != nil {
+		_, currentAuthorization, err := repository.loadCurrentActionAuthorization(
+			ctx, transaction.tx, command.Actor, command.RecordID, recordauth.CapabilityRecordRead,
+		)
+		if err != nil {
 			return err
+		}
+		if !currentRecordAuthorizationMatchesExpected(currentAuthorization, command.RecordID, command.CurrentRevisionID,
+			command.RecordLockVersion, command.AuthorizationEpoch, command.AuthorizationEvidence) {
+			return recordcollaboration.ErrActionConflict
 		}
 		loaded, err := listRecordActions(ctx, transaction.tx, command.RecordID, binding, command.Limit)
 		if err != nil {
@@ -274,7 +302,40 @@ func listRecordActions(ctx context.Context, tx pgx.Tx, recordID string, binding 
 	return result, nil
 }
 
-func (repository *PostgresRecordActionRepository) validateActionFieldsInTransaction(ctx context.Context, tx pgx.Tx, command recordcollaboration.ActionCommand, binding recordcollaboration.RecordFenceBinding) error {
+func (repository *PostgresRecordActionRepository) loadCurrentActionAuthorization(
+	ctx context.Context,
+	tx pgx.Tx,
+	actorInput recordauth.ActorScope,
+	recordID string,
+	capability recordauth.Capability,
+) (recordauth.ActorScope, records.CurrentRecordAuthorization, error) {
+	actor, err := repository.members.ReadMemberActor(ctx, tx, actorInput.ProjectID, actorInput.UserID)
+	if errors.Is(err, recordcollaboration.ErrMembershipDenied) {
+		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, recordauth.ErrDenied
+	}
+	if err != nil {
+		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, err
+	}
+	if actor.UserID != actorInput.UserID || actor.ProjectID != actorInput.ProjectID || actor.Role != actorInput.Role {
+		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, recordauth.ErrDenied
+	}
+	current, err := repository.authorization.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, recordID)
+	if err != nil {
+		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, err
+	}
+	if err := records.AuthorizeRecordResource(actor, capability, current.Evidence); err != nil {
+		return recordauth.ActorScope{}, records.CurrentRecordAuthorization{}, err
+	}
+	return actor, current, nil
+}
+
+func (repository *PostgresRecordActionRepository) validateActionFieldsInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+	command recordcollaboration.ActionCommand,
+	binding recordcollaboration.RecordFenceBinding,
+	currentEvidence records.RecordAuthorizationEvidence,
+) error {
 	if command.Fields.SubjectRevisionID() != "" {
 		var present int
 		err := tx.QueryRow(ctx, `
@@ -295,7 +356,10 @@ func (repository *PostgresRecordActionRepository) validateActionFieldsInTransact
 		if err != nil {
 			return fmt.Errorf("validate record action assignee: %w", err)
 		}
-		if err := records.AuthorizeRecordResource(member, recordauth.CapabilityRecordRead, command.AuthorizationEvidence); err != nil {
+		if member.UserID != command.Fields.AssigneeID() || member.ProjectID != recordauth.ProjectIDDefault {
+			return recordcollaboration.ErrMembershipDenied
+		}
+		if err := records.AuthorizeRecordResource(member, recordauth.CapabilityRecordRead, currentEvidence); err != nil {
 			if errors.Is(err, recordauth.ErrDenied) {
 				return recordcollaboration.ErrMembershipDenied
 			}

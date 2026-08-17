@@ -81,6 +81,9 @@ func TestPostgresRecordActionRepositoryEnforcesTransitionsCASAndTxBoundAssignee(
 			tx.currentStatus = test.from
 			tx.persistedVersion = test.persisted
 			memberActor, _ := storeActionAuthorization(t)
+			if test.assignee != "" {
+				memberActor = collaborationActor(t, test.assignee, nil)
+			}
 			if test.memberDenied {
 				memberActor = recordauth.ActorScope{}
 			}
@@ -99,8 +102,8 @@ func TestPostgresRecordActionRepositoryEnforcesTransitionsCASAndTxBoundAssignee(
 			if result.Status != test.want || result.Version != 5 {
 				t.Fatalf("result = %#v, want status %q version 5", result, test.want)
 			}
-			if test.assignee != "" && (member.calls != 1 || member.tx != tx) {
-				t.Fatalf("membership calls=%d tx=%T, want exact caller tx", member.calls, member.tx)
+			if test.assignee != "" && (member.targetCalls != 1 || member.tx != tx) {
+				t.Fatalf("target membership calls=%d tx=%T, want exact caller tx", member.targetCalls, member.tx)
 			}
 		})
 	}
@@ -228,22 +231,48 @@ func TestPostgresRecordActionRepositoryRollsBackEveryPostClaimFailure(t *testing
 }
 
 type recordActionMembershipStub struct {
-	actor recordauth.ActorScope
-	err   error
-	calls int
-	tx    pgx.Tx
+	caller      recordauth.ActorScope
+	actor       recordauth.ActorScope
+	err         error
+	calls       int
+	targetCalls int
+	tx          pgx.Tx
 }
 
-func (member *recordActionMembershipStub) ReadMemberActor(_ context.Context, tx pgx.Tx, _ recordauth.ProjectID, _ string) (recordauth.ActorScope, error) {
+func (member *recordActionMembershipStub) ReadMemberActor(_ context.Context, tx pgx.Tx, _ recordauth.ProjectID, userID string) (recordauth.ActorScope, error) {
 	member.calls++
 	member.tx = tx
+	if userID == member.caller.UserID {
+		return member.caller.Clone(), nil
+	}
+	member.targetCalls++
 	if member.err != nil {
 		return recordauth.ActorScope{}, member.err
 	}
 	return member.actor, nil
 }
 
+type recordActionAuthorizationStub struct {
+	command recordcollaboration.ActionCommand
+}
+
+func (stub *recordActionAuthorizationStub) resolveCurrentAuthorizationInTransaction(
+	_ context.Context,
+	_ pgx.Tx,
+	_ recordauth.ActorScope,
+	_ string,
+) (records.CurrentRecordAuthorization, error) {
+	return records.CurrentRecordAuthorization{
+		RecordID: stub.command.RecordID, CurrentRevisionID: stub.command.CurrentRevisionID,
+		LockVersion: stub.command.RecordLockVersion, AuthorizationEpoch: stub.command.AuthorizationEpoch,
+		Lifecycle: records.LifecycleActive, Evidence: stub.command.AuthorizationEvidence,
+	}, nil
+}
+
 func newRecordActionTestRepository(tx *fakeRecordActionTx, members CollaborationMembershipReader) *PostgresRecordActionRepository {
+	if stub, ok := members.(*recordActionMembershipStub); ok {
+		stub.caller = tx.command.Actor.Clone()
+	}
 	return &PostgresRecordActionRepository{
 		platform: &PostgresRecordPlatformRepository{
 			beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
@@ -252,7 +281,7 @@ func newRecordActionTestRepository(tx *fakeRecordActionTx, members Collaboration
 			},
 			gate: AdmissionGateFunc(func(context.Context, pgx.Tx) error { tx.steps = append(tx.steps, "admission"); return nil }),
 		},
-		members: members,
+		members: members, authorization: &recordActionAuthorizationStub{command: tx.command},
 	}
 }
 

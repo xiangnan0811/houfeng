@@ -29,8 +29,8 @@ func TestPostgresIntegrationRecordAutomaticFollowerSourcesRollbackWithProducerTr
 			commit: func(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, parent records.RevisionCommitResult, gate AdmissionGate) (string, error) {
 				command := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgsourcerollback", 0,
 					mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Rollback source", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}), "notification-source-action-rollback")
-				_, err := NewPostgresRecordActionRepository(
-					fixture.openDirectRuntimePool(t, ctx, "record-source-action-rollback", 1), gate, NewPostgresCollaborationMembershipReader(),
+				_, err := newPostgresActionRepositoryForTest(
+					t, fixture.openDirectRuntimePool(t, ctx, "record-source-action-rollback", 1), gate,
 				).CommitAction(ctx, command)
 				return command.Idempotency.Key.Key, err
 			},
@@ -1304,7 +1304,7 @@ func TestPostgresIntegrationRecordInboxRecomputesCurrentRecipientAndProjectionRe
 			t.Fatalf("CommitRevision(parent) error = %v", err)
 		}
 		seedNotificationPreferences(t, ctx, fixture, parent.RecordID, map[string]string{"usr_bbbbbbbbbbbbbbbbbbbbbbbb": "watching"})
-		actions := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+		actions := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
 		optionalCreate := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pginboxoptional", 0,
 			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Optional completion"}), "inbox-current-optional-create")
 		optionalComplete := postgresActionCommand(t, parent, recordcollaboration.ActionMutationComplete, optionalCreate.ActionID, 1,
@@ -1428,7 +1428,7 @@ func TestPostgresIntegrationRecordInboxRecomputesCurrentRecipientAndProjectionRe
 		}
 		watcherID := "usr_bbbbbbbbbbbbbbbbbbbbbbbb"
 		seedNotificationPreferences(t, ctx, fixture, parent.RecordID, map[string]string{watcherID: "watching"})
-		actions := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+		actions := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
 		create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pginboxunwatch", 0,
 			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Manual watcher"}), "inbox-unwatch-create")
 		complete := postgresActionCommand(t, parent, recordcollaboration.ActionMutationComplete, create.ActionID, 1,
@@ -1493,7 +1493,7 @@ func TestPostgresIntegrationRecordInboxScanBudgetCachesAndStableMultiRecordOrder
 		parents = append(parents, parent)
 		command := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, fmt.Sprintf("ract_pginboxbounded%d", index), 0,
 			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Bounded inbox", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}), fmt.Sprintf("inbox-bounded-action-%d", index))
-		if _, err := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader()).CommitAction(ctx, command); err != nil {
+		if _, err := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate).CommitAction(ctx, command); err != nil {
 			t.Fatalf("CommitAction(%d) error = %v", index, err)
 		}
 	}
@@ -1591,7 +1591,7 @@ func TestPostgresIntegrationRecordInboxSourceDependencyFailureIsUnavailableForEv
 	if err != nil {
 		t.Fatalf("CommitRevision(parent) error = %v", err)
 	}
-	actionRepository := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+	actionRepository := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
 	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pginboxdependency", 0,
 		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Dependency failure", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}),
 		"inbox-dependency-action")
@@ -1669,7 +1669,7 @@ func TestPostgresIntegrationRecordNotificationActionMappingMandatoryMuteAndReaso
 		"usr_cccccccccccccccccccccccc": "watching",
 		"usr_dddddddddddddddddddddddd": "watching",
 	})
-	actionRepository := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+	actionRepository := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
 	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgnotify", 0,
 		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Notify assignment", AssigneeID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb"}), "notification-action-create")
 	update := postgresActionCommand(t, parent, recordcollaboration.ActionMutationUpdate, create.ActionID, 1,
@@ -1761,7 +1761,7 @@ func TestPostgresIntegrationRecordNotificationUnassignedCompletionAndCancellatio
 		t.Fatalf("CommitRevision(parent) error = %v", err)
 	}
 	seedNotificationPreferences(t, ctx, fixture, parent.RecordID, map[string]string{"usr_bbbbbbbbbbbbbbbbbbbbbbbb": "watching"})
-	repository := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+	repository := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
 	create := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgnotifyunassigned", 0,
 		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Unassigned action"}), "notification-unassigned-create")
 	complete := postgresActionCommand(t, parent, recordcollaboration.ActionMutationComplete, create.ActionID, 1, recordcollaboration.ActionFields{}, "notification-unassigned-complete")
@@ -1817,7 +1817,7 @@ func TestPostgresIntegrationRecordNotificationSuppressesSelfAssignmentAndSelfMen
 		if err != nil {
 			t.Fatalf("CommitRevision(parent) error = %v", err)
 		}
-		repository := NewPostgresRecordActionRepository(runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader())
+		repository := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate)
 		command := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgnotifyselfassign", 0,
 			mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Self assignment", AssigneeID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa"}), "notification-self-assign-create")
 		command.Actor = mustPostgresCommentActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", recordauth.RoleProjectAdmin)
