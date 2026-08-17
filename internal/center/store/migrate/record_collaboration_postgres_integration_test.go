@@ -190,6 +190,22 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		`)
 		requirePostgresSQLState(t, err, "23503")
 	})
+	t.Run("mention rejects same-record wrong-fence revision", func(t *testing.T) {
+		tx, err := runtimeDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin wrong-fence mention transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, `
+			insert into public.record_comment_mentions (
+				record_id, comment_id, comment_version, mentioned_user_id,
+				record_fence_epoch
+			) values ('rec_acl', 'rcm_acl', 1, 'usr_other', 1)
+		`)
+		requirePostgresSQLState(t, err, "23503")
+	})
+
+	assertRecordCollaborationConcurrentRedaction(t, ctx, fixture, runtimeDB)
 
 	_, err = runtimeDB.Exec(ctx, `
 		insert into public.record_notifications (
@@ -242,6 +258,21 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 		`)
 		requirePostgresSQLState(t, err, "23503")
 	})
+	t.Run("delivery rejects same-record wrong-fence recipient", func(t *testing.T) {
+		tx, err := runtimeDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin wrong-fence delivery transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, `
+			insert into public.record_notification_deliveries (
+				delivery_id, record_id, notification_id, recipient_user_id, channel,
+				binding_id, authorization_epoch, record_fence_epoch
+			) values ('rnd_wrongfence', 'rec_acl', 'rnt_acl', 'usr_recipient', 'feishu',
+				'binding_wrongfence', 0, 1)
+		`)
+		requirePostgresSQLState(t, err, "23503")
+	})
 	if _, err := runtimeDB.Exec(ctx, `
 		insert into public.record_notifications (
 			notification_id, record_id, event_kind, subject_kind, subject_id,
@@ -273,6 +304,22 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 				started_at, completed_at
 			) values ('rna_cross', 'rec_acl', 'rnd_acl', 'rnt_aclother', 'usr_other',
 				2, 'temporary_failure', 0, 0, statement_timestamp(), statement_timestamp())
+		`)
+		requirePostgresSQLState(t, err, "23503")
+	})
+	t.Run("attempt rejects exact delivery tuple with wrong fence", func(t *testing.T) {
+		tx, err := runtimeDB.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin wrong-fence delivery attempt transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, `
+			insert into public.record_notification_delivery_attempts (
+				attempt_id, record_id, delivery_id, notification_id, recipient_user_id,
+				attempt_no, outcome, authorization_epoch, record_fence_epoch,
+				started_at, completed_at
+			) values ('rna_wrongfence', 'rec_acl', 'rnd_acl', 'rnt_acl', 'usr_recipient',
+				2, 'temporary_failure', 0, 1, statement_timestamp(), statement_timestamp())
 		`)
 		requirePostgresSQLState(t, err, "23503")
 	})
