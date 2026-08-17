@@ -493,7 +493,7 @@ func newRecordsHTTPHandlers(
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record comment application: %w", err)
 	}
-	watchRepository := store.NewPostgresRecordWatchRepository(pool, effectiveGate, collaborationMembers)
+	watchRepository := store.NewPostgresRecordWatchRepository(pool, effectiveGate, collaborationMembers, authorizations)
 	watchService, err := recordcollaboration.NewWatchService(authorizations, watchRepository)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record watch service: %w", err)

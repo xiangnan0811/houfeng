@@ -17,16 +17,25 @@ import (
 )
 
 type PostgresRecordWatchRepository struct {
-	platform *PostgresRecordPlatformRepository
-	members  CollaborationMembershipReader
+	platform      *PostgresRecordPlatformRepository
+	members       CollaborationMembershipReader
+	authorization *PostgresCurrentRecordAuthorizationSource
 }
 
-func NewPostgresRecordWatchRepository(pool *pgxpool.Pool, gate AdmissionGate, members CollaborationMembershipReader) *PostgresRecordWatchRepository {
-	return &PostgresRecordWatchRepository{platform: NewPostgresRecordPlatformRepository(pool, gate), members: members}
+func NewPostgresRecordWatchRepository(
+	pool *pgxpool.Pool,
+	gate AdmissionGate,
+	members CollaborationMembershipReader,
+	authorization *PostgresCurrentRecordAuthorizationSource,
+) *PostgresRecordWatchRepository {
+	return &PostgresRecordWatchRepository{
+		platform: NewPostgresRecordPlatformRepository(pool, gate), members: members, authorization: authorization,
+	}
 }
 
 func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, command recordcollaboration.WatchCommand) (recordcollaboration.WatchStatus, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) {
+	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) ||
+		repository.authorization == nil || nilRecordSubjectDependency(repository.authorization.resolver) {
 		return recordcollaboration.WatchStatus{}, recordcollaboration.ErrInvalidWatchCommand
 	}
 	if err := command.Validate(); err != nil {
@@ -58,14 +67,27 @@ func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, c
 			return recordcollaboration.ErrWatchConflict
 		}
 		member, err := repository.members.ReadMemberActor(ctx, transaction.tx, command.Actor.ProjectID, command.Actor.UserID)
+		if errors.Is(err, recordcollaboration.ErrMembershipDenied) {
+			return recordauth.ErrDenied
+		}
 		if err != nil {
 			return err
 		}
-		if member.UserID != command.Actor.UserID || member.ProjectID != command.Actor.ProjectID {
-			return recordcollaboration.ErrMembershipDenied
+		if member.UserID != command.Actor.UserID || member.ProjectID != command.Actor.ProjectID || member.Role != command.Actor.Role {
+			return recordauth.ErrDenied
 		}
-		if err := records.AuthorizeRecordResource(member, recordauth.CapabilityNotificationManage, command.AuthorizationEvidence); err != nil {
+		currentAuthorization, err := repository.authorization.resolveCurrentAuthorizationInTransaction(
+			ctx, transaction.tx, member, command.RecordID,
+		)
+		if err != nil {
 			return err
+		}
+		if err := records.AuthorizeRecordResource(member, recordauth.CapabilityNotificationManage, currentAuthorization.Evidence); err != nil {
+			return err
+		}
+		if !recordWatchCurrentAuthorizationMatchesCommand(currentAuthorization, command.RecordID, command.CurrentRevisionID, command.RecordLockVersion,
+			command.AuthorizationEpoch, command.AuthorizationEvidence) {
+			return recordcollaboration.ErrWatchConflict
 		}
 		current, err := loadRecordWatchStatus(ctx, transaction.tx, command.RecordID, command.Actor.UserID, binding.Epoch(), true)
 		if err != nil {
@@ -73,6 +95,9 @@ func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, c
 		}
 		if claim.ReplayResult != nil {
 			if !command.ResultFingerprint.MatchesPersisted(*claim.ReplayResult) {
+				return recordplatform.ErrIdempotencyConflictState
+			}
+			if !recordWatchReplayMatchesCurrent(command, current) {
 				return recordplatform.ErrIdempotencyConflictState
 			}
 			result = current
@@ -152,8 +177,23 @@ func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, c
 	return result, nil
 }
 
+func recordWatchReplayMatchesCurrent(command recordcollaboration.WatchCommand, current recordcollaboration.WatchStatus) bool {
+	if command.ExpectedVersion >= math.MaxInt64 || current.RecordID != command.RecordID || current.UserID != command.Actor.UserID {
+		return false
+	}
+	if command.Preference == recordcollaboration.FollowerPreferenceDefault {
+		if command.ExpectedVersion == 0 {
+			return current.Version == 0
+		}
+		return current.Version == 0 ||
+			(current.Version == command.ExpectedVersion+1 && current.Preference == recordcollaboration.FollowerPreferenceDefault)
+	}
+	return current.Version == command.ExpectedVersion+1 && current.Preference == command.Preference
+}
+
 func (repository *PostgresRecordWatchRepository) GetWatch(ctx context.Context, command recordcollaboration.WatchReadCommand) (recordcollaboration.WatchStatus, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) {
+	if ctx == nil || repository == nil || repository.platform == nil || nilCollaborationDependency(repository.members) ||
+		repository.authorization == nil || nilRecordSubjectDependency(repository.authorization.resolver) {
 		return recordcollaboration.WatchStatus{}, recordcollaboration.ErrInvalidWatchCommand
 	}
 	if err := command.Validate(); err != nil {
@@ -178,14 +218,27 @@ func (repository *PostgresRecordWatchRepository) GetWatch(ctx context.Context, c
 			return recordcollaboration.ErrWatchConflict
 		}
 		member, err := repository.members.ReadMemberActor(ctx, transaction.tx, command.Actor.ProjectID, command.Actor.UserID)
+		if errors.Is(err, recordcollaboration.ErrMembershipDenied) {
+			return recordauth.ErrDenied
+		}
 		if err != nil {
 			return err
 		}
-		if member.UserID != command.Actor.UserID || member.ProjectID != command.Actor.ProjectID {
-			return recordcollaboration.ErrMembershipDenied
+		if member.UserID != command.Actor.UserID || member.ProjectID != command.Actor.ProjectID || member.Role != command.Actor.Role {
+			return recordauth.ErrDenied
 		}
-		if err := records.AuthorizeRecordResource(member, recordauth.CapabilityNotificationRead, command.AuthorizationEvidence); err != nil {
+		currentAuthorization, err := repository.authorization.resolveCurrentAuthorizationInTransaction(
+			ctx, transaction.tx, member, command.RecordID,
+		)
+		if err != nil {
 			return err
+		}
+		if err := records.AuthorizeRecordResource(member, recordauth.CapabilityNotificationRead, currentAuthorization.Evidence); err != nil {
+			return err
+		}
+		if !recordWatchCurrentAuthorizationMatchesCommand(currentAuthorization, command.RecordID, command.CurrentRevisionID, command.RecordLockVersion,
+			command.AuthorizationEpoch, command.AuthorizationEvidence) {
+			return recordcollaboration.ErrWatchConflict
 		}
 		result, err = loadRecordWatchStatus(ctx, transaction.tx, command.RecordID, command.Actor.UserID, binding.Epoch(), false)
 		return err
@@ -194,6 +247,30 @@ func (repository *PostgresRecordWatchRepository) GetWatch(ctx context.Context, c
 		return recordcollaboration.WatchStatus{}, err
 	}
 	return result, nil
+}
+
+func recordWatchCurrentAuthorizationMatchesCommand(
+	current records.CurrentRecordAuthorization,
+	recordID string,
+	currentRevisionID string,
+	lockVersion uint64,
+	authorizationEpoch uint64,
+	expected records.RecordAuthorizationEvidence,
+) bool {
+	if current.RecordID != recordID || current.CurrentRevisionID != currentRevisionID || current.LockVersion != lockVersion ||
+		current.AuthorizationEpoch != authorizationEpoch || current.Lifecycle != records.LifecycleActive ||
+		current.Evidence.ProjectID != expected.ProjectID || current.Evidence.Visibility.CanonicalHash != expected.Visibility.CanonicalHash ||
+		len(current.Evidence.Sources) != len(expected.Sources) {
+		return false
+	}
+	for index := range current.Evidence.Sources {
+		left, right := current.Evidence.Sources[index], expected.Sources[index]
+		if left.Version != right.Version || left.Kind != right.Kind || left.SourceID != right.SourceID ||
+			left.State != right.State || left.Digest != right.Digest {
+			return false
+		}
+	}
+	return true
 }
 
 func loadRecordWatchStatus(ctx context.Context, tx pgx.Tx, recordID, userID string, epoch recordplatform.ContentEpoch, forUpdate bool) (recordcollaboration.WatchStatus, error) {

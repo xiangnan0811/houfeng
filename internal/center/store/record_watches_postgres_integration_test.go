@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordcollaboration"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
@@ -20,10 +22,10 @@ func TestPostgresIntegrationRecordWatchLifecycleReplayCASAndSourcePreservation(t
 	fixture := newRecordsPostgresFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
 	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgwatchflow", "watch-parent-key")
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-watch-lifecycle", 3)
 	repository := NewPostgresRecordWatchRepository(
-		fixture.openDirectRuntimePool(t, ctx, "record-watch-lifecycle", 3),
-		allowRecordPlatformAdmissionGate,
-		NewPostgresCollaborationMembershipReader(),
+		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+		newPostgresWatchAuthorizationSource(t, runtimePool),
 	)
 
 	watch := postgresWatchCommand(t, parent, 0, recordcollaboration.FollowerPreferenceWatching, "watch-flow-watch", 0x11)
@@ -46,6 +48,9 @@ func TestPostgresIntegrationRecordWatchLifecycleReplayCASAndSourcePreservation(t
 	status, err = repository.SetWatch(ctx, mute)
 	if err != nil || status.Version != 2 || status.Preference != recordcollaboration.FollowerPreferenceMuted || !status.Sources.Owner {
 		t.Fatalf("SetWatch(muted) = (%#v, %v), want preserved owner source", status, err)
+	}
+	if replay, err = repository.SetWatch(ctx, watch); !errors.Is(err, recordplatform.ErrIdempotencyConflictState) || replay != (recordcollaboration.WatchStatus{}) {
+		t.Fatalf("SetWatch(first key after later mutation) = (%#v, %v), want content-free fail-closed replay", replay, err)
 	}
 	defaultWithSource := postgresWatchCommand(t, parent, 2, recordcollaboration.FollowerPreferenceDefault, "watch-flow-default-source", 0x13)
 	status, err = repository.SetWatch(ctx, defaultWithSource)
@@ -97,10 +102,9 @@ func TestPostgresIntegrationRecordWatchRollsBackMutationWhenCompletionAdmissionF
 		}
 		return nil
 	})
-	repository := NewPostgresRecordWatchRepository(
-		fixture.openDirectRuntimePool(t, ctx, "record-watch-rollback", 1), gate,
-		NewPostgresCollaborationMembershipReader(),
-	)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-watch-rollback", 1)
+	repository := NewPostgresRecordWatchRepository(runtimePool, gate, NewPostgresCollaborationMembershipReader(),
+		newPostgresWatchAuthorizationSource(t, runtimePool))
 	command := postgresWatchCommand(t, parent, 0, recordcollaboration.FollowerPreferenceWatching, "watch-rollback-key", 0x21)
 
 	if got, err := repository.SetWatch(ctx, command); !errors.Is(err, cutPoint) || got != (recordcollaboration.WatchStatus{}) {
@@ -112,14 +116,200 @@ func TestPostgresIntegrationRecordWatchRollsBackMutationWhenCompletionAdmissionF
 	assertPostgresWatchRowAndKeyCounts(t, ctx, fixture, parent.RecordID, command.Idempotency.Key.Key, 0, 0)
 }
 
+func TestPostgresIntegrationRecordWatchReplayFailsClosedAfterAutomaticSourceMutation(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgwatchsource", "watch-source-parent")
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-watch-source", 2)
+	repository := NewPostgresRecordWatchRepository(
+		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+		newPostgresWatchAuthorizationSource(t, runtimePool),
+	)
+	watch := postgresWatchCommand(t, parent, 0, recordcollaboration.FollowerPreferenceWatching, "watch-source-watch", 0x29)
+	if status, err := repository.SetWatch(ctx, watch); err != nil || status.Version != 1 || status.Sources.Any() {
+		t.Fatalf("SetWatch(watching) = (%#v, %v)", status, err)
+	}
+	action := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgwatchsource", 0,
+		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Automatic watch source"}), "watch-source-action")
+	action.Actor = watch.Actor
+	if _, err := NewPostgresRecordActionRepository(
+		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+	).CommitAction(ctx, action); err != nil {
+		t.Fatalf("CommitAction() error = %v", err)
+	}
+	var version, keyCount int
+	var followsAction bool
+	var updatedAt time.Time
+	if err := fixture.db.QueryRow(ctx, `
+		select follower_version::int, follows_action, updated_at,
+		       (select count(*)::int from public.record_idempotency_keys where idempotency_key = $3)
+		from public.record_followers
+		where record_id = $1 and user_id = $2`, parent.RecordID, watch.Actor.UserID, watch.Idempotency.Key.Key).Scan(
+		&version, &followsAction, &updatedAt, &keyCount,
+	); err != nil {
+		t.Fatalf("read automatic source mutation: %v", err)
+	}
+	if version != 2 || !followsAction || keyCount != 1 {
+		t.Fatalf("automatic source version/action/keys = %d/%v/%d, want 2/true/1", version, followsAction, keyCount)
+	}
+	if replay, err := repository.SetWatch(ctx, watch); !errors.Is(err, recordplatform.ErrIdempotencyConflictState) || replay != (recordcollaboration.WatchStatus{}) {
+		t.Fatalf("SetWatch(replay after automatic source) = (%#v, %v), want fail closed", replay, err)
+	}
+	var afterVersion, afterKeyCount int
+	var afterAction bool
+	var afterUpdatedAt time.Time
+	if err := fixture.db.QueryRow(ctx, `
+		select follower_version::int, follows_action, updated_at,
+		       (select count(*)::int from public.record_idempotency_keys where idempotency_key = $3)
+		from public.record_followers
+		where record_id = $1 and user_id = $2`, parent.RecordID, watch.Actor.UserID, watch.Idempotency.Key.Key).Scan(
+		&afterVersion, &afterAction, &afterUpdatedAt, &afterKeyCount,
+	); err != nil {
+		t.Fatalf("read state after failed replay: %v", err)
+	}
+	if afterVersion != version || afterAction != followsAction || !afterUpdatedAt.Equal(updatedAt) || afterKeyCount != keyCount {
+		t.Fatalf("failed replay changed follower/key state: before=%d/%v/%s/%d after=%d/%v/%s/%d",
+			version, followsAction, updatedAt, keyCount, afterVersion, afterAction, afterUpdatedAt, afterKeyCount)
+	}
+}
+
+func TestPostgresIntegrationRecordWatchRefreshesAuthorizationInsideTransactionForWriteReadAndReplay(t *testing.T) {
+	for _, failure := range []struct {
+		name    string
+		step    func(*testing.T, records.CompleteRevisionInput) watchSubjectResolutionStep
+		wantErr error
+	}{
+		{
+			name: "revoked",
+			step: func(t *testing.T, input records.CompleteRevisionInput) watchSubjectResolutionStep {
+				capture := input.Subjects()[0].CaptureAuthorization
+				denied := collaborationSourceAuthorization(t, capture.CaptureScope,
+					collaborationVisibility(t, recordauth.VisibilityKindRestricted, nil), recordauth.SourceStateLive)
+				return watchSubjectResolutionStep{resolved: watchResolvedSubject(t, input, denied)}
+			},
+			wantErr: recordauth.ErrDenied,
+		},
+		{
+			name: "unavailable",
+			step: func(*testing.T, records.CompleteRevisionInput) watchSubjectResolutionStep {
+				return watchSubjectResolutionStep{err: ErrRecordSubjectUnavailable}
+			},
+			wantErr: ErrRecordSubjectUnavailable,
+		},
+	} {
+		for _, operation := range []string{"write", "read", "replay"} {
+			t.Run(failure.name+"/"+operation, func(t *testing.T) {
+				ctx := context.Background()
+				fixture := newRecordsPostgresFixture(t, ctx)
+				seedCollaborationRevisionUsers(t, ctx, fixture)
+				input := collaborationRevisionInput(t, collaborationRevisionInputValues{})
+				runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-watch-auth-"+failure.name+"-"+operation, 2)
+				parent, err := newRecordsPostgresRepository(t, runtimePool).CommitRevision(ctx, recordsPostgresRevisionCommand(
+					t, recordplatform.OperationKindRecordCreate, "rec_pgwatchauth"+failure.name+operation, "", 0, 0,
+					input, "watch-auth-parent-"+failure.name+"-"+operation,
+				))
+				if err != nil {
+					t.Fatalf("CommitRevision(parent) error = %v", err)
+				}
+				allowed := watchSubjectResolutionStep{resolved: watchResolvedSubject(t, input, input.Subjects()[0].CaptureAuthorization)}
+				steps := []watchSubjectResolutionStep{allowed, failure.step(t, input)}
+				if operation == "replay" {
+					steps = []watchSubjectResolutionStep{allowed, allowed, allowed, failure.step(t, input)}
+				}
+				resolver := &sequencedWatchSubjectResolver{steps: steps}
+				authorizations := newPostgresCurrentRecordAuthorizationSource(runtimePool, resolver, allowRecordPlatformAdmissionGate)
+				repository := NewPostgresRecordWatchRepository(
+					runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(), authorizations,
+				)
+				service, err := recordcollaboration.NewWatchService(authorizations, repository)
+				if err != nil {
+					t.Fatalf("NewWatchService() error = %v", err)
+				}
+				actor := collaborationActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", nil)
+				setRequest := recordcollaboration.WatchSetRequest{
+					Actor: actor, RecordID: parent.RecordID, ExpectedVersion: 0,
+					Preference: recordcollaboration.FollowerPreferenceWatching, IdempotencyKey: "watch-auth-" + failure.name + "-" + operation,
+					IdempotencyOwnerID: "record_watches_api", OwnerLeaseDuration: time.Minute, IdempotencyTTL: 24 * time.Hour,
+				}
+				if operation == "replay" {
+					if seeded, err := service.SetWatch(ctx, setRequest); err != nil || seeded.Version != 1 {
+						t.Fatalf("seed SetWatch() = (%#v, %v)", seeded, err)
+					}
+				}
+				var operationErr error
+				switch operation {
+				case "read":
+					_, operationErr = service.GetWatch(ctx, recordcollaboration.WatchReadRequest{Actor: actor, RecordID: parent.RecordID})
+				default:
+					_, operationErr = service.SetWatch(ctx, setRequest)
+				}
+				if !errors.Is(operationErr, failure.wantErr) {
+					t.Fatalf("%s authorization race error = %v, want %v", operation, operationErr, failure.wantErr)
+				}
+				wantCalls := 2
+				wantRows, wantKeys := 0, 0
+				if operation == "replay" {
+					wantCalls, wantRows, wantKeys = 4, 1, 1
+				}
+				if resolver.calls != wantCalls {
+					t.Fatalf("%s resolver calls = %d, want outside+inside %d", operation, resolver.calls, wantCalls)
+				}
+				assertPostgresWatchRowAndKeyCounts(t, ctx, fixture, parent.RecordID, setRequest.IdempotencyKey, wantRows, wantKeys)
+			})
+		}
+	}
+}
+
+func TestPostgresIntegrationRecordWatchActorMembershipDenialIsOpaque(t *testing.T) {
+	for _, membership := range []string{"missing", "demoted"} {
+		for _, operation := range []string{"write", "read"} {
+			t.Run(membership+"/"+operation, func(t *testing.T) {
+				ctx := context.Background()
+				fixture := newRecordsPostgresFixture(t, ctx)
+				seedCollaborationRevisionUsers(t, ctx, fixture)
+				parent := seedPostgresActionParent(t, ctx, fixture,
+					"rec_pgwatchmember"+membership+operation, "watch-member-parent-"+membership+"-"+operation)
+				runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-watch-member-"+membership+"-"+operation, 2)
+				repository := NewPostgresRecordWatchRepository(
+					runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+					newPostgresWatchAuthorizationSource(t, runtimePool),
+				)
+				actor := collaborationActor(t, "usr_aaaaaaaaaaaaaaaaaaaaaaaa", nil)
+				if membership == "missing" {
+					actor = collaborationActor(t, "usr_eeeeeeeeeeeeeeeeeeeeeeee", nil)
+				} else if _, err := fixture.db.Exec(ctx, `update public.users set role = 'viewer' where user_id = $1`, actor.UserID); err != nil {
+					t.Fatalf("demote collaboration actor: %v", err)
+				}
+				key := "watch-member-" + membership + "-" + operation
+				var operationErr error
+				if operation == "write" {
+					command := postgresWatchCommand(t, parent, 0, recordcollaboration.FollowerPreferenceWatching, key, 0x3a)
+					command.Actor = actor
+					_, operationErr = repository.SetWatch(ctx, command)
+				} else {
+					command := postgresWatchReadCommand(t, parent)
+					command.Actor = actor
+					_, operationErr = repository.GetWatch(ctx, command)
+				}
+				if !errors.Is(operationErr, recordauth.ErrDenied) || errors.Is(operationErr, recordcollaboration.ErrMembershipDenied) {
+					t.Fatalf("%s %s actor error = %v, want opaque recordauth.ErrDenied", membership, operation, operationErr)
+				}
+				assertPostgresWatchRowAndKeyCounts(t, ctx, fixture, parent.RecordID, key, 0, 0)
+			})
+		}
+	}
+}
+
 func TestPostgresIntegrationRecordWatchConcurrentSameCASHasOneWinner(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
 	seedCollaborationRevisionUsers(t, ctx, fixture)
 	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgwatchrace", "watch-race-parent")
+	seedPool := fixture.openDirectRuntimePool(t, ctx, "record-watch-race-seed", 1)
 	seedRepository := NewPostgresRecordWatchRepository(
-		fixture.openDirectRuntimePool(t, ctx, "record-watch-race-seed", 1),
-		allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+		seedPool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+		newPostgresWatchAuthorizationSource(t, seedPool),
 	)
 	seed := postgresWatchCommand(t, parent, 0, recordcollaboration.FollowerPreferenceWatching, "watch-race-seed", 0x31)
 	if _, err := seedRepository.SetWatch(ctx, seed); err != nil {
@@ -175,8 +365,8 @@ func TestPostgresIntegrationRecordWatchConcurrentSameCASHasOneWinner(t *testing.
 		}
 		workerPIDs = append(workerPIDs, pid)
 		repositories = append(repositories, NewPostgresRecordWatchRepository(
-			pool,
-			allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+			pool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+			newPostgresWatchAuthorizationSource(t, pool),
 		))
 	}
 	raceCtx, cancelRace := context.WithTimeout(ctx, 10*time.Second)
@@ -223,6 +413,58 @@ func TestPostgresIntegrationRecordWatchConcurrentSameCASHasOneWinner(t *testing.
 	if version != 2 || keyCount != 1 {
 		t.Fatalf("concurrent durable version/keys = %d/%d, want 2/1", version, keyCount)
 	}
+}
+
+type watchSubjectResolutionStep struct {
+	resolved records.ResolvedSubject
+	err      error
+}
+
+type sequencedWatchSubjectResolver struct {
+	steps []watchSubjectResolutionStep
+	calls int
+}
+
+func (resolver *sequencedWatchSubjectResolver) Resolve(
+	_ context.Context,
+	_ recordauth.ActorScope,
+	_ RecordSubjectReadInput,
+) (records.ResolvedSubject, error) {
+	resolver.calls++
+	if resolver.calls > len(resolver.steps) {
+		return records.ResolvedSubject{}, ErrRecordSubjectUnavailable
+	}
+	step := resolver.steps[resolver.calls-1]
+	return step.resolved, step.err
+}
+
+func watchResolvedSubject(t *testing.T, input records.CompleteRevisionInput, authorization recordauth.SourceAuthorization) records.ResolvedSubject {
+	t.Helper()
+	subject := input.Subjects()[0]
+	identity, err := records.NewSubjectIdentitySnapshot(subject.Kind, subject.IdentitySnapshot)
+	if err != nil {
+		t.Fatalf("NewSubjectIdentitySnapshot() error = %v", err)
+	}
+	return records.ResolvedSubject{
+		ProjectID: recordauth.ProjectIDDefault, StableID: subject.SourceID,
+		IdentitySnapshot: identity, LiveRoute: "/vps/" + subject.SourceID,
+		CaptureAuthorization: authorization,
+	}
+}
+
+func newPostgresWatchAuthorizationSource(t *testing.T, pool *pgxpool.Pool) *PostgresCurrentRecordAuthorizationSource {
+	t.Helper()
+	_, evidence := storeActionAuthorization(t)
+	identity, err := records.NewSubjectIdentitySnapshot(records.SubjectKindVPS, map[string]string{"display_name": "VPS"})
+	if err != nil {
+		t.Fatalf("NewSubjectIdentitySnapshot() error = %v", err)
+	}
+	resolver := &fakeCurrentRecordSubjectResolver{resolved: records.ResolvedSubject{
+		ProjectID: recordauth.ProjectIDDefault, StableID: testStoreRecordVPSID,
+		IdentitySnapshot: identity, LiveRoute: "/vps/" + testStoreRecordVPSID,
+		CaptureAuthorization: evidence.Sources[0],
+	}}
+	return newPostgresCurrentRecordAuthorizationSource(pool, resolver, allowRecordPlatformAdmissionGate)
 }
 
 func postgresWatchCommand(t *testing.T, parent records.RevisionCommitResult, expected uint64, preference recordcollaboration.FollowerPreference, key string, fingerprintByte byte) recordcollaboration.WatchCommand {

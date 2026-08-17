@@ -157,7 +157,7 @@ func (repository *PostgresRecordNotificationRepository) loadCurrentNotificationR
 		if err != nil {
 			return recordcollaboration.NotificationEventFacts{}, nil, err
 		}
-		current, err := repository.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, facts.RecordID)
+		current, err := repository.authorization.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, facts.RecordID)
 		if err != nil {
 			return recordcollaboration.NotificationEventFacts{}, nil, err
 		}
@@ -280,7 +280,7 @@ func scheduleExternalNotificationDelivery(
 	return nil
 }
 
-func (repository *PostgresRecordNotificationRepository) resolveCurrentAuthorizationInTransaction(ctx context.Context, tx pgx.Tx, actor recordauth.ActorScope, recordID string) (records.CurrentRecordAuthorization, error) {
+func (source *PostgresCurrentRecordAuthorizationSource) resolveCurrentAuthorizationInTransaction(ctx context.Context, tx pgx.Tx, actor recordauth.ActorScope, recordID string) (records.CurrentRecordAuthorization, error) {
 	loader := &PostgresCurrentRecordAuthorizationSource{db: tx}
 	snapshot, err := loader.loadCurrentRecordAuthorizationSnapshot(ctx, recordID)
 	if err != nil {
@@ -290,7 +290,7 @@ func (repository *PostgresRecordNotificationRepository) resolveCurrentAuthorizat
 	if err != nil {
 		return records.CurrentRecordAuthorization{}, err
 	}
-	sources, err := repository.authorization.resolveRecordAuthorizationSubjects(ctx, actor, normalized.projectID, normalized.subjects)
+	sources, err := source.resolveRecordAuthorizationSubjects(ctx, actor, normalized.projectID, normalized.subjects)
 	if err != nil {
 		return records.CurrentRecordAuthorization{}, err
 	}
@@ -969,7 +969,7 @@ func (repository *PostgresRecordNotificationRepository) loadInboxRecordAuthoriza
 		access.err = err
 		return access
 	}
-	current, err := repository.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, recordID)
+	current, err := repository.authorization.resolveCurrentAuthorizationInTransaction(ctx, tx, actor, recordID)
 	if err != nil {
 		access.err = err
 		return access

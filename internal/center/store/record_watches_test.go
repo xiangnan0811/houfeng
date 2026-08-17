@@ -10,7 +10,7 @@ import (
 )
 
 func TestPostgresRecordWatchRepositoryFailsClosedWithoutAdmission(t *testing.T) {
-	repository := NewPostgresRecordWatchRepository(nil, nil, NewPostgresCollaborationMembershipReader())
+	repository := NewPostgresRecordWatchRepository(nil, nil, NewPostgresCollaborationMembershipReader(), nil)
 	if repository == nil {
 		t.Fatal("NewPostgresRecordWatchRepository() = nil")
 	}

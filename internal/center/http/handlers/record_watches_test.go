@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/http/sessionctx"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordcollaboration"
 )
 
@@ -87,8 +89,44 @@ func TestRecordWatchesHandlerRequiresExactPatchContract(t *testing.T) {
 	}
 }
 
+func TestRecordWatchesHandlerMapsActorMembershipDenialToOpaqueNotFound(t *testing.T) {
+	actor := testRecordActionActor(t)
+	for _, method := range []string{http.MethodGet, http.MethodPatch} {
+		t.Run(method, func(t *testing.T) {
+			application := &recordWatchHandlerStub{err: fmt.Errorf("member denied: %w", recordauth.ErrDenied)}
+			var body *strings.Reader
+			if method == http.MethodPatch {
+				body = strings.NewReader(`{"preference":"watching"}`)
+			} else {
+				body = strings.NewReader("")
+			}
+			request := httptest.NewRequest(method, "/api/records/rec_watchparent1/watch", body)
+			if method == http.MethodPatch {
+				request.Header.Set("Idempotency-Key", "watch-member-denied")
+				request.Header.Set("If-Match", `"0"`)
+			}
+			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+			recorder := httptest.NewRecorder()
+			RecordWatches(application).ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusNotFound || recorder.Header().Get("Cache-Control") != recordPrivateCacheControl {
+				t.Fatalf("status/headers = %d %#v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
+			}
+			if strings.Contains(recorder.Body.String(), "member") || strings.Contains(recorder.Body.String(), actor.UserID) {
+				t.Fatalf("opaque response leaked membership identity: %s", recorder.Body.String())
+			}
+			if method == http.MethodPatch && application.setCalls != 1 {
+				t.Fatalf("set calls = %d, want 1", application.setCalls)
+			}
+			if method == http.MethodGet && application.getCalls != 1 {
+				t.Fatalf("get calls = %d, want 1", application.getCalls)
+			}
+		})
+	}
+}
+
 type recordWatchHandlerStub struct {
 	result   recordcollaboration.WatchStatus
+	err      error
 	set      recordcollaboration.WatchSetApplicationRequest
 	get      recordcollaboration.WatchReadApplicationRequest
 	setCalls int
@@ -98,11 +136,11 @@ type recordWatchHandlerStub struct {
 func (stub *recordWatchHandlerStub) SetWatch(_ context.Context, request recordcollaboration.WatchSetApplicationRequest) (recordcollaboration.WatchStatus, error) {
 	stub.setCalls++
 	stub.set = request
-	return stub.result, nil
+	return stub.result, stub.err
 }
 
 func (stub *recordWatchHandlerStub) GetWatch(_ context.Context, request recordcollaboration.WatchReadApplicationRequest) (recordcollaboration.WatchStatus, error) {
 	stub.getCalls++
 	stub.get = request
-	return stub.result, nil
+	return stub.result, stub.err
 }

@@ -871,7 +871,7 @@ func TestBootstrapWiresRecordWatchesInboxAndProjectionThroughSharedFailClosedDep
 	}
 	text := string(source)
 	for _, required := range []string{
-		"store.NewPostgresRecordWatchRepository(pool, effectiveGate, collaborationMembers)",
+		"store.NewPostgresRecordWatchRepository(pool, effectiveGate, collaborationMembers, authorizations)",
 		"recordcollaboration.NewWatchService(authorizations, watchRepository)",
 		"handlers.RecordWatches(watchApplication)",
 		"store.NewPostgresRecordNotificationRepository(",
