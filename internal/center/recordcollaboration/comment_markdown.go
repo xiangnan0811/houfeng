@@ -56,6 +56,56 @@ type CommentRenderNode struct {
 	Items    [][]CommentRenderNode `json:"items,omitempty"`
 }
 
+func (node *CommentRenderNode) UnmarshalJSON(raw []byte) error {
+	var fields map[string]json.RawMessage
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if err := decoder.Decode(&fields); err != nil || fields == nil || ensureCommentJSONEOF(decoder) != nil {
+		return ErrInvalidCommentMarkdown
+	}
+	var nodeType string
+	if err := json.Unmarshal(fields["type"], &nodeType); err != nil || !commentRenderNodeHasExactKeys(fields, nodeType) {
+		return ErrInvalidCommentMarkdown
+	}
+	type commentRenderNodeWire CommentRenderNode
+	var decoded commentRenderNodeWire
+	decoder = json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil || ensureCommentJSONEOF(decoder) != nil {
+		return ErrInvalidCommentMarkdown
+	}
+	*node = CommentRenderNode(decoded)
+	return nil
+}
+
+func commentRenderNodeHasExactKeys(fields map[string]json.RawMessage, nodeType string) bool {
+	var expected []string
+	switch nodeType {
+	case CommentRenderNodeParagraph, CommentRenderNodeEmphasis, CommentRenderNodeStrong, CommentRenderNodeStrikethrough:
+		expected = []string{"children", "type"}
+	case CommentRenderNodeText, CommentRenderNodeInlineCode, CommentRenderNodeFencedCode:
+		expected = []string{"text", "type"}
+	case CommentRenderNodeLineBreak:
+		expected = []string{"type"}
+	case CommentRenderNodeOrderedList:
+		expected = []string{"items", "start", "type"}
+	case CommentRenderNodeUnorderedList:
+		expected = []string{"items", "type"}
+	case CommentRenderNodeLink:
+		expected = []string{"children", "href", "type"}
+	default:
+		return false
+	}
+	if len(fields) != len(expected) {
+		return false
+	}
+	for _, key := range expected {
+		if _, ok := fields[key]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func (model CommentRenderModel) Validate() error {
 	if model.Version != CommentRenderContractVersionV1 || len(model.Nodes) == 0 {
 		return ErrInvalidCommentMarkdown
@@ -131,11 +181,14 @@ func hasUnsafeCommentControl(source string) bool {
 var (
 	commentFencePattern       = regexp.MustCompile(`^(` + "`{3,}" + `|~{3,})([A-Za-z0-9_+.-]{0,32})[ \t]*$`)
 	commentOrderedItemPattern = regexp.MustCompile(`^([1-9][0-9]{0,8})\. (.*)$`)
-	commentTableRulePattern   = regexp.MustCompile(`^[ \t]*:?-{3,}:?[ \t]*(\|[ \t]*:?-{3,}:?[ \t]*)+$`)
+	commentTableRulePattern   = regexp.MustCompile(`^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$`)
 	commentHeadingPattern     = regexp.MustCompile(`^[ \t]{0,3}#{1,6}([ \t]+|$)`)
 	commentTaskItemPattern    = regexp.MustCompile(`^[ \t]{0,3}[-+*] \[[ xX]\]([ \t]+|$)`)
+	commentOrderedTaskPattern = regexp.MustCompile(`^[ \t]{0,3}[1-9][0-9]{0,8}\. \[[ xX]\]([ \t]+|$)`)
+	commentSetextPattern      = regexp.MustCompile(`^[ \t]{0,3}=+[ \t]*$`)
 	commentFootnotePattern    = regexp.MustCompile(`(^|[^\\])\[\^[^]]+\]`)
 	commentRawHTMLPattern     = regexp.MustCompile(`(?i)<[/!?]?[a-z][^>]*>`)
+	commentHTMLCommentPattern = regexp.MustCompile(`<!--|-->`)
 )
 
 type commentMarkdownParser struct {
@@ -303,9 +356,11 @@ func isCommentBlockStart(line string) bool {
 func validateCommentBlockLine(line string) error {
 	trimmed := strings.TrimSpace(line)
 	lower := strings.ToLower(line)
-	if commentHeadingPattern.MatchString(line) || commentTaskItemPattern.MatchString(line) ||
+	if commentHeadingPattern.MatchString(line) || commentTaskItemPattern.MatchString(line) || commentOrderedTaskPattern.MatchString(line) ||
+		commentSetextPattern.MatchString(line) ||
 		commentTableRulePattern.MatchString(line) || commentFootnotePattern.MatchString(line) ||
-		commentRawHTMLPattern.MatchString(line) || strings.HasPrefix(strings.TrimLeft(line, " \t"), ">") ||
+		commentRawHTMLPattern.MatchString(line) || commentHTMLCommentPattern.MatchString(line) ||
+		strings.HasPrefix(strings.TrimLeft(line, " \t"), ">") ||
 		trimmed == "---" || trimmed == "***" || trimmed == "___" ||
 		strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t") ||
 		strings.Contains(lower, "[[attachment:") || strings.Contains(lower, "[[evidence:") ||
@@ -477,10 +532,23 @@ func validateCanonicalCommentLink(href string) error {
 		parsed.Host == "" || parsed.Hostname() == "" || parsed.Host != strings.ToLower(parsed.Host) || parsed.String() != href {
 		return ErrInvalidCommentMarkdown
 	}
+	if hasCommentDotPathSegment(parsed.EscapedPath()) {
+		return ErrInvalidCommentMarkdown
+	}
 	if (parsed.Scheme == "http" && parsed.Port() == "80") || (parsed.Scheme == "https" && parsed.Port() == "443") {
 		return ErrInvalidCommentMarkdown
 	}
 	return nil
+}
+
+func hasCommentDotPathSegment(escapedPath string) bool {
+	for _, segment := range strings.Split(escapedPath, "/") {
+		normalized := strings.ReplaceAll(segment, "%2E", ".")
+		if normalized == "." || normalized == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func isUpperHexPair(first, second byte) bool {

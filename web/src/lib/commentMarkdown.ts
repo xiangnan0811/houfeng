@@ -168,6 +168,7 @@ function expectCanonicalHTTPLink(value: unknown): string {
   const suffix = authorityMatch[3]
   if (authority === undefined || scheme === undefined || suffix === undefined || authority.includes('@') || authority !== authority.toLowerCase()) invalid()
   if ((scheme === 'http' && hasPort(authority, '80')) || (scheme === 'https' && hasPort(authority, '443'))) invalid()
+  if (hasDotPathSegment(suffix)) invalid()
   let parsed: URL
   try {
     parsed = new URL(href)
@@ -180,6 +181,14 @@ function expectCanonicalHTTPLink(value: unknown): string {
     : href
   if (parsed.href !== browserCanonical) invalid()
   return href
+}
+
+function hasDotPathSegment(suffix: string): boolean {
+  const path = suffix.split(/[?#]/u, 1)[0] ?? ''
+  return path.split('/').some((segment) => {
+    const normalized = segment.replaceAll('%2E', '.')
+    return normalized === '.' || normalized === '..'
+  })
 }
 
 function hasPort(authority: string, port: string): boolean {

@@ -94,10 +94,14 @@
     },
     {"name": "empty", "source": "", "valid": false},
     {"name": "raw html", "source": "before <script>alert(1)</script>", "valid": false},
+    {"name": "html comment", "source": "<!-- hidden -->", "valid": false},
     {"name": "image", "source": "![secret](https://example.com/a.png)", "valid": false},
     {"name": "heading", "source": "# document heading", "valid": false},
+    {"name": "setext heading", "source": "Heading\n===", "valid": false},
     {"name": "table", "source": "a | b\n--- | ---\n1 | 2", "valid": false},
+    {"name": "leading pipe table", "source": "a | b\n| --- | --- |\n1 | 2", "valid": false},
     {"name": "task list", "source": "- [x] execute", "valid": false},
+    {"name": "ordered task list", "source": "1. [x] execute", "valid": false},
     {"name": "footnote", "source": "note[^1]\n\n[^1]: hidden", "valid": false},
     {"name": "blockquote", "source": "> quoted", "valid": false},
     {"name": "thematic break", "source": "---", "valid": false},
@@ -106,6 +110,7 @@
     {"name": "relative link", "source": "[run](/relative)", "valid": false},
     {"name": "link userinfo", "source": "[run](https://user:pass@example.com/path)", "valid": false},
     {"name": "noncanonical uppercase host", "source": "[run](https://EXAMPLE.com/path)", "valid": false},
+    {"name": "noncanonical dot segment", "source": "[run](https://example.com/a/../b)", "valid": false},
     {"name": "attachment reference", "source": "[[attachment:att_01]]", "valid": false},
     {"name": "evidence reference", "source": "[[evidence:ev_01]]", "valid": false},
     {"name": "invalid utf8", "source_base64": "/w==", "valid": false},
@@ -151,6 +156,14 @@
     {
       "name": "noncanonical link host",
       "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://EXAMPLE.com/path","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "noncanonical link dot segment",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"https://example.com/a/../b","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "line break disallowed text key",
+      "model": {"version":"comment_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"line_break","text":""}]}]}
     },
     {
       "name": "arbitrary object fallback",
