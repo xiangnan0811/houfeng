@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -40,11 +41,11 @@ func (provider *PostgresRecordCollaborationProvider) ReadCollaborationActivityFa
 		from public.record_domain_activities
 		where project_id = $1 and record_id = $2
 		  and event_kind = any($3::text[])
-		order by event_at, activity_id`, binding.ProjectID(), binding.RecordID(), collaborationActivityFactKinds())
+		order by event_at, activity_id
+		limit $4`, binding.ProjectID(), binding.RecordID(), collaborationActivityFactKinds(), recordcollaboration.MaxCollaborationActivityFacts+1)
 	if err != nil {
 		return nil, fmt.Errorf("query collaboration activity facts: %w", err)
 	}
-	defer rows.Close()
 	facts := make([]recordcollaboration.ActivityFact, 0)
 	for rows.Next() {
 		var fact recordcollaboration.ActivityFact
@@ -53,7 +54,8 @@ func (provider *PostgresRecordCollaborationProvider) ReadCollaborationActivityFa
 			&fact.ActivityID, &fact.RecordID, &fact.RevisionID, &fact.Kind,
 			&fact.SourceEventID, &sourceVersion, &fact.ActorID, &authorizationEpoch,
 			&lockVersion, &fact.EventAt,
-		); err != nil || sourceVersion <= 0 || authorizationEpoch < 0 || lockVersion <= 0 {
+		); err != nil || sourceVersion <= 0 || authorizationEpoch <= 0 || lockVersion <= 0 {
+			rows.Close()
 			return nil, recordcollaboration.ErrInvalidActivityFact
 		}
 		fact.SourceVersion = uint64(sourceVersion)
@@ -61,14 +63,126 @@ func (provider *PostgresRecordCollaborationProvider) ReadCollaborationActivityFa
 		fact.RecordLockVersion = uint64(lockVersion)
 		fact.EventAt = fact.EventAt.UTC()
 		if fact.Validate() != nil {
+			rows.Close()
 			return nil, recordcollaboration.ErrInvalidActivityFact
 		}
 		facts = append(facts, fact)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return nil, fmt.Errorf("iterate collaboration activity facts: %w", err)
 	}
+	rows.Close()
+	for _, fact := range facts {
+		if err := validatePersistedCollaborationActivityFact(ctx, tx, fact); err != nil {
+			return nil, err
+		}
+	}
 	return facts, nil
+}
+
+func validatePersistedCollaborationActivityFact(ctx context.Context, tx pgx.Tx, fact recordcollaboration.ActivityFact) error {
+	switch fact.Kind {
+	case recordcollaboration.ActivityFactRecordOwnerChanged,
+		recordcollaboration.ActivityFactRecordParticipantChanged,
+		recordcollaboration.ActivityFactRecordFollowUpChanged:
+		var version int64
+		var actor string
+		var occurredAt time.Time
+		err := tx.QueryRow(ctx, `
+			select revision_no, author_id, created_at
+			from public.record_revisions
+			where record_id = $1 and revision_id = $2`, fact.RecordID, fact.RevisionID,
+		).Scan(&version, &actor, &occurredAt)
+		if err != nil {
+			return invalidCollaborationActivitySource(err)
+		}
+		if version != int64(fact.SourceVersion) || actor != fact.ActorID || !occurredAt.Equal(fact.EventAt) ||
+			collaborationRevisionActivityID(fact.RevisionID, recordcollaboration.RevisionActivityKind(fact.Kind)) != fact.ActivityID {
+			return recordcollaboration.ErrInvalidActivityFact
+		}
+	case recordcollaboration.ActivityFactActionCreated, recordcollaboration.ActivityFactActionUpdated,
+		recordcollaboration.ActivityFactActionCompleted, recordcollaboration.ActivityFactActionCancelled,
+		recordcollaboration.ActivityFactActionReopened:
+		var version int64
+		var kind, actor string
+		var occurredAt time.Time
+		err := tx.QueryRow(ctx, `
+			select action_version, event_kind, actor_id, occurred_at
+			from public.record_action_events
+			where record_id = $1 and action_event_id = $2`, fact.RecordID, fact.SourceEventID,
+		).Scan(&version, &kind, &actor, &occurredAt)
+		if err != nil {
+			return invalidCollaborationActivitySource(err)
+		}
+		if version != int64(fact.SourceVersion) || actor != fact.ActorID || !occurredAt.Equal(fact.EventAt) ||
+			recordActionActivityID(fact.SourceEventID) != fact.ActivityID || actionActivityFactKind(kind) != fact.Kind {
+			return recordcollaboration.ErrInvalidActivityFact
+		}
+	case recordcollaboration.ActivityFactCommentCreated, recordcollaboration.ActivityFactCommentEdited:
+		var version int64
+		var actor string
+		var occurredAt time.Time
+		err := tx.QueryRow(ctx, `
+			select comment_version, edited_by, created_at
+			from public.record_comment_revisions
+			where record_id = $1 and comment_revision_id = $2`, fact.RecordID, fact.SourceEventID,
+		).Scan(&version, &actor, &occurredAt)
+		if err != nil {
+			return invalidCollaborationActivitySource(err)
+		}
+		kind := recordcollaboration.ActivityFactCommentEdited
+		if version == 1 {
+			kind = recordcollaboration.ActivityFactCommentCreated
+		}
+		if version != int64(fact.SourceVersion) || actor != fact.ActorID || !occurredAt.Equal(fact.EventAt) ||
+			recordCommentActivityID(fact.SourceEventID) != fact.ActivityID || kind != fact.Kind {
+			return recordcollaboration.ErrInvalidActivityFact
+		}
+	case recordcollaboration.ActivityFactCommentRedacted:
+		var version int64
+		var actor string
+		var occurredAt time.Time
+		err := tx.QueryRow(ctx, `
+			select tombstone_version, deleted_by, deleted_at
+			from public.record_comment_tombstones
+			where record_id = $1 and tombstone_id = $2`, fact.RecordID, fact.SourceEventID,
+		).Scan(&version, &actor, &occurredAt)
+		if err != nil {
+			return invalidCollaborationActivitySource(err)
+		}
+		if version != int64(fact.SourceVersion) || actor != fact.ActorID || !occurredAt.Equal(fact.EventAt) ||
+			recordCommentActivityID(fact.SourceEventID) != fact.ActivityID {
+			return recordcollaboration.ErrInvalidActivityFact
+		}
+	default:
+		return recordcollaboration.ErrInvalidActivityFact
+	}
+	return nil
+}
+
+func invalidCollaborationActivitySource(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return recordcollaboration.ErrInvalidActivityFact
+	}
+	return fmt.Errorf("read collaboration activity source: %w", err)
+}
+
+func actionActivityFactKind(kind string) recordcollaboration.ActivityFactKind {
+	switch recordcollaboration.ActionMutationKind(kind) {
+	case recordcollaboration.ActionMutationCreate:
+		return recordcollaboration.ActivityFactActionCreated
+	case recordcollaboration.ActionMutationUpdate:
+		return recordcollaboration.ActivityFactActionUpdated
+	case recordcollaboration.ActionMutationComplete:
+		return recordcollaboration.ActivityFactActionCompleted
+	case recordcollaboration.ActionMutationCancel:
+		return recordcollaboration.ActivityFactActionCancelled
+	case recordcollaboration.ActionMutationReopen:
+		return recordcollaboration.ActivityFactActionReopened
+	default:
+		return ""
+	}
 }
 
 func (provider *PostgresRecordCollaborationProvider) BackupCollaboration(
@@ -110,6 +224,9 @@ func (provider *PostgresRecordCollaborationProvider) RestoreCollaboration(
 	if provider == nil || ctx == nil || nilCollaborationDependency(tx) || binding.Validate() != nil || snapshot.Validate() != nil {
 		return recordcollaboration.ErrInvalidPortabilityAdapter
 	}
+	if len(snapshot.NotificationAudits) != 0 {
+		return recordcollaboration.ErrInvalidPortabilitySnapshot
+	}
 	if err := assertCollaborationProviderBinding(ctx, tx, binding); err != nil {
 		return err
 	}
@@ -125,17 +242,11 @@ func (provider *PostgresRecordCollaborationProvider) RestoreCollaboration(
 	if err := restorePortableFollowers(ctx, tx, binding, snapshot); err != nil {
 		return err
 	}
-	// NotificationAudits are disclosure-only counts. Replaying them into the
-	// live inbox/delivery tables would recreate recipients, scoped binding IDs,
-	// or sendable work that the typed backup intentionally does not contain.
 	restored, err := provider.BackupCollaboration(ctx, tx, binding)
 	if err != nil {
 		return err
 	}
-	want := snapshot.Clone()
-	want.NotificationAudits = make([]recordcollaboration.PortableNotificationAudit, 0)
-	restored.NotificationAudits = make([]recordcollaboration.PortableNotificationAudit, 0)
-	if !reflect.DeepEqual(restored, want) {
+	if !reflect.DeepEqual(restored, snapshot) {
 		return recordcollaboration.ErrInvalidPortabilitySnapshot
 	}
 	return nil
@@ -232,7 +343,7 @@ func backupPortableActions(
 		       completed_at, created_by, updated_by, created_at, updated_at
 		from public.record_actions
 		where project_id = $1 and record_id = $2 and record_fence_epoch = $3
-		order by action_id`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()))
+		order by action_id limit $4`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()), recordcollaboration.MaxCollaborationPortabilityRowsPerSurface+1)
 	if err != nil {
 		return fmt.Errorf("query collaboration backup actions: %w", err)
 	}
@@ -263,7 +374,7 @@ func backupPortableActions(
 		       occurred_at, created_at
 		from public.record_action_events
 		where project_id = $1 and record_id = $2 and record_fence_epoch = $3
-		order by action_event_id`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()))
+		order by action_event_id limit $4`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()), recordcollaboration.MaxCollaborationPortabilityRowsPerSurface+1)
 	if err != nil {
 		return fmt.Errorf("query collaboration backup action events: %w", err)
 	}
@@ -305,7 +416,7 @@ func backupPortableComments(
 		       created_at, updated_at, redacted_at
 		from public.record_comments
 		where project_id = $1 and record_id = $2 and record_fence_epoch = $3
-		order by comment_id`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()))
+		order by comment_id limit $4`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()), recordcollaboration.MaxCollaborationPortabilityRowsPerSurface+1)
 	if err != nil {
 		return fmt.Errorf("query collaboration backup comments: %w", err)
 	}
@@ -339,7 +450,7 @@ func backupPortableComments(
 		       created_at, redacted_at
 		from public.record_comment_revisions
 		where project_id = $1 and record_id = $2 and record_fence_epoch = $3
-		order by comment_revision_id`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()))
+		order by comment_revision_id limit $4`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()), recordcollaboration.MaxCollaborationPortabilityRowsPerSurface+1)
 	if err != nil {
 		return fmt.Errorf("query collaboration backup comment revisions: %w", err)
 	}
@@ -380,7 +491,7 @@ func queryPortableTombstones(ctx context.Context, tx pgx.Tx, binding recordcolla
 		select tombstone_id, comment_id, tombstone_version, deleted_by, reason_code, deleted_at
 		from public.record_comment_tombstones
 		where record_id = $1 and record_fence_epoch = $2
-		order by tombstone_id`, binding.RecordID(), int64(binding.Epoch()))
+		order by tombstone_id limit $3`, binding.RecordID(), int64(binding.Epoch()), recordcollaboration.MaxCollaborationPortabilityRowsPerSurface+1)
 	if err != nil {
 		return fmt.Errorf("query collaboration backup tombstones: %w", err)
 	}
@@ -403,7 +514,7 @@ func queryPortableReplies(ctx context.Context, tx pgx.Tx, binding recordcollabor
 		select child_comment_id, parent_comment_id, created_at
 		from public.record_comment_replies
 		where record_id = $1 and record_fence_epoch = $2
-		order by child_comment_id`, binding.RecordID(), int64(binding.Epoch()))
+		order by child_comment_id limit $3`, binding.RecordID(), int64(binding.Epoch()), recordcollaboration.MaxCollaborationPortabilityRowsPerSurface+1)
 	if err != nil {
 		return fmt.Errorf("query collaboration backup replies: %w", err)
 	}
@@ -424,7 +535,7 @@ func queryPortableMentions(ctx context.Context, tx pgx.Tx, binding recordcollabo
 		select comment_id, comment_version, mentioned_user_id, created_at
 		from public.record_comment_mentions
 		where record_id = $1 and record_fence_epoch = $2
-		order by comment_id, comment_version, mentioned_user_id`, binding.RecordID(), int64(binding.Epoch()))
+		order by comment_id, comment_version, mentioned_user_id limit $3`, binding.RecordID(), int64(binding.Epoch()), recordcollaboration.MaxCollaborationPortabilityRowsPerSurface+1)
 	if err != nil {
 		return fmt.Errorf("query collaboration backup mentions: %w", err)
 	}
@@ -450,7 +561,7 @@ func backupPortableFollowersAndAudits(ctx context.Context, tx pgx.Tx, binding re
 		       created_at, updated_at
 		from public.record_followers
 		where project_id = $1 and record_id = $2 and record_fence_epoch = $3
-		order by user_id`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()))
+		order by user_id limit $4`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()), recordcollaboration.MaxCollaborationPortabilityRowsPerSurface+1)
 	if err != nil {
 		return fmt.Errorf("query collaboration backup followers: %w", err)
 	}
@@ -496,7 +607,7 @@ func backupPortableFollowersAndAudits(ctx context.Context, tx pgx.Tx, binding re
 		  and notification.record_fence_epoch = $3
 		group by notification.notification_id, notification.event_kind,
 		         notification.subject_kind, notification.source_version, notification.event_at
-		order by notification.notification_id`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()))
+		order by notification.notification_id limit $4`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()), recordcollaboration.MaxCollaborationPortabilityRowsPerSurface+1)
 	if err != nil {
 		return fmt.Errorf("query collaboration backup notification audits: %w", err)
 	}

@@ -3,6 +3,7 @@ package recordcollaboration
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"math"
 	"strings"
@@ -25,6 +26,10 @@ var (
 const (
 	CollaborationActivityContractVersionV1    uint64 = 1
 	CollaborationPortabilityContractVersionV1 uint64 = 1
+	MaxCollaborationActivityFacts                    = 4096
+	MaxCollaborationActivityFactBytes                = 4 * 1024 * 1024
+	MaxCollaborationPortabilityRowsPerSurface        = 4096
+	MaxCollaborationPortabilityBytes                 = 32 * 1024 * 1024
 )
 
 type ActivityFactKind string
@@ -61,7 +66,7 @@ func (fact ActivityFact) Validate() error {
 		(fact.RevisionID != "" && !validCollaborationRevisionIdentity(fact.RevisionID)) ||
 		!validActivityFactKind(fact.Kind) || !validPortableText(fact.SourceEventID, 256, false) ||
 		fact.SourceVersion == 0 || fact.SourceVersion > math.MaxInt64 ||
-		recordauth.ValidateActorUserID(fact.ActorID) != nil || fact.AuthorizationEpoch > math.MaxInt64 ||
+		recordauth.ValidateActorUserID(fact.ActorID) != nil || fact.AuthorizationEpoch == 0 || fact.AuthorizationEpoch > math.MaxInt64 ||
 		fact.RecordLockVersion == 0 || fact.RecordLockVersion > math.MaxInt64 ||
 		!portableTimeCanonical(fact.EventAt) {
 		return ErrInvalidActivityFact
@@ -107,12 +112,17 @@ func (provider *ActivityProvider) ListFacts(
 	if err != nil {
 		return nil, err
 	}
-	if facts == nil {
+	if facts == nil || len(facts) > MaxCollaborationActivityFacts {
 		return nil, ErrInvalidActivityFact
 	}
+	bytes := 0
 	for index, fact := range facts {
 		if fact.Validate() != nil || fact.RecordID != binding.RecordID() ||
 			(index > 0 && compareActivityFacts(facts[index-1], fact) >= 0) {
+			return nil, ErrInvalidActivityFact
+		}
+		bytes += len(fact.ActivityID) + len(fact.RecordID) + len(fact.RevisionID) + len(fact.Kind) + len(fact.SourceEventID) + len(fact.ActorID) + 64
+		if bytes > MaxCollaborationActivityFactBytes {
 			return nil, ErrInvalidActivityFact
 		}
 	}
@@ -248,6 +258,14 @@ func (snapshot PortabilitySnapshot) Validate() error {
 		snapshot.Mentions == nil || snapshot.Followers == nil || snapshot.NotificationAudits == nil {
 		return ErrInvalidPortabilitySnapshot
 	}
+	for _, rows := range []int{
+		len(snapshot.Actions), len(snapshot.ActionEvents), len(snapshot.Comments), len(snapshot.CommentRevisions),
+		len(snapshot.Tombstones), len(snapshot.Replies), len(snapshot.Mentions), len(snapshot.Followers), len(snapshot.NotificationAudits),
+	} {
+		if rows > MaxCollaborationPortabilityRowsPerSurface {
+			return ErrInvalidPortabilitySnapshot
+		}
+	}
 	for index, action := range snapshot.Actions {
 		if validatePortableAction(action) != nil || (index > 0 && snapshot.Actions[index-1].ActionID >= action.ActionID) {
 			return ErrInvalidPortabilitySnapshot
@@ -316,6 +334,10 @@ func (snapshot PortabilitySnapshot) Validate() error {
 			(index > 0 && snapshot.NotificationAudits[index-1].NotificationID >= audit.NotificationID) {
 			return ErrInvalidPortabilitySnapshot
 		}
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil || len(encoded) > MaxCollaborationPortabilityBytes {
+		return ErrInvalidPortabilitySnapshot
 	}
 	return nil
 }

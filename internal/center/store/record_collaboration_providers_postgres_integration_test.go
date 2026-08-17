@@ -94,6 +94,18 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 		len(snapshot.Tombstones) != 1 {
 		t.Fatalf("Backup() = %#v", snapshot)
 	}
+	withAudit := snapshot.Clone()
+	withAudit.NotificationAudits = append(withAudit.NotificationAudits, recordcollaboration.PortableNotificationAudit{
+		NotificationID: "rnt_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Kind:           recordcollaboration.NotificationEventActionCompleted, SubjectKind: recordcollaboration.NotificationSubjectAction,
+		SourceVersion: 1, EventAt: snapshot.Actions[0].UpdatedAt,
+	})
+	if err := portability.Restore(ctx, tx, binding, withAudit); !errors.Is(err, recordcollaboration.ErrInvalidPortabilitySnapshot) {
+		t.Fatalf("Restore(non-restorable disclosure audit) error = %v, want ErrInvalidPortabilitySnapshot", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit provider backup transaction: %v", err)
+	}
 
 	for _, statement := range []string{
 		`delete from public.record_comment_mentions where record_id = $1`,
@@ -105,10 +117,15 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 		`delete from public.record_actions where record_id = $1`,
 		`delete from public.record_followers where record_id = $1`,
 	} {
-		if _, err := tx.Exec(ctx, statement, parent.RecordID); err != nil {
+		if _, err := fixture.db.Exec(ctx, statement, parent.RecordID); err != nil {
 			t.Fatalf("clear restorable collaboration state: %v", err)
 		}
 	}
+	tx, err = runtimePool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin(restore) error = %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err := portability.Restore(ctx, tx, binding, snapshot); err != nil {
 		t.Fatalf("Restore() error = %v", err)
 	}
@@ -132,11 +149,12 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 	if _, err := portability.Backup(ctx, tx, binding); !errors.Is(err, recordcollaboration.ErrInvalidRecordFenceBinding) {
 		t.Fatalf("Backup(stale owned row) error = %v, want ErrInvalidRecordFenceBinding", err)
 	}
-	if _, err := tx.Exec(ctx, `
-		delete from public.record_followers
-		where record_id = $1 and user_id = 'usr_cccccccccccccccccccccccc'`, parent.RecordID,
-	); err != nil {
-		t.Fatalf("remove stale portability row: %v", err)
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("rollback stale portability row: %v", err)
+	}
+	tx, err = runtimePool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin(fence checks) error = %v", err)
 	}
 
 	stale, err := recordcollaboration.NewRecordFenceBinding(
@@ -188,6 +206,20 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 		t.Fatalf("seed live provider deletion fence: %v", err)
 	}
 	assertCollaborationProvidersDeletionReserved(t, ctx, activityProvider, portability, tx, binding, snapshot)
+	if _, err := tx.Exec(ctx, `delete from public.deletion_fence_leases where project_id = 'default' and object_kind = 'record' and object_id = $1`, parent.RecordID); err != nil {
+		t.Fatalf("remove live provider deletion fence: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into public.record_domain_activities (
+			activity_id, project_id, record_id, revision_id, event_kind, source_event_id,
+			source_version, actor_id, authorization_epoch, record_lock_version, event_at
+		) values ('rac_forgedprovider', 'default', $1, $2, 'action_created', 'raev_missingprovider',
+			1, 'usr_records1', 1, $3, transaction_timestamp())`, parent.RecordID, parent.RevisionID, int64(parent.LockVersion)); err != nil {
+		t.Fatalf("seed forged collaboration activity: %v", err)
+	}
+	if _, err := activityProvider.ListFacts(ctx, tx, binding); !errors.Is(err, recordcollaboration.ErrInvalidActivityFact) {
+		t.Fatalf("ListFacts(forged source) error = %v, want ErrInvalidActivityFact", err)
+	}
 }
 
 func assertCollaborationProvidersDeletionReserved(

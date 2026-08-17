@@ -124,6 +124,34 @@ func TestProvidersRejectTypedNilDependenciesTransactionsAndInvalidFacts(t *testi
 	if _, err := provider.ListFacts(context.Background(), &collaborationProviderTxStub{}, collaborationProviderTestBinding(t)); !errors.Is(err, ErrInvalidActivityFact) {
 		t.Fatalf("ListFacts(invalid fact) error = %v", err)
 	}
+	zeroAuthorization := ActivityFact{
+		ActivityID: "rac_zeroauth", RecordID: "rec_provider01", RevisionID: "rrv_provider01",
+		Kind: ActivityFactActionCompleted, SourceEventID: "raev_zeroauth", SourceVersion: 1,
+		ActorID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa", RecordLockVersion: 1,
+		EventAt: time.Date(2026, time.August, 17, 18, 0, 0, 0, time.UTC),
+	}
+	provider, _ = NewActivityProvider(&providerStoreStub{facts: []ActivityFact{zeroAuthorization}})
+	if _, err := provider.ListFacts(context.Background(), &collaborationProviderTxStub{}, collaborationProviderTestBinding(t)); !errors.Is(err, ErrInvalidActivityFact) {
+		t.Fatalf("ListFacts(zero authorization epoch) error = %v, want ErrInvalidActivityFact", err)
+	}
+	overLimit := make([]ActivityFact, MaxCollaborationActivityFacts+1)
+	provider, _ = NewActivityProvider(&providerStoreStub{facts: overLimit})
+	if _, err := provider.ListFacts(context.Background(), &collaborationProviderTxStub{}, collaborationProviderTestBinding(t)); !errors.Is(err, ErrInvalidActivityFact) {
+		t.Fatalf("ListFacts(over limit) error = %v, want ErrInvalidActivityFact", err)
+	}
+}
+
+func TestPortabilitySnapshotRejectsPerSurfaceOverflow(t *testing.T) {
+	t.Parallel()
+
+	tooMany := PortabilitySnapshot{
+		Actions: make([]PortableAction, MaxCollaborationPortabilityRowsPerSurface+1), ActionEvents: []PortableActionEvent{},
+		Comments: []PortableComment{}, CommentRevisions: []PortableCommentRevision{}, Tombstones: []PortableCommentTombstone{},
+		Replies: []PortableCommentReply{}, Mentions: []PortableCommentMention{}, Followers: []PortableFollower{}, NotificationAudits: []PortableNotificationAudit{},
+	}
+	if err := tooMany.Validate(); !errors.Is(err, ErrInvalidPortabilitySnapshot) {
+		t.Fatalf("Validate(per-surface overflow) error = %v, want ErrInvalidPortabilitySnapshot", err)
+	}
 }
 
 func TestPortableNotificationAuditHasContentFreeClosedSchema(t *testing.T) {
