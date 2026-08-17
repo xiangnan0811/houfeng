@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -55,6 +56,17 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 		t.Fatalf("Begin() error = %v", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		insert into public.record_notifications (
+			notification_id, record_id, event_kind, subject_kind, subject_id,
+			source_version, actor_id, authorization_epoch, record_fence_epoch,
+			event_at, details_delete_after
+		) values ('rnt_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', $1,
+			'action_completed', 'action', 'ract_providerroundtrip', 1, 'usr_records1',
+			$2, 0, transaction_timestamp(), transaction_timestamp() + interval '1 day')`,
+		parent.RecordID, int64(parent.AuthorizationEpoch)); err != nil {
+		t.Fatalf("seed portable notification audit: %v", err)
+	}
 	binding, err := recordcollaboration.NewRecordFenceBinding(
 		recordplatform.ProjectIDDefault, parent.RecordID, 0,
 	)
@@ -91,23 +103,19 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 		len(snapshot.Comments) != 1 || snapshot.Comments[0].State != recordcollaboration.CommentStateRedacted ||
 		snapshot.Comments[0].BodyMarkdown != "" || snapshot.Comments[0].BodyDigest != ([32]byte{}) ||
 		len(snapshot.CommentRevisions) != 1 || snapshot.CommentRevisions[0].BodyMarkdown != "" ||
-		len(snapshot.Tombstones) != 1 {
+		len(snapshot.Tombstones) != 1 || len(snapshot.NotificationAudits) != 1 ||
+		snapshot.NotificationAudits[0].NotificationID != "rnt_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
 		t.Fatalf("Backup() = %#v", snapshot)
-	}
-	withAudit := snapshot.Clone()
-	withAudit.NotificationAudits = append(withAudit.NotificationAudits, recordcollaboration.PortableNotificationAudit{
-		NotificationID: "rnt_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		Kind:           recordcollaboration.NotificationEventActionCompleted, SubjectKind: recordcollaboration.NotificationSubjectAction,
-		SourceVersion: 1, EventAt: snapshot.Actions[0].UpdatedAt,
-	})
-	if err := portability.Restore(ctx, tx, binding, withAudit); !errors.Is(err, recordcollaboration.ErrInvalidPortabilitySnapshot) {
-		t.Fatalf("Restore(non-restorable disclosure audit) error = %v, want ErrInvalidPortabilitySnapshot", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit provider backup transaction: %v", err)
 	}
 
 	for _, statement := range []string{
+		`delete from public.record_notification_delivery_attempts where record_id = $1`,
+		`delete from public.record_notification_deliveries where record_id = $1`,
+		`delete from public.record_notification_recipients where record_id = $1`,
+		`delete from public.record_notifications where record_id = $1`,
 		`delete from public.record_comment_mentions where record_id = $1`,
 		`delete from public.record_comment_replies where record_id = $1`,
 		`delete from public.record_comment_revisions where record_id = $1`,
@@ -220,6 +228,74 @@ func TestPostgresIntegrationCollaborationProvidersBindCallerTxEpochAndRoundTripR
 	if _, err := activityProvider.ListFacts(ctx, tx, binding); !errors.Is(err, recordcollaboration.ErrInvalidActivityFact) {
 		t.Fatalf("ListFacts(forged source) error = %v, want ErrInvalidActivityFact", err)
 	}
+}
+
+func TestPostgresIntegrationCollaborationAuditRestoreRejectsConflictAndStaleEpochWithoutMutation(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	parent := seedPostgresActionParent(t, ctx, fixture, "rec_providerauditconflict", "provider-audit-conflict-parent")
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-collaboration-audit-conflict", 2)
+	binding, err := recordcollaboration.NewRecordFenceBinding(recordplatform.ProjectIDDefault, parent.RecordID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := recordcollaboration.PortableNotificationAudit{
+		NotificationID: "rnt_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		Kind:           recordcollaboration.NotificationEventActionCompleted, SubjectKind: recordcollaboration.NotificationSubjectAction,
+		SourceVersion: 2, EventAt: time.Date(2026, time.August, 17, 12, 0, 0, 0, time.UTC),
+		RecipientCount: 2, DeliveryCount: 2, SentCount: 1, UnknownCount: 1,
+	}
+	snapshot := emptyCollaborationPortabilitySnapshot()
+	snapshot.NotificationAudits = append(snapshot.NotificationAudits, audit)
+	if err := snapshot.Validate(); err != nil {
+		t.Fatalf("audit snapshot invalid: %v", err)
+	}
+	portability, err := recordcollaboration.NewPortabilityAdapter(NewPostgresRecordCollaborationProvider())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := func(fence, recipientCount int64) {
+		t.Helper()
+		if _, err := fixture.db.Exec(ctx, `
+			insert into public.record_notification_audit_summaries (
+				notification_id, record_id, event_kind, subject_kind, source_version, event_at,
+				recipient_count, delivery_count, sent_count, unknown_count, permanent_failed_count,
+				record_fence_epoch
+			) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			audit.NotificationID, parent.RecordID, audit.Kind, audit.SubjectKind, int64(audit.SourceVersion), audit.EventAt,
+			recipientCount, int64(audit.DeliveryCount), int64(audit.SentCount), int64(audit.UnknownCount), int64(audit.PermanentFailed), fence,
+		); err != nil {
+			t.Fatalf("seed notification audit summary: %v", err)
+		}
+	}
+	seed(0, 1)
+	tx, err := runtimePool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := portability.Restore(ctx, tx, binding, snapshot); !errors.Is(err, recordcollaboration.ErrInvalidPortabilitySnapshot) {
+		t.Fatalf("Restore(conflicting audit) error = %v, want ErrInvalidPortabilitySnapshot", err)
+	}
+	_ = tx.Rollback(ctx)
+	var recipientCount, rows int64
+	if err := fixture.db.QueryRow(ctx, `
+		select recipient_count, count(*) over ()
+		from public.record_notification_audit_summaries where notification_id = $1`, audit.NotificationID,
+	).Scan(&recipientCount, &rows); err != nil || recipientCount != 1 || rows != 1 {
+		t.Fatalf("conflicting audit changed = recipient/rows %d/%d error %v", recipientCount, rows, err)
+	}
+	if _, err := fixture.db.Exec(ctx, `delete from public.record_notification_audit_summaries where notification_id = $1`, audit.NotificationID); err != nil {
+		t.Fatal(err)
+	}
+	seed(1, 2)
+	tx, err = runtimePool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := portability.Restore(ctx, tx, binding, snapshot); !errors.Is(err, recordcollaboration.ErrInvalidRecordFenceBinding) {
+		t.Fatalf("Restore(stale audit epoch) error = %v, want ErrInvalidRecordFenceBinding", err)
+	}
+	_ = tx.Rollback(ctx)
 }
 
 func assertCollaborationProvidersDeletionReserved(

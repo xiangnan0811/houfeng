@@ -45,6 +45,7 @@ func TestRecordCollaborationMigrationDefinesExactOwnedTables(t *testing.T) {
 		"record_notification_recipients",
 		"record_notification_deliveries",
 		"record_notification_delivery_attempts",
+		"record_notification_audit_summaries",
 		"record_collaboration_purge_receipts",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -106,6 +107,7 @@ func TestRecordCollaborationMigrationBindsEveryRecordSurfaceToFenceEpoch(t *test
 		"record_notification_recipients",
 		"record_notification_deliveries",
 		"record_notification_delivery_attempts",
+		"record_notification_audit_summaries",
 	} {
 		tableSQL := normalizedRecordCollaborationTableDefinition(t, sql, table)
 		if !strings.Contains(tableSQL, "record_fence_epoch bigint not null check (record_fence_epoch >= 0)") {
@@ -301,6 +303,15 @@ func TestRecordCollaborationMigrationBoundsNotificationRetentionAndRetries(t *te
 	} {
 		if strings.Contains(attemptSQL, forbidden) {
 			t.Errorf("0055 delivery-attempt audit retains forbidden content field %q", forbidden)
+		}
+	}
+	auditSQL := recordCollaborationTableDefinition(t, recordCollaborationMigrationSQL(t), "record_notification_audit_summaries")
+	for _, forbidden := range []string{
+		"actor_id", "recipient_user_id", "subject_id", "binding_id", "payload", "body", "title", "markdown",
+		"render_model", "credential", "secret", "provider_error", "provider_response", "json",
+	} {
+		if strings.Contains(auditSQL, forbidden) {
+			t.Errorf("0055 restored notification audit summary retains forbidden identity/content field %q", forbidden)
 		}
 	}
 }

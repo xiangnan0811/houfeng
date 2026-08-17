@@ -172,6 +172,7 @@ func TestRecordCollaborationDescriptorRequiresExactOwnedTables(t *testing.T) {
 		"record_comment_tombstones",
 		"record_comments",
 		"record_followers",
+		"record_notification_audit_summaries",
 		"record_notification_deliveries",
 		"record_notification_delivery_attempts",
 		"record_notification_recipients",

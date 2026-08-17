@@ -343,6 +343,34 @@ create table if not exists public.record_notification_delivery_attempts (
 create index if not exists idx_record_notification_delivery_attempts_delivery
   on public.record_notification_delivery_attempts(delivery_id, attempt_no, attempt_id);
 
+create table if not exists public.record_notification_audit_summaries (
+  notification_id text primary key check (notification_id ~ '^rnt_[0-9a-f]{64}$'),
+  project_id text not null default 'default' check (project_id = 'default'),
+  record_id text not null,
+  event_kind text not null
+    check (event_kind in ('record_owner_changed', 'record_participant_changed',
+      'record_follow_up_due', 'action_assigned', 'action_completed',
+      'action_cancelled', 'comment_replied', 'comment_mentioned',
+      'security_access_revoked')),
+  subject_kind text not null check (subject_kind in ('record', 'action', 'comment')),
+  source_version bigint not null check (source_version > 0),
+  event_at timestamptz not null,
+  recipient_count bigint not null check (recipient_count >= 0),
+  delivery_count bigint not null check (delivery_count >= 0),
+  sent_count bigint not null check (sent_count >= 0),
+  unknown_count bigint not null check (unknown_count >= 0),
+  permanent_failed_count bigint not null check (permanent_failed_count >= 0),
+  record_fence_epoch bigint not null check (record_fence_epoch >= 0),
+  created_at timestamptz not null default now(),
+  unique (record_id, notification_id),
+  check (sent_count + unknown_count + permanent_failed_count <= delivery_count),
+  foreign key (record_id) references public.records(record_id)
+    on delete restrict
+);
+
+create index if not exists idx_record_notification_audit_summaries_record
+  on public.record_notification_audit_summaries(record_id, notification_id);
+
 create table if not exists public.record_collaboration_purge_receipts (
   operation_id text primary key check (operation_id ~ '^rpo_[a-z0-9]{1,64}$'),
   adapter_name text not null default 'record_collaboration'
@@ -405,6 +433,8 @@ begin
 
   delete from public.record_notification_delivery_attempts where record_id = p_record_id;
   get diagnostics v_rows = row_count; v_removed := v_removed + v_rows;
+  delete from public.record_notification_audit_summaries where record_id = p_record_id;
+  get diagnostics v_rows = row_count; v_removed := v_removed + v_rows;
   delete from public.record_notification_deliveries where record_id = p_record_id;
   get diagnostics v_rows = row_count; v_removed := v_removed + v_rows;
   delete from public.record_notification_recipients where record_id = p_record_id;
@@ -439,6 +469,7 @@ begin
     (select count(*) from public.record_followers where record_id = p_record_id) +
     (select count(*) from public.record_notification_deliveries where record_id = p_record_id) +
     (select count(*) from public.record_notification_delivery_attempts where record_id = p_record_id) +
+    (select count(*) from public.record_notification_audit_summaries where record_id = p_record_id) +
     (select count(*) from public.record_notification_recipients where record_id = p_record_id) +
     (select count(*) from public.record_notifications where record_id = p_record_id)
   into v_remaining;
@@ -862,6 +893,9 @@ create trigger record_notifications_reject_update before update on public.record
 for each row execute function record_platform_internal.reject_immutable_mutation();
 drop trigger if exists record_notification_delivery_attempts_reject_update on public.record_notification_delivery_attempts;
 create trigger record_notification_delivery_attempts_reject_update before update on public.record_notification_delivery_attempts
+for each row execute function record_platform_internal.reject_immutable_mutation();
+drop trigger if exists record_notification_audit_summaries_reject_update on public.record_notification_audit_summaries;
+create trigger record_notification_audit_summaries_reject_update before update on public.record_notification_audit_summaries
 for each row execute function record_platform_internal.reject_immutable_mutation();
 drop trigger if exists record_collaboration_purge_receipts_reject_update on public.record_collaboration_purge_receipts;
 create trigger record_collaboration_purge_receipts_reject_update before update on public.record_collaboration_purge_receipts

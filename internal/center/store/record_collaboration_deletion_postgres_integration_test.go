@@ -135,6 +135,15 @@ func TestPostgresIntegrationRecordCollaborationDeletionPurgesExactOwnedSurfacesA
 	); err != nil {
 		t.Fatalf("seed collaboration delivery attempt: %v", err)
 	}
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.record_notification_audit_summaries (
+			notification_id, record_id, event_kind, subject_kind, source_version, event_at,
+			recipient_count, delivery_count, sent_count, unknown_count, permanent_failed_count,
+			record_fence_epoch
+		) values ('rnt_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', $1,
+			'action_completed', 'action', 1, transaction_timestamp(), 2, 3, 2, 1, 0, 0)`, parent.RecordID); err != nil {
+		t.Fatalf("seed collaboration restored notification audit: %v", err)
+	}
 
 	operation := recorddeletion.DeletionOperation{
 		OperationID: "rpo_collabdelete", ReservationID: "drs_collabdelete",
@@ -163,9 +172,10 @@ func TestPostgresIntegrationRecordCollaborationDeletionPurgesExactOwnedSurfacesA
 	if err != nil {
 		t.Fatalf("PreviewDeletion() error = %v", err)
 	}
-	wantCopies := []recorddeletion.AdapterSurvivingCopy{{
-		Kind: recorddeletion.SurvivingCopyKindDeliveredNotification, CopyCount: 1,
-	}}
+	wantCopies := []recorddeletion.AdapterSurvivingCopy{
+		{Kind: recorddeletion.SurvivingCopyKindDeliveredNotification, CopyCount: 3},
+		{Kind: recorddeletion.SurvivingCopyKindPossibleExternalDelivery, CopyCount: 1},
+	}
 	if !reflect.DeepEqual(preview.SurvivingCopies, wantCopies) {
 		t.Fatalf("PreviewDeletion().SurvivingCopies = %#v, want %#v", preview.SurvivingCopies, wantCopies)
 	}
@@ -174,8 +184,8 @@ func TestPostgresIntegrationRecordCollaborationDeletionPurgesExactOwnedSurfacesA
 	if err != nil {
 		t.Fatalf("PurgeDeletion() error = %v", err)
 	}
-	if receipt.RemovedRowCount != 16 {
-		t.Fatalf("PurgeDeletion().RemovedRowCount = %d, want 16", receipt.RemovedRowCount)
+	if receipt.RemovedRowCount != 17 {
+		t.Fatalf("PurgeDeletion().RemovedRowCount = %d, want 17", receipt.RemovedRowCount)
 	}
 	if err := adapter.VerifyDeletion(ctx, target, receipt); err != nil {
 		t.Fatalf("VerifyDeletion() error = %v", err)
@@ -189,7 +199,8 @@ func TestPostgresIntegrationRecordCollaborationDeletionPurgesExactOwnedSurfacesA
 		select
 		  (select count(*) from public.record_actions where record_id = $1) +
 		  (select count(*) from public.record_comments where record_id = $1) +
-		  (select count(*) from public.record_notifications where record_id = $1),
+		  (select count(*) from public.record_notifications where record_id = $1) +
+		  (select count(*) from public.record_notification_audit_summaries where record_id = $1),
 		  (select count(*) from public.record_collaboration_purge_receipts where operation_id = $2)`,
 		parent.RecordID, operation.OperationID,
 	).Scan(&remaining, &receipts); err != nil {

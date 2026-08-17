@@ -182,6 +182,7 @@ func recordCollaborationExpectedAppACLObjects() []AppACLManagedObjectR1 {
 		"record_notification_recipients",
 		"record_notification_deliveries",
 		"record_notification_delivery_attempts",
+		"record_notification_audit_summaries",
 		"record_collaboration_purge_receipts",
 	} {
 		objects = append(objects, AppACLManagedObjectR1{
@@ -279,6 +280,7 @@ func recordCollaborationExpectedAppACLPrivileges() []AppACLPrivilege {
 		"record_comment_mentions",
 		"record_notifications",
 		"record_notification_delivery_attempts",
+		"record_notification_audit_summaries",
 	} {
 		appendTable(runtime, table,
 			AppACLPrivilegeSelect, AppACLPrivilegeInsert)

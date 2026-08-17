@@ -123,6 +123,10 @@ func (repository *PostgresRecordDeletionRepository) PreviewCollaborationDeletion
 				  'delivery_attempts', coalesce((select jsonb_agg(jsonb_build_array(
 				    attempt_id, delivery_id, attempt_no, outcome, reason_code, record_fence_epoch
 				  ) order by attempt_id) from public.record_notification_delivery_attempts where record_id = root.record_id), '[]'::jsonb)
+				  , 'notification_audit_summaries', coalesce((select jsonb_agg(jsonb_build_array(
+				    notification_id, event_kind, subject_kind, source_version, recipient_count,
+				    delivery_count, sent_count, unknown_count, permanent_failed_count, record_fence_epoch
+				  ) order by notification_id) from public.record_notification_audit_summaries where record_id = root.record_id), '[]'::jsonb)
 				) as dependency_material,
 				jsonb_build_object(
 				  'actions', (select count(*) from public.record_actions where record_id = root.record_id),
@@ -137,11 +141,16 @@ func (repository *PostgresRecordDeletionRepository) PreviewCollaborationDeletion
 				  'recipients', (select count(*) from public.record_notification_recipients where record_id = root.record_id),
 				  'deliveries', (select count(*) from public.record_notification_deliveries where record_id = root.record_id),
 				  'delivery_attempts', (select count(*) from public.record_notification_delivery_attempts where record_id = root.record_id)
+				  , 'notification_audit_summaries', (select count(*) from public.record_notification_audit_summaries where record_id = root.record_id)
 				) as impact_material,
-				(select count(*) from public.record_notification_deliveries
-				  where record_id = root.record_id and delivery_state = 'sent') as delivered_count,
-				(select count(*) from public.record_notification_deliveries
-				  where record_id = root.record_id and delivery_state = 'unknown_outcome') as possible_count
+				((select count(*) from public.record_notification_deliveries
+				  where record_id = root.record_id and delivery_state = 'sent') +
+				 (select coalesce(sum(sent_count), 0) from public.record_notification_audit_summaries
+				  where record_id = root.record_id)) as delivered_count,
+				((select count(*) from public.record_notification_deliveries
+				  where record_id = root.record_id and delivery_state = 'unknown_outcome') +
+				 (select coalesce(sum(unknown_count), 0) from public.record_notification_audit_summaries
+				  where record_id = root.record_id)) as possible_count
 				from root
 			)
 			select pg_catalog.convert_to(dependency_material::text, 'UTF8'),
@@ -313,6 +322,7 @@ func assertRecordCollaborationSurfacesAbsent(ctx context.Context, tx pgx.Tx, rec
 		  (select count(*) from public.record_followers where record_id = $1) +
 		  (select count(*) from public.record_notification_deliveries where record_id = $1) +
 		  (select count(*) from public.record_notification_delivery_attempts where record_id = $1) +
+		  (select count(*) from public.record_notification_audit_summaries where record_id = $1) +
 		  (select count(*) from public.record_notification_recipients where record_id = $1) +
 		  (select count(*) from public.record_notifications where record_id = $1)`, recordID,
 	).Scan(&remaining); err != nil {

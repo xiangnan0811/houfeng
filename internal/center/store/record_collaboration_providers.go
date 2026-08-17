@@ -224,9 +224,6 @@ func (provider *PostgresRecordCollaborationProvider) RestoreCollaboration(
 	if provider == nil || ctx == nil || nilCollaborationDependency(tx) || binding.Validate() != nil || snapshot.Validate() != nil {
 		return recordcollaboration.ErrInvalidPortabilityAdapter
 	}
-	if len(snapshot.NotificationAudits) != 0 {
-		return recordcollaboration.ErrInvalidPortabilitySnapshot
-	}
 	if err := assertCollaborationProviderBinding(ctx, tx, binding); err != nil {
 		return err
 	}
@@ -240,6 +237,9 @@ func (provider *PostgresRecordCollaborationProvider) RestoreCollaboration(
 		return err
 	}
 	if err := restorePortableFollowers(ctx, tx, binding, snapshot); err != nil {
+		return err
+	}
+	if err := restorePortableNotificationAudits(ctx, tx, binding, snapshot.NotificationAudits); err != nil {
 		return err
 	}
 	restored, err := provider.BackupCollaboration(ctx, tx, binding)
@@ -290,7 +290,8 @@ func assertCollaborationPortabilityRowsBound(
 		  exists (select 1 from public.record_notifications where record_id = $1 and record_fence_epoch <> $2) or
 		  exists (select 1 from public.record_notification_recipients where record_id = $1 and record_fence_epoch <> $2) or
 		  exists (select 1 from public.record_notification_deliveries where record_id = $1 and record_fence_epoch <> $2) or
-		  exists (select 1 from public.record_notification_delivery_attempts where record_id = $1 and record_fence_epoch <> $2)`,
+		  exists (select 1 from public.record_notification_delivery_attempts where record_id = $1 and record_fence_epoch <> $2) or
+		  exists (select 1 from public.record_notification_audit_summaries where record_id = $1 and record_fence_epoch <> $2)`,
 		binding.RecordID(), int64(binding.Epoch()),
 	).Scan(&mismatched); err != nil {
 		return fmt.Errorf("verify collaboration portability row fences: %w", err)
@@ -589,25 +590,35 @@ func backupPortableFollowersAndAudits(ctx context.Context, tx pgx.Tx, binding re
 	rows.Close()
 
 	rows, err = tx.Query(ctx, `
-		select notification.notification_id, notification.event_kind,
-		       notification.subject_kind, notification.source_version, notification.event_at,
-		       count(distinct recipient.recipient_user_id),
-		       count(distinct delivery.delivery_id),
-		       count(distinct delivery.delivery_id) filter (where delivery.delivery_state = 'sent'),
-		       count(distinct delivery.delivery_id) filter (where delivery.delivery_state = 'unknown_outcome'),
-		       count(distinct delivery.delivery_id) filter (where delivery.delivery_state = 'permanent_failure')
-		from public.record_notifications as notification
-		left join public.record_notification_recipients as recipient
-		  on recipient.notification_id = notification.notification_id
-		 and recipient.record_id = notification.record_id
-		left join public.record_notification_deliveries as delivery
-		  on delivery.notification_id = notification.notification_id
-		 and delivery.record_id = notification.record_id
-		where notification.project_id = $1 and notification.record_id = $2
-		  and notification.record_fence_epoch = $3
-		group by notification.notification_id, notification.event_kind,
-		         notification.subject_kind, notification.source_version, notification.event_at
-		order by notification.notification_id limit $4`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()), recordcollaboration.MaxCollaborationPortabilityRowsPerSurface+1)
+		with live as (
+		  select notification.notification_id, notification.event_kind,
+		         notification.subject_kind, notification.source_version, notification.event_at,
+		         count(distinct recipient.recipient_user_id) as recipient_count,
+		         count(distinct delivery.delivery_id) as delivery_count,
+		         count(distinct delivery.delivery_id) filter (where delivery.delivery_state = 'sent') as sent_count,
+		         count(distinct delivery.delivery_id) filter (where delivery.delivery_state = 'unknown_outcome') as unknown_count,
+		         count(distinct delivery.delivery_id) filter (where delivery.delivery_state = 'permanent_failure') as permanent_failed_count
+		  from public.record_notifications as notification
+		  left join public.record_notification_recipients as recipient
+		    on recipient.notification_id = notification.notification_id and recipient.record_id = notification.record_id
+		  left join public.record_notification_deliveries as delivery
+		    on delivery.notification_id = notification.notification_id and delivery.record_id = notification.record_id
+		  where notification.project_id = $1 and notification.record_id = $2 and notification.record_fence_epoch = $3
+		  group by notification.notification_id, notification.event_kind,
+		           notification.subject_kind, notification.source_version, notification.event_at
+		), audits as (
+		  select notification_id, event_kind, subject_kind, source_version, event_at,
+		         recipient_count, delivery_count, sent_count, unknown_count, permanent_failed_count
+		  from live
+		  union all
+		  select notification_id, event_kind, subject_kind, source_version, event_at,
+		         recipient_count, delivery_count, sent_count, unknown_count, permanent_failed_count
+		  from public.record_notification_audit_summaries
+		  where project_id = $1 and record_id = $2 and record_fence_epoch = $3
+		)
+		select notification_id, event_kind, subject_kind, source_version, event_at,
+		       recipient_count, delivery_count, sent_count, unknown_count, permanent_failed_count
+		from audits order by notification_id limit $4`, binding.ProjectID(), binding.RecordID(), int64(binding.Epoch()), recordcollaboration.MaxCollaborationPortabilityRowsPerSurface+1)
 	if err != nil {
 		return fmt.Errorf("query collaboration backup notification audits: %w", err)
 	}
@@ -813,6 +824,71 @@ func restorePortableFollowers(ctx context.Context, tx pgx.Tx, binding recordcoll
 			int64(binding.Epoch()), follower.CreatedAt, follower.UpdatedAt,
 		); err != nil {
 			return fmt.Errorf("restore collaboration follower: %w", err)
+		}
+	}
+	return nil
+}
+
+func restorePortableNotificationAudits(
+	ctx context.Context,
+	tx pgx.Tx,
+	binding recordcollaboration.RecordFenceBinding,
+	audits []recordcollaboration.PortableNotificationAudit,
+) error {
+	for _, audit := range audits {
+		var live bool
+		if err := tx.QueryRow(ctx, `
+			select exists (
+			  select 1 from public.record_notifications
+			  where notification_id = $1 or (record_id = $2 and notification_id = $1)
+			)`, audit.NotificationID, binding.RecordID()).Scan(&live); err != nil {
+			return fmt.Errorf("preflight collaboration notification audit live identity: %w", err)
+		}
+		if live {
+			return recordcollaboration.ErrInvalidPortabilitySnapshot
+		}
+		var existing recordcollaboration.PortableNotificationAudit
+		var projectID, recordID string
+		var sourceVersion, recipientCount, deliveryCount, sentCount, unknownCount, permanentFailed, fenceEpoch int64
+		err := tx.QueryRow(ctx, `
+			select project_id, record_id, event_kind, subject_kind, source_version, event_at,
+			       recipient_count, delivery_count, sent_count, unknown_count, permanent_failed_count,
+			       record_fence_epoch
+			from public.record_notification_audit_summaries
+			where notification_id = $1`, audit.NotificationID,
+		).Scan(&projectID, &recordID, &existing.Kind, &existing.SubjectKind, &sourceVersion, &existing.EventAt,
+			&recipientCount, &deliveryCount, &sentCount, &unknownCount, &permanentFailed, &fenceEpoch)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("preflight collaboration notification audit summary: %w", err)
+		}
+		existing.NotificationID = audit.NotificationID
+		existing.SourceVersion = uint64(sourceVersion)
+		existing.EventAt = existing.EventAt.UTC()
+		existing.RecipientCount = uint64(recipientCount)
+		existing.DeliveryCount = uint64(deliveryCount)
+		existing.SentCount = uint64(sentCount)
+		existing.UnknownCount = uint64(unknownCount)
+		existing.PermanentFailed = uint64(permanentFailed)
+		if projectID != string(binding.ProjectID()) || recordID != binding.RecordID() || fenceEpoch != int64(binding.Epoch()) || existing != audit {
+			return recordcollaboration.ErrInvalidPortabilitySnapshot
+		}
+	}
+	for _, audit := range audits {
+		if _, err := tx.Exec(ctx, `
+			insert into public.record_notification_audit_summaries (
+				notification_id, project_id, record_id, event_kind, subject_kind,
+				source_version, event_at, recipient_count, delivery_count, sent_count,
+				unknown_count, permanent_failed_count, record_fence_epoch
+			) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			on conflict (notification_id) do nothing`,
+			audit.NotificationID, binding.ProjectID(), binding.RecordID(), audit.Kind, audit.SubjectKind,
+			int64(audit.SourceVersion), audit.EventAt, int64(audit.RecipientCount), int64(audit.DeliveryCount),
+			int64(audit.SentCount), int64(audit.UnknownCount), int64(audit.PermanentFailed), int64(binding.Epoch()),
+		); err != nil {
+			return fmt.Errorf("restore collaboration notification audit summary: %w", err)
 		}
 	}
 	return nil
