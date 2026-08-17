@@ -57,6 +57,9 @@ func TestPostgresIntegrationRecordWatchLifecycleReplayCASAndSourcePreservation(t
 	if err != nil || status.Version != 3 || status.Preference != recordcollaboration.FollowerPreferenceDefault || !status.Sources.Owner {
 		t.Fatalf("SetWatch(default with source) = (%#v, %v), want preserved row/source", status, err)
 	}
+	if replay, err = repository.SetWatch(ctx, defaultWithSource); err != nil || replay != status {
+		t.Fatalf("SetWatch(default with source replay) = (%#v, %v), want %#v", replay, err, status)
+	}
 	watchAgain := postgresWatchCommand(t, parent, 3, recordcollaboration.FollowerPreferenceWatching, "watch-flow-watch-again", 0x14)
 	status, err = repository.SetWatch(ctx, watchAgain)
 	if err != nil || status.Version != 4 || status.Preference != recordcollaboration.FollowerPreferenceWatching || !status.Sources.Owner {
@@ -70,8 +73,8 @@ func TestPostgresIntegrationRecordWatchLifecycleReplayCASAndSourcePreservation(t
 	}
 	unwatch := postgresWatchCommand(t, parent, 4, recordcollaboration.FollowerPreferenceDefault, "watch-flow-unwatch", 0x15)
 	status, err = repository.SetWatch(ctx, unwatch)
-	if err != nil || status.Version != 0 || status.Preference != recordcollaboration.FollowerPreferenceDefault || status.Sources.Any() || !status.UpdatedAt.IsZero() {
-		t.Fatalf("SetWatch(unwatch empty) = (%#v, %v), want absent default", status, err)
+	if err != nil || status.Version != 5 || status.Preference != recordcollaboration.FollowerPreferenceDefault || status.Sources.Any() || status.UpdatedAt.IsZero() {
+		t.Fatalf("SetWatch(unwatch empty) = (%#v, %v), want retained versioned default", status, err)
 	}
 	if replay, err = repository.SetWatch(ctx, unwatch); err != nil || replay != status {
 		t.Fatalf("SetWatch(unwatch replay) = (%#v, %v), want %#v", replay, err, status)
@@ -81,7 +84,7 @@ func TestPostgresIntegrationRecordWatchLifecycleReplayCASAndSourcePreservation(t
 	if got, err := repository.SetWatch(ctx, stale); !errors.Is(err, recordcollaboration.ErrWatchConflict) || got != (recordcollaboration.WatchStatus{}) {
 		t.Fatalf("SetWatch(stale) = (%#v, %v), want ErrWatchConflict", got, err)
 	}
-	assertPostgresWatchRowAndKeyCounts(t, ctx, fixture, parent.RecordID, stale.Idempotency.Key.Key, 0, 0)
+	assertPostgresWatchRowAndKeyCounts(t, ctx, fixture, parent.RecordID, stale.Idempotency.Key.Key, 1, 0)
 
 	read, err := repository.GetWatch(ctx, postgresWatchReadCommand(t, parent))
 	if err != nil || read != status {
@@ -169,6 +172,171 @@ func TestPostgresIntegrationRecordWatchReplayFailsClosedAfterAutomaticSourceMuta
 	if afterVersion != version || afterAction != followsAction || !afterUpdatedAt.Equal(updatedAt) || afterKeyCount != keyCount {
 		t.Fatalf("failed replay changed follower/key state: before=%d/%v/%s/%d after=%d/%v/%s/%d",
 			version, followsAction, updatedAt, keyCount, afterVersion, afterAction, afterUpdatedAt, afterKeyCount)
+	}
+}
+
+func TestPostgresIntegrationRecordWatchReplayFailsClosedAfterAutomaticSourcesEvolveRetainedDefault(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgwatchreuse", "watch-reuse-parent")
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-watch-reuse", 2)
+	repository := NewPostgresRecordWatchRepository(
+		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+		newPostgresWatchAuthorizationSource(t, runtimePool),
+	)
+
+	watch := postgresWatchCommand(t, parent, 0, recordcollaboration.FollowerPreferenceWatching, "watch-reuse-watch", 0x2a)
+	if status, err := repository.SetWatch(ctx, watch); err != nil || status.Version != 1 || status.Sources.Any() {
+		t.Fatalf("SetWatch(watching) = (%#v, %v)", status, err)
+	}
+	unwatch := postgresWatchCommand(t, parent, 1, recordcollaboration.FollowerPreferenceDefault, "watch-reuse-unwatch", 0x2b)
+	if status, err := repository.SetWatch(ctx, unwatch); err != nil || status.Version != 2 || status.Sources.Any() {
+		t.Fatalf("SetWatch(default) = (%#v, %v)", status, err)
+	}
+
+	action := postgresActionCommand(t, parent, recordcollaboration.ActionMutationCreate, "ract_pgwatchreuse", 0,
+		mustPostgresActionFields(t, recordcollaboration.ActionFieldValues{Title: "Recreate automatic source"}), "watch-reuse-action")
+	action.Actor = watch.Actor
+	if _, err := newPostgresActionRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate).CommitAction(ctx, action); err != nil {
+		t.Fatalf("CommitAction() error = %v", err)
+	}
+	comment := postgresCommentCommand(t, parent, recordcollaboration.CommentMutationCreate, "rcm_pgwatchreuse", 0,
+		"Second automatic source", "", nil, "watch-reuse-comment")
+	comment.Actor = watch.Actor
+	if _, err := newPostgresCommentRepositoryForTest(t, runtimePool, allowRecordPlatformAdmissionGate).CommitComment(ctx, comment); err != nil {
+		t.Fatalf("CommitComment() error = %v", err)
+	}
+
+	var version, keyCount int
+	var preference string
+	var followsAction, followsComment bool
+	var updatedAt time.Time
+	if err := fixture.db.QueryRow(ctx, `
+		select follower_version::int, manual_preference, follows_action, follows_comment, updated_at,
+		       (select count(*)::int from public.record_idempotency_keys where idempotency_key = $3)
+		from public.record_followers
+		where record_id = $1 and user_id = $2`, parent.RecordID, watch.Actor.UserID, unwatch.Idempotency.Key.Key).Scan(
+		&version, &preference, &followsAction, &followsComment, &updatedAt, &keyCount,
+	); err != nil {
+		t.Fatalf("read rebuilt automatic sources: %v", err)
+	}
+	if version != 4 || preference != string(recordcollaboration.FollowerPreferenceDefault) || !followsAction || !followsComment || keyCount != 1 {
+		t.Fatalf("evolved follower version/preference/action/comment/keys = %d/%q/%v/%v/%d, want 4/default/true/true/1",
+			version, preference, followsAction, followsComment, keyCount)
+	}
+
+	if replay, err := repository.SetWatch(ctx, unwatch); !errors.Is(err, recordplatform.ErrIdempotencyConflictState) || replay != (recordcollaboration.WatchStatus{}) {
+		t.Fatalf("SetWatch(replay after row reuse) = (%#v, %v), want fail closed", replay, err)
+	}
+	var afterVersion, afterKeyCount int
+	var afterPreference string
+	var afterAction, afterComment bool
+	var afterUpdatedAt time.Time
+	if err := fixture.db.QueryRow(ctx, `
+		select follower_version::int, manual_preference, follows_action, follows_comment, updated_at,
+		       (select count(*)::int from public.record_idempotency_keys where idempotency_key = $3)
+		from public.record_followers
+		where record_id = $1 and user_id = $2`, parent.RecordID, watch.Actor.UserID, unwatch.Idempotency.Key.Key).Scan(
+		&afterVersion, &afterPreference, &afterAction, &afterComment, &afterUpdatedAt, &afterKeyCount,
+	); err != nil {
+		t.Fatalf("read state after failed replay: %v", err)
+	}
+	if afterVersion != version || afterPreference != preference || afterAction != followsAction || afterComment != followsComment ||
+		!afterUpdatedAt.Equal(updatedAt) || afterKeyCount != keyCount {
+		t.Fatalf("failed replay changed rebuilt follower/key state: before=%d/%q/%v/%v/%s/%d after=%d/%q/%v/%v/%s/%d",
+			version, preference, followsAction, followsComment, updatedAt, keyCount,
+			afterVersion, afterPreference, afterAction, afterComment, afterUpdatedAt, afterKeyCount)
+	}
+}
+
+func TestPostgresIntegrationRecordWatchReplayKeepsVersionsMonotonicAcrossUnwatch(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgwatchsame", "watch-same-parent")
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-watch-same", 2)
+	repository := NewPostgresRecordWatchRepository(
+		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+		newPostgresWatchAuthorizationSource(t, runtimePool),
+	)
+
+	first := postgresWatchCommand(t, parent, 0, recordcollaboration.FollowerPreferenceWatching, "watch-same-first", 0x2c)
+	if status, err := repository.SetWatch(ctx, first); err != nil || status.Version != 1 || status.Preference != recordcollaboration.FollowerPreferenceWatching {
+		t.Fatalf("SetWatch(first) = (%#v, %v)", status, err)
+	}
+	remove := postgresWatchCommand(t, parent, 1, recordcollaboration.FollowerPreferenceDefault, "watch-same-remove", 0x2d)
+	if status, err := repository.SetWatch(ctx, remove); err != nil || status.Version != 2 {
+		t.Fatalf("SetWatch(remove) = (%#v, %v)", status, err)
+	}
+	second := postgresWatchCommand(t, parent, 2, recordcollaboration.FollowerPreferenceWatching, "watch-same-second", 0x2e)
+	secondStatus, err := repository.SetWatch(ctx, second)
+	if err != nil || secondStatus.Version != 3 || secondStatus.Preference != recordcollaboration.FollowerPreferenceWatching {
+		t.Fatalf("SetWatch(second) = (%#v, %v)", secondStatus, err)
+	}
+
+	if replay, err := repository.SetWatch(ctx, first); !errors.Is(err, recordplatform.ErrIdempotencyConflictState) || replay != (recordcollaboration.WatchStatus{}) {
+		t.Fatalf("SetWatch(first replay after identical recreation) = (%#v, %v), want fail closed", replay, err)
+	}
+	current, err := repository.GetWatch(ctx, postgresWatchReadCommand(t, parent))
+	if err != nil || current != secondStatus {
+		t.Fatalf("GetWatch() = (%#v, %v), want second state %#v", current, err, secondStatus)
+	}
+}
+
+func TestPostgresIntegrationRecordWatchReplayRejectsRetainedDefaultAfterLaterPrune(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgwatchprune", "watch-prune-parent")
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-watch-prune", 2)
+	repository := NewPostgresRecordWatchRepository(
+		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+		newPostgresWatchAuthorizationSource(t, runtimePool),
+	)
+
+	watch := postgresWatchCommand(t, parent, 0, recordcollaboration.FollowerPreferenceWatching, "watch-prune-watch", 0x2f)
+	if status, err := repository.SetWatch(ctx, watch); err != nil || status.Version != 1 {
+		t.Fatalf("SetWatch(watching) = (%#v, %v)", status, err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		update public.record_followers
+		set follows_owner = true
+		where record_id = $1 and user_id = $2`, parent.RecordID, watch.Actor.UserID); err != nil {
+		t.Fatalf("seed revision follower source: %v", err)
+	}
+	retained := postgresWatchCommand(t, parent, 1, recordcollaboration.FollowerPreferenceDefault, "watch-prune-default", 0x30)
+	retainedStatus, err := repository.SetWatch(ctx, retained)
+	if err != nil || retainedStatus.Version != 2 || retainedStatus.Preference != recordcollaboration.FollowerPreferenceDefault || !retainedStatus.Sources.Owner {
+		t.Fatalf("SetWatch(retained default) = (%#v, %v)", retainedStatus, err)
+	}
+	if replay, err := repository.SetWatch(ctx, retained); err != nil || replay != retainedStatus {
+		t.Fatalf("SetWatch(retained default replay) = (%#v, %v), want %#v", replay, err, retainedStatus)
+	}
+	encoded, err := encodeCollaborationDeleteCommand(collaborationPruneRevisionFollowersFunctionCommand{
+		RecordID: parent.RecordID, KeepUserIDs: []string{}, FenceEpoch: 0,
+	})
+	if err != nil {
+		t.Fatalf("encode prune command: %v", err)
+	}
+	var removed int64
+	if err := runtimePool.QueryRow(ctx, `select public.record_collaboration_prune_revision_followers($1)`, encoded).Scan(&removed); err != nil {
+		t.Fatalf("prune retained default row: %v", err)
+	}
+	if removed != 0 {
+		t.Fatalf("pruned rows = %d, want watch replay anchor retained", removed)
+	}
+	if _, err := runtimePool.Exec(ctx, `
+		update public.record_followers
+		set follower_version = follower_version + 1,
+		    follows_owner = false,
+		    updated_at = transaction_timestamp()
+		where record_id = $1 and user_id = $2`, parent.RecordID, watch.Actor.UserID); err != nil {
+		t.Fatalf("clear stale revision source: %v", err)
+	}
+
+	if replay, err := repository.SetWatch(ctx, retained); !errors.Is(err, recordplatform.ErrIdempotencyConflictState) || replay != (recordcollaboration.WatchStatus{}) {
+		t.Fatalf("SetWatch(retained replay after prune) = (%#v, %v), want fail closed", replay, err)
 	}
 }
 
@@ -474,7 +642,6 @@ func postgresWatchCommand(t *testing.T, parent records.RevisionCommitResult, exp
 		Actor: actor, RecordID: parent.RecordID, CurrentRevisionID: parent.RevisionID,
 		RecordLockVersion: parent.LockVersion, AuthorizationEpoch: parent.AuthorizationEpoch,
 		AuthorizationEvidence: evidence, ExpectedVersion: expected, Preference: preference,
-		ResultFingerprint: mustStoreActionFingerprint(t, operation, fingerprintByte+0x40),
 		Idempotency: recordplatform.IdempotencyClaimInputV1{
 			Key:                recordplatform.IdempotencyKey{ProjectID: recordplatform.ProjectIDDefault, OperationKind: operation, Key: key},
 			RequestFingerprint: mustStoreActionFingerprint(t, operation, fingerprintByte),

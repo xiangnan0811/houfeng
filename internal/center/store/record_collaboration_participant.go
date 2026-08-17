@@ -23,6 +23,8 @@ type collaborationRevisionParticipant struct {
 	members CollaborationMembershipReader
 }
 
+const maxCollaborationRevisionFollowers = 512
+
 func NewCollaborationRevisionParticipant(members CollaborationMembershipReader) records.RevisionParticipant {
 	return &collaborationRevisionParticipant{members: members}
 }
@@ -39,6 +41,10 @@ func (participant *collaborationRevisionParticipant) ApplyRevision(
 		return recordcollaboration.ErrRevisionParticipationUnavailable
 	}
 	if err := validateCollaborationRevisionCommitted(committed); err != nil {
+		return err
+	}
+	followerPlan, err := newCollaborationRevisionFollowerPlan(committed.Input)
+	if err != nil {
 		return err
 	}
 
@@ -78,7 +84,7 @@ func (participant *collaborationRevisionParticipant) ApplyRevision(
 	if err != nil {
 		return err
 	}
-	if err := reconcileCollaborationRevisionFollowers(ctx, tx, binding, committed.Input); err != nil {
+	if err := reconcileCollaborationRevisionFollowers(ctx, tx, binding, followerPlan); err != nil {
 		return err
 	}
 
@@ -240,12 +246,16 @@ type collaborationFollowerSources struct {
 	participant bool
 }
 
-func reconcileCollaborationRevisionFollowers(
-	ctx context.Context,
-	tx pgx.Tx,
-	binding recordcollaboration.RecordFenceBinding,
-	input records.CompleteRevisionInput,
-) error {
+type collaborationRevisionFollowerPlan struct {
+	desired map[string]collaborationFollowerSources
+	userIDs []string
+}
+
+func newCollaborationRevisionFollowerPlan(input records.CompleteRevisionInput) (collaborationRevisionFollowerPlan, error) {
+	participants := input.Participants()
+	if len(participants) > maxCollaborationRevisionFollowers {
+		return collaborationRevisionFollowerPlan{}, recordcollaboration.ErrRevisionParticipationUnavailable
+	}
 	desired := map[string]collaborationFollowerSources{
 		input.AuthorID(): {author: true},
 	}
@@ -254,18 +264,36 @@ func reconcileCollaborationRevisionFollowers(
 		sources.owner = true
 		desired[ownerID] = sources
 	}
-	for _, participant := range input.Participants() {
+	for _, participant := range participants {
 		sources := desired[participant.ParticipantID]
 		sources.participant = true
 		desired[participant.ParticipantID] = sources
+		if len(desired) > maxCollaborationRevisionFollowers {
+			return collaborationRevisionFollowerPlan{}, recordcollaboration.ErrRevisionParticipationUnavailable
+		}
 	}
 	userIDs := make([]string, 0, len(desired))
 	for userID := range desired {
 		userIDs = append(userIDs, userID)
 	}
 	sort.Strings(userIDs)
-	for _, userID := range userIDs {
-		sources := desired[userID]
+	return collaborationRevisionFollowerPlan{desired: desired, userIDs: userIDs}, nil
+}
+
+func reconcileCollaborationRevisionFollowers(
+	ctx context.Context,
+	tx pgx.Tx,
+	binding recordcollaboration.RecordFenceBinding,
+	plan collaborationRevisionFollowerPlan,
+) error {
+	if len(plan.userIDs) == 0 || len(plan.userIDs) > maxCollaborationRevisionFollowers || len(plan.desired) != len(plan.userIDs) {
+		return recordcollaboration.ErrRevisionParticipationUnavailable
+	}
+	for _, userID := range plan.userIDs {
+		sources, ok := plan.desired[userID]
+		if !ok {
+			return recordcollaboration.ErrRevisionParticipationUnavailable
+		}
 		if _, err := tx.Exec(ctx, `
 			insert into public.record_followers (
 				project_id, record_id, user_id, follower_version,
@@ -293,7 +321,7 @@ func reconcileCollaborationRevisionFollowers(
 	}
 	var pruned int64
 	encoded, err := encodeCollaborationDeleteCommand(collaborationPruneRevisionFollowersFunctionCommand{
-		RecordID: binding.RecordID(), KeepUserIDs: userIDs, FenceEpoch: int64(binding.Epoch()),
+		RecordID: binding.RecordID(), KeepUserIDs: plan.userIDs, FenceEpoch: int64(binding.Epoch()),
 	})
 	if err != nil {
 		return recordcollaboration.ErrRevisionParticipationUnavailable
@@ -317,7 +345,7 @@ func reconcileCollaborationRevisionFollowers(
 		where record_id = $1
 		  and not (user_id = any($2::text[]))
 		  and (follows_author or follows_owner or follows_participant)`,
-		binding.RecordID(), userIDs, int64(binding.Epoch()),
+		binding.RecordID(), plan.userIDs, int64(binding.Epoch()),
 	); err != nil {
 		return fmt.Errorf("update stale collaboration revision follower: %w", err)
 	}

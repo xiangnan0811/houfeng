@@ -94,11 +94,15 @@ func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, c
 			return err
 		}
 		if claim.ReplayResult != nil {
-			if !command.ResultFingerprint.MatchesPersisted(*claim.ReplayResult) {
+			resultFingerprint, err := current.ResultFingerprint(command.Idempotency.Key)
+			if err != nil || !resultFingerprint.MatchesPersisted(*claim.ReplayResult) {
 				return recordplatform.ErrIdempotencyConflictState
 			}
-			if !recordWatchReplayMatchesCurrent(command, current) {
-				return recordplatform.ErrIdempotencyConflictState
+			if current.Version > 0 {
+				marker, err := loadRecordWatchResultFingerprint(ctx, transaction.tx, command.RecordID, command.Actor.UserID)
+				if err != nil || !resultFingerprint.MatchesPersisted(marker) {
+					return recordplatform.ErrIdempotencyConflictState
+				}
 			}
 			result = current
 			return nil
@@ -109,29 +113,11 @@ func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, c
 		if current.Version == 0 && command.Preference == recordcollaboration.FollowerPreferenceDefault {
 			result = current
 		} else {
-			next, remove, err := nextRecordWatchPreference(current, command.Preference, uint64(binding.Epoch()))
+			next, err := nextRecordWatchPreference(current, command.Preference, uint64(binding.Epoch()))
 			if err != nil {
 				return err
 			}
-			if remove {
-				var removed int64
-				encoded, err := encodeCollaborationDeleteCommand(collaborationRemoveFollowerFunctionCommand{
-					RecordID: command.RecordID, UserID: command.Actor.UserID,
-					Version: int64(current.Version), FenceEpoch: int64(binding.Epoch()),
-				})
-				if err != nil {
-					return recordcollaboration.ErrWatchConflict
-				}
-				err = transaction.tx.QueryRow(ctx, `
-					select public.record_collaboration_remove_follower($1)`, encoded).Scan(&removed)
-				if err != nil {
-					return fmt.Errorf("delete empty record watch preference: %w", err)
-				}
-				if removed != 1 {
-					return recordcollaboration.ErrWatchConflict
-				}
-				result = next
-			} else if current.Version == 0 {
+			if current.Version == 0 {
 				var updatedAt time.Time
 				err := transaction.tx.QueryRow(ctx, `
 					insert into public.record_followers (
@@ -166,7 +152,28 @@ func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, c
 				result = next
 			}
 		}
-		if err := transaction.CompleteIdempotency(ctx, command.Idempotency.Key, *claim.Owner, command.ResultFingerprint); err != nil {
+		resultFingerprint, err := result.ResultFingerprint(command.Idempotency.Key)
+		if err != nil {
+			return err
+		}
+		if result.Version > 0 {
+			persisted, err := resultFingerprint.PersistedBytes()
+			if err != nil {
+				return err
+			}
+			tag, err := transaction.tx.Exec(ctx, `
+				update public.record_followers
+				set preference_result_fingerprint = $5
+				where record_id = $1 and user_id = $2 and follower_version = $3 and record_fence_epoch = $4`,
+				result.RecordID, result.UserID, int64(result.Version), int64(result.RecordFenceEpoch), persisted[:])
+			if err != nil {
+				return fmt.Errorf("bind record watch result fingerprint: %w", err)
+			}
+			if tag.RowsAffected() != 1 {
+				return recordcollaboration.ErrWatchConflict
+			}
+		}
+		if err := transaction.CompleteIdempotency(ctx, command.Idempotency.Key, *claim.Owner, resultFingerprint); err != nil {
 			return err
 		}
 		return result.Validate()
@@ -177,18 +184,20 @@ func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, c
 	return result, nil
 }
 
-func recordWatchReplayMatchesCurrent(command recordcollaboration.WatchCommand, current recordcollaboration.WatchStatus) bool {
-	if command.ExpectedVersion >= math.MaxInt64 || current.RecordID != command.RecordID || current.UserID != command.Actor.UserID {
-		return false
+func loadRecordWatchResultFingerprint(
+	ctx context.Context,
+	tx pgx.Tx,
+	recordID string,
+	userID string,
+) (recordplatform.PersistedRequestFingerprintV1, error) {
+	var raw []byte
+	if err := tx.QueryRow(ctx, `
+		select preference_result_fingerprint
+		from public.record_followers
+		where record_id = $1 and user_id = $2`, recordID, userID).Scan(&raw); err != nil {
+		return recordplatform.PersistedRequestFingerprintV1{}, err
 	}
-	if command.Preference == recordcollaboration.FollowerPreferenceDefault {
-		if command.ExpectedVersion == 0 {
-			return current.Version == 0
-		}
-		return current.Version == 0 ||
-			(current.Version == command.ExpectedVersion+1 && current.Preference == recordcollaboration.FollowerPreferenceDefault)
-	}
-	return current.Version == command.ExpectedVersion+1 && current.Preference == command.Preference
+	return recordplatform.ParseTrustedPersistedRequestFingerprintV1(raw)
 }
 
 func (repository *PostgresRecordWatchRepository) GetWatch(ctx context.Context, command recordcollaboration.WatchReadCommand) (recordcollaboration.WatchStatus, error) {
@@ -310,9 +319,9 @@ func loadRecordWatchStatus(ctx context.Context, tx pgx.Tx, recordID, userID stri
 	return status, nil
 }
 
-func nextRecordWatchPreference(current recordcollaboration.WatchStatus, preference recordcollaboration.FollowerPreference, fenceEpoch uint64) (recordcollaboration.WatchStatus, bool, error) {
+func nextRecordWatchPreference(current recordcollaboration.WatchStatus, preference recordcollaboration.FollowerPreference, fenceEpoch uint64) (recordcollaboration.WatchStatus, error) {
 	if recordcollaboration.ValidateFollowerPreference(preference) != nil || current.Validate() != nil || current.Version >= math.MaxInt64 || fenceEpoch > math.MaxInt64 {
-		return recordcollaboration.WatchStatus{}, false, recordcollaboration.ErrInvalidWatchCommand
+		return recordcollaboration.WatchStatus{}, recordcollaboration.ErrInvalidWatchCommand
 	}
 	next := current
 	if next.Version == 0 {
@@ -323,12 +332,7 @@ func nextRecordWatchPreference(current recordcollaboration.WatchStatus, preferen
 	next.Preference = preference
 	next.RecordFenceEpoch = fenceEpoch
 	next.UpdatedAt = time.Time{}
-	if preference == recordcollaboration.FollowerPreferenceDefault && !next.Sources.Any() {
-		next.Version = 0
-		next.UpdatedAt = time.Time{}
-		return next, true, nil
-	}
-	return next, false, nil
+	return next, nil
 }
 
 var _ recordcollaboration.WatchStore = (*PostgresRecordWatchRepository)(nil)

@@ -24,14 +24,14 @@ func TestPostgresRecordWatchRepositoryFailsClosedWithoutAdmission(t *testing.T) 
 	}
 }
 
-func TestNextRecordWatchPreferencePreservesAutomaticSourcesAndDeletesOnlyEmptyDefault(t *testing.T) {
+func TestNextRecordWatchPreferencePreservesAutomaticSourcesAndNeverResetsExistingVersion(t *testing.T) {
 	absent := recordcollaboration.WatchStatus{
 		RecordID: "rec_watch1", UserID: "usr_aaaaaaaaaaaaaaaaaaaaaaaa",
 		Preference: recordcollaboration.FollowerPreferenceDefault,
 	}
-	next, remove, err := nextRecordWatchPreference(absent, recordcollaboration.FollowerPreferenceWatching, 3)
-	if err != nil || remove || next.Version != 1 || next.Preference != recordcollaboration.FollowerPreferenceWatching || next.RecordFenceEpoch != 3 {
-		t.Fatalf("absent next/remove/error = %#v/%v/%v", next, remove, err)
+	next, err := nextRecordWatchPreference(absent, recordcollaboration.FollowerPreferenceWatching, 3)
+	if err != nil || next.Version != 1 || next.Preference != recordcollaboration.FollowerPreferenceWatching || next.RecordFenceEpoch != 3 {
+		t.Fatalf("absent next/error = %#v/%v", next, err)
 	}
 
 	current := recordcollaboration.WatchStatus{
@@ -41,17 +41,17 @@ func TestNextRecordWatchPreferencePreservesAutomaticSourcesAndDeletesOnlyEmptyDe
 		RecordFenceEpoch: 2,
 		UpdatedAt:        time.Date(2026, 8, 17, 3, 0, 0, 0, time.UTC),
 	}
-	next, remove, err = nextRecordWatchPreference(current, recordcollaboration.FollowerPreferenceDefault, 3)
-	if err != nil || remove || next.Version != 5 || next.Preference != recordcollaboration.FollowerPreferenceDefault ||
+	next, err = nextRecordWatchPreference(current, recordcollaboration.FollowerPreferenceDefault, 3)
+	if err != nil || next.Version != 5 || next.Preference != recordcollaboration.FollowerPreferenceDefault ||
 		!next.Sources.Author || !next.Sources.Participant || !next.Sources.Comment || next.RecordFenceEpoch != 3 {
-		t.Fatalf("next/remove/error = %#v/%v/%v", next, remove, err)
+		t.Fatalf("next/error = %#v/%v", next, err)
 	}
 
 	empty := current
 	empty.Sources = recordcollaboration.FollowerSources{}
 	empty.Preference = recordcollaboration.FollowerPreferenceWatching
-	next, remove, err = nextRecordWatchPreference(empty, recordcollaboration.FollowerPreferenceDefault, 3)
-	if err != nil || !remove || next.Version != 0 || next.Preference != recordcollaboration.FollowerPreferenceDefault || next.Sources.Any() {
-		t.Fatalf("empty default next/remove/error = %#v/%v/%v", next, remove, err)
+	next, err = nextRecordWatchPreference(empty, recordcollaboration.FollowerPreferenceDefault, 3)
+	if err != nil || next.Version != 5 || next.Preference != recordcollaboration.FollowerPreferenceDefault || next.Sources.Any() {
+		t.Fatalf("empty default next/error = %#v/%v", next, err)
 	}
 }

@@ -111,6 +111,24 @@ func TestPortabilityAdapterRejectsRedactedContentAndClonesBackupRestore(t *testi
 	}
 }
 
+func TestPortabilitySnapshotAllowsContentFreeVersionedDefaultWatchAnchor(t *testing.T) {
+	t.Parallel()
+	snapshot := validPortableAggregateSnapshot(t)
+	stamp := time.Date(2026, time.August, 17, 19, 0, 0, 0, time.UTC)
+	snapshot.Followers = append(snapshot.Followers, PortableFollower{
+		UserID: "usr_cccccccccccccccccccccccc", Version: 2,
+		Preference: FollowerPreferenceDefault, WatchReplayAnchor: true,
+		CreatedAt: stamp.Add(-time.Minute), UpdatedAt: stamp,
+	})
+	if err := snapshot.Validate(); err != nil {
+		t.Fatalf("Validate(versioned default watch anchor) error = %v", err)
+	}
+	snapshot.Followers[0].WatchReplayAnchor = false
+	if err := snapshot.Validate(); !errors.Is(err, ErrInvalidPortabilitySnapshot) {
+		t.Fatalf("Validate(unanchored default without sources) error = %v", err)
+	}
+}
+
 func TestProvidersRejectTypedNilDependenciesTransactionsAndInvalidFacts(t *testing.T) {
 	t.Parallel()
 

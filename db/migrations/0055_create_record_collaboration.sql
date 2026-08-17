@@ -199,6 +199,8 @@ create table if not exists public.record_followers (
   follower_version bigint not null check (follower_version > 0),
   manual_preference text not null default 'default'
     check (manual_preference in ('default', 'watching', 'muted')),
+  preference_result_fingerprint bytea
+    check (preference_result_fingerprint is null or octet_length(preference_result_fingerprint) = 32),
   follows_author boolean not null default false,
   follows_owner boolean not null default false,
   follows_participant boolean not null default false,
@@ -209,7 +211,10 @@ create table if not exists public.record_followers (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (record_id, user_id),
-  constraint record_followers_source_check check (manual_preference <> 'default' or follows_author or follows_owner or follows_participant or follows_comment or follows_mention or follows_action),
+  constraint record_followers_source_check check (
+    manual_preference <> 'default' or follows_author or follows_owner or follows_participant or
+    follows_comment or follows_mention or follows_action or preference_result_fingerprint is not null
+  ),
   check (updated_at >= created_at),
   foreign key (record_id) references public.records(record_id)
     on delete restrict
@@ -516,7 +521,8 @@ begin
   end if;
   delete from public.record_followers
     where record_id = p_record_id and user_id = p_user_id
-      and follower_version = p_expected_version and record_fence_epoch = p_fence_epoch;
+      and follower_version = p_expected_version and record_fence_epoch = p_fence_epoch
+      and preference_result_fingerprint is null;
   get diagnostics v_rows = row_count;
   if exists (
     select 1 from public.deletion_reservations
@@ -567,7 +573,8 @@ begin
     where record_id = p_record_id and record_fence_epoch = p_fence_epoch
       and not (user_id = any(p_keep_user_ids))
       and manual_preference = 'default'
-      and not follows_comment and not follows_mention and not follows_action;
+      and not follows_comment and not follows_mention and not follows_action
+      and preference_result_fingerprint is null;
   get diagnostics v_rows = row_count;
   if exists (
     select 1 from public.deletion_reservations

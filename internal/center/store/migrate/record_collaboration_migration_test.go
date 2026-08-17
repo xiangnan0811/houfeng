@@ -92,6 +92,19 @@ func TestRecordCollaborationMigrationExtendsExistingOutboxWithIdentityOnlySource
 	}
 }
 
+func TestRecordCollaborationMigrationBindsWatchReplayToContentFreeOperationFingerprint(t *testing.T) {
+	followerSQL := normalizedRecordCollaborationTableDefinition(t, recordCollaborationMigrationSQL(t), "record_followers")
+	if want := "preference_result_fingerprint bytea check (preference_result_fingerprint is null or octet_length(preference_result_fingerprint) = 32)"; !strings.Contains(followerSQL, want) {
+		t.Fatalf("0055 record_followers missing watch replay marker %q", want)
+	}
+	if want := "manual_preference <> 'default' or follows_author or follows_owner or follows_participant or follows_comment or follows_mention or follows_action or preference_result_fingerprint is not null"; !strings.Contains(followerSQL, want) {
+		t.Fatalf("0055 record_followers must retain versioned default replay anchors with %q", want)
+	}
+	if sql := recordCollaborationMigrationSQL(t); !strings.Contains(sql, "and preference_result_fingerprint is null") {
+		t.Fatal("0055 controlled follower pruning must preserve watch replay anchors")
+	}
+}
+
 func TestRecordCollaborationMigrationBindsEveryRecordSurfaceToFenceEpoch(t *testing.T) {
 	sql := recordCollaborationMigrationSQL(t)
 	for _, table := range []string{
@@ -254,7 +267,8 @@ func TestRecordCollaborationMigrationEnforcesReplyMentionFollowerAndInboxIdentit
 		"check (child_comment_id <> parent_comment_id)",
 		"primary key (comment_id, comment_version, mentioned_user_id)",
 		"manual_preference text not null default 'default' check (manual_preference in ('default', 'watching', 'muted'))",
-		"constraint record_followers_source_check check (manual_preference <> 'default' or follows_author or follows_owner or follows_participant or follows_comment or follows_mention or follows_action)",
+		"constraint record_followers_source_check",
+		"preference_result_fingerprint is not null",
 		"reason_kind text not null check (reason_kind in ('owner', 'participant', 'assignee', 'mention', 'reply', 'follower', 'security'))",
 		"constraint record_notification_recipients_mandatory_check check (mandatory = (reason_kind in ('assignee', 'mention', 'security')))",
 		"check (read_at is null or read_at >= created_at)",

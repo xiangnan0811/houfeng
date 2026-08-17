@@ -554,6 +554,7 @@ func backupPortableFollowersAndAudits(ctx context.Context, tx pgx.Tx, binding re
 		select user_id, follower_version, manual_preference,
 		       follows_author, follows_owner, follows_participant,
 		       follows_comment, follows_mention, follows_action,
+		       preference_result_fingerprint is not null,
 		       created_at, updated_at
 		from public.record_followers
 		where project_id = $1 and record_id = $2 and record_fence_epoch = $3
@@ -568,6 +569,7 @@ func backupPortableFollowersAndAudits(ctx context.Context, tx pgx.Tx, binding re
 			&follower.UserID, &version, &follower.Preference,
 			&follower.Sources.Author, &follower.Sources.Owner, &follower.Sources.Participant,
 			&follower.Sources.Comment, &follower.Sources.Mention, &follower.Sources.Action,
+			&follower.WatchReplayAnchor,
 			&follower.CreatedAt, &follower.UpdatedAt,
 		); err != nil || version <= 0 {
 			rows.Close()
@@ -805,18 +807,22 @@ func restorePortableComments(ctx context.Context, tx pgx.Tx, binding recordcolla
 
 func restorePortableFollowers(ctx context.Context, tx pgx.Tx, binding recordcollaboration.RecordFenceBinding, snapshot recordcollaboration.PortabilitySnapshot) error {
 	for _, follower := range snapshot.Followers {
+		var replayAnchor []byte
+		if follower.WatchReplayAnchor {
+			replayAnchor = make([]byte, sha256.Size)
+		}
 		if _, err := tx.Exec(ctx, `
 			insert into public.record_followers (
 				project_id, record_id, user_id, follower_version, manual_preference,
 				follows_author, follows_owner, follows_participant,
 				follows_comment, follows_mention, follows_action,
-				record_fence_epoch, created_at, updated_at
-			) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+				preference_result_fingerprint, record_fence_epoch, created_at, updated_at
+			) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 			on conflict (record_id, user_id) do nothing`, binding.ProjectID(), binding.RecordID(),
 			follower.UserID, int64(follower.Version), follower.Preference,
 			follower.Sources.Author, follower.Sources.Owner, follower.Sources.Participant,
 			follower.Sources.Comment, follower.Sources.Mention, follower.Sources.Action,
-			int64(binding.Epoch()), follower.CreatedAt, follower.UpdatedAt,
+			replayAnchor, int64(binding.Epoch()), follower.CreatedAt, follower.UpdatedAt,
 		); err != nil {
 			return fmt.Errorf("restore collaboration follower: %w", err)
 		}

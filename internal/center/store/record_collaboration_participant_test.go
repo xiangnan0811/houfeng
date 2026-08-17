@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,6 +17,52 @@ import (
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
+
+func TestCollaborationRevisionFollowerPlanBoundsDeduplicatedDesiredUsersBeforeMembership(t *testing.T) {
+	t.Parallel()
+
+	participantIDs := func(count int) []string {
+		ids := make([]string, 0, count)
+		for index := 0; index < count; index++ {
+			ids = append(ids, fmt.Sprintf("usr_%024x", index+1))
+		}
+		return ids
+	}
+	exact := collaborationRevisionInput(t, collaborationRevisionInputValues{
+		ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: participantIDs(510),
+	})
+	plan, err := newCollaborationRevisionFollowerPlan(exact)
+	if err != nil || len(plan.userIDs) != 512 {
+		t.Fatalf("newCollaborationRevisionFollowerPlan(512) = (%#v, %v)", plan, err)
+	}
+
+	over := collaborationRevisionInput(t, collaborationRevisionInputValues{
+		ownerID: "usr_bbbbbbbbbbbbbbbbbbbbbbbb", participantIDs: participantIDs(511),
+	})
+	if plan, err := newCollaborationRevisionFollowerPlan(over); !errors.Is(err, recordcollaboration.ErrRevisionParticipationUnavailable) || len(plan.userIDs) != 0 {
+		t.Fatalf("newCollaborationRevisionFollowerPlan(513) = (%#v, %v), want bounded rejection", plan, err)
+	}
+
+	membershipCalls := 0
+	steps := make([]string, 0, 1)
+	participant := NewCollaborationRevisionParticipant(&collaborationMembershipReaderStub{read: func(
+		context.Context, pgx.Tx, recordauth.ProjectID, string,
+	) (recordauth.ActorScope, error) {
+		membershipCalls++
+		return recordauth.ActorScope{}, errors.New("membership must not run")
+	}})
+	err = participant.ApplyRevision(context.Background(), &fakeCollaborationParticipantTx{steps: &steps}, records.RevisionCommitted{
+		Result: records.RevisionCommitResult{
+			RecordID: "rec_collaborationbound", RevisionID: "rrv_collaborationbound", RevisionNo: 1,
+			LockVersion: 1, AuthorizationEpoch: 1, Created: true, CommittedAt: time.Now().UTC(),
+		},
+		Input: over, ActivityKind: records.DomainActivityRecordCreated,
+		OutboxTTL: time.Hour, Outbox: &collaborationRevisionOutboxStub{},
+	})
+	if !errors.Is(err, recordcollaboration.ErrRevisionParticipationUnavailable) || membershipCalls != 0 || len(steps) != 0 {
+		t.Fatalf("ApplyRevision(513) = error %v, membership %d, steps %#v", err, membershipCalls, steps)
+	}
+}
 
 func TestCollaborationRevisionParticipantAppliesMembershipFenceFollowersActivitiesAndOutboxInOrder(t *testing.T) {
 	t.Parallel()

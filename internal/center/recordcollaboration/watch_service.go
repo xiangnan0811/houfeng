@@ -46,7 +46,7 @@ func (status WatchStatus) Validate() error {
 		}
 		return nil
 	}
-	if status.UpdatedAt.IsZero() || (status.Preference == FollowerPreferenceDefault && !status.Sources.Any()) {
+	if status.UpdatedAt.IsZero() {
 		return ErrInvalidWatchCommand
 	}
 	return nil
@@ -78,7 +78,6 @@ type WatchCommand struct {
 	ExpectedVersion       uint64
 	Preference            FollowerPreference
 	Idempotency           recordplatform.IdempotencyClaimInputV1
-	ResultFingerprint     recordplatform.RequestFingerprintV1
 }
 
 func (command WatchCommand) Validate() error {
@@ -87,7 +86,7 @@ func (command WatchCommand) Validate() error {
 		ValidateFollowerPreference(command.Preference) != nil || command.Actor.ProjectID != recordauth.ProjectIDDefault ||
 		command.Idempotency.Key.ProjectID != recordplatform.ProjectIDDefault ||
 		command.Idempotency.Key.OperationKind != recordplatform.OperationKindRecordWatchPreference ||
-		command.Idempotency.Validate() != nil || command.ResultFingerprint.Validate() != nil {
+		command.Idempotency.Validate() != nil {
 		return ErrInvalidWatchCommand
 	}
 	return records.AuthorizeRecordResource(command.Actor, recordauth.CapabilityNotificationManage, command.AuthorizationEvidence)
@@ -155,25 +154,11 @@ func (service *WatchService) SetWatch(ctx context.Context, request WatchSetReque
 	if err != nil {
 		return WatchStatus{}, ErrInvalidWatchRequest
 	}
-	resultScope := actionCanonicalEncoder{}
-	resultScope.string(watchResultDomainV1)
-	resultScope.string(request.RecordID)
-	resultScope.string(actor.UserID)
-	resultScope.uint64(request.ExpectedVersion)
-	resultScope.string(string(request.Preference))
-	resultFingerprint, err := recordplatform.FingerprintRequestV1(recordplatform.RequestFingerprintInputV1{
-		Version: recordplatform.RequestFingerprintVersionV1, OperationKind: recordplatform.OperationKindRecordWatchPreference,
-		ProjectID: recordplatform.ProjectIDDefault, ActorScopeDigest: sha256.Sum256([]byte(actor.UserID)),
-		RequestScopeDigest: sha256.Sum256(resultScope.bytes), PayloadDigest: sha256.Sum256([]byte(watchResultDomainV1 + ":content-free")),
-	})
-	if err != nil {
-		return WatchStatus{}, ErrInvalidWatchRequest
-	}
 	command := WatchCommand{
 		Actor: actor, RecordID: request.RecordID, CurrentRevisionID: current.CurrentRevisionID,
 		RecordLockVersion: current.LockVersion, AuthorizationEpoch: current.AuthorizationEpoch,
 		AuthorizationEvidence: cloneActionAuthorizationEvidence(current.Evidence), ExpectedVersion: request.ExpectedVersion,
-		Preference: request.Preference, ResultFingerprint: resultFingerprint,
+		Preference: request.Preference,
 		Idempotency: recordplatform.IdempotencyClaimInputV1{Key: key, RequestFingerprint: fingerprint,
 			OwnerID: request.IdempotencyOwnerID, OwnerLeaseDuration: request.OwnerLeaseDuration, RecordTTL: request.IdempotencyTTL},
 	}
@@ -188,6 +173,45 @@ func (service *WatchService) SetWatch(ctx context.Context, request WatchSetReque
 		return WatchStatus{}, ErrWatchConflict
 	}
 	return result, nil
+}
+
+// ResultFingerprint binds a completed watch command to the exact content-free
+// status it returned and to its idempotency key. The foundation persists this
+// value; an existing follower row retains the same opaque marker and monotonic
+// version so later preference or automatic-source state cannot impersonate it.
+func (status WatchStatus) ResultFingerprint(key recordplatform.IdempotencyKey) (recordplatform.RequestFingerprintV1, error) {
+	if status.Validate() != nil || key.Validate() != nil || key.ProjectID != recordplatform.ProjectIDDefault ||
+		key.OperationKind != recordplatform.OperationKindRecordWatchPreference {
+		return recordplatform.RequestFingerprintV1{}, ErrInvalidWatchCommand
+	}
+	identity := actionCanonicalEncoder{}
+	identity.string(watchResultDomainV1)
+	identity.string(key.Key)
+	identity.string(status.RecordID)
+	identity.string(status.UserID)
+	identity.uint64(status.Version)
+	identity.string(string(status.Preference))
+	for _, source := range []bool{
+		status.Sources.Author, status.Sources.Owner, status.Sources.Participant,
+		status.Sources.Comment, status.Sources.Mention, status.Sources.Action,
+	} {
+		if source {
+			identity.uint64(1)
+		} else {
+			identity.uint64(0)
+		}
+	}
+	identity.uint64(status.RecordFenceEpoch)
+	if status.UpdatedAt.IsZero() {
+		identity.string("")
+	} else {
+		identity.string(status.UpdatedAt.UTC().Format(time.RFC3339Nano))
+	}
+	return recordplatform.FingerprintRequestV1(recordplatform.RequestFingerprintInputV1{
+		Version: recordplatform.RequestFingerprintVersionV1, OperationKind: recordplatform.OperationKindRecordWatchPreference,
+		ProjectID: recordplatform.ProjectIDDefault, ActorScopeDigest: sha256.Sum256([]byte(status.UserID)),
+		RequestScopeDigest: sha256.Sum256(identity.bytes), PayloadDigest: sha256.Sum256([]byte(watchResultDomainV1 + ":content-free")),
+	})
 }
 
 func (service *WatchService) GetWatch(ctx context.Context, request WatchReadRequest) (WatchStatus, error) {

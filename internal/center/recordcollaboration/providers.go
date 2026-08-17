@@ -220,8 +220,11 @@ type PortableFollower struct {
 	Version    uint64
 	Preference FollowerPreference
 	Sources    FollowerSources
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// WatchReplayAnchor discloses only that this row must retain its monotonic
+	// version; the opaque operation fingerprint itself is never portable.
+	WatchReplayAnchor bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // PortableNotificationAudit is deliberately content-free. It preserves only
@@ -563,7 +566,7 @@ func validatePortableCommentTombstone(tombstone PortableCommentTombstone) error 
 func validatePortableFollower(follower PortableFollower) error {
 	if recordauth.ValidateActorUserID(follower.UserID) != nil || follower.Version == 0 || follower.Version > math.MaxInt64 ||
 		ValidateFollowerPreference(follower.Preference) != nil ||
-		(follower.Preference == FollowerPreferenceDefault && !follower.Sources.Any()) ||
+		(follower.Preference == FollowerPreferenceDefault && !follower.Sources.Any() && !follower.WatchReplayAnchor) ||
 		!portableTimeCanonical(follower.CreatedAt) || !portableTimeCanonical(follower.UpdatedAt) ||
 		follower.UpdatedAt.Before(follower.CreatedAt) {
 		return ErrInvalidPortabilitySnapshot
