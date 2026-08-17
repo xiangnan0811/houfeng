@@ -80,15 +80,29 @@ func TestRecordCollaborationAppACLRestrictsAdminAndOneWayHistoryUpdates(t *testi
 	}
 }
 
-func TestRecordCollaborationAppACLDoesNotPregrantDirectPurgeOrHistoryReplacement(t *testing.T) {
-	allowedDelete := map[string]struct{}{
-		"record_followers":               {},
-		"record_notification_recipients": {},
+func TestRecordCollaborationAppACLGrantsDeleteOnlyForExactAdapterOwnedContent(t *testing.T) {
+	wantDelete := map[string]struct{}{
+		"record_actions":                        {},
+		"record_action_events":                  {},
+		"record_comments":                       {},
+		"record_comment_revisions":              {},
+		"record_comment_tombstones":             {},
+		"record_comment_replies":                {},
+		"record_comment_mentions":               {},
+		"record_followers":                      {},
+		"record_notifications":                  {},
+		"record_notification_recipients":        {},
+		"record_notification_deliveries":        {},
+		"record_notification_delivery_attempts": {},
 	}
+	gotDelete := make(map[string]struct{})
 	for _, privilege := range recordCollaborationAppACLCurrentPrivileges("") {
-		if _, ok := allowedDelete[privilege.ObjectIdentity]; privilege.Privilege == AppACLPrivilegeDelete && !ok {
-			t.Errorf("runtime receives premature direct DELETE on collaboration table %q", privilege.ObjectIdentity)
+		if privilege.Subject == AppACLSubjectCenterRuntime && privilege.Privilege == AppACLPrivilegeDelete {
+			gotDelete[privilege.ObjectIdentity] = struct{}{}
 		}
+	}
+	if !reflect.DeepEqual(gotDelete, wantDelete) {
+		t.Fatalf("runtime collaboration DELETE privileges = %#v, want %#v", gotDelete, wantDelete)
 	}
 }
 
@@ -229,7 +243,8 @@ func recordCollaborationExpectedAppACLPrivileges() []AppACLPrivilege {
 		"record_notification_deliveries",
 	} {
 		appendTable(runtime, table,
-			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate,
+			AppACLPrivilegeDelete)
 	}
 	appendTable(runtime, "record_notification_recipients",
 		AppACLPrivilegeSelect, AppACLPrivilegeInsert,
@@ -245,7 +260,8 @@ func recordCollaborationExpectedAppACLPrivileges() []AppACLPrivilege {
 		"record_notifications",
 		"record_notification_delivery_attempts",
 	} {
-		appendTable(runtime, table, AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+		appendTable(runtime, table,
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeDelete)
 	}
 	appendTable(runtime, "record_collaboration_purge_receipts",
 		AppACLPrivilegeSelect, AppACLPrivilegeInsert)

@@ -85,6 +85,22 @@ var recordEvidenceSurfaceNames = []SurfaceName{
 	"record_revision_evidence",
 }
 
+var recordCollaborationSurfaceNames = []SurfaceName{
+	"record_action_events",
+	"record_actions",
+	"record_collaboration_purge_receipts",
+	"record_comment_mentions",
+	"record_comment_replies",
+	"record_comment_revisions",
+	"record_comment_tombstones",
+	"record_comments",
+	"record_followers",
+	"record_notification_deliveries",
+	"record_notification_delivery_attempts",
+	"record_notification_recipients",
+	"record_notifications",
+}
+
 func RequiredAdapterNames() []AdapterName {
 	return append([]AdapterName(nil), requiredAdapterNames...)
 }
@@ -99,6 +115,10 @@ func RecordAttachmentsSurfaceNames() []SurfaceName {
 
 func RecordEvidenceSurfaceNames() []SurfaceName {
 	return append([]SurfaceName(nil), recordEvidenceSurfaceNames...)
+}
+
+func RecordCollaborationSurfaceNames() []SurfaceName {
+	return append([]SurfaceName(nil), recordCollaborationSurfaceNames...)
 }
 
 type AdapterDescriptor struct {
@@ -146,6 +166,9 @@ func (descriptor AdapterDescriptor) validate() error {
 	}
 	if descriptor.name == AdapterNameRecordEvidence && !slices.Equal(descriptor.surfaces, recordEvidenceSurfaceNames) {
 		return fmt.Errorf("%w: record_evidence surfaces", ErrInvalidAdapterDescriptor)
+	}
+	if descriptor.name == AdapterNameRecordCollaboration && !slices.Equal(descriptor.surfaces, recordCollaborationSurfaceNames) {
+		return fmt.Errorf("%w: record_collaboration surfaces", ErrInvalidAdapterDescriptor)
 	}
 	return nil
 }

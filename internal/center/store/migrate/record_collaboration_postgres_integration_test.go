@@ -397,8 +397,10 @@ func assertRecordCollaborationAppACLCurrentRolePrivileges(
 	if err != nil || deletedRecipient.RowsAffected() != 1 {
 		t.Fatalf("runtime narrow recipient reconciliation delete = %d/%v, want 1/nil", deletedRecipient.RowsAffected(), err)
 	}
-	_, err = runtimeDB.Exec(ctx, `delete from public.record_comments where comment_id = 'rcm_acl'`)
-	requirePostgresSQLState(t, err, "42501")
+	deletedMissing, err := runtimeDB.Exec(ctx, `delete from public.record_comments where comment_id = 'rcm_missing'`)
+	if err != nil || deletedMissing.RowsAffected() != 0 {
+		t.Fatalf("runtime collaboration adapter DELETE privilege = %d/%v, want 0/nil", deletedMissing.RowsAffected(), err)
+	}
 
 	_, err = runtimeDB.Exec(ctx, `update public.record_action_events set actor_id = 'usr_changed' where action_event_id = 'raev_acl'`)
 	requirePostgresSQLState(t, err, "42501")

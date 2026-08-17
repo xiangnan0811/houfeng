@@ -324,7 +324,8 @@ func recordCollaborationAppACLCurrentPrivileges(string) []AppACLPrivilege {
 		"record_notification_deliveries",
 	} {
 		appendTable(runtime, table,
-			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate,
+			AppACLPrivilegeDelete)
 	}
 	appendTable(runtime, "record_notification_recipients",
 		AppACLPrivilegeSelect, AppACLPrivilegeInsert,
@@ -340,7 +341,8 @@ func recordCollaborationAppACLCurrentPrivileges(string) []AppACLPrivilege {
 		"record_notifications",
 		"record_notification_delivery_attempts",
 	} {
-		appendTable(runtime, table, AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+		appendTable(runtime, table,
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeDelete)
 	}
 	appendTable(runtime, "record_collaboration_purge_receipts",
 		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
