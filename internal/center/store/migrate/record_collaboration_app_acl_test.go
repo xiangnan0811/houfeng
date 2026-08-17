@@ -98,7 +98,6 @@ func TestRecordCollaborationAppACLRevokesRawDeleteAndGrantsOnlyControlledDeleteF
 	}
 	wantExecute := map[string]struct{}{
 		"public.record_collaboration_purge(bytea)":                         {},
-		"public.record_collaboration_remove_follower(bytea)":               {},
 		"public.record_collaboration_prune_revision_followers(bytea)":      {},
 		"public.record_collaboration_prune_notification_recipients(bytea)": {},
 	}
@@ -195,7 +194,6 @@ func recordCollaborationExpectedAppACLObjects() []AppACLManagedObjectR1 {
 		"enforce_record_comment_mutation()",
 		"enforce_record_comment_revision_mutation()",
 		"purge_record_collaboration(text, text, text, text, bigint, bigint, bytea)",
-		"remove_record_follower(text, text, bigint, bigint)",
 		"prune_record_revision_followers(text, text[], bigint)",
 		"prune_record_notification_recipients(text, text, text[], bigint)",
 	} {
@@ -207,7 +205,6 @@ func recordCollaborationExpectedAppACLObjects() []AppACLManagedObjectR1 {
 	}
 	for _, identity := range []string{
 		"record_collaboration_purge(bytea)",
-		"record_collaboration_remove_follower(bytea)",
 		"record_collaboration_prune_revision_followers(bytea)",
 		"record_collaboration_prune_notification_recipients(bytea)",
 	} {
@@ -233,11 +230,9 @@ func recordCollaborationExpectedFunctionContracts() []AppACLCurrentFunctionContr
 			Config:          []string{"search_path=pg_catalog"},
 		},
 		{SchemaName: appACLManagedInternalSchemaR1, Identity: "purge_record_collaboration(text, text, text, text, bigint, bigint, bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
-		{SchemaName: appACLManagedInternalSchemaR1, Identity: "remove_record_follower(text, text, bigint, bigint)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
 		{SchemaName: appACLManagedInternalSchemaR1, Identity: "prune_record_revision_followers(text, text[], bigint)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
 		{SchemaName: appACLManagedInternalSchemaR1, Identity: "prune_record_notification_recipients(text, text, text[], bigint)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
 		{SchemaName: "public", Identity: "record_collaboration_purge(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
-		{SchemaName: "public", Identity: "record_collaboration_remove_follower(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
 		{SchemaName: "public", Identity: "record_collaboration_prune_revision_followers(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
 		{SchemaName: "public", Identity: "record_collaboration_prune_notification_recipients(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
 	}
@@ -290,7 +285,6 @@ func recordCollaborationExpectedAppACLPrivileges() []AppACLPrivilege {
 	appendTable(AppACLSubjectPlatformAdmin, "record_collaboration_purge_receipts", AppACLPrivilegeSelect)
 	for _, function := range []string{
 		"public.record_collaboration_purge(bytea)",
-		"public.record_collaboration_remove_follower(bytea)",
 		"public.record_collaboration_prune_revision_followers(bytea)",
 		"public.record_collaboration_prune_notification_recipients(bytea)",
 	} {

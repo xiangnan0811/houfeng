@@ -487,56 +487,6 @@ $$;
 
 revoke all on function record_platform_internal.purge_record_collaboration(text,text,text,text,bigint,bigint,bytea) from public;
 
-create or replace function record_platform_internal.remove_record_follower(
-  text, text, bigint, bigint
-)
-returns bigint
-language plpgsql
-security definer
-set search_path = pg_catalog
-as $$
-declare
-  p_record_id alias for $1;
-  p_user_id alias for $2;
-  p_expected_version alias for $3;
-  p_fence_epoch alias for $4;
-  v_rows bigint;
-begin
-  if p_record_id is null or p_user_id is null or p_expected_version <= 0 or p_fence_epoch < 0 then
-    raise exception using errcode = '55000', message = 'invalid follower removal';
-  end if;
-  perform 1 from public.content_delivery_epochs
-    where project_id = 'default' and object_kind = 'record' and object_id = p_record_id
-      and delivery_epoch = p_fence_epoch for share;
-  if not found or exists (
-    select 1 from public.deletion_reservations
-    where project_id = 'default' and object_kind = 'record' and object_id = p_record_id
-      and state in ('fenced', 'committed')
-  ) or exists (
-    select 1 from public.deletion_fence_leases
-    where project_id = 'default' and object_kind = 'record' and object_id = p_record_id
-      and expires_at > transaction_timestamp()
-  ) then
-    raise exception using errcode = '55000', message = 'follower removal fence unavailable';
-  end if;
-  delete from public.record_followers
-    where record_id = p_record_id and user_id = p_user_id
-      and follower_version = p_expected_version and record_fence_epoch = p_fence_epoch
-      and preference_result_fingerprint is null;
-  get diagnostics v_rows = row_count;
-  if exists (
-    select 1 from public.deletion_reservations
-    where project_id = 'default' and object_kind = 'record' and object_id = p_record_id
-      and state in ('fenced', 'committed')
-  ) then
-    raise exception using errcode = '55000', message = 'follower removal raced deletion';
-  end if;
-  return v_rows;
-end
-$$;
-
-revoke all on function record_platform_internal.remove_record_follower(text,text,bigint,bigint) from public;
-
 create or replace function record_platform_internal.prune_record_revision_followers(
   text, text[], bigint
 )
@@ -674,30 +624,6 @@ begin
 end
 $$;
 revoke all on function public.record_collaboration_purge(bytea) from public;
-
-create or replace function public.record_collaboration_remove_follower(bytea)
-returns bigint
-language plpgsql
-security definer
-set search_path = pg_catalog
-as $$
-declare p_command alias for $1; v jsonb;
-begin
-  if p_command is null or octet_length(p_command) not between 1 and 2048 then
-    raise exception using errcode = '55000', message = 'invalid follower removal command';
-  end if;
-  v := convert_from(p_command, 'UTF8')::jsonb;
-  if jsonb_typeof(v) <> 'object' or
-    array(select key from jsonb_object_keys(v) as key order by key) <>
-    array['fence_epoch','record_id','user_id','version']::text[] then
-    raise exception using errcode = '55000', message = 'invalid follower removal command';
-  end if;
-  return record_platform_internal.remove_record_follower(
-    v->>'record_id', v->>'user_id', (v->>'version')::bigint, (v->>'fence_epoch')::bigint
-  );
-end
-$$;
-revoke all on function public.record_collaboration_remove_follower(bytea) from public;
 
 create or replace function public.record_collaboration_prune_revision_followers(bytea)
 returns bigint

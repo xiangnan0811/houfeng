@@ -18,13 +18,6 @@ type collaborationPurgeFunctionCommand struct {
 	LedgerEntryHash string `json:"ledger_entry_hash"`
 }
 
-type collaborationRemoveFollowerFunctionCommand struct {
-	RecordID   string `json:"record_id"`
-	UserID     string `json:"user_id"`
-	Version    int64  `json:"version"`
-	FenceEpoch int64  `json:"fence_epoch"`
-}
-
 type collaborationPruneRevisionFollowersFunctionCommand struct {
 	RecordID    string   `json:"record_id"`
 	KeepUserIDs []string `json:"keep_user_ids"`

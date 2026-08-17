@@ -92,6 +92,54 @@ func TestPostgresIntegrationRecordWatchLifecycleReplayCASAndSourcePreservation(t
 	}
 }
 
+func TestPostgresIntegrationRecordWatchInitialDefaultCreatesMonotonicReplayAnchor(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	seedCollaborationRevisionUsers(t, ctx, fixture)
+	parent := seedPostgresActionParent(t, ctx, fixture, "rec_pgwatchinitial", "watch-initial-parent")
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-watch-initial-default", 2)
+	repository := NewPostgresRecordWatchRepository(
+		runtimePool, allowRecordPlatformAdmissionGate, NewPostgresCollaborationMembershipReader(),
+		newPostgresWatchAuthorizationSource(t, runtimePool),
+	)
+	initial := postgresWatchCommand(t, parent, 0, recordcollaboration.FollowerPreferenceDefault, "watch-initial-default", 0x17)
+	status, err := repository.SetWatch(ctx, initial)
+	if err != nil || status.Version != 1 || status.Preference != recordcollaboration.FollowerPreferenceDefault || status.Sources.Any() || status.UpdatedAt.IsZero() {
+		t.Fatalf("SetWatch(initial default) = (%#v, %v), want versioned replay anchor", status, err)
+	}
+	var markerBytes int
+	if err := fixture.db.QueryRow(ctx, `
+		select octet_length(preference_result_fingerprint)
+		from public.record_followers
+		where record_id = $1 and user_id = $2`, parent.RecordID, initial.Actor.UserID,
+	).Scan(&markerBytes); err != nil || markerBytes != 32 {
+		t.Fatalf("initial default marker = (%d, %v), want 32 bytes", markerBytes, err)
+	}
+	if replay, err := repository.SetWatch(ctx, initial); err != nil || replay != status {
+		t.Fatalf("SetWatch(initial default replay) = (%#v, %v), want %#v", replay, err, status)
+	}
+
+	if _, err := runtimePool.Exec(ctx, `
+		update public.record_followers
+		set follower_version = follower_version + 1,
+		    follows_owner = true,
+		    updated_at = transaction_timestamp()
+		where record_id = $1 and user_id = $2`, parent.RecordID, initial.Actor.UserID); err != nil {
+		t.Fatalf("add automatic source: %v", err)
+	}
+	if _, err := runtimePool.Exec(ctx, `
+		update public.record_followers
+		set follower_version = follower_version + 1,
+		    follows_owner = false,
+		    updated_at = transaction_timestamp()
+		where record_id = $1 and user_id = $2`, parent.RecordID, initial.Actor.UserID); err != nil {
+		t.Fatalf("remove automatic source: %v", err)
+	}
+	if replay, err := repository.SetWatch(ctx, initial); !errors.Is(err, recordplatform.ErrIdempotencyConflictState) || replay != (recordcollaboration.WatchStatus{}) {
+		t.Fatalf("SetWatch(initial replay after evolution) = (%#v, %v), want fail closed", replay, err)
+	}
+}
+
 func TestPostgresIntegrationRecordWatchRollsBackMutationWhenCompletionAdmissionFails(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)

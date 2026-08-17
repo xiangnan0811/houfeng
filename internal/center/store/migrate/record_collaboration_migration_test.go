@@ -103,6 +103,10 @@ func TestRecordCollaborationMigrationBindsWatchReplayToContentFreeOperationFinge
 	if sql := recordCollaborationMigrationSQL(t); !strings.Contains(sql, "and preference_result_fingerprint is null") {
 		t.Fatal("0055 controlled follower pruning must preserve watch replay anchors")
 	}
+	if strings.Contains(recordCollaborationMigrationSQL(t), "remove_record_follower") ||
+		strings.Contains(recordCollaborationMigrationSQL(t), "record_collaboration_remove_follower") {
+		t.Fatal("0055 must not retain an unused single-follower SECURITY DEFINER delete surface")
+	}
 }
 
 func TestRecordCollaborationMigrationBindsEveryRecordSurfaceToFenceEpoch(t *testing.T) {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math"
@@ -110,47 +111,44 @@ func (repository *PostgresRecordWatchRepository) SetWatch(ctx context.Context, c
 		if current.Version != command.ExpectedVersion {
 			return recordcollaboration.ErrWatchConflict
 		}
-		if current.Version == 0 && command.Preference == recordcollaboration.FollowerPreferenceDefault {
-			result = current
-		} else {
-			next, err := nextRecordWatchPreference(current, command.Preference, uint64(binding.Epoch()))
+		next, err := nextRecordWatchPreference(current, command.Preference, uint64(binding.Epoch()))
+		if err != nil {
+			return err
+		}
+		if current.Version == 0 {
+			var updatedAt time.Time
+			provisionalMarker := make([]byte, sha256.Size)
+			err := transaction.tx.QueryRow(ctx, `
+				insert into public.record_followers (
+					project_id, record_id, user_id, follower_version, manual_preference,
+					preference_result_fingerprint, record_fence_epoch, created_at, updated_at
+				) values ($1, $2, $3, 1, $4, $5, $6, transaction_timestamp(), transaction_timestamp())
+				returning updated_at`, recordplatform.ProjectIDDefault, command.RecordID, command.Actor.UserID,
+				string(command.Preference), provisionalMarker, int64(binding.Epoch())).Scan(&updatedAt)
 			if err != nil {
-				return err
+				return fmt.Errorf("insert record watch preference: %w", err)
 			}
-			if current.Version == 0 {
-				var updatedAt time.Time
-				err := transaction.tx.QueryRow(ctx, `
-					insert into public.record_followers (
-						project_id, record_id, user_id, follower_version, manual_preference,
-						record_fence_epoch, created_at, updated_at
-					) values ($1, $2, $3, 1, $4, $5, transaction_timestamp(), transaction_timestamp())
-					returning updated_at`, recordplatform.ProjectIDDefault, command.RecordID, command.Actor.UserID,
-					string(command.Preference), int64(binding.Epoch())).Scan(&updatedAt)
-				if err != nil {
-					return fmt.Errorf("insert record watch preference: %w", err)
-				}
-				next.UpdatedAt = updatedAt.UTC()
-				result = next
-			} else {
-				var updatedAt time.Time
-				err := transaction.tx.QueryRow(ctx, `
-					update public.record_followers
-					set follower_version = follower_version + 1,
-					    manual_preference = $4,
-					    record_fence_epoch = $5,
-					    updated_at = transaction_timestamp()
-					where record_id = $1 and user_id = $2 and follower_version = $3
-					returning updated_at`, command.RecordID, command.Actor.UserID, int64(current.Version),
-					string(command.Preference), int64(binding.Epoch())).Scan(&updatedAt)
-				if errors.Is(err, pgx.ErrNoRows) {
-					return recordcollaboration.ErrWatchConflict
-				}
-				if err != nil {
-					return fmt.Errorf("update record watch preference: %w", err)
-				}
-				next.UpdatedAt = updatedAt.UTC()
-				result = next
+			next.UpdatedAt = updatedAt.UTC()
+			result = next
+		} else {
+			var updatedAt time.Time
+			err := transaction.tx.QueryRow(ctx, `
+				update public.record_followers
+				set follower_version = follower_version + 1,
+				    manual_preference = $4,
+				    record_fence_epoch = $5,
+				    updated_at = transaction_timestamp()
+				where record_id = $1 and user_id = $2 and follower_version = $3
+				returning updated_at`, command.RecordID, command.Actor.UserID, int64(current.Version),
+				string(command.Preference), int64(binding.Epoch())).Scan(&updatedAt)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return recordcollaboration.ErrWatchConflict
 			}
+			if err != nil {
+				return fmt.Errorf("update record watch preference: %w", err)
+			}
+			next.UpdatedAt = updatedAt.UTC()
+			result = next
 		}
 		resultFingerprint, err := result.ResultFingerprint(command.Idempotency.Key)
 		if err != nil {
