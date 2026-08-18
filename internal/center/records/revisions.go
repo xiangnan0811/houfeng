@@ -228,6 +228,12 @@ func validRecordRootID(value string) bool {
 	return true
 }
 
+// ValidRevisionID exposes the revision identity grammar to derived read models
+// that pin a record to the revision they projected.
+func ValidRevisionID(value string) bool {
+	return validRevisionID(value)
+}
+
 func validRevisionID(value string) bool {
 	if len(value) < len("rrv_")+1 || len(value) > len("rrv_")+64 || value[:len("rrv_")] != "rrv_" {
 		return false

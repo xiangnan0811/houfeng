@@ -234,21 +234,34 @@ func invalidQuery(field string) error {
 // no surrounding whitespace, and single spaces between words. Without this a
 // retyped term produces a different digest and silently invalidates a cursor.
 func normalizeQueryText(value string) (string, error) {
+	collapsed, ok := foldSearchText(value)
+	if !ok {
+		return "", invalidQuery("text")
+	}
+	if utf8.RuneCountInString(collapsed) > MaxQueryTextRunes {
+		return "", invalidQuery("text length")
+	}
+	return collapsed, nil
+}
+
+// foldSearchText is shared by the query side and the projection side so a term
+// an operator types folds exactly like the text that was indexed. Divergence
+// here would make a document unfindable by its own words.
+func foldSearchText(value string) (string, bool) {
 	if value == "" {
-		return "", nil
+		return "", true
 	}
 	if !utf8.ValidString(value) {
-		return "", invalidQuery("text encoding")
+		return "", false
 	}
-	composed := norm.NFC.String(value)
 	var builder strings.Builder
 	pendingSpace := false
-	for _, character := range composed {
+	for _, character := range norm.NFC.String(value) {
 		switch {
 		case unicode.IsSpace(character):
 			pendingSpace = builder.Len() > 0
 		case character == utf8.RuneError, unicode.IsControl(character):
-			return "", invalidQuery("text control character")
+			return "", false
 		default:
 			if pendingSpace {
 				builder.WriteRune(' ')
@@ -257,11 +270,7 @@ func normalizeQueryText(value string) (string, error) {
 			builder.WriteRune(character)
 		}
 	}
-	collapsed := builder.String()
-	if utf8.RuneCountInString(collapsed) > MaxQueryTextRunes {
-		return "", invalidQuery("text length")
-	}
-	return collapsed, nil
+	return builder.String(), true
 }
 
 func normalizeRecordTypes(values []records.RecordType) ([]records.RecordType, error) {

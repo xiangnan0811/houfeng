@@ -327,6 +327,18 @@ func (repository *PostgresRecordRepository) CommitRecordLifecycle(
 			return err
 		}
 
+		if err := projectRecordSearchLifecycle(
+			ctx,
+			transaction.tx,
+			command.RecordID,
+			command.TargetLifecycle,
+			nextLockVersion,
+			nextAuthorizationEpoch,
+			changedAt,
+		); err != nil {
+			return err
+		}
+
 		result = records.RecordLifecycleResult{
 			RecordID:           command.RecordID,
 			CurrentRevisionID:  command.CurrentRevisionID,

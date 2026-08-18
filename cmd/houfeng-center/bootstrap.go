@@ -388,6 +388,7 @@ func newRecordsHTTPHandlers(
 		store.NewRecordAttachmentRevisionParticipant(),
 		store.NewCollaborationRevisionParticipant(collaborationMembers),
 		store.NewRecordEvidenceRevisionParticipant(),
+		store.NewRecordSearchRevisionParticipant(),
 	})
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record repository: %w", err)

@@ -29,6 +29,22 @@ func DeriveDocumentText(model recordmarkdown.DocumentRenderModel) (string, error
 	return truncateDocumentTextOnRuneBoundary(collapseDocumentSeparators(builder.String())), nil
 }
 
+// DeriveDocumentTextFromMarkdown flattens a stored body into indexable text.
+// A body the dialect cannot parse yields empty text rather than an error: the
+// index is derived, so a record whose searchable text cannot be produced must
+// still save and stay findable by its title.
+func DeriveDocumentTextFromMarkdown(source string, references []recordmarkdown.DocumentReference) string {
+	model, err := recordmarkdown.ParseDocumentMarkdownV1(source, references)
+	if err != nil {
+		return ""
+	}
+	text, err := DeriveDocumentText(model)
+	if err != nil {
+		return ""
+	}
+	return text
+}
+
 func appendDocumentNodeText(builder *strings.Builder, node recordmarkdown.DocumentRenderNode) {
 	switch node.Type {
 	case recordmarkdown.DocumentRenderNodeText,
