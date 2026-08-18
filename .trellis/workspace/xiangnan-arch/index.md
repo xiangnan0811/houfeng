@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 247
+- **Total Sessions**: 248
 - **Last Active**: 2026-08-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~526 | Active |
+| `journal-5.md` | ~567 | Active |
 | `journal-4.md` | ~1998 | Archived |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 248 | 2026-08-18 | Deliver VPS Records Markdown workspace | `796d6311`, `eed7d975`, `03864828`, `9c96d699`, `199d2a2b`, `d41c8630` | `codex/vps-records-markdown-workspace-archive` |
 | 247 | 2026-08-18 | Deliver VPS Records collaboration platform | `a3137864`, `ee208be1` | `codex/vps-records-collaboration-archive` |
 | 246 | 2026-08-10 | Upgrade Trellis to 0.6.14 native auto | `14f45348` | `codex/trellis-0.6.14-upgrade` |
 | 245 | 2026-08-09 | Complete VPS Records attachment storage delivery | `2b1ecfa3`, `b510b319`, `1887821c` | `codex/vps-records-attachments-storage` |
