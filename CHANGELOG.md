@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.68.0](https://github.com/xiangnan0811/houfeng/compare/v0.67.0...v0.68.0) (2026-08-18)
+
+
+### Features
+
+* **records:** add houfeng markdown document dialect ([796d631](https://github.com/xiangnan0811/houfeng/commit/796d63110f32be681075ea3e95f784358ba817b1))
+* **records:** Markdown 编辑、阅读、差异与材料工作区 ([d41c863](https://github.com/xiangnan0811/houfeng/commit/d41c8630b7d3d9e2b18a97caf6ca2618a0765f30))
+* **web:** add record markdown workspace ([eed7d97](https://github.com/xiangnan0811/houfeng/commit/eed7d975e86b7a7e65bd2c9d0575ba79a10cfbcf))
+
+
+### Documentation
+
+* **trellis:** record markdown workspace decisions ([199d2a2](https://github.com/xiangnan0811/houfeng/commit/199d2a2b71ac14b18177aa3f11f55cc1a29404a2))
+
 ## [0.67.0](https://github.com/xiangnan0811/houfeng/compare/v0.66.0...v0.67.0) (2026-08-17)
 
 
