@@ -133,6 +133,40 @@
   still earns its place by making the text filter indexed. Recency ordering also
   matches how an operator reads an incident archive.
 
+## Decisions taken during implementation
+
+- The content digest on `record_search_documents` covers projected content only
+  (revision identity, type/status/impact/owner, title, derived text, tags,
+  participants, subjects, occurrence dates, visibility). Lifecycle, lock version,
+  authorization epoch, fence epoch and the timestamps are deliberately outside
+  it. Those are stored plainly and compared column by column, which is what lets
+  the lifecycle path update the index in place. That mattered because
+  `CommitRecordLifecycle` writes no revision and therefore never runs revision
+  participants: without an in-place update an archived record would have kept
+  answering an active-only search.
+- The projector writes every generation in `published` or `building` state. A
+  shadow rebuild must receive live commits while it runs, or publishing the
+  rebuilt generation would drop records committed during the rebuild. The
+  `record_lock_version` / `record_fence_epoch` fence on the upsert is what keeps
+  a rebuild replaying an older snapshot from overwriting a newer live commit, and
+  subject edges are only rewritten for generations whose document that
+  transaction actually won.
+- A body the Markdown dialect cannot parse yields title-only indexed text rather
+  than an error. A derived index must never be the reason a record fails to save.
+- The search read service has to live in `recordsearch`, not `records`.
+  `recordsearch` already imports `records` for the registry vocabulary
+  (`RecordType`, `Lifecycle`, `SubjectKind`, …), so `records.RecordCandidatePage`
+  cannot carry a `recordsearch.Query` without an import cycle. Consequently
+  `records.RecordListRequest` keeps only sort and paging, the filter vocabulary
+  is not restated at the `records` layer, and the HTTP layer routes any filtered
+  or text query to the `recordsearch` service. That is also what retires
+  `matchesRecordQuery` without leaving two filter implementations.
+- Authorization stays out of SQL. The index stores a visibility digest, not the
+  grants, so the candidate query narrows by indexed facts only and every
+  candidate is still authorized through `recordauth.Policy` before it is
+  hydrated, exactly as `RecordReadService.ListRecords` does today. No total count
+  or facet may be reported over unauthorized candidates.
+
 ## Dispatch
 
 Cursor implements this child directly with Trellis native auto artifacts.
