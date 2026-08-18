@@ -53,6 +53,7 @@ type bootstrapDeps struct {
 	openPostgres                func(context.Context, string) (postgresDB, error)
 	applyMigrations             func(context.Context, postgresDB) error
 	admitRuntime                func(context.Context, postgresDB) error
+	ensureSearchGeneration      func(context.Context, postgresDB) error
 	seedInitialUser             func(context.Context, auth.UserRepository, config.CenterConfig) error
 	newSessionRepository        func(*pgxpool.Pool, []byte) (auth.SessionRepository, error)
 	newIncidentNotifier         func(config.CenterConfig, centersettings.Repository) incidentservice.Notifier
@@ -97,6 +98,12 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	default:
 		db.Close()
 		return nil, nil, fmt.Errorf("unknown record-platform mode %d", cfg.RecordPlatformMode)
+	}
+	// The search projector only writes published or building generations, so one
+	// has to exist before the first record commits or nothing would be indexed.
+	if err := deps.ensureSearchGeneration(ctx, db); err != nil {
+		db.Close()
+		return nil, nil, err
 	}
 
 	monitoringInstanceRepo := store.NewPostgresMonitoringInstanceRepositoryWithTokenHMACKey(db.Pool(), cfg.SessionHMACKey)
@@ -618,6 +625,11 @@ func (d bootstrapDeps) withDefaults() bootstrapDeps {
 	if d.admitRuntime == nil {
 		d.admitRuntime = func(ctx context.Context, db postgresDB) error {
 			return migrate.AdmitAppACLCurrentRuntime(ctx, db.Pool())
+		}
+	}
+	if d.ensureSearchGeneration == nil {
+		d.ensureSearchGeneration = func(ctx context.Context, db postgresDB) error {
+			return store.EnsurePublishedRecordSearchGeneration(ctx, db.Pool())
 		}
 	}
 	if d.seedInitialUser == nil {

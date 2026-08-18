@@ -165,6 +165,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	db := &fakePostgresDB{}
 	applyCalls := 0
 	admitCalls := 0
+	searchGenerationCalls := 0
 	var gotRouterOptions centerhttp.RouterOptions
 	var gotWorkers []centerapp.Worker
 
@@ -178,6 +179,10 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		},
 		admitRuntime: func(context.Context, postgresDB) error {
 			admitCalls++
+			return nil
+		},
+		ensureSearchGeneration: func(context.Context, postgresDB) error {
+			searchGenerationCalls++
 			return nil
 		},
 		seedInitialUser: func(context.Context, auth.UserRepository, config.CenterConfig) error {
@@ -206,6 +211,11 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	}
 	if admitCalls != 1 {
 		t.Fatalf("admitRuntime calls = %d, want 1", admitCalls)
+	}
+	// Without a published generation the search projector writes nothing, so
+	// bootstrap has to guarantee one exists before the first record commits.
+	if searchGenerationCalls != 1 {
+		t.Fatalf("ensureSearchGeneration calls = %d, want 1", searchGenerationCalls)
 	}
 	if len(gotWorkers) != 5 {
 		t.Fatalf("runtime workers = %d, want evidence maintenance disabled until Child 10 supplies admission", len(gotWorkers))
@@ -366,6 +376,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 			return db, nil
 		},
 		applyMigrations: func(context.Context, postgresDB) error {
+			return nil
+		},
+		ensureSearchGeneration: func(context.Context, postgresDB) error {
 			return nil
 		},
 		seedInitialUser: func(context.Context, auth.UserRepository, config.CenterConfig) error {

@@ -259,6 +259,56 @@ func TestPostgresIntegrationRecordSearchProjectionFollowsLifecycle(t *testing.T)
 	}
 }
 
+// Bootstrap runs on every start, so it has to create the first published
+// generation and then leave it alone. Publishing a second one would break the
+// single-published-generation invariant that every query depends on.
+func TestPostgresIntegrationEnsurePublishedRecordSearchGenerationIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	pool := fixture.openDirectRuntimePool(t, ctx, "record-search-bootstrap", 1)
+
+	for attempt := range 3 {
+		if err := EnsurePublishedRecordSearchGeneration(ctx, pool); err != nil {
+			t.Fatalf("EnsurePublishedRecordSearchGeneration() attempt %d error = %v", attempt+1, err)
+		}
+	}
+	var publishedCount, totalCount int
+	if err := fixture.db.QueryRow(ctx, `
+		select (select count(*)::int from public.record_search_generations where generation_state = 'published'),
+		       (select count(*)::int from public.record_search_generations)`).Scan(&publishedCount, &totalCount); err != nil {
+		t.Fatalf("count generations: %v", err)
+	}
+	if publishedCount != 1 || totalCount != 1 {
+		t.Fatalf("generations = %d published of %d total, want exactly one", publishedCount, totalCount)
+	}
+}
+
+// A generation number is never reused, so bootstrapping after a failed rebuild
+// has to publish the next number rather than collide with the failed row.
+func TestPostgresIntegrationEnsurePublishedRecordSearchGenerationSkipsUsedNumbers(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	pool := fixture.openDirectRuntimePool(t, ctx, "record-search-bootstrap-skip", 1)
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.record_search_generations (generation, generation_state, failure_reason)
+		values (1, 'failed', 'rebuild_aborted')`); err != nil {
+		t.Fatalf("seed failed generation: %v", err)
+	}
+
+	if err := EnsurePublishedRecordSearchGeneration(ctx, pool); err != nil {
+		t.Fatalf("EnsurePublishedRecordSearchGeneration() error = %v", err)
+	}
+	var published int64
+	if err := fixture.db.QueryRow(ctx, `
+		select generation from public.record_search_generations
+		where generation_state = 'published'`).Scan(&published); err != nil {
+		t.Fatalf("read published generation: %v", err)
+	}
+	if published != 2 {
+		t.Fatalf("published generation = %d, want 2 after a failed generation 1", published)
+	}
+}
+
 func seedRecordSearchGeneration(
 	t *testing.T,
 	ctx context.Context,
