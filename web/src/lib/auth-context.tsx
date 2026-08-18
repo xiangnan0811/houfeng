@@ -38,9 +38,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(async () => {
+    const userId = user?.user_id ?? ''
     await client.logout()
     setUser(null)
-  }, [])
+    void import('../pages/records/draftBuffer').then((mod) => mod.discardUserDrafts(userId))
+    void import('./recordSecurity').then((mod) => mod.broadcastRecordSessionEnd(userId, 'logout'))
+  }, [user])
 
   return <Ctx.Provider value={{ user, loading, login, logout, refresh }}>{children}</Ctx.Provider>
 }

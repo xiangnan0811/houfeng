@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { PageState } from '../components/PageState'
 import { Button, MonoDigits, Timestamp } from '../components/atoms'
@@ -224,6 +225,7 @@ export function RecordInboxPage() {
                 <div className="record-inbox-item__commands page-form-actions">
                   <Button size="sm" variant="secondary" disabled={busy}
                     aria-label={`查看“${label}”的对象`} onClick={() => void resolveTarget(item)}>查看对象</Button>
+                  <Link className="btn sm secondary" to={`/records/${item.record_id}`}>打开记录</Link>
                   <Button size="sm" variant="ghost" disabled={busy}
                     aria-label={`标记“${label}”为${item.read_at === null ? '已读' : '未读'}`}
                     onClick={() => void changeReadState(item)}>{item.read_at === null ? '标记已读' : '标记未读'}</Button>

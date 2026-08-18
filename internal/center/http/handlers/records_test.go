@@ -15,6 +15,7 @@ import (
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordmarkdown"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store"
@@ -368,7 +369,15 @@ func TestRecordsHandlerGetsAllowlistedCurrentRecordWithoutAuthorizationEvidence(
 			Tags                []string `json:"tags"`
 			AttachmentIDs       []string `json:"attachment_ids"`
 			EvidenceSnapshotIDs []string `json:"evidence_snapshot_ids"`
-			Subjects            []struct {
+			RenderModel         *struct {
+				Version string `json:"version"`
+				Nodes   []struct {
+					Type  string `json:"type"`
+					Level uint64 `json:"level"`
+				} `json:"nodes"`
+			} `json:"render_model"`
+			RenderModelStatus string `json:"render_model_status"`
+			Subjects          []struct {
 				SourceID string `json:"source_id"`
 				Identity struct {
 					DisplayName string `json:"display_name"`
@@ -389,8 +398,40 @@ func TestRecordsHandlerGetsAllowlistedCurrentRecordWithoutAuthorizationEvidence(
 		response.Current.Subjects[0].Identity.Provider != "Example Cloud" ||
 		response.Current.Participants == nil || response.Current.AttachmentIDs == nil ||
 		!reflect.DeepEqual(response.Current.AttachmentIDs, []string{"att_httpfirst", "att_httpsecond"}) ||
-		!reflect.DeepEqual(response.Current.EvidenceSnapshotIDs, []string{"evs_httpcontract"}) {
+		!reflect.DeepEqual(response.Current.EvidenceSnapshotIDs, []string{"evs_httpcontract"}) ||
+		response.Current.RenderModel == nil || response.Current.RenderModel.Version != "houfeng_markdown/v1" ||
+		len(response.Current.RenderModel.Nodes) == 0 || response.Current.RenderModel.Nodes[0].Type != "heading" ||
+		response.Current.RenderModelStatus != "ready" {
 		t.Fatalf("response = %#v", response)
+	}
+}
+
+// A body the document dialect cannot represent must say so, otherwise the client
+// cannot tell a missing render model from an empty one.
+func TestRecordRevisionResponseReportsRenderModelStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus recordmarkdown.DocumentRenderStatus
+		wantModel  bool
+	}{
+		{name: "supported body", body: "# Details\n\nRecovered.", wantStatus: "ready", wantModel: true},
+		{name: "nested list body", body: "- outer\n  - inner", wantStatus: "unsupported"},
+		{name: "unterminated fence body", body: "# Details\n\n```sh\nls", wantStatus: "unsupported"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actor := mustRecordsHandlerActor(t)
+			revision := mustRecordsHandlerRecord(t, actor).Current
+			revision.Input = mustRecordsHandlerRevisionInputWithBody(t, actor, test.body)
+			response := newRecordRevisionResponse(revision)
+			if response.RenderModelStatus != test.wantStatus {
+				t.Fatalf("render_model_status = %q, want %q", response.RenderModelStatus, test.wantStatus)
+			}
+			if test.wantModel != (response.RenderModel != nil) {
+				t.Fatalf("render model present = %v, want %v", response.RenderModel != nil, test.wantModel)
+			}
+		})
 	}
 }
 
@@ -1048,9 +1089,69 @@ func mustRecordsHandlerRecord(t *testing.T, actor recordauth.ActorScope) records
 	if err != nil {
 		t.Fatalf("NormalizeSourceAuthorization() error = %v", err)
 	}
+	input := mustRecordsHandlerRevisionInput(t, actor, visibility, authorization, "# Details\nRecovered.")
+	createdAt := time.Date(2026, time.August, 3, 14, 0, 0, 0, time.UTC)
+	return records.Record{
+		RecordID:           "rec_httpcontract",
+		Lifecycle:          records.LifecycleActive,
+		CurrentRevisionID:  "rrv_httpcontract",
+		LockVersion:        7,
+		AuthorizationEpoch: 5,
+		Current: records.RecordRevision{
+			RecordID:   "rec_httpcontract",
+			RevisionID: "rrv_httpcontract",
+			RevisionNo: 1,
+			Input:      input,
+			CreatedAt:  createdAt,
+		},
+		Capabilities: records.RecordCapabilities{Read: true, Update: true, Archive: true, Draft: true},
+		CreatedAt:    createdAt,
+		UpdatedAt:    createdAt,
+	}
+}
+
+func mustRecordsHandlerRevisionInputWithBody(
+	t *testing.T,
+	actor recordauth.ActorScope,
+	body string,
+) records.CompleteRevisionInput {
+	t.Helper()
+	visibility, err := recordauth.NormalizeVisibilityScope(recordauth.VisibilityScope{
+		Version:        recordauth.VisibilityScopeVersionV1,
+		Kind:           recordauth.VisibilityKindProject,
+		ProjectID:      actor.ProjectID,
+		PolicyVersion:  recordauth.PolicyVersionV1,
+		PolicyRevision: 1,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeVisibilityScope() error = %v", err)
+	}
+	currentScope := visibility
+	authorization, err := recordauth.NormalizeSourceAuthorization(recordauth.SourceAuthorization{
+		Version:      recordauth.SourceAuthorizationVersionV1,
+		Kind:         recordauth.SourceKindVPS,
+		SourceID:     "vps_0123456789abcdef",
+		State:        recordauth.SourceStateLive,
+		CaptureScope: visibility,
+		CurrentScope: &currentScope,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeSourceAuthorization() error = %v", err)
+	}
+	return mustRecordsHandlerRevisionInput(t, actor, visibility, authorization, body)
+}
+
+func mustRecordsHandlerRevisionInput(
+	t *testing.T,
+	actor recordauth.ActorScope,
+	visibility recordauth.VisibilityScope,
+	authorization recordauth.SourceAuthorization,
+	body string,
+) records.CompleteRevisionInput {
+	t.Helper()
 	input, err := records.NormalizeCompleteRevisionInput(records.CompleteRevisionValues{
 		Title:                  "Database outage",
-		BodyMarkdown:           "# Details\nRecovered.",
+		BodyMarkdown:           body,
 		MarkdownDialectVersion: records.MarkdownDialectVersionV1,
 		RecordType:             records.RecordTypeNote,
 		ImpactLevel:            "high",
@@ -1074,24 +1175,7 @@ func mustRecordsHandlerRecord(t *testing.T, actor recordauth.ActorScope) records
 	if err != nil {
 		t.Fatalf("NormalizeCompleteRevisionInput() error = %v", err)
 	}
-	createdAt := time.Date(2026, time.August, 3, 14, 0, 0, 0, time.UTC)
-	return records.Record{
-		RecordID:           "rec_httpcontract",
-		Lifecycle:          records.LifecycleActive,
-		CurrentRevisionID:  "rrv_httpcontract",
-		LockVersion:        7,
-		AuthorizationEpoch: 5,
-		Current: records.RecordRevision{
-			RecordID:   "rec_httpcontract",
-			RevisionID: "rrv_httpcontract",
-			RevisionNo: 1,
-			Input:      input,
-			CreatedAt:  createdAt,
-		},
-		Capabilities: records.RecordCapabilities{Read: true, Update: true, Archive: true, Draft: true},
-		CreatedAt:    createdAt,
-		UpdatedAt:    createdAt,
-	}
+	return input
 }
 
 func mustRecordsHandlerDraft(

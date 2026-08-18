@@ -1,0 +1,193 @@
+{
+  "contract_version": "houfeng_markdown/v1",
+  "shared_comment_contract": "comment_markdown/v1",
+  "cases": [
+    {
+      "name": "heading paragraph and list",
+      "source": "# Outage\n\nService recovered.\n\n- inspect\n- repair",
+      "valid": true,
+      "model": {
+        "version": "houfeng_markdown/v1",
+        "nodes": [
+          {"type": "heading", "level": 1, "children": [{"type": "text", "text": "Outage"}]},
+          {"type": "paragraph", "children": [{"type": "text", "text": "Service recovered."}]},
+          {
+            "type": "unordered_list",
+            "items": [
+              [{"type": "text", "text": "inspect"}],
+              [{"type": "text", "text": "repair"}]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "blockquote thematic break and table",
+      "source": "> keep the window\n\n---\n\n| metric | value |\n| --- | --- |\n| loss | 3% |",
+      "valid": true,
+      "model": {
+        "version": "houfeng_markdown/v1",
+        "nodes": [
+          {
+            "type": "blockquote",
+            "children": [
+              {"type": "paragraph", "children": [{"type": "text", "text": "keep the window"}]}
+            ]
+          },
+          {"type": "thematic_break"},
+          {
+            "type": "table",
+            "header": [
+              [{"type": "text", "text": "metric"}],
+              [{"type": "text", "text": "value"}]
+            ],
+            "rows": [
+              [
+                [{"type": "text", "text": "loss"}],
+                [{"type": "text", "text": "3%"}]
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "task list and footnote",
+      "source": "- [x] execute\n- [ ] verify\n\nSee the note[^1].\n\n[^1]: captured after retry",
+      "valid": true,
+      "model": {
+        "version": "houfeng_markdown/v1",
+        "nodes": [
+          {
+            "type": "task_list",
+            "items": [
+              {"checked": true, "children": [{"type": "text", "text": "execute"}]},
+              {"checked": false, "children": [{"type": "text", "text": "verify"}]}
+            ]
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {"type": "text", "text": "See the note"},
+              {"type": "footnote_ref", "text": "1"},
+              {"type": "text", "text": "."}
+            ]
+          },
+          {
+            "type": "footnote_def",
+            "text": "1",
+            "children": [
+              {"type": "paragraph", "children": [{"type": "text", "text": "captured after retry"}]}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "authorized evidence and attachment refs",
+      "source": "<!-- houfeng-ref:v1 evidence ev_7K2P -->\n[系统证据：第三晚 TCP 观测](houfeng-evidence:ev_7K2P)\n\n<!-- houfeng-ref:v1 attachment att_4D8M -->\n[用户附件：mtr-third-night.png](houfeng-attachment:att_4D8M)",
+      "valid": true,
+      "authorized_references": [
+        {"kind": "evidence", "id": "ev_7K2P"},
+        {"kind": "attachment", "id": "att_4D8M"}
+      ],
+      "model": {
+        "version": "houfeng_markdown/v1",
+        "nodes": [
+          {
+            "type": "reference",
+            "kind": "evidence",
+            "id": "ev_7K2P",
+            "children": [{"type": "text", "text": "系统证据：第三晚 TCP 观测"}]
+          },
+          {
+            "type": "reference",
+            "kind": "attachment",
+            "id": "att_4D8M",
+            "children": [{"type": "text", "text": "用户附件：mtr-third-night.png"}]
+          }
+        ]
+      }
+    },
+    {
+      "name": "heading with shell fenced code",
+      "source": "# 处置记录\n\n```sh\n# 重启探针\nsystemctl restart houfeng-agent\n```\n\n处置完成。",
+      "valid": true,
+      "model": {
+        "version": "houfeng_markdown/v1",
+        "nodes": [
+          {"type": "heading", "level": 1, "children": [{"type": "text", "text": "处置记录"}]},
+          {"type": "fenced_code", "text": "# 重启探针\nsystemctl restart houfeng-agent\n"},
+          {"type": "paragraph", "children": [{"type": "text", "text": "处置完成。"}]}
+        ]
+      }
+    },
+    {
+      "name": "table citing footnote",
+      "source": "| 主机 | 结论 |\n| --- | --- |\n| alpha | 见备注[^1] |\n\n[^1]: 第三晚复现",
+      "valid": true,
+      "model": {
+        "version": "houfeng_markdown/v1",
+        "nodes": [
+          {
+            "type": "table",
+            "header": [
+              [{"type": "text", "text": "主机"}],
+              [{"type": "text", "text": "结论"}]
+            ],
+            "rows": [
+              [
+                [{"type": "text", "text": "alpha"}],
+                [{"type": "text", "text": "见备注"}, {"type": "footnote_ref", "text": "1"}]
+              ]
+            ]
+          },
+          {
+            "type": "footnote_def",
+            "text": "1",
+            "children": [{"type": "paragraph", "children": [{"type": "text", "text": "第三晚复现"}]}]
+          }
+        ]
+      }
+    },
+    {
+      "name": "nested list is not representable",
+      "source": "- 排查\n  - 磁盘\n  - 网络",
+      "valid": false
+    },
+    {
+      "name": "empty document",
+      "source": "",
+      "valid": true,
+      "model": {"version": "houfeng_markdown/v1", "nodes": []}
+    },
+    {"name": "raw html", "source": "before <script>alert(1)</script>", "valid": false},
+    {"name": "generic html comment", "source": "<!-- hidden -->", "valid": false},
+    {"name": "image", "source": "![secret](https://example.com/a.png)", "valid": false},
+    {"name": "javascript link", "source": "[run](javascript:alert(1))", "valid": false},
+    {"name": "data link", "source": "[run](data:text/html,boom)", "valid": false},
+    {"name": "relative link", "source": "[run](/relative)", "valid": false},
+    {"name": "link userinfo", "source": "[run](https://user:pass@example.com/path)", "valid": false},
+    {"name": "unauthorized evidence ref", "source": "<!-- houfeng-ref:v1 evidence ev_UNKNOWN -->\n[系统证据：未知](houfeng-evidence:ev_UNKNOWN)", "valid": false},
+    {"name": "ref comment without matching link", "source": "<!-- houfeng-ref:v1 evidence ev_7K2P -->\nno link", "valid": false},
+    {"name": "invalid utf8", "source_base64": "/w==", "valid": false}
+  ],
+  "hostile_models": [
+    {
+      "name": "unknown html node",
+      "model": {"version":"houfeng_markdown/v1","nodes":[{"type":"html","text":"<script>alert(1)</script>"}]}
+    },
+    {
+      "name": "unknown field",
+      "model": {"version":"houfeng_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"text","text":"safe","html":"<b>unsafe</b>"}]}]}
+    },
+    {
+      "name": "unsafe active link",
+      "model": {"version":"houfeng_markdown/v1","nodes":[{"type":"paragraph","children":[{"type":"link","href":"javascript:alert(1)","children":[{"type":"text","text":"run"}]}]}]}
+    },
+    {
+      "name": "inline node at model root",
+      "model": {"version":"houfeng_markdown/v1","nodes":[{"type":"text","text":"not a block"}]}
+    }
+  ]
+}

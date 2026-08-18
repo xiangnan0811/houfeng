@@ -1,1 +1,11 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/tasks/07-14-vps-records-markdown-workspace/research/current-main-rebaseline-2026-08-18.md","reason":"Audit implementation against reconciled Child 9 contracts and the Child 6 stop line."}
+{"file":".trellis/spec/backend/index.md","reason":"Route review to backend error, auth, quality, and collaboration guides."}
+{"file":".trellis/spec/backend/record-collaboration-notification-contract.md","reason":"Confirm shared comment_markdown/v1 semantics were not forked or relaxed."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review fail-closed render/URL/ref errors and panic prohibition."}
+{"file":".trellis/spec/backend/record-authorization.md","reason":"Review workspace revoke, opaque denial, and source-authorization paths."}
+{"file":".trellis/spec/web/index.md","reason":"Route review to Web state, styling, quality, and collaboration surface guides."}
+{"file":".trellis/spec/web/record-collaboration-surfaces.md","reason":"Confirm existing collaboration components are mounted, not rewritten."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Confirm recordsApi stays lazy and eager shell does not import it."}
+{"file":".trellis/spec/web/directory-structure.md","reason":"Review lazy record route ownership and colocated tests."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit Markdown source, render model, API, and Web round trips."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Verify isolated branch and that Child 6 search/center work is absent."}

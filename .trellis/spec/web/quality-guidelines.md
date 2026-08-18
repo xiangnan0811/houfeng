@@ -447,13 +447,13 @@ export default defineConfig([
 |------|----------------|
 | 新增 / 修改 center HTTP 端点的请求 / 响应字段 | 1) 后端按 `.trellis/spec/backend/` 改完；2) `web/src/lib/types.ts` 加 / 改 `*Record` `*Input`，**保持 snake_case 与 Go JSON tag 一致**；3) owning `web/src/lib/*Api.ts` façade 加 / 改函数；4) page / component 调用方更新；5) 必要时 page 测试的 `toHaveBeenLastCalledWith` 断言一起更新 |
 | 新增 / 修改业务 API 调用 | 必须落到 `web/src/lib/` façade，**不要**在 page / component 里直接 `fetch()`；默认使用 `api.ts`，只有全部 consumer 都是 lazy route 且 fresh bundle 证据要求隔离时才使用 domain façade，详见 `state-and-data.md` |
-| 移动 API helper 到 route-lazy domain façade | wire shape/API tests 不变；fresh production build 后同时检查 entry 与 max async budget，不得让入口下降以换取 async 超限，也不得抬预算 |
+| 移动 API helper 到 route-lazy domain façade | wire shape/API tests 不变；fresh production build 后同时检查 entry 与 max async budget，不得让入口下降以换取 async 超限；除 Child 5 lazy `MarkdownPreview` 的已审计 max-async 例外外不得抬预算 |
 | 修改 Asset Decisions controller / route composition | 运行 `AssetDecisionsPage.test.tsx`、全部 `asset-decisions/` domain workflow/controller tests 与 `assetDecisionArchitectureContract.test.ts`；核对四个 filtered GET、11 GET renewal inventory、group/manual/record focus restore 和结构预算 |
 | 新增 page | `web/src/app/router.tsx` 注册路由 + colocate `<Page>.test.tsx`（至少 1 个 happy-path test） |
 | 新增 atom | `web/src/components/atoms/<Name>.tsx` + 同名 `.test.tsx` + `atoms/index.ts` 加 barrel export + `web/src/styles/partials/atoms.css` 加样式（用令牌） |
 | 新增 / 改 CSS 令牌 | `web/src/styles/tokens.css` 同步检查 3 套运行时主题（`:root` / `theme-houfeng-light` / `theme-classic-dark`）；`classic-light` 复用 `houfeng-light`，见 `.trellis/spec/web/styling-guidelines.md` |
 | 改首屏防闪烁脚本 | `web/public/theme-bootstrap.js` 与 `web/src/lib/theme.ts` 的 preset/mode allowlist、system scheme 和 `classic-light` 回退必须保持一致；`web/index.html` 只同步加载同源脚本，不得恢复 inline script |
-| 改路由注册 / 页面加载边界 | 保持 `appRoutes` 可被 `matchRoutes` 测试；路由页用 `React.lazy` + `RouteModuleFallback`；fresh build 后运行 `bundle:check`，确认 entry/max async 均在 ratchet 内且没有 Vite large chunk warning |
+| 改路由注册 / 页面加载边界 | 保持 `appRoutes` 可被 `matchRoutes` 测试；路由页用 `React.lazy` + `RouteModuleFallback`；fresh build 后运行 `bundle:check`，确认 entry 仍在 ratchet 内；最大 async 只允许 Child 5 `MarkdownPreview` 这类已隔离 markdown chunk，不得把 Records transport 打进 entry，也不得为编辑器放宽 `style-src` |
 
 ---
 

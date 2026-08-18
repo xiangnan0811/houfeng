@@ -1,1 +1,12 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/tasks/07-14-vps-records-markdown-workspace/research/current-main-rebaseline-2026-08-18.md","reason":"Current protected-main baseline, real Child 9 component names, checklist-promotion ownership, and Child 6 stop line."}
+{"file":".trellis/spec/backend/index.md","reason":"Route implementation to backend error, auth, quality, and collaboration guides."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Stable sentinel errors, fail-closed render failures, and no panic in production parsers."}
+{"file":".trellis/spec/backend/record-authorization.md","reason":"Record/source authorization, opaque denials, and revoke behavior for workspace reads."}
+{"file":".trellis/spec/backend/record-collaboration-notification-contract.md","reason":"Reuse comment_markdown/v1 corpus, renderer bounds, and action/comment commands."}
+{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"Evidence references stay snapshot IDs; do not embed payloads in Markdown."}
+{"file":".trellis/spec/web/index.md","reason":"Route implementation to Web directory, state, styling, and collaboration surface guides."}
+{"file":".trellis/spec/web/directory-structure.md","reason":"Lazy record routes, colocated tests, and no page imports of app/layout."}
+{"file":".trellis/spec/web/record-collaboration-surfaces.md","reason":"Mount existing controlled collaboration components without copying their state machines."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Dark-first shared CSS, desktop/390px, focus, and bundle/CSS budgets."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Map Markdown source, render model, API, and Web preview boundaries."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Non-main branch, hooks, and stop before Child 6."}

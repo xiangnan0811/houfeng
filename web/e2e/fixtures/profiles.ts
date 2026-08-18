@@ -304,6 +304,143 @@ export function authenticatedProfile(
   }
 }
 
+const RECORD_USER_ID = 'usr_0123456789abcdef01234567'
+const RECORD_TIMESTAMP = '2026-08-17T09:00:00Z'
+const RECORD_EVIDENCE_ID = 'evs_e2ethirdnight'
+const RECORD_ATTACHMENT_ID = 'att_e2emtrreport'
+
+const RECORD_BODY_MARKDOWN = [
+  '# 第三晚 TCP 观测',
+  '',
+  '```sh',
+  '# 复现丢包',
+  'mtr -rw 203.0.113.7',
+  '```',
+  '',
+  '| 主机 | 丢包 |',
+  '| --- | --- |',
+  '| alpha | 3% |',
+  '',
+  '<!-- houfeng-ref:v1 evidence evs_e2ethirdnight -->',
+  `[系统证据：第三晚 TCP 观测](houfeng-evidence:${RECORD_EVIDENCE_ID})`,
+].join('\n')
+
+const RECORD_REVISION = {
+  record_id: 'rec_e2e001',
+  revision_id: 'rrv_e2e001',
+  revision_no: 2,
+  title: '第三晚 TCP 观测',
+  body_markdown: RECORD_BODY_MARKDOWN,
+  // Produced by the Go document parser for RECORD_BODY_MARKDOWN, so the reading
+  // surface exercises the server render model rather than the source fallback.
+  render_model: {
+    version: 'houfeng_markdown/v1',
+    nodes: [
+      { type: 'heading', level: 1, children: [{ type: 'text', text: '第三晚 TCP 观测' }] },
+      { type: 'fenced_code', text: '# 复现丢包\nmtr -rw 203.0.113.7\n' },
+      {
+        type: 'table',
+        header: [[{ type: 'text', text: '主机' }], [{ type: 'text', text: '丢包' }]],
+        rows: [[[{ type: 'text', text: 'alpha' }], [{ type: 'text', text: '3%' }]]],
+      },
+      {
+        type: 'reference',
+        kind: 'evidence',
+        id: RECORD_EVIDENCE_ID,
+        children: [{ type: 'text', text: '系统证据：第三晚 TCP 观测' }],
+      },
+    ],
+  },
+  render_model_status: 'ready',
+  markdown_dialect_version: 1,
+  record_type: 'troubleshooting',
+  business_status: 'investigating',
+  impact_level: 'high',
+  visibility: { kind: 'project', allowed_roles: [], allowed_group_ids: [] },
+  subjects: [{
+    registry_version: 1,
+    kind: 'vps',
+    role: 'affected',
+    source_id: 'vps_0123456789abcdef',
+    primary: true,
+    identity: { display_name: 'VPS Alpha', provider: 'Example Cloud' },
+  }],
+  tags: ['network'],
+  attachment_ids: [RECORD_ATTACHMENT_ID],
+  evidence_snapshot_ids: [RECORD_EVIDENCE_ID],
+  owner_id: RECORD_USER_ID,
+  participants: [],
+  author_id: RECORD_USER_ID,
+  save_reason: '记录第三晚复现',
+  created_at: RECORD_TIMESTAMP,
+}
+
+// A body the dialect cannot model. Writes only check UTF-8 and the dialect version,
+// so this is a normal record that must stay readable through the client fallback.
+const RECORD_UNSUPPORTED_REVISION = {
+  ...RECORD_REVISION,
+  render_model: undefined,
+  render_model_status: 'unsupported',
+  body_markdown: '# 排查路径\n\n- 排查\n  - 磁盘\n  - 网络',
+}
+
+/**
+ * A published record that actually carries materials, a fenced snippet and a table.
+ * The `/records/new` profile cannot exercise reading, layout switching or a populated
+ * material drawer, so those paths need their own served record.
+ */
+export function recordDetailProfile(options: { renderModel?: 'ready' | 'unsupported' } = {}): ApiFixtureProfile {
+  const revision = options.renderModel === 'unsupported' ? RECORD_UNSUPPORTED_REVISION : RECORD_REVISION
+  return authenticatedProfile({
+    [apiRouteKey('GET', '/api/records/rec_e2e001')]: {
+      status: 200,
+      body: {
+        record_id: 'rec_e2e001',
+        lifecycle: 'active',
+        current_revision_id: RECORD_REVISION.revision_id,
+        lock_version: 4,
+        authorization_epoch: 2,
+        current: revision,
+        capabilities: {
+          read: true,
+          update: true,
+          archive: true,
+          restore: true,
+          draft: true,
+          permanent_delete: false,
+        },
+        created_at: RECORD_TIMESTAMP,
+        updated_at: RECORD_TIMESTAMP,
+      },
+    },
+    [apiRouteKey('GET', '/api/records/rec_e2e001/actions?limit=50')]: {
+      status: 200,
+      body: { items: [] },
+    },
+    [apiRouteKey('GET', '/api/records/rec_e2e001/comments?limit=100')]: {
+      status: 200,
+      body: { comments: [] },
+    },
+    [apiRouteKey('GET', '/api/records/rec_e2e001/watch')]: {
+      status: 200,
+      body: {
+        record_id: 'rec_e2e001',
+        user_id: RECORD_USER_ID,
+        version: 0,
+        preference: 'default',
+        sources: {
+          author: false, owner: false, participant: false, comment: false, mention: false, action: false,
+        },
+        updated_at: null,
+      },
+    },
+    [apiRouteKey('GET', '/api/record-drafts?limit=100')]: {
+      status: 200,
+      body: { items: [] },
+    },
+  })
+}
+
 export function dashboardProfile(options: {
   dashboard?: DashboardOverview
   vps?: VPSAssetRecord[]

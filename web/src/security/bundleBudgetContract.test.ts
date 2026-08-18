@@ -258,14 +258,16 @@ describe('bundle budget checker', () => {
     expect(JSON.parse(readFileSync(fixture.budgetPath, 'utf8'))).toEqual(report.metrics)
   })
 
-  it('tree-shakes the unconsumed Records transport from the current production build', async () => {
+  it('keeps the Records transport out of the production entry after lazy record routes consume it', async () => {
     const placements: RecordsModulePlacement[] = []
 
     await buildCurrentApplication(placements)
 
-    expect(placements.filter((placement) => placement.module === 'recordsApi')).toEqual([])
+    const recordsApi = placements.filter((placement) => placement.module === 'recordsApi')
+    expect(recordsApi.length).toBeGreaterThan(0)
+    expect(recordsApi.every((placement) => !placement.isEntry)).toBe(true)
     expect(placements.filter((placement) => placement.module === 'apiError').every((placement) => (
-      !placement.isEntry && placement.isDynamicEntry
+      !placement.isEntry
     ))).toBe(true)
   })
 

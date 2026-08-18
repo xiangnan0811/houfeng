@@ -81,6 +81,7 @@ describe('RecordInboxPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看“评论提及”的对象' }))
     expect(await screen.findByText('目标：评论 rcm_001')).toBeInTheDocument()
     expect(api.target).toHaveBeenCalledWith('rnt_001')
+    expect(screen.getByRole('link', { name: '打开记录' })).toHaveAttribute('href', '/records/rec_001')
   })
 
   it('updates read state and removes a dismissed item without exposing mutable record content', async () => {

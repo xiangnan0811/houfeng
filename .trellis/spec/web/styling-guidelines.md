@@ -153,6 +153,8 @@
 - production selector branch 的每个 class 必须由非测试 TS/TSX/HTML 字符串 inventory 或明确动态 modifier prefix 拥有。不可达 branch 删除；同一 rule 仍可达的 selector branch 保留。
 - 同一 selector 在同一 at-rule context 只有一个定义。唯一 allowlist 是入口包与 Login 懒加载包各自需要的 root `.login-page`；media/theme context 不做机械合并。
 - 预算只能随有证据的清理降低；不得为让 CI 变绿而抬高上限。production 指标必须在 fresh build 后测量。
+- 九项上限当前全部精确等于实测值（2026-08-18 复核：source 26 文件 / 310967 字节 / 2106 规则、production 293189 raw / 38109 gzip），因此**新页面的净新增 CSS 预算是 0**：既不能往 `index.css` 加规则，也不能新增第 27 个 CSS 文件绕过。这是 ratchet 的设计意图而不是缺陷——新页面应当由 `page.css` / `atoms.css` 既有词汇组合出来，Child 5 的整个 Markdown 工作区就是零新增 CSS 交付的。
+- 想靠删死代码腾预算前先量：`cssReachabilityContract` 已经保证每个 class 都被 TS/TSX/HTML inventory 或声明的动态 modifier prefix 拥有，2026-08-18 实测可回收的"疑似无引用"规则只有约 12KB raw，且绝大多数是动态拼接的 `--tone` 类修饰符，属于假阳性。真要腾空间，走独立的、有视觉回归保护的整合任务，不要塞进功能 child。
 - route CSS 只有在 owner 真正 route-private、无 FOUC、workflow/browser gate 通过且入口 raw+gzip 下降时保留；跨 VPS/Subscriptions/Providers/Archive 共享的 Assets owner 不得伪装成 Asset Decisions 单路由 CSS。
 
 ### 4. Validation & Error Matrix

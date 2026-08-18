@@ -43,3 +43,26 @@ describe('record inbox route', () => {
     })).toBe(true)
   })
 })
+
+describe('record workspace routes', () => {
+  it('keeps static new ahead of the dynamic record id', () => {
+    const created = matchRoutes(appRoutes, '/records/new')
+    const detail = matchRoutes(appRoutes, '/records/rec_001')
+    const edit = matchRoutes(appRoutes, '/records/rec_001/edit')
+    const revision = matchRoutes(appRoutes, '/records/rec_001/revisions/rrv_001')
+
+    expect(created?.some(({ route }) => route.path === 'records/new')).toBe(true)
+    expect(detail?.some(({ route }) => route.path === 'records/:recordId')).toBe(true)
+    expect(edit?.some(({ route }) => route.path === 'records/:recordId/edit')).toBe(true)
+    expect(revision?.some(({ route }) => route.path === 'records/:recordId/revisions/:revisionId')).toBe(true)
+    expect(created?.some(({ route }) => route.path === 'records/:recordId')).toBe(false)
+  })
+
+  it('stays below the private route boundary', () => {
+    const matches = matchRoutes(appRoutes, '/records/new')
+    expect(matches?.some(({ route }) => {
+      const element = route.element as { type?: unknown } | undefined
+      return element?.type === RequireAuth
+    })).toBe(true)
+  })
+})

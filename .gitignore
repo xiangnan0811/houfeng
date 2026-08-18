@@ -28,6 +28,10 @@ docs/deploy/secrets/
 # temp
 tmp/
 
+# Node caches. Running vite/vitest with the repository root as cwd creates a bare
+# node_modules/.vite here even though the only Node project lives in web/.
+node_modules/
+
 # Python local caches
 __pycache__/
 *.py[cod]
