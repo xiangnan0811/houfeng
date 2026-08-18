@@ -22,14 +22,11 @@ storage, Vitest, Playwright, and Trellis child-task workflow.
 
 - Read `research/development-rebaseline-2026-08-02.md` before any child work.
 - Parent status remains `planning`; it is not an implementation target.
-- Current delivered program completion is `4/11`: Children 1–3 are archived,
-  and Child 4 was merged through PR #408, verified on protected main, and
-  published in `v0.66.0`. Its task archive is part of the 2026-08-17 planning
-  rebaseline.
-- Child 9 Collaboration is next. Child 5 remains planning until Child 9 is
-  independently reviewed and merged to protected main.
-- Children 5–11 require individual current-main plan reconciliation before
-  `task.py start`.
+- Current delivered program completion is `5/11`: Children 1–4 and 9 are
+  archived on protected main through `v0.67.0` (`036cc7f5`).
+- Child 5 Markdown is next. Children 6–8, 10, and 11 remain planning.
+- Children 6–11 still require individual current-main plan reconciliation
+  before `task.py start`. Do not start Child 6 from this child.
 - The old 121-item matrix is historical risk coverage, not a current
   line-by-line release gate.
 - Do not resume the stopped parent goal. A goal or sub-agent may be used only

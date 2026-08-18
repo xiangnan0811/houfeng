@@ -23,7 +23,8 @@ renderer或原地重解释历史评论。
 - 提供新建、阅读、编辑、历史revision、restore、三模式编辑/分栏/预览、工具栏/快捷键、模板与材料侧栏/390px抽屉。
 - 自动草稿与正式保存分离；服务端同步失败保留本地未同步字段/Markdown，IndexedDB按user/draft隔离≤24h且不含材料bytes。
 - 正式保存冲突展示字段和Markdown差异，用户人工合并；权限撤销/永久删除立即清内存/IndexedDB/object URL并显示无内容shell。
-- 安全渲染在服务端Goldmark+Bluemonday和Web react-markdown/rehype-sanitize双层执行；文档 corpus 包含并扩展 Child 9 comment-safe corpus，评论和文档的共同语义必须保持等价。
+- 安全渲染分层执行：服务端 Goldmark 做源级准入（拒绝 raw HTML/图片/危险 URL）并产出封闭 render model，Bluemonday 只服务预留给子任务10的 `RenderSafeHTML` 导出出口；Web 以 render model 为主、react-markdown/rehype-sanitize 为回退。文档 corpus 包含并扩展 Child 9 comment-safe corpus，评论和文档的共同语义必须保持等价。
+- 方言不表达的 Markdown 结构必须被拒绝而不是降级：revision 响应用 `render_model_status` 说明 model 缺失原因，前端回退到实时渲染并提示，两条渲染路径由等价测试守住。
 - 阅读面明确区分系统证据、用户附件和作者判断；引用失效显示tombstone，不留空白/坏卡。
 - 阅读/编辑工作区复用子任务9的负责人/参与者/跟进、行动项、评论和关注组件；桌面材料侧栏与390px抽屉包含实际行动项入口，阅读面保留评论时间线。Markdown task checklist只有经过显式预览/确认才提升为结构化行动项。
 - Markdown目录导出和PDF可复用服务端render model，但真正export job由子任务10实现。
@@ -31,17 +32,17 @@ renderer或原地重解释历史评论。
 
 ## Acceptance Criteria
 
-- [ ] Go/TS对同一golden corpus产生等价语义树/安全输出，hostile HTML/URL/属性/XSS命中为0。
-- [ ] 编辑、分栏、预览、工具栏、快捷键、模板插入/类型切换不覆盖已有正文。
-- [ ] evidence/attachment引用可视装饰与底层Markdown/清单往返无损；未知/失效引用安全显示。
-- [ ] 自动草稿三态、离开警告、跨设备恢复、IndexedDB TTL/清理和正式保存独立可测。
-- [ ] 并发冲突保留本地输入并显示字段/Markdown diff；无人工选择不覆盖server revision。
-- [ ] revision详情/restore只读历史、复制为新revision且材料引用仍指当时版本。
-- [ ] owner/participant/follow-up与正式revision同一保存；行动项、评论、关注保持独立活动合同。checklist提升需要显式确认且不会静默改正文或记录状态。
-- [ ] revoke/deletion在活动/后台/多tab/pageshow/reconnect路径均先遮蔽清理，不闪现旧DOM。
-- [ ] desktop/390编辑器和证据选择器通过Artifact布局、键盘/focus、Axe与无横向溢出测试。
-- [ ] CodeMirror/Markdown依赖仅进入lazy record chunks，bundle/CSS budget不提高。
-- [ ] Node22 `make verify-web`、Go render tests、E2E focused route tests通过。
+- [x] Go/TS对同一golden corpus产生等价语义树/安全输出，hostile HTML/URL/属性/XSS命中为0；render model 路径与源码回退路径的渲染结果由 `markdownEquivalence.test.tsx` 断言一致。
+- [x] 编辑、分栏、预览、工具栏、快捷键、模板插入/类型切换不覆盖已有正文。
+- [x] evidence/attachment引用可视装饰与底层Markdown/清单往返无损；未知/失效引用安全显示。
+- [x] 自动草稿三态、离开警告、跨设备恢复、IndexedDB TTL/清理和正式保存独立可测。
+- [x] 并发冲突保留本地输入并显示字段/Markdown diff；无人工选择不覆盖server revision。
+- [x] revision详情/restore只读历史、复制为新revision且材料引用仍指当时版本。
+- [x] owner/participant/follow-up与正式revision同一保存；行动项、评论、关注保持独立活动合同。checklist提升需要显式确认且不会静默改正文或记录状态。
+- [x] revoke/deletion在活动/后台/多tab/pageshow/reconnect路径均先遮蔽清理，不闪现旧DOM。reconnect 走 `online` 事件重校验；多tab 广播忽略更旧 authorization epoch；切换记录会复位关闭闩锁与 restore 幂等键。
+- [x] desktop/390编辑器和证据选择器通过Artifact布局、键盘/focus、Axe与无横向溢出测试。E2E 覆盖已发布记录阅读面（render model 路径）、三种布局切换、含真实材料的抽屉插入往返。
+- [x] CodeMirror/Markdown依赖仅进入lazy record chunks，bundle/CSS budget不提高。
+- [x] Node22 `make verify-web`、Go render tests、E2E focused route tests通过。
 
 ## Out of Scope
 

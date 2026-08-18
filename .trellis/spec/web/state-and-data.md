@@ -6,9 +6,9 @@
 
 ## Overview
 
-候风前端**当前没有引入任何第三方状态管理库**（`web/package.json` `dependencies` 仅 `react`、`react-dom`、`react-router-dom`，**无** Redux / Zustand / Jotai / Recoil / React Query / SWR）。整体策略：
+候风前端**当前没有引入任何第三方状态管理库**（无 Redux / Zustand / Jotai / Recoil / React Query / SWR）。`web/package.json` `dependencies` 现为 React/router 加上 Child 5 的 route-lazy Markdown 栈（`react-markdown`/`remark-gfm`/`rehype-sanitize`、`diff`）。源文编辑器是 textarea；CodeMirror 因 CSP `style-src 'self'` 不可用。整体策略：
 
-- **数据获取**集中在 `web/src/lib/`：`apiRequest.ts` 拥有 transport/error/401/JSON/query primitives，`api.ts` 拥有启动路径与通用业务 endpoint façade；只有在 production bundle 证据要求保持 route-lazy 边界时，才使用同目录的 domain façade（当前为 `observabilityApi.ts`，以及尚无 production consumer 的 `recordsApi.ts` transport contract）。`auth-client.ts` 复用同一 transport，返回类型从 `types.ts` 引用。
+- **数据获取**集中在 `web/src/lib/`：`apiRequest.ts` 拥有 transport/error/401/JSON/query primitives，`api.ts` 拥有启动路径与通用业务 endpoint façade；只有在 production bundle 证据要求保持 route-lazy 边界时，才使用同目录的 domain façade（当前为 `observabilityApi.ts`，以及只被 lazy record routes 消费的 `recordsApi.ts`）。`auth-client.ts` 复用同一 transport，返回类型从 `types.ts` 引用。
 - **本地组件状态**使用 React 内建 hooks（主用 `useState` + `useEffect`，少量 `useRef`；当前未发现 `useReducer`）。
 - **跨组件 / 跨页状态**仅由两个 React Context 承担：`AuthProvider` (`web/src/lib/auth-context.tsx`) 与 `ThemeProvider` (`web/src/lib/theme-context.tsx`)；两者都在 `web/src/main.tsx:15-23` 一次性挂载。
 - **URL 状态**走 `react-router-dom@7` 的路由参数（`useParams`、`useNavigate`），不另起 store。
@@ -21,7 +21,7 @@
 
 ### API client
 
-- **业务 `/api/*` 调用一律由 `web/src/lib/` 下的 façade 暴露**。默认 owner 是 `api.ts`；只有全部 production consumer 都位于 lazy route、且 fresh build 证明入口预算需要隔离时，才按领域拆出 façade。当前 `observabilityApi.ts` 拥有 observability helpers；`recordsApi.ts` 拥有 Records/draft/permanent-deletion transport，但在正式 Records lazy route 出现前不得被 production 入口消费。业务函数使用动词 + 资源命名并返回 `Promise<T>`，T 来自 `lib/types.ts`。
+- **业务 `/api/*` 调用一律由 `web/src/lib/` 下的 façade 暴露**。默认 owner 是 `api.ts`；只有全部 production consumer 都位于 lazy route、且 fresh build 证明入口预算需要隔离时，才按领域拆出 façade。当前 `observabilityApi.ts` 拥有 observability helpers；`recordsApi.ts` 拥有 Records/draft/permanent-deletion transport，只允许被 `/records/new`、`/records/:recordId` 及其 edit/revision lazy pages 和同目录 draft controller 消费，不得进入 AppShell / `api.ts` / eager router graph。业务函数使用动词 + 资源命名并返回 `Promise<T>`，T 来自 `lib/types.ts`。
 - **transport 唯一 owner 是 `web/src/lib/apiRequest.ts`**：默认 `credentials: 'include'`、`Accept: application/json`、`cache: 'no-store'`；401 触发共享 unauthorized handler 并抛 `ApiError(401)`；非 2xx 默认只从 `error/message` 生成 legacy `status/message`，领域 façade 可通过显式 `ApiErrorDecoder` seam追加 allowlisted metadata。当前只有 lazy-only `recordsApi.ts` 静态组合 `apiError.ts` decoder，生成 `code/field_errors/recovery` 且不把 decoder 带入 eager graph。`apiRequest.ts` 同时拥有 `withQuery`；`api.ts` 只为兼容现有调用 re-export transport/query primitives。domain façade 复用这些 primitives，不得复制 fetch wrapper。
 - **`/api/auth/*` 走 `web/src/lib/auth-client.ts`**，并复用 `apiRequest.ts` 的 primitives 与 401 hook。不要新增第二套 fetch 包装。
 - `If-Match` 乐观锁仍由业务 façade 的 `patchJSONBody(path, body, { ifMatch })` 表达，传入上一次拿到的 `updated_at`；transport seam 不改变 method/header/body/wire shape。
@@ -60,7 +60,7 @@
 - Records 草稿 PATCH 原样发送响应中的 `If-Match: <draft-etag>`，不得套用 legacy metadata helper 的额外引号；formal mutation 使用独立 `Idempotency-Key`。permanent-delete execute 的 `DeletionRequestTokenV1` 是唯一 `Idempotency-Key`，JSON body 只能含 `reservation_id`。
 - 只有所有 production consumer 都位于 lazy route 时才允许拆分。AppShell、auth、router bootstrap 等启动路径使用的 helper 留在 `api.ts`，不能为了数字好看制造首屏 waterfall。
 - helper 移动不得改变 method、path、query 顺序/省略规则、body 或 response 解包；原有 API/page tests 必须继续覆盖 wire shape。
-- 每次拆分先 fresh production build，再运行 `bundle:check`；入口与最大 async 两项都必须在现有 ratchet 内。预算只能随有证据的清理降低，不能抬高掩盖回退。
+- 每次拆分先 fresh production build，再运行 `bundle:check`。entry JS/CSS 与 font 只能随有证据的清理降低，不能抬高掩盖 eager 回退。`maxAsyncJsGzipBytes` 的唯一已审计例外是 Child 5 的 lazy `MarkdownPreview` chunk（react-markdown / remark-gfm / rehype-sanitize，2026-08-18 实测 gzip `48453`）。不得引入 CodeMirror：它会注入 inline `<style>`，违反 `style-src 'self'`。源文编辑器使用 textarea。Records transport 不得进入 entry。
 - page/component 只能 import façade，禁止直接 import `apiRequest.ts` 或调用 `fetch`。
 
 #### 4. Validation & Error Matrix
@@ -70,7 +70,7 @@
 | route-private helper 加入 eager `api.ts` 后 entry 超预算 | 移入已有 domain façade或先回到设计；不得抬预算 |
 | helper 仍被 AppShell/启动路径使用 | 保留在 `api.ts`，不引入启动期动态请求 |
 | domain façade 复制 fetch/response reader 或绕过 decoder seam | review/source gate 阻断，改为复用 transport primitive与显式 decoder |
-| `api.ts`/AppShell/TopBar/Sidebar/eager router graph 导入 `recordsApi.ts` | AST contract 阻断；在拥有正式 lazy route 前保持无 production consumer |
+| `api.ts`/AppShell/TopBar/Sidebar/eager router graph 导入 `recordsApi.ts` | AST contract 阻断；production consumer 必须停在 lazy record route / shared record workspace chunk，不得进入 entry |
 | 新记录草稿携带一个或伪造两个空 routing fields | TypeScript union/source review 阻断；body 只含 `payload` |
 | Records draft PATCH 给 ETag 增加引号 | 后端 exact `If-Match` 拒绝；原样发送 draft response 的 `etag` |
 | deletion token 同时进入 header 和 JSON body | body unknown-field decode 失败；只保留 header token 与 body `reservation_id` |
@@ -80,7 +80,7 @@
 #### 5. Good/Base/Bad Cases
 
 - Good: command audit、events 与 incident helper 进入 `observabilityApi.ts`，三个既有 lazy detail/events route 和新 audit route 共享一个小 async chunk，entry 与 max async 均通过。
-- Good: `recordsApi.ts` 直接 type-import canonical DTO、复用 `apiRequest.ts` 并显式组合 `apiError.ts`；当前 fresh production build 中两者都完全不存在，synthetic lazy consumer 只把两者放进同一个 dynamic chunk。
+- Good: `recordsApi.ts` 直接 type-import canonical DTO、复用 `apiRequest.ts` 并显式组合 `apiError.ts`；Child 5 lazy record routes 可把它放进 shared async `RecordWorkspace` chunk，但 entry 仍不得包含该模块。synthetic lazy consumer 继续证明 dynamic-only 边界。
 - Base: 同时被 AppShell 和 DashboardPage 使用的 `getDashboard` 留在 `api.ts`。
 - Bad: 页面为了懒加载直接 `fetch('/api/command-audits')`，复制 credentials/error 处理。
 - Bad: 从 `api.ts` re-export `recordsApi.ts` helpers，导致无页面的 transport 先进入 eager graph。
@@ -92,7 +92,7 @@
 - `apiRequest.test.ts` 断言 query normalization、JSON body init、legacy status/message 默认路径，以及显式 decoder 的 allowlisted structured error / unknown recovery。
 - `recordsApi.test.ts` 固定所有 Records URLs/methods、cursor/query、新/已有记录草稿 routing body、exact `If-Match`、普通/deletion idempotency header、body allowlist，以及 404/409/503 shape。
 - `recordsTransportArchitectureContract.test.ts` 使用 TypeScript AST 和静态依赖图固定唯一 runtime dependencies `apiRequest.ts|apiError.ts`，禁止 raw fetch/UI/import drift 与 eager Records edge；negative fixture 必须证明可捕获 direct re-export 和 transitive import。
-- `bundleBudgetContract.test.ts` 必须 fresh-build当前真实 app，证明 unconsumed `recordsApi.ts` 与 `apiError.ts` 均不属于任何 chunk；另用 synthetic dynamic import 证明未来 lazy consumer 把两者放在同一个 dynamic chunk且不进入 entry。
+- `bundleBudgetContract.test.ts` 必须 fresh-build当前真实 app，证明 `recordsApi.ts` 已被 lazy record routes 消费且 `isEntry=false`；`apiError.ts` 同样不得进入 entry。另用 synthetic dynamic import 证明单独 lazy consumer 仍把两者放在同一个 dynamic chunk。
 - 受影响 page tests继续覆盖 loading/error/data 与请求 inventory。
 - `NODE_ENV=production npm --prefix web run build` 后运行 `npm --prefix web run bundle:check`，记录 entry/max async 实测值。
 
