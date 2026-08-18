@@ -524,3 +524,44 @@ Implemented and independently reviewed Child 9 collaboration, notifications, opt
 ### Status
 
 [OK] **Completed**
+
+
+## Session 248: Deliver VPS Records Markdown workspace
+
+**Date**: 2026-08-18
+**Task**: Deliver VPS Records Markdown workspace
+**Branch**: `codex/vps-records-markdown-workspace-archive`
+
+### Summary
+
+Implemented and independently reviewed Child 5: the houfeng_markdown/v1 document dialect with Goldmark as source-level admission gate, the read/edit/revision workspace with drafts and field-level conflict resolution, cross-path render equivalence tests, and a single server-side HTML exit for Child 10 export; merged PR #413 through protected main and archived the task without starting Child 6.
+
+### Main Changes
+
+- Added internal/center/recordmarkdown owning the document dialect, delegating shared regions to Child 9's comment core so the two dialects cannot fork.
+- Refused rather than flattened structures the dialect cannot express, and reported render_model_status so the Web fallback is explicit instead of silent.
+- Added SafeDocumentHTML as the only server-side HTML exit, escaping unmodelable bodies through the same Bluemonday policy to keep export lossless.
+- Delivered the Web workspace with zero new CSS and Markdown dependencies confined to the lazy MarkdownPreview chunk.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `796d6311` | (see git log) |
+| `eed7d975` | (see git log) |
+| `03864828` | (see git log) |
+| `9c96d699` | (see git log) |
+| `199d2a2b` | (see git log) |
+| `d41c8630` | (see git log) |
+
+### Testing
+
+- [OK] ./scripts/verify.sh green; Playwright 85/85 green; Go fuzz FuzzParseDocumentMarkdownV1 green; PR #413 all seven required checks green.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Reconcile Child 6 (/records index, search, sidebar) against current main before task.py start.
