@@ -21,9 +21,13 @@
     "test:e2e:staging": "playwright test --config playwright.staging.config.ts"
   },
   "dependencies": {
+    "diff": "9.0.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "react-router-dom": "^7.17.0"
+    "react-markdown": "10.1.0",
+    "react-router-dom": "^7.17.0",
+    "rehype-sanitize": "6.0.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.12.1",

@@ -150,6 +150,10 @@ function expectString(value: unknown, allowEmpty: boolean): string {
   return value
 }
 
+export function validateCanonicalHTTPLink(value: unknown): string {
+  return expectCanonicalHTTPLink(value)
+}
+
 function expectCanonicalHTTPLink(value: unknown): string {
   const href = expectString(value, false)
   if (new TextEncoder().encode(href).length > MAX_COMMENT_LINK_BYTES || /[\s\\"'<>\0]/u.test(href)) invalid()

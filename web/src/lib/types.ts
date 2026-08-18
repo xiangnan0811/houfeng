@@ -2714,6 +2714,13 @@ export type RecordParticipant = {
   display_name: string
 }
 
+/**
+ * Why a revision may arrive without a server render model: `unsupported` means the
+ * body uses Markdown the document dialect cannot represent, so the client renders
+ * from source instead of treating the absence as an empty document.
+ */
+export type RecordRenderModelStatus = 'ready' | 'unsupported'
+
 export type RecordRevision = {
   record_id: string
   revision_id: string
@@ -2721,6 +2728,8 @@ export type RecordRevision = {
   revision_no: number
   title: string
   body_markdown: string
+  render_model?: unknown
+  render_model_status?: RecordRenderModelStatus
   markdown_dialect_version: 1
   record_type: RecordType
   business_status?: RecordBusinessStatus
@@ -2732,6 +2741,7 @@ export type RecordRevision = {
   subjects: RecordSubject[]
   tags: string[]
   attachment_ids: string[]
+  evidence_snapshot_ids?: string[]
   owner_id?: string
   participants: RecordParticipant[]
   follow_up_at?: string

@@ -75,6 +75,20 @@ describe('AuthProvider', () => {
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('admin'))
   })
 
+  it('logout without a session still completes and clears local record state', async () => {
+    vi.spyOn(client, 'me').mockResolvedValue(null)
+    vi.spyOn(client, 'logout').mockResolvedValue()
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    )
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'))
+    fireEvent.click(screen.getByText('out'))
+    await waitFor(() => expect(client.logout).toHaveBeenCalled())
+    expect(screen.getByTestId('user')).toHaveTextContent('none')
+  })
+
   it('clears user after logout', async () => {
     vi.spyOn(client, 'me').mockResolvedValue({
       user_id: 'u1',
