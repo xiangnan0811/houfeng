@@ -1,1 +1,14 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/07-14-vps-records-search-center/research/current-main-rebaseline-2026-08-18.md", "reason": "Current protected-main baseline: what list/search already exists, the reserved record_search adapter name, subject registry limits, transport and budget contracts, and the reconciled decisions."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Route implementation to backend database, error, auth, and quality guides."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Raw SQL migrations as single source of truth, index and constraint conventions for the 0056 projection."}
+{"file": ".trellis/spec/backend/record-authorization.md", "reason": "Search must apply record visibility and source authorization floor before any field, count, snippet, or facet is returned."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Stable sentinel errors and opaque denials for cursor tamper, expiry, and authorization mismatch."}
+{"file": ".trellis/spec/backend/record-collaboration-notification-contract.md", "reason": "Comment redaction and notification payload boundaries that indexed content must respect."}
+{"file": ".trellis/spec/backend/evidence-snapshot-contract.md", "reason": "Normalized evidence summaries are indexable; forbidden evidence and payload bytes are not."}
+{"file": ".trellis/spec/web/index.md", "reason": "Route implementation to Web directory, state, styling, and quality guides."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "recordsApi stays lazy and out of the eager shell; global search must reach it by dynamic import only."}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "Lazy route ownership, colocated tests, and the rule that pages do not import app/layout."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Zero net-new CSS budget: the records center composes from existing page.css and atoms.css vocabulary."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Keep query normalization, cursor encoding, SQL, and URL state consistent across layers."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Replace the in-memory q filter rather than adding a second search path beside it."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Non-main branch with hooks; stop before Child 7 activity work."}

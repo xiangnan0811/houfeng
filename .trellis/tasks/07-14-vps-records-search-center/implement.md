@@ -17,10 +17,14 @@ Playwright/Axe.
 
 ## Preconditions
 
-- [ ] Required dependencies are accepted on protected main.
+- [x] Required dependencies are accepted on protected main. See
+  `research/current-main-rebaseline-2026-08-18.md` for the baseline, the
+  surfaces that already exist, and the reconciled decisions. Read it first.
 - [ ] Run `trellis-before-dev` for backend database/http and Web component/state/
   quality guidance.
-- [ ] Confirm `0056` is free and current APP ACL fragment APIs exist.
+- [x] Confirm `0056` is free and current APP ACL fragment APIs exist. `0056` is
+  free; fragments live in
+  `internal/center/store/migrate/app_acl_current_contract.go`.
 - [ ] Baseline Go/Web/global-search tests with Node 22.
 
 ## Task 1: Query, normalization, and cursor domain
@@ -53,21 +57,31 @@ Playwright/Axe.
   EXPLAIN fixtures.
 - [ ] Implement scoped SQL query, counts/facets, snippets, and bounded global
   result endpoint.
+- [ ] Retire the in-memory `q` / `lifecycle` / `record_type` filter in
+  `records/read_service.go` in the same change, moving its tests onto the
+  indexed path. Do not leave two search paths.
 - [ ] Prove no unauthorized count/snippet/facet/log leakage and reviewed query
   plans/latency.
 
 ## Task 5: Records and Drafts Web routes
 
-- [ ] Add canonical query codec and lazy API facade methods.
+- [ ] Add canonical query codec and lazy API facade methods. The codec must not
+  become a runtime dependency of `recordsApi.ts`, and every new façade export
+  must be added to `EXPECTED_EXPORTS` in the transport contract.
+- [ ] Add cursor pagination to draft listing; the current endpoint takes only a
+  limit and cannot back the Drafts page.
 - [ ] Implement Records/Drafts pages, filters, pagination, loading/first-empty/
-  no-results/local-error/revoked states.
+  no-results/local-error/revoked states with zero new CSS.
+- [ ] Add the sidebar Records entry and the `/records` index route.
 - [ ] Test deep links, back/forward, keyboard, focus, desktop/390px, Axe, and
   bundle boundaries.
 
 ## Task 6: Global search integration
 
-- [ ] Replace browser full-dataset behavior only for the Records group with the
-  bounded server endpoint.
+- [ ] Add a bounded server-backed Records group to global search. No Records
+  group exists there today, so this adds one rather than replacing browser-side
+  behavior. Reach the transport by dynamic import so the eager shell contract
+  and the entry-chunk budget both keep holding.
 - [ ] Test request cancellation, auth revoke, error isolation, result limit, and
   link to canonical `/records` query.
 - [ ] Keep unrelated global search groups unchanged.

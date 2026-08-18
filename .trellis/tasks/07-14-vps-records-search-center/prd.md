@@ -80,6 +80,8 @@ removed.
 
 ## Execution Gate
 
-Keep `planning` until Foundation, Core, Markdown, and Collaboration are accepted
-on protected main and `0056` is free. Reconcile participant/filter APIs with the
-merged dependencies before start.
+Foundation, Core, Markdown, and Collaboration are accepted on protected main as
+of `v0.68.0`, and `0056` is free. The participant/filter reconciliation is
+recorded in `research/current-main-rebaseline-2026-08-18.md`, which is required
+reading before any implementation and which narrows several requirements below to
+what the merged dependencies actually expose.
