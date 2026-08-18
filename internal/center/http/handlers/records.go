@@ -16,6 +16,7 @@ import (
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordmarkdown"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store"
@@ -673,31 +674,33 @@ type recordCapabilities struct {
 }
 
 type recordRevisionResponse struct {
-	RecordID            string                         `json:"record_id"`
-	RevisionID          string                         `json:"revision_id"`
-	BaseRevisionID      string                         `json:"base_revision_id,omitempty"`
-	RevisionNo          uint64                         `json:"revision_no"`
-	Title               string                         `json:"title"`
-	BodyMarkdown        string                         `json:"body_markdown"`
-	MarkdownDialect     records.MarkdownDialectVersion `json:"markdown_dialect_version"`
-	RecordType          records.RecordType             `json:"record_type"`
-	BusinessStatus      records.BusinessStatus         `json:"business_status,omitempty"`
-	StatusGroup         records.StatusGroup            `json:"status_group,omitempty"`
-	ImpactLevel         records.ImpactLevel            `json:"impact_level"`
-	OccurredAt          *time.Time                     `json:"occurred_at,omitempty"`
-	CompletedAt         *time.Time                     `json:"completed_at,omitempty"`
-	Visibility          recordVisibilityResponse       `json:"visibility"`
-	Subjects            []recordSubjectResponse        `json:"subjects"`
-	Tags                []string                       `json:"tags"`
-	OwnerID             string                         `json:"owner_id,omitempty"`
-	Participants        []recordParticipantResponse    `json:"participants"`
-	AttachmentIDs       []string                       `json:"attachment_ids"`
-	EvidenceSnapshotIDs []string                       `json:"evidence_snapshot_ids"`
-	FollowUpAt          *time.Time                     `json:"follow_up_at,omitempty"`
-	Template            *recordTemplateResponse        `json:"template,omitempty"`
-	AuthorID            string                         `json:"author_id"`
-	SaveReason          string                         `json:"save_reason"`
-	CreatedAt           time.Time                      `json:"created_at"`
+	RecordID            string                              `json:"record_id"`
+	RevisionID          string                              `json:"revision_id"`
+	BaseRevisionID      string                              `json:"base_revision_id,omitempty"`
+	RevisionNo          uint64                              `json:"revision_no"`
+	Title               string                              `json:"title"`
+	BodyMarkdown        string                              `json:"body_markdown"`
+	MarkdownDialect     records.MarkdownDialectVersion      `json:"markdown_dialect_version"`
+	RecordType          records.RecordType                  `json:"record_type"`
+	BusinessStatus      records.BusinessStatus              `json:"business_status,omitempty"`
+	StatusGroup         records.StatusGroup                 `json:"status_group,omitempty"`
+	ImpactLevel         records.ImpactLevel                 `json:"impact_level"`
+	OccurredAt          *time.Time                          `json:"occurred_at,omitempty"`
+	CompletedAt         *time.Time                          `json:"completed_at,omitempty"`
+	Visibility          recordVisibilityResponse            `json:"visibility"`
+	Subjects            []recordSubjectResponse             `json:"subjects"`
+	Tags                []string                            `json:"tags"`
+	OwnerID             string                              `json:"owner_id,omitempty"`
+	Participants        []recordParticipantResponse         `json:"participants"`
+	AttachmentIDs       []string                            `json:"attachment_ids"`
+	EvidenceSnapshotIDs []string                            `json:"evidence_snapshot_ids"`
+	FollowUpAt          *time.Time                          `json:"follow_up_at,omitempty"`
+	Template            *recordTemplateResponse             `json:"template,omitempty"`
+	AuthorID            string                              `json:"author_id"`
+	SaveReason          string                              `json:"save_reason"`
+	CreatedAt           time.Time                           `json:"created_at"`
+	RenderModel         *recordmarkdown.DocumentRenderModel `json:"render_model,omitempty"`
+	RenderModelStatus   recordmarkdown.DocumentRenderStatus `json:"render_model_status"`
 }
 
 type recordVisibilityResponse struct {
@@ -816,7 +819,28 @@ func newRecordRevisionResponse(revision records.RecordRevision) recordRevisionRe
 	if template := input.Template(); template != nil {
 		response.Template = &recordTemplateResponse{ID: template.ID, Version: template.Version}
 	}
+	// A body the document dialect cannot represent still has to be readable, so the
+	// response reports why the render model is missing instead of dropping it
+	// silently and leaving the client to guess.
+	if model, err := recordmarkdown.ParseDocumentMarkdownV1(input.BodyMarkdown(), authorizedDocumentReferences(input)); err == nil {
+		cloned := model.Clone()
+		response.RenderModel = &cloned
+		response.RenderModelStatus = recordmarkdown.DocumentRenderReady
+	} else {
+		response.RenderModelStatus = recordmarkdown.DocumentRenderUnsupported
+	}
 	return response
+}
+
+func authorizedDocumentReferences(input records.CompleteRevisionInput) []recordmarkdown.DocumentReference {
+	references := make([]recordmarkdown.DocumentReference, 0, len(input.AttachmentIDs())+len(input.EvidenceSnapshotIDs()))
+	for _, id := range input.AttachmentIDs() {
+		references = append(references, recordmarkdown.DocumentReference{Kind: "attachment", ID: id})
+	}
+	for _, id := range input.EvidenceSnapshotIDs() {
+		references = append(references, recordmarkdown.DocumentReference{Kind: "evidence", ID: id})
+	}
+	return references
 }
 
 func newRecordMutationResponse(result records.RevisionCommitResult) recordMutationResponse {

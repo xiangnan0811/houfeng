@@ -212,7 +212,63 @@ func ensureCommentJSONEOF(decoder *json.Decoder) error {
 }
 
 func ParseCommentMarkdownV1(source string) (CommentRenderModel, error) {
-	if len(source) == 0 || len(source) > MaxCommentMarkdownSourceBytes || !utf8.ValidString(source) ||
+	return parseCommentMarkdownV1(source, MaxCommentMarkdownSourceBytes)
+}
+
+// ParseSharedMarkdownRegionV1 parses a region that uses only comment_markdown/v1
+// constructs while applying the caller's source budget. Document Markdown reuses
+// this shared block/inline core for its shared regions and must not inherit the
+// comment source ceiling; per-region node and depth ceilings still apply.
+func ParseSharedMarkdownRegionV1(source string, maxSourceBytes int) (CommentRenderModel, error) {
+	if maxSourceBytes < MaxCommentMarkdownSourceBytes {
+		maxSourceBytes = MaxCommentMarkdownSourceBytes
+	}
+	return parseCommentMarkdownV1(source, maxSourceBytes)
+}
+
+// FencedCodeOpeningV1 returns the fence marker run when line opens a fenced code
+// block. Document Markdown owns its own fenced blocks but must recognise them
+// with exactly these rules so both dialects agree on fence boundaries.
+func FencedCodeOpeningV1(line string) (string, bool) {
+	fence := commentFencePattern.FindStringSubmatch(line)
+	if fence == nil {
+		return "", false
+	}
+	return fence[1], true
+}
+
+// IsFencedCodeClosingV1 reports whether line closes a fence opened by opening.
+func IsFencedCodeClosingV1(line string, opening string) bool {
+	if opening == "" {
+		return false
+	}
+	return isClosingCommentFence(line, opening[0], len(opening))
+}
+
+// FencedCodeLineMaskV1 marks every line that belongs to a fenced code block,
+// fence delimiters included. Callers that inspect Markdown line by line use it so
+// code content is never mistaken for document structure.
+func FencedCodeLineMaskV1(lines []string) []bool {
+	mask := make([]bool, len(lines))
+	for index := 0; index < len(lines); index++ {
+		opening, ok := FencedCodeOpeningV1(lines[index])
+		if !ok {
+			continue
+		}
+		mask[index] = true
+		for index+1 < len(lines) {
+			index++
+			mask[index] = true
+			if IsFencedCodeClosingV1(lines[index], opening) {
+				break
+			}
+		}
+	}
+	return mask
+}
+
+func parseCommentMarkdownV1(source string, maxSourceBytes int) (CommentRenderModel, error) {
+	if len(source) == 0 || len(source) > maxSourceBytes || !utf8.ValidString(source) ||
 		strings.ContainsRune(source, '\r') || hasUnsafeCommentControl(source) {
 		return CommentRenderModel{}, ErrInvalidCommentMarkdown
 	}
@@ -568,6 +624,13 @@ func findCommentLinkClosingParen(source string, start int) int {
 		}
 	}
 	return -1
+}
+
+// ValidateCanonicalHTTPLink reports whether href is a byte-canonical http(s)
+// URL accepted by comment_markdown/v1. Document Markdown reuses this contract
+// for ordinary links.
+func ValidateCanonicalHTTPLink(href string) error {
+	return validateCanonicalCommentLink(href)
 }
 
 func validateCanonicalCommentLink(href string) error {
