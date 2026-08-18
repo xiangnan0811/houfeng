@@ -206,7 +206,7 @@ func TestNormalizeQueryRejectsInvalidInput(t *testing.T) {
 		{name: "unknown status group", values: QueryValues{StatusGroups: []records.StatusGroup{"soon"}}},
 		{name: "unknown lifecycle", values: QueryValues{Lifecycles: []records.Lifecycle{"deleted"}}},
 		{name: "unknown sort", values: QueryValues{Sort: "title_asc"}},
-		{name: "relevance sort without text", values: QueryValues{Sort: SortRelevanceDesc}},
+		{name: "unknown sort", values: QueryValues{Sort: Sort("relevance_desc")}},
 		{name: "text over budget", values: QueryValues{Text: string(longText)}},
 		{name: "text with control character", values: QueryValues{Text: "disk\x00fail"}},
 		{name: "invalid utf8 text", values: QueryValues{Text: "disk\xff"}},

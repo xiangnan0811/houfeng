@@ -120,12 +120,6 @@ func NormalizeQuery(values QueryValues) (Query, error) {
 	if !validSort(sortOrder) {
 		return Query{}, invalidQuery("sort")
 	}
-	// Relevance is only defined against a text term. Allowing it without one
-	// would order every record by a constant rank and make the cursor's
-	// relevance component meaningless.
-	if sortOrder == SortRelevanceDesc && text == "" {
-		return Query{}, invalidQuery("relevance sort without text")
-	}
 	pageSize := values.PageSize
 	if pageSize == 0 {
 		pageSize = DefaultPageSize

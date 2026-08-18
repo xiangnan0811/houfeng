@@ -92,6 +92,46 @@
 - Draft cursor pagination lands here because the Drafts page is in this child's
   scope and the current limit-only endpoint cannot back it.
 - Subject kind/role registry stays exactly as `0052` defines it.
+- Text matching uses `pg_trgm` over one normalized lowercase text column, not
+  PostgreSQL full-text search. Reason: the UI is Chinese-primary, and the
+  built-in `simple` configuration does not segment Chinese, so a whole CJK run
+  becomes one lexeme and an infix term like `磁盘` never matches
+  `磁盘故障排查`. `pg_trgm` is a trusted core contrib extension and indexes both
+  CJK and Latin infix matching through `gin_trgm_ops`, so it accelerates `ILIKE`
+  with no operator qualification at the query site. A non-core segmenter such as
+  `zhparser` is rejected because it would break the one-command install
+  contract.
+- Measured on PG 16.12 with the real migration applied and 20,000 documents, so
+  the trade is stated in numbers rather than assumed. A term of three or more
+  characters uses the index (`%故障排%` → bitmap index scan). A two-character
+  term cannot, because `pg_trgm` extracts no full trigram from a pattern shorter
+  than three characters, and two characters is the common Chinese term length
+  (`%磁盘%` → sequential scan, 21 of 20,000 rows matched, 11 ms end to end
+  including sort and limit). The index costs 6.7 MB against a 17 MB table at
+  that size. Both halves of that are acceptable here: a single-operator fleet
+  archive is orders of magnitude smaller than the measured corpus, so the
+  unindexed case stays comfortably interactive while the indexed case covers
+  hostnames, error strings, and longer phrases. This is the honest reason the
+  index is kept, and the reason no minimum term length is imposed on the
+  operator.
+- That decision touches no frozen surface, which is why it is affordable.
+  `pg_trgm` goes into `record_platform_internal` beside `pgcrypto`, and the
+  existing catalog readers already exclude extension members generically
+  (`pg_depend.deptype = 'e'`), so its functions never appear as unexpected
+  functions, owners, or grants. The frozen r2 pgcrypto attestation filters on
+  `extname = 'pgcrypto'` and is unaffected. The generic opaque-extension-member
+  reachability verifier keeps failing closed if anyone ever installs a text
+  extension into a schema an app role can reach.
+- Relevance ordering is dropped, and this is the one place the frozen surfaces
+  actually decide a product question. Ranking needs a per-row scalar, the
+  trigram functions live in a schema no app role may `USAGE`, and the APP ACL
+  privilege grammar only admits functions shaped `public.name(bytea)`
+  (`validFunctionIdentity`), which a `(text, text)` ranking wrapper cannot
+  satisfy. Widening either the grammar or the schema boundary to buy result
+  ordering is a bad trade, so `Sort` is exactly `updated_at_desc` /
+  `updated_at_asc`, the cursor carries no float component, and the trigram index
+  still earns its place by making the text filter indexed. Recency ordering also
+  matches how an operator reads an incident archive.
 
 ## Dispatch
 

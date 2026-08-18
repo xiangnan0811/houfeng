@@ -13,10 +13,9 @@ import (
 )
 
 // SortKey is the position of the last row on a page. It always carries the
-// record identifier so resuming is a total order even when two records share a
-// timestamp or a relevance rank.
+// record identifier so resuming is a total order even when two records share an
+// update timestamp.
 type SortKey struct {
-	Relevance float64
 	UpdatedAt time.Time
 	RecordID  string
 }
@@ -53,14 +52,13 @@ func (cursor Cursor) SortKey() SortKey {
 }
 
 type cursorEnvelope struct {
-	Version     uint64  `json:"v"`
-	QueryDigest string  `json:"q"`
-	ActorDigest string  `json:"a"`
-	Generation  uint64  `json:"g"`
-	ExpiresAt   int64   `json:"e"`
-	Relevance   float64 `json:"r,omitempty"`
-	UpdatedAt   int64   `json:"u"`
-	RecordID    string  `json:"i"`
+	Version     uint64 `json:"v"`
+	QueryDigest string `json:"q"`
+	ActorDigest string `json:"a"`
+	Generation  uint64 `json:"g"`
+	ExpiresAt   int64  `json:"e"`
+	UpdatedAt   int64  `json:"u"`
+	RecordID    string `json:"i"`
 }
 
 // EncodeCursor mints an opaque next-page token. It carries digests rather than
@@ -74,7 +72,7 @@ func EncodeCursor(values CursorValues) (string, error) {
 	if values.Generation == 0 || values.ExpiresAt.IsZero() {
 		return "", ErrInvalidCursor
 	}
-	if err := validateSortKey(values.Query, values.SortKey); err != nil {
+	if err := validateSortKey(values.SortKey); err != nil {
 		return "", err
 	}
 	encoded, err := json.Marshal(cursorEnvelope{
@@ -83,7 +81,6 @@ func EncodeCursor(values CursorValues) (string, error) {
 		ActorDigest: hex.EncodeToString(actorDigest[:]),
 		Generation:  values.Generation,
 		ExpiresAt:   values.ExpiresAt.UTC().Truncate(time.Microsecond).UnixMicro(),
-		Relevance:   values.SortKey.Relevance,
 		UpdatedAt:   values.SortKey.UpdatedAt.UTC().Truncate(time.Microsecond).UnixMicro(),
 		RecordID:    values.SortKey.RecordID,
 	})
@@ -134,11 +131,10 @@ func BindCursor(
 		return Cursor{}, ErrInvalidCursor
 	}
 	sortKey := SortKey{
-		Relevance: envelope.Relevance,
 		UpdatedAt: time.UnixMicro(envelope.UpdatedAt).UTC(),
 		RecordID:  envelope.RecordID,
 	}
-	if err := validateSortKey(query, sortKey); err != nil {
+	if err := validateSortKey(sortKey); err != nil {
 		return Cursor{}, ErrInvalidCursor
 	}
 	return Cursor{generation: generation, expiresAt: expiresAt, sortKey: sortKey}, nil
@@ -158,20 +154,8 @@ func cursorBindingDigests(
 	return query.Digest(), normalizedActor.CanonicalHash(), nil
 }
 
-func validateSortKey(query Query, sortKey SortKey) error {
+func validateSortKey(sortKey SortKey) error {
 	if sortKey.UpdatedAt.IsZero() || !records.ValidRecordRootID(sortKey.RecordID) {
-		return ErrInvalidCursor
-	}
-	// A relevance component only exists for a relevance-ordered page. Carrying
-	// one on a time-ordered page, or omitting one from a relevance page, would
-	// resume from a key the SQL never produced.
-	if query.Sort() == SortRelevanceDesc {
-		if sortKey.Relevance <= 0 {
-			return ErrInvalidCursor
-		}
-		return nil
-	}
-	if sortKey.Relevance != 0 {
 		return ErrInvalidCursor
 	}
 	return nil

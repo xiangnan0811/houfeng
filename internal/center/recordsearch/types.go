@@ -50,12 +50,17 @@ var (
 
 // Sort is the closed ordering vocabulary. Every ordering ends with the record
 // identifier so one page boundary is a total order.
+//
+// There is deliberately no relevance ordering. The trigram extension lives in
+// record_platform_internal, where no app role has USAGE, and the APP ACL
+// grammar only grants functions shaped public.name(bytea), so a per-row
+// similarity scalar could not be reached without widening a frozen contract.
+// The index still earns its place by making the text filter indexed.
 type Sort string
 
 const (
-	SortUpdatedDesc   Sort = "updated_at_desc"
-	SortUpdatedAsc    Sort = "updated_at_asc"
-	SortRelevanceDesc Sort = "relevance_desc"
+	SortUpdatedDesc Sort = "updated_at_desc"
+	SortUpdatedAsc  Sort = "updated_at_asc"
 )
 
 // FollowUpState filters on the follow-up time carried by the current revision.
@@ -108,7 +113,7 @@ type SubjectFilter struct {
 
 func validSort(sort Sort) bool {
 	switch sort {
-	case SortUpdatedDesc, SortUpdatedAsc, SortRelevanceDesc:
+	case SortUpdatedDesc, SortUpdatedAsc:
 		return true
 	default:
 		return false

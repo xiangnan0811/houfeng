@@ -82,7 +82,6 @@ func TestEncodeCursorRejectsUnusableValues(t *testing.T) {
 	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
 	actor := testActor(t, "usr_000000000000000000000001")
 	query := testQuery(t, QueryValues{})
-	relevance := testQuery(t, QueryValues{Text: "disk", Sort: SortRelevanceDesc})
 
 	tests := []struct {
 		name   string
@@ -95,14 +94,6 @@ func TestEncodeCursorRejectsUnusableValues(t *testing.T) {
 		{name: "zero sort timestamp", mutate: func(values *CursorValues) { values.SortKey.UpdatedAt = time.Time{} }},
 		{name: "missing record id", mutate: func(values *CursorValues) { values.SortKey.RecordID = "" }},
 		{name: "malformed record id", mutate: func(values *CursorValues) { values.SortKey.RecordID = "rec_UPPER" }},
-		// Relevance only exists for a relevance query. Carrying it on a time-ordered
-		// page would let the store resume from a key the SQL never produced.
-		{name: "relevance without relevance sort", mutate: func(values *CursorValues) { values.SortKey.Relevance = 0.5 }},
-		{name: "relevance sort without relevance", mutate: func(values *CursorValues) { values.Query = relevance }},
-		{name: "negative relevance", mutate: func(values *CursorValues) {
-			values.Query = relevance
-			values.SortKey.Relevance = -1
-		}},
 	}
 
 	for _, tt := range tests {
@@ -217,25 +208,23 @@ func TestBindCursorRejectsGroupMembershipChange(t *testing.T) {
 	}
 }
 
-func TestBindCursorCarriesRelevanceForRelevanceQueries(t *testing.T) {
+// Ordering is the only thing a cursor may reinterpret, so a page taken under one
+// order must not resume under another even though both orders share a sort key
+// shape.
+func TestBindCursorRejectsSortOrderChange(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
 	actor := testActor(t, "usr_000000000000000000000001")
-	query := testQuery(t, QueryValues{Text: "disk", Sort: SortRelevanceDesc})
-	values := testCursorValues(t, query, actor, now)
-	values.SortKey.Relevance = 0.1234567890123
+	descending := testQuery(t, QueryValues{Text: "disk", Sort: SortUpdatedDesc})
+	ascending := testQuery(t, QueryValues{Text: "disk", Sort: SortUpdatedAsc})
 
-	encoded, err := EncodeCursor(values)
+	encoded, err := EncodeCursor(testCursorValues(t, descending, actor, now))
 	if err != nil {
 		t.Fatalf("EncodeCursor() error = %v", err)
 	}
-	bound, err := BindCursor(encoded, query, actor, values.Generation, now)
-	if err != nil {
-		t.Fatalf("BindCursor() error = %v", err)
-	}
-	if bound.SortKey().Relevance != values.SortKey.Relevance {
-		t.Fatalf("Relevance = %v, want %v", bound.SortKey().Relevance, values.SortKey.Relevance)
+	if _, err := BindCursor(encoded, ascending, actor, 7, now); !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("BindCursor() error = %v, want %v", err, ErrInvalidCursor)
 	}
 }
 
