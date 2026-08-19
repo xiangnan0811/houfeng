@@ -54,16 +54,30 @@ func TestScanWindowReachesBackPastTheCheckpoint(t *testing.T) {
 	}
 	head := NewIncrementalSourceHead(SourceKindRecordDomain, testHeadMoment(), DefaultSourceSafetyLag)
 
-	window := checkpoint.ScanWindow(head, DefaultReprojectionWindow)
-	if !window.From.Before(checkpoint.RecordedThrough) {
-		t.Fatalf("scan window starts at %s, which does not reach back past the checkpoint %s",
-			window.From, checkpoint.RecordedThrough)
+	trailing, ok := checkpoint.TrailingWindow(DefaultReprojectionWindow)
+	if !ok {
+		t.Fatalf("a checkpoint with a position must have a trailing window")
 	}
-	if got, want := checkpoint.RecordedThrough.Sub(window.From), DefaultReprojectionWindow; got != want {
+	if !trailing.From.Before(checkpoint.RecordedThrough) {
+		t.Fatalf("trailing window starts at %s, which does not reach back past the checkpoint %s",
+			trailing.From, checkpoint.RecordedThrough)
+	}
+	if got, want := checkpoint.RecordedThrough.Sub(trailing.From), DefaultReprojectionWindow; got != want {
 		t.Fatalf("trailing overlap = %s, want %s", got, want)
 	}
-	if !window.Through.Equal(head.RecordedThrough) {
-		t.Fatalf("scan window ends at %s, want the head %s", window.Through, head.RecordedThrough)
+	// The trailing window stops at the checkpoint. Everything above it belongs to
+	// the forward window, which is what advances the position.
+	if !trailing.Through.Equal(checkpoint.RecordedThrough) {
+		t.Fatalf("trailing window ends at %s, want the checkpoint %s", trailing.Through, checkpoint.RecordedThrough)
+	}
+
+	frontier := checkpoint.FrontierWindow(head)
+	if !frontier.From.Equal(checkpoint.RecordedThrough) {
+		t.Fatalf("forward window starts at %s, want the checkpoint %s so boundary ties are re-read",
+			frontier.From, checkpoint.RecordedThrough)
+	}
+	if !frontier.Through.Equal(head.RecordedThrough) {
+		t.Fatalf("forward window ends at %s, want the head %s", frontier.Through, head.RecordedThrough)
 	}
 }
 
@@ -71,12 +85,18 @@ func TestScanWindowReachesBackPastTheCheckpoint(t *testing.T) {
 // from "now minus a window", which would skip all existing history.
 func TestFirstScanCoversAllHistory(t *testing.T) {
 	head := NewIncrementalSourceHead(SourceKindRecordDomain, testHeadMoment(), DefaultSourceSafetyLag)
-	window := SourceCheckpoint{Kind: SourceKindRecordDomain}.ScanWindow(head, DefaultReprojectionWindow)
+	checkpoint := SourceCheckpoint{Kind: SourceKindRecordDomain}
+	window := checkpoint.FrontierWindow(head)
 	if !window.From.IsZero() {
 		t.Fatalf("first scan starts at %s, want the zero time so nothing is skipped", window.From)
 	}
 	if !window.Through.Equal(head.RecordedThrough) {
 		t.Fatalf("first scan ends at %s, want %s", window.Through, head.RecordedThrough)
+	}
+	// Re-reading behind a position that does not exist yet would scan a window
+	// the forward pass already covers.
+	if _, ok := checkpoint.TrailingWindow(DefaultReprojectionWindow); ok {
+		t.Fatalf("a first run must not have a trailing window")
 	}
 }
 

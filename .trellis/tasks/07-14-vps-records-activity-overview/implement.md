@@ -91,8 +91,44 @@
 - Modify: `cmd/houfeng-center/bootstrap.go`
 - Modify: `cmd/houfeng-center/bootstrap_test.go`
 
-- [ ] 写 adapter/projector RED matrix：每个source的committed-contiguous `AuthoritativeHead`/`Readiness`/bounded scan、revision 1 去重、后续 revision、状态/visibility、evidence coverage、历史 VPS link interval、asset histories、monitoring correction/backfill、command metadata-only、comment/action domain events、同 identity 不同 hash、checkpoint retry 和旧 reservation epoch。另让worker A持有published-head锁/低range延迟commit、worker B竞争高range，证明B不能越过且rollback重新得到连续range；全重复与部分重复batch retry都必须先分类existing/hash、只为missing分号，head/rows无洞。
-- [ ] 实现并冻结activity-owned `ExportReadySourceAdapter`、`ActivitySnapshot`、`ReadinessVector`与`ActivityExportReader` types；SourceAdapter registry、batch projector、platform lease/checkpoint/outbox wake-up生成export readiness向量。准备可并行，final publish以generation head行锁先锁定candidate unique keys并分类existing/missing，existing只验hash，missing按确定顺序严格insert连续range，再原子写relation/interval/checkpoint/published head。final path禁止`ON CONFLICT DO NOTHING`吞号；意外冲突整批rollback。old epoch final insert被tombstone拒绝，任何source behind/unreadable时export readiness失败。legacy `experience_logs` 不直接注册 adapter。
+### Task 2a: source 契约、连续发号与 projector 核心（已完成）
+
+- [x] 写 projector/head-lock RED matrix 并确认 RED：worker A 持 published-head 行锁延迟 commit、worker B 竞争，
+  证明 B 不能越过且 A rollback 后 B 重新取到连续 range；全重复/部分重复 batch retry 先分类 existing/hash、
+  只为 missing 分号；同 identity 不同 hash 拒绝；retired generation 拒绝写入。
+- [x] 冻结 activity-owned `SourceAdapter` / `ExportReadySourceAdapter` / `ActivitySnapshot` / `ReadinessVector`；
+  实现 store 侧 head-lock 连续发号（`PublishActivityBatch`）、checkpoint 仓储与 projector 核心。
+  final path 无 `ON CONFLICT DO NOTHING`：意外冲突整批 rollback，rollback 释放号而不烧号。
+- [x] **`AuthoritativeHead` 语义定案（混合式，用户已确认）**：五个 source 都没有提交序单调列，
+  因此拆成两种强度。增量投影用 `NewIncrementalSourceHead`（滞后 `recorded_at` 水位）+ 尾部窗口幂等重扫；
+  导出完整性用 `NewSettledSourceHead`（带事务视界），`ReadinessVector.ValidateForExport` 在证据不足时 fail closed。
+  一个只有滞后水位的 head 无法支撑完整性声明（`SupportsCompletenessClaim` 返回 false）。
+- [x] **扫描窗口拆成前向/尾部两段**：`FrontierWindow` 双端闭区间（边界同刻行重读而非跨过，
+  因为按 recorded_at 分页只能推进到该时刻），`TrailingWindow` 每轮回扫 checkpoint 之下的重叠区，
+  这是晚提交行唯一被看到的途径。原先单一 `ScanWindow` 会让「整页都是已投影的旧行」永久卡住 checkpoint。
+- [x] adapter 输出按不可信输入校验：跨 source 冒名、非派生 activity ID、hash 不覆盖内容、
+  超出请求窗口的 recorded_at、无可达 subject、未注册 presentation 版本一律拒绝且不推进 checkpoint。
+- [x] checkpoint 推进纪律：整窗读完才推进到 head，截断页只推进到实际读到的最后一行；
+  失败只累加 attempt/error code，位置不动；`caught_up` 要求前向与尾部都读完。
+  0057 checkpoint 表改用 `recorded_through timestamptz`（替换原 `source_head_digest`/`source_cursor`），
+  因为位置是 source 自己的时间而不是我们输出里的序号。
+- [x] 验证：`go test ./internal/center/activity -count=1` 42 项 PASS（projector 29 个子测试），
+  `-race -count=10` PASS；变异测试 5/6 被捕获（第 6 个是我写的空操作变异，非测试缺口）。
+  真实 PostgreSQL：`PublishActivityBatch` 5 项 + checkpoint 5 项 + projector 端到端 3 项全 PASS，
+  含「晚到行拿到更晚的 ingest_sequence 但按真实 event_at 落到时间线中间」与「backlog 跨页 drain 后仍无洞」。
+  改过 migration 后跑完整 `./internal/center/store` integration 套件（205s）全 PASS。
+  注：`VerifyAppACLEffectiveCatalogR1` 系列在本地单 superuser 容器里失败，已用 `origin/main` worktree 确认同样失败，
+  属环境缺少 migrator/runtime 角色分离，非本次回归。
+
+### Task 2b: 五个 source adapter、worker 与 deletion/recovery（待做）
+
+- [ ] 写每个 source 的 adapter RED matrix：revision 1 去重、后续 revision、状态/visibility、evidence coverage、
+  历史 VPS link interval、asset histories、monitoring correction/backfill、command metadata-only、
+  comment/action domain events、旧 reservation epoch。
+- [ ] 实现五个具体 adapter（`record_domain`、`evidence`、`asset_history`、`monitoring_events`、`command_audits`）
+  与 platform lease / outbox wake-up；每个 adapter 需同时提供滞后 head 与带事务视界的 settled head，
+  后者用 `xmin` / `pg_snapshot` 判定，才能进入 export readiness。legacy `experience_logs` 不直接注册 adapter。
+  `ActivityExportReader` type 与 revision interval 写入也在本子任务。
 - [ ] 实现并注册 `activity.NewDeletionAdapter`：reservation后阻止/等待旧publish，清目标record的presentation主行、relations、revision intervals、overview recent/summary cache并独立verify零命中；receipt不含identity/content且不跨包删除。实现 `activity.NewRecoveryAdapter`，只清空/重建canonical activity、revision intervals、generation/checkpoint与overview summary；灾难rebuild递增generation，删除重放不能恢复旧presentation行。
 - [ ] 运行 `go test -race ./internal/center/activity/... ./internal/center/store -run 'Activity|Projector|RecordDomain|EvidenceActivity|AssetHistoryActivity|MonitoringEventActivity|CommandAuditActivity' -count=10`，预期 PASS、duplicate count=0、hostile stdout/stderr/raw payload corpus 命中=0。
 

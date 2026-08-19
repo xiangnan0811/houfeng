@@ -216,7 +216,7 @@ func TestRecordActivityMigrationCheckpointsAgainstSourceHeadNotSequenceMax(t *te
 	definition := normalizedRecordActivityTableDefinition(t, "record_activity_projection_checkpoints")
 	for _, want := range []string{
 		"source_kind text not null",
-		"source_head_digest bytea not null check (octet_length(source_head_digest) = 32)",
+		"recorded_through timestamptz",
 		"lease_owner_id text",
 		"lease_expires_at timestamptz",
 		"last_success_at timestamptz",
@@ -225,6 +225,12 @@ func TestRecordActivityMigrationCheckpointsAgainstSourceHeadNotSequenceMax(t *te
 		if !strings.Contains(definition, want) {
 			t.Fatalf("record_activity_projection_checkpoints must contain %q\ngot: %s", want, definition)
 		}
+	}
+	// A position expressed as an ingest sequence would be a position in our own
+	// output rather than in the source, so a source row that commits after we
+	// read past its neighbour could never be found again.
+	if strings.Contains(definition, "ingest_sequence") {
+		t.Fatalf("the checkpoint must position itself in the source, not in the projection\ngot: %s", definition)
 	}
 	if !strings.Contains(definition, "last_error_code text not null default ''") {
 		t.Fatal("the checkpoint must carry a safe reason code rather than a free-form error")

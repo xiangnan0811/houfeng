@@ -138,8 +138,11 @@ create table if not exists public.record_activity_projection_checkpoints (
   source_kind text not null
     check (source_kind in ('record_domain', 'evidence_snapshot', 'asset_history',
       'monitoring_event', 'command_audit')),
-  source_head_digest bytea not null check (octet_length(source_head_digest) = 32),
-  source_cursor text not null default '' check (octet_length(source_cursor) <= 512),
+  -- The position is the source's own recorded time, not an ingest sequence: a
+  -- sequence maximum would let a transaction that commits out of order be
+  -- skipped forever. Null means no pass has completed yet, so the next scan must
+  -- cover all history.
+  recorded_through timestamptz,
   caught_up boolean not null default false,
   lease_owner_id text
     check (lease_owner_id is null or lease_owner_id ~ '^[a-z0-9_-]{1,128}$'),

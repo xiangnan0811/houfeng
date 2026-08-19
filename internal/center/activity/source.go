@@ -95,20 +95,35 @@ type SourceCheckpoint struct {
 	LastErrorCode   string
 }
 
-// ScanWindow returns the range to read next. It intentionally overlaps the
-// checkpoint by the reprojection window rather than resuming exactly where it
-// stopped, so a row that committed late under the previous watermark is picked
-// up instead of being skipped forever.
-func (checkpoint SourceCheckpoint) ScanWindow(head SourceHead, overlap time.Duration) ScanWindow {
+// FrontierWindow is the forward range that makes progress. Both bounds are
+// inclusive: a page cut off in the middle of a group of rows sharing one
+// timestamp can only advance the position to that timestamp, and an exclusive
+// lower bound would then drop the rest of the group. Re-reading the boundary
+// instant instead costs one classification per row and no sequence numbers.
+//
+// A first run has no position, so the window opens at the zero time and covers
+// all history; starting at "now minus a window" would silently skip everything
+// older.
+func (checkpoint SourceCheckpoint) FrontierWindow(head SourceHead) ScanWindow {
+	return ScanWindow{From: checkpoint.RecordedThrough, Through: head.RecordedThrough}
+}
+
+// TrailingWindow is the backward range re-read on every pass, and it is the only
+// reason a late commit is not lost. None of the five sources orders rows by
+// commit, so a transaction that began under the previous watermark can commit
+// after it; its row then appears below the position the forward scan has already
+// passed. Re-reading is safe because publication is keyed on source identity.
+//
+// The second return is false on a first run, where the forward window already
+// covers all history and there is nothing behind it.
+func (checkpoint SourceCheckpoint) TrailingWindow(overlap time.Duration) (ScanWindow, bool) {
 	if checkpoint.RecordedThrough.IsZero() {
-		// A first run has no position, so it must cover all history. Starting at
-		// "now minus a window" here would silently skip everything older.
-		return ScanWindow{Through: head.RecordedThrough}
+		return ScanWindow{}, false
 	}
 	return ScanWindow{
 		From:    checkpoint.RecordedThrough.Add(-overlap),
-		Through: head.RecordedThrough,
-	}
+		Through: checkpoint.RecordedThrough,
+	}, true
 }
 
 // ValidateHead refuses a head that moved backwards or belongs to another source.
