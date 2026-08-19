@@ -125,10 +125,51 @@
 - [ ] 写每个 source 的 adapter RED matrix：revision 1 去重、后续 revision、状态/visibility、evidence coverage、
   历史 VPS link interval、asset histories、monitoring correction/backfill、command metadata-only、
   comment/action domain events、旧 reservation epoch。
-- [ ] 实现五个具体 adapter（`record_domain`、`evidence`、`asset_history`、`monitoring_events`、`command_audits`）
-  与 platform lease / outbox wake-up；每个 adapter 需同时提供滞后 head 与带事务视界的 settled head，
-  后者用 `xmin` / `pg_snapshot` 判定，才能进入 export readiness。legacy `experience_logs` 不直接注册 adapter。
-  `ActivityExportReader` type 与 revision interval 写入也在本子任务。
+- [x] **`record_domain` adapter 已完成**（`internal/center/store/record_activity_source_record_domain.go`）。
+  **计划偏差（文件布局）**：PRD 写的是 `internal/center/activity/adapters/*.go`，但
+  `.trellis/spec/backend/directory-structure.md:651` 规定原生 SQL 属于 `internal/center/store/<aggregate>.go`。
+  adapter 必须带 SQL，因此实现放在 store，`activity` 包只持有接口契约（与 Task 2a 的
+  `ActivityProjectionRepository` 同一模式）。
+  关键决定：(1) source 坐标用 `record_domain_activities.activity_id`（自身主键）而非 `source_event_id`——
+  后者五个 writer 形状不一致，collaboration writer 会写 `revision_id + ":" + field`，含冒号，
+  不符合 `SourceIdentity` 的 `^[a-z0-9_-]{1,128}$`；(2) subject 挂在 revision 上而不是 event 上，
+  action 事件不带 revision_id，用 lateral join 取 event_at 时点的当前 revision，否则这些事件无 subject、不可达；
+  (3) presentation 只用「按 event_kind 固定的标签」，不从记录正文/评论/命令输出拼标题；
+  (4) 0057 补了 `idx_record_domain_activities_recorded(project_id, recorded_at, activity_id)`——
+  原表只为按记录读建了 `(record_id, event_at desc)`，否则每轮投影全表顺扫。
+  验证：单测 6 项 + 真实 PostgreSQL 6 项全 PASS（含 subject 取自正确 revision、双端窗口边界、
+  分页顺序、索引存在、readiness 拒绝增量 head、经 projector 端到端投影且二次运行 0 插入）。
+
+- [ ] 剩余四个 adapter。**已完成 schema 侦察，结论如下（下次直接用，不用重查）**：
+  - `evidence`：表 `evidence_snapshots`（0054）。recorded=`created_at`，occurrence=`actual_ended_at`
+    （与 `ResolveEventTime` 对 `evidence_captured` 用 observation end 一致）。version=`schema_version`。
+    subject 来自 `(source_kind, source_id)`，但 `source_kind` 还包含 `subscription`/`monitoring_event`/
+    `command_audit`/`record_revision` 四个非 subject 值——**必须在 SQL 里显式 `where source_kind in
+    ('vps','monitoring_instance','target')`**，否则这些行没有可达 subject 会让整批失败。append-only。
+    **`created_at` 无索引，需补。**
+  - `asset_history`：**四张表**需 UNION 成一个 source：`renewal_decisions`(0020，occurrence=`decided_at`)、
+    `price_histories`(0021+0031，`changed_at`)、`ip_histories`(0021，`changed_at`)、
+    `vps_spec_snapshots`(0021，`captured_at`)。四张都有 `vps_id`、recorded=`created_at`、无 actor、无 version
+    （version 取 1）。event id 用各自主键，但**必须给 `SourceIdentity.EventID` 加表前缀区分**，
+    否则四张表主键可能撞。display_name 需 join `vps_assets`。**四张表的 `created_at` 都无索引，需补。**
+  - `monitoring_events`：表 `state_change_events`（0001，0029 改名）。recorded=`created_at`
+    （**已有全局索引 `idx_state_change_events_created_at`，无需补**），occurrence=`payload->>'event_at'`，
+    backfilled=`payload->'is_backfilled'`，correction=`payload->>'correction_of_event_id'`。
+    subject 来自 `(object_type, object_id)`，`monitoring_instance` 与 `target` 都是合法 subject kind。
+    **注意 `Corrects` 存的是被更正事件的 projected activity id，不是原始 event_id**，
+    需自连接取被更正事件的 `event_type` 才能推导其 activity id。
+    payload 元数据完整性判据可复用 `evidence_task4_sources.go:34-41` 的 `metadata_complete`。
+    20 个 EventKind 里只有一个 `monitoring_state_changed`，所以 `event_type` 落到 presentation 标签 + severity，
+    不再细分 EventKind。
+  - `command_audits`：表 `monitoring_instance_command_action_audit`(0046+0050)。
+    `occurred_at` 同时是 occurrence 与 recorded（**已有 `..._global_time(occurred_at desc, audit_id desc)` 索引**）。
+    subject=`monitoring_instance_id`（`mi_`），identity 用 `monitoring_instance_name_snapshot`，
+    actor 用 `actor_user_id` + snapshot 列。**stdout/stderr 不在本表**（在 `monitoring_instances.last_action`），
+    `details` jsonb 也不得投影。
+  - `record_outbox`(0051) 是 mutable 的 lease 队列，**不是 adapter 输入**，只可做 worker wake-up 信号。
+  - legacy `experience_logs` 不直接注册 adapter。
+
+- [ ] platform lease / worker、`ActivityExportReader` type 与 revision interval 写入。
 - [ ] 实现并注册 `activity.NewDeletionAdapter`：reservation后阻止/等待旧publish，清目标record的presentation主行、relations、revision intervals、overview recent/summary cache并独立verify零命中；receipt不含identity/content且不跨包删除。实现 `activity.NewRecoveryAdapter`，只清空/重建canonical activity、revision intervals、generation/checkpoint与overview summary；灾难rebuild递增generation，删除重放不能恢复旧presentation行。
 - [ ] 运行 `go test -race ./internal/center/activity/... ./internal/center/store -run 'Activity|Projector|RecordDomain|EvidenceActivity|AssetHistoryActivity|MonitoringEventActivity|CommandAuditActivity' -count=10`，预期 PASS、duplicate count=0、hostile stdout/stderr/raw payload corpus 命中=0。
 
