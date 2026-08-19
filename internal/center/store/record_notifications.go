@@ -535,7 +535,7 @@ func insertNotificationProjection(ctx context.Context, tx pgx.Tx, facts recordco
 		}
 	}
 	var pruned int64
-	encoded, err := encodeCollaborationDeleteCommand(collaborationPruneNotificationRecipientsFunctionCommand{
+	encoded, err := encodeRecordPurgeCommand(collaborationPruneNotificationRecipientsFunctionCommand{
 		NotificationID: notificationID, RecordID: facts.RecordID,
 		KeepUserIDs: recipientIDs, FenceEpoch: int64(facts.RecordFenceEpoch),
 	})

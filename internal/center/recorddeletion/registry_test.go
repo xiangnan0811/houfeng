@@ -326,6 +326,8 @@ func completeReadinessAdapters(t *testing.T) []Adapter {
 			surfaces = RecordEvidenceSurfaceNames()
 		case AdapterNameRecordCollaboration:
 			surfaces = RecordCollaborationSurfaceNames()
+		case AdapterNameRecordSearch:
+			surfaces = RecordSearchSurfaceNames()
 		}
 		adapters = append(adapters, newReadinessAdapterStub(t, name, surfaces, true, byte(index+1)))
 	}
