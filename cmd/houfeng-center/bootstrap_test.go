@@ -823,6 +823,35 @@ func TestBootstrapRegistersRecordCollaborationRevisionParticipantWithoutAdmissio
 	}
 }
 
+// Search must reuse the record read service and the injected admission gate. A
+// second read path would become a second authorization decision, and a bypassed
+// gate would let the index answer while the record surface is closed.
+func TestBootstrapWiresRecordSearchThroughSharedReadServiceAndAdmission(t *testing.T) {
+	source, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"recordsearch.NewService(store.NewPostgresRecordSearchStore(pool, effectiveGate), readService)",
+		"handlers.RecordSearch(searchService)",
+		"RecordSearchHandler:",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("bootstrap missing record search wiring %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"NewPostgresRecordSearchStore(pool, nil)",
+		"NewPostgresRecordSearchStore(pool, store.AdmissionGateFunc",
+		"NewPostgresRecordSearchStore(pool, allow",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("bootstrap contains forbidden record search admission bypass %q", forbidden)
+		}
+	}
+}
+
 func TestBootstrapWiresRecordActionsThroughSharedAuthorizationMembershipAndAdmission(t *testing.T) {
 	source, err := os.ReadFile("bootstrap.go")
 	if err != nil {

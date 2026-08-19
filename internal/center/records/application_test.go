@@ -280,13 +280,10 @@ func TestApplicationReadEntryPointsForwardExactRequests(t *testing.T) {
 	}
 	getRequest := RecordGetRequest{Actor: actor, RecordID: "rec_applicationread"}
 	listRequest := RecordListRequest{
-		Actor:      actor,
-		Query:      "database",
-		Lifecycle:  LifecycleActive,
-		RecordType: RecordTypeTroubleshooting,
-		Sort:       RecordSortUpdatedAsc,
-		After:      cursor,
-		Limit:      25,
+		Actor: actor,
+		Sort:  RecordSortUpdatedAsc,
+		After: cursor,
+		Limit: 25,
 	}
 	getRevisionRequest := RecordRevisionGetRequest{
 		Actor:      actor,

@@ -2821,10 +2821,10 @@ export type RecordDraftListResponse = {
   items: RecordDraft[]
 }
 
+// Text, lifecycle, and type filtering live on the search endpoint. The list
+// endpoint rejects them outright, so they must not survive here as options the
+// caller can set and silently lose.
 export type RecordListFilter = {
-  q?: string
-  lifecycle?: RecordLifecycle
-  record_type?: RecordType
   sort?: RecordSort
   limit?: number
   cursor?: string

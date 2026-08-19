@@ -490,16 +490,13 @@ describe('Records API transport', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, response))
 
     await expect(listRecords({
-      q: '  provider incident  ',
-      lifecycle: 'active',
-      record_type: 'troubleshooting',
       sort: 'updated_at_desc',
       limit: 25,
       cursor: '  cursor-current  ',
     })).resolves.toEqual(response)
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/records?q=provider+incident&lifecycle=active&record_type=troubleshooting&sort=updated_at_desc&limit=25&cursor=cursor-current',
+      '/api/records?sort=updated_at_desc&limit=25&cursor=cursor-current',
       requestDefaults,
     )
   })

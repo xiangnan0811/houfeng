@@ -30,6 +30,7 @@ import (
 	"houfeng/internal/center/notify"
 	"houfeng/internal/center/recordcollaboration"
 	centerrecords "houfeng/internal/center/records"
+	"houfeng/internal/center/recordsearch"
 	"houfeng/internal/center/retention"
 	"houfeng/internal/center/runtimefacts"
 	centersettings "houfeng/internal/center/settings"
@@ -191,6 +192,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	}
 	recordsEnabled := cfg.RecordPlatformMode == config.RecordPlatformModeRuntimeAdmission
 	var recordsHandler http.Handler
+	var recordSearchHandler http.Handler
 	var recordActionsHandler http.Handler
 	var recordCommentsHandler http.Handler
 	var collaborationRuntime recordCollaborationRuntime
@@ -201,7 +203,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	var attachmentsHandler http.Handler
 	var evidenceMaintenance *centerevidence.MaintenanceWorker
 	if recordsEnabled {
-		recordsHandler, recordActionsHandler, recordCommentsHandler, recordDraftsHandler, recordDeletionsHandler, evidenceHandler,
+		recordsHandler, recordSearchHandler, recordActionsHandler, recordCommentsHandler, recordDraftsHandler, recordDeletionsHandler, evidenceHandler,
 			attachmentUploadsHandler, attachmentsHandler, collaborationRuntime, evidenceMaintenance, err = newRecordsHTTPHandlers(
 			db.Pool(),
 			vpsAssetRepo,
@@ -230,6 +232,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		SettingsHandler:                             handlers.Settings(settingsHandlerRepo),
 		RecordsEnabled:                              recordsEnabled,
 		RecordsHandler:                              recordsHandler,
+		RecordSearchHandler:                         recordSearchHandler,
 		RecordActionsHandler:                        recordActionsHandler,
 		RecordCommentsHandler:                       recordCommentsHandler,
 		RecordWatchesHandler:                        collaborationRuntime.watchesHandler,
@@ -361,7 +364,7 @@ func newRecordsHTTPHandlers(
 	attachmentConfig config.AttachmentConfig,
 	evidenceSources productionEvidenceSources,
 	gate store.AdmissionGate,
-) (http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, recordCollaborationRuntime, *centerevidence.MaintenanceWorker, error) {
+) (http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, recordCollaborationRuntime, *centerevidence.MaintenanceWorker, error) {
 	effectiveGate := gate
 	if nilBootstrapAdmissionGate(effectiveGate) {
 		effectiveGate = nil
@@ -372,7 +375,7 @@ func newRecordsHTTPHandlers(
 		store.NewTargetRecordSubjectAdapter(targetRepository),
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record subject registry: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record subject registry: %w", err)
 	}
 	subjectResolver := store.NewRecordSubjectReadResolver(subjects, nil)
 	authorizations := store.NewPostgresCurrentRecordAuthorizationSource(pool, subjectResolver, effectiveGate)
@@ -382,7 +385,7 @@ func newRecordsHTTPHandlers(
 			Pool: pool, Gate: effectiveGate, Subjects: subjects, Sources: evidenceSources,
 		})
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create evidence composition: %w", err)
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create evidence composition: %w", err)
 		}
 		authorizations = evidenceComposition.authorizations
 	}
@@ -398,18 +401,18 @@ func newRecordsHTTPHandlers(
 		store.NewRecordSearchRevisionParticipant(),
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record repository: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record repository: %w", err)
 	}
 	draftRepository := store.NewPostgresRecordDraftRepository(pool, effectiveGate)
 	attachmentRepository := store.NewPostgresAttachmentRepository(pool)
 	contentLeaseRepository := store.NewPostgresRecordPlatformRepository(pool, effectiveGate)
 	blob, err := newAttachmentBlobStore(attachmentConfig)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create attachment Blob store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create attachment Blob store: %w", err)
 	}
 	scanner, err := newAttachmentScanner(attachmentConfig)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create attachment scanner readiness: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create attachment scanner readiness: %w", err)
 	}
 	uploadService, err := attachments.NewUploadService(
 		draftRepository,
@@ -423,7 +426,7 @@ func newRecordsHTTPHandlers(
 		},
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create attachment upload service: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create attachment upload service: %w", err)
 	}
 	downloadService, err := attachments.NewDownloadService(
 		attachmentRepository,
@@ -433,24 +436,24 @@ func newRecordsHTTPHandlers(
 		attachments.DownloadServiceOptions{Limits: attachmentConfig.Limits},
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create attachment download service: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create attachment download service: %w", err)
 	}
 
 	readService, err := centerrecords.NewRecordReadService(authorizations, authorizations, recordRepository)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record read service: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record read service: %w", err)
 	}
 	revisionService, err := centerrecords.NewRevisionService(subjects, authorizations, recordRepository)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record revision service: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record revision service: %w", err)
 	}
 	lifecycleService, err := centerrecords.NewRecordLifecycleService(authorizations, recordRepository)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record lifecycle service: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record lifecycle service: %w", err)
 	}
 	draftService, err := centerrecords.NewDraftService(draftRepository, authorizations)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record draft service: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record draft service: %w", err)
 	}
 	application, err := centerrecords.NewApplication(
 		readService,
@@ -465,12 +468,12 @@ func newRecordsHTTPHandlers(
 		},
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create records application: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create records application: %w", err)
 	}
 	actionRepository := store.NewPostgresRecordActionRepository(pool, effectiveGate, collaborationMembers, authorizations)
 	actionService, err := recordcollaboration.NewActionService(authorizations, actionRepository)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record action service: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record action service: %w", err)
 	}
 	actionApplication, err := recordcollaboration.NewActionApplication(
 		actionService,
@@ -482,12 +485,12 @@ func newRecordsHTTPHandlers(
 		},
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record action application: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record action application: %w", err)
 	}
 	commentRepository := store.NewPostgresRecordCommentRepository(pool, effectiveGate, collaborationMembers, authorizations)
 	commentService, err := recordcollaboration.NewCommentService(authorizations, commentRepository)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record comment service: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record comment service: %w", err)
 	}
 	commentApplication, err := recordcollaboration.NewCommentApplication(
 		commentService,
@@ -499,12 +502,12 @@ func newRecordsHTTPHandlers(
 		},
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record comment application: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record comment application: %w", err)
 	}
 	watchRepository := store.NewPostgresRecordWatchRepository(pool, effectiveGate, collaborationMembers, authorizations)
 	watchService, err := recordcollaboration.NewWatchService(authorizations, watchRepository)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record watch service: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record watch service: %w", err)
 	}
 	watchApplication, err := recordcollaboration.NewWatchApplication(
 		watchService,
@@ -515,7 +518,7 @@ func newRecordsHTTPHandlers(
 		},
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record watch application: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record watch application: %w", err)
 	}
 	notificationRepository := store.NewPostgresRecordNotificationRepository(
 		pool, effectiveGate, collaborationMembers, authorizations, 30*24*time.Hour,
@@ -523,7 +526,7 @@ func newRecordsHTTPHandlers(
 	notificationQueue := store.NewPostgresRecordPlatformRepository(pool, effectiveGate)
 	notificationProjector, err := recordcollaboration.NewNotificationProjector(notificationQueue, notificationRepository, 5*time.Second)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record notification projector: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record notification projector: %w", err)
 	}
 	collaborationRuntime := recordCollaborationRuntime{
 		watchesHandler: handlers.RecordWatches(watchApplication),
@@ -538,8 +541,14 @@ func newRecordsHTTPHandlers(
 			},
 		)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record notification projection worker: %w", err)
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record notification projection worker: %w", err)
 		}
+	}
+	// Search hydrates through the same read service the record endpoints use, so
+	// one authorization decision covers both surfaces.
+	searchService, err := recordsearch.NewService(store.NewPostgresRecordSearchStore(pool, effectiveGate), readService)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record search service: %w", err)
 	}
 	var evidencePreparer *centerevidence.RevisionPreparer
 	var evidenceHandler http.Handler = handlers.Evidence(nil)
@@ -553,6 +562,7 @@ func newRecordsHTTPHandlers(
 	// independent ledger/witness clients. Until all of them are wired and
 	// healthy, the production deletion transport remains explicitly closed.
 	return handlers.RecordsWithOptions(application, handlers.RecordHandlerOptions{EvidencePreparer: evidencePreparer}),
+		handlers.RecordSearch(searchService),
 		handlers.RecordActions(actionApplication), handlers.RecordComments(commentApplication), handlers.RecordDrafts(application), handlers.RecordDeletions(nil), evidenceHandler,
 		handlers.AttachmentUploads(uploadService), handlers.AttachmentsWithOptions(downloadService), collaborationRuntime, evidenceWorker, nil
 }

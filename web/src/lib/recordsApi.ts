@@ -104,9 +104,6 @@ function changeRecordLifecycle(
 export function listRecords(filter?: RecordListFilter): Promise<RecordListResponse> {
   return requestJSON<RecordListResponse>(withQuery('/api/records', filter
     ? {
-        q: filter.q,
-        lifecycle: filter.lifecycle,
-        record_type: filter.record_type,
         sort: filter.sort,
         limit: filter.limit,
         cursor: filter.cursor,

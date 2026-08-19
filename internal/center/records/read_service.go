@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 	"time"
 
 	"houfeng/internal/center/recordauth"
@@ -134,14 +133,15 @@ type RecordGetRequest struct {
 	RecordID string
 }
 
+// RecordListRequest walks records in sort order only. Filtering by text,
+// lifecycle, or type belongs to the search index: doing it here meant hydrating
+// and authorizing every record just to discard most of them, and it would now be
+// a second search path with its own matching rules.
 type RecordListRequest struct {
-	Actor      recordauth.ActorScope
-	Query      string
-	Lifecycle  Lifecycle
-	RecordType RecordType
-	Sort       RecordSort
-	After      *RecordCursor
-	Limit      uint64
+	Actor recordauth.ActorScope
+	Sort  RecordSort
+	After *RecordCursor
+	Limit uint64
 }
 
 type RecordListResult struct {
@@ -216,8 +216,7 @@ func (service *RecordReadService) GetRecord(ctx context.Context, request RecordG
 
 func (service *RecordReadService) ListRecords(ctx context.Context, request RecordListRequest) (RecordListResult, error) {
 	if ctx == nil || service == nil || nilRecordReadDependency(service.current) ||
-		nilRecordReadDependency(service.store) || request.Limit == 0 || request.Limit > 100 ||
-		len(request.Query) > 256 {
+		nilRecordReadDependency(service.store) || request.Limit == 0 || request.Limit > 100 {
 		return RecordListResult{}, ErrInvalidRecordReadRequest
 	}
 	actor, err := recordauth.NormalizeActorScope(request.Actor)
@@ -228,12 +227,6 @@ func (service *RecordReadService) ListRecords(ctx context.Context, request Recor
 		request.Sort = RecordSortUpdatedDesc
 	}
 	if request.Sort != RecordSortUpdatedDesc && request.Sort != RecordSortUpdatedAsc {
-		return RecordListResult{}, ErrInvalidRecordReadRequest
-	}
-	if request.Lifecycle != "" && ValidateLifecycle(request.Lifecycle) != nil {
-		return RecordListResult{}, ErrInvalidRecordReadRequest
-	}
-	if request.RecordType != "" && ValidateRecordType(request.RecordType) != nil {
 		return RecordListResult{}, ErrInvalidRecordReadRequest
 	}
 
@@ -290,12 +283,11 @@ func (service *RecordReadService) ListRecords(ctx context.Context, request Recor
 			if validateStoredRecordRevision(stored, current.RecordID, current.CurrentRevisionID, current.LockVersion, current.AuthorizationEpoch, current.Lifecycle) != nil {
 				continue
 			}
-			record := recordFromStored(actor, current, stored)
-			if matchesRecordQuery(record, request.Query, request.Lifecycle, request.RecordType) {
-				matched = append(matched, listedRecord{record: record, candidate: candidate})
-				if uint64(len(matched)) > request.Limit {
-					break
-				}
+			matched = append(matched, listedRecord{
+				record: recordFromStored(actor, current, stored), candidate: candidate,
+			})
+			if uint64(len(matched)) > request.Limit {
+				break
 			}
 		}
 		last := candidates[len(candidates)-1]
@@ -547,27 +539,4 @@ func minUint64(left, right uint64) uint64 {
 		return left
 	}
 	return right
-}
-
-func matchesRecordQuery(record Record, query string, lifecycle Lifecycle, recordType RecordType) bool {
-	if lifecycle != "" && record.Lifecycle != lifecycle {
-		return false
-	}
-	if recordType != "" && record.Current.Input.RecordType() != recordType {
-		return false
-	}
-	query = strings.ToLower(strings.TrimSpace(query))
-	if query == "" {
-		return true
-	}
-	if strings.Contains(strings.ToLower(record.Current.Input.Title()), query) ||
-		strings.Contains(strings.ToLower(record.Current.Input.BodyMarkdown()), query) {
-		return true
-	}
-	for _, tag := range record.Current.Input.Tags() {
-		if strings.Contains(strings.ToLower(tag), query) {
-			return true
-		}
-	}
-	return false
 }
