@@ -565,3 +565,65 @@ Implemented and independently reviewed Child 5: the houfeng_markdown/v1 document
 ### Next Steps
 
 - Reconcile Child 6 (/records index, search, sidebar) against current main before task.py start.
+
+
+## Session 249: Deliver VPS Records search center
+
+**Date**: 2026-08-19
+**Task**: Deliver VPS Records search center
+**Branch**: `codex/vps-records-search-center`
+
+### Summary
+
+Implemented Child 6: a server-side records search index behind `GET /api/records/search`, the `/records` and `/records/drafts` lazy routes with URL-driven filters, and a records group in the global search palette; merged PR #416 through protected main with all seven checks green, verified post-merge main CI, and archived the task.
+
+### Main Changes
+
+- Added `internal/center/recordsearch` owning query normalization, the pagination cursor, candidate-to-authorized hydration, rebuild orchestration, and the deletion adapter, so HTTP / store / projector share one normalization and one cursor contract.
+- Kept the index a derived projection: `title` + derived `plain_text` + generated `search_text` + a 32-byte content digest, never `body_markdown`.
+- Projected inside the commit transaction via a `RevisionParticipant`, with a lock-version / fence-epoch guard so a slow rebuild snapshot cannot overwrite a newer live commit.
+- Rebuilt into a shadow generation under a renewable lease with `resume_after_record_id` checkpointing, publishing by CAS behind two partial unique indexes.
+- Retired the in-memory `q` / `lifecycle` / `record_type` list filter to a 400 `filter_retired` rather than leaving two search paths with two matching rules.
+- Reached the records transport from the AppShell palette only through a dynamic import, so the transport stayed out of the entry chunk and no budget was raised.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6492c8a4` | (see git log) |
+| `15a6c121` | (see git log) |
+| `61b6b913` | (see git log) |
+| `7a786e98` | (see git log) |
+| `fe4a2964` | (see git log) |
+| `83141b3c` | (see git log) |
+| `a302d4d5` | (see git log) |
+| `0619a83d` | (see git log) |
+| `147455db` | (see git log) |
+| `07934943` | (see git log) |
+| `403148da` | (see git log) |
+| `e387bc17` | (see git log) |
+| `fc6d0091` | (see git log) |
+| `422230c2` | (see git log) |
+| `683e817e` | (see git log) |
+| `a34469d7` | (see git log) |
+| `c01663df` | (see git log) |
+
+### Testing
+
+- [OK] `./scripts/verify.sh` green on Node 22; 1152 web tests; `bundle:check` and `css:analyze` pass with no budget raised (entry JS gzip 109504, max async 48453, zero new CSS).
+- [OK] `go test ./internal/center/store -run TestPostgresIntegration` green against real PostgreSQL, covering 0056, projection, rebuild lease/checkpoint/publish CAS, and deletion purge with absence verification.
+- [OK] PR #416 all seven required checks green, including the three pinned-PG16 catalog jobs; post-merge main CI green.
+- [NOTE] `internal/center/store/migrate` PostgreSQL integration tests fail locally without `HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE`; reproduced with identical signatures at merge base `ed84334`, and CI's pinned-image jobs pass. Use the catalog job's image env for that package locally.
+
+### Lessons
+
+- `maxAsyncJsGzipBytes` flaps by a byte or two whenever an imported chunk's content hash changes, because the hash string itself compresses differently. Re-measure after the final build instead of ratcheting the limit per intermediate build; this task ended up needing no budget change at all.
+- The pagination cursor binds context by digest and is not signed, so it can never stand in for authorization. Every candidate still goes through the authorized read path.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Child 6 is merged and archived; dependent Activity overview and Portability migration children remain unstarted.
