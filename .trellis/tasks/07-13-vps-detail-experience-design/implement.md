@@ -22,11 +22,13 @@ storage, Vitest, Playwright, and Trellis child-task workflow.
 
 - Read `research/development-rebaseline-2026-08-02.md` before any child work.
 - Parent status remains `planning`; it is not an implementation target.
-- Current delivered program completion is `6/11`: Children 1–4, 9, and 5 are
-  archived on protected main, the last through PR #413 (`d41c8630`).
-- Child 6 `/records` index/search/sidebar is next. Children 7, 8, 10, and 11
-  remain planning.
-- Children 6–11 still require individual current-main plan reconciliation
+- Current delivered program completion is `7/11`: Children 1–4, 9, 5, and 6 are
+  archived on protected main, the last through PR #416, released as `v0.69.0`.
+- Child 7 activity projection / subject timeline / VPS overview is next, and is
+  the only remaining child whose direct dependencies (2, 4, 6, 9) are all on
+  main. Children 8, 10, and 11 remain planning and stay blocked in that order:
+  8 needs 7, 10 needs 2–9, 11 needs 1–10.
+- Children 7–11 still require individual current-main plan reconciliation
   before `task.py start`.
 - The old 121-item matrix is historical risk coverage, not a current
   line-by-line release gate.
