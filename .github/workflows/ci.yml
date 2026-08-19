@@ -86,8 +86,17 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
       - name: Install web dependencies
         run: env -u NODE_ENV npm --prefix web ci --include=dev
+      # Reconciling apt state is best-effort on purpose. The hosted image already
+      # carries the Chromium libraries, so a broken Ubuntu mirror here used to
+      # hang until the job timeout and report nothing. Bound it instead and let
+      # the contract gate below fail loudly if a library is genuinely missing.
+      - name: Reconcile Chromium system dependencies
+        continue-on-error: true
+        timeout-minutes: 5
+        run: timeout 240s npm --prefix web exec playwright install-deps -- chromium
       - name: Install lockfile-compatible Chromium
-        run: npm --prefix web exec playwright install -- --with-deps chromium
+        timeout-minutes: 5
+        run: npm --prefix web exec playwright install -- chromium
       - name: Run Chromium contract gate
         run: npm --prefix web run test:e2e
       - name: Upload browser failure diagnostics
