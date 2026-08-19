@@ -23,6 +23,7 @@ import (
 	"houfeng/internal/center/http/sessionctx"
 	incidentservice "houfeng/internal/center/incidents"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordsearch"
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/targets"
 )
@@ -165,6 +166,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	db := &fakePostgresDB{}
 	applyCalls := 0
 	admitCalls := 0
+	searchGenerationCalls := 0
 	var gotRouterOptions centerhttp.RouterOptions
 	var gotWorkers []centerapp.Worker
 
@@ -178,6 +180,10 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		},
 		admitRuntime: func(context.Context, postgresDB) error {
 			admitCalls++
+			return nil
+		},
+		ensureSearchGeneration: func(context.Context, postgresDB) error {
+			searchGenerationCalls++
 			return nil
 		},
 		seedInitialUser: func(context.Context, auth.UserRepository, config.CenterConfig) error {
@@ -207,8 +213,25 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	if admitCalls != 1 {
 		t.Fatalf("admitRuntime calls = %d, want 1", admitCalls)
 	}
-	if len(gotWorkers) != 5 {
+	// Without a published generation the search projector writes nothing, so
+	// bootstrap has to guarantee one exists before the first record commits.
+	if searchGenerationCalls != 1 {
+		t.Fatalf("ensureSearchGeneration calls = %d, want 1", searchGenerationCalls)
+	}
+	if len(gotWorkers) != 6 {
 		t.Fatalf("runtime workers = %d, want evidence maintenance disabled until Child 10 supplies admission", len(gotWorkers))
+	}
+	// The projector only indexes commits, so records written before the index
+	// existed stay invisible until a rebuild backfills them. That backfill has to
+	// be a running worker, not a manual step.
+	var rebuilder *recordsearch.RebuildWorker
+	for _, worker := range gotWorkers {
+		if candidate, ok := worker.(*recordsearch.RebuildWorker); ok {
+			rebuilder = candidate
+		}
+	}
+	if rebuilder == nil {
+		t.Fatalf("runtime workers = %#v, want a record search rebuild worker", gotWorkers)
 	}
 	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
 		gotRouterOptions.RecordWatchesHandler == nil || gotRouterOptions.RecordInboxHandler == nil ||
@@ -368,6 +391,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		applyMigrations: func(context.Context, postgresDB) error {
 			return nil
 		},
+		ensureSearchGeneration: func(context.Context, postgresDB) error {
+			return nil
+		},
 		seedInitialUser: func(context.Context, auth.UserRepository, config.CenterConfig) error {
 			return nil
 		},
@@ -393,6 +419,11 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 			for i, worker := range workers {
 				if worker == nil {
 					t.Fatalf("workers[%d] = nil, want non-nil", i)
+				}
+				// There is no index to rebuild while the records platform is off,
+				// and a worker polling those tables would fail every pass.
+				if _, ok := worker.(*recordsearch.RebuildWorker); ok {
+					t.Fatalf("workers[%d] is a record search rebuild worker, want none while records are disabled", i)
 				}
 			}
 			return app
@@ -806,6 +837,35 @@ func TestBootstrapRegistersRecordCollaborationRevisionParticipantWithoutAdmissio
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("bootstrap.go contains collaboration admission fallback %q", forbidden)
+		}
+	}
+}
+
+// Search must reuse the record read service and the injected admission gate. A
+// second read path would become a second authorization decision, and a bypassed
+// gate would let the index answer while the record surface is closed.
+func TestBootstrapWiresRecordSearchThroughSharedReadServiceAndAdmission(t *testing.T) {
+	source, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"recordsearch.NewService(store.NewPostgresRecordSearchStore(pool, effectiveGate), readService)",
+		"handlers.RecordSearch(searchService)",
+		"RecordSearchHandler:",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("bootstrap missing record search wiring %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"NewPostgresRecordSearchStore(pool, nil)",
+		"NewPostgresRecordSearchStore(pool, store.AdmissionGateFunc",
+		"NewPostgresRecordSearchStore(pool, allow",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("bootstrap contains forbidden record search admission bypass %q", forbidden)
 		}
 	}
 }

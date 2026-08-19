@@ -124,8 +124,36 @@ type DraftReadRequest struct {
 	DraftID string
 }
 
+// DraftCursor is a position in the author's activity order, not a filter, so a
+// draft edited between pages moves rather than disappearing from the sequence.
+type DraftCursor struct {
+	UpdatedAt time.Time
+	DraftID   string
+}
+
+func (cursor DraftCursor) Validate() error {
+	if cursor.UpdatedAt.IsZero() || !validDraftID(cursor.DraftID) {
+		return ErrInvalidDraftCommand
+	}
+	return nil
+}
+
 type DraftListRequest struct {
 	Actor recordauth.ActorScope
+	After *DraftCursor
+	Limit uint64
+}
+
+type DraftListResult struct {
+	Drafts     []Draft
+	NextCursor *DraftCursor
+}
+
+// DraftCandidatePage is the store-facing read. Its limit is a candidate budget
+// rather than a page size, because authorization and hydration drop candidates
+// after the store has already returned them.
+type DraftCandidatePage struct {
+	After *DraftCursor
 	Limit uint64
 }
 
@@ -169,7 +197,7 @@ type DraftReader interface {
 type DraftRepository interface {
 	DraftReader
 	GetDraftRouting(context.Context, string, string) (DraftRouting, error)
-	ListDraftRoutings(context.Context, string, uint64) ([]DraftRouting, error)
+	ListDraftRoutings(context.Context, string, DraftCandidatePage) ([]DraftRouting, error)
 	CreateDraft(context.Context, DraftCreateCommand) (Draft, error)
 	PatchDraft(context.Context, DraftPatchCommand) (Draft, error)
 	DeleteDraft(context.Context, DraftDeleteCommand) error
@@ -201,41 +229,117 @@ func (service *DraftService) ReadDraft(ctx context.Context, request DraftReadReq
 	return draft, nil
 }
 
-func (service *DraftService) ListDrafts(ctx context.Context, request DraftListRequest) ([]Draft, error) {
+// draftCandidateBatch reads ahead of the requested page because authorization and
+// hydration drop candidates. Without the read-ahead a page would come back short
+// whenever a draft was skipped, and the caller could not tell a short page from
+// the last one.
+const draftCandidateBatch = uint64(200)
+
+// ListDrafts returns one page of the author's drafts plus, when more remain, the
+// position to resume from.
+func (service *DraftService) ListDrafts(ctx context.Context, request DraftListRequest) (DraftListResult, error) {
 	if ctx == nil || service == nil || nilRevisionServiceDependency(service.drafts) ||
 		nilRevisionServiceDependency(service.current) || request.Limit == 0 || request.Limit > 100 {
-		return nil, ErrInvalidDraftCommand
+		return DraftListResult{}, ErrInvalidDraftCommand
+	}
+	if request.After != nil {
+		if err := request.After.Validate(); err != nil {
+			return DraftListResult{}, err
+		}
 	}
 	actor, err := recordauth.NormalizeActorScope(request.Actor)
 	if err != nil {
-		return nil, fmt.Errorf("%w: actor", ErrInvalidDraftCommand)
+		return DraftListResult{}, fmt.Errorf("%w: actor", ErrInvalidDraftCommand)
 	}
-	routings, err := service.drafts.ListDraftRoutings(ctx, actor.UserID, request.Limit)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]Draft, 0, len(routings))
-	for _, routing := range routings {
-		if _, err := service.authorizeDraftRouting(ctx, actor, routing, recordauth.CapabilityDraftRead); err != nil {
-			if errors.Is(err, recordauth.ErrDenied) || errors.Is(err, ErrRecordNotFound) ||
-				errors.Is(err, ErrRecordDeletionReserved) {
-				continue
-			}
-			return nil, err
-		}
-		draft, err := service.drafts.GetDraft(ctx, routing.DraftID, actor.UserID)
+
+	// One extra visible draft is what distinguishes "the page is full" from "there
+	// is another page", so it is collected and then withheld.
+	visible := make([]Draft, 0, request.Limit+1)
+	after := cloneDraftCursor(request.After)
+	batch := maxUint64(draftCandidateBatch, request.Limit+1)
+	for uint64(len(visible)) <= request.Limit {
+		routings, err := service.drafts.ListDraftRoutings(ctx, actor.UserID, DraftCandidatePage{
+			After: cloneDraftCursor(after), Limit: batch,
+		})
 		if err != nil {
-			if errors.Is(err, ErrDraftNotFound) || errors.Is(err, ErrRecordDeletionReserved) {
+			return DraftListResult{}, err
+		}
+		if len(routings) == 0 {
+			break
+		}
+		for _, routing := range routings {
+			draft, ok, err := service.listedDraft(ctx, actor, routing)
+			if err != nil {
+				return DraftListResult{}, err
+			}
+			if !ok {
 				continue
 			}
-			return nil, err
+			visible = append(visible, draft)
+			if uint64(len(visible)) > request.Limit {
+				break
+			}
 		}
-		if draft.Validate() != nil || !sameDraftRouting(routing, DraftRoutingFromDraft(draft)) {
-			continue
+		last := routings[len(routings)-1]
+		after = &DraftCursor{UpdatedAt: last.UpdatedAt.UTC(), DraftID: last.DraftID}
+		if uint64(len(routings)) < batch {
+			break
 		}
-		result = append(result, draft)
 	}
+
+	result := DraftListResult{}
+	if uint64(len(visible)) > request.Limit {
+		visible = visible[:request.Limit]
+		last := visible[len(visible)-1]
+		result.NextCursor = &DraftCursor{UpdatedAt: last.UpdatedAt.UTC(), DraftID: last.DraftID}
+	}
+	result.Drafts = visible
 	return result, nil
+}
+
+// listedDraft reports whether one candidate survives authorization and
+// hydration. A draft the actor cannot reach, or one that changed under the
+// listing, is absent rather than an error: the page describes what is currently
+// visible.
+func (service *DraftService) listedDraft(
+	ctx context.Context,
+	actor recordauth.ActorScope,
+	routing DraftRouting,
+) (Draft, bool, error) {
+	if _, err := service.authorizeDraftRouting(ctx, actor, routing, recordauth.CapabilityDraftRead); err != nil {
+		if errors.Is(err, recordauth.ErrDenied) || errors.Is(err, ErrRecordNotFound) ||
+			errors.Is(err, ErrDraftNotFound) || errors.Is(err, ErrRecordDeletionReserved) {
+			return Draft{}, false, nil
+		}
+		return Draft{}, false, err
+	}
+	draft, err := service.drafts.GetDraft(ctx, routing.DraftID, actor.UserID)
+	if err != nil {
+		if errors.Is(err, ErrDraftNotFound) || errors.Is(err, ErrRecordDeletionReserved) {
+			return Draft{}, false, nil
+		}
+		return Draft{}, false, err
+	}
+	if draft.Validate() != nil || !sameDraftRouting(routing, DraftRoutingFromDraft(draft)) {
+		return Draft{}, false, nil
+	}
+	return draft, true, nil
+}
+
+func cloneDraftCursor(cursor *DraftCursor) *DraftCursor {
+	if cursor == nil {
+		return nil
+	}
+	clone := *cursor
+	clone.UpdatedAt = clone.UpdatedAt.UTC()
+	return &clone
+}
+
+func maxUint64(left, right uint64) uint64 {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 type DraftService struct {

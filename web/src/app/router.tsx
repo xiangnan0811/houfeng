@@ -42,6 +42,12 @@ const providersPage = lazy(() =>
 const recordInboxPage = lazy(() =>
   import('../pages/RecordInboxPage').then((module) => ({ default: module.RecordInboxPage })),
 )
+const recordSearchPage = lazy(() =>
+  import('../pages/records/RecordSearchPage').then((module) => ({ default: module.RecordSearchPage })),
+)
+const recordDraftsPage = lazy(() =>
+  import('../pages/records/RecordDraftsPage').then((module) => ({ default: module.RecordDraftsPage })),
+)
 const recordNewPage = lazy(() =>
   import('../pages/records/RecordNewPage').then((module) => ({ default: module.RecordNewPage })),
 )
@@ -106,6 +112,8 @@ export const appRoutes: RouteObject[] = [
           { path: 'archive/:vpsId', element: routeElement(archiveDetailPage, '正在加载归档详情') },
           { path: 'providers', element: routeElement(providersPage, '正在加载服务商') },
           { path: 'record-inbox', element: routeElement(recordInboxPage, '正在加载记录通知') },
+          { path: 'records', element: routeElement(recordSearchPage, '正在加载运维记录') },
+          { path: 'records/drafts', element: routeElement(recordDraftsPage, '正在加载记录草稿') },
           { path: 'records/new', element: routeElement(recordNewPage, '正在加载新建记录') },
           { path: 'records/:recordId/edit', element: routeElement(recordEditPage, '正在加载记录编辑') },
           { path: 'records/:recordId/revisions/:revisionId', element: routeElement(recordRevisionPage, '正在加载历史修订') },

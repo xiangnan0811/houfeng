@@ -280,13 +280,10 @@ func TestApplicationReadEntryPointsForwardExactRequests(t *testing.T) {
 	}
 	getRequest := RecordGetRequest{Actor: actor, RecordID: "rec_applicationread"}
 	listRequest := RecordListRequest{
-		Actor:      actor,
-		Query:      "database",
-		Lifecycle:  LifecycleActive,
-		RecordType: RecordTypeTroubleshooting,
-		Sort:       RecordSortUpdatedAsc,
-		After:      cursor,
-		Limit:      25,
+		Actor: actor,
+		Sort:  RecordSortUpdatedAsc,
+		After: cursor,
+		Limit: 25,
 	}
 	getRevisionRequest := RecordRevisionGetRequest{
 		Actor:      actor,
@@ -381,11 +378,11 @@ func TestApplicationDraftEntryPointsForwardExactRequests(t *testing.T) {
 			}
 			return wantDraft, nil
 		},
-		list: func(_ context.Context, request DraftListRequest) ([]Draft, error) {
+		list: func(_ context.Context, request DraftListRequest) (DraftListResult, error) {
 			if !reflect.DeepEqual(request, listRequest) {
 				t.Fatalf("ListDrafts() request = %#v, want %#v", request, listRequest)
 			}
-			return []Draft{wantDraft}, nil
+			return DraftListResult{Drafts: []Draft{wantDraft}}, nil
 		},
 		create: func(_ context.Context, request DraftCreateRequest) (Draft, error) {
 			if !reflect.DeepEqual(request, createRequest) {
@@ -426,7 +423,7 @@ func TestApplicationDraftEntryPointsForwardExactRequests(t *testing.T) {
 		}
 	}
 	listed, err := application.ListDrafts(context.Background(), listRequest)
-	if err != nil || len(listed) != 1 || listed[0].DraftID != wantDraft.DraftID {
+	if err != nil || len(listed.Drafts) != 1 || listed.Drafts[0].DraftID != wantDraft.DraftID {
 		t.Fatalf("ListDrafts() = %#v, %v", listed, err)
 	}
 	if err := application.DiscardDraft(context.Background(), discardRequest); err != nil {
@@ -517,7 +514,7 @@ func (stub *recordApplicationLifecycleStub) ChangeLifecycle(ctx context.Context,
 
 type recordApplicationDraftStub struct {
 	read           func(context.Context, DraftReadRequest) (Draft, error)
-	list           func(context.Context, DraftListRequest) ([]Draft, error)
+	list           func(context.Context, DraftListRequest) (DraftListResult, error)
 	create         func(context.Context, DraftCreateRequest) (Draft, error)
 	patch          func(context.Context, DraftPatchRequest) (Draft, error)
 	discard        func(context.Context, DraftDiscardRequest) error
@@ -531,9 +528,9 @@ func (stub *recordApplicationDraftStub) ReadDraft(ctx context.Context, request D
 	return stub.read(ctx, request)
 }
 
-func (stub *recordApplicationDraftStub) ListDrafts(ctx context.Context, request DraftListRequest) ([]Draft, error) {
+func (stub *recordApplicationDraftStub) ListDrafts(ctx context.Context, request DraftListRequest) (DraftListResult, error) {
 	if stub.list == nil {
-		return nil, errors.New("unexpected ListDrafts call")
+		return DraftListResult{}, errors.New("unexpected ListDrafts call")
 	}
 	return stub.list(ctx, request)
 }

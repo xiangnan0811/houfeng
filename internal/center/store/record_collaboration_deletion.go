@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -50,7 +49,7 @@ func (repository *PostgresRecordDeletionRepository) CollaborationDeletionHealth(
 		}
 		var err error
 		health, err = recorddeletion.NewAdapterHealthSnapshot(
-			true, 1, digestCollaborationDeletionStrings(collaborationDeletionHealthDigestDomainV1, names...),
+			true, 1, digestRecordPurgeStrings(collaborationDeletionHealthDigestDomainV1, names...),
 		)
 		if err != nil {
 			return recorddeletion.ErrDeletionSafetyUnavailable
@@ -170,10 +169,10 @@ func (repository *PostgresRecordDeletionRepository) PreviewCollaborationDeletion
 			return recorddeletion.ErrDeletionSafetyUnavailable
 		}
 		snapshot = recorddeletion.AdapterPreviewSnapshot{
-			DependencyDigest: digestCollaborationDeletionBytes(
+			DependencyDigest: digestRecordPurgeBytes(
 				collaborationDeletionPreviewDigestDomainV1, target.DependencyGraphDigest[:], dependencyMaterial,
 			),
-			ImpactDigest:    digestCollaborationDeletionBytes(collaborationDeletionImpactDigestDomainV1, impactMaterial),
+			ImpactDigest:    digestRecordPurgeBytes(collaborationDeletionImpactDigestDomainV1, impactMaterial),
 			SurvivingCopies: []recorddeletion.AdapterSurvivingCopy{},
 		}
 		if deliveredCount > 0 {
@@ -219,11 +218,11 @@ func (repository *PostgresRecordDeletionRepository) PurgeRecordCollaboration(
 			return nil
 		}
 		var removed int64
-		encoded, err := encodeCollaborationDeleteCommand(collaborationPurgeFunctionCommand{
+		encoded, err := encodeRecordPurgeCommand(recordPurgeFunctionCommand{
 			OperationID: command.Operation.OperationID, ReservationID: command.Operation.ReservationID,
 			ProjectID: command.Operation.Object.ProjectID, RecordID: command.Operation.Object.ObjectID,
 			FenceEpoch: int64(command.Operation.FenceEpoch), LedgerSequence: int64(command.Operation.LedgerSequence),
-			LedgerEntryHash: encodeCollaborationLedgerHash(command.Operation.LedgerEntryHash),
+			LedgerEntryHash: encodeRecordPurgeLedgerHash(command.Operation.LedgerEntryHash),
 		})
 		if err != nil {
 			return recorddeletion.ErrDeletionSafetyUnavailable
@@ -300,8 +299,8 @@ func (repository *PostgresRecordDeletionRepository) VerifyRecordCollaborationPur
 		}
 		if removed < 0 || uint64(removed) != receipt.RemovedRowCount ||
 			!verifiedAt.Equal(receipt.VerifiedAbsentAt) ||
-			!equalCollaborationDeletionDigest(rawSurface, receipt.SurfaceDigest) ||
-			!equalCollaborationDeletionDigest(rawReceipt, receipt.ReceiptDigest) {
+			!equalRecordPurgeDigest(rawSurface, receipt.SurfaceDigest) ||
+			!equalRecordPurgeDigest(rawReceipt, receipt.ReceiptDigest) {
 			return recorddeletion.ErrDeletionSafetyUnavailable
 		}
 		return assertRecordCollaborationSurfacesAbsent(ctx, transaction.tx, command.Operation.Object.ObjectID)
@@ -354,7 +353,7 @@ func loadCollaborationPurgeReceipt(
 	if err != nil {
 		return recorddeletion.AdapterPurgeReceipt{}, false, fmt.Errorf("load collaboration purge receipt: %w", err)
 	}
-	if removed < 0 || verifiedAt.IsZero() || !equalCollaborationDeletionDigest(rawSurface, command.SurfaceDigest) {
+	if removed < 0 || verifiedAt.IsZero() || !equalRecordPurgeDigest(rawSurface, command.SurfaceDigest) {
 		return recorddeletion.AdapterPurgeReceipt{}, false, recorddeletion.ErrDeletionSafetyUnavailable
 	}
 	receipt := recorddeletion.AdapterPurgeReceipt{
@@ -362,7 +361,7 @@ func loadCollaborationPurgeReceipt(
 		SurfaceDigest: command.SurfaceDigest, ReceiptDigest: collaborationDeletionReceiptDigest(command, uint64(removed)),
 		RemovedRowCount: uint64(removed), VerifiedAbsentAt: verifiedAt.UTC(),
 	}
-	if !equalCollaborationDeletionDigest(rawReceipt, receipt.ReceiptDigest) {
+	if !equalRecordPurgeDigest(rawReceipt, receipt.ReceiptDigest) {
 		return recorddeletion.AdapterPurgeReceipt{}, false, recorddeletion.ErrDeletionSafetyUnavailable
 	}
 	return receipt, true, nil
@@ -372,55 +371,14 @@ func collaborationDeletionReceiptDigest(
 	command recordcollaboration.DeletionCommand,
 	removed uint64,
 ) [sha256.Size]byte {
-	return digestCollaborationDeletionBytes(
+	return digestRecordPurgeBytes(
 		collaborationDeletionReceiptDigestDomainV1,
 		[]byte(command.Operation.OperationID),
 		[]byte(command.Operation.Object.ProjectID),
 		[]byte(command.Operation.Object.ObjectID),
 		command.SurfaceDigest[:],
-		collaborationDeletionUint64(removed),
+		recordPurgeUint64(removed),
 	)
-}
-
-func digestCollaborationDeletionStrings(domain string, values ...string) [sha256.Size]byte {
-	encoded := make([][]byte, len(values))
-	for index, value := range values {
-		encoded[index] = []byte(value)
-	}
-	return digestCollaborationDeletionBytes(domain, encoded...)
-}
-
-func digestCollaborationDeletionBytes(domain string, values ...[]byte) [sha256.Size]byte {
-	hasher := sha256.New()
-	writeCollaborationDeletionDigestField(hasher, []byte(domain))
-	for _, value := range values {
-		writeCollaborationDeletionDigestField(hasher, value)
-	}
-	var digest [sha256.Size]byte
-	copy(digest[:], hasher.Sum(nil))
-	return digest
-}
-
-func writeCollaborationDeletionDigestField(hasher interface{ Write([]byte) (int, error) }, value []byte) {
-	_, _ = hasher.Write(collaborationDeletionUint64(uint64(len(value))))
-	_, _ = hasher.Write(value)
-}
-
-func collaborationDeletionUint64(value uint64) []byte {
-	encoded := make([]byte, 8)
-	binary.BigEndian.PutUint64(encoded, value)
-	return encoded
-}
-
-func equalCollaborationDeletionDigest(raw []byte, digest [sha256.Size]byte) bool {
-	if len(raw) != sha256.Size {
-		return false
-	}
-	var difference byte
-	for index := range raw {
-		difference |= raw[index] ^ digest[index]
-	}
-	return difference == 0
 }
 
 var _ recordcollaboration.DeletionStore = (*PostgresRecordDeletionRepository)(nil)

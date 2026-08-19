@@ -6,7 +6,7 @@ import { formatDate, formatMoney } from '../../lib/format'
 import type { MonitoringInstanceRecord, ProviderRecord, SubscriptionRecord, TargetRecord, VPSAssetRecord } from '../../lib/types'
 
 interface SearchResult {
-  kind: 'vps' | 'monitoring_instance' | 'target' | 'provider' | 'subscription'
+  kind: 'vps' | 'monitoring_instance' | 'target' | 'provider' | 'subscription' | 'record'
   id: string
   label: string
   hint: string
@@ -19,7 +19,15 @@ type ResultGroup = {
   results: SearchResult[]
 }
 
+/** Cap on the client-side asset matches, which are unranked. */
 const MAX_RESULTS = 10
+
+/**
+ * Records get their own quota rather than sharing the asset cap: they are ranked
+ * by the server, and a query matching many assets should not push every record
+ * out of the palette.
+ */
+const RECORD_RESULTS = 4
 
 const SEARCH_GROUP_LABELS: Record<SearchResult['kind'], string> = {
   vps: 'VPS',
@@ -27,9 +35,10 @@ const SEARCH_GROUP_LABELS: Record<SearchResult['kind'], string> = {
   target: '入口探测',
   provider: '服务商',
   subscription: '订阅',
+  record: '运维记录',
 }
 
-const SEARCH_GROUP_ORDER: SearchResult['kind'][] = ['vps', 'monitoring_instance', 'target', 'provider', 'subscription']
+const SEARCH_GROUP_ORDER: SearchResult['kind'][] = ['vps', 'monitoring_instance', 'target', 'provider', 'subscription', 'record']
 
 /** Global command search with ⌘K / Ctrl+K shortcut. */
 export function GlobalSearch() {
@@ -42,6 +51,7 @@ export function GlobalSearch() {
   const [focusIndex, setFocusIndex] = useState(-1)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const searchGeneration = useRef(0)
 
   useEffect(() => {
     if (!open) return
@@ -75,34 +85,36 @@ export function GlobalSearch() {
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault()
-    const q = query.trim().toLowerCase()
-    if (!q) {
+    const typed = query.trim()
+    if (!typed) {
       setResults([])
       setOpen(false)
       return
     }
+    const generation = ++searchGeneration.current
     setLoading(true)
     setError(null)
-    try {
-      const [vpsAssets, monitoring, targets, providers, subscriptions] = await Promise.all([
-        listVPSAssets(),
-        listMonitoringInstances(),
-        listTargets(),
-        listProviders(),
-        listSubscriptions({ sort: 'renew_at', order: 'asc' }),
-      ])
-      const matches = combine(vpsAssets, monitoring, targets, providers, subscriptions, q).slice(0, MAX_RESULTS)
-      setResults(matches)
-      setOpen(true)
-      setFocusIndex(matches.length > 0 ? 0 : -1)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '搜索失败'
-      setError(message)
-      setResults([])
-      setOpen(true)
-    } finally {
-      setLoading(false)
-    }
+
+    const [assets, recordHits] = await Promise.all([
+      searchAssets(typed.toLowerCase()),
+      // The records transport is reached only through this dynamic import, which
+      // keeps it out of the eager shell bundle. Its own failures resolve to no
+      // hits, so an index that is still building leaves the palette usable.
+      import('../../pages/records/globalRecordSearch')
+        .then((module) => module.searchRecordsForGlobalSearch(typed, RECORD_RESULTS))
+        .catch(() => []),
+    ])
+    if (generation !== searchGeneration.current) return
+
+    const matches = [
+      ...assets.matches,
+      ...recordHits.map((hit) => ({ kind: 'record' as const, ...hit })),
+    ]
+    setResults(matches)
+    setError(assets.error)
+    setOpen(true)
+    setFocusIndex(matches.length > 0 ? 0 : -1)
+    setLoading(false)
   }
 
   function clearSearch() {
@@ -142,7 +154,7 @@ export function GlobalSearch() {
           ref={inputRef}
           type="search"
           className="global-search__input"
-          placeholder="搜索 VPS / 监控实例 / 入口… (⌘ K)"
+          placeholder="搜索 VPS / 监控实例 / 运维记录… (⌘ K)"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -154,41 +166,70 @@ export function GlobalSearch() {
         <div className="global-search__menu" role="listbox">
           {loading ? (
             <p className="global-search__hint">正在加载…</p>
-          ) : error ? (
-            <p className="global-search__hint global-search__hint--error">{error}</p>
-          ) : results.length === 0 ? (
-            <p className="global-search__hint">没有匹配项</p>
           ) : (
-            groups.map((group) => (
-              <div className="global-search__group" key={group.kind}>
-                <p className="global-search__group-title">{group.label}</p>
-                {group.results.map((result) => {
-                  const index = results.indexOf(result)
-                  return (
-                    <Link
-                      key={`${result.kind}-${result.id}`}
-                      to={result.to}
-                      role="option"
-                      aria-selected={index === focusIndex}
-                      className={`global-search__item ${index === focusIndex ? 'is-focused' : ''}`}
-                      onClick={clearSearch}
-                      onMouseEnter={() => setFocusIndex(index)}
-                    >
-                      <span className="global-search__item-kind">{SEARCH_GROUP_LABELS[result.kind]}</span>
-                      <span className="global-search__item-label">{result.label}</span>
-                      {result.hint ? (
-                        <span className="global-search__item-hint">{result.hint}</span>
-                      ) : null}
-                    </Link>
-                  )
-                })}
-              </div>
-            ))
+            <>
+              {/* A partial failure keeps whatever did answer instead of discarding it. */}
+              {error ? (
+                <p className="global-search__hint global-search__hint--error">{error}</p>
+              ) : null}
+              {!error && results.length === 0 ? (
+                <p className="global-search__hint">没有匹配项</p>
+              ) : null}
+              {groups.map((group) => (
+                <div className="global-search__group" key={group.kind}>
+                  <p className="global-search__group-title">{group.label}</p>
+                  {group.results.map((result) => {
+                    const index = results.indexOf(result)
+                    return (
+                      <Link
+                        key={`${result.kind}-${result.id}`}
+                        to={result.to}
+                        role="option"
+                        aria-selected={index === focusIndex}
+                        className={`global-search__item ${index === focusIndex ? 'is-focused' : ''}`}
+                        onClick={clearSearch}
+                        onMouseEnter={() => setFocusIndex(index)}
+                      >
+                        <span className="global-search__item-kind">{SEARCH_GROUP_LABELS[result.kind]}</span>
+                        <span className="global-search__item-label">{result.label}</span>
+                        {result.hint ? (
+                          <span className="global-search__item-hint">{result.hint}</span>
+                        ) : null}
+                      </Link>
+                    )
+                  })}
+                </div>
+              ))}
+            </>
           )}
         </div>
       )}
     </div>
   )
+}
+
+type AssetSearchOutcome = {
+  matches: SearchResult[]
+  error: string | null
+}
+
+async function searchAssets(q: string): Promise<AssetSearchOutcome> {
+  try {
+    const [vpsAssets, monitoring, targets, providers, subscriptions] = await Promise.all([
+      listVPSAssets(),
+      listMonitoringInstances(),
+      listTargets(),
+      listProviders(),
+      listSubscriptions({ sort: 'renew_at', order: 'asc' }),
+    ])
+    return {
+      matches: combine(vpsAssets, monitoring, targets, providers, subscriptions, q)
+        .slice(0, MAX_RESULTS),
+      error: null,
+    }
+  } catch (err) {
+    return { matches: [], error: err instanceof Error ? err.message : '搜索失败' }
+  }
 }
 
 function combine(

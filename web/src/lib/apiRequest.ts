@@ -26,18 +26,24 @@ export class ApiError<TRecovery = unknown> extends Error {
   }
 }
 
+export type QueryValue = string | number | boolean | null | undefined
+
 export function withQuery(
   path: string,
-  filter?: Record<string, string | number | boolean | null | undefined>,
+  filter?: Record<string, QueryValue | readonly QueryValue[]>,
 ): string {
   if (!filter) return path
 
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(filter)) {
-    if (value == null || value === false) continue
-    const normalized = String(value).trim()
-    if (!normalized) continue
-    query.set(key, normalized)
+    // An array repeats its key, which is how the search endpoints read an
+    // OR-ed filter. Scalars keep the single-value form.
+    for (const item of Array.isArray(value) ? value : [value]) {
+      if (item == null || item === false) continue
+      const normalized = String(item).trim()
+      if (!normalized) continue
+      query.append(key, normalized)
+    }
   }
 
   return query.size ? `${path}?${query}` : path

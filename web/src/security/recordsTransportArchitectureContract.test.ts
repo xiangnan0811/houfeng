@@ -44,6 +44,7 @@ const EXPECTED_EXPORTS = [
   'previewRecordPermanentDeletion',
   'restoreRecord',
   'restoreRecordRevision',
+  'searchRecords',
   'uploadAttachmentContent',
 ].sort()
 

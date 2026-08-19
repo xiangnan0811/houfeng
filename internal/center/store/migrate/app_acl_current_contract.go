@@ -30,6 +30,7 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	recordAttachmentsAppACLCurrentMigrationFragment(),
 	recordEvidenceAppACLCurrentMigrationFragment(),
 	recordCollaborationAppACLCurrentMigrationFragment(),
+	recordSearchAppACLCurrentMigrationFragment(),
 }
 
 func recordsCoreAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -307,6 +308,90 @@ func recordCollaborationAppACLCurrentMigrationFragment() AppACLCurrentMigrationF
 		Privileges: recordCollaborationAppACLCurrentPrivileges,
 		Functions:  functions,
 	}
+}
+
+func recordSearchAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	objects := make([]AppACLManagedObjectR1, 0, 7)
+	for _, table := range []string{
+		"record_search_generations",
+		"record_search_documents",
+		"record_search_subjects",
+		"record_search_rebuild_jobs",
+		"record_search_purge_receipts",
+	} {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: table,
+		})
+	}
+	functions := []AppACLCurrentFunctionContract{
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "purge_record_search(text, text, text, text, bigint, bigint, bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "retire_record_search_generation(bigint)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_search_purge(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_search_retire_generation(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+	}
+	for _, function := range functions {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassFunction,
+			SchemaName:     function.SchemaName,
+			ObjectIdentity: function.Identity,
+		})
+	}
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0056_create_record_search.sql",
+		Objects:    objects,
+		Privileges: recordSearchAppACLCurrentPrivileges,
+		Functions:  functions,
+	}
+}
+
+// recordSearchAppACLCurrentPrivileges grants the derived index exactly what the
+// projector and the query path use. Raw DELETE is limited to the subject child
+// rows, which one transaction replaces whenever it rewrites their parent
+// document. Removing a document, a generation, or a purged record all go
+// through controlled functions, so nothing can delete the published generation
+// out from under a live query.
+func recordSearchAppACLCurrentPrivileges(string) []AppACLPrivilege {
+	privileges := make([]AppACLPrivilege, 0, 16)
+	appendTable := func(subject AppACLSubject, table string, kinds ...AppACLPrivilegeKind) {
+		for _, kind := range kinds {
+			privileges = append(privileges, AppACLPrivilege{
+				Subject:        subject,
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     appACLManagedPublicSchemaR1,
+				ObjectIdentity: table,
+				Privilege:      kind,
+			})
+		}
+	}
+
+	runtime := AppACLSubjectCenterRuntime
+	for _, table := range []string{
+		"record_search_generations",
+		"record_search_documents",
+		"record_search_rebuild_jobs",
+	} {
+		appendTable(runtime, table,
+			AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
+	}
+	appendTable(runtime, "record_search_subjects",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeDelete)
+	appendTable(runtime, "record_search_purge_receipts",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+	appendTable(AppACLSubjectPlatformAdmin, "record_search_purge_receipts", AppACLPrivilegeSelect)
+	for _, function := range []string{
+		"public.record_search_purge(bytea)",
+		"public.record_search_retire_generation(bytea)",
+	} {
+		privileges = append(privileges, AppACLPrivilege{
+			Subject:        runtime,
+			ObjectClass:    AppACLObjectClassFunction,
+			ObjectIdentity: function,
+			Privilege:      AppACLPrivilegeExecute,
+		})
+	}
+	return privileges
 }
 
 func recordCollaborationAppACLCurrentPrivileges(string) []AppACLPrivilege {

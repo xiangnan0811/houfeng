@@ -36,6 +36,7 @@ export function Sidebar({
         <div className="nav-section">
           <div className="nav-label">运营</div>
           <SidebarNavItem to="/" end label="工作台" icon={<svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>} />
+          <SidebarNavItem to="/records" label="运维记录" icon={<svg viewBox="0 0 16 16"><path d="M4 2h6l2 2v10H4z"/><path d="M6 6h4M6 9h4M6 12h2"/></svg>} />
         </div>
         <div className="nav-section">
           <div className="nav-label">资产</div>

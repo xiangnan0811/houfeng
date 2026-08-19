@@ -237,13 +237,19 @@ describe('useRecordDraft', () => {
     expect(api.listRecordDrafts).not.toHaveBeenCalled()
   })
 
+  // The local buffer has a 24-hour TTL, so a buffered fixture has to be anchored
+  // to now. A fixed calendar date silently ages out of the window and then makes
+  // the assertions pass for the wrong reason.
+  const bufferedAt = Date.now() - 60 * 60 * 1000
+  const serverDraftAt = new Date(bufferedAt + 30 * 60 * 1000).toISOString()
+
   it('lets a newer server draft win over a previously synced buffer', async () => {
     api.getRecord.mockResolvedValue(recordDetailFixture())
     api.listRecordDrafts.mockResolvedValue({
       items: [draftFixture({
         record_id: 'rec_001',
         payload: { ...emptyRecordDraftPayload('usr_1'), title: 'newer server draft' },
-        updated_at: '2026-08-18T03:00:00Z',
+        updated_at: serverDraftAt,
       })],
     })
     const store = memoryDraftBufferStore()
@@ -252,7 +258,7 @@ describe('useRecordDraft', () => {
       userId: 'usr_1',
       recordId: 'rec_001',
       payload: { ...emptyRecordDraftPayload('usr_1'), title: 'stale local' },
-      updatedAt: Date.parse('2026-08-18T01:00:00Z'),
+      updatedAt: bufferedAt,
     })
     const { result } = renderHook(() => useRecordDraft({
       mode: 'edit',
@@ -274,7 +280,7 @@ describe('useRecordDraft', () => {
       draft_id: 'dft_hidden',
       record_id: 'rec_001',
       payload: { ...emptyRecordDraftPayload('usr_1'), title: 'fetched draft' },
-      updated_at: '2026-08-18T03:00:00Z',
+      updated_at: serverDraftAt,
     }))
     const store = memoryDraftBufferStore()
     await writeUnsyncedDraft(store, {
@@ -283,7 +289,7 @@ describe('useRecordDraft', () => {
       recordId: 'rec_001',
       draftId: 'dft_hidden',
       payload: { ...emptyRecordDraftPayload('usr_1'), title: 'stale local' },
-      updatedAt: Date.parse('2026-08-18T01:00:00Z'),
+      updatedAt: bufferedAt,
     })
     const { result } = renderHook(() => useRecordDraft({
       mode: 'edit',

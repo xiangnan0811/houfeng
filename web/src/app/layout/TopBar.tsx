@@ -18,6 +18,9 @@ const PAGE_TITLES: Record<string, string> = {
   '/providers': '服务商',
   '/subscriptions': '订阅',
   '/asset-decisions': '资产决策',
+  '/records': '运维记录',
+  '/records/drafts': '记录草稿',
+  '/records/new': '新建记录',
   '/record-inbox': '记录通知',
   '/settings': '设置',
 }
@@ -255,5 +258,10 @@ function derivePageTitle(pathname: string): string {
   if (pathname.startsWith('/monitoring/')) return '监控实例详情'
   if (pathname.startsWith('/targets/')) return '目标详情'
   if (pathname.startsWith('/vps/')) return 'VPS 详情'
+  if (pathname.startsWith('/records/')) {
+    if (pathname.endsWith('/edit')) return '编辑记录'
+    if (pathname.includes('/revisions/')) return '历史修订'
+    return '运维记录详情'
+  }
   return '候风'
 }

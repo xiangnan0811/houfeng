@@ -233,6 +233,21 @@ func normalizeResolvedSubject(
 	}, nil
 }
 
+// ValidSubjectKind, ValidRelationRole, and ValidSubjectSourceID expose the
+// subject registry to callers that filter on parts of a reference instead of
+// carrying a whole one, so the registry stays defined here only.
+func ValidSubjectKind(kind SubjectKind) bool {
+	return knownSubjectKind(kind)
+}
+
+func ValidRelationRole(role RelationRole) bool {
+	return knownRelationRole(role)
+}
+
+func ValidSubjectSourceID(kind SubjectKind, value string) bool {
+	return validSubjectSourceID(kind, value)
+}
+
 func knownSubjectKind(kind SubjectKind) bool {
 	switch kind {
 	case SubjectKindVPS, SubjectKindMonitoringInstance, SubjectKindTarget:

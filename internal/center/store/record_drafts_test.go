@@ -286,7 +286,7 @@ func TestPostgresRecordDraftRepositoryListsAuthorRoutingMetadataInStableOrderAnd
 	repository := NewPostgresRecordDraftRepository(nil, allowRecordPlatformAdmissionGate)
 	repository.platform.beginTx = func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }
 
-	routings, err := repository.ListDraftRoutings(context.Background(), ownerID, 3)
+	routings, err := repository.ListDraftRoutings(context.Background(), ownerID, records.DraftCandidatePage{Limit: 3})
 	if err != nil {
 		t.Fatalf("ListDraftRoutings() error = %v", err)
 	}
@@ -294,8 +294,10 @@ func TestPostgresRecordDraftRepositoryListsAuthorRoutingMetadataInStableOrderAnd
 		routings[1].DraftID != "rdf_0000000000000001" {
 		t.Fatalf("ListDraftRoutings() = %#v", routings)
 	}
-	if len(tx.querySQL) == 0 || len(tx.queryArgs) == 0 || len(tx.queryArgs[0]) != 3 ||
-		tx.queryArgs[0][0] != ownerID || tx.queryArgs[0][1] != int64(3) || tx.queryArgs[0][2] != recordObjectKind {
+	if len(tx.querySQL) == 0 || len(tx.queryArgs) == 0 || len(tx.queryArgs[0]) != 5 ||
+		tx.queryArgs[0][0] != ownerID || tx.queryArgs[0][1] != int64(3) ||
+		tx.queryArgs[0][2] != recordObjectKind ||
+		tx.queryArgs[0][3] != nil || tx.queryArgs[0][4] != nil {
 		t.Fatalf("routing list query args = %#v", tx.queryArgs)
 	}
 	listSQL := strings.ToLower(tx.querySQL[0])
@@ -317,6 +319,70 @@ func TestPostgresRecordDraftRepositoryListsAuthorRoutingMetadataInStableOrderAnd
 		if strings.Contains(listSQL, forbidden) {
 			t.Fatalf("routing list SQL reads private content field %q:\n%s", forbidden, listSQL)
 		}
+	}
+}
+
+// The keyset predicate has to compare the same tuple the ordering uses. A filter
+// on updated_at alone would drop drafts that share a timestamp, and a different
+// ordering would make the index useless.
+func TestPostgresRecordDraftRepositoryResumesFromCursorOnTheOrderedTuple(t *testing.T) {
+	now := time.Date(2026, time.August, 3, 13, 0, 0, 0, time.UTC)
+	ownerID := "usr_0123456789abcdef01234567"
+	tx := newFakeRecordDraftTx(now)
+	repository := NewPostgresRecordDraftRepository(nil, allowRecordPlatformAdmissionGate)
+	repository.platform.beginTx = func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }
+
+	after := records.DraftCursor{UpdatedAt: now, DraftID: "rdf_0000000000000003"}
+	if _, err := repository.ListDraftRoutings(context.Background(), ownerID, records.DraftCandidatePage{
+		After: &after, Limit: 3,
+	}); err != nil {
+		t.Fatalf("ListDraftRoutings() error = %v", err)
+	}
+	listSQL := strings.ToLower(strings.Join(strings.Fields(tx.querySQL[0]), " "))
+	if !strings.Contains(listSQL, "(drafts.updated_at, drafts.draft_id) < ($4::timestamptz, $5::text)") {
+		t.Fatalf("routing list SQL missing the ordered-tuple keyset predicate:\n%s", listSQL)
+	}
+	args := tx.queryArgs[0]
+	if len(args) != 5 || args[3] != now.UTC() || args[4] != after.DraftID {
+		t.Fatalf("routing list cursor args = %#v", args)
+	}
+}
+
+// A candidate batch above the store's ceiling is a caller mistake, not something
+// to silently clamp: a clamped read would look drained and end the page early.
+func TestPostgresRecordDraftRepositoryRejectsUnusableCandidatePages(t *testing.T) {
+	ownerID := "usr_0123456789abcdef01234567"
+	repository := NewPostgresRecordDraftRepository(nil, allowRecordPlatformAdmissionGate)
+	repository.platform.beginTx = func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+		t.Fatal("ListDraftRoutings() opened a transaction for an unusable page")
+		return nil, nil
+	}
+	for _, testCase := range []struct {
+		name string
+		page records.DraftCandidatePage
+	}{
+		{name: "zero limit", page: records.DraftCandidatePage{}},
+		{name: "limit above ceiling", page: records.DraftCandidatePage{Limit: maxDraftRoutingCandidates + 1}},
+		{
+			name: "cursor without draft",
+			page: records.DraftCandidatePage{
+				Limit: 10, After: &records.DraftCursor{UpdatedAt: time.Now().UTC()},
+			},
+		},
+		{
+			name: "cursor without timestamp",
+			page: records.DraftCandidatePage{
+				Limit: 10, After: &records.DraftCursor{DraftID: "rdf_0000000000000003"},
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if _, err := repository.ListDraftRoutings(
+				context.Background(), ownerID, testCase.page,
+			); !errors.Is(err, records.ErrInvalidDraftCommand) {
+				t.Fatalf("ListDraftRoutings(%s) error = %v, want ErrInvalidDraftCommand", testCase.name, err)
+			}
+		})
 	}
 }
 
@@ -1009,15 +1075,23 @@ func (tx *fakeRecordDraftTx) Query(_ context.Context, sql string, args ...any) (
 	tx.querySQL = append(tx.querySQL, sql)
 	tx.queryArgs = append(tx.queryArgs, append([]any(nil), args...))
 	compact := strings.ToLower(sql)
-	if len(args) == 3 && (strings.Contains(compact, "select draft_id") || strings.Contains(compact, "select drafts.draft_id")) &&
+	if len(args) == 5 && (strings.Contains(compact, "select draft_id") || strings.Contains(compact, "select drafts.draft_id")) &&
 		strings.Contains(compact, "from public.record_drafts") {
 		authorID, _ := args[0].(string)
 		limit, _ := args[1].(int64)
+		afterUpdatedAt, hasCursor := args[3].(time.Time)
+		afterDraftID, _ := args[4].(string)
 		routings := make([]records.DraftRouting, 0, len(tx.routingDrafts))
 		for _, draft := range tx.routingDrafts {
 			if draft.AuthorID != authorID ||
 				(strings.Contains(compact, "deletion_reservations") && tx.fencedRecordIDs[draft.RecordID]) ||
 				int64(len(routings)) >= limit {
+				continue
+			}
+			// Mirrors the keyset predicate on the descending (updated_at, draft_id)
+			// tuple so the fake cannot pass a query the database would reject.
+			if hasCursor && (draft.UpdatedAt.After(afterUpdatedAt) ||
+				(draft.UpdatedAt.Equal(afterUpdatedAt) && draft.DraftID >= afterDraftID)) {
 				continue
 			}
 			routings = append(routings, records.DraftRoutingFromDraft(draft))

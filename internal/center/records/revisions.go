@@ -210,6 +210,12 @@ func deterministicRevisionIdentity(prefix string, fingerprint recordplatform.Req
 	return prefix + hex.EncodeToString(digest[:]), nil
 }
 
+// ValidRecordRootID exposes the record identity grammar to derived read models
+// that carry record identifiers without owning them.
+func ValidRecordRootID(value string) bool {
+	return validRecordRootID(value)
+}
+
 func validRecordRootID(value string) bool {
 	if len(value) < len("rec_")+1 || len(value) > len("rec_")+64 || value[:len("rec_")] != "rec_" {
 		return false
@@ -220,6 +226,12 @@ func validRecordRootID(value string) bool {
 		}
 	}
 	return true
+}
+
+// ValidRevisionID exposes the revision identity grammar to derived read models
+// that pin a record to the revision they projected.
+func ValidRevisionID(value string) bool {
+	return validRevisionID(value)
 }
 
 func validRevisionID(value string) bool {

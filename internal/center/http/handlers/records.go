@@ -89,6 +89,11 @@ func handleRecordsCollection(
 	switch request.Method {
 	case http.MethodGet:
 		listRequest, err := recordListRequestFromHTTP(request, actor)
+		if errors.Is(err, errRecordListFilterRetired) {
+			writeRecordError(w, http.StatusBadRequest, "filter_retired",
+				"record filtering moved to /api/records/search", nil)
+			return
+		}
 		if err != nil {
 			writeRecordError(w, http.StatusBadRequest, "cursor_invalid", "invalid record cursor or query", nil)
 			return
@@ -986,21 +991,32 @@ func decodeRecordsRequestJSON(w http.ResponseWriter, request *http.Request, dest
 	return true
 }
 
+// retiredRecordListFilters moved to GET /api/records/search. Accepting and
+// ignoring them here would answer a narrowed request with the unfiltered page,
+// which reads as "these are your matches".
+var retiredRecordListFilters = []string{"q", "lifecycle", "record_type"}
+
+var errRecordListFilterRetired = errors.New("record list filter retired")
+
 func recordListRequestFromHTTP(request *http.Request, actor recordauth.ActorScope) (records.RecordListRequest, error) {
+	query := request.URL.Query()
+	for _, retired := range retiredRecordListFilters {
+		if query.Has(retired) {
+			return records.RecordListRequest{}, errRecordListFilterRetired
+		}
+	}
 	limit, ok := boundedUintQuery(request, "limit", defaultRecordListLimit, 100)
 	if !ok {
 		return records.RecordListRequest{}, errors.New("invalid limit")
 	}
 	result := records.RecordListRequest{
-		Actor: actor, Query: request.URL.Query().Get("q"),
-		Lifecycle:  records.Lifecycle(request.URL.Query().Get("lifecycle")),
-		RecordType: records.RecordType(request.URL.Query().Get("record_type")),
-		Sort:       records.RecordSort(request.URL.Query().Get("sort")), Limit: limit,
+		Actor: actor,
+		Sort:  records.RecordSort(query.Get("sort")), Limit: limit,
 	}
 	if result.Sort == "" {
 		result.Sort = records.RecordSortUpdatedDesc
 	}
-	if encoded := request.URL.Query().Get("cursor"); encoded != "" {
+	if encoded := query.Get("cursor"); encoded != "" {
 		cursor, err := decodeRecordCursor(encoded)
 		if err != nil {
 			return records.RecordListRequest{}, err

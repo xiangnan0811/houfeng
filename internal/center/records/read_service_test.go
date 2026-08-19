@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -348,6 +349,18 @@ func TestRecordLifecycleServiceUsesCurrentAuthorizationAndCAS(t *testing.T) {
 	}
 }
 
+// The record list walks every candidate and hydrates it before it can compare
+// anything, so any filter field re-added here would resurrect a full-table scan
+// beside the search index and a second set of matching rules.
+func TestRecordListRequestCarriesNoSearchFilters(t *testing.T) {
+	requestType := reflect.TypeOf(RecordListRequest{})
+	for _, retired := range []string{"Query", "Lifecycle", "RecordType", "Tags", "Owner", "BusinessStatus"} {
+		if _, found := requestType.FieldByName(retired); found {
+			t.Fatalf("RecordListRequest.%s exists; filtering belongs to the search index", retired)
+		}
+	}
+}
+
 func TestRecordReadServiceListSkipsDeniedCandidatesBeforeContentRead(t *testing.T) {
 	actor := mustAuthorizationActor(t, recordauth.RoleViewer, testRecordGroupID)
 	allowedInput := mustCompleteRevisionInput(t, validCompleteRevisionValues(t))
@@ -416,7 +429,6 @@ func TestRecordReadServiceListSkipsDeniedCandidatesBeforeContentRead(t *testing.
 		Actor: actor,
 		Sort:  RecordSortUpdatedDesc,
 		Limit: 20,
-		Query: "packet loss",
 	})
 	if err != nil {
 		t.Fatalf("ListRecords() error = %v", err)

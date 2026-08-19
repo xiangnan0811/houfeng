@@ -35,6 +35,9 @@ import type {
   RecordRevision,
   RecordRevisionListFilter,
   RecordRevisionListResponse,
+  RecordSearchFilter,
+  RecordSearchResponse,
+  RecordSearchSubjectFilter,
   RestoreRecordRevisionInput,
 } from './types'
 
@@ -104,9 +107,45 @@ function changeRecordLifecycle(
 export function listRecords(filter?: RecordListFilter): Promise<RecordListResponse> {
   return requestJSON<RecordListResponse>(withQuery('/api/records', filter
     ? {
+        sort: filter.sort,
+        limit: filter.limit,
+        cursor: filter.cursor,
+      }
+    : undefined))
+}
+
+/**
+ * The server reads a subject filter by position, so every segment keeps its slot
+ * even when empty. Trimming trailing separators would shift `role` into
+ * `source_id` and silently ask a different question.
+ */
+function encodeRecordSearchSubject(subject: RecordSearchSubjectFilter): string {
+  return [
+    subject.kind ?? '',
+    subject.source_id ?? '',
+    subject.role ?? '',
+    subject.placement ?? '',
+  ].join(':')
+}
+
+export function searchRecords(filter?: RecordSearchFilter): Promise<RecordSearchResponse> {
+  return requestJSON<RecordSearchResponse>(withQuery('/api/records/search', filter
+    ? {
         q: filter.q,
+        type: filter.type,
+        status: filter.status,
+        status_group: filter.status_group,
         lifecycle: filter.lifecycle,
-        record_type: filter.record_type,
+        owner: filter.owner,
+        participant: filter.participant,
+        tag: filter.tag,
+        subject: filter.subject?.map(encodeRecordSearchSubject),
+        follow_up: filter.follow_up,
+        action: filter.action,
+        occurred_from: filter.occurred_from,
+        occurred_to: filter.occurred_to,
+        updated_from: filter.updated_from,
+        updated_to: filter.updated_to,
         sort: filter.sort,
         limit: filter.limit,
         cursor: filter.cursor,
@@ -276,7 +315,7 @@ export function restoreRecord(recordId: string, idempotencyKey: string): Promise
 export function listRecordDrafts(filter?: RecordDraftListFilter): Promise<RecordDraftListResponse> {
   return requestJSON<RecordDraftListResponse>(withQuery(
     '/api/record-drafts',
-    filter ? { limit: filter.limit } : undefined,
+    filter ? { limit: filter.limit, cursor: filter.cursor } : undefined,
   ))
 }
 

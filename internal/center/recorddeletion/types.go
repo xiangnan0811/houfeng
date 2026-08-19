@@ -102,6 +102,15 @@ var recordCollaborationSurfaceNames = []SurfaceName{
 	"record_notifications",
 }
 
+// record_search owns only the per-record projection rows. Generations and
+// rebuild jobs are index-wide state shared by every record, so one record's
+// purge must not be able to reach them.
+var recordSearchSurfaceNames = []SurfaceName{
+	"record_search_documents",
+	"record_search_purge_receipts",
+	"record_search_subjects",
+}
+
 func RequiredAdapterNames() []AdapterName {
 	return append([]AdapterName(nil), requiredAdapterNames...)
 }
@@ -120,6 +129,10 @@ func RecordEvidenceSurfaceNames() []SurfaceName {
 
 func RecordCollaborationSurfaceNames() []SurfaceName {
 	return append([]SurfaceName(nil), recordCollaborationSurfaceNames...)
+}
+
+func RecordSearchSurfaceNames() []SurfaceName {
+	return append([]SurfaceName(nil), recordSearchSurfaceNames...)
 }
 
 type AdapterDescriptor struct {
@@ -170,6 +183,9 @@ func (descriptor AdapterDescriptor) validate() error {
 	}
 	if descriptor.name == AdapterNameRecordCollaboration && !slices.Equal(descriptor.surfaces, recordCollaborationSurfaceNames) {
 		return fmt.Errorf("%w: record_collaboration surfaces", ErrInvalidAdapterDescriptor)
+	}
+	if descriptor.name == AdapterNameRecordSearch && !slices.Equal(descriptor.surfaces, recordSearchSurfaceNames) {
+		return fmt.Errorf("%w: record_search surfaces", ErrInvalidAdapterDescriptor)
 	}
 	return nil
 }

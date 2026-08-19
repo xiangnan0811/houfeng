@@ -832,8 +832,8 @@ func TestPostgresRecordRepositoryArchiveAndUnarchiveUseAtomicLifecycleOnlyTransa
 			want := []string{
 				"begin", "admission", "admission", "idempotency_lock", "idempotency_claim",
 				"fence_reservation_lock", "fence_epoch_init", "fence_epoch_lock", "fence_lease_lock", "fence_reservation_recheck",
-				"root_lock", "lifecycle_update", "domain_activity", "outbox", "admission", "idempotency_complete",
-				"commit", "rollback_cleanup",
+				"root_lock", "lifecycle_update", "domain_activity", "search_lifecycle", "outbox",
+				"admission", "idempotency_complete", "commit", "rollback_cleanup",
 			}
 			if !reflect.DeepEqual(steps, want) {
 				t.Fatalf("transaction steps =\n%#v\nwant\n%#v", steps, want)
@@ -1599,6 +1599,8 @@ func recordRevisionSQLStep(sql string) string {
 		return "lifecycle_update"
 	case strings.Contains(compact, "update public.records"):
 		return "current_projection"
+	case strings.Contains(compact, "update public.record_search_documents"):
+		return "search_lifecycle"
 	case strings.Contains(compact, "insert into public.record_domain_activities"):
 		return "domain_activity"
 	case strings.Contains(compact, "from public.record_domain_activities"):

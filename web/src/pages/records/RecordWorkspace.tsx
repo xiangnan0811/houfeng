@@ -36,6 +36,7 @@ import { RecordOutline } from './editor/RecordOutline'
 import { RecordSaveImpact } from './editor/RecordSaveImpact'
 import { RevisionDiff } from './editor/RevisionDiff'
 import { useRecordDraft, type RecordWorkspaceMode } from './hooks/useRecordDraft'
+import { labelOptions, RECORD_TYPE_LABELS } from './recordLabels'
 import {
   applyRecordTypeChange,
   BUSINESS_STATUS_LABELS,
@@ -45,16 +46,6 @@ import {
   templateMarkdownForType,
   typeSupportsBusinessStatus,
 } from './recordWorkspaceModel'
-
-const RECORD_TYPES = [
-  ['note', '备忘'],
-  ['troubleshooting', '排障'],
-  ['maintenance', '维护'],
-  ['migration', '迁移'],
-  ['provider_communication', '服务商沟通'],
-  ['billing', '账单'],
-  ['important_finding', '重要发现'],
-] as const
 
 type RecordWorkspaceProps = {
   mode: RecordWorkspaceMode
@@ -202,7 +193,9 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
               value={state.payload.record_type}
               onChange={(event) => commands.patchPayload(applyRecordTypeChange(event.target.value as RecordType))}
             >
-              {RECORD_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              {labelOptions(RECORD_TYPE_LABELS).map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </Select>
             {typeSupportsBusinessStatus(state.payload.record_type) ? (
               <Select

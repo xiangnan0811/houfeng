@@ -320,7 +320,7 @@ func reconcileCollaborationRevisionFollowers(
 		}
 	}
 	var pruned int64
-	encoded, err := encodeCollaborationDeleteCommand(collaborationPruneRevisionFollowersFunctionCommand{
+	encoded, err := encodeRecordPurgeCommand(collaborationPruneRevisionFollowersFunctionCommand{
 		RecordID: binding.RecordID(), KeepUserIDs: plan.userIDs, FenceEpoch: int64(binding.Epoch()),
 	})
 	if err != nil {

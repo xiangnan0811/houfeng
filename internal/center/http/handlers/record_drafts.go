@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -18,7 +21,7 @@ const defaultRecordDraftListLimit = uint64(50)
 
 type recordDraftHandlerApplication interface {
 	ReadDraft(context.Context, records.DraftReadRequest) (records.Draft, error)
-	ListDrafts(context.Context, records.DraftListRequest) ([]records.Draft, error)
+	ListDrafts(context.Context, records.DraftListRequest) (records.DraftListResult, error)
 	CreateDraft(context.Context, records.DraftCreateRequest) (records.Draft, error)
 	PatchDraft(context.Context, records.DraftPatchRequest) (records.Draft, error)
 	DiscardDraft(context.Context, records.DraftDiscardRequest) error
@@ -78,22 +81,36 @@ func handleRecordDraftCollection(
 			writeRecordError(w, http.StatusBadRequest, "invalid_request", "invalid draft list query", nil)
 			return
 		}
-		drafts, err := application.ListDrafts(request.Context(), records.DraftListRequest{
-			Actor: actor,
-			Limit: limit,
-		})
+		listRequest := records.DraftListRequest{Actor: actor, Limit: limit}
+		if encoded := request.URL.Query().Get("cursor"); encoded != "" {
+			cursor, err := decodeRecordDraftCursor(encoded)
+			if err != nil {
+				writeRecordError(w, http.StatusBadRequest, "cursor_invalid", "invalid draft cursor", nil)
+				return
+			}
+			listRequest.After = &cursor
+		}
+		result, err := application.ListDrafts(request.Context(), listRequest)
 		if err != nil {
 			writeRecordsApplicationError(w, err)
 			return
 		}
-		response := recordDraftListResponse{Items: make([]recordDraftResponse, 0, len(drafts))}
-		for _, draft := range drafts {
+		response := recordDraftListResponse{Items: make([]recordDraftResponse, 0, len(result.Drafts))}
+		for _, draft := range result.Drafts {
 			item, err := newRecordDraftResponse(draft)
 			if err != nil {
 				writeRecordInternalError(w)
 				return
 			}
 			response.Items = append(response.Items, item)
+		}
+		if result.NextCursor != nil {
+			encoded, err := encodeRecordDraftCursor(*result.NextCursor)
+			if err != nil {
+				writeRecordInternalError(w)
+				return
+			}
+			response.NextCursor = encoded
 		}
 		writeJSON(w, http.StatusOK, response)
 	case http.MethodPost:
@@ -190,7 +207,48 @@ type recordDraftWriteRequest struct {
 }
 
 type recordDraftListResponse struct {
-	Items []recordDraftResponse `json:"items"`
+	Items      []recordDraftResponse `json:"items"`
+	NextCursor string                `json:"next_cursor,omitempty"`
+}
+
+// recordDraftCursorEnvelope carries its own version and domain so a cursor minted
+// for another list cannot be replayed here as a valid position.
+type recordDraftCursorEnvelope struct {
+	Version   uint64    `json:"version"`
+	UpdatedAt time.Time `json:"updated_at"`
+	DraftID   string    `json:"draft_id"`
+}
+
+const recordDraftCursorVersion = uint64(1)
+
+func encodeRecordDraftCursor(cursor records.DraftCursor) (string, error) {
+	if cursor.Validate() != nil {
+		return "", errors.New("invalid draft cursor")
+	}
+	encoded, err := json.Marshal(recordDraftCursorEnvelope{
+		Version: recordDraftCursorVersion, UpdatedAt: cursor.UpdatedAt.UTC(), DraftID: cursor.DraftID,
+	})
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(encoded), nil
+}
+
+func decodeRecordDraftCursor(value string) (records.DraftCursor, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return records.DraftCursor{}, errors.New("invalid draft cursor")
+	}
+	var envelope recordDraftCursorEnvelope
+	if err := decodeJSONValue(bytes.NewReader(raw), &envelope); err != nil ||
+		envelope.Version != recordDraftCursorVersion {
+		return records.DraftCursor{}, errors.New("invalid draft cursor")
+	}
+	cursor := records.DraftCursor{UpdatedAt: envelope.UpdatedAt.UTC(), DraftID: envelope.DraftID}
+	if cursor.Validate() != nil {
+		return records.DraftCursor{}, errors.New("invalid draft cursor")
+	}
+	return cursor, nil
 }
 
 type recordDraftResponse struct {

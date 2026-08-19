@@ -71,12 +71,12 @@ func TestNewAdapterDescriptorNormalizesAndProtectsOwnedSurfaces(t *testing.T) {
 	t.Parallel()
 
 	input := []SurfaceName{"fixture.surface_z", "fixture.surface_a"}
-	descriptor, err := NewAdapterDescriptor(AdapterNameRecordSearch, input)
+	descriptor, err := NewAdapterDescriptor(AdapterNameRecordMarkdownClient, input)
 	if err != nil {
 		t.Fatalf("NewAdapterDescriptor() error = %v", err)
 	}
-	if descriptor.Name() != AdapterNameRecordSearch {
-		t.Fatalf("descriptor.Name() = %q, want %q", descriptor.Name(), AdapterNameRecordSearch)
+	if descriptor.Name() != AdapterNameRecordMarkdownClient {
+		t.Fatalf("descriptor.Name() = %q, want %q", descriptor.Name(), AdapterNameRecordMarkdownClient)
 	}
 	wantSurfaces := []SurfaceName{"fixture.surface_a", "fixture.surface_z"}
 	if got := descriptor.Surfaces(); !reflect.DeepEqual(got, wantSurfaces) {
@@ -199,6 +199,43 @@ func TestRecordCollaborationDescriptorRequiresExactOwnedTables(t *testing.T) {
 	returned[0] = "tampered"
 	if fresh := RecordCollaborationSurfaceNames(); !reflect.DeepEqual(fresh, want) {
 		t.Fatalf("RecordCollaborationSurfaceNames() after mutation = %#v", fresh)
+	}
+}
+
+func TestRecordSearchDescriptorRequiresExactOwnedTables(t *testing.T) {
+	t.Parallel()
+
+	// Generations and rebuild jobs are index-wide, not record-owned, so they are
+	// deliberately absent: a single record's purge must not be able to remove the
+	// generation every other record is being served from.
+	want := []SurfaceName{
+		"record_search_documents",
+		"record_search_purge_receipts",
+		"record_search_subjects",
+	}
+	if got := RecordSearchSurfaceNames(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("RecordSearchSurfaceNames() = %#v, want %#v", got, want)
+	}
+	descriptor, err := NewAdapterDescriptor(AdapterNameRecordSearch, want)
+	if err != nil {
+		t.Fatalf("NewAdapterDescriptor(record_search) error = %v", err)
+	}
+	if got := RecordSearchSurfaceDigest(); got == ([sha256.Size]byte{}) || got != digestAdapterSurfaces(descriptor) {
+		t.Fatalf("RecordSearchSurfaceDigest() = %x", got)
+	}
+	if _, err := NewAdapterDescriptor(AdapterNameRecordSearch, want[1:]); !errors.Is(err, ErrInvalidAdapterDescriptor) {
+		t.Fatalf("missing search surface error = %v", err)
+	}
+	for _, extra := range []SurfaceName{"record_search_generations", "record_search_rebuild_jobs"} {
+		widened := append(RecordSearchSurfaceNames(), extra)
+		if _, err := NewAdapterDescriptor(AdapterNameRecordSearch, widened); !errors.Is(err, ErrInvalidAdapterDescriptor) {
+			t.Fatalf("extra search surface %q error = %v", extra, err)
+		}
+	}
+	returned := RecordSearchSurfaceNames()
+	returned[0] = "tampered"
+	if fresh := RecordSearchSurfaceNames(); !reflect.DeepEqual(fresh, want) {
+		t.Fatalf("RecordSearchSurfaceNames() after mutation = %#v", fresh)
 	}
 }
 

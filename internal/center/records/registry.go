@@ -162,6 +162,36 @@ func ValidateRecordType(recordType RecordType) error {
 	return fmt.Errorf("%w: %q", ErrInvalidRecordType, recordType)
 }
 
+// ValidStatusGroup reports registry membership without binding the group to a
+// record type. Filters and projections need the vocabulary itself; only a
+// concrete revision needs the type-to-group mapping in StatusGroupFor.
+func ValidStatusGroup(group StatusGroup) bool {
+	for _, candidate := range canonicalStatusGroups {
+		if group == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidBusinessStatus reports whether any builtin record type declares the
+// status. It exists for cross-type filters, which select statuses before a
+// record type is known and must not widen the registry to do it.
+func ValidBusinessStatus(status BusinessStatus) bool {
+	for _, recordType := range builtinRecordTypes {
+		definition, ok := LookupRecordTypeDefinition(recordType)
+		if !ok || !definition.SupportsBusinessStatus {
+			continue
+		}
+		for _, candidate := range definition.Statuses {
+			if candidate.Status == status {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func LookupRecordTypeDefinition(recordType RecordType) (RecordTypeDefinition, bool) {
 	spec, ok := lookupRecordTypeSpec(recordType)
 	if !ok {

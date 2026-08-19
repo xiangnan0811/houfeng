@@ -361,7 +361,7 @@ func TestPostgresIntegrationRecordWatchReplayRejectsRetainedDefaultAfterLaterPru
 	if replay, err := repository.SetWatch(ctx, retained); err != nil || replay != retainedStatus {
 		t.Fatalf("SetWatch(retained default replay) = (%#v, %v), want %#v", replay, err, retainedStatus)
 	}
-	encoded, err := encodeCollaborationDeleteCommand(collaborationPruneRevisionFollowersFunctionCommand{
+	encoded, err := encodeRecordPurgeCommand(collaborationPruneRevisionFollowersFunctionCommand{
 		RecordID: parent.RecordID, KeepUserIDs: []string{}, FenceEpoch: 0,
 	})
 	if err != nil {

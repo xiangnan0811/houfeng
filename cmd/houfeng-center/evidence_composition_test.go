@@ -36,7 +36,7 @@ func TestRecordsBootstrapEvidenceGateBoundary(t *testing.T) {
 	}
 	build := func(gate store.AdmissionGate, sources productionEvidenceSources) result {
 		pool := &pgxpool.Pool{}
-		_, _, _, _, _, evidenceHandler, _, _, collaboration, worker, err := newRecordsHTTPHandlers(
+		_, _, _, _, _, _, evidenceHandler, _, _, collaboration, worker, err := newRecordsHTTPHandlers(
 			pool,
 			store.NewPostgresVPSAssetRepository(pool),
 			store.NewPostgresMonitoringInstanceRepository(pool),

@@ -325,6 +325,50 @@ func TestRecordsHandlerListsThroughTrustedActorAndReturnsOwnedDTO(t *testing.T) 
 	}
 }
 
+// Filtering moved to the search index. Silently ignoring a retired filter is
+// the dangerous outcome: the caller asked to narrow the page and would instead
+// receive unrelated records that look like matches.
+func TestRecordsHandlerRejectsFiltersThatMovedToSearch(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		query string
+	}{
+		{name: "text", query: "q=provider"},
+		{name: "lifecycle", query: "lifecycle=active"},
+		{name: "record type", query: "record_type=troubleshooting"},
+		{name: "empty text still rejected", query: "q="},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			actor := mustRecordsHandlerActor(t)
+			application := &recordsHandlerApplicationStub{
+				listRecords: func(_ context.Context, _ records.RecordListRequest) (records.RecordListResult, error) {
+					t.Fatal("ListRecords() called for a retired filter")
+					return records.RecordListResult{}, nil
+				},
+			}
+			handler := RecordsWithOptions(application, RecordHandlerOptions{
+				NewRecordID: func() (string, error) { return "rec_httpcontract", nil },
+			})
+			request := httptest.NewRequest(http.MethodGet, "/api/records?"+test.query, nil)
+			request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+			}
+			body := recorder.Body.String()
+			if !strings.Contains(body, "filter_retired") {
+				t.Fatalf("body = %s, want retired filter code", body)
+			}
+			if !strings.Contains(body, "/api/records/search") {
+				t.Fatalf("body = %s, want the replacement endpoint named", body)
+			}
+		})
+	}
+}
+
 func TestRecordsHandlerGetsAllowlistedCurrentRecordWithoutAuthorizationEvidence(t *testing.T) {
 	actor := mustRecordsHandlerActor(t)
 	want := mustRecordsHandlerRecord(t, actor)

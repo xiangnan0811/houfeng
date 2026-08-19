@@ -1,1 +1,12 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/07-14-vps-records-search-center/research/current-main-rebaseline-2026-08-18.md", "reason": "Audit the implementation against the reconciled decisions, especially one search path, dynamic-import global search, and the untouched subject registry."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Route review to backend database, error, auth, and quality guides."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Review 0056 migration shape, indexes, and that no ORM or down-migration was introduced."}
+{"file": ".trellis/spec/backend/record-authorization.md", "reason": "Verify no unauthorized result, count, snippet, facet, or log leakage and no stale cursor reuse."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Review cursor tamper, expiry, and generation mismatch behavior for fail-closed opaque denials."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Confirm focused race, real PostgreSQL, and EXPLAIN evidence exists for the query budgets."}
+{"file": ".trellis/spec/web/index.md", "reason": "Route review to Web state, styling, and quality guides."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Confirm the transport contract export list was updated and the eager shell still does not statically import recordsApi."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Confirm zero new CSS and that no budget limit was raised without a written audited exception."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Review desktop and 390px states, keyboard, focus, Axe, and deep-link coverage."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Audit URL round trips against server normalization and cursor semantics."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Verify isolated branch and that Child 7 activity work is absent."}

@@ -18,6 +18,7 @@ type RouterOptions struct {
 	SettingsHandler                               stdhttp.Handler
 	RecordsEnabled                                bool
 	RecordsHandler                                stdhttp.Handler
+	RecordSearchHandler                           stdhttp.Handler
 	RecordActionsHandler                          stdhttp.Handler
 	RecordCommentsHandler                         stdhttp.Handler
 	RecordWatchesHandler                          stdhttp.Handler
@@ -158,6 +159,9 @@ func New(opts RouterOptions) stdhttp.Handler {
 		handler := protect(opts.RecordsHandler)
 		mux.Handle("/api/records", handler)
 		mux.Handle("/api/records/", handler)
+	}
+	if opts.RecordsEnabled && opts.RecordSearchHandler != nil {
+		mux.Handle("/api/records/search", protect(opts.RecordSearchHandler))
 	}
 	if opts.RecordsEnabled && opts.RecordActionsHandler != nil {
 		handler := protect(opts.RecordActionsHandler)
