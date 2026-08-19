@@ -19,7 +19,12 @@
 
 ## Preconditions
 
-- [ ] 直接依赖子任务 2、4、6、9 已合入 `main` 且 CI 通过；`record_domain_activities` 能承载真实 comment/action events。
+- [x] 先读 `research/current-main-rebaseline-2026-08-19.md`。本计划的依赖意图仍然成立，
+  但其中的 `recordcursor` / AES-GCM 游标、`act_` 前缀、`record_state_changed` 等事件名、
+  `LegacyVPSDetail.tsx` 起点和 `records_v2_read` 现状都与当前 main 不符；以 rebaseline 为准。
+- [x] 直接依赖子任务 2、4、6、9 已合入 `main` 且 CI 通过；`record_domain_activities` 能承载真实 comment/action events。
+  已核实：comment/action/协作字段变更均有真实写入方（`store/record_comments.go:518`、
+  `store/record_actions.go:530`、`store/record_collaboration_participant.go:368`）。
 - [ ] 从最新受保护主线创建非 `main` 分支，运行 `sh scripts/setup-git-hooks.sh`，再运行 `trellis-before-dev` 读取 backend/web 与 cross-layer 规范。
 - [ ] 检查当前 migration 序列，确认 `0057_create_record_activity.sql` 可用；若冲突，停止并回到父任务统一重划尚未实施编号。
 - [ ] 记录 baseline：`make verify-go`、`make verify-web`、`go test ./internal/center/http/handlers ./internal/center/store -run 'VPSTimeline|Experience' -count=1`；旧 timeline/experience 必须保持 GREEN。
