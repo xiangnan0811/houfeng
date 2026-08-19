@@ -15,11 +15,13 @@ create table if not exists public.record_search_generations (
   superseded_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  check ((generation_state = 'published') = (published_at is not null)),
+  check (generation_state <> 'published' or published_at is not null),
+  check (published_at is null or generation_state in ('published', 'superseded')),
   check ((generation_state = 'superseded') = (superseded_at is not null)),
   check ((generation_state = 'failed') = (failure_reason <> '')),
   check (published_at is null or published_at >= started_at),
   check (superseded_at is null or superseded_at >= started_at),
+  check (superseded_at is null or published_at is null or superseded_at >= published_at),
   check (updated_at >= created_at)
 );
 

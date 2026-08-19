@@ -190,13 +190,28 @@ func TestRecordSearchMigrationAllowsOnePublishedAndOneBuildingGeneration(t *test
 	definition := normalizedRecordSearchTableDefinition(t, "record_search_generations")
 	for _, want := range []string{
 		"generation_state text not null default 'building' check (generation_state in ('building', 'published', 'superseded', 'failed'))",
-		"check ((generation_state = 'published') = (published_at is not null))",
+		"check (generation_state <> 'published' or published_at is not null)",
 		"check ((generation_state = 'superseded') = (superseded_at is not null))",
 		"check ((generation_state = 'failed') = (failure_reason <> ''))",
 		"coverage_digest bytea check (coverage_digest is null or octet_length(coverage_digest) = 32)",
 	} {
 		if !strings.Contains(definition, want) {
 			t.Errorf("0056 record_search_generations missing state invariant %q", want)
+		}
+	}
+}
+
+// Supersession is a demotion, not an erasure: the generation that served reads
+// keeps the timestamp proving when it did, while a generation that never
+// published must not claim one.
+func TestRecordSearchMigrationKeepsPublishTimestampAcrossSupersession(t *testing.T) {
+	definition := normalizedRecordSearchTableDefinition(t, "record_search_generations")
+	for _, want := range []string{
+		"check (published_at is null or generation_state in ('published', 'superseded'))",
+		"check (superseded_at is null or published_at is null or superseded_at >= published_at)",
+	} {
+		if !strings.Contains(definition, want) {
+			t.Errorf("0056 record_search_generations missing publish-history invariant %q", want)
 		}
 	}
 }

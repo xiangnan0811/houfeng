@@ -45,7 +45,7 @@ func (participant recordSearchRevisionParticipant) ApplyRevision(
 	if err != nil {
 		return err
 	}
-	generations, err := upsertRecordSearchDocument(ctx, tx, facts)
+	generations, err := upsertRecordSearchDocument(ctx, tx, facts, recordSearchLiveGenerations)
 	if err != nil {
 		return err
 	}
@@ -61,8 +61,38 @@ func recordSearchDocumentFacts(
 	committed records.RevisionCommitted,
 ) (recordsearch.DocumentFacts, error) {
 	result := committed.Result
-	input := committed.Input
-	if !records.ValidRecordRootID(result.RecordID) || !records.ValidRevisionID(result.RevisionID) {
+	return recordSearchDocumentFactsFromRevision(ctx, tx, recordSearchProjectionSource{
+		RecordID:           result.RecordID,
+		RevisionID:         result.RevisionID,
+		LockVersion:        result.LockVersion,
+		AuthorizationEpoch: result.AuthorizationEpoch,
+		Lifecycle:          result.Lifecycle,
+		Input:              committed.Input,
+		RecordUpdatedAt:    result.CommittedAt,
+	})
+}
+
+// recordSearchProjectionSource is everything the projection needs that does not
+// come from the record tables. A rebuild replays stored revisions and a commit
+// projects the revision it just wrote, so both arrive here rather than each
+// growing its own derivation.
+type recordSearchProjectionSource struct {
+	RecordID           string
+	RevisionID         string
+	LockVersion        uint64
+	AuthorizationEpoch uint64
+	Lifecycle          records.Lifecycle
+	Input              records.CompleteRevisionInput
+	RecordUpdatedAt    time.Time
+}
+
+func recordSearchDocumentFactsFromRevision(
+	ctx context.Context,
+	tx pgx.Tx,
+	source recordSearchProjectionSource,
+) (recordsearch.DocumentFacts, error) {
+	input := source.Input
+	if !records.ValidRecordRootID(source.RecordID) || !records.ValidRevisionID(source.RevisionID) {
 		return recordsearch.DocumentFacts{}, fmt.Errorf("%w: search projection identity", records.ErrInvalidRevisionCommand)
 	}
 
@@ -76,7 +106,7 @@ func recordSearchDocumentFacts(
 		 and epoch.object_kind = 'record'
 		 and epoch.object_id = record.record_id
 		where record.record_id = $1 and record.project_id = $2`,
-		result.RecordID, recordplatform.ProjectIDDefault,
+		source.RecordID, recordplatform.ProjectIDDefault,
 	).Scan(&createdAt, &fenceEpoch); err != nil {
 		return recordsearch.DocumentFacts{}, fmt.Errorf("read search projection record facts: %w", err)
 	}
@@ -99,12 +129,12 @@ func recordSearchDocumentFacts(
 	}
 
 	facts, err := recordsearch.NormalizeDocumentFacts(recordsearch.DocumentFactValues{
-		RecordID:           result.RecordID,
-		CurrentRevisionID:  result.RevisionID,
-		LockVersion:        result.LockVersion,
-		AuthorizationEpoch: result.AuthorizationEpoch,
+		RecordID:           source.RecordID,
+		CurrentRevisionID:  source.RevisionID,
+		LockVersion:        source.LockVersion,
+		AuthorizationEpoch: source.AuthorizationEpoch,
 		FenceEpoch:         uint64(fenceEpoch),
-		Lifecycle:          result.Lifecycle,
+		Lifecycle:          source.Lifecycle,
 		RecordType:         input.RecordType(),
 		BusinessStatus:     input.BusinessStatus(),
 		ImpactLevel:        input.ImpactLevel(),
@@ -122,7 +152,7 @@ func recordSearchDocumentFacts(
 		CompletedAt:      input.CompletedAt(),
 		FollowUpAt:       input.FollowUpAt(),
 		RecordCreatedAt:  createdAt,
-		RecordUpdatedAt:  result.CommittedAt,
+		RecordUpdatedAt:  source.RecordUpdatedAt,
 		Subjects:         subjects,
 	})
 	if err != nil {
@@ -147,14 +177,21 @@ func recordSearchAuthorizedReferences(input records.CompleteRevisionInput) []rec
 	return references
 }
 
-// upsertRecordSearchDocument writes the document into every live generation and
-// returns the generations it actually wrote. The lock-version fence is what
+// recordSearchLiveGenerations selects every generation a reader or a rebuild
+// could consult. A rebuild passes its own generation instead, because writing
+// the published generation mid-rebuild would change what readers see before the
+// new generation is complete.
+const recordSearchLiveGenerations int64 = 0
+
+// upsertRecordSearchDocument writes the document into the requested generations
+// and returns the generations it actually wrote. The lock-version fence is what
 // makes a rebuild safe to run against a moving record set: a rebuild worker
 // replaying an older snapshot cannot overwrite a newer live commit.
 func upsertRecordSearchDocument(
 	ctx context.Context,
 	tx pgx.Tx,
 	facts recordsearch.DocumentFacts,
+	generationScope int64,
 ) ([]int64, error) {
 	digest := facts.Digest()
 	visibility := facts.VisibilityDigest()
@@ -181,7 +218,10 @@ func upsertRecordSearchDocument(
 		    and record_action.status = 'open'
 		) as action on true
 		where generation.project_id = $2
-		  and generation.generation_state in ('published', 'building')
+		  and case when $25::bigint = 0
+		    then generation.generation_state in ('published', 'building')
+		    else generation.generation = $25::bigint
+		  end
 		on conflict (generation, record_id) do update set
 		  current_revision_id = excluded.current_revision_id,
 		  record_lock_version = excluded.record_lock_version,
@@ -218,7 +258,7 @@ func upsertRecordSearchDocument(
 		facts.Title(), facts.Text(), facts.Tags(), facts.ParticipantIDs(),
 		facts.VisibilityKind(), visibility[:],
 		facts.OccurredAt(), facts.CompletedAt(), facts.FollowUpAt(),
-		facts.RecordCreatedAt(), facts.RecordUpdatedAt(), digest[:],
+		facts.RecordCreatedAt(), facts.RecordUpdatedAt(), digest[:], generationScope,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("project search document: %w", err)

@@ -23,6 +23,7 @@ import (
 	"houfeng/internal/center/http/sessionctx"
 	incidentservice "houfeng/internal/center/incidents"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordsearch"
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/targets"
 )
@@ -217,8 +218,20 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	if searchGenerationCalls != 1 {
 		t.Fatalf("ensureSearchGeneration calls = %d, want 1", searchGenerationCalls)
 	}
-	if len(gotWorkers) != 5 {
+	if len(gotWorkers) != 6 {
 		t.Fatalf("runtime workers = %d, want evidence maintenance disabled until Child 10 supplies admission", len(gotWorkers))
+	}
+	// The projector only indexes commits, so records written before the index
+	// existed stay invisible until a rebuild backfills them. That backfill has to
+	// be a running worker, not a manual step.
+	var rebuilder *recordsearch.RebuildWorker
+	for _, worker := range gotWorkers {
+		if candidate, ok := worker.(*recordsearch.RebuildWorker); ok {
+			rebuilder = candidate
+		}
+	}
+	if rebuilder == nil {
+		t.Fatalf("runtime workers = %#v, want a record search rebuild worker", gotWorkers)
 	}
 	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
 		gotRouterOptions.RecordWatchesHandler == nil || gotRouterOptions.RecordInboxHandler == nil ||
@@ -406,6 +419,11 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 			for i, worker := range workers {
 				if worker == nil {
 					t.Fatalf("workers[%d] = nil, want non-nil", i)
+				}
+				// There is no index to rebuild while the records platform is off,
+				// and a worker polling those tables would fail every pass.
+				if _, ok := worker.(*recordsearch.RebuildWorker); ok {
+					t.Fatalf("workers[%d] is a record search rebuild worker, want none while records are disabled", i)
 				}
 			}
 			return app

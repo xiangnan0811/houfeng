@@ -14,8 +14,8 @@ import (
 func TestPostgresIntegrationRecordSearchDeletionPurgesEveryGenerationAndReplays(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	purged := seedSearchDeletionRecord(t, ctx, fixture, "rec_searchdelete", "Purged parent")
-	survivor := seedSearchDeletionRecord(t, ctx, fixture, "rec_searchkeep", "Survivor parent")
+	purged := seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_searchdelete", "Purged parent")
+	survivor := seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_searchkeep", "Survivor parent")
 
 	digest := testStoreRecordPlatformDigest(0x71)
 	indexed := []struct {
@@ -139,7 +139,7 @@ func TestPostgresIntegrationRecordSearchDeletionPurgesEveryGenerationAndReplays(
 func TestPostgresIntegrationRecordSearchDeletionDoesNotCommitReceiptBeforeExactAbsence(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
-	parent := seedSearchDeletionRecord(t, ctx, fixture, "rec_searchblocked", "Blocked parent")
+	parent := seedRecordWithoutSearchProjection(t, ctx, fixture, "rec_searchblocked", "Blocked parent")
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.record_search_generations (generation, generation_state, published_at)
 		values (1, 'published', transaction_timestamp())`); err != nil {
@@ -200,9 +200,11 @@ func TestPostgresIntegrationRecordSearchDeletionDoesNotCommitReceiptBeforeExactA
 	}
 }
 
-// Revision identity is derived from the payload, so seeded records need distinct
-// titles or their revision rows collide.
-func seedSearchDeletionRecord(
+// seedRecordWithoutSearchProjection commits with no search participant, which is
+// what a record written before the index looks like. Revision identity is derived
+// from the payload, so seeded records need distinct titles or their revision rows
+// collide.
+func seedRecordWithoutSearchProjection(
 	t *testing.T,
 	ctx context.Context,
 	fixture recordPlatformPostgresFixture,

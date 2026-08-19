@@ -25,6 +25,7 @@ import (
 	centerevidence "houfeng/internal/center/evidence"
 	centerhttp "houfeng/internal/center/http"
 	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/center/ids"
 	incidentservice "houfeng/internal/center/incidents"
 	"houfeng/internal/center/installer"
 	"houfeng/internal/center/notify"
@@ -339,6 +340,33 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		if evidenceMaintenance != nil {
 			workers = append(workers, evidenceMaintenance)
 		}
+		// A lease only excludes a second writer if the two disagree about who they
+		// are, so the owner is minted per process rather than fixed. A restarted
+		// center therefore waits out the dead lease instead of stealing a
+		// generation a still-live process is writing.
+		rebuildOwnerID, err := ids.New("rso")
+		if err != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("mint record search rebuild owner id: %w", err)
+		}
+		// The in-transaction projector only indexes commits, so records that
+		// predate the index, or a generation abandoned by a crashed rebuild, need a
+		// backfill pass to become searchable.
+		searchRebuilder, err := recordsearch.NewRebuildWorker(
+			store.NewPostgresRecordSearchRebuildStore(db.Pool(), deps.recordPlatformAdmissionGate),
+			recordsearch.RebuildWorkerOptions{
+				OwnerID:            rebuildOwnerID,
+				OwnerLeaseDuration: recordsearch.DefaultRebuildLeaseDuration,
+				BatchSize:          recordsearch.DefaultRebuildBatchSize,
+				PollInterval:       recordsearch.DefaultRebuildPollInterval,
+				Logger:             slog.Default(),
+			},
+		)
+		if err != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("create record search rebuild worker: %w", err)
+		}
+		workers = append(workers, searchRebuilder)
 	}
 	return deps.newApp(cfg.HTTPAddr, router, workers...), db.Close, nil
 }
