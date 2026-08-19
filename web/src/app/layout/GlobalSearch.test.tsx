@@ -226,6 +226,25 @@ describe('GlobalSearch', () => {
     expect(screen.getByRole('option', { name: /Tokyo VPS/ })).toBeInTheDocument()
   })
 
+  it('offers the way through to the full records result set', async () => {
+    searchRecordsForGlobalSearch.mockResolvedValue([
+      recordHit,
+      { id: '__all__', label: '查看全部匹配记录', hint: '磁盘', to: '/records?q=%E7%A3%81%E7%9B%98' },
+    ])
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByLabelText('全局搜索')
+    fireEvent.change(input, { target: { value: '磁盘' } })
+    fireEvent.submit(input.closest('form')!)
+
+    await waitFor(() => expect(screen.getByText('查看全部匹配记录')).toBeInTheDocument())
+    expect(screen.getByRole('option', { name: /查看全部匹配记录/ }))
+      .toHaveAttribute('href', '/records?q=%E7%A3%81%E7%9B%98')
+  })
+
   it('finds a record when no asset matches the query', async () => {
     searchRecordsForGlobalSearch.mockResolvedValue([recordHit])
     render(

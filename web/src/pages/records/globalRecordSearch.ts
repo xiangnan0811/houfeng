@@ -1,6 +1,7 @@
 import { searchRecords } from '../../lib/recordsApi'
 import type { RecordDetail } from '../../lib/types'
 import { RECORD_TYPE_LABELS } from './recordLabels'
+import { recordSearchParamsFromFilters } from './searchFilterModel'
 import { BUSINESS_STATUS_LABELS } from './recordWorkspaceModel'
 
 /**
@@ -39,13 +40,26 @@ export async function searchRecordsForGlobalSearch(
   try {
     const response = await searchRecords({ q, limit })
     const items = Array.isArray(response.items) ? response.items : []
-    return items.slice(0, limit).map((record) => ({
+    const hits: GlobalRecordSearchHit[] = items.slice(0, limit).map((record) => ({
       id: record.record_id,
       label: record.current.title.trim() || record.record_id,
       hint: describe(record),
       to: `/records/${record.record_id}`,
     }))
+    if (hits.length === 0) return hits
+    // The palette only ever shows a few of the ranked hits, so it has to offer a
+    // way through to the full result set. Only once the server has answered:
+    // pointing at the search page is misleading while the index cannot serve it.
+    return [...hits, {
+      id: RECORD_SEARCH_ALL_HIT_ID,
+      label: `查看全部匹配记录`,
+      hint: q,
+      to: `/records?${recordSearchParamsFromFilters({ q }).toString()}`,
+    }]
   } catch {
     return []
   }
 }
+
+/** Marks the trailing hit that leads to the full result set rather than a record. */
+export const RECORD_SEARCH_ALL_HIT_ID = '__all__'

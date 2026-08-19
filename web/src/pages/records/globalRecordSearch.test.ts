@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { searchRecordsForGlobalSearch } from './globalRecordSearch'
+import { RECORD_SEARCH_ALL_HIT_ID, searchRecordsForGlobalSearch } from './globalRecordSearch'
 import type { RecordDetail } from '../../lib/types'
+import { ApiError } from '../../lib/apiRequest'
 
 vi.mock('../../lib/recordsApi', () => ({
   searchRecords: vi.fn(),
@@ -67,12 +68,33 @@ describe('searchRecordsForGlobalSearch', () => {
   it('describes a hit by title, type, and primary subject', async () => {
     vi.mocked(api.searchRecords).mockResolvedValue({ items: [hit()], generation: 3 })
 
-    expect(await searchRecordsForGlobalSearch('磁盘', 4)).toEqual([{
+    const [first] = await searchRecordsForGlobalSearch('磁盘', 4)
+
+    expect(first).toEqual({
       id: 'rec_001',
       label: '东京节点磁盘 IO 抖动',
       hint: '排障 · 排查中 · Tokyo Edge',
       to: '/records/rec_001',
-    }])
+    })
+  })
+
+  it('closes the group with the canonical search page query', async () => {
+    vi.mocked(api.searchRecords).mockResolvedValue({ items: [hit()], generation: 3 })
+
+    const hits = await searchRecordsForGlobalSearch('  磁盘 IO  ', 4)
+
+    expect(hits.at(-1)).toEqual({
+      id: RECORD_SEARCH_ALL_HIT_ID,
+      label: '查看全部匹配记录',
+      hint: '磁盘 IO',
+      to: '/records?q=%E7%A3%81%E7%9B%98+IO',
+    })
+  })
+
+  it('offers no search page link when the server found nothing', async () => {
+    vi.mocked(api.searchRecords).mockResolvedValue({ items: [], generation: 3 })
+
+    expect(await searchRecordsForGlobalSearch('磁盘', 4)).toEqual([])
   })
 
   it('falls back to the record id when a revision carries no title', async () => {
@@ -80,19 +102,26 @@ describe('searchRecordsForGlobalSearch', () => {
     delete untitled.current.business_status
     vi.mocked(api.searchRecords).mockResolvedValue({ items: [untitled], generation: 3 })
 
-    expect(await searchRecordsForGlobalSearch('磁盘', 4)).toEqual([{
+    const [first] = await searchRecordsForGlobalSearch('磁盘', 4)
+
+    expect(first).toEqual({
       id: 'rec_001',
       label: 'rec_001',
       hint: '排障',
       to: '/records/rec_001',
-    }])
+    })
   })
 
-  it('reports nothing rather than failing when the index is unavailable', async () => {
-    // The palette also searches assets. A records index that has not finished
-    // building, or a center with the records platform switched off, must not
-    // blank out the rest of the results.
-    vi.mocked(api.searchRecords).mockRejectedValue(new Error('search index unavailable'))
+  // The palette also searches assets. A records index that has not finished
+  // building, a center with the records platform switched off, or a revoked
+  // session must not blank out the rest of the results. The session-ending side
+  // effect of a 401 belongs to the transport, which fires it before rejecting.
+  it.each([
+    ['the index is unavailable', new ApiError(503, 'search index unavailable')],
+    ['the session was revoked', new ApiError(401, 'unauthenticated')],
+    ['the network is down', new TypeError('Failed to fetch')],
+  ])('reports nothing rather than failing when %s', async (_case, failure) => {
+    vi.mocked(api.searchRecords).mockRejectedValue(failure)
 
     expect(await searchRecordsForGlobalSearch('磁盘', 4)).toEqual([])
   })
@@ -102,12 +131,14 @@ describe('searchRecordsForGlobalSearch', () => {
     expect(api.searchRecords).not.toHaveBeenCalled()
   })
 
-  it('keeps at most the requested number of hits', async () => {
+  it('keeps at most the requested number of record hits', async () => {
     vi.mocked(api.searchRecords).mockResolvedValue({
       items: [hit({}, 'rec_001'), hit({}, 'rec_002'), hit({}, 'rec_003')],
       generation: 3,
     })
 
-    expect(await searchRecordsForGlobalSearch('磁盘', 2)).toHaveLength(2)
+    const hits = await searchRecordsForGlobalSearch('磁盘', 2)
+
+    expect(hits.filter((entry) => entry.id !== RECORD_SEARCH_ALL_HIT_ID)).toHaveLength(2)
   })
 })
