@@ -2782,6 +2782,53 @@ export type RecordRevisionListResponse = {
   items: RecordRevision[]
 }
 
+export type RecordFollowUpState = 'none' | 'scheduled' | 'overdue'
+export type RecordActionState = 'none' | 'open' | 'overdue'
+export type RecordSubjectPlacement = 'primary' | 'related'
+
+/**
+ * A subject filter travels as the positional string `kind:source_id:role:placement`.
+ * An omitted segment means "any", so `vps::context` asks for every record where
+ * some VPS is context.
+ */
+export type RecordSearchSubjectFilter = {
+  kind?: RecordSubjectKind
+  source_id?: string
+  role?: RecordRelationRole
+  placement?: RecordSubjectPlacement
+}
+
+export type RecordSearchFilter = {
+  q?: string
+  type?: RecordType[]
+  status?: RecordBusinessStatus[]
+  status_group?: RecordStatusGroup[]
+  lifecycle?: RecordLifecycle[]
+  owner?: string[]
+  participant?: string[]
+  tag?: string[]
+  subject?: RecordSearchSubjectFilter[]
+  follow_up?: RecordFollowUpState
+  action?: RecordActionState
+  occurred_from?: string
+  occurred_to?: string
+  updated_from?: string
+  updated_to?: string
+  sort?: RecordSort
+  limit?: number
+  cursor?: string
+}
+
+export type RecordSearchResponse = {
+  items: RecordDetail[]
+  next_cursor?: string
+  /**
+   * The index generation the page was read from. A cursor is bound to it, so a
+   * republished index rejects the cursor rather than silently changing pages.
+   */
+  generation: number
+}
+
 export type RecordMutationResult = {
   record_id: string
   revision_id: string

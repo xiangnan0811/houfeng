@@ -25,6 +25,7 @@ import {
   previewRecordPermanentDeletion,
   restoreRecord,
   restoreRecordRevision,
+  searchRecords,
   uploadAttachmentContent,
 } from './recordsApi'
 import type {
@@ -47,6 +48,7 @@ import type {
   RecordLifecycleResult,
   RecordListResponse,
   RecordMutationResult,
+  RecordSearchResponse,
   RecordRevision,
   RecordRevisionListResponse,
   RecordSubjectReference,
@@ -500,6 +502,55 @@ describe('Records API transport', () => {
       '/api/records?sort=updated_at_desc&limit=25&cursor=cursor-current',
       requestDefaults,
     )
+  })
+
+  it('repeats multi-value search filters and flattens subjects positionally', async () => {
+    const response = {
+      items: [record],
+      next_cursor: 'search-cursor',
+      generation: 4,
+    } satisfies RecordSearchResponse
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, response))
+
+    await expect(searchRecords({
+      q: '  磁盘 IO  ',
+      type: ['troubleshooting', 'migration'],
+      status_group: ['in_progress'],
+      lifecycle: ['active'],
+      tag: ['ops', 'disk'],
+      subject: [
+        { kind: 'vps', source_id: 'vps_alpha', role: 'affected', placement: 'primary' },
+        { kind: 'vps', role: 'context' },
+      ],
+      follow_up: 'overdue',
+      sort: 'updated_at_desc',
+      limit: 25,
+      cursor: '  search-cursor  ',
+    })).resolves.toEqual(response)
+
+    const [url] = fetchMock.mock.calls[0] ?? []
+    const query = new URLSearchParams(String(url).split('?')[1] ?? '')
+    expect(String(url).startsWith('/api/records/search?')).toBe(true)
+    expect(query.get('q')).toBe('磁盘 IO')
+    expect(query.getAll('type')).toEqual(['troubleshooting', 'migration'])
+    expect(query.getAll('tag')).toEqual(['ops', 'disk'])
+    // Trailing empty segments are kept so the server reads each position by index.
+    expect(query.getAll('subject')).toEqual(['vps:vps_alpha:affected:primary', 'vps::context:'])
+    expect(query.get('follow_up')).toBe('overdue')
+    expect(query.get('limit')).toBe('25')
+    expect(query.get('cursor')).toBe('search-cursor')
+  })
+
+  it('omits absent search filters instead of sending empty parameters', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      () => Promise.resolve(mockResponse(200, { items: [], generation: 1 } satisfies RecordSearchResponse)),
+    )
+
+    await searchRecords()
+    await searchRecords({ q: '   ', type: [], subject: [] })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/records/search', requestDefaults)
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/records/search', requestDefaults)
   })
 
   it('sends the draft list cursor and preserves the one the server returns', async () => {

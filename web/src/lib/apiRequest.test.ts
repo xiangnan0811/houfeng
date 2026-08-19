@@ -46,6 +46,15 @@ describe('API request transport', () => {
     expect(withQuery('/api/example', {})).toBe('/api/example')
   })
 
+  it('repeats a key per array value and drops the empty ones', () => {
+    expect(withQuery('/api/example', {
+      type: ['troubleshooting', '  migration  '],
+      tag: [],
+      status: ['', '   '],
+      q: 'term',
+    })).toBe('/api/example?type=troubleshooting&type=migration&q=term')
+  })
+
   it('uses the shared JSON, cache and credential defaults', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
