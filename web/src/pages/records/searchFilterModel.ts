@@ -5,13 +5,22 @@ import type {
   RecordLifecycle,
   RecordSearchFilter,
   RecordSearchSubjectFilter,
-  RecordSort,
   RecordStatusGroup,
-  RecordSubjectKind,
-  RecordSubjectPlacement,
-  RecordRelationRole,
   RecordType,
 } from '../../lib/types'
+import {
+  labelVocabulary,
+  RECORD_ACTION_LABELS,
+  RECORD_FOLLOW_UP_LABELS,
+  RECORD_LIFECYCLE_LABELS,
+  RECORD_RELATION_ROLE_LABELS,
+  RECORD_SORT_LABELS,
+  RECORD_STATUS_GROUP_LABELS,
+  RECORD_SUBJECT_KIND_LABELS,
+  RECORD_SUBJECT_PLACEMENT_LABELS,
+  RECORD_TYPE_LABELS,
+} from './recordLabels'
+import { BUSINESS_STATUS_LABELS } from './recordWorkspaceModel'
 
 /**
  * Filter state for the records search page. It mirrors the query the server
@@ -27,25 +36,16 @@ const MAX_FILTER_VALUES = 32
 /** Mirrors recordsearch.MaxPageSize. */
 const MAX_PAGE_SIZE = 100
 
-const RECORD_TYPES = new Set<RecordType>([
-  'troubleshooting', 'maintenance', 'migration',
-  'provider_communication', 'billing', 'important_finding', 'note',
-])
-const BUSINESS_STATUSES = new Set<RecordBusinessStatus>([
-  'pending_investigation', 'investigating', 'verifying', 'resolved', 'closed',
-  'cancelled', 'planned', 'executing', 'completed', 'pending_contact',
-  'waiting_provider', 'waiting_internal', 'pending_review', 'processing',
-])
-const STATUS_GROUPS = new Set<RecordStatusGroup>([
-  'pending', 'in_progress', 'waiting', 'verification', 'completed', 'cancelled',
-])
-const LIFECYCLES = new Set<RecordLifecycle>(['active', 'archived'])
-const SUBJECT_KINDS = new Set<RecordSubjectKind>(['vps', 'monitoring_instance', 'target'])
-const RELATION_ROLES = new Set<RecordRelationRole>(['affected', 'context', 'evidence_source'])
-const SUBJECT_PLACEMENTS = new Set<RecordSubjectPlacement>(['primary', 'related'])
-const FOLLOW_UP_STATES = new Set<RecordFollowUpState>(['none', 'scheduled', 'overdue'])
-const ACTION_STATES = new Set<RecordActionState>(['none', 'open', 'overdue'])
-const SORTS = new Set<RecordSort>(['updated_at_desc', 'updated_at_asc'])
+const RECORD_TYPES = labelVocabulary(RECORD_TYPE_LABELS)
+const BUSINESS_STATUSES = labelVocabulary(BUSINESS_STATUS_LABELS)
+const STATUS_GROUPS = labelVocabulary(RECORD_STATUS_GROUP_LABELS)
+const LIFECYCLES = labelVocabulary(RECORD_LIFECYCLE_LABELS)
+const SUBJECT_KINDS = labelVocabulary(RECORD_SUBJECT_KIND_LABELS)
+const RELATION_ROLES = labelVocabulary(RECORD_RELATION_ROLE_LABELS)
+const SUBJECT_PLACEMENTS = labelVocabulary(RECORD_SUBJECT_PLACEMENT_LABELS)
+const FOLLOW_UP_STATES = labelVocabulary(RECORD_FOLLOW_UP_LABELS)
+const ACTION_STATES = labelVocabulary(RECORD_ACTION_LABELS)
+const SORTS = labelVocabulary(RECORD_SORT_LABELS)
 
 /**
  * The server owns the vocabularies, so anything outside them is dropped here
@@ -85,9 +85,16 @@ function freeTextValues(raw: readonly string[]): string[] | undefined {
   return values.length ? values : undefined
 }
 
+/**
+ * The server parses these as RFC3339, so a zone is mandatory. A zone-less local
+ * datetime parses happily in the browser but would come back as a 400, so it is
+ * dropped here instead.
+ */
+const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/
+
 function instant(raw: string | null): string | undefined {
   const trimmed = (raw ?? '').trim()
-  if (!trimmed || Number.isNaN(Date.parse(trimmed))) return undefined
+  if (!RFC3339.test(trimmed) || Number.isNaN(Date.parse(trimmed))) return undefined
   return trimmed
 }
 
@@ -203,6 +210,111 @@ export function recordSearchParamsFromFilters(filters: RecordSearchFilters): URL
   if (filters.sort) params.set('sort', filters.sort)
   if (filters.limit) params.set('limit', String(filters.limit))
   return params
+}
+
+/** One removable summary of an active filter value. */
+export type RecordSearchFilterChip = {
+  key: string
+  label: string
+  /** The filter set with this one value removed. */
+  next: RecordSearchFilters
+}
+
+/**
+ * Sets a filter, or clears it when the value is absent. An inactive filter has
+ * to be a missing key rather than a key holding `undefined`, both because
+ * `exactOptionalPropertyTypes` distinguishes the two and because the URL codec
+ * treats a present key as a real constraint.
+ */
+export function withFilter<Field extends keyof RecordSearchFilters>(
+  filters: RecordSearchFilters,
+  field: Field,
+  value: RecordSearchFilters[Field] | undefined,
+): RecordSearchFilters {
+  const next: Record<string, unknown> = { ...filters }
+  if (value === undefined) delete next[field]
+  else next[field] = value
+  return next as RecordSearchFilters
+}
+
+function withoutIndex<Value>(values: readonly Value[], index: number): Value[] | undefined {
+  const remaining = values.filter((_, position) => position !== index)
+  return remaining.length ? remaining : undefined
+}
+
+function chipsForList(
+  filters: RecordSearchFilters,
+  field: 'type' | 'status' | 'status_group' | 'lifecycle' | 'owner' | 'participant' | 'tag',
+  caption: string,
+  describe: (value: string) => string,
+): RecordSearchFilterChip[] {
+  const values: readonly string[] = filters[field] ?? []
+  return values.map((value, index) => ({
+    key: `${field}:${value}`,
+    label: `${caption}: ${describe(value)}`,
+    next: withFilter(filters, field, withoutIndex(values, index)),
+  }))
+}
+
+/**
+ * Every active filter as a removable chip. Filters with no dedicated control —
+ * subjects, which arrive from a link on a VPS or monitoring page — are still
+ * visible and removable here, so a shared link never applies a narrowing the
+ * reader cannot see.
+ */
+export function recordSearchFilterChips(filters: RecordSearchFilters): RecordSearchFilterChip[] {
+  const chips: RecordSearchFilterChip[] = [
+    ...chipsForList(filters, 'type', '类型', (value) => RECORD_TYPE_LABELS[value as RecordType]),
+    ...chipsForList(filters, 'status', '状态',
+      (value) => BUSINESS_STATUS_LABELS[value as RecordBusinessStatus]),
+    ...chipsForList(filters, 'status_group', '状态分组',
+      (value) => RECORD_STATUS_GROUP_LABELS[value as RecordStatusGroup]),
+    ...chipsForList(filters, 'lifecycle', '生命周期',
+      (value) => RECORD_LIFECYCLE_LABELS[value as RecordLifecycle]),
+    ...chipsForList(filters, 'owner', '负责人', (value) => value),
+    ...chipsForList(filters, 'participant', '参与人', (value) => value),
+    ...chipsForList(filters, 'tag', '标签', (value) => value),
+  ]
+  const subjects = filters.subject ?? []
+  for (const [index, subject] of subjects.entries()) {
+    const parts = [
+      subject.kind ? RECORD_SUBJECT_KIND_LABELS[subject.kind] : '任意类型',
+      subject.source_id ?? '任意对象',
+      subject.role ? RECORD_RELATION_ROLE_LABELS[subject.role] : '任意角色',
+      subject.placement ? RECORD_SUBJECT_PLACEMENT_LABELS[subject.placement] : '任意位置',
+    ]
+    chips.push({
+      key: `subject:${encodeSubject(subject)}`,
+      label: `对象: ${parts.join(' / ')}`,
+      next: withFilter(filters, 'subject', withoutIndex(subjects, index)),
+    })
+  }
+  for (const [field, caption, describe] of [
+    ['follow_up', '跟进', (value: string) => RECORD_FOLLOW_UP_LABELS[value as RecordFollowUpState]],
+    ['action', '待办', (value: string) => RECORD_ACTION_LABELS[value as RecordActionState]],
+    ['occurred_from', '发生于之后', (value: string) => value],
+    ['occurred_to', '发生于之前', (value: string) => value],
+    ['updated_from', '更新于之后', (value: string) => value],
+    ['updated_to', '更新于之前', (value: string) => value],
+  ] as const) {
+    const value = filters[field]
+    if (!value) continue
+    chips.push({
+      key: field,
+      label: `${caption}: ${describe(value)}`,
+      next: withFilter(filters, field, undefined),
+    })
+  }
+  return chips
+}
+
+/** Free-text list filters are edited as one comma-separated field. */
+export function parseFilterValueList(text: string): string[] | undefined {
+  return freeTextValues(text.split(/[,，\s]+/))
+}
+
+export function formatFilterValueList(values: readonly string[] | undefined): string {
+  return (values ?? []).join(', ')
 }
 
 /**

@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 
 import {
   DEFAULT_RECORD_SEARCH_FILTERS,
+  formatFilterValueList,
+  parseFilterValueList,
+  recordSearchFilterChips,
   recordSearchFilterKey,
   recordSearchFiltersFromSearchParams,
   recordSearchParamsFromFilters,
@@ -76,6 +79,10 @@ describe('record search filter model', () => {
 
   it('ignores a timestamp that is not an instant, and an inverted range', () => {
     expect(parse('occurred_from=yesterday').occurred_from).toBeUndefined()
+    // Zone-less: the browser would parse it as local time, the server as a 400.
+    expect(parse('occurred_from=2026-08-01T00%3A00').occurred_from).toBeUndefined()
+    expect(parse('occurred_from=2026-08-01T00%3A00%3A00%2B08%3A00').occurred_from)
+      .toBe('2026-08-01T00:00:00+08:00')
     expect(parse(
       'updated_from=2026-08-09T00%3A00%3A00Z&updated_to=2026-08-02T00%3A00%3A00Z',
     )).toEqual(DEFAULT_RECORD_SEARCH_FILTERS)
@@ -103,6 +110,41 @@ describe('record search filter model', () => {
       .toBe(recordSearchFilterKey(parse('type=migration&q=disk')))
     expect(recordSearchFilterKey(parse('q=disk')))
       .not.toBe(recordSearchFilterKey(parse('q=network')))
+  })
+
+  it('names every active filter as a chip, including ones with no control', () => {
+    const chips = recordSearchFilterChips(parse(
+      'type=troubleshooting&status=resolved&status_group=completed&lifecycle=archived'
+      + '&owner=usr_a&participant=usr_b&tag=ops&subject=vps%3Avps_alpha%3Aaffected%3A'
+      + '&follow_up=overdue&action=open&updated_from=2026-08-02T00%3A00%3A00Z',
+    ))
+    expect(chips.map((chip) => chip.label)).toEqual([
+      '类型: 排障',
+      '状态: 已解决',
+      '状态分组: 已完成',
+      '生命周期: 已归档',
+      '负责人: usr_a',
+      '参与人: usr_b',
+      '标签: ops',
+      '对象: VPS / vps_alpha / 受影响 / 任意位置',
+      '跟进: 已逾期',
+      '待办: 有待办',
+      '更新于之后: 2026-08-02T00:00:00Z',
+    ])
+  })
+
+  it('removes exactly the chip value, keeping its siblings', () => {
+    const chips = recordSearchFilterChips(parse('tag=ops&tag=disk&type=migration'))
+    const removed = chips.find((chip) => chip.label === '标签: ops')
+    expect(removed?.next).toEqual({ tag: ['disk'], type: ['migration'] })
+    expect(recordSearchFilterChips(parse('tag=ops'))[0]?.next).toEqual(DEFAULT_RECORD_SEARCH_FILTERS)
+  })
+
+  it('reads a free-text list from one field and writes it back', () => {
+    expect(parseFilterValueList(' ops, disk ，io  net ')).toEqual(['ops', 'disk', 'io', 'net'])
+    expect(parseFilterValueList('  ,  ')).toBeUndefined()
+    expect(formatFilterValueList(['ops', 'disk'])).toBe('ops, disk')
+    expect(formatFilterValueList(undefined)).toBe('')
   })
 
   it('sends only the filters the caller set, and never the cursor from the URL', () => {
