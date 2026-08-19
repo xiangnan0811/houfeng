@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.69.0](https://github.com/xiangnan0811/houfeng/compare/v0.68.0...v0.69.0) (2026-08-19)
+
+
+### Features
+
+* **recordsearch:** add search index migration and APP ACL fragment ([61b6b91](https://github.com/xiangnan0811/houfeng/commit/61b6b913b554139b5b7e32e9415f2514b66b2e92))
+* **recordsearch:** add search query normalization and bound page cursor ([15a6c12](https://github.com/xiangnan0811/houfeng/commit/15a6c121c0e374de055d033f498d49d39daa89b4))
+* **recordsearch:** backfill the index with a shadow-generation rebuild ([403148d](https://github.com/xiangnan0811/houfeng/commit/403148da53ea5d9e2f52300a964fceaa39eb02ab))
+* **recordsearch:** derive indexed document text from the render model ([7a786e9](https://github.com/xiangnan0811/houfeng/commit/7a786e98ebd4b8b9da633bc222d2b22955d50cbf))
+* **recordsearch:** project committed records into the search index ([fe4a296](https://github.com/xiangnan0811/houfeng/commit/fe4a29646f3dc0e4e0bda86c141a8dc3683cd9d9))
+* **recordsearch:** publish an initial search generation at startup ([83141b3](https://github.com/xiangnan0811/houfeng/commit/83141b3c7563d73328f1d9a22cfd607a778bf422))
+* **recordsearch:** purge indexed copies when a record is deleted ([0793494](https://github.com/xiangnan0811/houfeng/commit/0793494340710a44ec43f05e92679702d2fde89f))
+* **recordsearch:** serve authorized pages from the search index ([0619a83](https://github.com/xiangnan0811/houfeng/commit/0619a83dc8ba7b4ea995c32f0f6f75dee75238d1))
+* **records:** page the draft list with a keyset cursor ([e387bc1](https://github.com/xiangnan0811/houfeng/commit/e387bc17bcd723442d0e8ca66e9926fa4cf0844b))
+* **records:** serve search from the index and retire the in-memory filter ([147455d](https://github.com/xiangnan0811/houfeng/commit/147455db5936d36c8ce0412568fa739aba9c02be))
+* **web:** add the records search and drafts pages ([422230c](https://github.com/xiangnan0811/houfeng/commit/422230c2fb51cb1142e087bbc6f9682832551863))
+* **web:** add the records search client and URL filter codec ([fc6d009](https://github.com/xiangnan0811/houfeng/commit/fc6d0091e8e37951dff8d71896be21cf3e59777d))
+* **web:** find records from the global search palette ([683e817](https://github.com/xiangnan0811/houfeng/commit/683e817e2cbadb363dd2b93af46f395554edbdab))
+* **web:** lead from the palette to the full records result set ([a34469d](https://github.com/xiangnan0811/houfeng/commit/a34469d7d3e822344e0b4e1eb060d9d42fd8df66))
+
+
+### Documentation
+
+* **recordsearch:** record the projection and layering decisions ([a302d4d](https://github.com/xiangnan0811/houfeng/commit/a302d4d556978b326c2266edccc2572e1dd13136))
+* **spec:** record the search index and palette boundary contracts ([c01663d](https://github.com/xiangnan0811/houfeng/commit/c01663df684665d94b1378a63c01592afe91637c))
+* **trellis:** reconcile records search plan with current main ([6492c8a](https://github.com/xiangnan0811/houfeng/commit/6492c8a44f698ab3837a345937d79d260a64c139))
+
 ## [0.68.0](https://github.com/xiangnan0811/houfeng/compare/v0.67.0...v0.68.0) (2026-08-18)
 
 
