@@ -1,3 +1,10 @@
+-- The projector scans its sources by recorded time, and record_domain_activities
+-- was indexed only for per-record reads (record_id, event_at desc). Without this
+-- index every projection pass sequentially scans the whole log. The index lives
+-- here rather than with the table because the projector is what needs it.
+create index if not exists idx_record_domain_activities_recorded
+  on public.record_domain_activities(project_id, recorded_at, activity_id);
+
 create table if not exists public.record_activity_projection_heads (
   project_id text not null default 'default' check (project_id = 'default'),
   projection_generation bigint not null check (projection_generation > 0),
