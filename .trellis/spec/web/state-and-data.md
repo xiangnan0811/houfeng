@@ -48,7 +48,7 @@
 - Query/error: `apiRequest.ts` 的 `withQuery(path, filter)`、`ApiError<TRecovery = unknown>` 与可选 `ApiErrorDecoder` seam；`apiError.ts` 是 Records allowlist decoder；`api.ts` 保留兼容 re-export。
 - Shared/eager façade: `api.ts`；lazy observability façade: `observabilityApi.ts`；lazy-only Records transport: `recordsApi.ts`。
 - `observabilityApi.ts` exports: `listEvents`、`listIncidents`、`listHistoricalIncidents`、`listCommandAudits`。
-- `recordsApi.ts` exports: record list/read/revision/lifecycle、draft CRUD、permanent-delete preview/execute/status helpers；canonical DTO 位于 `types.ts`。
+- `recordsApi.ts` exports: record list/read/revision/lifecycle、draft CRUD（含 cursor 分页）、`searchRecords`、permanent-delete preview/execute/status helpers；canonical DTO 位于 `types.ts`。
 
 #### 3. Contracts
 
@@ -70,7 +70,8 @@
 | route-private helper 加入 eager `api.ts` 后 entry 超预算 | 移入已有 domain façade或先回到设计；不得抬预算 |
 | helper 仍被 AppShell/启动路径使用 | 保留在 `api.ts`，不引入启动期动态请求 |
 | domain façade 复制 fetch/response reader 或绕过 decoder seam | review/source gate 阻断，改为复用 transport primitive与显式 decoder |
-| `api.ts`/AppShell/TopBar/Sidebar/eager router graph 导入 `recordsApi.ts` | AST contract 阻断；production consumer 必须停在 lazy record route / shared record workspace chunk，不得进入 entry |
+| `api.ts`/AppShell/TopBar/Sidebar/eager router graph **静态**导入 `recordsApi.ts` | AST contract 阻断；production consumer 必须停在 lazy record route / shared record workspace chunk，不得进入 entry |
+| AppShell 需要 records 数据（global search） | 只允许 `import()` 动态到达，且必须经 `pages/records/globalRecordSearch.ts` 这类领域模块，不得在 shell 里静态 import transport |
 | 新记录草稿携带一个或伪造两个空 routing fields | TypeScript union/source review 阻断；body 只含 `payload` |
 | Records draft PATCH 给 ETag 增加引号 | 后端 exact `If-Match` 拒绝；原样发送 draft response 的 `etag` |
 | deletion token 同时进入 header 和 JSON body | body unknown-field decode 失败；只保留 header token 与 body `reservation_id` |
@@ -166,6 +167,34 @@ export type EvidenceCaptureReference = {
 - `EvidenceCapturePicker.test.tsx`覆盖warning可确认、exceeded/unavailable不可确认、stale、upstream reset与confirm body exact allowlist。
 - `recordsApi.test.ts`与architecture/bundle contracts继续证明唯一transport、lazy-only graph和wire shape不变。
 - 使用Node 22运行focused Vitest、lint、strict TypeScript/build、bundle/CSS contracts及`make verify-web`；不得抬bundle/CSS budget。
+
+### Scenario: AppShell 动态到达 records transport（global search 分组）
+
+#### 1. Scope / Trigger
+
+- Trigger: AppShell 常驻组件（当前只有 `GlobalSearch`）需要 server-backed records 数据，或改动 records 分组的配额/失败语义时。
+- 目标：让 shell 能搜到记录，同时不让 records transport 回到 entry chunk。
+
+#### 2. Signatures
+
+- `web/src/pages/records/globalRecordSearch.ts`：`searchRecordsForGlobalSearch(query, limit): Promise<GlobalRecordSearchHit[]>`、`GlobalRecordSearchHit`、`RECORD_SEARCH_ALL_HIT_ID`。
+- `GlobalSearch.tsx` 侧：`RECORD_RESULTS = 4`（records 配额）、`MAX_RESULTS = 10`（asset 配额）。
+
+#### 3. Contracts
+
+- shell **只能**用 `import('../../pages/records/globalRecordSearch')` 动态到达；不得在 shell 里静态 import `recordsApi.ts`、`searchFilterModel.ts` 或 records DTO 的 value import。type-only import 不构成 runtime edge，但没有必要时也不要加。
+- 领域模块负责映射与降级，shell 不认识 records 类型。canonical `/records?...` 链接由该模块用 `recordSearchParamsFromFilters` 生成——URL 编解码只有一个 owner。
+- **失败必须隔离**：records 分组任何异常（索引未就绪、平台关闭、401、网络失败）都 resolve 成空数组，不得阻断 asset 分组；asset 分组失败也不得清空已经返回的 records。`Promise.all` 的每个分支必须自带 catch。
+- 401 的 session 结束副作用属于 transport（`requestJSON` 先通知 unauthorized handler 再 reject），领域模块吞掉 rejection **不等于**吞掉该副作用；不要为了"提前失败"在请求前自行判断登录态。
+- records 有独立配额，不与 asset 上限共享：asset 是客户端未排序匹配，records 由服务端排序，共享上限会让高频关键词把记录全部挤掉。
+- 服务端返回非空时才追加通向 `/records` 的末位入口；索引不可用时指向搜索页是误导。
+- 迟到的旧查询不得覆盖新查询结果：`GlobalSearch` 用单调 generation ref 丢弃过期响应。
+
+#### 4. Tests Required
+
+- `globalRecordSearch.test.ts`：bounded limit、raw query 透传（服务端匹配，不做客户端小写化）、hit 映射与 id 回退、末位 canonical 链接、空结果不追加链接、三类失败均降级为空。
+- `GlobalSearch.test.tsx`：records 分组渲染与链接、无 asset 命中时仍出结果、asset 失败仍保留 records 并展示错误、迟到响应被丢弃。
+- `recordsTransportArchitectureContract.test.ts` 的 `EXPECTED_EXPORTS` 必须包含 `searchRecords`；fresh build 后 `bundle:check` 证明 entry 不含 records transport。
 
 ### Incident threshold settings contract
 

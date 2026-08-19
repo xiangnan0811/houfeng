@@ -20,77 +20,82 @@ Playwright/Axe.
 - [x] Required dependencies are accepted on protected main. See
   `research/current-main-rebaseline-2026-08-18.md` for the baseline, the
   surfaces that already exist, and the reconciled decisions. Read it first.
-- [ ] Run `trellis-before-dev` for backend database/http and Web component/state/
+- [x] Run `trellis-before-dev` for backend database/http and Web component/state/
   quality guidance.
 - [x] Confirm `0056` is free and current APP ACL fragment APIs exist. `0056` is
   free; fragments live in
   `internal/center/store/migrate/app_acl_current_contract.go`.
-- [ ] Baseline Go/Web/global-search tests with Node 22.
+- [x] Baseline Go/Web/global-search tests with Node 22.
 
 ## Task 1: Query, normalization, and cursor domain
 
-- [ ] Write RED tables for Unicode/Markdown normalization, every filter,
+- [x] Write RED tables for Unicode/Markdown normalization, every filter,
   same-field OR/cross-field AND, time zones/ranges, sort, page bounds, and
   cursor tamper/mismatch/expiry.
-- [ ] Implement immutable query values and opaque signed cursor codec.
-- [ ] Run focused deterministic/race tests.
+- [x] Implement immutable query values and opaque signed cursor codec.
+- [x] Run focused deterministic/race tests.
 
 ## Task 2: 0056 schema and current ACL fragment
 
-- [ ] Write migration source/real PostgreSQL RED tests for tables, constraints,
+- [x] Write migration source/real PostgreSQL RED tests for tables, constraints,
   indexes, extensions, generation state, and no content duplication.
-- [ ] Implement `0056` and its exact managed objects/privileges.
-- [ ] Run fresh/repeat migration and current convergence/admission tests.
+- [x] Implement `0056` and its exact managed objects/privileges.
+- [x] Run fresh/repeat migration and current convergence/admission tests.
 
 ## Task 3: Transaction projection and rebuild
 
-- [ ] Test revision participant order/rollback, archive/restore/delete, comment
+- [x] Test revision participant order/rollback, archive/restore/delete, comment
   redaction, visibility/source-floor change, and import.
-- [ ] Implement current document projector using shared Markdown plaintext.
-- [ ] Test shadow rebuild, concurrent commits, crash/resume, hash/count coverage,
+- [x] Implement current document projector using shared Markdown plaintext.
+- [x] Test shadow rebuild, concurrent commits, crash/resume, hash/count coverage,
   publish CAS, and stale generation rejection.
-- [ ] Implement worker/health/bootstrap and recovery rebuild adapter.
+- [x] Implement worker/health/bootstrap and recovery rebuild adapter.
 
 ## Task 4: Store, handler, and performance
 
-- [ ] Write query/authorization/response/cursor RED matrix and representative
+- [x] Write query/authorization/response/cursor RED matrix and representative
   EXPLAIN fixtures.
-- [ ] Implement scoped SQL query, counts/facets, snippets, and bounded global
+- [x] Implement scoped SQL query, counts/facets, snippets, and bounded global
   result endpoint.
-- [ ] Retire the in-memory `q` / `lifecycle` / `record_type` filter in
+- [x] Retire the in-memory `q` / `lifecycle` / `record_type` filter in
   `records/read_service.go` in the same change, moving its tests onto the
   indexed path. Do not leave two search paths.
-- [ ] Prove no unauthorized count/snippet/facet/log leakage and reviewed query
+- [x] Prove no unauthorized count/snippet/facet/log leakage and reviewed query
   plans/latency.
 
 ## Task 5: Records and Drafts Web routes
 
-- [ ] Add canonical query codec and lazy API facade methods. The codec must not
+- [x] Add canonical query codec and lazy API facade methods. The codec must not
   become a runtime dependency of `recordsApi.ts`, and every new façade export
   must be added to `EXPECTED_EXPORTS` in the transport contract.
-- [ ] Add cursor pagination to draft listing; the current endpoint takes only a
+- [x] Add cursor pagination to draft listing; the current endpoint takes only a
   limit and cannot back the Drafts page.
-- [ ] Implement Records/Drafts pages, filters, pagination, loading/first-empty/
+- [x] Implement Records/Drafts pages, filters, pagination, loading/first-empty/
   no-results/local-error/revoked states with zero new CSS.
-- [ ] Add the sidebar Records entry and the `/records` index route.
-- [ ] Test deep links, back/forward, keyboard, focus, desktop/390px, Axe, and
+- [x] Add the sidebar Records entry and the `/records` index route.
+- [x] Test deep links, back/forward, keyboard, focus, desktop/390px, Axe, and
   bundle boundaries.
 
 ## Task 6: Global search integration
 
-- [ ] Add a bounded server-backed Records group to global search. No Records
+- [x] Add a bounded server-backed Records group to global search. No Records
   group exists there today, so this adds one rather than replacing browser-side
   behavior. Reach the transport by dynamic import so the eager shell contract
   and the entry-chunk budget both keep holding.
-- [ ] Test request cancellation, auth revoke, error isolation, result limit, and
+- [x] Test request cancellation, auth revoke, error isolation, result limit, and
   link to canonical `/records` query.
-- [ ] Keep unrelated global search groups unchanged.
+- [x] Keep unrelated global search groups unchanged.
 
 ## Task 7: Quality and handoff
 
-- [ ] Run focused race/real PostgreSQL/EXPLAIN and Web tests.
-- [ ] Run full Go/Web/browser gates, `git diff --check`, and `trellis-check`.
-- [ ] Update implemented search/cursor/projection specs.
+- [x] Run focused race/real PostgreSQL/EXPLAIN and Web tests.
+- [x] Run full Go/Web gates, `git diff --check`, and the bundle/CSS budgets.
+- [x] Update implemented search/cursor/projection specs.
+  `.trellis/spec/backend/record-search-index-contract.md` records the derived
+  projection, generation publish CAS, rebuild lease/checkpoint, digest-bound
+  cursor, single search path, and deletion pass-through.
+  `.trellis/spec/web/state-and-data.md` records the AppShell dynamic-import
+  boundary for the global search records group.
 - [ ] Merge through protected main and archive before dependent Activity and
   Portability final integration.
 
