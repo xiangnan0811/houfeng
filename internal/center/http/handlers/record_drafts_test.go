@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -20,14 +21,14 @@ import (
 func TestRecordDraftsHandlerListsOnlyTrustedActorsPrivateDrafts(t *testing.T) {
 	actor := mustRecordsHandlerActor(t)
 	application := &recordDraftHandlerApplicationStub{
-		listDrafts: func(_ context.Context, request records.DraftListRequest) ([]records.Draft, error) {
+		listDrafts: func(_ context.Context, request records.DraftListRequest) (records.DraftListResult, error) {
 			if !reflect.DeepEqual(request.Actor, actor) {
 				t.Fatalf("ListDrafts() actor = %#v, want trusted context actor %#v", request.Actor, actor)
 			}
-			if request.Limit != 25 {
+			if request.Limit != 25 || request.After != nil {
 				t.Fatalf("ListDrafts() request = %#v", request)
 			}
-			return make([]records.Draft, 0), nil
+			return records.DraftListResult{Drafts: make([]records.Draft, 0)}, nil
 		},
 	}
 	handler := RecordDraftsWithOptions(application, RecordDraftHandlerOptions{
@@ -323,8 +324,8 @@ func TestRecordDraftHandlersFailClosedOnNonAllowlistedPersistedPayloads(t *testi
 		{
 			name: "list response",
 			handler: RecordDraftsWithOptions(&recordDraftHandlerApplicationStub{
-				listDrafts: func(context.Context, records.DraftListRequest) ([]records.Draft, error) {
-					return []records.Draft{unknown}, nil
+				listDrafts: func(context.Context, records.DraftListRequest) (records.DraftListResult, error) {
+					return records.DraftListResult{Drafts: []records.Draft{unknown}}, nil
 				},
 			}, RecordDraftHandlerOptions{NewDraftID: func() (string, error) { return "rdf_unused", nil }}),
 			request: recordsHandlerRequest(t, actor, http.MethodGet, "/api/record-drafts", ""),
@@ -476,6 +477,112 @@ func TestRecordDraftsHandlerUsesExactSubtreesAndMethodBoundaries(t *testing.T) {
 	}
 }
 
+// A draft cursor has to survive the round trip through the client untouched, and
+// it must be opaque: the client's job is to hand it back, not to read or
+// construct positions in the author's activity order.
+func TestRecordDraftsHandlerRoundTripsOpaqueCursor(t *testing.T) {
+	actor := mustRecordsHandlerActor(t)
+	updatedAt := time.Date(2026, time.August, 6, 8, 15, 0, 0, time.UTC)
+	var got records.DraftListRequest
+	handler := RecordDraftsWithOptions(&recordDraftHandlerApplicationStub{
+		listDrafts: func(_ context.Context, request records.DraftListRequest) (records.DraftListResult, error) {
+			got = request
+			return records.DraftListResult{
+				Drafts:     make([]records.Draft, 0),
+				NextCursor: &records.DraftCursor{UpdatedAt: updatedAt, DraftID: "rdf_httpcursor"},
+			}, nil
+		},
+	}, RecordDraftHandlerOptions{NewDraftID: func() (string, error) { return "rdf_unused", nil }})
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, recordsHandlerRequest(t, actor, http.MethodGet, "/api/record-drafts", ""))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Items      []json.RawMessage `json:"items"`
+		NextCursor string            `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.NextCursor == "" {
+		t.Fatalf("next_cursor = %q, want an encoded cursor; body=%s", response.NextCursor, recorder.Body.String())
+	}
+	if strings.Contains(response.NextCursor, "rdf_httpcursor") {
+		t.Fatalf("next_cursor = %q, want the draft id encoded rather than exposed", response.NextCursor)
+	}
+
+	replayed := httptest.NewRecorder()
+	handler.ServeHTTP(replayed, recordsHandlerRequest(
+		t, actor, http.MethodGet, "/api/record-drafts?cursor="+response.NextCursor, "",
+	))
+	if replayed.Code != http.StatusOK {
+		t.Fatalf("replay status = %d, want 200; body=%s", replayed.Code, replayed.Body.String())
+	}
+	if got.After == nil || got.After.DraftID != "rdf_httpcursor" || !got.After.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("replayed cursor = %#v, want the emitted position", got.After)
+	}
+}
+
+// A page with nothing after it must not carry the key at all, so a client can
+// use its presence as the only stop condition.
+func TestRecordDraftsHandlerOmitsCursorOnFinalPage(t *testing.T) {
+	actor := mustRecordsHandlerActor(t)
+	handler := RecordDraftsWithOptions(&recordDraftHandlerApplicationStub{
+		listDrafts: func(context.Context, records.DraftListRequest) (records.DraftListResult, error) {
+			return records.DraftListResult{Drafts: make([]records.Draft, 0)}, nil
+		},
+	}, RecordDraftHandlerOptions{NewDraftID: func() (string, error) { return "rdf_unused", nil }})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, recordsHandlerRequest(t, actor, http.MethodGet, "/api/record-drafts", ""))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "next_cursor") {
+		t.Fatalf("final page body = %s, want no next_cursor key", recorder.Body.String())
+	}
+}
+
+// A cursor the server did not mint is a client error, not an empty first page,
+// because silently restarting hides a real bug in the caller.
+func TestRecordDraftsHandlerRejectsUnusableCursor(t *testing.T) {
+	actor := mustRecordsHandlerActor(t)
+	handler := RecordDraftsWithOptions(&recordDraftHandlerApplicationStub{
+		listDrafts: func(context.Context, records.DraftListRequest) (records.DraftListResult, error) {
+			t.Fatal("ListDrafts() called with an unusable cursor")
+			return records.DraftListResult{}, nil
+		},
+	}, RecordDraftHandlerOptions{NewDraftID: func() (string, error) { return "rdf_unused", nil }})
+	for _, testCase := range []struct {
+		name   string
+		cursor string
+	}{
+		{name: "not base64", cursor: "not-a-cursor!!"},
+		{name: "base64 of nonsense", cursor: base64.RawURLEncoding.EncodeToString([]byte(`{"nope":1}`))},
+		{name: "record cursor replayed as a draft cursor", cursor: mustEncodedRecordCursor(t)},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, recordsHandlerRequest(
+				t, actor, http.MethodGet, "/api/record-drafts?cursor="+testCase.cursor, "",
+			))
+			assertRecordsHandlerError(t, recorder, http.StatusBadRequest, "cursor_invalid")
+		})
+	}
+}
+
+func mustEncodedRecordCursor(t *testing.T) string {
+	t.Helper()
+	encoded, err := encodeRecordCursor(records.RecordCursor{
+		UpdatedAt: time.Date(2026, time.August, 6, 8, 15, 0, 0, time.UTC), RecordID: "rec_httpcursor",
+	})
+	if err != nil {
+		t.Fatalf("encodeRecordCursor() error = %v", err)
+	}
+	return encoded
+}
+
 func recordsHandlerDraftWithRawPayload(t *testing.T, draft records.Draft, raw string) records.Draft {
 	t.Helper()
 	payload, err := records.NewDraftPayload([]byte(raw))
@@ -493,7 +600,7 @@ func recordsHandlerDraftWithRawPayload(t *testing.T, draft records.Draft, raw st
 
 type recordDraftHandlerApplicationStub struct {
 	readDraft      func(context.Context, records.DraftReadRequest) (records.Draft, error)
-	listDrafts     func(context.Context, records.DraftListRequest) ([]records.Draft, error)
+	listDrafts     func(context.Context, records.DraftListRequest) (records.DraftListResult, error)
 	createDraft    func(context.Context, records.DraftCreateRequest) (records.Draft, error)
 	patchDraft     func(context.Context, records.DraftPatchRequest) (records.Draft, error)
 	discardDraft   func(context.Context, records.DraftDiscardRequest) error
@@ -507,9 +614,9 @@ func (stub *recordDraftHandlerApplicationStub) ReadDraft(ctx context.Context, re
 	return stub.readDraft(ctx, request)
 }
 
-func (stub *recordDraftHandlerApplicationStub) ListDrafts(ctx context.Context, request records.DraftListRequest) ([]records.Draft, error) {
+func (stub *recordDraftHandlerApplicationStub) ListDrafts(ctx context.Context, request records.DraftListRequest) (records.DraftListResult, error) {
 	if stub.listDrafts == nil {
-		return nil, errors.New("unexpected ListDrafts call")
+		return records.DraftListResult{}, errors.New("unexpected ListDrafts call")
 	}
 	return stub.listDrafts(ctx, request)
 }

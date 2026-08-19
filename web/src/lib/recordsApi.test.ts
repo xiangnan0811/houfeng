@@ -42,6 +42,7 @@ import type {
   RecordDeletionPreview,
   RecordDetail,
   RecordDraft,
+  RecordDraftListResponse,
   RecordDraftPayload,
   RecordLifecycleResult,
   RecordListResponse,
@@ -497,6 +498,24 @@ describe('Records API transport', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/records?sort=updated_at_desc&limit=25&cursor=cursor-current',
+      requestDefaults,
+    )
+  })
+
+  it('sends the draft list cursor and preserves the one the server returns', async () => {
+    const response = {
+      items: [],
+      next_cursor: ' draft-cursor-next ',
+    } satisfies RecordDraftListResponse
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, response))
+
+    await expect(listRecordDrafts({
+      limit: 25,
+      cursor: '  draft-cursor-current  ',
+    })).resolves.toEqual(response)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/record-drafts?limit=25&cursor=draft-cursor-current',
       requestDefaults,
     )
   })

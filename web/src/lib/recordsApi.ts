@@ -273,7 +273,7 @@ export function restoreRecord(recordId: string, idempotencyKey: string): Promise
 export function listRecordDrafts(filter?: RecordDraftListFilter): Promise<RecordDraftListResponse> {
   return requestJSON<RecordDraftListResponse>(withQuery(
     '/api/record-drafts',
-    filter ? { limit: filter.limit } : undefined,
+    filter ? { limit: filter.limit, cursor: filter.cursor } : undefined,
   ))
 }
 

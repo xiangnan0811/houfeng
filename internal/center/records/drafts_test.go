@@ -414,7 +414,7 @@ func (store *draftServiceStoreStub) GetDraftRouting(_ context.Context, draftID, 
 	return DraftRoutingFromDraft(store.draft), nil
 }
 
-func (store *draftServiceStoreStub) ListDraftRoutings(_ context.Context, authorID string, _ uint64) ([]DraftRouting, error) {
+func (store *draftServiceStoreStub) ListDraftRoutings(_ context.Context, authorID string, _ DraftCandidatePage) ([]DraftRouting, error) {
 	if authorID != store.draft.AuthorID {
 		return nil, nil
 	}

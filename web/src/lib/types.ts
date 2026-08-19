@@ -2819,6 +2819,7 @@ export type RecordDraft = {
 
 export type RecordDraftListResponse = {
   items: RecordDraft[]
+  next_cursor?: string
 }
 
 // Text, lifecycle, and type filtering live on the search endpoint. The list
@@ -2836,6 +2837,7 @@ export type RecordRevisionListFilter = {
 
 export type RecordDraftListFilter = {
   limit?: number
+  cursor?: string
 }
 
 export type CreateRecordDraftInput = ({

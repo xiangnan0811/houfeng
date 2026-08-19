@@ -161,7 +161,7 @@ func TestPostgresIntegrationRecordDraftReservationFiltersExistingDraftRoutingAnd
 	if _, err := draftRepository.GetDraftRouting(ctx, draft.DraftID, draft.AuthorID); !errors.Is(err, records.ErrDraftNotFound) {
 		t.Fatalf("GetDraftRouting() error = %v, want ErrDraftNotFound", err)
 	}
-	routings, err := draftRepository.ListDraftRoutings(ctx, draft.AuthorID, 10)
+	routings, err := draftRepository.ListDraftRoutings(ctx, draft.AuthorID, records.DraftCandidatePage{Limit: 10})
 	if err != nil || len(routings) != 0 {
 		t.Fatalf("ListDraftRoutings() = %#v, %v, want empty", routings, err)
 	}
@@ -651,6 +651,62 @@ func TestPostgresIntegrationRecordDraftPublishDiscardAndRevokeCleanupAreAtomic(t
 			draftCount, checkpointCount, rootCount, revisionCount)
 	}
 	assertRecordsPostgresDraftFormalSideEffects(t, ctx, fixture.db, 1, 1)
+}
+
+// Drafts created in one transaction share updated_at down to the microsecond, so
+// the tie-break half of the keyset is not hypothetical. This walks the whole list
+// one draft at a time to prove no draft is skipped or served twice.
+func TestPostgresIntegrationRecordDraftRoutingKeysetPagesThroughTiedTimestamps(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	repository := newRecordsPostgresDraftRepository(
+		fixture.openDirectRuntimePool(t, ctx, "record-draft-keyset", 2),
+	)
+	seeded := make(map[string]bool, 5)
+	for index := 0; index < 5; index++ {
+		draftID := fmt.Sprintf("rdf_pgkeyset%d", index)
+		createRecordsPostgresDraft(t, ctx, repository, draftID, recordsPostgresDraftPayload(t, draftID))
+		seeded[draftID] = true
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		update public.record_drafts set updated_at = timestamptz '2026-08-06 09:00:00+00'
+		where author_id = $1`, recordsPostgresDraftAuthorID,
+	); err != nil {
+		t.Fatalf("collapse draft activity timestamps: %v", err)
+	}
+
+	var cursor *records.DraftCursor
+	walked := make([]string, 0, len(seeded))
+	for pass := 0; pass <= len(seeded); pass++ {
+		routings, err := repository.ListDraftRoutings(ctx, recordsPostgresDraftAuthorID,
+			records.DraftCandidatePage{After: cursor, Limit: 1})
+		if err != nil {
+			t.Fatalf("ListDraftRoutings(pass %d) error = %v", pass, err)
+		}
+		if len(routings) == 0 {
+			break
+		}
+		if len(routings) != 1 {
+			t.Fatalf("ListDraftRoutings(pass %d) = %d routings, want 1", pass, len(routings))
+		}
+		walked = append(walked, routings[0].DraftID)
+		cursor = &records.DraftCursor{
+			UpdatedAt: routings[0].UpdatedAt, DraftID: routings[0].DraftID,
+		}
+	}
+	if len(walked) != len(seeded) {
+		t.Fatalf("keyset walk visited %v, want all %d drafts exactly once", walked, len(seeded))
+	}
+	for _, draftID := range walked {
+		if !seeded[draftID] {
+			t.Fatalf("keyset walk served %q twice or served an unknown draft: %v", draftID, walked)
+		}
+		delete(seeded, draftID)
+	}
+	// Descending draft_id is the tie-break, so the walk order is fully determined.
+	if !sort.SliceIsSorted(walked, func(left, right int) bool { return walked[left] > walked[right] }) {
+		t.Fatalf("keyset walk order = %v, want descending draft ids under tied timestamps", walked)
+	}
 }
 
 func newRecordsPostgresDraftRepository(pool *pgxpool.Pool) *PostgresRecordDraftRepository {

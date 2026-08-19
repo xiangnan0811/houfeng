@@ -100,23 +100,45 @@ func (repository *PostgresRecordDraftRepository) GetDraftRouting(
 	return routing, nil
 }
 
+// maxDraftRoutingCandidates bounds one read. It exceeds the API page size because
+// the service reads ahead of the page to absorb candidates that authorization or
+// hydration drops.
+const maxDraftRoutingCandidates = uint64(200)
+
 func (repository *PostgresRecordDraftRepository) ListDraftRoutings(
 	ctx context.Context,
 	authorID string,
-	limit uint64,
+	page records.DraftCandidatePage,
 ) ([]records.DraftRouting, error) {
 	if ctx == nil || repository == nil || repository.platform == nil ||
-		recordauth.ValidateActorUserID(authorID) != nil || limit == 0 || limit > 100 {
+		recordauth.ValidateActorUserID(authorID) != nil ||
+		page.Limit == 0 || page.Limit > maxDraftRoutingCandidates {
 		return nil, fmt.Errorf("%w: routing list", records.ErrInvalidDraftCommand)
 	}
+	var afterUpdatedAt any
+	var afterDraftID any
+	if page.After != nil {
+		if err := page.After.Validate(); err != nil {
+			return nil, fmt.Errorf("%w: routing list cursor", records.ErrInvalidDraftCommand)
+		}
+		afterUpdatedAt = page.After.UpdatedAt.UTC()
+		afterDraftID = page.After.DraftID
+	}
 
-	routings := make([]records.DraftRouting, 0, limit)
+	routings := make([]records.DraftRouting, 0, page.Limit)
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		// The keyset predicate compares the same tuple the ordering uses, so
+		// idx_record_drafts_author_activity serves both and a draft cannot be
+		// skipped or repeated when its neighbours change between pages.
 		rows, err := transaction.tx.Query(ctx, `
 			select drafts.draft_id, drafts.project_id, drafts.record_id,
 			       drafts.base_revision_id, drafts.author_id, drafts.updated_at
 			from public.record_drafts drafts
 			where drafts.author_id = $1
+			  and (
+				$4::timestamptz is null
+				or (drafts.updated_at, drafts.draft_id) < ($4::timestamptz, $5::text)
+			  )
 			  and (
 				drafts.record_id is null
 				or not exists (
@@ -129,7 +151,8 @@ func (repository *PostgresRecordDraftRepository) ListDraftRoutings(
 				)
 			  )
 			order by drafts.updated_at desc, drafts.draft_id desc
-			limit $2`, authorID, int64(limit), recordObjectKind)
+			limit $2`,
+			authorID, int64(page.Limit), recordObjectKind, afterUpdatedAt, afterDraftID)
 		if err != nil {
 			return fmt.Errorf("list record draft routing metadata: %w", err)
 		}
@@ -138,7 +161,7 @@ func (repository *PostgresRecordDraftRepository) ListDraftRoutings(
 		}
 		defer rows.Close()
 
-		candidates := make([]records.DraftRouting, 0, limit)
+		candidates := make([]records.DraftRouting, 0, page.Limit)
 		for rows.Next() {
 			routing, err := scanRecordDraftRoutingRow(rows, "", authorID)
 			if err != nil {

@@ -31,7 +31,7 @@ type applicationLifecycleService interface {
 
 type applicationDraftService interface {
 	ReadDraft(context.Context, DraftReadRequest) (Draft, error)
-	ListDrafts(context.Context, DraftListRequest) ([]Draft, error)
+	ListDrafts(context.Context, DraftListRequest) (DraftListResult, error)
 	CreateDraft(context.Context, DraftCreateRequest) (Draft, error)
 	PatchDraft(context.Context, DraftPatchRequest) (Draft, error)
 	DiscardDraft(context.Context, DraftDiscardRequest) error
@@ -132,9 +132,9 @@ func (application *Application) ReadDraft(ctx context.Context, request DraftRead
 	return application.drafts.ReadDraft(ctx, request)
 }
 
-func (application *Application) ListDrafts(ctx context.Context, request DraftListRequest) ([]Draft, error) {
+func (application *Application) ListDrafts(ctx context.Context, request DraftListRequest) (DraftListResult, error) {
 	if ctx == nil || application == nil || nilRevisionServiceDependency(application.drafts) {
-		return nil, ErrInvalidApplicationRequest
+		return DraftListResult{}, ErrInvalidApplicationRequest
 	}
 	return application.drafts.ListDrafts(ctx, request)
 }
