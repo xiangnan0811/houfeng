@@ -12,8 +12,8 @@ func TestRecordAttachmentsAppACLFragmentRegistersExactObjectsAndPrivileges(t *te
 	if err != nil {
 		t.Fatalf("compile production current APP ACL source contract: %v", err)
 	}
-	if len(source.fragments) != 5 {
-		t.Fatalf("production current APP ACL fragments = %d, want records-core, attachments, evidence, collaboration, and search", len(source.fragments))
+	if len(source.fragments) != 6 {
+		t.Fatalf("production current APP ACL fragments = %d, want records-core, attachments, evidence, collaboration, search, and activity", len(source.fragments))
 	}
 	fragment := source.fragments[1]
 	if fragment.Migration != "0053_create_record_attachments.sql" {
@@ -61,10 +61,10 @@ func TestRecordAttachmentsAppACLFragmentExtendsCatalogWithoutSequencesOrFunction
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(contract.ManagedObjects), len(base.Objects)+len(recordsCoreExpectedAppACLObjects())+len(recordAttachmentsExpectedAppACLObjects())+len(recordEvidenceExpectedAppACLObjects())+len(recordCollaborationExpectedAppACLObjects())+len(recordSearchExpectedAppACLObjects()); got != want {
+	if got, want := len(contract.ManagedObjects), len(base.Objects)+len(recordsCoreExpectedAppACLObjects())+len(recordAttachmentsExpectedAppACLObjects())+len(recordEvidenceExpectedAppACLObjects())+len(recordCollaborationExpectedAppACLObjects())+len(recordSearchExpectedAppACLObjects())+len(recordActivityExpectedAppACLObjects()); got != want {
 		t.Fatalf("production current managed objects = %d, want %d", got, want)
 	}
-	if got, want := len(contract.Privileges), len(appACLPrivilegesR1("houfeng"))+len(recordsCoreExpectedAppACLPrivileges())+len(recordAttachmentsExpectedAppACLPrivileges())+len(recordEvidenceExpectedAppACLPrivileges())+len(recordCollaborationExpectedAppACLPrivileges())+len(recordSearchExpectedAppACLPrivileges()); got != want {
+	if got, want := len(contract.Privileges), len(appACLPrivilegesR1("houfeng"))+len(recordsCoreExpectedAppACLPrivileges())+len(recordAttachmentsExpectedAppACLPrivileges())+len(recordEvidenceExpectedAppACLPrivileges())+len(recordCollaborationExpectedAppACLPrivileges())+len(recordSearchExpectedAppACLPrivileges())+len(recordActivityExpectedAppACLPrivileges()); got != want {
 		t.Fatalf("production current privileges = %d, want %d", got, want)
 	}
 	if got, want := len(contract.ExpectedFunctions), len(appACLProjectorFunctionsR1())+1+len(recordCollaborationExpectedFunctionContracts())+len(recordSearchExpectedFunctionContracts()); got != want {

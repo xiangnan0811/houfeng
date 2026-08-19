@@ -25,9 +25,12 @@
 - [x] 直接依赖子任务 2、4、6、9 已合入 `main` 且 CI 通过；`record_domain_activities` 能承载真实 comment/action events。
   已核实：comment/action/协作字段变更均有真实写入方（`store/record_comments.go:518`、
   `store/record_actions.go:530`、`store/record_collaboration_participant.go:368`）。
-- [ ] 从最新受保护主线创建非 `main` 分支，运行 `sh scripts/setup-git-hooks.sh`，再运行 `trellis-before-dev` 读取 backend/web 与 cross-layer 规范。
-- [ ] 检查当前 migration 序列，确认 `0057_create_record_activity.sql` 可用；若冲突，停止并回到父任务统一重划尚未实施编号。
-- [ ] 记录 baseline：`make verify-go`、`make verify-web`、`go test ./internal/center/http/handlers ./internal/center/store -run 'VPSTimeline|Experience' -count=1`；旧 timeline/experience 必须保持 GREEN。
+- [x] 从最新受保护主线创建非 `main` 分支 `codex/vps-records-activity-overview`，运行 `sh scripts/setup-git-hooks.sh`，
+  并按 `trellis-before-dev` 读取 backend spec（`database-guidelines.md`、`record-search-index-contract.md`、
+  `record-authorization.md`）与 `guides/index.md`。
+- [x] 检查当前 migration 序列：`db/migrations/` 最高为 `0056_create_record_search.sql`，`0057` 未被占用。
+- [x] 记录 baseline：`make verify-go` exit 0；`go test ./internal/center/http/handlers ./internal/center/store -run 'VPSTimeline|Experience' -count=1` 全 GREEN。
+  本地无 PostgreSQL，改用一次性 `postgres:16` 容器提供 `HOUFENG_DATABASE_URL` 跑 integration 门。
 
 ## Task 1: 0057 schema、envelope、event-time 与 cursor
 
@@ -43,9 +46,20 @@
 - Modify: `internal/center/store/migrate/migrate_test.go`
 - Modify: `internal/center/store/migrate/postgres_integration_test.go`
 
-- [ ] 写 RED tests 固定 non-null slices、source identity→deterministic activity ID golden、empty rebuild后业务全序等价但projection generation递增/旧cursor过期、correction、event/recorded time、backfilled、confidential cursor namespace/query/auth/generation/as-of/full sort tuple、revision validity interval无重叠/连续推进，以及0057 published-head行锁、relation全过滤字段冗余hash/索引/CHECK/unique/no-cascade合同。运行 `go test ./internal/center/activity ./internal/center/store/migrate -run 'Activity|RecordActivity' -count=1`，预期因类型和 migration 不存在而 FAIL。
-- [ ] 实现 immutable value types、UTC normalization、task 6 `recordcursor` confidential codec adapter 与幂等0057 migration；响应和日志不暴露global generation/head/checkpoint，presentation只允许注册版本，拒绝 arbitrary map/raw payload。
-- [ ] 运行 `go test ./internal/center/activity ./internal/center/store/migrate -run 'Activity|RecordActivity' -count=1`，预期 PASS。使用已设置的 `HOUFENG_DATABASE_URL` 运行 `HOUFENG_POSTGRES_INTEGRATION=1 go test ./internal/center/store/migrate -run 'RecordActivity|AppACLCurrent' -count=1 -v`，预期 fresh/repeat/current admission 全 PASS 且没有该测试的 SKIP。
+- [x] 写 RED tests 固定 non-null slices、source identity→deterministic activity ID golden、correction、event/recorded time、
+  backfilled、confidential cursor namespace/query/auth/generation/as-of/full sort tuple、revision validity interval，
+  以及 0057 published-head 行锁、relation 全过滤字段冗余 hash/索引/CHECK/unique/no-cascade 合同。已确认 RED。
+- [x] 实现 immutable value types、UTC normalization、confidential cursor codec 与幂等 0057 migration；
+  响应不暴露 global generation/head/checkpoint（`Event` 的 `IngestSequence`/`AuthScope` 为 `json:"-"`），
+  presentation 只接受注册版本并受 `pg_column_size <= 4096` 约束，拒绝 arbitrary map/raw payload。
+  **计划偏差**：Child 6 未交付可复用的 `recordcursor` confidential codec（其游标是可解码的 base64 JSON），
+  因此本任务自建 `activity.CursorCodec`（AES-256-GCM + 固定 512B 明文桶 + 随机 nonce，密钥由
+  `HOUFENG_SESSION_HMAC_KEY` 经 HMAC-SHA256 域分离派生）。加密而非签名是硬要求：payload 内含
+  `projection_generation` 与 `as_of_ingest_sequence`，可解码的游标等于把全局水位交给浏览器。
+- [x] 运行 `go test ./internal/center/activity ./internal/center/store/migrate -run 'Activity|RecordActivity' -count=1` PASS（activity 30 项、migrate 17 项、0 SKIP）。
+  以一次性 `postgres:16` 容器提供 `HOUFENG_DATABASE_URL`，运行
+  `HOUFENG_POSTGRES_INTEGRATION=1 go test ./internal/center/store/migrate -run 'RecordActivity|AppACLCurrent' -count=1 -v`：
+  fresh apply、exact repeat、current APP ACL convergence/admission 全 PASS 且无 SKIP；另直接对同一 SQL 连跑两次确认幂等。
 
 ## Task 2: Source adapters、projector、checkpoint 与 deletion fence
 

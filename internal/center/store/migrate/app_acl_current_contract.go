@@ -31,6 +31,68 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	recordEvidenceAppACLCurrentMigrationFragment(),
 	recordCollaborationAppACLCurrentMigrationFragment(),
 	recordSearchAppACLCurrentMigrationFragment(),
+	recordActivityAppACLCurrentMigrationFragment(),
+}
+
+func recordActivityAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	objects := make([]AppACLManagedObjectR1, 0, 5)
+	for _, table := range []string{
+		"record_activity_projection_heads",
+		"record_activity_projection",
+		"record_activity_subjects",
+		"record_activity_projection_checkpoints",
+		"record_activity_revision_intervals",
+	} {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: table,
+		})
+	}
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0057_create_record_activity.sql",
+		Objects:    objects,
+		Privileges: recordActivityAppACLCurrentPrivileges,
+	}
+}
+
+// recordActivityAppACLCurrentPrivileges grants the projector what a rebuildable
+// read model needs and stops there. The runtime may delete every table here,
+// because dropping the projection and replaying the authoritative sources is the
+// documented recovery. What it deliberately cannot do is UPDATE a projected
+// fact: a correction is a new event that points at the one it corrects, so an
+// in-place rewrite would be the projector editing history rather than recording
+// it. The platform admin gets nothing at all, since these rows carry authorized
+// record and evidence presentation.
+func recordActivityAppACLCurrentPrivileges(string) []AppACLPrivilege {
+	privileges := make([]AppACLPrivilege, 0, 17)
+	appendTable := func(table string, kinds ...AppACLPrivilegeKind) {
+		for _, kind := range kinds {
+			privileges = append(privileges, AppACLPrivilege{
+				Subject:        AppACLSubjectCenterRuntime,
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     appACLManagedPublicSchemaR1,
+				ObjectIdentity: table,
+				Privilege:      kind,
+			})
+		}
+	}
+
+	// The head row advances its published watermark in place under a row lock,
+	// so it needs UPDATE but never DELETE: retiring a generation flips its state.
+	appendTable("record_activity_projection_heads",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
+	appendTable("record_activity_projection",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeDelete)
+	appendTable("record_activity_subjects",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeDelete)
+	appendTable("record_activity_projection_checkpoints",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
+	// Closing an interval writes its upper bound, which is why intervals accept
+	// UPDATE while projected facts do not.
+	appendTable("record_activity_revision_intervals",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
+	return privileges
 }
 
 func recordsCoreAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
