@@ -96,8 +96,9 @@ Playwright/Axe.
   cursor, single search path, and deletion pass-through.
   `.trellis/spec/web/state-and-data.md` records the AppShell dynamic-import
   boundary for the global search records group.
-- [ ] Merge through protected main and archive before dependent Activity and
-  Portability final integration.
+- [x] Merge through protected main and archive before dependent Activity and
+  Portability final integration. PR #416 merged with all seven checks green,
+  including the three pinned-PG16 catalog jobs; post-merge main CI passed.
 
 ## Rollback
 
