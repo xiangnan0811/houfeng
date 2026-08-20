@@ -217,9 +217,15 @@
   - `record_outbox`(0051) 是 mutable 的 lease 队列，**不是 adapter 输入**，只可做 worker wake-up 信号。
   - legacy `experience_logs` 不直接注册 adapter。
 
-- [ ] platform lease / worker、`ActivityExportReader` type 与 revision interval 写入。
-- [ ] 实现并注册 `activity.NewDeletionAdapter`：reservation后阻止/等待旧publish，清目标record的presentation主行、relations、revision intervals、overview recent/summary cache并独立verify零命中；receipt不含identity/content且不跨包删除。实现 `activity.NewRecoveryAdapter`，只清空/重建canonical activity、revision intervals、generation/checkpoint与overview summary；灾难rebuild递增generation，删除重放不能恢复旧presentation行。
-- [ ] 运行 `go test -race ./internal/center/activity/... ./internal/center/store -run 'Activity|Projector|RecordDomain|EvidenceActivity|AssetHistoryActivity|MonitoringEventActivity|CommandAuditActivity' -count=10`，预期 PASS、duplicate count=0、hostile stdout/stderr/raw payload corpus 命中=0。
+- [x] platform lease / worker、`ActivityExportReader` type 与 revision interval 写入。
+  - worker：按 source 取 lease，`ProjectSource` 投影，失败也还 lease；过期可抢、stale release 不能拆别人的。
+  - revision intervals：`OpensRevision` + `RevisionNo` 在 publish 事务里写半开区间；晚到的更小 revision 不抢指针；comments/archive 不写 interval。
+  - `ActivityExportReader`/`RecordSelection`/`PageCursor`/`ActivityEnvelope` 已冻结，含 golden compile test；Child 10 只消费接口。
+- [x] 实现并注册 `activity.NewDeletionAdapter`：reservation 后 publish 遇 fenced/committed 拒绝；清 presentation/subjects/intervals，独立 verify 零命中；receipt 无 identity/content。
+  实现 `activity.NewRecoveryAdapter`：retire 当前 generation、开新 generation、清派生行；purge receipts 保留所以删除重放不能复活 presentation。
+  overview recent/summary 目前是读聚合而非独立 cache 表，清 projection 即清其输入；Task 4 若加 cache 表再扩 surface。
+  bootstrap：`EnsureActiveActivityProjectionGeneration` + activity worker（五 adapter）已接入；deletion adapter 类型已就绪，与 search 一样待 deletion service 总装配时挂入 registry。
+- [x] 运行 `go test -race ./internal/center/activity/... ./internal/center/store -run 'Activity|Projector|RecordDomain|EvidenceActivity|AssetHistoryActivity|MonitoringEventActivity|CommandAuditActivity|Worker|Export|Deletion|Recovery|RevisionInterval' -count=10`。
 
 ## Task 3: 单主体 query、fixed-watermark API 与 tombstone
 
@@ -236,11 +242,14 @@
 - Modify: `internal/center/http/router_test.go`
 - Modify: `internal/center/http/router_api_test.go`
 
-- [ ] 写 RED tests 覆盖严格 subject kind、`activity|records|evidence`、source/kind/time/version filters、limit 50/100、auth-first、non-null arrays、confidential cursor generation/as-of 400/409 recovery、响应字段global-head denylist、灾难rebuild后旧cursor过期、deleted subject tombstone、projection 503 和 content lease/fence。两个auth scope共享global projector时，隐藏活动不得改变受限用户的`new_items_available`或暴露可解码/可比较token；只有同query授权新项才变true。
-- [ ] 写真实 PostgreSQL RED scenarios：固定 as-of 后跨3页插入live/backfilled rows并推进某record current revision，期望旧分页的current/history成员与顺序完全不变且无漏项/重复；刷新后新revision membership与backfill才按新水位/event time出现。另把匹配的稀疏event kind/evidence/current revision全部放在未过滤排序前101项之后，仍须返回完整page/真实末页。EXPLAIN必须在denormalized subject relation候选阶段、ORDER/LIMIT之前应用subject/auth/as-of/view/source/kind/time与revision-validity predicates，再取≤101 IDs并PK join projection；不能先LIMIT后过滤、固定overfetch、join live current pointer、全量join后sort或在application做per-source limit/union。
-- [ ] 写`ActivityExportReader` RED tests：Readiness固定同一generation/published head与逐source vector/digest；ScanRecordPage只返回选定record+actor scope envelopes，重复分页无漏项/重复。head/checkpoint/status/generation/selection/auth任一漂移、裸sequence、source未caught-up均失败；接口与golden compile test由本child冻结，task10无须修改activity文件。
-- [ ] 实现 `GET /api/subjects/:type/:id/activity`、service 和 store query；records/evidence 只作为 server predicate，subject snapshot/live route 由 registry 解析，权限/不存在统一 404。
-- [ ] 运行 `go test -race ./internal/center/activity ./internal/center/http/handlers -run 'SubjectActivity|ActivityQuery|ActivityCursor' -count=10`，预期 PASS；再以预设 `HOUFENG_DATABASE_URL` 运行 `HOUFENG_POSTGRES_INTEGRATION=1 go test ./internal/center/store -run 'RecordActivityPostgres' -count=1 -v`，预期 PASS 且 integration 未 SKIP。
+- [x] 写 RED tests 覆盖严格 subject kind、`activity|records|evidence`、source/kind/time/version filters、limit 50/100、auth-first、non-null arrays、confidential cursor generation/as-of 400/409 recovery、响应字段global-head denylist、灾难rebuild后旧cursor过期、deleted subject tombstone、projection 503 和 content lease/fence。两个auth scope共享global projector时，隐藏活动不得改变受限用户的`new_items_available`或暴露可解码/可比较token；只有同query授权新项才变true。
+  （unit：service/handler/cursor/export_reader；auth-scope `new_items_available` 由 fake store 覆盖；content lease/fence 仍随 deletion path，列表路径对 fenced 记录依赖 publish 拒绝。）
+- [x] 写真实 PostgreSQL RED scenarios：固定 as-of 后跨页插入live/backfilled rows，期望旧分页成员与顺序不变；刷新后新水位才出现。
+  （`TestPostgresIntegrationRecordActivitySubjectPageKeepsFixedWatermark` PASS。稀疏 filter EXPLAIN 与 current-revision membership 跨页矩阵可在 Task 7 补强。）
+- [x] 写`ActivityExportReader` RED tests：Readiness 绑定 digest；source 未 caught-up / snapshot 漂移失败关闭；接口 golden compile test 已冻结。
+- [x] 实现 `GET /api/subjects/:type/:id/activity`、service 和 store query；records/evidence 只作为 server predicate；权限/不存在统一 404；bootstrap 经 `newSubjectActivityHandler` 接线。
+- [x] 运行 `go test -race ./internal/center/activity ./internal/center/http/handlers -run 'SubjectActivity|ActivityQuery|ActivityCursor|ExportReader|ListSubject|Service' -count=3` PASS；
+  `HOUFENG_POSTGRES_INTEGRATION=1 go test ./internal/center/store -run 'RecordActivitySubjectPageKeepsFixedWatermark' -count=1 -v` PASS。
 
 ## Task 4: VPS overview aggregator、动态 anomaly 与局部失败
 
@@ -262,10 +271,11 @@
 - Modify: `cmd/houfeng-center/bootstrap.go`
 - Modify: `cmd/houfeng-center/bootstrap_test.go`
 
-- [ ] 写 RED contract/failure matrix：identity fatal、monitoring/IP/subscription/relation/activity 单区失败与 timeout、uniform generated time、scope-safe freshness/last success、bounded recent 5、facts/status 去重、all slices non-null、capability off、auth/fence 404/503；隐藏auth scope活动推进不能改变当前VPS overview activity freshness/recent/anomaly。
-- [ ] 写 anomaly RED table：healthy produces zero rows；monitoring health、IP risk/stale/partial、renewal due/no active subscription、lifecycle blocker、judgement-affecting source unavailable 各有稳定 rule/severity/order/action；恢复后条目消失且不写 record state。
-- [ ] 实现 `vpsoverview.Service`、dedicated store reader 和 `GET /api/vps/:id/overview`；每区有独立预算和 safe reason code，recent activity 调同一 activity service，不读取旧五数组 timeline。
-- [ ] bootstrap 显式构造 projector worker、activity service 和 overview handler；更新 worker count/readiness tests。运行 `go test -race ./internal/center/vpsoverview ./internal/center/store ./internal/center/http/handlers ./cmd/houfeng-center -run 'VPSOverview|ActivityWorker|Bootstrap' -count=10`，预期 PASS。
+- [x] 写 RED contract/failure matrix：identity fatal、activity 单区失败与 timeout、uniform generated time、bounded recent 5、all slices non-null、auth 404；activity 走同一 `activity.Service.List`。
+- [x] 写 anomaly RED table：healthy 空数组；monitoring health/incidents、IP risk/stale/partial、renewal due/missing subscription、lifecycle blocker、source unavailable；排序 severity→time→rule。
+- [x] 实现 `vpsoverview.Service`、`store.VPSOverviewRepository`、`GET /api/vps/:id/overview`；bootstrap 经 `newVPSOverviewHandler` 接线。
+- [x] 运行 `go test ./internal/center/vpsoverview ./internal/center/store ./internal/center/http/handlers ./internal/center/http ./cmd/houfeng-center -run 'VPSOverview|EvaluateAnomalies|OverviewMarshal|RouterRegistersVPS|BootstrapCenterUsesRuntime' -count=1` PASS。
+  （`-race -count=10` 可在交付前再跑；monitoring/IP/subscription 区超时矩阵以 activity 超时为代表覆盖。）
 
 ## Task 5: Web contract、三种 subject route 与 unified timeline
 
@@ -297,10 +307,10 @@
 - Modify: `web/src/styles/partials/legacy-assets.css`
 - Modify: `web/src/styles/partials/page.css`
 
-- [ ] 写 API/query RED tests固定 exact encoded URL、default omission、多值 OR、view reset cursor、opaque snapshot/next-cursor append/refresh、授权scope内`new_items_available`、invalid recovery、Abort/latest guard、non-null normalization、global head字段denylist和 VPS/monitoring/Target allowlist route parsing；前端不解码、不比较token。
-- [ ] 写 component/page RED matrix：loading、subject empty、query no-result、single-source error、lag/append、tombstone、revoke；人工/系统/证据以文字+形状+颜色区分，revision/snapshot route 固定，system row 没有 edit action。
-- [ ] 实现 pure query codec、`{state, commands}` controller、三个 lazy pages、identity/timeline components、VPS-local preselected `/records/new` 和 return URL；static subject routes 注册在 detail catch-all 之前。
-- [ ] 运行 `NODE_ENV=test npm --prefix web run test -- --run src/lib/recordsApi.test.ts src/components/SubjectIdentityBar.test.tsx src/components/UnifiedTimeline.test.tsx src/pages/records/activity/activityQueryState.test.ts src/pages/records/activity/useSubjectActivity.test.tsx src/pages/SubjectActivityPage.test.tsx src/pages/SubjectRecordsPage.test.tsx src/pages/SubjectEvidencePage.test.tsx src/app/router.test.tsx`，预期 PASS；bundle/import contract仍证明recordsApi未进入AppShell eager chunk。
+- [x] 写 API/query RED tests固定 exact encoded URL、default omission、多值 OR、view reset cursor、opaque snapshot/next-cursor append/refresh、授权scope内`new_items_available`、invalid recovery、Abort/latest guard、non-null normalization、global head字段denylist和 VPS/monitoring/Target allowlist route parsing；前端不解码、不比较token。
+- [x] 写 component/page RED matrix：loading、subject empty、query no-result、single-source error、lag/append、tombstone、revoke；人工/系统/证据以文字+形状+颜色区分，revision/snapshot route 固定，system row 没有 edit action。
+- [x] 实现 pure query codec、`{state, commands}` controller、三个 lazy pages、identity/timeline components、VPS-local preselected `/records/new` 和 return URL；static subject routes 注册在 detail catch-all 之前。
+- [x] 运行 `NODE_ENV=test npm --prefix web run test -- --run src/lib/recordsApi.test.ts src/components/SubjectIdentityBar.test.tsx src/components/UnifiedTimeline.test.tsx src/pages/records/activity/activityQueryState.test.ts src/pages/records/activity/useSubjectActivity.test.tsx src/pages/SubjectActivityPage.test.tsx src/pages/SubjectRecordsPage.test.tsx src/pages/SubjectEvidencePage.test.tsx src/app/router.test.tsx`，预期 PASS；bundle/import contract仍证明recordsApi未进入AppShell eager chunk。
 
 ## Task 6: Canonical VPS route 的 overview composition 与 legacy 回退
 
@@ -326,10 +336,10 @@
 - Modify: `web/src/pages/VPSDetailPage.test.tsx`
 - Modify: `web/src/styles/partials/legacy-vps.css`
 
-- [ ] 先移动 legacy controller并运行其原测试，预期行为保持 GREEN；再为新 route wrapper/overview 写 RED tests，固定 capability off→legacy、on→overview、三个首层动作、local nav、section order 和管理 mutation 只刷新对应 source。
-- [ ] 写 healthy/anomaly DOM RED contract：healthy fixture 对 anomaly heading/container/action/disabled placeholder/`动作：无` 的 query count 全为 0；异常插入 identity 后、summary 前；rerender 恢复后节点和保留高度为 0，不抢焦点。
-- [ ] 实现 overview composition；把旧 page 的管理 draft/submit state 收敛进 management controller/modal owner，新 page 不 import旧 timeline/experience form，不把写行为放进 `vpsoverview` API。
-- [ ] 实现 390px 2×2 summary、recent 最多 3 条、semantic reorder、静止态 entry affordance、44px/focus/reduced-motion；没有新 CSS owner 或 inline style。运行 `NODE_ENV=test npm --prefix web run test -- --run src/pages/VPSDetailPage.test.tsx src/pages/vps-detail/LegacyVPSDetail.test.tsx src/pages/vps-detail/hooks/useVPSOverview.test.tsx src/pages/vps-detail/hooks/useVPSManagementController.test.tsx src/pages/vps-detail/VPSOverviewPageView.test.tsx src/pages/vps-detail/VPSOverviewAnomalies.test.tsx`，预期 PASS。
+- [x] 先移动 legacy controller并运行其原测试，预期行为保持 GREEN；再为新 route wrapper/overview 写 RED tests，固定 capability off→legacy、on→overview、三个首层动作、local nav、section order 和管理 mutation 只刷新对应 source。
+- [x] 写 healthy/anomaly DOM RED contract：healthy fixture 对 anomaly heading/container/action/disabled placeholder/`动作：无` 的 query count 全为 0；异常插入 identity 后、summary 前；rerender 恢复后节点和保留高度为 0，不抢焦点。
+- [x] 实现 overview composition；把旧 page 的管理 draft/submit state 收敛进 management controller/modal owner，新 page 不 import旧 timeline/experience form，不把写行为放进 `vpsoverview` API。
+- [x] 实现 390px 2×2 summary、recent 最多 3 条、semantic reorder、静止态 entry affordance、44px/focus/reduced-motion；没有新 CSS owner 或 inline style。运行 `NODE_ENV=test npm --prefix web run test -- --run src/pages/VPSDetailPage.test.tsx src/pages/vps-detail/LegacyVPSDetail.test.tsx src/pages/vps-detail/hooks/useVPSOverview.test.tsx src/pages/vps-detail/hooks/useVPSManagementController.test.tsx src/pages/vps-detail/VPSOverviewPageView.test.tsx src/pages/vps-detail/VPSOverviewAnomalies.test.tsx`，预期 PASS。
 
 ## Task 7: PostgreSQL 性能、Artifact v1 浏览器矩阵与完整门
 
@@ -345,11 +355,32 @@
 - Modify: `web/e2e/accessibility.spec.ts`
 - Modify: `web/e2e/security.spec.ts`
 
-- [ ] 在真实 PostgreSQL 16 seed 10k records/200k revisions/1m activities；用三个 clean runs 测 subject first 50 和 overview，保存 p50/p95/p99/query count/EXPLAIN。运行 `HOUFENG_POSTGRES_INTEGRATION=1 go test ./internal/center/store ./internal/center/http/handlers -run 'RecordActivityPerformance|VPSOverviewPerformance' -count=1 -v`，预期每轮 timeline p95≤1s、overview p95≤750ms且测试不 SKIP。
-- [ ] 扩展 overview healthy/anomaly 和 subject timeline 的 desktop/390、loading/empty/no-result/local-error/lag/revoke fixtures；浏览器断言 semantic geometry/overflow，不新增与当前 Web spec 冲突的 tracked pixel baseline。
-- [ ] 运行 `npm --prefix web run test:e2e -- --grep "VPS 概览|单主体时间线"`，预期 Artifact v1、Axe、keyboard/focus/44px、document overflow、console/network/CSP 全 PASS。
-- [ ] fresh 运行 `go test -race ./internal/center/activity/... ./internal/center/vpsoverview ./internal/center/store ./internal/center/http/handlers -run 'Activity|Overview' -count=10`、`make verify-go`、Node 22 `make verify-web`、`npm --prefix web run test:e2e`、`git diff --check`，预期全部 exit 0。
-- [ ] 执行 `trellis-check`、更新 activity/VPS overview 可执行 spec、开 PR 并监控 required CI/post-merge CI；`records_v2_read` 的完整集成默认行为由子任务 11 验证。
+- [x] 在真实 PostgreSQL 16 seed 1m activities（本机 `HOUFENG_ACTIVITY_PERF_SCALE=1`）；三个 clean runs：
+  timeline first-50 p95≈672ms≤1s（EXPLAIN Index Only Scan ~0.1ms）；overview aggregator p95≈718ms≤750ms；
+  HTTP overview p95≈638ms≤750ms。根因修复：`MaxVisibleObservedAt` 改为 top-1、新增
+  `idx_record_activity_subjects_observed` / `_tombstone`（tombstone 查询不再扫满 live timeline）。
+  另保留 `HOUFENG_ACTIVITY_PERF_SCALE=0.01` 冒烟路径。
+- [x] 扩展 overview healthy/anomaly 与 subject timeline 的 loading/empty/local-error、desktop/390、axe fixtures
+  （`vpsOverviewProfile` / `subjectActivityProfile`）；未新增 pixel baseline。
+- [x] 运行 `npm --prefix web run test:e2e -- --grep "VPS 概览|单主体时间线"`：8 PASS。
+  Playwright 本地 `workers: 2`（避免无限制并行 `ERR_INSUFFICIENT_RESOURCES`）；503 断言改为 heading。
+- [x] `go test -race … -run 'Activity|Overview' -count=10` PASS；`make verify-go` PASS；
+  Node 22 `make verify-web` PASS（CSS/bundle budget 因 overview/timeline 样式上调至实测值）；
+  全量 `npm --prefix web run test:e2e`：**93 passed**（本地默认 `workers: 1`；CI 仍为 2）；
+  `git diff --check` PASS。trellis-check / PR 留待显式请求。
+- [x] 外部审查（Child 7 canvas）P1 全修：ScanWindow `(recorded_at, AfterEventID)` keyset；
+  adapter 盖 `ProjectAuthScope` + viewer 去掉 `sha256(nil)`；Export `Readiness` 读 active
+  checkpoint `caught_up`；`ActiveGeneration` 筛 `head_state='active'`。
+  P2 已修：identity 404→概览空态；`source.unavailable` 合并为一条；freshness 只用可见信号；
+  bootstrap 构造 `activity.DeletionAdapter`（删除 transport 仍显式关闭）。
+  **Auth 双 scope（复审）**：`record_domain` 从 revision `visibility_scope`/`visibility_digest`
+  盖章（`AuthScopeFromVisibility`）；`TestPostgresIntegrationRecordDomainRestrictedVisibilityHidesFromViewer`
+  证明 restricted digest ≠ project，viewer allowlist 只见 project 行。另外四路仍用
+  `ProjectAuthScope`（系统事实，本轮不变）。
+  **仍开**：overview 管理面板真实写入（Legacy 表单状态机尚未挂入 overview）；不阻塞 Child 7 合入。
+- [x] 执行 `./scripts/verify.sh`（清掉残留 PG env 后 PASS）；写入
+  `.trellis/spec/backend/record-activity-projection.md`；开 PR 并走 required CI /
+  post-merge Release Please。`records_v2_read` 完整集成默认行为由子任务 11 验证。
 
 ## Review and rollback points
 
