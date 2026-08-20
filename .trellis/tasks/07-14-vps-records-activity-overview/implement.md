@@ -140,7 +140,55 @@
   验证：单测 6 项 + 真实 PostgreSQL 6 项全 PASS（含 subject 取自正确 revision、双端窗口边界、
   分页顺序、索引存在、readiness 拒绝增量 head、经 projector 端到端投影且二次运行 0 插入）。
 
-- [ ] 剩余四个 adapter。**已完成 schema 侦察，结论如下（下次直接用，不用重查）**：
+- [x] **剩余四个 adapter 已全部完成**（monitoring_events、command_audits、evidence、asset_history）。
+  四个都验证过：单测 + 真实 PostgreSQL 集成（窗口双端边界、索引存在、经 projector 端到端且二次运行 0 插入）。
+  侦察结论与实际落地的差异、以及实现过程中新确立的判断如下：
+
+  - **`monitoring_events`（已完成，`record_activity_source_monitoring_events.go`）**：
+    没有自建校验，直接复用 `incidents.ValidMonitoringEventMetadata`——writer 已按该契约校验，
+    再写第二份「哪些 transition 合法」的判断必然与 writer 漂移。
+    **侦察漏判的关键点**：该表确实存在**契约之前写入的 legacy 行**（`evidence_sources_postgres_integration_test.go:128`
+    就构造了一个），若按 record_domain 的方式「拒绝整批且不推进 checkpoint」，
+    source 会永久卡在那行下面。因此拆成两类：payload **缺元数据键**=前契约历史，
+    在 SQL 里过滤掉并计数；payload **有键但违约**=活的 writer bug，仍在 Go 侧大声失败。
+    为此给 `activity.SourceReadiness` 加了 `ExcludedRows`（并纳入 `ReadinessVector.Digest`）——
+    静默丢行而声称 complete 是假声明，导出必须能说出「排除了几行」。
+    **`Corrects` 不需要自连接**：所有监控事件都映射到同一个 `monitoring_state_changed` 且 version 固定为 1，
+    被更正事件的 activity id 可直接由 `correction_of_event_id` 推导。
+    severity 需从中文事件量表（`正常/关注/告警/严重`）映射到 projection 的 `info/notice/warning/critical`。
+
+  - **`command_audits`（已完成，`record_activity_source_command_audits.go`）**：
+    三个 phase（queued/dispatched/completed）**各投影一条**，与 design「audit/event ID + immutable event type」一致；
+    合并成一条会丢掉「已下发但从未返回」这一最需要被看见的情形。
+    `command_id` 用 `agentapi.IsKnownCommandID` 校验后作为 summary——它是编译进来的白名单、非用户文本。
+    `details`/stdout/stderr 完全不读（有单测扫 SQL 字面量守这条边界）。
+    `completed` 且 `exit_code != 0` 抬到 `warning`：exit code 是 metadata 而非输出。
+
+  - **`evidence`（已完成，`record_activity_source_evidence.go`）**：
+    subject 取自 snapshot 自己捕获的 `(source_kind, source_id)` + `subject_identity_snapshot`，
+    **不经 record 反查**——design 明确要求 projector 不读 mutable current record 猜历史主体，
+    且 snapshot 所属 record 的 subjects 在捕获后仍可变。
+    非 subject 的四个 `source_kind` 是 schema headroom（`recordauth.knownSourceKind` 只认三个），
+    过滤 + 计入 `ExcludedRows`。
+    **侦察此处判断有误**：原以为要标 backfilled，实际 `ResolveEventTime` 的 `Backfilled`
+    只认 producer 显式声明（`SourceIsLate`/`CaptureIsLate`），
+    而 `evidence_snapshots` 没有任何一列在陈述「这次捕获迟到了」，
+    因此**不从 `actual_ended_at` 与 `created_at` 的时间差推断**——那正是规则禁止的猜测。
+
+  - **`asset_history`（已完成，`record_activity_source_asset_history.go`）**：
+    四表 UNION 成一个 source、一个 checkpoint（每表一个位置会互相打架）。
+    **值一律不投影**：IP/SSH host 是网络拓扑、price 是账单数字，SQL 里根本不 select 那些列；
+    唯一例外是 `to_decision`（7 值闭集，是词汇而非内容，也是让条目可操作的那一个细节）。
+    非 renewal 的行若带 detail 直接失败——那意味着有值列泄进了 scan。
+    event id 加表前缀（`rnw-`/`prc-`/`ipa-`/`spc-`），否则四表独立主键可能撞并静默合并两个事实。
+
+  - **0057 补了四个 adapter 需要的写入时间索引**：`idx_evidence_snapshots_created`、
+    `idx_renewal_decisions_created`、`idx_price_histories_created`、`idx_ip_histories_created`、
+    `idx_vps_spec_snapshots_created`。这些表原有索引全部以 `source`/`record`/`vps_id` 开头，
+    而投影 scan 按写入时间排序且不按这些列过滤。
+    `state_change_events` 与 command audit 已有可用的全局时间索引，无需补。
+
+  - 以下侦察结论仍然成立、已按其实现：
   - `evidence`：表 `evidence_snapshots`（0054）。recorded=`created_at`，occurrence=`actual_ended_at`
     （与 `ResolveEventTime` 对 `evidence_captured` 用 observation end 一致）。version=`schema_version`。
     subject 来自 `(source_kind, source_id)`，但 `source_kind` 还包含 `subscription`/`monitoring_event`/
