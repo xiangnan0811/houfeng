@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.70.0](https://github.com/xiangnan0811/houfeng/compare/v0.69.0...v0.70.0) (2026-08-20)
+
+
+### Features
+
+* **activity:** VPS records activity overview and subject timelines ([#422](https://github.com/xiangnan0811/houfeng/issues/422)) ([b3901e5](https://github.com/xiangnan0811/houfeng/commit/b3901e5f1617fb0d9eb91999687f7a91f382b85a))
+
+
+### Documentation
+
+* **task:** rebaseline the activity overview plan against current main ([31bdeea](https://github.com/xiangnan0811/houfeng/commit/31bdeea9ba2de9154693dabc2c7256457a873c61))
+
+
+### CI
+
+* stop a broken apt mirror from consuming the browser gate ([d44c29f](https://github.com/xiangnan0811/houfeng/commit/d44c29f816409d7c812fd506565c896c75adceb6))
+* 限制 Chromium 依赖安装的失败半径 ([d127933](https://github.com/xiangnan0811/houfeng/commit/d127933f988e9d239f92f68025c545688d31be6a))
+
 ## [0.69.0](https://github.com/xiangnan0811/houfeng/compare/v0.68.0...v0.69.0) (2026-08-19)
 
 
