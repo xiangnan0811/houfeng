@@ -12,7 +12,13 @@ import {
 
 import { apiRouteKey } from './fixtures/contracts'
 import { expect, test } from './fixtures'
-import { authenticatedProfile } from './fixtures/profiles'
+import {
+  authenticatedProfile,
+  subjectActivityFixture,
+  subjectActivityProfile,
+  vpsOverviewFixture,
+  vpsOverviewProfile,
+} from './fixtures/profiles'
 
 function controlledPromise(): { promise: Promise<void>; resolve: () => void } {
   let resolvePromise: (() => void) | undefined
@@ -255,4 +261,66 @@ test('renders the PageState success surface with provider workflow data', async 
 
   await expect(page.getByText(PROVIDER.name, { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('region', { name: '服务商与入口' })).toBeVisible()
+})
+
+test('VPS 概览 keeps loading until the overview response is released', async ({
+  api,
+  page,
+}) => {
+  const gate = controlledPromise()
+  api.useProfile(vpsOverviewProfile({ overviewWaitFor: gate.promise }))
+
+  await page.goto('/vps/vps_001')
+  await expect(page.getByRole('heading', { name: /正在(判定|加载)/ })).toBeVisible()
+  gate.resolve()
+  await expect(page.getByRole('heading', { name: 'Tokyo Edge' })).toBeVisible()
+})
+
+test('VPS 概览 healthy surface omits anomaly chrome', async ({ api, page }) => {
+  api.useProfile(vpsOverviewProfile({ overview: vpsOverviewFixture({ anomalies: [] }) }))
+  await page.goto('/vps/vps_001')
+  await expect(page.getByRole('heading', { name: 'Tokyo Edge' })).toBeVisible()
+  await expect(page.getByText('需要关注')).toHaveCount(0)
+  await expect(page.getByText('动作：无')).toHaveCount(0)
+  await expect(page.getByRole('link', { name: '新建记录' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '时间线' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '管理' })).toBeVisible()
+})
+
+test('VPS 概览 anomaly surface inserts attention before summary', async ({ api, page }) => {
+  api.useProfile(vpsOverviewProfile({
+    overview: vpsOverviewFixture({
+      anomalies: [{
+        rule_id: 'renewal.due_soon',
+        severity: 'warning',
+        title: '续费临期',
+        detail: '7 天内到期',
+        source: 'subscription',
+        primary_action: { id: 'open', label: '处理续费', route: '/vps/vps_001' },
+        secondary_actions: [],
+      }],
+    }),
+  }))
+  await page.goto('/vps/vps_001')
+  await expect(page.getByRole('heading', { name: '需要关注' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '处理续费' })).toBeVisible()
+})
+
+test('单主体时间线 loading / empty / local-error states', async ({ api, page }) => {
+  const gate = controlledPromise()
+  api.useProfile(subjectActivityProfile({ activityWaitFor: gate.promise }))
+  await page.goto('/vps/vps_001/activity')
+  await expect(page.getByRole('heading', { name: '正在加载活动' })).toBeVisible()
+  gate.resolve()
+  await expect(page.getByText('E2E 时间线条目')).toBeVisible()
+
+  api.useProfile(subjectActivityProfile({
+    activity: subjectActivityFixture({ items: [] }),
+  }))
+  await page.goto('/vps/vps_001/activity')
+  await expect(page.getByText('主体尚无活动')).toBeVisible()
+
+  api.useProfile(subjectActivityProfile({ activityStatus: 503 }))
+  await page.goto('/vps/vps_001/activity')
+  await expect(page.getByRole('heading', { name: '活动投影不可用' })).toBeVisible()
 })

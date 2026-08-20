@@ -54,4 +54,14 @@ describe('Breadcrumb', () => {
     renderAt('/monitoring/mi_8901234567890123456', '/monitoring/:monitoringInstanceId')
     expect(screen.getByText(/^mi_8901234567…$/)).toBeInTheDocument()
   })
+
+  it('adds a third crumb for subject activity routes', () => {
+    renderAt('/vps/vps_tokyo_001/activity', '/vps/:vpsId/activity')
+    expect(screen.getByRole('link', { name: 'VPS' })).toHaveAttribute('href', '/vps')
+    expect(screen.getByRole('link', { name: 'vps_tokyo_001' })).toHaveAttribute(
+      'href',
+      '/vps/vps_tokyo_001',
+    )
+    expect(screen.getByText('活动')).toBeInTheDocument()
+  })
 })

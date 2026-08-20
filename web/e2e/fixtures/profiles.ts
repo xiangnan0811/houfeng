@@ -9,11 +9,13 @@ import type {
   ProviderRecord,
   RecordNotification,
   SettingsRecord,
+  SubjectActivityListResponse,
   SubscriptionOverview,
   SubscriptionRecord,
   SubscriptionStatistics,
   TargetSparklinesResponse,
   VPSAssetRecord,
+  VPSOverview,
 } from '../../src/lib/types'
 import {
   dashboardOverviewFixture,
@@ -588,4 +590,165 @@ export function coreRouteProfile(path: CoreRoutePath): ApiFixtureProfile {
         [apiRouteKey('GET', '/api/settings')]: { status: 200, body: SETTINGS },
       })
   }
+}
+
+const EMPTY_SECTION = {
+  state: 'ready',
+  observed_at: null,
+  last_success_at: null,
+  reason_code: '',
+} as const
+
+export function vpsOverviewFixture(overrides: Partial<VPSOverview> = {}): VPSOverview {
+  const base: VPSOverview = {
+    generated_at: '2026-08-20T09:00:00Z',
+    identity: {
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
+      provider_name: 'Example Cloud',
+      product_name: 'VPS',
+      country: 'JP',
+      region: 'Tokyo',
+      city: 'Tokyo',
+      datacenter: 'TK1',
+      ipv4: '192.0.2.10',
+      ipv6: '',
+      lifecycle_status: '在用',
+      usage_status: '生产',
+      renewal_decision: '续费',
+      importance: '高',
+      labels: ['edge'],
+      updated_at: '2026-08-20T09:00:00Z',
+    },
+    anomalies: [],
+    summary: {
+      overall: { status: '正常', section: { ...EMPTY_SECTION } },
+      monitoring: { status: '正常', section: { ...EMPTY_SECTION } },
+      ip_quality: { status: '低风险', section: { ...EMPTY_SECTION } },
+      renewal: { status: '续费', section: { ...EMPTY_SECTION } },
+    },
+    recent_activity: {
+      section: { ...EMPTY_SECTION },
+      items: [{
+        activity_id: 'act_e2e_recent',
+        event_kind: 'record_created',
+        event_at: '2026-08-19T12:00:00Z',
+        recorded_at: '2026-08-19T12:00:01Z',
+        source_kind: 'record_domain',
+        backfilled: false,
+        subjects: [],
+        presentation: { version: 1, title: 'E2E 最近活动' },
+      }],
+      snapshot_cursor: 'snap-e2e-opaque',
+    },
+    facts: [{ key: 'ipv4', label: 'IPv4', value: '192.0.2.10' }],
+    relations: [{
+      kind: 'monitoring_instance',
+      count: 1,
+      status: '正常',
+      route: '/monitoring/mi_001',
+      label: '监控实例',
+    }],
+    capabilities: ['records_v2_read'],
+  }
+  return {
+    ...base,
+    ...overrides,
+    identity: { ...base.identity, ...overrides.identity },
+    summary: {
+      overall: { ...base.summary.overall, ...overrides.summary?.overall, section: { ...base.summary.overall.section, ...overrides.summary?.overall?.section } },
+      monitoring: { ...base.summary.monitoring, ...overrides.summary?.monitoring, section: { ...base.summary.monitoring.section, ...overrides.summary?.monitoring?.section } },
+      ip_quality: { ...base.summary.ip_quality, ...overrides.summary?.ip_quality, section: { ...base.summary.ip_quality.section, ...overrides.summary?.ip_quality?.section } },
+      renewal: { ...base.summary.renewal, ...overrides.summary?.renewal, section: { ...base.summary.renewal.section, ...overrides.summary?.renewal?.section } },
+    },
+    recent_activity: {
+      ...base.recent_activity,
+      ...overrides.recent_activity,
+      section: { ...base.recent_activity.section, ...overrides.recent_activity?.section },
+      items: overrides.recent_activity?.items ?? base.recent_activity.items,
+    },
+    anomalies: overrides.anomalies ?? base.anomalies,
+    facts: overrides.facts ?? base.facts,
+    relations: overrides.relations ?? base.relations,
+    capabilities: overrides.capabilities ?? base.capabilities,
+  }
+}
+
+export function subjectActivityFixture(
+  overrides: Partial<SubjectActivityListResponse> = {},
+): SubjectActivityListResponse {
+  const base: SubjectActivityListResponse = {
+    subject: {
+      kind: 'vps',
+      source_id: 'vps_001',
+      identity: { display_name: 'Tokyo Edge' },
+      live_route: '/vps/vps_001',
+      status: 'live',
+    },
+    view: 'activity',
+    snapshot_cursor: 'snap-e2e-opaque',
+    freshness: {
+      state: 'ready',
+      visible_observed_at: '2026-08-19T12:00:00Z',
+      new_items_available: false,
+      reason_code: '',
+    },
+    items: [{
+      activity_id: 'act_e2e_1',
+      event_kind: 'record_revised',
+      event_at: '2026-08-19T12:00:00Z',
+      recorded_at: '2026-08-19T12:00:01Z',
+      source_kind: 'record_domain',
+      backfilled: false,
+      subjects: [],
+      presentation: { version: 1, title: 'E2E 时间线条目' },
+      record_id: 'rec_e2e001',
+      revision_id: 'rrv_e2e001',
+    }],
+    source_statuses: [],
+  }
+  return {
+    ...base,
+    ...overrides,
+    subject: { ...base.subject, ...overrides.subject, identity: { ...base.subject.identity, ...overrides.subject?.identity } },
+    freshness: { ...base.freshness, ...overrides.freshness },
+    items: overrides.items ?? base.items,
+    source_statuses: overrides.source_statuses ?? base.source_statuses,
+  }
+}
+
+export function vpsOverviewProfile(options: {
+  overview?: VPSOverview
+  overviewStatus?: number
+  overviewWaitFor?: Promise<void>
+} = {}): ApiFixtureProfile {
+  const status = options.overviewStatus ?? 200
+  return authenticatedProfile({
+    [apiRouteKey('GET', '/api/vps/vps_001/overview')]: {
+      status,
+      body: status >= 400
+        ? { error: 'overview unavailable', code: status === 503 ? 'overview_unavailable' : 'resource_not_found' }
+        : options.overview ?? vpsOverviewFixture(),
+      ...(options.overviewWaitFor ? { waitFor: options.overviewWaitFor } : {}),
+    },
+  })
+}
+
+export function subjectActivityProfile(options: {
+  activity?: SubjectActivityListResponse
+  activityStatus?: number
+  activityWaitFor?: Promise<void>
+  path?: string
+} = {}): ApiFixtureProfile {
+  const status = options.activityStatus ?? 200
+  const path = options.path ?? '/api/subjects/vps/vps_001/activity'
+  return authenticatedProfile({
+    [apiRouteKey('GET', path)]: {
+      status,
+      body: status >= 400
+        ? { error: 'activity unavailable', code: status === 503 ? 'activity_projection_unavailable' : 'resource_not_found' }
+        : options.activity ?? subjectActivityFixture(),
+      ...(options.activityWaitFor ? { waitFor: options.activityWaitFor } : {}),
+    },
+  })
 }

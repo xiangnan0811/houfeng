@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test'
 
 import { expect, test } from './fixtures'
-import { coreRouteProfile } from './fixtures/profiles'
+import { coreRouteProfile, subjectActivityProfile, vpsOverviewProfile } from './fixtures/profiles'
 import { expectLocatorNotClipped, expectNoDocumentOverflow } from './support/geometry'
 
 async function expectHitTarget(page: Page, locator: Locator): Promise<void> {
@@ -81,5 +81,33 @@ test('Provider wide table scrolls only inside its named keyboard region', async 
   await page.keyboard.press('ArrowRight')
   await expect.poll(() => region.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
   expect((await heading.boundingBox())?.x).toBe(headingX)
+  await expectNoDocumentOverflow(page)
+})
+
+test('VPS 概览 remains complete and reachable at 390px', async ({ api, page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  api.useProfile(vpsOverviewProfile())
+  await page.goto('/vps/vps_001')
+
+  await expect(page.getByRole('heading', { name: 'Tokyo Edge' })).toBeVisible()
+  const command = page.getByRole('link', { name: '新建记录' })
+  await expect(command).toBeVisible()
+  await command.scrollIntoViewIfNeeded()
+  await expectLocatorNotClipped(command)
+  await expectHitTarget(page, command)
+  await expectNoDocumentOverflow(page)
+})
+
+test('单主体时间线 remains complete and reachable at 390px', async ({ api, page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  api.useProfile(subjectActivityProfile())
+  await page.goto('/vps/vps_001/activity')
+
+  await expect(page.getByText('E2E 时间线条目')).toBeVisible()
+  const command = page.getByRole('link', { name: '新建记录' })
+  await expect(command).toBeVisible()
+  await command.scrollIntoViewIfNeeded()
+  await expectLocatorNotClipped(command)
+  await expectHitTarget(page, command)
   await expectNoDocumentOverflow(page)
 })

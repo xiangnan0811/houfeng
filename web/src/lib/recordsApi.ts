@@ -39,6 +39,12 @@ import type {
   RecordSearchResponse,
   RecordSearchSubjectFilter,
   RestoreRecordRevisionInput,
+  SubjectActivityFilter,
+  SubjectActivityListResponse,
+  SubjectActivityItem,
+  SubjectActivitySourceStatus,
+  RecordSubjectKind,
+  VPSOverview,
 } from './types'
 
 function encoded(value: string): string {
@@ -363,4 +369,203 @@ export function executeRecordPermanentDeletion(
 
 export function getRecordDeletionOperation(operationId: string): Promise<RecordDeletionOperation> {
   return requestJSON<RecordDeletionOperation>(`/api/record-deletions/${encoded(operationId)}`)
+}
+
+const ACTIVITY_GLOBAL_HEAD_KEYS = [
+  'projection_generation',
+  'as_of_ingest_sequence',
+  'current_ingest_sequence',
+  'published_ingest_sequence',
+  'ingest_sequence',
+  'checkpoint',
+  'global_checkpoint',
+] as const
+
+function stripActivityGlobalHeadFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stripActivityGlobalHeadFields)
+  }
+  if (!value || typeof value !== 'object') return value
+  const out: Record<string, unknown> = {}
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if ((ACTIVITY_GLOBAL_HEAD_KEYS as readonly string[]).includes(key)) continue
+    out[key] = stripActivityGlobalHeadFields(nested)
+  }
+  return out
+}
+
+function normalizeActivityItems(raw: unknown): SubjectActivityItem[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((item) => {
+    const row = (item && typeof item === 'object' ? item : {}) as SubjectActivityItem
+    return {
+      ...row,
+      subjects: Array.isArray(row.subjects) ? row.subjects : [],
+      presentation: row.presentation ?? { version: 1, title: '' },
+    }
+  })
+}
+
+function normalizeActivitySourceStatuses(raw: unknown): SubjectActivitySourceStatus[] {
+  return Array.isArray(raw) ? raw as SubjectActivitySourceStatus[] : []
+}
+
+function normalizeSubjectActivityResponse(raw: unknown): SubjectActivityListResponse {
+  const stripped = stripActivityGlobalHeadFields(raw) as Partial<SubjectActivityListResponse> & {
+    subject?: Partial<SubjectActivityListResponse['subject']>
+    freshness?: Partial<SubjectActivityListResponse['freshness']>
+  }
+  const subject = stripped.subject ?? {
+    kind: 'vps' as RecordSubjectKind,
+    source_id: '',
+    identity: {},
+    status: 'live' as const,
+  }
+  return {
+    subject: {
+      kind: subject.kind ?? 'vps',
+      source_id: subject.source_id ?? '',
+      identity: subject.identity && typeof subject.identity === 'object' ? subject.identity : {},
+      ...(subject.live_route ? { live_route: subject.live_route } : {}),
+      status: subject.status === 'tombstoned' ? 'tombstoned' : 'live',
+    },
+    view: stripped.view === 'records' || stripped.view === 'evidence' ? stripped.view : 'activity',
+    snapshot_cursor: typeof stripped.snapshot_cursor === 'string' ? stripped.snapshot_cursor.trim() : '',
+    freshness: {
+      state: stripped.freshness?.state ?? '',
+      visible_observed_at: stripped.freshness?.visible_observed_at ?? null,
+      new_items_available: Boolean(stripped.freshness?.new_items_available),
+      reason_code: stripped.freshness?.reason_code ?? '',
+    },
+    items: normalizeActivityItems(stripped.items),
+    source_statuses: normalizeActivitySourceStatuses(stripped.source_statuses),
+    ...(typeof stripped.next_cursor === 'string' && stripped.next_cursor.trim()
+      ? { next_cursor: stripped.next_cursor.trim() }
+      : {}),
+  }
+}
+
+/**
+ * Lists one subject's fixed-watermark activity page. Cursors are opaque: the
+ * client only stores and returns them. Global projector head fields are stripped
+ * if a buggy server ever includes them.
+ */
+export function listSubjectActivity(
+  kind: RecordSubjectKind,
+  sourceId: string,
+  filter?: SubjectActivityFilter,
+): Promise<SubjectActivityListResponse> {
+  const path = `/api/subjects/${encoded(kind)}/${encoded(sourceId)}/activity`
+  return requestJSON<unknown>(withQuery(path, filter
+    ? {
+        view: filter.view === 'activity' ? undefined : filter.view,
+        source: filter.source,
+        event_kind: filter.event_kind,
+        from: filter.from,
+        to: filter.to,
+        versions: filter.versions === 'history' ? undefined : filter.versions,
+        limit: filter.limit === 50 ? undefined : filter.limit,
+        cursor: filter.cursor,
+      }
+    : undefined)).then(normalizeSubjectActivityResponse)
+}
+
+function emptySectionState(): VPSOverview['recent_activity']['section'] {
+  return {
+    state: '',
+    observed_at: null,
+    last_success_at: null,
+    reason_code: '',
+  }
+}
+
+function normalizeOverviewSection(
+  raw: Partial<VPSOverview['recent_activity']['section']> | undefined,
+): VPSOverview['recent_activity']['section'] {
+  return {
+    state: raw?.state ?? '',
+    observed_at: raw?.observed_at ?? null,
+    last_success_at: raw?.last_success_at ?? null,
+    reason_code: raw?.reason_code ?? '',
+  }
+}
+
+function normalizeVPSOverview(raw: unknown): VPSOverview {
+  const stripped = stripActivityGlobalHeadFields(raw) as Partial<VPSOverview>
+  const identity = stripped.identity ?? {
+    vps_id: '',
+    display_name: '',
+    provider_name: '',
+    product_name: '',
+    country: '',
+    region: '',
+    city: '',
+    datacenter: '',
+    ipv4: '',
+    ipv6: '',
+    lifecycle_status: '',
+    usage_status: '',
+    renewal_decision: '',
+    importance: '',
+    labels: [],
+    updated_at: '',
+  }
+  const summary = stripped.summary
+  return {
+    generated_at: typeof stripped.generated_at === 'string' ? stripped.generated_at : '',
+    identity: {
+      ...identity,
+      labels: Array.isArray(identity.labels) ? identity.labels : [],
+    },
+    anomalies: Array.isArray(stripped.anomalies)
+      ? stripped.anomalies.map((anomaly) => ({
+          ...anomaly,
+          secondary_actions: Array.isArray(anomaly.secondary_actions)
+            ? anomaly.secondary_actions
+            : [],
+        }))
+      : [],
+    summary: {
+      overall: {
+        status: summary?.overall?.status ?? '',
+        ...(summary?.overall?.detail ? { detail: summary.overall.detail } : {}),
+        section: normalizeOverviewSection(summary?.overall?.section),
+      },
+      monitoring: {
+        status: summary?.monitoring?.status ?? '',
+        ...(summary?.monitoring?.detail ? { detail: summary.monitoring.detail } : {}),
+        section: normalizeOverviewSection(summary?.monitoring?.section),
+      },
+      ip_quality: {
+        status: summary?.ip_quality?.status ?? '',
+        ...(summary?.ip_quality?.detail ? { detail: summary.ip_quality.detail } : {}),
+        section: normalizeOverviewSection(summary?.ip_quality?.section),
+      },
+      renewal: {
+        status: summary?.renewal?.status ?? '',
+        ...(summary?.renewal?.detail ? { detail: summary.renewal.detail } : {}),
+        section: normalizeOverviewSection(summary?.renewal?.section),
+      },
+    },
+    recent_activity: {
+      section: normalizeOverviewSection(stripped.recent_activity?.section) || emptySectionState(),
+      items: normalizeActivityItems(stripped.recent_activity?.items),
+      ...(typeof stripped.recent_activity?.snapshot_cursor === 'string'
+        && stripped.recent_activity.snapshot_cursor.trim()
+        ? { snapshot_cursor: stripped.recent_activity.snapshot_cursor.trim() }
+        : {}),
+    },
+    facts: Array.isArray(stripped.facts) ? stripped.facts : [],
+    relations: Array.isArray(stripped.relations) ? stripped.relations : [],
+    capabilities: Array.isArray(stripped.capabilities) ? stripped.capabilities : [],
+  }
+}
+
+/** Reads the request-scoped VPS overview read model. */
+export function getVPSOverview(vpsId: string): Promise<VPSOverview> {
+  return requestJSON<unknown>(`/api/vps/${encoded(vpsId)}/overview`).then(normalizeVPSOverview)
+}
+
+export function overviewHasRecordsV2Read(overview: VPSOverview): boolean {
+  return overview.capabilities.includes('records_v2_read')
 }

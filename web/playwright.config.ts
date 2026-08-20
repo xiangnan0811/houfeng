@@ -6,7 +6,9 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
-  ...(process.env.CI ? { workers: 2 } : {}),
+  // Local machines under memory pressure crash Chromium with workers>1
+  // (ERR_INSUFFICIENT_RESOURCES / Target crashed). CI keeps two workers.
+  workers: process.env.CI ? 2 : 1,
   reporter: process.env.CI
     ? [['html', { open: 'never' }], ['list']]
     : [['list']],
