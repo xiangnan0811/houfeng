@@ -5,6 +5,11 @@
 create index if not exists idx_record_domain_activities_recorded
   on public.record_domain_activities(project_id, recorded_at, activity_id);
 
+-- Same reason for evidence: its indexes all lead with source or record, and the
+-- projection scan filters on neither, so it would read the whole table each pass.
+create index if not exists idx_evidence_snapshots_created
+  on public.evidence_snapshots(created_at, snapshot_id);
+
 create table if not exists public.record_activity_projection_heads (
   project_id text not null default 'default' check (project_id = 'default'),
   projection_generation bigint not null check (projection_generation > 0),
