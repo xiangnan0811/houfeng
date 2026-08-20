@@ -10,6 +10,18 @@ create index if not exists idx_record_domain_activities_recorded
 create index if not exists idx_evidence_snapshots_created
   on public.evidence_snapshots(created_at, snapshot_id);
 
+-- The four asset history tables are read as one source, and every index they
+-- have leads with vps_id. A scan ordered by write time across all four needs one
+-- index per table or it degrades into four sequential scans per pass.
+create index if not exists idx_renewal_decisions_created
+  on public.renewal_decisions(created_at, decision_id);
+create index if not exists idx_price_histories_created
+  on public.price_histories(created_at, price_history_id);
+create index if not exists idx_ip_histories_created
+  on public.ip_histories(created_at, ip_history_id);
+create index if not exists idx_vps_spec_snapshots_created
+  on public.vps_spec_snapshots(created_at, snapshot_id);
+
 create table if not exists public.record_activity_projection_heads (
   project_id text not null default 'default' check (project_id = 'default'),
   projection_generation bigint not null check (projection_generation > 0),
