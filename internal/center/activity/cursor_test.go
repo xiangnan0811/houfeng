@@ -77,6 +77,28 @@ func TestCursorRoundTripsTheWatermarkAndFullSortTuple(t *testing.T) {
 	}
 }
 
+func TestCursorRoundTripsWatermarkOnlySnapshotToken(t *testing.T) {
+	codec := testCodec(t)
+	values := testCursorValues(t)
+	values.AsOf = 0
+	values.SortKey = SortKey{}
+
+	token, err := codec.Encode(values)
+	if err != nil {
+		t.Fatalf("encode snapshot cursor: %v", err)
+	}
+	bound, err := codec.Bind(token, values.Query, values.Actor, values.Generation, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("bind snapshot cursor: %v", err)
+	}
+	if !bound.FirstPage() {
+		t.Fatalf("snapshot cursor FirstPage() = false")
+	}
+	if bound.AsOf() != 0 {
+		t.Fatalf("as-of = %d, want 0", bound.AsOf())
+	}
+}
+
 // The watermark and the generation are how one authorization scope could learn
 // that activity it cannot see is advancing. If the token were merely encoded,
 // the browser could read both straight off the URL.
@@ -262,7 +284,6 @@ func TestEncodeRejectsIncompleteCursorValues(t *testing.T) {
 	cases := map[string]func(CursorValues) CursorValues{
 		"unnormalized query":  func(CursorValues) CursorValues { return unnormalized },
 		"zero generation":     func(v CursorValues) CursorValues { v.Generation = 0; return v },
-		"zero watermark":      func(v CursorValues) CursorValues { v.AsOf = 0; return v },
 		"missing expiry":      func(v CursorValues) CursorValues { v.ExpiresAt = time.Time{}; return v },
 		"missing activity id": func(v CursorValues) CursorValues { v.SortKey.ActivityID = ""; return v },
 		"missing event time":  func(v CursorValues) CursorValues { v.SortKey.EventAt = time.Time{}; return v },

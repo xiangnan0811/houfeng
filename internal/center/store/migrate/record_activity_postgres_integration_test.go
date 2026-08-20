@@ -29,6 +29,7 @@ func TestPostgresIntegrationRecordActivitySchema(t *testing.T) {
 		"record_activity_subjects",
 		"record_activity_projection_checkpoints",
 		"record_activity_revision_intervals",
+		"record_activity_purge_receipts",
 	} {
 		assertSingleStringValue(t, ctx, db, "select to_regclass('public."+table+"')::text", table)
 	}
@@ -158,13 +159,13 @@ func TestPostgresIntegrationRecordActivityAllowsOneOpenRevisionIntervalPerRecord
 
 	insertInterval := `
 		insert into public.record_activity_revision_intervals (
-		  projection_generation, record_id, revision_id,
+		  projection_generation, record_id, revision_id, revision_no,
 		  valid_from_ingest_sequence, valid_to_ingest_sequence,
 		  source_kind, source_event_id, source_version
-		) values (1, $1, $2, $3, $4, 'record_domain', $5, 1)`
+		) values (1, $1, $2, $3, $4, $5, 'record_domain', $6, 1)`
 
-	mustExec(t, ctx, db, insertInterval, "rec_one", "rrv_one", 1, nil, "rac_i1")
-	if _, err := db.Exec(ctx, insertInterval, "rec_one", "rrv_two", 5, nil, "rac_i2"); err == nil {
+	mustExec(t, ctx, db, insertInterval, "rec_one", "rrv_one", 1, 1, nil, "rac_i1")
+	if _, err := db.Exec(ctx, insertInterval, "rec_one", "rrv_two", 2, 5, nil, "rac_i2"); err == nil {
 		t.Fatal("a second open interval for the same record was accepted")
 	}
 
@@ -174,9 +175,9 @@ func TestPostgresIntegrationRecordActivityAllowsOneOpenRevisionIntervalPerRecord
 		set valid_to_ingest_sequence = 5
 		where record_id = 'rec_one' and revision_id = 'rrv_one'
 	`)
-	mustExec(t, ctx, db, insertInterval, "rec_one", "rrv_two", 5, nil, "rac_i2")
+	mustExec(t, ctx, db, insertInterval, "rec_one", "rrv_two", 2, 5, nil, "rac_i2")
 
-	if _, err := db.Exec(ctx, insertInterval, "rec_two", "rrv_three", 9, 9, "rac_i3"); err == nil {
+	if _, err := db.Exec(ctx, insertInterval, "rec_two", "rrv_three", 1, 9, 9, "rac_i3"); err == nil {
 		t.Fatal("an empty interval was accepted")
 	}
 }

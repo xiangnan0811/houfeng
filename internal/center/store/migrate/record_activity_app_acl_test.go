@@ -36,8 +36,12 @@ func TestRecordActivityAppACLFragmentRegistersExactObjectsAndPrivileges(t *testi
 	if !reflect.DeepEqual(gotObjects, wantObjects) {
 		t.Fatalf("record-activity managed objects = %#v, want %#v", gotObjects, wantObjects)
 	}
-	if len(fragment.Functions) != 0 {
-		t.Fatalf("record-activity declares function hardening contracts it does not own: %#v", fragment.Functions)
+	wantFunctions := []AppACLCurrentFunctionContract{
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "purge_record_activity(text, text, text, text, bigint, bigint, bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_activity_purge(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+	}
+	if !reflect.DeepEqual(fragment.Functions, wantFunctions) {
+		t.Fatalf("record-activity functions = %#v, want %#v", fragment.Functions, wantFunctions)
 	}
 	wantPrivileges, err := canonicalPrivileges(recordActivityExpectedAppACLPrivileges())
 	if err != nil {
@@ -52,13 +56,16 @@ func TestRecordActivityAppACLFragmentRegistersExactObjectsAndPrivileges(t *testi
 	}
 }
 
-// The projection holds authorized record and evidence presentation. The platform
-// admin role administers the database and has no business reading operator
-// timeline content, so it gets nothing here.
+// Projection rows carry authorized presentation, so the platform admin role must
+// not be able to read them. Purge receipts are the exception: they hold only
+// digests and counts, and admins need them for deletion audits.
 func TestRecordActivityAppACLKeepsAdminOutOfProjectedContent(t *testing.T) {
 	for _, privilege := range recordActivityAppACLCurrentPrivileges("") {
-		if privilege.Subject == AppACLSubjectPlatformAdmin {
-			t.Fatalf("platform admin receives a record-activity privilege: %#v", privilege)
+		if privilege.Subject != AppACLSubjectPlatformAdmin {
+			continue
+		}
+		if privilege.ObjectIdentity != "record_activity_purge_receipts" || privilege.Privilege != AppACLPrivilegeSelect {
+			t.Fatalf("platform admin receives a content-bearing record-activity privilege: %#v", privilege)
 		}
 	}
 }
@@ -106,13 +113,14 @@ func TestRecordActivityAppACLAllowsRebuildButNotInPlaceRewriteOfProjectedFacts(t
 }
 
 func recordActivityExpectedAppACLObjects() []AppACLManagedObjectR1 {
-	objects := make([]AppACLManagedObjectR1, 0, 5)
+	objects := make([]AppACLManagedObjectR1, 0, 8)
 	for _, table := range []string{
 		"record_activity_projection_heads",
 		"record_activity_projection",
 		"record_activity_subjects",
 		"record_activity_projection_checkpoints",
 		"record_activity_revision_intervals",
+		"record_activity_purge_receipts",
 	} {
 		objects = append(objects, AppACLManagedObjectR1{
 			ObjectClass:    AppACLObjectClassTable,
@@ -120,11 +128,24 @@ func recordActivityExpectedAppACLObjects() []AppACLManagedObjectR1 {
 			ObjectIdentity: table,
 		})
 	}
+	for _, function := range []struct {
+		schema   string
+		identity string
+	}{
+		{appACLManagedInternalSchemaR1, "purge_record_activity(text, text, text, text, bigint, bigint, bytea)"},
+		{appACLManagedPublicSchemaR1, "record_activity_purge(bytea)"},
+	} {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassFunction,
+			SchemaName:     function.schema,
+			ObjectIdentity: function.identity,
+		})
+	}
 	return objects
 }
 
 func recordActivityExpectedAppACLPrivileges() []AppACLPrivilege {
-	privileges := make([]AppACLPrivilege, 0, 17)
+	privileges := make([]AppACLPrivilege, 0, 22)
 	appendTable := func(table string, kinds ...AppACLPrivilegeKind) {
 		for _, kind := range kinds {
 			privileges = append(privileges, AppACLPrivilege{
@@ -146,5 +167,27 @@ func recordActivityExpectedAppACLPrivileges() []AppACLPrivilege {
 		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
 	appendTable("record_activity_revision_intervals",
 		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
+	appendTable("record_activity_purge_receipts",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+	privileges = append(privileges, AppACLPrivilege{
+		Subject:        AppACLSubjectPlatformAdmin,
+		ObjectClass:    AppACLObjectClassTable,
+		SchemaName:     "public",
+		ObjectIdentity: "record_activity_purge_receipts",
+		Privilege:      AppACLPrivilegeSelect,
+	})
+	privileges = append(privileges, AppACLPrivilege{
+		Subject:        AppACLSubjectCenterRuntime,
+		ObjectClass:    AppACLObjectClassFunction,
+		ObjectIdentity: "public.record_activity_purge(bytea)",
+		Privilege:      AppACLPrivilegeExecute,
+	})
 	return privileges
+}
+
+func recordActivityExpectedFunctionContracts() []AppACLCurrentFunctionContract {
+	return []AppACLCurrentFunctionContract{
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "purge_record_activity(text, text, text, text, bigint, bigint, bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_activity_purge(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+	}
 }

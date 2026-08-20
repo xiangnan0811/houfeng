@@ -35,13 +35,14 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 }
 
 func recordActivityAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
-	objects := make([]AppACLManagedObjectR1, 0, 5)
+	objects := make([]AppACLManagedObjectR1, 0, 8)
 	for _, table := range []string{
 		"record_activity_projection_heads",
 		"record_activity_projection",
 		"record_activity_subjects",
 		"record_activity_projection_checkpoints",
 		"record_activity_revision_intervals",
+		"record_activity_purge_receipts",
 	} {
 		objects = append(objects, AppACLManagedObjectR1{
 			ObjectClass:    AppACLObjectClassTable,
@@ -49,21 +50,33 @@ func recordActivityAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragme
 			ObjectIdentity: table,
 		})
 	}
+	functions := []AppACLCurrentFunctionContract{
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "purge_record_activity(text, text, text, text, bigint, bigint, bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_activity_purge(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+	}
+	for _, function := range functions {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassFunction,
+			SchemaName:     function.SchemaName,
+			ObjectIdentity: function.Identity,
+		})
+	}
 	return AppACLCurrentMigrationFragment{
 		Migration:  "0057_create_record_activity.sql",
 		Objects:    objects,
 		Privileges: recordActivityAppACLCurrentPrivileges,
+		Functions:  functions,
 	}
 }
 
 // recordActivityAppACLCurrentPrivileges grants the projector what a rebuildable
-// read model needs and stops there. The runtime may delete every table here,
+// read model needs and stops there. The runtime may delete the projected tables,
 // because dropping the projection and replaying the authoritative sources is the
 // documented recovery. What it deliberately cannot do is UPDATE a projected
 // fact: a correction is a new event that points at the one it corrects, so an
 // in-place rewrite would be the projector editing history rather than recording
-// it. The platform admin gets nothing at all, since these rows carry authorized
-// record and evidence presentation.
+// it. The platform admin may inspect purge receipts (counts and digests only)
+// and otherwise gets nothing, since projection rows carry authorized presentation.
 func recordActivityAppACLCurrentPrivileges(string) []AppACLPrivilege {
 	privileges := make([]AppACLPrivilege, 0, 17)
 	appendTable := func(table string, kinds ...AppACLPrivilegeKind) {
@@ -92,6 +105,24 @@ func recordActivityAppACLCurrentPrivileges(string) []AppACLPrivilege {
 	// UPDATE while projected facts do not.
 	appendTable("record_activity_revision_intervals",
 		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate, AppACLPrivilegeDelete)
+	// Receipts are append-only proofs. The controlled purge function is what
+	// removes projected rows under a reservation; receipts themselves never
+	// update or delete.
+	appendTable("record_activity_purge_receipts",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+	privileges = append(privileges, AppACLPrivilege{
+		Subject:        AppACLSubjectPlatformAdmin,
+		ObjectClass:    AppACLObjectClassTable,
+		SchemaName:     appACLManagedPublicSchemaR1,
+		ObjectIdentity: "record_activity_purge_receipts",
+		Privilege:      AppACLPrivilegeSelect,
+	})
+	privileges = append(privileges, AppACLPrivilege{
+		Subject:        AppACLSubjectCenterRuntime,
+		ObjectClass:    AppACLObjectClassFunction,
+		ObjectIdentity: "public.record_activity_purge(bytea)",
+		Privilege:      AppACLPrivilegeExecute,
+	})
 	return privileges
 }
 

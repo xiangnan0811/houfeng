@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/activity"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/records"
 )
 
@@ -17,6 +18,15 @@ func recordDomainTestSubjects() []activity.SubjectSnapshot {
 		Primary:  true,
 		Identity: map[string]string{"display_name": "hk-edge-01"},
 	}}
+}
+
+func recordDomainTestAuthScope(t *testing.T) recordauth.ResourceScope {
+	t.Helper()
+	scope, err := activity.ProjectAuthScope(recordauth.ProjectIDDefault)
+	if err != nil {
+		t.Fatalf("ProjectAuthScope() error = %v", err)
+	}
+	return scope
 }
 
 func recordDomainTestRow() recordDomainActivityRow {
@@ -93,11 +103,11 @@ func TestBuildRecordDomainCandidateDerivesAStableIdentity(t *testing.T) {
 	namespace := activityTestNamespace()
 	row := recordDomainTestRow()
 
-	first, err := buildRecordDomainCandidate(namespace, row, recordDomainTestSubjects())
+	first, err := buildRecordDomainCandidate(namespace, row, recordDomainTestSubjects(), recordDomainTestAuthScope(t))
 	if err != nil {
 		t.Fatalf("build candidate: %v", err)
 	}
-	second, err := buildRecordDomainCandidate(namespace, row, recordDomainTestSubjects())
+	second, err := buildRecordDomainCandidate(namespace, row, recordDomainTestSubjects(), recordDomainTestAuthScope(t))
 	if err != nil {
 		t.Fatalf("rebuild candidate: %v", err)
 	}
@@ -120,7 +130,7 @@ func TestBuildRecordDomainCandidateDerivesAStableIdentity(t *testing.T) {
 
 func TestBuildRecordDomainCandidateSeparatesEveryCoordinate(t *testing.T) {
 	namespace := activityTestNamespace()
-	base, err := buildRecordDomainCandidate(namespace, recordDomainTestRow(), recordDomainTestSubjects())
+	base, err := buildRecordDomainCandidate(namespace, recordDomainTestRow(), recordDomainTestSubjects(), recordDomainTestAuthScope(t))
 	if err != nil {
 		t.Fatalf("build baseline: %v", err)
 	}
@@ -133,7 +143,7 @@ func TestBuildRecordDomainCandidateSeparatesEveryCoordinate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			row := recordDomainTestRow()
 			mutate(&row)
-			candidate, err := buildRecordDomainCandidate(namespace, row, recordDomainTestSubjects())
+			candidate, err := buildRecordDomainCandidate(namespace, row, recordDomainTestSubjects(), recordDomainTestAuthScope(t))
 			if err != nil {
 				t.Fatalf("build candidate: %v", err)
 			}
@@ -149,7 +159,7 @@ func TestBuildRecordDomainCandidateSeparatesEveryCoordinate(t *testing.T) {
 // authorization than the record itself.
 func TestBuildRecordDomainCandidateCarriesNoRecordContent(t *testing.T) {
 	namespace := activityTestNamespace()
-	candidate, err := buildRecordDomainCandidate(namespace, recordDomainTestRow(), recordDomainTestSubjects())
+	candidate, err := buildRecordDomainCandidate(namespace, recordDomainTestRow(), recordDomainTestSubjects(), recordDomainTestAuthScope(t))
 	if err != nil {
 		t.Fatalf("build candidate: %v", err)
 	}
@@ -210,7 +220,7 @@ func TestBuildRecordDomainCandidateRejectsRowsItCannotProject(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			row := recordDomainTestRow()
 			test.mutate(&row)
-			if _, err := buildRecordDomainCandidate(namespace, row, test.subjects); !errors.Is(err, test.want) {
+			if _, err := buildRecordDomainCandidate(namespace, row, test.subjects, recordDomainTestAuthScope(t)); !errors.Is(err, test.want) {
 				t.Fatalf("error = %v, want %v", err, test.want)
 			}
 		})
@@ -232,7 +242,7 @@ func TestBuildRecordDomainCandidateAppliesTheFrozenEventTimeRules(t *testing.T) 
 	firstRevision.eventAt = occurred
 	firstRevision.recordedAt = saved
 
-	candidate, err := buildRecordDomainCandidate(namespace, firstRevision, recordDomainTestSubjects())
+	candidate, err := buildRecordDomainCandidate(namespace, firstRevision, recordDomainTestSubjects(), recordDomainTestAuthScope(t))
 	if err != nil {
 		t.Fatalf("build first revision: %v", err)
 	}
@@ -248,7 +258,7 @@ func TestBuildRecordDomainCandidateAppliesTheFrozenEventTimeRules(t *testing.T) 
 	laterRevision.revisionNo = 4
 	laterRevision.sourceVersion = 4
 
-	later, err := buildRecordDomainCandidate(namespace, laterRevision, recordDomainTestSubjects())
+	later, err := buildRecordDomainCandidate(namespace, laterRevision, recordDomainTestSubjects(), recordDomainTestAuthScope(t))
 	if err != nil {
 		t.Fatalf("build later revision: %v", err)
 	}
@@ -259,6 +269,103 @@ func TestBuildRecordDomainCandidateAppliesTheFrozenEventTimeRules(t *testing.T) 
 	}
 	if later.Backfilled {
 		t.Fatalf("an ordinary save delay is not a backfill")
+	}
+}
+
+// `versions=current` resolves against the intervals these claims open, so which
+// events claim to move the pointer is the whole answer. Archive names the
+// revision that was already current and a comment names the one it was written
+// against; if either opened an interval, the record's current revision would
+// appear to change on an event that never touched it.
+func TestBuildRecordDomainCandidateClaimsCurrencyOnlyForCommits(t *testing.T) {
+	namespace := activityTestNamespace()
+	for name, test := range map[string]struct {
+		kind          activity.EventKind
+		namedRevision bool
+		want          bool
+	}{
+		"the first revision":                 {kind: activity.EventKindRecordCreated, namedRevision: true, want: true},
+		"a later revision":                   {kind: activity.EventKindRecordRevised, namedRevision: true, want: true},
+		"a restore, which commits a new one": {kind: activity.EventKindRecordRestored, namedRevision: true, want: true},
+		"archiving, which names the current one": {
+			kind: activity.EventKindRecordArchived, namedRevision: true, want: false,
+		},
+		"unarchiving, which names the current one": {
+			kind: activity.EventKindRecordUnarchived, namedRevision: true, want: false,
+		},
+		"a comment against a revision": {
+			kind: activity.EventKindCommentCreated, namedRevision: true, want: false,
+		},
+		"an owner change": {
+			kind: activity.EventKindRecordOwnerChanged, namedRevision: true, want: false,
+		},
+		"an action whose revision the join resolved": {
+			kind: activity.EventKindActionCreated, namedRevision: false, want: false,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			row := recordDomainTestRow()
+			row.eventKind = string(test.kind)
+			row.namedRevision = test.namedRevision
+
+			candidate, err := buildRecordDomainCandidate(namespace, row, recordDomainTestSubjects(), recordDomainTestAuthScope(t))
+			if err != nil {
+				t.Fatalf("build candidate: %v", err)
+			}
+			if candidate.OpensRevision != test.want {
+				t.Fatalf("opens revision = %v, want %v for %s", candidate.OpensRevision, test.want, test.kind)
+			}
+			if candidate.RevisionNo != uint64(row.revisionNo) {
+				t.Fatalf("revision number = %d, want the row's %d", candidate.RevisionNo, row.revisionNo)
+			}
+		})
+	}
+}
+
+// A commit whose revision row the join could not find would produce an interval
+// with no order, which publication cannot compare against a late arrival.
+func TestBuildRecordDomainCandidateRejectsACommitWithNoRevisionNumber(t *testing.T) {
+	row := recordDomainTestRow()
+	row.eventKind = string(activity.EventKindRecordRevised)
+	row.namedRevision = true
+	row.revisionNo = 0
+
+	_, err := buildRecordDomainCandidate(activityTestNamespace(), row, recordDomainTestSubjects(), recordDomainTestAuthScope(t))
+	if !errors.Is(err, activity.ErrInvalidSourceIdentity) {
+		t.Fatalf("error = %v, want an invalid source identity", err)
+	}
+}
+
+// The claim is part of what the row asserts, so a retry that changes it must be
+// caught as a changed fact rather than accepted as the same one.
+func TestBuildRecordDomainCandidateHashCoversTheCurrencyClaim(t *testing.T) {
+	namespace := activityTestNamespace()
+	row := recordDomainTestRow()
+	row.eventKind = string(activity.EventKindRecordRevised)
+	row.namedRevision = true
+	row.revisionNo = 3
+
+	claimed, err := buildRecordDomainCandidate(namespace, row, recordDomainTestSubjects(), recordDomainTestAuthScope(t))
+	if err != nil {
+		t.Fatalf("build claiming candidate: %v", err)
+	}
+	row.namedRevision = false
+	unclaimed, err := buildRecordDomainCandidate(namespace, row, recordDomainTestSubjects(), recordDomainTestAuthScope(t))
+	if err != nil {
+		t.Fatalf("build unclaiming candidate: %v", err)
+	}
+	if claimed.CanonicalHash == unclaimed.CanonicalHash {
+		t.Fatal("the canonical hash must change when the currency claim does")
+	}
+
+	row.namedRevision = true
+	row.revisionNo = 4
+	renumbered, err := buildRecordDomainCandidate(namespace, row, recordDomainTestSubjects(), recordDomainTestAuthScope(t))
+	if err != nil {
+		t.Fatalf("build renumbered candidate: %v", err)
+	}
+	if claimed.CanonicalHash == renumbered.CanonicalHash {
+		t.Fatal("the canonical hash must change when the revision number does")
 	}
 }
 

@@ -139,6 +139,12 @@ create index if not exists idx_record_activity_subjects_timeline
     (subject_kind, subject_source_id, event_at desc, recorded_at desc, source_kind, activity_id)
   include (ingest_sequence, event_kind, record_id, revision_id, evidence_snapshot_id,
     auth_scope_digest, relation_role);
+-- Freshness max(recorded_at) / top-1 observed_at must stop early; the timeline
+-- index alone still forces a full subject scan under max().
+create index if not exists idx_record_activity_subjects_observed
+  on public.record_activity_subjects
+    (subject_kind, subject_source_id, recorded_at desc, activity_id)
+  include (ingest_sequence, auth_scope_digest, event_kind, source_kind);
 create index if not exists idx_record_activity_subjects_event_kind
   on public.record_activity_subjects
     (subject_kind, subject_source_id, event_kind, event_at desc, recorded_at desc, source_kind, activity_id)
@@ -155,6 +161,13 @@ create index if not exists idx_record_activity_subjects_record
 create index if not exists idx_record_activity_subjects_evidence
   on public.record_activity_subjects(subject_kind, subject_source_id, evidence_snapshot_id, event_at desc)
   where evidence_snapshot_id is not null;
+-- Tombstone identity lookup must not walk the live timeline when no
+-- tombstoned relation exists for the subject.
+create index if not exists idx_record_activity_subjects_tombstone
+  on public.record_activity_subjects
+    (subject_kind, subject_source_id, event_at desc, recorded_at desc, source_kind, activity_id)
+  include (identity_snapshot, ingest_sequence, auth_scope_digest)
+  where tombstoned;
 
 create table if not exists public.record_activity_projection_checkpoints (
   project_id text not null default 'default' check (project_id = 'default'),
@@ -194,6 +207,10 @@ create table if not exists public.record_activity_revision_intervals (
   projection_generation bigint not null check (projection_generation > 0),
   record_id text not null check (record_id ~ '^rec_[a-z0-9]{1,64}$'),
   revision_id text not null check (revision_id ~ '^rrv_[a-z0-9]{1,64}$'),
+  -- The revision's own order, carried so publication can tell a newer revision
+  -- from one that arrived late. Arrival order cannot answer that, and joining the
+  -- record tables to ask would put a mutable read in the publish transaction.
+  revision_no bigint not null check (revision_no > 0),
   valid_from_ingest_sequence bigint not null check (valid_from_ingest_sequence > 0),
   valid_to_ingest_sequence bigint check (valid_to_ingest_sequence is null or valid_to_ingest_sequence > 0),
   source_kind text not null
@@ -217,3 +234,125 @@ create index if not exists idx_record_activity_revision_intervals_validity
 create unique index if not exists uq_record_activity_revision_intervals_open
   on public.record_activity_revision_intervals(projection_generation, record_id)
   where valid_to_ingest_sequence is null;
+
+-- Per-record purge proof. Heads and checkpoints stay generation-wide and are
+-- never owned by a single record's deletion adapter.
+create table if not exists public.record_activity_purge_receipts (
+  operation_id text primary key check (operation_id ~ '^rpo_[a-z0-9]{1,64}$'),
+  adapter_name text not null default 'record_activity_projection'
+    check (adapter_name = 'record_activity_projection'),
+  removed_surface_digest bytea not null
+    check (octet_length(removed_surface_digest) = 32),
+  receipt_digest bytea not null check (octet_length(receipt_digest) = 32),
+  removed_row_count bigint not null check (removed_row_count >= 0),
+  verified_absent_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  foreign key (operation_id) references public.record_purge_operations(operation_id)
+    on delete restrict
+);
+
+create or replace function record_platform_internal.purge_record_activity(
+  text, text, text, text, bigint, bigint, bytea
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  p_operation_id alias for $1;
+  p_reservation_id alias for $2;
+  p_project_id alias for $3;
+  p_record_id alias for $4;
+  p_fence_epoch alias for $5;
+  p_ledger_sequence alias for $6;
+  p_ledger_entry_hash alias for $7;
+  v_removed bigint := 0;
+  v_rows bigint;
+  v_remaining bigint;
+begin
+  if p_operation_id is null or p_reservation_id is null or p_project_id <> 'default'
+    or p_record_id is null or p_fence_epoch < 0 or p_ledger_sequence <= 0
+    or octet_length(p_ledger_entry_hash) <> 32 then
+    raise exception using errcode = '55000', message = 'invalid activity purge authority';
+  end if;
+
+  perform 1
+  from public.record_purge_operations as operation
+  join public.deletion_reservations as reservation
+    on reservation.reservation_id = operation.reservation_id
+  where operation.operation_id = p_operation_id
+    and operation.reservation_id = p_reservation_id
+    and operation.project_id = p_project_id
+    and operation.operation_state = 'online_purging'
+    and operation.ledger_sequence = p_ledger_sequence
+    and operation.ledger_entry_hash = p_ledger_entry_hash
+    and reservation.project_id = p_project_id
+    and reservation.object_kind = 'record'
+    and reservation.object_id = p_record_id
+    and reservation.state = 'committed'
+    and reservation.fence_epoch = p_fence_epoch
+  for update of operation, reservation;
+  if not found then
+    raise exception using errcode = '55000', message = 'activity purge authority unavailable';
+  end if;
+
+  -- Subjects reference projection rows, so they go first. Clear both the
+  -- activity-linked rows and any denormalized record_id matches so a relation
+  -- that somehow lost its parent cannot survive as an orphan timeline hit.
+  delete from public.record_activity_subjects
+  where record_id = p_record_id
+     or activity_id in (
+          select activity_id from public.record_activity_projection where record_id = p_record_id
+        );
+  get diagnostics v_rows = row_count; v_removed := v_removed + v_rows;
+
+  delete from public.record_activity_projection where record_id = p_record_id;
+  get diagnostics v_rows = row_count; v_removed := v_removed + v_rows;
+
+  delete from public.record_activity_revision_intervals where record_id = p_record_id;
+  get diagnostics v_rows = row_count; v_removed := v_removed + v_rows;
+
+  select
+    (select count(*) from public.record_activity_subjects where record_id = p_record_id) +
+    (select count(*) from public.record_activity_projection where record_id = p_record_id) +
+    (select count(*) from public.record_activity_revision_intervals where record_id = p_record_id)
+  into v_remaining;
+  if v_remaining <> 0 then
+    raise exception using errcode = '55000', message = 'activity purge left owned rows';
+  end if;
+  return v_removed;
+end
+$$;
+
+revoke all on function record_platform_internal.purge_record_activity(text,text,text,text,bigint,bigint,bytea) from public;
+
+create or replace function public.record_activity_purge(bytea)
+returns bigint
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare p_command alias for $1; v jsonb;
+begin
+  if p_command is null or octet_length(p_command) not between 1 and 4096 then
+    raise exception using errcode = '55000', message = 'invalid activity purge command';
+  end if;
+  v := convert_from(p_command, 'UTF8')::jsonb;
+  if jsonb_typeof(v) <> 'object' or
+    array(select key from jsonb_object_keys(v) as key order by key) <>
+    array['fence_epoch','ledger_entry_hash','ledger_sequence','operation_id','project_id','record_id','reservation_id']::text[] then
+    raise exception using errcode = '55000', message = 'invalid activity purge command';
+  end if;
+  return record_platform_internal.purge_record_activity(
+    v->>'operation_id', v->>'reservation_id', v->>'project_id', v->>'record_id',
+    (v->>'fence_epoch')::bigint, (v->>'ledger_sequence')::bigint,
+    decode(v->>'ledger_entry_hash', 'hex')
+  );
+end
+$$;
+revoke all on function public.record_activity_purge(bytea) from public;
+
+drop trigger if exists record_activity_purge_receipts_reject_update on public.record_activity_purge_receipts;
+create trigger record_activity_purge_receipts_reject_update before update on public.record_activity_purge_receipts
+for each row execute function record_platform_internal.reject_immutable_mutation();

@@ -61,6 +61,11 @@ func (query Query) normalized() bool {
 	return query.normalizedFlag
 }
 
+// Normalized reports whether this value came from NormalizeQuery.
+func (query Query) Normalized() bool {
+	return query.normalized()
+}
+
 // NormalizeQuery produces the canonical form. Sorting and deduplicating the
 // repeated filters is what makes ?source=a&source=b and ?source=b&source=a one
 // query rather than two, which in turn makes a cursor from either usable on the

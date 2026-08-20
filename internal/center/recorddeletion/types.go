@@ -111,6 +111,16 @@ var recordSearchSurfaceNames = []SurfaceName{
 	"record_search_subjects",
 }
 
+// record_activity_projection owns only per-record derived rows. Projection
+// heads and checkpoints are generation-wide: one record's purge must not be
+// able to move every other record's watermark or steal a source lease.
+var recordActivitySurfaceNames = []SurfaceName{
+	"record_activity_projection",
+	"record_activity_purge_receipts",
+	"record_activity_revision_intervals",
+	"record_activity_subjects",
+}
+
 func RequiredAdapterNames() []AdapterName {
 	return append([]AdapterName(nil), requiredAdapterNames...)
 }
@@ -133,6 +143,10 @@ func RecordCollaborationSurfaceNames() []SurfaceName {
 
 func RecordSearchSurfaceNames() []SurfaceName {
 	return append([]SurfaceName(nil), recordSearchSurfaceNames...)
+}
+
+func RecordActivitySurfaceNames() []SurfaceName {
+	return append([]SurfaceName(nil), recordActivitySurfaceNames...)
 }
 
 type AdapterDescriptor struct {
@@ -186,6 +200,9 @@ func (descriptor AdapterDescriptor) validate() error {
 	}
 	if descriptor.name == AdapterNameRecordSearch && !slices.Equal(descriptor.surfaces, recordSearchSurfaceNames) {
 		return fmt.Errorf("%w: record_search surfaces", ErrInvalidAdapterDescriptor)
+	}
+	if descriptor.name == AdapterNameRecordActivityProjection && !slices.Equal(descriptor.surfaces, recordActivitySurfaceNames) {
+		return fmt.Errorf("%w: record_activity_projection surfaces", ErrInvalidAdapterDescriptor)
 	}
 	return nil
 }

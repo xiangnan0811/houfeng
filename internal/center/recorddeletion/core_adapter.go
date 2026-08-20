@@ -277,3 +277,11 @@ func RecordSearchSurfaceDigest() [sha256.Size]byte {
 	}
 	return digestAdapterSurfaces(descriptor)
 }
+
+func RecordActivitySurfaceDigest() [sha256.Size]byte {
+	descriptor, err := NewAdapterDescriptor(AdapterNameRecordActivityProjection, RecordActivitySurfaceNames())
+	if err != nil {
+		return [sha256.Size]byte{}
+	}
+	return digestAdapterSurfaces(descriptor)
+}

@@ -85,10 +85,14 @@ func (source *EvidenceActivitySource) Readiness(
 	).Scan(&excluded); err != nil {
 		return activity.SourceReadiness{}, fmt.Errorf("count non-subject evidence: %w", err)
 	}
+	caughtUp, err := loadActiveSourceCaughtUp(ctx, source.pool, activity.SourceKindEvidenceSnapshot)
+	if err != nil {
+		return activity.SourceReadiness{}, err
+	}
 	return activity.SourceReadiness{
 		Kind:         activity.SourceKindEvidenceSnapshot,
 		Head:         head,
-		CaughtUp:     true,
+		CaughtUp:     caughtUp,
 		ExcludedRows: uint64(excluded),
 	}, nil
 }
@@ -131,11 +135,17 @@ const evidenceActivityScanSQL = `
 	  snapshot.referenced_at,
 	  snapshot.sensitivity_level
 	from public.evidence_snapshots snapshot
-	where snapshot.created_at >= $1
-	  and snapshot.created_at <= $2
+	where (
+	    snapshot.created_at > $1
+	    or (
+	      snapshot.created_at = $1
+	      and ($2 = '' or snapshot.snapshot_id > $2)
+	    )
+	  )
+	  and snapshot.created_at <= $3
 	  and snapshot.source_kind in ('vps', 'monitoring_instance', 'target')
 	order by snapshot.created_at, snapshot.snapshot_id
-	limit $3`
+	limit $4`
 
 func (source *EvidenceActivitySource) ScanAfter(
 	ctx context.Context,
@@ -149,6 +159,7 @@ func (source *EvidenceActivitySource) ScanAfter(
 		ctx,
 		evidenceActivityScanSQL,
 		windowLowerBound(window),
+		activityKeysetAfter(window),
 		window.Through.UTC(),
 		limit,
 	)
@@ -259,6 +270,11 @@ func buildEvidenceCandidate(
 		},
 		Severity: "info",
 	}
+	authScope, err := activity.ProjectAuthScope(recordauth.ProjectIDDefault)
+	if err != nil {
+		return activity.CandidateEvent{}, err
+	}
+	candidate.AuthScope = authScope
 
 	candidate.CanonicalHash = candidate.ComputeCanonicalHash()
 	return candidate, nil

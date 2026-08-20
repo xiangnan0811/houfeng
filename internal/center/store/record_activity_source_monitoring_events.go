@@ -10,6 +10,7 @@ import (
 
 	"houfeng/internal/center/activity"
 	"houfeng/internal/center/incidents"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/records"
 )
 
@@ -90,10 +91,14 @@ func (source *MonitoringEventActivitySource) Readiness(
 	).Scan(&excluded); err != nil {
 		return activity.SourceReadiness{}, fmt.Errorf("count pre-contract monitoring events: %w", err)
 	}
+	caughtUp, err := loadActiveSourceCaughtUp(ctx, source.pool, activity.SourceKindMonitoringEvent)
+	if err != nil {
+		return activity.SourceReadiness{}, err
+	}
 	return activity.SourceReadiness{
 		Kind:         activity.SourceKindMonitoringEvent,
 		Head:         head,
-		CaughtUp:     true,
+		CaughtUp:     caughtUp,
 		ExcludedRows: uint64(excluded),
 	}, nil
 }
@@ -171,11 +176,17 @@ const monitoringEventActivityScanSQL = `
 	left join targets target
 	  on event.object_type = 'target' and target.target_id = event.object_id
 	where event.object_type in ('monitoring_instance', 'target')
-	  and event.created_at >= $1
-	  and event.created_at <= $2
+	  and (
+	    event.created_at > $1
+	    or (
+	      event.created_at = $1
+	      and ($2 = '' or event.event_id > $2)
+	    )
+	  )
+	  and event.created_at <= $3
 	  and (` + monitoringEventMetadataCompleteSQL + `)
 	order by event.created_at, event.event_id
-	limit $3`
+	limit $4`
 
 func (source *MonitoringEventActivitySource) ScanAfter(
 	ctx context.Context,
@@ -189,6 +200,7 @@ func (source *MonitoringEventActivitySource) ScanAfter(
 		ctx,
 		monitoringEventActivityScanSQL,
 		windowLowerBound(window),
+		activityKeysetAfter(window),
 		window.Through.UTC(),
 		limit,
 	)
@@ -389,6 +401,12 @@ func buildMonitoringEventCandidate(
 		}
 		candidate.Corrects = correctedID
 	}
+
+	authScope, err := activity.ProjectAuthScope(recordauth.ProjectIDDefault)
+	if err != nil {
+		return activity.CandidateEvent{}, err
+	}
+	candidate.AuthScope = authScope
 
 	candidate.CanonicalHash = candidate.ComputeCanonicalHash()
 	return candidate, nil

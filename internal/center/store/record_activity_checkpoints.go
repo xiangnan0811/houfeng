@@ -23,6 +23,8 @@ type ActivityProjectionRepository struct {
 var (
 	_ activity.Publisher       = (*ActivityProjectionRepository)(nil)
 	_ activity.CheckpointStore = (*ActivityProjectionRepository)(nil)
+	_ activity.SourceLeases    = (*ActivityProjectionRepository)(nil)
+	_ activity.GenerationStore = (*ActivityProjectionRepository)(nil)
 )
 
 func NewActivityProjectionRepository(pool *pgxpool.Pool) (*ActivityProjectionRepository, error) {
@@ -140,6 +142,119 @@ func (repository *ActivityProjectionRepository) SaveCheckpoint(
 		recordedThrough, checkpoint.CaughtUp, int64(checkpoint.Attempt), checkpoint.LastErrorCode, lastSuccessAt,
 	); err != nil {
 		return fmt.Errorf("save activity checkpoint for %s: %w", checkpoint.Kind, err)
+	}
+	return nil
+}
+
+// ActiveGeneration returns the generation currently being published into.
+//
+// The projector needs it on every pass rather than at startup: a disaster
+// rebuild increments the generation, and a worker still writing into the old one
+// would be filling a projection nobody reads.
+func (repository *ActivityProjectionRepository) ActiveGeneration(ctx context.Context) (uint64, error) {
+	var generation int64
+	err := repository.pool.QueryRow(ctx, `
+		select projection_generation
+		from public.record_activity_projection_heads
+		where project_id = $1 and head_state = 'active'`,
+		recordplatform.ProjectIDDefault,
+	).Scan(&generation)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No head row means nothing has ever been published, which is a deployment
+		// state rather than a failure: the worker waits instead of inventing one.
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read active activity generation: %w", err)
+	}
+	if generation <= 0 {
+		return 0, ErrActivityGenerationInactive
+	}
+	return uint64(generation), nil
+}
+
+// AcquireSourceLease takes the right to project one source, and reports whether
+// it got it.
+//
+// The lease is not what makes concurrent projection safe — the head lock keeps
+// allocation contiguous, publication is keyed on source identity, and a
+// checkpoint refuses to move backwards, so two workers on one source would
+// produce a correct result. What it prevents is the waste: two processes scanning
+// the same window and contending on the same head row for rows one of them has
+// already published.
+//
+// An expired lease is reclaimable, because a worker that died holding one must
+// not park its source until someone notices.
+func (repository *ActivityProjectionRepository) AcquireSourceLease(
+	ctx context.Context,
+	generation uint64,
+	kind activity.SourceKind,
+	ownerID string,
+	ttl time.Duration,
+) (bool, error) {
+	if generation == 0 {
+		return false, ErrActivityGenerationInactive
+	}
+	if !activity.ValidSourceKind(kind) {
+		return false, fmt.Errorf("acquire activity source lease: unknown source kind %q", kind)
+	}
+	if !activity.ValidOwnerID(ownerID) {
+		return false, fmt.Errorf("acquire activity source lease: invalid owner %q", ownerID)
+	}
+	if ttl <= 0 {
+		return false, errors.New("acquire activity source lease: non-positive ttl")
+	}
+
+	// The insert covers a source that has never run; the update covers taking over
+	// an unheld, expired, or already-ours lease. Re-acquiring our own extends it,
+	// which is how a long pass keeps the lease alive.
+	var claimed bool
+	err := repository.pool.QueryRow(ctx, `
+		insert into public.record_activity_projection_checkpoints (
+		  project_id, projection_generation, source_kind, lease_owner_id, lease_expires_at
+		) values ($1, $2, $3, $4, transaction_timestamp() + ($5 * interval '1 microsecond'))
+		on conflict (project_id, projection_generation, source_kind) do update
+		set lease_owner_id = excluded.lease_owner_id,
+		    lease_expires_at = excluded.lease_expires_at,
+		    updated_at = now()
+		where public.record_activity_projection_checkpoints.lease_owner_id is null
+		   or public.record_activity_projection_checkpoints.lease_owner_id = excluded.lease_owner_id
+		   or public.record_activity_projection_checkpoints.lease_expires_at <= transaction_timestamp()
+		returning true`,
+		recordplatform.ProjectIDDefault, generation, string(kind), ownerID, ttl.Microseconds(),
+	).Scan(&claimed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Someone else holds a live lease.
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("acquire activity source lease for %s: %w", kind, err)
+	}
+	return claimed, nil
+}
+
+// ReleaseSourceLease hands a source back. It only clears a lease this owner still
+// holds, so a worker whose lease already expired and was taken over cannot cut
+// the new holder's short.
+func (repository *ActivityProjectionRepository) ReleaseSourceLease(
+	ctx context.Context,
+	generation uint64,
+	kind activity.SourceKind,
+	ownerID string,
+) error {
+	if generation == 0 {
+		return ErrActivityGenerationInactive
+	}
+	if _, err := repository.pool.Exec(ctx, `
+		update public.record_activity_projection_checkpoints
+		set lease_owner_id = null, lease_expires_at = null, updated_at = now()
+		where project_id = $1
+		  and projection_generation = $2
+		  and source_kind = $3
+		  and lease_owner_id = $4`,
+		recordplatform.ProjectIDDefault, generation, string(kind), ownerID,
+	); err != nil {
+		return fmt.Errorf("release activity source lease for %s: %w", kind, err)
 	}
 	return nil
 }

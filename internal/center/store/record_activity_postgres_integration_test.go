@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/activity"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store/migrate"
 )
@@ -29,6 +30,10 @@ func newActivityCandidate(t *testing.T, eventID string, eventAt time.Time) activ
 	if err != nil {
 		t.Fatalf("mint activity id for %q: %v", eventID, err)
 	}
+	authScope, err := activity.ProjectAuthScope(recordauth.ProjectIDDefault)
+	if err != nil {
+		t.Fatalf("ProjectAuthScope() error = %v", err)
+	}
 	candidate := activity.CandidateEvent{
 		ActivityID: activityID,
 		Source:     source,
@@ -47,6 +52,7 @@ func newActivityCandidate(t *testing.T, eventID string, eventAt time.Time) activ
 			Primary:  true,
 			Identity: map[string]string{"display_name": "hk-edge-01"},
 		}},
+		AuthScope: authScope,
 	}
 	candidate.CanonicalHash = candidate.ComputeCanonicalHash()
 	return candidate
@@ -298,4 +304,106 @@ func openActivityTestPool(t *testing.T, ctx context.Context) *pgxpool.Pool {
 		t.Fatalf("seed active generation: %v", err)
 	}
 	return pool
+}
+
+// A page fixed at as-of must keep the same membership when later rows are
+// published, including rows that would sort into the middle of the timeline.
+func TestPostgresIntegrationRecordActivitySubjectPageKeepsFixedWatermark(t *testing.T) {
+	ctx := context.Background()
+	pool := openActivityTestPool(t, ctx)
+	repository, err := NewActivityProjectionRepository(pool)
+	if err != nil {
+		t.Fatalf("new repository: %v", err)
+	}
+
+	base := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)
+	first := []activity.CandidateEvent{
+		newActivityCandidate(t, "rac_wm1", base),
+		newActivityCandidate(t, "rac_wm2", base.Add(2*time.Minute)),
+		newActivityCandidate(t, "rac_wm3", base.Add(4*time.Minute)),
+	}
+	if _, err := PublishActivityBatch(ctx, pool, 1, first); err != nil {
+		t.Fatalf("publish first page: %v", err)
+	}
+	head, err := repository.LoadPublishedHead(ctx)
+	if err != nil {
+		t.Fatalf("load head: %v", err)
+	}
+	asOf := head.PublishedIngestSequence
+
+	query, err := activity.NormalizeQuery(activity.Query{
+		Subject: activity.SubjectRef{
+			Kind: records.SubjectKindVPS, SourceID: "vps_7c2a4e18b09d5f31",
+		},
+		View:  activity.ViewActivity,
+		Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("normalize query: %v", err)
+	}
+	pageRequest := activity.SubjectPageRequest{
+		Query:            query,
+		Generation:       head.Generation,
+		AsOf:             asOf,
+		Limit:            10,
+		AuthUnrestricted: true,
+	}
+	pageOne, err := repository.ListSubjectPage(ctx, pageRequest)
+	if err != nil {
+		t.Fatalf("list page one: %v", err)
+	}
+	if !pageOne.SubjectKnown || len(pageOne.Events) != 3 {
+		t.Fatalf("page one = known=%v events=%d, want known with 3", pageOne.SubjectKnown, len(pageOne.Events))
+	}
+	firstIDs := []string{pageOne.Events[0].ActivityID, pageOne.Events[1].ActivityID, pageOne.Events[2].ActivityID}
+
+	// Insert a live row that sorts between the first two events, and a backfilled
+	// older row. Neither may appear on a page still bound to the old as-of.
+	late := newActivityCandidate(t, "rac_wm_late", base.Add(time.Minute))
+	backfill := newActivityCandidate(t, "rac_wm_old", base.Add(-time.Hour))
+	backfill.Backfilled = true
+	backfill.CanonicalHash = backfill.ComputeCanonicalHash()
+	if _, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{late, backfill}); err != nil {
+		t.Fatalf("publish after watermark: %v", err)
+	}
+
+	pageAgain, err := repository.ListSubjectPage(ctx, pageRequest)
+	if err != nil {
+		t.Fatalf("list at frozen as-of: %v", err)
+	}
+	if len(pageAgain.Events) != 3 {
+		t.Fatalf("frozen page length = %d, want 3", len(pageAgain.Events))
+	}
+	for i, event := range pageAgain.Events {
+		if event.ActivityID != firstIDs[i] {
+			t.Fatalf("frozen page[%d] = %s, want %s", i, event.ActivityID, firstIDs[i])
+		}
+	}
+
+	newerHead, err := repository.LoadPublishedHead(ctx)
+	if err != nil {
+		t.Fatalf("reload head: %v", err)
+	}
+	hasNewer, err := repository.HasNewerAuthorized(ctx, activity.SubjectPageRequest{
+		Query:            query,
+		Generation:       newerHead.Generation,
+		AsOf:             newerHead.PublishedIngestSequence,
+		AuthUnrestricted: true,
+	}, asOf)
+	if err != nil {
+		t.Fatalf("HasNewerAuthorized: %v", err)
+	}
+	if !hasNewer {
+		t.Fatal("published rows after as-of must set HasNewerAuthorized")
+	}
+
+	refreshed := pageRequest
+	refreshed.AsOf = newerHead.PublishedIngestSequence
+	pageFresh, err := repository.ListSubjectPage(ctx, refreshed)
+	if err != nil {
+		t.Fatalf("list refreshed: %v", err)
+	}
+	if len(pageFresh.Events) != 5 {
+		t.Fatalf("refreshed page length = %d, want 5", len(pageFresh.Events))
+	}
 }

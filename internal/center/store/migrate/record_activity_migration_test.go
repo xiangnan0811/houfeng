@@ -57,6 +57,7 @@ func TestRecordActivityMigrationDefinesExactOwnedTables(t *testing.T) {
 		"record_activity_subjects",
 		"record_activity_projection_checkpoints",
 		"record_activity_revision_intervals",
+		"record_activity_purge_receipts",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("0057 record-activity tables = %#v, want %#v", got, want)
@@ -245,6 +246,7 @@ func TestRecordActivityMigrationTracksRevisionValidityAsClosedIntervals(t *testi
 	for _, want := range []string{
 		"record_id text not null",
 		"revision_id text not null",
+		"revision_no bigint not null",
 		"valid_from_ingest_sequence bigint not null",
 		"valid_to_ingest_sequence bigint",
 	} {
@@ -263,9 +265,11 @@ func TestRecordActivityMigrationIndexesTheReviewedQueryShapes(t *testing.T) {
 	got := recordActivityIndexNames(t)
 	for _, want := range []string{
 		"idx_record_activity_subjects_timeline",
+		"idx_record_activity_subjects_observed",
 		"idx_record_activity_subjects_event_kind",
 		"idx_record_activity_subjects_source_kind",
 		"idx_record_activity_subjects_watermark",
+		"idx_record_activity_subjects_tombstone",
 		"idx_record_activity_revision_intervals_validity",
 		"idx_record_activity_projection_source",
 	} {

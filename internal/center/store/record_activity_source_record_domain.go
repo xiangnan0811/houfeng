@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/activity"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
@@ -79,19 +80,24 @@ func (source *RecordDomainActivitySource) AuthoritativeHead(
 }
 
 // Readiness reports this source as export-ready only when the head it is given
-// can carry a completeness claim on its own.
+// can carry a completeness claim on its own, and the active projector checkpoint
+// says the source has caught up to that head.
 func (source *RecordDomainActivitySource) Readiness(
-	_ context.Context,
+	ctx context.Context,
 	_ activity.ExportScope,
 	head activity.SourceHead,
 ) (activity.SourceReadiness, error) {
 	if head.Kind != activity.SourceKindRecordDomain || !head.SupportsCompletenessClaim() {
 		return activity.SourceReadiness{}, fmt.Errorf("%w: record domain head carries no transaction horizon", activity.ErrSourceNotReady)
 	}
+	caughtUp, err := loadActiveSourceCaughtUp(ctx, source.pool, activity.SourceKindRecordDomain)
+	if err != nil {
+		return activity.SourceReadiness{}, err
+	}
 	return activity.SourceReadiness{
 		Kind:     activity.SourceKindRecordDomain,
 		Head:     head,
-		CaughtUp: true,
+		CaughtUp: caughtUp,
 	}, nil
 }
 
@@ -105,6 +111,10 @@ type recordDomainActivityRow struct {
 	eventAt       time.Time
 	recordedAt    time.Time
 	revisionNo    int64
+	// namedRevision distinguishes an event that carries its own revision from one
+	// whose revision the lateral join resolved. Only the former can have created
+	// that revision; a resolved one merely happened while it was current.
+	namedRevision bool
 }
 
 // ScanAfter reads one page and normalizes it. The lateral join resolves the
@@ -129,7 +139,8 @@ func (source *RecordDomainActivitySource) ScanAfter(
 		  domain_activity.actor_id,
 		  domain_activity.event_at,
 		  domain_activity.recorded_at,
-		  coalesce(named.revision_no, effective.revision_no, 0)
+		  coalesce(named.revision_no, effective.revision_no, 0),
+		  domain_activity.revision_id is not null
 		from public.record_domain_activities domain_activity
 		left join public.record_revisions named
 		  on named.revision_id = domain_activity.revision_id
@@ -142,12 +153,19 @@ func (source *RecordDomainActivitySource) ScanAfter(
 		  limit 1
 		) effective on domain_activity.revision_id is null
 		where domain_activity.project_id = $1
-		  and domain_activity.recorded_at >= $2
-		  and domain_activity.recorded_at <= $3
+		  and (
+		    domain_activity.recorded_at > $2
+		    or (
+		      domain_activity.recorded_at = $2
+		      and ($3 = '' or domain_activity.activity_id > $3)
+		    )
+		  )
+		  and domain_activity.recorded_at <= $4
 		order by domain_activity.recorded_at, domain_activity.activity_id
-		limit $4`,
+		limit $5`,
 		recordplatform.ProjectIDDefault,
 		windowLowerBound(window),
+		activityKeysetAfter(window),
 		window.Through.UTC(),
 		limit,
 	)
@@ -163,6 +181,7 @@ func (source *RecordDomainActivitySource) ScanAfter(
 		if err := rows.Scan(
 			&row.activityID, &row.recordID, &row.revisionID, &row.eventKind,
 			&row.sourceVersion, &row.actorID, &row.eventAt, &row.recordedAt, &row.revisionNo,
+			&row.namedRevision,
 		); err != nil {
 			return nil, fmt.Errorf("scan record domain activity row: %w", err)
 		}
@@ -182,10 +201,27 @@ func (source *RecordDomainActivitySource) ScanAfter(
 	if err != nil {
 		return nil, err
 	}
+	authScopes, err := source.loadRevisionAuthScopes(ctx, revisionIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	candidates := make([]activity.CandidateEvent, 0, len(scanned))
 	for _, row := range scanned {
-		candidate, err := buildRecordDomainCandidate(source.namespace, row, subjects[row.revisionID])
+		if row.revisionID == "" {
+			return nil, fmt.Errorf(
+				"%w: record domain activity %s has no revision for authorization",
+				activity.ErrUnreachableCandidate, row.activityID,
+			)
+		}
+		authScope, ok := authScopes[row.revisionID]
+		if !ok {
+			return nil, fmt.Errorf(
+				"%w: record domain activity %s revision %q has no visibility",
+				activity.ErrUnreachableCandidate, row.activityID, row.revisionID,
+			)
+		}
+		candidate, err := buildRecordDomainCandidate(source.namespace, row, subjects[row.revisionID], authScope)
 		if err != nil {
 			return nil, fmt.Errorf("normalize record domain activity %s: %w", row.activityID, err)
 		}
@@ -194,14 +230,44 @@ func (source *RecordDomainActivitySource) ScanAfter(
 	return candidates, nil
 }
 
-// windowLowerBound keeps a zero From meaning "all history" rather than the zero
-// instant, which PostgreSQL would happily compare against but which reads as a
-// year-1 timestamp in a query plan.
-func windowLowerBound(window activity.ScanWindow) time.Time {
-	if window.From.IsZero() {
-		return time.Unix(0, 0).UTC()
+func (source *RecordDomainActivitySource) loadRevisionAuthScopes(
+	ctx context.Context,
+	revisionIDs []string,
+) (map[string]recordauth.ResourceScope, error) {
+	byRevision := make(map[string]recordauth.ResourceScope, len(revisionIDs))
+	if len(revisionIDs) == 0 {
+		return byRevision, nil
 	}
-	return window.From.UTC()
+	rows, err := source.pool.Query(ctx, `
+		select revision_id, visibility_scope, visibility_digest
+		from public.record_revisions
+		where revision_id = any($1::text[])`,
+		revisionIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load record revision visibility: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			revisionID string
+			raw        []byte
+			digest     []byte
+		)
+		if err := rows.Scan(&revisionID, &raw, &digest); err != nil {
+			return nil, fmt.Errorf("scan record revision visibility: %w", err)
+		}
+		visibility, err := decodeStoredRecordVisibility(raw, digest)
+		if err != nil {
+			return nil, fmt.Errorf("decode revision %s visibility: %w", revisionID, err)
+		}
+		byRevision[revisionID] = activity.AuthScopeFromVisibility(visibility)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load record revision visibility: %w", err)
+	}
+	return byRevision, nil
 }
 
 func (source *RecordDomainActivitySource) loadRevisionSubjects(
@@ -271,6 +337,16 @@ var recordDomainEventTitles = map[activity.EventKind]string{
 	activity.EventKindActionReopened:           "行动项已重开",
 }
 
+// recordDomainRevisionCommitKinds are the kinds whose writer commits a new
+// revision. The split is the writer's own, not a guess: `RevisionCommitCommand`
+// accepts exactly these three, while archive and unarchive go through the
+// lifecycle path and name the revision that was already current.
+var recordDomainRevisionCommitKinds = map[activity.EventKind]bool{
+	activity.EventKind(records.DomainActivityRecordCreated):  true,
+	activity.EventKind(records.DomainActivityRecordRevised):  true,
+	activity.EventKind(records.DomainActivityRecordRestored): true,
+}
+
 // RecordDomainEventKinds is the closed set this source can emit. It exists so a
 // test can prove the projected vocabulary matches what the record writers
 // actually write, instead of drifting into kinds nothing produces.
@@ -286,6 +362,7 @@ func buildRecordDomainCandidate(
 	namespace activity.Namespace,
 	row recordDomainActivityRow,
 	subjects []activity.SubjectSnapshot,
+	authScope recordauth.ResourceScope,
 ) (activity.CandidateEvent, error) {
 	eventKind := activity.EventKind(row.eventKind)
 	title, known := recordDomainEventTitles[eventKind]
@@ -296,6 +373,12 @@ func buildRecordDomainCandidate(
 	}
 	if row.sourceVersion <= 0 {
 		return activity.CandidateEvent{}, activity.ErrInvalidSourceIdentity
+	}
+	if authScope.Visibility.Kind == "" || authScope.Visibility.CanonicalHash == ([32]byte{}) {
+		return activity.CandidateEvent{}, fmt.Errorf(
+			"%w: missing authoritative visibility for %s",
+			activity.ErrUnreachableCandidate, row.activityID,
+		)
 	}
 
 	// The event's own primary key is the source coordinate. `source_event_id` is
@@ -337,6 +420,21 @@ func buildRecordDomainCandidate(
 		Severity:   "info",
 		RecordID:   row.recordID,
 		RevisionID: row.revisionID,
+		RevisionNo: uint64(row.revisionNo),
+		AuthScope:  authScope,
+		// Only an event that carries its own revision and comes from the commit
+		// path created that revision. Everything else — comments, actions, archive
+		// — names a revision it merely happened alongside.
+		OpensRevision: row.namedRevision && recordDomainRevisionCommitKinds[eventKind],
+	}
+	if candidate.OpensRevision && (candidate.RevisionID == "" || candidate.RevisionNo == 0) {
+		// A commit whose revision row cannot be found means the join answered for a
+		// revision that is not there, and publication would build a validity
+		// interval on it.
+		return activity.CandidateEvent{}, fmt.Errorf(
+			"%w: %s commits revision %q with no revision number",
+			activity.ErrInvalidSourceIdentity, row.activityID, row.revisionID,
+		)
 	}
 	if len(candidate.Subjects) == 0 {
 		return activity.CandidateEvent{}, fmt.Errorf(

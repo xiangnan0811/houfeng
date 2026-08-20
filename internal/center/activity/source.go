@@ -80,10 +80,16 @@ func (head SourceHead) validate() error {
 	return nil
 }
 
-// ScanWindow is the half-open range one pass reads.
+// ScanWindow is the inclusive time range one pass reads, plus an optional
+// exclusive keyset cursor so a full page of rows that share one recorded_at can
+// continue without stalling.
 type ScanWindow struct {
 	From    time.Time
 	Through time.Time
+	// AfterEventID is the last Source.EventID already consumed at From. When set,
+	// ScanAfter must return rows strictly after (From, AfterEventID) in
+	// (recorded_at, source_event_id) order. Empty means "from the start of From".
+	AfterEventID string
 }
 
 // SourceCheckpoint is the projector's durable position in one source.
@@ -95,15 +101,10 @@ type SourceCheckpoint struct {
 	LastErrorCode   string
 }
 
-// FrontierWindow is the forward range that makes progress. Both bounds are
-// inclusive: a page cut off in the middle of a group of rows sharing one
-// timestamp can only advance the position to that timestamp, and an exclusive
-// lower bound would then drop the rest of the group. Re-reading the boundary
-// instant instead costs one classification per row and no sequence numbers.
-//
-// A first run has no position, so the window opens at the zero time and covers
-// all history; starting at "now minus a window" would silently skip everything
-// older.
+// FrontierWindow is the forward range that makes progress. Both time bounds are
+// inclusive. Mid-timestamp paging uses ScanWindow.AfterEventID inside one drain;
+// the durable checkpoint still stores only RecordedThrough, and a later pass may
+// reclassify rows already published at that instant (publication is idempotent).
 func (checkpoint SourceCheckpoint) FrontierWindow(head SourceHead) ScanWindow {
 	return ScanWindow{From: checkpoint.RecordedThrough, Through: head.RecordedThrough}
 }
@@ -267,6 +268,19 @@ type CandidateEvent struct {
 	EvidenceID    string
 	AuthScope     recordauth.ResourceScope
 	CanonicalHash [32]byte
+
+	// RevisionNo orders a record's revisions. It is carried so publication can
+	// tell a newer revision from an older one that arrived late, which arrival
+	// order alone cannot answer.
+	RevisionNo uint64
+
+	// OpensRevision says this event is the one that made RevisionID the record's
+	// current revision. Only the adapter can know that: a comment names the
+	// revision it was written against, and an archive names the revision that was
+	// already current, so neither moves the pointer even though both carry a
+	// revision id. Publication turns this claim into the validity interval that
+	// `versions=current` resolves against at a fixed watermark.
+	OpensRevision bool
 }
 
 // ComputeCanonicalHash fingerprints everything the projection stores about this
@@ -285,6 +299,12 @@ func (candidate CandidateEvent) ComputeCanonicalHash() [sha256.Size]byte {
 	writeUint64(digest, uint64(candidate.RecordedAt.UTC().UnixMicro()))
 	writeLengthPrefixed(digest, candidate.RecordID)
 	writeLengthPrefixed(digest, candidate.RevisionID)
+	writeUint64(digest, candidate.RevisionNo)
+	if candidate.OpensRevision {
+		digest.Write([]byte{1})
+	} else {
+		digest.Write([]byte{0})
+	}
 	writeLengthPrefixed(digest, candidate.EvidenceID)
 	writeLengthPrefixed(digest, candidate.Corrects)
 	writeLengthPrefixed(digest, candidate.Severity)

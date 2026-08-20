@@ -18,10 +18,11 @@ var (
 	// another source's kind. Accepting it would let one adapter mint identifiers
 	// inside another's namespace and overwrite events it does not own.
 	ErrForeignSourceCandidate = errors.New("activity candidate belongs to another source")
-	// ErrCandidateOutsideWindow means an adapter returned a row recorded after
-	// the bound it was given. Trusting it would let the checkpoint advance over
-	// ground the scan never covered consistently.
-	ErrCandidateOutsideWindow = errors.New("activity candidate was recorded after the requested window")
+	// ErrCandidateOutsideWindow means an adapter returned a row outside the
+	// requested ScanWindow (past Through, or at/before the exclusive keyset
+	// lower bound). Trusting it would let the checkpoint advance over ground
+	// the scan never covered consistently.
+	ErrCandidateOutsideWindow = errors.New("activity candidate was recorded outside the requested window")
 	// ErrUndeterminedActivityID means the identifier is not the derivation of the
 	// event's own source identity, so a retry or a rebuild would not agree on it.
 	ErrUndeterminedActivityID = errors.New("activity candidate id is not derived from its source identity")
@@ -32,6 +33,9 @@ var (
 	// ErrUnreachableCandidate means no subject-scoped query could ever return the
 	// row, which makes projecting it pure cost.
 	ErrUnreachableCandidate = errors.New("activity candidate has no reachable subject")
+	// ErrIncompleteRevisionClaim means a candidate says it moved a record's
+	// current revision without naming the record, the revision, or its order.
+	ErrIncompleteRevisionClaim = errors.New("activity candidate claims a revision it does not identify")
 )
 
 // maxScanPagesPerPass bounds one source's work in one pass. Draining across
@@ -206,6 +210,38 @@ func (projector *Projector) ProjectOnce(ctx context.Context, generation uint64) 
 	return report, nil
 }
 
+// SourceKinds lists the sources this projector was built with, in the order it
+// projects them.
+func (projector *Projector) SourceKinds() []SourceKind {
+	kinds := make([]SourceKind, 0, len(projector.adapters))
+	for _, adapter := range projector.adapters {
+		kinds = append(kinds, adapter.Kind())
+	}
+	return kinds
+}
+
+// ProjectSource runs one pass over a single source. A worker holding a per-source
+// lease needs this: projecting everything would mean projecting sources it does
+// not own.
+func (projector *Projector) ProjectSource(
+	ctx context.Context,
+	generation uint64,
+	kind SourceKind,
+) (SourceOutcome, error) {
+	if ctx == nil {
+		return SourceOutcome{}, errors.New("project activity source: nil context")
+	}
+	if generation == 0 {
+		return SourceOutcome{}, ErrInactiveGeneration
+	}
+	for _, adapter := range projector.adapters {
+		if adapter.Kind() == kind {
+			return projector.projectSource(ctx, generation, adapter), nil
+		}
+	}
+	return SourceOutcome{}, fmt.Errorf("project activity source: no adapter for %q", kind)
+}
+
 func (projector *Projector) projectSource(ctx context.Context, generation uint64, adapter SourceAdapter) SourceOutcome {
 	kind := adapter.Kind()
 	outcome := SourceOutcome{Kind: kind}
@@ -319,6 +355,8 @@ func failureCode(cause error) string {
 		return "candidate_hash_mismatch"
 	case errors.Is(cause, ErrUnreachableCandidate):
 		return "unreachable_candidate"
+	case errors.Is(cause, ErrIncompleteRevisionClaim):
+		return "incomplete_revision_claim"
 	case errors.Is(cause, ErrInvalidPresentation):
 		return "invalid_presentation"
 	case errors.Is(cause, ErrInvalidSourceIdentity):
@@ -339,8 +377,10 @@ type drainResult struct {
 	maxRecordedAt  time.Time
 	// complete means the window was read to its end.
 	complete bool
-	// stalled means a full page could not be paged past, because every row in it
-	// shares the lower bound's timestamp.
+	// stalled means a full page could not advance its keyset cursor. With a
+	// correct (recorded_at, event_id) ScanAfter this should not happen; it is
+	// retained as a fail-closed guard against a buggy adapter that returns the
+	// same page forever.
 	stalled bool
 }
 
@@ -348,6 +388,9 @@ type drainResult struct {
 // own publication, so a failure halfway through leaves the earlier pages durably
 // projected and simply does not advance the position: the next pass re-reads
 // them and publication classifies them as already present.
+//
+// Progress across rows that share one recorded_at uses ScanWindow.AfterEventID
+// so a full page at one instant cannot permanently stall the source.
 func (projector *Projector) drain(
 	ctx context.Context,
 	generation uint64,
@@ -356,8 +399,13 @@ func (projector *Projector) drain(
 ) (drainResult, error) {
 	result := drainResult{}
 	from := window.From
+	afterEventID := window.AfterEventID
 	for page := 0; page < maxScanPagesPerPass; page++ {
-		candidates, err := adapter.ScanAfter(ctx, ScanWindow{From: from, Through: window.Through}, projector.batchSize)
+		candidates, err := adapter.ScanAfter(ctx, ScanWindow{
+			From:         from,
+			Through:      window.Through,
+			AfterEventID: afterEventID,
+		}, projector.batchSize)
 		if err != nil {
 			return result, fmt.Errorf("scan %s: %w", adapter.Kind(), err)
 		}
@@ -365,7 +413,11 @@ func (projector *Projector) drain(
 			result.complete = true
 			return result, nil
 		}
-		if err := projector.validateCandidates(adapter.Kind(), window, candidates); err != nil {
+		if err := projector.validateCandidates(adapter.Kind(), ScanWindow{
+			From:         from,
+			Through:      window.Through,
+			AfterEventID: afterEventID,
+		}, candidates); err != nil {
 			return result, err
 		}
 
@@ -377,22 +429,23 @@ func (projector *Projector) drain(
 		result.inserted += outcome.Inserted
 		result.alreadyPresent += outcome.AlreadyPresent
 
-		pageMax := maxRecordedAt(candidates)
-		result.maxRecordedAt = laterTime(result.maxRecordedAt, pageMax)
+		last := candidates[len(candidates)-1]
+		result.maxRecordedAt = laterTime(result.maxRecordedAt, last.RecordedAt)
 
 		if len(candidates) < projector.batchSize {
 			result.complete = true
 			return result, nil
 		}
-		if !pageMax.After(from) {
-			// Every row in a full page sits at or below the lower bound, so
-			// moving the bound to pageMax would return the same page forever.
+
+		nextFrom := last.RecordedAt
+		nextAfter := last.Source.EventID
+		if !nextFrom.After(from) && nextAfter <= afterEventID {
+			// Keyset did not move — continuing would loop on the same page.
 			result.stalled = true
 			return result, nil
 		}
-		// Re-reading the boundary instant is deliberate: rows sharing pageMax may
-		// have been cut off by the page limit, and publication is idempotent.
-		from = pageMax
+		from = nextFrom
+		afterEventID = nextAfter
 	}
 	return result, nil
 }
@@ -427,6 +480,16 @@ func (projector *Projector) validateCandidate(kind SourceKind, window ScanWindow
 	if !window.Through.IsZero() && candidate.RecordedAt.After(window.Through) {
 		return ErrCandidateOutsideWindow
 	}
+	if !window.From.IsZero() {
+		if candidate.RecordedAt.Before(window.From) {
+			return ErrCandidateOutsideWindow
+		}
+		if !candidate.RecordedAt.After(window.From) &&
+			window.AfterEventID != "" &&
+			candidate.Source.EventID <= window.AfterEventID {
+			return ErrCandidateOutsideWindow
+		}
+	}
 	if len(candidate.Subjects) == 0 {
 		return ErrUnreachableCandidate
 	}
@@ -436,6 +499,15 @@ func (projector *Projector) validateCandidate(kind SourceKind, window ScanWindow
 			!records.ValidSubjectSourceID(subject.Kind, subject.SourceID) {
 			return ErrUnreachableCandidate
 		}
+	}
+
+	// A revision claim decides what `versions=current` answers at a watermark, so
+	// an incomplete one must not reach publication: an interval with no revision
+	// or no order would either fail a constraint mid-batch or, worse, silently
+	// become a pointer nothing can resolve.
+	if candidate.OpensRevision &&
+		(candidate.RecordID == "" || candidate.RevisionID == "" || candidate.RevisionNo == 0) {
+		return ErrIncompleteRevisionClaim
 	}
 
 	expectedID, err := NewActivityID(projector.namespace, candidate.Source, candidate.EventKind)
@@ -449,14 +521,6 @@ func (projector *Projector) validateCandidate(kind SourceKind, window ScanWindow
 		return ErrCandidateHashMismatch
 	}
 	return nil
-}
-
-func maxRecordedAt(candidates []CandidateEvent) time.Time {
-	var latest time.Time
-	for _, candidate := range candidates {
-		latest = laterTime(latest, candidate.RecordedAt.UTC())
-	}
-	return latest
 }
 
 func laterTime(left, right time.Time) time.Time {

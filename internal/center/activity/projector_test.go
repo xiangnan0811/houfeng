@@ -470,6 +470,35 @@ func TestProjectorRejectsUntrustworthyCandidates(t *testing.T) {
 			},
 			want: ErrInvalidSourceIdentity,
 		},
+		// A currency claim decides what versions=current answers at a watermark, so
+		// an unidentifiable one must not reach publication.
+		"claims a revision it does not name": {
+			mutate: func(t *testing.T, candidate *CandidateEvent) {
+				candidate.OpensRevision = true
+				candidate.RecordID = "rec_9a1b2c"
+				candidate.RevisionNo = 2
+				candidate.CanonicalHash = candidate.ComputeCanonicalHash()
+			},
+			want: ErrIncompleteRevisionClaim,
+		},
+		"claims a revision with no order": {
+			mutate: func(t *testing.T, candidate *CandidateEvent) {
+				candidate.OpensRevision = true
+				candidate.RecordID = "rec_9a1b2c"
+				candidate.RevisionID = "rrv_5d6e7f"
+				candidate.CanonicalHash = candidate.ComputeCanonicalHash()
+			},
+			want: ErrIncompleteRevisionClaim,
+		},
+		"claims a revision for no record": {
+			mutate: func(t *testing.T, candidate *CandidateEvent) {
+				candidate.OpensRevision = true
+				candidate.RevisionID = "rrv_5d6e7f"
+				candidate.RevisionNo = 2
+				candidate.CanonicalHash = candidate.ComputeCanonicalHash()
+			},
+			want: ErrIncompleteRevisionClaim,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			candidate := testCandidate(t, SourceKindRecordDomain, "rac_a1", recordedAt)
@@ -498,10 +527,60 @@ func TestProjectorRejectsUntrustworthyCandidates(t *testing.T) {
 	}
 }
 
-// More rows than a page can hold, all recorded at the same instant, cannot be
-// paged past. Reporting the stall is the honest answer; looping forever or
-// skipping the rest are both worse.
-func TestProjectorReportsAStallInsteadOfLoopingOnAPageItCannotAdvancePast(t *testing.T) {
+// A full page of rows that share one recorded_at must still advance via the
+// exclusive AfterEventID keyset. Stalling forever (or skipping the rest) would
+// leave the projection permanently incomplete.
+func TestProjectorPagesPastAFullPageOfSameInstantRows(t *testing.T) {
+	head := NewIncrementalSourceHead(SourceKindRecordDomain, time.Now().UTC(), DefaultSourceSafetyLag)
+	sameInstant := head.RecordedThrough.Add(-time.Hour)
+	ids := []string{"rac_a1", "rac_a2", "rac_a3", "rac_a4"}
+	reads := 0
+	adapter := &fakeAdapter{
+		kind: SourceKindRecordDomain,
+		head: func() (SourceHead, error) { return head, nil },
+		scan: func(window ScanWindow, limit int) ([]CandidateEvent, error) {
+			reads++
+			out := make([]CandidateEvent, 0, limit)
+			for _, id := range ids {
+				if !window.From.IsZero() && sameInstant.Before(window.From) {
+					continue
+				}
+				if !window.From.IsZero() && !sameInstant.After(window.From) &&
+					window.AfterEventID != "" && id <= window.AfterEventID {
+					continue
+				}
+				if !window.Through.IsZero() && sameInstant.After(window.Through) {
+					continue
+				}
+				out = append(out, testCandidate(t, SourceKindRecordDomain, id, sameInstant))
+				if len(out) == limit {
+					break
+				}
+			}
+			return out, nil
+		},
+	}
+	harness := newProjectorHarness(t, adapter, 2)
+
+	outcome := harness.projectOnce(t)
+
+	if !outcome.CaughtUp {
+		t.Fatalf("same-instant pages must catch up once the keyset drains them")
+	}
+	if outcome.Stalled {
+		t.Fatalf("keyset paging must not report a stall")
+	}
+	if outcome.Inserted != len(ids) {
+		t.Fatalf("inserted %d, want %d", outcome.Inserted, len(ids))
+	}
+	if reads != 3 {
+		t.Fatalf("projector read %d pages, want 2 full pages then an empty one", reads)
+	}
+}
+
+// A buggy adapter that ignores AfterEventID and returns the same page forever
+// must fail closed rather than catch up or spin.
+func TestProjectorRejectsAPageThatDoesNotRespectKeyset(t *testing.T) {
 	head := NewIncrementalSourceHead(SourceKindRecordDomain, time.Now().UTC(), DefaultSourceSafetyLag)
 	sameInstant := head.RecordedThrough.Add(-time.Hour)
 	reads := 0
@@ -521,13 +600,16 @@ func TestProjectorReportsAStallInsteadOfLoopingOnAPageItCannotAdvancePast(t *tes
 	outcome := harness.projectOnce(t)
 
 	if outcome.CaughtUp {
-		t.Fatalf("a stalled source must not report caught up")
+		t.Fatalf("a keyset-violating source must not report caught up")
 	}
-	if reads > maxScanPagesPerPass {
-		t.Fatalf("projector read %d pages, want it to stop once it could not advance", reads)
+	if outcome.Err == nil {
+		t.Fatalf("outcome must surface the invalid page")
 	}
-	if !outcome.Stalled {
-		t.Fatalf("outcome must report the stall so an operator can see it")
+	if !errors.Is(outcome.Err, ErrCandidateOutsideWindow) {
+		t.Fatalf("outcome err = %v, want %v", outcome.Err, ErrCandidateOutsideWindow)
+	}
+	if reads != 2 {
+		t.Fatalf("projector read %d pages, want one publish then one rejected re-read", reads)
 	}
 }
 

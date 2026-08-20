@@ -22,6 +22,14 @@ var (
 	// different canonical bytes. That is a source contract violation, not a
 	// retry, and it must stop the source rather than overwrite stored history.
 	ErrActivitySourceHashMismatch = errors.New("activity source event canonical hash mismatch")
+	// ErrActivityRevisionIntervalConflict means two distinct events each claim to
+	// have created the same revision, so the source is contradicting itself about
+	// which one moved the record's pointer.
+	ErrActivityRevisionIntervalConflict = errors.New("activity revision interval conflict")
+	// ErrActivityRecordFenced means the record is under a committed or fenced
+	// deletion reservation. Publishing presentation for it would revive a row
+	// the deletion adapter just proved absent.
+	ErrActivityRecordFenced = errors.New("activity record is deletion-fenced")
 )
 
 // ActivityPublishResult reports what one batch did. The caller needs to
@@ -33,6 +41,12 @@ type ActivityPublishResult struct {
 	AssignedFrom     uint64
 	AssignedThrough  uint64
 	PublishedThrough uint64
+
+	// SupersededRevisions counts revision commits that arrived after a later
+	// revision had already taken the record's pointer. Their events are projected;
+	// they just never held the pointer, and saying so keeps that from looking like
+	// a lost write.
+	SupersededRevisions int
 }
 
 // PublishActivityBatch projects a batch in one transaction.
@@ -147,10 +161,21 @@ func publishActivityBatchInTx(
 	})
 
 	assignedFrom := publishedThrough + 1
+	supersededRevisions := 0
 	for offset, candidate := range missing {
 		sequence := assignedFrom + uint64(offset)
 		if err := insertActivityRow(ctx, transaction, generation, sequence, candidate); err != nil {
 			return ActivityPublishResult{}, err
+		}
+		if !candidate.OpensRevision {
+			continue
+		}
+		opened, err := openRevisionInterval(ctx, transaction, generation, sequence, candidate)
+		if err != nil {
+			return ActivityPublishResult{}, err
+		}
+		if !opened {
+			supersededRevisions++
 		}
 	}
 	assignedThrough := assignedFrom + uint64(len(missing)) - 1
@@ -170,7 +195,85 @@ func publishActivityBatchInTx(
 	result.AssignedFrom = assignedFrom
 	result.AssignedThrough = assignedThrough
 	result.PublishedThrough = assignedThrough
+	result.SupersededRevisions = supersededRevisions
 	return result, nil
+}
+
+// openRevisionInterval moves a record's current-revision pointer to the revision
+// this event committed, and reports whether it actually moved.
+//
+// Validity is measured in ingest sequence rather than event time because that is
+// what a page fixed at a watermark can resolve: asking "which revision was
+// current at sequence S" must have one answer for as long as the reader pages
+// through S, and only projection order gives that. Intervals are half-open —
+// [valid_from, valid_to) — so the event that opens one is itself visible at the
+// watermark where the previous one closes.
+//
+// A revision that arrives after a later one has already opened does not take the
+// pointer. There is no watermark at which it was current, so writing it as one
+// would invent a period that never existed; the event itself is still on the
+// timeline, and the caller is told the pointer stayed put.
+func openRevisionInterval(
+	ctx context.Context,
+	transaction pgx.Tx,
+	generation uint64,
+	sequence uint64,
+	candidate activity.CandidateEvent,
+) (bool, error) {
+	var (
+		openRevisionID string
+		openRevisionNo int64
+	)
+	err := transaction.QueryRow(ctx, `
+		select revision_id, revision_no
+		from public.record_activity_revision_intervals
+		where project_id = $1
+		  and projection_generation = $2
+		  and record_id = $3
+		  and valid_to_ingest_sequence is null
+		for update`,
+		recordplatform.ProjectIDDefault, generation, candidate.RecordID,
+	).Scan(&openRevisionID, &openRevisionNo)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return false, fmt.Errorf("publish activity batch: read open revision for %s: %w", candidate.RecordID, err)
+	case openRevisionID == candidate.RevisionID:
+		// The same revision is already the open one. Two different events claiming
+		// to have created one revision is a source contradiction, not a retry:
+		// retries are already filtered out by activity id above.
+		return false, fmt.Errorf(
+			"%w: %s reopens revision %s",
+			ErrActivityRevisionIntervalConflict, candidate.ActivityID, candidate.RevisionID,
+		)
+	case uint64(openRevisionNo) >= candidate.RevisionNo:
+		return false, nil
+	default:
+		if _, err := transaction.Exec(ctx, `
+			update public.record_activity_revision_intervals
+			set valid_to_ingest_sequence = $4
+			where project_id = $1
+			  and projection_generation = $2
+			  and record_id = $3
+			  and valid_to_ingest_sequence is null`,
+			recordplatform.ProjectIDDefault, generation, candidate.RecordID, sequence,
+		); err != nil {
+			return false, fmt.Errorf("publish activity batch: close revision interval for %s: %w", candidate.RecordID, err)
+		}
+	}
+
+	if _, err := transaction.Exec(ctx, `
+		insert into public.record_activity_revision_intervals (
+		  project_id, projection_generation, record_id, revision_id, revision_no,
+		  valid_from_ingest_sequence, source_kind, source_event_id, source_version
+		) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		recordplatform.ProjectIDDefault, generation, candidate.RecordID,
+		candidate.RevisionID, int64(candidate.RevisionNo), sequence,
+		string(candidate.Source.Kind), candidate.Source.EventID, candidate.Source.Version,
+	); err != nil {
+		return false, fmt.Errorf("publish activity batch: open revision interval for %s: %w", candidate.RevisionID, err)
+	}
+	return true, nil
 }
 
 // loadExistingActivityHashes locks and reads whatever is already stored for this
@@ -229,6 +332,15 @@ func insertActivityRow(
 	sequence uint64,
 	candidate activity.CandidateEvent,
 ) error {
+	if candidate.RecordID != "" {
+		fenced, err := activityRecordIsDeletionFenced(ctx, transaction, candidate.RecordID)
+		if err != nil {
+			return err
+		}
+		if fenced {
+			return fmt.Errorf("%w: %s", ErrActivityRecordFenced, candidate.RecordID)
+		}
+	}
 	presentation, err := json.Marshal(candidate.Presentation)
 	if err != nil {
 		return fmt.Errorf("publish activity batch: encode presentation for %s: %w", candidate.ActivityID, err)
@@ -309,4 +421,26 @@ func nullableActorID(actor *activity.ActorSnapshot) *string {
 		return nil
 	}
 	return nullableText(actor.ActorID)
+}
+
+// activityRecordIsDeletionFenced answers whether a record's presentation must
+// stay absent. Both fenced and committed reservations count: online purge runs
+// while the reservation is committed, and a projector that raced past it would
+// put rows back under the deletion adapter's feet.
+func activityRecordIsDeletionFenced(ctx context.Context, transaction pgx.Tx, recordID string) (bool, error) {
+	var fenced bool
+	if err := transaction.QueryRow(ctx, `
+		select exists (
+		  select 1
+		  from public.deletion_reservations
+		  where project_id = $1
+		    and object_kind = 'record'
+		    and object_id = $2
+		    and state in ('fenced', 'committed')
+		)`,
+		recordplatform.ProjectIDDefault, recordID,
+	).Scan(&fenced); err != nil {
+		return false, fmt.Errorf("publish activity batch: check deletion fence for %s: %w", recordID, err)
+	}
+	return fenced, nil
 }

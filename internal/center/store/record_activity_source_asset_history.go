@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/activity"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/records"
 )
 
@@ -70,17 +71,21 @@ func (source *AssetHistoryActivitySource) AuthoritativeHead(
 }
 
 func (source *AssetHistoryActivitySource) Readiness(
-	_ context.Context,
+	ctx context.Context,
 	_ activity.ExportScope,
 	head activity.SourceHead,
 ) (activity.SourceReadiness, error) {
 	if head.Kind != activity.SourceKindAssetHistory || !head.SupportsCompletenessClaim() {
 		return activity.SourceReadiness{}, fmt.Errorf("%w: asset history head carries no transaction horizon", activity.ErrSourceNotReady)
 	}
+	caughtUp, err := loadActiveSourceCaughtUp(ctx, source.pool, activity.SourceKindAssetHistory)
+	if err != nil {
+		return activity.SourceReadiness{}, err
+	}
 	return activity.SourceReadiness{
 		Kind:     activity.SourceKindAssetHistory,
 		Head:     head,
-		CaughtUp: true,
+		CaughtUp: caughtUp,
 	}, nil
 }
 
@@ -139,22 +144,22 @@ const assetHistoryActivityScanSQL = `
 	         decision.vps_id, decision.decided_at as occurred_at, decision.created_at,
 	         decision.to_decision as detail
 	  from public.renewal_decisions decision
-	  where decision.created_at >= $1 and decision.created_at <= $2
+	  where decision.created_at >= $1 and decision.created_at <= $3
 	  union all
 	  select '` + assetFactPriceChange + `', price.price_history_id,
 	         price.vps_id, price.changed_at, price.created_at, ''
 	  from public.price_histories price
-	  where price.created_at >= $1 and price.created_at <= $2
+	  where price.created_at >= $1 and price.created_at <= $3
 	  union all
 	  select '` + assetFactIPChange + `', address.ip_history_id,
 	         address.vps_id, address.changed_at, address.created_at, ''
 	  from public.ip_histories address
-	  where address.created_at >= $1 and address.created_at <= $2
+	  where address.created_at >= $1 and address.created_at <= $3
 	  union all
 	  select '` + assetFactSpecSnapshot + `', spec.snapshot_id,
 	         spec.vps_id, spec.captured_at, spec.created_at, ''
 	  from public.vps_spec_snapshots spec
-	  where spec.created_at >= $1 and spec.created_at <= $2
+	  where spec.created_at >= $1 and spec.created_at <= $3
 	)
 	select
 	  facts.fact_type, facts.fact_id, facts.vps_id,
@@ -162,8 +167,15 @@ const assetHistoryActivityScanSQL = `
 	  facts.occurred_at, facts.created_at, facts.detail
 	from facts
 	left join public.vps_assets asset on asset.vps_id = facts.vps_id
-	order by facts.created_at, facts.fact_type, facts.fact_id
-	limit $3`
+	where (
+	    facts.created_at > $1
+	    or (
+	      facts.created_at = $1
+	      and ($2 = '' or (facts.fact_type || '-' || facts.fact_id) > $2)
+	    )
+	  )
+	order by facts.created_at, facts.fact_type || '-' || facts.fact_id
+	limit $4`
 
 func (source *AssetHistoryActivitySource) ScanAfter(
 	ctx context.Context,
@@ -177,6 +189,7 @@ func (source *AssetHistoryActivitySource) ScanAfter(
 		ctx,
 		assetHistoryActivityScanSQL,
 		windowLowerBound(window),
+		activityKeysetAfter(window),
 		window.Through.UTC(),
 		limit,
 	)
@@ -283,6 +296,11 @@ func buildAssetHistoryCandidate(
 		},
 		Severity: "info",
 	}
+	authScope, err := activity.ProjectAuthScope(recordauth.ProjectIDDefault)
+	if err != nil {
+		return activity.CandidateEvent{}, err
+	}
+	candidate.AuthScope = authScope
 
 	candidate.CanonicalHash = candidate.ComputeCanonicalHash()
 	return candidate, nil

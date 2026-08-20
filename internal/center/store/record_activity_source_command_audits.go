@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/activity"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/records"
 	"houfeng/internal/contracts/agentapi"
 )
@@ -68,17 +69,21 @@ func (source *CommandAuditActivitySource) AuthoritativeHead(
 }
 
 func (source *CommandAuditActivitySource) Readiness(
-	_ context.Context,
+	ctx context.Context,
 	_ activity.ExportScope,
 	head activity.SourceHead,
 ) (activity.SourceReadiness, error) {
 	if head.Kind != activity.SourceKindCommandAudit || !head.SupportsCompletenessClaim() {
 		return activity.SourceReadiness{}, fmt.Errorf("%w: command audit head carries no transaction horizon", activity.ErrSourceNotReady)
 	}
+	caughtUp, err := loadActiveSourceCaughtUp(ctx, source.pool, activity.SourceKindCommandAudit)
+	if err != nil {
+		return activity.SourceReadiness{}, err
+	}
 	return activity.SourceReadiness{
 		Kind:     activity.SourceKindCommandAudit,
 		Head:     head,
-		CaughtUp: true,
+		CaughtUp: caughtUp,
 	}, nil
 }
 
@@ -121,10 +126,16 @@ const commandAuditActivityScanSQL = `
 	from monitoring_instance_command_action_audit audit
 	left join monitoring_instances instance
 	  on instance.monitoring_instance_id = audit.monitoring_instance_id
-	where audit.occurred_at >= $1
-	  and audit.occurred_at <= $2
+	where (
+	    audit.occurred_at > $1
+	    or (
+	      audit.occurred_at = $1
+	      and ($2 = '' or audit.audit_id > $2)
+	    )
+	  )
+	  and audit.occurred_at <= $3
 	order by audit.occurred_at, audit.audit_id
-	limit $3`
+	limit $4`
 
 func (source *CommandAuditActivitySource) ScanAfter(
 	ctx context.Context,
@@ -138,6 +149,7 @@ func (source *CommandAuditActivitySource) ScanAfter(
 		ctx,
 		commandAuditActivityScanSQL,
 		windowLowerBound(window),
+		activityKeysetAfter(window),
 		window.Through.UTC(),
 		limit,
 	)
@@ -253,6 +265,12 @@ func buildCommandAuditCandidate(
 			DisplayName: row.actorDisplayName,
 		}
 	}
+
+	authScope, err := activity.ProjectAuthScope(recordauth.ProjectIDDefault)
+	if err != nil {
+		return activity.CandidateEvent{}, err
+	}
+	candidate.AuthScope = authScope
 
 	candidate.CanonicalHash = candidate.ComputeCanonicalHash()
 	return candidate, nil

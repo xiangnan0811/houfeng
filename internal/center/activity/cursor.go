@@ -77,6 +77,13 @@ func (cursor Cursor) AsOf() uint64         { return cursor.asOf }
 func (cursor Cursor) ExpiresAt() time.Time { return cursor.expiresAt }
 func (cursor Cursor) SortKey() SortKey     { return cursor.sortKey }
 
+// FirstPage reports whether this cursor is a watermark-only token: it freezes
+// generation and as-of, but does not advance past any row. Snapshot tokens and
+// the first page of a query both use this shape.
+func (cursor Cursor) FirstPage() bool {
+	return cursor.sortKey == SortKey{}
+}
+
 // CursorCodec seals page positions with AES-GCM. Encryption rather than a
 // signed envelope is the requirement here: the payload holds the projection
 // generation and the as-of watermark, and a client that could read those would
@@ -128,11 +135,21 @@ func (codec *CursorCodec) Encode(values CursorValues) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if values.Generation == 0 || values.AsOf == 0 || values.ExpiresAt.IsZero() {
+	// AsOf may be zero when the generation has published nothing yet: the token
+	// still freezes that empty watermark so a later publish cannot silently
+	// expand a page that already answered "no events".
+	if values.Generation == 0 || values.ExpiresAt.IsZero() {
 		return "", ErrInvalidCursor
 	}
 	if err := validateSortKey(values.SortKey); err != nil {
 		return "", err
+	}
+
+	eventAtMicro := int64(0)
+	recordedAtMicro := int64(0)
+	if values.SortKey != (SortKey{}) {
+		eventAtMicro = values.SortKey.EventAt.UTC().Truncate(time.Microsecond).UnixMicro()
+		recordedAtMicro = values.SortKey.RecordedAt.UTC().Truncate(time.Microsecond).UnixMicro()
 	}
 
 	payload, err := json.Marshal(cursorEnvelope{
@@ -142,8 +159,8 @@ func (codec *CursorCodec) Encode(values CursorValues) (string, error) {
 		Generation:  values.Generation,
 		AsOf:        values.AsOf,
 		ExpiresAt:   values.ExpiresAt.UTC().Truncate(time.Microsecond).UnixMicro(),
-		EventAt:     values.SortKey.EventAt.UTC().Truncate(time.Microsecond).UnixMicro(),
-		RecordedAt:  values.SortKey.RecordedAt.UTC().Truncate(time.Microsecond).UnixMicro(),
+		EventAt:     eventAtMicro,
+		RecordedAt:  recordedAtMicro,
 		SourceKind:  string(values.SortKey.SourceKind),
 		ActivityID:  values.SortKey.ActivityID,
 	})
@@ -216,7 +233,7 @@ func (codec *CursorCodec) Bind(
 	if envelope.Generation != generation {
 		return Cursor{}, ErrCursorExpired
 	}
-	if envelope.AsOf == 0 || envelope.ExpiresAt == 0 {
+	if envelope.ExpiresAt == 0 {
 		return Cursor{}, ErrCursorInvalid
 	}
 	expiresAt := time.UnixMicro(envelope.ExpiresAt).UTC()
@@ -224,14 +241,18 @@ func (codec *CursorCodec) Bind(
 		return Cursor{}, ErrCursorExpired
 	}
 
-	sortKey := SortKey{
-		EventAt:    time.UnixMicro(envelope.EventAt).UTC(),
-		RecordedAt: time.UnixMicro(envelope.RecordedAt).UTC(),
-		SourceKind: SourceKind(envelope.SourceKind),
-		ActivityID: envelope.ActivityID,
-	}
-	if err := validateSortKey(sortKey); err != nil {
-		return Cursor{}, ErrCursorInvalid
+	var sortKey SortKey
+	if envelope.EventAt != 0 || envelope.RecordedAt != 0 ||
+		envelope.SourceKind != "" || envelope.ActivityID != "" {
+		sortKey = SortKey{
+			EventAt:    time.UnixMicro(envelope.EventAt).UTC(),
+			RecordedAt: time.UnixMicro(envelope.RecordedAt).UTC(),
+			SourceKind: SourceKind(envelope.SourceKind),
+			ActivityID: envelope.ActivityID,
+		}
+		if err := validateSortKey(sortKey); err != nil {
+			return Cursor{}, ErrCursorInvalid
+		}
 	}
 	return Cursor{
 		generation: envelope.Generation,
@@ -279,6 +300,12 @@ func cursorBindingDigests(
 }
 
 func validateSortKey(sortKey SortKey) error {
+	// An empty sort key is a watermark token, not a page position. Encode and
+	// Bind both accept it so snapshot_cursor can freeze as-of without inventing
+	// a fake activity id.
+	if sortKey == (SortKey{}) {
+		return nil
+	}
 	if sortKey.EventAt.IsZero() || sortKey.RecordedAt.IsZero() {
 		return ErrInvalidCursor
 	}
