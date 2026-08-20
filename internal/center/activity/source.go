@@ -146,6 +146,17 @@ type SourceReadiness struct {
 	Kind     SourceKind
 	Head     SourceHead
 	CaughtUp bool
+
+	// ExcludedRows counts source rows this adapter deliberately does not project
+	// because it cannot establish their provenance. The monitoring log is the real
+	// case: it holds rows written before the metadata contract existed, and those
+	// rows are permanent history, so blocking on them would stall the source
+	// forever while projecting them would put unprovable claims on a timeline.
+	//
+	// The count is part of the proof rather than a log line. An export that says
+	// "complete" while an adapter silently skipped rows is making a false claim;
+	// with the count, it can say what it left out and why.
+	ExcludedRows uint64
 }
 
 // ActivitySnapshot pins the projection an export reads. Child 7 freezes this
@@ -216,6 +227,8 @@ func (vector ReadinessVector) Digest() [sha256.Size]byte {
 		binary.BigEndian.PutUint64(scratch[:], uint64(source.Head.RecordedThrough.UnixMicro()))
 		digest.Write(scratch[:])
 		binary.BigEndian.PutUint64(scratch[:], source.Head.TransactionHorizon)
+		digest.Write(scratch[:])
+		binary.BigEndian.PutUint64(scratch[:], source.ExcludedRows)
 		digest.Write(scratch[:])
 		if source.CaughtUp {
 			digest.Write([]byte{1})

@@ -71,38 +71,9 @@ func (source *RecordDomainActivitySource) AuthoritativeHead(
 	ctx context.Context,
 	_ activity.ExportScope,
 ) (activity.SourceHead, error) {
-	var (
-		oldestTransactionStart *time.Time
-		databaseNow            time.Time
-		horizon                uint64
-		visibleSessions        int64
-		totalSessions          int64
-	)
-	if err := source.pool.QueryRow(ctx, `
-		select
-		  min(activity.xact_start) filter (where activity.xact_start is not null),
-		  now(),
-		  pg_snapshot_xmin(pg_current_snapshot())::text::bigint,
-		  count(*) filter (where activity.xact_start is not null or activity.state = 'idle'),
-		  count(*)
-		from pg_stat_activity activity
-		where activity.datname = current_database()`,
-	).Scan(&oldestTransactionStart, &databaseNow, &horizon, &visibleSessions, &totalSessions); err != nil {
+	settledThrough, horizon, err := settledTransactionBound(ctx, source.pool)
+	if err != nil {
 		return activity.SourceHead{}, fmt.Errorf("read record domain authoritative head: %w", err)
-	}
-	// pg_stat_activity always lists rows, but blanks the columns this bound needs
-	// for sessions the role may not inspect. A blanked row is indistinguishable
-	// from an idle one here, so an unreadable session set means no proof.
-	if totalSessions == 0 || visibleSessions < totalSessions {
-		return activity.SourceHead{}, fmt.Errorf(
-			"%w: record domain settled head needs transaction start times for all %d sessions, only %d are readable",
-			activity.ErrSourceNotReady, totalSessions, visibleSessions,
-		)
-	}
-
-	settledThrough := databaseNow
-	if oldestTransactionStart != nil && oldestTransactionStart.Before(settledThrough) {
-		settledThrough = *oldestTransactionStart
 	}
 	return activity.NewSettledSourceHead(activity.SourceKindRecordDomain, settledThrough, horizon), nil
 }
