@@ -239,6 +239,47 @@ func TestRecordSearchDescriptorRequiresExactOwnedTables(t *testing.T) {
 	}
 }
 
+func TestRecordActivityDescriptorRequiresExactOwnedTables(t *testing.T) {
+	t.Parallel()
+
+	// Heads and checkpoints are generation-wide, so they are deliberately
+	// absent: a single record's purge must not be able to move every other
+	// record's watermark or steal a source lease.
+	want := []SurfaceName{
+		"record_activity_projection",
+		"record_activity_purge_receipts",
+		"record_activity_revision_intervals",
+		"record_activity_subjects",
+	}
+	if got := RecordActivitySurfaceNames(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("RecordActivitySurfaceNames() = %#v, want %#v", got, want)
+	}
+	descriptor, err := NewAdapterDescriptor(AdapterNameRecordActivityProjection, want)
+	if err != nil {
+		t.Fatalf("NewAdapterDescriptor(record_activity_projection) error = %v", err)
+	}
+	if got := RecordActivitySurfaceDigest(); got == ([sha256.Size]byte{}) || got != digestAdapterSurfaces(descriptor) {
+		t.Fatalf("RecordActivitySurfaceDigest() = %x", got)
+	}
+	if _, err := NewAdapterDescriptor(AdapterNameRecordActivityProjection, want[1:]); !errors.Is(err, ErrInvalidAdapterDescriptor) {
+		t.Fatalf("missing activity surface error = %v", err)
+	}
+	for _, extra := range []SurfaceName{
+		"record_activity_projection_heads",
+		"record_activity_projection_checkpoints",
+	} {
+		widened := append(RecordActivitySurfaceNames(), extra)
+		if _, err := NewAdapterDescriptor(AdapterNameRecordActivityProjection, widened); !errors.Is(err, ErrInvalidAdapterDescriptor) {
+			t.Fatalf("extra activity surface %q error = %v", extra, err)
+		}
+	}
+	returned := RecordActivitySurfaceNames()
+	returned[0] = "tampered"
+	if fresh := RecordActivitySurfaceNames(); !reflect.DeepEqual(fresh, want) {
+		t.Fatalf("RecordActivitySurfaceNames() after mutation = %#v", fresh)
+	}
+}
+
 func TestAdapterHealthSnapshotRequiresVersionedProof(t *testing.T) {
 	t.Parallel()
 

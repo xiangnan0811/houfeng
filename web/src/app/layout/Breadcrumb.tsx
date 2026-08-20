@@ -17,6 +17,13 @@ const SECTION_LABELS: Record<string, string> = {
   settings: '设置',
 }
 
+const NESTED_LABELS: Record<string, string> = {
+  activity: '活动',
+  records: '记录',
+  evidence: '证据',
+  'ip-quality': 'IP 质量',
+}
+
 /**
  * Build a breadcrumb trail from the current location.
  *
@@ -54,6 +61,13 @@ export function Breadcrumb() {
       label: truncateId(detailId),
       ...(isCurrent ? {} : { to: `/${sectionKey}/${detailId}` }),
     })
+  }
+
+  // Third crumb for subject activity / records / evidence (and other nested pages).
+  if (segments[2]) {
+    const nested = segments[2]
+    const nestedLabel = NESTED_LABELS[nested] ?? nested
+    crumbs.push({ label: nestedLabel })
   }
 
   // Touch params so React keeps this re-rendering on route change.

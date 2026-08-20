@@ -27,6 +27,7 @@
 | [IP Quality Contract](./ip-quality-contract.md) | VPS IP 质量低频采集、agent sync、center 入库/API、资产决策证据与 raw JSON 安全边界 | 已填实 |
 | [Evidence Snapshot Contract](./evidence-snapshot-contract.md) | evidence authoritative source、canonical adapter、监控事件 producer、成本/命令/资产历史失败关闭合同 | 已填实 |
 | [Record Search Index Contract](./record-search-index-contract.md) | 搜索派生投影、代次发布 CAS、影子重建租约/断点、上下文绑定游标、单一搜索路径与删除穿透 | 已填实 |
+| [Record Activity Projection Contract](./record-activity-projection.md) | 活动投影 keyset 扫描、auth_scope 盖章、ActiveGeneration、Export Readiness、subject freshness 边界 | 已填实 |
 
 ---
 

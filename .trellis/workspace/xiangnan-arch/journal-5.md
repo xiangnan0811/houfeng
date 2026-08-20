@@ -627,3 +627,27 @@ Implemented Child 6: a server-side records search index behind `GET /api/records
 ### Next Steps
 
 - Child 6 is merged and archived; dependent Activity overview and Portability migration children remain unstarted.
+
+
+## Session 250: Child 7 VPS records activity overview closeout
+
+**Date**: 2026-08-20
+**Task**: Child 7 VPS records activity overview closeout
+**Branch**: `codex/vps-records-activity-overview`
+
+### Summary
+
+Closed review P1/P2 (keyset drain, auth digests from visibility, checkpoint CaughtUp, ActiveGeneration filter, VPS 404 vs overview_unavailable, merged source.unavailable, DeletionAdapter, Freshness ready). verify.sh green. Spec record-activity-projection.md. Shipped activity projection APIs, VPS overview, subject activity SPA. Management writes deferred.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `05b0b90a` | (see git log) |
+| `f17afd22` | (see git log) |
+| `3f971e45` | (see git log) |
+| `2aac240c` | (see git log) |
+
+### Status
+
+[OK] **Completed**

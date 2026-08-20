@@ -3105,3 +3105,206 @@ export type RecordNotificationTarget = {
   subject_kind: 'record' | 'action' | 'comment'
   subject_id: string
 }
+
+/** Subject activity view — server predicate, not a separate list. */
+export type SubjectActivityView = 'activity' | 'records' | 'evidence'
+
+export type SubjectActivityVersionScope = 'history' | 'current'
+
+export type SubjectActivitySourceKind =
+  | 'record_domain'
+  | 'evidence_snapshot'
+  | 'asset_history'
+  | 'monitoring_event'
+  | 'command_audit'
+
+export type SubjectActivityEventKind =
+  | 'record_created'
+  | 'record_revised'
+  | 'record_restored'
+  | 'record_archived'
+  | 'record_unarchived'
+  | 'record_owner_changed'
+  | 'record_participant_changed'
+  | 'record_follow_up_changed'
+  | 'comment_created'
+  | 'comment_edited'
+  | 'comment_redacted'
+  | 'action_created'
+  | 'action_updated'
+  | 'action_completed'
+  | 'action_cancelled'
+  | 'action_reopened'
+  | 'evidence_captured'
+  | 'asset_fact_changed'
+  | 'monitoring_state_changed'
+  | 'command_executed'
+
+export type SubjectActivitySubjectStatus = 'live' | 'tombstoned'
+
+export type SubjectActivityFilter = {
+  view?: SubjectActivityView
+  source?: SubjectActivitySourceKind[]
+  event_kind?: SubjectActivityEventKind[]
+  from?: string
+  to?: string
+  versions?: SubjectActivityVersionScope
+  limit?: number
+  cursor?: string
+}
+
+export type SubjectActivityActor = {
+  actor_id: string
+  display_name?: string
+}
+
+export type SubjectActivitySubjectSnapshot = {
+  kind: RecordSubjectKind
+  source_id: string
+  role: string
+  primary: boolean
+  identity: Record<string, string>
+  live_route?: string
+  tombstoned: boolean
+}
+
+export type SubjectActivityPresentation = {
+  version: number
+  title: string
+  summary?: string
+}
+
+export type SubjectActivityItem = {
+  activity_id: string
+  event_kind: SubjectActivityEventKind
+  event_at: string
+  recorded_at: string
+  source_kind: SubjectActivitySourceKind
+  backfilled: boolean
+  actor?: SubjectActivityActor
+  subjects: SubjectActivitySubjectSnapshot[]
+  presentation: SubjectActivityPresentation
+  corrects_activity_id?: string
+  /** Optional route refs when the server includes them for deep links. */
+  record_id?: string
+  revision_id?: string
+  evidence_snapshot_id?: string
+}
+
+export type SubjectActivityHeader = {
+  kind: RecordSubjectKind
+  source_id: string
+  identity: Record<string, string>
+  live_route?: string
+  status: SubjectActivitySubjectStatus
+}
+
+export type SubjectActivityFreshness = {
+  state: string
+  visible_observed_at: string | null
+  new_items_available: boolean
+  reason_code: string
+}
+
+export type SubjectActivitySourceStatus = {
+  source_kind: SubjectActivitySourceKind
+  state: string
+  reason_code: string
+}
+
+export type SubjectActivityListResponse = {
+  subject: SubjectActivityHeader
+  view: SubjectActivityView
+  snapshot_cursor: string
+  freshness: SubjectActivityFreshness
+  items: SubjectActivityItem[]
+  source_statuses: SubjectActivitySourceStatus[]
+  next_cursor?: string
+}
+
+export const VPS_OVERVIEW_CAPABILITY_RECORDS_V2_READ = 'records_v2_read'
+
+export type VPSOverviewSectionState = {
+  state: string
+  observed_at: string | null
+  last_success_at: string | null
+  reason_code: string
+}
+
+export type VPSOverviewSummaryCell = {
+  status: string
+  detail?: string
+  section: VPSOverviewSectionState
+}
+
+export type VPSOverviewIdentity = {
+  vps_id: string
+  display_name: string
+  provider_name: string
+  product_name: string
+  country: string
+  region: string
+  city: string
+  datacenter: string
+  ipv4: string
+  ipv6: string
+  lifecycle_status: string
+  usage_status: string
+  renewal_decision: string
+  importance: string
+  labels: string[]
+  updated_at: string
+}
+
+export type VPSOverviewAnomalyAction = {
+  id: string
+  label: string
+  route?: string
+}
+
+export type VPSOverviewAnomaly = {
+  rule_id: string
+  severity: string
+  title: string
+  detail?: string
+  source: string
+  event_at?: string | null
+  primary_action?: VPSOverviewAnomalyAction | null
+  secondary_actions: VPSOverviewAnomalyAction[]
+}
+
+export type VPSOverviewFact = {
+  key: string
+  label: string
+  value: string
+}
+
+export type VPSOverviewRelation = {
+  kind: string
+  count: number
+  status?: string
+  route: string
+  label: string
+}
+
+export type VPSOverviewRecentActivity = {
+  section: VPSOverviewSectionState
+  items: SubjectActivityItem[]
+  snapshot_cursor?: string
+}
+
+export type VPSOverview = {
+  generated_at: string
+  identity: VPSOverviewIdentity
+  anomalies: VPSOverviewAnomaly[]
+  summary: {
+    overall: VPSOverviewSummaryCell
+    monitoring: VPSOverviewSummaryCell
+    ip_quality: VPSOverviewSummaryCell
+    renewal: VPSOverviewSummaryCell
+  }
+  recent_activity: VPSOverviewRecentActivity
+  facts: VPSOverviewFact[]
+  relations: VPSOverviewRelation[]
+  capabilities: string[]
+}

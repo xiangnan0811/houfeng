@@ -81,6 +81,15 @@ const vpsIPQualityPage = lazy(() =>
 const vpsPage = lazy(() =>
   import('../pages/VPSPage').then((module) => ({ default: module.VPSPage })),
 )
+const subjectActivityPage = lazy(() =>
+  import('../pages/SubjectActivityPage').then((module) => ({ default: module.SubjectActivityPage })),
+)
+const subjectRecordsPage = lazy(() =>
+  import('../pages/SubjectRecordsPage').then((module) => ({ default: module.SubjectRecordsPage })),
+)
+const subjectEvidencePage = lazy(() =>
+  import('../pages/SubjectEvidencePage').then((module) => ({ default: module.SubjectEvidencePage })),
+)
 
 function routeElement(Component: ComponentType, loadingLabel: string) {
   return (
@@ -107,6 +116,9 @@ export const appRoutes: RouteObject[] = [
           { index: true, element: routeElement(dashboardPage, '正在加载工作台') },
           { path: 'vps', element: routeElement(vpsPage, '正在加载 VPS 库存') },
           { path: 'vps/:vpsId/ip-quality', element: routeElement(vpsIPQualityPage, '正在加载 IP 质量报告') },
+          { path: 'vps/:vpsId/activity', element: routeElement(subjectActivityPage, '正在加载 VPS 活动') },
+          { path: 'vps/:vpsId/records', element: routeElement(subjectRecordsPage, '正在加载 VPS 记录') },
+          { path: 'vps/:vpsId/evidence', element: routeElement(subjectEvidencePage, '正在加载 VPS 证据') },
           { path: 'vps/:vpsId', element: routeElement(vpsDetailPage, '正在加载 VPS 详情') },
           { path: 'archive', element: routeElement(archivePage, '正在加载归档资产') },
           { path: 'archive/:vpsId', element: routeElement(archiveDetailPage, '正在加载归档详情') },
@@ -129,10 +141,34 @@ export const appRoutes: RouteObject[] = [
             element: routeElement(monitoringComparePage, '正在加载监控实例对比'),
           },
           {
+            path: 'monitoring/:monitoringInstanceId/activity',
+            element: routeElement(subjectActivityPage, '正在加载监控活动'),
+          },
+          {
+            path: 'monitoring/:monitoringInstanceId/records',
+            element: routeElement(subjectRecordsPage, '正在加载监控记录'),
+          },
+          {
+            path: 'monitoring/:monitoringInstanceId/evidence',
+            element: routeElement(subjectEvidencePage, '正在加载监控证据'),
+          },
+          {
             path: 'monitoring/:monitoringInstanceId',
             element: routeElement(monitoringDetailPage, '正在加载监控实例详情'),
           },
           { path: 'targets', element: routeElement(targetsPage, '正在加载入口探测') },
+          {
+            path: 'targets/:targetId/activity',
+            element: routeElement(subjectActivityPage, '正在加载目标活动'),
+          },
+          {
+            path: 'targets/:targetId/records',
+            element: routeElement(subjectRecordsPage, '正在加载目标记录'),
+          },
+          {
+            path: 'targets/:targetId/evidence',
+            element: routeElement(subjectEvidencePage, '正在加载目标证据'),
+          },
           {
             path: 'targets/:targetId',
             element: routeElement(targetDetailPage, '正在加载目标详情'),

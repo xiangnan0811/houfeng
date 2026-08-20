@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright'
 import type { AssetDecisionScenarioTemplateDetail } from '../src/lib/types'
 
 import { expect, test } from './fixtures'
-import { coreRouteProfile, dashboardProfile } from './fixtures/profiles'
+import { coreRouteProfile, dashboardProfile, subjectActivityProfile, vpsOverviewProfile } from './fixtures/profiles'
 import { apiRouteKey } from './fixtures/contracts'
 import { expectNoDocumentOverflow } from './support/geometry'
 
@@ -236,4 +236,44 @@ test('nested Modal closes one layer per Escape and preserves focus and body lock
   await expect(useTemplate).toBeFocused()
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).not.toBe('hidden')
   await expect(page).toHaveURL('/asset-decisions')
+})
+
+test('VPS 概览 has no serious or critical axe violations', async ({ api, page }) => {
+  api.useProfile(vpsOverviewProfile())
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/vps/vps_001')
+  await expect(page.getByRole('heading', { name: 'Tokyo Edge' })).toBeVisible()
+  await page.evaluate(() => document.fonts.ready)
+
+  const result = await new AxeBuilder({ page }).analyze()
+  const blocking = result.violations
+    .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
+    .map((violation) => ({
+      id: violation.id,
+      impact: violation.impact,
+      description: violation.description,
+      targets: violation.nodes.map((node) => node.target),
+    }))
+  expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([])
+  await expectNoDocumentOverflow(page)
+})
+
+test('单主体时间线 has no serious or critical axe violations', async ({ api, page }) => {
+  api.useProfile(subjectActivityProfile())
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/vps/vps_001/activity')
+  await expect(page.getByText('E2E 时间线条目')).toBeVisible()
+  await page.evaluate(() => document.fonts.ready)
+
+  const result = await new AxeBuilder({ page }).analyze()
+  const blocking = result.violations
+    .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
+    .map((violation) => ({
+      id: violation.id,
+      impact: violation.impact,
+      description: violation.description,
+      targets: violation.nodes.map((node) => node.target),
+    }))
+  expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([])
+  await expectNoDocumentOverflow(page)
 })

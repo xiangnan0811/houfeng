@@ -27,6 +27,7 @@ import {
   restoreRecordRevision,
   searchRecords,
   uploadAttachmentContent,
+  listSubjectActivity,
 } from './recordsApi'
 import type {
   AttachmentMetadata,
@@ -870,5 +871,101 @@ describe('Records API transport', () => {
       code: 'deletion_safety_unavailable',
       recovery: undefined,
     })
+  })
+
+  it('encodes subject activity filters with default omission and multi-value OR', async () => {
+    const wire = {
+      subject: {
+        kind: 'vps',
+        source_id: 'vps_001',
+        identity: { display_name: 'Edge' },
+        status: 'live',
+      },
+      view: 'records',
+      snapshot_cursor: ' snap-opaque ',
+      freshness: {
+        state: 'ready',
+        visible_observed_at: null,
+        new_items_available: true,
+        reason_code: '',
+      },
+      items: null,
+      source_statuses: null,
+      next_cursor: ' next-opaque ',
+      projection_generation: 9,
+      as_of_ingest_sequence: 42,
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(wire), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    await expect(listSubjectActivity('vps', 'vps 001/edge', {
+      view: 'activity',
+      source: ['record_domain', 'command_audit'],
+      event_kind: ['record_revised'],
+      versions: 'history',
+      limit: 50,
+      cursor: '  opaque-cursor  ',
+    })).resolves.toEqual({
+      subject: {
+        kind: 'vps',
+        source_id: 'vps_001',
+        identity: { display_name: 'Edge' },
+        status: 'live',
+      },
+      view: 'records',
+      snapshot_cursor: 'snap-opaque',
+      freshness: {
+        state: 'ready',
+        visible_observed_at: null,
+        new_items_available: true,
+        reason_code: '',
+      },
+      items: [],
+      source_statuses: [],
+      next_cursor: 'next-opaque',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/subjects/vps/vps%20001%2Fedge/activity'
+        + '?source=record_domain&source=command_audit'
+        + '&event_kind=record_revised&cursor=opaque-cursor',
+      requestDefaults,
+    )
+  })
+
+  it('omits default activity view and encodes non-default view/limit/versions', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({
+        subject: { kind: 'target', source_id: 'tg_001', identity: {}, status: 'live' },
+        view: 'evidence',
+        snapshot_cursor: 's',
+        freshness: {
+          state: 'ready',
+          visible_observed_at: null,
+          new_items_available: false,
+          reason_code: '',
+        },
+        items: [],
+        source_statuses: [],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    await listSubjectActivity('target', 'tg_001', {
+      view: 'evidence',
+      versions: 'current',
+      limit: 25,
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/subjects/target/tg_001/activity?view=evidence&versions=current&limit=25',
+      requestDefaults,
+    )
   })
 })

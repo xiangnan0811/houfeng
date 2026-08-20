@@ -638,6 +638,8 @@ func deletionTestRegistry(t *testing.T) (Registry, []*deletionServiceAdapterStub
 			surfaces = RecordCollaborationSurfaceNames()
 		case AdapterNameRecordSearch:
 			surfaces = RecordSearchSurfaceNames()
+		case AdapterNameRecordActivityProjection:
+			surfaces = RecordActivitySurfaceNames()
 		}
 		adapter := newDeletionServiceAdapterStub(t, name, surfaces, byte(index+1))
 		adapters = append(adapters, adapter)

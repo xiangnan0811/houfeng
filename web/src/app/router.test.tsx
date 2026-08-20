@@ -66,3 +66,26 @@ describe('record workspace routes', () => {
     })).toBe(true)
   })
 })
+
+describe('subject activity routes', () => {
+  it('registers static activity/records/evidence ahead of detail catch-alls', () => {
+    const vpsActivity = matchRoutes(appRoutes, '/vps/vps_001/activity')
+    const vpsDetail = matchRoutes(appRoutes, '/vps/vps_001')
+    const monitoringRecords = matchRoutes(appRoutes, '/monitoring/mi_001/records')
+    const targetEvidence = matchRoutes(appRoutes, '/targets/tg_001/evidence')
+
+    expect(vpsActivity?.some(({ route }) => route.path === 'vps/:vpsId/activity')).toBe(true)
+    expect(vpsActivity?.some(({ route }) => route.path === 'vps/:vpsId')).toBe(false)
+    expect(vpsDetail?.some(({ route }) => route.path === 'vps/:vpsId')).toBe(true)
+    expect(monitoringRecords?.some(({ route }) => route.path === 'monitoring/:monitoringInstanceId/records')).toBe(true)
+    expect(targetEvidence?.some(({ route }) => route.path === 'targets/:targetId/evidence')).toBe(true)
+  })
+
+  it('stays below the private route boundary', () => {
+    const matches = matchRoutes(appRoutes, '/vps/vps_001/activity')
+    expect(matches?.some(({ route }) => {
+      const element = route.element as { type?: unknown } | undefined
+      return element?.type === RequireAuth
+    })).toBe(true)
+  })
+})
