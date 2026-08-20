@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
+	"houfeng/internal/center/activity"
 	centerapp "houfeng/internal/center/app"
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/auth"
@@ -25,6 +26,7 @@ import (
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordsearch"
 	centersettings "houfeng/internal/center/settings"
+	"houfeng/internal/center/store"
 	"houfeng/internal/center/targets"
 )
 
@@ -167,6 +169,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	applyCalls := 0
 	admitCalls := 0
 	searchGenerationCalls := 0
+	activityGenerationCalls := 0
 	var gotRouterOptions centerhttp.RouterOptions
 	var gotWorkers []centerapp.Worker
 
@@ -185,6 +188,36 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 		ensureSearchGeneration: func(context.Context, postgresDB) error {
 			searchGenerationCalls++
 			return nil
+		},
+		ensureActivityGeneration: func(context.Context, postgresDB) error {
+			activityGenerationCalls++
+			return nil
+		},
+		newActivityProjectionWorker: func(*pgxpool.Pool, string) (centerapp.Worker, error) {
+			return fakeActivityProjectionWorker{}, nil
+		},
+		newSubjectActivityHandler: func(
+			*pgxpool.Pool,
+			*store.PostgresVPSAssetRepository,
+			*store.PostgresMonitoringInstanceRepository,
+			*store.PostgresTargetRepository,
+			[]byte,
+		) (http.Handler, error) {
+			return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), nil
+		},
+		newVPSOverviewHandler: func(
+			*pgxpool.Pool,
+			*store.PostgresVPSAssetRepository,
+			*store.PostgresVPSMonitoringInstanceLinkRepository,
+			*store.PostgresIPQualityRepository,
+			*store.PostgresSubscriptionRepository,
+			*store.PostgresAssetServiceRepository,
+			*store.PostgresAssetDomainRepository,
+			*store.PostgresMonitoringInstanceRepository,
+			*store.PostgresTargetRepository,
+			[]byte,
+		) (http.Handler, error) {
+			return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), nil
 		},
 		seedInitialUser: func(context.Context, auth.UserRepository, config.CenterConfig) error {
 			return nil
@@ -218,22 +251,33 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	if searchGenerationCalls != 1 {
 		t.Fatalf("ensureSearchGeneration calls = %d, want 1", searchGenerationCalls)
 	}
-	if len(gotWorkers) != 6 {
-		t.Fatalf("runtime workers = %d, want evidence maintenance disabled until Child 10 supplies admission", len(gotWorkers))
+	if activityGenerationCalls != 1 {
+		t.Fatalf("ensureActivityGeneration calls = %d, want 1", activityGenerationCalls)
+	}
+	if len(gotWorkers) != 7 {
+		t.Fatalf("runtime workers = %d, want search rebuild + activity projection with evidence maintenance still disabled", len(gotWorkers))
 	}
 	// The projector only indexes commits, so records written before the index
 	// existed stay invisible until a rebuild backfills them. That backfill has to
 	// be a running worker, not a manual step.
 	var rebuilder *recordsearch.RebuildWorker
+	var activityWorker centerapp.Worker
 	for _, worker := range gotWorkers {
 		if candidate, ok := worker.(*recordsearch.RebuildWorker); ok {
 			rebuilder = candidate
+		}
+		if _, ok := worker.(fakeActivityProjectionWorker); ok {
+			activityWorker = worker
 		}
 	}
 	if rebuilder == nil {
 		t.Fatalf("runtime workers = %#v, want a record search rebuild worker", gotWorkers)
 	}
+	if activityWorker == nil {
+		t.Fatalf("runtime workers = %#v, want an activity projection worker", gotWorkers)
+	}
 	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
+		gotRouterOptions.SubjectActivityHandler == nil || gotRouterOptions.VPSOverviewHandler == nil ||
 		gotRouterOptions.RecordWatchesHandler == nil || gotRouterOptions.RecordInboxHandler == nil ||
 		gotRouterOptions.RecordDraftsHandler == nil || gotRouterOptions.RecordDeletionsHandler == nil ||
 		gotRouterOptions.EvidenceHandler == nil || gotRouterOptions.AttachmentUploadsHandler == nil || gotRouterOptions.AttachmentsHandler == nil {
@@ -394,6 +438,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		ensureSearchGeneration: func(context.Context, postgresDB) error {
 			return nil
 		},
+		ensureActivityGeneration: func(context.Context, postgresDB) error {
+			return nil
+		},
 		seedInitialUser: func(context.Context, auth.UserRepository, config.CenterConfig) error {
 			return nil
 		},
@@ -424,6 +471,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 				// and a worker polling those tables would fail every pass.
 				if _, ok := worker.(*recordsearch.RebuildWorker); ok {
 					t.Fatalf("workers[%d] is a record search rebuild worker, want none while records are disabled", i)
+				}
+				if _, ok := worker.(*activity.Worker); ok {
+					t.Fatalf("workers[%d] is an activity projection worker, want none while records are disabled", i)
 				}
 			}
 			return app
@@ -1216,6 +1266,12 @@ func stringPtr(value string) *string {
 type fakeApp struct{}
 
 func (fakeApp) Run(context.Context) error {
+	return nil
+}
+
+type fakeActivityProjectionWorker struct{}
+
+func (fakeActivityProjectionWorker) Run(context.Context) error {
 	return nil
 }
 

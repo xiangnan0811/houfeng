@@ -19,6 +19,7 @@ type RouterOptions struct {
 	RecordsEnabled                                bool
 	RecordsHandler                                stdhttp.Handler
 	RecordSearchHandler                           stdhttp.Handler
+	SubjectActivityHandler                        stdhttp.Handler
 	RecordActionsHandler                          stdhttp.Handler
 	RecordCommentsHandler                         stdhttp.Handler
 	RecordWatchesHandler                          stdhttp.Handler
@@ -43,6 +44,7 @@ type RouterOptions struct {
 	ProviderItemHandler                           stdhttp.Handler
 	VPSCollectionHandler                          stdhttp.Handler
 	VPSItemHandler                                stdhttp.Handler
+	VPSOverviewHandler                            stdhttp.Handler
 	VPSMonitoringInstancesHandler                 stdhttp.Handler
 	VPSSubscriptionsHandler                       stdhttp.Handler
 	VPSLinkMonitoringInstanceHandler              stdhttp.Handler
@@ -163,6 +165,9 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.RecordsEnabled && opts.RecordSearchHandler != nil {
 		mux.Handle("/api/records/search", protect(opts.RecordSearchHandler))
 	}
+	if opts.RecordsEnabled && opts.SubjectActivityHandler != nil {
+		mux.Handle("/api/subjects/{type}/{id}/activity", protect(opts.SubjectActivityHandler))
+	}
 	if opts.RecordsEnabled && opts.RecordActionsHandler != nil {
 		handler := protect(opts.RecordActionsHandler)
 		mux.Handle("/api/records/{record_id}/actions", handler)
@@ -253,7 +258,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.VPSCollectionHandler != nil {
 		mux.Handle("/api/vps", protect(opts.VPSCollectionHandler))
 	}
-	if opts.VPSItemHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSSubscriptionsHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSIPQualityHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil || opts.VPSExtendValidityHandler != nil || opts.VPSArchiveReviewHandler != nil || opts.VPSArchiveHandler != nil || opts.VPSRestoreFromArchiveHandler != nil {
+	if opts.VPSItemHandler != nil || opts.VPSOverviewHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSSubscriptionsHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSIPQualityHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil || opts.VPSExtendValidityHandler != nil || opts.VPSArchiveReviewHandler != nil || opts.VPSArchiveHandler != nil || opts.VPSRestoreFromArchiveHandler != nil {
 		mux.Handle("/api/vps/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			vpsID, subtree := vpsSubtreePath(r.URL.Path)
 			if vpsID == "" {
@@ -268,6 +273,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.VPSItemHandler.ServeHTTP(w, r)
+			case vpsSubtreeOverview:
+				if opts.VPSOverviewHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSOverviewHandler.ServeHTTP(w, r)
 			case vpsSubtreeMonitoringInstances:
 				if opts.VPSMonitoringInstancesHandler == nil {
 					stdhttp.NotFound(w, r)
@@ -589,6 +600,7 @@ type vpsSubtree string
 const (
 	vpsSubtreeUnknown                  vpsSubtree = ""
 	vpsSubtreeItem                     vpsSubtree = "item"
+	vpsSubtreeOverview                 vpsSubtree = "overview"
 	vpsSubtreeMonitoringInstances      vpsSubtree = "monitoring-instances"
 	vpsSubtreeSubscriptions            vpsSubtree = "subscriptions"
 	vpsSubtreeLinkMonitoringInstance   vpsSubtree = "link-monitoring-instance"
@@ -628,6 +640,8 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 	switch segments[1] {
 	case "monitoring-instances":
 		return segments[0], vpsSubtreeMonitoringInstances
+	case "overview":
+		return segments[0], vpsSubtreeOverview
 	case "subscriptions":
 		return segments[0], vpsSubtreeSubscriptions
 	case "link-monitoring-instance":

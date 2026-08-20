@@ -17,6 +17,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
+	"houfeng/internal/center/activity"
 	centerapp "houfeng/internal/center/app"
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/auth"
@@ -30,6 +31,7 @@ import (
 	"houfeng/internal/center/installer"
 	"houfeng/internal/center/notify"
 	"houfeng/internal/center/recordcollaboration"
+	"houfeng/internal/center/recorddeletion"
 	centerrecords "houfeng/internal/center/records"
 	"houfeng/internal/center/recordsearch"
 	"houfeng/internal/center/retention"
@@ -40,6 +42,7 @@ import (
 	"houfeng/internal/center/subscriptioncosts"
 	"houfeng/internal/center/syncing"
 	"houfeng/internal/center/targets"
+	"houfeng/internal/center/vpsoverview"
 )
 
 type appRunner interface {
@@ -56,6 +59,27 @@ type bootstrapDeps struct {
 	applyMigrations             func(context.Context, postgresDB) error
 	admitRuntime                func(context.Context, postgresDB) error
 	ensureSearchGeneration      func(context.Context, postgresDB) error
+	ensureActivityGeneration    func(context.Context, postgresDB) error
+	newActivityProjectionWorker func(*pgxpool.Pool, string) (centerapp.Worker, error)
+	newSubjectActivityHandler   func(
+		*pgxpool.Pool,
+		*store.PostgresVPSAssetRepository,
+		*store.PostgresMonitoringInstanceRepository,
+		*store.PostgresTargetRepository,
+		[]byte,
+	) (http.Handler, error)
+	newVPSOverviewHandler func(
+		*pgxpool.Pool,
+		*store.PostgresVPSAssetRepository,
+		*store.PostgresVPSMonitoringInstanceLinkRepository,
+		*store.PostgresIPQualityRepository,
+		*store.PostgresSubscriptionRepository,
+		*store.PostgresAssetServiceRepository,
+		*store.PostgresAssetDomainRepository,
+		*store.PostgresMonitoringInstanceRepository,
+		*store.PostgresTargetRepository,
+		[]byte,
+	) (http.Handler, error)
 	seedInitialUser             func(context.Context, auth.UserRepository, config.CenterConfig) error
 	newSessionRepository        func(*pgxpool.Pool, []byte) (auth.SessionRepository, error)
 	newIncidentNotifier         func(config.CenterConfig, centersettings.Repository) incidentservice.Notifier
@@ -104,6 +128,12 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	// The search projector only writes published or building generations, so one
 	// has to exist before the first record commits or nothing would be indexed.
 	if err := deps.ensureSearchGeneration(ctx, db); err != nil {
+		db.Close()
+		return nil, nil, err
+	}
+	// The activity worker waits when no generation is active, so a fresh install
+	// needs one before the first pass or nothing would be projected.
+	if err := deps.ensureActivityGeneration(ctx, db); err != nil {
 		db.Close()
 		return nil, nil, err
 	}
@@ -194,6 +224,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	recordsEnabled := cfg.RecordPlatformMode == config.RecordPlatformModeRuntimeAdmission
 	var recordsHandler http.Handler
 	var recordSearchHandler http.Handler
+	var subjectActivityHandler http.Handler
+	var vpsOverviewHandler http.Handler
 	var recordActionsHandler http.Handler
 	var recordCommentsHandler http.Handler
 	var collaborationRuntime recordCollaborationRuntime
@@ -221,6 +253,33 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 			db.Close()
 			return nil, nil, fmt.Errorf("create records handlers: %w", err)
 		}
+		subjectActivityHandler, err = deps.newSubjectActivityHandler(
+			db.Pool(),
+			vpsAssetRepo,
+			monitoringInstanceRepo,
+			targetRepo,
+			cfg.SessionHMACKey,
+		)
+		if err != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("create subject activity handler: %w", err)
+		}
+		vpsOverviewHandler, err = deps.newVPSOverviewHandler(
+			db.Pool(),
+			vpsAssetRepo,
+			vpsMonitoringInstanceLinkRepo,
+			ipQualityRepo,
+			subscriptionRepo,
+			assetServiceRepo,
+			assetDomainRepo,
+			monitoringInstanceRepo,
+			targetRepo,
+			cfg.SessionHMACKey,
+		)
+		if err != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("create vps overview handler: %w", err)
+		}
 	}
 
 	router := deps.newRouter(centerhttp.RouterOptions{
@@ -234,6 +293,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		RecordsEnabled:                              recordsEnabled,
 		RecordsHandler:                              recordsHandler,
 		RecordSearchHandler:                         recordSearchHandler,
+		SubjectActivityHandler:                      subjectActivityHandler,
 		RecordActionsHandler:                        recordActionsHandler,
 		RecordCommentsHandler:                       recordCommentsHandler,
 		RecordWatchesHandler:                        collaborationRuntime.watchesHandler,
@@ -258,6 +318,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		ProviderItemHandler:                         handlers.ProviderItem(providerRepo),
 		VPSCollectionHandler:                        handlers.VPSCollection(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo, ipQualityRepo),
 		VPSItemHandler:                              handlers.VPSItem(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo, ipQualityRepo),
+		VPSOverviewHandler:                          vpsOverviewHandler,
 		VPSMonitoringInstancesHandler:               handlers.VPSMonitoringInstances(vpsMonitoringInstanceLinkRepo, vpsAssetRepo, monitoringInstanceRepo),
 		VPSSubscriptionsHandler:                     handlers.VPSSubscriptions(subscriptionRepo),
 		VPSLinkMonitoringInstanceHandler:            handlers.VPSLinkMonitoringInstance(vpsMonitoringInstanceLinkRepo),
@@ -367,8 +428,149 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 			return nil, nil, fmt.Errorf("create record search rebuild worker: %w", err)
 		}
 		workers = append(workers, searchRebuilder)
+
+		activityOwnerID, err := ids.New("rao")
+		if err != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("mint activity projection owner id: %w", err)
+		}
+		activityWorker, err := deps.newActivityProjectionWorker(db.Pool(), activityOwnerID)
+		if err != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("create activity projection worker: %w", err)
+		}
+		workers = append(workers, activityWorker)
 	}
 	return deps.newApp(cfg.HTTPAddr, router, workers...), db.Close, nil
+}
+
+func newActivityProjectionWorker(pool *pgxpool.Pool, ownerID string) (*activity.Worker, error) {
+	namespace := activity.Namespace{ProjectID: "default"}
+	repository, err := store.NewActivityProjectionRepository(pool)
+	if err != nil {
+		return nil, err
+	}
+	recordDomain, err := store.NewRecordDomainActivitySource(pool, namespace)
+	if err != nil {
+		return nil, err
+	}
+	monitoringEvents, err := store.NewMonitoringEventActivitySource(pool, namespace)
+	if err != nil {
+		return nil, err
+	}
+	commandAudits, err := store.NewCommandAuditActivitySource(pool, namespace)
+	if err != nil {
+		return nil, err
+	}
+	evidence, err := store.NewEvidenceActivitySource(pool, namespace)
+	if err != nil {
+		return nil, err
+	}
+	assetHistory, err := store.NewAssetHistoryActivitySource(pool, namespace)
+	if err != nil {
+		return nil, err
+	}
+	projector, err := activity.NewProjector(activity.ProjectorOptions{
+		Namespace: namespace,
+		Adapters: []activity.SourceAdapter{
+			recordDomain, monitoringEvents, commandAudits, evidence, assetHistory,
+		},
+		Checkpoints: repository,
+		Publisher:   repository,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return activity.NewWorker(activity.WorkerOptions{
+		Projector:   projector,
+		Leases:      repository,
+		Generations: repository,
+		OwnerID:     ownerID,
+		Logger:      slog.Default(),
+	})
+}
+
+func newSubjectActivityHandler(
+	pool *pgxpool.Pool,
+	vpsRepository *store.PostgresVPSAssetRepository,
+	monitoringInstanceRepository *store.PostgresMonitoringInstanceRepository,
+	targetRepository *store.PostgresTargetRepository,
+	sessionHMACKey []byte,
+) (http.Handler, error) {
+	subjects, err := centerrecords.NewSubjectAdapterRegistry([]centerrecords.SubjectSourceAdapter{
+		store.NewVPSRecordSubjectAdapter(vpsRepository),
+		store.NewMonitoringInstanceRecordSubjectAdapter(monitoringInstanceRepository),
+		store.NewTargetRecordSubjectAdapter(targetRepository),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("subject registry: %w", err)
+	}
+	repository, err := store.NewActivityProjectionRepository(pool)
+	if err != nil {
+		return nil, err
+	}
+	codec, err := activity.NewCursorCodec(sessionHMACKey)
+	if err != nil {
+		return nil, fmt.Errorf("activity cursor codec: %w", err)
+	}
+	service, err := activity.NewService(
+		repository,
+		repository,
+		store.NewActivityLiveSubjectResolver(subjects),
+		codec,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return handlers.SubjectActivity(service), nil
+}
+
+func newVPSOverviewHandler(
+	pool *pgxpool.Pool,
+	vpsRepository *store.PostgresVPSAssetRepository,
+	monitoringLinks *store.PostgresVPSMonitoringInstanceLinkRepository,
+	ipQuality *store.PostgresIPQualityRepository,
+	subscriptionRepository *store.PostgresSubscriptionRepository,
+	serviceRepository *store.PostgresAssetServiceRepository,
+	domainRepository *store.PostgresAssetDomainRepository,
+	monitoringInstanceRepository *store.PostgresMonitoringInstanceRepository,
+	targetRepository *store.PostgresTargetRepository,
+	sessionHMACKey []byte,
+) (http.Handler, error) {
+	sources, err := store.NewVPSOverviewRepository(
+		vpsRepository, monitoringLinks, ipQuality, subscriptionRepository,
+		serviceRepository, domainRepository,
+	)
+	if err != nil {
+		return nil, err
+	}
+	subjects, err := centerrecords.NewSubjectAdapterRegistry([]centerrecords.SubjectSourceAdapter{
+		store.NewVPSRecordSubjectAdapter(vpsRepository),
+		store.NewMonitoringInstanceRecordSubjectAdapter(monitoringInstanceRepository),
+		store.NewTargetRecordSubjectAdapter(targetRepository),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("subject registry: %w", err)
+	}
+	repository, err := store.NewActivityProjectionRepository(pool)
+	if err != nil {
+		return nil, err
+	}
+	codec, err := activity.NewCursorCodec(sessionHMACKey)
+	if err != nil {
+		return nil, fmt.Errorf("activity cursor codec: %w", err)
+	}
+	activityService, err := activity.NewService(
+		repository, repository, store.NewActivityLiveSubjectResolver(subjects), codec,
+	)
+	if err != nil {
+		return nil, err
+	}
+	overviewService, err := vpsoverview.NewService(sources, activityService)
+	if err != nil {
+		return nil, err
+	}
+	return handlers.VPSOverview(overviewService), nil
 }
 
 func nilBootstrapAdmissionGate(gate store.AdmissionGate) bool {
@@ -586,9 +788,18 @@ func newRecordsHTTPHandlers(
 		evidenceHandler = evidenceComposition.handler
 		evidenceWorker = evidenceComposition.worker
 	}
-	// Later Records children own the remaining deletion adapters and the
-	// independent ledger/witness clients. Until all of them are wired and
-	// healthy, the production deletion transport remains explicitly closed.
+	// Activity deletion adapter is constructed here so Child 7's surface is not
+	// forgotten when the permanent-deletion transport opens. Later Records
+	// children still own the remaining adapters and ledger/witness clients;
+	// until every RequiredAdapterNames member is wired and healthy, the
+	// production deletion transport remains explicitly closed.
+	deletionRepository := store.NewPostgresRecordDeletionRepository(pool, effectiveGate)
+	activityDeletionAdapter, err := activity.NewDeletionAdapter(deletionRepository)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create activity deletion adapter: %w", err)
+	}
+	var _ recorddeletion.Adapter = activityDeletionAdapter
+
 	return handlers.RecordsWithOptions(application, handlers.RecordHandlerOptions{EvidencePreparer: evidencePreparer}),
 		handlers.RecordSearch(searchService),
 		handlers.RecordActions(actionApplication), handlers.RecordComments(commentApplication), handlers.RecordDrafts(application), handlers.RecordDeletions(nil), evidenceHandler,
@@ -669,6 +880,22 @@ func (d bootstrapDeps) withDefaults() bootstrapDeps {
 		d.ensureSearchGeneration = func(ctx context.Context, db postgresDB) error {
 			return store.EnsurePublishedRecordSearchGeneration(ctx, db.Pool())
 		}
+	}
+	if d.ensureActivityGeneration == nil {
+		d.ensureActivityGeneration = func(ctx context.Context, db postgresDB) error {
+			return store.EnsureActiveActivityProjectionGeneration(ctx, db.Pool())
+		}
+	}
+	if d.newActivityProjectionWorker == nil {
+		d.newActivityProjectionWorker = func(pool *pgxpool.Pool, ownerID string) (centerapp.Worker, error) {
+			return newActivityProjectionWorker(pool, ownerID)
+		}
+	}
+	if d.newSubjectActivityHandler == nil {
+		d.newSubjectActivityHandler = newSubjectActivityHandler
+	}
+	if d.newVPSOverviewHandler == nil {
+		d.newVPSOverviewHandler = newVPSOverviewHandler
 	}
 	if d.seedInitialUser == nil {
 		d.seedInitialUser = func(ctx context.Context, repo auth.UserRepository, cfg config.CenterConfig) error {
