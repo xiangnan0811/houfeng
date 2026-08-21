@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.73.1](https://github.com/xiangnan0811/houfeng/compare/v0.73.0...v0.73.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **records:** keep archive restore aligned with S3 put and wrappers ([#431](https://github.com/xiangnan0811/houfeng/issues/431)) ([3418e0c](https://github.com/xiangnan0811/houfeng/commit/3418e0ca10661f0d5710a98b1c0ddad8022d7535))
+
 ## [0.73.0](https://github.com/xiangnan0811/houfeng/compare/v0.72.0...v0.73.0) (2026-08-21)
 
 
