@@ -118,6 +118,7 @@ describe('RecordWorkspace', () => {
       </MemoryRouter>,
     )
     expect(await screen.findByRole('heading', { name: 'Database outage' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '导出' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '材料与引用' }))
     expect(screen.getByText('ev_hist')).toBeInTheDocument()
     expect(screen.queryByText('ev_current')).toBeNull()

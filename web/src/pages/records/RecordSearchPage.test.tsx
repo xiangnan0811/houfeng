@@ -97,6 +97,7 @@ describe('RecordSearchPage', () => {
     expect(screen.getByRole('heading', { name: '运维记录' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '横向比较' })).toHaveAttribute('href', '/records/compare')
     await screen.findByText('东京节点磁盘 IO 抖动')
+    expect(await screen.findByRole('heading', { name: '导出' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/records/search', expect.objectContaining({
       credentials: 'include',
     }))
@@ -134,6 +135,35 @@ describe('RecordSearchPage', () => {
     await screen.findByText('大阪节点网络抖动')
     const href = screen.getByRole('link', { name: '横向比较' }).getAttribute('href') ?? ''
     expect(href.startsWith('/records/compare?state=')).toBe(true)
+  })
+
+  it('exports the selected search row instead of always the first result', async () => {
+    const second = searchResult({
+      record_id: 'rec_002',
+      current_revision_id: 'rev_002',
+      current: {
+        ...searchResult().current,
+        record_id: 'rec_002',
+        revision_id: 'rev_002',
+        title: '大阪节点网络抖动',
+        subjects: [{
+          registry_version: 1,
+          kind: 'vps',
+          source_id: 'vps_beta',
+          role: 'affected',
+          primary: true,
+          identity: { display_name: 'Osaka Edge' },
+        }],
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      mockJSONResponse({ items: [searchResult(), second], generation: 7 }),
+    ))
+    renderPage()
+    await screen.findByText('大阪节点网络抖动')
+    expect(screen.getByText('当前导出：东京节点磁盘 IO 抖动（rec_001）')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('VPS · Osaka Edge'))
+    expect(screen.getByText('当前导出：大阪节点网络抖动（rec_002）')).toBeInTheDocument()
   })
 
   it('sends the filters carried by the URL', async () => {

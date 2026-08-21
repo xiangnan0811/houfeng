@@ -508,3 +508,19 @@ func (store *revisionCommitStoreStub) CommitRevision(_ context.Context, command 
 	}
 	return store.result, store.err
 }
+
+func (store *revisionCommitStoreStub) CommitRevisions(ctx context.Context, commands []RevisionCommitCommand) ([]RevisionCommitResult, error) {
+	results := make([]RevisionCommitResult, 0, len(commands))
+	for _, command := range commands {
+		result, err := store.CommitRevision(ctx, command)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+func (store *revisionCommitStoreStub) CommitRevisionsFinishing(ctx context.Context, commands []RevisionCommitCommand, _ RevisionCommitFinish) ([]RevisionCommitResult, error) {
+	return store.CommitRevisions(ctx, commands)
+}

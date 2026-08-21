@@ -102,6 +102,22 @@ func Authorize(actor ActorScope, capability Capability, resource ResourceScope) 
 	return (Policy{}).Authorize(actor, capability, resource)
 }
 
+// AllowsCapability evaluates the closed role/capability table without a record
+// resource. Use Authorize when a record/source scope is available.
+func AllowsCapability(actor ActorScope, capability Capability) error {
+	normalized, err := NormalizeActorScope(actor)
+	if err != nil {
+		return denied(DenialReasonInvalidActor)
+	}
+	if !knownCapability(capability) {
+		return denied(DenialReasonInvalidCapability)
+	}
+	if !roleAllowsCapability(normalized.Role, capability) {
+		return denied(DenialReasonRoleCapability)
+	}
+	return nil
+}
+
 func denied(reason DenialReason) error {
 	return &DeniedError{reason: reason}
 }

@@ -17,6 +17,9 @@ func main() {
 }
 
 func runContentProcessorCommand() error {
+	if len(os.Args) >= 2 && os.Args[1] == renderDocumentPDFCommand {
+		return runRenderDocumentPDF()
+	}
 	slog.Info("content processor starting")
 	defer slog.Info("content processor stopped")
 	config, err := loadContentProcessorConfig()

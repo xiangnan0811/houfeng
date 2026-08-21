@@ -47,6 +47,8 @@ func TestRecordsBootstrapEvidenceGateBoundary(t *testing.T) {
 			},
 			sources,
 			gate,
+			config.CenterConfig{},
+			nil,
 			comparisonRuntimeConfig{},
 		)
 		return result{evidence: evidenceHandler, projection: collaboration.projectionWorker, worker: worker, err: err}

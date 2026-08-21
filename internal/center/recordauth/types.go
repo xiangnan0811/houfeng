@@ -4,6 +4,7 @@
 package recordauth
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -53,13 +54,14 @@ const (
 	CapabilityAttachmentUpdate Capability = "attachment.update"
 	CapabilityAttachmentDelete Capability = "attachment.delete"
 
-	CapabilitySearchRead         Capability = "search.read"
-	CapabilityActivityRead       Capability = "activity.read"
-	CapabilityComparisonRead     Capability = "comparison.read"
-	CapabilityNotificationRead   Capability = "notification.read"
-	CapabilityNotificationManage Capability = "notification.manage"
-	CapabilityImport             Capability = "import.execute"
-	CapabilityExport             Capability = "export.execute"
+	CapabilitySearchRead              Capability = "search.read"
+	CapabilityActivityRead            Capability = "activity.read"
+	CapabilityComparisonRead          Capability = "comparison.read"
+	CapabilityNotificationRead        Capability = "notification.read"
+	CapabilityNotificationManage      Capability = "notification.manage"
+	CapabilityImport                  Capability = "import.execute"
+	CapabilityExport                  Capability = "export.execute"
+	CapabilityExportSensitiveTopology Capability = "record.export_sensitive_topology"
 
 	// CapabilityPermanentDelete is the stable short name for the record
 	// permanent-deletion operation.
@@ -311,6 +313,80 @@ func NormalizeVisibilityScope(input VisibilityScope) (VisibilityScope, error) {
 	return normalized, nil
 }
 
+// ParseCanonicalVisibilityScope restores a VisibilityScope from trusted
+// canonical bytes. It refuses unknown versions, leftover input, and any
+// document whose re-encoded bytes do not match the original exactly.
+func ParseCanonicalVisibilityScope(raw []byte) (VisibilityScope, error) {
+	decoder := visibilityDecoder{rest: raw}
+	domain, err := decoder.string()
+	if err != nil || domain != "recordauth.visibility.v1" {
+		return VisibilityScope{}, fmt.Errorf("%w: domain", ErrInvalidVisibilityScope)
+	}
+	version, err := decoder.byte()
+	if err != nil {
+		return VisibilityScope{}, fmt.Errorf("%w: version", ErrInvalidVisibilityScope)
+	}
+	kind, err := decoder.string()
+	if err != nil {
+		return VisibilityScope{}, fmt.Errorf("%w: kind", ErrInvalidVisibilityScope)
+	}
+	projectID, err := decoder.string()
+	if err != nil {
+		return VisibilityScope{}, fmt.Errorf("%w: project", ErrInvalidVisibilityScope)
+	}
+	roleCount, err := decoder.length()
+	if err != nil {
+		return VisibilityScope{}, fmt.Errorf("%w: roles", ErrInvalidVisibilityScope)
+	}
+	roles := make([]Role, 0, roleCount)
+	for index := 0; index < roleCount; index++ {
+		role, err := decoder.string()
+		if err != nil {
+			return VisibilityScope{}, fmt.Errorf("%w: role", ErrInvalidVisibilityScope)
+		}
+		roles = append(roles, Role(role))
+	}
+	groupCount, err := decoder.length()
+	if err != nil {
+		return VisibilityScope{}, fmt.Errorf("%w: groups", ErrInvalidVisibilityScope)
+	}
+	groupIDs := make([]string, 0, groupCount)
+	for index := 0; index < groupCount; index++ {
+		groupID, err := decoder.string()
+		if err != nil {
+			return VisibilityScope{}, fmt.Errorf("%w: group", ErrInvalidVisibilityScope)
+		}
+		groupIDs = append(groupIDs, groupID)
+	}
+	policyVersion, err := decoder.uint64()
+	if err != nil {
+		return VisibilityScope{}, fmt.Errorf("%w: policy version", ErrInvalidVisibilityScope)
+	}
+	policyRevision, err := decoder.uint64()
+	if err != nil {
+		return VisibilityScope{}, fmt.Errorf("%w: policy revision", ErrInvalidVisibilityScope)
+	}
+	if err := decoder.done(); err != nil {
+		return VisibilityScope{}, fmt.Errorf("%w: trailing bytes", ErrInvalidVisibilityScope)
+	}
+	normalized, err := NormalizeVisibilityScope(VisibilityScope{
+		Version:         ScopeVersion(version),
+		Kind:            VisibilityKind(kind),
+		ProjectID:       ProjectID(projectID),
+		AllowedRoles:    roles,
+		AllowedGroupIDs: groupIDs,
+		PolicyVersion:   policyVersion,
+		PolicyRevision:  policyRevision,
+	})
+	if err != nil {
+		return VisibilityScope{}, err
+	}
+	if !bytes.Equal(normalized.canonicalBytes, raw) {
+		return VisibilityScope{}, fmt.Errorf("%w: non-canonical encoding", ErrInvalidVisibilityScope)
+	}
+	return normalized, nil
+}
+
 // SourceAuthorization is a strict tagged union. A live source carries a
 // current scope; a tombstoned source carries its complete final floor and the
 // canonical last-live-scope witness needed to preserve transition monotonicity.
@@ -452,7 +528,8 @@ func knownCapability(capability Capability) bool {
 		CapabilityNotificationRead,
 		CapabilityNotificationManage,
 		CapabilityImport,
-		CapabilityExport:
+		CapabilityExport,
+		CapabilityExportSensitiveTopology:
 		return true
 	default:
 		return false
@@ -620,6 +697,58 @@ func canonicalActorBytes(scope ActorScope) []byte {
 		encoder.string(groupID)
 	}
 	return encoder.bytes
+}
+
+type visibilityDecoder struct {
+	rest []byte
+}
+
+func (decoder *visibilityDecoder) byte() (byte, error) {
+	if len(decoder.rest) < 1 {
+		return 0, ErrInvalidVisibilityScope
+	}
+	value := decoder.rest[0]
+	decoder.rest = decoder.rest[1:]
+	return value, nil
+}
+
+func (decoder *visibilityDecoder) length() (int, error) {
+	if len(decoder.rest) < 4 {
+		return 0, ErrInvalidVisibilityScope
+	}
+	value := int(decoder.rest[0])<<24 | int(decoder.rest[1])<<16 | int(decoder.rest[2])<<8 | int(decoder.rest[3])
+	decoder.rest = decoder.rest[4:]
+	if value < 0 {
+		return 0, ErrInvalidVisibilityScope
+	}
+	return value, nil
+}
+
+func (decoder *visibilityDecoder) uint64() (uint64, error) {
+	if len(decoder.rest) < 8 {
+		return 0, ErrInvalidVisibilityScope
+	}
+	value := uint64(decoder.rest[0])<<56 | uint64(decoder.rest[1])<<48 | uint64(decoder.rest[2])<<40 | uint64(decoder.rest[3])<<32 |
+		uint64(decoder.rest[4])<<24 | uint64(decoder.rest[5])<<16 | uint64(decoder.rest[6])<<8 | uint64(decoder.rest[7])
+	decoder.rest = decoder.rest[8:]
+	return value, nil
+}
+
+func (decoder *visibilityDecoder) string() (string, error) {
+	length, err := decoder.length()
+	if err != nil || length > len(decoder.rest) {
+		return "", ErrInvalidVisibilityScope
+	}
+	value := string(decoder.rest[:length])
+	decoder.rest = decoder.rest[length:]
+	return value, nil
+}
+
+func (decoder *visibilityDecoder) done() error {
+	if len(decoder.rest) != 0 {
+		return ErrInvalidVisibilityScope
+	}
+	return nil
 }
 
 func canonicalVisibilityBytes(scope VisibilityScope) []byte {

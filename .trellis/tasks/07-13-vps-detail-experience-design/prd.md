@@ -4,13 +4,13 @@
 
 基于 0.59.0 staging 的真实使用流程、现有代码与数据能力，完整审查 VPS 详情页在功能、信息架构、视觉层级、交互可发现性、资产历史和经验记录方面的问题，并形成一套克制、清晰、适合长期运维使用的重构设计。设计应同时降低首次使用门槛和高频用户的操作成本，但不以装饰性视觉或不必要功能换取“丰富感”。
 
-完整书面设计已由用户于 2026-07-14 明确批准。当前按 11 个可独立验收的子任务实现：Children 1–4、9、5 与 6 已完成并合入 protected main，父任务进度为 `7/11`。Children 7、8、10、11 仍须分别审阅和明确启动。
+完整书面设计已由用户于 2026-07-14 明确批准。当前按 12 个可独立验收的子任务实现。Children 1–9 已完成并合入 protected main，父任务进度为 `9/12`。Child 10 收窄后进行中；Child 12（归档恢复保真度）与 Child 11 仍须分别审阅和明确启动。
 
 ## 2026-08-02 Development Rebaseline (authoritative)
 
 `research/development-rebaseline-2026-08-02.md` 是当前执行权威。项目没有用户或部署，当前程序不支持 `v0.60.1` 及以前数据库的原地升级；开发数据库可重建。功能正确性、权限、安全、数据一致性、删除和恢复语义继续作为门槛，但旧数据库兼容、混合版本、`experience_logs` 回填、APP V3 successor、staging/cutover/release receipt 不再属于本任务当前范围。
 
-下面的完整设计继续描述目标产品。凡与 2026-08-02 重基线冲突的升级、发布、切换或治理要求，均以重基线为准。实施按 11 个可独立验收的子任务推进；默认一次只启动一个有界子任务或切片，父任务保持 planning，不以巨型 goal 执行。
+下面的完整设计继续描述目标产品。凡与 2026-08-02 重基线冲突的升级、发布、切换或治理要求，均以重基线为准。实施按 12 个可独立验收的子任务推进；默认一次只启动一个有界子任务或切片，父任务保持 planning，不以巨型 goal 执行。
 
 ## Requirements
 
@@ -257,8 +257,8 @@
   - Axe 无 critical/serious；主要任务仅用键盘可完成，状态不只依赖颜色，触摸目标至少 44px，390px 不发生无意横向溢出或桌面内容机械堆叠。
   - 基准数据集至少包含 10,000 条当前记录、200,000 个修订和 1,000,000 条活动；该规模下 VPS 概览 API p95≤750ms，搜索首 25 条/时间线首 50 条 p95≤1s，草稿保存 p95≤500ms，纯文字正式修订 p95≤1s，comparison candidate/summary p95≤1s、6×2,000 detail p95≤2s，最大证据预览/捕获 p95≤10s 且有持续状态。comparison另受单请求96MiB、4GiB参考容器aggregate 512MiB weighted admission、2秒等待与5秒取消drain门禁约束。
   - migration 对账差异为 0；备份恢复后所有被引用 Blob 哈希通过；权限矩阵、永久禁止字段和不可比数据不得存在已知泄露、补零、外推或静默覆盖。
-- 当前任务作为父任务管理完整目标与跨子任务验收，不直接承载实现；获批设计后创建 11 个均属必交付范围的子任务：
-  - 统一授权与平台基础；记录/修订/草稿/状态核心；Blob/附件/配额/扫描；证据注册表与首批适配器；Markdown 编辑/阅读/差异/材料；搜索/记录中心/全局搜索；活动投影/单主体页面/VPS 概览；横向比较；负责人/行动项/评论/关注/通知；导入导出/legacy 迁移；集成切换/安全/性能/备份恢复与终验。
+- 当前任务作为父任务管理完整目标与跨子任务验收，不直接承载实现；当前为 12 个均属必交付范围的子任务：
+  - 统一授权与平台基础；记录/修订/草稿/状态核心；Blob/附件/配额/扫描；证据注册表与首批适配器；Markdown 编辑/阅读/差异/材料；搜索/记录中心/全局搜索；活动投影/单主体页面/VPS 概览；横向比较；负责人/行动项/评论/关注/通知；导入导出/legacy 迁移（Child 10 收窄）；归档恢复保真度（Child 12）；集成切换/安全/性能/备份恢复与终验。
   - 依赖必须写入各子任务文档：授权→记录核心；记录核心→附件/证据/搜索；附件+证据→编辑器；证据+搜索→时间线/概览；证据+编辑器→比较；记录核心→协作；附件+证据+编辑器+协作→可移植性；所有能力→最终集成验收。
   - 删除与恢复能力不新建模糊的尾部任务：独立账本/witness、RecoveryTrustStore、各来源 RecoveryPointManifest/inventory、backup attempt/workspace、recovery-control、restore/replay 编排基础、配置/启动 gate 与现有来源永久删除适配属于子任务 1；read fence/记录 purge/审计投影属于 2；Blob/附件无宽限清理与备份/恢复适配属于 3；服务端导出清理与删除 ID 防导入复活属于 10；子任务 11 在 1–10 的运行时能力上完成跨存储恢复接入、删除不复活、故障演练、最终 gate 和 staging 终验，而不是只写验收用例。
   - 视觉合同也不是父任务中的无主验收项：子任务5承接编辑器与证据选择器，6承接记录中心，7承接VPS概览与单主体时间线，8承接比较工作台；子任务11统一执行Artifact v1桌面/390px的语义、DOM状态、几何、overflow、focus、Axe、键盘与44px合同。正式基线不创建tracked pixel golden、screenshot manifest或批量raster；脱敏截图仅可作为未跟踪、短期人工评审证据，不能冒充自动回归门。
@@ -390,7 +390,7 @@
 ## Current Program Acceptance Criteria (authoritative)
 
 - [x] `RBL-AC-01` Child 1 的当前开发版 migration/ACL convergence 与 runtime admission 支持精确 embedded source set；新鲜数据库可构建，完全相同的当前数据库可重复启动，旧开发数据库在任何 DDL/DCL/ledger mutation 前返回明确重建错误。
-- [ ] `RBL-AC-02` Child 2–10 分别交付记录核心、附件、证据、Markdown、搜索、活动/概览、比较、协作和可移植性；每个 child 的功能验收、focused tests、全量相关门和 protected-main integration 均通过。
+- [ ] `RBL-AC-02` Child 2–10 分别交付记录核心、附件、证据、Markdown、搜索、活动/概览、比较、协作和可移植性（Child 10 为收窄后的文档/origin/ZIP）；Child 12 交付归档恢复保真度（证据落库、附件进 ZIP、隔离 PDF）；每个 child 的功能验收、focused tests、全量相关门和 protected-main integration 均通过。
 - [ ] `RBL-AC-03` migration 编号固定为 Child 2 `0052`、Child 3 `0053`、Child 4 `0054`、Child 9 `0055`、Child 6 `0056`、Child 7 `0057`、Child 10 `0058`；每个新增 root object 同时进入 managed surface、ACL compiler 和 runtime admission tests。
 - [ ] `RBL-AC-04` VPS 概览、项目记录中心、单主体时间线、Markdown 工作区、证据选择器和比较工作台达到批准设计的稳定/异常、loading/empty/error/revoked/deleted、desktop/390px、keyboard 和 accessibility 合同。
 - [ ] `RBL-AC-05` 权限、CAS/idempotency/outbox、immutable history、source deletion、附件准入、import/export integrity 和 response allowlist 由各 owning child 的单元与真实集成测试证明。
@@ -398,7 +398,7 @@
 - [ ] `RBL-AC-07` Child 11 在当前 main-compatible build 上完成真实 PostgreSQL、local/S3、processor、backup/restore、security、performance、browser 和 failure-path 集成终验；不以 staging 发布或 release automation 作为完成前提。
 - [ ] `RBL-AC-08` 旧 `experience_logs` 不回填、不双写、不转换；旧表/代码仅在不妨碍新功能时保留，最终入口切换不需要 legacy 数据迁移。
 - [ ] `RBL-AC-09` 进度只按 child acceptance 与集成状态报告；旧 branch/worktree、计划行数、goal 运行时间和未合入代码不计为完成功能。
-- [ ] `RBL-AC-10` 所有 11 个 child 已归档并合入 protected main，父级跨 child 功能、数据流和回归检查通过后，父任务才可完成。
+- [ ] `RBL-AC-10` 所有 12 个 child 已归档并合入 protected main，父级跨 child 功能、数据流和回归检查通过后，父任务才可完成。
 
 ## Historical Design and Risk Inventory (non-gating)
 

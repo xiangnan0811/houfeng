@@ -19,14 +19,19 @@ processor/scanner, shell integration harness, React/Playwright/Axe.
 
 ## Preconditions
 
-- [ ] Children 1-10 are merged and archived on protected main.
+- [ ] Children 1-10 and Child 12 (`08-21-vps-records-archive-restore-fidelity`)
+  are merged and archived on protected main.
+- [ ] Run existing `HOUFENG_POSTGRES_INTEGRATION=1` and
+  `HOUFENG_MINIO_INTEGRATION=1` portability tests. Do not add persist
+  paths or quarantine rows here.
 - [ ] Run `trellis-before-dev` for backend/database/deploy/security and Web
   quality/e2e guidance.
 - [ ] Inventory actual adapter kinds, worker constructors, integration helpers,
   feature flags, and test commands; revise paths below before start.
 - [ ] Inventory and verify Child 10's concrete deployment-membership gate,
-  source-deletion witness, and quarantine constructors; production composition
-  must have no test-gate or local-tombstone fallback.
+  source-deletion witness, and unknown-schema fail-closed import path;
+  production composition must have no test-gate or local-tombstone fallback.
+  Do not add quarantine row storage.
 - [ ] Confirm no root migration is added and the current migration maximum is
   the planned `0058` (or the globally rebaselined equivalent).
 - [ ] Establish clean Go/Web/PostgreSQL/local/MinIO baselines with Node 22 and

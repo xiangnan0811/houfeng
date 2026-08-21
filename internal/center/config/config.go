@@ -34,6 +34,7 @@ type CenterConfig struct {
 	ComparisonIntentKeyring   string
 	ComparisonIntentKeyID     string
 	ComparisonAdmissionBudget int64
+	PortabilityEnabled        bool
 	HTTPAddr                  string
 	WebDistDir                string
 	DatabaseURL               string
@@ -50,6 +51,10 @@ type CenterConfig struct {
 	SessionHMACKey            []byte
 	PasswordBcryptCost        int
 	Attachment                AttachmentConfig
+	RecordInstanceID          string
+	RecordDeploymentID        string
+	RecordInstanceKind        string
+	RecordInstanceCapability  string
 }
 
 type AttachmentConfig struct {
@@ -216,6 +221,20 @@ func LoadCenterConfig() (CenterConfig, error) {
 	if comparisonEnabled && (comparisonIntentKeyring == "" || comparisonIntentKeyID == "") {
 		return CenterConfig{}, fmt.Errorf("HOUFENG_COMPARISON_ENABLED requires HOUFENG_COMPARISON_INTENT_KEYRING and HOUFENG_COMPARISON_INTENT_KEY_ID")
 	}
+	recordInstanceID := strings.TrimSpace(os.Getenv("HOUFENG_RECORD_INSTANCE_ID"))
+	recordDeploymentID := strings.TrimSpace(os.Getenv("HOUFENG_RECORD_DEPLOYMENT_ID"))
+	recordInstanceKind := strings.TrimSpace(os.Getenv("HOUFENG_RECORD_INSTANCE_KIND"))
+	recordInstanceCapability := strings.TrimSpace(os.Getenv("HOUFENG_RECORD_INSTANCE_CAPABILITY"))
+	recordIdentitySet := 0
+	for _, value := range []string{recordInstanceID, recordDeploymentID, recordInstanceKind, recordInstanceCapability} {
+		if value != "" {
+			recordIdentitySet++
+		}
+	}
+	if recordIdentitySet != 0 && recordIdentitySet != 4 {
+		return CenterConfig{}, fmt.Errorf("HOUFENG_RECORD_INSTANCE_ID, HOUFENG_RECORD_DEPLOYMENT_ID, HOUFENG_RECORD_INSTANCE_KIND, and HOUFENG_RECORD_INSTANCE_CAPABILITY must all be set or all be empty")
+	}
+
 	if !comparisonEnabled && (comparisonIntentKeyring == "") != (comparisonIntentKeyID == "") {
 		return CenterConfig{}, fmt.Errorf("HOUFENG_COMPARISON_INTENT_KEYRING and HOUFENG_COMPARISON_INTENT_KEY_ID must both be set or both be empty")
 	}
@@ -226,12 +245,21 @@ func LoadCenterConfig() (CenterConfig, error) {
 		}
 	}
 
+	portabilityEnabled, err := boolEnvOrDefault("HOUFENG_PORTABILITY_ENABLED", false)
+	if err != nil {
+		return CenterConfig{}, err
+	}
+	if portabilityEnabled && recordPlatformMode != RecordPlatformModeRuntimeAdmission {
+		return CenterConfig{}, fmt.Errorf("HOUFENG_PORTABILITY_ENABLED requires HOUFENG_RECORDS_ENABLED=true")
+	}
+
 	return CenterConfig{
 		RecordPlatformMode:        recordPlatformMode,
 		ComparisonEnabled:         comparisonEnabled,
 		ComparisonIntentKeyring:   comparisonIntentKeyring,
 		ComparisonIntentKeyID:     comparisonIntentKeyID,
 		ComparisonAdmissionBudget: comparisonAdmissionBudget,
+		PortabilityEnabled:        portabilityEnabled,
 		HTTPAddr:                  httpAddr,
 		WebDistDir:                webDistDir,
 		DatabaseURL:               databaseURL,
@@ -248,6 +276,10 @@ func LoadCenterConfig() (CenterConfig, error) {
 		SessionHMACKey:            []byte(sessionHMACKey),
 		PasswordBcryptCost:        passwordBcryptCost,
 		Attachment:                attachmentConfig,
+		RecordInstanceID:          recordInstanceID,
+		RecordDeploymentID:        recordDeploymentID,
+		RecordInstanceKind:        recordInstanceKind,
+		RecordInstanceCapability:  recordInstanceCapability,
 	}, nil
 }
 

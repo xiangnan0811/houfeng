@@ -1422,6 +1422,51 @@ func TestRouterProtectsAndDispatchesEnabledRecordsRoutes(t *testing.T) {
 	}
 }
 
+func TestRouterRegistersRecordPortabilityOnlyWhenCapabilityOn(t *testing.T) {
+	t.Parallel()
+
+	off := newTestRouter(centerhttp.RouterOptions{
+		RecordsEnabled:     true,
+		PortabilityEnabled: false,
+		WebDistDir:         t.TempDir(),
+		RecordPortabilityHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Fatal("portability handler ran while capability is off")
+		}),
+	})
+	recorder := httptest.NewRecorder()
+	off.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/record-export-previews", nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("portability-off status = %d, want 404", recorder.Code)
+	}
+
+	paths := make([]string, 0)
+	on := newTestRouter(centerhttp.RouterOptions{
+		RecordsEnabled:     true,
+		PortabilityEnabled: true,
+		RecordPortabilityHandler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			paths = append(paths, request.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	})
+	for _, path := range []string{
+		"/api/record-export-previews",
+		"/api/record-exports",
+		"/api/record-exports/rej_httpcontract",
+		"/api/record-exports/rej_httpcontract/content",
+		"/api/record-imports/dry-run",
+		"/api/record-imports/rip_httpcontract/apply",
+	} {
+		recorder = httptest.NewRecorder()
+		on.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, nil))
+		if recorder.Code != http.StatusNoContent {
+			t.Fatalf("portability-on %s status = %d", path, recorder.Code)
+		}
+	}
+	if got, want := strings.Join(paths, ","), "/api/record-export-previews,/api/record-exports,/api/record-exports/rej_httpcontract,/api/record-exports/rej_httpcontract/content,/api/record-imports/dry-run,/api/record-imports/rip_httpcontract/apply"; got != want {
+		t.Fatalf("portability dispatch = %q, want %q", got, want)
+	}
+}
+
 func TestRouterRegistersComparisonCandidatesOnlyWhenCapabilityOn(t *testing.T) {
 	t.Parallel()
 

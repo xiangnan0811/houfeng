@@ -68,7 +68,15 @@ const COLUMNS: DataTableColumn<RecordDetail>[] = [
   },
 ]
 
-export function RecordSearchResultsTable({ rows }: { rows: RecordDetail[] }) {
+export function RecordSearchResultsTable({
+  rows,
+  selectedRecordId,
+  onSelect,
+}: {
+  rows: RecordDetail[]
+  selectedRecordId?: string
+  onSelect?: (record: RecordDetail) => void
+}) {
   return (
     <DataTable
       className="record-search-results__table"
@@ -77,6 +85,10 @@ export function RecordSearchResultsTable({ rows }: { rows: RecordDetail[] }) {
       rows={rows}
       rowKey={(record) => record.record_id}
       density="compact"
+      {...(onSelect ? { onRowClick: onSelect } : {})}
+      rowClassName={(record) => (
+        record.record_id === selectedRecordId ? 'data-table__row--selected' : undefined
+      )}
     />
   )
 }

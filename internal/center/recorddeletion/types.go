@@ -121,6 +121,21 @@ var recordActivitySurfaceNames = []SurfaceName{
 	"record_activity_subjects",
 }
 
+// record_portability owns the 0058 job, artifact, origin, and receipt tables.
+// Origin tombstones are listed because the adapter is responsible for them, but
+// a record purge must leave those rows so a purged identity cannot be restored.
+var recordPortabilitySurfaceNames = []SurfaceName{
+	"record_export_artifacts",
+	"record_export_jobs",
+	"record_import_artifacts",
+	"record_import_entity_mappings",
+	"record_import_jobs",
+	"record_import_plans",
+	"record_origin_tombstones",
+	"record_origins",
+	"record_portability_purge_receipts",
+}
+
 func RequiredAdapterNames() []AdapterName {
 	return append([]AdapterName(nil), requiredAdapterNames...)
 }
@@ -147,6 +162,10 @@ func RecordSearchSurfaceNames() []SurfaceName {
 
 func RecordActivitySurfaceNames() []SurfaceName {
 	return append([]SurfaceName(nil), recordActivitySurfaceNames...)
+}
+
+func RecordPortabilitySurfaceNames() []SurfaceName {
+	return append([]SurfaceName(nil), recordPortabilitySurfaceNames...)
 }
 
 type AdapterDescriptor struct {
@@ -203,6 +222,9 @@ func (descriptor AdapterDescriptor) validate() error {
 	}
 	if descriptor.name == AdapterNameRecordActivityProjection && !slices.Equal(descriptor.surfaces, recordActivitySurfaceNames) {
 		return fmt.Errorf("%w: record_activity_projection surfaces", ErrInvalidAdapterDescriptor)
+	}
+	if descriptor.name == AdapterNameRecordPortability && !slices.Equal(descriptor.surfaces, recordPortabilitySurfaceNames) {
+		return fmt.Errorf("%w: record_portability surfaces", ErrInvalidAdapterDescriptor)
 	}
 	return nil
 }

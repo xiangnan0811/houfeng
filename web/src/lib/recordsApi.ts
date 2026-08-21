@@ -30,6 +30,11 @@ import type {
   RecordDeletionOperation,
   RecordDeletionPreview,
   RecordDetail,
+  RecordExportPreview,
+  RecordExportPreviewInput,
+  RecordExportView,
+  RecordImportApplyResult,
+  RecordImportPlan,
   RecordDraft,
   RecordDraftListFilter,
   RecordDraftListResponse,
@@ -651,6 +656,62 @@ export function saveComparisonRecord(
     draft_etag: input.draft_etag,
     comparison_intent: input.comparison_intent,
   }, idempotencyKey, signal)
+}
+
+export function previewRecordExport(
+  input: RecordExportPreviewInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<RecordExportPreview> {
+  return postIdempotentJSON<RecordExportPreview>('/api/record-export-previews', input, idempotencyKey, signal)
+}
+
+export function createRecordExport(
+  input: { preview_id: string; preview_token: string; inventory_digest: string },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<RecordExportView> {
+  return postIdempotentJSON<RecordExportView>('/api/record-exports', input, idempotencyKey, signal)
+}
+
+export function getRecordExport(exportId: string, signal?: AbortSignal): Promise<RecordExportView> {
+  const init: RequestInit = {}
+  if (signal) init.signal = signal
+  return requestJSON<RecordExportView>(`/api/record-exports/${encoded(exportId)}`, init)
+}
+
+export function dryRunRecordImport(
+  archive: Blob,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<RecordImportPlan> {
+  const init: RequestInit = {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/zip',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: archive,
+  }
+  if (signal) init.signal = signal
+  return requestJSON<RecordImportPlan>('/api/record-imports/dry-run', init)
+}
+
+export function applyRecordImport(
+  planId: string,
+  lockVersion: number,
+  signal?: AbortSignal,
+): Promise<RecordImportApplyResult> {
+  const init = jsonBodyInit('POST', { lock_version: lockVersion })
+  if (signal) init.signal = signal
+  return requestJSON<RecordImportApplyResult>(`/api/record-imports/${encoded(planId)}/apply`, init)
+}
+
+export function downloadRecordExportContent(exportId: string, signal?: AbortSignal): Promise<Blob> {
+  const init: RequestInit = { headers: { Accept: 'application/octet-stream' } }
+  if (signal) init.signal = signal
+  return requestBlob(`/api/record-exports/${encoded(exportId)}/content`, init)
 }
 
 export function saveComparisonRevision(

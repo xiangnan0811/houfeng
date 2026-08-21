@@ -1220,8 +1220,9 @@ vps_overview__submitting_or_background
 | 7 | 活动投影、单主体页面与 VPS 概览 | 2, 4, 6, 9 | 合流排序、评论/行动项活动、局部错误、稳定/异常概览和主体路由；Artifact v1 VPS 两态与单主体时间线 |
 | 8 | 横向比较工作台 | 2, 4, 5, 7 | 主体证据入口、可比性、图表/矩阵、部分覆盖和保存记录；Artifact v1 比较工作台桌面/390px 合同 |
 | 9 | 负责人、行动项、评论、关注与通知 | 1, 2 | revision participant、最小安全评论 Markdown、独立活动 facts、提及/聚合、inbox、默认关闭的外部安全摘要；下游只消费 typed contracts |
-| 10 | 导入导出与可移植性 | 2, 3, 4, 5, 6, 7, 8, 9 | human/machine export、安全 import、可追溯 origin、真实 deployment/source-deletion authority、integrity-valid quarantine、服务端产物 purge 和删除后防复活；不转换 `experience_logs` |
-| 11 | 集成验证、备份恢复与终验 | 1–10 | 接入全部 backup/restore/replay adapter 与真实 admission/witness authority，完成 readiness、跨存储恢复、删除不复活、安全/容量/性能、desktop/390px、keyboard/Axe 和最终功能 gate；不承担 staging/release cutover |
+| 10 | 导入导出与可移植性（2026-08-21 收窄） | 2, 3, 4, 5, 6, 7, 8, 9 | human/machine export、文档 apply + origin + job 同事务、未知 schema 失败关闭、origin tombstone；不写 evidence 行、不进附件、不隔离 PDF；不转换 `experience_logs` |
+| 12 | 归档恢复保真度 | 10 | 同一 apply 事务写入 known `evidence_snapshots`、授权附件进 ZIP 并恢复、生产 PDF 走隔离 processor。不实现已放弃的 quarantine 落库与 ZIP activity 页 |
+| 11 | 集成验证、备份恢复与终验 | 1–10, 12 | 接入全部 backup/restore/replay adapter 与真实 admission/witness authority，跑 Child 10 Postgres/MinIO 套件，完成 readiness、跨存储恢复、删除不复活、安全/容量/性能、desktop/390px、keyboard/Axe 和最终功能 gate；不承担 staging/release cutover，不实现 Child 12 域能力 |
 
 所有子任务均为必交付范围。依赖写入每个子任务 `prd.md` / `implement.md`，不靠树位置暗示。父任务只有在全部子任务独立验收和跨层验收通过后关闭。
 

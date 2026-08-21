@@ -1,135 +1,218 @@
 # Records Import, Export, and Portability Implementation Plan
 
-> **For agentic workers:** Select a reviewed execution mode before starting.
-> Work in bounded RED -> verified RED -> minimal GREEN slices and review domain
-> adapter changes with each owning child contract.
+> **For agentic workers:** Use `trellis-before-dev` before product edits.
+> RED → verify RED → minimal GREEN → verify GREEN. Do not execute the
+> 2026-08-02 Task 1–9 list. Scope B: PR1 then PR2. Do not start Child 11
+> after PR1.
 
-**Goal:** Deliver safe human/machine export and atomic import for Records without
-legacy conversion.
+**Goal:** Close production admission/witness, deliver human Markdown export
+that consumes `comparison.result/v1` Export, then deliver machine archive
+and safe import.
 
-**Architecture:** A portability service composes domain-owned providers and
-participants, stores bounded job/plan/origin metadata in `0058`, stages artifact
-bytes in local/S3 storage, and rebuilds mutable projections from authoritative
-imported domain rows.
+**Architecture:** Named `AdmissionGate` / witness types in `store`.
+Portability orchestrates existing evidence/activity/markdown/attachment
+seams, stores job/origin metadata in `0058`, and stages bytes through the
+existing `BlobStore` unless a reviewed cut proves otherwise.
 
-**Tech Stack:** Go/pgx/PostgreSQL, standard ZIP/JSON/SHA-256/Ed25519, local/S3
-ArtifactStore, isolated Chromium PDF renderer, React/TypeScript.
+**Tech Stack:** Go/pgx/PostgreSQL, ZIP64/JSON/SHA-256, local/S3 BlobStore,
+isolated content processor (PDF in PR2), React/TypeScript.
 
 ---
 
+## 2026-08-21 approved scope B
+
+- Baseline: `origin/main` `a5836f33` / `v0.71.0` after #423.
+- One Trellis child; two reviewable PRs; exit after both merge.
+- Contrast: `research/current-main-reconciliation-2026-08-21.md`.
+- No `0059`. No `/monitoring/compare` change. No workbench download.
+- No 4 GiB harness, overview manage panel, activity digest expansion, or
+  sticky row headers.
+
 ## Preconditions
 
-- [ ] Children 1-9 are merged and accepted on protected main.
-- [ ] Run `trellis-before-dev` for backend/database/http/security and Web
-  component/state/quality guidance.
-- [ ] Confirm `0058` is free and all owning domain provider/participant APIs
-  exist; update this plan to their actual signatures before start.
-- [ ] Reconcile the external deletion-ledger/contract-activation implementation
-  and define the real deployment-membership gate plus witnessed source-deletion
-  reader against existing `0051` authority; do not create duplicate authority
-  tables or use an APP-local/test gate in production.
-- [ ] Run supported Go/Web baseline and hooks in a clean non-main worktree.
+- [x] Children 1–9 on protected main (`v0.71.0`).
+- [x] Current-main reconciliation written; Alan chose B.
+- [ ] Explicit approval of this planning summary, then `task.py start`.
+- [ ] Non-main branch/worktree from that main; `sh scripts/setup-git-hooks.sh`.
+- [ ] `trellis-before-dev` for backend database/http/security and Web
+  component/state/quality.
+- [ ] Reconfirm `0058` is still free and APP ACL fragments still end at `0057`.
+- [ ] Baseline GREEN: `make verify-go` and `make verify-web` (Node 22;
+  `TMPDIR=/tmp`; `GOCACHE`/`GOMODCACHE` under `$HOME`).
 
-## Task 1: Archive types and hostile conformance
+---
 
-**Files:** create `internal/center/portability/{types,canonical,archive,manifest,signature}.go`
-and focused tests/testdata.
+## PR1 — authority, 0058, human/comparison export
 
-- [ ] Write deterministic canonical/manifest/signature golden tests.
-- [ ] Verify RED for path normalization, links/devices, duplicate/collision,
-  truncation, size/count/ratio/depth/working-set, and hash mismatch cases.
-- [ ] Implement streaming typed archive read/write and optional signature.
-- [ ] Run deterministic tests repeatedly plus bounded fuzz tests.
+### Task 1: Named AdmissionGate
 
-## Task 2: 0058 schema and current ACL fragment
+**Files:** create a named gate type beside `internal/center/store/record_platform.go`;
+modify `cmd/houfeng-center/bootstrap.go` / `bootstrap_test.go`; tests in
+`record_platform*_test.go` and a real PostgreSQL membership fixture.
 
-**Files:** create `db/migrations/0058_create_record_portability.sql` and
-`internal/center/store/record_portability.go`; modify current APP ACL registry
-and migration tests.
+- [ ] RED: nil/typed-nil, empty membership, stale heartbeat, wrong
+  `deployment_id`, contract drift, typed-nil tx →
+  `ErrRecordPlatformAdmissionUnavailable`; 0 writes.
+- [ ] GREEN: `Admit` reads `deployment_membership` +
+  `deployment_contract_state` on the caller tx. Identity bound at
+  construction.
+- [ ] Bootstrap wires the named type. Source still contains no
+  `store.AdmissionGateFunc(`.
+- [ ] `go test -race ./internal/center/store ./cmd/houfeng-center -run 'Admission|Bootstrap' -count=10`
 
-- [ ] Write RED schema/constraint/index/TTL/content-allowlist tests.
-- [ ] Add the `0058` fragment with exact objects and runtime/admin privileges.
-- [ ] Prove `0058` contains no duplicate `deployment_membership` or
-  `deployment_contract_state` authority.
-- [ ] Implement store CAS/idempotency operations and typed row mapping.
-- [ ] Run fresh/repeat migration, current convergence/admission, and real
-  PostgreSQL store tests.
+### Task 2: Witnessed tombstone reader
 
-## Task 3: ArtifactStore conformance
+**Files:** `internal/center/store/record_subjects.go` and tests;
+bootstrap `NewRecordSubjectReadResolver(subjects, witness)` no longer nil.
 
-**Files:** create `artifact_store.go`, `artifact_local.go`, `artifact_s3.go` and
-one conformance suite.
+- [ ] RED: digest-only `source_deletion_tombstones` row is rejected;
+  missing/stale/unknown-version/unreachable witness fail closed.
+- [ ] GREEN: successful witness populates `WitnessedRecordSubjectTombstone`
+  with final floor. Evidence resolver stays live-only (no local fallback).
+- [ ] `HOUFENG_POSTGRES_INTEGRATION=1 go test ./internal/center/store -run 'WitnessedRecordSubject' -count=1`
 
-- [ ] Test conditional staging, streaming hash/size, atomic publish, immutable
-  version open, revoke, purge, multipart cleanup, and version mismatch.
-- [ ] Implement local fsync/rename and S3-compatible staged copy/publish.
-- [ ] Run the same suite for local and real MinIO profiles.
+### Task 3: 0058 + ACL + store
 
-## Task 4: Export providers, preview, and human rendering
+**Files:** `db/migrations/0058_create_record_portability.sql`;
+`internal/center/store/record_portability.go`;
+`internal/center/store/migrate/app_acl_current_contract.go` fragment;
+migration/ACL tests.
 
-- [ ] Define provider registry and fixed-preview contracts with all owning domains.
-- [ ] Test missing provider, unauthorized material, partial source, inventory
-  drift, capacity, expiry, and deletion fence.
-- [ ] Implement Markdown/PDF RenderModel exporters and attachment/evidence/
-  collaboration/activity/comparison providers.
-- [ ] Prove PDF isolation/no-network and semantic parity with Markdown.
+- [ ] RED schema/constraint/index/TTL/content-allowlist.
+- [ ] Fragment lists exact objects and runtime/admin privileges. Prove no
+  duplicate membership/contract tables.
+- [ ] Store CAS/idempotency for export jobs (import tables exist, unused).
+- [ ] Fresh/repeat migration + current convergence/admission.
 
-## Task 5: Machine export worker and download
+### Task 4: Human Markdown + comparison.result/v1 consumption
 
-- [ ] Test staging cutpoints, canonical manifest, optional signature, publish
-  idempotency, cancellation, janitor, and no partial visibility.
-- [ ] Implement worker and artifact lifecycle.
-- [ ] Test authorization/fence/content lease before headers and during stream;
-  verify revoke/reservation yields no new bytes.
+**Files:** create `internal/center/portability/` preview/export service;
+handlers `record_portability.go`; config flag; Web lazy export on record
+center / revision / detail — **not** `RecordComparisonPage`.
 
-## Task 6: Import quarantine and dry-run
+- [x] RED: unauthorized material, inventory drift, capability off, body
+  limits, comparison download byte-equals
+  `ComparisonResultKind.Export`; Summarize allowlist; forbidden
+  `conclusion`/`markdown` fields stay absent.
+- [x] GREEN: `POST /api/record-export-previews`, `POST /api/record-exports`,
+  `GET /api/record-exports/{id}`, `GET /api/record-exports/{id}/content`.
+  Markdown via `SafeDocumentHTML`. Comparison/evidence via existing
+  `Export` / `ExportAdapter`. Activity via `ActivityExportReader` when
+  included.
+- [x] Stage through `BlobStore` wrapper. Lease before headers and during
+  stream; revoke stops new bytes.
+- [x] `HOUFENG_PORTABILITY_ENABLED` default false; requires records-enabled.
+- [x] Web: no download control in `web/src/pages/records/compare/*`.
+- [x] `go test -race ./internal/center/portability ./internal/center/http/handlers ./internal/center/evidence -run 'Portability|RecordExport|ComparisonResult' -count=10`
+- [x] `cd web && nvm use 22.23.1 && npx vitest run` on the new export tests
+  plus `src/pages/records/compare` to prove no download chrome.
 
-- [ ] Test structural/integrity/schema/security/capacity validation and prove
-  dry-run writes no authoritative domain row.
-- [ ] Implement quarantine registration, validation, ID preallocation, exact
-  plan digest, warnings/blockers, and expiry.
-- [ ] Add hostile archive corpus and bounded fuzz coverage.
+### Task 5: PR1 deletion adapter + quality
 
-## Task 7: Atomic import apply
+- [x] Register `record_portability` surfaces for the `0058` tables.
+- [x] Focused Go/Web gates, `git diff --check`, `trellis-check`.
+- [ ] Do **not** commit, archive, or open a PR until Child 10 (PR1 + PR2)
+  is finished and Alan asks for delivery.
 
-- [ ] Test reference remapping, author provenance, local authority, duplicate
-  origin, idempotent replay, CAS drift, and every participant cutpoint.
-- [ ] Implement staged blobs plus one Records transaction and compensation
-  receipts.
-- [ ] Rebuild search/activity projections; never import their checkpoints.
-- [ ] Run race and real PostgreSQL tests.
+---
 
-## Task 8: HTTP, Web, workers, and adapters
+## PR2 — machine archive, import, PDF, quarantine
 
-- [ ] Add authenticated preview/export/download/upload/dry-run/apply/status/
-  cancel endpoints and response allowlist tests.
-- [ ] Add lazy Records import/export UI with loading/progress/warning/error/
-  revoked/deleted and 390px/keyboard contracts.
-- [ ] Register deletion, backup, restore, and janitor adapters.
-- [ ] Prove permanent deletion plus official restore/re-import cannot resurrect
-  target content.
+Same Trellis child and preferably the same branch after PR1 merges, or a
+follow-on branch from the new main. Reconfirm `0058` is the latest root
+migration before adding code (no new number).
 
-## Task 8A: Production admission, source witness, and quarantine
+### Task 6: Archive v1 conformance
 
-- [ ] RED covers nil/typed-nil/stale/wrong-deployment membership, missing or
-  discontinuous source tombstones, witness outage, archive/entry corruption,
-  unknown required schema, and forbidden generic render/apply/export paths.
-- [ ] Implement the concrete transaction-scoped `store.AdmissionGate`, witnessed
-  source-deletion authorization-floor reader, and integrity-valid allowlisted
-  external evidence quarantine without changing ordinary evidence registry
-  behavior.
-- [ ] Run strict real PostgreSQL/witness integration, replay, readiness, hostile
-  archive, and bootstrap tests; leave final aggregate enablement to Child 11.
+**Files:** `internal/center/portability/{archive,manifest,canonical}.go`
+and testdata.
 
-## Task 9: Quality and handoff
+- [x] RED: path normalization, links/devices, collision, size/count/ratio/
+  depth/working-set, hash mismatch.
+- [x] GREEN: ZIP64-capable `houfeng-record-archive/v1` writer/reader,
+  deterministic bytes, canonical manifest. Not yet wired into export HTTP.
+- [x] Bounded fuzz + working-set/ratio/depth corpus; wire `archive` export
+  kind through the existing preview/create path.
 
-- [ ] Run focused archive/import/export races and local/MinIO integration.
-- [ ] Run full Go/Web/browser gates, `git diff --check`, and `trellis-check`.
-- [ ] Update specs for the implemented archive/provider/participant contracts.
-- [ ] Merge through protected main and archive this child before Child 11 starts.
+### Task 7: PDF derived presentation
 
-## Rollback
+- [x] Same RenderModel as Markdown. Semantic parity tests; PDF is not
+  authority.
+- [x] Isolated processor **deferred to Child 12**. Child 10 keeps the
+  derived RenderModel + in-process stub.
 
-Disable routes/workers and purge unpublished staging data. `0058` is additive
-but the development database may be rebuilt when returning to a code version
-without it. Do not create a legacy compatibility migration.
+### Task 8: Import quarantine, dry-run, apply
+
+- [x] RED: dry-run writes 0 domain rows; hostile ZIP; untrusted
+  auth/role/path (top-level JSON); official markdown URLs/verbs allowed;
+  remap; idempotent replay; exact lock CAS; atomic multi-document apply;
+  empty/foreign actor fail-closed; origin conflict before writes;
+  official `kind`+`schema_version` evidence envelope.
+- [x] GREEN: `POST /api/record-imports/dry-run`,
+  `POST /api/record-imports/{plan_id}/apply`. Apply uses
+  `ImportDocumentsFinishing` so documents, origin, and job terminal
+  state share one platform transaction. `LoadImportJob` /
+  `ClaimImportJob` select `actor_id`.
+- [x] Rebuild search/activity; never import checkpoints.
+- [x] Unknown schemas fail-closed from the local registry. Archive
+  `optional:true` is not trusted. Quarantine persist abandoned.
+  Known comparison/evidence remaps and call the evidence importer.
+  Snapshot-row persist is Child 12.
+
+### Task 9: Origin tombstone, Web import, handoff
+
+- [x] Official restore/re-import of the same archive SHA-256 fails on
+  origin tombstone (dry-run and apply). Purge writes tombstones from
+  import mappings and origins.
+- [ ] Lazy Web import workflow: loading/progress/warning/error exist.
+  Independent revoked/deleted states and 390px/keyboard contract tests
+  are still open.
+- [x] Local staging conformance. MinIO/Postgres integration runs are
+  Child 11 (`HOUFENG_*_INTEGRATION=1`).
+- [x] Sensitive topology requires `record.export_sensitive_topology` and
+  a short-lived confirm token.
+- [x] Search-page export targets the selected result row, not always
+  `visibleRecords[0]`.
+- [ ] Merge PR2; archive this child only after the **narrowed**
+  `P-AC-01`–`P-AC-15` are on protected main. Child 12 owns evidence
+  persist / attachments / PDF isolation. Child 11 owns integration runs.
+  Then Child 11 may reconcile.
+
+## Validation commands
+
+```bash
+# PR1 focused
+go test -race ./internal/center/store ./internal/center/portability \
+  ./internal/center/http/handlers ./cmd/houfeng-center \
+  -run 'Admission|Witnessed|Portability|RecordExport|ComparisonResult' -count=10
+HOUFENG_POSTGRES_INTEGRATION=1 go test ./internal/center/store \
+  ./internal/center/store/migrate -count=1
+make verify-go
+# web: nvm use 22.23.1
+make verify-web
+
+# PR2 adds
+go test -race ./internal/center/portability -run 'Archive|Import|Origin|PDF' -count=10
+```
+
+Use `TMPDIR=/tmp`. Keep `GOCACHE`/`GOMODCACHE` under `$HOME`. Do not
+`git add .tmp/`.
+
+## Risky files / rollback
+
+- `cmd/houfeng-center/bootstrap.go` — gate/witness wiring; keep the
+  `AdmissionGateFunc` ratchet.
+- `internal/center/store/record_subjects.go` — do not accept digest-only
+  tombstones.
+- `internal/center/evidence/comparison_result_kind.go` — consume, do not
+  fork Export.
+- `web/src/pages/records/compare/*` — no download UI.
+- Feature-off hides routes/workers. `0058` is additive; rollback to
+  pre-0058 code rebuilds the development database.
+
+## Follow-up before `task.py start`
+
+- [ ] Alan approved this summary in a later message (choosing B is not
+  start approval).
+- [ ] Working location is a non-main branch from current `origin/main`.
+- [ ] `0058` still unoccupied.

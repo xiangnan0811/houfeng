@@ -279,6 +279,9 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	if gotRouterOptions.ComparisonEnabled {
 		t.Fatal("runtime ComparisonEnabled = true, want default off")
 	}
+	if gotRouterOptions.PortabilityEnabled || gotRouterOptions.RecordPortabilityHandler != nil {
+		t.Fatal("runtime PortabilityEnabled or handler is on, want default off")
+	}
 	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
 		gotRouterOptions.SubjectActivityHandler == nil || gotRouterOptions.VPSOverviewHandler == nil ||
 		gotRouterOptions.RecordWatchesHandler == nil || gotRouterOptions.RecordInboxHandler == nil ||
@@ -867,6 +870,93 @@ func TestBootstrapRegistersComparisonRevisionParticipantBetweenCollaborationAndE
 	evidence := strings.Index(source, "store.NewRecordEvidenceRevisionParticipant()")
 	if comparison < 0 || collaboration < 0 || evidence < 0 || !(collaboration < comparison && comparison < evidence) {
 		t.Fatalf("bootstrap comparison participant order: collaboration=%d comparison=%d evidence=%d", collaboration, comparison, evidence)
+	}
+}
+
+func TestBootstrapWiresNamedRecordPortabilityService(t *testing.T) {
+	source, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"portability.NewService(",
+		"handlers.RecordPortability(",
+		"portability.NewLeasedBlobStore(blob)",
+		"centerevidence.NewComparisonResultKind()",
+		"newActivityExportReader(",
+		"portability.NewDeletionAdapter(",
+		"portability.NewIsolatedDocumentPDFRenderer(",
+		"Importer:",
+		"portability.NewAuthoritativeProjectionRebuilder(",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("bootstrap.go missing portability wiring %q", required)
+		}
+	}
+}
+
+func TestBootstrapWiresNamedWitnessedRecordSubjectTombstoneSource(t *testing.T) {
+	source, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"newProductionWitnessedRecordSubjectTombstoneSource(",
+		"store.NewRecordSubjectReadResolver(subjects, witness)",
+		"store.NewWitnessedRecordSubjectTombstoneReader(",
+		"HOUFENG_DELETION_WITNESS_DATABASE_URL",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("bootstrap.go missing witnessed tombstone wiring %q", required)
+		}
+	}
+	if strings.Contains(text, "NewRecordSubjectReadResolver(subjects, nil)") {
+		t.Fatal("bootstrap.go still constructs RecordSubjectReadResolver with a nil witness")
+	}
+}
+
+func TestBootstrapWiresNamedDeploymentMembershipAdmissionGateWithoutFuncAdapter(t *testing.T) {
+	source, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"store.NewDeploymentMembershipAdmissionGate(",
+		"newProductionRecordPlatformAdmissionGate(",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("bootstrap.go missing named admission wiring %q", required)
+		}
+	}
+	if strings.Contains(text, "store.AdmissionGateFunc(") {
+		t.Fatal("bootstrap.go contains store.AdmissionGateFunc(")
+	}
+}
+
+func TestNewProductionRecordPlatformAdmissionGateConstructsNamedTypeOrStaysNil(t *testing.T) {
+	gate, err := newProductionRecordPlatformAdmissionGate(config.CenterConfig{})
+	if err != nil || gate != nil {
+		t.Fatalf("empty identity gate = %#v err = %v, want nil", gate, err)
+	}
+
+	if _, err := newProductionRecordPlatformAdmissionGate(config.CenterConfig{RecordInstanceID: "api-01"}); err == nil {
+		t.Fatal("partial identity error = nil, want rejection")
+	}
+
+	gate, err = newProductionRecordPlatformAdmissionGate(config.CenterConfig{
+		RecordInstanceID:         "api-01",
+		RecordDeploymentID:       "dp-" + strings.Repeat("a", 64),
+		RecordInstanceKind:       "api",
+		RecordInstanceCapability: "records.runtime",
+	})
+	if err != nil {
+		t.Fatalf("complete identity error = %v", err)
+	}
+	if _, ok := gate.(*store.DeploymentMembershipAdmissionGate); !ok {
+		t.Fatalf("gate type = %T, want *store.DeploymentMembershipAdmissionGate", gate)
 	}
 }
 

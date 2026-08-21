@@ -588,3 +588,47 @@ func mustResource(t *testing.T, visibility VisibilityScope, source SourceAuthori
 func ptrVisibility(scope VisibilityScope) *VisibilityScope {
 	return &scope
 }
+
+func TestParseCanonicalVisibilityScopeRoundTripsTrustedBytesAndRejectsUnknownVersion(t *testing.T) {
+	t.Parallel()
+
+	project := mustVisibility(t, VisibilityKindProject, nil, nil)
+	restricted := mustVisibility(t, VisibilityKindRestricted, []Role{RoleProjectAdmin}, []string{testGroupAlpha})
+	for _, scope := range []VisibilityScope{project, restricted} {
+		got, err := ParseCanonicalVisibilityScope(scope.CanonicalBytes())
+		if err != nil {
+			t.Fatalf("ParseCanonicalVisibilityScope() error = %v", err)
+		}
+		if !bytes.Equal(got.CanonicalBytes(), scope.CanonicalBytes()) || got.CanonicalHash != scope.CanonicalHash {
+			t.Fatalf("parsed scope = %#v, want %#v", got, scope)
+		}
+	}
+
+	if _, err := ParseCanonicalVisibilityScope(nil); !errors.Is(err, ErrInvalidVisibilityScope) {
+		t.Fatalf("ParseCanonicalVisibilityScope(nil) error = %v, want ErrInvalidVisibilityScope", err)
+	}
+	tampered := append(append([]byte(nil), project.CanonicalBytes()...), 0x00)
+	if _, err := ParseCanonicalVisibilityScope(tampered); !errors.Is(err, ErrInvalidVisibilityScope) {
+		t.Fatalf("ParseCanonicalVisibilityScope(trailing byte) error = %v, want ErrInvalidVisibilityScope", err)
+	}
+	unknown := append([]byte(nil), project.CanonicalBytes()...)
+	// Version sits after the domain string length prefix and domain bytes.
+	unknown[4+len("recordauth.visibility.v1")] = 2
+	if _, err := ParseCanonicalVisibilityScope(unknown); !errors.Is(err, ErrInvalidVisibilityScope) {
+		t.Fatalf("ParseCanonicalVisibilityScope(unknown version) error = %v, want ErrInvalidVisibilityScope", err)
+	}
+}
+
+func TestAllowsCapabilityGatesSensitiveExportWithoutInventingResource(t *testing.T) {
+	admin := mustActor(t, RoleProjectAdmin, nil)
+	viewer := mustActor(t, RoleViewer, nil)
+	if err := AllowsCapability(admin, CapabilityExportSensitiveTopology); err != nil {
+		t.Fatalf("admin sensitive export = %v", err)
+	}
+	if err := AllowsCapability(viewer, CapabilityExport); err != nil {
+		t.Fatalf("viewer export = %v", err)
+	}
+	if err := AllowsCapability(viewer, CapabilityExportSensitiveTopology); !errors.Is(err, ErrDenied) {
+		t.Fatalf("viewer sensitive export = %v, want ErrDenied", err)
+	}
+}

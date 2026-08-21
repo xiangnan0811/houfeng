@@ -19,6 +19,7 @@ var (
 	ErrInvalidTemplate                = errors.New("invalid record template")
 	ErrTemplateNotFound               = errors.New("record template not found")
 	ErrInvalidRevisionInput           = errors.New("invalid complete record revision input")
+	ErrUntrustedImportIdentity        = errors.New("untrusted imported identity")
 )
 
 type Lifecycle string

@@ -143,6 +143,9 @@ func TestLoadCenterConfigSelectsRuntimeAdmissionMode(t *testing.T) {
 	if cfg.ComparisonEnabled {
 		t.Fatal("ComparisonEnabled = true, want default false")
 	}
+	if cfg.PortabilityEnabled {
+		t.Fatal("PortabilityEnabled = true, want default false")
+	}
 }
 
 func TestLoadCenterConfigComparisonEnabledRequiresRecords(t *testing.T) {
@@ -172,6 +175,28 @@ func TestLoadCenterConfigComparisonEnabledRequiresRecords(t *testing.T) {
 	}
 	if cfg.ComparisonAdmissionBudget != 64<<20 {
 		t.Fatalf("ComparisonAdmissionBudget = %d, want 64 MiB default", cfg.ComparisonAdmissionBudget)
+	}
+}
+
+func TestLoadCenterConfigPortabilityEnabledRequiresRecords(t *testing.T) {
+	setRequiredAuth(t)
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://runtime")
+	t.Setenv("HOUFENG_PORTABILITY_ENABLED", "true")
+	t.Setenv("HOUFENG_RECORDS_ENABLED", "false")
+	t.Setenv("HOUFENG_RECORD_PERMANENT_DELETE_ENABLED", "false")
+
+	if _, err := centerconfig.LoadCenterConfig(); err == nil || !strings.Contains(err.Error(), "HOUFENG_PORTABILITY_ENABLED requires HOUFENG_RECORDS_ENABLED=true") {
+		t.Fatalf("LoadCenterConfig() error = %v, want portability stacked on records", err)
+	}
+
+	setRequiredLocalAttachments(t)
+	t.Setenv("HOUFENG_RECORDS_ENABLED", "true")
+	cfg, err := centerconfig.LoadCenterConfig()
+	if err != nil {
+		t.Fatalf("LoadCenterConfig() error = %v", err)
+	}
+	if !cfg.PortabilityEnabled {
+		t.Fatal("PortabilityEnabled = false, want true when records and portability are enabled")
 	}
 }
 
@@ -611,6 +636,44 @@ func TestLoadCenterConfigRequiresInitialUsername(t *testing.T) {
 
 	if _, err := centerconfig.LoadCenterConfig(); err == nil {
 		t.Fatal("LoadCenterConfig() error = nil, want non-nil for missing initial username")
+	}
+}
+
+func TestLoadCenterConfigRecordAdmissionIdentityIsOptionalAndAllOrNothing(t *testing.T) {
+	setRequiredAuth(t)
+	setRequiredLocalAttachments(t)
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://runtime")
+	t.Setenv("HOUFENG_RECORDS_ENABLED", "true")
+	t.Setenv("HOUFENG_RECORD_INSTANCE_ID", "api-01")
+
+	if _, err := centerconfig.LoadCenterConfig(); err == nil || !strings.Contains(err.Error(), "HOUFENG_RECORD_INSTANCE_ID") {
+		t.Fatalf("LoadCenterConfig() error = %v, want all-or-nothing record admission identity", err)
+	}
+
+	deploymentID := "dp-" + strings.Repeat("a", 64)
+	t.Setenv("HOUFENG_RECORD_DEPLOYMENT_ID", deploymentID)
+	t.Setenv("HOUFENG_RECORD_INSTANCE_KIND", "api")
+	t.Setenv("HOUFENG_RECORD_INSTANCE_CAPABILITY", "records.runtime")
+	cfg, err := centerconfig.LoadCenterConfig()
+	if err != nil {
+		t.Fatalf("LoadCenterConfig() error = %v", err)
+	}
+	if cfg.RecordInstanceID != "api-01" || cfg.RecordDeploymentID != deploymentID ||
+		cfg.RecordInstanceKind != "api" || cfg.RecordInstanceCapability != "records.runtime" {
+		t.Fatalf("record admission identity = %#v", cfg)
+	}
+
+	t.Setenv("HOUFENG_RECORD_INSTANCE_ID", "")
+	t.Setenv("HOUFENG_RECORD_DEPLOYMENT_ID", "")
+	t.Setenv("HOUFENG_RECORD_INSTANCE_KIND", "")
+	t.Setenv("HOUFENG_RECORD_INSTANCE_CAPABILITY", "")
+	cfg, err = centerconfig.LoadCenterConfig()
+	if err != nil {
+		t.Fatalf("LoadCenterConfig() empty identity error = %v", err)
+	}
+	if cfg.RecordInstanceID != "" || cfg.RecordDeploymentID != "" ||
+		cfg.RecordInstanceKind != "" || cfg.RecordInstanceCapability != "" {
+		t.Fatalf("empty record admission identity = %#v", cfg)
 	}
 }
 

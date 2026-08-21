@@ -156,9 +156,20 @@ adapter blocks acceptance and returns work to the owning child.
 - Multi-region/WORM disaster recovery, external key governance, or enterprise
   backup retention policy.
 - Formal human research recruitment in the current no-user phase.
+- Evidence snapshot persist, attachment bytes in ZIP, or isolated PDF
+  processor wiring (Child 12).
+- ZIP activity pages or persisted import quarantine rows (abandoned at
+  the parent; unknown schema stays fail-closed).
 
 ## Execution Gate
 
-Keep `planning` until Children 1-10 are accepted on protected main. Before start,
-reconcile this plan with their actual adapter registries and test entry points.
+Keep `planning` until Children 1-10 **and Child 12** (archive restore
+fidelity) are accepted on protected main. Before start, reconcile this
+plan with their actual adapter registries and test entry points.
+
+Child 11 **runs** existing portability Postgres/MinIO integration suites
+and verifies unknown-schema fail-closed. It does **not** implement
+evidence snapshot persist, attachment archive bytes, isolated PDF
+wiring, ZIP activity pages, or quarantine row storage.
+
 A missing child contract returns to that child; it does not expand Child 11.
