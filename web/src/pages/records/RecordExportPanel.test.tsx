@@ -160,4 +160,56 @@ describe('RecordExportPanel', () => {
     expect(screen.queryByText('record.md · 12 字节')).toBeNull()
     expect(screen.getByRole('button', { name: '下载' })).toBeDisabled()
   })
+
+  it('shows a revoked shell after a lease is revoked mid-download', async () => {
+    const { ApiError } = await import('../../lib/apiRequest')
+    api.previewRecordExport.mockResolvedValue({
+      preview_id: 'rej_1',
+      preview_token: 'tok',
+      export_kind: 'markdown',
+      export_mode: 'safe',
+      inventory_digest: 'aa',
+      expected_files: [{ name: 'record.md', media_type: 'text/markdown', byte_size: 12 }],
+      unavailable: [],
+      expires_at: '2026-08-21T13:00:00Z',
+    })
+    api.createRecordExport.mockRejectedValue(new ApiError(409, 'revoked', { code: 'export_lease_revoked' }))
+    render(<RecordExportPanel recordId="rec_001" />)
+    fireEvent.click(screen.getByRole('button', { name: '预览导出' }))
+    expect(await screen.findByText('record.md · 12 字节')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '下载' }))
+    expect(await screen.findByRole('heading', { name: '导出访问已撤销' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '下载' })).toBeNull()
+  })
+
+  it('shows a deleted shell when a previewed export target disappears', async () => {
+    const { ApiError } = await import('../../lib/apiRequest')
+    api.previewRecordExport.mockResolvedValue({
+      preview_id: 'rej_1',
+      preview_token: 'tok',
+      export_kind: 'markdown',
+      export_mode: 'safe',
+      inventory_digest: 'aa',
+      expected_files: [{ name: 'record.md', media_type: 'text/markdown', byte_size: 12 }],
+      unavailable: [],
+      expires_at: '2026-08-21T13:00:00Z',
+    })
+    api.createRecordExport.mockRejectedValue(new ApiError(404, 'gone', { code: 'resource_not_found' }))
+    render(<RecordExportPanel recordId="rec_001" />)
+    fireEvent.click(screen.getByRole('button', { name: '预览导出' }))
+    expect(await screen.findByText('record.md · 12 字节')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '下载' }))
+    expect(await screen.findByRole('heading', { name: '导出目标已删除' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '下载' })).toBeNull()
+  })
+
+  it('keeps the form when the first preview is unauthorized', async () => {
+    const { ApiError } = await import('../../lib/apiRequest')
+    api.previewRecordExport.mockRejectedValue(new ApiError(404, 'missing', { code: 'resource_not_found' }))
+    render(<RecordExportPanel recordId="rec_001" />)
+    fireEvent.click(screen.getByRole('button', { name: '预览导出' }))
+    expect(await screen.findByText('导出未开放或无权访问该材料。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '预览导出' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '导出目标已删除' })).toBeNull()
+  })
 })

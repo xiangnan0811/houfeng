@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 
 import { Button, Select } from '../../components/atoms'
+import { PageState } from '../../components/PageState'
 import { ApiError } from '../../lib/apiRequest'
 import {
   createRecordExport,
@@ -9,6 +10,8 @@ import {
 } from '../../lib/recordsApi'
 import type { RecordExportKind, RecordExportPreview } from '../../lib/types'
 
+type ExportSurface = 'form' | 'revoked' | 'deleted'
+
 type RecordExportPanelProps = {
   recordId: string
   revisionId?: string
@@ -16,15 +19,24 @@ type RecordExportPanelProps = {
   recordLabel?: string
 }
 
-function describeExportFailure(error: unknown): string {
+function describeExportFailure(error: unknown, hadPreview: boolean): string {
   if (error instanceof ApiError) {
-    if (error.code === 'resource_not_found') return '导出未开放或无权访问该材料。'
-    if (error.code === 'export_inventory_drift') return '导出清单已变化，请重新预览。'
     if (error.code === 'export_lease_revoked') return '下载租约已撤销，停止继续读取。'
+    if (error.code === 'resource_not_found') {
+      return hadPreview ? '导出目标已删除，当前预览已失效。' : '导出未开放或无权访问该材料。'
+    }
+    if (error.code === 'export_inventory_drift') return '导出清单已变化，请重新预览。'
     return error.message
   }
   if (error instanceof Error) return error.message
   return '导出失败'
+}
+
+function exportSurfaceFor(error: unknown, hadPreview: boolean): ExportSurface | null {
+  if (!(error instanceof ApiError)) return null
+  if (error.code === 'export_lease_revoked') return 'revoked'
+  if (error.code === 'resource_not_found' && hadPreview) return 'deleted'
+  return null
 }
 
 /** Remount with `key={recordId}` when the target record changes so preview state cannot leak. */
@@ -38,6 +50,7 @@ export function RecordExportPanel({ recordId, revisionId, snapshotIds = [], reco
   const [preview, setPreview] = useState<RecordExportPreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const [surface, setSurface] = useState<ExportSurface>('form')
 
   function runPreview() {
     setBusy(true)
@@ -57,7 +70,15 @@ export function RecordExportPanel({ recordId, revisionId, snapshotIds = [], reco
           setMessage(`有 ${next.unavailable.length} 项材料不可用，已按名称列出。`)
         }
       })
-      .catch((error: unknown) => setMessage(describeExportFailure(error)))
+      .catch((error: unknown) => {
+        const next = exportSurfaceFor(error, preview != null)
+        if (next) {
+          setSurface(next)
+          setPreview(null)
+          return
+        }
+        setMessage(describeExportFailure(error, preview != null))
+      })
       .finally(() => setBusy(false))
   }
 
@@ -80,8 +101,31 @@ export function RecordExportPanel({ recordId, revisionId, snapshotIds = [], reco
         link.click()
         URL.revokeObjectURL(url)
       })
-      .catch((error: unknown) => setMessage(describeExportFailure(error)))
+      .catch((error: unknown) => {
+        const next = exportSurfaceFor(error, true)
+        if (next) {
+          setSurface(next)
+          setPreview(null)
+          return
+        }
+        setMessage(describeExportFailure(error, true))
+      })
       .finally(() => setBusy(false))
+  }
+
+  if (surface === 'revoked') {
+    return (
+      <section className="card" aria-label="记录导出">
+        <PageState kind="empty" title="导出访问已撤销" description="下载租约已撤销，停止继续读取。" />
+      </section>
+    )
+  }
+  if (surface === 'deleted') {
+    return (
+      <section className="card" aria-label="记录导出">
+        <PageState kind="empty" title="导出目标已删除" description="当前预览已失效，记录或导出材料已不存在。" />
+      </section>
+    )
   }
 
   return (
@@ -122,8 +166,8 @@ export function RecordExportPanel({ recordId, revisionId, snapshotIds = [], reco
         ) : null}
       </div>
       <div className="page-form-actions">
-        <Button size="sm" variant="secondary" disabled={busy} onClick={runPreview}>预览导出</Button>
-        <Button size="sm" disabled={busy || !preview} onClick={runDownload}>下载</Button>
+        <Button size="lg" variant="secondary" disabled={busy} onClick={runPreview}>预览导出</Button>
+        <Button size="lg" disabled={busy || !preview} onClick={runDownload}>下载</Button>
       </div>
       {preview ? (
         <ul>

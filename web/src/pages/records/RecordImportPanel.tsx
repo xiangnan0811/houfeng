@@ -1,16 +1,21 @@
 import { useState } from 'react'
 
 import { Button, Input } from '../../components/atoms'
+import { PageState } from '../../components/PageState'
 import { ApiError } from '../../lib/apiRequest'
 import { applyRecordImport, dryRunRecordImport } from '../../lib/recordsApi'
 import type { RecordImportPlan } from '../../lib/types'
 
-function describeImportFailure(error: unknown): string {
+type ImportSurface = 'form' | 'deleted'
+
+function describeImportFailure(error: unknown, hadPlan: boolean): string {
   if (error instanceof ApiError) {
     if (error.code === 'origin_tombstoned') return '该来源已墓碑化，不能官方恢复或再导入。'
     if (error.code === 'import_origin_conflict') return '该归档已导入过，不能再次官方导入。'
     if (error.code === 'import_cas_conflict') return '导入计划已变化，请重新预检。'
-    if (error.code === 'resource_not_found') return '导入未开放或无权访问。'
+    if (error.code === 'resource_not_found') {
+      return hadPlan ? '导入计划已删除或已过期。' : '导入未开放或无权访问。'
+    }
     return error.message
   }
   if (error instanceof Error) return error.message
@@ -23,6 +28,7 @@ export function RecordImportPanel() {
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
   const [message, setMessage] = useState('')
+  const [surface, setSurface] = useState<ImportSurface>('form')
 
   function runDryRun() {
     if (!file) return
@@ -40,7 +46,7 @@ export function RecordImportPanel() {
       .catch((error: unknown) => {
         setPlan(null)
         setProgress('')
-        setMessage(describeImportFailure(error))
+        setMessage(describeImportFailure(error, false))
       })
       .finally(() => setBusy(false))
   }
@@ -55,10 +61,24 @@ export function RecordImportPanel() {
         setProgress(`已导入 ${result.record_ids.length} 条记录`)
       })
       .catch((error: unknown) => {
+        if (error instanceof ApiError && error.code === 'resource_not_found') {
+          setSurface('deleted')
+          setPlan(null)
+          setProgress('')
+          return
+        }
         setProgress('')
-        setMessage(describeImportFailure(error))
+        setMessage(describeImportFailure(error, true))
       })
       .finally(() => setBusy(false))
+  }
+
+  if (surface === 'deleted') {
+    return (
+      <section className="card" aria-label="记录导入">
+        <PageState kind="empty" title="导入计划已删除" description="当前预检已失效，请重新选择归档后再预检。" />
+      </section>
+    )
   }
 
   return (
@@ -77,8 +97,8 @@ export function RecordImportPanel() {
         }}
       />
       <div className="page-form-actions">
-        <Button size="sm" variant="secondary" disabled={busy || !file} onClick={runDryRun}>预检导入</Button>
-        <Button size="sm" disabled={busy || !plan} onClick={runApply}>确认应用</Button>
+        <Button size="lg" variant="secondary" disabled={busy || !file} onClick={runDryRun}>预检导入</Button>
+        <Button size="lg" disabled={busy || !plan} onClick={runApply}>确认应用</Button>
       </div>
       {progress ? <p role="status">{progress}</p> : null}
       {plan ? (

@@ -164,9 +164,10 @@ and testdata.
 - [x] Official restore/re-import of the same archive SHA-256 fails on
   origin tombstone (dry-run and apply). Purge writes tombstones from
   import mappings and origins.
-- [ ] Lazy Web import workflow: loading/progress/warning/error exist.
-  Independent revoked/deleted states and 390px/keyboard contract tests
-  are still open.
+- [x] Lazy Web import/export: loading/progress/warning/error exist.
+  Revoked and deleted are independent shells after a successful preview.
+  First-request 404 stays “未开放” and does not leak. 390px/keyboard
+  contract lives in `web/e2e/record-portability.spec.ts`.
 - [x] Local staging conformance. MinIO/Postgres integration runs are
   Child 11 (`HOUFENG_*_INTEGRATION=1`).
 - [x] Sensitive topology requires `record.export_sensitive_topology` and
