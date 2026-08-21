@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.71.0](https://github.com/xiangnan0811/houfeng/compare/v0.70.0...v0.71.0) (2026-08-21)
+
+
+### Features
+
+* **records:** add the records comparison workbench ([#423](https://github.com/xiangnan0811/houfeng/issues/423)) ([aacb9c5](https://github.com/xiangnan0811/houfeng/commit/aacb9c5096cb484fdfddb3ce78056fc834ed3569))
+
 ## [0.70.0](https://github.com/xiangnan0811/houfeng/compare/v0.69.0...v0.70.0) (2026-08-20)
 
 
