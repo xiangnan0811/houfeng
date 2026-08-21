@@ -94,6 +94,8 @@
 
 `cmd/houfeng-import-vps-json` 是当前第一个运维型 CLI：它只负责 flag、文件读取、数据库连接 / migration、事务与报告输出；JSON 结构、dry-run 校验、导入编排和报告模型都放在 `internal/center/importing/`。后续新增 CLI 时沿用这个边界，不要在 `cmd/<binary>/main.go` 里直接堆业务规则。
 
+`cmd/houfeng-backup` / `cmd/houfeng-restore` 同样只做 flag、信号和 `recordbackup.NewService` / `recordrestore.NewService` 装配。编排、manifest、local/S3 store 与恢复状态机分别在 `internal/center/recordbackup/` 与 `internal/center/recordrestore/`。`cmd/houfeng-record-platform-admin` 只做 APP ACL migrate / bootstrap / finalize，**禁止**改成备份 CLI。能力矩阵在 `internal/center/recordreadiness/`，由 `newProductionRecordReadinessRegistry` 接线。
+
 ### `internal/center/<domain>/`
 
 按领域拆包。每个子包遵循以下惯例：

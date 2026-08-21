@@ -33,6 +33,9 @@
 | `internal/center/syncing/` | `service.go:13-17` | `ErrBindingNotAccepted` / `ErrInvalidSyncToken`（**别名转发自 `enrollment` 包**，避免 handler 多包导入） |
 | `internal/center/subscriptions/` | `types.go:14-15` | `ErrSubscriptionNotFound`、`ErrInvalidSubscriptionInput` |
 | `internal/center/renewals/` | `types.go` | `ErrAssetTimelineNotFound`、`ErrInvalidAssetHistoryInput`；兼容别名 `ErrRenewalTimelineNotFound`、`ErrInvalidRenewalDecisionInput` |
+| `internal/center/recordreadiness/` | `types.go` | `ErrInvalidCapabilityRegistry`、`ErrReadinessUnavailable`、`ErrContentLeak` |
+| `internal/center/recordbackup/` | `types.go` | `ErrInvalidBackupRequest`、`ErrUnknownManifestVersion`、`ErrTamperedManifest`、`ErrBackupUnavailable`、`ErrBackupCleanupRequired` |
+| `internal/center/recordrestore/` | `types.go` | `ErrTargetNotEmpty`、`ErrIncompatibleRestore`、`ErrMissingArtifact`、`ErrResurrectionBlocked`、`ErrRestoreUnavailable` |
 
 命名约定：
 

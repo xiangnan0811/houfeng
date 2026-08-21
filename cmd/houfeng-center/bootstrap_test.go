@@ -947,6 +947,24 @@ func TestBootstrapWiresNamedDeploymentMembershipAdmissionGateWithoutFuncAdapter(
 	}
 }
 
+func TestBootstrapWiresRecordReadinessRegistry(t *testing.T) {
+	source, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"recordreadiness.NewRegistry(",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("bootstrap.go missing record readiness wiring %q", required)
+		}
+	}
+	if !strings.Contains(text, "handlers.RecordDeletions(nil)") {
+		t.Fatal("bootstrap must keep RecordDeletions(nil) until the aggregate matrix enables permanent delete")
+	}
+}
+
 func TestNewProductionRecordPlatformAdmissionGateConstructsNamedTypeOrStaysNil(t *testing.T) {
 	gate, err := newProductionRecordPlatformAdmissionGate(config.CenterConfig{})
 	if err != nil || gate != nil {

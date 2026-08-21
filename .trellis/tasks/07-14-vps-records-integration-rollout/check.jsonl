@@ -1,1 +1,10 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guideline index for quality check"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "verify-go, bootstrap_test nil assertions, integration skip rules"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "sentinel errors.Is and no panic"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "status matrix and logs stay content-safe"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "reject any 0059/0060 or extra root migration"}
+{"file": ".trellis/spec/backend/record-portability-contract.md", "reason": "do not revive quarantine rows or ZIP activity pages"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "no business logic in cmd/; store must not import portability"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "feature branch only; no main checkout/commit/merge"}
+{"file": ".trellis/tasks/07-14-vps-records-integration-rollout/research/current-main-inventory-2026-08-21.md", "reason": "compare implementation against the inventoried adapter set"}
+{"file": ".trellis/spec/backend/record-integration-contract.md", "reason": "Child 11 readiness/backup/restore executable contract"}
