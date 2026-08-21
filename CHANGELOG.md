@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.73.0](https://github.com/xiangnan0811/houfeng/compare/v0.72.0...v0.73.0) (2026-08-21)
+
+
+### Features
+
+* **records:** restore archive evidence, attachments, and isolated PDF ([#428](https://github.com/xiangnan0811/houfeng/issues/428)) ([c708151](https://github.com/xiangnan0811/houfeng/commit/c708151981eda451cf0f064e708fb71dea4c24e2))
+
 ## [0.72.0](https://github.com/xiangnan0811/houfeng/compare/v0.71.0...v0.72.0) (2026-08-21)
 
 
