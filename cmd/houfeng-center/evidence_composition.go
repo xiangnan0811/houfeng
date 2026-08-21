@@ -24,25 +24,36 @@ type productionEvidenceSources struct {
 	CommandAudits     evidenceadapters.CommandAuditSource
 }
 
+type comparisonRuntimeConfig struct {
+	Enabled          bool
+	AdmissionBudget  int64
+	IntentKeyring    string
+	IntentKeyID      string
+	ReservedKeyPaths []string
+}
+
 type productionEvidenceCompositionDependencies struct {
-	Pool     *pgxpool.Pool
-	Gate     store.AdmissionGate
-	Subjects centerrecords.SubjectAdapterRegistry
-	Sources  productionEvidenceSources
+	Pool              *pgxpool.Pool
+	Gate              store.AdmissionGate
+	Subjects          centerrecords.SubjectAdapterRegistry
+	Sources           productionEvidenceSources
+	ComparisonEnabled bool
+	Comparison        comparisonRuntimeConfig
 }
 
 type productionEvidenceComposition struct {
-	registry       centerevidence.Registry
-	repository     *store.PostgresEvidenceRepository
-	authorizations *store.PostgresCurrentRecordAuthorizationSource
-	application    *centerevidence.Service
-	preparer       *centerevidence.RevisionPreparer
-	handler        http.Handler
-	worker         *centerevidence.MaintenanceWorker
-	observer       *centerevidence.MaintenanceObserver
-	export         *centerevidence.ExportAdapter
-	deletion       *centerevidence.DeletionAdapter
-	recovery       *centerevidence.RecoveryAdapter
+	registry         centerevidence.Registry
+	repository       *store.PostgresEvidenceRepository
+	authorizations   *store.PostgresCurrentRecordAuthorizationSource
+	application      *centerevidence.Service
+	preparer         *centerevidence.RevisionPreparer
+	handler          http.Handler
+	worker           *centerevidence.MaintenanceWorker
+	observer         *centerevidence.MaintenanceObserver
+	export           *centerevidence.ExportAdapter
+	deletion         *centerevidence.DeletionAdapter
+	recovery         *centerevidence.RecoveryAdapter
+	comparisonSigner centerevidence.ComparisonIntentSigner
 }
 
 func newProductionEvidenceComposition(
@@ -87,8 +98,12 @@ func newProductionEvidenceComposition(
 	if err != nil {
 		return nil, fmt.Errorf("%w: command audit kind", centerevidence.ErrEvidenceServiceUnavailable)
 	}
+	comparisonResult, err := centerevidence.NewComparisonResultKind()
+	if err != nil {
+		return nil, fmt.Errorf("%w: comparison result kind", centerevidence.ErrEvidenceServiceUnavailable)
+	}
 	registry, err := centerevidence.NewRegistry([]centerevidence.Kind{
-		ipQuality, monitoringHost, monitoringProbe, monitoringEvent, subscriptionCost, commandAudit,
+		ipQuality, monitoringHost, monitoringProbe, monitoringEvent, subscriptionCost, commandAudit, comparisonResult,
 	})
 	if err != nil || !exactProductionEvidenceKindKeys(registry.Keys()) {
 		return nil, fmt.Errorf("%w: exact evidence registry", centerevidence.ErrEvidenceServiceUnavailable)
@@ -109,6 +124,36 @@ func newProductionEvidenceComposition(
 	application, err := centerevidence.NewService(registry, repository, repository, capacity)
 	if err != nil {
 		return nil, fmt.Errorf("%w: evidence application", centerevidence.ErrEvidenceServiceUnavailable)
+	}
+	application = application.WithComparisonCandidates(
+		store.NewComparisonLiveSubjectResolver(dependencies.Subjects),
+		repository,
+		authorizations,
+	)
+	var comparisonSigner centerevidence.ComparisonIntentSigner
+	if dependencies.ComparisonEnabled || dependencies.Comparison.Enabled {
+		admissionBudget := dependencies.Comparison.AdmissionBudget
+		if admissionBudget == 0 {
+			admissionBudget = 64 << 20
+		}
+		admission, err := centerevidence.NewComparisonAdmission(admissionBudget)
+		if err != nil {
+			return nil, fmt.Errorf("%w: comparison admission", centerevidence.ErrEvidenceServiceUnavailable)
+		}
+		if dependencies.Comparison.IntentKeyring == "" || dependencies.Comparison.IntentKeyID == "" {
+			return nil, fmt.Errorf("%w: comparison intent keyring", centerevidence.ErrComparisonIntentUnavailable)
+		}
+		opened, openErr := centerevidence.OpenComparisonIntentKeyring(
+			dependencies.Comparison.IntentKeyring,
+			dependencies.Comparison.IntentKeyID,
+			append([]string(nil), dependencies.Comparison.ReservedKeyPaths...),
+		)
+		if openErr != nil {
+			return nil, fmt.Errorf("%w: comparison intent keyring", openErr)
+		}
+		signer := opened
+		application = application.WithFixedComparison(repository, admission, signer)
+		comparisonSigner = signer
 	}
 	preparer, err := centerevidence.NewRevisionPreparer(registry, repository, repository, repository, capacity)
 	if err != nil {
@@ -140,9 +185,11 @@ func newProductionEvidenceComposition(
 	}
 	return &productionEvidenceComposition{
 		registry: registry, repository: repository, authorizations: authorizations,
-		application: application, preparer: preparer, handler: handlers.Evidence(application),
+		application: application, preparer: preparer, handler: handlers.EvidenceWithOptions(application, handlers.EvidenceHandlerOptions{
+			ComparisonEnabled: dependencies.ComparisonEnabled,
+		}),
 		worker: worker, observer: observer, export: exportAdapter,
-		deletion: deletionAdapter, recovery: recoveryAdapter,
+		deletion: deletionAdapter, recovery: recoveryAdapter, comparisonSigner: comparisonSigner,
 	}, nil
 }
 

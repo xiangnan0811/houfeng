@@ -1,3 +1,4 @@
+import { type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import { Timestamp } from './atoms'
@@ -9,6 +10,7 @@ type Props = {
   sourceStatuses?: SubjectActivitySourceStatus[]
   emptyTitle?: string
   emptyDescription?: string
+  itemActions?: (item: SubjectActivityItem) => ReactNode
 }
 
 const CHANNEL_LABEL: Record<TimelineChannel, string> = {
@@ -77,6 +79,7 @@ export function UnifiedTimeline({
   sourceStatuses = [],
   emptyTitle = '暂无活动',
   emptyDescription = '当前筛选条件下没有可见活动。',
+  itemActions,
 }: Props) {
   const degraded = sourceStatuses.filter((status) => status.state !== 'ready')
 
@@ -128,11 +131,14 @@ export function UnifiedTimeline({
                       <p className="unified-timeline__summary">{item.presentation.summary}</p>
                     ) : null}
                     {meta ? <p className="unified-timeline__evidence-meta">{meta}</p> : null}
-                    {href ? (
+                    {href || itemActions ? (
                       <p className="unified-timeline__actions">
-                        <Link className="text-link" to={href}>
-                          {channel === 'evidence' ? '查看证据' : '查看修订'}
-                        </Link>
+                        {href ? (
+                          <Link className="text-link" to={href}>
+                            {channel === 'evidence' ? '查看证据' : '查看修订'}
+                          </Link>
+                        ) : null}
+                        {itemActions?.(item)}
                       </p>
                     ) : null}
                     {channel === 'system' ? (

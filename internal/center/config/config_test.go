@@ -140,6 +140,53 @@ func TestLoadCenterConfigSelectsRuntimeAdmissionMode(t *testing.T) {
 	if cfg.Attachment.BlobBackend != attachments.BackendKindLocal || cfg.Attachment.BlobRoot != wantBlobRoot {
 		t.Fatalf("Attachment = %#v, want configured local backend", cfg.Attachment)
 	}
+	if cfg.ComparisonEnabled {
+		t.Fatal("ComparisonEnabled = true, want default false")
+	}
+}
+
+func TestLoadCenterConfigComparisonEnabledRequiresRecords(t *testing.T) {
+	setRequiredAuth(t)
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://runtime")
+	t.Setenv("HOUFENG_COMPARISON_ENABLED", "true")
+	t.Setenv("HOUFENG_RECORDS_ENABLED", "false")
+	t.Setenv("HOUFENG_RECORD_PERMANENT_DELETE_ENABLED", "false")
+
+	if _, err := centerconfig.LoadCenterConfig(); err == nil || !strings.Contains(err.Error(), "HOUFENG_COMPARISON_ENABLED requires HOUFENG_RECORDS_ENABLED=true") {
+		t.Fatalf("LoadCenterConfig() error = %v, want comparison stacked on records", err)
+	}
+
+	setRequiredLocalAttachments(t)
+	t.Setenv("HOUFENG_RECORDS_ENABLED", "true")
+	if _, err := centerconfig.LoadCenterConfig(); err == nil || !strings.Contains(err.Error(), "HOUFENG_COMPARISON_ENABLED requires HOUFENG_COMPARISON_INTENT_KEYRING") {
+		t.Fatalf("LoadCenterConfig() error = %v, want keyring required when comparison is enabled", err)
+	}
+	t.Setenv("HOUFENG_COMPARISON_INTENT_KEYRING", t.TempDir())
+	t.Setenv("HOUFENG_COMPARISON_INTENT_KEY_ID", "cmp_local")
+	cfg, err := centerconfig.LoadCenterConfig()
+	if err != nil {
+		t.Fatalf("LoadCenterConfig() error = %v", err)
+	}
+	if !cfg.ComparisonEnabled {
+		t.Fatal("ComparisonEnabled = false, want true when records and comparison are enabled")
+	}
+	if cfg.ComparisonAdmissionBudget != 64<<20 {
+		t.Fatalf("ComparisonAdmissionBudget = %d, want 64 MiB default", cfg.ComparisonAdmissionBudget)
+	}
+}
+
+func TestLoadCenterConfigComparisonIntentKeyringRequiresKeyID(t *testing.T) {
+	setRequiredAuth(t)
+	setRequiredLocalAttachments(t)
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://runtime")
+	t.Setenv("HOUFENG_RECORDS_ENABLED", "true")
+	t.Setenv("HOUFENG_RECORD_PERMANENT_DELETE_ENABLED", "false")
+	t.Setenv("HOUFENG_COMPARISON_ENABLED", "true")
+	t.Setenv("HOUFENG_COMPARISON_INTENT_KEYRING", t.TempDir())
+
+	if _, err := centerconfig.LoadCenterConfig(); err == nil || !strings.Contains(err.Error(), "HOUFENG_COMPARISON_ENABLED requires HOUFENG_COMPARISON_INTENT_KEYRING") {
+		t.Fatalf("LoadCenterConfig() error = %v, want keyring required when comparison is enabled", err)
+	}
 }
 
 func TestLoadCenterConfigRequiresAttachmentConfigurationOnlyForRecordsRuntime(t *testing.T) {

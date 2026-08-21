@@ -276,6 +276,9 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	if activityWorker == nil {
 		t.Fatalf("runtime workers = %#v, want an activity projection worker", gotWorkers)
 	}
+	if gotRouterOptions.ComparisonEnabled {
+		t.Fatal("runtime ComparisonEnabled = true, want default off")
+	}
 	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
 		gotRouterOptions.SubjectActivityHandler == nil || gotRouterOptions.VPSOverviewHandler == nil ||
 		gotRouterOptions.RecordWatchesHandler == nil || gotRouterOptions.RecordInboxHandler == nil ||
@@ -850,6 +853,20 @@ func TestBootstrapWiresRequiredRecordAuthorizationScopeRepositoryWithoutFallback
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("bootstrap.go retains optional record authorization fallback %q", forbidden)
 		}
+	}
+}
+
+func TestBootstrapRegistersComparisonRevisionParticipantBetweenCollaborationAndEvidence(t *testing.T) {
+	body, err := os.ReadFile("bootstrap.go")
+	if err != nil {
+		t.Fatalf("read bootstrap.go: %v", err)
+	}
+	source := string(body)
+	comparison := strings.Index(source, "store.NewComparisonRevisionParticipant(")
+	collaboration := strings.Index(source, "store.NewCollaborationRevisionParticipant(")
+	evidence := strings.Index(source, "store.NewRecordEvidenceRevisionParticipant()")
+	if comparison < 0 || collaboration < 0 || evidence < 0 || !(collaboration < comparison && comparison < evidence) {
+		t.Fatalf("bootstrap comparison participant order: collaboration=%d comparison=%d evidence=%d", collaboration, comparison, evidence)
 	}
 }
 

@@ -8,6 +8,7 @@ import { UnifiedTimeline } from '../components/UnifiedTimeline'
 import type { SubjectActivityView } from '../lib/types'
 import { SubjectActivityFilters } from './records/activity/SubjectActivityFilters'
 import { SubjectLocalNavigation } from './records/activity/SubjectLocalNavigation'
+import { comparisonEntryHref } from './records/compare/comparisonQueryState'
 import {
   parseSubjectActivityRoute,
   subjectActivityCursorFromSearchParams,
@@ -92,6 +93,9 @@ export function SubjectActivityWorkspace({ view }: Props) {
           returnLabel="返回详情"
           actions={(
             <>
+              {view === 'evidence' ? (
+                <Link className="btn sm secondary" to="/records/compare">横向比较</Link>
+              ) : null}
               <Link className="btn sm primary" to={newRecordHref}>新建记录</Link>
               {state.freshness?.new_items_available ? (
                 <Button
@@ -184,6 +188,16 @@ export function SubjectActivityWorkspace({ view }: Props) {
             sourceStatuses={state.sourceStatuses}
             emptyTitle={emptyTitle}
             emptyDescription={emptyDescription}
+            {...(view === 'evidence' ? {
+              itemActions: (item) => item.evidence_snapshot_id ? (
+                <Link
+                  className="text-link"
+                  to={comparisonEntryHref({ items: [{ snapshot_id: item.evidence_snapshot_id }] })}
+                >
+                  加入横向比较
+                </Link>
+              ) : null,
+            } : {})}
           />
           {state.nextCursor ? (
             <div className="subject-activity-page__more">

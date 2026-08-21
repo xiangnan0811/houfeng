@@ -55,6 +55,12 @@ describe('Breadcrumb', () => {
     expect(screen.getByText(/^mi_8901234567…$/)).toBeInTheDocument()
   })
 
+  it('keeps records compare ahead of the dynamic record id', () => {
+    renderAt('/records/compare', '/records/compare')
+    expect(screen.getByRole('link', { name: '运维记录' })).toHaveAttribute('href', '/records')
+    expect(screen.getByText('横向比较')).toBeInTheDocument()
+  })
+
   it('adds a third crumb for subject activity routes', () => {
     renderAt('/vps/vps_tokyo_001/activity', '/vps/:vpsId/activity')
     expect(screen.getByRole('link', { name: 'VPS' })).toHaveAttribute('href', '/vps')

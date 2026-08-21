@@ -10,6 +10,7 @@ import {
   createRecordDraft,
   createRecordRevision,
   discardRecordDraft,
+  evaluateFixedComparison,
   executeRecordPermanentDeletion,
   getAttachmentContent,
   getAttachmentMetadata,
@@ -23,8 +24,11 @@ import {
   listRecords,
   patchRecordDraft,
   previewRecordPermanentDeletion,
+  resolveComparisonCandidates,
   restoreRecord,
   restoreRecordRevision,
+  saveComparisonRecord,
+  saveComparisonRevision,
   searchRecords,
   uploadAttachmentContent,
   listSubjectActivity,
@@ -53,6 +57,8 @@ import type {
   RecordRevision,
   RecordRevisionListResponse,
   RecordSubjectReference,
+  ComparisonCandidateResponse,
+  ComparisonEvaluateResponse,
 } from './types'
 
 const requestDefaults = {
@@ -967,5 +973,163 @@ describe('Records API transport', () => {
       '/api/subjects/target/tg_001/activity?view=evidence&versions=current&limit=25',
       requestDefaults,
     )
+  })
+
+  it('resolves comparison candidates with an allowlisted body and abort signal', async () => {
+    const response = {
+      subjects: [
+        { kind: 'vps', id: 'vps_0123456789abcdef' },
+        { kind: 'vps', id: 'vps_0123456789abcde0' },
+      ],
+      candidates: [{
+        subject: { kind: 'vps', id: 'vps_0123456789abcdef' },
+        snapshot_id: 'evs_candidate',
+        record_id: 'rec_candidate',
+        revision_ids: ['rrv_candidate'],
+        kind: 'monitoring.host',
+        schema_version: 1,
+        canonical_hash: 'ab'.repeat(32),
+        requested_window: { start: '2026-08-10T11:00:00Z', end: '2026-08-10T12:00:00Z' },
+        actual_window: { start: '2026-08-10T11:00:00Z', end: '2026-08-10T12:00:00Z' },
+        quality_status: 'complete',
+        captured_at: '2026-08-10T12:00:00Z',
+        recommendation: 'nearest_window',
+      }],
+    } satisfies ComparisonCandidateResponse
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, response))
+    const controller = new AbortController()
+
+    const firstCandidate = response.candidates[0]
+    if (!firstCandidate) throw new Error('expected a comparison candidate fixture')
+    await expect(resolveComparisonCandidates({
+      subjects: response.subjects,
+      requested_window: firstCandidate.requested_window,
+      kinds: [{ kind: 'monitoring.host', schema_version: 1 }],
+      payload: 'must-not-leave-the-client',
+      token: 'must-not-leave-the-client',
+    } as never, controller.signal)).resolves.toEqual(response)
+
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    expect(fetchMock).toHaveBeenCalledWith('/api/evidence/comparison-candidates', expect.objectContaining({
+      method: 'POST',
+      signal: controller.signal,
+    }))
+    expect(JSON.parse(String(init?.body))).toEqual({
+      subjects: response.subjects,
+      requested_window: firstCandidate.requested_window,
+      kinds: [{ kind: 'monitoring.host', schema_version: 1 }],
+    })
+  })
+
+  it('evaluates a fixed comparison without client payload or secrets', async () => {
+    const response = {
+      digest: 'cd'.repeat(32),
+      items: [{
+        snapshot_id: 'evs_fixeda',
+        canonical_hash: '11'.repeat(32),
+        kind: 'command.audit',
+        schema_version: 1,
+        revision_context: 'not_applicable',
+      }],
+      review: [],
+      available_kinds: [{ kind: 'command.audit', schema_version: 1 }],
+      pairwise: [],
+      series: [],
+      save_eligibility: { eligible: true, blockers: [] },
+      comparison_intent: {
+        token: 'cmp1.valid.payload.mac',
+        key_id: 'cmp_key',
+        issued_at: '2026-08-20T10:00:00Z',
+        expires_at: '2026-08-20T10:15:00Z',
+      },
+    } satisfies ComparisonEvaluateResponse
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, response))
+    const controller = new AbortController()
+
+    await expect(evaluateFixedComparison({
+      items: [
+        { snapshot_id: 'evs_fixeda', payload: 'nope' } as never,
+        { record_id: 'rec_fixedb', revision_id: 'rrv_fixedb', snapshot_ids: ['evs_fixedb'] },
+      ],
+      baseline_index: 0,
+      alignment: 'actual_coverage',
+      requested_window: { start: '2026-08-10T11:00:00Z', end: '2026-08-10T12:00:00Z' },
+      tolerance_seconds: 60,
+      bucket_seconds: 300,
+      detail: { kind: 'monitoring.probe', schema_version: 2, metric: 'latency_ms' },
+    }, controller.signal)).resolves.toEqual(response)
+
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    expect(fetchMock).toHaveBeenCalledWith('/api/evidence/comparisons', expect.objectContaining({
+      method: 'POST',
+      signal: controller.signal,
+    }))
+    expect(JSON.parse(String(init?.body))).toEqual({
+      items: [
+        { snapshot_id: 'evs_fixeda' },
+        { record_id: 'rec_fixedb', revision_id: 'rrv_fixedb', snapshot_ids: ['evs_fixedb'] },
+      ],
+      baseline_index: 0,
+      alignment: 'actual_coverage',
+      requested_window: { start: '2026-08-10T11:00:00Z', end: '2026-08-10T12:00:00Z' },
+      tolerance_seconds: 60,
+      bucket_seconds: 300,
+      detail: { kind: 'monitoring.probe', schema_version: 2, metric: 'latency_ms' },
+    })
+  })
+
+  it('saves a comparison through records create/revision without client evidence items', async () => {
+    const mutation = {
+      record_id: 'rec_comparisonsave',
+      revision_id: 'rrv_comparisonsave',
+      revision_no: 1,
+      lock_version: 1,
+      authorization_epoch: 1,
+      lifecycle: 'active',
+      created: true,
+      replayed: false,
+      committed_at: '2026-08-20T10:00:00Z',
+    } satisfies RecordMutationResult
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(mockResponse(201, mutation))
+      .mockResolvedValueOnce(mockResponse(201, mutation))
+
+    await saveComparisonRecord({
+      record_id: 'rec_comparisonsave',
+      draft_id: draft.draft_id,
+      draft_etag: draft.etag,
+      comparison_intent: 'cmp1.valid.payload.mac',
+      evidence_items: [{ existing_snapshot_id: 'evs_client' }],
+      payload: { body_markdown: 'nope' },
+    } as never, 'comparison-save-key')
+    await saveComparisonRevision('rec /compare', {
+      draft_id: draft.draft_id,
+      draft_etag: draft.etag,
+      base_revision_id: revision.revision_id,
+      lock_version: 1,
+      authorization_epoch: 1,
+      comparison_intent: 'cmp1.valid.payload.mac',
+    }, 'comparison-revision-key')
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      record_id: 'rec_comparisonsave',
+      draft_id: draft.draft_id,
+      draft_etag: draft.etag,
+      comparison_intent: 'cmp1.valid.payload.mac',
+    })
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      headers: expect.objectContaining({ 'Idempotency-Key': 'comparison-save-key' }),
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/records/rec%20%2Fcompare/revisions', expect.objectContaining({
+      method: 'POST',
+    }))
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      draft_id: draft.draft_id,
+      draft_etag: draft.etag,
+      base_revision_id: revision.revision_id,
+      lock_version: 1,
+      authorization_epoch: 1,
+      comparison_intent: 'cmp1.valid.payload.mac',
+    })
   })
 })

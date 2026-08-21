@@ -95,6 +95,7 @@ describe('RecordSearchPage', () => {
     renderPage()
 
     expect(screen.getByRole('heading', { name: '运维记录' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '横向比较' })).toHaveAttribute('href', '/records/compare')
     await screen.findByText('东京节点磁盘 IO 抖动')
     expect(fetchMock).toHaveBeenCalledWith('/api/records/search', expect.objectContaining({
       credentials: 'include',
@@ -105,6 +106,34 @@ describe('RecordSearchPage', () => {
     expect(within(results).getByText('排查中')).toBeInTheDocument()
     expect(within(results).getByText('VPS · Tokyo Edge')).toBeInTheDocument()
     expect(screen.getByLabelText('当前查询参数')).toHaveTextContent('')
+  })
+
+  it('opens candidate compare when visible results cover two subjects', async () => {
+    const second = searchResult({
+      record_id: 'rec_002',
+      current_revision_id: 'rev_002',
+      current: {
+        ...searchResult().current,
+        record_id: 'rec_002',
+        revision_id: 'rev_002',
+        title: '大阪节点网络抖动',
+        subjects: [{
+          registry_version: 1,
+          kind: 'vps',
+          source_id: 'vps_beta',
+          role: 'affected',
+          primary: true,
+          identity: { display_name: 'Osaka Edge' },
+        }],
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      mockJSONResponse({ items: [searchResult(), second], generation: 7 }),
+    ))
+    renderPage()
+    await screen.findByText('大阪节点网络抖动')
+    const href = screen.getByRole('link', { name: '横向比较' }).getAttribute('href') ?? ''
+    expect(href.startsWith('/records/compare?state=')).toBe(true)
   })
 
   it('sends the filters carried by the URL', async () => {

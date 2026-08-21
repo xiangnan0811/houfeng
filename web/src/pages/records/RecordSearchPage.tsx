@@ -10,6 +10,10 @@ import { RecordSearchFilterDrawer } from './RecordSearchFilterDrawer'
 import { RecordSearchFilterPanel } from './RecordSearchFilterPanel'
 import { RecordSearchResultsTable } from './RecordSearchResultsTable'
 import {
+  comparisonEntryHref,
+  comparisonSubjectsFromRecords,
+} from './compare/comparisonQueryState'
+import {
   DEFAULT_RECORD_SEARCH_FILTERS,
   recordSearchFilterKey,
   recordSearchFiltersFromSearchParams,
@@ -224,6 +228,9 @@ export function RecordSearchPage() {
           </p>
         </div>
         <div className="header-actions">
+          <Link className="btn sm secondary" to={comparisonEntryHref({
+            subjects: comparisonSubjectsFromRecords(visibleRecords),
+          })}>横向比较</Link>
           <Link className="btn sm secondary" to="/records/drafts">草稿</Link>
           <Link className="btn sm primary" to="/records/new">新建记录</Link>
         </div>

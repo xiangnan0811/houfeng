@@ -47,11 +47,14 @@ describe('record inbox route', () => {
 describe('record workspace routes', () => {
   it('keeps static new ahead of the dynamic record id', () => {
     const created = matchRoutes(appRoutes, '/records/new')
+    const compare = matchRoutes(appRoutes, '/records/compare')
     const detail = matchRoutes(appRoutes, '/records/rec_001')
     const edit = matchRoutes(appRoutes, '/records/rec_001/edit')
     const revision = matchRoutes(appRoutes, '/records/rec_001/revisions/rrv_001')
 
     expect(created?.some(({ route }) => route.path === 'records/new')).toBe(true)
+    expect(compare?.some(({ route }) => route.path === 'records/compare')).toBe(true)
+    expect(compare?.some(({ route }) => route.path === 'records/:recordId')).toBe(false)
     expect(detail?.some(({ route }) => route.path === 'records/:recordId')).toBe(true)
     expect(edit?.some(({ route }) => route.path === 'records/:recordId/edit')).toBe(true)
     expect(revision?.some(({ route }) => route.path === 'records/:recordId/revisions/:revisionId')).toBe(true)

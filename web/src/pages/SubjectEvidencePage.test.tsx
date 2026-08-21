@@ -68,5 +68,9 @@ describe('SubjectEvidencePage', () => {
       'href',
       '/evidence/evs_9',
     )
+    expect(screen.getByRole('link', { name: '横向比较' })).toHaveAttribute('href', '/records/compare')
+    expect(screen.getByRole('link', { name: '加入横向比较' }).getAttribute('href')).toMatch(
+      /^\/records\/compare\?state=/,
+    )
   })
 })

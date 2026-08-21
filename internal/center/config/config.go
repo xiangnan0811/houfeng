@@ -29,23 +29,27 @@ const (
 )
 
 type CenterConfig struct {
-	RecordPlatformMode    RecordPlatformMode
-	HTTPAddr              string
-	WebDistDir            string
-	DatabaseURL           string
-	PublicBaseURL         string
-	LogFile               string
-	TelegramBotToken      string
-	TelegramChatID        string
-	TrustedProxies        []string
-	IncidentSweepInterval time.Duration
-	InitialUsername       string
-	InitialPassword       string
-	InitialDisplayName    string
-	SessionTTL            time.Duration
-	SessionHMACKey        []byte
-	PasswordBcryptCost    int
-	Attachment            AttachmentConfig
+	RecordPlatformMode        RecordPlatformMode
+	ComparisonEnabled         bool
+	ComparisonIntentKeyring   string
+	ComparisonIntentKeyID     string
+	ComparisonAdmissionBudget int64
+	HTTPAddr                  string
+	WebDistDir                string
+	DatabaseURL               string
+	PublicBaseURL             string
+	LogFile                   string
+	TelegramBotToken          string
+	TelegramChatID            string
+	TrustedProxies            []string
+	IncidentSweepInterval     time.Duration
+	InitialUsername           string
+	InitialPassword           string
+	InitialDisplayName        string
+	SessionTTL                time.Duration
+	SessionHMACKey            []byte
+	PasswordBcryptCost        int
+	Attachment                AttachmentConfig
 }
 
 type AttachmentConfig struct {
@@ -189,24 +193,61 @@ func LoadCenterConfig() (CenterConfig, error) {
 		}
 	}
 
+	comparisonEnabled, err := boolEnvOrDefault("HOUFENG_COMPARISON_ENABLED", false)
+	if err != nil {
+		return CenterConfig{}, err
+	}
+	if comparisonEnabled && recordPlatformMode != RecordPlatformModeRuntimeAdmission {
+		return CenterConfig{}, fmt.Errorf("HOUFENG_COMPARISON_ENABLED requires HOUFENG_RECORDS_ENABLED=true")
+	}
+	comparisonAdmissionBudget := int64(64 << 20)
+	if comparisonEnabled {
+		budget, err := int64EnvOrDefault("HOUFENG_COMPARISON_ADMISSION_BUDGET_BYTES", 64<<20)
+		if err != nil {
+			return CenterConfig{}, err
+		}
+		if budget < 8<<20 {
+			return CenterConfig{}, fmt.Errorf("HOUFENG_COMPARISON_ADMISSION_BUDGET_BYTES must be at least 8388608")
+		}
+		comparisonAdmissionBudget = budget
+	}
+	comparisonIntentKeyring := strings.TrimSpace(os.Getenv("HOUFENG_COMPARISON_INTENT_KEYRING"))
+	comparisonIntentKeyID := strings.TrimSpace(os.Getenv("HOUFENG_COMPARISON_INTENT_KEY_ID"))
+	if comparisonEnabled && (comparisonIntentKeyring == "" || comparisonIntentKeyID == "") {
+		return CenterConfig{}, fmt.Errorf("HOUFENG_COMPARISON_ENABLED requires HOUFENG_COMPARISON_INTENT_KEYRING and HOUFENG_COMPARISON_INTENT_KEY_ID")
+	}
+	if !comparisonEnabled && (comparisonIntentKeyring == "") != (comparisonIntentKeyID == "") {
+		return CenterConfig{}, fmt.Errorf("HOUFENG_COMPARISON_INTENT_KEYRING and HOUFENG_COMPARISON_INTENT_KEY_ID must both be set or both be empty")
+	}
+	if comparisonIntentKeyring != "" {
+		sessionKeyFile := strings.TrimSpace(os.Getenv("HOUFENG_SESSION_HMAC_KEY_FILE"))
+		if sessionKeyFile != "" && sameFilePath(comparisonIntentKeyring, sessionKeyFile) {
+			return CenterConfig{}, fmt.Errorf("HOUFENG_COMPARISON_INTENT_KEYRING must not reuse HOUFENG_SESSION_HMAC_KEY_FILE")
+		}
+	}
+
 	return CenterConfig{
-		RecordPlatformMode:    recordPlatformMode,
-		HTTPAddr:              httpAddr,
-		WebDistDir:            webDistDir,
-		DatabaseURL:           databaseURL,
-		PublicBaseURL:         publicBaseURL,
-		LogFile:               logFile,
-		TelegramBotToken:      telegramBotToken,
-		TelegramChatID:        telegramChatID,
-		TrustedProxies:        trustedProxies,
-		IncidentSweepInterval: sweepInterval,
-		InitialUsername:       initialUsername,
-		InitialPassword:       initialPassword,
-		InitialDisplayName:    initialDisplayName,
-		SessionTTL:            sessionTTL,
-		SessionHMACKey:        []byte(sessionHMACKey),
-		PasswordBcryptCost:    passwordBcryptCost,
-		Attachment:            attachmentConfig,
+		RecordPlatformMode:        recordPlatformMode,
+		ComparisonEnabled:         comparisonEnabled,
+		ComparisonIntentKeyring:   comparisonIntentKeyring,
+		ComparisonIntentKeyID:     comparisonIntentKeyID,
+		ComparisonAdmissionBudget: comparisonAdmissionBudget,
+		HTTPAddr:                  httpAddr,
+		WebDistDir:                webDistDir,
+		DatabaseURL:               databaseURL,
+		PublicBaseURL:             publicBaseURL,
+		LogFile:                   logFile,
+		TelegramBotToken:          telegramBotToken,
+		TelegramChatID:            telegramChatID,
+		TrustedProxies:            trustedProxies,
+		IncidentSweepInterval:     sweepInterval,
+		InitialUsername:           initialUsername,
+		InitialPassword:           initialPassword,
+		InitialDisplayName:        initialDisplayName,
+		SessionTTL:                sessionTTL,
+		SessionHMACKey:            []byte(sessionHMACKey),
+		PasswordBcryptCost:        passwordBcryptCost,
+		Attachment:                attachmentConfig,
 	}, nil
 }
 
@@ -377,6 +418,28 @@ func durationEnvOrDefault(key string, fallback time.Duration) (time.Duration, er
 		return 0, fmt.Errorf("parse %s: %w", key, err)
 	}
 	return duration, nil
+}
+
+func int64EnvOrDefault(key string, fallback int64) (int64, error) {
+	value, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback, nil
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, fmt.Errorf("%s must not be empty", key)
+	}
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", key, err)
+	}
+	return n, nil
+}
+
+func sameFilePath(left, right string) bool {
+	leftAbs, leftErr := filepath.Abs(strings.TrimSpace(left))
+	rightAbs, rightErr := filepath.Abs(strings.TrimSpace(right))
+	return leftErr == nil && rightErr == nil && leftAbs == rightAbs
 }
 
 func intEnvOrDefault(key string, fallback int) (int, error) {

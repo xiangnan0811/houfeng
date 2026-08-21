@@ -48,7 +48,7 @@
 - Query/error: `apiRequest.ts` 的 `withQuery(path, filter)`、`ApiError<TRecovery = unknown>` 与可选 `ApiErrorDecoder` seam；`apiError.ts` 是 Records allowlist decoder；`api.ts` 保留兼容 re-export。
 - Shared/eager façade: `api.ts`；lazy observability façade: `observabilityApi.ts`；lazy-only Records transport: `recordsApi.ts`。
 - `observabilityApi.ts` exports: `listEvents`、`listIncidents`、`listHistoricalIncidents`、`listCommandAudits`。
-- `recordsApi.ts` exports: record list/read/revision/lifecycle、draft CRUD（含 cursor 分页）、`searchRecords`、permanent-delete preview/execute/status helpers；canonical DTO 位于 `types.ts`。
+- `recordsApi.ts` exports: record list/read/revision/lifecycle、draft CRUD（含 cursor 分页）、`searchRecords`、permanent-delete preview/execute/status helpers、`resolveComparisonCandidates` / `evaluateFixedComparison` / `saveComparisonRecord` / `saveComparisonRevision`；canonical DTO 位于 `types.ts`。`/records/compare` 与三个入口可静态导入该 façade，仍不得进入 AppShell。
 
 #### 3. Contracts
 
@@ -58,6 +58,7 @@
 - `ApiError` 始终保留 `status/message`；默认 transport 不把业务 metadata带入 eager path。显式 decoder 中 `code` 只接受 string，`field_errors` 只复制 string `field/message` 项，`recovery` 默认类型为 `unknown`，领域消费者需要时使用对应 DTO 泛型/收窄。未知 JSON 顶层字段不得通过对象 spread 进入错误实例。
 - `CreateRecordDraftInput` 是关闭联合：新记录草稿只发送 `payload`，已有记录草稿必须同时发送 `record_id` 与 `base_revision_id`；不得在 TypeScript contract 中强迫新草稿伪造空 ID，也不得允许两个 routing fields 只出现一个。
 - Records 草稿 PATCH 原样发送响应中的 `If-Match: <draft-etag>`，不得套用 legacy metadata helper 的额外引号；formal mutation 使用独立 `Idempotency-Key`。permanent-delete execute 的 `DeletionRequestTokenV1` 是唯一 `Idempotency-Key`，JSON body 只能含 `reservation_id`。
+- `/records/compare` 使用 `comparison-url/v1` query `state`（canonical key order、UTC、整数秒）。state 不含 `token` / `comparison_intent` / `payload` / `title` / `body_markdown`。candidate 确认前 `POST /api/evidence/comparisons` 次数为 0。另存必须走 `createRecordDraft` + `saveComparisonRecord`，不得调用 `createRecord` / `useRecordDraft.publish()`。同一 digest 重试必须复用 `record_id` 与 `Idempotency-Key`。证据类型切换是 SegmentedControl 值选择，不是无 panel 的 Tabs。`HOUFENG_COMPARISON_ENABLED` 默认关。
 - 只有所有 production consumer 都位于 lazy route 时才允许拆分。AppShell、auth、router bootstrap 等启动路径使用的 helper 留在 `api.ts`，不能为了数字好看制造首屏 waterfall。
 - helper 移动不得改变 method、path、query 顺序/省略规则、body 或 response 解包；原有 API/page tests 必须继续覆盖 wire shape。
 - 每次拆分先 fresh production build，再运行 `bundle:check`。entry JS/CSS 与 font 只能随有证据的清理降低，不能抬高掩盖 eager 回退。`maxAsyncJsGzipBytes` 的唯一已审计例外是 Child 5 的 lazy `MarkdownPreview` chunk（react-markdown / remark-gfm / rehype-sanitize，2026-08-18 实测 gzip `48453`）。不得引入 CodeMirror：它会注入 inline `<style>`，违反 `style-src 'self'`。源文编辑器使用 textarea。Records transport 不得进入 entry。
@@ -91,7 +92,7 @@
 
 - API wire tests继续断言 default、filters、cursor、incident/event query 与错误 transport 行为。
 - `apiRequest.test.ts` 断言 query normalization、JSON body init、legacy status/message 默认路径，以及显式 decoder 的 allowlisted structured error / unknown recovery。
-- `recordsApi.test.ts` 固定所有 Records URLs/methods、cursor/query、新/已有记录草稿 routing body、exact `If-Match`、普通/deletion idempotency header、body allowlist，以及 404/409/503 shape。
+- `recordsApi.test.ts` 固定所有 Records URLs/methods、cursor/query、新/已有记录草稿 routing body、exact `If-Match`、普通/deletion idempotency header、body allowlist、comparison-candidates / comparisons / comparison-save 路径，以及 404/409/503 shape。
 - `recordsTransportArchitectureContract.test.ts` 使用 TypeScript AST 和静态依赖图固定唯一 runtime dependencies `apiRequest.ts|apiError.ts`，禁止 raw fetch/UI/import drift 与 eager Records edge；negative fixture 必须证明可捕获 direct re-export 和 transitive import。
 - `bundleBudgetContract.test.ts` 必须 fresh-build当前真实 app，证明 `recordsApi.ts` 已被 lazy record routes 消费且 `isEntry=false`；`apiError.ts` 同样不得进入 entry。另用 synthetic dynamic import 证明单独 lazy consumer 仍把两者放在同一个 dynamic chunk。
 - 受影响 page tests继续覆盖 loading/error/data 与请求 inventory。

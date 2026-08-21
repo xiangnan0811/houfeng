@@ -47,6 +47,7 @@ func TestRecordsBootstrapEvidenceGateBoundary(t *testing.T) {
 			},
 			sources,
 			gate,
+			comparisonRuntimeConfig{},
 		)
 		return result{evidence: evidenceHandler, projection: collaboration.projectionWorker, worker: worker, err: err}
 	}
@@ -136,7 +137,7 @@ func TestProductionEvidenceCompositionRejectsClosedDependencies(t *testing.T) {
 	}
 }
 
-func TestProductionEvidenceCompositionBuildsExactlySixKinds(t *testing.T) {
+func TestProductionEvidenceCompositionBuildsExactKnownKinds(t *testing.T) {
 	t.Parallel()
 
 	composition, err := newProductionEvidenceComposition(productionEvidenceCompositionDependencies{
@@ -159,7 +160,7 @@ func TestProductionEvidenceCompositionBuildsExactlySixKinds(t *testing.T) {
 	sort.Slice(want, func(left, right int) bool { return want[left].String() < want[right].String() })
 	got := composition.registry.Keys()
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("production evidence registry keys = %#v, want exact six %#v", got, want)
+		t.Fatalf("production evidence registry keys = %#v, want exact %#v", got, want)
 	}
 	for _, key := range got {
 		if key.Kind == "asset.history" {

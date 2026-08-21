@@ -9,9 +9,9 @@ import { TopBar } from './TopBar'
 const sync = { state: 'clear' as const, label: '摘要无异常' }
 const user = { user_id: 'u1', username: 'admin', role: 'admin', display_name: '' }
 
-function renderTopBar() {
+function renderTopBar(path = '/') {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <ThemeProvider>
         <TopBar sync={sync} user={user} />
       </ThemeProvider>
@@ -20,6 +20,12 @@ function renderTopBar() {
 }
 
 describe('TopBar theme menu', () => {
+  it('titles the comparison workbench instead of a record detail', async () => {
+    renderTopBar('/records/compare')
+    expect(await screen.findByText('横向比较')).toBeInTheDocument()
+    expect(screen.queryByText('运维记录详情')).not.toBeInTheDocument()
+  })
+
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ unread_count: 0 }), {
       status: 200,

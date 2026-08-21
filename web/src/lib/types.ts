@@ -2442,6 +2442,7 @@ export type EvidenceKindName =
   | 'monitoring.event'
   | 'subscription.cost'
   | 'command.audit'
+  | 'comparison.result'
 
 export type EvidenceTimeWindow = {
   start: string
@@ -3307,4 +3308,169 @@ export type VPSOverview = {
   facts: VPSOverviewFact[]
   relations: VPSOverviewRelation[]
   capabilities: string[]
+}
+
+export type ComparisonSubjectKind = 'vps' | 'monitoring_instance' | 'target'
+
+export type ComparisonSubjectRef = {
+  kind: ComparisonSubjectKind
+  id: string
+}
+
+export type ComparisonKindRef = {
+  kind: EvidenceKindName
+  schema_version: number
+}
+
+export type ComparisonAlignment = 'actual_coverage' | 'common_overlap'
+
+export type ComparisonReason =
+  | 'metadata_only'
+  | 'kind_missing'
+  | 'metric_missing'
+  | 'coverage_partial'
+  | 'coverage_truncated'
+  | 'common_overlap_unsupported'
+  | 'common_overlap_empty'
+  | 'schema_incompatible'
+  | 'unit_incompatible'
+  | 'precision_incompatible'
+  | 'source_tombstoned'
+  | 'source_unavailable'
+  | 'snapshot_unreadable'
+
+export type ComparisonCandidateRequest = {
+  subjects: ComparisonSubjectRef[]
+  requested_window: EvidenceTimeWindow
+  kinds?: ComparisonKindRef[]
+}
+
+export type ComparisonCandidateItem = {
+  subject: ComparisonSubjectRef
+  snapshot_id: string
+  record_id: string
+  revision_ids: string[]
+  kind: EvidenceKindName
+  schema_version: number
+  canonical_hash: string
+  requested_window: EvidenceTimeWindow
+  actual_window: EvidenceTimeWindow
+  quality_status: EvidenceQuality['status']
+  captured_at: string
+  recommendation: string
+}
+
+export type ComparisonCandidateResponse = {
+  subjects: ComparisonSubjectRef[]
+  candidates: ComparisonCandidateItem[]
+}
+
+export type ComparisonFixedItemInput = {
+  snapshot_id?: string
+  record_id?: string
+  revision_id?: string
+  snapshot_ids?: string[]
+}
+
+export type ComparisonEvaluateRequest = {
+  items: ComparisonFixedItemInput[]
+  baseline_index: number
+  alignment: ComparisonAlignment
+  requested_window: EvidenceTimeWindow
+  tolerance_seconds: number
+  bucket_seconds?: number
+  detail?: {
+    kind: EvidenceKindName
+    schema_version: number
+    metric?: string
+  }
+}
+
+export type ComparisonRevisionMetadata = {
+  record_type: string
+  business_status: string
+  status_group: string
+  impact_level: string
+  occurred_at: string | null
+}
+
+export type ComparisonResolvedItem = {
+  snapshot_id: string
+  canonical_hash: string
+  kind: EvidenceKindName
+  schema_version: number
+  revision_context: 'bound' | 'not_applicable'
+  record_id?: string
+  revision_id?: string
+  subject_kind?: ComparisonSubjectKind
+  subject_id?: string
+  revision?: ComparisonRevisionMetadata
+}
+
+export type ComparisonFinding = {
+  item_index: number
+  kind?: EvidenceKindName
+  schema_version?: number
+  reason: ComparisonReason
+}
+
+export type ComparisonPairwise = {
+  item_index: number
+  kind: EvidenceKindName
+  schema_version: number
+  compatible: boolean
+  reason: string
+  values: Record<string, unknown>
+}
+
+export type ComparisonPoint = {
+  start: string
+  end: string
+  value: number
+}
+
+export type ComparisonSeries = {
+  item_index: number
+  metric_id: string
+  segments: ComparisonPoint[][]
+  unit: string
+}
+
+export type ComparisonSaveEligibility = {
+  eligible: boolean
+  blockers: ComparisonReason[]
+}
+
+export type ComparisonIntent = {
+  token: string
+  key_id: string
+  issued_at: string
+  expires_at: string
+}
+
+export type ComparisonEvaluateResponse = {
+  digest: string
+  items: ComparisonResolvedItem[]
+  review: ComparisonFinding[]
+  available_kinds: ComparisonKindRef[]
+  pairwise: ComparisonPairwise[]
+  series: ComparisonSeries[]
+  save_eligibility: ComparisonSaveEligibility
+  comparison_intent?: ComparisonIntent
+}
+
+export type SaveComparisonRecordInput = {
+  record_id: string
+  draft_id: string
+  draft_etag: string
+  comparison_intent: string
+}
+
+export type SaveComparisonRevisionInput = {
+  draft_id: string
+  draft_etag: string
+  base_revision_id: string
+  lock_version: number
+  authorization_epoch: number
+  comparison_intent: string
 }

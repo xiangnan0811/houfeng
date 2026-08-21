@@ -43,8 +43,21 @@ type recordHandlerApplication interface {
 }
 
 type RecordHandlerOptions struct {
-	NewRecordID      func() (string, error)
-	EvidencePreparer recordEvidencePreparationService
+	NewRecordID          func() (string, error)
+	EvidencePreparer     recordEvidencePreparationService
+	ComparisonSave       recordComparisonSaveService
+	CompletedIdempotency completedComparisonSaveLookup
+}
+
+type completedComparisonSaveLookup func(
+	context.Context,
+	recordauth.ActorScope,
+	recordplatform.OperationKind,
+	string,
+) (bool, error)
+
+type recordComparisonSaveService interface {
+	PrepareComparisonSave(context.Context, evidence.ComparisonSaveRequest) (evidence.ComparisonSavePreparation, error)
 }
 
 type recordEvidencePreparationService interface {
@@ -142,12 +155,12 @@ func handleRecordsCollection(
 				writeRecordError(w, http.StatusInternalServerError, "internal_error", "internal server error", nil)
 				return
 			}
-		} else if !validRecordTransportID(recordID) || len(input.EvidenceItems) == 0 {
+		} else if !validRecordTransportID(recordID) || (len(input.EvidenceItems) == 0 && input.ComparisonIntent == "") {
 			writeRecordError(w, http.StatusBadRequest, "invalid_request", "invalid server-owned record identity", nil)
 			return
 		}
-		evidencePreparation, ok := prepareRecordEvidence(
-			w, request, actor, options.EvidencePreparer, recordID, input.EvidenceItems,
+		evidencePreparation, ok := prepareRecordEvidenceOrComparison(
+			w, request, actor, options, recordID, input, idempotencyKey, recordplatform.OperationKindRecordCreate,
 		)
 		if !ok {
 			return
@@ -271,8 +284,9 @@ func handleRecordRevisions(
 			writeRecordsApplicationError(w, records.ErrDraftRevisionConflict)
 			return
 		}
-		evidencePreparation, ok := prepareRecordEvidence(
-			w, request, actor, options.EvidencePreparer, recordID, input.EvidenceItems,
+		evidencePreparation, ok := prepareRecordEvidenceOrComparison(
+			w, request, actor, options, recordID, input.recordPublishRequest,
+			idempotencyKey, recordplatform.OperationKindRecordUpdate,
 		)
 		if !ok {
 			return
@@ -395,10 +409,11 @@ func handleRecordLifecycle(
 }
 
 type recordPublishRequest struct {
-	RecordID      string                    `json:"record_id,omitempty"`
-	DraftID       string                    `json:"draft_id"`
-	DraftETag     string                    `json:"draft_etag"`
-	EvidenceItems []recordEvidenceItemInput `json:"evidence_items,omitempty"`
+	RecordID         string                    `json:"record_id,omitempty"`
+	DraftID          string                    `json:"draft_id"`
+	DraftETag        string                    `json:"draft_etag"`
+	EvidenceItems    []recordEvidenceItemInput `json:"evidence_items,omitempty"`
+	ComparisonIntent string                    `json:"comparison_intent,omitempty"`
 }
 
 type recordEvidenceItemInput struct {
@@ -421,6 +436,7 @@ func (input *recordRevisionPublishRequest) UnmarshalJSON(data []byte) error {
 		LockVersion        uint64                    `json:"lock_version"`
 		AuthorizationEpoch uint64                    `json:"authorization_epoch"`
 		EvidenceItems      []recordEvidenceItemInput `json:"evidence_items,omitempty"`
+		ComparisonIntent   string                    `json:"comparison_intent,omitempty"`
 	}
 	var decoded revisionPublishAlias
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -430,12 +446,78 @@ func (input *recordRevisionPublishRequest) UnmarshalJSON(data []byte) error {
 	}
 	input.recordPublishRequest = recordPublishRequest{
 		DraftID: decoded.DraftID, DraftETag: decoded.DraftETag,
-		EvidenceItems: append([]recordEvidenceItemInput(nil), decoded.EvidenceItems...),
+		EvidenceItems:    append([]recordEvidenceItemInput(nil), decoded.EvidenceItems...),
+		ComparisonIntent: decoded.ComparisonIntent,
 	}
 	input.BaseRevisionID = decoded.BaseRevisionID
 	input.LockVersion = decoded.LockVersion
 	input.AuthorizationEpoch = decoded.AuthorizationEpoch
 	return nil
+}
+
+func prepareRecordEvidenceOrComparison(
+	w http.ResponseWriter,
+	request *http.Request,
+	actor recordauth.ActorScope,
+	options RecordHandlerOptions,
+	recordID string,
+	input recordPublishRequest,
+	idempotencyKey string,
+	operation recordplatform.OperationKind,
+) (evidence.RevisionPreparation, bool) {
+	if input.ComparisonIntent != "" {
+		if len(input.EvidenceItems) != 0 {
+			writeRecordError(w, http.StatusBadRequest, "invalid_request", "comparison save cannot include client evidence items", nil)
+			return evidence.RevisionPreparation{}, false
+		}
+		if nilEvidenceHandlerDependency(options.ComparisonSave) {
+			writeRecordNotFound(w)
+			return evidence.RevisionPreparation{}, false
+		}
+		saveRequest := evidence.ComparisonSaveRequest{
+			Actor: actor, RecordID: recordID, Token: input.ComparisonIntent,
+		}
+		plan, err := options.ComparisonSave.PrepareComparisonSave(request.Context(), saveRequest)
+		if errors.Is(err, evidence.ErrComparisonIntentExpired) {
+			completed, peekErr := peekCompletedComparisonSave(
+				request.Context(), options, actor, operation, idempotencyKey,
+			)
+			if peekErr != nil {
+				writeRecordsApplicationError(w, peekErr)
+				return evidence.RevisionPreparation{}, false
+			}
+			if !completed {
+				writeRecordsApplicationError(w, evidence.ErrComparisonIntentExpired)
+				return evidence.RevisionPreparation{}, false
+			}
+			saveRequest.AllowExpiredReplay = true
+			plan, err = options.ComparisonSave.PrepareComparisonSave(request.Context(), saveRequest)
+		}
+		if err != nil {
+			writeRecordsApplicationError(w, err)
+			return evidence.RevisionPreparation{}, false
+		}
+		prepared, err := evidence.NewRevisionPreparationFromComparisonSave(recordID, plan)
+		if err != nil {
+			writeRecordInternalError(w)
+			return evidence.RevisionPreparation{}, false
+		}
+		return prepared, true
+	}
+	return prepareRecordEvidence(w, request, actor, options.EvidencePreparer, recordID, input.EvidenceItems)
+}
+
+func peekCompletedComparisonSave(
+	ctx context.Context,
+	options RecordHandlerOptions,
+	actor recordauth.ActorScope,
+	operation recordplatform.OperationKind,
+	idempotencyKey string,
+) (bool, error) {
+	if options.CompletedIdempotency == nil {
+		return false, nil
+	}
+	return options.CompletedIdempotency(ctx, actor, operation, idempotencyKey)
 }
 
 func prepareRecordEvidence(
@@ -936,6 +1018,12 @@ func writeRecordsApplicationError(w http.ResponseWriter, err error) {
 		writeRecordError(w, http.StatusConflict, "evidence_preview_stale", "evidence preview is stale", nil)
 	case errors.Is(err, evidence.ErrSourceUnstable):
 		writeRecordError(w, http.StatusConflict, "evidence_source_unstable", "evidence source is unstable", nil)
+	case errors.Is(err, evidence.ErrComparisonIntentInvalid), errors.Is(err, evidence.ErrComparisonIntentUnavailable):
+		writeRecordError(w, http.StatusUnprocessableEntity, "comparison_intent_invalid", "comparison intent is invalid", nil)
+	case errors.Is(err, evidence.ErrComparisonIntentExpired):
+		writeRecordError(w, http.StatusUnprocessableEntity, "comparison_intent_expired", "comparison intent expired", nil)
+	case errors.Is(err, evidence.ErrComparisonIntentStale):
+		writeRecordError(w, http.StatusUnprocessableEntity, "comparison_intent_stale", "comparison intent is stale", nil)
 	case recordSemanticValidationError(err):
 		writeRecordError(w, http.StatusUnprocessableEntity, "record_invalid", "record content is invalid", nil)
 	default:

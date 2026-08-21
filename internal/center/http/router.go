@@ -17,6 +17,7 @@ type RouterOptions struct {
 	IncidentsHandler                              stdhttp.Handler
 	SettingsHandler                               stdhttp.Handler
 	RecordsEnabled                                bool
+	ComparisonEnabled                             bool
 	RecordsHandler                                stdhttp.Handler
 	RecordSearchHandler                           stdhttp.Handler
 	SubjectActivityHandler                        stdhttp.Handler
@@ -200,6 +201,10 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.RecordsEnabled && opts.EvidenceHandler != nil {
 		handler := protect(opts.EvidenceHandler)
 		mux.Handle("/api/evidence/capture-previews", handler)
+		if opts.ComparisonEnabled {
+			mux.Handle("/api/evidence/comparison-candidates", handler)
+			mux.Handle("/api/evidence/comparisons", handler)
+		}
 		mux.Handle("/api/evidence/{evidence_id}", handler)
 	}
 	if opts.RecordsEnabled && opts.AttachmentUploadsHandler != nil {

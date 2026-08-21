@@ -141,23 +141,26 @@ type RevisionPreparationValues struct {
 	Captures           []PreparedCapture
 	References         []PreparedReference
 	OrderedSnapshotIDs []string
+	ComparisonSave     ComparisonSavePreparation
 }
 
 // RevisionPreparation explicitly transports immutable evidence preparation
 // into a revision commit. The ordered IDs are canonical revision content.
 type RevisionPreparation struct {
-	recordID    string
-	captures    []PreparedCapture
-	references  []PreparedReference
-	snapshotIDs []string
+	recordID       string
+	captures       []PreparedCapture
+	references     []PreparedReference
+	snapshotIDs    []string
+	comparisonSave ComparisonSavePreparation
 }
 
 func NewRevisionPreparation(recordID string, values RevisionPreparationValues) (RevisionPreparation, error) {
 	prepared := RevisionPreparation{
-		recordID:    recordID,
-		captures:    clonePreparedCaptures(values.Captures),
-		references:  clonePreparedReferences(values.References),
-		snapshotIDs: append([]string(nil), values.OrderedSnapshotIDs...),
+		recordID:       recordID,
+		captures:       clonePreparedCaptures(values.Captures),
+		references:     clonePreparedReferences(values.References),
+		snapshotIDs:    append([]string(nil), values.OrderedSnapshotIDs...),
+		comparisonSave: cloneComparisonSavePreparation(values.ComparisonSave),
 	}
 	if err := prepared.ValidateForRecord(recordID); err != nil {
 		return RevisionPreparation{}, err
@@ -167,7 +170,8 @@ func NewRevisionPreparation(recordID string, values RevisionPreparationValues) (
 
 func (prepared RevisionPreparation) Empty() bool {
 	return prepared.recordID == "" && len(prepared.captures) == 0 &&
-		len(prepared.references) == 0 && len(prepared.snapshotIDs) == 0
+		len(prepared.references) == 0 && len(prepared.snapshotIDs) == 0 &&
+		prepared.comparisonSave.Empty()
 }
 
 func (prepared RevisionPreparation) ValidateForRecord(recordID string) error {
@@ -180,7 +184,7 @@ func (prepared RevisionPreparation) ValidateForRecord(recordID string) error {
 	if !validClosedPreparedID(recordID, "rec_") || prepared.recordID != recordID {
 		return revisionPreparationError("record identity", nil)
 	}
-	available := make(map[string]struct{}, len(prepared.captures)+len(prepared.references))
+	available := make(map[string]struct{}, len(prepared.captures)+len(prepared.references)+len(prepared.comparisonSave.Copies)+1)
 	for _, capture := range prepared.captures {
 		if capture.RecordID() != recordID || capture.Validate() != nil || !addPreparedSnapshotIdentity(available, capture.SnapshotID()) {
 			return revisionPreparationError("capture", nil)
@@ -189,6 +193,17 @@ func (prepared RevisionPreparation) ValidateForRecord(recordID string) error {
 	for _, reference := range prepared.references {
 		if reference.RecordID() != recordID || reference.Validate() != nil || !addPreparedSnapshotIdentity(available, reference.SnapshotID()) {
 			return revisionPreparationError("reference", nil)
+		}
+	}
+	for _, copy := range prepared.comparisonSave.Copies {
+		if copy.RecordID() != recordID || copy.Validate() != nil || !addPreparedSnapshotIdentity(available, copy.SnapshotID()) {
+			return revisionPreparationError("comparison copy", nil)
+		}
+	}
+	if !prepared.comparisonSave.Result.Empty() {
+		if prepared.comparisonSave.Result.RecordID() != recordID || prepared.comparisonSave.Result.Validate() != nil ||
+			!addPreparedSnapshotIdentity(available, prepared.comparisonSave.Result.SnapshotID()) {
+			return revisionPreparationError("comparison result", nil)
 		}
 	}
 	if len(prepared.snapshotIDs) != len(available) {
@@ -236,6 +251,10 @@ func (prepared RevisionPreparation) References() []PreparedReference {
 	return clonePreparedReferences(prepared.references)
 }
 
+func (prepared RevisionPreparation) ComparisonSave() ComparisonSavePreparation {
+	return cloneComparisonSavePreparation(prepared.comparisonSave)
+}
+
 func ValidSnapshotID(value string) bool {
 	return validClosedPreparedID(value, "evs_")
 }
@@ -264,6 +283,15 @@ func clonePreparedCaptures(values []PreparedCapture) []PreparedCapture {
 			snapshot:      value.Snapshot(),
 		}
 	}
+	return cloned
+}
+
+func cloneComparisonSavePreparation(value ComparisonSavePreparation) ComparisonSavePreparation {
+	if value.Empty() {
+		return ComparisonSavePreparation{}
+	}
+	cloned := value
+	cloned.Copies = append([]PreparedComparisonCopy(nil), value.Copies...)
 	return cloned
 }
 

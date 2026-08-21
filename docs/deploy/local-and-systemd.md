@@ -89,6 +89,11 @@ HOUFENG_LOG_FILE=/var/log/houfeng/center.log
 HOUFENG_INITIAL_USERNAME=admin
 HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
 HOUFENG_SESSION_HMAC_KEY=replace-me-with-32-plus-random-bytes
+HOUFENG_RECORDS_ENABLED=false
+HOUFENG_COMPARISON_ENABLED=false
+HOUFENG_COMPARISON_INTENT_KEYRING=/etc/houfeng/comparison-intent
+HOUFENG_COMPARISON_INTENT_KEY_ID=cmp_current
+HOUFENG_COMPARISON_ADMISSION_BUDGET_BYTES=67108864
 HOUFENG_PASSWORD_BCRYPT_COST=10
 HOUFENG_TRUSTED_PROXIES=
 HOUFENG_ATTACHMENT_BLOB_BACKEND=local
@@ -151,7 +156,10 @@ The tracked env example names two different catalog principals:
 untracked mode-0600 files. Compose mounts the bootstrap password only into the
 database container; the center and processor containers receive only the
 application password file. The processor does not receive center-only initial
-admin or session HMAC secrets.
+admin or session HMAC secrets. Comparison intent keys are a separate 0400
+keyring directory mounted into the center container; Compose and images must
+only bind-mount that path and must not COPY key bytes into the image. Do not
+reuse the session, deletion, or backup HMAC material.
 
 `scripts/compose-up.sh` is the fail-stop quick-start boundary. It validates the
 Compose configuration, starts only `db`, polls `pg_isready`, requires a
@@ -408,6 +416,11 @@ layer. Required environment variables:
 | `HOUFENG_SESSION_TTL` | no | `168h` | Rolling session lifetime; refreshed on each authenticated request. |
 | `HOUFENG_SESSION_HMAC_KEY` | yes | — | At least 32-byte HMAC secret for hashing session IDs at rest; keep stable across restarts. |
 | `HOUFENG_SESSION_HMAC_KEY_FILE` | no | — | File path containing the session HMAC secret; takes precedence over `HOUFENG_SESSION_HMAC_KEY`. |
+| `HOUFENG_RECORDS_ENABLED` | no | `false` | Enables the records/evidence platform. |
+| `HOUFENG_COMPARISON_ENABLED` | no | `false` | Enables the comparison workbench routes. Requires `HOUFENG_RECORDS_ENABLED=true` and a mounted comparison HMAC keyring. |
+| `HOUFENG_COMPARISON_INTENT_KEYRING` | no | — | Directory of independent 0400 comparison HMAC keys. Required when comparison is enabled. Mount the path; do not COPY key bytes into the image. Do not reuse session, deletion, or backup keys. |
+| `HOUFENG_COMPARISON_INTENT_KEY_ID` | no | — | Current key file name inside the comparison keyring. Required when comparison is enabled. |
+| `HOUFENG_COMPARISON_ADMISSION_BUDGET_BYTES` | no | `67108864` | Process-local comparison admission budget. Must be at least 8 MiB. |
 | `HOUFENG_PASSWORD_BCRYPT_COST` | no | Go bcrypt default cost | Cost used for newly seeded or changed passwords; validate with a latency benchmark before raising. |
 
 Behavior:

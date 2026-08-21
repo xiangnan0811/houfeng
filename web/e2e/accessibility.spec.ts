@@ -2,7 +2,14 @@ import AxeBuilder from '@axe-core/playwright'
 import type { AssetDecisionScenarioTemplateDetail } from '../src/lib/types'
 
 import { expect, test } from './fixtures'
-import { coreRouteProfile, dashboardProfile, subjectActivityProfile, vpsOverviewProfile } from './fixtures/profiles'
+import {
+  comparisonWorkbenchHref,
+  comparisonWorkbenchProfile,
+  coreRouteProfile,
+  dashboardProfile,
+  subjectActivityProfile,
+  vpsOverviewProfile,
+} from './fixtures/profiles'
 import { apiRouteKey } from './fixtures/contracts'
 import { expectNoDocumentOverflow } from './support/geometry'
 
@@ -263,6 +270,35 @@ test('单主体时间线 has no serious or critical axe violations', async ({ ap
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/vps/vps_001/activity')
   await expect(page.getByText('E2E 时间线条目')).toBeVisible()
+  await page.evaluate(() => document.fonts.ready)
+
+  const result = await new AxeBuilder({ page }).analyze()
+  const blocking = result.violations
+    .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
+    .map((violation) => ({
+      id: violation.id,
+      impact: violation.impact,
+      description: violation.description,
+      targets: violation.nodes.map((node) => node.target),
+    }))
+  expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([])
+  await expectNoDocumentOverflow(page)
+})
+
+test('横向比较工作台 has no serious or critical axe violations', async ({ api, page }) => {
+  api.useProfile(comparisonWorkbenchProfile({ mode: 'host-partial' }))
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto(comparisonWorkbenchHref({
+    mode: 'fixed',
+    items: [{ snapshot_id: 'evs_cmpleft' }, { snapshot_id: 'evs_cmpright' }],
+    baseline: 0,
+    alignment: 'actual_coverage',
+    tolerance_seconds: 60,
+    kind: 'monitoring.host/v1',
+    metric: 'cpu_usage_pct',
+  }))
+  await expect(page.getByRole('heading', { name: '可比性审查' })).toBeVisible()
   await page.evaluate(() => document.fonts.ready)
 
   const result = await new AxeBuilder({ page }).analyze()

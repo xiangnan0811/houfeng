@@ -22,14 +22,18 @@ storage, Vitest, Playwright, and Trellis child-task workflow.
 
 - Read `research/development-rebaseline-2026-08-02.md` before any child work.
 - Parent status remains `planning`; it is not an implementation target.
-- Current delivered program completion is `7/11`: Children 1–4, 9, 5, and 6 are
-  archived on protected main, the last through PR #416, released as `v0.69.0`.
-- Child 7 activity projection / subject timeline / VPS overview is next, and is
-  the only remaining child whose direct dependencies (2, 4, 6, 9) are all on
-  main. Children 8, 10, and 11 remain planning and stay blocked in that order:
-  8 needs 7, 10 needs 2–9, 11 needs 1–10.
-- Children 7–11 still require individual current-main plan reconciliation
-  before `task.py start`.
+- Current delivered program completion is `9/11`: Children 1–9 are on this
+  program path. Child 7 landed through PR #422 / `v0.70.0`. Child 8 is
+  archived at
+  `archive/2026-08/07-14-vps-records-comparison-workbench`
+  (work commits `d91987e6`, `3f95a3db`; PR #423). Children 10 and 11 remain
+  planning: 10 needs 2–9, 11 needs 1–10.
+- Child 7 leftovers stay independent: overview manage-panel writes and
+  activity group-granted viewer expansion are not Child 8 or Child 10.
+- Child 8 reconciliation and scope A live in the archived child research
+  note. Do not revive the 2026-08-02 Child 8 implement list.
+- Children 10 and 11 still require individual current-main plan
+  reconciliation before `task.py start`.
 - The old 121-item matrix is historical risk coverage, not a current
   line-by-line release gate.
 - Do not resume the stopped parent goal. A goal or sub-agent may be used only
@@ -149,17 +153,28 @@ all passed. Parent progress is now `1/11`; Child 2 remains planning.
 
 ### Child 7: Activity and VPS overview
 
-- Deliver `0057`, versioned source adapters, projector/checkpoints, subject
+- [x] Deliver `0057`, versioned source adapters, projector/checkpoints, subject
   timeline, overview aggregation, and approved VPS detail composition.
-- Exit with deterministic ordering, partial-source behavior, stable/anomaly
+- [x] Exit with deterministic ordering, partial-source behavior, stable/anomaly
   layout, source deletion, desktop/390px, and accessibility tests.
+
+Completion evidence: PR #422 merged, Release Please #420 published `v0.70.0`.
+Open leftovers (not Child 8): overview manage-panel writes still live in
+`LegacyVPSDetail`; activity viewer allowlist is project-digest only.
 
 ### Child 8: Comparison workbench
 
-- Deliver candidate discovery, fixed comparison, compatibility/coverage
+- [x] Deliver candidate discovery, fixed comparison, compatibility/coverage
   reasons, workbench UI, shareable URL, and save-as-record.
-- Exit with bounded query/capture behavior, partial evidence, desktop/390px,
-  accessibility, and atomic save tests.
+- [x] Reuse pairwise `Kind.Compare`; series only for `monitoring.host/v1` and
+  `monitoring.probe/v2`; HMAC save-as-record stays in-child.
+- [x] Exit with bounded process-local admission, partial evidence, desktop/390
+  named-scroll matrix, accessibility, and atomic save tests.
+
+Archived 2026-08-21 at `archive/2026-08/07-14-vps-records-comparison-workbench`
+(PR #423).
+Open leftovers: 4 GiB / 512 MiB mixed-load harness stays Child 11; sticky
+row headers omitted under the CSS ratchet. Do not absorb Child 7 leftovers.
 
 ### Child 10: Portability
 

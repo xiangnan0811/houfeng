@@ -1,0 +1,11 @@
+{"file": ".trellis/spec/backend/evidence-snapshot-contract.md", "reason": "Reject unregistered kinds, generic JSON Compare, and unregistered comparison.result prefixes"}
+{"file": ".trellis/spec/backend/record-authorization.md", "reason": "Opaque 404, capability intersection, no activity-digest shortcut"}
+{"file": ".trellis/spec/web/directory-structure.md", "reason": "Static /records/compare before /records/:recordId; no RecordsPage filename"}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Review before chart; 390px named scroll; no pixel goldens"}
+{"file": ".trellis/tasks/07-14-vps-records-comparison-workbench/prd.md", "reason": "Scope A acceptance: host/probe series only, no 4GiB harness, no overview/activity leftovers"}
+{"file": ".trellis/tasks/07-14-vps-records-comparison-workbench/design.md", "reason": "Candidates vs compare split, HMAC save, process-local admission"}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "comparison-url/v1, recordsApi comparison helpers, SegmentedControl kind switch, no AppShell"}
+{"file": "web/src/pages/records/compare/useComparisonWorkbench.ts", "reason": "Derive loading from requestKey; no sync setState in effect"}
+{"file": "web/css-budget.json", "reason": "Reuse page-stack/metric-grid/page-panel--scroll-x; +1 byte for .btn.lg 44px"}
+{"file": "internal/center/evidence/comparison_participant.go", "reason": "Save re-eval keeps revision XOR, chosen snapshot, and compare Detail from HMAC"}
+{"file": "internal/center/store/evidence_comparison_postgres_integration_test.go", "reason": "Typed seed SQL so official postgres candidate tests do not 42P08"}

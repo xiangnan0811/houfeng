@@ -169,8 +169,10 @@ func TestEvidenceHandlerFailClosedMatrix(t *testing.T) {
 }
 
 type evidenceHandlerApplicationStub struct {
-	capture func(context.Context, evidence.CapturePreviewRequest) (evidence.CapturePreviewResult, error)
-	read    func(context.Context, evidence.ReadSnapshotRequest) (evidence.ReadSnapshotResult, error)
+	capture    func(context.Context, evidence.CapturePreviewRequest) (evidence.CapturePreviewResult, error)
+	read       func(context.Context, evidence.ReadSnapshotRequest) (evidence.ReadSnapshotResult, error)
+	candidates func(context.Context, evidence.ComparisonCandidateRequest) (evidence.ComparisonCandidateResult, error)
+	compare    func(context.Context, evidence.ComparisonEvaluateRequest) (evidence.ComparisonEvaluateOutput, error)
 }
 
 func (stub *evidenceHandlerApplicationStub) CapturePreview(ctx context.Context, request evidence.CapturePreviewRequest) (evidence.CapturePreviewResult, error) {
@@ -179,6 +181,20 @@ func (stub *evidenceHandlerApplicationStub) CapturePreview(ctx context.Context, 
 
 func (stub *evidenceHandlerApplicationStub) ReadSnapshot(ctx context.Context, request evidence.ReadSnapshotRequest) (evidence.ReadSnapshotResult, error) {
 	return stub.read(ctx, request)
+}
+
+func (stub *evidenceHandlerApplicationStub) ResolveComparisonCandidates(ctx context.Context, request evidence.ComparisonCandidateRequest) (evidence.ComparisonCandidateResult, error) {
+	if stub.candidates == nil {
+		return evidence.ComparisonCandidateResult{}, evidence.ErrEvidenceServiceUnavailable
+	}
+	return stub.candidates(ctx, request)
+}
+
+func (stub *evidenceHandlerApplicationStub) EvaluateFixedComparison(ctx context.Context, request evidence.ComparisonEvaluateRequest) (evidence.ComparisonEvaluateOutput, error) {
+	if stub.compare == nil {
+		return evidence.ComparisonEvaluateOutput{}, evidence.ErrEvidenceServiceUnavailable
+	}
+	return stub.compare(ctx, request)
 }
 
 func evidenceHandlerRequest(t *testing.T, actor recordauth.ActorScope, method, path string, body *strings.Reader) *http.Request {

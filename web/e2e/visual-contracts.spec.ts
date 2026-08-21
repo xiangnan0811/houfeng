@@ -1,8 +1,14 @@
 import type { Locator, Page } from '@playwright/test'
 
 import { expect, test } from './fixtures'
-import { coreRouteProfile, subjectActivityProfile, vpsOverviewProfile } from './fixtures/profiles'
-import { expectLocatorNotClipped, expectNoDocumentOverflow } from './support/geometry'
+import {
+  comparisonWorkbenchHref,
+  comparisonWorkbenchProfile,
+  coreRouteProfile,
+  subjectActivityProfile,
+  vpsOverviewProfile,
+} from './fixtures/profiles'
+import { expectLocatorNotClipped, expectMinTouchTarget, expectNoDocumentOverflow } from './support/geometry'
 
 async function expectHitTarget(page: Page, locator: Locator): Promise<void> {
   const box = await locator.boundingBox()
@@ -109,5 +115,27 @@ test('单主体时间线 remains complete and reachable at 390px', async ({ api,
   await command.scrollIntoViewIfNeeded()
   await expectLocatorNotClipped(command)
   await expectHitTarget(page, command)
+  await expectNoDocumentOverflow(page)
+})
+
+test('横向比较工作台 save command remains complete and reachable at 390px', async ({ api, page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  api.useProfile(comparisonWorkbenchProfile({ mode: 'host-partial' }))
+  await page.goto(comparisonWorkbenchHref({
+    mode: 'fixed',
+    items: [{ snapshot_id: 'evs_cmpleft' }, { snapshot_id: 'evs_cmpright' }],
+    baseline: 0,
+    alignment: 'actual_coverage',
+    tolerance_seconds: 60,
+    kind: 'monitoring.host/v1',
+    metric: 'cpu_usage_pct',
+  }))
+
+  const command = page.getByRole('button', { name: '另存为记录' })
+  await expect(command).toBeVisible()
+  await command.scrollIntoViewIfNeeded()
+  await expectLocatorNotClipped(command)
+  await expectHitTarget(page, command)
+  await expectMinTouchTarget(command)
   await expectNoDocumentOverflow(page)
 })

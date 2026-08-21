@@ -1296,6 +1296,8 @@ func TestRouterKeepsRecordsRoutesAbsentWhenFeatureIsOff(t *testing.T) {
 		"/api/records/rec_httpcontract/permanent-delete",
 		"/api/record-deletions/rpo_httpcontract",
 		"/api/evidence/capture-previews",
+		"/api/evidence/comparison-candidates",
+		"/api/evidence/comparisons",
 		"/api/evidence/evs_httpcontract",
 	} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
@@ -1417,6 +1419,50 @@ func TestRouterProtectsAndDispatchesEnabledRecordsRoutes(t *testing.T) {
 	}
 	if got, want := strings.Join(evidencePaths, ","), "/api/evidence/capture-previews,/api/evidence/evs_httpcontract"; got != want {
 		t.Fatalf("evidence paths = %q, want %q", got, want)
+	}
+}
+
+func TestRouterRegistersComparisonCandidatesOnlyWhenCapabilityOn(t *testing.T) {
+	t.Parallel()
+
+	evidencePaths := make([]string, 0)
+	handler := newTestRouter(centerhttp.RouterOptions{
+		RecordsEnabled:    true,
+		ComparisonEnabled: false,
+		EvidenceHandler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			evidencePaths = append(evidencePaths, request.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/evidence/comparison-candidates", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("records-on comparison-off status = %d, wildcard still reaches evidence handler as snapshot id", recorder.Code)
+	}
+	if got, want := strings.Join(evidencePaths, ","), "/api/evidence/comparison-candidates"; got != want {
+		t.Fatalf("comparison-off evidence paths = %q, want wildcard dispatch %q", got, want)
+	}
+
+	enabledPaths := make([]string, 0)
+	enabled := newTestRouter(centerhttp.RouterOptions{
+		RecordsEnabled:    true,
+		ComparisonEnabled: true,
+		EvidenceHandler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			enabledPaths = append(enabledPaths, request.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	})
+	for _, path := range []string{"/api/evidence/comparison-candidates", "/api/evidence/comparisons"} {
+		request = httptest.NewRequest(http.MethodPost, path, nil)
+		recorder = httptest.NewRecorder()
+		enabled.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusNoContent {
+			t.Fatalf("comparison-on %s status = %d", path, recorder.Code)
+		}
+	}
+	if got, want := strings.Join(enabledPaths, ","), "/api/evidence/comparison-candidates,/api/evidence/comparisons"; got != want {
+		t.Fatalf("comparison-on dispatch = %#v, want %q", enabledPaths, want)
 	}
 }
 

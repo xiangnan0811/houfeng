@@ -42,6 +42,9 @@ const providersPage = lazy(() =>
 const recordInboxPage = lazy(() =>
   import('../pages/RecordInboxPage').then((module) => ({ default: module.RecordInboxPage })),
 )
+const recordComparisonPage = lazy(() =>
+  import('../pages/RecordComparisonPage').then((module) => ({ default: module.RecordComparisonPage })),
+)
 const recordSearchPage = lazy(() =>
   import('../pages/records/RecordSearchPage').then((module) => ({ default: module.RecordSearchPage })),
 )
@@ -127,6 +130,7 @@ export const appRoutes: RouteObject[] = [
           { path: 'records', element: routeElement(recordSearchPage, '正在加载运维记录') },
           { path: 'records/drafts', element: routeElement(recordDraftsPage, '正在加载记录草稿') },
           { path: 'records/new', element: routeElement(recordNewPage, '正在加载新建记录') },
+          { path: 'records/compare', element: routeElement(recordComparisonPage, '正在加载横向比较') },
           { path: 'records/:recordId/edit', element: routeElement(recordEditPage, '正在加载记录编辑') },
           { path: 'records/:recordId/revisions/:revisionId', element: routeElement(recordRevisionPage, '正在加载历史修订') },
           { path: 'records/:recordId', element: routeElement(recordDetailPage, '正在加载运维记录') },

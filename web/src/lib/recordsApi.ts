@@ -13,6 +13,11 @@ import type {
   AttachmentMetadata,
   AttachmentUploadCompletion,
   AttachmentUploadSession,
+  ComparisonCandidateRequest,
+  ComparisonCandidateResponse,
+  ComparisonEvaluateRequest,
+  ComparisonEvaluateResponse,
+  ComparisonFixedItemInput,
   CreateAttachmentUploadInput,
   CreateRecordDraftInput,
   EvidenceCapturePreview,
@@ -39,6 +44,8 @@ import type {
   RecordSearchResponse,
   RecordSearchSubjectFilter,
   RestoreRecordRevisionInput,
+  SaveComparisonRecordInput,
+  SaveComparisonRevisionInput,
   SubjectActivityFilter,
   SubjectActivityListResponse,
   SubjectActivityItem,
@@ -90,10 +97,17 @@ function attachmentUploadHeaders(
   return headers
 }
 
-function postIdempotentJSON<T>(path: string, body: unknown, idempotencyKey: string): Promise<T> {
-  return requestJSON<T>(path, jsonBodyInit('POST', body, {
+function postIdempotentJSON<T>(
+  path: string,
+  body: unknown,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  const init = jsonBodyInit('POST', body, {
     'Idempotency-Key': idempotencyKey,
-  }))
+  })
+  if (signal) init.signal = signal
+  return requestJSON<T>(path, init)
 }
 
 function changeRecordLifecycle(
@@ -568,4 +582,89 @@ export function getVPSOverview(vpsId: string): Promise<VPSOverview> {
 
 export function overviewHasRecordsV2Read(overview: VPSOverview): boolean {
   return overview.capabilities.includes('records_v2_read')
+}
+
+export function resolveComparisonCandidates(
+  input: ComparisonCandidateRequest,
+  signal?: AbortSignal,
+): Promise<ComparisonCandidateResponse> {
+  const body: ComparisonCandidateRequest = {
+    subjects: input.subjects.map((subject) => ({ kind: subject.kind, id: subject.id })),
+    requested_window: {
+      start: input.requested_window.start,
+      end: input.requested_window.end,
+    },
+  }
+  if (input.kinds?.length) {
+    body.kinds = input.kinds.map((key) => ({
+      kind: key.kind,
+      schema_version: key.schema_version,
+    }))
+  }
+  const init = jsonBodyInit('POST', body)
+  if (signal) init.signal = signal
+  return requestJSON<ComparisonCandidateResponse>('/api/evidence/comparison-candidates', init)
+}
+
+export function evaluateFixedComparison(
+  input: ComparisonEvaluateRequest,
+  signal?: AbortSignal,
+): Promise<ComparisonEvaluateResponse> {
+  const body: ComparisonEvaluateRequest = {
+    items: input.items.map((item): ComparisonFixedItemInput => {
+      if (item.snapshot_id) return { snapshot_id: item.snapshot_id }
+      const revision: ComparisonFixedItemInput = {}
+      if (item.record_id) revision.record_id = item.record_id
+      if (item.revision_id) revision.revision_id = item.revision_id
+      if (item.snapshot_ids?.length) revision.snapshot_ids = [...item.snapshot_ids]
+      return revision
+    }),
+    baseline_index: input.baseline_index,
+    alignment: input.alignment,
+    requested_window: {
+      start: input.requested_window.start,
+      end: input.requested_window.end,
+    },
+    tolerance_seconds: input.tolerance_seconds,
+  }
+  if (input.bucket_seconds != null) body.bucket_seconds = input.bucket_seconds
+  if (input.detail) {
+    body.detail = {
+      kind: input.detail.kind,
+      schema_version: input.detail.schema_version,
+      ...(input.detail.metric ? { metric: input.detail.metric } : {}),
+    }
+  }
+  const init = jsonBodyInit('POST', body)
+  if (signal) init.signal = signal
+  return requestJSON<ComparisonEvaluateResponse>('/api/evidence/comparisons', init)
+}
+
+export function saveComparisonRecord(
+  input: SaveComparisonRecordInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<RecordMutationResult> {
+  return postIdempotentJSON<RecordMutationResult>('/api/records', {
+    record_id: input.record_id,
+    draft_id: input.draft_id,
+    draft_etag: input.draft_etag,
+    comparison_intent: input.comparison_intent,
+  }, idempotencyKey, signal)
+}
+
+export function saveComparisonRevision(
+  recordId: string,
+  input: SaveComparisonRevisionInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<RecordMutationResult> {
+  return postIdempotentJSON<RecordMutationResult>(`/api/records/${encoded(recordId)}/revisions`, {
+    draft_id: input.draft_id,
+    draft_etag: input.draft_etag,
+    base_revision_id: input.base_revision_id,
+    lock_version: input.lock_version,
+    authorization_epoch: input.authorization_epoch,
+    comparison_intent: input.comparison_intent,
+  }, idempotencyKey, signal)
 }

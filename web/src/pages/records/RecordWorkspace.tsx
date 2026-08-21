@@ -36,6 +36,7 @@ import { RecordOutline } from './editor/RecordOutline'
 import { RecordSaveImpact } from './editor/RecordSaveImpact'
 import { RevisionDiff } from './editor/RevisionDiff'
 import { useRecordDraft, type RecordWorkspaceMode } from './hooks/useRecordDraft'
+import { comparisonEntryHref, comparisonSubjectsFromSources } from './compare/comparisonQueryState'
 import { labelOptions, RECORD_TYPE_LABELS } from './recordLabels'
 import {
   applyRecordTypeChange,
@@ -177,6 +178,14 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
               <Button size="lg" variant="secondary" disabled={state.saving} onClick={() => void commands.saveDraft()}>保存草稿</Button>
               <Button size="lg" disabled={state.publishing} onClick={() => void commands.publish()}>发布修订</Button>
             </>
+          ) : null}
+          {mode === 'revision' && recordId && revisionId ? (
+            <Link className="btn lg secondary" to={comparisonEntryHref({
+              subjects: comparisonSubjectsFromSources(state.payload.subjects),
+              items: [{ record_id: recordId, revision_id: revisionId }],
+            })}>
+              横向比较
+            </Link>
           ) : null}
           {mode === 'revision' ? (
             <Button size="lg" disabled={state.publishing} onClick={() => void commands.restore(restoreReason)}>恢复为新修订</Button>

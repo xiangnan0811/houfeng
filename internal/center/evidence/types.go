@@ -48,6 +48,7 @@ const (
 	KindMonitoringEvent  KindName = "monitoring.event"
 	KindSubscriptionCost KindName = "subscription.cost"
 	KindCommandAudit     KindName = "command.audit"
+	KindComparisonResult KindName = "comparison.result"
 )
 
 type KindKey struct {
@@ -77,6 +78,10 @@ func SubscriptionCostV1Key() KindKey {
 
 func CommandAuditV1Key() KindKey {
 	return KindKey{Kind: KindCommandAudit, SchemaVersion: 1}
+}
+
+func ComparisonResultV1Key() KindKey {
+	return KindKey{Kind: KindComparisonResult, SchemaVersion: 1}
 }
 
 type Sensitivity string
@@ -322,6 +327,7 @@ type Alignment struct {
 
 type Comparison struct {
 	Key        KindKey
+	ItemIndex  int
 	Compatible bool
 	Reason     string
 	Values     map[string]any

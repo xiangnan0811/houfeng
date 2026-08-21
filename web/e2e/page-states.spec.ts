@@ -14,6 +14,8 @@ import { apiRouteKey } from './fixtures/contracts'
 import { expect, test } from './fixtures'
 import {
   authenticatedProfile,
+  comparisonWorkbenchHref,
+  comparisonWorkbenchProfile,
   subjectActivityFixture,
   subjectActivityProfile,
   vpsOverviewFixture,
@@ -323,4 +325,25 @@ test('单主体时间线 loading / empty / local-error states', async ({ api, pa
   api.useProfile(subjectActivityProfile({ activityStatus: 503 }))
   await page.goto('/vps/vps_001/activity')
   await expect(page.getByRole('heading', { name: '活动投影不可用' })).toBeVisible()
+})
+
+test('横向比较工作台 keeps loading until the compare gate opens', async ({ api, page }) => {
+  const gate = controlledPromise()
+  api.useProfile(comparisonWorkbenchProfile({
+    mode: 'host-partial',
+    compareWaitFor: gate.promise,
+  }))
+  await page.goto(comparisonWorkbenchHref({
+    mode: 'fixed',
+    items: [{ snapshot_id: 'evs_cmpleft' }, { snapshot_id: 'evs_cmpright' }],
+    baseline: 0,
+    alignment: 'actual_coverage',
+    tolerance_seconds: 60,
+    kind: 'monitoring.host/v1',
+    metric: 'cpu_usage_pct',
+  }))
+  await expect(page.getByRole('heading', { name: '正在加载比较' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '取消比较' })).toBeVisible()
+  gate.resolve()
+  await expect(page.getByRole('heading', { name: '可比性审查' })).toBeVisible()
 })

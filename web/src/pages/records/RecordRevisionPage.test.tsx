@@ -59,5 +59,9 @@ describe('RecordRevisionPage', () => {
     )
     expect(await screen.findByRole('heading', { name: 'Database outage' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '恢复为新修订' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '横向比较' })).toHaveAttribute(
+      'href',
+      expect.stringMatching(/^\/records\/compare\?state=/),
+    )
   })
 })

@@ -89,7 +89,9 @@ web/
     │   ├── EventsPage.tsx + EventsPage.test.tsx
     │   ├── SettingsPage.tsx + SettingsPage.test.tsx
     │   ├── LoginPage.tsx + LoginPage.test.tsx
-    │   └── LoginPage.css       # 页面特有样式（极少例外）
+    │   ├── LoginPage.css       # 页面特有样式（极少例外）
+    │   ├── RecordComparisonPage.tsx + test
+    │   └── records/compare/    # /records/compare 私有 URL codec / controller / panels
     ├── components/             # 跨页复用展示组件
     │   ├── atoms/              # 设计系统原子（Button / Card / Badge / ...）
     │   │   ├── index.ts        # barrel export，pages 通常 from './atoms'
@@ -146,6 +148,7 @@ web/
 - 页面是**装配点**：调 `lib/` 下 owning API façade 拉数据，编排 `components/` 的展示原子，处理本地 UI 状态与表单。
 - 复杂单路由可建立 `<route-name>/` 私有目录；`asset-decisions/` 是当前参考：route page 只组合七个 `{state, commands}` controller、纯 model 与受控展示，controller / component / modal / workflow test 均留在路由私有边界内，不提升为跨页共享模块。
 - `CommandAuditPage.tsx` 是 `/command-audit` 唯一 controller/composition point，拥有 URL canonicalization、request generation、cursor append 与 expanded state；`pages/command-audit/` 只放 route-private filter model、筛选 UI、DataTable 和 allowlisted event timeline。共享 command display metadata 位于 `config/commands.ts`，不得把审计页组件提升到跨页 `components/` 或复制 Monitoring detail command list。
+- `RecordComparisonPage.tsx` 是 `/records/compare` 唯一装配点，必须挂在 `/records/:recordId` 之前。`pages/records/compare/` 只放 `comparison-url/v1` codec、`useComparisonWorkbench` 与受控面板。证据类型切换用 SegmentedControl，不把无 panel 的 Tabs 当值选择器。另存走 `recordsApi` 的 comparison helpers，不得调用 `createRecord` / `useRecordDraft.publish()`。
 - 页面之间**不要相互 import**；要复用就抽到 `components/`。
 - 页面仅由 `app/router.tsx` 引用。
 
@@ -253,7 +256,7 @@ web/
 2. **`app/layout/`、`app/RequireAuth.tsx`、`app/metadata.ts` 也在 `CLAUDE.md` 简述之外**，是当前实际的应用壳组织方式。
 3. **`auth-client.ts` 当前复用 `api.ts` 的 request helpers**，所以 401 hook 只有 `setUnauthorizedHandler` 一套，由 `auth-context.tsx` 绑定。新代码不要再新增第二套 fetch 包装。
 4. **当前未使用 React Query / SWR / Redux / Zustand 等状态库**（`web/package.json` 无依赖）；详见 `state-and-data.md`。
-5. **route-lazy domain façade 是受 bundle ratchet 约束的窄例外**：当前仅 `observabilityApi.ts`；不能无证据把单体 API 拆成文件风暴，也不能复制 transport。
+5. **route-lazy domain façade 是受 bundle ratchet 约束的窄例外**：当前为 `observabilityApi.ts` 与 lazy-only `recordsApi.ts`（含 comparison helpers）；不能无证据把单体 API 拆成文件风暴，也不能复制 transport。`/records/compare` 可静态导入 `recordsApi.ts`，仍不得进入 AppShell。
 
 ---
 
