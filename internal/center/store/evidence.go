@@ -247,9 +247,30 @@ func (repository *PostgresEvidenceRepository) PersistPayload(
 	ctx context.Context,
 	snapshot evidence.CanonicalSnapshot,
 ) (EvidencePayloadMetadata, error) {
+	tx, err := repository.startAdmittedTransaction(ctx)
+	if err != nil {
+		return EvidencePayloadMetadata{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	metadata, err := persistEvidencePayloadOnTx(ctx, tx, snapshot)
+	if err != nil {
+		return EvidencePayloadMetadata{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return EvidencePayloadMetadata{}, fmt.Errorf("commit evidence payload: %w", err)
+	}
+	return metadata, nil
+}
+
+func persistEvidencePayloadOnTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	snapshot evidence.CanonicalSnapshot,
+) (EvidencePayloadMetadata, error) {
 	canonical := snapshot.Bytes()
 	digest := snapshot.Hash()
-	if ctx == nil || validateEvidencePayloadBinding(canonical, digest, snapshot.Size()) != nil {
+	if ctx == nil || nilRecordEvidenceParticipantTx(tx) ||
+		validateEvidencePayloadBinding(canonical, digest, snapshot.Size()) != nil {
 		return EvidencePayloadMetadata{}, ErrInvalidEvidencePersistence
 	}
 	compressed, err := deterministicEvidenceGzip(canonical)
@@ -263,11 +284,6 @@ func (repository *PostgresEvidenceRepository) PersistPayload(
 		Digest: digest, Encoding: EvidencePayloadEncodingCanonicalJSONGzipV1,
 		CanonicalSizeBytes: uint64(len(canonical)), CompressedSizeBytes: uint64(len(compressed)),
 	}
-	tx, err := repository.startAdmittedTransaction(ctx)
-	if err != nil {
-		return EvidencePayloadMetadata{}, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	inserted, err := tx.Exec(ctx, `
 		insert into public.evidence_payloads (
 			payload_digest, canonical_size_bytes, compressed_size_bytes, compressed_payload
@@ -293,9 +309,6 @@ func (repository *PostgresEvidenceRepository) PersistPayload(
 			storedCompressedSize != int64(metadata.CompressedSizeBytes) || !bytes.Equal(storedCompressed, compressed) {
 			return EvidencePayloadMetadata{}, ErrEvidencePersistenceConflict
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return EvidencePayloadMetadata{}, fmt.Errorf("commit evidence payload: %w", err)
 	}
 	return metadata, nil
 }

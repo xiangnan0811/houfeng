@@ -24,6 +24,20 @@ func (recordAttachmentRevisionParticipant) ApplyRevision(
 	tx pgx.Tx,
 	committed records.RevisionCommitted,
 ) error {
+	if len(committed.ImportedAttachments) > 0 {
+		if err := attachments.InsertImportedAvailableAttachments(
+			ctx, tx, "default", committed.Result.RecordID, committed.ImportedAttachments,
+		); err != nil {
+			switch {
+			case errors.Is(err, attachments.ErrAttachmentConflict),
+				errors.Is(err, attachments.ErrInvalidAttachmentCommand),
+				errors.Is(err, attachments.ErrInvalidAttachmentReferences):
+				return fmt.Errorf("%w: %w", records.ErrInvalidRevisionCommand, err)
+			default:
+				return fmt.Errorf("insert imported revision attachments: %w", err)
+			}
+		}
+	}
 	err := attachments.ApplyRevisionAttachments(ctx, tx, attachments.RevisionAttachmentCommit{
 		ProjectID:     "default",
 		RecordID:      committed.Result.RecordID,

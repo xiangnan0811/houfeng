@@ -9,7 +9,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/records"
@@ -293,10 +295,14 @@ func mustImportService(t *testing.T) (*Service, *importWriterStub, *memoryImport
 }
 
 type importWriterStub struct {
-	mu     sync.Mutex
-	writes int
-	failOn int
-	repo   *memoryImportRepository
+	mu           sync.Mutex
+	writes       int
+	failOn       int
+	repo         *memoryImportRepository
+	preparations []evidence.RevisionPreparation
+	attachments  [][]string
+	importedAtts [][]attachments.ImportedAvailableAttachment
+	lastFinish   records.RevisionCommitFinish
 }
 
 func (stub *importWriterStub) ImportDocuments(ctx context.Context, requests []records.ImportDocumentRequest) ([]records.ImportedDocument, error) {
@@ -321,9 +327,16 @@ func (stub *importWriterStub) ImportDocumentsFinishing(
 			return nil, ErrImportOriginConflict
 		}
 	}
+	stub.preparations = stub.preparations[:0]
+	stub.attachments = stub.attachments[:0]
+	stub.importedAtts = stub.importedAtts[:0]
+	stub.lastFinish = finish
 	written := make([]records.ImportedDocument, 0, len(requests))
 	for _, request := range requests {
 		stub.writes++
+		stub.preparations = append(stub.preparations, request.EvidencePreparation)
+		stub.attachments = append(stub.attachments, append([]string(nil), request.AttachmentIDs...))
+		stub.importedAtts = append(stub.importedAtts, append([]attachments.ImportedAvailableAttachment(nil), request.ImportedAttachments...))
 		written = append(written, records.ImportedDocument{RecordID: request.RecordID, RevisionID: "rrv_imported"})
 	}
 	if stub.repo != nil && finish.ImportJobID != "" {
@@ -679,15 +692,14 @@ func TestOfficialArchiveWithEvidenceSnapshotIDsDryRunsAndApplies(t *testing.T) {
 		EvidenceSnapshotIDs: []string{"evs_allowedarchive"},
 	}
 	docs.mu.Unlock()
-	service.evidence = &evidenceStub{snapshot: evidence.AuthorizedSnapshot{
+	authorized := evidence.AuthorizedSnapshot{
 		RecordID: "rec_roundtrip1", SnapshotID: "evs_allowedarchive",
 		Key: evidence.ComparisonResultV1Key(), Snapshot: snapshot,
-	}}
+	}
+	service.evidence = &evidenceStub{snapshot: authorized}
 	service.comparison = kind
-	service.snapshots = &snapshotStub{snapshot: evidence.AuthorizedSnapshot{
-		RecordID: "rec_roundtrip1", SnapshotID: "evs_allowedarchive",
-		Key: evidence.ComparisonResultV1Key(), Snapshot: snapshot,
-	}}
+	service.snapshots = &snapshotStub{snapshot: authorized}
+	service.kinds = mustOfficialImportKinds(t, officialProbeDescriptor())
 
 	preview, err := service.Preview(context.Background(), PreviewRequest{
 		Actor: portabilityTestActor(t), IdempotencyKey: "official-evidence-export",
@@ -741,6 +753,113 @@ func TestOfficialArchiveWithEvidenceSnapshotIDsDryRunsAndApplies(t *testing.T) {
 	}
 	if !sawOfficial {
 		t.Fatalf("evidence imports = %#v, want official Export bytes", evidenceWriter.calls)
+	}
+}
+
+func TestOfficialArchiveApplyPutsKnownEvidenceOnFinishingRequest(t *testing.T) {
+	t.Parallel()
+
+	comparisonKind, err := evidence.NewComparisonResultKind()
+	if err != nil {
+		t.Fatalf("NewComparisonResultKind() error = %v", err)
+	}
+	comparisonSnapshot := mustPortabilityComparisonSnapshot(t, comparisonKind)
+	probeDescriptor, probeSnapshot := mustPortabilityProbeSnapshot(t)
+	comparisonExport := comparisonKind.Export(comparisonSnapshot, evidence.ExportModeSafe)
+	probeExport := officialProbeKind{descriptor: probeDescriptor}.Export(probeSnapshot, evidence.ExportModeSafe)
+	service, importer, _ := mustOfficialFidelityImportService(t, comparisonSnapshot, probeSnapshot, probeDescriptor)
+
+	raw := mustExportOfficialFidelityArchive(t, service)
+	plan, err := service.DryRun(context.Background(), DryRunRequest{
+		Actor: portabilityTestActor(t), IdempotencyKey: "official-fidelity-import", Archive: raw,
+	})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	applied, err := service.Apply(context.Background(), ApplyRequest{
+		Actor: portabilityTestActor(t), PlanID: plan.PlanID, LockVersion: plan.LockVersion,
+	})
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if importer.writes != 1 || len(applied.RecordIDs) != 1 || len(importer.preparations) != 1 {
+		t.Fatalf("writes=%d applied=%#v preparations=%d", importer.writes, applied, len(importer.preparations))
+	}
+	imported := importer.preparations[0].Imported()
+	if len(imported) != 2 {
+		t.Fatalf("Imported() = %#v, want comparison + probe", imported)
+	}
+	exports := map[string][]byte{}
+	for _, item := range imported {
+		kind, lookupErr := service.kinds.LookupKey(item.Snapshot().Envelope().Key)
+		if lookupErr != nil {
+			t.Fatalf("LookupKey(%s) error = %v", item.Snapshot().Envelope().Key, lookupErr)
+		}
+		exports[kind.Descriptor().Key.String()] = kind.Export(item.Snapshot(), evidence.ExportModeSafe).Bytes
+	}
+	if !bytes.Equal(exports[evidence.ComparisonResultV1Key().String()], comparisonExport.Bytes) {
+		t.Fatal("restored comparison Export bytes drifted")
+	}
+	if !bytes.Equal(exports[evidence.MonitoringProbeV2Key().String()], probeExport.Bytes) {
+		t.Fatal("restored probe Export bytes drifted")
+	}
+
+	second, err := service.Apply(context.Background(), ApplyRequest{
+		Actor: portabilityTestActor(t), PlanID: plan.PlanID, LockVersion: plan.LockVersion,
+	})
+	if err != nil || second.JobState != store.RecordImportJobStateApplied || second.RecordIDs[0] != applied.RecordIDs[0] {
+		t.Fatalf("second Apply() = %#v %v", second, err)
+	}
+	if importer.writes != 1 {
+		t.Fatalf("second apply wrote again: writes=%d", importer.writes)
+	}
+
+	blocked, importerBlocked, _ := mustOfficialFidelityImportService(t, comparisonSnapshot, probeSnapshot, probeDescriptor)
+	blockedPlan, err := blocked.DryRun(context.Background(), DryRunRequest{
+		Actor: portabilityTestActor(t), IdempotencyKey: "official-fidelity-tombstone-preview", Archive: raw,
+	})
+	if err != nil {
+		t.Fatalf("DryRun(pre-tombstone) error = %v", err)
+	}
+	blocked.imports.(*memoryImportRepository).tombstone(sha256.Sum256(raw))
+	if _, err := blocked.Apply(context.Background(), ApplyRequest{
+		Actor: portabilityTestActor(t), PlanID: blockedPlan.PlanID, LockVersion: blockedPlan.LockVersion,
+	}); !errors.Is(err, ErrOriginTombstoned) {
+		t.Fatalf("Apply(tombstone) error = %v", err)
+	}
+	if importerBlocked.writes != 0 || len(importerBlocked.preparations) != 0 {
+		t.Fatalf("tombstone apply persisted evidence: writes=%d preparations=%d", importerBlocked.writes, len(importerBlocked.preparations))
+	}
+}
+
+func TestOfficialEvidenceRestoreMemberRoundTripsKnownKinds(t *testing.T) {
+	t.Parallel()
+
+	comparisonKind, err := evidence.NewComparisonResultKind()
+	if err != nil {
+		t.Fatalf("NewComparisonResultKind() error = %v", err)
+	}
+	comparisonSnapshot := mustPortabilityComparisonSnapshot(t, comparisonKind)
+	probeDescriptor, probeSnapshot := mustPortabilityProbeSnapshot(t)
+	kinds := mustOfficialImportKinds(t, probeDescriptor)
+
+	for _, snapshot := range []evidence.CanonicalSnapshot{comparisonSnapshot, probeSnapshot} {
+		exported := snapshot.Bytes()
+		wrapped, err := encodeOfficialEvidenceRestoreMember(snapshot, exported)
+		if err != nil {
+			t.Fatalf("encodeOfficialEvidenceRestoreMember() error = %v", err)
+		}
+		restored, isWrapper, err := restoreOfficialEvidenceSnapshot(kinds, wrapped)
+		if err != nil || !isWrapper {
+			t.Fatalf("restoreOfficialEvidenceSnapshot() = (%v, %v) wrapper=%t", restored, err, isWrapper)
+		}
+		if restored.Hash() != snapshot.Hash() || !bytes.Equal(restored.Bytes(), snapshot.Bytes()) {
+			t.Fatal("restored snapshot drifted from official export")
+		}
+	}
+	_, isWrapper, err := restoreOfficialEvidenceSnapshot(kinds, comparisonKind.Export(comparisonSnapshot, evidence.ExportModeSafe).Bytes)
+	if err != nil || isWrapper {
+		t.Fatalf("raw comparison Export treated as wrapper: wrapper=%t err=%v", isWrapper, err)
 	}
 }
 
@@ -901,4 +1020,187 @@ func TestPortabilityApplyRejectsZeroLockAndForeignActor(t *testing.T) {
 	}); !errors.Is(err, ErrExportUnauthorized) {
 		t.Fatalf("foreign actor error = %v", err)
 	}
+}
+
+func officialProbeDescriptor() evidence.Descriptor {
+	return evidence.Descriptor{
+		Key: evidence.MonitoringProbeV2Key(),
+		Fields: []evidence.FieldDefinition{
+			{Path: "metric_name", Sensitivity: evidence.SensitivityNormal},
+			{Path: "metric_value", Sensitivity: evidence.SensitivityNormal},
+		},
+		Conformance: evidence.ConformanceMetadata{
+			CanonicalizationVersion: evidence.CanonicalizationVersionV1,
+			ForbiddenCorpusVersion:  evidence.ForbiddenCorpusVersionV1,
+			RendererVersion:         "renderer.v1",
+			MaxCanonicalBytes:       evidence.MaxCanonicalPayloadBytes,
+		},
+	}
+}
+
+type officialProbeKind struct {
+	descriptor evidence.Descriptor
+}
+
+func (kind officialProbeKind) Descriptor() evidence.Descriptor { return kind.descriptor }
+
+func (officialProbeKind) ValidateSelection(context.Context, evidence.ActorScope, evidence.Selection) error {
+	return evidence.ErrInvalidCanonicalPayload
+}
+
+func (officialProbeKind) PreviewCapture(context.Context, evidence.ActorScope, evidence.Selection) (evidence.Preview, error) {
+	return evidence.Preview{}, evidence.ErrInvalidCanonicalPayload
+}
+
+func (officialProbeKind) Capture(context.Context, evidence.ActorScope, evidence.Intent) (evidence.CanonicalSnapshot, error) {
+	return evidence.CanonicalSnapshot{}, evidence.ErrInvalidCanonicalPayload
+}
+
+func (officialProbeKind) Authorize(context.Context, evidence.ActorScope, evidence.Selection) (evidence.AuthorizationScope, error) {
+	return evidence.AuthorizationScope{}, evidence.ErrInvalidCanonicalPayload
+}
+
+func (kind officialProbeKind) Summarize(evidence.CanonicalSnapshot) evidence.Summary {
+	return evidence.Summary{Key: kind.descriptor.Key, RendererVersion: kind.descriptor.Conformance.RendererVersion}
+}
+
+func (kind officialProbeKind) Compare(evidence.CanonicalSnapshot, evidence.CanonicalSnapshot, evidence.Alignment) evidence.Comparison {
+	return evidence.Comparison{Key: kind.descriptor.Key, Compatible: true}
+}
+
+func (kind officialProbeKind) Export(snapshot evidence.CanonicalSnapshot, _ evidence.ExportMode) evidence.ExportMaterial {
+	return evidence.ExportMaterial{Key: kind.descriptor.Key, MediaType: "application/json", Bytes: snapshot.Bytes()}
+}
+
+func mustOfficialImportKinds(t *testing.T, probe evidence.Descriptor) evidence.Registry {
+	t.Helper()
+	comparison, err := evidence.NewComparisonResultKind()
+	if err != nil {
+		t.Fatalf("NewComparisonResultKind() error = %v", err)
+	}
+	registry, err := evidence.NewRegistry([]evidence.Kind{comparison, officialProbeKind{descriptor: probe}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	return registry
+}
+
+func mustPortabilityProbeSnapshot(t *testing.T) (evidence.Descriptor, evidence.CanonicalSnapshot) {
+	t.Helper()
+	descriptor := officialProbeDescriptor()
+	window := evidence.TimeWindow{
+		Start: time.Date(2026, 8, 10, 11, 0, 0, 0, time.UTC),
+		End:   time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
+	}
+	visibility, err := recordauth.NormalizeVisibilityScope(recordauth.VisibilityScope{
+		Version:        recordauth.VisibilityScopeVersionV1,
+		Kind:           recordauth.VisibilityKindProject,
+		ProjectID:      recordauth.ProjectIDDefault,
+		PolicyVersion:  recordauth.PolicyVersionV1,
+		PolicyRevision: 1,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeVisibilityScope() error = %v", err)
+	}
+	authorization, err := recordauth.NormalizeSourceAuthorization(recordauth.SourceAuthorization{
+		Version:      recordauth.SourceAuthorizationVersionV1,
+		Kind:         recordauth.SourceKindTarget,
+		SourceID:     "tg_0123456789abcdef",
+		State:        recordauth.SourceStateLive,
+		CaptureScope: visibility,
+		CurrentScope: &visibility,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeSourceAuthorization() error = %v", err)
+	}
+	envelope := evidence.SnapshotEnvelope{
+		Key: evidence.MonitoringProbeV2Key(),
+		Subject: evidence.IdentitySnapshot{
+			Type: "target", ID: "tg_0123456789abcdef",
+			Fields: map[string]string{"display_name": "edge probe"},
+		},
+		Source: evidence.IdentitySnapshot{
+			Type: string(recordauth.SourceKindTarget), ID: "tg_0123456789abcdef",
+			Fields: map[string]string{"display_name": "edge probe"},
+		},
+		Authorization:      authorization,
+		SourceDigest:       sha256.Sum256([]byte("source")),
+		RequestedWindow:    window,
+		ActualWindow:       window,
+		ObservedAt:         window.End,
+		CapturedAt:         window.End.Add(time.Minute),
+		ReferencedAt:       window.End.Add(2 * time.Minute),
+		SourceRevision:     "revision-1",
+		SourceWatermark:    "watermark-1",
+		ProducerVersion:    "producer-1",
+		CalculationVersion: "calculation-1",
+		Units:              evidence.UnitsSemantics{Status: evidence.UnitsApplicable, Values: map[string]string{"latency_ms": "ms"}},
+		Quality:            evidence.Quality{Status: evidence.QualityComplete, SampleCount: 60},
+		Sensitivity:        evidence.SensitivityNormal,
+		ActualPrecision:    evidence.DurationSemantics{Applicable: true, Value: time.Minute},
+		BucketWidth:        evidence.DurationSemantics{Applicable: true, Value: time.Minute},
+		QuotaOutcome:       evidence.QuotaOutcome{Status: evidence.QuotaAllowed},
+		Retention: evidence.RetentionSemantics{
+			Immutable: true, Scope: evidence.RetentionScopeRecordRevision,
+			SourceDeletion: evidence.SourceDeletionSnapshotRetained,
+		},
+	}
+	snapshot, _, err := evidence.NewCanonicalSnapshot(descriptor, envelope, map[string]any{
+		"metric_name": "latency_ms", "metric_value": "12",
+	}, evidence.RedactionNormalOnly)
+	if err != nil {
+		t.Fatalf("NewCanonicalSnapshot(probe) error = %v", err)
+	}
+	return descriptor, snapshot
+}
+
+func mustOfficialFidelityImportService(
+	t *testing.T,
+	comparisonSnapshot evidence.CanonicalSnapshot,
+	probeSnapshot evidence.CanonicalSnapshot,
+	probeDescriptor evidence.Descriptor,
+) (*Service, *importWriterStub, *memoryImportRepository) {
+	t.Helper()
+	service, importer, imports := mustImportService(t)
+	docs := service.documents.(*documentStub)
+	docs.mu.Lock()
+	docs.document = records.ExportDocument{
+		RecordID: "rec_fidelity1", RevisionID: "rrv_fidelity1", Title: "Disk notes",
+		BodyMarkdown:       "See https://example.com and do not delete this.\n",
+		AuthorizationEpoch: 2, LockVersion: 1,
+		EvidenceSnapshotIDs: []string{"evs_comparison01", "evs_probe0000001"},
+	}
+	docs.mu.Unlock()
+	snapshots := map[string]evidence.AuthorizedSnapshot{
+		"evs_comparison01": {
+			RecordID: "rec_fidelity1", SnapshotID: "evs_comparison01",
+			Key: evidence.ComparisonResultV1Key(), Snapshot: comparisonSnapshot,
+		},
+		"evs_probe0000001": {
+			RecordID: "rec_fidelity1", SnapshotID: "evs_probe0000001",
+			Key: evidence.MonitoringProbeV2Key(), Snapshot: probeSnapshot,
+		},
+	}
+	comparisonKind, err := evidence.NewComparisonResultKind()
+	if err != nil {
+		t.Fatalf("NewComparisonResultKind() error = %v", err)
+	}
+	service.evidence = &evidenceStub{snapshots: snapshots}
+	service.snapshots = &snapshotStub{snapshots: snapshots}
+	service.comparison = comparisonKind
+	service.kinds = mustOfficialImportKinds(t, probeDescriptor)
+	return service, importer, imports
+}
+
+func mustExportOfficialFidelityArchive(t *testing.T, service *Service) []byte {
+	t.Helper()
+	preview, err := service.Preview(context.Background(), PreviewRequest{
+		Actor: portabilityTestActor(t), IdempotencyKey: "official-fidelity-export",
+		RecordID: "rec_fidelity1", SnapshotID: "evs_comparison01",
+		ExportKind: ExportKindArchive, ExportMode: ExportModeSafe,
+	})
+	if err != nil {
+		t.Fatalf("Preview() error = %v", err)
+	}
+	return mustReadPreviewPayload(t, service, preview)
 }

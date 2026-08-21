@@ -3,6 +3,8 @@ package records
 import (
 	"context"
 
+	"houfeng/internal/center/attachments"
+	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
 )
 
@@ -12,6 +14,9 @@ type ImportDocumentRequest struct {
 	Title                 string
 	BodyMarkdown          string
 	IdempotencyKey        string
+	EvidencePreparation   evidence.RevisionPreparation
+	AttachmentIDs         []string
+	ImportedAttachments   []attachments.ImportedAvailableAttachment
 	ImportedAuthorization string
 	ImportedRole          string
 }
@@ -88,20 +93,29 @@ func (application *Application) ImportDocuments(
 		if request.ImportedAuthorization != "" || request.ImportedRole != "" {
 			return nil, ErrUntrustedImportIdentity
 		}
+		if err := request.EvidencePreparation.ValidateForRecord(request.RecordID); err != nil {
+			return nil, ErrInvalidApplicationRequest
+		}
+		if err := validateImportedAttachments(request.ImportedAttachments, request.AttachmentIDs); err != nil {
+			return nil, ErrInvalidApplicationRequest
+		}
 		values, err := ImportedRevisionValues(request.Actor, request.Title, request.BodyMarkdown)
 		if err != nil {
 			return nil, err
 		}
+		values.AttachmentIDs = append([]string(nil), request.AttachmentIDs...)
 		saves = append(saves, RevisionSaveRequest{
-			Actor:              request.Actor,
-			RecordID:           request.RecordID,
-			Values:             values,
-			ActivityKind:       DomainActivityRecordCreated,
-			IdempotencyKey:     request.IdempotencyKey,
-			IdempotencyOwnerID: application.options.IdempotencyOwnerID,
-			OwnerLeaseDuration: application.options.OwnerLeaseDuration,
-			IdempotencyTTL:     application.options.IdempotencyTTL,
-			OutboxTTL:          application.options.OutboxTTL,
+			Actor:               request.Actor,
+			RecordID:            request.RecordID,
+			Values:              values,
+			EvidencePreparation: request.EvidencePreparation,
+			ImportedAttachments: append([]attachments.ImportedAvailableAttachment(nil), request.ImportedAttachments...),
+			ActivityKind:        DomainActivityRecordCreated,
+			IdempotencyKey:      request.IdempotencyKey,
+			IdempotencyOwnerID:  application.options.IdempotencyOwnerID,
+			OwnerLeaseDuration:  application.options.OwnerLeaseDuration,
+			IdempotencyTTL:      application.options.IdempotencyTTL,
+			OutboxTTL:           application.options.OutboxTTL,
 		})
 	}
 	results, err := application.revisions.SaveRevisions(ctx, saves)
@@ -124,20 +138,29 @@ func (application *Application) ImportDocumentsFinishing(
 		if request.ImportedAuthorization != "" || request.ImportedRole != "" {
 			return nil, ErrUntrustedImportIdentity
 		}
+		if err := request.EvidencePreparation.ValidateForRecord(request.RecordID); err != nil {
+			return nil, ErrInvalidApplicationRequest
+		}
+		if err := validateImportedAttachments(request.ImportedAttachments, request.AttachmentIDs); err != nil {
+			return nil, ErrInvalidApplicationRequest
+		}
 		values, err := ImportedRevisionValues(request.Actor, request.Title, request.BodyMarkdown)
 		if err != nil {
 			return nil, err
 		}
+		values.AttachmentIDs = append([]string(nil), request.AttachmentIDs...)
 		saves = append(saves, RevisionSaveRequest{
-			Actor:              request.Actor,
-			RecordID:           request.RecordID,
-			Values:             values,
-			ActivityKind:       DomainActivityRecordCreated,
-			IdempotencyKey:     request.IdempotencyKey,
-			IdempotencyOwnerID: application.options.IdempotencyOwnerID,
-			OwnerLeaseDuration: application.options.OwnerLeaseDuration,
-			IdempotencyTTL:     application.options.IdempotencyTTL,
-			OutboxTTL:          application.options.OutboxTTL,
+			Actor:               request.Actor,
+			RecordID:            request.RecordID,
+			Values:              values,
+			EvidencePreparation: request.EvidencePreparation,
+			ImportedAttachments: append([]attachments.ImportedAvailableAttachment(nil), request.ImportedAttachments...),
+			ActivityKind:        DomainActivityRecordCreated,
+			IdempotencyKey:      request.IdempotencyKey,
+			IdempotencyOwnerID:  application.options.IdempotencyOwnerID,
+			OwnerLeaseDuration:  application.options.OwnerLeaseDuration,
+			IdempotencyTTL:      application.options.IdempotencyTTL,
+			OutboxTTL:           application.options.OutboxTTL,
 		})
 	}
 	results, err := application.revisions.SaveRevisionsFinishing(ctx, saves, finish)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
@@ -45,6 +46,7 @@ type RevisionCommitCommand struct {
 	DraftETag           DraftETag
 	Input               CompleteRevisionInput
 	EvidencePreparation evidence.RevisionPreparation
+	ImportedAttachments []attachments.ImportedAvailableAttachment
 	ActivityKind        DomainActivityKind
 	OutboxTTL           time.Duration
 	Idempotency         recordplatform.IdempotencyClaimInputV1
@@ -92,6 +94,7 @@ type RevisionCommitted struct {
 	Result              RevisionCommitResult
 	Input               CompleteRevisionInput
 	EvidencePreparation evidence.RevisionPreparation
+	ImportedAttachments []attachments.ImportedAvailableAttachment
 	ActivityKind        DomainActivityKind
 	OutboxTTL           time.Duration
 	Outbox              RevisionOutbox
@@ -128,6 +131,9 @@ func (command RevisionCommitCommand) Validate() error {
 		!reflect.DeepEqual(command.EvidencePreparation.SnapshotIDs(), command.Input.EvidenceSnapshotIDs()) {
 		return fmt.Errorf("%w: evidence preparation", ErrInvalidRevisionCommand)
 	}
+	if err := validateImportedAttachments(command.ImportedAttachments, command.Input.AttachmentIDs()); err != nil {
+		return fmt.Errorf("%w: imported attachments", ErrInvalidRevisionCommand)
+	}
 	_, draftETagErr := command.DraftETag.Digest()
 	hasDraftID := command.DraftID != ""
 	hasDraftETag := draftETagErr == nil
@@ -145,6 +151,30 @@ func (command RevisionCommitCommand) Validate() error {
 	}
 	if command.OutboxTTL.Microseconds() <= 0 {
 		return fmt.Errorf("%w: outbox ttl", ErrInvalidRevisionCommand)
+	}
+	return nil
+}
+
+func validateImportedAttachments(items []attachments.ImportedAvailableAttachment, attachmentIDs []string) error {
+	if len(items) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(attachmentIDs))
+	for _, attachmentID := range attachmentIDs {
+		allowed[attachmentID] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if item.Validate() != nil {
+			return ErrInvalidRevisionCommand
+		}
+		if _, ok := allowed[item.AttachmentID]; !ok {
+			return ErrInvalidRevisionCommand
+		}
+		if _, exists := seen[item.AttachmentID]; exists {
+			return ErrInvalidRevisionCommand
+		}
+		seen[item.AttachmentID] = struct{}{}
 	}
 	return nil
 }

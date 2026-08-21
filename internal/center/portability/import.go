@@ -197,7 +197,7 @@ func (service *Service) DryRun(ctx context.Context, request DryRunRequest) (Impo
 	plan, err := service.imports.SaveImportPlan(ctx, store.SaveRecordImportPlanInput{
 		ImportJobID: job.ImportJobID,
 		PlanDigest:  planned.digest,
-		ObjectCount: uint64(len(planned.documents) + len(planned.evidence) + len(planned.quarantine)),
+		ObjectCount: uint64(len(planned.documents) + len(planned.evidence) + len(planned.attachments) + len(planned.quarantine)),
 		RemapCount:  uint64(len(planned.remaps)),
 		Remaps:      planned.storeRemaps(),
 		Documents:   planned.documents,
@@ -271,14 +271,25 @@ func (service *Service) Apply(ctx context.Context, request ApplyRequest) (ApplyR
 	if err := service.applyImportedEvidence(ctx, actor, cached); err != nil {
 		return ApplyResult{}, err
 	}
+	preparations, err := service.prepareImportedEvidence(cached)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	importedAttachments, attachmentIDs, err := service.restoreImportedAttachments(ctx, actor, cached)
+	if err != nil {
+		return ApplyResult{}, err
+	}
 	importRequests := make([]records.ImportDocumentRequest, 0, len(plan.Documents))
 	for _, document := range plan.Documents {
 		importRequests = append(importRequests, records.ImportDocumentRequest{
-			Actor:          actor,
-			RecordID:       document.TargetID,
-			Title:          document.Title,
-			BodyMarkdown:   document.Body,
-			IdempotencyKey: "import-" + plan.ImportPlanID + "-" + document.TargetID,
+			Actor:               actor,
+			RecordID:            document.TargetID,
+			Title:               document.Title,
+			BodyMarkdown:        document.Body,
+			IdempotencyKey:      "import-" + plan.ImportPlanID + "-" + document.TargetID,
+			EvidencePreparation: preparations[document.TargetID],
+			AttachmentIDs:       attachmentIDs[document.TargetID],
+			ImportedAttachments: importedAttachments[document.TargetID],
 		})
 	}
 	written, err := service.importer.ImportDocumentsFinishing(ctx, importRequests, records.RevisionCommitFinish{
@@ -337,8 +348,8 @@ func (service *Service) cacheImportPlan(job store.RecordImportJob, planned plann
 	service.importPlans[job.PlanID] = cachedImportPlan{
 		jobID: job.ImportJobID, lockVersion: job.LockVersion, jobState: job.JobState,
 		actorID: job.ActorID, expiresAt: job.ExpiresAt, archiveDigest: job.ArchiveDigest,
-		documents: planned.documents, evidence: planned.evidence, remaps: planned.remaps,
-		quarantine: planned.quarantine, digest: planned.digest,
+		documents: planned.documents, evidence: planned.evidence, attachments: planned.attachments,
+		remaps: planned.remaps, quarantine: planned.quarantine, digest: planned.digest,
 	}
 }
 
@@ -407,8 +418,8 @@ func (service *Service) materializeImportPlan(ctx context.Context, planID string
 	cached := cachedImportPlan{
 		jobID: job.ImportJobID, lockVersion: job.LockVersion, jobState: job.JobState,
 		actorID: job.ActorID, expiresAt: job.ExpiresAt, archiveDigest: job.ArchiveDigest,
-		documents: planned.documents, evidence: planned.evidence, remaps: planned.remaps,
-		quarantine: planned.quarantine, digest: planned.digest,
+		documents: planned.documents, evidence: planned.evidence, attachments: planned.attachments,
+		remaps: planned.remaps, quarantine: planned.quarantine, digest: planned.digest,
 	}
 	if job.JobState == store.RecordImportJobStateApplied {
 		cached.applied = recordIDsFromRemaps(planned.remaps)
@@ -482,6 +493,10 @@ func rebindArchive(raw []byte, remaps []store.ImportRemap) (plannedArchive, erro
 			if err := planImportedEvidence(&planned, entry, bySource); err != nil {
 				return plannedArchive{}, err
 			}
+		case ArchiveClassAttachment:
+			if err := planImportedAttachment(&planned, entry, bySource); err != nil {
+				return plannedArchive{}, err
+			}
 		}
 	}
 	if len(planned.documents) == 0 {
@@ -502,11 +517,12 @@ func recordIDsFromRemaps(remaps []ImportRemap) []string {
 }
 
 type plannedArchive struct {
-	documents  []store.ImportDocumentPlan
-	evidence   []importedEvidencePlan
-	remaps     []ImportRemap
-	quarantine []QuarantinedEvidence
-	digest     [32]byte
+	documents   []store.ImportDocumentPlan
+	evidence    []importedEvidencePlan
+	attachments []importedAttachmentPlan
+	remaps      []ImportRemap
+	quarantine  []QuarantinedEvidence
+	digest      [32]byte
 }
 
 func (planned plannedArchive) storeRemaps() []store.ImportRemap {
@@ -543,6 +559,10 @@ func (service *Service) planArchive(raw []byte) (plannedArchive, error) {
 			planned.remaps = append(planned.remaps, ImportRemap{EntityKind: "record", SourceID: sourceID, TargetID: targetID})
 		case ArchiveClassEvidenceJSON, ArchiveClassComparisonJSON:
 			if err := planImportedEvidence(&planned, entry, nil); err != nil {
+				return plannedArchive{}, err
+			}
+		case ArchiveClassAttachment:
+			if err := planImportedAttachment(&planned, entry, nil); err != nil {
 				return plannedArchive{}, err
 			}
 		}
@@ -751,12 +771,67 @@ func (service *Service) applyImportedEvidence(ctx context.Context, actor recorda
 	return nil
 }
 
+func (service *Service) prepareImportedEvidence(cached cachedImportPlan) (map[string]evidence.RevisionPreparation, error) {
+	if service == nil {
+		return nil, ErrInvalidImportRequest
+	}
+	recordBySource := map[string]string{}
+	for _, document := range cached.documents {
+		recordBySource[document.SourceID] = document.TargetID
+	}
+	importedByRecord := map[string][]evidence.PreparedImportedSnapshot{}
+	seen := map[string]struct{}{}
+	for _, item := range cached.evidence {
+		snapshot, isWrapper, err := restoreOfficialEvidenceSnapshot(service.kinds, item.Payload)
+		if err != nil {
+			return nil, err
+		}
+		if !isWrapper {
+			continue
+		}
+		targetRecord := recordBySource[item.RecordSourceID]
+		if targetRecord == "" && len(cached.documents) == 1 {
+			targetRecord = cached.documents[0].TargetID
+		}
+		if targetRecord == "" || item.TargetID == "" {
+			return nil, ErrInvalidImportRequest
+		}
+		identity := targetRecord + "\x00" + item.TargetID
+		if _, exists := seen[identity]; exists {
+			return nil, ErrInvalidImportRequest
+		}
+		seen[identity] = struct{}{}
+		prepared, err := evidence.NewPreparedImportedSnapshot(targetRecord, item.TargetID, snapshot)
+		if err != nil {
+			return nil, ErrUntrustedImportContent
+		}
+		importedByRecord[targetRecord] = append(importedByRecord[targetRecord], prepared)
+	}
+	preparations := make(map[string]evidence.RevisionPreparation, len(importedByRecord))
+	for recordID, items := range importedByRecord {
+		ordered := make([]string, 0, len(items))
+		for _, item := range items {
+			ordered = append(ordered, item.SnapshotID())
+		}
+		prepared, err := evidence.NewRevisionPreparation(recordID, evidence.RevisionPreparationValues{
+			Imported:           items,
+			OrderedSnapshotIDs: ordered,
+		})
+		if err != nil {
+			return nil, ErrUntrustedImportContent
+		}
+		preparations[recordID] = prepared
+	}
+	return preparations, nil
+}
+
 func importPlanDigest(planned plannedArchive) [32]byte {
 	return sha256.Sum256(mustJSON(map[string]any{
-		"documents":  planned.documents,
-		"evidence":   planned.evidence,
-		"remaps":     planned.remaps,
-		"quarantine": planned.quarantine,
+		"documents":   planned.documents,
+		"evidence":    planned.evidence,
+		"attachments": planned.attachments,
+		"remaps":      planned.remaps,
+		"quarantine":  planned.quarantine,
 	}))
 }
 

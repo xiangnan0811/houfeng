@@ -28,13 +28,13 @@ Child 11 只跑集成验证，不实现本 child 的域能力。
 
 ## Acceptance Criteria
 
-- [ ] Known evidence JSON in an official archive becomes `evidence_snapshots` rows in the same apply transaction as documents/origin/job.
-- [ ] A second apply of the same plan is idempotent; origin conflict / tombstone still fail before writes.
-- [ ] Authorized attachment bytes round-trip through ZIP and BlobStore; unauthorized attachments are named, not invented.
-- [ ] Production bootstrap PDF renderer invokes the isolated processor; unit tests still cover RenderModel parity.
-- [ ] Official archive fixture with `EvidenceSnapshotIDs` includes a non-comparison known kind (`monitoring.probe/v2` or equivalent) and applies it.
-- [ ] Child 10 contracts remain: no `/records/compare` download, no second comparison exporter, unknown schema fail-closed, no quarantine rows, no activity pages in ZIP.
-- [ ] Focused Go/Web tests + `make verify-go` / `make verify-web`. Postgres/MinIO runs stay Child 11.
+- [x] Known evidence JSON in an official archive becomes `evidence_snapshots` rows in the same apply transaction as documents/origin/job.
+- [x] A second apply of the same plan is idempotent; origin conflict / tombstone still fail before writes.
+- [x] Authorized attachment bytes round-trip through ZIP and BlobStore; unauthorized attachments are named, not invented.
+- [x] Production bootstrap PDF renderer invokes the isolated processor; unit tests still cover RenderModel parity.
+- [x] Official archive fixture with `EvidenceSnapshotIDs` includes a non-comparison known kind (`monitoring.probe/v2` or equivalent) and applies it.
+- [x] Child 10 contracts remain: no `/records/compare` download, no second comparison exporter, unknown schema fail-closed, no quarantine rows, no activity pages in ZIP.
+- [x] Focused Go/Web tests + `make verify-go` / `make verify-web`. Postgres/MinIO runs stay Child 11.
 
 ## Out of Scope
 
@@ -46,4 +46,8 @@ Child 11 只跑集成验证，不实现本 child 的域能力。
 
 ## Execution Gate
 
-Keep `planning` until Child 10 is archived on protected main. Reconcile with the actual `ImportDocumentsFinishing` / attachment / processor seams before `task.py start`.
+Child 10 is archived on protected main (`9e910d7c`, release `v0.72.0` /
+`3c239fa0`). Seams reconciled: `ImportDocumentsFinishing` does not yet
+carry `EvidencePreparation`; `knownKindEvidenceImporter` validates only;
+`ArchiveClassAttachment` exists but `fillArchive` does not put bytes;
+production bootstrap still calls `NewIsolatedDocumentPDFRenderer("")`.

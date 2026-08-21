@@ -1,1 +1,4 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/record-portability-contract.md", "reason": "Child 10 ZIP/import/PDF residuals this child closes"}
+{"file": ".trellis/spec/backend/evidence-snapshot-contract.md", "reason": "RestoreCanonicalSnapshot and participant persist rules"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "verify-go / focused test gates"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "non-main branch, PR, release delivery"}

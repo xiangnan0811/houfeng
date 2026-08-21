@@ -362,14 +362,15 @@ func TestPortabilityPDFWithoutRendererStaysUnsupported(t *testing.T) {
 }
 
 type portabilityHarness struct {
-	enabled    bool
-	document   records.ExportDocument
-	documents  *documentStub
-	evidence   map[string]error
-	snapshot   evidence.AuthorizedSnapshot
-	comparison ComparisonExporter
-	omitPDF    bool
-	jobs       *memoryJobRepository
+	enabled     bool
+	document    records.ExportDocument
+	documents   *documentStub
+	evidence    map[string]error
+	snapshot    evidence.AuthorizedSnapshot
+	comparison  ComparisonExporter
+	attachments AttachmentSource
+	omitPDF     bool
+	jobs        *memoryJobRepository
 }
 
 func mustPortabilityService(t *testing.T, harness portabilityHarness) (*Service, *memoryJobRepository) {
@@ -385,15 +386,17 @@ func mustPortabilityService(t *testing.T, harness portabilityHarness) (*Service,
 	jobs := newMemoryJobRepository()
 	harness.jobs = jobs
 	options := Options{
-		Enabled:     harness.enabled,
-		BackendKind: "local",
-		Documents:   docs,
-		Jobs:        jobs,
-		Evidence:    &evidenceStub{deny: harness.evidence, snapshot: harness.snapshot},
-		Snapshots:   &snapshotStub{snapshot: harness.snapshot},
-		Comparison:  harness.comparison,
-		Staging:     NewLeasedBlobStore(blob),
-		Now:         func() time.Time { return time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC) },
+		Enabled:         harness.enabled,
+		BackendKind:     "local",
+		Documents:       docs,
+		Jobs:            jobs,
+		Evidence:        &evidenceStub{deny: harness.evidence, snapshot: harness.snapshot},
+		Snapshots:       &snapshotStub{snapshot: harness.snapshot},
+		Comparison:      harness.comparison,
+		Attachments:     harness.attachments,
+		AttachmentBlobs: blob,
+		Staging:         NewLeasedBlobStore(blob),
+		Now:             func() time.Time { return time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC) },
 	}
 	if !harness.omitPDF {
 		options.PDF = NewIsolatedDocumentPDFRenderer("")
@@ -455,14 +458,20 @@ func (stub *documentStub) ExportDocument(_ context.Context, _ records.ExportDocu
 }
 
 type evidenceStub struct {
-	deny     map[string]error
-	snapshot evidence.AuthorizedSnapshot
+	deny      map[string]error
+	snapshot  evidence.AuthorizedSnapshot
+	snapshots map[string]evidence.AuthorizedSnapshot
 }
 
 func (stub *evidenceStub) Export(_ context.Context, request evidence.ExportRequest) (evidence.ExportMaterial, error) {
 	if stub != nil && stub.deny != nil {
 		if err := stub.deny[request.SnapshotID]; err != nil {
 			return evidence.ExportMaterial{}, err
+		}
+	}
+	if stub != nil && stub.snapshots != nil {
+		if loaded, ok := stub.snapshots[request.SnapshotID]; ok && loaded.Snapshot.Size() > 0 {
+			return evidence.ExportMaterial{MediaType: "application/json", Bytes: loaded.Snapshot.Bytes()}, nil
 		}
 	}
 	if stub != nil && stub.snapshot.SnapshotID == request.SnapshotID && len(stub.snapshot.Snapshot.Bytes()) > 0 {
@@ -472,8 +481,9 @@ func (stub *evidenceStub) Export(_ context.Context, request evidence.ExportReque
 }
 
 type snapshotStub struct {
-	snapshot evidence.AuthorizedSnapshot
-	err      error
+	snapshot  evidence.AuthorizedSnapshot
+	snapshots map[string]evidence.AuthorizedSnapshot
+	err       error
 }
 
 func (stub *snapshotStub) LoadAuthorizedEvidenceSnapshot(
@@ -483,6 +493,11 @@ func (stub *snapshotStub) LoadAuthorizedEvidenceSnapshot(
 ) (evidence.AuthorizedSnapshot, error) {
 	if stub.err != nil {
 		return evidence.AuthorizedSnapshot{}, stub.err
+	}
+	if stub.snapshots != nil {
+		if loaded, ok := stub.snapshots[snapshotID]; ok {
+			return loaded, nil
+		}
 	}
 	if stub.snapshot.SnapshotID != snapshotID {
 		return evidence.AuthorizedSnapshot{}, recordauth.ErrDenied
