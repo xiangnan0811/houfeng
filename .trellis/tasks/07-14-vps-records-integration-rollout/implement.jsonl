@@ -1,1 +1,13 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index and guideline routing for Records integration work"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where new integration packages and CLI entry points may land"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "verify-go, table-driven tests, bootstrap wiring, integration skip rules"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "sentinel errors and fail-closed wrapping"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "content-safe slog fields; no payload or credential logs"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "no new root migration; 0058 remains the maximum"}
+{"file": ".trellis/spec/backend/record-portability-contract.md", "reason": "existing export/import/archive contract Child 11 verifies, not reimplements"}
+{"file": ".trellis/spec/backend/evidence-snapshot-contract.md", "reason": "evidence restore wrappers already on main; do not add persist paths"}
+{"file": ".trellis/spec/backend/record-authorization.md", "reason": "membership and capability fail-closed before protected writes"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "non-main branch, PR, squash-merge, no local main"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "reuse recorddeletion registry and existing recovery adapters"}
+{"file": ".trellis/tasks/07-14-vps-records-integration-rollout/research/current-main-inventory-2026-08-21.md", "reason": "2026-08-21 main inventory of adapters, bootstrap, and integration entry points"}
+{"file": ".trellis/spec/backend/record-integration-contract.md", "reason": "Child 11 backup/restore/readiness executable contract"}

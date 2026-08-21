@@ -29,6 +29,7 @@
 | [Record Search Index Contract](./record-search-index-contract.md) | 搜索派生投影、代次发布 CAS、影子重建租约/断点、上下文绑定游标、单一搜索路径与删除穿透 | 已填实 |
 | [Record Activity Projection Contract](./record-activity-projection.md) | 活动投影 keyset 扫描、auth_scope 盖章、ActiveGeneration、Export Readiness、subject freshness 边界 | 已填实 |
 | [Record Portability Contract](./record-portability-contract.md) | 导出/导入 HTTP、`0058`、archive v1、派生 PDF、AdmissionGate 与 origin tombstone | 已填实 |
+| [Record Integration Contract](./record-integration-contract.md) | Child 11 能力矩阵、官方 backup/restore、content-safe Encode、集成/恢复/安全/容量/浏览器脚本 | 已填实 |
 
 ---
 

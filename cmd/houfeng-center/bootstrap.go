@@ -38,6 +38,7 @@ import (
 	"houfeng/internal/center/recordcollaboration"
 	"houfeng/internal/center/recorddeletion"
 	"houfeng/internal/center/recordplatform"
+	"houfeng/internal/center/recordreadiness"
 	centerrecords "houfeng/internal/center/records"
 	"houfeng/internal/center/recordsearch"
 	"houfeng/internal/center/retention"
@@ -110,6 +111,7 @@ type recordCollaborationRuntime struct {
 	projectionWorker           *recordcollaboration.NotificationProjectionWorker
 	activityDeletionAdapter    recorddeletion.Adapter
 	portabilityDeletionAdapter recorddeletion.Adapter
+	readiness                  *recordreadiness.Registry
 }
 
 func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version string, deps bootstrapDeps) (appRunner, func(), error) {
@@ -966,6 +968,20 @@ func newRecordsHTTPHandlers(
 	var _ recorddeletion.Adapter = portabilityDeletionAdapter
 	collaborationRuntime.activityDeletionAdapter = activityDeletionAdapter
 	collaborationRuntime.portabilityDeletionAdapter = portabilityDeletionAdapter
+	readiness, err := newProductionRecordReadinessRegistry(
+		deletionRepository,
+		attachmentRepository,
+		evidenceComposition,
+		activityDeletionAdapter,
+		portabilityDeletionAdapter,
+		effectiveGate,
+		witness,
+		pool,
+	)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record readiness registry: %w", err)
+	}
+	collaborationRuntime.readiness = readiness
 
 	if cfg.PortabilityEnabled {
 		backendKind := "local"
@@ -1034,6 +1050,77 @@ func newRecordsHTTPHandlers(
 		handlers.RecordSearch(searchService),
 		handlers.RecordActions(actionApplication), handlers.RecordComments(commentApplication), handlers.RecordDrafts(application), handlers.RecordDeletions(nil), evidenceHandler,
 		handlers.AttachmentUploads(uploadService), handlers.AttachmentsWithOptions(downloadService), collaborationRuntime, evidenceWorker, nil
+}
+
+func newProductionRecordReadinessRegistry(
+	deletionRepository *store.PostgresRecordDeletionRepository,
+	attachmentRepository *store.PostgresAttachmentRepository,
+	evidenceComposition *productionEvidenceComposition,
+	activityDeletion recorddeletion.Adapter,
+	portabilityDeletion recorddeletion.Adapter,
+	gate store.AdmissionGate,
+	witness store.WitnessedRecordSubjectTombstoneSource,
+	pool *pgxpool.Pool,
+) (*recordreadiness.Registry, error) {
+	deletions := make([]recorddeletion.Adapter, 0, 7)
+	core, err := recorddeletion.NewCoreAdapter(deletionRepository)
+	if err != nil {
+		return nil, fmt.Errorf("core deletion adapter: %w", err)
+	}
+	deletions = append(deletions, core)
+	attachmentDeletion, err := attachments.NewDeletionAdapter(attachmentRepository)
+	if err != nil {
+		return nil, fmt.Errorf("attachment deletion adapter: %w", err)
+	}
+	deletions = append(deletions, attachmentDeletion)
+	if evidenceComposition != nil && evidenceComposition.deletion != nil {
+		deletions = append(deletions, evidenceComposition.deletion)
+	}
+	searchDeletion, err := recordsearch.NewDeletionAdapter(deletionRepository)
+	if err != nil {
+		return nil, fmt.Errorf("search deletion adapter: %w", err)
+	}
+	deletions = append(deletions, searchDeletion)
+	deletions = append(deletions, activityDeletion, portabilityDeletion)
+	collaborationDeletion, err := recordcollaboration.NewDeletionAdapter(deletionRepository)
+	if err != nil {
+		return nil, fmt.Errorf("collaboration deletion adapter: %w", err)
+	}
+	deletions = append(deletions, collaborationDeletion)
+
+	recoveries := make([]recordreadiness.RecoveryAdapter, 0, 4)
+	if _, err := recorddeletion.NewRecoveryAdapter(deletionRepository); err == nil {
+		recoveries = append(recoveries, recordreadiness.NewPresentRecovery(
+			recordreadiness.CapabilityRecoveryRecordCore, recordreadiness.CapabilityContractVersionV1,
+		))
+	}
+	if _, err := attachments.NewRecoveryAdapter(attachmentRepository); err == nil {
+		recoveries = append(recoveries, recordreadiness.NewPresentRecovery(
+			recordreadiness.CapabilityRecoveryRecordAttachments, recordreadiness.CapabilityContractVersionV1,
+		))
+	}
+	if evidenceComposition != nil && evidenceComposition.recovery != nil {
+		recoveries = append(recoveries, recordreadiness.NewPresentRecovery(
+			recordreadiness.CapabilityRecoveryRecordEvidence, recordreadiness.CapabilityContractVersionV1,
+		))
+	}
+	if activityStore, err := store.NewActivityProjectionRepository(pool); err == nil {
+		if _, err := activity.NewRecoveryAdapter(activityStore); err == nil {
+			recoveries = append(recoveries, recordreadiness.NewPresentRecovery(
+				recordreadiness.CapabilityRecoveryRecordActivityProjection, recordreadiness.CapabilityContractVersionV1,
+			))
+		}
+	}
+
+	input := recordreadiness.RegistryInput{
+		DeletionAdapters: deletions,
+		RecoveryAdapters: recoveries,
+	}
+	if !nilBootstrapAdmissionGate(gate) {
+		input.Membership = recordreadiness.MembershipAuthority(gate)
+		input.Witness = recordreadiness.WitnessAuthority(witness)
+	}
+	return recordreadiness.NewRegistry(input)
 }
 
 func contentProcessorPDFBinary() string {
