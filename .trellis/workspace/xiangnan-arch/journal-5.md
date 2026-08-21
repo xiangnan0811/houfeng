@@ -673,3 +673,33 @@ Delivered the gated records comparison workbench (candidates, host/probe series,
 ### Status
 
 [OK] **Completed**
+
+
+## Session 252: Child 10 portability merged
+
+**Date**: 2026-08-21
+**Task**: Child 10 portability merged
+**Branch**: `chore/child-10-portability-bookkeeping`
+
+### Summary
+
+Squash-merged Child 10 PR #425 (narrowed official export/import). Archived the child. Parent is 10/12. Child 12 owns evidence/attachments/isolated PDF; Child 11 owns integration.
+
+### Main Changes
+
+- Merged #425 onto protected main as 9e910d7c
+- Archived 07-14-vps-records-portability-migration
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9e910d7c` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Merge release 0.72.0 after main CI; then Child 12 start approval

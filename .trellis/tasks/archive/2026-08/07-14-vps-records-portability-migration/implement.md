@@ -174,10 +174,10 @@ and testdata.
   a short-lived confirm token.
 - [x] Search-page export targets the selected result row, not always
   `visibleRecords[0]`.
-- [ ] Merge PR2; archive this child only after the **narrowed**
-  `P-AC-01`–`P-AC-15` are on protected main. Child 12 owns evidence
-  persist / attachments / PDF isolation. Child 11 owns integration runs.
-  Then Child 11 may reconcile.
+- [x] Merge PR2 (#425 / `9e910d7c`). Archive this child after the
+  **narrowed** `P-AC-01`–`P-AC-15` are on protected main. Child 12 owns
+  evidence persist / attachments / PDF isolation. Child 11 owns
+  integration runs. Then Child 11 may reconcile.
 
 ## Validation commands
 
