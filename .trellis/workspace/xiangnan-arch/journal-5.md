@@ -703,3 +703,36 @@ Squash-merged Child 10 PR #425 (narrowed official export/import). Archived the c
 ### Next Steps
 
 - Merge release 0.72.0 after main CI; then Child 12 start approval
+
+---
+
+## Session 253: Child 12 archive restore fidelity
+
+**Date**: 2026-08-21
+**Task**: Child 12 archive restore fidelity merged
+**Branch**: `chore/archive-child-12-bookkeeping`
+
+### Summary
+
+Squash-merged Child 12 PR #428 (evidence persist, attachment ZIP restore, isolated PDF). Released as v0.73.0. Archived the child. Parent is 11/12. Child 11 stays planning.
+
+### Main Changes
+
+- Merged #428 onto protected main as c7081519
+- Released v0.73.0 (#429 / d8224c01) with agent assets
+- Archived 08-21-vps-records-archive-restore-fidelity
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c7081519` | feat(records): restore archive evidence, attachments, and isolated PDF (#428) |
+| `d8224c01` | chore(main): release 0.73.0 (#429) |
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Child 11 current-main reconciliation after explicit start; do not start it in this session

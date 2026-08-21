@@ -22,17 +22,17 @@ storage, Vitest, Playwright, and Trellis child-task workflow.
 
 - Read `research/development-rebaseline-2026-08-02.md` before any child work.
 - Parent status remains `planning`; it is not an implementation target.
-- Current delivered program completion is `10/12`: Children 1–10 are on this
-  program path. Child 7 landed through PR #422 / `v0.70.0`. Child 8 is
-  archived at
+- Current delivered program completion is `11/12`: Children 1–10 and
+  Child 12 are on this program path. Child 7 landed through PR #422 /
+  `v0.70.0`. Child 8 is archived at
   `archive/2026-08/07-14-vps-records-comparison-workbench`
   (PR #423). Child 10 squash-merged as `9e910d7c` via PR #425 with a
   **narrowed** PR2 exit (documents + origin + job; unknown schema
-  fail-closed). Child 12
-  (`08-21-vps-records-archive-restore-fidelity`) owns evidence persist,
-  attachment bytes in ZIP, and isolated PDF. Child 11 still waits for
-  archived Child 10 **and** Child 12 before claiming official restore or
-  enabling protected Records.
+  fail-closed). Child 12 squash-merged as `c7081519` via PR #428 and
+  released as `v0.73.0`; it is archived at
+  `archive/2026-08/08-21-vps-records-archive-restore-fidelity`. Child 11
+  still waits for archived Child 10 **and** Child 12 before claiming
+  official restore or enabling protected Records.
 - Child 7 leftovers stay independent: overview manage-panel writes and
   activity group-granted viewer expansion are not Child 8 or Child 10.
 - Child 8 reconciliation and scope A live in the archived child research
