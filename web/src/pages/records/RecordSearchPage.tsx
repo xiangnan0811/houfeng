@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { Button } from '../../components/atoms'
@@ -21,6 +21,15 @@ import {
   recordSearchToAPIQuery,
   type RecordSearchFilters,
 } from './searchFilterModel'
+
+const RecordExportPanel = lazy(() => import('./RecordExportPanel').then((module) => ({
+  default: module.RecordExportPanel,
+})))
+const RecordImportPanel = lazy(() => import('./RecordImportPanel').then((module) => ({
+  default: module.RecordImportPanel,
+})))
+
+const EMPTY_SNAPSHOT_IDS: readonly string[] = []
 
 const ADVANCED_FIELDS = [
   'owner', 'participant', 'tag', 'follow_up', 'action',
@@ -91,6 +100,7 @@ export function RecordSearchPage() {
   const [republished, setRepublished] = useState(false)
   const [resultFilterKey, setResultFilterKey] = useState<string | null>(null)
   const [reloadVersion, setReloadVersion] = useState(0)
+  const [exportRecordId, setExportRecordId] = useState<string | null>(null)
   const requestGeneration = useRef(0)
 
   useEffect(() => {
@@ -216,6 +226,8 @@ export function RecordSearchPage() {
   const visibleFailure = resultsMatchFilters ? failure : null
   const visibleNextCursor = resultsMatchFilters ? nextCursor : undefined
   const initialLoading = loading || !resultsMatchFilters
+  const exportRecord = visibleRecords.find((record) => record.record_id === exportRecordId)
+    ?? visibleRecords[0]
 
   return (
     <div className="page-stack record-search-page">
@@ -255,6 +267,20 @@ export function RecordSearchPage() {
         onClose={closeAdvanced}
       />
 
+      <Suspense fallback={<section className="card" aria-label="记录导入">正在加载导入</section>}>
+        <RecordImportPanel />
+      </Suspense>
+      {exportRecord ? (
+        <Suspense fallback={<section className="card" aria-label="记录导出">正在加载导出</section>}>
+          <RecordExportPanel
+            key={exportRecord.record_id}
+            recordId={exportRecord.record_id}
+            snapshotIds={exportRecord.current.evidence_snapshot_ids ?? EMPTY_SNAPSHOT_IDS}
+            recordLabel={`${exportRecord.current.title}（${exportRecord.record_id}）`}
+          />
+        </Suspense>
+      ) : null}
+
       <section className="page-stack record-search-results" aria-label="记录搜索结果">
         {republished ? (
           <p role="status" className="page-sub record-search-results__notice">
@@ -281,7 +307,12 @@ export function RecordSearchPage() {
         ) : null}
         {visibleRecords.length > 0 ? (
           <>
-            <RecordSearchResultsTable rows={visibleRecords} />
+            <p className="page-sub">点击结果行可切换导出对象；标题链接仍打开详情。</p>
+            <RecordSearchResultsTable
+              rows={visibleRecords}
+              {...(exportRecord ? { selectedRecordId: exportRecord.record_id } : {})}
+              onSelect={(record) => setExportRecordId(record.record_id)}
+            />
             <div className="section-heading__actions record-search-results__footer">
               {visibleFailure ? <p role="alert">加载更多失败：{visibleFailure.message}</p> : null}
               {visibleNextCursor ? (

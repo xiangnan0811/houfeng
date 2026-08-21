@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/ids"
 	"houfeng/internal/center/recordplatform"
 	"houfeng/internal/center/records"
 )
@@ -65,128 +66,174 @@ func (repository *PostgresRecordRepository) CommitRevision(
 
 	var result records.RevisionCommitResult
 	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		claim, err := transaction.ClaimIdempotency(ctx, command.Idempotency)
+		committed, err := repository.commitRevisionOnTx(ctx, transaction, command, prepared)
 		if err != nil {
 			return err
 		}
-		if (claim.ReplayResult == nil) == (claim.Owner == nil) {
-			return fmt.Errorf("%w: missing idempotency owner", records.ErrInvalidRevisionCommand)
-		}
+		result = committed
+		return nil
+	})
+	if err != nil {
+		return records.RevisionCommitResult{}, err
+	}
+	return result, nil
+}
 
-		if err := assertRecordMutationFence(ctx, transaction.tx, command.RecordID); err != nil {
-			return err
+func (repository *PostgresRecordRepository) CommitRevisions(
+	ctx context.Context,
+	commands []records.RevisionCommitCommand,
+) ([]records.RevisionCommitResult, error) {
+	if ctx == nil || repository == nil || repository.platform == nil || len(commands) == 0 {
+		return nil, fmt.Errorf("%w: repository", records.ErrInvalidRevisionCommand)
+	}
+	prepared := make([]preparedRecordRevision, 0, len(commands))
+	for _, command := range commands {
+		if err := command.Validate(); err != nil {
+			return nil, err
 		}
-		if claim.ReplayResult != nil {
-			result, err = loadRecordRevisionReplayResult(ctx, transaction.tx, command, prepared)
-			return err
-		}
-		var root lockedRecordRoot
-		switch command.Idempotency.Key.OperationKind {
-		case recordplatform.OperationKindRecordCreate:
-			root, err = createAndLockRecordRoot(ctx, transaction.tx, command.RecordID)
-			if err != nil {
-				return err
-			}
-			if root.currentRevisionID != nil || root.currentRevisionNo != 0 || root.lockVersion != command.LockVersion ||
-				root.authorizationEpoch != command.AuthorizationEpoch || command.BaseRevisionID != "" {
-				return records.ErrRecordRevisionConflict
-			}
-		case recordplatform.OperationKindRecordUpdate:
-			root, err = lockRecordRoot(ctx, transaction.tx, command.RecordID)
-			if err != nil {
-				return err
-			}
-			if root.currentRevisionID == nil || *root.currentRevisionID != command.BaseRevisionID ||
-				root.currentRevisionNo == 0 || root.lockVersion != command.LockVersion ||
-				root.authorizationEpoch != command.AuthorizationEpoch {
-				return records.ErrRecordRevisionConflict
-			}
-		default:
-			return fmt.Errorf("%w: operation", records.ErrInvalidRevisionCommand)
-		}
-		if err := lockPublishedRecordDraft(ctx, transaction.tx, command); err != nil {
-			return err
-		}
-
-		if root.currentRevisionID != nil && bytes.Equal(root.canonicalHash, prepared.canonicalHash[:]) {
-			result = records.RevisionCommitResult{
-				RecordID:           command.RecordID,
-				RevisionID:         *root.currentRevisionID,
-				RevisionNo:         root.currentRevisionNo,
-				LockVersion:        root.lockVersion,
-				AuthorizationEpoch: root.authorizationEpoch,
-				Lifecycle:          root.lifecycle,
-				Created:            false,
-				CommittedAt:        root.currentRevisionCreatedAt,
-			}
-			if err := cleanupPublishedRecordDraft(ctx, transaction.tx, command); err != nil {
-				return err
-			}
-			return transaction.CompleteIdempotency(
-				ctx,
-				command.Idempotency.Key,
-				*claim.Owner,
-				command.Idempotency.RequestFingerprint,
-			)
-		}
-
-		revisionNo := root.currentRevisionNo + 1
-		nextLockVersion := root.lockVersion + 1
-		nextAuthorizationEpoch := root.authorizationEpoch + 1
-		createdAt, err := insertRecordRevision(ctx, transaction.tx, command, prepared, revisionNo)
+		next, err := prepareRecordRevision(command)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if err := insertRecordRevisionRelations(ctx, transaction.tx, prepared); err != nil {
-			return err
+		prepared = append(prepared, next)
+	}
+	results := make([]records.RevisionCommitResult, len(commands))
+	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		for index, command := range commands {
+			result, err := repository.commitRevisionOnTx(ctx, transaction, command, prepared[index])
+			if err != nil {
+				return err
+			}
+			results[index] = result
 		}
-		if err := updateRecordCurrentProjection(ctx, transaction.tx, command, prepared, root, nextLockVersion, nextAuthorizationEpoch); err != nil {
-			return err
-		}
-		if _, err := insertRecordDomainActivity(ctx, transaction.tx, command, prepared, nextLockVersion, nextAuthorizationEpoch); err != nil {
-			return err
-		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
+}
 
-		result = records.RevisionCommitResult{
+func (repository *PostgresRecordRepository) CommitRevisionsFinishing(
+	ctx context.Context,
+	commands []records.RevisionCommitCommand,
+	finish records.RevisionCommitFinish,
+) ([]records.RevisionCommitResult, error) {
+	if ctx == nil || repository == nil || repository.platform == nil || len(commands) == 0 || finish.Validate() != nil {
+		return nil, fmt.Errorf("%w: repository", records.ErrInvalidRevisionCommand)
+	}
+	prepared := make([]preparedRecordRevision, 0, len(commands))
+	for _, command := range commands {
+		if err := command.Validate(); err != nil {
+			return nil, err
+		}
+		next, err := prepareRecordRevision(command)
+		if err != nil {
+			return nil, err
+		}
+		prepared = append(prepared, next)
+	}
+	originID, err := newRecordOriginID()
+	if err != nil {
+		return nil, fmt.Errorf("%w: origin", records.ErrInvalidRevisionCommand)
+	}
+	results := make([]records.RevisionCommitResult, len(commands))
+	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		if err := assertOriginAvailableOnTx(ctx, transaction, finish.OriginDigest); err != nil {
+			return err
+		}
+		if err := lockImportJobForApplyOnTx(ctx, transaction, finish); err != nil {
+			return err
+		}
+		for index, command := range commands {
+			result, err := repository.commitRevisionOnTx(ctx, transaction, command, prepared[index])
+			if err != nil {
+				return err
+			}
+			results[index] = result
+		}
+		sourceRecord := finish.SourceRecord
+		if sourceRecord == "" && len(results) > 0 {
+			sourceRecord = results[0].RecordID
+		}
+		if err := insertOriginOnTx(ctx, transaction, originID, InsertRecordOriginInput{
+			OriginKind:   finish.OriginKind,
+			OriginDigest: finish.OriginDigest,
+			SourceRecord: sourceRecord,
+		}); err != nil {
+			return err
+		}
+		return markImportJobAppliedOnTx(ctx, transaction, finish)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+func newRecordOriginID() (string, error) {
+	return ids.New("ror")
+}
+
+func (repository *PostgresRecordRepository) commitRevisionOnTx(
+	ctx context.Context,
+	transaction *RecordPlatformTransaction,
+	command records.RevisionCommitCommand,
+	prepared preparedRecordRevision,
+) (records.RevisionCommitResult, error) {
+	claim, err := transaction.ClaimIdempotency(ctx, command.Idempotency)
+	if err != nil {
+		return records.RevisionCommitResult{}, err
+	}
+	if (claim.ReplayResult == nil) == (claim.Owner == nil) {
+		return records.RevisionCommitResult{}, fmt.Errorf("%w: missing idempotency owner", records.ErrInvalidRevisionCommand)
+	}
+	if err := assertRecordMutationFence(ctx, transaction.tx, command.RecordID); err != nil {
+		return records.RevisionCommitResult{}, err
+	}
+	if claim.ReplayResult != nil {
+		return loadRecordRevisionReplayResult(ctx, transaction.tx, command, prepared)
+	}
+	var root lockedRecordRoot
+	switch command.Idempotency.Key.OperationKind {
+	case recordplatform.OperationKindRecordCreate:
+		root, err = createAndLockRecordRoot(ctx, transaction.tx, command.RecordID)
+		if err != nil {
+			return records.RevisionCommitResult{}, err
+		}
+		if root.currentRevisionID != nil || root.currentRevisionNo != 0 || root.lockVersion != command.LockVersion ||
+			root.authorizationEpoch != command.AuthorizationEpoch || command.BaseRevisionID != "" {
+			return records.RevisionCommitResult{}, records.ErrRecordRevisionConflict
+		}
+	case recordplatform.OperationKindRecordUpdate:
+		root, err = lockRecordRoot(ctx, transaction.tx, command.RecordID)
+		if err != nil {
+			return records.RevisionCommitResult{}, err
+		}
+		if root.currentRevisionID == nil || *root.currentRevisionID != command.BaseRevisionID ||
+			root.currentRevisionNo == 0 || root.lockVersion != command.LockVersion ||
+			root.authorizationEpoch != command.AuthorizationEpoch {
+			return records.RevisionCommitResult{}, records.ErrRecordRevisionConflict
+		}
+	default:
+		return records.RevisionCommitResult{}, fmt.Errorf("%w: operation", records.ErrInvalidRevisionCommand)
+	}
+	if err := lockPublishedRecordDraft(ctx, transaction.tx, command); err != nil {
+		return records.RevisionCommitResult{}, err
+	}
+	if root.currentRevisionID != nil && bytes.Equal(root.canonicalHash, prepared.canonicalHash[:]) {
+		result := records.RevisionCommitResult{
 			RecordID:           command.RecordID,
-			RevisionID:         prepared.revisionID,
-			RevisionNo:         revisionNo,
-			LockVersion:        nextLockVersion,
-			AuthorizationEpoch: nextAuthorizationEpoch,
+			RevisionID:         *root.currentRevisionID,
+			RevisionNo:         root.currentRevisionNo,
+			LockVersion:        root.lockVersion,
+			AuthorizationEpoch: root.authorizationEpoch,
 			Lifecycle:          root.lifecycle,
-			Created:            true,
-			CommittedAt:        createdAt,
-		}
-		if err := repository.participants.ApplyRevision(ctx, transaction.tx, records.RevisionCommitted{
-			Result:              result,
-			Input:               command.Input,
-			DraftID:             command.DraftID,
-			BaseRevisionID:      command.BaseRevisionID,
-			EvidencePreparation: command.EvidencePreparation,
-			ActivityKind:        command.ActivityKind,
-			OutboxTTL:           command.OutboxTTL,
-			Outbox:              transaction,
-		}); err != nil {
-			return err
-		}
-		outboxEventKind := recordplatform.OutboxEventKindRecordCreated
-		if command.Idempotency.Key.OperationKind == recordplatform.OperationKindRecordUpdate {
-			outboxEventKind = recordplatform.OutboxEventKindRecordUpdated
-		}
-		if _, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
-			Event: recordplatform.OutboxEvent{
-				ProjectID:          string(recordplatform.ProjectIDDefault),
-				EventKind:          outboxEventKind,
-				SubjectKind:        recordplatform.OutboxSubjectKindRecord,
-				SubjectID:          command.RecordID,
-				AuthorizationEpoch: result.AuthorizationEpoch,
-			},
-			ExpiresAfter: command.OutboxTTL,
-		}); err != nil {
-			return err
+			Created:            false,
+			CommittedAt:        root.currentRevisionCreatedAt,
 		}
 		if err := cleanupPublishedRecordDraft(ctx, transaction.tx, command); err != nil {
-			return err
+			return records.RevisionCommitResult{}, err
 		}
 		if err := transaction.CompleteIdempotency(
 			ctx,
@@ -194,11 +241,74 @@ func (repository *PostgresRecordRepository) CommitRevision(
 			*claim.Owner,
 			command.Idempotency.RequestFingerprint,
 		); err != nil {
-			return err
+			return records.RevisionCommitResult{}, err
 		}
-		return nil
-	})
+		return result, nil
+	}
+
+	revisionNo := root.currentRevisionNo + 1
+	nextLockVersion := root.lockVersion + 1
+	nextAuthorizationEpoch := root.authorizationEpoch + 1
+	createdAt, err := insertRecordRevision(ctx, transaction.tx, command, prepared, revisionNo)
 	if err != nil {
+		return records.RevisionCommitResult{}, err
+	}
+	if err := insertRecordRevisionRelations(ctx, transaction.tx, prepared); err != nil {
+		return records.RevisionCommitResult{}, err
+	}
+	if err := updateRecordCurrentProjection(ctx, transaction.tx, command, prepared, root, nextLockVersion, nextAuthorizationEpoch); err != nil {
+		return records.RevisionCommitResult{}, err
+	}
+	if _, err := insertRecordDomainActivity(ctx, transaction.tx, command, prepared, nextLockVersion, nextAuthorizationEpoch); err != nil {
+		return records.RevisionCommitResult{}, err
+	}
+	result := records.RevisionCommitResult{
+		RecordID:           command.RecordID,
+		RevisionID:         prepared.revisionID,
+		RevisionNo:         revisionNo,
+		LockVersion:        nextLockVersion,
+		AuthorizationEpoch: nextAuthorizationEpoch,
+		Lifecycle:          root.lifecycle,
+		Created:            true,
+		CommittedAt:        createdAt,
+	}
+	if err := repository.participants.ApplyRevision(ctx, transaction.tx, records.RevisionCommitted{
+		Result:              result,
+		Input:               command.Input,
+		DraftID:             command.DraftID,
+		BaseRevisionID:      command.BaseRevisionID,
+		EvidencePreparation: command.EvidencePreparation,
+		ActivityKind:        command.ActivityKind,
+		OutboxTTL:           command.OutboxTTL,
+		Outbox:              transaction,
+	}); err != nil {
+		return records.RevisionCommitResult{}, err
+	}
+	outboxEventKind := recordplatform.OutboxEventKindRecordCreated
+	if command.Idempotency.Key.OperationKind == recordplatform.OperationKindRecordUpdate {
+		outboxEventKind = recordplatform.OutboxEventKindRecordUpdated
+	}
+	if _, err := transaction.EnqueueOutbox(ctx, recordplatform.OutboxEnqueueInputV1{
+		Event: recordplatform.OutboxEvent{
+			ProjectID:          string(recordplatform.ProjectIDDefault),
+			EventKind:          outboxEventKind,
+			SubjectKind:        recordplatform.OutboxSubjectKindRecord,
+			SubjectID:          command.RecordID,
+			AuthorizationEpoch: result.AuthorizationEpoch,
+		},
+		ExpiresAfter: command.OutboxTTL,
+	}); err != nil {
+		return records.RevisionCommitResult{}, err
+	}
+	if err := cleanupPublishedRecordDraft(ctx, transaction.tx, command); err != nil {
+		return records.RevisionCommitResult{}, err
+	}
+	if err := transaction.CompleteIdempotency(
+		ctx,
+		command.Idempotency.Key,
+		*claim.Owner,
+		command.Idempotency.RequestFingerprint,
+	); err != nil {
 		return records.RevisionCommitResult{}, err
 	}
 	return result, nil

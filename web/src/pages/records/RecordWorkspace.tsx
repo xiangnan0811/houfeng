@@ -28,6 +28,12 @@ import { MarkdownSourceEditor } from './editor/MarkdownSourceEditor'
 const MarkdownPreview = lazy(() => import('./editor/MarkdownPreview').then((module) => ({
   default: module.MarkdownPreview,
 })))
+const RecordExportPanel = lazy(() => import('./RecordExportPanel').then((module) => ({
+  default: module.RecordExportPanel,
+})))
+const RecordImportPanel = lazy(() => import('./RecordImportPanel').then((module) => ({
+  default: module.RecordImportPanel,
+})))
 import { PromoteChecklistActionDialog } from './editor/PromoteChecklistActionDialog'
 import { RecordConflictResolver } from './editor/RecordConflictResolver'
 import { decodeRenderModelStatusV1, insertMaterialToken } from '../../lib/documentMarkdown'
@@ -305,6 +311,20 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
         ) : null}
         {mode === 'revision' ? (
           <Input label="恢复原因" value={restoreReason} onChange={(event) => setRestoreReason(event.target.value)} />
+        ) : null}
+        {(mode === 'read' || mode === 'revision') && recordId ? (
+          <Suspense fallback={<section className="card" aria-label="记录导出">正在加载导出</section>}>
+            <RecordExportPanel
+              recordId={recordId}
+              {...(revisionId ? { revisionId } : {})}
+              snapshotIds={evidenceIds}
+            />
+          </Suspense>
+        ) : null}
+        {mode === 'read' || mode === 'revision' || mode === 'new' ? (
+          <Suspense fallback={<section className="card" aria-label="记录导入">正在加载导入</section>}>
+            <RecordImportPanel />
+          </Suspense>
         ) : null}
         <div className="page-form-actions">
           <Button size="lg" variant="secondary" onClick={() => setMaterialsOpen(true)}>材料与引用</Button>

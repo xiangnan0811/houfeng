@@ -1,166 +1,155 @@
 # Records Import, Export, and Portability Design
 
+Scope B against `v0.71.0`. Historical 2026-07-14 `ExportProvider` /
+`ImportParticipant` sketches are not the implementation contract.
+
 ## 1. Boundary
 
-Portability translates authoritative Records domain data into and out of
-versioned artifacts. It does not migrate old application tables and does not
-own mutable search/activity projections.
+Portability orchestrates authorized artifacts in and out of Records. It does
+not own mutable search/activity projections, does not convert `experience_logs`,
+and does not import another package's tables.
 
-The child depends on domain-owned providers and participants rather than reading
-another package's tables directly.
+It also supplies the concrete production authority earlier children left
+fail-closed: a named `store.AdmissionGate`, a witnessed source-deletion reader,
+and (PR2) integrity-valid unsupported-evidence quarantine. Child 11 composes
+those constructors into the aggregate readiness/enablement story. This child
+may wire the named gate/witness into bootstrap; empty membership still
+fail-closes writes.
 
-This child also closes the production authority deferred by earlier Records
-children: a concrete transaction-scoped deployment-membership
-`store.AdmissionGate`, witnessed source-deletion tombstone reads, and the
-integrity-valid external evidence quarantine. These contracts bind the external
-deletion-ledger/contract-activation identity; they are not inferred from APP ACL
-state, local digests, archive claims, or test adapters. Child 11 composes and
-verifies them before enabling protected capabilities.
+```text
+portability -> published domain interfaces
+domain packages must not import portability
+evidence must not import records or portability
+comparison backend must not import activity or recordsearch
+```
+
+Collaboration `PortabilityAdapter` Backup/Restore remains the Child 11 backup
+seam. Archive export/import is a different contract.
 
 ## 2. Modules
 
-- `internal/center/portability`: archive, preview, export/import services, plans,
-  remapping, workers, policy, and adapter registries.
-- `internal/center/store/record_portability.go`: job/plan/origin/artifact store.
+- `internal/center/portability`: preview, jobs, workers, policy, remapping,
+  archive v1 (PR2), orchestration over domain seams.
+- `internal/center/store/record_portability.go`: `0058` rows.
+- Named admission/witness types live next to existing store seams
+  (`record_platform.go` / `record_subjects.go`), not inside portability, so
+  records/evidence can keep depending on `store.AdmissionGate` without
+  importing portability.
 - `internal/center/http/handlers/record_portability.go`: authenticated API.
-- `web/src/pages/records` lazy import/export workflows.
-- domain-owned provider/participant adapters remain in Records, Attachments,
-  Evidence, Collaboration, Activity, and Comparison packages.
-
-Dependency direction is portability -> published domain interfaces. Domain
-packages must not import portability.
+- `web/src/pages/records` lazy export (PR1) and import (PR2) workflows.
 
 ## 3. Migration 0058
 
-`0058_create_record_portability.sql` contains metadata and state, not duplicate
-Records content:
+One root migration in PR1, even though import tables stay unused until PR2:
 
-- `record_export_jobs` and `record_export_artifacts`;
-- `record_import_jobs`, `record_import_plans`, and `record_import_artifacts`;
-- `record_import_entity_mappings`;
-- `record_origins` and `record_origin_tombstones`;
-- `record_portability_purge_receipts`.
+- `record_export_jobs`, `record_export_artifacts`
+- `record_import_jobs`, `record_import_plans`, `record_import_artifacts`
+- `record_import_entity_mappings`
+- `record_origins`, `record_origin_tombstones`
+- `record_portability_purge_receipts`
 
-Rows use bounded enums, CAS versions, expiry, content classification, immutable
-artifact version/hash, and explicit local operator/source provenance. Long-lived
-origin/tombstone rows contain no title, Markdown, filename, evidence summary, or
-free-text error.
+No duplicate `deployment_membership` / `deployment_contract_state`.
+Long-lived origin/tombstone rows contain no title, Markdown, filename,
+evidence summary, or free-text error.
 
-Search/activity checkpoints, renderer caches, browser profiles, and raw
-`experience_logs` mappings are absent.
+## 4. Domain seams to compose
 
-## 4. Provider and participant contracts
+Do not re-introduce the unused 2026-07-14 interfaces as a second evidence API.
+Portability holds a closed orchestration table that calls:
 
-```go
-type ExportProvider interface {
-	Kind() string
-	Preview(context.Context, ExportScope) (ExportContribution, error)
-	Write(context.Context, FixedExport, ArchiveWriter) error
-}
+| Need | Existing seam | Package |
+|---|---|---|
+| Evidence bytes | `Kind.Export` via `evidence.ExportAdapter.Export` | `evidence` |
+| Comparison result | `ComparisonResultKind.Export` / `Summarize` | `evidence` (`comparison_result_kind.go`) |
+| Activity pages | `ActivityExportReader.Readiness` + `ScanRecordPage` | `activity` |
+| Human document | `SafeDocumentHTML` / `DocumentRenderModel` | `recordmarkdown` |
+| Attachment bytes | authorized `BlobStore` + attachment read APIs | `attachments` |
+| Records identity | existing record/revision read + `recordauth` | `records` / `store` |
+| Collaboration backup | `PortabilityAdapter.Backup` / `Restore` | `recordcollaboration` — Child 11 only |
 
-type ImportParticipant interface {
-	Kind() string
-	Plan(context.Context, ValidatedArchive, IDMap) (ImportContribution, error)
-	Apply(context.Context, pgx.Tx, FixedImportPlan) error
-}
-```
+If a domain cannot preview or write its contribution, add the method **in that
+domain** and keep the dependency arrow pointing at portability.
 
-The registry is closed for the build. Missing required providers/participants
-block preview or apply. Export contributions carry authorization/inventory
-versions; the service rechecks them before publish. Apply runs in the Records
-transaction participant chain where possible; Blob publication uses staged
-objects and a durable cleanup receipt.
+Missing required contributors block preview or apply.
 
-## 5. Archive v1
+## 5. Authority
 
-`houfeng-record-archive/v1` uses a ZIP64 container with a typed canonical JSON
-manifest. Paths are normalized UTF-8 relative paths with no links, devices,
-empty segments, `.`/`..`, or normalization collisions. Manifest entries are
-sorted and contain media type, byte count, SHA-256, and classification.
+### AdmissionGate
 
-The reader streams bounded entries and never trusts ZIP declared expansion size.
-Limits cover archive bytes, expanded bytes, entry count, per-metadata entity,
-path length/depth, manifest bytes, compression ratio, and working set.
+Construct a named type (not `AdmissionGateFunc`) whose `Admit(ctx, tx)` reads
+`deployment_membership` and `deployment_contract_state` on the caller tx.
+Identity is bound at construction. Bootstrap tests that currently forbid
+`AdmissionGateFunc(` remain the ratchet.
 
-Required schemas are versioned. Unknown required schema blocks the plan. An
-unknown optional payload can remain quarantined only with locally derived
-classification and no render/compare/re-export authority.
+### Witness
 
-Optional signatures bind exact manifest bytes. Signature trust is advisory
-provenance unless local policy explicitly requires it; it never grants local
-authorization.
+`RecordSubjectReadResolver` gains a real `WitnessedRecordSubjectTombstoneSource`.
+The reader must bind external full-witness / contract-activation identity.
+Selecting `source_deletion_tombstones.authorization_floor_digest` alone is a
+spec violation.
+
+### Quarantine (PR2)
+
+After archive and entry integrity succeed, unsupported optional payloads may
+expose allowlisted kind/schema/time/size/digest and “cannot interpret.”
+Payload bytes never reach a generic JSON renderer. Ordinary registry unknown
+contracts stay fail-closed.
 
 ## 6. Export flow
 
 ```text
-request -> authorized preview -> fixed contribution inventory/token
-        -> staged writer -> recheck auth/fence/readiness
-        -> hash/manifest/sign -> atomic publish -> expiring download
+request -> authorized preview -> fixed inventory/token
+        -> staged writer (BlobStore wrapper) -> recheck auth/fence/readiness
+        -> hash/manifest -> atomic publish -> expiring download
 ```
 
-Human Markdown and PDF consume the same domain RenderModel. PDF generation runs
-in the existing isolated content processor with network disabled. Attachment
-bytes are explicitly selected; evidence uses its schema-owned exporter.
+PR1 publish formats: Markdown (and comparison/evidence JSON from `Export`).
+PR2 adds ZIP64 archive and PDF derived from the same RenderModel.
 
-Download authorization and content lease are checked before headers and during
-streaming. A revoke or deletion reservation stops new bytes; already delivered
-external copies are disclosed but cannot be recalled.
+Modes `safe` and `sensitive_topology` are the evidence export modes already on
+`ExportMaterial`. Sensitive mode requires the existing independent capability
+and a short-lived confirm token (parent HTTP table).
 
-## 7. Import flow
+`/records/compare` is not an export surface. Download entry points are record
+center, revision, and record detail — the same places an operator already
+holds a record/revision identity.
+
+## 7. Import flow (PR2)
 
 ```text
 quarantine bytes -> structural/integrity/schema validation
                  -> dry-run + ID preallocation + fixed plan
                  -> operator confirmation
                  -> staged blobs + one domain transaction
-                 -> publish blobs/receipt or compensate
-                 -> rebuild projections
+                 -> publish or compensate
+                 -> rebuild search/activity
 ```
 
-The dry-run is read-only and lists exact counts, mappings, warnings, blockers,
-capacity, and expiry. Apply rechecks plan digest, policy, authorization, fence,
-capacity, and trust inputs.
+## 8. HTTP
 
-Foreign users remain imported provenance. Local authorship/ownership is assigned
-only through explicit local input validated by normal domain policy.
+Keep parent names unless implement-time review finds a collision:
 
-## 8. Deletion and recovery
+| Method / path | PR |
+|---|---|
+| `POST /api/record-export-previews` | 1 |
+| `POST /api/record-exports` | 1 |
+| `GET /api/record-exports/:id` | 1 |
+| `GET /api/record-exports/:id/content` | 1 |
+| `POST /api/record-imports/dry-run` | 2 |
+| `POST /api/record-imports/:plan_id/apply` | 2 |
 
-Portability registers adapters for job rows, quarantine, published artifacts,
-workspaces, mappings, and origin facts. Permanent delete removes content-bearing
-rows and locators. A minimal origin tombstone and deletion-ledger reference may
-remain to prevent official re-import.
+Flag off: no routes, no workers.
 
-Backup includes only declared published artifacts and active recoverable jobs.
-Temporary/quarantine/workspace data is either excluded with a cleanup contract
-or inventoried explicitly. Restore verifies object version/hash, then replays
-deletion outcomes before traffic.
+## 9. Deletion and recovery
 
-The source-deletion witness returns a typed final source identity and
-authorization floor bound to the witnessed ledger entry. Missing, stale,
-unknown-version, discontinuous, or unreachable witness state fails closed; a
-local digest-only tombstone is never a substitute. The deployment-membership
-gate reads the existing `0051` `deployment_membership` and
-`deployment_contract_state` authority in every admitted transaction, uses the
-same activated deployment identity, and rejects nil/typed-nil or drift before
-any business write. `0058` does not duplicate those authority tables.
+`record_portability` adapter surfaces are the `0058` tables. Permanent delete
+purges content-bearing rows and locators. Origin tombstone + ledger reference
+may remain. Child 11 enables the delete flag only after the aggregate registry
+is healthy.
 
-Unsupported external evidence remains quarantine-only after the archive and
-entry integrity layers succeed. Only allowlisted kind/schema/time/size/digest
-metadata may be shown; payload bytes never reach a generic JSON renderer and the
-entry cannot be applied, compared, copied, or re-exported as trusted evidence.
+## 10. Compatibility and rollback
 
-## 9. Compatibility
-
-Only archive format compatibility is supported. The database itself follows the
-current development baseline and may be rebuilt. Archive v1 readers keep stable
-conformance fixtures; future format changes add a new major/minor contract
-instead of reinterpreting old bytes.
-
-There is no `experience_logs` conversion path.
-
-## 10. Rollback
-
-Feature-off hides import/export routes and stops workers. Additive `0058` rows
-remain inert. Unpublished staged objects are cleaned by janitor. A database
-rollback to code without `0058` requires rebuilding the development database.
+Archive compatibility only; the development database may be rebuilt.
+Feature-off hides routes/workers; additive `0058` rows stay inert.
+Unpublished staging is janitor-cleaned.
+Rollback to code without `0058` requires rebuilding the development database.

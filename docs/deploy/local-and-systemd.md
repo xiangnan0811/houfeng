@@ -90,7 +90,12 @@ HOUFENG_INITIAL_USERNAME=admin
 HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
 HOUFENG_SESSION_HMAC_KEY=replace-me-with-32-plus-random-bytes
 HOUFENG_RECORDS_ENABLED=false
+HOUFENG_RECORD_INSTANCE_ID=
+HOUFENG_RECORD_DEPLOYMENT_ID=
+HOUFENG_RECORD_INSTANCE_KIND=
+HOUFENG_RECORD_INSTANCE_CAPABILITY=
 HOUFENG_COMPARISON_ENABLED=false
+HOUFENG_PORTABILITY_ENABLED=false
 HOUFENG_COMPARISON_INTENT_KEYRING=/etc/houfeng/comparison-intent
 HOUFENG_COMPARISON_INTENT_KEY_ID=cmp_current
 HOUFENG_COMPARISON_ADMISSION_BUDGET_BYTES=67108864
@@ -417,10 +422,15 @@ layer. Required environment variables:
 | `HOUFENG_SESSION_HMAC_KEY` | yes | — | At least 32-byte HMAC secret for hashing session IDs at rest; keep stable across restarts. |
 | `HOUFENG_SESSION_HMAC_KEY_FILE` | no | — | File path containing the session HMAC secret; takes precedence over `HOUFENG_SESSION_HMAC_KEY`. |
 | `HOUFENG_RECORDS_ENABLED` | no | `false` | Enables the records/evidence platform. |
+| `HOUFENG_RECORD_INSTANCE_ID` | no | — | Optional 0051 membership instance id. Must be set together with the other three record-identity variables. |
+| `HOUFENG_RECORD_DEPLOYMENT_ID` | no | — | Optional `dp-` + 64 hex deployment id bound into the named AdmissionGate. |
+| `HOUFENG_RECORD_INSTANCE_KIND` | no | — | Optional instance kind: `api`, `worker`, or `recovery`. |
+| `HOUFENG_RECORD_INSTANCE_CAPABILITY` | no | — | Optional membership capability token. Empty or unactivated membership still fail-closes writes. |
 | `HOUFENG_COMPARISON_ENABLED` | no | `false` | Enables the comparison workbench routes. Requires `HOUFENG_RECORDS_ENABLED=true` and a mounted comparison HMAC keyring. |
 | `HOUFENG_COMPARISON_INTENT_KEYRING` | no | — | Directory of independent 0400 comparison HMAC keys. Required when comparison is enabled. Mount the path; do not COPY key bytes into the image. Do not reuse session, deletion, or backup keys. |
 | `HOUFENG_COMPARISON_INTENT_KEY_ID` | no | — | Current key file name inside the comparison keyring. Required when comparison is enabled. |
 | `HOUFENG_COMPARISON_ADMISSION_BUDGET_BYTES` | no | `67108864` | Process-local comparison admission budget. Must be at least 8 MiB. |
+| `HOUFENG_PORTABILITY_ENABLED` | no | `false` | Enables record export preview/download routes. Requires `HOUFENG_RECORDS_ENABLED=true`. |
 | `HOUFENG_PASSWORD_BCRYPT_COST` | no | Go bcrypt default cost | Cost used for newly seeded or changed passwords; validate with a latency benchmark before raising. |
 
 Behavior:

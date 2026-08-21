@@ -98,6 +98,8 @@ describe('RecordComparisonPage', () => {
     expect(screen.getByText(/至少选择 2 项才能比较/)).toBeInTheDocument()
     expect(api.compare).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: '另存为记录' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '下载' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '预览导出' })).not.toBeInTheDocument()
   })
 
   it('does not compare a single seed item', () => {

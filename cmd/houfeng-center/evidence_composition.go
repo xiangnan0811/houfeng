@@ -37,6 +37,7 @@ type productionEvidenceCompositionDependencies struct {
 	Gate              store.AdmissionGate
 	Subjects          centerrecords.SubjectAdapterRegistry
 	Sources           productionEvidenceSources
+	Tombstones        store.WitnessedRecordSubjectTombstoneSource
 	ComparisonEnabled bool
 	Comparison        comparisonRuntimeConfig
 }
@@ -109,7 +110,11 @@ func newProductionEvidenceComposition(
 		return nil, fmt.Errorf("%w: exact evidence registry", centerevidence.ErrEvidenceServiceUnavailable)
 	}
 
-	subjectReadResolver := store.NewRecordSubjectReadResolver(dependencies.Subjects, nil)
+	tombstones := dependencies.Tombstones
+	if nilBootstrapDependency(tombstones) {
+		tombstones = &store.WitnessedRecordSubjectTombstoneReader{}
+	}
+	subjectReadResolver := store.NewRecordSubjectReadResolver(dependencies.Subjects, tombstones)
 	authorizations := store.NewPostgresCurrentRecordAuthorizationSource(dependencies.Pool, subjectReadResolver, dependencies.Gate)
 	repository, err := store.NewPostgresEvidenceRepositoryWithReadSources(
 		dependencies.Pool, dependencies.Gate, registry, authorizations, subjectReadResolver,

@@ -330,6 +330,8 @@ func completeReadinessAdapters(t *testing.T) []Adapter {
 			surfaces = RecordSearchSurfaceNames()
 		case AdapterNameRecordActivityProjection:
 			surfaces = RecordActivitySurfaceNames()
+		case AdapterNameRecordPortability:
+			surfaces = RecordPortabilitySurfaceNames()
 		}
 		adapters = append(adapters, newReadinessAdapterStub(t, name, surfaces, true, byte(index+1)))
 	}

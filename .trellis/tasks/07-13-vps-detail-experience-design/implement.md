@@ -6,7 +6,7 @@
 > not treat this parent plan as one implementation job.
 
 **Goal:** Deliver the approved VPS overview and project Records experience
-through 11 independently verifiable children.
+through 12 independently verifiable children.
 
 **Architecture:** The parent owns requirements, dependency order, migration
 numbering, and final cross-child acceptance. Each child owns its domain schema,
@@ -22,18 +22,27 @@ storage, Vitest, Playwright, and Trellis child-task workflow.
 
 - Read `research/development-rebaseline-2026-08-02.md` before any child work.
 - Parent status remains `planning`; it is not an implementation target.
-- Current delivered program completion is `9/11`: Children 1–9 are on this
+- Current delivered program completion is `9/12`: Children 1–9 are on this
   program path. Child 7 landed through PR #422 / `v0.70.0`. Child 8 is
   archived at
   `archive/2026-08/07-14-vps-records-comparison-workbench`
-  (work commits `d91987e6`, `3f95a3db`; PR #423). Children 10 and 11 remain
-  planning: 10 needs 2–9, 11 needs 1–10.
+  (work commits `d91987e6`, `3f95a3db`; PR #423). Child 10 is `in_progress`
+  on `plan/child-10-current-main-reconciliation` with a **narrowed** PR2
+  exit (documents + origin + job; unknown schema fail-closed). Child 12
+  (`08-21-vps-records-archive-restore-fidelity`) owns evidence persist,
+  attachment bytes in ZIP, and isolated PDF. Child 11 still waits for
+  archived Child 10 **and** Child 12 before claiming official restore or
+  enabling protected Records.
 - Child 7 leftovers stay independent: overview manage-panel writes and
   activity group-granted viewer expansion are not Child 8 or Child 10.
 - Child 8 reconciliation and scope A live in the archived child research
   note. Do not revive the 2026-08-02 Child 8 implement list.
-- Children 10 and 11 still require individual current-main plan
-  reconciliation before `task.py start`.
+- Child 10 current-main reconciliation is
+  `../07-14-vps-records-portability-migration/research/current-main-reconciliation-2026-08-21.md`.
+  Alan chose scope **B** (one Trellis child, two PRs; exit after both).
+  Child 10 PR2 exit was narrowed 2026-08-21; do not re-expand it.
+- Child 11 still requires its own current-main plan reconciliation
+  before `task.py start`, and still waits for Child 10 and Child 12.
 - The old 121-item matrix is historical risk coverage, not a current
   line-by-line release gate.
 - Do not resume the stopped parent goal. A goal or sub-agent may be used only
@@ -176,16 +185,37 @@ Archived 2026-08-21 at `archive/2026-08/07-14-vps-records-comparison-workbench`
 Open leftovers: 4 GiB / 512 MiB mixed-load harness stays Child 11; sticky
 row headers omitted under the CSS ratchet. Do not absorb Child 7 leftovers.
 
-### Child 10: Portability
+### Child 10: Portability (narrowed 2026-08-21)
 
-- Deliver `0058`, human export, canonical machine archive, safe import dry-run
-  and apply, origin remapping, authorization, and deletion/recovery adapters.
-- Deliver the real deployment-membership admission implementation, witnessed
-  source-deletion tombstone authority, and integrity-valid unsupported evidence
-  quarantine required by the already fail-closed Records composition.
-- Do not create `0059` or convert `experience_logs`.
-- Exit with archive conformance, hostile input, local/S3 artifact, atomic import,
-  idempotency, source deletion, and no-resurrection tests.
+- Scope B: one Trellis child, two reviewable PRs; exit after both are on
+  protected main **under the narrowed PR2 contract**. Consume
+  `comparison.result/v1` Export; do not add a workbench download.
+- PR1: named `AdmissionGate` + witnessed tombstone reader + `0058` + human
+  Markdown + comparison Export consumption + default-off flag + adapter
+  surfaces.
+- PR2: ZIP64 archive of document + known evidence JSON; dry-run/apply of
+  documents + origin + job in one transaction; origin tombstone and
+  existing-origin 409; derived PDF (in-process); unknown schema
+  fail-closed; search-page export follows the selected row.
+- Do not create `0059` or convert `experience_logs`. Do not fold Asset
+  JSON import into Records archives.
+
+### Abandoned at parent (do not revive in Child 10/11/12)
+
+- ZIP activity pages: import rebuilds search/activity from authoritative
+  rows; checkpoints stay rejected.
+- Persisted import `quarantine` rows: unknown schema stays
+  `ErrImportSchemaBlocked`; `optional:true` is not trusted. Do not add a
+  store-and-display opaque-envelope path unless a later product decision
+  reopens it.
+
+### Child 12: Archive restore fidelity
+
+- After Child 10 archives. Before Child 11 claims official restore.
+- Persist known evidence snapshots in the same apply transaction.
+- Put authorized attachment bytes into the archive and restore them.
+- Wire `houfeng-content-processor` so PDF isolation/no-network is real.
+- Do not implement abandoned quarantine persist or activity-in-ZIP.
 
 ### Child 11: Integration verification
 
@@ -193,9 +223,15 @@ row headers omitted under the CSS ratchet. Do not absorb Child 7 leftovers.
 - Compose the real admission/tombstone authority, prove readiness and fail-closed
   behavior, and enable protected capabilities only after the aggregate gate is
   complete.
+- Run Child 10's existing `HOUFENG_POSTGRES_INTEGRATION=1` and
+  `HOUFENG_MINIO_INTEGRATION=1` portability suites (do not write new
+  persist paths). Verify unknown-schema fail-closed; do not implement
+  quarantine rows.
 - Exercise PostgreSQL, local and S3-compatible storage, processor, worker,
   security, capacity, failure injection, browser, accessibility, and recovery.
 - Validate permanent deletion only after all adapter and replay gates are green.
+- Do not implement Child 12 domain work. A missing restore-fidelity
+  contract returns to Child 12.
 - Do not require staging deployment, release-image publication, Release Please,
   soak, or human-participant studies for child completion.
 

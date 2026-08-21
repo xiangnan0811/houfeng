@@ -18,6 +18,7 @@ type RouterOptions struct {
 	SettingsHandler                               stdhttp.Handler
 	RecordsEnabled                                bool
 	ComparisonEnabled                             bool
+	PortabilityEnabled                            bool
 	RecordsHandler                                stdhttp.Handler
 	RecordSearchHandler                           stdhttp.Handler
 	SubjectActivityHandler                        stdhttp.Handler
@@ -27,6 +28,7 @@ type RouterOptions struct {
 	RecordInboxHandler                            stdhttp.Handler
 	RecordDraftsHandler                           stdhttp.Handler
 	RecordDeletionsHandler                        stdhttp.Handler
+	RecordPortabilityHandler                      stdhttp.Handler
 	EvidenceHandler                               stdhttp.Handler
 	AttachmentUploadsHandler                      stdhttp.Handler
 	AttachmentsHandler                            stdhttp.Handler
@@ -197,6 +199,14 @@ func New(opts RouterOptions) stdhttp.Handler {
 		mux.Handle("/api/records/{record_id}/permanent-delete-preview", handler)
 		mux.Handle("/api/records/{record_id}/permanent-delete", handler)
 		mux.Handle("/api/record-deletions/{operation_id}", handler)
+	}
+	if opts.RecordsEnabled && opts.PortabilityEnabled && opts.RecordPortabilityHandler != nil {
+		handler := protect(opts.RecordPortabilityHandler)
+		mux.Handle("/api/record-export-previews", handler)
+		mux.Handle("/api/record-exports", handler)
+		mux.Handle("/api/record-exports/", handler)
+		mux.Handle("/api/record-imports/dry-run", handler)
+		mux.Handle("/api/record-imports/", handler)
 	}
 	if opts.RecordsEnabled && opts.EvidenceHandler != nil {
 		handler := protect(opts.EvidenceHandler)

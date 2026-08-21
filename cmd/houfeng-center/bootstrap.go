@@ -31,6 +31,7 @@ import (
 	incidentservice "houfeng/internal/center/incidents"
 	"houfeng/internal/center/installer"
 	"houfeng/internal/center/notify"
+	"houfeng/internal/center/portability"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordcollaboration"
 	"houfeng/internal/center/recorddeletion"
@@ -83,12 +84,13 @@ type bootstrapDeps struct {
 		*store.PostgresTargetRepository,
 		[]byte,
 	) (http.Handler, error)
-	seedInitialUser             func(context.Context, auth.UserRepository, config.CenterConfig) error
-	newSessionRepository        func(*pgxpool.Pool, []byte) (auth.SessionRepository, error)
-	newIncidentNotifier         func(config.CenterConfig, centersettings.Repository) incidentservice.Notifier
-	newRouter                   func(centerhttp.RouterOptions) http.Handler
-	newApp                      func(string, http.Handler, ...centerapp.Worker) appRunner
-	recordPlatformAdmissionGate store.AdmissionGate
+	seedInitialUser               func(context.Context, auth.UserRepository, config.CenterConfig) error
+	newSessionRepository          func(*pgxpool.Pool, []byte) (auth.SessionRepository, error)
+	newIncidentNotifier           func(config.CenterConfig, centersettings.Repository) incidentservice.Notifier
+	newRouter                     func(centerhttp.RouterOptions) http.Handler
+	newApp                        func(string, http.Handler, ...centerapp.Worker) appRunner
+	recordPlatformAdmissionGate   store.AdmissionGate
+	recordSubjectTombstoneWitness *pgxpool.Pool
 }
 
 type pgxPostgresDB struct {
@@ -100,9 +102,12 @@ type settingsQueryer interface {
 }
 
 type recordCollaborationRuntime struct {
-	watchesHandler   http.Handler
-	inboxHandler     http.Handler
-	projectionWorker *recordcollaboration.NotificationProjectionWorker
+	watchesHandler             http.Handler
+	inboxHandler               http.Handler
+	portabilityHandler         http.Handler
+	projectionWorker           *recordcollaboration.NotificationProjectionWorker
+	activityDeletionAdapter    recorddeletion.Adapter
+	portabilityDeletionAdapter recorddeletion.Adapter
 }
 
 func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version string, deps bootstrapDeps) (appRunner, func(), error) {
@@ -111,6 +116,16 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	db, err := deps.openPostgres(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
+	}
+	if deps.recordSubjectTombstoneWitness == nil {
+		if witnessURL := strings.TrimSpace(os.Getenv("HOUFENG_DELETION_WITNESS_DATABASE_URL")); witnessURL != "" {
+			witnessPool, err := pgxpool.New(ctx, witnessURL)
+			if err != nil {
+				db.Close()
+				return nil, nil, fmt.Errorf("open deletion witness: %w", err)
+			}
+			deps.recordSubjectTombstoneWitness = witnessPool
+		}
 	}
 
 	switch cfg.RecordPlatformMode {
@@ -225,6 +240,14 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		return centerhttp.RequireSameOrigin(cfg.PublicBaseURL)(centerhttp.RequireSession(authSvc, scopeRepo)(next))
 	}
 	recordsEnabled := cfg.RecordPlatformMode == config.RecordPlatformModeRuntimeAdmission
+	if recordsEnabled && nilBootstrapAdmissionGate(deps.recordPlatformAdmissionGate) {
+		gate, gateErr := newProductionRecordPlatformAdmissionGate(cfg)
+		if gateErr != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("create record platform admission gate: %w", gateErr)
+		}
+		deps.recordPlatformAdmissionGate = gate
+	}
 	var recordsHandler http.Handler
 	var recordSearchHandler http.Handler
 	var subjectActivityHandler http.Handler
@@ -251,6 +274,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 				SubscriptionCosts: subscriptionCostRepo, CommandAudits: commandAuditRepo,
 			},
 			deps.recordPlatformAdmissionGate,
+			cfg,
+			deps.recordSubjectTombstoneWitness,
 			comparisonRuntimeConfig{
 				Enabled:          cfg.ComparisonEnabled,
 				AdmissionBudget:  cfg.ComparisonAdmissionBudget,
@@ -302,6 +327,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		SettingsHandler:                             handlers.Settings(settingsHandlerRepo),
 		RecordsEnabled:                              recordsEnabled,
 		ComparisonEnabled:                           recordsEnabled && cfg.ComparisonEnabled,
+		PortabilityEnabled:                          recordsEnabled && cfg.PortabilityEnabled,
 		RecordsHandler:                              recordsHandler,
 		RecordSearchHandler:                         recordSearchHandler,
 		SubjectActivityHandler:                      subjectActivityHandler,
@@ -311,6 +337,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		RecordInboxHandler:                          collaborationRuntime.inboxHandler,
 		RecordDraftsHandler:                         recordDraftsHandler,
 		RecordDeletionsHandler:                      recordDeletionsHandler,
+		RecordPortabilityHandler:                    collaborationRuntime.portabilityHandler,
 		EvidenceHandler:                             evidenceHandler,
 		AttachmentUploadsHandler:                    attachmentUploadsHandler,
 		AttachmentsHandler:                          attachmentsHandler,
@@ -452,7 +479,50 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		}
 		workers = append(workers, activityWorker)
 	}
-	return deps.newApp(cfg.HTTPAddr, router, workers...), db.Close, nil
+	cleanup := db.Close
+	if deps.recordSubjectTombstoneWitness != nil && deps.recordSubjectTombstoneWitness != db.Pool() {
+		witness := deps.recordSubjectTombstoneWitness
+		cleanup = func() {
+			witness.Close()
+			db.Close()
+		}
+	}
+	return deps.newApp(cfg.HTTPAddr, router, workers...), cleanup, nil
+}
+
+func newActivityExportReader(pool *pgxpool.Pool) (*activity.ExportReader, error) {
+	namespace := activity.Namespace{ProjectID: "default"}
+	repository, err := store.NewActivityProjectionRepository(pool)
+	if err != nil {
+		return nil, err
+	}
+	recordDomain, err := store.NewRecordDomainActivitySource(pool, namespace)
+	if err != nil {
+		return nil, err
+	}
+	monitoringEvents, err := store.NewMonitoringEventActivitySource(pool, namespace)
+	if err != nil {
+		return nil, err
+	}
+	commandAudits, err := store.NewCommandAuditActivitySource(pool, namespace)
+	if err != nil {
+		return nil, err
+	}
+	evidenceSource, err := store.NewEvidenceActivitySource(pool, namespace)
+	if err != nil {
+		return nil, err
+	}
+	assetHistory, err := store.NewAssetHistoryActivitySource(pool, namespace)
+	if err != nil {
+		return nil, err
+	}
+	return activity.NewExportReader(activity.ExportReaderDeps{
+		HeadStore: repository,
+		Pages:     repository,
+		Adapters: []activity.ExportReadySourceAdapter{
+			recordDomain, monitoringEvents, commandAudits, evidenceSource, assetHistory,
+		},
+	})
 }
 
 func newActivityProjectionWorker(pool *pgxpool.Pool, ownerID string) (*activity.Worker, error) {
@@ -584,6 +654,56 @@ func newVPSOverviewHandler(
 	return handlers.VPSOverview(overviewService), nil
 }
 
+func newProductionWitnessedRecordSubjectTombstoneSource(
+	cfg config.CenterConfig,
+	local *pgxpool.Pool,
+	witness *pgxpool.Pool,
+) store.WitnessedRecordSubjectTombstoneSource {
+	reader, err := store.NewWitnessedRecordSubjectTombstoneReader(
+		recordplatform.DeploymentID(strings.TrimSpace(cfg.RecordDeploymentID)),
+		recordauth.ProjectIDDefault,
+		optionalRecordSubjectQueryer(witness),
+		optionalRecordSubjectQueryer(local),
+	)
+	if err != nil {
+		return &store.WitnessedRecordSubjectTombstoneReader{}
+	}
+	return reader
+}
+
+func optionalRecordSubjectQueryer(pool *pgxpool.Pool) *pgxpool.Pool {
+	if pool == nil {
+		return nil
+	}
+	return pool
+}
+
+func newProductionRecordPlatformAdmissionGate(cfg config.CenterConfig) (store.AdmissionGate, error) {
+	instanceID := strings.TrimSpace(cfg.RecordInstanceID)
+	deploymentID := strings.TrimSpace(cfg.RecordDeploymentID)
+	instanceKind := strings.TrimSpace(cfg.RecordInstanceKind)
+	capability := strings.TrimSpace(cfg.RecordInstanceCapability)
+	set := 0
+	for _, value := range []string{instanceID, deploymentID, instanceKind, capability} {
+		if value != "" {
+			set++
+		}
+	}
+	if set == 0 {
+		return nil, nil
+	}
+	if set != 4 {
+		return nil, fmt.Errorf("record admission identity is incomplete")
+	}
+	return store.NewDeploymentMembershipAdmissionGate(store.DeploymentMembershipIdentity{
+		InstanceID:   instanceID,
+		DeploymentID: recordplatform.DeploymentID(deploymentID),
+		ProjectID:    recordplatform.ProjectIDDefault,
+		InstanceKind: instanceKind,
+		Capability:   capability,
+	})
+}
+
 func nilBootstrapAdmissionGate(gate store.AdmissionGate) bool {
 	if gate == nil {
 		return true
@@ -620,6 +740,8 @@ func newRecordsHTTPHandlers(
 	attachmentConfig config.AttachmentConfig,
 	evidenceSources productionEvidenceSources,
 	gate store.AdmissionGate,
+	cfg config.CenterConfig,
+	tombstoneWitness *pgxpool.Pool,
 	comparison comparisonRuntimeConfig,
 ) (http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, recordCollaborationRuntime, *centerevidence.MaintenanceWorker, error) {
 	effectiveGate := gate
@@ -634,12 +756,14 @@ func newRecordsHTTPHandlers(
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record subject registry: %w", err)
 	}
-	subjectResolver := store.NewRecordSubjectReadResolver(subjects, nil)
+	witness := newProductionWitnessedRecordSubjectTombstoneSource(cfg, pool, tombstoneWitness)
+	subjectResolver := store.NewRecordSubjectReadResolver(subjects, witness)
 	authorizations := store.NewPostgresCurrentRecordAuthorizationSource(pool, subjectResolver, effectiveGate)
 	var evidenceComposition *productionEvidenceComposition
 	if effectiveGate != nil {
 		evidenceComposition, err = newProductionEvidenceComposition(productionEvidenceCompositionDependencies{
 			Pool: pool, Gate: effectiveGate, Subjects: subjects, Sources: evidenceSources,
+			Tombstones:        witness,
 			ComparisonEnabled: comparison.Enabled,
 			Comparison:        comparison,
 		})
@@ -833,6 +957,54 @@ func newRecordsHTTPHandlers(
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create activity deletion adapter: %w", err)
 	}
 	var _ recorddeletion.Adapter = activityDeletionAdapter
+	portabilityDeletionAdapter, err := portability.NewDeletionAdapter(deletionRepository)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record portability deletion adapter: %w", err)
+	}
+	var _ recorddeletion.Adapter = portabilityDeletionAdapter
+	collaborationRuntime.activityDeletionAdapter = activityDeletionAdapter
+	collaborationRuntime.portabilityDeletionAdapter = portabilityDeletionAdapter
+
+	if cfg.PortabilityEnabled {
+		backendKind := "local"
+		if attachmentConfig.BlobBackend == attachments.BackendKindS3 {
+			backendKind = "s3"
+		}
+		comparisonKind, err := centerevidence.NewComparisonResultKind()
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create comparison result kind: %w", err)
+		}
+		activityReader, err := newActivityExportReader(pool)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create activity export reader: %w", err)
+		}
+		var evidenceExporter portability.EvidenceExporter
+		var snapshotSource portability.SnapshotSource
+		if evidenceComposition != nil {
+			evidenceExporter = evidenceComposition.export
+			snapshotSource = evidenceComposition.repository
+		}
+		portabilityService, err := portability.NewService(portability.Options{
+			Enabled:         true,
+			BackendKind:     backendKind,
+			Documents:       application,
+			Jobs:            store.NewPostgresRecordPortabilityRepository(pool, effectiveGate),
+			Evidence:        evidenceExporter,
+			Snapshots:       snapshotSource,
+			Comparison:      comparisonKind,
+			Activity:        activityReader,
+			PDF:             portability.NewIsolatedDocumentPDFRenderer(""),
+			Imports:         store.NewPostgresRecordPortabilityRepository(pool, effectiveGate),
+			Importer:        application,
+			EvidenceImports: portability.NewKnownKindEvidenceImporter(),
+			Rebuilder:       portability.NewAuthoritativeProjectionRebuilder(),
+			Staging:         portability.NewLeasedBlobStore(blob),
+		})
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record portability service: %w", err)
+		}
+		collaborationRuntime.portabilityHandler = handlers.RecordPortability(portabilityService)
+	}
 
 	recordOptions := handlers.RecordHandlerOptions{EvidencePreparer: evidencePreparer}
 	if comparison.Enabled && evidenceComposition != nil {

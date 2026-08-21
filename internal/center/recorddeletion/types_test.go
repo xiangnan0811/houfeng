@@ -280,6 +280,46 @@ func TestRecordActivityDescriptorRequiresExactOwnedTables(t *testing.T) {
 	}
 }
 
+func TestRecordPortabilityDescriptorRequiresExactOwnedTables(t *testing.T) {
+	t.Parallel()
+
+	// Origin tombstones stay after a record purge, but the adapter still owns
+	// the table so Child 11 can compose one closed surface list.
+	want := []SurfaceName{
+		"record_export_artifacts",
+		"record_export_jobs",
+		"record_import_artifacts",
+		"record_import_entity_mappings",
+		"record_import_jobs",
+		"record_import_plans",
+		"record_origin_tombstones",
+		"record_origins",
+		"record_portability_purge_receipts",
+	}
+	if got := RecordPortabilitySurfaceNames(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("RecordPortabilitySurfaceNames() = %#v, want %#v", got, want)
+	}
+	descriptor, err := NewAdapterDescriptor(AdapterNameRecordPortability, want)
+	if err != nil {
+		t.Fatalf("NewAdapterDescriptor(record_portability) error = %v", err)
+	}
+	if got := RecordPortabilitySurfaceDigest(); got == ([sha256.Size]byte{}) || got != digestAdapterSurfaces(descriptor) {
+		t.Fatalf("RecordPortabilitySurfaceDigest() = %x", got)
+	}
+	if _, err := NewAdapterDescriptor(AdapterNameRecordPortability, want[1:]); !errors.Is(err, ErrInvalidAdapterDescriptor) {
+		t.Fatalf("missing portability surface error = %v", err)
+	}
+	widened := append(RecordPortabilitySurfaceNames(), "experience_logs")
+	if _, err := NewAdapterDescriptor(AdapterNameRecordPortability, widened); !errors.Is(err, ErrInvalidAdapterDescriptor) {
+		t.Fatalf("extra portability surface error = %v", err)
+	}
+	returned := RecordPortabilitySurfaceNames()
+	returned[0] = "tampered"
+	if fresh := RecordPortabilitySurfaceNames(); !reflect.DeepEqual(fresh, want) {
+		t.Fatalf("RecordPortabilitySurfaceNames() after mutation = %#v", fresh)
+	}
+}
+
 func TestAdapterHealthSnapshotRequiresVersionedProof(t *testing.T) {
 	t.Parallel()
 

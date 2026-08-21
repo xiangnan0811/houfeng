@@ -2783,6 +2783,83 @@ export type RecordRevisionListResponse = {
   items: RecordRevision[]
 }
 
+export type RecordExportKind = 'markdown' | 'comparison_json' | 'evidence_json' | 'archive' | 'pdf'
+export type RecordExportMode = 'safe' | 'sensitive_topology'
+
+export type RecordExportUnavailable = {
+  kind: string
+  id: string
+  reason: string
+}
+
+export type RecordExportExpectedFile = {
+  name: string
+  media_type: string
+  byte_size: number
+}
+
+export type RecordExportPreview = {
+  preview_id: string
+  preview_token: string
+  export_kind: RecordExportKind
+  export_mode: RecordExportMode
+  inventory_digest: string
+  expected_files: RecordExportExpectedFile[]
+  unavailable: RecordExportUnavailable[]
+  render_status?: string
+  comparison_summary?: Record<string, unknown>
+  expires_at: string
+}
+
+export type RecordExportPreviewInput = {
+  record_id: string
+  revision_id?: string
+  snapshot_id?: string
+  export_kind: RecordExportKind
+  export_mode: RecordExportMode
+  include_activity?: boolean
+}
+
+export type RecordExportView = {
+  export_id: string
+  job_state: string
+  export_kind: RecordExportKind
+  media_type?: string
+  byte_size?: number
+  expires_at: string
+}
+
+export type RecordImportRemap = {
+  entity_kind: string
+  source_id: string
+  target_id: string
+}
+
+export type RecordImportQuarantine = {
+  kind: string
+  schema: string
+  digest: string
+  byte_size: number
+  reason: string
+  observed_at?: string
+}
+
+export type RecordImportPlan = {
+  plan_id: string
+  job_state: string
+  lock_version: number
+  remaps: RecordImportRemap[]
+  quarantine: RecordImportQuarantine[]
+  object_count: number
+  expires_at: string
+}
+
+export type RecordImportApplyResult = {
+  plan_id: string
+  job_state: string
+  record_ids: string[]
+}
+
 export type RecordFollowUpState = 'none' | 'scheduled' | 'overdue'
 export type RecordActionState = 'none' | 'open' | 'overdue'
 export type RecordSubjectPlacement = 'primary' | 'related'

@@ -32,6 +32,7 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	recordCollaborationAppACLCurrentMigrationFragment(),
 	recordSearchAppACLCurrentMigrationFragment(),
 	recordActivityAppACLCurrentMigrationFragment(),
+	recordPortabilityAppACLCurrentMigrationFragment(),
 }
 
 func recordActivityAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -123,6 +124,97 @@ func recordActivityAppACLCurrentPrivileges(string) []AppACLPrivilege {
 		ObjectIdentity: "public.record_activity_purge(bytea)",
 		Privilege:      AppACLPrivilegeExecute,
 	})
+	return privileges
+}
+
+func recordPortabilityAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	objects := make([]AppACLManagedObjectR1, 0, 11)
+	for _, table := range []string{
+		"record_export_jobs",
+		"record_export_artifacts",
+		"record_import_jobs",
+		"record_import_plans",
+		"record_import_artifacts",
+		"record_import_entity_mappings",
+		"record_origins",
+		"record_origin_tombstones",
+		"record_portability_purge_receipts",
+	} {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: table,
+		})
+	}
+	functions := []AppACLCurrentFunctionContract{
+		{SchemaName: appACLManagedInternalSchemaR1, Identity: "purge_record_portability(text, text, text, text, bigint, bigint, bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+		{SchemaName: appACLManagedPublicSchemaR1, Identity: "record_portability_purge(bytea)", Kind: "f", SecurityDefiner: true, Config: []string{"search_path=pg_catalog"}},
+	}
+	for _, function := range functions {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassFunction,
+			SchemaName:     function.SchemaName,
+			ObjectIdentity: function.Identity,
+		})
+	}
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0058_create_record_portability.sql",
+		Objects:    objects,
+		Privileges: recordPortabilityAppACLCurrentPrivileges,
+		Functions:  functions,
+	}
+}
+
+// recordPortabilityAppACLCurrentPrivileges lets the runtime create and CAS
+// export/import job rows and append origin/purge proofs. Platform admin may
+// inspect digest-only tombstones and purge receipts, never job inventory or
+// artifact locators.
+func recordPortabilityAppACLCurrentPrivileges(string) []AppACLPrivilege {
+	privileges := make([]AppACLPrivilege, 0, 28)
+	appendTable := func(table string, kinds ...AppACLPrivilegeKind) {
+		for _, kind := range kinds {
+			privileges = append(privileges, AppACLPrivilege{
+				Subject:        AppACLSubjectCenterRuntime,
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     appACLManagedPublicSchemaR1,
+				ObjectIdentity: table,
+				Privilege:      kind,
+			})
+		}
+	}
+	appendTable("record_export_jobs",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
+	appendTable("record_export_artifacts",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
+	appendTable("record_import_jobs",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate)
+	appendTable("record_import_plans",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+	appendTable("record_import_artifacts",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+	appendTable("record_import_entity_mappings",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+	appendTable("record_origins",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+	appendTable("record_origin_tombstones",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+	appendTable("record_portability_purge_receipts",
+		AppACLPrivilegeSelect, AppACLPrivilegeInsert)
+	privileges = append(privileges, AppACLPrivilege{
+		Subject:        AppACLSubjectCenterRuntime,
+		ObjectClass:    AppACLObjectClassFunction,
+		ObjectIdentity: "public.record_portability_purge(bytea)",
+		Privilege:      AppACLPrivilegeExecute,
+	})
+	for _, table := range []string{"record_origin_tombstones", "record_portability_purge_receipts"} {
+		privileges = append(privileges, AppACLPrivilege{
+			Subject:        AppACLSubjectPlatformAdmin,
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: table,
+			Privilege:      AppACLPrivilegeSelect,
+		})
+	}
 	return privileges
 }
 

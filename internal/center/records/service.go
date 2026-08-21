@@ -58,6 +58,8 @@ type CurrentRecordAuthorizationSource interface {
 
 type RevisionCommitStore interface {
 	CommitRevision(context.Context, RevisionCommitCommand) (RevisionCommitResult, error)
+	CommitRevisions(context.Context, []RevisionCommitCommand) ([]RevisionCommitResult, error)
+	CommitRevisionsFinishing(context.Context, []RevisionCommitCommand, RevisionCommitFinish) ([]RevisionCommitResult, error)
 }
 
 type RevisionService struct {
@@ -81,31 +83,92 @@ func (service *RevisionService) SaveRevision(
 	ctx context.Context,
 	request RevisionSaveRequest,
 ) (RevisionCommitResult, error) {
-	if ctx == nil || service == nil || nilRevisionServiceDependency(service.current) || nilRevisionServiceDependency(service.store) {
-		return RevisionCommitResult{}, fmt.Errorf("%w: service", ErrInvalidRevisionServiceRequest)
-	}
-	actor, references, operation, capability, err := validateRevisionSaveRequest(request)
+	results, err := service.SaveRevisions(ctx, []RevisionSaveRequest{request})
 	if err != nil {
 		return RevisionCommitResult{}, err
+	}
+	if len(results) != 1 {
+		return RevisionCommitResult{}, fmt.Errorf("%w: service", ErrInvalidRevisionServiceRequest)
+	}
+	return results[0], nil
+}
+
+func (service *RevisionService) SaveRevisions(
+	ctx context.Context,
+	requests []RevisionSaveRequest,
+) ([]RevisionCommitResult, error) {
+	if ctx == nil || service == nil || nilRevisionServiceDependency(service.current) || nilRevisionServiceDependency(service.store) {
+		return nil, fmt.Errorf("%w: service", ErrInvalidRevisionServiceRequest)
+	}
+	if len(requests) == 0 {
+		return nil, fmt.Errorf("%w: empty", ErrInvalidRevisionServiceRequest)
+	}
+	commands := make([]RevisionCommitCommand, 0, len(requests))
+	for _, request := range requests {
+		command, err := service.prepareRevisionCommit(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		commands = append(commands, command)
+	}
+	if len(commands) == 1 {
+		result, err := service.store.CommitRevision(ctx, commands[0])
+		if err != nil {
+			return nil, err
+		}
+		return []RevisionCommitResult{result}, nil
+	}
+	return service.store.CommitRevisions(ctx, commands)
+}
+
+func (service *RevisionService) SaveRevisionsFinishing(
+	ctx context.Context,
+	requests []RevisionSaveRequest,
+	finish RevisionCommitFinish,
+) ([]RevisionCommitResult, error) {
+	if ctx == nil || service == nil || nilRevisionServiceDependency(service.current) || nilRevisionServiceDependency(service.store) {
+		return nil, fmt.Errorf("%w: service", ErrInvalidRevisionServiceRequest)
+	}
+	if len(requests) == 0 || finish.Validate() != nil {
+		return nil, fmt.Errorf("%w: finish", ErrInvalidRevisionServiceRequest)
+	}
+	commands := make([]RevisionCommitCommand, 0, len(requests))
+	for _, request := range requests {
+		command, err := service.prepareRevisionCommit(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		commands = append(commands, command)
+	}
+	return service.store.CommitRevisionsFinishing(ctx, commands, finish)
+}
+
+func (service *RevisionService) prepareRevisionCommit(
+	ctx context.Context,
+	request RevisionSaveRequest,
+) (RevisionCommitCommand, error) {
+	actor, references, operation, capability, err := validateRevisionSaveRequest(request)
+	if err != nil {
+		return RevisionCommitCommand{}, err
 	}
 
 	if operation == recordplatform.OperationKindRecordUpdate {
 		current, err := service.current.ResolveCurrentRecordAuthorization(ctx, actor.Clone(), request.RecordID)
 		if err != nil {
-			return RevisionCommitResult{}, fmt.Errorf("resolve current record authorization: %w", err)
+			return RevisionCommitCommand{}, fmt.Errorf("resolve current record authorization: %w", err)
 		}
 		if current.RecordID != request.RecordID || current.CurrentRevisionID != request.BaseRevisionID ||
 			current.LockVersion != request.LockVersion || current.AuthorizationEpoch != request.AuthorizationEpoch ||
 			current.Lifecycle != LifecycleActive {
-			return RevisionCommitResult{}, ErrRecordRevisionConflict
+			return RevisionCommitCommand{}, ErrRecordRevisionConflict
 		}
 		if err := AuthorizeRecordResource(actor, capability, current.Evidence); err != nil {
-			return RevisionCommitResult{}, err
+			return RevisionCommitCommand{}, err
 		}
 	}
 	if err := request.EvidencePreparation.ValidateForRecord(request.RecordID); err != nil ||
 		request.EvidencePreparation.ValidateReferencesForActor(actor) != nil {
-		return RevisionCommitResult{}, fmt.Errorf("%w: evidence preparation", ErrInvalidRevisionServiceRequest)
+		return RevisionCommitCommand{}, fmt.Errorf("%w: evidence preparation", ErrInvalidRevisionServiceRequest)
 	}
 
 	resolvedSubjects := make([]RevisionSubject, 0, len(references))
@@ -113,7 +176,7 @@ func (service *RevisionService) SaveRevision(
 	for _, reference := range references {
 		resolved, err := service.subjects.Resolve(ctx, actor.Clone(), reference)
 		if err != nil {
-			return RevisionCommitResult{}, err
+			return RevisionCommitCommand{}, err
 		}
 		resolvedSubjects = append(resolvedSubjects, RevisionSubject{
 			RegistryVersion:      reference.RegistryVersion,
@@ -133,14 +196,14 @@ func (service *RevisionService) SaveRevision(
 	values.EvidenceSnapshotIDs = request.EvidencePreparation.SnapshotIDs()
 	input, err := NormalizeCompleteRevisionInput(values)
 	if err != nil {
-		return RevisionCommitResult{}, err
+		return RevisionCommitCommand{}, err
 	}
 	if err := AuthorizeRecordResource(actor, capability, RecordAuthorizationEvidence{
 		ProjectID:  actor.ProjectID,
 		Visibility: input.VisibilityScope(),
 		Sources:    sourceAuthorizations,
 	}); err != nil {
-		return RevisionCommitResult{}, err
+		return RevisionCommitCommand{}, err
 	}
 
 	fingerprint, err := recordplatform.FingerprintRequestV1(recordplatform.RequestFingerprintInputV1{
@@ -152,7 +215,7 @@ func (service *RevisionService) SaveRevision(
 		PayloadDigest:      revisionCommitPayloadDigest(input),
 	})
 	if err != nil {
-		return RevisionCommitResult{}, fmt.Errorf("%w: fingerprint", ErrInvalidRevisionServiceRequest)
+		return RevisionCommitCommand{}, fmt.Errorf("%w: fingerprint", ErrInvalidRevisionServiceRequest)
 	}
 	command := RevisionCommitCommand{
 		RecordID:            request.RecordID,
@@ -178,9 +241,9 @@ func (service *RevisionService) SaveRevision(
 		},
 	}
 	if err := command.Validate(); err != nil {
-		return RevisionCommitResult{}, err
+		return RevisionCommitCommand{}, err
 	}
-	return service.store.CommitRevision(ctx, command)
+	return command, nil
 }
 
 func validateRevisionSaveRequest(

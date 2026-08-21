@@ -1038,3 +1038,46 @@ export function comparisonWorkbenchProfile(options: {
       : {}),
   })
 }
+
+export function recordSearchProfile(): ApiFixtureProfile {
+  return authenticatedProfile({
+    [apiRouteKey('GET', '/api/records/search')]: {
+      status: 200,
+      body: {
+        items: [{
+          record_id: 'rec_e2e001',
+          lifecycle: 'active',
+          current_revision_id: RECORD_REVISION.revision_id,
+          lock_version: 4,
+          authorization_epoch: 2,
+          current: RECORD_REVISION,
+          capabilities: {
+            read: true,
+            update: true,
+            archive: true,
+            restore: true,
+            draft: true,
+            permanent_delete: false,
+          },
+          created_at: RECORD_TIMESTAMP,
+          updated_at: RECORD_TIMESTAMP,
+        }],
+        generation: 1,
+      },
+    },
+    [apiRouteKey('POST', '/api/record-export-previews')]: {
+      status: 200,
+      body: {
+        preview_id: 'rej_e2e001',
+        preview_token: 'tok',
+        export_kind: 'markdown',
+        export_mode: 'safe',
+        inventory_digest: 'aa',
+        expected_files: [{ name: 'record.md', media_type: 'text/markdown', byte_size: 12 }],
+        unavailable: [],
+        expires_at: '2026-08-21T13:00:00Z',
+      },
+      expectedBodyKeys: ['record_id', 'export_kind', 'export_mode'],
+    },
+  })
+}

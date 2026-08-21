@@ -501,6 +501,22 @@ func (stub *recordApplicationRevisionStub) SaveRevision(ctx context.Context, req
 	return stub.save(ctx, request)
 }
 
+func (stub *recordApplicationRevisionStub) SaveRevisions(ctx context.Context, requests []RevisionSaveRequest) ([]RevisionCommitResult, error) {
+	results := make([]RevisionCommitResult, 0, len(requests))
+	for _, request := range requests {
+		result, err := stub.SaveRevision(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+func (stub *recordApplicationRevisionStub) SaveRevisionsFinishing(ctx context.Context, requests []RevisionSaveRequest, _ RevisionCommitFinish) ([]RevisionCommitResult, error) {
+	return stub.SaveRevisions(ctx, requests)
+}
+
 type recordApplicationLifecycleStub struct {
 	change func(context.Context, RecordLifecycleRequest) (RecordLifecycleResult, error)
 }

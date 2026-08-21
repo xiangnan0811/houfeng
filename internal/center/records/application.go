@@ -23,6 +23,8 @@ type applicationReadService interface {
 
 type applicationRevisionService interface {
 	SaveRevision(context.Context, RevisionSaveRequest) (RevisionCommitResult, error)
+	SaveRevisions(context.Context, []RevisionSaveRequest) ([]RevisionCommitResult, error)
+	SaveRevisionsFinishing(context.Context, []RevisionSaveRequest, RevisionCommitFinish) ([]RevisionCommitResult, error)
 }
 
 type applicationLifecycleService interface {
