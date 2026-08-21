@@ -49,7 +49,7 @@
 .btn:active{transform:scale(0.97)}
 .btn.sm{padding:5px 10px;font-size:11.5px;border-radius:5px}
 .btn.md{padding:7px 14px}
-.btn.lg{padding:9px 18px;font-size:13px;border-radius:7px}
+.btn.lg{padding:16px 18px;font-size:13px}
 .btn.primary{background:var(--accent);color:var(--bg)}
 .btn.primary:hover{opacity:0.88}
 .btn.secondary{background:var(--item-bg);color:var(--t1);border:1px solid var(--border)}

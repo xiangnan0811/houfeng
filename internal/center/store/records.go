@@ -38,6 +38,16 @@ func NewPostgresRecordRepository(
 	}, nil
 }
 
+func (repository *PostgresRecordRepository) PeekCompletedIdempotency(
+	ctx context.Context,
+	key recordplatform.IdempotencyKey,
+) (bool, error) {
+	if repository == nil || repository.platform == nil {
+		return false, fmt.Errorf("%w: repository", records.ErrInvalidRevisionCommand)
+	}
+	return repository.platform.PeekCompletedIdempotency(ctx, key)
+}
+
 func (repository *PostgresRecordRepository) CommitRevision(
 	ctx context.Context,
 	command records.RevisionCommitCommand,

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -30,8 +31,10 @@ import (
 	incidentservice "houfeng/internal/center/incidents"
 	"houfeng/internal/center/installer"
 	"houfeng/internal/center/notify"
+	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordcollaboration"
 	"houfeng/internal/center/recorddeletion"
+	"houfeng/internal/center/recordplatform"
 	centerrecords "houfeng/internal/center/records"
 	"houfeng/internal/center/recordsearch"
 	"houfeng/internal/center/retention"
@@ -248,6 +251,13 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 				SubscriptionCosts: subscriptionCostRepo, CommandAudits: commandAuditRepo,
 			},
 			deps.recordPlatformAdmissionGate,
+			comparisonRuntimeConfig{
+				Enabled:          cfg.ComparisonEnabled,
+				AdmissionBudget:  cfg.ComparisonAdmissionBudget,
+				IntentKeyring:    cfg.ComparisonIntentKeyring,
+				IntentKeyID:      cfg.ComparisonIntentKeyID,
+				ReservedKeyPaths: comparisonReservedKeyPaths(cfg),
+			},
 		)
 		if err != nil {
 			db.Close()
@@ -291,6 +301,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		IncidentsHandler:                            handlers.Incidents(incidentRepo),
 		SettingsHandler:                             handlers.Settings(settingsHandlerRepo),
 		RecordsEnabled:                              recordsEnabled,
+		ComparisonEnabled:                           recordsEnabled && cfg.ComparisonEnabled,
 		RecordsHandler:                              recordsHandler,
 		RecordSearchHandler:                         recordSearchHandler,
 		SubjectActivityHandler:                      subjectActivityHandler,
@@ -586,6 +597,21 @@ func nilBootstrapAdmissionGate(gate store.AdmissionGate) bool {
 	}
 }
 
+func comparisonReservedKeyPaths(cfg config.CenterConfig) []string {
+	_ = cfg
+	reserved := make([]string, 0, 2)
+	if path := strings.TrimSpace(os.Getenv("HOUFENG_SESSION_HMAC_KEY_FILE")); path != "" {
+		reserved = append(reserved, path)
+	}
+	if path := strings.TrimSpace(os.Getenv("HOUFENG_RECORD_DELETION_KEY_FILE")); path != "" {
+		reserved = append(reserved, path)
+	}
+	if path := strings.TrimSpace(os.Getenv("HOUFENG_BACKUP_HMAC_KEY_FILE")); path != "" {
+		reserved = append(reserved, path)
+	}
+	return reserved
+}
+
 func newRecordsHTTPHandlers(
 	pool *pgxpool.Pool,
 	vpsRepository *store.PostgresVPSAssetRepository,
@@ -594,6 +620,7 @@ func newRecordsHTTPHandlers(
 	attachmentConfig config.AttachmentConfig,
 	evidenceSources productionEvidenceSources,
 	gate store.AdmissionGate,
+	comparison comparisonRuntimeConfig,
 ) (http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, http.Handler, recordCollaborationRuntime, *centerevidence.MaintenanceWorker, error) {
 	effectiveGate := gate
 	if nilBootstrapAdmissionGate(effectiveGate) {
@@ -613,6 +640,8 @@ func newRecordsHTTPHandlers(
 	if effectiveGate != nil {
 		evidenceComposition, err = newProductionEvidenceComposition(productionEvidenceCompositionDependencies{
 			Pool: pool, Gate: effectiveGate, Subjects: subjects, Sources: evidenceSources,
+			ComparisonEnabled: comparison.Enabled,
+			Comparison:        comparison,
 		})
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create evidence composition: %w", err)
@@ -624,9 +653,14 @@ func newRecordsHTTPHandlers(
 	// nil/typed-nil path registers stable transports while every record and
 	// evidence operation remains closed.
 	collaborationMembers := store.NewPostgresCollaborationMembershipReader()
+	var comparisonSigner centerevidence.ComparisonIntentSigner
+	if evidenceComposition != nil {
+		comparisonSigner = evidenceComposition.comparisonSigner
+	}
 	recordRepository, err := store.NewPostgresRecordRepository(pool, effectiveGate, []centerrecords.RevisionParticipant{
 		store.NewRecordAttachmentRevisionParticipant(),
 		store.NewCollaborationRevisionParticipant(collaborationMembers),
+		store.NewComparisonRevisionParticipant(comparisonSigner),
 		store.NewRecordEvidenceRevisionParticipant(),
 		store.NewRecordSearchRevisionParticipant(),
 	})
@@ -800,7 +834,23 @@ func newRecordsHTTPHandlers(
 	}
 	var _ recorddeletion.Adapter = activityDeletionAdapter
 
-	return handlers.RecordsWithOptions(application, handlers.RecordHandlerOptions{EvidencePreparer: evidencePreparer}),
+	recordOptions := handlers.RecordHandlerOptions{EvidencePreparer: evidencePreparer}
+	if comparison.Enabled && evidenceComposition != nil {
+		recordOptions.ComparisonSave = evidenceComposition.application
+		recordOptions.CompletedIdempotency = func(
+			ctx context.Context,
+			actor recordauth.ActorScope,
+			operation recordplatform.OperationKind,
+			key string,
+		) (bool, error) {
+			return recordRepository.PeekCompletedIdempotency(ctx, recordplatform.IdempotencyKey{
+				ProjectID:     recordplatform.ProjectID(actor.ProjectID),
+				OperationKind: operation,
+				Key:           key,
+			})
+		}
+	}
+	return handlers.RecordsWithOptions(application, recordOptions),
 		handlers.RecordSearch(searchService),
 		handlers.RecordActions(actionApplication), handlers.RecordComments(commentApplication), handlers.RecordDrafts(application), handlers.RecordDeletions(nil), evidenceHandler,
 		handlers.AttachmentUploads(uploadService), handlers.AttachmentsWithOptions(downloadService), collaborationRuntime, evidenceWorker, nil

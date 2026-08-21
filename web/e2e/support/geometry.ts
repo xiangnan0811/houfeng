@@ -29,6 +29,13 @@ export async function expectLocatorNotClipped(locator: Locator): Promise<void> {
   expect(geometry.lineClamp).toBe('none')
 }
 
+export async function expectMinTouchTarget(locator: Locator): Promise<void> {
+  const box = await locator.boundingBox()
+  if (!box) throw new Error('expected command to have a bounding box')
+  expect(box.width).toBeGreaterThanOrEqual(44)
+  expect(box.height).toBeGreaterThanOrEqual(44)
+}
+
 export async function expectNoDocumentOverflow(page: Page): Promise<void> {
   const geometry = await page.evaluate(() => ({
     viewportWidth: window.innerWidth,

@@ -17,6 +17,7 @@ var knownKindKeys = []KindKey{
 	MonitoringEventV2Key(),
 	SubscriptionCostV1Key(),
 	CommandAuditV1Key(),
+	ComparisonResultV1Key(),
 }
 
 type registeredKind struct {

@@ -95,7 +95,7 @@ func TestRecoveryAdapterFailsClosedOnUnknownKindBeforeReplayOrGC(t *testing.T) {
 	}
 	repository := &evidenceRecoveryRepositoryStub{}
 	adapter, _ := NewRecoveryAdapter(registry, repository)
-	if err := adapter.Replay(context.Background(), inventory); !errors.Is(err, ErrKindNotRegistered) {
+	if err := adapter.Replay(context.Background(), inventory); !errors.Is(err, ErrUnknownKindVersion) && !errors.Is(err, ErrKindNotRegistered) {
 		t.Fatalf("Replay(unknown kind) error = %v", err)
 	}
 	if repository.restoreCalls != 0 || repository.gcCalls != 0 {

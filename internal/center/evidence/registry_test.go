@@ -17,6 +17,7 @@ func TestRegistryKnownKeysAndLookup(t *testing.T) {
 		MonitoringEventV2Key(),
 		SubscriptionCostV1Key(),
 		CommandAuditV1Key(),
+		ComparisonResultV1Key(),
 	}
 	if !reflect.DeepEqual(keys, want) {
 		t.Fatalf("KnownKindKeys() = %#v, want %#v", keys, want)

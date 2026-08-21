@@ -24,6 +24,7 @@ export class BrowserDiagnostics {
   private readonly diagnostics: string[] = []
   private readonly allowedHttpErrors = new Set<string>()
   private readonly allowedConsoleResourceErrors = new Set<string>()
+  private readonly allowedRequestFailures = new Set<string>()
 
   async install(page: Page): Promise<void> {
     page.on('console', (message) => {
@@ -45,8 +46,15 @@ export class BrowserDiagnostics {
       this.diagnostics.push(`pageerror: ${error.name}: ${error.message}`)
     })
     page.on('requestfailed', (request) => {
+      const failure = request.failure()?.errorText ?? 'unknown'
+      const key = this.requestFailureKey(
+        request.method() as ApiMethod,
+        canonicalApiPath(request.url()),
+        failure,
+      )
+      if (this.allowedRequestFailures.has(key)) return
       this.diagnostics.push(
-        `requestfailed: ${request.method()} ${canonicalApiPath(request.url())} ${request.failure()?.errorText ?? 'unknown'}`,
+        `requestfailed: ${request.method()} ${canonicalApiPath(request.url())} ${failure}`,
       )
     })
     page.on('response', (response) => {
@@ -87,6 +95,12 @@ export class BrowserDiagnostics {
     )
   }
 
+  allowRequestFailure(method: ApiMethod, path: string, errorText = 'net::ERR_ABORTED'): void {
+    this.allowedRequestFailures.add(
+      this.requestFailureKey(method, canonicalApiPath(path), errorText),
+    )
+  }
+
   async assertClean(page: Page): Promise<void> {
     const browserDiagnostics = await page.evaluate(
       () => window.__houfengE2EDiagnostics ?? [],
@@ -102,6 +116,10 @@ export class BrowserDiagnostics {
 
   private httpErrorKey(method: ApiMethod, path: string, status: number): string {
     return `${method} ${path} ${status}`
+  }
+
+  private requestFailureKey(method: ApiMethod, path: string, errorText: string): string {
+    return `${method} ${path} ${errorText}`
   }
 
   private consoleResourceErrorKey(path: string, status: number): string {

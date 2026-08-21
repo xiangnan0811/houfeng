@@ -4,9 +4,13 @@ import type {
   CommandAuditAction,
   CommandAuditEvent,
   CommandAuditListResponse,
+  ComparisonCandidateItem,
+  ComparisonEvaluateResponse,
   DashboardOverview,
   MonitoringInstanceSparklinesResponse,
   ProviderRecord,
+  RecordDraft,
+  RecordMutationResult,
   RecordNotification,
   SettingsRecord,
   SubjectActivityListResponse,
@@ -17,6 +21,11 @@ import type {
   VPSAssetRecord,
   VPSOverview,
 } from '../../src/lib/types'
+import {
+  COMPARISON_URL_VERSION,
+  comparisonHref,
+  type ComparisonURLState,
+} from '../../src/pages/records/compare/comparisonQueryState'
 import {
   dashboardOverviewFixture,
   subscriptionOverviewFixture,
@@ -750,5 +759,282 @@ export function subjectActivityProfile(options: {
         : options.activity ?? subjectActivityFixture(),
       ...(options.activityWaitFor ? { waitFor: options.activityWaitFor } : {}),
     },
+  })
+}
+
+export const COMPARISON_E2E_WINDOW = {
+  requested_from: '2026-07-01T00:00:00Z',
+  requested_to: '2026-07-02T00:00:00Z',
+} as const
+
+const COMPARISON_CANDIDATE_KEYS = ['subjects', 'requested_window', 'kinds'] as const
+const COMPARISON_EVALUATE_KEYS = [
+  'items',
+  'baseline_index',
+  'alignment',
+  'requested_window',
+  'tolerance_seconds',
+  'detail',
+] as const
+
+const COMPARISON_CANDIDATE: ComparisonCandidateItem = {
+  subject: { kind: 'vps', id: 'vps_cmpleft' },
+  snapshot_id: 'evs_cmpleft',
+  record_id: 'rec_cmpleft',
+  revision_ids: ['rrv_cmpleft'],
+  kind: 'monitoring.host',
+  schema_version: 1,
+  canonical_hash: 'aa'.repeat(32),
+  requested_window: {
+    start: COMPARISON_E2E_WINDOW.requested_from,
+    end: COMPARISON_E2E_WINDOW.requested_to,
+  },
+  actual_window: {
+    start: COMPARISON_E2E_WINDOW.requested_from,
+    end: COMPARISON_E2E_WINDOW.requested_to,
+  },
+  quality_status: 'complete',
+  captured_at: COMPARISON_E2E_WINDOW.requested_to,
+  recommendation: 'nearest_window',
+}
+
+function comparisonEvaluateFixture(
+  overrides: Partial<ComparisonEvaluateResponse> = {},
+): ComparisonEvaluateResponse {
+  const base: ComparisonEvaluateResponse = {
+    digest: 'dd'.repeat(32),
+    items: [
+      {
+        snapshot_id: 'evs_cmpleft',
+        canonical_hash: '11'.repeat(32),
+        kind: 'monitoring.host',
+        schema_version: 1,
+        revision_context: 'not_applicable',
+      },
+      {
+        snapshot_id: 'evs_cmpright',
+        canonical_hash: '22'.repeat(32),
+        kind: 'monitoring.host',
+        schema_version: 1,
+        revision_context: 'not_applicable',
+      },
+    ],
+    review: [],
+    available_kinds: [
+      { kind: 'monitoring.host', schema_version: 1 },
+      { kind: 'monitoring.probe', schema_version: 2 },
+    ],
+    pairwise: [],
+    series: [],
+    save_eligibility: { eligible: true, blockers: [] },
+    comparison_intent: {
+      token: 'cmp1.e2e.payload.mac',
+      key_id: 'cmp_e2e',
+      issued_at: '2026-08-20T10:00:00Z',
+      expires_at: '2026-08-20T10:15:00Z',
+    },
+  }
+  return {
+    ...base,
+    ...overrides,
+    items: overrides.items ?? base.items,
+    review: overrides.review ?? base.review,
+    available_kinds: overrides.available_kinds ?? base.available_kinds,
+    pairwise: overrides.pairwise ?? base.pairwise,
+    series: overrides.series ?? base.series,
+    save_eligibility: overrides.save_eligibility ?? base.save_eligibility,
+  }
+}
+
+export function comparisonWorkbenchHref(
+  state: Omit<ComparisonURLState, 'version' | 'requested_from' | 'requested_to'> & {
+    requested_from?: string
+    requested_to?: string
+  },
+): string {
+  return comparisonHref({
+    version: COMPARISON_URL_VERSION,
+    requested_from: COMPARISON_E2E_WINDOW.requested_from,
+    requested_to: COMPARISON_E2E_WINDOW.requested_to,
+    ...state,
+  })
+}
+
+export type ComparisonWorkbenchMode =
+  | 'candidates'
+  | 'host-partial'
+  | 'metadata-only'
+  | 'incompatible'
+  | 'revoked'
+
+export function comparisonWorkbenchProfile(options: {
+  mode: ComparisonWorkbenchMode
+  compareWaitFor?: Promise<void>
+  includeSave?: boolean
+} = { mode: 'host-partial' }): ApiFixtureProfile {
+  const evaluate = options.mode === 'metadata-only'
+    ? comparisonEvaluateFixture({
+      items: [
+        {
+          snapshot_id: 'evs_cmpleft',
+          canonical_hash: '11'.repeat(32),
+          kind: 'command.audit',
+          schema_version: 1,
+          revision_context: 'bound',
+          revision: {
+            record_type: 'note',
+            business_status: 'open',
+            status_group: 'open',
+            impact_level: 'low',
+            occurred_at: null,
+          },
+        },
+        {
+          snapshot_id: 'evs_cmpright',
+          canonical_hash: '22'.repeat(32),
+          kind: 'command.audit',
+          schema_version: 1,
+          revision_context: 'bound',
+          revision: {
+            record_type: 'note',
+            business_status: 'open',
+            status_group: 'open',
+            impact_level: 'low',
+            occurred_at: null,
+          },
+        },
+      ],
+      review: [{ item_index: 0, kind: 'command.audit', schema_version: 1, reason: 'metadata_only' }],
+      available_kinds: [{ kind: 'command.audit', schema_version: 1 }],
+      pairwise: [{
+        item_index: 1,
+        kind: 'command.audit',
+        schema_version: 1,
+        compatible: true,
+        reason: '',
+        values: { count: 0 },
+      }],
+    })
+    : options.mode === 'incompatible'
+      ? comparisonEvaluateFixture({
+        review: [{
+          item_index: 1,
+          kind: 'monitoring.host',
+          schema_version: 1,
+          reason: 'schema_incompatible',
+        }],
+        available_kinds: [],
+        pairwise: [{
+          item_index: 1,
+          kind: 'monitoring.host',
+          schema_version: 1,
+          compatible: false,
+          reason: 'schema_incompatible',
+          values: {},
+        }],
+        series: [],
+      })
+      : comparisonEvaluateFixture({
+        review: [{
+          item_index: 0,
+          kind: 'monitoring.host',
+          schema_version: 1,
+          reason: 'coverage_partial',
+        }],
+        series: [{
+          item_index: 0,
+          metric_id: 'cpu_usage_pct',
+          unit: '%',
+          segments: [
+            [{ start: '2026-07-01T00:00:00Z', end: '2026-07-01T00:05:00Z', value: 12 }],
+            [{ start: '2026-07-01T00:20:00Z', end: '2026-07-01T00:25:00Z', value: 18 }],
+          ],
+        }],
+      })
+
+  const draft: RecordDraft = {
+    draft_id: 'rdf_cmp_save',
+    etag: 'rdt1_cmp_save',
+    payload: {
+      title: '',
+      body_markdown: '',
+      markdown_dialect_version: 1,
+      record_type: 'note',
+      business_status: '',
+      impact_level: 'medium',
+      visibility: { kind: 'project', allowed_roles: [], allowed_group_ids: [] },
+      subjects: [],
+      tags: [],
+      attachment_ids: [],
+      owner_id: AUTHENTICATED_USER.user_id,
+      participant_ids: [],
+      save_reason: '',
+    },
+    version: 1,
+    warning_at: '2026-10-20T00:00:00Z',
+    created_at: '2026-08-20T10:00:00Z',
+    updated_at: '2026-08-20T10:00:00Z',
+    expires_at: '2026-11-01T10:00:00Z',
+  }
+
+  const saved: RecordMutationResult = {
+    record_id: 'rec_cmpsaved01',
+    revision_id: 'rrv_cmpsaved01',
+    revision_no: 1,
+    lock_version: 1,
+    authorization_epoch: 1,
+    lifecycle: 'active',
+    created: true,
+    replayed: false,
+    committed_at: '2026-08-20T10:01:00Z',
+  }
+
+  return authenticatedProfile({
+    [apiRouteKey('POST', '/api/evidence/comparison-candidates')]: {
+      status: 200,
+      body: {
+        subjects: [
+          { kind: 'vps', id: 'vps_cmpleft' },
+          { kind: 'vps', id: 'vps_cmpright' },
+        ],
+        candidates: [
+          COMPARISON_CANDIDATE,
+          {
+            ...COMPARISON_CANDIDATE,
+            subject: { kind: 'vps', id: 'vps_cmpright' },
+            snapshot_id: 'evs_cmpright',
+            record_id: 'rec_cmpright',
+            revision_ids: ['rrv_cmpright'],
+          },
+        ],
+      },
+      expectedBodyKeys: COMPARISON_CANDIDATE_KEYS,
+    },
+    [apiRouteKey('POST', '/api/evidence/comparisons')]: options.mode === 'revoked'
+      ? {
+        status: 404,
+        body: { error: 'resource not found', code: 'resource_not_found', snapshot_id: 'evs_restricted' },
+        expectedBodyKeys: COMPARISON_EVALUATE_KEYS,
+      }
+      : {
+        status: 200,
+        body: evaluate,
+        expectedBodyKeys: COMPARISON_EVALUATE_KEYS,
+        ...(options.compareWaitFor ? { waitFor: options.compareWaitFor } : {}),
+      },
+    ...(options.includeSave
+      ? {
+        [apiRouteKey('POST', '/api/record-drafts')]: {
+          status: 200,
+          body: draft,
+          expectedBodyKeys: ['payload'],
+        },
+        [apiRouteKey('POST', '/api/records')]: {
+          status: 200,
+          body: saved,
+          expectedBodyKeys: ['record_id', 'draft_id', 'draft_etag', 'comparison_intent'],
+        },
+      }
+      : {}),
   })
 }

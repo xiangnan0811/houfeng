@@ -604,6 +604,8 @@ func (tx *fakeRecordEvidenceParticipantTx) Exec(_ context.Context, sql string, a
 		return pgconn.NewCommandTag("SELECT 1"), nil
 	case strings.Contains(compact, "insert into public.evidence_snapshots"):
 		tx.execKinds = append(tx.execKinds, "snapshot")
+	case strings.Contains(compact, "insert into public.evidence_copy_lineage"):
+		tx.execKinds = append(tx.execKinds, "lineage")
 	case strings.Contains(compact, "insert into public.record_revision_evidence"):
 		tx.execKinds = append(tx.execKinds, "reference")
 		tx.referenceOrdinal = args[2].(int64)

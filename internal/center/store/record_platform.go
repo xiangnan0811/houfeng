@@ -422,6 +422,43 @@ func (repository *PostgresRecordPlatformRepository) finalizeOutbox(ctx context.C
 	return nil
 }
 
+func (repository *PostgresRecordPlatformRepository) PeekCompletedIdempotency(
+	ctx context.Context,
+	key recordplatform.IdempotencyKey,
+) (bool, error) {
+	if err := key.Validate(); err != nil {
+		return false, err
+	}
+	tx, err := repository.startTransaction(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := repository.admit(ctx, tx); err != nil {
+		return false, err
+	}
+	var status string
+	err = tx.QueryRow(ctx, `
+		select status
+		from public.record_idempotency_keys
+		where project_id = $1
+		  and operation_kind = $2
+		  and idempotency_key = $3
+		  and status = 'completed'
+		  and expires_at > transaction_timestamp()`,
+		string(key.ProjectID),
+		string(key.OperationKind),
+		key.Key,
+	).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("peek completed idempotency: %w", err)
+	}
+	return status == string(recordplatform.IdempotencyStatusCompleted), nil
+}
+
 // ClaimIdempotency creates, replays, or takes over one idempotency row while
 // holding its serialization-key row lock. Every durable timestamp is computed
 // by PostgreSQL transaction_timestamp().

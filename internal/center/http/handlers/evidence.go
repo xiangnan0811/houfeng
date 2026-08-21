@@ -21,11 +21,14 @@ const evidencePrivateCacheControl = "private, no-store"
 type evidenceHandlerApplication interface {
 	CapturePreview(context.Context, evidence.CapturePreviewRequest) (evidence.CapturePreviewResult, error)
 	ReadSnapshot(context.Context, evidence.ReadSnapshotRequest) (evidence.ReadSnapshotResult, error)
+	ResolveComparisonCandidates(context.Context, evidence.ComparisonCandidateRequest) (evidence.ComparisonCandidateResult, error)
+	EvaluateFixedComparison(context.Context, evidence.ComparisonEvaluateRequest) (evidence.ComparisonEvaluateOutput, error)
 }
 
 type EvidenceHandlerOptions struct {
-	NewRecordID   func() (string, error)
-	NewSnapshotID func() (string, error)
+	NewRecordID       func() (string, error)
+	NewSnapshotID     func() (string, error)
+	ComparisonEnabled bool
 }
 
 func Evidence(application evidenceHandlerApplication) http.Handler {
@@ -53,6 +56,18 @@ func EvidenceWithOptions(application evidenceHandlerApplication, options Evidenc
 		switch {
 		case request.URL.Path == "/api/evidence/capture-previews":
 			handleEvidenceCapturePreview(w, request, actor, application, options)
+		case request.URL.Path == "/api/evidence/comparison-candidates":
+			if !options.ComparisonEnabled {
+				writeEvidenceNotFound(w)
+				return
+			}
+			handleEvidenceComparisonCandidates(w, request, actor, application)
+		case request.URL.Path == "/api/evidence/comparisons":
+			if !options.ComparisonEnabled {
+				writeEvidenceNotFound(w)
+				return
+			}
+			handleEvidenceFixedComparison(w, request, actor, application)
 		case strings.HasPrefix(request.URL.Path, "/api/evidence/"):
 			handleEvidenceRead(w, request, actor, application)
 		default:
@@ -379,8 +394,19 @@ func decodeEvidenceRequestJSON(w http.ResponseWriter, request *http.Request, des
 
 func writeEvidenceApplicationError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, recordauth.ErrDenied), errors.Is(err, evidence.ErrSnapshotNotFound):
+	case errors.Is(err, recordauth.ErrDenied), errors.Is(err, evidence.ErrSnapshotNotFound),
+		errors.Is(err, evidence.ErrComparisonSubjectNotFound), errors.Is(err, evidence.ErrComparisonSelectionNotFound):
 		writeEvidenceNotFound(w)
+	case errors.Is(err, evidence.ErrInvalidComparisonSelection):
+		writeEvidenceError(w, http.StatusUnprocessableEntity, "comparison_selection_invalid", "comparison selection is invalid")
+	case errors.Is(err, evidence.ErrComparisonSelectionIncomplete):
+		writeEvidenceError(w, http.StatusUnprocessableEntity, "comparison_selection_incomplete", "comparison selection is incomplete")
+	case errors.Is(err, evidence.ErrComparisonCapacityExhausted):
+		writeEvidenceError(w, http.StatusTooManyRequests, "comparison_capacity_exhausted", "comparison capacity is exhausted")
+	case errors.Is(err, evidence.ErrComparisonRequestMemoryLimit):
+		writeEvidenceError(w, http.StatusUnprocessableEntity, "comparison_request_memory_limit", "comparison request exceeds memory limit")
+	case errors.Is(err, evidence.ErrComparisonResultTooLarge):
+		writeEvidenceError(w, http.StatusUnprocessableEntity, "comparison_result_too_large", "comparison result is too large")
 	case errors.Is(err, evidence.ErrKindNotRegistered), errors.Is(err, evidence.ErrUnknownKindVersion):
 		writeEvidenceError(w, http.StatusServiceUnavailable, "evidence_kind_unavailable", "evidence kind unavailable")
 	case errors.Is(err, evidence.ErrSourceUnstable):

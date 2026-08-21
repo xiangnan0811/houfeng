@@ -44,6 +44,15 @@ export function Breadcrumb() {
   const params = useParams()
 
   const segments = location.pathname.split('/').filter(Boolean)
+  if (segments[0] === 'records' && segments[1] === 'compare') {
+    return (
+      <nav className="breadcrumb" aria-label="面包屑导航">
+        <Link className="breadcrumb__link" to="/records">运维记录</Link>
+        <span className="breadcrumb__sep" aria-hidden>/</span>
+        <span className="breadcrumb__current" aria-current="page">横向比较</span>
+      </nav>
+    )
+  }
   if (segments.length < 2) return null
 
   const crumbs: Crumb[] = []

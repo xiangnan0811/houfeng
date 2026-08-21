@@ -76,10 +76,16 @@ type SnapshotReadSource interface {
 }
 
 type Service struct {
-	registry  Registry
-	intents   CaptureIntentStore
-	snapshots SnapshotReadSource
-	capacity  *CapacityEnforcer
+	registry             Registry
+	intents              CaptureIntentStore
+	snapshots            SnapshotReadSource
+	capacity             *CapacityEnforcer
+	comparisonSubjects   ComparisonSubjectResolver
+	comparisonCandidates ComparisonCandidateSource
+	comparisonRecords    ComparisonRecordScopeSource
+	comparisonSelection  ComparisonSelectionSource
+	comparisonAdmission  *ComparisonAdmission
+	comparisonSigner     ComparisonIntentSigner
 }
 
 func NewService(
@@ -94,6 +100,82 @@ func NewService(
 		return nil, ErrEvidenceServiceUnavailable
 	}
 	return &Service{registry: registry, intents: intents, snapshots: snapshots, capacity: capacity}, nil
+}
+
+func (service *Service) WithComparisonCandidates(
+	subjects ComparisonSubjectResolver,
+	candidates ComparisonCandidateSource,
+	records ComparisonRecordScopeSource,
+) *Service {
+	if service == nil || subjects == nil || candidates == nil || records == nil {
+		return service
+	}
+	cloned := *service
+	cloned.comparisonSubjects = subjects
+	cloned.comparisonCandidates = candidates
+	cloned.comparisonRecords = records
+	return &cloned
+}
+
+func (service *Service) ResolveComparisonCandidates(
+	ctx context.Context,
+	request ComparisonCandidateRequest,
+) (ComparisonCandidateResult, error) {
+	if service == nil || service.comparisonSubjects == nil || service.comparisonCandidates == nil || service.comparisonRecords == nil {
+		return ComparisonCandidateResult{}, ErrEvidenceServiceUnavailable
+	}
+	return ResolveComparisonCandidates(
+		ctx, service.registry, service.comparisonSubjects, service.comparisonCandidates, service.comparisonRecords, request,
+	)
+}
+
+func (service *Service) WithFixedComparison(
+	selection ComparisonSelectionSource,
+	admission *ComparisonAdmission,
+	signer ComparisonIntentSigner,
+) *Service {
+	if service == nil || selection == nil {
+		return service
+	}
+	cloned := *service
+	cloned.comparisonSelection = selection
+	cloned.comparisonAdmission = admission
+	cloned.comparisonSigner = signer
+	return &cloned
+}
+
+func (service *Service) EvaluateFixedComparison(
+	ctx context.Context,
+	request ComparisonEvaluateRequest,
+) (ComparisonEvaluateOutput, error) {
+	if service == nil || service.comparisonSelection == nil {
+		return ComparisonEvaluateOutput{}, ErrEvidenceServiceUnavailable
+	}
+	if service.comparisonAdmission != nil {
+		release, err := service.comparisonAdmission.Acquire(ctx, ComparisonAdmissionTokenBytes)
+		if err != nil {
+			return ComparisonEvaluateOutput{}, err
+		}
+		defer release()
+	}
+	return ResolveFixedComparison(ctx, service.registry, service.comparisonSelection, service.comparisonSigner, request)
+}
+
+func (service *Service) PrepareComparisonSave(
+	ctx context.Context,
+	request ComparisonSaveRequest,
+) (ComparisonSavePreparation, error) {
+	if service == nil || service.comparisonSelection == nil || service.comparisonSigner == nil {
+		return ComparisonSavePreparation{}, ErrComparisonIntentUnavailable
+	}
+	payloads, _ := service.snapshots.(CapturePayloadSink)
+	if payloads == nil {
+		payloads, _ = service.intents.(CapturePayloadSink)
+	}
+	if payloads == nil {
+		return ComparisonSavePreparation{}, ErrComparisonIntentUnavailable
+	}
+	return PrepareComparisonSave(ctx, service.registry, service.comparisonSelection, service.comparisonSigner, payloads, request)
 }
 
 func (service *Service) CapturePreview(

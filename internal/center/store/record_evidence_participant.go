@@ -60,8 +60,18 @@ func (participant recordEvidenceRevisionParticipant) ApplyRevision(
 			return fmt.Errorf("%w: prepared capture", records.ErrInvalidRevisionCommand)
 		}
 	}
-	if len(captures) > 0 {
-		if err := participant.enforceProjectCapacity(ctx, tx, committed.Result.RecordID, captures); err != nil {
+	save := preparation.ComparisonSave()
+	for _, copy := range save.Copies {
+		if copy.Validate() != nil {
+			return fmt.Errorf("%w: comparison copy", records.ErrInvalidRevisionCommand)
+		}
+	}
+	if !save.Result.Empty() && save.Result.Validate() != nil {
+		return fmt.Errorf("%w: comparison result", records.ErrInvalidRevisionCommand)
+	}
+	charges := evidenceCapacityCharges(captures, save)
+	if len(charges) > 0 {
+		if err := participant.enforceProjectCapacityCharges(ctx, tx, committed.Result.RecordID, charges); err != nil {
 			return err
 		}
 	}
@@ -70,6 +80,19 @@ func (participant recordEvidenceRevisionParticipant) ApplyRevision(
 			return err
 		}
 		if err := insertEvidenceSnapshot(ctx, tx, capture); err != nil {
+			return err
+		}
+	}
+	for _, copy := range save.Copies {
+		if err := insertEvidenceSnapshotRow(ctx, tx, copy.RecordID(), copy.SnapshotID(), copy.Snapshot()); err != nil {
+			return err
+		}
+		if err := insertEvidenceCopyLineage(ctx, tx, copy.SnapshotID(), copy.CopiedFromSnapshotID(), evidence.ComparisonCopyReason); err != nil {
+			return err
+		}
+	}
+	if !save.Result.Empty() {
+		if err := insertEvidenceSnapshotRow(ctx, tx, save.Result.RecordID(), save.Result.SnapshotID(), save.Result.Snapshot()); err != nil {
 			return err
 		}
 	}
@@ -98,11 +121,43 @@ func (participant recordEvidenceRevisionParticipant) ApplyRevision(
 	return nil
 }
 
+type evidenceCapacityCharge struct {
+	size     uint64
+	expected *evidence.QuotaOutcome
+}
+
+func evidenceCapacityCharges(
+	captures []evidence.PreparedCapture,
+	save evidence.ComparisonSavePreparation,
+) []evidenceCapacityCharge {
+	charges := make([]evidenceCapacityCharge, 0, len(captures)+len(save.Copies)+1)
+	for _, capture := range captures {
+		outcome := capture.Preview().QuotaOutcome
+		charges = append(charges, evidenceCapacityCharge{size: capture.Snapshot().Size(), expected: &outcome})
+	}
+	for _, copy := range save.Copies {
+		charges = append(charges, evidenceCapacityCharge{size: copy.Snapshot().Size()})
+	}
+	if !save.Result.Empty() {
+		charges = append(charges, evidenceCapacityCharge{size: save.Result.Snapshot().Size()})
+	}
+	return charges
+}
+
 func (participant recordEvidenceRevisionParticipant) enforceProjectCapacity(
 	ctx context.Context,
 	tx pgx.Tx,
 	recordID string,
 	captures []evidence.PreparedCapture,
+) error {
+	return participant.enforceProjectCapacityCharges(ctx, tx, recordID, evidenceCapacityCharges(captures, evidence.ComparisonSavePreparation{}))
+}
+
+func (participant recordEvidenceRevisionParticipant) enforceProjectCapacityCharges(
+	ctx context.Context,
+	tx pgx.Tx,
+	recordID string,
+	charges []evidenceCapacityCharge,
 ) error {
 	if participant.capacityPolicy.Validate() != nil {
 		return evidence.ErrCapacityUnavailable
@@ -132,18 +187,17 @@ func (participant recordEvidenceRevisionParticipant) enforceProjectCapacity(
 		return ErrEvidencePersistenceConflict
 	}
 	used := uint64(usedLogicalBytes)
-	for _, capture := range captures {
-		additional := capture.Snapshot().Size()
-		if additional == 0 || additional > math.MaxInt64 {
+	for _, charge := range charges {
+		if charge.size == 0 || charge.size > math.MaxInt64 {
 			return ErrEvidencePersistenceConflict
 		}
-		evaluation, err := participant.capacityPolicy.Evaluate(used, additional)
+		evaluation, err := participant.capacityPolicy.Evaluate(used, charge.size)
 		if err != nil {
 			return fmt.Errorf("%w: evaluate final evidence capacity: %w", ErrEvidencePersistenceConflict, err)
 		}
-		if evaluation.Outcome != capture.Preview().QuotaOutcome ||
-			evaluation.Outcome.Status == evidence.QuotaExceeded ||
-			evaluation.Outcome.Status == evidence.QuotaUnavailable {
+		if evaluation.Outcome.Status == evidence.QuotaExceeded ||
+			evaluation.Outcome.Status == evidence.QuotaUnavailable ||
+			(charge.expected != nil && evaluation.Outcome != *charge.expected) {
 			return fmt.Errorf("%w: %w", ErrEvidencePersistenceConflict, evidence.ErrPreviewStale)
 		}
 		used = evaluation.ProjectedBytes
@@ -252,7 +306,30 @@ func persistedEvidenceIntentMatchesCapture(persisted persistedEvidenceCaptureInt
 }
 
 func insertEvidenceSnapshot(ctx context.Context, tx pgx.Tx, capture evidence.PreparedCapture) error {
-	snapshot := capture.Snapshot()
+	return insertEvidenceSnapshotRow(ctx, tx, capture.RecordID(), capture.SnapshotID(), capture.Snapshot())
+}
+
+func insertEvidenceCopyLineage(ctx context.Context, tx pgx.Tx, snapshotID, copiedFromSnapshotID, reason string) error {
+	if !evidence.ValidSnapshotID(snapshotID) || !evidence.ValidSnapshotID(copiedFromSnapshotID) ||
+		snapshotID == copiedFromSnapshotID {
+		return ErrInvalidEvidencePersistence
+	}
+	inserted, err := tx.Exec(ctx, `
+		insert into public.evidence_copy_lineage (
+			snapshot_id, copied_from_snapshot_id, copy_reason
+		) values ($1, $2, $3)`,
+		snapshotID, copiedFromSnapshotID, reason,
+	)
+	if err != nil {
+		return fmt.Errorf("insert evidence copy lineage: %w", err)
+	}
+	if inserted.RowsAffected() != 1 {
+		return ErrEvidencePersistenceConflict
+	}
+	return nil
+}
+
+func insertEvidenceSnapshotRow(ctx context.Context, tx pgx.Tx, recordID, snapshotID string, snapshot evidence.CanonicalSnapshot) error {
 	envelope := snapshot.Envelope()
 	subjectJSON, err := marshalEvidenceParticipantJSON(envelope.Subject)
 	if err != nil {
@@ -316,8 +393,8 @@ func insertEvidenceSnapshot(ctx context.Context, tx pgx.Tx, capture evidence.Pre
 			$23, $24, $25, $26, $27, $28, $29, $30,
 			$31, $32, $33
 		)`,
-		capture.SnapshotID(),
-		capture.RecordID(),
+		snapshotID,
+		recordID,
 		string(envelope.Key.Kind),
 		int64(envelope.Key.SchemaVersion),
 		envelope.Source.Type,
