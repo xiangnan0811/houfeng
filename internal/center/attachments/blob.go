@@ -35,6 +35,12 @@ func (request PutRequest) Validate() error {
 	return nil
 }
 
+// NewBlobTemporaryKey allocates a one-time S3 temporary object key.
+// Local Blob Put ignores it; S3 Blob Put rejects an empty or malformed key.
+func NewBlobTemporaryKey() (string, error) {
+	return newS3BlobTemporaryKey()
+}
+
 type ObjectVersion struct {
 	Key       string
 	VersionID string

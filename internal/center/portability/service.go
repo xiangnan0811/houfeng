@@ -588,45 +588,19 @@ func (service *Service) fillArchive(ctx context.Context, request PreviewRequest,
 		return err
 	}
 	recordID := material.document.RecordID
-	entries := []ArchiveEntry{{
-		Path:           "records/" + recordID + "/document.md",
-		Classification: ArchiveClassMarkdown,
-		Payload:        append([]byte(nil), material.payload...),
-	}}
-	for _, snapshotID := range material.document.EvidenceSnapshotIDs {
-		if service.evidence == nil {
-			continue
-		}
-		exported, err := service.evidence.Export(ctx, evidence.ExportRequest{
-			Actor: request.Actor, SnapshotID: snapshotID, Mode: evidenceExportMode(request.ExportMode),
-		})
-		if err != nil || len(exported.Bytes) == 0 {
-			continue
-		}
-		payload := append([]byte(nil), exported.Bytes...)
-		if service.snapshots != nil {
-			if authorized, loadErr := service.snapshots.LoadAuthorizedEvidenceSnapshot(ctx, request.Actor, snapshotID); loadErr == nil && authorized.Snapshot.Size() > 0 {
-				if wrapped, wrapErr := encodeOfficialEvidenceRestoreMember(authorized.Snapshot, exported.Bytes); wrapErr == nil {
-					payload = wrapped
-				}
-			}
-		}
-		entries = append(entries, ArchiveEntry{
-			Path:           "records/" + recordID + "/evidence/" + snapshotID + ".json",
-			Classification: ArchiveClassEvidenceJSON,
-			Payload:        payload,
-		})
-	}
+	evidenceEntries, evidenceIncluded, wrapUnavailable := service.evaluateOfficialArchiveEvidence(ctx, request, material.document)
+	unavailable := append(keepNonAttachmentUnavailable(material.unavailable), wrapUnavailable...)
+	var comparisonEntries []ArchiveEntry
 	if request.SnapshotID != "" && service.comparison != nil && service.snapshots != nil {
 		comparison := *material
 		if err := service.fillComparison(ctx, request, &comparison); err != nil {
 			if !errors.Is(err, ErrInvalidExportRequest) {
-				material.unavailable = append(material.unavailable, UnavailableMaterial{
+				unavailable = append(unavailable, UnavailableMaterial{
 					Kind: "comparison", ID: request.SnapshotID, Reason: materialReason(err),
 				})
 			}
 		} else {
-			entries = append(entries, ArchiveEntry{
+			comparisonEntries = append(comparisonEntries, ArchiveEntry{
 				Path:           "records/" + recordID + "/comparison.result_v1.json",
 				Classification: ArchiveClassComparisonJSON,
 				Payload:        append([]byte(nil), comparison.payload...),
@@ -635,21 +609,75 @@ func (service *Service) fillArchive(ctx context.Context, request PreviewRequest,
 			material.snapshotID = request.SnapshotID
 		}
 	}
-	archiveBytes := 0
-	for _, entry := range entries {
+	draftMarkdown := renderMarkdownExport(material.document, evidenceIncluded, unavailable)
+	archiveBytes := len(draftMarkdown)
+	for _, entry := range evidenceEntries {
 		archiveBytes += len(entry.Payload)
 	}
-	attachmentEntries, _, attachmentUnavailable := service.evaluateExportAttachments(
-		ctx, request, recordID, material.document.AttachmentIDs, true, len(entries), archiveBytes,
+	for _, entry := range comparisonEntries {
+		archiveBytes += len(entry.Payload)
+	}
+	attachmentEntries, attachmentIncluded, attachmentUnavailable := service.evaluateExportAttachments(
+		ctx, request, recordID, material.document.AttachmentIDs, true,
+		1+len(evidenceEntries)+len(comparisonEntries), archiveBytes,
 	)
+	included := append(append([]string(nil), evidenceIncluded...), attachmentIncluded...)
+	unavailable = append(unavailable, attachmentUnavailable...)
+	entries := []ArchiveEntry{{
+		Path:           "records/" + recordID + "/document.md",
+		Classification: ArchiveClassMarkdown,
+		Payload:        renderMarkdownExport(material.document, included, unavailable),
+	}}
+	entries = append(entries, evidenceEntries...)
+	entries = append(entries, comparisonEntries...)
 	entries = append(entries, attachmentEntries...)
-	material.unavailable = append(keepNonAttachmentUnavailable(material.unavailable), attachmentUnavailable...)
 	raw, err := WriteArchiveV1(entries)
 	if err != nil {
 		return ErrInvalidExportRequest
 	}
+	material.unavailable = unavailable
 	material.payload = raw
 	return nil
+}
+
+func (service *Service) evaluateOfficialArchiveEvidence(
+	ctx context.Context,
+	request PreviewRequest,
+	document records.ExportDocument,
+) (entries []ArchiveEntry, included []string, unavailable []UnavailableMaterial) {
+	recordID := document.RecordID
+	for _, snapshotID := range document.EvidenceSnapshotIDs {
+		if service == nil || service.evidence == nil {
+			continue
+		}
+		exported, err := service.evidence.Export(ctx, evidence.ExportRequest{
+			Actor: request.Actor, SnapshotID: snapshotID, Mode: evidenceExportMode(request.ExportMode),
+		})
+		if err != nil || len(exported.Bytes) == 0 {
+			continue
+		}
+		if service.snapshots == nil {
+			unavailable = append(unavailable, UnavailableMaterial{Kind: "evidence", ID: snapshotID, Reason: "unavailable"})
+			continue
+		}
+		authorized, loadErr := service.snapshots.LoadAuthorizedEvidenceSnapshot(ctx, request.Actor, snapshotID)
+		if loadErr != nil || authorized.Snapshot.Size() == 0 {
+			unavailable = append(unavailable, UnavailableMaterial{Kind: "evidence", ID: snapshotID, Reason: "unavailable"})
+			continue
+		}
+		wrapped, wrapErr := encodeOfficialEvidenceRestoreMember(authorized.Snapshot, exported.Bytes)
+		if wrapErr != nil {
+			unavailable = append(unavailable, UnavailableMaterial{Kind: "evidence", ID: snapshotID, Reason: "unavailable"})
+			continue
+		}
+		included = append(included, snapshotID)
+		entries = append(entries, ArchiveEntry{
+			Path:           "records/" + recordID + "/evidence/" + snapshotID + ".json",
+			Classification: ArchiveClassEvidenceJSON,
+			Payload:        wrapped,
+		})
+	}
+	return entries, included, unavailable
 }
 
 func (service *Service) fillPDF(ctx context.Context, request PreviewRequest, material *preparedMaterial) error {

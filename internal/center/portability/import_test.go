@@ -754,6 +754,72 @@ func TestOfficialArchiveWithEvidenceSnapshotIDsDryRunsAndApplies(t *testing.T) {
 	if !sawOfficial {
 		t.Fatalf("evidence imports = %#v, want official Export bytes", evidenceWriter.calls)
 	}
+	if len(importer.preparations) != 1 || len(importer.preparations[0].Imported()) != 1 {
+		t.Fatalf("imported snapshots = %#v, want persistable wrapper", importer.preparations)
+	}
+}
+
+func TestOfficialArchiveRejectsRawEvidenceJSONThatApplyCannotPersist(t *testing.T) {
+	t.Parallel()
+
+	kind, err := evidence.NewComparisonResultKind()
+	if err != nil {
+		t.Fatalf("NewComparisonResultKind() error = %v", err)
+	}
+	snapshot := mustPortabilityComparisonSnapshot(t, kind)
+	exported := kind.Export(snapshot, evidence.ExportModeSafe)
+	service, importer, _ := mustImportService(t)
+	archive := mustImportArchive(t, []ArchiveEntry{{
+		Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
+		Payload: []byte("# Disk notes\n"),
+	}, {
+		Path: "records/rec_source01/evidence/evs_rawexport01.json", Classification: ArchiveClassEvidenceJSON,
+		Payload: exported.Bytes,
+	}})
+	if _, err := service.DryRun(context.Background(), DryRunRequest{
+		Actor: portabilityTestActor(t), IdempotencyKey: "import-raw-evidence", Archive: archive,
+	}); !errors.Is(err, ErrUntrustedImportContent) {
+		t.Fatalf("DryRun(raw evidence) = %v, want ErrUntrustedImportContent", err)
+	}
+	if importer.writes != 0 {
+		t.Fatalf("raw evidence wrote %d domain rows", importer.writes)
+	}
+}
+
+func TestOfficialArchiveWrapMissAppliesWithoutEmptySuccessSnapshots(t *testing.T) {
+	t.Parallel()
+
+	service, importer, _ := mustImportService(t)
+	docs := service.documents.(*documentStub)
+	docs.mu.Lock()
+	docs.document = records.ExportDocument{
+		RecordID: "rec_wrapmiss1", RevisionID: "rrv_wrapmiss1", Title: "Wrap miss",
+		BodyMarkdown: "# Body\n", AuthorizationEpoch: 1, LockVersion: 1,
+		EvidenceSnapshotIDs: []string{"evs_wrapmiss00001"},
+	}
+	docs.mu.Unlock()
+	preview, err := service.Preview(context.Background(), PreviewRequest{
+		Actor: portabilityTestActor(t), IdempotencyKey: "export-wrap-miss-apply",
+		RecordID: "rec_wrapmiss1", ExportKind: ExportKindArchive, ExportMode: ExportModeSafe,
+	})
+	if err != nil {
+		t.Fatalf("Preview() error = %v", err)
+	}
+	raw := mustReadPreviewPayload(t, service, preview)
+	plan, err := service.DryRun(context.Background(), DryRunRequest{
+		Actor: portabilityTestActor(t), IdempotencyKey: "import-wrap-miss", Archive: raw,
+	})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if _, err := service.Apply(context.Background(), ApplyRequest{
+		Actor: portabilityTestActor(t), PlanID: plan.PlanID, LockVersion: plan.LockVersion,
+	}); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if importer.writes != 1 || len(importer.preparations) != 1 || len(importer.preparations[0].Imported()) != 0 {
+		t.Fatalf("wrap-miss apply wrote snapshots=%#v writes=%d", importer.preparations, importer.writes)
+	}
 }
 
 func TestOfficialArchiveApplyPutsKnownEvidenceOnFinishingRequest(t *testing.T) {

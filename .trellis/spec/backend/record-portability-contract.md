@@ -102,8 +102,8 @@ Child 10 落地记录可移植性：具名 `AdmissionGate`、witnessed tombstone
 - `0058` **export** artifact 仍无独立 blob version 列；S3 导出 Open 依赖 lease map。**import** artifact 已持久化 `object_version_id`，apply 可在清掉进程缓存后从 Local/S3 重读 archive
 - Create 若 staging 成功但 Publish 失败，export job 可能停在 `staging`
 - 生产 PDF 走 `contentProcessorPDFBinary()` → `houfeng-content-processor`（`ValidateIsolation` + 禁网）；`NewIsolatedDocumentPDFRenderer("")` / 进程内 `WriteDerivedPDF` 只留测试
-- 官方 archive `records/{id}/evidence/{evs}.json` 使用 restore wrapper；Apply 经 `EvidencePreparation` 在同一笔 `ImportDocumentsFinishing` 事务写入 `evidence_snapshots`。`knownKindEvidenceImporter` 仍只做 schema 门。`comparison.result_v1.json` 保持原始 `Kind.Export` 字节，不当第二份 snapshot
-- 官方 archive 纳入已授权当前修订附件字节；超限在 preview 点名为 `over_archive_limit`。Apply 经 `AdmitContent` + BlobStore + `ImportedAttachments` 在同一笔 finishing 事务插入 available 行再绑定。不信任 archive MIME/path。Activity 页不进 ZIP（已放弃）
+- 官方 archive `records/{id}/evidence/{evs}.json` 必须是 restore wrapper；Export 无法 wrap 时点名为 `unavailable` 且不写入该成员。Apply 对非 wrapper 的 `evidence_json` fail-closed。`knownKindEvidenceImporter` 仍只做 schema 门。`comparison.result_v1.json` 保持原始 `Kind.Export` 字节，不当第二份 snapshot
+- 官方 archive 只纳入 `AdmitContent` 可恢复的附件；不支持的类型 preview 点名为 `unsupported` 且不进 ZIP。超限点名为 `over_archive_limit`。Apply 经 `AdmitContent` + `NewBlobTemporaryKey` + BlobStore + `ImportedAttachments` 在同一笔 finishing 事务插入 available 行再绑定。不信任 archive MIME/path。Activity 页不进 ZIP（已放弃）
 - 生产 `NewAuthoritativeProjectionRebuilder` 不另起 rebuild worker：search/activity 已在 `ImportDocuments` → `SaveRevisions` 同一事务内投影；导入 checkpoint 仍被拒绝
 - `HOUFENG_MINIO_INTEGRATION=1` / `HOUFENG_POSTGRES_INTEGRATION=1` 集成套件由 Child 11 在有环境时跑；本 child 只保证测试存在且无环境 skip
 - Witness 池：bootstrap 在 `HOUFENG_DELETION_WITNESS_DATABASE_URL` 有值时打开；未配则 reader 对 nil witness fail-closed

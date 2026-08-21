@@ -258,12 +258,22 @@ func TestPortabilityArchiveExportIncludesAuthorizedFilesAndNamesUnavailable(t *t
 		},
 		evidence: map[string]error{denied: recordauth.ErrDenied},
 		snapshot: evidence.AuthorizedSnapshot{
-			RecordID: "rec_archive1", SnapshotID: "evs_comparison01",
+			RecordID: "rec_archive1", SnapshotID: allowed,
 			Key: evidence.ComparisonResultV1Key(), Snapshot: snapshot,
 		},
 		comparison: kind,
 	}
 	service, _ := mustPortabilityService(t, harness)
+	service.snapshots = &snapshotStub{snapshots: map[string]evidence.AuthorizedSnapshot{
+		allowed: {
+			RecordID: "rec_archive1", SnapshotID: allowed,
+			Key: evidence.ComparisonResultV1Key(), Snapshot: snapshot,
+		},
+		"evs_comparison01": {
+			RecordID: "rec_archive1", SnapshotID: "evs_comparison01",
+			Key: evidence.ComparisonResultV1Key(), Snapshot: snapshot,
+		},
+	}}
 	preview, err := service.Preview(context.Background(), PreviewRequest{
 		Actor: portabilityTestActor(t), IdempotencyKey: "export-archive-1",
 		RecordID: "rec_archive1", SnapshotID: "evs_comparison01",
@@ -294,11 +304,49 @@ func TestPortabilityArchiveExportIncludesAuthorizedFilesAndNamesUnavailable(t *t
 	if !strings.Contains(string(document.Payload), "不可用材料") || !strings.Contains(string(document.Payload), denied) {
 		t.Fatalf("archive markdown omitted unauthorized material: %s", document.Payload)
 	}
-	if !bytes.Contains(byPath["records/rec_archive1/evidence/"+allowed+".json"].Payload, []byte(`{"ok":true}`)) {
-		t.Fatal("archive omitted authorized evidence bytes")
+	if _, ok := decodeOfficialEvidenceRestoreMember(byPath["records/rec_archive1/evidence/"+allowed+".json"].Payload); !ok {
+		t.Fatal("archive omitted authorized evidence wrapper")
 	}
 	if !bytes.Equal(byPath["records/rec_archive1/comparison.result_v1.json"].Payload, wantComparison.Bytes) {
 		t.Fatal("archive comparison bytes != ComparisonResultKind.Export")
+	}
+}
+
+func TestPortabilityArchiveOmitsUnwrappableEvidenceInsteadOfRawExport(t *testing.T) {
+	t.Parallel()
+
+	missing := "evs_wrapmiss00001"
+	service, _ := mustPortabilityService(t, portabilityHarness{
+		enabled: true,
+		document: records.ExportDocument{
+			RecordID: "rec_wrapmiss1", RevisionID: "rrv_wrapmiss1", Title: "Wrap miss",
+			BodyMarkdown: "# Body\n", AuthorizationEpoch: 1, LockVersion: 1,
+			EvidenceSnapshotIDs: []string{missing},
+		},
+	})
+	preview, err := service.Preview(context.Background(), PreviewRequest{
+		Actor: portabilityTestActor(t), IdempotencyKey: "export-wrap-miss",
+		RecordID: "rec_wrapmiss1", ExportKind: ExportKindArchive, ExportMode: ExportModeSafe,
+	})
+	if err != nil {
+		t.Fatalf("Preview() error = %v", err)
+	}
+	if len(preview.Unavailable) != 1 || preview.Unavailable[0].ID != missing || preview.Unavailable[0].Reason != "unavailable" {
+		t.Fatalf("unavailable = %#v, want named wrap miss", preview.Unavailable)
+	}
+	raw := mustReadPreviewPayload(t, service, preview)
+	_, entries, err := ReadArchiveV1(raw)
+	if err != nil {
+		t.Fatalf("ReadArchiveV1() error = %v", err)
+	}
+	for _, entry := range entries {
+		if entry.Classification == ArchiveClassEvidenceJSON {
+			t.Fatalf("archive wrote unwrappable evidence member %q", entry.Path)
+		}
+		if entry.Classification == ArchiveClassMarkdown &&
+			(strings.Contains(string(entry.Payload), "## 已授权材料") || !strings.Contains(string(entry.Payload), missing)) {
+			t.Fatalf("archive markdown listed wrap miss as authorized: %s", entry.Payload)
+		}
 	}
 }
 

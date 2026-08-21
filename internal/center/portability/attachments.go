@@ -87,6 +87,13 @@ func (service *Service) evaluateExportAttachments(
 			})
 			continue
 		}
+		displayName, _, err := admitOfficialAttachment(ctx, material.DisplayName, material.Bytes)
+		if err != nil {
+			unavailable = append(unavailable, UnavailableMaterial{
+				Kind: "attachment", ID: attachmentID, Reason: "unsupported",
+			})
+			continue
+		}
 		if enforceArchiveLimits &&
 			(uint64(len(material.Bytes)) > archiveV1MaxEntryBytes ||
 				currentEntries+1 > archiveV1MaxEntries ||
@@ -98,7 +105,6 @@ func (service *Service) evaluateExportAttachments(
 		}
 		included = append(included, "attachment:"+attachmentID)
 		if enforceArchiveLimits {
-			displayName := officialAttachmentDisplayName(material.DisplayName, material.Bytes)
 			entries = append(entries, ArchiveEntry{
 				Path:           "records/" + recordID + "/attachments/" + attachmentID + "/" + displayName,
 				Classification: ArchiveClassAttachment,
@@ -111,12 +117,21 @@ func (service *Service) evaluateExportAttachments(
 	return entries, included, unavailable
 }
 
-func officialAttachmentDisplayName(preferred string, content []byte) string {
-	displayName, _, err := officialAttachmentAdmission(preferred, content)
+func admitOfficialAttachment(ctx context.Context, preferred string, content []byte) (displayName, mediaType string, err error) {
+	displayName, mediaType, err = officialAttachmentAdmission(preferred, content)
 	if err != nil {
-		return "attachment.bin"
+		return "", "", err
 	}
-	return displayName
+	admitted, err := attachments.AdmitContent(ctx, attachments.AdmissionRequest{
+		DisplayName:       displayName,
+		DeclaredMediaType: mediaType,
+		SizeBytes:         int64(len(content)),
+		Content:           bytes.NewReader(content),
+	}, attachments.DefaultAdmissionLimits(attachments.DefaultLimits()))
+	if err != nil {
+		return "", "", err
+	}
+	return displayName, admitted.MediaType, nil
 }
 
 func officialAttachmentAdmission(preferred string, content []byte) (displayName, mediaType string, err error) {
@@ -132,6 +147,9 @@ func officialAttachmentAdmission(preferred string, content []byte) (displayName,
 	case bytes.HasPrefix(content, []byte{0xff, 0xd8, 0xff}):
 		mediaType = "image/jpeg"
 		extension = ".jpg"
+	case len(content) >= 12 && bytes.Equal(content[:4], []byte("RIFF")) && bytes.Equal(content[8:12], []byte("WEBP")):
+		mediaType = "image/webp"
+		extension = ".webp"
 	case bytes.HasPrefix(content, []byte("%PDF-")):
 		mediaType = "application/pdf"
 		extension = ".pdf"
@@ -181,7 +199,7 @@ func importedAttachmentIdentity(entry ArchiveEntry) (sourceID, displayName strin
 	if len(parts) < 5 || parts[0] != "records" || parts[2] != "attachments" || !strings.HasPrefix(parts[3], "att_") {
 		return "", "", ErrUntrustedImportContent
 	}
-	displayName, _, err = officialAttachmentAdmission(parts[len(parts)-1], entry.Payload)
+	displayName, _, err = admitOfficialAttachment(context.Background(), parts[len(parts)-1], entry.Payload)
 	if err != nil {
 		return "", "", err
 	}
@@ -217,22 +235,19 @@ func (service *Service) restoreImportedAttachments(
 		if targetRecord == "" {
 			return nil, nil, ErrInvalidImportRequest
 		}
-		displayName, mediaType, err := officialAttachmentAdmission(item.DisplayName, item.Payload)
-		if err != nil {
-			return nil, nil, err
-		}
-		admitted, err := attachments.AdmitContent(ctx, attachments.AdmissionRequest{
-			DisplayName:       displayName,
-			DeclaredMediaType: mediaType,
-			SizeBytes:         int64(len(item.Payload)),
-			Content:           bytes.NewReader(item.Payload),
-		}, attachments.DefaultAdmissionLimits(attachments.DefaultLimits()))
+		displayName, mediaType, err := admitOfficialAttachment(ctx, item.DisplayName, item.Payload)
 		if err != nil {
 			return nil, nil, err
 		}
 		digest := sha256.Sum256(item.Payload)
+		temporaryKey, err := attachments.NewBlobTemporaryKey()
+		if err != nil {
+			return nil, nil, err
+		}
 		object, err := service.attachmentBlobs.Put(ctx, attachments.PutRequest{
-			ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(item.Payload)),
+			ExpectedSHA256:    digest,
+			ExpectedSizeBytes: int64(len(item.Payload)),
+			TemporaryKey:      temporaryKey,
 		}, bytes.NewReader(item.Payload))
 		if err != nil {
 			return nil, nil, err
@@ -240,7 +255,7 @@ func (service *Service) restoreImportedAttachments(
 		imported[targetRecord] = append(imported[targetRecord], attachments.ImportedAvailableAttachment{
 			AttachmentID:     item.TargetID,
 			DisplayName:      displayName,
-			MediaType:        admitted.MediaType,
+			MediaType:        mediaType,
 			LogicalSizeBytes: int64(len(item.Payload)),
 			Object:           object,
 			BackendKind:      backend,
