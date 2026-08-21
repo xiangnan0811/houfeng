@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 253
+- **Total Sessions**: 254
 - **Last Active**: 2026-08-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~740 | Active |
+| `journal-5.md` | ~773 | Active |
 | `journal-4.md` | ~1998 | Archived |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 254 | 2026-08-21 | Child 11 records integration rollout | `79f62aac`, `60ed52f4` | `chore/archive-child-11-records-integration` |
 | 253 | 2026-08-21 | Child 12 archive restore fidelity | `c7081519` | `chore/archive-child-12-bookkeeping` |
 | 252 | 2026-08-21 | Child 10 portability merged | `9e910d7c` | `chore/child-10-portability-bookkeeping` |
 | 251 | 2026-08-21 | Child 8 records comparison workbench | `d91987e6`, `3f95a3db` | `docs/child-8-comparison-plan-reconciliation` |
