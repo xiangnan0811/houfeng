@@ -373,6 +373,18 @@ func TestS3BlobStoreOperationsRevalidateBucketContract(t *testing.T) {
 	}
 }
 
+func TestNewBlobTemporaryKeyMatchesS3Contract(t *testing.T) {
+	t.Parallel()
+
+	key, err := NewBlobTemporaryKey()
+	if err != nil {
+		t.Fatalf("NewBlobTemporaryKey() error = %v", err)
+	}
+	if !validS3BlobTemporaryKey(key) {
+		t.Fatalf("NewBlobTemporaryKey() = %q, want valid S3 temporary key", key)
+	}
+}
+
 func TestS3BlobStoreRejectsInvalidTemporaryKeysBeforeBackendAccess(t *testing.T) {
 	content := []byte("invalid caller-provided temporary key")
 	tests := []struct {

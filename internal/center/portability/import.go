@@ -626,6 +626,11 @@ func planImportedEvidence(planned *plannedArchive, entry ArchiveEntry, remaps ma
 	if !knownLocalImportSchema(schema) {
 		return ErrImportSchemaBlocked
 	}
+	if entry.Classification == ArchiveClassEvidenceJSON {
+		if _, ok := decodeOfficialEvidenceRestoreMember(entry.Payload); !ok {
+			return ErrUntrustedImportContent
+		}
+	}
 	targetID := sourceID
 	if remaps != nil {
 		remap, ok := remaps[sourceID]
