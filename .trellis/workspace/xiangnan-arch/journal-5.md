@@ -651,3 +651,25 @@ Closed review P1/P2 (keyset drain, auth digests from visibility, checkpoint Caug
 ### Status
 
 [OK] **Completed**
+
+
+## Session 251: Child 8 records comparison workbench
+
+**Date**: 2026-08-21
+**Task**: Child 8 records comparison workbench
+**Branch**: `docs/child-8-comparison-plan-reconciliation`
+
+### Summary
+
+Delivered the gated records comparison workbench (candidates, host/probe series, HMAC save-as-record, /records/compare). Work commits landed first, then the task was archived. 4 GiB harness stays Child 11; sticky row headers stay omitted under the CSS ratchet.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d91987e6` | (see git log) |
+| `3f95a3db` | (see git log) |
+
+### Status
+
+[OK] **Completed**
