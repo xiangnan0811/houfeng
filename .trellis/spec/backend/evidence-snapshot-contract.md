@@ -16,7 +16,7 @@
 - 修改 `internal/center/evidence/{capacity,maintenance_worker}.go`、`internal/center/store/evidence.go` 的capacity/backlog query或`record_evidence_participant.go`的final quota check；
 - 新增 kind/schema、producer/rule version、event/state/provenance 或敏感字段语义。
 
-已注册的 evidence kind 只允许：`ip_quality.report/v1`、`monitoring.host/v1`、`monitoring.probe/v2`、`monitoring.event/v2`、`subscription.cost/v1`、`command.audit/v1`。`asset_history_source/v1` 是 source/activity adapter，不是 registry kind，禁止注册 `asset.history/*`。
+已注册的 evidence kind 只允许：`ip_quality.report/v1`、`monitoring.host/v1`、`monitoring.probe/v2`、`monitoring.event/v2`、`subscription.cost/v1`、`command.audit/v1`、`comparison.result/v1`。`asset_history_source/v1` 是 source/activity adapter，不是 registry kind，禁止注册 `asset.history/*`。`comparison.result/v1` 没有 live capture；只由比较另存写入。
 
 ## 2. Signatures / Data Flow
 
@@ -121,6 +121,19 @@ GET /api/evidence/{snapshot_id}
 - metrics/alerts只暴露bounded aggregate count/bytes/status/timestamps/backlog，不带project ID、record/snapshot/intent ID、digest、payload或dependency error文本；observer copy和并发访问必须`-race`安全，相同alert state不增长cardinality，恢复到normal必须可见。
 - production nil/typed-nil `AdmissionGate`时bootstrap不注册maintenance run/log loop；Child 10提供真实gate后才组合worker。不得用allow-all/no-op gate制造假GREEN，Evidence capture/save feature仍保持关闭。
 
+### 3.8 横向比较工作台
+
+- 比较编排放在 `internal/center/evidence/`。`evidence` 不得 import `records`；比较路径不得 import `activity` / `recordsearch`。HTTP 只解析 candidate/compare；另存复用 records 事务与 `evidence_copy_lineage`。
+- `HOUFENG_COMPARISON_ENABLED` 默认 false，叠在 `HOUFENG_RECORDS_ENABLED` 上。capability 关闭时 route 与 handler 同时关闭。已保存的 `comparison.result/v1` 一旦注册必须仍可被 registry 读取。
+- `POST /api/evidence/comparison-candidates` 只接受 2–6 个 `vps|monitoring_instance|target` 与绝对 UTC 窗口；返回授权安全的 snapshot/revision 候选。不 capture、不签发 intent。缺失 subject 对外统一 404，不泄露计数。
+- `POST /api/evidence/comparisons` 只接受 2–6 个 snapshot XOR `record_id+revision_id`。客户端不得提交 payload、单位转换或已计算差值。无 `Detail` 返回 review；有 `Detail` 只追加一个 kind/metric。
+- 非时序 kind 复用 pairwise `Kind.Compare(..., AlignmentExact)`，`item_index` 是真实 compared item。`actual_coverage` series / trend / matrix 只服务 `monitoring.host/v1` 与 `monitoring.probe/v2`：`AlignActualCoverage` 必须把 nearest 一对一匹配接到 series 与逐桶差，尊重 `BaselineIndex`，对每个非基准项配对；测试必须断言配对改变输出。空 metric 记 `metric_missing`，不得默默返回空图。当前 kind 的 `common_overlap` 只返回 blocked reason，不实现重聚合。
+- 任一 `metadata_only` 只跳过该 item 的 payload，不得短路整次数值计算。授权失败省略 snapshot（对外 404）；授权后 payload/hash 失败标 `Unreadable` 且不签发 intent。
+- `comparison.result/v1` 只固化系统可验证选择、条件、差异和告警，使用派生 envelope，不整份拷贝基准机器 Source/Authorization。无快照拷贝时仍写 result（只存条件与告警）。人工标题与 conclusion 留在 revision Markdown。kind 实现 Summarize / Compare(self/exact) / Export；无 live capture。
+- 另存走现有 `POST /api/records` / revisions + `Idempotency-Key` + `comparison_intent`。客户端不得发送 `evidence_items` 或自造 copied IDs。participant `Name() == "comparison"` 排在 `collaboration` 与 `evidence` 之间；copy 使用新 logical ID + lineage，source mutation = 0。HMAC claims 必须带上修订 `record_id`/`revision_id`、chosen snapshot 和 compare 时的 Detail；另存重算不得把修订项降级成 snapshot-only。HMAC 仍有效但过期的 intent 必须能重建同一 copy/result identity，以便同 key 重试到达 idempotent replay。
+- HMAC intent purpose 为 `comparison-save/v1`，独立 0400 regular file、`O_NOFOLLOW`，不复用 deletion/backup/session key。`HOUFENG_COMPARISON_ENABLED=true` 时 keyring 与 key id 必填。unreadable / hash / copy blocker 不签发 intent；签发失败不得保持 eligible 且无 token。
+- 进程内 weighted admission：满额时 `Wait` 直到有空位或 `ctx.Done()` 后 429 `comparison_capacity_exhausted`，越界 422 `comparison_request_memory_limit`。4 GiB cgroup / mixed-load harness 不在本 child。
+
 ## 4. Validation Matrix
 
 | Boundary | Accept | Reject / Fail closed |
@@ -138,6 +151,7 @@ GET /api/evidence/{snapshot_id}
 | Recovery | deep-cloned reachable inventory、exact timestamp、同输入幂等 | orphan payload、浅拷贝TOCTOU、prefix kind放行、分歧replay |
 | Capacity | project logical bytes、warning可确认、exact boundary、existing ref豁免 | attachment quota、physical dedup折扣、stale/exceeded/unavailable写intent或snapshot |
 | Janitor/metrics | bounded DB-time cleanup、global-ref GC、aggregate defensive snapshot | unbounded scan、local-time age、identity/digest/payload label、nil gate log loop |
+| Comparison workbench | 2–6 authorized items、host/probe-only series、HMAC intent、copy-lineage save、capability default-off | generic JSON/Markdown 抽指标、source mutation、human conclusion 进 derived evidence、4 GiB harness 冒充本 child 退出门 |
 
 ## 5. Good / Baseline / Bad
 
@@ -160,6 +174,7 @@ sh scripts/test-record-platform-integration.sh postgres -- go test -v ./internal
 sh scripts/test-record-platform-integration.sh postgres -- go test -v ./internal/center/store -run '^TestPostgresIntegrationEvidenceCapacity' -count=1
 go test ./internal/center/evidence -run '^TestEvidenceMaintenance' -count=10
 go test -race ./internal/center/evidence ./internal/center/store ./cmd/houfeng-center -count=1
+go test -race ./internal/center/evidence ./internal/center/records ./internal/center/store ./internal/center/http/handlers -run 'Comparison|Comparability|Alignment' -count=10
 ```
 
 事件 writer 变更必须保留 `TestMonitoringEventEvidenceIsReachableFromIncidentWriterPath`、`TestMonitoringEventEvidenceIsReachableFromStateControlWriterPaths`、builder fail-closed 矩阵和真实 PostgreSQL 五类 writer-through-reader 覆盖。Task 完成前还需 `make verify-go`、`go test ./... -count=1`、`go mod verify`、`gofmt -d`、`git diff --check HEAD` 与 Trellis task validation。
