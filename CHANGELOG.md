@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.72.0](https://github.com/xiangnan0811/houfeng/compare/v0.71.0...v0.72.0) (2026-08-21)
+
+
+### Features
+
+* **records:** add official record export, import, and archive portability ([#425](https://github.com/xiangnan0811/houfeng/issues/425)) ([9e910d7](https://github.com/xiangnan0811/houfeng/commit/9e910d7c4c2b743e930de051e9590f6e5171d744))
+
 ## [0.71.0](https://github.com/xiangnan0811/houfeng/compare/v0.70.0...v0.71.0) (2026-08-21)
 
 
