@@ -41,6 +41,10 @@ type ComparisonExporter interface {
 	Summarize(evidence.CanonicalSnapshot) evidence.Summary
 }
 
+type KindSource interface {
+	LookupKey(evidence.KindKey) (evidence.Kind, error)
+}
+
 type JobRepository interface {
 	ClaimExportJob(context.Context, store.ClaimRecordExportJobInput) (store.RecordExportJob, error)
 	AdvanceExportJob(context.Context, store.AdvanceRecordExportJobInput) error
@@ -63,6 +67,9 @@ type Options struct {
 	Imports         ImportRepository
 	Importer        DocumentImporter
 	EvidenceImports EvidenceImporter
+	Kinds           KindSource
+	Attachments     AttachmentSource
+	AttachmentBlobs attachments.BlobStore
 	Rebuilder       ImportProjectionRebuilder
 	Staging         *LeasedBlobStore
 	Now             func() time.Time
@@ -82,6 +89,9 @@ type Service struct {
 	imports         ImportRepository
 	importer        DocumentImporter
 	evidenceImports EvidenceImporter
+	kinds           KindSource
+	attachments     AttachmentSource
+	attachmentBlobs attachments.BlobStore
 	rebuilder       ImportProjectionRebuilder
 	staging         *LeasedBlobStore
 	now             func() time.Time
@@ -101,6 +111,7 @@ type cachedImportPlan struct {
 	archiveDigest [32]byte
 	documents     []store.ImportDocumentPlan
 	evidence      []importedEvidencePlan
+	attachments   []importedAttachmentPlan
 	remaps        []ImportRemap
 	quarantine    []QuarantinedEvidence
 	digest        [32]byte
@@ -143,6 +154,9 @@ func NewService(options Options) (*Service, error) {
 		imports:         options.Imports,
 		importer:        options.Importer,
 		evidenceImports: options.EvidenceImports,
+		kinds:           options.Kinds,
+		attachments:     options.Attachments,
+		attachmentBlobs: options.AttachmentBlobs,
 		rebuilder:       options.Rebuilder,
 		staging:         options.Staging,
 		now:             now,
@@ -503,9 +517,11 @@ func (service *Service) fillMarkdown(ctx context.Context, request PreviewRequest
 		}
 		included = append(included, snapshotID)
 	}
-	for _, attachmentID := range material.document.AttachmentIDs {
-		included = append(included, "attachment:"+attachmentID)
-	}
+	_, attachmentIncluded, attachmentUnavailable := service.evaluateExportAttachments(
+		ctx, request, material.document.RecordID, material.document.AttachmentIDs, false, 0, 0,
+	)
+	included = append(included, attachmentIncluded...)
+	unavailable = append(unavailable, attachmentUnavailable...)
 	if request.IncludeActivity {
 		if err := service.includeActivity(ctx, request.Actor, material.document.RecordID); err != nil {
 			unavailable = append(unavailable, UnavailableMaterial{Kind: "activity", ID: material.document.RecordID, Reason: materialReason(err)})
@@ -587,10 +603,18 @@ func (service *Service) fillArchive(ctx context.Context, request PreviewRequest,
 		if err != nil || len(exported.Bytes) == 0 {
 			continue
 		}
+		payload := append([]byte(nil), exported.Bytes...)
+		if service.snapshots != nil {
+			if authorized, loadErr := service.snapshots.LoadAuthorizedEvidenceSnapshot(ctx, request.Actor, snapshotID); loadErr == nil && authorized.Snapshot.Size() > 0 {
+				if wrapped, wrapErr := encodeOfficialEvidenceRestoreMember(authorized.Snapshot, exported.Bytes); wrapErr == nil {
+					payload = wrapped
+				}
+			}
+		}
 		entries = append(entries, ArchiveEntry{
 			Path:           "records/" + recordID + "/evidence/" + snapshotID + ".json",
 			Classification: ArchiveClassEvidenceJSON,
-			Payload:        append([]byte(nil), exported.Bytes...),
+			Payload:        payload,
 		})
 	}
 	if request.SnapshotID != "" && service.comparison != nil && service.snapshots != nil {
@@ -611,6 +635,15 @@ func (service *Service) fillArchive(ctx context.Context, request PreviewRequest,
 			material.snapshotID = request.SnapshotID
 		}
 	}
+	archiveBytes := 0
+	for _, entry := range entries {
+		archiveBytes += len(entry.Payload)
+	}
+	attachmentEntries, _, attachmentUnavailable := service.evaluateExportAttachments(
+		ctx, request, recordID, material.document.AttachmentIDs, true, len(entries), archiveBytes,
+	)
+	entries = append(entries, attachmentEntries...)
+	material.unavailable = append(keepNonAttachmentUnavailable(material.unavailable), attachmentUnavailable...)
 	raw, err := WriteArchiveV1(entries)
 	if err != nil {
 		return ErrInvalidExportRequest
@@ -819,6 +852,16 @@ func evidenceExportMode(mode string) evidence.ExportMode {
 		return evidence.ExportModeSensitiveTopology
 	}
 	return evidence.ExportModeSafe
+}
+
+func keepNonAttachmentUnavailable(items []UnavailableMaterial) []UnavailableMaterial {
+	kept := make([]UnavailableMaterial, 0, len(items))
+	for _, item := range items {
+		if item.Kind != "attachment" {
+			kept = append(kept, item)
+		}
+	}
+	return kept
 }
 
 func materialReason(err error) string {

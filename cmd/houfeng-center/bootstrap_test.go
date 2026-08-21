@@ -886,13 +886,24 @@ func TestBootstrapWiresNamedRecordPortabilityService(t *testing.T) {
 		"centerevidence.NewComparisonResultKind()",
 		"newActivityExportReader(",
 		"portability.NewDeletionAdapter(",
-		"portability.NewIsolatedDocumentPDFRenderer(",
+		"portability.NewIsolatedDocumentPDFRenderer(contentProcessorPDFBinary())",
+		"portability.NewDownloadAttachmentSource(downloadService)",
+		"AttachmentBlobs: blob",
 		"Importer:",
 		"portability.NewAuthoritativeProjectionRebuilder(",
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("bootstrap.go missing portability wiring %q", required)
 		}
+	}
+	if strings.Contains(text, `NewIsolatedDocumentPDFRenderer("")`) {
+		t.Fatal("bootstrap.go still wires an empty in-process PDF renderer")
+	}
+}
+
+func TestContentProcessorPDFBinaryNeverEmpty(t *testing.T) {
+	if got := contentProcessorPDFBinary(); strings.TrimSpace(got) == "" {
+		t.Fatal("contentProcessorPDFBinary() returned empty production path")
 	}
 }
 

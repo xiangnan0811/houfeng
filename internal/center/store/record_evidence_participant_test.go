@@ -275,6 +275,39 @@ func TestRecordEvidenceRevisionParticipantRejectsSnapshotTimestampPostgresWouldR
 	}
 }
 
+func TestRecordEvidenceRevisionParticipantPersistsImportedSnapshots(t *testing.T) {
+	imported := storePreparedImportedSnapshot(t, "rec_importedparticipant", "evs_importedparticipant")
+	preparation, err := evidence.NewRevisionPreparation(imported.RecordID(), evidence.RevisionPreparationValues{
+		Imported:           []evidence.PreparedImportedSnapshot{imported},
+		OrderedSnapshotIDs: []string{imported.SnapshotID()},
+	})
+	if err != nil {
+		t.Fatalf("NewRevisionPreparation() error = %v", err)
+	}
+	tx := &fakeRecordEvidenceParticipantTx{projectID: string(recordauth.ProjectIDDefault)}
+
+	err = NewRecordEvidenceRevisionParticipant().ApplyRevision(context.Background(), tx, records.RevisionCommitted{
+		Result: records.RevisionCommitResult{
+			RecordID: imported.RecordID(), RevisionID: "rrv_importedparticipant",
+		},
+		Input:               recordsPostgresCompleteRevisionInputWithEvidence(t, "Imported evidence", preparation.SnapshotIDs()),
+		EvidencePreparation: preparation,
+	})
+	if err != nil {
+		t.Fatalf("ApplyRevision() error = %v", err)
+	}
+	if tx.capacityLockCalls != 1 || tx.queryRowCalls != 2 ||
+		!reflect.DeepEqual(tx.execKinds, []string{"payload", "snapshot", "reference"}) {
+		t.Fatalf("imported persist calls = query:%d locks:%d exec:%#v", tx.queryRowCalls, tx.capacityLockCalls, tx.execKinds)
+	}
+	if tx.referenceOrdinal != 0 || tx.referenceSnapshotID != imported.SnapshotID() {
+		t.Fatalf("revision reference = ordinal:%d snapshot:%q", tx.referenceOrdinal, tx.referenceSnapshotID)
+	}
+	if strings.Contains(tx.querySQL, "delete from public.evidence_capture_intents") {
+		t.Fatal("imported persist consumed a capture intent")
+	}
+}
+
 func storePreparedEvidenceCapture(t *testing.T, recordID, snapshotID, intentID string, previewedAt time.Time) evidence.PreparedCapture {
 	return storePreparedEvidenceCaptureWithSnapshotTimeOffset(t, recordID, snapshotID, intentID, previewedAt, 0)
 }
@@ -458,6 +491,50 @@ func storePreparedEvidenceReference(t *testing.T, actor evidence.ActorScope, rec
 	return prepared
 }
 
+func storePreparedImportedSnapshot(t *testing.T, recordID, snapshotID string) evidence.PreparedImportedSnapshot {
+	t.Helper()
+	descriptor := storeEvidenceParticipantDescriptor()
+	authorization := storeEvidenceParticipantAuthorization(t)
+	previewedAt := time.Date(2026, 8, 14, 8, 0, 0, 0, time.UTC)
+	window := evidence.TimeWindow{Start: previewedAt.Add(-time.Hour), End: previewedAt}
+	sourceDigest := sha256.Sum256([]byte("source:" + snapshotID))
+	envelope := evidence.SnapshotEnvelope{
+		Key: descriptor.Key,
+		Subject: evidence.IdentitySnapshot{
+			Type: "target", ID: authorization.SourceID, Fields: map[string]string{"display_name": "Evidence target"},
+		},
+		Source: evidence.IdentitySnapshot{
+			Type: string(recordauth.SourceKindTarget), ID: authorization.SourceID, Fields: map[string]string{"display_name": "Evidence target"},
+		},
+		Authorization: authorization, RequestedWindow: window, ActualWindow: window,
+		ObservedAt: previewedAt, CapturedAt: previewedAt.Add(time.Minute), ReferencedAt: previewedAt.Add(2 * time.Minute),
+		SourceRevision: "revision-1", SourceWatermark: "watermark-1", SourceDigest: sourceDigest,
+		ProducerVersion: "producer-1", CalculationVersion: "calculation-1",
+		Units:           evidence.UnitsSemantics{Status: evidence.UnitsApplicable, Values: map[string]string{"latency_ms": "ms"}},
+		Quality:         evidence.Quality{Status: evidence.QualityComplete, SampleCount: 60, BucketCount: 60, DataPointCount: 60},
+		Sensitivity:     evidence.SensitivityNormal,
+		ActualPrecision: evidence.DurationSemantics{Applicable: true, Value: time.Minute},
+		BucketWidth:     evidence.DurationSemantics{Applicable: true, Value: time.Minute},
+		QuotaOutcome:    evidence.QuotaOutcome{Status: evidence.QuotaAllowed},
+		Retention: evidence.RetentionSemantics{
+			Immutable: true, Scope: evidence.RetentionScopeRecordRevision,
+			SourceDeletion: evidence.SourceDeletionSnapshotRetained,
+		},
+	}
+	snapshot, _, err := evidence.NewCanonicalSnapshot(
+		descriptor, envelope, map[string]any{"metric_name": "latency_ms", "metric_value": "imported"},
+		evidence.RedactionNormalOnly,
+	)
+	if err != nil {
+		t.Fatalf("NewCanonicalSnapshot() error = %v", err)
+	}
+	imported, err := evidence.NewPreparedImportedSnapshot(recordID, snapshotID, snapshot)
+	if err != nil {
+		t.Fatalf("NewPreparedImportedSnapshot() error = %v", err)
+	}
+	return imported
+}
+
 func storeEvidenceRevisionPreparation(
 	t *testing.T,
 	recordID string,
@@ -602,6 +679,8 @@ func (tx *fakeRecordEvidenceParticipantTx) Exec(_ context.Context, sql string, a
 	case strings.Contains(compact, "pg_advisory_xact_lock"):
 		tx.capacityLockCalls++
 		return pgconn.NewCommandTag("SELECT 1"), nil
+	case strings.Contains(compact, "insert into public.evidence_payloads"):
+		tx.execKinds = append(tx.execKinds, "payload")
 	case strings.Contains(compact, "insert into public.evidence_snapshots"):
 		tx.execKinds = append(tx.execKinds, "snapshot")
 	case strings.Contains(compact, "insert into public.evidence_copy_lineage"):

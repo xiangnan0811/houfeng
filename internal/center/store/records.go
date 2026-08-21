@@ -278,6 +278,7 @@ func (repository *PostgresRecordRepository) commitRevisionOnTx(
 		DraftID:             command.DraftID,
 		BaseRevisionID:      command.BaseRevisionID,
 		EvidencePreparation: command.EvidencePreparation,
+		ImportedAttachments: command.ImportedAttachments,
 		ActivityKind:        command.ActivityKind,
 		OutboxTTL:           command.OutboxTTL,
 		Outbox:              transaction,

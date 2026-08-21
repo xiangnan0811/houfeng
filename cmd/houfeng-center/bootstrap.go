@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -984,7 +986,7 @@ func newRecordsHTTPHandlers(
 			evidenceExporter = evidenceComposition.export
 			snapshotSource = evidenceComposition.repository
 		}
-		portabilityService, err := portability.NewService(portability.Options{
+		portabilityOptions := portability.Options{
 			Enabled:         true,
 			BackendKind:     backendKind,
 			Documents:       application,
@@ -993,13 +995,19 @@ func newRecordsHTTPHandlers(
 			Snapshots:       snapshotSource,
 			Comparison:      comparisonKind,
 			Activity:        activityReader,
-			PDF:             portability.NewIsolatedDocumentPDFRenderer(""),
+			PDF:             portability.NewIsolatedDocumentPDFRenderer(contentProcessorPDFBinary()),
 			Imports:         store.NewPostgresRecordPortabilityRepository(pool, effectiveGate),
 			Importer:        application,
 			EvidenceImports: portability.NewKnownKindEvidenceImporter(),
 			Rebuilder:       portability.NewAuthoritativeProjectionRebuilder(),
 			Staging:         portability.NewLeasedBlobStore(blob),
-		})
+			Attachments:     portability.NewDownloadAttachmentSource(downloadService),
+			AttachmentBlobs: blob,
+		}
+		if evidenceComposition != nil {
+			portabilityOptions.Kinds = evidenceComposition.registry
+		}
+		portabilityService, err := portability.NewService(portabilityOptions)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create record portability service: %w", err)
 		}
@@ -1026,6 +1034,19 @@ func newRecordsHTTPHandlers(
 		handlers.RecordSearch(searchService),
 		handlers.RecordActions(actionApplication), handlers.RecordComments(commentApplication), handlers.RecordDrafts(application), handlers.RecordDeletions(nil), evidenceHandler,
 		handlers.AttachmentUploads(uploadService), handlers.AttachmentsWithOptions(downloadService), collaborationRuntime, evidenceWorker, nil
+}
+
+func contentProcessorPDFBinary() string {
+	if path, err := exec.LookPath("houfeng-content-processor"); err == nil && strings.TrimSpace(path) != "" {
+		return path
+	}
+	if executable, err := os.Executable(); err == nil {
+		sibling := filepath.Join(filepath.Dir(executable), "houfeng-content-processor")
+		if info, statErr := os.Stat(sibling); statErr == nil && !info.IsDir() {
+			return sibling
+		}
+	}
+	return "houfeng-content-processor"
 }
 
 func newAttachmentBlobStore(attachmentConfig config.AttachmentConfig) (attachments.BlobStore, error) {

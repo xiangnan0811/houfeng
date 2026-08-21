@@ -19,6 +19,12 @@ func scanImportedMember(entry ArchiveEntry) error {
 		}
 		return nil
 	}
+	if entry.Classification == ArchiveClassAttachment {
+		if len(entry.Payload) == 0 {
+			return ErrUntrustedImportContent
+		}
+		return nil
+	}
 	var decoded any
 	if err := json.Unmarshal(entry.Payload, &decoded); err != nil {
 		return ErrUntrustedImportContent

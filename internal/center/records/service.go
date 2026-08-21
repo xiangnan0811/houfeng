@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"time"
 
+	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordplatform"
@@ -31,6 +32,7 @@ type RevisionSaveRequest struct {
 	Values              CompleteRevisionValues
 	SubjectReferences   []SubjectReference
 	EvidencePreparation evidence.RevisionPreparation
+	ImportedAttachments []attachments.ImportedAvailableAttachment
 	ActivityKind        DomainActivityKind
 	IdempotencyKey      string
 	IdempotencyOwnerID  string
@@ -226,6 +228,7 @@ func (service *RevisionService) prepareRevisionCommit(
 		DraftETag:           request.DraftETag,
 		Input:               input,
 		EvidencePreparation: request.EvidencePreparation,
+		ImportedAttachments: append([]attachments.ImportedAvailableAttachment(nil), request.ImportedAttachments...),
 		ActivityKind:        request.ActivityKind,
 		OutboxTTL:           request.OutboxTTL,
 		Idempotency: recordplatform.IdempotencyClaimInputV1{

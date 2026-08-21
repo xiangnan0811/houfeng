@@ -69,7 +69,13 @@ func (participant recordEvidenceRevisionParticipant) ApplyRevision(
 	if !save.Result.Empty() && save.Result.Validate() != nil {
 		return fmt.Errorf("%w: comparison result", records.ErrInvalidRevisionCommand)
 	}
-	charges := evidenceCapacityCharges(captures, save)
+	imported := preparation.Imported()
+	for _, item := range imported {
+		if item.Validate() != nil {
+			return fmt.Errorf("%w: imported snapshot", records.ErrInvalidRevisionCommand)
+		}
+	}
+	charges := evidenceCapacityCharges(captures, save, imported)
 	if len(charges) > 0 {
 		if err := participant.enforceProjectCapacityCharges(ctx, tx, committed.Result.RecordID, charges); err != nil {
 			return err
@@ -93,6 +99,14 @@ func (participant recordEvidenceRevisionParticipant) ApplyRevision(
 	}
 	if !save.Result.Empty() {
 		if err := insertEvidenceSnapshotRow(ctx, tx, save.Result.RecordID(), save.Result.SnapshotID(), save.Result.Snapshot()); err != nil {
+			return err
+		}
+	}
+	for _, item := range imported {
+		if _, err := persistEvidencePayloadOnTx(ctx, tx, item.Snapshot()); err != nil {
+			return err
+		}
+		if err := insertEvidenceSnapshotRow(ctx, tx, item.RecordID(), item.SnapshotID(), item.Snapshot()); err != nil {
 			return err
 		}
 	}
@@ -129,8 +143,9 @@ type evidenceCapacityCharge struct {
 func evidenceCapacityCharges(
 	captures []evidence.PreparedCapture,
 	save evidence.ComparisonSavePreparation,
+	imported []evidence.PreparedImportedSnapshot,
 ) []evidenceCapacityCharge {
-	charges := make([]evidenceCapacityCharge, 0, len(captures)+len(save.Copies)+1)
+	charges := make([]evidenceCapacityCharge, 0, len(captures)+len(save.Copies)+len(imported)+1)
 	for _, capture := range captures {
 		outcome := capture.Preview().QuotaOutcome
 		charges = append(charges, evidenceCapacityCharge{size: capture.Snapshot().Size(), expected: &outcome})
@@ -141,6 +156,9 @@ func evidenceCapacityCharges(
 	if !save.Result.Empty() {
 		charges = append(charges, evidenceCapacityCharge{size: save.Result.Snapshot().Size()})
 	}
+	for _, item := range imported {
+		charges = append(charges, evidenceCapacityCharge{size: item.Snapshot().Size()})
+	}
 	return charges
 }
 
@@ -150,7 +168,7 @@ func (participant recordEvidenceRevisionParticipant) enforceProjectCapacity(
 	recordID string,
 	captures []evidence.PreparedCapture,
 ) error {
-	return participant.enforceProjectCapacityCharges(ctx, tx, recordID, evidenceCapacityCharges(captures, evidence.ComparisonSavePreparation{}))
+	return participant.enforceProjectCapacityCharges(ctx, tx, recordID, evidenceCapacityCharges(captures, evidence.ComparisonSavePreparation{}, nil))
 }
 
 func (participant recordEvidenceRevisionParticipant) enforceProjectCapacityCharges(

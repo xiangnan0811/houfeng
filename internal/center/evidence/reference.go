@@ -140,6 +140,7 @@ func (prepared PreparedReference) ActorScopeDigest() [sha256.Size]byte {
 type RevisionPreparationValues struct {
 	Captures           []PreparedCapture
 	References         []PreparedReference
+	Imported           []PreparedImportedSnapshot
 	OrderedSnapshotIDs []string
 	ComparisonSave     ComparisonSavePreparation
 }
@@ -150,6 +151,7 @@ type RevisionPreparation struct {
 	recordID       string
 	captures       []PreparedCapture
 	references     []PreparedReference
+	imported       []PreparedImportedSnapshot
 	snapshotIDs    []string
 	comparisonSave ComparisonSavePreparation
 }
@@ -159,6 +161,7 @@ func NewRevisionPreparation(recordID string, values RevisionPreparationValues) (
 		recordID:       recordID,
 		captures:       clonePreparedCaptures(values.Captures),
 		references:     clonePreparedReferences(values.References),
+		imported:       cloneImportedSnapshots(values.Imported),
 		snapshotIDs:    append([]string(nil), values.OrderedSnapshotIDs...),
 		comparisonSave: cloneComparisonSavePreparation(values.ComparisonSave),
 	}
@@ -170,8 +173,8 @@ func NewRevisionPreparation(recordID string, values RevisionPreparationValues) (
 
 func (prepared RevisionPreparation) Empty() bool {
 	return prepared.recordID == "" && len(prepared.captures) == 0 &&
-		len(prepared.references) == 0 && len(prepared.snapshotIDs) == 0 &&
-		prepared.comparisonSave.Empty()
+		len(prepared.references) == 0 && len(prepared.imported) == 0 &&
+		len(prepared.snapshotIDs) == 0 && prepared.comparisonSave.Empty()
 }
 
 func (prepared RevisionPreparation) ValidateForRecord(recordID string) error {
@@ -184,7 +187,7 @@ func (prepared RevisionPreparation) ValidateForRecord(recordID string) error {
 	if !validClosedPreparedID(recordID, "rec_") || prepared.recordID != recordID {
 		return revisionPreparationError("record identity", nil)
 	}
-	available := make(map[string]struct{}, len(prepared.captures)+len(prepared.references)+len(prepared.comparisonSave.Copies)+1)
+	available := make(map[string]struct{}, len(prepared.captures)+len(prepared.references)+len(prepared.imported)+len(prepared.comparisonSave.Copies)+1)
 	for _, capture := range prepared.captures {
 		if capture.RecordID() != recordID || capture.Validate() != nil || !addPreparedSnapshotIdentity(available, capture.SnapshotID()) {
 			return revisionPreparationError("capture", nil)
@@ -193,6 +196,11 @@ func (prepared RevisionPreparation) ValidateForRecord(recordID string) error {
 	for _, reference := range prepared.references {
 		if reference.RecordID() != recordID || reference.Validate() != nil || !addPreparedSnapshotIdentity(available, reference.SnapshotID()) {
 			return revisionPreparationError("reference", nil)
+		}
+	}
+	for _, imported := range prepared.imported {
+		if imported.RecordID() != recordID || imported.Validate() != nil || !addPreparedSnapshotIdentity(available, imported.SnapshotID()) {
+			return revisionPreparationError("imported snapshot", nil)
 		}
 	}
 	for _, copy := range prepared.comparisonSave.Copies {
@@ -253,6 +261,10 @@ func (prepared RevisionPreparation) References() []PreparedReference {
 
 func (prepared RevisionPreparation) ComparisonSave() ComparisonSavePreparation {
 	return cloneComparisonSavePreparation(prepared.comparisonSave)
+}
+
+func (prepared RevisionPreparation) Imported() []PreparedImportedSnapshot {
+	return cloneImportedSnapshots(prepared.imported)
 }
 
 func ValidSnapshotID(value string) bool {
