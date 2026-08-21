@@ -26,7 +26,7 @@ storage, Vitest, Playwright, and Trellis child-task workflow.
   program path. Child 7 landed through PR #422 / `v0.70.0`. Child 8 is
   archived at
   `archive/2026-08/07-14-vps-records-comparison-workbench`
-  (work commits `d91987e6`, `3f95a3db`). Children 10 and 11 remain
+  (work commits `d91987e6`, `3f95a3db`; PR #423). Children 10 and 11 remain
   planning: 10 needs 2–9, 11 needs 1–10.
 - Child 7 leftovers stay independent: overview manage-panel writes and
   activity group-granted viewer expansion are not Child 8 or Child 10.
@@ -171,7 +171,8 @@ Open leftovers (not Child 8): overview manage-panel writes still live in
 - [x] Exit with bounded process-local admission, partial evidence, desktop/390
   named-scroll matrix, accessibility, and atomic save tests.
 
-Archived 2026-08-21 at `archive/2026-08/07-14-vps-records-comparison-workbench`.
+Archived 2026-08-21 at `archive/2026-08/07-14-vps-records-comparison-workbench`
+(PR #423).
 Open leftovers: 4 GiB / 512 MiB mixed-load harness stays Child 11; sticky
 row headers omitted under the CSS ratchet. Do not absorb Child 7 leftovers.
 
