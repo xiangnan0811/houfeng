@@ -66,3 +66,25 @@ func TestPortabilityLeasedBlobStoreStageImportOpensAfterLeaseDrop(t *testing.T) 
 		t.Fatalf("OpenPublished() = %q %v key=%q", got, err, opened.Key)
 	}
 }
+
+func TestPortabilityLeasedBlobStoreStageUsesS3TemporaryKeyContract(t *testing.T) {
+	t.Parallel()
+
+	inner, err := attachments.NewLocalBlobStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalBlobStore() error = %v", err)
+	}
+	capture := &capturingBlobStore{inner: inner}
+	store := NewLeasedBlobStore(capture)
+	if _, err := store.Stage(context.Background(), "rej_tmp1", []byte("export-bytes")); err != nil {
+		t.Fatalf("Stage() error = %v", err)
+	}
+	if _, err := store.StageImport(context.Background(), "rij_tmp1", []byte("import-bytes")); err != nil {
+		t.Fatalf("StageImport() error = %v", err)
+	}
+	if len(capture.puts) != 2 {
+		t.Fatalf("Put count = %d, want 2", len(capture.puts))
+	}
+	requireBlobTemporaryKey(t, capture.puts[0].TemporaryKey)
+	requireBlobTemporaryKey(t, capture.puts[1].TemporaryKey)
+}

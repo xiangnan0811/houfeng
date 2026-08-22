@@ -192,3 +192,26 @@ func TestRecordPortabilityMigrationImportTablesExistForLaterApply(t *testing.T) 
 		t.Fatal("record_import_entity_mappings must persist the archive source id for remaps")
 	}
 }
+
+func TestRecordPortabilityBlobKeyCheckAvoidsMuslRepetitionLimit(t *testing.T) {
+	payload, err := migrations.FS.ReadFile("0059_relax_portability_blob_key_regex.sql")
+	if err != nil {
+		t.Fatalf("read 0059 portability blob_key migration: %v", err)
+	}
+	sql := strings.ToLower(string(payload))
+	if strings.Contains(sql, "{1,512}") {
+		t.Fatal("0059 must not keep the musl-invalid {1,512} repetition")
+	}
+	for _, want := range []string{
+		"record_export_artifacts",
+		"record_import_artifacts",
+		"char_length(blob_key) between 1 and 512",
+		"blob_key ~ '^[a-z0-9/._-]+$'",
+		"blob_key not like '%..%'",
+		"drop constraint if exists",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("0059 missing %q\n%s", want, sql)
+		}
+	}
+}

@@ -33,6 +33,7 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	recordSearchAppACLCurrentMigrationFragment(),
 	recordActivityAppACLCurrentMigrationFragment(),
 	recordPortabilityAppACLCurrentMigrationFragment(),
+	recordPortabilityBlobKeyMuslAppACLCurrentMigrationFragment(),
 }
 
 func recordActivityAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -163,6 +164,17 @@ func recordPortabilityAppACLCurrentMigrationFragment() AppACLCurrentMigrationFra
 		Privileges: recordPortabilityAppACLCurrentPrivileges,
 		Functions:  functions,
 	}
+}
+
+func recordPortabilityBlobKeyMuslAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0059_relax_portability_blob_key_regex.sql",
+		Privileges: recordPortabilityBlobKeyMuslAppACLCurrentPrivileges,
+	}
+}
+
+func recordPortabilityBlobKeyMuslAppACLCurrentPrivileges(string) []AppACLPrivilege {
+	return nil
 }
 
 // recordPortabilityAppACLCurrentPrivileges lets the runtime create and CAS
