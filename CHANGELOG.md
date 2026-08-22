@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.74.0](https://github.com/xiangnan0811/houfeng/compare/v0.73.1...v0.74.0) (2026-08-22)
+
+
+### Features
+
+* **records:** assemble readiness, backup, and restore gates ([#433](https://github.com/xiangnan0811/houfeng/issues/433)) ([79f62aa](https://github.com/xiangnan0811/houfeng/commit/79f62aac20dadd945d0159a1ca2d79076054c68a))
+
+
+### Bug Fixes
+
+* **records:** make portability blob keys musl- and S3-safe ([#436](https://github.com/xiangnan0811/houfeng/issues/436)) ([38a5524](https://github.com/xiangnan0811/houfeng/commit/38a5524dfb218199892728647760f88c5c15d234))
+
 ## [0.73.1](https://github.com/xiangnan0811/houfeng/compare/v0.73.0...v0.73.1) (2026-08-21)
 
 
