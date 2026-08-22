@@ -66,7 +66,7 @@ CLI：
 - Restore 顺序：空目标 → 校验 manifest/build/migration/ACL → stage → DB → objects → replay deletions → search rebuild → activity rebuild → APP ACL → verify → readiness。非空目标 → `ErrTargetNotEmpty`。不兼容 digest → `ErrIncompatibleRestore`。缺 artifact → `ErrMissingArtifact`。`PurgedKinds` 非空且目标在 replay 后仍有该 kind（或没有 `ArtifactPresence`）→ `ErrResurrectionBlocked`。重试必须换全新空目标。
 - Profile report：`houfeng-record-profile-report/v1`，字段只有 format / profile / commit / config_digest / suites / permanent_delete / missing。
 - `EncodeExternalCopies` 只输出 `scope` / `kind` / `copy_count`。
-- Child 11 不加 root migration；当前最大仍是 `0058`。
+- Child 11 不加 root migration。`0059` 是后续 portability owner 修复：musl 安全的 `blob_key` CHECK，不改 `0058` 原文。
 - CLI 必须调用 `recordbackup.NewService(` / `recordrestore.NewService(`，禁止 import `houfeng-record-platform-admin`。缺真实依赖时 fail-closed 为 `ErrBackupUnavailable` / `ErrRestoreUnavailable`。
 - 脚本：`--profile local|s3`；Docker 缺失 fail-closed；任何 `--- SKIP:` 即失败。recovery `--all` 不重跑已知 Alpine portability-deletion 种子缺陷。capacity 默认只跑单元；`--profile` 才用 `HOUFENG_ACTIVITY_PERF_SCALE=0.001`（最少 1000 行）。browser 用 Node 22 + `$HOME/.cache/ms-playwright`（若存在）并扫描 `web/dist`。
 
@@ -82,7 +82,7 @@ CLI：
 | `PurgedKinds` 仍可见 | `ErrResurrectionBlocked` |
 | Encode / 脚本 / CLI 源含 `postgres://`、`password=secret`、`# title` 等 | `ErrContentLeak` |
 | 生产 `web/src`（非测试）或 `web/dist` 含 e2e fixture token | `ErrContentLeak` / browser 脚本失败 |
-| Alpine `0058` `blob_key` CHECK 在 musl 上拒绝 `rxa_portdelete` | 域缺陷，归 portability owner；Child 11 不改 `0058` |
+| Alpine `0058` `blob_key` 512-bounded class repeat | `0059` 改为 `char_length` + 无上界 class repeat；不改 `0058` 原文 |
 | 集成 / 恢复 / 安全 / 容量命令出现 `--- SKIP:` | 命令失败，不能当通过证据 |
 
 ---

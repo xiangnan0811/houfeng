@@ -1,6 +1,6 @@
 # Record Portability Contract
 
-> **项目依据**：以 `internal/center/portability/`、`db/migrations/0058_create_record_portability.sql`、`internal/center/store/record_admission_gate.go` 和当前 HTTP/Web 接线为准。
+> **项目依据**：以 `internal/center/portability/`、`db/migrations/0058_create_record_portability.sql`、`db/migrations/0059_relax_portability_blob_key_regex.sql`、`internal/center/store/record_admission_gate.go` 和当前 HTTP/Web 接线为准。
 
 ---
 
@@ -31,7 +31,7 @@ Child 10 落地记录可移植性：具名 `AdmissionGate`、witnessed tombstone
 - `portability.WriteArchiveV1` / `ReadArchiveV1`
 - `store.NewDeploymentMembershipAdmissionGate`
 
-### 表（仅 `0058`，无 `0059`）
+### 表（`0058` 建表；`0059` 只改 musl 安全的 `blob_key` CHECK）
 
 `record_export_jobs`、`record_export_artifacts`、`record_import_jobs`、`record_import_plans`、`record_import_artifacts`、`record_import_entity_mappings`、`record_origins`、`record_origin_tombstones`、`record_portability_purge_receipts`
 
@@ -47,6 +47,8 @@ Child 10 落地记录可移植性：具名 `AdmissionGate`、witnessed tombstone
 - Origin tombstone 用 archive SHA-256；dry-run 与 apply 都查 tombstone 和已有 `record_origins`；purge 写入墓碑
 - `sensitive_topology` 需要 `record.export_sensitive_topology` 与 preview 签发的 confirm token
 - 生产 bootstrap 禁止 `store.AdmissionGateFunc(`
+- `LeasedBlobStore` Stage/StageImport 必须走 `attachments.NewBlobTemporaryKey()`；禁止 `import/{job}` / `export/{job}` 这类 S3 不承认的临时 key
+- `0059` 把 `blob_key` CHECK 改成 `char_length between 1 and 512` + `^[a-z0-9/._-]+$` + `not like '%..%'`，避免 musl `RE_DUP_MAX`；不要改 `0058` 原文
 
 ### Env
 

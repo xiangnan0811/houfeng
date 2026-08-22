@@ -26,16 +26,20 @@ func NewLeasedBlobStore(inner attachments.BlobStore) *LeasedBlobStore {
 }
 
 func (store *LeasedBlobStore) Stage(ctx context.Context, jobID string, payload []byte) (attachments.ObjectVersion, error) {
-	return store.stage(ctx, "export/"+jobID, jobID, payload)
+	return store.stage(ctx, jobID, payload)
 }
 
 func (store *LeasedBlobStore) StageImport(ctx context.Context, jobID string, payload []byte) (attachments.ObjectVersion, error) {
-	return store.stage(ctx, "import/"+jobID, jobID, payload)
+	return store.stage(ctx, jobID, payload)
 }
 
-func (store *LeasedBlobStore) stage(ctx context.Context, temporaryKey, jobID string, payload []byte) (attachments.ObjectVersion, error) {
-	if ctx == nil || store == nil || store.inner == nil || jobID == "" || temporaryKey == "" || len(payload) == 0 {
+func (store *LeasedBlobStore) stage(ctx context.Context, jobID string, payload []byte) (attachments.ObjectVersion, error) {
+	if ctx == nil || store == nil || store.inner == nil || jobID == "" || len(payload) == 0 {
 		return attachments.ObjectVersion{}, ErrExportUnavailable
+	}
+	temporaryKey, err := attachments.NewBlobTemporaryKey()
+	if err != nil {
+		return attachments.ObjectVersion{}, err
 	}
 	digest := sha256.Sum256(payload)
 	version, err := store.inner.Put(ctx, attachments.PutRequest{

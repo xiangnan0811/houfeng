@@ -52,6 +52,29 @@ func TestRecordPortabilityAppACLFragmentRegistersExactObjectsAndPrivileges(t *te
 	}
 }
 
+func TestRecordPortabilityBlobKeyMuslFragmentAddsNoObjectsOrPrivileges(t *testing.T) {
+	source, err := compileAppACLCurrentSourceContract(migrations.FS, appACLCurrentMigrationFragments)
+	if err != nil {
+		t.Fatalf("compile production current APP ACL source contract: %v", err)
+	}
+	var fragment appACLCurrentCompiledMigrationFragment
+	found := false
+	for _, candidate := range source.fragments {
+		if candidate.Migration == "0059_relax_portability_blob_key_regex.sql" {
+			fragment = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("production current APP ACL fragments are missing the 0059 blob_key CHECK migration")
+	}
+	if len(fragment.Objects) != 0 || len(fragment.Functions) != 0 || len(fragment.Privileges) != 0 {
+		t.Fatalf("0059 fragment must add no ACL surface: objects=%d functions=%d privileges=%d",
+			len(fragment.Objects), len(fragment.Functions), len(fragment.Privileges))
+	}
+}
+
 func TestRecordPortabilityAppACLRemovesRowsOnlyThroughControlledFunction(t *testing.T) {
 	gotDelete := make(map[string]struct{})
 	gotExecute := make(map[string]struct{})

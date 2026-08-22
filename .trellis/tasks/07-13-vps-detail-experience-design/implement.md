@@ -77,6 +77,7 @@ of main.
 | 6. Search | `0056_create_record_search.sql` | search projection objects and grants |
 | 7. Activity | `0057_create_record_activity.sql` | activity projection objects and grants |
 | 10. Portability | `0058_create_record_portability.sql` | import/export job and origin objects/grants |
+| Portability follow-up | `0059_relax_portability_blob_key_regex.sql` | musl-safe `blob_key` CHECK only; no new tables |
 
 Children 5, 8, and 11 add no root migration unless a later reviewed design
 proves one necessary. If any migration number is unexpectedly occupied on main,
