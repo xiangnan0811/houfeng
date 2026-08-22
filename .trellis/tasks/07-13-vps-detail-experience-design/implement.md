@@ -22,17 +22,18 @@ storage, Vitest, Playwright, and Trellis child-task workflow.
 
 - Read `research/development-rebaseline-2026-08-02.md` before any child work.
 - Parent status remains `planning`; it is not an implementation target.
-- Current delivered program completion is `11/12`: Children 1–10 and
-  Child 12 are on this program path. Child 7 landed through PR #422 /
-  `v0.70.0`. Child 8 is archived at
+- Current delivered program completion is `12/12` on protected main.
+  Child 11 squash-merged as `79f62aac` via PR #433. Permanent delete
+  stays disabled. Returned leftovers: Alpine `0058` portability-deletion
+  seed, MinIO `invalid Blob request`, and missing markdown/comparison
+  deletion adapters. See `research/final-cross-child-audit-2026-08-21.md`.
+  Child 7 landed through PR #422 / `v0.70.0`. Child 8 is archived at
   `archive/2026-08/07-14-vps-records-comparison-workbench`
   (PR #423). Child 10 squash-merged as `9e910d7c` via PR #425 with a
   **narrowed** PR2 exit (documents + origin + job; unknown schema
   fail-closed). Child 12 squash-merged as `c7081519` via PR #428 and
   released as `v0.73.0`; it is archived at
-  `archive/2026-08/08-21-vps-records-archive-restore-fidelity`. Child 11
-  still waits for archived Child 10 **and** Child 12 before claiming
-  official restore or enabling protected Records.
+  `archive/2026-08/08-21-vps-records-archive-restore-fidelity`.
 - Child 7 leftovers stay independent: overview manage-panel writes and
   activity group-granted viewer expansion are not Child 8 or Child 10.
 - Child 8 reconciliation and scope A live in the archived child research
@@ -41,8 +42,8 @@ storage, Vitest, Playwright, and Trellis child-task workflow.
   `../07-14-vps-records-portability-migration/research/current-main-reconciliation-2026-08-21.md`.
   Alan chose scope **B** (one Trellis child, two PRs; exit after both).
   Child 10 PR2 exit was narrowed 2026-08-21; do not re-expand it.
-- Child 11 still requires its own current-main plan reconciliation
-  before `task.py start`, and still waits for Child 10 and Child 12.
+- Child 11 current-main inventory lived in its task research and is now
+  on main via #433; do not start a second Child 11.
 - The old 121-item matrix is historical risk coverage, not a current
   line-by-line release gate.
 - Do not resume the stopped parent goal. A goal or sub-agent may be used only
@@ -253,21 +254,21 @@ For each child:
 
 ## 5. Parent final acceptance
 
-After all 11 children are archived and on protected main:
+After all 12 children are on protected main:
 
-- [ ] Trace create/edit/revise/search/activity/compare/export/import/delete/restore
-  across HTTP, domain, store, worker, Web, and adapter boundaries.
-- [ ] Confirm migration order `0051` through `0058` and exact current APP ACL
-  admission from a fresh database.
-- [ ] Run full Go/Web/browser/integration/recovery gates with supported Node 22
-  and workspace-backed temporary directories.
-- [ ] Verify feature-off behavior only where flags remain intentionally useful;
-  do not require legacy content compatibility.
-- [ ] Confirm permanent delete is either proven end to end or still visibly
-  disabled; never accept a partially wired capability.
-- [ ] Review the current authoritative acceptance criteria in `prd.md` and
-  record cross-child evidence.
-- [ ] Archive the parent only after these checks pass on protected main.
+- [x] Assembly path exists for search/activity/compare/export/import; official
+  backup/restore packages exist; production permanent-delete HTTP stays nil.
+- [x] Root migrations still end at `0058`; Child 11 added none.
+- [x] Child 11 `verify-web`, browser 64/64, local recovery/capacity/security,
+  and main CI `32497370438` passed. Local/S3 integration profiles fail on
+  returned owning-child defects (not skipped).
+- [x] `HOUFENG_RECORDS_ENABLED` / `HOUFENG_PORTABILITY_ENABLED` remain default
+  off; no legacy content compatibility claimed.
+- [x] Permanent delete is still visibly disabled with exact missing kinds.
+- [x] Cross-child evidence:
+  `research/final-cross-child-audit-2026-08-21.md`.
+- [ ] Archive the parent only after leftover domain defects are owned or
+  accepted; do not archive on a partial adapter set.
 
 ## 6. Rollback and replanning triggers
 

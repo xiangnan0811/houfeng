@@ -201,9 +201,13 @@ implementations; replay deletions before activity/search rebuild.
   `research/final-capability-matrix-2026-08-21.md`.
 - [x] Added `.trellis/spec/backend/record-integration-contract.md` and index/
   directory/error-handling pointers.
-- [ ] Push feature branch, open PR, watch required CI, squash-merge only after
-  required checks pass; then leave main and archive Child 11.
-- [ ] Parent final cross-child audit after merge; no staging or release.
+- [x] Pushed `feat/child-11-records-integration-rollout`, opened PR #433,
+  required CI green, squash-merged as `79f62aac`. Main CI run
+  `32497370438` green. Did not checkout or merge local main. Release
+  Please #434 left unmerged (no Child 11 release cutover).
+- [x] Parent cross-child audit recorded in
+  `../07-13-vps-detail-experience-design/research/final-cross-child-audit-2026-08-21.md`.
+  No staging or release.
 
 ## Required command shape
 

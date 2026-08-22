@@ -736,3 +736,38 @@ Squash-merged Child 12 PR #428 (evidence persist, attachment ZIP restore, isolat
 ### Next Steps
 
 - Child 11 current-main reconciliation after explicit start; do not start it in this session
+
+
+## Session 254: Child 11 records integration rollout
+
+**Date**: 2026-08-21
+**Task**: Child 11 records integration rollout
+**Branch**: `chore/archive-child-11-records-integration`
+
+### Summary
+
+Merged #433 readiness/backup/restore assembly. PD stays disabled. Archived Child 11. Parent 12/12. Left Release Please #434 unmerged.
+
+### Main Changes
+
+- Squash-merged PR #433 as 79f62aac; main CI 32497370438 green
+- Archived 07-14-vps-records-integration-rollout; parent audit recorded
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `79f62aac` | (see git log) |
+| `60ed52f4` | (see git log) |
+
+### Testing
+
+- [OK] PR CI and main CI required jobs passed; local/S3 integration remain red on returned defects
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Do not merge Release Please #434 from this child; leftover adapters stay with owning children
