@@ -68,7 +68,7 @@
   `12/12` 功能交付数字一致。
 - [x] `AC-07` 所有相关 task 通过 `task.py validate`，文档引用、
   `git diff --check` 与完整 diff 人工复核通过。
-- [ ] `AC-08` 文档 PR required/main CI 通过，随后按批准顺序完成归档并留下可恢复
+- [x] `AC-08` 文档 PR required/main CI 通过，随后按批准顺序完成归档并留下可恢复
   的 Git 提交证据。
 
 ## Out of Scope

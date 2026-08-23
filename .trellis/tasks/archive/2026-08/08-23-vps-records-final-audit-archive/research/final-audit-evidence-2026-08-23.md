@@ -163,13 +163,26 @@ The following local checks passed on the documentation branch:
   'TestBootstrapWiresRecordReadinessRegistry|TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled'
   -count=1`
 - `git diff --check`
-- Reference/path/status inspection confirmed the original parent is `planning`,
-  the closeout parent is `planning`, the overview child is archived/completed,
-  and the active final-audit child is `in_progress` on the recorded branch.
+- At the pre-delivery checkpoint, reference/path/status inspection confirmed the
+  original and closeout parents were `planning`, the overview child was
+  archived/completed, and the final-audit child was `in_progress` on its recorded
+  branch. The final receipt below supersedes that transient status snapshot.
 - The complete tracked diff and the full new evidence file were reviewed. A
   `git status --porcelain` allowlist check found no path outside the explicitly
   owned task artifacts; `.trellis/tasks/archive/**` status/diff is empty. Product
   code, tests, migrations, config, deploy, CI and specs therefore have zero diff.
 
-Protected delivery, post-merge verification and the archive sequence remain open
-for the root session.
+## Final protected delivery and archive receipt
+
+- Current-authority PR #441 merged as
+  `6e9be76e73783ba6867de2dabf9ab3edc24cf67b`; its required and post-merge main
+  CI both passed 7/7.
+- Archive PR #442 selected
+  `36d2f80836ea0b3402ff6e7868a73c9a98fe316b` and merged as
+  `8615679cfccfc5ac00115c184ff3d67a94be5511`; PR CI `32641264007` and
+  post-merge main CI `32641517555` both passed 7/7.
+- All 16 related archived tasks pass `task.py validate`; `task.py list --json`
+  reports no active task. Archive-time changes to earlier child artifacts are
+  path-only repairs required by the parent move, not historical acceptance edits.
+- Release Please run `32641517566` succeeded with no product release PR. Product
+  code, tests, migrations, config, deploy and CI remained unchanged.

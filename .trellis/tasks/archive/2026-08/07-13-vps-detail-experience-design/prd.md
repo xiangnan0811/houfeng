@@ -433,7 +433,7 @@
 - [x] `RBL-AC-07` Child 11 已在 main-compatible build 上完成其批准的 PostgreSQL、local/S3、processor、backup/restore、security、capacity、browser 和 failure-path 集成出口；它不代表永久删除已启用。
 - [x] `RBL-AC-08` 旧 `experience_logs` 不回填、不双写、不转换；旧表/代码仅在不妨碍新功能时保留，最终入口切换不需要 legacy 数据迁移。
 - [x] `RBL-AC-09` 进度只按 child acceptance 与 protected-main integration 报告；功能 child 为 `12/12`，收口协调节点不计为第 13 个产品能力。
-- [ ] `RBL-AC-10` 12 个功能 child 已归档并合入 protected main，父级跨 child 审计已完成；仍须把最终 current-authority 文档通过 protected-main PR 交付，并按批准顺序归档 final-audit child、收口父任务和本父任务。
+- [x] `RBL-AC-10` 12 个功能 child 已归档并合入 protected main；父级跨 child 审计由 PR #441 交付，随后 PR #442 按批准顺序归档 final-audit child、收口父任务和本父任务，required/main CI 均通过。
 
 ## Historical Design and Risk Inventory (non-gating)
 
@@ -566,16 +566,16 @@
 - [ ] `P-AC-121` `prd.md` 与复杂任务所需的设计资料经过自审，无未解释的占位符、互相矛盾或可产生两种解释的关键要求。
 ## Open Questions
 
-- 无阻塞产品取舍。永久删除和三项遗留的 future trigger 均已明确；当前只剩最终
-  文档的 protected delivery 与批准的归档顺序。
+- 无阻塞产品取舍或未完成收口步骤。永久删除和三项遗留的 future trigger 均已
+  明确，当前父任务树已归档。
 
-## Execution Gate
+## Final State
 
-- 父任务保持 `planning`；12 个功能 child 已全部归档并合入 protected main，
-  当前功能进度为 `12/12`。
+- 父任务、收口父任务及其两个 child 均为 `completed` 并位于
+  `.trellis/tasks/archive/2026-08/`；12 个功能 child 已全部归档并合入 protected
+  main，最终功能进度为 `12/12`。
 - 不重开任何历史 child，不补做已放弃的永久删除或三项接受延期的遗留；future
   trigger 成立时创建新的独立 task。
-- `08-23-vps-records-final-audit-archive` 的 current-authority 文档已由 PR #441
-  合入 protected main，required/main CI 均通过。当前只允许在
-  `codex/vps-records-parent-archive` 按“final-audit child → 收口父任务 → 本父任务”
-  执行归档；归档完成前不得提前标记父任务 completed。
+- Current-authority 文档由 PR #441 合入；有序归档由 PR #442 合入为
+  `8615679cfccfc5ac00115c184ff3d67a94be5511`。PR CI `32641264007` 与合入后
+  main CI `32641517555` 均 7/7 通过。

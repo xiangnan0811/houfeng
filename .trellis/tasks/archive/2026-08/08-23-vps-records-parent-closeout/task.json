@@ -15,8 +15,8 @@
   "branch": "codex/vps-records-parent-archive",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": "6e9be76e73783ba6867de2dabf9ab3edc24cf67b",
-  "pr_url": "https://github.com/xiangnan0811/houfeng/pull/441",
+  "commit": "8615679cfccfc5ac00115c184ff3d67a94be5511",
+  "pr_url": "https://github.com/xiangnan0811/houfeng/pull/442",
   "subtasks": [],
   "children": [
     "08-23-vps-overview-management-actions",
@@ -24,6 +24,6 @@
   ],
   "parent": "07-13-vps-detail-experience-design",
   "relatedFiles": [],
-  "notes": "Final current-authority audit delivered by PR #441. The closeout tree records 12/12 functional children separately from coordination tasks; permanent deletion remains abandoned and fail-closed.",
+  "notes": "Final current-authority audit delivered by PR #441 and the approved ordered archive by PR #442. The closeout tree records 12/12 functional children separately from coordination tasks; permanent deletion remains abandoned and fail-closed.",
   "meta": {}
 }

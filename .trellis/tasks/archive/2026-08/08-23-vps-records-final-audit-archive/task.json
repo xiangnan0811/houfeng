@@ -21,6 +21,6 @@
   "children": [],
   "parent": "08-23-vps-records-parent-closeout",
   "relatedFiles": [],
-  "notes": "Final current-authority audit delivered by PR #441; required CI and post-merge main CI passed. Permanent deletion remains abandoned and fail-closed; future demand requires a new task.",
+  "notes": "Final current-authority audit delivered by PR #441 and archived in the approved parent sequence by PR #442; required and post-merge main CI passed. Permanent deletion remains abandoned and fail-closed; future demand requires a new task.",
   "meta": {}
 }
