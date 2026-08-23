@@ -1,10 +1,11 @@
 # Parent final cross-child audit 2026-08-21
 
+Historical snapshot from Child 11 archive. Current leftovers and
+`v0.74.0` / #436 follow-up live in `handoff-2026-08-23.md`.
+
 Program children 1–12 are on protected main. Parent stays `planning`.
-No staging cutover. No Release Please merge. Latest published tag remains
-`v0.73.1`. Release Please opened
-https://github.com/xiangnan0811/houfeng/pull/434 (`chore(main): release 0.74.0`)
-and it is left unmerged.
+No staging cutover. At write time, latest published tag was `v0.73.1`
+and Release Please #434 was open; both are now closed on main.
 
 ## Delivery
 
