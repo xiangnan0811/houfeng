@@ -299,10 +299,9 @@ After all 12 children are on protected main:
 - [x] The user accepted the permanent-delete fail-closed boundary and the three
   explicit deferrals on 2026-08-23. This is a scope decision, not an
   implementation claim; future triggers create new tasks.
-- [ ] Deliver the final current-authority documentation through a protected-main
-  PR and verify required/main CI, then archive in order: final-audit child,
-  closeout parent, original parent. Do not claim delivery or archive completion
-  from the local audit branch.
+- [x] Final current-authority documentation was delivered by PR #441; the
+  final-audit child, closeout parent, and original parent were then archived in
+  order by PR #442. Both PR and post-merge main CI gates passed.
 
 ## 6. Rollback and replanning triggers
 

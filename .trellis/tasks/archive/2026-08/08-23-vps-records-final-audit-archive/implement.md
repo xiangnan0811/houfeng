@@ -70,14 +70,21 @@ product release PR, as expected for task-only changes.
 
 ## Phase 5: Archive sequence
 
-- [ ] 在非 main 受保护流程中归档本 final-audit child，并 validate 状态/路径。
-- [ ] 确认 overview 与 final-audit 两个 child 都完成，归档
+- [x] 在非 main 受保护流程中归档本 final-audit child，并 validate 状态/路径。
+- [x] 确认 overview 与 final-audit 两个 child 都完成，归档
   `08-23-vps-records-parent-closeout`，再 validate。
-- [ ] 最后归档 `07-13-vps-detail-experience-design`，确认其 current authority 和
+- [x] 最后归档 `07-13-vps-detail-experience-design`，确认其 current authority 和
   child tree 随归档保留。
-- [ ] 将归档 metadata/path 改动通过 PR 合入 protected main；确认 required/main CI。
-- [ ] 输出最终交接：12/12 功能交付、overview 收口证据、明确延期、future triggers、
+- [x] 将归档 metadata/path 改动通过 PR 合入 protected main；确认 required/main CI。
+- [x] 输出最终交接：12/12 功能交付、overview 收口证据、明确延期、future triggers、
   永久删除关闭状态和本地未清理资源。
+
+Phase 5 evidence: archive PR #442 selected
+`36d2f80836ea0b3402ff6e7868a73c9a98fe316b`, passed 7/7 required checks in
+run `32641264007`, and merged as
+`8615679cfccfc5ac00115c184ff3d67a94be5511`. Post-merge main CI run
+`32641517555` passed 7/7; Release Please run `32641517566` succeeded without a
+product release PR.
 
 ## Stop conditions
 

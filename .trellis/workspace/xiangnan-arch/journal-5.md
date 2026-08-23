@@ -844,7 +844,7 @@ Fixed Alpine/MinIO portability leftovers, released v0.74.0, left parent planning
 
 ### Summary
 
-交付并核验 PR #441 的 current-authority 审计，确认永久删除退出当前范围且保持 fail-closed；随后按 final-audit child、收口父任务、原父任务顺序归档，修复随父任务移动而失效的归档上下文路径，保持 12/12 功能计数与三项延期触发条件。
+交付并核验 PR #441 的 current-authority 审计，确认永久删除退出当前范围且保持 fail-closed；随后按 final-audit child、收口父任务、原父任务顺序归档，修复随父任务移动而失效的归档上下文路径，并由 PR #442 合入 protected main；PR 与 post-merge main CI 均 7/7 通过，保持 12/12 功能计数与三项延期触发条件。
 
 ### Git Commits
 

@@ -63,11 +63,17 @@ merged as `6e9be76e73783ba6867de2dabf9ab3edc24cf67b`; post-merge main CI run
 
 ## Phase 4: 归档顺序与交接
 
-- [ ] 在 protected main 事实完整后归档最终审计 child。
-- [ ] 校验本收口任务两个 child 均完成，再归档本收口任务。
-- [ ] 最后归档原父任务 `07-13-vps-detail-experience-design`。
-- [ ] 发布最终交接摘要：完成证据、明确延期、future triggers、当前安全默认值，
+- [x] 在 protected main 事实完整后归档最终审计 child。
+- [x] 校验本收口任务两个 child 均完成，再归档本收口任务。
+- [x] 最后归档原父任务 `07-13-vps-detail-experience-design`。
+- [x] 发布最终交接摘要：完成证据、明确延期、future triggers、当前安全默认值，
   以及任何未清理但不影响交付的本地 branch/worktree 状态。
+
+Phase 4 evidence: archive PR #442 selected
+`36d2f80836ea0b3402ff6e7868a73c9a98fe316b`, passed 7/7 required checks in
+run `32641264007`, and merged as
+`8615679cfccfc5ac00115c184ff3d67a94be5511`. Post-merge main CI run
+`32641517555` passed 7/7.
 
 ## Stop conditions
 
