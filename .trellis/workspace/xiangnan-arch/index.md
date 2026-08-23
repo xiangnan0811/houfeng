@@ -33,7 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 257 | 2026-08-23 | 完成 VPS 记录平台最终审计与父任务归档 | `290a5c6d08c980f1c9829312722a7884b69c4d7b`, `4d42cc68ec3c67d661566e23b317f0172c9019d3` | `codex/vps-records-parent-archive` |
+| 257 | 2026-08-23 | 完成 VPS 记录平台最终审计与父任务归档 | `290a5c6d08c980f1c9829312722a7884b69c4d7b`, `4d42cc68ec3c67d661566e23b317f0172c9019d3`, `8c3e9a577d500c22edceb079cc711d71e61e34c9` | `codex/vps-records-parent-archive` |
 | 256 | 2026-08-23 | 交付并归档 VPS 概览管理操作 | `40ddb0a9f34ee004191d1acad1798f99876c76f4`, `7e9080f208a5f1f5cce7e563f5030b9d068629de`, `af23844adc82ce97e6815a3dbd8706f7fdab10e8`, `ab1ad7cdaab4a7ee57b782a3a9a45e5074b591bd` | `codex/vps-overview-management-closeout` |
 | 255 | 2026-08-23 | Close Child 11 leftovers and hand off parent 12/12 | `38a5524d`, `9406110d`, `e2d8c452` | `chore/parent-12-12-handoff` |
 | 254 | 2026-08-21 | Child 11 records integration rollout | `79f62aac`, `60ed52f4` | `chore/archive-child-11-records-integration` |
