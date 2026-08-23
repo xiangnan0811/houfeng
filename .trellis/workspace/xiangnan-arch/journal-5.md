@@ -834,3 +834,25 @@ Fixed Alpine/MinIO portability leftovers, released v0.74.0, left parent planning
 ### Status
 
 [OK] **Completed**
+
+
+## Session 257: 完成 VPS 记录平台最终审计与父任务归档
+
+**Date**: 2026-08-23
+**Task**: 完成 VPS 记录平台最终审计与父任务归档
+**Branch**: `codex/vps-records-parent-archive`
+
+### Summary
+
+交付并核验 PR #441 的 current-authority 审计，确认永久删除退出当前范围且保持 fail-closed；随后按 final-audit child、收口父任务、原父任务顺序归档，保持 12/12 功能计数与三项延期触发条件。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `290a5c6d08c980f1c9829312722a7884b69c4d7b` | (see git log) |
+| `4d42cc68112d10985155ed236217368e109b7f99` | (see git log) |
+
+### Status
+
+[OK] **Completed**
