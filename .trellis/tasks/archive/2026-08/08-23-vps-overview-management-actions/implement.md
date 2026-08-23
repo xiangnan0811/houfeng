@@ -80,9 +80,9 @@ fallback、性能边界和可访问性。
 
 - [x] 执行独立代码审查，按 Critical/Important/Minor 清零实质问题。
 - [x] 将测试、浏览器、可访问性和 non-regression 证据写回 child。
-- [ ] 提交非 main 分支、push、创建 PR，等待 required CI；失败在同一分支修复。
-- [ ] 合入 protected main 后等待 main CI，并在选定提交复跑必要 smoke/focused gate。
-- [ ] 填写 commit/PR/CI 证据并归档本 child；只有此后才解锁最终审计 child。
+- [x] 提交非 main 分支、push、创建 PR，等待 required CI；失败在同一分支修复。
+- [x] 合入 protected main 后等待 main CI，并在选定提交复跑必要 smoke/focused gate。
+- [x] 填写 commit/PR/CI 证据并归档本 child；只有此后才解锁最终审计 child。
 
 ## Stop conditions
 

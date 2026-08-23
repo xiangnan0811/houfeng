@@ -66,9 +66,26 @@
 - 安全审查覆盖 authoritative cancellation preview、archive review、blockers、精确展示
   名确认和服务端再次校验。
 
-## 仍待交付证据
+## 交付与发布证据
 
-- implementation commit：`40ddb0a9f34ee004191d1acad1798f99876c76f4`。
-- PR：`https://github.com/xiangnan0811/houfeng/pull/438`。
-- required CI 结论与合入提交。
-- protected main 合入后 CI/smoke；完成前 `AC-09` 保持未勾选，最终审计 child 不解锁。
+- implementation commit：`40ddb0a9f34ee004191d1acad1798f99876c76f4`；delivery
+  metadata head：`7e9080f208a5f1f5cce7e563f5030b9d068629de`。
+- PR `#438`：`https://github.com/xiangnan0811/houfeng/pull/438`；7/7 required CI
+  通过（run `32637157947`）。
+- protected-main squash commit：`af23844adc82ce97e6815a3dbd8706f7fdab10e8`。
+- 合入后 main CI：run `32637395760`，7/7 jobs 全部通过。
+- Release Please prepare：run `32637395758` 成功；release PR `#439`
+  `https://github.com/xiangnan0811/houfeng/pull/439` 的 7/7 CI 全部通过。
+- release merge commit：`ab1ad7cdaab4a7ee57b782a3a9a45e5074b591bd`；release
+  main CI run `32637630914` 的 7/7 jobs 全部通过。
+- GitHub Release：`https://github.com/xiangnan0811/houfeng/releases/tag/v0.75.0`；
+  tag `v0.75.0` 指向 release merge commit，包含 amd64/arm64 agent、checksum manifest
+  与 minisign 签名四个已上传资产。
+- publish-images run `32637639621` 成功；registry `docker.io/linnea7171/houfeng:v0.75.0`
+  返回 OCI image index digest
+  `sha256:22df0845c806f69f9d4bccecf02227b744b9588e73de86eb03338c068be14415`，
+  明确包含 `linux/amd64` 与 `linux/arm64` manifest。
+- 原 feature branch/ref 未删除，便于恢复和审计。
+
+以上证据满足 `AC-09`，本 child 可以归档；最终审计 child 的 entry gate 已被解除，
+但本次收尾不提前启动它。

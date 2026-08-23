@@ -810,3 +810,27 @@ Fixed Alpine/MinIO portability leftovers, released v0.74.0, left parent planning
 - Do not reopen Child 11; start from research/handoff-2026-08-23.md
 - Own markdown/comparison deletion adapters or search/collaboration/portability recoveries before enabling PD
 - Or accept the partial adapter set and archive the parent with PD still disabled
+
+
+## Session 256: 交付并归档 VPS 概览管理操作
+
+**Date**: 2026-08-23
+**Task**: 交付并归档 VPS 概览管理操作
+**Branch**: `codex/vps-overview-management-closeout`
+
+### Summary
+
+完成新版 VPS overview 五类管理操作闭环；本地、浏览器、PR/main CI 通过，经 #438 合入并发布 v0.75.0，agent 资产与多架构镜像验证成功；永久删除保持延期，最终审计 child 仍未启动。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `40ddb0a9f34ee004191d1acad1798f99876c76f4` | (see git log) |
+| `7e9080f208a5f1f5cce7e563f5030b9d068629de` | (see git log) |
+| `af23844adc82ce97e6815a3dbd8706f7fdab10e8` | (see git log) |
+| `ab1ad7cdaab4a7ee57b782a3a9a45e5074b591bd` | (see git log) |
+
+### Status
+
+[OK] **Completed**
