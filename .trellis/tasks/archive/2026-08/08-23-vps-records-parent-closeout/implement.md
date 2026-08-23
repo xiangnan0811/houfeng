@@ -54,7 +54,12 @@ current main `62f975c535f076ef7c322a07e25c4c158a9efe34`; post-merge main CI
   - `12/12` 功能交付与收口 task tree 分开计数。
 - [x] 保持已归档 child 历史工件不变，只更新 current authority/pointer。
 - [x] 运行 Trellis validate、链接/引用检查、`git diff --check` 和完整 diff 复核。
-- [ ] 通过独立文档 PR 合入 protected main，并确认 required/main CI。
+- [x] 通过独立文档 PR 合入 protected main，并确认 required/main CI。
+
+Phase 3 delivery evidence: PR #441 selected
+`290a5c6d08c980f1c9829312722a7884b69c4d7b`, passed 7/7 required checks, and
+merged as `6e9be76e73783ba6867de2dabf9ab3edc24cf67b`; post-merge main CI run
+`32640659843` passed 7/7.
 
 ## Phase 4: 归档顺序与交接
 

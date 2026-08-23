@@ -4,7 +4,7 @@
 {"file": ".trellis/spec/web/directory-structure.md", "reason": "Record pages live under pages/records; compare must stay route-lazy"}
 {"file": ".trellis/spec/web/component-conventions.md", "reason": "Route controller owns fetch; matrix named-scroll; no new CSS framework"}
 {"file": ".trellis/tasks/07-14-vps-records-comparison-workbench/research/current-main-reconciliation-2026-08-20.md", "reason": "Approved scope A overlay against v0.70.0"}
-{"file": ".trellis/tasks/07-13-vps-detail-experience-design/research/visual-design-contract.md", "reason": "Artifact v1 comparison workbench desktop/390 and state matrix"}
+{"file": ".trellis/tasks/archive/2026-08/07-13-vps-detail-experience-design/research/visual-design-contract.md", "reason": "Artifact v1 comparison workbench desktop/390 and state matrix"}
 {"file": ".trellis/spec/web/state-and-data.md", "reason": "recordsApi comparison exports and /records/compare URL/save contracts"}
 {"file": "internal/center/evidence/comparison_participant.go", "reason": "HMAC claims carry record/revision IDs and Detail for save re-eval"}
 {"file": "internal/center/store/evidence_comparison_postgres_integration_test.go", "reason": "Official EvidenceComparisonCandidatePostgres seed typing"}

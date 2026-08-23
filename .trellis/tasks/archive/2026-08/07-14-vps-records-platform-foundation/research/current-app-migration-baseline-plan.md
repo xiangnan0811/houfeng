@@ -45,7 +45,7 @@ task status, commit, push, or create a PR.
 
 Before later execution:
 
-- read `.trellis/tasks/07-13-vps-detail-experience-design/research/development-rebaseline-2026-08-02.md`;
+- read `.trellis/tasks/archive/2026-08/07-13-vps-detail-experience-design/research/development-rebaseline-2026-08-02.md`;
 - read the Child 1 `prd.md`, `design.md`, and `implement.md`;
 - run `trellis-before-dev` for backend, database, error handling, and quality
   guidance;

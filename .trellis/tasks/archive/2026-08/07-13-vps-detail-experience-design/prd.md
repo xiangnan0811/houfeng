@@ -575,7 +575,7 @@
   当前功能进度为 `12/12`。
 - 不重开任何历史 child，不补做已放弃的永久删除或三项接受延期的遗留；future
   trigger 成立时创建新的独立 task。
-- 当前只允许 `08-23-vps-records-final-audit-archive` 在
-  `codex/vps-records-final-audit-archive` 完成文档 PR、required/main CI，再按
-  “final-audit child → 收口父任务 → 本父任务”执行归档。protected delivery 与
-  归档尚未完成，不得提前标记父任务 completed。
+- `08-23-vps-records-final-audit-archive` 的 current-authority 文档已由 PR #441
+  合入 protected main，required/main CI 均通过。当前只允许在
+  `codex/vps-records-parent-archive` 按“final-audit child → 收口父任务 → 本父任务”
+  执行归档；归档完成前不得提前标记父任务 completed。
