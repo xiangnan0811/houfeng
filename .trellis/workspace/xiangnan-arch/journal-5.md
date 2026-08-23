@@ -771,3 +771,42 @@ Merged #433 readiness/backup/restore assembly. PD stays disabled. Archived Child
 ### Next Steps
 
 - Do not merge Release Please #434 from this child; leftover adapters stay with owning children
+
+
+## Session 255: Close Child 11 leftovers and hand off parent 12/12
+
+**Date**: 2026-08-23
+**Task**: Close Child 11 leftovers and hand off parent 12/12
+**Branch**: `chore/parent-12-12-handoff`
+
+### Summary
+
+Fixed Alpine/MinIO portability leftovers, released v0.74.0, left parent planning at 12/12 with a ChatGPT handoff. Child 11 stays archived; permanent delete stays off.
+
+### Main Changes
+
+- Squash-merged #436 as 38a5524d (0059 musl blob_key CHECK + S3 temporary key)
+- Squash-merged Release Please #434 as 9406110d and published v0.74.0
+- Wrote parent research/handoff-2026-08-23.md; did not archive the parent
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `38a5524d` | (see git log) |
+| `9406110d` | (see git log) |
+| `e2d8c452` | (see git log) |
+
+### Testing
+
+- [OK] Local + S3 run-records-integration.sh passed after #436; main CI 32542193350 and 32542453260 green
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Do not reopen Child 11; start from research/handoff-2026-08-23.md
+- Own markdown/comparison deletion adapters or search/collaboration/portability recoveries before enabling PD
+- Or accept the partial adapter set and archive the parent with PD still disabled

@@ -23,10 +23,14 @@ storage, Vitest, Playwright, and Trellis child-task workflow.
 - Read `research/development-rebaseline-2026-08-02.md` before any child work.
 - Parent status remains `planning`; it is not an implementation target.
 - Current delivered program completion is `12/12` on protected main.
-  Child 11 squash-merged as `79f62aac` via PR #433. Permanent delete
-  stays disabled. Returned leftovers: Alpine `0058` portability-deletion
-  seed, MinIO `invalid Blob request`, and missing markdown/comparison
-  deletion adapters. See `research/final-cross-child-audit-2026-08-21.md`.
+  Latest published tag is `v0.74.0` (`9406110d` / #434). Child 11
+  squash-merged as `79f62aac` via PR #433 and is archived. Follow-up
+  #436 (`38a5524d`) closed the Alpine/musl `0058` CHECK and MinIO
+  staging-key leftovers. Permanent delete stays disabled. Remaining
+  leftovers are missing markdown/comparison deletion adapters and
+  search/collaboration/portability recoveries — return them to owning
+  children. Current handoff: `research/handoff-2026-08-23.md`. The
+  2026-08-21 audit is historical.
   Child 7 landed through PR #422 / `v0.70.0`. Child 8 is archived at
   `archive/2026-08/07-14-vps-records-comparison-workbench`
   (PR #423). Child 10 squash-merged as `9e910d7c` via PR #425 with a
@@ -259,10 +263,12 @@ After all 12 children are on protected main:
 
 - [x] Assembly path exists for search/activity/compare/export/import; official
   backup/restore packages exist; production permanent-delete HTTP stays nil.
-- [x] Root migrations still end at `0058`; Child 11 added none.
+- [x] Child 11 added no root migration. Follow-up #436 added `0059`
+  (musl-safe `blob_key` CHECK only).
 - [x] Child 11 `verify-web`, browser 64/64, local recovery/capacity/security,
-  and main CI `32497370438` passed. Local/S3 integration profiles fail on
-  returned owning-child defects (not skipped).
+  and main CI `32497370438` passed. After #436, local + S3
+  `./scripts/run-records-integration.sh` passed; main CI `32542193350`
+  and release CI `32542453260` were green.
 - [x] `HOUFENG_RECORDS_ENABLED` / `HOUFENG_PORTABILITY_ENABLED` remain default
   off; no legacy content compatibility claimed.
 - [x] Permanent delete is still visibly disabled with exact missing kinds.
