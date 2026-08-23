@@ -27,7 +27,7 @@
 ### R2. Update current authority consistently
 
 - 同步更新原父任务当前 `prd.md`、`implement.md` 与
-  `research/handoff-2026-08-23.md`，使用同一口径记录：
+  `../07-13-vps-detail-experience-design/research/handoff-2026-08-23.md`，使用同一口径记录：
   - 用户放弃当前永久删除方案，未来需求必须新建独立任务；
   - 七项 readiness 缺口、production pairing 和 nil handler 是关闭边界证据，
     不再是当前归档 blocker，也不代表已实现；
@@ -55,18 +55,18 @@
 
 ## Acceptance Criteria
 
-- [ ] `AC-01` Entry Gate 有 selected commit、PR、required CI 和 main 验证证据，且
+- [x] `AC-01` Entry Gate 有 selected commit、PR、required CI 和 main 验证证据，且
   现场代码确认五类管理动作已真实接线。
-- [ ] `AC-02` 原父任务三个 current authority 工件对永久删除决定、三项延期遗留、
+- [x] `AC-02` 原父任务三个 current authority 工件对永久删除决定、三项延期遗留、
   future triggers 和计数口径无矛盾。
-- [ ] `AC-03` 永久删除仍是未实现/未启用；readiness 缺口继续可见但不再阻止
+- [x] `AC-03` 永久删除仍是未实现/未启用；readiness 缺口继续可见但不再阻止
   当前父任务归档。
-- [ ] `AC-04` 普通归档/恢复、整体重建测试环境、单记录永久删除三种语义明确。
-- [ ] `AC-05` 已归档 child 历史工件 diff 为零；产品代码、迁移、配置、部署、测试
+- [x] `AC-04` 普通归档/恢复、整体重建测试环境、单记录永久删除三种语义明确。
+- [x] `AC-05` 已归档 child 历史工件 diff 为零；产品代码、迁移、配置、部署、测试
   与 CI diff 为零。
-- [ ] `AC-06` 原父任务、本收口任务及两个 child 的状态、路径、child 树和
+- [x] `AC-06` 原父任务、本收口任务及两个 child 的状态、路径、child 树和
   `12/12` 功能交付数字一致。
-- [ ] `AC-07` 所有相关 task 通过 `task.py validate`，文档引用、
+- [x] `AC-07` 所有相关 task 通过 `task.py validate`，文档引用、
   `git diff --check` 与完整 diff 人工复核通过。
 - [ ] `AC-08` 文档 PR required/main CI 通过，随后按批准顺序完成归档并留下可恢复
   的 Git 提交证据。
