@@ -14,7 +14,7 @@ export type VPSOverviewState = {
 }
 
 export type VPSOverviewCommands = {
-  refresh: () => void
+  refresh: () => Promise<boolean>
 }
 
 function describeFailure(error: unknown): {
@@ -69,7 +69,7 @@ export function useVPSOverview(
         errorMessage: '缺少 VPS ID。',
         errorCode: null,
       })
-      return
+      return false
     }
     const requestId = ++requestIdRef.current
     setState((prev) => ({
@@ -80,22 +80,31 @@ export function useVPSOverview(
     }))
     try {
       const overview = await getVPSOverview(vpsId.trim())
-      if (requestId !== requestIdRef.current) return
+      if (requestId !== requestIdRef.current) return false
       setState({
         status: 'ready',
         overview,
         errorMessage: null,
         errorCode: null,
       })
+      return true
     } catch (error) {
-      if (requestId !== requestIdRef.current) return
+      if (requestId !== requestIdRef.current) return false
       const failure = describeFailure(error)
-      setState({
-        status: failure.status,
-        overview: null,
-        errorMessage: failure.message,
-        errorCode: failure.code,
-      })
+      setState((current) => current.overview
+        ? {
+            status: 'ready',
+            overview: current.overview,
+            errorMessage: failure.message,
+            errorCode: failure.code,
+          }
+        : {
+            status: failure.status,
+            overview: null,
+            errorMessage: failure.message,
+            errorCode: failure.code,
+          })
+      return false
     }
   }, [vpsId])
 
@@ -112,9 +121,7 @@ export function useVPSOverview(
   return {
     state,
     commands: {
-      refresh: () => {
-        void load()
-      },
+      refresh: load,
     },
   }
 }

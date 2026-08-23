@@ -2,7 +2,10 @@ import type { VPSAssetDetail } from '../../lib/types'
 
 export type VPSLifecycleAction = 'archive' | 'restore'
 
-export function vpsLifecycleConfirmationCopy(detail: VPSAssetDetail, action: VPSLifecycleAction) {
+export function vpsLifecycleConfirmationCopy(
+  detail: Pick<VPSAssetDetail, 'display_name'>,
+  action: VPSLifecycleAction,
+) {
   const isRestore = action === 'restore'
   return {
     title: isRestore ? '确认恢复 VPS' : '确认归档 VPS',

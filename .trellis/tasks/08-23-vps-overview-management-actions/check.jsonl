@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Load the frontend quality checklist and route reviewers to the authoritative topic specs."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Check responsive, keyboard, focus, and dark-first UI behavior."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Check protected-main delivery and evidence."}
+{"file": ".trellis/tasks/08-23-vps-overview-management-actions/research/current-implementation-audit-2026-08-23.md", "reason": "Check the implementation against the original gap, shared owners, test seams, and lazy boundary."}

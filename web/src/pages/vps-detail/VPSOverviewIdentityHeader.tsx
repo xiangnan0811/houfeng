@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import type { Ref } from 'react'
 
 import { Button } from '../../components/atoms'
 import type { VPSOverviewIdentity } from '../../lib/types'
@@ -8,6 +9,7 @@ type Props = {
   onManage: () => void
   newRecordHref: string
   timelineHref: string
+  managementTriggerRef?: Ref<HTMLButtonElement>
 }
 
 export function VPSOverviewIdentityHeader({
@@ -15,6 +17,7 @@ export function VPSOverviewIdentityHeader({
   onManage,
   newRecordHref,
   timelineHref,
+  managementTriggerRef,
 }: Props) {
   return (
     <header className="vps-overview-identity">
@@ -28,9 +31,9 @@ export function VPSOverviewIdentityHeader({
         </p>
       </div>
       <div className="vps-overview-identity__actions" aria-label="VPS 首层动作">
-        <Link className="btn sm primary" to={newRecordHref}>新建记录</Link>
-        <Link className="btn sm secondary" to={timelineHref}>时间线</Link>
-        <Button type="button" size="sm" variant="secondary" onClick={onManage}>
+        <Link className="btn lg primary" to={newRecordHref}>新建记录</Link>
+        <Link className="btn lg secondary" to={timelineHref}>时间线</Link>
+        <Button ref={managementTriggerRef} type="button" size="lg" variant="secondary" onClick={onManage}>
           管理
         </Button>
       </div>

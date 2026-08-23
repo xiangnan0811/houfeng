@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/web/index.md", "reason": "Load the frontend spec index and pre-development checklist before implementation."}
+{"file": ".trellis/spec/web/styling-guidelines.md", "reason": "Keep dark-first styling, responsive modal behavior, and existing design tokens."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Extract only shared domain helpers and avoid duplicating Legacy behavior."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Deliver through a non-main branch and protected-main PR."}
+{"file": ".trellis/tasks/07-13-vps-detail-experience-design/research/handoff-2026-08-23.md", "reason": "Use the current parent handoff as the authority for the visible management gap and deferred leftovers."}
+{"file": ".trellis/tasks/08-23-vps-overview-management-actions/research/current-implementation-audit-2026-08-23.md", "reason": "Load the narrow current-code audit, reusable owners, test seams, and async boundaries."}
