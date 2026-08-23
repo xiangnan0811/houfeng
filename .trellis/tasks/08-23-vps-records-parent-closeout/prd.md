@@ -112,7 +112,9 @@ UI/验证遗留，并形成可审计、不会把延期能力误报为已完成�
   harness 明确延期。
 - Overview 入口现已通过 PR #438、post-merge main CI `32637395760` 和
   `v0.75.0` 完成该前置条件；其归档 PR #440 与 post-merge main CI
-  `32638216017` 也已完成。当前进入最终 current-authority 文档交付与归档阶段。
+  `32638216017` 也已完成。最终 current-authority 文档由 PR #441 合入为
+  `6e9be76e73783ba6867de2dabf9ab3edc24cf67b`，post-merge main CI
+  `32640659843` 通过；当前只剩批准的有序归档事务。
 - 收口按两个 child 串行执行：先完成 overview 管理操作闭环，再完成最终审计、
   决策固化和父任务归档。第二个 child 不得在第一个 child 合入 protected main
   前启动。

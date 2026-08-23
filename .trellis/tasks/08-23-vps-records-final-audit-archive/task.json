@@ -15,12 +15,12 @@
   "branch": "codex/vps-records-final-audit-archive",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "6e9be76e73783ba6867de2dabf9ab3edc24cf67b",
+  "pr_url": "https://github.com/xiangnan0811/houfeng/pull/441",
   "subtasks": [],
   "children": [],
   "parent": "08-23-vps-records-parent-closeout",
   "relatedFiles": [],
-  "notes": "",
+  "notes": "Final current-authority audit delivered by PR #441; required CI and post-merge main CI passed. Permanent deletion remains abandoned and fail-closed; future demand requires a new task.",
   "meta": {}
 }

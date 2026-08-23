@@ -58,8 +58,15 @@ as current main `62f975c535f076ef7c322a07e25c4c158a9efe34`; post-merge main CI
 - [x] 检查文档链接、task tree、路径、状态、日期、commit/PR/CI 引用与进度数字。
 - [x] 运行 `git diff --check`，确认产品、迁移、配置、部署、测试和 CI diff 为零。
 - [x] 人工复核完整 diff，确认没有把延期写成实现或删除安全门禁。
-- [ ] 独立审查后提交非 main 分支、push、创建文档 PR并等待 required CI。
-- [ ] 合入 protected main 后确认 main CI/文档检查和 selected commit inclusion。
+- [x] 独立审查后提交非 main 分支、push、创建文档 PR并等待 required CI。
+- [x] 合入 protected main 后确认 main CI/文档检查和 selected commit inclusion。
+
+Phase 4 delivery evidence: PR #441 selected
+`290a5c6d08c980f1c9829312722a7884b69c4d7b`, passed 7/7 required checks in run
+`32640427586`, and merged as
+`6e9be76e73783ba6867de2dabf9ab3edc24cf67b`. Post-merge main CI run
+`32640659843` passed 7/7; Release Please run `32640659862` succeeded without a
+product release PR, as expected for task-only changes.
 
 ## Phase 5: Archive sequence
 
