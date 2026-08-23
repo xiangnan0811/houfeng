@@ -86,7 +86,7 @@
   type-check、lint、web verify 与全量相关门禁通过。
 - [x] `AC-08` desktop 和 390px 浏览器验证、键盘/Escape/焦点返回、44px 目标与 Axe
   验证通过，并留存可审计证据。
-- [ ] `AC-09` PR required CI、protected-main 合入和合入后 main 验证均成功，证据
+- [x] `AC-09` PR required CI、protected-main 合入和合入后 main 验证均成功，证据
   回写 child 后才允许父收口任务进入最终审计。
 
 ## Out of Scope
