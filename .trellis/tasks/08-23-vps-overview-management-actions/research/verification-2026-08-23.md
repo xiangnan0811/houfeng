@@ -68,6 +68,7 @@
 
 ## 仍待交付证据
 
-- commit / push / PR URL。
+- implementation commit：`40ddb0a9f34ee004191d1acad1798f99876c76f4`。
+- PR：`https://github.com/xiangnan0811/houfeng/pull/438`。
 - required CI 结论与合入提交。
 - protected main 合入后 CI/smoke；完成前 `AC-09` 保持未勾选，最终审计 child 不解锁。
