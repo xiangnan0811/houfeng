@@ -6,7 +6,6 @@ import { ActionConfirmationModal } from '../../components/ActionConfirmationModa
 import { VPSCancellationWorkbench } from '../../components/VPSCancellationWorkbench'
 import { VPSTimelinePanel } from '../../components/VPSTimelinePanel'
 import {
-  ApiError,
   applyVPSCancellation,
   archiveVPS,
   createVPSDomain,
@@ -40,7 +39,6 @@ import type {
   CreateAssetDomainInput,
   CreateAssetServiceInput,
   CreateVPSExperienceLogInput,
-  RenewalSubscriptionLinkage,
   SubscriptionRecord,
   UpdateVPSAssetInput,
   VPSAssetDetail,
@@ -101,12 +99,11 @@ import {
   INITIAL_STATE,
   monitoringInstanceCreateDraftFromDetail,
 } from './vpsDetailHelpers'
-
-function describeError(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) return error.message
-  if (error instanceof Error) return error.message
-  return fallback
-}
+import {
+  describeManagementError as describeError,
+  subscriptionLinkageAction,
+  subscriptionLinkageNotice,
+} from './vpsManagementHelpers'
 
 type PageFeedbackItem = {
   key: string
@@ -199,30 +196,6 @@ function normalizeVPSDetail(detail: VPSAssetDetail): VPSAssetDetail {
     ...detail,
     monitoring_instance_links: detail.monitoring_instance_links ?? [],
   }
-}
-
-function subscriptionLinkageNotice(linkage?: RenewalSubscriptionLinkage | null): string {
-  if (!linkage || linkage.status === 'none') {
-    return '续费决策已更新，资产历史已刷新'
-  }
-  return `续费决策已更新，资产历史已刷新。${linkage.message}`
-}
-
-function subscriptionLinkageAction(linkage: RenewalSubscriptionLinkage | null | undefined, vpsID: string): { to: string; label: string } | null {
-  if (!linkage) return null
-  if (linkage.status === 'no_active_subscription') {
-    if (linkage.candidate_count > 0) {
-      return { to: `/vps/${encodeURIComponent(vpsID)}?workbench=cancellation`, label: '打开取消/退役' }
-    }
-    return { to: `/vps/${encodeURIComponent(vpsID)}?workbench=subscription`, label: '创建/更新订阅' }
-  }
-  if (linkage.status === 'multiple_active_subscriptions') {
-    return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsID)}`, label: '去订阅页选择处理' }
-  }
-  if (linkage.subscription_id) {
-    return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsID)}`, label: '查看关联订阅' }
-  }
-  return null
 }
 
 function drawerModeFromWorkbenchQuery(value: string | null): VPSDetailDrawerMode {

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import { PageState } from '../components/PageState'
@@ -7,6 +7,7 @@ import { getVPSOverview, overviewHasRecordsV2Read } from '../lib/recordsApi'
 import type { VPSOverview } from '../lib/types'
 import { RouteModuleFallback } from '../app/RouteModuleFallback'
 import { VPSOverviewPageView } from './vps-detail/VPSOverviewPageView'
+import { VPSOverviewManagementActions } from './vps-detail/VPSOverviewManagementActions'
 import { useVPSManagementController } from './vps-detail/hooks/useVPSManagementController'
 import { useVPSOverview } from './vps-detail/hooks/useVPSOverview'
 
@@ -124,6 +125,7 @@ function VPSOverviewRoute({
 }) {
   const { state, commands } = useVPSOverview(vpsId, initialOverview)
   const management = useVPSManagementController()
+  const managementTriggerRef = useRef<HTMLButtonElement>(null)
 
   if (state.status === 'loading' && !state.overview) {
     return <PageState kind="loading" title="正在加载 VPS 概览" />
@@ -151,14 +153,20 @@ function VPSOverviewRoute({
   }
 
   return (
-    <VPSOverviewPageView
-      overview={state.overview}
-      management={management}
-      onRefresh={commands.refresh}
-      onManagePanel={() => {
-        // Panel selection is owned by the management controller; mutation owners
-        // refresh the overview via commands.refresh after writes.
-      }}
-    />
+    <>
+      <VPSOverviewPageView
+        overview={state.overview}
+        management={management}
+        managementTriggerRef={managementTriggerRef}
+        onRefresh={commands.refresh}
+      />
+      <VPSOverviewManagementActions
+        vpsId={state.overview.identity.vps_id}
+        displayName={state.overview.identity.display_name}
+        management={management}
+        managementTriggerRef={managementTriggerRef}
+        onOverviewRefresh={commands.refresh}
+      />
+    </>
   )
 }

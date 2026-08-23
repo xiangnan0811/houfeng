@@ -1,0 +1,66 @@
+# VPS 记录平台父任务收口执行计划
+
+## Goal
+
+先关闭新版 VPS overview 的可见管理空操作，再固化永久删除及其他遗留的延期
+决定，完成跨任务审计并归档原父任务。
+
+## Execution rules
+
+- 本任务是协调父任务，不直接实施产品代码。
+- 只启动当前获批且依赖已满足的 child；不得把两个 child 并行推进。
+- 所有代码和文档变更都在非 main 分支完成，通过 protected-main PR 集成。
+- 原父任务在全部门禁满足前保持 `planning`。
+- `12/12` 始终表示原计划功能 child；本收口树不增加产品能力计数。
+
+## Phase 1: 完成规划并取得实现批准
+
+- [ ] 校验本任务以及两个 child 的 PRD、设计与执行计划。
+- [ ] 向用户提交完整规划摘要，明确范围、延期项、风险和归档门禁。
+- [ ] 只有在用户随后明确批准实施后，才启动
+  `08-23-vps-overview-management-actions`；不得从规划批准推断代码执行批准。
+
+## Phase 2: Overview 管理操作闭环
+
+- [ ] 从届时最新 `origin/main` 建立合规非 main 工作位置并启用仓库 hooks。
+- [ ] 按 child 的 TDD 计划先建立管理菜单五类动作的失败测试。
+- [ ] 复用/抽取 Legacy 已有表单、转换器、校验和 API 合同，不复制领域语义，
+  不把整个 `LegacyVPSDetail` 挂入 overview。
+- [ ] 完成 facts、decision、subscription、cancellation、archive 的真实交互，
+  写后刷新 overview；取消/归档保留原安全门禁。
+- [ ] 运行 focused Vitest、type-check/lint、web verify、桌面与 390px 浏览器验证、
+  键盘/焦点/Axe 检查和相关全量门禁。
+- [ ] 独立复核完整 diff，经 PR 合入 protected main，等待 required CI 与合入后
+  main 验证通过。
+- [ ] 将 child 的提交、PR、CI 与验证证据写回其当前工件并归档该 child。
+
+## Phase 3: 最终审计与文档集成
+
+- [ ] 确认 Phase 2 的 selected commit 已在 protected main；否则停止。
+- [ ] 启动 `08-23-vps-records-final-audit-archive`，重新核对代码、测试、Trellis
+  child 树、local/remote refs、PR/CI 和未提交状态。
+- [ ] 同步更新原父任务当前 `prd.md`、`implement.md` 和最新 handoff：
+  - 永久删除退出当前范围，保持关闭，未来新建独立任务；
+  - readiness 缺口、production pairing 与 nil handler 是延期边界证据；
+  - activity digest、sticky 行标题、mixed-load harness 未实现/未验证且已延期；
+  - overview 管理操作以 protected-main 证据标记为关闭；
+  - `12/12` 功能交付与收口 task tree 分开计数。
+- [ ] 保持已归档 child 历史工件不变，只更新 current authority/pointer。
+- [ ] 运行 Trellis validate、链接/引用检查、`git diff --check` 和完整 diff 复核。
+- [ ] 通过独立文档 PR 合入 protected main，并确认 required/main CI。
+
+## Phase 4: 归档顺序与交接
+
+- [ ] 在 protected main 事实完整后归档最终审计 child。
+- [ ] 校验本收口任务两个 child 均完成，再归档本收口任务。
+- [ ] 最后归档原父任务 `07-13-vps-detail-experience-design`。
+- [ ] 发布最终交接摘要：完成证据、明确延期、future triggers、当前安全默认值，
+  以及任何未清理但不影响交付的本地 branch/worktree 状态。
+
+## Stop conditions
+
+- overview 产品改动尚未合入 protected main；
+- 五类管理动作任一仍是占位、缺少错误反馈或写后未刷新；
+- 取消/归档缺少 preview、blocker、确认或导航安全合同；
+- 文档把延期能力误写成已实现，或把收口节点算作第 13 个产品能力；
+- Trellis、refs、PR/CI 或实际代码事实互相矛盾。

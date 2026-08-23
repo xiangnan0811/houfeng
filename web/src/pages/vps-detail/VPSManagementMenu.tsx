@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 
 import type { VPSManagementController } from './hooks/useVPSManagementController'
 
 type Props = {
   controller: VPSManagementController
-  onSelect: (panel: 'facts' | 'decision' | 'subscription' | 'cancellation' | 'archive') => void
+  returnFocusRef?: RefObject<HTMLButtonElement | null> | undefined
 }
 
 const ITEMS: Array<{
@@ -18,21 +18,37 @@ const ITEMS: Array<{
   { panel: 'archive', label: '归档' },
 ]
 
-export function VPSManagementMenu({ controller, onSelect }: Props) {
+export function VPSManagementMenu({ controller, returnFocusRef }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const { closeMenu, menuOpen } = controller
 
   useEffect(() => {
-    if (!controller.menuOpen) return
+    if (!menuOpen) return
+    rootRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+
+    const closeAndRestoreFocus = () => {
+      closeMenu()
+      queueMicrotask(() => returnFocusRef?.current?.focus())
+    }
     const onPointer = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
-        controller.closeMenu()
+        closeAndRestoreFocus()
       }
     }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      closeAndRestoreFocus()
+    }
     document.addEventListener('mousedown', onPointer)
-    return () => document.removeEventListener('mousedown', onPointer)
-  }, [controller])
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [closeMenu, menuOpen, returnFocusRef])
 
-  if (!controller.menuOpen) return null
+  if (!menuOpen) return null
 
   return (
     <div className="vps-overview-management" ref={rootRef}>
@@ -42,9 +58,8 @@ export function VPSManagementMenu({ controller, onSelect }: Props) {
             <button
               type="button"
               role="menuitem"
-              className="vps-overview-management__item"
+              className="btn lg ghost vps-overview-management__item"
               onClick={() => {
-                onSelect(item.panel)
                 controller.openPanel(item.panel)
               }}
             >

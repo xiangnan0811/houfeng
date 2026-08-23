@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
+import type { RefObject } from 'react'
 
 import { Button } from '../../components/atoms'
-import { PageState } from '../../components/PageState'
 import type { VPSOverview } from '../../lib/types'
 import { subjectNewRecordHref } from '../records/activity/activityQueryState'
 import { SubjectLocalNavigation } from '../records/activity/SubjectLocalNavigation'
@@ -17,16 +17,15 @@ import type { VPSManagementController } from './hooks/useVPSManagementController
 type Props = {
   overview: VPSOverview
   management: VPSManagementController
+  managementTriggerRef?: RefObject<HTMLButtonElement | null> | undefined
   onRefresh: () => void
-  /** Invoked when a management panel is chosen; parent owns mutation modals. */
-  onManagePanel: (panel: 'facts' | 'decision' | 'subscription' | 'cancellation' | 'archive') => void
 }
 
 export function VPSOverviewPageView({
   overview,
   management,
+  managementTriggerRef,
   onRefresh,
-  onManagePanel,
 }: Props) {
   const vpsId = overview.identity.vps_id
   const basePath = `/vps/${vpsId}`
@@ -51,12 +50,16 @@ export function VPSOverviewPageView({
           identity={overview.identity}
           newRecordHref={newRecordHref}
           timelineHref={activityHref}
+          {...(managementTriggerRef ? { managementTriggerRef } : {})}
           onManage={() => {
             if (management.menuOpen) management.closeMenu()
             else management.openMenu()
           }}
         />
-        <VPSManagementMenu controller={management} onSelect={onManagePanel} />
+        <VPSManagementMenu
+          controller={management}
+          {...(managementTriggerRef ? { returnFocusRef: managementTriggerRef } : {})}
+        />
       </div>
 
       <SubjectLocalNavigation
@@ -90,19 +93,6 @@ export function VPSOverviewPageView({
         </p>
       ) : null}
 
-      {management.panel && management.panel !== 'menu' ? (
-        <PageState
-          kind="empty"
-          compact
-          title="管理面板"
-          description={`已选择「${management.panel}」。写入动作由管理控制器持有；完成后将刷新概览。`}
-          action={(
-            <Button type="button" size="sm" onClick={management.closePanel}>
-              关闭
-            </Button>
-          )}
-        />
-      ) : null}
     </div>
   )
 }

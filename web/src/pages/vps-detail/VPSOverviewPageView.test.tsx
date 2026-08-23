@@ -112,7 +112,6 @@ describe('VPSOverviewPageView', () => {
           overview={healthyOverview()}
           management={managementStub()}
           onRefresh={vi.fn()}
-          onManagePanel={vi.fn()}
         />
       </MemoryRouter>,
     )
