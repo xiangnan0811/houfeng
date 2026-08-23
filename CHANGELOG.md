@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.75.0](https://github.com/xiangnan0811/houfeng/compare/v0.74.0...v0.75.0) (2026-08-23)
+
+
+### Features
+
+* **vps:** close overview management action gap ([#438](https://github.com/xiangnan0811/houfeng/issues/438)) ([af23844](https://github.com/xiangnan0811/houfeng/commit/af23844adc82ce97e6815a3dbd8706f7fdab10e8))
+
 ## [0.74.0](https://github.com/xiangnan0811/houfeng/compare/v0.73.1...v0.74.0) (2026-08-22)
 
 
