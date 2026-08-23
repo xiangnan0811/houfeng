@@ -22,28 +22,41 @@ storage, Vitest, Playwright, and Trellis child-task workflow.
 
 - Read `research/development-rebaseline-2026-08-02.md` before any child work.
 - Parent status remains `planning`; it is not an implementation target.
-- Current delivered program completion is `12/12` on protected main.
-  Latest published tag is `v0.74.0` (`9406110d` / #434). Child 11
-  squash-merged as `79f62aac` via PR #433 and is archived. Follow-up
-  #436 (`38a5524d`) closed the Alpine/musl `0058` CHECK and MinIO
-  staging-key leftovers. Permanent delete stays disabled. Remaining
-  leftovers are missing markdown/comparison deletion adapters and
-  search/collaboration/portability recoveries — return them to owning
-  children. Current handoff: `research/handoff-2026-08-23.md`. The
-  2026-08-21 audit is historical.
-  Child 7 landed through PR #422 / `v0.70.0`. Child 8 is archived at
-  `archive/2026-08/07-14-vps-records-comparison-workbench`
-  (PR #423). Child 10 squash-merged as `9e910d7c` via PR #425 with a
-  **narrowed** PR2 exit (documents + origin + job; unknown schema
-  fail-closed). Child 12 squash-merged as `c7081519` via PR #428 and
-  released as `v0.73.0`; it is archived at
-  `archive/2026-08/08-21-vps-records-archive-restore-fidelity`.
-- Child 7 leftovers stay independent: overview manage-panel writes and
-  activity group-granted viewer expansion are not Child 8 or Child 10.
+- Current delivered functional completion is `12/12` on protected main. The
+  2026-08-23 closeout parent and its two children are coordination/audit nodes,
+  not a thirteenth product capability. Current handoff:
+  `research/handoff-2026-08-23.md`; the 2026-08-21 audit is historical.
+- Overview management is closed by PR #438: selected commit
+  `7e9080f208a5f1f5cce7e563f5030b9d068629de`, merge commit
+  `af23844adc82ce97e6815a3dbd8706f7fdab10e8`, 7/7 PR checks and post-merge
+  main CI `32637395760` successful. It shipped in `v0.75.0`. Overview task
+  archival PR #440 merged as current `origin/main`
+  `62f975c535f076ef7c322a07e25c4c158a9efe34`; post-merge main CI
+  `32638216017` succeeded.
+- The user abandoned single-record irreversible permanent deletion for the
+  current scope on 2026-08-23. It remains unimplemented, disabled and
+  fail-closed. Do not return missing adapters to historical owners or reopen
+  Child 11. A future need requires a new Trellis task and new requirements,
+  design, implementation and acceptance.
+- The closing boundary is seven missing readiness rows:
+  `deletion.record_markdown_client`, `deletion.record_comparison`,
+  `recovery.record_search`, `recovery.record_collaboration`,
+  `recovery.record_portability`, `backup.orchestration`, and
+  `restore.replay`. The backup/restore rows are paired absent in production;
+  the production HTTP surface is additionally closed by
+  `handlers.RecordDeletions(nil)`.
+- Keep three lifecycle meanings separate: reversible record archive/restore;
+  deleting or rebuilding the whole disposable test environment; and the
+  abandoned single-record irreversible permanent-delete capability.
+- Three leftovers are accepted deferrals and remain unimplemented/unverified:
+  activity group-granted viewer digest (revisit when viewer scope exceeds the
+  project digest), comparison sticky row headers at 390px (revisit on an actual
+  positioning/usability issue), and the 4 GiB / 512 MiB mixed-load harness
+  (revisit for a formal capacity SLO, target hardware, or continuous benchmark).
 - Child 8 reconciliation and scope A live in the archived child research
   note. Do not revive the 2026-08-02 Child 8 implement list.
 - Child 10 current-main reconciliation is
-  `../07-14-vps-records-portability-migration/research/current-main-reconciliation-2026-08-21.md`.
+  `../archive/2026-08/07-14-vps-records-portability-migration/research/current-main-reconciliation-2026-08-21.md`.
   Alan chose scope **B** (one Trellis child, two PRs; exit after both).
   Child 10 PR2 exit was narrowed 2026-08-21; do not re-expand it.
 - Child 11 current-main inventory lived in its task research and is now
@@ -101,7 +114,7 @@ Every migration-owning child must add a current APP ACL fragment and prove:
 ### Slice 1: Close Child 1
 
 - [x] Execute the plan in
-  `../07-14-vps-records-platform-foundation/research/current-app-migration-baseline-plan.md`.
+  `../archive/2026-08/07-14-vps-records-platform-foundation/research/current-app-migration-baseline-plan.md`.
 - [x] Do not add Records Core schema or UI.
 - [x] Run focused migration/admission/CLI/bootstrap tests, PostgreSQL integration,
   full Go verification, and `trellis-check`.
@@ -111,7 +124,8 @@ Every migration-owning child must add a current APP ACL fragment and prove:
 
 Completion evidence: PR #394 merged as `2cbeb1bb`; required PR CI run
 `30750684376`, final independent review, and protected-main CI run `30751460764`
-all passed. Parent progress is now `1/11`; Child 2 remains planning.
+all passed. At that historical stage, progress was `1/11` under the former child
+count; current authoritative functional progress is `12/12`.
 
 ### Child 2: Records core
 
@@ -174,8 +188,10 @@ all passed. Parent progress is now `1/11`; Child 2 remains planning.
   layout, source deletion, desktop/390px, and accessibility tests.
 
 Completion evidence: PR #422 merged, Release Please #420 published `v0.70.0`.
-Open leftovers (not Child 8): overview manage-panel writes still live in
-`LegacyVPSDetail`; activity viewer allowlist is project-digest only.
+The overview management follow-up is also closed: PR #438 mounts the real five
+action panels on the overview route while keeping `LegacyVPSDetail` as a tested
+fallback; PR/main CI and `v0.75.0` evidence are listed in section 0. Activity
+group-granted viewer digest remains unimplemented and is an accepted deferral.
 
 ### Child 8: Comparison workbench
 
@@ -186,10 +202,11 @@ Open leftovers (not Child 8): overview manage-panel writes still live in
 - [x] Exit with bounded process-local admission, partial evidence, desktop/390
   named-scroll matrix, accessibility, and atomic save tests.
 
-Archived 2026-08-21 at `archive/2026-08/07-14-vps-records-comparison-workbench`
+Archived 2026-08-21 at `../archive/2026-08/07-14-vps-records-comparison-workbench`
 (PR #423).
-Open leftovers: 4 GiB / 512 MiB mixed-load harness stays Child 11; sticky
-row headers omitted under the CSS ratchet. Do not absorb Child 7 leftovers.
+Accepted deferrals: the 4 GiB / 512 MiB mixed-load harness was never delivered by
+Child 11, and sticky row headers remain omitted at 390px. Neither is represented
+as implemented; each requires a new task when its trigger in section 0 occurs.
 
 ### Child 10: Portability (narrowed 2026-08-21)
 
@@ -270,12 +287,22 @@ After all 12 children are on protected main:
   `./scripts/run-records-integration.sh` passed; main CI `32542193350`
   and release CI `32542453260` were green.
 - [x] `HOUFENG_RECORDS_ENABLED` / `HOUFENG_PORTABILITY_ENABLED` remain default
-  off; no legacy content compatibility claimed.
-- [x] Permanent delete is still visibly disabled with exact missing kinds.
+  off; `HOUFENG_RECORD_PERMANENT_DELETE_ENABLED` is default off and true is
+  rejected; Comparison also remains default off. No legacy content compatibility
+  is claimed.
+- [x] Permanent delete is still visibly disabled with the seven exact missing
+  readiness rows and separate nil production HTTP handler recorded above.
 - [x] Cross-child evidence:
   `research/final-cross-child-audit-2026-08-21.md`.
-- [ ] Archive the parent only after leftover domain defects are owned or
-  accepted; do not archive on a partial adapter set.
+- [x] All 12 functional children are archived and included in protected main.
+  Overview management is closed by PR #438 and released in `v0.75.0`.
+- [x] The user accepted the permanent-delete fail-closed boundary and the three
+  explicit deferrals on 2026-08-23. This is a scope decision, not an
+  implementation claim; future triggers create new tasks.
+- [ ] Deliver the final current-authority documentation through a protected-main
+  PR and verify required/main CI, then archive in order: final-audit child,
+  closeout parent, original parent. Do not claim delivery or archive completion
+  from the local audit branch.
 
 ## 6. Rollback and replanning triggers
 

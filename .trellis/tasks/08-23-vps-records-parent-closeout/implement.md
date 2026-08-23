@@ -15,38 +15,45 @@
 
 ## Phase 1: 完成规划并取得实现批准
 
-- [ ] 校验本任务以及两个 child 的 PRD、设计与执行计划。
-- [ ] 向用户提交完整规划摘要，明确范围、延期项、风险和归档门禁。
-- [ ] 只有在用户随后明确批准实施后，才启动
+- [x] 校验本任务以及两个 child 的 PRD、设计与执行计划。
+- [x] 向用户提交完整规划摘要，明确范围、延期项、风险和归档门禁。
+- [x] 用户已明确批准实施并启动
   `08-23-vps-overview-management-actions`；不得从规划批准推断代码执行批准。
 
 ## Phase 2: Overview 管理操作闭环
 
-- [ ] 从届时最新 `origin/main` 建立合规非 main 工作位置并启用仓库 hooks。
-- [ ] 按 child 的 TDD 计划先建立管理菜单五类动作的失败测试。
-- [ ] 复用/抽取 Legacy 已有表单、转换器、校验和 API 合同，不复制领域语义，
+- [x] 从当时最新 `origin/main` 建立合规非 main 工作位置并启用仓库 hooks。
+- [x] 按 child 的 TDD 计划先建立管理菜单五类动作的失败测试。
+- [x] 复用/抽取 Legacy 已有表单、转换器、校验和 API 合同，不复制领域语义，
   不把整个 `LegacyVPSDetail` 挂入 overview。
-- [ ] 完成 facts、decision、subscription、cancellation、archive 的真实交互，
+- [x] 完成 facts、decision、subscription、cancellation、archive 的真实交互，
   写后刷新 overview；取消/归档保留原安全门禁。
-- [ ] 运行 focused Vitest、type-check/lint、web verify、桌面与 390px 浏览器验证、
+- [x] 运行 focused Vitest、type-check/lint、web verify、桌面与 390px 浏览器验证、
   键盘/焦点/Axe 检查和相关全量门禁。
-- [ ] 独立复核完整 diff，经 PR 合入 protected main，等待 required CI 与合入后
+- [x] 独立复核完整 diff，经 PR 合入 protected main，等待 required CI 与合入后
   main 验证通过。
-- [ ] 将 child 的提交、PR、CI 与验证证据写回其当前工件并归档该 child。
+- [x] 将 child 的提交、PR、CI 与验证证据写回其当前工件并归档该 child。
+
+Phase 2 evidence: PR #438 selected
+`7e9080f208a5f1f5cce7e563f5030b9d068629de`, merged as
+`af23844adc82ce97e6815a3dbd8706f7fdab10e8`, passed 7/7 checks and post-merge
+main CI `32637395760`, then shipped in `v0.75.0`. Archive PR #440 merged as
+current main `62f975c535f076ef7c322a07e25c4c158a9efe34`; post-merge main CI
+`32638216017` succeeded.
 
 ## Phase 3: 最终审计与文档集成
 
-- [ ] 确认 Phase 2 的 selected commit 已在 protected main；否则停止。
-- [ ] 启动 `08-23-vps-records-final-audit-archive`，重新核对代码、测试、Trellis
+- [x] 确认 Phase 2 的 selected commit 已在 protected main；否则停止。
+- [x] 启动 `08-23-vps-records-final-audit-archive`，重新核对代码、测试、Trellis
   child 树、local/remote refs、PR/CI 和未提交状态。
-- [ ] 同步更新原父任务当前 `prd.md`、`implement.md` 和最新 handoff：
+- [x] 同步更新原父任务当前 `prd.md`、`implement.md` 和最新 handoff：
   - 永久删除退出当前范围，保持关闭，未来新建独立任务；
   - readiness 缺口、production pairing 与 nil handler 是延期边界证据；
   - activity digest、sticky 行标题、mixed-load harness 未实现/未验证且已延期；
   - overview 管理操作以 protected-main 证据标记为关闭；
   - `12/12` 功能交付与收口 task tree 分开计数。
-- [ ] 保持已归档 child 历史工件不变，只更新 current authority/pointer。
-- [ ] 运行 Trellis validate、链接/引用检查、`git diff --check` 和完整 diff 复核。
+- [x] 保持已归档 child 历史工件不变，只更新 current authority/pointer。
+- [x] 运行 Trellis validate、链接/引用检查、`git diff --check` 和完整 diff 复核。
 - [ ] 通过独立文档 PR 合入 protected main，并确认 required/main CI。
 
 ## Phase 4: 归档顺序与交接

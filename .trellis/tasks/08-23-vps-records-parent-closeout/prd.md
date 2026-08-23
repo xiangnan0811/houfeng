@@ -21,13 +21,18 @@ UI/验证遗留，并形成可审计、不会把延期能力误报为已完成�
   永久删除能力关闭的可解释原因，不再是当前父任务必须实现的交付项。
 - 普通记录归档与恢复继续属于已交付生命周期；延期的是“单条记录跨在线存储、
   受管副本和官方备份重放的不复活永久删除”，不是禁止整体重建一次性测试环境。
-- 当前仓库仍有四项已记录遗留：
-  1. 新 VPS overview 的 `onManagePanel` 仍为空操作，真实写入留在
-     `LegacyVPSDetail`；
-  2. activity viewer 只接受 project digest，未扩展 group-granted digest；
-  3. comparison 390px 使用具名滚动区，但 sticky 行标题因 CSS 棘轮未实现；
-  4. 4 GiB / 512 MiB mixed-load harness 原交给 Child 11，Child 11 归档后没有
-     当前 owner。
+- 原四项遗留中的 overview 管理操作已经关闭：PR #438 selected commit
+  `7e9080f208a5f1f5cce7e563f5030b9d068629de`、merge commit
+  `af23844adc82ce97e6815a3dbd8706f7fdab10e8`，7/7 checks 与合入后 main CI
+  `32637395760` 成功，并发布于 `v0.75.0`；历史 task archive PR #440 合入为
+  当前 `origin/main` `62f975c535f076ef7c322a07e25c4c158a9efe34`，合入后 main CI
+  `32638216017` 成功。
+- 其余三项已记录遗留保持延期：activity viewer 只接受 project digest，未扩展
+  group-granted digest；comparison 390px 有具名滚动区但没有 sticky 行标题；
+  4 GiB / 512 MiB mixed-load harness 未实现正式混合负载合同。三项都不阻止本轮
+  归档，也都不得标记为已实现/已验证。
+- 本轮独立复核的完整证据位于
+  `../08-23-vps-records-final-audit-archive/research/final-audit-evidence-2026-08-23.md`。
 
 ## Requirements
 
@@ -51,7 +56,7 @@ UI/验证遗留，并形成可审计、不会把延期能力误报为已完成�
 
 ### R3. Classify remaining UI and verification leftovers
 
-- 对四项非永久删除遗留逐项记录当前证据、用户影响、是否阻止父任务归档、
+- 对原四项非永久删除遗留逐项记录当前证据、用户影响、是否阻止父任务归档、
   处置方式和未来触发条件。
 - 新 VPS overview 管理菜单的可见空操作由 child
   `08-23-vps-overview-management-actions` 修复；该 child 合入 protected main
@@ -75,19 +80,19 @@ UI/验证遗留，并形成可审计、不会把延期能力误报为已完成�
 
 ## Acceptance Criteria
 
-- [ ] `AC-01` 原父任务当前权威工件逐字一致表达用户的永久删除延期决定、未来
+- [x] `AC-01` 原父任务当前权威工件逐字一致表达用户的永久删除延期决定、未来
   新任务触发条件和“延期不等于已实现”。
-- [ ] `AC-02` 七项 readiness 缺口、production backup/restore pairing 与 nil HTTP
+- [x] `AC-02` 七项 readiness 缺口、production backup/restore pairing 与 nil HTTP
   handler 不再阻止父任务归档，同时继续作为永久删除保持关闭的可验证原因。
-- [ ] `AC-03` 普通归档/恢复、整体删除测试环境与单记录永久删除的语义边界清楚，
+- [x] `AC-03` 普通归档/恢复、整体删除测试环境与单记录永久删除的语义边界清楚，
   不会让后续 agent 误删现有安全门禁或错误启用能力。
-- [ ] `AC-04` 四项 UI/验证遗留均有证据、处置和 future trigger；延期项明确标注
+- [x] `AC-04` 四项 UI/验证遗留均有证据、处置和 future trigger；延期项明确标注
   未实现/未验证；overview 管理操作 child 在父任务归档前已合入 protected main。
-- [ ] `AC-05` 12/12 功能交付与收口 task 的 Trellis 计数分开表述，父任务最终
+- [x] `AC-05` 12/12 功能交付与收口 task 的 Trellis 计数分开表述，父任务最终
   状态、child 树和 handoff 无互相矛盾的进度数字。
-- [ ] `AC-06` 变更范围只包含 Trellis task/workspace 工件；产品、迁移、配置、
+- [x] `AC-06` 变更范围只包含 Trellis task/workspace 工件；产品、迁移、配置、
   部署与测试代码 diff 为零。
-- [ ] `AC-07` 收口任务与父任务通过 `task.py validate`、`git diff --check` 和
+- [x] `AC-07` 收口任务与父任务通过 `task.py validate`、`git diff --check` 和
   文档一致性检查；完整 diff 经人工复核后才允许进入父任务归档流程。
 
 ## Out of Scope
@@ -105,6 +110,9 @@ UI/验证遗留，并形成可审计、不会把延期能力误报为已完成�
 - 用户于 2026-08-23 确认采用推荐方案：只修复可见的 overview 管理入口后再
   归档；activity group-granted digest、comparison sticky 行标题和 mixed-load
   harness 明确延期。
+- Overview 入口现已通过 PR #438、post-merge main CI `32637395760` 和
+  `v0.75.0` 完成该前置条件；其归档 PR #440 与 post-merge main CI
+  `32638216017` 也已完成。当前进入最终 current-authority 文档交付与归档阶段。
 - 收口按两个 child 串行执行：先完成 overview 管理操作闭环，再完成最终审计、
   决策固化和父任务归档。第二个 child 不得在第一个 child 合入 protected main
   前启动。

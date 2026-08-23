@@ -4,13 +4,48 @@
 
 基于 0.59.0 staging 的真实使用流程、现有代码与数据能力，完整审查 VPS 详情页在功能、信息架构、视觉层级、交互可发现性、资产历史和经验记录方面的问题，并形成一套克制、清晰、适合长期运维使用的重构设计。设计应同时降低首次使用门槛和高频用户的操作成本，但不以装饰性视觉或不必要功能换取“丰富感”。
 
-完整书面设计已由用户于 2026-07-14 明确批准。当前按 12 个可独立验收的子任务实现。Children 1–12 已合入 protected main，父任务进度为 `12/12`。永久删除仍关闭；父任务保持 planning，不以 Release Please / staging 作为完成。
+完整书面设计已由用户于 2026-07-14 明确批准。12 个可独立验收的功能 child 已全部归档并合入 protected main，父任务功能进度为 `12/12`；2026-08-23 新增的收口父/子节点只负责审计与归档，不是第 13 个产品能力。运维记录永久删除已退出当前范围并保持关闭；父任务在最终文档 PR 和批准的归档顺序完成前保持 `planning`。
 
 ## 2026-08-02 Development Rebaseline (authoritative)
 
 `research/development-rebaseline-2026-08-02.md` 是当前执行权威。项目没有用户或部署，当前程序不支持 `v0.60.1` 及以前数据库的原地升级；开发数据库可重建。功能正确性、权限、安全、数据一致性、删除和恢复语义继续作为门槛，但旧数据库兼容、混合版本、`experience_logs` 回填、APP V3 successor、staging/cutover/release receipt 不再属于本任务当前范围。
 
 下面的完整设计继续描述目标产品。凡与 2026-08-02 重基线冲突的升级、发布、切换或治理要求，均以重基线为准。实施按 12 个可独立验收的子任务推进；默认一次只启动一个有界子任务或切片，父任务保持 planning，不以巨型 goal 执行。
+
+## 2026-08-23 Final Scope Decision (authoritative)
+
+- 12 个功能 child 已全部归档并进入 protected main；本轮
+  `08-23-vps-records-parent-closeout` 及其两个 child 是非功能协调/审计节点，功能
+  计数仍为 `12/12`。
+- 新 VPS overview 的五类管理操作已由 PR #438（selected commit
+  `7e9080f208a5f1f5cce7e563f5030b9d068629de`，merge commit
+  `af23844adc82ce97e6815a3dbd8706f7fdab10e8`）接入真实 API；PR 7/7 checks、
+  合入后 main CI `32637395760` 均成功，并发布于 `v0.75.0`。其历史 task archive
+  由 PR #440 合入为当前 `origin/main`
+  `62f975c535f076ef7c322a07e25c4c158a9efe34`，合入后 main CI
+  `32638216017` 成功。
+- 用户于 2026-08-23 明确放弃在当前范围实现“单条运维记录不可逆永久删除”。
+  该能力仍未实现、未启用并失败关闭；未来只有在出现真实外部用户、合规删除
+  承诺、长期受管备份、正式灾备或产品内单记录不可恢复删除需求时，才创建全新
+  Trellis task 重新需求、设计、实现和验收，不重开任何历史 child。
+- 三种动作必须保持不同语义：普通记录 archive/restore 是已交付的可逆文档
+  生命周期；删除或重建当前可随时放弃的整个线上测试环境是部署级操作；单条记录
+  跨在线存储、受管副本与官方恢复路径的不复活永久删除是本轮放弃的独立高风险
+  能力。前两者不得被误写成后者已经实现。
+- 生产关闭边界仍可验证：readiness 缺少七行
+  `deletion.record_markdown_client`、`deletion.record_comparison`、
+  `recovery.record_search`、`recovery.record_collaboration`、
+  `recovery.record_portability`、`backup.orchestration`、`restore.replay`；其中
+  backup/restore 在 production 成对缺席。此外 production HTTP 仍使用
+  `handlers.RecordDeletions(nil)`。这些事实不再阻止当前父任务归档，也绝不表示
+  永久删除已经实现。
+- 三项非永久删除遗留明确接受延期且保持未实现/未验证：activity viewer 的
+  group-granted digest（viewer 权限需要超出 project digest 时新建任务）、
+  comparison 在 390px 的 sticky row headers（出现实际定位/可用性问题时新建
+  任务）、4 GiB / 512 MiB mixed-load harness（建立正式容量 SLO、目标硬件或
+  持续回归基准时新建任务）。
+- 2026-08-21 及更早的永久删除方案、验收矩阵和 child 工件均保留为历史设计与
+  实施证据；凡与本节冲突，以本节为当前范围权威。
 
 ## Requirements
 
@@ -390,15 +425,15 @@
 ## Current Program Acceptance Criteria (authoritative)
 
 - [x] `RBL-AC-01` Child 1 的当前开发版 migration/ACL convergence 与 runtime admission 支持精确 embedded source set；新鲜数据库可构建，完全相同的当前数据库可重复启动，旧开发数据库在任何 DDL/DCL/ledger mutation 前返回明确重建错误。
-- [ ] `RBL-AC-02` Child 2–10 分别交付记录核心、附件、证据、Markdown、搜索、活动/概览、比较、协作和可移植性（Child 10 为收窄后的文档/origin/ZIP）；Child 12 交付归档恢复保真度（证据落库、附件进 ZIP、隔离 PDF）；每个 child 的功能验收、focused tests、全量相关门和 protected-main integration 均通过。
-- [ ] `RBL-AC-03` migration 编号固定为 Child 2 `0052`、Child 3 `0053`、Child 4 `0054`、Child 9 `0055`、Child 6 `0056`、Child 7 `0057`、Child 10 `0058`；每个新增 root object 同时进入 managed surface、ACL compiler 和 runtime admission tests。
-- [ ] `RBL-AC-04` VPS 概览、项目记录中心、单主体时间线、Markdown 工作区、证据选择器和比较工作台达到批准设计的稳定/异常、loading/empty/error/revoked/deleted、desktop/390px、keyboard 和 accessibility 合同。
-- [ ] `RBL-AC-05` 权限、CAS/idempotency/outbox、immutable history、source deletion、附件准入、import/export integrity 和 response allowlist 由各 owning child 的单元与真实集成测试证明。
-- [ ] `RBL-AC-06` permanent delete 在全部 content-owning adapter 与 Child 11 backup/restore deletion replay 闭合前保持关闭；闭合后永久删除不会被官方恢复路径复活。
-- [ ] `RBL-AC-07` Child 11 在当前 main-compatible build 上完成真实 PostgreSQL、local/S3、processor、backup/restore、security、performance、browser 和 failure-path 集成终验；不以 staging 发布或 release automation 作为完成前提。
-- [ ] `RBL-AC-08` 旧 `experience_logs` 不回填、不双写、不转换；旧表/代码仅在不妨碍新功能时保留，最终入口切换不需要 legacy 数据迁移。
-- [ ] `RBL-AC-09` 进度只按 child acceptance 与集成状态报告；旧 branch/worktree、计划行数、goal 运行时间和未合入代码不计为完成功能。
-- [ ] `RBL-AC-10` 所有 12 个 child 已归档并合入 protected main，父级跨 child 功能、数据流和回归检查通过后，父任务才可完成。
+- [x] `RBL-AC-02` Child 2–10 分别交付记录核心、附件、证据、Markdown、搜索、活动/概览、比较、协作和可移植性（Child 10 为收窄后的文档/origin/ZIP）；Child 12 交付归档恢复保真度（证据落库、附件进 ZIP、隔离 PDF）；12 个功能 child 均已归档并合入 protected main。
+- [x] `RBL-AC-03` migration 编号固定为 Child 2 `0052`、Child 3 `0053`、Child 4 `0054`、Child 9 `0055`、Child 6 `0056`、Child 7 `0057`、Child 10 `0058`；已交付 root object 进入相应 managed surface、ACL compiler 和 runtime admission 合同。
+- [x] `RBL-AC-04` VPS 概览、项目记录中心、单主体时间线、Markdown 工作区、证据选择器和比较工作台按各 child 的批准出口完成 protected-main 验收；390px sticky row headers 是明确接受延期的独立可用性增强，不反写为已实现。
+- [x] `RBL-AC-05` 权限、CAS/idempotency/outbox、immutable history、source deletion、附件准入、import/export integrity 和 response allowlist 已由各 owning child 的验收证据覆盖。
+- [x] `RBL-AC-06` permanent delete 从当前范围撤出并保持失败关闭；七行 readiness 缺口、production backup/restore 成对缺席和 nil HTTP handler 继续阻止误启用，未来只能由全新任务重新打开。
+- [x] `RBL-AC-07` Child 11 已在 main-compatible build 上完成其批准的 PostgreSQL、local/S3、processor、backup/restore、security、capacity、browser 和 failure-path 集成出口；它不代表永久删除已启用。
+- [x] `RBL-AC-08` 旧 `experience_logs` 不回填、不双写、不转换；旧表/代码仅在不妨碍新功能时保留，最终入口切换不需要 legacy 数据迁移。
+- [x] `RBL-AC-09` 进度只按 child acceptance 与 protected-main integration 报告；功能 child 为 `12/12`，收口协调节点不计为第 13 个产品能力。
+- [ ] `RBL-AC-10` 12 个功能 child 已归档并合入 protected main，父级跨 child 审计已完成；仍须把最终 current-authority 文档通过 protected-main PR 交付，并按批准顺序归档 final-audit child、收口父任务和本父任务。
 
 ## Historical Design and Risk Inventory (non-gating)
 
@@ -531,10 +566,16 @@
 - [ ] `P-AC-121` `prd.md` 与复杂任务所需的设计资料经过自审，无未解释的占位符、互相矛盾或可产生两种解释的关键要求。
 ## Open Questions
 
-- 无阻塞产品取舍。Child 2 启动前仍需把既有规划与最新 protected main 对齐并单独审阅。
+- 无阻塞产品取舍。永久删除和三项遗留的 future trigger 均已明确；当前只剩最终
+  文档的 protected delivery 与批准的归档顺序。
 
 ## Execution Gate
 
-- 父任务保持 `planning`；Child 1 已完成并归档，当前总进度为 `1/11`。
-- Children 2–11 仍只 start 拥有下一项交付且经过单独审阅的 child；当前 closeout 不启动 Child 2。
-- 旧总控 goal 保持暂停，不作为恢复入口。
+- 父任务保持 `planning`；12 个功能 child 已全部归档并合入 protected main，
+  当前功能进度为 `12/12`。
+- 不重开任何历史 child，不补做已放弃的永久删除或三项接受延期的遗留；future
+  trigger 成立时创建新的独立 task。
+- 当前只允许 `08-23-vps-records-final-audit-archive` 在
+  `codex/vps-records-final-audit-archive` 完成文档 PR、required/main CI，再按
+  “final-audit child → 收口父任务 → 本父任务”执行归档。protected delivery 与
+  归档尚未完成，不得提前标记父任务 completed。
