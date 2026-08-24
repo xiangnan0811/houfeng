@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.76.1](https://github.com/xiangnan0811/houfeng/compare/v0.76.0...v0.76.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **release:** publish stable Compose env asset ([#450](https://github.com/xiangnan0811/houfeng/issues/450)) ([26d602a](https://github.com/xiangnan0811/houfeng/commit/26d602a3a4ea58340f3a04e801027bcadd4d0987))
+
 ## [0.76.0](https://github.com/xiangnan0811/houfeng/compare/v0.75.1...v0.76.0) (2026-08-24)
 
 
