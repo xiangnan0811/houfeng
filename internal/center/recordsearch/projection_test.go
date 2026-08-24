@@ -276,6 +276,10 @@ func TestNormalizeDocumentFactsAcceptsSparseRecord(t *testing.T) {
 	if got := facts.Subjects(); len(got) != 1 || !got[0].Primary {
 		t.Fatalf("Subjects() = %#v, want the single primary subject", got)
 	}
+	if facts.Tags() == nil || facts.ParticipantIDs() == nil {
+		t.Fatalf("sparse repeated facts = tags %#v participants %#v, want non-nil empty slices for NOT NULL storage arrays",
+			facts.Tags(), facts.ParticipantIDs())
+	}
 }
 
 // The accessors hand out slices that the store writes from, so a caller must not
