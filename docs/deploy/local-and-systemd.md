@@ -152,7 +152,7 @@ GitHub Release:
 install -d -m 0700 houfeng && cd houfeng
 sudo install -d -o 10001 -g 10001 -m 0700 optional-secrets optional-secrets/comparison-keyring optional-secrets/s3
 curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.yaml -o compose.yaml
-curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/.env.example -o .env
+curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.env.example -o .env
 chmod 0600 .env
 ${EDITOR:-vi} .env
 docker compose config
@@ -328,10 +328,10 @@ snapshot orchestration; use a separately reviewed recovery procedure.
 
 ### Upgrade, rollback, and secret rotation
 
-Before upgrading, take a cold recovery point. Download `compose.yaml` and
-`.env.example` from the exact target tag, review the new template against the
-private `.env`, preserve operator values, and update `HOUFENG_IMAGE` to the
-matching immutable tag. Then run:
+Before upgrading, take a cold recovery point. Download `compose.yaml` and the
+public `compose.env.example` asset from the exact target tag, review the new
+template against the private local `.env`, preserve operator values, and update
+`HOUFENG_IMAGE` to the matching immutable tag. Then run:
 
 ```bash
 docker compose config

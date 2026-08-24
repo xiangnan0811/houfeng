@@ -54,7 +54,7 @@ Deliver Houfeng as a downloadable, prebuilt-image-only production Docker Compose
 
 ## Acceptance Criteria
 
-- [ ] README production quick start uses download commands for `compose.yaml` and `.env.example`, then tells the user to edit `.env`, run `docker compose config`, and only afterward run `docker compose up -d`.
+- [ ] README production quick start uses download commands for `compose.yaml` and the stable public asset `compose.env.example` (saved locally as `.env`), then tells the user to edit `.env`, run `docker compose config`, and only afterward run `docker compose up -d`.
 - [ ] The downloaded template has visible Must change / Recommended / Optional sections and defaults `HOUFENG_RECORDS_ENABLED=true`.
 - [ ] `compose.yaml` uses only published images, contains the complete Center/Web + processor + ClamAV + PostgreSQL topology, and contains no Caddy or agent service.
 - [ ] Center is reachable to Nginx Proxy Manager over the required external network at the documented service name and port, with no public host port by default.
@@ -66,7 +66,7 @@ Deliver Houfeng as a downloadable, prebuilt-image-only production Docker Compose
 - [ ] Initialization failure prevents Center and processor startup and returns visible failure through Compose service state/logs; exact repeat is non-mutating except approved credential rotation.
 - [ ] All durable local paths are under `./data/`; copying `.env`, `compose.yaml`, and `data/` is the documented host-migration unit, including coordinated PostgreSQL + Records authority restore.
 - [ ] Center and processor do not receive the bootstrap secret; processor does not receive administrator/session/migrator/platform-admin secrets.
-- [ ] Release automation uploads version-matched Compose and env-template assets and verifies their pinned project image version before upload.
+- [ ] Release automation uploads version-matched `compose.yaml` and `compose.env.example` assets, never relies on a hidden release-asset filename, verifies their pinned project image version before upload, then publicly reads back exactly those deployment names and byte-identical downloads before reporting success.
 - [ ] Static/TDD tests cover topology, config grouping, no-build/no-manual-SQL docs, secret scoping, release assets, NPM network, role provisioning, failure ordering, and idempotence.
 - [ ] A real isolated Docker smoke test proves fresh start, an actual admitted Records write, attachment upload/process/ClamAV flow, authority heartbeat and restart idempotence, zero manual DB step, fail-closed corrupt/missing authority state, and no task-owned residue after cleanup.
 - [ ] Focused Go tests, `make verify-go`, Compose validation, `actionlint` when available, `git diff --check`, and independent `trellis-check` pass on the final snapshot.

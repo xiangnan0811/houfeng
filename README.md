@@ -71,7 +71,7 @@ source checkout, local build, helper launcher, or manual SQL step:
 install -d -m 0700 houfeng && cd houfeng
 sudo install -d -o 10001 -g 10001 -m 0700 optional-secrets optional-secrets/comparison-keyring optional-secrets/s3
 curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.yaml -o compose.yaml
-curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/.env.example -o .env
+curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.env.example -o .env
 chmod 0600 .env
 # Edit every value in "Must change"; keep HOUFENG_IMAGE pinned to the downloaded release.
 ${EDITOR:-vi} .env

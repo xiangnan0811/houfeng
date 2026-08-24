@@ -3,6 +3,7 @@
 {"file":".trellis/tasks/08-24-production-compose-deployment/implement.md","reason":"TDD execution phases and stop conditions."}
 {"file":".trellis/tasks/08-24-production-compose-deployment/research/deployment-baseline.md","reason":"Current deployment/runtime facts and chosen architecture."}
 {"file":".trellis/tasks/08-24-production-compose-deployment/research/records-authority.md","reason":"Confirmed admission blocker, rejected shortcuts, and approved single-host authority boundaries."}
+{"file":".trellis/tasks/08-24-production-compose-deployment/research/release-asset-name.md","reason":"Confirmed v0.76.0 hidden-asset normalization failure and stable public asset naming decision."}
 {"file":".trellis/spec/backend/directory-structure.md","reason":"Authoritative image, Compose, release, and deployment contract that must be updated."}
 {"file":".trellis/spec/backend/database-guidelines.md","reason":"Current Records APP writer, role, and runtime-admission contract."}
 {"file":".trellis/spec/backend/quality-guidelines.md","reason":"Required deterministic, integration, and no-false-green verification."}

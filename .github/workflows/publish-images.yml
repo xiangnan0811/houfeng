@@ -382,11 +382,11 @@ jobs:
         run: |
           mkdir -p dist
           cp compose.yaml dist/compose.yaml
-          cp docs/deploy/compose.env.example dist/.env.example
-          sed -i "s|^HOUFENG_IMAGE=.*$|HOUFENG_IMAGE=$HOUFENG_IMAGE|" dist/.env.example
+          cp docs/deploy/compose.env.example dist/compose.env.example
+          sed -i "s|^HOUFENG_IMAGE=.*$|HOUFENG_IMAGE=$HOUFENG_IMAGE|" dist/compose.env.example
 
-          grep -Fx "HOUFENG_IMAGE=$HOUFENG_IMAGE" dist/.env.example
-          rendered_images="$(docker compose --env-file dist/.env.example -f dist/compose.yaml config --images)"
+          grep -Fx "HOUFENG_IMAGE=$HOUFENG_IMAGE" dist/compose.env.example
+          rendered_images="$(docker compose --env-file dist/compose.env.example -f dist/compose.yaml config --images)"
           mapfile -t project_images < <(grep -F 'docker.io/linnea7171/houfeng:' <<< "$rendered_images" | sort -u)
           if [[ "${#project_images[@]}" -ne 1 || "${project_images[0]}" != "$HOUFENG_IMAGE" ]]; then
             echo "Deployment assets do not reference exactly the matching release image." >&2
@@ -403,8 +403,50 @@ jobs:
         run: |
           gh release upload "$VERSION" \
             dist/compose.yaml \
-            dist/.env.example \
+            dist/compose.env.example \
             --clobber
+
+      - name: Verify public deployment release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: v${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          verify_dir="$(mktemp -d)"
+          trap 'rm -rf "$verify_dir"' EXIT
+
+          release_asset_names_output="$(gh release view "$VERSION" --json assets --jq '.assets[].name')"
+          mapfile -t release_asset_names <<< "$release_asset_names_output"
+          required_deployment_assets=(compose.yaml compose.env.example)
+          for asset in "${required_deployment_assets[@]}"; do
+            matches=0
+            for release_asset in "${release_asset_names[@]}"; do
+              if [[ "$release_asset" == "$asset" ]]; then
+                matches=$((matches + 1))
+              fi
+            done
+            if [[ "$matches" -ne 1 ]]; then
+              echo "Release must expose exactly one public deployment asset named $asset." >&2
+              exit 1
+            fi
+          done
+
+          for forbidden_asset in .env.example default.env.example; do
+            for release_asset in "${release_asset_names[@]}"; do
+              if [[ "$release_asset" == "$forbidden_asset" ]]; then
+                echo "Release exposes forbidden deployment asset name $forbidden_asset." >&2
+                exit 1
+              fi
+            done
+          done
+
+          gh release download "$VERSION" --pattern 'compose.yaml' --dir "$verify_dir"
+          gh release download "$VERSION" --pattern 'compose.env.example' --dir "$verify_dir"
+          test -f "$verify_dir/compose.yaml"
+          test -f "$verify_dir/compose.env.example"
+          cmp -s dist/compose.yaml "$verify_dir/compose.yaml"
+          cmp -s dist/compose.env.example "$verify_dir/compose.env.example"
 
       - name: Publish summary
         shell: bash
@@ -416,5 +458,5 @@ jobs:
             echo
             echo "- Release tag: \`$VERSION\`"
             echo "- \`compose.yaml\`"
-            echo "- \`.env.example\`"
+            echo "- \`compose.env.example\`"
           } >> "$GITHUB_STEP_SUMMARY"
