@@ -331,194 +331,85 @@ if ok {
    - Wrong: 在 `agent/runtime` 里按 OS 分支，或让 runtime 感知 `sysctl` / `/proc` 文件名。
    - Correct: 在 `hostsample.New()` / `Provider.Collect` 内选择平台 collector，runtime 只消费 `HostSamplePayload`。
 
-#### Scenario: attachment runtime deployment and image release contract
+#### Scenario: release-asset production Compose and image contract
 
 1. **Scope / Trigger**
-   - 触发：修改 `Dockerfile`、`compose.yaml`、`docs/deploy/compose.env.example`、center/content-processor/systemd/Docker 部署文档、Release Please / Docker GitHub Actions、Docker 镜像命名 / 发布流程、或 center/processor/scanner/web/PostgreSQL/Blob 部署边界。
-   - 目标：Compose 提供 center + built web、隔离 attachment processor、required ClamAV scanner 与 PostgreSQL 的 development/conformance 快速部署路径；它不声称 named Blob volume 与同机 PostgreSQL 是独立 production recovery domain，也不把 agent 变成容器工作负载。镜像发布必须走 feature PR → `main` → Release Please release PR → GitHub Release → Docker Hub 的 release-only 链路。
+   - 触发：修改 `Dockerfile`、`compose.yaml`、`docs/deploy/compose.env.example`、README / deployment docs、Center/processor/ClamAV/PostgreSQL/Records authority 边界，或 `.github/workflows/publish-images.yml`。
+   - 目标：下载同一 GitHub Release 的 `compose.yaml` 与 `.env.example` 后，operator 只需编辑 `.env`、验证并执行普通 Compose；不 checkout source、不 build、不运行 SQL/helper launcher。Agent 仍是 monitored host 上的 Linux/systemd workload。
 
 2. **Signatures**
-   - Image definition: repository root `Dockerfile` builds a single project image containing `houfeng-center`, `houfeng-content-processor`, Poppler binaries, a small runtime entrypoint, and baked `web/dist`.
-   - Runtime user: repository root `Dockerfile` creates fixed UID/GID 10001 `houfeng`, owns `/app/web/dist`、`/var/log/houfeng` and private `/var/lib/houfeng/attachments`, and sets `USER houfeng:houfeng` in the runtime stage.
-   - Runtime entrypoint: `scripts/docker-entrypoint.sh` assembles `HOUFENG_DATABASE_URL` for either binary, but validates initial-user/session secrets only when executing `houfeng-center`; it does not perform runtime privilege dropping.
-   - Published Compose file: `compose.yaml` service set is exactly `houfeng` + `houfeng-content-processor` + pinned `clamav` + `db`; there is no agent service.
-   - Durable attachment path: center and processor mount the same `houfeng_blobs:/var/lib/houfeng/attachments`; processor rootfs is read-only and its only workspace is a private bounded tmpfs at `/var/lib/houfeng/processor-workspace`.
-   - Recovery boundary: local Blob volume and PostgreSQL metadata form one coordinated recovery point. Compose is a development/conformance topology, not an independent production recovery domain.
-   - Project image reference: `houfeng.image = linnea7171/houfeng:latest`; release publishing produces `linnea7171/houfeng:vX.Y.Z`, `linnea7171/houfeng:X.Y.Z`, and release-controlled `linnea7171/houfeng:latest`.
-   - Release automation: `.github/workflows/release-please.yml` runs on `push` to `main`, uses `googleapis/release-please-action`, and reads `release-please-config.json` plus `.release-please-manifest.json`.
-   - Release config: root package `.` uses `release-type: simple`, `include-v-in-tag: true`, and `CHANGELOG.md` maintained by Release Please.
-   - Docker Actions majors: Docker workflows use Node 24-compatible majors (`docker/setup-buildx-action@v4`, `docker/build-push-action@v7`, `docker/login-action@v4`, `docker/metadata-action@v6`) rather than relying on `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`.
-   - Runtime web path: `HOUFENG_WEB_DIST_DIR=/app/web/dist` inside the project image.
-   - Runtime HTTP default: project image and Compose set `HOUFENG_HTTP_ADDR=:16001`; default port mapping is `127.0.0.1:16001:16001`, with host port override allowed.
-   - Local Compose database identities: `POSTGRES_BOOTSTRAP_USER` initializes the PostgreSQL OID-10 bootstrap superuser, while distinct `HOUFENG_DATABASE_USER` identifies the application login. Unless an explicit `HOUFENG_DATABASE_URL` is already set, the project image entrypoint assembles `postgres://<application-user>:<application-password>@db:5432/?dbname=<database>&sslmode=disable` from the application identity, database name, and mounted password file. It percent-encodes each fallback component byte-for-byte, rejects ASCII control bytes before child execution, and gives the password file precedence over the password environment value. An explicit URL bypasses fallback assembly unchanged and remains subject to center config/TLS validation.
-   - Production database TLS guard: `HOUFENG_DATABASE_REQUIRE_TLS=true` makes center startup reject missing `sslmode` and `sslmode=disable|allow|prefer`; accepted modes are `require`、`verify-ca`、`verify-full`.
-   - Password hash cost tuning: `HOUFENG_PASSWORD_BCRYPT_COST` configures bcrypt cost for newly seeded/changed passwords and must stay within Go bcrypt `MinCost..MaxCost`.
-   - Center log file config: deployed center uses `HOUFENG_LOG_FILE=/var/log/houfeng/center.log`; unset keeps stdout-only local behavior.
-   - PostgreSQL data path: default Compose bind mount is `./data/postgres:/var/lib/postgresql/data` so operators can migrate the directory directly.
-   - Center log path: default Compose log mount is the named volume `houfeng_logs:/var/log/houfeng`, initialized from the image-owned directory so the non-root container can open `center.log`.
-   - Minimal env template: `docs/deploy/compose.env.example` copied to untracked `docs/deploy/compose.env`; it declares the two distinct database principal names plus host paths for separate untracked bootstrap/application password files.
-   - Database passwords are service-scoped Docker secrets backed by ignored mode-0600 files. The bootstrap password is mounted only into `db`; the application password is mounted into `db` for post-provisioning role creation and into both `houfeng` and `houfeng-content-processor` for their application connections. Center-only initial-user/session secrets are not mounted into or required by the processor. The tracked `compose.yaml` avoids password values and database URL assignments.
+   - Root `Dockerfile` produces one published image containing `houfeng-center`, `houfeng-content-processor`, `houfeng-record-platform-admin`, baked `web/dist`, curl, and Poppler. Normal runtime stays `USER houfeng:houfeng` (UID/GID 10001); only explicit one-shot/authority services override identity.
+   - `compose.yaml` defines exactly eight services: `houfeng-storage-init`, `houfeng-secrets-init`, `db`, `houfeng-db-init`, `houfeng-record-authority`, `clamav`, `houfeng`, and `houfeng-content-processor`. It has no `build:`, Caddy, or agent service.
+   - Center listens on container port `16001`, joins the pre-existing external network named by `HOUFENG_PROXY_NETWORK` as alias `houfeng`, and has no public host port by default. Only Center joins that NPM network.
+   - The tracked env template has exactly `Must change`, `Recommended`, and `Optional` operator sections. The release job writes the matching immutable `docker.io/linnea7171/houfeng:vX.Y.Z` into `HOUFENG_IMAGE`; installation does not ask the user to edit it.
+   - GitHub release asset URLs use `https://github.com/xiangnan0811/houfeng/releases/...`; the Docker registry identity remains the separately configured published image path.
 
 3. **Contracts**
-   - Published `compose.yaml` must not contain a local project `build:` block or password values/database URL assignments, and quick-start docs must not instruct `docker compose up --build`; operators should be able to run the published image directly.
-   - The documented Compose quick-start must run `scripts/compose-up.sh`. That script uses shell fail-stop, starts only `db`, awaits both `pg_isready` and a successful `SELECT 1` in the configured target database under the bootstrap identity, rejects a bootstrap/application identity collision, runs the pre-R1 provisioning SQL, creates/updates the constrained application role only afterward, and invokes `docker compose ... up -d houfeng houfeng-content-processor` last. Compose dependencies start the healthy pinned ClamAV daemon before either project service. An existing application role must have no `pg_auth_members` edge in either direction, which excludes every direct or recursive membership relation; `NOINHERIT` alone is insufficient because `SET ROLE` remains possible. Membership drift is rejected without cleanup before committed database-owner transfer or project-service startup. Readiness, provisioning, or role-setup failure must make the script nonzero without requesting either project service.
-   - The root `Dockerfile` is the image build definition for release-only GitHub Actions publishing, not the default Compose quick-start execution path.
-   - Docker image and agent asset publishing must be deliberate release output: `release.published` and maintainer `workflow_dispatch` may publish; `main` push and pull request events must not publish images, upload release assets, or access Docker Hub credentials.
-   - Feature PR merges to `main` should not publish Docker images directly; they trigger Release Please to open/update a release PR.
-   - The release PR must pass normal CI before merge. Merging it publishes the GitHub Release, and only that `release.published` event updates Docker Hub release tags and `latest`.
-   - Release Please requires `RELEASE_PLEASE_TOKEN`; Docker publishing requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. These are repository secrets only and must not appear in docs as concrete values, compose examples, or committed env files.
-   - Do not add a separate `main`-push Docker publishing workflow, `pull_request` Docker publishing, or a workaround env such as `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` when an official Node 24 action major exists.
-   - Each project container runs exactly one command: `houfeng` runs `houfeng-center`, and `houfeng-content-processor` runs `houfeng-content-processor`. Neither starts Vite, Nginx, Caddy, Postgres, ClamAV, or an agent inside the project container.
-   - The project container must run as `houfeng:houfeng` by default through the Dockerfile `USER` instruction. Do not rely on `gosu`, `su-exec`, `id -u`, or root entrypoint chown logic for normal startup.
-   - `db` uses the official PostgreSQL image with a user-migratable host directory mounted at `/var/lib/postgresql/data`; it is initialized under the bootstrap identity, not the application login. Center applies embedded migrations at startup through the separately provisioned application identity.
-   - Compose may bind Houfeng to host loopback for an operator-managed reverse proxy upstream; TLS termination stays outside the app container/Compose MVP.
-   - `HOUFENG_PUBLIC_BASE_URL` may be empty for first login, but must be set to an externally reachable absolute `http(s)` URL before one-command agent onboarding.
-   - `HOUFENG_LOG_FILE` is center-only. When set, the center must tee structured `slog` output to stdout and the configured file; startup fails if the file cannot be opened.
-   - Quick-start env stays bounded to database identity/password-file paths, initial admin/session secrets, public URL, explicit local attachment backend/root, ClamAV protocol bounds and processor lease/reconciliation/attempt bounds. S3 examples show only endpoint/bucket/TLS plus `_FILE` credential carriers, never credential values. Do not add Telegram, agent env, retention/session/incident tuning, or release automation secrets to this template.
-   - Do not add a log bind mount unless the center app actually writes files there; stdout/stderr-only logging must not be documented as sufficient long-term behavior for deployed center troubleshooting.
-   - The processor must run non-root with read-only rootfs, `cap_drop: ALL`, `no-new-privileges`, `core=0`, bounded queue/reconciliation/attempt/job TTL and a `noexec,nosuid,nodev` private tmpfs workspace. Center and processor share only the durable Blob volume and application database credential; processor must not receive center-only admin/session secrets.
-   - Local Blob and PostgreSQL backups must be coordinated as one recovery point. S3 deployments use private `_FILE` secrets and exact-version verification; neither a named volume nor an object bucket alone proves a complete recovery point.
-   - Agents remain Linux/systemd host installs through center-generated onboarding commands. Do not add an `agent` Compose service, Docker agent deployment docs, Docker socket mounts, host PID/network namespace requirements, Kubernetes manifests, or agent file logging under this contract.
+   - `docker compose up -d` owns ordinary initialization. Storage init creates UID/GID-safe paths; secret init stages only bootstrap/runtime/migrator/platform-admin files for read-only consumers; db-init provisions roles, calls `ConvergeAppACLCurrent`, verifies/activates the signed authority bundle through the existing projector, and runs current runtime admission. Center waits for healthy authority; the processor waits for db-init and ClamAV.
+   - Environment-backed Compose secrets remain scoped: DB gets bootstrap only; Center gets runtime + initial-admin + session; processor gets runtime only; db-init gets staged provisioning secrets; authority reads only its generated private state/database secret. The secret stager bind-mounts only `./data/secrets`, never the whole data tree or authority private bundle. Optional comparison keys are mounted only into Center; only the S3 credential directory is shared with the processor. Host optional-secret directories/files are owned by the image's UID/GID `10001` with directory mode `0700` and file mode `0400`, so non-root services can read their scoped bind mounts without broadening host access. Center/processor never receive bootstrap, migrator, platform-admin, or authority credentials.
+   - Production pins `HOUFENG_RECORDS_ENABLED=true` and permanent delete false. Center receives a file-based deployment ID plus fixed `compose-center` / `api` / `records.runtime`; no allow gate or operator-provided authority identity is permitted.
+   - Durable local state is a visible portable tree: `./data/postgres`, `./data/attachments`, `./data/logs`, `./data/clamav`, `./data/records-authority`, `./data/center-config`, and `./data/secrets`. PostgreSQL, local attachments, and Records authority state are one coordinated restore unit; active DB plus absent/corrupt/mismatched authority state fails closed.
+   - Processor stays non-root, read-only, `cap_drop: ALL`, `no-new-privileges`, core=0, with bounded `noexec,nosuid,nodev` tmpfs. Center and processor share only the runtime DB role, Blob contract, attachment bind, and scanner settings.
+   - `.env` passwords use independently generated, pairwise-distinct hex values (`openssl rand -hex 32`) to avoid dotenv interpolation traps and cross-role credential reuse; db-init rejects duplicate role secrets before mutation. Password-only edits do not guarantee service recreation: controlled rotation stops consumers, reruns `houfeng-secrets-init`, reruns `houfeng-db-init`, then force-recreates Center/processor.
+   - `.github/workflows/publish-images.yml` may publish only on `release.published` or explicit maintainer dispatch. It checks out the resolved release source, builds the image, creates tag-matched deployment assets, validates resolved project images, and uploads `compose.yaml` plus `.env.example` to the matching GitHub Release.
+   - Direct/systemd documentation may retain explicit pre-R1 provisioning as an advanced path, but the Docker quick-start section must contain no manual SQL, local toolchain, source build, or helper launcher.
 
 4. **Validation & Error Matrix**
 
    | Condition | Expected behavior |
    | --- | --- |
-   | `compose.yaml` contains `houfeng.build` or quick-start says `up --build` | Reject in review; published Compose must pull/use `linnea7171/houfeng:latest` from release publishing |
-   | Docker image workflow publishes on `push` to `main` or `pull_request` | Reject in review; image publication must be release/manual only |
-   | Release Please workflow is missing or not triggered by `push` to `main` | Reject in review; feature PR merge must create/update a release PR |
-   | Release Please workflow can publish Docker images or use Docker Hub credentials | Reject in review; it only manages release PRs/GitHub Releases |
-   | Docker workflows still use Node 20 Docker action majors (`setup-buildx@v3`, `build-push@v6`, `login@v3`, `metadata@v5`) | Reject in review; upgrade to the official Node 24 majors |
-   | Docker image workflow updates `latest` during manual rebuilds | Reject in review unless deliberately changed; `latest` is controlled by normal release publication |
-   | `compose.yaml` uses project service name `center` | Reject in review; service name must be `houfeng` |
-   | `compose.yaml` keeps project container port `8080` as the Docker default | Reject in review; Docker/Compose default must be `16001` inside and outside |
-   | `compose.yaml` adds an `agent` service | Reject in review; agents are host systemd services |
-   | `compose.yaml` lacks `houfeng-content-processor` or pinned healthy `clamav` | Reject in review; attachment admission requires an isolated processor and required scanner |
-   | center/processor local Blob roots differ or use container writable layer | Startup/static review rejects; both must share `houfeng_blobs:/var/lib/houfeng/attachments` |
-   | processor is root、rootfs writable、has capabilities/core dumps, or lacks bounded tmpfs/retry settings | Reject in review; processor isolation and resource bounds are deployment contracts |
-   | processor receives initial admin/session secrets | Reject in review; those secrets are center-only |
-   | `compose.yaml` maps `/var/log/houfeng` but the center image does not set `HOUFENG_LOG_FILE` | Reject in review; the volume must back a real file-writing path |
-   | `compose.yaml` bind-mounts `./data/logs:/var/log/houfeng` | Reject in review; first startup can create a root-owned host directory that non-root center cannot write |
-   | Dockerfile runtime stage lacks `USER houfeng:houfeng` or installs `gosu` | Reject in review; runtime must be non-root by default without privilege-drop helper |
-   | `HOUFENG_DATABASE_REQUIRE_TLS=true` with missing/weak `sslmode` | Center config load fails before serving traffic |
-   | `docs/deploy/compose.env` is committed | Reject in review; only `docs/deploy/compose.env.example` is tracked |
-   | `compose.yaml` contains `HOUFENG_DATABASE_URL:`, `POSTGRES_PASSWORD:`, or `HOUFENG_INITIAL_PASSWORD:` assignment lines | Reject in review; secrets must come from the env file and the tracked Compose file must avoid password-like assignments |
-   | Bootstrap/application principals are equal | Fail before provisioning or application startup; the application login must never be OID-10 bootstrap authority |
-   | Existing application role has direct/recursive membership in either direction | Role transaction rolls back without membership cleanup or committed database-owner transfer; Houfeng is not started |
-   | Database readiness or pre-R1 provisioning fails | `scripts/compose-up.sh` exits nonzero and never invokes `up -d houfeng houfeng-content-processor` |
-   | Bootstrap/application password file is missing or empty | Compose validation, PostgreSQL initialization, role setup, or project entrypoint fails before serving traffic |
-   | Fallback DSN component contains URI-reserved printable characters | Percent-encode the exact bytes and execute the child with a parseable URL; do not require URL-safe passwords |
-   | Fallback DSN component contains an ASCII control byte | Entrypoint exits nonzero before child execution |
-   | Missing `HOUFENG_INITIAL_PASSWORD` in env file | The project image entrypoint fails before serving traffic |
-   | Empty `HOUFENG_PUBLIC_BASE_URL` | Center can start and login works; install-command generation remains unavailable until configured |
-   | Internal Compose URL used as public base URL | Reject in docs/review unless target agents can actually reach it; production commands need the external browser/agent URL |
-   | Public deployment exposes plain HTTP directly | Reject in docs/review; require operator-managed HTTPS reverse proxy |
-   | Operator backs up only PostgreSQL or only local Blob volume | Recovery evidence is incomplete; capture and restore both as one coordinated recovery point |
+   | required env blank, non-HTTPS public URL, or NPM network absent | Compose/preflight fails visibly; never add a public fallback port |
+   | storage/secret/db init fails | dependent Center/processor stay unstarted; safe stage name is visible in init logs |
+   | authority state missing/corrupt/mismatched for active DB | db-init/authority fails closed; never regenerate over active state |
+   | authority heartbeat stale/unhealthy | Center dependency/readiness or Records writes fail closed |
+   | Center/processor receives privileged/authority secret | reject static review and service config |
+   | processor becomes root/writable/capable or loses bounds | reject static review and runtime inspection |
+   | release env image differs from the release tag | deployment-assets job fails before upload |
+   | operator changes only a secret then runs plain `up -d` | not a supported rotation proof; require explicit staging/init/recreation sequence |
+   | operator restores only DB, attachments, or authority state | incomplete recovery point; restore the coordinated directory copy |
 
 5. **Good / Base / Bad Cases**
-   - Good: operator copies `docs/deploy/compose.env.example`, creates the two ignored mode-0600 password files, runs `scripts/compose-up.sh docs/deploy/compose.env`, and accesses Houfeng on `127.0.0.1:16001` through a local reverse proxy upstream only after readiness and provisioning succeed.
-   - Good: center and processor share the private `houfeng_blobs` volume, ClamAV is healthy first, and processor runs UID/GID 10001 with read-only rootfs, zero capabilities/core dumps and a bounded private tmpfs workspace.
-   - Good: local backup quiesces center/processor writes and captures PostgreSQL plus `houfeng_blobs` in one recovery window; restore verifies both before serving traffic.
-   - Good: first Compose startup initializes the `houfeng_logs` named volume from image-owned `/var/log/houfeng`, and the center writes `/var/log/houfeng/center.log` while running as the non-root `houfeng` user.
-   - Good: operator collects recent `docker compose logs houfeng` output and, when file logs are needed, reads `/var/log/houfeng/center.log` from a temporary container mounting the `houfeng_logs` volume.
-   - Good: operator backs up or migrates `./data/postgres/` as an ordinary host directory before moving the deployment.
-   - Good: feature work lands through a branch PR; the merge to `main` runs Release Please, opens/updates a release PR, the release PR passes CI and is merged, the resulting GitHub Release fires release publishing, Docker Hub receives `vX.Y.Z`, `X.Y.Z`, and release-controlled `latest`, and the GitHub Release receives `houfeng-agent_vX.Y.Z_linux_amd64`, `houfeng-agent_vX.Y.Z_linux_arm64`, and `sha256sums.txt`.
-   - Good: release-only automation builds the root `Dockerfile` on published GitHub releases, tags/pushes `linnea7171/houfeng:vX.Y.Z`, `linnea7171/houfeng:X.Y.Z`, and release-controlled `latest`, uploads the installer-required agent assets built by `make build-agent-release VERSION=vX.Y.Z`, and leaves Compose without local `build:`.
-   - Base: local login works with empty `HOUFENG_PUBLIC_BASE_URL`; before onboarding real agents, operator sets the external HTTPS URL and recreates the `houfeng` container.
-   - Bad: using `build: .` in `compose.yaml` makes deployment depend on local Go/Node source builds and breaks the intended project-image distribution path.
-   - Bad: adding a `/var/log/houfeng` bind mount while the app does not write files there creates misleading troubleshooting expectations.
-   - Bad: adding an agent container with `/var/run/docker.sock` or broad host mounts changes the thin-agent security boundary and is not this deployment model.
-   - Bad: treating `houfeng_blobs` alone, `./data/postgres/` alone, or the co-located Compose host as an independent production recovery domain.
+   - Good: operator downloads release assets from `xiangnan0811/houfeng`, fills Must change secrets/network/HTTPS origin, runs `docker compose config`, `pull`, then `up -d`; PostgreSQL/ClamAV/authority/Center become healthy and processor runs without a public port.
+   - Good: real Records smoke authenticates, uploads content, observes quarantine → ClamAV/processor → available, then publishes through the production admission gate and downloads the same content.
+   - Base: exact repeat validates the same signed authority state/contract and leaves stable identity/epoch/fence unchanged except bounded membership expiry renewal and approved password rotation.
+   - Bad: `build: .`, a wrapper script, manual SQL, a named business-data volume, `latest` in the release env asset, or an agent/Caddy service changes the approved operator contract.
+   - Bad: copying PostgreSQL without `./data/records-authority`, editing the signed ledger, or exposing the authority database secret to Center bypasses the coordinated trust boundary.
 
 6. **Tests Required**
-   - `docker compose --env-file docs/deploy/compose.env.example -f compose.yaml config --quiet` must pass.
-   - Static check must confirm `compose.yaml` has no `HOUFENG_DATABASE_URL:`, `POSTGRES_PASSWORD:`, or `HOUFENG_INITIAL_PASSWORD:` assignment lines, has no `build:` for `houfeng`, has no `agent` service, references `linnea7171/houfeng:latest`, maps `127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001`, bind-mounts `./data/postgres`, mounts `houfeng_logs:/var/log/houfeng`, declares `houfeng_logs` and `houfeng_blobs`, and defines exact `houfeng` / `houfeng-content-processor` / pinned healthy `clamav` / `db` services. Both project services must share the Blob volume and explicit backend/root; processor must include non-root/read-only/cap-drop/no-new-privileges/core=0/private-tmpfs and bounded reconciliation/attempt/job settings.
-   - Deployment behavior tests must run the actual `scripts/compose-up.sh` against a fake Docker command and prove exact ordering `db start -> readiness -> provisioning -> application role -> center+processor start`; readiness and provisioning failures must both produce nonzero status with no project-service start call. Focused PostgreSQL 16.12 evidence must also construct an existing-role membership edge and prove role provisioning fails, database ownership is unchanged, and the launcher never requests project-service startup.
-   - Entrypoint behavior tests must execute the actual script as a subprocess with a controlled fake child and table-drive missing user/name/password, nonexistent/unreadable/empty secret files, file precedence, explicit-URL bypass, reserved-character encoding, malformed control-byte input, and zero child execution on every failure. A separate processor invocation must prove missing center-only initial password/session HMAC does not block its child. Static checks must prove `POSTGRES_BOOTSTRAP_USER` and `HOUFENG_DATABASE_USER` are nonempty/distinct in the example and Compose maps only the bootstrap identity to `POSTGRES_USER`.
-   - Static check must confirm the runtime image sets `USER houfeng:houfeng`, does not install `gosu`, and `scripts/docker-entrypoint.sh` contains no runtime privilege-drop branch.
-   - `git diff --check` must pass after Docker/docs edits.
-   - Search touched docs/configs for stale `center` service naming, "exactly two services", `127.0.0.1:8080`, Docker `:8080` defaults, `postgres-data` named-volume wording, misleading log mount/recovery wording, and stale `--build` / local-build quick-start wording before review.
-   - For Dockerfile changes, build the image when Docker is available and inspect the runtime as UID/GID 10001 for both executable project binaries, `pdfinfo`/`pdftoppm`, and a mode-0700 Blob directory. Verify the pinned ClamAV image contains the configured healthcheck and run the opt-in real scanner probe when the daemon is available. If Docker is unavailable, state that explicitly and rely on review plus existing `make verify-go` / `make verify-web` gates.
-   - Static systemd checks must require the same `houfeng` user for center/processor, persistent `/var/lib/houfeng/attachments`, a private mode-0700 processor runtime directory, `NoNewPrivileges=true`, `ProtectSystem=strict`, empty capabilities and `LimitCORE=0`. Deployment docs must use `_FILE` S3 credential carriers and require PostgreSQL + local Blob coordinated backup/restore.
-   - For Docker / agent asset publishing workflow changes, statically verify `.github/workflows/publish-images.yml` has no `push`/`pull_request` trigger, has `release.published` and `workflow_dispatch`, targets `docker.io/linnea7171/houfeng`, uses the root `Dockerfile`, builds agent assets with `make build-agent-release VERSION=vX.Y.Z`, uploads only `houfeng-agent_vX.Y.Z_linux_amd64`, `houfeng-agent_vX.Y.Z_linux_arm64`, and `sha256sums.txt` to the matching GitHub Release, grants `contents: write` only where needed for release asset upload, and references only GitHub Secrets for Docker Hub credentials.
-   - For Release Please changes, statically verify `.github/workflows/release-please.yml` runs on `push` to `main`, has `contents: write` and `pull-requests: write`, uses `secrets.RELEASE_PLEASE_TOKEN`, points to `release-please-config.json` and `.release-please-manifest.json`, and does not access Docker Hub credentials.
-   - For GitHub Actions maintenance, run `actionlint` when available and search Docker workflows for stale `docker/setup-buildx-action@v3`, `docker/build-push-action@v6`, `docker/login-action@v3`, `docker/metadata-action@v5`, and `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`.
+   - `go test ./internal/center/deploy ./cmd/houfeng-record-platform-admin` covers topology, env grouping, secret scope/staging, HTTPS preflight, release URLs/assets, safe stage diagnostics, and authority wiring.
+   - `docker compose config` must fail independently for every required blank and pass with a task-owned valid env. Validate current installed Compose syntax, including environment-backed secrets and external networks.
+   - Strict PostgreSQL 16 tests must cover fresh init, exact repeat, role drift, password rotation, current convergence/admission, activation, heartbeat expiry/renewal, and privilege denials with zero skips.
+   - Real isolated Compose evidence must build/inspect the release image, start unique task-owned resources, prove admitted Records + attachment/ClamAV flow, restart/exact repeat, corrupt-state fail-closed, portable-copy behavior, and clean teardown without touching unrelated Docker state.
+   - Inspect the image for all three binaries, baked Web, Poppler/curl, default UID/GID 10001, and entrypoint behavior. Run `make verify-go`, applicable Web/workflow checks, `actionlint` when installed, shell syntax, and `git diff --check`.
+   - Static docs tests must scope Docker quick-start prohibitions to the Compose section so advanced direct/systemd provisioning remains correct.
 
 7. **Wrong vs Correct**
 
 ```yaml
-# 错误：发布给 operator 的 Compose 默认从本地源码 build，且服务名不是 houfeng。
+# Wrong: source build and public port silently replace the release/NPM contract.
 services:
-  center:
+  houfeng:
     build: .
+    ports: ["16001:16001"]
 ```
 
 ```yaml
-# 正确：发布 Compose 默认使用项目镜像，服务名为 houfeng。
+# Correct: immutable release image, external NPM network, no public host port.
 services:
   houfeng:
-    image: linnea7171/houfeng:latest
-  houfeng-content-processor:
-    image: linnea7171/houfeng:latest
-    command: ["/usr/local/bin/houfeng-content-processor"]
-  clamav:
-    image: clamav/clamav:1.4.3
-  db:
-    image: postgres:16.12
-```
-
-```yaml
-# 错误：processor 使用可写 rootfs、保留 capabilities，并把 workspace 落到持久 Blob。
-services:
-  houfeng-content-processor:
-    volumes:
-      - houfeng_blobs:/var/lib/houfeng
-```
-
-```yaml
-# 正确：只共享 Blob 子目录；workspace 是有界 private tmpfs，进程无额外权限。
-services:
-  houfeng-content-processor:
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    volumes:
-      - houfeng_blobs:/var/lib/houfeng/attachments
-    tmpfs:
-      - /var/lib/houfeng/processor-workspace:rw,noexec,nosuid,nodev,size=536870912,mode=0700,uid=10001,gid=10001
-```
-
-```yaml
-# 错误：Docker 默认仍监听 / 暴露 8080。
-services:
-  houfeng:
-    environment:
-      HOUFENG_HTTP_ADDR: ":8080"
-    ports:
-      - "127.0.0.1:8080:8080"
-```
-
-```yaml
-# 正确：Docker/Compose 默认内外都是 16001，host 端口可覆盖。
-services:
-  houfeng:
-    environment:
-      HOUFENG_HTTP_ADDR: ":16001"
-    ports:
-      - "127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001"
-```
-
-```yaml
-# 错误：把 agent 做成容器服务并要求宿主机高权限挂载。
-services:
-  agent:
-    image: linnea7171/houfeng-agent:latest
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+    image: "${HOUFENG_IMAGE:?set HOUFENG_IMAGE in .env}"
+    networks:
+      houfeng-proxy:
+        aliases: [houfeng]
+networks:
+  houfeng-proxy:
+    external: true
+    name: "${HOUFENG_PROXY_NETWORK:?set HOUFENG_PROXY_NETWORK in .env}"
 ```
 
 ```text
-正确：agent 继续通过 MonitoringInstance onboarding 生成的一键安装命令安装到真实 Linux/systemd 主机。
+Wrong: restore data/postgres alone or edit the signed authority ledger.
+Correct: stop writes and copy compose.yaml + .env + optional-secrets + the complete data tree; restore PostgreSQL and authority state together.
 ```
 
 ### `internal/contracts/agentapi/`

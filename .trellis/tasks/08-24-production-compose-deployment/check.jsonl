@@ -1,0 +1,14 @@
+{"file":".trellis/tasks/08-24-production-compose-deployment/prd.md","reason":"Verify every approved acceptance criterion."}
+{"file":".trellis/tasks/08-24-production-compose-deployment/design.md","reason":"Review service ownership, initialization, NPM, config, portability, and rollback."}
+{"file":".trellis/tasks/08-24-production-compose-deployment/research/deployment-baseline.md","reason":"Check implementation against current source-of-truth facts."}
+{"file":".trellis/tasks/08-24-production-compose-deployment/research/records-authority.md","reason":"Verify the approved authority design resolves the confirmed admission blocker without bypass."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Verify final deployment and release artifacts match the updated contract."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Verify exact current APP writer/roles/runtime admission and no privilege leakage."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review deterministic, PostgreSQL, Compose, Docker, and full Go gates."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review content-safe failure and secret redaction behavior."}
+{"file":".trellis/spec/backend/record-integration-contract.md","reason":"Verify complete Records/processor/ClamAV topology and gate semantics."}
+{"file":"internal/center/store/record_admission_gate.go","reason":"Review exact contract and membership enforcement against the authority implementation."}
+{"file":"internal/center/recordplatform/projection_command.go","reason":"Review canonical projection reuse and absence of parallel activation authority."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check reuse and absence of parallel migration/config authorities."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace configuration and lifecycle across release assets, Compose, init, runtime, and docs."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Review task scope and delivery evidence."}
