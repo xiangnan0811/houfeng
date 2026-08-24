@@ -107,7 +107,7 @@
 - [x] Update the publish workflow, README, canonical deployment guide, task artifacts, and deployment spec to use `compose.env.example`, while operators continue saving it locally as `.env`.
 - [x] Add a post-upload public readback gate that checks exact deployment-name cardinality, rejects normalized legacy names, downloads into a trap-cleaned temporary directory, and proves both public files are byte-identical to the staged assets without restricting unrelated Release assets.
 - [x] Run focused deployment tests, workflow syntax/static checks, proportional repository gates, and independent `trellis-check` on the final snapshot.
-- [ ] Deliver a patch release and prove the public GitHub Release contains downloadable `compose.yaml` and `compose.env.example`, contains neither `.env.example` nor `default.env.example`, and renders every Houfeng service to the matching multi-architecture image tag.
+- [x] Deliver a patch release and prove the public GitHub Release contains downloadable `compose.yaml` and `compose.env.example`, contains neither `.env.example` nor `default.env.example`, and renders every Houfeng service to the matching multi-architecture image tag.
 
 Phase 10 implementation evidence:
 
@@ -116,6 +116,8 @@ Phase 10 implementation evidence:
 - The release/docs/spec static contracts and full `go test ./internal/center/deploy -count=1` pass under Go 1.26.2. Ruby parses the workflow YAML, the public-readback step passes `bash -n`, and installed Docker Compose renders the tracked template to the single pinned test image without creating runtime resources; `actionlint` is not installed.
 - `GOTMPDIR=/var/tmp/hfpr GOFLAGS='-p=1' make verify-go` passes. The shorter on-disk temp root avoids host Unix-socket path and tmpfs quota limits without changing test coverage. Independent review and public patch-release verification remain delivery steps.
 - Final independent `trellis-check` reports Critical 0 / Important 0 / Minor 0. It independently passed the five-test release/docs/spec suite, full deploy package, workflow YAML parse, extracted readback shell syntax, Compose render to the single `v0.76.1` Houfeng image, and diff hygiene; the earlier missing-public-postcondition Important is resolved.
+- PR #450 merged the stable public asset-name fix, all seven required CI jobs passed on the PR and merged `main`, and Release Please PR #451 published `v0.76.1`. Publish run `32732811538` passed both architecture builds, the multi-architecture manifest, deployment upload, and the public post-upload readback gate.
+- Fresh public verification downloaded `compose.yaml` and `compose.env.example` from `v0.76.1`, proved both byte-identical to the tagged/staged sources, confirmed neither `.env.example` nor `default.env.example` exists, and rendered six Houfeng services to `docker.io/linnea7171/houfeng:v0.76.1` alongside `postgres:16.12` and `clamav/clamav:1.4.3`. Docker's registry manifest inspection confirmed `linux/amd64` and `linux/arm64` image manifests.
 
 ## Stop conditions
 
