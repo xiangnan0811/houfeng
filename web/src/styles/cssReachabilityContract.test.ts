@@ -7,6 +7,8 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 const productionExtensions = new Set(['.ts', '.tsx'])
+// This repository-wide AST scan competes with the full coverage suite in CI.
+const repositoryScanTimeoutMilliseconds = 15_000
 
 function walkFiles(directory: string, accept: (path: string) => boolean): string[] {
   return readdirSync(directory, { withFileTypes: true })
@@ -87,7 +89,9 @@ function splitSelectors(value: string) {
 }
 
 describe('production CSS reachability', () => {
-  it('requires every class selector branch to have a production source owner', () => {
+  it('requires every class selector branch to have a production source owner', {
+    timeout: repositoryScanTimeoutMilliseconds,
+  }, () => {
     const { exact, prefixes } = sourceClassInventory()
     const violations: string[] = []
     const isUsed = (className: string) =>
