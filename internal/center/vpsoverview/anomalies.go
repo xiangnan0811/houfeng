@@ -1,6 +1,7 @@
 package vpsoverview
 
 import (
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -54,7 +55,7 @@ type Snapshot struct {
 // empty slice — never a placeholder row.
 func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 	anomalies := make([]Anomaly, 0)
-	routeBase := "/vps/" + snapshot.VPSID
+	ipQualityRoute := "/vps/" + url.PathEscape(snapshot.VPSID) + "/ip-quality"
 
 	if snapshot.MonitoringAvailable {
 		health := strings.TrimSpace(snapshot.MonitoringHealth)
@@ -67,7 +68,7 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 				Source:   "monitoring",
 				EventAt:  snapshot.MonitoringObserved,
 				Primary: &AnomalyAction{
-					ID: "open_monitoring", Label: "查看监控", Route: routeBase + "/monitoring",
+					ID: "open_monitoring", Label: "查看监控", Route: "/monitoring?abnormal=1",
 				},
 			})
 		}
@@ -80,7 +81,7 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 				Source:   "monitoring",
 				EventAt:  snapshot.MonitoringObserved,
 				Primary: &AnomalyAction{
-					ID: "open_incidents", Label: "查看事件", Route: "/incidents",
+					ID: "open_incidents", Label: "查看事件", Route: "/events?object_type=monitoring_instance",
 				},
 			})
 		}
@@ -95,7 +96,7 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 				Source:   "ip_quality",
 				EventAt:  snapshot.IPObservedAt,
 				Primary: &AnomalyAction{
-					ID: "open_ip_quality", Label: "查看 IP 质量", Route: routeBase,
+					ID: "open_ip_quality", Label: "查看 IP 质量", Route: ipQualityRoute,
 				},
 			})
 		}
@@ -109,7 +110,7 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 				Source:   "ip_quality",
 				EventAt:  snapshot.IPObservedAt,
 				Primary: &AnomalyAction{
-					ID: "open_ip_quality", Label: "查看 IP 质量", Route: routeBase,
+					ID: "open_ip_quality", Label: "查看 IP 质量", Route: ipQualityRoute,
 				},
 			})
 		}
@@ -122,7 +123,7 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 				Source:   "ip_quality",
 				EventAt:  snapshot.IPObservedAt,
 				Primary: &AnomalyAction{
-					ID: "open_ip_quality", Label: "查看 IP 质量", Route: routeBase,
+					ID: "open_ip_quality", Label: "查看 IP 质量", Route: ipQualityRoute,
 				},
 			})
 		}
@@ -138,7 +139,7 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 				Title:    "缺少有效订阅",
 				Source:   "renewal",
 				Primary: &AnomalyAction{
-					ID: "open_subscriptions", Label: "管理订阅", Route: routeBase,
+					ID: "open_subscription", Label: "管理订阅",
 				},
 			})
 		}
@@ -152,7 +153,7 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 					Source:   "renewal",
 					EventAt:  snapshot.NextRenewAt,
 					Primary: &AnomalyAction{
-						ID: "open_subscriptions", Label: "查看续费", Route: routeBase,
+						ID: "open_renewal_decision", Label: "查看续费",
 					},
 				})
 			}
@@ -168,7 +169,7 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 			Detail:   snapshot.LifecycleStatus,
 			Source:   "lifecycle",
 			Primary: &AnomalyAction{
-				ID: "open_management", Label: "打开管理", Route: routeBase,
+				ID: "open_management", Label: "打开管理",
 			},
 		})
 	}
@@ -183,7 +184,7 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 			Detail:   strings.Join(sources, ", "),
 			Source:   "overview",
 			Primary: &AnomalyAction{
-				ID: "retry_overview", Label: "重试", Route: routeBase,
+				ID: "retry_overview", Label: "重试",
 			},
 		})
 	}

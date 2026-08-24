@@ -3302,8 +3302,10 @@ export type SubjectActivityListResponse = {
 
 export const VPS_OVERVIEW_CAPABILITY_RECORDS_V2_READ = 'records_v2_read'
 
+export type VPSOverviewSectionStatus = 'ready' | 'stale' | 'unavailable'
+
 export type VPSOverviewSectionState = {
-  state: string
+  state: VPSOverviewSectionStatus
   observed_at: string | null
   last_success_at: string | null
   reason_code: string
@@ -3334,14 +3336,34 @@ export type VPSOverviewIdentity = {
   updated_at: string
 }
 
+export type VPSOverviewAnomalyRuleID =
+  | 'monitoring.health.abnormal.v1'
+  | 'monitoring.incidents.open.v1'
+  | 'ip_quality.risk.elevated.v1'
+  | 'ip_quality.stale.v1'
+  | 'ip_quality.partial.v1'
+  | 'renewal.due.soon.v1'
+  | 'renewal.subscription.missing.v1'
+  | 'lifecycle.blocker.v1'
+  | 'source.unavailable.v1'
+
+export type VPSOverviewAnomalyActionID =
+  | 'open_monitoring'
+  | 'open_incidents'
+  | 'open_ip_quality'
+  | 'open_subscription'
+  | 'open_renewal_decision'
+  | 'open_management'
+  | 'retry_overview'
+
 export type VPSOverviewAnomalyAction = {
-  id: string
+  id: VPSOverviewAnomalyActionID
   label: string
   route?: string
 }
 
 export type VPSOverviewAnomaly = {
-  rule_id: string
+  rule_id: VPSOverviewAnomalyRuleID
   severity: string
   title: string
   detail?: string
@@ -3357,12 +3379,19 @@ export type VPSOverviewFact = {
   value: string
 }
 
+export type VPSOverviewRelationKind =
+  | 'monitoring_instances'
+  | 'subscriptions'
+  | 'services'
+  | 'domains'
+
 export type VPSOverviewRelation = {
-  kind: string
+  kind: VPSOverviewRelationKind
   count: number
   status?: string
-  route: string
+  route?: string
   label: string
+  section: VPSOverviewSectionState
 }
 
 export type VPSOverviewRecentActivity = {

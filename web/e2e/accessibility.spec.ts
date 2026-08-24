@@ -8,6 +8,7 @@ import {
   coreRouteProfile,
   dashboardProfile,
   subjectActivityProfile,
+  vpsOverviewPartialFixture,
   vpsOverviewProfile,
 } from './fixtures/profiles'
 import { apiRouteKey } from './fixtures/contracts'
@@ -43,6 +44,22 @@ for (const surface of AXE_SURFACES) {
     expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([])
   })
 }
+
+test('VPS partial freshness has no blocking axe violations and exposes keyboard retry', async ({ api, page }) => {
+  api.useProfile(vpsOverviewProfile({ overview: vpsOverviewPartialFixture() }))
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/vps/vps_001')
+  await expect(page.getByRole('heading', { name: 'Tokyo Edge' })).toBeVisible()
+
+  const retry = page.getByRole('button', { name: '重试 IP 质量' })
+  await retry.focus()
+  await expect(retry).toBeFocused()
+  const result = await new AxeBuilder({ page }).analyze()
+  const blocking = result.violations
+    .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
+    .map((violation) => ({ id: violation.id, targets: violation.nodes.map((node) => node.target) }))
+  expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([])
+})
 
 test('Command Audit keeps output metadata-only and owns narrow-screen table scrolling and dialog focus', async ({
   api,

@@ -40,24 +40,19 @@ then
 fi
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-workspace=$(mktemp -d "${TMPDIR:-/tmp}/houfeng-records-integration.XXXXXX")
+records_runner_kind=integration
+records_run_id=
+workspace=
 containers=()
+volumes=()
+source "$root/scripts/lib/records-runner-lifecycle.sh"
+records_runner_install_cleanup
+records_runner_validate_run_id_override
+records_runner_require_signal_tools
+workspace=$(mktemp -d "${TMPDIR:-/tmp}/houfeng-records-integration.XXXXXX")
+records_runner_prepare_run_id
 selected_ports=()
 picked_port=
-
-cleanup() {
-  status=$?
-  for container in "${containers[@]}"
-  do
-    docker rm -f "$container" >/dev/null 2>&1 || true
-  done
-  if [ "${HOUFENG_RECORDS_KEEP_WORKSPACE-}" != "1" ]
-  then
-    rm -rf "$workspace" || true
-  fi
-  exit "$status"
-}
-trap cleanup EXIT
 
 random_password() {
   od -An -N18 -tx1 /dev/urandom | tr -d ' \n'
@@ -87,17 +82,18 @@ start_minio() {
   port=$2
   access=$3
   secret=$4
-  data="$workspace/minio"
-  mkdir -p "$data"
-  docker run --rm -d \
+  containers+=("$name")
+  docker run -d \
     --name "$name" \
+    --label "com.houfeng.records.runner=$records_runner_kind" \
+    --label "com.houfeng.records.run=$records_run_id" \
+    --label "com.houfeng.records.owner=$records_owner_id" \
     --network=host \
     -e MINIO_ROOT_USER="$access" \
     -e MINIO_ROOT_PASSWORD="$secret" \
-    -v "$data:/data" \
+    --mount "type=volume,source=$minio_volume,target=/data" \
     minio/minio:RELEASE.2024-12-18T13-15-44Z \
     server /data --address "127.0.0.1:${port}" >/dev/null
-  containers+=("$name")
 }
 
 wait_for_minio() {
@@ -122,7 +118,15 @@ then
   minio_port=$picked_port
   minio_access=houfengminio
   minio_secret=$(random_password)
-  minio_name="houfeng-records-minio-${RANDOM}${RANDOM}"
+  minio_name="houfeng-records-minio-${records_run_id}-${RANDOM}${RANDOM}"
+  minio_volume="houfeng-records-integration-minio-${records_owner_id}"
+  volumes+=("$minio_volume")
+  docker volume create \
+    --label "com.houfeng.records.runner=$records_runner_kind" \
+    --label "com.houfeng.records.run=$records_run_id" \
+    --label "com.houfeng.records.owner=$records_owner_id" \
+    "$minio_volume" >/dev/null
+  records_runner_verify_volume_ownership "$minio_volume"
   start_minio "$minio_name" "$minio_port" "$minio_access" "$minio_secret"
   wait_for_minio "$minio_name" "$minio_port"
   minio_args=(
@@ -148,32 +152,52 @@ set +e
   cd "$root"
   if [ "$profile" = "s3" ]
   then
-    "$root/scripts/test-record-platform-integration.sh" postgres -- \
+    exec setsid env \
+      --default-signal=INT \
+      --default-signal=TERM \
+      HOUFENG_RECORDS_KEEP_WORKSPACE=0 \
+      "$root/scripts/test-record-platform-integration.sh" postgres -- \
       "${minio_args[@]}" \
       go test ./internal/center/recordbackup ./internal/center/recordrestore ./internal/center/store ./internal/center/portability \
       -run 'LocalProfile|WitnessedRecordSubject|RecordPortabilityDeletion|RecordWatchVersionedDefaultAnchor|MinIO' \
       -count=1
   else
-    "$root/scripts/test-record-platform-integration.sh" postgres -- \
+    exec setsid env \
+      --default-signal=INT \
+      --default-signal=TERM \
+      HOUFENG_RECORDS_KEEP_WORKSPACE=0 \
+      "$root/scripts/test-record-platform-integration.sh" postgres -- \
       go test ./internal/center/recordbackup ./internal/center/recordrestore ./internal/center/store \
       -run 'LocalProfile|WitnessedRecordSubject|RecordPortabilityDeletion|RecordWatchVersionedDefaultAnchor' \
       -count=1
   fi
-) >"$stdout_file" 2>"$stderr_file"
+) >"$stdout_file" 2>"$stderr_file" &
+records_runner_body_pid=$!
+wait "$records_runner_body_pid"
 command_status=$?
+records_runner_body_pid=
 set -e
 
-if grep -Fq -- '--- SKIP:' "$stdout_file" "$stderr_file"
+if records_runner_finish_evidence \
+  "$command_status" \
+  0 \
+  "$stdout_file" \
+  "$stderr_file" \
+  'records integration command skipped a test'
 then
-  printf 'records integration command skipped a test\n' >&2
-  exit 1
+  final_status=0
+else
+  final_status=$?
 fi
 
 if [ "$command_status" -ne 0 ]
 then
   cat "$stdout_file"
   cat "$stderr_file" >&2
-  exit "$command_status"
+fi
+if [ "$final_status" -ne 0 ]
+then
+  exit "$final_status"
 fi
 
 commit=$(git -C "$root" rev-parse HEAD)

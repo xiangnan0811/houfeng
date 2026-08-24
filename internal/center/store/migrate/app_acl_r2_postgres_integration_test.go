@@ -2461,7 +2461,7 @@ func newAppACLR2FakeRunnerToolchain(t *testing.T) *appACLR2FakeRunnerToolchain {
 	if err := os.MkdirAll(toolchain.tmpParent, 0o755); err != nil {
 		t.Fatalf("create fake runner TMPDIR: %v", err)
 	}
-	for _, command := range []string{"od", "seq", "grep", "sort", "wc", "tr", "tee", "rm", "sleep"} {
+	for _, command := range []string{"awk", "env", "od", "seq", "grep", "setsid", "sort", "wc", "tr", "tee", "rm", "sleep"} {
 		target, err := exec.LookPath(command)
 		if err != nil {
 			t.Fatalf("locate host command %q for fake runner: %v", command, err)
@@ -2484,16 +2484,40 @@ exec /usr/bin/mktemp "$@"
 	writeExecutable("docker", `#!/usr/bin/bash
 set -euo pipefail
 log=${HOUFENG_APP_ACLR2_FAKE_DOCKER_LOG:?}
+label_value() {
+  local labels=$1
+  local key=$2
+  local label
+  local old_ifs=$IFS
+  IFS=,
+  for label in $labels
+  do
+    case "$label" in
+      "$key"=*)
+        printf '%s\n' "${label#*=}"
+        IFS=$old_ifs
+        return 0
+        ;;
+    esac
+  done
+  IFS=$old_ifs
+  return 0
+}
 command=$1
 shift
 case "$command" in
   run)
     name=
     image=
+    labels=
     while (($#)); do
       case "$1" in
         --name)
           name=$2
+          shift 2
+          ;;
+        --label)
+          labels="${labels}${labels:+,}$2"
           shift 2
           ;;
         --tmpfs|-e)
@@ -2514,8 +2538,29 @@ case "$command" in
           ;;
       esac
     done
-    printf 'run\t%s\t%s\n' "$name" "$image" >> "$log"
-    printf 'fake-container\n'
+    printf 'run\t%s\t%s\t%s\n' "$name" "$image" "$labels" >> "$log"
+    printf 'fake-id-%s\n' "$name"
+    ;;
+  container)
+    subcommand=${1-}
+    shift
+    case "$subcommand" in
+      inspect)
+        name=${!#}
+        printf 'container-inspect\t%s\n' "$name" >> "$log"
+        line=$(/usr/bin/awk -F '\t' -v name="$name" '$1 == "run" && $2 == name { found=$0 } END { print found }' "$log")
+        if [ -z "$line" ]
+        then
+          exit 44
+        fi
+        IFS=$'\t' read -r _ _ _ labels <<< "$line"
+        printf 'fake-id-%s|%s|%s|%s\n' \
+          "$name" \
+          "$(label_value "$labels" com.houfeng.records.runner)" \
+          "$(label_value "$labels" com.houfeng.records.run)" \
+          "$(label_value "$labels" com.houfeng.records.owner)"
+        ;;
+    esac
     ;;
   exec)
     container=$1
@@ -2654,8 +2699,17 @@ func assertAppACLR2FakeRunnerLifecycle(t *testing.T, fake *appACLR2FakeRunnerToo
 		fields := strings.Split(line, "\t")
 		switch fields[0] {
 		case "run":
-			if len(fields) != 3 || fields[2] != wantImage {
+			if len(fields) != 4 || fields[2] != wantImage {
 				t.Fatalf("fake strict runner run record = %#v, want image %q", fields, wantImage)
+			}
+			for _, label := range []string{
+				"com.houfeng.records.runner=record-platform",
+				"com.houfeng.records.run=",
+				"com.houfeng.records.owner=",
+			} {
+				if !strings.Contains(fields[3], label) {
+					t.Fatalf("fake strict runner run record = %#v, want label %q", fields, label)
+				}
 			}
 			runNames = append(runNames, fields[1])
 			for _, prefix := range []string{
@@ -2684,7 +2738,7 @@ func assertAppACLR2FakeRunnerLifecycle(t *testing.T, fake *appACLR2FakeRunnerToo
 	for _, name := range runNames {
 		found := false
 		for _, removed := range removeNames {
-			if removed == name {
+			if removed == "fake-id-"+name {
 				found = true
 				break
 			}

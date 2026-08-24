@@ -6,6 +6,7 @@ import {
   comparisonWorkbenchProfile,
   coreRouteProfile,
   subjectActivityProfile,
+  vpsOverviewPartialFixture,
   vpsOverviewProfile,
 } from './fixtures/profiles'
 import { expectLocatorNotClipped, expectMinTouchTarget, expectNoDocumentOverflow } from './support/geometry'
@@ -101,6 +102,20 @@ test('VPS 概览 remains complete and reachable at 390px', async ({ api, page })
   await command.scrollIntoViewIfNeeded()
   await expectLocatorNotClipped(command)
   await expectHitTarget(page, command)
+  await expectNoDocumentOverflow(page)
+})
+
+test('VPS 概览 partial freshness stays reachable without document overflow at 390px', async ({ api, page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  api.useProfile(vpsOverviewProfile({ overview: vpsOverviewPartialFixture() }))
+  await page.goto('/vps/vps_001')
+
+  const retry = page.getByRole('button', { name: '重试 IP 质量' })
+  await expect(retry).toBeVisible()
+  await retry.scrollIntoViewIfNeeded()
+  await expectLocatorNotClipped(retry)
+  await expectHitTarget(page, retry)
+  await expectMinTouchTarget(retry)
   await expectNoDocumentOverflow(page)
 })
 

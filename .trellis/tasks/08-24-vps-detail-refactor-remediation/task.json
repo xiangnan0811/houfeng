@@ -1,0 +1,34 @@
+{
+  "id": "vps-detail-refactor-remediation",
+  "name": "vps-detail-refactor-remediation",
+  "title": "Remediate VPS detail refactor audit findings",
+  "description": "Fix the four Important and one Minor findings confirmed by the VPS detail refactor completion audit, with TDD, full strict verification, protected delivery, and no expansion of permanent-delete or accepted deferrals.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "mixed",
+  "package": null,
+  "priority": "P1",
+  "creator": "xiangnan-arch",
+  "assignee": "xiangnan-arch",
+  "createdAt": "2026-08-24",
+  "completedAt": null,
+  "branch": "codex/vps-detail-refactor-remediation",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-24-vps-overview-freshness-reliability",
+    "08-24-vps-overview-action-contract",
+    "08-24-vps-overview-gate-contract",
+    "08-24-records-s3-harness-lifecycle"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "worktree_path": "/home/murray/code/houfeng/.worktree/vps-detail-refactor-remediation",
+    "audit_base_commit": "08730e7991f3242ed43fcad561cde1f3ea60b6fb"
+  }
+}

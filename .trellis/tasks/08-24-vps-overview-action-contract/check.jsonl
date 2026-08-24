@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/08-24-vps-overview-action-contract/prd.md", "reason": "Check every I-01 and M-01 acceptance criterion."}
+{"file": ".trellis/tasks/08-24-vps-overview-action-contract/design.md", "reason": "Check exact token matrix, panels, dependency, security, and rollback."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/research/route-contract.md", "reason": "Check all discovered owners and required behavior tests."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Review Link versus Button, focus, and route-agnostic presentation."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Review audit, Node 22, production, browser, and accessibility evidence."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review stable rule and relation table tests."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Review producer-to-browser destination closure."}
+{"file": ".trellis/tasks/08-24-vps-overview-freshness-reliability/design.md", "reason": "Ensure section and retry interactions remain intact."}
+{"file": ".trellis/tasks/08-24-vps-overview-gate-contract/design.md", "reason": "Ensure the final decoder validates the corrected action and relation shape."}

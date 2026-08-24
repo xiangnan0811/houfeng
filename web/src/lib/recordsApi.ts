@@ -489,100 +489,401 @@ export function listSubjectActivity(
     : undefined)).then(normalizeSubjectActivityResponse)
 }
 
-function emptySectionState(): VPSOverview['recent_activity']['section'] {
-  return {
-    state: '',
-    observed_at: null,
-    last_success_at: null,
-    reason_code: '',
+type InvalidVPSOverviewResponseReason = 'malformed_json' | 'invalid_shape'
+type VPSOverviewWireObject = Record<string, unknown>
+
+const VPS_OVERVIEW_SECTION_STATES = ['ready', 'stale', 'unavailable'] as const
+const VPS_OVERVIEW_ANOMALY_RULES = [
+  'monitoring.health.abnormal.v1',
+  'monitoring.incidents.open.v1',
+  'ip_quality.risk.elevated.v1',
+  'ip_quality.stale.v1',
+  'ip_quality.partial.v1',
+  'renewal.subscription.missing.v1',
+  'renewal.due.soon.v1',
+  'lifecycle.blocker.v1',
+  'source.unavailable.v1',
+] as const
+const VPS_OVERVIEW_ANOMALY_ACTIONS = [
+  'open_monitoring',
+  'open_incidents',
+  'open_ip_quality',
+  'open_subscription',
+  'open_renewal_decision',
+  'open_management',
+  'retry_overview',
+] as const
+const SUBJECT_ACTIVITY_SOURCE_KINDS = [
+  'record_domain',
+  'evidence_snapshot',
+  'asset_history',
+  'monitoring_event',
+  'command_audit',
+] as const
+const SUBJECT_ACTIVITY_EVENT_KINDS = [
+  'record_created',
+  'record_revised',
+  'record_restored',
+  'record_archived',
+  'record_unarchived',
+  'record_owner_changed',
+  'record_participant_changed',
+  'record_follow_up_changed',
+  'comment_created',
+  'comment_edited',
+  'comment_redacted',
+  'action_created',
+  'action_updated',
+  'action_completed',
+  'action_cancelled',
+  'action_reopened',
+  'evidence_captured',
+  'asset_fact_changed',
+  'monitoring_state_changed',
+  'command_executed',
+] as const
+const RECORD_SUBJECT_KINDS = ['vps', 'monitoring_instance', 'target'] as const
+const SUBJECT_ACTIVITY_ROLES = ['affected', 'context', 'evidence_source'] as const
+const SUBJECT_ACTIVITY_IDENTITY_FIELDS = {
+  vps: ['provider', 'region', 'purpose'],
+  monitoring_instance: ['version'],
+  target: ['target_type'],
+} as const satisfies Record<RecordSubjectKind, readonly string[]>
+const VPS_OVERVIEW_RELATIONS = [
+  { kind: 'monitoring_instances', route: false },
+  { kind: 'subscriptions', route: true },
+  { kind: 'services', route: false },
+  { kind: 'domains', route: false },
+] as const
+
+export class InvalidVPSOverviewResponseError extends Error {
+  readonly reason: InvalidVPSOverviewResponseReason
+
+  constructor(reason: InvalidVPSOverviewResponseReason) {
+    super('Invalid VPS overview response')
+    Object.defineProperty(this, 'name', { value: 'InvalidVPSOverviewResponseError' })
+    this.reason = reason
   }
 }
 
-function normalizeOverviewSection(
-  raw: Partial<VPSOverview['recent_activity']['section']> | undefined,
-): VPSOverview['recent_activity']['section'] {
+function invalidVPSOverview(): never {
+  throw new InvalidVPSOverviewResponseError('invalid_shape')
+}
+
+function overviewObject(value: unknown): VPSOverviewWireObject {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) invalidVPSOverview()
+  return value as VPSOverviewWireObject
+}
+
+function overviewArray(value: unknown): unknown[] {
+  if (!Array.isArray(value)) invalidVPSOverview()
+  return value
+}
+
+function overviewString(value: unknown): string {
+  if (typeof value !== 'string') invalidVPSOverview()
+  return value
+}
+
+function optionalOverviewString(
+  object: VPSOverviewWireObject,
+  key: string,
+): string | undefined {
+  if (!Object.prototype.hasOwnProperty.call(object, key)) return undefined
+  return overviewString(object[key])
+}
+
+function overviewBoolean(value: unknown): boolean {
+  if (typeof value !== 'boolean') invalidVPSOverview()
+  return value
+}
+
+function overviewEnum<const T extends string>(value: unknown, allowed: readonly T[]): T {
+  if (typeof value !== 'string' || !allowed.includes(value as T)) invalidVPSOverview()
+  return value as T
+}
+
+function overviewStringArray(value: unknown): string[] {
+  return overviewArray(value).map(overviewString)
+}
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) return isLeapYear(year) ? 29 : 28
+  return [4, 6, 9, 11].includes(month) ? 30 : 31
+}
+
+function overviewTimestamp(value: unknown): string {
+  const timestamp = overviewString(value)
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/u.exec(timestamp)
+  if (!match) invalidVPSOverview()
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
+  const second = Number(match[6])
+  const offsetHour = match[8] === undefined ? 0 : Number(match[8])
+  const offsetMinute = match[9] === undefined ? 0 : Number(match[9])
+  if (
+    month < 1
+    || month > 12
+    || day < 1
+    || day > daysInMonth(year, month)
+    || hour > 23
+    || minute > 59
+    || second > 59
+    || offsetHour > 23
+    || offsetMinute > 59
+  ) invalidVPSOverview()
+  return timestamp
+}
+
+function nullableOverviewTimestamp(value: unknown): string | null {
+  return value === null ? null : overviewTimestamp(value)
+}
+
+function optionalNullableOverviewTimestamp(
+  object: VPSOverviewWireObject,
+  key: string,
+): string | null | undefined {
+  if (!Object.prototype.hasOwnProperty.call(object, key)) return undefined
+  return nullableOverviewTimestamp(object[key])
+}
+
+function decodeOverviewSection(value: unknown): VPSOverview['recent_activity']['section'] {
+  const section = overviewObject(value)
   return {
-    state: raw?.state ?? '',
-    observed_at: raw?.observed_at ?? null,
-    last_success_at: raw?.last_success_at ?? null,
-    reason_code: raw?.reason_code ?? '',
+    state: overviewEnum(section.state, VPS_OVERVIEW_SECTION_STATES),
+    observed_at: nullableOverviewTimestamp(section.observed_at),
+    last_success_at: nullableOverviewTimestamp(section.last_success_at),
+    reason_code: overviewString(section.reason_code),
   }
 }
 
-function normalizeVPSOverview(raw: unknown): VPSOverview {
-  const stripped = stripActivityGlobalHeadFields(raw) as Partial<VPSOverview>
-  const identity = stripped.identity ?? {
-    vps_id: '',
-    display_name: '',
-    provider_name: '',
-    product_name: '',
-    country: '',
-    region: '',
-    city: '',
-    datacenter: '',
-    ipv4: '',
-    ipv6: '',
-    lifecycle_status: '',
-    usage_status: '',
-    renewal_decision: '',
-    importance: '',
-    labels: [],
-    updated_at: '',
+function decodeOverviewSummaryCell(value: unknown): VPSOverview['summary']['overall'] {
+  const cell = overviewObject(value)
+  const detail = optionalOverviewString(cell, 'detail')
+  const decoded: VPSOverview['summary']['overall'] = {
+    status: overviewString(cell.status),
+    section: decodeOverviewSection(cell.section),
   }
-  const summary = stripped.summary
+  if (detail !== undefined) decoded.detail = detail
+  return decoded
+}
+
+function decodeOverviewIdentity(value: unknown): VPSOverview['identity'] {
+  const identity = overviewObject(value)
   return {
-    generated_at: typeof stripped.generated_at === 'string' ? stripped.generated_at : '',
-    identity: {
-      ...identity,
-      labels: Array.isArray(identity.labels) ? identity.labels : [],
-    },
-    anomalies: Array.isArray(stripped.anomalies)
-      ? stripped.anomalies.map((anomaly) => ({
-          ...anomaly,
-          secondary_actions: Array.isArray(anomaly.secondary_actions)
-            ? anomaly.secondary_actions
-            : [],
-        }))
-      : [],
+    vps_id: overviewString(identity.vps_id),
+    display_name: overviewString(identity.display_name),
+    provider_name: overviewString(identity.provider_name),
+    product_name: overviewString(identity.product_name),
+    country: overviewString(identity.country),
+    region: overviewString(identity.region),
+    city: overviewString(identity.city),
+    datacenter: overviewString(identity.datacenter),
+    ipv4: overviewString(identity.ipv4),
+    ipv6: overviewString(identity.ipv6),
+    lifecycle_status: overviewString(identity.lifecycle_status),
+    usage_status: overviewString(identity.usage_status),
+    renewal_decision: overviewString(identity.renewal_decision),
+    importance: overviewString(identity.importance),
+    labels: overviewStringArray(identity.labels),
+    updated_at: overviewTimestamp(identity.updated_at),
+  }
+}
+
+function decodeOverviewAction(value: unknown): VPSOverview['anomalies'][number]['secondary_actions'][number] {
+  const action = overviewObject(value)
+  const route = optionalOverviewString(action, 'route')
+  const decoded: VPSOverview['anomalies'][number]['secondary_actions'][number] = {
+    id: overviewEnum(action.id, VPS_OVERVIEW_ANOMALY_ACTIONS),
+    label: overviewString(action.label),
+  }
+  if (route !== undefined) decoded.route = route
+  return decoded
+}
+
+function decodeOverviewAnomaly(value: unknown): VPSOverview['anomalies'][number] {
+  const anomaly = overviewObject(value)
+  const detail = optionalOverviewString(anomaly, 'detail')
+  const eventAt = optionalNullableOverviewTimestamp(anomaly, 'event_at')
+  const hasPrimary = Object.prototype.hasOwnProperty.call(anomaly, 'primary_action')
+  const decoded: VPSOverview['anomalies'][number] = {
+    rule_id: overviewEnum(anomaly.rule_id, VPS_OVERVIEW_ANOMALY_RULES),
+    severity: overviewString(anomaly.severity),
+    title: overviewString(anomaly.title),
+    source: overviewString(anomaly.source),
+    secondary_actions: overviewArray(anomaly.secondary_actions).map(decodeOverviewAction),
+  }
+  if (detail !== undefined) decoded.detail = detail
+  if (eventAt !== undefined) decoded.event_at = eventAt
+  if (hasPrimary) {
+    decoded.primary_action = anomaly.primary_action === null
+      ? null
+      : decodeOverviewAction(anomaly.primary_action)
+  }
+  return decoded
+}
+
+function decodeOverviewActor(value: unknown): NonNullable<SubjectActivityItem['actor']> {
+  const actor = overviewObject(value)
+  const displayName = optionalOverviewString(actor, 'display_name')
+  const decoded: NonNullable<SubjectActivityItem['actor']> = {
+    actor_id: overviewString(actor.actor_id),
+  }
+  if (displayName !== undefined) decoded.display_name = displayName
+  return decoded
+}
+
+function decodeOverviewIdentityMap(
+  value: unknown,
+  kind: RecordSubjectKind,
+): Record<string, string> {
+  const identity = overviewObject(value)
+  const decoded: Record<string, string> = {}
+  const displayName = optionalOverviewString(identity, 'display_name')
+  if (displayName !== undefined) decoded.display_name = displayName
+  for (const field of SUBJECT_ACTIVITY_IDENTITY_FIELDS[kind]) {
+    const item = optionalOverviewString(identity, field)
+    if (item !== undefined) decoded[field] = item
+  }
+  return decoded
+}
+
+function decodeOverviewSubject(value: unknown): SubjectActivityItem['subjects'][number] {
+  const subject = overviewObject(value)
+  const kind = overviewEnum(subject.kind, RECORD_SUBJECT_KINDS)
+  const liveRoute = optionalOverviewString(subject, 'live_route')
+  const decoded: SubjectActivityItem['subjects'][number] = {
+    kind,
+    source_id: overviewString(subject.source_id),
+    role: overviewEnum(subject.role, SUBJECT_ACTIVITY_ROLES),
+    primary: overviewBoolean(subject.primary),
+    identity: decodeOverviewIdentityMap(subject.identity, kind),
+    tombstoned: overviewBoolean(subject.tombstoned),
+  }
+  if (liveRoute !== undefined) decoded.live_route = liveRoute
+  return decoded
+}
+
+function decodeOverviewPresentation(value: unknown): SubjectActivityItem['presentation'] {
+  const presentation = overviewObject(value)
+  if (presentation.version !== 1) invalidVPSOverview()
+  const summary = optionalOverviewString(presentation, 'summary')
+  const decoded: SubjectActivityItem['presentation'] = {
+    version: 1,
+    title: overviewString(presentation.title),
+  }
+  if (summary !== undefined) decoded.summary = summary
+  return decoded
+}
+
+function decodeOverviewActivityItem(value: unknown): SubjectActivityItem {
+  const item = overviewObject(value)
+  const actor = Object.prototype.hasOwnProperty.call(item, 'actor')
+    ? decodeOverviewActor(item.actor)
+    : undefined
+  const correctsActivityID = optionalOverviewString(item, 'corrects_activity_id')
+  const decoded: SubjectActivityItem = {
+    activity_id: overviewString(item.activity_id),
+    event_kind: overviewEnum(item.event_kind, SUBJECT_ACTIVITY_EVENT_KINDS),
+    event_at: overviewTimestamp(item.event_at),
+    recorded_at: overviewTimestamp(item.recorded_at),
+    source_kind: overviewEnum(item.source_kind, SUBJECT_ACTIVITY_SOURCE_KINDS),
+    backfilled: overviewBoolean(item.backfilled),
+    subjects: overviewArray(item.subjects).map(decodeOverviewSubject),
+    presentation: decodeOverviewPresentation(item.presentation),
+  }
+  if (actor !== undefined) decoded.actor = actor
+  if (correctsActivityID !== undefined) decoded.corrects_activity_id = correctsActivityID
+  return decoded
+}
+
+function decodeOverviewRecentActivity(value: unknown): VPSOverview['recent_activity'] {
+  const activity = overviewObject(value)
+  const items = overviewArray(activity.items)
+  if (items.length > 5) invalidVPSOverview()
+  const snapshotCursor = optionalOverviewString(activity, 'snapshot_cursor')
+  const decoded: VPSOverview['recent_activity'] = {
+    section: decodeOverviewSection(activity.section),
+    items: items.map(decodeOverviewActivityItem),
+  }
+  if (snapshotCursor !== undefined) decoded.snapshot_cursor = snapshotCursor
+  return decoded
+}
+
+function decodeOverviewFact(value: unknown): VPSOverview['facts'][number] {
+  const fact = overviewObject(value)
+  return {
+    key: overviewString(fact.key),
+    label: overviewString(fact.label),
+    value: overviewString(fact.value),
+  }
+}
+
+function decodeOverviewRelations(value: unknown): VPSOverview['relations'] {
+  const relations = overviewArray(value)
+  if (relations.length !== VPS_OVERVIEW_RELATIONS.length) invalidVPSOverview()
+  return relations.map((candidate, index) => {
+    const relation = overviewObject(candidate)
+    const contract = VPS_OVERVIEW_RELATIONS[index]
+    if (!contract || relation.kind !== contract.kind) invalidVPSOverview()
+    if (!Number.isSafeInteger(relation.count) || Number(relation.count) < 0) invalidVPSOverview()
+    const hasRoute = Object.prototype.hasOwnProperty.call(relation, 'route')
+    if (hasRoute !== contract.route) invalidVPSOverview()
+    const status = optionalOverviewString(relation, 'status')
+    const route = contract.route ? overviewString(relation.route) : undefined
+    const decoded: VPSOverview['relations'][number] = {
+      kind: contract.kind,
+      count: Number(relation.count),
+      label: overviewString(relation.label),
+      section: decodeOverviewSection(relation.section),
+    }
+    if (status !== undefined) decoded.status = status
+    if (route !== undefined) decoded.route = route
+    return decoded
+  })
+}
+
+function decodeVPSOverview(value: unknown): VPSOverview {
+  const overview = overviewObject(value)
+  const summary = overviewObject(overview.summary)
+  return {
+    generated_at: overviewTimestamp(overview.generated_at),
+    identity: decodeOverviewIdentity(overview.identity),
+    anomalies: overviewArray(overview.anomalies).map(decodeOverviewAnomaly),
     summary: {
-      overall: {
-        status: summary?.overall?.status ?? '',
-        ...(summary?.overall?.detail ? { detail: summary.overall.detail } : {}),
-        section: normalizeOverviewSection(summary?.overall?.section),
-      },
-      monitoring: {
-        status: summary?.monitoring?.status ?? '',
-        ...(summary?.monitoring?.detail ? { detail: summary.monitoring.detail } : {}),
-        section: normalizeOverviewSection(summary?.monitoring?.section),
-      },
-      ip_quality: {
-        status: summary?.ip_quality?.status ?? '',
-        ...(summary?.ip_quality?.detail ? { detail: summary.ip_quality.detail } : {}),
-        section: normalizeOverviewSection(summary?.ip_quality?.section),
-      },
-      renewal: {
-        status: summary?.renewal?.status ?? '',
-        ...(summary?.renewal?.detail ? { detail: summary.renewal.detail } : {}),
-        section: normalizeOverviewSection(summary?.renewal?.section),
-      },
+      overall: decodeOverviewSummaryCell(summary.overall),
+      monitoring: decodeOverviewSummaryCell(summary.monitoring),
+      ip_quality: decodeOverviewSummaryCell(summary.ip_quality),
+      renewal: decodeOverviewSummaryCell(summary.renewal),
     },
-    recent_activity: {
-      section: normalizeOverviewSection(stripped.recent_activity?.section) || emptySectionState(),
-      items: normalizeActivityItems(stripped.recent_activity?.items),
-      ...(typeof stripped.recent_activity?.snapshot_cursor === 'string'
-        && stripped.recent_activity.snapshot_cursor.trim()
-        ? { snapshot_cursor: stripped.recent_activity.snapshot_cursor.trim() }
-        : {}),
-    },
-    facts: Array.isArray(stripped.facts) ? stripped.facts : [],
-    relations: Array.isArray(stripped.relations) ? stripped.relations : [],
-    capabilities: Array.isArray(stripped.capabilities) ? stripped.capabilities : [],
+    recent_activity: decodeOverviewRecentActivity(overview.recent_activity),
+    facts: overviewArray(overview.facts).map(decodeOverviewFact),
+    relations: decodeOverviewRelations(overview.relations),
+    capabilities: overviewStringArray(overview.capabilities),
   }
 }
 
-/** Reads the request-scoped VPS overview read model. */
-export function getVPSOverview(vpsId: string): Promise<VPSOverview> {
-  return requestJSON<unknown>(`/api/vps/${encoded(vpsId)}/overview`).then(normalizeVPSOverview)
+/** Reads and fully validates the request-scoped VPS overview read model. */
+export async function getVPSOverview(vpsId: string): Promise<VPSOverview> {
+  let response: unknown
+  try {
+    response = await requestJSON<unknown>(`/api/vps/${encoded(vpsId)}/overview`)
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new InvalidVPSOverviewResponseError('malformed_json')
+    }
+    throw error
+  }
+  const overview = decodeVPSOverview(response)
+  if (overview.identity.vps_id !== vpsId) invalidVPSOverview()
+  return overview
 }
 
 export function overviewHasRecordsV2Read(overview: VPSOverview): boolean {

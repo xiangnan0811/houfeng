@@ -1,5 +1,9 @@
+import { createElement } from 'react'
+import { render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { UnifiedTimeline } from '../components/UnifiedTimeline'
 import { ApiError } from './apiRequest'
 import {
   archiveRecord,
@@ -19,6 +23,8 @@ import {
   getRecordDeletionOperation,
   getRecordDraft,
   getRecordRevision,
+  getVPSOverview,
+  InvalidVPSOverviewResponseError,
   listRecordDrafts,
   listRecordRevisions,
   listRecords,
@@ -59,6 +65,7 @@ import type {
   RecordSubjectReference,
   ComparisonCandidateResponse,
   ComparisonEvaluateResponse,
+  VPSOverview,
 } from './types'
 
 const requestDefaults = {
@@ -232,11 +239,449 @@ const evidenceReadResponse = {
   read_model: { version: 'monitoring_host_read_model/v1' },
 } satisfies EvidenceSnapshotRead
 
+function vpsOverviewResponse(): VPSOverview {
+  const ready = {
+    state: 'ready' as const,
+    observed_at: '2026-08-20T08:59:00Z',
+    last_success_at: '2026-08-20T08:59:00Z',
+    reason_code: '',
+  }
+  return {
+    generated_at: '2026-08-20T09:00:00Z',
+    identity: {
+      vps_id: 'vps_001',
+      display_name: 'Tokyo Edge',
+      provider_name: 'Example Cloud',
+      product_name: 'VPS',
+      country: 'JP',
+      region: 'Tokyo',
+      city: 'Tokyo',
+      datacenter: 'TK1',
+      ipv4: '192.0.2.10',
+      ipv6: '',
+      lifecycle_status: '在用',
+      usage_status: '生产',
+      renewal_decision: '续费',
+      importance: '高',
+      labels: ['edge'],
+      updated_at: '2026-08-20T08:58:00Z',
+    },
+    anomalies: [{
+      rule_id: 'ip_quality.stale.v1',
+      severity: 'notice',
+      title: 'IP 质量证据过期',
+      source: 'ip_quality',
+      event_at: '2026-08-19T09:00:00Z',
+      primary_action: {
+        id: 'open_ip_quality',
+        label: '查看 IP 质量',
+        route: '/vps/vps_001/ip-quality',
+      },
+      secondary_actions: [],
+    }],
+    summary: {
+      overall: { status: '需要关注', detail: '存在陈旧证据', section: { ...ready } },
+      monitoring: { status: '正常', section: { ...ready } },
+      ip_quality: {
+        status: '未知',
+        section: {
+          state: 'stale',
+          observed_at: '2026-08-19T09:00:00Z',
+          last_success_at: '2026-08-19T09:00:00Z',
+          reason_code: 'ip_quality_stale',
+        },
+      },
+      renewal: { status: '续费', section: { ...ready } },
+    },
+    recent_activity: {
+      section: { ...ready },
+      items: [{
+        activity_id: 'act_recent',
+        event_kind: 'record_created',
+        event_at: '2026-08-19T12:00:00Z',
+        recorded_at: '2026-08-19T12:00:01Z',
+        source_kind: 'record_domain',
+        backfilled: false,
+        actor: { actor_id: 'usr_operator', display_name: 'Operator' },
+        subjects: [{
+          kind: 'vps',
+          source_id: 'vps_001',
+          role: 'affected',
+          primary: true,
+          identity: { display_name: 'Tokyo Edge' },
+          live_route: '/vps/vps_001',
+          tombstoned: false,
+        }],
+        presentation: { version: 1, title: '创建记录', summary: '运维记录已创建' },
+        corrects_activity_id: 'act_previous',
+      }],
+      snapshot_cursor: 'snap-opaque',
+    },
+    facts: [{ key: 'ipv4', label: 'IPv4', value: '192.0.2.10' }],
+    relations: [
+      {
+        kind: 'monitoring_instances',
+        count: 1,
+        status: '正常',
+        label: '监控实例',
+        section: { ...ready },
+      },
+      {
+        kind: 'subscriptions',
+        count: 1,
+        status: '续费中',
+        route: '/subscriptions?vps_id=vps_001',
+        label: '订阅',
+        section: { ...ready },
+      },
+      {
+        kind: 'services',
+        count: 1,
+        status: 'active',
+        label: '服务',
+        section: { ...ready },
+      },
+      {
+        kind: 'domains',
+        count: 1,
+        status: 'active',
+        label: '域名',
+        section: { ...ready },
+      },
+    ],
+    capabilities: ['records_v2_read'],
+  }
+}
+
+function mutateVPSOverview(mutator: (wire: Record<string, unknown>) => void): unknown {
+  const wire = structuredClone(vpsOverviewResponse()) as unknown as Record<string, unknown>
+  mutator(wire)
+  return wire
+}
+
+function fixtureObject(value: unknown): Record<string, unknown> {
+  return value as Record<string, unknown>
+}
+
+function fixtureArray(value: unknown): unknown[] {
+  return value as unknown[]
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
 describe('Records API transport', () => {
+  it('rejects an empty successful VPS overview instead of synthesizing a DTO', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, {}))
+
+    await expect(getVPSOverview('vps_001')).rejects.toMatchObject({
+      name: 'InvalidVPSOverviewResponseError',
+      reason: 'invalid_shape',
+    })
+  })
+
+  it('projects a complete VPS overview through an allowlist and accepts additive fields', async () => {
+    const expected = vpsOverviewResponse()
+    expected.identity.vps_id = 'vps 001/edge'
+    const wire = mutateVPSOverview((value) => {
+      fixtureObject(value.identity).vps_id = 'vps 001/edge'
+      value.internal_checkpoint = 'must-not-leave-wire'
+      fixtureObject(value.identity).provider_account = 'must-not-leave-wire'
+      const anomaly = fixtureObject(fixtureArray(value.anomalies)[0])
+      anomaly.debug = { raw: 'must-not-leave-wire' }
+      fixtureObject(anomaly.primary_action).internal_destination = '/private'
+      const item = fixtureObject(fixtureArray(fixtureObject(value.recent_activity).items)[0])
+      item.projection_generation = 42
+      fixtureObject(item.presentation).private_summary = 'must-not-leave-wire'
+      fixtureObject(fixtureArray(value.relations)[0]).source_ids = ['mi_private']
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, wire))
+
+    await expect(getVPSOverview('vps 001/edge')).resolves.toEqual(expected)
+    expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps%20001%2Fedge/overview', requestDefaults)
+  })
+
+  it('strips non-authoritative overview activity fields before timeline presentation', async () => {
+    const wire = mutateVPSOverview((value) => {
+      const activity = fixtureObject(fixtureArray(fixtureObject(value.recent_activity).items)[0])
+      activity.event_kind = 'evidence_captured'
+      activity.source_kind = 'evidence_snapshot'
+      activity.record_id = 'rec_private'
+      activity.revision_id = 'rrv_private'
+      activity.evidence_snapshot_id = 'evs_private'
+      fixtureObject(activity.presentation).summary = ''
+      const subject = fixtureObject(fixtureArray(activity.subjects)[0])
+      const identity = fixtureObject(subject.identity)
+      identity.provider = 'Example Cloud'
+      identity.region = 'Tokyo'
+      identity.purpose = 'edge'
+      identity.evidence_snapshot_id = 'evs_identity_private'
+      identity.coverage = 'private coverage'
+      identity.bucket = 'private bucket'
+      identity.quality = 'private quality'
+      identity.private_key = 'private identity'
+      Object.defineProperty(identity, '__proto__', {
+        value: 'private prototype',
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      })
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, wire))
+
+    const overview = await getVPSOverview('vps_001')
+    const item = overview.recent_activity.items[0]
+    const identity = item?.subjects[0]?.identity
+    expect(item).not.toHaveProperty('record_id')
+    expect(item).not.toHaveProperty('revision_id')
+    expect(item).not.toHaveProperty('evidence_snapshot_id')
+    expect(identity).toEqual({
+      display_name: 'Tokyo Edge',
+      provider: 'Example Cloud',
+      region: 'Tokyo',
+      purpose: 'edge',
+    })
+    expect(Object.prototype.hasOwnProperty.call(identity, '__proto__')).toBe(false)
+
+    render(createElement(
+      MemoryRouter,
+      null,
+      createElement(UnifiedTimeline, { items: overview.recent_activity.items }),
+    ))
+    expect(screen.queryByRole('link', { name: '查看证据' })).not.toBeInTheDocument()
+    expect(document.querySelector('.unified-timeline__evidence-meta')).toBeNull()
+    expect(document.body).not.toHaveTextContent('private')
+  })
+
+  it('projects only the authoritative identity fields for each activity subject kind', async () => {
+    const wire = mutateVPSOverview((value) => {
+      const activity = fixtureObject(fixtureArray(fixtureObject(value.recent_activity).items)[0])
+      activity.subjects = [
+        {
+          kind: 'vps',
+          source_id: 'vps_001',
+          role: 'affected',
+          primary: true,
+          identity: {
+            display_name: 'Tokyo Edge',
+            provider: 'Example Cloud',
+            region: 'Tokyo',
+            purpose: 'edge',
+            version: 'must-strip',
+          },
+          tombstoned: false,
+        },
+        {
+          kind: 'monitoring_instance',
+          source_id: 'mi_001',
+          role: 'context',
+          primary: false,
+          identity: {
+            display_name: 'Tokyo Monitor',
+            version: '1.2.3',
+            provider: 'must-strip',
+          },
+          tombstoned: false,
+        },
+        {
+          kind: 'target',
+          source_id: 'tg_001',
+          role: 'evidence_source',
+          primary: false,
+          identity: {
+            display_name: 'HTTPS probe',
+            target_type: 'https',
+            quality: 'must-strip',
+          },
+          tombstoned: false,
+        },
+      ]
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, wire))
+
+    const overview = await getVPSOverview('vps_001')
+    expect(overview.recent_activity.items[0]?.subjects.map((subject) => subject.identity)).toEqual([
+      {
+        display_name: 'Tokyo Edge',
+        provider: 'Example Cloud',
+        region: 'Tokyo',
+        purpose: 'edge',
+      },
+      { display_name: 'Tokyo Monitor', version: '1.2.3' },
+      { display_name: 'HTTPS probe', target_type: 'https' },
+    ])
+  })
+
+  it('accepts an empty activity identity map without inventing display data', async () => {
+    const wire = mutateVPSOverview((value) => {
+      const activity = fixtureObject(fixtureArray(fixtureObject(value.recent_activity).items)[0])
+      const subject = fixtureObject(fixtureArray(activity.subjects)[0])
+      subject.identity = {}
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, wire))
+
+    const overview = await getVPSOverview('vps_001')
+    expect(overview.recent_activity.items[0]?.subjects[0]?.identity).toEqual({})
+  })
+
+  it('decodes a valid capability-off overview without inventing records access', async () => {
+    const wire = vpsOverviewResponse()
+    wire.capabilities = []
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, wire))
+
+    await expect(getVPSOverview('vps_001')).resolves.toEqual(wire)
+  })
+
+  it('rejects a valid overview whose identity belongs to another requested VPS', async () => {
+    const wire = vpsOverviewResponse()
+    wire.identity.vps_id = 'vps_private_other'
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, wire))
+
+    const error = await getVPSOverview('vps_001').catch((reason: unknown) => reason)
+    expect(error).toMatchObject({
+      name: 'InvalidVPSOverviewResponseError',
+      reason: 'invalid_shape',
+    })
+    expect(JSON.stringify(error)).not.toContain('vps_private_other')
+  })
+
+  it('maps malformed success JSON to a minimal typed error without retaining the payload', async () => {
+    const raw = '{"token":"must-not-retain"'
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(raw, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    const error = await getVPSOverview('vps_private').catch((reason: unknown) => reason)
+
+    expect(error).toBeInstanceOf(InvalidVPSOverviewResponseError)
+    expect(error).toMatchObject({ reason: 'malformed_json' })
+    expect(JSON.stringify(error)).toBe('{"reason":"malformed_json"}')
+    expect(String(error)).not.toContain(raw)
+    expect(error).not.toHaveProperty('body')
+    expect(error).not.toHaveProperty('value')
+    expect(error).not.toHaveProperty('url')
+    expect(error).not.toHaveProperty('cause')
+  })
+
+  it.each([
+    ['null response', () => null],
+    ['array response', () => []],
+    ['missing identity', () => mutateVPSOverview((wire) => { delete wire.identity })],
+    ['invalid identity labels', () => mutateVPSOverview((wire) => {
+      fixtureObject(wire.identity).labels = ['edge', 7]
+    })],
+    ['invalid identity scalar', () => mutateVPSOverview((wire) => {
+      fixtureObject(wire.identity).provider_name = null
+    })],
+    ['invalid generated timestamp', () => mutateVPSOverview((wire) => { wire.generated_at = '2026-02-30T09:00:00Z' })],
+    ['missing summary cell', () => mutateVPSOverview((wire) => {
+      delete fixtureObject(wire.summary).renewal
+    })],
+    ['invalid section enum', () => mutateVPSOverview((wire) => {
+      const overall = fixtureObject(fixtureObject(wire.summary).overall)
+      fixtureObject(overall.section).state = 'loading'
+    })],
+    ['invalid nullable section timestamp', () => mutateVPSOverview((wire) => {
+      const overall = fixtureObject(fixtureObject(wire.summary).overall)
+      fixtureObject(overall.section).observed_at = 'yesterday'
+    })],
+    ['invalid activity items collection', () => mutateVPSOverview((wire) => {
+      fixtureObject(wire.recent_activity).items = null
+    })],
+    ['invalid activity event kind', () => mutateVPSOverview((wire) => {
+      const activity = fixtureObject(fixtureArray(fixtureObject(wire.recent_activity).items)[0])
+      activity.event_kind = 'command_output_exposed'
+    })],
+    ['invalid activity presentation version', () => mutateVPSOverview((wire) => {
+      const activity = fixtureObject(fixtureArray(fixtureObject(wire.recent_activity).items)[0])
+      fixtureObject(activity.presentation).version = 2
+    })],
+    ['invalid activity subject kind', () => mutateVPSOverview((wire) => {
+      const activity = fixtureObject(fixtureArray(fixtureObject(wire.recent_activity).items)[0])
+      fixtureObject(fixtureArray(activity.subjects)[0]).kind = 'service'
+    })],
+    ['invalid activity subject role', () => mutateVPSOverview((wire) => {
+      const activity = fixtureObject(fixtureArray(fixtureObject(wire.recent_activity).items)[0])
+      fixtureObject(fixtureArray(activity.subjects)[0]).role = 'owner'
+    })],
+    ['invalid activity identity value', () => mutateVPSOverview((wire) => {
+      const activity = fixtureObject(fixtureArray(fixtureObject(wire.recent_activity).items)[0])
+      const subject = fixtureObject(fixtureArray(activity.subjects)[0])
+      fixtureObject(subject.identity).display_name = 42
+    })],
+    ['unknown anomaly rule', () => mutateVPSOverview((wire) => {
+      fixtureObject(fixtureArray(wire.anomalies)[0]).rule_id = 'unknown.rule.v1'
+    })],
+    ['unknown anomaly action', () => mutateVPSOverview((wire) => {
+      const anomaly = fixtureObject(fixtureArray(wire.anomalies)[0])
+      fixtureObject(anomaly.primary_action).id = 'open_private_console'
+    })],
+    ['invalid anomaly route scalar', () => mutateVPSOverview((wire) => {
+      const anomaly = fixtureObject(fixtureArray(wire.anomalies)[0])
+      fixtureObject(anomaly.primary_action).route = 42
+    })],
+    ['invalid fact', () => mutateVPSOverview((wire) => {
+      fixtureObject(fixtureArray(wire.facts)[0]).value = 42
+    })],
+    ['missing relation', () => mutateVPSOverview((wire) => {
+      wire.relations = fixtureArray(wire.relations).slice(0, 3)
+    })],
+    ['out-of-order relations', () => mutateVPSOverview((wire) => {
+      const relations = fixtureArray(wire.relations)
+      ;[relations[0], relations[1]] = [relations[1], relations[0]]
+    })],
+    ['negative relation count', () => mutateVPSOverview((wire) => {
+      fixtureObject(fixtureArray(wire.relations)[0]).count = -1
+    })],
+    ['fractional relation count', () => mutateVPSOverview((wire) => {
+      fixtureObject(fixtureArray(wire.relations)[0]).count = 1.5
+    })],
+    ['unexpected command relation route', () => mutateVPSOverview((wire) => {
+      fixtureObject(fixtureArray(wire.relations)[0]).route = '/monitoring'
+    })],
+    ['missing subscription relation route', () => mutateVPSOverview((wire) => {
+      delete fixtureObject(fixtureArray(wire.relations)[1]).route
+    })],
+    ['invalid relation section', () => mutateVPSOverview((wire) => {
+      const relation = fixtureObject(fixtureArray(wire.relations)[2])
+      fixtureObject(relation.section).reason_code = false
+    })],
+    ['invalid capability', () => mutateVPSOverview((wire) => { wire.capabilities = ['records_v2_read', 3] })],
+  ])('rejects an invalid VPS overview shape: %s', async (_caseName, candidate) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, candidate()))
+
+    await expect(getVPSOverview('vps_001')).rejects.toMatchObject({
+      name: 'InvalidVPSOverviewResponseError',
+      reason: 'invalid_shape',
+    })
+  })
+
+  it('preserves HTTP, network, abort and non-JSON transport errors unchanged', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mockResponse(503, {
+      code: 'upstream_timeout',
+      message: 'private upstream detail',
+    }))
+    const apiError = await getVPSOverview('vps_001').catch((reason: unknown) => reason)
+    expect(apiError).toBeInstanceOf(ApiError)
+    expect(apiError).toMatchObject({ status: 503, code: 'upstream_timeout' })
+
+    const networkError = new TypeError('network failed')
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(networkError)
+    await expect(getVPSOverview('vps_001')).rejects.toBe(networkError)
+
+    const abortError = new DOMException('request aborted', 'AbortError')
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(abortError)
+    await expect(getVPSOverview('vps_001')).rejects.toBe(abortError)
+
+    const bodyReadError = new Error('body stream failed')
+    const response = mockResponse(200, vpsOverviewResponse())
+    vi.spyOn(response, 'text').mockRejectedValue(bodyReadError)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response)
+    await expect(getVPSOverview('vps_001')).rejects.toBe(bodyReadError)
+  })
+
   it('captures an evidence preview with an allowlisted body and abort signal', async () => {
     const input = {
       record_id: 'rec_contract',

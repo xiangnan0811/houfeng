@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/prd.md", "reason": "Parent scope, requirements, acceptance criteria, and exclusions."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/design.md", "reason": "Cross-child architecture, decisions, ordering, safety, and rollback."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/research/overview-gate.md", "reason": "I-02 boundary, decoder, gate matrix, and exact tests."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/research/freshness.md", "reason": "I-03 source budgets, freshness authority, DTO, UI, and performance proof."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/research/route-contract.md", "reason": "I-01 and M-01 destination matrix, owners, dependency boundary, and tests."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/research/s3-harness.md", "reason": "I-04 resource ownership, cleanup status, and no-leak verification."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Keep all work on the remediation branch and deliver through protected main."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Trace every finding through backend, wire, facade, UI, browser, and harness."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Route backend work to current repository guidelines."}
+{"file": ".trellis/spec/web/index.md", "reason": "Route Web work to current Node 22 and frontend guidelines."}

@@ -1,14 +1,14 @@
 {
   "version": 1,
   "limits": {
-    "sourceFilesMax": 26,
-    "sourceBytesMax": 320492,
-    "rulesMax": 2186,
-    "declarationsMax": 8796,
+    "sourceFilesMax": 27,
+    "sourceBytesMax": 322682,
+    "rulesMax": 2199,
+    "declarationsMax": 8842,
     "repeatedSelectorTextsMax": 159,
     "literalColorDeclarationsMax": 247,
     "importantDeclarationsMax": 11,
-    "productionCssBytesMax": 302558,
-    "productionCssGzipBytesMax": 39298
+    "productionCssBytesMax": 304316,
+    "productionCssGzipBytesMax": 39514
   }
 }

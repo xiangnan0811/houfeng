@@ -1,0 +1,14 @@
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/prd.md", "reason": "Check every parent acceptance criterion and exclusion."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/design.md", "reason": "Check cross-child contract alignment, ordering, safety, and rollback."}
+{"file": ".trellis/tasks/08-24-vps-overview-freshness-reliability/prd.md", "reason": "Check I-03 completion and no source-freshness drift."}
+{"file": ".trellis/tasks/08-24-vps-overview-freshness-reliability/design.md", "reason": "Check concurrency, timestamps, DTO, and local retry ownership."}
+{"file": ".trellis/tasks/08-24-vps-overview-action-contract/prd.md", "reason": "Check I-01 and M-01 completion."}
+{"file": ".trellis/tasks/08-24-vps-overview-action-contract/design.md", "reason": "Check exact route-command resolution and relation panels."}
+{"file": ".trellis/tasks/08-24-vps-overview-gate-contract/prd.md", "reason": "Check I-02 completion and fallback allowlist."}
+{"file": ".trellis/tasks/08-24-vps-overview-gate-contract/design.md", "reason": "Check typed decoder, no leakage, and retry behavior."}
+{"file": ".trellis/tasks/08-24-records-s3-harness-lifecycle/prd.md", "reason": "Check I-04 required lifecycle evidence."}
+{"file": ".trellis/tasks/08-24-records-s3-harness-lifecycle/design.md", "reason": "Check exact resource ownership and status precedence."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check Go quality, deterministic tests, and strict infrastructure gates."}
+{"file": ".trellis/spec/backend/record-integration-contract.md", "reason": "Check Records local and S3 required gate semantics."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Check Node 22, production build, browser, accessibility, and budgets."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Check protected delivery, CI, release, and evidence reconciliation."}

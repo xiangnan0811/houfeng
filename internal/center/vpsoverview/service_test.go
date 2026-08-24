@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -19,18 +20,80 @@ type fakeSources struct {
 	delay  time.Duration
 }
 
-func (fake *fakeSources) LoadSources(ctx context.Context, _ string) (SourceBundle, error) {
+func (fake *fakeSources) wait(ctx context.Context) error {
 	if fake.delay > 0 {
 		select {
 		case <-ctx.Done():
-			return SourceBundle{}, ctx.Err()
+			return ctx.Err()
 		case <-time.After(fake.delay):
 		}
 	}
-	if fake.err != nil {
-		return SourceBundle{}, fake.err
+	return nil
+}
+
+func (fake *fakeSources) LoadIdentity(ctx context.Context, _ string) (IdentitySource, error) {
+	if err := fake.wait(ctx); err != nil {
+		return IdentitySource{}, err
 	}
-	return fake.bundle, nil
+	if fake.err != nil {
+		return IdentitySource{}, fake.err
+	}
+	return IdentitySource{Identity: fake.bundle.Identity, Facts: fake.bundle.Facts}, nil
+}
+
+func (fake *fakeSources) LoadMonitoring(context.Context, string) (MonitoringSource, error) {
+	return MonitoringSource{
+		Section: fake.bundle.MonitoringSection, Health: fake.bundle.MonitoringHealth,
+		Status: fake.bundle.MonitoringStatus, Detail: fake.bundle.MonitoringDetail,
+		ActiveIncidents: fake.bundle.ActiveIncidents,
+		Count:           relationCount(fake.bundle.Relations, "monitoring_instances"),
+	}, nil
+}
+
+func (fake *fakeSources) LoadIPQuality(context.Context, string) (IPQualitySource, error) {
+	return IPQualitySource{
+		Section: fake.bundle.IPSection, Status: fake.bundle.IPStatus,
+		RiskLevel: fake.bundle.IPRiskLevel, Stale: fake.bundle.IPStale,
+	}, nil
+}
+
+func (fake *fakeSources) LoadRenewal(context.Context, string, string) (RenewalSource, error) {
+	return RenewalSource{
+		Section: fake.bundle.RenewalSection, ActiveSubscriptions: fake.bundle.ActiveSubscriptions,
+		NextRenewAt: fake.bundle.NextRenewAt, Status: fake.bundle.RenewalStatus,
+	}, nil
+}
+
+func (fake *fakeSources) LoadServiceRelation(context.Context, string) (RelationSource, error) {
+	return RelationSource{
+		Count:   relationCount(fake.bundle.Relations, "services"),
+		Section: relationSection(fake.bundle.Relations, "services"),
+	}, nil
+}
+
+func (fake *fakeSources) LoadDomainRelation(context.Context, string) (RelationSource, error) {
+	return RelationSource{
+		Count:   relationCount(fake.bundle.Relations, "domains"),
+		Section: relationSection(fake.bundle.Relations, "domains"),
+	}, nil
+}
+
+func relationCount(relations []RelationSummary, kind string) int {
+	for _, relation := range relations {
+		if relation.Kind == kind {
+			return relation.Count
+		}
+	}
+	return 0
+}
+
+func relationSection(relations []RelationSummary, kind string) SectionState {
+	for _, relation := range relations {
+		if relation.Kind == kind {
+			return relation.Section
+		}
+	}
+	return SectionState{State: SectionReady}
 }
 
 type fakeActivity struct {
@@ -111,6 +174,68 @@ func TestServiceGetHealthyOverview(t *testing.T) {
 	for _, forbidden := range []string{"projection_generation", "as_of_ingest_sequence", "published_ingest"} {
 		if contains(body, forbidden) {
 			t.Fatalf("leaked %s in %s", forbidden, body)
+		}
+	}
+}
+
+func TestServiceGetRelationDestinations(t *testing.T) {
+	now := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
+	const vpsID = "vps id+东京"
+	sources := &fakeSources{bundle: SourceBundle{
+		Identity: Identity{
+			VPSID: vpsID, DisplayName: "Alpha", LifecycleStatus: "active",
+			RenewalDecision: "keep", Labels: []string{}, UpdatedAt: now,
+		},
+		MonitoringSection:   SectionState{State: SectionReady},
+		MonitoringHealth:    "正常",
+		MonitoringStatus:    "启用",
+		IPSection:           SectionState{State: SectionReady},
+		IPStatus:            "success",
+		IPRiskLevel:         "low",
+		RenewalSection:      SectionState{State: SectionReady},
+		ActiveSubscriptions: 2,
+		Facts:               []Fact{},
+		Relations: []RelationSummary{
+			{Kind: "monitoring_instances", Count: 1, Section: SectionState{State: SectionReady}},
+			{Kind: "services", Count: 3, Section: SectionState{State: SectionReady}},
+			{Kind: "domains", Count: 4, Section: SectionState{State: SectionReady}},
+		},
+	}}
+	service, err := NewServiceWithClock(
+		sources,
+		&fakeActivity{result: activity.ListResult{Items: []activity.Event{}, Freshness: activity.Freshness{State: "ready"}}},
+		func() time.Time { return now },
+		time.Second,
+	)
+	if err != nil {
+		t.Fatalf("NewServiceWithClock: %v", err)
+	}
+	overview, err := service.Get(context.Background(), Request{Actor: testOverviewActor(t), VPSID: vpsID})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	tests := []struct {
+		kind  string
+		label string
+		count int
+		route string
+	}{
+		{kind: "monitoring_instances", label: "监控实例", count: 1},
+		{kind: "subscriptions", label: "订阅", count: 2, route: "/subscriptions?vps_id=" + url.QueryEscape(vpsID)},
+		{kind: "services", label: "服务", count: 3},
+		{kind: "domains", label: "域名", count: 4},
+	}
+	if len(overview.Relations) != len(tests) {
+		t.Fatalf("relations = %#v, want %d ordered rows", overview.Relations, len(tests))
+	}
+	for index, tt := range tests {
+		got := overview.Relations[index]
+		if got.Kind != tt.kind || got.Label != tt.label || got.Count != tt.count || got.Route != tt.route {
+			t.Errorf("relation[%d] = %#v, want kind=%q label=%q count=%d route=%q", index, got, tt.kind, tt.label, tt.count, tt.route)
+		}
+		if got.Section.State != SectionReady {
+			t.Errorf("relation[%d].section = %#v, want required ready section", index, got.Section)
 		}
 	}
 }

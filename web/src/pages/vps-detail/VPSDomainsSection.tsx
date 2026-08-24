@@ -12,6 +12,7 @@ type VPSDomainsSectionProps = {
   domains: AssetDomainRecord[]
   error: string | null
   notice: string | null
+  readOnly?: boolean
   onCreate: () => void
 }
 
@@ -19,6 +20,7 @@ export function VPSDomainsSection({
   domains,
   error,
   notice,
+  readOnly = false,
   onCreate,
 }: VPSDomainsSectionProps) {
   const domainColumns: DataTableColumn<AssetDomainRecord>[] = [
@@ -105,7 +107,7 @@ export function VPSDomainsSection({
         <span className="section-heading__meta">
           <MonoDigits>{domains.length}</MonoDigits> 个手工记录域名
         </span>
-        <Button variant="secondary" size="sm" onClick={onCreate}>新增域名</Button>
+        {!readOnly ? <Button variant="secondary" size="sm" onClick={onCreate}>新增域名</Button> : null}
       </div>
       {error ? (
         <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">

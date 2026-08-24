@@ -1,6 +1,8 @@
 import type { User } from '../../src/lib/auth-client'
 import type {
+  AssetDomainRecord,
   AssetDecisionOverview,
+  AssetServiceRecord,
   CommandAuditAction,
   CommandAuditEvent,
   CommandAuditListResponse,
@@ -19,6 +21,8 @@ import type {
   SubscriptionStatistics,
   TargetSparklinesResponse,
   VPSAssetRecord,
+  VPSAssetDetail,
+  VPSMonitoringInstanceSummary,
   VPSOverview,
 } from '../../src/lib/types'
 import {
@@ -608,6 +612,58 @@ const EMPTY_SECTION = {
   reason_code: '',
 } as const
 
+const VPS_OVERVIEW_MONITORING = {
+  monitoring_instance_id: 'mi_001',
+  display_name: 'Tokyo Monitor',
+  group: 'edge',
+  region: 'Kanto',
+  city: 'Tokyo',
+  provider: 'Example Cloud',
+  lifecycle_status: 'active',
+  monitoring_status: 'active',
+  binding_status: 'bound',
+  current_health_status: '正常',
+  last_heartbeat_at: '2026-08-20T08:59:00Z',
+  current_active_incident_count: 0,
+  current_primary_issue_summary: '',
+  linked_at: '2026-08-01T00:00:00Z',
+  note: '',
+} satisfies VPSMonitoringInstanceSummary
+
+const VPS_OVERVIEW_SERVICE = {
+  service_id: 'svc_001',
+  vps_id: 'vps_001',
+  name: 'Overview Gateway',
+  service_type: 'web',
+  status: 'active',
+  url: 'https://edge.example.invalid',
+  labels: ['edge'],
+  note: '',
+  created_at: '2026-08-01T00:00:00Z',
+  updated_at: '2026-08-20T09:00:00Z',
+} satisfies AssetServiceRecord
+
+const VPS_OVERVIEW_DOMAIN = {
+  domain_id: 'domain_001',
+  vps_id: 'vps_001',
+  service_id: 'svc_001',
+  domain_name: 'edge.example.com',
+  purpose: 'gateway',
+  status: 'active',
+  registrar: 'Example Registrar',
+  auto_renew: true,
+  https_enabled: true,
+  labels: ['edge'],
+  note: '',
+  created_at: '2026-08-01T00:00:00Z',
+  updated_at: '2026-08-20T09:00:00Z',
+} satisfies AssetDomainRecord
+
+const VPS_OVERVIEW_DETAIL = {
+  ...vpsAssetFixture(),
+  monitoring_instance_links: [VPS_OVERVIEW_MONITORING],
+} satisfies VPSAssetDetail
+
 export function vpsOverviewFixture(overrides: Partial<VPSOverview> = {}): VPSOverview {
   const base: VPSOverview = {
     generated_at: '2026-08-20T09:00:00Z',
@@ -651,13 +707,24 @@ export function vpsOverviewFixture(overrides: Partial<VPSOverview> = {}): VPSOve
       snapshot_cursor: 'snap-e2e-opaque',
     },
     facts: [{ key: 'ipv4', label: 'IPv4', value: '192.0.2.10' }],
-    relations: [{
-      kind: 'monitoring_instance',
-      count: 1,
-      status: '正常',
-      route: '/monitoring/mi_001',
-      label: '监控实例',
-    }],
+    relations: [
+      {
+        kind: 'monitoring_instances', count: 1, status: '正常',
+        label: '监控实例', section: { ...EMPTY_SECTION },
+      },
+      {
+        kind: 'subscriptions', count: 1, status: '续费中', route: '/subscriptions?vps_id=vps_001',
+        label: '订阅', section: { ...EMPTY_SECTION },
+      },
+      {
+        kind: 'services', count: 1, status: 'active',
+        label: '服务', section: { ...EMPTY_SECTION },
+      },
+      {
+        kind: 'domains', count: 1, status: 'active',
+        label: '域名', section: { ...EMPTY_SECTION },
+      },
+    ],
     capabilities: ['records_v2_read'],
   }
   return {
@@ -681,6 +748,53 @@ export function vpsOverviewFixture(overrides: Partial<VPSOverview> = {}): VPSOve
     relations: overrides.relations ?? base.relations,
     capabilities: overrides.capabilities ?? base.capabilities,
   }
+}
+
+export function vpsOverviewPartialFixture(): VPSOverview {
+  const unavailable = (reasonCode: string) => ({
+    state: 'unavailable' as const,
+    observed_at: null,
+    last_success_at: null,
+    reason_code: reasonCode,
+  })
+  return vpsOverviewFixture({
+    summary: {
+      overall: { status: '需要关注', section: { ...EMPTY_SECTION } },
+      monitoring: { status: '正常', section: { ...EMPTY_SECTION } },
+      ip_quality: {
+        status: '未知',
+        section: {
+          state: 'stale',
+          observed_at: '2026-08-19T08:00:00Z',
+          last_success_at: '2026-08-19T08:00:00Z',
+          reason_code: 'ip_quality_stale',
+        },
+      },
+      renewal: { status: 'unavailable', section: unavailable('subscription_timeout') },
+    },
+    recent_activity: {
+      section: unavailable('activity_projection_unavailable'),
+      items: [],
+    },
+    relations: [
+      {
+        kind: 'monitoring_instances', count: 1, status: '正常',
+        label: '监控实例', section: { ...EMPTY_SECTION },
+      },
+      {
+        kind: 'subscriptions', count: 0, status: 'unavailable', route: '/subscriptions?vps_id=vps_001',
+        label: '订阅', section: unavailable('subscription_timeout'),
+      },
+      {
+        kind: 'services', count: 0, status: 'unavailable',
+        label: '服务', section: unavailable('relation_timeout'),
+      },
+      {
+        kind: 'domains', count: 0, status: '',
+        label: '域名', section: { ...EMPTY_SECTION },
+      },
+    ],
+  })
 }
 
 export function subjectActivityFixture(
@@ -739,6 +853,19 @@ export function vpsOverviewProfile(options: {
         ? { error: 'overview unavailable', code: status === 503 ? 'overview_unavailable' : 'resource_not_found' }
         : options.overview ?? vpsOverviewFixture(),
       ...(options.overviewWaitFor ? { waitFor: options.overviewWaitFor } : {}),
+    },
+    [apiRouteKey('GET', '/api/vps/vps_001')]: { status: 200, body: VPS_OVERVIEW_DETAIL },
+    [apiRouteKey('GET', '/api/vps/vps_001/monitoring-instances')]: {
+      status: 200,
+      body: [VPS_OVERVIEW_MONITORING],
+    },
+    [apiRouteKey('GET', '/api/vps/vps_001/services')]: {
+      status: 200,
+      body: [VPS_OVERVIEW_SERVICE],
+    },
+    [apiRouteKey('GET', '/api/vps/vps_001/domains')]: {
+      status: 200,
+      body: [VPS_OVERVIEW_DOMAIN],
     },
   })
 }

@@ -1,0 +1,11 @@
+{"file": ".trellis/tasks/08-24-vps-overview-action-contract/prd.md", "reason": "I-01 and M-01 requirements and acceptance criteria."}
+{"file": ".trellis/tasks/08-24-vps-overview-action-contract/design.md", "reason": "Closed token resolver, exact matrix, relation panels, and dependency plan."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/research/route-contract.md", "reason": "Current owners, route matrix, RED files, and React Router boundary."}
+{"file": ".trellis/tasks/08-24-vps-overview-freshness-reliability/design.md", "reason": "Consume the already-frozen relation.section and local retry shape."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Use Link for navigation, Button for commands, and preserve focus ownership."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Keep router and page-controller state authoritative."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Node 22, audit, build, bundle, Chromium, and accessibility gates."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Go table tests and stable wire contracts."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse focused legacy relation components without importing the page."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Trace every token through producer, wire, resolver, owner, and behavior."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Protected non-main implementation and delivery."}

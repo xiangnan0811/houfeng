@@ -17,8 +17,10 @@ import (
 	"houfeng/internal/center/activity"
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/recordauth"
+	centerrecords "houfeng/internal/center/records"
 	"houfeng/internal/center/store"
 	storemigrate "houfeng/internal/center/store/migrate"
+	overviewperftest "houfeng/internal/center/testsupport/vpsoverviewperf"
 	"houfeng/internal/center/vpsoverview"
 )
 
@@ -27,30 +29,6 @@ const (
 	vpsOverviewPerfRuns      = 3
 	vpsOverviewPerfBudget    = 750 * time.Millisecond
 )
-
-type overviewPerfSources struct {
-	bundle vpsoverview.SourceBundle
-}
-
-func (sources overviewPerfSources) LoadSources(context.Context, string) (vpsoverview.SourceBundle, error) {
-	return sources.bundle, nil
-}
-
-type overviewPerfLiveSubjects struct{}
-
-func (overviewPerfLiveSubjects) ResolveLive(
-	_ context.Context,
-	_ recordauth.ActorScope,
-	ref activity.SubjectRef,
-) (activity.SubjectHeader, error) {
-	return activity.SubjectHeader{
-		Kind:      ref.Kind,
-		SourceID:  ref.SourceID,
-		Identity:  map[string]string{"display_name": "perf-vps"},
-		LiveRoute: "/vps/" + ref.SourceID,
-		Status:    activity.SubjectStatusLive,
-	}, nil
-}
 
 // TestPostgresIntegrationVPSOverviewPerformance times GET /api/vps/:id/overview
 // against a large subject activity projection. Scale with HOUFENG_ACTIVITY_PERF_SCALE.
@@ -63,11 +41,36 @@ func TestPostgresIntegrationVPSOverviewPerformance(t *testing.T) {
 	if err := seedOverviewPerfActivities(ctx, pool, count); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `analyze public.record_activity_subjects; analyze public.record_activity_projection`); err != nil {
-		t.Fatalf("analyze: %v", err)
+	if err := overviewperftest.SeedAuthority(ctx, pool, vpsOverviewPerfSubjectID); err != nil {
+		t.Fatalf("seed overview authority: %v", err)
+	}
+	if err := overviewperftest.PrepareMeasurement(ctx, pool); err != nil {
+		t.Fatalf("prepare measurement: %v", err)
 	}
 
-	repository, err := store.NewActivityProjectionRepository(pool)
+	trace := &overviewperftest.QueryTrace{}
+	runtimePool := overviewperftest.OpenTracedPool(t, ctx, pool, trace)
+	vpsRepository := store.NewPostgresVPSAssetRepository(runtimePool)
+	sources, err := store.NewVPSOverviewRepository(
+		vpsRepository,
+		store.NewPostgresVPSMonitoringInstanceLinkRepository(runtimePool),
+		store.NewPostgresIPQualityRepository(runtimePool),
+		store.NewPostgresSubscriptionRepository(runtimePool),
+		store.NewPostgresAssetServiceRepository(runtimePool),
+		store.NewPostgresAssetDomainRepository(runtimePool),
+	)
+	if err != nil {
+		t.Fatalf("overview sources: %v", err)
+	}
+	subjects, err := centerrecords.NewSubjectAdapterRegistry([]centerrecords.SubjectSourceAdapter{
+		store.NewVPSRecordSubjectAdapter(vpsRepository),
+		store.NewMonitoringInstanceRecordSubjectAdapter(store.NewPostgresMonitoringInstanceRepository(runtimePool)),
+		store.NewTargetRecordSubjectAdapter(store.NewPostgresTargetRepository(runtimePool)),
+	})
+	if err != nil {
+		t.Fatalf("subject registry: %v", err)
+	}
+	activityRepository, err := store.NewActivityProjectionRepository(runtimePool)
 	if err != nil {
 		t.Fatalf("repository: %v", err)
 	}
@@ -76,27 +79,12 @@ func TestPostgresIntegrationVPSOverviewPerformance(t *testing.T) {
 		t.Fatalf("codec: %v", err)
 	}
 	activityService, err := activity.NewService(
-		repository, repository, overviewPerfLiveSubjects{}, codec,
+		activityRepository, activityRepository, store.NewActivityLiveSubjectResolver(subjects), codec,
 	)
 	if err != nil {
 		t.Fatalf("activity service: %v", err)
 	}
-	overviewService, err := vpsoverview.NewServiceWithClock(overviewPerfSources{
-		bundle: vpsoverview.SourceBundle{
-			Identity: vpsoverview.Identity{
-				VPSID:           vpsOverviewPerfSubjectID,
-				DisplayName:     "perf-vps",
-				LifecycleStatus: "active",
-				UsageStatus:     "in_use",
-				Labels:          []string{},
-			},
-			MonitoringSection: vpsoverview.SectionState{State: vpsoverview.SectionReady},
-			IPSection:         vpsoverview.SectionState{State: vpsoverview.SectionReady},
-			RenewalSection:    vpsoverview.SectionState{State: vpsoverview.SectionReady},
-			Facts:             []vpsoverview.Fact{},
-			Relations:         []vpsoverview.RelationSummary{},
-		},
-	}, activityService, func() time.Time { return time.Now().UTC() }, 5*time.Second)
+	overviewService, err := vpsoverview.NewService(sources, activityService)
 	if err != nil {
 		t.Fatalf("overview service: %v", err)
 	}
@@ -110,25 +98,45 @@ func TestPostgresIntegrationVPSOverviewPerformance(t *testing.T) {
 	handler := VPSOverview(overviewService)
 
 	// Warmup
-	serveOverview(t, handler, actor)
+	warmup := serveOverview(t, handler, actor)
+	if warmup.Code != http.StatusOK {
+		t.Fatalf("warmup status=%d body=%s", warmup.Code, warmup.Body.String())
+	}
+	var warmupOverview vpsoverview.Overview
+	if err := json.Unmarshal(warmup.Body.Bytes(), &warmupOverview); err != nil {
+		t.Fatalf("warmup decode: %v", err)
+	}
+	if err := overviewperftest.ValidateHealthyOverview(warmupOverview, vpsOverviewPerfSubjectID); err != nil {
+		t.Fatalf("warmup unhealthy overview: %v", err)
+	}
+	if err := trace.Snapshot().Validate(); err != nil {
+		t.Fatalf("warmup query contract: %v", err)
+	}
+	trace.Reset()
 
 	durations := make([]time.Duration, 0, vpsOverviewPerfRuns)
 	for run := 1; run <= vpsOverviewPerfRuns; run++ {
+		trace.Reset()
 		started := time.Now()
 		recorder := serveOverview(t, handler, actor)
 		elapsed := time.Since(started)
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("run %d status=%d body=%s", run, recorder.Code, recorder.Body.String())
 		}
-		var payload map[string]json.RawMessage
-		if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		var overview vpsoverview.Overview
+		if err := json.Unmarshal(recorder.Body.Bytes(), &overview); err != nil {
 			t.Fatalf("run %d decode: %v", run, err)
 		}
-		if _, ok := payload["recent_activity"]; !ok {
-			t.Fatalf("run %d missing recent_activity", run)
+		if err := overviewperftest.ValidateHealthyOverview(overview, vpsOverviewPerfSubjectID); err != nil {
+			t.Fatalf("run %d unhealthy overview: %v", run, err)
+		}
+		queryStats := trace.Snapshot()
+		if err := queryStats.Validate(); err != nil {
+			t.Fatalf("run %d query contract: %v", run, err)
 		}
 		durations = append(durations, elapsed)
-		t.Logf("run %d GET overview = %s", run, elapsed.Round(time.Millisecond))
+		t.Logf("run %d GET overview = %s (queries=%d query_errors=%d query_error_rate=%.2f%%)",
+			run, elapsed.Round(time.Millisecond), queryStats.Count, queryStats.Errors, queryStats.ErrorRatePercent())
 	}
 
 	p95 := overviewPerfP95(durations)
@@ -177,9 +185,18 @@ func overviewPerfP95(values []time.Duration) time.Duration {
 			}
 		}
 	}
-	// n=3 → index 1.9 ≈ last element as conservative p95
-	idx := int(0.95 * float64(len(sorted)-1))
-	return sorted[idx]
+	// Use the nearest-rank definition so a small sample never rounds down to a
+	// value below the observed 95th percentile.
+	rank := (95*len(sorted) + 99) / 100
+	return sorted[rank-1]
+}
+
+func TestOverviewPerfP95UsesConservativeNearestRank(t *testing.T) {
+	values := []time.Duration{507 * time.Millisecond, 508 * time.Millisecond, 522 * time.Millisecond}
+
+	if got, want := overviewPerfP95(values), 522*time.Millisecond; got != want {
+		t.Fatalf("overviewPerfP95() = %s, want %s", got, want)
+	}
 }
 
 func openVPSOverviewPerfPool(t *testing.T, ctx context.Context) *pgxpool.Pool {

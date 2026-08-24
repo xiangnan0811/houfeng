@@ -5,6 +5,7 @@ import { HealthBadge } from '../assetPageBadges'
 
 type VPSMonitoringInstanceLinksSectionProps = {
   monitoring: VPSMonitoringInstanceSummary[]
+  readOnly?: boolean
   unlinkingMonitoringInstanceId: string | null
   pendingUnlinkMonitoringInstance: VPSMonitoringInstanceSummary | null
   linkFeedback: string | null
@@ -19,6 +20,7 @@ type VPSMonitoringInstanceLinksSectionProps = {
 
 export function VPSMonitoringInstanceLinksSection({
   monitoring,
+  readOnly = false,
   unlinkingMonitoringInstanceId,
   pendingUnlinkMonitoringInstance,
   linkFeedback,
@@ -45,12 +47,12 @@ export function VPSMonitoringInstanceLinksSection({
         <span className="section-heading__meta">
           <MonoDigits>{monitoring.length}</MonoDigits> 个 active link
         </span>
-        {hasNoActiveLinks ? (
+        {!readOnly && hasNoActiveLinks ? (
           <div className="section-heading__actions">
             <Button variant="primary" size="sm" onClick={onCreateMonitoringInstance}>接入/升级 agent</Button>
             <Button variant="secondary" size="sm" onClick={onOpenLink}>关联已有监控实例</Button>
           </div>
-        ) : singleActiveLink ? (
+        ) : !readOnly && singleActiveLink ? (
           <div className="section-heading__actions">
             <Button variant="primary" size="sm" onClick={() => onUpgradeMonitoringInstance(singleActiveLink)}>接入/升级 agent</Button>
           </div>
@@ -61,7 +63,7 @@ export function VPSMonitoringInstanceLinksSection({
           检测到 <MonoDigits>{monitoring.length}</MonoDigits> 个 active 监控实例关联。请人工核对要保留的实例，逐个接入/升级或解除多余关联。
         </p>
       ) : null}
-      {linkFeedback ? (
+      {!readOnly && linkFeedback ? (
         <p
           className={[
             'asset-operation-feedback',
@@ -72,7 +74,7 @@ export function VPSMonitoringInstanceLinksSection({
           {linkFeedback}
         </p>
       ) : null}
-      {pendingUnlinkMonitoringInstance ? (
+      {!readOnly && pendingUnlinkMonitoringInstance ? (
         <section className="asset-lifecycle-confirm" role="alertdialog" aria-label="确认解除监控实例关联">
           <p className="asset-lifecycle-confirm__eyebrow">操作确认</p>
           <h4>确认解除监控实例关联</h4>
@@ -126,24 +128,26 @@ export function VPSMonitoringInstanceLinksSection({
                 <span>最近心跳</span>
                 <Timestamp value={monitoringInstance.last_heartbeat_at} />
               </div>
-              <div className="vps-monitoring-instance-evidence-strip__actions">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={unlinkingMonitoringInstanceId !== null}
-                  onClick={() => onUpgradeMonitoringInstance(monitoringInstance)}
-                >
-                  接入/升级 agent
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={unlinkingMonitoringInstanceId !== null}
-                  onClick={() => onRequestUnlinkMonitoringInstance(monitoringInstance)}
-                >
-                  {unlinkingMonitoringInstanceId === monitoringInstance.monitoring_instance_id ? '解除中…' : '解除关联'}
-                </Button>
-              </div>
+              {!readOnly ? (
+                <div className="vps-monitoring-instance-evidence-strip__actions">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={unlinkingMonitoringInstanceId !== null}
+                    onClick={() => onUpgradeMonitoringInstance(monitoringInstance)}
+                  >
+                    接入/升级 agent
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={unlinkingMonitoringInstanceId !== null}
+                    onClick={() => onRequestUnlinkMonitoringInstance(monitoringInstance)}
+                  >
+                    {unlinkingMonitoringInstanceId === monitoringInstance.monitoring_instance_id ? '解除中…' : '解除关联'}
+                  </Button>
+                </div>
+              ) : null}
             </article>
           ))}
         </div>

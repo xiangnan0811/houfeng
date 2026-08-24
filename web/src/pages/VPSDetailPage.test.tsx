@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../lib/apiRequest'
@@ -19,12 +19,12 @@ vi.mock('./vps-detail/LegacyVPSDetail', () => ({
   LegacyVPSDetail: () => <div>Legacy VPS detail shell</div>,
 }))
 
-function overviewFixture(): VPSOverview {
+function overviewFixture(vpsId = 'vps_001', displayName = '东京边缘'): VPSOverview {
   return {
     generated_at: '2026-08-20T00:00:00Z',
     identity: {
-      vps_id: 'vps_001',
-      display_name: '东京边缘',
+      vps_id: vpsId,
+      display_name: displayName,
       provider_name: 'Example',
       product_name: 'VPS',
       country: 'JP',
@@ -153,20 +153,123 @@ function cancellationResultFixture(): LifecycleActionResult {
   }
 }
 
-function renderDetail() {
+function deferredOverview() {
+  let resolve!: (value: VPSOverview) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<VPSOverview>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+function renderDetail({
+  initialEntry = '/vps/vps_001',
+  nextEntry,
+  reactStrictMode = false,
+}: {
+  initialEntry?: string
+  nextEntry?: string
+  reactStrictMode?: boolean
+} = {}) {
   return render(
-    <MemoryRouter initialEntries={['/vps/vps_001']}>
+    <MemoryRouter initialEntries={[initialEntry]}>
+      {nextEntry ? <Link to={nextEntry}>切换测试 VPS</Link> : null}
       <Routes>
         <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
         <Route path="/archive/:vpsId" element={<div>Archive detail route</div>} />
       </Routes>
     </MemoryRouter>,
+    { reactStrictMode },
   )
 }
 
 describe('VPSDetailPage gate', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('reuses one pending capability probe through StrictMode effect replay', async () => {
+    const probe = deferredOverview()
+    const get = vi.spyOn(recordsApi, 'getVPSOverview').mockReturnValue(probe.promise)
+
+    renderDetail({ reactStrictMode: true })
+
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(1))
+    probe.resolve(overviewFixture())
+
+    expect(await screen.findByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts exactly one new gate probe for a StrictMode retry revision', async () => {
+    const initial = deferredOverview()
+    const retry = deferredOverview()
+    const get = vi.spyOn(recordsApi, 'getVPSOverview')
+      .mockReturnValueOnce(initial.promise)
+      .mockReturnValue(retry.promise)
+
+    renderDetail({ reactStrictMode: true })
+
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(1))
+    initial.reject(new TypeError('private initial transport'))
+    await screen.findByRole('heading', { name: '无法加载 VPS 概览' })
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+    retry.resolve(overviewFixture())
+    expect(await screen.findByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
+    expect(get).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not let a resolved A gate mount a duplicate B owner during a route transition', async () => {
+    const overviewA = overviewFixture('vps_a', 'A 概览')
+    const overviewB = overviewFixture('vps_b', 'B 概览')
+    const pendingB = deferredOverview()
+    const get = vi.spyOn(recordsApi, 'getVPSOverview').mockImplementation((vpsId) => {
+      if (vpsId === 'vps_a') return Promise.resolve(overviewA)
+      if (vpsId === 'vps_b') return pendingB.promise
+      throw new Error(`unexpected VPS ${vpsId}`)
+    })
+
+    renderDetail({ initialEntry: '/vps/vps_a', nextEntry: '/vps/vps_b' })
+    expect(await screen.findByRole('heading', { name: 'A 概览' })).toBeInTheDocument()
+    expect(get.mock.calls.filter(([vpsId]) => vpsId === 'vps_a')).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('link', { name: '切换测试 VPS' }))
+
+    expect(screen.queryByRole('heading', { name: 'A 概览' })).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(get.mock.calls.filter(([vpsId]) => vpsId === 'vps_b')).toHaveLength(1)
+    })
+
+    pendingB.resolve(overviewB)
+    expect(await screen.findByRole('heading', { name: 'B 概览' })).toBeInTheDocument()
+    expect(get.mock.calls.map(([vpsId]) => vpsId)).toEqual(['vps_a', 'vps_b'])
+  })
+
+  it('keeps B visible when an earlier pending A probe settles late', async () => {
+    const pendingA = deferredOverview()
+    const pendingB = deferredOverview()
+    const get = vi.spyOn(recordsApi, 'getVPSOverview').mockImplementation((vpsId) => {
+      if (vpsId === 'vps_a') return pendingA.promise
+      if (vpsId === 'vps_b') return pendingB.promise
+      throw new Error(`unexpected VPS ${vpsId}`)
+    })
+
+    renderDetail({ initialEntry: '/vps/vps_a', nextEntry: '/vps/vps_b' })
+    await waitFor(() => expect(get).toHaveBeenCalledWith('vps_a'))
+
+    fireEvent.click(screen.getByRole('link', { name: '切换测试 VPS' }))
+    await waitFor(() => expect(get).toHaveBeenCalledWith('vps_b'))
+    pendingB.resolve(overviewFixture('vps_b', 'B 概览'))
+    expect(await screen.findByRole('heading', { name: 'B 概览' })).toBeInTheDocument()
+
+    pendingA.resolve(overviewFixture('vps_a', 'A 概览'))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'B 概览' })).toBeInTheDocument())
+    expect(screen.queryByRole('heading', { name: 'A 概览' })).not.toBeInTheDocument()
+    expect(get.mock.calls.map(([vpsId]) => vpsId)).toEqual(['vps_a', 'vps_b'])
   })
 
   it('uses overview composition when records_v2_read is present', async () => {
@@ -182,6 +285,70 @@ describe('VPSDetailPage gate', () => {
     expect(screen.queryByText('动作：无')).not.toBeInTheDocument()
     // Gate probe seeds the overview route — no duplicate first-paint fetch.
     expect(get).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries a degraded section through the existing full-overview owner', async () => {
+    const degraded = overviewFixture()
+    degraded.summary.ip_quality.section = {
+      state: 'stale',
+      observed_at: '2026-08-19T00:00:00Z',
+      last_success_at: '2026-08-19T00:00:00Z',
+      reason_code: 'ip_quality_stale',
+    }
+    let resolveRefresh!: (value: VPSOverview) => void
+    const refresh = new Promise<VPSOverview>((resolve) => {
+      resolveRefresh = resolve
+    })
+    const get = vi.spyOn(recordsApi, 'getVPSOverview')
+      .mockResolvedValueOnce(degraded)
+      .mockImplementationOnce(() => refresh)
+
+    renderDetail()
+
+    const retry = await screen.findByRole('button', { name: '重试 IP 质量' })
+    fireEvent.click(retry)
+
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+    expect(get).toHaveBeenNthCalledWith(2, 'vps_001')
+    expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
+    expect(retry).toBeDisabled()
+
+    resolveRefresh(overviewFixture())
+    await waitFor(() => expect(screen.queryByRole('button', { name: '重试 IP 质量' })).not.toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
+  })
+
+  it('keeps the overview mounted and resets retry state when a refresh rejects', async () => {
+    const degraded = overviewFixture()
+    degraded.summary.ip_quality.section = {
+      state: 'unavailable',
+      observed_at: '2026-08-19T00:00:00Z',
+      last_success_at: '2026-08-19T00:00:00Z',
+      reason_code: 'ip_quality_unavailable',
+    }
+    let rejectRefresh!: (reason: unknown) => void
+    const refresh = new Promise<VPSOverview>((_resolve, reject) => {
+      rejectRefresh = reject
+    })
+    const get = vi.spyOn(recordsApi, 'getVPSOverview')
+      .mockResolvedValueOnce(degraded)
+      .mockImplementationOnce(() => refresh)
+
+    renderDetail()
+
+    const retry = await screen.findByRole('button', { name: '重试 IP 质量' })
+    fireEvent.click(retry)
+
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
+    expect(retry).toBeDisabled()
+
+    rejectRefresh(new ApiError(503, 'refresh unavailable', { code: 'overview_unavailable' }))
+
+    await waitFor(() => expect(retry).toBeEnabled())
+    expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
+    expect(screen.getByText('IP 质量数据暂不可用，请稍后重试。')).toBeInTheDocument()
+    expect(get).toHaveBeenCalledTimes(2)
   })
 
   it('moves focus into the management menu and returns it on Escape', async () => {
@@ -466,13 +633,26 @@ describe('VPSDetailPage gate', () => {
 
   it('shows overview not-found when identity is missing', async () => {
     vi.spyOn(recordsApi, 'getVPSOverview').mockRejectedValue(
-      new ApiError(404, 'vps not found', { code: 'resource_not_found' }),
+      new ApiError(404, 'private lookup detail', { code: 'resource_not_found' }),
     )
 
     renderDetail()
 
     await waitFor(() => expect(screen.getByText('未找到 VPS')).toBeInTheDocument())
+    expect(screen.getByText('该 VPS 不存在，或当前账号无权查看。')).toBeInTheDocument()
+    expect(screen.queryByText('private lookup detail')).not.toBeInTheDocument()
     expect(screen.queryByText('Legacy VPS detail shell')).not.toBeInTheDocument()
+  })
+
+  it('falls back to legacy only after a valid capability-off overview', async () => {
+    const capabilityOff = overviewFixture()
+    capabilityOff.capabilities = []
+    const get = vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(capabilityOff)
+
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByText('Legacy VPS detail shell')).toBeInTheDocument())
+    expect(get).toHaveBeenCalledTimes(1)
   })
 
   it('falls back to legacy when overview capability is unavailable', async () => {
@@ -494,5 +674,45 @@ describe('VPSDetailPage gate', () => {
     renderDetail()
 
     await waitFor(() => expect(screen.getByText('无法加载 VPS 概览')).toBeInTheDocument())
+  })
+
+  it.each([
+    [
+      'typed decoder error',
+      new recordsApi.InvalidVPSOverviewResponseError('invalid_shape'),
+      'Invalid VPS overview response',
+    ],
+    ['network error', new TypeError('private network endpoint'), 'private network endpoint'],
+    [
+      'unknown 503',
+      new ApiError(503, 'private upstream timeout', { code: 'upstream_timeout' }),
+      'private upstream timeout',
+    ],
+    [
+      'other API error',
+      new ApiError(500, 'private database failure', { code: 'internal_error' }),
+      'private database failure',
+    ],
+  ])('shows a safe retryable gate for %s and recovers on the next probe', async (
+    _caseName,
+    failure,
+    rawMessage,
+  ) => {
+    const get = vi.spyOn(recordsApi, 'getVPSOverview')
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(overviewFixture())
+
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByText('无法加载 VPS 概览')).toBeInTheDocument())
+    expect(screen.getByText('VPS 概览请求或响应校验失败，请重试。')).toBeInTheDocument()
+    expect(screen.queryByText(rawMessage)).not.toBeInTheDocument()
+    expect(screen.queryByText('Legacy VPS detail shell')).not.toBeInTheDocument()
+    expect(get).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument())
   })
 })

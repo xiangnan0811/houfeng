@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
-	"sync"
 	"time"
 
 	"houfeng/internal/center/activity"
@@ -25,8 +25,48 @@ type Request struct {
 	VPSID string
 }
 
-// SourceBundle is everything except recent activity. The store owns how these
-// facts are loaded; the service owns timeouts, anomalies, and activity.
+// IdentitySource is the fatal identity read and its stable facts.
+type IdentitySource struct {
+	Identity Identity
+	Facts    []Fact
+}
+
+// MonitoringSource is one bounded monitoring read. Count is reused by the
+// monitoring relation so aggregation never repeats the authority query.
+type MonitoringSource struct {
+	Section         SectionState
+	Health          string
+	Status          string
+	Detail          string
+	ActiveIncidents int
+	Count           int
+}
+
+// IPQualitySource is one bounded IP-quality read.
+type IPQualitySource struct {
+	Section   SectionState
+	Status    string
+	RiskLevel string
+	Stale     bool
+}
+
+// RenewalSource is one bounded subscription read. ActiveSubscriptions and its
+// Section are reused by the subscription relation.
+type RenewalSource struct {
+	Section             SectionState
+	ActiveSubscriptions int
+	NextRenewAt         *time.Time
+	Status              string
+}
+
+// RelationSource is one bounded service/domain relation read.
+type RelationSource struct {
+	Count   int
+	Section SectionState
+}
+
+// SourceBundle remains as a data fixture shape for compatibility tests. It is
+// not a SourceReader contract; production aggregation uses the granular types.
 type SourceBundle struct {
 	Identity Identity
 
@@ -50,9 +90,15 @@ type SourceBundle struct {
 	Facts     []Fact
 }
 
-// SourceReader loads non-activity overview facts for one VPS.
+// SourceReader exposes independently bounded authority reads. Identity is
+// always loaded first; the remaining methods are safe to run concurrently.
 type SourceReader interface {
-	LoadSources(context.Context, string) (SourceBundle, error)
+	LoadIdentity(context.Context, string) (IdentitySource, error)
+	LoadMonitoring(context.Context, string) (MonitoringSource, error)
+	LoadIPQuality(context.Context, string) (IPQualitySource, error)
+	LoadRenewal(context.Context, string, string) (RenewalSource, error)
+	LoadServiceRelation(context.Context, string) (RelationSource, error)
+	LoadDomainRelation(context.Context, string) (RelationSource, error)
 }
 
 // ActivityLister is the subject activity service surface overview needs.
@@ -60,53 +106,145 @@ type ActivityLister interface {
 	List(context.Context, activity.ListRequest) (activity.ListResult, error)
 }
 
+// SourceBudgets bounds the entire overview and every authority read. A source
+// child is constrained by both its own budget and the remaining total budget.
+type SourceBudgets struct {
+	Total      time.Duration
+	Identity   time.Duration
+	Monitoring time.Duration
+	IPQuality  time.Duration
+	Renewal    time.Duration
+	Services   time.Duration
+	Domains    time.Duration
+	Activity   time.Duration
+}
+
+func defaultSourceBudgets() SourceBudgets {
+	return uniformSourceBudgets(DefaultSectionBudget)
+}
+
+func uniformSourceBudgets(budget time.Duration) SourceBudgets {
+	return SourceBudgets{
+		Total: budget, Identity: budget, Monitoring: budget, IPQuality: budget,
+		Renewal: budget, Services: budget, Domains: budget, Activity: budget,
+	}
+}
+
+func (budgets SourceBudgets) valid() bool {
+	return budgets.Total > 0 && budgets.Identity > 0 && budgets.Monitoring > 0 &&
+		budgets.IPQuality > 0 && budgets.Renewal > 0 && budgets.Services > 0 &&
+		budgets.Domains > 0 && budgets.Activity > 0
+}
+
 // Service aggregates section readers into one Overview.
 type Service struct {
-	sources        SourceReader
-	activity       ActivityLister
-	now            func() time.Time
-	sectionBudget  time.Duration
-	activityBudget time.Duration
+	sources  SourceReader
+	activity ActivityLister
+	now      func() time.Time
+	budgets  SourceBudgets
 }
 
 // NewService wires overview aggregation. Both dependencies are required.
 func NewService(sources SourceReader, activityLister ActivityLister) (*Service, error) {
-	if nilOverviewDependency(sources) || nilOverviewDependency(activityLister) {
-		return nil, fmt.Errorf("%w: dependency", ErrInvalidOverviewRequest)
-	}
-	return &Service{
-		sources:        sources,
-		activity:       activityLister,
-		now:            func() time.Time { return time.Now().UTC() },
-		sectionBudget:  DefaultSectionBudget,
-		activityBudget: DefaultSectionBudget,
-	}, nil
+	return NewServiceWithBudgets(
+		sources,
+		activityLister,
+		func() time.Time { return time.Now().UTC() },
+		defaultSourceBudgets(),
+	)
 }
 
-// NewServiceWithClock exists for deterministic tests.
+// NewServiceWithClock exists for deterministic compatibility tests. The one
+// supplied budget is applied to the total request and every source.
 func NewServiceWithClock(
 	sources SourceReader,
 	activityLister ActivityLister,
 	now func() time.Time,
 	sectionBudget time.Duration,
 ) (*Service, error) {
-	service, err := NewService(sources, activityLister)
-	if err != nil {
-		return nil, err
-	}
-	if now == nil || sectionBudget <= 0 {
-		return nil, fmt.Errorf("%w: clock", ErrInvalidOverviewRequest)
-	}
-	service.now = now
-	service.sectionBudget = sectionBudget
-	service.activityBudget = sectionBudget
-	return service, nil
+	return NewServiceWithBudgets(sources, activityLister, now, uniformSourceBudgets(sectionBudget))
 }
 
-// Get returns one overview at a uniform generated_at.
+// NewServiceWithBudgets exposes deterministic source budgets to focused tests.
+func NewServiceWithBudgets(
+	sources SourceReader,
+	activityLister ActivityLister,
+	now func() time.Time,
+	budgets SourceBudgets,
+) (*Service, error) {
+	if nilOverviewDependency(sources) || nilOverviewDependency(activityLister) {
+		return nil, fmt.Errorf("%w: dependency", ErrInvalidOverviewRequest)
+	}
+	if now == nil || !budgets.valid() {
+		return nil, fmt.Errorf("%w: budgets", ErrInvalidOverviewRequest)
+	}
+	return &Service{sources: sources, activity: activityLister, now: now, budgets: budgets}, nil
+}
+
+type sourceKind uint8
+
+const (
+	sourceMonitoring sourceKind = iota
+	sourceIPQuality
+	sourceRenewal
+	sourceServices
+	sourceDomains
+	sourceActivity
+)
+
+type sourceMessage struct {
+	kind       sourceKind
+	monitoring MonitoringSource
+	ipQuality  IPQualitySource
+	renewal    RenewalSource
+	relation   RelationSource
+	activity   ActivitySection
+	err        error
+}
+
+type sourceCollection struct {
+	monitoring    MonitoringSource
+	monitoringErr error
+	ipQuality     IPQualitySource
+	ipQualityErr  error
+	renewal       RenewalSource
+	renewalErr    error
+	services      RelationSource
+	servicesErr   error
+	domains       RelationSource
+	domainsErr    error
+	activity      ActivitySection
+	activityErr   error
+}
+
+func (collection *sourceCollection) apply(message sourceMessage) {
+	switch message.kind {
+	case sourceMonitoring:
+		collection.monitoring, collection.monitoringErr = message.monitoring, message.err
+	case sourceIPQuality:
+		collection.ipQuality, collection.ipQualityErr = message.ipQuality, message.err
+	case sourceRenewal:
+		collection.renewal, collection.renewalErr = message.renewal, message.err
+	case sourceServices:
+		collection.services, collection.servicesErr = message.relation, message.err
+	case sourceDomains:
+		collection.domains, collection.domainsErr = message.relation, message.err
+	case sourceActivity:
+		collection.activity, collection.activityErr = message.activity, message.err
+	}
+}
+
+func (collection *sourceCollection) timeoutPending(pending map[sourceKind]struct{}) {
+	for kind := range pending {
+		collection.apply(sourceMessage{kind: kind, err: context.DeadlineExceeded})
+	}
+}
+
+// Get returns one overview assembled after an identity-first, independently
+// bounded concurrent source collection.
 func (service *Service) Get(ctx context.Context, request Request) (Overview, error) {
 	if ctx == nil || service == nil || nilOverviewDependency(service.sources) ||
-		nilOverviewDependency(service.activity) {
+		nilOverviewDependency(service.activity) || !service.budgets.valid() {
 		return Overview{}, ErrInvalidOverviewRequest
 	}
 	actor, err := recordauth.NormalizeActorScope(request.Actor)
@@ -118,110 +256,219 @@ func (service *Service) Get(ctx context.Context, request Request) (Overview, err
 		return Overview{}, fmt.Errorf("%w: vps id", ErrInvalidOverviewRequest)
 	}
 
-	generatedAt := service.now().UTC()
-
-	type sourceResult struct {
-		bundle SourceBundle
-		err    error
+	totalCtx, cancelTotal := context.WithTimeout(ctx, service.budgets.Total)
+	defer cancelTotal()
+	identityCtx, cancelIdentity := context.WithTimeout(totalCtx, service.budgets.Identity)
+	identitySource, err := service.sources.LoadIdentity(identityCtx, vpsID)
+	cancelIdentity()
+	if ctx.Err() != nil {
+		return Overview{}, ctx.Err()
 	}
-	type activityResult struct {
-		section ActivitySection
-		err     error
-	}
-
-	var (
-		sourcesOut  sourceResult
-		activityOut activityResult
-		wait        sync.WaitGroup
-	)
-	wait.Add(2)
-
-	go func() {
-		defer wait.Done()
-		sectionCtx, cancel := context.WithTimeout(ctx, service.sectionBudget)
-		defer cancel()
-		bundle, err := service.sources.LoadSources(sectionCtx, vpsID)
-		sourcesOut = sourceResult{bundle: bundle, err: err}
-	}()
-
-	go func() {
-		defer wait.Done()
-		sectionCtx, cancel := context.WithTimeout(ctx, service.activityBudget)
-		defer cancel()
-		activityOut.section, activityOut.err = service.loadRecentActivity(sectionCtx, actor, vpsID)
-	}()
-
-	wait.Wait()
-
-	if sourcesOut.err != nil {
-		if errors.Is(sourcesOut.err, ErrVPSNotFound) {
+	if err != nil {
+		if errors.Is(err, ErrVPSNotFound) {
 			return Overview{}, ErrVPSNotFound
 		}
-		return Overview{}, sourcesOut.err
-	}
-	bundle := sourcesOut.bundle
-	if bundle.Identity.Labels == nil {
-		bundle.Identity.Labels = []string{}
-	}
-	if bundle.Facts == nil {
-		bundle.Facts = []Fact{}
-	}
-	if bundle.Relations == nil {
-		bundle.Relations = []RelationSummary{}
+		return Overview{}, err
 	}
 
-	activitySection := activityOut.section
-	if activityOut.err != nil {
-		activitySection = ActivitySection{
-			Section: SectionState{
-				State:      SectionUnavailable,
-				ReasonCode: reasonForError(activityOut.err),
-			},
-			Items: []activity.Event{},
+	results := make(chan sourceMessage, 6)
+	service.launchSources(totalCtx, actor, vpsID, identitySource.Identity.RenewalDecision, results)
+	pending := map[sourceKind]struct{}{
+		sourceMonitoring: {}, sourceIPQuality: {}, sourceRenewal: {},
+		sourceServices: {}, sourceDomains: {}, sourceActivity: {},
+	}
+	var collected sourceCollection
+	for len(pending) > 0 {
+		select {
+		case <-ctx.Done():
+			return Overview{}, ctx.Err()
+		case message := <-results:
+			if _, waiting := pending[message.kind]; !waiting {
+				continue
+			}
+			delete(pending, message.kind)
+			collected.apply(message)
+		case <-totalCtx.Done():
+			if ctx.Err() != nil {
+				return Overview{}, ctx.Err()
+			}
+			// Preserve every result already published before marking only the
+			// genuinely pending sources unavailable.
+			draining := true
+			for draining {
+				select {
+				case message := <-results:
+					if _, waiting := pending[message.kind]; waiting {
+						delete(pending, message.kind)
+						collected.apply(message)
+					}
+				default:
+					draining = false
+				}
+			}
+			collected.timeoutPending(pending)
+			clear(pending)
 		}
+	}
+	if ctx.Err() != nil {
+		return Overview{}, ctx.Err()
+	}
+
+	return service.buildOverview(identitySource, collected), nil
+}
+
+func (service *Service) launchSources(
+	totalCtx context.Context,
+	actor recordauth.ActorScope,
+	vpsID string,
+	renewalDecision string,
+	results chan<- sourceMessage,
+) {
+	go func() {
+		child, cancel := context.WithTimeout(totalCtx, service.budgets.Monitoring)
+		defer cancel()
+		value, err := service.sources.LoadMonitoring(child, vpsID)
+		results <- sourceMessage{kind: sourceMonitoring, monitoring: value, err: err}
+	}()
+	go func() {
+		child, cancel := context.WithTimeout(totalCtx, service.budgets.IPQuality)
+		defer cancel()
+		value, err := service.sources.LoadIPQuality(child, vpsID)
+		results <- sourceMessage{kind: sourceIPQuality, ipQuality: value, err: err}
+	}()
+	go func() {
+		child, cancel := context.WithTimeout(totalCtx, service.budgets.Renewal)
+		defer cancel()
+		value, err := service.sources.LoadRenewal(child, vpsID, renewalDecision)
+		results <- sourceMessage{kind: sourceRenewal, renewal: value, err: err}
+	}()
+	go func() {
+		child, cancel := context.WithTimeout(totalCtx, service.budgets.Services)
+		defer cancel()
+		value, err := service.sources.LoadServiceRelation(child, vpsID)
+		results <- sourceMessage{kind: sourceServices, relation: value, err: err}
+	}()
+	go func() {
+		child, cancel := context.WithTimeout(totalCtx, service.budgets.Domains)
+		defer cancel()
+		value, err := service.sources.LoadDomainRelation(child, vpsID)
+		results <- sourceMessage{kind: sourceDomains, relation: value, err: err}
+	}()
+	go func() {
+		child, cancel := context.WithTimeout(totalCtx, service.budgets.Activity)
+		defer cancel()
+		value, err := service.loadRecentActivity(child, actor, vpsID)
+		results <- sourceMessage{kind: sourceActivity, activity: value, err: err}
+	}()
+}
+
+func (service *Service) buildOverview(identitySource IdentitySource, collected sourceCollection) Overview {
+	identity := identitySource.Identity
+	if identity.Labels == nil {
+		identity.Labels = []string{}
+	}
+	facts := identitySource.Facts
+	if facts == nil {
+		facts = []Fact{}
+	}
+
+	monitoring := collected.monitoring
+	monitoring.Section = successfulOrUnavailableSection(
+		monitoring.Section, collected.monitoringErr, sourceMonitoring,
+	)
+	ipQuality := collected.ipQuality
+	ipQuality.Section = successfulOrUnavailableSection(
+		ipQuality.Section, collected.ipQualityErr, sourceIPQuality,
+	)
+	renewal := collected.renewal
+	renewal.Section = successfulOrUnavailableSection(
+		renewal.Section, collected.renewalErr, sourceRenewal,
+	)
+	services := collected.services
+	services.Section = successfulOrUnavailableSection(
+		services.Section, collected.servicesErr, sourceServices,
+	)
+	domains := collected.domains
+	domains.Section = successfulOrUnavailableSection(
+		domains.Section, collected.domainsErr, sourceDomains,
+	)
+	activitySection := collected.activity
+	if collected.activityErr != nil {
+		activitySection = ActivitySection{
+			Section: successfulOrUnavailableSection(SectionState{}, collected.activityErr, sourceActivity),
+			Items:   []activity.Event{},
+		}
+	}
+	if activitySection.Section.State == "" {
+		activitySection.Section.State = SectionReady
 	}
 	if activitySection.Items == nil {
 		activitySection.Items = []activity.Event{}
 	}
 
-	snapshot := snapshotFromBundle(generatedAt, bundle)
+	generatedAt := service.now().UTC()
+	// Sanitize judgement-source timestamps before anomaly derivation so a
+	// rejected future observation cannot escape through anomaly event_at.
+	monitoring.Section = normalizeSectionFreshness(monitoring.Section, generatedAt)
+	ipQuality.Section = normalizeSectionFreshness(ipQuality.Section, generatedAt)
+	renewal.Section = normalizeSectionFreshness(renewal.Section, generatedAt)
+	overallSection := SectionState{
+		State: SectionReady, ObservedAt: timePointer(generatedAt), LastSuccessAt: timePointer(generatedAt),
+	}
+	relations := []RelationSummary{
+		{
+			Kind: "monitoring_instances", Label: "监控实例",
+			Count: monitoring.Count, Status: relationStatus(collected.monitoringErr, monitoring.Health, monitoring.Status),
+			Section: monitoring.Section,
+		},
+		{
+			Kind: "subscriptions", Label: "订阅", Route: "/subscriptions?vps_id=" + url.QueryEscape(identity.VPSID),
+			Count: renewal.ActiveSubscriptions, Status: relationStatus(collected.renewalErr, renewal.Status),
+			Section: renewal.Section,
+		},
+		{
+			Kind: "services", Label: "服务",
+			Count: services.Count, Status: relationStatus(collected.servicesErr), Section: services.Section,
+		},
+		{
+			Kind: "domains", Label: "域名",
+			Count: domains.Count, Status: relationStatus(collected.domainsErr), Section: domains.Section,
+		},
+	}
+
+	snapshot := snapshotFromSources(generatedAt, identity, monitoring, ipQuality, renewal)
 	if activitySection.Section.State == SectionUnavailable {
-		snapshot.JudgementSourcesUnavailable = appendUnique(
-			snapshot.JudgementSourcesUnavailable, "activity",
-		)
+		snapshot.JudgementSourcesUnavailable = appendUnique(snapshot.JudgementSourcesUnavailable, "activity")
 	}
 	anomalies := EvaluateAnomalies(snapshot)
-
 	overview := Overview{
 		GeneratedAt: generatedAt,
-		Identity:    bundle.Identity,
+		Identity:    identity,
 		Anomalies:   anomalies,
 		Summary: Summary{
 			Overall: SummaryCell{
-				Status:  overallStatus(anomalies, bundle.Identity.LifecycleStatus),
-				Section: SectionState{State: SectionReady, LastSuccessAt: &generatedAt},
+				Status: overallStatus(anomalies, identity.LifecycleStatus), Section: overallSection,
 			},
 			Monitoring: SummaryCell{
-				Status:  firstNonEmpty(bundle.MonitoringHealth, bundle.MonitoringStatus, "unknown"),
-				Detail:  bundle.MonitoringDetail,
-				Section: bundle.MonitoringSection,
+				Status: firstNonEmpty(monitoring.Health, monitoring.Status, "unknown"),
+				Detail: monitoring.Detail, Section: monitoring.Section,
 			},
 			IPQuality: SummaryCell{
-				Status:  firstNonEmpty(bundle.IPRiskLevel, bundle.IPStatus, "unknown"),
-				Detail:  bundle.IPStatus,
-				Section: bundle.IPSection,
+				Status: firstNonEmpty(ipQuality.RiskLevel, ipQuality.Status, "unknown"),
+				Detail: ipQuality.Status, Section: ipQuality.Section,
 			},
 			Renewal: SummaryCell{
-				Status:  firstNonEmpty(bundle.RenewalStatus, bundle.Identity.RenewalDecision, "unknown"),
-				Section: bundle.RenewalSection,
+				Status:  firstNonEmpty(renewal.Status, identity.RenewalDecision, "unknown"),
+				Section: renewal.Section,
 			},
 		},
 		RecentActivity: activitySection,
-		Facts:          bundle.Facts,
-		Relations:      bundle.Relations,
+		Facts:          facts,
+		Relations:      relations,
 		Capabilities:   []string{CapabilityRecordsV2Read},
 	}
-	return overview, nil
+	normalizeOverviewFreshness(&overview)
+	return overview
 }
 
 func (service *Service) loadRecentActivity(
@@ -239,8 +486,6 @@ func (service *Service) loadRecentActivity(
 	})
 	if err != nil {
 		if errors.Is(err, activity.ErrSubjectNotFound) {
-			// Subject timeline absence with a live VPS identity is an empty
-			// activity section, not a fatal overview miss.
 			return ActivitySection{
 				Section: SectionState{State: SectionReady},
 				Items:   []activity.Event{},
@@ -271,35 +516,136 @@ func (service *Service) loadRecentActivity(
 	}, nil
 }
 
-func snapshotFromBundle(generatedAt time.Time, bundle SourceBundle) Snapshot {
+func successfulOrUnavailableSection(section SectionState, err error, kind sourceKind) SectionState {
+	if err == nil {
+		if section.State == "" {
+			section.State = SectionReady
+		}
+		return section
+	}
+	return SectionState{State: SectionUnavailable, ReasonCode: reasonForSourceError(kind, err)}
+}
+
+func reasonForSourceError(kind sourceKind, err error) string {
+	timedOut := errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+	switch kind {
+	case sourceMonitoring:
+		if timedOut {
+			return "monitoring_timeout"
+		}
+		return "monitoring_unavailable"
+	case sourceIPQuality:
+		if timedOut {
+			return "ip_quality_timeout"
+		}
+		return "ip_quality_unavailable"
+	case sourceRenewal:
+		if timedOut {
+			return "subscription_timeout"
+		}
+		return "subscription_unavailable"
+	case sourceServices, sourceDomains:
+		if timedOut {
+			return "relation_timeout"
+		}
+		return "relation_unavailable"
+	case sourceActivity:
+		if timedOut {
+			return "activity_timeout"
+		}
+		if errors.Is(err, activity.ErrProjectionUnavailable) {
+			return "activity_projection_unavailable"
+		}
+		return "activity_unavailable"
+	default:
+		return "section_unavailable"
+	}
+}
+
+func relationStatus(err error, values ...string) string {
+	if err != nil {
+		return "unavailable"
+	}
+	return firstNonEmpty(values...)
+}
+
+func normalizeOverviewFreshness(overview *Overview) {
+	generatedAt := overview.GeneratedAt.UTC()
+	overview.GeneratedAt = generatedAt
+	overview.Summary.Overall.Section = normalizeSectionFreshness(overview.Summary.Overall.Section, generatedAt)
+	overview.Summary.Monitoring.Section = normalizeSectionFreshness(overview.Summary.Monitoring.Section, generatedAt)
+	overview.Summary.IPQuality.Section = normalizeSectionFreshness(overview.Summary.IPQuality.Section, generatedAt)
+	overview.Summary.Renewal.Section = normalizeSectionFreshness(overview.Summary.Renewal.Section, generatedAt)
+	overview.RecentActivity.Section = normalizeSectionFreshness(overview.RecentActivity.Section, generatedAt)
+	for index := range overview.Relations {
+		overview.Relations[index].Section = normalizeSectionFreshness(overview.Relations[index].Section, generatedAt)
+	}
+}
+
+func normalizeSectionFreshness(section SectionState, generatedAt time.Time) SectionState {
+	invalid := false
+	section.ObservedAt, invalid = normalizedSourceTime(section.ObservedAt, generatedAt)
+	var lastInvalid bool
+	section.LastSuccessAt, lastInvalid = normalizedSourceTime(section.LastSuccessAt, generatedAt)
+	invalid = invalid || lastInvalid
+	if invalid && section.State != SectionUnavailable {
+		section.State = SectionStale
+		section.ReasonCode = "source_timestamp_invalid"
+	}
+	return section
+}
+
+func normalizedSourceTime(value *time.Time, generatedAt time.Time) (*time.Time, bool) {
+	if value == nil {
+		return nil, false
+	}
+	normalized := value.UTC()
+	if normalized.After(generatedAt) {
+		return nil, true
+	}
+	return &normalized, false
+}
+
+func timePointer(value time.Time) *time.Time {
+	value = value.UTC()
+	return &value
+}
+
+func snapshotFromSources(
+	generatedAt time.Time,
+	identity Identity,
+	monitoring MonitoringSource,
+	ipQuality IPQualitySource,
+	renewal RenewalSource,
+) Snapshot {
 	snapshot := Snapshot{
 		GeneratedAt:         generatedAt,
-		VPSID:               bundle.Identity.VPSID,
-		Identity:            bundle.Identity,
-		LifecycleStatus:     bundle.Identity.LifecycleStatus,
-		RenewalDecision:     bundle.Identity.RenewalDecision,
-		MonitoringHealth:    bundle.MonitoringHealth,
-		MonitoringDetail:    bundle.MonitoringDetail,
-		ActiveIncidents:     bundle.ActiveIncidents,
-		MonitoringObserved:  bundle.MonitoringSection.ObservedAt,
-		IPStatus:            bundle.IPStatus,
-		IPRiskLevel:         bundle.IPRiskLevel,
-		IPStale:             bundle.IPStale,
-		IPObservedAt:        bundle.IPSection.ObservedAt,
-		ActiveSubscriptions: bundle.ActiveSubscriptions,
-		NextRenewAt:         bundle.NextRenewAt,
+		VPSID:               identity.VPSID,
+		Identity:            identity,
+		LifecycleStatus:     identity.LifecycleStatus,
+		RenewalDecision:     identity.RenewalDecision,
+		MonitoringHealth:    monitoring.Health,
+		MonitoringDetail:    monitoring.Detail,
+		ActiveIncidents:     monitoring.ActiveIncidents,
+		MonitoringObserved:  monitoring.Section.ObservedAt,
+		IPStatus:            ipQuality.Status,
+		IPRiskLevel:         ipQuality.RiskLevel,
+		IPStale:             ipQuality.Stale,
+		IPObservedAt:        ipQuality.Section.ObservedAt,
+		ActiveSubscriptions: renewal.ActiveSubscriptions,
+		NextRenewAt:         renewal.NextRenewAt,
 	}
-	snapshot.MonitoringAvailable = bundle.MonitoringSection.State != SectionUnavailable
-	snapshot.IPAvailable = bundle.IPSection.State != SectionUnavailable
-	snapshot.SubscriptionAvailable = bundle.RenewalSection.State != SectionUnavailable
+	snapshot.MonitoringAvailable = monitoring.Section.State != SectionUnavailable
+	snapshot.IPAvailable = ipQuality.Section.State != SectionUnavailable
+	snapshot.SubscriptionAvailable = renewal.Section.State != SectionUnavailable
 
-	if bundle.MonitoringSection.State == SectionUnavailable {
+	if !snapshot.MonitoringAvailable {
 		snapshot.JudgementSourcesUnavailable = append(snapshot.JudgementSourcesUnavailable, "monitoring")
 	}
-	if bundle.IPSection.State == SectionUnavailable {
+	if !snapshot.IPAvailable {
 		snapshot.JudgementSourcesUnavailable = append(snapshot.JudgementSourcesUnavailable, "ip_quality")
 	}
-	if bundle.RenewalSection.State == SectionUnavailable {
+	if !snapshot.SubscriptionAvailable {
 		snapshot.JudgementSourcesUnavailable = append(snapshot.JudgementSourcesUnavailable, "renewal")
 	}
 	return snapshot
@@ -323,17 +669,6 @@ func overallStatus(anomalies []Anomaly, lifecycle string) string {
 		return "notice"
 	}
 	return "healthy"
-}
-
-func reasonForError(err error) string {
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
-		return "section_timeout"
-	case errors.Is(err, activity.ErrProjectionUnavailable):
-		return "activity_projection_unavailable"
-	default:
-		return "section_unavailable"
-	}
 }
 
 func appendUnique(values []string, value string) []string {

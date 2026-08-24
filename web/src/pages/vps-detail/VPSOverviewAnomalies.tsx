@@ -1,16 +1,23 @@
 import { Link } from 'react-router-dom'
 
-import type { VPSOverviewAnomaly } from '../../lib/types'
+import { Button } from '../../components/atoms'
+import type { VPSOverviewAnomaly, VPSOverviewAnomalyAction } from '../../lib/types'
+import {
+  resolveVPSOverviewAnomalyDestination,
+  type VPSOverviewCommand,
+} from './vpsOverviewDestination'
 
 type Props = {
+  vpsId: string
   anomalies: VPSOverviewAnomaly[]
+  onCommand: (command: VPSOverviewCommand) => void
 }
 
 /**
  * Healthy overviews must not mount this section at all — the parent gates on
  * `anomalies.length > 0` so query counts for anomaly chrome stay at zero.
  */
-export function VPSOverviewAnomalies({ anomalies }: Props) {
+export function VPSOverviewAnomalies({ vpsId, anomalies, onCommand }: Props) {
   if (anomalies.length === 0) return null
 
   return (
@@ -33,26 +40,22 @@ export function VPSOverviewAnomalies({ anomalies }: Props) {
             </div>
             <div className="vps-overview-anomalies__actions">
               {anomaly.primary_action ? (
-                anomaly.primary_action.route ? (
-                  <Link className="btn sm primary" to={anomaly.primary_action.route}>
-                    {anomaly.primary_action.label}
-                  </Link>
-                ) : (
-                  <span className="btn sm primary" aria-disabled="true">
-                    {anomaly.primary_action.label}
-                  </span>
-                )
+                <AnomalyAction
+                  vpsId={vpsId}
+                  ruleId={anomaly.rule_id}
+                  action={anomaly.primary_action}
+                  primary
+                  onCommand={onCommand}
+                />
               ) : null}
               {anomaly.secondary_actions.map((action) => (
-                action.route ? (
-                  <Link key={action.id} className="btn sm secondary" to={action.route}>
-                    {action.label}
-                  </Link>
-                ) : (
-                  <span key={action.id} className="btn sm secondary" aria-disabled="true">
-                    {action.label}
-                  </span>
-                )
+                <AnomalyAction
+                  key={action.id}
+                  vpsId={vpsId}
+                  ruleId={anomaly.rule_id}
+                  action={action}
+                  onCommand={onCommand}
+                />
               ))}
             </div>
           </li>
@@ -60,4 +63,33 @@ export function VPSOverviewAnomalies({ anomalies }: Props) {
       </ul>
     </section>
   )
+}
+
+function AnomalyAction({
+  vpsId,
+  ruleId,
+  action,
+  primary = false,
+  onCommand,
+}: {
+  vpsId: string
+  ruleId: string
+  action: VPSOverviewAnomalyAction
+  primary?: boolean
+  onCommand: (command: VPSOverviewCommand) => void
+}) {
+  const destination = resolveVPSOverviewAnomalyDestination(vpsId, ruleId, action)
+  const variant = primary ? 'primary' : 'secondary'
+
+  if (destination?.kind === 'route') {
+    return <Link className={`btn sm ${variant}`} to={destination.to}>{action.label}</Link>
+  }
+  if (destination?.kind === 'command') {
+    return (
+      <Button size="sm" variant={variant} onClick={() => onCommand(destination.command)}>
+        {action.label}
+      </Button>
+    )
+  }
+  return <span className={`btn sm ${variant}`} aria-disabled="true">{action.label}</span>
 }
