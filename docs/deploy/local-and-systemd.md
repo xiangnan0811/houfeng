@@ -139,90 +139,243 @@ The center applies embedded migrations on startup and serves API plus the built 
 
 ## Docker Compose deployment
 
-The Compose path runs the center and built web UI, the isolated content processor, a pinned ClamAV daemon, and PostgreSQL. It is a development/conformance topology for exercising the complete attachment path on one Docker host. It is not an independent production recovery domain: the named Blob volume and the PostgreSQL bind-mounted data directory share one host failure boundary. It does not run agents in containers; monitored hosts still use the center-generated Linux/systemd onboarding command reached after creating a VPS and its scoped MonitoringInstance from the VPS detail page.
+The release bundle is the ordinary single-host production path. It runs only
+published images and needs no source checkout, local build, helper launcher, or
+manual database command. Prerequisites are Docker with Compose support, an
+existing Docker network shared with Nginx Proxy Manager (NPM), and an HTTPS
+hostname whose DNS already reaches NPM.
 
-Prerequisites: Docker with Compose support, and an operator-managed HTTPS reverse proxy for production/public access.
-
-```bash
-cp docs/deploy/compose.env.example docs/deploy/compose.env
-install -d -m 700 docs/deploy/secrets
-umask 077
-openssl rand -hex 32 > docs/deploy/secrets/postgres-bootstrap-password
-openssl rand -hex 32 > docs/deploy/secrets/houfeng-database-password
-# edit docs/deploy/compose.env and replace the admin password and session HMAC key
-# optionally set HOUFENG_PUBLIC_BASE_URL before agent onboarding
-set -eu
-scripts/compose-up.sh docs/deploy/compose.env
-```
-
-The tracked env example names two different catalog principals:
-`POSTGRES_BOOTSTRAP_USER` initializes the PostgreSQL OID-10 superuser and
-`HOUFENG_DATABASE_USER` is the application login. Their passwords live in two
-untracked mode-0600 files. Compose mounts the bootstrap password only into the
-database container; the center and processor containers receive only the
-application password file. The processor does not receive center-only initial
-admin or session HMAC secrets. Comparison intent keys are a separate 0400
-keyring directory mounted into the center container; Compose and images must
-only bind-mount that path and must not COPY key bytes into the image. Do not
-reuse the session, deletion, or backup HMAC material.
-
-`scripts/compose-up.sh` is the fail-stop quick-start boundary. It validates the
-Compose configuration, starts only `db`, polls `pg_isready`, requires a
-successful `SELECT 1` against the configured target database as the bootstrap
-principal, and rejects equal bootstrap/application names. Only after that
-database-level readiness proof does it run
-`docs/deploy/app-acl-r2-pre-r1-provisioning.sql`; it then creates or updates the
-constrained application login and transfers the fresh database to that login.
-Any readiness, identity, provisioning, or application-role error exits nonzero
-before `docker compose ... up -d houfeng houfeng-content-processor` is invoked.
-
-An existing application role is accepted only when it has no direct role
-membership in either direction; that also excludes every recursive membership
-path involving the role. `NOINHERIT` is not a substitute because membership can
-still authorize `SET ROLE`. Membership drift is rejected without cleanup: the
-application-role transaction rolls back, database ownership stays unchanged,
-and Houfeng is not started.
-
-The principal values are consumed by PostgreSQL only during initial database
-creation. A data directory created by an older Compose layout with `houfeng` as
-the OID-10 superuser cannot be made compliant by changing the env file. Back it
-up and initialize a fresh database with this sequence, or use a separately
-reviewed migration plan; do not rename or repurpose the existing OID-10 role in
-place.
-
-The default Compose file pulls and runs `linnea7171/houfeng:latest`. The project image contains `houfeng-center`, `houfeng-content-processor`, Poppler tools, a small runtime entrypoint, and baked `web/dist`; both project services run as the non-root `houfeng` user. The center uses `HOUFENG_HTTP_ADDR=:16001`, `HOUFENG_WEB_DIST_DIR=/app/web/dist`, and `HOUFENG_LOG_FILE=/var/log/houfeng/center.log`, so no host-mounted `web/dist` directory is required. The processor runs with a read-only root filesystem, all capabilities dropped, `no-new-privileges`, core dumps disabled, a bounded private tmpfs workspace, and the same persistent Blob volume as center. When `HOUFENG_DATABASE_URL` is unset, the entrypoint assembles it from the application user, password-file value, and database name loaded from `docs/deploy/compose.env`. It percent-encodes each component as UTF-8 bytes, so printable URI-reserved characters in strong passwords and catalog names are preserved; it rejects ASCII control bytes and never executes either binary on fallback-input failure. The password file takes precedence over `HOUFENG_DATABASE_PASSWORD`. An explicitly supplied `HOUFENG_DATABASE_URL` bypasses fallback assembly unchanged and remains subject to normal URL/TLS validation. Center-only initial-user and session secrets are validated only for the center command and are not mounted into or required by the processor. The entrypoint does not perform runtime privilege dropping. The root `Dockerfile` is published by the release-only Docker image workflow; the default quick-start still pulls the published image and does not build locally.
-
-Sensitive Compose values remain untracked. The database bootstrap and application passwords live under the ignored `docs/deploy/secrets/` directory and are mounted as service-scoped Docker secrets; the initial admin password and session HMAC key live in the untracked `docs/deploy/compose.env` copied from `docs/deploy/compose.env.example`. The tracked `compose.yaml` contains only secret-file mount paths and intentionally avoids password values or database URLs so repository secret scanners do not flag placeholder deployment configuration.
-
-Maintainers publish Docker images and installer-required agent assets through the release pipeline. Configure GitHub repository secrets `RELEASE_PLEASE_TOKEN`, `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, and `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY`; if the minisign key is password-protected, also configure `HOUFENG_RELEASE_MINISIGN_PASSWORD`. After an eligible conventional feature/fix/docs PR merges to `main`, `.github/workflows/release-please.yml` opens or updates a release PR. When that release PR passes CI and is merged, Release Please publishes a GitHub Release such as `v1.2.3`; the `release.published` event then runs `.github/workflows/publish-images.yml`, uploads `houfeng-agent_v1.2.3_linux_amd64`, `houfeng-agent_v1.2.3_linux_arm64`, `sha256sums.txt`, and `sha256sums.txt.minisig` to the release, and pushes `linnea7171/houfeng:v1.2.3`, `linnea7171/houfeng:1.2.3`, and `linnea7171/houfeng:latest`. Manual workflow dispatch requires explicit `version` and `source_ref` inputs, can rebuild/upload those agent assets for emergency backfills, and does not update the Docker `latest` tag.
-
-`compose.yaml` starts four required services:
-
-- `houfeng` — the Houfeng project image, bound by default to `127.0.0.1:16001` on the host for a local reverse proxy upstream. Override only the host port with `HOUFENG_HOST_PORT=<port>` in `docs/deploy/compose.env` if needed.
-- `houfeng-content-processor` — the same project image with the processor command, isolated workspace, explicit retry/reconciliation bounds, shared Blob volume, and no center-only admin/session secrets.
-- `clamav` — the pinned ClamAV daemon and persistent signature database used by both admission readiness and processor scanning.
-- `db` — PostgreSQL initialized under `POSTGRES_BOOTSTRAP_USER`, with a separate constrained `HOUFENG_DATABASE_USER`, and the user-migratable host directory `./data/postgres/` mounted at `/var/lib/postgresql/data`.
-
-The Houfeng service writes center application logs to `/var/log/houfeng/center.log` inside the container, backed by the `houfeng_logs` named Docker volume. It still emits logs to stdout so `docker compose logs houfeng` remains the primary quick troubleshooting path. The processor emits content-free lifecycle/errors to stdout; inspect it with `docker compose logs houfeng-content-processor`. To inspect the center log file directly, use a temporary container with the named volume mounted instead of relying on a host bind path.
-
-PostgreSQL has a `pg_isready` healthcheck using the bootstrap identity, ClamAV has a daemon readiness check, and both project services retain `service_healthy` dependencies. The quick-start additionally waits for database readiness before provisioning and does not request either project service until provisioning and application-role setup have both succeeded. The center then applies embedded migrations as the application principal on startup.
-
-For local Blob storage, PostgreSQL metadata and `houfeng_blobs` are one logical recovery point. Quiesce center and processor writes, capture both stores within the same backup window, and restore both before serving traffic; a database-only or Blob-only snapshot is incomplete. Copying a named volume beside `./data/postgres/` does not create an independent production recovery domain. Production S3 deployments still require a coordinated database/object manifest and exact-version verification; the full cross-storage recovery controller belongs to the later recovery task.
-
-`HOUFENG_PUBLIC_BASE_URL` in `docs/deploy/compose.env` may be empty for first login. Before generating one-command agent install commands, set it to the externally reachable absolute `http(s)` URL that browsers and target agents can access, then recreate the Houfeng container:
+Create a private deployment directory and download the two assets from the same
+GitHub Release:
 
 ```bash
-docker compose --env-file docs/deploy/compose.env up -d houfeng
+install -d -m 0700 houfeng && cd houfeng
+sudo install -d -o 10001 -g 10001 -m 0700 optional-secrets optional-secrets/comparison-keyring optional-secrets/s3
+curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.yaml -o compose.yaml
+curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/.env.example -o .env
+chmod 0600 .env
+${EDITOR:-vi} .env
+docker compose config
+docker compose pull
+docker compose up -d
 ```
 
-For production/public deployments, terminate HTTPS outside this Compose stack with Caddy, Nginx Proxy Manager, Nginx, a cloud load balancer, or similar, and forward to the loopback-bound Houfeng port. Configure `HOUFENG_PUBLIC_BASE_URL` to the external origin so Host allowlisting rejects mismatched hosts, set `HOUFENG_TRUSTED_PROXIES` only to the reverse proxy CIDRs that should be trusted, and apply request body, rate, and connection limits at the proxy. Do not expose the center directly on public plain HTTP. If one-command agent onboarding is needed, publish a GitHub Release so the release workflow builds `linnea7171/houfeng:vX.Y.Z`, `linnea7171/houfeng:X.Y.Z`, release-controlled `linnea7171/houfeng:latest`, and the matching signed Linux agent release assets described above. For controlled production rollouts, pin a tested image tag or digest instead of relying only on mutable `latest`.
+Fill every value in **Must change** before validation. The downloaded
+`HOUFENG_IMAGE` is already pinned to the matching `vX.Y.Z` image; do not replace
+it with `latest`. **Recommended** contains the stable project name, the fixed
+Records profile marker, proxy/session choices, and local-storage choice.
+**Optional** contains integrations that may remain blank. Keep
+`COMPOSE_PROJECT_NAME=houfeng` stable across upgrades and restores.
+Generate every blank secret independently with `openssl rand -hex 32`, paste
+the raw hex without quotes, and never reuse a value. Hex avoids dotenv traps
+from `$`, `#`, and quote characters.
+`HOUFENG_RECORDS_ENABLED=true` describes a production invariant: the Compose
+service pins it true because database initialization converges and admits the
+current Records ACL. Permanent deletion is pinned false because this profile
+does not deliver the required external witness.
 
-For troubleshooting, collect recent `docker compose --env-file docs/deploy/compose.env logs --tail=100 houfeng` output plus `/var/log/houfeng/center.log` from the `houfeng_logs` named volume when file logs are needed. Do not paste enrollment commands, tokens, cookies, passwords, or provider credentials into shared logs or issues.
+### Nginx Proxy Manager
 
-Rollback/removal expectations:
+Set `HOUFENG_PROXY_NETWORK` to the exact existing Docker network already joined
+by NPM. Only `houfeng` joins it, with the stable alias `houfeng`; no Houfeng
+service publishes a host port. In NPM create a Proxy Host with:
 
-- `docker compose down` stops and removes the center, processor, ClamAV, and database containers but keeps PostgreSQL files under `./data/postgres/` and keeps the named Blob/signature/log volumes unless volumes are explicitly requested for removal.
-- Delete `./data/postgres/` or the `houfeng_blobs` volume only when intentionally discarding the complete deployment. Back up or move PostgreSQL and Blob data as the same recovery point when migrating to another host.
+- domain name equal to the host in `HOUFENG_PUBLIC_BASE_URL`;
+- scheme `http`, forward hostname `houfeng`, and forward port `16001`;
+- **Websockets Support** and **Block Common Exploits** enabled;
+- a valid certificate and **Force SSL** enabled.
+
+Set `HOUFENG_TRUSTED_PROXIES` only when forwarded client IPs are required, and
+then only to the exact NPM-network CIDR. Broad ranges such as `0.0.0.0/0` and
+`::/0` are rejected. Apply appropriate request-body, rate, and connection limits
+in NPM. Center Host validation is derived from `HOUFENG_PUBLIC_BASE_URL`.
+
+### Topology and initialization
+
+The stack contains eight services:
+
+- `houfeng-storage-init` creates the UID/GID-owned attachment, log, authority,
+  public Center identity, and staged-secret directories below `./data`;
+- `houfeng-secrets-init` copies only the four operator database secrets needed
+  by the read-only initializer/processor into service-specific private files;
+- `db` runs pinned PostgreSQL 16 with its bootstrap secret;
+- `houfeng-db-init` provisions distinct runtime, platform-admin, and migrator
+  logins plus the internally generated constrained authority login, applies the
+  pre-R1 catalog restriction, converges the current schema, verifies or creates
+  the signed activation ledger, activates through the existing projector, and
+  proves runtime admission;
+- `houfeng-record-authority` verifies the signed state and active contract,
+  renews only the fixed `compose-center` membership, and exposes a loopback-only
+  health probe after the membership is fresh;
+- `clamav` maintains the malware-signature cache and scans attachment content;
+- `houfeng` serves the baked Web UI and API as UID/GID 10001;
+- `houfeng-content-processor` runs the attachment processor as UID/GID 10001
+  with a read-only root, no capabilities, `no-new-privileges`, core dumps
+  disabled, and a bounded private tmpfs.
+
+Storage, secret-staging, and database initialization are one-shot gates. Center
+starts only after they succeed, PostgreSQL/ClamAV are healthy, and the Records
+authority is healthy; the processor waits for initialization and scanner
+readiness. Seeing all three initializer containers in `Exited (0)` state is
+expected. Any catalog, identity, signed-state, activation, membership,
+migration, or runtime-admission drift fails closed before application services
+start. Exact-repeat initialization verifies the existing authority bundle and
+active contract rather than creating a second identity or fabricating rows.
+
+Compose secrets are sourced from the private root `.env` and exposed as files to
+only the services that need them. PostgreSQL receives only its bootstrap
+secret. `houfeng-secrets-init` receives the bootstrap and three operator-managed
+database-role secrets, mounts only `data/secrets`, then writes separate private
+directories for db-init and the processor because Compose cannot inject
+environment-backed secret content into a read-only service root. It cannot read
+the authority bundle, attachments, logs, or PostgreSQL tree. Center receives the
+runtime, initial-admin, and session secrets. The processor receives only a staged
+runtime secret. The
+authority reads only its generated private state and generated constrained
+database credential. Center and processor never receive bootstrap, migrator,
+platform-admin, or authority credentials; the processor never receives initial
+admin or session material.
+
+All local durable state is visible in the deployment directory:
+
+The authority's private bundle is under `data/records-authority`, Center receives
+only `data/center-config`, and staged service files remain under `data/secrets`.
+
+```text
+data/
+├── attachments/
+├── center-config/
+│   └── deployment-id
+├── clamav/
+├── logs/
+│   └── center.log
+├── postgres/
+├── records-authority/
+│   ├── private/
+│   │   ├── activation-ledger.jsonl
+│   │   ├── activation-receipt.json
+│   │   ├── authority-key
+│   │   └── database-secret
+│   └── public/
+│       └── deployment-id
+└── secrets/
+    ├── db-init/
+    └── processor/
+```
+
+`optional-secrets/` is the only additional mounted operator directory and must
+remain owned by UID/GID `10001` and mode `0700` so the non-root containers can
+traverse their scoped bind mounts. Install an optional key file with
+`sudo install -o 10001 -g 10001 -m 0400 SOURCE DEST`; do not loosen permissions
+to make a host-side copy succeed. `optional-secrets/comparison-keyring/` is
+mounted only into Center. `optional-secrets/s3/` is mounted into Center and the
+processor because both access the same Blob backend; the processor cannot read
+comparison keys.
+Local attachments are the default. If S3 is selected, Center and processor must
+use the same endpoint, bucket, TLS mode, and credential-file paths below the S3
+directory; S3 data is no longer part of the local `./data` migration unit.
+
+### Health and troubleshooting
+
+`docker compose ps` must show PostgreSQL, ClamAV, Center, and the Records
+authority healthy, the processor running, and all three initializer services
+completed successfully. Verify the public route through NPM because no
+loopback/host port exists:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 houfeng houfeng-record-authority houfeng-content-processor clamav
+docker compose exec -T db pg_isready -U postgres -d houfeng
+curl -fsS https://center.example.com/api/healthz
+test -s data/logs/center.log
+```
+
+Replace the example HTTPS origin with `HOUFENG_PUBLIC_BASE_URL`. Keep shared
+diagnostics free of passwords, cookies, provider credentials, enrollment
+commands, and tokens. If an initializer failed, inspect it explicitly with
+`docker compose logs houfeng-storage-init houfeng-secrets-init houfeng-db-init`;
+do not bypass its dependency or start Center manually. Authority health failure
+belongs in `docker compose logs houfeng-record-authority`; do not replace the
+deployment ID or edit its private files to force readiness.
+
+### Backup, restore, and host migration
+
+PostgreSQL, local attachments, and Records authority state are one logical
+recovery point. The matching public deployment ID, signed ledger, authority key,
+generated database credential, and activation receipt are not reproducible
+cache data.
+For the simplest consistent backup, stop the whole stack with
+`docker compose down`, copy the complete private deployment directory while
+PostgreSQL is stopped, then restart with `docker compose up -d`. The copy must
+include `compose.yaml`, `.env`, `optional-secrets/`, and the entire `data/`
+tree. Protect it as secret material. A database-only, attachment-only,
+authority-only, or live unordered filesystem copy is incomplete. An active
+database with absent, corrupt, or mismatched authority state fails closed;
+restore PostgreSQL and Records authority state together.
+
+To restore or migrate hosts, stop the source, copy that same directory intact,
+install Docker/Compose on the target, recreate or join the external NPM network
+named in `.env`, and run `docker compose config` followed by
+`docker compose up -d`. Do not start both copies against one identity or split
+the PostgreSQL and attachment recovery points. Confirm the public health route
+and a representative admitted Records write plus attachment after restore before
+retiring the source. Starting two copied authorities for the same deployment is
+unsupported.
+
+For S3, a valid recovery point instead requires a coordinated PostgreSQL dump
+and object-version manifest. The Compose bundle does not claim cross-storage
+snapshot orchestration; use a separately reviewed recovery procedure.
+
+### Upgrade, rollback, and secret rotation
+
+Before upgrading, take a cold recovery point. Download `compose.yaml` and
+`.env.example` from the exact target tag, review the new template against the
+private `.env`, preserve operator values, and update `HOUFENG_IMAGE` to the
+matching immutable tag. Then run:
+
+```bash
+docker compose config
+docker compose pull
+docker compose up -d
+docker compose ps
+```
+
+The database initializer applies the supported forward schema transition before
+Center starts. Do not roll an older image back over a database already migrated
+by a newer incompatible release. If release notes do not explicitly confirm
+backward compatibility, rollback means restoring the complete pre-upgrade cold
+recovery point together with its matching Compose asset and image tag.
+
+Compose does not include the value behind an environment-sourced secret in its
+service configuration hash. A plain `docker compose up -d` therefore does not
+guarantee that a completed initializer or running application container will be
+recreated after a password-only edit. For a runtime, migrator, or
+platform-admin password rotation, use this controlled sequence:
+
+```bash
+docker compose stop houfeng houfeng-content-processor
+${EDITOR:-vi} .env
+docker compose run --rm houfeng-secrets-init
+docker compose run --rm houfeng-db-init
+docker compose up -d --force-recreate houfeng houfeng-content-processor
+docker compose ps
+```
+
+The explicit secret-staging run is required: Compose does not include an
+environment-backed secret's value in the completed one-shot service hash, and
+db-init/processor intentionally read their staged read-only files. Do not restart
+the application services if either staging or initialization fails. PostgreSQL's
+bootstrap password must be rotated inside PostgreSQL and in `.env` as one
+controlled operation before running the same initializer/recreation sequence;
+changing only `.env` locks the initializer out. Change the Center admin password
+in the authenticated UI after first startup because seed credentials are
+ignored once users exist. Rotating `HOUFENG_SESSION_HMAC_KEY` requires explicit
+Center recreation and invalidates browser sessions and HMAC-backed agent
+credentials, so plan reauthentication/re-enrollment before doing it.
+
+`docker compose down` removes containers and the private default network but
+does not delete bind-mounted data. Never delete `./data` unless intentionally
+discarding the entire deployment and its recovery point.
 
 ## Agent environment
 
@@ -478,10 +631,11 @@ journalctl -u houfeng-agent -n 100 --no-pager
 After Docker Compose startup:
 
 ```bash
-curl -fsS http://127.0.0.1:16001/api/healthz
-docker compose --env-file docs/deploy/compose.env ps
-docker compose --env-file docs/deploy/compose.env logs --tail=100 houfeng
-docker compose --env-file docs/deploy/compose.env logs --tail=100 houfeng-content-processor clamav
+docker compose ps
+docker compose logs --tail=100 houfeng houfeng-content-processor clamav
+docker compose exec -T db pg_isready -U postgres -d houfeng
+curl -fsS https://center.example.com/api/healthz
+test -s data/logs/center.log
 ```
 
 Continue with `docs/operations/fresh-install-smoke-run.md` for the full fresh-install path.

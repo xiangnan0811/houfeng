@@ -353,3 +353,68 @@ jobs:
             echo "### Tags"
             jq -r '.tags[] | "- `" + . + "`"' <<< "$DOCKER_METADATA_OUTPUT_JSON"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  deployment-assets:
+    needs:
+      - resolve
+      - publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - name: Prepare and validate deployment assets
+        shell: bash
+        env:
+          HOUFENG_IMAGE: docker.io/linnea7171/houfeng:v${{ needs.resolve.outputs.version }}
+          HOUFENG_PROXY_NETWORK: houfeng-release-validation
+          HOUFENG_PUBLIC_BASE_URL: https://center.example.invalid
+          HOUFENG_INITIAL_USERNAME: release-validation
+          POSTGRES_BOOTSTRAP_PASSWORD: release-validation-bootstrap
+          HOUFENG_RUNTIME_PASSWORD: release-validation-runtime
+          HOUFENG_MIGRATOR_PASSWORD: release-validation-migrator
+          HOUFENG_PLATFORM_ADMIN_PASSWORD: release-validation-admin
+          HOUFENG_INITIAL_PASSWORD: release-validation-initial
+          HOUFENG_SESSION_HMAC_KEY: release-validation-session-hmac-key-32-bytes
+        run: |
+          mkdir -p dist
+          cp compose.yaml dist/compose.yaml
+          cp docs/deploy/compose.env.example dist/.env.example
+          sed -i "s|^HOUFENG_IMAGE=.*$|HOUFENG_IMAGE=$HOUFENG_IMAGE|" dist/.env.example
+
+          grep -Fx "HOUFENG_IMAGE=$HOUFENG_IMAGE" dist/.env.example
+          rendered_images="$(docker compose --env-file dist/.env.example -f dist/compose.yaml config --images)"
+          mapfile -t project_images < <(grep -F 'docker.io/linnea7171/houfeng:' <<< "$rendered_images" | sort -u)
+          if [[ "${#project_images[@]}" -ne 1 || "${project_images[0]}" != "$HOUFENG_IMAGE" ]]; then
+            echo "Deployment assets do not reference exactly the matching release image." >&2
+            printf '%s\n' "$rendered_images" >&2
+            exit 1
+          fi
+          docker buildx imagetools inspect "$HOUFENG_IMAGE"
+
+      - name: Upload deployment release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: v${{ needs.resolve.outputs.version }}
+        run: |
+          gh release upload "$VERSION" \
+            dist/compose.yaml \
+            dist/.env.example \
+            --clobber
+
+      - name: Publish summary
+        shell: bash
+        env:
+          VERSION: v${{ needs.resolve.outputs.version }}
+        run: |
+          {
+            echo "## Production Compose assets published"
+            echo
+            echo "- Release tag: \`$VERSION\`"
+            echo "- \`compose.yaml\`"
+            echo "- \`.env.example\`"
+          } >> "$GITHUB_STEP_SUMMARY"

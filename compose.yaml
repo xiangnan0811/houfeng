@@ -1,70 +1,265 @@
 services:
-  houfeng:
-    image: linnea7171/houfeng:latest
-    restart: unless-stopped
-    env_file:
-      - path: docs/deploy/compose.env
-        required: false
+  houfeng-storage-init:
+    image: "${HOUFENG_IMAGE:?set HOUFENG_IMAGE in .env}"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - >-
+        install -d -o 10002 -g 10002 -m 0750 /state &&
+        install -d -o 10001 -g 10001 -m 0700 /state/attachments /state/logs &&
+        install -d -o 10002 -g 10002 -m 0755 /state/center-config &&
+        install -d -o 10002 -g 10002 -m 0700 /state/secrets &&
+        install -d -o 10002 -g 10002 -m 0700 /state/secrets/db-init &&
+        install -d -o 10002 -g 10001 -m 0750 /state/secrets/processor
+    restart: "no"
+    network_mode: none
+    volumes:
+      - ./data:/state
+
+  houfeng-secrets-init:
+    image: "${HOUFENG_IMAGE:?set HOUFENG_IMAGE in .env}"
+    user: "10002:10002"
+    group_add:
+      - "10001"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        copy_secret() {
+          install -g "$$4" -m "$$3" "$$1" "$$2.next"
+          mv -f "$$2.next" "$$2"
+        }
+        copy_secret /run/secrets/postgres_bootstrap_password /state/secrets/db-init/postgres_bootstrap_password 0400 10002
+        copy_secret /run/secrets/houfeng_runtime_password /state/secrets/db-init/houfeng_runtime_password 0400 10002
+        copy_secret /run/secrets/houfeng_platform_admin_password /state/secrets/db-init/houfeng_platform_admin_password 0400 10002
+        copy_secret /run/secrets/houfeng_migrator_password /state/secrets/db-init/houfeng_migrator_password 0400 10002
+        copy_secret /run/secrets/houfeng_runtime_password /state/secrets/processor/houfeng_runtime_password 0040 10001
+    restart: "no"
+    network_mode: none
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
     depends_on:
+      houfeng-storage-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./data/secrets:/state/secrets
+    secrets:
+      - postgres_bootstrap_password
+      - houfeng_runtime_password
+      - houfeng_platform_admin_password
+      - houfeng_migrator_password
+
+  db:
+    image: postgres:16.12
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: houfeng
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_bootstrap_password
+    secrets:
+      - postgres_bootstrap_password
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d houfeng"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  houfeng-db-init:
+    image: "${HOUFENG_IMAGE:?set HOUFENG_IMAGE in .env}"
+    entrypoint: ["/usr/local/bin/houfeng-record-platform-admin"]
+    command: ["deploy-init", "--scope", "compose"]
+    user: "10002:10002"
+    restart: "no"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    depends_on:
+      houfeng-storage-init:
+        condition: service_completed_successfully
+      houfeng-secrets-init:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    volumes:
+      - ./data:/var/lib/houfeng
+      - ./data/secrets/db-init:/run/secrets:ro
+
+  houfeng-record-authority:
+    image: "${HOUFENG_IMAGE:?set HOUFENG_IMAGE in .env}"
+    entrypoint: ["/usr/local/bin/houfeng-record-platform-admin"]
+    command: ["record-authority", "--scope", "compose"]
+    user: "10002:10002"
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    depends_on:
+      houfeng-storage-init:
+        condition: service_completed_successfully
+      houfeng-secrets-init:
+        condition: service_completed_successfully
+      houfeng-db-init:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:16002/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    volumes:
+      - ./data:/var/lib/houfeng:ro
+      - type: tmpfs
+        target: /var/lib/houfeng/secrets
+        tmpfs:
+          size: 4096
+          mode: 0
+
+  clamav:
+    image: clamav/clamav:1.4.3
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    volumes:
+      - ./data/clamav:/var/lib/clamav
+
+  houfeng:
+    image: "${HOUFENG_IMAGE:?set HOUFENG_IMAGE in .env}"
+    restart: unless-stopped
+    depends_on:
+      houfeng-storage-init:
+        condition: service_completed_successfully
+      houfeng-db-init:
+        condition: service_completed_successfully
+      houfeng-record-authority:
+        condition: service_healthy
       db:
         condition: service_healthy
       clamav:
         condition: service_healthy
     environment:
-      HOUFENG_DATABASE_USER: "${HOUFENG_DATABASE_USER:?set HOUFENG_DATABASE_USER in docs/deploy/compose.env}"
-      HOUFENG_DATABASE_NAME: "${HOUFENG_DATABASE_NAME:-houfeng}"
-      HOUFENG_DATABASE_PASSWORD_FILE: /run/secrets/houfeng_database_password
+      HOUFENG_DATABASE_USER: houfeng_runtime
+      HOUFENG_DATABASE_NAME: houfeng
+      HOUFENG_DATABASE_PASSWORD_FILE: /run/secrets/houfeng_runtime_password
+      HOUFENG_DATABASE_REQUIRE_TLS: "false"
       HOUFENG_HTTP_ADDR: ":16001"
       HOUFENG_WEB_DIST_DIR: /app/web/dist
       HOUFENG_LOG_FILE: /var/log/houfeng/center.log
+      HOUFENG_PUBLIC_BASE_URL: "${HOUFENG_PUBLIC_BASE_URL:?set the external HTTPS HOUFENG_PUBLIC_BASE_URL in .env}"
+      HOUFENG_REQUIRE_HTTPS_PUBLIC_BASE_URL: "true"
+      HOUFENG_TRUSTED_PROXIES: "${HOUFENG_TRUSTED_PROXIES:-}"
+      HOUFENG_INITIAL_USERNAME: "${HOUFENG_INITIAL_USERNAME:?set HOUFENG_INITIAL_USERNAME in .env}"
+      HOUFENG_INITIAL_PASSWORD_FILE: /run/secrets/houfeng_initial_password
+      HOUFENG_SESSION_HMAC_KEY_FILE: /run/secrets/houfeng_session_hmac_key
+      HOUFENG_SESSION_TTL: "${HOUFENG_SESSION_TTL:-168h}"
+      HOUFENG_PASSWORD_BCRYPT_COST: "${HOUFENG_PASSWORD_BCRYPT_COST:-10}"
+      HOUFENG_INCIDENT_SWEEP_INTERVAL: "${HOUFENG_INCIDENT_SWEEP_INTERVAL:-1m}"
+      # The current production ACL is provisioned and admitted for Records.
+      # These are deployment invariants, not operator-selectable feature flags.
+      HOUFENG_RECORDS_ENABLED: "true"
+      HOUFENG_RECORD_PERMANENT_DELETE_ENABLED: "false"
+      HOUFENG_RECORD_DEPLOYMENT_ID_FILE: /run/houfeng/records-authority/deployment-id
+      HOUFENG_RECORD_INSTANCE_ID: compose-center
+      HOUFENG_RECORD_INSTANCE_KIND: api
+      HOUFENG_RECORD_INSTANCE_CAPABILITY: records.runtime
+      HOUFENG_PORTABILITY_ENABLED: "${HOUFENG_PORTABILITY_ENABLED:-true}"
+      HOUFENG_COMPARISON_ENABLED: "${HOUFENG_COMPARISON_ENABLED:-false}"
+      HOUFENG_COMPARISON_INTENT_KEYRING: "${HOUFENG_COMPARISON_INTENT_KEYRING:-}"
+      HOUFENG_COMPARISON_INTENT_KEY_ID: "${HOUFENG_COMPARISON_INTENT_KEY_ID:-}"
+      HOUFENG_COMPARISON_ADMISSION_BUDGET_BYTES: "${HOUFENG_COMPARISON_ADMISSION_BUDGET_BYTES:-67108864}"
       HOUFENG_ATTACHMENT_BLOB_BACKEND: "${HOUFENG_ATTACHMENT_BLOB_BACKEND:-local}"
-      HOUFENG_ATTACHMENT_BLOB_ROOT: "${HOUFENG_ATTACHMENT_BLOB_ROOT:-/var/lib/houfeng/attachments}"
-      HOUFENG_CLAMAV_NETWORK: "${HOUFENG_CLAMAV_NETWORK:-tcp}"
-      HOUFENG_CLAMAV_ADDRESS: "${HOUFENG_CLAMAV_ADDRESS:-clamav:3310}"
-      HOUFENG_CLAMAV_DIAL_TIMEOUT: "${HOUFENG_CLAMAV_DIAL_TIMEOUT:-5s}"
-      HOUFENG_CLAMAV_OPERATION_TIMEOUT: "${HOUFENG_CLAMAV_OPERATION_TIMEOUT:-2m}"
-      HOUFENG_CLAMAV_CHUNK_SIZE: "${HOUFENG_CLAMAV_CHUNK_SIZE:-65536}"
-      HOUFENG_CLAMAV_RESPONSE_LIMIT: "${HOUFENG_CLAMAV_RESPONSE_LIMIT:-4096}"
-      HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS: "${HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS:-3}"
-    ports:
-      - "127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001"
+      HOUFENG_ATTACHMENT_BLOB_ROOT: /var/lib/houfeng/attachments
+      HOUFENG_ATTACHMENT_S3_ENDPOINT: "${HOUFENG_ATTACHMENT_S3_ENDPOINT:-}"
+      HOUFENG_ATTACHMENT_S3_ACCESS_KEY_FILE: "${HOUFENG_ATTACHMENT_S3_ACCESS_KEY_FILE:-}"
+      HOUFENG_ATTACHMENT_S3_SECRET_KEY_FILE: "${HOUFENG_ATTACHMENT_S3_SECRET_KEY_FILE:-}"
+      HOUFENG_ATTACHMENT_S3_BUCKET: "${HOUFENG_ATTACHMENT_S3_BUCKET:-}"
+      HOUFENG_ATTACHMENT_S3_SECURE: "${HOUFENG_ATTACHMENT_S3_SECURE:-true}"
+      HOUFENG_CLAMAV_NETWORK: tcp
+      HOUFENG_CLAMAV_ADDRESS: clamav:3310
+      HOUFENG_CLAMAV_DIAL_TIMEOUT: 5s
+      HOUFENG_CLAMAV_OPERATION_TIMEOUT: 2m
+      HOUFENG_CLAMAV_CHUNK_SIZE: "65536"
+      HOUFENG_CLAMAV_RESPONSE_LIMIT: "4096"
+      HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS: "3"
+      HOUFENG_TELEGRAM_BOT_TOKEN: "${HOUFENG_TELEGRAM_BOT_TOKEN:-}"
+      HOUFENG_TELEGRAM_CHAT_ID: "${HOUFENG_TELEGRAM_CHAT_ID:-}"
+    healthcheck:
+      test: ["CMD-SHELL", "health_host=$${HOUFENG_PUBLIC_BASE_URL#*://}; health_host=$${health_host%%/*}; curl --fail --silent --show-error --header \"Host: $${health_host}\" http://127.0.0.1:16001/api/healthz >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     volumes:
-      - houfeng_logs:/var/log/houfeng
-      - houfeng_blobs:/var/lib/houfeng/attachments
+      - ./data/attachments:/var/lib/houfeng/attachments
+      - ./data/logs:/var/log/houfeng
+      - ./data/center-config:/run/houfeng/records-authority:ro
+      - ./optional-secrets/comparison-keyring:/run/houfeng/optional-secrets/comparison-keyring:ro
+      - ./optional-secrets/s3:/run/houfeng/optional-secrets/s3:ro
     secrets:
-      - houfeng_database_password
+      - houfeng_runtime_password
+      - houfeng_initial_password
+      - houfeng_session_hmac_key
+    networks:
+      default:
+      houfeng-proxy:
+        aliases:
+          - houfeng
 
   houfeng-content-processor:
-    image: linnea7171/houfeng:latest
+    image: "${HOUFENG_IMAGE:?set HOUFENG_IMAGE in .env}"
     command: ["/usr/local/bin/houfeng-content-processor"]
     user: "houfeng:houfeng"
     restart: unless-stopped
     depends_on:
+      houfeng-storage-init:
+        condition: service_completed_successfully
+      houfeng-secrets-init:
+        condition: service_completed_successfully
+      houfeng-db-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       clamav:
         condition: service_healthy
     environment:
-      HOUFENG_DATABASE_USER: "${HOUFENG_DATABASE_USER:?set HOUFENG_DATABASE_USER in docs/deploy/compose.env}"
-      HOUFENG_DATABASE_NAME: "${HOUFENG_DATABASE_NAME:-houfeng}"
-      HOUFENG_DATABASE_PASSWORD_FILE: /run/secrets/houfeng_database_password
+      HOUFENG_DATABASE_USER: houfeng_runtime
+      HOUFENG_DATABASE_NAME: houfeng
+      HOUFENG_DATABASE_PASSWORD_FILE: /run/secrets/houfeng_runtime_password
       HOUFENG_ATTACHMENT_BLOB_BACKEND: "${HOUFENG_ATTACHMENT_BLOB_BACKEND:-local}"
-      HOUFENG_ATTACHMENT_BLOB_ROOT: "${HOUFENG_ATTACHMENT_BLOB_ROOT:-/var/lib/houfeng/attachments}"
-      HOUFENG_CLAMAV_NETWORK: "${HOUFENG_CLAMAV_NETWORK:-tcp}"
-      HOUFENG_CLAMAV_ADDRESS: "${HOUFENG_CLAMAV_ADDRESS:-clamav:3310}"
-      HOUFENG_CLAMAV_DIAL_TIMEOUT: "${HOUFENG_CLAMAV_DIAL_TIMEOUT:-5s}"
-      HOUFENG_CLAMAV_OPERATION_TIMEOUT: "${HOUFENG_CLAMAV_OPERATION_TIMEOUT:-2m}"
-      HOUFENG_CLAMAV_CHUNK_SIZE: "${HOUFENG_CLAMAV_CHUNK_SIZE:-65536}"
-      HOUFENG_CLAMAV_RESPONSE_LIMIT: "${HOUFENG_CLAMAV_RESPONSE_LIMIT:-4096}"
+      HOUFENG_ATTACHMENT_BLOB_ROOT: /var/lib/houfeng/attachments
+      HOUFENG_ATTACHMENT_S3_ENDPOINT: "${HOUFENG_ATTACHMENT_S3_ENDPOINT:-}"
+      HOUFENG_ATTACHMENT_S3_ACCESS_KEY_FILE: "${HOUFENG_ATTACHMENT_S3_ACCESS_KEY_FILE:-}"
+      HOUFENG_ATTACHMENT_S3_SECRET_KEY_FILE: "${HOUFENG_ATTACHMENT_S3_SECRET_KEY_FILE:-}"
+      HOUFENG_ATTACHMENT_S3_BUCKET: "${HOUFENG_ATTACHMENT_S3_BUCKET:-}"
+      HOUFENG_ATTACHMENT_S3_SECURE: "${HOUFENG_ATTACHMENT_S3_SECURE:-true}"
+      HOUFENG_CLAMAV_NETWORK: tcp
+      HOUFENG_CLAMAV_ADDRESS: clamav:3310
+      HOUFENG_CLAMAV_DIAL_TIMEOUT: 5s
+      HOUFENG_CLAMAV_OPERATION_TIMEOUT: 2m
+      HOUFENG_CLAMAV_CHUNK_SIZE: "65536"
+      HOUFENG_CLAMAV_RESPONSE_LIMIT: "4096"
       HOUFENG_CONTENT_PROCESSOR_WORKSPACE_ROOT: /var/lib/houfeng/processor-workspace
       HOUFENG_CONTENT_PROCESSOR_OWNER_ID: compose-processor
-      HOUFENG_CONTENT_PROCESSOR_LEASE_DURATION: "${HOUFENG_CONTENT_PROCESSOR_LEASE_DURATION:-5m}"
-      HOUFENG_CONTENT_PROCESSOR_CLEANUP_TIMEOUT: "${HOUFENG_CONTENT_PROCESSOR_CLEANUP_TIMEOUT:-30s}"
-      HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_ITEMS: "${HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_ITEMS:-100}"
-      HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_RUNTIME: "${HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_RUNTIME:-30s}"
-      HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_RETRY_DELAY: "${HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_RETRY_DELAY:-1s}"
-      HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS: "${HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS:-3}"
-      HOUFENG_CONTENT_PROCESSOR_JOB_TTL: "${HOUFENG_CONTENT_PROCESSOR_JOB_TTL:-24h}"
+      HOUFENG_CONTENT_PROCESSOR_LEASE_DURATION: 5m
+      HOUFENG_CONTENT_PROCESSOR_CLEANUP_TIMEOUT: 30s
+      HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_ITEMS: "100"
+      HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_MAX_RUNTIME: 30s
+      HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_RETRY_DELAY: 1s
+      HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS: "3"
+      HOUFENG_CONTENT_PROCESSOR_JOB_TTL: 24h
       HOUFENG_PDFINFO_BINARY: /usr/bin/pdfinfo
       HOUFENG_PDFTOPPM_BINARY: /usr/bin/pdftoppm
     read_only: true
@@ -79,50 +274,25 @@ services:
     tmpfs:
       - /var/lib/houfeng/processor-workspace:rw,noexec,nosuid,nodev,size=536870912,mode=0700,uid=10001,gid=10001
     volumes:
-      - houfeng_blobs:/var/lib/houfeng/attachments
-    secrets:
-      - houfeng_database_password
+      - ./data/attachments:/var/lib/houfeng/attachments
+      - ./optional-secrets/s3:/run/houfeng/optional-secrets/s3:ro
+      - ./data/secrets/processor:/run/secrets:ro
 
-  clamav:
-    image: clamav/clamav:1.4.3
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 60s
-    volumes:
-      - clamav_data:/var/lib/clamav
-
-  db:
-    image: postgres:16.12
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: "${POSTGRES_BOOTSTRAP_USER:?set POSTGRES_BOOTSTRAP_USER in docs/deploy/compose.env}"
-      POSTGRES_DB: "${HOUFENG_DATABASE_NAME:-houfeng}"
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_bootstrap_password
-      HOUFENG_DATABASE_USER: "${HOUFENG_DATABASE_USER:?set HOUFENG_DATABASE_USER in docs/deploy/compose.env}"
-      HOUFENG_DATABASE_PASSWORD_FILE: /run/secrets/houfeng_database_password
-    volumes:
-      - ./data/postgres:/var/lib/postgresql/data
-    secrets:
-      - postgres_bootstrap_password
-      - houfeng_database_password
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
-volumes:
-  houfeng_logs:
-  houfeng_blobs:
-  clamav_data:
+networks:
+  houfeng-proxy:
+    external: true
+    name: "${HOUFENG_PROXY_NETWORK:?set HOUFENG_PROXY_NETWORK in .env}"
 
 secrets:
   postgres_bootstrap_password:
-    file: "${POSTGRES_BOOTSTRAP_PASSWORD_FILE:?set POSTGRES_BOOTSTRAP_PASSWORD_FILE in docs/deploy/compose.env}"
-  houfeng_database_password:
-    file: "${HOUFENG_DATABASE_PASSWORD_FILE:?set HOUFENG_DATABASE_PASSWORD_FILE in docs/deploy/compose.env}"
+    environment: "${POSTGRES_BOOTSTRAP_PASSWORD:+POSTGRES_BOOTSTRAP_PASSWORD}"
+  houfeng_runtime_password:
+    environment: "${HOUFENG_RUNTIME_PASSWORD:+HOUFENG_RUNTIME_PASSWORD}"
+  houfeng_platform_admin_password:
+    environment: "${HOUFENG_PLATFORM_ADMIN_PASSWORD:+HOUFENG_PLATFORM_ADMIN_PASSWORD}"
+  houfeng_migrator_password:
+    environment: "${HOUFENG_MIGRATOR_PASSWORD:+HOUFENG_MIGRATOR_PASSWORD}"
+  houfeng_initial_password:
+    environment: "${HOUFENG_INITIAL_PASSWORD:+HOUFENG_INITIAL_PASSWORD}"
+  houfeng_session_hmac_key:
+    environment: "${HOUFENG_SESSION_HMAC_KEY:+HOUFENG_SESSION_HMAC_KEY}"

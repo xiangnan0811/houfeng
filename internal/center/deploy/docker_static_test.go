@@ -1,7 +1,7 @@
 package deploy_test
 
 import (
-	"bytes"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,12 +67,75 @@ func TestDockerEntrypointDoesNotRequireCenterSecretsForProcessor(t *testing.T) {
 	}
 }
 
+func TestDockerEntrypointRequiresHTTPSOnlyForProductionCompose(t *testing.T) {
+	base := map[string]string{
+		"HOUFENG_DATABASE_USER":     "houfeng_runtime",
+		"HOUFENG_DATABASE_NAME":     "houfeng",
+		"HOUFENG_DATABASE_PASSWORD": "runtime-secret",
+	}
+
+	productionHTTP := maps.Clone(base)
+	productionHTTP["HOUFENG_REQUIRE_HTTPS_PUBLIC_BASE_URL"] = "true"
+	productionHTTP["HOUFENG_PUBLIC_BASE_URL"] = "http://center.example.com"
+	result := runDockerEntrypoint(t, productionHTTP, "", 0)
+	if result.err == nil || result.childRan {
+		t.Fatalf("production Compose HTTP origin unexpectedly ran child; output:\n%s", result.output)
+	}
+	if !strings.Contains(result.output, "production Compose requires an https:// HOUFENG_PUBLIC_BASE_URL") {
+		t.Fatalf("production Compose HTTP rejection = %q", result.output)
+	}
+
+	productionHTTPS := maps.Clone(base)
+	productionHTTPS["HOUFENG_REQUIRE_HTTPS_PUBLIC_BASE_URL"] = "true"
+	productionHTTPS["HOUFENG_PUBLIC_BASE_URL"] = "https://center.example.com"
+	result = runDockerEntrypoint(t, productionHTTPS, "", 0)
+	if result.err != nil || !result.childRan {
+		t.Fatalf("production Compose HTTPS origin did not run child: %v\n%s", result.err, result.output)
+	}
+
+	localHTTP := maps.Clone(base)
+	localHTTP["HOUFENG_PUBLIC_BASE_URL"] = "http://127.0.0.1:8080"
+	result = runDockerEntrypoint(t, localHTTP, "", 0)
+	if result.err != nil || !result.childRan {
+		t.Fatalf("direct local HTTP path was affected by Compose-only preflight: %v\n%s", result.err, result.output)
+	}
+}
+
+func TestProductionComposeIncludesBoundedOneShotInitializers(t *testing.T) {
+	t.Parallel()
+
+	compose := readText(t, filepath.Join(repoRoot(t), "compose.yaml"))
+	storageInit := composeServiceBlock(t, compose, "houfeng-storage-init")
+	databaseInit := composeServiceBlock(t, compose, "houfeng-db-init")
+	houfeng := composeServiceBlock(t, compose, "houfeng")
+	processor := composeServiceBlock(t, compose, "houfeng-content-processor")
+
+	for service, block := range map[string]string{
+		"houfeng-storage-init": storageInit,
+		"houfeng-db-init":      databaseInit,
+	} {
+		if !strings.Contains(block, `restart: "no"`) {
+			t.Fatalf("%s must be a bounded one-shot service with restart disabled:\n%s", service, block)
+		}
+	}
+
+	for service, block := range map[string]string{
+		"houfeng":                   houfeng,
+		"houfeng-content-processor": processor,
+	} {
+		if !strings.Contains(block, "houfeng-storage-init:\n        condition: service_completed_successfully") {
+			t.Fatalf("%s must wait for successful storage initialization:\n%s", service, block)
+		}
+		if !strings.Contains(block, "houfeng-db-init:\n        condition: service_completed_successfully") {
+			t.Fatalf("%s must wait for successful database initialization:\n%s", service, block)
+		}
+	}
+}
+
 func TestAttachmentRuntimeDeploymentIsPersistentAndIsolated(t *testing.T) {
 	root := repoRoot(t)
 	dockerfile := readText(t, filepath.Join(root, "Dockerfile"))
 	compose := readText(t, filepath.Join(root, "compose.yaml"))
-	envExample := readText(t, filepath.Join(root, "docs", "deploy", "compose.env.example"))
-	guide := readText(t, filepath.Join(root, "docs", "deploy", "local-and-systemd.md"))
 	processorUnit := readText(t, filepath.Join(root, "docs", "deploy", "systemd", "houfeng-content-processor.service"))
 
 	for _, required := range []string{
@@ -90,7 +153,7 @@ func TestAttachmentRuntimeDeploymentIsPersistentAndIsolated(t *testing.T) {
 	clamav := composeServiceBlock(t, compose, "clamav")
 	for _, block := range []string{center, processor} {
 		for _, required := range []string{
-			"houfeng_blobs:/var/lib/houfeng/attachments",
+			"./data/attachments:/var/lib/houfeng/attachments",
 			"HOUFENG_ATTACHMENT_BLOB_BACKEND",
 			"HOUFENG_ATTACHMENT_BLOB_ROOT",
 		} {
@@ -128,30 +191,6 @@ func TestAttachmentRuntimeDeploymentIsPersistentAndIsolated(t *testing.T) {
 	if strings.Contains(clamav, "clamav/clamav:latest") {
 		t.Fatal("ClamAV image must use a pinned version, not latest")
 	}
-	if !strings.Contains(compose, "\n  houfeng_blobs:\n") {
-		t.Fatal("compose.yaml must declare the persistent houfeng_blobs volume")
-	}
-
-	for _, required := range []string{
-		"HOUFENG_ATTACHMENT_BLOB_BACKEND=local",
-		"HOUFENG_ATTACHMENT_BLOB_ROOT=/var/lib/houfeng/attachments",
-		"HOUFENG_CLAMAV_NETWORK=tcp",
-		"HOUFENG_CLAMAV_ADDRESS=clamav:3310",
-		"HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS=3",
-	} {
-		if !strings.Contains(envExample, required) {
-			t.Fatalf("compose.env.example must contain explicit attachment setting %q", required)
-		}
-	}
-	for _, forbidden := range []string{"HOUFENG_ATTACHMENT_S3_ACCESS_KEY=", "HOUFENG_ATTACHMENT_S3_SECRET_KEY="} {
-		if strings.Contains(envExample, forbidden) {
-			t.Fatalf("tracked env example must not contain S3 credential value carrier %q", forbidden)
-		}
-	}
-	if !strings.Contains(guide, "development/conformance topology") || !strings.Contains(guide, "independent production recovery domain") {
-		t.Fatal("deployment guide must bound Compose attachment storage to development/conformance and avoid production recovery claims")
-	}
-
 	for _, required := range []string{
 		"User=houfeng",
 		"Group=houfeng",
@@ -346,40 +385,9 @@ func TestDockerEntrypointExecutesActualScriptWithValidatedDatabaseInputs(t *test
 	}
 }
 
-func TestComposeApplicationRoleRejectsExistingMembershipBeforeMutation(t *testing.T) {
-	root := repoRoot(t)
-	applicationRoleSQL := readText(t, filepath.Join(root, "docs", "deploy", "compose-application-role.sql"))
-
-	membershipGuard := strings.Index(applicationRoleSQL, "pg_catalog.pg_auth_members")
-	if membershipGuard < 0 {
-		t.Fatal("Compose application-role provisioning must inspect pg_auth_members before mutating an existing role")
-	}
-	for _, required := range []string{
-		`\set ON_ERROR_STOP on`,
-		"RAISE EXCEPTION 'Houfeng application role must not have direct or recursive role membership'",
-	} {
-		if !strings.Contains(applicationRoleSQL, required) {
-			t.Fatalf("Compose application-role membership drift must make psql fail through %q", required)
-		}
-	}
-	if strings.Contains(applicationRoleSQL, `\quit`) {
-		t.Fatal("Compose application-role membership drift must not rely on psql \\quit accepting an exit-status argument")
-	}
-	for _, mutation := range []string{"'ALTER ROLE %I", "'ALTER DATABASE %I OWNER TO %I"} {
-		mutationOffset := strings.Index(applicationRoleSQL, mutation)
-		if mutationOffset < 0 {
-			t.Fatalf("Compose application-role provisioning must contain %q", mutation)
-		}
-		if membershipGuard > mutationOffset {
-			t.Fatalf("Compose application-role membership guard must precede %q", mutation)
-		}
-	}
-}
-
 func TestAppACLR2PreR1ProvisioningRevokesPGControlSystemFromPublic(t *testing.T) {
 	root := repoRoot(t)
 	provisioning := readText(t, filepath.Join(root, "docs", "deploy", "app-acl-r2-pre-r1-provisioning.sql"))
-	guide := readText(t, filepath.Join(root, "docs", "deploy", "local-and-systemd.md"))
 	runtimeReader := readText(t, filepath.Join(root, "internal", "center", "store", "migrate", "app_acl_r2_receipt_postgres.go"))
 
 	for _, required := range []string{
@@ -400,136 +408,8 @@ func TestAppACLR2PreR1ProvisioningRevokesPGControlSystemFromPublic(t *testing.T)
 			t.Fatalf("APP ACL R2 pre-R1 provisioning SQL must not depend on migration %q", forbidden)
 		}
 	}
-	for _, required := range []string{
-		"scripts/compose-up.sh docs/deploy/compose.env",
-		"docs/deploy/app-acl-r2-pre-r1-provisioning.sql",
-	} {
-		if !strings.Contains(guide, required) {
-			t.Fatalf("deployment guide must contain pre-R1 provisioning step %q", required)
-		}
-	}
-	if strings.Contains(guide, "psql -X -v ON_ERROR_STOP=1 -U houfeng -d houfeng") {
-		t.Fatal("deployment guide must not provision with the Houfeng application principal")
-	}
 	if strings.Contains(strings.ToUpper(runtimeReader), "REVOKE EXECUTE ON FUNCTION PG_CATALOG.PG_CONTROL_SYSTEM") {
 		t.Fatal("APP ACL R2 runtime catalog reader must not repair pg_control_system() privileges")
-	}
-}
-
-func TestComposeSeparatesBootstrapAndApplicationDatabasePrincipals(t *testing.T) {
-	root := repoRoot(t)
-	compose := readText(t, filepath.Join(root, "compose.yaml"))
-	envExample := readText(t, filepath.Join(root, "docs", "deploy", "compose.env.example"))
-	entrypoint := readText(t, filepath.Join(root, "scripts", "docker-entrypoint.sh"))
-	applicationRoleSQL := readText(t, filepath.Join(root, "docs", "deploy", "compose-application-role.sql"))
-
-	bootstrapUser := dotenvValue(t, envExample, "POSTGRES_BOOTSTRAP_USER")
-	applicationUser := dotenvValue(t, envExample, "HOUFENG_DATABASE_USER")
-	if bootstrapUser == applicationUser {
-		t.Fatalf("Compose bootstrap principal %q must differ from application principal", bootstrapUser)
-	}
-
-	for _, required := range []string{
-		"image: postgres:16.12",
-		`POSTGRES_USER: "${POSTGRES_BOOTSTRAP_USER`,
-		`HOUFENG_DATABASE_USER: "${HOUFENG_DATABASE_USER`,
-		"POSTGRES_PASSWORD_FILE: /run/secrets/postgres_bootstrap_password",
-		"HOUFENG_DATABASE_PASSWORD_FILE: /run/secrets/houfeng_database_password",
-	} {
-		if !strings.Contains(compose, required) {
-			t.Fatalf("compose.yaml must wire distinct database identities through %q", required)
-		}
-	}
-	if strings.Contains(compose, "POSTGRES_USER: houfeng") {
-		t.Fatal("compose.yaml must not initialize the application principal as the PostgreSQL bootstrap superuser")
-	}
-	if strings.Contains(compose, "image: postgres:16-alpine") {
-		t.Fatal("compose.yaml must pin PostgreSQL to an APP ACL R2 allowlisted image")
-	}
-	dbServiceOffset := strings.Index(compose, "\n  db:\n")
-	if dbServiceOffset < 0 {
-		t.Fatal("compose.yaml must define the db service after the Houfeng service")
-	}
-	houfengService := compose[:dbServiceOffset]
-	if !strings.Contains(houfengService, "\n      - houfeng_database_password\n") {
-		t.Fatal("Houfeng service must mount the application database password secret")
-	}
-	if strings.Contains(houfengService, "postgres_bootstrap_password") {
-		t.Fatal("Houfeng service must not receive the PostgreSQL bootstrap password secret")
-	}
-	for _, required := range []string{
-		"${HOUFENG_DATABASE_USER:-}",
-		"${HOUFENG_DATABASE_NAME:-}",
-		"${HOUFENG_DATABASE_PASSWORD_FILE:-}",
-	} {
-		if !strings.Contains(entrypoint, required) {
-			t.Fatalf("docker entrypoint must assemble the application DSN from %q", required)
-		}
-	}
-	if strings.Contains(entrypoint, "$POSTGRES_PASSWORD") {
-		t.Fatal("Houfeng entrypoint must not reuse the PostgreSQL bootstrap password")
-	}
-	for _, required := range []string{
-		"CREATE ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L",
-		"ALTER ROLE %I WITH LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L",
-		"ALTER DATABASE %I OWNER TO %I",
-	} {
-		if !strings.Contains(applicationRoleSQL, required) {
-			t.Fatalf("Compose application-role provisioning must contain %q", required)
-		}
-	}
-}
-
-func TestComposeQuickStartWaitsForReadinessBeforeProvisioning(t *testing.T) {
-	result := runComposeBootstrap(t, "")
-	if result.err != nil {
-		t.Fatalf("Compose quick-start failed: %v\n%s", result.err, result.output)
-	}
-	const wantEvents = "up-db\nready\nready-query\nidentity\nprovision\napp-role\nup-houfeng\n"
-	if result.events != wantEvents {
-		t.Fatalf("Compose quick-start events = %q, want readiness and provisioning before application startup %q", result.events, wantEvents)
-	}
-}
-
-func TestComposeQuickStartStopsBeforeHoufengOnReadinessOrProvisioningFailure(t *testing.T) {
-	tests := []struct {
-		failure    string
-		wantEvents string
-	}{
-		{failure: "readiness", wantEvents: "up-db\nready\n"},
-		{failure: "readiness-query", wantEvents: "up-db\nready\nready-query\n"},
-		{failure: "identity", wantEvents: "up-db\nready\nready-query\nidentity\n"},
-		{failure: "provision", wantEvents: "up-db\nready\nready-query\nidentity\nprovision\n"},
-		{failure: "app-role", wantEvents: "up-db\nready\nready-query\nidentity\nprovision\napp-role\n"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.failure, func(t *testing.T) {
-			result := runComposeBootstrap(t, tt.failure)
-			if result.err == nil {
-				t.Fatalf("Compose quick-start unexpectedly succeeded after %s failure", tt.failure)
-			}
-			if result.events != tt.wantEvents {
-				t.Fatalf("Compose quick-start events after %s failure = %q, want %q", tt.failure, result.events, tt.wantEvents)
-			}
-			if strings.Contains(result.events, "up-houfeng\n") {
-				t.Fatalf("Compose quick-start started Houfeng after %s failure; events: %q", tt.failure, result.events)
-			}
-		})
-	}
-}
-
-func TestComposeUsesNamedLogVolumeForNonRootContainer(t *testing.T) {
-	root := repoRoot(t)
-	compose := readText(t, filepath.Join(root, "compose.yaml"))
-
-	if strings.Contains(compose, "./data/logs:/var/log/houfeng") {
-		t.Fatal("compose.yaml must not bind-mount ./data/logs over the non-root image log directory")
-	}
-	if !strings.Contains(compose, "houfeng_logs:/var/log/houfeng") {
-		t.Fatal("compose.yaml must mount the named houfeng_logs volume at /var/log/houfeng")
-	}
-	if !strings.Contains(compose, "\nvolumes:\n  houfeng_logs:\n") {
-		t.Fatal("compose.yaml must declare the houfeng_logs named volume")
 	}
 }
 
@@ -608,28 +488,6 @@ func composeServiceBlock(t *testing.T, body, service string) string {
 	return marker + strings.Join(lines[:end], "\n")
 }
 
-func dotenvValue(t *testing.T, body, key string) string {
-	t.Helper()
-	prefix := key + "="
-	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(line, prefix) {
-			value := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-			if value == "" {
-				t.Fatalf("%s must not be empty in compose.env.example", key)
-			}
-			return value
-		}
-	}
-	t.Fatalf("compose.env.example must define %s", key)
-	return ""
-}
-
-type composeBootstrapResult struct {
-	events string
-	output string
-	err    error
-}
-
 type dockerEntrypointResult struct {
 	childRan    bool
 	databaseURL string
@@ -695,90 +553,4 @@ printf '%s' "$HOUFENG_DATABASE_URL" >"$HOUFENG_ENTRYPOINT_CHILD_DATABASE_URL"
 		output:      string(output),
 		err:         err,
 	}
-}
-
-func runComposeBootstrap(t *testing.T, failure string) composeBootstrapResult {
-	t.Helper()
-	root := repoRoot(t)
-	tempDir := t.TempDir()
-	eventsPath := filepath.Join(tempDir, "events")
-	fakeDocker := filepath.Join(tempDir, "docker")
-	const fakeDockerBody = `#!/bin/sh
-set -eu
-
-args=$*
-case "$args" in
-  *"up -d db"*)
-    printf '%s\n' up-db >>"$FAKE_DOCKER_EVENTS"
-    ;;
-  *pg_isready*)
-    printf '%s\n' ready >>"$FAKE_DOCKER_EVENTS"
-    if [ "${FAKE_DOCKER_FAILURE:-}" = readiness ]; then
-      exit 1
-    fi
-    ;;
-  *psql*"select 1"*)
-    printf '%s\n' ready-query >>"$FAKE_DOCKER_EVENTS"
-    if [ "${FAKE_DOCKER_FAILURE:-}" = readiness-query ]; then
-      exit 1
-    fi
-    ;;
-  *"principals must differ"*)
-    printf '%s\n' identity >>"$FAKE_DOCKER_EVENTS"
-    if [ "${FAKE_DOCKER_FAILURE:-}" = identity ]; then
-      exit 1
-    fi
-    ;;
-  *psql*)
-    input=$(cat)
-    case "$input" in
-      *"REVOKE EXECUTE ON FUNCTION pg_catalog.pg_control_system() FROM PUBLIC;"*)
-        printf '%s\n' provision >>"$FAKE_DOCKER_EVENTS"
-        if [ "${FAKE_DOCKER_FAILURE:-}" = provision ]; then
-          exit 1
-        fi
-        ;;
-      *"CREATE ROLE"*)
-        printf '%s\n' app-role >>"$FAKE_DOCKER_EVENTS"
-        if [ "${FAKE_DOCKER_FAILURE:-}" = app-role ]; then
-          exit 1
-        fi
-        ;;
-      *)
-        printf '%s\n' unknown-psql >>"$FAKE_DOCKER_EVENTS"
-        exit 1
-        ;;
-    esac
-    ;;
-  *"up -d houfeng"*)
-    printf '%s\n' up-houfeng >>"$FAKE_DOCKER_EVENTS"
-    ;;
-esac
-`
-	if err := os.WriteFile(fakeDocker, []byte(fakeDockerBody), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
-	}
-
-	command := exec.Command(
-		"/bin/sh",
-		filepath.Join(root, "scripts", "compose-up.sh"),
-		filepath.Join(root, "docs", "deploy", "compose.env.example"),
-	)
-	command.Dir = root
-	command.Env = append(os.Environ(),
-		"PATH="+tempDir+":"+os.Getenv("PATH"),
-		"FAKE_DOCKER_EVENTS="+eventsPath,
-		"FAKE_DOCKER_FAILURE="+failure,
-		"HOUFENG_COMPOSE_DB_READY_MAX_ATTEMPTS=1",
-		"HOUFENG_COMPOSE_DB_READY_INTERVAL_SECONDS=0",
-	)
-	var output bytes.Buffer
-	command.Stdout = &output
-	command.Stderr = &output
-	err := command.Run()
-	events, readErr := os.ReadFile(eventsPath)
-	if readErr != nil && !os.IsNotExist(readErr) {
-		t.Fatalf("read fake docker events: %v", readErr)
-	}
-	return composeBootstrapResult{events: string(events), output: output.String(), err: err}
 }
