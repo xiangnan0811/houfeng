@@ -1,0 +1,16 @@
+{"file":".trellis/tasks/08-24-production-compose-deployment/prd.md","reason":"Approved production deployment requirements and acceptance criteria."}
+{"file":".trellis/tasks/08-24-production-compose-deployment/design.md","reason":"Service graph, initialization, configuration, NPM, portability, and verification design."}
+{"file":".trellis/tasks/08-24-production-compose-deployment/implement.md","reason":"TDD execution phases and stop conditions."}
+{"file":".trellis/tasks/08-24-production-compose-deployment/research/deployment-baseline.md","reason":"Current deployment/runtime facts and chosen architecture."}
+{"file":".trellis/tasks/08-24-production-compose-deployment/research/records-authority.md","reason":"Confirmed admission blocker, rejected shortcuts, and approved single-host authority boundaries."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Authoritative image, Compose, release, and deployment contract that must be updated."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Current Records APP writer, role, and runtime-admission contract."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Required deterministic, integration, and no-false-green verification."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Safe deploy-init diagnostics and secret redaction."}
+{"file":".trellis/spec/backend/record-integration-contract.md","reason":"Records, processor, scanner, and integration requirements."}
+{"file":"internal/center/store/record_admission_gate.go","reason":"Exact production membership and active-contract admission checks the authority must satisfy."}
+{"file":"internal/center/recordplatform/projection_command.go","reason":"Canonical existing activation projection codec to reuse after signed-ledger verification."}
+{"file":"cmd/houfeng-center/bootstrap.go","reason":"Production admission-gate construction and new deployment-ID file configuration seam."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse current migration and configuration authority instead of parallel implementations."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Coordinate image, database, Compose, docs, and release data flow."}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"Non-main worktree and protected delivery rules."}

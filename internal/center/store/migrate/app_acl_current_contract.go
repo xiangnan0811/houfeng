@@ -9,6 +9,7 @@ import (
 
 const appACLCurrentR1BoundaryMigration = "0051_create_record_platform_foundation.sql"
 const appACLCurrentValidationDatabase = "app_acl_current_validation"
+const recordsAuthorityCatalogRole = "houfeng_records_authority"
 
 type AppACLCurrentFunctionContract struct {
 	SchemaName      string
@@ -18,11 +19,25 @@ type AppACLCurrentFunctionContract struct {
 	Config          []string
 }
 
+// AppACLCurrentAuxiliaryPrivilege describes a grant to a fixed-purpose role
+// outside the frozen runtime/admin privilege body. Auxiliary grants are still
+// part of the current catalog contract, but they never alter the canonical r1
+// application privilege-set representation.
+type AppACLCurrentAuxiliaryPrivilege struct {
+	CatalogRole    string
+	ObjectClass    AppACLObjectClass
+	SchemaName     string
+	ObjectIdentity string
+	Privilege      AppACLPrivilegeKind
+	GrantOption    bool
+}
+
 type AppACLCurrentMigrationFragment struct {
-	Migration  string
-	Objects    []AppACLManagedObjectR1
-	Privileges func(databaseName string) []AppACLPrivilege
-	Functions  []AppACLCurrentFunctionContract
+	Migration           string
+	Objects             []AppACLManagedObjectR1
+	Privileges          func(databaseName string) []AppACLPrivilege
+	AuxiliaryPrivileges []AppACLCurrentAuxiliaryPrivilege
+	Functions           []AppACLCurrentFunctionContract
 }
 
 var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
@@ -34,6 +49,47 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	recordActivityAppACLCurrentMigrationFragment(),
 	recordPortabilityAppACLCurrentMigrationFragment(),
 	recordPortabilityBlobKeyMuslAppACLCurrentMigrationFragment(),
+	recordsAuthorityAppACLCurrentMigrationFragment(),
+}
+
+func recordsAuthorityAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	const heartbeatIdentity = "record_platform_compose_membership_heartbeat(bytea)"
+	return AppACLCurrentMigrationFragment{
+		Migration: "0060_create_records_authority_heartbeat.sql",
+		Objects: []AppACLManagedObjectR1{{
+			ObjectClass:    AppACLObjectClassFunction,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: heartbeatIdentity,
+		}},
+		Privileges: func(string) []AppACLPrivilege { return nil },
+		AuxiliaryPrivileges: []AppACLCurrentAuxiliaryPrivilege{
+			{
+				CatalogRole:    recordsAuthorityCatalogRole,
+				ObjectClass:    AppACLObjectClassDatabase,
+				ObjectIdentity: appACLCurrentValidationDatabase,
+				Privilege:      AppACLPrivilegeConnect,
+			},
+			{
+				CatalogRole:    recordsAuthorityCatalogRole,
+				ObjectClass:    AppACLObjectClassSchema,
+				ObjectIdentity: appACLManagedPublicSchemaR1,
+				Privilege:      AppACLPrivilegeUsage,
+			},
+			{
+				CatalogRole:    recordsAuthorityCatalogRole,
+				ObjectClass:    AppACLObjectClassFunction,
+				ObjectIdentity: appACLManagedPublicSchemaR1 + "." + heartbeatIdentity,
+				Privilege:      AppACLPrivilegeExecute,
+			},
+		},
+		Functions: []AppACLCurrentFunctionContract{{
+			SchemaName:      appACLManagedPublicSchemaR1,
+			Identity:        heartbeatIdentity,
+			Kind:            "f",
+			SecurityDefiner: true,
+			Config:          []string{"search_path=pg_catalog"},
+		}},
+	}
 }
 
 func recordActivityAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -652,10 +708,11 @@ type appACLCurrentSourceContract struct {
 }
 
 type appACLCurrentCompiledMigrationFragment struct {
-	Migration  string
-	Objects    []AppACLManagedObjectR1
-	Privileges []AppACLPrivilege
-	Functions  []AppACLCurrentFunctionContract
+	Migration           string
+	Objects             []AppACLManagedObjectR1
+	Privileges          []AppACLPrivilege
+	AuxiliaryPrivileges []AppACLCurrentAuxiliaryPrivilege
+	Functions           []AppACLCurrentFunctionContract
 }
 
 func compileAppACLCurrentSourceContract(
@@ -718,10 +775,11 @@ func compileAppACLCurrentSourceContract(
 
 func cloneAppACLCurrentMigrationFragment(fragment AppACLCurrentMigrationFragment) AppACLCurrentMigrationFragment {
 	cloned := AppACLCurrentMigrationFragment{
-		Migration:  fragment.Migration,
-		Objects:    append([]AppACLManagedObjectR1(nil), fragment.Objects...),
-		Privileges: fragment.Privileges,
-		Functions:  append([]AppACLCurrentFunctionContract(nil), fragment.Functions...),
+		Migration:           fragment.Migration,
+		Objects:             append([]AppACLManagedObjectR1(nil), fragment.Objects...),
+		Privileges:          fragment.Privileges,
+		AuxiliaryPrivileges: append([]AppACLCurrentAuxiliaryPrivilege(nil), fragment.AuxiliaryPrivileges...),
+		Functions:           append([]AppACLCurrentFunctionContract(nil), fragment.Functions...),
 	}
 	for index := range cloned.Functions {
 		cloned.Functions[index].Config = append([]string(nil), cloned.Functions[index].Config...)
@@ -736,10 +794,11 @@ func compileAppACLCurrentMigrationFragment(
 		return appACLCurrentCompiledMigrationFragment{}, fmt.Errorf("current APP ACL fragment %q has no privilege compiler", fragment.Migration)
 	}
 	return appACLCurrentCompiledMigrationFragment{
-		Migration:  fragment.Migration,
-		Objects:    append([]AppACLManagedObjectR1(nil), fragment.Objects...),
-		Privileges: append([]AppACLPrivilege(nil), fragment.Privileges(appACLCurrentValidationDatabase)...),
-		Functions:  cloneAppACLCurrentFunctionContracts(fragment.Functions),
+		Migration:           fragment.Migration,
+		Objects:             append([]AppACLManagedObjectR1(nil), fragment.Objects...),
+		Privileges:          append([]AppACLPrivilege(nil), fragment.Privileges(appACLCurrentValidationDatabase)...),
+		AuxiliaryPrivileges: append([]AppACLCurrentAuxiliaryPrivilege(nil), fragment.AuxiliaryPrivileges...),
+		Functions:           cloneAppACLCurrentFunctionContracts(fragment.Functions),
 	}, nil
 }
 
@@ -793,6 +852,22 @@ func validateAppACLCurrentFragments(fragments []appACLCurrentCompiledMigrationFr
 	}
 	if _, err := canonicalPrivileges(privileges); err != nil {
 		return fmt.Errorf("validate current APP ACL fragment privileges: %w", err)
+	}
+	auxiliaryPrivileges := make([]AppACLCurrentAuxiliaryPrivilege, 0)
+	for _, fragment := range fragments {
+		for _, privilege := range fragment.AuxiliaryPrivileges {
+			object, err := appACLCurrentAuxiliaryManagedObject(privilege)
+			if err != nil {
+				return fmt.Errorf("current APP ACL fragment %q auxiliary privilege: %w", fragment.Migration, err)
+			}
+			if _, managed := managedObjects[object]; !managed {
+				return fmt.Errorf("current APP ACL fragment %q auxiliary privilege references unmanaged object %#v", fragment.Migration, object)
+			}
+			auxiliaryPrivileges = append(auxiliaryPrivileges, privilege)
+		}
+	}
+	if _, err := canonicalAppACLCurrentAuxiliaryPrivileges(auxiliaryPrivileges); err != nil {
+		return fmt.Errorf("validate current APP ACL fragment auxiliary privileges: %w", err)
 	}
 
 	hardenedFunctions := make(map[AppACLManagedObjectR1]struct{}, len(newFunctions))
@@ -940,6 +1015,11 @@ func compileAppACLCurrentCatalogContract(
 			return appACLEffectiveCatalogContract{}, fmt.Errorf("materialize current APP ACL fragment %q privileges: %w", fragment.Migration, err)
 		}
 		contract.Privileges = append(contract.Privileges, fragmentPrivileges...)
+		fragmentAuxiliaryPrivileges, err := appACLCurrentAuxiliaryPrivilegesForDatabase(fragment.AuxiliaryPrivileges, databaseName)
+		if err != nil {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("materialize current APP ACL fragment %q auxiliary privileges: %w", fragment.Migration, err)
+		}
+		contract.AuxiliaryPrivileges = append(contract.AuxiliaryPrivileges, fragmentAuxiliaryPrivileges...)
 		for _, function := range fragment.Functions {
 			contract.ExpectedFunctions = append(contract.ExpectedFunctions, appACLEffectiveCatalogFunctionContract{
 				SchemaName:      function.SchemaName,
@@ -962,6 +1042,20 @@ func compileAppACLCurrentCatalogContract(
 	}
 	contract.RoleBindings = append([]AppACLRoleBinding(nil), canonicalSet.RoleBindings...)
 	contract.Privileges = append([]AppACLPrivilege(nil), canonicalSet.Privileges...)
+	contract.AuxiliaryPrivileges, err = canonicalAppACLCurrentAuxiliaryPrivileges(contract.AuxiliaryPrivileges)
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonicalize current APP ACL auxiliary privileges: %w", err)
+	}
+	for _, privilege := range contract.AuxiliaryPrivileges {
+		if privilege.CatalogRole == migratorRole {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("current APP ACL auxiliary role reuses migrator role")
+		}
+		for _, binding := range contract.RoleBindings {
+			if privilege.CatalogRole == binding.CatalogRole {
+				return appACLEffectiveCatalogContract{}, fmt.Errorf("current APP ACL auxiliary role reuses application role")
+			}
+		}
+	}
 
 	contract.ManagedObjects, err = canonicalAppACLManagedObjects(contract.ManagedObjects)
 	if err != nil {
@@ -985,6 +1079,15 @@ func compileAppACLCurrentCatalogContract(
 			return appACLEffectiveCatalogContract{}, fmt.Errorf("current APP ACL privilege references unmanaged object %#v", object)
 		}
 	}
+	for _, privilege := range contract.AuxiliaryPrivileges {
+		object, err := appACLCurrentAuxiliaryManagedObject(privilege)
+		if err != nil {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("map current APP ACL auxiliary privilege to managed object: %w", err)
+		}
+		if _, ok := managed[object]; !ok {
+			return appACLEffectiveCatalogContract{}, fmt.Errorf("current APP ACL auxiliary privilege references unmanaged object %#v", object)
+		}
+	}
 	expectedFunctions := make(map[AppACLManagedObjectR1]struct{}, len(contract.ExpectedFunctions))
 	for _, function := range contract.ExpectedFunctions {
 		object := AppACLManagedObjectR1{
@@ -1003,6 +1106,77 @@ func compileAppACLCurrentCatalogContract(
 		}
 	}
 	return contract, nil
+}
+
+func appACLCurrentAuxiliaryManagedObject(privilege AppACLCurrentAuxiliaryPrivilege) (AppACLManagedObjectR1, error) {
+	if !validCatalogRoleName(privilege.CatalogRole) {
+		return AppACLManagedObjectR1{}, fmt.Errorf("invalid auxiliary catalog role")
+	}
+	if privilege.GrantOption {
+		return AppACLManagedObjectR1{}, fmt.Errorf("auxiliary privilege has grant option")
+	}
+	applicationPrivilege := AppACLPrivilege{
+		Subject:        AppACLSubjectCenterRuntime,
+		ObjectClass:    privilege.ObjectClass,
+		SchemaName:     privilege.SchemaName,
+		ObjectIdentity: privilege.ObjectIdentity,
+		Privilege:      privilege.Privilege,
+		GrantOption:    privilege.GrantOption,
+	}
+	return appACLCurrentManagedObjectFromPrivilege(applicationPrivilege)
+}
+
+func appACLCurrentAuxiliaryPrivilegesForDatabase(
+	template []AppACLCurrentAuxiliaryPrivilege,
+	databaseName string,
+) ([]AppACLCurrentAuxiliaryPrivilege, error) {
+	if !validBareCatalogName(databaseName) {
+		return nil, fmt.Errorf("invalid app ACL database name")
+	}
+	privileges := append([]AppACLCurrentAuxiliaryPrivilege(nil), template...)
+	for index := range privileges {
+		if privileges[index].ObjectClass == AppACLObjectClassDatabase &&
+			privileges[index].ObjectIdentity == appACLCurrentValidationDatabase {
+			privileges[index].ObjectIdentity = databaseName
+		}
+	}
+	return privileges, nil
+}
+
+func canonicalAppACLCurrentAuxiliaryPrivileges(
+	privileges []AppACLCurrentAuxiliaryPrivilege,
+) ([]AppACLCurrentAuxiliaryPrivilege, error) {
+	ordered := append([]AppACLCurrentAuxiliaryPrivilege(nil), privileges...)
+	for _, privilege := range ordered {
+		if _, err := appACLCurrentAuxiliaryManagedObject(privilege); err != nil {
+			return nil, err
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		left, right := ordered[i], ordered[j]
+		if left.CatalogRole != right.CatalogRole {
+			return left.CatalogRole < right.CatalogRole
+		}
+		if left.ObjectClass != right.ObjectClass {
+			return left.ObjectClass < right.ObjectClass
+		}
+		if left.SchemaName != right.SchemaName {
+			return left.SchemaName < right.SchemaName
+		}
+		if left.ObjectIdentity != right.ObjectIdentity {
+			return left.ObjectIdentity < right.ObjectIdentity
+		}
+		if left.Privilege != right.Privilege {
+			return left.Privilege < right.Privilege
+		}
+		return !left.GrantOption && right.GrantOption
+	})
+	for index := 1; index < len(ordered); index++ {
+		if ordered[index-1] == ordered[index] {
+			return nil, fmt.Errorf("duplicate auxiliary privilege tuple")
+		}
+	}
+	return ordered, nil
 }
 
 func appACLCurrentPrivilegesForDatabase(

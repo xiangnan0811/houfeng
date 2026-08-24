@@ -59,9 +59,26 @@ func (input appACLEffectiveCatalogVerifierInput) Validate() error {
 		!reflect.DeepEqual(input.Contract.Privileges, canonicalSet.Privileges) {
 		return fmt.Errorf("app ACL catalog contract is not canonical")
 	}
+	canonicalAuxiliary, err := canonicalAppACLCurrentAuxiliaryPrivileges(input.Contract.AuxiliaryPrivileges)
+	if err != nil {
+		return fmt.Errorf("canonicalize app ACL catalog auxiliary privileges: %w", err)
+	}
+	if !reflect.DeepEqual(input.Contract.AuxiliaryPrivileges, canonicalAuxiliary) {
+		return fmt.Errorf("app ACL catalog auxiliary privileges are not canonical")
+	}
 	for _, binding := range input.Contract.RoleBindings {
 		if binding.CatalogRole == input.MigratorRole {
 			return fmt.Errorf("app ACL migrator role reuses %s catalog role %q", binding.Subject, binding.CatalogRole)
+		}
+	}
+	for _, privilege := range input.Contract.AuxiliaryPrivileges {
+		if privilege.CatalogRole == input.MigratorRole {
+			return fmt.Errorf("app ACL auxiliary role reuses migrator role")
+		}
+		for _, binding := range input.Contract.RoleBindings {
+			if privilege.CatalogRole == binding.CatalogRole {
+				return fmt.Errorf("app ACL auxiliary role reuses application role")
+			}
 		}
 	}
 	managedObjects, err := canonicalAppACLManagedObjects(input.Contract.ManagedObjects)
@@ -89,6 +106,15 @@ func (input appACLEffectiveCatalogVerifierInput) Validate() error {
 		}
 		if _, ok := managed[object]; !ok {
 			return fmt.Errorf("app ACL privilege references unmanaged object %#v", object)
+		}
+	}
+	for _, privilege := range input.Contract.AuxiliaryPrivileges {
+		object, err := appACLCurrentAuxiliaryManagedObject(privilege)
+		if err != nil {
+			return fmt.Errorf("map app ACL auxiliary privilege to managed object: %w", err)
+		}
+		if _, ok := managed[object]; !ok {
+			return fmt.Errorf("app ACL auxiliary privilege references unmanaged object %#v", object)
 		}
 	}
 	for _, function := range input.Contract.ExpectedFunctions {
@@ -323,7 +349,7 @@ func verifyAppACLEffectiveCatalogSnapshot(
 		return err
 	}
 
-	roleStates := make(map[string]AppACLEffectiveCatalogRoleStateR1, 3)
+	roleStates := make(map[string]AppACLEffectiveCatalogRoleStateR1, 3+len(input.Contract.AuxiliaryPrivileges))
 	for _, role := range snapshot.Roles {
 		if _, exists := roleStates[role.Name]; exists {
 			return fmt.Errorf("app ACL catalog snapshot has duplicate role %q", role.Name)
@@ -350,6 +376,23 @@ func verifyAppACLEffectiveCatalogSnapshot(
 		role := roleStates[roleName]
 		if !role.Login || role.Inherit || role.Superuser || role.CreateDatabase || role.CreateRole || role.Replication || role.BypassRLS {
 			return fmt.Errorf("app ACL role %q must be LOGIN, NOINHERIT, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION, and NOBYPASSRLS", role.Name)
+		}
+	}
+	presentAuxiliaryRoles := make(map[string]struct{})
+	for _, privilege := range input.Contract.AuxiliaryPrivileges {
+		role, present := roleStates[privilege.CatalogRole]
+		if !present {
+			continue
+		}
+		presentAuxiliaryRoles[role.Name] = struct{}{}
+		if !role.Login || role.Inherit || role.Superuser || role.CreateDatabase || role.CreateRole || role.Replication || role.BypassRLS {
+			return fmt.Errorf("app ACL auxiliary role %q must be LOGIN, NOINHERIT, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION, and NOBYPASSRLS", role.Name)
+		}
+		if role.TemporaryObjects {
+			return fmt.Errorf("app ACL auxiliary role %q has TEMP privilege", role.Name)
+		}
+		if role.SchemaCreate {
+			return fmt.Errorf("app ACL auxiliary role %q has public schema CREATE privilege", role.Name)
 		}
 	}
 	if len(snapshot.Memberships) != 0 {
@@ -396,10 +439,10 @@ func verifyAppACLEffectiveCatalogSnapshot(
 	if err := verifyAppACLEffectiveCatalogFunctions(snapshot.Functions, input.Contract.ExpectedFunctions); err != nil {
 		return err
 	}
-	if err := verifyAppACLEffectiveCatalogPrivileges("direct", snapshot.DirectPrivileges, input.Contract); err != nil {
+	if err := verifyAppACLEffectiveCatalogPrivileges("direct", snapshot.DirectPrivileges, input.Contract, presentAuxiliaryRoles); err != nil {
 		return err
 	}
-	if err := verifyAppACLEffectiveCatalogPrivileges("effective", snapshot.EffectivePrivileges, input.Contract); err != nil {
+	if err := verifyAppACLEffectiveCatalogPrivileges("effective", snapshot.EffectivePrivileges, input.Contract, presentAuxiliaryRoles); err != nil {
 		return err
 	}
 	return nil
@@ -514,47 +557,73 @@ func verifyAppACLEffectiveCatalogPrivileges(
 	kind string,
 	observed []AppACLEffectiveCatalogPrivilegeObservationR1,
 	contract appACLEffectiveCatalogContract,
+	presentAuxiliaryRoles map[string]struct{},
 ) error {
 	bindings := make(map[string]AppACLSubject, len(contract.RoleBindings))
 	for _, binding := range contract.RoleBindings {
 		bindings[binding.CatalogRole] = binding.Subject
 	}
-	expected := make(map[AppACLPrivilege]struct{}, len(contract.Privileges))
-	for _, privilege := range contract.Privileges {
-		expected[privilege] = struct{}{}
+	knownRoles := make(map[string]struct{}, len(bindings)+len(contract.AuxiliaryPrivileges))
+	for role := range bindings {
+		knownRoles[role] = struct{}{}
 	}
-	actual := make(map[AppACLPrivilege]struct{}, len(observed))
+	for _, privilege := range contract.AuxiliaryPrivileges {
+		knownRoles[privilege.CatalogRole] = struct{}{}
+	}
+	expected := make(map[AppACLEffectiveCatalogPrivilegeObservationR1]struct{}, len(contract.Privileges)+len(contract.AuxiliaryPrivileges))
+	for _, privilege := range contract.Privileges {
+		role := ""
+		for candidate, subject := range bindings {
+			if subject == privilege.Subject {
+				role = candidate
+				break
+			}
+		}
+		expected[AppACLEffectiveCatalogPrivilegeObservationR1{
+			Grantee:        role,
+			ObjectClass:    privilege.ObjectClass,
+			SchemaName:     privilege.SchemaName,
+			ObjectIdentity: privilege.ObjectIdentity,
+			ColumnName:     privilege.ColumnName,
+			Privilege:      privilege.Privilege,
+			GrantOption:    privilege.GrantOption,
+		}] = struct{}{}
+	}
+	for _, privilege := range contract.AuxiliaryPrivileges {
+		if _, present := presentAuxiliaryRoles[privilege.CatalogRole]; !present {
+			continue
+		}
+		expected[AppACLEffectiveCatalogPrivilegeObservationR1{
+			Grantee:        privilege.CatalogRole,
+			ObjectClass:    privilege.ObjectClass,
+			SchemaName:     privilege.SchemaName,
+			ObjectIdentity: privilege.ObjectIdentity,
+			Privilege:      privilege.Privilege,
+			GrantOption:    privilege.GrantOption,
+		}] = struct{}{}
+	}
+	actual := make(map[AppACLEffectiveCatalogPrivilegeObservationR1]struct{}, len(observed))
 	for _, observation := range observed {
 		if observation.Grantee == appACLEffectiveCatalogPublicGranteeR1 {
 			return fmt.Errorf("PUBLIC has %s %s privilege on %s", kind, observation.Privilege, appACLEffectiveCatalogObjectLabel(observation.SchemaName, observation.ObjectIdentity))
 		}
-		subject, knownRole := bindings[observation.Grantee]
-		if !knownRole {
+		if _, knownRole := knownRoles[observation.Grantee]; !knownRole {
 			return fmt.Errorf("%s app ACL privilege has unknown grantee %q", kind, observation.Grantee)
 		}
 		if observation.GrantOption {
 			return fmt.Errorf("%s app ACL privilege has grant option for %q", kind, observation.Grantee)
 		}
-		privilege := AppACLPrivilege{
-			Subject:        subject,
-			ObjectClass:    observation.ObjectClass,
-			SchemaName:     observation.SchemaName,
-			ObjectIdentity: observation.ObjectIdentity,
-			ColumnName:     observation.ColumnName,
-			Privilege:      observation.Privilege,
-			GrantOption:    observation.GrantOption,
-		}
-		if _, wanted := expected[privilege]; !wanted {
+		if _, wanted := expected[observation]; !wanted {
 			return fmt.Errorf("unexpected %s app ACL privilege for %q on %s", kind, observation.Grantee, appACLEffectiveCatalogObjectLabel(observation.SchemaName, observation.ObjectIdentity))
 		}
-		if _, duplicate := actual[privilege]; duplicate {
+		if _, duplicate := actual[observation]; duplicate {
 			return fmt.Errorf("duplicate %s app ACL privilege for %q on %s", kind, observation.Grantee, appACLEffectiveCatalogObjectLabel(observation.SchemaName, observation.ObjectIdentity))
 		}
-		actual[privilege] = struct{}{}
+		actual[observation] = struct{}{}
 	}
 	for privilege := range expected {
 		if _, found := actual[privilege]; !found {
-			return fmt.Errorf("missing %s app ACL privilege for %s on %s", kind, privilege.Subject, appACLEffectiveCatalogObjectLabel(privilege.SchemaName, privilege.ObjectIdentity))
+			return fmt.Errorf("missing %s app ACL privilege for %q on %s", kind, privilege.Grantee, appACLEffectiveCatalogObjectLabel(privilege.SchemaName, privilege.ObjectIdentity))
 		}
 	}
 	return nil

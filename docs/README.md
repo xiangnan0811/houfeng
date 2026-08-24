@@ -5,13 +5,13 @@ This index keeps the current public/operator path separate from design reference
 ## Start here
 
 - `../README.md` — public project overview, quick start, components, verification commands, and documentation map.
-- `deploy/local-and-systemd.md` — canonical deployment guide for local, Docker Compose center, systemd center installs, and one-command Linux agent onboarding.
+- `deploy/local-and-systemd.md` — canonical guide for the full published-image production Compose stack, advanced direct/systemd center installs, and one-command Linux agent onboarding.
 - `operations/fresh-install-smoke-run.md` — fresh-install smoke run. The primary onboarding path is the center-generated one-command installer.
 - `design/current/README.md` — maintained design guidance and change rule.
 
 ## Current operator guides
 
-- `deploy/local-and-systemd.md` — build artifacts, center environment, Docker Compose center deployment (`houfeng` service on `127.0.0.1:16001`, `./data/postgres/`, `./data/logs/`, Release Please -> GitHub Release -> Docker image publishing), authentication, reverse proxy/TLS notes, systemd examples, generated install commands, checksum verification, and manual troubleshooting fallback.
+- `deploy/local-and-systemd.md` — release-asset Compose quick start, NPM external-network setup with no public host port, automatic storage/database initialization, Center/Web + Records processor + ClamAV + PostgreSQL, the portable `./data/` recovery unit, upgrades/rollbacks, authentication, advanced direct/systemd examples, and generated agent install commands.
 - `deploy/systemd/houfeng-center.service` — example center systemd unit.
 - `deploy/systemd/houfeng-agent.service` — example agent systemd unit for manual installs and reference.
 - `operations/fresh-install-smoke-run.md` — live PostgreSQL smoke path for center/auth/monitoring instance/agent/target/probe/incident/event checks.

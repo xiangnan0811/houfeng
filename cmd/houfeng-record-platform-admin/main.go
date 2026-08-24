@@ -10,28 +10,36 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	centerdeploy "houfeng/internal/center/deploy"
 	"houfeng/internal/center/platformmigrate"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/store/migrate"
 )
 
 var (
-	errInvalidAppMigrationInvocation        = errors.New("only migrate --scope app is supported")
-	errOpenAppMigratorPool                  = errors.New("open app migrator PostgreSQL connection failed")
-	errConvergeAppMigration                 = errors.New("converge app migration failed")
-	errInvalidAppACLR2BootstrapInvocation   = errors.New("only bootstrap --scope app-acl-r2 is supported")
-	errOpenAppACLR2BootstrapPool            = errors.New("open app ACL R2 bootstrap PostgreSQL connection failed")
-	errBootstrapAppACLR2                    = errors.New("bootstrap app ACL R2 failed")
-	errInvalidAppACLR2FinalizeInvocation    = errors.New("only finalize --scope app-acl-r2 is supported")
-	errInvalidAppACLR2FinalizeConfiguration = errors.New("app ACL R2 finalizer configuration is invalid")
-	errOpenAppACLR2FinalizePool             = errors.New("open app ACL R2 finalizer PostgreSQL connection failed")
-	errFinalizeAppACLR2                     = errors.New("finalize app ACL R2 failed")
+	errInvalidAppMigrationInvocation           = errors.New("only migrate --scope app is supported")
+	errOpenAppMigratorPool                     = errors.New("open app migrator PostgreSQL connection failed")
+	errConvergeAppMigration                    = errors.New("converge app migration failed")
+	errInvalidAppACLR2BootstrapInvocation      = errors.New("only bootstrap --scope app-acl-r2 is supported")
+	errOpenAppACLR2BootstrapPool               = errors.New("open app ACL R2 bootstrap PostgreSQL connection failed")
+	errBootstrapAppACLR2                       = errors.New("bootstrap app ACL R2 failed")
+	errInvalidAppACLR2FinalizeInvocation       = errors.New("only finalize --scope app-acl-r2 is supported")
+	errInvalidAppACLR2FinalizeConfiguration    = errors.New("app ACL R2 finalizer configuration is invalid")
+	errOpenAppACLR2FinalizePool                = errors.New("open app ACL R2 finalizer PostgreSQL connection failed")
+	errFinalizeAppACLR2                        = errors.New("finalize app ACL R2 failed")
+	errInvalidComposeDeployInitInvocation      = errors.New("only deploy-init --scope compose is supported")
+	errInvalidComposeDeployInitConfiguration   = errors.New("Compose deploy-init configuration is invalid")
+	errComposeDeployInit                       = errors.New("Compose deployment initialization failed")
+	errInvalidComposeRecordAuthorityInvocation = errors.New("only record-authority --scope compose is supported")
+	errComposeRecordAuthority                  = errors.New("Compose Records authority failed")
 )
 
 type appMigrationDependencies struct {
@@ -76,13 +84,33 @@ type appACLR2FinalizeDependencies struct {
 }
 
 type appAdminDependencies struct {
-	migration appMigrationDependencies
-	bootstrap appACLR2BootstrapDependencies
-	finalize  appACLR2FinalizeDependencies
+	migration   appMigrationDependencies
+	bootstrap   appACLR2BootstrapDependencies
+	finalize    appACLR2FinalizeDependencies
+	composeInit composeDeployInitDependencies
+	authority   composeRecordAuthorityDependencies
 }
 
+type composeDeployInitDependencies struct {
+	readFile   func(string) ([]byte, error)
+	initialize func(context.Context, centerdeploy.ComposeInitConfig) error
+}
+
+type composeRecordAuthorityDependencies struct {
+	run func(context.Context) error
+}
+
+const (
+	composeBootstrapPasswordPath = "/run/secrets/postgres_bootstrap_password"
+	composeRuntimePasswordPath   = "/run/secrets/houfeng_runtime_password"
+	composeAdminPasswordPath     = "/run/secrets/houfeng_platform_admin_password"
+	composeMigratorPasswordPath  = "/run/secrets/houfeng_migrator_password"
+)
+
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := runAdminWithDeps(ctx, os.Args[1:], defaultAppAdminDependencies()); err != nil {
 		slog.Error("record platform admin command failed", "error", err)
 		os.Exit(1)
 	}
@@ -97,6 +125,11 @@ func defaultAppAdminDependencies() appAdminDependencies {
 		migration: defaultAppMigrationDependencies(),
 		bootstrap: defaultAppACLR2BootstrapDependencies(),
 		finalize:  defaultAppACLR2FinalizeDependencies(),
+		composeInit: composeDeployInitDependencies{
+			readFile:   os.ReadFile,
+			initialize: centerdeploy.InitializeCompose,
+		},
+		authority: composeRecordAuthorityDependencies{run: centerdeploy.RunComposeAuthority},
 	}
 }
 
@@ -143,9 +176,104 @@ func runAdminWithDeps(ctx context.Context, args []string, deps appAdminDependenc
 			return runAppACLR2BootstrapWithDeps(ctx, args, deps.bootstrap)
 		case "finalize":
 			return runAppACLR2FinalizeWithDeps(ctx, args, deps.finalize)
+		case "deploy-init":
+			return runComposeDeployInitWithDeps(ctx, args, deps.composeInit)
+		case "record-authority":
+			return runComposeRecordAuthorityWithDeps(ctx, args, deps.authority)
 		}
 	}
 	return runWithDeps(ctx, args, deps.migration)
+}
+
+func runComposeRecordAuthorityWithDeps(ctx context.Context, args []string, deps composeRecordAuthorityDependencies) error {
+	if len(args) != 3 || args[0] != "record-authority" || args[1] != "--scope" || args[2] != "compose" {
+		return errInvalidComposeRecordAuthorityInvocation
+	}
+	if deps.run == nil {
+		return errComposeRecordAuthority
+	}
+	if err := deps.run(ctx); err != nil {
+		for _, stage := range []error{
+			centerdeploy.ErrComposeAuthorityLoadState,
+			centerdeploy.ErrComposeAuthorityOpenDB,
+			centerdeploy.ErrComposeAuthorityListen,
+			centerdeploy.ErrComposeAuthorityHeartbeat,
+			centerdeploy.ErrComposeAuthorityServe,
+		} {
+			if errors.Is(err, stage) {
+				return fmt.Errorf("%w: %w", errComposeRecordAuthority, stage)
+			}
+		}
+		return errComposeRecordAuthority
+	}
+	return nil
+}
+
+func runComposeDeployInitWithDeps(ctx context.Context, args []string, deps composeDeployInitDependencies) error {
+	if len(args) != 3 || args[0] != "deploy-init" || args[1] != "--scope" || args[2] != "compose" {
+		return errInvalidComposeDeployInitInvocation
+	}
+	if deps.readFile == nil || deps.initialize == nil {
+		return errComposeDeployInit
+	}
+
+	readPassword := func(path string) (string, error) {
+		payload, err := deps.readFile(path)
+		if err != nil {
+			return "", errInvalidComposeDeployInitConfiguration
+		}
+		return string(payload), nil
+	}
+	bootstrapPassword, err := readPassword(composeBootstrapPasswordPath)
+	if err != nil {
+		return err
+	}
+	runtimePassword, err := readPassword(composeRuntimePasswordPath)
+	if err != nil {
+		return err
+	}
+	adminPassword, err := readPassword(composeAdminPasswordPath)
+	if err != nil {
+		return err
+	}
+	migratorPassword, err := readPassword(composeMigratorPasswordPath)
+	if err != nil {
+		return err
+	}
+	config, err := centerdeploy.NewComposeInitConfig(centerdeploy.ComposeInitPasswords{
+		Bootstrap:     bootstrapPassword,
+		Runtime:       runtimePassword,
+		PlatformAdmin: adminPassword,
+		Migrator:      migratorPassword,
+	})
+	if err != nil {
+		return errInvalidComposeDeployInitConfiguration
+	}
+	if err := deps.initialize(ctx, config); err != nil {
+		return safeComposeDeployInitError(err)
+	}
+	return nil
+}
+
+func safeComposeDeployInitError(initializationErr error) error {
+	for _, stage := range []error{
+		centerdeploy.ErrComposeInitOpenBootstrap,
+		centerdeploy.ErrComposeInitPrepareAuthority,
+		centerdeploy.ErrComposeInitProvisionBootstrap,
+		centerdeploy.ErrComposeInitOpenMigrator,
+		centerdeploy.ErrComposeInitConvergeCurrent,
+		centerdeploy.ErrComposeInitActivateAuthority,
+		centerdeploy.ErrComposeInitPublishAuthority,
+		centerdeploy.ErrComposeInitOpenAuthority,
+		centerdeploy.ErrComposeInitHeartbeatAuthority,
+		centerdeploy.ErrComposeInitOpenRuntime,
+		centerdeploy.ErrComposeInitAdmitRuntime,
+	} {
+		if errors.Is(initializationErr, stage) {
+			return fmt.Errorf("%w: %w", errComposeDeployInit, stage)
+		}
+	}
+	return errComposeDeployInit
 }
 
 func runWithDeps(ctx context.Context, args []string, deps appMigrationDependencies) error {

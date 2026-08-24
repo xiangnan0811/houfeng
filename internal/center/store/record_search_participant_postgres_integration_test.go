@@ -74,6 +74,67 @@ func TestPostgresIntegrationRecordSearchProjectionIndexesCommittedRevision(t *te
 	}
 }
 
+// Notes do not require tags, owners, or participants. Those empty repeated
+// values still have to reach PostgreSQL as empty arrays rather than SQL NULL,
+// because a search projection is part of the same transaction as publication.
+func TestPostgresIntegrationRecordSearchProjectionIndexesSparseCommittedRevision(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	pool := fixture.openDirectRuntimePool(t, ctx, "record-search-sparse", 1)
+	seedRecordSearchGeneration(t, ctx, fixture.db, 1, "published")
+	repository := newRecordsPostgresRepository(t, pool, NewRecordSearchRevisionParticipant())
+
+	base := recordsPostgresCompleteRevisionInput(t, "Sparse search record")
+	sparse, err := records.NormalizeCompleteRevisionInput(records.CompleteRevisionValues{
+		Title:                  base.Title(),
+		BodyMarkdown:           base.BodyMarkdown(),
+		MarkdownDialectVersion: base.MarkdownDialectVersion(),
+		RecordType:             base.RecordType(),
+		BusinessStatus:         base.BusinessStatus(),
+		ImpactLevel:            base.ImpactLevel(),
+		VisibilityScope:        base.VisibilityScope(),
+		Subjects:               base.Subjects(),
+		Tags:                   nil,
+		OwnerID:                "",
+		Participants:           nil,
+		AttachmentIDs:          nil,
+		EvidenceSnapshotIDs:    nil,
+		AuthorID:               base.AuthorID(),
+	})
+	if err != nil {
+		t.Fatalf("NormalizeCompleteRevisionInput(sparse) error = %v", err)
+	}
+	committed, err := repository.CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t,
+		recordplatform.OperationKindRecordCreate,
+		"rec_pgsearchsparse",
+		"",
+		0,
+		0,
+		sparse,
+		"record-search-sparse-key",
+	))
+	if err != nil {
+		t.Fatalf("CommitRevision() error = %v", err)
+	}
+
+	var arraysPresent bool
+	if err := fixture.db.QueryRow(ctx, `
+		select tags is not null and participant_ids is not null
+		from public.record_search_documents
+		where generation = 1 and record_id = $1`, committed.RecordID,
+	).Scan(&arraysPresent); err != nil {
+		t.Fatalf("read sparse projected arrays: %v", err)
+	}
+	if !arraysPresent {
+		t.Fatal("sparse projected tags or participant_ids stored as SQL NULL")
+	}
+	document := readRecordSearchProjectedDocument(t, ctx, fixture.db, committed.RecordID, 1)
+	if len(document.tags) != 0 || len(document.participants) != 0 || document.subjectCount != 1 {
+		t.Fatalf("sparse projected document = %#v, want empty repeated fields and one primary subject", document)
+	}
+}
+
 // A shadow rebuild builds the next generation while the published one still
 // serves reads, so a commit during the rebuild must land in both. Otherwise
 // publishing the rebuilt generation would silently drop the record.

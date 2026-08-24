@@ -1,0 +1,28 @@
+{
+  "id": "production-compose-deployment",
+  "name": "production-compose-deployment",
+  "title": "Production Docker Compose deployment bundle",
+  "description": "Deliver a downloadable, prebuilt-image-only, full Houfeng production Compose bundle for Nginx Proxy Manager with automatic database provisioning, categorized configuration, and portable persistent data.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "cross-layer",
+  "package": null,
+  "priority": "P1",
+  "creator": "xiangnan-arch",
+  "assignee": "xiangnan-arch",
+  "createdAt": "2026-08-24",
+  "completedAt": null,
+  "branch": "codex/production-compose-deployment",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "worktree_path": "/home/murray/code/houfeng/.worktree/production-compose-deployment"
+  }
+}

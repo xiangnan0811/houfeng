@@ -18,9 +18,245 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	centerdeploy "houfeng/internal/center/deploy"
 	"houfeng/internal/center/platformmigrate"
 	"houfeng/internal/center/store/migrate"
 )
+
+func TestComposeDeployInitRouteLoadsOnlyFixedSecretFiles(t *testing.T) {
+	t.Parallel()
+
+	secretByPath := map[string][]byte{
+		"/run/secrets/postgres_bootstrap_password":     []byte("bootstrap:/?# secret"),
+		"/run/secrets/houfeng_runtime_password":        []byte("runtime:/?# secret"),
+		"/run/secrets/houfeng_platform_admin_password": []byte("admin:/?# secret"),
+		"/run/secrets/houfeng_migrator_password":       []byte("migrator:/?# secret"),
+	}
+	var readPaths []string
+	var initialized centerdeploy.ComposeInitConfig
+	err := runComposeDeployInitWithDeps(t.Context(), []string{"deploy-init", "--scope", "compose"}, composeDeployInitDependencies{
+		readFile: func(path string) ([]byte, error) {
+			readPaths = append(readPaths, path)
+			value, ok := secretByPath[path]
+			if !ok {
+				return nil, fs.ErrNotExist
+			}
+			return append([]byte(nil), value...), nil
+		},
+		initialize: func(_ context.Context, config centerdeploy.ComposeInitConfig) error {
+			initialized = config
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("deploy-init --scope compose error = %v", err)
+	}
+	wantPaths := []string{
+		"/run/secrets/postgres_bootstrap_password",
+		"/run/secrets/houfeng_runtime_password",
+		"/run/secrets/houfeng_platform_admin_password",
+		"/run/secrets/houfeng_migrator_password",
+	}
+	if !reflect.DeepEqual(readPaths, wantPaths) {
+		t.Fatalf("Compose deploy-init secret reads = %q, want only fixed paths %q", readPaths, wantPaths)
+	}
+	if initialized.DatabaseHost != "db" || initialized.DatabasePort != 5432 || initialized.DatabaseName != "houfeng" || initialized.BootstrapRole != "postgres" {
+		t.Fatalf("Compose deploy-init endpoint/bootstrap config = %#v, want fixed internal topology", initialized)
+	}
+	if initialized.Roles != (platformmigrate.AppRoleSetV1{CenterRuntime: "houfeng_runtime", PlatformAdmin: "houfeng_platform_admin", Migrator: "houfeng_migrator"}) {
+		t.Fatalf("Compose deploy-init roles = %#v, want fixed current APP role set", initialized.Roles)
+	}
+	if initialized.Passwords.Bootstrap != "bootstrap:/?# secret" || initialized.Passwords.Runtime != "runtime:/?# secret" || initialized.Passwords.PlatformAdmin != "admin:/?# secret" || initialized.Passwords.Migrator != "migrator:/?# secret" {
+		t.Fatal("Compose deploy-init did not preserve printable secret bytes")
+	}
+}
+
+func TestComposeRecordAuthorityRouteUsesOnlyFixedInternalConfiguration(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	err := runAdminWithDeps(t.Context(), []string{"record-authority", "--scope", "compose"}, appAdminDependencies{
+		authority: composeRecordAuthorityDependencies{
+			run: func(ctx context.Context) error {
+				calls++
+				if ctx != t.Context() {
+					t.Fatal("record authority did not preserve caller lifecycle context")
+				}
+				return nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("record-authority --scope compose error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("record authority calls = %d, want one", calls)
+	}
+}
+
+func TestComposeRecordAuthorityRouteRejectsArgumentsAndPreservesSafeStage(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{
+		{"record-authority"},
+		{"record-authority", "--scope", "app"},
+		{"record-authority", "--scope", "compose", "secret"},
+		{"record-authority", "--scope", "compose", "--database-password", "secret"},
+	} {
+		calls := 0
+		err := runAdminWithDeps(t.Context(), args, appAdminDependencies{
+			authority: composeRecordAuthorityDependencies{run: func(context.Context) error {
+				calls++
+				return nil
+			}},
+		})
+		if !errors.Is(err, errInvalidComposeRecordAuthorityInvocation) || calls != 0 {
+			t.Fatalf("record authority args %q = error %v/calls %d, want pre-run rejection", args, err, calls)
+		}
+	}
+
+	const secret = "authority-secret-must-not-leak"
+	for _, stage := range []error{
+		centerdeploy.ErrComposeAuthorityLoadState,
+		centerdeploy.ErrComposeAuthorityOpenDB,
+		centerdeploy.ErrComposeAuthorityListen,
+		centerdeploy.ErrComposeAuthorityHeartbeat,
+		centerdeploy.ErrComposeAuthorityServe,
+	} {
+		err := runAdminWithDeps(t.Context(), []string{"record-authority", "--scope", "compose"}, appAdminDependencies{
+			authority: composeRecordAuthorityDependencies{run: func(context.Context) error {
+				return fmt.Errorf("%s: %w", secret, stage)
+			}},
+		})
+		if !errors.Is(err, errComposeRecordAuthority) || !errors.Is(err, stage) || strings.Contains(err.Error(), secret) {
+			t.Fatalf("record authority stage error = %q, want safe visible stage", err)
+		}
+	}
+}
+
+func TestComposeDeployInitRejectsUnsafeInputsBeforeInitialization(t *testing.T) {
+	t.Parallel()
+
+	tests := [][]string{
+		{"deploy-init"},
+		{"deploy-init", "--scope", "app"},
+		{"deploy-init", "--scope", "compose", "positional-secret"},
+		{"deploy-init", "--scope", "compose", "--database-url", "postgres://secret@example.invalid/houfeng"},
+		{"deploy-init", "--scope", "compose", "--unknown"},
+	}
+	for _, args := range tests {
+		args := args
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			reads := 0
+			initializations := 0
+			err := runComposeDeployInitWithDeps(t.Context(), args, composeDeployInitDependencies{
+				readFile: func(string) ([]byte, error) {
+					reads++
+					return []byte("secret"), nil
+				},
+				initialize: func(context.Context, centerdeploy.ComposeInitConfig) error {
+					initializations++
+					return nil
+				},
+			})
+			if !errors.Is(err, errInvalidComposeDeployInitInvocation) {
+				t.Fatalf("runComposeDeployInitWithDeps(%q) error = %v, want %v", args, err, errInvalidComposeDeployInitInvocation)
+			}
+			if reads != 0 || initializations != 0 {
+				t.Fatalf("invalid Compose deploy-init performed reads:%d initializations:%d", reads, initializations)
+			}
+		})
+	}
+}
+
+func TestComposeDeployInitRejectsAndRedactsSecretOrOperationalFailure(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		readFile   func(string) ([]byte, error)
+		initialize func(context.Context, centerdeploy.ComposeInitConfig) error
+		want       error
+	}{
+		{
+			name: "missing secret",
+			readFile: func(string) ([]byte, error) {
+				return nil, fmt.Errorf("secret path contains sensitive-host-detail")
+			},
+			initialize: func(context.Context, centerdeploy.ComposeInitConfig) error { return nil },
+			want:       errInvalidComposeDeployInitConfiguration,
+		},
+		{
+			name: "control byte",
+			readFile: func(string) ([]byte, error) {
+				return []byte("secret\n"), nil
+			},
+			initialize: func(context.Context, centerdeploy.ComposeInitConfig) error { return nil },
+			want:       errInvalidComposeDeployInitConfiguration,
+		},
+		{
+			name: "initializer",
+			readFile: func(path string) ([]byte, error) {
+				return []byte(filepath.Base(path) + "-value"), nil
+			},
+			initialize: func(context.Context, centerdeploy.ComposeInitConfig) error {
+				return fmt.Errorf("database rejected secret-value at sensitive-host-detail")
+			},
+			want: errComposeDeployInit,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := runComposeDeployInitWithDeps(t.Context(), []string{"deploy-init", "--scope", "compose"}, composeDeployInitDependencies{
+				readFile:   tt.readFile,
+				initialize: tt.initialize,
+			})
+			if !errors.Is(err, tt.want) || strings.Contains(err.Error(), "secret-value") || strings.Contains(err.Error(), "sensitive-host-detail") {
+				t.Fatalf("Compose deploy-init error = %q, want redacted %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestComposeDeployInitPreservesOnlySafeInitializerStage(t *testing.T) {
+	t.Parallel()
+
+	for _, stage := range []error{
+		centerdeploy.ErrComposeInitOpenBootstrap,
+		centerdeploy.ErrComposeInitPrepareAuthority,
+		centerdeploy.ErrComposeInitProvisionBootstrap,
+		centerdeploy.ErrComposeInitOpenMigrator,
+		centerdeploy.ErrComposeInitConvergeCurrent,
+		centerdeploy.ErrComposeInitActivateAuthority,
+		centerdeploy.ErrComposeInitPublishAuthority,
+		centerdeploy.ErrComposeInitOpenAuthority,
+		centerdeploy.ErrComposeInitHeartbeatAuthority,
+		centerdeploy.ErrComposeInitOpenRuntime,
+		centerdeploy.ErrComposeInitAdmitRuntime,
+	} {
+		stage := stage
+		t.Run(stage.Error(), func(t *testing.T) {
+			const secret = "stage-secret-must-not-leak"
+			err := runComposeDeployInitWithDeps(t.Context(), []string{"deploy-init", "--scope", "compose"}, composeDeployInitDependencies{
+				readFile: func(path string) ([]byte, error) {
+					return []byte(filepath.Base(path) + "-value"), nil
+				},
+				initialize: func(context.Context, centerdeploy.ComposeInitConfig) error {
+					return fmt.Errorf("database detail includes %s: %w", secret, stage)
+				},
+			})
+			if !errors.Is(err, errComposeDeployInit) || !errors.Is(err, stage) {
+				t.Fatalf("Compose deploy-init error = %v, want command and safe stage sentinels", err)
+			}
+			if got, want := err.Error(), errComposeDeployInit.Error()+": "+stage.Error(); got != want {
+				t.Fatalf("Compose deploy-init error = %q, want safe stage-only message %q", got, want)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("Compose deploy-init stage error leaked secret: %q", err)
+			}
+		})
+	}
+}
 
 type fakeAppACLR2FinalizePoolHandle struct {
 	pool       *pgxpool.Pool

@@ -1,6 +1,23 @@
 #!/bin/sh
 set -eu
 
+case "${HOUFENG_REQUIRE_HTTPS_PUBLIC_BASE_URL:-false}" in
+true)
+	case "${HOUFENG_PUBLIC_BASE_URL:-}" in
+	https://?*) ;;
+	*)
+		printf '%s\n' "houfeng container entrypoint: production Compose requires an https:// HOUFENG_PUBLIC_BASE_URL" >&2
+		exit 1
+		;;
+	esac
+	;;
+false|'') ;;
+*)
+	printf '%s\n' "houfeng container entrypoint: HOUFENG_REQUIRE_HTTPS_PUBLIC_BASE_URL must be true or false" >&2
+	exit 1
+	;;
+esac
+
 uri_encode_component() {
 	component=$1
 	encoded=

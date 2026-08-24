@@ -194,11 +194,11 @@ func (facts DocumentFacts) FollowUpAt() *time.Time {
 }
 
 func (facts DocumentFacts) Tags() []string {
-	return append([]string(nil), facts.values.Tags...)
+	return append([]string{}, facts.values.Tags...)
 }
 
 func (facts DocumentFacts) ParticipantIDs() []string {
-	return append([]string(nil), facts.values.ParticipantIDs...)
+	return append([]string{}, facts.values.ParticipantIDs...)
 }
 
 func (facts DocumentFacts) Subjects() []DocumentSubject {

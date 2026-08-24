@@ -1550,6 +1550,26 @@ func appACLConvergenceDCLStatementsForContract(contract appACLEffectiveCatalogCo
 			return nil, fmt.Errorf("app ACL convergence privilege references unmanaged object %#v", object)
 		}
 	}
+	auxiliaryPrivileges, err := canonicalAppACLCurrentAuxiliaryPrivileges(contract.AuxiliaryPrivileges)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize app ACL convergence auxiliary privileges: %w", err)
+	}
+	auxiliaryRoles := make([]string, 0)
+	seenAuxiliaryRoles := make(map[string]struct{})
+	for _, privilege := range auxiliaryPrivileges {
+		object, err := appACLCurrentAuxiliaryManagedObject(privilege)
+		if err != nil {
+			return nil, fmt.Errorf("map app ACL convergence auxiliary privilege: %w", err)
+		}
+		if _, ok := managed[object]; !ok {
+			return nil, fmt.Errorf("app ACL convergence auxiliary privilege references unmanaged object %#v", object)
+		}
+		if _, seen := seenAuxiliaryRoles[privilege.CatalogRole]; !seen {
+			seenAuxiliaryRoles[privilege.CatalogRole] = struct{}{}
+			auxiliaryRoles = append(auxiliaryRoles, privilege.CatalogRole)
+		}
+	}
+	sort.Strings(auxiliaryRoles)
 
 	rolesBySubject := make(map[AppACLSubject]string, len(canonicalSet.RoleBindings))
 	grantees := make([]string, 0, len(canonicalSet.RoleBindings)+1)
@@ -1568,6 +1588,10 @@ func appACLConvergenceDCLStatementsForContract(contract appACLEffectiveCatalogCo
 		for _, grantee := range grantees {
 			statements = append(statements, "revoke all privileges "+target+" from "+grantee)
 		}
+		for _, role := range auxiliaryRoles {
+			statement := "revoke all privileges " + target + " from " + pgx.Identifier{role}.Sanitize()
+			statements = append(statements, appACLConvergenceConditionalRoleStatement(role, statement))
+		}
 	}
 	for _, privilege := range canonicalSet.Privileges {
 		role, ok := rolesBySubject[privilege.Subject]
@@ -1580,7 +1604,32 @@ func appACLConvergenceDCLStatementsForContract(contract appACLEffectiveCatalogCo
 		}
 		statements = append(statements, "grant "+string(privilege.Privilege)+" "+target+" to "+pgx.Identifier{role}.Sanitize())
 	}
+	for _, privilege := range auxiliaryPrivileges {
+		applicationPrivilege := AppACLPrivilege{
+			Subject:        AppACLSubjectCenterRuntime,
+			ObjectClass:    privilege.ObjectClass,
+			SchemaName:     privilege.SchemaName,
+			ObjectIdentity: privilege.ObjectIdentity,
+			Privilege:      privilege.Privilege,
+		}
+		target, err := appACLConvergenceGrantTarget(applicationPrivilege)
+		if err != nil {
+			return nil, err
+		}
+		statement := "grant " + string(privilege.Privilege) + " " + target + " to " + pgx.Identifier{privilege.CatalogRole}.Sanitize()
+		statements = append(statements, appACLConvergenceConditionalRoleStatement(privilege.CatalogRole, statement))
+	}
 	return statements, nil
+}
+
+func appACLConvergenceConditionalRoleStatement(role string, statement string) string {
+	roleLiteral := strings.ReplaceAll(role, "'", "''")
+	dynamicStatement := strings.ReplaceAll(statement, "'", "''")
+	return "do $app_acl_auxiliary$\nbegin\n" +
+		"  if pg_catalog.to_regrole('" + roleLiteral + "') is not null then\n" +
+		"    execute '" + dynamicStatement + "';\n" +
+		"  end if;\n" +
+		"end\n$app_acl_auxiliary$"
 }
 
 func applyAppACLConvergenceDCLInTx(ctx context.Context, tx pgx.Tx, contract AppACLEffectiveCatalogContractR1) error {

@@ -72,14 +72,14 @@ func TestRecordsCoreAppACLFragmentExtendsCatalogWithPrimaryValidationFunctionAnd
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(contract.ManagedObjects), len(base.Objects)+len(recordsCoreExpectedAppACLObjects())+len(recordAttachmentsExpectedAppACLObjects())+len(recordEvidenceExpectedAppACLObjects())+len(recordCollaborationExpectedAppACLObjects())+len(recordSearchExpectedAppACLObjects())+len(recordActivityExpectedAppACLObjects())+len(recordPortabilityExpectedAppACLObjects()); got != want {
+	if got, want := len(contract.ManagedObjects), len(base.Objects)+len(recordsCoreExpectedAppACLObjects())+len(recordAttachmentsExpectedAppACLObjects())+len(recordEvidenceExpectedAppACLObjects())+len(recordCollaborationExpectedAppACLObjects())+len(recordSearchExpectedAppACLObjects())+len(recordActivityExpectedAppACLObjects())+len(recordPortabilityExpectedAppACLObjects())+len(recordsAuthorityExpectedAppACLObjects()); got != want {
 		t.Fatalf("production current managed objects = %d, want %d", got, want)
 	}
 	if got, want := len(contract.Privileges), len(appACLPrivilegesR1("houfeng"))+len(recordsCoreExpectedAppACLPrivileges())+len(recordAttachmentsExpectedAppACLPrivileges())+len(recordEvidenceExpectedAppACLPrivileges())+len(recordCollaborationExpectedAppACLPrivileges())+len(recordSearchExpectedAppACLPrivileges())+len(recordActivityExpectedAppACLPrivileges())+len(recordPortabilityExpectedAppACLPrivileges()); got != want {
 		t.Fatalf("production current privileges = %d, want %d", got, want)
 	}
-	if got, want := len(contract.ExpectedFunctions), len(appACLProjectorFunctionsR1())+1+len(recordCollaborationExpectedFunctionContracts())+len(recordSearchExpectedFunctionContracts())+len(recordActivityExpectedFunctionContracts())+len(recordPortabilityExpectedFunctionContracts()); got != want {
-		t.Fatalf("production current expected functions = %d, want %d frozen projectors, records-core validator, and collaboration mutation guards", got, want)
+	if got, want := len(contract.ExpectedFunctions), len(appACLProjectorFunctionsR1())+1+len(recordCollaborationExpectedFunctionContracts())+len(recordSearchExpectedFunctionContracts())+len(recordActivityExpectedFunctionContracts())+len(recordPortabilityExpectedFunctionContracts())+len(recordsAuthorityExpectedFunctionContracts()); got != want {
+		t.Fatalf("production current expected functions = %d, want %d including the authority heartbeat", got, want)
 	}
 	for _, object := range contract.ManagedObjects {
 		if object.ObjectClass == AppACLObjectClassSequence && object.SchemaName == "public" &&
