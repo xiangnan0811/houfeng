@@ -40,8 +40,9 @@ type vpsOverviewDomainSource interface {
 	ListAssetDomainsForVPS(context.Context, string) ([]assetdomains.Record, error)
 }
 
-// VPSOverviewRepository loads non-activity overview facts from existing
-// repositories. It does not invent a second timeline or status authority.
+// VPSOverviewRepository exposes one authority query per independently bounded
+// overview source. It does not map source failures to wire states; the overview
+// service owns that closed, safe error vocabulary.
 type VPSOverviewRepository struct {
 	vps           vpsOverviewAssetSource
 	monitoring    vpsOverviewMonitoringSource
@@ -71,43 +72,163 @@ func NewVPSOverviewRepository(
 
 var _ vpsoverview.SourceReader = (*VPSOverviewRepository)(nil)
 
-// LoadSources returns identity (fatal) plus degraded-capable sections.
-func (repository *VPSOverviewRepository) LoadSources(
+// LoadIdentity performs the fatal authority read before any degradable source
+// is allowed to start.
+func (repository *VPSOverviewRepository) LoadIdentity(
 	ctx context.Context,
 	vpsID string,
-) (vpsoverview.SourceBundle, error) {
+) (vpsoverview.IdentitySource, error) {
 	if ctx == nil || repository == nil {
-		return vpsoverview.SourceBundle{}, vpsoverview.ErrInvalidOverviewRequest
+		return vpsoverview.IdentitySource{}, vpsoverview.ErrInvalidOverviewRequest
 	}
 	record, err := repository.vps.GetVPSAsset(ctx, vpsID)
 	if err != nil {
 		if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
-			return vpsoverview.SourceBundle{}, vpsoverview.ErrVPSNotFound
+			return vpsoverview.IdentitySource{}, vpsoverview.ErrVPSNotFound
 		}
-		return vpsoverview.SourceBundle{}, err
+		return vpsoverview.IdentitySource{}, err
 	}
-
-	bundle := vpsoverview.SourceBundle{
+	return vpsoverview.IdentitySource{
 		Identity: identityFromVPS(record),
 		Facts:    factsFromVPS(record),
+	}, nil
+}
+
+// LoadMonitoring performs exactly one monitoring authority query.
+func (repository *VPSOverviewRepository) LoadMonitoring(
+	ctx context.Context,
+	vpsID string,
+) (vpsoverview.MonitoringSource, error) {
+	if ctx == nil || repository == nil {
+		return vpsoverview.MonitoringSource{}, vpsoverview.ErrInvalidOverviewRequest
 	}
-
-	monitoringLinks, monitoringErr := repository.monitoring.ListMonitoringInstancesForVPS(ctx, vpsID)
-	bundle.MonitoringSection, bundle.MonitoringHealth, bundle.MonitoringStatus,
-		bundle.MonitoringDetail, bundle.ActiveIncidents = monitoringFromLinks(monitoringLinks, monitoringErr)
-
-	bundle.IPSection, bundle.IPStatus, bundle.IPRiskLevel, bundle.IPStale =
-		repository.loadIPQuality(ctx, vpsID)
-
-	bundle.RenewalSection, bundle.ActiveSubscriptions, bundle.NextRenewAt, bundle.RenewalStatus =
-		repository.loadRenewal(ctx, vpsID, record.RenewalDecision)
-
-	monitoringCount := 0
-	if monitoringErr == nil {
-		monitoringCount = len(monitoringLinks)
+	links, err := repository.monitoring.ListMonitoringInstancesForVPS(ctx, vpsID)
+	if err != nil {
+		return vpsoverview.MonitoringSource{}, err
 	}
-	bundle.Relations = repository.loadRelations(ctx, vpsID, bundle, monitoringCount)
-	return bundle, nil
+	return monitoringFromLinks(links), nil
+}
+
+// LoadIPQuality performs exactly one IP-quality authority query.
+func (repository *VPSOverviewRepository) LoadIPQuality(
+	ctx context.Context,
+	vpsID string,
+) (vpsoverview.IPQualitySource, error) {
+	if ctx == nil || repository == nil {
+		return vpsoverview.IPQualitySource{}, vpsoverview.ErrInvalidOverviewRequest
+	}
+	report, err := repository.ipQuality.GetVPSIPQuality(ctx, vpsID)
+	if err != nil {
+		return vpsoverview.IPQualitySource{}, err
+	}
+	result := vpsoverview.IPQualitySource{Section: vpsoverview.SectionState{State: vpsoverview.SectionReady}}
+	if report.Summary == nil {
+		result.Status = "missing"
+		return result, nil
+	}
+	result.Status = report.Summary.Status
+	result.RiskLevel = report.Summary.RiskLevel
+	result.Stale = report.Summary.Stale
+	if !report.Summary.ObservedAt.IsZero() {
+		observed := report.Summary.ObservedAt.UTC()
+		result.Section.ObservedAt = &observed
+		result.Section.LastSuccessAt = &observed
+	}
+	if result.Stale {
+		result.Section.State = vpsoverview.SectionStale
+		result.Section.ReasonCode = "ip_quality_stale"
+	}
+	return result, nil
+}
+
+// LoadRenewal performs exactly one subscription authority query. RenewAt is a
+// business deadline; freshness comes only from the maximum row UpdatedAt.
+func (repository *VPSOverviewRepository) LoadRenewal(
+	ctx context.Context,
+	vpsID string,
+	decision string,
+) (vpsoverview.RenewalSource, error) {
+	if ctx == nil || repository == nil {
+		return vpsoverview.RenewalSource{}, vpsoverview.ErrInvalidOverviewRequest
+	}
+	rows, err := repository.subscriptions.ListSubscriptions(ctx, subscriptions.ListFilters{
+		VPSID: vpsID,
+		Sort:  subscriptions.SortRenewAt,
+		Order: subscriptions.OrderAsc,
+	})
+	if err != nil {
+		return vpsoverview.RenewalSource{}, err
+	}
+	result := vpsoverview.RenewalSource{
+		Section: vpsoverview.SectionState{State: vpsoverview.SectionReady},
+		Status:  decision,
+	}
+	var lastUpdated *time.Time
+	for _, row := range rows {
+		lastUpdated = newestNonZero(lastUpdated, row.UpdatedAt)
+		if row.Status != subscriptions.StatusActive {
+			continue
+		}
+		result.ActiveSubscriptions++
+		if row.RenewAt == nil || row.RenewAt.Time.IsZero() {
+			continue
+		}
+		candidate := row.RenewAt.Time.UTC()
+		if result.NextRenewAt == nil || candidate.Before(*result.NextRenewAt) {
+			result.NextRenewAt = &candidate
+		}
+	}
+	result.Section.ObservedAt = cloneTime(lastUpdated)
+	result.Section.LastSuccessAt = cloneTime(lastUpdated)
+	return result, nil
+}
+
+// LoadServiceRelation performs exactly one service authority query.
+func (repository *VPSOverviewRepository) LoadServiceRelation(
+	ctx context.Context,
+	vpsID string,
+) (vpsoverview.RelationSource, error) {
+	if ctx == nil || repository == nil {
+		return vpsoverview.RelationSource{}, vpsoverview.ErrInvalidOverviewRequest
+	}
+	rows, err := repository.services.ListAssetServicesForVPS(ctx, vpsID)
+	if err != nil {
+		return vpsoverview.RelationSource{}, err
+	}
+	var lastUpdated *time.Time
+	for _, row := range rows {
+		lastUpdated = newestNonZero(lastUpdated, row.UpdatedAt)
+	}
+	return vpsoverview.RelationSource{
+		Count: len(rows),
+		Section: vpsoverview.SectionState{
+			State: vpsoverview.SectionReady, ObservedAt: cloneTime(lastUpdated), LastSuccessAt: cloneTime(lastUpdated),
+		},
+	}, nil
+}
+
+// LoadDomainRelation performs exactly one domain authority query.
+func (repository *VPSOverviewRepository) LoadDomainRelation(
+	ctx context.Context,
+	vpsID string,
+) (vpsoverview.RelationSource, error) {
+	if ctx == nil || repository == nil {
+		return vpsoverview.RelationSource{}, vpsoverview.ErrInvalidOverviewRequest
+	}
+	rows, err := repository.domains.ListAssetDomainsForVPS(ctx, vpsID)
+	if err != nil {
+		return vpsoverview.RelationSource{}, err
+	}
+	var lastUpdated *time.Time
+	for _, row := range rows {
+		lastUpdated = newestNonZero(lastUpdated, row.UpdatedAt)
+	}
+	return vpsoverview.RelationSource{
+		Count: len(rows),
+		Section: vpsoverview.SectionState{
+			State: vpsoverview.SectionReady, ObservedAt: cloneTime(lastUpdated), LastSuccessAt: cloneTime(lastUpdated),
+		},
+	}, nil
 }
 
 func identityFromVPS(record vpsassets.Record) vpsoverview.Identity {
@@ -161,18 +282,15 @@ func factsFromVPS(record vpsassets.Record) []vpsoverview.Fact {
 	return facts
 }
 
-func monitoringFromLinks(
-	links []assetlinks.MonitoringInstanceSummary,
-	err error,
-) (section vpsoverview.SectionState, health, status, detail string, incidents int) {
-	if err != nil {
-		return vpsoverview.SectionState{
-			State: vpsoverview.SectionUnavailable, ReasonCode: "monitoring_unavailable",
-		}, "", "", "", 0
+func monitoringFromLinks(links []assetlinks.MonitoringInstanceSummary) vpsoverview.MonitoringSource {
+	result := vpsoverview.MonitoringSource{
+		Section: vpsoverview.SectionState{State: vpsoverview.SectionReady},
+		Count:   len(links),
 	}
-	section = vpsoverview.SectionState{State: vpsoverview.SectionReady}
 	if len(links) == 0 {
-		return section, "", "unlinked", "未关联监控实例", 0
+		result.Status = "unlinked"
+		result.Detail = "未关联监控实例"
+		return result
 	}
 	primary := links[0]
 	for _, link := range links[1:] {
@@ -180,127 +298,33 @@ func monitoringFromLinks(
 			primary = link
 		}
 	}
-	health = primary.CurrentHealthStatus
-	status = primary.MonitoringStatus
-	detail = primary.CurrentPrimaryIssueSummary
-	incidents = primary.CurrentActiveIncidentCount
-	if primary.LastHeartbeatAt != nil {
+	result.Health = primary.CurrentHealthStatus
+	result.Status = primary.MonitoringStatus
+	result.Detail = primary.CurrentPrimaryIssueSummary
+	result.ActiveIncidents = primary.CurrentActiveIncidentCount
+	if primary.LastHeartbeatAt != nil && !primary.LastHeartbeatAt.IsZero() {
 		observed := primary.LastHeartbeatAt.UTC()
-		section.ObservedAt = &observed
-		section.LastSuccessAt = &observed
+		result.Section.ObservedAt = &observed
+		result.Section.LastSuccessAt = &observed
 	}
-	return section, health, status, detail, incidents
+	return result
 }
 
-func (repository *VPSOverviewRepository) loadIPQuality(
-	ctx context.Context,
-	vpsID string,
-) (section vpsoverview.SectionState, status, risk string, stale bool) {
-	section = vpsoverview.SectionState{State: vpsoverview.SectionReady}
-	report, err := repository.ipQuality.GetVPSIPQuality(ctx, vpsID)
-	if err != nil {
-		return vpsoverview.SectionState{
-			State: vpsoverview.SectionUnavailable, ReasonCode: "ip_quality_unavailable",
-		}, "", "", false
+func newestNonZero(current *time.Time, candidate time.Time) *time.Time {
+	if candidate.IsZero() {
+		return current
 	}
-	if report.Summary == nil {
-		return section, "missing", "", false
+	candidate = candidate.UTC()
+	if current == nil || candidate.After(*current) {
+		return &candidate
 	}
-	summary := report.Summary
-	status = summary.Status
-	risk = summary.RiskLevel
-	stale = summary.Stale
-	observed := summary.ObservedAt.UTC()
-	section.ObservedAt = &observed
-	section.LastSuccessAt = &observed
-	if stale {
-		section.State = vpsoverview.SectionStale
-		section.ReasonCode = "ip_quality_stale"
-	}
-	return section, status, risk, stale
+	return current
 }
 
-func (repository *VPSOverviewRepository) loadRenewal(
-	ctx context.Context,
-	vpsID string,
-	decision vpsassets.RenewalDecision,
-) (section vpsoverview.SectionState, activeCount int, nextRenew *time.Time, status string) {
-	section = vpsoverview.SectionState{State: vpsoverview.SectionReady}
-	status = string(decision)
-	rows, err := repository.subscriptions.ListSubscriptions(ctx, subscriptions.ListFilters{
-		VPSID: vpsID,
-		Sort:  subscriptions.SortRenewAt,
-		Order: subscriptions.OrderAsc,
-	})
-	if err != nil {
-		return vpsoverview.SectionState{
-			State: vpsoverview.SectionUnavailable, ReasonCode: "subscription_unavailable",
-		}, 0, nil, status
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
 	}
-	for _, row := range rows {
-		if row.Status == subscriptions.StatusActive {
-			activeCount++
-			if row.RenewAt != nil && !row.RenewAt.Time.IsZero() {
-				candidate := row.RenewAt.Time.UTC()
-				if nextRenew == nil || candidate.Before(*nextRenew) {
-					nextRenew = &candidate
-				}
-			}
-		}
-	}
-	if nextRenew != nil {
-		section.ObservedAt = nextRenew
-		section.LastSuccessAt = nextRenew
-	}
-	return section, activeCount, nextRenew, status
-}
-
-func (repository *VPSOverviewRepository) loadRelations(
-	ctx context.Context,
-	vpsID string,
-	bundle vpsoverview.SourceBundle,
-	monitoringCount int,
-) []vpsoverview.RelationSummary {
-	route := "/vps/" + vpsID
-	relations := []vpsoverview.RelationSummary{{
-		Kind:   "monitoring_instances",
-		Label:  "监控实例",
-		Route:  route,
-		Count:  monitoringCount,
-		Status: firstNonEmptyLocal(bundle.MonitoringHealth, bundle.MonitoringStatus),
-	}, {
-		Kind:   "subscriptions",
-		Label:  "订阅",
-		Route:  route,
-		Count:  bundle.ActiveSubscriptions,
-		Status: bundle.RenewalStatus,
-	}}
-	if services, err := repository.services.ListAssetServicesForVPS(ctx, vpsID); err == nil {
-		relations = append(relations, vpsoverview.RelationSummary{
-			Kind: "services", Label: "服务", Route: route, Count: len(services),
-		})
-	} else {
-		relations = append(relations, vpsoverview.RelationSummary{
-			Kind: "services", Label: "服务", Route: route, Count: 0, Status: "unavailable",
-		})
-	}
-	if domains, err := repository.domains.ListAssetDomainsForVPS(ctx, vpsID); err == nil {
-		relations = append(relations, vpsoverview.RelationSummary{
-			Kind: "domains", Label: "域名", Route: route, Count: len(domains),
-		})
-	} else {
-		relations = append(relations, vpsoverview.RelationSummary{
-			Kind: "domains", Label: "域名", Route: route, Count: 0, Status: "unavailable",
-		})
-	}
-	return relations
-}
-
-func firstNonEmptyLocal(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
+	cloned := value.UTC()
+	return &cloned
 }

@@ -40,21 +40,25 @@ case "$mode" in
 esac
 shift 2
 
-workspace=$(mktemp -d "${TMPDIR:-/tmp}/houfeng-record-platform.XXXXXX")
+script_dir=${0%/*}
+if [ "$script_dir" = "$0" ]
+then
+  script_dir=.
+fi
+root=$(cd "$script_dir/.." && pwd)
+records_runner_kind=record-platform
+records_run_id=
+workspace=
 containers=()
+volumes=()
+source "$root/scripts/lib/records-runner-lifecycle.sh"
+records_runner_install_cleanup
+records_runner_validate_run_id_override
+records_runner_require_signal_tools
+workspace=$(mktemp -d "${TMPDIR:-/tmp}/houfeng-record-platform.XXXXXX")
+records_runner_prepare_run_id
 selected_ports=()
 picked_port=
-
-cleanup() {
-  status=$?
-  for container in "${containers[@]}"
-  do
-    docker rm -f "$container" >/dev/null 2>&1 || true
-  done
-  rm -rf "$workspace"
-  exit "$status"
-}
-trap cleanup EXIT
 
 random_password() {
   od -An -N18 -tx1 /dev/urandom | tr -d ' \n'
@@ -83,14 +87,17 @@ start_postgres() {
   name=$1
   port=$2
   password=$3
-  docker run --rm -d \
+  containers+=("$name")
+  docker run -d \
     --name "$name" \
+    --label "com.houfeng.records.runner=$records_runner_kind" \
+    --label "com.houfeng.records.run=$records_run_id" \
+    --label "com.houfeng.records.owner=$records_owner_id" \
     --network=host \
     --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=512m \
     -e POSTGRES_PASSWORD="$password" \
     "$postgres_image" \
     -c port="$port" >/dev/null
-  containers+=("$name")
 }
 
 wait_for_postgres() {
@@ -108,10 +115,10 @@ wait_for_postgres() {
   return 1
 }
 
-app_name="houfeng-rp-app-${RANDOM}${RANDOM}"
-ledger_name="houfeng-rp-ledger-${RANDOM}${RANDOM}"
-witness_name="houfeng-rp-witness-${RANDOM}${RANDOM}"
-recovery_name="houfeng-rp-recovery-${RANDOM}${RANDOM}"
+app_name="houfeng-rp-app-${records_run_id}-${RANDOM}${RANDOM}"
+ledger_name="houfeng-rp-ledger-${records_run_id}-${RANDOM}${RANDOM}"
+witness_name="houfeng-rp-witness-${records_run_id}-${RANDOM}${RANDOM}"
+recovery_name="houfeng-rp-recovery-${records_run_id}-${RANDOM}${RANDOM}"
 pick_free_port 56000
 app_port=$picked_port
 pick_free_port "$((app_port + 1))"
@@ -160,27 +167,50 @@ stdout_tee_pid=$!
 exec {stderr_tee_fd}> >(tee "$stderr_file" >&2)
 stderr_tee_pid=$!
 set +e
-(
-  exec {stdout_tee_fd}>&-
-  exec {stderr_tee_fd}>&-
+setsid env \
+  --default-signal=INT \
+  --default-signal=TERM \
   HOUFENG_POSTGRES_INTEGRATION=1 \
   HOUFENG_DATABASE_URL="postgres://postgres:${app_password}@127.0.0.1:${app_port}/postgres?sslmode=disable" \
   HOUFENG_DELETION_LEDGER_DATABASE_URL="postgres://postgres:${ledger_password}@127.0.0.1:${ledger_port}/postgres?sslmode=disable" \
   HOUFENG_DELETION_WITNESS_DATABASE_URL="postgres://postgres:${witness_password}@127.0.0.1:${witness_port}/postgres?sslmode=disable" \
   HOUFENG_RECOVERY_CONTROL_DATABASE_URL="postgres://postgres:${recovery_password}@127.0.0.1:${recovery_port}/postgres?sslmode=disable" \
-  "$@"
-) >&"$stdout_tee_fd" 2>&"$stderr_tee_fd"
+  "$@" \
+  >&"$stdout_tee_fd" 2>&"$stderr_tee_fd" \
+  {stdout_tee_fd}>&- {stderr_tee_fd}>&- &
+records_runner_body_pid=$!
+wait "$records_runner_body_pid"
 command_status=$?
+records_runner_body_pid=
 exec {stdout_tee_fd}>&-
 exec {stderr_tee_fd}>&-
 wait "$stdout_tee_pid"
+stdout_tee_status=$?
 wait "$stderr_tee_pid"
+stderr_tee_status=$?
 set -e
 
-if grep -Fq -- '--- SKIP:' "$stdout_file" "$stderr_file"
+evidence_sink_status=0
+if [ "$stdout_tee_status" -ne 0 ]
 then
-  printf 'record-platform integration command skipped a test\n' >&2
-  exit 1
+  printf 'record-platform integration evidence sink failed: stdout tee status %s\n' "$stdout_tee_status" >&2
+  evidence_sink_status=1
+fi
+if [ "$stderr_tee_status" -ne 0 ]
+then
+  printf 'record-platform integration evidence sink failed: stderr tee status %s\n' "$stderr_tee_status" >&2
+  evidence_sink_status=1
 fi
 
-exit "$command_status"
+if records_runner_finish_evidence \
+  "$command_status" \
+  "$evidence_sink_status" \
+  "$stdout_file" \
+  "$stderr_file" \
+  'record-platform integration command skipped a test'
+then
+  final_status=0
+else
+  final_status=$?
+fi
+exit "$final_status"

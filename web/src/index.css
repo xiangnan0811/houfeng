@@ -24,6 +24,7 @@
 
 /* owner: vps */
 @import './styles/partials/legacy-vps.css';
+@import './styles/partials/vps-overview-freshness.css';
 
 /* owner: observability */
 @import './styles/partials/legacy-events.css';

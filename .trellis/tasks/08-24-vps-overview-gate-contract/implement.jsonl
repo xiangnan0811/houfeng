@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/08-24-vps-overview-gate-contract/prd.md", "reason": "I-02 requirements and acceptance criteria."}
+{"file": ".trellis/tasks/08-24-vps-overview-gate-contract/design.md", "reason": "Local decoder, allowlisted gate, error copy, retry, and rollback."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/research/overview-gate.md", "reason": "Current flow, decoder patterns, failure matrix, and exact tests."}
+{"file": ".trellis/tasks/08-24-vps-overview-freshness-reliability/design.md", "reason": "Final relation.section and section-state wire contract."}
+{"file": ".trellis/tasks/08-24-vps-overview-action-contract/design.md", "reason": "Final action IDs, relation kinds, and route optionality."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Facade ownership, unknown decoding, lazy boundary, and state model."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Node 22 unit, production, bundle, and Chromium gates."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse local decoder patterns without a one-use global abstraction."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Validate once at the success boundary and test invalid shapes."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Protected branch and delivery requirements."}

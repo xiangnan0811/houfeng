@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/08-24-records-s3-harness-lifecycle/prd.md", "reason": "I-04 requirements and acceptance criteria."}
+{"file": ".trellis/tasks/08-24-records-s3-harness-lifecycle/design.md", "reason": "Named-volume ownership, cleanup state, tests, and rollback."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/research/s3-harness.md", "reason": "Root cause, exact files, status matrix, and real no-leak gate."}
+{"file": ".trellis/spec/backend/record-integration-contract.md", "reason": "Required local and S3 integration and recovery semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Deterministic script tests, Go gates, and no false-green infrastructure."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Content-safe diagnostics and stable failure semantics."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Use one bounded lifecycle helper instead of drifting cleanup copies."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Protected non-main implementation and delivery."}
+{"file": ".trellis/tasks/archive/2026-08/07-14-vps-records-integration-rollout/design.md", "reason": "Original runner ownership and bounded cleanup authority."}

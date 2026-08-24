@@ -122,11 +122,12 @@ type Fact struct {
 
 // RelationSummary is a count + route card for linked resources.
 type RelationSummary struct {
-	Kind   string `json:"kind"`
-	Count  int    `json:"count"`
-	Status string `json:"status,omitempty"`
-	Route  string `json:"route"`
-	Label  string `json:"label"`
+	Kind    string       `json:"kind"`
+	Count   int          `json:"count"`
+	Status  string       `json:"status,omitempty"`
+	Route   string       `json:"route,omitempty"`
+	Label   string       `json:"label"`
+	Section SectionState `json:"section"`
 }
 
 // Anomaly is one versioned rule hit. Empty overview.Anomalies means healthy —

@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/08-24-vps-overview-freshness-reliability/prd.md", "reason": "Check every I-03 acceptance criterion."}
+{"file": ".trellis/tasks/08-24-vps-overview-freshness-reliability/design.md", "reason": "Check source isolation, truthful time, DTO, UI, and rollback."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/research/freshness.md", "reason": "Check against the full fault and performance matrix."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review concurrency, context cancellation, race, and strict PostgreSQL proof."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Review reason-code safety and error boundary."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Review wire alignment and refresh ownership."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Review Node 22, Chromium, Axe, 390px, and full Web gates."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Review backend-to-browser closure."}
+{"file": ".trellis/tasks/08-24-vps-overview-gate-contract/design.md", "reason": "Ensure relation.section is required by the final decoder."}
+{"file": ".trellis/tasks/08-24-vps-overview-action-contract/design.md", "reason": "Ensure route optionality and local retries do not conflict."}

@@ -1,7 +1,5 @@
-import { Link } from 'react-router-dom'
 import type { RefObject } from 'react'
 
-import { Button } from '../../components/atoms'
 import type { VPSOverview } from '../../lib/types'
 import { subjectNewRecordHref } from '../records/activity/activityQueryState'
 import { SubjectLocalNavigation } from '../records/activity/SubjectLocalNavigation'
@@ -13,12 +11,14 @@ import { VPSOverviewRecentActivity } from './VPSOverviewRecentActivity'
 import { VPSOverviewRelations } from './VPSOverviewRelations'
 import { VPSOverviewSummaryGrid } from './VPSOverviewSummaryGrid'
 import type { VPSManagementController } from './hooks/useVPSManagementController'
+import type { VPSOverviewCommand } from './vpsOverviewDestination'
 
 type Props = {
   overview: VPSOverview
   management: VPSManagementController
   managementTriggerRef?: RefObject<HTMLButtonElement | null> | undefined
   onRefresh: () => void
+  retrying: boolean
 }
 
 export function VPSOverviewPageView({
@@ -26,6 +26,7 @@ export function VPSOverviewPageView({
   management,
   managementTriggerRef,
   onRefresh,
+  retrying,
 }: Props) {
   const vpsId = overview.identity.vps_id
   const basePath = `/vps/${vpsId}`
@@ -41,6 +42,31 @@ export function VPSOverviewPageView({
     sourceId: vpsId,
     view: 'activity' as const,
     basePath,
+  }
+
+  function runCommand(command: VPSOverviewCommand) {
+    switch (command) {
+      case 'open_subscription':
+        management.openPanel('subscription')
+        return
+      case 'open_renewal_decision':
+        management.openPanel('decision')
+        return
+      case 'open_management':
+        management.openMenu()
+        return
+      case 'retry_overview':
+        onRefresh()
+        return
+      case 'open_monitoring_instances':
+        management.openPanel('monitoring-instance-evidence')
+        return
+      case 'open_services':
+        management.openPanel('services-detail')
+        return
+      case 'open_domains':
+        management.openPanel('domains-detail')
+    }
   }
 
   return (
@@ -71,27 +97,25 @@ export function VPSOverviewPageView({
 
       {/* Anomalies only mount when present — healthy DOM has zero anomaly nodes. */}
       {overview.anomalies.length > 0 ? (
-        <VPSOverviewAnomalies anomalies={overview.anomalies} />
+        <VPSOverviewAnomalies vpsId={vpsId} anomalies={overview.anomalies} onCommand={runCommand} />
       ) : null}
 
-      <VPSOverviewSummaryGrid summary={overview.summary} />
+      <VPSOverviewSummaryGrid summary={overview.summary} onRefresh={onRefresh} retrying={retrying} />
       <VPSOverviewRecentActivity
         items={overview.recent_activity.items}
         activityHref={activityHref}
+        section={overview.recent_activity.section}
+        onRefresh={onRefresh}
+        retrying={retrying}
       />
       <VPSOverviewFacts facts={overview.facts} />
-      <VPSOverviewRelations relations={overview.relations} />
-
-      {overview.recent_activity.section.state === 'unavailable'
-        || overview.summary.monitoring.section.state === 'unavailable' ? (
-        <p className="vps-overview-page__section-note" role="status">
-          部分区段暂不可用。
-          <Button type="button" size="sm" variant="ghost" onClick={onRefresh}>
-            重试
-          </Button>
-          <Link className="text-link" to={activityHref}>打开时间线</Link>
-        </p>
-      ) : null}
+      <VPSOverviewRelations
+        vpsId={vpsId}
+        relations={overview.relations}
+        onCommand={runCommand}
+        onRefresh={onRefresh}
+        retrying={retrying}
+      />
 
     </div>
   )

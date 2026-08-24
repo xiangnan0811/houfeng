@@ -1,0 +1,29 @@
+{
+  "id": "vps-overview-action-contract",
+  "name": "vps-overview-action-contract",
+  "title": "Fix VPS overview action and navigation contract",
+  "description": "Fix I-01 and M-01: land every overview action on a real route or owned command, remove inert relation links, validate internal navigation targets, and upgrade React Router.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "fullstack",
+  "package": null,
+  "priority": "P1",
+  "creator": "xiangnan-arch",
+  "assignee": "xiangnan-arch",
+  "createdAt": "2026-08-24",
+  "completedAt": null,
+  "branch": "codex/vps-detail-refactor-remediation",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-24-vps-detail-refactor-remediation",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "worktree_path": "/home/murray/code/houfeng/.worktree/vps-detail-refactor-remediation",
+    "audit_base_commit": "08730e7991f3242ed43fcad561cde1f3ea60b6fb"
+  }
+}

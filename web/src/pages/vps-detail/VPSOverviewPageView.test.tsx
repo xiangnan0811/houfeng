@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -82,11 +82,11 @@ function healthyOverview(): VPSOverview {
     },
     facts: [{ key: 'ipv4', label: 'IPv4', value: '192.0.2.1' }],
     relations: [{
-      kind: 'monitoring_instance',
+      kind: 'monitoring_instances',
       count: 1,
       status: '正常',
-      route: '/monitoring/mi_001',
       label: '监控实例',
+      section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' },
     }],
     capabilities: ['records_v2_read'],
   }
@@ -112,6 +112,7 @@ describe('VPSOverviewPageView', () => {
           overview={healthyOverview()}
           management={managementStub()}
           onRefresh={vi.fn()}
+          retrying={false}
         />
       </MemoryRouter>,
     )
@@ -132,6 +133,204 @@ describe('VPSOverviewPageView', () => {
     expect(screen.queryByText('不应显示的第四条')).not.toBeInTheDocument()
     expect(screen.getByText('最近一条')).toBeInTheDocument()
   })
+
+  it('owns degraded freshness and retry locally without rendering unavailable counts as zero', () => {
+    const refresh = vi.fn()
+    const degraded: VPSOverview = {
+      ...healthyOverview(),
+      summary: {
+        ...healthyOverview().summary,
+        ip_quality: {
+          status: '未知',
+          section: {
+            state: 'stale',
+            observed_at: '2026-08-19T00:00:00Z',
+            last_success_at: '2026-08-19T00:00:00Z',
+            reason_code: 'ip_quality_stale',
+          },
+        },
+        renewal: {
+          status: '未知',
+          section: {
+            state: 'unavailable',
+            observed_at: null,
+            last_success_at: null,
+            reason_code: 'subscription_unavailable',
+          },
+        },
+      },
+      recent_activity: {
+        section: {
+          state: 'unavailable',
+          observed_at: null,
+          last_success_at: null,
+          reason_code: 'activity_projection_unavailable',
+        },
+        items: [],
+      },
+      relations: [{
+        kind: 'services',
+        count: 0,
+        status: 'unavailable',
+        label: '服务',
+        section: {
+          state: 'unavailable',
+          observed_at: null,
+          last_success_at: null,
+          reason_code: 'relation_unavailable',
+        },
+      }, {
+        kind: 'domains',
+        count: 0,
+        label: '域名',
+        section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' },
+      }],
+    }
+
+    const { rerender } = render(
+      <MemoryRouter>
+        <VPSOverviewPageView
+          overview={degraded}
+          management={managementStub()}
+          onRefresh={refresh}
+          retrying={false}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.queryByText('暂无最近活动')).not.toBeInTheDocument()
+    expect(screen.getByText('最近活动暂不可用，无法确认是否为空。')).toBeInTheDocument()
+    const serviceTrigger = screen.getByRole('button', { name: '服务—unavailable' })
+    const domainTrigger = screen.getByRole('button', { name: '域名0' })
+    expect(within(serviceTrigger).getByText('—')).toBeInTheDocument()
+    expect(within(domainTrigger).getByText('0')).toBeInTheDocument()
+    const serviceRetry = screen.getByRole('button', { name: '重试 服务' })
+    expect(serviceRetry.closest('a')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '重试 IP 质量' }))
+    fireEvent.click(screen.getByRole('button', { name: '重试 续费' }))
+    fireEvent.click(screen.getByRole('button', { name: '重试 最近活动' }))
+    fireEvent.click(serviceRetry)
+    expect(refresh).toHaveBeenCalledTimes(4)
+    expect(screen.queryByText('部分区段暂不可用。')).not.toBeInTheDocument()
+
+    rerender(
+      <MemoryRouter>
+        <VPSOverviewPageView
+          overview={degraded}
+          management={managementStub()}
+          onRefresh={refresh}
+          retrying
+        />
+      </MemoryRouter>,
+    )
+    for (const button of screen.getAllByRole('button', { name: /^重试 / })) {
+      expect(button).toBeDisabled()
+    }
+  })
+
+  it('retains visible activity rows while the activity source is stale', () => {
+    const stale = healthyOverview()
+    stale.recent_activity.section = {
+      state: 'stale',
+      observed_at: '2026-08-19T00:00:00Z',
+      last_success_at: '2026-08-19T00:00:00Z',
+      reason_code: 'source_timestamp_invalid',
+    }
+    render(
+      <MemoryRouter>
+        <VPSOverviewPageView
+          overview={stale}
+          management={managementStub()}
+          onRefresh={vi.fn()}
+          retrying={false}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('最近一条')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试 最近活动' })).toBeInTheDocument()
+  })
+
+  it('owns every overview command callback without changing routes', () => {
+    const management = managementStub()
+    const refresh = vi.fn()
+    const overview = healthyOverview()
+    overview.anomalies = [
+      {
+        rule_id: 'renewal.subscription.missing.v1',
+        severity: 'warning',
+        title: '缺少有效订阅',
+        source: 'renewal',
+        primary_action: { id: 'open_subscription', label: '管理订阅' },
+        secondary_actions: [],
+      },
+      {
+        rule_id: 'renewal.due.soon.v1',
+        severity: 'notice',
+        title: '续费临近',
+        source: 'renewal',
+        primary_action: { id: 'open_renewal_decision', label: '查看续费' },
+        secondary_actions: [],
+      },
+      {
+        rule_id: 'lifecycle.blocker.v1',
+        severity: 'warning',
+        title: '生命周期待处理',
+        source: 'lifecycle',
+        primary_action: { id: 'open_management', label: '打开管理' },
+        secondary_actions: [],
+      },
+      {
+        rule_id: 'source.unavailable.v1',
+        severity: 'notice',
+        title: '判断依据暂不可用',
+        source: 'overview',
+        primary_action: { id: 'retry_overview', label: '重试概览' },
+        secondary_actions: [],
+      },
+    ]
+    overview.relations = [
+      ...overview.relations,
+      {
+        kind: 'services',
+        count: 1,
+        label: '服务',
+        section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' },
+      },
+      {
+        kind: 'domains',
+        count: 1,
+        label: '域名',
+        section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' },
+      },
+    ]
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <VPSOverviewPageView
+          overview={overview}
+          management={management}
+          onRefresh={refresh}
+          retrying={false}
+        />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '管理订阅' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看续费' }))
+    fireEvent.click(screen.getByRole('button', { name: '打开管理' }))
+    fireEvent.click(screen.getByRole('button', { name: '重试概览' }))
+    fireEvent.click(screen.getByRole('button', { name: /监控实例/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^服务/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^域名/ }))
+
+    expect(management.openPanel).toHaveBeenCalledWith('subscription')
+    expect(management.openPanel).toHaveBeenCalledWith('decision')
+    expect(management.openPanel).toHaveBeenCalledWith('monitoring-instance-evidence')
+    expect(management.openPanel).toHaveBeenCalledWith('services-detail')
+    expect(management.openPanel).toHaveBeenCalledWith('domains-detail')
+    expect(management.openMenu).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('VPSOverviewAnomalies', () => {
@@ -139,25 +338,29 @@ describe('VPSOverviewAnomalies', () => {
     render(
       <MemoryRouter>
         <VPSOverviewAnomalies
+          vpsId="vps_001"
           anomalies={[{
-            rule_id: 'renewal.due_soon',
+            rule_id: 'renewal.due.soon.v1',
             severity: 'warning',
             title: '续费临期',
             detail: '7 天内到期',
             source: 'subscription',
-            primary_action: { id: 'open_renewal', label: '处理续费', route: '/vps/vps_001' },
+            primary_action: { id: 'open_renewal_decision', label: '处理续费' },
             secondary_actions: [],
           }]}
+          onCommand={vi.fn()}
         />
       </MemoryRouter>,
     )
 
     expect(screen.getByRole('heading', { name: '需要关注' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '处理续费' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '处理续费' })).toBeInTheDocument()
   })
 
   it('returns null for healthy empty anomalies', () => {
-    const { container } = render(<VPSOverviewAnomalies anomalies={[]} />)
+    const { container } = render(
+      <VPSOverviewAnomalies vpsId="vps_001" anomalies={[]} onCommand={vi.fn()} />,
+    )
     expect(container.firstChild).toBeNull()
   })
 })

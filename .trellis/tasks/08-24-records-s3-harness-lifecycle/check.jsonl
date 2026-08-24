@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/08-24-records-s3-harness-lifecycle/prd.md", "reason": "Check every I-04 acceptance criterion."}
+{"file": ".trellis/tasks/08-24-records-s3-harness-lifecycle/design.md", "reason": "Check exact resource ownership, failure precedence, keep mode, and rollback."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/research/s3-harness.md", "reason": "Check the full fake fault matrix and real no-leak proof."}
+{"file": ".trellis/spec/backend/record-integration-contract.md", "reason": "Review required profile, no-skip, cleanup, and recovery semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review deterministic Go and shell verification."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Review content-safe diagnostics."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Review protected delivery evidence."}

@@ -8,6 +8,9 @@ export type VPSManagementPanel =
   | 'subscription'
   | 'cancellation'
   | 'archive'
+  | 'monitoring-instance-evidence'
+  | 'services-detail'
+  | 'domains-detail'
 
 export type VPSManagementController = {
   panel: VPSManagementPanel

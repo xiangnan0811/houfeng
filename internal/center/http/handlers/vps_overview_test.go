@@ -31,11 +31,14 @@ func (stub *vpsOverviewStub) Get(_ context.Context, request vpsoverview.Request)
 func TestVPSOverviewHandlerReturnsPayload(t *testing.T) {
 	now := time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)
 	stub := &vpsOverviewStub{overview: vpsoverview.Overview{
-		GeneratedAt:  now,
-		Identity:     vpsoverview.Identity{VPSID: "vps_7c2a4e18b09d5f31", DisplayName: "Alpha", Labels: []string{}},
-		Anomalies:    []vpsoverview.Anomaly{},
-		Facts:        []vpsoverview.Fact{},
-		Relations:    []vpsoverview.RelationSummary{},
+		GeneratedAt: now,
+		Identity:    vpsoverview.Identity{VPSID: "vps_7c2a4e18b09d5f31", DisplayName: "Alpha", Labels: []string{}},
+		Anomalies:   []vpsoverview.Anomaly{},
+		Facts:       []vpsoverview.Fact{},
+		Relations: []vpsoverview.RelationSummary{{
+			Kind: "services", Count: 0, Status: "unavailable", Label: "服务",
+			Section: vpsoverview.SectionState{State: vpsoverview.SectionUnavailable, ReasonCode: "relation_unavailable"},
+		}},
 		Capabilities: []string{vpsoverview.CapabilityRecordsV2Read},
 	}}
 	actor, err := recordauth.NormalizeActorScope(recordauth.ActorScope{
@@ -60,6 +63,27 @@ func TestVPSOverviewHandlerReturnsPayload(t *testing.T) {
 	}
 	if _, ok := payload["anomalies"]; !ok {
 		t.Fatal("missing anomalies")
+	}
+	var relations []vpsoverview.RelationSummary
+	if err := json.Unmarshal(payload["relations"], &relations); err != nil {
+		t.Fatalf("relations: %v", err)
+	}
+	if len(relations) != 1 || relations[0].Section.State != vpsoverview.SectionUnavailable ||
+		relations[0].Section.ReasonCode != "relation_unavailable" {
+		t.Fatalf("relations = %#v", relations)
+	}
+	var relationPayloads []map[string]json.RawMessage
+	if err := json.Unmarshal(payload["relations"], &relationPayloads); err != nil {
+		t.Fatalf("raw relations: %v", err)
+	}
+	if len(relationPayloads) != 1 {
+		t.Fatalf("raw relations = %#v, want exactly one", relationPayloads)
+	}
+	if _, exists := relationPayloads[0]["section"]; !exists {
+		t.Fatalf("required relation section missing from %s", payload["relations"])
+	}
+	if _, exists := relationPayloads[0]["route"]; exists {
+		t.Fatalf("command-owned relation route must be omitted: %s", payload["relations"])
 	}
 }
 

@@ -25,6 +25,7 @@ import type {
 import { VPSFactsEditForm } from './VPSFactsEditForm'
 import type { VPSManagementController } from './hooks/useVPSManagementController'
 import { VPSRenewalDecisionForm } from './VPSRenewalDecisionForm'
+import { VPSOverviewRelationPanels } from './VPSOverviewRelationPanels'
 import { VPSSubscriptionForm } from './VPSSubscriptionForm'
 import type { DecisionDraftState, FactEditFormState, SubscriptionDraftState } from './types'
 import {
@@ -94,6 +95,9 @@ export function VPSOverviewManagementActions({
   const subscriptionOpen = panel === 'subscription'
   const cancellationOpen = panel === 'cancellation'
   const archiveOpen = panel === 'archive'
+  const relationPanelOpen = panel === 'monitoring-instance-evidence'
+    || panel === 'services-detail'
+    || panel === 'domains-detail'
   const detailPanelOpen = factsOpen || decisionOpen || subscriptionOpen
 
   useEffect(() => {
@@ -451,6 +455,14 @@ export function VPSOverviewManagementActions({
             </>
           ) : null}
         </p>
+      ) : null}
+
+      {relationPanelOpen ? (
+        <VPSOverviewRelationPanels
+          key={`${vpsId}:${panel}`}
+          vpsId={vpsId}
+          management={management}
+        />
       ) : null}
 
       <Modal

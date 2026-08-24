@@ -7,34 +7,12 @@ import (
 
 	"houfeng/internal/center/activity"
 	"houfeng/internal/center/recordauth"
+	centerrecords "houfeng/internal/center/records"
+	overviewperftest "houfeng/internal/center/testsupport/vpsoverviewperf"
 	"houfeng/internal/center/vpsoverview"
 )
 
 const overviewPerfBudget = 750 * time.Millisecond
-
-type overviewPerfSources struct {
-	bundle vpsoverview.SourceBundle
-}
-
-func (sources overviewPerfSources) LoadSources(context.Context, string) (vpsoverview.SourceBundle, error) {
-	return sources.bundle, nil
-}
-
-type overviewPerfLiveSubjects struct{}
-
-func (overviewPerfLiveSubjects) ResolveLive(
-	_ context.Context,
-	_ recordauth.ActorScope,
-	ref activity.SubjectRef,
-) (activity.SubjectHeader, error) {
-	return activity.SubjectHeader{
-		Kind:      ref.Kind,
-		SourceID:  ref.SourceID,
-		Identity:  map[string]string{"display_name": "perf-vps"},
-		LiveRoute: "/vps/" + ref.SourceID,
-		Status:    activity.SubjectStatusLive,
-	}, nil
-}
 
 // TestPostgresIntegrationVPSOverviewPerformance times the overview aggregator
 // against a large subject activity projection (same seed as the timeline test).
@@ -47,11 +25,36 @@ func TestPostgresIntegrationVPSOverviewPerformance(t *testing.T) {
 	if err := seedActivityPerformanceProjection(ctx, pool, count); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `analyze public.record_activity_subjects; analyze public.record_activity_projection`); err != nil {
-		t.Fatalf("analyze: %v", err)
+	if err := overviewperftest.SeedAuthority(ctx, pool, activityPerfSubjectID); err != nil {
+		t.Fatalf("seed overview authority: %v", err)
+	}
+	if err := overviewperftest.PrepareMeasurement(ctx, pool); err != nil {
+		t.Fatalf("prepare measurement: %v", err)
 	}
 
-	repository, err := NewActivityProjectionRepository(pool)
+	trace := &overviewperftest.QueryTrace{}
+	runtimePool := overviewperftest.OpenTracedPool(t, ctx, pool, trace)
+	vpsRepository := NewPostgresVPSAssetRepository(runtimePool)
+	sources, err := NewVPSOverviewRepository(
+		vpsRepository,
+		NewPostgresVPSMonitoringInstanceLinkRepository(runtimePool),
+		NewPostgresIPQualityRepository(runtimePool),
+		NewPostgresSubscriptionRepository(runtimePool),
+		NewPostgresAssetServiceRepository(runtimePool),
+		NewPostgresAssetDomainRepository(runtimePool),
+	)
+	if err != nil {
+		t.Fatalf("overview sources: %v", err)
+	}
+	subjects, err := centerrecords.NewSubjectAdapterRegistry([]centerrecords.SubjectSourceAdapter{
+		NewVPSRecordSubjectAdapter(vpsRepository),
+		NewMonitoringInstanceRecordSubjectAdapter(NewPostgresMonitoringInstanceRepository(runtimePool)),
+		NewTargetRecordSubjectAdapter(NewPostgresTargetRepository(runtimePool)),
+	})
+	if err != nil {
+		t.Fatalf("subject registry: %v", err)
+	}
+	activityRepository, err := NewActivityProjectionRepository(runtimePool)
 	if err != nil {
 		t.Fatalf("repository: %v", err)
 	}
@@ -60,27 +63,12 @@ func TestPostgresIntegrationVPSOverviewPerformance(t *testing.T) {
 		t.Fatalf("cursor codec: %v", err)
 	}
 	activityService, err := activity.NewService(
-		repository, repository, overviewPerfLiveSubjects{}, codec,
+		activityRepository, activityRepository, NewActivityLiveSubjectResolver(subjects), codec,
 	)
 	if err != nil {
 		t.Fatalf("activity service: %v", err)
 	}
-	overviewService, err := vpsoverview.NewServiceWithClock(overviewPerfSources{
-		bundle: vpsoverview.SourceBundle{
-			Identity: vpsoverview.Identity{
-				VPSID:           activityPerfSubjectID,
-				DisplayName:     "perf-vps",
-				LifecycleStatus: "active",
-				UsageStatus:     "in_use",
-				Labels:          []string{},
-			},
-			MonitoringSection: vpsoverview.SectionState{State: vpsoverview.SectionReady},
-			IPSection:         vpsoverview.SectionState{State: vpsoverview.SectionReady},
-			RenewalSection:    vpsoverview.SectionState{State: vpsoverview.SectionReady},
-			Facts:             []vpsoverview.Fact{},
-			Relations:         []vpsoverview.RelationSummary{},
-		},
-	}, activityService, func() time.Time { return time.Now().UTC() }, 5*time.Second)
+	overviewService, err := vpsoverview.NewService(sources, activityService)
 	if err != nil {
 		t.Fatalf("overview service: %v", err)
 	}
@@ -93,26 +81,38 @@ func TestPostgresIntegrationVPSOverviewPerformance(t *testing.T) {
 	}
 	request := vpsoverview.Request{Actor: actor, VPSID: activityPerfSubjectID}
 
-	if _, err := overviewService.Get(ctx, request); err != nil {
+	warmup, err := overviewService.Get(ctx, request)
+	if err != nil {
 		t.Fatalf("warmup overview: %v", err)
 	}
+	if err := overviewperftest.ValidateHealthyOverview(warmup, activityPerfSubjectID); err != nil {
+		t.Fatalf("warmup unhealthy overview: %v", err)
+	}
+	if err := trace.Snapshot().Validate(); err != nil {
+		t.Fatalf("warmup query contract: %v", err)
+	}
+	trace.Reset()
 
 	durations := make([]time.Duration, 0, activityPerfRuns)
 	for run := 1; run <= activityPerfRuns; run++ {
+		trace.Reset()
 		started := time.Now()
 		overview, err := overviewService.Get(ctx, request)
 		elapsed := time.Since(started)
 		if err != nil {
 			t.Fatalf("run %d overview: %v", run, err)
 		}
-		if overview.Identity.VPSID != activityPerfSubjectID {
-			t.Fatalf("run %d identity = %q", run, overview.Identity.VPSID)
+		if err := overviewperftest.ValidateHealthyOverview(overview, activityPerfSubjectID); err != nil {
+			t.Fatalf("run %d unhealthy overview: %v", run, err)
 		}
-		if len(overview.RecentActivity.Items) == 0 {
-			t.Fatalf("run %d: expected recent activity items", run)
+		queryStats := trace.Snapshot()
+		if err := queryStats.Validate(); err != nil {
+			t.Fatalf("run %d query contract: %v", run, err)
 		}
 		durations = append(durations, elapsed)
-		t.Logf("run %d overview Get = %s (recent=%d)", run, elapsed.Round(time.Millisecond), len(overview.RecentActivity.Items))
+		t.Logf("run %d overview Get = %s (recent=%d queries=%d query_errors=%d query_error_rate=%.2f%%)",
+			run, elapsed.Round(time.Millisecond), len(overview.RecentActivity.Items),
+			queryStats.Count, queryStats.Errors, queryStats.ErrorRatePercent())
 	}
 
 	p50, p95, p99 := durationPercentiles(durations)

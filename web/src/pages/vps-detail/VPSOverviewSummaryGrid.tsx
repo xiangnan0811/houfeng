@@ -1,21 +1,24 @@
 import type { VPSOverview } from '../../lib/types'
+import { VPSOverviewFreshness } from './VPSOverviewFreshness'
 
 type Props = {
   summary: VPSOverview['summary']
+  onRefresh: () => void
+  retrying: boolean
 }
 
-const CELLS: Array<{ key: keyof VPSOverview['summary']; label: string }> = [
-  { key: 'overall', label: '总体' },
-  { key: 'monitoring', label: '监控' },
-  { key: 'ip_quality', label: 'IP 质量' },
-  { key: 'renewal', label: '续费' },
+const CELLS: Array<{ key: keyof VPSOverview['summary']; label: string; retryable: boolean }> = [
+  { key: 'overall', label: '总体', retryable: false },
+  { key: 'monitoring', label: '监控', retryable: true },
+  { key: 'ip_quality', label: 'IP 质量', retryable: true },
+  { key: 'renewal', label: '续费', retryable: true },
 ]
 
-export function VPSOverviewSummaryGrid({ summary }: Props) {
+export function VPSOverviewSummaryGrid({ summary, onRefresh, retrying }: Props) {
   return (
     <section className="vps-overview-summary" aria-label="决策摘要">
       <div className="vps-overview-summary__grid">
-        {CELLS.map(({ key, label }) => {
+        {CELLS.map(({ key, label, retryable }) => {
           const cell = summary[key]
           return (
             <article key={key} className="vps-overview-summary__cell">
@@ -24,6 +27,12 @@ export function VPSOverviewSummaryGrid({ summary }: Props) {
               {cell.detail ? (
                 <p className="vps-overview-summary__detail">{cell.detail}</p>
               ) : null}
+              <VPSOverviewFreshness
+                section={cell.section}
+                sourceLabel={label}
+                {...(retryable ? { onRetry: onRefresh } : {})}
+                retrying={retrying}
+              />
             </article>
           )
         })}

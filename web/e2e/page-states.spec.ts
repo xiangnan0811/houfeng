@@ -19,6 +19,7 @@ import {
   subjectActivityFixture,
   subjectActivityProfile,
   vpsOverviewFixture,
+  vpsOverviewPartialFixture,
   vpsOverviewProfile,
 } from './fixtures/profiles'
 
@@ -278,6 +279,31 @@ test('VPS 概览 keeps loading until the overview response is released', async (
   await expect(page.getByRole('heading', { name: 'Tokyo Edge' })).toBeVisible()
 })
 
+test('VPS 概览 rejects an empty 200 response and recovers only after retry', async ({
+  api,
+  page,
+}) => {
+  api.useProfile(authenticatedProfile({
+    [apiRouteKey('GET', '/api/vps/vps_001/overview')]: {
+      status: 200,
+      body: {},
+    },
+  }))
+
+  await page.goto('/vps/vps_001')
+
+  await expect(page.getByRole('heading', { name: '无法加载 VPS 概览' })).toBeVisible()
+  await expect(page.getByText('VPS 概览请求或响应校验失败，请重试。')).toBeVisible()
+  await expect(page.locator('.vps-detail-page')).toHaveCount(0)
+  expect(api.requestCount('GET', '/api/vps/vps_001/overview')).toBe(1)
+
+  api.useProfile(vpsOverviewProfile())
+  await page.getByRole('button', { name: '重试' }).click()
+
+  await expect(page.getByRole('heading', { name: 'Tokyo Edge' })).toBeVisible()
+  expect(api.requestCount('GET', '/api/vps/vps_001/overview')).toBe(2)
+})
+
 test('VPS 概览 healthy surface omits anomaly chrome', async ({ api, page }) => {
   api.useProfile(vpsOverviewProfile({ overview: vpsOverviewFixture({ anomalies: [] }) }))
   await page.goto('/vps/vps_001')
@@ -293,19 +319,45 @@ test('VPS 概览 anomaly surface inserts attention before summary', async ({ api
   api.useProfile(vpsOverviewProfile({
     overview: vpsOverviewFixture({
       anomalies: [{
-        rule_id: 'renewal.due_soon',
+        rule_id: 'renewal.due.soon.v1',
         severity: 'warning',
         title: '续费临期',
         detail: '7 天内到期',
         source: 'subscription',
-        primary_action: { id: 'open', label: '处理续费', route: '/vps/vps_001' },
+        primary_action: { id: 'open_renewal_decision', label: '处理续费' },
         secondary_actions: [],
       }],
     }),
   }))
   await page.goto('/vps/vps_001')
   await expect(page.getByRole('heading', { name: '需要关注' })).toBeVisible()
-  await expect(page.getByRole('link', { name: '处理续费' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '处理续费' })).toBeVisible()
+})
+
+test('VPS 概览 keeps partial freshness local and retries only the full overview', async ({ api, page }) => {
+  const partial = vpsOverviewPartialFixture()
+  api.useProfile(vpsOverviewProfile({ overview: partial }))
+  await page.goto('/vps/vps_001')
+
+  await expect(page.getByRole('heading', { name: 'Tokyo Edge' })).toBeVisible()
+  await expect(page.getByLabel('IP 质量新鲜度')).toContainText('数据陈旧')
+  await expect(page.getByLabel('续费新鲜度')).toContainText('暂不可用')
+  await expect(page.getByLabel('服务新鲜度')).toContainText('暂不可用')
+  await expect(page.getByText('最近活动暂不可用，无法确认是否为空。')).toBeVisible()
+  const serviceCard = page.locator('.vps-overview-relations__item').filter({ hasText: '服务' })
+  await expect(serviceCard.locator('.vps-overview-relations__count')).toHaveText('—')
+
+  const refreshGate = controlledPromise()
+  api.useProfile(vpsOverviewProfile({ overview: partial, overviewWaitFor: refreshGate.promise }))
+  const retry = page.getByRole('button', { name: '重试 IP 质量' })
+  await retry.focus()
+  await page.keyboard.press('Enter')
+
+  await expect.poll(() => api.requestCount('GET', '/api/vps/vps_001/overview')).toBe(2)
+  await expect(page.getByRole('heading', { name: 'Tokyo Edge' })).toBeVisible()
+  await expect(retry).toBeDisabled()
+  refreshGate.resolve()
+  await expect(retry).toBeEnabled()
 })
 
 test('单主体时间线 loading / empty / local-error states', async ({ api, page }) => {

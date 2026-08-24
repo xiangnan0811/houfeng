@@ -13,6 +13,7 @@ type VPSServicesSectionProps = {
   services: AssetServiceRecord[]
   error: string | null
   notice: string | null
+  readOnly?: boolean
   onCreate: () => void
 }
 
@@ -20,6 +21,7 @@ export function VPSServicesSection({
   services,
   error,
   notice,
+  readOnly = false,
   onCreate,
 }: VPSServicesSectionProps) {
   const serviceColumns: DataTableColumn<AssetServiceRecord>[] = [
@@ -92,7 +94,7 @@ export function VPSServicesSection({
         <span className="section-heading__meta">
           <MonoDigits>{services.length}</MonoDigits> 个手工记录服务
         </span>
-        <Button variant="secondary" size="sm" onClick={onCreate}>新增服务</Button>
+        {!readOnly ? <Button variant="secondary" size="sm" onClick={onCreate}>新增服务</Button> : null}
       </div>
       {error ? (
         <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">

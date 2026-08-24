@@ -110,6 +110,8 @@ func TestChild11AssemblyArtifactsRejectLeakCorpus(t *testing.T) {
 		filepath.Join("scripts", "run-records-integration.sh"),
 		filepath.Join("scripts", "run-records-recovery.sh"),
 		filepath.Join("scripts", "run-records-security.sh"),
+		filepath.Join("scripts", "lib", "records-runner-lifecycle.sh"),
+		filepath.Join("scripts", "test-records-s3-lifecycle.sh"),
 		filepath.Join("cmd", "houfeng-backup", "main.go"),
 		filepath.Join("cmd", "houfeng-restore", "main.go"),
 	} {

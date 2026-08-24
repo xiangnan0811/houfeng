@@ -1,0 +1,95 @@
+/* Route-private freshness presentation for the VPS overview decision surface. */
+.vps-overview-freshness {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: var(--border-w) solid var(--border-muted);
+  color: var(--text-secondary);
+  font-size: var(--type-small-size);
+}
+
+.vps-overview-freshness__headline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.vps-overview-freshness__state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px var(--space-2);
+  border: var(--border-w) solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.vps-overview-freshness--ready .vps-overview-freshness__state {
+  border-color: color-mix(in srgb, var(--color-state-normal) 38%, transparent);
+  color: var(--color-state-normal);
+}
+
+.vps-overview-freshness--stale .vps-overview-freshness__state {
+  border-color: color-mix(in srgb, var(--color-state-alert) 42%, transparent);
+  color: var(--color-state-alert);
+}
+
+.vps-overview-freshness--unavailable .vps-overview-freshness__state {
+  border-color: color-mix(in srgb, var(--color-state-critical) 42%, transparent);
+  color: var(--color-state-critical);
+}
+
+.vps-overview-freshness__reason {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.vps-overview-freshness__times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.vps-overview-freshness__times > div {
+  display: inline-flex;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.vps-overview-freshness__times dt,
+.vps-overview-freshness__times dd {
+  margin: 0;
+}
+
+.vps-overview-freshness__times dt {
+  color: var(--text-muted);
+}
+
+.vps-overview-freshness__retry {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.vps-overview-relations__item {
+  padding: var(--space-3);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-2);
+  background: var(--surface);
+}
+
+.vps-overview-relations__item > .vps-overview-relations__link {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}

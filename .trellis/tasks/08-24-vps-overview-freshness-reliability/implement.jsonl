@@ -1,0 +1,11 @@
+{"file": ".trellis/tasks/08-24-vps-overview-freshness-reliability/prd.md", "reason": "I-03 requirements and acceptance criteria."}
+{"file": ".trellis/tasks/08-24-vps-overview-freshness-reliability/design.md", "reason": "Approved reader, budget, freshness, DTO, and UI design."}
+{"file": ".trellis/tasks/08-24-vps-detail-refactor-remediation/research/freshness.md", "reason": "Current-code inventory and exact RED and verification matrix."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Contexts, concurrency, deterministic tests, Go gates, and PostgreSQL evidence."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Closed safe reason codes and no internal error leakage."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Go and TypeScript alignment plus retained refresh state."}
+{"file": ".trellis/spec/web/component-conventions.md", "reason": "Controlled local retry, accessibility, and component ownership."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Node 22, Vitest, Chromium, Axe, and responsive gates."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Trace source authority through DTO, facade, hook, components, and browser."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Stay on the non-main remediation branch and preserve protected delivery."}
+{"file": ".trellis/tasks/archive/2026-08/07-14-vps-records-activity-overview/design.md", "reason": "Original bounded overview and privacy-safe freshness authority."}
