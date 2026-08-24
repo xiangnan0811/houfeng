@@ -2,6 +2,7 @@
 {"file":".trellis/tasks/08-24-production-compose-deployment/design.md","reason":"Review service ownership, initialization, NPM, config, portability, and rollback."}
 {"file":".trellis/tasks/08-24-production-compose-deployment/research/deployment-baseline.md","reason":"Check implementation against current source-of-truth facts."}
 {"file":".trellis/tasks/08-24-production-compose-deployment/research/records-authority.md","reason":"Verify the approved authority design resolves the confirmed admission blocker without bypass."}
+{"file":".trellis/tasks/08-24-production-compose-deployment/research/release-asset-name.md","reason":"Verify the stable public asset name fixes the observed v0.76.0 release failure."}
 {"file":".trellis/spec/backend/directory-structure.md","reason":"Verify final deployment and release artifacts match the updated contract."}
 {"file":".trellis/spec/backend/database-guidelines.md","reason":"Verify exact current APP writer/roles/runtime admission and no privilege leakage."}
 {"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review deterministic, PostgreSQL, Compose, Docker, and full Go gates."}

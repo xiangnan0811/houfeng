@@ -534,7 +534,7 @@ func TestProductionQuickStartUsesReleaseAssetsAndAutomaticInitialization(t *test
 	for name, document := range map[string]string{"README": readme, "deployment guide": composeGuide} {
 		steps := []string{
 			"https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.yaml",
-			"https://github.com/xiangnan0811/houfeng/releases/latest/download/.env.example",
+			"https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.env.example",
 			"docker compose config",
 			"docker compose up -d",
 		}
@@ -584,13 +584,83 @@ func TestPublishWorkflowUploadsVersionMatchedDeploymentAssets(t *testing.T) {
 	for _, required := range []string{
 		"\n  deployment-assets:\n",
 		"compose.yaml",
-		".env.example",
+		"compose.env.example",
 		"docker.io/linnea7171/houfeng:v${{ needs.resolve.outputs.version }}",
-		"docker compose --env-file dist/.env.example -f dist/compose.yaml config --images",
+		"docker compose --env-file dist/compose.env.example -f dist/compose.yaml config --images",
 		"gh release upload",
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("publish workflow must contain deployment asset contract %q", required)
+		}
+	}
+}
+
+func TestPublishWorkflowUsesStablePublicComposeEnvironmentAssetName(t *testing.T) {
+	t.Parallel()
+
+	workflow := readText(t, filepath.Join(repoRoot(t), ".github", "workflows", "publish-images.yml"))
+	for _, required := range []string{
+		"cp docs/deploy/compose.env.example dist/compose.env.example",
+		"docker compose --env-file dist/compose.env.example -f dist/compose.yaml config --images",
+		"dist/compose.env.example \\",
+		"echo \"- \\`compose.env.example\\`\"",
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("publish workflow must stage, validate, upload, and report the stable public deployment asset through %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"dist/.env.example",
+		"dist/default.env.example",
+	} {
+		if strings.Contains(workflow, forbidden) {
+			t.Fatalf("publish workflow must not use normalized or hidden deployment asset path %q", forbidden)
+		}
+	}
+}
+
+func TestPublishWorkflowVerifiesPublicDeploymentAssetsAfterUpload(t *testing.T) {
+	t.Parallel()
+
+	workflow := readText(t, filepath.Join(repoRoot(t), ".github", "workflows", "publish-images.yml"))
+	deploymentJobOffset := strings.Index(workflow, "\n  deployment-assets:\n")
+	if deploymentJobOffset < 0 {
+		t.Fatal("publish workflow must define the deployment-assets job")
+	}
+	deploymentJob := workflow[deploymentJobOffset:]
+	uploadOffset := strings.Index(deploymentJob, "gh release upload")
+	verificationOffset := strings.Index(deploymentJob, "- name: Verify public deployment release assets")
+	summaryOffset := strings.Index(deploymentJob, "- name: Publish summary")
+	if uploadOffset < 0 || verificationOffset <= uploadOffset || summaryOffset <= verificationOffset {
+		t.Fatal("publish workflow must upload, publicly read back/download, then report deployment assets")
+	}
+	verificationStep := deploymentJob[verificationOffset:summaryOffset]
+	for _, required := range []string{
+		"- name: Verify public deployment release assets",
+		`verify_dir="$(mktemp -d)"`,
+		`trap 'rm -rf "$verify_dir"' EXIT`,
+		`gh release view "$VERSION" --json assets --jq '.assets[].name'`,
+		"required_deployment_assets=(compose.yaml compose.env.example)",
+		`if [[ "$release_asset" == "$asset" ]]; then`,
+		`if [[ "$matches" -ne 1 ]]; then`,
+		"for forbidden_asset in .env.example default.env.example; do",
+		`gh release download "$VERSION" --pattern 'compose.yaml' --dir "$verify_dir"`,
+		`gh release download "$VERSION" --pattern 'compose.env.example' --dir "$verify_dir"`,
+		`test -f "$verify_dir/compose.yaml"`,
+		`test -f "$verify_dir/compose.env.example"`,
+		`cmp -s dist/compose.yaml "$verify_dir/compose.yaml"`,
+		`cmp -s dist/compose.env.example "$verify_dir/compose.env.example"`,
+	} {
+		if !strings.Contains(verificationStep, required) {
+			t.Fatalf("publish workflow must verify public deployment release assets through %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		`"${#release_asset_names[@]}" -ne 2`,
+		`"${#release_asset_names[@]}" != 2`,
+	} {
+		if strings.Contains(verificationStep, forbidden) {
+			t.Fatalf("public deployment verification must preserve unrelated release assets; found total-asset assumption %q", forbidden)
 		}
 	}
 }
@@ -608,6 +678,7 @@ func TestProductionComposeTrellisSpecsMatchReleaseAndAuthorityContract(t *testin
 		"HOUFENG_PROXY_NETWORK",
 		"./data/records-authority",
 		"no public host port",
+		"post-upload public readback",
 	} {
 		if !strings.Contains(deploymentSpec, required) {
 			t.Fatalf("deployment Trellis spec must contain %q", required)

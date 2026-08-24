@@ -335,7 +335,7 @@ if ok {
 
 1. **Scope / Trigger**
    - 触发：修改 `Dockerfile`、`compose.yaml`、`docs/deploy/compose.env.example`、README / deployment docs、Center/processor/ClamAV/PostgreSQL/Records authority 边界，或 `.github/workflows/publish-images.yml`。
-   - 目标：下载同一 GitHub Release 的 `compose.yaml` 与 `.env.example` 后，operator 只需编辑 `.env`、验证并执行普通 Compose；不 checkout source、不 build、不运行 SQL/helper launcher。Agent 仍是 monitored host 上的 Linux/systemd workload。
+   - 目标：下载同一 GitHub Release 的 `compose.yaml` 与 `compose.env.example`（后者保存为本地 `.env`）后，operator 只需编辑 `.env`、验证并执行普通 Compose；不 checkout source、不 build、不运行 SQL/helper launcher。Agent 仍是 monitored host 上的 Linux/systemd workload。
 
 2. **Signatures**
    - Root `Dockerfile` produces one published image containing `houfeng-center`, `houfeng-content-processor`, `houfeng-record-platform-admin`, baked `web/dist`, curl, and Poppler. Normal runtime stays `USER houfeng:houfeng` (UID/GID 10001); only explicit one-shot/authority services override identity.
@@ -351,7 +351,7 @@ if ok {
    - Durable local state is a visible portable tree: `./data/postgres`, `./data/attachments`, `./data/logs`, `./data/clamav`, `./data/records-authority`, `./data/center-config`, and `./data/secrets`. PostgreSQL, local attachments, and Records authority state are one coordinated restore unit; active DB plus absent/corrupt/mismatched authority state fails closed.
    - Processor stays non-root, read-only, `cap_drop: ALL`, `no-new-privileges`, core=0, with bounded `noexec,nosuid,nodev` tmpfs. Center and processor share only the runtime DB role, Blob contract, attachment bind, and scanner settings.
    - `.env` passwords use independently generated, pairwise-distinct hex values (`openssl rand -hex 32`) to avoid dotenv interpolation traps and cross-role credential reuse; db-init rejects duplicate role secrets before mutation. Password-only edits do not guarantee service recreation: controlled rotation stops consumers, reruns `houfeng-secrets-init`, reruns `houfeng-db-init`, then force-recreates Center/processor.
-   - `.github/workflows/publish-images.yml` may publish only on `release.published` or explicit maintainer dispatch. It checks out the resolved release source, builds the image, creates tag-matched deployment assets, validates resolved project images, and uploads `compose.yaml` plus `.env.example` to the matching GitHub Release.
+   - `.github/workflows/publish-images.yml` may publish only on `release.published` or explicit maintainer dispatch. It checks out the resolved release source, builds the image, stages and validates the public `compose.env.example` filename (never hidden `dist/.env.example`), and uploads `compose.yaml` plus `compose.env.example` to the matching GitHub Release. A post-upload public readback queries all asset names, requires exactly one of each deployment name, rejects `.env.example` / `default.env.example` without rejecting unrelated agent assets, downloads both exact names into a fresh trap-cleaned directory, and requires byte identity with the staged files before the success summary.
    - Direct/systemd documentation may retain explicit pre-R1 provisioning as an advanced path, but the Docker quick-start section must contain no manual SQL, local toolchain, source build, or helper launcher.
 
 4. **Validation & Error Matrix**
@@ -365,6 +365,7 @@ if ok {
    | Center/processor receives privileged/authority secret | reject static review and service config |
    | processor becomes root/writable/capable or loses bounds | reject static review and runtime inspection |
    | release env image differs from the release tag | deployment-assets job fails before upload |
+   | required public deployment name absent/duplicated, legacy normalized name present, download absent, or public bytes differ | deployment-assets job fails after upload and before success summary |
    | operator changes only a secret then runs plain `up -d` | not a supported rotation proof; require explicit staging/init/recreation sequence |
    | operator restores only DB, attachments, or authority state | incomplete recovery point; restore the coordinated directory copy |
 
@@ -380,7 +381,7 @@ if ok {
    - `docker compose config` must fail independently for every required blank and pass with a task-owned valid env. Validate current installed Compose syntax, including environment-backed secrets and external networks.
    - Strict PostgreSQL 16 tests must cover fresh init, exact repeat, role drift, password rotation, current convergence/admission, activation, heartbeat expiry/renewal, and privilege denials with zero skips.
    - Real isolated Compose evidence must build/inspect the release image, start unique task-owned resources, prove admitted Records + attachment/ClamAV flow, restart/exact repeat, corrupt-state fail-closed, portable-copy behavior, and clean teardown without touching unrelated Docker state.
-   - Inspect the image for all three binaries, baked Web, Poppler/curl, default UID/GID 10001, and entrypoint behavior. Run `make verify-go`, applicable Web/workflow checks, `actionlint` when installed, shell syntax, and `git diff --check`.
+   - Inspect the image for all three binaries, baked Web, Poppler/curl, default UID/GID 10001, and entrypoint behavior. Workflow static checks freeze post-upload name query/cardinality, forbidden-name rejection, fresh exact downloads, trap cleanup, byte comparison, and upload/readback/summary ordering while preserving unrelated Release assets. Run `make verify-go`, applicable Web/workflow checks, `actionlint` when installed, shell syntax, and `git diff --check`.
    - Static docs tests must scope Docker quick-start prohibitions to the Compose section so advanced direct/systemd provisioning remains correct.
 
 7. **Wrong vs Correct**

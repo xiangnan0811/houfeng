@@ -1,6 +1,6 @@
 # Production Docker Compose deployment implementation plan
 
-> Follow TDD. Keep all implementation on `codex/production-compose-deployment` in the dedicated worktree. Do not stage, commit, push, or change another task/worktree.
+> Follow TDD. Keep the release-asset hotfix on `codex/production-compose-release-asset-fix` in the dedicated worktree. Do not stage, commit, push, or change another task/worktree.
 
 ## Phase 0: Start gate and baseline
 
@@ -66,7 +66,7 @@
 
 **Files:** `.github/workflows/publish-images.yml`, `README.md`, `docs/deploy/local-and-systemd.md`, docs index/operations docs as needed
 
-- [x] Generate/upload release-tag-pinned `compose.yaml` and `.env.example` assets and verify image/tag agreement.
+- [x] Generate/upload release-tag-pinned `compose.yaml` and `compose.env.example` assets and verify image/tag agreement.
 - [x] Rewrite README quick start around download → edit → validate → up, then exact NPM setup.
 - [x] Rewrite the canonical Compose guide for full production topology, categorized variables, automatic DB initialization, upgrade/backup/restore/host migration, logs/health, and rollback limits.
 - [x] Remove stale claims that Compose is only a development/conformance topology or requires `scripts/compose-up.sh`/manual SQL/password files.
@@ -100,6 +100,22 @@
 - A unique isolated real stack completed fresh automatic provisioning, signed activation, authority health, actual admission-gated Record publish, upload quarantine, ClamAV processing, available attachment download, exact repeat, authority restart, SCRAM password rotation, and safe stage-visible/no-secret diagnostics.
 - A stopped full-directory copy started under a second unique project/network and returned the existing Record and byte-identical attachment. Removing its authority ledger made db-init exit 1 while authority, Center, and processor remained unstarted. The original task stack was restored healthy, then all task containers/networks, the disposable smoke `./data`, portable copy, task image, and task-only temporary state were removed.
 - `GOFLAGS='-p=2' make verify-go`, release/static checks, shell syntax, and final diff hygiene pass. Low parallelism avoids the host's transient test-artifact quota without changing test coverage.
+
+## Phase 10: Patch release asset naming
+
+- [x] Add a deterministic static RED that requires the stable public asset name `compose.env.example` and rejects hidden `dist/.env.example` upload paths.
+- [x] Update the publish workflow, README, canonical deployment guide, task artifacts, and deployment spec to use `compose.env.example`, while operators continue saving it locally as `.env`.
+- [x] Add a post-upload public readback gate that checks exact deployment-name cardinality, rejects normalized legacy names, downloads into a trap-cleaned temporary directory, and proves both public files are byte-identical to the staged assets without restricting unrelated Release assets.
+- [x] Run focused deployment tests, workflow syntax/static checks, proportional repository gates, and independent `trellis-check` on the final snapshot.
+- [ ] Deliver a patch release and prove the public GitHub Release contains downloadable `compose.yaml` and `compose.env.example`, contains neither `.env.example` nor `default.env.example`, and renders every Houfeng service to the matching multi-architecture image tag.
+
+Phase 10 implementation evidence:
+
+- RED: `env GOTOOLCHAIN=go1.26.2 GOCACHE=/var/tmp/houfeng-production-compose-release-gocache GOTMPDIR=/var/tmp/houfeng-production-compose-release-tmp GOFLAGS=-p=2 go test ./internal/center/deploy -run '^TestPublishWorkflowUsesStablePublicComposeEnvironmentAssetName$' -count=1 -v` failed because the workflow did not stage `dist/compose.env.example`; the identical focused command is GREEN after the rename.
+- RED: `env GOTOOLCHAIN=go1.26.2 GOCACHE=/var/tmp/hfpr-cache GOTMPDIR=/var/tmp/hfpr GOFLAGS=-p=1 go test ./internal/center/deploy -run '^TestPublishWorkflowVerifiesPublicDeploymentAssetsAfterUpload$' -count=1 -v` failed because the upload had no public verification step. Extending the same contract to byte identity then failed on the absent `cmp -s dist/compose.yaml "$verify_dir/compose.yaml"`; the identical command is GREEN after adding the post-upload query, exact-name checks, fresh downloads, safe cleanup, and both byte comparisons.
+- The release/docs/spec static contracts and full `go test ./internal/center/deploy -count=1` pass under Go 1.26.2. Ruby parses the workflow YAML, the public-readback step passes `bash -n`, and installed Docker Compose renders the tracked template to the single pinned test image without creating runtime resources; `actionlint` is not installed.
+- `GOTMPDIR=/var/tmp/hfpr GOFLAGS='-p=1' make verify-go` passes. The shorter on-disk temp root avoids host Unix-socket path and tmpfs quota limits without changing test coverage. Independent review and public patch-release verification remain delivery steps.
+- Final independent `trellis-check` reports Critical 0 / Important 0 / Minor 0. It independently passed the five-test release/docs/spec suite, full deploy package, workflow YAML parse, extracted readback shell syntax, Compose render to the single `v0.76.1` Houfeng image, and diff hygiene; the earlier missing-public-postcondition Important is resolved.
 
 ## Stop conditions
 

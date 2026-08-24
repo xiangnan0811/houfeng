@@ -7,14 +7,14 @@ The production path is release-asset based:
 ```text
 create deployment directory
   -> download compose.yaml
-  -> download .env.example as .env
+  -> download compose.env.example as .env
   -> edit every Must change value and review Recommended / Optional settings
   -> docker compose config
   -> docker compose up -d
   -> configure Nginx Proxy Manager to houfeng:16001
 ```
 
-The release workflow checks out the exact release source, creates a version-pinned env asset, verifies that Compose resolves to the same `linnea7171/houfeng:vX.Y.Z`, and uploads both files to the matching GitHub Release. The repository templates stay reviewable; the published env asset carries the concrete release tag.
+The release workflow checks out the exact release source, creates the explicitly named `compose.env.example` version-pinned asset, verifies that Compose resolves to the same `linnea7171/houfeng:vX.Y.Z`, and uploads both files to the matching GitHub Release. It then queries the public asset names, requires exactly one `compose.yaml` and one `compose.env.example`, rejects `.env.example` and `default.env.example` without assuming those are the Release's only assets, and downloads both names to a fresh temporary directory for byte comparison with the staged files before publishing its success summary. A hidden `.env.example` release asset is forbidden because GitHub may normalize its public name. The repository templates stay reviewable; the published env asset carries the concrete release tag.
 
 ## 2. Service graph
 
@@ -178,6 +178,7 @@ TDD begins with deployment static/behavior tests that encode the new contract an
 | Records enabled | Center and processor start against current runtime role |
 | one secret not granted to a service | it is absent from that service configuration/container |
 | image/template release version mismatch | release job fails before upload |
+| required public deployment name missing/duplicated, forbidden name present, download absent, or bytes differ | release job fails after upload and before success summary |
 
 Verification includes fake/isolated command tests, strict PostgreSQL 16 integration for provisioning and repeat, Compose config, real isolated Docker smoke where available, release-workflow static checks, full Go verification, and independent review.
 
