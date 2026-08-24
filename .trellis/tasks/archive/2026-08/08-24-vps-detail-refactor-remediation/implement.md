@@ -83,12 +83,29 @@
 
 ## Phase 7: Protected delivery and final reconciliation
 
-- [ ] 提交 feature branch、push、开 PR；等待 required CI，失败在同 branch 修复。
-- [ ] required CI 全绿后合入 protected main；不直接修改 local/remote main。
-- [ ] 监控 post-merge main CI、Release Please、release jobs 与多架构 image publishing。
-- [ ] 在最终 artifact 对应提交做必要 smoke，核对 PR/merge/release/image digest。
-- [ ] 更新 parent/children task metadata、evidence 与 archive；安全清理选定 worktree/refs 前先核对
+- [x] 提交 feature branch、push、开 PR；等待 required CI，失败在同 branch 修复。
+- [x] required CI 全绿后合入 protected main；不直接修改 local/remote main。
+- [x] 监控 post-merge main CI、Release Please、release jobs 与多架构 image publishing。
+- [x] 在最终 artifact 对应提交做必要 smoke，核对 PR/merge/release/image digest。
+- [x] 更新 parent/children task metadata、evidence 与 archive；安全清理选定 worktree/refs 前先核对
   dirty state，不删除任何用户状态。
+
+### Final protected delivery snapshot
+
+- 产品交付：PR #444 required CI 7/7，通过 squash merge `80abdd3e6e9d81033c097bb24bc7ac1eb428c815`；
+  对应 main CI `32696132095` 7/7 通过。
+- 正式发布：Release PR #445 required CI 7/7，通过 squash merge
+  `f0cde8fe0fead6fa884a3f25d9ba8a088cb0bb8b`；tag/release `v0.75.1` 精确指向该提交，
+  agent amd64/arm64、checksum 与 minisign 资产均已发布。
+- 镜像发布：workflow `32696500404` 全绿；`docker.io/linnea7171/houfeng:v0.75.1`
+  registry index digest 为 `sha256:f13cb443afa750fc392a849e3e49e21f8780f420c44ceb5f5e4de89e3e156c91`，
+  包含 linux/amd64 `sha256:57c01f61f16193b0080e4b8573d0082b80bfe9f6e50d2570d54ac3b4888e2c36`
+  与 linux/arm64 `sha256:398ed034e500189a95cd0582564eb3cb8c7668c43153dfeb03725cf6fdeae6da`。
+- 发布后可靠性闭环：release commit main CI 的单一 CSS repository-scan 5s timeout 经 PR #446
+  修复为局部 15s 上限；PR CI `32697246890` 7/7、最终 main CI `32697595709` 7/7，
+  Release Please `32697595669` 通过且未产生不必要的新版本。
+- 最终对账：parent/children 文档与 metadata 已同步并归档；所有现有 worktree/ref 均先核对状态，
+  未删除用户或历史资源，临时 Docker/TMPDIR 资源保持零残留。
 
 ## Stop conditions
 

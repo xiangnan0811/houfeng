@@ -21,14 +21,14 @@ relation 不再空跳转，API route 输入 fail closed，React Router 升级到
 
 ## Acceptance Criteria
 
-- [ ] backend rule/relation destination 表驱动测试覆盖每个 kind，且 router-level test 证明路径
+- [x] backend rule/relation destination 表驱动测试覆盖每个 kind，且 router-level test 证明路径
   注册或 command callback 被调用。
-- [ ] production behavior 中“查看监控/事件/IP/续费”到达对应 owner；“打开管理/重试”不换页
+- [x] production behavior 中“查看监控/事件/IP/续费”到达对应 owner；“打开管理/重试”不换页
   且触发正确 callback。
-- [ ] monitoring/service/domain relation 打开各自 VPS-scoped panel；external/protocol-relative/
+- [x] monitoring/service/domain relation 打开各自 VPS-scoped panel；external/protocol-relative/
   backslash/mismatched route 与未知 action/relation fail closed。
-- [ ] React Router production audit finding 清零；Web lint/unit/build/budget/Chromium 通过。
-- [ ] 不改变 management modal、focus return、legacy route ordering 或非相关 navigation。
+- [x] React Router production audit finding 清零；Web lint/unit/build/budget/Chromium 通过。
+- [x] 不改变 management modal、focus return、legacy route ordering 或非相关 navigation。
 
 ## Out of Scope
 

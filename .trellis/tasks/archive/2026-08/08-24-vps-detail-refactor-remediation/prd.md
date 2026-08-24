@@ -105,7 +105,7 @@ Parent 只拥有跨 child integration、全量复核和 protected delivery，不
   延期保持不变；没有顺手扩展或不相关重构。
 - [x] `AC-09` 独立 `trellis-check` 无未解决 Critical/Important/Minor；原审查 5 项逐条有
   RED→GREEN 与绝对 `file:line` closure 证据。
-- [ ] `AC-10` feature branch 经 PR/required CI/main CI/release/image protected delivery，最终
+- [x] `AC-10` feature branch 经 PR/required CI/main CI/release/image protected delivery，最终
   workspace/refs/task artifacts 对账并清理；不得直接修改 local/remote `main`。
 
 ## Out of Scope

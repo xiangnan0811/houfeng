@@ -19,12 +19,12 @@
 
 ## Acceptance Criteria
 
-- [ ] malformed JSON、fetch `TypeError`、`SyntaxError`、`null`、`{}`、invalid identity/section/
+- [x] malformed JSON、fetch `TypeError`、`SyntaxError`、`null`、`{}`、invalid identity/section/
   action/relation 的 RED 测试全部转 GREEN，且不会加载 legacy chunk。
-- [ ] valid capability-on 只请求一次并 seed overview；valid capability-off 与明确 unavailable
+- [x] valid capability-on 只请求一次并 seed overview；valid capability-off 与明确 unavailable
   才加载 legacy；404 与 500 行为保持合同。
-- [ ] error copy 稳定且不泄露 body/URL/internal detail；retry 能重新执行 gate probe。
-- [ ] focused API/client/page tests、Web lint/build/full suite 与 Chromium 通过。
+- [x] error copy 稳定且不泄露 body/URL/internal detail；retry 能重新执行 gate probe。
+- [x] focused API/client/page tests、Web lint/build/full suite 与 Chromium 通过。
 
 ## Out of Scope
 
