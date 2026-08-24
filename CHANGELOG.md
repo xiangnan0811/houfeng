@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.75.1](https://github.com/xiangnan0811/houfeng/compare/v0.75.0...v0.75.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **vps:** complete detail overview remediation ([#444](https://github.com/xiangnan0811/houfeng/issues/444)) ([80abdd3](https://github.com/xiangnan0811/houfeng/commit/80abdd3e6e9d81033c097bb24bc7ac1eb428c815))
+
 ## [0.75.0](https://github.com/xiangnan0811/houfeng/compare/v0.74.0...v0.75.0) (2026-08-23)
 
 
