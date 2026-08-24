@@ -3,7 +3,7 @@
   "name": "vps-detail-refactor-remediation",
   "title": "Remediate VPS detail refactor audit findings",
   "description": "Fix the four Important and one Minor findings confirmed by the VPS detail refactor completion audit, with TDD, full strict verification, protected delivery, and no expansion of permanent-delete or accepted deferrals.",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": "mixed",
   "package": null,
@@ -11,12 +11,12 @@
   "creator": "xiangnan-arch",
   "assignee": "xiangnan-arch",
   "createdAt": "2026-08-24",
-  "completedAt": null,
+  "completedAt": "2026-08-24",
   "branch": "codex/vps-detail-refactor-remediation",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "80abdd3e6e9d81033c097bb24bc7ac1eb428c815,5e58a5e8f8688f918653708489697ef956513544",
+  "pr_url": "https://github.com/xiangnan0811/houfeng/pull/444",
   "subtasks": [],
   "children": [
     "08-24-vps-overview-freshness-reliability",
@@ -26,7 +26,7 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "Delivered by PR #444, released as v0.75.1 by PR #445, and post-release CI reliability closed by PR #446; final main CI 32697595709 passed 7/7.",
   "meta": {
     "worktree_path": "/home/murray/code/houfeng/.worktree/vps-detail-refactor-remediation",
     "audit_base_commit": "08730e7991f3242ed43fcad561cde1f3ea60b6fb"

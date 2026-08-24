@@ -20,14 +20,14 @@
 
 ## Acceptance Criteria
 
-- [ ] slow monitoring/timeout 测试证明 IP、renewal、services、domains、activity 仍能完成并保持 ready。
-- [ ] monitoring/IP/subscription/activity/service/domain 的 error matrix 都生成独立 section；
+- [x] slow monitoring/timeout 测试证明 IP、renewal、services、domains、activity 仍能完成并保持 ready。
+- [x] monitoring/IP/subscription/activity/service/domain 的 error matrix 都生成独立 section；
   relation failure 有 unavailable/reason 且 UI 不显示成可信普通零。
-- [ ] future renewal fixture 的 observed/last-success 均 `<= generated_at`，deadline 仍正确保留
+- [x] future renewal fixture 的 observed/last-success 均 `<= generated_at`，deadline 仍正确保留
   在 anomaly/event 语义。
-- [ ] Web section 本地 state/reason/last-success/retry 通过 unit、Axe、390px 与 production
+- [x] Web section 本地 state/reason/last-success/retry 通过 unit、Axe、390px 与 production
   preview；健康态不增加 anomaly chrome。
-- [ ] focused Go/Web、full Go/Web/Chromium 与 Records browser 通过。
+- [x] focused Go/Web、full Go/Web/Chromium 与 Records browser 通过。
 
 ## Out of Scope
 

@@ -20,14 +20,14 @@ teardown 失败可见且能使原本成功的 suite 非零退出，完整 gate �
 
 ## Acceptance Criteria
 
-- [ ] 单元/脚本测试先复现“cleanup fail + suite success 仍 exit 0”，修复后要求非零；suite
+- [x] 单元/脚本测试先复现“cleanup fail + suite success 仍 exit 0”，修复后要求非零；suite
   原错误码在 cleanup 同时失败时保持。
-- [ ] integration/recovery S3 正常运行后，本次 container、volume、workspace 全部不存在；
+- [x] integration/recovery S3 正常运行后，本次 container、volume、workspace 全部不存在；
   host 无新增 root-owned `/tmp/houfeng-records-*`。
-- [ ] local 与 S3 两种 profile、recovery `--all`、skip rejection 与 permanent-delete disabled
+- [x] local 与 S3 两种 profile、recovery `--all`、skip rejection 与 permanent-delete disabled
   assertions 全部保持通过。
-- [ ] 两个 runner 与直接 child 的 cleanup 状态仲裁一致，并由测试防止未来漂移。
-- [ ] 不清理任何 pre-existing/unknown Docker 或 `/tmp` 资源。
+- [x] 两个 runner 与直接 child 的 cleanup 状态仲裁一致，并由测试防止未来漂移。
+- [x] 不清理任何 pre-existing/unknown Docker 或 `/tmp` 资源。
 
 ## Out of Scope
 

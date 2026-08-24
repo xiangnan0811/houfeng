@@ -857,3 +857,41 @@ Fixed Alpine/MinIO portability leftovers, released v0.74.0, left parent planning
 ### Status
 
 [OK] **Completed**
+
+
+## Session 258: Complete VPS detail refactor remediation delivery
+
+**Date**: 2026-08-24
+**Task**: Complete VPS detail refactor remediation delivery
+**Branch**: `codex/vps-detail-refactor-task-closeout`
+
+### Summary
+
+Closed all four remediation children, delivered v0.75.1, fixed the post-release CSS contract timeout, and archived the parent tree with final evidence.
+
+### Main Changes
+
+- Delivered overview freshness, action/navigation, typed gate, and S3 lifecycle fixes through PR #444.
+- Published v0.75.1 and verified signed agent assets plus the amd64/arm64 image index.
+- Closed the only post-release main CI timeout through PR #446 without changing production behavior or global test budgets.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `80abdd3e6e9d81033c097bb24bc7ac1eb428c815` | (see git log) |
+| `f0cde8fe0fead6fa884a3f25d9ba8a088cb0bb8b` | (see git log) |
+| `5e58a5e8f8688f918653708489697ef956513544` | (see git log) |
+
+### Testing
+
+- [OK] Final local Go 1.26.2, Node 22, Chromium, PostgreSQL million-row, Records local/S3, audit, and zero-residue gates passed.
+- [OK] PR #444, release PR #445, PR #446, and final main CI run 32697595709 all passed their required checks.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- No product remediation remains; preserve existing worktrees and refs until separately authorized for destructive cleanup.
