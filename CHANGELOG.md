@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.76.0](https://github.com/xiangnan0811/houfeng/compare/v0.75.1...v0.76.0) (2026-08-24)
+
+
+### Features
+
+* **deploy:** ship production Compose deployment ([#448](https://github.com/xiangnan0811/houfeng/issues/448)) ([d2c2ba3](https://github.com/xiangnan0811/houfeng/commit/d2c2ba3fad90992b46bfe7e71869b2da262ca07c))
+
 ## [0.75.1](https://github.com/xiangnan0811/houfeng/compare/v0.75.0...v0.75.1) (2026-08-24)
 
 
