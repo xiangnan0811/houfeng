@@ -677,6 +677,105 @@ func TestLoadCenterConfigRecordAdmissionIdentityIsOptionalAndAllOrNothing(t *tes
 	}
 }
 
+func TestLoadCenterConfigRecordDeploymentIDFileTakesPrecedenceAndIsCanonical(t *testing.T) {
+	setRequiredAuth(t)
+	setRequiredLocalAttachments(t)
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://runtime")
+	t.Setenv("HOUFENG_RECORDS_ENABLED", "true")
+	t.Setenv("HOUFENG_RECORD_INSTANCE_ID", "compose-center")
+	t.Setenv("HOUFENG_RECORD_INSTANCE_KIND", "api")
+	t.Setenv("HOUFENG_RECORD_INSTANCE_CAPABILITY", "records.runtime")
+	t.Setenv("HOUFENG_RECORD_DEPLOYMENT_ID", "dp-"+strings.Repeat("a", 64))
+	deploymentIDPath := filepath.Join(t.TempDir(), "deployment-id")
+	wantDeploymentID := "dp-" + strings.Repeat("b", 64)
+	if err := os.WriteFile(deploymentIDPath, []byte(wantDeploymentID+"\n"), 0o644); err != nil {
+		t.Fatalf("write deployment ID: %v", err)
+	}
+	t.Setenv("HOUFENG_RECORD_DEPLOYMENT_ID_FILE", deploymentIDPath)
+
+	cfg, err := centerconfig.LoadCenterConfig()
+	if err != nil {
+		t.Fatalf("LoadCenterConfig() error = %v", err)
+	}
+	if cfg.RecordDeploymentID != wantDeploymentID {
+		t.Fatalf("RecordDeploymentID = %q, want file value %q to take precedence", cfg.RecordDeploymentID, wantDeploymentID)
+	}
+}
+
+func TestLoadCenterConfigRejectsMissingMalformedOversizedOrNonregularRecordDeploymentIDFile(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T) string
+	}{
+		{
+			name: "missing",
+			prepare: func(t *testing.T) string {
+				return filepath.Join(t.TempDir(), "missing-deployment-id")
+			},
+		},
+		{
+			name: "malformed",
+			prepare: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "deployment-id")
+				if err := os.WriteFile(path, []byte("dp-not-a-deployment-id\n"), 0o644); err != nil {
+					t.Fatalf("write malformed deployment ID: %v", err)
+				}
+				return path
+			},
+		},
+		{
+			name: "oversized",
+			prepare: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "deployment-id")
+				if err := os.WriteFile(path, []byte("dp-"+strings.Repeat("a", 65)+"\n"), 0o644); err != nil {
+					t.Fatalf("write oversized deployment ID: %v", err)
+				}
+				return path
+			},
+		},
+		{
+			name: "control character",
+			prepare: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "deployment-id")
+				body := []byte("dp-" + strings.Repeat("a", 63) + "\x00\n")
+				if err := os.WriteFile(path, body, 0o644); err != nil {
+					t.Fatalf("write control-character deployment ID: %v", err)
+				}
+				return path
+			},
+		},
+		{
+			name: "directory",
+			prepare: func(t *testing.T) string {
+				return t.TempDir()
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			setRequiredAuth(t)
+			setRequiredLocalAttachments(t)
+			t.Setenv("HOUFENG_DATABASE_URL", "postgres://runtime")
+			t.Setenv("HOUFENG_RECORDS_ENABLED", "true")
+			t.Setenv("HOUFENG_RECORD_INSTANCE_ID", "compose-center")
+			t.Setenv("HOUFENG_RECORD_INSTANCE_KIND", "api")
+			t.Setenv("HOUFENG_RECORD_INSTANCE_CAPABILITY", "records.runtime")
+			t.Setenv("HOUFENG_RECORD_DEPLOYMENT_ID", "dp-"+strings.Repeat("f", 64))
+			path := tc.prepare(t)
+			t.Setenv("HOUFENG_RECORD_DEPLOYMENT_ID_FILE", path)
+
+			_, err := centerconfig.LoadCenterConfig()
+			if err == nil || !strings.Contains(err.Error(), "HOUFENG_RECORD_DEPLOYMENT_ID_FILE") {
+				t.Fatalf("LoadCenterConfig() error = %v, want safe deployment-ID-file rejection", err)
+			}
+			if strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "dp-not-a-deployment-id") {
+				t.Fatalf("LoadCenterConfig() error leaks path/content: %q", err)
+			}
+		})
+	}
+}
+
 func TestLoadCenterConfigRequiresInitialPassword(t *testing.T) {
 	t.Setenv("HOUFENG_HTTP_ADDR", ":8080")
 	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")

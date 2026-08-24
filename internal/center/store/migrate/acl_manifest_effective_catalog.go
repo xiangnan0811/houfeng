@@ -46,11 +46,12 @@ type appACLEffectiveCatalogFunctionContract struct {
 }
 
 type appACLEffectiveCatalogContract struct {
-	DatabaseName      string
-	RoleBindings      []AppACLRoleBinding
-	Privileges        []AppACLPrivilege
-	ManagedObjects    []AppACLManagedObjectR1
-	ExpectedFunctions []appACLEffectiveCatalogFunctionContract
+	DatabaseName        string
+	RoleBindings        []AppACLRoleBinding
+	Privileges          []AppACLPrivilege
+	AuxiliaryPrivileges []AppACLCurrentAuxiliaryPrivilege
+	ManagedObjects      []AppACLManagedObjectR1
+	ExpectedFunctions   []appACLEffectiveCatalogFunctionContract
 }
 
 // CompileAppACLEffectiveCatalogContractR1 derives the r1 expected catalog

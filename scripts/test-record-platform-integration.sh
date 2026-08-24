@@ -171,6 +171,7 @@ setsid env \
   --default-signal=INT \
   --default-signal=TERM \
   HOUFENG_POSTGRES_INTEGRATION=1 \
+  HOUFENG_RECORD_PLATFORM_EPHEMERAL_OWNER="$records_owner_id" \
   HOUFENG_DATABASE_URL="postgres://postgres:${app_password}@127.0.0.1:${app_port}/postgres?sslmode=disable" \
   HOUFENG_DELETION_LEDGER_DATABASE_URL="postgres://postgres:${ledger_password}@127.0.0.1:${ledger_port}/postgres?sslmode=disable" \
   HOUFENG_DELETION_WITNESS_DATABASE_URL="postgres://postgres:${witness_password}@127.0.0.1:${witness_port}/postgres?sslmode=disable" \

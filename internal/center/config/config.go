@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/auth"
+	"houfeng/internal/center/recordplatform"
 )
 
 const (
@@ -223,6 +225,12 @@ func LoadCenterConfig() (CenterConfig, error) {
 	}
 	recordInstanceID := strings.TrimSpace(os.Getenv("HOUFENG_RECORD_INSTANCE_ID"))
 	recordDeploymentID := strings.TrimSpace(os.Getenv("HOUFENG_RECORD_DEPLOYMENT_ID"))
+	if deploymentIDFile := strings.TrimSpace(os.Getenv("HOUFENG_RECORD_DEPLOYMENT_ID_FILE")); deploymentIDFile != "" {
+		recordDeploymentID, err = readCanonicalRecordDeploymentIDFile(deploymentIDFile)
+		if err != nil {
+			return CenterConfig{}, err
+		}
+	}
 	recordInstanceKind := strings.TrimSpace(os.Getenv("HOUFENG_RECORD_INSTANCE_KIND"))
 	recordInstanceCapability := strings.TrimSpace(os.Getenv("HOUFENG_RECORD_INSTANCE_CAPABILITY"))
 	recordIdentitySet := 0
@@ -233,6 +241,11 @@ func LoadCenterConfig() (CenterConfig, error) {
 	}
 	if recordIdentitySet != 0 && recordIdentitySet != 4 {
 		return CenterConfig{}, fmt.Errorf("HOUFENG_RECORD_INSTANCE_ID, HOUFENG_RECORD_DEPLOYMENT_ID, HOUFENG_RECORD_INSTANCE_KIND, and HOUFENG_RECORD_INSTANCE_CAPABILITY must all be set or all be empty")
+	}
+	if recordDeploymentID != "" {
+		if err := recordplatform.ValidateDeploymentID(recordplatform.DeploymentID(recordDeploymentID)); err != nil {
+			return CenterConfig{}, fmt.Errorf("HOUFENG_RECORD_DEPLOYMENT_ID must be a canonical deployment ID")
+		}
 	}
 
 	if !comparisonEnabled && (comparisonIntentKeyring == "") != (comparisonIntentKeyID == "") {
@@ -434,6 +447,31 @@ func secretEnvOrFile(key string) (string, error) {
 		return nonEmptyEnvValue(fileKey, string(body))
 	}
 	return requiredEnv(key)
+}
+
+func readCanonicalRecordDeploymentIDFile(path string) (string, error) {
+	before, err := os.Lstat(path)
+	if err != nil || !before.Mode().IsRegular() {
+		return "", fmt.Errorf("HOUFENG_RECORD_DEPLOYMENT_ID_FILE could not be read as a regular file")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("HOUFENG_RECORD_DEPLOYMENT_ID_FILE could not be read as a regular file")
+	}
+	defer file.Close()
+	after, err := file.Stat()
+	if err != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) {
+		return "", fmt.Errorf("HOUFENG_RECORD_DEPLOYMENT_ID_FILE changed while opening")
+	}
+	body, err := io.ReadAll(io.LimitReader(file, 69))
+	if err != nil || len(body) != 68 || body[len(body)-1] != '\n' {
+		return "", fmt.Errorf("HOUFENG_RECORD_DEPLOYMENT_ID_FILE is not a canonical deployment ID file")
+	}
+	deploymentID := recordplatform.DeploymentID(string(body[:len(body)-1]))
+	if err := recordplatform.ValidateDeploymentID(deploymentID); err != nil {
+		return "", fmt.Errorf("HOUFENG_RECORD_DEPLOYMENT_ID_FILE is not a canonical deployment ID file")
+	}
+	return string(deploymentID), nil
 }
 
 func durationEnvOrDefault(key string, fallback time.Duration) (time.Duration, error) {

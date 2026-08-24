@@ -110,6 +110,14 @@ func readAppACLEffectiveCatalogSnapshotInTx(
 		input.Contract.RoleBindings[1].CatalogRole,
 		input.MigratorRole,
 	}
+	auxiliaryRoleNames := make(map[string]struct{})
+	for _, privilege := range input.Contract.AuxiliaryPrivileges {
+		if _, seen := auxiliaryRoleNames[privilege.CatalogRole]; seen {
+			continue
+		}
+		auxiliaryRoleNames[privilege.CatalogRole] = struct{}{}
+		roleNames = append(roleNames, privilege.CatalogRole)
+	}
 	if snapshot.Roles, err = readAppACLEffectiveCatalogRolesR1(ctx, tx, snapshot.DatabaseName, roleNames); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
@@ -122,7 +130,13 @@ func readAppACLEffectiveCatalogSnapshotInTx(
 	if snapshot.DirectPrivileges, err = readAppACLEffectiveCatalogDirectPrivilegesR1(ctx, tx, snapshot.DatabaseName, scope); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
-	if snapshot.EffectivePrivileges, err = readAppACLEffectiveCatalogEffectivePrivilegesR1(ctx, tx, snapshot.DatabaseName, roleNames[:2], scope); err != nil {
+	effectiveRoleNames := append([]string(nil), roleNames[:2]...)
+	for _, role := range snapshot.Roles {
+		if _, auxiliary := auxiliaryRoleNames[role.Name]; auxiliary {
+			effectiveRoleNames = append(effectiveRoleNames, role.Name)
+		}
+	}
+	if snapshot.EffectivePrivileges, err = readAppACLEffectiveCatalogEffectivePrivilegesR1(ctx, tx, snapshot.DatabaseName, effectiveRoleNames, scope); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
 	if snapshot.ColumnACLs, err = readAppACLEffectiveCatalogColumnACLsR1(ctx, tx, scope); err != nil {
@@ -137,7 +151,7 @@ func readAppACLEffectiveCatalogSnapshotInTx(
 	if err := verifyAppACLPublicProjectorStructureR1(ctx, tx, scope); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
-	if err := verifyAppACLOpaqueExtensionMemberReachabilityForScope(ctx, tx, roleNames[:2], scope); err != nil {
+	if err := verifyAppACLOpaqueExtensionMemberReachabilityForScope(ctx, tx, effectiveRoleNames, scope); err != nil {
 		return AppACLEffectiveCatalogSnapshotR1{}, err
 	}
 	snapshot = scopeAppACLEffectiveCatalogSnapshot(snapshot, scope)
