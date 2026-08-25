@@ -1,0 +1,29 @@
+{
+  "id": "vps-detail-refactor-completion-audit",
+  "name": "vps-detail-refactor-completion-audit",
+  "title": "Audit VPS detail page refactor completion",
+  "description": "Independent read-only completion, reliability, regression, UX, security, integration, and delivery audit of the current VPS detail refactor and Records support chain.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "full-stack-read-only-audit",
+  "package": null,
+  "priority": "P2",
+  "creator": "xiangnan-arch",
+  "assignee": "xiangnan-arch",
+  "createdAt": "2026-08-23",
+  "completedAt": "2026-08-25",
+  "branch": "codex/vps-detail-refactor-completion-audit",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "80abdd3e6e9d81033c097bb24bc7ac1eb428c815,5e58a5e8f8688f918653708489697ef956513544",
+  "pr_url": "https://github.com/xiangnan0811/houfeng/pull/444",
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Historical findings-only audit at 08730e79; all I-01..I-04/M-01 findings were closed by PR #444, released in v0.75.1, and post-release reliability was closed by PR #446. Current-main closure review on 93f2a2fb reports 0 Critical / 0 Important / 0 Minor.",
+  "meta": {
+    "audit_base_commit": "08730e7991f3242ed43fcad561cde1f3ea60b6fb",
+    "closure_review_commit": "93f2a2fb1ed56035d1449ab39f183abc6acbe954"
+  }
+}
