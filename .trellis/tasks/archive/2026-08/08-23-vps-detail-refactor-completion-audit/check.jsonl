@@ -1,0 +1,24 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Independently trace the VPS detail and Records data flow across all changed layers."}
+{"file":".trellis/spec/web/index.md","reason":"Discover current Web review rules rather than relying on historical task claims."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Apply current lint, test, accessibility, responsive and browser quality requirements."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Review loading/error/stale-request and API data ownership contracts."}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Review page decomposition, lazy fallback and component responsibility."}
+{"file":".trellis/spec/web/styling-guidelines.md","reason":"Review dark-first responsive, focus, target-size and interaction styling."}
+{"file":".trellis/spec/web/directory-structure.md","reason":"Verify the reviewer covers the live VPS detail routes, feature modules and shared UI boundaries."}
+{"file":".trellis/spec/web/record-collaboration-surfaces.md","reason":"Audit the current Records collaboration, activity, evidence and deletion-state UI contracts."}
+{"file":".trellis/spec/backend/index.md","reason":"Discover current backend review rules for every relevant domain."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Verify ownership and layering across current handlers, services, stores and workers."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply current Go, PostgreSQL and full-scope check requirements."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Audit migrations, hand-written SQL, fail-closed reads and model invariants."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Audit status mapping, opaque failures, wrapped errors and partial-source behavior."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Audit diagnostic coverage and prevention of secret or sensitive-record leakage."}
+{"file":".trellis/spec/backend/ip-quality-contract.md","reason":"Audit VPS IP-quality authority, partial/unknown state and evidence semantics."}
+{"file":".trellis/spec/backend/subscription-cost-center.md","reason":"Audit VPS-scoped subscription cost, missing-source and authorization semantics."}
+{"file":".trellis/spec/backend/record-authorization.md","reason":"Audit trusted actor, source scope intersection and no-existence-leak behavior."}
+{"file":".trellis/spec/backend/record-collaboration-notification-contract.md","reason":"Audit collaboration DTOs, transactions, delivery and deletion/restore boundaries."}
+{"file":".trellis/spec/backend/evidence-snapshot-contract.md","reason":"Audit evidence authority, redaction, snapshot and source-deletion behavior."}
+{"file":".trellis/spec/backend/record-search-index-contract.md","reason":"Audit search projection, cursor, rebuild and deletion penetration."}
+{"file":".trellis/spec/backend/record-activity-projection.md","reason":"Audit activity ordering, watermarks, authorization and freshness."}
+{"file":".trellis/spec/backend/record-portability-contract.md","reason":"Audit export/import, archive, origin tombstone and admission behavior."}
+{"file":".trellis/spec/backend/record-integration-contract.md","reason":"Audit readiness, backup/restore, security, capacity and browser integration."}
+{"file":".trellis/tasks/08-23-vps-detail-refactor-completion-audit/research/audit-scope-and-validation.md","reason":"Anchor the independent check in the task-specific scope and exact validation inventory."}
