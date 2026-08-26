@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.77.1](https://github.com/xiangnan0811/houfeng/compare/v0.77.0...v0.77.1) (2026-08-26)
+
+
+### Documentation
+
+* **task:** close VPS overview launch delivery ([3b7fb35](https://github.com/xiangnan0811/houfeng/commit/3b7fb356184430b3d30ee2a5fe79aa01c90b475d))
+
 ## [0.77.0](https://github.com/xiangnan0811/houfeng/compare/v0.76.1...v0.77.0) (2026-08-26)
 
 
