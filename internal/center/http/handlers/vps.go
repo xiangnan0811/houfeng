@@ -193,7 +193,7 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return
 			}
-			if input.LifecycleStatus.Set {
+			if input.HasChanges() {
 				current, err := repo.GetVPSAsset(r.Context(), vpsID)
 				if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
 					writeError(w, http.StatusNotFound, "vps asset not found")
@@ -203,10 +203,16 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 					writeError(w, http.StatusInternalServerError, "internal server error")
 					return
 				}
-				if current.LifecycleStatus == vpsassets.LifecycleArchived {
+				if current.LifecycleStatus == vpsassets.LifecycleCancelled || current.LifecycleStatus == vpsassets.LifecycleArchived {
+					writeError(w, http.StatusConflict, "vps asset readonly")
+					return
+				}
+				expectedUpdatedAt, ok := parseMetadataPrecondition(r.Header.Get("If-Match"))
+				if !ok || expectedUpdatedAt == nil {
 					writeError(w, http.StatusBadRequest, "invalid input")
 					return
 				}
+				input.ExpectedUpdatedAt = expectedUpdatedAt
 			}
 
 			var linkage *vpsassets.RenewalSubscriptionLinkage
@@ -225,6 +231,14 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 			}
 			if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
 				writeError(w, http.StatusNotFound, "vps asset not found")
+				return
+			}
+			if errors.Is(err, vpsassets.ErrVPSAssetConflict) {
+				writeError(w, http.StatusConflict, "vps asset conflict")
+				return
+			}
+			if errors.Is(err, vpsassets.ErrVPSAssetReadonly) {
+				writeError(w, http.StatusConflict, "vps asset readonly")
 				return
 			}
 			if errors.Is(err, vpsassets.ErrInvalidVPSAssetInput) || errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
