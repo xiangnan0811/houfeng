@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.77.2](https://github.com/xiangnan0811/houfeng/compare/v0.77.1...v0.77.2) (2026-08-26)
+
+
+### Bug Fixes
+
+* harden VPS overview after v0.77.1 ([0a54b50](https://github.com/xiangnan0811/houfeng/commit/0a54b50af36284b8ccc94fbc97b232b8f23ad5e0))
+* **overview:** harden backend judgment contracts ([2dda743](https://github.com/xiangnan0811/houfeng/commit/2dda74372619083438d248762e19e4aaf0721046))
+* **subscriptions:** make VPS creates idempotent ([e62e485](https://github.com/xiangnan0811/houfeng/commit/e62e485a442201e04f481e2311936399d4b7ca9f))
+* **web:** harden VPS overview management flows ([1043e08](https://github.com/xiangnan0811/houfeng/commit/1043e08c89880b39f2e2011fe680774cbbc25ead))
+
+
+### Documentation
+
+* **task:** record VPS overview hardening delivery ([d153b8e](https://github.com/xiangnan0811/houfeng/commit/d153b8e2776ac845325cbfe8a0cff6ed9220ecd0))
+* **task:** record VPS overview hardening PR ([6212f66](https://github.com/xiangnan0811/houfeng/commit/6212f66f42a19bb6af2e39f3e0fa84ec8aee032b))
+
 ## [0.77.1](https://github.com/xiangnan0811/houfeng/compare/v0.77.0...v0.77.1) (2026-08-26)
 
 
