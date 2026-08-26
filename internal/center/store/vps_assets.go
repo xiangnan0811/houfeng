@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -307,7 +308,7 @@ func (r *PostgresVPSAssetRepository) CreateVPSAsset(ctx context.Context, input v
 
 func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID string, input vpsassets.PatchInput) (vpsassets.Record, error) {
 	input = vpsassets.NormalizePatchInput(input)
-	if err := vpsassets.ValidatePatchInput(input); err != nil {
+	if err := vpsassets.ValidateOrdinaryPatchInput(input); err != nil {
 		return vpsassets.Record{}, err
 	}
 	if !input.HasChanges() {
@@ -322,13 +323,19 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 	if err != nil {
 		return vpsassets.Record{}, err
 	}
+	if err := ensureVPSAssetOrdinaryPatchAllowed(current); err != nil {
+		return vpsassets.Record{}, err
+	}
 	if err := validateMergedVPSAssetPatch(current, input); err != nil {
 		return vpsassets.Record{}, err
 	}
+	if conflict := vpsAssetPreconditionConflict(current, input.ExpectedUpdatedAt); conflict != nil {
+		return vpsassets.Record{}, conflict
+	}
 
-	record, err := patchVPSAssetRow(ctx, r.db, vpsID, input)
+	record, err := patchOrdinaryVPSAssetRow(ctx, r.db, vpsID, input)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return vpsassets.Record{}, vpsassets.ErrVPSAssetNotFound
+		return vpsassets.Record{}, vpsAssetPatchMissingRowError(ctx, r, vpsID, input.ExpectedUpdatedAt)
 	}
 	if err != nil {
 		if isVPSAssetInvalidPostgresError(err) {
@@ -346,7 +353,7 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistory(ctx context.Contex
 
 func (r *PostgresVPSAssetRepository) PatchVPSAssetWithSubscriptionRenewalLinkage(ctx context.Context, vpsID string, input vpsassets.PatchInput) (vpsassets.Record, vpsassets.RenewalSubscriptionLinkage, error) {
 	input = vpsassets.NormalizePatchInput(input)
-	if err := vpsassets.ValidatePatchInput(input); err != nil {
+	if err := vpsassets.ValidateOrdinaryPatchInput(input); err != nil {
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
 	}
 	if !input.HasChanges() {
@@ -382,12 +389,24 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistoryAndOptionalSubscrip
 	if err != nil {
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("query vps asset %q before history patch: %w", vpsID, err)
 	}
+	if err := ensureVPSAssetOrdinaryPatchAllowed(current); err != nil {
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
+	}
 	if err := validateMergedVPSAssetPatch(current, input); err != nil {
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
 	}
+	if conflict := vpsAssetPreconditionConflict(current, input.ExpectedUpdatedAt); conflict != nil {
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, conflict
+	}
 
-	record, err := patchVPSAssetRow(ctx, tx, vpsID, input)
+	record, err := patchOrdinaryVPSAssetRow(ctx, tx, vpsID, input)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if err := ensureVPSAssetOrdinaryPatchAllowed(current); err != nil {
+			return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
+		}
+		if input.ExpectedUpdatedAt != nil {
+			return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, vpsassets.ErrVPSAssetConflict
+		}
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, vpsassets.ErrVPSAssetNotFound
 	}
 	if err != nil {
@@ -662,6 +681,15 @@ func validateMergedVPSAssetPatch(current vpsassets.Record, input vpsassets.Patch
 	return vpsassets.ValidateVPSStateCombination(merged.LifecycleStatus, merged.UsageStatus, merged.RenewalDecision)
 }
 
+func ensureVPSAssetOrdinaryPatchAllowed(current vpsassets.Record) error {
+	switch current.LifecycleStatus {
+	case vpsassets.LifecycleCancelled, vpsassets.LifecycleArchived:
+		return fmt.Errorf("%w: %s vps %q cannot be patched through ordinary update", vpsassets.ErrVPSAssetReadonly, current.LifecycleStatus, current.VPSID)
+	default:
+		return nil
+	}
+}
+
 func applyVPSAssetPatchPreview(record vpsassets.Record, input vpsassets.PatchInput) vpsassets.Record {
 	if input.DisplayName.Set {
 		record.DisplayName = input.DisplayName.Value
@@ -741,7 +769,11 @@ func vpsSpecChanged(from, to vpsassets.Record) bool {
 		from.Virtualization != to.Virtualization
 }
 
-func patchVPSAssetRow(ctx context.Context, db vpsAssetQueryer, vpsID string, input vpsassets.PatchInput) (vpsassets.Record, error) {
+func patchOrdinaryVPSAssetRow(ctx context.Context, db vpsAssetQueryer, vpsID string, input vpsassets.PatchInput) (vpsassets.Record, error) {
+	return patchVPSAssetRow(ctx, db, vpsID, input, true)
+}
+
+func patchVPSAssetRow(ctx context.Context, db vpsAssetQueryer, vpsID string, input vpsassets.PatchInput, ordinary bool) (vpsassets.Record, error) {
 	return scanVPSAsset(db.QueryRow(ctx, `
 		update vps_assets
 		set display_name = case when $2::boolean then $3 else display_name end,
@@ -773,6 +805,8 @@ func patchVPSAssetRow(ctx context.Context, db vpsAssetQueryer, vpsID string, inp
 		    end,
 		    updated_at = now()
 		where vps_id = $1
+		  and ($46::timestamptz is null or updated_at = $46)
+		  and (not $47::boolean or lifecycle_status not in ('cancelled', 'archived'))
 		returning `+vpsAssetSelectColumns,
 		vpsID,
 		input.DisplayName.Set,
@@ -819,7 +853,48 @@ func patchVPSAssetRow(ctx context.Context, db vpsAssetQueryer, vpsID string, inp
 		input.Labels.Values,
 		input.Note.Set,
 		input.Note.Value,
+		nullableTimeArg(input.ExpectedUpdatedAt),
+		ordinary,
 	))
+}
+
+func nullableTimeArg(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func vpsAssetPreconditionConflict(current vpsassets.Record, expected *time.Time) error {
+	if expected == nil {
+		return nil
+	}
+	if current.UpdatedAt.UTC().Equal(expected.UTC()) {
+		return nil
+	}
+	return vpsassets.ErrVPSAssetConflict
+}
+
+func vpsAssetPatchMissingRowError(
+	ctx context.Context,
+	repo *PostgresVPSAssetRepository,
+	vpsID string,
+	expected *time.Time,
+) error {
+	current, err := repo.GetVPSAsset(ctx, vpsID)
+	if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
+		return vpsassets.ErrVPSAssetNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if err := ensureVPSAssetOrdinaryPatchAllowed(current); err != nil {
+		return err
+	}
+	if expected != nil {
+		return vpsassets.ErrVPSAssetConflict
+	}
+	return vpsassets.ErrVPSAssetNotFound
 }
 
 func nullableStringArg(value *string) any {

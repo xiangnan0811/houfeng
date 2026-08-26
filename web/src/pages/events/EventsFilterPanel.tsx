@@ -1,4 +1,4 @@
-import { FilterSelect } from '../../components/filters'
+import { FilterChip, FilterSelect } from '../../components/filters'
 import {
   EVENT_TYPE_SELECT_OPTIONS,
   INCIDENT_CLASS_OPTIONS,
@@ -40,6 +40,12 @@ export function EventsFilterPanel({
             onFilterChange('object_type', value === 'monitoring_instance' || value === 'target' ? value : '')
           }
         />
+        {filters.object_id ? (
+          <FilterChip
+            label={`对象 ID: ${filters.object_id}`}
+            onRemove={() => onFilterChange('object_id', '')}
+          />
+        ) : null}
         <FilterSelect
           label="严重度"
           value={filters.severity || null}

@@ -11,10 +11,13 @@ import (
 const (
 	RuleMonitoringHealthAbnormal   = "monitoring.health.abnormal.v1"
 	RuleMonitoringIncidentsOpen    = "monitoring.incidents.open.v1"
+	RuleMonitoringUnlinked         = "monitoring.unlinked.v1"
 	RuleIPQualityRiskElevated      = "ip_quality.risk.elevated.v1"
 	RuleIPQualityStale             = "ip_quality.stale.v1"
 	RuleIPQualityPartial           = "ip_quality.partial.v1"
+	RuleIPQualityMissing           = "ip_quality.missing.v1"
 	RuleRenewalDueSoon             = "renewal.due.soon.v1"
+	RuleRenewalOverdue             = "renewal.overdue.v1"
 	RuleRenewalSubscriptionMissing = "renewal.subscription.missing.v1"
 	RuleLifecycleBlocker           = "lifecycle.blocker.v1"
 	RuleSourceUnavailable          = "source.unavailable.v1"
@@ -30,11 +33,13 @@ type Snapshot struct {
 	VPSID       string
 	Identity    Identity
 
-	MonitoringAvailable bool
-	MonitoringHealth    string
-	MonitoringDetail    string
-	ActiveIncidents     int
-	MonitoringObserved  *time.Time
+	MonitoringAvailable  bool
+	MonitoringInstanceID string
+	MonitoringHealth     string
+	MonitoringStatus     string
+	MonitoringDetail     string
+	ActiveIncidents      int
+	MonitoringObserved   *time.Time
 
 	IPAvailable  bool
 	IPStatus     string
@@ -58,74 +63,100 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 	ipQualityRoute := "/vps/" + url.PathEscape(snapshot.VPSID) + "/ip-quality"
 
 	if snapshot.MonitoringAvailable {
-		health := strings.TrimSpace(snapshot.MonitoringHealth)
-		if health != "" && health != "正常" {
+		status := strings.ToLower(strings.TrimSpace(snapshot.MonitoringStatus))
+		if status == "unlinked" {
 			anomalies = append(anomalies, Anomaly{
-				RuleID:   RuleMonitoringHealthAbnormal,
-				Severity: healthSeverity(health),
-				Title:    "监控健康异常",
-				Detail:   firstNonEmpty(snapshot.MonitoringDetail, health),
+				RuleID:   RuleMonitoringUnlinked,
+				Severity: SeverityNotice,
+				Title:    "未关联监控实例",
+				Detail:   firstNonEmpty(snapshot.MonitoringDetail, "缺少监控证据"),
 				Source:   "monitoring",
-				EventAt:  snapshot.MonitoringObserved,
 				Primary: &AnomalyAction{
-					ID: "open_monitoring", Label: "查看监控", Route: "/monitoring?abnormal=1",
+					ID: "open_monitoring_instances", Label: "关联监控",
 				},
 			})
-		}
-		if snapshot.ActiveIncidents > 0 {
-			anomalies = append(anomalies, Anomaly{
-				RuleID:   RuleMonitoringIncidentsOpen,
-				Severity: SeverityWarning,
-				Title:    "存在未关闭事件",
-				Detail:   snapshot.MonitoringDetail,
-				Source:   "monitoring",
-				EventAt:  snapshot.MonitoringObserved,
-				Primary: &AnomalyAction{
-					ID: "open_incidents", Label: "查看事件", Route: "/events?object_type=monitoring_instance",
-				},
-			})
+		} else {
+			health := strings.TrimSpace(snapshot.MonitoringHealth)
+			if health != "" && health != "正常" {
+				anomalies = append(anomalies, Anomaly{
+					RuleID:   RuleMonitoringHealthAbnormal,
+					Severity: healthSeverity(health),
+					Title:    "监控健康异常",
+					Detail:   firstNonEmpty(snapshot.MonitoringDetail, health),
+					Source:   "monitoring",
+					EventAt:  snapshot.MonitoringObserved,
+					Primary: &AnomalyAction{
+						ID: "open_monitoring", Label: "查看监控", Route: scopedMonitoringRoute(snapshot.MonitoringInstanceID),
+					},
+				})
+			}
+			if snapshot.ActiveIncidents > 0 {
+				anomalies = append(anomalies, Anomaly{
+					RuleID:   RuleMonitoringIncidentsOpen,
+					Severity: SeverityWarning,
+					Title:    "存在未关闭事件",
+					Detail:   snapshot.MonitoringDetail,
+					Source:   "monitoring",
+					EventAt:  snapshot.MonitoringObserved,
+					Primary: &AnomalyAction{
+						ID: "open_incidents", Label: "查看事件", Route: scopedMonitoringEventsRoute(snapshot.MonitoringInstanceID),
+					},
+				})
+			}
 		}
 	}
 
 	if snapshot.IPAvailable {
-		if snapshot.IPStale {
-			anomalies = append(anomalies, Anomaly{
-				RuleID:   RuleIPQualityStale,
-				Severity: SeverityNotice,
-				Title:    "IP 质量证据过期",
-				Source:   "ip_quality",
-				EventAt:  snapshot.IPObservedAt,
-				Primary: &AnomalyAction{
-					ID: "open_ip_quality", Label: "查看 IP 质量", Route: ipQualityRoute,
-				},
-			})
-		}
 		status := strings.ToLower(strings.TrimSpace(snapshot.IPStatus))
-		if status == "partial" || status == "failure" {
+		if status == "missing" {
 			anomalies = append(anomalies, Anomaly{
-				RuleID:   RuleIPQualityPartial,
+				RuleID:   RuleIPQualityMissing,
 				Severity: SeverityNotice,
-				Title:    "IP 质量采集不完整",
-				Detail:   snapshot.IPStatus,
+				Title:    "缺少 IP 质量证据",
 				Source:   "ip_quality",
-				EventAt:  snapshot.IPObservedAt,
 				Primary: &AnomalyAction{
 					ID: "open_ip_quality", Label: "查看 IP 质量", Route: ipQualityRoute,
 				},
 			})
-		}
-		if elevatedIPRisk(snapshot.IPRiskLevel) {
-			anomalies = append(anomalies, Anomaly{
-				RuleID:   RuleIPQualityRiskElevated,
-				Severity: SeverityWarning,
-				Title:    "IP 风险偏高",
-				Detail:   snapshot.IPRiskLevel,
-				Source:   "ip_quality",
-				EventAt:  snapshot.IPObservedAt,
-				Primary: &AnomalyAction{
-					ID: "open_ip_quality", Label: "查看 IP 质量", Route: ipQualityRoute,
-				},
-			})
+		} else if status != "not_configured" {
+			if snapshot.IPStale {
+				anomalies = append(anomalies, Anomaly{
+					RuleID:   RuleIPQualityStale,
+					Severity: SeverityNotice,
+					Title:    "IP 质量证据过期",
+					Source:   "ip_quality",
+					EventAt:  snapshot.IPObservedAt,
+					Primary: &AnomalyAction{
+						ID: "open_ip_quality", Label: "查看 IP 质量", Route: ipQualityRoute,
+					},
+				})
+			}
+			if status == "partial" || status == "failure" {
+				anomalies = append(anomalies, Anomaly{
+					RuleID:   RuleIPQualityPartial,
+					Severity: SeverityNotice,
+					Title:    "IP 质量采集不完整",
+					Detail:   snapshot.IPStatus,
+					Source:   "ip_quality",
+					EventAt:  snapshot.IPObservedAt,
+					Primary: &AnomalyAction{
+						ID: "open_ip_quality", Label: "查看 IP 质量", Route: ipQualityRoute,
+					},
+				})
+			}
+			if elevatedIPRisk(snapshot.IPRiskLevel) {
+				anomalies = append(anomalies, Anomaly{
+					RuleID:   RuleIPQualityRiskElevated,
+					Severity: SeverityWarning,
+					Title:    "IP 风险偏高",
+					Detail:   snapshot.IPRiskLevel,
+					Source:   "ip_quality",
+					EventAt:  snapshot.IPObservedAt,
+					Primary: &AnomalyAction{
+						ID: "open_ip_quality", Label: "查看 IP 质量", Route: ipQualityRoute,
+					},
+				})
+			}
 		}
 	}
 
@@ -144,8 +175,21 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 			})
 		}
 		if snapshot.NextRenewAt != nil {
-			dueIn := snapshot.NextRenewAt.UTC().Sub(snapshot.GeneratedAt.UTC())
-			if dueIn >= 0 && dueIn <= time.Duration(renewalDueWindowDays)*24*time.Hour {
+			renewDay := calendarDayUTC(*snapshot.NextRenewAt)
+			generatedDay := calendarDayUTC(snapshot.GeneratedAt)
+			dueInDays := int(renewDay.Sub(generatedDay).Hours() / 24)
+			if dueInDays < 0 {
+				anomalies = append(anomalies, Anomaly{
+					RuleID:   RuleRenewalOverdue,
+					Severity: SeverityWarning,
+					Title:    "续费已逾期",
+					Source:   "renewal",
+					EventAt:  snapshot.NextRenewAt,
+					Primary: &AnomalyAction{
+						ID: "open_renewal_decision", Label: "查看续费",
+					},
+				})
+			} else if dueInDays <= renewalDueWindowDays {
 				anomalies = append(anomalies, Anomaly{
 					RuleID:   RuleRenewalDueSoon,
 					Severity: SeverityNotice,
@@ -247,6 +291,28 @@ func anomalyEventUnix(anomaly Anomaly) int64 {
 		return 0
 	}
 	return anomaly.EventAt.UTC().Unix()
+}
+
+func calendarDayUTC(value time.Time) time.Time {
+	year, month, day := value.UTC().Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+}
+
+func scopedMonitoringRoute(instanceID string) string {
+	id := strings.TrimSpace(instanceID)
+	if id == "" {
+		return "/monitoring?abnormal=1"
+	}
+	return "/monitoring/" + url.PathEscape(id)
+}
+
+func scopedMonitoringEventsRoute(instanceID string) string {
+	route := "/events?object_type=monitoring_instance"
+	id := strings.TrimSpace(instanceID)
+	if id == "" {
+		return route
+	}
+	return route + "&object_id=" + url.QueryEscape(id)
 }
 
 func firstNonEmpty(values ...string) string {

@@ -20,6 +20,7 @@ export const test = base.extend<HoufengFixtures>({
     await api.install()
     await use(api)
     api.assertNoUnexpectedRequests()
+    await api.assertRuntimeStreamsClean()
   }, { auto: true }],
 })
 

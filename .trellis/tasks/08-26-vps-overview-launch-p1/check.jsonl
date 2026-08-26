@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Go formatting, unit, integration and race-aware review checklist."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Review transaction scope, conflicts and deterministic PostgreSQL tests."}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"ESLint, Vitest, build, budget and Playwright review checklist."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Review generation ownership, terminal routing and fail-closed destinations."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review the complete cancellation and overview data flow."}

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 
-import { Timestamp } from '../../components/atoms'
+import { Badge, Timestamp } from '../../components/atoms'
+import { TIMELINE_CHANNEL_LABELS, timelineChannel } from '../../components/timelineChannel'
 import type { SubjectActivityItem, VPSOverviewSectionState } from '../../lib/types'
 import { VPSOverviewFreshness } from './VPSOverviewFreshness'
 
@@ -45,7 +46,10 @@ export function VPSOverviewRecentActivity({
           {visible.map((item) => (
             <li key={item.activity_id} className="vps-overview-recent__item">
               <div className="vps-overview-recent__item-main">
-                <p className="vps-overview-recent__item-title">{item.presentation.title}</p>
+                <p className="vps-overview-recent__item-title">
+                  <Badge variant="info">{TIMELINE_CHANNEL_LABELS[timelineChannel(item)]}</Badge>
+                  {item.presentation.title}
+                </p>
                 <Timestamp value={item.event_at} mode="absolute" />
               </div>
             </li>

@@ -9,6 +9,7 @@ import type {
   ComparisonCandidateItem,
   ComparisonEvaluateResponse,
   DashboardOverview,
+  MonitoringInstanceRecord,
   MonitoringInstanceSparklinesResponse,
   ProviderRecord,
   RecordDraft,
@@ -678,19 +679,19 @@ export function vpsOverviewFixture(overrides: Partial<VPSOverview> = {}): VPSOve
       datacenter: 'TK1',
       ipv4: '192.0.2.10',
       ipv6: '',
-      lifecycle_status: '在用',
-      usage_status: '生产',
-      renewal_decision: '续费',
-      importance: '高',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'high',
       labels: ['edge'],
       updated_at: '2026-08-20T09:00:00Z',
     },
     anomalies: [],
     summary: {
-      overall: { status: '正常', section: { ...EMPTY_SECTION } },
+      overall: { status: 'healthy', section: { ...EMPTY_SECTION } },
       monitoring: { status: '正常', section: { ...EMPTY_SECTION } },
-      ip_quality: { status: '低风险', section: { ...EMPTY_SECTION } },
-      renewal: { status: '续费', section: { ...EMPTY_SECTION } },
+      ip_quality: { status: 'low', section: { ...EMPTY_SECTION } },
+      renewal: { status: 'keep', section: { ...EMPTY_SECTION } },
     },
     recent_activity: {
       section: { ...EMPTY_SECTION },
@@ -713,7 +714,7 @@ export function vpsOverviewFixture(overrides: Partial<VPSOverview> = {}): VPSOve
         label: '监控实例', section: { ...EMPTY_SECTION },
       },
       {
-        kind: 'subscriptions', count: 1, status: '续费中', route: '/subscriptions?vps_id=vps_001',
+        kind: 'subscriptions', count: 1, status: 'keep', route: '/subscriptions?vps_id=vps_001',
         label: '订阅', section: { ...EMPTY_SECTION },
       },
       {
@@ -759,7 +760,7 @@ export function vpsOverviewPartialFixture(): VPSOverview {
   })
   return vpsOverviewFixture({
     summary: {
-      overall: { status: '需要关注', section: { ...EMPTY_SECTION } },
+      overall: { status: 'attention', section: { ...EMPTY_SECTION } },
       monitoring: { status: '正常', section: { ...EMPTY_SECTION } },
       ip_quality: {
         status: '未知',
@@ -838,6 +839,64 @@ export function subjectActivityFixture(
     items: overrides.items ?? base.items,
     source_statuses: overrides.source_statuses ?? base.source_statuses,
   }
+}
+
+export function monitoringInstanceDetailProfile(monitoringInstanceId = 'mi_001'): ApiFixtureProfile {
+  const record = {
+    monitoring_instance_id: monitoringInstanceId,
+    display_name: 'Tokyo Monitor',
+    group: 'edge',
+    region: 'ap-northeast-1',
+    city: 'Tokyo',
+    provider: 'Example Cloud',
+    lifecycle_status: '在用',
+    monitoring_status: '启用',
+    binding_status: '已绑定',
+    labels: [] as string[],
+    note: '',
+    current_health_status: '正常',
+    last_heartbeat_at: '2026-08-20T08:59:00Z',
+    last_sync_at: '2026-08-20T09:00:00Z',
+    current_active_incident_count: 0,
+    current_primary_issue_summary: '',
+    created_at: '2026-08-01T00:00:00Z',
+    updated_at: '2026-08-20T09:00:00Z',
+  } satisfies MonitoringInstanceRecord
+  const runtimeFacts = {
+    monitoring_instance_id: monitoringInstanceId,
+    latest_host_sample: null,
+  }
+  const onboarding = {
+    ...record,
+    phase: '接入完成',
+    has_host_sample: false,
+    has_accepted_observation: false,
+  }
+  return authenticatedProfile({
+    [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}`)]: { status: 200, body: record },
+    [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}/runtime-facts?window=realtime`)]: {
+      status: 200,
+      body: runtimeFacts,
+    },
+    [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}/runtime-facts?window=24h`)]: {
+      status: 200,
+      body: runtimeFacts,
+    },
+    [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}/onboarding`)]: {
+      status: 200,
+      body: onboarding,
+    },
+    [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}/vps`)]: { status: 200, body: [] },
+    [apiRouteKey('GET', `/api/incidents?object_type=monitoring_instance&object_id=${monitoringInstanceId}`)]: {
+      status: 200,
+      body: [],
+    },
+    [apiRouteKey('GET', `/api/events?object_type=monitoring_instance&object_id=${monitoringInstanceId}`)]: {
+      status: 200,
+      body: { items: [] },
+    },
+    [apiRouteKey('GET', '/api/settings')]: { status: 200, body: SETTINGS },
+  })
 }
 
 export function vpsOverviewProfile(options: {

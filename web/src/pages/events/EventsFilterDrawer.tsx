@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react'
 
 import { Modal, SegmentedControl } from '../../components/atoms'
-import { FilterSelect, FilterToggle } from '../../components/filters'
+import { FilterChip, FilterSelect, FilterToggle } from '../../components/filters'
 import type { StateChangeEventType } from '../../lib/types'
 import {
   ALLOWED_EVENT_TYPES,
@@ -65,6 +65,12 @@ export function EventsFilterDrawer({
               onFilterChange('object_type', value === 'monitoring_instance' || value === 'target' ? value : '')
             }
           />
+          {filters.object_id ? (
+            <FilterChip
+              label={`对象 ID: ${filters.object_id}`}
+              onRemove={() => onFilterChange('object_id', '')}
+            />
+          ) : null}
           <FilterSelect
             label="严重程度"
             value={filters.severity || null}

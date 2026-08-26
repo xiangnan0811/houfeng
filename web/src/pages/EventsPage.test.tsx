@@ -113,6 +113,41 @@ describe('EventsPage', () => {
     expect(screen.getByText('证书即将过期')).toBeInTheDocument()
   })
 
+  it('forwards object_id from the URL into the events query', async () => {
+    const fetchMock = setupFetchMock({})
+    vi.stubGlobal('fetch', fetchMock)
+    renderEventsPage('/events?object_type=monitoring_instance&object_id=mi_001')
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((call) =>
+        String(call[0]).includes('/api/events?')
+        && String(call[0]).includes('object_type=monitoring_instance')
+        && String(call[0]).includes('object_id=mi_001'),
+      )).toBe(true),
+    )
+  })
+
+  it('shows object_id as a clearable chip and drops it when object type changes', async () => {
+    const fetchMock = setupFetchMock({})
+    vi.stubGlobal('fetch', fetchMock)
+    renderEventsPage('/events?object_type=monitoring_instance&object_id=mi_001')
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '移除筛选 对象 ID: mi_001' })).toBeInTheDocument(),
+    )
+
+    fireEvent.change(screen.getByLabelText('对象类型'), { target: { value: 'target' } })
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((call) =>
+        String(call[0]).includes('/api/events?')
+        && String(call[0]).includes('object_type=target')
+        && !String(call[0]).includes('object_id='),
+      )).toBe(true),
+    )
+    expect(screen.queryByRole('button', { name: '移除筛选 对象 ID: mi_001' })).not.toBeInTheDocument()
+  })
+
   it('renders error state when API fails', async () => {
     vi.stubGlobal('fetch', setupFetchMock({ eventsStatus: 500 }))
     renderEventsPage()

@@ -19,6 +19,14 @@ vi.mock('./vps-detail/LegacyVPSDetail', () => ({
   LegacyVPSDetail: () => <div>Legacy VPS detail shell</div>,
 }))
 
+function toCancelOverview(): VPSOverview {
+  const overview = overviewFixture()
+  return {
+    ...overview,
+    identity: { ...overview.identity, lifecycle_status: 'to_cancel' },
+  }
+}
+
 function overviewFixture(vpsId = 'vps_001', displayName = '东京边缘'): VPSOverview {
   return {
     generated_at: '2026-08-20T00:00:00Z',
@@ -33,19 +41,19 @@ function overviewFixture(vpsId = 'vps_001', displayName = '东京边缘'): VPSOv
       datacenter: 'TK1',
       ipv4: '192.0.2.1',
       ipv6: '',
-      lifecycle_status: '在用',
-      usage_status: '生产',
-      renewal_decision: '续费',
-      importance: '高',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'high',
       labels: [],
       updated_at: '2026-08-20T00:00:00Z',
     },
     anomalies: [],
     summary: {
-      overall: { status: '正常', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
+      overall: { status: 'healthy', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
       monitoring: { status: '正常', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
-      ip_quality: { status: '低风险', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
-      renewal: { status: '续费', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
+      ip_quality: { status: 'low', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
+      renewal: { status: 'keep', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
     },
     recent_activity: {
       section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' },
@@ -122,6 +130,7 @@ function cancellationPreviewFixture(): CancellationPreview {
     recommended_steps: [],
     warnings: ['请确认上游流量已经迁移。'],
     blockers: ['仍有关联资源，暂时不能执行取消。'],
+    preview_digest: 'preview-digest-test',
   }
 }
 
@@ -419,7 +428,7 @@ describe('VPSDetailPage gate', () => {
     fireEvent.change(nameInput, { target: { value: '东京边缘 2' } })
     fireEvent.click(screen.getByRole('button', { name: '保存基础信息' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('基础信息已更新，但概览刷新失败')
+    expect(await screen.findByText(/基础信息已更新，但概览刷新失败/)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
     expect(screen.queryByText('VPS 概览不可用')).not.toBeInTheDocument()
   })
@@ -474,7 +483,7 @@ describe('VPSDetailPage gate', () => {
     expect(update).toHaveBeenCalledWith('vps_001', {
       renewal_decision: 'observe',
       renewal_reason: '等待下月价格确认',
-    })
+    }, { expectedUpdatedAt: '2026-08-20T00:00:00Z' })
     expect(screen.getByRole('status')).toHaveTextContent('续费决策已更新，概览已刷新。未找到 active 订阅。')
     const linkageAction = screen.getByRole('link', { name: '创建/更新订阅' })
     expect(linkageAction).toHaveAttribute(
@@ -512,15 +521,29 @@ describe('VPSDetailPage gate', () => {
     expect(screen.getByRole('status')).toHaveTextContent('订阅账单事实已创建，概览已刷新')
   })
 
+  it.each([
+    { lifecycle: 'cancelled' as const, capabilities: ['records_v2_read'] },
+    { lifecycle: 'archived' as const, capabilities: ['records_v2_read'] },
+    { lifecycle: 'cancelled' as const, capabilities: [] as string[] },
+    { lifecycle: 'archived' as const, capabilities: [] as string[] },
+  ])('redirects $lifecycle VPS to archive when capabilities=$capabilities', async ({ lifecycle, capabilities }) => {
+    const overview = overviewFixture()
+    overview.identity.lifecycle_status = lifecycle
+    overview.capabilities = capabilities
+    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overview)
+    renderDetail()
+    expect(await screen.findByText('Archive detail route')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '管理' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '新建记录' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Legacy VPS detail shell')).not.toBeInTheDocument()
+  })
+
   it('loads cancellation preview and preserves server blockers', async () => {
-    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
+    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
     const getPreview = vi.spyOn(api, 'getVPSCancellationPreview')
       .mockResolvedValue(cancellationPreviewFixture())
 
-    renderDetail()
-
-    fireEvent.click(await screen.findByRole('button', { name: '管理' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '取消 / 退役' }))
+    renderDetail({ initialEntry: '/vps/vps_001?workbench=cancellation' })
 
     expect(await screen.findByRole('dialog', { name: '取消 / 退役' })).toBeInTheDocument()
     expect(await screen.findByRole('alert')).toHaveTextContent('仍有关联资源，暂时不能执行取消')
@@ -529,15 +552,12 @@ describe('VPSDetailPage gate', () => {
   })
 
   it('retries a failed cancellation preview read in the open workbench', async () => {
-    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
+    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
     const getPreview = vi.spyOn(api, 'getVPSCancellationPreview')
       .mockRejectedValueOnce(new ApiError(503, 'preview unavailable'))
       .mockResolvedValueOnce(cancellationPreviewFixture())
 
-    renderDetail()
-
-    fireEvent.click(await screen.findByRole('button', { name: '管理' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '取消 / 退役' }))
+    renderDetail({ initialEntry: '/vps/vps_001?workbench=cancellation' })
 
     expect(await screen.findByRole('alert')).toHaveTextContent('preview unavailable')
     fireEvent.click(screen.getByRole('button', { name: '重试加载' }))
@@ -548,15 +568,12 @@ describe('VPSDetailPage gate', () => {
   })
 
   it('keeps the cancellation audit result and refreshes preview plus overview', async () => {
-    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
+    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
     const safePreview = { ...cancellationPreviewFixture(), warnings: [], blockers: [] }
     const getPreview = vi.spyOn(api, 'getVPSCancellationPreview').mockResolvedValue(safePreview)
     const apply = vi.spyOn(api, 'applyVPSCancellation').mockResolvedValue(cancellationResultFixture())
 
-    renderDetail()
-
-    fireEvent.click(await screen.findByRole('button', { name: '管理' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '取消 / 退役' }))
+    renderDetail({ initialEntry: '/vps/vps_001?workbench=cancellation' })
     fireEvent.change(await screen.findByRole('textbox', { name: '原因' }), {
       target: { value: '测试退役' },
     })
@@ -569,7 +586,7 @@ describe('VPSDetailPage gate', () => {
   })
 
   it('requires a fresh eligible archive review and exact display-name confirmation', async () => {
-    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
+    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
     const review = vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue(archiveReviewFixture())
     const archive = vi.spyOn(api, 'archiveVPS').mockResolvedValue(archiveReviewFixture())
 
@@ -595,7 +612,7 @@ describe('VPSDetailPage gate', () => {
   })
 
   it('explains an ineligible archive review and keeps confirmation disabled', async () => {
-    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
+    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
     vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue({
       ...archiveReviewFixture(),
       eligible: false,
@@ -613,7 +630,7 @@ describe('VPSDetailPage gate', () => {
   })
 
   it('retries a failed archive review without leaving the confirmation flow', async () => {
-    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
+    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
     const review = vi.spyOn(api, 'getVPSArchiveReview')
       .mockRejectedValueOnce(new ApiError(503, 'review unavailable'))
       .mockResolvedValueOnce(archiveReviewFixture())

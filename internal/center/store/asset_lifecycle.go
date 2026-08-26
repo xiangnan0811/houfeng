@@ -27,6 +27,8 @@ import (
 
 var _ assetlifecycle.Repository = (*PostgresAssetLifecycleRepository)(nil)
 
+const maxCancellationTxAttempts = 3
+
 type assetLifecycleDB interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -86,28 +88,17 @@ func (r *PostgresAssetLifecycleRepository) GetVPSCancellationPreview(ctx context
 	if err != nil {
 		return assetlifecycle.CancellationPreview{}, err
 	}
+	return loadCancellationPreview(ctx, r.db, vps, false)
+}
 
-	subscriptionRecords, err := listLifecycleSubscriptionsForVPS(ctx, r.db, vpsID, false)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, err
-	}
-	monitoringInstanceLinks, err := listLifecycleMonitoringInstancesForVPS(ctx, r.db, vpsID)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, err
-	}
-	services, err := listLifecycleAssetServicesForVPS(ctx, r.db, vpsID)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, err
-	}
-	domains, err := listLifecycleAssetDomainsForVPS(ctx, r.db, vpsID)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, err
-	}
-	targetLinks, err := listLifecycleTargetImpacts(ctx, r.db, services, domains)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, err
-	}
-
+func assembleCancellationPreview(
+	vps vpsassets.Record,
+	subscriptionRecords []subscriptions.Record,
+	monitoringInstanceLinks []assetlinks.MonitoringInstanceSummary,
+	services []assetservices.Record,
+	domains []assetdomains.Record,
+	targetLinks []assetlifecycle.TargetImpact,
+) assetlifecycle.CancellationPreview {
 	preview := assetlifecycle.CancellationPreview{
 		VPS:                     vps,
 		Subscriptions:           buildSubscriptionImpacts(subscriptionRecords),
@@ -118,7 +109,38 @@ func (r *PostgresAssetLifecycleRepository) GetVPSCancellationPreview(ctx context
 	}
 	preview.RecommendedSteps = buildCancellationRecommendedSteps(preview)
 	preview.Warnings, preview.Blockers = buildCancellationPreviewFindings(preview)
-	return preview, nil
+	assetlifecycle.AttachCancellationPreviewDigest(&preview)
+	return preview
+}
+
+func loadCancellationPreview(
+	ctx context.Context,
+	queryer assetLifecycleQueryer,
+	vps vpsassets.Record,
+	lockRelated bool,
+) (assetlifecycle.CancellationPreview, error) {
+	vpsID := vps.VPSID
+	subscriptionRecords, err := listLifecycleSubscriptionsForVPS(ctx, queryer, vpsID, lockRelated)
+	if err != nil {
+		return assetlifecycle.CancellationPreview{}, err
+	}
+	monitoringInstanceLinks, err := listLifecycleMonitoringInstancesForVPS(ctx, queryer, vpsID, lockRelated)
+	if err != nil {
+		return assetlifecycle.CancellationPreview{}, err
+	}
+	services, err := listLifecycleAssetServicesForVPS(ctx, queryer, vpsID, lockRelated)
+	if err != nil {
+		return assetlifecycle.CancellationPreview{}, err
+	}
+	domains, err := listLifecycleAssetDomainsForVPS(ctx, queryer, vpsID, lockRelated)
+	if err != nil {
+		return assetlifecycle.CancellationPreview{}, err
+	}
+	targetLinks, err := listLifecycleTargetImpacts(ctx, queryer, services, domains, lockRelated)
+	if err != nil {
+		return assetlifecycle.CancellationPreview{}, err
+	}
+	return assembleCancellationPreview(vps, subscriptionRecords, monitoringInstanceLinks, services, domains, targetLinks), nil
 }
 
 func (r *PostgresAssetLifecycleRepository) GetVPSArchiveReview(ctx context.Context, vpsID string) (assetlifecycle.ArchiveReview, error) {
@@ -167,7 +189,7 @@ func (r *PostgresAssetLifecycleRepository) ApplyVPSArchive(ctx context.Context, 
 
 	updated, err := patchVPSAssetRow(ctx, tx, currentVPS.VPSID, vpsassets.PatchInput{
 		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleArchived),
-	})
+	}, false)
 	if err != nil {
 		return assetlifecycle.ArchiveReview{}, err
 	}
@@ -203,7 +225,7 @@ func (r *PostgresAssetLifecycleRepository) RestoreVPSFromArchive(ctx context.Con
 
 	updated, err := patchVPSAssetRow(ctx, tx, currentVPS.VPSID, vpsassets.PatchInput{
 		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleIdle),
-	})
+	}, false)
 	if err != nil {
 		return vpsassets.Record{}, err
 	}
@@ -223,9 +245,22 @@ func (r *PostgresAssetLifecycleRepository) ApplyVPSCancellation(ctx context.Cont
 		return assetlifecycle.LifecycleActionResult{}, err
 	}
 
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	for attempt := 1; attempt <= maxCancellationTxAttempts; attempt++ {
+		result, err := r.applyVPSCancellationOnce(ctx, vpsID, input)
+		if err == nil {
+			return result, nil
+		}
+		if !isRetryableLifecycleTxAttempt(err) {
+			return assetlifecycle.LifecycleActionResult{}, err
+		}
+	}
+	return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("%w: apply vps cancellation after retries", assetlifecycle.ErrRetryableLifecycleConflict)
+}
+
+func (r *PostgresAssetLifecycleRepository) applyVPSCancellationOnce(ctx context.Context, vpsID string, input assetlifecycle.ApplyCancellationInput) (assetlifecycle.LifecycleActionResult, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
-		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("begin asset lifecycle action transaction: %w", err)
+		return assetlifecycle.LifecycleActionResult{}, wrapRetryableLifecycleTx(fmt.Errorf("begin asset lifecycle action transaction: %w", err))
 	}
 	txClosed := false
 	defer func() {
@@ -245,20 +280,30 @@ func (r *PostgresAssetLifecycleRepository) ApplyVPSCancellation(ctx context.Cont
 	)
 	recordFailedStep := func(completedSteps []assetlifecycle.LifecycleActionStep, objectType, objectID, stepType, message string, cause error) error {
 		rollbackForFailure()
+		if isRetryableLifecycleTxConflict(cause) {
+			return wrapRetryableLifecycleTx(cause)
+		}
 		return r.recordFailedVPSCancellation(ctx, currentVPS.VPSID, input, action, completedSteps, objectType, objectID, stepType, message, cause)
 	}
 
 	currentVPS, err = getLifecycleVPSAsset(ctx, tx, vpsID, true)
 	if err != nil {
-		return assetlifecycle.LifecycleActionResult{}, err
+		return cancellationTxErr(err)
 	}
 	if err := ensureVPSCancellationNotBlocked(currentVPS); err != nil {
 		return assetlifecycle.LifecycleActionResult{}, err
 	}
+	preview, err := loadCancellationPreview(ctx, tx, currentVPS, true)
+	if err != nil {
+		return cancellationTxErr(err)
+	}
+	if preview.PreviewDigest != input.PreviewDigest {
+		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("%w: impact graph changed", assetlifecycle.ErrStaleCancellationPreview)
+	}
 
 	action, err = insertLifecycleAction(ctx, tx, currentVPS.VPSID, input)
 	if err != nil {
-		return assetlifecycle.LifecycleActionResult{}, err
+		return cancellationTxErr(err)
 	}
 
 	steps := make([]assetlifecycle.LifecycleActionStep, 0, 1+len(input.SubscriptionIDs)+len(input.MonitoringInstanceActions)*2+len(input.TargetActions))
@@ -306,6 +351,9 @@ func (r *PostgresAssetLifecycleRepository) ApplyVPSCancellation(ctx context.Cont
 
 	if err := tx.Commit(ctx); err != nil {
 		txClosed = true
+		if isRetryableLifecycleTxConflict(err) {
+			return assetlifecycle.LifecycleActionResult{}, wrapRetryableLifecycleTx(err)
+		}
 		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("commit asset lifecycle action %q: %w", action.ActionID, err)
 	}
 	txClosed = true
@@ -364,19 +412,19 @@ func buildVPSArchiveReview(ctx context.Context, queryer assetLifecycleQueryer, v
 	if err != nil {
 		return assetlifecycle.ArchiveReview{}, err
 	}
-	monitoringInstanceLinks, err := listLifecycleMonitoringInstancesForVPS(ctx, queryer, vpsID)
+	monitoringInstanceLinks, err := listLifecycleMonitoringInstancesForVPS(ctx, queryer, vpsID, lockSubscriptions)
 	if err != nil {
 		return assetlifecycle.ArchiveReview{}, err
 	}
-	services, err := listLifecycleAssetServicesForVPS(ctx, queryer, vpsID)
+	services, err := listLifecycleAssetServicesForVPS(ctx, queryer, vpsID, lockSubscriptions)
 	if err != nil {
 		return assetlifecycle.ArchiveReview{}, err
 	}
-	domains, err := listLifecycleAssetDomainsForVPS(ctx, queryer, vpsID)
+	domains, err := listLifecycleAssetDomainsForVPS(ctx, queryer, vpsID, lockSubscriptions)
 	if err != nil {
 		return assetlifecycle.ArchiveReview{}, err
 	}
-	targetLinks, err := listLifecycleTargetImpacts(ctx, queryer, services, domains)
+	targetLinks, err := listLifecycleTargetImpacts(ctx, queryer, services, domains, lockSubscriptions)
 	if err != nil {
 		return assetlifecycle.ArchiveReview{}, err
 	}
@@ -407,7 +455,7 @@ func (r *PostgresAssetLifecycleRepository) recordFailedVPSCancellation(
 	cause error,
 ) error {
 	if auditErr := recordFailedLifecycleAction(ctx, r.db, vpsID, input, action, completedSteps, objectType, objectID, stepType, message, cause); auditErr != nil {
-		return fmt.Errorf("%w: record failed asset lifecycle action audit: %w", cause, auditErr)
+		return failedLifecycleAuditError{cause: cause, audit: auditErr}
 	}
 	return cause
 }
@@ -579,8 +627,12 @@ func listLifecycleSubscriptionsForVPS(ctx context.Context, queryer assetLifecycl
 	return records, nil
 }
 
-func listLifecycleMonitoringInstancesForVPS(ctx context.Context, queryer assetLifecycleQueryer, vpsID string) ([]assetlinks.MonitoringInstanceSummary, error) {
-	rows, err := queryer.Query(ctx, `
+func listLifecycleMonitoringInstancesForVPS(ctx context.Context, queryer assetLifecycleQueryer, vpsID string, forUpdate bool) ([]assetlinks.MonitoringInstanceSummary, error) {
+	orderBy := "l.linked_at desc, n.display_name, n.monitoring_instance_id"
+	if forUpdate {
+		orderBy = "n.monitoring_instance_id, l.linked_at desc, n.display_name"
+	}
+	query := `
 		select
 			n.monitoring_instance_id,
 			n.display_name,
@@ -602,7 +654,12 @@ func listLifecycleMonitoringInstancesForVPS(ctx context.Context, queryer assetLi
 		join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
 		where l.vps_id = $1
 		  and l.unlinked_at is null
-		order by l.linked_at desc, n.display_name, n.monitoring_instance_id`, vpsID)
+		order by ` + orderBy
+	if forUpdate {
+		query += `
+		for update of l, n`
+	}
+	rows, err := queryer.Query(ctx, query, vpsID)
 	if err != nil {
 		return nil, fmt.Errorf("query active monitoring instances for vps lifecycle %q: %w", vpsID, err)
 	}
@@ -639,12 +696,17 @@ func listLifecycleMonitoringInstancesForVPS(ctx context.Context, queryer assetLi
 	return summaries, nil
 }
 
-func listLifecycleAssetServicesForVPS(ctx context.Context, queryer assetLifecycleQueryer, vpsID string) ([]assetservices.Record, error) {
-	rows, err := queryer.Query(ctx, `
-		select `+assetServiceSelectColumns+`
+func listLifecycleAssetServicesForVPS(ctx context.Context, queryer assetLifecycleQueryer, vpsID string, forUpdate bool) ([]assetservices.Record, error) {
+	query := `
+		select ` + assetServiceSelectColumns + `
 		from asset_services
 		where vps_id = $1
-		order by lower(name), service_id`, vpsID)
+		order by lower(name), service_id`
+	if forUpdate {
+		query += `
+		for update`
+	}
+	rows, err := queryer.Query(ctx, query, vpsID)
 	if err != nil {
 		return nil, fmt.Errorf("query asset services for vps lifecycle %q: %w", vpsID, err)
 	}
@@ -664,12 +726,17 @@ func listLifecycleAssetServicesForVPS(ctx context.Context, queryer assetLifecycl
 	return records, nil
 }
 
-func listLifecycleAssetDomainsForVPS(ctx context.Context, queryer assetLifecycleQueryer, vpsID string) ([]assetdomains.Record, error) {
-	rows, err := queryer.Query(ctx, `
-		select `+assetDomainSelectColumns+`
+func listLifecycleAssetDomainsForVPS(ctx context.Context, queryer assetLifecycleQueryer, vpsID string, forUpdate bool) ([]assetdomains.Record, error) {
+	query := `
+		select ` + assetDomainSelectColumns + `
 		from asset_domains
 		where vps_id = $1
-		order by lower(domain_name), domain_id`, vpsID)
+		order by lower(domain_name), domain_id`
+	if forUpdate {
+		query += `
+		for update`
+	}
+	rows, err := queryer.Query(ctx, query, vpsID)
 	if err != nil {
 		return nil, fmt.Errorf("query asset domains for vps lifecycle %q: %w", vpsID, err)
 	}
@@ -689,7 +756,7 @@ func listLifecycleAssetDomainsForVPS(ctx context.Context, queryer assetLifecycle
 	return records, nil
 }
 
-func listLifecycleTargetImpacts(ctx context.Context, queryer assetLifecycleQueryer, services []assetservices.Record, domains []assetdomains.Record) ([]assetlifecycle.TargetImpact, error) {
+func listLifecycleTargetImpacts(ctx context.Context, queryer assetLifecycleQueryer, services []assetservices.Record, domains []assetdomains.Record, forUpdate bool) ([]assetlifecycle.TargetImpact, error) {
 	targetIDs := make([]string, 0)
 	impactsByID := map[string]*assetlifecycle.TargetImpact{}
 	for _, service := range services {
@@ -720,11 +787,16 @@ func listLifecycleTargetImpacts(ctx context.Context, queryer assetLifecycleQuery
 		return []assetlifecycle.TargetImpact{}, nil
 	}
 
-	rows, err := queryer.Query(ctx, `
+	query := `
 		select target_id, name, run_status
 		from targets
 		where target_id = any($1::text[])
-		order by lower(name), target_id`, targetIDs)
+		order by lower(name), target_id`
+	if forUpdate {
+		query += `
+		for update`
+	}
+	rows, err := queryer.Query(ctx, query, targetIDs)
 	if err != nil {
 		return nil, fmt.Errorf("query targets for vps lifecycle impact: %w", err)
 	}
@@ -924,6 +996,10 @@ func buildArchiveReviewFindings(review assetlifecycle.ArchiveReview) ([]string, 
 		blockers = append(blockers, "VPS 已归档，只能在归档详情页只读查看或执行受控恢复。")
 	case vpsassets.LifecycleCancelled:
 		warnings = append(warnings, "VPS 已取消，可以归档为只读历史资产。")
+	case vpsassets.LifecycleToCancel:
+		warnings = append(warnings, "VPS 仍处于待取消，归档后将进入只读历史边界。")
+	default:
+		blockers = append(blockers, "只有待取消或已取消的 VPS 可以归档。")
 	}
 
 	activeSubscriptions := 0
@@ -1246,7 +1322,7 @@ func applyVPSCancellationState(ctx context.Context, tx pgx.Tx, actionID string, 
 		return assetlifecycle.LifecycleActionStep{}, err
 	}
 
-	updated, err := patchVPSAssetRow(ctx, tx, current.VPSID, patch)
+	updated, err := patchVPSAssetRow(ctx, tx, current.VPSID, patch, false)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return assetlifecycle.LifecycleActionStep{}, vpsassets.ErrVPSAssetNotFound
 	}
@@ -1426,7 +1502,7 @@ func lockMonitoringInstanceForLifecycleAction(ctx context.Context, tx pgx.Tx, vp
 		where l.vps_id = $1
 		  and l.monitoring_instance_id = $2
 		  and l.unlinked_at is null
-		for update of n`, vpsID, monitoringInstanceID))
+		for update of l, n`, vpsID, monitoringInstanceID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return monitoringinstances.Record{}, fmt.Errorf("%w: monitoring instance %q is not actively linked to vps %q", assetlifecycle.ErrInvalidLifecycleActionInput, monitoringInstanceID, vpsID)
 	}
@@ -1736,4 +1812,57 @@ func isLifecycleActionInvalidPostgresError(err error) bool {
 		return false
 	}
 	return pgErr.Code == "23503" || pgErr.Code == "23514"
+}
+
+func isRetryableLifecycleTxConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "40001" || pgErr.Code == "40P01")
+}
+
+type retryableLifecycleTxError struct {
+	err error
+}
+
+func (e retryableLifecycleTxError) Error() string {
+	if e.err == nil {
+		return "retryable lifecycle transaction conflict"
+	}
+	return e.err.Error()
+}
+
+func (e retryableLifecycleTxError) Unwrap() error {
+	return e.err
+}
+
+func wrapRetryableLifecycleTx(err error) error {
+	if err == nil || !isRetryableLifecycleTxConflict(err) {
+		return err
+	}
+	var already retryableLifecycleTxError
+	if errors.As(err, &already) {
+		return err
+	}
+	return retryableLifecycleTxError{err: err}
+}
+
+func cancellationTxErr(err error) (assetlifecycle.LifecycleActionResult, error) {
+	return assetlifecycle.LifecycleActionResult{}, wrapRetryableLifecycleTx(err)
+}
+
+func isRetryableLifecycleTxAttempt(err error) bool {
+	var retryable retryableLifecycleTxError
+	return errors.As(err, &retryable)
+}
+
+type failedLifecycleAuditError struct {
+	cause error
+	audit error
+}
+
+func (e failedLifecycleAuditError) Error() string {
+	return fmt.Sprintf("%v: record failed asset lifecycle action audit: %v", e.cause, e.audit)
+}
+
+func (e failedLifecycleAuditError) Unwrap() error {
+	return e.cause
 }

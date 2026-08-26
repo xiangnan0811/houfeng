@@ -1,0 +1,152 @@
+{
+  "generated_at": "2026-08-20T09:00:00Z",
+  "identity": {
+    "vps_id": "vps_001",
+    "display_name": "Tokyo Edge",
+    "provider_name": "Example Cloud",
+    "product_name": "VPS",
+    "country": "JP",
+    "region": "Tokyo",
+    "city": "Tokyo",
+    "datacenter": "TK1",
+    "ipv4": "192.0.2.10",
+    "ipv6": "",
+    "lifecycle_status": "active",
+    "usage_status": "in_use",
+    "renewal_decision": "keep",
+    "importance": "high",
+    "labels": ["edge"],
+    "updated_at": "2026-08-20T08:58:00Z"
+  },
+  "anomalies": [
+    {
+      "rule_id": "ip_quality.missing.v1",
+      "severity": "notice",
+      "title": "缺少 IP 质量证据",
+      "source": "ip_quality",
+      "primary_action": {
+        "id": "open_ip_quality",
+        "label": "查看 IP 质量",
+        "route": "/vps/vps_001/ip-quality"
+      },
+      "secondary_actions": []
+    },
+    {
+      "rule_id": "monitoring.unlinked.v1",
+      "severity": "notice",
+      "title": "未关联监控实例",
+      "detail": "未关联监控实例",
+      "source": "monitoring",
+      "primary_action": {
+        "id": "open_monitoring_instances",
+        "label": "关联监控"
+      },
+      "secondary_actions": []
+    }
+  ],
+  "summary": {
+    "overall": {
+      "status": "notice",
+      "section": {
+        "state": "ready",
+        "observed_at": null,
+        "last_success_at": null,
+        "reason_code": ""
+      }
+    },
+    "monitoring": {
+      "status": "unlinked",
+      "detail": "未关联监控实例",
+      "section": {
+        "state": "ready",
+        "observed_at": null,
+        "last_success_at": null,
+        "reason_code": ""
+      }
+    },
+    "ip_quality": {
+      "status": "missing",
+      "detail": "missing",
+      "section": {
+        "state": "ready",
+        "observed_at": null,
+        "last_success_at": null,
+        "reason_code": ""
+      }
+    },
+    "renewal": {
+      "status": "keep",
+      "section": {
+        "state": "ready",
+        "observed_at": null,
+        "last_success_at": null,
+        "reason_code": ""
+      }
+    }
+  },
+  "recent_activity": {
+    "section": {
+      "state": "ready",
+      "observed_at": null,
+      "last_success_at": null,
+      "reason_code": ""
+    },
+    "items": []
+  },
+  "facts": [
+    {
+      "key": "ipv4",
+      "label": "IPv4",
+      "value": "192.0.2.10"
+    }
+  ],
+  "relations": [
+    {
+      "kind": "monitoring_instances",
+      "count": 0,
+      "status": "unlinked",
+      "label": "监控实例",
+      "section": {
+        "state": "ready",
+        "observed_at": null,
+        "last_success_at": null,
+        "reason_code": ""
+      }
+    },
+    {
+      "kind": "subscriptions",
+      "count": 1,
+      "route": "/subscriptions?vps_id=vps_001",
+      "label": "订阅",
+      "section": {
+        "state": "ready",
+        "observed_at": null,
+        "last_success_at": null,
+        "reason_code": ""
+      }
+    },
+    {
+      "kind": "services",
+      "count": 0,
+      "label": "服务",
+      "section": {
+        "state": "ready",
+        "observed_at": null,
+        "last_success_at": null,
+        "reason_code": ""
+      }
+    },
+    {
+      "kind": "domains",
+      "count": 0,
+      "label": "域名",
+      "section": {
+        "state": "ready",
+        "observed_at": null,
+        "last_success_at": null,
+        "reason_code": ""
+      }
+    }
+  ],
+  "capabilities": ["records_v2_read"]
+}

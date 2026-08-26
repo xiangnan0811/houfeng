@@ -19,6 +19,12 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
+func vpsPatchWithMatch(path, body string, updatedAt time.Time) *http.Request {
+	req := httptest.NewRequest(http.MethodPatch, path, strings.NewReader(body))
+	req.Header.Set("If-Match", `"`+updatedAt.Format(time.RFC3339Nano)+`"`)
+	return req
+}
+
 type fakeVPSAssetRepository struct {
 	listVPSAssetsResult  []vpsassets.Record
 	listVPSAssetsErr     error
@@ -600,7 +606,7 @@ func TestVPSItemPatchesAsset(t *testing.T) {
 	}}
 
 	handler := handlers.VPSItem(repo)
-	req := httptest.NewRequest(http.MethodPatch, "/api/vps/vps_001", strings.NewReader(`{
+	req := vpsPatchWithMatch("/api/vps/vps_001", `{
 		"display_name":" Tokyo Edge Updated ",
 		"provider_id":null,
 		"ssh_port":2200,
@@ -608,7 +614,7 @@ func TestVPSItemPatchesAsset(t *testing.T) {
 		"usage_status":"idle",
 		"renewal_decision":"keep",
 		"labels":[" edge ","backup","edge"]
-	}`))
+	}`, now)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -637,6 +643,9 @@ func TestVPSItemPatchesAsset(t *testing.T) {
 	if !repo.patchVPSAssetInput.Labels.Set || len(repo.patchVPSAssetInput.Labels.Values) != 2 {
 		t.Fatalf("patch labels = %#v, want normalized labels", repo.patchVPSAssetInput.Labels)
 	}
+	if repo.patchVPSAssetInput.ExpectedUpdatedAt == nil || !repo.patchVPSAssetInput.ExpectedUpdatedAt.Equal(now) {
+		t.Fatalf("expected updated_at = %v, want %s", repo.patchVPSAssetInput.ExpectedUpdatedAt, now.Format(time.RFC3339Nano))
+	}
 	var body vpsassets.Record
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
@@ -644,6 +653,31 @@ func TestVPSItemPatchesAsset(t *testing.T) {
 	if body.DisplayName != "Tokyo Edge Updated" || body.LifecycleStatus != vpsassets.LifecycleActive {
 		t.Fatalf("body = %#v, want updated current asset", body)
 	}
+}
+
+func TestVPSItemPatchRequiresIfMatchAndRejectsConflict(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	t.Run("missing if-match", func(t *testing.T) {
+		repo := &fakeVPSAssetRepository{}
+		req := httptest.NewRequest(http.MethodPatch, "/api/vps/vps_001", strings.NewReader(`{"display_name":"Tokyo"}`))
+		recorder := httptest.NewRecorder()
+		handlers.VPSItem(repo).ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", recorder.Code)
+		}
+		if repo.patchVPSAssetID != "" {
+			t.Fatal("patch must not run without If-Match")
+		}
+	})
+	t.Run("stale if-match", func(t *testing.T) {
+		repo := &fakeVPSAssetRepository{patchVPSAssetErr: vpsassets.ErrVPSAssetConflict}
+		req := vpsPatchWithMatch("/api/vps/vps_001", `{"display_name":"Tokyo"}`, now)
+		recorder := httptest.NewRecorder()
+		handlers.VPSItem(repo).ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want 409; body=%s", recorder.Code, recorder.Body.String())
+		}
+	})
 }
 
 func TestVPSItemRejectsDirectArchivePatch(t *testing.T) {
@@ -686,14 +720,43 @@ func TestVPSItemRejectsDirectRestoreFromArchivedPatch(t *testing.T) {
 
 	handler.ServeHTTP(recorder, req)
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusConflict, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "vps asset readonly") {
+		t.Fatalf("body = %s, want vps asset readonly", recorder.Body.String())
 	}
 	if repo.getVPSAssetID != "vps_001" {
 		t.Fatalf("get vps id = %q, want current state lookup before archived restore guard", repo.getVPSAssetID)
 	}
 	if repo.patchVPSAssetID != "" {
 		t.Fatalf("patch vps id = %q, want no patch when archived asset is restored through ordinary PATCH", repo.patchVPSAssetID)
+	}
+}
+
+func TestVPSItemRejectsOrdinaryPatchOnCancelledVPS(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	repo := &fakeVPSAssetRepository{getVPSAssetResult: vpsassets.Record{
+		VPSID:           "vps_001",
+		DisplayName:     "Tokyo Edge",
+		SSHPort:         22,
+		LifecycleStatus: vpsassets.LifecycleCancelled,
+		UsageStatus:     vpsassets.UsageIdle,
+		RenewalDecision: vpsassets.RenewalCancel,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}}
+	handler := handlers.VPSItem(repo)
+	req := vpsPatchWithMatch("/api/vps/vps_001", `{"display_name":"Renamed"}`, now)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusConflict, recorder.Body.String())
+	}
+	if repo.patchVPSAssetID != "" {
+		t.Fatalf("patch vps id = %q, want no patch on cancelled VPS", repo.patchVPSAssetID)
 	}
 }
 
@@ -720,10 +783,10 @@ func TestVPSItemPatchesCancellationDecisionWithSubscriptionLinkage(t *testing.T)
 	}
 
 	handler := handlers.VPSItem(repo)
-	req := httptest.NewRequest(http.MethodPatch, "/api/vps/vps_001", strings.NewReader(`{
+	req := vpsPatchWithMatch("/api/vps/vps_001", `{
 		"renewal_decision":"cancel",
 		"renewal_reason":" too expensive "
-	}`))
+	}`, now)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -762,10 +825,10 @@ func TestVPSItemPatchesRenewalDecisionReason(t *testing.T) {
 	}}
 
 	handler := handlers.VPSItem(repo)
-	req := httptest.NewRequest(http.MethodPatch, "/api/vps/vps_001", strings.NewReader(`{
+	req := vpsPatchWithMatch("/api/vps/vps_001", `{
 		"renewal_decision":"cancel",
 		"renewal_reason":" too expensive "
-	}`))
+	}`, time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC))
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -1034,8 +1097,10 @@ func TestVPSItemReturnsNotFound(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := handlers.VPSItem(tt.repo)
-			body := strings.NewReader(`{"display_name":"New Name"}`)
-			req := httptest.NewRequest(tt.method, "/api/vps/vps_missing", body)
+			req := httptest.NewRequest(tt.method, "/api/vps/vps_missing", strings.NewReader(`{"display_name":"New Name"}`))
+			if tt.method == http.MethodPatch {
+				req.Header.Set("If-Match", `"2026-05-09T13:00:00Z"`)
+			}
 			recorder := httptest.NewRecorder()
 
 			handler.ServeHTTP(recorder, req)
@@ -1105,6 +1170,9 @@ func TestVPSMapsInvalidProviderReferenceToBadRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			if tt.method == http.MethodPatch {
+				req.Header.Set("If-Match", `"2026-05-09T13:00:00Z"`)
+			}
 			recorder := httptest.NewRecorder()
 
 			tt.handler.ServeHTTP(recorder, req)
@@ -1158,6 +1226,9 @@ func TestVPSMapRepositoryFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			if tt.method == http.MethodPatch {
+				req.Header.Set("If-Match", `"2026-05-09T13:00:00Z"`)
+			}
 			recorder := httptest.NewRecorder()
 
 			tt.handler.ServeHTTP(recorder, req)

@@ -14,6 +14,8 @@ import (
 
 var ErrVPSAssetNotFound = errors.New("vps asset not found")
 var ErrInvalidVPSAssetInput = errors.New("invalid vps asset input")
+var ErrVPSAssetConflict = errors.New("vps asset conflict")
+var ErrVPSAssetReadonly = errors.New("vps asset readonly")
 
 type LifecycleStatus string
 
@@ -139,29 +141,30 @@ type CreateInput struct {
 }
 
 type PatchInput struct {
-	DisplayName     OptionalString         `json:"display_name"`
-	ProviderID      OptionalNullableString `json:"provider_id"`
-	ProviderName    OptionalString         `json:"provider_name"`
-	ProductName     OptionalString         `json:"product_name"`
-	OrderRef        OptionalString         `json:"order_ref"`
-	Country         OptionalString         `json:"country"`
-	Region          OptionalString         `json:"region"`
-	City            OptionalString         `json:"city"`
-	Datacenter      OptionalString         `json:"datacenter"`
-	IPv4            OptionalString         `json:"ipv4"`
-	IPv6            OptionalString         `json:"ipv6"`
-	SSHHost         OptionalString         `json:"ssh_host"`
-	SSHPort         OptionalInt            `json:"ssh_port"`
-	SSHUser         OptionalString         `json:"ssh_user"`
-	OSName          OptionalString         `json:"os_name"`
-	Virtualization  OptionalString         `json:"virtualization"`
-	LifecycleStatus OptionalLifecycle      `json:"lifecycle_status"`
-	UsageStatus     OptionalUsage          `json:"usage_status"`
-	RenewalDecision OptionalRenewal        `json:"renewal_decision"`
-	RenewalReason   OptionalString         `json:"renewal_reason"`
-	Importance      OptionalString         `json:"importance"`
-	Labels          OptionalLabels         `json:"labels"`
-	Note            OptionalString         `json:"note"`
+	DisplayName       OptionalString         `json:"display_name"`
+	ProviderID        OptionalNullableString `json:"provider_id"`
+	ProviderName      OptionalString         `json:"provider_name"`
+	ProductName       OptionalString         `json:"product_name"`
+	OrderRef          OptionalString         `json:"order_ref"`
+	Country           OptionalString         `json:"country"`
+	Region            OptionalString         `json:"region"`
+	City              OptionalString         `json:"city"`
+	Datacenter        OptionalString         `json:"datacenter"`
+	IPv4              OptionalString         `json:"ipv4"`
+	IPv6              OptionalString         `json:"ipv6"`
+	SSHHost           OptionalString         `json:"ssh_host"`
+	SSHPort           OptionalInt            `json:"ssh_port"`
+	SSHUser           OptionalString         `json:"ssh_user"`
+	OSName            OptionalString         `json:"os_name"`
+	Virtualization    OptionalString         `json:"virtualization"`
+	LifecycleStatus   OptionalLifecycle      `json:"lifecycle_status"`
+	UsageStatus       OptionalUsage          `json:"usage_status"`
+	RenewalDecision   OptionalRenewal        `json:"renewal_decision"`
+	RenewalReason     OptionalString         `json:"renewal_reason"`
+	Importance        OptionalString         `json:"importance"`
+	Labels            OptionalLabels         `json:"labels"`
+	Note              OptionalString         `json:"note"`
+	ExpectedUpdatedAt *time.Time             `json:"-"`
 }
 
 type ListFilters struct {

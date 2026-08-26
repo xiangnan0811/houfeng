@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { Timestamp } from './atoms'
 import type { SubjectActivityItem, SubjectActivitySourceStatus } from '../lib/types'
-import { timelineChannel, type TimelineChannel } from './timelineChannel'
+import { timelineChannel, TIMELINE_CHANNEL_LABELS, type TimelineChannel } from './timelineChannel'
 
 type Props = {
   items: SubjectActivityItem[]
@@ -13,11 +13,7 @@ type Props = {
   itemActions?: (item: SubjectActivityItem) => ReactNode
 }
 
-const CHANNEL_LABEL: Record<TimelineChannel, string> = {
-  human: '人工记录',
-  system: '系统事实',
-  evidence: '不可变证据',
-}
+const CHANNEL_LABEL = TIMELINE_CHANNEL_LABELS
 
 function dayKey(iso: string): string {
   const parsed = Date.parse(iso)

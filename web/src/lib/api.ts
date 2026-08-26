@@ -473,8 +473,14 @@ export function getVPSIPQualityReport(vpsId: string, reportId: string) {
   )
 }
 
-export function updateVPSAsset(vpsId: string, input: UpdateVPSAssetInput): Promise<VPSAssetUpdateResult> {
-  return patchJSONBody<VPSAssetUpdateResult>(`/api/vps/${vpsId}`, input)
+export function updateVPSAsset(
+  vpsId: string,
+  input: UpdateVPSAssetInput,
+  options: { expectedUpdatedAt: string },
+): Promise<VPSAssetUpdateResult> {
+  return patchJSONBody<VPSAssetUpdateResult>(`/api/vps/${vpsId}`, input, {
+    ifMatch: options.expectedUpdatedAt,
+  })
 }
 
 export function getAssetDecisionOverview(filter?: AssetDecisionGroupListFilter) {

@@ -256,7 +256,7 @@ export function useAssetDecisionRenewalQueue({
       const updated = await updateVPSAsset(selectedVPS.vps_id, {
         renewal_decision: draft.renewalDecision,
         ...(reason ? { renewal_reason: reason } : {}),
-      })
+      }, { expectedUpdatedAt: selectedVPS.updated_at })
       setSettledQueue((current) => current ? {
         ...current,
         ...updateDecisionQueues(queue, updated),

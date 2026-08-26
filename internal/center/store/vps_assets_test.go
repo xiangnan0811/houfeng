@@ -270,9 +270,9 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 	}
 
 	patched, err := repo.PatchVPSAsset(context.Background(), "vps_001", vpsassets.PatchInput{
-		DisplayName:     vpsassets.PatchString(" Akamai Edge Archived "),
+		DisplayName:     vpsassets.PatchString(" Akamai Edge Idle "),
 		ProviderID:      vpsassets.PatchNullableString(nil),
-		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleArchived),
+		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleIdle),
 		UsageStatus:     vpsassets.PatchUsage(vpsassets.UsageIdle),
 		Importance:      vpsassets.PatchString(" critical "),
 		Labels:          vpsassets.PatchLabels([]string{" edge ", "backup", "edge"}),
@@ -280,17 +280,17 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PatchVPSAsset() error = %v", err)
 	}
-	if patched.DisplayName != "Akamai Edge Archived" || patched.ArchivedAt == nil {
-		t.Fatalf("patched = %#v, want archived record", patched)
+	if patched.DisplayName != "Akamai Edge Archived" {
+		t.Fatalf("patched = %#v, want ordinary patched record", patched)
 	}
 	if len(rowCalls) != 4 {
 		t.Fatalf("QueryRow calls = %d, want create/get/pre-read/patch", len(rowCalls))
 	}
 	patchArgs := rowArgs[3]
-	if len(patchArgs) != 45 {
-		t.Fatalf("patch args len = %d, want 45", len(patchArgs))
+	if len(patchArgs) != 47 {
+		t.Fatalf("patch args len = %d, want 47", len(patchArgs))
 	}
-	if patchArgs[0] != "vps_001" || patchArgs[1] != true || patchArgs[2] != "Akamai Edge Archived" {
+	if patchArgs[0] != "vps_001" || patchArgs[1] != true || patchArgs[2] != "Akamai Edge Idle" {
 		t.Fatalf("patch name args = %#v, want vps id and trimmed name", patchArgs[:3])
 	}
 	if patchArgs[3] != true || patchArgs[4] != nil {
@@ -299,8 +299,11 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 	if patchArgs[25] != false {
 		t.Fatalf("patch ssh port set arg = %#v, want false in non-history patch", patchArgs[25])
 	}
-	if patchArgs[33] != true || patchArgs[34] != string(vpsassets.LifecycleArchived) {
-		t.Fatalf("patch lifecycle args = set:%#v value:%#v, want archived", patchArgs[33], patchArgs[34])
+	if patchArgs[33] != true || patchArgs[34] != string(vpsassets.LifecycleIdle) {
+		t.Fatalf("patch lifecycle args = set:%#v value:%#v, want idle", patchArgs[33], patchArgs[34])
+	}
+	if patchArgs[46] != true {
+		t.Fatalf("ordinary lifecycle guard arg = %#v, want true", patchArgs[46])
 	}
 	labels, ok := patchArgs[42].([]string)
 	if !ok || len(labels) != 2 || labels[0] != "edge" || labels[1] != "backup" {
@@ -316,6 +319,8 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 		"when $34::boolean and $35::text <> 'archived' then null",
 		"updated_at = now()",
 		"where vps_id = $1",
+		"and ($46::timestamptz is null or updated_at = $46)",
+		"and (not $47::boolean or lifecycle_status not in ('cancelled', 'archived'))",
 		"returning " + vpsAssetSelectColumns,
 	} {
 		if !strings.Contains(rowCalls[3], snippet) {
@@ -546,6 +551,101 @@ func TestPostgresVPSAssetPatchRejectsMergedReplacedState(t *testing.T) {
 	}
 }
 
+func TestPostgresVPSAssetPatchRejectsControlledLifecycleStatuses(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
+	for _, status := range []vpsassets.LifecycleStatus{
+		vpsassets.LifecycleToCancel,
+		vpsassets.LifecycleCancelled,
+		vpsassets.LifecycleToMigrate,
+		vpsassets.LifecycleArchived,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			t.Parallel()
+			updated := false
+			repo := &PostgresVPSAssetRepository{db: fakeVPSAssetDB{
+				queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+					if strings.Contains(sql, "update vps_assets") {
+						updated = true
+					}
+					return fakeVPSAssetRow{scan: func(dest ...any) error {
+						scanVPSAssetRecordDestinations(dest, vpsassets.Record{
+							VPSID:           "vps_001",
+							DisplayName:     "Tokyo Edge",
+							SSHPort:         22,
+							LifecycleStatus: vpsassets.LifecycleActive,
+							UsageStatus:     vpsassets.UsageInUse,
+							RenewalDecision: vpsassets.RenewalKeep,
+							Importance:      "normal",
+							CreatedAt:       now,
+							UpdatedAt:       now,
+						})
+						return nil
+					}}
+				},
+			}}
+			_, err := repo.PatchVPSAsset(context.Background(), "vps_001", vpsassets.PatchInput{
+				LifecycleStatus: vpsassets.PatchLifecycle(status),
+			})
+			if !errors.Is(err, vpsassets.ErrInvalidVPSAssetInput) {
+				t.Fatalf("PatchVPSAsset(%s) error = %v, want ErrInvalidVPSAssetInput", status, err)
+			}
+			if updated {
+				t.Fatalf("PatchVPSAsset(%s) issued UPDATE before rejecting controlled lifecycle", status)
+			}
+		})
+	}
+}
+
+func TestPostgresVPSAssetPatchRejectsTerminalRowAtUpdate(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
+	updated := false
+	repo := &PostgresVPSAssetRepository{db: fakeVPSAssetDB{
+		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "update vps_assets"):
+				updated = true
+				if !strings.Contains(sql, "lifecycle_status not in ('cancelled', 'archived')") {
+					t.Fatalf("ordinary UPDATE missing terminal predicate: %s", sql)
+				}
+				return fakeVPSAssetRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+			case strings.Contains(sql, "from vps_assets"):
+				return fakeVPSAssetRow{scan: func(dest ...any) error {
+					status := vpsassets.LifecycleActive
+					if updated {
+						status = vpsassets.LifecycleCancelled
+					}
+					scanVPSAssetRecordDestinations(dest, vpsassets.Record{
+						VPSID:           "vps_001",
+						DisplayName:     "Tokyo Edge",
+						SSHPort:         22,
+						LifecycleStatus: status,
+						UsageStatus:     vpsassets.UsageIdle,
+						RenewalDecision: vpsassets.RenewalCancel,
+						Importance:      "normal",
+						CreatedAt:       now,
+						UpdatedAt:       now,
+					})
+					return nil
+				}}
+			default:
+				t.Fatalf("unexpected QueryRow SQL %q", sql)
+				return fakeVPSAssetRow{scan: func(dest ...any) error { return nil }}
+			}
+		},
+	}}
+
+	_, err := repo.PatchVPSAsset(context.Background(), "vps_001", vpsassets.PatchInput{
+		DisplayName: vpsassets.PatchString("Renamed after cancel"),
+	})
+	if !errors.Is(err, vpsassets.ErrVPSAssetReadonly) {
+		t.Fatalf("PatchVPSAsset() error = %v, want ErrVPSAssetReadonly after terminal race", err)
+	}
+}
+
 func TestPostgresVPSAssetPatchRejectsMergedCancelledInUseState(t *testing.T) {
 	t.Parallel()
 
@@ -582,11 +682,11 @@ func TestPostgresVPSAssetPatchRejectsMergedCancelledInUseState(t *testing.T) {
 	_, err := repo.PatchVPSAsset(context.Background(), "vps_001", vpsassets.PatchInput{
 		UsageStatus: vpsassets.PatchUsage(vpsassets.UsageInUse),
 	})
-	if !errors.Is(err, vpsassets.ErrInvalidVPSAssetInput) {
-		t.Fatalf("PatchVPSAsset() error = %v, want ErrInvalidVPSAssetInput", err)
+	if !errors.Is(err, vpsassets.ErrVPSAssetReadonly) {
+		t.Fatalf("PatchVPSAsset() error = %v, want ErrVPSAssetReadonly", err)
 	}
 	if updated {
-		t.Fatal("PatchVPSAsset() updated row before rejecting merged cancelled/in_use state")
+		t.Fatal("PatchVPSAsset() updated row before rejecting readonly cancelled vps")
 	}
 }
 
@@ -1056,6 +1156,41 @@ func TestPostgresVPSAssetMapsNotFound(t *testing.T) {
 	}
 	if _, err := repo.PatchVPSAsset(context.Background(), "vps_missing", vpsassets.PatchInput{DisplayName: vpsassets.PatchString("New")}); !errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
 		t.Fatalf("PatchVPSAsset() error = %v, want ErrVPSAssetNotFound", err)
+	}
+}
+
+func TestPostgresVPSAssetPatchRejectsStaleUpdatedAt(t *testing.T) {
+	t.Parallel()
+
+	current := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	stale := current.Add(-time.Minute)
+	repo := &PostgresVPSAssetRepository{db: fakeVPSAssetDB{
+		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			if strings.Contains(sql, "update vps_assets") {
+				t.Fatal("stale If-Match must not issue UPDATE")
+			}
+			return fakeVPSAssetRow{scan: func(dest ...any) error {
+				scanVPSAssetRecordDestinations(dest, vpsassets.Record{
+					VPSID:           "vps_001",
+					DisplayName:     "Akamai Edge",
+					SSHPort:         22,
+					LifecycleStatus: vpsassets.LifecycleActive,
+					UsageStatus:     vpsassets.UsageInUse,
+					RenewalDecision: vpsassets.RenewalKeep,
+					Importance:      "normal",
+					Labels:          []string{},
+					UpdatedAt:       current,
+				})
+				return nil
+			}}
+		},
+	}}
+	_, err := repo.PatchVPSAsset(context.Background(), "vps_001", vpsassets.PatchInput{
+		DisplayName:       vpsassets.PatchString("Newer"),
+		ExpectedUpdatedAt: &stale,
+	})
+	if !errors.Is(err, vpsassets.ErrVPSAssetConflict) {
+		t.Fatalf("PatchVPSAsset() error = %v, want ErrVPSAssetConflict", err)
 	}
 }
 

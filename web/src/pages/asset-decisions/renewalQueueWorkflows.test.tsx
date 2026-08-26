@@ -60,6 +60,7 @@ describe('Asset Decisions renewal queue workflows', () => {
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
+          'If-Match': '"2026-05-09T08:00:00Z"',
         },
         cache: 'no-store',
         credentials: 'include',

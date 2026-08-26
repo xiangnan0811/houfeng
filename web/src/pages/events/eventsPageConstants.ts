@@ -28,6 +28,7 @@ export const INCIDENT_CLASS_OPTIONS: FilterSelectOption[] = [
 
 export const DEFAULT_FILTERS: FilterState = {
   object_type: '',
+  object_id: '',
   severity: '',
   event_type: '',
   limit: String(DEFAULT_LIMIT),

@@ -18,6 +18,8 @@ import (
 
 var ErrInvalidLifecycleActionInput = errors.New("invalid lifecycle action input")
 var ErrLifecycleActionBlocked = errors.New("lifecycle action blocked")
+var ErrStaleCancellationPreview = errors.New("stale cancellation preview")
+var ErrRetryableLifecycleConflict = errors.New("lifecycle transaction conflict")
 
 type ActionType string
 
@@ -65,6 +67,7 @@ type CancellationPreview struct {
 	RecommendedSteps        []RecommendedLifecycleStep             `json:"recommended_steps"`
 	Warnings                []string                               `json:"warnings"`
 	Blockers                []string                               `json:"blockers"`
+	PreviewDigest           string                                 `json:"preview_digest"`
 }
 
 type ArchiveReview struct {
@@ -112,6 +115,7 @@ type ApplyCancellationInput struct {
 	VPSLifecycleStatus        vpsassets.LifecycleStatus       `json:"vps_lifecycle_status"`
 	MonitoringInstanceActions []MonitoringInstanceActionInput `json:"monitoring_instance_actions"`
 	TargetActions             []TargetActionInput             `json:"target_actions"`
+	PreviewDigest             string                          `json:"preview_digest"`
 }
 
 type ExtendValidityInput struct {
@@ -189,6 +193,7 @@ type LinkedVPSContext struct {
 
 func NormalizeApplyCancellationInput(input ApplyCancellationInput) ApplyCancellationInput {
 	input.Reason = strings.TrimSpace(input.Reason)
+	input.PreviewDigest = strings.TrimSpace(input.PreviewDigest)
 	if input.VPSLifecycleStatus == "" {
 		input.VPSLifecycleStatus = vpsassets.LifecycleCancelled
 	}
@@ -244,6 +249,9 @@ func ValidateExtendValidityInput(input ExtendValidityInput) error {
 func ValidateApplyCancellationInput(input ApplyCancellationInput) error {
 	if strings.TrimSpace(input.Reason) == "" {
 		return fmt.Errorf("%w: reason is required", ErrInvalidLifecycleActionInput)
+	}
+	if strings.TrimSpace(input.PreviewDigest) == "" {
+		return fmt.Errorf("%w: preview_digest is required", ErrInvalidLifecycleActionInput)
 	}
 	if input.VPSLifecycleStatus != vpsassets.LifecycleToCancel && input.VPSLifecycleStatus != vpsassets.LifecycleCancelled {
 		return fmt.Errorf("%w: vps_lifecycle_status must be to_cancel or cancelled", ErrInvalidLifecycleActionInput)

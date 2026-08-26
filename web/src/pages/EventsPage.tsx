@@ -71,6 +71,7 @@ function parseEventSearchParams(searchParams: URLSearchParams): FilterState {
 
   return {
     object_type: isObjectType(rawObjectType) ? rawObjectType : DEFAULT_FILTERS.object_type,
+    object_id: (searchParams.get('object_id') ?? '').trim(),
     severity: isSeverity(rawSeverity) ? rawSeverity : DEFAULT_FILTERS.severity,
     event_type: isEventType(rawEventType) ? rawEventType : DEFAULT_FILTERS.event_type,
     limit: String(DEFAULT_LIMIT),
@@ -99,6 +100,7 @@ function normalizeFilters(filters: FilterState): FilterState {
 
   return {
     object_type: isObjectType(filters.object_type) ? filters.object_type : '',
+    object_id: filters.object_id.trim(),
     severity: isSeverity(filters.severity) ? filters.severity : '',
     event_type: isEventType(filters.event_type) ? filters.event_type : '',
     limit: String(DEFAULT_LIMIT),
@@ -119,6 +121,7 @@ function searchParamsFromFilters(filters: FilterState): URLSearchParams {
   const normalized = normalizeFilters(filters)
   const next = new URLSearchParams()
   if (normalized.object_type) next.set('object_type', normalized.object_type)
+  if (normalized.object_id) next.set('object_id', normalized.object_id)
   if (normalized.severity) next.set('severity', normalized.severity)
   if (normalized.event_type) next.set('event_type', normalized.event_type)
   if (normalized.time_range !== 'custom') {
@@ -146,6 +149,7 @@ function hasActiveFilters(filters: FilterState): boolean {
   const normalized = normalizeFilters(filters)
   return (
     normalized.object_type !== '' ||
+    normalized.object_id !== '' ||
     normalized.severity !== '' ||
     normalized.event_type !== '' ||
     normalized.created_from !== '' ||
@@ -164,6 +168,7 @@ function hasActiveFilters(filters: FilterState): boolean {
 function buildFilterQuery(filters: FilterState, effectiveLimit: number): EventListFilter {
   const query: EventListFilter = {
     object_type: filters.object_type,
+    object_id: filters.object_id,
     severity: filters.severity,
     event_type: filters.event_type,
     limit: effectiveLimit,
@@ -361,6 +366,10 @@ export function EventsPage() {
   }, [appliedFilters, setSearchParams])
 
   function commitInlineFilter<K extends keyof FilterState>(key: K, value: FilterState[K]) {
+    if (key === 'object_type') {
+      commitFilters({ ...appliedFilters, object_type: value as FilterState['object_type'], object_id: '' })
+      return
+    }
     commitFilters({ ...appliedFilters, [key]: value })
   }
 
@@ -372,9 +381,12 @@ export function EventsPage() {
     setDraftState((current) => {
       const currentFilters =
         current.filterKey === appliedFilterKey ? current.filters : appliedFilters
+      const nextFilters = key === 'object_type'
+        ? { ...currentFilters, object_type: value as FilterState['object_type'], object_id: '' }
+        : { ...currentFilters, [key]: value }
       return {
         filterKey: appliedFilterKey,
-        filters: { ...currentFilters, [key]: value },
+        filters: nextFilters,
       }
     })
   }

@@ -4,6 +4,7 @@ export type TimeRange = '24h' | '7d' | '30d' | 'custom'
 
 export type FilterState = {
   object_type: '' | 'monitoring_instance' | 'target'
+  object_id: string
   severity: '' | '关注' | '告警' | '严重'
   event_type: '' | StateChangeEventType
   limit: string

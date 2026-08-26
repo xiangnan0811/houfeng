@@ -56,6 +56,28 @@ func TestPostgresAssetLifecycleMigrationDefinesAuditTablesAndIndexes(t *testing.
 	}
 }
 
+func TestListLifecycleMonitoringInstancesForVPSLocksSharedRowsInGlobalIDOrder(t *testing.T) {
+	t.Parallel()
+
+	var capturedQuery string
+	tx := &fakeAssetLifecycleTx{
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			capturedQuery = sql
+			return &fakeSubscriptionRows{}, nil
+		},
+	}
+
+	if _, err := listLifecycleMonitoringInstancesForVPS(context.Background(), tx, "vps_001", true); err != nil {
+		t.Fatalf("listLifecycleMonitoringInstancesForVPS() error = %v", err)
+	}
+	if !strings.Contains(capturedQuery, "order by n.monitoring_instance_id, l.linked_at desc, n.display_name") {
+		t.Fatalf("locking query does not use global monitoring_instance_id order:\n%s", capturedQuery)
+	}
+	if !strings.Contains(capturedQuery, "for update of l, n") {
+		t.Fatalf("locking query does not lock link and shared instance rows:\n%s", capturedQuery)
+	}
+}
+
 func TestPostgresVPSFirstStatusMigrationNormalizesLegacyStateIntoVPSAudit(t *testing.T) {
 	t.Parallel()
 
@@ -130,6 +152,7 @@ func TestApplyVPSCancellationRejectsArchivedVPSBeforeMutation(t *testing.T) {
 	_, err := repo.ApplyVPSCancellation(context.Background(), "vps_archived", assetlifecycle.ApplyCancellationInput{
 		Reason:             "expired and no renewal",
 		VPSLifecycleStatus: vpsassets.LifecycleCancelled,
+		PreviewDigest:      cancellationPreviewDigestForTest(assetLifecycleTestVPSRecord("vps_archived", vpsassets.LifecycleArchived, vpsassets.RenewalCancel, now, &archivedAt)),
 	})
 
 	if !errors.Is(err, assetlifecycle.ErrLifecycleActionBlocked) {
@@ -143,6 +166,416 @@ func TestApplyVPSCancellationRejectsArchivedVPSBeforeMutation(t *testing.T) {
 	}
 	if businessTx.rollbackCount == 0 {
 		t.Fatalf("business tx rollback count = %d, want rollback", businessTx.rollbackCount)
+	}
+}
+
+func TestApplyVPSCancellationRejectsStalePreview(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	tx := &fakeAssetLifecycleTx{
+		queryFunc: emptyLifecycleListQuery,
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "from vps_assets") {
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil))
+					return nil
+				})
+			}
+			return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+				return pgx.ErrNoRows
+			})
+		},
+	}
+	repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{tx}}}
+	_, err := repo.ApplyVPSCancellation(context.Background(), "vps_001", assetlifecycle.ApplyCancellationInput{
+		Reason:             "expired and no renewal",
+		VPSLifecycleStatus: vpsassets.LifecycleCancelled,
+		PreviewDigest:      "stale-digest",
+	})
+	if !errors.Is(err, assetlifecycle.ErrStaleCancellationPreview) {
+		t.Fatalf("ApplyVPSCancellation error = %v, want ErrStaleCancellationPreview", err)
+	}
+	if tx.commitCount != 0 {
+		t.Fatalf("commit count = %d, want 0", tx.commitCount)
+	}
+}
+
+func TestApplyVPSCancellationUsesSerializableIsolationWithoutTableLocks(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	tx := &fakeAssetLifecycleTx{
+		queryFunc: emptyLifecycleListQuery,
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "from vps_assets") {
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil))
+					return nil
+				})
+			}
+			return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+				return pgx.ErrNoRows
+			})
+		},
+	}
+	db := &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{tx}}
+	repo := &PostgresAssetLifecycleRepository{db: db}
+	_, err := repo.ApplyVPSCancellation(context.Background(), "vps_001", assetlifecycle.ApplyCancellationInput{
+		Reason:             "expired and no renewal",
+		VPSLifecycleStatus: vpsassets.LifecycleCancelled,
+		PreviewDigest:      "stale-digest",
+	})
+	if !errors.Is(err, assetlifecycle.ErrStaleCancellationPreview) {
+		t.Fatalf("ApplyVPSCancellation error = %v, want ErrStaleCancellationPreview", err)
+	}
+	if len(db.beginOptions) != 1 || db.beginOptions[0].IsoLevel != pgx.Serializable {
+		t.Fatalf("begin options = %#v, want SERIALIZABLE", db.beginOptions)
+	}
+	for _, call := range tx.execCalls {
+		if strings.Contains(strings.ToLower(call.sql), "lock table") {
+			t.Fatalf("unexpected table lock %#v", call.sql)
+		}
+	}
+}
+
+func TestApplyVPSCancellationRetriesSerializableBeginConflicts(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	tx := &fakeAssetLifecycleTx{
+		queryFunc: emptyLifecycleListQuery,
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "from vps_assets") {
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil))
+					return nil
+				})
+			}
+			return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+				return pgx.ErrNoRows
+			})
+		},
+	}
+	db := &fakeAssetLifecycleDB{
+		txs:      []*fakeAssetLifecycleTx{tx},
+		beginErr: &pgconn.PgError{Code: "40001", Message: "serialization failure"},
+	}
+	repo := &PostgresAssetLifecycleRepository{db: db}
+	_, err := repo.ApplyVPSCancellation(context.Background(), "vps_001", assetlifecycle.ApplyCancellationInput{
+		Reason:             "expired and no renewal",
+		VPSLifecycleStatus: vpsassets.LifecycleCancelled,
+		PreviewDigest:      "stale-digest",
+	})
+	if !errors.Is(err, assetlifecycle.ErrStaleCancellationPreview) {
+		t.Fatalf("ApplyVPSCancellation error = %v, want ErrStaleCancellationPreview after retry", err)
+	}
+	if len(db.beginOptions) != 2 {
+		t.Fatalf("begin count = %d, want 2", len(db.beginOptions))
+	}
+}
+
+func TestApplyVPSCancellationMapsExhaustedRetriesToTypedConflict(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeAssetLifecycleDB{
+		beginErr:       &pgconn.PgError{Code: "40001", Message: "serialization failure"},
+		beginErrSticky: true,
+	}
+	repo := &PostgresAssetLifecycleRepository{db: db}
+	_, err := repo.ApplyVPSCancellation(context.Background(), "vps_001", assetlifecycle.ApplyCancellationInput{
+		Reason:             "expired and no renewal",
+		VPSLifecycleStatus: vpsassets.LifecycleCancelled,
+		PreviewDigest:      "digest",
+	})
+	if !errors.Is(err, assetlifecycle.ErrRetryableLifecycleConflict) {
+		t.Fatalf("ApplyVPSCancellation error = %v, want ErrRetryableLifecycleConflict", err)
+	}
+	if len(db.beginOptions) != maxCancellationTxAttempts {
+		t.Fatalf("begin count = %d, want %d", len(db.beginOptions), maxCancellationTxAttempts)
+	}
+}
+
+func TestApplyVPSCancellationRetriesSerializableConflictFromLockVPS(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	vps := assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil)
+	conflictTx := &fakeAssetLifecycleTx{
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "from vps_assets") {
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					return &pgconn.PgError{Code: "40001", Message: "serialization failure"}
+				})
+			}
+			return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+				return pgx.ErrNoRows
+			})
+		},
+	}
+	staleTx := &fakeAssetLifecycleTx{
+		queryFunc: emptyLifecycleListQuery,
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "from vps_assets") {
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, vps)
+					return nil
+				})
+			}
+			return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+				return pgx.ErrNoRows
+			})
+		},
+	}
+	db := &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{conflictTx, staleTx}}
+	repo := &PostgresAssetLifecycleRepository{db: db}
+	_, err := repo.ApplyVPSCancellation(context.Background(), "vps_001", assetlifecycle.ApplyCancellationInput{
+		Reason:             "expired and no renewal",
+		VPSLifecycleStatus: vpsassets.LifecycleCancelled,
+		PreviewDigest:      "stale-digest",
+	})
+	if !errors.Is(err, assetlifecycle.ErrStaleCancellationPreview) {
+		t.Fatalf("ApplyVPSCancellation error = %v, want ErrStaleCancellationPreview after lock retry", err)
+	}
+	if db.beginCount != 2 {
+		t.Fatalf("begin count = %d, want retry after VPS lock conflict", db.beginCount)
+	}
+}
+
+func TestApplyVPSCancellationRetriesRetryableConflictsAtRemainingCutPoints(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	vps := assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil)
+	changedVPS := vps
+	changedVPS.UpdatedAt = now.Add(time.Second)
+	newStaleAfterRetryTx := func() *fakeAssetLifecycleTx {
+		return &fakeAssetLifecycleTx{
+			queryFunc: emptyLifecycleListQuery,
+			queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+				if strings.Contains(sql, "from vps_assets") {
+					return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+						scanVPSAssetRecordDestinations(dest, changedVPS)
+						return nil
+					})
+				}
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					return pgx.ErrNoRows
+				})
+			},
+		}
+	}
+
+	digest := cancellationPreviewDigestForTest(vps)
+	tests := []struct {
+		name       string
+		digest     string
+		conflictTx *fakeAssetLifecycleTx
+	}{
+		{
+			name:   "lock VPS 40P01",
+			digest: "stale-digest",
+			conflictTx: &fakeAssetLifecycleTx{
+				queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+					if strings.Contains(sql, "from vps_assets") {
+						return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+							return &pgconn.PgError{Code: "40P01", Message: "deadlock detected"}
+						})
+					}
+					return fakeAssetLifecycleRowFunc(func(dest ...any) error { return pgx.ErrNoRows })
+				},
+			},
+		},
+		{
+			name:   "preview load 40001",
+			digest: "stale-digest",
+			conflictTx: &fakeAssetLifecycleTx{
+				queryFunc: func(context.Context, string, ...any) (pgx.Rows, error) {
+					return nil, &pgconn.PgError{Code: "40001", Message: "serialization failure"}
+				},
+				queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+					if strings.Contains(sql, "from vps_assets") {
+						return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+							scanVPSAssetRecordDestinations(dest, vps)
+							return nil
+						})
+					}
+					return fakeAssetLifecycleRowFunc(func(dest ...any) error { return pgx.ErrNoRows })
+				},
+			},
+		},
+		{
+			name:   "action insert 40P01",
+			digest: digest,
+			conflictTx: &fakeAssetLifecycleTx{
+				queryFunc: emptyLifecycleListQuery,
+				queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+					if strings.Contains(sql, "from vps_assets") {
+						return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+							scanVPSAssetRecordDestinations(dest, vps)
+							return nil
+						})
+					}
+					return fakeAssetLifecycleRowFunc(func(dest ...any) error { return pgx.ErrNoRows })
+				},
+				execFunc: func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+					if strings.Contains(sql, "insert into asset_lifecycle_actions") {
+						return pgconn.CommandTag{}, &pgconn.PgError{Code: "40P01", Message: "deadlock detected"}
+					}
+					return pgconn.NewCommandTag("INSERT 0 1"), nil
+				},
+			},
+		},
+		{
+			name:   "commit 40001",
+			digest: digest,
+			conflictTx: func() *fakeAssetLifecycleTx {
+				tx := successfulCancellationTx(t, vps, now)
+				tx.commitErr = &pgconn.PgError{Code: "40001", Message: "serialization failure"}
+				return tx
+			}(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			db := &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{tt.conflictTx, newStaleAfterRetryTx()}}
+			repo := &PostgresAssetLifecycleRepository{db: db}
+			_, err := repo.ApplyVPSCancellation(context.Background(), "vps_001", assetlifecycle.ApplyCancellationInput{
+				Reason:             "expired and no renewal",
+				VPSLifecycleStatus: vpsassets.LifecycleCancelled,
+				PreviewDigest:      tt.digest,
+			})
+			if !errors.Is(err, assetlifecycle.ErrStaleCancellationPreview) {
+				t.Fatalf("ApplyVPSCancellation error = %v, want ErrStaleCancellationPreview after %s retry", err, tt.name)
+			}
+			if db.beginCount != 2 {
+				t.Fatalf("begin count = %d, want retry after %s", db.beginCount, tt.name)
+			}
+		})
+	}
+}
+
+func successfulCancellationTx(t *testing.T, vps vpsassets.Record, now time.Time) *fakeAssetLifecycleTx {
+	t.Helper()
+	return &fakeAssetLifecycleTx{
+		queryFunc: emptyLifecycleListQuery,
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "from vps_assets"):
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, vps)
+					return nil
+				})
+			case strings.Contains(sql, "update vps_assets"):
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					record := vps
+					record.LifecycleStatus = vpsassets.LifecycleCancelled
+					record.UsageStatus = vpsassets.UsageIdle
+					record.RenewalDecision = vpsassets.RenewalCancel
+					scanVPSAssetRecordDestinations(dest, record)
+					return nil
+				})
+			case strings.Contains(sql, "insert into renewal_decisions"):
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					*(dest[0].(*string)) = "rdec_001"
+					*(dest[1].(*string)) = "vps_001"
+					fromDecision := "keep"
+					*(dest[2].(**string)) = &fromDecision
+					*(dest[3].(*string)) = "cancel"
+					*(dest[4].(*string)) = "expired and no renewal"
+					*(dest[5].(*time.Time)) = now
+					*(dest[6].(*time.Time)) = now
+					return nil
+				})
+			default:
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error { return pgx.ErrNoRows })
+			}
+		},
+	}
+}
+
+func TestApplyVPSCancellationDoesNotAuditRetryableStepConflicts(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	vps := assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil)
+	digest := cancellationPreviewDigestForTest(vps)
+	conflictTx := &fakeAssetLifecycleTx{
+		queryFunc: emptyLifecycleListQuery,
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "from vps_assets") {
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, vps)
+					return nil
+				})
+			}
+			if strings.Contains(sql, "update vps_assets") {
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					return &pgconn.PgError{Code: "40001", Message: "serialization failure"}
+				})
+			}
+			return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+				return pgx.ErrNoRows
+			})
+		},
+	}
+	db := &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{conflictTx, conflictTx, conflictTx}}
+	repo := &PostgresAssetLifecycleRepository{db: db}
+	_, err := repo.ApplyVPSCancellation(context.Background(), "vps_001", assetlifecycle.ApplyCancellationInput{
+		Reason:             "expired and no renewal",
+		VPSLifecycleStatus: vpsassets.LifecycleCancelled,
+		PreviewDigest:      digest,
+	})
+	if !errors.Is(err, assetlifecycle.ErrRetryableLifecycleConflict) {
+		t.Fatalf("ApplyVPSCancellation error = %v, want ErrRetryableLifecycleConflict", err)
+	}
+	if db.beginCount != maxCancellationTxAttempts {
+		t.Fatalf("begin tx count = %d, want retry without failed-audit tx", db.beginCount)
+	}
+	for _, call := range conflictTx.execCalls {
+		if strings.Contains(strings.ToLower(call.sql), "'failed'") || strings.Contains(call.sql, "status = 'failed'") {
+			t.Fatalf("unexpected failed-action audit %#v", call.sql)
+		}
+	}
+}
+
+func TestApplyVPSCancellationRetriesActionStepInsertConflictsWithoutFailedAudit(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []string{"40001", "40P01"} {
+		code := code
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+			vps := assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil)
+			conflictTx := successfulCancellationTx(t, vps, now)
+			conflictTx.execFunc = func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+				if strings.Contains(sql, "insert into asset_lifecycle_action_steps") {
+					return pgconn.CommandTag{}, &pgconn.PgError{Code: code, Message: "retryable action-step insert conflict"}
+				}
+				return pgconn.NewCommandTag("INSERT 0 1"), nil
+			}
+			db := &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{conflictTx, conflictTx, conflictTx}}
+			repo := &PostgresAssetLifecycleRepository{db: db}
+			_, err := repo.ApplyVPSCancellation(context.Background(), vps.VPSID, assetlifecycle.ApplyCancellationInput{
+				Reason:             "expired and no renewal",
+				VPSLifecycleStatus: vpsassets.LifecycleCancelled,
+				PreviewDigest:      cancellationPreviewDigestForTest(vps),
+			})
+			if !errors.Is(err, assetlifecycle.ErrRetryableLifecycleConflict) {
+				t.Fatalf("ApplyVPSCancellation error = %v, want ErrRetryableLifecycleConflict", err)
+			}
+			if db.beginCount != maxCancellationTxAttempts {
+				t.Fatalf("begin tx count = %d, want %d", db.beginCount, maxCancellationTxAttempts)
+			}
+			for _, call := range conflictTx.execCalls {
+				if strings.Contains(strings.ToLower(call.sql), "'failed'") || strings.Contains(call.sql, "status = 'failed'") {
+					t.Fatalf("unexpected failed-action audit %#v", call.sql)
+				}
+			}
+		})
 	}
 }
 
@@ -293,6 +726,73 @@ func TestApplyVPSArchiveRequiresConfirmationAndPatchesArchivedInTransaction(t *t
 	}
 }
 
+func TestGetVPSArchiveReviewRejectsActiveLifecycle(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "from vps_assets") {
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil))
+					return nil
+				})
+			}
+			return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+				return pgx.ErrNoRows
+			})
+		},
+		queryFunc: emptyLifecycleListQuery,
+	}}
+
+	review, err := repo.GetVPSArchiveReview(context.Background(), "vps_001")
+	if err != nil {
+		t.Fatalf("GetVPSArchiveReview() error = %v", err)
+	}
+	if review.Eligible {
+		t.Fatalf("active VPS archive review eligible = true, want blocked by lifecycle")
+	}
+	if len(review.Blockers) == 0 {
+		t.Fatalf("active VPS archive review blockers empty")
+	}
+}
+
+func TestApplyVPSArchiveRejectsActiveLifecycleWithoutPatch(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+	tx := &fakeAssetLifecycleTx{
+		queryFunc: emptyLifecycleListQuery,
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "from vps_assets") {
+				return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+					scanVPSAssetRecordDestinations(dest, assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil))
+					return nil
+				})
+			}
+			return fakeAssetLifecycleRowFunc(func(dest ...any) error {
+				return errors.New("unexpected query row")
+			})
+		},
+	}
+	repo := &PostgresAssetLifecycleRepository{db: &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{tx}}}
+
+	_, err := repo.ApplyVPSArchive(context.Background(), "vps_001", assetlifecycle.ApplyArchiveInput{
+		ConfirmationName: "Frankfurt Legacy",
+	})
+	if !errors.Is(err, assetlifecycle.ErrLifecycleActionBlocked) {
+		t.Fatalf("ApplyVPSArchive() error = %v, want ErrLifecycleActionBlocked", err)
+	}
+	if tx.commitCount != 0 {
+		t.Fatalf("commit count = %d, want 0", tx.commitCount)
+	}
+	for _, call := range tx.execCalls {
+		if strings.Contains(strings.ToLower(call.sql), "update vps_assets") {
+			t.Fatalf("unexpected VPS patch during active archive apply: %#v", call.sql)
+		}
+	}
+}
+
 func TestApplyVPSArchiveRejectsWrongConfirmationBeforePatch(t *testing.T) {
 	t.Parallel()
 
@@ -422,6 +922,7 @@ func TestApplyVPSCancellationPersistsFailedAuditAfterRollback(t *testing.T) {
 
 	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
 	businessTx := &fakeAssetLifecycleTx{
+		queryFunc: emptyLifecycleListQuery,
 		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
 			switch {
 			case strings.Contains(sql, "from vps_assets"):
@@ -452,6 +953,7 @@ func TestApplyVPSCancellationPersistsFailedAuditAfterRollback(t *testing.T) {
 	_, err := repo.ApplyVPSCancellation(context.Background(), "vps_001", assetlifecycle.ApplyCancellationInput{
 		Reason:                    "expired and no renewal",
 		VPSLifecycleStatus:        vpsassets.LifecycleCancelled,
+		PreviewDigest:             cancellationPreviewDigestForTest(assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalCancel, now, nil)),
 		SubscriptionIDs:           []string{"sub_missing"},
 		MonitoringInstanceActions: []assetlifecycle.MonitoringInstanceActionInput{},
 		TargetActions:             []assetlifecycle.TargetActionInput{},
@@ -515,15 +1017,7 @@ func TestApplyVPSCancellationMovesInUseVPSOutOfUseBeforeCancelled(t *testing.T) 
 	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
 	var vpsPatchArgs []any
 	tx := &fakeAssetLifecycleTx{
-		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-			switch {
-			case strings.Contains(sql, "from subscriptions"),
-				strings.Contains(sql, "from vps_monitoring_instance_links"):
-				return &fakeSubscriptionRows{}, nil
-			default:
-				return nil, errors.New("unexpected query")
-			}
-		},
+		queryFunc: emptyLifecycleListQuery,
 		queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
 			switch {
 			case strings.Contains(sql, "from vps_assets"):
@@ -563,6 +1057,7 @@ func TestApplyVPSCancellationMovesInUseVPSOutOfUseBeforeCancelled(t *testing.T) 
 	result, err := repo.ApplyVPSCancellation(context.Background(), "vps_001", assetlifecycle.ApplyCancellationInput{
 		Reason:             "expired and no renewal",
 		VPSLifecycleStatus: vpsassets.LifecycleCancelled,
+		PreviewDigest:      cancellationPreviewDigestForTest(assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil)),
 	})
 	if err != nil {
 		t.Fatalf("ApplyVPSCancellation() error = %v", err)
@@ -570,8 +1065,11 @@ func TestApplyVPSCancellationMovesInUseVPSOutOfUseBeforeCancelled(t *testing.T) 
 	if result.Action.Status != assetlifecycle.ActionStatusCompleted {
 		t.Fatalf("action status = %q, want completed", result.Action.Status)
 	}
-	if len(vpsPatchArgs) != 45 {
+	if len(vpsPatchArgs) != 47 {
 		t.Fatalf("vps patch args = %#v, want patchVPSAssetRow args", vpsPatchArgs)
+	}
+	if vpsPatchArgs[46] != false {
+		t.Fatalf("controlled lifecycle patch guard = %#v, want false", vpsPatchArgs[46])
 	}
 	if vpsPatchArgs[35] != true || vpsPatchArgs[36] != string(vpsassets.UsageIdle) {
 		t.Fatalf("usage patch args = set:%#v value:%#v, want usage_status idle before cancelled", vpsPatchArgs[35], vpsPatchArgs[36])
@@ -809,6 +1307,15 @@ func TestCancellationPreviewFindingsTreatPausedAndUnknownSubscriptionsAsInactive
 	}
 }
 
+func cancellationPreviewDigestForTest(vps vpsassets.Record) string {
+	preview := assembleCancellationPreview(vps, nil, nil, nil, nil, nil)
+	return assetlifecycle.DigestCancellationPreview(preview)
+}
+
+func emptyLifecycleListQuery(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return &fakeSubscriptionRows{}, nil
+}
+
 func assetLifecycleTestVPSRecord(vpsID string, lifecycle vpsassets.LifecycleStatus, renewal vpsassets.RenewalDecision, now time.Time, archivedAt *time.Time) vpsassets.Record {
 	return vpsassets.Record{
 		VPSID:           vpsID,
@@ -877,10 +1384,13 @@ func scanMonitoringInstanceSummaryDestinations(dest []any, summary assetlinks.Mo
 }
 
 type fakeAssetLifecycleDB struct {
-	txs          []*fakeAssetLifecycleTx
-	queryFunc    func(context.Context, string, ...any) (pgx.Rows, error)
-	queryRowFunc func(context.Context, string, ...any) pgx.Row
-	beginCount   int
+	txs            []*fakeAssetLifecycleTx
+	queryFunc      func(context.Context, string, ...any) (pgx.Rows, error)
+	queryRowFunc   func(context.Context, string, ...any) pgx.Row
+	beginCount     int
+	beginOptions   []pgx.TxOptions
+	beginErr       error
+	beginErrSticky bool
 }
 
 func (f *fakeAssetLifecycleDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
@@ -899,7 +1409,15 @@ func (f *fakeAssetLifecycleDB) QueryRow(ctx context.Context, sql string, args ..
 	})
 }
 
-func (f *fakeAssetLifecycleDB) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+func (f *fakeAssetLifecycleDB) BeginTx(_ context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+	f.beginOptions = append(f.beginOptions, options)
+	if f.beginErr != nil {
+		err := f.beginErr
+		if !f.beginErrSticky {
+			f.beginErr = nil
+		}
+		return nil, err
+	}
 	if f.beginCount >= len(f.txs) {
 		return nil, errors.New("unexpected BeginTx call")
 	}
@@ -915,6 +1433,7 @@ type fakeAssetLifecycleTx struct {
 	execCalls     []fakeAssetLifecycleExecCall
 	commitCount   int
 	rollbackCount int
+	commitErr     error
 }
 
 type fakeAssetLifecycleExecCall struct {
@@ -928,6 +1447,9 @@ func (f *fakeAssetLifecycleTx) Begin(context.Context) (pgx.Tx, error) {
 
 func (f *fakeAssetLifecycleTx) Commit(context.Context) error {
 	f.commitCount++
+	if f.commitErr != nil {
+		return f.commitErr
+	}
 	return nil
 }
 

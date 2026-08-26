@@ -1,4 +1,5 @@
 import type { VPSOverview } from '../../lib/types'
+import { overviewSummaryCellLabel } from '../../lib/vpsOverviewPresentation'
 import { VPSOverviewFreshness } from './VPSOverviewFreshness'
 
 type Props = {
@@ -17,13 +18,14 @@ const CELLS: Array<{ key: keyof VPSOverview['summary']; label: string; retryable
 export function VPSOverviewSummaryGrid({ summary, onRefresh, retrying }: Props) {
   return (
     <section className="vps-overview-summary" aria-label="决策摘要">
+      <h2 className="visually-hidden">决策摘要</h2>
       <div className="vps-overview-summary__grid">
         {CELLS.map(({ key, label, retryable }) => {
           const cell = summary[key]
           return (
             <article key={key} className="vps-overview-summary__cell">
               <p className="vps-overview-summary__label">{label}</p>
-              <h3 className="vps-overview-summary__status">{cell.status || '—'}</h3>
+              <h3 className="vps-overview-summary__status">{overviewSummaryCellLabel(key, cell.status) || '—'}</h3>
               {cell.detail ? (
                 <p className="vps-overview-summary__detail">{cell.detail}</p>
               ) : null}

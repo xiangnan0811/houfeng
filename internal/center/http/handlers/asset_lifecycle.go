@@ -222,6 +222,10 @@ func writeAssetLifecycleError(w http.ResponseWriter, err error) bool {
 		writeError(w, http.StatusBadRequest, "invalid input")
 	case errors.Is(err, assetlifecycle.ErrLifecycleActionBlocked):
 		writeError(w, http.StatusConflict, "lifecycle action blocked")
+	case errors.Is(err, assetlifecycle.ErrStaleCancellationPreview):
+		writeError(w, http.StatusConflict, "cancellation preview stale")
+	case errors.Is(err, assetlifecycle.ErrRetryableLifecycleConflict):
+		writeError(w, http.StatusConflict, "lifecycle transaction conflict")
 	case errors.Is(err, vpsassets.ErrVPSAssetNotFound):
 		writeError(w, http.StatusNotFound, "vps asset not found")
 	case errors.Is(err, subscriptions.ErrSubscriptionNotFound):
