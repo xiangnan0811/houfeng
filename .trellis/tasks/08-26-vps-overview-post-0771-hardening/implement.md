@@ -159,8 +159,8 @@ Five commit-blocking findings:
 ## Phase 5 — Commit and PR delivery
 
 - [x] Run the final PostgreSQL and full repository pre-commit gates.
-- [ ] Commit the Trellis task record and implementation in coherent batches.
-- [ ] Push `fix/vps-overview-post-0771-hardening` and open the feature PR.
+- [x] Commit the Trellis task record and implementation in coherent batches.
+- [x] Push `fix/vps-overview-post-0771-hardening` and open feature PR #458.
 - [ ] Monitor all required PR checks; diagnose and fix failures on the same
       branch; merge only with an unchanged verified head SHA.
 - [ ] Verify main CI and Release Please after the feature merge.
@@ -188,6 +188,11 @@ Five commit-blocking findings:
   budgets PASS.
 - Full Chromium Playwright: 133 / 133 PASS, including the cancellation decision
   PATCH path and cancellation workbench deep link.
+
+### Feature PR record
+
+- PR: https://github.com/xiangnan0811/houfeng/pull/458
+- Work commits: `d153b8e2`, `e62e485a`, `2dda7437`, `1043e08c`.
 
 ## Rollback
 
