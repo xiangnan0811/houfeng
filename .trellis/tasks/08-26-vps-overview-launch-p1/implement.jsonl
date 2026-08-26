@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend layer entrypoint and quality gates."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Serializable transactions, lock ordering and PostgreSQL error contracts."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Typed domain/store/HTTP error propagation."}
+{"file":".trellis/spec/web/index.md","reason":"Web layer conventions and Node 22 verification."}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Async request ownership, routing and stale-state rules."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Storage-to-API-to-Web lifecycle and destination contract trace."}
