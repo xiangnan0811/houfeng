@@ -1361,6 +1361,7 @@ describe('api helpers', () => {
       recommended_steps: [],
       warnings: ['订阅账单记录已无续费动作，但 VPS 尚未进入 to_cancel/cancelled，存在状态割裂。'],
       blockers: [],
+      preview_digest: 'preview-digest-test',
     }
     const actionResult = {
       action: {
@@ -1396,6 +1397,7 @@ describe('api helpers', () => {
       vps_lifecycle_status: 'cancelled',
       monitoring_instance_actions: [{ monitoring_instance_id: 'mi_001', lifecycle_status: '已退役', monitoring_status: '暂停' }],
       target_actions: [{ target_id: 'tg_001', run_status: '已归档' }],
+      preview_digest: 'preview-digest-test',
     } satisfies ApplyCancellationInput
     const fetchMock = vi
       .fn()
@@ -1559,7 +1561,7 @@ describe('api helpers', () => {
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(unlinkedRecord)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(updateVPSAsset('vps_001', patchBody)).resolves.toEqual(updatedVPS)
+    await expect(updateVPSAsset('vps_001', patchBody, { expectedUpdatedAt: '2026-05-09T09:00:00Z' })).resolves.toEqual(updatedVPS)
     await expect(linkVPSMonitoringInstance('vps_001', linkBody)).resolves.toEqual(linkRecord)
     await expect(unlinkVPSMonitoringInstance('vps_001', unlinkBody)).resolves.toEqual(unlinkedRecord)
 
@@ -1568,6 +1570,7 @@ describe('api helpers', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'If-Match': '"2026-05-09T09:00:00Z"',
       },
       cache: 'no-store',
       credentials: 'include',

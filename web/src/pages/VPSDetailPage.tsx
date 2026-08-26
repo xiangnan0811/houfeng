@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Navigate, useParams } from 'react-router-dom'
 
 import { PageState } from '../components/PageState'
 import { ApiError } from '../lib/apiRequest'
@@ -15,7 +15,7 @@ const LegacyVPSDetailPage = lazy(() =>
   import('./vps-detail/LegacyVPSDetail').then((module) => ({ default: module.LegacyVPSDetail })),
 )
 
-type GateMode = 'probing' | 'overview' | 'legacy' | 'not_found' | 'error'
+type GateMode = 'probing' | 'overview' | 'legacy' | 'archive' | 'not_found' | 'error'
 type SettledGate = {
   vpsId: string
   revision: number
@@ -30,6 +30,10 @@ type GateProbe = {
 }
 const SAFE_OVERVIEW_FAILURE = 'VPS 概览请求或响应校验失败，请重试。'
 const SAFE_VPS_NOT_FOUND = '该 VPS 不存在，或当前账号无权查看。'
+
+function isReadonlyArchiveLifecycle(status: string | undefined): boolean {
+  return status === 'cancelled' || status === 'archived'
+}
 
 /**
  * Canonical `/vps/:id` entry. Capability-off or an explicitly unavailable overview
@@ -73,7 +77,15 @@ export function VPSDetailPage() {
     void probe.promise
       .then((overview) => {
         if (cancelled || probeRef.current !== probe) return
-        if (overviewHasRecordsV2Read(overview)) {
+        if (isReadonlyArchiveLifecycle(overview.identity.lifecycle_status)) {
+          setSettledGate({
+            vpsId: normalizedVPSId,
+            revision: probeRevision,
+            mode: 'archive',
+            error: null,
+            overview,
+          })
+        } else if (overviewHasRecordsV2Read(overview)) {
           setSettledGate({
             vpsId: normalizedVPSId,
             revision: probeRevision,
@@ -170,6 +182,10 @@ export function VPSDetailPage() {
     )
   }
 
+  if (gate === 'archive') {
+    return <Navigate to={`/archive/${encodeURIComponent(normalizedVPSId)}`} replace />
+  }
+
   if (gate === 'legacy') {
     return (
       <Suspense fallback={<RouteModuleFallback label="正在加载 VPS 详情" />}>
@@ -216,6 +232,11 @@ function VPSOverviewRoute({
     )
   }
 
+  const lifecycleStatus = state.overview.identity.lifecycle_status
+  if (lifecycleStatus === 'cancelled' || lifecycleStatus === 'archived') {
+    return <Navigate to={`/archive/${encodeURIComponent(vpsId ?? '')}`} replace />
+  }
+
   return (
     <>
       <VPSOverviewPageView
@@ -224,10 +245,12 @@ function VPSOverviewRoute({
         managementTriggerRef={managementTriggerRef}
         onRefresh={commands.refresh}
         retrying={state.status === 'loading'}
+        refreshError={state.errorMessage}
       />
       <VPSOverviewManagementActions
         vpsId={state.overview.identity.vps_id}
         displayName={state.overview.identity.display_name}
+        lifecycleStatus={state.overview.identity.lifecycle_status}
         management={management}
         managementTriggerRef={managementTriggerRef}
         onOverviewRefresh={commands.refresh}

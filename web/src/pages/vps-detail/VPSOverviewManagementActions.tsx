@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import { Button, Modal } from '../../components/atoms'
@@ -14,6 +14,7 @@ import {
   listProviders,
   updateVPSAsset,
 } from '../../lib/api'
+import { ApiError } from '../../lib/apiRequest'
 import type {
   ApplyCancellationInput,
   ArchiveReview,
@@ -45,6 +46,7 @@ import {
 type Props = {
   vpsId: string
   displayName: string
+  lifecycleStatus: string
   management: VPSManagementController
   managementTriggerRef: RefObject<HTMLButtonElement | null>
   onOverviewRefresh: () => Promise<boolean>
@@ -59,11 +61,13 @@ type PageFeedback = {
 export function VPSOverviewManagementActions({
   vpsId,
   displayName,
+  lifecycleStatus,
   management,
   managementTriggerRef,
   onOverviewRefresh,
 }: Props) {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [detail, setDetail] = useState<VPSAssetDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
@@ -110,6 +114,27 @@ export function VPSOverviewManagementActions({
       submissionLockRef.current = false
     }
   }, [vpsId])
+
+  useEffect(() => {
+    const workbench = searchParams.get('workbench')
+    if (!workbench) return
+    if (workbench === 'archive' && lifecycleStatus !== 'to_cancel' && lifecycleStatus !== 'cancelled') {
+      const next = new URLSearchParams(searchParams)
+      next.delete('workbench')
+      setSearchParams(next, { replace: true })
+      return
+    }
+    if (workbench === 'cancellation') management.openPanel('cancellation')
+    else if (workbench === 'subscription') management.openPanel('subscription')
+    else if (workbench === 'decision') management.openPanel('decision')
+    else if (workbench === 'archive') management.openPanel('archive')
+    else return
+    const next = new URLSearchParams(searchParams)
+    next.delete('workbench')
+    setSearchParams(next, { replace: true })
+    // Deep-link opens once per VPS identity; later search edits must not re-open closed panels.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vpsId, lifecycleStatus])
 
   useEffect(() => {
     if (!detailPanelOpen) return
@@ -262,7 +287,7 @@ export function VPSOverviewManagementActions({
     const generation = beginSubmission()
     if (generation === null) return
     try {
-      await updateVPSAsset(detail.vps_id, input)
+      await updateVPSAsset(detail.vps_id, input, { expectedUpdatedAt: detail.updated_at })
       if (!submissionIsCurrent(generation)) return
       const refreshed = await onOverviewRefresh()
       if (!submissionIsCurrent(generation)) return
@@ -296,7 +321,7 @@ export function VPSOverviewManagementActions({
       const updated = await updateVPSAsset(detail.vps_id, {
         renewal_decision: decisionDraft.renewalDecision,
         ...(reason ? { renewal_reason: reason } : {}),
-      })
+      }, { expectedUpdatedAt: detail.updated_at })
       if (!submissionIsCurrent(generation)) return
       const refreshed = await onOverviewRefresh()
       if (!submissionIsCurrent(generation)) return
@@ -381,6 +406,18 @@ export function VPSOverviewManagementActions({
         : { tone: 'warning', message: `取消/退役动作已完成，写入 ${result.steps.length} 个审计步骤，但部分刷新失败，请重新复核。` })
     } catch (error: unknown) {
       if (!submissionIsCurrent(generation)) return
+      if (error instanceof ApiError && error.status === 409 && error.message === 'cancellation preview stale') {
+        try {
+          const preview = await getVPSCancellationPreview(vpsId)
+          if (!submissionIsCurrent(generation)) return
+          setCancellationPreview(preview)
+        } catch {
+          if (!submissionIsCurrent(generation)) return
+        }
+        if (!submissionIsCurrent(generation)) return
+        setCancellationError('影响范围已变化，请重新加载预览后再确认')
+        return
+      }
       setMutationError(describeManagementError(error, '执行取消/退役失败'))
     } finally {
       finishSubmission(generation)
@@ -569,7 +606,7 @@ export function VPSOverviewManagementActions({
           {cancellationError ? <Button onClick={retryLoad}>重试加载</Button> : null}
           {cancellationPreview ? (
             <VPSCancellationWorkbench
-              key={`${vpsId}:${cancellationResult?.action.action_id ?? 'preview'}`}
+              key={`${vpsId}:${cancellationPreview.preview_digest}`}
               preview={cancellationPreview}
               submitting={submitting}
               error={mutationError}

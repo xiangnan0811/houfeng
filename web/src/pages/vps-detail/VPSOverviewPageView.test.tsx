@@ -21,19 +21,19 @@ function healthyOverview(): VPSOverview {
       datacenter: 'TK1',
       ipv4: '192.0.2.1',
       ipv6: '',
-      lifecycle_status: '在用',
-      usage_status: '生产',
-      renewal_decision: '续费',
-      importance: '高',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'high',
       labels: ['edge'],
       updated_at: '2026-08-20T00:00:00Z',
     },
     anomalies: [],
     summary: {
-      overall: { status: '正常', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
+      overall: { status: 'healthy', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
       monitoring: { status: '正常', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
-      ip_quality: { status: '低风险', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
-      renewal: { status: '续费', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
+      ip_quality: { status: 'low', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
+      renewal: { status: 'keep', section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' } },
     },
     recent_activity: {
       section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' },
@@ -129,7 +129,15 @@ describe('VPSOverviewPageView', () => {
     expect(screen.queryByText('动作：无')).not.toBeInTheDocument()
 
     const sectionTitles = Array.from(container.querySelectorAll('h2')).map((node) => node.textContent)
-    expect(sectionTitles).toEqual(['最近活动', '稳定事实', '关联资源'])
+    expect(sectionTitles).toEqual(['决策摘要', '最近活动', '稳定事实', '关联资源'])
+    expect(screen.getByText('在用')).toBeInTheDocument()
+    expect(screen.getByText('承载业务')).toBeInTheDocument()
+    expect(screen.getByText('总体正常')).toBeInTheDocument()
+    expect(screen.getByText('低风险')).toBeInTheDocument()
+    expect(screen.getByText('保留')).toBeInTheDocument()
+    expect(screen.getByText('人工记录')).toBeInTheDocument()
+    expect(screen.getByText('系统事实')).toBeInTheDocument()
+    expect(screen.getByText('不可变证据')).toBeInTheDocument()
     expect(screen.queryByText('不应显示的第四条')).not.toBeInTheDocument()
     expect(screen.getByText('最近一条')).toBeInTheDocument()
   })
@@ -200,7 +208,7 @@ describe('VPSOverviewPageView', () => {
 
     expect(screen.queryByText('暂无最近活动')).not.toBeInTheDocument()
     expect(screen.getByText('最近活动暂不可用，无法确认是否为空。')).toBeInTheDocument()
-    const serviceTrigger = screen.getByRole('button', { name: '服务—unavailable' })
+    const serviceTrigger = screen.getByRole('button', { name: '服务—暂不可用' })
     const domainTrigger = screen.getByRole('button', { name: '域名0' })
     expect(within(serviceTrigger).getByText('—')).toBeInTheDocument()
     expect(within(domainTrigger).getByText('0')).toBeInTheDocument()
@@ -330,6 +338,66 @@ describe('VPSOverviewPageView', () => {
     expect(management.openPanel).toHaveBeenCalledWith('domains-detail')
     expect(management.openMenu).toHaveBeenCalledTimes(1)
     expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows a refresh failure without clearing last successful overview', () => {
+    render(
+      <MemoryRouter>
+        <VPSOverviewPageView
+          overview={healthyOverview()}
+          management={managementStub()}
+          onRefresh={vi.fn()}
+          retrying={false}
+          refreshError="VPS 概览请求或响应校验失败，请重试。"
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('status')).toHaveTextContent('本次刷新失败，当前仍展示上次成功数据')
+    expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
+  })
+
+  it('hides cancellation and archive for an active VPS', () => {
+    render(
+      <MemoryRouter>
+        <VPSOverviewPageView
+          overview={healthyOverview()}
+          management={managementStub({ menuOpen: true })}
+          onRefresh={vi.fn()}
+          retrying={false}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByRole('menuitem', { name: '取消 / 退役' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '归档' })).not.toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '编辑事实' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '管理' })).toHaveAttribute('aria-controls')
+  })
+
+  it('opens cancellation from the lifecycle blocker on to_cancel VPS', () => {
+    const management = managementStub()
+    const overview = healthyOverview()
+    overview.identity = { ...overview.identity, lifecycle_status: 'to_cancel' }
+    overview.anomalies = [{
+      rule_id: 'lifecycle.blocker.v1',
+      severity: 'warning',
+      title: '生命周期待处理',
+      source: 'lifecycle',
+      primary_action: { id: 'open_management', label: '打开管理' },
+      secondary_actions: [],
+    }]
+    render(
+      <MemoryRouter>
+        <VPSOverviewPageView
+          overview={overview}
+          management={management}
+          onRefresh={vi.fn()}
+          retrying={false}
+        />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '打开管理' }))
+    expect(management.openPanel).toHaveBeenCalledWith('cancellation')
+    expect(management.openMenu).not.toHaveBeenCalled()
   })
 })
 

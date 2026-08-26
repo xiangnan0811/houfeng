@@ -8,7 +8,19 @@ export type ManagementFeedbackAction = {
 }
 
 export function describeManagementError(error: unknown, fallback: string): string {
-  if (error instanceof ApiError || error instanceof Error) return error.message
+  if (error instanceof ApiError) {
+    if (error.status === 409 && error.message === 'cancellation preview stale') {
+      return '影响范围已变化，请重新加载预览后再确认'
+    }
+    if (error.status === 409 && error.message === 'lifecycle action blocked') {
+      return '当前生命周期状态不允许此操作'
+    }
+    if (error.status === 409) {
+      return 'VPS 已被其他操作更新，请重新加载后确认'
+    }
+    return error.message
+  }
+  if (error instanceof Error) return error.message
   return fallback
 }
 

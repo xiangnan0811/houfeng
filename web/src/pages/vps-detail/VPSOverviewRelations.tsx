@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 
 import { Button } from '../../components/atoms'
 import type { VPSOverviewRelation } from '../../lib/types'
+import { overviewRelationStatusLabel } from '../../lib/vpsOverviewPresentation'
 import { VPSOverviewFreshness } from './VPSOverviewFreshness'
 import {
   resolveVPSOverviewRelationDestination,
@@ -65,7 +66,7 @@ function RelationContent({ relation }: { relation: VPSOverviewRelation }) {
         {relation.section.state === 'unavailable' ? '—' : relation.count}
       </span>
       {relation.status ? (
-        <span className="vps-overview-relations__status">{relation.status}</span>
+        <span className="vps-overview-relations__status">{overviewRelationStatusLabel(relation.status)}</span>
       ) : null}
     </>
   )

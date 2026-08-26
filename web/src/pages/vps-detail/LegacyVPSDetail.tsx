@@ -29,6 +29,7 @@ import {
   unlinkVPSMonitoringInstance,
   updateVPSAsset,
 } from '../../lib/api'
+import { ApiError } from '../../lib/apiRequest'
 import type {
   ArchiveReview,
   AssetDomainRecord,
@@ -223,6 +224,7 @@ export function LegacyVPSDetail() {
   const initialDrawerFromQuery = drawerModeFromWorkbenchQuery(searchParams.get('workbench'))
   const openCancellationFromQuery = initialDrawerFromQuery === 'cancellation'
   const skipNextQueryDrivenReload = useRef(false)
+  const cancellationPreviewGenerationRef = useRef(0)
   const [state, setState] = useState(INITIAL_STATE)
   const [selectors, setSelectors] = useState(INITIAL_SELECTOR_STATE)
   const [decisionDraft, setDecisionDraft] = useState<DecisionDraftState>({
@@ -302,10 +304,16 @@ export function LegacyVPSDetail() {
     }
 
     let cancelled = false
+    cancellationPreviewGenerationRef.current += 1
 
     getVPSAsset(vpsId)
       .then(async (detail) => {
         const normalizedDetail = normalizeVPSDetail(detail)
+        if (normalizedDetail.lifecycle_status === 'archived' || normalizedDetail.lifecycle_status === 'cancelled') {
+          if (cancelled) return null
+          navigate(`/archive/${encodeURIComponent(normalizedDetail.vps_id)}`, { replace: true })
+          return null
+        }
         const [timeline, services, domains, subscriptionState, ipQualityState, cancellationState] = await Promise.all([
           getVPSTimeline(vpsId),
           listVPSServices(vpsId),
@@ -316,12 +324,9 @@ export function LegacyVPSDetail() {
         ])
         return { normalizedDetail, timeline, services, domains, subscriptionState, ipQualityState, cancellationState }
       })
-      .then(({ normalizedDetail, timeline, services, domains, subscriptionState, ipQualityState, cancellationState }) => {
-        if (cancelled) return
-        if (normalizedDetail.lifecycle_status === 'archived' || normalizedDetail.lifecycle_status === 'cancelled') {
-          navigate(`/archive/${encodeURIComponent(normalizedDetail.vps_id)}`, { replace: true })
-          return
-        }
+      .then((payload) => {
+        if (cancelled || payload == null) return
+        const { normalizedDetail, timeline, services, domains, subscriptionState, ipQualityState, cancellationState } = payload
         setState({
           vpsId,
           error: null,
@@ -410,8 +415,9 @@ export function LegacyVPSDetail() {
     }
   }, [initialDrawerFromQuery, navigate, openCancellationFromQuery, vpsId])
 
-  const refreshCancellationPreview = useCallback(async (targetVPSId: string) => {
+  const applyCancellationPreview = useCallback(async (targetVPSId: string, generation: number) => {
     const cancellationState = await loadCancellationPreview(targetVPSId)
+    if (generation !== cancellationPreviewGenerationRef.current) return false
     setState((current) => {
       if (current.vpsId !== targetVPSId) return current
       return {
@@ -420,7 +426,13 @@ export function LegacyVPSDetail() {
         cancellationPreviewError: cancellationState.cancellationPreviewError,
       }
     })
+    return true
   }, [])
+
+  const refreshCancellationPreview = useCallback(async (targetVPSId: string) => {
+    const generation = ++cancellationPreviewGenerationRef.current
+    await applyCancellationPreview(targetVPSId, generation)
+  }, [applyCancellationPreview])
 
   async function refreshDetail(targetVPSId: string): Promise<VPSAssetDetail> {
     const detail = normalizeVPSDetail(await getVPSAsset(targetVPSId))
@@ -441,11 +453,9 @@ export function LegacyVPSDetail() {
       loadIPQuality(targetVPSId, detailResult),
     ])
     setState((current) => {
-      const keepCancellationResult = current.vpsId === targetVPSId ? current.cancellationResult : null
-      const keepCancellationPreview = current.vpsId === targetVPSId ? current.cancellationPreview : null
-      const keepCancellationPreviewError = current.vpsId === targetVPSId ? current.cancellationPreviewError : null
+      if (current.vpsId !== targetVPSId) return current
       return {
-        vpsId: targetVPSId,
+        ...current,
         error: null,
         detail: detailResult,
         timeline,
@@ -455,9 +465,6 @@ export function LegacyVPSDetail() {
         subscriptionsError: subscriptionState.subscriptionsError,
         ipQuality: ipQualityState.ipQuality,
         ipQualityError: ipQualityState.ipQualityError,
-        cancellationPreview: keepCancellationPreview,
-        cancellationPreviewError: keepCancellationPreviewError,
-        cancellationResult: keepCancellationResult,
       }
     })
     return detailResult
@@ -760,7 +767,7 @@ export function LegacyVPSDetail() {
       const updated = await updateVPSAsset(detail.vps_id, {
         renewal_decision: decisionDraft.renewalDecision,
         ...(reason ? { renewal_reason: reason } : {}),
-      })
+      }, { expectedUpdatedAt: detail.updated_at })
       const refreshed = await refreshDetailAndTimeline(detail.vps_id)
       setDecisionDraft({ renewalDecision: refreshed.renewal_decision, reason: '' })
       setDecisionNotice(subscriptionLinkageNotice(updated.renewal_subscription_linkage))
@@ -799,7 +806,7 @@ export function LegacyVPSDetail() {
 
     setFactSubmitting(true)
     try {
-      await updateVPSAsset(detail.vps_id, input)
+      await updateVPSAsset(detail.vps_id, input, { expectedUpdatedAt: detail.updated_at })
       const refreshed = await refreshDetailAndTimeline(detail.vps_id)
       setFactDraft(detailToFactEditForm(refreshed))
       collapseDrawer()
@@ -1021,6 +1028,8 @@ export function LegacyVPSDetail() {
   async function handleCancellationSubmit(input: ApplyCancellationInput) {
     const detail = state.detail
     if (!detail) return
+    const generation = cancellationPreviewGenerationRef.current
+    const stillCurrent = () => generation === cancellationPreviewGenerationRef.current
 
     setCancellationSubmitting(true)
     setCancellationError(null)
@@ -1029,26 +1038,31 @@ export function LegacyVPSDetail() {
 
     try {
       const result: LifecycleActionResult = await applyVPSCancellation(detail.vps_id, input)
+      if (!stillCurrent()) return
       setState((current) => {
         if (current.vpsId !== detail.vps_id) return current
         return { ...current, cancellationResult: result }
       })
       await refreshDetailAndTimeline(detail.vps_id)
-      const cancellationState = await loadCancellationPreview(detail.vps_id)
+      if (!stillCurrent()) return
+      const applied = await applyCancellationPreview(detail.vps_id, generation)
+      if (!applied) return
       setState((current) => {
         if (current.vpsId !== detail.vps_id) return current
-        return {
-          ...current,
-          cancellationPreview: cancellationState.cancellationPreview,
-          cancellationPreviewError: cancellationState.cancellationPreviewError,
-          cancellationResult: result,
-        }
+        return { ...current, cancellationResult: result }
       })
       setLifecycleNotice(`取消/退役动作已完成，写入 ${result.steps.length} 个审计步骤`)
     } catch (error: unknown) {
+      if (error instanceof ApiError && error.status === 409 && error.message === 'cancellation preview stale') {
+        const applied = await applyCancellationPreview(detail.vps_id, generation)
+        if (!applied) return
+        setCancellationError('影响范围已变化，请重新加载预览后再确认')
+        return
+      }
+      if (!stillCurrent()) return
       setCancellationError(describeError(error, '执行取消/退役失败'))
     } finally {
-      setCancellationSubmitting(false)
+      if (stillCurrent()) setCancellationSubmitting(false)
     }
   }
 
@@ -1244,6 +1258,7 @@ export function LegacyVPSDetail() {
       }
       return (
         <VPSCancellationWorkbench
+          key={`${detail.vps_id}:${state.cancellationPreview.preview_digest}`}
           preview={state.cancellationPreview}
           submitting={cancellationSubmitting}
           error={cancellationError ?? state.cancellationPreviewError}

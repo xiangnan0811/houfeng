@@ -1,4 +1,4 @@
-import type { RefObject } from 'react'
+import { useId, type RefObject } from 'react'
 
 import type { VPSOverview } from '../../lib/types'
 import { subjectNewRecordHref } from '../records/activity/activityQueryState'
@@ -19,6 +19,7 @@ type Props = {
   managementTriggerRef?: RefObject<HTMLButtonElement | null> | undefined
   onRefresh: () => void
   retrying: boolean
+  refreshError?: string | null
 }
 
 export function VPSOverviewPageView({
@@ -27,8 +28,12 @@ export function VPSOverviewPageView({
   managementTriggerRef,
   onRefresh,
   retrying,
+  refreshError = null,
 }: Props) {
+  const managementMenuId = useId()
   const vpsId = overview.identity.vps_id
+  const readonlyLifecycle = overview.identity.lifecycle_status === 'cancelled'
+    || overview.identity.lifecycle_status === 'archived'
   const basePath = `/vps/${vpsId}`
   const activityHref = `${basePath}/activity`
   const newRecordHref = subjectNewRecordHref({
@@ -53,6 +58,10 @@ export function VPSOverviewPageView({
         management.openPanel('decision')
         return
       case 'open_management':
+        if (overview.identity.lifecycle_status === 'to_cancel') {
+          management.openPanel('cancellation')
+          return
+        }
         management.openMenu()
         return
       case 'retry_overview':
@@ -74,18 +83,26 @@ export function VPSOverviewPageView({
       <div className="vps-overview-page__identity-wrap">
         <VPSOverviewIdentityHeader
           identity={overview.identity}
-          newRecordHref={newRecordHref}
+          {...(readonlyLifecycle ? {} : { newRecordHref })}
           timelineHref={activityHref}
-          {...(managementTriggerRef ? { managementTriggerRef } : {})}
-          onManage={() => {
-            if (management.menuOpen) management.closeMenu()
-            else management.openMenu()
-          }}
+          {...(managementTriggerRef && !readonlyLifecycle ? { managementTriggerRef } : {})}
+          menuOpen={management.menuOpen}
+          menuId={managementMenuId}
+          {...(readonlyLifecycle ? {} : {
+            onManage: () => {
+              if (management.menuOpen) management.closeMenu()
+              else management.openMenu()
+            },
+          })}
         />
+        {readonlyLifecycle ? null : (
         <VPSManagementMenu
+          lifecycleStatus={overview.identity.lifecycle_status}
           controller={management}
+          menuId={managementMenuId}
           {...(managementTriggerRef ? { returnFocusRef: managementTriggerRef } : {})}
         />
+        )}
       </div>
 
       <SubjectLocalNavigation
@@ -94,6 +111,12 @@ export function VPSOverviewPageView({
         overviewHref={basePath}
         overviewCurrent
       />
+
+      {refreshError ? (
+        <p className="create-form__error" role="status">
+          本次刷新失败，当前仍展示上次成功数据。{refreshError}
+        </p>
+      ) : null}
 
       {/* Anomalies only mount when present — healthy DOM has zero anomaly nodes. */}
       {overview.anomalies.length > 0 ? (

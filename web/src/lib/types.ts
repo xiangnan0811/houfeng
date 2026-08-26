@@ -1779,6 +1779,7 @@ export type CancellationPreview = {
   recommended_steps: RecommendedLifecycleStep[]
   warnings: string[]
   blockers: string[]
+  preview_digest: string
 }
 
 export type ArchiveReview = {
@@ -1815,6 +1816,7 @@ export type ApplyCancellationInput = {
   vps_lifecycle_status: Extract<VPSLifecycleStatus, 'to_cancel' | 'cancelled'>
   monitoring_instance_actions: MonitoringInstanceLifecycleActionInput[]
   target_actions: TargetLifecycleActionInput[]
+  preview_digest: string
 }
 
 export type ExtendVPSValidityInput = {
@@ -3339,10 +3341,13 @@ export type VPSOverviewIdentity = {
 export type VPSOverviewAnomalyRuleID =
   | 'monitoring.health.abnormal.v1'
   | 'monitoring.incidents.open.v1'
+  | 'monitoring.unlinked.v1'
   | 'ip_quality.risk.elevated.v1'
   | 'ip_quality.stale.v1'
   | 'ip_quality.partial.v1'
+  | 'ip_quality.missing.v1'
   | 'renewal.due.soon.v1'
+  | 'renewal.overdue.v1'
   | 'renewal.subscription.missing.v1'
   | 'lifecycle.blocker.v1'
   | 'source.unavailable.v1'
@@ -3355,6 +3360,7 @@ export type VPSOverviewAnomalyActionID =
   | 'open_renewal_decision'
   | 'open_management'
   | 'retry_overview'
+  | 'open_monitoring_instances'
 
 export type VPSOverviewAnomalyAction = {
   id: VPSOverviewAnomalyActionID

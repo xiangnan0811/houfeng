@@ -152,6 +152,7 @@ export function VPSCancellationWorkbench({
       vps_lifecycle_status: vpsLifecycleStatus,
       monitoring_instance_actions: monitoringInstanceActions,
       target_actions: targetActions,
+      preview_digest: preview.preview_digest,
     }
   }
 

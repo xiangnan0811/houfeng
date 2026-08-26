@@ -95,6 +95,7 @@ function previewFixture(): CancellationPreview {
     }],
     warnings: ['订阅账单记录已无续费动作，但 VPS 尚未进入 to_cancel/cancelled，存在状态割裂。'],
     blockers: [],
+    preview_digest: 'preview-digest-test',
   }
 }
 
@@ -127,6 +128,7 @@ describe('VPSCancellationWorkbench', () => {
       vps_lifecycle_status: 'cancelled',
       monitoring_instance_actions: [{ monitoring_instance_id: 'mi_001', lifecycle_status: '已退役', monitoring_status: '暂停' }],
       target_actions: [{ target_id: 'tg_001', run_status: '已归档' }],
+      preview_digest: 'preview-digest-test',
     })
   })
 
@@ -230,5 +232,33 @@ describe('VPSCancellationWorkbench', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('请显式选择要取消自动续费的 active 订阅。')
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('rebuilds confirmation state when the preview digest changes', () => {
+    const onSubmit = vi.fn()
+    const preview = previewFixture()
+    const { rerender } = render(
+      <VPSCancellationWorkbench
+        key={preview.preview_digest}
+        preview={preview}
+        submitting={false}
+        error={null}
+        result={null}
+        onSubmit={onSubmit}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText('原因'), { target: { value: '旧确认' } })
+    const next = { ...preview, preview_digest: 'preview-digest-next' }
+    rerender(
+      <VPSCancellationWorkbench
+        key={next.preview_digest}
+        preview={next}
+        submitting={false}
+        error={null}
+        result={null}
+        onSubmit={onSubmit}
+      />,
+    )
+    expect(screen.getByLabelText('原因')).toHaveValue('')
   })
 })

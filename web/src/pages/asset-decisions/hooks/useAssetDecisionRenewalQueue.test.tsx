@@ -315,7 +315,9 @@ describe('useAssetDecisionRenewalQueue', () => {
     })
 
     expect(returned).toBe(updated)
-    expect(updateVPS).toHaveBeenCalledWith('vps_review', { renewal_decision: 'cancel' })
+    expect(updateVPS).toHaveBeenCalledWith('vps_review', { renewal_decision: 'cancel' }, {
+      expectedUpdatedAt: '2026-05-09T08:00:00Z',
+    })
     expect(result.current.state.queue.unreviewed).toEqual([])
     expect(result.current.state.queue.cancel[0]).toBe(updated)
     expect(result.current.state.queue.subscriptions[0]).toMatchObject({
