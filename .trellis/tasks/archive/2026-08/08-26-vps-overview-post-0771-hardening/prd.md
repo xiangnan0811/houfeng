@@ -119,7 +119,7 @@ subscriptions.
 - [x] The new GitHub release, signed agent assets, production Compose assets,
       and `docker.io/linnea7171/houfeng` version/latest multi-arch image are
       publicly verifiable.
-- [ ] Trellis task/journal, local main, feature branch, and dedicated worktree
+- [x] Trellis task/journal, local main, feature branch, and dedicated worktree
       are reconciled and cleaned without directly committing to main.
 
 ## Notes

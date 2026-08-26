@@ -170,7 +170,7 @@ Five commit-blocking findings:
 - [x] Review and merge the generated Release Please PR after its checks pass.
 - [x] Verify the GitHub release, signed agent assets, Compose assets, and
       multi-arch Docker version/latest tags.
-- [ ] Archive this Trellis task and record the delivery commits in the journal.
+- [x] Archive this Trellis task and record the delivery commits in the journal.
 - [x] Fast-forward local main, remove the dedicated worktree and local feature
       branch, prune stale worktree metadata, and confirm a clean next-start
       checkout.
