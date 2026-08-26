@@ -15,14 +15,12 @@
   "branch": "fix/vps-overview-post-0771-hardening",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": "1043e08c89880b39f2e2011fe680774cbbc25ead",
+  "commit": "0a54b50af36284b8ccc94fbc97b232b8f23ad5e0",
   "pr_url": "https://github.com/xiangnan0811/houfeng/pull/458",
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
-  "meta": {
-    "worktree_path": "/home/murray/code/houfeng/.worktree/vps-overview-post-0771-hardening"
-  }
+  "notes": "Feature PR #458 merged at 0a54b50af36284b8ccc94fbc97b232b8f23ad5e0. Release PR #459 merged at efc32b0b247fee648919a0781ff57bbe67310745 and published v0.77.2. Feature PR CI 32979231414, post-feature main CI 32979617250, release PR CI 32979673901, final main CI 32980352538, Release Please 32980352452, and publish-images 32980370133 passed. Six public release assets, the minisign signature, and Docker index sha256:833ed47cda1b2cdf9a64cbe00551d2ff58075236387119e884e709e2c35824a4 for linux/amd64 and linux/arm64 were independently verified. The original feature worktree and local/remote feature branches were removed after confirming the head was merged and clean.",
+  "meta": {}
 }

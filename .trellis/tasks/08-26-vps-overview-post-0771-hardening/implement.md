@@ -161,17 +161,17 @@ Five commit-blocking findings:
 - [x] Run the final PostgreSQL and full repository pre-commit gates.
 - [x] Commit the Trellis task record and implementation in coherent batches.
 - [x] Push `fix/vps-overview-post-0771-hardening` and open feature PR #458.
-- [ ] Monitor all required PR checks; diagnose and fix failures on the same
+- [x] Monitor all required PR checks; diagnose and fix failures on the same
       branch; merge only with an unchanged verified head SHA.
-- [ ] Verify main CI and Release Please after the feature merge.
+- [x] Verify main CI and Release Please after the feature merge.
 
 ## Phase 6 — Release and cleanup
 
-- [ ] Review and merge the generated Release Please PR after its checks pass.
-- [ ] Verify the GitHub release, signed agent assets, Compose assets, and
+- [x] Review and merge the generated Release Please PR after its checks pass.
+- [x] Verify the GitHub release, signed agent assets, Compose assets, and
       multi-arch Docker version/latest tags.
 - [ ] Archive this Trellis task and record the delivery commits in the journal.
-- [ ] Fast-forward local main, remove the dedicated worktree and local feature
+- [x] Fast-forward local main, remove the dedicated worktree and local feature
       branch, prune stale worktree metadata, and confirm a clean next-start
       checkout.
 
@@ -193,6 +193,29 @@ Five commit-blocking findings:
 
 - PR: https://github.com/xiangnan0811/houfeng/pull/458
 - Work commits: `d153b8e2`, `e62e485a`, `2dda7437`, `1043e08c`.
+
+### Delivery and release evidence (2026-08-26)
+
+- Feature head `6212f66f` passed all seven checks in CI run `32979231414` and
+  merged through PR #458 at `0a54b50a`. Main CI `32979617250` and Release
+  Please `32979617175` passed.
+- Release head `925dfc45` passed all seven checks in CI run `32979673901` and
+  merged through PR #459 at `efc32b0b`. Final main CI `32980352538` and Release
+  Please `32980352452` passed.
+- `v0.77.2` is a public non-prerelease whose tag resolves to `efc32b0b`.
+  `publish-images` run `32980370133` passed agent-assets, amd64/arm64 builds,
+  manifest publication, image inspection, and public deployment-asset checks.
+- The six public assets are `houfeng-agent_v0.77.2_linux_amd64`,
+  `houfeng-agent_v0.77.2_linux_arm64`, `sha256sums.txt`,
+  `sha256sums.txt.minisig`, `compose.yaml`, and `compose.env.example`. Local
+  checksum and minisign verification passed; forbidden legacy deployment asset
+  names were absent.
+- Docker tags `v0.77.2`, `0.77.2`, and `latest` all resolve to
+  `sha256:833ed47cda1b2cdf9a64cbe00551d2ff58075236387119e884e709e2c35824a4`,
+  with `linux/amd64` and `linux/arm64` manifests.
+- Primary `main` was fast-forwarded to `efc32b0b`. The original feature
+  worktree was clean and its head was an ancestor of `origin/main`; it and the
+  local/remote feature branches were then removed and worktree metadata pruned.
 
 ## Rollback
 
