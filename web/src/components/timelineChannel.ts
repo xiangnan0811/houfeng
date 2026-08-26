@@ -2,6 +2,12 @@ import type { SubjectActivityItem } from '../lib/types'
 
 export type TimelineChannel = 'human' | 'system' | 'evidence'
 
+export const TIMELINE_CHANNEL_LABELS: Record<TimelineChannel, string> = {
+  human: '人工记录',
+  system: '系统事实',
+  evidence: '不可变证据',
+}
+
 const HUMAN_KINDS = new Set([
   'record_created',
   'record_revised',

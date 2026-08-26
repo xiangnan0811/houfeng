@@ -1,4 +1,6 @@
 import { createElement } from 'react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -259,10 +261,10 @@ function vpsOverviewResponse(): VPSOverview {
       datacenter: 'TK1',
       ipv4: '192.0.2.10',
       ipv6: '',
-      lifecycle_status: '在用',
-      usage_status: '生产',
-      renewal_decision: '续费',
-      importance: '高',
+      lifecycle_status: 'active',
+      usage_status: 'in_use',
+      renewal_decision: 'keep',
+      importance: 'high',
       labels: ['edge'],
       updated_at: '2026-08-20T08:58:00Z',
     },
@@ -280,7 +282,7 @@ function vpsOverviewResponse(): VPSOverview {
       secondary_actions: [],
     }],
     summary: {
-      overall: { status: '需要关注', detail: '存在陈旧证据', section: { ...ready } },
+      overall: { status: 'attention', detail: '存在陈旧证据', section: { ...ready } },
       monitoring: { status: '正常', section: { ...ready } },
       ip_quality: {
         status: '未知',
@@ -291,7 +293,7 @@ function vpsOverviewResponse(): VPSOverview {
           reason_code: 'ip_quality_stale',
         },
       },
-      renewal: { status: '续费', section: { ...ready } },
+      renewal: { status: 'keep', section: { ...ready } },
     },
     recent_activity: {
       section: { ...ready },
@@ -531,6 +533,26 @@ describe('Records API transport', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, wire))
 
     await expect(getVPSOverview('vps_001')).resolves.toEqual(wire)
+  })
+
+  it('decodes the shared Go/TS machine-enum golden overview', async () => {
+    const golden = JSON.parse(readFileSync(
+      resolve(process.cwd(), '../internal/center/vpsoverview/testdata/overview.machine-enums.v1.json'),
+      'utf8',
+    )) as unknown
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, golden))
+
+    const overview = await getVPSOverview('vps_001')
+    expect(overview.identity.lifecycle_status).toBe('active')
+    expect(overview.identity.usage_status).toBe('in_use')
+    expect(overview.identity.renewal_decision).toBe('keep')
+    expect(overview.summary.overall.status).toBe('notice')
+    expect(overview.summary.monitoring.status).toBe('unlinked')
+    expect(overview.summary.ip_quality.status).toBe('missing')
+    expect(overview.anomalies.map((item) => item.rule_id)).toEqual([
+      'ip_quality.missing.v1',
+      'monitoring.unlinked.v1',
+    ])
   })
 
   it('rejects a valid overview whose identity belongs to another requested VPS', async () => {

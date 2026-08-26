@@ -496,11 +496,14 @@ const VPS_OVERVIEW_SECTION_STATES = ['ready', 'stale', 'unavailable'] as const
 const VPS_OVERVIEW_ANOMALY_RULES = [
   'monitoring.health.abnormal.v1',
   'monitoring.incidents.open.v1',
+  'monitoring.unlinked.v1',
   'ip_quality.risk.elevated.v1',
   'ip_quality.stale.v1',
   'ip_quality.partial.v1',
+  'ip_quality.missing.v1',
   'renewal.subscription.missing.v1',
   'renewal.due.soon.v1',
+  'renewal.overdue.v1',
   'lifecycle.blocker.v1',
   'source.unavailable.v1',
 ] as const
@@ -512,6 +515,7 @@ const VPS_OVERVIEW_ANOMALY_ACTIONS = [
   'open_renewal_decision',
   'open_management',
   'retry_overview',
+  'open_monitoring_instances',
 ] as const
 const SUBJECT_ACTIVITY_SOURCE_KINDS = [
   'record_domain',
