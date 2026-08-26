@@ -112,14 +112,14 @@ subscriptions.
       `ip_quality, monitoring`.
 - [x] Unknown anomaly severity is rejected by the decoder, not rendered as an
       unknown CSS modifier.
-- [ ] Changes are split into coherent Conventional Commit batches, pushed to
+- [x] Changes are split into coherent Conventional Commit batches, pushed to
       the feature branch, and merged through a required-checks-green PR.
-- [ ] Main CI and Release Please succeed; the generated release PR is merged
+- [x] Main CI and Release Please succeed; the generated release PR is merged
       only after its required checks pass.
-- [ ] The new GitHub release, signed agent assets, production Compose assets,
+- [x] The new GitHub release, signed agent assets, production Compose assets,
       and `docker.io/linnea7171/houfeng` version/latest multi-arch image are
       publicly verifiable.
-- [ ] Trellis task/journal, local main, feature branch, and dedicated worktree
+- [x] Trellis task/journal, local main, feature branch, and dedicated worktree
       are reconciled and cleaned without directly committing to main.
 
 ## Notes
@@ -133,3 +133,19 @@ subscriptions.
   protected merge, release verification, then worktree cleanup.
 - Chinese remains the primary UI language. Keep single-center + PostgreSQL +
   outbound agents. Do not revive archived docs.
+- Feature PR #458 merged at `0a54b50a` after CI run `32979231414`; the following
+  main CI run `32979617250` and Release Please run `32979617175` passed.
+- Release PR #459 merged at `efc32b0b` after CI run `32979673901`. Final main
+  CI `32980352538`, Release Please `32980352452`, and publish-images
+  `32980370133` passed and published `v0.77.2`.
+- The public release exposes exactly six expected assets. Downloaded agent
+  binaries passed `sha256sum -c`; `sha256sums.txt.minisig` verified with the
+  installer-pinned public key and trusted comment `houfeng v0.77.2 checksum
+  manifest`; Compose asset digests matched GitHub metadata.
+- Docker tags `v0.77.2`, `0.77.2`, and `latest` resolve to index digest
+  `sha256:833ed47cda1b2cdf9a64cbe00551d2ff58075236387119e884e709e2c35824a4`,
+  containing `linux/amd64` and `linux/arm64` images.
+- Local `main` was fast-forwarded to the release commit. The clean, merged
+  feature worktree and both local and remote feature branches were removed
+  before task archival; the separate closeout branch carries only Trellis
+  archival and journal records through protected-main review.
