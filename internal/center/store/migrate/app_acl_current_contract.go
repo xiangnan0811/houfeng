@@ -50,6 +50,33 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	recordPortabilityAppACLCurrentMigrationFragment(),
 	recordPortabilityBlobKeyMuslAppACLCurrentMigrationFragment(),
 	recordsAuthorityAppACLCurrentMigrationFragment(),
+	subscriptionCreateIdempotencyAppACLCurrentMigrationFragment(),
+}
+
+func subscriptionCreateIdempotencyAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0061_create_subscription_create_idempotency.sql",
+		Objects: []AppACLManagedObjectR1{{
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: "subscription_create_idempotency",
+		}},
+		Privileges: subscriptionCreateIdempotencyAppACLCurrentPrivileges,
+	}
+}
+
+func subscriptionCreateIdempotencyAppACLCurrentPrivileges(string) []AppACLPrivilege {
+	privileges := make([]AppACLPrivilege, 0, 2)
+	for _, kind := range []AppACLPrivilegeKind{AppACLPrivilegeSelect, AppACLPrivilegeInsert} {
+		privileges = append(privileges, AppACLPrivilege{
+			Subject:        AppACLSubjectCenterRuntime,
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: "subscription_create_idempotency",
+			Privilege:      kind,
+		})
+	}
+	return privileges
 }
 
 func recordsAuthorityAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {

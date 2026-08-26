@@ -198,6 +198,7 @@ type Repository interface {
 	ListSubscriptions(context.Context, ListFilters) ([]Record, error)
 	GetSubscription(context.Context, string) (Record, error)
 	CreateSubscription(context.Context, CreateInput) (Record, error)
+	CreateSubscriptionIdempotent(ctx context.Context, input CreateInput, idempotencyKey string) (record Record, replayed bool, err error)
 	PatchSubscription(context.Context, string, PatchInput) (Record, error)
 }
 

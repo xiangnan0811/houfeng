@@ -12,16 +12,19 @@ import (
 )
 
 type vpsSubscriptionCreateRequest struct {
-	Price              float64             `json:"price"`
-	Currency           string              `json:"currency"`
-	BillingCycle       string              `json:"billing_cycle"`
-	BillingMonths      int                 `json:"billing_months"`
-	StartedAt          *subscriptions.Date `json:"started_at"`
-	RenewAt            *subscriptions.Date `json:"renew_at"`
-	AutoRenew          bool                `json:"auto_renew"`
-	AutoRenewCancelled bool                `json:"auto_renew_cancelled"`
-	PaymentMethod      string              `json:"payment_method"`
-	Note               string              `json:"note"`
+	Price               float64             `json:"price"`
+	Currency            string              `json:"currency"`
+	BillingCycle        string              `json:"billing_cycle"`
+	BillingMonths       int                 `json:"billing_months"`
+	BillingPeriodUnit   string              `json:"billing_period_unit"`
+	BillingPeriodLength int                 `json:"billing_period_length"`
+	StartedAt           *subscriptions.Date `json:"started_at"`
+	RenewAt             *subscriptions.Date `json:"renew_at"`
+	AutoRenew           bool                `json:"auto_renew"`
+	AutoRenewCancelled  bool                `json:"auto_renew_cancelled"`
+	RenewalMode         string              `json:"renewal_mode"`
+	PaymentMethod       string              `json:"payment_method"`
+	Note                string              `json:"note"`
 }
 
 func SubscriptionsCollection(repo subscriptions.Repository, costSvc ...*subscriptioncosts.Service) http.Handler {
@@ -143,18 +146,21 @@ func VPSSubscriptions(repo subscriptions.Repository) http.Handler {
 			}
 
 			input := subscriptions.CreateInput{
-				VPSID:              vpsID,
-				Price:              request.Price,
-				Currency:           request.Currency,
-				BillingCycle:       request.BillingCycle,
-				BillingMonths:      request.BillingMonths,
-				StartedAt:          request.StartedAt,
-				RenewAt:            request.RenewAt,
-				AutoRenew:          request.AutoRenew,
-				AutoRenewCancelled: request.AutoRenewCancelled,
-				Status:             subscriptions.DefaultStatus,
-				PaymentMethod:      request.PaymentMethod,
-				Note:               request.Note,
+				VPSID:               vpsID,
+				Price:               request.Price,
+				Currency:            request.Currency,
+				BillingCycle:        request.BillingCycle,
+				BillingMonths:       request.BillingMonths,
+				BillingPeriodUnit:   request.BillingPeriodUnit,
+				BillingPeriodLength: request.BillingPeriodLength,
+				StartedAt:           request.StartedAt,
+				RenewAt:             request.RenewAt,
+				AutoRenew:           request.AutoRenew,
+				AutoRenewCancelled:  request.AutoRenewCancelled,
+				RenewalMode:         request.RenewalMode,
+				Status:              subscriptions.DefaultStatus,
+				PaymentMethod:       request.PaymentMethod,
+				Note:                request.Note,
 			}
 			input = subscriptions.NormalizeCreateInput(input)
 			if err := subscriptions.ValidateCreateInput(input); err != nil {
@@ -162,13 +168,31 @@ func VPSSubscriptions(repo subscriptions.Repository) http.Handler {
 				return
 			}
 
-			record, err := repo.CreateSubscription(r.Context(), input)
+			key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+			if _, err := subscriptions.NormalizeIdempotencyKey(key); err != nil {
+				writeCodedError(w, http.StatusBadRequest, "invalid idempotency key", "invalid_idempotency_key")
+				return
+			}
+
+			record, replayed, err := repo.CreateSubscriptionIdempotent(r.Context(), input, key)
+			if errors.Is(err, subscriptions.ErrInvalidIdempotencyKey) {
+				writeCodedError(w, http.StatusBadRequest, "invalid idempotency key", "invalid_idempotency_key")
+				return
+			}
+			if errors.Is(err, subscriptions.ErrIdempotencyKeyReused) {
+				writeCodedError(w, http.StatusConflict, "idempotency key reused", "idempotency_key_reused")
+				return
+			}
 			if errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return
 			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			if replayed {
+				writeJSON(w, http.StatusOK, record)
 				return
 			}
 			writeJSON(w, http.StatusCreated, record)
