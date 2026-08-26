@@ -1,0 +1,28 @@
+{
+  "id": "vps-overview-post-0771-hardening",
+  "name": "vps-overview-post-0771-hardening",
+  "title": "Harden VPS overview after v0.77.1",
+  "description": "Post-v0.77.1 hardening: IP Quality availability, cancellation entry, localized overview details, CAS 409 recovery, stable lifecycle error codes, subscription idempotency, summary-only IP source, closed anomaly severity enum.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "internal/center + web + database migration + release",
+  "package": null,
+  "priority": "P1",
+  "creator": "xiangnan-arch",
+  "assignee": "xiangnan-arch",
+  "createdAt": "2026-08-26",
+  "completedAt": null,
+  "branch": "fix/vps-overview-post-0771-hardening",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "worktree_path": "/home/murray/code/houfeng/.worktree/vps-overview-post-0771-hardening"
+  }
+}
