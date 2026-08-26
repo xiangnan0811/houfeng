@@ -4,6 +4,7 @@ import type { VPSManagementController } from './hooks/useVPSManagementController
 
 type Props = {
   lifecycleStatus: string
+  renewalDecision?: string
   controller: VPSManagementController
   returnFocusRef?: RefObject<HTMLButtonElement | null> | undefined
   menuId?: string
@@ -22,16 +23,20 @@ const ITEMS: Array<{
   { panel: 'archive', label: '归档' },
 ]
 
-function visibleManagementPanels(lifecycleStatus: string): ManagementPanel[] {
+const WRITEABLE_LIFECYCLES = new Set(['active', 'idle', 'testing'])
+const CANCELLATION_RENEWALS = new Set(['cancel', 'auto_renew_cancelled', 'migrate'])
+
+function visibleManagementPanels(lifecycleStatus: string, renewalDecision = ''): ManagementPanel[] {
   return ITEMS.filter((item) => {
-    if (item.panel === 'cancellation') {
+    if (lifecycleStatus === 'archived' || lifecycleStatus === 'cancelled') {
       return false
+    }
+    if (item.panel === 'cancellation') {
+      if (lifecycleStatus === 'to_cancel' || lifecycleStatus === 'to_migrate') return true
+      return WRITEABLE_LIFECYCLES.has(lifecycleStatus) && CANCELLATION_RENEWALS.has(renewalDecision)
     }
     if (item.panel === 'archive') {
       return lifecycleStatus === 'to_cancel'
-    }
-    if (lifecycleStatus === 'archived' || lifecycleStatus === 'cancelled') {
-      return false
     }
     return true
   }).map((item) => item.panel)
@@ -41,12 +46,12 @@ function menuItems(root: HTMLElement | null): HTMLButtonElement[] {
   return Array.from(root?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])
 }
 
-export function VPSManagementMenu({ lifecycleStatus, controller, returnFocusRef, menuId }: Props) {
+export function VPSManagementMenu({ lifecycleStatus, renewalDecision, controller, returnFocusRef, menuId }: Props) {
   const generatedId = useId()
   const resolvedMenuId = menuId ?? generatedId
   const rootRef = useRef<HTMLDivElement>(null)
   const { closeMenu, menuOpen } = controller
-  const items = ITEMS.filter((item) => visibleManagementPanels(lifecycleStatus).includes(item.panel))
+  const items = ITEMS.filter((item) => visibleManagementPanels(lifecycleStatus, renewalDecision).includes(item.panel))
 
   useEffect(() => {
     if (!menuOpen) return

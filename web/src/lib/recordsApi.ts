@@ -507,6 +507,7 @@ const VPS_OVERVIEW_ANOMALY_RULES = [
   'lifecycle.blocker.v1',
   'source.unavailable.v1',
 ] as const
+const VPS_OVERVIEW_ANOMALY_SEVERITIES = ['critical', 'warning', 'notice', 'info'] as const
 const VPS_OVERVIEW_ANOMALY_ACTIONS = [
   'open_monitoring',
   'open_incidents',
@@ -719,7 +720,7 @@ function decodeOverviewAnomaly(value: unknown): VPSOverview['anomalies'][number]
   const hasPrimary = Object.prototype.hasOwnProperty.call(anomaly, 'primary_action')
   const decoded: VPSOverview['anomalies'][number] = {
     rule_id: overviewEnum(anomaly.rule_id, VPS_OVERVIEW_ANOMALY_RULES),
-    severity: overviewString(anomaly.severity),
+    severity: overviewEnum(anomaly.severity, VPS_OVERVIEW_ANOMALY_SEVERITIES),
     title: overviewString(anomaly.title),
     source: overviewString(anomaly.source),
     secondary_actions: overviewArray(anomaly.secondary_actions).map(decodeOverviewAction),

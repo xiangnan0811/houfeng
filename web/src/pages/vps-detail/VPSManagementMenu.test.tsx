@@ -33,14 +33,18 @@ describe('VPSManagementMenu', () => {
     expect(items[items.length - 1]).toHaveFocus()
   })
 
-  it('omits cancellation on active VPS and write entries after cancel', () => {
+  it('shows cancellation after a cancel-like renewal and keeps archive on to_cancel only', () => {
     const { rerender } = render(<VPSManagementMenu lifecycleStatus="active" controller={controller()} />)
     expect(screen.queryByRole('menuitem', { name: '取消 / 退役' })).not.toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: '归档' })).not.toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: '编辑事实' })).toBeInTheDocument()
 
+    rerender(<VPSManagementMenu lifecycleStatus="active" renewalDecision="cancel" controller={controller()} />)
+    expect(screen.getByRole('menuitem', { name: '取消 / 退役' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '归档' })).not.toBeInTheDocument()
+
     rerender(<VPSManagementMenu lifecycleStatus="to_cancel" controller={controller()} />)
-    expect(screen.queryByRole('menuitem', { name: '取消 / 退役' })).not.toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '取消 / 退役' })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: '归档' })).toBeInTheDocument()
 
     rerender(<VPSManagementMenu lifecycleStatus="cancelled" controller={controller()} />)

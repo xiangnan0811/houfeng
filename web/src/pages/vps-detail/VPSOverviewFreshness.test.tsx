@@ -62,4 +62,46 @@ describe('VPSOverviewFreshness', () => {
     expect(screen.getByText('数据正常')).toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
+
+  it('notes leftover IP quality history without judging or claiming unavailability', () => {
+    render(
+      <VPSOverviewFreshness
+        section={{
+          state: 'ready',
+          observed_at: null,
+          last_success_at: null,
+          reason_code: 'ip_quality_disabled_has_history',
+        }}
+        sourceLabel="IP 质量"
+        onRetry={vi.fn()}
+        retrying={false}
+      />,
+    )
+
+    expect(screen.getByText('数据正常')).toBeInTheDocument()
+    expect(screen.getByText('存在历史报告（当前未启用）。')).toBeInTheDocument()
+    expect(screen.queryByText('暂不可用')).not.toBeInTheDocument()
+    expect(screen.queryByText(/ip_quality_disabled_has_history/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('does not treat an unknown ready reason as a source failure', () => {
+    render(
+      <VPSOverviewFreshness
+        section={{
+          state: 'ready',
+          observed_at: null,
+          last_success_at: null,
+          reason_code: 'future_non_judging_note',
+        }}
+        sourceLabel="IP 质量"
+        onRetry={vi.fn()}
+        retrying={false}
+      />,
+    )
+
+    expect(screen.getByText('数据正常')).toBeInTheDocument()
+    expect(screen.queryByText(/暂不可用/)).not.toBeInTheDocument()
+    expect(screen.queryByText('future_non_judging_note')).not.toBeInTheDocument()
+  })
 })

@@ -813,8 +813,15 @@ export function createSubscription(input: CreateSubscriptionInput): Promise<Subs
   return postJSONBody<SubscriptionRecord>('/api/subscriptions', input)
 }
 
-export function createVPSSubscription(vpsId: string, input: CreateVPSSubscriptionInput): Promise<SubscriptionRecord> {
-  return postJSONBody<SubscriptionRecord>(`/api/vps/${vpsId}/subscriptions`, input)
+export function createVPSSubscription(
+  vpsId: string,
+  input: CreateVPSSubscriptionInput,
+  idempotencyKey: string,
+): Promise<SubscriptionRecord> {
+  return requestJSON<SubscriptionRecord>(
+    `/api/vps/${vpsId}/subscriptions`,
+    jsonBodyInit('POST', input, { 'Idempotency-Key': idempotencyKey }),
+  )
 }
 
 export function getSubscription(subscriptionId: string) {

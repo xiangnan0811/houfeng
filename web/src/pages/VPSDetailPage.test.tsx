@@ -511,13 +511,17 @@ describe('VPSDetailPage gate', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建/更新订阅' }))
 
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
-    expect(create).toHaveBeenCalledWith('vps_001', expect.objectContaining({
-      price: 12.5,
-      currency: 'USD',
-      billing_period_unit: 'month',
-      billing_period_length: 1,
-      renewal_mode: 'manual',
-    }))
+    expect(create).toHaveBeenCalledWith(
+      'vps_001',
+      expect.objectContaining({
+        price: 12.5,
+        currency: 'USD',
+        billing_period_unit: 'month',
+        billing_period_length: 1,
+        renewal_mode: 'manual',
+      }),
+      expect.stringMatching(/^[0-9a-f-]{36}$/i),
+    )
     expect(screen.getByRole('status')).toHaveTextContent('订阅账单事实已创建，概览已刷新')
   })
 

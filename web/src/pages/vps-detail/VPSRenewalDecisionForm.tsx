@@ -43,7 +43,9 @@ export function VPSRenewalDecisionForm({
       <label className="asset-operation-field">
         <span>续费决策</span>
         <select
+          aria-label="续费决策"
           value={draft.renewalDecision}
+          disabled={submitting}
           onChange={(event) => {
             onDraftChange({
               ...draft,
@@ -60,7 +62,9 @@ export function VPSRenewalDecisionForm({
       <label className="asset-operation-field asset-operation-field--wide">
         <span>决策理由</span>
         <textarea
+          aria-label="决策理由"
           value={draft.reason}
+          disabled={submitting}
           onChange={(event) => {
             onDraftChange({ ...draft, reason: event.target.value })
             onFeedbackClear()

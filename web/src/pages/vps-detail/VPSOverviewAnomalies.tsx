@@ -2,7 +2,11 @@ import { Link } from 'react-router-dom'
 
 import { Button } from '../../components/atoms'
 import type { VPSOverviewAnomaly, VPSOverviewAnomalyAction } from '../../lib/types'
-import { overviewAnomalySourceLabel } from '../../lib/vpsOverviewPresentation'
+import {
+  overviewAnomalyDetailLabel,
+  overviewAnomalySeverityClass,
+  overviewAnomalySourceLabel,
+} from '../../lib/vpsOverviewPresentation'
 import {
   resolveVPSOverviewAnomalyDestination,
   type VPSOverviewCommand,
@@ -30,12 +34,12 @@ export function VPSOverviewAnomalies({ vpsId, anomalies, onCommand }: Props) {
         {anomalies.map((anomaly) => (
           <li
             key={anomaly.rule_id}
-            className={`vps-overview-anomalies__item vps-overview-anomalies__item--${anomaly.severity}`}
+            className={['vps-overview-anomalies__item', overviewAnomalySeverityClass(anomaly.severity)].filter(Boolean).join(' ')}
           >
             <div className="vps-overview-anomalies__body">
               <h3 className="vps-overview-anomalies__item-title">{anomaly.title}</h3>
               {anomaly.detail ? (
-                <p className="vps-overview-anomalies__detail">{anomaly.detail}</p>
+                <p className="vps-overview-anomalies__detail">{overviewAnomalyDetailLabel(anomaly.rule_id, anomaly.detail)}</p>
               ) : null}
               <p className="vps-overview-anomalies__source">{overviewAnomalySourceLabel(anomaly.source)}</p>
             </div>

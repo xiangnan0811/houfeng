@@ -92,6 +92,7 @@ import {
   createVPSDomain,
   createVPSSubscription,
 } from './api'
+import { buildSubscriptionInput, INITIAL_SUBSCRIPTION_DRAFT } from '../pages/vps-detail/vpsDetailHelpers'
 import { withQuery as transportWithQuery } from './apiRequest'
 import { listCommandAudits, listEvents, listIncidents } from './observabilityApi'
 import type { CommandAuditListFilter } from './types'
@@ -1681,7 +1682,7 @@ describe('api helpers', () => {
     await expect(listSubscriptions({ vps_id: 'vps_001', status: 'active', renew_within_days: 30, sort: 'renew_at', order: 'asc', asset_scope: 'historical' })).resolves.toEqual([subscription])
     await expect(getSubscription('sub_001')).resolves.toEqual(subscription)
     await expect(createSubscription(input)).resolves.toEqual(subscription)
-    await expect(createVPSSubscription('vps_001', vpsScopedInput)).resolves.toEqual(subscription)
+    await expect(createVPSSubscription('vps_001', vpsScopedInput, 'create-sub-vps-001')).resolves.toEqual(subscription)
     await expect(updateSubscription('sub_001', patchBody)).resolves.toEqual(updatedSubscription)
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -1713,6 +1714,7 @@ describe('api helpers', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Idempotency-Key': 'create-sub-vps-001',
       },
       cache: 'no-store',
       credentials: 'include',
@@ -1728,6 +1730,66 @@ describe('api helpers', () => {
       credentials: 'include',
       body: JSON.stringify(patchBody),
     })
+  })
+
+  it('posts the real VPS workbench subscription form including period and renewal_mode', async () => {
+    const subscription = {
+      subscription_id: 'sub_001',
+      vps_id: 'vps_001',
+      price: 12,
+      currency: 'USD',
+      billing_cycle: 'monthly',
+      billing_months: 1,
+      billing_period_unit: 'month',
+      billing_period_length: 1,
+      monthly_price: 12,
+      started_at: '2026-05-01',
+      renew_at: '2026-06-01',
+      auto_renew: false,
+      auto_renew_cancelled: false,
+      renewal_mode: 'manual',
+      status: 'active',
+      payment_method: 'card',
+      note: 'production',
+      created_at: '2026-05-09T08:00:00Z',
+      updated_at: '2026-05-09T08:00:00Z',
+    } satisfies SubscriptionRecord
+    const input = buildSubscriptionInput({
+      ...INITIAL_SUBSCRIPTION_DRAFT,
+      price: '12',
+      currency: 'USD',
+      billingPeriodUnit: 'month',
+      billingPeriodLength: '1',
+      startedAt: '2026-05-01',
+      renewAt: '2026-06-01',
+      renewalMode: 'manual',
+      paymentMethod: 'card',
+      note: 'production',
+    })
+    expect(input).toEqual(expect.objectContaining({
+      billing_period_unit: 'month',
+      billing_period_length: 1,
+      renewal_mode: 'manual',
+    }))
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockResponse(201, JSON.stringify(subscription)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(createVPSSubscription('vps_001', input, 'form-sub-vps-001')).resolves.toEqual(subscription)
+    expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/subscriptions', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'form-sub-vps-001',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+      body: JSON.stringify(input),
+    })
+    const posted = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>
+    expect(posted.billing_period_unit).toBe('month')
+    expect(posted.billing_period_length).toBe(1)
+    expect(posted.renewal_mode).toBe('manual')
   })
 
   it('uses monthly budget endpoints for subscription budget timeline', async () => {

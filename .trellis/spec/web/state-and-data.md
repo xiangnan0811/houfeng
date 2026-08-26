@@ -1165,7 +1165,7 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 
 - `VPSDetailPage` 初始加载必须包括 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)`、`listVPSDomains(vpsId)` 和 `listSubscriptions({ vps_id: vpsId, sort: 'renew_at', order: 'asc' })`。Provider/MonitoringInstance/Target selector 数据可在对应 Drawer 打开时懒加载，避免主详情首屏为选择器阻塞。
 - VPS scoped subscription 只作为续费/成本 evidence。订阅请求失败时显示请求错误和未知状态，不得把 failure 当成真实 `缺订阅`。
-- VPS Detail 是普通补录的主入口：`createVPSSubscription(vpsId, input)` 只提交账单事实且不含 status；`createVPSMonitoringInstance(vpsId, input?)` 默认空 body，让后端从 VPS 派生 MonitoringInstance 身份并自动 link。
+- VPS Detail 是普通补录的主入口：`createVPSSubscription(vpsId, input, idempotencyKey)` 由调用方持有幂等键，经 `Idempotency-Key` 发送；同一草稿重试必须复用同一 key，草稿变化后必须轮换 key。请求体由 `buildSubscriptionInput` 产出，始终包含 `billing_period_unit`、`billing_period_length`、`renewal_mode`，且不含 status。相同 key + 相同 digest 的丢失响应重放返回 200 既有记录；400 `invalid_idempotency_key` 表示缺 key 或 key 非法；409 `idempotency_key_reused` 表示同一 key 已用于不同内容，必须换 key 后再创建。`createVPSMonitoringInstance(vpsId, input?)` 默认空 body，让后端从 VPS 派生 MonitoringInstance 身份并自动 link。
 - VPS 详情页必须可加载 `getVPSCancellationPreview(vpsId)` 并在资产判断 workbench 显示取消 / 过期影响范围；URL `?workbench=cancellation` 应直接打开统一取消 / 退役工作台。
 - 如果 preview 显示 subscription 已非活跃但 VPS 仍未取消，页面不得引导“创建订阅”作为主路径，而应引导用户处理 VPS、MonitoringInstance 与 Target/实例的 lifecycle action。
 - `VPSAssetDetail.monitoring_instance_links` 可以在 Detail 页展示 health、heartbeat、active incident count 和 issue summary，因为后端 detail contract 已返回这些字段；这不改变 `VPSAssetRecord.active_monitoring_instance_link_count` 在列表页只能代表数量的限制。
@@ -1182,6 +1182,68 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 | decision/facts/experience save succeeds | Drawer 关闭，主页面出现成功 notice，detail/timeline/services/domains/subscriptions 刷新 |
 | service/domain create succeeds | Drawer 关闭，只刷新对应 service/domain list，主页面表格出现新记录 |
 | local service/domain validation fails | Drawer 内显示本地错误，不发 POST；主页面不重复渲染同一错误 |
+| scoped subscription create missing/invalid `Idempotency-Key` | API client 抛出 `ApiError`，`code=invalid_idempotency_key`；表单显示错误，不轮换草稿以外的成功路径 |
+| scoped subscription create reuses key for a different digest | `ApiError` `409` / `code=idempotency_key_reused`；必须换 key 后再创建 |
+| scoped subscription create retries same key + same digest after a lost 201 | 200 既有记录，不新建；调用方继续持有原 key |
+
+#### Scenario: Caller-owned VPS subscription idempotency
+
+##### 1. Scope / Trigger
+
+- Trigger: 修改 `createVPSSubscription`、VPS 详情订阅草稿、订阅提交/重试状态或 `ApiError.code` 解码。
+
+##### 2. Signatures
+
+- API client: `createVPSSubscription(vpsId, input, idempotencyKey): Promise<SubscriptionRecord>`。
+- Header: `Idempotency-Key` 由 page/controller 生成并显式传给 API client。
+- Error contract: `ApiError.status` + allowlisted `ApiError.code`，本场景使用 `invalid_idempotency_key` 与 `idempotency_key_reused`。
+
+##### 3. Contracts
+
+- page/controller 持有 key；API helper 不得为每次调用隐式生成 key。
+- 同一草稿的 transport failure、timeout 或丢失 201 重试必须复用原 key。
+- 草稿发生业务语义变化时必须轮换 key；409 `idempotency_key_reused` 后也必须轮换 key，避免同一 key 永久冲突。
+- 是否轮换只能依据草稿变化或 allowlisted `ApiError.code`，不得匹配英文 `message`。
+- Overview 与 Legacy VPS detail 两个调用方必须使用相同合同。
+
+##### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| 首次提交成功 201 | 关闭表单并刷新对应订阅/Overview 数据 |
+| 相同草稿 transport failure 后重试 | 复用完全相同的 `Idempotency-Key` |
+| 已提交 201 但响应丢失，重试收到 200 | 当作成功原记录，不重复创建 |
+| 409 `idempotency_key_reused` | 展示错误并轮换 key；下一次显式提交使用新 key |
+| 其他 400/409/500 | 展示错误；不得仅因 status 或 message 轮换 key |
+| 用户修改草稿 | 为新的业务输入生成新 key |
+
+##### 5. Good/Base/Bad Cases
+
+- Good: `fetch` 抛 transport error，用户不改表单直接重试，两次请求 header 完全相同。
+- Base: 用户修改周期或续费模式后提交，新草稿使用新 key。
+- Bad: `createVPSSubscription` 内部每次调用 `crypto.randomUUID()`，导致丢失响应重试重复写入。
+- Bad: 通过 `error.message.includes('idempotency')` 决定轮换，文案变化或本地化后行为漂移。
+
+##### 6. Tests Required
+
+- API unit: helper 原样发送调用方 key，并提交完整 `buildSubscriptionInput` 周期字段。
+- Overview Vitest: reused-key 409 后 key 改变；transport failure 后 key 保持不变。
+- Legacy Vitest: 与 Overview 相同的 key 生命周期断言。
+- PostgreSQL integration 由后端 spec 负责证明 replay 只有一行；前端测试不能替代该证据。
+
+##### 7. Wrong vs Correct
+
+```ts
+// 错误：helper 每次调用都换 key，网络重试失去幂等性。
+return requestJSON(path, jsonBodyInit('POST', input, {
+  'Idempotency-Key': crypto.randomUUID(),
+}))
+```
+
+```ts
+// 正确：调用方按草稿生命周期持有 key，helper 只负责发送。
+await createVPSSubscription(vpsId, input, subscriptionIdempotencyKeyRef.current)
+```
 
 #### 4. Validation & Error Matrix
 

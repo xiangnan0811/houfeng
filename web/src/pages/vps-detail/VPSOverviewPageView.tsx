@@ -58,7 +58,10 @@ export function VPSOverviewPageView({
         management.openPanel('decision')
         return
       case 'open_management':
-        if (overview.identity.lifecycle_status === 'to_cancel') {
+        if (
+          overview.identity.lifecycle_status === 'to_cancel'
+          || overview.identity.lifecycle_status === 'to_migrate'
+        ) {
           management.openPanel('cancellation')
           return
         }
@@ -98,6 +101,7 @@ export function VPSOverviewPageView({
         {readonlyLifecycle ? null : (
         <VPSManagementMenu
           lifecycleStatus={overview.identity.lifecycle_status}
+          renewalDecision={overview.identity.renewal_decision}
           controller={management}
           menuId={managementMenuId}
           {...(managementTriggerRef ? { returnFocusRef: managementTriggerRef } : {})}

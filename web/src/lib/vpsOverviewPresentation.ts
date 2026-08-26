@@ -111,3 +111,47 @@ export function overviewImportanceLabel(value: string): string {
 export function overviewLocationLabel(parts: Array<string | undefined>): string {
   return parts.map((part) => part?.trim()).filter(Boolean).join(' · ')
 }
+
+const SUMMARY_DETAIL_FALLBACKS: Record<string, string> = {
+  historical_disabled: '存在历史报告（当前未启用）',
+  ip_quality_disabled_has_history: '存在历史报告（当前未启用）',
+}
+
+export function overviewSummaryDetailLabel(
+  key: 'overall' | 'monitoring' | 'ip_quality' | 'renewal',
+  value: string,
+): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (key === 'monitoring') return trimmed
+  if (SUMMARY_DETAIL_FALLBACKS[trimmed]) return SUMMARY_DETAIL_FALLBACKS[trimmed]
+  if (key === 'ip_quality') return overviewIPLabel(trimmed)
+  if (key === 'renewal') return overviewRenewalLabel(trimmed)
+  if (key === 'overall') return overviewOverallLabel(trimmed)
+  return trimmed
+}
+
+export function overviewAnomalyDetailLabel(ruleId: string, value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (ruleId.startsWith('monitoring.')) return trimmed
+  if (ruleId === 'source.unavailable.v1') {
+    return trimmed.split(',').map((part) => overviewAnomalySourceLabel(part.trim())).join('、')
+  }
+  if (ruleId.startsWith('ip_quality.')) return overviewIPLabel(trimmed)
+  if (ruleId.startsWith('lifecycle.')) return overviewLifecycleLabel(trimmed)
+  if (ruleId.startsWith('renewal.')) return overviewRenewalLabel(trimmed)
+  return trimmed
+}
+
+export function overviewAnomalySeverityClass(severity: string): string {
+  switch (severity) {
+    case 'critical':
+    case 'warning':
+    case 'notice':
+    case 'info':
+      return `vps-overview-anomalies__item--${severity}`
+    default:
+      return ''
+  }
+}

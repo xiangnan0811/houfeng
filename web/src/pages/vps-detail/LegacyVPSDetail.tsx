@@ -29,7 +29,6 @@ import {
   unlinkVPSMonitoringInstance,
   updateVPSAsset,
 } from '../../lib/api'
-import { ApiError } from '../../lib/apiRequest'
 import type {
   ArchiveReview,
   AssetDomainRecord,
@@ -102,6 +101,8 @@ import {
 } from './vpsDetailHelpers'
 import {
   describeManagementError as describeError,
+  isCancellationPreviewStale,
+  isIdempotencyKeyReused,
   subscriptionLinkageAction,
   subscriptionLinkageNotice,
 } from './vpsManagementHelpers'
@@ -225,6 +226,7 @@ export function LegacyVPSDetail() {
   const openCancellationFromQuery = initialDrawerFromQuery === 'cancellation'
   const skipNextQueryDrivenReload = useRef(false)
   const cancellationPreviewGenerationRef = useRef(0)
+  const subscriptionIdempotencyKeyRef = useRef(crypto.randomUUID())
   const [state, setState] = useState(INITIAL_STATE)
   const [selectors, setSelectors] = useState(INITIAL_SELECTOR_STATE)
   const [decisionDraft, setDecisionDraft] = useState<DecisionDraftState>({
@@ -280,6 +282,10 @@ export function LegacyVPSDetail() {
   const [domainSubmitting, setDomainSubmitting] = useState(false)
   const [domainError, setDomainError] = useState<string | null>(null)
   const [domainNotice, setDomainNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    subscriptionIdempotencyKeyRef.current = crypto.randomUUID()
+  }, [subscriptionDraft])
 
   function clearWorkbenchQueryParam() {
     if (!searchParams.has('workbench')) return
@@ -774,7 +780,11 @@ export function LegacyVPSDetail() {
       const refreshed = await refreshDetailAndTimeline(detail.vps_id)
       setDecisionDraft({ renewalDecision: refreshed.renewal_decision, reason: '' })
       setDecisionNotice(subscriptionLinkageNotice(updated.renewal_subscription_linkage))
-      setDecisionAction(subscriptionLinkageAction(updated.renewal_subscription_linkage, detail.vps_id))
+      setDecisionAction(subscriptionLinkageAction(
+        updated.renewal_subscription_linkage,
+        detail.vps_id,
+        updated.renewal_decision,
+      ))
       collapseDrawer()
     } catch (error: unknown) {
       setDecisionError(describeError(error, '更新续费决策失败'))
@@ -895,7 +905,7 @@ export function LegacyVPSDetail() {
 
     setSubscriptionSubmitting(true)
     try {
-      const subscription = await createVPSSubscription(detail.vps_id, input)
+      const subscription = await createVPSSubscription(detail.vps_id, input, subscriptionIdempotencyKeyRef.current)
       setState((current) => {
         if (current.vpsId !== detail.vps_id) return current
         return {
@@ -911,6 +921,9 @@ export function LegacyVPSDetail() {
       setSubscriptionNotice('订阅账单事实已创建')
       collapseDrawer()
     } catch (error: unknown) {
+      if (isIdempotencyKeyReused(error)) {
+        subscriptionIdempotencyKeyRef.current = crypto.randomUUID()
+      }
       setSubscriptionError(describeError(error, '创建订阅失败'))
     } finally {
       setSubscriptionSubmitting(false)
@@ -1060,7 +1073,7 @@ export function LegacyVPSDetail() {
       })
       setLifecycleNotice(`取消/退役动作已完成，写入 ${result.steps.length} 个审计步骤`)
     } catch (error: unknown) {
-      if (error instanceof ApiError && error.status === 409 && error.message === 'cancellation preview stale') {
+      if (isCancellationPreviewStale(error)) {
         const applied = await applyCancellationPreview(detail.vps_id, generation)
         if (!applied) return
         setCancellationError('影响范围已变化，请重新加载预览后再确认')
@@ -1278,6 +1291,7 @@ export function LegacyVPSDetail() {
     if (activeDrawer === 'facts') {
       return factDraft ? (
         <VPSFactsEditForm
+          key={detail.updated_at}
           draft={factDraft}
           providers={selectors.providers}
           providersLoading={selectors.providersLoading}
