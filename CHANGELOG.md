@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.77.3](https://github.com/xiangnan0811/houfeng/compare/v0.77.2...v0.77.3) (2026-08-26)
+
+
+### Documentation
+
+* archive VPS overview hardening task ([f540943](https://github.com/xiangnan0811/houfeng/commit/f5409439eb7c61a9b1f41b1c703ba91e4674a136))
+* **task:** complete VPS hardening closeout ([b28ba6f](https://github.com/xiangnan0811/houfeng/commit/b28ba6f5053fbdc06f84773fe1f816fef2776690))
+* **task:** record VPS hardening release ([0c4962d](https://github.com/xiangnan0811/houfeng/commit/0c4962dc2ddeb395f2b8b81b3080abfb04b08434))
+
 ## [0.77.2](https://github.com/xiangnan0811/houfeng/compare/v0.77.1...v0.77.2) (2026-08-26)
 
 
