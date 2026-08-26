@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 258
-- **Last Active**: 2026-08-24
+- **Total Sessions**: 259
+- **Last Active**: 2026-08-26
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~897 | Active |
+| `journal-5.md` | ~943 | Active |
 | `journal-4.md` | ~1998 | Archived |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 259 | 2026-08-26 | VPS overview launch P1 released as v0.77.0 | `4f3e8083`, `926ff276`, `60486924`, `5718ff6c`, `3ee214a7`, `8ee987ac`, `28264027`, `87fea043`, `fa97fc44`, `7da35e03` | `fix/vps-overview-launch-p1` |
 | 258 | 2026-08-24 | Complete VPS detail refactor remediation delivery | `80abdd3e6e9d81033c097bb24bc7ac1eb428c815`, `f0cde8fe0fead6fa884a3f25d9ba8a088cb0bb8b`, `5e58a5e8f8688f918653708489697ef956513544` | `codex/vps-detail-refactor-task-closeout` |
 | 257 | 2026-08-23 | 完成 VPS 记录平台最终审计与父任务归档 | `290a5c6d08c980f1c9829312722a7884b69c4d7b`, `4d42cc68ec3c67d661566e23b317f0172c9019d3`, `8c3e9a577d500c22edceb079cc711d71e61e34c9` | `codex/vps-records-parent-archive` |
 | 256 | 2026-08-23 | 交付并归档 VPS 概览管理操作 | `40ddb0a9f34ee004191d1acad1798f99876c76f4`, `7e9080f208a5f1f5cce7e563f5030b9d068629de`, `af23844adc82ce97e6815a3dbd8706f7fdab10e8`, `ab1ad7cdaab4a7ee57b782a3a9a45e5074b591bd` | `codex/vps-overview-management-closeout` |

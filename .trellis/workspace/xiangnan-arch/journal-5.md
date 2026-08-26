@@ -895,3 +895,49 @@ Closed all four remediation children, delivered v0.75.1, fixed the post-release 
 ### Next Steps
 
 - No product remediation remains; preserve existing worktrees and refs until separately authorized for destructive cleanup.
+
+
+## Session 259: VPS overview launch P1 released as v0.77.0
+
+**Date**: 2026-08-26
+**Task**: VPS overview launch P1 released as v0.77.0
+**Branch**: `fix/vps-overview-launch-p1`
+
+### Summary
+
+Shipped the reviewed VPS lifecycle, overview destination, monitoring, events and browser-contract work through PR #454 and release PR #455; verified v0.77.0 CI, signed assets and multi-architecture image publication.
+
+### Main Changes
+
+- Hardened serializable cancellation, terminal read-only routing and lifecycle ownership.
+- Closed overview, events, monitoring deep-link, runtime-stream and keyboard/browser contracts.
+- Merged PR #454 and release PR #455; published and verified v0.77.0.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4f3e8083` | (see git log) |
+| `926ff276` | (see git log) |
+| `60486924` | (see git log) |
+| `5718ff6c` | (see git log) |
+| `3ee214a7` | (see git log) |
+| `8ee987ac` | (see git log) |
+| `28264027` | (see git log) |
+| `87fea043` | (see git log) |
+| `fa97fc44` | (see git log) |
+| `7da35e03` | (see git log) |
+
+### Testing
+
+- [OK] Go 1.26.2 verify-go and deterministic real PostgreSQL concurrency passed.
+- [OK] Node 22 verify-web passed with 199 files / 1404 Vitest tests and all build budgets.
+- [OK] Fresh Chromium Playwright passed 130/130; PR, main and release CI all passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Begin the next task from a clean main checkout after the archival cleanup PR merges.
