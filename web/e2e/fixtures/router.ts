@@ -61,6 +61,8 @@ export class ApiFixtureController {
         if (parsed.hostname !== window.location.hostname || parsed.port !== window.location.port) return null
         const match = parsed.pathname.match(/^\/api\/monitoring-instances\/([^/]+)\/runtime-stream$/)
         if (!match?.[1] || parsed.search !== '' || parsed.hash !== '') return null
+        const expectedURL = `${expectedProtocol}//${window.location.host}/api/monitoring-instances/${match[1]}/runtime-stream`
+        if (url !== expectedURL) return null
         return match[1]
       }
 
@@ -207,6 +209,11 @@ export class ApiFixtureController {
       throw new Error(`expected runtime stream socket open for ${monitoringInstanceId}, got ${JSON.stringify(matches)}`)
     }
     for (const socket of matches) {
+      const expectedProtocol = pageURL.protocol === 'https:' ? 'wss:' : 'ws:'
+      const expectedURL = `${expectedProtocol}//${pageURL.host}/api/monitoring-instances/${monitoringInstanceId}/runtime-stream`
+      if (socket.url !== expectedURL) {
+        throw new Error(`runtime stream socket ${socket.url} is not the exact raw owner URL`)
+      }
       let parsed: URL
       try {
         parsed = new URL(socket.url, pageURL)

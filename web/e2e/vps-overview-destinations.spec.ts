@@ -131,6 +131,14 @@ for (const contract of ROUTE_ACTIONS) {
     }
     if (contract.owner === 'events') {
       await expect(page.getByRole('heading', { name: '事件流' })).toBeVisible()
+      expect(api.requestCount(
+        'GET',
+        '/api/events?object_type=monitoring_instance&object_id=mi_001&limit=200',
+      )).toBe(1)
+    }
+    if (contract.owner === 'ip-quality') {
+      await expect(page.getByRole('heading', { name: 'IP 质量报告加载失败' })).toBeVisible()
+      await expect.poll(() => api.requestCount('GET', '/api/vps/vps_001/ip-quality')).toBe(1)
     }
   })
 }
@@ -211,6 +219,7 @@ test('VPS overview subscription relation reaches the exact filtered subscription
   await card.getByRole('link').click()
   await expectLocation(page, '/subscriptions?vps_id=vps_001')
   await expect(page.getByRole('heading', { name: /订阅成本中枢/ })).toBeVisible()
+  await expect.poll(() => api.requestCount('GET', '/api/subscriptions?vps_id=vps_001')).toBe(1)
 })
 
 const RELATION_PANELS = [
@@ -338,7 +347,7 @@ test('runtime stream fixture rejects foreign-origin sockets even with an allowli
   await api.allowRuntimeStream('mi_001')
   await page.goto('/vps/vps_001')
 
-  const foreignURL = 'wss://evil.invalid/api/monitoring-instances/mi_001/runtime-stream'
+  const foreignURL = 'ws://evil.invalid/api/monitoring-instances/mi_001/runtime-stream'
   await page.evaluate((url) => {
     const socket = new WebSocket(url)
     socket.addEventListener('error', () => undefined)
@@ -348,5 +357,26 @@ test('runtime stream fixture rejects foreign-origin sockets even with an allowli
   await expect.poll(async () => {
     const sockets = await api.snapshotRuntimeStreamSockets()
     return sockets.find((socket) => socket.url.includes('evil.invalid'))?.phase ?? ''
+  }).toBe('error')
+})
+
+test('runtime stream fixture rejects raw path traversal before URL normalization', async ({ api, page }) => {
+  api.useProfile(vpsOverviewProfile())
+  await api.allowRuntimeStream('mi_001')
+  await page.goto('/vps/vps_001')
+
+  const traversalURL = await page.evaluate(() => {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${protocol}//${location.host}/api/monitoring-instances/mi_001/child/../runtime-stream`
+  })
+  await page.evaluate((url) => {
+    const socket = new WebSocket(url)
+    socket.addEventListener('error', () => undefined)
+  }, traversalURL)
+  api.acknowledgeUnexpectedRuntimeStream('/child/../runtime-stream')
+
+  await expect.poll(async () => {
+    const sockets = await api.snapshotRuntimeStreamSockets()
+    return sockets.find((socket) => socket.url.includes('/child/../runtime-stream'))?.phase ?? ''
   }).toBe('error')
 })
