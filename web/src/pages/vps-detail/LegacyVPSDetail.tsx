@@ -443,7 +443,10 @@ export function LegacyVPSDetail() {
     return detail
   }
 
-  async function refreshDetailAndTimeline(targetVPSId: string): Promise<VPSAssetDetail> {
+  async function refreshDetailAndTimeline(
+    targetVPSId: string,
+    ownsRefresh: () => boolean = () => true,
+  ): Promise<VPSAssetDetail> {
     const detailResult = normalizeVPSDetail(await getVPSAsset(targetVPSId))
     const [timeline, services, domains, subscriptionState, ipQualityState] = await Promise.all([
       getVPSTimeline(targetVPSId),
@@ -453,7 +456,7 @@ export function LegacyVPSDetail() {
       loadIPQuality(targetVPSId, detailResult),
     ])
     setState((current) => {
-      if (current.vpsId !== targetVPSId) return current
+      if (!ownsRefresh() || current.vpsId !== targetVPSId) return current
       return {
         ...current,
         error: null,
@@ -1043,8 +1046,12 @@ export function LegacyVPSDetail() {
         if (current.vpsId !== detail.vps_id) return current
         return { ...current, cancellationResult: result }
       })
-      await refreshDetailAndTimeline(detail.vps_id)
+      const refreshed = await refreshDetailAndTimeline(detail.vps_id, stillCurrent)
       if (!stillCurrent()) return
+      if (refreshed.lifecycle_status === 'cancelled' || refreshed.lifecycle_status === 'archived') {
+        navigate(`/archive/${encodeURIComponent(refreshed.vps_id)}`, { replace: true })
+        return
+      }
       const applied = await applyCancellationPreview(detail.vps_id, generation)
       if (!applied) return
       setState((current) => {
@@ -1171,7 +1178,7 @@ export function LegacyVPSDetail() {
   const timeline = state.timeline
   const decisionChanged = decisionDraft.renewalDecision !== detail.renewal_decision
   const linkControlsDisabled = linkSubmitting || unlinkingMonitoringInstanceId !== null
-  const isArchived = detail.lifecycle_status === 'archived'
+  const isArchived = detail.lifecycle_status === 'archived' || detail.lifecycle_status === 'cancelled'
   const linkFeedback = linkError ?? unlinkError ?? linkNotice
   const linkFeedbackIsError = linkError !== null || unlinkError !== null
   const primarySubscription = selectPrimarySubscription(state.subscriptions)

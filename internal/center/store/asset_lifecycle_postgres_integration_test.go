@@ -91,6 +91,15 @@ func TestApplyVPSCancellationConcurrentWithSubscriptionInsertOverlapsWithoutDead
 		})
 		applyDone <- applyErr
 	}()
+	if err := waitForBlockedLifecycleSessions(ctx, pool, 1); err != nil {
+		t.Fatalf("ApplyVPSCancellation did not queue behind the holder lock: %v", err)
+	}
+	select {
+	case applyErr := <-applyDone:
+		t.Fatalf("ApplyVPSCancellation finished before subscription start: %v", applyErr)
+	default:
+	}
+
 	go func() {
 		insertCtx, insertCancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer insertCancel()
@@ -105,7 +114,7 @@ func TestApplyVPSCancellationConcurrentWithSubscriptionInsertOverlapsWithoutDead
 	}()
 
 	if err := waitForBlockedLifecycleSessions(ctx, pool, 2); err != nil {
-		t.Fatalf("production transactions did not overlap on the holder lock: %v", err)
+		t.Fatalf("CreateSubscription did not queue behind ApplyVPSCancellation: %v", err)
 	}
 	select {
 	case applyErr := <-applyDone:

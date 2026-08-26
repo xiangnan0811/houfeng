@@ -628,6 +628,10 @@ func listLifecycleSubscriptionsForVPS(ctx context.Context, queryer assetLifecycl
 }
 
 func listLifecycleMonitoringInstancesForVPS(ctx context.Context, queryer assetLifecycleQueryer, vpsID string, forUpdate bool) ([]assetlinks.MonitoringInstanceSummary, error) {
+	orderBy := "l.linked_at desc, n.display_name, n.monitoring_instance_id"
+	if forUpdate {
+		orderBy = "n.monitoring_instance_id, l.linked_at desc, n.display_name"
+	}
 	query := `
 		select
 			n.monitoring_instance_id,
@@ -650,7 +654,7 @@ func listLifecycleMonitoringInstancesForVPS(ctx context.Context, queryer assetLi
 		join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
 		where l.vps_id = $1
 		  and l.unlinked_at is null
-		order by l.linked_at desc, n.display_name, n.monitoring_instance_id`
+		order by ` + orderBy
 	if forUpdate {
 		query += `
 		for update of l, n`

@@ -56,6 +56,28 @@ func TestPostgresAssetLifecycleMigrationDefinesAuditTablesAndIndexes(t *testing.
 	}
 }
 
+func TestListLifecycleMonitoringInstancesForVPSLocksSharedRowsInGlobalIDOrder(t *testing.T) {
+	t.Parallel()
+
+	var capturedQuery string
+	tx := &fakeAssetLifecycleTx{
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			capturedQuery = sql
+			return &fakeSubscriptionRows{}, nil
+		},
+	}
+
+	if _, err := listLifecycleMonitoringInstancesForVPS(context.Background(), tx, "vps_001", true); err != nil {
+		t.Fatalf("listLifecycleMonitoringInstancesForVPS() error = %v", err)
+	}
+	if !strings.Contains(capturedQuery, "order by n.monitoring_instance_id, l.linked_at desc, n.display_name") {
+		t.Fatalf("locking query does not use global monitoring_instance_id order:\n%s", capturedQuery)
+	}
+	if !strings.Contains(capturedQuery, "for update of l, n") {
+		t.Fatalf("locking query does not lock link and shared instance rows:\n%s", capturedQuery)
+	}
+}
+
 func TestPostgresVPSFirstStatusMigrationNormalizesLegacyStateIntoVPSAudit(t *testing.T) {
 	t.Parallel()
 
@@ -516,6 +538,44 @@ func TestApplyVPSCancellationDoesNotAuditRetryableStepConflicts(t *testing.T) {
 		if strings.Contains(strings.ToLower(call.sql), "'failed'") || strings.Contains(call.sql, "status = 'failed'") {
 			t.Fatalf("unexpected failed-action audit %#v", call.sql)
 		}
+	}
+}
+
+func TestApplyVPSCancellationRetriesActionStepInsertConflictsWithoutFailedAudit(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []string{"40001", "40P01"} {
+		code := code
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
+			vps := assetLifecycleTestVPSRecord("vps_001", vpsassets.LifecycleActive, vpsassets.RenewalKeep, now, nil)
+			conflictTx := successfulCancellationTx(t, vps, now)
+			conflictTx.execFunc = func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+				if strings.Contains(sql, "insert into asset_lifecycle_action_steps") {
+					return pgconn.CommandTag{}, &pgconn.PgError{Code: code, Message: "retryable action-step insert conflict"}
+				}
+				return pgconn.NewCommandTag("INSERT 0 1"), nil
+			}
+			db := &fakeAssetLifecycleDB{txs: []*fakeAssetLifecycleTx{conflictTx, conflictTx, conflictTx}}
+			repo := &PostgresAssetLifecycleRepository{db: db}
+			_, err := repo.ApplyVPSCancellation(context.Background(), vps.VPSID, assetlifecycle.ApplyCancellationInput{
+				Reason:             "expired and no renewal",
+				VPSLifecycleStatus: vpsassets.LifecycleCancelled,
+				PreviewDigest:      cancellationPreviewDigestForTest(vps),
+			})
+			if !errors.Is(err, assetlifecycle.ErrRetryableLifecycleConflict) {
+				t.Fatalf("ApplyVPSCancellation error = %v, want ErrRetryableLifecycleConflict", err)
+			}
+			if db.beginCount != maxCancellationTxAttempts {
+				t.Fatalf("begin tx count = %d, want %d", db.beginCount, maxCancellationTxAttempts)
+			}
+			for _, call := range conflictTx.execCalls {
+				if strings.Contains(strings.ToLower(call.sql), "'failed'") || strings.Contains(call.sql, "status = 'failed'") {
+					t.Fatalf("unexpected failed-action audit %#v", call.sql)
+				}
+			}
+		})
 	}
 }
 
