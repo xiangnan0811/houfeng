@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.77.0](https://github.com/xiangnan0811/houfeng/compare/v0.76.1...v0.77.0) (2026-08-26)
+
+
+### Features
+
+* harden VPS overview lifecycle launch ([0f81e8b](https://github.com/xiangnan0811/houfeng/commit/0f81e8bf391b43925cd217790b8e7defba9e402d))
+* **lifecycle:** harden VPS cancellation consistency ([926ff27](https://github.com/xiangnan0811/houfeng/commit/926ff2760cdf372bdf64ede9c2a0a1ac2eafe7b3))
+* **vps-overview:** enrich anomaly action contracts ([6048692](https://github.com/xiangnan0811/houfeng/commit/604869244810022ea2efef0c88f920e77365aa3c))
+* **web:** harden overview destinations ([3ee214a](https://github.com/xiangnan0811/houfeng/commit/3ee214a7381281e43328a57ea48c617370ae4b04))
+* **web:** harden VPS lifecycle workflows ([5718ff6](https://github.com/xiangnan0811/houfeng/commit/5718ff6c7806321927bfe77a966682e5f3b0c14c))
+
+
+### Bug Fixes
+
+* **lifecycle:** stabilize terminal and shared-row transitions ([87fea04](https://github.com/xiangnan0811/houfeng/commit/87fea043e9d21b750798f1b696284a58314b70e9))
+
+
+### Documentation
+
+* **task:** record premerge verification ([7da35e0](https://github.com/xiangnan0811/houfeng/commit/7da35e0322725e09e937be70313f0c4201a53e13))
+* **task:** record VPS overview launch P1 ([4f3e808](https://github.com/xiangnan0811/houfeng/commit/4f3e8083854cb7c7c1fa86f051272b14c5c5de33))
+* **task:** refresh launch verification evidence ([2826402](https://github.com/xiangnan0811/houfeng/commit/2826402772f82a10fcf7a70d3192212b8589a51f))
+
 ## [0.76.1](https://github.com/xiangnan0811/houfeng/compare/v0.76.0...v0.76.1) (2026-08-24)
 
 
