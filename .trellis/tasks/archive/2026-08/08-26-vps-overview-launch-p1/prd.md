@@ -51,8 +51,8 @@ Deliver the VPS overview launch slice across lifecycle cancellation, terminal-st
   focus to the trigger or body.
 - [x] `make verify-go`, full Web verification, CSS/bundle budgets, production
   build, 199-file/1404-test Vitest and 130-test Playwright are green.
-- [ ] Feature commits are reviewed and merged through a protected-main PR.
-- [ ] Main CI, Release Please, GitHub release and published container image for
+- [x] Feature commits are reviewed and merged through protected-main PR #454.
+- [x] Main CI, Release Please, GitHub release and published container image for
   the resulting version are verified before cleanup.
 
 ## Notes
@@ -60,3 +60,8 @@ Deliver the VPS overview launch slice across lifecycle cancellation, terminal-st
 - This task retroactively records the uncommitted branch after repeated
   read-only review. Do not edit the archived predecessor task designs.
 - Source branch: `fix/vps-overview-launch-p1`; target branch: `main`.
+- PR #454 merged at `0f81e8bf`; release PR #455 merged at `e7470c4c` and
+  published `v0.77.0` with green main CI and release automation.
+- Docker image `docker.io/linnea7171/houfeng:v0.77.0` resolves to index digest
+  `sha256:dc276903ae908aa5bd932d9384125f00def59d2415bd1648967f305f60941676`
+  for `linux/amd64` and `linux/arm64`.
