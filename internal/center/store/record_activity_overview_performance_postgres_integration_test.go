@@ -39,6 +39,7 @@ func TestPostgresIntegrationVPSOverviewPerformance(t *testing.T) {
 		vpsRepository,
 		NewPostgresVPSMonitoringInstanceLinkRepository(runtimePool),
 		NewPostgresIPQualityRepository(runtimePool),
+		NewPostgresSettingsRepository(runtimePool),
 		NewPostgresSubscriptionRepository(runtimePool),
 		NewPostgresAssetServiceRepository(runtimePool),
 		NewPostgresAssetDomainRepository(runtimePool),

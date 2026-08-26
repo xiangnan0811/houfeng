@@ -45,16 +45,33 @@ func (fake *fakeMonitoringLinks) ListMonitoringInstancesForVPS(_ context.Context
 }
 
 type fakeIPQuality struct {
-	report ipquality.VPSReport
-	err    error
-	calls  int
-	vpsID  string
+	report          ipquality.VPSReport
+	summary         *ipquality.Summary
+	err             error
+	calls           int
+	summaryCalls    int
+	fullReportCalls int
+	vpsID           string
 }
 
 func (fake *fakeIPQuality) GetVPSIPQuality(_ context.Context, vpsID string) (ipquality.VPSReport, error) {
 	fake.calls++
+	fake.fullReportCalls++
 	fake.vpsID = vpsID
 	return fake.report, fake.err
+}
+
+func (fake *fakeIPQuality) GetLatestVPSIPQualitySummary(_ context.Context, vpsID string) (*ipquality.Summary, error) {
+	fake.calls++
+	fake.summaryCalls++
+	fake.vpsID = vpsID
+	if fake.err != nil {
+		return nil, fake.err
+	}
+	if fake.summary != nil {
+		return fake.summary, nil
+	}
+	return fake.report.Summary, nil
 }
 
 type fakeSubscriptions struct {
@@ -115,6 +132,7 @@ func TestVPSOverviewRepositoryLoadsGranularSourcesWithTruthfulFreshness(t *testi
 		&fakeIPQuality{report: ipquality.VPSReport{Summary: &ipquality.Summary{
 			Status: "success", RiskLevel: "low", ObservedAt: now,
 		}}},
+		&fakeIPQualityAvailability{enabled: true},
 		&fakeSubscriptions{rows: []subscriptions.Record{{
 			Status: subscriptions.StatusActive, RenewAt: &renew, UpdatedAt: now.Add(-2 * time.Hour),
 		}, {
@@ -177,7 +195,7 @@ func TestVPSOverviewRepositoryLoadsGranularSourcesWithTruthfulFreshness(t *testi
 func TestVPSOverviewRepositoryNotFound(t *testing.T) {
 	repo, err := NewVPSOverviewRepository(
 		&fakeVPSRepo{err: vpsassets.ErrVPSAssetNotFound},
-		&fakeMonitoringLinks{}, &fakeIPQuality{}, &fakeSubscriptions{},
+		&fakeMonitoringLinks{}, &fakeIPQuality{}, &fakeIPQualityAvailability{}, &fakeSubscriptions{},
 		&fakeServices{}, &fakeDomains{},
 	)
 	if err != nil {
@@ -191,7 +209,7 @@ func TestVPSOverviewRepositoryNotFound(t *testing.T) {
 
 func TestVPSOverviewRepositoryEmptyRenewalIsReadyWithoutInventedTimestamp(t *testing.T) {
 	repo, err := NewVPSOverviewRepository(
-		&fakeVPSRepo{}, &fakeMonitoringLinks{}, &fakeIPQuality{}, &fakeSubscriptions{},
+		&fakeVPSRepo{}, &fakeMonitoringLinks{}, &fakeIPQuality{}, &fakeIPQualityAvailability{}, &fakeSubscriptions{},
 		&fakeServices{}, &fakeDomains{},
 	)
 	if err != nil {
@@ -214,7 +232,8 @@ func TestVPSOverviewRepositoryGranularReadersUseOneBoundedQueryEach(t *testing.T
 	subs := &fakeSubscriptions{}
 	services := &fakeServices{}
 	domains := &fakeDomains{}
-	repo, err := NewVPSOverviewRepository(vps, monitoring, ip, subs, services, domains)
+	availability := &fakeIPQualityAvailability{enabled: true}
+	repo, err := NewVPSOverviewRepository(vps, monitoring, ip, availability, subs, services, domains)
 	if err != nil {
 		t.Fatalf("NewVPSOverviewRepository: %v", err)
 	}
@@ -238,10 +257,13 @@ func TestVPSOverviewRepositoryGranularReadersUseOneBoundedQueryEach(t *testing.T
 		t.Fatalf("LoadDomainRelation: %v", err)
 	}
 
-	if vps.calls != 1 || monitoring.calls != 1 || ip.calls != 1 || subs.calls != 1 ||
-		services.calls != 1 || domains.calls != 1 {
-		t.Fatalf("authority call counts vps=%d monitoring=%d ip=%d subscriptions=%d services=%d domains=%d",
-			vps.calls, monitoring.calls, ip.calls, subs.calls, services.calls, domains.calls)
+	if vps.calls != 1 || monitoring.calls != 1 || ip.calls != 1 || availability.calls != 1 ||
+		subs.calls != 1 || services.calls != 1 || domains.calls != 1 {
+		t.Fatalf("authority call counts vps=%d monitoring=%d ip=%d availability=%d subscriptions=%d services=%d domains=%d",
+			vps.calls, monitoring.calls, ip.calls, availability.calls, subs.calls, services.calls, domains.calls)
+	}
+	if ip.fullReportCalls != 0 {
+		t.Fatalf("GetVPSIPQuality calls = %d, want 0", ip.fullReportCalls)
 	}
 	if vps.vpsID != vpsID || monitoring.vpsID != vpsID || ip.vpsID != vpsID ||
 		services.vpsID != vpsID || domains.vpsID != vpsID {
@@ -258,7 +280,7 @@ func TestVPSOverviewRepositoryRelationEmptyVersusError(t *testing.T) {
 	services := &fakeServices{}
 	domains := &fakeDomains{}
 	repo, err := NewVPSOverviewRepository(
-		&fakeVPSRepo{}, &fakeMonitoringLinks{}, &fakeIPQuality{}, &fakeSubscriptions{}, services, domains,
+		&fakeVPSRepo{}, &fakeMonitoringLinks{}, &fakeIPQuality{}, &fakeIPQualityAvailability{}, &fakeSubscriptions{}, services, domains,
 	)
 	if err != nil {
 		t.Fatalf("NewVPSOverviewRepository: %v", err)

@@ -1615,11 +1615,71 @@ return vpsassets.RenewalSubscriptionLinkage{Status: vpsassets.RenewalSubscriptio
 
 ### VPS-scoped Subscription creation
 
-`POST /api/vps/{vps_id}/subscriptions` 是普通补录订阅的主合同。path `vps_id` 是唯一 VPS 来源，请求体不得接受或覆盖 `vps_id`，也不得接受用户输入的 `status`。
+`POST /api/vps/{vps_id}/subscriptions` 是普通补录订阅的主合同。path `vps_id` 是唯一 VPS 来源，请求体不得接受或覆盖 `vps_id`，也不得接受用户输入的 `status`。`decodeJSON` 必须 `DisallowUnknownFields`。
 
-- 请求字段只表达账单事实：`price`、`currency`、`billing_cycle`、`billing_months`、`started_at`、`renew_at`、`auto_renew`、`auto_renew_cancelled`、`payment_method`、`note`。
+- 请求必须携带 `Idempotency-Key`。缺 key 或 key 非法返回 400 `invalid_idempotency_key`；同一 key 已用于不同 digest 返回 409 `idempotency_key_reused`。相同 key + 相同 digest 的丢失响应重放返回 200 既有记录，且只保留一行。
+- 请求字段只表达账单事实：`price`、`currency`、`billing_cycle`、`billing_months`、`billing_period_unit`、`billing_period_length`、`started_at`、`renew_at`、`auto_renew`、`auto_renew_cancelled`、`renewal_mode`、`payment_method`、`note`。
 - 后端可以为 legacy `subscriptions.status` 写入内部默认值，但新 UI / API contract 不把它作为人工业务状态。
 - 创建订阅不得反向修改 VPS lifecycle / usage / renewal decision，不得创建 MonitoringInstance link，不得修改 Provider、Target、ProbeItem 或 Agent。
+
+#### Scenario: Idempotent VPS-scoped subscription creation
+
+##### 1. Scope / Trigger
+
+- Trigger: 修改 `POST /api/vps/{vps_id}/subscriptions`、`subscriptions.CreateInput`、`PostgresSubscriptionRepository.CreateSubscriptionIdempotent`、`subscription_create_idempotency` schema 或 APP ACL。
+
+##### 2. Signatures
+
+- HTTP: `POST /api/vps/{vps_id}/subscriptions`，header `Idempotency-Key: <8..128 characters>`，body 为 VPS scoped 账单事实。
+- Store: `CreateSubscriptionIdempotent(ctx, input, idempotencyKey) (record, replayed, error)`。
+- DB: `subscription_create_idempotency(idempotency_key text primary key, request_digest text, subscription_id text references subscriptions on delete cascade, created_at timestamptz)`。
+
+##### 3. Contracts
+
+- key trim 后长度必须为 8..128，只允许 `[A-Za-z0-9._:-]`；HTTP 与数据库约束必须一致。
+- digest 是 normalize 后完整 `CreateInput`（包含 path `vps_id`、周期字段、续费模式和内部默认 status）的 canonical JSON SHA-256；`nil` labels 必须按空数组计算。
+- repository 必须在同一事务内按 key 获取 advisory transaction lock、检查 receipt、插入 subscription 与 receipt；不能先提交 subscription 再记录 key。
+- 首次创建返回 201；相同 key + 相同 digest 返回原 subscription 和 200；相同 key + 不同 digest 不写入并返回 coded 409。
+- APP runtime role 只需要 receipt 表 `select` / `insert`；不授予 `update` / `delete`。
+
+##### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| header 缺失、过短、过长或含非法字符 | 400 `invalid_idempotency_key`，不创建 subscription |
+| body 有未知字段 | 400 `invalid json`，不创建 subscription |
+| body 账单事实非法 | 400 `invalid input`，不创建 receipt |
+| key 首次出现 | 同事务创建 subscription + receipt，201 |
+| key 与 digest 均相同 | 返回 receipt 指向的原记录，200，不新增行 |
+| key 相同但 digest 不同 | 409 `idempotency_key_reused`，不新增行 |
+| subscription insert、receipt insert 或 commit 失败 | 事务回滚，不留下孤立 subscription 或 receipt |
+
+##### 5. Good/Base/Bad Cases
+
+- Good: 客户端收到 201 前断网，使用同一 key 和同一草稿重试；服务端返回 200 原记录，数据库仍只有一条 subscription。
+- Base: 新草稿使用新 key，正常创建另一条订阅事实。
+- Bad: 网络失败后生成新 key，可能把已经提交但丢失响应的请求再创建一次。
+- Bad: 只用 key 不比较 digest，使同一 key 能静默返回另一份业务输入的结果。
+
+##### 6. Tests Required
+
+- Domain unit: key 长度/字符边界；normalize 后 digest 稳定；任一业务字段变化都会改变 digest。
+- Handler: 真实周期字段可解码；缺 key 400；replay 200；reused key 409 且 code 稳定。
+- PostgreSQL integration: 模拟丢失 201 后 replay，断言 subscription 与 receipt 各一行；不同 digest 冲突不写入。
+- Migration/ACL: table、FK/check/index 存在；APP role 只有 `select` / `insert`。
+
+##### 7. Wrong vs Correct
+
+```go
+// 错误：先创建 subscription，再在另一个事务记录 key。
+record, err := repo.CreateSubscription(ctx, input)
+_, _ = db.Exec(ctx, `insert into subscription_create_idempotency (...) values (...)`)
+```
+
+```go
+// 正确：key lock、digest 检查、subscription 和 receipt 共用一个事务。
+record, replayed, err := repo.CreateSubscriptionIdempotent(ctx, input, idempotencyKey)
+```
 
 ### Asset Ledger timeline histories
 

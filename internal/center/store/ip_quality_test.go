@@ -387,6 +387,74 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsEmptyWhenFilteredViews
 	}
 }
 
+func TestPostgresIPQualityRepositoryGetLatestVPSIPQualitySummaryDoesNotLoadDetailTables(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
+	db := &fakeIPQualityDB{
+		queryRows: map[string]pgx.Rows{
+			"vps overview ip quality summary": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+				scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "vps_001"
+					*(dest[1].(*string)) = agentapi.IPQualityStatusSuccess
+					*(dest[2].(*string)) = "high"
+					*(dest[3].(*bool)) = true
+					*(dest[4].(*time.Time)) = now
+					return nil
+				},
+			}}},
+			"from ip_quality_provider_results": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+				scan: func(...any) error {
+					t.Fatal("overview summary must not query provider results")
+					return nil
+				},
+			}}},
+			"from ip_quality_service_unlocks": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+				scan: func(...any) error {
+					t.Fatal("overview summary must not query service unlocks")
+					return nil
+				},
+			}}},
+			"from ip_quality_assigned_vps_reports": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+				scan: func(...any) error {
+					t.Fatal("overview summary must not query 30-history assigned reports")
+					return nil
+				},
+			}}},
+		},
+	}
+	repo := &PostgresIPQualityRepository{db: db}
+
+	got, err := repo.GetLatestVPSIPQualitySummary(context.Background(), "vps_001")
+	if err != nil {
+		t.Fatalf("GetLatestVPSIPQualitySummary() error = %v", err)
+	}
+	if got == nil || got.Status != agentapi.IPQualityStatusSuccess || got.RiskLevel != "high" || !got.Stale {
+		t.Fatalf("summary = %#v", got)
+	}
+	joined := strings.ToLower(strings.Join(db.queries, "\n"))
+	if !strings.Contains(joined, "vps overview ip quality summary") {
+		t.Fatalf("summary-only query missing overview marker: %s", joined)
+	}
+	if strings.Contains(joined, "ip_quality_provider_results") ||
+		strings.Contains(joined, "ip_quality_service_unlocks") ||
+		strings.Contains(joined, "limit 30") ||
+		strings.Contains(joined, "raw_json") ||
+		strings.Contains(joined, "diagnostics_json") {
+		t.Fatalf("summary-only queries leaked detail tables: %s", joined)
+	}
+	if strings.Contains(joined, "provider_count") || strings.Contains(joined, "unlockable_count") {
+		t.Fatalf("overview summary selected detail aggregates: %s", joined)
+	}
+	if strings.Contains(joined, "ip_quality_latest_vps_summaries") ||
+		strings.Contains(joined, "ip_quality_assigned_vps_reports") {
+		t.Fatalf("overview summary still uses the detail-joining latest summaries view: %s", joined)
+	}
+	if len(db.queries) != 1 {
+		t.Fatalf("query count = %d, want 1 summary query", len(db.queries))
+	}
+}
+
 func TestPostgresIPQualityRepositoryReadsVPSIPQualityThroughFilteredViews(t *testing.T) {
 	t.Parallel()
 

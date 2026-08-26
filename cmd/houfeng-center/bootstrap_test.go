@@ -210,6 +210,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 			*store.PostgresVPSAssetRepository,
 			*store.PostgresVPSMonitoringInstanceLinkRepository,
 			*store.PostgresIPQualityRepository,
+			*store.PostgresSettingsRepository,
 			*store.PostgresSubscriptionRepository,
 			*store.PostgresAssetServiceRepository,
 			*store.PostgresAssetDomainRepository,

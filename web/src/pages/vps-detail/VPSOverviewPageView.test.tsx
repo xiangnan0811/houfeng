@@ -356,7 +356,7 @@ describe('VPSOverviewPageView', () => {
     expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
   })
 
-  it('hides cancellation and archive for an active VPS', () => {
+  it('hides cancellation and archive for an active VPS that is still keeping', () => {
     render(
       <MemoryRouter>
         <VPSOverviewPageView
@@ -373,6 +373,23 @@ describe('VPSOverviewPageView', () => {
     expect(screen.getByRole('button', { name: '管理' })).toHaveAttribute('aria-controls')
   })
 
+  it('shows cancellation for an active VPS after a cancel renewal decision', () => {
+    const overview = healthyOverview()
+    overview.identity = { ...overview.identity, renewal_decision: 'cancel' }
+    render(
+      <MemoryRouter>
+        <VPSOverviewPageView
+          overview={overview}
+          management={managementStub({ menuOpen: true })}
+          onRefresh={vi.fn()}
+          retrying={false}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('menuitem', { name: '取消 / 退役' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '归档' })).not.toBeInTheDocument()
+  })
+
   it('opens cancellation from the lifecycle blocker on to_cancel VPS', () => {
     const management = managementStub()
     const overview = healthyOverview()
@@ -381,6 +398,33 @@ describe('VPSOverviewPageView', () => {
       rule_id: 'lifecycle.blocker.v1',
       severity: 'warning',
       title: '生命周期待处理',
+      source: 'lifecycle',
+      primary_action: { id: 'open_management', label: '打开管理' },
+      secondary_actions: [],
+    }]
+    render(
+      <MemoryRouter>
+        <VPSOverviewPageView
+          overview={overview}
+          management={management}
+          onRefresh={vi.fn()}
+          retrying={false}
+        />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '打开管理' }))
+    expect(management.openPanel).toHaveBeenCalledWith('cancellation')
+  })
+
+  it('opens cancellation from the lifecycle blocker on to_migrate VPS', () => {
+    const management = managementStub()
+    const overview = healthyOverview()
+    overview.identity = { ...overview.identity, lifecycle_status: 'to_migrate' }
+    overview.anomalies = [{
+      rule_id: 'lifecycle.blocker.v1',
+      severity: 'warning',
+      title: '生命周期待处理',
+      detail: 'to_migrate',
       source: 'lifecycle',
       primary_action: { id: 'open_management', label: '打开管理' },
       secondary_actions: [],
@@ -423,6 +467,84 @@ describe('VPSOverviewAnomalies', () => {
 
     expect(screen.getByRole('heading', { name: '需要关注' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '处理续费' })).toBeInTheDocument()
+  })
+
+  it('does not leak classified machine tokens in summary or anomaly details', () => {
+    const overview = healthyOverview()
+    overview.summary.ip_quality = {
+      ...overview.summary.ip_quality,
+      status: 'high',
+      detail: 'partial',
+    }
+    overview.identity = { ...overview.identity, lifecycle_status: 'to_cancel', importance: 'normal' }
+    overview.anomalies = [
+      {
+        rule_id: 'lifecycle.blocker.v1',
+        severity: 'warning',
+        title: '生命周期待处理',
+        detail: 'to_cancel',
+        source: 'lifecycle',
+        primary_action: { id: 'open_management', label: '打开管理' },
+        secondary_actions: [],
+      },
+      {
+        rule_id: 'source.unavailable.v1',
+        severity: 'notice',
+        title: '判断依据暂不可用',
+        detail: 'ip_quality, monitoring, renewal',
+        source: 'overview',
+        primary_action: { id: 'retry_overview', label: '重试概览' },
+        secondary_actions: [],
+      },
+    ]
+    render(
+      <MemoryRouter>
+        <VPSOverviewPageView
+          overview={overview}
+          management={managementStub()}
+          onRefresh={vi.fn()}
+          retrying={false}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('高风险')).toBeInTheDocument()
+    expect(screen.getByText('采集不完整')).toBeInTheDocument()
+    expect(screen.getAllByText('待取消').length).toBeGreaterThan(0)
+    expect(screen.getByText('IP 质量、监控、续费')).toBeInTheDocument()
+    expect(screen.queryByText('partial')).not.toBeInTheDocument()
+    expect(screen.queryByText('to_cancel')).not.toBeInTheDocument()
+    expect(screen.queryByText('ip_quality, monitoring, renewal')).not.toBeInTheDocument()
+    expect(screen.queryByText('high')).not.toBeInTheDocument()
+  })
+
+  it('notes leftover IP quality history without judging the current section', () => {
+    const overview = healthyOverview()
+    overview.summary.ip_quality = {
+      status: 'not_configured',
+      detail: 'not_configured',
+      section: {
+        state: 'ready',
+        observed_at: null,
+        last_success_at: null,
+        reason_code: 'ip_quality_disabled_has_history',
+      },
+    }
+    render(
+      <MemoryRouter>
+        <VPSOverviewPageView
+          overview={overview}
+          management={managementStub()}
+          onRefresh={vi.fn()}
+          retrying={false}
+        />
+      </MemoryRouter>,
+    )
+    const cell = screen.getByLabelText('IP 质量新鲜度').closest('article')
+    expect(cell).toHaveTextContent('未启用')
+    expect(cell).toHaveTextContent('存在历史报告（当前未启用）。')
+    expect(cell).not.toHaveTextContent('高风险')
+    expect(cell).not.toHaveTextContent('暂不可用')
+    expect(screen.queryByText('ip_quality_disabled_has_history')).not.toBeInTheDocument()
   })
 
   it('returns null for healthy empty anomalies', () => {

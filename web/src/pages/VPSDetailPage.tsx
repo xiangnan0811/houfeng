@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { Navigate, useParams } from 'react-router-dom'
+import { Navigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { PageState } from '../components/PageState'
 import { ApiError } from '../lib/apiRequest'
@@ -10,6 +10,7 @@ import { VPSOverviewPageView } from './vps-detail/VPSOverviewPageView'
 import { VPSOverviewManagementActions } from './vps-detail/VPSOverviewManagementActions'
 import { useVPSManagementController } from './vps-detail/hooks/useVPSManagementController'
 import { useVPSOverview } from './vps-detail/hooks/useVPSOverview'
+import { parseOverviewWorkbench } from './vps-detail/vpsManagementHelpers'
 
 const LegacyVPSDetailPage = lazy(() =>
   import('./vps-detail/LegacyVPSDetail').then((module) => ({ default: module.LegacyVPSDetail })),
@@ -207,6 +208,16 @@ function VPSOverviewRoute({
   const { state, commands } = useVPSOverview(vpsId, initialOverview)
   const management = useVPSManagementController()
   const managementTriggerRef = useRef<HTMLButtonElement>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  useEffect(() => {
+    if (!searchParams.has('workbench')) return
+    const panel = parseOverviewWorkbench(searchParams.get('workbench'))
+    if (panel) management.openPanel(panel)
+    const next = new URLSearchParams(searchParams)
+    next.delete('workbench')
+    setSearchParams(next, { replace: true })
+  }, [management, searchParams, setSearchParams])
 
   if (state.status === 'loading' && !state.overview) {
     return <PageState kind="loading" title="正在加载 VPS 概览" />

@@ -237,6 +237,109 @@ export function detailToFactEditForm(detail: VPSAssetDetail): FactEditFormState 
   }
 }
 
+const FACT_EDIT_COMPARE_FIELDS: ReadonlyArray<{
+  key: keyof FactEditFormState
+  label: string
+}> = [
+  { key: 'displayName', label: '名称' },
+  { key: 'providerID', label: '服务商' },
+  { key: 'providerName', label: '服务商名称' },
+  { key: 'productName', label: '产品名' },
+  { key: 'orderRef', label: '订单号' },
+  { key: 'country', label: '国家 / 地区' },
+  { key: 'region', label: '区域' },
+  { key: 'city', label: '城市' },
+  { key: 'datacenter', label: '数据中心' },
+  { key: 'ipv4', label: 'IPv4' },
+  { key: 'ipv6', label: 'IPv6' },
+  { key: 'sshHost', label: 'SSH Host' },
+  { key: 'sshPort', label: 'SSH 端口' },
+  { key: 'sshUser', label: 'SSH 用户' },
+  { key: 'osName', label: '系统' },
+  { key: 'virtualization', label: '虚拟化' },
+  { key: 'usageStatus', label: '使用状态' },
+  { key: 'importance', label: '重要性' },
+  { key: 'labels', label: '标签' },
+  { key: 'note', label: '备注' },
+]
+
+function normalizeFactEditField(form: FactEditFormState, key: keyof FactEditFormState): string {
+  switch (key) {
+    case 'displayName':
+    case 'providerName':
+    case 'productName':
+    case 'orderRef':
+    case 'country':
+    case 'region':
+    case 'city':
+    case 'datacenter':
+    case 'ipv4':
+    case 'ipv6':
+    case 'sshHost':
+    case 'sshUser':
+    case 'osName':
+    case 'virtualization':
+    case 'note':
+      return form[key].trim()
+    case 'providerID':
+      return form.providerID.trim()
+    case 'sshPort': {
+      const sshPort = Number.parseInt(form.sshPort.trim(), 10)
+      if (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535) {
+        return form.sshPort
+      }
+      return String(sshPort)
+    }
+    case 'usageStatus':
+      return form.usageStatus
+    case 'importance':
+      return form.importance.trim() || 'normal'
+    case 'labels':
+      return parseLabels(form.labels).join('\u0000')
+  }
+}
+
+function factEditFieldChanged(
+  left: FactEditFormState,
+  right: FactEditFormState,
+  key: keyof FactEditFormState,
+): boolean {
+  return normalizeFactEditField(left, key) !== normalizeFactEditField(right, key)
+}
+
+export function mergeFactDraftWithLatest(
+  base: FactEditFormState,
+  draft: FactEditFormState,
+  latest: VPSAssetDetail,
+): FactEditFormState {
+  const latestForm = detailToFactEditForm(latest)
+  const merged = { ...latestForm }
+  for (const { key } of FACT_EDIT_COMPARE_FIELDS) {
+    if (factEditFieldChanged(base, draft, key)) {
+      Object.assign(merged, { [key]: draft[key] })
+    }
+  }
+  return merged
+}
+
+export function compareFactDraftAgainstLatest(
+  base: FactEditFormState,
+  draft: FactEditFormState,
+  latest: VPSAssetDetail,
+): Array<{ field: string; yours: string; latest: string }> {
+  const latestForm = detailToFactEditForm(latest)
+  return FACT_EDIT_COMPARE_FIELDS
+    .filter(({ key }) => (
+      factEditFieldChanged(base, draft, key)
+      && factEditFieldChanged(draft, latestForm, key)
+    ))
+    .map(({ key, label }) => ({
+      field: label,
+      yours: String(draft[key] ?? ''),
+      latest: String(latestForm[key] ?? ''),
+    }))
+}
+
 export function buildFactEditInput(form: FactEditFormState): UpdateVPSAssetInput {
   if (form.displayName.trim() === '') {
     throw new Error('VPS 名称不能为空。')

@@ -18,6 +18,8 @@ function reasonDescription(section: VPSOverviewSectionState, sourceLabel: string
   switch (section.reason_code) {
     case 'ip_quality_stale':
       return `${sourceLabel}数据超过新鲜度阈值。`
+    case 'ip_quality_disabled_has_history':
+      return '存在历史报告（当前未启用）。'
     case 'source_timestamp_invalid':
       return `${sourceLabel}来源时间异常，已标记为陈旧。`
     case 'monitoring_timeout':
@@ -37,7 +39,9 @@ function reasonDescription(section: VPSOverviewSectionState, sourceLabel: string
     case '':
       return section.state === 'ready' ? null : `${sourceLabel}数据暂不可用，请稍后重试。`
     default:
-      return `${sourceLabel}数据暂不可用，请稍后重试。`
+      // Ready sections may carry a non-judging note code. Never treat that as
+      // source failure, and never echo an unknown reason_code into the DOM.
+      return section.state === 'ready' ? null : `${sourceLabel}数据暂不可用，请稍后重试。`
   }
 }
 

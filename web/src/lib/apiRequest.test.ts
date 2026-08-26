@@ -159,9 +159,10 @@ describe('API request transport', () => {
       status: 409,
       message: 'record revision changed',
       field_errors: [],
+      code: 'record_revision_conflict',
     })
-    expect(defaultError).not.toHaveProperty('code')
     expect(defaultError).not.toHaveProperty('recovery')
+    expect(defaultError).not.toHaveProperty('internal_debug')
 
     const error = await requestJSON(
       '/api/failure',

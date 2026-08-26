@@ -633,6 +633,9 @@ describe('Records API transport', () => {
       const subject = fixtureObject(fixtureArray(activity.subjects)[0])
       fixtureObject(subject.identity).display_name = 42
     })],
+    ['unknown anomaly severity', () => mutateVPSOverview((wire) => {
+      fixtureObject(fixtureArray(wire.anomalies)[0]).severity = 'urgent'
+    })],
     ['unknown anomaly rule', () => mutateVPSOverview((wire) => {
       fixtureObject(fixtureArray(wire.anomalies)[0]).rule_id = 'unknown.rule.v1'
     })],

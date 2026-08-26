@@ -14,7 +14,7 @@ import (
 	"houfeng/internal/center/vpsoverview"
 )
 
-const ExpectedQueryCount = 21
+const ExpectedQueryCount = 18
 
 var expectedRelations = []string{
 	"monitoring_instances",

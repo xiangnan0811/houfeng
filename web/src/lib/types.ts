@@ -3368,9 +3368,11 @@ export type VPSOverviewAnomalyAction = {
   route?: string
 }
 
+export type VPSOverviewAnomalySeverity = 'critical' | 'warning' | 'notice' | 'info'
+
 export type VPSOverviewAnomaly = {
   rule_id: VPSOverviewAnomalyRuleID
-  severity: string
+  severity: VPSOverviewAnomalySeverity
   title: string
   detail?: string
   source: string

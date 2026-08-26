@@ -996,6 +996,7 @@ describe('LegacyVPSDetail', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Idempotency-Key': expect.stringMatching(/^[0-9a-f-]{36}$/i),
       },
       cache: 'no-store',
       credentials: 'include',
@@ -1015,6 +1016,96 @@ describe('LegacyVPSDetail', () => {
         note: 'created from vps detail',
       }),
     })
+  })
+
+  it('rotates the subscription idempotency key only after a reused-key 409', async () => {
+    const responseBody = {
+      ...vpsDetailBody,
+      vps_id: 'vps_missing_subscription',
+      display_name: 'Missing Subscription Edge',
+      renewal_decision: 'keep',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(responseBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'idempotency key reused', code: 'idempotency_key_reused' }, 409))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'idempotency key reused', code: 'idempotency_key_reused' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_missing_subscription']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '创建/更新订阅' }), 'subscription command'))
+    const drawer = screen.getByRole('dialog', { name: '创建/更新订阅' })
+    fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '18' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    expect(await within(drawer).findByRole('alert')).toHaveTextContent('同一幂等键已用于不同的订阅内容')
+    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7))
+    const firstKey = (fetchMock.mock.calls[5]?.[1] as RequestInit | undefined)?.headers
+    const secondKey = (fetchMock.mock.calls[6]?.[1] as RequestInit | undefined)?.headers
+    expect((firstKey as Record<string, string>)['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/i)
+    expect((secondKey as Record<string, string>)['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/i)
+    expect((firstKey as Record<string, string>)['Idempotency-Key']).not.toBe(
+      (secondKey as Record<string, string>)['Idempotency-Key'],
+    )
+  })
+
+  it('keeps the same subscription idempotency key after a transport failure', async () => {
+    const responseBody = {
+      ...vpsDetailBody,
+      vps_id: 'vps_missing_subscription',
+      display_name: 'Missing Subscription Edge',
+      renewal_decision: 'keep',
+    }
+    const createdSubscription = {
+      ...subscriptionBody,
+      subscription_id: 'sub_scoped_001',
+      vps_id: 'vps_missing_subscription',
+      price: 18,
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(responseBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(mockJSONResponse(createdSubscription, 201))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_missing_subscription']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '创建/更新订阅' }), 'subscription command'))
+    const drawer = screen.getByRole('dialog', { name: '创建/更新订阅' })
+    fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '18' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    expect(await within(drawer).findByRole('alert')).toHaveTextContent('Failed to fetch')
+    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    await waitFor(() => expect(screen.getByText('订阅账单事实已创建')).toBeInTheDocument())
+    const firstKey = (fetchMock.mock.calls[5]?.[1] as RequestInit | undefined)?.headers
+    const secondKey = (fetchMock.mock.calls[6]?.[1] as RequestInit | undefined)?.headers
+    expect((firstKey as Record<string, string>)['Idempotency-Key']).toBe(
+      (secondKey as Record<string, string>)['Idempotency-Key'],
+    )
   })
 
   it('opens quick subscription creation from the VPS workbench deep link', async () => {
@@ -2947,7 +3038,7 @@ describe('LegacyVPSDetail', () => {
       }
       if (url === '/api/vps/vps_b/cancellation-preview') return mockJSONResponse(previewB)
       if (url === '/api/vps/vps_a/cancellation' && method === 'POST') {
-        return mockJSONResponse({ error: 'cancellation preview stale' }, 409)
+        return mockJSONResponse({ error: 'cancellation preview stale', code: 'cancellation_preview_stale' }, 409)
       }
       throw new Error(`unexpected fetch ${method} ${url}`)
     })
@@ -3268,7 +3359,7 @@ describe('LegacyVPSDetail', () => {
         return mockJSONResponse(previewACalls === 1 ? previewA : previewAFresh)
       }
       if (url === '/api/vps/vps_a/cancellation' && method === 'POST') {
-        return mockJSONResponse({ error: 'cancellation preview stale' }, 409)
+        return mockJSONResponse({ error: 'cancellation preview stale', code: 'cancellation_preview_stale' }, 409)
       }
       throw new Error(`unexpected fetch ${method} ${url}`)
     }))

@@ -92,11 +92,14 @@ async function request(
     let details: ApiErrorDetails<unknown> | undefined
     if (rawBody.trim()) {
       try {
-        const errorBody = JSON.parse(rawBody) as { error?: string; message?: string }
+        const errorBody = JSON.parse(rawBody) as { error?: string; message?: string; code?: unknown }
         if (decodeError) {
           ;[message, details] = decodeError(errorBody, rawBody)
         } else {
           message = errorBody.error ?? errorBody.message ?? rawBody
+          if (typeof errorBody.code === 'string' && errorBody.code.trim()) {
+            details = { code: errorBody.code.trim() }
+          }
         }
       } catch {
         message = rawBody

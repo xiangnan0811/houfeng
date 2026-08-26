@@ -78,6 +78,7 @@ type Repository interface {
 	SaveReports(context.Context, []ReportWrite) error
 	GetVPSIPQuality(context.Context, string) (VPSReport, error)
 	GetVPSIPQualityReportDetail(context.Context, string, string) (VPSReport, error)
+	GetLatestVPSIPQualitySummary(context.Context, string) (*Summary, error)
 	ListLatestSummariesForVPS(context.Context, []string) (map[string]Summary, error)
 }
 

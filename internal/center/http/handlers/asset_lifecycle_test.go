@@ -446,3 +446,43 @@ func TestAssetContextHandlersReturnBatchContexts(t *testing.T) {
 		t.Fatalf("target contexts = %#v, want attention context", targetBody)
 	}
 }
+
+func TestAssetLifecycleConflictsReturnStableCodes(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		code string
+	}{
+		{name: "stale preview", err: assetlifecycle.ErrStaleCancellationPreview, code: "cancellation_preview_stale"},
+		{name: "retryable transaction", err: assetlifecycle.ErrRetryableLifecycleConflict, code: "lifecycle_transaction_conflict"},
+		{name: "blocked action", err: assetlifecycle.ErrLifecycleActionBlocked, code: "lifecycle_action_blocked"},
+	}
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			repo := &fakeAssetLifecycleRepository{applyErr: test.err}
+			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/cancellation", strings.NewReader(`{
+				"reason":"expired",
+				"preview_digest":"digest-1"
+			}`))
+			recorder := httptest.NewRecorder()
+			handlers.VPSCancellation(repo).ServeHTTP(recorder, req)
+			if recorder.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409; body=%s", recorder.Code, recorder.Body.String())
+			}
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if body["code"] != test.code {
+				t.Fatalf("body = %#v, want code %q", body, test.code)
+			}
+			if strings.TrimSpace(body["error"]) == "" {
+				t.Fatalf("body = %#v, want display error text", body)
+			}
+		})
+	}
+}

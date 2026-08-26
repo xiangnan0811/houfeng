@@ -230,13 +230,91 @@ func (r *PostgresSubscriptionRepository) CreateSubscription(ctx context.Context,
 	if err := subscriptions.ValidateCreateInput(input); err != nil {
 		return subscriptions.Record{}, err
 	}
+	return insertSubscription(ctx, r.db, input)
+}
 
+func (r *PostgresSubscriptionRepository) CreateSubscriptionIdempotent(
+	ctx context.Context,
+	input subscriptions.CreateInput,
+	idempotencyKey string,
+) (subscriptions.Record, bool, error) {
+	input = subscriptions.NormalizeCreateInput(input)
+	if err := subscriptions.ValidateCreateInput(input); err != nil {
+		return subscriptions.Record{}, false, err
+	}
+	key, err := subscriptions.NormalizeIdempotencyKey(idempotencyKey)
+	if err != nil {
+		return subscriptions.Record{}, false, err
+	}
+	digest, err := subscriptions.CreateRequestDigest(input)
+	if err != nil {
+		return subscriptions.Record{}, false, err
+	}
+	if r.beginTx == nil {
+		return subscriptions.Record{}, false, errors.New("subscription repository cannot create idempotently without transaction support")
+	}
+
+	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return subscriptions.Record{}, false, fmt.Errorf("begin subscription create idempotency transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext($1)::bigint)`, key); err != nil {
+		return subscriptions.Record{}, false, fmt.Errorf("lock subscription create idempotency key: %w", err)
+	}
+
+	var storedDigest string
+	var subscriptionID string
+	err = tx.QueryRow(ctx, `
+		select request_digest, subscription_id
+		from subscription_create_idempotency
+		where idempotency_key = $1`, key).Scan(&storedDigest, &subscriptionID)
+	if err == nil {
+		if storedDigest != digest {
+			return subscriptions.Record{}, false, subscriptions.ErrIdempotencyKeyReused
+		}
+		record, err := scanSubscription(tx.QueryRow(ctx, `
+			select `+subscriptionSelectColumns+`
+			from subscriptions
+			where subscription_id = $1`, subscriptionID))
+		if err != nil {
+			return subscriptions.Record{}, false, fmt.Errorf("load replayed subscription %q: %w", subscriptionID, err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return subscriptions.Record{}, false, fmt.Errorf("commit subscription create idempotency replay: %w", err)
+		}
+		return record, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return subscriptions.Record{}, false, fmt.Errorf("lookup subscription create idempotency: %w", err)
+	}
+
+	record, err := insertSubscription(ctx, tx, input)
+	if err != nil {
+		return subscriptions.Record{}, false, err
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into subscription_create_idempotency (
+			idempotency_key,
+			request_digest,
+			subscription_id
+		) values ($1, $2, $3)`, key, digest, record.SubscriptionID); err != nil {
+		return subscriptions.Record{}, false, fmt.Errorf("record subscription create idempotency: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return subscriptions.Record{}, false, fmt.Errorf("commit subscription create: %w", err)
+	}
+	return record, false, nil
+}
+
+func insertSubscription(ctx context.Context, db subscriptionQueryer, input subscriptions.CreateInput) (subscriptions.Record, error) {
 	subscriptionID, err := ids.New("sub")
 	if err != nil {
 		return subscriptions.Record{}, fmt.Errorf("generate subscription id: %w", err)
 	}
 
-	record, err := scanSubscription(r.db.QueryRow(ctx, `
+	record, err := scanSubscription(db.QueryRow(ctx, `
 		insert into subscriptions (
 			subscription_id,
 			vps_id,
