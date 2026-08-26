@@ -80,6 +80,7 @@ type bootstrapDeps struct {
 		*store.PostgresVPSAssetRepository,
 		*store.PostgresVPSMonitoringInstanceLinkRepository,
 		*store.PostgresIPQualityRepository,
+		*store.PostgresSettingsRepository,
 		*store.PostgresSubscriptionRepository,
 		*store.PostgresAssetServiceRepository,
 		*store.PostgresAssetDomainRepository,
@@ -308,6 +309,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 			vpsAssetRepo,
 			vpsMonitoringInstanceLinkRepo,
 			ipQualityRepo,
+			settingsRepo,
 			subscriptionRepo,
 			assetServiceRepo,
 			assetDomainRepo,
@@ -615,6 +617,7 @@ func newVPSOverviewHandler(
 	vpsRepository *store.PostgresVPSAssetRepository,
 	monitoringLinks *store.PostgresVPSMonitoringInstanceLinkRepository,
 	ipQuality *store.PostgresIPQualityRepository,
+	settingsRepository *store.PostgresSettingsRepository,
 	subscriptionRepository *store.PostgresSubscriptionRepository,
 	serviceRepository *store.PostgresAssetServiceRepository,
 	domainRepository *store.PostgresAssetDomainRepository,
@@ -623,7 +626,7 @@ func newVPSOverviewHandler(
 	sessionHMACKey []byte,
 ) (http.Handler, error) {
 	sources, err := store.NewVPSOverviewRepository(
-		vpsRepository, monitoringLinks, ipQuality, subscriptionRepository,
+		vpsRepository, monitoringLinks, ipQuality, settingsRepository, subscriptionRepository,
 		serviceRepository, domainRepository,
 	)
 	if err != nil {

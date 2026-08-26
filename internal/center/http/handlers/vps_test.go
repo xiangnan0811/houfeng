@@ -677,6 +677,13 @@ func TestVPSItemPatchRequiresIfMatchAndRejectsConflict(t *testing.T) {
 		if recorder.Code != http.StatusConflict {
 			t.Fatalf("status = %d, want 409; body=%s", recorder.Code, recorder.Body.String())
 		}
+		var body map[string]string
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if body["code"] != "vps_asset_conflict" {
+			t.Fatalf("body = %#v, want code vps_asset_conflict", body)
+		}
 	})
 }
 

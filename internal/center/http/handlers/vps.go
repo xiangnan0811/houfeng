@@ -234,7 +234,7 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 				return
 			}
 			if errors.Is(err, vpsassets.ErrVPSAssetConflict) {
-				writeError(w, http.StatusConflict, "vps asset conflict")
+				writeCodedError(w, http.StatusConflict, "vps asset conflict", "vps_asset_conflict")
 				return
 			}
 			if errors.Is(err, vpsassets.ErrVPSAssetReadonly) {

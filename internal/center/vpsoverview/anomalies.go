@@ -251,7 +251,7 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 	return anomalies
 }
 
-func healthSeverity(health string) string {
+func healthSeverity(health string) AnomalySeverity {
 	switch health {
 	case "严重":
 		return SeverityCritical
@@ -273,7 +273,7 @@ func elevatedIPRisk(level string) bool {
 	}
 }
 
-func severityRank(severity string) int {
+func severityRank(severity AnomalySeverity) int {
 	switch severity {
 	case SeverityCritical:
 		return 0

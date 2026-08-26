@@ -241,6 +241,98 @@ func (r *PostgresIPQualityRepository) SaveReports(ctx context.Context, reports [
 	return nil
 }
 
+const overviewLatestIPQualitySummarySQL = `
+		-- vps overview ip quality summary
+		with valid_reports as (
+			select r.report_id, r.observed_at, r.ip_address, r.status, r.risk_level, r.monitoring_instance_id
+			from ip_quality_reports r
+			where r.status in ('success', 'partial')
+				and r.ip_address <> '0.0.0.0'
+				and r.ip_version in (4, 6)
+		),
+		ip_quality_stale_settings as (
+			select
+				case
+					when coalesce(ip_quality_settings, '{}'::jsonb) ? 'stale_after_seconds'
+						and coalesce(ip_quality_settings->>'stale_after_seconds', '') ~ '^[0-9]+$'
+					then greatest((ip_quality_settings->>'stale_after_seconds')::integer, 60)
+					else 604800
+				end as stale_after_seconds
+			from center_settings
+			where settings_id = 'center'
+			union all
+			select 604800
+			where not exists (
+				select 1 from center_settings where settings_id = 'center'
+			)
+		),
+		assigned as (
+			select
+				l.vps_id,
+				r.report_id,
+				r.observed_at,
+				r.status,
+				r.risk_level
+			from vps_monitoring_instance_links l
+			join valid_reports r on r.monitoring_instance_id = l.monitoring_instance_id
+			where l.unlinked_at is null
+				and l.vps_id = $1
+			union all
+			select
+				v.vps_id,
+				r.report_id,
+				r.observed_at,
+				r.status,
+				r.risk_level
+			from vps_assets v
+			join valid_reports r on r.ip_address in (nullif(v.ipv4, ''), nullif(v.ipv6, ''))
+			where v.vps_id = $1
+				and not exists (
+					select 1
+					from vps_monitoring_instance_links l
+					where l.vps_id = v.vps_id
+						and l.unlinked_at is null
+				)
+		)
+		select
+			assigned.vps_id,
+			assigned.status,
+			assigned.risk_level,
+			assigned.observed_at < now() - make_interval(secs => (
+				select stale_after_seconds
+				from ip_quality_stale_settings
+				limit 1
+			)) as stale,
+			assigned.observed_at
+		from assigned
+		order by assigned.observed_at desc, assigned.report_id desc
+		limit 1`
+
+func (r *PostgresIPQualityRepository) GetLatestVPSIPQualitySummary(ctx context.Context, vpsID string) (*ipquality.Summary, error) {
+	rows, err := r.db.Query(ctx, overviewLatestIPQualitySummarySQL, vpsID)
+	if err != nil {
+		return nil, fmt.Errorf("query overview ip quality summary: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterate overview ip quality summary: %w", err)
+		}
+		return nil, nil
+	}
+	var summary ipquality.Summary
+	if err := rows.Scan(
+		&summary.VPSID,
+		&summary.Status,
+		&summary.RiskLevel,
+		&summary.Stale,
+		&summary.ObservedAt,
+	); err != nil {
+		return nil, fmt.Errorf("scan overview ip quality summary: %w", err)
+	}
+	return &summary, nil
+}
+
 func (r *PostgresIPQualityRepository) GetVPSIPQuality(ctx context.Context, vpsID string) (ipquality.VPSReport, error) {
 	summaries, err := r.ListLatestSummariesForVPS(ctx, []string{vpsID})
 	if err != nil {

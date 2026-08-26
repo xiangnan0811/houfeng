@@ -8,15 +8,17 @@ import (
 	"houfeng/internal/center/records"
 )
 
+type AnomalySeverity string
+
 const (
 	SectionReady       = "ready"
 	SectionStale       = "stale"
 	SectionUnavailable = "unavailable"
 
-	SeverityCritical = "critical"
-	SeverityWarning  = "warning"
-	SeverityNotice   = "notice"
-	SeverityInfo     = "info"
+	SeverityCritical AnomalySeverity = "critical"
+	SeverityWarning  AnomalySeverity = "warning"
+	SeverityNotice   AnomalySeverity = "notice"
+	SeverityInfo     AnomalySeverity = "info"
 
 	RecentActivityLimit  = 5
 	DefaultSectionBudget = 800 * time.Millisecond
@@ -134,7 +136,7 @@ type RelationSummary struct {
 // there is deliberately no healthy_placeholder rule.
 type Anomaly struct {
 	RuleID      string          `json:"rule_id"`
-	Severity    string          `json:"severity"`
+	Severity    AnomalySeverity `json:"severity"`
 	Title       string          `json:"title"`
 	Detail      string          `json:"detail,omitempty"`
 	Source      string          `json:"source"`

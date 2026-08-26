@@ -15,6 +15,11 @@ import (
 	centersettings "houfeng/internal/center/settings"
 )
 
+const ipQualityEnabledSQL = `
+		select coalesce((ip_quality_settings->>'enabled')::boolean, false)
+		from center_settings
+		where settings_id = $1`
+
 const getCenterSettingsSQL = `
 		select
 			settings_id,
@@ -95,6 +100,23 @@ func NewPostgresSettingsRepository(db *pgxpool.Pool) *PostgresSettingsRepository
 }
 
 var _ centersettings.Repository = (*PostgresSettingsRepository)(nil)
+
+// IPQualityEnabled reads only the IP Quality enabled flag. It must not decode
+// the full settings document.
+func (r *PostgresSettingsRepository) IPQualityEnabled(ctx context.Context) (bool, error) {
+	if ctx == nil || r == nil || r.db == nil {
+		return false, fmt.Errorf("query ip quality enabled: invalid repository")
+	}
+	var enabled bool
+	err := r.db.QueryRow(ctx, ipQualityEnabledSQL, centersettings.SingletonID).Scan(&enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("query ip quality enabled: %w", err)
+	}
+	return enabled, nil
+}
 
 func (r *PostgresSettingsRepository) GetSettings(ctx context.Context) (centersettings.CenterSettings, error) {
 	record, err := r.scanSettingsRow(ctx, getCenterSettingsSQL, centersettings.SingletonID)

@@ -25,7 +25,11 @@ type vpsOverviewMonitoringSource interface {
 }
 
 type vpsOverviewIPQualitySource interface {
-	GetVPSIPQuality(context.Context, string) (ipquality.VPSReport, error)
+	GetLatestVPSIPQualitySummary(context.Context, string) (*ipquality.Summary, error)
+}
+
+type vpsOverviewIPQualityAvailability interface {
+	IPQualityEnabled(context.Context) (bool, error)
 }
 
 type vpsOverviewSubscriptionSource interface {
@@ -47,6 +51,7 @@ type VPSOverviewRepository struct {
 	vps           vpsOverviewAssetSource
 	monitoring    vpsOverviewMonitoringSource
 	ipQuality     vpsOverviewIPQualitySource
+	availability  vpsOverviewIPQualityAvailability
 	subscriptions vpsOverviewSubscriptionSource
 	services      vpsOverviewServiceSource
 	domains       vpsOverviewDomainSource
@@ -57,15 +62,17 @@ func NewVPSOverviewRepository(
 	vps vpsOverviewAssetSource,
 	monitoring vpsOverviewMonitoringSource,
 	ipQuality vpsOverviewIPQualitySource,
+	availability vpsOverviewIPQualityAvailability,
 	subs vpsOverviewSubscriptionSource,
 	services vpsOverviewServiceSource,
 	domains vpsOverviewDomainSource,
 ) (*VPSOverviewRepository, error) {
-	if vps == nil || monitoring == nil || ipQuality == nil || subs == nil || services == nil || domains == nil {
+	if vps == nil || monitoring == nil || ipQuality == nil || availability == nil ||
+		subs == nil || services == nil || domains == nil {
 		return nil, fmt.Errorf("%w: dependency", vpsoverview.ErrInvalidOverviewRequest)
 	}
 	return &VPSOverviewRepository{
-		vps: vps, monitoring: monitoring, ipQuality: ipQuality,
+		vps: vps, monitoring: monitoring, ipQuality: ipQuality, availability: availability,
 		subscriptions: subs, services: services, domains: domains,
 	}, nil
 }
@@ -109,7 +116,7 @@ func (repository *VPSOverviewRepository) LoadMonitoring(
 	return monitoringFromLinks(links), nil
 }
 
-// LoadIPQuality performs exactly one IP-quality authority query.
+// LoadIPQuality performs one availability check plus one summary-only query.
 func (repository *VPSOverviewRepository) LoadIPQuality(
 	ctx context.Context,
 	vpsID string,
@@ -117,20 +124,31 @@ func (repository *VPSOverviewRepository) LoadIPQuality(
 	if ctx == nil || repository == nil {
 		return vpsoverview.IPQualitySource{}, vpsoverview.ErrInvalidOverviewRequest
 	}
-	report, err := repository.ipQuality.GetVPSIPQuality(ctx, vpsID)
+	enabled, err := repository.availability.IPQualityEnabled(ctx)
+	if err != nil {
+		return vpsoverview.IPQualitySource{}, err
+	}
+	summary, err := repository.ipQuality.GetLatestVPSIPQualitySummary(ctx, vpsID)
 	if err != nil {
 		return vpsoverview.IPQualitySource{}, err
 	}
 	result := vpsoverview.IPQualitySource{Section: vpsoverview.SectionState{State: vpsoverview.SectionReady}}
-	if report.Summary == nil {
+	if !enabled {
+		result.Status = "not_configured"
+		if summary != nil {
+			result.Section.ReasonCode = "ip_quality_disabled_has_history"
+		}
+		return result, nil
+	}
+	if summary == nil {
 		result.Status = "missing"
 		return result, nil
 	}
-	result.Status = report.Summary.Status
-	result.RiskLevel = report.Summary.RiskLevel
-	result.Stale = report.Summary.Stale
-	if !report.Summary.ObservedAt.IsZero() {
-		observed := report.Summary.ObservedAt.UTC()
+	result.Status = summary.Status
+	result.RiskLevel = summary.RiskLevel
+	result.Stale = summary.Stale
+	if !summary.ObservedAt.IsZero() {
+		observed := summary.ObservedAt.UTC()
 		result.Section.ObservedAt = &observed
 		result.Section.LastSuccessAt = &observed
 	}

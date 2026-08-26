@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 const (
@@ -59,4 +60,12 @@ func decodeJSONValue(body io.Reader, dst any) error {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func writeCodedError(w http.ResponseWriter, status int, message, code string) {
+	body := map[string]string{"error": message}
+	if strings.TrimSpace(code) != "" {
+		body["code"] = strings.TrimSpace(code)
+	}
+	writeJSON(w, status, body)
 }
