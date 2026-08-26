@@ -39,8 +39,8 @@ Deliver the VPS overview launch slice across lifecycle cancellation, terminal-st
   emits no failed audit for retryable conflicts, and maps exhausted retries to
   `409 lifecycle transaction conflict`.
 - [x] A real PostgreSQL test forces two production transactions to wait on the
-  VPS row lock, completes without deadlock, emits no failed action, and cleans
-  up the holder on every exit path.
+  VPS row lock in a defined Apply-then-Create queue, completes without deadlock,
+  emits no failed action, and cleans up the holder on every exit path.
 - [x] Public ordinary patch paths reject controlled lifecycle states and
   cancelled/archived concurrent updates.
 - [x] Terminal routing, workbench visibility and async ownership are covered for
@@ -50,7 +50,7 @@ Deliver the VPS overview launch slice across lifecycle cancellation, terminal-st
 - [x] Native Tab exits the VPS management menu in Chromium without restoring
   focus to the trigger or body.
 - [x] `make verify-go`, full Web verification, CSS/bundle budgets, production
-  build, 199-file/1404-test Vitest and 129-test Playwright are green.
+  build, 199-file/1404-test Vitest and 130-test Playwright are green.
 - [ ] Feature commits are reviewed and merged through a protected-main PR.
 - [ ] Main CI, Release Please, GitHub release and published container image for
   the resulting version are verified before cleanup.

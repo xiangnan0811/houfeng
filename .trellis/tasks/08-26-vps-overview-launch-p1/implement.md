@@ -14,7 +14,9 @@
 - [x] Implement serializable cancellation retries, typed 409 exhaustion and
   failed-audit separation.
 - [x] Add transaction cut-point unit tests and deterministic real PostgreSQL
-  overlap/no-deadlock coverage with safe cleanup.
+  overlap/no-deadlock coverage with defined queue order and safe cleanup.
+- [x] Lock shared monitoring rows in global ID order and cover direct action-step
+  insert `40001`/`40P01` retry/no-failed-audit contracts.
 - [x] Extend overview anomaly/relation presentation contracts and goldens.
 
 ## Phase 3 — Web ownership and destinations
@@ -23,6 +25,8 @@
 - [x] Make modern and legacy cancellation preview/apply state generation-safe.
 - [x] Harden events, monitoring, relations and internal destination allowlists.
 - [x] Add native Tab and exact runtime-stream Playwright contracts.
+- [x] Replace legacy cancellation success into archive after terminal refresh and
+  require deep-link owner requests plus raw runtime-stream URL ownership.
 
 ## Phase 4 — Verification and review
 
@@ -30,14 +34,14 @@
 - [x] Real PostgreSQL cancellation/subscription overlap regression.
 - [x] Node 22 `make verify-web`: ESLint, 199 files / 1404 Vitest tests,
   TypeScript, production build, bundle and CSS budgets.
-- [x] Node 22 Playwright: 129/129 Chromium tests.
-- [x] Comprehensive read-only review: no remaining Critical or Important; both
-  actionable P3 findings fixed and reverified.
+- [x] Node 22 Playwright: 130/130 Chromium tests.
+- [x] Final read-only re-review after the pre-merge findings are fixed: no
+  remaining Critical, Important or actionable Minor.
 
 ## Phase 5 — Delivery and cleanup
 
 - [x] Commit task metadata and implementation in reviewable batches.
-- [ ] Push and open the protected-main pull request.
+- [x] Push and open protected-main PR #454.
 - [ ] Resolve review and required CI on the same branch; merge when green.
 - [ ] Verify main CI, Release Please, GitHub release and container publication.
 - [ ] Archive this task, record the session journal, sync the primary checkout

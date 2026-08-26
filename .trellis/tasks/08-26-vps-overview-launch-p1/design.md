@@ -24,23 +24,30 @@ authorization boundaries.
   subscription, monitoring, service/domain→target, target and recommended-step
   inputs. Apply re-reads and validates the digest inside the transaction.
 - The PostgreSQL regression test uses a third holder transaction and polls the
-  isolated database's `pg_stat_activity` until both production transactions are
-  active Lock waiters. Holder release is idempotent and cancellation-aware.
+  isolated database's `pg_stat_activity`. It queues cancellation Apply first,
+  observes one active Lock waiter, then queues subscription Create and observes
+  two waiters before release. Holder release is idempotent and
+  cancellation-aware.
+- Lifecycle apply locks shared monitoring instance rows in global
+  `monitoring_instance_id` order before applying caller-selected steps, so two
+  VPS transactions cannot invert shared-row acquisition order.
 
 ## Web decisions
 
 - Terminal lifecycle routing precedes capability routing and uses replace
-  navigation to `/archive/:id`.
+  navigation to `/archive/:id`; legacy cancellation success also replaces after
+  its authoritative refresh reaches `cancelled` or `archived`.
 - Cancellation preview/application state is owned by `vpsId:generation` and
   `preview_digest`. Every async continuation, including stale-409 recovery and
   successful detail refresh, verifies ownership before writing state.
 - Cancellation/archive commands are lifecycle-specific. Terminal overview and
   legacy surfaces expose no ordinary write affordances.
 - Destinations use exact, own-property allowlists. Event object IDs reject dot
-  segments and fragments; runtime streams parse a complete URL and require the
-  page protocol, hostname, port, exact path and empty search/hash.
+  segments and fragments; runtime streams require the raw URL to equal the page
+  protocol, host, port and exact owner path before normalized URL checks.
 - Vitest proves component event handling; Playwright owns native focus movement,
-  exact route consumption, runtime WebSocket and foreign-origin behavior.
+  exact route and API-owner consumption, runtime WebSocket, same-protocol
+  foreign-origin rejection and raw traversal rejection.
 
 ## Delivery decisions
 
