@@ -42,8 +42,9 @@
 
 - [x] Commit task metadata and implementation in reviewable batches.
 - [x] Push and open protected-main PR #454.
-- [ ] Resolve review and required CI on the same branch; merge when green.
-- [ ] Verify main CI, Release Please, GitHub release and container publication.
-- [ ] Archive this task, record the session journal, sync the primary checkout
+- [x] Resolve review and required CI on the same branch; merge PR #454 green.
+- [x] Verify main CI, Release Please, GitHub release `v0.77.0`, signed agent
+  assets, deployment assets and multi-architecture container publication.
+- [x] Archive this task, record the session journal, sync the primary checkout
   and remove stale task branch/worktree state without touching protected main
   directly.
