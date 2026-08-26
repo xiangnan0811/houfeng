@@ -298,6 +298,7 @@ func monitoringFromLinks(links []assetlinks.MonitoringInstanceSummary) vpsovervi
 			primary = link
 		}
 	}
+	result.MonitoringInstanceID = primary.MonitoringInstanceID
 	result.Health = primary.CurrentHealthStatus
 	result.Status = primary.MonitoringStatus
 	result.Detail = primary.CurrentPrimaryIssueSummary

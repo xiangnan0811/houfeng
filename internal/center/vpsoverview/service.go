@@ -34,12 +34,13 @@ type IdentitySource struct {
 // MonitoringSource is one bounded monitoring read. Count is reused by the
 // monitoring relation so aggregation never repeats the authority query.
 type MonitoringSource struct {
-	Section         SectionState
-	Health          string
-	Status          string
-	Detail          string
-	ActiveIncidents int
-	Count           int
+	Section              SectionState
+	MonitoringInstanceID string
+	Health               string
+	Status               string
+	Detail               string
+	ActiveIncidents      int
+	Count                int
 }
 
 // IPQualitySource is one bounded IP-quality read.
@@ -619,21 +620,23 @@ func snapshotFromSources(
 	renewal RenewalSource,
 ) Snapshot {
 	snapshot := Snapshot{
-		GeneratedAt:         generatedAt,
-		VPSID:               identity.VPSID,
-		Identity:            identity,
-		LifecycleStatus:     identity.LifecycleStatus,
-		RenewalDecision:     identity.RenewalDecision,
-		MonitoringHealth:    monitoring.Health,
-		MonitoringDetail:    monitoring.Detail,
-		ActiveIncidents:     monitoring.ActiveIncidents,
-		MonitoringObserved:  monitoring.Section.ObservedAt,
-		IPStatus:            ipQuality.Status,
-		IPRiskLevel:         ipQuality.RiskLevel,
-		IPStale:             ipQuality.Stale,
-		IPObservedAt:        ipQuality.Section.ObservedAt,
-		ActiveSubscriptions: renewal.ActiveSubscriptions,
-		NextRenewAt:         renewal.NextRenewAt,
+		GeneratedAt:          generatedAt,
+		VPSID:                identity.VPSID,
+		Identity:             identity,
+		LifecycleStatus:      identity.LifecycleStatus,
+		RenewalDecision:      identity.RenewalDecision,
+		MonitoringHealth:     monitoring.Health,
+		MonitoringStatus:     monitoring.Status,
+		MonitoringDetail:     monitoring.Detail,
+		MonitoringInstanceID: monitoring.MonitoringInstanceID,
+		ActiveIncidents:      monitoring.ActiveIncidents,
+		MonitoringObserved:   monitoring.Section.ObservedAt,
+		IPStatus:             ipQuality.Status,
+		IPRiskLevel:          ipQuality.RiskLevel,
+		IPStale:              ipQuality.Stale,
+		IPObservedAt:         ipQuality.Section.ObservedAt,
+		ActiveSubscriptions:  renewal.ActiveSubscriptions,
+		NextRenewAt:          renewal.NextRenewAt,
 	}
 	snapshot.MonitoringAvailable = monitoring.Section.State != SectionUnavailable
 	snapshot.IPAvailable = ipQuality.Section.State != SectionUnavailable

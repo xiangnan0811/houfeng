@@ -27,6 +27,61 @@ func TestEvaluateAnomaliesHealthyProducesEmptySlice(t *testing.T) {
 	}
 }
 
+func TestEvaluateAnomaliesSkipsNotConfiguredIPQuality(t *testing.T) {
+	now := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	got := EvaluateAnomalies(Snapshot{
+		GeneratedAt: now, VPSID: "vps_7c2a4e18b09d5f31",
+		IPAvailable: true, IPStatus: "not_configured",
+	})
+	if len(got) != 0 {
+		t.Fatalf("not_configured IP anomalies = %#v, want empty", got)
+	}
+}
+
+func TestEvaluateAnomaliesRenewalWindowBoundaries(t *testing.T) {
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	sameDayMidnight := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	atWindow := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
+	pastWindow := time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name string
+		at   time.Time
+		want string
+	}{
+		{name: "yesterday overdue", at: now.Add(-24 * time.Hour), want: RuleRenewalOverdue},
+		{name: "same calendar day midnight is due soon", at: sameDayMidnight, want: RuleRenewalDueSoon},
+		{name: "now due soon", at: now, want: RuleRenewalDueSoon},
+		{name: "14d due soon", at: atWindow, want: RuleRenewalDueSoon},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			renew := tt.at
+			got := EvaluateAnomalies(Snapshot{
+				GeneratedAt: now, VPSID: "vps_7c2a4e18b09d5f31",
+				SubscriptionAvailable: true, ActiveSubscriptions: 1, NextRenewAt: &renew,
+			})
+			found := false
+			for _, anomaly := range got {
+				if anomaly.RuleID == tt.want {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("anomalies = %#v, want %s", got, tt.want)
+			}
+		})
+	}
+	got := EvaluateAnomalies(Snapshot{
+		GeneratedAt: now, VPSID: "vps_7c2a4e18b09d5f31",
+		SubscriptionAvailable: true, ActiveSubscriptions: 1, NextRenewAt: &pastWindow,
+	})
+	for _, anomaly := range got {
+		if anomaly.RuleID == RuleRenewalDueSoon || anomaly.RuleID == RuleRenewalOverdue {
+			t.Fatalf("14d+epsilon should not emit renewal anomaly: %#v", got)
+		}
+	}
+}
+
 func TestEvaluateAnomaliesTable(t *testing.T) {
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 	renew := now.Add(3 * 24 * time.Hour)
@@ -95,6 +150,32 @@ func TestEvaluateAnomaliesTable(t *testing.T) {
 			want: RuleRenewalSubscriptionMissing,
 		},
 		{
+			name: "monitoring unlinked",
+			in: Snapshot{
+				GeneratedAt: now, VPSID: "vps_7c2a4e18b09d5f31",
+				MonitoringAvailable: true, MonitoringStatus: "unlinked",
+			},
+			want: RuleMonitoringUnlinked,
+		},
+		{
+			name: "ip quality missing",
+			in: Snapshot{
+				GeneratedAt: now, VPSID: "vps_7c2a4e18b09d5f31",
+				IPAvailable: true, IPStatus: "missing",
+			},
+			want: RuleIPQualityMissing,
+		},
+		{
+			name: "renewal overdue",
+			in: Snapshot{
+				GeneratedAt: now, VPSID: "vps_7c2a4e18b09d5f31",
+				SubscriptionAvailable: true, ActiveSubscriptions: 1,
+				NextRenewAt:     func() *time.Time { t := now.Add(-24 * time.Hour); return &t }(),
+				LifecycleStatus: "active",
+			},
+			want: RuleRenewalOverdue,
+		},
+		{
 			name: "lifecycle blocker",
 			in: Snapshot{
 				GeneratedAt: now, VPSID: "vps_7c2a4e18b09d5f31",
@@ -151,18 +232,20 @@ func TestEvaluateAnomaliesActionDestinations(t *testing.T) {
 			name: "monitoring health opens the abnormal monitoring work surface",
 			snapshot: Snapshot{
 				GeneratedAt: now, VPSID: vpsID, MonitoringAvailable: true, MonitoringHealth: "告警",
+				MonitoringInstanceID: "mi_7c2a4e18b09d5f31",
 			},
 			ruleID: RuleMonitoringHealthAbnormal, actionID: "open_monitoring",
-			actionLabel: "查看监控", route: "/monitoring?abnormal=1",
+			actionLabel: "查看监控", route: "/monitoring/mi_7c2a4e18b09d5f31",
 		},
 		{
 			name: "open incidents opens monitoring instance events",
 			snapshot: Snapshot{
 				GeneratedAt: now, VPSID: vpsID, MonitoringAvailable: true,
 				MonitoringHealth: "正常", ActiveIncidents: 1,
+				MonitoringInstanceID: "mi_7c2a4e18b09d5f31",
 			},
 			ruleID: RuleMonitoringIncidentsOpen, actionID: "open_incidents",
-			actionLabel: "查看事件", route: "/events?object_type=monitoring_instance",
+			actionLabel: "查看事件", route: "/events?object_type=monitoring_instance&object_id=mi_7c2a4e18b09d5f31",
 		},
 		{
 			name: "elevated IP risk opens the scoped IP quality route",
@@ -186,6 +269,22 @@ func TestEvaluateAnomaliesActionDestinations(t *testing.T) {
 				GeneratedAt: now, VPSID: vpsID, IPAvailable: true, IPStatus: "partial",
 			},
 			ruleID: RuleIPQualityPartial, actionID: "open_ip_quality",
+			actionLabel: "查看 IP 质量", route: "/vps/" + vpsID + "/ip-quality",
+		},
+		{
+			name: "unlinked monitoring is a page-owned command",
+			snapshot: Snapshot{
+				GeneratedAt: now, VPSID: vpsID, MonitoringAvailable: true, MonitoringStatus: "unlinked",
+			},
+			ruleID: RuleMonitoringUnlinked, actionID: "open_monitoring_instances",
+			actionLabel: "关联监控",
+		},
+		{
+			name: "missing IP quality opens the scoped IP quality route",
+			snapshot: Snapshot{
+				GeneratedAt: now, VPSID: vpsID, IPAvailable: true, IPStatus: "missing",
+			},
+			ruleID: RuleIPQualityMissing, actionID: "open_ip_quality",
 			actionLabel: "查看 IP 质量", route: "/vps/" + vpsID + "/ip-quality",
 		},
 		{
