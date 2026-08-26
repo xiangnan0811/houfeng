@@ -941,3 +941,33 @@ Shipped the reviewed VPS lifecycle, overview destination, monitoring, events and
 ### Next Steps
 
 - Begin the next task from a clean main checkout after the archival cleanup PR merges.
+
+
+## Session 260: Ship VPS overview post-v0.77.1 hardening
+
+**Date**: 2026-08-26
+**Task**: Ship VPS overview post-v0.77.1 hardening
+**Branch**: `codex/archive-vps-overview-post-0771-hardening`
+
+### Summary
+
+Hardened VPS overview IP Quality judgment, cancellation discovery, CAS recovery, localized details, lifecycle error codes, subscription idempotency, summary-only queries, and severity decoding; delivered through PR #458, released v0.77.2 through PR #459, verified CI, signed assets, Compose assets, and amd64/arm64 Docker tags, then removed the merged feature worktree and branches.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d153b8e2` | (see git log) |
+| `e62e485a` | (see git log) |
+| `2dda7437` | (see git log) |
+| `1043e08c` | (see git log) |
+| `6212f66f` | (see git log) |
+| `0a54b50a` | (see git log) |
+| `925dfc45` | (see git log) |
+| `efc32b0b` | (see git log) |
+| `0c4962dc` | (see git log) |
+| `bb1d09d1` | (see git log) |
+
+### Status
+
+[OK] **Completed**
