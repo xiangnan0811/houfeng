@@ -6,6 +6,7 @@ import { expect, test } from './fixtures'
 import { apiRouteKey, type ApiFixtureProfile } from './fixtures/contracts'
 import {
   coreRouteProfile,
+  monitoringInstanceDetailProfile,
   vpsOverviewFixture,
   vpsOverviewProfile,
 } from './fixtures/profiles'
@@ -42,11 +43,11 @@ async function expectLocation(page: Page, expected: string) {
 }
 
 function routeOwnerProfile(owner: 'monitoring' | 'events' | 'ip-quality'): ApiFixtureProfile {
-  if (owner === 'monitoring') return coreRouteProfile('/monitoring')
+  if (owner === 'monitoring') return monitoringInstanceDetailProfile('mi_001')
   if (owner === 'events') {
     return {
       ...coreRouteProfile('/events'),
-      [apiRouteKey('GET', '/api/events?object_type=monitoring_instance&limit=200')]: {
+      [apiRouteKey('GET', '/api/events?object_type=monitoring_instance&object_id=mi_001&limit=200')]: {
         status: 200,
         body: { items: [] },
       },
@@ -64,19 +65,19 @@ const ROUTE_ACTIONS = [
   {
     name: 'monitoring',
     owner: 'monitoring' as const,
-    expected: '/monitoring?abnormal=1',
+    expected: '/monitoring/mi_001',
     action: anomaly(
       'monitoring.health.abnormal.v1',
-      { id: 'open_monitoring', label: '查看监控', route: '/monitoring?abnormal=1' },
+      { id: 'open_monitoring', label: '查看监控', route: '/monitoring/mi_001' },
     ),
   },
   {
     name: 'incidents',
     owner: 'events' as const,
-    expected: '/events?object_type=monitoring_instance',
+    expected: '/events?object_type=monitoring_instance&object_id=mi_001',
     action: anomaly(
       'monitoring.incidents.open.v1',
-      { id: 'open_incidents', label: '查看事件', route: '/events?object_type=monitoring_instance' },
+      { id: 'open_incidents', label: '查看事件', route: '/events?object_type=monitoring_instance&object_id=mi_001' },
     ),
   },
   {
@@ -114,10 +115,23 @@ for (const contract of ROUTE_ACTIONS) {
       ...vpsOverviewProfile({ overview: overviewWithAnomalies([contract.action]) }),
       ...routeOwnerProfile(contract.owner),
     })
+    if (contract.owner === 'monitoring') {
+      await api.allowRuntimeStream('mi_001')
+    }
     await page.goto('/vps/vps_001')
 
     await page.getByRole('link', { name: contract.action.primary_action!.label }).click()
     await expectLocation(page, contract.expected)
+    if (contract.owner === 'monitoring') {
+      await expect(page.getByRole('heading', { name: 'Tokyo Monitor' })).toBeVisible()
+      expect(api.requestCount('GET', '/api/monitoring-instances/mi_001')).toBeGreaterThan(0)
+      expect(api.requestCount('GET', '/api/monitoring-instances/mi_001/runtime-facts?window=realtime')).toBeGreaterThan(0)
+      await expect(page.getByText('已连接')).toBeVisible()
+      await api.assertRuntimeStreamConnected('mi_001')
+    }
+    if (contract.owner === 'events') {
+      await expect(page.getByRole('heading', { name: '事件流' })).toBeVisible()
+    }
   })
 }
 
@@ -151,6 +165,23 @@ for (const contract of PANEL_COMMANDS) {
     await expectLocation(page, '/vps/vps_001')
   })
 }
+
+test('VPS overview management menu exits on native Tab from a menuitem', async ({ api, page }) => {
+  api.useProfile(vpsOverviewProfile())
+  await page.goto('/vps/vps_001')
+
+  const trigger = page.getByRole('button', { name: '管理' })
+  await trigger.click()
+  const menu = page.getByRole('menu', { name: '管理' })
+  const firstItem = menu.getByRole('menuitem').first()
+  await expect(menu).toBeVisible()
+  await expect(firstItem).toBeFocused()
+
+  await page.keyboard.press('Tab')
+  await expect(menu).toHaveCount(0)
+  await expect(trigger).not.toBeFocused()
+  await expect(page.locator('body')).not.toBeFocused()
+})
 
 test('VPS overview management and retry commands stay on the canonical page', async ({ api, page }) => {
   const overview = overviewWithAnomalies([
@@ -300,4 +331,22 @@ test('VPS overview relation dialog is keyboard-safe, mobile-safe, and accessible
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
   await expect(trigger).toBeFocused()
+})
+
+test('runtime stream fixture rejects foreign-origin sockets even with an allowlisted id', async ({ api, page }) => {
+  api.useProfile(vpsOverviewProfile())
+  await api.allowRuntimeStream('mi_001')
+  await page.goto('/vps/vps_001')
+
+  const foreignURL = 'wss://evil.invalid/api/monitoring-instances/mi_001/runtime-stream'
+  await page.evaluate((url) => {
+    const socket = new WebSocket(url)
+    socket.addEventListener('error', () => undefined)
+  }, foreignURL)
+  api.acknowledgeUnexpectedRuntimeStream('evil.invalid')
+
+  await expect.poll(async () => {
+    const sockets = await api.snapshotRuntimeStreamSockets()
+    return sockets.find((socket) => socket.url.includes('evil.invalid'))?.phase ?? ''
+  }).toBe('error')
 })
