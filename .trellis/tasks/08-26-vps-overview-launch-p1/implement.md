@@ -30,13 +30,13 @@
 - [x] Real PostgreSQL cancellation/subscription overlap regression.
 - [x] Node 22 `make verify-web`: ESLint, 199 files / 1404 Vitest tests,
   TypeScript, production build, bundle and CSS budgets.
-- [x] Node 22 Playwright: 128/128 Chromium tests.
+- [x] Node 22 Playwright: 129/129 Chromium tests.
 - [x] Comprehensive read-only review: no remaining Critical or Important; both
   actionable P3 findings fixed and reverified.
 
 ## Phase 5 — Delivery and cleanup
 
-- [ ] Commit task metadata and implementation in reviewable batches.
+- [x] Commit task metadata and implementation in reviewable batches.
 - [ ] Push and open the protected-main pull request.
 - [ ] Resolve review and required CI on the same branch; merge when green.
 - [ ] Verify main CI, Release Please, GitHub release and container publication.

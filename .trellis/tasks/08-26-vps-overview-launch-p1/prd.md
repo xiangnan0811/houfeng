@@ -50,7 +50,7 @@ Deliver the VPS overview launch slice across lifecycle cancellation, terminal-st
 - [x] Native Tab exits the VPS management menu in Chromium without restoring
   focus to the trigger or body.
 - [x] `make verify-go`, full Web verification, CSS/bundle budgets, production
-  build, 199-file/1404-test Vitest and 128-test Playwright are green.
+  build, 199-file/1404-test Vitest and 129-test Playwright are green.
 - [ ] Feature commits are reviewed and merged through a protected-main PR.
 - [ ] Main CI, Release Please, GitHub release and published container image for
   the resulting version are verified before cleanup.
