@@ -1064,6 +1064,12 @@ export function LegacyVPSDetail() {
       return
     }
 
+    const write = beginVpsWrite(detail.vps_id)
+    if (!write) {
+      setLinkError('上一次保存仍在进行，请稍后再试')
+      return
+    }
+    const { generation, token } = write
     setLinkSubmitting(true)
     setLinkError(null)
     setLinkNotice(null)
@@ -1074,13 +1080,17 @@ export function LegacyVPSDetail() {
         monitoring_instance_id: monitoringInstanceId,
         note: linkDraft.note.trim(),
       })
+      if (!mutationIsCurrent(generation)) return
       await refreshDetail(detail.vps_id)
+      if (!mutationIsCurrent(generation)) return
       setLinkDraft({ monitoringInstanceId: '', note: '' })
       setLinkNotice('监控实例关联已更新')
       collapseDrawer()
     } catch (error: unknown) {
+      if (!mutationIsCurrent(generation)) return
       setLinkError(describeError(error, '关联监控实例失败'))
     } finally {
+      finishVpsWrite(detail.vps_id, token)
       setLinkSubmitting(false)
     }
   }
@@ -1090,6 +1100,12 @@ export function LegacyVPSDetail() {
     const detail = state.detail
     if (!detail) return
 
+    const write = beginVpsWrite(detail.vps_id)
+    if (!write) {
+      setMonitoringCreateError('上一次保存仍在进行，请稍后再试')
+      return
+    }
+    const { generation, token } = write
     setMonitoringCreateSubmitting(true)
     setMonitoringCreateError(null)
     setMonitoringCreateNotice(null)
@@ -1098,13 +1114,17 @@ export function LegacyVPSDetail() {
     try {
       const input = buildMonitoringInstanceCreateInput(monitoringCreateDraft ?? monitoringInstanceCreateDraftFromDetail(detail))
       const created = await createVPSMonitoringInstance(detail.vps_id, input)
+      if (!mutationIsCurrent(generation)) return
       await refreshDetail(detail.vps_id)
+      if (!mutationIsCurrent(generation)) return
       setMonitoringCreateNotice('监控实例已创建并关联，正在进入接入流程')
       collapseDrawer()
       navigate(`/monitoring/${created.monitoring_instance_id}?onboarding=1&return_vps=${encodeURIComponent(detail.vps_id)}`)
     } catch (error: unknown) {
+      if (!mutationIsCurrent(generation)) return
       setMonitoringCreateError(describeError(error, '创建监控实例失败'))
     } finally {
+      finishVpsWrite(detail.vps_id, token)
       setMonitoringCreateSubmitting(false)
     }
   }
@@ -1124,9 +1144,16 @@ export function LegacyVPSDetail() {
       return
     }
 
+    const write = beginVpsWrite(detail.vps_id)
+    if (!write) {
+      setSubscriptionError('上一次保存仍在进行，请稍后再试')
+      return
+    }
+    const { generation, token } = write
     setSubscriptionSubmitting(true)
     try {
       const subscription = await createVPSSubscription(detail.vps_id, input, subscriptionIdempotencyKeyRef.current)
+      if (!mutationIsCurrent(generation)) return
       setState((current) => {
         if (current.vpsId !== detail.vps_id) return current
         return {
@@ -1142,11 +1169,13 @@ export function LegacyVPSDetail() {
       setSubscriptionNotice('订阅账单事实已创建')
       collapseDrawer()
     } catch (error: unknown) {
+      if (!mutationIsCurrent(generation)) return
       if (isIdempotencyKeyReused(error)) {
         subscriptionIdempotencyKeyRef.current = crypto.randomUUID()
       }
       setSubscriptionError(describeError(error, '创建订阅失败'))
     } finally {
+      finishVpsWrite(detail.vps_id, token)
       setSubscriptionSubmitting(false)
     }
   }
@@ -1170,16 +1199,26 @@ export function LegacyVPSDetail() {
       return
     }
 
+    const write = beginVpsWrite(detail.vps_id)
+    if (!write) {
+      setValidityExtensionError('上一次保存仍在进行，请稍后再试')
+      return
+    }
+    const { generation, token } = write
     setValidityExtensionSubmitting(true)
     try {
       const result = await extendVPSValidity(detail.vps_id, input)
-      await refreshDetailAndTimeline(detail.vps_id)
+      if (!mutationIsCurrent(generation)) return
+      await refreshDetailAndTimeline(detail.vps_id, () => mutationIsCurrent(generation))
+      if (!mutationIsCurrent(generation)) return
       setValidityExtensionDraft(INITIAL_VALIDITY_EXTENSION_DRAFT)
       setValidityExtensionNotice(`有效期已延长，写入 ${result.steps.length} 个审计步骤`)
       collapseDrawer()
     } catch (error: unknown) {
+      if (!mutationIsCurrent(generation)) return
       setValidityExtensionError(describeError(error, '延长有效期失败'))
     } finally {
+      finishVpsWrite(detail.vps_id, token)
       setValidityExtensionSubmitting(false)
     }
   }
@@ -1188,6 +1227,12 @@ export function LegacyVPSDetail() {
     const detail = state.detail
     if (!detail) return
 
+    const write = beginVpsWrite(detail.vps_id)
+    if (!write) {
+      setUnlinkError('上一次保存仍在进行，请稍后再试')
+      return
+    }
+    const { generation, token } = write
     setUnlinkingMonitoringInstanceId(monitoringInstance.monitoring_instance_id)
     setUnlinkError(null)
     setLinkError(null)
@@ -1198,12 +1243,16 @@ export function LegacyVPSDetail() {
         monitoring_instance_id: monitoringInstance.monitoring_instance_id,
         note: monitoringInstance.note,
       })
+      if (!mutationIsCurrent(generation)) return
       await refreshDetail(detail.vps_id)
+      if (!mutationIsCurrent(generation)) return
       setLinkNotice('监控实例关联已解除')
       setPendingUnlinkMonitoringInstance(null)
     } catch (error: unknown) {
+      if (!mutationIsCurrent(generation)) return
       setUnlinkError(describeError(error, '解除监控实例关联失败'))
     } finally {
+      finishVpsWrite(detail.vps_id, token)
       setUnlinkingMonitoringInstanceId(null)
     }
   }
@@ -1238,16 +1287,25 @@ export function LegacyVPSDetail() {
       return
     }
 
+    const write = beginVpsWrite(detail.vps_id)
+    if (!write) {
+      setLifecycleError('上一次保存仍在进行，请稍后再试')
+      return
+    }
+    const { generation, token } = write
     setLifecycleSubmitting(true)
     setLifecycleError(null)
     setLifecycleNotice(null)
 
     try {
       await archiveVPS(detail.vps_id, { confirmation_name: confirmationName })
+      if (!mutationIsCurrent(generation)) return
       navigate(`/archive/${encodeURIComponent(detail.vps_id)}`, { replace: true })
     } catch (error: unknown) {
+      if (!mutationIsCurrent(generation)) return
       setLifecycleError(describeError(error, '归档 VPS 失败'))
     } finally {
+      finishVpsWrite(detail.vps_id, token)
       setLifecycleSubmitting(false)
     }
   }
@@ -1265,8 +1323,16 @@ export function LegacyVPSDetail() {
   async function handleCancellationSubmit(input: ApplyCancellationInput) {
     const detail = state.detail
     if (!detail) return
+    const write = beginVpsWrite(detail.vps_id)
+    if (!write) {
+      setCancellationError('上一次保存仍在进行，请稍后再试')
+      return
+    }
+    const { generation: mutationGeneration, token } = write
     const generation = cancellationPreviewGenerationRef.current
-    const stillCurrent = () => generation === cancellationPreviewGenerationRef.current
+    const stillCurrent = () => (
+      generation === cancellationPreviewGenerationRef.current && mutationIsCurrent(mutationGeneration)
+    )
 
     setCancellationSubmitting(true)
     setCancellationError(null)
@@ -1303,6 +1369,7 @@ export function LegacyVPSDetail() {
       if (!stillCurrent()) return
       setCancellationError(describeError(error, '执行取消/退役失败'))
     } finally {
+      finishVpsWrite(detail.vps_id, token)
       if (stillCurrent()) setCancellationSubmitting(false)
     }
   }
@@ -1322,16 +1389,26 @@ export function LegacyVPSDetail() {
       return
     }
 
+    const write = beginVpsWrite(detail.vps_id)
+    if (!write) {
+      setExperienceError('上一次保存仍在进行，请稍后再试')
+      return
+    }
+    const { generation, token } = write
     setExperienceSubmitting(true)
     try {
       await createVPSExperienceLog(detail.vps_id, input)
-      await refreshDetailAndTimeline(detail.vps_id)
+      if (!mutationIsCurrent(generation)) return
+      await refreshDetailAndTimeline(detail.vps_id, () => mutationIsCurrent(generation))
+      if (!mutationIsCurrent(generation)) return
       setExperienceDraft(INITIAL_EXPERIENCE_DRAFT)
       setExperienceNotice('经验记录已写入资产历史')
       collapseDrawer()
     } catch (error: unknown) {
+      if (!mutationIsCurrent(generation)) return
       setExperienceError(describeError(error, '创建经验记录失败'))
     } finally {
+      finishVpsWrite(detail.vps_id, token)
       setExperienceSubmitting(false)
     }
   }
@@ -1351,16 +1428,26 @@ export function LegacyVPSDetail() {
       return
     }
 
+    const write = beginVpsWrite(detail.vps_id)
+    if (!write) {
+      setServiceError('上一次保存仍在进行，请稍后再试')
+      return
+    }
+    const { generation, token } = write
     setServiceSubmitting(true)
     try {
       await createVPSService(detail.vps_id, input)
+      if (!mutationIsCurrent(generation)) return
       await refreshServices(detail.vps_id)
+      if (!mutationIsCurrent(generation)) return
       setServiceDraft(INITIAL_SERVICE_DRAFT)
       setServiceNotice('服务记录已创建')
       collapseDrawer()
     } catch (error: unknown) {
+      if (!mutationIsCurrent(generation)) return
       setServiceError(describeError(error, '创建服务记录失败'))
     } finally {
+      finishVpsWrite(detail.vps_id, token)
       setServiceSubmitting(false)
     }
   }
@@ -1380,16 +1467,26 @@ export function LegacyVPSDetail() {
       return
     }
 
+    const write = beginVpsWrite(detail.vps_id)
+    if (!write) {
+      setDomainError('上一次保存仍在进行，请稍后再试')
+      return
+    }
+    const { generation, token } = write
     setDomainSubmitting(true)
     try {
       await createVPSDomain(detail.vps_id, input)
+      if (!mutationIsCurrent(generation)) return
       await refreshDomains(detail.vps_id)
+      if (!mutationIsCurrent(generation)) return
       setDomainDraft(INITIAL_DOMAIN_DRAFT)
       setDomainNotice('域名记录已创建')
       collapseDrawer()
     } catch (error: unknown) {
+      if (!mutationIsCurrent(generation)) return
       setDomainError(describeError(error, '创建域名记录失败'))
     } finally {
+      finishVpsWrite(detail.vps_id, token)
       setDomainSubmitting(false)
     }
   }
