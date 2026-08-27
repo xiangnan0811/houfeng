@@ -971,3 +971,27 @@ Hardened VPS overview IP Quality judgment, cancellation discovery, CAS recovery,
 ### Status
 
 [OK] **Completed**
+
+
+## Session 261: Release v0.77.4 hardening closeout
+
+**Date**: 2026-08-27
+**Task**: Release v0.77.4 hardening closeout
+**Branch**: `feat/v0774-hardening-closeout`
+
+### Summary
+
+Hardened subscription create idempotency and DTO contracts, disabled IP Quality judgement, VPS CAS/readonly recovery, and generation/token-owned Legacy mutation races; verified full Go/Web, PostgreSQL, and Chromium gates.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f3946ca0` | (see git log) |
+| `ef05a34c` | (see git log) |
+| `b9a0cc88` | (see git log) |
+| `c6c2f7d3` | (see git log) |
+
+### Status
+
+[OK] **Completed**
