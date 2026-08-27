@@ -48,6 +48,7 @@ type fakeIPQuality struct {
 	report          ipquality.VPSReport
 	summary         *ipquality.Summary
 	err             error
+	blockUntilDone  bool
 	calls           int
 	summaryCalls    int
 	fullReportCalls int
@@ -61,10 +62,15 @@ func (fake *fakeIPQuality) GetVPSIPQuality(_ context.Context, vpsID string) (ipq
 	return fake.report, fake.err
 }
 
-func (fake *fakeIPQuality) GetLatestVPSIPQualitySummary(_ context.Context, vpsID string) (*ipquality.Summary, error) {
+func (fake *fakeIPQuality) GetLatestVPSIPQualitySummary(ctx context.Context, vpsID string) (*ipquality.Summary, error) {
 	fake.calls++
 	fake.summaryCalls++
 	fake.vpsID = vpsID
+	if fake.blockUntilDone {
+		<-ctx.Done()
+		time.Sleep(10 * time.Millisecond)
+		return nil, ctx.Err()
+	}
 	if fake.err != nil {
 		return nil, fake.err
 	}

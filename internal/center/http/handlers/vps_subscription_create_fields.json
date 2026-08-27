@@ -1,15 +1,15 @@
 [
-  "price",
-  "currency",
-  "billing_cycle",
-  "billing_months",
-  "billing_period_unit",
-  "billing_period_length",
-  "started_at",
-  "renew_at",
-  "auto_renew",
-  "auto_renew_cancelled",
-  "renewal_mode",
-  "payment_method",
-  "note"
+  {"name": "price", "type": "number", "required": true, "nullable": false},
+  {"name": "currency", "type": "string", "required": true, "nullable": false},
+  {"name": "billing_cycle", "type": "string", "required": true, "nullable": false},
+  {"name": "billing_months", "type": "number", "required": true, "nullable": false},
+  {"name": "billing_period_unit", "type": "string", "required": false, "nullable": false},
+  {"name": "billing_period_length", "type": "number", "required": false, "nullable": false},
+  {"name": "started_at", "type": "date", "required": false, "nullable": true},
+  {"name": "renew_at", "type": "date", "required": false, "nullable": true},
+  {"name": "auto_renew", "type": "boolean", "required": true, "nullable": false},
+  {"name": "auto_renew_cancelled", "type": "boolean", "required": true, "nullable": false},
+  {"name": "renewal_mode", "type": "string", "required": false, "nullable": false},
+  {"name": "payment_method", "type": "string", "required": true, "nullable": false},
+  {"name": "note", "type": "string", "required": true, "nullable": false}
 ]

@@ -63,8 +63,8 @@ func TestPostgresOverviewDisabledIPQualityDoesNotJudgeLeftoverOrMissingReport(t 
 		if overview.Summary.IPQuality.Status != "not_configured" {
 			t.Fatalf("ip quality status = %q, leftover must not drive current judgement", overview.Summary.IPQuality.Status)
 		}
-		if overview.Summary.IPQuality.Section.ReasonCode != "ip_quality_disabled_has_history" {
-			t.Fatalf("reason = %q, want ip_quality_disabled_has_history", overview.Summary.IPQuality.Section.ReasonCode)
+		if overview.Summary.IPQuality.Section.ReasonCode != "" {
+			t.Fatalf("reason = %q, want empty; leftover history must stay off Overview judgement", overview.Summary.IPQuality.Section.ReasonCode)
 		}
 		assertOverviewDoesNotJudgeLeftoverIP(t, overview, "healthy")
 	})

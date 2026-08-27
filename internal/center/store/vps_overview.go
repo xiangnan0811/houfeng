@@ -117,8 +117,8 @@ func (repository *VPSOverviewRepository) LoadMonitoring(
 }
 
 // LoadIPQuality performs one availability check. When enabled it also does one
-// summary-only query. When disabled the summary lookup is best-effort only and
-// cannot fail the section or current judgement.
+// summary-only query. When disabled it returns immediately; history is not part
+// of current Overview judgement and must not share the request deadline.
 func (repository *VPSOverviewRepository) LoadIPQuality(
 	ctx context.Context,
 	vpsID string,
@@ -133,10 +133,6 @@ func (repository *VPSOverviewRepository) LoadIPQuality(
 	result := vpsoverview.IPQualitySource{Section: vpsoverview.SectionState{State: vpsoverview.SectionReady}}
 	if !enabled {
 		result.Status = "not_configured"
-		summary, summaryErr := repository.ipQuality.GetLatestVPSIPQualitySummary(ctx, vpsID)
-		if summaryErr == nil && summary != nil {
-			result.Section.ReasonCode = "ip_quality_disabled_has_history"
-		}
 		return result, nil
 	}
 	summary, err := repository.ipQuality.GetLatestVPSIPQualitySummary(ctx, vpsID)

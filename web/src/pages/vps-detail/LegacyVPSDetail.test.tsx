@@ -4264,4 +4264,321 @@ describe('LegacyVPSDetail', () => {
     expect(bPatches).toBe(1)
     expect(aPatches).toBe(1)
   })
+
+  it('does not navigate to monitoring onboarding from a delayed create after switching VPS', async () => {
+    const detailA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const detailB = {
+      ...vpsDetailBody,
+      vps_id: 'vps_b',
+      display_name: 'Osaka Edge B',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const delayedCreate = deferred<ReturnType<typeof mockJSONResponse>>()
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_a' && method === 'GET') return Promise.resolve(mockJSONResponse(detailA))
+      if (url === '/api/vps/vps_b' && method === 'GET') return Promise.resolve(mockJSONResponse(detailB))
+      if (url === '/api/vps/vps_a/monitoring-instances' && method === 'POST') return delayedCreate.promise
+      if (url.startsWith('/api/vps/vps_a/timeline') || url.startsWith('/api/vps/vps_b/timeline')) {
+        return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: url.includes('vps_b') ? 'vps_b' : 'vps_a' }))
+      }
+      if (url.includes('/services') || url.includes('/domains')) return Promise.resolve(mockJSONResponse([]))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function NavigationHarness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate('/vps/vps_b')}>切到 B</button>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+            <Route path="/monitoring/:monitoringInstanceId" element={<LocationProbe />} />
+          </Routes>
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '接入/升级 agent' }), 'agent onboarding command'))
+    fireEvent.click(within(screen.getByRole('dialog', { name: '接入/升级 agent' })).getByRole('button', { name: '接入/升级 agent' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/vps/vps_a/monitoring-instances',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+
+    fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+
+    await act(async () => {
+      delayedCreate.resolve(mockJSONResponse({
+        monitoring_instance_id: 'mi_from_a',
+        display_name: 'Tokyo Edge A',
+        link: { link_id: 'vnl_from_a', vps_id: 'vps_a', monitoring_instance_id: 'mi_from_a' },
+      }, 201))
+    })
+
+    expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument()
+    expect(screen.queryByTestId('location-path')).not.toBeInTheDocument()
+  })
+
+  it('does not navigate to archive from a delayed archive after switching VPS', async () => {
+    const detailA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const detailB = {
+      ...vpsDetailBody,
+      vps_id: 'vps_b',
+      display_name: 'Osaka Edge B',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const archiveReviewA = {
+      vps: detailA,
+      subscriptions: [],
+      monitoring_instance_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      warnings: [],
+      blockers: [],
+      eligible: true,
+    }
+    const delayedArchive = deferred<ReturnType<typeof mockJSONResponse>>()
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_a' && method === 'GET') return Promise.resolve(mockJSONResponse(detailA))
+      if (url === '/api/vps/vps_b' && method === 'GET') return Promise.resolve(mockJSONResponse(detailB))
+      if (url === '/api/vps/vps_a/archive-review') return Promise.resolve(mockJSONResponse(archiveReviewA))
+      if (url === '/api/vps/vps_a/archive' && method === 'POST') return delayedArchive.promise
+      if (url.startsWith('/api/vps/vps_a/timeline') || url.startsWith('/api/vps/vps_b/timeline')) {
+        return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: url.includes('vps_b') ? 'vps_b' : 'vps_a' }))
+      }
+      if (url.includes('/services') || url.includes('/domains')) return Promise.resolve(mockJSONResponse([]))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function NavigationHarness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate('/vps/vps_b')}>切到 B</button>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+            <Route path="/archive/:vpsId" element={<LocationProbe />} />
+          </Routes>
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
+    clickVPSAction('归档 VPS')
+    const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    fireEvent.change(within(dialog).getByLabelText('输入 VPS 名称确认归档'), { target: { value: 'Tokyo Edge A' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/vps/vps_a/archive',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+
+    fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+
+    await act(async () => {
+      delayedArchive.resolve(mockJSONResponse({ ...detailA, lifecycle_status: 'archived' }))
+    })
+
+    expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument()
+    expect(screen.queryByTestId('location-path')).not.toBeInTheDocument()
+  })
+
+  it('does not close VPS B drawer when a delayed service create on A completes', async () => {
+    const detailA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const detailB = {
+      ...vpsDetailBody,
+      vps_id: 'vps_b',
+      display_name: 'Osaka Edge B',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const delayedCreate = deferred<ReturnType<typeof mockJSONResponse>>()
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_a' && method === 'GET') return Promise.resolve(mockJSONResponse(detailA))
+      if (url === '/api/vps/vps_b' && method === 'GET') return Promise.resolve(mockJSONResponse(detailB))
+      if (url === '/api/vps/vps_a/services' && method === 'POST') return delayedCreate.promise
+      if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_b/services') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (url === '/api/targets') return Promise.resolve(mockJSONResponse([targetBody]))
+      if (url.startsWith('/api/vps/vps_a/timeline') || url.startsWith('/api/vps/vps_b/timeline')) {
+        return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: url.includes('vps_b') ? 'vps_b' : 'vps_a' }))
+      }
+      if (url.includes('/domains')) return Promise.resolve(mockJSONResponse([]))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function NavigationHarness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate('/vps/vps_b')}>切到 B</button>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          </Routes>
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
+    clickVPSAction('新增服务')
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/targets', expect.anything()))
+    const aDrawer = screen.getByRole('dialog', { name: '新增服务' })
+    fireEvent.change(within(aDrawer).getByLabelText('服务名称'), { target: { value: 'Blog A' } })
+    fireEvent.change(within(aDrawer).getByLabelText('入口 URL'), { target: { value: 'https://a.example.com' } })
+    fireEvent.click(within(aDrawer).getByRole('button', { name: '创建服务记录' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/vps/vps_a/services',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+
+    fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+    clickVPSAction('新增服务')
+    expect(screen.getByRole('dialog', { name: '新增服务' })).toBeInTheDocument()
+
+    await act(async () => {
+      delayedCreate.resolve(mockJSONResponse({
+        ...serviceBody,
+        service_id: 'svc_from_a',
+        vps_id: 'vps_a',
+        name: 'Blog A',
+      }, 201))
+    })
+
+    expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '新增服务' })).toBeInTheDocument()
+    expect(screen.queryByText('服务记录已创建')).not.toBeInTheDocument()
+  })
+
+  it('does not show VPS A subscription notice after switching to VPS B', async () => {
+    const detailA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const detailB = {
+      ...vpsDetailBody,
+      vps_id: 'vps_b',
+      display_name: 'Osaka Edge B',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const delayedCreate = deferred<ReturnType<typeof mockJSONResponse>>()
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_a' && method === 'GET') return Promise.resolve(mockJSONResponse(detailA))
+      if (url === '/api/vps/vps_b' && method === 'GET') return Promise.resolve(mockJSONResponse(detailB))
+      if (url === '/api/vps/vps_a/subscriptions' && method === 'POST') return delayedCreate.promise
+      if (url.startsWith('/api/vps/vps_a/timeline') || url.startsWith('/api/vps/vps_b/timeline')) {
+        return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: url.includes('vps_b') ? 'vps_b' : 'vps_a' }))
+      }
+      if (url.includes('/services') || url.includes('/domains')) return Promise.resolve(mockJSONResponse([]))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function NavigationHarness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate('/vps/vps_b')}>切到 B</button>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          </Routes>
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '创建/更新订阅' }), 'subscription command'))
+    const drawer = screen.getByRole('dialog', { name: '创建/更新订阅' })
+    fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '18' } })
+    fireEvent.change(within(drawer).getByLabelText('续费日期'), { target: { value: '2026-07-01' } })
+    fireEvent.click(within(drawer).getByLabelText('自动续费'))
+    fireEvent.change(within(drawer).getByLabelText('支付方式'), { target: { value: '__custom' } })
+    fireEvent.change(within(drawer).getByLabelText('自定义支付方式'), { target: { value: 'visa' } })
+    fireEvent.change(within(drawer).getByLabelText('备注'), { target: { value: 'from A' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/vps/vps_a/subscriptions',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+
+    fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+
+    await act(async () => {
+      delayedCreate.resolve(mockJSONResponse({
+        ...subscriptionBody,
+        subscription_id: 'sub_from_a',
+        vps_id: 'vps_a',
+        price: 18,
+        note: 'from A',
+      }, 200))
+    })
+
+    expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument()
+    expect(screen.queryByText('订阅账单事实已创建')).not.toBeInTheDocument()
+  })
 })

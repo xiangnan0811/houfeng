@@ -517,7 +517,7 @@ describe('VPSOverviewAnomalies', () => {
     expect(screen.queryByText('high')).not.toBeInTheDocument()
   })
 
-  it('notes leftover IP quality history without judging the current section', () => {
+  it('shows disabled IP quality as not configured without a history footnote', () => {
     const overview = healthyOverview()
     overview.summary.ip_quality = {
       status: 'not_configured',
@@ -526,7 +526,7 @@ describe('VPSOverviewAnomalies', () => {
         state: 'ready',
         observed_at: null,
         last_success_at: null,
-        reason_code: 'ip_quality_disabled_has_history',
+        reason_code: '',
       },
     }
     render(
@@ -541,7 +541,7 @@ describe('VPSOverviewAnomalies', () => {
     )
     const cell = screen.getByLabelText('IP 质量新鲜度').closest('article')
     expect(cell).toHaveTextContent('未启用')
-    expect(cell).toHaveTextContent('存在历史报告（当前未启用）。')
+    expect(cell).not.toHaveTextContent('存在历史报告（当前未启用）')
     expect(cell).not.toHaveTextContent('高风险')
     expect(cell).not.toHaveTextContent('暂不可用')
     expect(screen.queryByText('ip_quality_disabled_has_history')).not.toBeInTheDocument()

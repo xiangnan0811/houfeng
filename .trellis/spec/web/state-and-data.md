@@ -33,7 +33,8 @@
 - 字段名**完全镜像 center JSON**（snake_case，如 `monitoring_instance_id` / `current_health_status` / `last_heartbeat_at`）。**不要在前端再驼峰化一遍**——保持 grep 友好，便于和 Go 侧 `internal/center/http/handlers/*` 对齐。
 - 中文枚举（如 `IncidentSeverity = '正常' | '关注' | '告警' | '严重'`、`OnboardingPhase` 等）来自 center，前端原样保留中文字面量；展示标签通过 `STATE_CHANGE_EVENT_TYPE_LABELS` (`web/src/lib/types.ts:202-221`) 这种 const map 二次映射，**不要散落到组件文件**。
 - **当前类型是手写**，与 Go contract 没有自动生成机制。新增字段时按以下顺序：1) center handler / contract 改完；2) 在 `lib/types.ts` 加字段（保持 snake_case、保持可选性与后端一致）；3) 在 owning `lib/*Api.ts` façade 引用；4) page / component 消费。
-- `CreateVPSSubscriptionInput` 必须是 VPS-scoped billing-fact DTO 的显式类型，不能写成 `Omit<CreateSubscriptionInput, 'vps_id' | 'status'>`。字段集合以 `internal/center/http/handlers/vps_subscription_create_fields.json` 为共享清单；Go 用 struct json tag、TS 用类型字段解析，两边都必须与清单一致。`createSubscription(input, idempotencyKey)` 与 `createVPSSubscription(..., idempotencyKey)` 都要发送 `Idempotency-Key`；网络错误后复用原 key，只有表单内容变化或 `idempotency_key_reused` 才轮换。
+- `CreateVPSSubscriptionInput` 必须是 VPS-scoped billing-fact DTO 的显式类型，不能写成 `Omit<CreateSubscriptionInput, 'vps_id' | 'status'>`。字段集合以 `internal/center/http/handlers/vps_subscription_create_fields.json` 为共享语义清单（`name` / `type` / `required` / `nullable`）；Go 用 struct json tag + 类型/指针性，TS 用类型字段、`?` 与 `| null` 解析，两边都必须与清单一致。`createSubscription(input, idempotencyKey)` 与 `createVPSSubscription(..., idempotencyKey)` 都要发送 `Idempotency-Key`；网络错误后复用原 key，只有表单内容变化或 `idempotency_key_reused` 才轮换。
+- Legacy VPS 详情页（`LegacyVPSDetail.tsx`）所有会在 await 之后改 notice / draft / drawer / navigate 的写操作都必须走现有 `beginVpsWrite` + `mutationIsCurrent`。不得只给 facts/decision 加归属。晚到的 VPS A 结果不得关闭 B 的抽屉或导航离开 B。服务端请求不必取消；`finishVpsWrite` 仍在 `finally` 释放同 VPS 锁。
 - Asset Ledger 共享枚举必须跟后端机器值同步：`AssetScope = 'current'|'historical'|'archived'|'all'`，其中 `archived` 是旧 API 兼容别名；`RenewalMode = 'auto'|'manual'|'auto_cancelled'|'lottery'|'gift'|'bonus'|'other'`，其中 `lottery` 展示为“抽奖”，`gift` 展示为“赠送”。选项和标签集中在 `web/src/lib/assetOptions.ts`，页面不得散落 `抽奖/赠送` 这种混合标签。
 
 ### Scenario: route-lazy API façade 与 bundle 边界
@@ -62,7 +63,7 @@
 - `/records/compare` 使用 `comparison-url/v1` query `state`（canonical key order、UTC、整数秒）。state 不含 `token` / `comparison_intent` / `payload` / `title` / `body_markdown`。candidate 确认前 `POST /api/evidence/comparisons` 次数为 0。另存必须走 `createRecordDraft` + `saveComparisonRecord`，不得调用 `createRecord` / `useRecordDraft.publish()`。同一 digest 重试必须复用 `record_id` 与 `Idempotency-Key`。证据类型切换是 SegmentedControl 值选择，不是无 panel 的 Tabs。`HOUFENG_COMPARISON_ENABLED` 默认关。
 - 只有所有 production consumer 都位于 lazy route 时才允许拆分。AppShell、auth、router bootstrap 等启动路径使用的 helper 留在 `api.ts`，不能为了数字好看制造首屏 waterfall。
 - helper 移动不得改变 method、path、query 顺序/省略规则、body 或 response 解包；原有 API/page tests 必须继续覆盖 wire shape。
-- 每次拆分先 fresh production build，再运行 `bundle:check`。entry JS/CSS 与 font 只能随有证据的清理降低，不能抬高掩盖 eager 回退。`maxAsyncJsGzipBytes` 的唯一已审计例外是 Child 5 的 lazy `MarkdownPreview` chunk（react-markdown / remark-gfm / rehype-sanitize，2026-08-18 实测 gzip `48453`）。不得引入 CodeMirror：它会注入 inline `<style>`，违反 `style-src 'self'`。源文编辑器使用 textarea。Records transport 不得进入 entry。
+- 每次拆分先 fresh production build，再运行 `bundle:check`。entry JS/CSS 与 font 只能随有证据的清理降低，不能抬高掩盖 eager 回退。`maxAsyncJsGzipBytes` 的唯一已审计例外是 Child 5 的 lazy `MarkdownPreview` chunk（react-markdown / remark-gfm / rehype-sanitize，2026-08-27 生产构建实测 gzip `48455`）。不得引入 CodeMirror：它会注入 inline `<style>`，违反 `style-src 'self'`。源文编辑器使用 textarea。Records transport 不得进入 entry。
 - page/component 只能 import façade，禁止直接 import `apiRequest.ts` 或调用 `fetch`。
 
 #### 4. Validation & Error Matrix

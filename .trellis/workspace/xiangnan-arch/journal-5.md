@@ -995,3 +995,42 @@ Hardened subscription create idempotency and DTO contracts, disabled IP Quality 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 262: v0.77.5 hardening closeout
+
+**Date**: 2026-08-27
+**Task**: v0.77.5 hardening closeout
+**Branch**: `feat/v0775-hardening-closeout`
+
+### Summary
+
+Closed remaining v0.77.4 seams: disabled IP Quality out of Overview deadline, Legacy write ownership, semantic DTO contract, and permanent receipt docs.
+
+### Main Changes
+
+- Disabled IP Quality Overview returns not_configured immediately without a history query.
+- Legacy remaining writes are generation-owned so late A results cannot hijack VPS B UI.
+- VPS subscription create DTO tests check type, requiredness, and nullability.
+- Documented permanent idempotency receipts and Idempotency-Key requirement.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `96520df4` | (see git log) |
+| `0cdbea88` | (see git log) |
+| `1f38bd41` | (see git log) |
+| `b5bdcf3a` | (see git log) |
+
+### Testing
+
+- [OK] Go focused IP Quality + DTO tests, PostgreSQL disabled Overview integration, Vitest 1457, Playwright Chromium 133/133.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Push feat/v0775-hardening-closeout, open the PR, and wait for required CI.
