@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.77.5](https://github.com/xiangnan0811/houfeng/compare/v0.77.4...v0.77.5) (2026-08-27)
+
+
+### Bug Fixes
+
+* close remaining v0.77.5 hardening seams ([186ced0](https://github.com/xiangnan0811/houfeng/commit/186ced0aa413d13f1d7300323cdb7f0b6340df69))
+* close remaining v0.77.5 hardening seams ([#464](https://github.com/xiangnan0811/houfeng/issues/464)) ([186ced0](https://github.com/xiangnan0811/houfeng/commit/186ced0aa413d13f1d7300323cdb7f0b6340df69))
+* **vps:** keep disabled IP quality off Overview judgement ([96520df](https://github.com/xiangnan0811/houfeng/commit/96520df48fd8fc3bd6d002f727a85fd6f5b0ea54))
+* **web:** own remaining Legacy writes after route switch ([0cdbea8](https://github.com/xiangnan0811/houfeng/commit/0cdbea88b0190818b97007652546f77b4e78e97f))
+
+
+### Documentation
+
+* record v0.77.5 closeout contracts ([b5bdcf3](https://github.com/xiangnan0811/houfeng/commit/b5bdcf3a46654d8d8626cb9f157919b8f126bf0f))
+
 ## [0.77.4](https://github.com/xiangnan0811/houfeng/compare/v0.77.3...v0.77.4) (2026-08-27)
 
 
