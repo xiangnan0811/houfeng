@@ -52,6 +52,7 @@ These are hard requirements because violating them risks correctness, data loss,
 - Generated install commands contain one-time credentials and must not be pasted into public logs, docs, screenshots, or transcripts.
 - Lifecycle actions that can retire, archive, delete, cancel, or sever evidence paths must be explicit, reviewable, and auditable.
 - Backfilled or historical facts must not be presented as live incidents unless current rules explicitly classify them that way.
+- `POST /api/subscriptions` requires `Idempotency-Key`. Reuse a stable UUID for retries of the same request body; generate a new key when the logical operation changes. Create receipts in `subscription_create_idempotency` last for the lifetime of the subscription row.
 
 ## Flexible boundaries
 

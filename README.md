@@ -114,6 +114,10 @@ make build-agent-release VERSION=v1.2.3
 
 Upload `dist/houfeng-agent_v1.2.3_linux_amd64`, `dist/houfeng-agent_v1.2.3_linux_arm64`, `dist/sha256sums.txt`, and `dist/sha256sums.txt.minisig` to the matching GitHub Release. The installer script itself is served by the deployed center at `/api/agent/install.sh`; GitHub Release hosts only the binary and signed checksum assets.
 
+## API compatibility
+
+`POST /api/subscriptions` requires an `Idempotency-Key` header. Use a stable UUID for retries of the same request body. Generate a new key when the logical operation changes. The in-repo Web UI sends this header; external scripts and CLI callers must do the same. Create receipts stay for the lifetime of the subscription row.
+
 ## Verification commands
 
 Repository quality gates are exposed through the Makefile:
