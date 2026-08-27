@@ -1,0 +1,28 @@
+{
+  "id": "v0774-hardening-closeout",
+  "name": "v0774-hardening-closeout",
+  "title": "v0.77.4 close remaining hardening seams",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "backend,web",
+  "package": null,
+  "priority": "P2",
+  "creator": "xiangnan-arch",
+  "assignee": "xiangnan-arch",
+  "createdAt": "2026-08-27",
+  "completedAt": "2026-08-27",
+  "branch": "feat/v0774-hardening-closeout",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "release_target": "v0.77.4"
+  }
+}

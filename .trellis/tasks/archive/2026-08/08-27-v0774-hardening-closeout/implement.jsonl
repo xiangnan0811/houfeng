@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/subscription-cost-center.md", "reason": "Subscription create is cost-center billing facts; collection POST must not become a second state machine."}
+{"file": ".trellis/spec/backend/ip-quality-contract.md", "reason": "Disabled IP Quality must not produce risk or missing judgement; history is non-judging."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "HTTP errors use sentinels and coded JSON; do not leak raw err.Error() or leave 409 without code."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Handler tests are table-driven and colocated; verify-go is the Go gate."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "API façade owns headers/body; TS types mirror JSON; no page-level fetch."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Vitest colocated with pages; verify-web is the web gate."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse CreateSubscriptionIdempotent and existing CAS merge helpers; extract shared banner."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Idempotency header, error codes, and DTO fields must stay aligned across Go and TS."}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Work stays on feat/v0774-hardening-closeout, not main."}

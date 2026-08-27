@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/subscription-cost-center.md", "reason": "Confirm collection create still does not write VPS lifecycle/renewal state."}
+{"file": ".trellis/spec/backend/ip-quality-contract.md", "reason": "Confirm disabled path cannot emit risk/missing; enabled failures still fail closed."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Confirm readonly and idempotency errors use coded JSON and errors.Is."}
+{"file": ".trellis/spec/web/state-and-data.md", "reason": "Confirm createSubscription header and CreateVPSSubscriptionInput stay in lib/."}
+{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "Confirm colocated tests and no new CSS/JS libraries."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Confirm one idempotency helper and one CAS banner, not duplicated algorithms."}

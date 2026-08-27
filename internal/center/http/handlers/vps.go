@@ -204,7 +204,7 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 					return
 				}
 				if current.LifecycleStatus == vpsassets.LifecycleCancelled || current.LifecycleStatus == vpsassets.LifecycleArchived {
-					writeError(w, http.StatusConflict, "vps asset readonly")
+					writeCodedError(w, http.StatusConflict, "vps asset readonly", "vps_asset_readonly")
 					return
 				}
 				expectedUpdatedAt, ok := parseMetadataPrecondition(r.Header.Get("If-Match"))
@@ -238,7 +238,7 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 				return
 			}
 			if errors.Is(err, vpsassets.ErrVPSAssetReadonly) {
-				writeError(w, http.StatusConflict, "vps asset readonly")
+				writeCodedError(w, http.StatusConflict, "vps asset readonly", "vps_asset_readonly")
 				return
 			}
 			if errors.Is(err, vpsassets.ErrInvalidVPSAssetInput) || errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {

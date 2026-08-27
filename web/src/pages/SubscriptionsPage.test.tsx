@@ -366,15 +366,18 @@ describe('SubscriptionsPage', () => {
     fireEvent.click(within(createDialog).getByRole('button', { name: '创建订阅' }))
 
     await waitFor(() => expect(screen.getByText('USD 24.00')).toBeInTheDocument())
-    expect(findCall(fetchMock, '/api/subscriptions', 'POST')).toEqual(['/api/subscriptions', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({
+    const createCall = findCall(fetchMock, '/api/subscriptions', 'POST')
+    expect(createCall?.[0]).toBe('/api/subscriptions')
+    const createInit = createCall?.[1] as RequestInit
+    expect(createInit.method).toBe('POST')
+    expect(createInit.headers).toEqual({
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': expect.stringMatching(/^[0-9a-f-]{36}$/i),
+    })
+    expect(createInit.cache).toBe('no-store')
+    expect(createInit.credentials).toBe('include')
+    expect(JSON.parse(String(createInit.body))).toEqual({
         vps_id: 'vps_001',
         price: 24,
         currency: 'USD',
@@ -394,8 +397,53 @@ describe('SubscriptionsPage', () => {
         ends_at: null,
         payment_method: '',
         note: '',
-      }),
-    }])
+    })
+  })
+
+  it('reuses the create idempotency key after a lost response', async () => {
+    const fetchMock = setupSubscriptionFetch({ subscriptions: [], vpsRows: [vps] })
+    let posts = 0
+    const original = fetchMock.getMockImplementation()
+    if (!original) throw new Error('subscription fetch mock missing implementation')
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/subscriptions' && method === 'POST') {
+        posts += 1
+        if (posts === 1) return Promise.reject(new TypeError('Failed to fetch'))
+      }
+      return original(url, init)
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('尚未记录订阅')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '创建订阅' }))
+    const createDialog = screen.getByRole('dialog', { name: '新建订阅表单' })
+    fireEvent.change(within(createDialog).getByLabelText('VPS'), { target: { value: 'vps_001' } })
+    fireEvent.change(within(createDialog).getByLabelText('价格'), { target: { value: '24' } })
+    fireEvent.change(within(createDialog).getByLabelText('币种'), { target: { value: 'USD' } })
+    fireEvent.change(within(createDialog).getByLabelText('计费周期单位'), { target: { value: 'month' } })
+    fireEvent.change(within(createDialog).getByLabelText('计费周期长度'), { target: { value: '2' } })
+    fireEvent.change(within(createDialog).getByLabelText('续费日期'), { target: { value: '2026-07-01' } })
+    fireEvent.click(within(createDialog).getByRole('button', { name: '创建订阅' }))
+    expect(await screen.findByText('Failed to fetch')).toBeInTheDocument()
+    fireEvent.click(within(createDialog).getByRole('button', { name: '创建订阅' }))
+    await waitFor(() => expect(screen.getByText('USD 24.00')).toBeInTheDocument())
+
+    const postCalls = fetchMock.mock.calls.filter(([url, init]) => (
+      url === '/api/subscriptions' && ((init as RequestInit | undefined)?.method ?? 'GET') === 'POST'
+    ))
+    expect(postCalls).toHaveLength(2)
+    const firstKey = (postCalls[0]?.[1] as RequestInit).headers
+    const secondKey = (postCalls[1]?.[1] as RequestInit).headers
+    expect(firstKey).toEqual(expect.objectContaining({
+      'Idempotency-Key': expect.stringMatching(/^[0-9a-f-]{36}$/i),
+    }))
+    expect(secondKey).toEqual(firstKey)
   })
 
   it('closes URL-requested create drawer without dropping filters', async () => {

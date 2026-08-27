@@ -730,8 +730,12 @@ func TestVPSItemRejectsDirectRestoreFromArchivedPatch(t *testing.T) {
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusConflict, recorder.Body.String())
 	}
-	if !strings.Contains(recorder.Body.String(), "vps asset readonly") {
-		t.Fatalf("body = %s, want vps asset readonly", recorder.Body.String())
+	var readonlyBody map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &readonlyBody); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if readonlyBody["error"] != "vps asset readonly" || readonlyBody["code"] != "vps_asset_readonly" {
+		t.Fatalf("body = %#v, want coded vps_asset_readonly", readonlyBody)
 	}
 	if repo.getVPSAssetID != "vps_001" {
 		t.Fatalf("get vps id = %q, want current state lookup before archived restore guard", repo.getVPSAssetID)
@@ -762,8 +766,51 @@ func TestVPSItemRejectsOrdinaryPatchOnCancelledVPS(t *testing.T) {
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusConflict, recorder.Body.String())
 	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["error"] != "vps asset readonly" || body["code"] != "vps_asset_readonly" {
+		t.Fatalf("body = %#v, want coded vps_asset_readonly", body)
+	}
 	if repo.patchVPSAssetID != "" {
 		t.Fatalf("patch vps id = %q, want no patch on cancelled VPS", repo.patchVPSAssetID)
+	}
+}
+
+func TestVPSItemPatchMapsRepositoryReadonlyRace(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	repo := &fakeVPSAssetRepository{
+		getVPSAssetResult: vpsassets.Record{
+			VPSID:           "vps_001",
+			DisplayName:     "Tokyo Edge",
+			SSHPort:         22,
+			LifecycleStatus: vpsassets.LifecycleActive,
+			UsageStatus:     vpsassets.UsageInUse,
+			RenewalDecision: vpsassets.RenewalKeep,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+		patchVPSAssetErr: vpsassets.ErrVPSAssetReadonly,
+	}
+	handler := handlers.VPSItem(repo)
+	req := vpsPatchWithMatch("/api/vps/vps_001", `{"display_name":"Renamed"}`, now)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusConflict, recorder.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["error"] != "vps asset readonly" || body["code"] != "vps_asset_readonly" {
+		t.Fatalf("body = %#v, want coded vps_asset_readonly", body)
+	}
+	if repo.patchVPSAssetID != "vps_001" {
+		t.Fatalf("patch vps id = %q, want repository race to reach PatchVPSAsset", repo.patchVPSAssetID)
 	}
 }
 

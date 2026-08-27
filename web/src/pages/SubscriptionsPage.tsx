@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { Modal, Input, Select, StatusGlyph } from '../components/atoms'
@@ -90,7 +90,12 @@ const INITIAL_FORM: FormState = {
 }
 
 function describeError(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) return err.message
+  if (err instanceof ApiError) {
+    if (err.status === 409 && err.code === 'idempotency_key_reused') {
+      return '同一幂等键已用于不同的订阅内容，请重新填写后再创建'
+    }
+    return err.message
+  }
   if (err instanceof Error) return err.message
   return fallback
 }
@@ -389,6 +394,7 @@ export function SubscriptionsPage() {
   const [refreshingRates, setRefreshingRates] = useState(false)
   const [rateNotice, setRateNotice] = useState<string | null>(null)
   const [breakdownKind, setBreakdownKind] = useState<SubscriptionBreakdownKind>('provider')
+  const createIdempotencyKeyRef = useRef(crypto.randomUUID())
   const panelOpen = createOpen || createRequested
   const effectiveForm = createRequested && filters.vps_id && createForm.vpsID === ''
     ? { ...createForm, vpsID: filters.vps_id } : createForm
@@ -447,6 +453,10 @@ export function SubscriptionsPage() {
     return () => { cancelled = true }
   }, [reloadKey])
 
+  useEffect(() => {
+    createIdempotencyKeyRef.current = crypto.randomUUID()
+  }, [createForm])
+
   function setFilter<K extends keyof FilterState>(key: K, val: FilterState[K]) {
     setSearchParams(filtersToParams({ ...filters, [key]: val }), { replace: true })
   }
@@ -465,9 +475,14 @@ export function SubscriptionsPage() {
     let input: CreateSubscriptionInput
     try { input = buildCreateInput(effectiveForm) } catch (err: unknown) { setCreateError(describeError(err, '输入无效')); return }
     setCreateSubmitting(true)
-    createSubscription(input)
+    createSubscription(input, createIdempotencyKeyRef.current)
       .then(() => { closeCreate(); reloadWorkbench() })
-      .catch((err: unknown) => setCreateError(describeError(err, '创建失败')))
+      .catch((err: unknown) => {
+        if (err instanceof ApiError && err.status === 409 && err.code === 'idempotency_key_reused') {
+          createIdempotencyKeyRef.current = crypto.randomUUID()
+        }
+        setCreateError(describeError(err, '创建失败'))
+      })
       .finally(() => setCreateSubmitting(false))
   }
 

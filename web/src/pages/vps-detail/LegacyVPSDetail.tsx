@@ -89,7 +89,11 @@ import {
   buildExperienceLogInput,
   buildFactEditInput,
   buildServiceInput,
+  compareDecisionDraft,
+  compareFactDraftAgainstLatest,
+  decisionDraftAlreadySatisfied,
   detailToFactEditForm,
+  mergeFactDraftWithLatest,
   INITIAL_DOMAIN_DRAFT,
   INITIAL_EXPERIENCE_DRAFT,
   INITIAL_SELECTOR_STATE,
@@ -99,12 +103,17 @@ import {
   INITIAL_STATE,
   monitoringInstanceCreateDraftFromDetail,
 } from './vpsDetailHelpers'
+import { VPSVersionConflictBanner } from './VPSVersionConflictBanner'
 import {
   describeManagementError as describeError,
   isCancellationPreviewStale,
   isIdempotencyKeyReused,
+  isTerminalVPSLifecycle,
+  isVPSAssetReadonly,
+  isVPSVersionConflict,
   subscriptionLinkageAction,
   subscriptionLinkageNotice,
+  type VPSVersionConflictState,
 } from './vpsManagementHelpers'
 
 type PageFeedbackItem = {
@@ -226,7 +235,12 @@ export function LegacyVPSDetail() {
   const openCancellationFromQuery = initialDrawerFromQuery === 'cancellation'
   const skipNextQueryDrivenReload = useRef(false)
   const cancellationPreviewGenerationRef = useRef(0)
+  const mutationGenerationRef = useRef(0)
+  const latestLoadLockRef = useRef(false)
+  const writeLocksRef = useRef(new Map<string, string>())
+  const currentVpsIdRef = useRef(vpsId)
   const subscriptionIdempotencyKeyRef = useRef(crypto.randomUUID())
+  const factDraftRef = useRef<FactEditFormState | null>(null)
   const [state, setState] = useState(INITIAL_STATE)
   const [selectors, setSelectors] = useState(INITIAL_SELECTOR_STATE)
   const [decisionDraft, setDecisionDraft] = useState<DecisionDraftState>({
@@ -239,9 +253,14 @@ export function LegacyVPSDetail() {
   const [decisionAction, setDecisionAction] = useState<{ to: string; label: string } | null>(null)
   const [activeDrawer, setActiveDrawer] = useState<VPSDetailDrawerMode>(null)
   const [factDraft, setFactDraft] = useState<FactEditFormState | null>(null)
+  const [factDraftBase, setFactDraftBase] = useState<FactEditFormState | null>(null)
   const [factSubmitting, setFactSubmitting] = useState(false)
   const [factError, setFactError] = useState<string | null>(null)
   const [factNotice, setFactNotice] = useState<string | null>(null)
+  const [mutationConflict, setMutationConflict] = useState<VPSVersionConflictState | null>(null)
+  const [latestLoading, setLatestLoading] = useState(false)
+  const [writeInFlight, setWriteInFlight] = useState(false)
+  const [readonlyBlocked, setReadonlyBlocked] = useState(false)
   const [linkDraft, setLinkDraft] = useState<LinkDraftState>({ monitoringInstanceId: '', note: '' })
   const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [linkError, setLinkError] = useState<string | null>(null)
@@ -284,6 +303,10 @@ export function LegacyVPSDetail() {
   const [domainNotice, setDomainNotice] = useState<string | null>(null)
 
   useEffect(() => {
+    currentVpsIdRef.current = vpsId
+  }, [vpsId])
+
+  useEffect(() => {
     subscriptionIdempotencyKeyRef.current = crypto.randomUUID()
   }, [subscriptionDraft])
 
@@ -295,8 +318,41 @@ export function LegacyVPSDetail() {
     setSearchParams(next, { replace: true })
   }
 
+  function replaceFactDraft(next: FactEditFormState | null) {
+    factDraftRef.current = next
+    setFactDraft(next)
+  }
+
+  function invalidateMutations() {
+    mutationGenerationRef.current += 1
+    latestLoadLockRef.current = false
+    setLatestLoading(false)
+    setFactSubmitting(false)
+    setDecisionSubmitting(false)
+  }
+
+  function mutationIsCurrent(generation: number): boolean {
+    return mutationGenerationRef.current === generation
+  }
+
+  function beginVpsWrite(targetVpsId: string): { generation: number; token: string } | null {
+    if (writeLocksRef.current.has(targetVpsId)) return null
+    const token = crypto.randomUUID()
+    writeLocksRef.current.set(targetVpsId, token)
+    if (currentVpsIdRef.current === targetVpsId) setWriteInFlight(true)
+    return { generation: ++mutationGenerationRef.current, token }
+  }
+
+  function finishVpsWrite(targetVpsId: string, token: string) {
+    if (writeLocksRef.current.get(targetVpsId) !== token) return
+    writeLocksRef.current.delete(targetVpsId)
+    if (currentVpsIdRef.current === targetVpsId) setWriteInFlight(false)
+  }
+
   function collapseDrawer() {
     setActiveDrawer(null)
+    setMutationConflict(null)
+    setReadonlyBlocked(false)
     clearWorkbenchQueryParam()
   }
 
@@ -311,6 +367,10 @@ export function LegacyVPSDetail() {
 
     let cancelled = false
     cancellationPreviewGenerationRef.current += 1
+    mutationGenerationRef.current += 1
+    latestLoadLockRef.current = false
+    currentVpsIdRef.current = vpsId
+    setWriteInFlight(writeLocksRef.current.has(vpsId))
 
     getVPSAsset(vpsId)
       .then(async (detail) => {
@@ -352,9 +412,16 @@ export function LegacyVPSDetail() {
         setDecisionError(null)
         setDecisionNotice(null)
         setDecisionAction(null)
-        setFactDraft(detailToFactEditForm(normalizedDetail))
+        replaceFactDraft(detailToFactEditForm(normalizedDetail))
+        setFactDraftBase(detailToFactEditForm(normalizedDetail))
         setFactError(null)
         setFactNotice(null)
+        setMutationConflict(null)
+        setReadonlyBlocked(false)
+        setLatestLoading(false)
+        setFactSubmitting(false)
+        setDecisionSubmitting(false)
+        setWriteInFlight(writeLocksRef.current.has(vpsId))
         setLinkDraft({ monitoringInstanceId: '', note: '' })
         setLinkError(null)
         setLinkNotice(null)
@@ -418,6 +485,8 @@ export function LegacyVPSDetail() {
 
     return () => {
       cancelled = true
+      mutationGenerationRef.current += 1
+      latestLoadLockRef.current = false
     }
   }, [initialDrawerFromQuery, navigate, openCancellationFromQuery, vpsId])
 
@@ -508,7 +577,7 @@ export function LegacyVPSDetail() {
   }
 
   function handleFactDraftChange(draft: FactEditFormState) {
-    setFactDraft(draft)
+    replaceFactDraft(draft)
   }
 
   function handleLinkDraftChange(draft: LinkDraftState) {
@@ -679,6 +748,7 @@ export function LegacyVPSDetail() {
   }
 
   function closeDrawer() {
+    invalidateMutations()
     if (activeDrawer === 'decision') {
       if (state.detail) {
         setDecisionDraft({ renewalDecision: state.detail.renewal_decision, reason: '' })
@@ -687,11 +757,15 @@ export function LegacyVPSDetail() {
     }
     if (activeDrawer === 'facts') {
       if (state.detail) {
-        setFactDraft(detailToFactEditForm(state.detail))
+        const form = detailToFactEditForm(state.detail)
+        replaceFactDraft(form)
+        setFactDraftBase(form)
       }
       setFactError(null)
       setFactNotice(null)
     }
+    setMutationConflict(null)
+    setReadonlyBlocked(false)
     if (activeDrawer === 'monitoring-instance-link') {
       setLinkDraft({ monitoringInstanceId: '', note: '' })
       clearLinkFormFeedback()
@@ -758,12 +832,97 @@ export function LegacyVPSDetail() {
       .finally(() => setArchiveReviewLoading(false))
   }
 
+  async function routeIfTerminalVPS(vpsID: string, generation: number): Promise<boolean> {
+    try {
+      const latest = normalizeVPSDetail(await getVPSAsset(vpsID))
+      if (!mutationIsCurrent(generation)) return true
+      if (isTerminalVPSLifecycle(latest.lifecycle_status)) {
+        navigate(`/archive/${encodeURIComponent(latest.vps_id)}`, { replace: true })
+        return true
+      }
+    } catch {
+      if (!mutationIsCurrent(generation)) return true
+    }
+    if (!mutationIsCurrent(generation)) return true
+    setReadonlyBlocked(true)
+    return false
+  }
+
+  async function loadLatestVersion() {
+    if (latestLoadLockRef.current) return
+    const detail = state.detail
+    if (!detail) return
+    latestLoadLockRef.current = true
+    const generation = ++mutationGenerationRef.current
+    const targetVpsId = detail.vps_id
+    setLatestLoading(true)
+    try {
+      const latest = normalizeVPSDetail(await getVPSAsset(targetVpsId))
+      if (!mutationIsCurrent(generation)) return
+      if (isTerminalVPSLifecycle(latest.lifecycle_status)) {
+        navigate(`/archive/${encodeURIComponent(latest.vps_id)}`, { replace: true })
+        return
+      }
+      if (mutationConflict?.draftKind === 'decision' && decisionDraftAlreadySatisfied(decisionDraft, latest)) {
+        setState((current) => current.vpsId === targetVpsId ? { ...current, detail: latest } : current)
+        setMutationConflict(null)
+        setDecisionNotice('该决策已由其他操作完成')
+        collapseDrawer()
+        await refreshDetailAndTimeline(targetVpsId, () => mutationIsCurrent(generation))
+        return
+      }
+      const currentDraft = factDraftRef.current
+      const factsCompare = currentDraft
+        ? compareFactDraftAgainstLatest(factDraftBase ?? detailToFactEditForm(latest), currentDraft, latest)
+        : []
+      if (currentDraft && factDraftBase) {
+        replaceFactDraft(mergeFactDraftWithLatest(factDraftBase, currentDraft, latest))
+      } else if (currentDraft) {
+        replaceFactDraft(mergeFactDraftWithLatest(detailToFactEditForm(latest), currentDraft, latest))
+      }
+      setFactDraftBase(detailToFactEditForm(latest))
+      setState((current) => current.vpsId === targetVpsId ? { ...current, detail: latest } : current)
+      setMutationConflict((current) => {
+        if (!current) return current
+        return {
+          ...current,
+          loaded: true,
+          compare: current.draftKind === 'facts'
+            ? factsCompare
+            : current.draftKind === 'decision'
+              ? compareDecisionDraft(decisionDraft, latest)
+              : [],
+        }
+      })
+      setFactError(null)
+      setDecisionError(null)
+    } catch (error: unknown) {
+      if (!mutationIsCurrent(generation)) return
+      const message = describeError(error, '加载最新版本失败')
+      if (mutationConflict?.draftKind === 'decision') setDecisionError(message)
+      else setFactError(message)
+    } finally {
+      if (mutationIsCurrent(generation)) {
+        latestLoadLockRef.current = false
+        setLatestLoading(false)
+      }
+    }
+  }
+
   async function handleDecisionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const detail = state.detail
     if (!detail) return
 
     clearDecisionFeedback()
+    if (readonlyBlocked) {
+      setDecisionError('当前状态不允许修改')
+      return
+    }
+    if (mutationConflict?.draftKind === 'decision' && !mutationConflict.loaded) {
+      setDecisionError('请先加载最新版本后再保存')
+      return
+    }
 
     if (decisionDraft.renewalDecision === detail.renewal_decision) {
       setDecisionError('请选择一个不同的续费决策')
@@ -771,14 +930,23 @@ export function LegacyVPSDetail() {
     }
 
     const reason = decisionDraft.reason.trim()
+    const write = beginVpsWrite(detail.vps_id)
+    if (!write) {
+      setDecisionError('上一次保存仍在进行，请稍后再试')
+      return
+    }
+    const { generation, token } = write
     setDecisionSubmitting(true)
     try {
       const updated = await updateVPSAsset(detail.vps_id, {
         renewal_decision: decisionDraft.renewalDecision,
         ...(reason ? { renewal_reason: reason } : {}),
       }, { expectedUpdatedAt: detail.updated_at })
-      const refreshed = await refreshDetailAndTimeline(detail.vps_id)
+      if (!mutationIsCurrent(generation)) return
+      const refreshed = await refreshDetailAndTimeline(detail.vps_id, () => mutationIsCurrent(generation))
+      if (!mutationIsCurrent(generation)) return
       setDecisionDraft({ renewalDecision: refreshed.renewal_decision, reason: '' })
+      setMutationConflict(null)
       setDecisionNotice(subscriptionLinkageNotice(updated.renewal_subscription_linkage))
       setDecisionAction(subscriptionLinkageAction(
         updated.renewal_subscription_linkage,
@@ -787,17 +955,36 @@ export function LegacyVPSDetail() {
       ))
       collapseDrawer()
     } catch (error: unknown) {
+      if (!mutationIsCurrent(generation)) return
+      if (isVPSVersionConflict(error)) {
+        setMutationConflict({
+          kind: 'vps_version_conflict',
+          draftKind: 'decision',
+          loaded: false,
+          staleUpdatedAt: detail.updated_at,
+          compare: [],
+        })
+      }
+      if (isVPSAssetReadonly(error)) {
+        await routeIfTerminalVPS(detail.vps_id, generation)
+      }
+      if (!mutationIsCurrent(generation)) return
       setDecisionError(describeError(error, '更新续费决策失败'))
     } finally {
+      finishVpsWrite(detail.vps_id, token)
       setDecisionSubmitting(false)
     }
   }
 
   function openFactEdit(detail: VPSAssetDetail) {
     ensureProvidersLoaded()
-    setFactDraft(detailToFactEditForm(detail))
+    const form = detailToFactEditForm(detail)
+    replaceFactDraft(form)
+    setFactDraftBase(form)
     setFactError(null)
     setFactNotice(null)
+    setMutationConflict(null)
+    setReadonlyBlocked(false)
     setActiveDrawer('facts')
   }
 
@@ -808,6 +995,14 @@ export function LegacyVPSDetail() {
 
     setFactError(null)
     setFactNotice(null)
+    if (readonlyBlocked) {
+      setFactError('当前状态不允许修改')
+      return
+    }
+    if (mutationConflict?.draftKind === 'facts' && !mutationConflict.loaded) {
+      setFactError('请先加载最新版本后再保存')
+      return
+    }
 
     let input: UpdateVPSAssetInput
     try {
@@ -817,16 +1012,42 @@ export function LegacyVPSDetail() {
       return
     }
 
+    const write = beginVpsWrite(detail.vps_id)
+    if (!write) {
+      setFactError('上一次保存仍在进行，请稍后再试')
+      return
+    }
+    const { generation, token } = write
     setFactSubmitting(true)
     try {
       await updateVPSAsset(detail.vps_id, input, { expectedUpdatedAt: detail.updated_at })
-      const refreshed = await refreshDetailAndTimeline(detail.vps_id)
-      setFactDraft(detailToFactEditForm(refreshed))
+      if (!mutationIsCurrent(generation)) return
+      const refreshed = await refreshDetailAndTimeline(detail.vps_id, () => mutationIsCurrent(generation))
+      if (!mutationIsCurrent(generation)) return
+      const form = detailToFactEditForm(refreshed)
+      replaceFactDraft(form)
+      setFactDraftBase(form)
+      setMutationConflict(null)
       collapseDrawer()
       setFactNotice('基础信息已更新，资产历史已刷新')
     } catch (error: unknown) {
+      if (!mutationIsCurrent(generation)) return
+      if (isVPSVersionConflict(error)) {
+        setMutationConflict({
+          kind: 'vps_version_conflict',
+          draftKind: 'facts',
+          loaded: false,
+          staleUpdatedAt: detail.updated_at,
+          compare: [],
+        })
+      }
+      if (isVPSAssetReadonly(error)) {
+        await routeIfTerminalVPS(detail.vps_id, generation)
+      }
+      if (!mutationIsCurrent(generation)) return
       setFactError(describeError(error, '更新基础信息失败'))
     } finally {
+      finishVpsWrite(detail.vps_id, token)
       setFactSubmitting(false)
     }
   }
@@ -1242,18 +1463,27 @@ export function LegacyVPSDetail() {
   function renderDrawerContent(): ReactNode {
     if (activeDrawer === 'decision') {
       return (
-        <VPSRenewalDecisionForm
-          detail={detail}
-          draft={decisionDraft}
-          submitting={decisionSubmitting}
-          error={decisionError}
-          notice={decisionNotice}
-          decisionChanged={decisionChanged}
-          onCancel={closeDrawer}
-          onDraftChange={handleDecisionDraftChange}
-          onFeedbackClear={clearDecisionFeedback}
-          onSubmit={(event) => void handleDecisionSubmit(event)}
-        />
+        <>
+          {mutationConflict?.draftKind === 'decision' ? (
+            <VPSVersionConflictBanner
+              conflict={mutationConflict}
+              loading={latestLoading}
+              onLoadLatest={() => void loadLatestVersion()}
+            />
+          ) : null}
+          <VPSRenewalDecisionForm
+            detail={detail}
+            draft={decisionDraft}
+            submitting={decisionSubmitting || latestLoading || writeInFlight}
+            error={decisionError}
+            notice={decisionNotice}
+            decisionChanged={decisionChanged}
+            onCancel={closeDrawer}
+            onDraftChange={handleDecisionDraftChange}
+            onFeedbackClear={clearDecisionFeedback}
+            onSubmit={(event) => void handleDecisionSubmit(event)}
+          />
+        </>
       )
     }
     if (activeDrawer === 'cancellation') {
@@ -1290,19 +1520,28 @@ export function LegacyVPSDetail() {
     }
     if (activeDrawer === 'facts') {
       return factDraft ? (
-        <VPSFactsEditForm
-          key={detail.updated_at}
-          draft={factDraft}
-          providers={selectors.providers}
-          providersLoading={selectors.providersLoading}
-          providersError={selectors.providersError}
-          submitting={factSubmitting}
-          error={factError}
-          notice={factNotice}
-          onCancel={closeDrawer}
-          onDraftChange={handleFactDraftChange}
-          onSubmit={(event) => void handleFactSubmit(event)}
-        />
+        <>
+          {mutationConflict?.draftKind === 'facts' ? (
+            <VPSVersionConflictBanner
+              conflict={mutationConflict}
+              loading={latestLoading}
+              onLoadLatest={() => void loadLatestVersion()}
+            />
+          ) : null}
+          <VPSFactsEditForm
+            key={detail.updated_at}
+            draft={factDraft}
+            providers={selectors.providers}
+            providersLoading={selectors.providersLoading}
+            providersError={selectors.providersError}
+            submitting={factSubmitting || latestLoading || writeInFlight}
+            error={factError}
+            notice={factNotice}
+            onCancel={closeDrawer}
+            onDraftChange={handleFactDraftChange}
+            onSubmit={(event) => void handleFactSubmit(event)}
+          />
+        </>
       ) : null
     }
     if (activeDrawer === 'monitoring-instance-link') {

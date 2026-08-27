@@ -4,6 +4,8 @@ import { ApiError } from '../../lib/apiRequest'
 import {
   describeManagementError,
   isIdempotencyKeyReused,
+  isTerminalVPSLifecycle,
+  isVPSAssetReadonly,
   parseOverviewWorkbench,
   subscriptionLinkageAction,
 } from './vpsManagementHelpers'
@@ -19,8 +21,31 @@ describe('describeManagementError', () => {
     expect(describeManagementError(new ApiError(409, 'vps updated', {
       code: 'vps_asset_conflict',
     }), 'fallback')).toBe('VPS 已被其他操作更新，请先加载最新版本后再保存')
+    expect(describeManagementError(new ApiError(409, 'vps asset readonly', {
+      code: 'vps_asset_readonly',
+    }), 'fallback')).toBe('当前状态不允许修改')
     expect(describeManagementError(new ApiError(409, 'cancellation preview stale'), 'fallback'))
       .toBe('cancellation preview stale')
+  })
+})
+
+describe('isVPSAssetReadonly', () => {
+  it('matches only the coded 409 readonly contract', () => {
+    expect(isVPSAssetReadonly(new ApiError(409, 'vps asset readonly', {
+      code: 'vps_asset_readonly',
+    }))).toBe(true)
+    expect(isVPSAssetReadonly(new ApiError(409, 'vps updated', {
+      code: 'vps_asset_conflict',
+    }))).toBe(false)
+    expect(isVPSAssetReadonly(new ApiError(409, 'vps asset readonly'))).toBe(false)
+  })
+})
+
+describe('isTerminalVPSLifecycle', () => {
+  it('treats cancelled and archived as terminal', () => {
+    expect(isTerminalVPSLifecycle('cancelled')).toBe(true)
+    expect(isTerminalVPSLifecycle('archived')).toBe(true)
+    expect(isTerminalVPSLifecycle('active')).toBe(false)
   })
 })
 

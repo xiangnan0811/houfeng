@@ -33,6 +33,7 @@
 - 字段名**完全镜像 center JSON**（snake_case，如 `monitoring_instance_id` / `current_health_status` / `last_heartbeat_at`）。**不要在前端再驼峰化一遍**——保持 grep 友好，便于和 Go 侧 `internal/center/http/handlers/*` 对齐。
 - 中文枚举（如 `IncidentSeverity = '正常' | '关注' | '告警' | '严重'`、`OnboardingPhase` 等）来自 center，前端原样保留中文字面量；展示标签通过 `STATE_CHANGE_EVENT_TYPE_LABELS` (`web/src/lib/types.ts:202-221`) 这种 const map 二次映射，**不要散落到组件文件**。
 - **当前类型是手写**，与 Go contract 没有自动生成机制。新增字段时按以下顺序：1) center handler / contract 改完；2) 在 `lib/types.ts` 加字段（保持 snake_case、保持可选性与后端一致）；3) 在 owning `lib/*Api.ts` façade 引用；4) page / component 消费。
+- `CreateVPSSubscriptionInput` 必须是 VPS-scoped billing-fact DTO 的显式类型，不能写成 `Omit<CreateSubscriptionInput, 'vps_id' | 'status'>`。字段集合以 `internal/center/http/handlers/vps_subscription_create_fields.json` 为共享清单；Go 用 struct json tag、TS 用类型字段解析，两边都必须与清单一致。`createSubscription(input, idempotencyKey)` 与 `createVPSSubscription(..., idempotencyKey)` 都要发送 `Idempotency-Key`；网络错误后复用原 key，只有表单内容变化或 `idempotency_key_reused` 才轮换。
 - Asset Ledger 共享枚举必须跟后端机器值同步：`AssetScope = 'current'|'historical'|'archived'|'all'`，其中 `archived` 是旧 API 兼容别名；`RenewalMode = 'auto'|'manual'|'auto_cancelled'|'lottery'|'gift'|'bonus'|'other'`，其中 `lottery` 展示为“抽奖”，`gift` 展示为“赠送”。选项和标签集中在 `web/src/lib/assetOptions.ts`，页面不得散落 `抽奖/赠送` 这种混合标签。
 
 ### Scenario: route-lazy API façade 与 bundle 边界
@@ -1186,14 +1187,79 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 | scoped subscription create reuses key for a different digest | `ApiError` `409` / `code=idempotency_key_reused`；必须换 key 后再创建 |
 | scoped subscription create retries same key + same digest after a lost 201 | 200 既有记录，不新建；调用方继续持有原 key |
 
-#### Scenario: Caller-owned VPS subscription idempotency
+#### Scenario: VPS mutation CAS recovery and request ownership
 
 ##### 1. Scope / Trigger
 
-- Trigger: 修改 `createVPSSubscription`、VPS 详情订阅草稿、订阅提交/重试状态或 `ApiError.code` 解码。
+- Trigger: 修改 Overview / Legacy VPS detail 的 facts 或 renewal-decision PATCH、409 recovery、Drawer 生命周期，或跨 `vpsId` 的异步状态管理。
 
 ##### 2. Signatures
 
+- Mutation: `updateVPSAsset(vpsId, input, { expectedUpdatedAt }): Promise<VPSAssetUpdateResult>`，以当前 `updated_at` 发送 `If-Match`。
+- Recovery codes: `vps_asset_conflict` 进入 load-latest/merge/retry；`vps_asset_readonly` 重新读取 identity，terminal VPS replace 到 `/archive/:vpsId`。
+- Ownership: 两套 detail surface 都用 generation 决定响应是否仍可应用；Legacy 额外用 `Map<vpsId, requestToken>` 决定 facts/decision PATCH 是否仍在途。
+
+##### 3. Contracts
+
+- 409 conflict 后必须先加载最新版；facts 使用三方 merge 保留本地改动，decision 保留本地 decision/reason，重试使用最新版 `updated_at`。最新版已经满足 decision 时按“其他操作已完成”收敛，不再提交。
+- route 切换和组件卸载都必须让旧 generation 失效；允许关闭编辑 surface 时，关闭动作也必须使 generation 失效。迟到响应不得写入新 VPS 的 draft/error/notice，也不得导航到旧 VPS archive。
+- Overview 在提交期间禁止关闭当前 panel；生产路由切换通过 identity gate 卸载当前 Overview，因此 mounted route 内的同步单请求锁即可防住 React state 重渲染前的连续提交。
+- Legacy 的 persistent Modal 允许在 PATCH pending 时关闭和重开，因此写锁必须跟网络请求生命周期走，不跟 Drawer 生命周期走。关闭 Drawer 不释放同一 VPS 的锁；只有对应 Promise settle 后，匹配 `requestToken` 的 `finally` 才能释放。
+- Legacy 写锁按 `vpsId` 隔离：A pending 不阻止 B 写入；A 的迟到 `finally` 不得释放 B 的锁。
+- load-latest 使用独立 in-flight lock；并发点击只发一个 GET，关闭或换 VPS 后迟到的 latest 不得覆盖当前 draft/ETag。
+
+##### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| stale `If-Match` / `vps_asset_conflict` | 阻止直接重试；加载最新、merge/compare，再用新 ETag 保存 |
+| `vps_asset_readonly` + latest identity terminal | replace 到该 identity 的 `/archive/:vpsId`；generation 失效后不得导航 |
+| Legacy Drawer 在 PATCH pending 时关闭并重开同一 VPS | 继续显示“保存中”，不发第二个 PATCH；settle 后恢复 |
+| Legacy A PATCH pending 时切到 B | B 可以独立写入；A settle 不改变 B 的 lock/draft/notice |
+| Legacy A→B→A 且 A 仍 pending | A 继续锁定；B 的 settle 不得释放 A |
+| load-latest 连点或关闭后迟到 | 连点只有一个 GET；迟到结果被丢弃 |
+
+##### 5. Good/Base/Bad Cases
+
+- Good (Legacy): A/B 各有 deferred PATCH；往返路由后每台只由自己的 token 解锁，PATCH 计数各为 1。
+- Base (Legacy): 用户关闭保存中的 Drawer，服务端写入仍可完成，但 UI 丢弃旧 generation 的结果应用并在 settle 后解锁。
+- Bad (Legacy): 在 `invalidateMutations()` 清 write lock，允许旧 PATCH 未完成时再次发送相同 ETag。
+- Bad (Legacy): 用组件级 boolean 锁住全部 VPS，导致 A 的挂起请求无限阻塞 B。
+
+##### 6. Tests Required
+
+- Overview/Legacy Vitest 覆盖 facts/decision conflict → load latest → merge/compare → 新 ETag retry，以及 readonly terminal identity routing。
+- Legacy Vitest 用 deferred PATCH 覆盖关闭/重开同一 VPS仍互斥；用 A/B 双 deferred 覆盖 A→B→A、跨 VPS 独立写、token 精确释放。
+- load-latest 测试断言连点 GET count=1，route/Drawer 失效后 draft、ETag、导航与错误均不被迟到响应改写。
+
+##### 7. Wrong vs Correct
+
+```ts
+// 错误（Legacy）：Drawer close 把 transport lock 当作 UI state 一起清掉。
+writeLockRef.current = false
+setSubmitting(false)
+```
+
+```ts
+// 正确（Legacy）：按 VPS + token 持锁，只有该请求自己的 finally 可以释放。
+const token = crypto.randomUUID()
+writeLocks.set(vpsId, token)
+try {
+  await updateVPSAsset(vpsId, input, { expectedUpdatedAt })
+} finally {
+  if (writeLocks.get(vpsId) === token) writeLocks.delete(vpsId)
+}
+```
+
+#### Scenario: Caller-owned subscription create idempotency
+
+##### 1. Scope / Trigger
+
+- Trigger: 修改 `createSubscription` / `createVPSSubscription`、collection/VPS 订阅草稿、订阅提交/重试状态、VPS-scoped DTO 或 `ApiError.code` 解码。
+
+##### 2. Signatures
+
+- Collection API client: `createSubscription(input, idempotencyKey): Promise<SubscriptionRecord>`。
 - API client: `createVPSSubscription(vpsId, input, idempotencyKey): Promise<SubscriptionRecord>`。
 - Header: `Idempotency-Key` 由 page/controller 生成并显式传给 API client。
 - Error contract: `ApiError.status` + allowlisted `ApiError.code`，本场景使用 `invalid_idempotency_key` 与 `idempotency_key_reused`。
@@ -1204,7 +1270,8 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 - 同一草稿的 transport failure、timeout 或丢失 201 重试必须复用原 key。
 - 草稿发生业务语义变化时必须轮换 key；409 `idempotency_key_reused` 后也必须轮换 key，避免同一 key 永久冲突。
 - 是否轮换只能依据草稿变化或 allowlisted `ApiError.code`，不得匹配英文 `message`。
-- Overview 与 Legacy VPS detail 两个调用方必须使用相同合同。
+- `SubscriptionsPage`、Overview 与 Legacy VPS detail 三个调用方必须使用相同 key 生命周期合同。
+- `CreateVPSSubscriptionInput` 只能包含 VPS-scoped billing-fact 字段；共享清单、Go struct json tag、TypeScript 类型字段三方必须完全一致。
 
 ##### 4. Validation & Error Matrix
 
@@ -1227,8 +1294,10 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 ##### 6. Tests Required
 
 - API unit: helper 原样发送调用方 key，并提交完整 `buildSubscriptionInput` 周期字段。
+- Collection page Vitest: transport failure 后复用 key；草稿变化或 allowlisted reused-key 409 后轮换 key。
 - Overview Vitest: reused-key 409 后 key 改变；transport failure 后 key 保持不变。
 - Legacy Vitest: 与 Overview 相同的 key 生命周期断言。
+- Contract tests: `vps_subscription_create_fields.json`、Go `vpsSubscriptionCreateRequest` json tags、TS `CreateVPSSubscriptionInput` 字段集合完全一致；只改一端必须失败。
 - PostgreSQL integration 由后端 spec 负责证明 replay 只有一行；前端测试不能替代该证据。
 
 ##### 7. Wrong vs Correct

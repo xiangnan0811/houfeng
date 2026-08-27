@@ -70,16 +70,7 @@ func SubscriptionsCollection(repo subscriptions.Repository, costSvc ...*subscrip
 				return
 			}
 
-			record, err := repo.CreateSubscription(r.Context(), input)
-			if errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
-				writeError(w, http.StatusBadRequest, "invalid input")
-				return
-			}
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "internal server error")
-				return
-			}
-			writeJSON(w, http.StatusCreated, record)
+			writeSubscriptionCreate(w, r, repo, input)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -168,38 +159,42 @@ func VPSSubscriptions(repo subscriptions.Repository) http.Handler {
 				return
 			}
 
-			key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-			if _, err := subscriptions.NormalizeIdempotencyKey(key); err != nil {
-				writeCodedError(w, http.StatusBadRequest, "invalid idempotency key", "invalid_idempotency_key")
-				return
-			}
-
-			record, replayed, err := repo.CreateSubscriptionIdempotent(r.Context(), input, key)
-			if errors.Is(err, subscriptions.ErrInvalidIdempotencyKey) {
-				writeCodedError(w, http.StatusBadRequest, "invalid idempotency key", "invalid_idempotency_key")
-				return
-			}
-			if errors.Is(err, subscriptions.ErrIdempotencyKeyReused) {
-				writeCodedError(w, http.StatusConflict, "idempotency key reused", "idempotency_key_reused")
-				return
-			}
-			if errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
-				writeError(w, http.StatusBadRequest, "invalid input")
-				return
-			}
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "internal server error")
-				return
-			}
-			if replayed {
-				writeJSON(w, http.StatusOK, record)
-				return
-			}
-			writeJSON(w, http.StatusCreated, record)
+			writeSubscriptionCreate(w, r, repo, input)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	})
+}
+
+func writeSubscriptionCreate(w http.ResponseWriter, r *http.Request, repo subscriptions.Repository, input subscriptions.CreateInput) {
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if _, err := subscriptions.NormalizeIdempotencyKey(key); err != nil {
+		writeCodedError(w, http.StatusBadRequest, "invalid idempotency key", "invalid_idempotency_key")
+		return
+	}
+
+	record, replayed, err := repo.CreateSubscriptionIdempotent(r.Context(), input, key)
+	if errors.Is(err, subscriptions.ErrInvalidIdempotencyKey) {
+		writeCodedError(w, http.StatusBadRequest, "invalid idempotency key", "invalid_idempotency_key")
+		return
+	}
+	if errors.Is(err, subscriptions.ErrIdempotencyKeyReused) {
+		writeCodedError(w, http.StatusConflict, "idempotency key reused", "idempotency_key_reused")
+		return
+	}
+	if errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
+		writeError(w, http.StatusBadRequest, "invalid input")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if replayed {
+		writeJSON(w, http.StatusOK, record)
+		return
+	}
+	writeJSON(w, http.StatusCreated, record)
 }
 
 func SubscriptionItem(repo subscriptions.Repository) http.Handler {

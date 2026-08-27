@@ -81,6 +81,7 @@ writeError(w, http.StatusInternalServerError, "internal server error")
 - 兜底分支：所有未识别 error 一律 `writeError(w, http.StatusInternalServerError, "internal server error")`（参考 `targets.go:36`）。
 - 405 走 `writeError(w, http.StatusMethodNotAllowed, "method not allowed")`（参考 `targets.go:41`）。
 - 同一 handler 内出现 2 个以上 sentinel 分支时使用 `switch { case errors.Is(...) }`（参考 `internal/center/http/handlers/auth.go:128-131`、`runtime_controls.go:63-66`）。
+- 需要前端分支的 409 必须走 `writeCodedError` 并带稳定 `code`。当前 VPS 普通 PATCH 使用 `vps_asset_conflict` 与 `vps_asset_readonly`；订阅创建使用 `invalid_idempotency_key` 与 `idempotency_key_reused`。不要只返回英文 `error` 而让中文 UI 回退到 `error.message`。
 
 ### Scenario: Records versioned transport errors and opaque resource denial
 
