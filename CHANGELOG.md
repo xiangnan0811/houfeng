@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.77.4](https://github.com/xiangnan0811/houfeng/compare/v0.77.3...v0.77.4) (2026-08-27)
+
+
+### Bug Fixes
+
+* harden v0.77.4 subscription and VPS recovery ([a1f3124](https://github.com/xiangnan0811/houfeng/commit/a1f3124c869ea82cc6bc1b5688f90fc62f040d36))
+* **subscriptions:** harden idempotent create contracts ([f3946ca](https://github.com/xiangnan0811/houfeng/commit/f3946ca07c098a16b3e67552de259d0a5134d461))
+* **vps:** harden mutation conflict recovery ([b9a0cc8](https://github.com/xiangnan0811/houfeng/commit/b9a0cc88bd4d798df419790a87419e34138a062e))
+* **vps:** keep disabled IP quality non-judging ([ef05a34](https://github.com/xiangnan0811/houfeng/commit/ef05a34ce79f76181db48d051026821a2655a7f0))
+
+
+### Documentation
+
+* **spec:** record v0.77.4 hardening contracts ([c6c2f7d](https://github.com/xiangnan0811/houfeng/commit/c6c2f7d3fe6f8a4feeb7cd9ec90939fe15eb3f4b))
+
 ## [0.77.3](https://github.com/xiangnan0811/houfeng/compare/v0.77.2...v0.77.3) (2026-08-26)
 
 
