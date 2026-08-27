@@ -83,7 +83,8 @@ func overviewRuleIDs(overview vpsoverview.Overview) []string {
 func TestLoadIPQualityDisabledWithoutReportIsNotConfigured(t *testing.T) {
 	t.Parallel()
 
-	repo := testOverviewRepository(t, &fakeIPQuality{}, &fakeIPQualityAvailability{enabled: false})
+	ip := &fakeIPQuality{}
+	repo := testOverviewRepository(t, ip, &fakeIPQualityAvailability{enabled: false})
 	got, err := repo.LoadIPQuality(context.Background(), "vps_7c2a4e18b09d5f31")
 	if err != nil {
 		t.Fatalf("LoadIPQuality: %v", err)
@@ -94,15 +95,19 @@ func TestLoadIPQualityDisabledWithoutReportIsNotConfigured(t *testing.T) {
 	if got.Section.State != vpsoverview.SectionReady || got.Section.ReasonCode != "" {
 		t.Fatalf("section = %#v, want ready without historical note", got.Section)
 	}
+	if ip.summaryCalls != 0 {
+		t.Fatalf("summary calls = %d, want 0 on the disabled path", ip.summaryCalls)
+	}
 }
 
 func TestLoadIPQualityDisabledLeftoverHighRiskDoesNotJudge(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
-	repo := testOverviewRepository(t, &fakeIPQuality{report: ipquality.VPSReport{Summary: &ipquality.Summary{
+	ip := &fakeIPQuality{report: ipquality.VPSReport{Summary: &ipquality.Summary{
 		Status: "partial", RiskLevel: "high", Stale: true, ObservedAt: now,
-	}}}, &fakeIPQualityAvailability{enabled: false})
+	}}}
+	repo := testOverviewRepository(t, ip, &fakeIPQualityAvailability{enabled: false})
 	got, err := repo.LoadIPQuality(context.Background(), "vps_7c2a4e18b09d5f31")
 	if err != nil {
 		t.Fatalf("LoadIPQuality: %v", err)
@@ -110,12 +115,15 @@ func TestLoadIPQualityDisabledLeftoverHighRiskDoesNotJudge(t *testing.T) {
 	if got.Status != "not_configured" || got.RiskLevel != "" || got.Stale {
 		t.Fatalf("ip quality = %#v, leftover report must not drive current judgement", got)
 	}
-	if got.Section.ReasonCode != "ip_quality_disabled_has_history" {
-		t.Fatalf("reason = %q, want ip_quality_disabled_has_history", got.Section.ReasonCode)
+	if got.Section.ReasonCode != "" {
+		t.Fatalf("reason = %q, want empty; Overview must not annotate disabled history", got.Section.ReasonCode)
+	}
+	if ip.summaryCalls != 0 {
+		t.Fatalf("summary calls = %d, want 0 on the disabled path", ip.summaryCalls)
 	}
 }
 
-func TestLoadIPQualityDisabledSummaryQueryErrorIsNotConfigured(t *testing.T) {
+func TestLoadIPQualityDisabledDoesNotQuerySummary(t *testing.T) {
 	t.Parallel()
 
 	ip := &fakeIPQuality{err: context.DeadlineExceeded}
@@ -128,10 +136,10 @@ func TestLoadIPQualityDisabledSummaryQueryErrorIsNotConfigured(t *testing.T) {
 		t.Fatalf("ip quality = %#v, want not_configured without leftover judgement fields", got)
 	}
 	if got.Section.State != vpsoverview.SectionReady || got.Section.ReasonCode != "" {
-		t.Fatalf("section = %#v, want ready without a failed history note", got.Section)
+		t.Fatalf("section = %#v, want ready without a history note", got.Section)
 	}
-	if ip.summaryCalls != 1 {
-		t.Fatalf("summary calls = %d, want 1 best-effort lookup", ip.summaryCalls)
+	if ip.summaryCalls != 0 {
+		t.Fatalf("summary calls = %d, want 0 on the disabled path", ip.summaryCalls)
 	}
 }
 
@@ -260,19 +268,24 @@ func TestOverviewServiceWiresRepositoryAvailabilityNotEvaluatorStub(t *testing.T
 	}
 }
 
-func TestOverviewServiceDisabledIPQualitySummaryErrorStaysHealthy(t *testing.T) {
+func TestOverviewServiceDisabledIPQualityDeadlineRaceStaysHealthy(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
-	repo := testOverviewRepository(t, &fakeIPQuality{err: context.DeadlineExceeded}, &fakeIPQualityAvailability{enabled: false})
-	service, err := vpsoverview.NewServiceWithClock(
+	ip := &fakeIPQuality{blockUntilDone: true}
+	repo := testOverviewRepository(t, ip, &fakeIPQualityAvailability{enabled: false})
+	budget := 40 * time.Millisecond
+	service, err := vpsoverview.NewServiceWithBudgets(
 		repo,
 		&overviewActivityLister{},
 		func() time.Time { return now },
-		time.Second,
+		vpsoverview.SourceBudgets{
+			Total: budget, Identity: budget, Monitoring: budget, IPQuality: budget,
+			Renewal: budget, Services: budget, Domains: budget, Activity: budget,
+		},
 	)
 	if err != nil {
-		t.Fatalf("NewServiceWithClock: %v", err)
+		t.Fatalf("NewServiceWithBudgets: %v", err)
 	}
 	overview, err := service.Get(context.Background(), vpsoverview.Request{
 		Actor: testOverviewServiceActor(t), VPSID: "vps_7c2a4e18b09d5f31",
@@ -283,13 +296,22 @@ func TestOverviewServiceDisabledIPQualitySummaryErrorStaysHealthy(t *testing.T) 
 	if overview.Summary.Overall.Status != "healthy" {
 		t.Fatalf("overall = %s anomalies=%#v, want healthy", overview.Summary.Overall.Status, overviewRuleIDs(overview))
 	}
-	if overview.Summary.IPQuality.Section.State == vpsoverview.SectionUnavailable {
-		t.Fatalf("ip quality section = %#v, disabled history error must not mark unavailable", overview.Summary.IPQuality.Section)
+	if overview.Summary.IPQuality.Status != "not_configured" {
+		t.Fatalf("ip quality status = %q, want not_configured", overview.Summary.IPQuality.Status)
+	}
+	if overview.Summary.IPQuality.Section.State != vpsoverview.SectionReady {
+		t.Fatalf("ip quality section = %#v, want ready", overview.Summary.IPQuality.Section)
+	}
+	if overview.Summary.IPQuality.Section.ReasonCode != "" {
+		t.Fatalf("reason = %q, want empty", overview.Summary.IPQuality.Section.ReasonCode)
 	}
 	for _, rule := range overviewRuleIDs(overview) {
 		if rule == vpsoverview.RuleSourceUnavailable || rule == vpsoverview.RuleIPQualityMissing {
-			t.Fatalf("anomalies = %#v, disabled summary error must not change current judgement", overviewRuleIDs(overview))
+			t.Fatalf("anomalies = %#v, disabled deadline must not change current judgement", overviewRuleIDs(overview))
 		}
+	}
+	if ip.summaryCalls != 0 {
+		t.Fatalf("summary calls = %d, want 0 on the disabled path", ip.summaryCalls)
 	}
 }
 
