@@ -25,6 +25,22 @@ export function isVPSVersionConflict(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409 && error.code === 'vps_asset_conflict'
 }
 
+export function isVPSAssetReadonly(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 409 && error.code === 'vps_asset_readonly'
+}
+
+export function isTerminalVPSLifecycle(status: string | null | undefined): boolean {
+  return status === 'cancelled' || status === 'archived'
+}
+
+export type VPSVersionConflictState = {
+  kind: 'vps_version_conflict'
+  draftKind: 'facts' | 'decision'
+  loaded: boolean
+  staleUpdatedAt: string
+  compare: Array<{ field: string; yours: string; latest: string }>
+}
+
 export function isIdempotencyKeyReused(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409 && error.code === 'idempotency_key_reused'
 }
@@ -42,6 +58,9 @@ export function describeManagementError(error: unknown, fallback: string): strin
     }
     if (error.status === 409 && error.code === 'vps_asset_conflict') {
       return 'VPS 已被其他操作更新，请先加载最新版本后再保存'
+    }
+    if (error.status === 409 && error.code === 'vps_asset_readonly') {
+      return '当前状态不允许修改'
     }
     if (error.status === 409 && error.code === 'idempotency_key_reused') {
       return '同一幂等键已用于不同的订阅内容，请重新填写后再创建'

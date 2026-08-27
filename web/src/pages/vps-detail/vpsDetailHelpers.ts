@@ -19,8 +19,9 @@ import {
   normalizePaymentMethod,
   normalizeRenewalMode,
 } from '../../lib/assetOptions'
-import { parseLabels } from '../assetPageUtils'
+import { parseLabels, renewalLabel } from '../assetPageUtils'
 import type {
+  DecisionDraftState,
   DomainDraftState,
   ExperienceDraftState,
   FactEditFormState,
@@ -338,6 +339,25 @@ export function compareFactDraftAgainstLatest(
       yours: String(draft[key] ?? ''),
       latest: String(latestForm[key] ?? ''),
     }))
+}
+
+export function compareDecisionDraft(
+  draft: DecisionDraftState,
+  latest: VPSAssetDetail,
+): Array<{ field: string; yours: string; latest: string }> {
+  if (draft.renewalDecision === latest.renewal_decision) return []
+  return [{
+    field: '续费决策',
+    yours: renewalLabel(draft.renewalDecision),
+    latest: renewalLabel(latest.renewal_decision),
+  }]
+}
+
+export function decisionDraftAlreadySatisfied(
+  draft: DecisionDraftState,
+  latest: VPSAssetDetail,
+): boolean {
+  return draft.renewalDecision === latest.renewal_decision
 }
 
 export function buildFactEditInput(form: FactEditFormState): UpdateVPSAssetInput {

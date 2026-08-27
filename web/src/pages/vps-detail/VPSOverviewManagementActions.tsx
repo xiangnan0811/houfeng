@@ -31,21 +31,27 @@ import type { DecisionDraftState, FactEditFormState, SubscriptionDraftState } fr
 import {
   buildFactEditInput,
   buildSubscriptionInput,
+  compareDecisionDraft,
   compareFactDraftAgainstLatest,
+  decisionDraftAlreadySatisfied,
   detailToFactEditForm,
   INITIAL_SUBSCRIPTION_DRAFT,
   mergeFactDraftWithLatest,
 } from './vpsDetailHelpers'
+import { VPSVersionConflictBanner } from './VPSVersionConflictBanner'
 import { vpsLifecycleConfirmationCopy } from './vpsLifecycleConfirmationCopy'
 import {
   describeManagementError,
   isCancellationPreviewStale,
   isIdempotencyKeyReused,
+  isTerminalVPSLifecycle,
+  isVPSAssetReadonly,
   isVPSVersionConflict,
   parseOverviewWorkbench,
   subscriptionLinkageAction,
   subscriptionLinkageNotice,
   type ManagementFeedbackAction,
+  type VPSVersionConflictState,
 } from './vpsManagementHelpers'
 
 type Props = {
@@ -55,14 +61,6 @@ type Props = {
   management: VPSManagementController
   managementTriggerRef: RefObject<HTMLButtonElement | null>
   onOverviewRefresh: () => Promise<boolean>
-}
-
-type MutationConflict = {
-  kind: 'vps_version_conflict'
-  draftKind: 'facts' | 'decision'
-  loaded: boolean
-  staleUpdatedAt: string
-  compare: Array<{ field: string; yours: string; latest: string }>
 }
 
 type PageFeedback = {
@@ -101,7 +99,8 @@ export function VPSOverviewManagementActions({
   const [archiveConfirmationName, setArchiveConfirmationName] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [mutationError, setMutationError] = useState<string | null>(null)
-  const [mutationConflict, setMutationConflict] = useState<MutationConflict | null>(null)
+  const [mutationConflict, setMutationConflict] = useState<VPSVersionConflictState | null>(null)
+  const [readonlyBlocked, setReadonlyBlocked] = useState(false)
   const [pageFeedback, setPageFeedback] = useState<PageFeedback | null>(null)
   const [loadRevision, setLoadRevision] = useState(0)
   const requestIdRef = useRef(0)
@@ -109,6 +108,13 @@ export function VPSOverviewManagementActions({
   const submissionLockRef = useRef(false)
   const subscriptionIdempotencyKeyRef = useRef(crypto.randomUUID())
   const factDraftRef = useRef<FactEditFormState | null>(null)
+  const mutationConflictRef = useRef<VPSVersionConflictState | null>(null)
+  const decisionDraftRef = useRef<DecisionDraftState | null>(null)
+
+  useEffect(() => {
+    mutationConflictRef.current = mutationConflict
+    decisionDraftRef.current = decisionDraft
+  }, [mutationConflict, decisionDraft])
 
   function replaceFactDraft(next: FactEditFormState | null) {
     factDraftRef.current = next
@@ -132,6 +138,7 @@ export function VPSOverviewManagementActions({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- route identity invalidates any in-flight mutation UI owner
     setSubmitting(false)
     setMutationConflict(null)
+    setReadonlyBlocked(false)
     return () => {
       mutationGenerationRef.current += 1
       submissionLockRef.current = false
@@ -170,6 +177,7 @@ export function VPSOverviewManagementActions({
     setProvidersError(null)
     setMutationError(null)
     setMutationConflict(null)
+    setReadonlyBlocked(false)
 
     void getVPSAsset(vpsId)
       .then((nextDetail) => {
@@ -293,8 +301,23 @@ export function VPSOverviewManagementActions({
     requestIdRef.current += 1
     setMutationConflict(null)
     setMutationError(null)
+    setReadonlyBlocked(false)
     management.closePanel()
     queueMicrotask(() => managementTriggerRef.current?.focus())
+  }
+
+  async function routeIfTerminalVPS(generation: number): Promise<void> {
+    try {
+      const latest = await getVPSAsset(vpsId)
+      if (!submissionIsCurrent(generation)) return
+      if (isTerminalVPSLifecycle(latest.lifecycle_status)) {
+        navigate(`/archive/${encodeURIComponent(vpsId)}`, { replace: true })
+        return
+      }
+    } catch {
+      if (!submissionIsCurrent(generation)) return
+    }
+    setReadonlyBlocked(true)
   }
 
   async function submitFacts(event: FormEvent<HTMLFormElement>) {
@@ -302,6 +325,10 @@ export function VPSOverviewManagementActions({
     if (!detail || !factDraft) return
 
     setMutationError(null)
+    if (readonlyBlocked) {
+      setMutationError('当前状态不允许修改')
+      return
+    }
     if (mutationConflict?.draftKind === 'facts' && !mutationConflict.loaded) {
       setMutationError('请先加载最新版本后再保存')
       return
@@ -338,6 +365,10 @@ export function VPSOverviewManagementActions({
           compare: [],
         })
       }
+      if (isVPSAssetReadonly(error)) {
+        await routeIfTerminalVPS(generation)
+      }
+      if (!submissionIsCurrent(generation)) return
       setMutationError(describeManagementError(error, '更新基础信息失败'))
     } finally {
       finishSubmission(generation)
@@ -349,6 +380,10 @@ export function VPSOverviewManagementActions({
     if (!detail || !decisionDraft) return
 
     setMutationError(null)
+    if (readonlyBlocked) {
+      setMutationError('当前状态不允许修改')
+      return
+    }
     if (mutationConflict?.draftKind === 'decision' && !mutationConflict.loaded) {
       setMutationError('请先加载最新版本后再保存')
       return
@@ -402,6 +437,10 @@ export function VPSOverviewManagementActions({
           compare: [],
         })
       }
+      if (isVPSAssetReadonly(error)) {
+        await routeIfTerminalVPS(generation)
+      }
+      if (!submissionIsCurrent(generation)) return
       setMutationError(describeManagementError(error, '更新续费决策失败'))
     } finally {
       finishSubmission(generation)
@@ -414,6 +453,28 @@ export function VPSOverviewManagementActions({
     try {
       const latest = await getVPSAsset(vpsId)
       if (!submissionIsCurrent(generation)) return
+      if (isTerminalVPSLifecycle(latest.lifecycle_status)) {
+        navigate(`/archive/${encodeURIComponent(vpsId)}`, { replace: true })
+        return
+      }
+      const currentDecisionDraft = decisionDraftRef.current
+      if (
+        mutationConflictRef.current?.draftKind === 'decision'
+        && currentDecisionDraft
+        && decisionDraftAlreadySatisfied(currentDecisionDraft, latest)
+      ) {
+        setMutationConflict(null)
+        setDetail(latest)
+        const refreshed = await onOverviewRefresh()
+        if (!submissionIsCurrent(generation)) return
+        finishSubmission(generation)
+        setPageFeedback(refreshed
+          ? { tone: 'success', message: '该决策已由其他操作完成' }
+          : { tone: 'warning', message: '该决策已由其他操作完成，但概览刷新失败，请稍后手动重试。' })
+        management.closePanel()
+        queueMicrotask(() => managementTriggerRef.current?.focus())
+        return
+      }
       const currentDraft = factDraftRef.current
       const factsCompare = currentDraft
         ? compareFactDraftAgainstLatest(factDraftBase ?? detailToFactEditForm(latest), currentDraft, latest)
@@ -619,7 +680,11 @@ export function VPSOverviewManagementActions({
           {detailError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{detailError}</p> : null}
           {detailError ? <Button onClick={retryLoad}>重试加载</Button> : null}
           {mutationConflict?.draftKind === 'facts' ? (
-            <VersionConflictBanner conflict={mutationConflict} onLoadLatest={() => void loadLatestVersion()} />
+            <VPSVersionConflictBanner
+              conflict={mutationConflict}
+              loading={submitting}
+              onLoadLatest={() => void loadLatestVersion()}
+            />
           ) : null}
           {detail && factDraft ? (
             <VPSFactsEditForm
@@ -655,7 +720,11 @@ export function VPSOverviewManagementActions({
           {detailError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{detailError}</p> : null}
           {detailError ? <Button onClick={retryLoad}>重试加载</Button> : null}
           {mutationConflict?.draftKind === 'decision' ? (
-            <VersionConflictBanner conflict={mutationConflict} onLoadLatest={() => void loadLatestVersion()} />
+            <VPSVersionConflictBanner
+              conflict={mutationConflict}
+              loading={submitting}
+              onLoadLatest={() => void loadLatestVersion()}
+            />
           ) : null}
           {detail && decisionDraft ? (
             <VPSRenewalDecisionForm
@@ -790,41 +859,4 @@ export function VPSOverviewManagementActions({
       </ActionConfirmationModal>
     </>
   )
-}
-
-function VersionConflictBanner({
-  conflict,
-  onLoadLatest,
-}: {
-  conflict: MutationConflict
-  onLoadLatest: () => void
-}) {
-  return (
-    <div className="asset-operation-feedback asset-operation-feedback--notice" role="status">
-      <p>
-        {conflict.loaded
-          ? '已加载最新版本。保存将使用新的更新时间。你改过的字段会保留；未改过的字段已换成最新值。'
-          : 'VPS 已被其他操作更新。请先加载最新版本，草稿会保留。'}
-      </p>
-      {conflict.compare.length > 0 ? (
-        <ul>
-          {conflict.compare.map((row) => (
-            <li key={row.field}>{row.field}：将保留你的草稿 {row.yours || '（空）'}，而不是最新 {row.latest || '（空）'}</li>
-          ))}
-        </ul>
-      ) : null}
-      {conflict.loaded ? null : (
-        <Button size="sm" onClick={onLoadLatest}>加载最新版本</Button>
-      )}
-    </div>
-  )
-}
-
-function compareDecisionDraft(draft: DecisionDraftState, latest: VPSAssetDetail) {
-  if (draft.renewalDecision === latest.renewal_decision) return []
-  return [{
-    field: '续费决策',
-    yours: draft.renewalDecision,
-    latest: latest.renewal_decision,
-  }]
 }

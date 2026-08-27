@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 
 import type { VPSAssetDetail } from '../../lib/types'
 import {
+  compareDecisionDraft,
   compareFactDraftAgainstLatest,
+  decisionDraftAlreadySatisfied,
   detailToFactEditForm,
   mergeFactDraftWithLatest,
 } from './vpsDetailHelpers'
@@ -183,5 +185,18 @@ describe('fact draft 3-way merge', () => {
     expect(fields).not.toContain('标签')
     expect(fields).not.toContain('备注')
     expect(fields).toContain('SSH 端口')
+  })
+})
+
+describe('compareDecisionDraft', () => {
+  it('uses localized renewal labels and detects an already-satisfied decision', () => {
+    const latest = detailFixture({ renewal_decision: 'keep' })
+    expect(decisionDraftAlreadySatisfied({ renewalDecision: 'keep', reason: '本地' }, latest)).toBe(true)
+    expect(compareDecisionDraft({ renewalDecision: 'keep', reason: '' }, latest)).toEqual([])
+    expect(compareDecisionDraft({ renewalDecision: 'cancel', reason: '' }, latest)).toEqual([{
+      field: '续费决策',
+      yours: '取消',
+      latest: '保留',
+    }])
   })
 })

@@ -599,6 +599,162 @@ describe('VPSOverviewManagementActions', () => {
     )
   })
 
+  it('localizes renewal compare rows and treats an already-satisfied latest decision as done', async () => {
+    const stale = detailFixture('vps_a', '东京边缘')
+    const latest = {
+      ...stale,
+      renewal_decision: 'cancel' as const,
+      updated_at: '2026-08-21T00:00:00Z',
+    }
+    vi.spyOn(api, 'getVPSAsset')
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValueOnce(latest)
+    const update = vi.spyOn(api, 'updateVPSAsset')
+      .mockRejectedValueOnce(new ApiError(409, 'vps updated', { code: 'vps_asset_conflict' }))
+    const refresh = vi.fn().mockResolvedValue(true)
+
+    render(
+      <MemoryRouter>
+        <Harness onRefresh={refresh} />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开续费' }))
+    fireEvent.change(await screen.findByRole('combobox', { name: '续费决策' }), {
+      target: { value: 'cancel' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '决策理由' }), {
+      target: { value: '准备取消' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存续费决策' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('请先加载最新版本')
+
+    fireEvent.click(screen.getByRole('button', { name: '加载最新版本' }))
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('该决策已由其他操作完成')
+    })
+    expect(screen.queryByRole('dialog', { name: '续费决策' })).not.toBeInTheDocument()
+    expect(update).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalled()
+  })
+
+  it('shows localized renewal values when the latest decision still differs', async () => {
+    const stale = detailFixture('vps_a', '东京边缘')
+    const latest = {
+      ...stale,
+      renewal_decision: 'observe' as const,
+      updated_at: '2026-08-21T00:00:00Z',
+    }
+    vi.spyOn(api, 'getVPSAsset')
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValueOnce(latest)
+    vi.spyOn(api, 'updateVPSAsset')
+      .mockRejectedValueOnce(new ApiError(409, 'vps updated', { code: 'vps_asset_conflict' }))
+    const refresh = vi.fn().mockResolvedValue(true)
+
+    render(
+      <MemoryRouter>
+        <Harness onRefresh={refresh} />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开续费' }))
+    fireEvent.change(await screen.findByRole('combobox', { name: '续费决策' }), {
+      target: { value: 'cancel' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存续费决策' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('请先加载最新版本')
+    fireEvent.click(screen.getByRole('button', { name: '加载最新版本' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('将保留你的草稿 取消，而不是最新 观察')
+    expect(screen.getByRole('status')).not.toHaveTextContent('cancel')
+    expect(screen.getByRole('status')).not.toHaveTextContent('observe')
+  })
+
+  it('routes to archive after a readonly race on a cancelled VPS', async () => {
+    const stale = detailFixture('vps_a', '东京边缘')
+    const archived = {
+      ...stale,
+      lifecycle_status: 'cancelled' as const,
+      updated_at: '2026-08-21T00:00:00Z',
+    }
+    vi.spyOn(api, 'getVPSAsset')
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValueOnce(archived)
+    vi.spyOn(api, 'updateVPSAsset')
+      .mockRejectedValueOnce(new ApiError(409, 'vps asset readonly', { code: 'vps_asset_readonly' }))
+    const refresh = vi.fn().mockResolvedValue(true)
+
+    function LocationProbe() {
+      const location = useLocation()
+      return <div data-testid="location-path">{location.pathname}</div>
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<Harness onRefresh={refresh} />} />
+          <Route path="/archive/:vpsId" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开事实' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: 'VPS 名称' }), {
+      target: { value: '我的草稿' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存基础信息' }))
+    await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/archive/vps_a'))
+  })
+
+  it('does not write a stale readonly error onto the next VPS after a delayed identity GET', async () => {
+    const stale = detailFixture('vps_a', '东京边缘')
+    const nextVPS = detailFixture('vps_b', '大阪边缘')
+    const identity = deferred<VPSAssetDetail>()
+    let aGets = 0
+    vi.spyOn(api, 'getVPSAsset').mockImplementation(async (id) => {
+      if (id === 'vps_b') return nextVPS
+      aGets += 1
+      if (aGets === 1) return stale
+      return identity.promise
+    })
+    vi.spyOn(api, 'listProviders').mockResolvedValue([])
+    vi.spyOn(api, 'updateVPSAsset').mockRejectedValue(
+      new ApiError(409, 'vps asset readonly', { code: 'vps_asset_readonly' }),
+    )
+    const refresh = vi.fn().mockResolvedValue(true)
+
+    function LocationProbe() {
+      const location = useLocation()
+      return <div data-testid="location-path">{location.pathname}</div>
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<Harness onRefresh={refresh} />} />
+          <Route path="/archive/:vpsId" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开事实' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: 'VPS 名称' }), {
+      target: { value: '我的草稿' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存基础信息' }))
+    await waitFor(() => expect(aGets).toBe(2))
+    fireEvent.click(screen.getByRole('button', { name: '切换 VPS' }))
+    expect(await screen.findByRole('textbox', { name: 'VPS 名称' })).toHaveValue('大阪边缘')
+
+    await act(async () => {
+      identity.resolve({ ...stale, lifecycle_status: 'cancelled' })
+    })
+
+    expect(screen.getByRole('textbox', { name: 'VPS 名称' })).toHaveValue('大阪边缘')
+    expect(screen.queryByText('当前状态不允许修改')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('location-path')).not.toBeInTheDocument()
+  })
+
   it('strips rejected archive workbench query without opening the panel', async () => {
     function LocationProbe() {
       const location = useLocation()

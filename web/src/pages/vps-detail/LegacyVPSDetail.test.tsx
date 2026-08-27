@@ -3591,4 +3591,677 @@ describe('LegacyVPSDetail', () => {
     expect(screen.queryByRole('heading', { name: 'Tokyo Edge' })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(12)
   })
+
+  it('recovers from a facts CAS conflict while keeping the local draft', async () => {
+    const stale = {
+      ...vpsDetailBody,
+      display_name: 'Tokyo Edge',
+      product_name: 'cx22',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+      updated_at: '2026-05-09T08:00:00Z',
+    }
+    const latest = {
+      ...stale,
+      display_name: 'Tokyo Edge 最新',
+      product_name: 'edge-large',
+      updated_at: '2026-08-21T00:00:00Z',
+    }
+    let patchCount = 0
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_001' && method === 'GET') {
+        return Promise.resolve(mockJSONResponse(patchCount === 0 ? stale : latest))
+      }
+      if (url === '/api/vps/vps_001' && method === 'PATCH') {
+        patchCount += 1
+        if (patchCount === 1) {
+          return Promise.resolve(mockJSONResponse({ error: 'vps asset conflict', code: 'vps_asset_conflict' }, 409))
+        }
+        const body = JSON.parse(String(init?.body)) as { display_name?: string; product_name?: string }
+        return Promise.resolve(mockJSONResponse({
+          ...latest,
+          display_name: body.display_name ?? latest.display_name,
+          product_name: body.product_name ?? latest.product_name,
+          updated_at: '2026-08-21T01:00:00Z',
+        }))
+      }
+      if (url === '/api/vps/vps_001/timeline') return Promise.resolve(mockJSONResponse(timelineEmptyBody))
+      if (url === '/api/vps/vps_001/services') return Promise.resolve(mockJSONResponse(servicesEmptyBody))
+      if (url === '/api/vps/vps_001/domains') return Promise.resolve(mockJSONResponse(domainsEmptyBody))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      if (url === '/api/providers') return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    clickVPSAction('编辑基础资料')
+    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: '我的草稿' } })
+    fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('请先加载最新版本')
+    fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
+    expect(patchCount).toBe(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '加载最新版本' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('已加载最新版本')
+    expect(within(factsDrawer).getByLabelText('VPS 名称')).toHaveValue('我的草稿')
+    expect(within(factsDrawer).getByLabelText('产品名')).toHaveValue('edge-large')
+
+    fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
+    await waitFor(() => expect(patchCount).toBe(2))
+    const patchCalls = fetchMock.mock.calls.filter(([calledUrl, init]) => (
+      calledUrl === '/api/vps/vps_001' && ((init as RequestInit | undefined)?.method ?? 'GET') === 'PATCH'
+    ))
+    expect(patchCalls).toHaveLength(2)
+    expect((patchCalls[1]?.[1] as RequestInit).headers).toEqual(expect.objectContaining({
+      'If-Match': '"2026-08-21T00:00:00Z"',
+    }))
+    expect(JSON.parse(String((patchCalls[1]?.[1] as RequestInit).body))).toEqual(expect.objectContaining({
+      display_name: '我的草稿',
+      product_name: 'edge-large',
+    }))
+  })
+
+  it('recovers from a renewal CAS conflict while keeping the local reason', async () => {
+    const stale = {
+      ...vpsDetailBody,
+      renewal_decision: 'keep',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+      updated_at: '2026-05-09T08:00:00Z',
+    }
+    const latest = {
+      ...stale,
+      product_name: 'edge-large',
+      updated_at: '2026-08-21T00:00:00Z',
+    }
+    let patchCount = 0
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_001' && method === 'GET') {
+        return Promise.resolve(mockJSONResponse(patchCount === 0 ? stale : latest))
+      }
+      if (url === '/api/vps/vps_001' && method === 'PATCH') {
+        patchCount += 1
+        if (patchCount === 1) {
+          return Promise.resolve(mockJSONResponse({ error: 'vps asset conflict', code: 'vps_asset_conflict' }, 409))
+        }
+        return Promise.resolve(mockJSONResponse({
+          ...latest,
+          renewal_decision: 'cancel',
+          updated_at: '2026-08-21T01:00:00Z',
+        }))
+      }
+      if (url === '/api/vps/vps_001/timeline') return Promise.resolve(mockJSONResponse(timelineEmptyBody))
+      if (url === '/api/vps/vps_001/services') return Promise.resolve(mockJSONResponse(servicesEmptyBody))
+      if (url === '/api/vps/vps_001/domains') return Promise.resolve(mockJSONResponse(domainsEmptyBody))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '调整决策' }))
+    const decisionDrawer = screen.getByRole('dialog', { name: '调整决策' })
+    fireEvent.change(within(decisionDrawer).getByLabelText('续费决策'), { target: { value: 'cancel' } })
+    fireEvent.change(within(decisionDrawer).getByLabelText('决策理由'), { target: { value: 'too expensive' } })
+    fireEvent.click(within(decisionDrawer).getByRole('button', { name: '保存续费决策' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('请先加载最新版本')
+
+    fireEvent.click(screen.getByRole('button', { name: '加载最新版本' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('已加载最新版本')
+    expect(within(decisionDrawer).getByLabelText('决策理由')).toHaveValue('too expensive')
+    expect(within(decisionDrawer).getByLabelText('续费决策')).toHaveValue('cancel')
+
+    fireEvent.click(within(decisionDrawer).getByRole('button', { name: '保存续费决策' }))
+    await waitFor(() => expect(patchCount).toBe(2))
+    const patchCalls = fetchMock.mock.calls.filter(([calledUrl, init]) => (
+      calledUrl === '/api/vps/vps_001' && ((init as RequestInit | undefined)?.method ?? 'GET') === 'PATCH'
+    ))
+    expect(patchCalls).toHaveLength(2)
+    expect((patchCalls[1]?.[1] as RequestInit).headers).toEqual(expect.objectContaining({
+      'If-Match': '"2026-08-21T00:00:00Z"',
+    }))
+    expect(JSON.parse(String((patchCalls[1]?.[1] as RequestInit).body))).toEqual({
+      renewal_decision: 'cancel',
+      renewal_reason: 'too expensive',
+    })
+  })
+
+  it('routes to archive after a readonly race on a cancelled VPS', async () => {
+    const stale = {
+      ...vpsDetailBody,
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    let patchCount = 0
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_001' && method === 'GET') {
+        if (patchCount === 0) return Promise.resolve(mockJSONResponse(stale))
+        return Promise.resolve(mockJSONResponse({ ...stale, lifecycle_status: 'cancelled' }))
+      }
+      if (url === '/api/vps/vps_001' && method === 'PATCH') {
+        patchCount += 1
+        return Promise.resolve(mockJSONResponse({ error: 'vps asset readonly', code: 'vps_asset_readonly' }, 409))
+      }
+      if (url === '/api/vps/vps_001/timeline') return Promise.resolve(mockJSONResponse(timelineEmptyBody))
+      if (url === '/api/vps/vps_001/services') return Promise.resolve(mockJSONResponse(servicesEmptyBody))
+      if (url === '/api/vps/vps_001/domains') return Promise.resolve(mockJSONResponse(domainsEmptyBody))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      if (url === '/api/providers') return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          <Route path="/archive/:vpsId" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    clickVPSAction('编辑基础资料')
+    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: '我的草稿' } })
+    fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
+    await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/archive/vps_001'))
+  })
+
+  it('does not archive from a delayed readonly identity GET after switching VPS', async () => {
+    const detailA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const detailB = {
+      ...vpsDetailBody,
+      vps_id: 'vps_b',
+      display_name: 'Osaka Edge B',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const delayedIdentity = deferred<ReturnType<typeof mockJSONResponse>>()
+    let aGets = 0
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_a' && method === 'GET') {
+        aGets += 1
+        if (aGets === 1) return Promise.resolve(mockJSONResponse(detailA))
+        return delayedIdentity.promise
+      }
+      if (url === '/api/vps/vps_a' && method === 'PATCH') {
+        return Promise.resolve(mockJSONResponse({ error: 'vps asset readonly', code: 'vps_asset_readonly' }, 409))
+      }
+      if (url === '/api/vps/vps_b' && method === 'GET') return Promise.resolve(mockJSONResponse(detailB))
+      if (url.startsWith('/api/vps/vps_a/timeline') || url.startsWith('/api/vps/vps_b/timeline')) {
+        return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: url.includes('vps_b') ? 'vps_b' : 'vps_a' }))
+      }
+      if (url.includes('/services') || url.includes('/domains')) return Promise.resolve(mockJSONResponse([]))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      if (url === '/api/providers') return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function NavigationHarness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate('/vps/vps_b')}>切到 B</button>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+            <Route path="/archive/:vpsId" element={<LocationProbe />} />
+          </Routes>
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
+    clickVPSAction('编辑基础资料')
+    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: '我的草稿' } })
+    fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
+    await waitFor(() => expect(aGets).toBe(2))
+    fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+
+    await act(async () => {
+      delayedIdentity.resolve(mockJSONResponse({ ...detailA, lifecycle_status: 'cancelled' }))
+    })
+
+    expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument()
+    expect(screen.queryByTestId('location-path')).not.toBeInTheDocument()
+    expect(screen.queryByText('当前状态不允许修改')).not.toBeInTheDocument()
+  })
+
+  it('ignores a delayed load-latest response after switching VPS', async () => {
+    const detailA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A',
+      product_name: 'cx22',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const detailB = {
+      ...vpsDetailBody,
+      vps_id: 'vps_b',
+      display_name: 'Osaka Edge B',
+      product_name: 'edge-b',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const delayedLatest = deferred<ReturnType<typeof mockJSONResponse>>()
+    let aGets = 0
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_a' && method === 'GET') {
+        aGets += 1
+        if (aGets === 1) return Promise.resolve(mockJSONResponse(detailA))
+        return delayedLatest.promise
+      }
+      if (url === '/api/vps/vps_a' && method === 'PATCH') {
+        return Promise.resolve(mockJSONResponse({ error: 'vps asset conflict', code: 'vps_asset_conflict' }, 409))
+      }
+      if (url === '/api/vps/vps_b' && method === 'GET') return Promise.resolve(mockJSONResponse(detailB))
+      if (url.startsWith('/api/vps/vps_a/timeline') || url.startsWith('/api/vps/vps_b/timeline')) {
+        return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: url.includes('vps_b') ? 'vps_b' : 'vps_a' }))
+      }
+      if (url.includes('/services') || url.includes('/domains')) return Promise.resolve(mockJSONResponse([]))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      if (url === '/api/providers') return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function NavigationHarness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate('/vps/vps_b')}>切到 B</button>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          </Routes>
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
+    clickVPSAction('编辑基础资料')
+    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: 'A 草稿' } })
+    fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('请先加载最新版本')
+    fireEvent.click(screen.getByRole('button', { name: '加载最新版本' }))
+    await waitFor(() => expect(aGets).toBe(2))
+    fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+
+    await act(async () => {
+      delayedLatest.resolve(mockJSONResponse({
+        ...detailA,
+        display_name: 'A 被覆盖',
+        product_name: 'stale-product',
+        updated_at: '2026-08-21T00:00:00Z',
+      }))
+    })
+
+    expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('A 被覆盖')).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue('A 草稿')).not.toBeInTheDocument()
+  })
+
+  it('locks concurrent load-latest clicks and ignores a late response after the drawer closes', async () => {
+    const stale = {
+      ...vpsDetailBody,
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const delayedLatest = deferred<ReturnType<typeof mockJSONResponse>>()
+    let gets = 0
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_001' && method === 'GET') {
+        gets += 1
+        if (gets === 1) return Promise.resolve(mockJSONResponse(stale))
+        if (gets === 2) return delayedLatest.promise
+        return Promise.resolve(mockJSONResponse({ error: `extra GET ${gets}` }, 500))
+      }
+      if (url === '/api/vps/vps_001' && method === 'PATCH') {
+        return Promise.resolve(mockJSONResponse({ error: 'vps asset conflict', code: 'vps_asset_conflict' }, 409))
+      }
+      if (url === '/api/vps/vps_001/timeline') return Promise.resolve(mockJSONResponse(timelineEmptyBody))
+      if (url === '/api/vps/vps_001/services') return Promise.resolve(mockJSONResponse(servicesEmptyBody))
+      if (url === '/api/vps/vps_001/domains') return Promise.resolve(mockJSONResponse(domainsEmptyBody))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      if (url === '/api/providers') return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    clickVPSAction('编辑基础资料')
+    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: '我的草稿' } })
+    fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('请先加载最新版本')
+    fireEvent.click(screen.getByRole('button', { name: '加载最新版本' }))
+    await waitFor(() => expect(gets).toBe(2))
+    expect(screen.getByRole('button', { name: '正在加载最新版本' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '正在加载最新版本' }))
+    expect(gets).toBe(2)
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑基础资料' })).not.toBeInTheDocument())
+
+    await act(async () => {
+      delayedLatest.resolve(mockJSONResponse({
+        ...stale,
+        display_name: '迟到的最新版',
+        updated_at: '2026-08-21T00:00:00Z',
+      }))
+    })
+
+    expect(screen.queryByRole('dialog', { name: '编辑基础资料' })).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue('迟到的最新版')).not.toBeInTheDocument()
+    expect(gets).toBe(2)
+  })
+
+  it('holds the facts write lock until the in-flight PATCH settles', async () => {
+    const stale = {
+      ...vpsDetailBody,
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const delayedPatch = deferred<ReturnType<typeof mockJSONResponse>>()
+    let patches = 0
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_001' && method === 'GET') return Promise.resolve(mockJSONResponse(stale))
+      if (url === '/api/vps/vps_001' && method === 'PATCH') {
+        patches += 1
+        if (patches === 1) return delayedPatch.promise
+        return Promise.resolve(mockJSONResponse({
+          ...stale,
+          display_name: '第二次保存',
+          updated_at: '2026-08-21T01:00:00Z',
+        }))
+      }
+      if (url === '/api/vps/vps_001/timeline') return Promise.resolve(mockJSONResponse(timelineEmptyBody))
+      if (url === '/api/vps/vps_001/services') return Promise.resolve(mockJSONResponse(servicesEmptyBody))
+      if (url === '/api/vps/vps_001/domains') return Promise.resolve(mockJSONResponse(domainsEmptyBody))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      if (url === '/api/providers') return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    clickVPSAction('编辑基础资料')
+    fireEvent.change(within(screen.getByRole('dialog', { name: '编辑基础资料' })).getByLabelText('VPS 名称'), {
+      target: { value: '我的草稿' },
+    })
+    fireEvent.click(within(screen.getByRole('dialog', { name: '编辑基础资料' })).getByRole('button', { name: '保存基础信息' }))
+    expect(await screen.findByRole('button', { name: '保存中…' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑基础资料' })).not.toBeInTheDocument())
+
+    clickVPSAction('编辑基础资料')
+    const reopened = screen.getByRole('dialog', { name: '编辑基础资料' })
+    expect(within(reopened).getByRole('button', { name: '保存中…' })).toBeDisabled()
+    fireEvent.click(within(reopened).getByRole('button', { name: '保存中…' }))
+    expect(patches).toBe(1)
+
+    await act(async () => {
+      delayedPatch.resolve(mockJSONResponse({
+        ...stale,
+        display_name: '我的草稿',
+        updated_at: '2026-08-21T00:00:00Z',
+      }))
+    })
+
+    await waitFor(() => expect(within(reopened).getByRole('button', { name: '保存基础信息' })).toBeEnabled())
+    expect(within(reopened).getByLabelText('VPS 名称')).toBeEnabled()
+    expect(patches).toBe(1)
+  })
+
+  it('holds the renewal write lock until the in-flight PATCH settles', async () => {
+    const stale = {
+      ...vpsDetailBody,
+      renewal_decision: 'keep',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const delayedPatch = deferred<ReturnType<typeof mockJSONResponse>>()
+    let patches = 0
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_001' && method === 'GET') return Promise.resolve(mockJSONResponse(stale))
+      if (url === '/api/vps/vps_001' && method === 'PATCH') {
+        patches += 1
+        if (patches === 1) return delayedPatch.promise
+        return Promise.resolve(mockJSONResponse({
+          ...stale,
+          renewal_decision: 'observe',
+          updated_at: '2026-08-21T01:00:00Z',
+        }))
+      }
+      if (url === '/api/vps/vps_001/timeline') return Promise.resolve(mockJSONResponse(timelineEmptyBody))
+      if (url === '/api/vps/vps_001/services') return Promise.resolve(mockJSONResponse(servicesEmptyBody))
+      if (url === '/api/vps/vps_001/domains') return Promise.resolve(mockJSONResponse(domainsEmptyBody))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '调整决策' }))
+    const decisionDrawer = screen.getByRole('dialog', { name: '调整决策' })
+    fireEvent.change(within(decisionDrawer).getByLabelText('续费决策'), { target: { value: 'cancel' } })
+    fireEvent.change(within(decisionDrawer).getByLabelText('决策理由'), { target: { value: 'too expensive' } })
+    fireEvent.click(within(decisionDrawer).getByRole('button', { name: '保存续费决策' }))
+    expect(await screen.findByRole('button', { name: '保存中…' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '调整决策' })).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '调整决策' }))
+    const reopened = screen.getByRole('dialog', { name: '调整决策' })
+    expect(within(reopened).getByRole('button', { name: '保存中…' })).toBeDisabled()
+    expect(within(reopened).getByLabelText('续费决策')).toBeDisabled()
+    fireEvent.click(within(reopened).getByRole('button', { name: '保存中…' }))
+    expect(patches).toBe(1)
+
+    await act(async () => {
+      delayedPatch.resolve(mockJSONResponse({
+        ...stale,
+        renewal_decision: 'cancel',
+        updated_at: '2026-08-21T00:00:00Z',
+      }))
+    })
+
+    await waitFor(() => expect(within(reopened).getByLabelText('续费决策')).toBeEnabled())
+    expect(within(reopened).queryByRole('button', { name: '保存中…' })).not.toBeInTheDocument()
+    fireEvent.change(within(reopened).getByLabelText('续费决策'), { target: { value: 'cancel' } })
+    expect(within(reopened).getByRole('button', { name: '保存续费决策' })).toBeEnabled()
+    expect(patches).toBe(1)
+  })
+
+  it('does not let an in-flight write on VPS A block writes on VPS B', async () => {
+    const detailA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const detailB = {
+      ...vpsDetailBody,
+      vps_id: 'vps_b',
+      display_name: 'Osaka Edge B',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const delayedAPatch = deferred<ReturnType<typeof mockJSONResponse>>()
+    const delayedBPatch = deferred<ReturnType<typeof mockJSONResponse>>()
+    let aPatches = 0
+    let bPatches = 0
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_a' && method === 'GET') return Promise.resolve(mockJSONResponse(detailA))
+      if (url === '/api/vps/vps_b' && method === 'GET') return Promise.resolve(mockJSONResponse(detailB))
+      if (url === '/api/vps/vps_a' && method === 'PATCH') {
+        aPatches += 1
+        return delayedAPatch.promise
+      }
+      if (url === '/api/vps/vps_b' && method === 'PATCH') {
+        bPatches += 1
+        return delayedBPatch.promise
+      }
+      if (url.startsWith('/api/vps/vps_a/timeline') || url.startsWith('/api/vps/vps_b/timeline')) {
+        return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: url.includes('vps_b') ? 'vps_b' : 'vps_a' }))
+      }
+      if (url.includes('/services') || url.includes('/domains')) return Promise.resolve(mockJSONResponse([]))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      if (url === '/api/providers') return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function NavigationHarness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate('/vps/vps_b')}>切到 B</button>
+          <button type="button" onClick={() => navigate('/vps/vps_a')}>切回 A</button>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          </Routes>
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
+    clickVPSAction('编辑基础资料')
+    fireEvent.change(within(screen.getByRole('dialog', { name: '编辑基础资料' })).getByLabelText('VPS 名称'), {
+      target: { value: 'A 草稿' },
+    })
+    fireEvent.click(within(screen.getByRole('dialog', { name: '编辑基础资料' })).getByRole('button', { name: '保存基础信息' }))
+    expect(await screen.findByRole('button', { name: '保存中…' })).toBeDisabled()
+    await waitFor(() => expect(aPatches).toBe(1))
+
+    fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+    clickVPSAction('编辑基础资料')
+    const bDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    expect(within(bDrawer).getByRole('button', { name: '保存基础信息' })).toBeEnabled()
+    fireEvent.change(within(bDrawer).getByLabelText('VPS 名称'), { target: { value: 'B 草稿' } })
+    fireEvent.click(within(bDrawer).getByRole('button', { name: '保存基础信息' }))
+    expect(await within(bDrawer).findByRole('button', { name: '保存中…' })).toBeDisabled()
+    await waitFor(() => expect(bPatches).toBe(1))
+
+    fireEvent.click(screen.getByRole('button', { name: '切回 A' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
+    clickVPSAction('编辑基础资料')
+    const aReopened = screen.getByRole('dialog', { name: '编辑基础资料' })
+    expect(within(aReopened).getByRole('button', { name: '保存中…' })).toBeDisabled()
+    fireEvent.click(within(aReopened).getByRole('button', { name: '保存中…' }))
+    expect(aPatches).toBe(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+    clickVPSAction('编辑基础资料')
+    const bReopened = screen.getByRole('dialog', { name: '编辑基础资料' })
+    expect(within(bReopened).getByRole('button', { name: '保存中…' })).toBeDisabled()
+
+    await act(async () => {
+      delayedAPatch.resolve(mockJSONResponse({
+        ...detailA,
+        display_name: 'A 迟到写入',
+        updated_at: '2026-08-21T00:00:00Z',
+      }))
+    })
+
+    expect(within(bReopened).getByRole('button', { name: '保存中…' })).toBeDisabled()
+    fireEvent.click(within(bReopened).getByRole('button', { name: '保存中…' }))
+    expect(bPatches).toBe(1)
+    expect(screen.queryByDisplayValue('A 迟到写入')).not.toBeInTheDocument()
+
+    await act(async () => {
+      delayedBPatch.resolve(mockJSONResponse({
+        ...detailB,
+        display_name: 'B 草稿',
+        updated_at: '2026-08-21T01:00:00Z',
+      }))
+    })
+
+    await waitFor(() => expect(within(bReopened).getByRole('button', { name: '保存基础信息' })).toBeEnabled())
+    expect(within(bReopened).getByLabelText('VPS 名称')).toBeEnabled()
+    expect(bPatches).toBe(1)
+    expect(aPatches).toBe(1)
+  })
 })
