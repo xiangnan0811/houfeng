@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 261
+- **Total Sessions**: 262
 - **Last Active**: 2026-08-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~997 | Active |
+| `journal-5.md` | ~1036 | Active |
 | `journal-4.md` | ~1998 | Archived |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 262 | 2026-08-27 | v0.77.5 hardening closeout | `96520df4`, `0cdbea88`, `1f38bd41`, `b5bdcf3a` | `feat/v0775-hardening-closeout` |
 | 261 | 2026-08-27 | Release v0.77.4 hardening closeout | `f3946ca0`, `ef05a34c`, `b9a0cc88`, `c6c2f7d3` | `feat/v0774-hardening-closeout` |
 | 260 | 2026-08-26 | Ship VPS overview post-v0.77.1 hardening | `d153b8e2`, `e62e485a`, `2dda7437`, `1043e08c`, `6212f66f`, `0a54b50a`, `925dfc45`, `efc32b0b`, `0c4962dc`, `bb1d09d1` | `codex/archive-vps-overview-post-0771-hardening` |
 | 259 | 2026-08-26 | VPS overview launch P1 released as v0.77.0 | `4f3e8083`, `926ff276`, `60486924`, `5718ff6c`, `3ee214a7`, `8ee987ac`, `28264027`, `87fea043`, `fa97fc44`, `7da35e03` | `fix/vps-overview-launch-p1` |
