@@ -109,6 +109,7 @@
 | Raw JSON 超过上限 | 存合法 truncation marker，不存无效 JSON |
 | Provider/service `extra_json` 超过上限 | 存合法 extra truncation marker，不存无效 JSON |
 | 历史详情 report 属于其他 VPS 或未被该 VPS assignment 命中 | API 不返回该 report 细节 |
+| Settings `enabled=false` 且 latest summary 查询超时/失败 | Overview IP Quality 仍为 `not_configured` + `SectionReady`；不得把 `ip_quality` 写入 `JudgementSourcesUnavailable`，也不得发出 `source.unavailable.v1` 或抬升 overall status。历史注释只能 best-effort |
 
 ### 5. Good/Base/Bad Cases
 
@@ -116,7 +117,7 @@
 - Good: 多个默认 provider 成功/失败混合时，页面展示 provider/source 状态、coverage、失败诊断和 extra details；成功 provider 的风险信号进入风险矩阵，失败/未配置来源只进入采集完整性。
 - Good: Netflix/ChatGPT/YouTube 等服务探测返回逐服务行；429 或 404 只显示 unknown/failure，不显示已解锁或已阻断。
 - Good: 用户从历史列表打开旧 report，API 返回该 report 的 summary、provider rows、service rows、coverage 和 diagnostics。
-- Base: IP 质量关闭时 plan 仍可下发 `enabled=false`，agent 不启动外部采集，UI 显示未采集/缺口而不是风险。
+- Base: IP 质量关闭时 plan 仍可下发 `enabled=false`，agent 不启动外部采集，Overview 判断为 `not_configured` 而不是 missing/risk。关闭后的历史 summary 查询失败不能改变当前健康判断。
 - Base: ChatGPT 和 Netflix service unlock 被阻断时，资产决策显示 `media_unlock_blocked`，但不自动迁移资产。
 - Bad: agent 运行 `bash <(curl -Ls IP.Check.Place)` 或下载远程脚本解析 stdout。
 - Bad: 把 `status=failure` 且 `risk_level=high` 的报告当作真实高风险 IP。
