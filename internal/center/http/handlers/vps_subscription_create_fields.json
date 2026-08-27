@@ -1,0 +1,15 @@
+[
+  "price",
+  "currency",
+  "billing_cycle",
+  "billing_months",
+  "billing_period_unit",
+  "billing_period_length",
+  "started_at",
+  "renew_at",
+  "auto_renew",
+  "auto_renew_cancelled",
+  "renewal_mode",
+  "payment_method",
+  "note"
+]

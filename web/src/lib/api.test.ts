@@ -1681,7 +1681,7 @@ describe('api helpers', () => {
 
     await expect(listSubscriptions({ vps_id: 'vps_001', status: 'active', renew_within_days: 30, sort: 'renew_at', order: 'asc', asset_scope: 'historical' })).resolves.toEqual([subscription])
     await expect(getSubscription('sub_001')).resolves.toEqual(subscription)
-    await expect(createSubscription(input)).resolves.toEqual(subscription)
+    await expect(createSubscription(input, 'create-sub-collection-001')).resolves.toEqual(subscription)
     await expect(createVPSSubscription('vps_001', vpsScopedInput, 'create-sub-vps-001')).resolves.toEqual(subscription)
     await expect(updateSubscription('sub_001', patchBody)).resolves.toEqual(updatedSubscription)
 
@@ -1704,6 +1704,7 @@ describe('api helpers', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Idempotency-Key': 'create-sub-collection-001',
       },
       cache: 'no-store',
       credentials: 'include',

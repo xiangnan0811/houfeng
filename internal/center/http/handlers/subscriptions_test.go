@@ -203,6 +203,7 @@ func TestSubscriptionsCollectionCreatesSubscription(t *testing.T) {
 		"note":" production "
 	}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "create-sub-collection-001")
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -228,6 +229,103 @@ func TestSubscriptionsCollectionCreatesSubscription(t *testing.T) {
 	}
 	if body.SubscriptionID != "sub_001" || body.MonthlyPrice != 10 {
 		t.Fatalf("body = %#v, want created subscription", body)
+	}
+	if repo.createIdempotencyKey != "create-sub-collection-001" {
+		t.Fatalf("idempotency key = %q, want create-sub-collection-001", repo.createIdempotencyKey)
+	}
+}
+
+func TestSubscriptionsCollectionCreateRequiresIdempotencyKey(t *testing.T) {
+	handler := handlers.SubscriptionsCollection(&fakeSubscriptionRepository{})
+	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions", strings.NewReader(`{
+		"vps_id":"vps_001",
+		"price":12,
+		"currency":"USD",
+		"billing_months":1
+	}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	if body["code"] != "invalid_idempotency_key" {
+		t.Fatalf("code = %q, want invalid_idempotency_key; body=%#v", body["code"], body)
+	}
+}
+
+func TestSubscriptionsCollectionCreateReplaysSameIdempotencyKey(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	repo := &fakeSubscriptionRepository{createSubscriptionResult: subscriptions.Record{
+		SubscriptionID: "sub_001",
+		VPSID:          "vps_001",
+		Price:          12,
+		Currency:       "USD",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}}
+	handler := handlers.SubscriptionsCollection(repo)
+	body := `{"vps_id":"vps_001","price":12,"currency":"USD","billing_months":1}`
+
+	first := httptest.NewRequest(http.MethodPost, "/api/subscriptions", strings.NewReader(body))
+	first.Header.Set("Idempotency-Key", "replay-collection-001")
+	firstRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(firstRecorder, first)
+	if firstRecorder.Code != http.StatusCreated {
+		t.Fatalf("first status = %d, want %d; body=%s", firstRecorder.Code, http.StatusCreated, firstRecorder.Body.String())
+	}
+
+	second := httptest.NewRequest(http.MethodPost, "/api/subscriptions", strings.NewReader(body))
+	second.Header.Set("Idempotency-Key", "replay-collection-001")
+	secondRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(secondRecorder, second)
+	if secondRecorder.Code != http.StatusOK {
+		t.Fatalf("replay status = %d, want %d; body=%s", secondRecorder.Code, http.StatusOK, secondRecorder.Body.String())
+	}
+	var replayed subscriptions.Record
+	if err := json.Unmarshal(secondRecorder.Body.Bytes(), &replayed); err != nil {
+		t.Fatalf("unmarshal replay body: %v", err)
+	}
+	if replayed.SubscriptionID != "sub_001" {
+		t.Fatalf("replayed id = %q, want sub_001", replayed.SubscriptionID)
+	}
+}
+
+func TestSubscriptionsCollectionCreateRejectsReusedIdempotencyKey(t *testing.T) {
+	repo := &fakeSubscriptionRepository{createSubscriptionResult: subscriptions.Record{
+		SubscriptionID: "sub_001",
+		VPSID:          "vps_001",
+		Price:          12,
+		Currency:       "USD",
+	}}
+	handler := handlers.SubscriptionsCollection(repo)
+
+	first := httptest.NewRequest(http.MethodPost, "/api/subscriptions", strings.NewReader(`{"vps_id":"vps_001","price":12,"currency":"USD","billing_months":1}`))
+	first.Header.Set("Idempotency-Key", "reuse-collection-001")
+	firstRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(firstRecorder, first)
+	if firstRecorder.Code != http.StatusCreated {
+		t.Fatalf("first status = %d, want %d; body=%s", firstRecorder.Code, http.StatusCreated, firstRecorder.Body.String())
+	}
+
+	second := httptest.NewRequest(http.MethodPost, "/api/subscriptions", strings.NewReader(`{"vps_id":"vps_001","price":24,"currency":"USD","billing_months":1}`))
+	second.Header.Set("Idempotency-Key", "reuse-collection-001")
+	secondRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(secondRecorder, second)
+	if secondRecorder.Code != http.StatusConflict {
+		t.Fatalf("reuse status = %d, want %d; body=%s", secondRecorder.Code, http.StatusConflict, secondRecorder.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(secondRecorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	if body["code"] != "idempotency_key_reused" {
+		t.Fatalf("code = %q, want idempotency_key_reused; body=%#v", body["code"], body)
 	}
 }
 
@@ -750,7 +848,7 @@ func TestSubscriptionsMapRepositoryFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
-			if tt.name == "vps scoped create" {
+			if tt.name == "create" || tt.name == "vps scoped create" {
 				req.Header.Set("Idempotency-Key", "create-fail-sub-001")
 			}
 			recorder := httptest.NewRecorder()

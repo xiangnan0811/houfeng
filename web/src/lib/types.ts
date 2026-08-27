@@ -2207,7 +2207,21 @@ export type CreateSubscriptionInput = {
   note: string
 }
 
-export type CreateVPSSubscriptionInput = Omit<CreateSubscriptionInput, 'vps_id' | 'status'>
+export type CreateVPSSubscriptionInput = {
+  price: number
+  currency: string
+  billing_cycle: string
+  billing_months: number
+  billing_period_unit?: BillingPeriodUnit | string
+  billing_period_length?: number
+  started_at?: string | null
+  renew_at?: string | null
+  auto_renew: boolean
+  auto_renew_cancelled: boolean
+  renewal_mode?: RenewalMode | string
+  payment_method: string
+  note: string
+}
 
 export type UpdateSubscriptionInput = Partial<CreateSubscriptionInput>
 

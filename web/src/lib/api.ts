@@ -809,8 +809,14 @@ export function bulkUpsertSubscriptionMonthlyBudgets(input: BulkUpsertSubscripti
   return postJSONBody<BulkUpsertSubscriptionMonthlyBudgetResult>('/api/subscription-monthly-budgets/bulk', input)
 }
 
-export function createSubscription(input: CreateSubscriptionInput): Promise<SubscriptionRecord> {
-  return postJSONBody<SubscriptionRecord>('/api/subscriptions', input)
+export function createSubscription(
+  input: CreateSubscriptionInput,
+  idempotencyKey: string,
+): Promise<SubscriptionRecord> {
+  return requestJSON<SubscriptionRecord>(
+    '/api/subscriptions',
+    jsonBodyInit('POST', input, { 'Idempotency-Key': idempotencyKey }),
+  )
 }
 
 export function createVPSSubscription(
