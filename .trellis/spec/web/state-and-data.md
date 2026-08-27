@@ -63,7 +63,7 @@
 - `/records/compare` 使用 `comparison-url/v1` query `state`（canonical key order、UTC、整数秒）。state 不含 `token` / `comparison_intent` / `payload` / `title` / `body_markdown`。candidate 确认前 `POST /api/evidence/comparisons` 次数为 0。另存必须走 `createRecordDraft` + `saveComparisonRecord`，不得调用 `createRecord` / `useRecordDraft.publish()`。同一 digest 重试必须复用 `record_id` 与 `Idempotency-Key`。证据类型切换是 SegmentedControl 值选择，不是无 panel 的 Tabs。`HOUFENG_COMPARISON_ENABLED` 默认关。
 - 只有所有 production consumer 都位于 lazy route 时才允许拆分。AppShell、auth、router bootstrap 等启动路径使用的 helper 留在 `api.ts`，不能为了数字好看制造首屏 waterfall。
 - helper 移动不得改变 method、path、query 顺序/省略规则、body 或 response 解包；原有 API/page tests 必须继续覆盖 wire shape。
-- 每次拆分先 fresh production build，再运行 `bundle:check`。entry JS/CSS 与 font 只能随有证据的清理降低，不能抬高掩盖 eager 回退。`maxAsyncJsGzipBytes` 的唯一已审计例外是 Child 5 的 lazy `MarkdownPreview` chunk（react-markdown / remark-gfm / rehype-sanitize，2026-08-18 实测 gzip `48453`）。不得引入 CodeMirror：它会注入 inline `<style>`，违反 `style-src 'self'`。源文编辑器使用 textarea。Records transport 不得进入 entry。
+- 每次拆分先 fresh production build，再运行 `bundle:check`。entry JS/CSS 与 font 只能随有证据的清理降低，不能抬高掩盖 eager 回退。`maxAsyncJsGzipBytes` 的唯一已审计例外是 Child 5 的 lazy `MarkdownPreview` chunk（react-markdown / remark-gfm / rehype-sanitize，2026-08-27 生产构建实测 gzip `48455`）。不得引入 CodeMirror：它会注入 inline `<style>`，违反 `style-src 'self'`。源文编辑器使用 textarea。Records transport 不得进入 entry。
 - page/component 只能 import façade，禁止直接 import `apiRequest.ts` 或调用 `fetch`。
 
 #### 4. Validation & Error Matrix
