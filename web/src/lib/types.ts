@@ -815,6 +815,8 @@ export type BillingPeriodUnit = 'day' | 'week' | 'month' | 'year'
 
 export type RenewalMode = 'auto' | 'manual' | 'auto_cancelled' | 'lottery' | 'gift' | 'bonus' | 'other'
 
+export type ISODate = string
+
 export type AssetServiceType = 'web' | 'api' | 'database' | 'worker' | 'proxy' | 'other'
 
 export type AssetServiceStatus = 'active' | 'paused' | 'retired' | 'unknown'
@@ -2214,8 +2216,8 @@ export type CreateVPSSubscriptionInput = {
   billing_months: number
   billing_period_unit?: BillingPeriodUnit | string
   billing_period_length?: number
-  started_at?: string | null
-  renew_at?: string | null
+  started_at?: ISODate | null
+  renew_at?: ISODate | null
   auto_renew: boolean
   auto_renew_cancelled: boolean
   renewal_mode?: RenewalMode | string

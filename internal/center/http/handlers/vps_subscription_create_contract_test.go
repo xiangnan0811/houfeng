@@ -16,6 +16,7 @@ import (
 type vpsSubscriptionCreateField struct {
 	Name     string `json:"name"`
 	Type     string `json:"type"`
+	Format   string `json:"format,omitempty"`
 	Required bool   `json:"required"`
 	Nullable bool   `json:"nullable"`
 }
@@ -133,7 +134,7 @@ func TestVPSSubscriptionCreateManifestRejectsSemanticDrift(t *testing.T) {
 	manifest := []vpsSubscriptionCreateField{
 		{Name: "price", Type: "number", Required: true, Nullable: false},
 		{Name: "auto_renew", Type: "boolean", Required: true, Nullable: false},
-		{Name: "renew_at", Type: "date", Required: false, Nullable: true},
+		{Name: "renew_at", Type: "string", Format: "date", Required: false, Nullable: true},
 		{Name: "note", Type: "string", Required: true, Nullable: false},
 	}
 
@@ -173,6 +174,35 @@ func TestVPSSubscriptionCreateManifestRejectsSemanticDrift(t *testing.T) {
 	}
 	if ts[0].Type == manifest[0].Type && ts[3].Required == manifest[3].Required {
 		t.Fatal("drift sample unexpectedly matched the manifest")
+	}
+}
+
+func TestJSONFieldContractsSeparateBaseTypeFormatAndNullability(t *testing.T) {
+	type sample struct {
+		Ordinary subscriptions.OptionalString `json:"ordinary"`
+		Date     subscriptions.OptionalDate   `json:"date"`
+	}
+
+	want := []vpsSubscriptionCreateField{
+		{Name: "ordinary", Type: "string", Nullable: false},
+		{Name: "date", Type: "string", Format: "date", Nullable: true},
+	}
+	if got := jsonFieldContractsOf(reflect.TypeOf(sample{})); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Go field contracts = %#v, want base type/format/nullability separated as %#v", got, want)
+	}
+}
+
+func TestVPSSubscriptionCreateManifestPreservesOptionalDateFormat(t *testing.T) {
+	fields, err := decodeVPSSubscriptionCreateManifest([]byte(`[{"name":"renew_at","type":"string","format":"date","required":false,"nullable":true},{"name":"note","type":"string","required":true,"nullable":false}]`))
+	if err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	want := []vpsSubscriptionCreateField{
+		{Name: "renew_at", Type: "string", Format: "date", Nullable: true},
+		{Name: "note", Type: "string", Required: true},
+	}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("decoded manifest = %#v, want optional date format preserved as %#v", fields, want)
 	}
 }
 
@@ -382,6 +412,27 @@ func TestVPSSubscriptionCreateManifestRequiresBooleanSemanticKeys(t *testing.T) 
 	}
 }
 
+func TestVPSSubscriptionCreateManifestRejectsInvalidTypeAndFormatSemantics(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "missing type", body: `[{"name":"value","required":false,"nullable":false}]`},
+		{name: "null type", body: `[{"name":"value","type":null,"required":false,"nullable":false}]`},
+		{name: "unknown type", body: `[{"name":"value","type":"date","required":false,"nullable":false}]`},
+		{name: "null format", body: `[{"name":"value","type":"string","format":null,"required":false,"nullable":false}]`},
+		{name: "unknown format", body: `[{"name":"value","type":"string","format":"datetime","required":false,"nullable":false}]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if fields, err := decodeVPSSubscriptionCreateManifest([]byte(tt.body)); err == nil {
+				t.Fatalf("decode manifest = %#v, want type/format semantic rejection", fields)
+			}
+		})
+	}
+}
+
 func TestTSJSONTypeNameAcceptsSupportedUnionMembers(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -392,8 +443,8 @@ func TestTSJSONTypeNameAcceptsSupportedUnionMembers(t *testing.T) {
 		{name: "number", typeExpr: "number", wantType: "number"},
 		{name: "boolean", typeExpr: "boolean", wantType: "boolean"},
 		{name: "string", typeExpr: "string", wantType: "string"},
-		{name: "nullable date", typeExpr: "string | null", wantType: "date", wantNullable: true},
-		{name: "reordered nullable date", typeExpr: "null | string", wantType: "date", wantNullable: true},
+		{name: "nullable string", typeExpr: "string | null", wantType: "string", wantNullable: true},
+		{name: "reordered nullable string", typeExpr: "null | string", wantType: "string", wantNullable: true},
 	}
 
 	for _, tt := range tests {
@@ -401,6 +452,57 @@ func TestTSJSONTypeNameAcceptsSupportedUnionMembers(t *testing.T) {
 			gotType, gotNullable, ok := tsJSONTypeName(tt.typeExpr, nil)
 			if !ok || gotType != tt.wantType || gotNullable != tt.wantNullable {
 				t.Fatalf("tsJSONTypeName(%q) = (%q, nullable=%t, ok=%t), want (%q, nullable=%t, ok=true)", tt.typeExpr, gotType, gotNullable, ok, tt.wantType, tt.wantNullable)
+			}
+		})
+	}
+}
+
+func TestParseTSObjectFieldsMapsOnlyExactISODateAliasToDateFormat(t *testing.T) {
+	got := parseTSObjectFields(t, `export type ISODate = string
+export type Sample = {
+  ordinary: string | null
+  date: ISODate | null
+}`)
+	want := []vpsSubscriptionCreateField{
+		{Name: "ordinary", Type: "string", Required: true, Nullable: true},
+		{Name: "date", Type: "string", Format: "date", Required: true, Nullable: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("TypeScript fields = %#v, want exact ISODate format mapping %#v", got, want)
+	}
+}
+
+func TestParseTSObjectFieldsRejectsMissingOrWidenedISODateAlias(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "missing",
+			source: `export type Sample = {
+  date: ISODate | null
+}`,
+		},
+		{
+			name: "widened",
+			source: `export type ISODate = string | number
+export type Sample = {
+  date: ISODate | null
+}`,
+		},
+		{
+			name: "nullable definition",
+			source: `export type ISODate = string | null
+export type Sample = {
+  date: ISODate | null
+}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, err := parseTSObjectFieldsSource(tt.source); err == nil {
+				t.Fatalf("invalid ISODate source was accepted as %#v", got)
 			}
 		})
 	}
@@ -794,6 +896,7 @@ func jsonFieldContractsOf(typ reflect.Type) []vpsSubscriptionCreateField {
 		fields = append(fields, vpsSubscriptionCreateField{
 			Name:     name,
 			Type:     goJSONTypeName(goType),
+			Format:   goJSONFormat(goType),
 			Required: field.Tag.Get("required") == "true",
 			Nullable: nullable,
 		})
@@ -825,9 +928,18 @@ func supportedGoJSONTypeName(typ reflect.Type) (string, bool) {
 	case reflect.TypeOf(subscriptions.OptionalString{}), reflect.TypeOf(""):
 		return "string", true
 	case reflect.TypeOf(subscriptions.OptionalDate{}), reflect.TypeOf(subscriptions.Date{}):
-		return "date", true
+		return "string", true
 	default:
 		return "", false
+	}
+}
+
+func goJSONFormat(typ reflect.Type) string {
+	switch typ {
+	case reflect.TypeOf(subscriptions.OptionalDate{}), reflect.TypeOf(subscriptions.Date{}):
+		return "date"
+	default:
+		return ""
 	}
 }
 
@@ -846,10 +958,11 @@ func readVPSSubscriptionCreateManifest(t *testing.T, root string) []vpsSubscript
 
 func decodeVPSSubscriptionCreateManifest(body []byte) ([]vpsSubscriptionCreateField, error) {
 	var rawFields []struct {
-		Name     *string `json:"name"`
-		Type     *string `json:"type"`
-		Required *bool   `json:"required"`
-		Nullable *bool   `json:"nullable"`
+		Name     *string         `json:"name"`
+		Type     *string         `json:"type"`
+		Format   json.RawMessage `json:"format"`
+		Required *bool           `json:"required"`
+		Nullable *bool           `json:"nullable"`
 	}
 	if err := json.Unmarshal(body, &rawFields); err != nil {
 		return nil, err
@@ -868,8 +981,16 @@ func decodeVPSSubscriptionCreateManifest(body []byte) ([]vpsSubscriptionCreateFi
 			Required: *rawField.Required,
 			Nullable: *rawField.Nullable,
 		}
-		if field.Name == "" || field.Type == "" {
+		if field.Name == "" || (field.Type != "number" && field.Type != "string" && field.Type != "boolean") {
 			return nil, fmt.Errorf("manifest field missing name/type: %#v", field)
+		}
+		if len(rawField.Format) > 0 {
+			if string(rawField.Format) == "null" || json.Unmarshal(rawField.Format, &field.Format) != nil || field.Format != "date" {
+				return nil, fmt.Errorf("manifest field %d has invalid format", i)
+			}
+			if field.Type != "string" {
+				return nil, fmt.Errorf("manifest field %d format requires string type", i)
+			}
 		}
 		fields = append(fields, field)
 	}
@@ -905,7 +1026,11 @@ func parseTSObjectFieldsSource(source string) ([]vpsSubscriptionCreateField, err
 		if aliasErr != nil {
 			return nil, aliasErr
 		}
-		return parseTSObjectBody(source[start+len(marker):], stringAliases)
+		dateAliases, aliasErr := verifiedTSISODateAliases(source)
+		if aliasErr != nil {
+			return nil, aliasErr
+		}
+		return parseTSObjectBody(source[start+len(marker):], stringAliases, dateAliases)
 	}
 
 	const sampleMarker = "export type Sample = {"
@@ -920,7 +1045,11 @@ func parseTSObjectFieldsSource(source string) ([]vpsSubscriptionCreateField, err
 	if aliasErr != nil {
 		return nil, aliasErr
 	}
-	return parseTSObjectBody(source[start+len(sampleMarker):], stringAliases)
+	dateAliases, aliasErr := verifiedTSISODateAliases(source)
+	if aliasErr != nil {
+		return nil, aliasErr
+	}
+	return parseTSObjectBody(source[start+len(sampleMarker):], stringAliases, dateAliases)
 }
 
 func uniqueLiveTSDeclarationStart(source string, marker string, declarationName string) (int, bool, error) {
@@ -1021,7 +1150,7 @@ func onlyHorizontalWhitespace(value string) bool {
 	return true
 }
 
-func parseTSObjectBody(rest string, stringAliases map[string]struct{}) ([]vpsSubscriptionCreateField, error) {
+func parseTSObjectBody(rest string, stringAliases map[string]struct{}, dateAliases map[string]struct{}) ([]vpsSubscriptionCreateField, error) {
 	end := strings.Index(rest, "\n}")
 	if end < 0 {
 		return nil, fmt.Errorf("TypeScript object type is not a flat object type")
@@ -1053,13 +1182,14 @@ func parseTSObjectBody(rest string, stringAliases map[string]struct{}) ([]vpsSub
 		required := !strings.HasSuffix(strings.TrimSpace(name), "?")
 		name = strings.TrimSuffix(strings.TrimSpace(name), "?")
 		typeExpr = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(typeExpr), ";"))
-		typeName, nullable, ok := tsJSONTypeName(typeExpr, stringAliases)
+		typeName, format, nullable, ok := tsJSONFieldContract(typeExpr, stringAliases, dateAliases)
 		if !ok {
 			return nil, fmt.Errorf("unsupported TypeScript type expression %q", typeExpr)
 		}
 		fields = append(fields, vpsSubscriptionCreateField{
 			Name:     name,
 			Type:     typeName,
+			Format:   format,
 			Required: required,
 			Nullable: nullable,
 		})
@@ -1099,6 +1229,31 @@ func verifiedTSStringLiteralAliases(source string) (map[string]struct{}, error) 
 		if validDefinition {
 			aliases[aliasName] = struct{}{}
 		}
+	}
+	return aliases, nil
+}
+
+func verifiedTSISODateAliases(source string) (map[string]struct{}, error) {
+	const aliasName = "ISODate"
+	aliases := make(map[string]struct{}, 1)
+	marker := "export type " + aliasName + " ="
+	start, found, err := uniqueLiveTSDeclarationStart(source, marker, aliasName)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return aliases, nil
+	}
+	definitionRest := source[start+len(marker):]
+	if lineEnd := strings.IndexByte(definitionRest, '\n'); lineEnd >= 0 {
+		if startsWithTSTypeContinuationAfterTrivia(definitionRest[lineEnd+1:]) {
+			return aliases, nil
+		}
+		definitionRest = definitionRest[:lineEnd]
+	}
+	definition := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(definitionRest), ";"))
+	if definition == "string" {
+		aliases[aliasName] = struct{}{}
 	}
 	return aliases, nil
 }
@@ -1192,12 +1347,19 @@ func isNonEmptyTypeScriptStringLiteral(member string) bool {
 }
 
 func tsJSONTypeName(typeExpr string, stringAliases map[string]struct{}) (string, bool, bool) {
+	typeName, _, nullable, ok := tsJSONFieldContract(typeExpr, stringAliases, nil)
+	return typeName, nullable, ok
+}
+
+func tsJSONFieldContract(typeExpr string, stringAliases map[string]struct{}, dateAliases map[string]struct{}) (string, string, bool, bool) {
 	primitiveKind := ""
 	nullable := false
+	hasDateAlias := false
+	hasOrdinaryString := false
 	for _, rawMember := range strings.Split(typeExpr, "|") {
 		member := strings.TrimSpace(rawMember)
 		if member == "" {
-			return "", false, false
+			return "", "", false, false
 		}
 
 		kind := ""
@@ -1211,24 +1373,33 @@ func tsJSONTypeName(typeExpr string, stringAliases map[string]struct{}) (string,
 			kind = "boolean"
 		case "string":
 			kind = "string"
+			hasOrdinaryString = true
 		default:
-			if _, ok := stringAliases[member]; !ok {
-				return "", false, false
+			if _, ok := dateAliases[member]; ok {
+				kind = "string"
+				hasDateAlias = true
+			} else if _, ok := stringAliases[member]; ok {
+				kind = "string"
+				hasOrdinaryString = true
+			} else {
+				return "", "", false, false
 			}
-			kind = "string"
 		}
 		if primitiveKind != "" && primitiveKind != kind {
-			return "", false, false
+			return "", "", false, false
 		}
 		primitiveKind = kind
 	}
 	if primitiveKind == "" {
-		return "", false, false
+		return "", "", false, false
 	}
-	if primitiveKind == "string" && nullable {
-		return "date", true, true
+	if hasDateAlias && hasOrdinaryString {
+		return "", "", false, false
 	}
-	return primitiveKind, nullable, true
+	if hasDateAlias {
+		return "string", "date", nullable, true
+	}
+	return primitiveKind, "", nullable, true
 }
 
 func namesOf(fields []vpsSubscriptionCreateField) []string {
