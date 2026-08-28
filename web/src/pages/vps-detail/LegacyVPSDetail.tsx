@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { Button, Modal } from '../../components/atoms'
@@ -115,6 +115,12 @@ import {
   subscriptionLinkageNotice,
   type VPSVersionConflictState,
 } from './vpsManagementHelpers'
+import {
+  createVPSWriteOwnerStore,
+  type VPSWriteOperation,
+  type VPSWriteOwner,
+  type VPSWriteOwnerStore,
+} from './vpsWriteOwnerStore'
 
 type PageFeedbackItem = {
   key: string
@@ -227,7 +233,15 @@ function shouldExposeCancellationWorkbench(detail: VPSAssetDetail, preview: Canc
     Boolean(preview && ((preview.warnings ?? []).length > 0 || (preview.blockers ?? []).length > 0))
 }
 
-export function LegacyVPSDetail() {
+type LegacyVPSDetailProps = {
+  writeOwnerStore?: VPSWriteOwnerStore
+  onViewAuthorityInvalidatedWriteSettled?: (vpsId: string) => void
+}
+
+export function LegacyVPSDetail({
+  writeOwnerStore: providedWriteOwnerStore,
+  onViewAuthorityInvalidatedWriteSettled,
+}: LegacyVPSDetailProps = {}) {
   const { vpsId } = useParams()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -236,75 +250,65 @@ export function LegacyVPSDetail() {
   const skipNextQueryDrivenReload = useRef(false)
   const cancellationPreviewGenerationRef = useRef(0)
   const mutationGenerationRef = useRef(0)
-  const latestLoadLockRef = useRef(false)
-  const writeLocksRef = useRef(new Map<string, string>())
+  const archiveReviewRequestRef = useRef(0)
   const currentVpsIdRef = useRef(vpsId)
+  const latestLoadLockRef = useRef(false)
+  const [localWriteOwnerStore] = useState(createVPSWriteOwnerStore)
+  const writeOwnerStore = providedWriteOwnerStore ?? localWriteOwnerStore
   const subscriptionIdempotencyKeyRef = useRef(crypto.randomUUID())
   const factDraftRef = useRef<FactEditFormState | null>(null)
   const [state, setState] = useState(INITIAL_STATE)
   const [selectors, setSelectors] = useState(INITIAL_SELECTOR_STATE)
+  const writeOwners = useSyncExternalStore(
+    writeOwnerStore.subscribe,
+    writeOwnerStore.getSnapshot,
+    writeOwnerStore.getSnapshot,
+  )
   const [decisionDraft, setDecisionDraft] = useState<DecisionDraftState>({
     renewalDecision: 'unreviewed',
     reason: '',
   })
-  const [decisionSubmitting, setDecisionSubmitting] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [decisionNotice, setDecisionNotice] = useState<string | null>(null)
   const [decisionAction, setDecisionAction] = useState<{ to: string; label: string } | null>(null)
   const [activeDrawer, setActiveDrawer] = useState<VPSDetailDrawerMode>(null)
   const [factDraft, setFactDraft] = useState<FactEditFormState | null>(null)
   const [factDraftBase, setFactDraftBase] = useState<FactEditFormState | null>(null)
-  const [factSubmitting, setFactSubmitting] = useState(false)
   const [factError, setFactError] = useState<string | null>(null)
   const [factNotice, setFactNotice] = useState<string | null>(null)
   const [mutationConflict, setMutationConflict] = useState<VPSVersionConflictState | null>(null)
   const [latestLoading, setLatestLoading] = useState(false)
-  const [writeInFlight, setWriteInFlight] = useState(false)
   const [readonlyBlocked, setReadonlyBlocked] = useState(false)
   const [linkDraft, setLinkDraft] = useState<LinkDraftState>({ monitoringInstanceId: '', note: '' })
-  const [linkSubmitting, setLinkSubmitting] = useState(false)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [linkNotice, setLinkNotice] = useState<string | null>(null)
-  const [monitoringCreateSubmitting, setMonitoringCreateSubmitting] = useState(false)
   const [monitoringCreateError, setMonitoringCreateError] = useState<string | null>(null)
   const [monitoringCreateNotice, setMonitoringCreateNotice] = useState<string | null>(null)
   const [monitoringCreateDraft, setMonitoringCreateDraft] = useState<MonitoringInstanceCreateDraftState | null>(null)
   const [subscriptionDraft, setSubscriptionDraft] = useState<SubscriptionDraftState>(INITIAL_SUBSCRIPTION_DRAFT)
-  const [subscriptionSubmitting, setSubscriptionSubmitting] = useState(false)
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null)
   const [subscriptionNotice, setSubscriptionNotice] = useState<string | null>(null)
   const [validityExtensionDraft, setValidityExtensionDraft] = useState<ValidityExtensionDraftState>(INITIAL_VALIDITY_EXTENSION_DRAFT)
-  const [validityExtensionSubmitting, setValidityExtensionSubmitting] = useState(false)
   const [validityExtensionError, setValidityExtensionError] = useState<string | null>(null)
   const [validityExtensionNotice, setValidityExtensionNotice] = useState<string | null>(null)
-  const [unlinkingMonitoringInstanceId, setUnlinkingMonitoringInstanceId] = useState<string | null>(null)
   const [unlinkError, setUnlinkError] = useState<string | null>(null)
   const [pendingUnlinkMonitoringInstance, setPendingUnlinkMonitoringInstance] = useState<VPSMonitoringInstanceSummary | null>(null)
   const [lifecycleConfirmingAction, setLifecycleConfirmingAction] = useState<'archive' | 'restore' | null>(null)
-  const [lifecycleSubmitting, setLifecycleSubmitting] = useState(false)
   const [lifecycleError, setLifecycleError] = useState<string | null>(null)
   const [lifecycleNotice, setLifecycleNotice] = useState<string | null>(null)
   const [archiveReview, setArchiveReview] = useState<ArchiveReview | null>(null)
   const [archiveReviewLoading, setArchiveReviewLoading] = useState(false)
   const [archiveConfirmationName, setArchiveConfirmationName] = useState('')
-  const [cancellationSubmitting, setCancellationSubmitting] = useState(false)
   const [cancellationError, setCancellationError] = useState<string | null>(null)
   const [experienceDraft, setExperienceDraft] = useState<ExperienceDraftState>(INITIAL_EXPERIENCE_DRAFT)
-  const [experienceSubmitting, setExperienceSubmitting] = useState(false)
   const [experienceError, setExperienceError] = useState<string | null>(null)
   const [experienceNotice, setExperienceNotice] = useState<string | null>(null)
   const [serviceDraft, setServiceDraft] = useState<ServiceDraftState>(INITIAL_SERVICE_DRAFT)
-  const [serviceSubmitting, setServiceSubmitting] = useState(false)
   const [serviceError, setServiceError] = useState<string | null>(null)
   const [serviceNotice, setServiceNotice] = useState<string | null>(null)
   const [domainDraft, setDomainDraft] = useState<DomainDraftState>(INITIAL_DOMAIN_DRAFT)
-  const [domainSubmitting, setDomainSubmitting] = useState(false)
   const [domainError, setDomainError] = useState<string | null>(null)
   const [domainNotice, setDomainNotice] = useState<string | null>(null)
-
-  useEffect(() => {
-    currentVpsIdRef.current = vpsId
-  }, [vpsId])
 
   useEffect(() => {
     subscriptionIdempotencyKeyRef.current = crypto.randomUUID()
@@ -327,26 +331,33 @@ export function LegacyVPSDetail() {
     mutationGenerationRef.current += 1
     latestLoadLockRef.current = false
     setLatestLoading(false)
-    setFactSubmitting(false)
-    setDecisionSubmitting(false)
   }
 
   function mutationIsCurrent(generation: number): boolean {
     return mutationGenerationRef.current === generation
   }
 
-  function beginVpsWrite(targetVpsId: string): { generation: number; token: string } | null {
-    if (writeLocksRef.current.has(targetVpsId)) return null
-    const token = crypto.randomUUID()
-    writeLocksRef.current.set(targetVpsId, token)
-    if (currentVpsIdRef.current === targetVpsId) setWriteInFlight(true)
-    return { generation: ++mutationGenerationRef.current, token }
+  function beginVpsWrite(
+    targetVpsId: string,
+    operation: VPSWriteOperation,
+    monitoringInstanceId?: string,
+  ): VPSWriteOwner | null {
+    const owner = writeOwnerStore.begin({
+      vpsId: targetVpsId,
+      generation: mutationGenerationRef.current + 1,
+      operation,
+      ...(monitoringInstanceId ? { monitoringInstanceId } : {}),
+    })
+    if (!owner) return null
+    mutationGenerationRef.current = owner.generation
+    return owner
   }
 
-  function finishVpsWrite(targetVpsId: string, token: string) {
-    if (writeLocksRef.current.get(targetVpsId) !== token) return
-    writeLocksRef.current.delete(targetVpsId)
-    if (currentVpsIdRef.current === targetVpsId) setWriteInFlight(false)
+  function finishVpsWrite(owner: VPSWriteOwner) {
+    const released = writeOwnerStore.finish(owner)
+    if (released && !mutationIsCurrent(owner.generation)) {
+      onViewAuthorityInvalidatedWriteSettled?.(owner.vpsId)
+    }
   }
 
   function collapseDrawer() {
@@ -357,26 +368,37 @@ export function LegacyVPSDetail() {
   }
 
   useEffect(() => {
+    currentVpsIdRef.current = vpsId
+    archiveReviewRequestRef.current += 1
+    const invalidateRouteAuthority = () => {
+      archiveReviewRequestRef.current += 1
+      mutationGenerationRef.current += 1
+      latestLoadLockRef.current = false
+    }
     if (!vpsId) {
-      return
+      return invalidateRouteAuthority
     }
     if (skipNextQueryDrivenReload.current) {
       skipNextQueryDrivenReload.current = false
-      return
+      return invalidateRouteAuthority
     }
 
     let cancelled = false
-    cancellationPreviewGenerationRef.current += 1
-    mutationGenerationRef.current += 1
+    const routeGeneration = ++mutationGenerationRef.current
+    const routePreviewGeneration = ++cancellationPreviewGenerationRef.current
     latestLoadLockRef.current = false
-    currentVpsIdRef.current = vpsId
-    setWriteInFlight(writeLocksRef.current.has(vpsId))
+    const routeIsCurrent = () => (
+      !cancelled &&
+      currentVpsIdRef.current === vpsId &&
+      mutationGenerationRef.current === routeGeneration
+    )
 
     getVPSAsset(vpsId)
       .then(async (detail) => {
+        if (!routeIsCurrent()) return null
         const normalizedDetail = normalizeVPSDetail(detail)
         if (normalizedDetail.lifecycle_status === 'archived' || normalizedDetail.lifecycle_status === 'cancelled') {
-          if (cancelled) return null
+          if (!routeIsCurrent()) return null
           navigate(`/archive/${encodeURIComponent(normalizedDetail.vps_id)}`, { replace: true })
           return null
         }
@@ -391,22 +413,46 @@ export function LegacyVPSDetail() {
         return { normalizedDetail, timeline, services, domains, subscriptionState, ipQualityState, cancellationState }
       })
       .then((payload) => {
-        if (cancelled || payload == null) return
+        if (payload == null || !routeIsCurrent()) return
         const { normalizedDetail, timeline, services, domains, subscriptionState, ipQualityState, cancellationState } = payload
-        setState({
-          vpsId,
-          error: null,
-          detail: normalizedDetail,
-          timeline,
-          services,
-          domains,
-          subscriptions: subscriptionState.subscriptions,
-          subscriptionsError: subscriptionState.subscriptionsError,
-          ipQuality: ipQualityState.ipQuality,
-          ipQualityError: ipQualityState.ipQualityError,
-          cancellationPreview: cancellationState.cancellationPreview,
-          cancellationPreviewError: cancellationState.cancellationPreviewError,
-          cancellationResult: null,
+        const cancellationResetGeneration = initialDrawerFromQuery === 'cancellation'
+          ? null
+          : ++cancellationPreviewGenerationRef.current
+        setState((current) => {
+          if (!routeIsCurrent()) return current
+          const routePreviewIsCurrent = (
+            initialDrawerFromQuery === 'cancellation' &&
+            cancellationPreviewGenerationRef.current === routePreviewGeneration
+          )
+          const cancellationResetIsCurrent = (
+            cancellationResetGeneration !== null &&
+            cancellationPreviewGenerationRef.current === cancellationResetGeneration
+          )
+          return {
+            vpsId,
+            error: null,
+            detail: normalizedDetail,
+            timeline,
+            services,
+            domains,
+            subscriptions: subscriptionState.subscriptions,
+            subscriptionsError: subscriptionState.subscriptionsError,
+            ipQuality: ipQualityState.ipQuality,
+            ipQualityError: ipQualityState.ipQualityError,
+            cancellationPreview: routePreviewIsCurrent
+              ? cancellationState.cancellationPreview
+              : cancellationResetIsCurrent
+                ? null
+                : current.cancellationPreview,
+            cancellationPreviewError: routePreviewIsCurrent
+              ? cancellationState.cancellationPreviewError
+              : cancellationResetIsCurrent
+                ? null
+                : current.cancellationPreviewError,
+            cancellationResult: routePreviewIsCurrent || cancellationResetIsCurrent
+              ? null
+              : current.cancellationResult,
+          }
         })
         setDecisionDraft({ renewalDecision: normalizedDetail.renewal_decision, reason: '' })
         setDecisionError(null)
@@ -419,9 +465,6 @@ export function LegacyVPSDetail() {
         setMutationConflict(null)
         setReadonlyBlocked(false)
         setLatestLoading(false)
-        setFactSubmitting(false)
-        setDecisionSubmitting(false)
-        setWriteInFlight(writeLocksRef.current.has(vpsId))
         setLinkDraft({ monitoringInstanceId: '', note: '' })
         setLinkError(null)
         setLinkNotice(null)
@@ -436,6 +479,7 @@ export function LegacyVPSDetail() {
         setValidityExtensionNotice(null)
         setUnlinkError(null)
         setPendingUnlinkMonitoringInstance(null)
+        archiveReviewRequestRef.current += 1
         setLifecycleConfirmingAction(null)
         setLifecycleError(null)
         setLifecycleNotice(null)
@@ -465,36 +509,46 @@ export function LegacyVPSDetail() {
         setActiveDrawer(initialDrawerFromQuery)
       })
       .catch((error: unknown) => {
-        if (cancelled) return
-        setState({
-          vpsId,
-          error: describeError(error, '加载 VPS 详情失败'),
-          detail: null,
-          timeline: null,
-          services: [],
-          domains: [],
-          subscriptions: [],
-          subscriptionsError: null,
-          ipQuality: null,
-          ipQualityError: null,
-          cancellationPreview: null,
-          cancellationPreviewError: null,
-          cancellationResult: null,
+        if (!routeIsCurrent()) return
+        setState((current) => {
+          if (!routeIsCurrent()) return current
+          return {
+            vpsId,
+            error: describeError(error, '加载 VPS 详情失败'),
+            detail: null,
+            timeline: null,
+            services: [],
+            domains: [],
+            subscriptions: [],
+            subscriptionsError: null,
+            ipQuality: null,
+            ipQualityError: null,
+            cancellationPreview: null,
+            cancellationPreviewError: null,
+            cancellationResult: null,
+          }
         })
       })
 
     return () => {
       cancelled = true
-      mutationGenerationRef.current += 1
-      latestLoadLockRef.current = false
+      invalidateRouteAuthority()
     }
   }, [initialDrawerFromQuery, navigate, openCancellationFromQuery, vpsId])
 
-  const applyCancellationPreview = useCallback(async (targetVPSId: string, generation: number) => {
+  const applyCancellationPreview = useCallback(async (
+    targetVPSId: string,
+    generation: number,
+    ownsRefresh: () => boolean = () => true,
+  ) => {
     const cancellationState = await loadCancellationPreview(targetVPSId)
-    if (generation !== cancellationPreviewGenerationRef.current) return false
+    if (generation !== cancellationPreviewGenerationRef.current || !ownsRefresh()) return false
     setState((current) => {
-      if (current.vpsId !== targetVPSId) return current
+      if (
+        current.vpsId !== targetVPSId ||
+        generation !== cancellationPreviewGenerationRef.current ||
+        !ownsRefresh()
+      ) return current
       return {
         ...current,
         cancellationPreview: cancellationState.cancellationPreview,
@@ -509,10 +563,13 @@ export function LegacyVPSDetail() {
     await applyCancellationPreview(targetVPSId, generation)
   }, [applyCancellationPreview])
 
-  async function refreshDetail(targetVPSId: string): Promise<VPSAssetDetail> {
+  async function refreshDetail(
+    targetVPSId: string,
+    ownsRefresh: () => boolean = () => true,
+  ): Promise<VPSAssetDetail> {
     const detail = normalizeVPSDetail(await getVPSAsset(targetVPSId))
     setState((current) => {
-      if (current.vpsId !== targetVPSId || !current.timeline) return current
+      if (current.vpsId !== targetVPSId || !current.timeline || !ownsRefresh()) return current
       return { ...current, error: null, detail }
     })
     return detail
@@ -548,19 +605,25 @@ export function LegacyVPSDetail() {
     return detailResult
   }
 
-  async function refreshServices(targetVPSId: string): Promise<AssetServiceRecord[]> {
+  async function refreshServices(
+    targetVPSId: string,
+    ownsRefresh: () => boolean = () => true,
+  ): Promise<AssetServiceRecord[]> {
     const services = await listVPSServices(targetVPSId)
     setState((current) => {
-      if (current.vpsId !== targetVPSId) return current
+      if (current.vpsId !== targetVPSId || !ownsRefresh()) return current
       return { ...current, services }
     })
     return services
   }
 
-  async function refreshDomains(targetVPSId: string): Promise<AssetDomainRecord[]> {
+  async function refreshDomains(
+    targetVPSId: string,
+    ownsRefresh: () => boolean = () => true,
+  ): Promise<AssetDomainRecord[]> {
     const domains = await listVPSDomains(targetVPSId)
     setState((current) => {
-      if (current.vpsId !== targetVPSId) return current
+      if (current.vpsId !== targetVPSId || !ownsRefresh()) return current
       return { ...current, domains }
     })
     return domains
@@ -644,6 +707,7 @@ export function LegacyVPSDetail() {
   }
 
   function closeLifecycleConfirmation() {
+    archiveReviewRequestRef.current += 1
     setLifecycleConfirmingAction(null)
     setLifecycleError(null)
     setArchiveReview(null)
@@ -717,8 +781,13 @@ export function LegacyVPSDetail() {
     }
     if (mode === 'cancellation') {
       setCancellationError(null)
-      setState((current) => ({ ...current, cancellationResult: null }))
-      if (state.detail && !state.cancellationPreview && !state.cancellationPreviewError) {
+      setState((current) => ({
+        ...current,
+        cancellationPreview: null,
+        cancellationPreviewError: null,
+        cancellationResult: null,
+      }))
+      if (state.detail) {
         void refreshCancellationPreview(state.detail.vps_id)
       }
     }
@@ -748,6 +817,9 @@ export function LegacyVPSDetail() {
   }
 
   function closeDrawer() {
+    if (activeDrawer === 'cancellation') {
+      cancellationPreviewGenerationRef.current += 1
+    }
     invalidateMutations()
     if (activeDrawer === 'decision') {
       if (state.detail) {
@@ -807,6 +879,7 @@ export function LegacyVPSDetail() {
   }
 
   function openLifecycleConfirmation(action: 'archive' | 'restore') {
+    const requestId = ++archiveReviewRequestRef.current
     setLifecycleConfirmingAction(action)
     setLifecycleError(null)
     setLifecycleNotice(null)
@@ -818,18 +891,27 @@ export function LegacyVPSDetail() {
     }
     const detail = state.detail
     if (!detail) return
+    const targetVpsId = detail.vps_id
+    const ownsArchiveReview = () => (
+      archiveReviewRequestRef.current === requestId && currentVpsIdRef.current === targetVpsId
+    )
     setArchiveReview(null)
     setArchiveReviewLoading(true)
-    getVPSArchiveReview(detail.vps_id)
+    getVPSArchiveReview(targetVpsId)
       .then((review) => {
+        if (!ownsArchiveReview()) return
         setArchiveReview(review)
         setLifecycleError(null)
       })
       .catch((error: unknown) => {
+        if (!ownsArchiveReview()) return
         setArchiveReview(null)
         setLifecycleError(describeError(error, '加载归档资格失败'))
       })
-      .finally(() => setArchiveReviewLoading(false))
+      .finally(() => {
+        if (!ownsArchiveReview()) return
+        setArchiveReviewLoading(false)
+      })
   }
 
   async function routeIfTerminalVPS(vpsID: string, generation: number): Promise<boolean> {
@@ -930,13 +1012,12 @@ export function LegacyVPSDetail() {
     }
 
     const reason = decisionDraft.reason.trim()
-    const write = beginVpsWrite(detail.vps_id)
-    if (!write) {
+    const owner = beginVpsWrite(detail.vps_id, 'decision')
+    if (!owner) {
       setDecisionError('上一次保存仍在进行，请稍后再试')
       return
     }
-    const { generation, token } = write
-    setDecisionSubmitting(true)
+    const { generation } = owner
     try {
       const updated = await updateVPSAsset(detail.vps_id, {
         renewal_decision: decisionDraft.renewalDecision,
@@ -971,8 +1052,7 @@ export function LegacyVPSDetail() {
       if (!mutationIsCurrent(generation)) return
       setDecisionError(describeError(error, '更新续费决策失败'))
     } finally {
-      finishVpsWrite(detail.vps_id, token)
-      setDecisionSubmitting(false)
+      finishVpsWrite(owner)
     }
   }
 
@@ -1012,13 +1092,12 @@ export function LegacyVPSDetail() {
       return
     }
 
-    const write = beginVpsWrite(detail.vps_id)
-    if (!write) {
+    const owner = beginVpsWrite(detail.vps_id, 'facts')
+    if (!owner) {
       setFactError('上一次保存仍在进行，请稍后再试')
       return
     }
-    const { generation, token } = write
-    setFactSubmitting(true)
+    const { generation } = owner
     try {
       await updateVPSAsset(detail.vps_id, input, { expectedUpdatedAt: detail.updated_at })
       if (!mutationIsCurrent(generation)) return
@@ -1047,8 +1126,7 @@ export function LegacyVPSDetail() {
       if (!mutationIsCurrent(generation)) return
       setFactError(describeError(error, '更新基础信息失败'))
     } finally {
-      finishVpsWrite(detail.vps_id, token)
-      setFactSubmitting(false)
+      finishVpsWrite(owner)
     }
   }
 
@@ -1064,13 +1142,12 @@ export function LegacyVPSDetail() {
       return
     }
 
-    const write = beginVpsWrite(detail.vps_id)
-    if (!write) {
+    const owner = beginVpsWrite(detail.vps_id, 'link')
+    if (!owner) {
       setLinkError('上一次保存仍在进行，请稍后再试')
       return
     }
-    const { generation, token } = write
-    setLinkSubmitting(true)
+    const { generation } = owner
     setLinkError(null)
     setLinkNotice(null)
     setUnlinkError(null)
@@ -1081,7 +1158,7 @@ export function LegacyVPSDetail() {
         note: linkDraft.note.trim(),
       })
       if (!mutationIsCurrent(generation)) return
-      await refreshDetail(detail.vps_id)
+      await refreshDetail(detail.vps_id, () => mutationIsCurrent(generation))
       if (!mutationIsCurrent(generation)) return
       setLinkDraft({ monitoringInstanceId: '', note: '' })
       setLinkNotice('监控实例关联已更新')
@@ -1090,8 +1167,7 @@ export function LegacyVPSDetail() {
       if (!mutationIsCurrent(generation)) return
       setLinkError(describeError(error, '关联监控实例失败'))
     } finally {
-      finishVpsWrite(detail.vps_id, token)
-      setLinkSubmitting(false)
+      finishVpsWrite(owner)
     }
   }
 
@@ -1100,13 +1176,12 @@ export function LegacyVPSDetail() {
     const detail = state.detail
     if (!detail) return
 
-    const write = beginVpsWrite(detail.vps_id)
-    if (!write) {
+    const owner = beginVpsWrite(detail.vps_id, 'monitoring-create')
+    if (!owner) {
       setMonitoringCreateError('上一次保存仍在进行，请稍后再试')
       return
     }
-    const { generation, token } = write
-    setMonitoringCreateSubmitting(true)
+    const { generation } = owner
     setMonitoringCreateError(null)
     setMonitoringCreateNotice(null)
     setUnlinkError(null)
@@ -1115,7 +1190,7 @@ export function LegacyVPSDetail() {
       const input = buildMonitoringInstanceCreateInput(monitoringCreateDraft ?? monitoringInstanceCreateDraftFromDetail(detail))
       const created = await createVPSMonitoringInstance(detail.vps_id, input)
       if (!mutationIsCurrent(generation)) return
-      await refreshDetail(detail.vps_id)
+      await refreshDetail(detail.vps_id, () => mutationIsCurrent(generation))
       if (!mutationIsCurrent(generation)) return
       setMonitoringCreateNotice('监控实例已创建并关联，正在进入接入流程')
       collapseDrawer()
@@ -1124,8 +1199,7 @@ export function LegacyVPSDetail() {
       if (!mutationIsCurrent(generation)) return
       setMonitoringCreateError(describeError(error, '创建监控实例失败'))
     } finally {
-      finishVpsWrite(detail.vps_id, token)
-      setMonitoringCreateSubmitting(false)
+      finishVpsWrite(owner)
     }
   }
 
@@ -1144,18 +1218,17 @@ export function LegacyVPSDetail() {
       return
     }
 
-    const write = beginVpsWrite(detail.vps_id)
-    if (!write) {
+    const owner = beginVpsWrite(detail.vps_id, 'subscription')
+    if (!owner) {
       setSubscriptionError('上一次保存仍在进行，请稍后再试')
       return
     }
-    const { generation, token } = write
-    setSubscriptionSubmitting(true)
+    const { generation } = owner
     try {
       const subscription = await createVPSSubscription(detail.vps_id, input, subscriptionIdempotencyKeyRef.current)
       if (!mutationIsCurrent(generation)) return
       setState((current) => {
-        if (current.vpsId !== detail.vps_id) return current
+        if (current.vpsId !== detail.vps_id || !mutationIsCurrent(generation)) return current
         return {
           ...current,
           subscriptions: [
@@ -1175,8 +1248,7 @@ export function LegacyVPSDetail() {
       }
       setSubscriptionError(describeError(error, '创建订阅失败'))
     } finally {
-      finishVpsWrite(detail.vps_id, token)
-      setSubscriptionSubmitting(false)
+      finishVpsWrite(owner)
     }
   }
 
@@ -1199,13 +1271,12 @@ export function LegacyVPSDetail() {
       return
     }
 
-    const write = beginVpsWrite(detail.vps_id)
-    if (!write) {
+    const owner = beginVpsWrite(detail.vps_id, 'validity-extension')
+    if (!owner) {
       setValidityExtensionError('上一次保存仍在进行，请稍后再试')
       return
     }
-    const { generation, token } = write
-    setValidityExtensionSubmitting(true)
+    const { generation } = owner
     try {
       const result = await extendVPSValidity(detail.vps_id, input)
       if (!mutationIsCurrent(generation)) return
@@ -1218,8 +1289,7 @@ export function LegacyVPSDetail() {
       if (!mutationIsCurrent(generation)) return
       setValidityExtensionError(describeError(error, '延长有效期失败'))
     } finally {
-      finishVpsWrite(detail.vps_id, token)
-      setValidityExtensionSubmitting(false)
+      finishVpsWrite(owner)
     }
   }
 
@@ -1227,13 +1297,16 @@ export function LegacyVPSDetail() {
     const detail = state.detail
     if (!detail) return
 
-    const write = beginVpsWrite(detail.vps_id)
-    if (!write) {
+    const owner = beginVpsWrite(
+      detail.vps_id,
+      'monitoring-unlink',
+      monitoringInstance.monitoring_instance_id,
+    )
+    if (!owner) {
       setUnlinkError('上一次保存仍在进行，请稍后再试')
       return
     }
-    const { generation, token } = write
-    setUnlinkingMonitoringInstanceId(monitoringInstance.monitoring_instance_id)
+    const { generation } = owner
     setUnlinkError(null)
     setLinkError(null)
     setLinkNotice(null)
@@ -1244,7 +1317,7 @@ export function LegacyVPSDetail() {
         note: monitoringInstance.note,
       })
       if (!mutationIsCurrent(generation)) return
-      await refreshDetail(detail.vps_id)
+      await refreshDetail(detail.vps_id, () => mutationIsCurrent(generation))
       if (!mutationIsCurrent(generation)) return
       setLinkNotice('监控实例关联已解除')
       setPendingUnlinkMonitoringInstance(null)
@@ -1252,8 +1325,7 @@ export function LegacyVPSDetail() {
       if (!mutationIsCurrent(generation)) return
       setUnlinkError(describeError(error, '解除监控实例关联失败'))
     } finally {
-      finishVpsWrite(detail.vps_id, token)
-      setUnlinkingMonitoringInstanceId(null)
+      finishVpsWrite(owner)
     }
   }
 
@@ -1287,13 +1359,12 @@ export function LegacyVPSDetail() {
       return
     }
 
-    const write = beginVpsWrite(detail.vps_id)
-    if (!write) {
+    const owner = beginVpsWrite(detail.vps_id, 'lifecycle')
+    if (!owner) {
       setLifecycleError('上一次保存仍在进行，请稍后再试')
       return
     }
-    const { generation, token } = write
-    setLifecycleSubmitting(true)
+    const { generation } = owner
     setLifecycleError(null)
     setLifecycleNotice(null)
 
@@ -1305,8 +1376,7 @@ export function LegacyVPSDetail() {
       if (!mutationIsCurrent(generation)) return
       setLifecycleError(describeError(error, '归档 VPS 失败'))
     } finally {
-      finishVpsWrite(detail.vps_id, token)
-      setLifecycleSubmitting(false)
+      finishVpsWrite(owner)
     }
   }
 
@@ -1323,18 +1393,17 @@ export function LegacyVPSDetail() {
   async function handleCancellationSubmit(input: ApplyCancellationInput) {
     const detail = state.detail
     if (!detail) return
-    const write = beginVpsWrite(detail.vps_id)
-    if (!write) {
+    const owner = beginVpsWrite(detail.vps_id, 'cancellation')
+    if (!owner) {
       setCancellationError('上一次保存仍在进行，请稍后再试')
       return
     }
-    const { generation: mutationGeneration, token } = write
+    const mutationGeneration = owner.generation
     const generation = cancellationPreviewGenerationRef.current
     const stillCurrent = () => (
       generation === cancellationPreviewGenerationRef.current && mutationIsCurrent(mutationGeneration)
     )
 
-    setCancellationSubmitting(true)
     setCancellationError(null)
     setLifecycleNotice(null)
     setLifecycleError(null)
@@ -1343,7 +1412,7 @@ export function LegacyVPSDetail() {
       const result: LifecycleActionResult = await applyVPSCancellation(detail.vps_id, input)
       if (!stillCurrent()) return
       setState((current) => {
-        if (current.vpsId !== detail.vps_id) return current
+        if (current.vpsId !== detail.vps_id || !stillCurrent()) return current
         return { ...current, cancellationResult: result }
       })
       const refreshed = await refreshDetailAndTimeline(detail.vps_id, stillCurrent)
@@ -1352,25 +1421,25 @@ export function LegacyVPSDetail() {
         navigate(`/archive/${encodeURIComponent(refreshed.vps_id)}`, { replace: true })
         return
       }
-      const applied = await applyCancellationPreview(detail.vps_id, generation)
-      if (!applied) return
+      const applied = await applyCancellationPreview(detail.vps_id, generation, stillCurrent)
+      if (!applied || !stillCurrent()) return
       setState((current) => {
-        if (current.vpsId !== detail.vps_id) return current
+        if (current.vpsId !== detail.vps_id || !stillCurrent()) return current
         return { ...current, cancellationResult: result }
       })
       setLifecycleNotice(`取消/退役动作已完成，写入 ${result.steps.length} 个审计步骤`)
     } catch (error: unknown) {
       if (isCancellationPreviewStale(error)) {
-        const applied = await applyCancellationPreview(detail.vps_id, generation)
-        if (!applied) return
+        if (!stillCurrent()) return
+        const applied = await applyCancellationPreview(detail.vps_id, generation, stillCurrent)
+        if (!applied || !stillCurrent()) return
         setCancellationError('影响范围已变化，请重新加载预览后再确认')
         return
       }
       if (!stillCurrent()) return
       setCancellationError(describeError(error, '执行取消/退役失败'))
     } finally {
-      finishVpsWrite(detail.vps_id, token)
-      if (stillCurrent()) setCancellationSubmitting(false)
+      finishVpsWrite(owner)
     }
   }
 
@@ -1389,13 +1458,12 @@ export function LegacyVPSDetail() {
       return
     }
 
-    const write = beginVpsWrite(detail.vps_id)
-    if (!write) {
+    const owner = beginVpsWrite(detail.vps_id, 'experience')
+    if (!owner) {
       setExperienceError('上一次保存仍在进行，请稍后再试')
       return
     }
-    const { generation, token } = write
-    setExperienceSubmitting(true)
+    const { generation } = owner
     try {
       await createVPSExperienceLog(detail.vps_id, input)
       if (!mutationIsCurrent(generation)) return
@@ -1408,8 +1476,7 @@ export function LegacyVPSDetail() {
       if (!mutationIsCurrent(generation)) return
       setExperienceError(describeError(error, '创建经验记录失败'))
     } finally {
-      finishVpsWrite(detail.vps_id, token)
-      setExperienceSubmitting(false)
+      finishVpsWrite(owner)
     }
   }
 
@@ -1428,17 +1495,16 @@ export function LegacyVPSDetail() {
       return
     }
 
-    const write = beginVpsWrite(detail.vps_id)
-    if (!write) {
+    const owner = beginVpsWrite(detail.vps_id, 'service')
+    if (!owner) {
       setServiceError('上一次保存仍在进行，请稍后再试')
       return
     }
-    const { generation, token } = write
-    setServiceSubmitting(true)
+    const { generation } = owner
     try {
       await createVPSService(detail.vps_id, input)
       if (!mutationIsCurrent(generation)) return
-      await refreshServices(detail.vps_id)
+      await refreshServices(detail.vps_id, () => mutationIsCurrent(generation))
       if (!mutationIsCurrent(generation)) return
       setServiceDraft(INITIAL_SERVICE_DRAFT)
       setServiceNotice('服务记录已创建')
@@ -1447,8 +1513,7 @@ export function LegacyVPSDetail() {
       if (!mutationIsCurrent(generation)) return
       setServiceError(describeError(error, '创建服务记录失败'))
     } finally {
-      finishVpsWrite(detail.vps_id, token)
-      setServiceSubmitting(false)
+      finishVpsWrite(owner)
     }
   }
 
@@ -1467,17 +1532,16 @@ export function LegacyVPSDetail() {
       return
     }
 
-    const write = beginVpsWrite(detail.vps_id)
-    if (!write) {
+    const owner = beginVpsWrite(detail.vps_id, 'domain')
+    if (!owner) {
       setDomainError('上一次保存仍在进行，请稍后再试')
       return
     }
-    const { generation, token } = write
-    setDomainSubmitting(true)
+    const { generation } = owner
     try {
       await createVPSDomain(detail.vps_id, input)
       if (!mutationIsCurrent(generation)) return
-      await refreshDomains(detail.vps_id)
+      await refreshDomains(detail.vps_id, () => mutationIsCurrent(generation))
       if (!mutationIsCurrent(generation)) return
       setDomainDraft(INITIAL_DOMAIN_DRAFT)
       setDomainNotice('域名记录已创建')
@@ -1486,8 +1550,7 @@ export function LegacyVPSDetail() {
       if (!mutationIsCurrent(generation)) return
       setDomainError(describeError(error, '创建域名记录失败'))
     } finally {
-      finishVpsWrite(detail.vps_id, token)
-      setDomainSubmitting(false)
+      finishVpsWrite(owner)
     }
   }
 
@@ -1507,6 +1570,21 @@ export function LegacyVPSDetail() {
 
   const detail = state.detail
   const timeline = state.timeline
+  const currentWriteOwner = writeOwners.get(detail.vps_id) ?? null
+  const decisionSubmitting = currentWriteOwner?.operation === 'decision'
+  const factSubmitting = currentWriteOwner?.operation === 'facts'
+  const linkSubmitting = currentWriteOwner?.operation === 'link'
+  const monitoringCreateSubmitting = currentWriteOwner?.operation === 'monitoring-create'
+  const subscriptionSubmitting = currentWriteOwner?.operation === 'subscription'
+  const validityExtensionSubmitting = currentWriteOwner?.operation === 'validity-extension'
+  const lifecycleSubmitting = currentWriteOwner?.operation === 'lifecycle'
+  const cancellationSubmitting = currentWriteOwner?.operation === 'cancellation'
+  const experienceSubmitting = currentWriteOwner?.operation === 'experience'
+  const serviceSubmitting = currentWriteOwner?.operation === 'service'
+  const domainSubmitting = currentWriteOwner?.operation === 'domain'
+  const unlinkingMonitoringInstanceId = currentWriteOwner?.operation === 'monitoring-unlink'
+    ? currentWriteOwner.monitoringInstanceId ?? null
+    : null
   const decisionChanged = decisionDraft.renewalDecision !== detail.renewal_decision
   const linkControlsDisabled = linkSubmitting || unlinkingMonitoringInstanceId !== null
   const isArchived = detail.lifecycle_status === 'archived' || detail.lifecycle_status === 'cancelled'
@@ -1571,7 +1649,7 @@ export function LegacyVPSDetail() {
           <VPSRenewalDecisionForm
             detail={detail}
             draft={decisionDraft}
-            submitting={decisionSubmitting || latestLoading || writeInFlight}
+            submitting={decisionSubmitting || latestLoading}
             error={decisionError}
             notice={decisionNotice}
             decisionChanged={decisionChanged}
@@ -1631,7 +1709,7 @@ export function LegacyVPSDetail() {
             providers={selectors.providers}
             providersLoading={selectors.providersLoading}
             providersError={selectors.providersError}
-            submitting={factSubmitting || latestLoading || writeInFlight}
+            submitting={factSubmitting || latestLoading}
             error={factError}
             notice={factNotice}
             onCancel={closeDrawer}

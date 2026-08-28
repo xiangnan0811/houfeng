@@ -1,9 +1,17 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import * as api from '../../lib/api'
 import { LegacyVPSDetail } from './LegacyVPSDetail'
+
+const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url))
+const LEGACY_VPS_DETAIL_SOURCE_PATH = resolve(TEST_DIRECTORY, 'LegacyVPSDetail.tsx')
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -2534,6 +2542,1227 @@ describe('LegacyVPSDetail', () => {
     })
   })
 
+  describe('archive review request ownership', () => {
+    const detailA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A',
+      renewal_decision: 'keep',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const detailB = {
+      ...vpsDetailBody,
+      vps_id: 'vps_b',
+      display_name: 'Osaka Edge B',
+      renewal_decision: 'keep',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+
+    type ReviewResponse = ReturnType<typeof mockJSONResponse>
+    type ReviewHandler = () => ReviewResponse | Promise<ReviewResponse>
+
+    function archiveReviewFor(
+      detail: typeof detailA,
+      { blockers = [], eligible = blockers.length === 0 }: { blockers?: string[]; eligible?: boolean } = {},
+    ) {
+      return {
+        vps: detail,
+        subscriptions: [],
+        monitoring_instance_links: [],
+        services: [],
+        domains: [],
+        target_links: [],
+        warnings: [],
+        blockers,
+        eligible,
+      }
+    }
+
+    function createArchiveReviewFetch(onAReview: ReviewHandler, onBReview?: ReviewHandler) {
+      return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/vps/vps_a' && method === 'GET') return mockJSONResponse(detailA)
+        if (url === '/api/vps/vps_b' && method === 'GET') return mockJSONResponse(detailB)
+        if (url === '/api/vps/vps_a/archive-review' && method === 'GET') return onAReview()
+        if (url === '/api/vps/vps_b/archive-review' && method === 'GET' && onBReview) return onBReview()
+        if (url.startsWith('/api/vps/vps_a/timeline') || url.startsWith('/api/vps/vps_b/timeline')) {
+          return mockJSONResponse({ ...timelineEmptyBody, vps_id: url.includes('vps_b') ? 'vps_b' : 'vps_a' })
+        }
+        if (url.includes('/services') || url.includes('/domains')) return mockJSONResponse([])
+        if (url.startsWith('/api/subscriptions')) return mockJSONResponse([])
+        throw new Error('unexpected fetch ' + method + ' ' + url)
+      })
+    }
+
+    function NavigationHarness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate('/vps/vps_b')}>切到 B</button>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          </Routes>
+        </>
+      )
+    }
+
+    function renderRouteRace() {
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a']}>
+          <NavigationHarness />
+        </MemoryRouter>,
+      )
+    }
+
+    it('registers full route-authority cleanup before every route-effect early return', () => {
+      const source = readFileSync(LEGACY_VPS_DETAIL_SOURCE_PATH, 'utf8')
+      const routeEffectStart = source.indexOf('  useEffect(() => {\n    currentVpsIdRef.current = vpsId')
+      const routeEffectEnd = source.indexOf('\n  const applyCancellationPreview', routeEffectStart)
+
+      expect(routeEffectStart).toBeGreaterThan(-1)
+      expect(routeEffectEnd).toBeGreaterThan(routeEffectStart)
+
+      const routeEffect = source.slice(routeEffectStart, routeEffectEnd)
+      const entryInvalidation = routeEffect.indexOf('archiveReviewRequestRef.current += 1')
+      const cleanupDeclaration = routeEffect.indexOf('const invalidateRouteAuthority = () => {')
+      expect(entryInvalidation).toBeGreaterThan(-1)
+      expect(cleanupDeclaration).toBeGreaterThan(entryInvalidation)
+      expect(routeEffect).toMatch(
+        /const invalidateRouteAuthority = \(\) => \{\s+archiveReviewRequestRef\.current \+= 1\s+mutationGenerationRef\.current \+= 1\s+latestLoadLockRef\.current = false\s+\}/,
+      )
+      expect(routeEffect).toMatch(/if \(!vpsId\) \{\s+return invalidateRouteAuthority\s+\}/)
+      expect(routeEffect).toMatch(
+        /if \(skipNextQueryDrivenReload\.current\) \{[\s\S]*?return invalidateRouteAuthority\s+\}/,
+      )
+      expect(routeEffect).toContain('cancelled = true\n      invalidateRouteAuthority()')
+      expect(routeEffect).toContain(
+        'setPendingUnlinkMonitoringInstance(null)\n        archiveReviewRequestRef.current += 1\n        setLifecycleConfirmingAction(null)',
+      )
+
+      expect(routeEffect).toContain('const routeGeneration = ++mutationGenerationRef.current')
+      expect(routeEffect).toContain('const routePreviewGeneration = ++cancellationPreviewGenerationRef.current')
+      expect(routeEffect).toMatch(
+        /const routeIsCurrent = \(\) => \(\s+!cancelled &&\s+currentVpsIdRef\.current === vpsId &&\s+mutationGenerationRef\.current === routeGeneration\s+\)/,
+      )
+
+      const terminalCommitStart = routeEffect.indexOf('const normalizedDetail = normalizeVPSDetail(detail)')
+      const payloadCommitStart = routeEffect.indexOf('      .then((payload) => {')
+      const catchCommitStart = routeEffect.indexOf('      .catch((error: unknown) => {', payloadCommitStart)
+      const cleanupStart = routeEffect.indexOf('\n    return () => {', catchCommitStart)
+
+      expect(terminalCommitStart).toBeGreaterThan(-1)
+      expect(payloadCommitStart).toBeGreaterThan(terminalCommitStart)
+      expect(catchCommitStart).toBeGreaterThan(payloadCommitStart)
+      expect(cleanupStart).toBeGreaterThan(catchCommitStart)
+
+      const terminalCommit = routeEffect.slice(terminalCommitStart, payloadCommitStart)
+      expect(terminalCommit).toContain('if (!routeIsCurrent()) return null')
+      expect(terminalCommit).toMatch(
+        /if \(normalizedDetail\.lifecycle_status === 'archived' \|\| normalizedDetail\.lifecycle_status === 'cancelled'\) \{\s+if \(!routeIsCurrent\(\)\) return null\s+navigate\(/,
+      )
+
+      const payloadCommit = routeEffect.slice(payloadCommitStart, catchCommitStart)
+      expect(payloadCommit).toContain('if (payload == null || !routeIsCurrent()) return')
+      const cancellationResetInvalidation = payloadCommit.indexOf(
+        'const cancellationResetGeneration = initialDrawerFromQuery === \'cancellation\'\n'
+        + '          ? null\n'
+        + '          : ++cancellationPreviewGenerationRef.current',
+      )
+      const payloadStateCommit = payloadCommit.indexOf('setState((current) => {')
+      expect(cancellationResetInvalidation).toBeGreaterThan(-1)
+      expect(payloadStateCommit).toBeGreaterThan(cancellationResetInvalidation)
+      expect(payloadCommit).toMatch(
+        /setState\(\(current\) => \{\s+if \(!routeIsCurrent\(\)\) return current/,
+      )
+      expect(payloadCommit).toContain('cancellationPreviewGenerationRef.current === routePreviewGeneration')
+
+      const catchCommit = routeEffect.slice(catchCommitStart, cleanupStart)
+      expect(catchCommit).toMatch(
+        /\.catch\(\(error: unknown\) => \{\s+if \(!routeIsCurrent\(\)\) return/,
+      )
+      expect(catchCommit).toMatch(
+        /setState\(\(current\) => \{\s+if \(!routeIsCurrent\(\)\) return current/,
+      )
+    })
+
+    it('invalidates a review opened during a pending same-VPS query reload before payload reset', async () => {
+      const delayedRouteDetail = deferred<ReviewResponse>()
+      const delayedReviewA1 = deferred<ReviewResponse>()
+      const delayedReviewA2 = deferred<ReviewResponse>()
+      let detailGets = 0
+      let reviewGets = 0
+      const onAReview = vi.fn(() => {
+        reviewGets += 1
+        return reviewGets === 1 ? delayedReviewA1.promise : delayedReviewA2.promise
+      })
+      const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/vps/vps_a' && method === 'GET') {
+          detailGets += 1
+          return detailGets === 1
+            ? Promise.resolve(mockJSONResponse(detailA))
+            : delayedRouteDetail.promise
+        }
+        if (url === '/api/vps/vps_a/archive-review' && method === 'GET') return onAReview()
+        if (url === '/api/vps/vps_a/timeline' && method === 'GET') {
+          return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' }))
+        }
+        if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_a/domains') {
+          return Promise.resolve(mockJSONResponse([]))
+        }
+        if (url.startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+        throw new Error(`unexpected fetch ${method} ${url}`)
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      function SameVPSQueryReloadHarness() {
+        const navigate = useNavigate()
+        return (
+          <>
+            <button
+              type="button"
+              onClick={() => navigate('/vps/vps_a?workbench=subscription')}
+            >
+              同 VPS query reload
+            </button>
+            <Routes>
+              <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+            </Routes>
+          </>
+        )
+      }
+
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a']}>
+          <SameVPSQueryReloadHarness />
+        </MemoryRouter>,
+      )
+
+      await screen.findByRole('heading', { name: 'Tokyo Edge A' })
+      fireEvent.click(screen.getByRole('button', { name: '同 VPS query reload' }))
+      await waitFor(() => expect(detailGets).toBe(2))
+
+      clickVPSAction('归档 VPS')
+      const archiveDialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+      expect(within(archiveDialog).getByText('正在检查归档资格…')).toBeInTheDocument()
+      await waitFor(() => expect(onAReview).toHaveBeenCalledTimes(1))
+
+      await act(async () => {
+        delayedRouteDetail.resolve(mockJSONResponse(detailA))
+      })
+
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog', { name: '确认归档 VPS' })).not.toBeInTheDocument()
+      })
+      expect(screen.getByRole('dialog', { name: '创建/更新订阅' })).toBeInTheDocument()
+
+      clickVPSAction('归档 VPS')
+      const currentArchiveDialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+      expect(within(currentArchiveDialog).getByText('正在检查归档资格…')).toBeInTheDocument()
+      await waitFor(() => expect(onAReview).toHaveBeenCalledTimes(2))
+
+      await act(async () => {
+        delayedReviewA1.reject(new Error('query reload 后的迟到归档错误'))
+      })
+
+      expect(screen.queryByText('query reload 后的迟到归档错误')).not.toBeInTheDocument()
+      expect(within(currentArchiveDialog).getByText('正在检查归档资格…')).toBeInTheDocument()
+      expect(within(currentArchiveDialog).queryByLabelText('输入 VPS 名称确认归档')).not.toBeInTheDocument()
+      expect(within(currentArchiveDialog).getByRole('button', { name: '确认归档' })).toBeDisabled()
+
+      await act(async () => {
+        delayedReviewA2.resolve(mockJSONResponse(archiveReviewFor(detailA)))
+      })
+      expect(await within(currentArchiveDialog).findByLabelText('输入 VPS 名称确认归档')).toBeInTheDocument()
+    })
+
+    it('rejects late archive review data after a same-VPS query payload resets the modal', async () => {
+      const delayedRouteDetail = deferred<ReviewResponse>()
+      const delayedReviewA1 = deferred<ReviewResponse>()
+      const delayedReviewA2 = deferred<ReviewResponse>()
+      let detailGets = 0
+      let reviewGets = 0
+      const onAReview = vi.fn(() => {
+        reviewGets += 1
+        return reviewGets === 1 ? delayedReviewA1.promise : delayedReviewA2.promise
+      })
+      const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/vps/vps_a' && method === 'GET') {
+          detailGets += 1
+          return detailGets === 1
+            ? Promise.resolve(mockJSONResponse(detailA))
+            : delayedRouteDetail.promise
+        }
+        if (url === '/api/vps/vps_a/archive-review' && method === 'GET') return onAReview()
+        if (url === '/api/vps/vps_a/timeline' && method === 'GET') {
+          return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' }))
+        }
+        if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_a/domains') {
+          return Promise.resolve(mockJSONResponse([]))
+        }
+        if (url.startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+        throw new Error(`unexpected fetch ${method} ${url}`)
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      function SameVPSQueryReloadHarness() {
+        const navigate = useNavigate()
+        return (
+          <>
+            <button
+              type="button"
+              onClick={() => navigate('/vps/vps_a?workbench=subscription')}
+            >
+              同 VPS query reload
+            </button>
+            <Routes>
+              <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+            </Routes>
+          </>
+        )
+      }
+
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a']}>
+          <SameVPSQueryReloadHarness />
+        </MemoryRouter>,
+      )
+
+      await screen.findByRole('heading', { name: 'Tokyo Edge A' })
+      fireEvent.click(screen.getByRole('button', { name: '同 VPS query reload' }))
+      await waitFor(() => expect(detailGets).toBe(2))
+
+      clickVPSAction('归档 VPS')
+      const archiveDialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+      expect(within(archiveDialog).getByText('正在检查归档资格…')).toBeInTheDocument()
+      await waitFor(() => expect(onAReview).toHaveBeenCalledTimes(1))
+
+      await act(async () => {
+        delayedRouteDetail.resolve(mockJSONResponse(detailA))
+      })
+
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog', { name: '确认归档 VPS' })).not.toBeInTheDocument()
+      })
+      expect(screen.getByRole('dialog', { name: '创建/更新订阅' })).toBeInTheDocument()
+
+      clickVPSAction('归档 VPS')
+      const currentArchiveDialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+      expect(within(currentArchiveDialog).getByText('正在检查归档资格…')).toBeInTheDocument()
+      await waitFor(() => expect(onAReview).toHaveBeenCalledTimes(2))
+
+      await act(async () => {
+        delayedReviewA1.resolve(mockJSONResponse(archiveReviewFor(detailA, {
+          blockers: ['query reload 后的迟到归档阻塞项'],
+          eligible: false,
+        })))
+      })
+
+      expect(within(currentArchiveDialog).queryByText('query reload 后的迟到归档阻塞项')).not.toBeInTheDocument()
+      expect(within(currentArchiveDialog).getByText('正在检查归档资格…')).toBeInTheDocument()
+      expect(within(currentArchiveDialog).queryByLabelText('输入 VPS 名称确认归档')).not.toBeInTheDocument()
+      const confirmButton = within(currentArchiveDialog).getByRole('button', { name: '确认归档' })
+      expect(confirmButton).toBeDisabled()
+
+      await act(async () => {
+        delayedReviewA2.resolve(mockJSONResponse(archiveReviewFor(detailA)))
+      })
+
+      const confirmationInput = await within(currentArchiveDialog).findByLabelText('输入 VPS 名称确认归档')
+      fireEvent.change(confirmationInput, { target: { value: 'Tokyo Edge A' } })
+      expect(within(currentArchiveDialog).queryByText('query reload 后的迟到归档阻塞项')).not.toBeInTheDocument()
+      expect(confirmButton).toBeEnabled()
+    })
+
+    it('keeps current archive review data after a stale same-VPS query review settles', async () => {
+      const delayedRouteDetail = deferred<ReviewResponse>()
+      const delayedReviewA1 = deferred<ReviewResponse>()
+      const delayedReviewA2 = deferred<ReviewResponse>()
+      let detailGets = 0
+      let reviewGets = 0
+      const onAReview = vi.fn(() => {
+        reviewGets += 1
+        return reviewGets === 1 ? delayedReviewA1.promise : delayedReviewA2.promise
+      })
+      const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/vps/vps_a' && method === 'GET') {
+          detailGets += 1
+          return detailGets === 1
+            ? Promise.resolve(mockJSONResponse(detailA))
+            : delayedRouteDetail.promise
+        }
+        if (url === '/api/vps/vps_a/archive-review' && method === 'GET') return onAReview()
+        if (url === '/api/vps/vps_a/timeline' && method === 'GET') {
+          return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' }))
+        }
+        if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_a/domains') {
+          return Promise.resolve(mockJSONResponse([]))
+        }
+        if (url.startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+        throw new Error(`unexpected fetch ${method} ${url}`)
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      function SameVPSQueryReloadHarness() {
+        const navigate = useNavigate()
+        return (
+          <>
+            <button
+              type="button"
+              onClick={() => navigate('/vps/vps_a?workbench=subscription')}
+            >
+              同 VPS query reload
+            </button>
+            <Routes>
+              <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+            </Routes>
+          </>
+        )
+      }
+
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a']}>
+          <SameVPSQueryReloadHarness />
+        </MemoryRouter>,
+      )
+
+      await screen.findByRole('heading', { name: 'Tokyo Edge A' })
+      fireEvent.click(screen.getByRole('button', { name: '同 VPS query reload' }))
+      await waitFor(() => expect(detailGets).toBe(2))
+
+      clickVPSAction('归档 VPS')
+      await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+      await waitFor(() => expect(onAReview).toHaveBeenCalledTimes(1))
+
+      await act(async () => {
+        delayedRouteDetail.resolve(mockJSONResponse(detailA))
+      })
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog', { name: '确认归档 VPS' })).not.toBeInTheDocument()
+      })
+
+      clickVPSAction('归档 VPS')
+      const currentArchiveDialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+      await waitFor(() => expect(onAReview).toHaveBeenCalledTimes(2))
+      await act(async () => {
+        delayedReviewA2.resolve(mockJSONResponse(archiveReviewFor(detailA)))
+      })
+
+      const confirmationInput = await within(currentArchiveDialog).findByLabelText('输入 VPS 名称确认归档')
+      fireEvent.change(confirmationInput, { target: { value: 'Tokyo Edge A' } })
+      const confirmButton = within(currentArchiveDialog).getByRole('button', { name: '确认归档' })
+      expect(confirmButton).toBeEnabled()
+
+      await act(async () => {
+        delayedReviewA1.resolve(mockJSONResponse(archiveReviewFor(detailA, {
+          blockers: ['query reload 后的迟到归档阻塞项'],
+          eligible: false,
+        })))
+      })
+
+      expect(within(currentArchiveDialog).queryByText('query reload 后的迟到归档阻塞项')).not.toBeInTheDocument()
+      expect(within(currentArchiveDialog).queryByText('正在检查归档资格…')).not.toBeInTheDocument()
+      expect(within(currentArchiveDialog).getByLabelText('输入 VPS 名称确认归档')).toHaveValue('Tokyo Edge A')
+      expect(confirmButton).toBeEnabled()
+    })
+
+    it('invalidates a deferred archive write after query-skip cleanup unmounts the detail route', async () => {
+      const delayedArchive = deferred<ReviewResponse>()
+      const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/vps/vps_a' && method === 'GET') return Promise.resolve(mockJSONResponse(detailA))
+        if (url === '/api/vps/vps_a/archive-review' && method === 'GET') {
+          return Promise.resolve(mockJSONResponse(archiveReviewFor(detailA)))
+        }
+        if (url === '/api/vps/vps_a/archive' && method === 'POST') return delayedArchive.promise
+        if (url.startsWith('/api/vps/vps_a/timeline')) {
+          return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' }))
+        }
+        if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_a/domains') {
+          return Promise.resolve(mockJSONResponse([]))
+        }
+        if (url.startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+        throw new Error(`unexpected fetch ${method} ${url}`)
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      function QuerySkipUnmountHarness() {
+        const navigate = useNavigate()
+        return (
+          <>
+            <button type="button" onClick={() => navigate('/away')}>离开详情</button>
+            <LocationProbe />
+            <Routes>
+              <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+              <Route path="/away" element={<div>已离开详情</div>} />
+              <Route path="/archive/:vpsId" element={<div>归档详情</div>} />
+            </Routes>
+          </>
+        )
+      }
+
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a?workbench=subscription']}>
+          <QuerySkipUnmountHarness />
+        </MemoryRouter>,
+      )
+
+      const subscriptionDrawer = await screen.findByRole('dialog', { name: '创建/更新订阅' })
+      fireEvent.click(within(subscriptionDrawer).getByRole('button', { name: '取消' }))
+      await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(/^$/))
+
+      clickVPSAction('归档 VPS')
+      const archiveDialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+      fireEvent.change(within(archiveDialog).getByLabelText('输入 VPS 名称确认归档'), {
+        target: { value: 'Tokyo Edge A' },
+      })
+      fireEvent.click(within(archiveDialog).getByRole('button', { name: '确认归档' }))
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+        '/api/vps/vps_a/archive',
+        expect.objectContaining({ method: 'POST' }),
+      ))
+
+      fireEvent.click(screen.getByRole('button', { name: '离开详情' }))
+      await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/away'))
+
+      await act(async () => {
+        delayedArchive.resolve(mockJSONResponse({ ...detailA, lifecycle_status: 'archived' }))
+      })
+
+      expect(screen.getByTestId('location-path')).toHaveTextContent('/away')
+      expect(screen.getByText('已离开详情')).toBeInTheDocument()
+      expect(screen.queryByText('归档详情')).not.toBeInTheDocument()
+    })
+
+    async function openArchiveDialog(displayName: string) {
+      await waitFor(() => expect(screen.getByRole('heading', { name: displayName })).toBeInTheDocument())
+      clickVPSAction('归档 VPS')
+      return screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    }
+
+    it('ignores late A review data after B owns the archive dialog', async () => {
+      const delayedA = deferred<ReviewResponse>()
+      const delayedB = deferred<ReviewResponse>()
+      const onAReview = vi.fn(() => delayedA.promise)
+      const onBReview = vi.fn(() => delayedB.promise)
+      vi.stubGlobal('fetch', createArchiveReviewFetch(onAReview, onBReview))
+      renderRouteRace()
+
+      const dialogA = await openArchiveDialog('Tokyo Edge A')
+      expect(within(dialogA).getByText('正在检查归档资格…')).toBeInTheDocument()
+      await waitFor(() => expect(onAReview).toHaveBeenCalledTimes(1))
+
+      fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+      const dialogB = await openArchiveDialog('Osaka Edge B')
+      expect(within(dialogB).getByText('正在检查归档资格…')).toBeInTheDocument()
+      await waitFor(() => expect(onBReview).toHaveBeenCalledTimes(1))
+
+      await act(async () => {
+        delayedA.resolve(mockJSONResponse(archiveReviewFor(detailA, {
+          blockers: ['A 迟到的归档阻塞项'],
+          eligible: false,
+        })))
+      })
+
+      expect(within(dialogB).queryByText('A 迟到的归档阻塞项')).not.toBeInTheDocument()
+      expect(within(dialogB).getByText('正在检查归档资格…')).toBeInTheDocument()
+      expect(within(dialogB).getByRole('button', { name: '确认归档' })).toBeDisabled()
+
+      await act(async () => {
+        delayedB.resolve(mockJSONResponse(archiveReviewFor(detailB)))
+      })
+
+      await waitFor(() => expect(within(dialogB).getByLabelText('输入 VPS 名称确认归档')).toBeInTheDocument())
+      fireEvent.change(within(dialogB).getByLabelText('输入 VPS 名称确认归档'), {
+        target: { value: 'Osaka Edge B' },
+      })
+      expect(within(dialogB).getByRole('button', { name: '确认归档' })).toBeEnabled()
+    })
+
+    it('ignores a late A rejection after B owns the archive dialog', async () => {
+      const delayedA = deferred<ReviewResponse>()
+      const delayedB = deferred<ReviewResponse>()
+      const onAReview = vi.fn(() => delayedA.promise)
+      const onBReview = vi.fn(() => delayedB.promise)
+      vi.stubGlobal('fetch', createArchiveReviewFetch(onAReview, onBReview))
+      renderRouteRace()
+
+      await openArchiveDialog('Tokyo Edge A')
+      await waitFor(() => expect(onAReview).toHaveBeenCalledTimes(1))
+      fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+      const dialogB = await openArchiveDialog('Osaka Edge B')
+      await waitFor(() => expect(onBReview).toHaveBeenCalledTimes(1))
+
+      await act(async () => {
+        delayedA.reject(new Error('A 迟到的归档资格错误'))
+      })
+
+      expect(within(dialogB).queryByText('A 迟到的归档资格错误')).not.toBeInTheDocument()
+      expect(within(dialogB).getByText('正在检查归档资格…')).toBeInTheDocument()
+      expect(within(dialogB).getByRole('button', { name: '确认归档' })).toBeDisabled()
+
+      await act(async () => {
+        delayedB.resolve(mockJSONResponse(archiveReviewFor(detailB, {
+          blockers: ['B 当前归档阻塞项'],
+          eligible: false,
+        })))
+      })
+
+      await waitFor(() => expect(within(dialogB).getByText('B 当前归档阻塞项')).toBeInTheDocument())
+      expect(within(dialogB).queryByText('正在检查归档资格…')).not.toBeInTheDocument()
+    })
+
+    it('does not let an old A finally clear B archive review loading', async () => {
+      const delayedA = deferred<ReviewResponse>()
+      const delayedB = deferred<ReviewResponse>()
+      const onAReview = vi.fn(() => delayedA.promise)
+      const onBReview = vi.fn(() => delayedB.promise)
+      vi.stubGlobal('fetch', createArchiveReviewFetch(onAReview, onBReview))
+      renderRouteRace()
+
+      await openArchiveDialog('Tokyo Edge A')
+      await waitFor(() => expect(onAReview).toHaveBeenCalledTimes(1))
+      fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+      const dialogB = await openArchiveDialog('Osaka Edge B')
+      await waitFor(() => expect(onBReview).toHaveBeenCalledTimes(1))
+
+      await act(async () => {
+        delayedA.resolve(mockJSONResponse(archiveReviewFor(detailA)))
+      })
+
+      expect(within(dialogB).getByText('正在检查归档资格…')).toBeInTheDocument()
+      expect(within(dialogB).queryByLabelText('输入 VPS 名称确认归档')).not.toBeInTheDocument()
+      expect(within(dialogB).getByRole('button', { name: '确认归档' })).toBeDisabled()
+
+      await act(async () => {
+        delayedB.resolve(mockJSONResponse(archiveReviewFor(detailB, {
+          blockers: ['B finally 所属请求已完成'],
+          eligible: false,
+        })))
+      })
+
+      await waitFor(() => expect(within(dialogB).getByText('B finally 所属请求已完成')).toBeInTheDocument())
+      expect(within(dialogB).queryByText('正在检查归档资格…')).not.toBeInTheDocument()
+    })
+
+    it.each(['success', 'failure'] as const)(
+      'rejects stale same-VPS close/reopen ABA %s commits by request id',
+      async (outcome) => {
+        const delayedA1 = deferred<ReviewResponse>()
+        const delayedA2 = deferred<ReviewResponse>()
+        let reviewCalls = 0
+        const onAReview = vi.fn(() => {
+          reviewCalls += 1
+          return reviewCalls === 1 ? delayedA1.promise : delayedA2.promise
+        })
+        vi.stubGlobal('fetch', createArchiveReviewFetch(onAReview))
+
+        render(
+          <MemoryRouter initialEntries={['/vps/vps_a']}>
+            <Routes>
+              <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+            </Routes>
+          </MemoryRouter>,
+        )
+
+        const firstDialog = await openArchiveDialog('Tokyo Edge A')
+        await waitFor(() => expect(onAReview).toHaveBeenCalledTimes(1))
+        fireEvent.click(within(firstDialog).getByRole('button', { name: '取消' }))
+        await waitFor(() => expect(screen.queryByRole('alertdialog', { name: '确认归档 VPS' })).not.toBeInTheDocument())
+
+        clickVPSAction('归档 VPS')
+        const secondDialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+        await waitFor(() => expect(onAReview).toHaveBeenCalledTimes(2))
+        expect(within(secondDialog).getByText('正在检查归档资格…')).toBeInTheDocument()
+
+        await act(async () => {
+          if (outcome === 'success') {
+            delayedA1.resolve(mockJSONResponse(archiveReviewFor(detailA, {
+              blockers: ['A1 迟到的同路由阻塞项'],
+              eligible: false,
+            })))
+          } else {
+            delayedA1.reject(new Error('A1 迟到的同路由错误'))
+          }
+        })
+
+        expect(within(secondDialog).queryByText('A1 迟到的同路由阻塞项')).not.toBeInTheDocument()
+        expect(within(secondDialog).queryByText('A1 迟到的同路由错误')).not.toBeInTheDocument()
+        expect(within(secondDialog).getByText('正在检查归档资格…')).toBeInTheDocument()
+        expect(within(secondDialog).getByRole('button', { name: '确认归档' })).toBeDisabled()
+
+        await act(async () => {
+          delayedA2.resolve(mockJSONResponse(archiveReviewFor(detailA)))
+        })
+
+        await waitFor(() => expect(within(secondDialog).getByLabelText('输入 VPS 名称确认归档')).toBeInTheDocument())
+        fireEvent.change(within(secondDialog).getByLabelText('输入 VPS 名称确认归档'), {
+          target: { value: 'Tokyo Edge A' },
+        })
+        expect(within(secondDialog).getByRole('button', { name: '确认归档' })).toBeEnabled()
+      },
+    )
+
+    it('commits current-owner failure and finalizes archive review loading', async () => {
+      const delayedA = deferred<ReviewResponse>()
+      const onAReview = vi.fn(() => delayedA.promise)
+      vi.stubGlobal('fetch', createArchiveReviewFetch(onAReview))
+
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a']}>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+      const dialog = await openArchiveDialog('Tokyo Edge A')
+      expect(within(dialog).getByText('正在检查归档资格…')).toBeInTheDocument()
+      await waitFor(() => expect(onAReview).toHaveBeenCalledTimes(1))
+
+      await act(async () => {
+        delayedA.reject(new Error('当前归档资格加载失败'))
+      })
+
+      await waitFor(() => expect(within(dialog).getByRole('alert')).toHaveTextContent('当前归档资格加载失败'))
+      expect(within(dialog).queryByText('正在检查归档资格…')).not.toBeInTheDocument()
+      expect(within(dialog).getByText('归档资格暂未加载成功，请关闭后重试。')).toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: '确认归档' })).toBeDisabled()
+    })
+  })
+
+  describe('same-VPS route load ownership', () => {
+    const initialRouteDetail = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Route A initial',
+      renewal_decision: 'keep',
+      monitoring_instance_links: [{
+        ...vpsDetailBody.monitoring_instance_links[0],
+        monitoring_instance_id: 'mi_route_a',
+        display_name: 'Route A Monitoring',
+        note: 'route race',
+      }],
+      active_monitoring_instance_link_count: 1,
+    }
+    const currentRouteDetail = {
+      ...initialRouteDetail,
+      display_name: 'Route A current after unlink',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+      updated_at: '2026-08-27T02:00:00Z',
+    }
+
+    function SameVPSQueryReloadHarness({ workbench = 'subscription' }: { workbench?: string }) {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate(`/vps/vps_a?workbench=${workbench}`)}>
+            同 VPS query reload
+          </button>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          </Routes>
+        </>
+      )
+    }
+
+    function createRouteMutationRaceFetch({
+      delayedRouteDetail,
+      delayedReloadTimeline,
+      reloadDetail = initialRouteDetail,
+    }: {
+      delayedRouteDetail?: ReturnType<typeof deferred<Response>>
+      delayedReloadTimeline?: ReturnType<typeof deferred<Response>>
+      reloadDetail?: typeof initialRouteDetail
+    }) {
+      let detailGets = 0
+      let timelineGets = 0
+      const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/vps/vps_a' && method === 'GET') {
+          detailGets += 1
+          if (detailGets === 1) return Promise.resolve(mockJSONResponse(initialRouteDetail))
+          if (detailGets === 2) {
+            return delayedRouteDetail?.promise ?? Promise.resolve(mockJSONResponse(reloadDetail))
+          }
+          if (detailGets === 3) return Promise.resolve(mockJSONResponse(currentRouteDetail))
+          throw new Error(`unexpected detail GET ${detailGets}`)
+        }
+        if (url === '/api/vps/vps_a/unlink-monitoring-instance' && method === 'POST') {
+          return Promise.resolve(mockJSONResponse({
+            link_id: 'vnl_route_a',
+            vps_id: 'vps_a',
+            monitoring_instance_id: 'mi_route_a',
+            linked_at: '2026-08-27T00:00:00Z',
+            unlinked_at: '2026-08-27T01:00:00Z',
+            note: 'route race',
+          }))
+        }
+        if (url === '/api/vps/vps_a/timeline') {
+          timelineGets += 1
+          if (timelineGets === 2 && delayedReloadTimeline) return delayedReloadTimeline.promise
+          return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' }))
+        }
+        if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_a/domains') {
+          return Promise.resolve(mockJSONResponse([]))
+        }
+        if (url.startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+        throw new Error(`unexpected fetch ${method} ${url}`)
+      })
+      return { fetchMock, detailGets: () => detailGets, timelineGets: () => timelineGets }
+    }
+
+    async function commitUnlinkRefreshWhileRoutePending(
+      delayedRouteDetail: ReturnType<typeof deferred<Response>>,
+    ) {
+      const { fetchMock, detailGets } = createRouteMutationRaceFetch({ delayedRouteDetail })
+      vi.stubGlobal('fetch', fetchMock)
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a']}>
+          <SameVPSQueryReloadHarness />
+        </MemoryRouter>,
+      )
+
+      await screen.findByRole('heading', { name: 'Route A initial' })
+      fireEvent.click(screen.getByRole('button', { name: '同 VPS query reload' }))
+      await waitFor(() => expect(detailGets()).toBe(2))
+
+      clickVPSAction('监控观测')
+      const evidenceDrawer = screen.getByRole('dialog', { name: '监控观测' })
+      fireEvent.click(within(evidenceDrawer).getByRole('button', { name: '解除关联' }))
+      const confirmation = within(evidenceDrawer).getByRole('alertdialog', { name: '确认解除监控实例关联' })
+      fireEvent.click(within(confirmation).getByRole('button', { name: '确认解除关联' }))
+
+      await waitFor(() => expect(detailGets()).toBe(3))
+      await screen.findByRole('heading', { name: 'Route A current after unlink' })
+    }
+
+    it('rejects a stale same-VPS second-stage payload at the outer guard before it resets the current mutation view', async () => {
+      const delayedReloadTimeline = deferred<Response>()
+      const { fetchMock, detailGets, timelineGets } = createRouteMutationRaceFetch({
+        delayedReloadTimeline,
+        reloadDetail: {
+          ...initialRouteDetail,
+          display_name: 'Route A stale second-stage payload',
+        },
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a']}>
+          <SameVPSQueryReloadHarness />
+        </MemoryRouter>,
+      )
+
+      await screen.findByRole('heading', { name: 'Route A initial' })
+      fireEvent.click(screen.getByRole('button', { name: '同 VPS query reload' }))
+      await waitFor(() => expect(detailGets()).toBe(2))
+      await waitFor(() => expect(timelineGets()).toBe(2))
+
+      clickVPSAction('监控观测')
+      const evidenceDrawer = screen.getByRole('dialog', { name: '监控观测' })
+      fireEvent.click(within(evidenceDrawer).getByRole('button', { name: '解除关联' }))
+      const confirmation = within(evidenceDrawer).getByRole('alertdialog', { name: '确认解除监控实例关联' })
+      fireEvent.click(within(confirmation).getByRole('button', { name: '确认解除关联' }))
+      await waitFor(() => expect(detailGets()).toBe(3))
+      await screen.findByRole('heading', { name: 'Route A current after unlink' })
+
+      await act(async () => {
+        delayedReloadTimeline.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' }))
+      })
+
+      expect(screen.getByRole('heading', { level: 1, name: 'Route A current after unlink' })).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { level: 1, name: 'Route A stale second-stage payload' })).not.toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: '监控观测' })).toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: '创建/更新订阅' })).not.toBeInTheDocument()
+    })
+
+    it('rejects a same-VPS payload whose functional state updater loses ownership before commit', async () => {
+      const delayedReloadTimeline = deferred<Response>()
+      const payloadAdmission = deferred<void>()
+      let payloadAdmitted = false
+      const realGetVPSAsset = api.getVPSAsset
+      let getVPSAssetCalls = 0
+      const getVPSAssetMock = vi.spyOn(api, 'getVPSAsset').mockImplementation(async (vpsId) => {
+        const detail = await realGetVPSAsset(vpsId)
+        getVPSAssetCalls += 1
+        if (getVPSAssetCalls !== 2) return detail
+        return {
+          ...detail,
+          monitoring_instance_links: new Proxy(detail.monitoring_instance_links, {
+            get(target, property, receiver) {
+              if (property === '0') {
+                payloadAdmitted = true
+                payloadAdmission.resolve()
+              }
+              return Reflect.get(target, property, receiver)
+            },
+          }),
+        }
+      })
+      const { fetchMock, detailGets, timelineGets } = createRouteMutationRaceFetch({
+        delayedReloadTimeline,
+        reloadDetail: {
+          ...initialRouteDetail,
+          display_name: 'Route A stale queued updater',
+        },
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a']}>
+          <SameVPSQueryReloadHarness />
+        </MemoryRouter>,
+      )
+
+      await screen.findByRole('heading', { name: 'Route A initial' })
+      fireEvent.click(screen.getByRole('button', { name: '同 VPS query reload' }))
+      await waitFor(() => expect(detailGets()).toBe(2))
+      expect(getVPSAssetMock).toHaveBeenCalledTimes(2)
+      await waitFor(() => expect(timelineGets()).toBe(2))
+      expect(payloadAdmitted).toBe(false)
+      clickVPSAction('监控观测')
+      const evidenceDrawer = screen.getByRole('dialog', { name: '监控观测' })
+      const closeButton = within(evidenceDrawer).getByLabelText('关闭')
+
+      await act(async () => {
+        delayedReloadTimeline.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' }))
+        await payloadAdmission.promise
+        closeButton.click()
+      })
+
+      expect(screen.getByRole('heading', { level: 1, name: 'Route A initial' })).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { level: 1, name: 'Route A stale queued updater' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: '监控观测' })).not.toBeInTheDocument()
+    })
+
+    it('rejects a stale same-VPS route rejection after a later mutation refresh commits', async () => {
+      const delayedRouteDetail = deferred<Response>()
+      await commitUnlinkRefreshWhileRoutePending(delayedRouteDetail)
+
+      await act(async () => {
+        delayedRouteDetail.reject(new Error('Route A stale rejection'))
+      })
+
+      expect(screen.getByRole('heading', { name: 'Route A current after unlink' })).toBeInTheDocument()
+      expect(screen.queryByText('Route A stale rejection')).not.toBeInTheDocument()
+    })
+
+    it('keeps a newer ordinary preview when an older route-owned preview settles last', async () => {
+      const detailA = {
+        ...vpsDetailBody,
+        vps_id: 'vps_a',
+        display_name: 'Route Preview A',
+        lifecycle_status: 'active',
+        renewal_decision: 'cancel',
+        monitoring_instance_links: [],
+        active_monitoring_instance_link_count: 0,
+      }
+      const routePreviewA1 = cancellationPreviewBody({
+        vps: detailA,
+        subscriptions: [],
+        monitoring_instance_links: [],
+        services: [],
+        domains: [],
+        target_links: [],
+        recommended_steps: [],
+        warnings: ['route A1 旧警告'],
+        blockers: ['route A1 旧阻止项'],
+        preview_digest: 'route-preview-a1',
+      })
+      const ordinaryPreviewA2 = cancellationPreviewBody({
+        vps: detailA,
+        subscriptions: [],
+        monitoring_instance_links: [],
+        services: [],
+        domains: [],
+        target_links: [],
+        recommended_steps: [],
+        warnings: ['ordinary A2 新警告'],
+        blockers: ['ordinary A2 新阻止项'],
+        preview_digest: 'ordinary-preview-a2',
+      })
+      const delayedRoutePreviewA1 = deferred<Response>()
+      const delayedOrdinaryPreviewA2 = deferred<Response>()
+      let previewCalls = 0
+      vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/vps/vps_a' && method === 'GET') return Promise.resolve(mockJSONResponse(detailA))
+        if (url === '/api/vps/vps_a/timeline') {
+          return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' }))
+        }
+        if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_a/domains') {
+          return Promise.resolve(mockJSONResponse([]))
+        }
+        if (url.startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+        if (url === '/api/vps/vps_a/cancellation-preview' && method === 'GET') {
+          previewCalls += 1
+          return previewCalls === 1
+            ? delayedRoutePreviewA1.promise
+            : delayedOrdinaryPreviewA2.promise
+        }
+        throw new Error(`unexpected fetch ${method} ${url}`)
+      }))
+
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a']}>
+          <SameVPSQueryReloadHarness workbench="cancellation" />
+        </MemoryRouter>,
+      )
+
+      await screen.findByRole('heading', { name: 'Route Preview A' })
+      fireEvent.click(screen.getByRole('button', { name: '同 VPS query reload' }))
+      await waitFor(() => expect(previewCalls).toBe(1))
+
+      fireEvent.click(screen.getByRole('button', { name: '处理取消/退役' }))
+      const drawer = await screen.findByRole('dialog', { name: '取消/退役' })
+      await waitFor(() => expect(previewCalls).toBe(2))
+      expect(within(drawer).getByText('正在加载取消/退役影响范围…')).toBeInTheDocument()
+
+      await act(async () => {
+        delayedRoutePreviewA1.resolve(mockJSONResponse(routePreviewA1))
+      })
+
+      expect(within(drawer).getByText('正在加载取消/退役影响范围…')).toBeInTheDocument()
+      expect(within(drawer).queryByText('route A1 旧警告')).not.toBeInTheDocument()
+      expect(within(drawer).queryByText('route A1 旧阻止项')).not.toBeInTheDocument()
+
+      await act(async () => {
+        delayedOrdinaryPreviewA2.resolve(mockJSONResponse(ordinaryPreviewA2))
+      })
+
+      await waitFor(() => expect(within(drawer).getByText('ordinary A2 新警告')).toBeInTheDocument())
+      expect(within(drawer).getByText('ordinary A2 新阻止项')).toBeInTheDocument()
+      expect(within(drawer).queryByText('route A1 旧警告')).not.toBeInTheDocument()
+      expect(within(drawer).queryByText('route A1 旧阻止项')).not.toBeInTheDocument()
+    })
+
+    it('invalidates a cancellation preview before a route payload switches drawers', async () => {
+      const detailA = {
+        ...vpsDetailBody,
+        vps_id: 'vps_a',
+        display_name: 'Route Reset A',
+        lifecycle_status: 'active',
+        renewal_decision: 'keep',
+        monitoring_instance_links: [],
+        active_monitoring_instance_link_count: 0,
+      }
+      const latePreview = cancellationPreviewBody({
+        vps: detailA,
+        subscriptions: [],
+        monitoring_instance_links: [],
+        services: [],
+        domains: [],
+        target_links: [],
+        recommended_steps: [],
+        warnings: ['payload reset 后的迟到警告'],
+        blockers: ['payload reset 后的迟到阻止项'],
+        preview_digest: 'payload-reset-stale-preview',
+      })
+      const delayedRouteDetail = deferred<Response>()
+      const delayedOrdinaryPreview = deferred<Response>()
+      let detailGets = 0
+      let previewCalls = 0
+      vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/vps/vps_a' && method === 'GET') {
+          detailGets += 1
+          return detailGets === 1
+            ? Promise.resolve(mockJSONResponse(detailA))
+            : delayedRouteDetail.promise
+        }
+        if (url === '/api/vps/vps_a/timeline') {
+          return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' }))
+        }
+        if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_a/domains') {
+          return Promise.resolve(mockJSONResponse([]))
+        }
+        if (url.startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+        if (url === '/api/vps/vps_a/cancellation-preview' && method === 'GET') {
+          previewCalls += 1
+          return previewCalls === 1
+            ? Promise.resolve(mockJSONResponse({ error: '初始 route preview 不可用' }, 503))
+            : delayedOrdinaryPreview.promise
+        }
+        throw new Error(`unexpected fetch ${method} ${url}`)
+      }))
+
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a?workbench=cancellation']}>
+          <SameVPSQueryReloadHarness workbench="subscription" />
+        </MemoryRouter>,
+      )
+
+      const cancellationDrawer = await screen.findByRole('dialog', { name: '取消/退役' })
+      expect(within(cancellationDrawer).getByRole('alert')).toHaveTextContent('初始 route preview 不可用')
+      expect(screen.queryByRole('button', { name: '处理取消/退役' })).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: '同 VPS query reload' }))
+      await waitFor(() => expect(detailGets).toBe(2))
+      fireEvent.click(within(cancellationDrawer).getByRole('button', { name: '重新加载' }))
+      await waitFor(() => expect(previewCalls).toBe(2))
+
+      await act(async () => {
+        delayedRouteDetail.resolve(mockJSONResponse(detailA))
+      })
+      await screen.findByRole('dialog', { name: '创建/更新订阅' })
+
+      await act(async () => {
+        delayedOrdinaryPreview.resolve(mockJSONResponse(latePreview))
+      })
+
+      expect(screen.queryByRole('button', { name: '处理取消/退役' })).not.toBeInTheDocument()
+      expect(screen.queryByText('payload reset 后的迟到警告')).not.toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: '创建/更新订阅' })).toBeInTheDocument()
+    })
+
+    it('clears a committed cancellation preview, feedback, and attention when a route payload switches drawers', async () => {
+      const detailA = {
+        ...vpsDetailBody,
+        vps_id: 'vps_a',
+        display_name: 'Route Reset Committed A',
+        lifecycle_status: 'active',
+        renewal_decision: 'keep',
+        monitoring_instance_links: [],
+        active_monitoring_instance_link_count: 0,
+      }
+      const initialPreview = cancellationPreviewBody({
+        vps: detailA,
+        subscriptions: [],
+        monitoring_instance_links: [],
+        services: [],
+        domains: [],
+        target_links: [],
+        recommended_steps: [],
+        warnings: [],
+        blockers: [],
+        preview_digest: 'payload-reset-initial-preview',
+      })
+      const refreshedPreview = {
+        ...initialPreview,
+        preview_digest: 'payload-reset-refreshed-preview',
+      }
+      const staleRecoveryPreview = {
+        ...initialPreview,
+        warnings: ['payload reset 已提交警告'],
+        blockers: ['payload reset 已提交阻止项'],
+        preview_digest: 'payload-reset-committed-preview',
+      }
+      const applyResult = {
+        action: {
+          action_id: 'alca_route_reset',
+          vps_id: 'vps_a',
+          action_type: 'cancel_vps',
+          status: 'completed',
+          reason: '验证 route payload reset',
+          created_at: '2026-08-27T03:00:00Z',
+          confirmed_at: '2026-08-27T03:00:00Z',
+          completed_at: '2026-08-27T03:00:00Z',
+          summary: {},
+        },
+        steps: [{
+          step_id: 'alcs_route_reset',
+          action_id: 'alca_route_reset',
+          object_type: 'vps',
+          object_id: 'vps_a',
+          step_type: 'vps_lifecycle',
+          status: 'completed',
+          before_state: {},
+          after_state: {},
+          message: 'done',
+          executed_at: '2026-08-27T03:00:00Z',
+          created_at: '2026-08-27T03:00:00Z',
+        }],
+      }
+      const delayedRouteDetail = deferred<Response>()
+      let detailGets = 0
+      let previewCalls = 0
+      let cancellationPosts = 0
+      vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/vps/vps_a' && method === 'GET') {
+          detailGets += 1
+          if (detailGets === 3) return delayedRouteDetail.promise
+          return Promise.resolve(mockJSONResponse(detailA))
+        }
+        if (url === '/api/vps/vps_a/timeline') {
+          return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' }))
+        }
+        if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_a/domains') {
+          return Promise.resolve(mockJSONResponse([]))
+        }
+        if (url.startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+        if (url === '/api/vps/vps_a/cancellation-preview' && method === 'GET') {
+          previewCalls += 1
+          if (previewCalls === 1) return Promise.resolve(mockJSONResponse(initialPreview))
+          if (previewCalls === 2) return Promise.resolve(mockJSONResponse(refreshedPreview))
+          return Promise.resolve(mockJSONResponse(staleRecoveryPreview))
+        }
+        if (url === '/api/vps/vps_a/cancellation' && method === 'POST') {
+          cancellationPosts += 1
+          return cancellationPosts === 1
+            ? Promise.resolve(mockJSONResponse(applyResult))
+            : Promise.resolve(mockJSONResponse({
+                error: 'cancellation preview stale',
+                code: 'cancellation_preview_stale',
+              }, 409))
+        }
+        throw new Error(`unexpected fetch ${method} ${url}`)
+      }))
+
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a?workbench=cancellation']}>
+          <SameVPSQueryReloadHarness workbench="subscription" />
+        </MemoryRouter>,
+      )
+
+      let cancellationDrawer = await screen.findByRole('dialog', { name: '取消/退役' })
+      fireEvent.change(within(cancellationDrawer).getByLabelText('原因'), {
+        target: { value: '验证 route payload reset' },
+      })
+      fireEvent.click(within(cancellationDrawer).getByRole('button', { name: '确认取消/退役' }))
+      await waitFor(() => expect(previewCalls).toBe(2))
+      await waitFor(() => expect(screen.getByText(
+        '已完成生命周期动作 alca_route_reset，写入 1 个步骤。',
+      )).toBeInTheDocument())
+
+      cancellationDrawer = screen.getByRole('dialog', { name: '取消/退役' })
+      fireEvent.change(within(cancellationDrawer).getByLabelText('原因'), {
+        target: { value: '再次验证 route payload reset' },
+      })
+      fireEvent.click(within(cancellationDrawer).getByRole('button', { name: '确认取消/退役' }))
+      await waitFor(() => expect(within(cancellationDrawer).getByText('payload reset 已提交警告')).toBeInTheDocument())
+      expect(within(cancellationDrawer).getByText('payload reset 已提交阻止项')).toBeInTheDocument()
+      expect(within(cancellationDrawer).getByText('影响范围已变化，请重新加载预览后再确认')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '处理取消/退役' })).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: '同 VPS query reload' }))
+      await waitFor(() => expect(detailGets).toBe(3))
+      await act(async () => {
+        delayedRouteDetail.resolve(mockJSONResponse(detailA))
+      })
+      await screen.findByRole('dialog', { name: '创建/更新订阅' })
+
+      expect(screen.queryByText('payload reset 已提交警告')).not.toBeInTheDocument()
+      expect(screen.queryByText('payload reset 已提交阻止项')).not.toBeInTheDocument()
+      expect(screen.queryByText('影响范围已变化，请重新加载预览后再确认')).not.toBeInTheDocument()
+      expect(screen.queryByText('已完成生命周期动作 alca_route_reset，写入 1 个步骤。')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '处理取消/退役' })).not.toBeInTheDocument()
+    })
+  })
+
   it('creates a service record for the current VPS and refreshes services', async () => {
     const detailBody = {
       vps_id: 'vps_001',
@@ -3378,6 +4607,331 @@ describe('LegacyVPSDetail', () => {
 
     await waitFor(() => expect(screen.getByText('影响范围已变化，请重新加载预览后再确认')).toBeInTheDocument())
     expect(screen.getByText('新 A 预览')).toBeInTheDocument()
+  })
+
+  it('supersedes an ordinary cancellation preview when the drawer closes before reopen', async () => {
+    const detailA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A',
+      lifecycle_status: 'active',
+      renewal_decision: 'unreviewed',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+      running_monitoring_instance_count: 0,
+      running_target_count: 0,
+    }
+    const previewA1 = cancellationPreviewBody({
+      vps: detailA,
+      subscriptions: [],
+      monitoring_instance_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      recommended_steps: [],
+      warnings: ['A1 关闭前的旧警告'],
+      blockers: ['A1 关闭前的旧阻止项'],
+      preview_digest: 'digest-a-1',
+    })
+    const previewA2 = cancellationPreviewBody({
+      vps: detailA,
+      subscriptions: [],
+      monitoring_instance_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      recommended_steps: [],
+      warnings: ['A2 重开后的当前警告'],
+      blockers: ['A2 重开后的当前阻止项'],
+      preview_digest: 'digest-a-2',
+    })
+    const delayedPreviewA1 = deferred<ReturnType<typeof mockJSONResponse>>()
+    const delayedPreviewA2 = deferred<ReturnType<typeof mockJSONResponse>>()
+    let previewCalls = 0
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (url === '/api/vps/vps_a' && method === 'GET') return Promise.resolve(mockJSONResponse(detailA))
+      if (url.startsWith('/api/vps/vps_a/timeline')) {
+        return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' }))
+      }
+      if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_a/domains') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (url.startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      if (url === '/api/vps/vps_a/cancellation-preview' && method === 'GET') {
+        previewCalls += 1
+        if (previewCalls === 1) {
+          return Promise.resolve(mockJSONResponse({ error: '初始取消预览暂不可用' }, 503))
+        }
+        return previewCalls === 2 ? delayedPreviewA1.promise : delayedPreviewA2.promise
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`)
+    }))
+
+    function CancellationQueryHarness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate('/vps/vps_a?workbench=cancellation')}>
+            通过查询重开取消/退役
+          </button>
+          <LocationProbe />
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          </Routes>
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a?workbench=cancellation']}>
+        <CancellationQueryHarness />
+      </MemoryRouter>,
+    )
+
+    const firstDrawer = await screen.findByRole('dialog', { name: '取消/退役' })
+    await waitFor(() => expect(previewCalls).toBe(1))
+    expect(within(firstDrawer).getByRole('alert')).toHaveTextContent('初始取消预览暂不可用')
+    expect(screen.queryByRole('button', { name: '处理取消/退役' })).not.toBeInTheDocument()
+
+    fireEvent.click(within(firstDrawer).getByRole('button', { name: '重新加载' }))
+    await waitFor(() => expect(previewCalls).toBe(2))
+
+    fireEvent.click(within(firstDrawer).getByText('关闭'))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '取消/退役' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(/^$/))
+
+    await act(async () => {
+      delayedPreviewA1.resolve(mockJSONResponse(previewA1))
+    })
+
+    expect(screen.queryByRole('button', { name: '处理取消/退役' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '通过查询重开取消/退役' }))
+    await waitFor(() => expect(previewCalls).toBe(3))
+
+    await act(async () => {
+      delayedPreviewA2.resolve(mockJSONResponse(previewA2))
+    })
+
+    const secondDrawer = await screen.findByRole('dialog', { name: '取消/退役' })
+    await waitFor(() => expect(within(secondDrawer).getByText('A2 重开后的当前警告')).toBeInTheDocument())
+    expect(within(secondDrawer).getByText('A2 重开后的当前阻止项')).toBeInTheDocument()
+    expect(within(secondDrawer).queryByText('A1 关闭前的旧警告')).not.toBeInTheDocument()
+    expect(within(secondDrawer).queryByText('A1 关闭前的旧阻止项')).not.toBeInTheDocument()
+  })
+
+  it.each(['workbench button', 'modal close'] as const)(
+    'reloads a previously loaded cancellation preview after %s closes the deep-linked drawer',
+    async (closeControl) => {
+      const detailA = {
+        ...vpsDetailBody,
+        vps_id: 'vps_a',
+        display_name: 'Tokyo Edge A',
+        lifecycle_status: 'to_cancel',
+        monitoring_instance_links: [],
+        active_monitoring_instance_link_count: 0,
+      }
+      const previewA1 = cancellationPreviewBody({
+        vps: detailA,
+        subscriptions: [],
+        monitoring_instance_links: [],
+        services: [],
+        domains: [],
+        target_links: [],
+        recommended_steps: [],
+        warnings: ['A1 已关闭的旧预览'],
+        blockers: [],
+        preview_digest: 'digest-a-loaded-1',
+      })
+      const previewA2 = cancellationPreviewBody({
+        vps: detailA,
+        subscriptions: [],
+        monitoring_instance_links: [],
+        services: [],
+        domains: [],
+        target_links: [],
+        recommended_steps: [],
+        warnings: ['A2 重开后重新获取的预览'],
+        blockers: [],
+        preview_digest: 'digest-a-loaded-2',
+      })
+      const delayedPreviewA2 = deferred<ReturnType<typeof mockJSONResponse>>()
+      let previewCalls = 0
+      vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (url === '/api/vps/vps_a' && method === 'GET') return Promise.resolve(mockJSONResponse(detailA))
+        if (url.startsWith('/api/vps/vps_a/timeline')) {
+          return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' }))
+        }
+        if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_a/domains') {
+          return Promise.resolve(mockJSONResponse([]))
+        }
+        if (url.startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+        if (url === '/api/vps/vps_a/cancellation-preview' && method === 'GET') {
+          previewCalls += 1
+          return previewCalls === 1
+            ? Promise.resolve(mockJSONResponse(previewA1))
+            : delayedPreviewA2.promise
+        }
+        throw new Error(`unexpected fetch ${method} ${url}`)
+      }))
+
+      render(
+        <MemoryRouter initialEntries={['/vps/vps_a?workbench=cancellation']}>
+          <Routes>
+            <Route
+              path="/vps/:vpsId"
+              element={(
+                <>
+                  <LocationProbe />
+                  <LegacyVPSDetail />
+                </>
+              )}
+            />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+      const firstDrawer = await screen.findByRole('dialog', { name: '取消/退役' })
+      expect(within(firstDrawer).getByText('A1 已关闭的旧预览')).toBeInTheDocument()
+      expect(previewCalls).toBe(1)
+
+      if (closeControl === 'workbench button') {
+        fireEvent.click(within(firstDrawer).getByText('关闭'))
+      } else {
+        fireEvent.click(within(firstDrawer).getByLabelText('关闭'))
+      }
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: '取消/退役' })).not.toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(/^$/))
+
+      fireEvent.click(screen.getByRole('button', { name: '处理取消/退役' }))
+      const secondDrawer = await screen.findByRole('dialog', { name: '取消/退役' })
+      await waitFor(() => expect(previewCalls).toBe(2))
+      expect(within(secondDrawer).getByText('正在加载取消/退役影响范围…')).toBeInTheDocument()
+      expect(within(secondDrawer).queryByText('A1 已关闭的旧预览')).not.toBeInTheDocument()
+
+      await act(async () => {
+        delayedPreviewA2.resolve(mockJSONResponse(previewA2))
+      })
+
+      await waitFor(() => expect(within(secondDrawer).getByText('A2 重开后重新获取的预览')).toBeInTheDocument())
+    },
+  )
+
+  it('rejects a mutation-owned cancellation preview after the drawer invalidates the write', async () => {
+    const detailA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A',
+      lifecycle_status: 'to_cancel',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const initialPreview = cancellationPreviewBody({
+      vps: detailA,
+      subscriptions: [],
+      monitoring_instance_links: [],
+      target_links: [],
+      warnings: ['A 初始预览'],
+      preview_digest: 'digest-a-initial',
+    })
+    const stalePreview = cancellationPreviewBody({
+      vps: detailA,
+      subscriptions: [],
+      monitoring_instance_links: [],
+      target_links: [],
+      warnings: ['A 已失效写入的预览'],
+      preview_digest: 'digest-a-stale-write',
+    })
+    const reopenedPreview = cancellationPreviewBody({
+      vps: detailA,
+      subscriptions: [],
+      monitoring_instance_links: [],
+      target_links: [],
+      warnings: ['A 重开后的当前预览'],
+      preview_digest: 'digest-a-reopened',
+    })
+    const applyResult = {
+      action: {
+        action_id: 'alca_a',
+        vps_id: 'vps_a',
+        action_type: 'cancel_vps',
+        status: 'completed',
+        reason: '退役 A',
+        created_at: '2026-05-30T08:00:00Z',
+        confirmed_at: '2026-05-30T08:00:00Z',
+        completed_at: '2026-05-30T08:00:00Z',
+        summary: {},
+      },
+      steps: [{
+        step_id: 'alcs_a',
+        action_id: 'alca_a',
+        object_type: 'vps',
+        object_id: 'vps_a',
+        step_type: 'vps_lifecycle',
+        status: 'completed',
+        before_state: {},
+        after_state: {},
+        message: 'done',
+        executed_at: '2026-05-30T08:00:00Z',
+        created_at: '2026-05-30T08:00:00Z',
+      }],
+    }
+    const delayedPreviewRefresh = deferred<ReturnType<typeof mockJSONResponse>>()
+    let previewCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (url === '/api/vps/vps_a' && method === 'GET') return mockJSONResponse(detailA)
+      if (url.startsWith('/api/vps/vps_a/timeline')) {
+        return mockJSONResponse({ ...timelineEmptyBody, vps_id: 'vps_a' })
+      }
+      if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_a/domains') return mockJSONResponse([])
+      if (url.startsWith('/api/subscriptions')) return mockJSONResponse([])
+      if (url === '/api/vps/vps_a/cancellation-preview') {
+        previewCalls += 1
+        if (previewCalls === 1) return mockJSONResponse(initialPreview)
+        if (previewCalls === 2) return delayedPreviewRefresh.promise
+        return mockJSONResponse(reopenedPreview)
+      }
+      if (url === '/api/vps/vps_a/cancellation' && method === 'POST') return mockJSONResponse(applyResult)
+      throw new Error(`unexpected fetch ${method} ${url}`)
+    }))
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a?workbench=cancellation']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const workbench = await screen.findByRole('dialog', { name: '取消/退役' })
+    expect(within(workbench).getByText('A 初始预览')).toBeInTheDocument()
+    fireEvent.change(within(workbench).getByLabelText('原因'), { target: { value: '退役 A' } })
+    fireEvent.click(within(workbench).getByRole('button', { name: '确认取消/退役' }))
+    await waitFor(() => expect(previewCalls).toBe(2))
+
+    const modalClose = workbench.querySelector('.modal-close')
+    if (!(modalClose instanceof HTMLButtonElement)) throw new Error('cancellation modal close button must exist')
+    expect(modalClose).toBeEnabled()
+    fireEvent.click(modalClose)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '取消/退役' })).not.toBeInTheDocument())
+
+    await act(async () => {
+      delayedPreviewRefresh.resolve(mockJSONResponse(stalePreview))
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '处理取消/退役' }))
+    const reopened = screen.getByRole('dialog', { name: '取消/退役' })
+    await waitFor(() => expect(previewCalls).toBe(3))
+    await waitFor(() => expect(within(reopened).getByText('A 重开后的当前预览')).toBeInTheDocument())
+    expect(within(reopened).queryByText('A 初始预览')).not.toBeInTheDocument()
+    expect(within(reopened).queryByText('A 已失效写入的预览')).not.toBeInTheDocument()
+    expect(screen.queryByText('取消/退役动作已完成，写入 1 个审计步骤')).not.toBeInTheDocument()
   })
 
   it('does not write an old successful cancellation refresh across A→B→A', async () => {
@@ -4419,7 +5973,346 @@ describe('LegacyVPSDetail', () => {
     expect(screen.queryByTestId('location-path')).not.toBeInTheDocument()
   })
 
-  it('does not close VPS B drawer when a delayed service create on A completes', async () => {
+  it('rejects a stale detail refresh commit after A→B→A', async () => {
+    const initialA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A initial',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const detailB = {
+      ...vpsDetailBody,
+      vps_id: 'vps_b',
+      display_name: 'Osaka Edge B',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const newerA = {
+      ...initialA,
+      display_name: 'Tokyo Edge A current',
+      updated_at: '2026-08-27T01:00:00Z',
+    }
+    const staleA = {
+      ...initialA,
+      display_name: 'Tokyo Edge A stale refresh',
+      updated_at: '2026-08-27T00:30:00Z',
+    }
+    const monitoringOption = {
+      monitoring_instance_id: 'mi_aba_detail',
+      display_name: 'ABA Detail Monitoring',
+      group: 'edge',
+      region: 'JP',
+      city: 'Tokyo',
+      provider: 'Monitoring Hint',
+      lifecycle_status: '在用',
+      monitoring_status: '启用',
+      binding_status: '已绑定',
+      labels: [],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-08-27T00:00:00Z',
+      updated_at: '2026-08-27T00:00:00Z',
+    }
+    const staleDetailRefresh = deferred<ReturnType<typeof mockJSONResponse>>()
+    let aDetailGets = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (url === '/api/vps/vps_a' && method === 'GET') {
+        aDetailGets += 1
+        if (aDetailGets === 1) return mockJSONResponse(initialA)
+        if (aDetailGets === 2) return staleDetailRefresh.promise
+        return mockJSONResponse(newerA)
+      }
+      if (url === '/api/vps/vps_b' && method === 'GET') return mockJSONResponse(detailB)
+      if (url === '/api/vps/vps_a/link-monitoring-instance' && method === 'POST') {
+        return mockJSONResponse({
+          link_id: 'vnl_aba_detail',
+          vps_id: 'vps_a',
+          monitoring_instance_id: monitoringOption.monitoring_instance_id,
+          linked_at: '2026-08-27T00:10:00Z',
+          unlinked_at: null,
+          note: 'ABA detail',
+        }, 201)
+      }
+      if (url === '/api/monitoring-instances') return mockJSONResponse([monitoringOption])
+      if (url.startsWith('/api/vps/vps_a/timeline') || url.startsWith('/api/vps/vps_b/timeline')) {
+        return mockJSONResponse({ ...timelineEmptyBody, vps_id: url.includes('vps_b') ? 'vps_b' : 'vps_a' })
+      }
+      if (url.includes('/services') || url.includes('/domains')) return mockJSONResponse([])
+      if (url.startsWith('/api/subscriptions')) return mockJSONResponse([])
+      throw new Error(`unexpected fetch ${method} ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function NavigationHarness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate('/vps/vps_b')}>切到 B</button>
+          <button type="button" onClick={() => navigate('/vps/vps_a')}>切回 A</button>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          </Routes>
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A initial' })).toBeInTheDocument())
+    clickVPSAction('关联已有监控实例')
+    const linkDrawer = screen.getByRole('dialog', { name: '关联已有监控实例' })
+    await within(linkDrawer).findByRole('option', { name: /ABA Detail Monitoring/ })
+    fireEvent.change(within(linkDrawer).getByLabelText('选择监控实例'), {
+      target: { value: monitoringOption.monitoring_instance_id },
+    })
+    fireEvent.change(within(linkDrawer).getByLabelText('关联备注'), { target: { value: 'ABA detail' } })
+    fireEvent.click(within(linkDrawer).getByRole('button', { name: '关联监控实例' }))
+    await waitFor(() => expect(aDetailGets).toBe(2))
+
+    fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '切回 A' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A current' })).toBeInTheDocument())
+
+    await act(async () => {
+      staleDetailRefresh.resolve(mockJSONResponse(staleA))
+    })
+
+    expect(screen.getByRole('heading', { name: 'Tokyo Edge A current' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Tokyo Edge A stale refresh' })).not.toBeInTheDocument()
+  })
+
+  it('rejects a stale services refresh commit after A→B→A', async () => {
+    const initialA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A initial',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const detailB = {
+      ...vpsDetailBody,
+      vps_id: 'vps_b',
+      display_name: 'Osaka Edge B',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const newerA = {
+      ...initialA,
+      display_name: 'Tokyo Edge A current',
+      updated_at: '2026-08-27T01:00:00Z',
+    }
+    const currentService = {
+      ...serviceBody,
+      service_id: 'svc_aba_current',
+      vps_id: 'vps_a',
+      name: 'Current A Service',
+    }
+    const staleService = {
+      ...serviceBody,
+      service_id: 'svc_aba_stale',
+      vps_id: 'vps_a',
+      name: 'Stale A Service',
+    }
+    const staleServicesRefresh = deferred<ReturnType<typeof mockJSONResponse>>()
+    let aDetailGets = 0
+    let aServicesGets = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (url === '/api/vps/vps_a' && method === 'GET') {
+        aDetailGets += 1
+        return mockJSONResponse(aDetailGets === 1 ? initialA : newerA)
+      }
+      if (url === '/api/vps/vps_b' && method === 'GET') return mockJSONResponse(detailB)
+      if (url === '/api/vps/vps_a/services' && method === 'POST') {
+        return mockJSONResponse({ ...serviceBody, service_id: 'svc_aba_created', vps_id: 'vps_a', name: 'Created A Service' }, 201)
+      }
+      if (url === '/api/vps/vps_a/services' && method === 'GET') {
+        aServicesGets += 1
+        if (aServicesGets === 1) return mockJSONResponse([])
+        if (aServicesGets === 2) return staleServicesRefresh.promise
+        return mockJSONResponse([currentService])
+      }
+      if (url === '/api/vps/vps_b/services') return mockJSONResponse([])
+      if (url === '/api/targets') return mockJSONResponse([targetBody])
+      if (url.startsWith('/api/vps/vps_a/timeline') || url.startsWith('/api/vps/vps_b/timeline')) {
+        return mockJSONResponse({ ...timelineEmptyBody, vps_id: url.includes('vps_b') ? 'vps_b' : 'vps_a' })
+      }
+      if (url.includes('/domains')) return mockJSONResponse([])
+      if (url.startsWith('/api/subscriptions')) return mockJSONResponse([])
+      throw new Error(`unexpected fetch ${method} ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function NavigationHarness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate('/vps/vps_b')}>切到 B</button>
+          <button type="button" onClick={() => navigate('/vps/vps_a')}>切回 A</button>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          </Routes>
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A initial' })).toBeInTheDocument())
+    clickVPSAction('新增服务')
+    const createDrawer = screen.getByRole('dialog', { name: '新增服务' })
+    fireEvent.change(within(createDrawer).getByLabelText('服务名称'), { target: { value: 'Created A Service' } })
+    fireEvent.change(within(createDrawer).getByLabelText('入口 URL'), { target: { value: 'https://created-a.example.com' } })
+    fireEvent.click(within(createDrawer).getByRole('button', { name: '创建服务记录' }))
+    await waitFor(() => expect(aServicesGets).toBe(2))
+
+    fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '切回 A' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A current' })).toBeInTheDocument())
+
+    const overviewActions = screen.getByRole('region', { name: 'Tokyo Edge A current' }).querySelector('.vps-detail-overview__actions')
+    if (!(overviewActions instanceof HTMLElement)) throw new Error('VPS overview actions must exist')
+    fireEvent.click(within(overviewActions).getByRole('button', { name: '服务' }))
+    const servicesDrawer = screen.getByRole('dialog', { name: '服务详情' })
+    expect(within(servicesDrawer).getByText('Current A Service')).toBeInTheDocument()
+
+    await act(async () => {
+      staleServicesRefresh.resolve(mockJSONResponse([staleService]))
+    })
+
+    expect(within(servicesDrawer).getByText('Current A Service')).toBeInTheDocument()
+    expect(within(servicesDrawer).queryByText('Stale A Service')).not.toBeInTheDocument()
+  })
+
+  it('rejects a stale domains refresh commit after A→B→A', async () => {
+    const initialA = {
+      ...vpsDetailBody,
+      vps_id: 'vps_a',
+      display_name: 'Tokyo Edge A initial',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const detailB = {
+      ...vpsDetailBody,
+      vps_id: 'vps_b',
+      display_name: 'Osaka Edge B',
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const newerA = {
+      ...initialA,
+      display_name: 'Tokyo Edge A current',
+      updated_at: '2026-08-27T01:00:00Z',
+    }
+    const currentDomain = {
+      ...domainBody,
+      domain_id: 'dom_aba_current',
+      vps_id: 'vps_a',
+      service_id: null,
+      target_id: null,
+      domain_name: 'current-a.example.com',
+    }
+    const staleDomain = {
+      ...domainBody,
+      domain_id: 'dom_aba_stale',
+      vps_id: 'vps_a',
+      service_id: null,
+      target_id: null,
+      domain_name: 'stale-a.example.com',
+    }
+    const staleDomainsRefresh = deferred<ReturnType<typeof mockJSONResponse>>()
+    let aDetailGets = 0
+    let aDomainsGets = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (url === '/api/vps/vps_a' && method === 'GET') {
+        aDetailGets += 1
+        return mockJSONResponse(aDetailGets === 1 ? initialA : newerA)
+      }
+      if (url === '/api/vps/vps_b' && method === 'GET') return mockJSONResponse(detailB)
+      if (url === '/api/vps/vps_a/domains' && method === 'POST') {
+        return mockJSONResponse({ ...domainBody, domain_id: 'dom_aba_created', vps_id: 'vps_a', domain_name: 'created-a.example.com' }, 201)
+      }
+      if (url === '/api/vps/vps_a/domains' && method === 'GET') {
+        aDomainsGets += 1
+        if (aDomainsGets === 1) return mockJSONResponse([])
+        if (aDomainsGets === 2) return staleDomainsRefresh.promise
+        return mockJSONResponse([currentDomain])
+      }
+      if (url === '/api/vps/vps_b/domains') return mockJSONResponse([])
+      if (url === '/api/targets') return mockJSONResponse([targetBody])
+      if (url.startsWith('/api/vps/vps_a/timeline') || url.startsWith('/api/vps/vps_b/timeline')) {
+        return mockJSONResponse({ ...timelineEmptyBody, vps_id: url.includes('vps_b') ? 'vps_b' : 'vps_a' })
+      }
+      if (url.includes('/services')) return mockJSONResponse([])
+      if (url.startsWith('/api/subscriptions')) return mockJSONResponse([])
+      throw new Error(`unexpected fetch ${method} ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function NavigationHarness() {
+      const navigate = useNavigate()
+      return (
+        <>
+          <button type="button" onClick={() => navigate('/vps/vps_b')}>切到 B</button>
+          <button type="button" onClick={() => navigate('/vps/vps_a')}>切回 A</button>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          </Routes>
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <NavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A initial' })).toBeInTheDocument())
+    clickVPSAction('新增域名')
+    const createDrawer = screen.getByRole('dialog', { name: '新增域名' })
+    fireEvent.change(within(createDrawer).getByLabelText('域名'), { target: { value: 'created-a.example.com' } })
+    fireEvent.click(within(createDrawer).getByRole('button', { name: '创建域名记录' }))
+    await waitFor(() => expect(aDomainsGets).toBe(2))
+
+    fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '切回 A' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A current' })).toBeInTheDocument())
+
+    const overviewActions = screen.getByRole('region', { name: 'Tokyo Edge A current' }).querySelector('.vps-detail-overview__actions')
+    if (!(overviewActions instanceof HTMLElement)) throw new Error('VPS overview actions must exist')
+    fireEvent.click(within(overviewActions).getByRole('button', { name: '域名' }))
+    const domainsDrawer = screen.getByRole('dialog', { name: '域名详情' })
+    expect(within(domainsDrawer).getByText('current-a.example.com')).toBeInTheDocument()
+
+    await act(async () => {
+      staleDomainsRefresh.resolve(mockJSONResponse([staleDomain]))
+    })
+
+    expect(within(domainsDrawer).getByText('current-a.example.com')).toBeInTheDocument()
+    expect(within(domainsDrawer).queryByText('stale-a.example.com')).not.toBeInTheDocument()
+  })
+
+  it('keeps service write ownership per VPS across concurrent A and B creates', async () => {
     const detailA = {
       ...vpsDetailBody,
       vps_id: 'vps_a',
@@ -4434,12 +6327,22 @@ describe('LegacyVPSDetail', () => {
       monitoring_instance_links: [],
       active_monitoring_instance_link_count: 0,
     }
-    const delayedCreate = deferred<ReturnType<typeof mockJSONResponse>>()
+    const delayedACreate = deferred<ReturnType<typeof mockJSONResponse>>()
+    const delayedBCreate = deferred<ReturnType<typeof mockJSONResponse>>()
+    let aCreates = 0
+    let bCreates = 0
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET'
       if (url === '/api/vps/vps_a' && method === 'GET') return Promise.resolve(mockJSONResponse(detailA))
       if (url === '/api/vps/vps_b' && method === 'GET') return Promise.resolve(mockJSONResponse(detailB))
-      if (url === '/api/vps/vps_a/services' && method === 'POST') return delayedCreate.promise
+      if (url === '/api/vps/vps_a/services' && method === 'POST') {
+        aCreates += 1
+        return delayedACreate.promise
+      }
+      if (url === '/api/vps/vps_b/services' && method === 'POST') {
+        bCreates += 1
+        return delayedBCreate.promise
+      }
       if (url === '/api/vps/vps_a/services' || url === '/api/vps/vps_b/services') {
         return Promise.resolve(mockJSONResponse([]))
       }
@@ -4458,6 +6361,7 @@ describe('LegacyVPSDetail', () => {
       return (
         <>
           <button type="button" onClick={() => navigate('/vps/vps_b')}>切到 B</button>
+          <button type="button" onClick={() => navigate('/vps/vps_a')}>切回 A</button>
           <Routes>
             <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
           </Routes>
@@ -4478,18 +6382,33 @@ describe('LegacyVPSDetail', () => {
     fireEvent.change(within(aDrawer).getByLabelText('服务名称'), { target: { value: 'Blog A' } })
     fireEvent.change(within(aDrawer).getByLabelText('入口 URL'), { target: { value: 'https://a.example.com' } })
     fireEvent.click(within(aDrawer).getByRole('button', { name: '创建服务记录' }))
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      '/api/vps/vps_a/services',
-      expect.objectContaining({ method: 'POST' }),
-    ))
+    await waitFor(() => expect(aCreates).toBe(1))
+    expect(within(aDrawer).getByRole('button', { name: '创建中…' })).toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
     clickVPSAction('新增服务')
-    expect(screen.getByRole('dialog', { name: '新增服务' })).toBeInTheDocument()
+    let bDrawer = screen.getByRole('dialog', { name: '新增服务' })
+    expect(within(bDrawer).getByRole('button', { name: '创建服务记录' })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '切回 A' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
+    clickVPSAction('新增服务')
+    expect(within(screen.getByRole('dialog', { name: '新增服务' })).getByRole('button', { name: '创建中…' })).toBeDisabled()
+    expect(aCreates).toBe(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+    clickVPSAction('新增服务')
+    bDrawer = screen.getByRole('dialog', { name: '新增服务' })
+    fireEvent.change(within(bDrawer).getByLabelText('服务名称'), { target: { value: 'Blog B' } })
+    fireEvent.change(within(bDrawer).getByLabelText('入口 URL'), { target: { value: 'https://b.example.com' } })
+    fireEvent.click(within(bDrawer).getByRole('button', { name: '创建服务记录' }))
+    await waitFor(() => expect(bCreates).toBe(1))
+    expect(within(bDrawer).getByRole('button', { name: '创建中…' })).toBeDisabled()
 
     await act(async () => {
-      delayedCreate.resolve(mockJSONResponse({
+      delayedACreate.resolve(mockJSONResponse({
         ...serviceBody,
         service_id: 'svc_from_a',
         vps_id: 'vps_a',
@@ -4498,11 +6417,23 @@ describe('LegacyVPSDetail', () => {
     })
 
     expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument()
-    expect(screen.getByRole('dialog', { name: '新增服务' })).toBeInTheDocument()
+    bDrawer = screen.getByRole('dialog', { name: '新增服务' })
+    expect(within(bDrawer).getByRole('button', { name: '创建中…' })).toBeDisabled()
+    expect(within(bDrawer).getByLabelText('服务名称')).toHaveValue('Blog B')
+    expect(bCreates).toBe(1)
     expect(screen.queryByText('服务记录已创建')).not.toBeInTheDocument()
+
+    await act(async () => {
+      delayedBCreate.resolve(mockJSONResponse({
+        ...serviceBody,
+        service_id: 'svc_from_b',
+        vps_id: 'vps_b',
+        name: 'Blog B',
+      }, 201))
+    })
   })
 
-  it('does not show VPS A subscription notice after switching to VPS B', async () => {
+  it('keeps subscription write ownership per VPS across concurrent A and B creates', async () => {
     const detailA = {
       ...vpsDetailBody,
       vps_id: 'vps_a',
@@ -4517,12 +6448,22 @@ describe('LegacyVPSDetail', () => {
       monitoring_instance_links: [],
       active_monitoring_instance_link_count: 0,
     }
-    const delayedCreate = deferred<ReturnType<typeof mockJSONResponse>>()
+    const delayedACreate = deferred<ReturnType<typeof mockJSONResponse>>()
+    const delayedBCreate = deferred<ReturnType<typeof mockJSONResponse>>()
+    let aCreates = 0
+    let bCreates = 0
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET'
       if (url === '/api/vps/vps_a' && method === 'GET') return Promise.resolve(mockJSONResponse(detailA))
       if (url === '/api/vps/vps_b' && method === 'GET') return Promise.resolve(mockJSONResponse(detailB))
-      if (url === '/api/vps/vps_a/subscriptions' && method === 'POST') return delayedCreate.promise
+      if (url === '/api/vps/vps_a/subscriptions' && method === 'POST') {
+        aCreates += 1
+        return delayedACreate.promise
+      }
+      if (url === '/api/vps/vps_b/subscriptions' && method === 'POST') {
+        bCreates += 1
+        return delayedBCreate.promise
+      }
       if (url.startsWith('/api/vps/vps_a/timeline') || url.startsWith('/api/vps/vps_b/timeline')) {
         return Promise.resolve(mockJSONResponse({ ...timelineEmptyBody, vps_id: url.includes('vps_b') ? 'vps_b' : 'vps_a' }))
       }
@@ -4560,16 +6501,26 @@ describe('LegacyVPSDetail', () => {
     fireEvent.change(within(drawer).getByLabelText('自定义支付方式'), { target: { value: 'visa' } })
     fireEvent.change(within(drawer).getByLabelText('备注'), { target: { value: 'from A' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      '/api/vps/vps_a/subscriptions',
-      expect.objectContaining({ method: 'POST' }),
-    ))
+    await waitFor(() => expect(aCreates).toBe(1))
+    expect(within(drawer).getByRole('button', { name: '保存中…' })).toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '创建/更新订阅' }), 'subscription command'))
+    const bDrawer = screen.getByRole('dialog', { name: '创建/更新订阅' })
+    expect(within(bDrawer).getByRole('button', { name: '创建/更新订阅' })).toBeEnabled()
+    fireEvent.change(within(bDrawer).getByLabelText('价格'), { target: { value: '24' } })
+    fireEvent.change(within(bDrawer).getByLabelText('续费日期'), { target: { value: '2026-08-01' } })
+    fireEvent.click(within(bDrawer).getByLabelText('自动续费'))
+    fireEvent.change(within(bDrawer).getByLabelText('支付方式'), { target: { value: '__custom' } })
+    fireEvent.change(within(bDrawer).getByLabelText('自定义支付方式'), { target: { value: 'mastercard' } })
+    fireEvent.change(within(bDrawer).getByLabelText('备注'), { target: { value: 'from B' } })
+    fireEvent.click(within(bDrawer).getByRole('button', { name: '创建/更新订阅' }))
+    await waitFor(() => expect(bCreates).toBe(1))
+    expect(within(bDrawer).getByRole('button', { name: '保存中…' })).toBeDisabled()
 
     await act(async () => {
-      delayedCreate.resolve(mockJSONResponse({
+      delayedACreate.resolve(mockJSONResponse({
         ...subscriptionBody,
         subscription_id: 'sub_from_a',
         vps_id: 'vps_a',
@@ -4578,7 +6529,21 @@ describe('LegacyVPSDetail', () => {
       }, 200))
     })
 
-    expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: 'Osaka Edge B' }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('dialog', { name: '创建/更新订阅' })).toBeInTheDocument()
+    expect(within(bDrawer).getByRole('button', { name: '保存中…' })).toBeDisabled()
+    expect(within(bDrawer).getByLabelText('备注')).toHaveValue('from B')
+    expect(bCreates).toBe(1)
     expect(screen.queryByText('订阅账单事实已创建')).not.toBeInTheDocument()
+
+    await act(async () => {
+      delayedBCreate.resolve(mockJSONResponse({
+        ...subscriptionBody,
+        subscription_id: 'sub_from_b',
+        vps_id: 'vps_b',
+        price: 24,
+        note: 'from B',
+      }, 200))
+    })
   })
 })
