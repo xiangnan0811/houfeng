@@ -16,7 +16,7 @@
   "base_branch": "main",
   "worktree_path": "/home/murray/code/houfeng/.worktree/v0776-vps-hardening",
   "commit": null,
-  "pr_url": null,
+  "pr_url": "https://github.com/xiangnan0811/houfeng/pull/466",
   "subtasks": [],
   "children": [
     "08-27-v0775-vps-detail-hardening"
