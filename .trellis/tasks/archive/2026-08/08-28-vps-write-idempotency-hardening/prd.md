@@ -43,7 +43,7 @@
 - [x] 新 migration、migration registry、APP ACL current fragment 与迁移/权限测试一致；既有 released migrations 不被修改。
 - [x] DTO contract 测试证明 nullable ordinary string 不再变成 date，显式日期别名映射为 `type: string` + `format: date`，Go/TS/manifest 四维加 format 完全一致。
 - [x] Focused Web/Go/handler/store/migration tests、lint/type-check/build、Node 22 `make verify-web` 与相关 Chromium 路由场景通过；`make verify-go` 已执行且只复现任务外 attachment PNG golden 差异，已在最终证据中单独记录，未伪装为通过。
-- [ ] 外部复审通过后的交付链完整闭环：逻辑分批提交、feature PR required CI、protected main merge、post-merge main CI、Release Please release PR 合并、GitHub Release/签名 agent 与部署资产、多架构 Docker image 均已核验；任务归档和现场清理完成。
+- [x] 外部复审通过后的交付链完整闭环：逻辑分批提交、feature PR required CI、protected main merge、post-merge main CI、Release Please release PR 合并、GitHub Release/签名 agent 与部署资产、多架构 Docker image 均已核验；任务归档和现场清理完成。
 
 ## Out of Scope
 

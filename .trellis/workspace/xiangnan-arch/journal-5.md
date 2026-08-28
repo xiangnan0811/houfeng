@@ -1058,3 +1058,46 @@ Closed all externally reviewed scoped subscription and VPS Detail async ownershi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 264: Deliver and release VPS write idempotency hardening
+
+**Date**: 2026-08-28
+**Task**: Deliver and release VPS write idempotency hardening
+**Branch**: `codex/archive-vps-write-idempotency-hardening`
+
+### Summary
+
+Delivered the reviewed VPS write lifecycle, scoped create idempotency, and explicit DTO date-format contracts through protected feature/release PRs; published and verified v0.78.0, signed assets, deployment assets, and multi-architecture Docker tags.
+
+### Main Changes
+
+- Split the approved implementation into contract, persistence, HTTP/API, frontend ownership, Trellis evidence, and E2E hardening commits.
+- Merged feature PR #468 and Release Please PR #469 after all required checks passed.
+- Archived the completed Trellis task with exact PR, CI, release, asset, image, and cleanup evidence.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2740cc8a` | (see git log) |
+| `4780251e` | (see git log) |
+| `5a6bf2b0` | (see git log) |
+| `398bc261` | (see git log) |
+| `721188b9` | (see git log) |
+| `72c0d991` | (see git log) |
+| `080d2c02` | (see git log) |
+| `415de509` | (see git log) |
+
+### Testing
+
+- [OK] Feature PR, post-feature main, release PR, and post-release main CI all passed seven of seven jobs.
+- [OK] v0.78.0 publish-images passed; minisign and both binary checksums passed locally; v0.78.0, 0.78.0, and latest share one amd64/arm64 OCI index.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Use the clean synchronized main checkout for the next development task.

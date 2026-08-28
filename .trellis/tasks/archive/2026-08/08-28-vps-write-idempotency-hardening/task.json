@@ -1,0 +1,31 @@
+{
+  "id": "vps-write-idempotency-hardening",
+  "name": "vps-write-idempotency-hardening",
+  "title": "收口 VPS 写入生命周期与幂等合同",
+  "description": "修复 v0.77.6 复审发现的 VPS 写 owner 生命周期、四个 VPS scoped create API 未知结果重试和 nullable string/date mirror 推断问题，并完成受保护交付与 v0.78.0 发布。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "xiangnan-arch",
+  "assignee": "xiangnan-arch",
+  "createdAt": "2026-08-28",
+  "completedAt": "2026-08-28",
+  "branch": "codex/vps-write-idempotency-hardening",
+  "base_branch": "main",
+  "worktree_path": "/home/murray/code/houfeng/.worktree/vps-write-idempotency-hardening",
+  "commit": "080d2c025bf843d193f9d5fb69542af18083918e",
+  "pr_url": "https://github.com/xiangnan0811/houfeng/pull/468",
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "2026-08-28: External review passed. Feature PR #468 and release PR #469 merged through protected main; v0.78.0, signed assets, deployment assets, and multi-arch Docker tags were verified before archive.",
+  "meta": {
+    "external_review_gate": "passed-2026-08-28",
+    "release": "v0.78.0",
+    "release_commit": "415de509ca853769fa97d480fd9f473896ba5a55",
+    "release_pr": "https://github.com/xiangnan0811/houfeng/pull/469"
+  }
+}

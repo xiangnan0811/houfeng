@@ -1,10 +1,10 @@
 # Final verification evidence
 
 - Date: 2026-08-28 (Asia/Shanghai)
-- Baseline/current HEAD: `da83a96769b618c6e223f71a1d2c6645d54c853b`
+- Initial review baseline: `da83a96769b618c6e223f71a1d2c6645d54c853b`
 - Worktree: `/home/murray/code/houfeng/.worktree/vps-write-idempotency-hardening`
 - Branch: `codex/vps-write-idempotency-hardening`
-- Task state: `in_progress`; retained unstaged and uncommitted for external review
+- Initial handoff state: `in_progress`; retained unstaged and uncommitted for external review before the later approved delivery
 
 ## Task-scope results
 
@@ -31,11 +31,13 @@ want dac4e6f598e26f4dcfb32ea88f81375f42a14739719a9761db54160b1267ed9d
 
 All task-affected Go packages passed. The attachment golden was not rewritten and is not claimed as green.
 
-## Handoff state
+## Initial external-review handoff state
 
 - Git index: empty.
 - Worktree: intentionally dirty with task files only; all changes remain unstaged/uncommitted.
 - No commit, push, PR, merge, release, archive, clean, or task-complete transition was performed.
 - Task remains `in_progress` while awaiting external review.
+
+This handoff state was superseded after external review passed and the user authorized full protected delivery. Feature PR #468, release PR #469, `v0.78.0`, the signed assets, deployment assets, and multi-architecture images all completed successfully. See `delivery-release-evidence.md` for the exact final record.
 
 This evidence intentionally omits DSNs, SQL, idempotency keys, digests, request bodies, note/details content, and raw internal errors.
