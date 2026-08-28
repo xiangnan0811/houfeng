@@ -78,15 +78,15 @@
   - 运行 `git diff --check`、`git status --short --branch`、`git diff --stat`、`git diff --cached --quiet`；确认无 staged changes、无新 commit、无 push/PR。
   - 交付绝对路径、精确 dirty 文件、测试证据与剩余阻塞，停下等待外部审查意见。
 
-- [ ] **13. Batched commits and feature PR**
+- [x] **13. Batched commits and feature PR**
   - 按 DTO mirror、backend persistence、HTTP wiring、frontend ownership/API、Trellis evidence/spec 的逻辑边界分批提交；每批提交前核对 staged diff，不混入任务外文件。
   - 推送 `codex/vps-write-idempotency-hardening`，创建 feature PR，等待全部 required checks 通过后经 protected main 合并。
 
-- [ ] **14. Main and release delivery**
+- [x] **14. Main and release delivery**
   - 核验 feature merge 后 main CI 与 Release Please；等待生成/更新 release PR，并在其 required checks 全绿后合并。
   - 核验新 tag/GitHub Release、签名 agent/checksum/deployment assets、release 后 main CI 与 `publish-images`，并确认 Docker Hub `vX.Y.Z`/`X.Y.Z`/`latest` 指向含 amd64+arm64 的同一 manifest。
 
-- [ ] **15. Archive, journal, and cleanup**
+- [x] **15. Archive, journal, and cleanup**
   - 把 PR、run、merge commit、release/tag/image digest 写入任务 evidence，完成 PRD acceptance，归档任务并记录 developer journal。
   - 通过非 main 分支/PR 交付归档工件；全部远端检查完成后同步本地 main，删除已合并 feature/archive 分支与 worktree，保留干净主 checkout 供下一次开发。
 
@@ -103,3 +103,12 @@ git status --short --branch
 ```
 
 PostgreSQL 与 Playwright 命令在实施前从当前 spec/runner 解析准确入口，不硬编码过期模式。
+
+## Delivery and release evidence
+
+- Feature PR #468 merged as `080d2c025bf843d193f9d5fb69542af18083918e` after all seven required checks passed on head `72c0d9912b633ff0de410564e4d1ccf39e7cd217`; feature PR CI run `33182939197` and post-merge main CI run `33183499335` both passed.
+- Release Please run `33183499353` created release PR #469. Its head `fed1a072025b5f9a21316ff1e468642a20228124` passed all seven checks in CI run `33183539006`, then merged through the protected branch as `415de509ca853769fa97d480fd9f473896ba5a55`.
+- Release Please run `33183993833` published public non-prerelease `v0.78.0`; the tag resolves exactly to `415de509ca853769fa97d480fd9f473896ba5a55`. Release-after-merge main CI run `33183993850` and `publish-images` run `33184005814` passed.
+- The six public release assets are the amd64/arm64 agent binaries, signed checksum manifest, `compose.yaml`, and `compose.env.example`. Local minisign verification against the installer-pinned public key and both binary SHA-256 checks passed.
+- Docker Hub tags `v0.78.0`, `0.78.0`, and `latest` all resolve to `sha256:73772ba18dcbfb37b622117f2fce9d5b4ffa5018541b3c04ee78001912e7e27a`, containing linux/amd64 (`sha256:c485af5878f978963edbf82c067285ad9a23924cf207abb49e96f26d6af04795`) and linux/arm64 (`sha256:a80bfdbca988728a9e0e89f698530ecbba8cb9e403f9798f6926fad636ef2cd7`) images plus their provenance attestations.
+- Exact URLs, run IDs, asset digests, cleanup boundaries, and the initial local-only attachment golden exception are preserved in `research/delivery-release-evidence.md` and `research/final-verification-evidence.md`.
