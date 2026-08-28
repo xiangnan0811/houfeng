@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/08-28-vps-write-idempotency-hardening/research/verification-contract.md", "reason": "Bounded RED/GREEN, Web, Go, PostgreSQL, privacy and uncommitted-handoff gates"}
+{"file": ".trellis/spec/web/vps-detail-ownership.md", "reason": "Verify common owner lifecycle and stale settle behavior"}
+{"file": ".trellis/tasks/08-28-vps-write-idempotency-hardening/research/implementation-contract.md", "reason": "Verify transactional receipts, migration, APP ACL, DTO and lifecycle invariants"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify 400/409 codes and non-leakage"}
+{"file": ".trellis/tasks/08-28-vps-write-idempotency-hardening/research/current-code-evidence.md", "reason": "Review every reported finding against the original code anchors and hard stop"}
+{"file": ".trellis/tasks/08-28-vps-write-idempotency-hardening/research/p2-02-postgres-verification-evidence.md", "reason": "Strict disposable PostgreSQL lost-response and current APP ACL execution evidence for P2-02"}
+{"file": ".trellis/tasks/08-28-vps-write-idempotency-hardening/research/final-verification-evidence.md", "reason": "Final Node 22 Web, Chromium, focused Go, PostgreSQL, privacy, diff/index and known out-of-scope verify-go evidence"}

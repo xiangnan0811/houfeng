@@ -10,7 +10,7 @@
 
 - **数据获取**集中在 `web/src/lib/`：`apiRequest.ts` 拥有 transport/error/401/JSON/query primitives，`api.ts` 拥有启动路径与通用业务 endpoint façade；只有在 production bundle 证据要求保持 route-lazy 边界时，才使用同目录的 domain façade（当前为 `observabilityApi.ts`，以及只被 lazy record routes 消费的 `recordsApi.ts`）。`auth-client.ts` 复用同一 transport，返回类型从 `types.ts` 引用。
 - **本地组件状态**使用 React 内建 hooks（主用 `useState` + `useEffect`，少量 `useRef`；当前未发现 `useReducer`）。
-- **跨组件 / 跨页状态**仅由两个 React Context 承担：`AuthProvider` (`web/src/lib/auth-context.tsx`) 与 `ThemeProvider` (`web/src/lib/theme-context.tsx`)；两者都在 `web/src/main.tsx:15-23` 一次性挂载。
+- **跨组件 / 跨页状态**由三个 React Context 承担：根级 `AuthProvider`、`ThemeProvider`，以及 authenticated `AppShell` 内按 `user.user_id` 隔离的 `VPSWriteRegistryProvider`。后者只保存 VPS write owner/attempt metadata，不缓存服务端业务列表或原始表单正文。
 - **URL 状态**走 `react-router-dom@7` 的路由参数（`useParams`、`useNavigate`），不另起 store。
 
 > **未来留余地**：如果出现需要全局缓存的服务端状态（请求去重、stale-while-revalidate、跨页共享列表）或复杂客户端状态（多步表单、协作 / 撤销），可以考虑引入 React Query / Zustand。**当前不引入**——任何引入需要独立技术决策。
@@ -1591,22 +1591,23 @@ setExpandedChannels((prev) => new Set(Array.from(prev).filter((channel) => reset
 
 ## 跨组件 / 跨页状态
 
-仅有两条 Context：
+当前有三条 Context：
 
 | Context | 文件 | 提供值 | 消费方式 |
 |---------|------|--------|----------|
 | Auth | `web/src/lib/auth-context.tsx` | `{ user, loading, login, logout, refresh }` | `useAuth()`，必须在 `<AuthProvider>` 内调用，否则抛错 |
 | Theme | `web/src/lib/theme-context.tsx` | `{ preset, mode, setPreset, setMode }` | `useTheme()`（必须在 Provider 内）/ `useThemeOptional()`（测试便利） |
+| VPS write registry | `web/src/lib/vpsWriteRegistry-context.tsx` | user-scoped `VPSWriteOwnerStore` | `useVPSWriteRegistry()`；direct page/component tests 可使用 optional hook + injected/local fallback |
 
-两者都在 `web/src/main.tsx` 一次性挂在根：`AppErrorBoundary` → `ThemeProvider` → `AuthProvider` → `RouterProvider`。
+Auth/Theme 在 `web/src/main.tsx` 根链挂载；VPS registry 在 `AuthenticatedAppShell key={user.user_id}` 内包住 `<Outlet />`，保证跨受保护路由延续、用户切换销毁。
 
-**新增第三个 Context 的判断标准**：
+**新增第四个 Context 的判断标准**：
 
 1. 数据真的需要被树形多个子树消费（如多 page、多 layout 子树）。
 2. 不是纯服务端数据缓存（那种应在引入 React Query 之类时再统一）。
 3. 写入路径有限且语义清晰（如全局开关、当前组织 ID）。
 
-满足后落到 `web/src/lib/<name>-context.tsx`，导出 `<Name>Provider` + `use<Name>`，并在 `main.tsx` Provider 链显式挂载（不要在某个 page 内偷偷挂）。
+满足后落到 `web/src/lib/<name>-context.tsx`，导出 `<Name>Provider` + `use<Name>`；按真实生命周期显式挂在根 Provider 链或 authenticated AppShell，禁止在会被业务 route/gate 重挂载的 page 内偷偷挂。
 
 ---
 

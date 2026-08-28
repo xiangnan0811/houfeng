@@ -1681,6 +1681,72 @@ _, _ = db.Exec(ctx, `insert into subscription_create_idempotency (...) values (.
 record, replayed, err := repo.CreateSubscriptionIdempotent(ctx, input, idempotencyKey)
 ```
 
+#### Scenario: Idempotent VPS-scoped detail creates
+
+##### 1. Scope / Trigger
+
+- Trigger: 修改 VPS scoped experience/service/domain/monitoring create handler、对应 repository、`internal/center/createidempotency`、`0062_create_vps_create_idempotency.sql` 或 APP ACL current fragment。Collection `POST /api/services|domains|monitoring-instances` 不在此合同内，必须保持原签名和状态语义。
+
+##### 2. Signatures
+
+- HTTP: `POST /api/vps/{vps_id}/experience-logs|services|domains|monitoring-instances`，必须恰有一个合法 `Idempotency-Key`。
+- Store signatures:
+
+  ```go
+  CreateExperienceLogIdempotent(context.Context, renewals.CreateExperienceLogInput, string) (renewals.ExperienceLogRecord, bool, error)
+  CreateAssetServiceIdempotent(context.Context, assetservices.CreateInput, string) (assetservices.Record, bool, error)
+  CreateAssetDomainIdempotent(context.Context, assetdomains.CreateInput, string) (assetdomains.Record, bool, error)
+  CreateLinkedMonitoringInstanceIdempotent(context.Context, pathVPSID string, wire monitoringinstances.LinkedCreateWireIdentity, key string) (monitoringinstances.Record, assetlinks.Record, bool, error)
+  ```
+
+  `bool` 为 `replayed`；monitoring 同时返回原 instance 与 link，且 handler 不在调用前读取 VPS defaults。
+- DB: `experience_log_create_idempotency`、`asset_service_create_idempotency`、`asset_domain_create_idempotency`、`vps_monitoring_instance_create_idempotency`。每表以 key 为 PK，保存 digest、结果 FK、`created_at`；结果删除级联 receipt，无 TTL/janitor/update 路径。
+
+##### 3. Contracts
+
+- shared key trim/format 为 8..128 且只允许 `[A-Za-z0-9._:-]`；缺失、重复或非法 header 为 400 `invalid_idempotency_key`，且不得调用 create repository。
+- digest 必须来自 normalize 后的 path VPS scope + 实际 wire identity。Monitoring digest 不包含从可变 VPS 状态派生的 persistence defaults；相同 wire retry 即使 VPS 默认值变化也必须 replay 原 instance/link。
+- 顺序统一为 normalize/validate → begin transaction → operation-namespaced advisory xact lock → receipt lookup → mismatch/replay 或 result insert → receipt insert → commit。任一 cut point 失败都 rollback/fail closed。
+- first create 为 201；same key + same digest 为 200 原 ID 且无额外写；same key + different digest 为 409 `idempotency_key_reused`。HTTP 错误/日志不得包含 key、digest、body、note/details、SQL 或 wrapped internal error。
+- `0062` 是 `0061` 后的 additive migration；runtime APP 对四张 receipt 表只有 `select`/`insert`，无 update/delete/sequence 权限。不得修改已发布 migration。
+
+##### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| body/领域输入非法 | 400，事务前拒绝；不得创建 result/receipt |
+| receipt replay 指向的 result/link 缺失 | fail closed internal error；不得静默重建 |
+| monitoring 的 VPS 不存在或已有 active link | 404/409 既有稳定语义；instance/link/receipt 均不落单 |
+| committed response unknown 后同 key/body retry | 200 原 ID；每类 result/receipt 各一行，monitoring link 也只有一行 |
+
+##### 5. Good / Base / Bad Cases
+
+- Good: monitoring 首次提交只给实际 wire 字段，repository 在 receipt miss 后于同一事务锁定 VPS、派生 defaults 并原子创建 instance + link + receipt；随后 VPS defaults 改变，同 key/wire 仍返回原双 ID。
+- Base: 新 key + 合法新 body 创建新记录并返回 201；collection create 继续走旧签名，不要求 `Idempotency-Key`。
+- Bad: handler 先读取 VPS defaults 再查 receipt；后续 VPS lookup 失败会让已提交请求的 replay 错误返回 404/500。
+- Bad: 把派生 VPS defaults 放进 digest，或把 monitoring instance/link/receipt 拆到不同事务，都会破坏 lost-response replay。
+
+##### 6. Tests Required
+
+- Handler tests 覆盖四类 missing/duplicate/invalid、201/200/409 与 zero/one repository create count。
+- Store unit 覆盖 begin/lock/lookup/replay scan/result insert/receipt insert/commit rollback cut points；PostgreSQL lost-response integration 覆盖四类真实表和 monitoring 双 ID。
+- Migration/ACL tests 校验 successor 顺序、四表 FK/check/index、migration registry 与 current APP exact privileges；严格 PostgreSQL runner 缺 fixture/DSN 时是 blocker，不得 skip-as-pass。
+- Monitoring regression 必须让 receipt replay 路径上的 VPS/default lookup 成为 unexpected，并在真实 PostgreSQL 中修改首次派生所依赖的 defaults 后证明原 ID、原持久化值及单行 materialization 不变。
+- 测试失败输出不得打印 body、key、digest、note/details、SQL、DSN、record 或 raw error；AST/privacy contract 应覆盖本场景新增 handler/store/PG tests。
+
+##### 7. Wrong vs Correct
+
+```go
+// 错误：handler 先读可变 VPS，再把派生 persistence 交给幂等仓储。
+vps, err := vpsRepo.GetVPSAsset(ctx, pathVPSID)
+record, link, replayed, err := repo.CreateLinkedMonitoringInstanceIdempotent(ctx, pathVPSID, derive(vps, wire), key)
+```
+
+```go
+// 正确：handler 只传 path + normalized wire；repository 先查 receipt，miss 才在事务内锁 VPS 并派生。
+record, link, replayed, err := repo.CreateLinkedMonitoringInstanceIdempotent(ctx, pathVPSID, wire, key)
+```
+
 ### Asset Ledger timeline histories
 
 `db/migrations/0020_create_renewal_decisions.sql` 添加 `renewal_decisions`，用于记录资产层 VPS 续费决策变化历史。它补充 `vps_assets.renewal_decision` 当前状态，不替代当前状态字段。
