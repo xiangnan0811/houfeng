@@ -1188,69 +1188,9 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 | scoped subscription create reuses key for a different digest | `ApiError` `409` / `code=idempotency_key_reused`；必须换 key 后再创建 |
 | scoped subscription create retries same key + same digest after a lost 201 | 200 既有记录，不新建；调用方继续持有原 key |
 
-#### Scenario: VPS mutation CAS recovery and request ownership
+#### Specialized contract: VPS Detail async ownership
 
-##### 1. Scope / Trigger
-
-- Trigger: 修改 Overview / Legacy VPS detail 的 facts 或 renewal-decision PATCH、409 recovery、Drawer 生命周期，或跨 `vpsId` 的异步状态管理。
-
-##### 2. Signatures
-
-- Mutation: `updateVPSAsset(vpsId, input, { expectedUpdatedAt }): Promise<VPSAssetUpdateResult>`，以当前 `updated_at` 发送 `If-Match`。
-- Recovery codes: `vps_asset_conflict` 进入 load-latest/merge/retry；`vps_asset_readonly` 重新读取 identity，terminal VPS replace 到 `/archive/:vpsId`。
-- Ownership: 两套 detail surface 都用 generation 决定响应是否仍可应用；Legacy 额外用 `Map<vpsId, requestToken>` 决定 facts/decision PATCH 是否仍在途。
-
-##### 3. Contracts
-
-- 409 conflict 后必须先加载最新版；facts 使用三方 merge 保留本地改动，decision 保留本地 decision/reason，重试使用最新版 `updated_at`。最新版已经满足 decision 时按“其他操作已完成”收敛，不再提交。
-- route 切换和组件卸载都必须让旧 generation 失效；允许关闭编辑 surface 时，关闭动作也必须使 generation 失效。迟到响应不得写入新 VPS 的 draft/error/notice，也不得导航到旧 VPS archive。
-- Overview 在提交期间禁止关闭当前 panel；生产路由切换通过 identity gate 卸载当前 Overview，因此 mounted route 内的同步单请求锁即可防住 React state 重渲染前的连续提交。
-- Legacy 的 persistent Modal 允许在 PATCH pending 时关闭和重开，因此写锁必须跟网络请求生命周期走，不跟 Drawer 生命周期走。关闭 Drawer 不释放同一 VPS 的锁；只有对应 Promise settle 后，匹配 `requestToken` 的 `finally` 才能释放。
-- Legacy 写锁按 `vpsId` 隔离：A pending 不阻止 B 写入；A 的迟到 `finally` 不得释放 B 的锁。
-- load-latest 使用独立 in-flight lock；并发点击只发一个 GET，关闭或换 VPS 后迟到的 latest 不得覆盖当前 draft/ETag。
-
-##### 4. Validation & Error Matrix
-
-| Condition | Expected behavior |
-| --- | --- |
-| stale `If-Match` / `vps_asset_conflict` | 阻止直接重试；加载最新、merge/compare，再用新 ETag 保存 |
-| `vps_asset_readonly` + latest identity terminal | replace 到该 identity 的 `/archive/:vpsId`；generation 失效后不得导航 |
-| Legacy Drawer 在 PATCH pending 时关闭并重开同一 VPS | 继续显示“保存中”，不发第二个 PATCH；settle 后恢复 |
-| Legacy A PATCH pending 时切到 B | B 可以独立写入；A settle 不改变 B 的 lock/draft/notice |
-| Legacy A→B→A 且 A 仍 pending | A 继续锁定；B 的 settle 不得释放 A |
-| load-latest 连点或关闭后迟到 | 连点只有一个 GET；迟到结果被丢弃 |
-
-##### 5. Good/Base/Bad Cases
-
-- Good (Legacy): A/B 各有 deferred PATCH；往返路由后每台只由自己的 token 解锁，PATCH 计数各为 1。
-- Base (Legacy): 用户关闭保存中的 Drawer，服务端写入仍可完成，但 UI 丢弃旧 generation 的结果应用并在 settle 后解锁。
-- Bad (Legacy): 在 `invalidateMutations()` 清 write lock，允许旧 PATCH 未完成时再次发送相同 ETag。
-- Bad (Legacy): 用组件级 boolean 锁住全部 VPS，导致 A 的挂起请求无限阻塞 B。
-
-##### 6. Tests Required
-
-- Overview/Legacy Vitest 覆盖 facts/decision conflict → load latest → merge/compare → 新 ETag retry，以及 readonly terminal identity routing。
-- Legacy Vitest 用 deferred PATCH 覆盖关闭/重开同一 VPS仍互斥；用 A/B 双 deferred 覆盖 A→B→A、跨 VPS 独立写、token 精确释放。
-- load-latest 测试断言连点 GET count=1，route/Drawer 失效后 draft、ETag、导航与错误均不被迟到响应改写。
-
-##### 7. Wrong vs Correct
-
-```ts
-// 错误（Legacy）：Drawer close 把 transport lock 当作 UI state 一起清掉。
-writeLockRef.current = false
-setSubmitting(false)
-```
-
-```ts
-// 正确（Legacy）：按 VPS + token 持锁，只有该请求自己的 finally 可以释放。
-const token = crypto.randomUUID()
-writeLocks.set(vpsId, token)
-try {
-  await updateVPSAsset(vpsId, input, { expectedUpdatedAt })
-} finally {
-  if (writeLocks.get(vpsId) === token) writeLocks.delete(vpsId)
-}
-```
+Legacy VPS Detail 的 mutation transport、view generation、refresh commit、archive review 与 cancellation preview supersession 以 bounded [VPS Detail 异步所有权合同](./vps-detail-ownership.md) 为唯一权威来源。本通用文档不重复该长场景，避免任务上下文截断与双份合同漂移。
 
 #### Scenario: Caller-owned subscription create idempotency
 

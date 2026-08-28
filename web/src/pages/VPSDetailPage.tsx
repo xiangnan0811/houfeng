@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Navigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { PageState } from '../components/PageState'
@@ -11,6 +11,7 @@ import { VPSOverviewManagementActions } from './vps-detail/VPSOverviewManagement
 import { useVPSManagementController } from './vps-detail/hooks/useVPSManagementController'
 import { useVPSOverview } from './vps-detail/hooks/useVPSOverview'
 import { parseOverviewWorkbench } from './vps-detail/vpsManagementHelpers'
+import { createVPSWriteOwnerStore } from './vps-detail/vpsWriteOwnerStore'
 
 const LegacyVPSDetailPage = lazy(() =>
   import('./vps-detail/LegacyVPSDetail').then((module) => ({ default: module.LegacyVPSDetail })),
@@ -52,6 +53,25 @@ export function VPSDetailPage() {
   const [settledGate, setSettledGate] = useState<SettledGate | null>(null)
   const [probeRevision, setProbeRevision] = useState(0)
   const probeRef = useRef<GateProbe | null>(null)
+  const [legacyWriteOwnerStore] = useState(createVPSWriteOwnerStore)
+  const currentVPSIdRef = useRef(normalizedVPSId)
+  const mountedRef = useRef(false)
+
+  useLayoutEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    currentVPSIdRef.current = normalizedVPSId
+  }, [normalizedVPSId])
+
+  function revalidateInvalidatedLegacyWrite(vpsId: string) {
+    if (!mountedRef.current || currentVPSIdRef.current !== vpsId) return
+    setProbeRevision((revision) => revision + 1)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -190,7 +210,10 @@ export function VPSDetailPage() {
   if (gate === 'legacy') {
     return (
       <Suspense fallback={<RouteModuleFallback label="正在加载 VPS 详情" />}>
-        <LegacyVPSDetailPage />
+        <LegacyVPSDetailPage
+          writeOwnerStore={legacyWriteOwnerStore}
+          onViewAuthorityInvalidatedWriteSettled={revalidateInvalidatedLegacyWrite}
+        />
       </Suspense>
     )
   }

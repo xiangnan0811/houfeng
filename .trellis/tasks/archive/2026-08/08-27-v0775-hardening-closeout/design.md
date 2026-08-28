@@ -33,55 +33,15 @@ Regression: a summary fake that does `<-ctx.Done(); time.Sleep(...); return ctx.
 
 ## P2-02 Legacy mutation ownership
 
-Reuse the existing mechanism. Do not invent `MutationOwner` as a second system.
+The current executable contract is exclusively `.trellis/spec/web/vps-detail-ownership.md`; do not restore the historical token `Map`, component-local submitting booleans, or the obsolete one-argument begin/two-argument finish examples formerly recorded here.
 
-`beginVpsWrite(vpsId)` already:
+The page-scoped `VPSWriteOwnerStore` persists across capability-gate remounts and owns immutable `{ vpsId, token, generation, operation, monitoringInstanceId? }` records. `beginVpsWrite(vpsId, operation, monitoringInstanceId?)` returns an owner or `null` for same-VPS mutual exclusion; callers guard `null` before dereference. Reactive pending UI comes from `useSyncExternalStore`, not handler-local `setSubmitting(false)` cleanup.
 
-- rejects a second in-flight write for the same VPS
-- stores a request token in `Map<vpsId, token>`
-- increments `mutationGenerationRef`
-- sets `writeInFlight` only when that VPS is current
+Every handler keeps all post-await notice/draft/Drawer/navigation/refresh effects behind `mutationIsCurrent(owner.generation)`. Its `finally` calls `finishVpsWrite(owner)`, whose store release identity is exact `vpsId + token`; `VPSWriteOwnerStore.finish(owner)` returns `true` only for that exact release and `false` for a stale token.
 
-Route change already increments `mutationGenerationRef` and `cancellationPreviewGenerationRef`.
+When exact release settles after the owning view generation has become stale, Legacy notifies the persistent page shell. The page re-probes only while mounted and still displaying that VPS, covering capability remount, Drawer close/reopen, and same-VPS query reload. A current-view write follows Legacy's local commit/refresh path and does not trigger a redundant page probe. Different VPS IDs remain parallel; stale A cannot re-probe or mutate current B.
 
-Wrap every remaining async write with the same pattern as facts/decision:
-
-```
-const write = beginVpsWrite(detail.vps_id)
-if (!write) { setError('上一次保存仍在进行，请稍后再试'); return }
-const { generation, token } = write
-try {
-  await server
-  if (!mutationIsCurrent(generation)) return
-  // notice, draft reset, collapseDrawer, navigate, refresh
-} catch {
-  if (!mutationIsCurrent(generation)) return
-  setError(...)
-} finally {
-  finishVpsWrite(detail.vps_id, token)
-  setSubmitting(false)
-}
-```
-
-Handlers in this set:
-
-- `handleLinkSubmit`
-- `handleMonitoringInstanceCreateSubmit`
-- `handleSubscriptionSubmit`
-- `handleValidityExtensionSubmit`
-- `handleUnlinkMonitoringInstance`
-- `handleArchiveVPS`
-- `handleExperienceSubmit`
-- `handleServiceSubmit`
-- `handleDomainSubmit`
-
-`handleCancellationSubmit` already uses preview generation. Also take `beginVpsWrite` so cancel cannot overlap another same-VPS write. Keep the preview generation check. `handleRestoreVPS` is a synchronous archive redirect and stays as-is.
-
-`refreshDetail` already ignores `setState` when `current.vpsId` differs. That is not enough: `collapseDrawer`, `navigate`, and `setNotice` still fire. Ownership checks must sit in front of those side effects.
-
-`finishVpsWrite` stays in `finally` even when generation is stale, so returning to A after A completes can write again. Different VPS IDs stay parallel.
-
-Duplicate-submit copy matches facts/decision: “上一次保存仍在进行，请稍后再试”.
+The complete handler inventory, cancellation-preview composition, refresh commit guards, duplicate-submit copy, and required regressions are maintained in the bounded spec and active remediation task rather than duplicated here.
 
 ## P3-01 Semantic DTO manifest
 

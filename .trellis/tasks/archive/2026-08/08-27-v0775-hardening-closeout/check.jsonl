@@ -1,6 +1,5 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
 {"file": ".trellis/spec/backend/ip-quality-contract.md", "reason": "Verify disabled IP Quality cannot change current judgement"}
 {"file": ".trellis/spec/backend/subscription-cost-center.md", "reason": "Verify receipt permanence and Idempotency-Key docs"}
-{"file": ".trellis/spec/web/state-and-data.md", "reason": "Verify semantic DTO tests and Legacy ownership"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "verify-go / verify.sh gates"}
-{"file": ".trellis/spec/web/quality-guidelines.md", "reason": "verify-web and colocated Vitest"}
+{"file": ".trellis/spec/web/vps-detail-ownership.md", "reason": "Verify exact-owner state commits and request supersession under route and modal races"}
+{"file": ".trellis/tasks/08-27-v0775-vps-detail-hardening/research/verification-contract.md", "reason": "Apply bounded Go, Vitest, Chromium, repository, and baseline-exception gates"}
+{"file": ".trellis/tasks/08-27-v0775-vps-detail-hardening/research/review-evidence.md", "reason": "Require the latest independent external review to clear all blocking findings before archive"}

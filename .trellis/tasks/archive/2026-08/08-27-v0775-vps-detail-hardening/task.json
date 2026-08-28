@@ -1,0 +1,32 @@
+{
+  "id": "v0775-vps-detail-hardening",
+  "name": "v0775-vps-detail-hardening",
+  "title": "封箱 v0.77.5 VPS 详情 hardening",
+  "description": "修复 v0.77.5 复审确认的 scoped subscription required 合同、Legacy submitting/refresh ABA 归属及 archive review 请求归属问题，并补齐真实 HTTP 与浏览器/组件竞态回归。",
+  "status": "completed",
+  "dev_type": "bugfix",
+  "scope": "cross-layer",
+  "package": null,
+  "priority": "P2",
+  "creator": "xiangnan-arch",
+  "assignee": "xiangnan-arch",
+  "createdAt": "2026-08-27",
+  "completedAt": "2026-08-28",
+  "branch": "codex/v0776-vps-hardening",
+  "base_branch": "main",
+  "worktree_path": "/home/murray/code/houfeng/.worktree/v0776-vps-hardening",
+  "commit": null,
+  "pr_url": "https://github.com/xiangnan0811/houfeng/pull/466",
+  "subtasks": [],
+  "children": [
+    "08-27-v0775-scoped-subscription-required-contract",
+    "08-27-v0775-legacy-operation-refresh-ownership",
+    "08-27-v0775-archive-review-request-ownership"
+  ],
+  "parent": "08-27-v0775-hardening-closeout",
+  "relatedFiles": [],
+  "notes": "2026-08-28: All accepted external-review findings were fixed and the independent review explicitly passed; batched commit and release delivery are authorized.",
+  "meta": {
+    "external_review_gate": "passed-2026-08-28"
+  }
+}

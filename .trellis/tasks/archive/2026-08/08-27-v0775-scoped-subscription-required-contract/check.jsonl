@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/subscription-cost-center.md","reason":"Check required, nullable, defaulting, and collection compatibility contracts"}
+{"file":".trellis/tasks/08-27-v0775-vps-detail-hardening/research/verification-contract.md","reason":"Check table-driven HTTP tests, strict DTO parser negatives, and bounded Go/web gates"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check manifest, Go request, TypeScript DTO, and runtime behavior remain aligned"}
+{"file":".trellis/tasks/08-27-v0775-vps-detail-hardening/research/review-evidence.md","reason":"Verify the original missing/null finding is closed without expanding P3 scope"}

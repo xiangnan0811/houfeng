@@ -25,6 +25,7 @@ type fakeSubscriptionRepository struct {
 	createSubscriptionResult subscriptions.Record
 	createSubscriptionErr    error
 	createSubscriptionInput  subscriptions.CreateInput
+	createSubscriptionCalls  int
 	createIdempotencyKey     string
 	idempotencyByKey         map[string]fakeSubscriptionIdempotency
 	patchSubscriptionResult  subscriptions.Record
@@ -52,6 +53,7 @@ func (f *fakeSubscriptionRepository) GetSubscription(_ context.Context, subscrip
 }
 
 func (f *fakeSubscriptionRepository) CreateSubscription(_ context.Context, input subscriptions.CreateInput) (subscriptions.Record, error) {
+	f.createSubscriptionCalls++
 	f.createSubscriptionInput = input
 	if f.createSubscriptionErr != nil {
 		return subscriptions.Record{}, f.createSubscriptionErr
@@ -60,6 +62,7 @@ func (f *fakeSubscriptionRepository) CreateSubscription(_ context.Context, input
 }
 
 func (f *fakeSubscriptionRepository) CreateSubscriptionIdempotent(_ context.Context, input subscriptions.CreateInput, key string) (subscriptions.Record, bool, error) {
+	f.createSubscriptionCalls++
 	f.createSubscriptionInput = input
 	f.createIdempotencyKey = key
 	if f.createSubscriptionErr != nil {
@@ -89,6 +92,33 @@ func (f *fakeSubscriptionRepository) PatchSubscription(_ context.Context, subscr
 		return subscriptions.Record{}, f.patchSubscriptionErr
 	}
 	return f.patchSubscriptionResult, nil
+}
+
+func validVPSSubscriptionCreatePayload() map[string]any {
+	return map[string]any{
+		"price":                 12,
+		"currency":              "USD",
+		"billing_cycle":         "monthly",
+		"billing_months":        1,
+		"billing_period_unit":   "month",
+		"billing_period_length": 1,
+		"started_at":            "2026-05-01",
+		"renew_at":              "2026-06-01",
+		"auto_renew":            false,
+		"auto_renew_cancelled":  false,
+		"renewal_mode":          "manual",
+		"payment_method":        "card",
+		"note":                  "production",
+	}
+}
+
+func marshalVPSSubscriptionCreatePayload(t *testing.T, payload map[string]any) string {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal VPS subscription create payload: %v", err)
+	}
+	return string(body)
 }
 
 func TestSubscriptionsCollectionListsSubscriptionsWithFilters(t *testing.T) {
@@ -329,6 +359,174 @@ func TestSubscriptionsCollectionCreateRejectsReusedIdempotencyKey(t *testing.T) 
 	}
 }
 
+func TestVPSSubscriptionsCreateRejectsMissingRequiredFields(t *testing.T) {
+	requiredFields := []string{
+		"price",
+		"currency",
+		"billing_cycle",
+		"billing_months",
+		"auto_renew",
+		"auto_renew_cancelled",
+		"payment_method",
+		"note",
+	}
+
+	for _, field := range requiredFields {
+		t.Run(field, func(t *testing.T) {
+			payload := validVPSSubscriptionCreatePayload()
+			delete(payload, field)
+			repo := &fakeSubscriptionRepository{}
+			handler := handlers.VPSSubscriptions(repo)
+			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
+			req.Header.Set("Idempotency-Key", "missing-required-"+field)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+			}
+			if repo.createSubscriptionCalls != 0 {
+				t.Fatalf("repository calls = %d, want 0", repo.createSubscriptionCalls)
+			}
+		})
+	}
+}
+
+func TestVPSSubscriptionsCreateRejectsNullRequiredFields(t *testing.T) {
+	requiredFields := []string{
+		"price",
+		"currency",
+		"billing_cycle",
+		"billing_months",
+		"auto_renew",
+		"auto_renew_cancelled",
+		"payment_method",
+		"note",
+	}
+
+	for _, field := range requiredFields {
+		t.Run(field, func(t *testing.T) {
+			payload := validVPSSubscriptionCreatePayload()
+			payload[field] = nil
+			repo := &fakeSubscriptionRepository{}
+			handler := handlers.VPSSubscriptions(repo)
+			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
+			req.Header.Set("Idempotency-Key", "null-required-"+field)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+			}
+			if repo.createSubscriptionCalls != 0 {
+				t.Fatalf("repository calls = %d, want 0", repo.createSubscriptionCalls)
+			}
+		})
+	}
+}
+
+func TestVPSSubscriptionsCreateRejectsNullOptionalNonNullableFields(t *testing.T) {
+	optionalNonNullableFields := []string{
+		"billing_period_unit",
+		"billing_period_length",
+		"renewal_mode",
+	}
+
+	for _, field := range optionalNonNullableFields {
+		t.Run(field, func(t *testing.T) {
+			payload := validVPSSubscriptionCreatePayload()
+			payload[field] = nil
+			repo := &fakeSubscriptionRepository{}
+			handler := handlers.VPSSubscriptions(repo)
+			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
+			req.Header.Set("Idempotency-Key", "null-optional-"+field)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+			}
+			if repo.createSubscriptionCalls != 0 {
+				t.Fatalf("repository calls = %d, want 0", repo.createSubscriptionCalls)
+			}
+		})
+	}
+}
+
+func TestVPSSubscriptionsCreateAcceptsAbsentOrNullNullableDates(t *testing.T) {
+	tests := []struct {
+		name         string
+		field        string
+		explicitNull bool
+	}{
+		{name: "started_at/null", field: "started_at", explicitNull: true},
+		{name: "started_at/absent", field: "started_at"},
+		{name: "renew_at/null", field: "renew_at", explicitNull: true},
+		{name: "renew_at/absent", field: "renew_at"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := validVPSSubscriptionCreatePayload()
+			if tt.explicitNull {
+				payload[tt.field] = nil
+			} else {
+				delete(payload, tt.field)
+			}
+			repo := &fakeSubscriptionRepository{}
+			handler := handlers.VPSSubscriptions(repo)
+			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
+			req.Header.Set("Idempotency-Key", "null-date-"+tt.field)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusCreated, recorder.Body.String())
+			}
+			if repo.createSubscriptionCalls != 1 {
+				t.Fatalf("repository calls = %d, want 1", repo.createSubscriptionCalls)
+			}
+			if tt.field == "started_at" && repo.createSubscriptionInput.StartedAt != nil {
+				t.Fatalf("started_at = %#v, want nil", repo.createSubscriptionInput.StartedAt)
+			}
+			if tt.field == "renew_at" && repo.createSubscriptionInput.RenewAt != nil {
+				t.Fatalf("renew_at = %#v, want nil", repo.createSubscriptionInput.RenewAt)
+			}
+		})
+	}
+}
+
+func TestVPSSubscriptionsCreatePreservesExplicitZeroFalseAndBlankValues(t *testing.T) {
+	payload := validVPSSubscriptionCreatePayload()
+	payload["price"] = 0
+	payload["auto_renew"] = false
+	payload["auto_renew_cancelled"] = false
+	payload["payment_method"] = ""
+	payload["note"] = ""
+	repo := &fakeSubscriptionRepository{}
+	handler := handlers.VPSSubscriptions(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
+	req.Header.Set("Idempotency-Key", "explicit-zero-values")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusCreated, recorder.Body.String())
+	}
+	if repo.createSubscriptionCalls != 1 {
+		t.Fatalf("repository calls = %d, want 1", repo.createSubscriptionCalls)
+	}
+	input := repo.createSubscriptionInput
+	if input.Price != 0 || input.AutoRenew || input.AutoRenewCancelled || input.PaymentMethod != "" || input.Note != "" {
+		t.Fatalf("create input = %#v, want exact explicit zero, false, and blank values", input)
+	}
+}
+
 func TestVPSSubscriptionsCreatesBillingFactWithoutUserStatus(t *testing.T) {
 	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
 	renewAt := subscriptions.NewDate(time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC))
@@ -357,6 +555,7 @@ func TestVPSSubscriptionsCreatesBillingFactWithoutUserStatus(t *testing.T) {
 		"billing_months":1,
 		"renew_at":"2026-06-01",
 		"auto_renew":true,
+		"auto_renew_cancelled":false,
 		"payment_method":" card ",
 		"note":" billing fact "
 	}`))
@@ -447,11 +646,7 @@ func TestVPSSubscriptionsCreateAcceptsRealWorkbenchFormPayload(t *testing.T) {
 
 func TestVPSSubscriptionsCreateRequiresIdempotencyKey(t *testing.T) {
 	handler := handlers.VPSSubscriptions(&fakeSubscriptionRepository{})
-	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(`{
-		"price":12,
-		"currency":"USD",
-		"billing_months":1
-	}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, validVPSSubscriptionCreatePayload())))
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -479,7 +674,7 @@ func TestVPSSubscriptionsCreateReplaysSameIdempotencyKey(t *testing.T) {
 		UpdatedAt:      now,
 	}}
 	handler := handlers.VPSSubscriptions(repo)
-	body := `{"price":12,"currency":"USD","billing_months":1}`
+	body := marshalVPSSubscriptionCreatePayload(t, validVPSSubscriptionCreatePayload())
 
 	first := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(body))
 	first.Header.Set("Idempotency-Key", "replay-sub-001")
@@ -513,8 +708,9 @@ func TestVPSSubscriptionsCreateRejectsReusedIdempotencyKey(t *testing.T) {
 		Currency:       "USD",
 	}}
 	handler := handlers.VPSSubscriptions(repo)
+	firstPayload := validVPSSubscriptionCreatePayload()
 
-	first := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(`{"price":12,"currency":"USD","billing_months":1}`))
+	first := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, firstPayload)))
 	first.Header.Set("Idempotency-Key", "reuse-sub-001")
 	firstRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(firstRecorder, first)
@@ -522,7 +718,9 @@ func TestVPSSubscriptionsCreateRejectsReusedIdempotencyKey(t *testing.T) {
 		t.Fatalf("first status = %d, want %d; body=%s", firstRecorder.Code, http.StatusCreated, firstRecorder.Body.String())
 	}
 
-	second := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(`{"price":24,"currency":"USD","billing_months":1}`))
+	secondPayload := validVPSSubscriptionCreatePayload()
+	secondPayload["price"] = 24
+	second := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, secondPayload)))
 	second.Header.Set("Idempotency-Key", "reuse-sub-001")
 	secondRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(secondRecorder, second)
@@ -539,14 +737,31 @@ func TestVPSSubscriptionsCreateRejectsReusedIdempotencyKey(t *testing.T) {
 }
 
 func TestVPSSubscriptionsRejectsStatusField(t *testing.T) {
-	handler := handlers.VPSSubscriptions(&fakeSubscriptionRepository{})
-	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(`{"price":12,"currency":"USD","billing_months":1,"status":"paused"}`))
+	repo := &fakeSubscriptionRepository{}
+	handler := handlers.VPSSubscriptions(repo)
+	payload := validVPSSubscriptionCreatePayload()
+	payload["status"] = "paused"
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
+	req.Header.Set("Idempotency-Key", "reject-status-field")
+	if _, err := subscriptions.NormalizeIdempotencyKey(req.Header.Get("Idempotency-Key")); err != nil {
+		t.Fatalf("status-field rejection regression must use a valid idempotency key: %v", err)
+	}
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	if len(body) != 1 || body["error"] != "invalid json" {
+		t.Fatalf("body = %#v, want exact invalid json error", body)
+	}
+	if repo.createSubscriptionCalls != 0 || repo.createIdempotencyKey != "" {
+		t.Fatalf("create calls/key = %d/%q, want zero calls and no idempotency create", repo.createSubscriptionCalls, repo.createIdempotencyKey)
 	}
 }
 
@@ -840,7 +1055,7 @@ func TestSubscriptionsMapRepositoryFailures(t *testing.T) {
 		{name: "list", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{listSubscriptionsErr: errors.New("list failed")}), method: http.MethodGet, path: "/api/subscriptions"},
 		{name: "create", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{createSubscriptionErr: errors.New("create failed")}), method: http.MethodPost, path: "/api/subscriptions", body: `{"vps_id":"vps_001","price":12,"currency":"USD","billing_months":1}`},
 		{name: "vps scoped list", handler: handlers.VPSSubscriptions(&fakeSubscriptionRepository{listSubscriptionsErr: errors.New("list failed")}), method: http.MethodGet, path: "/api/vps/vps_001/subscriptions"},
-		{name: "vps scoped create", handler: handlers.VPSSubscriptions(&fakeSubscriptionRepository{createSubscriptionErr: errors.New("create failed")}), method: http.MethodPost, path: "/api/vps/vps_001/subscriptions", body: `{"price":12,"currency":"USD","billing_months":1}`},
+		{name: "vps scoped create", handler: handlers.VPSSubscriptions(&fakeSubscriptionRepository{createSubscriptionErr: errors.New("create failed")}), method: http.MethodPost, path: "/api/vps/vps_001/subscriptions", body: marshalVPSSubscriptionCreatePayload(t, validVPSSubscriptionCreatePayload())},
 		{name: "get", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{getSubscriptionErr: errors.New("get failed")}), method: http.MethodGet, path: "/api/subscriptions/sub_001"},
 		{name: "patch", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{patchSubscriptionErr: errors.New("patch failed")}), method: http.MethodPatch, path: "/api/subscriptions/sub_001", body: `{"note":"review"}`},
 	}

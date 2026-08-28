@@ -2,7 +2,7 @@
 
 ## Goal
 
-Close the remaining `v0.77.4` review items so disabled IP Quality cannot change current Overview health, every Legacy write that mutates UI after await is generation-owned, the VPS-scoped subscription DTO contract checks field semantics, and subscription create receipts have an explicit permanent lifecycle. After this patch it is acceptable to call this hardening round boxed.
+Close the remaining `v0.77.4` review items so disabled IP Quality cannot change current Overview health, every Legacy write that mutates UI after await is generation-owned, the VPS-scoped subscription DTO contract checks field semantics, and subscription create receipts have an explicit permanent lifecycle. This hardening round is boxed only after implementation gates pass and an independent external review reports no blocking findings.
 
 ## Background
 
@@ -25,6 +25,8 @@ Legacy `beginVpsWrite` / `mutationIsCurrent` / per-VPS request tokens only wrap 
 3. **P3-01.** The shared VPS-scoped subscription create manifest records field semantics (`type`, `required`, `nullable`), not only names. Go and TypeScript contract tests fail on type / requiredness / nullability drift. Do not add an OpenAPI/codegen pipeline.
 4. **P3-02.** Create receipts are permanent for the lifetime of the subscription row. Same key+digest always replays while that row exists. If the subscription row is deleted, cascade removes the receipt. Backup restore keeps old keys valid. No janitor, TTL, or new metrics platform. Write this contract into active docs.
 5. Public operator-facing docs state that `POST /api/subscriptions` requires `Idempotency-Key`: reuse a stable UUID for retries of the same body; rotate the key when the logical operation changes.
+6. Internal implementation/check completion is not an archive condition. Every external-review Critical/Important/Minor finding in the accepted review scope must be recorded, fixed, and independently re-reviewed before this task can be archived.
+7. The active remediation tree rooted at `08-27-v0775-vps-detail-hardening` remains part of this task and owns the later VPS detail/subscription contract review rounds. This parent remains `in_progress` while that tree or its external review is unresolved.
 
 ## Out of scope
 
@@ -46,6 +48,7 @@ Legacy `beginVpsWrite` / `mutationIsCurrent` / per-VPS request tokens only wrap 
 - Tests live next to the code they protect.
 - Receipt policy stays truthful to single-operator scale. Do not build a generic TTL platform.
 - Do not work on local `main`; use a feature branch.
+- Do not archive immediately after development or internal quality gates. Wait for the external review verdict and keep the task active whenever that verdict contains blocking findings.
 
 ## Acceptance criteria
 
@@ -55,7 +58,8 @@ Legacy `beginVpsWrite` / `mutationIsCurrent` / per-VPS request tokens only wrap 
 - Legacy tests cover at least: A create-monitoring pending → switch to B → A completes, no navigate; A archive pending → switch to B → A completes, no archive navigate; A create-service pending → switch to B and open a drawer → A completes, B drawer stays open; A create-subscription pending → switch to B → A replay completes, no A notice on B.
 - Go and TypeScript subscription create contract tests fail if `price` becomes string, `auto_renew` becomes string, `renew_at` loses nullability, or a required field such as `note` becomes optional.
 - Active docs state that receipts are permanent for the subscription row lifetime, and that `POST /api/subscriptions` requires `Idempotency-Key`.
+- The remediation child tree is complete, the latest independent external review reports no blocking findings, and that review evidence is recorded before archive.
 
 ## Non-goals / non-claims
 
-`v0.77.4` remains deployable. This task is the closeout patch, not a rollback. Do not describe the hardening round as boxed until the acceptance tests above pass.
+`v0.77.4` remains deployable. This task is the closeout patch, not a rollback. Do not describe the hardening round as boxed until the acceptance tests above pass and the independent external-review gate is clear.

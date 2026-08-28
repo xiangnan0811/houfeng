@@ -1034,3 +1034,27 @@ Closed remaining v0.77.4 seams: disabled IP Quality out of Overview deadline, Le
 ### Next Steps
 
 - Push feat/v0775-hardening-closeout, open the PR, and wait for required CI.
+
+
+## Session 263: Deliver v0.77.6 VPS hardening
+
+**Date**: 2026-08-28
+**Task**: Deliver v0.77.6 VPS hardening
+**Branch**: `codex/v0776-vps-hardening`
+
+### Summary
+
+Closed all externally reviewed scoped subscription and VPS Detail async ownership findings, verified Node 22 Web/Chromium and Go gates with the approved attachment golden exception, and prepared the reviewed branch for PR, release, and cleanup.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `86675d7a` | (see git log) |
+| `4dd95a0a` | (see git log) |
+| `4dcaf333` | (see git log) |
+| `b029d988` | (see git log) |
+
+### Status
+
+[OK] **Completed**

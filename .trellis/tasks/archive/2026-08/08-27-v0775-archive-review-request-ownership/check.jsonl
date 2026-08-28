@@ -1,0 +1,4 @@
+{"file":".trellis/spec/web/vps-detail-ownership.md","reason":"Check exact request supersession across route, close, reopen, success, failure, and finalization"}
+{"file":".trellis/tasks/08-27-v0775-vps-detail-hardening/research/verification-contract.md","reason":"Check deterministic modal race tests plus bounded lint, type, Chromium, and repository gates"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check client review ownership does not replace backend archive authority"}
+{"file":".trellis/tasks/08-27-v0775-vps-detail-hardening/research/review-evidence.md","reason":"Verify all original archive review stale-result paths are closed"}

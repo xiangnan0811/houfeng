@@ -2,7 +2,10 @@
 
 ## Checkout
 
-Current tree is clean `main` at `v0.77.4`. Create `feat/v0775-hardening-closeout` in this checkout (no worktree). Enable hooks with `sh scripts/setup-git-hooks.sh` before the first commit.
+- Worktree: `/home/murray/code/houfeng/.worktree/v0776-vps-hardening`
+- Branch: `codex/v0776-vps-hardening`
+- Base/HEAD: reviewed `6c91b128a621e0adf0b2ce2e6434ebc3ad758340` (`v0.77.5`)
+- The remediation starts unstaged on this non-main branch. Hooks are enabled. External review cleared the accepted scope on 2026-08-28; batch the work commits before archiving this task tree, then continue through PR, CI, merge, release and image verification.
 
 ## Order
 
@@ -14,14 +17,10 @@ Current tree is clean `main` at `v0.77.4`. Create `feat/v0775-hardening-closeout
    - Overview UI tests: disabled current judgement shows “未启用”, not “存在历史报告（当前未启用）”. Keep the presentation label map.
 
 2. **P2-02 Legacy write ownership**
-   - Wrap link, create-monitoring, create-subscription, extend-validity, unlink, archive, experience, service, domain, and cancellation with `beginVpsWrite` + `mutationIsCurrent` before notice/draft/drawer/navigate.
-   - Cancellation keeps preview generation; also take the per-VPS write lock.
-   - Duplicate-submit error: “上一次保存仍在进行，请稍后再试”.
-   - Tests in `LegacyVPSDetail.test.tsx`:
-     - A create-monitoring pending → switch B → A completes, no `/monitoring/:id` navigate.
-     - A archive pending → switch B → A completes, no `/archive/:id` navigate.
-     - A create-service pending → switch B and open a drawer → A completes, B drawer stays open.
-     - A create-subscription pending → switch B → A replay completes, no A notice on B.
+   - Follow the bounded current contract in `.trellis/spec/web/vps-detail-ownership.md`; do not reintroduce the historical begin/finish signatures or component-local submitting booleans.
+   - Keep the production store page-scoped across capability-gate remounts. Guard `beginVpsWrite(...) === null`, derive pending state with `useSyncExternalStore`, gate post-await UI commits with the owner generation, and finalize only the exact owner.
+   - Exact stale-view settle may notify the mounted/current matching page to re-probe; current-view settle and an old A while B is current must not re-probe.
+   - Preserve the full operation/refresh/preview regression inventory maintained by the active remediation task, including real-entry remount, Drawer close/reopen, same-VPS query reload, current-view no-extra-probe, and exact/stale store finish results.
 
 3. **P3-01 semantic DTO manifest**
    - Rewrite `vps_subscription_create_fields.json` to `{name,type,required,nullable}[]` using the design table.
@@ -34,23 +33,31 @@ Current tree is clean `main` at `v0.77.4`. Create `feat/v0775-hardening-closeout
    - Update `.trellis/spec/backend/ip-quality-contract.md`: disabled Overview does not query latest summary and does not emit `ip_quality_disabled_has_history`.
    - Short `README.md` + `docs/design/current/product-and-architecture.md` note: `POST /api/subscriptions` requires `Idempotency-Key`.
 
-## Validation
+## Final validation matrix
 
 ```bash
-go test ./internal/center/store -run 'TestLoadIPQuality|TestOverviewServiceDisabledIPQuality|TestPostgresVPSOverview'
-go test ./internal/center/http/handlers -run 'TestVPSSubscriptionCreateRequestMatchesTypeScriptDTO'
-cd web && npx vitest run \
+go test ./internal/center/store -run 'TestLoadIPQuality|TestOverviewServiceDisabledIPQuality|TestPostgresVPSOverview' -count=1
+go test ./internal/center/http/handlers -count=1
+env PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  npm --prefix web run test -- --run \
   src/lib/vpsSubscriptionCreateContract.test.ts \
   src/lib/vpsOverviewPresentation.test.ts \
   src/pages/vps-detail/VPSOverviewPageView.test.tsx \
   src/pages/vps-detail/VPSOverviewFreshness.test.tsx \
-  src/pages/vps-detail/LegacyVPSDetail.test.tsx
-make fmt-go
-# before finish:
-./scripts/verify.sh
+  src/pages/vps-detail/LegacyVPSDetail.test.tsx \
+  src/pages/VPSDetailPage.legacy-ownership.test.tsx \
+  src/pages/vps-detail/vpsWriteOwnerStore.test.ts
+env PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin make verify-web
+env PATH=/home/murray/.nvm/versions/node/v22.23.1/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  npm --prefix web run test:e2e
+make verify-go
+python3 .trellis/scripts/task.py validate .trellis/tasks/08-27-v0775-hardening-closeout
+python3 .trellis/scripts/task.py validate .trellis/tasks/08-27-v0775-vps-detail-hardening
+git diff --check
+git diff --cached --check
 ```
 
-PostgreSQL integration for disabled Overview with an existing report must be run where that file is already gated (same as v0.77.4). Browser Playwright is not required unless Legacy/Overview e2e fixtures fail compile; Vitest covers the new races.
+PostgreSQL integration for disabled Overview with an existing report must be run where that file is already gated. Formal Chromium `npm --prefix web run test:e2e` is a mandatory independent gate because `make verify-web` does not execute Playwright. If `make verify-go` again fails only at unchanged `internal/center/attachments TestPreviewImageGoldenMetadataFreeBoundedPNG` with actual `0d749fd4…` versus expected `dac4e6f5…`, record it as the approved pre-existing baseline exception; any other failure blocks closeout. All five remediation task directories must validate without context warnings before external re-review.
 
 ## Review gates
 
@@ -61,13 +68,15 @@ PostgreSQL integration for disabled Overview with an existing report must be run
 - Manifest tests must fail type and requiredness drift, not only renamed fields.
 - No receipt janitor or new migration.
 - Docs must say receipts are permanent and collection POST requires `Idempotency-Key`.
+- The remediation tree rooted at `08-27-v0775-vps-detail-hardening` must remain linked and active until its latest external review has no blocking findings.
+- Passing implementation tests or an internal `trellis-check` does not authorize archive. Record the independent external-review verdict, remediate every accepted finding, and wait for a clear re-review before archiving this parent.
 
 ## Rollback
 
 Feature-branch revert. No schema change.
 
-## Follow-up before `task.py start`
+## Cleared execution state
 
-- Planning summary approved by the user.
-- Branch `feat/v0775-hardening-closeout` created from current `main`.
-- `implement.jsonl` / `check.jsonl` contain real spec entries.
+- Parent status remains `in_progress` on `codex/v0776-vps-hardening` only until the reviewed work commits and task-tree archive commits are created.
+- `08-27-v0775-vps-detail-hardening` retains its three implementation children; all four remediation tasks passed external review on 2026-08-28.
+- `implement.jsonl` / `check.jsonl` use bounded current specs and review evidence without context-truncation warnings.

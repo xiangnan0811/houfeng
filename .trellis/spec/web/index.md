@@ -19,6 +19,7 @@
 | [Directory Structure](./directory-structure.md) | `web/` 目录结构与文件归属 | 已填实 |
 | [Component Conventions](./component-conventions.md) | 页面 / 组件 / 共享原子的拆分与命名 | 已填实 |
 | [State and Data](./state-and-data.md) | API client、数据获取、状态管理与类型 | 已填实 |
+| [VPS Detail Ownership](./vps-detail-ownership.md) | Legacy VPS Detail 写入、refresh、archive review 与 cancellation preview 的 bounded 异步所有权合同 | 已填实 |
 | [Records Collaboration Surfaces](./record-collaboration-surfaces.md) | collaboration exact DTO、受控组件、lazy Inbox、unread eager seam 与异步安全合同 | 已填实 |
 | [Styling Guidelines](./styling-guidelines.md) | 设计令牌、CSS / 类名约定与暗色优先 | 已填实 |
 | [Quality Guidelines](./quality-guidelines.md) | Lint / 测试 / 评审标准与禁止模式 | 已填实 |
