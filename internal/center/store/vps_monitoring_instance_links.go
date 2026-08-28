@@ -70,6 +70,10 @@ func lockVPSAndRejectActiveMonitoringLink(ctx context.Context, tx pgx.Tx, vpsID 
 		return fmt.Errorf("lock vps %q before monitoring instance link write: %w", vpsID, err)
 	}
 
+	return rejectActiveMonitoringLink(ctx, tx, vpsID)
+}
+
+func rejectActiveMonitoringLink(ctx context.Context, tx pgx.Tx, vpsID string) error {
 	var activeLinkCount int
 	if err := tx.QueryRow(ctx, `
 		select count(*)

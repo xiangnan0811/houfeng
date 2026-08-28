@@ -51,6 +51,46 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	recordPortabilityBlobKeyMuslAppACLCurrentMigrationFragment(),
 	recordsAuthorityAppACLCurrentMigrationFragment(),
 	subscriptionCreateIdempotencyAppACLCurrentMigrationFragment(),
+	vpsCreateIdempotencyAppACLCurrentMigrationFragment(),
+}
+
+var vpsCreateIdempotencyReceiptTables = []string{
+	"experience_log_create_idempotency",
+	"asset_service_create_idempotency",
+	"asset_domain_create_idempotency",
+	"vps_monitoring_instance_create_idempotency",
+}
+
+func vpsCreateIdempotencyAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	objects := make([]AppACLManagedObjectR1, 0, len(vpsCreateIdempotencyReceiptTables))
+	for _, table := range vpsCreateIdempotencyReceiptTables {
+		objects = append(objects, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: table,
+		})
+	}
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0062_create_vps_create_idempotency.sql",
+		Objects:    objects,
+		Privileges: vpsCreateIdempotencyAppACLCurrentPrivileges,
+	}
+}
+
+func vpsCreateIdempotencyAppACLCurrentPrivileges(string) []AppACLPrivilege {
+	privileges := make([]AppACLPrivilege, 0, len(vpsCreateIdempotencyReceiptTables)*2)
+	for _, table := range vpsCreateIdempotencyReceiptTables {
+		for _, kind := range []AppACLPrivilegeKind{AppACLPrivilegeSelect, AppACLPrivilegeInsert} {
+			privileges = append(privileges, AppACLPrivilege{
+				Subject:        AppACLSubjectCenterRuntime,
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     appACLManagedPublicSchemaR1,
+				ObjectIdentity: table,
+				Privilege:      kind,
+			})
+		}
+	}
+	return privileges
 }
 
 func subscriptionCreateIdempotencyAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {

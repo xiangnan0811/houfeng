@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/assetservices"
+	"houfeng/internal/center/createidempotency"
 	"houfeng/internal/center/ids"
 )
 
@@ -21,13 +22,20 @@ type assetServiceDB interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
+type assetServiceQueryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 type PostgresAssetServiceRepository struct {
-	db assetServiceDB
+	db      assetServiceDB
+	beginTx func(context.Context, pgx.TxOptions) (pgx.Tx, error)
 }
 
 func NewPostgresAssetServiceRepository(db *pgxpool.Pool) *PostgresAssetServiceRepository {
-	return &PostgresAssetServiceRepository{db: db}
+	return &PostgresAssetServiceRepository{db: db, beginTx: db.BeginTx}
 }
+
+const assetServiceCreateOperation = "asset-service.create"
 
 const assetServiceSelectColumns = `
 	service_id,
@@ -170,13 +178,98 @@ func (r *PostgresAssetServiceRepository) CreateAssetService(ctx context.Context,
 	if err := assetservices.ValidateCreateInput(input); err != nil {
 		return assetservices.Record{}, err
 	}
+	return insertAssetService(ctx, r.db, input)
+}
+
+func (r *PostgresAssetServiceRepository) CreateAssetServiceIdempotent(
+	ctx context.Context,
+	input assetservices.CreateInput,
+	idempotencyKey string,
+) (assetservices.Record, bool, error) {
+	input = assetservices.NormalizeCreateInput(input)
+	if err := assetservices.ValidateCreateInput(input); err != nil {
+		return assetservices.Record{}, false, err
+	}
+	key, err := createidempotency.NormalizeKey(idempotencyKey)
+	if err != nil {
+		return assetservices.Record{}, false, err
+	}
+	digest, err := assetServiceCreateDigest(input)
+	if err != nil {
+		return assetservices.Record{}, false, err
+	}
+	if r.beginTx == nil {
+		return assetservices.Record{}, false, errors.New("asset service repository cannot create idempotently without transaction support")
+	}
+
+	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return assetservices.Record{}, false, fmt.Errorf("begin asset service create transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	lockKey := createidempotency.NamespacedLockKey(assetServiceCreateOperation, key)
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext($1)::bigint)`, lockKey); err != nil {
+		return assetservices.Record{}, false, fmt.Errorf("lock asset service create receipt: %w", err)
+	}
+
+	var storedDigest string
+	var serviceID string
+	err = tx.QueryRow(ctx, `
+		select request_digest, service_id
+		from asset_service_create_idempotency
+		where idempotency_key = $1`, key).Scan(&storedDigest, &serviceID)
+	if err == nil {
+		if storedDigest != digest {
+			return assetservices.Record{}, false, createidempotency.ErrIdempotencyKeyReused
+		}
+		record, err := scanAssetService(tx.QueryRow(ctx, `
+			select `+assetServiceSelectColumns+`
+			from asset_services
+			where service_id = $1
+			  and vps_id = $2`, serviceID, input.VPSID))
+		if err != nil {
+			return assetservices.Record{}, false, fmt.Errorf("load replayed asset service: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return assetservices.Record{}, false, fmt.Errorf("commit asset service create replay: %w", err)
+		}
+		return record, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return assetservices.Record{}, false, fmt.Errorf("lookup asset service create receipt: %w", err)
+	}
+
+	record, err := insertAssetService(ctx, tx, input)
+	if err != nil {
+		return assetservices.Record{}, false, err
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into asset_service_create_idempotency (
+			idempotency_key,
+			request_digest,
+			service_id
+		) values ($1, $2, $3)`, key, digest, record.ServiceID); err != nil {
+		return assetservices.Record{}, false, fmt.Errorf("record asset service create receipt: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return assetservices.Record{}, false, fmt.Errorf("commit asset service create: %w", err)
+	}
+	return record, false, nil
+}
+
+func assetServiceCreateDigest(input assetservices.CreateInput) (string, error) {
+	return createidempotency.DigestNormalizedRequest(input)
+}
+
+func insertAssetService(ctx context.Context, db assetServiceQueryer, input assetservices.CreateInput) (assetservices.Record, error) {
 
 	serviceID, err := ids.New("svc")
 	if err != nil {
 		return assetservices.Record{}, fmt.Errorf("generate asset service id: %w", err)
 	}
 
-	record, err := scanAssetService(r.db.QueryRow(ctx, `
+	record, err := scanAssetService(db.QueryRow(ctx, `
 		insert into asset_services (
 			service_id,
 			vps_id,

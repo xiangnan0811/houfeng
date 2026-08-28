@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/assetdomains"
+	"houfeng/internal/center/createidempotency"
 	"houfeng/internal/center/ids"
 )
 
@@ -22,13 +23,20 @@ type assetDomainDB interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
+type assetDomainQueryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 type PostgresAssetDomainRepository struct {
-	db assetDomainDB
+	db      assetDomainDB
+	beginTx func(context.Context, pgx.TxOptions) (pgx.Tx, error)
 }
 
 func NewPostgresAssetDomainRepository(db *pgxpool.Pool) *PostgresAssetDomainRepository {
-	return &PostgresAssetDomainRepository{db: db}
+	return &PostgresAssetDomainRepository{db: db, beginTx: db.BeginTx}
 }
+
+const assetDomainCreateOperation = "asset-domain.create"
 
 const assetDomainSelectColumns = `
 	domain_id,
@@ -191,13 +199,107 @@ func (r *PostgresAssetDomainRepository) CreateAssetDomain(ctx context.Context, i
 			return assetdomains.Record{}, assetdomains.ErrDomainServiceNotFound
 		}
 	}
+	return insertAssetDomain(ctx, r.db, input)
+}
+
+func (r *PostgresAssetDomainRepository) CreateAssetDomainIdempotent(
+	ctx context.Context,
+	input assetdomains.CreateInput,
+	idempotencyKey string,
+) (assetdomains.Record, bool, error) {
+	input = assetdomains.NormalizeCreateInput(input)
+	if err := assetdomains.ValidateCreateInput(input); err != nil {
+		return assetdomains.Record{}, false, err
+	}
+	key, err := createidempotency.NormalizeKey(idempotencyKey)
+	if err != nil {
+		return assetdomains.Record{}, false, err
+	}
+	digest, err := assetDomainCreateDigest(input)
+	if err != nil {
+		return assetdomains.Record{}, false, err
+	}
+	if r.beginTx == nil {
+		return assetdomains.Record{}, false, errors.New("asset domain repository cannot create idempotently without transaction support")
+	}
+
+	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return assetdomains.Record{}, false, fmt.Errorf("begin asset domain create transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	lockKey := createidempotency.NamespacedLockKey(assetDomainCreateOperation, key)
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext($1)::bigint)`, lockKey); err != nil {
+		return assetdomains.Record{}, false, fmt.Errorf("lock asset domain create receipt: %w", err)
+	}
+
+	var storedDigest string
+	var domainID string
+	err = tx.QueryRow(ctx, `
+		select request_digest, domain_id
+		from asset_domain_create_idempotency
+		where idempotency_key = $1`, key).Scan(&storedDigest, &domainID)
+	if err == nil {
+		if storedDigest != digest {
+			return assetdomains.Record{}, false, createidempotency.ErrIdempotencyKeyReused
+		}
+		record, err := scanAssetDomain(tx.QueryRow(ctx, `
+			select `+assetDomainSelectColumns+`
+			from asset_domains
+			where domain_id = $1
+			  and vps_id = $2`, domainID, input.VPSID))
+		if err != nil {
+			return assetdomains.Record{}, false, fmt.Errorf("load replayed asset domain: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return assetdomains.Record{}, false, fmt.Errorf("commit asset domain create replay: %w", err)
+		}
+		return record, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return assetdomains.Record{}, false, fmt.Errorf("lookup asset domain create receipt: %w", err)
+	}
+
+	if input.ServiceID != nil {
+		exists, err := assetDomainServiceBelongsToVPS(ctx, tx, *input.ServiceID, input.VPSID)
+		if err != nil {
+			return assetdomains.Record{}, false, fmt.Errorf("check asset domain service scope: %w", err)
+		}
+		if !exists {
+			return assetdomains.Record{}, false, assetdomains.ErrDomainServiceNotFound
+		}
+	}
+	record, err := insertAssetDomain(ctx, tx, input)
+	if err != nil {
+		return assetdomains.Record{}, false, err
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into asset_domain_create_idempotency (
+			idempotency_key,
+			request_digest,
+			domain_id
+		) values ($1, $2, $3)`, key, digest, record.DomainID); err != nil {
+		return assetdomains.Record{}, false, fmt.Errorf("record asset domain create receipt: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return assetdomains.Record{}, false, fmt.Errorf("commit asset domain create: %w", err)
+	}
+	return record, false, nil
+}
+
+func assetDomainCreateDigest(input assetdomains.CreateInput) (string, error) {
+	return createidempotency.DigestNormalizedRequest(input)
+}
+
+func insertAssetDomain(ctx context.Context, db assetDomainQueryer, input assetdomains.CreateInput) (assetdomains.Record, error) {
 
 	domainID, err := ids.New("dom")
 	if err != nil {
 		return assetdomains.Record{}, fmt.Errorf("generate asset domain id: %w", err)
 	}
 
-	record, err := scanAssetDomain(r.db.QueryRow(ctx, `
+	record, err := scanAssetDomain(db.QueryRow(ctx, `
 		insert into asset_domains (
 			domain_id,
 			vps_id,
@@ -265,8 +367,12 @@ func (r *PostgresAssetDomainRepository) vpsAssetExists(ctx context.Context, vpsI
 }
 
 func (r *PostgresAssetDomainRepository) serviceAssetBelongsToVPS(ctx context.Context, serviceID, vpsID string) (bool, error) {
+	return assetDomainServiceBelongsToVPS(ctx, r.db, serviceID, vpsID)
+}
+
+func assetDomainServiceBelongsToVPS(ctx context.Context, db assetDomainQueryer, serviceID, vpsID string) (bool, error) {
 	var exists bool
-	if err := r.db.QueryRow(ctx, `
+	if err := db.QueryRow(ctx, `
 		select exists (
 			select 1
 			from asset_services

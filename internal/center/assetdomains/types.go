@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"houfeng/internal/center/createidempotency"
 	"houfeng/internal/center/subscriptions"
 )
 
@@ -73,6 +74,13 @@ type Repository interface {
 	ListAssetDomainsForVPS(context.Context, string) ([]Record, error)
 	CreateAssetDomain(context.Context, CreateInput) (Record, error)
 }
+
+type IdempotentRepository interface {
+	CreateAssetDomainIdempotent(context.Context, CreateInput, string) (Record, bool, error)
+}
+
+var ErrInvalidIdempotencyKey = createidempotency.ErrInvalidIdempotencyKey
+var ErrIdempotencyKeyReused = createidempotency.ErrIdempotencyKeyReused
 
 func NormalizeCreateInput(input CreateInput) CreateInput {
 	input.VPSID = strings.TrimSpace(input.VPSID)

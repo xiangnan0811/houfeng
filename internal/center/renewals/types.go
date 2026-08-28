@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"houfeng/internal/center/createidempotency"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
 )
@@ -184,6 +185,13 @@ type ExperienceLogRepository interface {
 	CreateExperienceLog(context.Context, CreateExperienceLogInput) (ExperienceLogRecord, error)
 	ListExperienceLogsForVPS(context.Context, string) ([]ExperienceLogRecord, error)
 }
+
+type IdempotentExperienceLogRepository interface {
+	CreateExperienceLogIdempotent(context.Context, CreateExperienceLogInput, string) (ExperienceLogRecord, bool, error)
+}
+
+var ErrInvalidIdempotencyKey = createidempotency.ErrInvalidIdempotencyKey
+var ErrIdempotencyKeyReused = createidempotency.ErrIdempotencyKeyReused
 
 type TimelineRepository interface {
 	GetVPSTimeline(context.Context, string) (VPSTimeline, error)
