@@ -4,7 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
+
+	"houfeng/internal/center/assetlinks"
+	"houfeng/internal/center/createidempotency"
 )
 
 const (
@@ -24,6 +30,10 @@ const (
 	BindingPendingConfirmation = "指纹变更待确认"
 	HealthNormal               = "正常"
 
+	LinkedCreateMaxLabelCount = 20
+	LinkedCreateMaxLabelRunes = 64
+	LinkedCreateMaxNoteRunes  = 2000
+
 	OnboardingPhaseNotStarted               = "未开始接入"
 	OnboardingPhaseBoundAwaitingObservation = "已绑定，等待稳定观测"
 	OnboardingPhaseCompleted                = "接入完成"
@@ -36,6 +46,10 @@ var ErrMonitoringInstanceMetadataConflict = errors.New("monitoring instance meta
 var ErrInvalidManagementInput = errors.New("invalid monitoring instance management input")
 var ErrManagementActionBlocked = errors.New("monitoring instance management action blocked")
 var ErrArchivedMonitoringInstance = errors.New("archived monitoring instance")
+var ErrInvalidCreateInput = errors.New("invalid monitoring instance create input")
+
+var ErrInvalidIdempotencyKey = createidempotency.ErrInvalidIdempotencyKey
+var ErrIdempotencyKeyReused = createidempotency.ErrIdempotencyKeyReused
 
 var allowedLifecycleStatuses = map[string]struct{}{
 	LifecyclePendingEnrollment: {},
@@ -112,6 +126,20 @@ type CreateInput struct {
 	LifecycleStatus string   `json:"lifecycle_status"`
 	Labels          []string `json:"labels"`
 	Note            string   `json:"note"`
+}
+
+// LinkedCreateWireIdentity is the normalized identity of the actual
+// VPS-scoped monitoring-instance create request body. It deliberately excludes
+// defaults derived from mutable VPS state.
+type LinkedCreateWireIdentity struct {
+	DisplayName string   `json:"display_name"`
+	Group       string   `json:"group"`
+	Region      string   `json:"region"`
+	City        string   `json:"city"`
+	Provider    string   `json:"provider"`
+	Labels      []string `json:"labels"`
+	Note        string   `json:"note"`
+	LinkNote    string   `json:"link_note"`
 }
 
 type UpdateMetadataInput struct {
@@ -231,6 +259,10 @@ type Repository interface {
 	StoreActionResult(context.Context, string, []byte) error
 }
 
+type IdempotentLinkedRepository interface {
+	CreateLinkedMonitoringInstanceIdempotent(context.Context, string, LinkedCreateWireIdentity, string) (Record, assetlinks.Record, bool, error)
+}
+
 type EnrollmentTokenIssue struct {
 	Token     string    `json:"token"`
 	IssuedAt  time.Time `json:"issued_at"`
@@ -285,6 +317,80 @@ type OnboardingRepository interface {
 func IsValidLifecycleStatus(status string) bool {
 	_, ok := allowedLifecycleStatuses[status]
 	return ok
+}
+
+func NormalizeCreateInput(input CreateInput) CreateInput {
+	input.DisplayName = strings.TrimSpace(input.DisplayName)
+	input.Group = strings.TrimSpace(input.Group)
+	input.Region = strings.TrimSpace(input.Region)
+	input.City = strings.TrimSpace(input.City)
+	input.Provider = strings.TrimSpace(input.Provider)
+	input.LifecycleStatus = strings.TrimSpace(input.LifecycleStatus)
+	input.Labels = normalizeLabels(input.Labels)
+	input.Note = strings.TrimSpace(input.Note)
+	return input
+}
+
+func ValidateCreateInput(input CreateInput) error {
+	if strings.TrimSpace(input.DisplayName) == "" || strings.TrimSpace(input.Region) == "" || strings.TrimSpace(input.City) == "" || strings.TrimSpace(input.Provider) == "" {
+		return fmt.Errorf("%w: required metadata is missing", ErrInvalidCreateInput)
+	}
+	if !IsValidLifecycleStatus(input.LifecycleStatus) {
+		return fmt.Errorf("%w: invalid lifecycle_status", ErrInvalidCreateInput)
+	}
+	return nil
+}
+
+func ValidateCreateInputMetadata(input CreateInput) error {
+	return validateCreateMetadata(input.Labels, input.Note)
+}
+
+func NormalizeLinkedCreateWireIdentity(input LinkedCreateWireIdentity) LinkedCreateWireIdentity {
+	input.DisplayName = strings.TrimSpace(input.DisplayName)
+	input.Group = strings.TrimSpace(input.Group)
+	input.Region = strings.TrimSpace(input.Region)
+	input.City = strings.TrimSpace(input.City)
+	input.Provider = strings.TrimSpace(input.Provider)
+	input.Labels = normalizeLabels(input.Labels)
+	input.Note = strings.TrimSpace(input.Note)
+	input.LinkNote = strings.TrimSpace(input.LinkNote)
+	return input
+}
+
+func ValidateLinkedCreateWireIdentity(input LinkedCreateWireIdentity) error {
+	return validateCreateMetadata(input.Labels, input.Note)
+}
+
+func validateCreateMetadata(labels []string, note string) error {
+	if len(labels) > LinkedCreateMaxLabelCount {
+		return fmt.Errorf("%w: too many labels", ErrInvalidCreateInput)
+	}
+	for _, label := range labels {
+		if utf8.RuneCountInString(label) > LinkedCreateMaxLabelRunes {
+			return fmt.Errorf("%w: label is too long", ErrInvalidCreateInput)
+		}
+	}
+	if utf8.RuneCountInString(note) > LinkedCreateMaxNoteRunes {
+		return fmt.Errorf("%w: note is too long", ErrInvalidCreateInput)
+	}
+	return nil
+}
+
+func normalizeLabels(labels []string) []string {
+	normalized := make([]string, 0, len(labels))
+	seen := make(map[string]struct{}, len(labels))
+	for _, raw := range labels {
+		label := strings.TrimSpace(raw)
+		if label == "" {
+			continue
+		}
+		if _, exists := seen[label]; exists {
+			continue
+		}
+		seen[label] = struct{}{}
+		normalized = append(normalized, label)
+	}
+	return normalized
 }
 
 func NormalizeListScope(scope ListScope) (ListScope, bool) {

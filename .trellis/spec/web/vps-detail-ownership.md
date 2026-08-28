@@ -6,27 +6,30 @@
 
 ### 1. Scope / Trigger
 
-- 修改 `VPSDetailPage` capability gate、`LegacyVPSDetail` 的任一网络写操作、same-VPS query reload、409 recovery、Drawer 生命周期、mutation 触发的 detail/services/domains refresh，或跨 `vpsId` 的异步提交时适用。
+- 修改 authenticated `AppShell` 的 VPS write registry、`VPSDetailPage` capability gate、Legacy/Overview 的任一网络写操作、same-VPS query reload、create retry、409 recovery、Drawer 生命周期、mutation 触发的权威 refresh，或跨 `vpsId` 的异步提交时适用。
 - 写操作 inventory：`facts`、`decision`、`link`、`monitoring-create`、`subscription`、`validity-extension`、`monitoring-unlink`、`lifecycle`、`cancellation`、`experience`、`service`、`domain`。
 
 ### 2. Signatures
 
 - View generation: `mutationGenerationRef: MutableRefObject<number>`；`mutationIsCurrent(generation: number): boolean` 只比较 generation。
-- Transport owner store: `VPSWriteOwnerStore { getSnapshot, subscribe, begin, finish }` 持有 `Map<vpsId, { vpsId, token, generation, operation, monitoringInstanceId? }>`；`finish(owner): boolean` 仅在 `vpsId + token` 精确匹配并释放时返回 `true`，stale token 返回 `false`。`useSyncExternalStore` 只渲染当前 VPS/operation 的提交态。生产入口由持续挂载的 `VPSDetailPage` 创建一次并传给 lazy Legacy；直接挂载 Legacy 的测试/兼容入口使用实例内 fallback store。
+- Transport owner store: `VPSWriteOwnerStore { getSnapshot, subscribe, begin, prepareCreate, finishCreate, finish }`。公开 snapshot 持有 `Map<vpsId, { vpsId, token, viewToken, generation, operation, startedAt, monitoringInstanceId? }>`；digest/key attempt material 只留在 registry 私有 map 与 `prepareCreate` 的 exact-owner 返回值，不发布到 external-store snapshot。`finish*` 仅在 `vpsId + token` 精确匹配并释放时返回 `true`，stale token 返回 `false`。
+- Production lifecycle: `AuthenticatedAppShell key={user.user_id}` 内只挂一份 `VPSWriteRegistryProvider` 并包住 `<Outlet />`；Legacy 与 Overview 都消费该 user-scoped store。直接挂载 page/component 的测试兼容入口才允许实例内 fallback store；禁止 module-global singleton。
 - Owner lifecycle: `beginVpsWrite(vpsId, operation, monitoringInstanceId?): VPSWriteOwner | null` 委托 store 获取 owner；同 VPS 已有在途写入时返回 `null`，调用方必须在解引用前结束本次提交。`finishVpsWrite(owner)` 委托 store 精确释放并根据其 boolean 结果判断自己是否真正完成该 transport owner。
 - Mutation refresh: `refreshDetail` / `refreshServices` / `refreshDomains` 接收 `ownsRefresh: () => boolean`，在 await 后和 functional state setter 内都检查 VPS identity 与 predicate。
 - Route load owner: 正常 route-load entry 从 `mutationGenerationRef` 捕获唯一 `routeGeneration`；`routeIsCurrent()` 同时要求 effect 未 cancelled、generation 仍 current、目标 `vpsId` 仍是当前 view。payload、catch、terminal navigation 与 functional state setter 都必须在提交点检查该 owner。
-- Settle convergence owner: Legacy 的中央 `finishVpsWrite(owner)` 仅在 store 精确释放成功且 `mutationIsCurrent(owner.generation)` 为 false 时通知 page shell：该 transport 已结算但原 view authority 已失效。`VPSDetailPage` callback 只有在 page 仍 mounted 且 `currentVPSIdRef.current === owner.vpsId` 时递增 probe revision；当前 view 正常提交的 settle 不通知、不额外 probe。
+- Settle convergence owner: 每个实际 gate/view 有唯一 `viewToken`。当前 page 若继承同 VPS 的不同-token owner，记录 exact token；该 owner 从 snapshot 消失后只触发一次权威 re-probe。Legacy 的 stale-generation callback 还必须校验当前 `vpsId + viewToken`；当前 view 正常 settle 由自己的 mutation refresh 收敛，不额外 probe。
 
 ### 3. Contracts
 
 - generation 控制 view commit，owner 控制 transport lifetime。route/Drawer invalidation 使旧 notice、draft、drawer、navigate、preview/result 与 refresh commit 失效，但不得提前清除仍在途的 transport owner。
-- `VPSDetailPage` 在参数变化时会进入 `probing` 并卸载 Legacy 子树；生产 transport store 必须归属于仍持续挂载的 page shell，不能归属于被 gate 重挂载的 Legacy 实例，也不能使用跨 page/test 泄漏的 module-global singleton。
+- `VPSDetailPage` 在参数变化时会进入 `probing` 并卸载 Legacy/Overview 子树；生产 transport store 必须归属于 user-keyed authenticated AppShell，不能归属于 page/gate 重挂载的实例，也不能跨用户保留。
 - 任一 write owner settle 时，若其 owning Legacy view generation 已因 remount、Drawer close 或 same-VPS query reload 失效，且 page shell 仍 mounted/current VPS 仍匹配，必须触发一次权威 re-probe/reload。该 reload 用来收敛旧 Legacy generation 已拒绝的 POST 结果；不得允许旧 target closure 在用户已切到另一 VPS 时触发其 re-probe，也不得给仍由当前 view 正常提交/refresh 的写入增加重复 probe。
 - route effect entry 先失效 archive review request。该 effect 的正常路径、`!vpsId` early return 与 query-driven reload skip early return 都必须注册同一 authority cleanup：失效 archive request、递增 mutation generation，并释放 latest-load view lock。正常路径还取消本次 route load。
 - 正常 route load 是一个 generation-owned view transaction，而不是只依赖 effect-local `cancelled`。同 VPS reload A1 pending 后，任何 A2 reload、mutation 或 mutation-owned refresh 都会推进 generation；A1 的 payload、catch、functional state commit 或 terminal navigation 随后必须被丢弃。
 - 组件卸载或 route 切换后，旧 mutation 即使成功也不得更新 UI 或导航；其 `finally` 仍必须用 exact token 释放自己的 transport owner。
 - Legacy owner 按 VPS 隔离、同 VPS 互斥。A pending 不阻止 B；A 的迟到 `finally` 不得释放 B 或同 VPS后继请求。
+- 同 VPS 任一 operation 已有 owner 时，Legacy/Overview 的所有写入 submit/confirm/link/unlink 控件都必须从同一 snapshot 派生 blocked 状态；handler 仍须消费 `begin(...)` 的 nullable 返回值立即结束，不能只靠按钮禁用。
+- subscription、experience、service、domain、monitoring create 先取得 provisional owner，再对 path VPS ID + operation + 实际 wire body 做 canonical SHA-256；transport/unconfirmed failure 保留相同 digest/key，body 变化或 `idempotency_key_reused` 轮换，confirmed success 清除。raw body 不进入 registry、UI、日志、错误或测试 snapshot。
 - `finishVpsWrite` 的 release identity 是 `vpsId + token`。`generation`、`operation` 与 stable monitoring identity 用于 commit/UI 语义，不是额外的 release key；不要把未实现的“全部字段匹配”写成合同。
 - mutation refresh 的 predicate 必须在 functional setter 内重检，阻止 A→B→A 的旧 A response 覆盖当前 A。
 - 409 recovery 先加载最新版；facts 三方 merge，decision 保留本地 decision/reason，并用新 `updated_at` 重试。terminal identity 只有 generation 仍 current 时才 replace 到 `/archive/:vpsId`。
@@ -38,7 +41,7 @@
 | --- | --- |
 | query-skip effect 后启动 mutation，再卸载组件 | cleanup 使 mutation generation 失效；迟到 response 不更新、不导航，settle 精确释放 transport owner。生产 Page 若仍 mounted/current VPS 匹配则由 stale-settle callback 权威 re-probe；无 callback 的 direct-Legacy harness 只释放 owner |
 | A mutation pending 时切到 B | B 可独立写；A settle 不改变 B owner/draft/notice |
-| 真实 `VPSDetailPage` 中 A write pending → probe B → probe A-before-settle，返回 A 的 route GET 先完成 → A POST settle | page-scoped store 保留 A owner；A POST/idempotency key count 保持 1；settle 后自动 re-probe A 并展示权威 subscription/service/lifecycle；旧 Legacy 不直接提交 mutation response |
+| 真实 AppShell 中 A write pending → Dashboard/B/Legacy↔Overview → 返回 A-before-settle → A POST settle | user-scoped store 保留 A owner；A POST/key count 保持 1；返回视图的全部写控件 blocked；settle 后自动 re-probe A 并展示权威状态 |
 | A write pending → 当前 route 已是 B → A settle | 不 re-probe B；B heading/data 与 capability probe count 不变 |
 | 当前 A subscription pending → 关闭并重开 Drawer → POST settle | 重开时仍只有原 POST/幂等 key且旧快照保持；stale generation settle 后自动 re-probe A 并展示权威 subscription |
 | 当前 A subscription pending → same-VPS query reload 完成旧 route load → POST settle | query reload 不产生第二 POST；stale generation settle 后再做一次权威 re-probe并收敛服务端 subscription |
@@ -52,7 +55,7 @@
 ### 5. Good / Base / Bad Cases
 
 - Good: A/B 各有 deferred mutation，往返路由后各自只由自己的 token 解锁。
-- Good: capability gate 卸载/重挂 Legacy 时，page-scoped store 的 snapshot 与 exact-token finalizer 都继续有效。
+- Good: route/gate 卸载或 Legacy↔Overview 切换时，AppShell user-scoped store 的 snapshot 与 exact-token finalizer 都继续有效；用户切换会销毁旧 registry。
 - Good: exact owner release 后，Legacy 只在自己的 generation 已 stale 时通知 page；page 只在 mounted/current VPS 匹配时 bump revision 一次。
 - Good: route effect 任一分支返回的 teardown 都会失效 write generation，不只失效 archive read。
 - Good: same-VPS route request 在开始时捕获 generation，并在 payload、catch 与 functional setter 三处重检，而不只依赖 `cancelled`。
@@ -61,13 +64,14 @@
 - Bad: route request 只用 effect-local `cancelled`；同一 effect 生命周期内的 mutation 可先提交，随后旧 route payload 仍覆盖它。
 - Bad: `invalidateMutations()` 清 transport owner，允许原请求未 settle 时同 VPS重复提交。
 - Bad: 用组件级 submitting boolean 让 A 阻止 B，或 route 切换时提前解锁 A。
-- Bad: 在 `LegacyVPSDetail` 内创建生产 owner Map；`VPSDetailPage` probing remount 会得到空 Map 并允许同 VPS重复 POST。
+- Bad: 在 `LegacyVPSDetail` 或 `VPSDetailPage` 内创建生产 owner Map；route/page remount 会得到空 Map 并允许同 VPS重复 POST。
+- Bad: snapshot 发布 digest/key，或按 `owner.operation` 只禁用当前 Drawer，导致另一 operation 控件仍显示 enabled 但 `begin` 静默拒绝。
 
 ### 6. Tests Required
 
 - 用 controlled deferred promise 覆盖 query-driven reload skip effect → mutation pending → unmount → late success；断言无旧 archive navigation/notice/state commit。禁止 sleep。
 - 覆盖 service/subscription A/B 双 deferred、同 VPS close/reopen、exact-token cleanup、12 个 operation inventory，以及 facts/decision 代表路径。
-- 真实 `VPSDetailPage` 与真实 lazy Legacy 回归不得 mock Legacy：覆盖 A pending → B → A-before-settle、同 VPS pending subscription close/reopen，以及 pending subscription 与 same-VPS query reload 交错；每条 stale-view settle 都要求 POST/幂等 key 唯一且最终页面自动收敛到服务端 subscription/service/lifecycle。另测 A settle 时当前 route 为 B 不增加 B probe，以及 current-view subscription 正常 settle 不增加 capability/detail probe。store 单测直接断言 stale token `finish` 返回 `false`、exact owner 返回 `true`，并覆盖 instance 隔离。证据较重的受控 remount 用例可使用有说明的 scoped timeout，不得提高全局 timeout。
+- 真实 authenticated AppShell/VPSDetailPage 回归不得 mock Legacy：覆盖 pending → Dashboard/返回、Legacy→Overview、Overview→离开/返回、同 VPS query reload、A/B 并行与旧 view settle 收敛；每条交错都要求 POST/key 唯一。store 单测覆盖 stale/exact token、instance/user 隔离、same/changed digest、409 rotation、confirmed clear，并断言 external snapshot 不包含 raw body、digest 或 key。
 - 分别覆盖 detail/services/domains A→B→A stale refresh，predicate 必须在 functional setter 内生效。
 - 用 controlled deferred 覆盖 same-VPS route load A1 与后继 mutation/refresh 或 reload A2 的交错；至少分别证明旧 payload、旧 catch 与 functional state commit 都不能覆盖最新 view。
 - stale-success runtime 证明必须让 A1 detail 先通过最早 route guard，再延迟 timeline/services/domains/subscription 等二阶段请求。payload guard 用例在二阶段 settle 前推进 generation；functional-setter 用例则先让 payload guard 通过并排队 updater，再在 updater 执行前推进 generation。两条用例必须能分别对 outer/inner guard 做 mutation RED，不能只靠 source inventory。
@@ -106,25 +110,18 @@ try {
 ```
 
 ```tsx
-// 错误：生产 owner store 属于会被 capability gate 卸载的 Legacy 实例。
+// 错误：生产 owner store 属于会被 route/gate 卸载的 page 实例。
 export function LegacyVPSDetail() {
   const [writeOwnerStore] = useState(createVPSWriteOwnerStore)
 }
 
-// 正确：持续挂载的 VPSDetailPage 持有 store；Legacy remount 复用同一实例。
-export function VPSDetailPage() {
-  const [writeOwnerStore] = useState(createVPSWriteOwnerStore)
-  if (gate === 'probing') {
-    return <PageState kind="loading" title="正在判定 VPS 详情形态" />
-  }
-  if (gate === 'legacy') {
-    return (
-      <Suspense fallback={<RouteModuleFallback label="正在加载 VPS 详情" />}>
-        <LegacyVPSDetailPage writeOwnerStore={writeOwnerStore} />
-      </Suspense>
-    )
-  }
-  return <VPSOverviewRoute vpsId={normalizedVPSId} initialOverview={seededOverview} />
+// 正确：user-keyed authenticated shell 持有 provider；所有受保护 route 复用。
+function AuthenticatedAppShell({ user }: { user: User }) {
+  return (
+    <VPSWriteRegistryProvider key={user.user_id}>
+      <Outlet />
+    </VPSWriteRegistryProvider>
+  )
 }
 ```
 

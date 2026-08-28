@@ -75,7 +75,10 @@ for (const viewport of VIEWPORTS) {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.goto('/records/rec_e2e001')
 
-    await expect(page.getByRole('heading', { name: '第三晚 TCP 观测', level: 1 })).toBeVisible()
+    await expect(page.locator('.page-header').getByRole('heading', {
+      name: '第三晚 TCP 观测',
+      level: 1,
+    })).toBeVisible()
     const preview = page.locator('[data-render-contract="houfeng_markdown/v1"]')
     await expect(preview).toBeVisible()
     await expect(preview.locator('pre code')).toContainText('mtr -rw 203.0.113.7')
@@ -161,7 +164,10 @@ test('published record reading surface has no serious or critical accessibility 
   await page.setViewportSize({ width: 390, height: 900 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/records/rec_e2e001')
-  await expect(page.getByRole('heading', { name: '第三晚 TCP 观测', level: 1 })).toBeVisible()
+  await expect(page.locator('.page-header').getByRole('heading', {
+    name: '第三晚 TCP 观测',
+    level: 1,
+  })).toBeVisible()
 
   const result = await new AxeBuilder({ page }).analyze()
   expect(result.violations.filter((violation) => (

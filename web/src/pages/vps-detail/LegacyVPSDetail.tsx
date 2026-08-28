@@ -8,6 +8,8 @@ import { VPSTimelinePanel } from '../../components/VPSTimelinePanel'
 import {
   applyVPSCancellation,
   archiveVPS,
+  buildVPSDomainCreateBody,
+  buildVPSServiceCreateBody,
   createVPSDomain,
   createVPSMonitoringInstance,
   createVPSService,
@@ -29,6 +31,7 @@ import {
   unlinkVPSMonitoringInstance,
   updateVPSAsset,
 } from '../../lib/api'
+import { useOptionalVPSWriteRegistry } from '../../lib/vpsWriteRegistry-context'
 import type {
   ArchiveReview,
   AssetDomainRecord,
@@ -120,7 +123,9 @@ import {
   type VPSWriteOperation,
   type VPSWriteOwner,
   type VPSWriteOwnerStore,
+  type VPSPreparedCreateOwner,
 } from './vpsWriteOwnerStore'
+import type { VPSCreateSettleOutcome } from './vpsWriteOwnerStore'
 
 type PageFeedbackItem = {
   key: string
@@ -235,11 +240,13 @@ function shouldExposeCancellationWorkbench(detail: VPSAssetDetail, preview: Canc
 
 type LegacyVPSDetailProps = {
   writeOwnerStore?: VPSWriteOwnerStore
-  onViewAuthorityInvalidatedWriteSettled?: (vpsId: string) => void
+  viewToken?: string
+  onViewAuthorityInvalidatedWriteSettled?: (vpsId: string, viewToken: string) => void
 }
 
 export function LegacyVPSDetail({
   writeOwnerStore: providedWriteOwnerStore,
+  viewToken: providedViewToken,
   onViewAuthorityInvalidatedWriteSettled,
 }: LegacyVPSDetailProps = {}) {
   const { vpsId } = useParams()
@@ -253,9 +260,11 @@ export function LegacyVPSDetail({
   const archiveReviewRequestRef = useRef(0)
   const currentVpsIdRef = useRef(vpsId)
   const latestLoadLockRef = useRef(false)
+  const contextWriteOwnerStore = useOptionalVPSWriteRegistry()
   const [localWriteOwnerStore] = useState(createVPSWriteOwnerStore)
-  const writeOwnerStore = providedWriteOwnerStore ?? localWriteOwnerStore
-  const subscriptionIdempotencyKeyRef = useRef(crypto.randomUUID())
+  const writeOwnerStore = providedWriteOwnerStore ?? contextWriteOwnerStore ?? localWriteOwnerStore
+  const [localViewToken] = useState(() => crypto.randomUUID())
+  const viewToken = providedViewToken ?? localViewToken
   const factDraftRef = useRef<FactEditFormState | null>(null)
   const [state, setState] = useState(INITIAL_STATE)
   const [selectors, setSelectors] = useState(INITIAL_SELECTOR_STATE)
@@ -284,6 +293,7 @@ export function LegacyVPSDetail({
   const [linkNotice, setLinkNotice] = useState<string | null>(null)
   const [monitoringCreateError, setMonitoringCreateError] = useState<string | null>(null)
   const [monitoringCreateNotice, setMonitoringCreateNotice] = useState<string | null>(null)
+  const [monitoringCreateAction, setMonitoringCreateAction] = useState<{ to: string; label: string } | null>(null)
   const [monitoringCreateDraft, setMonitoringCreateDraft] = useState<MonitoringInstanceCreateDraftState | null>(null)
   const [subscriptionDraft, setSubscriptionDraft] = useState<SubscriptionDraftState>(INITIAL_SUBSCRIPTION_DRAFT)
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null)
@@ -309,10 +319,6 @@ export function LegacyVPSDetail({
   const [domainDraft, setDomainDraft] = useState<DomainDraftState>(INITIAL_DOMAIN_DRAFT)
   const [domainError, setDomainError] = useState<string | null>(null)
   const [domainNotice, setDomainNotice] = useState<string | null>(null)
-
-  useEffect(() => {
-    subscriptionIdempotencyKeyRef.current = crypto.randomUUID()
-  }, [subscriptionDraft])
 
   function clearWorkbenchQueryParam() {
     if (!searchParams.has('workbench')) return
@@ -344,6 +350,7 @@ export function LegacyVPSDetail({
   ): VPSWriteOwner | null {
     const owner = writeOwnerStore.begin({
       vpsId: targetVpsId,
+      viewToken,
       generation: mutationGenerationRef.current + 1,
       operation,
       ...(monitoringInstanceId ? { monitoringInstanceId } : {}),
@@ -356,7 +363,22 @@ export function LegacyVPSDetail({
   function finishVpsWrite(owner: VPSWriteOwner) {
     const released = writeOwnerStore.finish(owner)
     if (released && !mutationIsCurrent(owner.generation)) {
-      onViewAuthorityInvalidatedWriteSettled?.(owner.vpsId)
+      onViewAuthorityInvalidatedWriteSettled?.(owner.vpsId, owner.viewToken)
+    }
+  }
+
+  async function prepareVpsCreate(owner: VPSWriteOwner, wireBody: unknown): Promise<VPSPreparedCreateOwner | null> {
+    const preparedOwner = await writeOwnerStore.prepareCreate(owner, wireBody)
+    if (!preparedOwner) return null
+    if (mutationIsCurrent(owner.generation)) return preparedOwner
+    finishVpsCreate(preparedOwner, 'not_sent')
+    return null
+  }
+
+  function finishVpsCreate(owner: VPSPreparedCreateOwner, outcome: VPSCreateSettleOutcome) {
+    const released = writeOwnerStore.finishCreate(owner, outcome)
+    if (released && !mutationIsCurrent(owner.generation)) {
+      onViewAuthorityInvalidatedWriteSettled?.(owner.vpsId, owner.viewToken)
     }
   }
 
@@ -470,6 +492,7 @@ export function LegacyVPSDetail({
         setLinkNotice(null)
         setMonitoringCreateError(null)
         setMonitoringCreateNotice(null)
+        setMonitoringCreateAction(null)
         setMonitoringCreateDraft(monitoringInstanceCreateDraftFromDetail(normalizedDetail))
         setSubscriptionDraft(INITIAL_SUBSCRIPTION_DRAFT)
         setSubscriptionError(null)
@@ -655,6 +678,7 @@ export function LegacyVPSDetail({
   function clearMonitoringCreateFeedback() {
     setMonitoringCreateError(null)
     setMonitoringCreateNotice(null)
+    setMonitoringCreateAction(null)
   }
 
   function handleMonitoringCreateDraftChange(draft: MonitoringInstanceCreateDraftState) {
@@ -1184,22 +1208,38 @@ export function LegacyVPSDetail({
     const { generation } = owner
     setMonitoringCreateError(null)
     setMonitoringCreateNotice(null)
+    setMonitoringCreateAction(null)
     setUnlinkError(null)
 
+    let preparedOwner: VPSPreparedCreateOwner | null = null
+    let settleOutcome: VPSCreateSettleOutcome = 'unknown'
     try {
       const input = buildMonitoringInstanceCreateInput(monitoringCreateDraft ?? monitoringInstanceCreateDraftFromDetail(detail))
-      const created = await createVPSMonitoringInstance(detail.vps_id, input)
+      preparedOwner = await prepareVpsCreate(owner, input)
+      if (!preparedOwner) return
+      const created = await createVPSMonitoringInstance(detail.vps_id, input, preparedOwner.idempotencyKey)
+      settleOutcome = 'confirmed'
       if (!mutationIsCurrent(generation)) return
-      await refreshDetail(detail.vps_id, () => mutationIsCurrent(generation))
-      if (!mutationIsCurrent(generation)) return
-      setMonitoringCreateNotice('监控实例已创建并关联，正在进入接入流程')
-      collapseDrawer()
-      navigate(`/monitoring/${created.monitoring_instance_id}?onboarding=1&return_vps=${encodeURIComponent(detail.vps_id)}`)
+      const onboardingPath = `/monitoring/${created.monitoring_instance_id}?onboarding=1&return_vps=${encodeURIComponent(detail.vps_id)}`
+      try {
+        await refreshDetail(detail.vps_id, () => mutationIsCurrent(generation))
+        if (!mutationIsCurrent(generation)) return
+        setMonitoringCreateNotice('监控实例已创建并关联，正在进入接入流程')
+        collapseDrawer()
+        navigate(onboardingPath)
+      } catch (refreshError: unknown) {
+        if (!mutationIsCurrent(generation)) return
+        setMonitoringCreateNotice(`监控实例已创建并关联，但权威状态刷新失败：${describeError(refreshError, '权威状态刷新失败')}`)
+        setMonitoringCreateAction({ to: onboardingPath, label: '继续接入 agent' })
+        collapseDrawer()
+      }
     } catch (error: unknown) {
+      if (isIdempotencyKeyReused(error)) settleOutcome = 'idempotency_key_reused'
       if (!mutationIsCurrent(generation)) return
       setMonitoringCreateError(describeError(error, '创建监控实例失败'))
     } finally {
-      finishVpsWrite(owner)
+      if (preparedOwner) finishVpsCreate(preparedOwner, settleOutcome)
+      else finishVpsWrite(owner)
     }
   }
 
@@ -1224,8 +1264,13 @@ export function LegacyVPSDetail({
       return
     }
     const { generation } = owner
+    let preparedOwner: VPSPreparedCreateOwner | null = null
+    let settleOutcome: VPSCreateSettleOutcome = 'unknown'
     try {
-      const subscription = await createVPSSubscription(detail.vps_id, input, subscriptionIdempotencyKeyRef.current)
+      preparedOwner = await prepareVpsCreate(owner, input)
+      if (!preparedOwner) return
+      const subscription = await createVPSSubscription(detail.vps_id, input, preparedOwner.idempotencyKey)
+      settleOutcome = 'confirmed'
       if (!mutationIsCurrent(generation)) return
       setState((current) => {
         if (current.vpsId !== detail.vps_id || !mutationIsCurrent(generation)) return current
@@ -1242,13 +1287,12 @@ export function LegacyVPSDetail({
       setSubscriptionNotice('订阅账单事实已创建')
       collapseDrawer()
     } catch (error: unknown) {
+      if (isIdempotencyKeyReused(error)) settleOutcome = 'idempotency_key_reused'
       if (!mutationIsCurrent(generation)) return
-      if (isIdempotencyKeyReused(error)) {
-        subscriptionIdempotencyKeyRef.current = crypto.randomUUID()
-      }
       setSubscriptionError(describeError(error, '创建订阅失败'))
     } finally {
-      finishVpsWrite(owner)
+      if (preparedOwner) finishVpsCreate(preparedOwner, settleOutcome)
+      else finishVpsWrite(owner)
     }
   }
 
@@ -1464,19 +1508,45 @@ export function LegacyVPSDetail({
       return
     }
     const { generation } = owner
+    let preparedOwner: VPSPreparedCreateOwner | null = null
+    let settleOutcome: VPSCreateSettleOutcome = 'unknown'
     try {
-      await createVPSExperienceLog(detail.vps_id, input)
+      preparedOwner = await prepareVpsCreate(owner, input)
+      if (!preparedOwner) return
+      const created = await createVPSExperienceLog(detail.vps_id, input, preparedOwner.idempotencyKey)
+      settleOutcome = 'confirmed'
       if (!mutationIsCurrent(generation)) return
-      await refreshDetailAndTimeline(detail.vps_id, () => mutationIsCurrent(generation))
-      if (!mutationIsCurrent(generation)) return
+      setState((current) => {
+        if (current.vpsId !== detail.vps_id || !current.timeline || !mutationIsCurrent(generation)) return current
+        return {
+          ...current,
+          timeline: {
+            ...current.timeline,
+            experience_logs: [
+              created,
+              ...current.timeline.experience_logs.filter((item) => item.experience_log_id !== created.experience_log_id),
+            ],
+          },
+        }
+      })
       setExperienceDraft(INITIAL_EXPERIENCE_DRAFT)
-      setExperienceNotice('经验记录已写入资产历史')
-      collapseDrawer()
+      try {
+        await refreshDetailAndTimeline(detail.vps_id, () => mutationIsCurrent(generation))
+        if (!mutationIsCurrent(generation)) return
+        setExperienceNotice('经验记录已写入资产历史')
+        collapseDrawer()
+      } catch (refreshError: unknown) {
+        if (!mutationIsCurrent(generation)) return
+        setExperienceNotice(`经验记录已创建，但权威状态刷新失败：${describeError(refreshError, '权威状态刷新失败')}`)
+        collapseDrawer()
+      }
     } catch (error: unknown) {
+      if (isIdempotencyKeyReused(error)) settleOutcome = 'idempotency_key_reused'
       if (!mutationIsCurrent(generation)) return
       setExperienceError(describeError(error, '创建经验记录失败'))
     } finally {
-      finishVpsWrite(owner)
+      if (preparedOwner) finishVpsCreate(preparedOwner, settleOutcome)
+      else finishVpsWrite(owner)
     }
   }
 
@@ -1501,19 +1571,40 @@ export function LegacyVPSDetail({
       return
     }
     const { generation } = owner
+    let preparedOwner: VPSPreparedCreateOwner | null = null
+    let settleOutcome: VPSCreateSettleOutcome = 'unknown'
     try {
-      await createVPSService(detail.vps_id, input)
+      const wireBody = buildVPSServiceCreateBody(input)
+      preparedOwner = await prepareVpsCreate(owner, wireBody)
+      if (!preparedOwner) return
+      const created = await createVPSService(detail.vps_id, input, preparedOwner.idempotencyKey)
+      settleOutcome = 'confirmed'
       if (!mutationIsCurrent(generation)) return
-      await refreshServices(detail.vps_id, () => mutationIsCurrent(generation))
-      if (!mutationIsCurrent(generation)) return
+      setState((current) => {
+        if (current.vpsId !== detail.vps_id || !mutationIsCurrent(generation)) return current
+        return {
+          ...current,
+          services: [created, ...current.services.filter((item) => item.service_id !== created.service_id)],
+        }
+      })
       setServiceDraft(INITIAL_SERVICE_DRAFT)
-      setServiceNotice('服务记录已创建')
-      collapseDrawer()
+      try {
+        await refreshServices(detail.vps_id, () => mutationIsCurrent(generation))
+        if (!mutationIsCurrent(generation)) return
+        setServiceNotice('服务记录已创建')
+        collapseDrawer()
+      } catch (refreshError: unknown) {
+        if (!mutationIsCurrent(generation)) return
+        setServiceNotice(`服务记录已创建，但权威状态刷新失败：${describeError(refreshError, '权威状态刷新失败')}`)
+        collapseDrawer()
+      }
     } catch (error: unknown) {
+      if (isIdempotencyKeyReused(error)) settleOutcome = 'idempotency_key_reused'
       if (!mutationIsCurrent(generation)) return
       setServiceError(describeError(error, '创建服务记录失败'))
     } finally {
-      finishVpsWrite(owner)
+      if (preparedOwner) finishVpsCreate(preparedOwner, settleOutcome)
+      else finishVpsWrite(owner)
     }
   }
 
@@ -1538,19 +1629,40 @@ export function LegacyVPSDetail({
       return
     }
     const { generation } = owner
+    let preparedOwner: VPSPreparedCreateOwner | null = null
+    let settleOutcome: VPSCreateSettleOutcome = 'unknown'
     try {
-      await createVPSDomain(detail.vps_id, input)
+      const wireBody = buildVPSDomainCreateBody(input)
+      preparedOwner = await prepareVpsCreate(owner, wireBody)
+      if (!preparedOwner) return
+      const created = await createVPSDomain(detail.vps_id, input, preparedOwner.idempotencyKey)
+      settleOutcome = 'confirmed'
       if (!mutationIsCurrent(generation)) return
-      await refreshDomains(detail.vps_id, () => mutationIsCurrent(generation))
-      if (!mutationIsCurrent(generation)) return
+      setState((current) => {
+        if (current.vpsId !== detail.vps_id || !mutationIsCurrent(generation)) return current
+        return {
+          ...current,
+          domains: [created, ...current.domains.filter((item) => item.domain_id !== created.domain_id)],
+        }
+      })
       setDomainDraft(INITIAL_DOMAIN_DRAFT)
-      setDomainNotice('域名记录已创建')
-      collapseDrawer()
+      try {
+        await refreshDomains(detail.vps_id, () => mutationIsCurrent(generation))
+        if (!mutationIsCurrent(generation)) return
+        setDomainNotice('域名记录已创建')
+        collapseDrawer()
+      } catch (refreshError: unknown) {
+        if (!mutationIsCurrent(generation)) return
+        setDomainNotice(`域名记录已创建，但权威状态刷新失败：${describeError(refreshError, '权威状态刷新失败')}`)
+        collapseDrawer()
+      }
     } catch (error: unknown) {
+      if (isIdempotencyKeyReused(error)) settleOutcome = 'idempotency_key_reused'
       if (!mutationIsCurrent(generation)) return
       setDomainError(describeError(error, '创建域名记录失败'))
     } finally {
-      finishVpsWrite(owner)
+      if (preparedOwner) finishVpsCreate(preparedOwner, settleOutcome)
+      else finishVpsWrite(owner)
     }
   }
 
@@ -1571,22 +1683,13 @@ export function LegacyVPSDetail({
   const detail = state.detail
   const timeline = state.timeline
   const currentWriteOwner = writeOwners.get(detail.vps_id) ?? null
-  const decisionSubmitting = currentWriteOwner?.operation === 'decision'
-  const factSubmitting = currentWriteOwner?.operation === 'facts'
-  const linkSubmitting = currentWriteOwner?.operation === 'link'
-  const monitoringCreateSubmitting = currentWriteOwner?.operation === 'monitoring-create'
-  const subscriptionSubmitting = currentWriteOwner?.operation === 'subscription'
-  const validityExtensionSubmitting = currentWriteOwner?.operation === 'validity-extension'
+  const writeBlocked = currentWriteOwner !== null
   const lifecycleSubmitting = currentWriteOwner?.operation === 'lifecycle'
-  const cancellationSubmitting = currentWriteOwner?.operation === 'cancellation'
-  const experienceSubmitting = currentWriteOwner?.operation === 'experience'
-  const serviceSubmitting = currentWriteOwner?.operation === 'service'
-  const domainSubmitting = currentWriteOwner?.operation === 'domain'
   const unlinkingMonitoringInstanceId = currentWriteOwner?.operation === 'monitoring-unlink'
     ? currentWriteOwner.monitoringInstanceId ?? null
     : null
   const decisionChanged = decisionDraft.renewalDecision !== detail.renewal_decision
-  const linkControlsDisabled = linkSubmitting || unlinkingMonitoringInstanceId !== null
+  const linkControlsDisabled = writeBlocked || unlinkingMonitoringInstanceId !== null
   const isArchived = detail.lifecycle_status === 'archived' || detail.lifecycle_status === 'cancelled'
   const linkFeedback = linkError ?? unlinkError ?? linkNotice
   const linkFeedbackIsError = linkError !== null || unlinkError !== null
@@ -1613,7 +1716,7 @@ export function LegacyVPSDetail({
     Boolean(archiveReview?.eligible) &&
     archiveBlockers.length === 0 &&
     archiveConfirmationName.trim() === detail.display_name.trim()
-  const lifecycleConfirmDisabled = lifecycleSubmitting ||
+  const lifecycleConfirmDisabled = writeBlocked ||
     (lifecycleConfirmingAction === 'archive' ? !archiveCanConfirm : false)
 
   function drawerTitle(): string {
@@ -1649,7 +1752,7 @@ export function LegacyVPSDetail({
           <VPSRenewalDecisionForm
             detail={detail}
             draft={decisionDraft}
-            submitting={decisionSubmitting || latestLoading}
+            submitting={writeBlocked || latestLoading}
             error={decisionError}
             notice={decisionNotice}
             decisionChanged={decisionChanged}
@@ -1685,7 +1788,7 @@ export function LegacyVPSDetail({
         <VPSCancellationWorkbench
           key={`${detail.vps_id}:${state.cancellationPreview.preview_digest}`}
           preview={state.cancellationPreview}
-          submitting={cancellationSubmitting}
+          submitting={writeBlocked}
           error={cancellationError ?? state.cancellationPreviewError}
           result={state.cancellationResult}
           onCancel={closeDrawer}
@@ -1709,7 +1812,7 @@ export function LegacyVPSDetail({
             providers={selectors.providers}
             providersLoading={selectors.providersLoading}
             providersError={selectors.providersError}
-            submitting={factSubmitting || latestLoading}
+            submitting={writeBlocked || latestLoading}
             error={factError}
             notice={factNotice}
             onCancel={closeDrawer}
@@ -1728,7 +1831,7 @@ export function LegacyVPSDetail({
           monitoringInstancesLoading={selectors.monitoringInstancesLoading}
           monitoringInstancesError={selectors.monitoringInstancesError}
           controlsDisabled={linkControlsDisabled}
-          submitting={linkSubmitting}
+          submitting={writeBlocked}
           error={linkError}
           notice={linkNotice}
           onCancel={closeDrawer}
@@ -1743,7 +1846,7 @@ export function LegacyVPSDetail({
         <VPSMonitoringInstanceCreateForm
           detail={detail}
           draft={monitoringCreateDraft}
-          submitting={monitoringCreateSubmitting}
+          submitting={writeBlocked}
           error={monitoringCreateError}
           notice={monitoringCreateNotice}
           onCancel={closeDrawer}
@@ -1758,7 +1861,7 @@ export function LegacyVPSDetail({
         <VPSSubscriptionForm
           detail={detail}
           draft={subscriptionDraft}
-          submitting={subscriptionSubmitting}
+          submitting={writeBlocked}
           error={subscriptionError}
           notice={subscriptionNotice}
           onCancel={closeDrawer}
@@ -1774,7 +1877,7 @@ export function LegacyVPSDetail({
           detail={detail}
           activeSubscription={activeSubscription}
           draft={validityExtensionDraft}
-          submitting={validityExtensionSubmitting}
+          submitting={writeBlocked}
           error={validityExtensionError}
           notice={validityExtensionNotice}
           onCancel={closeDrawer}
@@ -1789,7 +1892,7 @@ export function LegacyVPSDetail({
         <VPSExperienceLogForm
           timeline={timeline}
           draft={experienceDraft}
-          submitting={experienceSubmitting}
+          submitting={writeBlocked}
           error={experienceError}
           notice={experienceNotice}
           onCancel={closeDrawer}
@@ -1806,7 +1909,7 @@ export function LegacyVPSDetail({
           targets={selectors.targets}
           targetsLoading={selectors.targetsLoading}
           targetsError={selectors.targetsError}
-          submitting={serviceSubmitting}
+          submitting={writeBlocked}
           error={serviceError}
           notice={serviceNotice}
           onCancel={closeDrawer}
@@ -1824,7 +1927,7 @@ export function LegacyVPSDetail({
           targets={selectors.targets}
           targetsLoading={selectors.targetsLoading}
           targetsError={selectors.targetsError}
-          submitting={domainSubmitting}
+          submitting={writeBlocked}
           error={domainError}
           notice={domainNotice}
           onCancel={closeDrawer}
@@ -1838,6 +1941,7 @@ export function LegacyVPSDetail({
       return (
         <VPSMonitoringInstanceLinksSection
           monitoring={detail.monitoring_instance_links ?? []}
+          writeBlocked={writeBlocked}
           unlinkingMonitoringInstanceId={unlinkingMonitoringInstanceId}
           pendingUnlinkMonitoringInstance={pendingUnlinkMonitoringInstance}
           linkFeedback={linkFeedback}
@@ -1904,7 +2008,7 @@ export function LegacyVPSDetail({
     activeDrawer === 'validity-extension' || !validityExtensionError ? null : { key: 'validity-error', message: validityExtensionError, error: true },
     validityExtensionNotice ? { key: 'validity-notice', message: validityExtensionNotice } : null,
     activeDrawer === 'monitoring-instance-create' || !monitoringCreateError ? null : { key: 'monitoring-create-error', message: monitoringCreateError, error: true },
-    monitoringCreateNotice ? { key: 'monitoring-create-notice', message: monitoringCreateNotice } : null,
+    monitoringCreateNotice ? { key: 'monitoring-create-notice', message: monitoringCreateNotice, action: monitoringCreateAction } : null,
     lifecycleConfirmingAction || !lifecycleError ? null : { key: 'lifecycle-error', message: lifecycleError, error: true },
     lifecycleNotice ? { key: 'lifecycle-notice', message: lifecycleNotice } : null,
   ]
@@ -1912,11 +2016,17 @@ export function LegacyVPSDetail({
 
   return (
     <div className="page-stack asset-page vps-detail-page">
+      {currentWriteOwner && currentWriteOwner.viewToken !== viewToken ? (
+        <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
+          操作处理中，请等待当前写入完成。
+        </p>
+      ) : null}
       <VPSDetailOverviewPanel
         model={overviewModel}
         vpsId={detail.vps_id}
         isArchived={isArchived}
         lifecycleSubmitting={lifecycleSubmitting}
+        writeBlocked={writeBlocked}
         onDecisionEdit={() => openDrawer('decision')}
         onTimelineOpen={() => openDrawer('timeline-detail')}
         onServicesOpen={() => openDrawer('services-detail')}

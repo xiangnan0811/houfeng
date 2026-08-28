@@ -107,6 +107,7 @@ web/
     │   ├── apiRequest.ts       # fetch/401/error/JSON transport primitives
     │   ├── auth-client.ts      # /api/auth/* 薄封装，复用 apiRequest transport
     │   ├── auth-context.tsx    # AuthProvider + useAuth
+    │   ├── vpsWriteRegistry.ts + vpsWriteRegistry-context.tsx # user-scoped VPS write authority
     │   ├── modalStack.ts + useModalFocus.ts # portal modal 栈、焦点与滚动锁
     │   ├── theme.ts + theme-context.tsx
     │   ├── format.ts           # 时间 / 字节 / 百分比等展示格式化
@@ -166,7 +167,7 @@ web/
 - `api.ts`：eager/shared API façade，导出 `withQuery`、兼容 transport re-export 与启动/多域共享函数（`listMonitoringInstances()`、`getDashboard()` 等）。
 - `observabilityApi.ts`：bundle-evidenced route-lazy façade，拥有 events/incidents/command-audit 读取。它只能复用 `api.ts` / `apiRequest.ts` primitives，不拥有第二套 fetch/401/error 逻辑；新增 domain façade 的门槛见 `state-and-data.md`。
 - `auth-client.ts`：`/api/auth/*` 的薄封装（`login`、`logout`、`me`、`changePassword`），复用 `api.ts` 的 `requestJSON` / `postJSONBody` / `requestEmpty` 与同一套 401 hook。
-- `auth-context.tsx` / `theme-context.tsx`：唯二的 React Context Provider，分别在 `main.tsx` 顶层一次性挂载。
+- `auth-context.tsx` / `theme-context.tsx` 在 `main.tsx` 顶层挂载；`vpsWriteRegistry-context.tsx` 在 authenticated AppShell 内按用户挂载并包住 Outlet。
 - `format.ts`：所有面向用户的格式化（时间、字节、百分比、标签拼接）；**新格式化函数都加到这里**，不要散落到组件文件。
 - `types.ts`：与 center HTTP 响应对齐的 TypeScript 类型；**不要在 page / component 里手抄一遍**。
 
@@ -224,7 +225,7 @@ web/
 | 新复杂路由私有 controller / presentation | `web/src/pages/<route>/hooks/use<Name>.ts` 与同级 `components/` / `modals/`；route page 是唯一 composition point，controller 不互相 import，展示层不 import controller/API |
 | 新 API 调用 | 默认在 `web/src/lib/api.ts` 加函数；若全部 consumer 都是 lazy route 且 bundle 证据要求隔离，放入已有 domain façade；同步 `lib/types.ts`，不要在 page/component 直接 `fetch()` |
 | 新数据格式化 | `web/src/lib/format.ts` 加函数；同时在 `lib/format.test.ts` 增用例 |
-| 新跨树 / 跨组件状态 | 当前只有 `auth-context` / `theme-context` 两个 Provider；如确需第三个，放 `web/src/lib/<name>-context.tsx`，并在 `main.tsx` 挂到 Provider 链 |
+| 新跨树 / 跨组件状态 | 当前有 Auth、Theme、authenticated VPS write registry 三个 Provider；新增时放 `web/src/lib/<name>-context.tsx`，并按真实生命周期挂到根链或 AppShell，禁止 page-private provider |
 | 新布局壳元素（侧边栏 / 顶栏内增项） | 改 `web/src/app/layout/`；不要把布局碎片散到 `pages/` |
 | 新 SPA 全局样式 | 改 `web/src/styles/` 下既有文件；非必要不新增 CSS 文件 |
 | 新 production source contract | `web/src/security/<Contract>.test.ts`；使用 AST/结构解析并配 synthetic fixture，不用正则扫描 JSX或路径级白名单 |

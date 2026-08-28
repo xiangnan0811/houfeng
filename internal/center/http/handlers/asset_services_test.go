@@ -24,6 +24,34 @@ type fakeAssetServiceRepository struct {
 	createResult     assetservices.Record
 	createErr        error
 	createInput      assetservices.CreateInput
+	createCalls      int
+	idempotentCalls  int
+	idempotentKey    string
+	replayed         bool
+}
+
+type statefulAssetServiceRepository struct {
+	creates testIdempotentCreateState[assetservices.Record]
+}
+
+func (r *statefulAssetServiceRepository) ListAssetServicesForVPS(context.Context, string) ([]assetservices.Record, error) {
+	return nil, nil
+}
+
+func (r *statefulAssetServiceRepository) CreateAssetServiceIdempotent(_ context.Context, input assetservices.CreateInput, key string) (assetservices.Record, bool, error) {
+	identity := struct {
+		VPSID string
+		Input assetservices.CreateInput
+	}{VPSID: input.VPSID, Input: input}
+	return r.creates.create(key, identity, func() assetservices.Record {
+		return assetservices.Record{
+			ServiceID:   "svc_sequence_001",
+			VPSID:       input.VPSID,
+			Name:        input.Name,
+			ServiceType: input.ServiceType,
+			Status:      input.Status,
+		}
+	})
 }
 
 func (f *fakeAssetServiceRepository) ListAssetServices(_ context.Context, filters assetservices.ListFilters) ([]assetservices.Record, error) {
@@ -43,11 +71,22 @@ func (f *fakeAssetServiceRepository) ListAssetServicesForVPS(_ context.Context, 
 }
 
 func (f *fakeAssetServiceRepository) CreateAssetService(_ context.Context, input assetservices.CreateInput) (assetservices.Record, error) {
+	f.createCalls++
 	f.createInput = input
 	if f.createErr != nil {
 		return assetservices.Record{}, f.createErr
 	}
 	return f.createResult, nil
+}
+
+func (f *fakeAssetServiceRepository) CreateAssetServiceIdempotent(_ context.Context, input assetservices.CreateInput, key string) (assetservices.Record, bool, error) {
+	f.idempotentCalls++
+	f.createInput = input
+	f.idempotentKey = key
+	if f.createErr != nil {
+		return assetservices.Record{}, false, f.createErr
+	}
+	return f.createResult, f.replayed, nil
 }
 
 func TestAssetServicesCollectionListsServices(t *testing.T) {
@@ -69,7 +108,7 @@ func TestAssetServicesCollectionListsServices(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
 	if repo.listFilters.VPSID != "vps_001" ||
 		repo.listFilters.TargetID != "tg_001" ||
@@ -79,10 +118,10 @@ func TestAssetServicesCollectionListsServices(t *testing.T) {
 	}
 	var body []assetservices.Record
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response body: %v", err)
+		t.Fatalf("unmarshal response body error type = %T", err)
 	}
 	if len(body) != 1 || body[0].ServiceID != "svc_001" {
-		t.Fatalf("body = %#v, want service list", body)
+		t.Fatalf("response count/ID matches = %d/%t", len(body), len(body) == 1 && body[0].ServiceID == "svc_001")
 	}
 }
 
@@ -120,7 +159,7 @@ func TestAssetServicesCollectionCreatesService(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusCreated, recorder.Body.String())
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusCreated)
 	}
 	if repo.createInput.VPSID != "vps_001" || repo.createInput.TargetID == nil || *repo.createInput.TargetID != "tg_001" {
 		t.Fatalf("create identity = %#v, want trimmed vps and target", repo.createInput)
@@ -130,6 +169,9 @@ func TestAssetServicesCollectionCreatesService(t *testing.T) {
 	}
 	if len(repo.createInput.Labels) != 1 || repo.createInput.Labels[0] != "prod" {
 		t.Fatalf("create labels = %#v, want normalized labels", repo.createInput.Labels)
+	}
+	if repo.createCalls != 1 || repo.idempotentCalls != 0 {
+		t.Fatalf("create calls = legacy:%d idempotent:%d, want collection legacy create only", repo.createCalls, repo.idempotentCalls)
 	}
 }
 
@@ -152,17 +194,17 @@ func TestVPSServicesListsServices(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
 	if repo.listForVPSID != "vps_001" {
 		t.Fatalf("list vps id = %q, want vps_001", repo.listForVPSID)
 	}
 	var body []assetservices.Record
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response body: %v", err)
+		t.Fatalf("unmarshal response body error type = %T", err)
 	}
 	if len(body) != 1 || body[0].ServiceID != "svc_001" {
-		t.Fatalf("body = %#v, want service list", body)
+		t.Fatalf("response count/ID matches = %d/%t", len(body), len(body) == 1 && body[0].ServiceID == "svc_001")
 	}
 }
 
@@ -184,12 +226,13 @@ func TestVPSServicesCreatesServiceWithPathVPSID(t *testing.T) {
 		"name":" Worker ",
 		"service_type":"worker"
 	}`))
+	req.Header.Set("Idempotency-Key", "service-create-001")
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusCreated, recorder.Body.String())
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusCreated)
 	}
 	if repo.createInput.VPSID != "vps_path" {
 		t.Fatalf("create VPSID = %q, want path vps id", repo.createInput.VPSID)
@@ -197,6 +240,178 @@ func TestVPSServicesCreatesServiceWithPathVPSID(t *testing.T) {
 	if repo.createInput.Status != assetservices.ServiceStatusActive {
 		t.Fatalf("create status = %q, want default active", repo.createInput.Status)
 	}
+	if repo.createCalls != 0 || repo.idempotentCalls != 1 || repo.idempotentKey != "service-create-001" {
+		t.Fatalf("create calls = legacy:%d idempotent:%d, want one idempotent call", repo.createCalls, repo.idempotentCalls)
+	}
+}
+
+func TestVPSServicesRequiresSingleValidIdempotencyKeyBeforeCreate(t *testing.T) {
+	tests := []struct {
+		name string
+		keys []string
+	}{
+		{name: "missing"},
+		{name: "empty", keys: []string{""}},
+		{name: "multiple", keys: []string{"service-key-001", "service-key-002"}},
+		{name: "comma joined multiple", keys: []string{"service-key-001,service-key-002"}},
+		{name: "too short", keys: []string{"short"}},
+		{name: "too long", keys: []string{strings.Repeat("a", 129)}},
+		{name: "invalid characters", keys: []string{"private/key"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeAssetServiceRepository{}
+			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/services", strings.NewReader(`{"name":"Blog","service_type":"web"}`))
+			for _, key := range tt.keys {
+				req.Header.Add("Idempotency-Key", key)
+			}
+			recorder := httptest.NewRecorder()
+
+			handlers.VPSServices(repo).ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal error body error type = %T", err)
+			}
+			if body["code"] != "invalid_idempotency_key" {
+				t.Fatalf("code = %q, want invalid_idempotency_key", body["code"])
+			}
+			if strings.Contains(recorder.Body.String(), "private/key") {
+				t.Fatal("response disclosed rejected idempotency key")
+			}
+			if repo.createCalls != 0 || repo.idempotentCalls != 0 {
+				t.Fatalf("create calls = legacy:%d idempotent:%d, want zero", repo.createCalls, repo.idempotentCalls)
+			}
+		})
+	}
+}
+
+func TestVPSServicesValidatesBodyBeforeIdempotencyKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantError string
+	}{
+		{name: "invalid json", body: `{"name":`, wantError: "invalid json"},
+		{name: "invalid input", body: `{"name":" "}`, wantError: "invalid input"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeAssetServiceRepository{}
+			recorder := httptest.NewRecorder()
+			handlers.VPSServices(repo).ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/services", strings.NewReader(tt.body)))
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal error body error type = %T", err)
+			}
+			if body["error"] != tt.wantError || body["code"] != "" {
+				t.Fatalf("error/code matches = %t/%t", body["error"] == tt.wantError, body["code"] == "")
+			}
+			if repo.createCalls != 0 || repo.idempotentCalls != 0 {
+				t.Fatalf("create calls = legacy:%d idempotent:%d, want zero", repo.createCalls, repo.idempotentCalls)
+			}
+		})
+	}
+}
+
+func TestVPSServicesMapsIdempotentCreateOutcomes(t *testing.T) {
+	tests := []struct {
+		name       string
+		replayed   bool
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "first create", wantStatus: http.StatusCreated},
+		{name: "replay", replayed: true, wantStatus: http.StatusOK},
+		{name: "reused key", err: assetservices.ErrIdempotencyKeyReused, wantStatus: http.StatusConflict, wantCode: "idempotency_key_reused"},
+		{name: "repository rejects key", err: assetservices.ErrInvalidIdempotencyKey, wantStatus: http.StatusBadRequest, wantCode: "invalid_idempotency_key"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeAssetServiceRepository{
+				createResult: assetservices.Record{ServiceID: "svc_stable", VPSID: "vps_001", Name: "Blog"},
+				createErr:    tt.err,
+				replayed:     tt.replayed,
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/services", strings.NewReader(`{"name":"Blog","service_type":"web"}`))
+			req.Header.Set("Idempotency-Key", "service-outcome-001")
+			recorder := httptest.NewRecorder()
+
+			handlers.VPSServices(repo).ServeHTTP(recorder, req)
+
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
+			}
+			if repo.createCalls != 0 || repo.idempotentCalls != 1 {
+				t.Fatalf("create calls = legacy:%d idempotent:%d, want one idempotent call", repo.createCalls, repo.idempotentCalls)
+			}
+			if tt.wantCode != "" {
+				var body map[string]string
+				if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+					t.Fatalf("unmarshal error body error type = %T", err)
+				}
+				if body["code"] != tt.wantCode {
+					t.Fatalf("code = %q, want %q", body["code"], tt.wantCode)
+				}
+				return
+			}
+			var body assetservices.Record
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal response error type = %T", err)
+			}
+			if body.ServiceID != "svc_stable" {
+				t.Fatalf("service_id = %q, want stable replay DTO", body.ServiceID)
+			}
+		})
+	}
+}
+
+func TestVPSServicesSequentialIdempotentCreateContract(t *testing.T) {
+	repo := &statefulAssetServiceRepository{}
+	handler := handlers.VPSServices(repo)
+	const path = "/api/vps/vps_sequence/services"
+	const key = "service-sequence-001"
+
+	first := serveTestIdempotentCreate(handler, path, `{"name":" Blog ","service_type":" web "}`, key)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first status = %d, want %d", first.Code, http.StatusCreated)
+	}
+	firstRecord := decodeTestResponse[assetservices.Record](t, first)
+	if firstRecord.ServiceID != "svc_sequence_001" || firstRecord.VPSID != "vps_sequence" {
+		t.Fatal("first response did not contain the materialized service identity")
+	}
+	assertTestIdempotentCreateCounts(t, &repo.creates, 1, 1)
+
+	replay := serveTestIdempotentCreate(handler, path, `{"name":"Blog","service_type":"web"}`, key)
+	if replay.Code != http.StatusOK {
+		t.Fatalf("replay status = %d, want %d", replay.Code, http.StatusOK)
+	}
+	replayRecord := decodeTestResponse[assetservices.Record](t, replay)
+	if replayRecord.ServiceID != firstRecord.ServiceID {
+		t.Fatal("replay did not return the original service identity")
+	}
+	assertTestIdempotentCreateCounts(t, &repo.creates, 2, 1)
+
+	reused := serveTestIdempotentCreate(handler, path, `{"name":"API","service_type":"web"}`, key)
+	if reused.Code != http.StatusConflict {
+		t.Fatalf("reused-key status = %d, want %d", reused.Code, http.StatusConflict)
+	}
+	reusedError := decodeTestResponse[map[string]string](t, reused)
+	if reusedError["code"] != "idempotency_key_reused" {
+		t.Fatalf("reused-key code = %q, want idempotency_key_reused", reusedError["code"])
+	}
+	assertTestIdempotentCreateCounts(t, &repo.creates, 3, 1)
 }
 
 func TestAssetServicesRejectInvalidRequests(t *testing.T) {
@@ -221,6 +436,9 @@ func TestAssetServicesRejectInvalidRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			if tt.method == http.MethodPost {
+				req.Header.Set("Idempotency-Key", "service-request-001")
+			}
 			recorder := httptest.NewRecorder()
 
 			tt.handler.ServeHTTP(recorder, req)
@@ -253,6 +471,9 @@ func TestAssetServicesMapRepositoryErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			if tt.method == http.MethodPost {
+				req.Header.Set("Idempotency-Key", "service-error-001")
+			}
 			recorder := httptest.NewRecorder()
 
 			tt.handler.ServeHTTP(recorder, req)
@@ -317,6 +538,9 @@ func TestAssetServicesMapRepositoryNotFoundErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			if tt.method == http.MethodPost {
+				req.Header.Set("Idempotency-Key", "service-not-found-001")
+			}
 			recorder := httptest.NewRecorder()
 
 			tt.handler.ServeHTTP(recorder, req)

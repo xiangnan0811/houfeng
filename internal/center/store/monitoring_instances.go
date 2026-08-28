@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/assetlinks"
+	"houfeng/internal/center/createidempotency"
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/incidents"
@@ -24,6 +25,7 @@ import (
 var _ monitoringinstances.Repository = (*PostgresMonitoringInstanceRepository)(nil)
 var _ enrollment.Repository = (*PostgresMonitoringInstanceRepository)(nil)
 var _ monitoringinstances.OnboardingRepository = (*PostgresMonitoringInstanceRepository)(nil)
+var _ monitoringinstances.IdempotentLinkedRepository = (*PostgresMonitoringInstanceRepository)(nil)
 
 type monitoringInstanceDB interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
@@ -94,6 +96,8 @@ const (
 )
 
 var ErrInvalidMonitoringInstanceRuntimeTransition = errors.New("invalid monitoring instance runtime transition")
+
+const linkedMonitoringInstanceCreateOperation = "linked-monitoring-instance.create"
 
 var monitoringInstanceSelectColumnNames = []string{
 	"monitoring_instance_id",
@@ -982,9 +986,228 @@ func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstance(ct
 		_ = tx.Rollback(ctx)
 	}()
 
+	record, link, err := insertLinkedMonitoringInstance(ctx, tx, vpsID, input, linkNote)
+	if err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("commit linked monitoring instance transaction for vps %q: %w", vpsID, err)
+	}
+	return record, link, nil
+}
+
+func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstanceIdempotent(
+	ctx context.Context,
+	vpsID string,
+	wireIdentity monitoringinstances.LinkedCreateWireIdentity,
+	idempotencyKey string,
+) (monitoringinstances.Record, assetlinks.Record, bool, error) {
+	vpsID = strings.TrimSpace(vpsID)
+	if vpsID == "" {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, assetlinks.ErrInvalidVPSMonitoringInstanceLinkInput
+	}
+	wireIdentity = monitoringinstances.NormalizeLinkedCreateWireIdentity(wireIdentity)
+	if err := monitoringinstances.ValidateLinkedCreateWireIdentity(wireIdentity); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
+	}
+	key, err := createidempotency.NormalizeKey(idempotencyKey)
+	if err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
+	}
+	digest, err := linkedMonitoringInstanceCreateDigest(vpsID, wireIdentity)
+	if err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
+	}
+
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, fmt.Errorf("begin linked monitoring instance create transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	lockKey := createidempotency.NamespacedLockKey(linkedMonitoringInstanceCreateOperation, key)
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext($1)::bigint)`, lockKey); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, fmt.Errorf("lock linked monitoring instance create receipt: %w", err)
+	}
+
+	var storedDigest string
+	var monitoringInstanceID string
+	var linkID string
+	err = tx.QueryRow(ctx, `
+		select request_digest, monitoring_instance_id, link_id
+		from vps_monitoring_instance_create_idempotency
+		where idempotency_key = $1`, key).Scan(&storedDigest, &monitoringInstanceID, &linkID)
+	if err == nil {
+		if storedDigest != digest {
+			return monitoringinstances.Record{}, assetlinks.Record{}, false, createidempotency.ErrIdempotencyKeyReused
+		}
+		record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
+			select `+monitoringInstanceSelectColumns+`
+			from monitoring_instances
+			where monitoring_instance_id = $1`, monitoringInstanceID))
+		if err != nil {
+			return monitoringinstances.Record{}, assetlinks.Record{}, false, fmt.Errorf("load replayed monitoring instance: %w", err)
+		}
+		link, err := scanVPSMonitoringInstanceLink(tx.QueryRow(ctx, `
+			select `+vpsMonitoringInstanceLinkSelectColumns+`
+			from vps_monitoring_instance_links
+			where link_id = $1
+			  and vps_id = $2
+			  and monitoring_instance_id = $3`, linkID, vpsID, monitoringInstanceID))
+		if err != nil {
+			return monitoringinstances.Record{}, assetlinks.Record{}, false, fmt.Errorf("load replayed monitoring instance link: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return monitoringinstances.Record{}, assetlinks.Record{}, false, fmt.Errorf("commit linked monitoring instance create replay: %w", err)
+		}
+		return record, link, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, fmt.Errorf("lookup linked monitoring instance create receipt: %w", err)
+	}
+
+	defaults, err := loadLinkedMonitoringInstanceVPSDefaults(ctx, tx, vpsID)
+	if err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
+	}
+	input, linkNote := deriveLinkedMonitoringInstanceCreateInput(vpsID, wireIdentity, defaults)
+	input = monitoringinstances.NormalizeCreateInput(input)
+	if err := monitoringinstances.ValidateCreateInput(input); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
+	}
+	if err := monitoringinstances.ValidateCreateInputMetadata(input); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
+	}
+	if err := rejectActiveMonitoringLink(ctx, tx, vpsID); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
+	}
+	record, link, err := insertLinkedMonitoringInstanceRows(ctx, tx, vpsID, input, linkNote)
+	if err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into vps_monitoring_instance_create_idempotency (
+			idempotency_key,
+			request_digest,
+			monitoring_instance_id,
+			link_id
+		) values ($1, $2, $3, $4)`, key, digest, record.MonitoringInstanceID, link.LinkID); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, fmt.Errorf("record linked monitoring instance create receipt: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, fmt.Errorf("commit linked monitoring instance create: %w", err)
+	}
+	return record, link, false, nil
+}
+
+func linkedMonitoringInstanceCreateDigest(vpsID string, input monitoringinstances.LinkedCreateWireIdentity) (string, error) {
+	return createidempotency.DigestNormalizedRequest(struct {
+		VPSID string                                       `json:"vps_id"`
+		Input monitoringinstances.LinkedCreateWireIdentity `json:"input"`
+	}{VPSID: vpsID, Input: input})
+}
+
+type linkedMonitoringInstanceVPSDefaults struct {
+	VPSID        string
+	DisplayName  string
+	Region       string
+	Country      string
+	City         string
+	Datacenter   string
+	ProviderName string
+	Labels       []string
+	Note         string
+}
+
+func loadLinkedMonitoringInstanceVPSDefaults(ctx context.Context, tx pgx.Tx, vpsID string) (linkedMonitoringInstanceVPSDefaults, error) {
+	var defaults linkedMonitoringInstanceVPSDefaults
+	err := tx.QueryRow(ctx, `
+		select
+			vps_id,
+			display_name,
+			region,
+			country,
+			city,
+			datacenter,
+			provider_name,
+			labels,
+			note
+		from vps_assets
+		where vps_id = $1
+		for update`, vpsID).Scan(
+		&defaults.VPSID,
+		&defaults.DisplayName,
+		&defaults.Region,
+		&defaults.Country,
+		&defaults.City,
+		&defaults.Datacenter,
+		&defaults.ProviderName,
+		&defaults.Labels,
+		&defaults.Note,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return linkedMonitoringInstanceVPSDefaults{}, assetlinks.ErrVPSMonitoringInstanceLinkNotFound
+	}
+	if err != nil {
+		return linkedMonitoringInstanceVPSDefaults{}, fmt.Errorf("load locked vps defaults for linked monitoring instance: %w", err)
+	}
+	return defaults, nil
+}
+
+func deriveLinkedMonitoringInstanceCreateInput(
+	vpsID string,
+	wire monitoringinstances.LinkedCreateWireIdentity,
+	defaults linkedMonitoringInstanceVPSDefaults,
+) (monitoringinstances.CreateInput, string) {
+	labels := wire.Labels
+	if len(labels) == 0 {
+		labels = defaults.Labels
+	}
+	linkNote := wire.LinkNote
+	if linkNote == "" {
+		linkNote = "created from vps detail"
+	}
+	return monitoringinstances.CreateInput{
+		DisplayName:     firstLinkedMonitoringNonEmpty(wire.DisplayName, defaults.DisplayName, vpsID),
+		Group:           wire.Group,
+		Region:          firstLinkedMonitoringNonEmpty(wire.Region, defaults.Region, defaults.Country, "未确认"),
+		City:            firstLinkedMonitoringNonEmpty(wire.City, defaults.City, defaults.Datacenter, "未确认"),
+		Provider:        firstLinkedMonitoringNonEmpty(wire.Provider, defaults.ProviderName, "未关联服务商"),
+		LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment,
+		Labels:          labels,
+		Note:            firstLinkedMonitoringNonEmpty(wire.Note, defaults.Note),
+	}, linkNote
+}
+
+func firstLinkedMonitoringNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func insertLinkedMonitoringInstance(
+	ctx context.Context,
+	tx pgx.Tx,
+	vpsID string,
+	input monitoringinstances.CreateInput,
+	linkNote string,
+) (monitoringinstances.Record, assetlinks.Record, error) {
 	if err := lockVPSAndRejectActiveMonitoringLink(ctx, tx, vpsID); err != nil {
 		return monitoringinstances.Record{}, assetlinks.Record{}, err
 	}
+	return insertLinkedMonitoringInstanceRows(ctx, tx, vpsID, input, linkNote)
+}
+
+func insertLinkedMonitoringInstanceRows(
+	ctx context.Context,
+	tx pgx.Tx,
+	vpsID string,
+	input monitoringinstances.CreateInput,
+	linkNote string,
+) (monitoringinstances.Record, assetlinks.Record, error) {
 
 	monitoringInstanceID, err := ids.New("mi")
 	if err != nil {
@@ -1067,9 +1290,6 @@ func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstance(ct
 		return monitoringinstances.Record{}, assetlinks.Record{}, mapVPSMonitoringInstanceLinkWriteError(err, "create linked monitoring instance for vps %q", vpsID)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("commit linked monitoring instance transaction for vps %q: %w", vpsID, err)
-	}
 	return record, link, nil
 }
 

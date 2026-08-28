@@ -301,6 +301,58 @@ function LocationProbe() {
   )
 }
 
+function createConfirmedCreateRefreshFailureFetch({
+  createPath,
+  createdBody,
+  failingRefreshPath,
+  initialServices = [],
+  initialDomains = [],
+}: {
+  createPath: string
+  createdBody: unknown
+  failingRefreshPath: string
+  initialServices?: unknown[]
+  initialDomains?: unknown[]
+}) {
+  const detailBody = {
+    ...vpsDetailBody,
+    renewal_decision: 'keep',
+    active_monitoring_instance_link_count: 0,
+    monitoring_instance_links: [],
+  }
+  const getCounts = new Map<string, number>()
+  let createCount = 0
+
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (url === createPath && method === 'POST') {
+      createCount += 1
+      return mockJSONResponse(createdBody, 201)
+    }
+    if (url === '/api/targets' && method === 'GET') return mockJSONResponse([targetBody])
+    if (url.startsWith('/api/subscriptions') && method === 'GET') return mockJSONResponse([])
+
+    const responseByPath = new Map<string, unknown>([
+      ['/api/vps/vps_001', detailBody],
+      ['/api/vps/vps_001/timeline', timelineEmptyBody],
+      ['/api/vps/vps_001/services', initialServices],
+      ['/api/vps/vps_001/domains', initialDomains],
+    ])
+    if (method === 'GET' && responseByPath.has(url)) {
+      const count = (getCounts.get(url) ?? 0) + 1
+      getCounts.set(url, count)
+      if (url === failingRefreshPath && count > 1) {
+        throw new Error('authoritative refresh unavailable')
+      }
+      return mockJSONResponse(responseByPath.get(url))
+    }
+    throw new Error(`unexpected fetch ${method} ${url}`)
+  })
+
+  return { fetchMock, getCreateCount: () => createCount }
+}
+
 describe('LegacyVPSDetail', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -1363,6 +1415,7 @@ describe('LegacyVPSDetail', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Idempotency-Key': expect.any(String),
       },
       cache: 'no-store',
       credentials: 'include',
@@ -1382,6 +1435,53 @@ describe('LegacyVPSDetail', () => {
       cache: 'no-store',
       credentials: 'include',
     })
+  })
+
+  it('preserves a confirmed monitoring create when the authoritative VPS refresh fails', async () => {
+    const createdMonitoringInstance = {
+      monitoring_instance_id: 'mi_confirmed_001',
+      display_name: 'Tokyo Edge',
+      link: {
+        link_id: 'vnl_confirmed_001',
+        vps_id: 'vps_001',
+        monitoring_instance_id: 'mi_confirmed_001',
+      },
+    }
+    const { fetchMock, getCreateCount } = createConfirmedCreateRefreshFailureFetch({
+      createPath: '/api/vps/vps_001/monitoring-instances',
+      createdBody: createdMonitoringInstance,
+      failingRefreshPath: '/api/vps/vps_001',
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          <Route path="/monitoring/:monitoringInstanceId" element={<div>confirmed monitoring onboarding</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('heading', { name: 'Tokyo Edge' })
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '接入/升级 agent' }), 'agent onboarding command'))
+    const drawer = screen.getByRole('dialog', { name: '接入/升级 agent' })
+    fireEvent.click(within(drawer).getByRole('button', { name: '接入/升级 agent' }))
+
+    const warning = await screen.findByText(/监控实例已创建并关联，但权威状态刷新失败/)
+    expect(warning).toHaveTextContent('authoritative refresh unavailable')
+    expect(screen.queryByRole('dialog', { name: '接入/升级 agent' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/创建监控实例失败/)).not.toBeInTheDocument()
+    const continueLink = screen.getByRole('link', { name: '继续接入 agent' })
+    expect(continueLink).toHaveAttribute(
+      'href',
+      '/monitoring/mi_confirmed_001?onboarding=1&return_vps=vps_001',
+    )
+    expect(getCreateCount()).toBe(1)
+
+    fireEvent.click(continueLink)
+    expect(await screen.findByText('confirmed monitoring onboarding')).toBeInTheDocument()
+    expect(getCreateCount()).toBe(1)
   })
 
   it('upgrades through the existing active monitoring instance instead of creating another one', async () => {
@@ -2294,6 +2394,7 @@ describe('LegacyVPSDetail', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Idempotency-Key': expect.any(String),
       },
       cache: 'no-store',
       credentials: 'include',
@@ -2325,6 +2426,50 @@ describe('LegacyVPSDetail', () => {
       cache: 'no-store',
       credentials: 'include',
     })
+  })
+
+  it('keeps a confirmed experience log and closes its form when authoritative refresh fails', async () => {
+    const createdExperience = {
+      experience_log_id: 'elog_confirmed_001',
+      vps_id: 'vps_001',
+      category: 'network',
+      severity: 'warning',
+      summary: '确认写入的经验',
+      details: 'confirmed experience details',
+      occurred_at: '2026-05-10T09:30:00.000Z',
+      created_at: '2026-05-10T09:31:00Z',
+    }
+    const { fetchMock, getCreateCount } = createConfirmedCreateRefreshFailureFetch({
+      createPath: '/api/vps/vps_001/experience-logs',
+      createdBody: createdExperience,
+      failingRefreshPath: '/api/vps/vps_001',
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('heading', { name: 'Tokyo Edge' })
+    clickVPSAction('记录经验')
+    const drawer = screen.getByRole('dialog', { name: '记录经验' })
+    fireEvent.change(within(drawer).getByLabelText('分类'), { target: { value: 'network' } })
+    fireEvent.change(within(drawer).getByLabelText('级别'), { target: { value: 'warning' } })
+    fireEvent.change(within(drawer).getByLabelText('摘要'), { target: { value: '确认写入的经验' } })
+    fireEvent.change(within(drawer).getByLabelText('发生时间'), { target: { value: '2026-05-10T09:30' } })
+    fireEvent.change(within(drawer).getByLabelText('详情'), { target: { value: 'confirmed experience details' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '写入经验记录' }))
+
+    const warning = await screen.findByText(/经验记录已创建，但权威状态刷新失败/)
+    expect(warning).toHaveTextContent('authoritative refresh unavailable')
+    expect(screen.queryByRole('dialog', { name: '记录经验' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/创建经验记录失败/)).not.toBeInTheDocument()
+    expect(screen.getAllByText(/确认写入的经验/).length).toBeGreaterThan(0)
+    expect(getCreateCount()).toBe(1)
   })
 
   it.each(['archived', 'cancelled'] as const)('redirects %s VPS detail requests to archive detail', async (lifecycleStatus) => {
@@ -3852,6 +3997,7 @@ describe('LegacyVPSDetail', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Idempotency-Key': expect.any(String),
       },
       cache: 'no-store',
       credentials: 'include',
@@ -3871,6 +4017,43 @@ describe('LegacyVPSDetail', () => {
       cache: 'no-store',
       credentials: 'include',
     })
+  })
+
+  it('keeps a confirmed service and closes its form when authoritative refresh fails', async () => {
+    const createdService = {
+      ...serviceBody,
+      service_id: 'svc_confirmed_001',
+      name: 'Confirmed Service',
+      url: 'https://confirmed.example.com',
+    }
+    const { fetchMock, getCreateCount } = createConfirmedCreateRefreshFailureFetch({
+      createPath: '/api/vps/vps_001/services',
+      createdBody: createdService,
+      failingRefreshPath: '/api/vps/vps_001/services',
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('heading', { name: 'Tokyo Edge' })
+    clickVPSAction('新增服务')
+    const drawer = screen.getByRole('dialog', { name: '新增服务' })
+    fireEvent.change(within(drawer).getByLabelText('服务名称'), { target: { value: 'Confirmed Service' } })
+    fireEvent.change(within(drawer).getByLabelText('入口 URL'), { target: { value: 'https://confirmed.example.com' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '创建服务记录' }))
+
+    const warning = await screen.findByText(/服务记录已创建，但权威状态刷新失败/)
+    expect(warning).toHaveTextContent('authoritative refresh unavailable')
+    expect(screen.queryByRole('dialog', { name: '新增服务' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/创建服务记录失败/)).not.toBeInTheDocument()
+    expect(screen.getAllByText('Confirmed Service').length).toBeGreaterThan(0)
+    expect(getCreateCount()).toBe(1)
   })
 
   it('shows a service-local validation error before creating services', async () => {
@@ -4028,6 +4211,7 @@ describe('LegacyVPSDetail', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Idempotency-Key': expect.any(String),
       },
       cache: 'no-store',
       credentials: 'include',
@@ -4050,6 +4234,43 @@ describe('LegacyVPSDetail', () => {
       cache: 'no-store',
       credentials: 'include',
     })
+  })
+
+  it('keeps a confirmed domain and closes its form when authoritative refresh fails', async () => {
+    const createdDomain = {
+      ...domainBody,
+      domain_id: 'dom_confirmed_001',
+      service_id: null,
+      target_id: null,
+      domain_name: 'confirmed.example.com',
+    }
+    const { fetchMock, getCreateCount } = createConfirmedCreateRefreshFailureFetch({
+      createPath: '/api/vps/vps_001/domains',
+      createdBody: createdDomain,
+      failingRefreshPath: '/api/vps/vps_001/domains',
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('heading', { name: 'Tokyo Edge' })
+    clickVPSAction('新增域名')
+    const drawer = screen.getByRole('dialog', { name: '新增域名' })
+    fireEvent.change(within(drawer).getByLabelText('域名'), { target: { value: 'confirmed.example.com' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '创建域名记录' }))
+
+    const warning = await screen.findByText(/域名记录已创建，但权威状态刷新失败/)
+    expect(warning).toHaveTextContent('authoritative refresh unavailable')
+    expect(screen.queryByRole('dialog', { name: '新增域名' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/创建域名记录失败/)).not.toBeInTheDocument()
+    expect(screen.getAllByText('confirmed.example.com').length).toBeGreaterThan(0)
+    expect(getCreateCount()).toBe(1)
   })
 
   it('shows a domain-local validation error before creating domains', async () => {

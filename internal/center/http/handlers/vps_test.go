@@ -32,6 +32,7 @@ type fakeVPSAssetRepository struct {
 	getVPSAssetResult    vpsassets.Record
 	getVPSAssetErr       error
 	getVPSAssetID        string
+	getVPSAssetCalls     int
 	createVPSAssetResult vpsassets.Record
 	createVPSAssetErr    error
 	createVPSAssetInput  vpsassets.CreateInput
@@ -47,6 +48,7 @@ func (f *fakeVPSAssetRepository) ListVPSAssets(_ context.Context, filters vpsass
 }
 
 func (f *fakeVPSAssetRepository) GetVPSAsset(_ context.Context, vpsID string) (vpsassets.Record, error) {
+	f.getVPSAssetCalls++
 	f.getVPSAssetID = vpsID
 	if f.getVPSAssetErr != nil {
 		return vpsassets.Record{}, f.getVPSAssetErr
@@ -119,9 +121,17 @@ type fakeRenewalTimelineRepository struct {
 	createLogResult      renewals.ExperienceLogRecord
 	createLogErr         error
 	createLogInput       renewals.CreateExperienceLogInput
+	createLogCalls       int
+	idempotentLogCalls   int
+	idempotentLogKey     string
+	createLogReplayed    bool
 	listLogsResult       []renewals.ExperienceLogRecord
 	listLogsErr          error
 	listLogsRequestedVPS string
+}
+
+type statefulExperienceLogRepository struct {
+	creates testIdempotentCreateState[renewals.ExperienceLogRecord]
 }
 
 func (f *fakeRenewalTimelineRepository) GetVPSTimeline(_ context.Context, vpsID string) (renewals.VPSTimeline, error) {
@@ -133,11 +143,22 @@ func (f *fakeRenewalTimelineRepository) GetVPSTimeline(_ context.Context, vpsID 
 }
 
 func (f *fakeRenewalTimelineRepository) CreateExperienceLog(_ context.Context, input renewals.CreateExperienceLogInput) (renewals.ExperienceLogRecord, error) {
+	f.createLogCalls++
 	f.createLogInput = input
 	if f.createLogErr != nil {
 		return renewals.ExperienceLogRecord{}, f.createLogErr
 	}
 	return f.createLogResult, nil
+}
+
+func (f *fakeRenewalTimelineRepository) CreateExperienceLogIdempotent(_ context.Context, input renewals.CreateExperienceLogInput, key string) (renewals.ExperienceLogRecord, bool, error) {
+	f.idempotentLogCalls++
+	f.createLogInput = input
+	f.idempotentLogKey = key
+	if f.createLogErr != nil {
+		return renewals.ExperienceLogRecord{}, false, f.createLogErr
+	}
+	return f.createLogResult, f.createLogReplayed, nil
 }
 
 func (f *fakeRenewalTimelineRepository) ListExperienceLogsForVPS(_ context.Context, vpsID string) ([]renewals.ExperienceLogRecord, error) {
@@ -146,6 +167,32 @@ func (f *fakeRenewalTimelineRepository) ListExperienceLogsForVPS(_ context.Conte
 		return nil, f.listLogsErr
 	}
 	return f.listLogsResult, nil
+}
+
+func (r *statefulExperienceLogRepository) ListExperienceLogsForVPS(context.Context, string) ([]renewals.ExperienceLogRecord, error) {
+	return nil, nil
+}
+
+func (r *statefulExperienceLogRepository) CreateExperienceLogIdempotent(_ context.Context, input renewals.CreateExperienceLogInput, key string) (renewals.ExperienceLogRecord, bool, error) {
+	identity := struct {
+		VPSID string
+		Input renewals.CreateExperienceLogInput
+	}{VPSID: input.VPSID, Input: input}
+	return r.creates.create(key, identity, func() renewals.ExperienceLogRecord {
+		var occurredAt time.Time
+		if input.OccurredAt != nil {
+			occurredAt = *input.OccurredAt
+		}
+		return renewals.ExperienceLogRecord{
+			ExperienceLogID: "elog_sequence_001",
+			VPSID:           input.VPSID,
+			Category:        input.Category,
+			Severity:        input.Severity,
+			Summary:         input.Summary,
+			Details:         input.Details,
+			OccurredAt:      occurredAt,
+		}
+	})
 }
 
 func TestVPSCollectionListsAssetsWithFilters(t *testing.T) {
@@ -1033,17 +1080,17 @@ func TestVPSExperienceLogsListsAndCreates(t *testing.T) {
 	listRecorder := httptest.NewRecorder()
 	handlers.VPSExperienceLogs(repo).ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/experience-logs", nil))
 	if listRecorder.Code != http.StatusOK {
-		t.Fatalf("list status = %d, want %d; body=%s", listRecorder.Code, http.StatusOK, listRecorder.Body.String())
+		t.Fatalf("list status = %d, want %d", listRecorder.Code, http.StatusOK)
 	}
 	if repo.listLogsRequestedVPS != "vps_001" {
-		t.Fatalf("list vps id = %q, want vps_001", repo.listLogsRequestedVPS)
+		t.Fatalf("list VPS ID matches = %t", repo.listLogsRequestedVPS == "vps_001")
 	}
 	var listBody []renewals.ExperienceLogRecord
 	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listBody); err != nil {
-		t.Fatalf("unmarshal list response: %v", err)
+		t.Fatalf("unmarshal list response error type = %T", err)
 	}
 	if len(listBody) != 1 || listBody[0].ExperienceLogID != "elog_001" {
-		t.Fatalf("list body = %#v, want one experience log", listBody)
+		t.Fatalf("list response count/ID matches = %d/%t", len(listBody), len(listBody) == 1 && listBody[0].ExperienceLogID == "elog_001")
 	}
 
 	createRecorder := httptest.NewRecorder()
@@ -1054,9 +1101,10 @@ func TestVPSExperienceLogsListsAndCreates(t *testing.T) {
 		"details":" new ticket was answered quickly ",
 		"occurred_at":"2026-05-10T09:30:00Z"
 	}`))
+	createReq.Header.Set("Idempotency-Key", "experience-create-001")
 	handlers.VPSExperienceLogs(repo).ServeHTTP(createRecorder, createReq)
 	if createRecorder.Code != http.StatusCreated {
-		t.Fatalf("create status = %d, want %d; body=%s", createRecorder.Code, http.StatusCreated, createRecorder.Body.String())
+		t.Fatalf("create status = %d, want %d", createRecorder.Code, http.StatusCreated)
 	}
 	if repo.createLogInput.VPSID != "vps_001" ||
 		repo.createLogInput.Category != renewals.ExperienceSupport ||
@@ -1064,15 +1112,187 @@ func TestVPSExperienceLogsListsAndCreates(t *testing.T) {
 		repo.createLogInput.Summary != "support response improved" ||
 		repo.createLogInput.Details != "new ticket was answered quickly" ||
 		repo.createLogInput.OccurredAt == nil {
-		t.Fatalf("create input = %#v, want normalized experience log input", repo.createLogInput)
+		t.Fatal("create input did not match normalized experience log fields")
 	}
 	var createBody renewals.ExperienceLogRecord
 	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createBody); err != nil {
-		t.Fatalf("unmarshal create response: %v", err)
+		t.Fatalf("unmarshal create response error type = %T", err)
 	}
 	if createBody.ExperienceLogID != "elog_002" {
-		t.Fatalf("create body = %#v, want created experience log", createBody)
+		t.Fatalf("created experience log ID = %q, want stable ID", createBody.ExperienceLogID)
 	}
+	if repo.createLogCalls != 0 || repo.idempotentLogCalls != 1 || repo.idempotentLogKey != "experience-create-001" {
+		t.Fatalf("create calls = legacy:%d idempotent:%d, want one idempotent call", repo.createLogCalls, repo.idempotentLogCalls)
+	}
+}
+
+func TestVPSExperienceLogsRequiresSingleValidIdempotencyKeyBeforeCreate(t *testing.T) {
+	tests := []struct {
+		name string
+		keys []string
+	}{
+		{name: "missing"},
+		{name: "empty", keys: []string{""}},
+		{name: "multiple", keys: []string{"experience-key-001", "experience-key-002"}},
+		{name: "comma joined multiple", keys: []string{"experience-key-001,experience-key-002"}},
+		{name: "too short", keys: []string{"short"}},
+		{name: "too long", keys: []string{strings.Repeat("a", 129)}},
+		{name: "invalid characters", keys: []string{"private/key"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRenewalTimelineRepository{}
+			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/experience-logs", strings.NewReader(`{"category":"network","severity":"warning","summary":"packet loss"}`))
+			for _, key := range tt.keys {
+				req.Header.Add("Idempotency-Key", key)
+			}
+			recorder := httptest.NewRecorder()
+
+			handlers.VPSExperienceLogs(repo).ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal error body error type = %T", err)
+			}
+			if body["code"] != "invalid_idempotency_key" {
+				t.Fatalf("code = %q, want invalid_idempotency_key", body["code"])
+			}
+			if strings.Contains(recorder.Body.String(), "private/key") {
+				t.Fatal("response disclosed rejected idempotency key")
+			}
+			if repo.createLogCalls != 0 || repo.idempotentLogCalls != 0 {
+				t.Fatalf("create calls = legacy:%d idempotent:%d, want zero", repo.createLogCalls, repo.idempotentLogCalls)
+			}
+		})
+	}
+}
+
+func TestVPSExperienceLogsValidatesBodyBeforeIdempotencyKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantError string
+	}{
+		{name: "invalid json", body: `{"category":`, wantError: "invalid json"},
+		{name: "invalid input", body: `{"category":"network","severity":"warning","summary":" "}`, wantError: "invalid input"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRenewalTimelineRepository{}
+			recorder := httptest.NewRecorder()
+			handlers.VPSExperienceLogs(repo).ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/experience-logs", strings.NewReader(tt.body)))
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal error body error type = %T", err)
+			}
+			if body["error"] != tt.wantError || body["code"] != "" {
+				t.Fatalf("error/code matches = %t/%t", body["error"] == tt.wantError, body["code"] == "")
+			}
+			if repo.createLogCalls != 0 || repo.idempotentLogCalls != 0 {
+				t.Fatalf("create calls = legacy:%d idempotent:%d, want zero", repo.createLogCalls, repo.idempotentLogCalls)
+			}
+		})
+	}
+}
+
+func TestVPSExperienceLogsMapsIdempotentCreateOutcomes(t *testing.T) {
+	tests := []struct {
+		name       string
+		replayed   bool
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "first create", wantStatus: http.StatusCreated},
+		{name: "replay", replayed: true, wantStatus: http.StatusOK},
+		{name: "reused key", err: renewals.ErrIdempotencyKeyReused, wantStatus: http.StatusConflict, wantCode: "idempotency_key_reused"},
+		{name: "repository rejects key", err: renewals.ErrInvalidIdempotencyKey, wantStatus: http.StatusBadRequest, wantCode: "invalid_idempotency_key"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRenewalTimelineRepository{
+				createLogResult:   renewals.ExperienceLogRecord{ExperienceLogID: "elog_stable", VPSID: "vps_001", Summary: "packet loss"},
+				createLogErr:      tt.err,
+				createLogReplayed: tt.replayed,
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/experience-logs", strings.NewReader(`{"category":"network","severity":"warning","summary":"packet loss"}`))
+			req.Header.Set("Idempotency-Key", "experience-outcome-001")
+			recorder := httptest.NewRecorder()
+
+			handlers.VPSExperienceLogs(repo).ServeHTTP(recorder, req)
+
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
+			}
+			if repo.createLogCalls != 0 || repo.idempotentLogCalls != 1 {
+				t.Fatalf("create calls = legacy:%d idempotent:%d, want one idempotent call", repo.createLogCalls, repo.idempotentLogCalls)
+			}
+			if tt.wantCode != "" {
+				var body map[string]string
+				if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+					t.Fatalf("unmarshal error body error type = %T", err)
+				}
+				if body["code"] != tt.wantCode {
+					t.Fatalf("code = %q, want %q", body["code"], tt.wantCode)
+				}
+				return
+			}
+			var body renewals.ExperienceLogRecord
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal response error type = %T", err)
+			}
+			if body.ExperienceLogID != "elog_stable" {
+				t.Fatalf("experience_log_id = %q, want stable replay DTO", body.ExperienceLogID)
+			}
+		})
+	}
+}
+
+func TestVPSExperienceLogsSequentialIdempotentCreateContract(t *testing.T) {
+	repo := &statefulExperienceLogRepository{}
+	handler := handlers.VPSExperienceLogs(repo)
+	const path = "/api/vps/vps_sequence/experience-logs"
+	const key = "experience-sequence-001"
+
+	first := serveTestIdempotentCreate(handler, path, `{"category":" network ","severity":" warning ","summary":" Packet loss ","details":" Investigating "}`, key)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first status = %d, want %d", first.Code, http.StatusCreated)
+	}
+	firstRecord := decodeTestResponse[renewals.ExperienceLogRecord](t, first)
+	if firstRecord.ExperienceLogID != "elog_sequence_001" || firstRecord.VPSID != "vps_sequence" {
+		t.Fatal("first response did not contain the materialized experience-log identity")
+	}
+	assertTestIdempotentCreateCounts(t, &repo.creates, 1, 1)
+
+	replay := serveTestIdempotentCreate(handler, path, `{"category":"network","severity":"warning","summary":"Packet loss","details":"Investigating"}`, key)
+	if replay.Code != http.StatusOK {
+		t.Fatalf("replay status = %d, want %d", replay.Code, http.StatusOK)
+	}
+	replayRecord := decodeTestResponse[renewals.ExperienceLogRecord](t, replay)
+	if replayRecord.ExperienceLogID != firstRecord.ExperienceLogID {
+		t.Fatal("replay did not return the original experience-log identity")
+	}
+	assertTestIdempotentCreateCounts(t, &repo.creates, 2, 1)
+
+	reused := serveTestIdempotentCreate(handler, path, `{"category":"network","severity":"warning","summary":"Packet loss changed","details":"Investigating"}`, key)
+	if reused.Code != http.StatusConflict {
+		t.Fatalf("reused-key status = %d, want %d", reused.Code, http.StatusConflict)
+	}
+	reusedError := decodeTestResponse[map[string]string](t, reused)
+	if reusedError["code"] != "idempotency_key_reused" {
+		t.Fatalf("reused-key code = %q, want idempotency_key_reused", reusedError["code"])
+	}
+	assertTestIdempotentCreateCounts(t, &repo.creates, 3, 1)
 }
 
 func TestVPSExperienceLogsMapsErrorsAndMethods(t *testing.T) {
@@ -1098,12 +1318,15 @@ func TestVPSExperienceLogsMapsErrorsAndMethods(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			if tt.method == http.MethodPost {
+				req.Header.Set("Idempotency-Key", "experience-error-001")
+			}
 			recorder := httptest.NewRecorder()
 
 			handlers.VPSExperienceLogs(tt.repo).ServeHTTP(recorder, req)
 
 			if recorder.Code != tt.want {
-				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, tt.want, recorder.Body.String())
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.want)
 			}
 		})
 	}

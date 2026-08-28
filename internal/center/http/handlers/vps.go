@@ -26,6 +26,11 @@ type vpsIPQualitySummaryRepository interface {
 	ListLatestSummariesForVPS(context.Context, []string) (map[string]ipquality.Summary, error)
 }
 
+type vpsExperienceLogRepository interface {
+	ListExperienceLogsForVPS(context.Context, string) ([]renewals.ExperienceLogRecord, error)
+	renewals.IdempotentExperienceLogRepository
+}
+
 type vpsPatchResponse struct {
 	vpsassets.Record
 	RenewalSubscriptionLinkage *vpsassets.RenewalSubscriptionLinkage `json:"renewal_subscription_linkage,omitempty"`
@@ -377,7 +382,7 @@ func VPSTimeline(repo renewals.TimelineRepository) http.Handler {
 	})
 }
 
-func VPSExperienceLogs(repo renewals.ExperienceLogRepository) http.Handler {
+func VPSExperienceLogs(repo vpsExperienceLogRepository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "experience-logs")
 		if !ok {
@@ -415,7 +420,16 @@ func VPSExperienceLogs(repo renewals.ExperienceLogRepository) http.Handler {
 				return
 			}
 
-			record, err := repo.CreateExperienceLog(r.Context(), input)
+			key, ok := requestCreateIdempotencyKey(r)
+			if !ok {
+				writeInvalidCreateIdempotencyKey(w)
+				return
+			}
+
+			record, replayed, err := repo.CreateExperienceLogIdempotent(r.Context(), input, key)
+			if writeCreateIdempotencyError(w, err) {
+				return
+			}
 			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return
@@ -428,7 +442,7 @@ func VPSExperienceLogs(repo renewals.ExperienceLogRepository) http.Handler {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
 			}
-			writeJSON(w, http.StatusCreated, record)
+			writeJSON(w, idempotentCreateStatus(replayed), record)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}

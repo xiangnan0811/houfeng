@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
+import { MemoryRouter, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { AppShell } from '../app/layout/AppShell'
+import * as authCtx from '../lib/auth-context'
 import * as recordsApi from '../lib/recordsApi'
 import type { SubscriptionRecord, VPSAssetDetail, VPSOverview } from '../lib/types'
 import { VPSDetailPage } from './VPSDetailPage'
@@ -130,6 +132,42 @@ function NavigationHarness() {
   )
 }
 
+const authenticatedUser = { user_id: 'u1', username: 'admin', role: 'admin', display_name: '' }
+
+function installAuthenticatedUser() {
+  vi.spyOn(authCtx, 'useAuth').mockReturnValue({
+    user: authenticatedUser,
+    loading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refresh: vi.fn(),
+  })
+}
+
+function AppShellNavigationLayout() {
+  const navigate = useNavigate()
+  return (
+    <>
+      <button type="button" onClick={() => navigate('/dashboard')}>前往工作台</button>
+      <button type="button" onClick={() => navigate('/vps/vps_a')}>返回同一 VPS</button>
+      <Outlet />
+    </>
+  )
+}
+
+function DashboardNavigationHarness() {
+  return (
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route element={<AppShellNavigationLayout />}>
+          <Route path="vps/:vpsId" element={<VPSDetailPage />} />
+          <Route path="dashboard" element={<h1>工作台测试页</h1>} />
+        </Route>
+      </Route>
+    </Routes>
+  )
+}
+
 function openSubscriptionDrawer() {
   const command = screen.getAllByRole('button', { name: '创建/更新订阅' })[0]
   if (!command) throw new Error('subscription command must be present')
@@ -137,7 +175,18 @@ function openSubscriptionDrawer() {
   return screen.getByRole('dialog', { name: '创建/更新订阅' })
 }
 
-function installSingleVPSSubscriptionHarness() {
+function openLegacyActionDrawer(commandName: string, dialogName: string) {
+  const summary = screen.getAllByLabelText('VPS 详情操作')[0]
+  const menu = summary?.closest('details')
+  if (!summary || !menu) throw new Error('legacy VPS actions menu must be present')
+  if (!menu.hasAttribute('open')) fireEvent.click(summary)
+  fireEvent.click(within(menu).getByRole('button', { name: commandName }))
+  return screen.getByRole('dialog', { name: dialogName })
+}
+
+function installSingleVPSSubscriptionHarness(
+  overviewFor: (vpsId: string) => VPSOverview = (vpsId) => capabilityOffOverview(vpsId, 'Tokyo Edge A'),
+) {
   const delayedSubscription = deferred<Response>()
   const initialDetail = detailFixture('vps_a', 'Tokyo Edge A')
   const settledDetail = {
@@ -151,12 +200,55 @@ function installSingleVPSSubscriptionHarness() {
   let detailGets = 0
 
   const getOverview = vi.spyOn(recordsApi, 'getVPSOverview').mockImplementation((vpsId) => {
-    if (vpsId === 'vps_a') return Promise.resolve(capabilityOffOverview('vps_a', 'Tokyo Edge A'))
+    if (vpsId === 'vps_a') return Promise.resolve(overviewFor(vpsId))
     throw new Error(`unexpected overview ${vpsId}`)
   })
   vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const method = (init?.method ?? 'GET').toUpperCase()
+    if (url === '/api/dashboard' && method === 'GET') {
+      return Promise.resolve(mockJSONResponse({
+        snapshot_generated_at: '2026-08-28T00:00:00Z',
+        total_monitoring_instance_count: 0,
+        total_target_count: 0,
+        abnormal_monitoring_instance_count: 0,
+        abnormal_target_count: 0,
+        severe_monitoring_instance_count: 0,
+        severe_target_count: 0,
+        maintenance_monitoring_instance_count: 0,
+        maintenance_target_count: 0,
+        pending_onboarding_monitoring_instance_count: 0,
+        paused_monitoring_instance_count: 0,
+        retired_monitoring_instance_count: 0,
+        paused_target_count: 0,
+        archived_target_count: 0,
+        recent_new_incident_count: 0,
+        recent_recovery_count: 0,
+        group_summaries: [],
+        notification_status: {
+          telegram_configured: false,
+          telegram_runtime_managed: false,
+          telegram_runtime_apply_active: false,
+          feishu_configured: false,
+        },
+        asset_summary: {
+          renewal_due_30d_subscription_count: 0,
+          renewal_due_30d_vps_count: 0,
+          unreviewed_vps_count: 0,
+          to_cancel_vps_count: 0,
+          to_migrate_vps_count: 0,
+          unlinked_vps_count: 0,
+          abnormal_linked_vps_count: 0,
+          cost_by_currency: [],
+        },
+        recent_events: [],
+        abnormal_monitoring_instances: [],
+        abnormal_targets: [],
+      }))
+    }
+    if (url === '/api/record-notifications/unread-count' && method === 'GET') {
+      return Promise.resolve(mockJSONResponse({ unread_count: 0 }))
+    }
     if (url === '/api/vps/vps_a' && method === 'GET') {
       detailGets += 1
       return Promise.resolve(mockJSONResponse(writeSettled ? settledDetail : initialDetail))
@@ -289,6 +381,132 @@ describe('VPSDetailPage legacy write ownership', () => {
     expect(screen.queryByText('缺少当前订阅')).not.toBeInTheDocument()
     expect(harness.getOverview).toHaveBeenCalledTimes(1)
     expect(harness.getDetailGets()).toBe(1)
+  })
+
+  it('blocks a second same-VPS POST after visiting Dashboard and reloads when the old view settles', async () => {
+    installAuthenticatedUser()
+    const harness = installSingleVPSSubscriptionHarness()
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <DashboardNavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('heading', { name: 'Tokyo Edge A' })
+    const initialDrawer = openSubscriptionDrawer()
+    fireEvent.change(within(initialDrawer).getByLabelText('价格'), { target: { value: '12' } })
+    fireEvent.click(within(initialDrawer).getByRole('button', { name: '创建/更新订阅' }))
+    await waitFor(() => expect(harness.idempotencyKeys).toHaveLength(1))
+
+    fireEvent.click(screen.getByRole('button', { name: '前往工作台' }))
+    await screen.findByRole('heading', { name: '工作台测试页' })
+    fireEvent.click(screen.getByRole('button', { name: '返回同一 VPS' }))
+    await screen.findByRole('heading', { name: 'Tokyo Edge A' })
+    expect(screen.getByText('操作处理中，请等待当前写入完成。')).toBeInTheDocument()
+
+    const blockedExperienceDrawer = openLegacyActionDrawer('记录经验', '记录经验')
+    expect(within(blockedExperienceDrawer).getByRole('button', { name: '记录中…' })).toBeDisabled()
+    fireEvent.click(within(blockedExperienceDrawer).getByRole('button', { name: '关闭' }))
+
+    const returnedDrawer = openSubscriptionDrawer()
+    const blockedSave = within(returnedDrawer).getByRole('button', { name: '保存中…' })
+    expect(blockedSave).toBeDisabled()
+    fireEvent.click(blockedSave)
+    expect(harness.idempotencyKeys).toHaveLength(1)
+
+    await act(async () => harness.settle())
+
+    await screen.findByRole('heading', { name: 'Tokyo Edge A converged' })
+    await waitFor(() => expect(harness.getDetailGets()).toBe(3))
+    expect(harness.getOverview).toHaveBeenCalledTimes(3)
+    expect(harness.idempotencyKeys).toHaveLength(1)
+    expect(screen.queryByText('缺少当前订阅')).not.toBeInTheDocument()
+    expect(screen.queryByText('订阅账单事实已创建')).not.toBeInTheDocument()
+  })
+
+  it('blocks Overview when a pending Legacy write owns the same VPS', async () => {
+    installAuthenticatedUser()
+    let overviewEnabled = false
+    const harness = installSingleVPSSubscriptionHarness((vpsId) => ({
+      ...capabilityOffOverview(vpsId, 'Tokyo Edge A'),
+      capabilities: overviewEnabled ? ['records_v2_read'] : [],
+    }))
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <DashboardNavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('heading', { name: 'Tokyo Edge A' })
+    const legacyDrawer = openSubscriptionDrawer()
+    fireEvent.change(within(legacyDrawer).getByLabelText('价格'), { target: { value: '12' } })
+    fireEvent.click(within(legacyDrawer).getByRole('button', { name: '创建/更新订阅' }))
+    await waitFor(() => expect(harness.idempotencyKeys).toHaveLength(1))
+
+    fireEvent.click(screen.getByRole('button', { name: '前往工作台' }))
+    await screen.findByRole('heading', { name: '工作台测试页' })
+    overviewEnabled = true
+    fireEvent.click(screen.getByRole('button', { name: '返回同一 VPS' }))
+
+    await screen.findByRole('button', { name: '管理' })
+    expect(screen.getByText('操作处理中，请等待当前写入完成。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '管理' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
+    const overviewDrawer = await screen.findByRole('dialog', { name: '订阅事实' })
+    const blockedSave = within(overviewDrawer).getByRole('button', { name: '保存中…' })
+    expect(blockedSave).toBeDisabled()
+    fireEvent.click(blockedSave)
+    expect(harness.idempotencyKeys).toHaveLength(1)
+
+    await act(async () => harness.settle())
+
+    await waitFor(() => expect(harness.getOverview).toHaveBeenCalledTimes(3))
+    expect(await screen.findByRole('button', { name: '管理' })).toBeInTheDocument()
+    expect(harness.idempotencyKeys).toHaveLength(1)
+  })
+
+  it('keeps an Overview owner across Dashboard leave/return and reloads the returned view after settle', async () => {
+    installAuthenticatedUser()
+    const harness = installSingleVPSSubscriptionHarness((vpsId) => ({
+      ...capabilityOffOverview(vpsId, 'Tokyo Edge A'),
+      capabilities: ['records_v2_read'],
+    }))
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <DashboardNavigationHarness />
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('button', { name: '管理' })
+    fireEvent.click(screen.getByRole('button', { name: '管理' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
+    const initialDrawer = await screen.findByRole('dialog', { name: '订阅事实' })
+    fireEvent.change(within(initialDrawer).getByLabelText('价格'), { target: { value: '12' } })
+    fireEvent.click(within(initialDrawer).getByRole('button', { name: '创建/更新订阅' }))
+    await waitFor(() => expect(harness.idempotencyKeys).toHaveLength(1))
+
+    fireEvent.click(screen.getByRole('button', { name: '前往工作台' }))
+    await screen.findByRole('heading', { name: '工作台测试页' })
+    fireEvent.click(screen.getByRole('button', { name: '返回同一 VPS' }))
+
+    await screen.findByRole('button', { name: '管理' })
+    expect(screen.getByText('操作处理中，请等待当前写入完成。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '管理' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
+    const returnedDrawer = await screen.findByRole('dialog', { name: '订阅事实' })
+    const blockedSave = within(returnedDrawer).getByRole('button', { name: '保存中…' })
+    expect(blockedSave).toBeDisabled()
+    fireEvent.click(blockedSave)
+    expect(harness.idempotencyKeys).toHaveLength(1)
+
+    await act(async () => harness.settle())
+
+    await waitFor(() => expect(harness.getOverview).toHaveBeenCalledTimes(3))
+    expect(screen.getByRole('button', { name: '管理' })).toBeInTheDocument()
+    expect(harness.idempotencyKeys).toHaveLength(1)
   })
 
   it('revalidates the current VPS after an inherited write owner settles across the production probe gate remount', async () => {

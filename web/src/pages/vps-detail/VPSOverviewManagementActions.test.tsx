@@ -8,6 +8,7 @@ import { ApiError } from '../../lib/apiRequest'
 import type { CancellationPreview, VPSAssetDetail } from '../../lib/types'
 import { useVPSManagementController } from './hooks/useVPSManagementController'
 import { VPSOverviewManagementActions } from './VPSOverviewManagementActions'
+import { createVPSWriteOwnerStore, type VPSWriteOwnerStore } from './vpsWriteOwnerStore'
 
 function detailFixture(vpsId: string, displayName: string): VPSAssetDetail {
   return {
@@ -66,7 +67,15 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function Harness({ onRefresh }: { onRefresh: () => Promise<boolean> }) {
+function Harness({
+  onRefresh,
+  writeOwnerStore,
+  viewToken,
+}: {
+  onRefresh: () => Promise<boolean>
+  writeOwnerStore?: VPSWriteOwnerStore
+  viewToken?: string
+}) {
   const [vpsId, setVpsId] = useState('vps_a')
   const management = useVPSManagementController()
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -84,6 +93,8 @@ function Harness({ onRefresh }: { onRefresh: () => Promise<boolean> }) {
         management={management}
         managementTriggerRef={triggerRef}
         onOverviewRefresh={onRefresh}
+        {...(writeOwnerStore ? { writeOwnerStore } : {})}
+        {...(viewToken ? { viewToken } : {})}
       />
     </>
   )
@@ -152,6 +163,82 @@ describe('VPSOverviewManagementActions', () => {
     expect(update).toHaveBeenCalledTimes(1)
     await act(async () => mutation.resolve(detailFixture('vps_a', '东京边缘已更新')))
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+  })
+
+  it('blocks Overview while a Legacy view owns the same VPS and unblocks only after that exact owner settles', async () => {
+    const registry = createVPSWriteOwnerStore()
+    const legacyOwner = registry.begin({
+      vpsId: 'vps_a',
+      viewToken: 'legacy-view',
+      generation: 1,
+      operation: 'subscription',
+    })
+    expect(legacyOwner).not.toBeNull()
+    if (!legacyOwner) return
+
+    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture('vps_a', '东京边缘'))
+    const create = vi.spyOn(api, 'createVPSSubscription').mockResolvedValue({} as never)
+    const refresh = vi.fn().mockResolvedValue(true)
+
+    render(
+      <MemoryRouter>
+        <Harness
+          onRefresh={refresh}
+          writeOwnerStore={registry}
+          viewToken="overview-view"
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('操作处理中，请等待当前写入完成。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '打开订阅' }))
+    await screen.findByLabelText('价格')
+    const blockedSave = screen.getByRole('button', { name: '保存中…' })
+    expect(blockedSave).toBeDisabled()
+    fireEvent.click(blockedSave)
+    expect(create).not.toHaveBeenCalled()
+
+    act(() => {
+      registry.finish(legacyOwner)
+    })
+    const enabledSave = await screen.findByRole('button', { name: '创建/更新订阅' })
+    expect(enabledSave).toBeEnabled()
+  })
+
+  it('keeps an Overview write owner while the view leaves and returns', async () => {
+    const registry = createVPSWriteOwnerStore()
+    const pendingCreate = deferred<Awaited<ReturnType<typeof api.createVPSSubscription>>>()
+    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture('vps_a', '东京边缘'))
+    const create = vi.spyOn(api, 'createVPSSubscription').mockReturnValue(pendingCreate.promise)
+    const refresh = vi.fn().mockResolvedValue(true)
+
+    const firstView = render(
+      <MemoryRouter>
+        <Harness onRefresh={refresh} writeOwnerStore={registry} viewToken="overview-old-view" />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '打开订阅' }))
+    fireEvent.change(await screen.findByLabelText('价格'), { target: { value: '12' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建/更新订阅' }))
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+
+    firstView.unmount()
+    render(
+      <MemoryRouter>
+        <Harness onRefresh={refresh} writeOwnerStore={registry} viewToken="overview-returned-view" />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('操作处理中，请等待当前写入完成。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '打开订阅' }))
+    await screen.findByLabelText('价格')
+    expect(screen.getByRole('button', { name: '保存中…' })).toBeDisabled()
+    expect(create).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      pendingCreate.resolve({} as Awaited<ReturnType<typeof api.createVPSSubscription>>)
+    })
+    expect(await screen.findByRole('button', { name: '创建/更新订阅' })).toBeEnabled()
+    expect(create).toHaveBeenCalledTimes(1)
   })
 
   it('does not write a stale cancellation preview onto a newly selected VPS', async () => {

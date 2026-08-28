@@ -1,11 +1,17 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
 	"houfeng/internal/center/assetdomains"
 )
+
+type vpsAssetDomainRepository interface {
+	ListAssetDomainsForVPS(context.Context, string) ([]assetdomains.Record, error)
+	assetdomains.IdempotentRepository
+}
 
 func AssetDomainsCollection(repo assetdomains.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +63,7 @@ func AssetDomainsCollection(repo assetdomains.Repository) http.Handler {
 	})
 }
 
-func VPSDomains(repo assetdomains.Repository) http.Handler {
+func VPSDomains(repo vpsAssetDomainRepository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "domains")
 		if !ok {
@@ -89,14 +95,23 @@ func VPSDomains(repo assetdomains.Repository) http.Handler {
 				return
 			}
 
-			record, err := repo.CreateAssetDomain(r.Context(), input)
+			key, ok := requestCreateIdempotencyKey(r)
+			if !ok {
+				writeInvalidCreateIdempotencyKey(w)
+				return
+			}
+
+			record, replayed, err := repo.CreateAssetDomainIdempotent(r.Context(), input, key)
+			if writeCreateIdempotencyError(w, err) {
+				return
+			}
 			if handled := writeAssetDomainRepositoryError(w, err); handled {
 				return
 			} else if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
 			}
-			writeJSON(w, http.StatusCreated, record)
+			writeJSON(w, idempotentCreateStatus(replayed), record)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}

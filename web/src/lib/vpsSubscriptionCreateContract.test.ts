@@ -25,28 +25,39 @@ const _noCollectionFields: ExtraCollectionField extends never ? true : never = t
 
 type FieldContract = {
   name: string
-  type: 'number' | 'string' | 'boolean' | 'date'
+  type: 'number' | 'string' | 'boolean'
+  format?: 'date'
   required: boolean
   nullable: boolean
 }
 
 const APPROVED_STRING_ALIAS_NAMES = ['BillingPeriodUnit', 'RenewalMode'] as const
+const ISO_DATE_ALIAS_NAME = 'ISODate'
 
 function parseManifest(): FieldContract[] {
   const fields = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as unknown
+  return parseManifestFields(fields)
+}
+
+function parseManifestFields(fields: unknown): FieldContract[] {
   if (!Array.isArray(fields) || fields.length === 0) {
     throw new Error('vps subscription create manifest must be a non-empty array')
   }
   return fields.map((field) => {
+    const format = typeof field === 'object' && field !== null && Object.prototype.hasOwnProperty.call(field, 'format')
+      ? (field as FieldContract).format
+      : undefined
     if (
       typeof field !== 'object' ||
       field === null ||
       typeof (field as FieldContract).name !== 'string' ||
-      typeof (field as FieldContract).type !== 'string' ||
+      !['number', 'string', 'boolean'].includes((field as FieldContract).type) ||
+      (format !== undefined && format !== 'date') ||
+      (format === 'date' && (field as FieldContract).type !== 'string') ||
       typeof (field as FieldContract).required !== 'boolean' ||
       typeof (field as FieldContract).nullable !== 'boolean'
     ) {
-      throw new Error('vps subscription create manifest entries must include name, type, required, nullable')
+      throw new Error('vps subscription create manifest entries must include valid type, optional format, required, nullable semantics')
     }
     return field as FieldContract
   })
@@ -84,9 +95,10 @@ function parseGoJSONTags(source: string, structName: string): FieldContract[] {
     }
 
     const nullable = goType.startsWith('*') || goType === 'subscriptions.OptionalDate'
+    const typeContract = goJSONTypeContract(goType)
     return [{
       name,
-      type: goJSONTypeName(goType),
+      ...typeContract,
       required: goStructTagValue(trimmed, 'required') === 'true',
       nullable,
     }]
@@ -139,9 +151,17 @@ function goJSONTypeName(goType: string): FieldContract['type'] {
     named === 'subscriptions.OptionalInt'
   ) return 'number'
   if (named === 'bool' || named === 'subscriptions.OptionalBool') return 'boolean'
-  if (named === 'subscriptions.Date' || named === 'subscriptions.OptionalDate') return 'date'
+  if (named === 'subscriptions.Date' || named === 'subscriptions.OptionalDate') return 'string'
   if (named === 'string' || named === 'subscriptions.OptionalString') return 'string'
   throw new Error(`Unsupported Go JSON field type: ${JSON.stringify(goType)}`)
+}
+
+function goJSONTypeContract(goType: string): Pick<FieldContract, 'type' | 'format'> {
+  const type = goJSONTypeName(goType)
+  const named = goType.replace(/^\*/, '')
+  return named === 'subscriptions.Date' || named === 'subscriptions.OptionalDate'
+    ? { type, format: 'date' }
+    : { type }
 }
 
 function parseTSTypeFields(source: string, typeName: string): FieldContract[] {
@@ -160,6 +180,7 @@ function parseTSTypeFields(source: string, typeName: string): FieldContract[] {
     throw new Error(`${typeName} has unsupported declaration suffix after its closing brace`)
   }
   const stringAliases = verifiedStringLiteralAliases(source)
+  const dateAliases = verifiedISODateAliases(source)
   return body.slice(0, end).split('\n').flatMap((line) => {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('//')) return []
@@ -168,12 +189,11 @@ function parseTSTypeFields(source: string, typeName: string): FieldContract[] {
     const required = !rawName.trim().endsWith('?')
     const name = rawName.trim().replace(/\?$/, '')
     const typeExpr = rest.join(':').replace(/;?\s*$/, '').trim()
-    const classification = classifyTSTypeUnion(typeExpr, stringAliases)
+    const classification = classifyTSTypeUnion(typeExpr, stringAliases, dateAliases)
     return [{
       name,
-      type: classification.type,
+      ...classification,
       required,
-      nullable: classification.nullable,
     }]
   })
 }
@@ -276,6 +296,24 @@ function verifiedStringLiteralAliases(source: string): ReadonlySet<string> {
   return aliases
 }
 
+function verifiedISODateAliases(source: string): ReadonlySet<string> {
+  const aliases = new Set<string>()
+  const marker = `export type ${ISO_DATE_ALIAS_NAME} =`
+  if (!source.includes(marker)) return aliases
+  const start = findUniqueLiveDeclarationStart(source, marker, ISO_DATE_ALIAS_NAME, true)
+  const definitionStart = start + marker.length
+  const lineEnd = source.indexOf('\n', definitionStart)
+  if (lineEnd >= 0 && startsWithTypeContinuationAfterTrivia(source.slice(lineEnd + 1))) {
+    return aliases
+  }
+  const definition = source
+    .slice(definitionStart, lineEnd < 0 ? source.length : lineEnd)
+    .replace(/[\t ]*;[\t ]*\r?$/, '')
+    .trim()
+  if (definition === 'string') aliases.add(ISO_DATE_ALIAS_NAME)
+  return aliases
+}
+
 function startsWithTypeContinuationAfterTrivia(source: string): boolean {
   for (let index = 0; index < source.length;) {
     const character = source[index]
@@ -337,9 +375,12 @@ function isNonEmptyTypeScriptStringLiteral(member: string): boolean {
 function classifyTSTypeUnion(
   typeExpr: string,
   stringAliases: ReadonlySet<string> = new Set(),
-): Pick<FieldContract, 'type' | 'nullable'> {
+  dateAliases: ReadonlySet<string> = new Set(),
+): Pick<FieldContract, 'type' | 'format' | 'nullable'> {
   const primitiveKinds = new Set<'number' | 'string' | 'boolean'>()
   let nullable = false
+  let hasDateAlias = false
+  let hasOrdinaryString = false
 
   for (const rawMember of typeExpr.split('|')) {
     const member = rawMember.trim()
@@ -358,10 +399,17 @@ function classifyTSTypeUnion(
         break
       case 'string':
         primitiveKinds.add('string')
+        hasOrdinaryString = true
         break
       default:
+        if (dateAliases.has(member)) {
+          primitiveKinds.add('string')
+          hasDateAlias = true
+          break
+        }
         if (stringAliases.has(member)) {
           primitiveKinds.add('string')
+          hasOrdinaryString = true
           break
         }
         throw new Error(`Unsupported TypeScript union member: ${JSON.stringify(member)}`)
@@ -375,10 +423,12 @@ function classifyTSTypeUnion(
   if (!primitiveKind) {
     throw new Error(`TypeScript type expression has no primitive kind: ${JSON.stringify(typeExpr)}`)
   }
-  return {
-    type: primitiveKind === 'string' && nullable ? 'date' : primitiveKind,
-    nullable,
+  if (hasDateAlias && hasOrdinaryString) {
+    throw new Error(`TypeScript date alias must not be mixed with an ordinary string: ${JSON.stringify(typeExpr)}`)
   }
+  return hasDateAlias
+    ? { type: 'string', format: 'date', nullable }
+    : { type: primitiveKind, nullable }
 }
 
 describe('CreateVPSSubscriptionInput', () => {
@@ -405,6 +455,59 @@ describe('CreateVPSSubscriptionInput', () => {
     expect(drifted[2]?.nullable).toBe(false)
     expect(drifted[3]?.required).toBe(false)
   })
+
+  it('keeps an ordinary nullable string unformatted', () => {
+    expect(parseTSTypeFields(`export type Sample = {
+  value: string | null
+}`, 'Sample')).toEqual([{
+      name: 'value',
+      type: 'string',
+      required: true,
+      nullable: true,
+    }])
+  })
+
+  it('maps only an exact same-source ISODate alias to string format date', () => {
+    expect(parseTSTypeFields(`export type ISODate = string
+export type Sample = {
+  value: ISODate | null
+}`, 'Sample')).toEqual([{
+      name: 'value',
+      type: 'string',
+      format: 'date',
+      required: true,
+      nullable: true,
+    }])
+  })
+
+  it('expresses manifest date format independently from nullability', () => {
+    const manifest = parseManifest()
+    expect(manifest.find((field) => field.name === 'renew_at')).toEqual({
+      name: 'renew_at',
+      type: 'string',
+      format: 'date',
+      required: false,
+      nullable: true,
+    })
+    expect(manifest.find((field) => field.name === 'note')).toEqual({
+      name: 'note',
+      type: 'string',
+      required: true,
+      nullable: false,
+    })
+  })
+
+  for (const { name, field } of [
+    { name: 'a missing type', field: { name: 'value', required: true, nullable: false } },
+    { name: 'a null type', field: { name: 'value', type: null, required: true, nullable: false } },
+    { name: 'an unknown type', field: { name: 'value', type: 'date', required: true, nullable: false } },
+    { name: 'a null format', field: { name: 'value', type: 'string', format: null, required: true, nullable: false } },
+    { name: 'an unknown format', field: { name: 'value', type: 'string', format: 'datetime', required: true, nullable: false } },
+  ]) {
+    it(`rejects manifest entries with ${name}`, () => {
+      expect(() => parseManifestFields([field])).toThrow('vps subscription create manifest')
+    })
+  }
 
   it('rejects unknown Go field types instead of guessing string', () => {
     expect(() => parseGoJSONTags(`type Sample struct {
@@ -488,8 +591,8 @@ describe('CreateVPSSubscriptionInput', () => {
     { name: 'number', typeExpr: 'number', want: { type: 'number', nullable: false } },
     { name: 'boolean', typeExpr: 'boolean', want: { type: 'boolean', nullable: false } },
     { name: 'string', typeExpr: 'string', want: { type: 'string', nullable: false } },
-    { name: 'nullable date', typeExpr: 'string | null', want: { type: 'date', nullable: true } },
-    { name: 'reordered nullable date', typeExpr: 'null | string', want: { type: 'date', nullable: true } },
+    { name: 'nullable string', typeExpr: 'string | null', want: { type: 'string', nullable: true } },
+    { name: 'reordered nullable string', typeExpr: 'null | string', want: { type: 'string', nullable: true } },
   ] as const) {
     it(`classifies supported ${name} members exactly`, () => {
       expect(classifyTSTypeUnion(typeExpr)).toEqual(want)
@@ -561,6 +664,44 @@ export type Sample = {
   value?: BillingPeriodUnit | string
 }`,
       error: 'BillingPeriodUnit declared more than once',
+    },
+  ]) {
+    it(`rejects ${name}`, () => {
+      expect(() => parseTSTypeFields(source, 'Sample')).toThrow(error)
+    })
+  }
+
+  for (const { name, source, error } of [
+    {
+      name: 'a missing ISODate definition',
+      source: `export type Sample = {
+  value: ISODate | null
+}`,
+      error: 'Unsupported TypeScript union member',
+    },
+    {
+      name: 'a widened ISODate definition',
+      source: `export type ISODate = string | number
+export type Sample = {
+  value: ISODate | null
+}`,
+      error: 'Unsupported TypeScript union member',
+    },
+    {
+      name: 'a nullable ISODate definition',
+      source: `export type ISODate = string | null
+export type Sample = {
+  value: ISODate | null
+}`,
+      error: 'Unsupported TypeScript union member',
+    },
+    {
+      name: 'an ISODate field widened with raw string',
+      source: `export type ISODate = string
+export type Sample = {
+  value: ISODate | string | null
+}`,
+      error: 'date alias must not be mixed',
     },
   ]) {
     it(`rejects ${name}`, () => {

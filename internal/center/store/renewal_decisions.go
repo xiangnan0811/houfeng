@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/createidempotency"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/subscriptions"
@@ -28,12 +29,15 @@ type renewalDecisionQueryer interface {
 }
 
 type PostgresRenewalDecisionRepository struct {
-	db renewalDecisionDB
+	db      renewalDecisionDB
+	beginTx func(context.Context, pgx.TxOptions) (pgx.Tx, error)
 }
 
 func NewPostgresRenewalDecisionRepository(db *pgxpool.Pool) *PostgresRenewalDecisionRepository {
-	return &PostgresRenewalDecisionRepository{db: db}
+	return &PostgresRenewalDecisionRepository{db: db, beginTx: db.BeginTx}
 }
+
+const experienceLogCreateOperation = "experience-log.create"
 
 const renewalDecisionSelectColumns = `
 	decision_id,
@@ -395,6 +399,101 @@ func (r *PostgresRenewalDecisionRepository) CreateExperienceLog(ctx context.Cont
 		return renewals.ExperienceLogRecord{}, err
 	}
 	return record, nil
+}
+
+func (r *PostgresRenewalDecisionRepository) CreateExperienceLogIdempotent(
+	ctx context.Context,
+	input renewals.CreateExperienceLogInput,
+	idempotencyKey string,
+) (renewals.ExperienceLogRecord, bool, error) {
+	input = renewals.NormalizeCreateExperienceLogInput(input)
+	if err := renewals.ValidateCreateExperienceLogInput(input); err != nil {
+		return renewals.ExperienceLogRecord{}, false, err
+	}
+	key, err := createidempotency.NormalizeKey(idempotencyKey)
+	if err != nil {
+		return renewals.ExperienceLogRecord{}, false, err
+	}
+	digest, err := experienceLogCreateDigest(input)
+	if err != nil {
+		return renewals.ExperienceLogRecord{}, false, err
+	}
+	if r.beginTx == nil {
+		return renewals.ExperienceLogRecord{}, false, errors.New("experience log repository cannot create idempotently without transaction support")
+	}
+
+	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return renewals.ExperienceLogRecord{}, false, fmt.Errorf("begin experience log create transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	lockKey := createidempotency.NamespacedLockKey(experienceLogCreateOperation, key)
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext($1)::bigint)`, lockKey); err != nil {
+		return renewals.ExperienceLogRecord{}, false, fmt.Errorf("lock experience log create receipt: %w", err)
+	}
+
+	var storedDigest string
+	var experienceLogID string
+	err = tx.QueryRow(ctx, `
+		select request_digest, experience_log_id
+		from experience_log_create_idempotency
+		where idempotency_key = $1`, key).Scan(&storedDigest, &experienceLogID)
+	if err == nil {
+		if storedDigest != digest {
+			return renewals.ExperienceLogRecord{}, false, createidempotency.ErrIdempotencyKeyReused
+		}
+		record, err := scanExperienceLog(tx.QueryRow(ctx, `
+			select `+experienceLogSelectColumns+`
+			from experience_logs
+			where experience_log_id = $1
+			  and vps_id = $2`, experienceLogID, input.VPSID))
+		if err != nil {
+			return renewals.ExperienceLogRecord{}, false, fmt.Errorf("load replayed experience log: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return renewals.ExperienceLogRecord{}, false, fmt.Errorf("commit experience log create replay: %w", err)
+		}
+		return record, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return renewals.ExperienceLogRecord{}, false, fmt.Errorf("lookup experience log create receipt: %w", err)
+	}
+
+	record, err := createExperienceLog(ctx, tx, input)
+	if err != nil {
+		return renewals.ExperienceLogRecord{}, false, err
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into experience_log_create_idempotency (
+			idempotency_key,
+			request_digest,
+			experience_log_id
+		) values ($1, $2, $3)`, key, digest, record.ExperienceLogID); err != nil {
+		return renewals.ExperienceLogRecord{}, false, fmt.Errorf("record experience log create receipt: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return renewals.ExperienceLogRecord{}, false, fmt.Errorf("commit experience log create: %w", err)
+	}
+	return record, false, nil
+}
+
+func experienceLogCreateDigest(input renewals.CreateExperienceLogInput) (string, error) {
+	return createidempotency.DigestNormalizedRequest(struct {
+		VPSID      string                      `json:"vps_id"`
+		Category   renewals.ExperienceCategory `json:"category"`
+		Severity   renewals.ExperienceSeverity `json:"severity"`
+		Summary    string                      `json:"summary"`
+		Details    string                      `json:"details"`
+		OccurredAt *time.Time                  `json:"occurred_at"`
+	}{
+		VPSID:      input.VPSID,
+		Category:   input.Category,
+		Severity:   input.Severity,
+		Summary:    input.Summary,
+		Details:    input.Details,
+		OccurredAt: input.OccurredAt,
+	})
 }
 
 func (r *PostgresRenewalDecisionRepository) ListExperienceLogsForVPS(ctx context.Context, vpsID string) ([]renewals.ExperienceLogRecord, error) {

@@ -32,7 +32,7 @@ func TestCreateSubscriptionIdempotentReplayAfterLostResponseKeepsOneRow(t *testi
 		UsageStatus:     vpsassets.UsageInUse,
 	})
 	if err != nil {
-		t.Fatalf("CreateVPSAsset: %v", err)
+		t.Fatalf("CreateVPSAsset error type = %T", err)
 	}
 
 	input := subscriptions.CreateInput{
@@ -46,7 +46,7 @@ func TestCreateSubscriptionIdempotentReplayAfterLostResponseKeepsOneRow(t *testi
 
 	first, replayed, err := subRepo.CreateSubscriptionIdempotent(ctx, input, key)
 	if err != nil {
-		t.Fatalf("first CreateSubscriptionIdempotent: %v", err)
+		t.Fatalf("first CreateSubscriptionIdempotent error type = %T", err)
 	}
 	if replayed {
 		t.Fatal("first CreateSubscriptionIdempotent reported replay")
@@ -54,7 +54,7 @@ func TestCreateSubscriptionIdempotentReplayAfterLostResponseKeepsOneRow(t *testi
 
 	second, replayed, err := subRepo.CreateSubscriptionIdempotent(ctx, input, key)
 	if err != nil {
-		t.Fatalf("replay CreateSubscriptionIdempotent: %v", err)
+		t.Fatalf("replay CreateSubscriptionIdempotent error type = %T", err)
 	}
 	if !replayed {
 		t.Fatal("replay CreateSubscriptionIdempotent did not report replay")
@@ -70,19 +70,19 @@ func TestCreateSubscriptionIdempotentReplayAfterLostResponseKeepsOneRow(t *testi
 		BillingMonths: 1,
 	}, key)
 	if !errors.Is(err, subscriptions.ErrIdempotencyKeyReused) {
-		t.Fatalf("reused key error = %v, want %v (record=%#v replayed=%v)", err, subscriptions.ErrIdempotencyKeyReused, conflict, replayed)
+		t.Fatalf("reused-key sentinel/replayed/result ID empty = %t/%t/%t", errors.Is(err, subscriptions.ErrIdempotencyKeyReused), replayed, conflict.SubscriptionID == "")
 	}
 
 	var subscriptionCount int
 	if err := pool.QueryRow(ctx, `select count(*) from subscriptions where vps_id = $1`, vps.VPSID).Scan(&subscriptionCount); err != nil {
-		t.Fatalf("count subscriptions: %v", err)
+		t.Fatalf("count subscriptions error type = %T", err)
 	}
 	if subscriptionCount != 1 {
 		t.Fatalf("subscription rows = %d, want 1 after lost-response replay", subscriptionCount)
 	}
 	var idempotencyCount int
 	if err := pool.QueryRow(ctx, `select count(*) from subscription_create_idempotency where idempotency_key = $1`, key).Scan(&idempotencyCount); err != nil {
-		t.Fatalf("count idempotency rows: %v", err)
+		t.Fatalf("count idempotency rows error type = %T", err)
 	}
 	if idempotencyCount != 1 {
 		t.Fatalf("idempotency rows = %d, want 1", idempotencyCount)
@@ -102,27 +102,27 @@ func openTemporarySubscriptionIdempotencyPostgresSchema(t *testing.T, ctx contex
 
 	adminConfig, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
-		t.Fatalf("parse HOUFENG_DATABASE_URL: %v", err)
+		t.Fatalf("parse HOUFENG_DATABASE_URL error type = %T", err)
 	}
 	databaseName := fmt.Sprintf("houfeng_sub_idemp_%d_%d", time.Now().UnixNano(), os.Getpid())
 	if !regexp.MustCompile(`^[a-z_][a-z0-9_]*$`).MatchString(databaseName) {
-		t.Fatalf("unsafe generated database name %q", databaseName)
+		t.Fatal("generated database name failed the identifier allowlist")
 	}
 
 	adminPool, err := pgxpool.NewWithConfig(ctx, adminConfig)
 	if err != nil {
-		t.Fatalf("open postgres pool for schema setup: %v", err)
+		t.Fatalf("open postgres pool for schema setup error type = %T", err)
 	}
 	t.Cleanup(adminPool.Close)
 	quotedDatabase := `"` + strings.ReplaceAll(databaseName, `"`, `""`) + `"`
 	if _, err := adminPool.Exec(ctx, `create database `+quotedDatabase); err != nil {
-		t.Fatalf("create temporary postgres database %q: %v", databaseName, err)
+		t.Fatalf("create temporary postgres database error type = %T", err)
 	}
 	t.Cleanup(func() {
 		dropCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if _, err := adminPool.Exec(dropCtx, `drop database if exists `+quotedDatabase+` with (force)`); err != nil {
-			t.Errorf("drop temporary postgres database %q: %v", databaseName, err)
+			t.Errorf("drop temporary postgres database error type = %T", err)
 		}
 	})
 
@@ -130,11 +130,11 @@ func openTemporarySubscriptionIdempotencyPostgresSchema(t *testing.T, ctx contex
 	testConfig.ConnConfig.Database = databaseName
 	testPool, err := pgxpool.NewWithConfig(ctx, testConfig)
 	if err != nil {
-		t.Fatalf("open temporary postgres database %q: %v", databaseName, err)
+		t.Fatalf("open temporary postgres database error type = %T", err)
 	}
 	t.Cleanup(testPool.Close)
 	if err := storemigrate.Apply(ctx, testPool); err != nil {
-		t.Fatalf("apply migrations: %v", err)
+		t.Fatalf("apply migrations error type = %T", err)
 	}
 	return testPool
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"houfeng/internal/center/createidempotency"
 )
 
 var ErrServiceNotFound = errors.New("asset service not found")
@@ -72,6 +74,13 @@ type Repository interface {
 	ListAssetServicesForVPS(context.Context, string) ([]Record, error)
 	CreateAssetService(context.Context, CreateInput) (Record, error)
 }
+
+type IdempotentRepository interface {
+	CreateAssetServiceIdempotent(context.Context, CreateInput, string) (Record, bool, error)
+}
+
+var ErrInvalidIdempotencyKey = createidempotency.ErrInvalidIdempotencyKey
+var ErrIdempotencyKeyReused = createidempotency.ErrIdempotencyKeyReused
 
 func NormalizeCreateInput(input CreateInput) CreateInput {
 	input.VPSID = strings.TrimSpace(input.VPSID)

@@ -711,7 +711,7 @@ describe('api helpers', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listVPSExperienceLogs('vps_001')).resolves.toEqual([logRecord])
-    await expect(createVPSExperienceLog('vps_001', input)).resolves.toEqual(logRecord)
+    await expect(createVPSExperienceLog('vps_001', input, 'experience-attempt-key')).resolves.toEqual(logRecord)
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/experience-logs', {
       headers: { Accept: 'application/json' },
@@ -723,6 +723,7 @@ describe('api helpers', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Idempotency-Key': 'experience-attempt-key',
       },
       cache: 'no-store',
       credentials: 'include',
@@ -1119,7 +1120,7 @@ describe('api helpers', () => {
     await expect(listAssetServices(filter)).resolves.toEqual([service])
     await expect(createAssetService(collectionInput)).resolves.toEqual(service)
     await expect(listVPSServices('vps_001')).resolves.toEqual([service])
-    await expect(createVPSService('vps_001', vpsScopedInput)).resolves.toMatchObject({
+    await expect(createVPSService('vps_001', vpsScopedInput, 'service-attempt-key')).resolves.toMatchObject({
       service_id: 'svc_001',
       name: 'Worker',
       service_type: 'worker',
@@ -1154,6 +1155,7 @@ describe('api helpers', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Idempotency-Key': 'service-attempt-key',
       },
       cache: 'no-store',
       credentials: 'include',
@@ -1237,7 +1239,7 @@ describe('api helpers', () => {
     await expect(listAssetDomains(filter)).resolves.toEqual([domain])
     await expect(createAssetDomain(collectionInput)).resolves.toEqual(domain)
     await expect(listVPSDomains('vps_001')).resolves.toEqual([domain])
-    await expect(createVPSDomain('vps_001', vpsScopedInput)).resolves.toMatchObject({
+    await expect(createVPSDomain('vps_001', vpsScopedInput, 'domain-attempt-key')).resolves.toMatchObject({
       domain_id: 'dom_001',
       domain_name: 'api.example.com',
     })
@@ -1271,6 +1273,7 @@ describe('api helpers', () => {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Idempotency-Key': 'domain-attempt-key',
       },
       cache: 'no-store',
       credentials: 'include',
@@ -1326,12 +1329,13 @@ describe('api helpers', () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(mockResponse(201, JSON.stringify(created)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(createVPSMonitoringInstance('vps_001')).resolves.toEqual(created)
+    await expect(createVPSMonitoringInstance('vps_001', {}, 'monitoring-attempt-key')).resolves.toEqual(created)
     expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/monitoring-instances', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Idempotency-Key': 'monitoring-attempt-key',
       },
       cache: 'no-store',
       credentials: 'include',

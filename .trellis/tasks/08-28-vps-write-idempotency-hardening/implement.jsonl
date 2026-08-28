@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/web/vps-detail-ownership.md", "reason": "Legacy and Overview per-VPS async ownership, generation, settle and refresh contracts"}
+{"file": ".trellis/tasks/08-28-vps-write-idempotency-hardening/research/implementation-contract.md", "reason": "Bounded web state, HTTP, PostgreSQL, DTO mirror and hard-stop contract extracted for this task"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Stable coded HTTP errors and privacy-safe error mapping"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer owner, HTTP, domain and database data-flow checklist"}
+{"file": ".trellis/tasks/08-28-vps-write-idempotency-hardening/research/current-code-evidence.md", "reason": "Exact v0.77.6 code anchors and verification boundary for all three findings"}

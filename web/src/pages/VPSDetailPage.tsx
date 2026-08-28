@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Navigate, useParams, useSearchParams } from 'react-router-dom'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { Navigate, useLocation, useParams, useSearchParams } from 'react-router-dom'
 
 import { PageState } from '../components/PageState'
 import { ApiError } from '../lib/apiRequest'
@@ -11,7 +11,8 @@ import { VPSOverviewManagementActions } from './vps-detail/VPSOverviewManagement
 import { useVPSManagementController } from './vps-detail/hooks/useVPSManagementController'
 import { useVPSOverview } from './vps-detail/hooks/useVPSOverview'
 import { parseOverviewWorkbench } from './vps-detail/vpsManagementHelpers'
-import { createVPSWriteOwnerStore } from './vps-detail/vpsWriteOwnerStore'
+import { useOptionalVPSWriteRegistry } from '../lib/vpsWriteRegistry-context'
+import { createVPSWriteOwnerStore, type VPSWriteOwnerStore } from './vps-detail/vpsWriteOwnerStore'
 
 const LegacyVPSDetailPage = lazy(() =>
   import('./vps-detail/LegacyVPSDetail').then((module) => ({ default: module.LegacyVPSDetail })),
@@ -49,12 +50,22 @@ function isReadonlyArchiveLifecycle(status: string | undefined): boolean {
  */
 export function VPSDetailPage() {
   const { vpsId } = useParams()
+  const location = useLocation()
   const normalizedVPSId = vpsId?.trim() ?? ''
   const [settledGate, setSettledGate] = useState<SettledGate | null>(null)
   const [probeRevision, setProbeRevision] = useState(0)
   const probeRef = useRef<GateProbe | null>(null)
-  const [legacyWriteOwnerStore] = useState(createVPSWriteOwnerStore)
+  const contextWriteOwnerStore = useOptionalVPSWriteRegistry()
+  const [localWriteOwnerStore] = useState(createVPSWriteOwnerStore)
+  const writeOwnerStore = contextWriteOwnerStore ?? localWriteOwnerStore
+  const writeOwners = useSyncExternalStore(
+    writeOwnerStore.subscribe,
+    writeOwnerStore.getSnapshot,
+    writeOwnerStore.getSnapshot,
+  )
   const currentVPSIdRef = useRef(normalizedVPSId)
+  const currentViewTokenRef = useRef('')
+  const [viewTokenNamespace] = useState(() => crypto.randomUUID())
   const mountedRef = useRef(false)
 
   useLayoutEffect(() => {
@@ -68,8 +79,12 @@ export function VPSDetailPage() {
     currentVPSIdRef.current = normalizedVPSId
   }, [normalizedVPSId])
 
-  function revalidateInvalidatedLegacyWrite(vpsId: string) {
-    if (!mountedRef.current || currentVPSIdRef.current !== vpsId) return
+  function revalidateInvalidatedLegacyWrite(vpsId: string, settledViewToken: string) {
+    if (
+      !mountedRef.current
+      || currentVPSIdRef.current !== vpsId
+      || currentViewTokenRef.current !== settledViewToken
+    ) return
     setProbeRevision((revision) => revision + 1)
   }
 
@@ -169,6 +184,29 @@ export function VPSDetailPage() {
   const gate: GateMode = !normalizedVPSId ? 'not_found' : (ownedGate?.mode ?? 'probing')
   const gateError = !normalizedVPSId ? SAFE_VPS_NOT_FOUND : (ownedGate?.error ?? null)
   const seededOverview = ownedGate?.overview ?? null
+  const viewIdentity = `${location.key}:${normalizedVPSId}:${probeRevision}:${gate}`
+  const viewToken = `${viewTokenNamespace}:${viewIdentity}`
+  const inheritedOwnerRef = useRef<{ vpsId: string; token: string } | null>(null)
+  const currentWriteOwner = writeOwners.get(normalizedVPSId)
+
+  useLayoutEffect(() => {
+    currentViewTokenRef.current = viewToken
+  }, [viewToken])
+
+  useEffect(() => {
+    if (currentWriteOwner && currentWriteOwner.viewToken !== viewToken) {
+      inheritedOwnerRef.current = {
+        vpsId: normalizedVPSId,
+        token: currentWriteOwner.token,
+      }
+      return
+    }
+    const inheritedOwner = inheritedOwnerRef.current
+    if (!currentWriteOwner && inheritedOwner?.vpsId === normalizedVPSId) {
+      inheritedOwnerRef.current = null
+      setProbeRevision((revision) => revision + 1)
+    }
+  }, [currentWriteOwner, normalizedVPSId, viewToken])
 
   if (gate === 'probing') {
     return <PageState kind="loading" title="正在判定 VPS 详情形态" />
@@ -211,22 +249,34 @@ export function VPSDetailPage() {
     return (
       <Suspense fallback={<RouteModuleFallback label="正在加载 VPS 详情" />}>
         <LegacyVPSDetailPage
-          writeOwnerStore={legacyWriteOwnerStore}
+          writeOwnerStore={writeOwnerStore}
+          viewToken={viewToken}
           onViewAuthorityInvalidatedWriteSettled={revalidateInvalidatedLegacyWrite}
         />
       </Suspense>
     )
   }
 
-  return <VPSOverviewRoute vpsId={normalizedVPSId} initialOverview={seededOverview} />
+  return (
+    <VPSOverviewRoute
+      vpsId={normalizedVPSId}
+      initialOverview={seededOverview}
+      writeOwnerStore={writeOwnerStore}
+      viewToken={viewToken}
+    />
+  )
 }
 
 function VPSOverviewRoute({
   vpsId,
   initialOverview,
+  writeOwnerStore,
+  viewToken,
 }: {
   vpsId: string | undefined
   initialOverview: VPSOverview | null
+  writeOwnerStore: VPSWriteOwnerStore
+  viewToken: string
 }) {
   const { state, commands } = useVPSOverview(vpsId, initialOverview)
   const management = useVPSManagementController()
@@ -288,6 +338,8 @@ function VPSOverviewRoute({
         management={management}
         managementTriggerRef={managementTriggerRef}
         onOverviewRefresh={commands.refresh}
+        writeOwnerStore={writeOwnerStore}
+        viewToken={viewToken}
       />
     </>
   )
