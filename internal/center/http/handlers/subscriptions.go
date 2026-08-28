@@ -12,19 +12,50 @@ import (
 )
 
 type vpsSubscriptionCreateRequest struct {
-	Price               float64             `json:"price"`
-	Currency            string              `json:"currency"`
-	BillingCycle        string              `json:"billing_cycle"`
-	BillingMonths       int                 `json:"billing_months"`
-	BillingPeriodUnit   string              `json:"billing_period_unit"`
-	BillingPeriodLength int                 `json:"billing_period_length"`
-	StartedAt           *subscriptions.Date `json:"started_at"`
-	RenewAt             *subscriptions.Date `json:"renew_at"`
-	AutoRenew           bool                `json:"auto_renew"`
-	AutoRenewCancelled  bool                `json:"auto_renew_cancelled"`
-	RenewalMode         string              `json:"renewal_mode"`
-	PaymentMethod       string              `json:"payment_method"`
-	Note                string              `json:"note"`
+	Price               subscriptions.OptionalFloat  `json:"price" required:"true"`
+	Currency            subscriptions.OptionalString `json:"currency" required:"true"`
+	BillingCycle        subscriptions.OptionalString `json:"billing_cycle" required:"true"`
+	BillingMonths       subscriptions.OptionalInt    `json:"billing_months" required:"true"`
+	BillingPeriodUnit   subscriptions.OptionalString `json:"billing_period_unit"`
+	BillingPeriodLength subscriptions.OptionalInt    `json:"billing_period_length"`
+	StartedAt           subscriptions.OptionalDate   `json:"started_at"`
+	RenewAt             subscriptions.OptionalDate   `json:"renew_at"`
+	AutoRenew           subscriptions.OptionalBool   `json:"auto_renew" required:"true"`
+	AutoRenewCancelled  subscriptions.OptionalBool   `json:"auto_renew_cancelled" required:"true"`
+	RenewalMode         subscriptions.OptionalString `json:"renewal_mode"`
+	PaymentMethod       subscriptions.OptionalString `json:"payment_method" required:"true"`
+	Note                subscriptions.OptionalString `json:"note" required:"true"`
+}
+
+func (request vpsSubscriptionCreateRequest) toCreateInput(vpsID string) (subscriptions.CreateInput, bool) {
+	if !request.Price.Set ||
+		!request.Currency.Set ||
+		!request.BillingCycle.Set ||
+		!request.BillingMonths.Set ||
+		!request.AutoRenew.Set ||
+		!request.AutoRenewCancelled.Set ||
+		!request.PaymentMethod.Set ||
+		!request.Note.Set {
+		return subscriptions.CreateInput{}, false
+	}
+
+	return subscriptions.CreateInput{
+		VPSID:               vpsID,
+		Price:               request.Price.Value,
+		Currency:            request.Currency.Value,
+		BillingCycle:        request.BillingCycle.Value,
+		BillingMonths:       request.BillingMonths.Value,
+		BillingPeriodUnit:   request.BillingPeriodUnit.Value,
+		BillingPeriodLength: request.BillingPeriodLength.Value,
+		StartedAt:           request.StartedAt.Value,
+		RenewAt:             request.RenewAt.Value,
+		AutoRenew:           request.AutoRenew.Value,
+		AutoRenewCancelled:  request.AutoRenewCancelled.Value,
+		RenewalMode:         request.RenewalMode.Value,
+		Status:              subscriptions.DefaultStatus,
+		PaymentMethod:       request.PaymentMethod.Value,
+		Note:                request.Note.Value,
+	}, true
 }
 
 func SubscriptionsCollection(repo subscriptions.Repository, costSvc ...*subscriptioncosts.Service) http.Handler {
@@ -136,22 +167,10 @@ func VPSSubscriptions(repo subscriptions.Repository) http.Handler {
 				return
 			}
 
-			input := subscriptions.CreateInput{
-				VPSID:               vpsID,
-				Price:               request.Price,
-				Currency:            request.Currency,
-				BillingCycle:        request.BillingCycle,
-				BillingMonths:       request.BillingMonths,
-				BillingPeriodUnit:   request.BillingPeriodUnit,
-				BillingPeriodLength: request.BillingPeriodLength,
-				StartedAt:           request.StartedAt,
-				RenewAt:             request.RenewAt,
-				AutoRenew:           request.AutoRenew,
-				AutoRenewCancelled:  request.AutoRenewCancelled,
-				RenewalMode:         request.RenewalMode,
-				Status:              subscriptions.DefaultStatus,
-				PaymentMethod:       request.PaymentMethod,
-				Note:                request.Note,
+			input, ok := request.toCreateInput(vpsID)
+			if !ok {
+				writeError(w, http.StatusBadRequest, "invalid input")
+				return
 			}
 			input = subscriptions.NormalizeCreateInput(input)
 			if err := subscriptions.ValidateCreateInput(input); err != nil {
