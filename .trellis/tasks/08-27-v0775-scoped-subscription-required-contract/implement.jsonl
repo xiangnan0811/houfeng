@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/index.md","reason":"Route backend work through the package-specific contract and quality specs"}
+{"file":".trellis/spec/backend/subscription-cost-center.md","reason":"Authoritative subscription request, defaulting, validation, and idempotency behavior"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse existing Optional value wrappers and avoid duplicate presence abstractions"}
+{"file":".trellis/tasks/08-27-v0775-vps-detail-hardening/research/review-evidence.md","reason":"Pinned runtime gap, field semantics, parser boundary, and baseline evidence"}

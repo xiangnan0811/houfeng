@@ -1,6 +1,6 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
 {"file": ".trellis/spec/backend/ip-quality-contract.md", "reason": "Disabled Overview must not query latest summary or judge leftover reports"}
 {"file": ".trellis/spec/backend/subscription-cost-center.md", "reason": "Idempotency-Key contract and permanent receipt lifetime"}
-{"file": ".trellis/spec/web/state-and-data.md", "reason": "Hand-aligned DTOs and semantic CreateVPSSubscriptionInput manifest"}
+{"file": ".trellis/spec/web/vps-detail-ownership.md", "reason": "Bounded authority for Legacy transport, route, refresh, archive review, and preview ownership"}
 {"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Go/TS JSON contract and UI ownership across route changes"}
 {"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "Non-main feature branch before implementation"}
+{"file": ".trellis/tasks/08-27-v0775-vps-detail-hardening/research/review-evidence.md", "reason": "Current external-review findings, remediation evidence, and accepted baseline exception"}
