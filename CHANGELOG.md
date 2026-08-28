@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.78.0](https://github.com/xiangnan0811/houfeng/compare/v0.77.6...v0.78.0) (2026-08-28)
+
+
+### Features
+
+* harden VPS write idempotency ([080d2c0](https://github.com/xiangnan0811/houfeng/commit/080d2c025bf843d193f9d5fb69542af18083918e))
+
 ## [0.77.6](https://github.com/xiangnan0811/houfeng/compare/v0.77.5...v0.77.6) (2026-08-28)
 
 
