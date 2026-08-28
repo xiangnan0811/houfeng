@@ -1,18 +1,16 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strings"
 
 	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/monitoringinstances"
-	"houfeng/internal/center/vpsassets"
 )
 
 type linkedMonitoringInstanceCreator interface {
-	CreateLinkedMonitoringInstance(context.Context, string, monitoringinstances.CreateInput, string) (monitoringinstances.Record, assetlinks.Record, error)
+	monitoringinstances.IdempotentLinkedRepository
 }
 
 type vpsMonitoringInstanceCreateRequest struct {
@@ -31,7 +29,7 @@ type vpsMonitoringInstanceCreateResponse struct {
 	Link assetlinks.Record `json:"link"`
 }
 
-func VPSMonitoringInstances(repo assetlinks.Repository, vpsRepo vpsassets.Repository, creator linkedMonitoringInstanceCreator) http.Handler {
+func VPSMonitoringInstances(repo assetlinks.Repository, creator linkedMonitoringInstanceCreator) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "monitoring-instances")
 		if !ok {
@@ -48,7 +46,7 @@ func VPSMonitoringInstances(repo assetlinks.Repository, vpsRepo vpsassets.Reposi
 			}
 			writeJSON(w, http.StatusOK, records)
 		case http.MethodPost:
-			if vpsRepo == nil || creator == nil {
+			if creator == nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
 			}
@@ -57,29 +55,32 @@ func VPSMonitoringInstances(repo assetlinks.Repository, vpsRepo vpsassets.Reposi
 				writeError(w, http.StatusBadRequest, "invalid json")
 				return
 			}
-
-			vps, err := vpsRepo.GetVPSAsset(r.Context(), vpsID)
-			if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
-				writeError(w, http.StatusNotFound, "vps asset not found")
-				return
-			}
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "internal server error")
-				return
-			}
-
-			input := monitoringInstanceInputFromVPS(vps, request)
-			if !isValidCreateInput(input) || !isValidMetadata(input.Labels, input.Note) {
+			wireIdentity := monitoringinstances.NormalizeLinkedCreateWireIdentity(monitoringinstances.LinkedCreateWireIdentity{
+				DisplayName: request.DisplayName,
+				Group:       request.Group,
+				Region:      request.Region,
+				City:        request.City,
+				Provider:    request.Provider,
+				Labels:      request.Labels,
+				Note:        request.Note,
+				LinkNote:    request.LinkNote,
+			})
+			if err := monitoringinstances.ValidateLinkedCreateWireIdentity(wireIdentity); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return
 			}
 
-			linkNote := strings.TrimSpace(request.LinkNote)
-			if linkNote == "" {
-				linkNote = "created from vps detail"
+			key, ok := requestCreateIdempotencyKey(r)
+			if !ok {
+				writeInvalidCreateIdempotencyKey(w)
+				return
 			}
-			record, link, err := creator.CreateLinkedMonitoringInstance(r.Context(), vps.VPSID, input, linkNote)
-			if errors.Is(err, assetlinks.ErrInvalidVPSMonitoringInstanceLinkInput) {
+
+			record, link, replayed, err := creator.CreateLinkedMonitoringInstanceIdempotent(r.Context(), vpsID, wireIdentity, key)
+			if writeCreateIdempotencyError(w, err) {
+				return
+			}
+			if errors.Is(err, monitoringinstances.ErrInvalidCreateInput) || errors.Is(err, assetlinks.ErrInvalidVPSMonitoringInstanceLinkInput) {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return
 			}
@@ -99,46 +100,11 @@ func VPSMonitoringInstances(repo assetlinks.Repository, vpsRepo vpsassets.Reposi
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
 			}
-			writeJSON(w, http.StatusCreated, vpsMonitoringInstanceCreateResponse{Record: record, Link: link})
+			writeJSON(w, idempotentCreateStatus(replayed), vpsMonitoringInstanceCreateResponse{Record: record, Link: link})
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	})
-}
-
-func monitoringInstanceInputFromVPS(vps vpsassets.Record, request vpsMonitoringInstanceCreateRequest) monitoringinstances.CreateInput {
-	displayName := firstNonEmpty(request.DisplayName, vps.DisplayName, vps.VPSID)
-	region := firstNonEmpty(request.Region, vps.Region, vps.Country, "未确认")
-	city := firstNonEmpty(request.City, vps.City, vps.Datacenter, "未确认")
-	provider := firstNonEmpty(request.Provider, vps.ProviderName, "未关联服务商")
-	labels := request.Labels
-	if len(labels) == 0 {
-		labels = vps.Labels
-	}
-	note := firstNonEmpty(request.Note, vps.Note)
-
-	input := monitoringinstances.CreateInput{
-		DisplayName:     displayName,
-		Group:           request.Group,
-		Region:          region,
-		City:            city,
-		Provider:        provider,
-		LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment,
-		Labels:          labels,
-		Note:            note,
-	}
-	input = normalizeCreateInput(input)
-	input.Labels, input.Note = normalizeMetadata(input.Labels, input.Note)
-	return input
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 func VPSLinkMonitoringInstance(repo assetlinks.Repository) http.Handler {

@@ -17,15 +17,88 @@ import (
 )
 
 type fakeLinkedMonitoringInstanceCreator struct {
-	result     monitoringinstances.Record
-	linkResult assetlinks.Record
-	err        error
-	vpsID      string
-	input      monitoringinstances.CreateInput
-	linkNote   string
+	result             monitoringinstances.Record
+	linkResult         assetlinks.Record
+	err                error
+	vpsID              string
+	input              monitoringinstances.CreateInput
+	linkNote           string
+	legacyCalls        int
+	idempotentCalls    int
+	idempotentWire     monitoringinstances.LinkedCreateWireIdentity
+	idempotentKey      string
+	idempotentReplayed bool
+}
+
+type statefulLinkedMonitoringInstanceResult struct {
+	record monitoringinstances.Record
+	link   assetlinks.Record
+}
+
+type statefulLinkedMonitoringInstanceCreator struct {
+	creates testIdempotentCreateState[statefulLinkedMonitoringInstanceResult]
+	vpsRepo *sequentialVPSAssetRepository
+}
+
+type sequentialVPSAssetRepository struct {
+	fakeVPSAssetRepository
+	results  []vpsassets.Record
+	errAfter int
+}
+
+func (r *sequentialVPSAssetRepository) GetVPSAsset(_ context.Context, vpsID string) (vpsassets.Record, error) {
+	r.getVPSAssetCalls++
+	r.getVPSAssetID = vpsID
+	if r.getVPSAssetErr != nil {
+		return vpsassets.Record{}, r.getVPSAssetErr
+	}
+	if r.errAfter > 0 && r.getVPSAssetCalls > r.errAfter {
+		return vpsassets.Record{}, errors.New("later vps lookup failed")
+	}
+	if r.getVPSAssetCalls > len(r.results) {
+		return vpsassets.Record{}, errors.New("unexpected vps lookup")
+	}
+	return r.results[r.getVPSAssetCalls-1], nil
+}
+
+func (c *statefulLinkedMonitoringInstanceCreator) CreateLinkedMonitoringInstanceIdempotent(ctx context.Context, vpsID string, wire monitoringinstances.LinkedCreateWireIdentity, key string) (monitoringinstances.Record, assetlinks.Record, bool, error) {
+	identity := struct {
+		VPSID        string
+		WireIdentity monitoringinstances.LinkedCreateWireIdentity
+	}{VPSID: vpsID, WireIdentity: wire}
+	var lookupErr error
+	result, replayed, err := c.creates.create(key, identity, func() statefulLinkedMonitoringInstanceResult {
+		vps, err := c.vpsRepo.GetVPSAsset(ctx, vpsID)
+		if err != nil {
+			lookupErr = err
+			return statefulLinkedMonitoringInstanceResult{}
+		}
+		record := monitoringinstances.Record{
+			MonitoringInstanceID: "mi_sequence_001",
+			DisplayName:          vps.DisplayName,
+			Group:                wire.Group,
+			Region:               vps.Region,
+			City:                 vps.City,
+			Provider:             vps.ProviderName,
+			LifecycleStatus:      monitoringinstances.LifecyclePendingEnrollment,
+		}
+		return statefulLinkedMonitoringInstanceResult{
+			record: record,
+			link: assetlinks.Record{
+				LinkID:               "vnl_sequence_001",
+				VPSID:                vpsID,
+				MonitoringInstanceID: record.MonitoringInstanceID,
+			},
+		}
+	})
+	if lookupErr != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, lookupErr
+	}
+	return result.record, result.link, replayed, err
 }
 
 func (f *fakeLinkedMonitoringInstanceCreator) CreateLinkedMonitoringInstance(_ context.Context, vpsID string, input monitoringinstances.CreateInput, linkNote string) (monitoringinstances.Record, assetlinks.Record, error) {
+	f.legacyCalls++
 	f.vpsID = vpsID
 	f.input = input
 	f.linkNote = linkNote
@@ -33,6 +106,17 @@ func (f *fakeLinkedMonitoringInstanceCreator) CreateLinkedMonitoringInstance(_ c
 		return monitoringinstances.Record{}, assetlinks.Record{}, f.err
 	}
 	return f.result, f.linkResult, nil
+}
+
+func (f *fakeLinkedMonitoringInstanceCreator) CreateLinkedMonitoringInstanceIdempotent(_ context.Context, vpsID string, wire monitoringinstances.LinkedCreateWireIdentity, key string) (monitoringinstances.Record, assetlinks.Record, bool, error) {
+	f.idempotentCalls++
+	f.vpsID = vpsID
+	f.idempotentWire = wire
+	f.idempotentKey = key
+	if f.err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, f.err
+	}
+	return f.result, f.linkResult, f.idempotentReplayed, nil
 }
 
 type fakeAssetLinkRepository struct {
@@ -105,14 +189,14 @@ func TestVPSLinkMonitoringInstanceCreatesLink(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusCreated, recorder.Body.String())
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusCreated)
 	}
 	if repo.linkMonitoringInstanceVPSID != "vps_001" || repo.linkMonitoringInstanceInput.MonitoringInstanceID != "mi_001" || repo.linkMonitoringInstanceInput.Note != "primary" {
-		t.Fatalf("link input = vps:%q input:%#v, want normalized values", repo.linkMonitoringInstanceVPSID, repo.linkMonitoringInstanceInput)
+		t.Fatalf("link input VPS/monitoring ID/note matches = %t/%t/%t", repo.linkMonitoringInstanceVPSID == "vps_001", repo.linkMonitoringInstanceInput.MonitoringInstanceID == "mi_001", repo.linkMonitoringInstanceInput.Note == "primary")
 	}
 	var body assetlinks.Record
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response body: %v", err)
+		t.Fatalf("unmarshal response body error type = %T", err)
 	}
 	if body.LinkID != "vnl_001" {
 		t.Fatalf("link_id = %q, want vnl_001", body.LinkID)
@@ -138,14 +222,14 @@ func TestVPSUnlinkMonitoringInstanceEndsActiveLink(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
 	if repo.unlinkMonitoringInstanceVPSID != "vps_001" || repo.unlinkMonitoringInstanceInput.MonitoringInstanceID != "mi_001" || repo.unlinkMonitoringInstanceInput.Note != "rotated" {
-		t.Fatalf("unlink input = vps:%q input:%#v, want normalized values", repo.unlinkMonitoringInstanceVPSID, repo.unlinkMonitoringInstanceInput)
+		t.Fatalf("unlink input VPS/monitoring ID/note matches = %t/%t/%t", repo.unlinkMonitoringInstanceVPSID == "vps_001", repo.unlinkMonitoringInstanceInput.MonitoringInstanceID == "mi_001", repo.unlinkMonitoringInstanceInput.Note == "rotated")
 	}
 	var body assetlinks.Record
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response body: %v", err)
+		t.Fatalf("unmarshal response body error type = %T", err)
 	}
 	if body.UnlinkedAt == nil {
 		t.Fatalf("unlinked_at = nil, want historical unlink timestamp")
@@ -164,38 +248,29 @@ func TestVPSMonitoringInstancesListsActiveMonitoringInstanceSummaries(t *testing
 		LinkedAt:                   now,
 	}}}
 
-	handler := handlers.VPSMonitoringInstances(repo, nil, nil)
+	handler := handlers.VPSMonitoringInstances(repo, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/monitoring-instances", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
 	if repo.listMonitoringInstancesForVPSID != "vps_001" {
 		t.Fatalf("list vps id = %q, want vps_001", repo.listMonitoringInstancesForVPSID)
 	}
 	var body []assetlinks.MonitoringInstanceSummary
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response body: %v", err)
+		t.Fatalf("unmarshal response body error type = %T", err)
 	}
 	if len(body) != 1 || body[0].MonitoringInstanceID != "mi_001" || body[0].CurrentHealthStatus != "关注" {
-		t.Fatalf("body = %#v, want active monitoringInstance summary", body)
+		t.Fatalf("response count/ID/health matches = %d/%t/%t", len(body), len(body) == 1 && body[0].MonitoringInstanceID == "mi_001", len(body) == 1 && body[0].CurrentHealthStatus == "关注")
 	}
 }
 
-func TestVPSMonitoringInstancesCreatesDerivedMonitoringInstance(t *testing.T) {
+func TestVPSMonitoringInstancesDelegatesEmptyWireIdentityToRepository(t *testing.T) {
 	now := time.Date(2026, time.May, 9, 16, 0, 0, 0, time.UTC)
-	vpsRepo := &fakeVPSAssetRepository{getVPSAssetResult: vpsassets.Record{
-		VPSID:        "vps_001",
-		DisplayName:  "Tokyo Edge",
-		ProviderName: "Acme Cloud",
-		Region:       "ap-northeast-1",
-		City:         "Tokyo",
-		Labels:       []string{"edge", "prod"},
-		Note:         "primary asset note",
-	}}
 	creator := &fakeLinkedMonitoringInstanceCreator{
 		result: monitoringinstances.Record{
 			MonitoringInstanceID: "mi_001",
@@ -214,46 +289,268 @@ func TestVPSMonitoringInstancesCreatesDerivedMonitoringInstance(t *testing.T) {
 		},
 		linkResult: assetlinks.Record{
 			LinkID:               "vnl_001",
-			VPSID:                "vps_001",
+			VPSID:                "vps_path",
 			MonitoringInstanceID: "mi_001",
 			LinkedAt:             now,
 			Note:                 "created from vps detail",
 		},
 	}
 
-	handler := handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, vpsRepo, creator)
-	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/monitoring-instances", strings.NewReader(`{}`))
+	handler := handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, creator)
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_path/monitoring-instances", strings.NewReader(`{}`))
+	req.Header.Set("Idempotency-Key", "monitoring-create-001")
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusCreated, recorder.Body.String())
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusCreated)
 	}
-	if vpsRepo.getVPSAssetID != "vps_001" {
-		t.Fatalf("get vps id = %q, want vps_001", vpsRepo.getVPSAssetID)
+	if creator.vpsID != "vps_path" {
+		t.Fatalf("creator vps id = %q, want path vps id", creator.vpsID)
 	}
-	if creator.vpsID != "vps_001" {
-		t.Fatalf("creator vps id = %q, want vps_001", creator.vpsID)
+	wire := creator.idempotentWire
+	if wire.DisplayName != "" || wire.Group != "" || wire.Region != "" || wire.City != "" || wire.Provider != "" || len(wire.Labels) != 0 || wire.Note != "" || wire.LinkNote != "" {
+		t.Fatal("wire identity did not preserve the exact empty request fields")
 	}
-	if creator.input.DisplayName != "Tokyo Edge" || creator.input.Provider != "Acme Cloud" || creator.input.Region != "ap-northeast-1" || creator.input.City != "Tokyo" {
-		t.Fatalf("creator input = %#v, want VPS-derived identity", creator.input)
-	}
-	if creator.input.LifecycleStatus != monitoringinstances.LifecyclePendingEnrollment {
-		t.Fatalf("lifecycle status = %q, want pending enrollment", creator.input.LifecycleStatus)
-	}
-	if len(creator.input.Labels) != 2 || creator.input.Note != "primary asset note" {
-		t.Fatalf("metadata = labels:%#v note:%q, want inherited VPS metadata", creator.input.Labels, creator.input.Note)
+	if creator.legacyCalls != 0 || creator.idempotentCalls != 1 || creator.idempotentKey != "monitoring-create-001" {
+		t.Fatalf("create calls = legacy:%d idempotent:%d, want one idempotent call", creator.legacyCalls, creator.idempotentCalls)
 	}
 	var body struct {
 		MonitoringInstanceID string            `json:"monitoring_instance_id"`
 		Link                 assetlinks.Record `json:"link"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response body: %v", err)
+		t.Fatalf("unmarshal response body error type = %T", err)
 	}
 	if body.MonitoringInstanceID != "mi_001" || body.Link.LinkID != "vnl_001" {
-		t.Fatalf("body = %#v, want monitoring instance plus link", body)
+		t.Fatalf("response ID matches = %t/%t, want true/true", body.MonitoringInstanceID == "mi_001", body.Link.LinkID == "vnl_001")
+	}
+}
+
+func TestVPSMonitoringInstancesPreservesNormalizedWireIdentity(t *testing.T) {
+	creator := &fakeLinkedMonitoringInstanceCreator{}
+	handler := handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, creator)
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/monitoring-instances", strings.NewReader(`{
+		"display_name":" Explicit name ",
+		"group":" Edge ",
+		"region":" Explicit region ",
+		"city":" Explicit city ",
+		"provider":" Explicit provider ",
+		"labels":[" explicit ","explicit"],
+		"note":" Explicit note ",
+		"link_note":" Explicit link note "
+	}`))
+	req.Header.Set("Idempotency-Key", "monitoring-wire-001")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusCreated)
+	}
+	wire := creator.idempotentWire
+	if wire.DisplayName != "Explicit name" || wire.Group != "Edge" || wire.Region != "Explicit region" || wire.City != "Explicit city" || wire.Provider != "Explicit provider" || len(wire.Labels) != 1 || wire.Labels[0] != "explicit" || wire.Note != "Explicit note" || wire.LinkNote != "Explicit link note" {
+		t.Fatal("wire identity did not preserve all eight normalized request fields")
+	}
+}
+
+func TestVPSMonitoringInstancesRequiresSingleValidIdempotencyKeyBeforeRepositories(t *testing.T) {
+	tests := []struct {
+		name string
+		keys []string
+	}{
+		{name: "missing"},
+		{name: "empty", keys: []string{""}},
+		{name: "multiple", keys: []string{"monitoring-key-001", "monitoring-key-002"}},
+		{name: "comma joined multiple", keys: []string{"monitoring-key-001,monitoring-key-002"}},
+		{name: "too short", keys: []string{"short"}},
+		{name: "too long", keys: []string{strings.Repeat("a", 129)}},
+		{name: "invalid characters", keys: []string{"private/key"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			creator := &fakeLinkedMonitoringInstanceCreator{}
+			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/monitoring-instances", strings.NewReader(`{}`))
+			for _, key := range tt.keys {
+				req.Header.Add("Idempotency-Key", key)
+			}
+			recorder := httptest.NewRecorder()
+
+			handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, creator).ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal error body error type = %T", err)
+			}
+			if body["code"] != "invalid_idempotency_key" {
+				t.Fatalf("code = %q, want invalid_idempotency_key", body["code"])
+			}
+			if strings.Contains(recorder.Body.String(), "private/key") {
+				t.Fatal("response disclosed rejected idempotency key")
+			}
+			if creator.legacyCalls != 0 || creator.idempotentCalls != 0 {
+				t.Fatalf("repository calls = legacy:%d idempotent:%d, want none", creator.legacyCalls, creator.idempotentCalls)
+			}
+		})
+	}
+}
+
+func TestVPSMonitoringInstancesValidatesBodyBeforeIdempotencyKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantError string
+	}{
+		{name: "invalid json", body: `{"note":`, wantError: "invalid json"},
+		{name: "invalid input", body: `{"note":"` + strings.Repeat("x", monitoringinstances.LinkedCreateMaxNoteRunes+1) + `"}`, wantError: "invalid input"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			creator := &fakeLinkedMonitoringInstanceCreator{}
+			recorder := httptest.NewRecorder()
+			handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, creator).ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/monitoring-instances", strings.NewReader(tt.body)))
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal error body error type = %T", err)
+			}
+			if body["error"] != tt.wantError || body["code"] != "" {
+				t.Fatalf("error/code matches = %t/%t", body["error"] == tt.wantError, body["code"] == "")
+			}
+			if creator.legacyCalls != 0 || creator.idempotentCalls != 0 {
+				t.Fatalf("repository calls = legacy:%d idempotent:%d, want none", creator.legacyCalls, creator.idempotentCalls)
+			}
+		})
+	}
+}
+
+func TestVPSMonitoringInstancesMapsIdempotentCreateOutcomes(t *testing.T) {
+	tests := []struct {
+		name       string
+		replayed   bool
+		err        error
+		wantStatus int
+		wantCode   string
+		wantError  string
+	}{
+		{name: "first create", wantStatus: http.StatusCreated},
+		{name: "replay", replayed: true, wantStatus: http.StatusOK},
+		{name: "reused key", err: monitoringinstances.ErrIdempotencyKeyReused, wantStatus: http.StatusConflict, wantCode: "idempotency_key_reused"},
+		{name: "repository rejects key", err: monitoringinstances.ErrInvalidIdempotencyKey, wantStatus: http.StatusBadRequest, wantCode: "invalid_idempotency_key"},
+		{name: "monitoring invalid input", err: monitoringinstances.ErrInvalidCreateInput, wantStatus: http.StatusBadRequest, wantError: "invalid input"},
+		{name: "link invalid input", err: assetlinks.ErrInvalidVPSMonitoringInstanceLinkInput, wantStatus: http.StatusBadRequest, wantError: "invalid input"},
+		{name: "link missing", err: assetlinks.ErrVPSMonitoringInstanceLinkNotFound, wantStatus: http.StatusNotFound, wantError: "vps asset not found"},
+		{name: "link conflict", err: assetlinks.ErrVPSMonitoringInstanceLinkConflict, wantStatus: http.StatusConflict, wantError: "vps monitoring instance link conflict"},
+		{name: "active exists", err: assetlinks.ErrVPSActiveMonitoringInstanceExists, wantStatus: http.StatusConflict, wantError: "vps active monitoring instance exists"},
+		{name: "internal", err: errors.New("private repository detail"), wantStatus: http.StatusInternalServerError, wantError: "internal server error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			creator := &fakeLinkedMonitoringInstanceCreator{
+				result:             monitoringinstances.Record{MonitoringInstanceID: "mi_stable"},
+				linkResult:         assetlinks.Record{LinkID: "vnl_stable", VPSID: "vps_001", MonitoringInstanceID: "mi_stable"},
+				err:                tt.err,
+				idempotentReplayed: tt.replayed,
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/monitoring-instances", strings.NewReader(`{}`))
+			req.Header.Set("Idempotency-Key", "monitoring-outcome-001")
+			recorder := httptest.NewRecorder()
+
+			handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, creator).ServeHTTP(recorder, req)
+
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
+			}
+			if creator.legacyCalls != 0 || creator.idempotentCalls != 1 {
+				t.Fatalf("create calls = legacy:%d idempotent:%d, want one idempotent call", creator.legacyCalls, creator.idempotentCalls)
+			}
+			if tt.wantCode != "" || tt.wantError != "" {
+				var body map[string]string
+				if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+					t.Fatalf("unmarshal error body error type = %T", err)
+				}
+				if body["code"] != tt.wantCode || (tt.wantError != "" && body["error"] != tt.wantError) {
+					t.Fatalf("error code/message matches = %t/%t", body["code"] == tt.wantCode, tt.wantError == "" || body["error"] == tt.wantError)
+				}
+				if strings.Contains(recorder.Body.String(), "private repository detail") {
+					t.Fatal("response disclosed repository error detail")
+				}
+				return
+			}
+			var body struct {
+				MonitoringInstanceID string            `json:"monitoring_instance_id"`
+				Link                 assetlinks.Record `json:"link"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal response error type = %T", err)
+			}
+			if body.MonitoringInstanceID != "mi_stable" || body.Link.LinkID != "vnl_stable" {
+				t.Fatalf("response monitoring/link ID matches = %t/%t", body.MonitoringInstanceID == "mi_stable", body.Link.LinkID == "vnl_stable")
+			}
+		})
+	}
+}
+
+func TestVPSMonitoringInstancesReceiptReplayDoesNotDependOnLaterVPSLookup(t *testing.T) {
+	vpsRepo := &sequentialVPSAssetRepository{results: []vpsassets.Record{
+		{
+			VPSID:        "vps_repository_first",
+			DisplayName:  "First fallback",
+			ProviderName: "First provider",
+			Region:       "First region",
+			City:         "First city",
+		},
+	}, errAfter: 1}
+	creator := &statefulLinkedMonitoringInstanceCreator{vpsRepo: vpsRepo}
+	handler := handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, creator)
+	const path = "/api/vps/vps_sequence/monitoring-instances"
+	const key = "monitoring-sequence-001"
+	type response struct {
+		MonitoringInstanceID string            `json:"monitoring_instance_id"`
+		Link                 assetlinks.Record `json:"link"`
+	}
+
+	first := serveTestIdempotentCreate(handler, path, `{}`, key)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first status = %d, want %d", first.Code, http.StatusCreated)
+	}
+	firstRecord := decodeTestResponse[response](t, first)
+	if firstRecord.MonitoringInstanceID != "mi_sequence_001" || firstRecord.Link.LinkID != "vnl_sequence_001" || firstRecord.Link.VPSID != "vps_sequence" {
+		t.Fatal("first response did not contain the path-scoped materialized identities")
+	}
+	assertTestIdempotentCreateCounts(t, &creator.creates, 1, 1)
+
+	replay := serveTestIdempotentCreate(handler, path, `{}`, key)
+	if replay.Code != http.StatusOK {
+		t.Fatalf("replay status = %d, want %d", replay.Code, http.StatusOK)
+	}
+	replayRecord := decodeTestResponse[response](t, replay)
+	if replayRecord.MonitoringInstanceID != firstRecord.MonitoringInstanceID || replayRecord.Link.LinkID != firstRecord.Link.LinkID {
+		t.Fatal("replay did not return the original monitoring identities")
+	}
+	assertTestIdempotentCreateCounts(t, &creator.creates, 2, 1)
+
+	reused := serveTestIdempotentCreate(handler, path, `{"group":"Secondary"}`, key)
+	if reused.Code != http.StatusConflict {
+		t.Fatalf("reused-key status = %d, want %d", reused.Code, http.StatusConflict)
+	}
+	reusedError := decodeTestResponse[map[string]string](t, reused)
+	if reusedError["code"] != "idempotency_key_reused" {
+		t.Fatalf("reused-key code = %q, want idempotency_key_reused", reusedError["code"])
+	}
+	assertTestIdempotentCreateCounts(t, &creator.creates, 3, 1)
+	if vpsRepo.getVPSAssetCalls != 1 || vpsRepo.getVPSAssetID != "vps_sequence" {
+		t.Fatalf("vps lookup calls = %d, want one path-scoped materialization lookup", vpsRepo.getVPSAssetCalls)
 	}
 }
 
@@ -283,10 +580,10 @@ func TestMonitoringInstanceVPSListsActiveVPSSummaries(t *testing.T) {
 	}
 	var body []assetlinks.VPSSummary
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response body: %v", err)
+		t.Fatalf("unmarshal response body error type = %T", err)
 	}
 	if len(body) != 1 || body[0].VPSID != "vps_001" || body[0].ProviderName != "Asset Provider" {
-		t.Fatalf("body = %#v, want active vps summary", body)
+		t.Fatalf("response count/ID matches = %d/%t", len(body), len(body) == 1 && body[0].VPSID == "vps_001")
 	}
 }
 
@@ -306,6 +603,9 @@ func TestAssetLinkHandlersRejectInvalidInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			if tt.method == http.MethodPost {
+				req.Header.Set("Idempotency-Key", "asset-link-error-001")
+			}
 			recorder := httptest.NewRecorder()
 
 			tt.handler.ServeHTTP(recorder, req)
@@ -330,16 +630,19 @@ func TestAssetLinkHandlersMapDomainErrors(t *testing.T) {
 		{name: "link existing active monitoring instance", handler: handlers.VPSLinkMonitoringInstance(&fakeAssetLinkRepository{linkMonitoringInstanceErr: assetlinks.ErrVPSActiveMonitoringInstanceExists}), method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", body: `{"monitoring_instance_id":"mi_001"}`, want: http.StatusConflict},
 		{name: "link missing vps or monitoring instance", handler: handlers.VPSLinkMonitoringInstance(&fakeAssetLinkRepository{linkMonitoringInstanceErr: assetlinks.ErrVPSMonitoringInstanceLinkNotFound}), method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", body: `{"monitoring_instance_id":"mi_001"}`, want: http.StatusNotFound},
 		{name: "unlink missing active link", handler: handlers.VPSUnlinkMonitoringInstance(&fakeAssetLinkRepository{unlinkMonitoringInstanceErr: assetlinks.ErrVPSMonitoringInstanceLinkNotFound}), method: http.MethodPost, path: "/api/vps/vps_001/unlink-monitoring-instance", body: `{"monitoring_instance_id":"mi_001"}`, want: http.StatusNotFound},
-		{name: "list monitoringInstances repo failure", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{listMonitoringInstancesForVPSErr: errors.New("query failed")}, nil, nil), method: http.MethodGet, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusInternalServerError},
-		{name: "create monitoringInstance missing vps", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, &fakeVPSAssetRepository{getVPSAssetErr: vpsassets.ErrVPSAssetNotFound}, &fakeLinkedMonitoringInstanceCreator{}), method: http.MethodPost, path: "/api/vps/vps_001/monitoring-instances", body: `{}`, want: http.StatusNotFound},
-		{name: "create monitoringInstance link conflict", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, &fakeVPSAssetRepository{getVPSAssetResult: vpsassets.Record{VPSID: "vps_001", DisplayName: "Tokyo Edge", ProviderName: "Acme Cloud", Region: "Tokyo", City: "Tokyo"}}, &fakeLinkedMonitoringInstanceCreator{err: assetlinks.ErrVPSMonitoringInstanceLinkConflict}), method: http.MethodPost, path: "/api/vps/vps_001/monitoring-instances", body: `{}`, want: http.StatusConflict},
-		{name: "create monitoringInstance existing active monitoring instance", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, &fakeVPSAssetRepository{getVPSAssetResult: vpsassets.Record{VPSID: "vps_001", DisplayName: "Tokyo Edge", ProviderName: "Acme Cloud", Region: "Tokyo", City: "Tokyo"}}, &fakeLinkedMonitoringInstanceCreator{err: assetlinks.ErrVPSActiveMonitoringInstanceExists}), method: http.MethodPost, path: "/api/vps/vps_001/monitoring-instances", body: `{}`, want: http.StatusConflict},
+		{name: "list monitoringInstances repo failure", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{listMonitoringInstancesForVPSErr: errors.New("query failed")}, nil), method: http.MethodGet, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusInternalServerError},
+		{name: "create monitoringInstance missing vps", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, &fakeLinkedMonitoringInstanceCreator{err: assetlinks.ErrVPSMonitoringInstanceLinkNotFound}), method: http.MethodPost, path: "/api/vps/vps_001/monitoring-instances", body: `{}`, want: http.StatusNotFound},
+		{name: "create monitoringInstance link conflict", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, &fakeLinkedMonitoringInstanceCreator{err: assetlinks.ErrVPSMonitoringInstanceLinkConflict}), method: http.MethodPost, path: "/api/vps/vps_001/monitoring-instances", body: `{}`, want: http.StatusConflict},
+		{name: "create monitoringInstance existing active monitoring instance", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, &fakeLinkedMonitoringInstanceCreator{err: assetlinks.ErrVPSActiveMonitoringInstanceExists}), method: http.MethodPost, path: "/api/vps/vps_001/monitoring-instances", body: `{}`, want: http.StatusConflict},
 		{name: "list vps repo failure", handler: handlers.MonitoringInstanceVPS(&fakeAssetLinkRepository{listVPSForMonitoringInstanceErr: errors.New("query failed")}), method: http.MethodGet, path: "/api/monitoring-instances/mi_001/vps", want: http.StatusInternalServerError},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			if tt.method == http.MethodPost {
+				req.Header.Set("Idempotency-Key", "asset-link-domain-error-001")
+			}
 			recorder := httptest.NewRecorder()
 
 			tt.handler.ServeHTTP(recorder, req)
@@ -359,7 +662,7 @@ func TestAssetLinkHandlersRejectWrongMethodsAndMalformedPaths(t *testing.T) {
 		path    string
 		want    int
 	}{
-		{name: "vps monitoringInstances wrong method", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, nil, nil), method: http.MethodDelete, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusMethodNotAllowed},
+		{name: "vps monitoringInstances wrong method", handler: handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, nil), method: http.MethodDelete, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusMethodNotAllowed},
 		{name: "monitoringInstance vps wrong method", handler: handlers.MonitoringInstanceVPS(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/monitoring-instances/mi_001/vps", want: http.StatusMethodNotAllowed},
 		{name: "malformed vps path", handler: handlers.VPSLinkMonitoringInstance(&fakeAssetLinkRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance/extra", want: http.StatusNotFound},
 		{name: "malformed monitoringInstance path", handler: handlers.MonitoringInstanceVPS(&fakeAssetLinkRepository{}), method: http.MethodGet, path: "/api/monitoring-instances/mi_001/vps/extra", want: http.StatusNotFound},

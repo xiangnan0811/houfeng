@@ -363,7 +363,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		VPSCollectionHandler:                        handlers.VPSCollection(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo, ipQualityRepo),
 		VPSItemHandler:                              handlers.VPSItem(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo, ipQualityRepo),
 		VPSOverviewHandler:                          vpsOverviewHandler,
-		VPSMonitoringInstancesHandler:               handlers.VPSMonitoringInstances(vpsMonitoringInstanceLinkRepo, vpsAssetRepo, monitoringInstanceRepo),
+		VPSMonitoringInstancesHandler:               handlers.VPSMonitoringInstances(vpsMonitoringInstanceLinkRepo, monitoringInstanceRepo),
 		VPSSubscriptionsHandler:                     handlers.VPSSubscriptions(subscriptionRepo),
 		VPSLinkMonitoringInstanceHandler:            handlers.VPSLinkMonitoringInstance(vpsMonitoringInstanceLinkRepo),
 		VPSUnlinkMonitoringInstanceHandler:          handlers.VPSUnlinkMonitoringInstance(vpsMonitoringInstanceLinkRepo),
