@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.77.6](https://github.com/xiangnan0811/houfeng/compare/v0.77.5...v0.77.6) (2026-08-28)
+
+
+### Bug Fixes
+
+* harden VPS detail ownership and subscription contracts ([#466](https://github.com/xiangnan0811/houfeng/issues/466)) ([e3ee6aa](https://github.com/xiangnan0811/houfeng/commit/e3ee6aa2333b9d34f72d6267eb106e5a8208501d))
+
 ## [0.77.5](https://github.com/xiangnan0811/houfeng/compare/v0.77.4...v0.77.5) (2026-08-27)
 
 
