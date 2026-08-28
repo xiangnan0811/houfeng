@@ -6,6 +6,7 @@ import { HealthBadge } from '../assetPageBadges'
 type VPSMonitoringInstanceLinksSectionProps = {
   monitoring: VPSMonitoringInstanceSummary[]
   readOnly?: boolean
+  writeBlocked?: boolean
   unlinkingMonitoringInstanceId: string | null
   pendingUnlinkMonitoringInstance: VPSMonitoringInstanceSummary | null
   linkFeedback: string | null
@@ -21,6 +22,7 @@ type VPSMonitoringInstanceLinksSectionProps = {
 export function VPSMonitoringInstanceLinksSection({
   monitoring,
   readOnly = false,
+  writeBlocked = false,
   unlinkingMonitoringInstanceId,
   pendingUnlinkMonitoringInstance,
   linkFeedback,
@@ -49,12 +51,12 @@ export function VPSMonitoringInstanceLinksSection({
         </span>
         {!readOnly && hasNoActiveLinks ? (
           <div className="section-heading__actions">
-            <Button variant="primary" size="sm" onClick={onCreateMonitoringInstance}>接入/升级 agent</Button>
-            <Button variant="secondary" size="sm" onClick={onOpenLink}>关联已有监控实例</Button>
+            <Button variant="primary" size="sm" disabled={writeBlocked} onClick={onCreateMonitoringInstance}>接入/升级 agent</Button>
+            <Button variant="secondary" size="sm" disabled={writeBlocked} onClick={onOpenLink}>关联已有监控实例</Button>
           </div>
         ) : !readOnly && singleActiveLink ? (
           <div className="section-heading__actions">
-            <Button variant="primary" size="sm" onClick={() => onUpgradeMonitoringInstance(singleActiveLink)}>接入/升级 agent</Button>
+            <Button variant="primary" size="sm" disabled={writeBlocked} onClick={() => onUpgradeMonitoringInstance(singleActiveLink)}>接入/升级 agent</Button>
           </div>
         ) : null}
       </div>
@@ -90,7 +92,7 @@ export function VPSMonitoringInstanceLinksSection({
             <Button
               type="button"
               variant="secondary"
-              disabled={unlinkingMonitoringInstanceId === pendingUnlinkMonitoringInstance.monitoring_instance_id}
+              disabled={writeBlocked || unlinkingMonitoringInstanceId === pendingUnlinkMonitoringInstance.monitoring_instance_id}
               onClick={onCancelUnlinkMonitoringInstance}
             >
               取消
@@ -98,7 +100,7 @@ export function VPSMonitoringInstanceLinksSection({
             <Button
               type="button"
               variant="danger"
-              disabled={unlinkingMonitoringInstanceId === pendingUnlinkMonitoringInstance.monitoring_instance_id}
+              disabled={writeBlocked || unlinkingMonitoringInstanceId === pendingUnlinkMonitoringInstance.monitoring_instance_id}
               onClick={() => onConfirmUnlinkMonitoringInstance(pendingUnlinkMonitoringInstance)}
             >
               {unlinkingMonitoringInstanceId === pendingUnlinkMonitoringInstance.monitoring_instance_id ? '解除中…' : '确认解除关联'}
@@ -133,7 +135,7 @@ export function VPSMonitoringInstanceLinksSection({
                   <Button
                     variant="ghost"
                     size="sm"
-                    disabled={unlinkingMonitoringInstanceId !== null}
+                    disabled={writeBlocked || unlinkingMonitoringInstanceId !== null}
                     onClick={() => onUpgradeMonitoringInstance(monitoringInstance)}
                   >
                     接入/升级 agent
@@ -141,7 +143,7 @@ export function VPSMonitoringInstanceLinksSection({
                   <Button
                     variant="ghost"
                     size="sm"
-                    disabled={unlinkingMonitoringInstanceId !== null}
+                    disabled={writeBlocked || unlinkingMonitoringInstanceId !== null}
                     onClick={() => onRequestUnlinkMonitoringInstance(monitoringInstance)}
                   >
                     {unlinkingMonitoringInstanceId === monitoringInstance.monitoring_instance_id ? '解除中…' : '解除关联'}

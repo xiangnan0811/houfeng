@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type RefObject } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
@@ -22,6 +22,7 @@ import type {
   ProviderRecord,
   VPSAssetDetail,
 } from '../../lib/types'
+import { useOptionalVPSWriteRegistry } from '../../lib/vpsWriteRegistry-context'
 import { VPSFactsEditForm } from './VPSFactsEditForm'
 import type { VPSManagementController } from './hooks/useVPSManagementController'
 import { VPSRenewalDecisionForm } from './VPSRenewalDecisionForm'
@@ -53,6 +54,14 @@ import {
   type ManagementFeedbackAction,
   type VPSVersionConflictState,
 } from './vpsManagementHelpers'
+import {
+  createVPSWriteOwnerStore,
+  type VPSCreateSettleOutcome,
+  type VPSPreparedCreateOwner,
+  type VPSWriteOperation,
+  type VPSWriteOwner,
+  type VPSWriteOwnerStore,
+} from './vpsWriteOwnerStore'
 
 type Props = {
   vpsId: string
@@ -61,6 +70,8 @@ type Props = {
   management: VPSManagementController
   managementTriggerRef: RefObject<HTMLButtonElement | null>
   onOverviewRefresh: () => Promise<boolean>
+  writeOwnerStore?: VPSWriteOwnerStore
+  viewToken?: string
 }
 
 type PageFeedback = {
@@ -76,6 +87,8 @@ export function VPSOverviewManagementActions({
   management,
   managementTriggerRef,
   onOverviewRefresh,
+  writeOwnerStore: providedWriteOwnerStore,
+  viewToken: providedViewToken,
 }: Props) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -97,7 +110,6 @@ export function VPSOverviewManagementActions({
   const [archiveReviewLoading, setArchiveReviewLoading] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [archiveConfirmationName, setArchiveConfirmationName] = useState('')
-  const [submitting, setSubmitting] = useState(false)
   const [mutationError, setMutationError] = useState<string | null>(null)
   const [mutationConflict, setMutationConflict] = useState<VPSVersionConflictState | null>(null)
   const [readonlyBlocked, setReadonlyBlocked] = useState(false)
@@ -105,8 +117,18 @@ export function VPSOverviewManagementActions({
   const [loadRevision, setLoadRevision] = useState(0)
   const requestIdRef = useRef(0)
   const mutationGenerationRef = useRef(0)
-  const submissionLockRef = useRef(false)
-  const subscriptionIdempotencyKeyRef = useRef(crypto.randomUUID())
+  const contextWriteOwnerStore = useOptionalVPSWriteRegistry()
+  const [localWriteOwnerStore] = useState(createVPSWriteOwnerStore)
+  const writeOwnerStore = providedWriteOwnerStore ?? contextWriteOwnerStore ?? localWriteOwnerStore
+  const [localViewToken] = useState(() => crypto.randomUUID())
+  const viewToken = providedViewToken ?? localViewToken
+  const writeOwners = useSyncExternalStore(
+    writeOwnerStore.subscribe,
+    writeOwnerStore.getSnapshot,
+    writeOwnerStore.getSnapshot,
+  )
+  const currentWriteOwner = writeOwners.get(vpsId)
+  const submitting = Boolean(currentWriteOwner)
   const factDraftRef = useRef<FactEditFormState | null>(null)
   const mutationConflictRef = useRef<VPSVersionConflictState | null>(null)
   const decisionDraftRef = useRef<DecisionDraftState | null>(null)
@@ -134,20 +156,13 @@ export function VPSOverviewManagementActions({
 
   useEffect(() => {
     mutationGenerationRef.current += 1
-    submissionLockRef.current = false
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- route identity invalidates any in-flight mutation UI owner
-    setSubmitting(false)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- route identity invalidates prior conflict UI before the new route can mutate
     setMutationConflict(null)
     setReadonlyBlocked(false)
     return () => {
       mutationGenerationRef.current += 1
-      submissionLockRef.current = false
     }
   }, [vpsId])
-
-  useEffect(() => {
-    subscriptionIdempotencyKeyRef.current = crypto.randomUUID()
-  }, [subscriptionDraft])
 
   useEffect(() => {
     const workbench = searchParams.get('workbench')
@@ -279,21 +294,36 @@ export function VPSOverviewManagementActions({
     setLoadRevision((current) => current + 1)
   }
 
-  function beginSubmission(): number | null {
-    if (submissionLockRef.current) return null
-    submissionLockRef.current = true
-    setSubmitting(true)
-    return ++mutationGenerationRef.current
+  function beginSubmission(operation: VPSWriteOperation): VPSWriteOwner | null {
+    const owner = writeOwnerStore.begin({
+      vpsId,
+      viewToken,
+      generation: mutationGenerationRef.current + 1,
+      operation,
+    })
+    if (!owner) return null
+    mutationGenerationRef.current = owner.generation
+    return owner
   }
 
   function submissionIsCurrent(generation: number): boolean {
     return mutationGenerationRef.current === generation
   }
 
-  function finishSubmission(generation: number) {
-    if (!submissionIsCurrent(generation)) return
-    submissionLockRef.current = false
-    setSubmitting(false)
+  function finishSubmission(owner: VPSWriteOwner) {
+    writeOwnerStore.finish(owner)
+  }
+
+  async function prepareCreate(owner: VPSWriteOwner, wireBody: unknown): Promise<VPSPreparedCreateOwner | null> {
+    const preparedOwner = await writeOwnerStore.prepareCreate(owner, wireBody)
+    if (!preparedOwner) return null
+    if (submissionIsCurrent(owner.generation)) return preparedOwner
+    writeOwnerStore.finishCreate(preparedOwner, 'not_sent')
+    return null
+  }
+
+  function finishCreate(owner: VPSPreparedCreateOwner, outcome: VPSCreateSettleOutcome) {
+    writeOwnerStore.finishCreate(owner, outcome)
   }
 
   function closePanel() {
@@ -341,8 +371,9 @@ export function VPSOverviewManagementActions({
       return
     }
 
-    const generation = beginSubmission()
-    if (generation === null) return
+    const owner = beginSubmission('facts')
+    if (!owner) return
+    const { generation } = owner
     try {
       await updateVPSAsset(detail.vps_id, input, { expectedUpdatedAt: detail.updated_at })
       if (!submissionIsCurrent(generation)) return
@@ -371,7 +402,7 @@ export function VPSOverviewManagementActions({
       if (!submissionIsCurrent(generation)) return
       setMutationError(describeManagementError(error, '更新基础信息失败'))
     } finally {
-      finishSubmission(generation)
+      finishSubmission(owner)
     }
   }
 
@@ -393,8 +424,9 @@ export function VPSOverviewManagementActions({
       return
     }
 
-    const generation = beginSubmission()
-    if (generation === null) return
+    const owner = beginSubmission('decision')
+    if (!owner) return
+    const { generation } = owner
     try {
       const reason = decisionDraft.reason.trim()
       const updated = await updateVPSAsset(detail.vps_id, {
@@ -443,13 +475,14 @@ export function VPSOverviewManagementActions({
       if (!submissionIsCurrent(generation)) return
       setMutationError(describeManagementError(error, '更新续费决策失败'))
     } finally {
-      finishSubmission(generation)
+      finishSubmission(owner)
     }
   }
 
   async function loadLatestVersion() {
-    const generation = beginSubmission()
-    if (generation === null) return
+    const owner = beginSubmission(mutationConflictRef.current?.draftKind === 'decision' ? 'decision' : 'facts')
+    if (!owner) return
+    const { generation } = owner
     try {
       const latest = await getVPSAsset(vpsId)
       if (!submissionIsCurrent(generation)) return
@@ -467,7 +500,7 @@ export function VPSOverviewManagementActions({
         setDetail(latest)
         const refreshed = await onOverviewRefresh()
         if (!submissionIsCurrent(generation)) return
-        finishSubmission(generation)
+        finishSubmission(owner)
         setPageFeedback(refreshed
           ? { tone: 'success', message: '该决策已由其他操作完成' }
           : { tone: 'warning', message: '该决策已由其他操作完成，但概览刷新失败，请稍后手动重试。' })
@@ -503,7 +536,7 @@ export function VPSOverviewManagementActions({
       if (!submissionIsCurrent(generation)) return
       setMutationError(describeManagementError(error, '加载最新版本失败'))
     } finally {
-      finishSubmission(generation)
+      finishSubmission(owner)
     }
   }
 
@@ -520,10 +553,16 @@ export function VPSOverviewManagementActions({
       return
     }
 
-    const generation = beginSubmission()
-    if (generation === null) return
+    const owner = beginSubmission('subscription')
+    if (!owner) return
+    const { generation } = owner
+    let preparedOwner: VPSPreparedCreateOwner | null = null
+    let settleOutcome: VPSCreateSettleOutcome = 'unknown'
     try {
-      await createVPSSubscription(detail.vps_id, input, subscriptionIdempotencyKeyRef.current)
+      preparedOwner = await prepareCreate(owner, input)
+      if (!preparedOwner) return
+      await createVPSSubscription(detail.vps_id, input, preparedOwner.idempotencyKey)
+      settleOutcome = 'confirmed'
       if (!submissionIsCurrent(generation)) return
       const refreshed = await onOverviewRefresh()
       if (!submissionIsCurrent(generation)) return
@@ -533,20 +572,20 @@ export function VPSOverviewManagementActions({
       management.closePanel()
       queueMicrotask(() => managementTriggerRef.current?.focus())
     } catch (error: unknown) {
+      if (isIdempotencyKeyReused(error)) settleOutcome = 'idempotency_key_reused'
       if (!submissionIsCurrent(generation)) return
-      if (isIdempotencyKeyReused(error)) {
-        subscriptionIdempotencyKeyRef.current = crypto.randomUUID()
-      }
       setMutationError(describeManagementError(error, '创建订阅失败'))
     } finally {
-      finishSubmission(generation)
+      if (preparedOwner) finishCreate(preparedOwner, settleOutcome)
+      else finishSubmission(owner)
     }
   }
 
   async function submitCancellation(input: ApplyCancellationInput) {
     if (!cancellationPreview) return
-    const generation = beginSubmission()
-    if (generation === null) return
+    const owner = beginSubmission('cancellation')
+    if (!owner) return
+    const { generation } = owner
     setMutationError(null)
     setCancellationError(null)
     try {
@@ -585,7 +624,7 @@ export function VPSOverviewManagementActions({
       }
       setMutationError(describeManagementError(error, '执行取消/退役失败'))
     } finally {
-      finishSubmission(generation)
+      finishSubmission(owner)
     }
   }
 
@@ -604,8 +643,9 @@ export function VPSOverviewManagementActions({
       return
     }
 
-    const generation = beginSubmission()
-    if (generation === null) return
+    const owner = beginSubmission('lifecycle')
+    if (!owner) return
+    const { generation } = owner
     setArchiveError(null)
     try {
       await archiveVPS(vpsId, { confirmation_name: confirmationName })
@@ -615,7 +655,7 @@ export function VPSOverviewManagementActions({
       if (!submissionIsCurrent(generation)) return
       setArchiveError(describeManagementError(error, '归档 VPS 失败'))
     } finally {
-      finishSubmission(generation)
+      finishSubmission(owner)
     }
   }
 
@@ -631,6 +671,11 @@ export function VPSOverviewManagementActions({
 
   return (
     <>
+      {currentWriteOwner && currentWriteOwner.viewToken !== viewToken ? (
+        <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
+          操作处理中，请等待当前写入完成。
+        </p>
+      ) : null}
       {pageFeedback && panel === null ? (
         <p
           className={pageFeedback.tone === 'warning'

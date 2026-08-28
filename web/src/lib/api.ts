@@ -661,16 +661,25 @@ export function listVPSExperienceLogs(vpsId: string) {
   return requestJSON<VPSExperienceLogRecord[]>(`/api/vps/${vpsId}/experience-logs`)
 }
 
-export function createVPSExperienceLog(vpsId: string, input: CreateVPSExperienceLogInput): Promise<VPSExperienceLogRecord> {
-  return postJSONBody<VPSExperienceLogRecord>(`/api/vps/${vpsId}/experience-logs`, input)
+export function createVPSExperienceLog(
+  vpsId: string,
+  input: CreateVPSExperienceLogInput,
+  idempotencyKey: string,
+): Promise<VPSExperienceLogRecord> {
+  return requestJSON<VPSExperienceLogRecord>(
+    `/api/vps/${vpsId}/experience-logs`,
+    jsonBodyInit('POST', input, { 'Idempotency-Key': idempotencyKey }),
+  )
 }
 
 export function listVPSServices(vpsId: string) {
   return requestJSON<AssetServiceRecord[]>(`/api/vps/${vpsId}/services`)
 }
 
-export function createVPSService(vpsId: string, input: CreateAssetServiceInput): Promise<AssetServiceRecord> {
-  const body: Omit<CreateAssetServiceInput, 'vps_id'> = {
+export function buildVPSServiceCreateBody(
+  input: CreateAssetServiceInput,
+): Omit<CreateAssetServiceInput, 'vps_id'> {
+  return {
     ...(input.target_id === undefined ? {} : { target_id: input.target_id }),
     name: input.name,
     ...(input.service_type === undefined ? {} : { service_type: input.service_type }),
@@ -680,15 +689,28 @@ export function createVPSService(vpsId: string, input: CreateAssetServiceInput):
     ...(input.labels === undefined ? {} : { labels: input.labels }),
     ...(input.note === undefined ? {} : { note: input.note }),
   }
-  return postJSONBody<AssetServiceRecord>(`/api/vps/${vpsId}/services`, body)
+}
+
+export function createVPSService(
+  vpsId: string,
+  input: CreateAssetServiceInput,
+  idempotencyKey: string,
+): Promise<AssetServiceRecord> {
+  const body = buildVPSServiceCreateBody(input)
+  return requestJSON<AssetServiceRecord>(
+    `/api/vps/${vpsId}/services`,
+    jsonBodyInit('POST', body, { 'Idempotency-Key': idempotencyKey }),
+  )
 }
 
 export function listVPSDomains(vpsId: string) {
   return requestJSON<AssetDomainRecord[]>(`/api/vps/${vpsId}/domains`)
 }
 
-export function createVPSDomain(vpsId: string, input: CreateAssetDomainInput): Promise<AssetDomainRecord> {
-  const body: Omit<CreateAssetDomainInput, 'vps_id'> = {
+export function buildVPSDomainCreateBody(
+  input: CreateAssetDomainInput,
+): Omit<CreateAssetDomainInput, 'vps_id'> {
+  return {
     ...(input.service_id === undefined ? {} : { service_id: input.service_id }),
     ...(input.target_id === undefined ? {} : { target_id: input.target_id }),
     domain_name: input.domain_name,
@@ -701,7 +723,18 @@ export function createVPSDomain(vpsId: string, input: CreateAssetDomainInput): P
     ...(input.labels === undefined ? {} : { labels: input.labels }),
     ...(input.note === undefined ? {} : { note: input.note }),
   }
-  return postJSONBody<AssetDomainRecord>(`/api/vps/${vpsId}/domains`, body)
+}
+
+export function createVPSDomain(
+  vpsId: string,
+  input: CreateAssetDomainInput,
+  idempotencyKey: string,
+): Promise<AssetDomainRecord> {
+  const body = buildVPSDomainCreateBody(input)
+  return requestJSON<AssetDomainRecord>(
+    `/api/vps/${vpsId}/domains`,
+    jsonBodyInit('POST', body, { 'Idempotency-Key': idempotencyKey }),
+  )
 }
 
 export function listVPSMonitoringInstances(vpsId: string) {
@@ -710,9 +743,13 @@ export function listVPSMonitoringInstances(vpsId: string) {
 
 export function createVPSMonitoringInstance(
   vpsId: string,
-  input: CreateVPSMonitoringInstanceInput = {},
+  input: CreateVPSMonitoringInstanceInput,
+  idempotencyKey: string,
 ): Promise<CreateVPSMonitoringInstanceResponse> {
-  return postJSONBody<CreateVPSMonitoringInstanceResponse>(`/api/vps/${vpsId}/monitoring-instances`, input)
+  return requestJSON<CreateVPSMonitoringInstanceResponse>(
+    `/api/vps/${vpsId}/monitoring-instances`,
+    jsonBodyInit('POST', input, { 'Idempotency-Key': idempotencyKey }),
+  )
 }
 
 export function linkVPSMonitoringInstance(vpsId: string, input: LinkVPSMonitoringInstanceInput): Promise<VPSMonitoringInstanceLinkRecord> {

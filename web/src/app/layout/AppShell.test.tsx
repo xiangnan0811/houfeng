@@ -1,5 +1,6 @@
+import { useSyncExternalStore, type PropsWithChildren } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -9,6 +10,23 @@ import {
 import { AppShell } from './AppShell'
 import * as authCtx from '../../lib/auth-context'
 import type { User } from '../../lib/auth-client'
+import { useVPSWriteRegistry } from '../../lib/vpsWriteRegistry-context'
+
+const delayedRegistryProvider = vi.hoisted(() => ({
+  pending: null as Promise<void> | null,
+}))
+
+vi.mock('../../lib/vpsWriteRegistry-context', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/vpsWriteRegistry-context')>()
+  const { createElement } = await import('react')
+  return {
+    ...actual,
+    VPSWriteRegistryProvider: ({ children }: PropsWithChildren) => {
+      if (delayedRegistryProvider.pending) throw delayedRegistryProvider.pending
+      return createElement(actual.VPSWriteRegistryProvider, null, children)
+    },
+  }
+})
 
 const baseAuth = {
   login: vi.fn(),
@@ -93,8 +111,35 @@ function renderAuthenticatedAppShell(authUser: User = user) {
   )
 }
 
+function WriteRegistryProbe({ page }: { page: 'detail' | 'dashboard' }) {
+  const registry = useVPSWriteRegistry()
+  const owners = useSyncExternalStore(registry.subscribe, registry.getSnapshot, registry.getSnapshot)
+  const owner = owners.get('vps_a')
+
+  return (
+    <div>
+      <p>{page}:{owner ? 'owned' : 'idle'}</p>
+      <button
+        type="button"
+        onClick={() => registry.begin({
+          vpsId: 'vps_a',
+          viewToken: `${page}-view`,
+          generation: 1,
+          operation: 'subscription',
+        })}
+      >
+        开始写入
+      </button>
+      <Link to={page === 'detail' ? '/dashboard' : '/vps/vps_a'}>
+        {page === 'detail' ? '前往工作台' : '返回 VPS'}
+      </Link>
+    </div>
+  )
+}
+
 describe('AppShell', () => {
   afterEach(() => {
+    delayedRegistryProvider.pending = null
     vi.useRealTimers()
     vi.restoreAllMocks()
     Object.defineProperty(document, 'visibilityState', {
@@ -117,6 +162,70 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
     expect(screen.getByText('admin')).toBeInTheDocument()
     expect(document.title).toBe(PRODUCT_FULL_NAME_ZH)
+  })
+
+  it('owns one route-persistent VPS write registry and resets it when the authenticated user changes', async () => {
+    stubDashboardFetch(vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
+    let currentUser: User = user
+    vi.spyOn(authCtx, 'useAuth').mockImplementation(() => ({
+      ...baseAuth,
+      user: currentUser,
+      loading: false,
+    }))
+
+    const routeTree = () => (
+      <MemoryRouter initialEntries={['/vps/vps_a']}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route path="vps/:vpsId" element={<WriteRegistryProbe page="detail" />} />
+            <Route path="dashboard" element={<WriteRegistryProbe page="dashboard" />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    )
+    const { rerender } = render(routeTree())
+
+    fireEvent.click(await screen.findByRole('button', { name: '开始写入' }))
+    expect(screen.getByText('detail:owned')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('link', { name: '前往工作台' }))
+    expect(screen.getByText('dashboard:owned')).toBeInTheDocument()
+
+    currentUser = { ...user, user_id: 'u2', username: 'operator' }
+    rerender(routeTree())
+    expect(await screen.findByText('dashboard:idle')).toBeInTheDocument()
+  })
+
+  it('announces route loading while the lazy registry provider is pending', async () => {
+    stubDashboardFetch(vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
+    vi.spyOn(authCtx, 'useAuth').mockReturnValue({
+      ...baseAuth,
+      user,
+      loading: false,
+    })
+    let releaseProvider!: () => void
+    delayedRegistryProvider.pending = new Promise<void>((resolve) => {
+      releaseProvider = resolve
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route path="dashboard" element={<p>工作台路由已加载</p>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const loadingMessage = await screen.findByText('正在加载页面…')
+    expect(loadingMessage).toHaveAttribute('role', 'status')
+    expect(screen.queryByText('工作台路由已加载')).not.toBeInTheDocument()
+
+    await act(async () => {
+      delayedRegistryProvider.pending = null
+      releaseProvider()
+    })
+    expect(await screen.findByText('工作台路由已加载')).toBeInTheDocument()
   })
 
   it('starts authenticated keyboard navigation with a skip link to a focusable main', () => {

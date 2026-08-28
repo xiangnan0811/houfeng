@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { ChangePasswordModal } from './ChangePasswordModal'
@@ -13,6 +13,11 @@ import {
   SHELL_SUMMARY_FRESHNESS_MS,
   type DashboardSummaryState,
 } from './shellSummaryModel'
+
+const LazyVPSWriteRegistryProvider = lazy(async () => {
+  const { VPSWriteRegistryProvider } = await import('../../lib/vpsWriteRegistry-context')
+  return { default: VPSWriteRegistryProvider }
+})
 
 export function AppShell() {
   const { user, logout } = useAuth()
@@ -132,7 +137,15 @@ function AuthenticatedAppShell({ user, logout }: AuthenticatedAppShellProps) {
         <div className="main-wrap">
           <TopBar sync={sync} user={user} />
           <main className="main" id="main-content" tabIndex={-1}>
-            <Outlet />
+            <Suspense fallback={(
+              <p className="asset-operation-feedback asset-operation-feedback--notice" role="status" aria-live="polite">
+                正在加载页面…
+              </p>
+            )}>
+              <LazyVPSWriteRegistryProvider>
+                <Outlet />
+              </LazyVPSWriteRegistryProvider>
+            </Suspense>
           </main>
         </div>
         {changePwOpen && <ChangePasswordModal onClose={() => setChangePwOpen(false)} />}

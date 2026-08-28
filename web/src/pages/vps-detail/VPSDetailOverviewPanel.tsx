@@ -9,6 +9,7 @@ type VPSDetailOverviewPanelProps = {
   vpsId: string
   isArchived: boolean
   lifecycleSubmitting: boolean
+  writeBlocked?: boolean
   onDecisionEdit: () => void
   onTimelineOpen: () => void
   onServicesOpen: () => void
@@ -45,6 +46,7 @@ export function VPSDetailOverviewPanel({
   vpsId,
   isArchived,
   lifecycleSubmitting,
+  writeBlocked = false,
   onDecisionEdit,
   onTimelineOpen,
   onServicesOpen,
@@ -174,14 +176,14 @@ export function VPSDetailOverviewPanel({
               <button type="button" onClick={() => runMenuAction(onServiceCreate)}>新增服务</button>
               <button type="button" onClick={() => runMenuAction(onDomainCreate)}>新增域名</button>
               {isArchived ? (
-                <button type="button" disabled={lifecycleSubmitting} onClick={() => runMenuAction(onRestoreStart)}>
+                <button type="button" disabled={writeBlocked} onClick={() => runMenuAction(onRestoreStart)}>
                   {lifecycleSubmitting ? '恢复中…' : '恢复为闲置'}
                 </button>
               ) : (
                 <button
                   type="button"
                   className="watchtower-actions-menu__danger"
-                  disabled={lifecycleSubmitting}
+                  disabled={writeBlocked}
                   onClick={() => runMenuAction(onArchiveStart)}
                 >
                   {lifecycleSubmitting ? '归档中…' : '归档 VPS'}
