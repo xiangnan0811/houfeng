@@ -70,6 +70,9 @@ export function VPSOverviewPageView({
       case 'retry_overview':
         onRefresh()
         return
+      case 'open_monitoring_onboarding':
+        management.openPanel('monitoring-instance-create')
+        return
       case 'open_monitoring_instances':
         management.openPanel('monitoring-instance-evidence')
         return

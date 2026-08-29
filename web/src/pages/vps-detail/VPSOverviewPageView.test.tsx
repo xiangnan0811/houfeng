@@ -295,6 +295,14 @@ describe('VPSOverviewPageView', () => {
         primary_action: { id: 'retry_overview', label: '重试概览' },
         secondary_actions: [],
       },
+      {
+        rule_id: 'monitoring.unlinked.v1',
+        severity: 'notice',
+        title: '未关联监控实例',
+        source: 'monitoring',
+        primary_action: { id: 'open_monitoring_instances', label: '创建并接入 agent' },
+        secondary_actions: [],
+      },
     ]
     overview.relations = [
       ...overview.relations,
@@ -327,12 +335,14 @@ describe('VPSOverviewPageView', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看续费' }))
     fireEvent.click(screen.getByRole('button', { name: '打开管理' }))
     fireEvent.click(screen.getByRole('button', { name: '重试概览' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建并接入 agent' }))
     fireEvent.click(screen.getByRole('button', { name: /监控实例/ }))
     fireEvent.click(screen.getByRole('button', { name: /^服务/ }))
     fireEvent.click(screen.getByRole('button', { name: /^域名/ }))
 
     expect(management.openPanel).toHaveBeenCalledWith('subscription')
     expect(management.openPanel).toHaveBeenCalledWith('decision')
+    expect(management.openPanel).toHaveBeenCalledWith('monitoring-instance-create')
     expect(management.openPanel).toHaveBeenCalledWith('monitoring-instance-evidence')
     expect(management.openPanel).toHaveBeenCalledWith('services-detail')
     expect(management.openPanel).toHaveBeenCalledWith('domains-detail')

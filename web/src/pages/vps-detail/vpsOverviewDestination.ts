@@ -3,6 +3,7 @@ export type VPSOverviewCommand =
   | 'open_renewal_decision'
   | 'open_management'
   | 'retry_overview'
+  | 'open_monitoring_onboarding'
   | 'open_monitoring_instances'
   | 'open_services'
   | 'open_domains'
@@ -33,17 +34,21 @@ function isAppRelativeRoute(route: string): boolean {
   return route.startsWith('/') && !route.startsWith('//')
 }
 
+export function isStableMonitoringInstanceID(value: unknown): value is string {
+  return typeof value === 'string' && MONITORING_INSTANCE_ID.test(value)
+}
+
 function isMonitoringInstanceDetailRoute(route: string): boolean {
   if (!isAppRelativeRoute(route) || !route.startsWith('/monitoring/')) return false
   const rest = route.slice('/monitoring/'.length)
-  return rest.length > 0 && !rest.includes('/') && !rest.includes('?') && !rest.includes('#') && MONITORING_INSTANCE_ID.test(rest)
+  return rest.length > 0 && !rest.includes('/') && !rest.includes('?') && !rest.includes('#') && isStableMonitoringInstanceID(rest)
 }
 
 function isMonitoringInstanceEventsRoute(route: string): boolean {
   if (!isAppRelativeRoute(route) || route.includes('#') || route.includes('\t')) return false
   if (route.includes('&&') || route.endsWith('&') || route.includes('%')) return false
   const match = route.match(MONITORING_INSTANCE_EVENTS_ROUTE)
-  return match !== null && MONITORING_INSTANCE_ID.test(match[1] ?? '')
+  return match !== null && isStableMonitoringInstanceID(match[1])
 }
 
 const anomalyDestinations: Readonly<Record<string, ExpectedDestination>> = {
@@ -76,7 +81,7 @@ const anomalyDestinations: Readonly<Record<string, ExpectedDestination>> = {
   },
   'monitoring.unlinked.v1\u0000open_monitoring_instances': {
     kind: 'command',
-    command: 'open_monitoring_instances',
+    command: 'open_monitoring_onboarding',
   },
   'renewal.subscription.missing.v1\u0000open_subscription': {
     kind: 'command',

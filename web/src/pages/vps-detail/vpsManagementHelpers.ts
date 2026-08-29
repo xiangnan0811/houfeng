@@ -9,10 +9,16 @@ export type ManagementFeedbackAction = {
 
 const CANCELLATION_LIKE_RENEWAL = new Set(['cancel', 'auto_renew_cancelled', 'migrate'])
 
-export type OverviewWorkbenchPanel = 'cancellation' | 'subscription'
+export type OverviewWorkbenchPanel =
+  | 'cancellation'
+  | 'subscription'
+  | 'monitoring-instance-create'
 
 export function parseOverviewWorkbench(value: string | null | undefined): OverviewWorkbenchPanel | null {
   const normalized = value?.trim()
+  if (normalized === 'monitoring' || normalized === 'monitoring-instance-create') {
+    return 'monitoring-instance-create'
+  }
   if (normalized === 'cancellation' || normalized === 'subscription') return normalized
   return null
 }

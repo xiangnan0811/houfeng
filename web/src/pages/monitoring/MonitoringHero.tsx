@@ -30,8 +30,8 @@ export function MonitoringHero({
           <p className="page-sub">观察 agent 接入后的监控实例、心跳、主机性能与运行控制。</p>
         </div>
         <div className="header-actions">
-          <Link className="btn md primary" to="/vps">
-            从 VPS 接入 agent
+          <Link className="btn md primary" to="/vps?view=unlinked">
+            从未关联 VPS 接入 agent
           </Link>
         </div>
       </div>

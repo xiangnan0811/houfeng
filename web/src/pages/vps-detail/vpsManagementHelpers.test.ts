@@ -62,12 +62,15 @@ describe('isIdempotencyKeyReused', () => {
 })
 
 describe('parseOverviewWorkbench', () => {
-  it('allowlists cancellation and subscription only', () => {
+  it('allowlists management panels and normalizes both monitoring aliases', () => {
     expect(parseOverviewWorkbench('cancellation')).toBe('cancellation')
     expect(parseOverviewWorkbench('subscription')).toBe('subscription')
+    expect(parseOverviewWorkbench('monitoring')).toBe('monitoring-instance-create')
+    expect(parseOverviewWorkbench('monitoring-instance-create')).toBe('monitoring-instance-create')
     expect(parseOverviewWorkbench('decision')).toBeNull()
     expect(parseOverviewWorkbench('archive')).toBeNull()
     expect(parseOverviewWorkbench('facts')).toBeNull()
+    expect(parseOverviewWorkbench(' monitoring ')).toBe('monitoring-instance-create')
     expect(parseOverviewWorkbench(null)).toBeNull()
   })
 })

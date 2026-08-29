@@ -282,15 +282,23 @@ function VPSOverviewRoute({
   const management = useVPSManagementController()
   const managementTriggerRef = useRef<HTMLButtonElement>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  const openManagementPanel = management.openPanel
+  const pendingWorkbenchPanelRef = useRef<ReturnType<typeof parseOverviewWorkbench>>(null)
 
   useEffect(() => {
-    if (!searchParams.has('workbench')) return
-    const panel = parseOverviewWorkbench(searchParams.get('workbench'))
-    if (panel) management.openPanel(panel)
-    const next = new URLSearchParams(searchParams)
-    next.delete('workbench')
-    setSearchParams(next, { replace: true })
-  }, [management, searchParams, setSearchParams])
+    if (searchParams.has('workbench')) {
+      pendingWorkbenchPanelRef.current = parseOverviewWorkbench(searchParams.get('workbench'))
+      const next = new URLSearchParams(searchParams)
+      next.delete('workbench')
+      setSearchParams(next, { replace: true })
+      return
+    }
+
+    const pendingPanel = pendingWorkbenchPanelRef.current
+    if (!pendingPanel) return
+    pendingWorkbenchPanelRef.current = null
+    openManagementPanel(pendingPanel)
+  }, [openManagementPanel, searchParams, setSearchParams])
 
   if (state.status === 'loading' && !state.overview) {
     return <PageState kind="loading" title="正在加载 VPS 概览" />
@@ -334,7 +342,6 @@ function VPSOverviewRoute({
       <VPSOverviewManagementActions
         vpsId={state.overview.identity.vps_id}
         displayName={state.overview.identity.display_name}
-        lifecycleStatus={state.overview.identity.lifecycle_status}
         management={management}
         managementTriggerRef={managementTriggerRef}
         onOverviewRefresh={commands.refresh}

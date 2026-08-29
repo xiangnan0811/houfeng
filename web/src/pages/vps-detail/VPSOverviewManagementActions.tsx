@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type RefObject } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import { Button, Modal } from '../../components/atoms'
@@ -26,6 +26,7 @@ import { useOptionalVPSWriteRegistry } from '../../lib/vpsWriteRegistry-context'
 import { VPSFactsEditForm } from './VPSFactsEditForm'
 import type { VPSManagementController } from './hooks/useVPSManagementController'
 import { VPSRenewalDecisionForm } from './VPSRenewalDecisionForm'
+import { VPSOverviewMonitoringOnboarding } from './VPSOverviewMonitoringOnboarding'
 import { VPSOverviewRelationPanels } from './VPSOverviewRelationPanels'
 import { VPSSubscriptionForm } from './VPSSubscriptionForm'
 import type { DecisionDraftState, FactEditFormState, SubscriptionDraftState } from './types'
@@ -48,7 +49,6 @@ import {
   isTerminalVPSLifecycle,
   isVPSAssetReadonly,
   isVPSVersionConflict,
-  parseOverviewWorkbench,
   subscriptionLinkageAction,
   subscriptionLinkageNotice,
   type ManagementFeedbackAction,
@@ -66,7 +66,6 @@ import {
 type Props = {
   vpsId: string
   displayName: string
-  lifecycleStatus: string
   management: VPSManagementController
   managementTriggerRef: RefObject<HTMLButtonElement | null>
   onOverviewRefresh: () => Promise<boolean>
@@ -83,7 +82,6 @@ type PageFeedback = {
 export function VPSOverviewManagementActions({
   vpsId,
   displayName,
-  lifecycleStatus,
   management,
   managementTriggerRef,
   onOverviewRefresh,
@@ -91,7 +89,6 @@ export function VPSOverviewManagementActions({
   viewToken: providedViewToken,
 }: Props) {
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
   const [detail, setDetail] = useState<VPSAssetDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
@@ -163,18 +160,6 @@ export function VPSOverviewManagementActions({
       mutationGenerationRef.current += 1
     }
   }, [vpsId])
-
-  useEffect(() => {
-    const workbench = searchParams.get('workbench')
-    if (!workbench) return
-    const panel = parseOverviewWorkbench(workbench)
-    if (panel) management.openPanel(panel)
-    const next = new URLSearchParams(searchParams)
-    next.delete('workbench')
-    setSearchParams(next, { replace: true })
-    // Deep-link opens once per VPS identity; later search edits must not re-open closed panels.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vpsId, lifecycleStatus])
 
   useEffect(() => {
     if (!detailPanelOpen) return
@@ -703,6 +688,15 @@ export function VPSOverviewManagementActions({
           ) : null}
         </p>
       ) : null}
+
+      <VPSOverviewMonitoringOnboarding
+        vpsId={vpsId}
+        management={management}
+        managementTriggerRef={managementTriggerRef}
+        onOverviewRefresh={onOverviewRefresh}
+        writeOwnerStore={writeOwnerStore}
+        viewToken={viewToken}
+      />
 
       {relationPanelOpen ? (
         <VPSOverviewRelationPanels

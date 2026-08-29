@@ -89,7 +89,6 @@ function Harness({
       <VPSOverviewManagementActions
         vpsId={vpsId}
         displayName={vpsId === 'vps_a' ? '东京边缘' : '大阪边缘'}
-        lifecycleStatus="active"
         management={management}
         managementTriggerRef={triggerRef}
         onOverviewRefresh={onRefresh}
@@ -268,7 +267,6 @@ describe('VPSOverviewManagementActions', () => {
           <VPSOverviewManagementActions
             vpsId={vpsId}
             displayName={vpsId === 'vps_a' ? '东京边缘' : '大阪边缘'}
-            lifecycleStatus="to_cancel"
             management={management}
             managementTriggerRef={triggerRef}
             onOverviewRefresh={refresh}
@@ -314,7 +312,6 @@ describe('VPSOverviewManagementActions', () => {
           <VPSOverviewManagementActions
             vpsId="vps_a"
             displayName="东京边缘"
-            lifecycleStatus="to_cancel"
             management={management}
             managementTriggerRef={triggerRef}
             onOverviewRefresh={refresh}
@@ -842,39 +839,4 @@ describe('VPSOverviewManagementActions', () => {
     expect(screen.queryByTestId('location-path')).not.toBeInTheDocument()
   })
 
-  it('strips rejected archive workbench query without opening the panel', async () => {
-    function LocationProbe() {
-      const location = useLocation()
-      return <div data-testid="location-search">{location.search}</div>
-    }
-
-    function ArchiveHarness() {
-      const management = useVPSManagementController()
-      const triggerRef = useRef<HTMLButtonElement>(null)
-      return (
-        <>
-          <LocationProbe />
-          <VPSOverviewManagementActions
-            vpsId="vps_a"
-            displayName="东京边缘"
-            lifecycleStatus="active"
-            management={management}
-            managementTriggerRef={triggerRef}
-            onOverviewRefresh={vi.fn().mockResolvedValue(true)}
-          />
-        </>
-      )
-    }
-
-    render(
-      <MemoryRouter initialEntries={['/vps/vps_a?workbench=archive']}>
-        <Routes>
-          <Route path="/vps/:vpsId" element={<ArchiveHarness />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(''))
-    expect(screen.queryByRole('dialog', { name: '确认归档 VPS' })).not.toBeInTheDocument()
-  })
 })

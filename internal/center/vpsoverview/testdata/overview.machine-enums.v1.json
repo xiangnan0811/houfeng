@@ -39,7 +39,7 @@
       "source": "monitoring",
       "primary_action": {
         "id": "open_monitoring_instances",
-        "label": "关联监控"
+        "label": "创建并接入 agent"
       },
       "secondary_actions": []
     }

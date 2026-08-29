@@ -1,0 +1,6 @@
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Node 22 Web test, lint, build, browser and user-visible workflow quality gates"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Focused Go verification and evidence requirements for the backend action-label change"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Verify 0/1/many active-link behavior, exact onboarding URL and no duplicate Monitoring owner"}
+{"file":".trellis/spec/web/vps-detail-ownership.md","reason":"Review exact owner settlement, stale async suppression, refresh failure and retry semantics"}
+{"file":".trellis/tasks/08-29-monitoring-agent-bootstrap/design.md","reason":"Check all approved design decisions and out-of-scope boundaries against implementation"}
+{"file":".trellis/tasks/08-29-monitoring-agent-bootstrap/research/current-flow-audit.md","reason":"Re-test the original deadlock and distinguish the pre-existing attachment golden baseline failure"}
