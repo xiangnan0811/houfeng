@@ -1101,3 +1101,24 @@ Delivered the reviewed VPS write lifecycle, scoped create idempotency, and expli
 ### Next Steps
 
 - Use the clean synchronized main checkout for the next development task.
+
+
+## Session 265: Deliver existing NPM proxy compatibility
+
+**Date**: 2026-08-29
+**Task**: Deliver existing NPM proxy compatibility
+**Branch**: `codex/npm-network-compatibility-finish`
+
+### Summary
+
+Delivered shared-network and host-proxy Compose modes through PR #471, protected merge 123f8565, release PR #472, and v0.79.0 at 5eceb02f. Required PR and post-merge CI passed; publish run 33236465908 succeeded; four public deployment assets were downloaded, byte-checked against the tag, and rendered in both modes; Docker Hub image includes linux/amd64 and linux/arm64.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1fa3eb33af309f9b503f0a18c5e27d8d0459817a` | (see git log) |
+
+### Status
+
+[OK] **Completed**

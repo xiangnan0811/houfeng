@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 264
-- **Last Active**: 2026-08-28
+- **Total Sessions**: 265
+- **Last Active**: 2026-08-29
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~1103 | Active |
+| `journal-5.md` | ~1124 | Active |
 | `journal-4.md` | ~1998 | Archived |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 265 | 2026-08-29 | Deliver existing NPM proxy compatibility | `1fa3eb33af309f9b503f0a18c5e27d8d0459817a` | `codex/npm-network-compatibility-finish` |
 | 264 | 2026-08-28 | Deliver and release VPS write idempotency hardening | `2740cc8a`, `4780251e`, `5a6bf2b0`, `398bc261`, `721188b9`, `72c0d991`, `080d2c02`, `415de509` | `codex/archive-vps-write-idempotency-hardening` |
 | 263 | 2026-08-28 | Deliver v0.77.6 VPS hardening | `86675d7a`, `4dd95a0a`, `4dcaf333`, `b029d988` | `codex/v0776-vps-hardening` |
 | 262 | 2026-08-27 | v0.77.5 hardening closeout | `96520df4`, `0cdbea88`, `1f38bd41`, `b5bdcf3a` | `feat/v0775-hardening-closeout` |
