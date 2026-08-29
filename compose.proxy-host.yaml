@@ -1,0 +1,8 @@
+services:
+  houfeng:
+    ports:
+      - name: npm-host-proxy
+        target: 16001
+        published: "16001"
+        host_ip: 127.0.0.1
+        protocol: tcp

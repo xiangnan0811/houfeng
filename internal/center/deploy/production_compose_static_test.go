@@ -26,16 +26,21 @@ func TestProductionComposeUsesPublishedFullStack(t *testing.T) {
 	t.Parallel()
 
 	compose := readText(t, filepath.Join(repoRoot(t), "compose.yaml"))
-	for _, service := range []string{
+	expectedServices := []string{
 		"houfeng-storage-init",
+		"houfeng-secrets-init",
+		"db",
 		"houfeng-db-init",
 		"houfeng-record-authority",
+		"clamav",
 		"houfeng",
 		"houfeng-content-processor",
-		"clamav",
-		"db",
-	} {
+	}
+	for _, service := range expectedServices {
 		composeServiceBlock(t, compose, service)
+	}
+	if services := composeTopLevelServiceNames(compose); len(services) != len(expectedServices) {
+		t.Fatalf("production compose must define exactly the reviewed eight-service graph; got %v", services)
 	}
 	for _, service := range []string{
 		"houfeng-storage-init",
@@ -77,6 +82,27 @@ func TestProductionComposeUsesPublishedFullStack(t *testing.T) {
 	if !strings.Contains(center, `HOUFENG_REQUIRE_HTTPS_PUBLIC_BASE_URL: "true"`) {
 		t.Fatalf("production Center must activate the Compose-only HTTPS origin preflight:\n%s", center)
 	}
+}
+
+func composeTopLevelServiceNames(body string) []string {
+	var services []string
+	inServices := false
+	for _, line := range strings.Split(body, "\n") {
+		if line == "services:" {
+			inServices = true
+			continue
+		}
+		if !inServices {
+			continue
+		}
+		if line != "" && !strings.HasPrefix(line, " ") {
+			break
+		}
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") && strings.HasSuffix(line, ":") {
+			services = append(services, strings.TrimSuffix(strings.TrimSpace(line), ":"))
+		}
+	}
+	return services
 }
 
 func TestProductionComposeWiresFailClosedRecordsAuthority(t *testing.T) {
@@ -221,7 +247,7 @@ func TestProductionComposeStagesEnvironmentSecretsForReadOnlyServices(t *testing
 	}
 }
 
-func TestProductionComposeUsesPortableDataAndNPMNetwork(t *testing.T) {
+func TestProductionComposeUsesPortableData(t *testing.T) {
 	t.Parallel()
 
 	compose := readText(t, filepath.Join(repoRoot(t), "compose.yaml"))
@@ -235,8 +261,6 @@ func TestProductionComposeUsesPortableDataAndNPMNetwork(t *testing.T) {
 		"houfeng": {
 			"./data/attachments:/var/lib/houfeng/attachments",
 			"./data/logs:/var/log/houfeng",
-			"aliases:",
-			"- houfeng",
 		},
 		"houfeng-content-processor": {
 			"./data/attachments:/var/lib/houfeng/attachments",
@@ -252,30 +276,97 @@ func TestProductionComposeUsesPortableDataAndNPMNetwork(t *testing.T) {
 		block := composeServiceBlock(t, compose, service)
 		for _, required := range requirements {
 			if !strings.Contains(block, required) {
-				t.Fatalf("%s must contain portable/NPM contract %q:\n%s", service, required, block)
+				t.Fatalf("%s must contain portable data contract %q:\n%s", service, required, block)
 			}
-		}
-	}
-	if strings.Contains(compose, "\n    ports:") {
-		t.Fatal("production compose must not publish a host port by default")
-	}
-	for _, service := range []string{"houfeng-storage-init", "houfeng-db-init", "houfeng-record-authority", "houfeng-content-processor", "clamav", "db"} {
-		if strings.Contains(composeServiceBlock(t, compose, service), "houfeng-proxy") {
-			t.Fatalf("only Center may join the external NPM network; %s also joins it", service)
-		}
-	}
-	for _, required := range []string{
-		"\nnetworks:\n",
-		"  houfeng-proxy:\n",
-		"    external: true",
-		`    name: "${HOUFENG_PROXY_NETWORK:?set HOUFENG_PROXY_NETWORK in .env}"`,
-	} {
-		if !strings.Contains(compose, required) {
-			t.Fatalf("production compose must define the external NPM network through %q", required)
 		}
 	}
 	if strings.Contains(compose, "\nvolumes:\n") {
 		t.Fatal("production business data must use visible ./data bind mounts, not top-level named volumes")
+	}
+}
+
+func TestProductionComposeDefinesExplicitProxyModes(t *testing.T) {
+	t.Parallel()
+
+	root := repoRoot(t)
+	base := readText(t, filepath.Join(root, "compose.yaml"))
+	networkMode := readText(t, filepath.Join(root, "compose.proxy-network.yaml"))
+	hostMode := readText(t, filepath.Join(root, "compose.proxy-host.yaml"))
+
+	const expectedNetworkMode = `services:
+  houfeng:
+    networks:
+      houfeng-proxy:
+        aliases:
+          - houfeng
+
+networks:
+  houfeng-proxy:
+    external: true
+    name: "${HOUFENG_PROXY_NETWORK:?set HOUFENG_PROXY_NETWORK for shared-network mode}"`
+	const expectedHostMode = `services:
+  houfeng:
+    ports:
+      - name: npm-host-proxy
+        target: 16001
+        published: "16001"
+        host_ip: 127.0.0.1
+        protocol: tcp`
+	for _, mode := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{name: "shared-network", got: networkMode, want: expectedNetworkMode},
+		{name: "host-proxy", got: hostMode, want: expectedHostMode},
+	} {
+		if got, want := strings.TrimSpace(mode.got), strings.TrimSpace(mode.want); got != want {
+			t.Fatalf("%s mode file must remain the exact thin reviewed overlay:\nwant:\n%s\n\ngot:\n%s", mode.name, want, got)
+		}
+	}
+
+	center := composeServiceBlock(t, base, "houfeng")
+	if !strings.Contains(center, "networks:\n      default:") {
+		t.Fatalf("base Center must retain its private default network:\n%s", center)
+	}
+	for _, forbidden := range []string{"HOUFENG_PROXY_NETWORK", "houfeng-proxy", "\n    ports:"} {
+		if strings.Contains(base, forbidden) {
+			t.Fatalf("base Compose must not own proxy mode value %q", forbidden)
+		}
+	}
+
+	networkCenter := composeServiceBlock(t, networkMode, "houfeng")
+	for _, required := range []string{
+		"houfeng-proxy:",
+		"aliases:",
+		"- houfeng",
+		"name: \"${HOUFENG_PROXY_NETWORK:?set HOUFENG_PROXY_NETWORK for shared-network mode}\"",
+		"external: true",
+	} {
+		if !strings.Contains(networkMode, required) && !strings.Contains(networkCenter, required) {
+			t.Fatalf("shared-network mode must contain %q", required)
+		}
+	}
+	if strings.Contains(networkMode, "ports:") {
+		t.Fatal("shared-network mode must not publish Center")
+	}
+
+	hostCenter := composeServiceBlock(t, hostMode, "houfeng")
+	for _, required := range []string{
+		"ports:",
+		"target: 16001",
+		"published: \"16001\"",
+		"host_ip: 127.0.0.1",
+		"protocol: tcp",
+	} {
+		if !strings.Contains(hostCenter, required) {
+			t.Fatalf("host-proxy mode must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{"HOUFENG_PROXY_NETWORK", "external:", "houfeng-proxy", "0.0.0.0", "host_ip: \"::\""} {
+		if strings.Contains(hostMode, forbidden) {
+			t.Fatalf("host-proxy mode contains forbidden value %q", forbidden)
+		}
 	}
 }
 
@@ -426,7 +517,26 @@ func TestProductionEnvironmentTemplateHasThreeOperatorSections(t *testing.T) {
 			t.Fatalf("environment template must contain exactly one %q heading", heading)
 		}
 	}
+	const defaultComposeFile = "COMPOSE_FILE=compose.yaml:compose.proxy-network.yaml"
+	var activeComposeFileAssignments []string
+	for _, line := range strings.Split(envExample, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "COMPOSE_FILE=") {
+			activeComposeFileAssignments = append(activeComposeFileAssignments, line)
+		}
+	}
+	if len(activeComposeFileAssignments) != 1 {
+		t.Fatalf("environment template must contain exactly one active COMPOSE_FILE assignment, got %v", activeComposeFileAssignments)
+	}
+	if activeComposeFileAssignments[0] != defaultComposeFile {
+		t.Fatalf("environment template must select only the shared-network overlay by default: got %q, want %q", activeComposeFileAssignments[0], defaultComposeFile)
+	}
 	for _, required := range []string{
+		"COMPOSE_FILE=compose.yaml:compose.proxy-network.yaml",
+		"compose.proxy-host.yaml",
 		"HOUFENG_IMAGE=",
 		"HOUFENG_PROXY_NETWORK=",
 		"HOUFENG_PUBLIC_BASE_URL=",
@@ -442,6 +552,11 @@ func TestProductionEnvironmentTemplateHasThreeOperatorSections(t *testing.T) {
 		"openssl rand -hex 32",
 		"Generate a fresh value for every secret",
 		"Never reuse one value",
+		"exact observed proxy-source",
+		"for the selected mode",
+		"Do not guess 127.0.0.0/8",
+		"0.0.0.0/0",
+		"::/0",
 	} {
 		if !strings.Contains(envExample, required) {
 			t.Fatalf("environment template must expose %q", required)
@@ -463,6 +578,8 @@ func TestProductionEnvironmentTemplateHasThreeOperatorSections(t *testing.T) {
 		"HOUFENG_CONTENT_PROCESSOR_RECONCILIATION_RETRY_DELAY=",
 		"HOUFENG_CONTENT_PROCESSOR_MAX_ATTEMPTS=",
 		"HOUFENG_CONTENT_PROCESSOR_JOB_TTL=",
+		"HOUFENG_PROXY_NETWORK=host",
+		"HOUFENG_HOST_PORT=",
 	} {
 		if strings.Contains(envExample, forbidden) {
 			t.Fatalf("environment template must not contain legacy/mutable setting %q", forbidden)
@@ -522,6 +639,13 @@ func TestProductionGuideDocumentsAuthorityAndPortableRecoveryUnit(t *testing.T) 
 			t.Fatalf("README production overview must mention %q", required)
 		}
 	}
+	const recoveryUnit = "`compose.yaml`, `compose.proxy-network.yaml`, `compose.proxy-host.yaml`, `.env`, `optional-secrets/`, and the entire `data/` tree"
+	for name, document := range map[string]string{"README": readme, "deployment guide": composeGuide} {
+		normalizedDocument := strings.Join(strings.Fields(document), " ")
+		if !strings.Contains(normalizedDocument, recoveryUnit) {
+			t.Fatalf("%s must preserve all proxy-mode assets in the portable recovery unit through %q", name, recoveryUnit)
+		}
+	}
 }
 
 func TestProductionQuickStartUsesReleaseAssetsAndAutomaticInitialization(t *testing.T) {
@@ -534,6 +658,8 @@ func TestProductionQuickStartUsesReleaseAssetsAndAutomaticInitialization(t *test
 	for name, document := range map[string]string{"README": readme, "deployment guide": composeGuide} {
 		steps := []string{
 			"https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.yaml",
+			"https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.proxy-network.yaml",
+			"https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.proxy-host.yaml",
 			"https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.env.example",
 			"docker compose config",
 			"docker compose up -d",
@@ -549,8 +675,70 @@ func TestProductionQuickStartUsesReleaseAssetsAndAutomaticInitialization(t *test
 			}
 			last = offset
 		}
+		postStartup := document[last+len("docker compose up -d"):]
+		hasPublicHealthProbe := false
+		for _, line := range strings.Split(postStartup, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "curl -fsS ") &&
+				strings.Contains(line, "/api/healthz") &&
+				!strings.Contains(line, "http://") &&
+				!strings.Contains(line, "127.0.0.1") {
+				hasPublicHealthProbe = true
+				break
+			}
+		}
+		if !hasPublicHealthProbe {
+			t.Fatalf("%s must verify the public HTTPS /api/healthz route after docker compose up -d", name)
+		}
 		if strings.Contains(document, "github.com/linnea7171/houfeng/") {
 			t.Fatalf("%s must download release assets from the canonical xiangnan0811/houfeng repository", name)
+		}
+		for _, required := range []string{
+			"COMPOSE_FILE=compose.yaml:compose.proxy-network.yaml",
+			"COMPOSE_FILE=compose.yaml:compose.proxy-host.yaml",
+			`docker inspect "$(docker compose ps -q app)"`,
+			".NetworkSettings.Networks",
+			"houfeng:16001",
+			"127.0.0.1:16001",
+			"Docker Engine 28.0.0",
+			`docker version --format '{{.Server.Version}}'`,
+		} {
+			if !strings.Contains(document, required) {
+				t.Fatalf("%s must document the two reviewed NPM proxy modes through %q", name, required)
+			}
+		}
+		lowerDocument := strings.ToLower(document)
+		for _, forbidden := range []string{
+			"houfeng_proxy_network=host",
+			"houfeng_proxy_network=bridge",
+			"houfeng_proxy_network=npm-network",
+			"houfeng_proxy_network=placeholder",
+			"houfeng_proxy_network=example",
+			"houfeng_proxy_network=your-network",
+			"create a placeholder proxy network",
+			"change npm from host to bridge",
+			"move npm from host to bridge",
+			"reconfigure npm from host to bridge",
+			"switch npm from host to bridge",
+		} {
+			if strings.Contains(lowerDocument, forbidden) {
+				t.Fatalf("%s must not recommend unsupported NPM compatibility instruction %q", name, forbidden)
+			}
+		}
+	}
+	if !strings.Contains(readme, `curl -fsS "${HOUFENG_PUBLIC_BASE_URL%/}/api/healthz"`) {
+		t.Fatal("README public health check must reuse HOUFENG_PUBLIC_BASE_URL without exposing deployment secrets")
+	}
+	for _, required := range []string{
+		`awk -F= '$1 == "HOUFENG_PUBLIC_BASE_URL" {`,
+		`value = substr($0, index($0, "=") + 1)`,
+		`quote = substr(value, 1, 1)`,
+		`quote == "\"" || quote == sprintf("%c", 39)`,
+		`substr(value, length(value), 1) == quote`,
+		`value = substr(value, 2, length(value) - 2)`,
+	} {
+		if !strings.Contains(readme, required) {
+			t.Fatalf("README public health extraction must handle unquoted, single-quoted, and double-quoted HOUFENG_PUBLIC_BASE_URL through %q", required)
 		}
 	}
 	for _, forbidden := range []string{
@@ -577,21 +765,93 @@ func markdownSection(t *testing.T, document, startHeading, endHeading string) st
 	return document[start : start+len(startHeading)+end]
 }
 
+func TestPublishWorkflowSerializesDeploymentAssetsByResolvedVersion(t *testing.T) {
+	t.Parallel()
+
+	workflow := readText(t, filepath.Join(repoRoot(t), ".github", "workflows", "publish-images.yml"))
+	deploymentJobOffset := strings.Index(workflow, "\n  deployment-assets:\n")
+	if deploymentJobOffset < 0 {
+		t.Fatal("publish workflow must define the deployment-assets job")
+	}
+	deploymentJob := workflow[deploymentJobOffset:]
+	const requiredConcurrency = `    concurrency:
+      group: deployment-assets-${{ needs.resolve.outputs.version }}
+      cancel-in-progress: false`
+	if !strings.Contains(deploymentJob, requiredConcurrency) {
+		t.Fatalf("deployment-assets must serialize release and workflow_dispatch runs for the same resolved version through:\n%s", requiredConcurrency)
+	}
+}
+
 func TestPublishWorkflowUploadsVersionMatchedDeploymentAssets(t *testing.T) {
 	t.Parallel()
 
 	workflow := readText(t, filepath.Join(repoRoot(t), ".github", "workflows", "publish-images.yml"))
-	for _, required := range []string{
-		"\n  deployment-assets:\n",
+	deploymentJobOffset := strings.Index(workflow, "\n  deployment-assets:\n")
+	if deploymentJobOffset < 0 {
+		t.Fatal("publish workflow must define the deployment-assets job")
+	}
+	deploymentJob := workflow[deploymentJobOffset:]
+	deploymentAssets := []string{
 		"compose.yaml",
+		"compose.proxy-network.yaml",
+		"compose.proxy-host.yaml",
 		"compose.env.example",
+	}
+	staging := []struct {
+		source string
+		asset  string
+	}{
+		{source: "compose.yaml", asset: deploymentAssets[0]},
+		{source: "compose.proxy-network.yaml", asset: deploymentAssets[1]},
+		{source: "compose.proxy-host.yaml", asset: deploymentAssets[2]},
+		{source: "docs/deploy/compose.env.example", asset: deploymentAssets[3]},
+	}
+	lastStagingOffset := -1
+	for _, staged := range staging {
+		copyCommand := "cp " + staged.source + " dist/" + staged.asset
+		offset := strings.Index(deploymentJob, copyCommand)
+		if offset < 0 {
+			t.Fatalf("publish workflow must stage deployment asset through %q", copyCommand)
+		}
+		if offset <= lastStagingOffset {
+			t.Fatalf("publish workflow must stage deployment assets in reviewed order; %q is out of order", staged.asset)
+		}
+		lastStagingOffset = offset
+	}
+
+	sharedRender := `shared_network_images="$(docker compose --env-file dist/compose.env.example -f dist/compose.yaml -f dist/compose.proxy-network.yaml config --images)"`
+	hostRender := `host_proxy_images="$(env -u HOUFENG_PROXY_NETWORK docker compose --env-file dist/compose.env.example -f dist/compose.yaml -f dist/compose.proxy-host.yaml config --images)"`
+	for _, required := range []string{
 		"docker.io/linnea7171/houfeng:v${{ needs.resolve.outputs.version }}",
-		"docker compose --env-file dist/compose.env.example -f dist/compose.yaml config --images",
-		"gh release upload",
+		"HOUFENG_PROXY_NETWORK: houfeng-release-validation",
+		`sed -i "s|^HOUFENG_IMAGE=.*$|HOUFENG_IMAGE=$HOUFENG_IMAGE|" dist/compose.env.example`,
+		`grep -Fx "HOUFENG_IMAGE=$HOUFENG_IMAGE" dist/compose.env.example`,
+		sharedRender,
+		hostRender,
+		`mapfile -t project_images < <(printf '%s\n%s\n' "$shared_network_images" "$host_proxy_images" | grep -F 'docker.io/linnea7171/houfeng:' | sort -u)`,
+		`if [[ "${#project_images[@]}" -ne 1 || "${project_images[0]}" != "$HOUFENG_IMAGE" ]]; then`,
 	} {
-		if !strings.Contains(workflow, required) {
+		if !strings.Contains(deploymentJob, required) {
 			t.Fatalf("publish workflow must contain deployment asset contract %q", required)
 		}
+	}
+	sharedRenderOffset := strings.Index(deploymentJob, sharedRender)
+	hostRenderOffset := strings.Index(deploymentJob, hostRender)
+	exactImageOffset := strings.Index(deploymentJob, `if [[ "${#project_images[@]}" -ne 1 || "${project_images[0]}" != "$HOUFENG_IMAGE" ]]; then`)
+	manifestOffset := strings.Index(deploymentJob, `docker buildx imagetools inspect "$HOUFENG_IMAGE"`)
+	if !(lastStagingOffset < sharedRenderOffset && sharedRenderOffset < hostRenderOffset && hostRenderOffset < exactImageOffset && exactImageOffset < manifestOffset) {
+		t.Fatal("publish workflow must stage assets, render shared-network and host-proxy modes, require their one exact release image, then inspect its manifest")
+	}
+
+	uploadStepOffset := strings.Index(deploymentJob, "- name: Upload deployment release assets")
+	verificationStepOffset := strings.Index(deploymentJob, "- name: Verify public deployment release assets")
+	if uploadStepOffset < 0 || verificationStepOffset <= uploadStepOffset {
+		t.Fatal("publish workflow must upload deployment assets before public verification")
+	}
+	uploadStep := deploymentJob[uploadStepOffset:verificationStepOffset]
+	expectedAssetList := "required_deployment_assets=(" + strings.Join(deploymentAssets, " ") + ")"
+	if !strings.Contains(uploadStep, expectedAssetList) {
+		t.Fatalf("publish workflow must use the exact ordered deployment asset list before upload: %q", expectedAssetList)
 	}
 }
 
@@ -601,8 +861,9 @@ func TestPublishWorkflowUsesStablePublicComposeEnvironmentAssetName(t *testing.T
 	workflow := readText(t, filepath.Join(repoRoot(t), ".github", "workflows", "publish-images.yml"))
 	for _, required := range []string{
 		"cp docs/deploy/compose.env.example dist/compose.env.example",
-		"docker compose --env-file dist/compose.env.example -f dist/compose.yaml config --images",
-		"dist/compose.env.example \\",
+		"docker compose --env-file dist/compose.env.example -f dist/compose.yaml -f dist/compose.proxy-network.yaml config --images",
+		"env -u HOUFENG_PROXY_NETWORK docker compose --env-file dist/compose.env.example -f dist/compose.yaml -f dist/compose.proxy-host.yaml config --images",
+		"required_deployment_assets=(compose.yaml compose.proxy-network.yaml compose.proxy-host.yaml compose.env.example)",
 		"echo \"- \\`compose.env.example\\`\"",
 	} {
 		if !strings.Contains(workflow, required) {
@@ -616,6 +877,63 @@ func TestPublishWorkflowUsesStablePublicComposeEnvironmentAssetName(t *testing.T
 		if strings.Contains(workflow, forbidden) {
 			t.Fatalf("publish workflow must not use normalized or hidden deployment asset path %q", forbidden)
 		}
+	}
+}
+
+func TestPublishWorkflowSafelyRetriesDeploymentAssetUpload(t *testing.T) {
+	t.Parallel()
+
+	workflow := readText(t, filepath.Join(repoRoot(t), ".github", "workflows", "publish-images.yml"))
+	deploymentJobOffset := strings.Index(workflow, "\n  deployment-assets:\n")
+	if deploymentJobOffset < 0 {
+		t.Fatal("publish workflow must define the deployment-assets job")
+	}
+	deploymentJob := workflow[deploymentJobOffset:]
+	uploadStepOffset := strings.Index(deploymentJob, "- name: Upload deployment release assets")
+	verificationStepOffset := strings.Index(deploymentJob, "- name: Verify public deployment release assets")
+	if uploadStepOffset < 0 || verificationStepOffset <= uploadStepOffset {
+		t.Fatal("publish workflow must define upload and post-upload verification steps in order")
+	}
+	uploadStep := deploymentJob[uploadStepOffset:verificationStepOffset]
+	for _, required := range []string{
+		"set -euo pipefail",
+		`upload_check_dir="$(mktemp -d)"`,
+		`trap 'rm -rf "$upload_check_dir"' EXIT`,
+		`gh release view "$VERSION" --json assets --jq '.assets[].name'`,
+		"required_deployment_assets=(compose.yaml compose.proxy-network.yaml compose.proxy-host.yaml compose.env.example)",
+		"missing_deployment_assets=()",
+		`for asset in "${required_deployment_assets[@]}"; do`,
+		`if [[ "$release_asset" == "$asset" ]]; then`,
+		`case "$matches" in`,
+		`missing_deployment_assets+=("dist/$asset")`,
+		`gh release download "$VERSION" --pattern "$asset" --dir "$upload_check_dir"`,
+		`test -f "$upload_check_dir/$asset"`,
+		`if cmp -s "dist/$asset" "$upload_check_dir/$asset"; then`,
+		`Existing deployment asset $asset is byte-identical; retaining it.`,
+		`Existing deployment asset $asset differs from staged bytes; refusing to overwrite.`,
+		`Release contains duplicate deployment assets named $asset; refusing to mutate it.`,
+		`if [[ "${#missing_deployment_assets[@]}" -gt 0 ]]; then`,
+		`gh release upload "$VERSION" "${missing_deployment_assets[@]}"`,
+	} {
+		if !strings.Contains(uploadStep, required) {
+			t.Fatalf("deployment upload retry contract must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"--clobber",
+		"gh release delete-asset",
+		"--method DELETE",
+		"-X DELETE",
+	} {
+		if strings.Contains(uploadStep, forbidden) {
+			t.Fatalf("deployment upload retries must never destructively replace existing assets through %q", forbidden)
+		}
+	}
+	cardinalityOffset := strings.Index(uploadStep, `case "$matches" in`)
+	comparisonOffset := strings.Index(uploadStep, `if cmp -s "dist/$asset" "$upload_check_dir/$asset"; then`)
+	uploadOffset := strings.Index(uploadStep, `gh release upload "$VERSION" "${missing_deployment_assets[@]}"`)
+	if !(cardinalityOffset >= 0 && cardinalityOffset < comparisonOffset && comparisonOffset < uploadOffset) {
+		t.Fatal("deployment upload must inspect cardinality and byte-compare every existing asset before uploading any missing asset")
 	}
 }
 
@@ -640,24 +958,45 @@ func TestPublishWorkflowVerifiesPublicDeploymentAssetsAfterUpload(t *testing.T) 
 		`verify_dir="$(mktemp -d)"`,
 		`trap 'rm -rf "$verify_dir"' EXIT`,
 		`gh release view "$VERSION" --json assets --jq '.assets[].name'`,
-		"required_deployment_assets=(compose.yaml compose.env.example)",
-		`if [[ "$release_asset" == "$asset" ]]; then`,
-		`if [[ "$matches" -ne 1 ]]; then`,
+		"required_deployment_assets=(compose.yaml compose.proxy-network.yaml compose.proxy-host.yaml compose.env.example)",
 		"for forbidden_asset in .env.example default.env.example; do",
-		`gh release download "$VERSION" --pattern 'compose.yaml' --dir "$verify_dir"`,
-		`gh release download "$VERSION" --pattern 'compose.env.example' --dir "$verify_dir"`,
-		`test -f "$verify_dir/compose.yaml"`,
-		`test -f "$verify_dir/compose.env.example"`,
-		`cmp -s dist/compose.yaml "$verify_dir/compose.yaml"`,
-		`cmp -s dist/compose.env.example "$verify_dir/compose.env.example"`,
 	} {
 		if !strings.Contains(verificationStep, required) {
 			t.Fatalf("publish workflow must verify public deployment release assets through %q", required)
 		}
 	}
+	if count := strings.Count(verificationStep, "required_deployment_assets=("); count != 1 {
+		t.Fatalf("public deployment verification must use one required_deployment_assets array, got %d", count)
+	}
+	assetLoopOffset := strings.Index(verificationStep, `for asset in "${required_deployment_assets[@]}"; do`)
+	forbiddenLoopOffset := strings.Index(verificationStep, "for forbidden_asset in .env.example default.env.example; do")
+	if assetLoopOffset < 0 || forbiddenLoopOffset <= assetLoopOffset {
+		t.Fatal("public deployment verification must use the required_deployment_assets array before checking legacy names")
+	}
+	assetLoop := verificationStep[assetLoopOffset:forbiddenLoopOffset]
+	assetLoopRequirements := []string{
+		`if [[ "$release_asset" == "$asset" ]]; then`,
+		`if [[ "$matches" -ne 1 ]]; then`,
+		`gh release download "$VERSION" --pattern "$asset" --dir "$verify_dir"`,
+		`test -f "$verify_dir/$asset"`,
+		`cmp -s "dist/$asset" "$verify_dir/$asset"`,
+	}
+	lastAssetLoopOffset := -1
+	for _, required := range assetLoopRequirements {
+		offset := strings.Index(assetLoop, required)
+		if offset < 0 {
+			t.Fatalf("required_deployment_assets loop must verify every public asset through %q", required)
+		}
+		if offset <= lastAssetLoopOffset {
+			t.Fatalf("required_deployment_assets loop must check cardinality before download/existence/byte identity; %q is out of order", required)
+		}
+		lastAssetLoopOffset = offset
+	}
 	for _, forbidden := range []string{
 		`"${#release_asset_names[@]}" -ne 2`,
 		`"${#release_asset_names[@]}" != 2`,
+		`"${#release_asset_names[@]}" -ne 4`,
+		`"${#release_asset_names[@]}" != 4`,
 	} {
 		if strings.Contains(verificationStep, forbidden) {
 			t.Fatalf("public deployment verification must preserve unrelated release assets; found total-asset assumption %q", forbidden)
@@ -671,27 +1010,101 @@ func TestProductionComposeTrellisSpecsMatchReleaseAndAuthorityContract(t *testin
 	root := repoRoot(t)
 	deploymentSpec := readText(t, filepath.Join(root, ".trellis", "spec", "backend", "directory-structure.md"))
 	databaseSpec := readText(t, filepath.Join(root, ".trellis", "spec", "backend", "database-guidelines.md"))
+	composeScenario := markdownSection(
+		t,
+		deploymentSpec,
+		"#### Scenario: release-asset production Compose and image contract",
+		"### `internal/contracts/agentapi/`",
+	)
 	for _, required := range []string{
-		"release-asset production Compose",
+		"1. **Scope / Trigger**",
+		"2. **Signatures**",
+		"3. **Contracts**",
+		"4. **Validation & Error Matrix**",
+		"5. **Good / Base / Bad Cases**",
+		"6. **Tests Required**",
+		"7. **Wrong vs Correct**",
+		"`compose.yaml` → `compose.proxy-network.yaml` → `compose.proxy-host.yaml` → `compose.env.example`",
+		"COMPOSE_FILE=compose.yaml:compose.proxy-network.yaml",
+		"COMPOSE_FILE=compose.yaml:compose.proxy-host.yaml",
+		"Mode selection is common base + exactly one selected overlay.",
+		"loading both overlays is unsupported",
+		"existing NPM user-defined network",
+		"NPM remains unchanged",
+		"upstream `houfeng:16001`",
+		"base and shared-network mode publish no host port",
+		"`target: 16001`",
+		"`published: \"16001\"`",
+		"`host_ip: 127.0.0.1`",
+		"`protocol: tcp`",
+		"The effective behavior is `127.0.0.1:16001 -> 16001/tcp`",
+		"renderer-specific short form",
+		"exactly one fixed IPv4-loopback mapping",
+		"Docker Engine `28.0.0+`",
+		"Do not set `HOUFENG_PROXY_NETWORK=host` or invent a placeholder network.",
+		"all-interface/LAN/IPv6 mapping",
+		"must not duplicate the eight-service graph",
+		"renders both modes before upload",
+		"`concurrency.group: deployment-assets-${{ needs.resolve.outputs.version }}`",
+		"`cancel-in-progress: false`",
+		"serializes deployment-asset mutation for one resolved version",
+		"does not cancel the running job",
+		"queued pending runs may be replaced",
+		"non-destructive fail-closed idempotent upload",
+		"exact-name cardinality",
+		"byte identity",
+		"unrelated agent assets",
+		"do not assert total asset count equals four",
+		"`docker compose up -d` owns ordinary initialization.",
+		"Center waits for healthy authority",
+		"processor waits for db-init and ClamAV",
 		"houfeng-secrets-init",
 		"houfeng-record-authority",
-		"HOUFENG_PROXY_NETWORK",
+		"secret stager bind-mounts only `./data/secrets`",
+		"Center/processor never receive bootstrap, migrator, platform-admin, or authority credentials",
+		"Processor stays non-root, read-only, `cap_drop: ALL`, `no-new-privileges`, core=0",
 		"./data/records-authority",
-		"no public host port",
-		"post-upload public readback",
+		"PostgreSQL, local attachments, and Records authority state are one coordinated restore unit",
 	} {
-		if !strings.Contains(deploymentSpec, required) {
-			t.Fatalf("deployment Trellis spec must contain %q", required)
+		if !strings.Contains(composeScenario, required) {
+			t.Fatalf("deployment Trellis Compose scenario must contain %q", required)
 		}
+	}
+	rotationSteps := []string{
+		"`docker compose stop houfeng houfeng-content-processor`",
+		"`docker compose run --rm houfeng-secrets-init`",
+		"`docker compose run --rm houfeng-db-init`",
+		"`docker compose up -d --force-recreate houfeng houfeng-content-processor`",
+	}
+	lastRotationStep := -1
+	for _, step := range rotationSteps {
+		offset := strings.Index(composeScenario, step)
+		if offset < 0 {
+			t.Fatalf("deployment Trellis Compose scenario must preserve password rotation step %q", step)
+		}
+		if offset <= lastRotationStep {
+			t.Fatalf("deployment Trellis Compose scenario password rotation steps are out of order at %q", step)
+		}
+		lastRotationStep = offset
 	}
 	for _, forbidden := range []string{
 		"scripts/compose-up.sh",
 		"Compose is a development/conformance topology",
 		"houfeng_blobs:/var/lib/houfeng/attachments",
 		`127.0.0.1:${HOUFENG_HOST_PORT:-16001}:16001`,
+		"`127.0.0.1:16001:16001/tcp`",
+		"one deployment-assets job waits",
+		"every later job waits",
+		"all later jobs wait",
+		"cancellation is globally disabled",
+		"cancellation and cross-run mutation for that version are disabled",
+		"`compose.yaml` 与 `compose.env.example`（后者保存为本地 `.env`）",
+		"uploads `compose.yaml` plus `compose.env.example`",
+		"never add a public fallback port",
+		`name: "${HOUFENG_PROXY_NETWORK:?set HOUFENG_PROXY_NETWORK in .env}"`,
 	} {
-		if strings.Contains(deploymentSpec, forbidden) {
-			t.Fatalf("deployment Trellis spec retains obsolete production contract %q", forbidden)
+		if strings.Contains(composeScenario, forbidden) {
+			t.Fatalf("deployment Trellis Compose scenario retains obsolete single-mode contract %q", forbidden)
 		}
 	}
 	for _, required := range []string{

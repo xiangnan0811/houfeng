@@ -71,13 +71,11 @@ source checkout, local build, helper launcher, or manual SQL step:
 install -d -m 0700 houfeng && cd houfeng
 sudo install -d -o 10001 -g 10001 -m 0700 optional-secrets optional-secrets/comparison-keyring optional-secrets/s3
 curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.yaml -o compose.yaml
+curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.proxy-network.yaml -o compose.proxy-network.yaml
+curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.proxy-host.yaml -o compose.proxy-host.yaml
 curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.env.example -o .env
 chmod 0600 .env
-# Edit every value in "Must change"; keep HOUFENG_IMAGE pinned to the downloaded release.
 ${EDITOR:-vi} .env
-docker compose config
-docker compose pull
-docker compose up -d
 ```
 
 The optional-secret directories are owned by the image's non-root UID/GID so
@@ -85,15 +83,72 @@ Center and the processor can traverse their scoped read-only bind mounts. Instal
 any optional key file with `sudo install -o 10001 -g 10001 -m 0400 SOURCE DEST`;
 do not loosen the directory modes to make a host-side copy succeed.
 
-Before `up`, create or select the existing Docker network named by
-`HOUFENG_PROXY_NETWORK`; Nginx Proxy Manager must already join that network.
-Create an NPM Proxy Host with scheme `http`, forward hostname `houfeng`, forward
-port `16001`, Websockets Support and Block Common Exploits enabled, a valid SSL
-certificate, and Force SSL enabled. Houfeng publishes no host port by default.
+Fill every value required by the selected mode in **Must change**; keep
+`HOUFENG_IMAGE` pinned to the downloaded release. Select exactly one proxy mode:
+
+- Shared-network mode is the default:
+  `COMPOSE_FILE=compose.yaml:compose.proxy-network.yaml`. From the existing NPM
+  Compose directory, discover the networks already joined by its `app` service:
+
+  ```bash
+  docker inspect "$(docker compose ps -q app)" \
+    --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{"\n"}}{{end}}'
+  ```
+
+  If that deployment uses another service name, substitute it for `app`. Set
+  `HOUFENG_PROXY_NETWORK` to the exact existing user-defined network reported by
+  the command. Houfeng joins NPM's network; this does not require editing NPM's
+  Compose configuration or inventing a replacement network. Configure the NPM
+  upstream as `http://houfeng:16001`. This default mode publishes no host port.
+
+- For an NPM deployment already using host networking, first verify the server
+  version:
+
+  ```bash
+  docker version --format '{{.Server.Version}}'
+  ```
+
+  Host-proxy mode requires Docker Engine 28.0.0 or newer. Keep NPM in its existing
+  host-network configuration, set
+  `COMPOSE_FILE=compose.yaml:compose.proxy-host.yaml`, and leave
+  `HOUFENG_PROXY_NETWORK` blank. Configure the NPM upstream as
+  `http://127.0.0.1:16001`; Houfeng publishes only that fixed IPv4-loopback port.
+  Older Engines are unsupported because their localhost-published ports may be
+  reachable from the same L2 segment.
+
+After editing `.env`, render the selected pair before pulling or starting it:
+
+```bash
+docker compose config
+docker compose pull
+docker compose up -d
+HOUFENG_PUBLIC_BASE_URL="$(
+  awk -F= '$1 == "HOUFENG_PUBLIC_BASE_URL" {
+    value = substr($0, index($0, "=") + 1)
+    quote = substr(value, 1, 1)
+    if ((quote == "\"" || quote == sprintf("%c", 39)) &&
+        substr(value, length(value), 1) == quote) {
+      value = substr(value, 2, length(value) - 2)
+    }
+    print value
+    exit
+  }' .env
+)"
+curl -fsS "${HOUFENG_PUBLIC_BASE_URL%/}/api/healthz"
+```
+
+The final two commands read only the non-secret public origin from `.env` and
+verify `/api/healthz` through the configured HTTPS NPM route; they do not source
+the deployment secrets or bypass the reverse proxy.
+
+For either mode, enable Websockets Support and Block Common Exploits in the NPM
+Proxy Host, install a valid certificate, and enable Force SSL. The public
+`HOUFENG_PUBLIC_BASE_URL` must use that HTTPS origin.
 
 The stack runs Center with baked Web, the Records attachment processor, ClamAV,
 PostgreSQL 16, a long-running Records authority, and bounded storage, secret,
-and database initializer services. Center alone joins the NPM network.
+and database initializer services. Center alone gains the selected proxy
+reachability; all other services remain on the private default network.
 Initialization creates private paths below `./data`, stages only the secrets
 needed by read-only services, provisions distinct runtime/platform-admin/
 migrator/authority database roles, converges the current Records schema,
@@ -102,6 +157,10 @@ proves runtime admission before Center or the processor may start. PostgreSQL,
 attachments, logs, ClamAV cache, public Center identity, staged private secret
 files, and signed authority state all remain visible below `./data`, including
 `./data/records-authority`. Agents remain host-installed Linux/systemd services.
+The portable recovery unit includes `compose.yaml`,
+`compose.proxy-network.yaml`, `compose.proxy-host.yaml`, `.env`,
+`optional-secrets/`, and the entire `data/` tree; restore PostgreSQL and Records
+authority state together rather than mixing recovery points.
 See `docs/deploy/local-and-systemd.md` for coordinated backup, upgrade,
 rollback, migration, troubleshooting, and advanced direct deployment guidance.
 

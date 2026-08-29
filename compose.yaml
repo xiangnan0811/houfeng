@@ -214,9 +214,6 @@ services:
       - houfeng_session_hmac_key
     networks:
       default:
-      houfeng-proxy:
-        aliases:
-          - houfeng
 
   houfeng-content-processor:
     image: "${HOUFENG_IMAGE:?set HOUFENG_IMAGE in .env}"
@@ -277,11 +274,6 @@ services:
       - ./data/attachments:/var/lib/houfeng/attachments
       - ./optional-secrets/s3:/run/houfeng/optional-secrets/s3:ro
       - ./data/secrets/processor:/run/secrets:ro
-
-networks:
-  houfeng-proxy:
-    external: true
-    name: "${HOUFENG_PROXY_NETWORK:?set HOUFENG_PROXY_NETWORK in .env}"
 
 secrets:
   postgres_bootstrap_password:
