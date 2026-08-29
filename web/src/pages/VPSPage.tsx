@@ -97,6 +97,11 @@ const INITIAL_FILTER_STATE: FilterState = {
   renewal_decision: null,
 }
 
+function vpsDetailHref(vpsID: string, view: VPSQuickView): string {
+  const pathname = `/vps/${encodeURIComponent(vpsID)}`
+  return view === 'unlinked' ? `${pathname}?workbench=monitoring` : pathname
+}
+
 const LIFECYCLE_OPTIONS = Object.entries(VPS_LIFECYCLE_STATUS_LABELS)
   .filter(([value]) => value !== 'cancelled' && value !== 'archived')
   .map(([value, label]) => ({
@@ -494,18 +499,19 @@ export function VPSPage() {
             <tbody>
               {filteredRows.map((row) => {
                 const cancellationReason = cancellationAttentionReason(row)
+                const detailHref = vpsDetailHref(row.vps.vps_id, filters.view)
                 return (
                   <Fragment key={row.vps.vps_id}>
                     {/* a11y-allow-nonsemantic-click: primary-link-row-enhancement */}
                     <tr
                       onClick={(event) => {
                         if (isInteractiveRowTarget(event.target)) return
-                        navigate(`/vps/${row.vps.vps_id}`)
+                        navigate(detailHref)
                       }}
                       className="row-clickable"
                     >
                       <td>
-                        <Link className="name" to={`/vps/${row.vps.vps_id}`}>
+                        <Link className="name" to={detailHref}>
                           {row.vps.display_name}
                         </Link>
                       </td>

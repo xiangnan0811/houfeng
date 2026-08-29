@@ -72,7 +72,7 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 				Detail:   firstNonEmpty(snapshot.MonitoringDetail, "缺少监控证据"),
 				Source:   "monitoring",
 				Primary: &AnomalyAction{
-					ID: "open_monitoring_instances", Label: "关联监控",
+					ID: "open_monitoring_instances", Label: "创建并接入 agent",
 				},
 			})
 		} else {

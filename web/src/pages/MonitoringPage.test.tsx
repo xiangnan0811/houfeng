@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { listMonitoringInstanceSparklines } from '../lib/api'
@@ -63,8 +63,13 @@ function monitoringInstanceRecord(overrides: Partial<Record<string, unknown>> = 
   }
 }
 
+function LocationProbe() {
+  const location = useLocation()
+  return <span data-testid="location">{location.pathname}{location.search}</span>
+}
+
 function getMonitoringHeaderVPSLink() {
-  return screen.getByRole('link', { name: '从 VPS 接入 agent' })
+  return screen.getByRole('link', { name: '从未关联 VPS 接入 agent' })
 }
 
 describe('MonitoringPage', () => {
@@ -87,7 +92,7 @@ describe('MonitoringPage', () => {
       <MemoryRouter initialEntries={['/monitoring']}>
         <Routes>
           <Route path="/monitoring" element={<MonitoringPage />} />
-          <Route path="/vps" element={<div>vps inventory</div>} />
+          <Route path="/vps" element={<><div>vps inventory</div><LocationProbe /></>} />
         </Routes>
       </MemoryRouter>,
     )
@@ -99,7 +104,7 @@ describe('MonitoringPage', () => {
     expect(screen.queryByRole('link', { name: '资产组合决策' })).not.toBeInTheDocument()
     expect(screen.queryByText('资产上下文')).not.toBeInTheDocument()
     expect(screen.getByText('观察 agent 接入后的监控实例、心跳、主机性能与运行控制。')).toBeInTheDocument()
-    expect(getMonitoringHeaderVPSLink()).toHaveAttribute('href', '/vps')
+    expect(getMonitoringHeaderVPSLink()).toHaveAttribute('href', '/vps?view=unlinked')
     expect(screen.queryByRole('button', { name: '高级创建' })).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: '高级创建监控实例表单' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('显示名称')).not.toBeInTheDocument()
@@ -115,6 +120,7 @@ describe('MonitoringPage', () => {
     fireEvent.click(getMonitoringHeaderVPSLink())
 
     await waitFor(() => expect(screen.getByText('vps inventory')).toBeInTheDocument())
+    expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
   })
 
   it('routes the empty monitoring list action to VPS inventory', async () => {
@@ -125,20 +131,48 @@ describe('MonitoringPage', () => {
       <MemoryRouter initialEntries={['/monitoring']}>
         <Routes>
           <Route path="/monitoring" element={<MonitoringPage />} />
-          <Route path="/vps" element={<div>vps inventory</div>} />
+          <Route path="/vps" element={<><div>vps inventory</div><LocationProbe /></>} />
         </Routes>
       </MemoryRouter>,
     )
 
     await waitFor(() => expect(screen.getByText('尚无观测事实')).toBeInTheDocument())
 
-    expect(screen.getByRole('button', { name: '创建第一台 VPS' })).toBeInTheDocument()
+    expect(screen.getByText('从未关联 VPS 中选择一台，创建监控实例并接入 agent。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '选择未关联 VPS' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: '高级创建监控实例表单' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '创建第一台 VPS' }))
+    fireEvent.click(screen.getByRole('button', { name: '选择未关联 VPS' }))
 
     await waitFor(() => expect(screen.getByText('vps inventory')).toBeInTheDocument())
+    expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps an empty archived scope out of the first-run onboarding state', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring?scope=archived']}>
+        <Routes>
+          <Route path="/monitoring" element={<MonitoringPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText('没有匹配当前筛选的监控实例')).toBeInTheDocument(),
+    )
+
+    expect(screen.queryByText('尚无观测事实')).not.toBeInTheDocument()
+    expect(screen.queryByText('从未关联 VPS 中选择一台，创建监控实例并接入 agent。')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选择未关联 VPS' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances?scope=archived', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
   })
 
   it('routes an existing pending onboarding monitoring instance to detail for onboarding work', async () => {
@@ -799,7 +833,7 @@ describe('MonitoringPage', () => {
 
     await waitFor(() => expect(getMonitoringHeaderVPSLink()).toBeInTheDocument())
 
-    expect(getMonitoringHeaderVPSLink()).toHaveAttribute('href', '/vps')
+    expect(getMonitoringHeaderVPSLink()).toHaveAttribute('href', '/vps?view=unlinked')
     expect(screen.queryByRole('button', { name: '高级创建' })).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: '高级创建监控实例表单' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('显示名称')).not.toBeInTheDocument()

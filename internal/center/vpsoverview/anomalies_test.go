@@ -277,7 +277,7 @@ func TestEvaluateAnomaliesActionDestinations(t *testing.T) {
 				GeneratedAt: now, VPSID: vpsID, MonitoringAvailable: true, MonitoringStatus: "unlinked",
 			},
 			ruleID: RuleMonitoringUnlinked, actionID: "open_monitoring_instances",
-			actionLabel: "关联监控",
+			actionLabel: "创建并接入 agent",
 		},
 		{
 			name: "missing IP quality opens the scoped IP quality route",

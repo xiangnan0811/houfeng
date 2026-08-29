@@ -14,6 +14,7 @@ type MonitoringInstancesListSectionProps = {
   showTrends: boolean
   sortState: DataTableSortState | null
   hasActiveFilters: boolean
+  firstRunEligible: boolean
   batchPanelVisible: boolean
   selectAll: boolean
   batchSubmitting: boolean
@@ -43,6 +44,7 @@ export function MonitoringInstancesListSection({
   showTrends,
   sortState,
   hasActiveFilters,
+  firstRunEligible,
   batchPanelVisible,
   selectAll,
   batchSubmitting,
@@ -62,7 +64,11 @@ export function MonitoringInstancesListSection({
   onRowClick,
   onOpenVPSInventory,
 }: MonitoringInstancesListSectionProps) {
-  const firstRunEmpty = baseMonitoringInstances.length === 0 && !hasActiveFilters && monitoringInstanceListView === 'all'
+  const firstRunEmpty =
+    firstRunEligible &&
+    baseMonitoringInstances.length === 0 &&
+    !hasActiveFilters &&
+    monitoringInstanceListView === 'all'
   const bindingConflictEmpty =
     baseMonitoringInstances.length === 0 && !hasActiveFilters && monitoringInstanceListView === 'binding-conflict'
   const runtimeAttentionEmpty =
@@ -99,10 +105,10 @@ export function MonitoringInstancesListSection({
           kind="empty"
           surface="empty"
           title="尚无观测事实"
-          description="普通服务器请先创建 VPS，再从 VPS 详情页创建监控实例并接入 agent。"
+          description="从未关联 VPS 中选择一台，创建监控实例并接入 agent。"
           action={(
             <button type="button" className="btn md primary" onClick={onOpenVPSInventory}>
-              创建第一台 VPS
+              选择未关联 VPS
             </button>
           )}
         />

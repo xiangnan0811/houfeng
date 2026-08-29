@@ -136,7 +136,7 @@ describe('VPSPage', () => {
       <MemoryRouter initialEntries={['/vps']}>
         <Routes>
           <Route path="/vps" element={<VPSPage />} />
-          <Route path="/vps/:vpsId" element={<div>vps detail route</div>} />
+          <Route path="/vps/:vpsId" element={<><div>vps detail route</div><LocationProbe /></>} />
         </Routes>
       </MemoryRouter>,
     )
@@ -198,6 +198,36 @@ describe('VPSPage', () => {
     if (!tokyoRow) throw new Error('expected Tokyo Edge link to belong to a VPS table row')
     fireEvent.click(tokyoRow)
     await waitFor(() => expect(screen.getByText('vps detail route')).toBeInTheDocument())
+    expect(screen.getByTestId('location')).toHaveTextContent('/vps/vps_001')
+  })
+
+  it('routes unlinked inventory name links and background row clicks into monitoring onboarding', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([vps, missingFactsVPS]))
+      .mockResolvedValueOnce(mockJSONResponse([provider]))
+      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps?view=unlinked']}>
+        <Routes>
+          <Route path="/vps" element={<VPSPage />} />
+          <Route path="/vps/:vpsId" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const nameLink = await screen.findByRole('link', { name: 'Osaka Missing' })
+    expect(nameLink).toHaveAttribute('href', '/vps/vps_missing?workbench=monitoring')
+    const row = nameLink.closest('tr')
+    if (!row) throw new Error('expected Osaka Missing link to belong to a VPS table row')
+
+    fireEvent.click(row)
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
+      '/vps/vps_missing?workbench=monitoring',
+    ))
   })
 
   it('keeps VPS rows visible and does not mark missing subscriptions when subscription evidence fails', async () => {

@@ -8,6 +8,7 @@ export type VPSManagementPanel =
   | 'subscription'
   | 'cancellation'
   | 'archive'
+  | 'monitoring-instance-create'
   | 'monitoring-instance-evidence'
   | 'services-detail'
   | 'domains-detail'

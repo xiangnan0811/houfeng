@@ -459,6 +459,7 @@ export function MonitoringPage() {
           showTrends={true}
           sortState={sortState}
           hasActiveFilters={hasActiveFilters}
+          firstRunEligible={monitoringInstanceListScope === 'active'}
           batchPanelVisible={batchPanelVisible}
           selectAll={selectAll}
           batchSubmitting={batchSubmitting}
@@ -478,7 +479,7 @@ export function MonitoringPage() {
           onRowClick={(monitoringInstance) => {
             navigate(`/monitoring/${monitoringInstance.monitoring_instance_id}`)
           }}
-          onOpenVPSInventory={() => navigate('/vps')}
+          onOpenVPSInventory={() => navigate('/vps?view=unlinked')}
         />
       </div>
     </div>

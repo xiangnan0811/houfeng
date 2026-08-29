@@ -3,12 +3,26 @@ import { describe, expect, it } from 'vitest'
 
 import { appRoutes } from '../../app/router'
 import {
+  isStableMonitoringInstanceID,
   resolveVPSOverviewAnomalyDestination,
   resolveVPSOverviewRelationDestination,
   type VPSOverviewDestination,
 } from './vpsOverviewDestination'
 
 const vpsId = 'vps_001'
+
+describe('isStableMonitoringInstanceID', () => {
+  it.each(['mi_001', 'mi_tokyo-edge_2'])('accepts the stable monitoring instance ID %s', (id) => {
+    expect(isStableMonitoringInstanceID(id)).toBe(true)
+  })
+
+  it.each(['mi/existing', 'mi%2Fexisting', 'mi_../escape', 'monitoring_001', '', null, undefined])(
+    'rejects the malformed monitoring instance ID %s',
+    (id) => {
+      expect(isStableMonitoringInstanceID(id)).toBe(false)
+    },
+  )
+})
 
 describe('resolveVPSOverviewAnomalyDestination', () => {
   const tests: Array<{
@@ -54,7 +68,7 @@ describe('resolveVPSOverviewAnomalyDestination', () => {
     {
       ruleId: 'monitoring.unlinked.v1',
       action: { id: 'open_monitoring_instances' },
-      expected: { kind: 'command', command: 'open_monitoring_instances' },
+      expected: { kind: 'command', command: 'open_monitoring_onboarding' },
     },
     {
       ruleId: 'lifecycle.blocker.v1',

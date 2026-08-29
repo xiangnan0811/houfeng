@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../lib/apiRequest'
@@ -172,18 +172,41 @@ function deferredOverview() {
   return { promise, resolve, reject }
 }
 
+function DetailLocationProbe() {
+  const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  return (
+    <>
+      <span data-testid="detail-location">{location.pathname}{location.search}</span>
+      <button
+        type="button"
+        onClick={() => {
+          const next = new URLSearchParams(searchParams)
+          next.set('section', 'facts')
+          setSearchParams(next)
+        }}
+      >
+        编辑无关查询
+      </button>
+    </>
+  )
+}
+
 function renderDetail({
   initialEntry = '/vps/vps_001',
   nextEntry,
   reactStrictMode = false,
+  showLocationProbe = false,
 }: {
   initialEntry?: string
   nextEntry?: string
   reactStrictMode?: boolean
+  showLocationProbe?: boolean
 } = {}) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       {nextEntry ? <Link to={nextEntry}>切换测试 VPS</Link> : null}
+      {showLocationProbe ? <DetailLocationProbe /> : null}
       <Routes>
         <Route path="/vps/:vpsId" element={<VPSDetailPage />} />
         <Route path="/archive/:vpsId" element={<div>Archive detail route</div>} />
@@ -523,6 +546,49 @@ describe('VPSDetailPage gate', () => {
       expect.stringMatching(/^[0-9a-f-]{36}$/i),
     )
     expect(screen.getByRole('status')).toHaveTextContent('订阅账单事实已创建，概览已刷新')
+  })
+
+  it.each(['monitoring', 'monitoring-instance-create'])(
+    'opens the monitoring onboarding once for workbench=%s and consumes the query',
+    async (workbench) => {
+      vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
+      const getDetail = vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture())
+
+      renderDetail({
+        initialEntry: `/vps/vps_001?workbench=${workbench}`,
+        showLocationProbe: true,
+      })
+
+      expect(await screen.findByRole('dialog', { name: '接入/升级 agent' })).toBeInTheDocument()
+      expect(await screen.findByRole('textbox', { name: '监控实例名称' })).toHaveValue('东京边缘')
+      await waitFor(() => expect(screen.getByTestId('detail-location')).not.toHaveTextContent('workbench='))
+      expect(screen.getByTestId('detail-location')).toHaveTextContent('/vps/vps_001')
+      expect(getDetail).toHaveBeenCalledTimes(1)
+
+      fireEvent.click(screen.getByRole('button', { name: '取消' }))
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: '接入/升级 agent' })).not.toBeInTheDocument())
+      fireEvent.click(screen.getByRole('button', { name: '编辑无关查询' }))
+
+      await waitFor(() => expect(screen.getByTestId('detail-location')).toHaveTextContent('?section=facts'))
+      expect(screen.queryByRole('dialog', { name: '接入/升级 agent' })).not.toBeInTheDocument()
+      expect(getDetail).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('consumes a rejected workbench query without opening a panel', async () => {
+    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
+    const getDetail = vi.spyOn(api, 'getVPSAsset')
+
+    renderDetail({
+      initialEntry: '/vps/vps_001?workbench=archive',
+      showLocationProbe: true,
+    })
+
+    expect(await screen.findByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('detail-location')).not.toHaveTextContent('workbench='))
+    expect(screen.getByTestId('detail-location')).toHaveTextContent('/vps/vps_001')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(getDetail).not.toHaveBeenCalled()
   })
 
   it.each([

@@ -903,6 +903,7 @@ export function vpsOverviewProfile(options: {
   overview?: VPSOverview
   overviewStatus?: number
   overviewWaitFor?: Promise<void>
+  detail?: VPSAssetDetail
 } = {}): ApiFixtureProfile {
   const status = options.overviewStatus ?? 200
   return authenticatedProfile({
@@ -913,7 +914,10 @@ export function vpsOverviewProfile(options: {
         : options.overview ?? vpsOverviewFixture(),
       ...(options.overviewWaitFor ? { waitFor: options.overviewWaitFor } : {}),
     },
-    [apiRouteKey('GET', '/api/vps/vps_001')]: { status: 200, body: VPS_OVERVIEW_DETAIL },
+    [apiRouteKey('GET', '/api/vps/vps_001')]: {
+      status: 200,
+      body: options.detail ?? VPS_OVERVIEW_DETAIL,
+    },
     [apiRouteKey('GET', '/api/vps/vps_001/monitoring-instances')]: {
       status: 200,
       body: [VPS_OVERVIEW_MONITORING],

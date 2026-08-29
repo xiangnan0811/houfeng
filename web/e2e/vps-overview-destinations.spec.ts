@@ -1,7 +1,14 @@
 import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
 
-import type { VPSOverview, VPSOverviewAnomaly } from '../src/lib/types'
+import type {
+  CreateVPSMonitoringInstanceInput,
+  CreateVPSMonitoringInstanceResponse,
+  VPSAssetDetail,
+  VPSOverview,
+  VPSOverviewAnomaly,
+} from '../src/lib/types'
+import { vpsAssetFixture } from '../src/pages/dashboard/dashboardTestFixtures'
 import { expect, test } from './fixtures'
 import { apiRouteKey, type ApiFixtureProfile } from './fixtures/contracts'
 import {
@@ -36,6 +43,97 @@ function anomaly(
 
 function overviewWithAnomalies(anomalies: VPSOverviewAnomaly[]): VPSOverview {
   return vpsOverviewFixture({ anomalies })
+}
+
+const EXPECTED_MONITORING_CREATE_BODY = {
+  display_name: 'Tokyo Edge',
+  group: '',
+  region: 'Kanto',
+  city: 'Tokyo',
+  provider: 'Example Cloud',
+  labels: ['edge'],
+  note: '',
+  link_note: 'created from vps detail',
+} satisfies CreateVPSMonitoringInstanceInput
+
+const MONITORING_CREATE_BODY_KEYS = [
+  'display_name',
+  'group',
+  'region',
+  'city',
+  'provider',
+  'labels',
+  'note',
+  'link_note',
+] as const satisfies readonly (keyof CreateVPSMonitoringInstanceInput)[]
+
+// Mirrors the authoritative JSON enum values in internal/center/monitoringinstances/types.go.
+const CREATED_MONITORING_INSTANCE = {
+  monitoring_instance_id: 'mi_created',
+  display_name: 'Tokyo Edge',
+  group: '',
+  region: 'Kanto',
+  city: 'Tokyo',
+  provider: 'Example Cloud',
+  labels: ['edge'],
+  note: '',
+  lifecycle_status: '待接入',
+  monitoring_status: '启用',
+  binding_status: '未绑定',
+  current_health_status: '正常',
+  current_active_incident_count: 0,
+  current_primary_issue_summary: '',
+  created_at: '2026-08-29T00:00:00Z',
+  updated_at: '2026-08-29T00:00:00Z',
+  link: {
+    link_id: 'link_created',
+    vps_id: 'vps_001',
+    monitoring_instance_id: 'mi_created',
+    linked_at: '2026-08-29T00:00:00Z',
+    unlinked_at: null,
+    note: 'created from vps detail',
+  },
+} satisfies CreateVPSMonitoringInstanceResponse
+
+function unlinkedVPSDetail(): VPSAssetDetail {
+  return {
+    ...vpsAssetFixture({ active_monitoring_instance_link_count: 0 }),
+    monitoring_instance_links: [],
+  }
+}
+
+function unlinkedVPSOverview(): VPSOverview {
+  const base = vpsOverviewFixture()
+  return vpsOverviewFixture({
+    anomalies: [anomaly(
+      'monitoring.unlinked.v1',
+      { id: 'open_monitoring_instances', label: '创建并接入 agent' },
+    )],
+    summary: {
+      ...base.summary,
+      monitoring: { ...base.summary.monitoring, status: 'unlinked' },
+    },
+    relations: base.relations.map((relation) => (
+      relation.kind === 'monitoring_instances'
+        ? { ...relation, count: 0, status: 'unlinked' }
+        : relation
+    )),
+  })
+}
+
+function firstMonitoringCreateProfile(): ApiFixtureProfile {
+  return {
+    ...monitoringInstanceDetailProfile('mi_created'),
+    ...vpsOverviewProfile({
+      overview: unlinkedVPSOverview(),
+      detail: unlinkedVPSDetail(),
+    }),
+    [apiRouteKey('POST', '/api/vps/vps_001/monitoring-instances')]: {
+      status: 201,
+      body: CREATED_MONITORING_INSTANCE,
+      expectedBodyKeys: MONITORING_CREATE_BODY_KEYS,
+    },
+  }
 }
 
 async function expectLocation(page: Page, expected: string) {
@@ -173,6 +271,132 @@ for (const contract of PANEL_COMMANDS) {
     await expectLocation(page, '/vps/vps_001')
   })
 }
+
+test('VPS overview creates the first monitoring instance and reaches its onboarding owner', async ({
+  api,
+  page,
+}) => {
+  expect(CREATED_MONITORING_INSTANCE).toMatchObject({
+    lifecycle_status: '待接入',
+    monitoring_status: '启用',
+    binding_status: '未绑定',
+  })
+  const overviewFixture = unlinkedVPSOverview()
+  expect(overviewFixture.summary.monitoring.status).toBe('unlinked')
+  expect(overviewFixture.relations.find((relation) => (
+    relation.kind === 'monitoring_instances'
+  ))?.status).toBe('unlinked')
+
+  api.useProfile(firstMonitoringCreateProfile())
+  await api.allowRuntimeStream('mi_created')
+  await page.goto('/vps/vps_001')
+
+  await page.getByRole('button', { name: '创建并接入 agent' }).click()
+  const dialog = page.getByRole('dialog', { name: '接入/升级 agent' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('textbox', { name: '监控实例名称' })).toHaveValue('Tokyo Edge')
+
+  const createRequestPromise = page.waitForRequest((request) => (
+    request.method() === 'POST'
+    && new URL(request.url()).pathname === '/api/vps/vps_001/monitoring-instances'
+  ))
+  const onboardingNavigation = page.waitForURL((url) => (
+    url.pathname === '/monitoring/mi_created'
+    && url.search === '?onboarding=1&return_vps=vps_001'
+  ))
+  await dialog.getByRole('button', { name: '接入/升级 agent' }).click()
+
+  const createRequest = await createRequestPromise
+  expect(createRequest.postDataJSON()).toEqual(EXPECTED_MONITORING_CREATE_BODY)
+  expect(createRequest.headers()['idempotency-key']).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  )
+  await onboardingNavigation
+  await expect(page.getByRole('heading', { name: 'Tokyo Monitor' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '监控实例接入抽屉' })).toBeVisible()
+  await api.assertRuntimeStreamConnected('mi_created')
+  expect(api.requestCount('GET', '/api/vps/vps_001/overview')).toBe(2)
+  expect(api.requestCount('POST', '/api/vps/vps_001/monitoring-instances')).toBe(1)
+})
+
+test('Monitoring first-run entry selects an unlinked VPS and consumes the route workbench', async ({
+  api,
+  page,
+}) => {
+  const linkedVPS = vpsAssetFixture({
+    vps_id: 'vps_linked',
+    display_name: 'Linked Osaka',
+    active_monitoring_instance_link_count: 1,
+  })
+  api.useProfile({
+    ...coreRouteProfile('/monitoring'),
+    ...coreRouteProfile('/vps'),
+    ...vpsOverviewProfile({
+      overview: unlinkedVPSOverview(),
+      detail: unlinkedVPSDetail(),
+    }),
+    [apiRouteKey('GET', '/api/vps')]: {
+      status: 200,
+      body: [unlinkedVPSDetail(), linkedVPS],
+    },
+  })
+  await page.goto('/monitoring')
+
+  await page.getByRole('button', { name: '选择未关联 VPS' }).click()
+  await expectLocation(page, '/vps?view=unlinked')
+  const unlinkedVPS = page.getByRole('link', { name: 'Tokyo Edge' })
+  await expect(unlinkedVPS).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Linked Osaka' })).toHaveCount(0)
+
+  const workbenchNavigation = page.waitForURL((url) => (
+    url.pathname === '/vps/vps_001' && url.search === '?workbench=monitoring'
+  ))
+  await unlinkedVPS.click()
+  await workbenchNavigation
+
+  const dialog = page.getByRole('dialog', { name: '接入/升级 agent' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('textbox', { name: '监控实例名称' })).toHaveValue('Tokyo Edge')
+  await expectLocation(page, '/vps/vps_001')
+  expect(api.requestCount('POST', '/api/vps/vps_001/monitoring-instances')).toBe(0)
+})
+
+test('VPS overview onboarding dialog is operable, mobile-safe, and accessible at 390px', async ({
+  api,
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  api.useProfile(vpsOverviewProfile({
+    overview: unlinkedVPSOverview(),
+    detail: unlinkedVPSDetail(),
+  }))
+  await page.goto('/vps/vps_001')
+
+  await page.getByRole('button', { name: '创建并接入 agent' }).click()
+  const dialog = page.getByRole('dialog', { name: '接入/升级 agent' })
+  await expect(dialog).toBeVisible()
+  const name = dialog.getByRole('textbox', { name: '监控实例名称' })
+  await name.fill('Tokyo Edge Mobile')
+  await expect(name).toHaveValue('Tokyo Edge Mobile')
+  const submit = dialog.getByRole('button', { name: '接入/升级 agent' })
+  await submit.scrollIntoViewIfNeeded()
+  await expect(submit).toBeVisible()
+  await submit.focus()
+  await expect(submit).toBeFocused()
+  await expectNoDocumentOverflow(page)
+
+  const result = await new AxeBuilder({ page }).analyze()
+  const blocking = result.violations
+    .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
+    .map((violation) => ({
+      id: violation.id,
+      impact: violation.impact,
+      targets: violation.nodes.map((node) => node.target),
+    }))
+  expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([])
+  expect(api.requestCount('POST', '/api/vps/vps_001/monitoring-instances')).toBe(0)
+})
 
 test('VPS overview management menu exits on native Tab from a menuitem', async ({ api, page }) => {
   api.useProfile(vpsOverviewProfile())
