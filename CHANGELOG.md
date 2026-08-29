@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.79.1](https://github.com/xiangnan0811/houfeng/compare/v0.79.0...v0.79.1) (2026-08-29)
+
+
+### Bug Fixes
+
+* restore monitoring agent bootstrap ([5471937](https://github.com/xiangnan0811/houfeng/commit/54719379541f5168a1493ee9d7d44e8c03964276))
+* restore monitoring agent bootstrap ([30cbe86](https://github.com/xiangnan0811/houfeng/commit/30cbe86597469eb29e39d7989dcd52d3c03c3434))
+
+
+### Documentation
+
+* **trellis:** plan monitoring agent bootstrap ([4ded7af](https://github.com/xiangnan0811/houfeng/commit/4ded7af97a0aeaa460da5935865042c3f71c4e84))
+
 ## [0.79.0](https://github.com/xiangnan0811/houfeng/compare/v0.78.0...v0.79.0) (2026-08-29)
 
 
