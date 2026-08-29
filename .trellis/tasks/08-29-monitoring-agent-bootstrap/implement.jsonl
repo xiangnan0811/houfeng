@@ -1,0 +1,7 @@
+{"file":".trellis/spec/web/state-and-data.md","reason":"Authoritative VPS monitoring 0/1/many routing, onboarding URL and good/bad flow contract"}
+{"file":".trellis/spec/web/vps-detail-ownership.md","reason":"Shared per-VPS owner, generation, settle and refresh semantics across Legacy and Overview"}
+{"file":".trellis/spec/web/component-conventions.md","reason":"Page-private API ownership, existing component reuse, modal behavior and file boundary guidance"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace backend anomaly action through resolver, panel, API write and refreshed relations"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse the existing form, helpers, API and write registry without duplicating the Legacy component"}
+{"file":".trellis/tasks/08-29-monitoring-agent-bootstrap/design.md","reason":"Approved action compatibility, onboarding owner, 0/1/many routing and Monitoring entrypoint design"}
+{"file":".trellis/tasks/08-29-monitoring-agent-bootstrap/research/current-flow-audit.md","reason":"Current v0.79.0 root cause, exact code anchors, existing contracts and baseline evidence"}
