@@ -1122,3 +1122,25 @@ Delivered shared-network and host-proxy Compose modes through PR #471, protected
 ### Status
 
 [OK] **Completed**
+
+
+## Session 266: Restore monitoring agent bootstrap
+
+**Date**: 2026-08-29
+**Task**: Restore monitoring agent bootstrap
+**Branch**: `codex/monitoring-agent-bootstrap-finish`
+
+### Summary
+
+Restored VPS-scoped monitoring instance creation and agent onboarding for existing unlinked VPS assets, closed async ownership races, delivered v0.79.1, and verified release assets plus multi-architecture images.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4ded7af9` | (see git log) |
+| `30cbe865` | (see git log) |
+
+### Status
+
+[OK] **Completed**
