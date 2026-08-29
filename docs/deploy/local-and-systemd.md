@@ -142,30 +142,29 @@ The center applies embedded migrations on startup and serves API plus the built 
 The release bundle is the ordinary single-host production path. It runs only
 published images and needs no source checkout, local build, helper launcher, or
 manual database command. Prerequisites are Docker with Compose support, an
-existing Docker network shared with Nginx Proxy Manager (NPM), and an HTTPS
-hostname whose DNS already reaches NPM.
+existing Nginx Proxy Manager (NPM) deployment in either supported proxy mode,
+and an HTTPS hostname whose DNS already reaches NPM.
 
-Create a private deployment directory and download the two assets from the same
+Create a private deployment directory and download the four assets from the same
 GitHub Release:
 
 ```bash
 install -d -m 0700 houfeng && cd houfeng
 sudo install -d -o 10001 -g 10001 -m 0700 optional-secrets optional-secrets/comparison-keyring optional-secrets/s3
 curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.yaml -o compose.yaml
+curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.proxy-network.yaml -o compose.proxy-network.yaml
+curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.proxy-host.yaml -o compose.proxy-host.yaml
 curl -fL https://github.com/xiangnan0811/houfeng/releases/latest/download/compose.env.example -o .env
 chmod 0600 .env
 ${EDITOR:-vi} .env
-docker compose config
-docker compose pull
-docker compose up -d
 ```
 
-Fill every value in **Must change** before validation. The downloaded
-`HOUFENG_IMAGE` is already pinned to the matching `vX.Y.Z` image; do not replace
-it with `latest`. **Recommended** contains the stable project name, the fixed
-Records profile marker, proxy/session choices, and local-storage choice.
-**Optional** contains integrations that may remain blank. Keep
-`COMPOSE_PROJECT_NAME=houfeng` stable across upgrades and restores.
+Fill every value required by the selected mode in **Must change** before
+validation. The downloaded `HOUFENG_IMAGE` is already pinned to the matching
+`vX.Y.Z` image; do not replace it with `latest`. **Recommended** contains the
+stable project name, the fixed Records profile marker, proxy/session choices,
+and local-storage choice. **Optional** contains integrations that may remain
+blank. Keep `COMPOSE_PROJECT_NAME=houfeng` stable across upgrades and restores.
 Generate every blank secret independently with `openssl rand -hex 32`, paste
 the raw hex without quotes, and never reuse a value. Hex avoids dotenv traps
 from `$`, `#`, and quote characters.
@@ -176,19 +175,82 @@ does not deliver the required external witness.
 
 ### Nginx Proxy Manager
 
-Set `HOUFENG_PROXY_NETWORK` to the exact existing Docker network already joined
-by NPM. Only `houfeng` joins it, with the stable alias `houfeng`; no Houfeng
-service publishes a host port. In NPM create a Proxy Host with:
+Select exactly one of the reviewed modes through `COMPOSE_FILE`. Do not load both
+mode files at once.
+
+#### Shared-network mode (default)
+
+Keep the template default:
+
+```dotenv
+COMPOSE_FILE=compose.yaml:compose.proxy-network.yaml
+```
+
+From the existing NPM Compose directory, inspect the networks already joined by
+its `app` service:
+
+```bash
+docker inspect "$(docker compose ps -q app)" \
+  --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{"\n"}}{{end}}'
+```
+
+If that deployment uses another service name, substitute it for `app`. Set
+`HOUFENG_PROXY_NETWORK` to the exact existing user-defined network reported by
+the command. Do not invent a network name: a missing external network makes
+startup fail rather than creating a substitute. Houfeng joins the network
+already used by NPM; this does not require editing NPM's Compose
+configuration. Only `houfeng` gains that external-network membership, with the
+stable alias `houfeng`, and no Houfeng service publishes a host port. Use the NPM
+upstream `http://houfeng:16001`.
+
+#### Host-proxy mode
+
+An NPM deployment already using `network_mode: host` cannot resolve the
+shared-network alias. Keep NPM in its existing host-network configuration and
+check the Docker server version before changing `.env`:
+
+```bash
+docker version --format '{{.Server.Version}}'
+```
+
+Docker Engine 28.0.0 or newer is required. Earlier Engines may allow another
+host on the same L2 segment to reach a localhost-published container port, so
+they are unsupported; this deployment contract does not substitute a guessed
+host-firewall workaround. Select the host overlay and leave the network value
+blank:
+
+```dotenv
+COMPOSE_FILE=compose.yaml:compose.proxy-host.yaml
+HOUFENG_PROXY_NETWORK=
+```
+
+Use the NPM upstream `http://127.0.0.1:16001`. This mode publishes Center TCP
+16001 only to the fixed host IPv4 loopback address; it does not expose a public
+or LAN bind and does not change Center's private PostgreSQL/ClamAV network.
+
+#### Common NPM and startup settings
+
+In NPM create a Proxy Host with:
 
 - domain name equal to the host in `HOUFENG_PUBLIC_BASE_URL`;
-- scheme `http`, forward hostname `houfeng`, and forward port `16001`;
+- scheme `http` and the forward hostname/port for the selected mode above;
 - **Websockets Support** and **Block Common Exploits** enabled;
 - a valid certificate and **Force SSL** enabled.
 
 Set `HOUFENG_TRUSTED_PROXIES` only when forwarded client IPs are required, and
-then only to the exact NPM-network CIDR. Broad ranges such as `0.0.0.0/0` and
-`::/0` are rejected. Apply appropriate request-body, rate, and connection limits
-in NPM. Center Host validation is derived from `HOUFENG_PUBLIC_BASE_URL`.
+then only to an exact observed proxy-source CIDR for the selected mode. Do not
+guess `127.0.0.0/8`; broad ranges such as `0.0.0.0/0` and `::/0` are rejected.
+Apply appropriate request-body, rate, and connection limits in NPM. Center Host
+validation is derived from `HOUFENG_PUBLIC_BASE_URL`.
+
+After selecting one mode and completing `.env`, render the merged model before
+pulling or starting anything:
+
+```bash
+docker compose config
+docker compose pull
+docker compose up -d
+```
 
 ### Topology and initialization
 
@@ -279,8 +341,9 @@ directory; S3 data is no longer part of the local `./data` migration unit.
 
 `docker compose ps` must show PostgreSQL, ClamAV, Center, and the Records
 authority healthy, the processor running, and all three initializer services
-completed successfully. Verify the public route through NPM because no
-loopback/host port exists:
+completed successfully. Verify the public route through NPM in either mode;
+shared-network mode has no host port, while host-proxy mode has only the reviewed
+IPv4-loopback mapping:
 
 ```bash
 docker compose ps
@@ -298,6 +361,13 @@ do not bypass its dependency or start Center manually. Authority health failure
 belongs in `docker compose logs houfeng-record-authority`; do not replace the
 deployment ID or edit its private files to force readiness.
 
+In host-proxy mode, an optional host-local check can isolate the Center mapping
+from NPM while retaining the configured public Host authority:
+
+```bash
+curl -fsS -H 'Host: center.example.com' http://127.0.0.1:16001/api/healthz
+```
+
 ### Backup, restore, and host migration
 
 PostgreSQL, local attachments, and Records authority state are one logical
@@ -307,20 +377,23 @@ cache data.
 For the simplest consistent backup, stop the whole stack with
 `docker compose down`, copy the complete private deployment directory while
 PostgreSQL is stopped, then restart with `docker compose up -d`. The copy must
-include `compose.yaml`, `.env`, `optional-secrets/`, and the entire `data/`
-tree. Protect it as secret material. A database-only, attachment-only,
-authority-only, or live unordered filesystem copy is incomplete. An active
-database with absent, corrupt, or mismatched authority state fails closed;
-restore PostgreSQL and Records authority state together.
+include `compose.yaml`, `compose.proxy-network.yaml`,
+`compose.proxy-host.yaml`, `.env`, `optional-secrets/`, and the entire `data/`
+tree. Keeping both matching release mode files makes the selected
+`COMPOSE_FILE` recoverable even though only one mode is active. Protect the copy
+as secret material. A database-only, attachment-only, authority-only, or live
+unordered filesystem copy is incomplete. An active database with absent,
+corrupt, or mismatched authority state fails closed; restore PostgreSQL and Records authority state together.
 
 To restore or migrate hosts, stop the source, copy that same directory intact,
-install Docker/Compose on the target, recreate or join the external NPM network
-named in `.env`, and run `docker compose config` followed by
-`docker compose up -d`. Do not start both copies against one identity or split
-the PostgreSQL and attachment recovery points. Confirm the public health route
-and a representative admitted Records write plus attachment after restore before
-retiring the source. Starting two copied authorities for the same deployment is
-unsupported.
+install Docker/Compose on the target, and re-establish the prerequisite for the
+selected mode: make the exact existing NPM network available to shared-network
+mode, or prove Docker Engine 28.0.0 or newer for host-proxy mode. Keep the same
+`COMPOSE_FILE`, run `docker compose config`, then run `docker compose up -d`.
+Do not start both copies against one identity or split the PostgreSQL and
+attachment recovery points. Confirm the public health route and a representative
+admitted Records write plus attachment after restore before retiring the source.
+Starting two copied authorities for the same deployment is unsupported.
 
 For S3, a valid recovery point instead requires a coordinated PostgreSQL dump
 and object-version manifest. The Compose bundle does not claim cross-storage
@@ -328,10 +401,12 @@ snapshot orchestration; use a separately reviewed recovery procedure.
 
 ### Upgrade, rollback, and secret rotation
 
-Before upgrading, take a cold recovery point. Download `compose.yaml` and the
-public `compose.env.example` asset from the exact target tag, review the new
-template against the private local `.env`, preserve operator values, and update
-`HOUFENG_IMAGE` to the matching immutable tag. Then run:
+Before upgrading, take a cold recovery point. Download `compose.yaml`,
+`compose.proxy-network.yaml`, `compose.proxy-host.yaml`, and the public
+`compose.env.example` asset from the exact target tag. Review the new template
+against the private local `.env`, preserve the selected `COMPOSE_FILE` and its
+mode-specific value, and update `HOUFENG_IMAGE` to the matching immutable tag.
+Then run:
 
 ```bash
 docker compose config
@@ -344,7 +419,11 @@ The database initializer applies the supported forward schema transition before
 Center starts. Do not roll an older image back over a database already migrated
 by a newer incompatible release. If release notes do not explicitly confirm
 backward compatibility, rollback means restoring the complete pre-upgrade cold
-recovery point together with its matching Compose asset and image tag.
+recovery point together with its matching common Compose file, mode file, env
+contract, and image tag. Switching modes changes only `COMPOSE_FILE` and the
+mode-specific `HOUFENG_PROXY_NETWORK` value; always run `docker compose config`
+before `docker compose up -d`, and never replace or split the data/authority
+identity while switching.
 
 Compose does not include the value behind an environment-sourced secret in its
 service configuration hash. A plain `docker compose up -d` therefore does not

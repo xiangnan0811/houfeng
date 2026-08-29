@@ -1,0 +1,11 @@
+services:
+  houfeng:
+    networks:
+      houfeng-proxy:
+        aliases:
+          - houfeng
+
+networks:
+  houfeng-proxy:
+    external: true
+    name: "${HOUFENG_PROXY_NETWORK:?set HOUFENG_PROXY_NETWORK for shared-network mode}"
