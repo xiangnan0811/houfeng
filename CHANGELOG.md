@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.79.0](https://github.com/xiangnan0811/houfeng/compare/v0.78.0...v0.79.0) (2026-08-29)
+
+
+### Features
+
+* support existing NPM proxy modes ([123f856](https://github.com/xiangnan0811/houfeng/commit/123f85656b2e520b048c6486cbafd028a0c57e21))
+* support existing NPM proxy modes ([1fa3eb3](https://github.com/xiangnan0811/houfeng/commit/1fa3eb33af309f9b503f0a18c5e27d8d0459817a))
+
+
+### Documentation
+
+* **trellis:** plan NPM proxy compatibility ([d61d4d3](https://github.com/xiangnan0811/houfeng/commit/d61d4d37b6c4f237f3ad4dc6ff2771c8d9da47b1))
+
 ## [0.78.0](https://github.com/xiangnan0811/houfeng/compare/v0.77.6...v0.78.0) (2026-08-28)
 
 
