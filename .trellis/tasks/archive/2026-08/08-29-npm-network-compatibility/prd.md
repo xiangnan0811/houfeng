@@ -46,14 +46,14 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1: bridge-mode NPM 用户复用 NPM 已加入的现有网络；Houfeng 在该网络以 `houfeng:16001` 可达，NPM Compose 无需修改。
-- [ ] AC2: shared-network 模式缺少 `HOUFENG_PROXY_NETWORK` 时 `docker compose config` 以明确诊断失败，且最终模型不含 published port。
-- [ ] AC3: host-mode NPM 用户把 `COMPOSE_FILE` 切换到 host 模式后，可保持 `HOUFENG_PROXY_NETWORK` 为空并成功渲染；最终模型只含 `127.0.0.1:16001 -> 16001/tcp`。
-- [ ] AC4: host 模式文档在启动前要求并展示 Docker Engine 28.0.0+ 检查，明确 NPM upstream 为 `127.0.0.1:16001`，且不提供旧 Engine 防火墙绕过方案。
-- [ ] AC5: 两个模式最终模型中，只有 Center 获得代理可达性，Center 始终保留 default network；数据库、ClamAV、authority、processor 与 initializer 不加入外部代理网络或发布端口。
-- [ ] AC6: 自动化测试冻结模式文件职责、env 默认选择、shared-network stable alias/no-host-port、host loopback-only/no-external-network requirement，以及四个 release asset 的验证和公开读回合同。
-- [ ] AC7: README 和正式部署指南提供可复制的现有 NPM 网络发现、模式选择、下载、`docker compose config`、启动和公共 health 验证步骤，不建议填写 `host` 或创建占位网络。
-- [ ] AC8: focused deployment tests、两种 Compose render、Go 质量门、workflow/YAML/shell 检查、diff hygiene、独立 Trellis check、PR CI 和发布资产验证全部通过。
+- [x] AC1: bridge-mode NPM 用户复用 NPM 已加入的现有网络；Houfeng 在该网络以 `houfeng:16001` 可达，NPM Compose 无需修改。
+- [x] AC2: shared-network 模式缺少 `HOUFENG_PROXY_NETWORK` 时 `docker compose config` 以明确诊断失败，且最终模型不含 published port。
+- [x] AC3: host-mode NPM 用户把 `COMPOSE_FILE` 切换到 host 模式后，可保持 `HOUFENG_PROXY_NETWORK` 为空并成功渲染；最终模型只含 `127.0.0.1:16001 -> 16001/tcp`。
+- [x] AC4: host 模式文档在启动前要求并展示 Docker Engine 28.0.0+ 检查，明确 NPM upstream 为 `127.0.0.1:16001`，且不提供旧 Engine 防火墙绕过方案。
+- [x] AC5: 两个模式最终模型中，只有 Center 获得代理可达性，Center 始终保留 default network；数据库、ClamAV、authority、processor 与 initializer 不加入外部代理网络或发布端口。
+- [x] AC6: 自动化测试冻结模式文件职责、env 默认选择、shared-network stable alias/no-host-port、host loopback-only/no-external-network requirement，以及四个 release asset 的验证和公开读回合同。
+- [x] AC7: README 和正式部署指南提供可复制的现有 NPM 网络发现、模式选择、下载、`docker compose config`、启动和公共 health 验证步骤，不建议填写 `host` 或创建占位网络。
+- [x] AC8: focused deployment tests、两种 Compose render、Go 质量门、workflow/YAML/shell 检查、diff hygiene、独立 Trellis check、PR CI 和发布资产验证全部通过。
 
 ## Out of Scope
 

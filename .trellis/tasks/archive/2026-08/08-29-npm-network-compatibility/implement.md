@@ -1,6 +1,6 @@
 # NPM Network Compatibility Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add explicit shared-network and host-proxy production Compose modes so Houfeng adapts to an existing NPM deployment without weakening the default no-host-port boundary.
 
@@ -38,7 +38,7 @@
 - Modify: `internal/center/deploy/production_compose_static_test.go`
 - Test: `internal/center/deploy/production_compose_static_test.go`
 
-- [ ] **Step 1: Replace the single-network topology assertion with base + mode assertions**
+- [x] **Step 1: Replace the single-network topology assertion with base + mode assertions**
 
 Add a focused test shaped as follows, reusing `readText`, `repoRoot`, and `composeServiceBlock`:
 
@@ -99,7 +99,7 @@ func TestProductionComposeDefinesExplicitProxyModes(t *testing.T) {
 
 Keep the existing portable bind-mount assertions, but move proxy assertions out of `TestProductionComposeUsesPortableDataAndNPMNetwork` and rename it to describe portable data only.
 
-- [ ] **Step 2: Run the focused RED**
+- [x] **Step 2: Run the focused RED**
 
 ```bash
 go test ./internal/center/deploy -run 'TestProductionComposeDefinesExplicitProxyModes|TestProductionComposeUsesPortableData' -count=1 -v
@@ -116,7 +116,7 @@ Expected: FAIL because both mode files are absent and the base still owns `HOUFE
 - Create: `compose.proxy-host.yaml`
 - Test: `internal/center/deploy/production_compose_static_test.go`
 
-- [ ] **Step 1: Make the base Center private-network-only**
+- [x] **Step 1: Make the base Center private-network-only**
 
 Replace the Center network block with:
 
@@ -127,7 +127,7 @@ Replace the Center network block with:
 
 Delete the base top-level `houfeng-proxy` network declaration. Do not change another service, dependency, environment value, secret, mount, healthcheck, or default network.
 
-- [ ] **Step 2: Add the exact shared-network mode file**
+- [x] **Step 2: Add the exact shared-network mode file**
 
 ```yaml
 services:
@@ -143,7 +143,7 @@ networks:
     name: "${HOUFENG_PROXY_NETWORK:?set HOUFENG_PROXY_NETWORK for shared-network mode}"
 ```
 
-- [ ] **Step 3: Add the exact host-proxy mode file**
+- [x] **Step 3: Add the exact host-proxy mode file**
 
 ```yaml
 services:
@@ -156,7 +156,7 @@ services:
         protocol: tcp
 ```
 
-- [ ] **Step 4: Run the focused GREEN**
+- [x] **Step 4: Run the focused GREEN**
 
 ```bash
 go test ./internal/center/deploy -run 'TestProductionComposeDefinesExplicitProxyModes|TestProductionComposeUsesPortableData' -count=1 -v
@@ -164,7 +164,7 @@ go test ./internal/center/deploy -run 'TestProductionComposeDefinesExplicitProxy
 
 Expected: PASS.
 
-- [ ] **Step 5: Render both modes with complete non-secret test values**
+- [x] **Step 5: Render both modes with complete non-secret test values**
 
 Shared-network render:
 
@@ -214,7 +214,7 @@ Expected: exit 0; Center retains default network and renders only `127.0.0.1:160
 - Modify: `README.md`
 - Modify: `docs/deploy/local-and-systemd.md`
 
-- [ ] **Step 1: Add failing env/docs contract assertions**
+- [x] **Step 1: Add failing env/docs contract assertions**
 
 Update `TestProductionEnvironmentTemplateHasThreeOperatorSections` and `TestProductionQuickStartUsesReleaseAssetsAndAutomaticInitialization` to require:
 
@@ -234,7 +234,7 @@ required := []string{
 
 Add negative checks so docs do not recommend `HOUFENG_PROXY_NETWORK=host`, a placeholder proxy network for host mode, or changing NPM from host to bridge merely for Houfeng.
 
-- [ ] **Step 2: Run the docs RED**
+- [x] **Step 2: Run the docs RED**
 
 ```bash
 go test ./internal/center/deploy -run 'TestProductionEnvironmentTemplateHasThreeOperatorSections|TestProductionQuickStartUsesReleaseAssetsAndAutomaticInitialization' -count=1 -v
@@ -242,7 +242,7 @@ go test ./internal/center/deploy -run 'TestProductionEnvironmentTemplateHasThree
 
 Expected: FAIL on missing mode assets, `COMPOSE_FILE`, host upstream, and Engine requirement.
 
-- [ ] **Step 3: Update the env template**
+- [x] **Step 3: Update the env template**
 
 Keep exactly Must change / Recommended / Optional headings. Add the default mode selection before mode-specific variables:
 
@@ -259,7 +259,7 @@ HOUFENG_PROXY_NETWORK=
 
 Do not add a configurable host bind address or public port variable.
 
-- [ ] **Step 4: Rewrite the quick start around four assets**
+- [x] **Step 4: Rewrite the quick start around four assets**
 
 README and the canonical guide must download, in order:
 
@@ -287,7 +287,7 @@ The guide must say Engine 28.0.0+ is required, set `COMPOSE_FILE=compose.yaml:co
 
 Update backup/restore and upgrade text so the deployment unit includes the common and mode assets. Preserve public HTTPS, NPM security toggles, secret rotation, Records authority, and coordinated recovery text.
 
-- [ ] **Step 5: Run docs GREEN**
+- [x] **Step 5: Run docs GREEN**
 
 ```bash
 go test ./internal/center/deploy -run 'TestProductionEnvironmentTemplateHasThreeOperatorSections|TestProductionQuickStartUsesReleaseAssetsAndAutomaticInitialization|TestProductionGuideDocumentsAuthorityAndPortableRecoveryUnit' -count=1 -v
@@ -303,7 +303,7 @@ Expected: PASS.
 - Modify: `internal/center/deploy/production_compose_static_test.go`
 - Modify: `.github/workflows/publish-images.yml`
 
-- [ ] **Step 1: Extend release static tests first**
+- [x] **Step 1: Extend release static tests first**
 
 Change required asset assertions to the exact ordered set:
 
@@ -326,7 +326,7 @@ Require workflow evidence for:
 - downloading and byte-comparing all four names;
 - preserving unrelated agent release assets.
 
-- [ ] **Step 2: Run the release RED**
+- [x] **Step 2: Run the release RED**
 
 ```bash
 go test ./internal/center/deploy -run 'TestPublishWorkflowUploadsVersionMatchedDeploymentAssets|TestPublishWorkflowUsesStablePublicComposeEnvironmentAssetName|TestPublishWorkflowVerifiesPublicDeploymentAssetsAfterUpload' -count=1 -v
@@ -334,7 +334,7 @@ go test ./internal/center/deploy -run 'TestPublishWorkflowUploadsVersionMatchedD
 
 Expected: FAIL because the workflow still stages, validates, uploads, and reads back only two deployment assets.
 
-- [ ] **Step 3: Implement dual-mode pre-upload validation**
+- [x] **Step 3: Implement dual-mode pre-upload validation**
 
 In the deployment-assets job:
 
@@ -346,11 +346,11 @@ In the deployment-assets job:
 
 Do not depend on `COMPOSE_FILE` for CI rendering; explicit `-f` pairs make the two validation targets auditable.
 
-- [ ] **Step 4: Extend upload and public readback**
+- [x] **Step 4: Extend upload and public readback**
 
 Upload all four `dist/` files. Use one `required_deployment_assets` array for exact-name cardinality, downloads, existence checks, and `cmp -s` comparisons. Keep the existing checks rejecting `.env.example` and `default.env.example`, and do not require the Release's total asset count to equal four.
 
-- [ ] **Step 5: Run release GREEN and syntax checks**
+- [x] **Step 5: Run release GREEN and syntax checks**
 
 ```bash
 go test ./internal/center/deploy -run 'TestPublishWorkflowUploadsVersionMatchedDeploymentAssets|TestPublishWorkflowUsesStablePublicComposeEnvironmentAssetName|TestPublishWorkflowVerifiesPublicDeploymentAssetsAfterUpload' -count=1 -v
@@ -366,7 +366,7 @@ Extract any changed multiline shell bodies with the existing test/helper approac
 - Modify: `.trellis/spec/backend/directory-structure.md`
 - Modify: `internal/center/deploy/production_compose_static_test.go`
 
-- [ ] **Step 1: Update the release-asset production Compose scenario**
+- [x] **Step 1: Update the release-asset production Compose scenario**
 
 Change the scenario's scope, signatures, contracts, error matrix, good/base/bad cases, required tests, and correct YAML examples to encode:
 
@@ -380,7 +380,7 @@ Change the scenario's scope, signatures, contracts, error matrix, good/base/bad 
 
 Remove the obsolete blanket assertion that every loopback host port is forbidden; replace it with the conditional rule that the base and shared-network mode have no published port while host mode has exactly one loopback mapping.
 
-- [ ] **Step 2: Update the spec sync test and run it**
+- [x] **Step 2: Update the spec sync test and run it**
 
 ```bash
 go test ./internal/center/deploy -run 'TestProductionComposeTrellisSpecsMatchReleaseAndAuthorityContract' -count=1 -v
@@ -394,7 +394,7 @@ Expected: PASS with the new four-asset/two-mode/Engine-28 contract.
 
 - Check all task-owned files.
 
-- [ ] **Step 1: Run focused and package tests**
+- [x] **Step 1: Run focused and package tests**
 
 ```bash
 go test ./internal/center/deploy -count=1
@@ -403,11 +403,11 @@ go test ./cmd/houfeng-record-platform-admin -count=1
 
 Expected: PASS with zero skips attributable to this task.
 
-- [ ] **Step 2: Re-run both final Compose renders**
+- [x] **Step 2: Re-run both final Compose renders**
 
 Run the exact shared-network and host-proxy commands from Task 2 against the final env template. Save no rendered secrets or configs in tracked files. Expected: both exit 0 with the mode-specific topology.
 
-- [ ] **Step 3: Run repository quality gates**
+- [x] **Step 3: Run repository quality gates**
 
 ```bash
 make verify-go
@@ -417,7 +417,7 @@ git status --short
 
 Run `actionlint` if installed; otherwise record that it is unavailable after YAML parse and shell syntax checks. No Web gate is required unless implementation unexpectedly changes `web/`.
 
-- [ ] **Step 4: Dispatch Trellis check**
+- [x] **Step 4: Dispatch Trellis check**
 
 Provide the active task path first and require findings-first review of:
 
@@ -436,7 +436,7 @@ Fix all Critical/Important findings, rerun affected RED/GREEN and full gates, an
 
 - Stage only task-owned source, tests, docs, workflow, spec, and Trellis task artifacts.
 
-- [ ] **Step 1: Review exact diff and commit on the feature branch**
+- [x] **Step 1: Review exact diff and commit on the feature branch**
 
 ```bash
 git status --short
@@ -454,7 +454,7 @@ git commit -m "feat: support existing NPM proxy modes"
 
 Expected: commit succeeds on `codex/npm-network-compatibility`; no unrelated or user-owned files are staged.
 
-- [ ] **Step 2: Push and open a PR**
+- [x] **Step 2: Push and open a PR**
 
 ```bash
 git push -u origin codex/npm-network-compatibility
@@ -465,7 +465,7 @@ gh pr create --base main --head codex/npm-network-compatibility \
 
 The PR body must summarize the two modes, Engine 28 boundary, RED/GREEN commands, Compose renders, and rollback.
 
-- [ ] **Step 3: Monitor required CI and merge only when green**
+- [x] **Step 3: Monitor required CI and merge only when green**
 
 ```bash
 gh pr checks --watch
@@ -473,10 +473,10 @@ gh pr checks --watch
 
 Resolve failures on the same branch, rerun proportional local gates, push fixes, and re-watch. Merge through the protected PR path only after required checks pass.
 
-- [ ] **Step 4: Verify post-merge and release assets**
+- [x] **Step 4: Verify post-merge and release assets**
 
 Monitor main CI, Release Please, release publishing, and deployment-assets jobs. For the resulting release, download all four deployment assets into a fresh temporary directory, compare them with the tagged sources, render both modes with the matching release image, and verify the public asset list contains exactly one of each required deployment name while preserving unrelated agent assets.
 
-- [ ] **Step 5: Finish Trellis task**
+- [x] **Step 5: Finish Trellis task**
 
 Record commit/PR/CI/merge/release evidence in task artifacts and the developer journal, run the final task validation, then archive only after all acceptance criteria and release evidence are satisfied.
