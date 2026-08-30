@@ -1144,3 +1144,25 @@ Restored VPS-scoped monitoring instance creation and agent onboarding for existi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 267: Release monitoring agent heartbeat queue recovery
+
+**Date**: 2026-08-30
+**Task**: Release monitoring agent heartbeat queue recovery
+**Branch**: `codex/monitoring-agent-heartbeat-ingestion-finish`
+
+### Summary
+
+Diagnosed stale durable sync queue head-of-line blocking, shipped authority-aware discard and retry policy with FileStore durability/privacy/performance hardening, completed independent reviews, merged PR #477, released signed multi-architecture agent and image v0.79.2, and recorded the production-evidence caveat.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `61fe8ff3` | (see git log) |
+| `533f6238` | (see git log) |
+
+### Status
+
+[OK] **Completed**
