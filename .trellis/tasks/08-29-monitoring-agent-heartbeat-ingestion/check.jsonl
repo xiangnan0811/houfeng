@@ -1,0 +1,11 @@
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify errors.As classification and exact poison, permanent rejection and transient retry behavior"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify queue durability, oldest-first backfill, repeat/race tests and make verify-go evidence"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Audit Error-level diagnostics and absence of secrets, raw fingerprints, bodies and remote free text"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Confirm current heartbeat reaches center authority while UI remains derived from persisted facts"}
+{"file":".trellis/tasks/08-29-monitoring-agent-heartbeat-ingestion/prd.md","reason":"Review every acceptance criterion and out-of-scope boundary against the final diff"}
+{"file":".trellis/tasks/08-29-monitoring-agent-heartbeat-ingestion/design.md","reason":"Review authority equality and discard, terminal, retry matrix including rollback risks"}
+{"file":".trellis/tasks/08-29-monitoring-agent-heartbeat-ingestion/research/root-cause-synthesis.md","reason":"Reproduce the original head-of-line failure and preserve the production-evidence caveat"}
+{"file":"agent/runtime/runtime.go","reason":"Review queue authority, typed failure policy, sanitized diagnostics, pending-payload durable handoff and atomic stale draining"}
+{"file":"agent/runtime/runtime_test.go","reason":"Review RED/GREEN privacy, all-boundary cancellation, full status lattice, payload retention, durability ordering and backlog regressions"}
+{"file":"agent/syncqueue/store.go","reason":"Review DeleteMany atomicity, duplicate-ID normalization complexity, newest-entry retention, locking, cancellation and fsync behavior"}
+{"file":"agent/syncqueue/store_test.go","reason":"Review batch-delete persistence, independent duplicate-ID ack, bounded recovery, oversized enqueue and canceled-operation evidence"}

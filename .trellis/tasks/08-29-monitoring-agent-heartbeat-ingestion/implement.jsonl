@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/error-handling.md","reason":"Authoritative RemoteError classification: permanent auth or binding rejection, poison discard, and 5xx retry"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Durable sync queue bounds, retry/backfill contracts, Go toolchain and repeated worker tests"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Agent journal boundaries, Error-level worker failures and strict secret/body non-disclosure"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Persisted current and legacy credential compatibility plus installer preservation boundary"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace current agent authority through queue, HTTP rejection, persistence and Monitoring reads"}
+{"file":".trellis/tasks/08-29-monitoring-agent-heartbeat-ingestion/design.md","reason":"Approved authority matching, discard/terminal/retry matrix, compatibility and privacy design"}
+{"file":".trellis/tasks/08-29-monitoring-agent-heartbeat-ingestion/research/root-cause-synthesis.md","reason":"Confirmed queue head-of-line mechanism, confidence boundary, alternatives and minimum RED"}
+{"file":".trellis/tasks/08-29-monitoring-agent-heartbeat-ingestion/research/agent-sender-flow.md","reason":"Exact installer, credential, runtime, queue, logging, release and regression evidence"}
+{"file":".trellis/tasks/08-29-monitoring-agent-heartbeat-ingestion/research/center-receiver-flow.md","reason":"Center enroll, sync, persistence and read-path continuity plus reject/suppress discriminators"}
