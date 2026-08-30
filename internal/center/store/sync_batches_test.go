@@ -290,6 +290,12 @@ func TestPostgresSyncRepositoryDuplicateBatchCommitsWithoutRewritingFacts(t *tes
 	if err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
+	if result.Disposition != syncing.ResultDispositionExactDuplicate {
+		t.Fatalf("Disposition = %q, want exact duplicate", result.Disposition)
+	}
+	if result.AcceptedAt.IsZero() {
+		t.Fatal("AcceptedAt is zero, want accepted duplicate sync")
+	}
 	if tx.commitCalls != 1 {
 		t.Fatalf("commitCalls = %d, want 1 for idempotent duplicate", tx.commitCalls)
 	}
@@ -516,6 +522,9 @@ func TestSyncBatchShortCircuitsSuppressedMonitoringInstanceWithoutWrites(t *test
 			}
 			if result.AcceptedAt.IsZero() {
 				t.Fatal("AcceptedAt is zero, want accepted short-circuit sync")
+			}
+			if result.Disposition != syncing.ResultDispositionSuppressed {
+				t.Fatalf("Disposition = %q, want suppressed", result.Disposition)
 			}
 			if result.Plan.HostSampleFrequencyTier != "" || result.Plan.HostSampleMaintenanceContext || result.Plan.IPQualityPlan != nil || result.Plan.PendingAction != nil || len(result.Plan.ProbeAssignments) != 0 {
 				t.Fatalf("Plan = %#v, want empty plan", result.Plan)
@@ -807,6 +816,9 @@ func TestSyncBatchPlanReturnsAcceptedAtAndDerivedPlan(t *testing.T) {
 	}
 	if result.AcceptedAt.IsZero() {
 		t.Fatal("AcceptedAt is zero, want non-zero")
+	}
+	if result.Disposition != syncing.ResultDispositionRecorded {
+		t.Fatalf("Disposition = %q, want recorded", result.Disposition)
 	}
 	if result.Plan.HostSampleFrequencyTier != agentapi.FrequencyTier5s {
 		t.Fatalf("HostSampleFrequencyTier = %q, want %q", result.Plan.HostSampleFrequencyTier, agentapi.FrequencyTier5s)

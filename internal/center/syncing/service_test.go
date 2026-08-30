@@ -3,9 +3,73 @@ package syncing
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 )
+
+func TestServiceExactDuplicateDispositionSkipsPostSyncAndReturnsOriginalResult(t *testing.T) {
+	t.Parallel()
+
+	want := Result{
+		Disposition: ResultDispositionExactDuplicate,
+		AcceptedAt:  time.Date(2026, time.August, 30, 9, 0, 0, 0, time.UTC),
+	}
+	repo := &fakeSyncRepository{result: want}
+	postSync := &fakePostSyncProcessor{}
+	service := NewService(repo, postSync)
+
+	got, err := service.SyncBatch(context.Background(), Batch{MonitoringInstanceID: "mi_001"})
+	if err != nil {
+		t.Fatalf("SyncBatch() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SyncBatch() result = %#v, want original repository result", got)
+	}
+	if postSync.calls != 0 {
+		t.Fatalf("postSync calls = %d, want 0 for exact duplicate", postSync.calls)
+	}
+}
+
+func TestServiceNonDuplicateDispositionRunsPostSync(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		disposition ResultDisposition
+	}{
+		{name: "recorded", disposition: ResultDispositionRecorded},
+		{name: "suppressed", disposition: ResultDispositionSuppressed},
+		{name: "legacy zero", disposition: ResultDisposition("")},
+		{name: "unknown", disposition: ResultDisposition("future_value")},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			want := Result{
+				Disposition: tt.disposition,
+				AcceptedAt:  time.Date(2026, time.August, 30, 9, 1, 0, 0, time.UTC),
+			}
+			repo := &fakeSyncRepository{result: want}
+			postSync := &fakePostSyncProcessor{}
+			service := NewService(repo, postSync)
+
+			got, err := service.SyncBatch(context.Background(), Batch{MonitoringInstanceID: "mi_001"})
+			if err != nil {
+				t.Fatalf("SyncBatch() error = %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("SyncBatch() result = %#v, want original repository result", got)
+			}
+			if postSync.calls != 1 {
+				t.Fatalf("postSync calls = %d, want 1", postSync.calls)
+			}
+		})
+	}
+}
 
 func TestCompositePostSyncProcessorRunsBestEffortAndReturnsPrimaryError(t *testing.T) {
 	t.Parallel()
@@ -52,4 +116,13 @@ type fakePostSyncProcessor struct {
 func (f *fakePostSyncProcessor) AfterSuccessfulSync(context.Context, Batch, Result) error {
 	f.calls++
 	return f.err
+}
+
+type fakeSyncRepository struct {
+	result Result
+	err    error
+}
+
+func (f *fakeSyncRepository) ApplyBatch(context.Context, Batch) (Result, error) {
+	return f.result, f.err
 }

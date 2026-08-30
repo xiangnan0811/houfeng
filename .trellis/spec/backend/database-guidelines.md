@@ -2390,6 +2390,87 @@ where not exists (
 8. **回填观测 (`is_backfilled = true`) 必须落库但不得触发实时告警**。请求路径仍旧 `insert`（参见 `store/sync_batches.go:188`），但 incident service 在 select 阶段对历史数据的处理需带条件分支。**不要在 incident 判定里忽略 `is_backfilled` 字段，也不要在写路径里干脆丢弃这条数据**。
 9. **notification_records.channel 是真实发送通道，不是 evaluator 默认值**。`incidents.NotificationChannel` 当前只允许 `telegram` / `feishu` 作为生产通道语义；Feishu-only 发送只写 `channel='feishu'`，Telegram+Feishu 混合发送必须按 channel 写多条 record，单个 channel 失败只能把该 channel 标为 `failed`。通知策略关闭、维护/回填抑制或无可用 channel 时写 `suppressed`，但不能把 Feishu-only 或 mixed delivery 误记成 Telegram-only。
 
+### Scenario: Replay-safe latest reads and incident projection row-version CAS
+
+#### 1. Scope / Trigger
+
+- Trigger：修改 sync batch disposition、host/probe/heartbeat/IP-quality 的 latest/current 查询、incident snapshot/evaluator/writer、对象 summary 更新，或 current APP ACL/migration convergence。
+- 目标：live/backfill 任意到达顺序都得到同一 current 事实；旧 incident evaluation 不能晚写回退新投影；生产 exact-current 数据库不因本修复被要求重建。
+
+#### 2. Signatures
+
+- `syncing.ResultDisposition`：闭合值 `recorded | exact_duplicate | suppressed`；`Result` 保持既有 `AcceptedAt`、plan 与 pending action wire 语义。
+- latest SQL ordering：`observed_at DESC, is_backfilled ASC, received_at DESC, stable_row_key DESC`；host/probe/heartbeat 稳定键为各自 `id`，IP-quality 为 `report_id`。
+- snapshot：`GetObjectRowVersion(ctx, ObjectType, objectID) (string, error)`，固定读取 monitoring instance 或 target 的 `xmin::text`。
+- mutation：`IncidentMutation.ExpectedObjectRowVersion string`；typed conflict 为 `incidents.ErrIncidentProjectionConflict`。
+- writer guard 必须是事务的第一条数据库操作：对静态 allowlisted 对象表执行 `SELECT xmin::text ... FOR UPDATE` 后做 opaque equality compare。
+
+#### 3. Contracts
+
+- `agent_sync_batches` exact marker 继续阻止重复 raw append；只有 `exact_duplicate` 跳过 post-sync incident 处理。`recorded` 正常评估，`suppressed` 仍允许暂停/维护/退役/归档对象的行政恢复。
+- 所有 current/latest consumer 必须优先事件时间，再 live-over-backfill、接收时间与稳定主键；Go normalizer 使用相同前三项的 stable sort，完全同值保留 SQL 稳定键顺序。历史 analytics 不得被误改为只保留 latest。
+- 每次 incident attempt 先读取 opaque object row version，再完整读取对象、active incidents、raw facts 与 settings；token 不解析、不排序、不持久化，也不进入日志、API 或 event payload。
+- writer guard token 不匹配时，在 active delete/upsert、event insert、summary update、notification append/dispatch 和 commit 之前返回 typed conflict；成功 mutation 才替换 active set、写 events、更新 object summary 并自然推进 `xmin`。
+- service 对首次 typed conflict 只做一次完整重读/重评；retry 时间使用 `max(originalTriggerTime, serviceNow)`。第二次 conflict 脱敏、60 秒按对象类型限频记录并安全 yield，已提交 sync response/plan 仍返回成功，由后续 sweep 收敛。
+- inactive object 且没有 previous active incident 时不写空 mutation，避免每轮无意义推进 `xmin`。对象在枚举后、fresh Get/row-version 读取前，或完整评估后、writer guard 前被删除，都必须通过稳定 missing-object classification 安全 yield；普通 repository error 与未分类 `pgx.ErrNoRows` 保持 `errors.Is` 并 fail closed。
+- notification dispatch/append 只在 mutation commit 成功后发生；CAS 不宣称外部 exactly-once，但 stale/duplicate mutation 不得主动增加 event 或 notification record。
+- 本合同不新增 schema revision。current convergence 对 previous exact-current + future migration 会在 DDL 前返回 rebuild-required；因此该类修复不得偷偷新增 successor migration、ACL fragment 或现场 GRANT。base monitoring instance/target 的既有 runtime table SELECT/UPDATE 足以完成 token guard 与 summary update，column ACL 必须仍为零。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| live/backfill 同 `observed_at` | live 胜出，不受 arrival order 影响 |
+| provenance 相同、`received_at` 不同 | 较新 received row 胜出；稳定键不能越级覆盖 |
+| exact same provenance/time | stable row key 决胜，结果确定性 |
+| exact duplicate sync | raw count、object row version、events、notifications 不变；post-sync skip |
+| old mutation token 与 current `xmin` 不同 | typed conflict；零 incident/event/summary/notification 副作用 |
+| unrelated object UPDATE 推进 `xmin` | 安全 false conflict；完整重读后再评估，不盲重放旧 mutation |
+| 两个 writer 同持旧 token 并发 | object `FOR UPDATE` 串行化；先提交者成功，等待者比较新 token 后 conflict |
+| pre-evaluation read 或 writer guard 返回稳定 object-not-found classification | safe yield；周期 sweep 继续下一对象，零 DML/event/notification |
+| empty row-version / unsupported object type / ordinary DB error | fail closed；普通 error cause 保留，不得误归类为对象删除 |
+| previous exact-current DB 加 future migration | rebuild-required 且 durable state 不变；本任务不建立 successor |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：live T2 后收到 backfill T1；raw facts 都保留，但 latest、active incident、health summary 与通知保持 T2 结论。
+- Good：A/B 同读 token N；B 先提交并推进对象 row version，A 从 guard 等待恢复后看到新 token 并在任何 DML 前冲突。
+- Base：没有竞争时，token 匹配，incident replacement、events 与 summary 在一个事务提交；通知随后独立追加。
+- Bad：latest 只按 `observed_at, id` 排序；相同事件时间下晚到 backfill 或高键旧 receipt 会覆盖 live。
+- Bad：先 delete active incidents 再比较 token；即使最终返回 conflict，也已破坏 current projection。
+- Bad：把 token 放进 `state_change_events.payload`、日志或 API，或把 `xmin` 当可排序业务时间。
+- Bad：为了获得 CAS 加 `updated_at` migration 或 current ACL successor；生产 exact-current 会在 DDL 前要求 rebuild。
+
+#### 6. Tests Required
+
+- strict PostgreSQL 16 actual-row test 必须覆盖 backfill-first/live-first 两种顺序，并对 host/probe/heartbeat agent-version/IP summary/IP latest report/asset decision consumer 证明 backfill、received-at、stable-key 三层独立区分力；不能只做 SQL substring/fake rows。
+- store/service tests 覆盖 `recorded/exact_duplicate/suppressed`，证明只有 exact duplicate skip，且 committed response/plan 不被 projection conflict 反转。
+- incident writer unit tests 必须 trace guard 是事务第一条 DB op，并覆盖 match、mismatch、missing/empty/unsupported、零 DML/commit/token leakage。
+- strict direct-runtime PostgreSQL 16 CAS test 必须覆盖 monitoring instance 与 target：重叠 writer 在 object guard 上确定性等待、先提交/后 conflict；无关 runtime object UPDATE 的安全 conflict；active/summary/events/notification payload/records/token 在 stale attempt 前后守恒。owner 只 seed/read/assert，生产操作使用 direct runtime role。
+- service/store tests 覆盖一次 retry、第二次安全 yield/限频、fresh monotonic retry time、inactive empty no-op、枚举删除、writer-guard 删除、普通 DB/未分类 `pgx.ErrNoRows` 负控、notification-after-commit；direct-runtime PostgreSQL 删除窗口必须覆盖 MI/target 并证明对象/incident/event/notification 零副作用。
+- migration regression 必须证明 previous exact-current + future migration 返回 rebuild-required/no mutation；migration/schema/current ACL diff guard 必须为空。
+
+#### 7. Wrong vs Correct
+
+```sql
+-- Wrong: arrival/key order can let an older backfill win.
+order by observed_at desc, id desc
+
+-- Correct: event time, live provenance, receipt time, then stable key.
+order by observed_at desc, is_backfilled asc, received_at desc, id desc
+```
+
+```go
+// Wrong: destructive projection replacement happens before stale detection.
+replaceActive(ctx, tx, mutation.Active)
+if currentVersion != mutation.ExpectedObjectRowVersion { return ErrIncidentProjectionConflict }
+
+// Correct: lock and compare first; no side effect exists on conflict.
+currentVersion := selectObjectRowVersionForUpdate(ctx, tx, mutation.ObjectType, mutation.ObjectID)
+if currentVersion != mutation.ExpectedObjectRowVersion { return ErrIncidentProjectionConflict }
+replaceActive(ctx, tx, mutation.Active)
+```
+
 ### Scenario: Administrative incident recovery for inactive objects
 
 #### 1. Scope / Trigger
@@ -2402,7 +2483,7 @@ where not exists (
 - Service paths: `EvaluateStaleMonitoringInstances(ctx, now)`、`AfterSuccessfulSync(ctx, batch, result)`、`EvaluatePeriodicState(ctx, now)`。
 - Repositories:
   - MonitoringInstance repo must provide current record for MI evaluation.
-  - Target repo may implement optional `GetTarget(ctx, targetID)` so touched target sync can re-check current run status before evaluating observations.
+  - Target repo must provide `GetTarget(ctx, targetID)` so every touched-target attempt reloads current lifecycle state before evaluating observations.
 - Mutation: `IncidentMutation{ObjectType, ObjectID, Active: []IncidentRecord{}, Events: []StateChangeEventRecord{EventType: recovered}}`。
 
 #### 3. Contracts
@@ -2412,7 +2493,7 @@ where not exists (
 - Periodic stale sweep must close existing active incidents for inactive MonitoringInstances instead of silently skipping them.
 - `AfterSuccessfulSync` must recover inactive MonitoringInstance incidents before host metric evaluation, so old samples cannot keep disk/resource incidents active after an administrative stop.
 - Periodic Target sweep must recover inactive Target incidents and skip probe/TLS/trend evaluation.
-- If a touched Target can be loaded and is inactive, `AfterSuccessfulSync` must recover prior target incidents and skip new evaluation for that target. If the repository cannot load the Target or returns not found, legacy observation-only evaluation may continue for compatibility.
+- If a touched Target is inactive, `AfterSuccessfulSync` must recover prior target incidents and skip new evaluation for that target. If the Target disappears before the fresh load or writer guard, the attempt must safely yield with no projection/event/notification side effect; observation-only fallback is forbidden because it can recreate incidents for a deleted object. Ordinary repository errors still fail closed.
 - Administrative recovery writes recovered events but intentionally does not call notification append/dispatch. User-initiated stop should not generate a recovery notification storm.
 
 #### 4. Validation & Error Matrix
@@ -2424,7 +2505,8 @@ where not exists (
 | active MI stale heartbeat | normal heartbeat evaluation still applies |
 | paused / archived Target has prior active incident | target mutation active is empty; recovered event written; no notification records |
 | touched paused Target has fresh failing observations | administrative recovery wins; no new active probe incident |
-| Target getter returns not found | fallback to existing observation evaluation |
+| Target getter or writer guard returns stable object-not-found classification | safe yield with zero projection/event/summary/notification side effect |
+| Target getter returns an ordinary repository error | fail closed; preserve the error cause and do not retry |
 
 #### 5. Good/Base/Bad Cases
 
@@ -2437,7 +2519,7 @@ where not exists (
 #### 6. Tests Required
 
 - Service tests: MI periodic inactive recovery, MI `AfterSuccessfulSync` inactive recovery before metric evaluation, Target periodic inactive recovery, touched Target inactive recovery, all assert no notification records/sends.
-- Regression tests: active MI/Target still evaluate normally; `ErrTargetNotFound` fallback remains compatible.
+- Regression tests: active MI/Target still evaluate normally; MI/Target not-found at fresh read or writer guard safely yields and the sweep continues; ordinary repository errors remain fail-closed negative controls.
 
 #### 7. Wrong vs Correct
 

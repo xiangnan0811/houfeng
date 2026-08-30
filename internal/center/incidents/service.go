@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/monitoringinstances"
@@ -30,14 +33,12 @@ type MonitoringInstanceRepository interface {
 }
 
 type TargetRepository interface {
+	GetTarget(context.Context, string) (targets.TargetRecord, error)
 	ListTargets(context.Context) ([]targets.TargetRecord, error)
 }
 
-type TargetGetter interface {
-	GetTarget(context.Context, string) (targets.TargetRecord, error)
-}
-
 type SnapshotReader interface {
+	GetObjectRowVersion(context.Context, ObjectType, string) (string, error)
 	ListActiveIncidents(context.Context, ObjectType, string) ([]IncidentRecord, error)
 	ListRecentHostSamples(context.Context, string, time.Time) ([]runtimefacts.HostSample, error)
 	ListRecentProbeObservations(context.Context, string, time.Time) ([]runtimefacts.ProbeObservation, error)
@@ -313,6 +314,8 @@ type Service struct {
 	now                       func() time.Time
 	fallbackHeartbeatInterval time.Duration
 	fallbackSweepInterval     time.Duration
+	projectionConflictWarnMu  sync.Mutex
+	projectionConflictWarnAt  map[ObjectType]time.Time
 }
 
 func NewService(monitoringInstancesRepo MonitoringInstanceRepository, targetsRepo TargetRepository, snapshots SnapshotReader, writer MutationWriter, notifier Notifier, logger *slog.Logger, heartbeatInterval, sweepInterval time.Duration) *Service {
@@ -340,6 +343,7 @@ func NewSettingsBackedService(monitoringInstancesRepo MonitoringInstanceReposito
 		now:                       func() time.Time { return time.Now().UTC() },
 		fallbackHeartbeatInterval: heartbeatInterval,
 		fallbackSweepInterval:     sweepInterval,
+		projectionConflictWarnAt:  make(map[ObjectType]time.Time),
 	}
 }
 
@@ -392,12 +396,6 @@ func (s *Service) EvaluatePeriodicState(ctx context.Context, now time.Time) erro
 		return fmt.Errorf("list targets for periodic sweep: %w", err)
 	}
 	for _, target := range targetRecords {
-		if shouldRecoverIncidentsForTarget(target) {
-			if err := s.recoverActiveIncidentsForInactiveObject(ctx, ObjectTypeTarget, target.TargetID, now, administrativeRecoverySummaryForTarget(target)); err != nil {
-				return err
-			}
-			continue
-		}
 		if err := s.evaluateTarget(ctx, target.TargetID, now); err != nil {
 			return err
 		}
@@ -406,30 +404,16 @@ func (s *Service) EvaluatePeriodicState(ctx context.Context, now time.Time) erro
 }
 
 func (s *Service) EvaluateStaleMonitoringInstances(ctx context.Context, now time.Time) error {
-	timing := s.incidentTimingFor(ctx)
 	records, err := s.monitoringInstances.ListMonitoringInstances(ctx)
 	if err != nil {
 		return fmt.Errorf("list monitoring instances for stale sweep: %w", err)
 	}
 	for _, record := range records {
-		if !shouldEvaluateHeartbeatForMonitoringInstance(record) {
-			if err := s.recoverActiveIncidentsForInactiveObject(ctx, ObjectTypeMonitoringInstance, record.MonitoringInstanceID, now, administrativeRecoverySummaryForMonitoringInstance(record)); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := s.evaluateMonitoringInstanceHeartbeatOnly(ctx, record, now, timing.heartbeatInterval, timing.staleThresholdIntervals); err != nil {
+		if err := s.evaluateMonitoringInstanceHeartbeatOnly(ctx, record.MonitoringInstanceID, now); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func shouldEvaluateHeartbeatForMonitoringInstance(record monitoringinstances.Record) bool {
-	if isInactiveMonitoringInstance(record) {
-		return false
-	}
-	return true
 }
 
 func isInactiveMonitoringInstance(record monitoringinstances.Record) bool {
@@ -454,122 +438,229 @@ func shouldRecoverIncidentsForTarget(record targets.TargetRecord) bool {
 	}
 }
 
-func (s *Service) evaluateMonitoringInstanceHeartbeatOnly(ctx context.Context, record monitoringinstances.Record, now time.Time, heartbeatInterval time.Duration, staleThresholdIntervals int) error {
-	previous, err := s.snapshots.ListActiveIncidents(ctx, ObjectTypeMonitoringInstance, record.MonitoringInstanceID)
-	if err != nil {
-		return fmt.Errorf("list previous monitoring instance incidents for %q: %w", record.MonitoringInstanceID, err)
-	}
-	previousByClass := incidentsByClass(previous)
-	evaluations := []classEvaluation{{
-		class:  IncidentMonitoringInstanceHeartbeatMissing,
-		result: EvaluateMonitoringInstanceHeartbeatMissing(previousByClass[IncidentMonitoringInstanceHeartbeatMissing], record.MonitoringInstanceID, now, record.LastHeartbeatAt, heartbeatInterval, staleThresholdIntervals),
-	}}
-	return s.applyEvaluations(ctx, ObjectTypeMonitoringInstance, record.MonitoringInstanceID, previous, evaluations, now)
+func (s *Service) evaluateMonitoringInstanceHeartbeatOnly(ctx context.Context, monitoringInstanceID string, now time.Time) error {
+	return s.evaluateObjectWithRetry(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID, now, func(attemptNow time.Time) evaluationAttemptResult {
+		return s.evaluateMonitoringInstanceHeartbeatOnlyAttempt(ctx, monitoringInstanceID, attemptNow)
+	})
 }
 
 func (s *Service) evaluateMonitoringInstance(ctx context.Context, monitoringInstanceID string, now time.Time) error {
+	return s.evaluateObjectWithRetry(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID, now, func(attemptNow time.Time) evaluationAttemptResult {
+		return s.evaluateMonitoringInstanceAttempt(ctx, monitoringInstanceID, attemptNow)
+	})
+}
+
+func (s *Service) evaluateMonitoringInstanceHeartbeatOnlyAttempt(ctx context.Context, monitoringInstanceID string, now time.Time) evaluationAttemptResult {
+	rowVersion, err := s.objectRowVersion(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID)
+	if err != nil {
+		return evaluationAttemptResult{err: err}
+	}
 	record, err := s.monitoringInstances.GetMonitoringInstance(ctx, monitoringInstanceID)
 	if err != nil {
-		return fmt.Errorf("get monitoring instance %q for incident evaluation: %w", monitoringInstanceID, err)
+		if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+			return evaluationAttemptResult{err: ErrIncidentProjectionObjectNotFound}
+		}
+		return evaluationAttemptResult{err: fmt.Errorf("get monitoring instance %q for incident evaluation: %w", monitoringInstanceID, err)}
 	}
 	previous, err := s.snapshots.ListActiveIncidents(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID)
 	if err != nil {
-		return fmt.Errorf("list previous monitoring instance incidents for %q: %w", monitoringInstanceID, err)
+		return evaluationAttemptResult{err: fmt.Errorf("list previous monitoring instance incidents for %q: %w", monitoringInstanceID, err)}
 	}
 	if isInactiveMonitoringInstance(record) {
-		return s.applyAdministrativeRecovery(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID, previous, now, administrativeRecoverySummaryForMonitoringInstance(record))
+		if len(previous) == 0 {
+			return evaluationAttemptResult{}
+		}
+		mutation := buildAdministrativeRecoveryMutation(ObjectTypeMonitoringInstance, monitoringInstanceID, rowVersion, previous, now, administrativeRecoverySummaryForMonitoringInstance(record))
+		return s.applyEvaluationAttempt(ctx, mutation, nil, false)
+	}
+	previousByClass := incidentsByClass(previous)
+	timing := s.incidentTimingFor(ctx)
+	evaluations := []classEvaluation{{
+		class:  IncidentMonitoringInstanceHeartbeatMissing,
+		result: EvaluateMonitoringInstanceHeartbeatMissing(previousByClass[IncidentMonitoringInstanceHeartbeatMissing], monitoringInstanceID, now, record.LastHeartbeatAt, timing.heartbeatInterval, timing.staleThresholdIntervals),
+	}}
+	mutation := buildMutation(ObjectTypeMonitoringInstance, monitoringInstanceID, rowVersion, previous, evaluations)
+	return s.applyEvaluationAttempt(ctx, mutation, evaluations, true)
+}
+
+func (s *Service) evaluateMonitoringInstanceAttempt(ctx context.Context, monitoringInstanceID string, now time.Time) evaluationAttemptResult {
+	rowVersion, err := s.objectRowVersion(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID)
+	if err != nil {
+		return evaluationAttemptResult{err: err}
+	}
+	record, err := s.monitoringInstances.GetMonitoringInstance(ctx, monitoringInstanceID)
+	if err != nil {
+		if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+			return evaluationAttemptResult{err: ErrIncidentProjectionObjectNotFound}
+		}
+		return evaluationAttemptResult{err: fmt.Errorf("get monitoring instance %q for incident evaluation: %w", monitoringInstanceID, err)}
+	}
+	previous, err := s.snapshots.ListActiveIncidents(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID)
+	if err != nil {
+		return evaluationAttemptResult{err: fmt.Errorf("list previous monitoring instance incidents for %q: %w", monitoringInstanceID, err)}
+	}
+	if isInactiveMonitoringInstance(record) {
+		if len(previous) == 0 {
+			return evaluationAttemptResult{}
+		}
+		mutation := buildAdministrativeRecoveryMutation(ObjectTypeMonitoringInstance, monitoringInstanceID, rowVersion, previous, now, administrativeRecoverySummaryForMonitoringInstance(record))
+		return s.applyEvaluationAttempt(ctx, mutation, nil, false)
 	}
 	previousByClass := incidentsByClass(previous)
 	heartbeatInterval := s.heartbeatIntervalFor(ctx)
+	hostSamples, err := s.snapshots.ListRecentHostSamples(ctx, monitoringInstanceID, now.Add(-30*time.Minute))
+	if err != nil {
+		return evaluationAttemptResult{err: fmt.Errorf("list recent host samples for %q: %w", monitoringInstanceID, err)}
+	}
+	thresholds := s.metricThresholdsFor(ctx)
+	trendHostSamples, err := s.snapshots.ListRecentHostSamples(ctx, monitoringInstanceID, now.Add(-24*time.Hour))
+	if err != nil {
+		return evaluationAttemptResult{err: fmt.Errorf("list trend host samples for %q: %w", monitoringInstanceID, err)}
+	}
+	baselineStart, baselineEnd := trendBaselineWindow(now)
+	monitoringInstanceBaselines, err := s.snapshots.ListMonitoringInstanceHostDailyAggregates(ctx, monitoringInstanceID, baselineStart, baselineEnd)
+	if err != nil {
+		return evaluationAttemptResult{err: fmt.Errorf("list monitoring instance trend baselines for %q: %w", monitoringInstanceID, err)}
+	}
+
 	evaluations := []classEvaluation{{
 		class:  IncidentMonitoringInstanceHeartbeatMissing,
 		result: EvaluateMonitoringInstanceHeartbeatMissing(previousByClass[IncidentMonitoringInstanceHeartbeatMissing], monitoringInstanceID, now, record.LastHeartbeatAt, heartbeatInterval),
 	}}
-
-	hostSamples, err := s.snapshots.ListRecentHostSamples(ctx, monitoringInstanceID, now.Add(-30*time.Minute))
-	if err != nil {
-		return fmt.Errorf("list recent host samples for %q: %w", monitoringInstanceID, err)
-	}
 	if len(hostSamples) > 0 {
 		latest := &hostSamples[0]
 		resourceSamples := monitoringInstanceResourceSamplesFromHostSamples(hostSamples)
-		thresholds := s.metricThresholdsFor(ctx)
 		evaluations = append(evaluations,
 			classEvaluation{class: IncidentMonitoringInstanceDiskPressure, result: EvaluateMonitoringInstanceDiskPressure(previousByClass[IncidentMonitoringInstanceDiskPressure], monitoringInstanceID, latest, thresholds)},
 			classEvaluation{class: IncidentMonitoringInstanceInodePressure, result: EvaluateMonitoringInstanceInodePressure(previousByClass[IncidentMonitoringInstanceInodePressure], monitoringInstanceID, latest, thresholds)},
 			classEvaluation{class: IncidentMonitoringInstanceResourcePressure, result: EvaluateMonitoringInstanceResourcePressure(previousByClass[IncidentMonitoringInstanceResourcePressure], monitoringInstanceID, resourceSamples, thresholds)},
 		)
 	}
-
-	trendHostSamples, err := s.snapshots.ListRecentHostSamples(ctx, monitoringInstanceID, now.Add(-24*time.Hour))
-	if err != nil {
-		return fmt.Errorf("list trend host samples for %q: %w", monitoringInstanceID, err)
-	}
-	baselineStart, baselineEnd := trendBaselineWindow(now)
-	monitoringInstanceBaselines, err := s.snapshots.ListMonitoringInstanceHostDailyAggregates(ctx, monitoringInstanceID, baselineStart, baselineEnd)
-	if err != nil {
-		return fmt.Errorf("list monitoring instance trend baselines for %q: %w", monitoringInstanceID, err)
-	}
 	evaluations = append(evaluations, classEvaluation{
 		class:  IncidentMonitoringInstanceTrendDegradation,
 		result: EvaluateMonitoringInstanceTrendDegradation(previousByClass[IncidentMonitoringInstanceTrendDegradation], monitoringInstanceID, monitoringInstanceResourceSamplesFromHostSamples(trendHostSamples), monitoringInstanceBaselines),
 	})
 
-	return s.applyEvaluations(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID, previous, evaluations, now)
+	mutation := buildMutation(ObjectTypeMonitoringInstance, monitoringInstanceID, rowVersion, previous, evaluations)
+	return s.applyEvaluationAttempt(ctx, mutation, evaluations, true)
 }
 
 func (s *Service) evaluateTarget(ctx context.Context, targetID string, now time.Time) error {
+	return s.evaluateObjectWithRetry(ctx, ObjectTypeTarget, targetID, now, func(attemptNow time.Time) evaluationAttemptResult {
+		return s.evaluateTargetAttempt(ctx, targetID, attemptNow)
+	})
+}
+
+func (s *Service) evaluateTargetAttempt(ctx context.Context, targetID string, now time.Time) evaluationAttemptResult {
+	rowVersion, err := s.objectRowVersion(ctx, ObjectTypeTarget, targetID)
+	if err != nil {
+		return evaluationAttemptResult{err: err}
+	}
+	target, err := s.targets.GetTarget(ctx, targetID)
+	if err != nil {
+		if errors.Is(err, targets.ErrTargetNotFound) {
+			return evaluationAttemptResult{err: ErrIncidentProjectionObjectNotFound}
+		}
+		return evaluationAttemptResult{err: fmt.Errorf("get target %q for incident evaluation: %w", targetID, err)}
+	}
 	previous, err := s.snapshots.ListActiveIncidents(ctx, ObjectTypeTarget, targetID)
 	if err != nil {
-		return fmt.Errorf("list previous target incidents for %q: %w", targetID, err)
+		return evaluationAttemptResult{err: fmt.Errorf("list previous target incidents for %q: %w", targetID, err)}
 	}
-	if getter, ok := s.targets.(TargetGetter); ok {
-		target, err := getter.GetTarget(ctx, targetID)
-		if err != nil && !errors.Is(err, targets.ErrTargetNotFound) {
-			return fmt.Errorf("get target %q for incident evaluation: %w", targetID, err)
+	if shouldRecoverIncidentsForTarget(target) {
+		if len(previous) == 0 {
+			return evaluationAttemptResult{}
 		}
-		if err == nil && shouldRecoverIncidentsForTarget(target) {
-			return s.applyAdministrativeRecovery(ctx, ObjectTypeTarget, targetID, previous, now, administrativeRecoverySummaryForTarget(target))
-		}
+		mutation := buildAdministrativeRecoveryMutation(ObjectTypeTarget, targetID, rowVersion, previous, now, administrativeRecoverySummaryForTarget(target))
+		return s.applyEvaluationAttempt(ctx, mutation, nil, false)
 	}
 	previousByClass := incidentsByClass(previous)
 	observations, err := s.snapshots.ListRecentProbeObservations(ctx, targetID, now.Add(-6*time.Hour))
 	if err != nil {
-		return fmt.Errorf("list recent probe observations for %q: %w", targetID, err)
+		return evaluationAttemptResult{err: fmt.Errorf("list recent probe observations for %q: %w", targetID, err)}
+	}
+	trendObservations, err := s.snapshots.ListRecentProbeObservations(ctx, targetID, now.Add(-24*time.Hour))
+	if err != nil {
+		return evaluationAttemptResult{err: fmt.Errorf("list trend probe observations for %q: %w", targetID, err)}
+	}
+	baselineStart, baselineEnd := trendBaselineWindow(now)
+	targetBaselines, err := s.snapshots.ListTargetProbeDailyAggregates(ctx, targetID, baselineStart, baselineEnd)
+	if err != nil {
+		return evaluationAttemptResult{err: fmt.Errorf("list target trend baselines for %q: %w", targetID, err)}
 	}
 
 	evaluations := []classEvaluation{
 		{class: IncidentTargetProbeFailure, result: evaluateTargetProbeFailureAcrossSeries(previousByClass[IncidentTargetProbeFailure], targetID, observations)},
 		{class: IncidentTargetTLSExpiry, result: evaluateTargetTLSExpiryAcrossSeries(previousByClass[IncidentTargetTLSExpiry], targetID, observations)},
 	}
-	trendObservations, err := s.snapshots.ListRecentProbeObservations(ctx, targetID, now.Add(-24*time.Hour))
-	if err != nil {
-		return fmt.Errorf("list trend probe observations for %q: %w", targetID, err)
-	}
-	baselineStart, baselineEnd := trendBaselineWindow(now)
-	targetBaselines, err := s.snapshots.ListTargetProbeDailyAggregates(ctx, targetID, baselineStart, baselineEnd)
-	if err != nil {
-		return fmt.Errorf("list target trend baselines for %q: %w", targetID, err)
-	}
 	evaluations = append(evaluations, classEvaluation{
 		class:  IncidentTargetLatencyTrendDegradation,
 		result: EvaluateTargetLatencyTrendDegradationAcrossSeries(previousByClass[IncidentTargetLatencyTrendDegradation], targetID, trendObservations, targetBaselines),
 	})
-	return s.applyEvaluations(ctx, ObjectTypeTarget, targetID, previous, evaluations, now)
+	mutation := buildMutation(ObjectTypeTarget, targetID, rowVersion, previous, evaluations)
+	return s.applyEvaluationAttempt(ctx, mutation, evaluations, true)
 }
 
-func (s *Service) recoverActiveIncidentsForInactiveObject(ctx context.Context, objectType ObjectType, objectID string, now time.Time, summary string) error {
-	previous, err := s.snapshots.ListActiveIncidents(ctx, objectType, objectID)
-	if err != nil {
-		return fmt.Errorf("list previous %s incidents for %q: %w", objectType, objectID, err)
-	}
-	return s.applyAdministrativeRecovery(ctx, objectType, objectID, previous, now, summary)
+type evaluationAttemptResult struct {
+	evaluations        []classEvaluation
+	appendNotification bool
+	conflict           bool
+	err                error
 }
 
-func (s *Service) applyAdministrativeRecovery(ctx context.Context, objectType ObjectType, objectID string, previous []IncidentRecord, now time.Time, summary string) error {
-	if len(previous) == 0 {
+func (s *Service) evaluateObjectWithRetry(ctx context.Context, objectType ObjectType, objectID string, triggerNow time.Time, attempt func(time.Time) evaluationAttemptResult) error {
+	attemptNow := triggerNow
+	for attemptNumber := 0; attemptNumber < 2; attemptNumber++ {
+		result := attempt(attemptNow)
+		if result.err == nil {
+			if !result.appendNotification {
+				return nil
+			}
+			return s.appendNotificationRecords(ctx, objectType, objectID, result.evaluations)
+		}
+		if errors.Is(result.err, ErrIncidentProjectionObjectNotFound) {
+			return nil
+		}
+		if !result.conflict {
+			return result.err
+		}
+		if attemptNumber == 0 {
+			freshNow := s.now()
+			if freshNow.After(triggerNow) {
+				attemptNow = freshNow
+			} else {
+				attemptNow = triggerNow
+			}
+			continue
+		}
+		s.warnProjectionConflictRetryExhausted(objectType)
 		return nil
 	}
+	return nil
+}
+
+func (s *Service) objectRowVersion(ctx context.Context, objectType ObjectType, objectID string) (string, error) {
+	rowVersion, err := s.snapshots.GetObjectRowVersion(ctx, objectType, objectID)
+	if err != nil {
+		return "", fmt.Errorf("get %s incident projection row version: %w", objectType, err)
+	}
+	if rowVersion == "" {
+		return "", fmt.Errorf("get %s incident projection row version: empty row version", objectType)
+	}
+	return rowVersion, nil
+}
+
+func (s *Service) applyEvaluationAttempt(ctx context.Context, mutation IncidentMutation, evaluations []classEvaluation, appendNotification bool) evaluationAttemptResult {
+	err := s.writer.ApplyIncidentMutation(ctx, mutation)
+	return evaluationAttemptResult{
+		evaluations:        evaluations,
+		appendNotification: appendNotification,
+		conflict:           err != nil && errors.Is(err, ErrIncidentProjectionConflict),
+		err:                err,
+	}
+}
+
+func buildAdministrativeRecoveryMutation(objectType ObjectType, objectID, expectedObjectRowVersion string, previous []IncidentRecord, now time.Time, summary string) IncidentMutation {
 	events := make([]StateChangeEventRecord, 0, len(previous))
 	for _, incident := range previous {
 		events = append(events, StateChangeEventRecord{
@@ -590,20 +681,31 @@ func (s *Service) applyAdministrativeRecovery(ctx context.Context, objectType Ob
 			CorrectionOfEventID: "",
 		})
 	}
-	return s.writer.ApplyIncidentMutation(ctx, IncidentMutation{
-		ObjectType: objectType,
-		ObjectID:   objectID,
-		Active:     []IncidentRecord{},
-		Events:     events,
-	})
+	return IncidentMutation{
+		ObjectType:               objectType,
+		ObjectID:                 objectID,
+		ExpectedObjectRowVersion: expectedObjectRowVersion,
+		Active:                   []IncidentRecord{},
+		Events:                   events,
+	}
 }
 
-func (s *Service) applyEvaluations(ctx context.Context, objectType ObjectType, objectID string, previous []IncidentRecord, evaluations []classEvaluation, now time.Time) error {
-	mutation := buildMutation(objectType, objectID, previous, evaluations)
-	if err := s.writer.ApplyIncidentMutation(ctx, mutation); err != nil {
-		return err
+func (s *Service) warnProjectionConflictRetryExhausted(objectType ObjectType) {
+	now := s.now()
+	s.projectionConflictWarnMu.Lock()
+	last := s.projectionConflictWarnAt[objectType]
+	if !last.IsZero() && now.Before(last.Add(time.Minute)) {
+		s.projectionConflictWarnMu.Unlock()
+		return
 	}
-	return s.appendNotificationRecords(ctx, objectType, objectID, evaluations)
+	s.projectionConflictWarnAt[objectType] = now
+	s.projectionConflictWarnMu.Unlock()
+	s.logger.Error(
+		"incident projection conflict retry exhausted",
+		"error", ErrIncidentProjectionConflict,
+		"object_type", objectType,
+		"classification", "concurrent_update",
+	)
 }
 
 func administrativeRecoverySummaryForMonitoringInstance(record monitoringinstances.Record) string {
@@ -824,14 +926,14 @@ type classEvaluation struct {
 	result EvaluationResult
 }
 
-func buildMutation(objectType ObjectType, objectID string, previous []IncidentRecord, evaluations []classEvaluation) IncidentMutation {
+func buildMutation(objectType ObjectType, objectID, expectedObjectRowVersion string, previous []IncidentRecord, evaluations []classEvaluation) IncidentMutation {
 	activeByClass := incidentsByClass(previous)
 	mutation := IncidentMutation{
-		ObjectType:    objectType,
-		ObjectID:      objectID,
-		Active:        make([]IncidentRecord, 0),
-		Events:        make([]StateChangeEventRecord, 0),
-		Notifications: make([]NotificationRecordWrite, 0),
+		ObjectType:               objectType,
+		ObjectID:                 objectID,
+		ExpectedObjectRowVersion: expectedObjectRowVersion,
+		Active:                   make([]IncidentRecord, 0),
+		Events:                   make([]StateChangeEventRecord, 0),
 	}
 
 	for _, evaluation := range evaluations {
@@ -979,6 +1081,7 @@ func monitoringInstanceResourceSamplesFromHostSamples(hostSamples []runtimefacts
 	for _, sample := range hostSamples {
 		resourceSamples = append(resourceSamples, MonitoringInstanceResourceSample{
 			ObservedAt:         sample.ObservedAt,
+			ReceivedAt:         sample.ReceivedAt,
 			CPUUsagePct:        sample.CPUUsagePct,
 			NormalizedLoad5:    sample.Load5,
 			MemUsedPct:         sample.MemUsedPct,
@@ -1161,11 +1264,70 @@ func observationSeriesSuppressed(series []runtimefacts.ProbeObservation) bool {
 }
 
 type PostgresSnapshotReader struct {
-	db *pgxpool.Pool
+	db incidentSnapshotDB
 }
+
+type incidentSnapshotDB interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+const monitoringInstanceRowVersionSQL = `select xmin::text from monitoring_instances where monitoring_instance_id = $1`
+const targetRowVersionSQL = `select xmin::text from targets where target_id = $1`
+
+const incidentRecentHostSamplesSQL = `
+	select
+		monitoring_instance_id, observed_at, received_at, agent_version, fingerprint,
+		cpu_usage_pct, load_1, load_5, load_15, mem_used_pct, mem_available_bytes, mem_total_bytes,
+		swap_used_pct, disk_used_pct, disk_total_bytes, inode_used_pct, net_in_bytes_per_sec,
+		net_out_bytes_per_sec, cpu_iowait_pct, cpu_steal_pct, disk_read_bytes_per_sec,
+		disk_write_bytes_per_sec, disk_busy_pct, uptime_seconds,
+		maintenance_context, is_backfilled, sync_batch_id
+	from host_samples
+	where monitoring_instance_id = $1 and observed_at >= $2
+	order by observed_at desc, is_backfilled asc, received_at desc, id desc`
+
+const incidentRecentProbeObservationsSQL = `
+	select
+		po.monitoring_instance_id, po.target_id, po.probe_item_id, pi.probe_kind,
+		po.observed_at, po.received_at, po.agent_version, po.fingerprint,
+		po.result_kind, po.latency_ms, po.http_status, po.tls_expiry_days,
+		coalesce(po.error_code, ''), coalesce(po.error_summary, ''),
+		po.maintenance_context, po.is_backfilled, po.sync_batch_id
+	from probe_observations po
+	join probe_items pi on pi.probe_item_id = po.probe_item_id
+	where po.target_id = $1 and po.observed_at >= $2
+	order by po.observed_at desc, po.is_backfilled asc, po.received_at desc, po.id desc`
 
 func NewPostgresSnapshotReader(db *pgxpool.Pool) *PostgresSnapshotReader {
 	return &PostgresSnapshotReader{db: db}
+}
+
+func (r *PostgresSnapshotReader) GetObjectRowVersion(ctx context.Context, objectType ObjectType, objectID string) (string, error) {
+	if strings.TrimSpace(objectID) == "" {
+		return "", errors.New("incident object id is required for row-version read")
+	}
+	var query string
+	switch objectType {
+	case ObjectTypeMonitoringInstance:
+		query = monitoringInstanceRowVersionSQL
+	case ObjectTypeTarget:
+		query = targetRowVersionSQL
+	default:
+		return "", fmt.Errorf("incident object type %q does not support row-version reads", objectType)
+	}
+
+	var rowVersion string
+	if err := r.db.QueryRow(ctx, query, objectID).Scan(&rowVersion); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("incident object row version not found: %w: %w", ErrIncidentProjectionObjectNotFound, err)
+		}
+		return "", fmt.Errorf("read incident object row version: %w", err)
+	}
+	if rowVersion == "" {
+		return "", errors.New("incident object row version is empty")
+	}
+	return rowVersion, nil
 }
 
 func (r *PostgresSnapshotReader) ListActiveIncidents(ctx context.Context, objectType ObjectType, objectID string) ([]IncidentRecord, error) {
@@ -1198,17 +1360,7 @@ func (r *PostgresSnapshotReader) ListActiveIncidents(ctx context.Context, object
 }
 
 func (r *PostgresSnapshotReader) ListRecentHostSamples(ctx context.Context, monitoringInstanceID string, since time.Time) ([]runtimefacts.HostSample, error) {
-	rows, err := r.db.Query(ctx, `
-		select
-			monitoring_instance_id, observed_at, received_at, agent_version, fingerprint,
-			cpu_usage_pct, load_1, load_5, load_15, mem_used_pct, mem_available_bytes, mem_total_bytes,
-			swap_used_pct, disk_used_pct, disk_total_bytes, inode_used_pct, net_in_bytes_per_sec,
-			net_out_bytes_per_sec, cpu_iowait_pct, cpu_steal_pct, disk_read_bytes_per_sec,
-			disk_write_bytes_per_sec, disk_busy_pct, uptime_seconds,
-			maintenance_context, is_backfilled, sync_batch_id
-		from host_samples
-		where monitoring_instance_id = $1 and observed_at >= $2
-		order by observed_at desc, id desc`, monitoringInstanceID, since)
+	rows, err := r.db.Query(ctx, incidentRecentHostSamplesSQL, monitoringInstanceID, since)
 	if err != nil {
 		return nil, fmt.Errorf("query host samples for %q: %w", monitoringInstanceID, err)
 	}
@@ -1235,17 +1387,7 @@ func (r *PostgresSnapshotReader) ListRecentHostSamples(ctx context.Context, moni
 }
 
 func (r *PostgresSnapshotReader) ListRecentProbeObservations(ctx context.Context, targetID string, since time.Time) ([]runtimefacts.ProbeObservation, error) {
-	rows, err := r.db.Query(ctx, `
-		select
-			po.monitoring_instance_id, po.target_id, po.probe_item_id, pi.probe_kind,
-			po.observed_at, po.received_at, po.agent_version, po.fingerprint,
-			po.result_kind, po.latency_ms, po.http_status, po.tls_expiry_days,
-			coalesce(po.error_code, ''), coalesce(po.error_summary, ''),
-			po.maintenance_context, po.is_backfilled, po.sync_batch_id
-		from probe_observations po
-		join probe_items pi on pi.probe_item_id = po.probe_item_id
-		where po.target_id = $1 and po.observed_at >= $2
-		order by po.observed_at desc, po.id desc`, targetID, since)
+	rows, err := r.db.Query(ctx, incidentRecentProbeObservationsSQL, targetID, since)
 	if err != nil {
 		return nil, fmt.Errorf("query probe observations for %q: %w", targetID, err)
 	}

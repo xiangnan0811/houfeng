@@ -434,7 +434,7 @@ func (r *PostgresMonitoringInstanceRepository) loadMonitoringRecordSubject(
 		         select heartbeat.agent_version
 		         from monitoring_instance_heartbeats heartbeat
 		         where heartbeat.monitoring_instance_id = mi.monitoring_instance_id
-		         order by heartbeat.observed_at desc, heartbeat.id desc
+		         order by heartbeat.observed_at desc, heartbeat.is_backfilled asc, heartbeat.received_at desc, heartbeat.id desc
 		         limit 1
 		       ), '')
 		from monitoring_instances mi

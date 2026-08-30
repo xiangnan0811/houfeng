@@ -361,6 +361,60 @@ func TestPostgresIPQualityRepositoryHistoryDoesNotReadLatestOnlyView(t *testing.
 	}
 }
 
+func TestIPQualityLatestAndHistoryQueriesUseReplaySafeOrdering(t *testing.T) {
+	t.Parallel()
+
+	if !strings.Contains(overviewLatestIPQualitySummarySQL, "order by assigned.observed_at desc, assigned.is_backfilled asc, assigned.received_at desc, assigned.report_id desc") {
+		t.Fatalf("overviewLatestIPQualitySummarySQL = %q, want replay-safe latest ordering", overviewLatestIPQualitySummarySQL)
+	}
+
+	latestDB := &fakeIPQualityDB{queryRows: map[string]pgx.Rows{
+		"select latest.vps_id": &fakeIPQualityRows{},
+	}}
+	latestRepo := &PostgresIPQualityRepository{db: latestDB}
+	if _, err := latestRepo.ListLatestSummariesForVPS(context.Background(), []string{"vps_001"}); err != nil {
+		t.Fatalf("ListLatestSummariesForVPS() error = %v", err)
+	}
+	latestSQL := strings.ToLower(latestDB.queries[0])
+	if strings.Contains(latestSQL, "ip_quality_latest_vps_summaries") {
+		t.Fatalf("ListLatestSummariesForVPS SQL used legacy latest view: %s", latestSQL)
+	}
+	if !strings.Contains(latestSQL, "from ip_quality_assigned_vps_reports assigned") ||
+		!strings.Contains(latestSQL, "join ip_quality_reports r on r.report_id = assigned.report_id") ||
+		!strings.Contains(latestSQL, "order by assigned.observed_at desc, r.is_backfilled asc, r.received_at desc, assigned.report_id desc") {
+		t.Fatalf("ListLatestSummariesForVPS SQL = %s, want source-query replay-safe ordering", latestSQL)
+	}
+
+	reportDB := &fakeIPQualityDB{queryRows: map[string]pgx.Rows{
+		"from ip_quality_reports r": &fakeIPQualityRows{},
+	}}
+	reportRepo := &PostgresIPQualityRepository{db: reportDB}
+	if _, _, err := reportRepo.latestReportForVPS(context.Background(), "vps_001"); err != nil {
+		t.Fatalf("latestReportForVPS() error = %v", err)
+	}
+	reportSQL := strings.ToLower(reportDB.queries[0])
+	if strings.Contains(reportSQL, "ip_quality_latest_vps_summaries") {
+		t.Fatalf("latestReportForVPS SQL used legacy latest view: %s", reportSQL)
+	}
+	if !strings.Contains(reportSQL, "join ip_quality_assigned_vps_reports assigned on assigned.report_id = r.report_id") ||
+		!strings.Contains(reportSQL, "order by r.observed_at desc, r.is_backfilled asc, r.received_at desc, r.report_id desc") {
+		t.Fatalf("latestReportForVPS SQL = %s, want assigned source replay-safe ordering", reportSQL)
+	}
+
+	historyDB := &fakeIPQualityDB{queryRows: map[string]pgx.Rows{
+		"from ip_quality_assigned_vps_reports assigned": &fakeIPQualityRows{},
+	}}
+	historyRepo := &PostgresIPQualityRepository{db: historyDB}
+	if _, err := historyRepo.historyForVPS(context.Background(), "vps_001"); err != nil {
+		t.Fatalf("historyForVPS() error = %v", err)
+	}
+	historySQL := strings.ToLower(historyDB.queries[0])
+	if !strings.Contains(historySQL, "join ip_quality_reports r on r.report_id = assigned.report_id") ||
+		!strings.Contains(historySQL, "order by assigned.observed_at desc, r.is_backfilled asc, r.received_at desc, assigned.report_id desc") {
+		t.Fatalf("historyForVPS SQL = %s, want deterministic replay-safe history ordering", historySQL)
+	}
+}
+
 func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsEmptyWhenFilteredViewsHaveNoReports(t *testing.T) {
 	t.Parallel()
 
@@ -455,7 +509,7 @@ func TestPostgresIPQualityRepositoryGetLatestVPSIPQualitySummaryDoesNotLoadDetai
 	}
 }
 
-func TestPostgresIPQualityRepositoryReadsVPSIPQualityThroughFilteredViews(t *testing.T) {
+func TestPostgresIPQualityRepositoryReadsVPSIPQualityThroughFilteredAssignedView(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
@@ -504,10 +558,11 @@ func TestPostgresIPQualityRepositoryReadsVPSIPQualityThroughFilteredViews(t *tes
 		strings.Contains(joined, "r.ip_address in (nullif") {
 		t.Fatalf("repository query bypassed filtered IP quality read views: %s", joined)
 	}
-	for _, want := range []string{"ip_quality_latest_vps_summaries", "ip_quality_assigned_vps_reports"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("repository queries = %s, want %s", joined, want)
-		}
+	if strings.Contains(joined, "ip_quality_latest_vps_summaries") {
+		t.Fatalf("repository queries = %s, legacy latest view cannot express replay-safe ordering", joined)
+	}
+	if !strings.Contains(joined, "ip_quality_assigned_vps_reports") {
+		t.Fatalf("repository queries = %s, want filtered assigned reports view", joined)
 	}
 }
 

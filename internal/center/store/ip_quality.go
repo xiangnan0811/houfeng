@@ -244,7 +244,7 @@ func (r *PostgresIPQualityRepository) SaveReports(ctx context.Context, reports [
 const overviewLatestIPQualitySummarySQL = `
 		-- vps overview ip quality summary
 		with valid_reports as (
-			select r.report_id, r.observed_at, r.ip_address, r.status, r.risk_level, r.monitoring_instance_id
+			select r.report_id, r.observed_at, r.received_at, r.ip_address, r.status, r.risk_level, r.monitoring_instance_id, r.is_backfilled
 			from ip_quality_reports r
 			where r.status in ('success', 'partial')
 				and r.ip_address <> '0.0.0.0'
@@ -271,8 +271,10 @@ const overviewLatestIPQualitySummarySQL = `
 				l.vps_id,
 				r.report_id,
 				r.observed_at,
+				r.received_at,
 				r.status,
-				r.risk_level
+				r.risk_level,
+				r.is_backfilled
 			from vps_monitoring_instance_links l
 			join valid_reports r on r.monitoring_instance_id = l.monitoring_instance_id
 			where l.unlinked_at is null
@@ -282,8 +284,10 @@ const overviewLatestIPQualitySummarySQL = `
 				v.vps_id,
 				r.report_id,
 				r.observed_at,
+				r.received_at,
 				r.status,
-				r.risk_level
+				r.risk_level,
+				r.is_backfilled
 			from vps_assets v
 			join valid_reports r on r.ip_address in (nullif(v.ipv4, ''), nullif(v.ipv6, ''))
 			where v.vps_id = $1
@@ -305,7 +309,7 @@ const overviewLatestIPQualitySummarySQL = `
 			)) as stale,
 			assigned.observed_at
 		from assigned
-		order by assigned.observed_at desc, assigned.report_id desc
+		order by assigned.observed_at desc, assigned.is_backfilled asc, assigned.received_at desc, assigned.report_id desc
 		limit 1`
 
 func (r *PostgresIPQualityRepository) GetLatestVPSIPQualitySummary(ctx context.Context, vpsID string) (*ipquality.Summary, error) {
@@ -417,6 +421,16 @@ func (r *PostgresIPQualityRepository) ListLatestSummariesForVPS(ctx context.Cont
 		return out, nil
 	}
 	rows, err := r.db.Query(ctx, `
+		with ranked as (
+			select assigned.*,
+				row_number() over (
+					partition by assigned.vps_id
+					order by assigned.observed_at desc, r.is_backfilled asc, r.received_at desc, assigned.report_id desc
+				) as latest_rank
+			from ip_quality_assigned_vps_reports assigned
+			join ip_quality_reports r on r.report_id = assigned.report_id
+			where assigned.vps_id = any($1)
+		)
 		select latest.vps_id,
 			latest.report_id,
 			latest.observed_at,
@@ -436,8 +450,8 @@ func (r *PostgresIPQualityRepository) ListLatestSummariesForVPS(ctx context.Cont
 			latest.provider_count,
 			latest.unlockable_count,
 			latest.coverage_json
-		from ip_quality_latest_vps_summaries latest
-		where latest.vps_id = any($1)`, vpsIDs)
+		from ranked latest
+		where latest.latest_rank = 1`, vpsIDs)
 	if err != nil {
 		return nil, fmt.Errorf("query ip quality latest summaries: %w", err)
 	}
@@ -484,9 +498,9 @@ func (r *PostgresIPQualityRepository) latestReportForVPS(ctx context.Context, vp
 			r.diagnostics_json,
 			r.created_at
 		from ip_quality_reports r
-		join ip_quality_latest_vps_summaries latest on latest.report_id = r.report_id
-		where latest.vps_id = $1
-		order by r.observed_at desc, r.report_id desc
+		join ip_quality_assigned_vps_reports assigned on assigned.report_id = r.report_id
+		where assigned.vps_id = $1
+		order by r.observed_at desc, r.is_backfilled asc, r.received_at desc, r.report_id desc
 		limit 1`, vpsID)
 	if err != nil {
 		return ipquality.Report{}, false, fmt.Errorf("query latest ip quality report for vps %q: %w", vpsID, err)
@@ -734,8 +748,9 @@ func (r *PostgresIPQualityRepository) historyForVPS(ctx context.Context, vpsID s
 			assigned.unlockable_count,
 			assigned.coverage_json
 		from ip_quality_assigned_vps_reports assigned
+		join ip_quality_reports r on r.report_id = assigned.report_id
 		where assigned.vps_id = $1
-		order by assigned.observed_at desc, assigned.report_id desc
+		order by assigned.observed_at desc, r.is_backfilled asc, r.received_at desc, assigned.report_id desc
 		limit 30`, vpsID)
 	if err != nil {
 		return nil, fmt.Errorf("query ip quality history for vps %q: %w", vpsID, err)

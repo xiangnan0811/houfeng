@@ -523,12 +523,19 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 				(count(*) filter (where n.current_health_status <> '正常'))::int as abnormal_monitoring_count,
 				coalesce(sum(n.current_active_incident_count), 0)::int as active_incident_count,
 				coalesce((array_remove(array_agg(nullif(n.current_primary_issue_summary, '') order by n.current_active_incident_count desc, n.updated_at desc), null))[1], '') as primary_issue_summary
-			from vps_monitoring_instance_links l
-			left join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
-			where l.unlinked_at is null
-			group by l.vps_id
-		),
-		ip_quality_provider_risk_rollup as (
+				from vps_monitoring_instance_links l
+				left join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
+				where l.unlinked_at is null
+				group by l.vps_id
+			),
+			ip_quality_latest as (
+				select distinct on (assigned.vps_id)
+					assigned.*
+				from ip_quality_assigned_vps_reports assigned
+				join ip_quality_reports r on r.report_id = assigned.report_id
+				order by assigned.vps_id, assigned.observed_at desc, r.is_backfilled asc, r.received_at desc, assigned.report_id desc
+			),
+			ip_quality_provider_risk_rollup as (
 			select
 				report_id,
 				(count(*) filter (
@@ -659,10 +666,10 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 		left join subscription_rollup sr on sr.vps_id = v.vps_id
 		left join primary_subscriptions ps on ps.vps_id = v.vps_id
 		left join service_rollup svr on svr.vps_id = v.vps_id
-		left join domain_rollup dr on dr.vps_id = v.vps_id
-		left join target_rollup tr on tr.vps_id = v.vps_id
-		left join monitoring_rollup mr on mr.vps_id = v.vps_id
-		left join ip_quality_latest_vps_summaries ipq on ipq.vps_id = v.vps_id
+			left join domain_rollup dr on dr.vps_id = v.vps_id
+			left join target_rollup tr on tr.vps_id = v.vps_id
+			left join monitoring_rollup mr on mr.vps_id = v.vps_id
+			left join ip_quality_latest ipq on ipq.vps_id = v.vps_id
 		left join ip_quality_provider_risk_rollup ipqr on ipqr.report_id = ipq.report_id
 		left join ip_quality_unlock_rollup ipqu on ipqu.report_id = ipq.report_id
 		where v.lifecycle_status not in ('cancelled', 'archived')

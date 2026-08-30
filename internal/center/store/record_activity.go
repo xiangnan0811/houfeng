@@ -94,9 +94,10 @@ func publishActivityBatchInTx(
 		return ActivityPublishResult{}, ErrActivityGenerationInactive
 	}
 
-	// Locking the head first is what serializes allocation. Everything below
-	// runs with the guarantee that no other publisher can be numbering rows in
-	// this generation at the same time.
+	// Locking the head first is the serialization root for both candidate
+	// classification and sequence allocation. Everything below runs with the
+	// guarantee that no other publisher can classify or number rows in this
+	// generation at the same time.
 	var publishedThrough, allocatedThrough uint64
 	err := transaction.QueryRow(ctx, `
 		select published_ingest_sequence, allocated_ingest_sequence
@@ -276,10 +277,11 @@ func openRevisionInterval(
 	return true, nil
 }
 
-// loadExistingActivityHashes locks and reads whatever is already stored for this
-// batch. Locking here rather than relying on a conflict clause is deliberate: the
-// final insert must be a strict INSERT so an unexpected conflict rolls the batch
-// back instead of silently swallowing an allocated number.
+// loadExistingActivityHashes reads whatever is already stored for this batch.
+// The active head lock already serializes every conforming publisher and rebuild;
+// projection facts are immutable and therefore need no row lock or UPDATE grant.
+// The final insert remains a strict INSERT so an unexpected nonconforming conflict
+// rolls the batch back instead of silently swallowing an allocated number.
 func loadExistingActivityHashes(
 	ctx context.Context,
 	transaction pgx.Tx,
@@ -296,8 +298,7 @@ func loadExistingActivityHashes(
 		select activity_id, canonical_hash
 		from public.record_activity_projection
 		where activity_id = any($1::text[])
-		order by activity_id
-		for update`,
+		order by activity_id`,
 		identifiers,
 	)
 	if err != nil {

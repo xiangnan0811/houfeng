@@ -53,7 +53,7 @@ const runtimeFactsLatestHostSampleSQL = `
 			containers
 		from host_samples
 		where monitoring_instance_id = $1
-		order by observed_at desc, id desc
+		order by observed_at desc, is_backfilled asc, received_at desc, id desc
 		limit 1`
 
 const runtimeFactsHostSampleWindowSummarySQL = `
@@ -186,9 +186,9 @@ const runtimeFactsLatestProbeObservationsSQL = `
 			from probe_observations po
 			join probe_items pi on pi.probe_item_id = po.probe_item_id
 			where po.target_id = $1
-			order by po.probe_item_id, po.monitoring_instance_id, po.observed_at desc, po.id desc
+			order by po.probe_item_id, po.monitoring_instance_id, po.observed_at desc, po.is_backfilled asc, po.received_at desc, po.id desc
 		) latest
-		order by latest.observed_at desc, latest.probe_item_id, latest.monitoring_instance_id`
+		order by latest.observed_at desc, latest.is_backfilled asc, latest.received_at desc, latest.id desc`
 
 const runtimeFactsRecentProbeObservationsSQL = `
 		select
@@ -213,7 +213,7 @@ const runtimeFactsRecentProbeObservationsSQL = `
 		join probe_items pi on pi.probe_item_id = po.probe_item_id
 		where po.target_id = $1
 			and po.observed_at >= $2
-		order by po.observed_at desc, po.id desc
+		order by po.observed_at desc, po.is_backfilled asc, po.received_at desc, po.id desc
 		limit $3`
 
 type runtimeFactsQueryer interface {

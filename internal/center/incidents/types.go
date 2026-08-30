@@ -1,10 +1,16 @@
 package incidents
 
 import (
+	"errors"
 	"time"
 
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/targets"
+)
+
+var (
+	ErrIncidentProjectionConflict       = errors.New("incident projection conflict")
+	ErrIncidentProjectionObjectNotFound = errors.New("incident projection object not found")
 )
 
 type IncidentClass string
@@ -171,15 +177,16 @@ type NotificationRecordWrite struct {
 }
 
 type IncidentMutation struct {
-	ObjectType    ObjectType
-	ObjectID      string
-	Active        []IncidentRecord
-	Events        []StateChangeEventRecord
-	Notifications []NotificationRecordWrite
+	ObjectType               ObjectType
+	ObjectID                 string
+	ExpectedObjectRowVersion string
+	Active                   []IncidentRecord
+	Events                   []StateChangeEventRecord
 }
 
 type MonitoringInstanceResourceSample struct {
 	ObservedAt         time.Time
+	ReceivedAt         time.Time
 	CPUUsagePct        float64
 	NormalizedLoad5    float64
 	MemUsedPct         float64

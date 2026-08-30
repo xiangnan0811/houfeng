@@ -1188,3 +1188,27 @@ Fixed PostgreSQL 16 ON CONFLICT permission failure for agent sync batch idempote
 ### Status
 
 [OK] **Completed**
+
+
+## Session 269: 完成 Agent replay freshness 与 Activity ACL 修复
+
+**Date**: 2026-08-30
+**Task**: 完成 Agent replay freshness 与 Activity ACL 修复
+**Branch**: `codex/agent-replay-freshness-activity-acl`
+
+### Summary
+
+完成 K=2 durable replay 调度、Center replay-safe latest 与 incident CAS、Activity immutable-fact ACL 修复；独立审查归零，full/race/vet、精确 PostgreSQL 16 与 make verify-go 全部通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3e0f4b01` | (see git log) |
+| `629039c8` | (see git log) |
+| `3777c1a0` | (see git log) |
+| `93893cea` | (see git log) |
+
+### Status
+
+[OK] **Completed**

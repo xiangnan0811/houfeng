@@ -320,10 +320,13 @@ type RemoteError struct {
 - `FileStore` 返回给 runtime 的 entry ID 必须唯一：enqueue 遇到 heartbeat batch ID 冲突时分配确定性 suffix，读取 legacy/hostile 持久文件时也在排序后确定性规范化 duplicate/empty ID，保证单条 ack 不会删除尚未发送的同 ID fact。
 - 该规范化只作用于本地 `Entry.ID`，不得改写 carrier `SyncBatchID`。重复 SyncBatchID 仍是 center 的同一幂等事实，不能宣称 suffix 后会成为两个独立 center facts。大量同 ID 持久项的规范化、以及已有密集 `base-N` suffix 时的新 ID 分配都必须近似线性，不得为每个候选 suffix 重扫整个队列造成 O(n²) recovery。
 - wrapped policy / remote operation / pre-sync local operation / local queue error 必须提供 `Unwrap() error`，使调用方仍可通过 `errors.As` / `errors.Is` 取得 typed cause；其 `Error()` 只格式化稳定、脱敏字段。
+- 每轮调度上界：`maxBacklogSyncAttemptsPerRound = 2`；`Enqueue` 返回的本地 `Entry.ID` 是本轮 current carrier 的唯一身份。
 
 #### 3. Contracts
 
-- 每个 tick 仍先 durable enqueue 当前请求，再 oldest-first flush；同一当前 authority 的合法离线积压保持 backfill 语义。
+- 每个 tick 先 durable enqueue 当前请求，再以 exact 本地 `Entry.ID` 分离 backlog lane 与 current lane。backlog lane 仍按 `CreatedAt, ID` FIFO，但每轮最多尝试两个旧 entry；current entry 始终在本轮最后尝试，因此 fresh 不会被大积压无限饿死。该合同只放宽全局 FIFO，不放宽 backlog lane 内 FIFO。
+- 只有旧 entry 发送时才把其中事实标记 `is_backfilled=true`；不得用可碰撞的 carrier `SyncBatchID` 判断 current/backfill。每轮最多 `K+1=3` 次同步尝试。
+- 每个成功响应必须先完成对应 entry 的 durable `Delete`，再计入 ack 并应用 response plan。backlog plan 可依次应用，但 current response 最后应用，避免 exact-duplicate backlog 的空 plan 覆盖 fresh plan。
 - pending command result 与已 drain 的 IP-quality report 在 durable queue Enqueue 成功前必须继续保留于 runtime；compatibility no-queue 路径则只在 Sync 成功后清理。`FileStore.Enqueue` 若容量裁剪连 newest entry 自身也无法保留，必须返回 local durability error 且不改写原队列，不能假成功后让 runtime 清空这些 payload。对超过新 `MaxBytes` 的 legacy/hostile 大文件做 oldest-first byte pruning 时必须线性计算序列化大小，不能为每个待删 entry 反复 marshal 整个剩余队列。
 - 与当前 ID、token 或任一 carrier fingerprint 不一致，以及缺少 heartbeat/heartbeat batch ID 的持久项属于 stale authority：先用一次 `DeleteMany` durable 删除本轮可独立删除的全部 stale 项，成功后才按 stable reason 聚合写脱敏 discard 日志并继续。不得为默认 72 小时积压逐项重写/fsync 整个队列或逐项刷日志。
 - 生产 `FileStore.List` 在 runtime 分类前确定性规范化 duplicate/empty persisted ID，后续 Delete/DeleteMany/MarkAttempt 必须以相同映射重新读取，下一次 mutation 把规范化 ID 持久化。这样两个 retained current facts 即使原文件复用同一 ID，也能 oldest-first 分别发送/ack；第一次 Delete 不能删除第二个未发送 fact。对未实现此能力的其他 `SyncQueue`，runtime 仍以 collision guard 禁止 stale ID-wide delete 与 retained current ID 相撞。
@@ -340,11 +343,10 @@ type RemoteError struct {
 | --- | --- | --- |
 | stale authority / malformed local carrier | 一次 batch delete 成功后按 reason 聚合记 discard | 继续 flush |
 | stale ID 与 retained current ID 冲突 | 不做 stale ID-wide delete、不记 discard | 跳过 stale carrier，继续 current entry |
-| HTTP `400` + `ErrorCodeInvalidJSON` / `ErrorCodeInvalidRequest` | mark → delete 成功后记 discard | 继续 flush |
+| HTTP `400` + `ErrorCodeInvalidJSON` / `ErrorCodeInvalidRequest` | mark → delete 成功后记 discard；计入本轮 backlog 上限 | backlog lane 可继续；current discard 后结束本轮 |
 | `401` / `404` / `409` / `405` 或其他非 `429` 4xx | mark，保留 entry | 返回 sanitized terminal error |
-| `429` | mark，保留 entry | 下一 tick retry |
-| 其他 5xx | mark，保留 entry | 下一 tick retry |
-| transport failure | mark，保留 entry | 下一 tick retry |
+| backlog `429` / 其他 5xx / transport failure | mark，保留 entry | 停止本轮 backlog lane，但仍尝试 exact current；下一 tick 从同一 backlog head retry |
+| current `429` / 其他 5xx / transport failure | mark，保留 entry | 结束本轮；下一 tick 作为 backfilled backlog retry |
 | typed remote status 0、2xx 或 3xx error | mark，保留 entry | 作为不明确 remote failure 下一 tick retry，不做推测性 delete |
 | 非 400 status 携带 `invalid_json` / `invalid_request` code | 以 status 为准，不 delete | 4xx terminal 或 5xx retry |
 | durable Mark/Delete 失败 | 保留可恢复状态 | 返回 local queue error |
@@ -353,9 +355,11 @@ type RemoteError struct {
 
 - Good：旧 instance/token/fingerprint 项位于队头；agent 删除它并在同一次 flush 送达当前心跳。
 - Good：五万条同一 stale reason 的历史积压只触发一次 atomic `DeleteMany` 与一条聚合日志，不产生 O(n²) rewrite/fsync 或日志洪泛。
-- Good：legacy queue 含两个同 ID 的 retained current facts；FileStore 暴露两个稳定唯一 ID，首个 ack 后第二个仍 durable，随后才发送，且新的 current heartbeat 不越过它。
+- Good：legacy queue 含多个 retained current facts；FileStore 暴露稳定唯一 ID，backlog lane 仍 FIFO；每两个旧 entry 后本轮 exact current 可以有界越过剩余 backlog，后续轮次继续排空旧项。
 - Good：含 command result/IP-quality report 的当前 request 首次 Enqueue 写盘失败；payload 留在内存，修复本地故障后同 Runtime 再次 Run 能将其 durable enqueue 并发送。
-- Base：center 暂时 503；队头保留并在下一 tick 标记为 backfilled 后重试，后续事实不越过它。
+- Base：backlog head 暂时 503；队头保留，停止本轮 backlog lane，但本轮 current 仍发送；下一 tick 该旧项继续作为 FIFO head retry。
+- Bad：按 carrier `SyncBatchID` 识别 current；本地 ID collision suffix 不会改 carrier ID，会把旧项误标 live 或把 fresh 误标 backfill。
+- Bad：在 current 前遍历完整 backlog；65,536 条 durable queue 会让实时 heartbeat/host sample 长时间没有网络尝试。
 - Bad：看到任意 `invalid_request` 字符串就 delete，导致携带该 code 的 404/500 被误当作脏请求。
 - Bad：先 log “discarded” 再执行 delete；磁盘写失败时日志宣称的状态与 durable file 相反。
 - Bad：terminal 分支既在 runtime 内 log 又 return 给 main，产生两条同一故障日志。
@@ -376,7 +380,10 @@ type RemoteError struct {
 - `TestRuntimeCurrentAuthorityPermanentRemoteErrorsAreTerminalAndSanitized`：永久 4xx 保留 entry、只返回一次脱敏 terminal evidence，并覆盖 status/code precedence。
 - `TestRuntimeLogsDiscardOnlyAfterQueueDeleteSucceeds`：stale/poison delete 失败时没有虚假 discard 日志。
 - `TestRuntimeTransientQueueFailuresRemainRetryableAndBackfilled`：status 0/2xx/3xx、429/5xx/transport 保留、重试与 secret-bearing cause 不泄露。
-- `TestRuntimePreservesOldestFirstForValidCurrentAuthorityBacklog`：合法当前 authority 积压顺序不回退；runtime package 另跑 `-count=10` 与 `-race`。
+- `TestRuntimeBoundsReplayBeforeCurrentDurableRequest`、`TestRuntimeReplaysBacklogFIFOAcrossFreshInterleaving`：fresh 前最多两个旧尝试，且 backlog lane 跨轮保持 FIFO 并最终排空。
+- `TestRuntimeRetryableBacklogHeadDoesNotBlockCurrentDurableRequest`、`TestRuntimeCurrentRequestRetryRemainsDurableAndBackfilled`：旧 retry 只阻断 backlog lane；失败 fresh durable 留存并在下一轮变为 backfill。
+- `TestRuntimeCurrentResponsePlanWinsAfterBoundedReplay`：durable delete 后应用响应，且 current plan 最后生效。
+- `TestRuntimeBoundedReplayPreservesDurableAuxiliaryPayloads`、`TestRuntimeLocalEntryIDControlsCurrentAndBackfilledOnBatchIDCollision`：辅助载荷不丢，本地 entry ID 独立决定 live/backfill。
 - `TestFileStoreDeleteManyRechecksCancellationBeforeMutation`、`TestFileStoreRechecksCancellationAfterLockAcrossOperations`：锁前检查后发生的取消也不能继续 durable mutation。
 - `TestRuntimeTreatsParentCancellationAcrossBoundariesAsCleanShutdown`：fingerprint/credential/enrollment/non-queue client 边界的 parent cancellation 都干净退出。
 - `TestRuntimeSanitizesRemoteFailuresOutsideDurableQueue`、`TestRuntimeDoesNotExposePersistedQueueIdentifiersOrLocalCauses`：覆盖 enrollment/non-queue sync、queue 标识和 local cause 的主进程可见 Error/log 边界。

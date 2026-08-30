@@ -21,7 +21,12 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
-const defaultInterval = 5 * time.Second
+const (
+	defaultInterval                = 5 * time.Second
+	maxBacklogSyncAttemptsPerRound = 2
+	replayProgressLogInterval      = time.Minute
+	replayProgressLogMessage       = "sync queue replay progress"
+)
 
 var agentVersion = "dev"
 
@@ -31,16 +36,31 @@ var errRemoteSync = errors.New("remote sync failed")
 
 var errStaleSyncAuthority = errors.New("stale sync queue authority")
 
+var errCurrentSyncQueueEntryMissing = errors.New("current sync queue entry missing")
+
+var errCurrentSyncQueueEntryAmbiguous = errors.New("current sync queue entry ambiguous")
+
+var errSyncQueueReplayRetry = errors.New("sync queue replay retry pending")
+
 type syncQueueAction string
 
 type syncFailureKind string
 
+type syncQueueEntryDisposition string
+
+type syncRoundResult struct {
+	ackedEntries     int
+	remainingEntries int
+}
+
 const (
-	syncQueueActionDiscard   syncQueueAction = "discard"
-	syncQueueActionTerminal  syncQueueAction = "terminal"
-	syncQueueActionRetry     syncQueueAction = "retry"
-	syncFailureKindRemote    syncFailureKind = "remote"
-	syncFailureKindTransport syncFailureKind = "transport"
+	syncQueueActionDiscard     syncQueueAction           = "discard"
+	syncQueueActionTerminal    syncQueueAction           = "terminal"
+	syncQueueActionRetry       syncQueueAction           = "retry"
+	syncFailureKindRemote      syncFailureKind           = "remote"
+	syncFailureKindTransport   syncFailureKind           = "transport"
+	syncQueueEntryAcknowledged syncQueueEntryDisposition = "acknowledged"
+	syncQueueEntryDiscarded    syncQueueEntryDisposition = "discarded"
 )
 
 type syncAuthority struct {
@@ -182,21 +202,24 @@ type SyncQueue interface {
 }
 
 type Runtime struct {
-	cfg                 agentconfig.AgentConfig
-	client              Client
-	logger              *slog.Logger
-	tokenSource         TokenSource
-	syncCredentialStore SyncCredentialStore
-	fingerprintSource   FingerprintSource
-	hostSampleProvider  HostSampleProvider
-	probeProvider       ProbeProvider
-	ipQualityProvider   IPQualityProvider
-	interval            time.Duration
-	syncQueue           SyncQueue
-	currentPlan         *agentapi.SyncPlan
-	lastHostSampleAt    time.Time
-	pendingResults      []agentexec.Result
-	pendingIPReports    []agentapi.IPQualityReportPayload
+	cfg                  agentconfig.AgentConfig
+	client               Client
+	logger               *slog.Logger
+	tokenSource          TokenSource
+	syncCredentialStore  SyncCredentialStore
+	fingerprintSource    FingerprintSource
+	hostSampleProvider   HostSampleProvider
+	probeProvider        ProbeProvider
+	ipQualityProvider    IPQualityProvider
+	interval             time.Duration
+	syncQueue            SyncQueue
+	currentPlan          *agentapi.SyncPlan
+	lastHostSampleAt     time.Time
+	pendingResults       []agentexec.Result
+	pendingIPReports     []agentapi.IPQualityReportPayload
+	now                  func() time.Time
+	replayActive         bool
+	lastReplayProgressAt time.Time
 }
 
 func New(cfg agentconfig.AgentConfig, logger *slog.Logger, tokenSource TokenSource, fingerprintSource FingerprintSource) *Runtime {
@@ -234,6 +257,7 @@ func NewWithRuntimeDeps(
 	}
 	var queue SyncQueue
 	var ipQualityProvider IPQualityProvider
+	now := time.Now
 	for _, dep := range optionalDeps {
 		switch typed := dep.(type) {
 		case nil:
@@ -244,6 +268,10 @@ func NewWithRuntimeDeps(
 			}
 		case IPQualityProvider:
 			ipQualityProvider = typed
+		case func() time.Time:
+			if typed != nil {
+				now = typed
+			}
 		}
 	}
 	var syncCredentialStore SyncCredentialStore
@@ -263,6 +291,7 @@ func NewWithRuntimeDeps(
 		ipQualityProvider:   ipQualityProvider,
 		interval:            interval,
 		syncQueue:           queue,
+		now:                 now,
 	}
 }
 
@@ -338,7 +367,8 @@ func (r *Runtime) Run(ctx context.Context) error {
 				continue
 			}
 
-			if err := r.enqueueAndFlush(ctx, request, syncBatchID, authority); err != nil {
+			round, err := r.enqueueAndFlush(ctx, request, authority)
+			if err != nil {
 				if ctx.Err() != nil {
 					return nil
 				}
@@ -347,11 +377,12 @@ func (r *Runtime) Run(ctx context.Context) error {
 					return fmt.Errorf("sync queue terminal failure: %w", err)
 				}
 				if errors.Is(err, errRemoteSync) {
-					r.logger.Error("sync queue flush failed", "error", err)
+					r.logSyncQueueReplayRetry(round, policyErr)
 					continue
 				}
 				return fmt.Errorf("sync queue operation failed: %w", err)
 			}
+			r.logSyncQueueReplayProgress(round)
 		}
 	}
 }
@@ -440,18 +471,20 @@ func (r *Runtime) buildSyncRequest(ctx context.Context, monitoringInstanceID, sy
 	return request
 }
 
-func (r *Runtime) enqueueAndFlush(ctx context.Context, request agentapi.SyncRequest, currentBatchID string, authority syncAuthority) error {
-	if _, err := r.syncQueue.Enqueue(ctx, request); err != nil {
-		return &syncQueueOperationError{operation: "enqueue", cause: err}
+func (r *Runtime) enqueueAndFlush(ctx context.Context, request agentapi.SyncRequest, authority syncAuthority) (syncRoundResult, error) {
+	currentEntryID, err := r.syncQueue.Enqueue(ctx, request)
+	if err != nil {
+		return syncRoundResult{}, &syncQueueOperationError{operation: "enqueue", cause: err}
 	}
 	r.acknowledgePendingPayloads(len(request.CommandResults), len(request.IPQualityReports))
 	if err := r.syncQueue.Prune(ctx); err != nil {
-		return &syncQueueOperationError{operation: "prune", cause: err}
+		return syncRoundResult{}, &syncQueueOperationError{operation: "prune", cause: err}
 	}
-	if err := r.flushSyncQueue(ctx, currentBatchID, authority); err != nil {
-		return fmt.Errorf("flush sync queue: %w", err)
+	round, err := r.flushSyncQueue(ctx, currentEntryID, authority)
+	if err != nil {
+		return round, fmt.Errorf("flush sync queue: %w", err)
 	}
-	return nil
+	return round, nil
 }
 
 func (r *Runtime) acknowledgePendingPayloads(commandResults, ipQualityReports int) {
@@ -467,46 +500,88 @@ func (r *Runtime) acknowledgePendingPayloads(commandResults, ipQualityReports in
 	}
 }
 
-func (r *Runtime) flushSyncQueue(ctx context.Context, currentBatchID string, authority syncAuthority) error {
+func (r *Runtime) flushSyncQueue(ctx context.Context, currentEntryID string, authority syncAuthority) (syncRoundResult, error) {
 	entries, err := r.syncQueue.List(ctx)
 	if err != nil {
-		return &syncQueueOperationError{operation: "list", cause: err}
+		return syncRoundResult{}, &syncQueueOperationError{operation: "list", cause: err}
 	}
 	entries, err = r.discardStaleSyncQueueEntries(ctx, entries, authority)
 	if err != nil {
-		return err
+		return syncRoundResult{}, err
 	}
-	for _, entry := range entries {
-		response, err := r.syncRequest(ctx, entry, currentBatchID)
+	backlog := make([]syncqueue.Entry, 0, len(entries))
+	var current *syncqueue.Entry
+	for i := range entries {
+		entry := entries[i]
+		if entry.ID != currentEntryID {
+			backlog = append(backlog, entry)
+			continue
+		}
+		if current != nil {
+			return syncRoundResult{}, &syncQueueOperationError{operation: "locate_current", cause: errCurrentSyncQueueEntryAmbiguous}
+		}
+		current = &entry
+	}
+	if current == nil {
+		return syncRoundResult{}, &syncQueueOperationError{operation: "locate_current", cause: errCurrentSyncQueueEntryMissing}
+	}
+	round := syncRoundResult{remainingEntries: len(backlog)}
+
+	var backlogRetryErr error
+	for i := 0; i < len(backlog) && i < maxBacklogSyncAttemptsPerRound; i++ {
+		disposition, err := r.flushSyncQueueEntry(ctx, backlog[i], false)
 		if err != nil {
-			if markErr := r.syncQueue.MarkAttempt(ctx, entry.ID); markErr != nil {
-				return &syncQueueOperationError{operation: "mark_attempt", cause: markErr}
-			}
 			var policyErr *syncPolicyError
-			if !errors.As(err, &policyErr) {
-				return err
+			if errors.As(err, &policyErr) && policyErr.action == syncQueueActionRetry {
+				backlogRetryErr = err
+				break
 			}
-			switch policyErr.action {
-			case syncQueueActionDiscard:
-				if deleteErr := r.syncQueue.Delete(ctx, entry.ID); deleteErr != nil {
-					return &syncQueueOperationError{operation: "delete_rejected", cause: deleteErr}
-				}
-				r.logSyncQueuePolicy("discard rejected sync queue entry", policyErr)
-				continue
-			case syncQueueActionTerminal:
-				return policyErr
-			case syncQueueActionRetry:
-				return policyErr
-			default:
-				return err
-			}
+			return round, err
 		}
-		if err := r.syncQueue.Delete(ctx, entry.ID); err != nil {
-			return &syncQueueOperationError{operation: "delete_acknowledged", cause: err}
+		round.remainingEntries--
+		if disposition == syncQueueEntryAcknowledged {
+			round.ackedEntries++
 		}
-		r.applySyncPlan(ctx, response)
 	}
-	return nil
+
+	if _, err := r.flushSyncQueueEntry(ctx, *current, true); err != nil {
+		round.remainingEntries++
+		return round, err
+	}
+	if backlogRetryErr != nil {
+		return round, backlogRetryErr
+	}
+	return round, nil
+}
+
+func (r *Runtime) flushSyncQueueEntry(ctx context.Context, entry syncqueue.Entry, current bool) (syncQueueEntryDisposition, error) {
+	response, err := r.syncRequest(ctx, entry, current)
+	if err != nil {
+		if markErr := r.syncQueue.MarkAttempt(ctx, entry.ID); markErr != nil {
+			return "", &syncQueueOperationError{operation: "mark_attempt", cause: markErr}
+		}
+		var policyErr *syncPolicyError
+		if !errors.As(err, &policyErr) {
+			return "", err
+		}
+		switch policyErr.action {
+		case syncQueueActionDiscard:
+			if deleteErr := r.syncQueue.Delete(ctx, entry.ID); deleteErr != nil {
+				return "", &syncQueueOperationError{operation: "delete_rejected", cause: deleteErr}
+			}
+			r.logSyncQueuePolicy("discard rejected sync queue entry", policyErr)
+			return syncQueueEntryDiscarded, nil
+		case syncQueueActionTerminal, syncQueueActionRetry:
+			return "", policyErr
+		default:
+			return "", err
+		}
+	}
+	if err := r.syncQueue.Delete(ctx, entry.ID); err != nil {
+		return "", &syncQueueOperationError{operation: "delete_acknowledged", cause: err}
+	}
+	r.applySyncPlan(ctx, response)
+	return syncQueueEntryAcknowledged, nil
 }
 
 func (r *Runtime) discardStaleSyncQueueEntries(ctx context.Context, entries []syncqueue.Entry, authority syncAuthority) ([]syncqueue.Entry, error) {
@@ -555,9 +630,9 @@ func (r *Runtime) discardStaleSyncQueueEntries(ctx context.Context, entries []sy
 	return retained, nil
 }
 
-func (r *Runtime) syncRequest(ctx context.Context, entry syncqueue.Entry, currentBatchID string) (*agentapi.SyncResponse, error) {
+func (r *Runtime) syncRequest(ctx context.Context, entry syncqueue.Entry, current bool) (*agentapi.SyncResponse, error) {
 	request := entry.Request
-	if entry.Attempts > 0 || syncBatchIDForRequest(entry.Request) != currentBatchID {
+	if !current {
 		request = syncqueue.WithBackfilledFacts(entry.Request, true)
 	}
 	response, err := r.client.Sync(ctx, request)
@@ -580,6 +655,66 @@ func (r *Runtime) logSyncQueuePolicy(message string, policyErr *syncPolicyError)
 		attributes = append(attributes, "code", policyErr.code)
 	}
 	r.logger.Error(message, attributes...)
+}
+
+func (r *Runtime) logSyncQueueReplayProgress(round syncRoundResult) {
+	if round.ackedEntries == 0 {
+		if round.remainingEntries > 0 {
+			r.replayActive = true
+			return
+		}
+		r.replayActive = false
+		r.lastReplayProgressAt = time.Time{}
+		return
+	}
+	if round.remainingEntries > 0 {
+		enteringReplay := !r.replayActive
+		r.replayActive = true
+		now := r.now()
+		if !enteringReplay && !r.lastReplayProgressAt.IsZero() && now.Before(r.lastReplayProgressAt.Add(replayProgressLogInterval)) {
+			return
+		}
+		r.lastReplayProgressAt = now
+		r.logger.Info(
+			replayProgressLogMessage,
+			"state", "catching_up",
+			"acked_entries", round.ackedEntries,
+			"remaining_entries", round.remainingEntries,
+		)
+		return
+	}
+	r.replayActive = false
+	r.lastReplayProgressAt = time.Time{}
+	r.logger.Info(
+		replayProgressLogMessage,
+		"state", "caught_up",
+		"acked_entries", round.ackedEntries,
+		"remaining_entries", 0,
+	)
+}
+
+func (r *Runtime) logSyncQueueReplayRetry(round syncRoundResult, policyErr *syncPolicyError) {
+	if round.remainingEntries > 0 {
+		r.replayActive = true
+	}
+	attributes := []any{
+		"error", errSyncQueueReplayRetry,
+		"state", "retrying",
+		"kind", policyErr.kind,
+		"action", policyErr.action,
+	}
+	if policyErr.statusCode > 0 {
+		attributes = append(attributes, "status", policyErr.statusCode)
+	}
+	if policyErr.code != "" {
+		attributes = append(attributes, "code", policyErr.code)
+	}
+	attributes = append(
+		attributes,
+		"acked_entries", round.ackedEntries,
+		"remaining_entries", round.remainingEntries,
+	)
+	r.logger.Error(replayProgressLogMessage, attributes...)
 }
 
 func classifyRemoteOperationFailure(operation string, err error) *remoteOperationError {
@@ -707,13 +842,6 @@ func (r *Runtime) applySyncPlan(ctx context.Context, response *agentapi.SyncResp
 	} else {
 		r.currentPlan = nil
 	}
-}
-
-func syncBatchIDForRequest(request agentapi.SyncRequest) string {
-	if len(request.Heartbeats) == 0 {
-		return ""
-	}
-	return request.Heartbeats[0].SyncBatchID
 }
 
 func (r *Runtime) collectHostSample(observedAt time.Time, fingerprint, syncBatchID string) *agentapi.HostSamplePayload {

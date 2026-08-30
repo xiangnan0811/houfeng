@@ -174,7 +174,9 @@ func TestPostgresAssetDecisionRepositoryLoadsIPQualityFacts(t *testing.T) {
 		t.Fatalf("facts = %#v, want one fact", facts)
 	}
 	for _, want := range []string{
-		"ip_quality_latest_vps_summaries",
+		"ip_quality_assigned_vps_reports",
+		"join ip_quality_reports",
+		"order by assigned.vps_id, assigned.observed_at desc, r.is_backfilled asc, r.received_at desc, assigned.report_id desc",
 		"ip_quality_provider_results",
 		"ip_quality_service_unlocks",
 		"where coalesce(status, 'success') = 'success'",
@@ -183,6 +185,9 @@ func TestPostgresAssetDecisionRepositoryLoadsIPQualityFacts(t *testing.T) {
 		if !strings.Contains(capturedSQL, want) {
 			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
 		}
+	}
+	if strings.Contains(capturedSQL, "ip_quality_latest_vps_summaries") {
+		t.Fatalf("capturedSQL = %q, must not use legacy latest view", capturedSQL)
 	}
 	summary := facts[0].VPS.IPQualitySummary
 	if summary == nil || summary.IPAddress != "203.0.113.10" || summary.RiskLevel != "high" {

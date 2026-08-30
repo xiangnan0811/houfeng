@@ -349,6 +349,50 @@ func TestEmptyInputDoesNotForceRecovery(t *testing.T) {
 	}
 }
 
+func TestNormalizeHostSamplesUsesReplaySafeStableLatestOrdering(t *testing.T) {
+	t.Parallel()
+
+	observed := time.Date(2026, time.August, 30, 10, 0, 0, 0, time.UTC)
+	received := observed.Add(time.Minute)
+	input := []runtimefacts.HostSample{
+		{SyncBatchID: "backfill", ObservedAt: observed, ReceivedAt: received.Add(time.Minute), IsBackfilled: true},
+		{SyncBatchID: "live-older-receipt", ObservedAt: observed, ReceivedAt: received},
+		{SyncBatchID: "live-newer-receipt-first", ObservedAt: observed, ReceivedAt: received.Add(time.Minute)},
+		{SyncBatchID: "live-newer-receipt-second", ObservedAt: observed, ReceivedAt: received.Add(time.Minute)},
+		{SyncBatchID: "older-observation", ObservedAt: observed.Add(-time.Minute), ReceivedAt: received.Add(10 * time.Minute)},
+	}
+
+	got := normalizeHostSamples(input)
+	want := []string{"live-newer-receipt-first", "live-newer-receipt-second", "live-older-receipt", "backfill", "older-observation"}
+	for i, batchID := range want {
+		if got[i].SyncBatchID != batchID {
+			t.Fatalf("normalizeHostSamples()[%d].SyncBatchID = %q, want %q; got %#v", i, got[i].SyncBatchID, batchID, got)
+		}
+	}
+}
+
+func TestNormalizeProbeObservationsUsesReplaySafeStableLatestOrdering(t *testing.T) {
+	t.Parallel()
+
+	observed := time.Date(2026, time.August, 30, 10, 0, 0, 0, time.UTC)
+	received := observed.Add(time.Minute)
+	input := []runtimefacts.ProbeObservation{
+		{SyncBatchID: "backfill", ObservedAt: observed, ReceivedAt: received.Add(time.Minute), IsBackfilled: true},
+		{SyncBatchID: "live-older-receipt", ObservedAt: observed, ReceivedAt: received},
+		{SyncBatchID: "live-newer-receipt-first", ObservedAt: observed, ReceivedAt: received.Add(time.Minute)},
+		{SyncBatchID: "live-newer-receipt-second", ObservedAt: observed, ReceivedAt: received.Add(time.Minute)},
+		{SyncBatchID: "older-observation", ObservedAt: observed.Add(-time.Minute), ReceivedAt: received.Add(10 * time.Minute)},
+	}
+
+	got := normalizeProbeObservations(input)
+	want := []string{"live-newer-receipt-first", "live-newer-receipt-second", "live-older-receipt", "backfill", "older-observation"}
+	for i, batchID := range want {
+		if got[i].SyncBatchID != batchID {
+			t.Fatalf("normalizeProbeObservations()[%d].SyncBatchID = %q, want %q; got %#v", i, got[i].SyncBatchID, batchID, got)
+		}
+	}
+}
+
 func TestEvaluateMonitoringInstanceHeartbeatMissingDoesNotRecoverWithoutUsableHeartbeatEvidence(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 10, 0, 0, 0, time.UTC)
 	previous := &IncidentRecord{
@@ -504,6 +548,49 @@ func TestEvaluateMonitoringInstanceTrendDegradationSkipsSuppressedStartsAndRecov
 	}
 	if recovered.Notification == nil || recovered.Notification.Reason != NotificationReasonRecovered {
 		t.Fatalf("Notification = %#v, want recovered notification", recovered.Notification)
+	}
+}
+
+func TestEvaluateMonitoringInstanceTrendDegradationPrefersLiveSampleAtEqualObservedTime(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
+	baselines := []MonitoringInstanceHostDailyAggregate{{
+		BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: 2, AvgCPUStealPct: 0.5,
+	}}
+
+	result := EvaluateMonitoringInstanceTrendDegradation(nil, "mi_001",
+		[]MonitoringInstanceResourceSample{
+			{ObservedAt: now, NormalizedLoad5: 0.7, CPUIOWaitPct: 2, IsBackfilled: true},
+			{ObservedAt: now, NormalizedLoad5: 2.0, CPUIOWaitPct: 12},
+			{ObservedAt: now.Add(-10 * time.Minute), NormalizedLoad5: 2.0, CPUIOWaitPct: 12},
+			{ObservedAt: now.Add(-20 * time.Minute), NormalizedLoad5: 2.0, CPUIOWaitPct: 12},
+		},
+		baselines,
+	)
+
+	if result.Transition != TransitionStarted {
+		t.Fatalf("Transition = %q, want %q when equal-time live evidence outranks backfill", result.Transition, TransitionStarted)
+	}
+}
+
+func TestNormalizeMonitoringInstanceResourceSamplesUsesReplaySafeStableOrdering(t *testing.T) {
+	t.Parallel()
+	observedAt := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
+	receivedBase := observedAt.Add(time.Minute)
+
+	got := normalizeMonitoringInstanceResourceSamples([]MonitoringInstanceResourceSample{
+		{ObservedAt: observedAt, ReceivedAt: receivedBase, CPUUsagePct: 1},
+		{ObservedAt: observedAt, ReceivedAt: receivedBase.Add(9 * time.Minute), CPUUsagePct: 2, IsBackfilled: true},
+		{ObservedAt: observedAt, ReceivedAt: receivedBase.Add(2 * time.Minute), CPUUsagePct: 3},
+		{ObservedAt: observedAt, ReceivedAt: receivedBase.Add(time.Minute), CPUUsagePct: 4},
+		{ObservedAt: observedAt, ReceivedAt: receivedBase.Add(time.Minute), CPUUsagePct: 5},
+	})
+
+	want := []float64{3, 4, 5, 1, 2}
+	for i := range want {
+		if got[i].CPUUsagePct != want[i] {
+			t.Fatalf("normalized CPU markers = %#v, want %#v", []float64{got[0].CPUUsagePct, got[1].CPUUsagePct, got[2].CPUUsagePct, got[3].CPUUsagePct, got[4].CPUUsagePct}, want)
+		}
 	}
 }
 

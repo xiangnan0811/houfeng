@@ -605,8 +605,17 @@ func normalizeHostSamples(samples []runtimefacts.HostSample) []runtimefacts.Host
 	for _, sample := range samples {
 		filtered = append(filtered, sample)
 	}
-	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].ObservedAt.After(filtered[j].ObservedAt)
+	sort.SliceStable(filtered, func(i, j int) bool {
+		if !filtered[i].ObservedAt.Equal(filtered[j].ObservedAt) {
+			return filtered[i].ObservedAt.After(filtered[j].ObservedAt)
+		}
+		if filtered[i].IsBackfilled != filtered[j].IsBackfilled {
+			return !filtered[i].IsBackfilled
+		}
+		if !filtered[i].ReceivedAt.Equal(filtered[j].ReceivedAt) {
+			return filtered[i].ReceivedAt.After(filtered[j].ReceivedAt)
+		}
+		return false
 	})
 	return filtered
 }
@@ -616,8 +625,17 @@ func normalizeProbeObservations(observations []runtimefacts.ProbeObservation) []
 	for _, observation := range observations {
 		filtered = append(filtered, observation)
 	}
-	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].ObservedAt.After(filtered[j].ObservedAt)
+	sort.SliceStable(filtered, func(i, j int) bool {
+		if !filtered[i].ObservedAt.Equal(filtered[j].ObservedAt) {
+			return filtered[i].ObservedAt.After(filtered[j].ObservedAt)
+		}
+		if filtered[i].IsBackfilled != filtered[j].IsBackfilled {
+			return !filtered[i].IsBackfilled
+		}
+		if !filtered[i].ReceivedAt.Equal(filtered[j].ReceivedAt) {
+			return filtered[i].ReceivedAt.After(filtered[j].ReceivedAt)
+		}
+		return false
 	})
 	return filtered
 }
@@ -851,8 +869,18 @@ func normalizeMonitoringInstanceResourceSamples(samples []MonitoringInstanceReso
 	for _, sample := range samples {
 		filtered = append(filtered, sample)
 	}
-	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].ObservedAt.After(filtered[j].ObservedAt)
+	sort.SliceStable(filtered, func(i, j int) bool {
+		left, right := filtered[i], filtered[j]
+		if !left.ObservedAt.Equal(right.ObservedAt) {
+			return left.ObservedAt.After(right.ObservedAt)
+		}
+		if left.IsBackfilled != right.IsBackfilled {
+			return !left.IsBackfilled
+		}
+		if !left.ReceivedAt.Equal(right.ReceivedAt) {
+			return left.ReceivedAt.After(right.ReceivedAt)
+		}
+		return false
 	})
 	return filtered
 }

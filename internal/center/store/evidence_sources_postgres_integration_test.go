@@ -27,7 +27,7 @@ func TestPostgresIntegrationEvidenceSources(t *testing.T) {
 	eventWindow := evidence.TimeWindow{Start: window.Start, End: now.Add(5 * time.Minute)}
 	partialDay := now.UTC().Truncate(24*time.Hour).AddDate(0, 0, -10)
 	completeDay := partialDay.AddDate(0, 0, 2)
-	seedEvidenceSourceFixtures(t, ctx, fixture.db, fixture.db, now, partialDay, completeDay)
+	seedEvidenceSourceFixtures(t, ctx, fixture.db, runtimePool, now, partialDay, completeDay)
 
 	runtimeRepository := &PostgresRuntimeFactsRepository{db: runtimePool}
 	hostCapture, err := runtimeRepository.LoadMonitoringHostEvidence(ctx, "mi_0123456789abcdef", window, time.Hour, []string{
@@ -282,11 +282,13 @@ func seedTask4EvidenceSources(t *testing.T, ctx context.Context, db, writerDB *p
 		t.Fatalf("heartbeat evaluation = %#v, want incident-start event", evaluation)
 	}
 	eventRepository := NewPostgresIncidentRepository(writerDB)
+	firstObjectRowVersion := readEvidenceFixtureMonitoringInstanceRowVersion(t, ctx, writerDB)
 	if err := eventRepository.ApplyIncidentMutation(ctx, incidents.IncidentMutation{
-		ObjectType: incidents.ObjectTypeMonitoringInstance,
-		ObjectID:   "mi_0123456789abcdef",
-		Active:     []incidents.IncidentRecord{*evaluation.Current},
-		Events:     []incidents.StateChangeEventRecord{*evaluation.Event},
+		ObjectType:               incidents.ObjectTypeMonitoringInstance,
+		ObjectID:                 "mi_0123456789abcdef",
+		ExpectedObjectRowVersion: firstObjectRowVersion,
+		Active:                   []incidents.IncidentRecord{*evaluation.Current},
+		Events:                   []incidents.StateChangeEventRecord{*evaluation.Event},
 	}); err != nil {
 		t.Fatalf("ApplyIncidentMutation() for normal Task 4 writer-path fixture: %v", err)
 	}
@@ -299,9 +301,14 @@ func seedTask4EvidenceSources(t *testing.T, ctx context.Context, db, writerDB *p
 			and event_type = 'incident_started'`).Scan(&startedEventID); err != nil {
 		t.Fatalf("load incident writer event identity: %v", err)
 	}
+	secondObjectRowVersion := readEvidenceFixtureMonitoringInstanceRowVersion(t, ctx, writerDB)
+	if secondObjectRowVersion == firstObjectRowVersion {
+		t.Fatal("monitoring instance row version did not change after incident summary update")
+	}
 	if err := eventRepository.ApplyIncidentMutation(ctx, incidents.IncidentMutation{
-		ObjectType: incidents.ObjectTypeMonitoringInstance,
-		ObjectID:   "mi_0123456789abcdef",
+		ObjectType:               incidents.ObjectTypeMonitoringInstance,
+		ObjectID:                 "mi_0123456789abcdef",
+		ExpectedObjectRowVersion: secondObjectRowVersion,
 		Events: []incidents.StateChangeEventRecord{{
 			IncidentID:          "inc_monitoring_instance_cpu",
 			IncidentClass:       incidents.IncidentMonitoringInstanceResourcePressure,
@@ -394,6 +401,21 @@ func seedTask4EvidenceSources(t *testing.T, ctx context.Context, db, writerDB *p
 	execEvidenceSQL(t, ctx, db, `
 		insert into vps_spec_snapshots (snapshot_id, vps_id, product_name, ssh_host, ssh_port, ssh_user, os_name, virtualization, captured_at, created_at)
 		values ('vss_evidence_sources', 'vps_0123456789abcdef', 'VPS-2', 'source-only.example', 22, 'root', 'Debian 13', 'kvm', $1::timestamptz + interval '30 minutes', $1::timestamptz + interval '31 minutes')`, historyAt)
+}
+
+func readEvidenceFixtureMonitoringInstanceRowVersion(t *testing.T, ctx context.Context, writerDB *pgxpool.Pool) string {
+	t.Helper()
+	var rowVersion string
+	if err := writerDB.QueryRow(ctx, `
+		select xmin::text
+		from monitoring_instances
+		where monitoring_instance_id = 'mi_0123456789abcdef'`).Scan(&rowVersion); err != nil {
+		t.Fatalf("read monitoring instance row version through runtime writer connection: %v", err)
+	}
+	if rowVersion == "" {
+		t.Fatal("monitoring instance row version is empty")
+	}
+	return rowVersion
 }
 
 func seedTask4StateControlWriterFixtures(t *testing.T, ctx context.Context, db, writerDB *pgxpool.Pool, now time.Time) {

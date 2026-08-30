@@ -92,6 +92,15 @@ func TestIPQualityEvidenceQueryAllowlistExcludesRetentionOnlyJSON(t *testing.T) 
 	}
 }
 
+func TestIPQualityEvidenceQueryUsesReplaySafeLatestOrderingWithinWindow(t *testing.T) {
+	t.Parallel()
+
+	normalized := strings.ToLower(ipQualityEvidenceReportSQL)
+	if !strings.Contains(normalized, "order by r.observed_at desc, r.is_backfilled asc, r.received_at desc, r.report_id desc") {
+		t.Fatalf("ipQualityEvidenceReportSQL = %q, want replay-safe latest IP-quality ordering", ipQualityEvidenceReportSQL)
+	}
+}
+
 func TestMonitoringEvidenceMergeUsesDailyAggregateForPartialRawRetentionDay(t *testing.T) {
 	t.Parallel()
 
