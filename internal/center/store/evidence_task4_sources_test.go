@@ -40,12 +40,16 @@ func TestMonitoringEventEvidenceIsReachableFromIncidentWriterPath(t *testing.T) 
 		query:   db.Query,
 	}
 	if err := repository.ApplyIncidentMutation(context.Background(), incidents.IncidentMutation{
-		ObjectType: incidents.ObjectTypeMonitoringInstance,
-		ObjectID:   "mi_writer_path",
-		Active:     []incidents.IncidentRecord{*evaluation.Current},
-		Events:     []incidents.StateChangeEventRecord{*evaluation.Event},
+		ObjectType:               incidents.ObjectTypeMonitoringInstance,
+		ObjectID:                 "mi_writer_path",
+		ExpectedObjectRowVersion: "73",
+		Active:                   []incidents.IncidentRecord{*evaluation.Current},
+		Events:                   []incidents.StateChangeEventRecord{*evaluation.Event},
 	}); err != nil {
 		t.Fatalf("ApplyIncidentMutation() error = %v", err)
+	}
+	if db.guardCalls != 1 {
+		t.Fatalf("row-version guard calls = %d, want 1", db.guardCalls)
 	}
 
 	capture, err := repository.LoadMonitoringEventEvidence(
@@ -79,8 +83,9 @@ func TestMonitoringEventEvidenceWriterPathRetainsBackfillCorrectionAndProvenance
 		query:   db.Query,
 	}
 	if err := repository.ApplyIncidentMutation(context.Background(), incidents.IncidentMutation{
-		ObjectType: incidents.ObjectTypeMonitoringInstance,
-		ObjectID:   "mi_writer_correction",
+		ObjectType:               incidents.ObjectTypeMonitoringInstance,
+		ObjectID:                 "mi_writer_correction",
+		ExpectedObjectRowVersion: "73",
 		Events: []incidents.StateChangeEventRecord{{
 			IncidentID:          "inc_monitoring_instance_cpu",
 			IncidentClass:       incidents.IncidentMonitoringInstanceResourcePressure,
@@ -100,6 +105,9 @@ func TestMonitoringEventEvidenceWriterPathRetainsBackfillCorrectionAndProvenance
 		}},
 	}); err != nil {
 		t.Fatalf("ApplyIncidentMutation() error = %v", err)
+	}
+	if db.guardCalls != 1 {
+		t.Fatalf("row-version guard calls = %d, want 1", db.guardCalls)
 	}
 
 	capture, err := repository.LoadMonitoringEventEvidence(
@@ -191,7 +199,8 @@ func TestMonitoringEventEvidenceIsReachableFromStateControlWriterPaths(t *testin
 }
 
 type monitoringEventWriterPathDB struct {
-	eventArgs []any
+	eventArgs  []any
+	guardCalls int
 }
 
 func (db *monitoringEventWriterPathDB) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -201,7 +210,14 @@ func (db *monitoringEventWriterPathDB) Exec(_ context.Context, sql string, args 
 	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
 
-func (db *monitoringEventWriterPathDB) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+func (db *monitoringEventWriterPathDB) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	if canonicalIncidentSQL(sql) == canonicalIncidentSQL(incidentMonitoringInstanceRowVersionGuardSQL) {
+		db.guardCalls++
+		return fakeRow{scan: func(dest ...any) error {
+			*(dest[0].(*string)) = "73"
+			return nil
+		}}
+	}
 	return fakeRow{scan: func(dest ...any) error {
 		*(dest[0].(*int)) = 1
 		*(dest[1].(*string)) = string(incidents.SeverityAlert)

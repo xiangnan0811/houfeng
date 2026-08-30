@@ -229,7 +229,7 @@ const ipQualityEvidenceReportSQL = `
 	where assigned.vps_id = $1
 		and r.observed_at >= $2
 		and r.observed_at < $3
-	order by r.observed_at desc, r.report_id desc
+	order by r.observed_at desc, r.is_backfilled asc, r.received_at desc, r.report_id desc
 	limit 1`
 
 const ipQualityEvidenceProvidersSQL = `

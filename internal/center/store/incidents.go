@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -44,6 +45,18 @@ type PostgresIncidentRepository struct {
 	beginTx func(context.Context, pgx.TxOptions) (incidentStoreTx, error)
 	query   func(context.Context, string, ...any) (pgx.Rows, error)
 }
+
+const incidentMonitoringInstanceRowVersionGuardSQL = `
+	select xmin::text
+	from monitoring_instances
+	where monitoring_instance_id = $1
+	for update`
+
+const incidentTargetRowVersionGuardSQL = `
+	select xmin::text
+	from targets
+	where target_id = $1
+	for update`
 
 func NewPostgresIncidentRepository(db *pgxpool.Pool) *PostgresIncidentRepository {
 	return &PostgresIncidentRepository{
@@ -130,19 +143,22 @@ func (r *PostgresIncidentRepository) ListActiveIncidents(ctx context.Context, fi
 }
 
 func (r *PostgresIncidentRepository) ApplyIncidentMutation(ctx context.Context, mutation incidents.IncidentMutation) error {
+	if mutation.ExpectedObjectRowVersion == "" {
+		return errors.New("incident mutation object row version is required")
+	}
 	tx, err := r.beginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin incident mutation tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := guardIncidentObjectRowVersion(ctx, tx, mutation); err != nil {
+		return err
+	}
 	if err := replaceActiveIncidents(ctx, tx, mutation); err != nil {
 		return err
 	}
 	if err := insertStateChangeEvents(ctx, tx, mutation.Events); err != nil {
-		return err
-	}
-	if err := insertNotificationRecords(ctx, tx, mutation.Notifications); err != nil {
 		return err
 	}
 	if err := projectObjectSummary(ctx, tx, mutation.ObjectType, mutation.ObjectID); err != nil {
@@ -150,6 +166,30 @@ func (r *PostgresIncidentRepository) ApplyIncidentMutation(ctx context.Context, 
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit incident mutation tx: %w", err)
+	}
+	return nil
+}
+
+func guardIncidentObjectRowVersion(ctx context.Context, tx incidentStoreTx, mutation incidents.IncidentMutation) error {
+	var query string
+	switch mutation.ObjectType {
+	case incidents.ObjectTypeMonitoringInstance:
+		query = incidentMonitoringInstanceRowVersionGuardSQL
+	case incidents.ObjectTypeTarget:
+		query = incidentTargetRowVersionGuardSQL
+	default:
+		return fmt.Errorf("unsupported incident mutation object type %q", mutation.ObjectType)
+	}
+
+	var currentRowVersion string
+	if err := tx.QueryRow(ctx, query, mutation.ObjectID).Scan(&currentRowVersion); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("incident mutation object not found: %w: %w", incidents.ErrIncidentProjectionObjectNotFound, err)
+		}
+		return fmt.Errorf("query incident mutation object row version: %w", err)
+	}
+	if currentRowVersion != mutation.ExpectedObjectRowVersion {
+		return incidents.ErrIncidentProjectionConflict
 	}
 	return nil
 }

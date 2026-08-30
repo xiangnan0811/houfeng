@@ -2665,6 +2665,30 @@ func assertSQLOrder(t *testing.T, sqls []string, snippets ...string) {
 	}
 }
 
+func TestMonitoringRecordSubjectUsesReplaySafeLatestHeartbeatAgentVersion(t *testing.T) {
+	t.Parallel()
+
+	var gotSQL string
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
+		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			gotSQL = sql
+			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+				*(dest[0].(*string)) = "mi_001"
+				*(dest[1].(*string)) = "Tokyo Edge"
+				*(dest[2].(*string)) = "agent/v1"
+				return nil
+			}}
+		},
+	}}
+
+	if _, err := repo.loadMonitoringRecordSubject(context.Background(), "mi_001"); err != nil {
+		t.Fatalf("loadMonitoringRecordSubject() error = %v", err)
+	}
+	if !strings.Contains(gotSQL, "order by heartbeat.observed_at desc, heartbeat.is_backfilled asc, heartbeat.received_at desc, heartbeat.id desc") {
+		t.Fatalf("loadMonitoringRecordSubject SQL = %q, want replay-safe heartbeat agent-version ordering", gotSQL)
+	}
+}
+
 type fakeMonitoringInstanceDB struct {
 	queryRow func(context.Context, string, ...any) pgx.Row
 	query    func(context.Context, string, ...any) (pgx.Rows, error)

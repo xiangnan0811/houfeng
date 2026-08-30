@@ -37,9 +37,18 @@ type Batch struct {
 	CommandResults       []CommandResult
 }
 
+type ResultDisposition string
+
+const (
+	ResultDispositionRecorded       ResultDisposition = "recorded"
+	ResultDispositionExactDuplicate ResultDisposition = "exact_duplicate"
+	ResultDispositionSuppressed     ResultDisposition = "suppressed"
+)
+
 type Result struct {
-	AcceptedAt time.Time
-	Plan       agentplan.SyncPlan
+	Disposition ResultDisposition
+	AcceptedAt  time.Time
+	Plan        agentplan.SyncPlan
 }
 
 type PostSyncProcessor interface {
@@ -91,7 +100,7 @@ func (s *Service) SyncBatch(ctx context.Context, batch Batch) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if s.postSync != nil {
+	if s.postSync != nil && result.Disposition != ResultDispositionExactDuplicate {
 		if err := s.postSync.AfterSuccessfulSync(ctx, batch, result); err != nil {
 			return Result{}, err
 		}

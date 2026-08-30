@@ -548,7 +548,7 @@ func TestGetTargetRuntimeFactsReturnsTargetNotFound(t *testing.T) {
 func TestRuntimeFactSQLLocksLatestOrderingHostMetricAggregationAndProbeJoinShape(t *testing.T) {
 	t.Parallel()
 
-	if !strings.Contains(runtimeFactsLatestHostSampleSQL, "order by observed_at desc, id desc") {
+	if !strings.Contains(runtimeFactsLatestHostSampleSQL, "order by observed_at desc, is_backfilled asc, received_at desc, id desc") {
 		t.Fatalf("runtimeFactsLatestHostSampleSQL = %q, want latest host sample ordering", runtimeFactsLatestHostSampleSQL)
 	}
 	if !strings.Contains(runtimeFactsLatestHostSampleSQL, "mem_total_bytes") || !strings.Contains(runtimeFactsLatestHostSampleSQL, "disk_total_bytes") {
@@ -559,6 +559,12 @@ func TestRuntimeFactSQLLocksLatestOrderingHostMetricAggregationAndProbeJoinShape
 	}
 	if !strings.Contains(runtimeFactsLatestProbeObservationsSQL, "distinct on (po.probe_item_id, po.monitoring_instance_id)") {
 		t.Fatalf("runtimeFactsLatestProbeObservationsSQL = %q, want distinct on probe_item_id,monitoring_instance_id", runtimeFactsLatestProbeObservationsSQL)
+	}
+	if !strings.Contains(runtimeFactsLatestProbeObservationsSQL, "order by po.probe_item_id, po.monitoring_instance_id, po.observed_at desc, po.is_backfilled asc, po.received_at desc, po.id desc") {
+		t.Fatalf("runtimeFactsLatestProbeObservationsSQL = %q, want replay-safe latest probe ordering", runtimeFactsLatestProbeObservationsSQL)
+	}
+	if !strings.Contains(runtimeFactsLatestProbeObservationsSQL, "order by latest.observed_at desc, latest.is_backfilled asc, latest.received_at desc, latest.id desc") {
+		t.Fatalf("runtimeFactsLatestProbeObservationsSQL = %q, want replay-safe latest probe output ordering", runtimeFactsLatestProbeObservationsSQL)
 	}
 	if !strings.Contains(runtimeFactsHostMetricPointsSQL, "where monitoring_instance_id = $1") || !strings.Contains(runtimeFactsHostMetricPointsSQL, "observed_at >= $2") || !strings.Contains(runtimeFactsHostMetricPointsSQL, "observed_at <= $3") {
 		t.Fatalf("runtimeFactsHostMetricPointsSQL = %q, want monitoring_instance_id and observed_at window filters", runtimeFactsHostMetricPointsSQL)
@@ -581,7 +587,7 @@ func TestRuntimeFactSQLLocksLatestOrderingHostMetricAggregationAndProbeJoinShape
 	if !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "where po.target_id = $1") || !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "po.observed_at >= $2") {
 		t.Fatalf("runtimeFactsRecentProbeObservationsSQL = %q, want target_id and observed_at lower bound filters", runtimeFactsRecentProbeObservationsSQL)
 	}
-	if !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "order by po.observed_at desc, po.id desc") || !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "limit $3") {
+	if !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "order by po.observed_at desc, po.is_backfilled asc, po.received_at desc, po.id desc") || !strings.Contains(runtimeFactsRecentProbeObservationsSQL, "limit $3") {
 		t.Fatalf("runtimeFactsRecentProbeObservationsSQL = %q, want recent probe ordering and limit", runtimeFactsRecentProbeObservationsSQL)
 	}
 }

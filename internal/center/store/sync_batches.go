@@ -89,8 +89,9 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 			return syncing.Result{}, fmt.Errorf("commit suppressed sync batch transaction for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 		}
 		return syncing.Result{
-			AcceptedAt: receivedAt,
-			Plan:       plan,
+			Disposition: syncing.ResultDispositionSuppressed,
+			AcceptedAt:  receivedAt,
+			Plan:        plan,
 		}, nil
 	}
 
@@ -108,8 +109,9 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 			return syncing.Result{}, fmt.Errorf("commit duplicate sync batch transaction for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 		}
 		return syncing.Result{
-			AcceptedAt: receivedAt,
-			Plan:       plan,
+			Disposition: syncing.ResultDispositionExactDuplicate,
+			AcceptedAt:  receivedAt,
+			Plan:        plan,
 		}, nil
 	}
 
@@ -150,8 +152,9 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 	}
 
 	return syncing.Result{
-		AcceptedAt: receivedAt,
-		Plan:       plan,
+		Disposition: syncing.ResultDispositionRecorded,
+		AcceptedAt:  receivedAt,
+		Plan:        plan,
 	}, nil
 }
 
