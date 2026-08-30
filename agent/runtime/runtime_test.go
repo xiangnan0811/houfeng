@@ -146,6 +146,12 @@ func (staticFingerprint) Fingerprint(context.Context) (string, error) {
 	return "fp-001", nil
 }
 
+type staticFingerprintValue string
+
+func (value staticFingerprintValue) Fingerprint(context.Context) (string, error) {
+	return string(value), nil
+}
+
 type errorFingerprintSource struct {
 	err error
 }
@@ -247,12 +253,86 @@ type failNthEnqueueQueue struct {
 	err    error
 }
 
+type localEntryIDCollisionQueue struct {
+	*fakeSyncQueue
+	enqueued bool
+}
+
+type cancelAfterSuccessfulDeleteQueue struct {
+	agentruntime.SyncQueue
+	afterDeletes int
+	cancel       context.CancelFunc
+	deleteCalls  int
+}
+
 func (q *failNthEnqueueQueue) Enqueue(ctx context.Context, request agentapi.SyncRequest) (string, error) {
 	q.calls++
 	if q.failAt > 0 && q.calls == q.failAt {
 		return "", q.err
 	}
 	return q.fakeSyncQueue.Enqueue(ctx, request)
+}
+
+func (q *localEntryIDCollisionQueue) Enqueue(_ context.Context, request agentapi.SyncRequest) (string, error) {
+	if q.enqueued {
+		return q.fakeSyncQueue.Enqueue(context.Background(), request)
+	}
+	q.enqueued = true
+	q.entries = append(q.entries,
+		syncqueue.Entry{ID: "collision", Request: request},
+		syncqueue.Entry{ID: "collision-2", Request: request},
+	)
+	return "collision-2", nil
+}
+
+func (q *cancelAfterSuccessfulDeleteQueue) Delete(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := q.SyncQueue.Delete(ctx, id); err != nil {
+		return err
+	}
+	q.deleteCalls++
+	if q.cancel != nil && q.deleteCalls >= q.afterDeletes {
+		q.cancel()
+		q.cancel = nil
+	}
+	return nil
+}
+
+func (q *cancelAfterSuccessfulDeleteQueue) Enqueue(ctx context.Context, request agentapi.SyncRequest) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return q.SyncQueue.Enqueue(ctx, request)
+}
+
+func (q *cancelAfterSuccessfulDeleteQueue) List(ctx context.Context) ([]syncqueue.Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return q.SyncQueue.List(ctx)
+}
+
+func (q *cancelAfterSuccessfulDeleteQueue) DeleteMany(ctx context.Context, ids []string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return q.SyncQueue.DeleteMany(ctx, ids)
+}
+
+func (q *cancelAfterSuccessfulDeleteQueue) MarkAttempt(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return q.SyncQueue.MarkAttempt(ctx, id)
+}
+
+func (q *cancelAfterSuccessfulDeleteQueue) Prune(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return q.SyncQueue.Prune(ctx)
 }
 
 func (f *fakeSyncQueue) Enqueue(_ context.Context, request agentapi.SyncRequest) (string, error) {
@@ -1948,8 +2028,16 @@ func TestRuntimeTransientQueueFailuresRemainRetryableAndBackfilled(t *testing.T)
 				t.Fatalf("MarkAttempt() calls = %d, want 1", store.markCalls)
 			}
 			logText := logs.String()
-			if !strings.Contains(logText, "sync queue flush failed") {
-				t.Fatal("logs missing retryable flush diagnostic")
+			for _, wanted := range []string{
+				"sync queue replay progress",
+				"state=retrying",
+				"error=\"sync queue replay retry pending\"",
+				"acked_entries=0",
+				"remaining_entries=1",
+			} {
+				if !strings.Contains(logText, wanted) {
+					t.Fatalf("logs missing stable retry diagnostic %q", wanted)
+				}
 			}
 			var remoteErr *enroll.RemoteError
 			if errors.As(tt.err, &remoteErr) {
@@ -2026,6 +2114,984 @@ func TestRuntimePreservesOldestFirstForValidCurrentAuthorityBacklog(t *testing.T
 	}
 }
 
+func TestRuntimeBoundsReplayBeforeCurrentDurableRequest(t *testing.T) {
+	withoutDockerCLI(t)
+
+	const (
+		monitoringInstanceID = "monitoringInstance-current"
+		syncToken            = "sync-token-current"
+	)
+	baseQueue := &fakeSyncQueue{}
+	for i, batchID := range []string{"backlog-one", "backlog-two", "backlog-three", "backlog-four"} {
+		baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
+			ID:      batchID,
+			Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", batchID, time.Now().UTC().Add(time.Duration(i-5)*time.Minute)),
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	queue := &cancelAfterSuccessfulDeleteQueue{
+		SyncQueue:    baseQueue,
+		afterDeletes: 3,
+		cancel:       cancel,
+	}
+	client := &fakeClient{}
+	rt := newQueueTestRuntime(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, monitoringInstanceID, syncToken)
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error type = %T, want nil", err)
+	}
+	if len(client.syncRequests) != 3 {
+		t.Fatalf("Sync() calls = %d, want exactly two backlog attempts and current", len(client.syncRequests))
+	}
+	if queue.deleteCalls != 3 {
+		t.Fatalf("durable Delete() calls = %d, want 3", queue.deleteCalls)
+	}
+	if syncBatchID(client.syncRequests[0]) != "backlog-one" || syncBatchID(client.syncRequests[1]) != "backlog-two" {
+		t.Fatal("backlog FIFO order mismatch in the bounded replay lane")
+	}
+	current := client.syncRequests[2]
+	if batchID := syncBatchID(current); strings.HasPrefix(batchID, "backlog-") {
+		t.Fatal("third Sync() was backlog, want current durable request")
+	}
+	if current.Heartbeats[0].IsBackfilled {
+		t.Fatal("current durable request was marked backfilled")
+	}
+	entries, err := queue.List(context.Background())
+	if err != nil {
+		t.Fatalf("queue List() error type = %T", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("remaining queue count = %d, want 2", len(entries))
+	}
+	if syncBatchID(entries[0].Request) != "backlog-three" || syncBatchID(entries[1].Request) != "backlog-four" {
+		t.Fatal("remaining backlog FIFO order mismatch")
+	}
+}
+
+func TestRuntimeReplaysBacklogFIFOAcrossFreshInterleaving(t *testing.T) {
+	withoutDockerCLI(t)
+
+	const (
+		monitoringInstanceID = "monitoringInstance-current"
+		syncToken            = "sync-token-current"
+	)
+	baseQueue := &fakeSyncQueue{}
+	for i := 1; i <= 5; i++ {
+		batchID := "backlog-" + strconv.Itoa(i)
+		baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
+			ID:      batchID,
+			Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", batchID, time.Now().UTC().Add(time.Duration(i-6)*time.Minute)),
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	queue := &cancelAfterSuccessfulDeleteQueue{
+		SyncQueue:    baseQueue,
+		afterDeletes: 8,
+		cancel:       cancel,
+	}
+	client := &fakeClient{}
+	rt := newQueueTestRuntime(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, monitoringInstanceID, syncToken)
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error type = %T, want nil", err)
+	}
+	if len(client.syncRequests) != 8 {
+		t.Fatalf("Sync() calls = %d, want 8 across three bounded rounds", len(client.syncRequests))
+	}
+	if queue.deleteCalls != 8 {
+		t.Fatalf("durable Delete() calls = %d, want 8", queue.deleteCalls)
+	}
+	wantBacklogAt := map[int]string{0: "backlog-1", 1: "backlog-2", 3: "backlog-3", 4: "backlog-4", 6: "backlog-5"}
+	for i, request := range client.syncRequests {
+		if batchID, isBacklog := wantBacklogAt[i]; isBacklog {
+			if got := syncBatchID(request); got != batchID {
+				t.Fatalf("backlog FIFO order mismatch at attempt position %d", i)
+			}
+			if !request.Heartbeats[0].IsBackfilled {
+				t.Fatalf("Sync()[%d] backlog heartbeat IsBackfilled = false", i)
+			}
+			continue
+		}
+		if got := syncBatchID(request); strings.HasPrefix(got, "backlog-") {
+			t.Fatalf("attempt position %d was backlog, want interleaved current request", i)
+		}
+		if request.Heartbeats[0].IsBackfilled {
+			t.Fatalf("Sync()[%d] current heartbeat IsBackfilled = true", i)
+		}
+	}
+	entries, err := queue.List(context.Background())
+	if err != nil {
+		t.Fatalf("queue List() error type = %T", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("queue count after continuous success = %d, want 0", len(entries))
+	}
+}
+
+func TestRuntimeRetryableBacklogHeadDoesNotBlockCurrentDurableRequest(t *testing.T) {
+	withoutDockerCLI(t)
+
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "transport", err: errors.New("center unavailable")},
+		{name: "rate limited", err: &enroll.RemoteError{StatusCode: http.StatusTooManyRequests, Code: "rate_limited"}},
+		{name: "server error", err: &enroll.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: agentapi.ErrorCodeInternalError}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const (
+				monitoringInstanceID = "monitoringInstance-current"
+				syncToken            = "sync-token-current"
+			)
+			baseQueue := &fakeSyncQueue{entries: []syncqueue.Entry{
+				{ID: "backlog-head", Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", "backlog-head", time.Now().UTC().Add(-2*time.Minute))},
+				{ID: "backlog-later", Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", "backlog-later", time.Now().UTC().Add(-time.Minute))},
+			}}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			queue := &cancelAfterSuccessfulDeleteQueue{
+				SyncQueue:    baseQueue,
+				afterDeletes: 1,
+				cancel:       cancel,
+			}
+			headFailed := false
+			client := &fakeClient{}
+			client.syncFunc = func(request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
+				batchID := syncBatchID(request)
+				if batchID == "backlog-head" && !headFailed {
+					headFailed = true
+					return nil, tt.err
+				}
+				return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
+			}
+			rt := newQueueTestRuntime(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, monitoringInstanceID, syncToken)
+
+			if err := rt.Run(ctx); err != nil {
+				t.Fatalf("Run() error type = %T, want nil", err)
+			}
+			if len(client.syncRequests) != 2 || syncBatchID(client.syncRequests[0]) != "backlog-head" || strings.HasPrefix(syncBatchID(client.syncRequests[1]), "backlog-") {
+				t.Fatalf("Sync() ordering/category mismatch across %d attempts", len(client.syncRequests))
+			}
+			if queue.deleteCalls != 1 {
+				t.Fatalf("durable Delete() calls = %d, want 1", queue.deleteCalls)
+			}
+			if !client.syncRequests[0].Heartbeats[0].IsBackfilled || client.syncRequests[1].Heartbeats[0].IsBackfilled {
+				t.Fatal("retryable backlog/current backfill classification was not preserved")
+			}
+			entries, err := queue.List(context.Background())
+			if err != nil {
+				t.Fatalf("queue List() error type = %T", err)
+			}
+			if len(entries) != 2 {
+				t.Fatalf("retained queue count = %d, want 2", len(entries))
+			}
+			if syncBatchID(entries[0].Request) != "backlog-head" || syncBatchID(entries[1].Request) != "backlog-later" {
+				t.Fatal("retained backlog FIFO order mismatch")
+			}
+			if entries[0].Attempts != 1 {
+				t.Fatalf("retryable head attempt count = %d, want 1", entries[0].Attempts)
+			}
+		})
+	}
+}
+
+func TestRuntimeCurrentRequestRetryRemainsDurableAndBackfilled(t *testing.T) {
+	withoutDockerCLI(t)
+
+	baseQueue := &fakeSyncQueue{}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	queue := &cancelAfterSuccessfulDeleteQueue{
+		SyncQueue:    baseQueue,
+		afterDeletes: 2,
+		cancel:       cancel,
+	}
+	var failedBatchID string
+	client := &fakeClient{}
+	client.syncFunc = func(request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
+		switch client.syncCalls {
+		case 1:
+			failedBatchID = syncBatchID(request)
+			return nil, errors.New("temporary transport failure")
+		case 2:
+			if syncBatchID(request) != failedBatchID || !request.Heartbeats[0].IsBackfilled {
+				t.Fatal("failed current request did not become the next round's backfilled head")
+			}
+		case 3:
+			if syncBatchID(request) == failedBatchID || request.Heartbeats[0].IsBackfilled {
+				t.Fatal("new round current request was not kept live")
+			}
+		}
+		return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
+	}
+	rt := newQueueTestRuntime(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, "monitoringInstance-current", "sync-token-current")
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error type = %T, want nil", err)
+	}
+	if len(client.syncRequests) != 3 {
+		t.Fatalf("Sync() attempt count = %d, want 3", len(client.syncRequests))
+	}
+	if queue.deleteCalls != 2 {
+		t.Fatalf("durable Delete() calls = %d, want 2", queue.deleteCalls)
+	}
+	if len(baseQueue.entries) != 0 {
+		t.Fatalf("queue count after retry success = %d, want 0", len(baseQueue.entries))
+	}
+}
+
+func TestRuntimeCurrentResponsePlanWinsAfterBoundedReplay(t *testing.T) {
+	withoutDockerCLI(t)
+
+	const (
+		monitoringInstanceID = "monitoringInstance-current"
+		syncToken            = "sync-token-current"
+	)
+	baseQueue := &fakeSyncQueue{}
+	for i := 1; i <= 3; i++ {
+		batchID := "backlog-" + strconv.Itoa(i)
+		baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
+			ID:      batchID,
+			Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", batchID, time.Now().UTC().Add(time.Duration(i-4)*time.Minute)),
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	queue := &cancelAfterSuccessfulDeleteQueue{
+		SyncQueue:    baseQueue,
+		afterDeletes: 5,
+		cancel:       cancel,
+	}
+	currentResponses := 0
+	client := &fakeClient{syncFunc: func(request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
+		if strings.HasPrefix(syncBatchID(request), "backlog-") {
+			return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "exact_duplicate", Plan: &agentapi.SyncPlan{}}, nil
+		}
+		currentResponses++
+		if currentResponses == 2 {
+			if len(request.HostSamples) != 1 {
+				t.Fatalf("second current request host samples = %d, want 1 from the fresh response plan", len(request.HostSamples))
+			}
+		}
+		return &agentapi.SyncResponse{
+			AcceptedAt: time.Now().UTC(),
+			Status:     "accepted",
+			Plan:       &agentapi.SyncPlan{HostSampleFrequencyTier: agentapi.FrequencyTier5s},
+		}, nil
+	}}
+	hostProvider := &fakeHostSampleProvider{result: agentapi.HostSamplePayload{CPUUsagePct: 12.5}}
+	tokenSource := &syncCredentialTokenSource{monitoringInstanceID: monitoringInstanceID, syncToken: syncToken, hasCredentials: true}
+	rt := agentruntime.NewWithRuntimeDeps(
+		agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
+		slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
+		client,
+		tokenSource,
+		staticFingerprint{},
+		hostProvider,
+		&fakeProbeProvider{},
+		10*time.Millisecond,
+		queue,
+	)
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error type = %T, want nil", err)
+	}
+	if currentResponses != 2 || hostProvider.calls != 1 {
+		t.Fatalf("current responses/host collections = %d/%d, want 2/1", currentResponses, hostProvider.calls)
+	}
+	if queue.deleteCalls != 5 {
+		t.Fatalf("durable Delete() calls = %d, want 5", queue.deleteCalls)
+	}
+}
+
+func TestRuntimeBoundedReplayPreservesDurableAuxiliaryPayloads(t *testing.T) {
+	withoutDockerCLI(t)
+
+	enqueueErr := errors.New("queue temporarily unavailable")
+	baseQueue := &failNthEnqueueQueue{fakeSyncQueue: &fakeSyncQueue{}, failAt: 2, err: enqueueErr}
+	queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue}
+	ipProvider := &fakeIPQualityProvider{reportsAfterStart: []agentapi.IPQualityReportPayload{{
+		IPAddress: "203.0.113.10",
+		Status:    agentapi.IPQualityStatusSuccess,
+	}}}
+	tokenSource := &syncCredentialTokenSource{
+		monitoringInstanceID: "monitoringInstance-current",
+		syncToken:            "sync-token-current",
+		hasCredentials:       true,
+	}
+	var auxBatchID string
+	client := &fakeClient{}
+	client.syncFunc = func(request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
+		switch client.syncCalls {
+		case 1:
+			return &agentapi.SyncResponse{
+				AcceptedAt: time.Now().UTC(),
+				Status:     "accepted",
+				Plan: &agentapi.SyncPlan{
+					PendingAction: &agentapi.PendingAction{CommandID: "uptime", ActionID: "act_aux"},
+					IPQualityPlan: &agentapi.IPQualityPlan{Enabled: true, FrequencySeconds: 86400},
+				},
+			}, nil
+		case 2:
+			auxBatchID = syncBatchID(request)
+			assertAuxiliaryPayloads(t, request, false)
+			entries, err := queue.List(context.Background())
+			if err != nil {
+				t.Fatalf("queue List() at send boundary error type = %T", err)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("durable carrier count before send = %d, want 1", len(entries))
+			}
+			if syncBatchID(entries[0].Request) != auxBatchID {
+				t.Fatal("durable carrier identity mismatch before send")
+			}
+			assertAuxiliaryPayloads(t, entries[0].Request, false)
+			return nil, errors.New("temporary transport failure")
+		case 3:
+			if syncBatchID(request) != auxBatchID {
+				t.Fatal("retry carrier identity mismatch")
+			}
+			assertAuxiliaryPayloads(t, request, true)
+		case 4:
+			if syncBatchID(request) == auxBatchID || request.Heartbeats[0].IsBackfilled {
+				t.Fatal("fresh request after auxiliary retry was not live")
+			}
+		default:
+			t.Fatalf("unexpected Sync() call %d", client.syncCalls)
+		}
+		return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
+	}
+	rt := agentruntime.NewWithRuntimeDeps(
+		agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
+		slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
+		client,
+		tokenSource,
+		staticFingerprint{},
+		&fakeHostSampleProvider{},
+		&fakeProbeProvider{},
+		time.Millisecond,
+		queue,
+		ipProvider,
+	)
+
+	firstCtx, firstCancel := context.WithTimeout(context.Background(), time.Second)
+	if err := rt.Run(firstCtx); !errors.Is(err, enqueueErr) {
+		firstCancel()
+		t.Fatalf("first Run() error type = %T, want enqueue error", err)
+	}
+	firstCancel()
+	if client.syncCalls != 1 {
+		t.Fatalf("first Run() Sync() calls = %d, want one plan response before enqueue failure", client.syncCalls)
+	}
+
+	baseQueue.failAt = 0
+	secondCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	queue.afterDeletes = queue.deleteCalls + 2
+	queue.cancel = cancel
+	if err := rt.Run(secondCtx); err != nil {
+		t.Fatalf("second Run() error type = %T, want nil", err)
+	}
+	if client.syncCalls != 4 {
+		t.Fatalf("Sync() calls = %d, want plan, failed aux current, backfilled aux retry, fresh current", client.syncCalls)
+	}
+	if queue.deleteCalls != 3 {
+		t.Fatalf("durable Delete() calls = %d, want 3 across both runs", queue.deleteCalls)
+	}
+	if len(baseQueue.entries) != 0 {
+		t.Fatalf("queue count after auxiliary retry = %d, want 0", len(baseQueue.entries))
+	}
+}
+
+func TestRuntimeLocalEntryIDControlsCurrentAndBackfilledOnBatchIDCollision(t *testing.T) {
+	withoutDockerCLI(t)
+
+	baseQueue := &localEntryIDCollisionQueue{fakeSyncQueue: &fakeSyncQueue{}}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	queue := &cancelAfterSuccessfulDeleteQueue{
+		SyncQueue:    baseQueue,
+		afterDeletes: 2,
+		cancel:       cancel,
+	}
+	client := &fakeClient{}
+	rt := newQueueTestRuntime(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, "monitoringInstance-current", "sync-token-current")
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error type = %T, want nil", err)
+	}
+	if len(client.syncRequests) != 2 {
+		t.Fatalf("Sync() calls = %d, want colliding backlog and exact current entry", len(client.syncRequests))
+	}
+	if queue.deleteCalls != 2 {
+		t.Fatalf("durable Delete() calls = %d, want 2", queue.deleteCalls)
+	}
+	if syncBatchID(client.syncRequests[0]) != syncBatchID(client.syncRequests[1]) {
+		t.Fatal("collision fixture did not preserve the same carrier sync_batch_id")
+	}
+	if !client.syncRequests[0].Heartbeats[0].IsBackfilled {
+		t.Fatal("pre-existing local entry with colliding batch ID was not backfilled")
+	}
+	if client.syncRequests[1].Heartbeats[0].IsBackfilled {
+		t.Fatal("exact local entry returned by Enqueue was marked backfilled")
+	}
+}
+
+func TestRuntimeLogsBoundedReplayProgressAfterDurableAck(t *testing.T) {
+	withoutDockerCLI(t)
+
+	const (
+		monitoringInstanceID = "monitoringInstance-current"
+		syncToken            = "sync-token-current"
+	)
+	t.Run("successful durable acknowledgements", func(t *testing.T) {
+		baseQueue := &fakeSyncQueue{}
+		for i := 1; i <= 4; i++ {
+			batchID := "backlog-" + strconv.Itoa(i)
+			baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
+				ID:      batchID,
+				Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", batchID, time.Now().UTC().Add(time.Duration(i-5)*time.Minute)),
+			})
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: 3, cancel: cancel}
+		var logs bytes.Buffer
+		rt := newQueueTestRuntimeWithClock(
+			slog.New(slog.NewTextHandler(&logs, nil)),
+			&fakeClient{},
+			queue,
+			monitoringInstanceID,
+			syncToken,
+			func() time.Time { return time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC) },
+		)
+
+		if err := rt.Run(ctx); err != nil {
+			t.Fatalf("Run() error type = %T, want nil", err)
+		}
+		lines := replayLogLines(logs.String())
+		if len(lines) != 1 {
+			t.Fatalf("replay progress log count = %d, want 1", len(lines))
+		}
+		for _, wanted := range []string{"level=INFO", "state=catching_up", "acked_entries=2", "remaining_entries=2"} {
+			if !strings.Contains(lines[0], wanted) {
+				t.Fatalf("replay progress log missing stable field %q", wanted)
+			}
+		}
+	})
+
+	t.Run("delete failure is not progress", func(t *testing.T) {
+		deleteErr := errors.New("durable delete failed with private local cause")
+		queue := &fakeSyncQueue{
+			deleteErr: deleteErr,
+			entries: []syncqueue.Entry{{
+				ID:      "backlog-one",
+				Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", "backlog-one", time.Now().UTC().Add(-time.Minute)),
+			}},
+		}
+		var logs bytes.Buffer
+		rt := newQueueTestRuntimeWithClock(
+			slog.New(slog.NewTextHandler(&logs, nil)),
+			&fakeClient{},
+			queue,
+			monitoringInstanceID,
+			syncToken,
+			time.Now,
+		)
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		err := rt.Run(ctx)
+		if !errors.Is(err, deleteErr) {
+			t.Fatalf("Run() error type = %T, want durable delete error", err)
+		}
+		if lines := replayLogLines(logs.String()); len(lines) != 0 {
+			t.Fatalf("replay progress log count = %d, want 0 after failed durable delete", len(lines))
+		}
+	})
+
+	t.Run("discard-only round with backlog remaining has no healthy progress", func(t *testing.T) {
+		baseQueue := &fakeSyncQueue{}
+		for i := 1; i <= 3; i++ {
+			batchID := "poison-" + strconv.Itoa(i)
+			baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
+				ID:      batchID,
+				Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", batchID, time.Now().UTC().Add(time.Duration(i-4)*time.Minute)),
+			})
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: 3, cancel: cancel}
+		client := &fakeClient{}
+		client.syncFunc = func(request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
+			if strings.HasPrefix(syncBatchID(request), "poison-") {
+				return nil, &enroll.RemoteError{
+					StatusCode: http.StatusBadRequest,
+					Code:       agentapi.ErrorCodeInvalidRequest,
+					Message:    "private remote response detail",
+				}
+			}
+			return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
+		}
+		var logs bytes.Buffer
+		rt := newQueueTestRuntimeWithClock(
+			slog.New(slog.NewTextHandler(&logs, nil)),
+			client,
+			queue,
+			monitoringInstanceID,
+			syncToken,
+			func() time.Time { return time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC) },
+		)
+
+		if err := rt.Run(ctx); err != nil {
+			t.Fatalf("Run() error type = %T, want nil", err)
+		}
+		if got := strings.Count(logs.String(), "discard rejected sync queue entry"); got != 2 {
+			t.Fatalf("discard policy log count = %d, want 2", got)
+		}
+		if lines := replayLogLines(logs.String()); len(lines) != 0 {
+			t.Fatalf("healthy replay log count = %d, want 0 for discard-only work", len(lines))
+		}
+	})
+
+	t.Run("discard-only drain resets replay and keeps later live ticks quiet", func(t *testing.T) {
+		baseQueue := &fakeSyncQueue{}
+		for i := 1; i <= 2; i++ {
+			batchID := "poison-" + strconv.Itoa(i)
+			baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
+				ID:      batchID,
+				Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", batchID, time.Now().UTC().Add(time.Duration(i-3)*time.Minute)),
+			})
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: 5, cancel: cancel}
+		client := &fakeClient{}
+		client.syncFunc = func(request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
+			if strings.HasPrefix(syncBatchID(request), "poison-") {
+				return nil, &enroll.RemoteError{
+					StatusCode: http.StatusBadRequest,
+					Code:       agentapi.ErrorCodeInvalidRequest,
+					Message:    "private remote response detail",
+				}
+			}
+			return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
+		}
+		var logs bytes.Buffer
+		rt := newQueueTestRuntimeWithClock(
+			slog.New(slog.NewTextHandler(&logs, nil)),
+			client,
+			queue,
+			monitoringInstanceID,
+			syncToken,
+			func() time.Time { return time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC) },
+		)
+
+		if err := rt.Run(ctx); err != nil {
+			t.Fatalf("Run() error type = %T, want nil", err)
+		}
+		if got := strings.Count(logs.String(), "discard rejected sync queue entry"); got != 2 {
+			t.Fatalf("discard policy log count = %d, want 2", got)
+		}
+		if queue.deleteCalls != 5 {
+			t.Fatalf("durable delete count = %d, want 5 including later live ticks", queue.deleteCalls)
+		}
+		if lines := replayLogLines(logs.String()); len(lines) != 0 {
+			t.Fatalf("healthy replay log count = %d, want 0 after discard-only drain and live ticks", len(lines))
+		}
+	})
+}
+
+func TestRuntimeLogsInstantSuccessfulReplayDrainAsCaughtUpOnce(t *testing.T) {
+	withoutDockerCLI(t)
+
+	const (
+		monitoringInstanceID = "monitoringInstance-current"
+		syncToken            = "sync-token-current"
+	)
+	baseQueue := &fakeSyncQueue{}
+	for i := 1; i <= 2; i++ {
+		batchID := "backlog-" + strconv.Itoa(i)
+		baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
+			ID:      batchID,
+			Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", batchID, time.Now().UTC().Add(time.Duration(i-3)*time.Minute)),
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: 3, cancel: cancel}
+	var logs bytes.Buffer
+	rt := newQueueTestRuntimeWithClock(
+		slog.New(slog.NewTextHandler(&logs, nil)),
+		&fakeClient{},
+		queue,
+		monitoringInstanceID,
+		syncToken,
+		func() time.Time { return time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC) },
+	)
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error type = %T, want nil", err)
+	}
+	lines := replayLogLines(logs.String())
+	if len(lines) != 1 {
+		t.Fatalf("replay transition log count = %d, want exactly 1", len(lines))
+	}
+	for _, wanted := range []string{"level=INFO", "state=caught_up", "acked_entries=2", "remaining_entries=0"} {
+		if !strings.Contains(lines[0], wanted) {
+			t.Fatalf("instant replay drain missing stable field %q", wanted)
+		}
+	}
+	if strings.Contains(lines[0], "state=catching_up") {
+		t.Fatal("instant replay drain emitted a preceding catching-up state")
+	}
+}
+
+func TestRuntimeLogsReplayCaughtUpOnceAndKeepsLiveTicksQuiet(t *testing.T) {
+	withoutDockerCLI(t)
+
+	const (
+		monitoringInstanceID = "monitoringInstance-current"
+		syncToken            = "sync-token-current"
+	)
+	baseQueue := &fakeSyncQueue{}
+	for i := 1; i <= 3; i++ {
+		batchID := "backlog-" + strconv.Itoa(i)
+		baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
+			ID:      batchID,
+			Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", batchID, time.Now().UTC().Add(time.Duration(i-4)*time.Minute)),
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: 7, cancel: cancel}
+	var logs bytes.Buffer
+	rt := newQueueTestRuntimeWithClock(
+		slog.New(slog.NewTextHandler(&logs, nil)),
+		&fakeClient{},
+		queue,
+		monitoringInstanceID,
+		syncToken,
+		func() time.Time { return time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC) },
+	)
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error type = %T, want nil", err)
+	}
+	lines := replayLogLines(logs.String())
+	if len(lines) != 2 {
+		t.Fatalf("replay transition log count = %d, want 2 with later live ticks silent", len(lines))
+	}
+	for _, wanted := range []string{"state=catching_up", "acked_entries=2", "remaining_entries=1"} {
+		if !strings.Contains(lines[0], wanted) {
+			t.Fatalf("first replay transition missing stable field %q", wanted)
+		}
+	}
+	for _, wanted := range []string{"state=caught_up", "acked_entries=1", "remaining_entries=0"} {
+		if !strings.Contains(lines[1], wanted) {
+			t.Fatalf("caught-up transition missing stable field %q", wanted)
+		}
+	}
+	if got := strings.Count(logs.String(), "state=caught_up"); got != 1 {
+		t.Fatalf("caught-up transition count = %d, want 1", got)
+	}
+}
+
+func TestRuntimeThrottlesReplayProgressLogs(t *testing.T) {
+	withoutDockerCLI(t)
+
+	const (
+		monitoringInstanceID = "monitoringInstance-current"
+		syncToken            = "sync-token-current"
+	)
+	baseQueue := &fakeSyncQueue{}
+	for i := 1; i <= 8; i++ {
+		batchID := "backlog-" + strconv.Itoa(i)
+		baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
+			ID:      batchID,
+			Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", batchID, time.Now().UTC().Add(time.Duration(i-9)*time.Minute)),
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: 9, cancel: cancel}
+	clockTimes := []time.Time{
+		time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, time.August, 30, 12, 0, 30, 0, time.UTC),
+		time.Date(2026, time.August, 30, 12, 1, 0, 0, time.UTC),
+	}
+	clockCall := 0
+	clock := func() time.Time {
+		if clockCall >= len(clockTimes) {
+			return clockTimes[len(clockTimes)-1]
+		}
+		value := clockTimes[clockCall]
+		clockCall++
+		return value
+	}
+	var logs bytes.Buffer
+	rt := newQueueTestRuntimeWithClock(
+		slog.New(slog.NewTextHandler(&logs, nil)),
+		&fakeClient{},
+		queue,
+		monitoringInstanceID,
+		syncToken,
+		clock,
+	)
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error type = %T, want nil", err)
+	}
+	lines := replayLogLines(logs.String())
+	if len(lines) != 2 {
+		t.Fatalf("rate-limited replay progress log count = %d, want 2 across three rounds", len(lines))
+	}
+	for _, wanted := range []string{"state=catching_up", "acked_entries=2", "remaining_entries=6"} {
+		if !strings.Contains(lines[0], wanted) {
+			t.Fatalf("first replay progress log missing stable field %q", wanted)
+		}
+	}
+	for _, wanted := range []string{"state=catching_up", "acked_entries=2", "remaining_entries=2"} {
+		if !strings.Contains(lines[1], wanted) {
+			t.Fatalf("post-throttle replay progress log missing stable field %q", wanted)
+		}
+	}
+}
+
+func TestRuntimeReplayRetryIsFailureStateNotHealthyProgress(t *testing.T) {
+	withoutDockerCLI(t)
+
+	tests := []struct {
+		name          string
+		seedBacklog   int
+		failSyncCall  int
+		wantAcked     string
+		wantRemaining string
+		cancelDeletes int
+	}{
+		{name: "backlog retry after one durable ack", seedBacklog: 2, failSyncCall: 2, wantAcked: "acked_entries=1", wantRemaining: "remaining_entries=1", cancelDeletes: 6},
+		{name: "fresh retry becomes durable backlog", seedBacklog: 0, failSyncCall: 1, wantAcked: "acked_entries=0", wantRemaining: "remaining_entries=1", cancelDeletes: 4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const (
+				monitoringInstanceID = "monitoringInstance-current"
+				syncToken            = "sync-token-current"
+			)
+			baseQueue := &fakeSyncQueue{}
+			for i := 1; i <= tt.seedBacklog; i++ {
+				batchID := "backlog-" + strconv.Itoa(i)
+				baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
+					ID:      batchID,
+					Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", batchID, time.Now().UTC().Add(time.Duration(i-tt.seedBacklog-1)*time.Minute)),
+				})
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: tt.cancelDeletes, cancel: cancel}
+			client := &fakeClient{}
+			client.syncFunc = func(agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
+				if client.syncCalls == tt.failSyncCall {
+					return nil, &enroll.RemoteError{
+						StatusCode: http.StatusServiceUnavailable,
+						Code:       agentapi.ErrorCodeInternalError,
+						Message:    "private remote response detail",
+					}
+				}
+				return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
+			}
+			var logs bytes.Buffer
+			rt := newQueueTestRuntimeWithClock(
+				slog.New(slog.NewTextHandler(&logs, nil)),
+				client,
+				queue,
+				monitoringInstanceID,
+				syncToken,
+				time.Now,
+			)
+
+			if err := rt.Run(ctx); err != nil {
+				t.Fatalf("Run() error type = %T, want nil", err)
+			}
+			lines := replayLogLines(logs.String())
+			if len(lines) != 2 {
+				t.Fatalf("replay retry/recovery log count = %d, want exactly 2", len(lines))
+			}
+			for _, wanted := range []string{
+				"level=ERROR",
+				"state=retrying",
+				"error=\"sync queue replay retry pending\"",
+				"kind=remote",
+				"action=retry",
+				"status=503",
+				"code=" + agentapi.ErrorCodeInternalError,
+				tt.wantAcked,
+				tt.wantRemaining,
+			} {
+				if !strings.Contains(lines[0], wanted) {
+					t.Fatalf("retry state log missing stable field %q", wanted)
+				}
+			}
+			if strings.Contains(lines[0], "state=catching_up") || strings.Contains(lines[0], "state=caught_up") {
+				t.Fatal("retry round was logged as healthy replay progress")
+			}
+			for _, wanted := range []string{"level=INFO", "state=caught_up", "acked_entries=1", "remaining_entries=0"} {
+				if !strings.Contains(lines[1], wanted) {
+					t.Fatalf("replay recovery transition missing stable field %q", wanted)
+				}
+			}
+			if strings.Contains(lines[1], "state=catching_up") {
+				t.Fatal("replay recovery emitted an extra catching-up state")
+			}
+			if strings.Contains(logs.String(), "sync queue flush failed") {
+				t.Fatal("retry round emitted a duplicate legacy queue failure log")
+			}
+		})
+	}
+}
+
+func TestRuntimeReplayLogsDoNotExposeSensitiveQueueOrRequestFields(t *testing.T) {
+	withoutDockerCLI(t)
+
+	const (
+		monitoringInstanceID = "monitoring-private-id-sentinel"
+		syncToken            = "sync-private-token-sentinel"
+		fingerprint          = "fingerprint-private-sentinel"
+		entryID              = "entry-private-id-sentinel"
+		batchID              = "batch-private-id-sentinel"
+		remoteMessage        = "remote-private-message-sentinel"
+	)
+	request := validQueueRequest(monitoringInstanceID, syncToken, fingerprint, batchID, time.Now().UTC().Add(-time.Minute))
+	request.HostSamples = []agentapi.HostSamplePayload{{
+		ObservedAt:  time.Now().UTC().Add(-time.Minute),
+		Fingerprint: fingerprint,
+		SyncBatchID: batchID,
+	}}
+	request.ProbeObservations = []agentapi.ProbeObservationPayload{{
+		TargetID:     "object-private-id-sentinel",
+		ProbeItemID:  "probe-private-id-sentinel",
+		Fingerprint:  fingerprint,
+		SyncBatchID:  batchID,
+		ErrorSummary: "payload-private-sentinel",
+	}}
+	request.IPQualityReports = []agentapi.IPQualityReportPayload{{
+		IPAddress:   "198.51.100.77",
+		Fingerprint: fingerprint,
+		SyncBatchID: batchID,
+	}}
+	request.CommandResults = []agentapi.CommandResult{{
+		ActionID:  "action-private-id-sentinel",
+		CommandID: "command-private-id-sentinel",
+		Stdout:    "stdout-private-sentinel",
+		Stderr:    "stderr-private-sentinel",
+	}}
+	baseQueue := &fakeSyncQueue{entries: []syncqueue.Entry{{ID: entryID, Request: request}}}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: 2, cancel: cancel}
+	client := &fakeClient{}
+	client.syncFunc = func(agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
+		if client.syncCalls == 1 {
+			return nil, fmt.Errorf("Authorization=private DSN=private request=response private cause: %w", &enroll.RemoteError{
+				StatusCode: http.StatusServiceUnavailable,
+				Code:       agentapi.ErrorCodeInternalError,
+				Message:    remoteMessage,
+			})
+		}
+		return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
+	}
+	tokenSource := &syncCredentialTokenSource{
+		monitoringInstanceID: monitoringInstanceID,
+		syncToken:            syncToken,
+		hasCredentials:       true,
+	}
+	var logs bytes.Buffer
+	rt := agentruntime.NewWithRuntimeDeps(
+		agentconfig.AgentConfig{ServerURL: "https://operator-private@center.example.test/path-private-sentinel?query-private-sentinel", TokenFile: "/tmp/token"},
+		slog.New(slog.NewTextHandler(&logs, nil)),
+		client,
+		tokenSource,
+		staticFingerprintValue(fingerprint),
+		&fakeHostSampleProvider{},
+		&fakeProbeProvider{},
+		10*time.Millisecond,
+		queue,
+		func() time.Time { return time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC) },
+	)
+
+	if err := rt.Run(ctx); err != nil {
+		t.Fatalf("Run() error type = %T, want nil", err)
+	}
+	lines := replayLogLines(logs.String())
+	if len(lines) < 1 || !strings.Contains(lines[0], "state=retrying") {
+		t.Fatal("privacy fixture did not exercise the replay retry log")
+	}
+	for _, forbidden := range []string{
+		monitoringInstanceID,
+		syncToken,
+		fingerprint,
+		entryID,
+		batchID,
+		"object-private-id-sentinel",
+		"probe-private-id-sentinel",
+		"action-private-id-sentinel",
+		"command-private-id-sentinel",
+		"198.51.100.77",
+		"payload-private-sentinel",
+		"stdout-private-sentinel",
+		"stderr-private-sentinel",
+		remoteMessage,
+		"Authorization=private",
+		"DSN=private",
+		"request=response",
+		"operator-private",
+		"path-private-sentinel",
+		"query-private-sentinel",
+	} {
+		if strings.Contains(logs.String(), forbidden) {
+			t.Fatal("runtime replay diagnostics exposed a forbidden sensitive field category")
+		}
+	}
+}
+
+func replayLogLines(logs string) []string {
+	lines := make([]string, 0)
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.Contains(line, "sync queue replay progress") {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func assertAuxiliaryPayloads(t *testing.T, request agentapi.SyncRequest, backfilled bool) {
+	t.Helper()
+	if len(request.CommandResults) != 1 {
+		t.Fatalf("command result count = %d, want 1", len(request.CommandResults))
+	}
+	if request.CommandResults[0].ActionID != "act_aux" || request.CommandResults[0].CommandID != "uptime" {
+		t.Fatal("command result identity category mismatch")
+	}
+	if len(request.IPQualityReports) != 1 {
+		t.Fatalf("IP-quality report count = %d, want 1", len(request.IPQualityReports))
+	}
+	if request.IPQualityReports[0].IPAddress != "203.0.113.10" {
+		t.Fatal("IP-quality report address category mismatch")
+	}
+	if len(request.Heartbeats) != 1 {
+		t.Fatalf("heartbeat count = %d, want 1", len(request.Heartbeats))
+	}
+	if request.Heartbeats[0].IsBackfilled != backfilled || request.IPQualityReports[0].IsBackfilled != backfilled {
+		t.Fatalf("heartbeat/IP backfilled = %t/%t, want %t", request.Heartbeats[0].IsBackfilled, request.IPQualityReports[0].IsBackfilled, backfilled)
+	}
+}
+
 func validQueueRequest(monitoringInstanceID, syncToken, fingerprint, batchID string, observedAt time.Time) agentapi.SyncRequest {
 	return agentapi.SyncRequest{
 		MonitoringInstanceID: monitoringInstanceID,
@@ -2040,6 +3106,10 @@ func validQueueRequest(monitoringInstanceID, syncToken, fingerprint, batchID str
 }
 
 func newQueueTestRuntime(logger *slog.Logger, client *fakeClient, queue agentruntime.SyncQueue, monitoringInstanceID, syncToken string) *agentruntime.Runtime {
+	return newQueueTestRuntimeWithClock(logger, client, queue, monitoringInstanceID, syncToken, nil)
+}
+
+func newQueueTestRuntimeWithClock(logger *slog.Logger, client *fakeClient, queue agentruntime.SyncQueue, monitoringInstanceID, syncToken string, clock func() time.Time) *agentruntime.Runtime {
 	tokenSource := &syncCredentialTokenSource{
 		monitoringInstanceID: monitoringInstanceID,
 		syncToken:            syncToken,
@@ -2055,6 +3125,7 @@ func newQueueTestRuntime(logger *slog.Logger, client *fakeClient, queue agentrun
 		&fakeProbeProvider{},
 		10*time.Millisecond,
 		queue,
+		clock,
 	)
 }
 
