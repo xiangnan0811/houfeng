@@ -1,0 +1,14 @@
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/research/field-audit.md","reason":"现场容器、日志、心跳积压与 Activity Projection ACL 证据"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/design.md","reason":"已接受的 K=2 调度、Center CAS、Activity 锁语义与发布顺序合同"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/implement.md","reason":"可执行 TDD 顺序、RED/GREEN 命令和边界门禁"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/research/agent-queue-scheduling.md","reason":"Agent queue 调度、plan 顺序、本地 entry ID 与公平性源码证据"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/research/center-monotonicity.md","reason":"Center latest、duplicate、incident stale-writer 与 migration 边界证据"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/research/activity-projection-acl.md","reason":"Activity active-head 串行化与 direct-runtime 最小 ACL 证据"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/research/replay-observability.md","reason":"Agent replay 聚合日志、节流与隐私合同"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/research/planning-review.md","reason":"独立规划审查发现、修订与残余风险"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"current APP ACL、production DML 与真实 PostgreSQL 验证合同"}
+{"file":".trellis/spec/backend/record-activity-projection.md","reason":"Activity Projection 的并发分类、去重和事务语义"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"TDD、strict PostgreSQL、race 与完整验证要求"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Agent 同步错误映射和 durable retry 边界"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"运行态可观测性与敏感信息保护"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Agent runtime 到 Center store 的端到端数据流审查"}

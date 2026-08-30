@@ -1,0 +1,14 @@
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/research/field-audit.md","reason":"逐项复核现场事实、非缺陷基线与发布后验收"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/design.md","reason":"逐项审查已接受的跨层设计合同和非目标"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/implement.md","reason":"复核每个 TDD 门禁、真实命令与交付断点"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/research/agent-queue-scheduling.md","reason":"复核 Agent 公平性、durability 与 plan 顺序证据"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/research/center-monotonicity.md","reason":"复核 Center 单调性、CAS、duplicate 与 no-migration 边界"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/research/activity-projection-acl.md","reason":"复核 Activity 并发与最小权限结论"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/research/replay-observability.md","reason":"复核 replay 日志节流、状态与非泄漏"}
+{"file":".trellis/tasks/08-30-agent-replay-freshness-activity-acl/research/planning-review.md","reason":"确认规划审查 findings 已闭合且残余风险未被误报"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"审查最小权限、direct-runtime DML 与 migration 边界"}
+{"file":".trellis/spec/backend/record-activity-projection.md","reason":"审查 projection 并发与幂等语义未漂移"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"审查测试层级、strict lane 和交付门禁"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"审查 retry/error mapping 与非泄漏边界"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"审查日志可观测性与脱敏"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"审查跨层数据流和隐藏权限前提"}

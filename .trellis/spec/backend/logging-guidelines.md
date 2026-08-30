@@ -92,6 +92,76 @@ slog 调用一律走 `key, value, key, value` 形式，**不要拼字符串**。
 4. **HTTP 请求路径不主动 log**：handler 通过 `writeError` 返回 4xx/5xx 即足够；当前代码 handler 内**没有** `slog.Info/Error` 调用。如需排查请求级问题，看 systemd journal 里 stdlib net/http 的访问日志或扩中间件，**不要在每个 handler 里散加 log**。
 5. **agent enroll / sync 边界**：enroll 成功或绑定失败必须在最外层边界留一条脱敏日志，便于 fleet 排查；retryable sync 失败由 `agent/runtime.Runtime.Run` 记录，terminal 失败只返回给 `cmd/houfeng-agent` 记录一次。
 
+### Scenario: Agent durable replay 聚合状态日志
+
+#### 1. Scope / Trigger
+
+- Trigger：修改 `agent/runtime` 的 durable replay scheduler、`syncRoundResult`、retry policy 或 `sync queue replay progress` 日志。
+- 目标：运维能区分正在追赶、已经追平和 retrying，同时不把逐条 queue/request 内容或凭据写入 journal。
+
+#### 2. Signatures
+
+- 固定 message：`sync queue replay progress`。
+- `Info` state：`catching_up | caught_up`；字段只允许 `state`、`acked_entries`、`remaining_entries`。
+- `Error` state：`retrying`；除 `error` 外只允许 `state`、allowlisted `kind/action/status/code` 与两个 aggregate count。
+- 内存状态：`replayActive`、`lastReplayProgressAt`；持续进度间隔固定为一分钟，不新增 durable telemetry 文件或 wire 字段。
+
+#### 3. Contracts
+
+- `acked_entries` 只统计 Sync 成功且对应 durable `Delete` 已完成的旧 backlog entry；invalid 400 的 discard 即使使 remaining 归零，也不能伪装成成功 ack。
+- 首次有健康 replay progress 写一次 `catching_up`；持续追赶每轮最多一条且至多每 60 秒一条；归零时只写一次 `caught_up`；随后普通 live tick 保持安静。
+- retryable round 使用 `Error state=retrying`，不能同时把该轮写成健康 catching-up。失败 entry 保留在 durable queue。
+- 日志不得包含 sync/enrollment token、Authorization、DSN、fingerprint、server URL、MonitoringInstance/object/entry/batch ID、请求/响应 payload、remote message、raw local/remote cause、stdout/stderr。
+- 所有测试使用注入 clock 推进节流窗口，不真实 sleep；失败文案也只能输出计数、位置、布尔或固定分类。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected |
+| --- | --- |
+| backlog ack 后仍有旧项 | `Info state=catching_up`，计数来自 durable delete 后状态 |
+| backlog 全部 ack | 单次 `Info state=caught_up remaining_entries=0` |
+| invalid 400 discard 到 0 | 可结束 replay episode，但 `acked_entries=0`；不得记虚假成功 |
+| backlog retryable failure | `Error state=retrying`，entry retained；不写 catching_up/caught_up |
+| 60 秒内持续健康进度 | 抑制重复 catching_up 日志 |
+| delete 失败 | 不增加 ack，不写健康 progress；返回本地 durability error |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：每轮 durable ack 两条，首次打印 catching_up；一分钟内其余健康轮静默，最终排空只打印一次 caught_up。
+- Base：没有 backlog 的普通 fresh tick 不写 replay 日志。
+- Bad：每成功发送一条就打印 entry/batch ID，造成日志洪泛和标识泄露。
+- Bad：网络成功、durable delete 失败后仍增加 ack 或打印 caught_up。
+- Bad：把 `RemoteError.Message` 或 wrapped raw cause 作为 `error` 字段记录。
+
+#### 6. Tests Required
+
+- `TestRuntimeLogsBoundedReplayProgressAfterDurableAck`、`TestRuntimeLogsInstantSuccessfulReplayDrainAsCaughtUpOnce`：progress 只来自 durable ack，直接排空只写一次 caught_up。
+- `TestRuntimeLogsReplayCaughtUpOnceAndKeepsLiveTicksQuiet`、`TestRuntimeThrottlesReplayProgressLogs`：episode 转换、普通 live tick 静默与注入 clock 的 60 秒节流。
+- `TestRuntimeReplayRetryIsFailureStateNotHealthyProgress`、`TestRuntimeReplayLogsDoNotExposeSensitiveQueueOrRequestFields`：retrying level/fields 和 sentinel privacy。
+- delete failure、invalid discard tests 必须证明无虚假 ack/caught-up；focused tests 运行 `-count=10`，runtime package 运行 `-race`。
+
+#### 7. Wrong vs Correct
+
+```go
+// Wrong: per-entry log leaks durable identifiers and counts network success
+// before the queue state is durable.
+logger.Info("replayed entry", "entry_id", entry.ID)
+acked++
+_ = queue.Delete(ctx, entry.ID)
+```
+
+```go
+// Correct: delete first; expose only aggregate episode state.
+if err := queue.Delete(ctx, entry.ID); err != nil {
+	return err
+}
+round.ackedEntries++
+logger.Info("sync queue replay progress",
+	"state", "catching_up",
+	"acked_entries", round.ackedEntries,
+	"remaining_entries", round.remainingEntries)
+```
+
 ---
 
 ## 不该 log 的位置 / 内容
