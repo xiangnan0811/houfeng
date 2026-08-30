@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Authoritative migration, current APP ACL, runtime DML and MonitoringInstance sync persistence contracts"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve wrapped PostgreSQL causes, stable agent internal_error mapping and 5xx retry behavior"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Require focused Go gates and real PostgreSQL evidence without skip-as-pass"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace agent retry through Center transaction, database idempotency fact and derived heartbeat state"}
+{"file":".trellis/tasks/08-30-agent-heartbeat-onboarding-failure/design.md","reason":"Confirmed root cause, chosen targetless conflict design, rejected privilege expansion and rollout boundaries"}

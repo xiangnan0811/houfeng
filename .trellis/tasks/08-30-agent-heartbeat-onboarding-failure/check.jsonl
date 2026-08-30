@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Verify INSERT-only ACL, targetless conflict semantics, immutable migrations and future unique-constraint review trigger"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify wrapped 42501 evidence stays server-side while agent receives stable internal_error and retries 5xx"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify real PostgreSQL 16 lane ran without SKIP plus focused and full Go gates"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify end-to-end agent retry, Center persistence, duplicate short-circuit and derived heartbeat state"}
+{"file":".trellis/tasks/08-30-agent-heartbeat-onboarding-failure/prd.md","reason":"Review every acceptance criterion and out-of-scope boundary against the final diff and field evidence"}
+{"file":".trellis/tasks/08-30-agent-heartbeat-onboarding-failure/design.md","reason":"Review root-cause proof, alternatives, minimum change, rollout, rollback and future schema risk"}
