@@ -52,7 +52,7 @@
   - 例：`auth/seed.go:28` `fmt.Errorf("count users: %w", err)`
   - 例：`observations/service.go:53` `fmt.Errorf("%w: probe_item_id %q not found", ErrInvalidProbeObservation, observation.ProbeItemID)` — sentinel 放在格式串前面，便于 `errors.Is` 判定 `ErrInvalidProbeObservation`。
 - **可以用 `%v`**：仅当确认底层 error 是文案性、不参与上层判定时（极少数）。当前代码库几乎全部用 `%w`。
-- **多层包装**：Go 1.20+ 支持 `fmt.Errorf("...: %w: %w", err1, err2)`，参考 `agent/runtime/runtime.go:270` `fmt.Errorf("%w: sync heartbeat: %w", errRemoteSync, err)`，用于同时挂上 sentinel 与底层原因。
+- **多层分类**：需要同时保留稳定策略和底层 typed cause 时，优先使用带 `Unwrap() error` 的 typed wrapper；调用方用 `errors.Is` / `errors.As`，面向日志的 `Error()` 不得格式化不受信的底层文案。
 
 ---
 
@@ -304,11 +304,118 @@ type RemoteError struct {
 }
 ```
 
-后续逻辑用 `errors.As(err, &remoteErr)` 取出 `Code`，再决定行为：
+### Scenario: agent durable sync queue 的远端失败策略
 
-- `ErrorCodeInvalidSyncToken` / `ErrorCodeBindingNotAccepted`：意味着重新 enroll 也无济于事，应让 systemd 拉起 agent 时人为干预——不要本地重试到老。
-- `ErrorCodeInvalidJSON` / `ErrorCodeInvalidRequest`：表示 agent 自己造了脏数据，必须先记录到 sync queue 再丢弃，**不要无限重试同一条**（agent/runtime 当前对 sync 失败统一通过 syncqueue 的重试与回填语义处理，见 `runtime.go:189-198`）。
-- 其他 5xx：可让 sync queue 在下一 tick 重试。
+#### 1. Scope / Trigger
+
+- Trigger：修改 `agent/runtime` 的 queue flush、`agent/syncqueue` authority/backfill、`agent/enroll.RemoteError` 消费或 agent sync 错误日志。
+- 目标：永久拒绝或脏队列项不能阻塞后续当前心跳，同时不能把临时故障误删，也不能把持久队列内的凭据带入日志。
+
+#### 2. Signatures
+
+- typed remote cause：`*enroll.RemoteError{StatusCode, Code, Message}`。
+- 当前 queue authority：runtime 已加载的 `monitoring_instance_id`、`sync_token` 与本机 `fingerprint` 精确三元组。
+- 本地 policy result：`kind=remote|transport`、`action=discard|terminal|retry`、可选 allowlisted `status` / `agentapi.ErrorCode*`。
+- stale backlog durability primitive：`SyncQueue.DeleteMany(context.Context, []string) error`；生产 `FileStore` 必须在一次加锁、一次原子文件替换中删除整批 stale ID。
+- `FileStore` 返回给 runtime 的 entry ID 必须唯一：enqueue 遇到 heartbeat batch ID 冲突时分配确定性 suffix，读取 legacy/hostile 持久文件时也在排序后确定性规范化 duplicate/empty ID，保证单条 ack 不会删除尚未发送的同 ID fact。
+- 该规范化只作用于本地 `Entry.ID`，不得改写 carrier `SyncBatchID`。重复 SyncBatchID 仍是 center 的同一幂等事实，不能宣称 suffix 后会成为两个独立 center facts。大量同 ID 持久项的规范化、以及已有密集 `base-N` suffix 时的新 ID 分配都必须近似线性，不得为每个候选 suffix 重扫整个队列造成 O(n²) recovery。
+- wrapped policy / remote operation / pre-sync local operation / local queue error 必须提供 `Unwrap() error`，使调用方仍可通过 `errors.As` / `errors.Is` 取得 typed cause；其 `Error()` 只格式化稳定、脱敏字段。
+
+#### 3. Contracts
+
+- 每个 tick 仍先 durable enqueue 当前请求，再 oldest-first flush；同一当前 authority 的合法离线积压保持 backfill 语义。
+- pending command result 与已 drain 的 IP-quality report 在 durable queue Enqueue 成功前必须继续保留于 runtime；compatibility no-queue 路径则只在 Sync 成功后清理。`FileStore.Enqueue` 若容量裁剪连 newest entry 自身也无法保留，必须返回 local durability error 且不改写原队列，不能假成功后让 runtime 清空这些 payload。对超过新 `MaxBytes` 的 legacy/hostile 大文件做 oldest-first byte pruning 时必须线性计算序列化大小，不能为每个待删 entry 反复 marshal 整个剩余队列。
+- 与当前 ID、token 或任一 carrier fingerprint 不一致，以及缺少 heartbeat/heartbeat batch ID 的持久项属于 stale authority：先用一次 `DeleteMany` durable 删除本轮可独立删除的全部 stale 项，成功后才按 stable reason 聚合写脱敏 discard 日志并继续。不得为默认 72 小时积压逐项重写/fsync 整个队列或逐项刷日志。
+- 生产 `FileStore.List` 在 runtime 分类前确定性规范化 duplicate/empty persisted ID，后续 Delete/DeleteMany/MarkAttempt 必须以相同映射重新读取，下一次 mutation 把规范化 ID 持久化。这样两个 retained current facts 即使原文件复用同一 ID，也能 oldest-first 分别发送/ack；第一次 Delete 不能删除第二个未发送 fact。对未实现此能力的其他 `SyncQueue`，runtime 仍以 collision guard 禁止 stale ID-wide delete 与 retained current ID 相撞。
+- 每次实际发送失败先 `MarkAttempt`；随后按下表决定 delete/return/continue。delete 或 mark 失败是本地 durability error，必须终止 runtime，不能记录虚假的“已丢弃”。
+- 所有 `FileStore` operation 在等待 path lock 后重新检查 `ctx.Err()`；mutation 在原子写之前再次检查。已取消的调用不得在锁等待后继续修改 durable queue。原子 write 一旦开始则允许完整结束，不能留下半写文件。
+- terminal error 由 runtime 返回给 `cmd/houfeng-agent`，只允许最外层入口记录一次；内部不得同时 log + return。
+- parent context 在 fingerprint、credential load、enrollment、non-queue client 或 queue boundary 取消时属于 clean shutdown；runtime 检查的是 `ctx.Err()`，不能把客户端内部独立产生的 `context.Canceled` 无条件吞掉。
+- queue/non-queue sync 与 enrollment 的日志和返回错误禁止包含 `RemoteError.Message`、原始 response body、token、Authorization、原始 fingerprint、request payload、persisted entry/instance ID 或 raw local queue cause。未知远端 code 不进入日志；wrapped cause 仅用于 `errors.As` / `errors.Is`，不能被主进程直接记录。
+- `agent enrolled` 只在 bound、sync token 非空且凭据 durable persistence 成功后记录，并且只含 allowlisted status/binding status，不记录 MonitoringInstance ID。runtime start/stop 的 `server_url` 只记录 parsed scheme + host origin，不能记录 userinfo、path、query 或 fragment。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | Queue action | Runtime action |
+| --- | --- | --- |
+| stale authority / malformed local carrier | 一次 batch delete 成功后按 reason 聚合记 discard | 继续 flush |
+| stale ID 与 retained current ID 冲突 | 不做 stale ID-wide delete、不记 discard | 跳过 stale carrier，继续 current entry |
+| HTTP `400` + `ErrorCodeInvalidJSON` / `ErrorCodeInvalidRequest` | mark → delete 成功后记 discard | 继续 flush |
+| `401` / `404` / `409` / `405` 或其他非 `429` 4xx | mark，保留 entry | 返回 sanitized terminal error |
+| `429` | mark，保留 entry | 下一 tick retry |
+| 其他 5xx | mark，保留 entry | 下一 tick retry |
+| transport failure | mark，保留 entry | 下一 tick retry |
+| typed remote status 0、2xx 或 3xx error | mark，保留 entry | 作为不明确 remote failure 下一 tick retry，不做推测性 delete |
+| 非 400 status 携带 `invalid_json` / `invalid_request` code | 以 status 为准，不 delete | 4xx terminal 或 5xx retry |
+| durable Mark/Delete 失败 | 保留可恢复状态 | 返回 local queue error |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：旧 instance/token/fingerprint 项位于队头；agent 删除它并在同一次 flush 送达当前心跳。
+- Good：五万条同一 stale reason 的历史积压只触发一次 atomic `DeleteMany` 与一条聚合日志，不产生 O(n²) rewrite/fsync 或日志洪泛。
+- Good：legacy queue 含两个同 ID 的 retained current facts；FileStore 暴露两个稳定唯一 ID，首个 ack 后第二个仍 durable，随后才发送，且新的 current heartbeat 不越过它。
+- Good：含 command result/IP-quality report 的当前 request 首次 Enqueue 写盘失败；payload 留在内存，修复本地故障后同 Runtime 再次 Run 能将其 durable enqueue 并发送。
+- Base：center 暂时 503；队头保留并在下一 tick 标记为 backfilled 后重试，后续事实不越过它。
+- Bad：看到任意 `invalid_request` 字符串就 delete，导致携带该 code 的 404/500 被误当作脏请求。
+- Bad：先 log “discarded” 再执行 delete；磁盘写失败时日志宣称的状态与 durable file 相反。
+- Bad：terminal 分支既在 runtime 内 log 又 return 给 main，产生两条同一故障日志。
+- Bad：把 persisted entry ID / stale instance ID 或 local queue cause 放进 Error/log；持久文件可损坏或被本机高权限操作改变，这些值不是安全的日志字段。
+- Bad：收到 enrollment response 就先记 `agent enrolled`，随后才发现 binding 未确认、token 缺失或凭据写盘失败。
+
+#### 6. Tests Required
+
+- `TestRuntimeRejectedPersistedIdentityDoesNotBlockCurrentCredentialHeartbeat`：真实 `syncqueue.FileStore` 证明旧 authority 不阻塞当前心跳。
+- `TestRuntimeDiscardsPersistedQueueEntriesOutsideCurrentAuthority`：ID/token/各 carrier fingerprint 与最小 heartbeat identity 矩阵。
+- `TestRuntimeBulkDiscardsLargeStaleAuthorityBacklog`：大积压只调用一次 batch delete、按 reason 聚合日志，并立即送达当前心跳。
+- `TestRuntimeDoesNotBulkDeleteCurrentAuthorityEntrySharingStaleIdentifier`：persisted ID 冲突不能误删 retained current authority。
+- `TestRuntimePreservesRetainedCurrentFactsWithPersistedDuplicateIDs`、`TestFileStoreEntryIDAddsSuffixOnHeartbeatBatchCollision`、`TestFileStoreNormalizesPersistedDuplicateIDsBeforeDelete`：生产 FileStore 中 duplicate entry ID retained facts 可独立 ack，首个 Delete 不丢后续 fact；不把 entry suffix 当成新的 center batch identity。
+- `TestFileStoreNormalizesLargePersistedDuplicateIDBacklog`、`TestFileStoreEntryIDScalesAcrossDenseHeartbeatBatchSuffixes`：默认容量量级的 duplicate-ID 恢复与密集 suffix 分配不退化成 O(n²) 扫描。
+- `TestRuntimeRetainsCommandResultUntilQueueEnqueueSucceeds`、`TestRuntimeRetainsIPQualityReportUntilQueueEnqueueSucceeds`：辅助 payload 只在 durable transfer 后从 runtime buffer ack。
+- `TestFileStoreEnqueueFailsWithoutMutatingQueueWhenNewestEntryExceedsMaxBytes`、`TestFileStorePrunesLargeOversizedPersistedBacklogInLinearPass`、`TestFileStorePruneDoesNotWriteAnEmptyQueueBeyondMaxBytes`：newest entry 无法满足 MaxBytes 时 fail closed；legacy/hostile 超限积压线性裁剪；即使空数组编码也超过极小 cap 时不改写原文件。
+- `TestRuntimeDiscardsExplicitInvalidQueueEntryAndContinues`：仅 HTTP 400 + 两个稳定 invalid code 可 discard。
+- `TestRuntimeCurrentAuthorityPermanentRemoteErrorsAreTerminalAndSanitized`：永久 4xx 保留 entry、只返回一次脱敏 terminal evidence，并覆盖 status/code precedence。
+- `TestRuntimeLogsDiscardOnlyAfterQueueDeleteSucceeds`：stale/poison delete 失败时没有虚假 discard 日志。
+- `TestRuntimeTransientQueueFailuresRemainRetryableAndBackfilled`：status 0/2xx/3xx、429/5xx/transport 保留、重试与 secret-bearing cause 不泄露。
+- `TestRuntimePreservesOldestFirstForValidCurrentAuthorityBacklog`：合法当前 authority 积压顺序不回退；runtime package 另跑 `-count=10` 与 `-race`。
+- `TestFileStoreDeleteManyRechecksCancellationBeforeMutation`、`TestFileStoreRechecksCancellationAfterLockAcrossOperations`：锁前检查后发生的取消也不能继续 durable mutation。
+- `TestRuntimeTreatsParentCancellationAcrossBoundariesAsCleanShutdown`：fingerprint/credential/enrollment/non-queue client 边界的 parent cancellation 都干净退出。
+- `TestRuntimeSanitizesRemoteFailuresOutsideDurableQueue`、`TestRuntimeDoesNotExposePersistedQueueIdentifiersOrLocalCauses`：覆盖 enrollment/non-queue sync、queue 标识和 local cause 的主进程可见 Error/log 边界。
+- `TestRuntimeSanitizesLocalFailuresBeforeSyncLoop`：fingerprint、credential load、enrollment token 与 credential persistence 的原始 local cause 只可通过 unwrap 取得，不进入主进程可见 error string。
+- `TestRuntimeLogsEnrollmentOnlyAfterCredentialsPersist`、`TestRuntimeEnrollmentSuccessLogDoesNotExposePersistedIdentity`、`TestRuntimeDoesNotLogServerURLCredentials`：覆盖 success-after-durability、enrollment identity privacy 与仅 origin 的启动日志。
+
+#### 7. Wrong vs Correct
+
+```go
+// Wrong: every remote error blocks the queue forever, and logging the raw
+// cause may include RemoteError.Message/body.
+return fmt.Errorf("remote sync failed: %w", err)
+```
+
+```go
+// Correct: classify by typed status/code, preserve the cause for errors.As,
+// but expose only sanitized policy fields and apply delete-before-log ordering.
+policy := &syncPolicyError{
+	kind: syncFailureKindTransport, action: syncQueueActionRetry, cause: err,
+}
+var remoteErr *enroll.RemoteError
+if !errors.As(err, &remoteErr) {
+	return policy
+}
+policy.kind = syncFailureKindRemote
+policy.statusCode = remoteErr.StatusCode
+policy.code = allowlistedAgentErrorCode(remoteErr.Code)
+switch {
+case remoteErr.StatusCode == http.StatusBadRequest &&
+	(remoteErr.Code == agentapi.ErrorCodeInvalidJSON ||
+		remoteErr.Code == agentapi.ErrorCodeInvalidRequest):
+	policy.action = syncQueueActionDiscard
+case remoteErr.StatusCode == http.StatusTooManyRequests || remoteErr.StatusCode >= 500:
+	// keep retry
+case remoteErr.StatusCode >= 400:
+	policy.action = syncQueueActionTerminal
+}
+return policy
+```
 
 ---
 

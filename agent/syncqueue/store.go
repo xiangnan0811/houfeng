@@ -20,6 +20,8 @@ const (
 	defaultMaxBytes   = 64 * 1024 * 1024
 )
 
+var errEntryExceedsCapacity = errors.New("sync queue entry exceeds configured capacity")
+
 type Options struct {
 	MaxEntries int
 	MaxAge     time.Duration
@@ -121,6 +123,9 @@ func (s *FileStore) Enqueue(ctx context.Context, request agentapi.SyncRequest) (
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	entries, err := s.readEntries()
 	if err != nil {
 		return "", err
@@ -140,6 +145,12 @@ func (s *FileStore) Enqueue(ctx context.Context, request agentapi.SyncRequest) (
 		Request:   cloneRequest(request),
 	})
 	entries = s.pruneEntries(entries)
+	if !entryIDExists(entries, id) {
+		return "", errEntryExceedsCapacity
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if err := s.writeEntries(entries); err != nil {
 		return "", err
 	}
@@ -152,8 +163,14 @@ func (s *FileStore) List(ctx context.Context) ([]Entry, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	entries, err := s.readEntries()
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	sortEntries(entries)
@@ -175,6 +192,9 @@ func (s *FileStore) Delete(ctx context.Context, id string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	entries, err := s.readEntries()
 	if err != nil {
 		return err
@@ -185,6 +205,41 @@ func (s *FileStore) Delete(ctx context.Context, id string) error {
 			filtered = append(filtered, entry)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.writeEntries(filtered)
+}
+
+func (s *FileStore) DeleteMany(ctx context.Context, ids []string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	entries, err := s.readEntries()
+	if err != nil {
+		return err
+	}
+	deleted := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		deleted[id] = struct{}{}
+	}
+	filtered := entries[:0]
+	for _, entry := range entries {
+		if _, ok := deleted[entry.ID]; !ok {
+			filtered = append(filtered, entry)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return s.writeEntries(filtered)
 }
 
@@ -194,6 +249,9 @@ func (s *FileStore) MarkAttempt(ctx context.Context, id string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	entries, err := s.readEntries()
 	if err != nil {
 		return err
@@ -204,6 +262,9 @@ func (s *FileStore) MarkAttempt(ctx context.Context, id string) error {
 			break
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return s.writeEntries(entries)
 }
 
@@ -213,11 +274,18 @@ func (s *FileStore) Prune(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	entries, err := s.readEntries()
 	if err != nil {
 		return err
 	}
-	return s.writeEntries(s.pruneEntries(entries))
+	entries = s.pruneEntries(entries)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.writeEntries(entries)
 }
 
 func WithBackfilledFacts(request agentapi.SyncRequest, backfilled bool) agentapi.SyncRequest {
@@ -260,14 +328,30 @@ func (s *FileStore) pruneEntries(entries []Entry) []Entry {
 }
 
 func pruneEntriesByBytes(entries []Entry, maxBytes int) []Entry {
-	for len(entries) > 0 {
-		payload, err := json.Marshal(entries)
-		if err != nil || len(payload) <= maxBytes {
+	if len(entries) == 0 {
+		return entries
+	}
+	encodedSizes := make([]int, len(entries))
+	totalBytes := len(entries) + 1 // brackets plus one comma between adjacent entries
+	for i, entry := range entries {
+		payload, err := json.Marshal(entry)
+		if err != nil {
 			return entries
 		}
-		entries = entries[1:]
+		encodedSizes[i] = len(payload)
+		totalBytes += len(payload)
 	}
-	return entries
+	firstRetained := 0
+	remaining := len(entries)
+	for firstRetained < len(entries) && totalBytes > maxBytes {
+		totalBytes -= encodedSizes[firstRetained]
+		if remaining > 1 {
+			totalBytes--
+		}
+		firstRetained++
+		remaining--
+	}
+	return entries[firstRetained:]
 }
 
 func (s *FileStore) readEntries() ([]Entry, error) {
@@ -310,6 +394,9 @@ func (s *FileStore) writeEntries(entries []Entry) error {
 	if err != nil {
 		return err
 	}
+	if len(payload) > s.opts.MaxBytes {
+		return errEntryExceedsCapacity
+	}
 	file, err := os.CreateTemp(dir, ".sync-buffer-*.tmp")
 	if err != nil {
 		return err
@@ -349,16 +436,23 @@ func (s *FileStore) writeEntries(entries []Entry) error {
 }
 
 func entryIDForRequest(request agentapi.SyncRequest, now time.Time, entries []Entry) string {
+	base := ""
 	if len(request.Heartbeats) > 0 && request.Heartbeats[0].SyncBatchID != "" {
-		return request.Heartbeats[0].SyncBatchID
+		base = request.Heartbeats[0].SyncBatchID
 	}
-	base := now.UTC().Format(time.RFC3339Nano)
-	if !entryIDExists(entries, base) {
+	if base == "" {
+		base = now.UTC().Format(time.RFC3339Nano)
+	}
+	used := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		used[entry.ID] = struct{}{}
+	}
+	if _, exists := used[base]; !exists {
 		return base
 	}
 	for suffix := 1; ; suffix++ {
 		candidate := base + "-" + strconv.Itoa(suffix)
-		if !entryIDExists(entries, candidate) {
+		if _, exists := used[candidate]; !exists {
 			return candidate
 		}
 	}
@@ -432,12 +526,55 @@ func syncDirectory(dir string) error {
 }
 
 func sortEntries(entries []Entry) {
-	sort.Slice(entries, func(i, j int) bool {
+	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].CreatedAt.Equal(entries[j].CreatedAt) {
 			return entries[i].ID < entries[j].ID
 		}
 		return entries[i].CreatedAt.Before(entries[j].CreatedAt)
 	})
+	normalizeEntryIDs(entries)
+}
+
+func normalizeEntryIDs(entries []Entry) {
+	reserved := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		if entry.ID != "" {
+			reserved[entry.ID] = struct{}{}
+		}
+	}
+	used := make(map[string]struct{}, len(entries))
+	nextSuffix := make(map[string]int)
+	for i := range entries {
+		id := entries[i].ID
+		if id != "" {
+			if _, duplicate := used[id]; !duplicate {
+				used[id] = struct{}{}
+				continue
+			}
+		}
+
+		base := id
+		if base == "" {
+			base = entries[i].CreatedAt.UTC().Format(time.RFC3339Nano)
+		}
+		suffix := nextSuffix[base]
+		if suffix < 1 {
+			suffix = 1
+		}
+		for ; ; suffix++ {
+			candidate := base + "-" + strconv.Itoa(suffix)
+			if _, exists := reserved[candidate]; exists {
+				continue
+			}
+			if _, exists := used[candidate]; exists {
+				continue
+			}
+			entries[i].ID = candidate
+			used[candidate] = struct{}{}
+			nextSuffix[base] = suffix + 1
+			break
+		}
+	}
 }
 
 func cloneRequest(request agentapi.SyncRequest) agentapi.SyncRequest {
