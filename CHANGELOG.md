@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.79.2](https://github.com/xiangnan0811/houfeng/compare/v0.79.1...v0.79.2) (2026-08-30)
+
+
+### Bug Fixes
+
+* **agent:** unblock heartbeat queue after authority changes ([ae46b45](https://github.com/xiangnan0811/houfeng/commit/ae46b454424bf6002240a130d796383f6b70f7d9))
+* **agent:** unblock heartbeat queue after authority changes ([533f623](https://github.com/xiangnan0811/houfeng/commit/533f623899dea93587de29fb1cd4fff9f4aecf8d))
+
+
+### Documentation
+
+* **trellis:** plan monitoring agent heartbeat ingestion ([61fe8ff](https://github.com/xiangnan0811/houfeng/commit/61fe8ff3cb4706fd975dd5db2d322360b40cc158))
+
 ## [0.79.1](https://github.com/xiangnan0811/houfeng/compare/v0.79.0...v0.79.1) (2026-08-29)
 
 
