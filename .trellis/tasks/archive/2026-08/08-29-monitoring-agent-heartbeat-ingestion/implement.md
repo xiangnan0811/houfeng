@@ -67,7 +67,7 @@
   - 使用 `trellis-check` 执行 spec、复用、lint/vet/test、跨层数据流与任务范围审查。
   - 使用独立 reviewer 按 findings-first、Critical/Important/Minor 审查 queue liveness、terminal/retry 分类、数据保留和秘密泄漏；修复后重跑相同 gates。
 
-- [ ] **9. Protected delivery and released-agent proof**
+- [x] **9. Protected delivery and released-agent proof**
   - 在用户批准完整交付后按逻辑批次 commit，push feature branch，创建 PR 并等待 required CI；失败只在同一分支修复。
   - required checks 全绿后 merge；监控 main CI、Release Please/release job 与 agent asset 发布。
   - 对最终 release 的目标架构 agent asset 校验版本、checksum/signature，并确认升级后的 runtime regression 通过；不要把 PR 创建或 merge 单独声称为用户问题已交付。
@@ -141,4 +141,13 @@ The exact focused test selector may be narrowed after the RED names exist, but i
 - **Important fixed — byte pruning repeatedly encoded the full queue tail:** an oversized legacy/hostile persisted queue caused `pruneEntriesByBytes` to marshal the remaining slice once per oldest-entry eviction. A 32,768-entry RED timed out at 2 seconds; the implementation now marshals each entry once, computes exact JSON array size, and selects the oldest-first cut in one linear pass. The same focused group passed in `0.305s`.
 - **Important fixed — MaxBytes and logging specs had drifted:** `quality-guidelines.md` incorrectly allowed an individually oversized newest entry to clear the queue and succeed, while `logging-guidelines.md` still required agent enrollment identity/raw status logging. Both specs now match the fail-closed queue and allowlisted, origin-only diagnostic boundary; fragile runtime line anchors were replaced by function-level references.
 - Byte-cap writes now fail before temp-file creation when even the selected representation exceeds `MaxBytes`; `TestFileStorePruneDoesNotWriteAnEmptyQueueBeyondMaxBytes` proves an impossible one-byte cap leaves the prior file unchanged.
-- Final related packages passed; runtime `-count=10` passed in `60.657s`; runtime/syncqueue/enroll race tests passed; `GOTOOLCHAIN=go1.26.2 make verify-go` passed after every final code/spec change. `git diff --check`, task JSON/JSONL parsing, production `SkipFsync` scan, and touched production error/log privacy inspection passed after this evidence update. No Critical, Important, or Minor finding remains in the reviewed scope; protected delivery is still step 9 and remains owned by the main session.
+- Final related packages passed; runtime `-count=10` passed in `60.657s`; runtime/syncqueue/enroll race tests passed; `GOTOOLCHAIN=go1.26.2 make verify-go` passed after every final code/spec change. `git diff --check`, task JSON/JSONL parsing, production `SkipFsync` scan, and touched production error/log privacy inspection passed after this evidence update. No Critical, Important, or Minor finding remains in the reviewed scope; the protected-delivery evidence is recorded below.
+
+## Protected delivery and release evidence — 2026-08-30
+
+- Work commits: `61fe8ff3` (`docs(trellis): plan monitoring agent heartbeat ingestion`) and `533f6238` (`fix(agent): unblock heartbeat queue after authority changes`). Feature PR [#477](https://github.com/xiangnan0811/houfeng/pull/477) passed all seven CI jobs and merged to main as `ae46b454`.
+- Post-feature main CI run `33287903243` and Release Please run `33287903240` passed. Release PR [#478](https://github.com/xiangnan0811/houfeng/pull/478) changed only the release manifest and changelog, passed all seven CI jobs, and merged as `430f22d3`.
+- Release [v0.79.2](https://github.com/xiangnan0811/houfeng/releases/tag/v0.79.2) targets `430f22d3`. Publish run `33288121734` passed agent asset build/static-link verification/signing/upload, amd64 and arm64 image builds, public manifest inspection, and deployment-asset upload/readback. Release-main CI run `33288114156` also passed.
+- Independent download verification passed with the installer-pinned minisign public key. `sha256sums.txt` validates `houfeng-agent_v0.79.2_linux_amd64` as `424b3a9150fbcd61a51fea20c6f81d39096293c5ecb3d180b847945ba19aa9a0` and arm64 as `0661f9486a568651927d397387877152d322d6ed0c523a4173c1bc763f5c76a6`; both binaries are statically linked, record `vcs.revision=430f22d3...`, and record `vcs.modified=false`.
+- Docker Registry API independently confirmed `docker.io/linnea7171/houfeng:v0.79.2` as an OCI index with linux/amd64 and linux/arm64; public index digest is `sha256:7dec91c891633346e812133744020a258470ec9fb44e1c4003e2626f84ff7ac1`.
+- The deterministic stale-head failure and the released runtime regression are proved by committed tests and release metadata. No production host journal/queue/database evidence or host access was supplied, so the exact original invalidation event and live UI transition after installing v0.79.2 are intentionally not claimed as observed facts.

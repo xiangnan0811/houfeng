@@ -3,7 +3,7 @@
   "name": "monitoring-agent-heartbeat-ingestion",
   "title": "修复 agent 接入后无心跳与主机样本",
   "description": "修复持久 sync 队列中永久拒绝的旧身份条目阻塞当前心跳，并补齐脱敏、可操作的错误分类。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "bugfix",
   "scope": "agent-runtime",
   "package": "agent/runtime",
@@ -11,12 +11,12 @@
   "creator": "xiangnan-arch",
   "assignee": "xiangnan-arch",
   "createdAt": "2026-08-29",
-  "completedAt": null,
+  "completedAt": "2026-08-30",
   "branch": "fix/monitoring-agent-heartbeat-ingestion",
   "base_branch": "main",
   "worktree_path": "/home/murray/code/houfeng/.worktree/monitoring-agent-heartbeat-ingestion",
-  "commit": null,
-  "pr_url": null,
+  "commit": "533f623899dea93587de29fb1cd4fff9f4aecf8d",
+  "pr_url": "https://github.com/xiangnan0811/houfeng/pull/477",
   "subtasks": [],
   "children": [],
   "parent": null,
@@ -30,6 +30,6 @@
     ".trellis/spec/backend/logging-guidelines.md",
     ".trellis/spec/backend/quality-guidelines.md"
   ],
-  "notes": "Implementation and all independent reviews, including the final zero-finding pass, are complete. Duplicate-ID independent ack, linear dense-suffix allocation, linear byte pruning, bounded recovery, cancellation, payload durability, oversized enqueue fail-closed behavior, full retry lattice, privacy, and spec drift were fixed with RED/GREEN evidence; focused, stress, race and make verify-go gates are green. No Critical, Important, or Minor finding remains. Protected delivery remains for the main session.",
+  "notes": "Implementation, four independent review passes, protected delivery, v0.79.2 release publication, signed agent-asset verification, multi-architecture image publication, and post-merge CI are complete. No Critical, Important, or Minor finding remains. The deterministic queue failure and regression are proved; no production host access was supplied, so live dashboard recovery is not claimed as observed evidence.",
   "meta": {}
 }
