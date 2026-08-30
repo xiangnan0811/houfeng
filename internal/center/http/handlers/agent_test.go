@@ -755,6 +755,48 @@ func TestAgentSyncHandlerReturnsBindingNotAcceptedError(t *testing.T) {
 	assertErrorResponse(t, recorder, agentapi.ErrorCodeBindingNotAccepted, "binding not accepted")
 }
 
+func TestAgentSyncHandlerReturnsStableInternalErrorWithoutStoreDetails(t *testing.T) {
+	t.Parallel()
+
+	const privateStoreDetail = "permission denied for table agent_sync_batches; sync-token-fixture; raw-fingerprint-fixture"
+	svc := &fakeAgentSyncService{syncErr: errors.New(privateStoreDetail)}
+	handler := handlers.AgentSync(svc)
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	setSyncAuth(req)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInternalError, "internal server error")
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("unmarshal internal error envelope: %v", err)
+	}
+	if len(envelope) != 2 || envelope["code"] == nil || envelope["message"] == nil {
+		t.Fatalf("internal error envelope keys = %#v, want only code and message", envelope)
+	}
+	responseSurface := recorder.Body.String()
+	for name, values := range recorder.Header() {
+		responseSurface += name + ":" + strings.Join(values, ",") + "\n"
+	}
+	for _, privateFragment := range []string{
+		privateStoreDetail,
+		"permission denied for table agent_sync_batches",
+		"sync-token-fixture",
+		"raw-fingerprint-fixture",
+		"sync-token-001",
+		"fp-001",
+	} {
+		if strings.Contains(responseSurface, privateFragment) {
+			t.Fatalf("agent sync error response exposed private store detail %q", privateFragment)
+		}
+	}
+}
+
 func TestAgentSyncHandlerRejectsEmptyMonitoringInstanceID(t *testing.T) {
 	t.Parallel()
 

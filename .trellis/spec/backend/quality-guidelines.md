@@ -116,11 +116,13 @@ web:
 
 - 单元测试与被测文件**同目录同包**：`store/sync_batches.go` ↔ `store/sync_batches_test.go`。
 - 跨包黑盒测试用 `<package>_test` 包名：`internal/center/http/handlers/monitoring_instances_test.go` 第 1 行 `package handlers_test`。
-- 端到端测试加 `_e2e_test.go` 后缀：唯一例子 `internal/center/http/auth_e2e_test.go`，配套 helper `auth_e2e_helpers_test.go`。
-- 唯一窄例外见下方 APP ACL PG16 catalog lane 场景：批准的
-  `internal/center/store/migrate/app_acl_r2_postgres_integration_test.go` 与
-  `internal/center/store/migrate/app_acl_current_postgres_integration_test.go`
-  保持各自既有所有权名称；它们不为其他真实数据库测试建立命名先例。
+- 集成测试按边界选清晰后缀，而不是规定唯一命名：HTTP end-to-end 可沿用
+  `auth_e2e_test.go`；真实 PostgreSQL store 测试沿用
+  `*_postgres_integration_test.go`，例如
+  `sync_batches_postgres_integration_test.go`、
+  `app_acl_r2_postgres_integration_test.go` 与
+  `app_acl_current_postgres_integration_test.go`。测试名和文件名必须让 focused
+  selector、fixture ownership 与 cleanup scope 可辨认。
 - 路由级集成测试单独文件：`internal/center/http/router_api_test.go`、`router_test.go`。
 
 ### Table-driven 测试
@@ -164,7 +166,7 @@ for _, tt := range tests {
 
 ### Store 测试
 
-**当前所有 `internal/center/store/*_test.go` 均使用 fake `pgx.Tx` / `pgx.Row` 实现接口**，**不依赖真实 Postgres**。`grep -l "OpenPostgres\|pgxpool.New" internal/center/store/*_test.go` 结果为空。
+普通 store 单元测试默认使用 fake `pgx.Tx` / `pgx.Row`，保持快速、确定且不依赖外部服务；真实 PostgreSQL 的权限检查、trigger、catalog、外键级联或事务语义则使用现有 `*_postgres_integration_test.go`、隔离 fixture 和 runner，不能用 fake 结果代替。
 
 参考模板 `internal/center/store/sync_batches_test.go:175-260` 的 `fakeSyncBatchTx`：
 
@@ -172,7 +174,10 @@ for _, tt := range tests {
 - 通过 `execErrForSQLSubstring` 等字段按 SQL 文本子串决定哪一步注入错误，验证事务 rollback 行为。
 - 仓库构造时直接替换 `beginTx` 字段（`PostgresSyncRepository.beginTx`，见 `store/sync_batches.go:30-36`），跳过真 pgxpool。
 
-**真实 Postgres 烟囱测试不在 verify 链路里**，由 `docs/operations/fresh-install-smoke-run.md` 的人工 fresh-install 流程补齐。新加 store 方法时如果只能靠真 DB 验证（例如 trigger / 外键级联），应在 `docs/operations/` 下补描述，不要把 verify 弄成"必须有本地 Postgres"。
+- 普通 `make verify-go` 保留现有行为：真实 PostgreSQL fixture / environment 缺失时 integration test 可以 skip，因此 broad local verify 不要求本机常驻 PostgreSQL。
+- 当 database/package spec 把某个真实数据库测试指定为 acceptance gate 时，必须通过隔离 strict runner 实际产生 RUN/PASS；runner 看到 SKIP 必须失败。示例：`TestPostgresIntegrationAgentSyncBatchRuntimeACL` 按 `database-guidelines.md` 的 “Agent sync batch INSERT-only idempotency” scenario 使用 `postgres` mode 验证 direct-runtime ACL。
+- `postgres` mode 的此类 focused acceptance 是任务/包合同，不自动成为默认 CI required job；只有 workflow 与对应 spec 明确声明的 job 才是 required CI gate。
+- 不要为了“覆盖更全”随意启动 PostgreSQL；仅在 fake 无法证明的权限、trigger、catalog 或事务边界使用既有 runner/fixture，并保持临时角色、数据库与连接的隔离 cleanup。
 
 时间窗口类 store 测试要避免夹具随真实日期漂移失效：如果生产逻辑用 `time.Now()` / 当前日期判断续费窗口、过期、TTL、retention 等，测试中的"未来日期"必须相对 `time.Now().UTC()` 生成，或者把时间源注入被测代码。不要把 `2026-06-11` 这类固定日期当作"未来 7 天"写进会长期运行的 CI 夹具；到了真实日期之后，它会变成过去日期并让测试从行为验证退化成日历炸弹。固定 `created_at` / `updated_at` 这类展示或排序时间可以继续用稳定常量。
 
@@ -644,9 +649,9 @@ if !(warning < alert && alert < critical) {
   `internal/center/store/migrate/app_acl_current_postgres_integration_test.go`、
   `scripts/test-record-platform-integration.sh` 的 `pg16-catalog` mode，或
   `.github/workflows/ci.yml` 的 `record-platform-pg16-catalog` job 时。
-- 本场景的两个批准 integration 文件是唯一命名例外。该 required-CI catalog
-  lane 不替代普通 `_e2e_test.go` 测试，也不替代父任务的 record-platform
-  fixture modes。
+- 本场景的两个 integration 文件沿用 `*_postgres_integration_test.go` 命名。该
+  required-CI catalog lane 不替代其他 integration tests，也不替代父任务的
+  record-platform fixture modes。
 - 它同时覆盖冻结 APP ACL R2 authority/catalog evidence 与 current-build
   migration/admission evidence，不改变冻结的 R1/R2 source、tuple、ACL、data、
   permission、state 或 clone/restore 合同。
@@ -661,11 +666,11 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   scripts/test-record-platform-integration.sh pg16-catalog -- <command> [args...]
 ```
 
-- `pg16-catalog` 是唯一严格的 Slice 7 mode。`<exact-image>` 只能是
+- `pg16-catalog` 是本场景的 Slice 7 strict mode。`<exact-image>` 只能是
   `postgres:16.0`、`postgres:16.6` 或 `postgres:16.12`。
-- `postgres` 与 `postgres-s3` 保持原有父任务合同：
-  `scripts/test-record-platform-integration.sh <mode> -- <command> [args...]`。
-  Slice 7 image variable 不对两者施加 validation 或 defaulting。
+- `postgres` 保持通用父任务合同：
+  `scripts/test-record-platform-integration.sh postgres -- <command> [args...]`。
+  Slice 7 image variable 不对该 mode 施加 validation 或 defaulting。
 - required workflow job id 是 `record-platform-pg16-catalog`；显式 job name
   是 `record-platform-pg16-catalog (${{ matrix.postgres_image }})`。literal
   matrix 必须产生以下精确 check contexts：
@@ -705,14 +710,14 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   fixture URL 或 child execution 之前验证 mode、`--`、child argv 和严格 image
   值。每个被接受的 strict lane 都把所选 image 用于所有
   APP/ledger/witness/recovery fixture databases。
-- `postgres`、`postgres-s3`、两者名称和未来父任务调用都是 compatibility
-  boundary。加入 `pg16-catalog` 时不得 rename、delete、route through strict
-  allowlist 或以其他方式改变它们。
-- 批准文件只有直接执行且未设置
-  `HOUFENG_POSTGRES_INTEGRATION=1` 时才可走普通 `t.Skip`。strict runner
-  export 该变量；child output 中任意 `--- SKIP:` 都必须使 runner exit 1，
-  enabled-test prerequisite failure 必须使用 `t.Fatal`/error 而非 skip。没有
-  其他 real-PostgreSQL test 获得此例外。
+- `postgres` 的名称和未来父任务调用是 compatibility boundary。加入或修改
+  `pg16-catalog` 时不得 rename、delete、route through strict allowlist 或以其他
+  方式改变该通用 mode。
+- Integration test 直接执行且未设置 `HOUFENG_POSTGRES_INTEGRATION=1` 时可按
+  普通 broad-verify 规则 `t.Skip`。strict runner export 该变量；child output
+  中任意 `--- SKIP:` 都必须使 runner exit 1，enabled-test prerequisite failure
+  必须使用 `t.Fatal`/error 而非 skip。其他 database/package spec 指定的
+  real-PostgreSQL acceptance test 也必须遵守相同的 strict RUN/PASS 合同。
 - workflow matrix 只能包含三个 quoted literal，不得有 `include`、default
   expression 或不同 entry point；每个 lane 运行同一 `pg16-catalog` command。
   job 必须先 checkout 和按仓库既有 `setup-go@v6`/`go.mod` 模式安装 Go；显式
@@ -773,7 +778,7 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
 | --- | --- |
 | `pg16-catalog` 缺少 image，或 image 为 `postgres`、`postgres:16`、`postgres:16-alpine`、其他非 allowlist 值 | 在任何 Docker 或 fixture side effect 前 exit 2。 |
 | `pg16-catalog` 使用一个 allowlist image | 用该 exact image 启动四个 fixture database 并执行 child command。 |
-| 调用 `postgres` 或 `postgres-s3` | 保持各自 mode contract；不能仅因为 strict image variable 缺少或不同而拒绝。 |
+| 调用 `postgres` | 保持通用 mode contract；不能仅因为 strict image variable 缺少或不同而拒绝。 |
 | strict child 输出 `--- SKIP:` | cleanup 后 runner nonzero exit；该 lane 不是 evidence。 |
 | strict child 在 stderr 输出 module/tool diagnostics，同时在 stdout 输出 canonical Go JSON events | diagnostics 保持在 stderr 且 event JSONL 可完整解析；任一 stream 的 `--- SKIP:` 仍使 runner nonzero exit。 |
 | fresh job 缺少 `runs-on`、checkout 或按 `go.mod` 的 setup-go，或 lane 运行不同 child command | workflow review 拒绝；不能声称 fresh Actions runner 可执行。 |
@@ -972,7 +977,7 @@ same successful head.
 - ❌ **TODO 不带 issue 链接**：`grep -rn "TODO\|FIXME" internal/ agent/ cmd/` 当前为空，保持纪录干净。如果必须 TODO，写完整理由 + 跟踪 issue 编号。
 - ❌ **新增 handler 但不更新 `bootstrap_test.go` 的 nil 断言**：会让"装配缺失"绕过 verify。
 - ❌ **测试用 `time.Sleep(N seconds)` 等 worker tick**：用注入小间隔 + ctx cancel 的 deterministic 模式（参考 `retention/worker_test.go:92`）。
-- ❌ **store 测试为了"覆盖更全"启动真 Postgres**：当前生态依赖 `fakeSyncBatchTx` 风格。如果确实要写真 DB 测试，单独走 `_e2e_test.go` 后缀并默认 `t.Skip` 在 env 缺失时跳过；唯一例外是上方已逐项限定的 APP ACL R2 Slice 7 文件/strict runner，不能外推到其他测试。
+- ❌ **store 测试为了“覆盖更全”随意启动真 PostgreSQL**：普通单元测试优先 `fakeSyncBatchTx` 风格；只有权限、trigger、catalog、外键或事务语义无法由 fake 证明时，才沿用隔离的 `*_postgres_integration_test.go` fixture/runner 和完整 cleanup。普通 broad verify 可在环境缺失时 skip；被 database/package spec 指定为 acceptance gate 的测试必须经 strict runner 实际 RUN/PASS，SKIP 不是证据。
 - ❌ **在窗口/过期判断测试里写会过期的固定未来日期**：例如生产逻辑按真实 `time.Now()` 判定 `renew_at` 是否在 30 天内时，测试夹具不能用 `time.Date(2026, time.June, 11, ...)` 表达"7 天后"。用 `time.Now().UTC().AddDate(0, 0, 7)`，或注入时钟后固定测试时钟。
 - ❌ **改 contract 包但不同 PR 改 agent**：`internal/contracts/agentapi/` 的任何 breaking 改动**必须**当 PR 把 agent 也升级，否则 fleet 会立即崩。
 - ❌ **改 `db/migrations/` 已合入的 SQL 文件**：见 `database-guidelines.md`。reviewer 看到这种 diff 应直接 reject。

@@ -156,6 +156,7 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 }
 
 func recordAgentSyncBatch(ctx context.Context, tx syncBatchTx, batch syncing.Batch) (bool, error) {
+	// Keep this targetless so the runtime role remains INSERT-only on agent_sync_batches.
 	tag, err := tx.Exec(ctx, `
 		insert into agent_sync_batches (
 			monitoring_instance_id,
@@ -164,7 +165,7 @@ func recordAgentSyncBatch(ctx context.Context, tx syncBatchTx, batch syncing.Bat
 			$1,
 			$2
 		)
-		on conflict (monitoring_instance_id, sync_batch_id) do nothing`,
+		on conflict do nothing`,
 		batch.MonitoringInstanceID,
 		batch.Heartbeats[0].SyncBatchID,
 	)

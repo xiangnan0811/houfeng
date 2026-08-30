@@ -1166,3 +1166,25 @@ Diagnosed stale durable sync queue head-of-line blocking, shipped authority-awar
 ### Status
 
 [OK] **Completed**
+
+
+## Session 268: Fix agent sync batch INSERT-only ACL
+
+**Date**: 2026-08-30
+**Task**: Fix agent sync batch INSERT-only ACL
+**Branch**: `codex/agent-heartbeat-onboarding-failure`
+
+### Summary
+
+Fixed PostgreSQL 16 ON CONFLICT permission failure for agent sync batch idempotency, added direct-runtime and privacy regressions, completed independent review loops, and captured executable database/testing guidance.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d9c4560c` | (see git log) |
+| `e2ec54a1` | (see git log) |
+
+### Status
+
+[OK] **Completed**

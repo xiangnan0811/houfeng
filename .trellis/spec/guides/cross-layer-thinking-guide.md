@@ -39,6 +39,8 @@ For each arrow, ask:
 | Backend ↔ Frontend | Serialization, date formats |
 | Component ↔ Component | Props shape changes |
 
+最小权限数据库边界还要区分“catalog grant 正确”和“生产 SQL 可执行”：`ON CONFLICT` target、`RETURNING`、row lock、trigger 或函数都可能引入隐式权限。只要 SQL 依赖 least-privilege runtime role，就应使用 production repository + direct runtime session 执行代表性 DML；fake transaction 与 catalog-only 断言不能替代这项证据。具体合同由对应 backend database spec 定义。
+
 For Go ↔ TypeScript JSON boundaries, explicitly test empty collections: a nil Go slice is serialized as `null`, not `[]`. A handwritten TypeScript array type does not validate runtime JSON, so decide whether the backend guarantees non-nil slices or the owning frontend boundary normalizes nullable collections before array operations.
 
 ### Step 3: Define Contracts
@@ -79,12 +81,14 @@ Before implementation:
 - [ ] Identified all layer boundaries
 - [ ] Defined format at each boundary
 - [ ] Decided where validation happens
+- [ ] For least-privilege SQL, identified implicit read/write/execute requirements and the direct-runtime test that proves the production statement is executable
 
 After implementation:
 - [ ] Tested with edge cases (null, empty, invalid)
 - [ ] For every Go slice field, verified the actual JSON shape for both nil and empty values (`null` versus `[]`)
 - [ ] Verified error handling at each boundary
 - [ ] Checked data survives round-trip
+- [ ] For ACL-sensitive persistence, ran production SQL as the runtime role and verified both intended privileges and forbidden table/column grants
 
 ---
 
