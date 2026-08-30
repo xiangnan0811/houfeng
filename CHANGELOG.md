@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.79.3](https://github.com/xiangnan0811/houfeng/compare/v0.79.2...v0.79.3) (2026-08-30)
+
+
+### Bug Fixes
+
+* **center:** preserve insert-only agent sync idempotency ([a322c99](https://github.com/xiangnan0811/houfeng/commit/a322c990fbf203ff53fcb2a607a96f7f6af9b72b))
+* **center:** preserve insert-only agent sync idempotency ([d9c4560](https://github.com/xiangnan0811/houfeng/commit/d9c4560c680ff7827f159941b7a362cca84826ed))
+
+
+### Documentation
+
+* **trellis:** record agent sync ACL fix evidence ([e2ec54a](https://github.com/xiangnan0811/houfeng/commit/e2ec54a116b6a60c698319c6b4baa703e7a4abc4))
+
 ## [0.79.2](https://github.com/xiangnan0811/houfeng/compare/v0.79.1...v0.79.2) (2026-08-30)
 
 
