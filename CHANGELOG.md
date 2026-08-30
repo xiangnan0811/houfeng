@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.79.4](https://github.com/xiangnan0811/houfeng/compare/v0.79.3...v0.79.4) (2026-08-30)
+
+
+### Bug Fixes
+
+* **agent:** bound backlog replay without starving fresh sync ([3e0f4b0](https://github.com/xiangnan0811/houfeng/commit/3e0f4b0166d940a77a5d3abcd78e3b271f016043))
+* **center:** make replay projections monotonic and idempotent ([629039c](https://github.com/xiangnan0811/houfeng/commit/629039c8553eb61fa8cb783d596906d33ad2f0cd))
+* **center:** run activity projection under immutable-fact ACL ([3777c1a](https://github.com/xiangnan0811/houfeng/commit/3777c1a09add3cbe76cf7428e9cf747b1c7251ab))
+* keep agent replay fresh and projections monotonic ([fd9e7a5](https://github.com/xiangnan0811/houfeng/commit/fd9e7a5e95f156be5bd0dfcdb65ad62d2099e031))
+
+
+### Documentation
+
+* **trellis:** record replay and projection contracts ([93893ce](https://github.com/xiangnan0811/houfeng/commit/93893cea2704b0664aca9aade4cab52cba5d8fac))
+
 ## [0.79.3](https://github.com/xiangnan0811/houfeng/compare/v0.79.2...v0.79.3) (2026-08-30)
 
 
