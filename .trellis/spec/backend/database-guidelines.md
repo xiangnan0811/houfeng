@@ -1323,6 +1323,64 @@ if syncState.SuppressWritesAndPlan() {
 }
 ```
 
+### Agent sync batch INSERT-only idempotency
+
+#### 1. Scope / Trigger
+
+- Trigger: 修改 `internal/center/store/sync_batches.go`、`agent_sync_batches` 的 ACL / schema / unique constraint，或 agent heartbeat / sync ingestion 的幂等事务。
+- 目标：runtime role 对 `agent_sync_batches` 保持最小 INSERT-only 权限，同时首次 batch 写入、原样重试和事务内事实去重继续工作。
+
+#### 2. Signatures
+
+- Production SQL contract: `INSERT INTO agent_sync_batches (...) VALUES (...) ON CONFLICT DO NOTHING`，不得给 `ON CONFLICT` 添加 column list 或 constraint name。
+- Required PostgreSQL integration test: `TestPostgresIntegrationAgentSyncBatchRuntimeACL`，必须通过生产 `NewPostgresSyncRepository` 和 direct runtime role 执行。
+
+#### 3. Contracts
+
+- Runtime privilege vector 必须是 `INSERT=true`、`SELECT=false`、`UPDATE=false`、`DELETE=false`；不得用表级或列级 SELECT 来绕过 ingest SQL 的权限问题。
+- PostgreSQL 16 对显式 conflict target（例如 `(monitoring_instance_id, sync_batch_id)`）要求读取 target columns，因此会让 INSERT-only runtime 以 SQLSTATE `42501` 失败；生产查询必须使用 targetless `ON CONFLICT DO NOTHING`。
+- 当前 schema 的唯一性前提只有 `PRIMARY KEY (monitoring_instance_id, sync_batch_id)`，所以 targetless 形式保持首次写入和原样重复的既有语义；首次 insert 的 `RowsAffected()` 必须为 1 并继续写事实，重复 insert 必须为 0、提交空 plan，且不得重写 heartbeat、observation 或 `last_heartbeat_at` / `last_sync_at`。
+- 给 `agent_sync_batches` 新增任何 primary key 或 unique constraint 前，必须重审 targetless “忽略任意冲突”的语义、ACL 和 direct-runtime 回归；schema 变更不得默认沿用当前前提。
+- 验证 binding / token / fingerprint 和写入抑制状态后，batch marker 仍必须在 heartbeat / observation facts 之前写入；不得调整事务顺序、参数或错误包装来修复 ACL。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| current direct runtime ACL | INSERT allowed; SELECT/UPDATE/DELETE denied |
+| first heartbeat-only batch | batch marker and heartbeat each persist once; sync timestamps advance |
+| exact duplicate batch | accepted with an empty plan; batch/heartbeat row counts remain one and first-write heartbeat/sync timestamps remain unchanged |
+| explicit conflict target under INSERT-only runtime | wrapped PostgreSQL SQLSTATE `42501`; regression RED |
+| new unique constraint proposed | block until targetless conflict semantics and direct-runtime test are reviewed |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: direct runtime 只拥有 INSERT，首次 heartbeat-only `ApplyBatch` 成功，原样重试也成功且不重复写事实。
+- Base: owner/migrator 负责 seed 和事后计数；被测生产调用始终由 direct runtime session 执行。
+- Bad: 为了让显式 conflict target 工作而给 runtime 增加 SELECT，扩大了 ingest role 的读取能力。
+- Bad: 只用 fake transaction 或 ACL catalog 断言证明修复；它们不能证明 PostgreSQL 16 实际的 privilege check。
+
+#### 6. Tests Required
+
+- SQL shape 单元测试必须同时断言包含 targetless `on conflict do nothing`，且不包含 `on conflict (`。
+- 必须运行真实 PostgreSQL 16 direct-runtime 回归；测试不得因 DSN、fixture 或容器缺失而 skip-as-pass，严格命令为：
+
+```bash
+GOTOOLCHAIN=go1.26.2 scripts/test-record-platform-integration.sh postgres -- go test -v ./internal/center/store -run '^TestPostgresIntegrationAgentSyncBatchRuntimeACL$' -count=1
+```
+
+- 真实回归必须在调用前后核验 ACL 未扩张，并证明首次/重复成功、batch/heartbeat 各一行；首次调用推进 `last_heartbeat_at` / `last_sync_at`，重复调用使用不同 receive time 并证明两个状态时间不被重写。
+
+#### 7. Wrong vs Correct
+
+```sql
+-- 错误：PG16 读取显式 target columns，与 INSERT-only ACL 冲突。
+on conflict (monitoring_instance_id, sync_batch_id) do nothing
+
+-- 正确：在当前唯一复合主键前提下保留 INSERT-only 幂等合同。
+on conflict do nothing
+```
+
 ### Asset Ledger providers
 
 `db/migrations/0016_create_asset_ledger.sql` 是 post-V1 Asset Ledger 的 schema 入口，当前落 `providers` 服务商主数据表：

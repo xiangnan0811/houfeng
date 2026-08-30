@@ -230,6 +230,44 @@ func TestPostgresSyncRepositoryRecordsBatchIDBeforeWritingFacts(t *testing.T) {
 	if len(args) != 2 || args[0] != "mi_001" || args[1] != "sync_001" {
 		t.Fatalf("agent sync batch insert args = %#v, want monitoring instance id and sync batch id", args)
 	}
+	batchSQL := strings.ToLower(tx.execSQL[recordIndex])
+	if !strings.Contains(batchSQL, "on conflict do nothing") {
+		t.Fatal("agent sync batch SQL must use targetless ON CONFLICT DO NOTHING")
+	}
+	if strings.Contains(batchSQL, "on conflict (") {
+		t.Fatal("agent sync batch SQL must not name conflict columns under INSERT-only ACL")
+	}
+}
+
+func TestPostgresSyncRepositoryPreservesAgentSyncBatchPostgresCause(t *testing.T) {
+	t.Parallel()
+
+	wantPostgresError := &pgconn.PgError{Code: "42501"}
+	tx := &fakeSyncBatchTx{
+		monitoringInstanceBindingStatus: agentapi.BindingStatusBound,
+		monitoringInstanceFingerprint:   "fp-001",
+		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
+		probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
+		execErrForSQLSubstring:          "insert into agent_sync_batches",
+		execErr:                         wantPostgresError,
+	}
+	repo := &PostgresSyncRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) {
+			return tx, nil
+		},
+	}
+
+	_, err := repo.ApplyBatch(context.Background(), testSyncBatch())
+	var gotPostgresError *pgconn.PgError
+	if !errors.As(err, &gotPostgresError) || gotPostgresError != wantPostgresError {
+		t.Fatal("ApplyBatch() did not preserve the agent sync batch PostgreSQL typed cause")
+	}
+	if tx.commitCalls != 0 {
+		t.Fatalf("commitCalls = %d, want 0", tx.commitCalls)
+	}
+	if containsSQL(tx.execSQL, "insert into monitoring_instance_heartbeats") {
+		t.Fatal("agent sync batch insert failure wrote heartbeat facts")
+	}
 }
 
 func TestPostgresSyncRepositoryDuplicateBatchCommitsWithoutRewritingFacts(t *testing.T) {
@@ -262,8 +300,13 @@ func TestPostgresSyncRepositoryDuplicateBatchCommitsWithoutRewritingFacts(t *tes
 		containsSQL(tx.execSQL, "last_heartbeat_at = greatest") {
 		t.Fatalf("duplicate sync batch rewrote facts; execSQL=%#v", tx.execSQL)
 	}
-	if result.Plan.ProbeAssignments == nil {
-		t.Fatal("duplicate sync batch should return an empty but non-nil probe assignment slice")
+	if result.Plan.HostSampleFrequencyTier != "" ||
+		result.Plan.HostSampleMaintenanceContext ||
+		result.Plan.IPQualityPlan != nil ||
+		result.Plan.PendingAction != nil ||
+		result.Plan.ProbeAssignments == nil ||
+		len(result.Plan.ProbeAssignments) != 0 {
+		t.Fatal("duplicate sync batch should return an exact empty plan with a non-nil probe assignment slice")
 	}
 }
 
