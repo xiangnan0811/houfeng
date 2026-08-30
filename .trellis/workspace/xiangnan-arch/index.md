@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 267
+- **Total Sessions**: 268
 - **Last Active**: 2026-08-30
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~1168 | Active |
+| `journal-5.md` | ~1190 | Active |
 | `journal-4.md` | ~1998 | Archived |
 | `journal-3.md` | ~1989 | Archived |
 | `journal-2.md` | ~1991 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 268 | 2026-08-30 | Fix agent sync batch INSERT-only ACL | `d9c4560c`, `e2ec54a1` | `codex/agent-heartbeat-onboarding-failure` |
 | 267 | 2026-08-30 | Release monitoring agent heartbeat queue recovery | `61fe8ff3`, `533f6238` | `codex/monitoring-agent-heartbeat-ingestion-finish` |
 | 266 | 2026-08-29 | Restore monitoring agent bootstrap | `4ded7af9`, `30cbe865` | `codex/monitoring-agent-bootstrap-finish` |
 | 265 | 2026-08-29 | Deliver existing NPM proxy compatibility | `1fa3eb33af309f9b503f0a18c5e27d8d0459817a` | `codex/npm-network-compatibility-finish` |
