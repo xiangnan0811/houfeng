@@ -194,7 +194,7 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 
 ### 特殊：syncqueue fsync
 
-`agent/syncqueue/store.go:22-32` 的 `Options.SkipFsync` 是**测试专用开关**，避免 macOS APFS fsync 拖慢运行时计时类测试（CLAUDE.md 提到的"slow filesystems"问题，最近一次修复见 `git log -- agent/syncqueue/`）。
+`agent/syncqueue.Options.SkipFsync` 是**测试专用开关**，避免 macOS APFS fsync 拖慢运行时计时类测试（CLAUDE.md 提到的"slow filesystems"问题，最近一次修复见 `git log -- agent/syncqueue/`）。
 
 约定：
 
@@ -283,7 +283,8 @@ pdfCtx, err := pdfcpu.ReadWithContext(ctx, bytes.NewReader(content), cfg)
    - Defaults: `MaxEntries=65536`、`MaxAge=72h`、`MaxBytes=64MiB`。
    - `MaxBytes <= 0` uses the default; env override must be a positive integer.
    - Queue pruning order is oldest first after sorting by `CreatedAt` / ID, then max entries, then max bytes.
-   - If even the newest entry cannot fit the configured byte cap, the queue may be empty after pruning; do not write a file larger than the cap.
+   - Byte pruning must calculate serialized entry sizes in a linear pass; an oversized legacy/hostile queue must not repeatedly marshal every remaining tail once per evicted entry.
+   - If the newly enqueued entry cannot fit the configured byte cap even by itself, `Enqueue` must return a local durability error and leave the previously persisted queue unchanged; it must never report success after pruning away the new entry or write a file larger than the cap.
    - Production runtime must pass `BufferMaxBytes` into `syncqueue.NewFileStore`; tests may set small caps and `SkipFsync: true`.
 
 4. **Validation & Error Matrix**
@@ -292,16 +293,16 @@ pdfCtx, err := pdfcpu.ReadWithContext(ctx, bytes.NewReader(content), cfg)
    | `HOUFENG_AGENT_BUFFER_MAX_BYTES` missing | default 64MiB |
    | non-integer / `<=0` max bytes | config load error |
    | two entries exceed max bytes but newest fits | oldest dropped, newest remains, file size <= cap |
-   | newest entry exceeds max bytes | all entries dropped, file size <= cap |
+   | newest entry exceeds max bytes | `Enqueue` returns a durability error; the previously persisted queue is unchanged and no oversized file is written |
 
 5. **Good / Base / Bad Cases**
    - Good: center is offline for days; queue keeps recent facts within 64MiB and drops oldest entries predictably.
-   - Base: operator lowers max bytes for a tiny VPS; queue may keep fewer entries but never grows past cap.
+   - Base: operator lowers max bytes for a tiny VPS; fitting new entries may evict older entries, while an individually oversized new entry fails closed and preserves the prior queue.
    - Bad: only limiting entry count lets a few very large command/IP quality payloads fill disk.
 
 6. **Tests Required**
    - `agent/config/config_test.go`: defaults, override, invalid max bytes.
-   - `agent/syncqueue/store_test.go`: byte pruning keeps newest fitting entries and file size stays below cap.
+   - `agent/syncqueue/store_test.go`: byte pruning keeps newest fitting entries and file size stays below cap; an individually oversized new entry returns an error without mutating the prior queue; a default-capacity-scale oversized persisted backlog is pruned without quadratic tail re-encoding.
    - `agent/runtime` or construction coverage proving `BufferMaxBytes` reaches `syncqueue.Options`.
    - Installer embedded-script check that generated `agent.env` includes `HOUFENG_AGENT_BUFFER_MAX_BYTES`.
 

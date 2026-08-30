@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/url"
+	"sort"
 	"time"
 
 	agentconfig "houfeng/agent/config"
@@ -26,6 +29,102 @@ var ErrMissingSyncToken = errors.New("enrollment bound response missing sync tok
 
 var errRemoteSync = errors.New("remote sync failed")
 
+var errStaleSyncAuthority = errors.New("stale sync queue authority")
+
+type syncQueueAction string
+
+type syncFailureKind string
+
+const (
+	syncQueueActionDiscard   syncQueueAction = "discard"
+	syncQueueActionTerminal  syncQueueAction = "terminal"
+	syncQueueActionRetry     syncQueueAction = "retry"
+	syncFailureKindRemote    syncFailureKind = "remote"
+	syncFailureKindTransport syncFailureKind = "transport"
+)
+
+type syncAuthority struct {
+	monitoringInstanceID string
+	syncToken            string
+	fingerprint          string
+}
+
+type syncPolicyError struct {
+	kind       syncFailureKind
+	action     syncQueueAction
+	statusCode int
+	code       string
+	cause      error
+}
+
+type remoteOperationError struct {
+	operation  string
+	kind       syncFailureKind
+	statusCode int
+	code       string
+	cause      error
+}
+
+func (e *remoteOperationError) Error() string {
+	message := fmt.Sprintf("remote operation failed operation=%s kind=%s", e.operation, e.kind)
+	if e.statusCode > 0 {
+		message += fmt.Sprintf(" status=%d", e.statusCode)
+	}
+	if e.code != "" {
+		message += fmt.Sprintf(" code=%s", e.code)
+	}
+	return message
+}
+
+func (e *remoteOperationError) Unwrap() error {
+	return e.cause
+}
+
+type syncQueueOperationError struct {
+	operation string
+	cause     error
+}
+
+func (e *syncQueueOperationError) Error() string {
+	return fmt.Sprintf("sync queue operation failed operation=%s", e.operation)
+}
+
+func (e *syncQueueOperationError) Unwrap() error {
+	return e.cause
+}
+
+type runtimeOperationError struct {
+	operation string
+	cause     error
+}
+
+func (e *runtimeOperationError) Error() string {
+	return fmt.Sprintf("runtime operation failed operation=%s", e.operation)
+}
+
+func (e *runtimeOperationError) Unwrap() error {
+	return e.cause
+}
+
+func (e *syncPolicyError) Error() string {
+	message := fmt.Sprintf("sync failure kind=%s action=%s", e.kind, e.action)
+	if e.statusCode > 0 {
+		message += fmt.Sprintf(" status=%d", e.statusCode)
+	}
+	if e.code != "" {
+		message += fmt.Sprintf(" code=%s", e.code)
+	}
+	return message
+}
+
+func (e *syncPolicyError) Unwrap() error {
+	return e.cause
+}
+
+func (e *syncPolicyError) Is(target error) bool {
+	return e.action == syncQueueActionRetry && target == errRemoteSync
+}
+
 type EnrollmentNotBoundError struct {
 	BindingStatus string
 }
@@ -34,7 +133,12 @@ func (e *EnrollmentNotBoundError) Error() string {
 	if e.BindingStatus == "" {
 		return "enrollment binding_status is not bound"
 	}
-	return fmt.Sprintf("enrollment binding_status is %q, want %q", e.BindingStatus, agentapi.BindingStatusBound)
+	switch e.BindingStatus {
+	case agentapi.BindingStatusUnbound, agentapi.BindingStatusPendingConfirmation:
+		return fmt.Sprintf("enrollment binding_status is %q, want %q", e.BindingStatus, agentapi.BindingStatusBound)
+	default:
+		return fmt.Sprintf("enrollment binding_status is unrecognized, want %q", agentapi.BindingStatusBound)
+	}
 }
 
 type Client interface {
@@ -72,6 +176,7 @@ type SyncQueue interface {
 	Enqueue(context.Context, agentapi.SyncRequest) (string, error)
 	List(context.Context) ([]syncqueue.Entry, error)
 	Delete(context.Context, string) error
+	DeleteMany(context.Context, []string) error
 	MarkAttempt(context.Context, string) error
 	Prune(context.Context) error
 }
@@ -91,6 +196,7 @@ type Runtime struct {
 	currentPlan         *agentapi.SyncPlan
 	lastHostSampleAt    time.Time
 	pendingResults      []agentexec.Result
+	pendingIPReports    []agentapi.IPQualityReportPayload
 }
 
 func New(cfg agentconfig.AgentConfig, logger *slog.Logger, tokenSource TokenSource, fingerprintSource FingerprintSource) *Runtime {
@@ -171,25 +277,40 @@ func (r *Runtime) Run(ctx context.Context) error {
 		return fmt.Errorf("runtime fingerprint source is nil")
 	}
 
-	r.logger.Info("agent runtime started", "server_url", r.cfg.ServerURL)
-	defer r.logger.Info("agent runtime stopped", "server_url", r.cfg.ServerURL)
+	serverURL := serverURLForLog(r.cfg.ServerURL)
+	r.logger.Info("agent runtime started", "server_url", serverURL)
+	defer r.logger.Info("agent runtime stopped", "server_url", serverURL)
 
 	fingerprint, err := r.fingerprintSource.Fingerprint(ctx)
 	if err != nil {
-		return fmt.Errorf("load fingerprint: %w", err)
+		if ctx.Err() != nil {
+			return nil
+		}
+		return &runtimeOperationError{operation: "load_fingerprint", cause: err}
 	}
 
 	monitoringInstanceID, syncToken, ok, err := r.loadSyncCredentials(ctx)
 	if err != nil {
-		return err
+		if ctx.Err() != nil {
+			return nil
+		}
+		return &runtimeOperationError{operation: "load_sync_credentials", cause: err}
 	}
 	if !ok {
 		enrollment, err := r.enroll(ctx, fingerprint)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
 		monitoringInstanceID = enrollment.MonitoringInstanceID
 		syncToken = enrollment.SyncToken
+	}
+	authority := syncAuthority{
+		monitoringInstanceID: monitoringInstanceID,
+		syncToken:            syncToken,
+		fingerprint:          fingerprint,
 	}
 
 	ticker := time.NewTicker(r.interval)
@@ -207,15 +328,23 @@ func (r *Runtime) Run(ctx context.Context) error {
 			if r.syncQueue == nil {
 				response, err := r.client.Sync(ctx, request)
 				if err != nil {
-					return fmt.Errorf("sync heartbeat: %w", err)
+					if ctx.Err() != nil {
+						return nil
+					}
+					return fmt.Errorf("sync heartbeat: %w", classifySyncFailure(err))
 				}
+				r.acknowledgePendingPayloads(len(request.CommandResults), len(request.IPQualityReports))
 				r.applySyncPlan(ctx, response)
 				continue
 			}
 
-			if err := r.enqueueAndFlush(ctx, request, syncBatchID); err != nil {
+			if err := r.enqueueAndFlush(ctx, request, syncBatchID, authority); err != nil {
 				if ctx.Err() != nil {
 					return nil
+				}
+				var policyErr *syncPolicyError
+				if errors.As(err, &policyErr) && policyErr.action == syncQueueActionTerminal {
+					return fmt.Errorf("sync queue terminal failure: %w", err)
 				}
 				if errors.Is(err, errRemoteSync) {
 					r.logger.Error("sync queue flush failed", "error", err)
@@ -241,7 +370,7 @@ func (r *Runtime) loadSyncCredentials(ctx context.Context) (string, string, bool
 func (r *Runtime) enroll(ctx context.Context, fingerprint string) (*agentapi.EnrollmentResponse, error) {
 	token, err := r.tokenSource.Token(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("load token: %w", err)
+		return nil, &runtimeOperationError{operation: "load_enrollment_token", cause: err}
 	}
 
 	enrollment, err := r.client.Enroll(ctx, agentapi.EnrollmentRequest{
@@ -249,10 +378,9 @@ func (r *Runtime) enroll(ctx context.Context, fingerprint string) (*agentapi.Enr
 		Fingerprint: fingerprint,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("enroll agent: %w", err)
+		return nil, fmt.Errorf("enroll agent: %w", classifyRemoteOperationFailure("enroll", err))
 	}
 
-	r.logger.Info("agent enrolled", "monitoring_instance_id", enrollment.MonitoringInstanceID, "status", enrollment.Status, "binding_status", enrollment.BindingStatus)
 	if enrollment.BindingStatus != agentapi.BindingStatusBound {
 		return nil, fmt.Errorf("enroll agent: %w", &EnrollmentNotBoundError{BindingStatus: enrollment.BindingStatus})
 	}
@@ -261,9 +389,14 @@ func (r *Runtime) enroll(ctx context.Context, fingerprint string) (*agentapi.Enr
 	}
 	if r.syncCredentialStore != nil {
 		if err := r.syncCredentialStore.SaveSyncCredentials(ctx, enrollment.MonitoringInstanceID, enrollment.SyncToken); err != nil {
-			return nil, fmt.Errorf("persist sync credentials: %w", err)
+			return nil, &runtimeOperationError{operation: "persist_sync_credentials", cause: err}
 		}
 	}
+	enrollmentStatus := "unrecognized"
+	if enrollment.Status == "accepted" {
+		enrollmentStatus = enrollment.Status
+	}
+	r.logger.Info("agent enrolled", "status", enrollmentStatus, "binding_status", enrollment.BindingStatus)
 	return enrollment, nil
 }
 
@@ -290,7 +423,8 @@ func (r *Runtime) buildSyncRequest(ctx context.Context, monitoringInstanceID, sy
 		request.ProbeObservations = append(request.ProbeObservations, probeObservations...)
 	}
 
-	request.IPQualityReports = append(request.IPQualityReports, r.drainIPQualityReports(observedAt, fingerprint, syncBatchID)...)
+	r.pendingIPReports = append(r.pendingIPReports, r.drainIPQualityReports(observedAt, fingerprint, syncBatchID)...)
+	request.IPQualityReports = append(request.IPQualityReports, r.pendingIPReports...)
 	r.startIPQualityCollection(ctx, observedAt)
 
 	// Flush any pending command results from executed actions.
@@ -303,26 +437,42 @@ func (r *Runtime) buildSyncRequest(ctx context.Context, monitoringInstanceID, sy
 			ExitCode:  pr.ExitCode,
 		})
 	}
-	r.pendingResults = nil
-
 	return request
 }
 
-func (r *Runtime) enqueueAndFlush(ctx context.Context, request agentapi.SyncRequest, currentBatchID string) error {
+func (r *Runtime) enqueueAndFlush(ctx context.Context, request agentapi.SyncRequest, currentBatchID string, authority syncAuthority) error {
 	if _, err := r.syncQueue.Enqueue(ctx, request); err != nil {
-		return fmt.Errorf("enqueue sync request: %w", err)
+		return &syncQueueOperationError{operation: "enqueue", cause: err}
 	}
+	r.acknowledgePendingPayloads(len(request.CommandResults), len(request.IPQualityReports))
 	if err := r.syncQueue.Prune(ctx); err != nil {
-		return fmt.Errorf("prune sync queue: %w", err)
+		return &syncQueueOperationError{operation: "prune", cause: err}
 	}
-	if err := r.flushSyncQueue(ctx, currentBatchID); err != nil {
+	if err := r.flushSyncQueue(ctx, currentBatchID, authority); err != nil {
 		return fmt.Errorf("flush sync queue: %w", err)
 	}
 	return nil
 }
 
-func (r *Runtime) flushSyncQueue(ctx context.Context, currentBatchID string) error {
+func (r *Runtime) acknowledgePendingPayloads(commandResults, ipQualityReports int) {
+	if commandResults >= len(r.pendingResults) {
+		r.pendingResults = nil
+	} else if commandResults > 0 {
+		r.pendingResults = r.pendingResults[commandResults:]
+	}
+	if ipQualityReports >= len(r.pendingIPReports) {
+		r.pendingIPReports = nil
+	} else if ipQualityReports > 0 {
+		r.pendingIPReports = r.pendingIPReports[ipQualityReports:]
+	}
+}
+
+func (r *Runtime) flushSyncQueue(ctx context.Context, currentBatchID string, authority syncAuthority) error {
 	entries, err := r.syncQueue.List(ctx)
+	if err != nil {
+		return &syncQueueOperationError{operation: "list", cause: err}
+	}
+	entries, err = r.discardStaleSyncQueueEntries(ctx, entries, authority)
 	if err != nil {
 		return err
 	}
@@ -330,16 +480,79 @@ func (r *Runtime) flushSyncQueue(ctx context.Context, currentBatchID string) err
 		response, err := r.syncRequest(ctx, entry, currentBatchID)
 		if err != nil {
 			if markErr := r.syncQueue.MarkAttempt(ctx, entry.ID); markErr != nil {
-				return fmt.Errorf("mark sync attempt for %s: %w", entry.ID, markErr)
+				return &syncQueueOperationError{operation: "mark_attempt", cause: markErr}
 			}
-			return err
+			var policyErr *syncPolicyError
+			if !errors.As(err, &policyErr) {
+				return err
+			}
+			switch policyErr.action {
+			case syncQueueActionDiscard:
+				if deleteErr := r.syncQueue.Delete(ctx, entry.ID); deleteErr != nil {
+					return &syncQueueOperationError{operation: "delete_rejected", cause: deleteErr}
+				}
+				r.logSyncQueuePolicy("discard rejected sync queue entry", policyErr)
+				continue
+			case syncQueueActionTerminal:
+				return policyErr
+			case syncQueueActionRetry:
+				return policyErr
+			default:
+				return err
+			}
 		}
 		if err := r.syncQueue.Delete(ctx, entry.ID); err != nil {
-			return fmt.Errorf("delete synced queue entry %s: %w", entry.ID, err)
+			return &syncQueueOperationError{operation: "delete_acknowledged", cause: err}
 		}
 		r.applySyncPlan(ctx, response)
 	}
 	return nil
+}
+
+func (r *Runtime) discardStaleSyncQueueEntries(ctx context.Context, entries []syncqueue.Entry, authority syncAuthority) ([]syncqueue.Entry, error) {
+	staleIDs := make([]string, 0)
+	retained := make([]syncqueue.Entry, 0, len(entries))
+	retainedIDs := make(map[string]struct{})
+	reasonCounts := make(map[string]int)
+	for _, entry := range entries {
+		if _, stale := syncQueueAuthorityMismatch(entry.Request, authority); !stale {
+			retained = append(retained, entry)
+			retainedIDs[entry.ID] = struct{}{}
+		}
+	}
+	for _, entry := range entries {
+		reason, stale := syncQueueAuthorityMismatch(entry.Request, authority)
+		if !stale {
+			continue
+		}
+		if _, collidesWithRetained := retainedIDs[entry.ID]; collidesWithRetained {
+			continue
+		}
+		staleIDs = append(staleIDs, entry.ID)
+		reasonCounts[reason]++
+	}
+	if len(staleIDs) == 0 {
+		return retained, nil
+	}
+	if err := r.syncQueue.DeleteMany(ctx, staleIDs); err != nil {
+		return nil, &syncQueueOperationError{operation: "delete_stale", cause: err}
+	}
+
+	reasons := make([]string, 0, len(reasonCounts))
+	for reason := range reasonCounts {
+		reasons = append(reasons, reason)
+	}
+	sort.Strings(reasons)
+	for _, reason := range reasons {
+		r.logger.Error(
+			"discard stale sync queue entries",
+			"error", errStaleSyncAuthority,
+			"action", syncQueueActionDiscard,
+			"reason", reason,
+			"discarded", reasonCounts[reason],
+		)
+	}
+	return retained, nil
 }
 
 func (r *Runtime) syncRequest(ctx context.Context, entry syncqueue.Entry, currentBatchID string) (*agentapi.SyncResponse, error) {
@@ -349,9 +562,128 @@ func (r *Runtime) syncRequest(ctx context.Context, entry syncqueue.Entry, curren
 	}
 	response, err := r.client.Sync(ctx, request)
 	if err != nil {
-		return nil, fmt.Errorf("%w: sync heartbeat: %w", errRemoteSync, err)
+		return nil, classifySyncFailure(err)
 	}
 	return response, nil
+}
+
+func (r *Runtime) logSyncQueuePolicy(message string, policyErr *syncPolicyError) {
+	attributes := []any{
+		"error", policyErr,
+		"kind", policyErr.kind,
+		"action", policyErr.action,
+	}
+	if policyErr.statusCode > 0 {
+		attributes = append(attributes, "status", policyErr.statusCode)
+	}
+	if policyErr.code != "" {
+		attributes = append(attributes, "code", policyErr.code)
+	}
+	r.logger.Error(message, attributes...)
+}
+
+func classifyRemoteOperationFailure(operation string, err error) *remoteOperationError {
+	operationErr := &remoteOperationError{
+		operation: operation,
+		kind:      syncFailureKindTransport,
+		cause:     err,
+	}
+	var remoteErr *enroll.RemoteError
+	if !errors.As(err, &remoteErr) || remoteErr == nil {
+		return operationErr
+	}
+	operationErr.kind = syncFailureKindRemote
+	operationErr.statusCode = remoteErr.StatusCode
+	operationErr.code = allowlistedAgentErrorCode(remoteErr.Code)
+	return operationErr
+}
+
+func serverURLForLog(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "invalid"
+	}
+	return parsed.Scheme + "://" + parsed.Host
+}
+
+func classifySyncFailure(err error) *syncPolicyError {
+	policyErr := &syncPolicyError{
+		kind:   syncFailureKindTransport,
+		action: syncQueueActionRetry,
+		cause:  err,
+	}
+	var remoteErr *enroll.RemoteError
+	if !errors.As(err, &remoteErr) || remoteErr == nil {
+		return policyErr
+	}
+
+	policyErr.kind = syncFailureKindRemote
+	policyErr.statusCode = remoteErr.StatusCode
+	policyErr.code = allowlistedAgentErrorCode(remoteErr.Code)
+	if remoteErr.StatusCode == 429 || remoteErr.StatusCode >= 500 {
+		return policyErr
+	}
+	if remoteErr.StatusCode == http.StatusBadRequest &&
+		(remoteErr.Code == agentapi.ErrorCodeInvalidJSON || remoteErr.Code == agentapi.ErrorCodeInvalidRequest) {
+		policyErr.action = syncQueueActionDiscard
+		return policyErr
+	}
+	if remoteErr.StatusCode >= 400 && remoteErr.StatusCode < 500 {
+		policyErr.action = syncQueueActionTerminal
+	}
+	return policyErr
+}
+
+func allowlistedAgentErrorCode(code string) string {
+	switch code {
+	case agentapi.ErrorCodeInvalidRequest,
+		agentapi.ErrorCodeInvalidJSON,
+		agentapi.ErrorCodeInvalidEnrollmentToken,
+		agentapi.ErrorCodeInvalidSyncToken,
+		agentapi.ErrorCodeBindingNotAccepted,
+		agentapi.ErrorCodeMethodNotAllowed,
+		agentapi.ErrorCodeMonitoringInstanceNotFound,
+		agentapi.ErrorCodeInternalError:
+		return code
+	default:
+		return ""
+	}
+}
+
+func syncQueueAuthorityMismatch(request agentapi.SyncRequest, authority syncAuthority) (string, bool) {
+	if request.MonitoringInstanceID != authority.monitoringInstanceID {
+		return "monitoring_instance_mismatch", true
+	}
+	if request.SyncToken != authority.syncToken {
+		return "sync_token_mismatch", true
+	}
+	if len(request.Heartbeats) == 0 {
+		return "missing_heartbeat", true
+	}
+	for _, heartbeat := range request.Heartbeats {
+		if heartbeat.SyncBatchID == "" {
+			return "missing_heartbeat_batch_id", true
+		}
+		if heartbeat.Fingerprint != authority.fingerprint {
+			return "heartbeat_fingerprint_mismatch", true
+		}
+	}
+	for _, sample := range request.HostSamples {
+		if sample.Fingerprint != authority.fingerprint {
+			return "host_sample_fingerprint_mismatch", true
+		}
+	}
+	for _, observation := range request.ProbeObservations {
+		if observation.Fingerprint != authority.fingerprint {
+			return "probe_fingerprint_mismatch", true
+		}
+	}
+	for _, report := range request.IPQualityReports {
+		if report.Fingerprint != authority.fingerprint {
+			return "ip_quality_fingerprint_mismatch", true
+		}
+	}
+	return "", false
 }
 
 func (r *Runtime) applySyncPlan(ctx context.Context, response *agentapi.SyncResponse) {
