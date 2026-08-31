@@ -3,7 +3,7 @@
   "name": "vps-heartbeat-notification-policy",
   "title": "修复 VPS 心跳异常通知策略",
   "description": "修复成功同步后的心跳判定静默回退 3、N-1 提前触发、单心跳立即恢复和通知缺少 VPS/监控实例身份的问题；默认改为 12，按 N/2N/4N 分级并以 3 个连续实时批次恢复。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "bugfix",
   "scope": "fullstack",
   "package": "internal/center/incidents",
@@ -11,12 +11,12 @@
   "creator": "xiangnan-arch",
   "assignee": "xiangnan-arch",
   "createdAt": "2026-08-31",
-  "completedAt": null,
+  "completedAt": "2026-08-31",
   "branch": "codex/heartbeat-notification-policy",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "4b093c7812e30d67edae61908c3991ce33416dab",
+  "pr_url": "https://github.com/xiangnan0811/houfeng/pull/484",
   "subtasks": [],
   "children": [],
   "parent": null,
@@ -49,6 +49,6 @@
     ".trellis/spec/web/state-and-data.md",
     ".trellis/spec/web/quality-guidelines.md"
   ],
-  "notes": "产品已选择方案 A 并批准实施及完整受保护交付。步骤 2-11 与任务内 TDD 已完成；独立审查依次修复严格 recovery policy validation、mixed heartbeat batch ID ingress invariant 与默认阈值重复 literal，最终全范围复审零发现。精确 Go 1.26.2、strict PostgreSQL、Node 22 Web、136 项 E2E、视觉证据测试及三视口生产预览 browser sanity 均已 fresh 通过；步骤 12 等待实际完成受保护交付、发布验收、Trellis 归档和现场清理。",
+  "notes": "产品已选择方案 A 并批准实施及完整受保护交付。步骤 2-11 与任务内 TDD 已完成；独立审查依次修复严格 recovery policy validation、mixed heartbeat batch ID ingress invariant 与默认阈值重复 literal，最终全范围复审零发现。功能 PR #484、release PR #485、两轮 exact-main CI 和 v0.79.5 publish-images 均成功，公开资产签名/校验和与多架构 OCI image 已独立复核。真实 staging run 33358504336 在任何 mutation 前发现环境仍为 v0.59.0 并 fail closed；仓库无部署授权，staging 升级与真实 19/20、三次恢复、通知主体验收已拆到未启动任务 08-31-staging-heartbeat-policy-acceptance，当前任务不虚称 live acceptance。",
   "meta": {}
 }

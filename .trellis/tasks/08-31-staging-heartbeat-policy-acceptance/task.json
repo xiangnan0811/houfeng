@@ -1,0 +1,30 @@
+{
+  "id": "staging-heartbeat-policy-acceptance",
+  "name": "staging-heartbeat-policy-acceptance",
+  "title": "升级 staging 并验收 VPS 心跳通知策略",
+  "description": "将 https://staging.yading.de 从当前 v0.59.0 升级到 v0.79.5 或更高兼容版本，并在可控测试实例上完成持久化阈值 readback、N=20 的 19/20 边界、三次非回填实时心跳恢复以及通知主体的真实环境验收；部署授权、凭据和回滚必须另行确认。",
+  "status": "planning",
+  "dev_type": "implementation",
+  "scope": "fullstack",
+  "package": null,
+  "priority": "P2",
+  "creator": "xiangnan-arch",
+  "assignee": "xiangnan-arch",
+  "createdAt": "2026-08-31",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".github/workflows/frontend-staging-smoke.yml",
+    "docs/operations/ui-preview-and-browser-sanity.md",
+    ".trellis/tasks/08-31-vps-heartbeat-notification-policy/implement.md"
+  ],
+  "notes": "由 v0.79.5 release-bound staging audit 创建。run 33358504336 在任何登录/设置写入前因 expected v0.79.5、observed v0.59.0 fail closed；仓库没有 staging 部署 workflow 或主机授权。任务未启动，部署授权、备份和回滚方案必须先确认。",
+  "meta": {}
+}

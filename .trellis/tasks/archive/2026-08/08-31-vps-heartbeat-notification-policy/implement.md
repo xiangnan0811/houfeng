@@ -130,6 +130,9 @@
   - commit/push feature branch、创建 PR；required CI 全绿后合并，再监控 main CI、Release Please、release 和多架构镜像发布。
   - 升级环境后 read back 全局阈值；用可控测试实例分别验证 19/20 边界、3 次 live recovery 和消息主体，不制造真实用户噪声。
   - 报告数据库 migration/index、事件、通知记录、外发消息与 Agent 心跳的联合证据；仅页面显示 20 或进程 active 不算验收完成。
+  - 2026-08-31 交付部分已完成：feature PR `#484` head `4b093c78` 的 7 项 CI 全绿，合并为 `ecfbb808`；exact-main CI run `33357793177` 全绿。Release PR `#485` 在删除重复 CHANGELOG 项后以 head `b0035f2b` 的 7 项 CI 全绿，合并为 `e427f41b`。
+  - Release `v0.79.5` 精确指向 `e427f41b`；release-main CI run `33358208141` 与 `publish-images` run `33358215951` 均成功。公开 Agent checksum manifest minisign 验签、两架构 SHA256/static/vcs metadata、部署资产 digests 及 Docker Registry OCI index 均已独立复核；`v0.79.5`、`0.79.5`、`latest` 同指 `sha256:a3c75cab7538d6b601a48d7d6a26db1ea1c4658ba14edc528663cff6c9e8ab6e`，包含 linux/arm64 `sha256:24b081a5af62c204474f0608ceb27a7fde59bd480a31cc88c2553ad8b166b911` 与 linux/amd64 `sha256:937f720cd3a12e26e5f2465981973c5bc30bbc8eb8e8cd2959b804980bf68d99`。
+  - 真实环境验收未冒充完成：从受保护 main dispatch 的 staging run `33358504336` 要求 `v0.79.5`，但 `/api/healthz` 实际仍为 `v0.59.0`，因此在登录或任何 Settings mutation 前 fail closed。脱敏 artifact `frontend-staging-audit-33358504336` digest 为 `sha256:f5f7fcdbbdeb6a506f2f8da5691ad4f52ae36e2f5ededad177cf85a9f40a5118`；仓库无 staging 部署 workflow/主机授权，升级与 19/20、三次恢复、通知主体联合验收已拆到未启动任务 `08-31-staging-heartbeat-policy-acceptance`。
 
 ## Planned changed files
 
