@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.79.5](https://github.com/xiangnan0811/houfeng/compare/v0.79.4...v0.79.5) (2026-08-31)
+
+
+### Bug Fixes
+
+* **monitoring:** stabilize heartbeat incident notifications ([ecfbb80](https://github.com/xiangnan0811/houfeng/commit/ecfbb808fc7ed326d0f2ed5b332c861c73da6522))
+* **monitoring:** stabilize heartbeat incident notifications ([4b093c7](https://github.com/xiangnan0811/houfeng/commit/4b093c7812e30d67edae61908c3991ce33416dab))
+
 ## [0.79.4](https://github.com/xiangnan0811/houfeng/compare/v0.79.3...v0.79.4) (2026-08-30)
 
 
