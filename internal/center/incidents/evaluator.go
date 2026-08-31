@@ -10,20 +10,79 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
-func EvaluateMonitoringInstanceHeartbeatMissing(previous *IncidentRecord, monitoringInstanceID string, now time.Time, lastHeartbeatAt *time.Time, heartbeatInterval time.Duration, staleThresholdIntervals ...int) EvaluationResult {
-	if lastHeartbeatAt == nil || heartbeatInterval <= 0 {
+const maxHeartbeatIncidentInterval = time.Duration(1<<63-1) / 2
+
+func EvaluateMonitoringInstanceHeartbeatMissing(previous *IncidentRecord, monitoringInstanceID string, now time.Time, lastHeartbeatAt *time.Time, policy HeartbeatIncidentPolicy, recoveryReceipts []LiveHeartbeatReceipt) EvaluationResult {
+	if lastHeartbeatAt == nil || !validHeartbeatIncidentPolicy(policy) {
 		return noop(previous)
 	}
-	missed := int(now.Sub(*lastHeartbeatAt) / heartbeatInterval)
-	threshold := 3
-	if len(staleThresholdIntervals) > 0 && staleThresholdIntervals[0] > 0 {
-		threshold = staleThresholdIntervals[0]
-	}
-	severity, summary, active := heartbeatSeverity(missed, threshold)
+	missed := heartbeatMissedIntervals(now, *lastHeartbeatAt, policy.HeartbeatInterval)
+	severity, summary, active := heartbeatSeverity(missed, policy.MissingThreshold)
 	if !active {
+		if previous == nil || !hasStableHeartbeatRecoveryEvidence(previous, policy, recoveryReceipts) {
+			return noop(previous)
+		}
 		return recoverIfNeeded(previous, now, "心跳已恢复", MonitoringEventProvenanceCenter, false)
 	}
 	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceHeartbeatMissing, severity, now, summary, MonitoringEventProvenanceCenter)
+}
+
+func heartbeatMissedIntervals(now, lastHeartbeatAt time.Time, heartbeatInterval time.Duration) int {
+	if heartbeatInterval <= 0 || !now.After(lastHeartbeatAt) {
+		return 0
+	}
+	missed := now.Sub(lastHeartbeatAt) / heartbeatInterval
+	if missed <= 0 {
+		return 0
+	}
+	maxInt := int(^uint(0) >> 1)
+	if uint64(missed) > uint64(maxInt) {
+		return maxInt
+	}
+	return int(missed)
+}
+
+func validHeartbeatIncidentPolicy(policy HeartbeatIncidentPolicy) bool {
+	return policy.HeartbeatInterval > 0 &&
+		policy.HeartbeatInterval <= maxHeartbeatIncidentInterval &&
+		policy.MissingThreshold > 0 &&
+		policy.MissingThreshold <= int(^uint(0)>>1)/4 &&
+		policy.RecoverySuccesses == heartbeatRecoverySuccesses &&
+		policy.RecoveryMaxIntervalGap == 2*policy.HeartbeatInterval
+}
+
+func hasStableHeartbeatRecoveryEvidence(previous *IncidentRecord, policy HeartbeatIncidentPolicy, receipts []LiveHeartbeatReceipt) bool {
+	if previous == nil || previous.StartedAt.IsZero() || len(receipts) < policy.RecoverySuccesses {
+		return false
+	}
+
+	latestByBatch := make(map[string]time.Time, len(receipts))
+	for _, receipt := range receipts {
+		batchID := strings.TrimSpace(receipt.SyncBatchID)
+		if batchID == "" || !receipt.ReceivedAt.After(previous.StartedAt) {
+			continue
+		}
+		if current, ok := latestByBatch[batchID]; !ok || receipt.ReceivedAt.After(current) {
+			latestByBatch[batchID] = receipt.ReceivedAt
+		}
+	}
+	if len(latestByBatch) < policy.RecoverySuccesses {
+		return false
+	}
+
+	receivedAt := make([]time.Time, 0, len(latestByBatch))
+	for _, value := range latestByBatch {
+		receivedAt = append(receivedAt, value)
+	}
+	sort.Slice(receivedAt, func(i, j int) bool { return receivedAt[i].After(receivedAt[j]) })
+	receivedAt = receivedAt[:policy.RecoverySuccesses]
+	sort.Slice(receivedAt, func(i, j int) bool { return receivedAt[i].Before(receivedAt[j]) })
+	for i := 1; i < len(receivedAt); i++ {
+		if receivedAt[i].Sub(receivedAt[i-1]) > policy.RecoveryMaxIntervalGap {
+			return false
+		}
+	}
+	return true
 }
 
 func EvaluateMonitoringInstanceDiskPressure(previous *IncidentRecord, monitoringInstanceID string, sample *runtimefacts.HostSample, thresholds MetricThresholds) EvaluationResult {
@@ -409,21 +468,15 @@ func severityRank(severity Severity) int {
 	}
 }
 
-func heartbeatSeverity(missed, alertThreshold int) (Severity, string, bool) {
-	if alertThreshold <= 0 {
-		alertThreshold = 3
-	}
-	noticeThreshold := alertThreshold - 1
-	if noticeThreshold < 1 {
-		noticeThreshold = 1
-	}
-	criticalThreshold := alertThreshold + 2
+func heartbeatSeverity(missed, missingThreshold int) (Severity, string, bool) {
+	alertThreshold := 2 * missingThreshold
+	criticalThreshold := 4 * missingThreshold
 	switch {
 	case missed >= criticalThreshold:
 		return SeverityCritical, fmt.Sprintf("最近 %d 个心跳周期未收到心跳", missed), true
 	case missed >= alertThreshold:
 		return SeverityAlert, fmt.Sprintf("最近 %d 个心跳周期未收到心跳", missed), true
-	case missed >= noticeThreshold:
+	case missed >= missingThreshold:
 		return SeverityNotice, fmt.Sprintf("最近 %d 个心跳周期未收到心跳", missed), true
 	default:
 		return SeverityNormal, "", false

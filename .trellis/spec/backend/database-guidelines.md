@@ -2471,6 +2471,99 @@ if currentVersion != mutation.ExpectedObjectRowVersion { return ErrIncidentProje
 replaceActive(ctx, tx, mutation.Active)
 ```
 
+### Scenario: Heartbeat incident policy and stable live recovery
+
+#### 1. Scope / Trigger
+
+- Trigger：修改 heartbeat incident evaluator/service、settings-backed policy、heartbeat receipt snapshot 查询、心跳通知正文、`0063_tune_heartbeat_incident_policy.sql` 或对应 current APP ACL fragment。
+- 目标：periodic 与 post-sync 使用同一持久化策略精确判定失联，只用服务端确认的稳定实时心跳恢复，并保持 settings/CAS/通知/迁移边界 fail closed。
+
+#### 2. Signatures
+
+- `HeartbeatIncidentPolicy` 是必填显式值，包含 heartbeat interval、missing threshold、recovery successes（当前固定 3）与 max recovery gap（当前固定 `2 * interval`）；evaluator 不得保留 variadic threshold 或硬编码 3 的兼容 fallback。
+- `SnapshotReader.ListRecentLiveHeartbeatReceipts(ctx, monitoringInstanceID, startedAt)` 只返回有界的 `SyncBatchID` 与服务端 `ReceivedAt`。
+- `syncing.MaxBatchItems = 256` 是 Agent sync handler 与恢复查询共用的单批集合上限；有效 HTTP heartbeat carrier 固定为 `1..MaxBatchItems`，同一请求内每个 heartbeat 必须使用相同 `sync_batch_id`，不得在两处复制 256。
+
+#### 3. Contracts
+
+- `N` 是首次事件边界：`N <= missed < 2N` 为关注、`2N <= missed < 4N` 为告警、`missed >= 4N` 为严重。默认 `N=12`；自定义 `N=20` 的精确边界是 20/40/80。
+- periodic sweep 与 `AfterSuccessfulSync` 必须通过同一个权威 resolver 读取 persisted policy。settings read/decode/validation error 返回内部评估边界且不产生新的 heartbeat mutation/notification；periodic 返回该错误，公开 `AfterSuccessfulSync` 因 sync 事实已提交而记录稳定日志并返回 `nil`，交给 periodic 后续收敛，避免 Agent 重试命中 `exact_duplicate` 后永久跳过 post-sync。CAS retry 必须重读 record、active incidents、settings、notification toggles 与 recovery receipts。
+- 非空 heartbeat carrier 全为 `is_backfilled=true` 时，公开 post-sync full attempt 必须跳过 heartbeat start/escalate/recover 并保留 active heartbeat incident，但同批其他维度仍按既有 provenance 规则评估；空 carrier 为兼容 fixture 正常评估，mixed/live carrier 也正常评估。CAS retry 保留首次触发 provenance，但仍重读上述事实与策略。
+- settings 校验必须限制 `seconds * time.Second`、`2 * heartbeat interval` 与 `4 * N` 的平台安全上界，domain policy validation 也拒绝越界直接构造；missed-interval 转换必须饱和，不能因 `int` 宽度回绕。
+- active heartbeat incident 只在 `started_at` 之后收到 3 个不同 `sync_batch_id` 的 non-backfilled live receipts 后恢复；排序和 gap 均使用服务端 `received_at`，相邻 gap 必须 `<= 2 * heartbeat interval`。1/2 个 receipt、duplicate batch、backfill、pre-incident、超 gap、query error 或单纯提高阈值都保留 active incident。
+- PostgreSQL reader 必须先建立 `recent_live AS MATERIALIZED`：限定 monitoring instance、`received_at > started_at`、`is_backfilled = false`，按 `received_at desc, id desc` 排序，并在任何 WindowAgg/去重前 `limit $3`；arg3 固定为 `3 * syncing.MaxBatchItems = 768`。随后才按 `sync_batch_id` 去重并最终 `limit 3`；只 scan batch ID/received time，所有 query/scan/iteration error 用 `%w` 保留 cause。每个 accepted batch 最多 256 条 heartbeat，因此 768 行足以包含最近三个批次的证据；同时间戳以 `id` 稳定决胜，不假设时间唯一。绕过 ingress 上限的 legacy/direct write 至多令查询少取 distinct batch、延迟恢复，不能制造恢复，保持 fail closed。严格 PostgreSQL 证据必须先对大历史 `ANALYZE`，再以 `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` 递归证明 heartbeat relation 使用 `idx_monitoring_instance_heartbeats_live_received` 的有序 `Index Scan` / `Index Only Scan`；禁止该 relation 的 Seq/Bitmap 路径，并固定约束 scan rows×loops、filter removals 与 shared hit/read blocks。既有 latest/current ordering 不得改变。
+- 心跳通知只在 post-commit delivery 边界格式化为 `VPS/监控实例：<安全名称或未命名监控实例>（<稳定 ID>）`、事件标签和原 evaluator summary。名称处理固定为：CR/LF 与控制字符替换为空白、bidi controls 移除、Unicode 空白折叠并 trim；最多 80 个 rune，超限以单个 `…` 结尾且总长仍不超过 80，净化后空值 fallback。领域 event summary 保持简洁，Telegram/飞书 dispatch 文本必须与对应 `notification_records.summary` 完全一致。行政恢复继续零通知。
+- `0063` 把 `center_settings.incident_defaults` 列默认值改为 12，只将现有全局顶层值 3 更新为 12 并推进 `updated_at`；全局 20/其他值与 `override_rules` 中显式 3 保持不变。partial covering index 固定为 non-backfilled `(monitoring_instance_id, received_at desc, id desc) INCLUDE(sync_batch_id)`，迁移可重复执行。
+- `0063` 在 current APP ACL registry 注册 explicit empty fragment；`Privileges` callback 必须非 nil 且返回 nil，不能借恢复查询扩张 runtime privilege。不得修改历史 migration。
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| missed 为 `N-1 / N / 2N / 4N` | 正常 / 关注 / 告警 / 严重 |
+| 第三个 distinct live receipt 到达且相邻 gap 合规 | heartbeat incident 恢复一次 |
+| receipt 为 backfill、重复 batch、事件前或 gap 超限 | active incident 保持不变 |
+| settings 或 receipt query 失败 | fail closed；零新 mutation/notification，error cause 可追踪 |
+| 已提交的 post-sync 内部评估失败 | 稳定日志 + 公开 hook 返回 `nil`；periodic 后续收敛 |
+| 非空全回填 / mixed-live heartbeat carrier | heartbeat transition 全抑制且 active 保留 / 正常 heartbeat 评估；其他维度各按自身 provenance |
+| interval、seconds 或 N 的派生计算越界 | settings/domain validation 拒绝；零回绕计算或副作用 |
+| CAS 首次冲突 | 第二次 attempt 完整重读策略、对象、active 与 receipts 后重评 |
+| global 3 / global 20 / override 3 应用 `0063` | 12 / 20 / 3；重复 apply 不再改变数据 |
+| post-incident live history 远超 768 行 | exact covering index 有序扫描最多候选上界，WindowAgg/Sort 只消费 inner candidate；扩大旧历史量级不得带来线性 block reads；HTTP 拒绝同请求混用 heartbeat batch ID，若写入绕过单批 256 上限或单 batch ID 约束，证据不足时保持 active |
+| DisplayName 含 CRLF/control/bidi、全空或超过 80 rune | 净化/折叠/Unicode 安全截断；净化后空则 fallback，稳定 ID 始终保留 |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：自定义 `N=20` 时 periodic/post-sync 都在 19 周期保持正常并在 20 周期首次关注；三个连续 live batch 后恢复。
+- Good：长期 active 有数千条相同 batch 历史；查询沿 0063 exact covering index 截取最多 768 行，再 WindowAgg 去重；扩大旧历史量级时 scan rows 和 blocks 保持固定上界，三个最新 batch 的 `received_at` 相同时仍由 `id desc` 稳定返回。
+- Base：阈值提高但没有 incident 后的新 live receipts，旧 heartbeat incident 继续 active。
+- Bad：post-sync 走旧阈值 3、settings 错误时回退默认值，或用最新一条 heartbeat/Agent observed time立即恢复。
+- Bad：通知只写显示名而无稳定 ID，或 dispatch 和 notification record 分别格式化导致正文不一致。
+- Bad：把最终 `limit 3` 写在 WindowAgg 之后却没有 inner candidate limit；结果虽然只有三行，数据库仍会扫描/排序长期完整历史。
+
+#### 6. Tests Required
+
+- evaluator/service focused tests 覆盖 N/2N/4N、自定义 20、跳级、完整 recovery 负例、真实公开 `AfterSuccessfulSync`、全回填与 mixed/live carrier、settings/receipt error 的内部返回及公开 log+ack、CAS 全量重读并保留 trigger provenance、overflow 拒绝/饱和，以及通知开关/多通道/partial failure/nil dispatcher/行政恢复；通知用例还必须覆盖 CRLF/control/bidi、超长多字节、净化后 fallback，并断言 dispatcher/所有 channel records 逐字一致。
+- SQL mock tests 固定 receipt filter/dedupe/order、`recent_live MATERIALIZED`、窗口前 `limit $3`、arg3=768、最终 limit 与 `%w`；strict PostgreSQL 16 必须实际 RUN/PASS，以远超候选上限的重复历史和相同时间戳三批次证明结果。对大历史 `ANALYZE` 后，必须对捕获的生产 SQL 执行 `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`：递归拒绝 heartbeat relation 的 Seq/Bitmap path，断言 exact 0063 Index/Index Only Scan、scan rows×loops/filter removals/shared blocks 固定有界，并用第二量级旧历史证明读取不线性增长；同时保留 WindowAgg/Sort/input actual rows 不超过 768 的断言。迁移测试还要证明 `0063` 数据保留/default/covering index、runtime existing SELECT 可查询且 APP ACL tuple 不扩张，SKIP 不算证据。
+
+#### 7. Wrong vs Correct
+
+```go
+// Wrong：事实已经提交后把内部评估错误返回给 Agent；exact_duplicate 重试会跳过 post-sync。
+if err := evaluateAfterSync(ctx, batch); err != nil { return err }
+
+// Correct：trigger provenance 进入可重试 full attempt；内部错误稳定记录，公开 hook ack。
+trigger := heartbeatEvaluationTriggerForSync(batch.Heartbeats)
+if err := evaluateMonitoringInstanceWithTrigger(ctx, batch.MonitoringInstanceID, trigger); err != nil {
+    logger.Error("evaluate monitoring instance incidents after sync failed", "error", err)
+}
+return nil
+```
+
+全回填 trigger 只令 heartbeat class 使用 `skip(previousHeartbeat)`；不得跳过 host/target 等其他 class，也不得把 mixed/live carrier 当成全回填。
+
+```sql
+-- Wrong：最终 limit 不会限制其前面的 WindowAgg/Sort 输入。
+select ... from (
+  select ..., row_number() over (partition by sync_batch_id ...)
+  from monitoring_instance_heartbeats
+) ranked
+where batch_rank = 1 limit 3;
+
+-- Correct：先按 covering index 建立 materialized、稳定排序且有界的候选集，
+-- 再做 batch 去重；$3 来自 3 * syncing.MaxBatchItems。
+with recent_live as materialized (
+  select sync_batch_id, received_at, id
+  from monitoring_instance_heartbeats
+  where monitoring_instance_id = $1
+    and received_at > $2 and is_backfilled = false
+  order by received_at desc, id desc
+  limit $3
+)
+select ... from (... row_number() over (...) from recent_live) ranked
+where batch_rank = 1 limit 3;
+```
+
 ### Scenario: Administrative incident recovery for inactive objects
 
 #### 1. Scope / Trigger

@@ -72,6 +72,14 @@ For each boundary:
 
 **Good**: Each layer only knows its neighbors
 
+### Mistake 4: Configured policy reaches only one trigger
+
+**Bad**: A periodic worker reads persisted policy, while an event-driven or post-commit hook calls the same evaluator with an optional argument or silent default.
+
+**Good**: Enumerate every public trigger, resolve one explicit validated policy at each trigger, and make missing/invalid policy fail closed. Add a regression that invokes every public trigger with the same non-default persisted value.
+
+If a bounded downstream query derives its limit from an upstream ingress maximum, the bound is a cross-layer contract: enforce every contributing ingress invariant (count, grouping/key identity, and duplicate semantics) at the actual HTTP/service boundary and test the rejection path before relying on the limit in SQL.
+
 ---
 
 ## Checklist for Cross-Layer Features
@@ -81,6 +89,8 @@ Before implementation:
 - [ ] Identified all layer boundaries
 - [ ] Defined format at each boundary
 - [ ] Decided where validation happens
+- [ ] Enumerated periodic, request-driven, post-commit, retry and reconciliation entry points that can invoke the same policy
+- [ ] For a query bound derived from ingress limits, identified the count, grouping/key and duplicate invariants that make the bound true
 - [ ] For least-privilege SQL, identified implicit read/write/execute requirements and the direct-runtime test that proves the production statement is executable
 
 After implementation:
@@ -88,6 +98,8 @@ After implementation:
 - [ ] For every Go slice field, verified the actual JSON shape for both nil and empty values (`null` versus `[]`)
 - [ ] Verified error handling at each boundary
 - [ ] Checked data survives round-trip
+- [ ] Called every public policy entry point with one persisted non-default value and proved none can silently use a fallback
+- [ ] Proved derived query bounds at both ends: ingress rejects violating payloads and the production query stays fail closed if legacy/direct writers bypass the boundary
 - [ ] For ACL-sensitive persistence, ran production SQL as the runtime role and verified both intended privileges and forbidden table/column grants
 
 ---

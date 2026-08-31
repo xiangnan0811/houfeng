@@ -167,7 +167,7 @@ const settingsResponseBody = {
   },
   incident_defaults: {
     heartbeat_interval_seconds: 5,
-    stale_threshold_intervals: 3,
+    stale_threshold_intervals: 12,
     sweep_interval_seconds: 5,
     notify_on_started: true,
     notify_on_escalated: true,
@@ -258,7 +258,7 @@ const settingsUpdateBody = {
   },
   incident_defaults: {
     heartbeat_interval_seconds: 5,
-    stale_threshold_intervals: 3,
+    stale_threshold_intervals: 12,
     sweep_interval_seconds: 5,
     notify_on_started: true,
     notify_on_escalated: true,
@@ -1871,7 +1871,9 @@ describe('api helpers', () => {
       .mockResolvedValue(mockResponse(200, JSON.stringify(settingsResponseBody)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(getSettings()).resolves.toEqual(settingsResponseBody)
+    const settings = await getSettings()
+    expect(settings).toEqual(settingsResponseBody)
+    expect(settings.incident_defaults.stale_threshold_intervals).toBe(12)
     expect(fetchMock).toHaveBeenCalledWith('/api/settings', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -1886,6 +1888,8 @@ describe('api helpers', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(updateSettings(settingsUpdateBody)).resolves.toEqual(settingsResponseBody)
+    const requestBody = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as SettingsUpdateInput
+    expect(requestBody.incident_defaults.stale_threshold_intervals).toBe(12)
     expect(fetchMock).toHaveBeenCalledWith('/api/settings', {
       method: 'PUT',
       headers: {

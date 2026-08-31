@@ -17,7 +17,7 @@ import (
 )
 
 const frozenR1RootSourceCount = 52
-const currentRootSourceCount = frozenR1RootSourceCount + 11
+const currentRootSourceCount = frozenR1RootSourceCount + 12
 
 func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	names, err := Names()
@@ -164,6 +164,9 @@ func TestFrozenR1RootSourcesRemainExactPrefix(t *testing.T) {
 	}
 	if got, want := names[frozenR1RootSourceCount+10], "0062_create_vps_create_idempotency.sql"; got != want {
 		t.Fatalf("eleventh current extension migration = %q, want %q", got, want)
+	}
+	if got, want := names[frozenR1RootSourceCount+11], "0063_tune_heartbeat_incident_policy.sql"; got != want {
+		t.Fatalf("twelfth current extension migration = %q, want %q", got, want)
 	}
 
 	snapshot, err := snapshotMigrationSources(migrations.FS)

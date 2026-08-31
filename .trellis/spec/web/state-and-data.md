@@ -208,7 +208,7 @@ export type EvidenceCaptureReference = {
 
 #### 2. Signatures
 
-- API response/request fields: `incident_defaults.cpu_warning_pct`、`cpu_alert_pct`、`cpu_critical_pct`、`mem_*`、`disk_*`、`inode_*`、`iowait_warning_pct`、`iowait_critical_pct`、`load5_warning`、`load5_critical`。
+- API response/request fields: `incident_defaults.heartbeat_interval_seconds`、`stale_threshold_intervals`、`sweep_interval_seconds`、`notify_on_*`、`cpu_warning_pct`、`cpu_alert_pct`、`cpu_critical_pct`、`mem_*`、`disk_*`、`inode_*`、`iowait_warning_pct`、`iowait_critical_pct`、`load5_warning`、`load5_critical`。
 - Settings page builder: `web/src/pages/SettingsPage.tsx` `buildIncidentDefaults(form)`。
 - Runtime presentation resolver: `web/src/config/thresholds.ts` `resolveThresholds(incidentDefaults)`.
 
@@ -216,6 +216,9 @@ export type EvidenceCaptureReference = {
 
 - CPU / 内存 / 磁盘 / Inode 三段阈值必须满足 `关注 < 告警 < 严重`，对应后端 `warning < alert < critical`。
 - IOWait / Load5 只有关注与严重输入，必须满足 `关注 < 严重`；告警阈值由中点派生，不在 Settings 页暴露独立输入。
+- `stale_threshold_intervals = N` 表示首次失联事件的精确边界；默认 `N=12`，按默认 5 秒心跳约 60 秒。后端在 `2N` 升级为告警、`4N` 升级为严重，并要求连续 3 次不同 batch 的非回填实时心跳稳定恢复。
+- `IncidentDefaultsSection` 必须直接解释首次 `N`、默认 `12≈60s`、`2N/4N` 升级和 3 次实时心跳恢复；继续复用现有输入和 Settings façade，不新增字段、Context、依赖或组件内 direct fetch。
+- 自定义阈值必须按原值 round-trip；例如 GET 返回 `N=20`，即使用户只改扫描间隔，PUT 仍提交 `20`。只把代表全局默认配置的 fixture 从 3 更新为 12，包括 `scripts/visual_evidence.py` 当前 `/api/settings` browser-sanity mock；显式 override/迁移反例中的 3 不得机械替换。
 - Settings 页本地校验失败时必须显示中文错误并阻止 `PUT /api/settings`。
 - `resolveThresholds` 是展示层防御边界：即使 API 返回历史脏数据，倒序 metric 也必须回退到 `DEFAULT_THRESHOLDS`，避免图表阈值线和等级 tooltip 反向。
 - 修改默认阈值时必须同时检查 `web/src/config/thresholds.ts` 与后端 `internal/center/settings/types.go` 的默认值是否一致。
@@ -226,19 +229,25 @@ export type EvidenceCaptureReference = {
 | --- | --- |
 | 用户输入 CPU `95 / 90 / 96` | Settings 页显示 `CPU 阈值必须满足 关注 < 告警 < 严重。`，不提交 |
 | 用户输入 Load5 `4 / 4` | Settings 页显示 `Load5 阈值必须满足 关注 < 严重。`，不提交 |
+| 默认 settings 返回 `stale_threshold_intervals=12` | 输入显示 12，并展示约 60 秒、2N/4N 与三次实时心跳恢复说明 |
+| persisted settings 返回 `stale_threshold_intervals=20` | 修改其他字段后的 PUT 仍携带 20 |
 | API 返回倒序 CPU 阈值 | 图表/列表使用 CPU 默认阈值 |
 | API 返回有效 IOWait `10 / 40` | 展示阈值为 `10 / 25 / 40` |
 
 #### 5. Good/Base/Bad Cases
 
 - Good: Settings 页保存 `CPU 80/90/95` 后，监控详情 tooltip、阈值线和后端 evaluator 语义一致。
+- Good: Settings 页读取自定义 `N=20` 后只修改扫描间隔，保存 payload 保持 `stale_threshold_intervals=20`。
 - Base: `/api/settings` 暂时失败或返回缺失阈值，页面继续使用 `DEFAULT_THRESHOLDS`。
+- Bad: UI 把默认 12 写死回所有响应，覆盖已有全局 20 或 override 中显式 3。
 - Bad: Settings 页只校验正整数，允许 `CPU 95/80/90` 发到后端。
 - Bad: `resolveThresholds` 对 `IOWait 50/20` 派生 `35` 并渲染倒序阈值线。
 
 #### 6. Tests Required
 
-- `web/src/pages/SettingsPage.test.tsx`: 覆盖倒序阈值本地拒绝和不发 PUT。
+- `web/src/pages/SettingsPage.test.tsx`: 覆盖倒序阈值本地拒绝和不发 PUT，以及默认 12 文案与自定义 20 原样 PUT。
+- `web/src/lib/api.test.ts`: GET response 与 PUT request 的代表默认 fixture 都固定 `stale_threshold_intervals=12`；不得用旧默认 3 伪装 fresh-install API 形状。
+- `scripts/test_visual_evidence.py`: 调用 active mock 的 `/api/settings` 并断言 `stale_threshold_intervals=12`，防止 browser-sanity 与真实 fresh-install 默认漂移。
 - `web/src/config/thresholds.test.ts`: 覆盖有效两段阈值派生 alert，以及倒序 runtime settings 回退默认值。
 - 跨后端改动时同步跑 `go test ./internal/center/settings`。
 

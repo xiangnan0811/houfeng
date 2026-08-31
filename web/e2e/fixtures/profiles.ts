@@ -139,7 +139,7 @@ const SETTINGS = {
   probe_frequency_defaults: { tcp: '5s', http: '5s', tls: '6h' },
   incident_defaults: {
     heartbeat_interval_seconds: 5,
-    stale_threshold_intervals: 3,
+    stale_threshold_intervals: 12,
     sweep_interval_seconds: 5,
     notify_on_started: true,
     notify_on_escalated: true,

@@ -1,0 +1,9 @@
+{"file":".trellis/tasks/08-31-vps-heartbeat-notification-policy/research/root-cause.md","reason":"复核实现确实关闭 post-sync 漏参、N-1 提前触发、单心跳恢复和无主体通知四个根因"}
+{"file":".trellis/tasks/08-31-vps-heartbeat-notification-policy/research/implementation-contracts.md","reason":"复核 migration/APP ACL、CAS/backfill/行政恢复、Web 数据流和完整质量门未漂移"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"审查 migration/data preservation、bounded live heartbeat query、index、APP ACL fragment 和真实数据库证据"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"审查 RED/GREEN、CAS/worker 回归、strict lane 与 make verify-go 证据"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"审查默认 12、自定义 20、设置 copy 与后端持久化/evaluator 语义一致"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"审查 Node 22 focused/full Web gates 和用户可见变更 browser evidence"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"审查 Settings 到通知记录/外发正文的完整数据流、错误与抑制分支"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"审查两条入口没有复制阈值默认、恢复规则或通知主体逻辑"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"审查受保护分支、CI、发布和生产验收没有越权或提前宣称完成"}

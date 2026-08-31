@@ -11,6 +11,13 @@ import (
 	"houfeng/internal/center/observations"
 )
 
+// MaxBatchItems is the admitted per-collection item limit for one agent sync
+// request. The HTTP boundary also requires every heartbeat in a request to use
+// one sync batch ID, so one admitted heartbeat batch contributes at most this
+// many rows. Persistence and bounded recovery queries may rely on these ingress
+// invariants; callers that bypass the HTTP handler must enforce both.
+const MaxBatchItems = 256
+
 var (
 	ErrBindingNotAccepted = enrollment.ErrBindingNotAccepted
 	ErrInvalidSyncToken   = enrollment.ErrInvalidSyncToken

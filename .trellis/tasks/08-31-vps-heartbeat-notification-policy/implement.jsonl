@@ -1,0 +1,9 @@
+{"file":".trellis/tasks/08-31-vps-heartbeat-notification-policy/research/root-cause.md","reason":"已确认 settings 持久化正常、post-sync 漏传阈值、旧分级、即时恢复和通知身份缺失根因"}
+{"file":".trellis/tasks/08-31-vps-heartbeat-notification-policy/research/implementation-contracts.md","reason":"聚焦汇总 migration、APP ACL、incident CAS/backfill、Settings/Web 与质量门硬合同，避免大 spec 注入截断丢失关键边界"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"迁移不可变、心跳事实排序、incident 数据流、partial index、current APP ACL fragment 与真实 PostgreSQL 合同"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Go TDD、worker/service/store tests、strict PostgreSQL 与跨前后端完整质量门"}
+{"file":".trellis/spec/web/state-and-data.md","reason":"Settings incident defaults 数据流、snake_case contract、页面状态与阈值语义一致性"}
+{"file":".trellis/spec/web/quality-guidelines.md","reason":"Node 22、Vitest、lint/build/budget 与 user-visible UI browser gate"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"从 Settings 保存到 store、两条 evaluator 入口、notification delivery 的端到端数据流"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"复用单一 policy resolver、恢复判定和通知格式化 owner，避免两条路径再次漂移"}
+{"file":".trellis/spec/guides/branch-workflow-governance.md","reason":"非 main 分支、PR/CI、release 与生产验收边界"}

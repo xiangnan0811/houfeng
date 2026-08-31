@@ -277,7 +277,7 @@ func seedTask4EvidenceSources(t *testing.T, ctx context.Context, db, writerDB *p
 	t.Helper()
 	eventAt := now.Add(-4 * time.Hour)
 	lastHeartbeatAt := eventAt.Add(-4 * 5 * time.Second)
-	evaluation := incidents.EvaluateMonitoringInstanceHeartbeatMissing(nil, "mi_0123456789abcdef", eventAt, &lastHeartbeatAt, 5*time.Second)
+	evaluation := incidents.EvaluateMonitoringInstanceHeartbeatMissing(nil, "mi_0123456789abcdef", eventAt, &lastHeartbeatAt, incidents.HeartbeatIncidentPolicy{HeartbeatInterval: 5 * time.Second, MissingThreshold: 3, RecoverySuccesses: 3, RecoveryMaxIntervalGap: 10 * time.Second}, nil)
 	if evaluation.Current == nil || evaluation.Event == nil || evaluation.Event.EventType != incidents.EventIncidentStarted {
 		t.Fatalf("heartbeat evaluation = %#v, want incident-start event", evaluation)
 	}
