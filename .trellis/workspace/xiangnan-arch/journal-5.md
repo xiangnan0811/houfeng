@@ -1212,3 +1212,43 @@ Fixed PostgreSQL 16 ON CONFLICT permission failure for agent sync batch idempote
 ### Status
 
 [OK] **Completed**
+
+
+## Session 270: 交付并发布 VPS 心跳通知策略
+
+**Date**: 2026-08-31
+**Task**: 交付并发布 VPS 心跳通知策略
+**Branch**: `codex/heartbeat-notification-policy-finish`
+
+### Summary
+
+完成心跳阈值/稳定恢复/通知主体修复的独立审查、受保护交付与 v0.79.5 发布；公开资产和多架构镜像已验证，staging 因仍为 v0.59.0 在 mutation 前 fail closed，并拆出后续部署验收任务。
+
+### Main Changes
+
+- 默认 N=12，周期与 post-sync 共用持久化策略，按 N/2N/4N 分级并以三次合格实时心跳恢复。
+- 通知包含净化后的监控实例名和稳定 ID；0063 迁移保留自定义值并为有界恢复查询提供索引。
+- PR #484、release PR #485、v0.79.5、Agent 签名资产和 amd64/arm64 OCI image 完成受保护交付。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4b093c78` | (see git log) |
+| `b0035f2b` | (see git log) |
+| `8f8808d4` | (see git log) |
+| `1ebae26c` | (see git log) |
+
+### Testing
+
+- [OK] Go 1.26.2 verify-go、strict PostgreSQL、Node 22 verify-web、136 E2E、视觉/三视口 browser sanity 全绿。
+- [OK] feature/release/exact-main CI 全绿；publish-images run 33358215951 成功，Release 资产 minisign/SHA256/vcs metadata 与 Docker Registry manifest 独立通过。
+- [OK] staging run 33358504336 发现 expected v0.79.5、observed v0.59.0，并在登录/设置写入前 fail closed；脱敏 artifact 已保存。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 仅在取得 staging 部署授权、备份和回滚方案后启动 08-31-staging-heartbeat-policy-acceptance。
