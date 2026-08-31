@@ -71,6 +71,7 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
 
         status, settings = call_observability_api("/api/settings")
         self.assertEqual(status, 200)
+        self.assertEqual(settings["incident_defaults"]["stale_threshold_intervals"], 12)
         self.assertEqual(settings["incident_defaults"]["load5_critical"], 8.0)
         self.assertEqual(settings["ip_quality_settings"]["stale_after_seconds"], 604800)
 

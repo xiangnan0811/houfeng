@@ -453,7 +453,9 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 
 ### Go 版本
 
-`actions/setup-go@v6` 通过 `go-version-file: go.mod`（`.github/workflows/ci.yml:16`）锁定。本地 Go 必须 ≥ `go.mod` 声明的版本。
+`actions/setup-go@v6` 通过 `go-version-file: go.mod`（`.github/workflows/ci.yml:16`）锁定精确工具链。本地完成/发布门禁也必须使用 `go.mod` 声明的精确版本；仅仅“更高版本”不能替代该证据，因为标准库编码器等实现细节可能让 byte-level golden 在未来工具链上产生不同输出。
+
+当前仓库门禁示例为 `GOTOOLCHAIN=go1.26.2 make verify-go`。如果默认 `go version` 不同，先用精确工具链复现失败；不得在只看到未来/实验性工具链的不同摘要后更新 golden 或修改生产代码。
 
 ---
 
@@ -461,7 +463,7 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 
 下面这条清单是 happy-path，按顺序勾：
 
-1. [ ] **`make verify-go`** —— 永远必须通过。fmt 修了直接重跑。
+1. [ ] **用 `go.mod` 的精确工具链运行 `make verify-go`** —— 永远必须通过。当前命令是 `GOTOOLCHAIN=go1.26.2 make verify-go`；fmt 修了直接重跑。
 2. [ ] **改了 `web/` 里任何文件 → `cd web && npm run lint && npm run test`**（CLAUDE.md 第 31 行）。
 3. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完。
 4. [ ] **改了迁移 / 表结构** → 跑一次 `docs/operations/fresh-install-smoke-run.md` 的 fresh-install；若发现可复用的 gap 或规则，补到 `.trellis/spec/` 或当前 active docs。

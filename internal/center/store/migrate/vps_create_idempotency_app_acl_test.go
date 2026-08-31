@@ -115,7 +115,7 @@ func TestVPSCreateIdempotencyAppACLFragmentRegistersExactSelectInsert(t *testing
 	if err != nil {
 		t.Fatalf("compile production current APP ACL source contract: %T", err)
 	}
-	if got, want := len(source.fragments), 11; got != want {
+	if got, want := len(source.fragments), 12; got != want {
 		t.Fatalf("production current APP ACL fragments = %d, want %d", got, want)
 	}
 	fragment := source.fragments[10]

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"houfeng/internal/center/targets"
 )
@@ -110,6 +111,88 @@ func TestSettingsValidateAcceptsStructuredSettings(t *testing.T) {
 	}
 	if string(body) != `{"raw_layer_days":30,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}` {
 		t.Fatalf("RetentionPolicy JSON = %s", body)
+	}
+}
+
+func TestSettingsValidateRejectsOverflowingIncidentTiming(t *testing.T) {
+	t.Parallel()
+
+	valid := Default()
+	valid.IncidentDefaults.StaleThresholdIntervals = 20
+	if got, err := Validate(valid); err != nil || got.IncidentDefaults.StaleThresholdIntervals != 20 {
+		t.Fatalf("Validate(N=20) = (%#v, %v), want unchanged valid threshold", got.IncidentDefaults, err)
+	}
+
+	maxDurationSeconds := int64((time.Duration(1<<63 - 1)) / time.Second)
+	maxThreshold := int(^uint(0)>>1) / 4
+	tests := []struct {
+		name   string
+		mutate func(*CenterSettings)
+	}{
+		{
+			name: "global heartbeat recovery gap",
+			mutate: func(input *CenterSettings) {
+				input.IncidentDefaults.HeartbeatIntervalSeconds = int(maxDurationSeconds/2 + 1)
+			},
+		},
+		{
+			name: "global sweep duration",
+			mutate: func(input *CenterSettings) {
+				input.IncidentDefaults.SweepIntervalSeconds = int(maxDurationSeconds + 1)
+			},
+		},
+		{
+			name: "global severity multiplier",
+			mutate: func(input *CenterSettings) {
+				input.IncidentDefaults.StaleThresholdIntervals = maxThreshold + 1
+			},
+		},
+		{
+			name: "override heartbeat recovery gap",
+			mutate: func(input *CenterSettings) {
+				value := int(maxDurationSeconds/2 + 1)
+				input.OverrideRules.MonitoringInstanceLabels = []MonitoringInstanceLabelOverrideRule{{
+					Label: "overflow",
+					Overrides: SettingsOverrideFields{IncidentDefaults: &IncidentDefaultsOverride{
+						HeartbeatIntervalSeconds: &value,
+					}},
+				}}
+			},
+		},
+		{
+			name: "override sweep duration",
+			mutate: func(input *CenterSettings) {
+				value := int(maxDurationSeconds + 1)
+				input.OverrideRules.MonitoringInstanceLabels = []MonitoringInstanceLabelOverrideRule{{
+					Label: "overflow",
+					Overrides: SettingsOverrideFields{IncidentDefaults: &IncidentDefaultsOverride{
+						SweepIntervalSeconds: &value,
+					}},
+				}}
+			},
+		},
+		{
+			name: "override severity multiplier",
+			mutate: func(input *CenterSettings) {
+				value := maxThreshold + 1
+				input.OverrideRules.MonitoringInstanceLabels = []MonitoringInstanceLabelOverrideRule{{
+					Label: "overflow",
+					Overrides: SettingsOverrideFields{IncidentDefaults: &IncidentDefaultsOverride{
+						StaleThresholdIntervals: &value,
+					}},
+				}}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := Default()
+			tt.mutate(&input)
+			if _, err := Validate(input); !errors.Is(err, ErrInvalidSettings) {
+				t.Fatalf("Validate() error = %v, want ErrInvalidSettings", err)
+			}
+		})
 	}
 }
 
@@ -268,6 +351,9 @@ func TestSettingsDefaultProvidesDeterministicSingletonShape(t *testing.T) {
 	}
 	if got.IncidentDefaults.HeartbeatIntervalSeconds != 5 {
 		t.Fatalf("HeartbeatIntervalSeconds = %d, want 5", got.IncidentDefaults.HeartbeatIntervalSeconds)
+	}
+	if got.IncidentDefaults.StaleThresholdIntervals != 12 {
+		t.Fatalf("StaleThresholdIntervals = %d, want 12", got.IncidentDefaults.StaleThresholdIntervals)
 	}
 	if got.IncidentDefaults.SweepIntervalSeconds != 5 {
 		t.Fatalf("SweepIntervalSeconds = %d, want 5", got.IncidentDefaults.SweepIntervalSeconds)

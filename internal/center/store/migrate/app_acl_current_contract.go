@@ -52,6 +52,14 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	recordsAuthorityAppACLCurrentMigrationFragment(),
 	subscriptionCreateIdempotencyAppACLCurrentMigrationFragment(),
 	vpsCreateIdempotencyAppACLCurrentMigrationFragment(),
+	heartbeatIncidentPolicyAppACLCurrentMigrationFragment(),
+}
+
+func heartbeatIncidentPolicyAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0063_tune_heartbeat_incident_policy.sql",
+		Privileges: func(string) []AppACLPrivilege { return nil },
+	}
 }
 
 var vpsCreateIdempotencyReceiptTables = []string{

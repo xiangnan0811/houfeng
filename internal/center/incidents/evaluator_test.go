@@ -8,27 +8,290 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
+func TestEvaluateMonitoringInstanceHeartbeatMissingBoundary(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 10, 0, 0, 0, time.UTC)
+	policy := HeartbeatIncidentPolicy{
+		HeartbeatInterval:      5 * time.Second,
+		MissingThreshold:       12,
+		RecoverySuccesses:      3,
+		RecoveryMaxIntervalGap: 10 * time.Second,
+	}
+	tests := []struct {
+		name     string
+		missed   int
+		severity Severity
+		active   bool
+	}{
+		{name: "before first boundary", missed: 11},
+		{name: "first boundary", missed: 12, severity: SeverityNotice, active: true},
+		{name: "before alert boundary", missed: 23, severity: SeverityNotice, active: true},
+		{name: "alert boundary", missed: 24, severity: SeverityAlert, active: true},
+		{name: "before critical boundary", missed: 47, severity: SeverityAlert, active: true},
+		{name: "critical boundary", missed: 48, severity: SeverityCritical, active: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lastHeartbeat := now.Add(-time.Duration(tt.missed) * policy.HeartbeatInterval)
+			got := EvaluateMonitoringInstanceHeartbeatMissing(nil, "mi_boundary", now, &lastHeartbeat, policy, nil)
+			if !tt.active {
+				if got.Transition != TransitionNoop || got.Current != nil || got.Event != nil || got.Notification != nil {
+					t.Fatalf("result = %#v, want inactive noop", got)
+				}
+				return
+			}
+			if got.Transition != TransitionStarted || got.Current == nil || got.Current.Severity != tt.severity {
+				t.Fatalf("result = %#v, want started %q incident", got, tt.severity)
+			}
+		})
+	}
+}
+
+func TestEvaluateMonitoringInstanceHeartbeatMissingCustomThreshold(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 10, 0, 0, 0, time.UTC)
+	policy := HeartbeatIncidentPolicy{
+		HeartbeatInterval:      5 * time.Second,
+		MissingThreshold:       20,
+		RecoverySuccesses:      3,
+		RecoveryMaxIntervalGap: 10 * time.Second,
+	}
+	tests := []struct {
+		missed   int
+		severity Severity
+	}{
+		{missed: 19},
+		{missed: 20, severity: SeverityNotice},
+		{missed: 40, severity: SeverityAlert},
+		{missed: 80, severity: SeverityCritical},
+	}
+	for _, tt := range tests {
+		lastHeartbeat := now.Add(-time.Duration(tt.missed) * policy.HeartbeatInterval)
+		got := EvaluateMonitoringInstanceHeartbeatMissing(nil, "mi_custom", now, &lastHeartbeat, policy, nil)
+		if tt.severity == "" {
+			if got.Current != nil || got.Transition != TransitionNoop {
+				t.Fatalf("missed %d result = %#v, want inactive noop", tt.missed, got)
+			}
+			continue
+		}
+		if got.Current == nil || got.Current.Severity != tt.severity {
+			t.Fatalf("missed %d result = %#v, want %q", tt.missed, got, tt.severity)
+		}
+	}
+}
+
+func TestValidHeartbeatIncidentPolicyRejectsOverflowingDerivedBounds(t *testing.T) {
+	t.Parallel()
+
+	valid := HeartbeatIncidentPolicy{
+		HeartbeatInterval:      5 * time.Second,
+		MissingThreshold:       20,
+		RecoverySuccesses:      3,
+		RecoveryMaxIntervalGap: 10 * time.Second,
+	}
+	if !validHeartbeatIncidentPolicy(valid) {
+		t.Fatal("validHeartbeatIncidentPolicy(N=20) = false, want true")
+	}
+
+	invalidInterval := valid
+	invalidInterval.HeartbeatInterval = time.Duration(1<<63-1)/2 + 1
+	if validHeartbeatIncidentPolicy(invalidInterval) {
+		t.Fatal("validHeartbeatIncidentPolicy(overflowing 2*interval) = true, want false")
+	}
+
+	invalidThreshold := valid
+	invalidThreshold.MissingThreshold = int(^uint(0)>>1)/4 + 1
+	if validHeartbeatIncidentPolicy(invalidThreshold) {
+		t.Fatal("validHeartbeatIncidentPolicy(overflowing 4*N) = true, want false")
+	}
+
+	for _, recoverySuccesses := range []int{heartbeatRecoverySuccesses - 1, heartbeatRecoverySuccesses + 1} {
+		invalidRecoverySuccesses := valid
+		invalidRecoverySuccesses.RecoverySuccesses = recoverySuccesses
+		if validHeartbeatIncidentPolicy(invalidRecoverySuccesses) {
+			t.Fatalf("validHeartbeatIncidentPolicy(recovery successes=%d) = true, want false", recoverySuccesses)
+		}
+	}
+
+	for _, recoveryGap := range []time.Duration{valid.HeartbeatInterval, 3 * valid.HeartbeatInterval} {
+		invalidRecoveryGap := valid
+		invalidRecoveryGap.RecoveryMaxIntervalGap = recoveryGap
+		if validHeartbeatIncidentPolicy(invalidRecoveryGap) {
+			t.Fatalf("validHeartbeatIncidentPolicy(recovery gap=%v) = true, want false", recoveryGap)
+		}
+	}
+}
+
+func TestHeartbeatMissedIntervalsSaturatesAndHandlesClockSkew(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 10, 0, 0, 0, time.UTC)
+	if got := heartbeatMissedIntervals(now, now.Add(-100*time.Second), 5*time.Second); got != 20 {
+		t.Fatalf("heartbeatMissedIntervals(normal) = %d, want 20", got)
+	}
+	if got := heartbeatMissedIntervals(now, now.Add(time.Second), time.Second); got != 0 {
+		t.Fatalf("heartbeatMissedIntervals(clock skew) = %d, want 0", got)
+	}
+	if got := heartbeatMissedIntervals(now, now.Add(-time.Second), 0); got != 0 {
+		t.Fatalf("heartbeatMissedIntervals(zero interval) = %d, want 0", got)
+	}
+
+	distantNow := time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC)
+	distantPast := time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)
+	if got, want := heartbeatMissedIntervals(distantNow, distantPast, time.Nanosecond), int(^uint(0)>>1); got != want {
+		t.Fatalf("heartbeatMissedIntervals(saturated) = %d, want %d", got, want)
+	}
+}
+
+func TestEvaluateMonitoringInstanceHeartbeatMissingJumpStartsAtActualSeverity(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 10, 0, 0, 0, time.UTC)
+	lastHeartbeat := now.Add(-48 * 5 * time.Second)
+	policy := HeartbeatIncidentPolicy{HeartbeatInterval: 5 * time.Second, MissingThreshold: 12, RecoverySuccesses: 3, RecoveryMaxIntervalGap: 10 * time.Second}
+
+	got := EvaluateMonitoringInstanceHeartbeatMissing(nil, "mi_jump", now, &lastHeartbeat, policy, nil)
+	if got.Transition != TransitionStarted || got.Current == nil || got.Current.Severity != SeverityCritical {
+		t.Fatalf("result = %#v, want one directly-started critical incident", got)
+	}
+	if got.Event == nil || got.Event.EventType != EventIncidentStarted || got.Event.Severity != SeverityCritical {
+		t.Fatalf("Event = %#v, want one critical start event", got.Event)
+	}
+}
+
+func TestEvaluateMonitoringInstanceHeartbeatMissingRecoveryRequiresStableLiveReceipts(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Date(2026, time.August, 31, 10, 0, 0, 0, time.UTC)
+	now := startedAt.Add(time.Minute)
+	lastHeartbeat := now.Add(-5 * time.Second)
+	policy := HeartbeatIncidentPolicy{HeartbeatInterval: 5 * time.Second, MissingThreshold: 12, RecoverySuccesses: 3, RecoveryMaxIntervalGap: 10 * time.Second}
+	previous := &IncidentRecord{
+		IncidentID:      "inc_monitoring_instance_mi_recovery_monitoring_instance_heartbeat_missing",
+		ObjectType:      ObjectTypeMonitoringInstance,
+		ObjectID:        "mi_recovery",
+		IncidentClass:   IncidentMonitoringInstanceHeartbeatMissing,
+		Severity:        SeverityAlert,
+		StartedAt:       startedAt,
+		LastEvaluatedAt: startedAt.Add(30 * time.Second),
+		Status:          IncidentStatusActive,
+	}
+	receipts := []LiveHeartbeatReceipt{
+		{SyncBatchID: "batch-3", ReceivedAt: startedAt.Add(15 * time.Second)},
+		{SyncBatchID: "batch-2", ReceivedAt: startedAt.Add(10 * time.Second)},
+		{SyncBatchID: "batch-1", ReceivedAt: startedAt.Add(5 * time.Second)},
+	}
+
+	for count := 1; count <= 2; count++ {
+		got := EvaluateMonitoringInstanceHeartbeatMissing(previous, previous.ObjectID, now, &lastHeartbeat, policy, receipts[:count])
+		if got.Transition != TransitionNoop || got.Current == nil || got.Current.IncidentID != previous.IncidentID || got.Event != nil || got.Notification != nil {
+			t.Fatalf("%d receipts result = %#v, want previous active incident preserved", count, got)
+		}
+	}
+
+	got := EvaluateMonitoringInstanceHeartbeatMissing(previous, previous.ObjectID, now, &lastHeartbeat, policy, receipts)
+	if got.Transition != TransitionRecovered || got.Current != nil {
+		t.Fatalf("three receipts result = %#v, want recovered", got)
+	}
+	if got.Event == nil || got.Event.EventType != EventIncidentRecovered || got.Notification == nil || got.Notification.Reason != NotificationReasonRecovered {
+		t.Fatalf("three receipts result = %#v, want one recovery event and notification", got)
+	}
+}
+
+func TestEvaluateMonitoringInstanceHeartbeatMissingRecoveryRejectsInvalidEvidence(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Date(2026, time.August, 31, 10, 0, 0, 0, time.UTC)
+	now := startedAt.Add(time.Minute)
+	lastHeartbeat := now.Add(-5 * time.Second)
+	validPolicy := HeartbeatIncidentPolicy{HeartbeatInterval: 5 * time.Second, MissingThreshold: 12, RecoverySuccesses: 3, RecoveryMaxIntervalGap: 10 * time.Second}
+	previous := &IncidentRecord{
+		IncidentID:      "inc_monitoring_instance_mi_recovery_monitoring_instance_heartbeat_missing",
+		ObjectType:      ObjectTypeMonitoringInstance,
+		ObjectID:        "mi_recovery",
+		IncidentClass:   IncidentMonitoringInstanceHeartbeatMissing,
+		Severity:        SeverityAlert,
+		StartedAt:       startedAt,
+		LastEvaluatedAt: startedAt.Add(30 * time.Second),
+		Status:          IncidentStatusActive,
+	}
+	tests := []struct {
+		name     string
+		policy   HeartbeatIncidentPolicy
+		receipts []LiveHeartbeatReceipt
+	}{
+		{
+			name:   "duplicate batch",
+			policy: validPolicy,
+			receipts: []LiveHeartbeatReceipt{
+				{SyncBatchID: "batch-2", ReceivedAt: startedAt.Add(15 * time.Second)},
+				{SyncBatchID: "batch-1", ReceivedAt: startedAt.Add(10 * time.Second)},
+				{SyncBatchID: "batch-1", ReceivedAt: startedAt.Add(5 * time.Second)},
+			},
+		},
+		{
+			name:   "pre incident",
+			policy: validPolicy,
+			receipts: []LiveHeartbeatReceipt{
+				{SyncBatchID: "batch-3", ReceivedAt: startedAt.Add(10 * time.Second)},
+				{SyncBatchID: "batch-2", ReceivedAt: startedAt.Add(5 * time.Second)},
+				{SyncBatchID: "batch-1", ReceivedAt: startedAt},
+			},
+		},
+		{
+			name:   "gap too large",
+			policy: validPolicy,
+			receipts: []LiveHeartbeatReceipt{
+				{SyncBatchID: "batch-3", ReceivedAt: startedAt.Add(30 * time.Second)},
+				{SyncBatchID: "batch-2", ReceivedAt: startedAt.Add(10 * time.Second)},
+				{SyncBatchID: "batch-1", ReceivedAt: startedAt.Add(5 * time.Second)},
+			},
+		},
+		{
+			name:     "missing receipts after raising threshold",
+			policy:   HeartbeatIncidentPolicy{HeartbeatInterval: 5 * time.Second, MissingThreshold: 20, RecoverySuccesses: 3, RecoveryMaxIntervalGap: 10 * time.Second},
+			receipts: nil,
+		},
+		{
+			name:     "invalid policy",
+			policy:   HeartbeatIncidentPolicy{HeartbeatInterval: 5 * time.Second, MissingThreshold: 12, RecoverySuccesses: 0, RecoveryMaxIntervalGap: 10 * time.Second},
+			receipts: []LiveHeartbeatReceipt{{SyncBatchID: "batch-3", ReceivedAt: startedAt.Add(15 * time.Second)}, {SyncBatchID: "batch-2", ReceivedAt: startedAt.Add(10 * time.Second)}, {SyncBatchID: "batch-1", ReceivedAt: startedAt.Add(5 * time.Second)}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := EvaluateMonitoringInstanceHeartbeatMissing(previous, previous.ObjectID, now, &lastHeartbeat, tt.policy, tt.receipts)
+			if got.Transition != TransitionNoop || got.Current == nil || got.Current.IncidentID != previous.IncidentID || got.Event != nil || got.Notification != nil {
+				t.Fatalf("result = %#v, want previous active incident preserved", got)
+			}
+		})
+	}
+}
+
 func TestEvaluateMonitoringInstanceHeartbeatMissingStartsAndEscalates(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 10, 0, 0, 0, time.UTC)
 	lastHeartbeat := now.Add(-3 * time.Minute)
+	policy := HeartbeatIncidentPolicy{HeartbeatInterval: time.Minute, MissingThreshold: 3, RecoverySuccesses: 3, RecoveryMaxIntervalGap: 2 * time.Minute}
 
-	started := EvaluateMonitoringInstanceHeartbeatMissing(nil, "mi_001", now, &lastHeartbeat, time.Minute)
+	started := EvaluateMonitoringInstanceHeartbeatMissing(nil, "mi_001", now, &lastHeartbeat, policy, nil)
 	if started.Transition != TransitionStarted {
 		t.Fatalf("Transition = %q, want %q", started.Transition, TransitionStarted)
 	}
-	if started.Current == nil || started.Current.Severity != SeverityAlert {
-		t.Fatalf("Current = %#v, want alert incident", started.Current)
+	if started.Current == nil || started.Current.Severity != SeverityNotice {
+		t.Fatalf("Current = %#v, want notice incident", started.Current)
 	}
 	if started.Notification == nil || started.Notification.Reason != NotificationReasonStarted {
 		t.Fatalf("Notification = %#v, want started notification", started.Notification)
 	}
-	if started.Event == nil || started.Event.Provenance != MonitoringEventProvenanceCenter || started.Event.ProducerVersion != MonitoringEventProducerVersion || started.Event.RuleVersion != MonitoringEventIncidentRuleVersion || started.Event.PriorState != "normal" || started.Event.ResultingState != "alert" || started.Event.IsBackfilled || started.Event.CorrectionOfEventID != "" {
+	if started.Event == nil || started.Event.Provenance != MonitoringEventProvenanceCenter || started.Event.ProducerVersion != MonitoringEventProducerVersion || started.Event.RuleVersion != MonitoringEventIncidentRuleVersion || started.Event.PriorState != "normal" || started.Event.ResultingState != "notice" || started.Event.IsBackfilled || started.Event.CorrectionOfEventID != "" {
 		t.Fatalf("started Event = %#v, want explicit center incident transition metadata", started.Event)
 	}
 
 	previous := started.Current
-	olderHeartbeat := now.Add(-5 * time.Minute)
-	escalated := EvaluateMonitoringInstanceHeartbeatMissing(previous, "mi_001", now, &olderHeartbeat, time.Minute)
+	olderHeartbeat := now.Add(-12 * time.Minute)
+	escalated := EvaluateMonitoringInstanceHeartbeatMissing(previous, "mi_001", now, &olderHeartbeat, policy, nil)
 	if escalated.Transition != TransitionEscalated {
 		t.Fatalf("Transition = %q, want %q", escalated.Transition, TransitionEscalated)
 	}
@@ -38,17 +301,19 @@ func TestEvaluateMonitoringInstanceHeartbeatMissingStartsAndEscalates(t *testing
 	if escalated.Notification == nil || escalated.Notification.Reason != NotificationReasonEscalated {
 		t.Fatalf("Notification = %#v, want escalated notification", escalated.Notification)
 	}
-	if escalated.Event == nil || escalated.Event.PriorState != "alert" || escalated.Event.ResultingState != "critical" {
-		t.Fatalf("escalated Event = %#v, want alert-to-critical transition", escalated.Event)
+	if escalated.Event == nil || escalated.Event.PriorState != "notice" || escalated.Event.ResultingState != "critical" {
+		t.Fatalf("escalated Event = %#v, want notice-to-critical transition", escalated.Event)
 	}
 }
 
 func TestEvaluateMonitoringInstanceHeartbeatMissingRecovers(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 10, 0, 0, 0, time.UTC)
 	lastHeartbeat := now.Add(-30 * time.Second)
-	previous := &IncidentRecord{IncidentID: "inc_monitoring_instance_mi_001_monitoring_instance_heartbeat_missing", ObjectType: ObjectTypeMonitoringInstance, ObjectID: "mi_001", IncidentClass: IncidentMonitoringInstanceHeartbeatMissing, Severity: SeverityAlert, LastEvaluatedAt: now.Add(-time.Minute)}
+	previous := &IncidentRecord{IncidentID: "inc_monitoring_instance_mi_001_monitoring_instance_heartbeat_missing", ObjectType: ObjectTypeMonitoringInstance, ObjectID: "mi_001", IncidentClass: IncidentMonitoringInstanceHeartbeatMissing, Severity: SeverityAlert, StartedAt: now.Add(-time.Minute), LastEvaluatedAt: now.Add(-time.Minute)}
+	policy := HeartbeatIncidentPolicy{HeartbeatInterval: time.Minute, MissingThreshold: 3, RecoverySuccesses: 3, RecoveryMaxIntervalGap: 2 * time.Minute}
+	receipts := []LiveHeartbeatReceipt{{SyncBatchID: "batch-3", ReceivedAt: now.Add(-10 * time.Second)}, {SyncBatchID: "batch-2", ReceivedAt: now.Add(-20 * time.Second)}, {SyncBatchID: "batch-1", ReceivedAt: now.Add(-30 * time.Second)}}
 
-	result := EvaluateMonitoringInstanceHeartbeatMissing(previous, "mi_001", now, &lastHeartbeat, time.Minute)
+	result := EvaluateMonitoringInstanceHeartbeatMissing(previous, "mi_001", now, &lastHeartbeat, policy, receipts)
 	if result.Transition != TransitionRecovered {
 		t.Fatalf("Transition = %q, want %q", result.Transition, TransitionRecovered)
 	}
@@ -404,7 +669,8 @@ func TestEvaluateMonitoringInstanceHeartbeatMissingDoesNotRecoverWithoutUsableHe
 		LastEvaluatedAt: now.Add(-time.Minute),
 	}
 
-	nilHeartbeat := EvaluateMonitoringInstanceHeartbeatMissing(previous, "mi_001", now, nil, time.Minute)
+	policy := HeartbeatIncidentPolicy{HeartbeatInterval: time.Minute, MissingThreshold: 3, RecoverySuccesses: 3, RecoveryMaxIntervalGap: 2 * time.Minute}
+	nilHeartbeat := EvaluateMonitoringInstanceHeartbeatMissing(previous, "mi_001", now, nil, policy, nil)
 	if nilHeartbeat.Transition != TransitionNoop {
 		t.Fatalf("Transition = %q, want %q for nil heartbeat", nilHeartbeat.Transition, TransitionNoop)
 	}
@@ -413,7 +679,8 @@ func TestEvaluateMonitoringInstanceHeartbeatMissingDoesNotRecoverWithoutUsableHe
 	}
 
 	lastHeartbeat := now.Add(-5 * time.Minute)
-	invalidInterval := EvaluateMonitoringInstanceHeartbeatMissing(previous, "mi_001", now, &lastHeartbeat, 0)
+	policy.HeartbeatInterval = 0
+	invalidInterval := EvaluateMonitoringInstanceHeartbeatMissing(previous, "mi_001", now, &lastHeartbeat, policy, nil)
 	if invalidInterval.Transition != TransitionNoop {
 		t.Fatalf("Transition = %q, want %q for invalid interval", invalidInterval.Transition, TransitionNoop)
 	}

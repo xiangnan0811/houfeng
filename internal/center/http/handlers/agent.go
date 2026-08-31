@@ -27,7 +27,6 @@ type AgentSyncService interface {
 }
 
 const (
-	agentSyncMaxItems          = 256
 	agentIdentityMaxBytes      = 256
 	agentSecretMaxBytes        = 512
 	agentErrorSummaryMaxBytes  = 2048
@@ -348,15 +347,17 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 		return false
 	}
 
+	heartbeatSyncBatchID := req.Heartbeats[0].SyncBatchID
 	for _, heartbeat := range req.Heartbeats {
-		if !isValidAgentCarrier(heartbeat.ObservedAt, heartbeat.AgentVersion, heartbeat.Fingerprint, heartbeat.SyncBatchID) {
+		if heartbeat.SyncBatchID != heartbeatSyncBatchID ||
+			!isValidAgentCarrier(heartbeat.ObservedAt, heartbeat.AgentVersion, heartbeat.Fingerprint, heartbeat.SyncBatchID) {
 			return false
 		}
 	}
 
 	for _, sample := range req.HostSamples {
 		if !isValidAgentCarrier(sample.ObservedAt, sample.AgentVersion, sample.Fingerprint, sample.SyncBatchID) ||
-			len(sample.Containers) > agentSyncMaxItems {
+			len(sample.Containers) > syncing.MaxBatchItems {
 			return false
 		}
 		for _, container := range sample.Containers {
@@ -396,8 +397,8 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 			!optionalMax(report.ErrorSummary, agentErrorSummaryMaxBytes) ||
 			len(report.RawJSON) > agentRawJSONMaxBytes ||
 			len(report.DiagnosticsJSON) > agentRawJSONMaxBytes ||
-			len(report.ProviderResults) > agentSyncMaxItems ||
-			len(report.ServiceUnlocks) > agentSyncMaxItems {
+			len(report.ProviderResults) > syncing.MaxBatchItems ||
+			len(report.ServiceUnlocks) > syncing.MaxBatchItems {
 			return false
 		}
 		if !isValidIPQualityReportStatus(report.Status) {
@@ -459,7 +460,7 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 
 func exceedsAgentBatchLimit(lengths ...int) bool {
 	for _, length := range lengths {
-		if length > agentSyncMaxItems {
+		if length > syncing.MaxBatchItems {
 			return true
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,7 +24,16 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
-const defaultHeartbeatInterval = 5 * time.Second
+const (
+	defaultHeartbeatInterval                 = 5 * time.Second
+	heartbeatRecoverySuccesses               = 3
+	maxHeartbeatNotificationDisplayNameRunes = 80
+	// Every accepted agent sync contains at most syncing.MaxBatchItems heartbeat
+	// rows. Three batch-widths therefore contain the first row from at least the
+	// three newest accepted batches. Direct writers that violate the ingress
+	// contract can only delay recovery; they cannot manufacture recovery proof.
+	heartbeatRecoveryCandidateLimit = heartbeatRecoverySuccesses * syncing.MaxBatchItems
+)
 
 var errNotificationSuppressed = errors.New("incident notification suppressed")
 
@@ -40,6 +50,7 @@ type TargetRepository interface {
 type SnapshotReader interface {
 	GetObjectRowVersion(context.Context, ObjectType, string) (string, error)
 	ListActiveIncidents(context.Context, ObjectType, string) ([]IncidentRecord, error)
+	ListRecentLiveHeartbeatReceipts(context.Context, string, time.Time) ([]LiveHeartbeatReceipt, error)
 	ListRecentHostSamples(context.Context, string, time.Time) ([]runtimefacts.HostSample, error)
 	ListRecentProbeObservations(context.Context, string, time.Time) ([]runtimefacts.ProbeObservation, error)
 	ListMonitoringInstanceHostDailyAggregates(context.Context, string, time.Time, time.Time) ([]MonitoringInstanceHostDailyAggregate, error)
@@ -326,7 +337,7 @@ func NewSettingsBackedService(monitoringInstancesRepo MonitoringInstanceReposito
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if heartbeatInterval <= 0 {
+	if heartbeatInterval <= 0 || heartbeatInterval > maxHeartbeatIncidentInterval {
 		heartbeatInterval = defaultHeartbeatInterval
 	}
 	if sweepInterval <= 0 {
@@ -352,7 +363,8 @@ func (s *Service) AfterSuccessfulSync(ctx context.Context, batch syncing.Batch, 
 	if now.IsZero() {
 		now = s.now()
 	}
-	if err := s.evaluateMonitoringInstance(ctx, batch.MonitoringInstanceID, now); err != nil {
+	heartbeatTrigger := heartbeatEvaluationTriggerForSync(batch.Heartbeats)
+	if err := s.evaluateMonitoringInstanceWithTrigger(ctx, batch.MonitoringInstanceID, now, heartbeatTrigger); err != nil {
 		s.logger.Error("evaluate monitoring instance incidents after sync failed", "monitoring_instance_id", batch.MonitoringInstanceID, "error", err)
 	}
 	for _, targetID := range uniqueTargetIDs(batch.Observations.ProbeObservations) {
@@ -445,8 +457,28 @@ func (s *Service) evaluateMonitoringInstanceHeartbeatOnly(ctx context.Context, m
 }
 
 func (s *Service) evaluateMonitoringInstance(ctx context.Context, monitoringInstanceID string, now time.Time) error {
+	return s.evaluateMonitoringInstanceWithTrigger(ctx, monitoringInstanceID, now, heartbeatEvaluationTrigger{})
+}
+
+type heartbeatEvaluationTrigger struct {
+	suppressTransitions bool
+}
+
+func heartbeatEvaluationTriggerForSync(heartbeats []syncing.HeartbeatPayload) heartbeatEvaluationTrigger {
+	if len(heartbeats) == 0 {
+		return heartbeatEvaluationTrigger{}
+	}
+	for _, heartbeat := range heartbeats {
+		if !heartbeat.IsBackfilled {
+			return heartbeatEvaluationTrigger{}
+		}
+	}
+	return heartbeatEvaluationTrigger{suppressTransitions: true}
+}
+
+func (s *Service) evaluateMonitoringInstanceWithTrigger(ctx context.Context, monitoringInstanceID string, now time.Time, heartbeatTrigger heartbeatEvaluationTrigger) error {
 	return s.evaluateObjectWithRetry(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID, now, func(attemptNow time.Time) evaluationAttemptResult {
-		return s.evaluateMonitoringInstanceAttempt(ctx, monitoringInstanceID, attemptNow)
+		return s.evaluateMonitoringInstanceAttempt(ctx, monitoringInstanceID, attemptNow, heartbeatTrigger)
 	})
 }
 
@@ -474,16 +506,27 @@ func (s *Service) evaluateMonitoringInstanceHeartbeatOnlyAttempt(ctx context.Con
 		return s.applyEvaluationAttempt(ctx, mutation, nil, false)
 	}
 	previousByClass := incidentsByClass(previous)
-	timing := s.incidentTimingFor(ctx)
+	policySnapshot, err := s.resolveIncidentPolicySnapshot(ctx)
+	if err != nil {
+		return evaluationAttemptResult{err: err}
+	}
+	heartbeatPrevious := previousByClass[IncidentMonitoringInstanceHeartbeatMissing]
+	recoveryReceipts, err := s.heartbeatRecoveryReceipts(ctx, monitoringInstanceID, now, record.LastHeartbeatAt, heartbeatPrevious, policySnapshot.heartbeat)
+	if err != nil {
+		return evaluationAttemptResult{err: err}
+	}
 	evaluations := []classEvaluation{{
 		class:  IncidentMonitoringInstanceHeartbeatMissing,
-		result: EvaluateMonitoringInstanceHeartbeatMissing(previousByClass[IncidentMonitoringInstanceHeartbeatMissing], monitoringInstanceID, now, record.LastHeartbeatAt, timing.heartbeatInterval, timing.staleThresholdIntervals),
+		result: EvaluateMonitoringInstanceHeartbeatMissing(heartbeatPrevious, monitoringInstanceID, now, record.LastHeartbeatAt, policySnapshot.heartbeat, recoveryReceipts),
 	}}
 	mutation := buildMutation(ObjectTypeMonitoringInstance, monitoringInstanceID, rowVersion, previous, evaluations)
-	return s.applyEvaluationAttempt(ctx, mutation, evaluations, true)
+	result := s.applyEvaluationAttempt(ctx, mutation, evaluations, true)
+	result.notificationPolicy = &policySnapshot.notification
+	result.monitoringInstance = &record
+	return result
 }
 
-func (s *Service) evaluateMonitoringInstanceAttempt(ctx context.Context, monitoringInstanceID string, now time.Time) evaluationAttemptResult {
+func (s *Service) evaluateMonitoringInstanceAttempt(ctx context.Context, monitoringInstanceID string, now time.Time, heartbeatTrigger heartbeatEvaluationTrigger) evaluationAttemptResult {
 	rowVersion, err := s.objectRowVersion(ctx, ObjectTypeMonitoringInstance, monitoringInstanceID)
 	if err != nil {
 		return evaluationAttemptResult{err: err}
@@ -507,12 +550,24 @@ func (s *Service) evaluateMonitoringInstanceAttempt(ctx context.Context, monitor
 		return s.applyEvaluationAttempt(ctx, mutation, nil, false)
 	}
 	previousByClass := incidentsByClass(previous)
-	heartbeatInterval := s.heartbeatIntervalFor(ctx)
+	policySnapshot, err := s.resolveIncidentPolicySnapshot(ctx)
+	if err != nil {
+		return evaluationAttemptResult{err: err}
+	}
+	heartbeatPrevious := previousByClass[IncidentMonitoringInstanceHeartbeatMissing]
+	heartbeatEvaluation := skip(heartbeatPrevious)
+	if !heartbeatTrigger.suppressTransitions {
+		recoveryReceipts, err := s.heartbeatRecoveryReceipts(ctx, monitoringInstanceID, now, record.LastHeartbeatAt, heartbeatPrevious, policySnapshot.heartbeat)
+		if err != nil {
+			return evaluationAttemptResult{err: err}
+		}
+		heartbeatEvaluation = EvaluateMonitoringInstanceHeartbeatMissing(heartbeatPrevious, monitoringInstanceID, now, record.LastHeartbeatAt, policySnapshot.heartbeat, recoveryReceipts)
+	}
 	hostSamples, err := s.snapshots.ListRecentHostSamples(ctx, monitoringInstanceID, now.Add(-30*time.Minute))
 	if err != nil {
 		return evaluationAttemptResult{err: fmt.Errorf("list recent host samples for %q: %w", monitoringInstanceID, err)}
 	}
-	thresholds := s.metricThresholdsFor(ctx)
+	thresholds := policySnapshot.metrics
 	trendHostSamples, err := s.snapshots.ListRecentHostSamples(ctx, monitoringInstanceID, now.Add(-24*time.Hour))
 	if err != nil {
 		return evaluationAttemptResult{err: fmt.Errorf("list trend host samples for %q: %w", monitoringInstanceID, err)}
@@ -525,7 +580,7 @@ func (s *Service) evaluateMonitoringInstanceAttempt(ctx context.Context, monitor
 
 	evaluations := []classEvaluation{{
 		class:  IncidentMonitoringInstanceHeartbeatMissing,
-		result: EvaluateMonitoringInstanceHeartbeatMissing(previousByClass[IncidentMonitoringInstanceHeartbeatMissing], monitoringInstanceID, now, record.LastHeartbeatAt, heartbeatInterval),
+		result: heartbeatEvaluation,
 	}}
 	if len(hostSamples) > 0 {
 		latest := &hostSamples[0]
@@ -542,7 +597,10 @@ func (s *Service) evaluateMonitoringInstanceAttempt(ctx context.Context, monitor
 	})
 
 	mutation := buildMutation(ObjectTypeMonitoringInstance, monitoringInstanceID, rowVersion, previous, evaluations)
-	return s.applyEvaluationAttempt(ctx, mutation, evaluations, true)
+	result := s.applyEvaluationAttempt(ctx, mutation, evaluations, true)
+	result.notificationPolicy = &policySnapshot.notification
+	result.monitoringInstance = &record
+	return result
 }
 
 func (s *Service) evaluateTarget(ctx context.Context, targetID string, now time.Time) error {
@@ -604,6 +662,8 @@ func (s *Service) evaluateTargetAttempt(ctx context.Context, targetID string, no
 type evaluationAttemptResult struct {
 	evaluations        []classEvaluation
 	appendNotification bool
+	notificationPolicy *notificationPolicy
+	monitoringInstance *monitoringinstances.Record
 	conflict           bool
 	err                error
 }
@@ -615,6 +675,9 @@ func (s *Service) evaluateObjectWithRetry(ctx context.Context, objectType Object
 		if result.err == nil {
 			if !result.appendNotification {
 				return nil
+			}
+			if result.notificationPolicy != nil {
+				return s.appendNotificationRecordsWithPolicy(ctx, objectType, objectID, result.evaluations, *result.notificationPolicy, result.monitoringInstance)
 			}
 			return s.appendNotificationRecords(ctx, objectType, objectID, result.evaluations)
 		}
@@ -734,10 +797,10 @@ func administrativeRecoverySummaryForTarget(record targets.TargetRecord) string 
 	return "Target 非运行态，当前异常按行政状态收敛"
 }
 
-type incidentTiming struct {
-	heartbeatInterval       time.Duration
-	sweepInterval           time.Duration
-	staleThresholdIntervals int
+type incidentPolicySnapshot struct {
+	heartbeat    HeartbeatIncidentPolicy
+	metrics      MetricThresholds
+	notification notificationPolicy
 }
 
 type notificationPolicy struct {
@@ -842,65 +905,99 @@ func (p notificationPolicy) enabled(reason NotificationReason) bool {
 	}
 }
 
-func (s *Service) heartbeatIntervalFor(ctx context.Context) time.Duration {
-	return s.incidentTimingFor(ctx).heartbeatInterval
-}
-
 func (s *Service) sweepIntervalFor(ctx context.Context) time.Duration {
-	return s.incidentTimingFor(ctx).sweepInterval
-}
-
-func (s *Service) incidentTimingFor(ctx context.Context) incidentTiming {
-	timing := incidentTiming{
-		heartbeatInterval:       s.fallbackHeartbeatInterval,
-		sweepInterval:           s.fallbackSweepInterval,
-		staleThresholdIntervals: 3,
-	}
 	if s.settingsRepo == nil {
-		return timing
+		return s.fallbackSweepInterval
 	}
+	var defaults centersettings.IncidentDefaults
 	if source, ok := s.settingsRepo.(persistedIncidentDefaultsSource); ok {
-		defaults, exists, err := source.GetPersistedIncidentDefaults(ctx)
+		persisted, exists, err := source.GetPersistedIncidentDefaults(ctx)
 		if err != nil || !exists {
-			return timing
+			return s.fallbackSweepInterval
 		}
-		return applyIncidentDefaults(timing, defaults)
+		defaults = persisted
+	} else {
+		settings, err := s.settingsRepo.GetSettings(ctx)
+		if err != nil {
+			return s.fallbackSweepInterval
+		}
+		defaults = settings.IncidentDefaults
 	}
-	settings, err := s.settingsRepo.GetSettings(ctx)
+	validated, err := centersettings.ValidateIncidentDefaults(defaults)
 	if err != nil {
-		return timing
+		return s.fallbackSweepInterval
 	}
-	return applyIncidentDefaults(timing, settings.IncidentDefaults)
+	return time.Duration(validated.SweepIntervalSeconds) * time.Second
 }
 
-func applyIncidentDefaults(timing incidentTiming, defaults centersettings.IncidentDefaults) incidentTiming {
-	if defaults.HeartbeatIntervalSeconds > 0 {
-		timing.heartbeatInterval = time.Duration(defaults.HeartbeatIntervalSeconds) * time.Second
-	}
-	if defaults.SweepIntervalSeconds > 0 {
-		timing.sweepInterval = time.Duration(defaults.SweepIntervalSeconds) * time.Second
-	}
-	if defaults.StaleThresholdIntervals > 0 {
-		timing.staleThresholdIntervals = defaults.StaleThresholdIntervals
-	}
-	return timing
-}
-
-func (s *Service) metricThresholdsFor(ctx context.Context) MetricThresholds {
+func (s *Service) resolveIncidentPolicySnapshot(ctx context.Context) (incidentPolicySnapshot, error) {
 	if s.settingsRepo == nil {
-		return DefaultMetricThresholds()
+		defaults := centersettings.Default().IncidentDefaults
+		return incidentPolicySnapshot{
+			heartbeat: HeartbeatIncidentPolicy{
+				HeartbeatInterval:      s.fallbackHeartbeatInterval,
+				MissingThreshold:       defaults.StaleThresholdIntervals,
+				RecoverySuccesses:      heartbeatRecoverySuccesses,
+				RecoveryMaxIntervalGap: 2 * s.fallbackHeartbeatInterval,
+			},
+			metrics:      MetricThresholdsFromDefaults(defaults),
+			notification: notificationPolicyFromDefaults(defaults),
+		}, nil
 	}
+
+	var defaults centersettings.IncidentDefaults
 	if source, ok := s.settingsRepo.(persistedIncidentDefaultsSource); ok {
-		defaults, exists, err := source.GetPersistedIncidentDefaults(ctx)
-		if err == nil && exists {
-			return MetricThresholdsFromDefaults(defaults)
+		persisted, exists, err := source.GetPersistedIncidentDefaults(ctx)
+		if err != nil {
+			return incidentPolicySnapshot{}, fmt.Errorf("read persisted incident defaults: %w", err)
 		}
+		if exists {
+			defaults = persisted
+		} else {
+			settings, err := s.settingsRepo.GetSettings(ctx)
+			if err != nil {
+				return incidentPolicySnapshot{}, fmt.Errorf("read center settings for incident policy: %w", err)
+			}
+			defaults = settings.IncidentDefaults
+		}
+	} else {
+		settings, err := s.settingsRepo.GetSettings(ctx)
+		if err != nil {
+			return incidentPolicySnapshot{}, fmt.Errorf("read center settings for incident policy: %w", err)
+		}
+		defaults = settings.IncidentDefaults
 	}
-	settings, err := s.settingsRepo.GetSettings(ctx)
+
+	validated, err := centersettings.ValidateIncidentDefaults(defaults)
 	if err != nil {
-		return DefaultMetricThresholds()
+		return incidentPolicySnapshot{}, fmt.Errorf("validate incident policy settings: %w", err)
 	}
-	return MetricThresholdsFromDefaults(settings.IncidentDefaults)
+	heartbeatInterval := time.Duration(validated.HeartbeatIntervalSeconds) * time.Second
+	return incidentPolicySnapshot{
+		heartbeat: HeartbeatIncidentPolicy{
+			HeartbeatInterval:      heartbeatInterval,
+			MissingThreshold:       validated.StaleThresholdIntervals,
+			RecoverySuccesses:      heartbeatRecoverySuccesses,
+			RecoveryMaxIntervalGap: 2 * heartbeatInterval,
+		},
+		metrics:      MetricThresholdsFromDefaults(validated),
+		notification: notificationPolicyFromDefaults(validated),
+	}, nil
+}
+
+func (s *Service) heartbeatRecoveryReceipts(ctx context.Context, monitoringInstanceID string, now time.Time, lastHeartbeatAt *time.Time, previous *IncidentRecord, policy HeartbeatIncidentPolicy) ([]LiveHeartbeatReceipt, error) {
+	if previous == nil || lastHeartbeatAt == nil || !validHeartbeatIncidentPolicy(policy) {
+		return nil, nil
+	}
+	missed := heartbeatMissedIntervals(now, *lastHeartbeatAt, policy.HeartbeatInterval)
+	if missed >= policy.MissingThreshold {
+		return nil, nil
+	}
+	receipts, err := s.snapshots.ListRecentLiveHeartbeatReceipts(ctx, monitoringInstanceID, previous.StartedAt)
+	if err != nil {
+		return nil, fmt.Errorf("list recent live heartbeat receipts for %q: %w", monitoringInstanceID, err)
+	}
+	return receipts, nil
 }
 
 func (s *Service) notificationPolicyFor(ctx context.Context) notificationPolicy {
@@ -961,17 +1058,23 @@ func buildMutation(objectType ObjectType, objectID, expectedObjectRowVersion str
 }
 
 func (s *Service) appendNotificationRecords(ctx context.Context, objectType ObjectType, objectID string, evaluations []classEvaluation) error {
-	records := make([]NotificationRecordWrite, 0)
 	policy := s.notificationPolicyFor(ctx)
+	return s.appendNotificationRecordsWithPolicy(ctx, objectType, objectID, evaluations, policy, nil)
+}
+
+func (s *Service) appendNotificationRecordsWithPolicy(ctx context.Context, objectType ObjectType, objectID string, evaluations []classEvaluation, policy notificationPolicy, monitoringInstance *monitoringinstances.Record) error {
+	records := make([]NotificationRecordWrite, 0)
 	for _, evaluation := range evaluations {
 		if evaluation.result.Notification == nil {
 			continue
 		}
 		decision := evaluation.result.Notification
 		base := notificationRecordBase(evaluation, objectType, objectID, decision)
+		deliverySummary := incidentNotificationDeliverySummary(evaluation, objectType, objectID, decision, monitoringInstance)
+		base.Summary = deliverySummary
 		shouldSend := decision.ShouldSend && policy.enabled(decision.Reason)
 		if shouldSend && s.dispatcher != nil {
-			deliveries := s.dispatcher.Dispatch(ctx, decision.Summary)
+			deliveries := s.dispatcher.Dispatch(ctx, deliverySummary)
 			records = append(records, s.notificationRecordsFromDeliveries(base, deliveries)...)
 			continue
 		}
@@ -981,6 +1084,68 @@ func (s *Service) appendNotificationRecords(ctx context.Context, objectType Obje
 		return nil
 	}
 	return s.writer.AppendNotificationRecords(ctx, records)
+}
+
+func incidentNotificationDeliverySummary(evaluation classEvaluation, objectType ObjectType, objectID string, decision *NotificationDecision, monitoringInstance *monitoringinstances.Record) string {
+	if decision == nil || objectType != ObjectTypeMonitoringInstance || evaluation.class != IncidentMonitoringInstanceHeartbeatMissing {
+		if decision == nil {
+			return ""
+		}
+		return decision.Summary
+	}
+
+	var eventLabel string
+	switch decision.Reason {
+	case NotificationReasonStarted:
+		eventLabel = "心跳失联"
+	case NotificationReasonEscalated:
+		eventLabel = "心跳失联升级"
+	case NotificationReasonRecovered:
+		eventLabel = "心跳恢复"
+	default:
+		return decision.Summary
+	}
+
+	displayName := "未命名监控实例"
+	if monitoringInstance != nil && monitoringInstance.MonitoringInstanceID == objectID {
+		if value := sanitizeHeartbeatNotificationDisplayName(monitoringInstance.DisplayName); value != "" {
+			displayName = value
+		}
+	}
+	return fmt.Sprintf("VPS/监控实例：%s（%s）\n事件：%s\n详情：%s", displayName, objectID, eventLabel, decision.Summary)
+}
+
+func sanitizeHeartbeatNotificationDisplayName(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if isBidiControl(r) {
+			return -1
+		}
+		if unicode.IsControl(r) || unicode.IsSpace(r) {
+			return ' '
+		}
+		return r
+	}, value)
+	value = strings.Join(strings.Fields(value), " ")
+	if value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxHeartbeatNotificationDisplayNameRunes {
+		return value
+	}
+	prefix := strings.TrimSpace(string(runes[:maxHeartbeatNotificationDisplayNameRunes-1]))
+	if prefix == "" {
+		return ""
+	}
+	return prefix + "…"
+}
+
+func isBidiControl(r rune) bool {
+	return r == '\u061c' ||
+		r == '\u200e' ||
+		r == '\u200f' ||
+		(r >= '\u202a' && r <= '\u202e') ||
+		(r >= '\u2066' && r <= '\u2069')
 }
 
 func notificationRecordBase(evaluation classEvaluation, objectType ObjectType, objectID string, decision *NotificationDecision) NotificationRecordWrite {
@@ -1275,6 +1440,32 @@ type incidentSnapshotDB interface {
 const monitoringInstanceRowVersionSQL = `select xmin::text from monitoring_instances where monitoring_instance_id = $1`
 const targetRowVersionSQL = `select xmin::text from targets where target_id = $1`
 
+const incidentRecentLiveHeartbeatReceiptsSQL = `
+	with recent_live as materialized (
+		select sync_batch_id, received_at, id
+		from monitoring_instance_heartbeats
+		where monitoring_instance_id = $1
+			and received_at > $2
+			and is_backfilled = false
+		order by received_at desc, id desc
+		limit $3
+	), ranked as (
+		select
+			sync_batch_id,
+			received_at,
+			id,
+			row_number() over (
+				partition by sync_batch_id
+				order by received_at desc, id desc
+			) as batch_rank
+		from recent_live
+	)
+	select sync_batch_id, received_at
+	from ranked
+	where batch_rank = 1
+	order by received_at desc, id desc
+	limit 3`
+
 const incidentRecentHostSamplesSQL = `
 	select
 		monitoring_instance_id, observed_at, received_at, agent_version, fingerprint,
@@ -1357,6 +1548,27 @@ func (r *PostgresSnapshotReader) ListActiveIncidents(ctx context.Context, object
 		return nil, fmt.Errorf("iterate active incidents: %w", err)
 	}
 	return records, nil
+}
+
+func (r *PostgresSnapshotReader) ListRecentLiveHeartbeatReceipts(ctx context.Context, monitoringInstanceID string, startedAt time.Time) ([]LiveHeartbeatReceipt, error) {
+	rows, err := r.db.Query(ctx, incidentRecentLiveHeartbeatReceiptsSQL, monitoringInstanceID, startedAt, heartbeatRecoveryCandidateLimit)
+	if err != nil {
+		return nil, fmt.Errorf("query recent live heartbeat receipts for %q: %w", monitoringInstanceID, err)
+	}
+	defer rows.Close()
+
+	receipts := make([]LiveHeartbeatReceipt, 0, heartbeatRecoverySuccesses)
+	for rows.Next() {
+		var receipt LiveHeartbeatReceipt
+		if err := rows.Scan(&receipt.SyncBatchID, &receipt.ReceivedAt); err != nil {
+			return nil, fmt.Errorf("scan recent live heartbeat receipt for %q: %w", monitoringInstanceID, err)
+		}
+		receipts = append(receipts, receipt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate recent live heartbeat receipts for %q: %w", monitoringInstanceID, err)
+	}
+	return receipts, nil
 }
 
 func (r *PostgresSnapshotReader) ListRecentHostSamples(ctx context.Context, monitoringInstanceID string, since time.Time) ([]runtimefacts.HostSample, error) {

@@ -2429,7 +2429,7 @@ def asset_workflow_settings() -> dict[str, object]:
         },
         "incident_defaults": {
             "heartbeat_interval_seconds": 5,
-            "stale_threshold_intervals": 3,
+            "stale_threshold_intervals": 12,
             "sweep_interval_seconds": 5,
             "notify_on_started": True,
             "notify_on_escalated": True,

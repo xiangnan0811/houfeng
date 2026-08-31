@@ -22,13 +22,14 @@ func TestMonitoringEventEvidenceIsReachableFromIncidentWriterPath(t *testing.T) 
 	t.Parallel()
 
 	eventAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
-	lastHeartbeatAt := eventAt.Add(-4 * time.Minute)
+	lastHeartbeatAt := eventAt.Add(-6 * time.Minute)
 	evaluation := incidents.EvaluateMonitoringInstanceHeartbeatMissing(
 		nil,
 		"mi_writer_path",
 		eventAt,
 		&lastHeartbeatAt,
-		time.Minute,
+		incidents.HeartbeatIncidentPolicy{HeartbeatInterval: time.Minute, MissingThreshold: 3, RecoverySuccesses: 3, RecoveryMaxIntervalGap: 2 * time.Minute},
+		nil,
 	)
 	if evaluation.Current == nil || evaluation.Event == nil {
 		t.Fatalf("heartbeat evaluation = %#v, want started incident and event", evaluation)

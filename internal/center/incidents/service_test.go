@@ -10,8 +10,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/observations"
@@ -98,17 +100,21 @@ func (f *fakeTargetRepo) GetTarget(_ context.Context, targetID string) (targets.
 var _ TargetRepository = (*fakeTargetRepo)(nil)
 
 type fakeSnapshotReader struct {
-	activeByObject               map[string][]IncidentRecord
-	activeByObjectSequences      map[string][][]IncidentRecord
-	hostSamples                  map[string][]runtimefacts.HostSample
-	hostSampleSequences          map[string][][]runtimefacts.HostSample
-	probeObs                     map[string][]runtimefacts.ProbeObservation
-	probeObservationSequences    map[string][][]runtimefacts.ProbeObservation
-	monitoringInstanceAggregates map[string][]MonitoringInstanceHostDailyAggregate
-	targetAggregates             map[string][]TargetProbeDailyAggregate
-	rowVersionSequences          map[string][]string
-	rowVersionErrors             map[string][]error
-	trace                        *[]string
+	activeByObject                map[string][]IncidentRecord
+	activeByObjectSequences       map[string][][]IncidentRecord
+	hostSamples                   map[string][]runtimefacts.HostSample
+	hostSampleSequences           map[string][][]runtimefacts.HostSample
+	probeObs                      map[string][]runtimefacts.ProbeObservation
+	probeObservationSequences     map[string][][]runtimefacts.ProbeObservation
+	monitoringInstanceAggregates  map[string][]MonitoringInstanceHostDailyAggregate
+	targetAggregates              map[string][]TargetProbeDailyAggregate
+	rowVersionSequences           map[string][]string
+	rowVersionErrors              map[string][]error
+	liveHeartbeatReceipts         map[string][]LiveHeartbeatReceipt
+	liveHeartbeatReceiptSequences map[string][][]LiveHeartbeatReceipt
+	liveHeartbeatReceiptErrors    map[string][]error
+	liveHeartbeatReceiptCalls     map[string]int
+	trace                         *[]string
 }
 
 func (f *fakeSnapshotReader) GetObjectRowVersion(
@@ -160,6 +166,24 @@ func (f *fakeSnapshotReader) ListRecentProbeObservations(_ context.Context, targ
 	}
 	return append([]runtimefacts.ProbeObservation(nil), f.probeObs[targetID]...), nil
 }
+func (f *fakeSnapshotReader) ListRecentLiveHeartbeatReceipts(_ context.Context, monitoringInstanceID string, _ time.Time) ([]LiveHeartbeatReceipt, error) {
+	appendIncidentTestTrace(f.trace, "heartbeat-receipts:"+monitoringInstanceID)
+	if f.liveHeartbeatReceiptCalls == nil {
+		f.liveHeartbeatReceiptCalls = make(map[string]int)
+	}
+	f.liveHeartbeatReceiptCalls[monitoringInstanceID]++
+	if errs := f.liveHeartbeatReceiptErrors[monitoringInstanceID]; len(errs) > 0 {
+		err := errs[0]
+		f.liveHeartbeatReceiptErrors[monitoringInstanceID] = errs[1:]
+		return nil, err
+	}
+	if sequences := f.liveHeartbeatReceiptSequences[monitoringInstanceID]; len(sequences) > 0 {
+		receipts := sequences[0]
+		f.liveHeartbeatReceiptSequences[monitoringInstanceID] = sequences[1:]
+		return append([]LiveHeartbeatReceipt(nil), receipts...), nil
+	}
+	return append([]LiveHeartbeatReceipt(nil), f.liveHeartbeatReceipts[monitoringInstanceID]...), nil
+}
 func (f *fakeSnapshotReader) ListMonitoringInstanceHostDailyAggregates(_ context.Context, monitoringInstanceID string, _, _ time.Time) ([]MonitoringInstanceHostDailyAggregate, error) {
 	appendIncidentTestTrace(f.trace, "host-aggregate:"+monitoringInstanceID)
 	return append([]MonitoringInstanceHostDailyAggregate(nil), f.monitoringInstanceAggregates[monitoringInstanceID]...), nil
@@ -205,10 +229,14 @@ func appendIncidentTestTrace(trace *[]string, entry string) {
 }
 
 type fakeIncidentSnapshotDB struct {
+	query    func(context.Context, string, ...any) (pgx.Rows, error)
 	queryRow func(context.Context, string, ...any) pgx.Row
 }
 
-func (f fakeIncidentSnapshotDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (f fakeIncidentSnapshotDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if f.query != nil {
+		return f.query(ctx, sql, args...)
+	}
 	return nil, errors.New("unexpected Query call")
 }
 
@@ -226,6 +254,30 @@ type fakeIncidentSnapshotRow struct {
 func (r fakeIncidentSnapshotRow) Scan(dest ...any) error {
 	return r.scan(dest...)
 }
+
+type fakeIncidentSnapshotRows struct {
+	scans []func(...any) error
+	index int
+	err   error
+}
+
+func (r *fakeIncidentSnapshotRows) Close()                                       {}
+func (r *fakeIncidentSnapshotRows) Err() error                                   { return r.err }
+func (r *fakeIncidentSnapshotRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (r *fakeIncidentSnapshotRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (r *fakeIncidentSnapshotRows) Next() bool {
+	if r.index >= len(r.scans) {
+		return false
+	}
+	r.index++
+	return true
+}
+func (r *fakeIncidentSnapshotRows) Scan(dest ...any) error { return r.scans[r.index-1](dest...) }
+func (r *fakeIncidentSnapshotRows) Values() ([]any, error) {
+	return nil, errors.New("unexpected Values call")
+}
+func (r *fakeIncidentSnapshotRows) RawValues() [][]byte { return nil }
+func (r *fakeIncidentSnapshotRows) Conn() *pgx.Conn     { return nil }
 
 type fakeNotifier struct {
 	messages []string
@@ -264,12 +316,18 @@ type fakeSettingsRepository struct {
 }
 
 type tracedSettingsRepository struct {
-	settings centersettings.CenterSettings
-	trace    *[]string
+	settings         centersettings.CenterSettings
+	settingsSequence []centersettings.CenterSettings
+	trace            *[]string
 }
 
 func (r *tracedSettingsRepository) GetSettings(context.Context) (centersettings.CenterSettings, error) {
 	appendIncidentTestTrace(r.trace, "settings")
+	if len(r.settingsSequence) > 0 {
+		settings := r.settingsSequence[0]
+		r.settingsSequence = r.settingsSequence[1:]
+		return settings, nil
+	}
 	return r.settings, nil
 }
 
@@ -281,6 +339,94 @@ func TestIncidentSnapshotSeriesSQLUsesReplaySafeLatestOrdering(t *testing.T) {
 	}
 	if !strings.Contains(incidentRecentProbeObservationsSQL, "order by po.observed_at desc, po.is_backfilled asc, po.received_at desc, po.id desc") {
 		t.Fatalf("incidentRecentProbeObservationsSQL = %q, want replay-safe probe series ordering", incidentRecentProbeObservationsSQL)
+	}
+}
+
+func TestPostgresSnapshotReaderListRecentLiveHeartbeatReceiptsSQLContract(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Date(2026, time.August, 31, 10, 0, 0, 0, time.UTC)
+	receivedAt := []time.Time{startedAt.Add(15 * time.Second), startedAt.Add(10 * time.Second), startedAt.Add(5 * time.Second)}
+	var gotSQL string
+	var gotArgs []any
+	db := fakeIncidentSnapshotDB{query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+		gotSQL = strings.ToLower(strings.Join(strings.Fields(sql), " "))
+		gotArgs = append([]any(nil), args...)
+		rows := &fakeIncidentSnapshotRows{scans: make([]func(...any) error, 0, 3)}
+		for i := range receivedAt {
+			batchID := fmt.Sprintf("batch-%d", 3-i)
+			when := receivedAt[i]
+			rows.scans = append(rows.scans, func(dest ...any) error {
+				*(dest[0].(*string)) = batchID
+				*(dest[1].(*time.Time)) = when
+				return nil
+			})
+		}
+		return rows, nil
+	}}
+	reader := &PostgresSnapshotReader{db: db}
+
+	got, err := reader.ListRecentLiveHeartbeatReceipts(context.Background(), "mi_receipts", startedAt)
+	if err != nil {
+		t.Fatalf("ListRecentLiveHeartbeatReceipts() error = %v", err)
+	}
+	for _, fragment := range []string{
+		"with recent_live as materialized",
+		"from monitoring_instance_heartbeats",
+		"monitoring_instance_id = $1",
+		"received_at > $2",
+		"is_backfilled = false",
+		"limit $3",
+		"partition by sync_batch_id",
+		"from recent_live",
+		"order by received_at desc, id desc",
+		"limit 3",
+	} {
+		if !strings.Contains(gotSQL, fragment) {
+			t.Fatalf("SQL = %q, want fragment %q", gotSQL, fragment)
+		}
+	}
+	candidateLimitPosition := strings.Index(gotSQL, "limit $3")
+	windowPosition := strings.Index(gotSQL, "row_number() over")
+	if candidateLimitPosition < 0 || windowPosition < 0 || candidateLimitPosition > windowPosition {
+		t.Fatalf("SQL = %q, want bounded candidate LIMIT before WindowAgg deduplication", gotSQL)
+	}
+	wantCandidateLimit := heartbeatRecoverySuccesses * syncing.MaxBatchItems
+	if len(gotArgs) != 3 || gotArgs[0] != "mi_receipts" || gotArgs[1] != startedAt || gotArgs[2] != wantCandidateLimit {
+		t.Fatalf("query args = %#v, want instance id, started_at, and conservative candidate limit %d", gotArgs, wantCandidateLimit)
+	}
+	if len(got) != 3 || got[0].SyncBatchID != "batch-3" || got[0].ReceivedAt != receivedAt[0] || got[2].SyncBatchID != "batch-1" {
+		t.Fatalf("receipts = %#v, want minimal newest-first batch evidence", got)
+	}
+}
+
+func TestPostgresSnapshotReaderListRecentLiveHeartbeatReceiptsWrapsErrors(t *testing.T) {
+	t.Parallel()
+
+	queryErr := errors.New("query receipts")
+	scanErr := errors.New("scan receipt")
+	rowsErr := errors.New("iterate receipts")
+	tests := []struct {
+		name string
+		db   fakeIncidentSnapshotDB
+		want error
+	}{
+		{name: "query", want: queryErr, db: fakeIncidentSnapshotDB{query: func(context.Context, string, ...any) (pgx.Rows, error) { return nil, queryErr }}},
+		{name: "scan", want: scanErr, db: fakeIncidentSnapshotDB{query: func(context.Context, string, ...any) (pgx.Rows, error) {
+			return &fakeIncidentSnapshotRows{scans: []func(...any) error{func(...any) error { return scanErr }}}, nil
+		}}},
+		{name: "rows", want: rowsErr, db: fakeIncidentSnapshotDB{query: func(context.Context, string, ...any) (pgx.Rows, error) {
+			return &fakeIncidentSnapshotRows{err: rowsErr}, nil
+		}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &PostgresSnapshotReader{db: tt.db}
+			_, err := reader.ListRecentLiveHeartbeatReceipts(context.Background(), "mi_receipts", time.Now())
+			if err == nil || !errors.Is(err, tt.want) {
+				t.Fatalf("ListRecentLiveHeartbeatReceipts() error = %v, want wrapped %v", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -350,15 +496,81 @@ func TestServiceMonitoringInstanceProjectionConflictRereadsAndRetriesOnce(t *tes
 		"active:monitoring_instance:" + monitoringInstanceID,
 		"settings",
 		"host:" + monitoringInstanceID,
-		"settings",
 		"host:" + monitoringInstanceID,
 		"host-aggregate:" + monitoringInstanceID,
 		"apply:monitoring_instance:" + monitoringInstanceID,
 	}
 	wantTrace := append(append([]string{}, wantAttemptTrace...), wantAttemptTrace...)
-	wantTrace = append(wantTrace, "settings")
 	if strings.Join(trace, "|") != strings.Join(wantTrace, "|") {
 		t.Fatalf("trace = %#v, want two token-first full attempts %#v", trace, wantTrace)
+	}
+}
+
+func TestServiceHeartbeatProjectionConflictRereadsPolicyRecordActiveAndReceipts(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 15, 30, 0, 0, time.UTC)
+	monitoringInstanceID := "mi_heartbeat_retry"
+	startedAt := now.Add(-time.Minute)
+	lastHeartbeat := now
+	trace := make([]string, 0)
+	firstSettings := centersettings.Default()
+	secondSettings := centersettings.Default()
+	secondSettings.IncidentDefaults.NotifyOnRecovered = false
+	settingsRepo := &tracedSettingsRepository{settingsSequence: []centersettings.CenterSettings{firstSettings, secondSettings}, trace: &trace}
+	repo := &fakeMonitoringInstanceRepo{
+		getMonitoringInstanceResults: map[string][]monitoringinstances.Record{
+			monitoringInstanceID: {
+				{MonitoringInstanceID: monitoringInstanceID, DisplayName: "first name", MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat},
+				{MonitoringInstanceID: monitoringInstanceID, DisplayName: "second name", MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat},
+			},
+		},
+		trace: &trace,
+	}
+	active := heartbeatActiveIncidentForTest(monitoringInstanceID, SeverityAlert, startedAt)
+	receipts := []LiveHeartbeatReceipt{
+		{SyncBatchID: "batch-3", ReceivedAt: startedAt.Add(15 * time.Second)},
+		{SyncBatchID: "batch-2", ReceivedAt: startedAt.Add(10 * time.Second)},
+		{SyncBatchID: "batch-1", ReceivedAt: startedAt.Add(5 * time.Second)},
+	}
+	snapshots := &fakeSnapshotReader{
+		rowVersionSequences: map[string][]string{"monitoring_instance:" + monitoringInstanceID: {"version-1", "version-2"}},
+		activeByObjectSequences: map[string][][]IncidentRecord{
+			"monitoring_instance:" + monitoringInstanceID: {{*active}, {*active}},
+		},
+		liveHeartbeatReceiptSequences: map[string][][]LiveHeartbeatReceipt{monitoringInstanceID: {receipts, receipts}},
+		trace:                         &trace,
+	}
+	writer := &fakeMutationWriter{applyErrors: []error{ErrIncidentProjectionConflict, nil}, trace: &trace}
+	notifier := &fakeNotifier{}
+	service := NewSettingsBackedService(repo, &fakeTargetRepo{}, snapshots, writer, notifier, settingsRepo, slog.Default(), 5*time.Second, time.Minute)
+
+	if err := service.evaluateMonitoringInstanceHeartbeatOnly(context.Background(), monitoringInstanceID, now); err != nil {
+		t.Fatalf("evaluateMonitoringInstanceHeartbeatOnly() error = %v", err)
+	}
+	if len(writer.mutations) != 2 || len(writer.mutations[1].Active) != 0 || len(writer.mutations[1].Events) != 1 || writer.mutations[1].Events[0].EventType != EventIncidentRecovered {
+		t.Fatalf("mutations = %#v, want recovery recomputed on second attempt", writer.mutations)
+	}
+	if snapshots.liveHeartbeatReceiptCalls[monitoringInstanceID] != 2 {
+		t.Fatalf("receipt reads = %d, want one fresh read per CAS attempt", snapshots.liveHeartbeatReceiptCalls[monitoringInstanceID])
+	}
+	if len(notifier.messages) != 0 || len(writer.notifications) != 1 || len(writer.notifications[0]) != 1 || writer.notifications[0][0].DeliveryStatus != DeliveryStatusSuppressed {
+		t.Fatalf("messages = %#v notifications = %#v, want second settings snapshot to suppress recovery", notifier.messages, writer.notifications)
+	}
+	if !strings.Contains(writer.notifications[0][0].Summary, "second name（"+monitoringInstanceID+"）") || strings.Contains(writer.notifications[0][0].Summary, "first name") {
+		t.Fatalf("summary = %q, want second-attempt record identity", writer.notifications[0][0].Summary)
+	}
+	wantAttempt := []string{
+		"version:monitoring_instance:" + monitoringInstanceID,
+		"get:monitoring_instance:" + monitoringInstanceID,
+		"active:monitoring_instance:" + monitoringInstanceID,
+		"settings",
+		"heartbeat-receipts:" + monitoringInstanceID,
+		"apply:monitoring_instance:" + monitoringInstanceID,
+	}
+	wantTrace := append(append([]string{}, wantAttempt...), wantAttempt...)
+	if strings.Join(trace, "|") != strings.Join(wantTrace, "|") {
+		t.Fatalf("trace = %#v, want full CAS reread trace %#v", trace, wantTrace)
 	}
 }
 
@@ -1161,7 +1373,7 @@ func TestServiceWriterGuardOrdinaryErrorsPropagateWithoutRetry(t *testing.T) {
 
 func TestServiceHeartbeatOnlySweepUsesFreshObjectAndRowVersionCAS(t *testing.T) {
 	now := time.Date(2026, time.August, 30, 12, 30, 0, 0, time.UTC)
-	stale := now.Add(-5 * time.Minute)
+	stale := now.Add(-12 * time.Minute)
 	trace := make([]string, 0)
 	repo := &fakeMonitoringInstanceRepo{
 		listMonitoringInstancesResult: []monitoringinstances.Record{{MonitoringInstanceID: "mi_heartbeat", LastHeartbeatAt: &now}},
@@ -1442,6 +1654,211 @@ func TestServiceNotificationFlags(t *testing.T) {
 	}
 }
 
+func TestServiceHeartbeatNotificationIncludesMonitoringInstanceIdentity(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 15, 0, 0, 0, time.UTC)
+	settings := centersettings.Default()
+	settings.IncidentDefaults.HeartbeatIntervalSeconds = 5
+	settings.IncidentDefaults.StaleThresholdIntervals = 12
+	policyRepo := &fakeSettingsRepository{persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true}
+
+	tests := []struct {
+		name          string
+		lastHeartbeat time.Time
+		previous      *IncidentRecord
+		receipts      []LiveHeartbeatReceipt
+		eventLabel    string
+		detail        string
+		eventType     EventType
+	}{
+		{
+			name:          "started",
+			lastHeartbeat: now.Add(-12 * 5 * time.Second),
+			eventLabel:    "心跳失联",
+			detail:        "最近 12 个心跳周期未收到心跳",
+			eventType:     EventIncidentStarted,
+		},
+		{
+			name:          "escalated",
+			lastHeartbeat: now.Add(-24 * 5 * time.Second),
+			previous:      heartbeatActiveIncidentForTest("mi_identity", SeverityNotice, now.Add(-time.Hour)),
+			eventLabel:    "心跳失联升级",
+			detail:        "最近 24 个心跳周期未收到心跳",
+			eventType:     EventIncidentEscalated,
+		},
+		{
+			name:          "recovered",
+			lastHeartbeat: now,
+			previous:      heartbeatActiveIncidentForTest("mi_identity", SeverityAlert, now.Add(-time.Minute)),
+			receipts: []LiveHeartbeatReceipt{
+				{SyncBatchID: "batch-3", ReceivedAt: now.Add(-5 * time.Second)},
+				{SyncBatchID: "batch-2", ReceivedAt: now.Add(-10 * time.Second)},
+				{SyncBatchID: "batch-1", ReceivedAt: now.Add(-15 * time.Second)},
+			},
+			eventLabel: "心跳恢复",
+			detail:     "心跳已恢复",
+			eventType:  EventIncidentRecovered,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			monitoringInstanceID := "mi_identity"
+			record := monitoringinstances.Record{
+				MonitoringInstanceID: monitoringInstanceID,
+				DisplayName:          "  香港-01  ",
+				MonitoringStatus:     monitoringinstances.MonitoringEnabled,
+				LifecycleStatus:      monitoringinstances.LifecycleInUse,
+				LastHeartbeatAt:      &tt.lastHeartbeat,
+			}
+			active := map[string][]IncidentRecord{}
+			if tt.previous != nil {
+				active["monitoring_instance:"+monitoringInstanceID] = []IncidentRecord{*tt.previous}
+			}
+			snapshots := &fakeSnapshotReader{
+				activeByObject:        active,
+				liveHeartbeatReceipts: map[string][]LiveHeartbeatReceipt{monitoringInstanceID: tt.receipts},
+			}
+			writer := &fakeMutationWriter{}
+			notifier := &fakeNotifier{}
+			service := NewSettingsBackedService(&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: record}, &fakeTargetRepo{}, snapshots, writer, notifier, policyRepo, slog.Default(), 5*time.Second, time.Minute)
+
+			if err := service.evaluateMonitoringInstanceHeartbeatOnly(context.Background(), monitoringInstanceID, now); err != nil {
+				t.Fatalf("evaluateMonitoringInstanceHeartbeatOnly() error = %v", err)
+			}
+			if len(writer.mutations) != 1 || len(writer.mutations[0].Events) != 1 || writer.mutations[0].Events[0].EventType != tt.eventType {
+				t.Fatalf("mutation = %#v, want one %q event", writer.mutations, tt.eventType)
+			}
+			if got := writer.mutations[0].Events[0].Summary; got != tt.detail {
+				t.Fatalf("domain event summary = %q, want concise %q", got, tt.detail)
+			}
+			wantSummary := fmt.Sprintf("VPS/监控实例：香港-01（%s）\n事件：%s\n详情：%s", monitoringInstanceID, tt.eventLabel, tt.detail)
+			if len(notifier.messages) != 1 || notifier.messages[0] != wantSummary {
+				t.Fatalf("notifier messages = %#v, want %q", notifier.messages, wantSummary)
+			}
+			if len(writer.notifications) != 1 || len(writer.notifications[0]) != 1 || writer.notifications[0][0].Summary != wantSummary {
+				t.Fatalf("notification records = %#v, want matching enriched summary", writer.notifications)
+			}
+		})
+	}
+}
+
+func TestServiceHeartbeatNotificationUsesUnnamedMonitoringInstanceFallback(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 15, 0, 0, 0, time.UTC)
+	lastHeartbeat := now.Add(-12 * 5 * time.Second)
+	record := monitoringinstances.Record{MonitoringInstanceID: "mi_unnamed", DisplayName: " \t ", MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat}
+	settings := centersettings.Default()
+	writer := &fakeMutationWriter{}
+	notifier := &fakeNotifier{}
+	service := NewSettingsBackedService(
+		&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: record},
+		&fakeTargetRepo{},
+		&fakeSnapshotReader{},
+		writer,
+		notifier,
+		&fakeSettingsRepository{persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true},
+		slog.Default(),
+		5*time.Second,
+		time.Minute,
+	)
+
+	if err := service.evaluateMonitoringInstanceHeartbeatOnly(context.Background(), record.MonitoringInstanceID, now); err != nil {
+		t.Fatalf("evaluateMonitoringInstanceHeartbeatOnly() error = %v", err)
+	}
+	if len(notifier.messages) != 1 || !strings.Contains(notifier.messages[0], "未命名监控实例（mi_unnamed）") {
+		t.Fatalf("notifier messages = %#v, want unnamed fallback with stable id", notifier.messages)
+	}
+}
+
+func TestHeartbeatNotificationDeliverySanitizesAndBoundsMonitoringInstanceDisplayName(t *testing.T) {
+	t.Parallel()
+
+	const (
+		monitoringInstanceID = "mi_safe_identity"
+		detail               = "最近 12 个心跳周期未收到心跳"
+	)
+	tests := []struct {
+		name        string
+		displayName string
+		wantName    string
+	}{
+		{
+			name:        "line breaks controls bidi and whitespace",
+			displayName: " \r\n 香\u202e港\u0007\t  节点 \u2066 ",
+			wantName:    "香港 节点",
+		},
+		{
+			name:        "unicode safe length bound",
+			displayName: strings.Repeat("云", 100),
+			wantName:    strings.Repeat("云", 79) + "…",
+		},
+		{
+			name:        "unsafe only falls back",
+			displayName: "\r\n\u202e\u0000\u2066",
+			wantName:    "未命名监控实例",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writer := &fakeMutationWriter{}
+			dispatcher := &fakeNotificationDispatcher{deliveries: []NotificationDelivery{
+				{Channel: NotificationChannelTelegram, Status: DeliveryStatusSent},
+				{Channel: NotificationChannelFeishu, Status: DeliveryStatusSent},
+			}}
+			service := NewService(nil, nil, nil, writer, nil, slog.Default(), 5*time.Second, time.Minute)
+			service.dispatcher = dispatcher
+			evaluation := classEvaluation{
+				class: IncidentMonitoringInstanceHeartbeatMissing,
+				result: EvaluationResult{Notification: &NotificationDecision{
+					ShouldSend: true,
+					Reason:     NotificationReasonStarted,
+					Summary:    detail,
+				}},
+			}
+			monitoringInstance := monitoringinstances.Record{MonitoringInstanceID: monitoringInstanceID, DisplayName: tt.displayName}
+
+			if err := service.appendNotificationRecordsWithPolicy(context.Background(), ObjectTypeMonitoringInstance, monitoringInstanceID, []classEvaluation{evaluation}, defaultNotificationPolicy(), &monitoringInstance); err != nil {
+				t.Fatalf("appendNotificationRecordsWithPolicy() error = %v", err)
+			}
+
+			wantSummary := fmt.Sprintf("VPS/监控实例：%s（%s）\n事件：心跳失联\n详情：%s", tt.wantName, monitoringInstanceID, detail)
+			if len(dispatcher.summaries) != 1 || dispatcher.summaries[0] != wantSummary {
+				t.Fatalf("dispatcher summaries = %#v, want sanitized %q", dispatcher.summaries, wantSummary)
+			}
+			if !utf8.ValidString(dispatcher.summaries[0]) {
+				t.Fatalf("dispatcher summary is not valid UTF-8: %q", dispatcher.summaries[0])
+			}
+			if strings.ContainsAny(dispatcher.summaries[0], "\r\u0000\u0007\u202e\u2066") {
+				t.Fatalf("dispatcher summary retained unsafe display-name code points: %q", dispatcher.summaries[0])
+			}
+			if len(writer.notifications) != 1 || len(writer.notifications[0]) != 2 {
+				t.Fatalf("notification records = %#v, want telegram and feishu records", writer.notifications)
+			}
+			for _, record := range writer.notifications[0] {
+				if record.Summary != dispatcher.summaries[0] {
+					t.Fatalf("record summary = %q, want exact dispatcher summary %q", record.Summary, dispatcher.summaries[0])
+				}
+			}
+		})
+	}
+}
+
+func heartbeatActiveIncidentForTest(monitoringInstanceID string, severity Severity, startedAt time.Time) *IncidentRecord {
+	return &IncidentRecord{
+		IncidentID:      incidentID(ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceHeartbeatMissing),
+		ObjectType:      ObjectTypeMonitoringInstance,
+		ObjectID:        monitoringInstanceID,
+		IncidentClass:   IncidentMonitoringInstanceHeartbeatMissing,
+		Severity:        severity,
+		StartedAt:       startedAt,
+		LastEvaluatedAt: startedAt,
+		Status:          IncidentStatusActive,
+		SourceSummary:   "existing heartbeat incident",
+	}
+}
+
 func TestServiceAfterSuccessfulSyncEvaluatesMonitoringInstanceAndTouchedTargets(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
@@ -1479,6 +1896,188 @@ func TestServiceAfterSuccessfulSyncEvaluatesMonitoringInstanceAndTouchedTargets(
 	}
 	if len(notifier.messages) == 0 {
 		t.Fatal("notifier.messages = 0, want at least one notification")
+	}
+}
+
+func TestServiceAfterSuccessfulSyncSuppressesHeartbeatTransitionsForExplicitAllBackfill(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 16, 0, 0, 0, time.UTC)
+	settings := centersettings.Default()
+	settings.IncidentDefaults.HeartbeatIntervalSeconds = 5
+	settings.IncidentDefaults.StaleThresholdIntervals = 12
+	settingsRepo := &fakeSettingsRepository{persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true}
+	allBackfill := []syncing.HeartbeatPayload{{SyncBatchID: "batch-backfill", IsBackfilled: true}}
+
+	t.Run("stale start is suppressed", func(t *testing.T) {
+		lastHeartbeat := now.Add(-12 * 5 * time.Second)
+		writer := &fakeMutationWriter{}
+		notifier := &fakeNotifier{}
+		service := NewSettingsBackedService(
+			&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_backfill_start", MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat}},
+			&fakeTargetRepo{}, &fakeSnapshotReader{}, writer, notifier, settingsRepo, slog.Default(), 5*time.Second, time.Minute,
+		)
+
+		if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_backfill_start", Heartbeats: allBackfill}, syncing.Result{AcceptedAt: now}); err != nil {
+			t.Fatalf("AfterSuccessfulSync() error = %v", err)
+		}
+		if len(writer.mutations) != 1 || mutationsContainIncident(writer.mutations, IncidentMonitoringInstanceHeartbeatMissing) || len(writer.mutations[0].Events) != 0 {
+			t.Fatalf("mutations = %#v, want evaluated projection without a heartbeat transition", writer.mutations)
+		}
+		if len(writer.notifications) != 0 || len(notifier.messages) != 0 {
+			t.Fatalf("notifications = %#v messages = %#v, want no heartbeat notification", writer.notifications, notifier.messages)
+		}
+	})
+
+	t.Run("active notice is preserved instead of escalating", func(t *testing.T) {
+		monitoringInstanceID := "mi_backfill_escalation"
+		lastHeartbeat := now.Add(-24 * 5 * time.Second)
+		previous := heartbeatActiveIncidentForTest(monitoringInstanceID, SeverityNotice, now.Add(-time.Hour))
+		writer := &fakeMutationWriter{}
+		notifier := &fakeNotifier{}
+		service := NewSettingsBackedService(
+			&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: monitoringInstanceID, MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat}},
+			&fakeTargetRepo{},
+			&fakeSnapshotReader{activeByObject: map[string][]IncidentRecord{"monitoring_instance:" + monitoringInstanceID: {*previous}}},
+			writer, notifier, settingsRepo, slog.Default(), 5*time.Second, time.Minute,
+		)
+
+		if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: monitoringInstanceID, Heartbeats: allBackfill}, syncing.Result{AcceptedAt: now}); err != nil {
+			t.Fatalf("AfterSuccessfulSync() error = %v", err)
+		}
+		if len(writer.mutations) != 1 || len(writer.mutations[0].Active) != 1 {
+			t.Fatalf("mutations = %#v, want one preserved active heartbeat incident", writer.mutations)
+		}
+		got := writer.mutations[0].Active[0]
+		if got.IncidentClass != IncidentMonitoringInstanceHeartbeatMissing || got.Severity != SeverityNotice || !got.StartedAt.Equal(previous.StartedAt) || !got.LastEvaluatedAt.Equal(previous.LastEvaluatedAt) {
+			t.Fatalf("active heartbeat = %#v, want original notice unchanged", got)
+		}
+		if len(writer.mutations[0].Events) != 0 || len(writer.notifications) != 0 || len(notifier.messages) != 0 {
+			t.Fatalf("events = %#v notifications = %#v messages = %#v, want no escalation side effects", writer.mutations[0].Events, writer.notifications, notifier.messages)
+		}
+	})
+
+	t.Run("active incident is not recovered and receipt evidence is not queried", func(t *testing.T) {
+		monitoringInstanceID := "mi_backfill_recovery"
+		lastHeartbeat := now
+		previous := heartbeatActiveIncidentForTest(monitoringInstanceID, SeverityAlert, now.Add(-time.Minute))
+		snapshots := &fakeSnapshotReader{
+			activeByObject: map[string][]IncidentRecord{"monitoring_instance:" + monitoringInstanceID: {*previous}},
+			liveHeartbeatReceipts: map[string][]LiveHeartbeatReceipt{monitoringInstanceID: {
+				{SyncBatchID: "live-3", ReceivedAt: now.Add(-5 * time.Second)},
+				{SyncBatchID: "live-2", ReceivedAt: now.Add(-10 * time.Second)},
+				{SyncBatchID: "live-1", ReceivedAt: now.Add(-15 * time.Second)},
+			}},
+		}
+		writer := &fakeMutationWriter{}
+		service := NewSettingsBackedService(
+			&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: monitoringInstanceID, MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat}},
+			&fakeTargetRepo{}, snapshots, writer, nil, settingsRepo, slog.Default(), 5*time.Second, time.Minute,
+		)
+
+		if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: monitoringInstanceID, Heartbeats: allBackfill}, syncing.Result{AcceptedAt: now}); err != nil {
+			t.Fatalf("AfterSuccessfulSync() error = %v", err)
+		}
+		if len(writer.mutations) != 1 || len(writer.mutations[0].Active) != 1 || writer.mutations[0].Active[0].IncidentID != previous.IncidentID || len(writer.mutations[0].Events) != 0 {
+			t.Fatalf("mutation = %#v, want active heartbeat incident preserved without recovery", writer.mutations)
+		}
+		if got := snapshots.liveHeartbeatReceiptCalls[monitoringInstanceID]; got != 0 {
+			t.Fatalf("receipt reads = %d, want 0 for an explicit all-backfill trigger", got)
+		}
+	})
+
+	t.Run("other monitoring dimensions still evaluate", func(t *testing.T) {
+		monitoringInstanceID := "mi_backfill_disk"
+		lastHeartbeat := now.Add(-12 * 5 * time.Second)
+		writer := &fakeMutationWriter{}
+		service := NewSettingsBackedService(
+			&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: monitoringInstanceID, MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat}},
+			&fakeTargetRepo{},
+			&fakeSnapshotReader{hostSamples: map[string][]runtimefacts.HostSample{monitoringInstanceID: {{ObservedAt: now, DiskUsedPct: 99}}}},
+			writer, nil, settingsRepo, slog.Default(), 5*time.Second, time.Minute,
+		)
+
+		if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: monitoringInstanceID, Heartbeats: allBackfill}, syncing.Result{AcceptedAt: now}); err != nil {
+			t.Fatalf("AfterSuccessfulSync() error = %v", err)
+		}
+		if mutationsContainIncident(writer.mutations, IncidentMonitoringInstanceHeartbeatMissing) || !mutationsContainIncident(writer.mutations, IncidentMonitoringInstanceDiskPressure) {
+			t.Fatalf("mutations = %#v, want heartbeat suppressed while disk pressure evaluates", writer.mutations)
+		}
+	})
+
+	t.Run("CAS retry retains the original all-backfill trigger", func(t *testing.T) {
+		monitoringInstanceID := "mi_backfill_retry"
+		firstHeartbeat := now.Add(-24 * 5 * time.Second)
+		secondHeartbeat := now.Add(-48 * 5 * time.Second)
+		previous := heartbeatActiveIncidentForTest(monitoringInstanceID, SeverityNotice, now.Add(-time.Hour))
+		trace := make([]string, 0)
+		repo := &fakeMonitoringInstanceRepo{
+			getMonitoringInstanceResults: map[string][]monitoringinstances.Record{monitoringInstanceID: {
+				{MonitoringInstanceID: monitoringInstanceID, MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &firstHeartbeat},
+				{MonitoringInstanceID: monitoringInstanceID, MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &secondHeartbeat},
+			}},
+			trace: &trace,
+		}
+		snapshots := &fakeSnapshotReader{
+			rowVersionSequences: map[string][]string{"monitoring_instance:" + monitoringInstanceID: {"version-1", "version-2"}},
+			activeByObjectSequences: map[string][][]IncidentRecord{
+				"monitoring_instance:" + monitoringInstanceID: {{*previous}, {*previous}},
+			},
+			trace: &trace,
+		}
+		settingsRepo := &tracedSettingsRepository{settingsSequence: []centersettings.CenterSettings{settings, settings}, trace: &trace}
+		writer := &fakeMutationWriter{applyErrors: []error{ErrIncidentProjectionConflict, nil}, trace: &trace}
+		service := NewSettingsBackedService(repo, &fakeTargetRepo{}, snapshots, writer, nil, settingsRepo, slog.Default(), 5*time.Second, time.Minute)
+		service.now = func() time.Time { return now.Add(time.Second) }
+
+		if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: monitoringInstanceID, Heartbeats: allBackfill}, syncing.Result{AcceptedAt: now}); err != nil {
+			t.Fatalf("AfterSuccessfulSync() error = %v", err)
+		}
+		if len(writer.mutations) != 2 {
+			t.Fatalf("mutations = %#v, want conflict attempt plus retry", writer.mutations)
+		}
+		for i, mutation := range writer.mutations {
+			if len(mutation.Active) != 1 || mutation.Active[0].Severity != SeverityNotice || !mutation.Active[0].LastEvaluatedAt.Equal(previous.LastEvaluatedAt) || len(mutation.Events) != 0 {
+				t.Fatalf("mutation[%d] = %#v, want original heartbeat incident preserved by the retained trigger", i, mutation)
+			}
+		}
+		if got := snapshots.liveHeartbeatReceiptCalls[monitoringInstanceID]; got != 0 {
+			t.Fatalf("receipt reads = %d, want 0 across all-backfill CAS attempts", got)
+		}
+		if got := strings.Count(strings.Join(trace, "|"), "settings"); got != 2 {
+			t.Fatalf("trace = %#v, want settings reread on both attempts", trace)
+		}
+	})
+}
+
+func TestServiceAfterSuccessfulSyncEvaluatesHeartbeatForMixedOrLiveCarrier(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 16, 30, 0, 0, time.UTC)
+	lastHeartbeat := now.Add(-12 * 5 * time.Second)
+	settings := centersettings.Default()
+	settings.IncidentDefaults.HeartbeatIntervalSeconds = 5
+
+	for _, tt := range []struct {
+		name       string
+		heartbeats []syncing.HeartbeatPayload
+	}{
+		{name: "live", heartbeats: []syncing.HeartbeatPayload{{SyncBatchID: "live"}}},
+		{name: "mixed", heartbeats: []syncing.HeartbeatPayload{{SyncBatchID: "backfill", IsBackfilled: true}, {SyncBatchID: "live"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			writer := &fakeMutationWriter{}
+			notifier := &fakeNotifier{}
+			service := NewSettingsBackedService(
+				&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_" + tt.name, MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat}},
+				&fakeTargetRepo{}, &fakeSnapshotReader{}, writer, notifier,
+				&fakeSettingsRepository{persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true},
+				slog.Default(), 5*time.Second, time.Minute,
+			)
+
+			if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_" + tt.name, Heartbeats: tt.heartbeats}, syncing.Result{AcceptedAt: now}); err != nil {
+				t.Fatalf("AfterSuccessfulSync() error = %v", err)
+			}
+			if !mutationsContainIncident(writer.mutations, IncidentMonitoringInstanceHeartbeatMissing) || len(writer.mutations[0].Events) != 1 || len(notifier.messages) != 1 {
+				t.Fatalf("mutations = %#v messages = %#v, want normal heartbeat start", writer.mutations, notifier.messages)
+			}
+		})
 	}
 }
 
@@ -1919,7 +2518,7 @@ func TestSettingsBackedHeartbeatIntervalUsesPersistedSettings(t *testing.T) {
 
 func TestSettingsBackedHeartbeatStaleThresholdUsesPersistedSettings(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	stale := now.Add(-3 * time.Minute)
+	stale := now.Add(-4 * time.Minute)
 	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{listMonitoringInstancesResult: []monitoringinstances.Record{{MonitoringInstanceID: "mi_001", MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &stale}}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{}
@@ -1941,8 +2540,195 @@ func TestSettingsBackedHeartbeatStaleThresholdUsesPersistedSettings(t *testing.T
 		t.Fatalf("len(mutations) = %d, want 1", len(writer.mutations))
 	}
 	if len(writer.mutations[0].Active) != 1 || writer.mutations[0].Active[0].Severity != SeverityNotice {
-		t.Fatalf("Active = %#v, want notice incident when missed is one below alert threshold", writer.mutations[0].Active)
+		t.Fatalf("Active = %#v, want notice incident at persisted first boundary N=4", writer.mutations[0].Active)
 	}
+}
+
+func TestServiceHeartbeatPolicyUsesPersistedThresholdInPeriodicAndPostSync(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 14, 0, 0, 0, time.UTC)
+	settings := centersettings.Default()
+	settings.IncidentDefaults.HeartbeatIntervalSeconds = 5
+	settings.IncidentDefaults.StaleThresholdIntervals = 20
+
+	paths := []struct {
+		name string
+		run  func(*Service) error
+	}{
+		{name: "periodic", run: func(service *Service) error {
+			return service.EvaluateStaleMonitoringInstances(context.Background(), now)
+		}},
+		{name: "post sync", run: func(service *Service) error {
+			return service.AfterSuccessfulSync(
+				context.Background(),
+				syncing.Batch{MonitoringInstanceID: "mi_policy", Heartbeats: []syncing.HeartbeatPayload{{SyncBatchID: "live-policy"}}},
+				syncing.Result{AcceptedAt: now},
+			)
+		}},
+	}
+	for _, path := range paths {
+		path := path
+		t.Run(path.name, func(t *testing.T) {
+			for _, missed := range []int{19, 20} {
+				missed := missed
+				t.Run(fmt.Sprintf("missed_%d", missed), func(t *testing.T) {
+					lastHeartbeat := now.Add(-time.Duration(missed) * 5 * time.Second)
+					record := monitoringinstances.Record{MonitoringInstanceID: "mi_policy", DisplayName: "policy instance", MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat}
+					repo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: record, listMonitoringInstancesResult: []monitoringinstances.Record{record}}
+					writer := &fakeMutationWriter{}
+					settingsRepo := &fakeSettingsRepository{persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true}
+					service := NewSettingsBackedService(repo, &fakeTargetRepo{}, &fakeSnapshotReader{}, writer, nil, settingsRepo, slog.Default(), 5*time.Second, time.Minute)
+
+					if err := path.run(service); err != nil {
+						t.Fatalf("run() error = %v", err)
+					}
+					if len(writer.mutations) != 1 {
+						t.Fatalf("mutations = %#v, want one evaluated projection", writer.mutations)
+					}
+					gotHeartbeat := mutationsContainIncident(writer.mutations, IncidentMonitoringInstanceHeartbeatMissing)
+					if missed == 19 && gotHeartbeat {
+						t.Fatalf("mutation = %#v, want no heartbeat incident before persisted N=20", writer.mutations[0])
+					}
+					if missed == 20 && !gotHeartbeat {
+						t.Fatalf("mutation = %#v, want heartbeat incident at persisted N=20", writer.mutations[0])
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestServiceHeartbeatPolicySettingsFailureFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 14, 0, 0, 0, time.UTC)
+	lastHeartbeat := now.Add(-20 * time.Second)
+	record := monitoringinstances.Record{MonitoringInstanceID: "mi_settings_error", MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat}
+	settingsErr := errors.New("decode persisted incident defaults")
+
+	t.Run("periodic returns the internal evaluation error", func(t *testing.T) {
+		writer := &fakeMutationWriter{}
+		repo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: record, listMonitoringInstancesResult: []monitoringinstances.Record{record}}
+		settingsRepo := &fakeSettingsRepository{persistedIncidentDefaultsErr: settingsErr}
+		service := NewSettingsBackedService(repo, &fakeTargetRepo{}, &fakeSnapshotReader{}, writer, nil, settingsRepo, slog.Default(), 5*time.Second, time.Minute)
+
+		err := service.EvaluateStaleMonitoringInstances(context.Background(), now)
+		if err == nil || !errors.Is(err, settingsErr) {
+			t.Fatalf("EvaluateStaleMonitoringInstances() error = %v, want wrapped settings error", err)
+		}
+		if len(writer.mutations) != 0 || len(writer.notifications) != 0 {
+			t.Fatalf("mutations = %#v notifications = %#v, want fail-closed zero side effects", writer.mutations, writer.notifications)
+		}
+	})
+
+	t.Run("post sync logs and acknowledges after the batch is committed", func(t *testing.T) {
+		writer := &fakeMutationWriter{}
+		notifier := &fakeNotifier{}
+		repo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: record}
+		settingsRepo := &fakeSettingsRepository{persistedIncidentDefaultsErr: settingsErr}
+		var logOutput bytes.Buffer
+		service := NewSettingsBackedService(repo, &fakeTargetRepo{}, &fakeSnapshotReader{}, writer, notifier, settingsRepo, slog.New(slog.NewTextHandler(&logOutput, nil)), 5*time.Second, time.Minute)
+
+		err := service.AfterSuccessfulSync(
+			context.Background(),
+			syncing.Batch{MonitoringInstanceID: record.MonitoringInstanceID, Heartbeats: []syncing.HeartbeatPayload{{SyncBatchID: "live-settings-error"}}},
+			syncing.Result{AcceptedAt: now},
+		)
+		if err != nil {
+			t.Fatalf("AfterSuccessfulSync() error = %v, want best-effort acknowledgement", err)
+		}
+		if len(writer.mutations) != 0 || len(writer.notifications) != 0 || len(notifier.messages) != 0 {
+			t.Fatalf("mutations = %#v notifications = %#v messages = %#v, want fail-closed zero side effects", writer.mutations, writer.notifications, notifier.messages)
+		}
+		if !strings.Contains(logOutput.String(), "evaluate monitoring instance incidents after sync failed") {
+			t.Fatalf("logs = %q, want stable post-sync evaluation failure message", logOutput.String())
+		}
+	})
+}
+
+func TestServiceHeartbeatRecoveryUsesStableReceiptEvidence(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Date(2026, time.August, 31, 14, 0, 0, 0, time.UTC)
+	now := startedAt.Add(time.Minute)
+	lastHeartbeat := now
+	monitoringInstanceID := "mi_recovery_service"
+	record := monitoringinstances.Record{MonitoringInstanceID: monitoringInstanceID, MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat}
+	previous := activeIncident(ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceHeartbeatMissing, startedAt)
+	receipts := []LiveHeartbeatReceipt{
+		{SyncBatchID: "batch-3", ReceivedAt: startedAt.Add(15 * time.Second)},
+		{SyncBatchID: "batch-2", ReceivedAt: startedAt.Add(10 * time.Second)},
+		{SyncBatchID: "batch-1", ReceivedAt: startedAt.Add(5 * time.Second)},
+	}
+	snapshots := &fakeSnapshotReader{
+		activeByObject:        map[string][]IncidentRecord{"monitoring_instance:" + monitoringInstanceID: {previous}},
+		liveHeartbeatReceipts: map[string][]LiveHeartbeatReceipt{monitoringInstanceID: receipts},
+	}
+	writer := &fakeMutationWriter{}
+	settings := centersettings.Default()
+	settingsRepo := &fakeSettingsRepository{persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true}
+	service := NewSettingsBackedService(&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: record}, &fakeTargetRepo{}, snapshots, writer, nil, settingsRepo, slog.Default(), 5*time.Second, time.Minute)
+
+	if err := service.evaluateMonitoringInstanceHeartbeatOnly(context.Background(), monitoringInstanceID, now); err != nil {
+		t.Fatalf("evaluateMonitoringInstanceHeartbeatOnly() error = %v", err)
+	}
+	if len(writer.mutations) != 1 || len(writer.mutations[0].Active) != 0 || len(writer.mutations[0].Events) != 1 || writer.mutations[0].Events[0].EventType != EventIncidentRecovered {
+		t.Fatalf("mutation = %#v, want stable-receipt recovery", writer.mutations)
+	}
+}
+
+func TestServiceHeartbeatRecoveryReceiptReadFailureFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Date(2026, time.August, 31, 14, 0, 0, 0, time.UTC)
+	now := startedAt.Add(time.Minute)
+	lastHeartbeat := now
+	monitoringInstanceID := "mi_recovery_read_error"
+	record := monitoringinstances.Record{MonitoringInstanceID: monitoringInstanceID, MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat}
+	previous := activeIncident(ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceHeartbeatMissing, startedAt)
+	readErr := errors.New("receipt query unavailable")
+	settings := centersettings.Default()
+	newService := func(writer *fakeMutationWriter, logger *slog.Logger) *Service {
+		snapshots := &fakeSnapshotReader{
+			activeByObject:             map[string][]IncidentRecord{"monitoring_instance:" + monitoringInstanceID: {previous}},
+			liveHeartbeatReceiptErrors: map[string][]error{monitoringInstanceID: {readErr}},
+		}
+		settingsRepo := &fakeSettingsRepository{persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true}
+		return NewSettingsBackedService(&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: record}, &fakeTargetRepo{}, snapshots, writer, nil, settingsRepo, logger, 5*time.Second, time.Minute)
+	}
+
+	t.Run("internal evaluation returns the read error", func(t *testing.T) {
+		writer := &fakeMutationWriter{}
+		service := newService(writer, slog.Default())
+		err := service.evaluateMonitoringInstanceHeartbeatOnly(context.Background(), monitoringInstanceID, now)
+		if err == nil || !errors.Is(err, readErr) {
+			t.Fatalf("evaluateMonitoringInstanceHeartbeatOnly() error = %v, want wrapped receipt error", err)
+		}
+		if len(writer.mutations) != 0 || len(writer.notifications) != 0 {
+			t.Fatalf("mutations = %#v notifications = %#v, want fail-closed zero side effects", writer.mutations, writer.notifications)
+		}
+	})
+
+	t.Run("post sync logs and acknowledges after the batch is committed", func(t *testing.T) {
+		writer := &fakeMutationWriter{}
+		var logOutput bytes.Buffer
+		service := newService(writer, slog.New(slog.NewTextHandler(&logOutput, nil)))
+		err := service.AfterSuccessfulSync(
+			context.Background(),
+			syncing.Batch{MonitoringInstanceID: monitoringInstanceID, Heartbeats: []syncing.HeartbeatPayload{{SyncBatchID: "live-receipt-error"}}},
+			syncing.Result{AcceptedAt: now},
+		)
+		if err != nil {
+			t.Fatalf("AfterSuccessfulSync() error = %v, want best-effort acknowledgement", err)
+		}
+		if len(writer.mutations) != 0 || len(writer.notifications) != 0 {
+			t.Fatalf("mutations = %#v notifications = %#v, want fail-closed zero side effects", writer.mutations, writer.notifications)
+		}
+		if !strings.Contains(logOutput.String(), "evaluate monitoring instance incidents after sync failed") {
+			t.Fatalf("logs = %q, want stable post-sync evaluation failure message", logOutput.String())
+		}
+	})
 }
 
 func TestSettingsBackedSweepIntervalUsesPersistedSettings(t *testing.T) {
@@ -1960,7 +2746,9 @@ func TestSettingsBackedSweepIntervalUsesPersistedSettings(t *testing.T) {
 	}
 }
 
-func TestIncidentTimingFallsBackWhenPersistedSettingsAbsentOrUnavailable(t *testing.T) {
+func TestSweepIntervalFallsBackWhenPersistedSettingsAbsentOrUnavailable(t *testing.T) {
+	invalid := centersettings.Default()
+	invalid.IncidentDefaults.HeartbeatIntervalSeconds = int(int64(time.Duration(1<<63-1)/time.Second)/2 + 1)
 	tests := []struct {
 		name string
 		repo *fakeSettingsRepository
@@ -1973,15 +2761,16 @@ func TestIncidentTimingFallsBackWhenPersistedSettingsAbsentOrUnavailable(t *test
 			name: "unavailable",
 			repo: &fakeSettingsRepository{persistedIncidentDefaultsErr: errors.New("boom")},
 		},
+		{
+			name: "invalid overflowing duration",
+			repo: &fakeSettingsRepository{persistedIncidentDefaults: invalid.IncidentDefaults, persistedIncidentExists: true},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			service := NewSettingsBackedService(nil, nil, nil, nil, nil, tt.repo, slog.Default(), 45*time.Second, 2*time.Minute)
 
-			if got := service.heartbeatIntervalFor(context.Background()); got != 45*time.Second {
-				t.Fatalf("heartbeatIntervalFor() = %v, want %v", got, 45*time.Second)
-			}
 			if got := service.sweepIntervalFor(context.Background()); got != 2*time.Minute {
 				t.Fatalf("sweepIntervalFor() = %v, want %v", got, 2*time.Minute)
 			}
@@ -1989,9 +2778,25 @@ func TestIncidentTimingFallsBackWhenPersistedSettingsAbsentOrUnavailable(t *test
 	}
 }
 
+func TestServiceNormalizesOverflowingFallbackHeartbeatInterval(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(nil, nil, nil, nil, nil, slog.Default(), time.Duration(1<<63-1), time.Minute)
+	policy, err := service.resolveIncidentPolicySnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("resolveIncidentPolicySnapshot() error = %v", err)
+	}
+	if policy.heartbeat.HeartbeatInterval != defaultHeartbeatInterval {
+		t.Fatalf("HeartbeatInterval = %v, want safe default %v", policy.heartbeat.HeartbeatInterval, defaultHeartbeatInterval)
+	}
+	if policy.heartbeat.RecoveryMaxIntervalGap != 2*defaultHeartbeatInterval {
+		t.Fatalf("RecoveryMaxIntervalGap = %v, want %v", policy.heartbeat.RecoveryMaxIntervalGap, 2*defaultHeartbeatInterval)
+	}
+}
+
 func TestServiceEvaluateStaleMonitoringInstancesCreatesHeartbeatIncident(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	stale := now.Add(-3 * time.Minute)
+	stale := now.Add(-12 * time.Minute)
 	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{listMonitoringInstancesResult: []monitoringinstances.Record{{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &stale}}}
 	targetRepo := &fakeTargetRepo{}
 	snapshots := &fakeSnapshotReader{}

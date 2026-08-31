@@ -8,6 +8,14 @@ import (
 	"time"
 )
 
+func TestMaxBatchItemsMatchesAgentIngressContract(t *testing.T) {
+	t.Parallel()
+
+	if MaxBatchItems != 256 {
+		t.Fatalf("MaxBatchItems = %d, want existing agent ingress limit 256", MaxBatchItems)
+	}
+}
+
 func TestServiceExactDuplicateDispositionSkipsPostSyncAndReturnsOriginalResult(t *testing.T) {
 	t.Parallel()
 

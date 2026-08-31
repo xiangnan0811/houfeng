@@ -18,6 +18,11 @@ export function IncidentDefaultsSection({ value, onChange }: IncidentDefaultsSec
     <>
       <div className="ss-title">异常判定阈值</div>
       <div className="ss-desc">触发异常的资源使用率阈值与通知策略</div>
+      <div className="ss-desc">
+        <span>首次达到 N 次遗漏周期时判定失联；默认 N = 12，按 5 秒心跳约 60 秒。</span>
+        <br />
+        <span>达到 2N 时升级为告警，达到 4N 时升级为严重；恢复需连续 3 次非回填实时心跳。</span>
+      </div>
       <div className="settings-row-group settings-row-group--3">
         <div className="settings-row">
           <span className="sr-label">心跳间隔</span>

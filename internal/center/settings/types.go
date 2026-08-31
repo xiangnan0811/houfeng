@@ -6,11 +6,16 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"houfeng/internal/center/targets"
 )
 
-const SingletonID = "center"
+const (
+	SingletonID                 = "center"
+	maxIncidentDurationSeconds  = int64(time.Duration(1<<63-1) / time.Second)
+	maxHeartbeatIntervalSeconds = maxIncidentDurationSeconds / 2
+)
 
 var ErrInvalidSettings = errors.New("invalid center settings")
 
@@ -188,7 +193,7 @@ func Default() CenterSettings {
 		},
 		IncidentDefaults: IncidentDefaults{
 			HeartbeatIntervalSeconds: 5,
-			StaleThresholdIntervals:  3,
+			StaleThresholdIntervals:  12,
 			SweepIntervalSeconds:     5,
 			NotifyOnStarted:          true,
 			NotifyOnEscalated:        true,
@@ -304,15 +309,30 @@ func validateProbeFrequencyDefaults(input ProbeFrequencyDefaults) (ProbeFrequenc
 	return input, nil
 }
 
+// ValidateIncidentDefaults applies the same validation and default-filling
+// rules used by Validate to a persisted incident-defaults snapshot.
+func ValidateIncidentDefaults(input IncidentDefaults) (IncidentDefaults, error) {
+	return validateIncidentDefaults(input)
+}
+
 func validateIncidentDefaults(input IncidentDefaults) (IncidentDefaults, error) {
 	if input.HeartbeatIntervalSeconds <= 0 {
 		return IncidentDefaults{}, invalidSettings("heartbeat interval must be positive")
 	}
+	if int64(input.HeartbeatIntervalSeconds) > maxHeartbeatIntervalSeconds {
+		return IncidentDefaults{}, invalidSettings("heartbeat interval exceeds safe duration")
+	}
 	if input.StaleThresholdIntervals <= 0 {
 		return IncidentDefaults{}, invalidSettings("stale threshold intervals must be positive")
 	}
+	if input.StaleThresholdIntervals > maxIncidentThresholdIntervals() {
+		return IncidentDefaults{}, invalidSettings("stale threshold intervals exceed safe severity bounds")
+	}
 	if input.SweepIntervalSeconds <= 0 {
 		return IncidentDefaults{}, invalidSettings("sweep interval must be positive")
+	}
+	if int64(input.SweepIntervalSeconds) > maxIncidentDurationSeconds {
+		return IncidentDefaults{}, invalidSettings("sweep interval exceeds safe duration")
 	}
 
 	// Fill in defaults for zero-value thresholds (fields omitted in API input).
@@ -374,6 +394,10 @@ func validateIncidentDefaults(input IncidentDefaults) (IncidentDefaults, error) 
 	}
 
 	return input, nil
+}
+
+func maxIncidentThresholdIntervals() int {
+	return int(^uint(0)>>1) / 4
 }
 
 func applyIntDefault(dst *int, defaultVal int) {
@@ -513,17 +537,26 @@ func validateIncidentDefaultsOverride(input IncidentDefaultsOverride, incidentDe
 		if *input.HeartbeatIntervalSeconds <= 0 {
 			return IncidentDefaultsOverride{}, invalidSettings("override heartbeat interval must be positive")
 		}
+		if int64(*input.HeartbeatIntervalSeconds) > maxHeartbeatIntervalSeconds {
+			return IncidentDefaultsOverride{}, invalidSettings("override heartbeat interval exceeds safe duration")
+		}
 	}
 	if input.StaleThresholdIntervals != nil {
 		hasOverride = true
 		if *input.StaleThresholdIntervals <= 0 {
 			return IncidentDefaultsOverride{}, invalidSettings("override stale threshold must be positive")
 		}
+		if *input.StaleThresholdIntervals > maxIncidentThresholdIntervals() {
+			return IncidentDefaultsOverride{}, invalidSettings("override stale threshold exceeds safe severity bounds")
+		}
 	}
 	if input.SweepIntervalSeconds != nil {
 		hasOverride = true
 		if *input.SweepIntervalSeconds <= 0 {
 			return IncidentDefaultsOverride{}, invalidSettings("override sweep interval must be positive")
+		}
+		if int64(*input.SweepIntervalSeconds) > maxIncidentDurationSeconds {
+			return IncidentDefaultsOverride{}, invalidSettings("override sweep interval exceeds safe duration")
 		}
 	}
 	if input.NotifyOnStarted != nil || input.NotifyOnEscalated != nil || input.NotifyOnRecovered != nil {

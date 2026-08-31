@@ -95,6 +95,10 @@ func (*fixedIncidentSnapshotReader) ListActiveIncidents(context.Context, inciden
 	return nil, nil
 }
 
+func (*fixedIncidentSnapshotReader) ListRecentLiveHeartbeatReceipts(context.Context, string, time.Time) ([]incidentservice.LiveHeartbeatReceipt, error) {
+	return nil, nil
+}
+
 func (*fixedIncidentSnapshotReader) ListRecentHostSamples(context.Context, string, time.Time) ([]runtimefacts.HostSample, error) {
 	return nil, nil
 }

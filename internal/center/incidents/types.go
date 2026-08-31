@@ -198,6 +198,24 @@ type MonitoringInstanceResourceSample struct {
 	IsBackfilled       bool
 }
 
+// HeartbeatIncidentPolicy is the complete policy required to evaluate a
+// monitoring-instance heartbeat incident. Callers must resolve it from the
+// current settings snapshot instead of relying on evaluator defaults.
+type HeartbeatIncidentPolicy struct {
+	HeartbeatInterval      time.Duration
+	MissingThreshold       int
+	RecoverySuccesses      int
+	RecoveryMaxIntervalGap time.Duration
+}
+
+// LiveHeartbeatReceipt is the minimal, server-owned recovery evidence for a
+// heartbeat incident. The persistence reader guarantees that these receipts
+// are non-backfilled and ordered by ReceivedAt descending.
+type LiveHeartbeatReceipt struct {
+	SyncBatchID string
+	ReceivedAt  time.Time
+}
+
 type EvaluationTransition string
 
 type EvaluationResult struct {

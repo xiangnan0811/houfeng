@@ -35,7 +35,7 @@ const settingsResponseBody = {
   },
   incident_defaults: {
     heartbeat_interval_seconds: 5,
-    stale_threshold_intervals: 3,
+    stale_threshold_intervals: 12,
     sweep_interval_seconds: 5,
     notify_on_started: true,
     notify_on_escalated: true,
@@ -171,6 +171,49 @@ describe('SettingsPage', () => {
     )
   })
 
+  it('explains the default heartbeat incident boundaries and keeps a custom threshold unchanged in PUT', async () => {
+    const customSettings = {
+      ...settingsResponseBody,
+      incident_defaults: {
+        ...settingsResponseBody.incident_defaults,
+        stale_threshold_intervals: 20,
+      },
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(customSettings))
+      .mockResolvedValueOnce(
+        mockJSONResponse({
+          ...customSettings,
+          incident_defaults: {
+            ...customSettings.incident_defaults,
+            sweep_interval_seconds: 10,
+          },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSettingsPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('监控策略')
+
+    expect(screen.getByText('首次达到 N 次遗漏周期时判定失联；默认 N = 12，按 5 秒心跳约 60 秒。')).toBeInTheDocument()
+    expect(screen.getByText('达到 2N 时升级为告警，达到 4N 时升级为严重；恢复需连续 3 次非回填实时心跳。')).toBeInTheDocument()
+    expect(screen.getByLabelText('失联判定阈值')).toHaveValue('20')
+
+    fireEvent.change(screen.getByLabelText('扫描间隔秒数'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      incident_defaults: {
+        stale_threshold_intervals: 20,
+        sweep_interval_seconds: 10,
+      },
+    })
+  })
+
   it('keeps the runtime management toggle checked when persisted settings explicitly disable Telegram delivery', async () => {
     vi.stubGlobal(
       'fetch',
@@ -282,7 +325,7 @@ describe('SettingsPage', () => {
       },
       incident_defaults: {
         heartbeat_interval_seconds: 5,
-        stale_threshold_intervals: 3,
+        stale_threshold_intervals: 12,
         sweep_interval_seconds: 5,
         notify_on_started: true,
         notify_on_escalated: true,
@@ -751,7 +794,7 @@ describe('SettingsPage', () => {
       },
       incident_defaults: {
         heartbeat_interval_seconds: 5,
-        stale_threshold_intervals: 3,
+        stale_threshold_intervals: 12,
         sweep_interval_seconds: 5,
         notify_on_started: true,
         notify_on_escalated: true,
