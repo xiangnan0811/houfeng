@@ -198,8 +198,25 @@ type composeInitDependencies struct {
 
 // InitializeCompose provisions the fixed production Compose database contract.
 func InitializeCompose(ctx context.Context, config ComposeInitConfig) error {
-	return initializeComposeWithDependencies(ctx, config, composeInitDependencies{
-		openPostgres:       openComposePostgres,
+	return initializeCompose(ctx, config, openComposePostgres)
+}
+
+// initializeCompose is the narrow transport seam used by the strict
+// PostgreSQL integration fixture. Every production dependency other than the
+// connection opener remains wired here exactly as InitializeCompose uses it.
+func initializeCompose(
+	ctx context.Context,
+	config ComposeInitConfig,
+	openPostgres func(context.Context, composePostgresEndpoint) (*pgxpool.Pool, error),
+) error {
+	return initializeComposeWithDependencies(ctx, config, defaultComposeInitDependencies(openPostgres))
+}
+
+func defaultComposeInitDependencies(
+	openPostgres func(context.Context, composePostgresEndpoint) (*pgxpool.Pool, error),
+) composeInitDependencies {
+	return composeInitDependencies{
+		openPostgres:       openPostgres,
 		closePostgres:      func(pool *pgxpool.Pool) { pool.Close() },
 		prepareAuthority:   prepareComposeAuthorityState,
 		provisionBootstrap: platformmigrate.ProvisionComposeBootstrap,
@@ -211,7 +228,7 @@ func InitializeCompose(ctx context.Context, config ComposeInitConfig) error {
 		publishAuthority:   publishComposeAuthorityDeploymentID,
 		heartbeatAuthority: heartbeatComposeAuthority,
 		admitRuntime:       migrate.AdmitAppACLCurrentRuntime,
-	})
+	}
 }
 
 func initializeComposeWithDependencies(ctx context.Context, config ComposeInitConfig, deps composeInitDependencies) error {

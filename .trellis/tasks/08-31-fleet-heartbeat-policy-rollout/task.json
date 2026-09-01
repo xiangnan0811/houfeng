@@ -1,0 +1,30 @@
+{
+  "id": "fleet-heartbeat-policy-rollout",
+  "name": "fleet-heartbeat-policy-rollout",
+  "title": "修复迁移升级协议并滚动升级 fleet Center 与双 Agent",
+  "description": "修复 v0.79.4 exact-current 数据库无法消费 v0.79.5 0063 的阻断，发布新补丁并以冷备、隔离演练和双 Agent canary 完成生产升级。",
+  "status": "in_progress",
+  "dev_type": "bugfix",
+  "scope": "backend",
+  "package": "internal/center/store/migrate",
+  "priority": "P1",
+  "creator": "xiangnan-arch",
+  "assignee": "xiangnan-arch",
+  "createdAt": "2026-08-31",
+  "completedAt": null,
+  "branch": "codex/fleet-heartbeat-policy-rollout",
+  "base_branch": "main",
+  "worktree_path": "/home/murray/code/houfeng/.worktree/staging-heartbeat-policy-acceptance",
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "v0.79.5 is an immutable released blocker target and must not be deployed or rewritten; the only approved fixed release shape is the exact next v0.79.x patch, currently v0.79.6.",
+  "meta": {
+    "target_center": "hostcram",
+    "target_agents": "netcup,informaten",
+    "production_origin": "fleet.yading.de"
+  }
+}

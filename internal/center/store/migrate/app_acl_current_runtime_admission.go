@@ -12,10 +12,11 @@ import (
 )
 
 type appACLCurrentRuntimeAdmissionDependencies struct {
-	beginTx       appACLRuntimeAdmissionBeginTx
-	readManifest  func(context.Context, pgx.Tx) (AppACLManifestRuntimeSnapshotV1, error)
-	readCatalog   func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error)
-	verifyCatalog func(AppACLEffectiveCatalogSnapshotR1, appACLEffectiveCatalogVerifierInput) error
+	beginTx               appACLRuntimeAdmissionBeginTx
+	readManifest          func(context.Context, pgx.Tx) (AppACLManifestRuntimeSnapshotV1, error)
+	readCatalog           func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error)
+	verifyCatalog         func(AppACLEffectiveCatalogSnapshotR1, appACLEffectiveCatalogVerifierInput) error
+	transitionDefinitions []appACLCurrentTransitionDefinition
 }
 
 // AdmitAppACLCurrentRuntime admits a direct runtime login only when the
@@ -35,6 +36,9 @@ func AdmitAppACLCurrentRuntime(ctx context.Context, db *pgxpool.Pool) error {
 			readManifest:  readAppACLManifestRuntimeSnapshotInTxV1,
 			readCatalog:   readAppACLEffectiveCatalogSnapshotInTx,
 			verifyCatalog: verifyAppACLEffectiveCatalogSnapshot,
+			transitionDefinitions: cloneAppACLCurrentTransitionDefinitions(
+				appACLCurrentTransitionDefinitions,
+			),
 		},
 	)
 }
@@ -55,6 +59,13 @@ func admitAppACLCurrentRuntimeWithDependencies(
 	if err := dependencies.validate(); err != nil {
 		return err
 	}
+	var transitions []appACLCurrentTransition
+	if dependencies.transitionDefinitions != nil {
+		transitions, err = compileAppACLCurrentTransitions(source, dependencies.transitionDefinitions)
+		if err != nil {
+			return fmt.Errorf("compile current app ACL runtime transitions: %w", err)
+		}
+	}
 
 	tx, err := dependencies.beginTx(ctx, pgx.TxOptions{
 		IsoLevel:   pgx.RepeatableRead,
@@ -74,7 +85,7 @@ func admitAppACLCurrentRuntimeWithDependencies(
 	if err != nil {
 		return fmt.Errorf("read current app ACL runtime manifest: %w", err)
 	}
-	manifest, contract, err := verifyAppACLCurrentManifestRuntimeSnapshot(manifestSnapshot, source)
+	manifest, contract, err := verifyAppACLCurrentManifestRuntimeSnapshot(manifestSnapshot, source, transitions)
 	if err != nil {
 		return fmt.Errorf("verify current app ACL runtime manifest: %w", err)
 	}

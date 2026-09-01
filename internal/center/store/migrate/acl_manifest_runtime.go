@@ -150,6 +150,7 @@ func validateAppACLManifestRuntimeRoles(
 func verifyAppACLCurrentManifestRuntimeSnapshot(
 	snapshot AppACLManifestRuntimeSnapshotV1,
 	source appACLCurrentSourceContract,
+	transitions []appACLCurrentTransition,
 ) (AppACLManifestPersistedV1, appACLEffectiveCatalogContract, error) {
 	if snapshot.Head == nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, appACLDevelopmentDatabaseRebuildError(
@@ -160,23 +161,12 @@ func verifyAppACLCurrentManifestRuntimeSnapshot(
 	if err != nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err
 	}
-	if len(snapshot.Manifests) != 1 || snapshot.Head.ManifestRevision != 1 {
+	if len(snapshot.Manifests) != 1 && len(transitions) == 0 {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, appACLDevelopmentDatabaseRebuildError(
-			"APP manifest chain is not the current genesis revision",
+			"APP manifest chain is not a registered current shape",
 		)
 	}
 	if err := validateAppACLManifestRuntimeRoles(snapshot, envelope); err != nil {
-		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err
-	}
-
-	manifestMigrations, err := ParseCanonicalMigrationSetBodyV1(envelope.Latest.CanonicalMigrationSet)
-	if err != nil {
-		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, fmt.Errorf("parse current app ACL manifest migration set: %w", err)
-	}
-	if err := compareAppACLCurrentMigrationEntries(source.sources.canonicalSet, manifestMigrations, "persisted manifest"); err != nil {
-		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err
-	}
-	if err := compareAppACLCurrentMigrationEntries(source.sources.canonicalSet, snapshot.AppliedMigrations, "applied migration ledger"); err != nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err
 	}
 
@@ -196,5 +186,22 @@ func verifyAppACLCurrentManifestRuntimeSnapshot(
 	if !bytes.Equal(envelope.Latest.CanonicalPrivilegeSet, compiledPrivileges) {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, fmt.Errorf("latest app ACL manifest privilege set does not match current compiler output")
 	}
-	return envelope.Latest, contract, nil
+	shape, err := classifyAppACLCurrentManifestShape(
+		source,
+		transitions,
+		snapshot.AppliedMigrations,
+		snapshot.Manifests,
+		snapshot.Head,
+		compiledPrivileges,
+		envelope.Latest.MigratorCatalogRole,
+	)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err
+	}
+	if shape.kind == appACLCurrentManifestShapePredecessor {
+		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, appACLDevelopmentDatabaseRebuildError(
+			"registered APP predecessor requires successor convergence before runtime admission",
+		)
+	}
+	return shape.latest, contract, nil
 }
