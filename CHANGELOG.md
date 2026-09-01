@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.79.6](https://github.com/xiangnan0811/houfeng/compare/v0.79.5...v0.79.6) (2026-09-01)
+
+
+### Bug Fixes
+
+* **center:** support exact ACL successor upgrades ([06a6f0c](https://github.com/xiangnan0811/houfeng/commit/06a6f0c3906e067bde25abd5c345190a3851b047))
+
 ## [0.79.5](https://github.com/xiangnan0811/houfeng/compare/v0.79.4...v0.79.5) (2026-08-31)
 
 
