@@ -21,6 +21,8 @@ func TestPostgresIntegrationAppACLCurrent(t *testing.T) {
 	t.Run("exact_repeat_is_read_only", testPostgresIntegrationAppACLCurrentExactRepeat)
 	t.Run("prior_baseline_requires_rebuild_without_mutation", testPostgresIntegrationAppACLCurrentPriorBaseline)
 	t.Run("unrelated_same_name_objects_are_ignored", testPostgresIntegrationAppACLCurrentUnrelatedSameNames)
+	t.Run("registered_successor", testPostgresIntegrationAppACLCurrentRegisteredSuccessor)
+	t.Run("registered_successor_rejections", testPostgresIntegrationAppACLCurrentRegisteredSuccessorRejectsInvalidPredecessor)
 }
 
 func testPostgresIntegrationAppACLCurrentFreshAndRuntime(t *testing.T) {
@@ -289,6 +291,10 @@ func testPostgresIntegrationAppACLCurrentPriorBaseline(t *testing.T) {
 		Migration:  "0052_future.sql",
 		Privileges: func(string) []AppACLPrivilege { return nil },
 	}}
+	futureDependencies := defaultAppACLCurrentConvergenceDependencies()
+	// This fixture deliberately models an unrelated post-R1 source contract,
+	// not the production 0062 -> 0063 registered transition.
+	futureDependencies.transitionDefinitions = nil
 	_, err := convergeAppACLCurrentWithDependencies(
 		ctx,
 		func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
@@ -298,7 +304,7 @@ func testPostgresIntegrationAppACLCurrentPriorBaseline(t *testing.T) {
 		fixture.admin,
 		futureFS,
 		futureFragments,
-		defaultAppACLCurrentConvergenceDependencies(),
+		futureDependencies,
 	)
 	if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
 		t.Fatalf("future current convergence error = %v, want rebuild-required sentinel", err)

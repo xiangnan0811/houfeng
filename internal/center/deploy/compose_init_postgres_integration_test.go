@@ -17,7 +17,6 @@ import (
 	"houfeng/internal/center/platformmigrate"
 	"houfeng/internal/center/recordauthority"
 	"houfeng/internal/center/store"
-	"houfeng/internal/center/store/migrate"
 )
 
 func TestPostgresIntegrationComposeInitialize(t *testing.T) {
@@ -65,21 +64,7 @@ func TestPostgresIntegrationComposeInitialize(t *testing.T) {
 		}
 		return pool, nil
 	}
-	dependencies := composeInitDependencies{
-		openPostgres:       openPostgres,
-		closePostgres:      func(pool *pgxpool.Pool) { pool.Close() },
-		prepareAuthority:   prepareComposeAuthorityState,
-		provisionBootstrap: platformmigrate.ProvisionComposeBootstrap,
-		convergeCurrent: func(ctx context.Context, pool *pgxpool.Pool, runtimeRole, adminRole string) error {
-			_, err := migrate.ConvergeAppACLCurrent(ctx, pool, runtimeRole, adminRole)
-			return err
-		},
-		activateAuthority:  activateComposeAuthorityState,
-		publishAuthority:   publishComposeAuthorityDeploymentID,
-		heartbeatAuthority: heartbeatComposeAuthority,
-		admitRuntime:       migrate.AdmitAppACLCurrentRuntime,
-	}
-	if err := initializeComposeWithDependencies(ctx, config, dependencies); err != nil {
+	if err := initializeCompose(ctx, config, openPostgres); err != nil {
 		t.Fatalf("fresh Compose initialization error = %v", err)
 	}
 	assertComposeIntegrationCatalog(t, ctx, bootstrapPool, openPostgres, config)
@@ -87,7 +72,7 @@ func TestPostgresIntegrationComposeInitialize(t *testing.T) {
 	assertComposeIntegrationHeartbeatRejectionsDoNotMutate(t, ctx, openPostgres, config)
 	beforeRepeat := readComposeIntegrationDurableCounts(t, ctx, openPostgres, config)
 	passwordsBeforeRepeat := readComposeIntegrationPasswordHashes(t, ctx, bootstrapPool, config)
-	if err := initializeComposeWithDependencies(ctx, config, dependencies); err != nil {
+	if err := initializeCompose(ctx, config, openPostgres); err != nil {
 		t.Fatalf("exact-repeat Compose initialization error = %v", err)
 	}
 	afterRepeat := readComposeIntegrationDurableCounts(t, ctx, openPostgres, config)
@@ -103,7 +88,7 @@ func TestPostgresIntegrationComposeInitialize(t *testing.T) {
 	rotated.Passwords.Runtime = "runtime:/?# rotated secret"
 	rotated.Passwords.PlatformAdmin = "admin:/?# rotated secret"
 	rotated.Passwords.Migrator = "migrator:/?# rotated secret"
-	if err := initializeComposeWithDependencies(ctx, rotated, dependencies); err != nil {
+	if err := initializeCompose(ctx, rotated, openPostgres); err != nil {
 		t.Fatalf("password-rotation Compose initialization error = %v", err)
 	}
 	passwordsAfterRotation := readComposeIntegrationPasswordHashes(t, ctx, bootstrapPool, rotated)
@@ -127,7 +112,7 @@ func TestPostgresIntegrationComposeInitialize(t *testing.T) {
 	rejected.Passwords.Runtime = "runtime rejected rotation"
 	rejected.Passwords.PlatformAdmin = "admin rejected rotation"
 	rejected.Passwords.Migrator = "migrator rejected rotation"
-	if err := initializeComposeWithDependencies(ctx, rejected, dependencies); err == nil {
+	if err := initializeCompose(ctx, rejected, openPostgres); err == nil {
 		t.Fatal("Compose initialization accepted existing role membership drift")
 	}
 	passwordsAfterRejectedRotation := readComposeIntegrationPasswordHashes(t, ctx, bootstrapPool, rotated)

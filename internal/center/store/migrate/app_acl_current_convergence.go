@@ -18,23 +18,28 @@ var ErrDevelopmentDatabaseRebuildRequired = errors.New(
 )
 
 type appACLCurrentConvergenceDependencies struct {
-	readDatabaseName  func(context.Context, pgx.Tx) (string, error)
-	resolveRoles      func(context.Context, pgx.Tx, string, string) (platformmigrate.AppRoleSetV1, error)
-	rejectMisplaced   func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error
-	rejectLegacy      func(context.Context, pgx.Tx, migrationSourceSnapshot, appACLEffectiveCatalogContract, string) error
-	readPhaseState    func(context.Context, pgx.Tx) (appACLConvergencePhaseState, error)
-	lockLedger        func(context.Context, pgx.Tx) error
-	rejectFresh       func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error
-	ensureLedger      func(context.Context, pgx.Tx, map[string]migrationSource) error
-	readApplied       func(context.Context, pgx.Tx) ([]MigrationChecksumEntry, error)
-	applyPending      func(context.Context, pgx.Tx, migrationSourceSnapshot, []MigrationChecksumEntry) error
-	readManifests     func(context.Context, pgx.Tx) ([]AppACLManifestPersistedV1, error)
-	readHead          func(context.Context, pgx.Tx) (*AppACLManifestHeadV1, error)
-	readHeadForUpdate func(context.Context, pgx.Tx) (*AppACLManifestHeadV1, error)
-	applyDCL          func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error
-	readCatalog       func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error)
-	verifyCatalog     func(AppACLEffectiveCatalogSnapshotR1, appACLEffectiveCatalogVerifierInput) error
-	insertGenesis     func(context.Context, pgx.Tx, []byte, []byte, string) (AppACLManifestPersistedV1, error)
+	readDatabaseName        func(context.Context, pgx.Tx) (string, error)
+	resolveRoles            func(context.Context, pgx.Tx, string, string) (platformmigrate.AppRoleSetV1, error)
+	rejectMisplaced         func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error
+	rejectLegacy            func(context.Context, pgx.Tx, migrationSourceSnapshot, appACLEffectiveCatalogContract, string) error
+	readPhaseState          func(context.Context, pgx.Tx) (appACLConvergencePhaseState, error)
+	lockLedger              func(context.Context, pgx.Tx) error
+	rejectFresh             func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error
+	ensureLedger            func(context.Context, pgx.Tx, map[string]migrationSource) error
+	readApplied             func(context.Context, pgx.Tx) ([]MigrationChecksumEntry, error)
+	applyPending            func(context.Context, pgx.Tx, migrationSourceSnapshot, []MigrationChecksumEntry) error
+	readManifests           func(context.Context, pgx.Tx) ([]AppACLManifestPersistedV1, error)
+	readHead                func(context.Context, pgx.Tx) (*AppACLManifestHeadV1, error)
+	readHeadForUpdate       func(context.Context, pgx.Tx) (*AppACLManifestHeadV1, error)
+	applyDCL                func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error
+	readCatalog             func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error)
+	verifyCatalog           func(AppACLEffectiveCatalogSnapshotR1, appACLEffectiveCatalogVerifierInput) error
+	insertGenesis           func(context.Context, pgx.Tx, []byte, []byte, string) (AppACLManifestPersistedV1, error)
+	transitionDefinitions   []appACLCurrentTransitionDefinition
+	preflightTransition     func(context.Context, pgx.Tx, appACLCurrentTransition) (appACLCurrentTransitionPreflight, error)
+	verifyTransitionApplied func(context.Context, pgx.Tx, appACLCurrentTransition, appACLCurrentTransitionPreflight) error
+	verifyTransitionCurrent func(context.Context, pgx.Tx, appACLCurrentTransition) error
+	insertSuccessor         func(context.Context, pgx.Tx, AppACLManifestPersistedV1, []byte, []byte) (AppACLManifestPersistedV1, error)
 }
 
 func defaultAppACLCurrentConvergenceDependencies() appACLCurrentConvergenceDependencies {
@@ -56,6 +61,13 @@ func defaultAppACLCurrentConvergenceDependencies() appACLCurrentConvergenceDepen
 		readCatalog:       readAppACLEffectiveCatalogSnapshotInTx,
 		verifyCatalog:     verifyAppACLEffectiveCatalogSnapshot,
 		insertGenesis:     insertAppACLManifestGenesisV1,
+		transitionDefinitions: cloneAppACLCurrentTransitionDefinitions(
+			appACLCurrentTransitionDefinitions,
+		),
+		preflightTransition:     preflightAppACLCurrentTransitionInTx,
+		verifyTransitionApplied: verifyAppliedAppACLCurrentTransitionInTx,
+		verifyTransitionCurrent: verifyCurrentAppACLCurrentTransitionInTx,
+		insertSuccessor:         insertAppACLManifestSuccessorV1,
 	}
 }
 
@@ -100,6 +112,13 @@ func convergeAppACLCurrentWithDependencies(
 	if err := dependencies.validate(); err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
+	var transitions []appACLCurrentTransition
+	if dependencies.transitionDefinitions != nil {
+		transitions, err = compileAppACLCurrentTransitions(source, dependencies.transitionDefinitions)
+		if err != nil {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("compile current app ACL transitions: %w", err)
+		}
+	}
 
 	var result AppACLManifestPersistedV1
 	err = retryAppACLConvergence(ctx, func() error {
@@ -114,7 +133,7 @@ func convergeAppACLCurrentWithDependencies(
 			_ = tx.Rollback(ctx)
 		}()
 
-		manifest, err := convergeAppACLCurrentInTx(ctx, tx, runtimeRole, adminRole, source, dependencies)
+		manifest, err := convergeAppACLCurrentInTx(ctx, tx, runtimeRole, adminRole, source, transitions, dependencies)
 		if err != nil {
 			return err
 		}
@@ -136,6 +155,7 @@ func convergeAppACLCurrentInTx(
 	runtimeRole string,
 	adminRole string,
 	source appACLCurrentSourceContract,
+	transitions []appACLCurrentTransition,
 	dependencies appACLCurrentConvergenceDependencies,
 ) (AppACLManifestPersistedV1, error) {
 	if tx == nil {
@@ -195,7 +215,7 @@ func convergeAppACLCurrentInTx(
 		}
 		return convergeFreshAppACLCurrentInTx(ctx, tx, source, compiledPrivileges, verifierInput, roles.Migrator, dependencies)
 	case exactCandidate:
-		return verifyExactAppACLCurrentInTx(ctx, tx, source, compiledPrivileges, verifierInput, roles.Migrator, dependencies)
+		return verifyExactAppACLCurrentInTx(ctx, tx, source, transitions, compiledPrivileges, verifierInput, roles.Migrator, dependencies)
 	default:
 		return AppACLManifestPersistedV1{}, appACLDevelopmentDatabaseRebuildError("APP ledger and manifest tables do not form a current baseline")
 	}
@@ -205,6 +225,7 @@ func verifyExactAppACLCurrentInTx(
 	ctx context.Context,
 	tx pgx.Tx,
 	source appACLCurrentSourceContract,
+	transitions []appACLCurrentTransition,
 	compiledPrivileges []byte,
 	verifierInput appACLEffectiveCatalogVerifierInput,
 	migratorRole string,
@@ -224,38 +245,21 @@ func verifyExactAppACLCurrentInTx(
 	if err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
-	if err := compareAppACLCurrentMigrationEntries(source.sources.canonicalSet, applied, "applied migration ledger"); err != nil {
-		return AppACLManifestPersistedV1{}, err
-	}
 	manifests, err := dependencies.readManifests(ctx, tx)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
-	if err := ValidateAppACLManifestChainV1(manifests, *head); err != nil {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("validate current app ACL manifest chain: %w", err)
-	}
-	if len(manifests) != 1 || head.ManifestRevision != 1 {
-		return AppACLManifestPersistedV1{}, appACLDevelopmentDatabaseRebuildError("APP manifest chain is already advanced")
-	}
-	manifestEntries, err := ParseCanonicalMigrationSetBodyV1(manifests[0].CanonicalMigrationSet)
-	if err != nil {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("parse current app ACL manifest migration set: %w", err)
-	}
-	if err := compareAppACLCurrentMigrationEntries(source.sources.canonicalSet, manifestEntries, "persisted manifest"); err != nil {
-		return AppACLManifestPersistedV1{}, err
-	}
-	existing, err := checkAppACLManifestGenesisStateV1(
+	shape, err := classifyAppACLCurrentManifestShape(
+		source,
+		transitions,
+		applied,
 		manifests,
 		head,
-		source.sources.canonicalSet,
 		compiledPrivileges,
 		migratorRole,
 	)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, err
-	}
-	if existing == nil {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("current app ACL exact state has no genesis manifest")
 	}
 	if err := dependencies.rejectMisplaced(ctx, tx, verifierInput.Contract); err != nil {
 		return AppACLManifestPersistedV1{}, err
@@ -266,7 +270,76 @@ func verifyExactAppACLCurrentInTx(
 	if err := verifyAppACLCurrentConvergenceCatalog(ctx, tx, verifierInput, dependencies); err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
-	return *existing, nil
+	if shape.kind == appACLCurrentManifestShapeSuccessor {
+		if err := dependencies.verifyTransitionCurrent(ctx, tx, *shape.transition); err != nil {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("verify current registered APP transition: %w", err)
+		}
+		return shape.latest, nil
+	}
+	if shape.kind == appACLCurrentManifestShapeGenesis {
+		return shape.latest, nil
+	}
+
+	before, err := dependencies.preflightTransition(ctx, tx, *shape.transition)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("preflight registered APP transition: %w", err)
+	}
+	if err := dependencies.applyPending(ctx, tx, source.sources, applied); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("apply registered APP transition migrations: %w", err)
+	}
+	applied, err = dependencies.readApplied(ctx, tx)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	if err := compareAppACLCurrentMigrationEntries(source.sources.canonicalSet, applied, "registered successor migration ledger"); err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	if err := dependencies.verifyTransitionApplied(ctx, tx, *shape.transition, before); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("verify applied registered APP transition: %w", err)
+	}
+	if err := verifyAppACLCurrentConvergenceCatalog(ctx, tx, verifierInput, dependencies); err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	inserted, err := dependencies.insertSuccessor(
+		ctx,
+		tx,
+		shape.latest,
+		source.sources.canonicalSet,
+		compiledPrivileges,
+	)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("insert registered APP manifest successor: %w", err)
+	}
+	head, err = dependencies.readHeadForUpdate(ctx, tx)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	manifests, err = dependencies.readManifests(ctx, tx)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	finalShape, err := classifyAppACLCurrentManifestShape(
+		source,
+		transitions,
+		applied,
+		manifests,
+		head,
+		compiledPrivileges,
+		migratorRole,
+	)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("read back registered APP successor: %w", err)
+	}
+	if finalShape.kind != appACLCurrentManifestShapeSuccessor || finalShape.latest.ManifestDigest != inserted.ManifestDigest {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("registered APP successor readback does not match inserted revision")
+	}
+	if err := dependencies.verifyTransitionCurrent(ctx, tx, *shape.transition); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("verify final registered APP transition: %w", err)
+	}
+	if err := verifyAppACLCurrentConvergenceCatalog(ctx, tx, verifierInput, dependencies); err != nil {
+		return AppACLManifestPersistedV1{}, err
+	}
+	return finalShape.latest, nil
 }
 
 func convergeFreshAppACLCurrentInTx(
@@ -431,6 +504,10 @@ func (dependencies appACLCurrentConvergenceDependencies) validate() error {
 		{name: "catalog reader", missing: dependencies.readCatalog == nil},
 		{name: "catalog verifier", missing: dependencies.verifyCatalog == nil},
 		{name: "manifest genesis inserter", missing: dependencies.insertGenesis == nil},
+		{name: "transition preflight", missing: dependencies.preflightTransition == nil},
+		{name: "applied transition verifier", missing: dependencies.verifyTransitionApplied == nil},
+		{name: "current transition verifier", missing: dependencies.verifyTransitionCurrent == nil},
+		{name: "manifest successor inserter", missing: dependencies.insertSuccessor == nil},
 	}
 	for _, check := range checks {
 		if check.missing {

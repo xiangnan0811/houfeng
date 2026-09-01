@@ -715,6 +715,30 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
 - `postgres` 的名称和未来父任务调用是 compatibility boundary。加入或修改
   `pg16-catalog` 时不得 rename、delete、route through strict allowlist 或以其他
   方式改变该通用 mode。
+- current APP successor 变更必须保留一个完全离线、测试运行时不读取 git/network
+  的 released-predecessor oracle。当前 oracle 固定 v0.79.4 的63-entry migration
+  canonical body、privilege body和revision-1 manifest digest；产品transition compiler
+  必须逐byte匹配后才可打开transaction，不能和测试共同从fixed current set动态截
+  prefix自证。symbolic tag只用于生成前的人工trust-root核验，不属于测试运行时输入。
+- successor单元证据必须按TDD覆盖registry定义错误（missing/duplicate/unknown/
+  out-of-order/overlap/privilege drift）、writer insert/head CAS/RowsAffected/readback、
+  manifest shape与runtime admission，以及每个transaction cutpoint。transaction前
+  definition/golden错误断言opener零调用；transaction内任一步错误断言rollback、
+  commit零调用和later seam零调用；serialization failure必须重跑完整closure并重读
+  ledger/head/settings，而不是从中间步骤续跑。
+- strict PostgreSQL successor证据必须用两个隔离singleton settings fixture分别覆盖
+  global 3与global 20；两者都含override 3和heartbeat rows。断言0063的3→12、20保留、
+  override保留、exact covering index、ledger/revision chain/runtime admission与repeat
+  durable snapshot深相等。错误同名index、错误released default与partial-0063必须在
+  revision-2发布前fail closed。任何 `SKIP` 都不是证据。
+- Compose caller证据必须从独立released predecessor materialize exact 0062/revision-1
+  后调用生产init装配，而不是直接调用任意依赖注入helper或success fake；允许仅以
+  PostgreSQL transport opener为测试seam，但其余依赖必须由与公开入口相同的production
+  factory装配。released fixture必须由build-tagged test-only source直接前向收敛并逐字节
+  验证冻结golden，不能先运行fixed current再反向删除0063。验证role password、authority
+  state、heartbeat rows/index、Records/attachment readback、0063语义和repeat。focused PG/Compose
+  GREEN、affected package与cutpoint GREEN、`go vet`和`git diff --check`相互独立记录，
+  不得用其中一项替代另一项或替代full `make verify-go`。
 - Integration test 直接执行且未设置 `HOUFENG_POSTGRES_INTEGRATION=1` 时可按
   普通 broad-verify 规则 `t.Skip`。strict runner export 该变量；child output
   中任意 `--- SKIP:` 都必须使 runner exit 1，enabled-test prerequisite failure

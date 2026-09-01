@@ -544,6 +544,7 @@ func TestServiceHeartbeatProjectionConflictRereadsPolicyRecordActiveAndReceipts(
 	writer := &fakeMutationWriter{applyErrors: []error{ErrIncidentProjectionConflict, nil}, trace: &trace}
 	notifier := &fakeNotifier{}
 	service := NewSettingsBackedService(repo, &fakeTargetRepo{}, snapshots, writer, notifier, settingsRepo, slog.Default(), 5*time.Second, time.Minute)
+	service.now = func() time.Time { return now }
 
 	if err := service.evaluateMonitoringInstanceHeartbeatOnly(context.Background(), monitoringInstanceID, now); err != nil {
 		t.Fatalf("evaluateMonitoringInstanceHeartbeatOnly() error = %v", err)

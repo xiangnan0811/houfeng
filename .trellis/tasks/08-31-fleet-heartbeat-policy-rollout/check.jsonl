@@ -1,0 +1,12 @@
+{"file": ".trellis/tasks/08-31-fleet-heartbeat-policy-rollout/research/live-upgrade-blocker-verification.md", "reason": "复核实现真正关闭生产 exact-current upgrade blocker 且未放宽任意 predecessor"}
+{"file": ".trellis/tasks/08-31-fleet-heartbeat-policy-rollout/research/production-operations-contracts.md", "reason": "不被上下文上限截断地复核 Center/Agent source closure、deadline、marker、canary、rollback、privacy 与授权边界；同时读取完整 runbook"}
+{"file": ".trellis/tasks/08-31-fleet-heartbeat-policy-rollout/research/heartbeat-acceptance-notification-isolation.md", "reason": "复核生产未执行强制 outage 或全局通知 mutation"}
+{"file": ".trellis/spec/backend/index.md", "reason": "复核后端层索引要求的数据库、错误、质量与日志规范均被执行"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "复核 exact-current 迁移事务性、PostgreSQL 真实执行与 repeat-safe 证据"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "复核 RED/GREEN、focused/strict/whole-package gates 与失败归因"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "复核 migration/runtime admission fail-closed、错误包装与不泄密行为"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "审查 secrets tokens DSN notification content 与 remote logs 没有泄漏"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "审查受保护交付 release production evidence 和最终 cleanup 不越权"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "审查 source-to-live 全链路与每个 stop rollback boundary"}
+{"file": ".trellis/tasks/08-31-fleet-heartbeat-policy-rollout/research/exact-current-0062-to-0063-independent-review.md", "reason": "独立对照全部入口和缺失 exact 0062 to 0063 fixture，防止错误声称已有支持路径"}
+{"file": ".trellis/tasks/08-31-fleet-heartbeat-policy-rollout/research/implementation-contracts.md", "reason": "在不截断大 spec 的前提下复核数据库质量隐私分支发布和生产硬边界"}

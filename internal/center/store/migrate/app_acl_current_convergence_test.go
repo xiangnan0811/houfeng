@@ -741,6 +741,16 @@ func appACLCurrentConvergenceTestDependencies() appACLCurrentConvergenceDependen
 		insertGenesis: func(context.Context, pgx.Tx, []byte, []byte, string) (AppACLManifestPersistedV1, error) {
 			return AppACLManifestPersistedV1{}, nil
 		},
+		preflightTransition: func(context.Context, pgx.Tx, appACLCurrentTransition) (appACLCurrentTransitionPreflight, error) {
+			return appACLCurrentTransitionPreflight{}, nil
+		},
+		verifyTransitionApplied: func(context.Context, pgx.Tx, appACLCurrentTransition, appACLCurrentTransitionPreflight) error {
+			return nil
+		},
+		verifyTransitionCurrent: func(context.Context, pgx.Tx, appACLCurrentTransition) error { return nil },
+		insertSuccessor: func(context.Context, pgx.Tx, AppACLManifestPersistedV1, []byte, []byte) (AppACLManifestPersistedV1, error) {
+			return AppACLManifestPersistedV1{}, nil
+		},
 	}
 }
 

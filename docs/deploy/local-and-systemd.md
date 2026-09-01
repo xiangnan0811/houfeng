@@ -415,15 +415,36 @@ docker compose up -d
 docker compose ps
 ```
 
-The database initializer applies the supported forward schema transition before
-Center starts. Do not roll an older image back over a database already migrated
-by a newer incompatible release. If release notes do not explicitly confirm
-backward compatibility, rollback means restoring the complete pre-upgrade cold
-recovery point together with its matching common Compose file, mode file, env
-contract, and image tag. Switching modes changes only `COMPOSE_FILE` and the
-mode-specific `HOUFENG_PROXY_NETWORK` value; always run `docker compose config`
-before `docker compose up -d`, and never replace or split the data/authority
-identity while switching.
+The database initializer applies only a forward transition explicitly supported
+by the target release before Center starts. For v0.79.6, the only existing-state
+upgrade admitted by the current APP migrator is the exact released v0.79.4
+`0062_create_vps_create_idempotency.sql` revision-1 predecessor; it atomically
+applies `0063_tune_heartbeat_incident_policy.sql` and publishes revision 2.
+Fresh v0.79.6 databases and exact revision-2 repeats are also supported. A
+partial, checksum-drifted, unknown-prefix, null-head, or otherwise unknown
+database fails initialization; do not bypass db-init, run ad hoc SQL, or start
+Center manually.
+
+Before relying on that transition, rehearse both restoration of the complete
+cold recovery point and the target upgrade in an isolated Compose project that
+cannot publish production ports, join the production proxy network, reuse the
+production project name, or start a second Records authority. The rehearsal must
+verify the ledger/manifest chain, settings conversion or preservation, exact
+index shape, runtime admission, Records, and attachments, then remove only the
+isolated rehearsal resources. A successful database-only dry run is not a cold
+restore rehearsal.
+
+Do not roll an older image back over a database already migrated by a newer
+incompatible release. For v0.79.6, image-only rollback after revision 2 is not
+supported: rollback means stopping the target stack and restoring the complete
+pre-upgrade cold recovery point together with its matching PostgreSQL,
+attachments, Records authority state, common Compose file, mode file, env
+contract, secrets, and old image set. Switching modes changes only
+`COMPOSE_FILE` and the mode-specific `HOUFENG_PROXY_NETWORK` value; always run
+`docker compose config` before `docker compose up -d`, and never replace or split
+the data/authority identity while switching. If db-init or any post-init
+admission/health check fails, keep Center and the authority stopped until the
+exact old stack has been restored and verified.
 
 Compose does not include the value behind an environment-sourced secret in its
 service configuration hash. A plain `docker compose up -d` therefore does not

@@ -1,0 +1,12 @@
+{"file": ".trellis/tasks/08-31-fleet-heartbeat-policy-rollout/research/live-upgrade-blocker-verification.md", "reason": "现场与严格 PostgreSQL 证明 v0.79.4 exact 0062 到 v0.79.5/0063 的确定阻断及修复边界"}
+{"file": ".trellis/tasks/08-31-fleet-heartbeat-policy-rollout/research/production-operations-contracts.md", "reason": "不被上下文上限截断的 Center/Agent fail-fast、deadline、marker、rollback 与生产授权合同；执行前仍须读取完整 runbook"}
+{"file": ".trellis/tasks/08-31-fleet-heartbeat-policy-rollout/research/heartbeat-acceptance-notification-isolation.md", "reason": "生产通知全局路由限制、被动验收与非生产强制策略测试边界"}
+{"file": ".trellis/spec/backend/index.md", "reason": "后端层规范入口与本任务数据库迁移、错误处理、质量和日志子规范路由"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "exact-current migration、事务、PostgreSQL 集成验证与可重复升级约束"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "TDD、focused/strict PostgreSQL/whole-package 门禁与生产级回归覆盖要求"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "migration admission、runtime fail-closed、typed/wrapped error 与安全日志边界"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "数据库/Agent/notification 证据的 secret 与原始错误脱敏边界"}
+{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "非 main 分支、PR CI merge release production follow-through 与 cleanup 治理"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "migration writer、runtime admission、Compose、release 与三主机现场的端到端数据流"}
+{"file": ".trellis/tasks/08-31-fleet-heartbeat-policy-rollout/research/exact-current-0062-to-0063-independent-review.md", "reason": "独立源码复审穷尽当前 admin Compose legacy R1 R2 路径并确认无桥及 exact release-pair fixture 缺口"}
+{"file": ".trellis/tasks/08-31-fleet-heartbeat-policy-rollout/research/implementation-contracts.md", "reason": "小于注入上限的 current successor strict PG privacy branch release production 核心合同摘要"}
