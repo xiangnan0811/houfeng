@@ -5,7 +5,6 @@
 
 ### Bug Fixes
 
-* **center:** support exact ACL successor upgrades ([45040bd](https://github.com/xiangnan0811/houfeng/commit/45040bd4948afde7e63d501f85da75c2bcb70cec))
 * **center:** support exact ACL successor upgrades ([06a6f0c](https://github.com/xiangnan0811/houfeng/commit/06a6f0c3906e067bde25abd5c345190a3851b047))
 
 ## [0.79.5](https://github.com/xiangnan0811/houfeng/compare/v0.79.4...v0.79.5) (2026-08-31)
