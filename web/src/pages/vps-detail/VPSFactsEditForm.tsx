@@ -92,7 +92,7 @@ export function VPSFactsEditForm({
   }
 
   return (
-    <form className="asset-facts-edit-form provider-form" onSubmit={onSubmit}>
+    <form className="asset-facts-edit-form" onSubmit={onSubmit}>
       <section className="provider-form__section" aria-labelledby={`${headingId}-identity`}>
         <h4 id={`${headingId}-identity`} className="provider-form__section-title">身份 / 服务商</h4>
         <div className="provider-form__grid">

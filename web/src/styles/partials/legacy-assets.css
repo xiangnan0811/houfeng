@@ -53,7 +53,7 @@
 
 .asset-lifecycle-confirm__callouts p{margin:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.45}
 
-.asset-facts-edit-form{margin:0 0 var(--space-4)}
+.asset-facts-edit-form{display:flex;flex-direction:column;gap:var(--space-4);margin:0 0 var(--space-4)}
 .asset-facts-edit-form .provider-form__section-title{font-size:14px;text-transform:none;letter-spacing:normal}
 
 .asset-cancel-workbench{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
