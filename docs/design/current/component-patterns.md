@@ -62,6 +62,10 @@ The switch is labeled 表格视图 / 目录视图; persisted `workbench` / `ledg
 - Inventory entries carry the current `/vps` query in React Router history state `vpsInventoryHref`. The top-bar return accepts only `/vps` with optional search parameters; absent or invalid context falls back to `/vps`. Onboarding query consumption, in-page sections, VPS activity/records/evidence navigation, and activity filter/retry replacements preserve that state. This is navigation context, not another persisted preference.
 - Browser acceptance covers both layouts in global dark/light themes, selecting from a 30-asset inventory, collapsing/reopening inspection, opening actual independent detail, accessing and closing management, and returning with view/search/filter/selection intact. Entering the base detail page resets the shared main scroller; explicit hash navigation retains its section target. Fixed top bars must not cover return controls or in-page section targets.
 
+## VPS facts editor
+
+The shared editor groups existing fields into identity/provider, location, connection/host, and usage/note sections. Reuse existing form section/grid styles with readable headings, two desktop columns and one column on narrow screens; keep feedback and save/cancel actions in normal scroll flow. Both overview and legacy detail use this editor without changing provider snapshots, country/IPv6/SSH field behavior, version-conflict recovery, or write ownership. It is not the VPS creation flow or a lifecycle decision surface.
+
 ## Decision and workbench page IA
 
 Decision-heavy pages (asset decisions, detail pages with decision boards) follow a three-tier information architecture instead of stacking every API field on one screen:

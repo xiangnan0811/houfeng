@@ -4,6 +4,8 @@
 
 ### Features
 
+* **web:** group the shared VPS facts editor into identity/provider, location, connection/host, and usage/note sections with responsive columns, preserving existing fields, write ownership and conflict handling.
+
 * **web:** add shared-state VPS directory and table views with persistent presentation preference, URL-preserved search and selection, and an inline asset inspector. Existing VPS management and onboarding destinations remain shared.
 * **web:** separate compact, collapsible VPS quick inspection from a shared independent detail workspace, organize full detail by responsibility, and retain inventory context on return navigation.
 * **web:** expand table quick inspection beneath the selected row, support global dark/light themes in both VPS layouts, and remove redundant inventory explanatory copy.
