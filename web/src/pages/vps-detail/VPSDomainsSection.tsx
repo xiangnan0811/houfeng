@@ -51,10 +51,10 @@ export function VPSDomainsSection({
               <li key={domain.domain_id} className="vps-relation-row vps-relation-row--resource vps-relation-row--domain">
                 <div className="vps-detail-resource__primary">
                   <div className="vps-detail-resource__identity">
-                    <strong className="vps-detail-resource__name">{domainResourceName(domain)}</strong>
+                    <strong className="vps-detail-resource__name mono">{domainResourceName(domain)}</strong>
                     <span className="vps-detail-resource__id mono">{domain.domain_id}</span>
                   </div>
-                  <span className="badge-row badge-row--wrap">
+                  <span className="vps-detail-resource__status badge-row badge-row--wrap">
                     <Badge variant="state" tone={domain.status === 'active' ? 'normal' : 'offline'}>
                       {domainResourceStatus(domain)}
                     </Badge>
@@ -63,19 +63,19 @@ export function VPSDomainsSection({
                 <dl className="vps-relation-row__facts">
                   <div>
                     <dt>HTTPS</dt>
-                    <dd>{domain.https_enabled ? 'HTTPS' : '未记录 HTTPS'}</dd>
+                    <dd>{domain.https_enabled ? '已启用' : '未记录'}</dd>
                   </div>
                   <div>
                     <dt>用途</dt>
-                    <dd>{purpose || '用途未记录'}</dd>
+                    <dd>{purpose || '未记录'}</dd>
                   </div>
                   <div>
                     <dt>注册商</dt>
-                    <dd>{registrar || '注册商未记录'}</dd>
+                    <dd>{registrar || '未记录'}</dd>
                   </div>
                   <div>
                     <dt>过期</dt>
-                    <dd>{expires ? formatDate(expires) : '过期日未记录'}</dd>
+                    <dd>{expires ? formatDate(expires) : '未记录'}</dd>
                   </div>
                   <div>
                     <dt>续费</dt>
@@ -83,7 +83,7 @@ export function VPSDomainsSection({
                   </div>
                   <div>
                     <dt>关联服务</dt>
-                    <dd>{serviceId ? <>服务 <span className="mono">{serviceId}</span></> : '未关联服务'}</dd>
+                    <dd>{serviceId ? <span className="mono">{serviceId}</span> : '未关联'}</dd>
                   </div>
                   <div className="vps-relation-row__wide">
                     <dt>入口探测</dt>
@@ -92,7 +92,7 @@ export function VPSDomainsSection({
                         <Link className="text-link mono" to={`/targets/${encodeURIComponent(probe)}`}>
                           {probe}
                         </Link>
-                      ) : '未关联入口探测'}
+                      ) : '未关联'}
                     </dd>
                   </div>
                   {domain.labels.length > 0 ? (

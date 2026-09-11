@@ -1327,13 +1327,17 @@
   background: var(--row-bg);
 }
 
-.vps-relation-row--resource:hover {
-  background: var(--row-bg-hover);
+.vps-relation-row--resource .vps-detail-resource__id {
+  font-size: 12px;
 }
 
-.vps-relation-row--resource .vps-detail-resource__id {
-  color: var(--text-muted);
-  font-size: 12px;
+.vps-relation-row--resource .vps-relation-row__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.vps-relation-row__wide {
+  grid-column: 1 / -1;
 }
 
 .vps-relation-row--resource .vps-relation-row__facts dd {
@@ -1341,17 +1345,13 @@
   font-size: var(--type-small-size);
 }
 
-.vps-relation-row__wide {
-  flex: 1 1 100%;
-}
-
 .vps-relation-row--resource .vps-relation-row__wide dd {
   color: var(--text-primary);
   font-size: var(--type-body-size);
+  overflow-wrap: anywhere;
 }
 
 .vps-relation-row--resource .vps-relation-row__note dd {
   color: var(--text-muted);
-  font-size: var(--type-small-size);
 }
 

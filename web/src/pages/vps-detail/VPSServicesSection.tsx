@@ -57,7 +57,7 @@ export function VPSServicesSection({
                     <strong className="vps-detail-resource__name">{serviceResourceName(service)}</strong>
                     <span className="vps-detail-resource__id mono">{service.service_id}</span>
                   </div>
-                  <span className="badge-row badge-row--wrap">
+                  <span className="vps-detail-resource__status badge-row badge-row--wrap">
                     <Badge variant="info" tone="neutral">{serviceResourceType(service)}</Badge>
                     <Badge variant="state" tone={service.status === 'active' ? 'normal' : 'offline'}>
                       {serviceResourceStatus(service)}

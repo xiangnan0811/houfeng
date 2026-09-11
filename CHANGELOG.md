@@ -4,7 +4,7 @@
 
 ### Features
 
-* **web:** align service/domain detail modals with the VPS workspace using shared name/ID/status hierarchy, subtle resource surfaces, compact wrapping facts and subordinate notes while preserving collection, link, copy and create behavior.
+* **web:** align service/domain detail modals with the VPS workspace using shared name/ID/status hierarchy, monospace domain identities, subtle noninteractive resource surfaces, compact two-column facts and subordinate notes while preserving collection, link, copy and create behavior.
 
 * **web:** group the shared VPS facts editor into identity/provider, location, connection/host, and usage/note sections with responsive columns, preserving existing fields, write ownership and conflict handling.
 
