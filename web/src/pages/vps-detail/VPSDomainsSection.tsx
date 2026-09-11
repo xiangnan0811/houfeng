@@ -49,14 +49,16 @@ export function VPSDomainsSection({
             const serviceId = domain.service_id?.trim() ?? ''
             return (
               <li key={domain.domain_id} className="vps-relation-row vps-relation-row--resource vps-relation-row--domain">
-                <div className="vps-relation-row__identity">
-                  <strong>{domainResourceName(domain)}</strong>
+                <div className="vps-detail-resource__primary">
+                  <div className="vps-detail-resource__identity">
+                    <strong className="vps-detail-resource__name">{domainResourceName(domain)}</strong>
+                    <span className="vps-detail-resource__id mono">{domain.domain_id}</span>
+                  </div>
                   <span className="badge-row badge-row--wrap">
                     <Badge variant="state" tone={domain.status === 'active' ? 'normal' : 'offline'}>
                       {domainResourceStatus(domain)}
                     </Badge>
                   </span>
-                  <span className="mono">{domain.domain_id}</span>
                 </div>
                 <dl className="vps-relation-row__facts">
                   <div>
@@ -100,7 +102,7 @@ export function VPSDomainsSection({
                     </div>
                   ) : null}
                   {note ? (
-                    <div className="vps-relation-row__wide">
+                    <div className="vps-relation-row__wide vps-relation-row__note">
                       <dt>备注</dt>
                       <dd>{note}</dd>
                     </div>
