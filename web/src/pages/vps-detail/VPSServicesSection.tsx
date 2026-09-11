@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 
-import { Button, MonoDigits } from '../../components/atoms'
+import { Badge, Button, MonoDigits } from '../../components/atoms'
 import type { AssetServiceRecord } from '../../lib/types'
 import { AssetLabels } from '../assetPageBadges'
 import { VPSCopyValueButton } from './VPSCopyValueButton'
@@ -51,74 +51,58 @@ export function VPSServicesSection({
             const probe = service.target_id?.trim() ?? ''
             const note = service.note.trim()
             return (
-              <li key={service.service_id} className="vps-relation-row vps-relation-row--service">
-                <div className="vps-relation-row__group vps-relation-row__group--identity">
-                  <div className="vps-relation-row__identity">
-                    <strong>{serviceResourceName(service)}</strong>
-                    <span className="mono">{service.service_id}</span>
+              <li key={service.service_id} className="vps-relation-row vps-relation-row--resource vps-relation-row--service">
+                <div className="vps-relation-row__identity">
+                  <strong>{serviceResourceName(service)}</strong>
+                  <span className="badge-row badge-row--wrap">
+                    <Badge variant="info" tone="neutral">{serviceResourceType(service)}</Badge>
+                    <Badge variant="state" tone={service.status === 'active' ? 'normal' : 'offline'}>
+                      {serviceResourceStatus(service)}
+                    </Badge>
+                  </span>
+                  <span className="mono">{service.service_id}</span>
+                </div>
+                <dl className="vps-relation-row__facts">
+                  <div className="vps-relation-row__wide">
+                    <dt>入口</dt>
+                    <dd>
+                      {url ? (
+                        <span className="vps-relation-row__entry-value">
+                          {href ? (
+                            <a className="text-link" href={href} target="_blank" rel="noreferrer">{url}</a>
+                          ) : url}
+                          <VPSCopyValueButton value={url} label="入口" />
+                        </span>
+                      ) : '未记录'}
+                    </dd>
                   </div>
-                  <dl className="vps-relation-row__facts">
-                    <div>
-                      <dt>状态</dt>
-                      <dd>{serviceResourceStatus(service)}</dd>
-                    </div>
-                    <div>
-                      <dt>类型</dt>
-                      <dd>{serviceResourceType(service)}</dd>
-                    </div>
-                  </dl>
-                </div>
-                <div className="vps-relation-row__group vps-relation-row__group--entry">
-                  <dl className="vps-relation-row__facts">
-                    <div>
-                      <dt>入口</dt>
-                      <dd>
-                        {url ? (
-                          <span className="vps-relation-row__entry-value">
-                            {href ? (
-                              <a className="text-link" href={href} target="_blank" rel="noreferrer">{url}</a>
-                            ) : url}
-                            <VPSCopyValueButton value={url} label="入口" />
-                          </span>
-                        ) : '未记录'}
-                      </dd>
-                    </div>
-                  </dl>
-                </div>
-                <div className="vps-relation-row__group vps-relation-row__group--assoc">
-                  <dl className="vps-relation-row__facts">
-                    <div>
-                      <dt>端口</dt>
-                      <dd>{service.port != null ? service.port : '未记录'}</dd>
-                    </div>
-                    <div>
-                      <dt>入口探测</dt>
-                      <dd>
-                        {probe ? (
-                          <Link className="text-link" to={`/targets/${encodeURIComponent(probe)}`}>
-                            {probe}
-                          </Link>
-                        ) : '未关联'}
-                      </dd>
-                    </div>
-                    {service.labels.length > 0 ? (
-                      <div>
-                        <dt>标签</dt>
-                        <dd><AssetLabels labels={service.labels} /></dd>
-                      </div>
-                    ) : null}
-                  </dl>
-                </div>
-                {note ? (
-                  <div className="vps-relation-row__group vps-relation-row__group--note">
-                    <dl className="vps-relation-row__facts">
-                      <div>
-                        <dt>备注</dt>
-                        <dd>{note}</dd>
-                      </div>
-                    </dl>
+                  <div>
+                    <dt>端口</dt>
+                    <dd>{service.port != null ? <MonoDigits>{service.port}</MonoDigits> : '未记录'}</dd>
                   </div>
-                ) : null}
+                  <div>
+                    <dt>入口探测</dt>
+                    <dd>
+                      {probe ? (
+                        <Link className="text-link mono" to={`/targets/${encodeURIComponent(probe)}`}>
+                          {probe}
+                        </Link>
+                      ) : '未关联'}
+                    </dd>
+                  </div>
+                  {service.labels.length > 0 ? (
+                    <div className="vps-relation-row__wide">
+                      <dt>标签</dt>
+                      <dd><AssetLabels labels={service.labels} /></dd>
+                    </div>
+                  ) : null}
+                  {note ? (
+                    <div className="vps-relation-row__wide">
+                      <dt>备注</dt>
+                      <dd>{note}</dd>
+                    </div>
+                  ) : null}
+                </dl>
               </li>
             )
           })}

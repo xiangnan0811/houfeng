@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 
-import { Button, MonoDigits } from '../../components/atoms'
+import { Badge, Button, MonoDigits } from '../../components/atoms'
 import { formatDate } from '../../lib/format'
 import type { AssetDomainRecord } from '../../lib/types'
 import { AssetLabels } from '../assetPageBadges'
@@ -48,16 +48,17 @@ export function VPSDomainsSection({
             const note = domain.note.trim()
             const serviceId = domain.service_id?.trim() ?? ''
             return (
-              <li key={domain.domain_id} className="vps-relation-row">
+              <li key={domain.domain_id} className="vps-relation-row vps-relation-row--resource vps-relation-row--domain">
                 <div className="vps-relation-row__identity">
                   <strong>{domainResourceName(domain)}</strong>
+                  <span className="badge-row badge-row--wrap">
+                    <Badge variant="state" tone={domain.status === 'active' ? 'normal' : 'offline'}>
+                      {domainResourceStatus(domain)}
+                    </Badge>
+                  </span>
                   <span className="mono">{domain.domain_id}</span>
                 </div>
                 <dl className="vps-relation-row__facts">
-                  <div>
-                    <dt>状态</dt>
-                    <dd>{domainResourceStatus(domain)}</dd>
-                  </div>
                   <div>
                     <dt>HTTPS</dt>
                     <dd>{domain.https_enabled ? 'HTTPS' : '未记录 HTTPS'}</dd>
@@ -80,26 +81,26 @@ export function VPSDomainsSection({
                   </div>
                   <div>
                     <dt>关联服务</dt>
-                    <dd>{serviceId ? `服务 ${serviceId}` : '未关联服务'}</dd>
+                    <dd>{serviceId ? <>服务 <span className="mono">{serviceId}</span></> : '未关联服务'}</dd>
                   </div>
-                  <div>
+                  <div className="vps-relation-row__wide">
                     <dt>入口探测</dt>
                     <dd>
                       {probe ? (
-                        <Link className="text-link" to={`/targets/${encodeURIComponent(probe)}`}>
+                        <Link className="text-link mono" to={`/targets/${encodeURIComponent(probe)}`}>
                           {probe}
                         </Link>
                       ) : '未关联入口探测'}
                     </dd>
                   </div>
                   {domain.labels.length > 0 ? (
-                    <div>
+                    <div className="vps-relation-row__wide">
                       <dt>标签</dt>
                       <dd><AssetLabels labels={domain.labels} /></dd>
                     </div>
                   ) : null}
                   {note ? (
-                    <div>
+                    <div className="vps-relation-row__wide">
                       <dt>备注</dt>
                       <dd>{note}</dd>
                     </div>

@@ -1226,11 +1226,16 @@
   line-height: 1.45;
 }
 
-.vps-relation-modal {
+.vps-relation-modal,
+.vps-relation-row,
+.vps-relation-row__identity {
   display: flex;
   flex-direction: column;
-  gap: 12px;
   min-width: 0;
+}
+
+.vps-relation-modal {
+  gap: 12px;
   font-size: var(--type-body-size);
   line-height: 1.45;
 }
@@ -1242,7 +1247,8 @@
   line-height: 1.45;
 }
 
-.vps-relation-modal__actions {
+.vps-relation-modal__actions,
+.vps-relation-row__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1258,22 +1264,14 @@
   list-style: none;
 }
 
-
 .vps-relation-row {
-  display: flex;
-  flex-direction: column;
   gap: 8px;
-  min-width: 0;
   padding: 12px 0;
   border-bottom: var(--border-w) solid var(--border-muted);
 }
 
-
 .vps-relation-row__identity {
-  display: flex;
-  flex-direction: column;
   gap: 2px;
-  min-width: 0;
 }
 
 .vps-relation-row__identity strong {
@@ -1283,7 +1281,6 @@
   line-height: 1.4;
   overflow-wrap: break-word;
 }
-
 
 .vps-relation-row__facts {
   display: flex;
@@ -1319,34 +1316,35 @@
   white-space: nowrap;
 }
 
-.vps-relation-row__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.vps-relation-row--service .vps-relation-row__group {
+.vps-relation-row--resource .vps-relation-row__identity {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 8px;
 }
 
-.vps-relation-row--service .vps-relation-row__group--identity,
-.vps-relation-row--service .vps-relation-row__group--assoc {
-  grid-template-columns: minmax(0, 1fr) minmax(6.5rem, 8.5rem) minmax(6.5rem, 8.5rem);
+.vps-relation-row--resource .vps-relation-row__identity .mono {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
-.vps-relation-row--service .vps-relation-row__facts {
-  display: contents;
+.vps-relation-row--resource .vps-relation-row__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.vps-relation-row--service .vps-relation-row__facts > div {
+.vps-relation-row--resource .vps-relation-row__facts > div {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
   width: auto;
 }
 
+.vps-relation-row__wide {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 760px) {
-  .vps-relation-row--service .vps-relation-row__group--identity,
-  .vps-relation-row--service .vps-relation-row__group--assoc {
+  .vps-relation-row--resource .vps-relation-row__facts {
     grid-template-columns: minmax(0, 1fr);
   }
 }

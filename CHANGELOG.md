@@ -4,6 +4,8 @@
 
 ### Features
 
+* **web:** align service/domain detail modals with the VPS workspace using resource names, shared type/status badges, subordinate IDs, and responsive labelled facts while preserving collection, link, copy and create behavior.
+
 * **web:** group the shared VPS facts editor into identity/provider, location, connection/host, and usage/note sections with responsive columns, preserving existing fields, write ownership and conflict handling.
 
 * **web:** add shared-state VPS directory and table views with persistent presentation preference, URL-preserved search and selection, and an inline asset inspector. Existing VPS management and onboarding destinations remain shared.
