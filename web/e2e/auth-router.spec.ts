@@ -12,7 +12,7 @@ test('redirects a protected route to login without an authenticated fixture', as
 
   expectMainDocumentCsp(response)
   await expect(page).toHaveURL(/\/login\?next=%2Fvps$/)
-  await expect(page.getByText('候风控制面板')).toBeVisible()
+  await expect(page.getByText('候风', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '登录' })).toBeVisible()
 })
 

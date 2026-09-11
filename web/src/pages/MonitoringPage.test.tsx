@@ -69,7 +69,7 @@ function LocationProbe() {
 }
 
 function getMonitoringHeaderVPSLink() {
-  return screen.getByRole('link', { name: '从未关联 VPS 接入 agent' })
+  return screen.getByRole('link', { name: '从未关联 VPS 接入' })
 }
 
 describe('MonitoringPage', () => {
@@ -103,7 +103,8 @@ describe('MonitoringPage', () => {
     expect(screen.queryByRole('heading', { name: '资产判断支撑' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '资产组合决策' })).not.toBeInTheDocument()
     expect(screen.queryByText('资产上下文')).not.toBeInTheDocument()
-    expect(screen.getByText('观察 agent 接入后的监控实例、心跳、主机性能与运行控制。')).toBeInTheDocument()
+    expect(screen.queryByText('观测 · MONITORING')).not.toBeInTheDocument()
+    expect(document.querySelector('.page-eyebrow')).toBeNull()
     expect(getMonitoringHeaderVPSLink()).toHaveAttribute('href', '/vps?view=unlinked')
     expect(screen.queryByRole('button', { name: '高级创建' })).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: '高级创建监控实例表单' })).not.toBeInTheDocument()
@@ -892,6 +893,10 @@ describe('MonitoringPage', () => {
     const polylines = document.querySelectorAll('polyline')
     // 2 monitoring x 3 metrics = 6 polylines
     expect(polylines.length).toBe(6)
+
+    expect(screen.getByRole('columnheader', { name: 'CPU · 内存 · 磁盘' })).toBeInTheDocument()
+    expect(document.querySelector('.monitoring-table')?.closest('.page-panel')).toBeNull()
+    expect(screen.getByRole('region', { name: '监控实例清单' })).toBeInTheDocument()
 
     // Each row should have the trend column visible
     const trendCells = document.querySelectorAll('.monitoring-table__trends')

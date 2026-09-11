@@ -51,7 +51,8 @@ test('VPS partial freshness has no blocking axe violations and exposes keyboard 
   await page.goto('/vps/vps_001')
   await expect(page.getByRole('heading', { name: 'Tokyo Edge' })).toBeVisible()
 
-  const retry = page.getByRole('button', { name: '重试 IP 质量' })
+  const retry = page.getByRole('button', { name: '刷新 概览 IP 质量' })
+
   await retry.focus()
   await expect(retry).toBeFocused()
   const result = await new AxeBuilder({ page }).analyze()

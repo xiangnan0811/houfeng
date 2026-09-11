@@ -1,9 +1,8 @@
 import { Link } from 'react-router-dom'
 
-import { MonoDigits, StatCard } from '../../components/atoms'
+import { MonoDigits } from '../../components/atoms'
 
 type MonitoringHeroProps = {
-  totalMonitoringInstanceCount: number
   abnormalMonitoringInstanceCount: number
   pendingOnboardingMonitoringInstanceCount: number
   maintenanceOrPausedMonitoringInstanceCount: number
@@ -13,7 +12,6 @@ type MonitoringHeroProps = {
 }
 
 export function MonitoringHero({
-  totalMonitoringInstanceCount,
   abnormalMonitoringInstanceCount,
   pendingOnboardingMonitoringInstanceCount,
   maintenanceOrPausedMonitoringInstanceCount,
@@ -22,25 +20,37 @@ export function MonitoringHero({
   onRuntimeAttentionClick,
 }: MonitoringHeroProps) {
   return (
-    <>
-      <div className="page-header animate-in">
-        <div>
-          <div className="page-eyebrow">观测 · MONITORING</div>
-          <h1 className="page-title">监控</h1>
-          <p className="page-sub">观察 agent 接入后的监控实例、心跳、主机性能与运行控制。</p>
-        </div>
-        <div className="header-actions">
-          <Link className="btn md primary" to="/vps?view=unlinked">
-            从未关联 VPS 接入 agent
-          </Link>
-        </div>
+    <header className="page__head">
+      <h1 className="page__title">监控</h1>
+      <div className="page__actions">
+        <button
+          type="button"
+          className="btn sm ghost"
+          onClick={onAbnormalClick}
+          disabled={abnormalMonitoringInstanceCount === 0}
+        >
+          异常 <MonoDigits>{abnormalMonitoringInstanceCount}</MonoDigits>
+        </button>
+        <button
+          type="button"
+          className="btn sm ghost"
+          onClick={onOnboardingClick}
+          disabled={pendingOnboardingMonitoringInstanceCount === 0}
+        >
+          待接入 <MonoDigits>{pendingOnboardingMonitoringInstanceCount}</MonoDigits>
+        </button>
+        <button
+          type="button"
+          className="btn sm ghost"
+          onClick={onRuntimeAttentionClick}
+          disabled={maintenanceOrPausedMonitoringInstanceCount === 0}
+        >
+          维护/暂停 <MonoDigits>{maintenanceOrPausedMonitoringInstanceCount}</MonoDigits>
+        </button>
+        <Link className="btn sm primary" to="/vps?view=unlinked">
+          从未关联 VPS 接入
+        </Link>
       </div>
-      <div className="stat-grid">
-        <StatCard value={<MonoDigits>{totalMonitoringInstanceCount}</MonoDigits>} label="全部监控实例" onClick={onAbnormalClick} />
-        <StatCard value={<MonoDigits>{abnormalMonitoringInstanceCount}</MonoDigits>} label="异常" tone={abnormalMonitoringInstanceCount > 0 ? 'err' : 'normal'} onClick={onAbnormalClick} />
-        <StatCard value={<MonoDigits>{pendingOnboardingMonitoringInstanceCount}</MonoDigits>} label="待接入" tone={pendingOnboardingMonitoringInstanceCount > 0 ? 'warn' : 'normal'} onClick={onOnboardingClick} />
-        <StatCard value={<MonoDigits>{maintenanceOrPausedMonitoringInstanceCount}</MonoDigits>} label="维护/暂停" tone={maintenanceOrPausedMonitoringInstanceCount > 0 ? 'warn' : 'normal'} onClick={onRuntimeAttentionClick} />
-      </div>
-    </>
+    </header>
   )
 }

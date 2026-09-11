@@ -83,7 +83,6 @@ export function MonitoringInstanceLinkedVPSSection({
   return (
     <div ref={sectionRef}>
       <DetailSection
-        eyebrow="ASSET LEDGER"
         title="关联 VPS"
         aside={loading ? '加载中' : loaded ? `${records.length} 台` : '待同步'}
       >

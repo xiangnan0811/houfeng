@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { Badge } from '../../components/atoms'
 import { formatPercent } from '../../lib/format'
@@ -11,6 +11,7 @@ import {
   serviceUnlockCounts,
   strongestRiskFlags,
 } from '../../components/ip-quality/ipQualityPresentation'
+import { VPSObservationRows } from './VPSObservationRows'
 
 type VPSIPQualitySectionProps = {
   vpsId: string
@@ -19,6 +20,7 @@ type VPSIPQualitySectionProps = {
 }
 
 export function VPSIPQualitySection({ vpsId, report, error }: VPSIPQualitySectionProps) {
+  const location = useLocation()
   const summary = report?.summary ?? null
   const score = report ? deriveQualityScore(report) : null
   const riskFlags = report ? strongestRiskFlags(report) : []
@@ -26,29 +28,62 @@ export function VPSIPQualitySection({ vpsId, report, error }: VPSIPQualitySectio
   const unlockCounts = report ? serviceUnlockCounts(report.service_unlocks) : null
   const providerCoveragePct = report ? providerCoverage(report) : null
   const serviceCoveragePct = report ? serviceCoverage(report) : null
+  const reportHref = `/vps/${encodeURIComponent(vpsId)}/ip-quality`
+  const reportLink = (
+    <Link className="text-link" to={reportHref} state={location.state}>
+      查看完整 IP 质量报告
+    </Link>
+  )
+
+  if (!error && !summary) {
+    return (
+      <VPSObservationRows
+        ariaLabel="IP 质量"
+        rows={[{
+          key: 'ip-quality-empty',
+          project: 'IP 质量',
+          ariaLabel: 'IP 质量',
+          conclusion: '尚无报告',
+          conclusionTone: 'unknown',
+          action: reportLink,
+        }]}
+      />
+    )
+  }
+
+  if (error && !summary) {
+    return (
+      <section className="vps-ip-quality-summary" aria-label="IP 质量概况">
+        <VPSObservationRows
+          ariaLabel="IP 质量"
+          rows={[{
+            key: 'ip-quality-error',
+            project: 'IP 质量',
+            ariaLabel: 'IP 质量',
+            conclusion: '报告暂不可用',
+            conclusionTone: 'unknown',
+            action: reportLink,
+          }]}
+        />
+        <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{error}</p>
+      </section>
+    )
+  }
 
   return (
     <section className="page-panel vps-ip-quality-summary" aria-labelledby="vps-ip-quality-summary-title">
       <div className="section-heading section-heading--inline">
         <div>
-          <p className="section-heading__eyebrow">IP Quality</p>
           <h2 id="vps-ip-quality-summary-title" className="section-heading__title">IP 质量概况</h2>
         </div>
-        <div className="section-heading__actions">
-          <Link className="btn sm secondary" to={`/vps/${encodeURIComponent(vpsId)}/ip-quality`}>
-            查看完整 IP 质量报告
-          </Link>
-        </div>
+        <div className="section-heading__actions">{reportLink}</div>
       </div>
       {error ? (
-        <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{error}</p>
+        <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+          {error} 仍展示上次可用报告。当前读取失败。
+        </p>
       ) : null}
-      {error ? (
-        <div className="vps-cost-card__empty">
-          <strong>报告暂不可用</strong>
-          <span>保留完整报告入口；当前不根据缓存摘要推断评分。</span>
-        </div>
-      ) : summary && report ? (
+      {summary && report ? (
         <>
           <div className="vps-ip-quality-summary__facts">
             <div>
@@ -81,12 +116,7 @@ export function VPSIPQualitySection({ vpsId, report, error }: VPSIPQualitySectio
             <span>{riskFlagLabels.length > 0 ? `重点风险：${riskFlagLabels.join(' · ')}` : '无明显负面信号'}</span>
           </div>
         </>
-      ) : (
-        <div className="vps-cost-card__empty">
-          <strong>尚无 IP 质量报告</strong>
-          <span>尚未收到可用质量结论。</span>
-        </div>
-      )}
+      ) : null}
     </section>
   )
 }

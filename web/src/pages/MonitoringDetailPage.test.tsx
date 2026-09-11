@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +7,7 @@ import { MonitoringDetailPage } from './MonitoringDetailPage'
 import { formatDateTime } from '../lib/format'
 
 vi.mock('../lib/api', async (importOriginal) => {
+
   const actual = await importOriginal<typeof import('../lib/api')>()
   return {
     ...actual,
@@ -307,32 +309,46 @@ describe('MonitoringDetailPage', () => {
 
   it('settles linked VPS loading after a delayed response', async () => {
     const linkedVPSResponse = deferredResponse()
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord({
-        monitoring_instance_id: 'mi_slow',
-        display_name: 'Slow Linked VPS Monitoring Instance',
-        binding_status: '已绑定',
-        current_health_status: '正常',
-        current_active_incident_count: 0,
-        current_primary_issue_summary: '',
-      })))
-      .mockResolvedValueOnce(mockJSONResponse({
-        monitoring_instance_id: 'mi_slow',
-        latest_host_sample: null,
-        recent_host_samples: [],
-      }))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockReturnValueOnce(linkedVPSResponse.promise)
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_slow') {
+        return Promise.resolve(mockJSONResponse(monitoringInstanceRecord({
+          monitoring_instance_id: 'mi_slow',
+          display_name: 'Slow Linked VPS Monitoring Instance',
+          binding_status: '已绑定',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+        })))
+      }
+      if (path === '/api/monitoring-instances/mi_slow/runtime-facts?window=realtime') {
+        return Promise.resolve(mockJSONResponse({
+          monitoring_instance_id: 'mi_slow',
+          latest_host_sample: null,
+          recent_host_samples: [],
+        }))
+      }
+      if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_slow') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/events?object_type=monitoring_instance&object_id=mi_slow') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/monitoring-instances/mi_slow/vps') {
+        return linkedVPSResponse.promise
+      }
+      return Promise.reject(new Error(`unexpected fetch ${path}`))
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     render(
-      <MemoryRouter initialEntries={['/monitoring/mi_slow']}>
-        <Routes>
-          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
+      <StrictMode>
+        <MemoryRouter initialEntries={['/monitoring/mi_slow']}>
+          <Routes>
+            <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </StrictMode>,
     )
 
     await waitFor(() => expect(screen.getByText('VPS 关联加载中')).toBeInTheDocument())
@@ -361,8 +377,13 @@ describe('MonitoringDetailPage', () => {
     expect(screen.getByRole('link', { name: 'Slow Response VPS' })).toHaveAttribute('href', '/vps/vps_slow')
     expect(screen.queryByText('delayed response')).not.toBeInTheDocument()
     expect(screen.queryByText('VPS 关联加载中')).not.toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_slow/vps', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
   })
+
 
   it('edits monitoring instance group labels and note from the detail metadata section', async () => {
     const initialRecord = monitoringInstanceRecord({

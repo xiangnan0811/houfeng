@@ -20,8 +20,7 @@ export function TargetsFilterPanel({
   onSingleFilterChange,
 }: TargetsFilterPanelProps) {
   return (
-    <div className="filter-bar">
-      <span className="filter-bar__label">筛选</span>
+    <div className="page-filters">
       <select
         className="filter-select"
         aria-label="类型"

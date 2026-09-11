@@ -163,18 +163,16 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
     : undefined
 
   return (
-    <div className="page-stack record-workspace animate-in">
-      <div className="page-header">
+    <div className="page record-workspace">
+      <header className="page__head">
         <div>
-          <div className="page-eyebrow">RECORDS · MARKDOWN</div>
-          <h1 className="page-title">{state.payload.title || title}</h1>
-          <p className="page-subtitle">人写的运维记录与系统活动分离；正式保存写入新的修订。</p>
-          <p role="status">
+          <h1 className="page__title">{state.payload.title || title}</h1>
+          <p className="page-sub" role="status">
             {state.saving ? '正在保存草稿' : state.dirty ? '本地未同步' : state.draft ? '草稿已同步' : '尚未创建草稿'}
             {state.message ? ` · ${state.message}` : ''}
           </p>
         </div>
-        <div className="page-form-actions">
+        <div className="page__actions">
           {recordId ? <Link className="btn sm secondary" to={`/records/${recordId}`}>阅读</Link> : null}
           {recordId && mode === 'read' && state.record?.capabilities.update ? (
             <Link className="btn sm secondary" to={`/records/${recordId}/edit`}>编辑</Link>
@@ -197,7 +195,7 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
             <Button size="lg" disabled={state.publishing} onClick={() => void commands.restore(restoreReason)}>恢复为新修订</Button>
           ) : null}
         </div>
-      </div>
+      </header>
 
       {editable ? (
         <form className="vps-create-form" onSubmit={(event) => event.preventDefault()}>

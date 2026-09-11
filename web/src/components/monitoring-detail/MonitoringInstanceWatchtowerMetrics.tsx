@@ -433,7 +433,6 @@ export function MonitoringInstanceWatchtowerMetrics({
     <section className="watchtower-metrics-panel" aria-label="主机指标趋势">
       <div className="watchtower-metrics-panel__header">
         <div>
-          <p className="watchtower-metrics-panel__eyebrow">Host Metrics</p>
           <h2>关键资源趋势</h2>
         </div>
         <p>

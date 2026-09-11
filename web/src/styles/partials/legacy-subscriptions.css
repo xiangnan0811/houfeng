@@ -250,7 +250,7 @@
 .input--compact:focus{outline:1px solid var(--accent);border-color:var(--accent)}
 select.input--compact{width:auto;text-align:left;padding-right:18px}
 .input--wide{width:200px;text-align:left}
-.override-textarea{width:100%;font-size:11px;padding:8px;resize:vertical;min-height:120px}
+.override-textarea{width:100%;font-family:var(--font-mono);font-size:var(--type-code-size);text-align:left;padding:var(--space-2);resize:vertical;min-height:120px}
 .settings-tabs{margin-bottom:20px}
 .settings-toggles{display:flex;align-items:center;gap:16px}
 .settings-toggle-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t2);cursor:pointer}

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../lib/apiRequest'
 import * as api from '../lib/api'
@@ -198,7 +198,7 @@ function renderDetail({
   reactStrictMode = false,
   showLocationProbe = false,
 }: {
-  initialEntry?: string
+  initialEntry?: string | { pathname: string; search?: string; state?: unknown }
   nextEntry?: string
   reactStrictMode?: boolean
   showLocationProbe?: boolean
@@ -220,6 +220,13 @@ describe('VPSDetailPage gate', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
+
+  beforeEach(() => {
+    vi.spyOn(api, 'listSubscriptions').mockResolvedValue([])
+    vi.spyOn(api, 'listVPSServices').mockResolvedValue([])
+    vi.spyOn(api, 'listVPSDomains').mockResolvedValue([])
+  })
+
 
   it('reuses one pending capability probe through StrictMode effect replay', async () => {
     const probe = deferredOverview()
@@ -311,10 +318,8 @@ describe('VPSDetailPage gate', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument())
     expect(screen.getByRole('link', { name: '新建记录' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '时间线' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '管理' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '概览' })).toHaveAttribute('aria-current', 'page')
-    expect(screen.queryByText('动作：无')).not.toBeInTheDocument()
     // Gate probe seeds the overview route — no duplicate first-paint fetch.
     expect(get).toHaveBeenCalledTimes(1)
   })
@@ -337,7 +342,8 @@ describe('VPSDetailPage gate', () => {
 
     renderDetail()
 
-    const retry = await screen.findByRole('button', { name: '重试 IP 质量' })
+    const retry = await screen.findByRole('button', { name: '刷新 概览 IP 质量' })
+
     fireEvent.click(retry)
 
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
@@ -346,7 +352,8 @@ describe('VPSDetailPage gate', () => {
     expect(retry).toBeDisabled()
 
     resolveRefresh(overviewFixture())
-    await waitFor(() => expect(screen.queryByRole('button', { name: '重试 IP 质量' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('button', { name: '刷新 概览 IP 质量' })).not.toBeInTheDocument())
+
     expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
   })
 
@@ -368,7 +375,8 @@ describe('VPSDetailPage gate', () => {
 
     renderDetail()
 
-    const retry = await screen.findByRole('button', { name: '重试 IP 质量' })
+    const retry = await screen.findByRole('button', { name: '重试 概览 IP 质量' })
+
     fireEvent.click(retry)
 
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
@@ -379,7 +387,6 @@ describe('VPSDetailPage gate', () => {
 
     await waitFor(() => expect(retry).toBeEnabled())
     expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
-    expect(screen.getByText('IP 质量数据暂不可用，请稍后重试。')).toBeInTheDocument()
     expect(get).toHaveBeenCalledTimes(2)
   })
 
@@ -555,7 +562,7 @@ describe('VPSDetailPage gate', () => {
       const getDetail = vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture())
 
       renderDetail({
-        initialEntry: `/vps/vps_001?workbench=${workbench}`,
+        initialEntry: { pathname: '/vps/vps_001', search: `?workbench=${workbench}`, state: { vpsInventoryHref: '/vps?workspace=workbench&view=unlinked&q=Tokyo&selected=vps_001' } },
         showLocationProbe: true,
       })
 

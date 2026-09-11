@@ -651,32 +651,28 @@ export function ProvidersPage() {
   ]
 
   return (
-    <div className="page-stack provider-directory">
-      <div className="watchtower-header">
-        <div className="watchtower-header__row1">
-          <div className="watchtower-header__title-block">
-            <h1>服务商目录</h1>
-            <div className="badge-row">
-              <span className="badge badge--state tone--normal"><span className="badge__dot" />{state.providers.length} 个服务商</span>
-              <span className="badge badge--state tone--maintenance"><span className="badge__dot" />{multiAccountCount} 个多账号</span>
-              <span className="badge badge--state tone--notice"><span className="badge__dot" />{missingMetadataCount} 个待补事实</span>
-            </div>
-          </div>
-          <div className="watchtower-header__actions">
-            <button className="btn md primary" onClick={openCreate}>
-              <svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" /></svg>
-              新建服务商
-            </button>
+    <div className="page provider-directory">
+      <header className="page__head">
+        <div>
+          <h1 className="page__title">服务商目录</h1>
+          <p className="page-sub">
+            <span>供 VPS 与订阅引用的低频资产事实</span>
+            {' · '}
+            <span>我的评分与外部口碑入口分离</span>
+          </p>
+          <div className="badge-row">
+            <span className="badge badge--state tone--normal"><span className="badge__dot" />{state.providers.length} 个服务商</span>
+            <span className="badge badge--state tone--maintenance"><span className="badge__dot" />{multiAccountCount} 个多账号</span>
+            <span className="badge badge--state tone--notice"><span className="badge__dot" />{missingMetadataCount} 个待补事实</span>
           </div>
         </div>
-        <div className="watchtower-header__row2">
-          <span className="watchtower-header__meta-item">供 VPS 与订阅引用的低频资产事实</span>
-          <span className="watchtower-header__meta-sep">·</span>
-          <span className="watchtower-header__meta-item">我的评分与外部口碑入口分离</span>
-          <span className="watchtower-header__meta-sep">·</span>
-          <span className="watchtower-header__meta-item">不声明外部账号、账单或服务商状态真相</span>
+        <div className="page__actions">
+          <button className="btn md primary" onClick={openCreate}>
+            <svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" /></svg>
+            新建服务商
+          </button>
         </div>
-      </div>
+      </header>
 
       {state.loading ? (
         <PageStateView kind="loading" title="正在加载服务商目录…" surface="empty" compact />
@@ -700,7 +696,7 @@ export function ProvidersPage() {
         />
       ) : (
         <>
-          <div className="provider-directory-summary-rail animate-in" aria-label="服务商目录摘要">
+          <div className="provider-directory-summary-rail" aria-label="服务商目录摘要">
             <span><strong><MonoDigits>{rows.length}</MonoDigits></strong> 服务商</span>
             <span><strong><MonoDigits>{hasAssetsCount == null ? '—' : hasAssetsCount}</MonoDigits></strong> 有资产</span>
             <span><strong><MonoDigits>{multiAccountCount}</MonoDigits></strong> 多账号</span>
@@ -711,10 +707,7 @@ export function ProvidersPage() {
 
           <section className="page-panel provider-directory-panel">
             <div className="section-heading section-heading--inline">
-              <div>
-                <p className="section-heading__eyebrow">Providers</p>
-                <h2 id="provider-directory-table-title" className="section-heading__title">服务商与入口</h2>
-              </div>
+              <h2 id="provider-directory-table-title" className="section-heading__title">服务商与入口</h2>
               <span className="section-heading__meta">{filteredRows.length} / {rows.length} 条</span>
             </div>
 

@@ -119,7 +119,6 @@ export function VPSTimelinePanel({ timeline }: VPSTimelinePanelProps) {
     <section className="page-panel asset-timeline">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">ASSET TIMELINE</p>
           <h2>资产历史</h2>
           <p className="section-heading__description">续费、价格、IP、规格与经验记录作为单台资产判断的 timeline 历史证据。</p>
         </div>

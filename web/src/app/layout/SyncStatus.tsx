@@ -14,9 +14,11 @@ export interface SyncStatusProps {
   generatedAt?: string
 }
 
+const GENERATED_AT_LABEL = '系统摘要生成于'
+
 export function SyncStatus({ state, label, generatedAt }: SyncStatusProps) {
   const accessibleLabel = generatedAt
-    ? `${label}，摘要生成 ${formatDateTime(generatedAt)}`
+    ? `${label}，${GENERATED_AT_LABEL} ${formatDateTime(generatedAt)}`
     : label
 
   return (
@@ -26,7 +28,9 @@ export function SyncStatus({ state, label, generatedAt }: SyncStatusProps) {
         <span className="tp-sync-summary__label">{label}</span>
         {generatedAt ? (
           <span className="tp-sync-summary__meta">
-            摘要生成 <Timestamp value={generatedAt} mode="absolute" />
+            <span className="tp-sync-summary__meta-label">{GENERATED_AT_LABEL}</span>
+            {' '}
+            <Timestamp value={generatedAt} mode="absolute" />
           </span>
         ) : null}
       </span>

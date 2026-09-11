@@ -236,7 +236,7 @@ export function TargetDetailPageBody({
   )
 
   return (
-    <div className="page-stack">
+    <div className="page">
       <TargetWatchtowerHeader
         target={target}
         runtimeSubmitting={runtimeSubmitting}
@@ -289,7 +289,7 @@ export function TargetDetailPageBody({
         <div className="target-observation-workbench">
           <div className="target-observation-workbench__intro">
             <div>
-              <p className="target-observation-workbench__eyebrow">Runtime controls</p>
+              <p className="target-observation-workbench__eyebrow">运行控制</p>
               <h3>运行控制状态：{target.run_status}</h3>
               <p>
                 运行控制在右上角操作菜单中执行；时间窗口切换只刷新 runtime facts，不重载目标身份、ProbeItem 或事件证据。

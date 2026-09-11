@@ -261,7 +261,7 @@ export function MonitoringDetailPageBody({
       : null
 
   return (
-    <div className="page-stack">
+    <div className="page">
       <MonitoringInstanceWatchtowerHeader
         monitoringInstance={monitoringInstance}
         latestSample={sample}

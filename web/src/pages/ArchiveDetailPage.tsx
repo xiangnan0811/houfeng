@@ -56,17 +56,14 @@ function describeError(error: unknown, fallback: string): string {
 
 function SectionCard({
   title,
-  eyebrow,
   children,
 }: {
   title: string
-  eyebrow: string
   children: ReactNode
 }) {
   return (
     <section className="page-panel archive-detail-card" aria-label={title}>
       <div className="archive-detail-card__heading">
-        <p>{eyebrow}</p>
         <h2>{title}</h2>
       </div>
       {children}
@@ -76,17 +73,14 @@ function SectionCard({
 
 function SummaryCard({
   title,
-  eyebrow,
   children,
 }: {
   title: string
-  eyebrow: string
   children: ReactNode
 }) {
   return (
     <section className="archive-detail-summary-card">
       <div className="archive-detail-summary-card__heading">
-        <p>{eyebrow}</p>
         <h2>{title}</h2>
       </div>
       {children}
@@ -150,7 +144,6 @@ function UserRecordsSection({ records }: { records: VPSExperienceLogRecord[] }) 
     <section className="page-panel archive-detail-card archive-detail-user-records" aria-label="用户记录">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">USER RECORDS</p>
           <h2>用户记录</h2>
           <p className="section-heading__description">归档后最重要的回看材料，优先展示自身使用体验、感受和问题判断。</p>
         </div>
@@ -182,7 +175,6 @@ function CompactTimelineSections({ timeline }: { timeline: VPSTimeline }) {
     <section className="page-panel archive-detail-card" aria-label="续费、价格、规格与 IP 历史">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">FACT HISTORY</p>
           <h2>续费、价格、规格与 IP 历史</h2>
           <p className="section-heading__description">这些是辅助判断材料，保留为归档 VPS 的事实变化证据。</p>
         </div>
@@ -408,7 +400,6 @@ function MonitoringHistory({ review }: { review: ArchiveReview }) {
     <section className="page-panel archive-detail-card archive-detail__full-width" aria-label="监控历史">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">MONITORING HISTORY</p>
           <h2>监控历史</h2>
           <p className="section-heading__description">归档前保留在 VPS 台账里的监控实例证据，只读用于服务商质量回看。</p>
         </div>
@@ -453,7 +444,6 @@ function TargetHistory({ targets }: { targets: TargetImpact[] }) {
     <section className="page-panel archive-detail-card archive-detail__full-width" aria-label="Target 历史">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">TARGET HISTORY</p>
           <h2>Target 历史</h2>
           <p className="section-heading__description">来自归档 review 的服务/域名关联图，不依赖普通 Target 列表过滤。</p>
         </div>
@@ -581,32 +571,30 @@ export function ArchiveDetailPage() {
   const isCancelled = vps.lifecycle_status === 'cancelled'
 
   return (
-    <div className="page-stack archive-detail-page animate-in">
-      <header className="watchtower-header archive-detail-header" role="banner" aria-label="归档 VPS 身份">
-        <div className="watchtower-header__row1">
-          <div className="watchtower-header__title-block">
-            <p className="archive-detail-header__eyebrow">只读归档详情</p>
-            <h1>{vps.display_name}</h1>
-            <div className="badge-row">
-              <LifecycleBadge value={vps.lifecycle_status} />
-              <UsageBadge value={vps.usage_status} />
-              <RenewalBadge value={vps.renewal_decision} />
-            </div>
-          </div>
-          <div className="watchtower-header__actions">
-            <Link className="btn sm secondary" to="/archive">归档列表</Link>
-            <Link className="btn sm ghost" to="/vps">VPS 列表</Link>
-            {isArchived ? (
-              <button className="btn sm primary" type="button" onClick={() => setRestoreOpen(true)}>
-                恢复为闲置
-              </button>
-            ) : null}
+    <div className="page archive-detail-page">
+      <header className="page__head" role="banner" aria-label="归档 VPS 身份">
+        <div>
+          <h1 className="page__title">{vps.display_name}</h1>
+          <p className="page-sub">只读归档详情</p>
+          <p className="page-sub">
+            {formatOptional(vps.provider_name)}
+            {' · '}
+            {vpsLocationLabel(vps)}
+          </p>
+          <div className="badge-row">
+            <LifecycleBadge value={vps.lifecycle_status} />
+            <UsageBadge value={vps.usage_status} />
+            <RenewalBadge value={vps.renewal_decision} />
           </div>
         </div>
-        <div className="watchtower-header__row2">
-          <span className="watchtower-header__meta-item">{formatOptional(vps.provider_name)}</span>
-          <span className="watchtower-header__meta-sep" aria-hidden>·</span>
-          <span className="watchtower-header__meta-item">{vpsLocationLabel(vps)}</span>
+        <div className="page__actions">
+          <Link className="btn sm secondary" to="/archive">归档列表</Link>
+          <Link className="btn sm ghost" to="/vps">VPS 列表</Link>
+          {isArchived ? (
+            <button className="btn sm primary" type="button" onClick={() => setRestoreOpen(true)}>
+              恢复为闲置
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -622,7 +610,7 @@ export function ArchiveDetailPage() {
       </section>
 
       <div className="archive-detail-summary-grid">
-        <SummaryCard title="基础信息" eyebrow="IDENTITY">
+        <SummaryCard title="基础信息">
           <DetailList items={[
             { label: '服务商', value: formatOptional(vps.provider_name) },
             { label: '产品', value: formatOptional(vps.product_name) },
@@ -631,7 +619,7 @@ export function ArchiveDetailPage() {
           ]}
           />
         </SummaryCard>
-        <SummaryCard title="访问入口" eyebrow="ACCESS">
+        <SummaryCard title="访问入口">
           <DetailList items={[
             { label: '主入口', value: vpsAccessLabel(vps) },
             { label: 'IPv4', value: formatOptional(vps.ipv4) },
@@ -640,7 +628,7 @@ export function ArchiveDetailPage() {
           ]}
           />
         </SummaryCard>
-        <SummaryCard title="订阅历史" eyebrow="BILLING">
+        <SummaryCard title="订阅历史">
           <DetailList items={[
             { label: '历史次数', value: <MonoDigits>{subscriptions.length}</MonoDigits> },
             { label: '最近状态', value: subscriptions[0] ? <SubscriptionStatusBadge value={subscriptions[0].status} /> : '—' },
@@ -648,24 +636,24 @@ export function ArchiveDetailPage() {
           ]}
           />
         </SummaryCard>
-        <SummaryCard title="月成本" eyebrow="MONTHLY">
+        <SummaryCard title="月成本">
           <strong className="archive-detail-summary-card__metric">{subscriptionMonthlySummary(subscriptions)}</strong>
         </SummaryCard>
-        <SummaryCard title="服务" eyebrow="SERVICES">
+        <SummaryCard title="服务">
           <DetailList items={[
             { label: '服务数量', value: <MonoDigits>{review.services.length}</MonoDigits> },
             { label: '首个服务', value: review.services[0]?.name ?? '—' },
           ]}
           />
         </SummaryCard>
-        <SummaryCard title="域名" eyebrow="DOMAINS">
+        <SummaryCard title="域名">
           <DetailList items={[
             { label: '域名数量', value: <MonoDigits>{review.domains.length}</MonoDigits> },
             { label: '首个域名', value: review.domains[0]?.domain_name ?? '—' },
           ]}
           />
         </SummaryCard>
-        <SummaryCard title="续费判断" eyebrow="DECISION">
+        <SummaryCard title="续费判断">
           <DetailList items={[
             { label: '当前判断', value: lifecycleLabel(vps.lifecycle_status) },
             { label: '续费决策', value: renewalLabel(vps.renewal_decision) },
@@ -673,7 +661,7 @@ export function ArchiveDetailPage() {
           ]}
           />
         </SummaryCard>
-        <SummaryCard title="资产历史" eyebrow="TIMELINE">
+        <SummaryCard title="资产历史">
           <DetailList items={[
             { label: '用户记录', value: <MonoDigits>{timeline.experience_logs.length}</MonoDigits> },
             { label: '续费历史', value: <MonoDigits>{timeline.renewal_decisions.length}</MonoDigits> },
@@ -687,15 +675,15 @@ export function ArchiveDetailPage() {
       <UserRecordsSection records={timeline.experience_logs} />
       <CompactTimelineSections timeline={timeline} />
 
-      <SectionCard title="订阅明细" eyebrow="SUBSCRIPTIONS">
+      <SectionCard title="订阅明细">
         <SubscriptionTable subscriptions={subscriptions} />
       </SectionCard>
 
       <div className="archive-detail-two-col">
-        <SectionCard title="服务资产" eyebrow="SERVICES">
+        <SectionCard title="服务资产">
           <ServicesTable services={review.services} />
         </SectionCard>
-        <SectionCard title="域名资产" eyebrow="DOMAINS">
+        <SectionCard title="域名资产">
           <DomainsTable domains={review.domains} />
         </SectionCard>
       </div>
@@ -711,7 +699,7 @@ export function ArchiveDetailPage() {
         size="md"
       >
         <div className="asset-lifecycle-confirm">
-          <p className="asset-lifecycle-confirm__eyebrow">RESTORE</p>
+          <p className="asset-lifecycle-confirm__eyebrow">恢复</p>
           <h4>恢复后进入闲置状态，关联订阅、监控、服务、域名和历史记录会保留。</h4>
           <p className="asset-lifecycle-confirm__callouts">恢复不会把它还原到归档前的精确生命周期，只会变为闲置。</p>
           {restoreError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{restoreError}</p> : null}

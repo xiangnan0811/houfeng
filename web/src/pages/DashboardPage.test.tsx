@@ -264,7 +264,7 @@ describe('DashboardPage', () => {
       '/asset-decisions?view=needs_decision&renew_within_days=30',
     )
     expect(screen.queryByText('摘要无异常')).not.toBeInTheDocument()
-    expect(screen.getAllByText('资产判断等待核对').length).toBeGreaterThan(1)
+    expect(screen.getByRole('heading', { name: '资产判断等待核对' })).toBeInTheDocument()
   })
 
   it('renders a retryable full-page error only for the dashboard request', async () => {

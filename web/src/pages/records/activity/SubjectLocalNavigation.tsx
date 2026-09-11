@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import type { SubjectActivityView } from '../../../lib/types'
 import {
@@ -25,6 +25,8 @@ export function SubjectLocalNavigation({
   overviewCurrent = false,
   search = '',
 }: Props) {
+  const { state } = useLocation()
+  const navigationState = subject.kind === 'vps' ? state : undefined
   const query = search && search !== '?' ? search : ''
   return (
     <nav className="subject-local-nav" aria-label="主体局部导航">
@@ -34,6 +36,7 @@ export function SubjectLocalNavigation({
             ? 'subject-local-nav__link subject-local-nav__link--active'
             : 'subject-local-nav__link'}
           to={overviewHref}
+          state={navigationState}
           aria-current={overviewCurrent ? 'page' : undefined}
         >
           概览
@@ -49,6 +52,7 @@ export function SubjectLocalNavigation({
               ? 'subject-local-nav__link subject-local-nav__link--active'
               : 'subject-local-nav__link'}
             to={to}
+            state={navigationState}
             aria-current={active ? 'page' : undefined}
           >
             {subjectActivityViewLabel(view)}

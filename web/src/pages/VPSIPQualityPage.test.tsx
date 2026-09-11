@@ -200,7 +200,7 @@ describe('VPSIPQualityPage', () => {
       credentials: 'include',
     })
     expect(screen.getByRole('link', { name: '返回 VPS 详情' })).toHaveAttribute('href', '/vps/vps_001')
-    const headerActions = screen.getByRole('link', { name: '返回 VPS 详情' }).closest('.section-heading__actions')
+    const headerActions = screen.getByRole('link', { name: '返回 VPS 详情' }).closest('.page__actions')
     expect(headerActions).not.toBeNull()
     expect(within(headerActions as HTMLElement).queryByText('高风险')).not.toBeInTheDocument()
     expect(screen.getAllByText('风险信号').length).toBeGreaterThan(0)

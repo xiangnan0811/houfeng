@@ -336,16 +336,14 @@ export function SubscriptionInsights({
   const rankingMax = Math.max(...monthlyRows.map((row) => row.monthly_price_base ?? 0), 0)
 
   return (
-    <section className="subscription-insights animate-in" aria-label="订阅成本洞察">
+    <section className="subscription-insights" aria-label="订阅成本洞察">
       <div className="section-heading">
-        <p className="section-heading__eyebrow">Cost Insights</p>
         <h2 className="section-heading__title">成本洞察</h2>
       </div>
       <div className="subscription-insights__grid">
         <div className="page-panel subscription-insight-panel subscription-insight-panel--month">
           <div className="subscription-panel-header">
             <div>
-              <p className="section-heading__eyebrow">This Month</p>
               <h3 className="section-heading__title">月成本</h3>
             </div>
             <Tabs
@@ -443,7 +441,6 @@ export function SubscriptionInsights({
         <div className="page-panel subscription-insight-panel subscription-insight-panel--trend">
           <div className="subscription-panel-header">
             <div>
-              <p className="section-heading__eyebrow">Year</p>
               <h3 className="section-heading__title">年度趋势与风险</h3>
             </div>
             {statisticsLoading ? <span className="section-heading__meta">加载中</span> : null}
@@ -472,7 +469,6 @@ export function SubscriptionInsights({
         <div className="page-panel subscription-insight-panel subscription-insight-panel--composition">
           <div className="subscription-panel-header">
             <div>
-              <p className="section-heading__eyebrow">Composition</p>
               <h3 className="section-heading__title">成本构成</h3>
             </div>
             <label className="subscription-panel-select">
@@ -515,7 +511,6 @@ export function SubscriptionInsights({
         <div className="page-panel subscription-insight-panel subscription-insight-panel--renewal">
           <div className="subscription-panel-header">
             <div>
-              <p className="section-heading__eyebrow">Renewal Queue</p>
               <h3 className="section-heading__title">续费队列</h3>
             </div>
             <span className="section-heading__meta">{overview?.upcoming_renewals?.length ?? 0} 项</span>

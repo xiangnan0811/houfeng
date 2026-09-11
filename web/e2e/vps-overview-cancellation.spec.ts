@@ -86,7 +86,7 @@ test('setting renewal decision to cancel exposes the cancellation workbench', as
   })
   await page.goto('/vps/vps_001')
 
-  await page.getByRole('button', { name: '管理' }).click()
+  await page.getByRole('button', { name: '管理', exact: true }).click()
   await expect(page.getByRole('menuitem', { name: '取消 / 退役' })).toHaveCount(0)
   await page.getByRole('menuitem', { name: '续费决策' }).click()
 
@@ -96,7 +96,7 @@ test('setting renewal decision to cancel exposes the cancellation workbench', as
   await decisionDialog.getByRole('button', { name: '保存续费决策' }).click()
 
   await expect(page.getByRole('dialog', { name: '续费决策' })).toHaveCount(0)
-  await page.getByRole('button', { name: '管理' }).click()
+  await page.getByRole('button', { name: '管理', exact: true }).click()
   await expect(page.getByRole('menuitem', { name: '取消 / 退役' })).toBeVisible()
   await page.getByRole('menuitem', { name: '取消 / 退役' }).click()
   await expect(page.getByRole('dialog', { name: '取消 / 退役' })).toBeVisible()
@@ -114,7 +114,7 @@ test('active VPS with a cancel renewal decision exposes the cancellation workben
   })
   await page.goto('/vps/vps_001')
 
-  await page.getByRole('button', { name: '管理' }).click()
+  await page.getByRole('button', { name: '管理', exact: true }).click()
   await expect(page.getByRole('menuitem', { name: '取消 / 退役' })).toBeVisible()
   await page.getByRole('menuitem', { name: '取消 / 退役' }).click()
   await expect(page.getByRole('dialog', { name: '取消 / 退役' })).toBeVisible()

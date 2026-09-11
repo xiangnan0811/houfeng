@@ -8,10 +8,6 @@
 
 .archive-detail-page{gap:var(--space-4)}
 
-.archive-detail-header{border-color:color-mix(in srgb,var(--accent) 18%,var(--border))}
-
-.archive-detail-header__eyebrow{margin:0;color:var(--text-muted);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);text-transform:uppercase}
-
 .archive-detail-notice{display:flex;flex-direction:column;gap:var(--space-1);padding:var(--space-3) var(--space-4);border-color:color-mix(in srgb,var(--color-state-notice) 20%,var(--border));background:color-mix(in srgb,var(--color-state-notice) 5%,var(--surface-elevated))}
 
 .archive-detail-notice p{margin:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.45}

@@ -242,15 +242,16 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     pendingFocusRestoreRef.current = null
   }, [pendingRuntimeConfirmation, state.monitoringInstance])
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
       isMountedRef.current = false
-    },
-    [],
-  )
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
+
     getSettings()
       .then((settings) => {
         if (!cancelled) setThresholds(resolveThresholds(settings.incident_defaults))

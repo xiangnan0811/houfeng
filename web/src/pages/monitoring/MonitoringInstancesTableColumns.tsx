@@ -136,7 +136,7 @@ export function buildMonitoringInstancesTableColumns({
     },
     {
       key: 'trends',
-      label: '近 24h',
+      label: 'CPU · 内存 · 磁盘',
       width: 212,
       cellClassName: 'monitoring-table__trends',
       render: (monitoringInstance) => <MonitoringInstancesTrendCell monitoringInstance={monitoringInstance} sparklines={sparklines} thresholds={thresholds} />,

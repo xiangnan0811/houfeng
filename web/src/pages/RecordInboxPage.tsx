@@ -176,17 +176,14 @@ export function RecordInboxPage() {
   }
 
   return (
-    <div className="page-stack record-inbox-page animate-in">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">协作值班 · RECORD INBOX</div>
-          <h1 className="page-title">记录协作收件箱</h1>
-          <p className="page-subtitle">只显示当前授权下的行动与评论送达，不展开记录正文。</p>
+    <div className="page record-inbox-page">
+      <header className="page__head">
+        <h1 className="page__title">记录协作收件箱</h1>
+        <div className="page__actions" aria-label="通知摘要">
+          <span className="text-sm text-muted">可见通知</span>
+          <MonoDigits>{items.length}</MonoDigits>
         </div>
-        <div className="record-inbox-page__summary hero-meta-card" aria-label="通知摘要">
-          <span>可见通知</span><MonoDigits>{items.length}</MonoDigits>
-        </div>
-      </div>
+      </header>
 
       {state === 'loading' ? <PageState kind="loading" title="正在读取记录通知" /> : null}
       {state === 'empty' ? <PageState kind="empty" surface="empty" title="当前没有待处理通知" description="新的行动指派、回复或提及会出现在这里。" /> : null}

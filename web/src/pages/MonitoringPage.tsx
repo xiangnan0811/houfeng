@@ -324,7 +324,6 @@ export function MonitoringPage() {
     return (
       <PageState
         kind="error"
-        eyebrow="监控实例"
         title="监控实例列表不可用"
         description={error}
         technicalSummary={error}
@@ -423,33 +422,32 @@ export function MonitoringPage() {
   })
 
   return (
-    <div className="page-stack animate-in">
+    <div className="page monitoring-page">
       <MonitoringHero
-        totalMonitoringInstanceCount={monitoring.length}
         abnormalMonitoringInstanceCount={abnormalMonitoringInstanceCount}
         pendingOnboardingMonitoringInstanceCount={pendingOnboardingMonitoringInstanceCount}
         maintenanceOrPausedMonitoringInstanceCount={maintenanceOrPausedMonitoringInstanceCount}
-        onAbnormalClick={() => setAbnormalFilter(abnormalMonitoringInstanceCount > 0)}
-        onOnboardingClick={() => setOnboardingFilter(pendingOnboardingMonitoringInstanceCount > 0)}
+        onAbnormalClick={() => setAbnormalFilter(true)}
+        onOnboardingClick={() => setOnboardingFilter(true)}
         onRuntimeAttentionClick={() => applyQuickView('runtime-attention')}
       />
 
-      <div className="animate-in d2">
-        <MonitoringToolbar
-          filterState={filterState}
-          healthOptions={healthOptions}
-          lifecycleOptions={lifecycleOptions}
-          runStatusOptions={runStatusOptions}
-          regionOptions={regionOptions}
-          providerOptions={providerOptions}
-          monitoringInstanceListScope={monitoringInstanceListScope}
-          compareSet={compareSet}
-          onFilterChange={updateSearchParam}
-          onScopeChange={setMonitoringInstanceScope}
-          onAbnormalChange={(checked) => setAbnormalFilter(checked)}
-          onOpenBatchPanel={() => setBatchPanelOpen(true)}
-        />
+      <MonitoringToolbar
+        filterState={filterState}
+        healthOptions={healthOptions}
+        lifecycleOptions={lifecycleOptions}
+        runStatusOptions={runStatusOptions}
+        regionOptions={regionOptions}
+        providerOptions={providerOptions}
+        monitoringInstanceListScope={monitoringInstanceListScope}
+        compareSet={compareSet}
+        onFilterChange={updateSearchParam}
+        onScopeChange={setMonitoringInstanceScope}
+        onAbnormalChange={(checked) => setAbnormalFilter(checked)}
+        onOpenBatchPanel={() => setBatchPanelOpen(true)}
+      />
 
+      <div className="page__work" role="region" aria-label="监控实例清单" tabIndex={0}>
         <MonitoringInstancesListSection
           monitoringInstanceListView={monitoringInstanceListView}
           baseMonitoringInstances={baseMonitoringInstances}

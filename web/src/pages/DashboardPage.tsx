@@ -130,7 +130,7 @@ export function DashboardPage() {
     resources.vps.status === 'loading' || resources.subscription.status === 'loading'
 
   return (
-    <div className="page-stack dashboard-page">
+    <div className="page dashboard-page">
       <DashboardCommandSurface
         model={model}
         supportingLoading={supportingLoading}

@@ -19,7 +19,6 @@ export function ArchiveVPSWorkspace({
     <section className="page-panel archive-page__workspace">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">READ ONLY</p>
           <h2 className="section-heading__title">归档服务器</h2>
           <p className="section-heading__description">只保留已取消、已归档 VPS 的清单入口；单台历史在详情页只读查看。</p>
         </div>

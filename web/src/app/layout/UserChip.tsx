@@ -115,6 +115,16 @@ export function UserChip({ user, onLogout, onChangePassword }: UserChipProps) {
       </button>
       {open && (
         <div id={menuId} className="user-chip__menu" role="menu" aria-labelledby={triggerId}>
+          <div className="user-chip__account-summary" role="none">
+            <div className="user-chip__account-name">{user.display_name || user.username}</div>
+            <div className="user-chip__account-meta">
+              {user.display_name && user.username && user.display_name !== user.username ? (
+                <span className="user-chip__account-username">@{user.username} · </span>
+              ) : null}
+              <span className="user-chip__account-role">{roleLabel}</span>
+            </div>
+          </div>
+          <div className="user-chip__divider" role="separator" />
           <button
             ref={(node) => {
               itemRefs.current[0] = node

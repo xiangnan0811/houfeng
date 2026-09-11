@@ -281,32 +281,6 @@ describe('index.css modernization contracts', () => {
     expect(declaration(rule, 'position')).toBe('relative')
   })
 
-  it('only shows watchtower h1 eyebrow pseudo elements for explicit variants', () => {
-    expect(
-      declaration(
-        requireUniqueRule(indexCss, '.watchtower-header__title-block h1::before'),
-        'display',
-      ),
-    ).toBe('none')
-    expect(
-      declaration(
-        requireUniqueRule(
-          indexCss,
-          '.watchtower-header[aria-label="VPS 身份与操作"] .watchtower-header__title-block h1::before',
-        ),
-        'display',
-      ),
-    ).toBe('block')
-    expect(
-      declaration(
-        requireUniqueRule(
-          indexCss,
-          '.provider-directory .watchtower-header__title-block h1::before',
-        ),
-        'display',
-      ),
-    ).toBe('block')
-  })
 
   it('stacks the login card and footer vertically in both global and route CSS', () => {
     expect(declaration(requireUniqueRule(indexCss, '.login-page'), 'flex-direction')).toBe(

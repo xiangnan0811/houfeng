@@ -57,7 +57,7 @@ export function SubjectActivityWorkspace({ view }: Props) {
 
   if (!route || route.view !== view) {
     return (
-      <div className="page-stack">
+      <div className="page">
         <PageState
           kind="error"
           title="未找到主体活动页"
@@ -69,7 +69,7 @@ export function SubjectActivityWorkspace({ view }: Props) {
 
   const writeFilters = (next: ActivityFilters) => {
     // Filter changes clear the cursor so a watermark from another query is never reused.
-    setSearchParams(subjectActivityParamsFromState(next), { replace: true })
+    setSearchParams(subjectActivityParamsFromState(next), { replace: true, state: route.kind === 'vps' ? location.state : undefined })
   }
 
   const overviewHref = route.kind === 'vps' ? route.basePath : undefined
@@ -85,7 +85,7 @@ export function SubjectActivityWorkspace({ view }: Props) {
     : '投影中还没有与该主体相关的可见事件。'
 
   return (
-    <div className="page-stack subject-activity-page">
+    <div className="page subject-activity-page">
       {state.subject ? (
         <SubjectIdentityBar
           subject={state.subject}
@@ -111,8 +111,8 @@ export function SubjectActivityWorkspace({ view }: Props) {
           )}
         />
       ) : (
-        <header className="subject-identity-bar subject-identity-bar--pending">
-          <h1 className="subject-identity-bar__title">{route.sourceId}</h1>
+        <header className="page__head">
+          <h1 className="page__title">{route.sourceId}</h1>
         </header>
       )}
 
@@ -163,7 +163,7 @@ export function SubjectActivityWorkspace({ view }: Props) {
               type="button"
               size="sm"
               onClick={() => {
-                setSearchParams(subjectActivityParamsFromState(filters), { replace: true })
+                setSearchParams(subjectActivityParamsFromState(filters), { replace: true, state: route.kind === 'vps' ? location.state : undefined })
                 commands.refresh()
               }}
             >

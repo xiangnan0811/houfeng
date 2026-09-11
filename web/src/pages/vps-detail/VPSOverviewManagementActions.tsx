@@ -852,7 +852,7 @@ export function VPSOverviewManagementActions({
         onConfirm={() => void submitArchive()}
       >
         <div className="asset-lifecycle-confirm">
-          <p className="asset-lifecycle-confirm__eyebrow">ARCHIVE REVIEW</p>
+          <p className="asset-lifecycle-confirm__eyebrow">归档审查</p>
           {archiveReviewLoading ? (
             <p className="asset-lifecycle-confirm__callouts" role="status">正在检查归档资格…</p>
           ) : archiveReview?.blockers.length ? (

@@ -63,22 +63,23 @@ describe('buildShellSummaryModel', () => {
   it('keeps loading and initial failure distinct', () => {
     expect(buildShellSummaryModel(INITIAL_DASHBOARD_SUMMARY, NOW)).toMatchObject({
       state: 'loading',
+      label: '正在读取系统摘要',
       showAnomalyCounts: false,
     })
     expect(buildShellSummaryModel({ status: 'error', overview: null, error: '503' }, NOW))
-      .toMatchObject({ state: 'unavailable', showAnomalyCounts: false })
+      .toMatchObject({ state: 'unavailable', label: '系统摘要不可用', showAnomalyCounts: false })
   })
 
   it('derives clear and anomaly from a fresh snapshot', () => {
     expect(buildShellSummaryModel(success(), NOW)).toMatchObject({
       state: 'clear',
-      label: '摘要无异常',
+      label: '系统摘要无异常',
       showAnomalyCounts: true,
     })
     expect(buildShellSummaryModel(success(overview({ abnormal_target_count: 2 })), NOW))
       .toMatchObject({
         state: 'anomaly',
-        label: '摘要有异常',
+        label: '系统摘要有异常',
         showAnomalyCounts: true,
       })
   })
@@ -88,7 +89,7 @@ describe('buildShellSummaryModel', () => {
 
     expect(
       buildShellSummaryModel(success(overview({ snapshot_generated_at: generatedAt })), NOW),
-    ).toMatchObject({ state: 'stale', showAnomalyCounts: false })
+    ).toMatchObject({ state: 'stale', label: '系统摘要已过期', showAnomalyCounts: false })
   })
 
   it('preserves the last generated time but hides counts after refresh failure', () => {
@@ -101,7 +102,7 @@ describe('buildShellSummaryModel', () => {
       ),
     ).toEqual({
       state: 'stale',
-      label: '摘要已过期',
+      label: '系统摘要已过期',
       generatedAt: lastOverview.snapshot_generated_at,
       showAnomalyCounts: false,
     })

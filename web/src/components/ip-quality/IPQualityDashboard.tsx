@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { Badge, type BadgeTone } from '../atoms'
 import { formatDateTime, formatNumber, formatOptional, formatPercent } from '../../lib/format'
@@ -96,6 +96,7 @@ function compactJSON(value: unknown): string {
 }
 
 export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDashboardProps) {
+  const location = useLocation()
   const score = deriveQualityScore(report)
   const reasons = topQualityReasons(report)
   const providerCoveragePct = providerCoverage(report)
@@ -112,24 +113,23 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
   }, 0)
 
   return (
-    <div className="page-stack asset-page vps-ip-quality-dashboard">
-      <section className="page-panel vps-ip-quality-dashboard__hero">
-        <div className="section-heading section-heading--inline">
-          <div>
-            <p className="section-heading__eyebrow">IP Quality</p>
-            <h1 className="section-heading__title">IP 质量驾驶舱</h1>
-            <p className="section-heading__meta">
-              最近采集 {formatDateTime(summary.observed_at)} · Agent {report.latest_report?.agent_version || '—'} · {report.provider_results.length} 个 provider · {report.service_unlocks.length} 个服务
-            </p>
-          </div>
-          <div className="section-heading__actions">
-            <Link className="btn sm secondary" to={detailPath}>返回 VPS 详情</Link>
-          </div>
+    <div className="page vps-ip-quality-dashboard">
+      <header className="page__head">
+        <div>
+          <h1 className="page__title">IP 质量驾驶舱</h1>
+          <p className="page-sub">
+            最近采集 {formatDateTime(summary.observed_at)} · Agent {report.latest_report?.agent_version || '—'} · {report.provider_results.length} 个 provider · {report.service_unlocks.length} 个服务
+          </p>
         </div>
+        <div className="page__actions">
+          <Link className="btn sm secondary" to={detailPath} state={location.state}>返回 VPS 详情</Link>
+        </div>
+      </header>
 
+      <section className="page-panel vps-ip-quality-dashboard__hero">
         <div className="vps-ip-quality-dashboard__lead">
           <div className="vps-ip-quality-dashboard__score">
-            <span>Quality Score</span>
+            <span>质量分</span>
             <strong>{score ?? '—'}</strong>
             <small>{qualityVerdict(score, summary)}</small>
             <div className="vps-ip-quality-dashboard__score-badges">
@@ -175,10 +175,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
 
       <section className="page-panel vps-ip-quality-dashboard__signal-panel">
         <div className="section-heading section-heading--inline">
-          <div>
-            <p className="section-heading__eyebrow">Risk Matrix</p>
-            <h2 className="section-heading__title">风险信号矩阵</h2>
-          </div>
+          <h2 className="section-heading__title">风险信号矩阵</h2>
         </div>
         <div className="vps-ip-quality-dashboard__signal-grid">
           {riskSignalCounts(report.provider_results).map((signal) => (
@@ -193,10 +190,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
 
       <section className="page-panel page-panel--scroll-x vps-ip-quality-dashboard__provider-panel">
         <div className="section-heading section-heading--inline">
-          <div>
-            <p className="section-heading__eyebrow">Provider Evidence</p>
-            <h2 className="section-heading__title">各 IP 数据库判断</h2>
-          </div>
+          <h2 className="section-heading__title">各 IP 数据库判断</h2>
         </div>
         {visibleProviders.length > 0 ? (
           <table className="data-table data-table--compact asset-table vps-ip-quality-dashboard__provider-table">
@@ -276,7 +270,6 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
       <section className="page-panel vps-ip-quality-dashboard__service-panel">
         <div className="section-heading section-heading--inline">
           <div>
-            <p className="section-heading__eyebrow">Service Unlock</p>
             <h2 className="section-heading__title">服务解锁矩阵</h2>
           </div>
           <div className="vps-ip-quality-dashboard__service-stats" aria-label="服务解锁状态统计">
@@ -313,7 +306,6 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
       <section className="page-panel vps-ip-quality-dashboard__context-panel">
         <div className="section-heading section-heading--inline">
           <div>
-            <p className="section-heading__eyebrow">Context And Coverage</p>
             <h2 className="section-heading__title">证据上下文与采集完整性</h2>
           </div>
           <span className="section-heading__meta">基础 IP 信息作为证据上下文，不作为本页主结论。</span>
@@ -349,10 +341,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
 
       <section className="page-panel vps-ip-quality-dashboard__history-panel">
         <div className="section-heading section-heading--inline">
-          <div>
-            <p className="section-heading__eyebrow">Trend</p>
-            <h2 className="section-heading__title">质量变化历史</h2>
-          </div>
+          <h2 className="section-heading__title">质量变化历史</h2>
         </div>
         {report.history.length > 0 ? (
           <div className="vps-ip-quality-dashboard__history">
@@ -361,7 +350,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
                 <span>{formatDateTime(item.observed_at)}</span>
                 <strong>{riskLevelLabel(item.risk_level)}</strong>
                 <small>{item.ip_address} · {item.provider_count} provider · {item.unlockable_count} 解锁</small>
-                {item.report_id ? <Link to={`?report_id=${encodeURIComponent(item.report_id)}`}>查看详情</Link> : null}
+                {item.report_id ? <Link to={`?report_id=${encodeURIComponent(item.report_id)}`} state={location.state}>查看详情</Link> : null}
               </article>
             ))}
           </div>
@@ -373,7 +362,6 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
       <section className="page-panel vps-ip-quality-dashboard__diagnostics-panel">
         <div className="section-heading section-heading--inline">
           <div>
-            <p className="section-heading__eyebrow">Diagnostics</p>
             <h2 className="section-heading__title">诊断与异常</h2>
           </div>
           <span className="section-heading__meta">诊断用于排查采集，不把未知当作受阻或高风险。</span>

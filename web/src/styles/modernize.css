@@ -31,49 +31,6 @@
   color: var(--text-primary);
 }
 
-/* ---------- 3. 路由切换入场动画（统一节奏；尊重减弱动效偏好） ---------- */
-/* 仅作用于页面级 .page-stack，子组件重渲染不会重播，避免抖动。 */
-@keyframes page-enter {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: none; /* 终结态无 transform，不残留 containing block */
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .page-stack {
-    animation: none;
-  }
-}
-
-/* ---------- 4. 监控对比页表头统一（与列表页一致：eyebrow + 渐变标题） ---------- */
-/* 该页用 .compare-command 结构而非标准 .page-header，此前未纳入统一处理。 */
-.compare-command__eyebrow {
-  font-size: var(--type-eyebrow-size);
-  font-weight: var(--type-eyebrow-weight);
-  letter-spacing: var(--type-eyebrow-tracking);
-  text-transform: uppercase;
-  color: var(--accent);
-  margin-bottom: 6px;
-}
-.compare-command h1 {
-  font-family: var(--font-sans);
-  font-size: var(--type-h1-size);
-  font-weight: var(--type-h1-weight);
-  line-height: var(--type-h1-leading);
-  background: linear-gradient(
-    95deg,
-    var(--text-primary) 52%,
-    color-mix(in srgb, var(--accent) 65%, var(--text-primary))
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
 
 /* ---------- 5. 键盘焦点环统一（链接 / 可聚焦控件，提升可访问性一致性） ---------- */
 a:focus-visible,
@@ -199,154 +156,55 @@ summary:focus-visible,
   }
 }
 
-/* ---------- 8. 保存按钮：悬浮药丸按钮，无背景白条 ---------- */
-.settings-system-form {
-  padding-bottom: 100px; /* 为固定保存按钮预留空间，避免遮挡最末内容 */
-}
-.subscription-settings {
-  padding-bottom: 96px; /* 订阅 tab 同样为浮动保存按钮预留空间 */
-}
+/* ---------- 8. 保存条：滚动流末尾，不遮挡字段 ---------- */
 .settings-save-footer {
-  position: fixed;
-  right: 28px;
-  bottom: 28px;
-  z-index: 100;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: var(--border-w) solid var(--panel-border);
   background: transparent;
-  border: none;
-  box-shadow: none;
-  backdrop-filter: none;
 }
 .settings-save-footer > div:first-child {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
 }
 .settings-save-footer__message {
   margin: 0;
-  padding: 8px 14px;
-  border-radius: var(--radius-pill);
   font-size: var(--type-small-size);
   line-height: 1.5;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  box-shadow: var(--shadow-soft);
 }
 .settings-save-footer__message--error {
-  color: color-mix(in srgb, var(--color-state-critical) 74%, var(--text-primary));
-  background: color-mix(in srgb, var(--color-state-critical) 9%, transparent);
-  border-color: color-mix(in srgb, var(--color-state-critical) 36%, transparent);
+  color: var(--color-state-critical);
 }
 .settings-save-footer__message--success {
   color: var(--color-state-normal);
-  background: color-mix(in srgb, var(--color-state-normal) 9%, transparent);
-  border-color: color-mix(in srgb, var(--color-state-normal) 30%, transparent);
 }
 .settings-save-footer__hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 15px;
-  border-radius: var(--radius-pill);
+  margin-right: auto;
+  color: var(--text-secondary);
   font-size: var(--type-small-size);
-  font-weight: 500;
-  color: var(--text-primary);
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  box-shadow: var(--shadow-soft);
-}
-.settings-save-footer__hint::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
-  animation: unsaved-pulse 1.6s var(--ease-calm, ease) infinite;
-}
-@keyframes unsaved-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-.settings-save-footer .btn {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: var(--radius-pill);
-  padding: 12px 26px;
-  font-size: 14px;
-  font-weight: 600;
-  color: #fff;
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
-  border: 1px solid color-mix(in srgb, var(--accent-strong) 65%, #000 25%);
-  box-shadow: 0 12px 26px -8px color-mix(in srgb, var(--accent) 55%, transparent), var(--shadow-lg);
-  transition: transform var(--dur-state, 0.15s) var(--ease-out, ease), box-shadow var(--dur-state, 0.15s) var(--ease-out, ease);
-}
-.settings-save-footer .btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 18px 34px -10px color-mix(in srgb, var(--accent) 60%, transparent), var(--shadow-lg);
-}
-.settings-save-footer .btn:active:not(:disabled) {
-  transform: translateY(0);
-}
-.settings-save-footer .btn:disabled {
-  opacity: 0.65;
-  cursor: progress;
-}
-.settings-save-footer .btn svg {
-  width: 16px;
-  height: 16px;
-  flex: 0 0 auto;
-}
-
-@media (max-width: 700px) {
-  .settings-save-footer {
-    right: 12px;
-    left: 12px;
-    bottom: 12px;
-    justify-content: flex-end;
-  }
-  .settings-save-footer .btn {
-    flex: 1 1 auto;
-  }
 }
 
 /* ---------- 9. 开关重设计：一眼可见 + 明确开/关状态 ---------- */
 .toggle {
-  width: 52px;
-  height: 28px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  border: 1.5px solid var(--border-strong);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+  width: 36px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: var(--border-w) solid var(--border-strong);
+  box-shadow: none;
   position: relative;
   flex: 0 0 auto;
   padding: 0;
   cursor: pointer;
-  transition: background var(--dur-state, 0.18s) var(--ease-calm, ease), border-color var(--dur-state, 0.18s) var(--ease-calm, ease);
+  transition: background-color var(--dur-micro) var(--ease-calm), border-color var(--dur-micro) var(--ease-calm);
 }
-/* index.css 的 .toggle::after 白色圆点残留已在拆分时彻底移除，此处无需再中和 */
 .toggle::after {
-  content: 'OFF';
-  position: absolute;
-  right: 9px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: auto;
-  height: auto;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  color: var(--text-secondary);
-  pointer-events: none;
+  content: none;
 }
 .toggle.is-on {
   background: var(--accent);
@@ -354,26 +212,23 @@ summary:focus-visible,
   box-shadow: none;
 }
 .toggle.is-on::after {
-  content: 'ON';
-  right: auto;
-  left: 10px;
-  color: #fff;
+  content: none;
 }
 .toggle__thumb {
   position: absolute;
   top: 50%;
-  left: 3px;
+  left: 2px;
   transform: translateY(-50%);
-  width: 22px;
-  height: 22px;
-  background: #fff;
+  width: 14px;
+  height: 14px;
+  background: var(--text-primary);
   border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-  transition: transform var(--dur-state, 0.18s) var(--ease-out, ease);
+  box-shadow: none;
+  transition: transform var(--dur-micro) var(--ease-calm), background-color var(--dur-micro) var(--ease-calm);
 }
 .toggle.is-on .toggle__thumb {
-  transform: translate(24px, -50%);
-  background: #fff;
+  transform: translate(16px, -50%);
+  background: var(--bg);
 }
 .toggle:disabled {
   opacity: 0.5;
@@ -389,6 +244,7 @@ summary:focus-visible,
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+  flex: 0 1 auto;
 }
 
 .topbar .tp-sync-summary__copy {
@@ -402,12 +258,20 @@ summary:focus-visible,
   color: var(--text-secondary);
   font-size: var(--type-small-size);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .topbar .tp-sync-summary__meta {
   color: var(--text-muted);
   font-size: var(--type-eyebrow-size);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar .tp-sync--loading {
+  background: var(--text-muted);
 }
 
 .topbar .tp-sync--clear {

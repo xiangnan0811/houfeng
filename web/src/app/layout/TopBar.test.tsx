@@ -1,17 +1,17 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, type InitialEntry } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ThemeProvider } from '../../lib/theme-context'
 import { invalidateRecordNotificationUnreadCount } from '../../lib/recordInboxUnreadApi'
 import { TopBar } from './TopBar'
 
-const sync = { state: 'clear' as const, label: '摘要无异常' }
+const sync = { state: 'clear' as const, label: '系统摘要无异常' }
 const user = { user_id: 'u1', username: 'admin', role: 'admin', display_name: '' }
 
-function renderTopBar(path = '/') {
+function renderTopBar(entry: InitialEntry = '/') {
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={[entry]}>
       <ThemeProvider>
         <TopBar sync={sync} user={user} />
       </ThemeProvider>
@@ -148,4 +148,56 @@ describe('TopBar theme menu', () => {
     fireEvent.mouseDown(document.body)
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
+})
+
+describe('TopBar VPS breadcrumb', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ unread_count: 0 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    localStorage.clear()
+    document.documentElement.className = ''
+  })
+
+  it('keeps the inventory title without a return link', () => {
+    renderTopBar('/vps')
+    expect(screen.getByText('VPS 资产')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '返回 VPS 列表' })).not.toBeInTheDocument()
+  })
+
+  it('renders one inventory return link with the current route label', () => {
+    renderTopBar({
+      pathname: '/vps/vps_001',
+      state: { vpsInventoryHref: '/vps?workspace=workbench&view=unlinked&q=Tokyo&selected=vps_001' },
+    })
+
+    const returnLink = screen.getByRole('link', { name: '返回 VPS 列表' })
+    expect(returnLink).toHaveTextContent('VPS 资产')
+    expect(returnLink).toHaveAttribute('href', '/vps?workspace=workbench&view=unlinked&q=Tokyo&selected=vps_001')
+    expect(screen.getByText('VPS 详情')).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: '返回 VPS 列表' })).toHaveLength(1)
+  })
+
+  it('keeps sibling route labels next to the same inventory return link', () => {
+    renderTopBar({
+      pathname: '/vps/vps_001/ip-quality',
+      state: { vpsInventoryHref: '/vps?workspace=ledger' },
+    })
+    expect(screen.getByRole('link', { name: '返回 VPS 列表' })).toHaveAttribute('href', '/vps?workspace=ledger')
+    expect(screen.getByText('IP 质量')).toBeInTheDocument()
+    expect(screen.queryByText('VPS 详情')).not.toBeInTheDocument()
+  })
+
+  it.each(['https://example.invalid/vps', '/settings', '/vps/vps_001', '/vps#frag'])(
+    'falls back to /vps when location state is not an inventory href: %s',
+    (vpsInventoryHref) => {
+      renderTopBar({ pathname: '/vps/vps_001', state: { vpsInventoryHref } })
+      expect(screen.getByRole('link', { name: '返回 VPS 列表' })).toHaveAttribute('href', '/vps')
+    },
+  )
 })

@@ -154,7 +154,7 @@ describe('MonitoringComparePage', () => {
 
     await waitFor(() => expect(screen.getByRole('link', { name: 'Tokyo Edge' })).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: '判断两个监控实例是否需要深入排查' })).toBeInTheDocument()
-    expect(screen.getByText('监控实例对比 · 24h runtime facts')).toBeInTheDocument()
+    expect(screen.getByText('监控实例对比 · 24 小时运行事实')).toBeInTheDocument()
     expect(screen.getByText('先对齐 A/B 的身份、健康、运行态、绑定态、位置与样本可用性；只有差异明显时再下钻详细主机指标。')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'A/B 摘要判断' })).toBeInTheDocument()
     expect(screen.getByText('默认先看状态与样本是否可比；详细图表保留在下方。')).toBeInTheDocument()
@@ -172,7 +172,7 @@ describe('MonitoringComparePage', () => {
     expect(screen.getByText('有样本')).toBeInTheDocument()
     expect(screen.getByText('无样本')).toBeInTheDocument()
     expect(screen.getByText(/窗口样本/)).toBeInTheDocument()
-    expect(screen.getByText('24h runtime facts 暂无 HostSample')).toBeInTheDocument()
+    expect(screen.getByText('24 小时运行事实暂无主机样本')).toBeInTheDocument()
     expect(screen.getByText('详细趋势仍使用 MonitoringInstanceWatchtowerMetrics')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'CPU 使用率' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '尚未收到主机样本' })).toBeInTheDocument()

@@ -93,7 +93,7 @@ function ReadyRecordActionPanel({ state, actions, members, busy, onCreate, onUpd
   return (
     <section className="record-collaboration-panel record-action-panel card" aria-labelledby="record-actions-title">
       <header className="record-collaboration-panel__header section-heading">
-        <div><p className="record-collaboration-panel__eyebrow section-heading__eyebrow">ACTION QUEUE</p><h2 className="section-heading__title" id="record-actions-title">行动队列</h2></div>
+        <div><h2 className="section-heading__title" id="record-actions-title">行动队列</h2></div>
         <span className="record-collaboration-panel__count badge badge--count">{actions.length}</span>
       </header>
       {state === 'empty' || actions.length === 0

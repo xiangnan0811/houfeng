@@ -22,7 +22,11 @@ function glyphState(tone: DashboardTone) {
 function signalLabel(model: DashboardReadyModel): string {
   if (model.mode === 'stable' && model.degradations.length > 0) return '局部数据不可用'
   if (model.mode === 'onboarding') return '待接入'
+  if (model.mode === 'critical') return '严重'
+  if (model.mode === 'abnormal') return '异常'
+  if (model.mode === 'maintenance') return '维护'
   if (model.mode === 'stable' && model.tone === 'normal') return '摘要无异常'
+  if (model.mode === 'stable') return '待核对'
   return model.title
 }
 
@@ -67,38 +71,25 @@ export function DashboardCommandSurface({
               摘要生成 <Timestamp value={model.snapshotGeneratedAt} mode="absolute" />
             </span>
           </div>
-          <p className="dashboard-decision-surface__eyebrow">日常入口</p>
           <h1>工作台</h1>
           <h2>{model.title}</h2>
-          <p className="dashboard-decision-surface__summary">{model.summary}</p>
         </div>
 
         <section
           className={`dashboard-primary-action dashboard-primary-action--${model.tone}`}
-          aria-labelledby="dashboard-primary-action-title"
+          aria-label="今日第一步"
         >
-          <h2 id="dashboard-primary-action-title">今日第一步</h2>
-          <p>{model.title}</p>
           <Link className="btn md primary" to={model.primaryAction.to}>
             {model.primaryAction.label}
           </Link>
         </section>
       </header>
 
-      <section
-        className="dashboard-judgement-rail"
-        aria-label="判断摘要"
-      >
-        {model.judgements.map((item) => (
-          <JudgementItem item={item} key={item.id} />
-        ))}
-      </section>
-
       {onRetrySupporting ? (
         <div className="dashboard-degradation" role="status" aria-label="局部数据不可用">
           <div>
             <strong>局部数据不可用</strong>
-            <span>已保留成功的 Dashboard 摘要，不会把失败表示成真实空数据。</span>
+            <span>已成功的摘要仍保留，失败的部分不会显示成空库存。</span>
           </div>
           <button
             type="button"
@@ -111,13 +102,37 @@ export function DashboardCommandSurface({
         </div>
       ) : null}
 
+      {observation.attentionItems.length > 0 ? (
+        <ul className="dashboard-attention-list" aria-label="最高优先级异常对象">
+          {observation.attentionItems.map((item) => (
+            <li key={`${item.kind}-${item.id}`}>
+              <Link
+                className={`dashboard-attention-link dashboard-attention-link--${item.tone}`}
+                to={item.to}
+                aria-label={`${item.name}：${item.detail}`}
+              >
+                <StatusGlyph state={glyphState(item.tone)} size="sm" />
+                <span className="dashboard-attention-link__copy">
+                  <strong>{item.name}</strong>
+                  <span>{item.detail}</span>
+                </span>
+                <span className="dashboard-attention-link__meta">{item.meta}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <section className="dashboard-judgement-rail" aria-label="判断摘要">
+        {model.judgements.map((item) => (
+          <JudgementItem item={item} key={item.id} />
+        ))}
+      </section>
+
       <div className="dashboard-evidence-grid">
         <section className="dashboard-evidence-lane" aria-labelledby="dashboard-observation-title">
           <div className="dashboard-evidence-lane__header">
-            <div>
-              <p>当前事实</p>
-              <h2 id="dashboard-observation-title">观测证据</h2>
-            </div>
+            <h2 id="dashboard-observation-title">观测证据</h2>
             <Link className="text-link" to={DASHBOARD_LINKS.events24h}>查看事件流</Link>
           </div>
           <div className="dashboard-evidence-metrics">
@@ -134,38 +149,16 @@ export function DashboardCommandSurface({
               维护对象 <MonoDigits>{observation.maintenanceTotal}</MonoDigits>
             </span>
           </div>
-          {observation.attentionItems.length > 0 ? (
-            <ul className="dashboard-attention-list" aria-label="最高优先级异常对象">
-              {observation.attentionItems.map((item) => (
-                <li key={`${item.kind}-${item.id}`}>
-                  <Link
-                    className={`dashboard-attention-link dashboard-attention-link--${item.tone}`}
-                    to={item.to}
-                    aria-label={`${item.name}：${item.detail}`}
-                  >
-                    <StatusGlyph state={glyphState(item.tone)} size="sm" />
-                    <span className="dashboard-attention-link__copy">
-                      <strong>{item.name}</strong>
-                      <span>{item.detail}</span>
-                    </span>
-                    <span className="dashboard-attention-link__meta">{item.meta}</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          ) : (
+          {observation.attentionItems.length === 0 ? (
             <p className="dashboard-evidence-lane__empty">
               {model.mode === 'onboarding' ? '尚未建立观测对象。' : '当前摘要没有异常对象。'}
             </p>
-          )}
+          ) : null}
         </section>
 
         <section className="dashboard-evidence-lane" aria-labelledby="dashboard-assets-title">
           <div className="dashboard-evidence-lane__header">
-            <div>
-              <p>来源与精度</p>
-              <h2 id="dashboard-assets-title">资产与账单证据</h2>
-            </div>
+            <h2 id="dashboard-assets-title">资产与账单证据</h2>
             <Link className="text-link" to={DASHBOARD_LINKS.assetDecisionsNeedsDecision}>
               进入资产决策
             </Link>
@@ -174,7 +167,7 @@ export function DashboardCommandSurface({
             <article className={`dashboard-source dashboard-source--${model.assetEvidence.status}`}>
               <div className="dashboard-source__header">
                 <h3>{model.assetEvidence.title}</h3>
-                <span>来源：VPS 清单</span>
+                <span>VPS 清单</span>
               </div>
               <p>{model.assetEvidence.detail}</p>
               {model.assetEvidence.loadedAt ? (
@@ -185,7 +178,7 @@ export function DashboardCommandSurface({
               <div className="dashboard-source__header">
                 <h3>{billingUnavailable ? '订阅摘要不可用' : model.billingEvidence.title}</h3>
                 <span>
-                  来源：{model.billingEvidence.source === 'subscription-overview'
+                  {model.billingEvidence.source === 'subscription-overview'
                     ? '订阅摘要'
                     : 'Dashboard 聚合摘要'}
                 </span>

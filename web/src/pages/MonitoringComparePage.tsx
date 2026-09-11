@@ -86,7 +86,7 @@ export function MonitoringComparePage() {
   }
 
   return (
-    <div className="page-stack">
+    <div className="page">
       <CompareCommandPanel stateA={monitoringInstanceA} stateB={monitoringInstanceB} />
 
       <div className="compare-identity">
@@ -97,7 +97,6 @@ export function MonitoringComparePage() {
       <CompareSummaryStrip stateA={monitoringInstanceA} stateB={monitoringInstanceB} />
 
       <DetailSection
-        eyebrow="24h runtime facts"
         title="主机指标对比"
         aside="详细趋势仍使用 MonitoringInstanceWatchtowerMetrics"
       >
@@ -157,22 +156,24 @@ function monitoringInstanceContext(monitoringInstance: MonitoringInstanceRecord)
 
 function CompareCommandPanel({ stateA, stateB }: { stateA: MonitoringInstanceState; stateB: MonitoringInstanceState }) {
   return (
-    <section className="compare-command" aria-labelledby="monitoringInstance-compare-title">
-      <div className="compare-command__intro">
-        <p className="compare-command__eyebrow">监控实例对比 · 24h runtime facts</p>
-        <h1 id="monitoringInstance-compare-title">判断两个监控实例是否需要深入排查</h1>
-        <p>
-          先对齐 A/B 的身份、健康、运行态、绑定态、位置与样本可用性；只有差异明显时再下钻详细主机指标。
-        </p>
-      </div>
-      <div className="compare-command__aside">
-        <div className="compare-command__selection" aria-label="当前对比对象">
-          <CompareCommandPeer state={stateA} side="left" />
-          <CompareCommandPeer state={stateB} side="right" />
+    <>
+      <header className="page__head" aria-labelledby="monitoringInstance-compare-title">
+        <div>
+          <h1 id="monitoringInstance-compare-title" className="page__title">判断两个监控实例是否需要深入排查</h1>
+          <p className="page-sub">监控实例对比 · 24 小时运行事实</p>
+          <p className="page-sub">
+            先对齐 A/B 的身份、健康、运行态、绑定态、位置与样本可用性；只有差异明显时再下钻详细主机指标。
+          </p>
         </div>
-        <Link className="btn md ghost" to="/monitoring">返回监控实例列表</Link>
+        <div className="page__actions">
+          <Link className="btn md ghost" to="/monitoring">返回监控实例列表</Link>
+        </div>
+      </header>
+      <div className="compare-command__selection" aria-label="当前对比对象">
+        <CompareCommandPeer state={stateA} side="left" />
+        <CompareCommandPeer state={stateB} side="right" />
       </div>
-    </section>
+    </>
   )
 }
 
@@ -221,7 +222,6 @@ function CompareSummaryStrip({ stateA, stateB }: { stateA: MonitoringInstanceSta
     <section className="compare-summary-strip" aria-labelledby="compare-summary-title">
       <header className="compare-summary-strip__header">
         <div>
-          <p className="compare-summary-strip__eyebrow">Compare Summary</p>
           <h2 id="compare-summary-title">A/B 摘要判断</h2>
         </div>
         <p>默认先看状态与样本是否可比；详细图表保留在下方。</p>
@@ -241,7 +241,7 @@ function CompareSummaryCard({ state, side }: { state: MonitoringInstanceState; s
       <PageState
         kind="loading"
         title={`${label} 摘要读取中`}
-        description="正在建立 24h runtime facts 摘要。"
+        description="正在建立 24 小时运行事实摘要。"
         surface="empty"
         compact
         className="compare-summary-card compare-summary-card--state"
@@ -315,7 +315,7 @@ function CompareSummaryCard({ state, side }: { state: MonitoringInstanceState; s
                 <Timestamp value={sample.observed_at} mode="absolute" />
               </span>
             ) : (
-              <span className="compare-summary-row__detail">24h runtime facts 暂无 HostSample</span>
+              <span className="compare-summary-row__detail">24 小时运行事实暂无主机样本</span>
             )}
           </dd>
         </div>

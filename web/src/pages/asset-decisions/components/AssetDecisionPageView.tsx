@@ -31,17 +31,14 @@ export function AssetDecisionPageView({
   recordModal,
 }: AssetDecisionPageViewProps) {
   return (
-    <div className="animate-in asset-decision-workbench">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">决策台 · DECISIONS</div>
-          <h1 className="page-title">资产组合决策</h1>
+    <div className="page asset-decision-workbench">
+      <header className="page__head">
+        <h1 className="page__title">资产组合决策</h1>
+        <div className="page__actions">
+          <Link className="btn sm secondary" to="/vps">VPS 库存</Link>
+          <Link className="btn sm secondary" to="/subscriptions">订阅列表</Link>
         </div>
-        <div className="header-actions">
-          <Link className="btn md secondary" to="/vps">VPS 库存</Link>
-          <Link className="btn md secondary" to="/subscriptions">订阅列表</Link>
-        </div>
-      </div>
+      </header>
 
       {decisionNotice && <div className="inline-alert ok" role="status">{decisionNotice}</div>}
       <PortfolioWorkbench {...portfolio} />

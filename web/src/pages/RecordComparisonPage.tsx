@@ -53,14 +53,10 @@ export function RecordComparisonPage() {
   const showSeries = Boolean(activeKind?.startsWith('monitoring.host') || activeKind?.startsWith('monitoring.probe'))
 
   return (
-    <div className="page-stack">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">运维知识 · COMPARE</div>
-          <h1 className="page-title">横向比较工作台</h1>
-          <p className="page-sub">先确认不可变选择与可比性，再看差异。人工结论与系统结果分开另存。</p>
-        </div>
-      </div>
+    <div className="page">
+      <header className="page__head">
+        <h1 className="page__title">横向比较工作台</h1>
+      </header>
 
       {!state.query.ok ? (
         <PageState

@@ -1,0 +1,28 @@
+{
+  "id": "operator-ui-rebuild",
+  "name": "operator-ui-rebuild",
+  "title": "Rebuild Houfeng operator UI as a night observatory",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "web",
+  "package": null,
+  "priority": "P2",
+  "creator": "xiangnan-arch",
+  "assignee": "xiangnan-arch",
+  "createdAt": "2026-09-08",
+  "completedAt": null,
+  "branch": "feat/operator-ui-observatory",
+  "base_branch": "main",
+  "worktree_path": ".worktree/operator-ui-rebuild",
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "2026-09-11 local checkpoint: continue on feat/operator-ui-observatory in .worktree/operator-ui-rebuild; do not start another main-checkout edit stream. User accepts workbench, VPS list and VPS detail excluding modals as the current visual baseline, not whole-site completion. Other pages, modals and final release gates remain pending. Main-checkout fragments are semantically superseded and archived as stash fd1eda668d0ae35771af771715225e702fb8a0f1, not merged verbatim. Entry JS exceeds its unchanged budget by 925 bytes; existing CSS-budget increases versus main are preserved but are not release approval. See implement.md checkpoint section for validation and continuation boundaries.",
+  "meta": {
+    "description": "Rebuild the operator SPA as a night observatory: lampblack, celadon, iron-red, table-first daily path."
+  }
+}

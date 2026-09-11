@@ -6,10 +6,10 @@ type VPSDetailMissingIDProps = {
 
 export function VPSDetailMissingID({ onBack }: VPSDetailMissingIDProps) {
   return (
-    <div className="page-stack asset-page vps-detail-page">
+    <div className="page asset-page vps-detail-page vps-detail-workspace">
       <section className="page-panel page-panel--inline">
         <div>
-          <div className="page-panel__eyebrow">VPS DETAIL</div>
+          <div className="page-panel__eyebrow">VPS 详情</div>
           <h1 className="page-panel__title">VPS 详情不可用</h1>
           <p className="page-panel__description">缺少 VPS ID</p>
         </div>

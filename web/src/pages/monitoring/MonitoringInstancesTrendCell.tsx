@@ -35,7 +35,7 @@ export function MonitoringInstancesTrendCell({ monitoringInstance, sparklines, t
 
   return (
     <span className="monitoring-table__trend-strip">
-      <span className="monitoring-table__trend-item">
+      <span className="monitoring-table__trend-item" title="CPU" aria-label={`CPU ${formatPercent(latestCpu)}`}>
         <span className="monitoring-table__trend-value">
           {latestCpu != null ? <MonoDigits>{formatPercent(latestCpu)}</MonoDigits> : '—'}
         </span>
@@ -45,7 +45,7 @@ export function MonitoringInstancesTrendCell({ monitoringInstance, sparklines, t
           <span className="monitoring-table__trends-empty">—</span>
         )}
       </span>
-      <span className="monitoring-table__trend-item">
+      <span className="monitoring-table__trend-item" title="内存" aria-label={`内存 ${formatPercent(latestMem)}`}>
         <span className="monitoring-table__trend-value">
           {latestMem != null ? <MonoDigits>{formatPercent(latestMem)}</MonoDigits> : '—'}
         </span>
@@ -55,7 +55,7 @@ export function MonitoringInstancesTrendCell({ monitoringInstance, sparklines, t
           <span className="monitoring-table__trends-empty">—</span>
         )}
       </span>
-      <span className="monitoring-table__trend-item">
+      <span className="monitoring-table__trend-item" title="磁盘" aria-label={`磁盘 ${formatPercent(latestDisk)}`}>
         <span className="monitoring-table__trend-value">
           {latestDisk != null ? <MonoDigits>{formatPercent(latestDisk)}</MonoDigits> : '—'}
         </span>

@@ -24,7 +24,7 @@ export function RecordWatchControl({ state, watch, busy, onChange }: RecordWatch
   return (
     <section className="record-collaboration-panel record-watch-control card" aria-labelledby="record-watch-title">
       <header className="record-collaboration-panel__header section-heading">
-        <div><p className="record-collaboration-panel__eyebrow section-heading__eyebrow">WATCH POLICY</p><h2 className="section-heading__title" id="record-watch-title">关注策略</h2></div>
+        <div><h2 className="section-heading__title" id="record-watch-title">关注策略</h2></div>
         <span className="record-collaboration-panel__signal badge badge--info">v{watch.version}</span>
       </header>
       <p className="record-watch-control__sources">

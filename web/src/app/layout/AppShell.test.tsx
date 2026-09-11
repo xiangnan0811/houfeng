@@ -297,7 +297,7 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--anomaly')
-      expect(syncEl).toHaveAttribute('title', '摘要有异常')
+      expect(syncEl).toHaveAttribute('title', '系统摘要有异常')
     })
   })
 
@@ -318,7 +318,7 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--anomaly')
-      expect(syncEl).toHaveAttribute('title', '摘要有异常')
+      expect(syncEl).toHaveAttribute('title', '系统摘要有异常')
     })
   })
 
@@ -364,7 +364,7 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--anomaly')
-      expect(syncEl).toHaveAttribute('title', '摘要有异常')
+      expect(syncEl).toHaveAttribute('title', '系统摘要有异常')
     })
     unmount()
 
@@ -394,7 +394,7 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--anomaly')
-      expect(syncEl).toHaveAttribute('title', '摘要有异常')
+      expect(syncEl).toHaveAttribute('title', '系统摘要有异常')
     })
   })
 
@@ -411,10 +411,10 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--clear')
-      expect(syncEl).toHaveAttribute('title', '摘要无异常')
+      expect(syncEl).toHaveAttribute('title', '系统摘要无异常')
     })
-    expect(screen.getByText('摘要无异常')).toBeInTheDocument()
-    expect(screen.getByText(/摘要生成/)).toBeInTheDocument()
+    expect(screen.getByText('系统摘要无异常')).toBeInTheDocument()
+    expect(screen.getByText(/系统摘要生成于/)).toBeInTheDocument()
     expect(document.querySelector('.layout')).not.toHaveTextContent('系统正常')
   })
 
@@ -438,7 +438,7 @@ describe('AppShell', () => {
 
     const syncEl = document.querySelector('.tp-sync')
     expect(syncEl).toHaveClass('tp-sync--stale')
-    expect(syncEl).toHaveAttribute('title', '摘要已过期')
+    expect(syncEl).toHaveAttribute('title', '系统摘要已过期')
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
   })
 
@@ -507,9 +507,9 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--stale')
-      expect(syncEl).toHaveAttribute('title', '摘要已过期')
+      expect(syncEl).toHaveAttribute('title', '系统摘要已过期')
     })
-    expect(screen.getByText(/摘要生成/)).toBeInTheDocument()
+    expect(screen.getByText(/系统摘要生成于/)).toBeInTheDocument()
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
   })
 
@@ -523,7 +523,7 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--unavailable')
-      expect(syncEl).toHaveAttribute('title', '摘要不可用')
+      expect(syncEl).toHaveAttribute('title', '系统摘要不可用')
     })
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
   })

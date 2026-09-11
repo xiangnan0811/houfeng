@@ -176,7 +176,7 @@ function openSubscriptionDrawer() {
 }
 
 function openLegacyActionDrawer(commandName: string, dialogName: string) {
-  const summary = screen.getAllByLabelText('VPS 详情操作')[0]
+  const summary = screen.getAllByLabelText(/^VPS 详情操作/)[0]
   const menu = summary?.closest('details')
   if (!summary || !menu) throw new Error('legacy VPS actions menu must be present')
   if (!menu.hasAttribute('open')) fireEvent.click(summary)
@@ -624,7 +624,7 @@ describe('VPSDetailPage legacy write ownership', () => {
     })
     await screen.findByRole('heading', { name: 'Tokyo Edge A converged' })
     await waitFor(() => expect(aDetailGets).toBe(3))
-    expect(screen.getAllByText('1 个服务').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Settled A Service').length).toBeGreaterThan(0)
     expect(screen.queryByText('缺少当前订阅')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '处理取消/退役' })).toBeInTheDocument()
     expect(screen.queryByText('订阅账单事实已创建')).not.toBeInTheDocument()

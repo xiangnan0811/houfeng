@@ -1,5 +1,6 @@
-import { Fragment } from 'react'
-import { isInteractiveRowTarget, type DataTableColumn, type DataTableSortState } from '../../components/atoms'
+import { Fragment, useMemo } from 'react'
+import { ColumnResizeHandle, isInteractiveRowTarget, type DataTableColumn, type DataTableSortState } from '../../components/atoms'
+import { useColumnWidths } from '../../lib/useColumnWidths'
 import { PageState } from '../../components/PageState'
 import type { MonitoringInstanceRecord } from '../../lib/types'
 import { MonitoringInstancesBatchPanel } from './MonitoringInstancesBatchPanel'
@@ -77,6 +78,11 @@ export function MonitoringInstancesListSection({
   const visibleColumns = showTrends
     ? columns
     : columns.filter((column) => column.key !== 'trends')
+  const defaultWidths = useMemo(
+    () => visibleColumns.map((column) => (typeof column.width === 'number' ? column.width : 120)),
+    [visibleColumns],
+  )
+  const { widths, startResize } = useColumnWidths('monitoring-list', defaultWidths)
 
   return (
     <>
@@ -139,19 +145,18 @@ export function MonitoringInstancesListSection({
           }
         />
       ) : (
-        <div className="page-panel page-panel--scroll-x monitoring-table-panel">
-          <table className="table animate-in d2 monitoring-table" role="table">
+        <table className="table table--resizable monitoring-table" role="table">
             <colgroup>
-              {visibleColumns.map((col) => (
+              {visibleColumns.map((col, index) => (
                 <col
                   key={col.key}
-                  width={col.width || undefined}
+                  width={widths[index] ?? col.width ?? undefined}
                 />
               ))}
             </colgroup>
             <thead>
               <tr role="row">
-                {visibleColumns.map((col) => {
+                {visibleColumns.map((col, index) => {
                   const isSortable = col.sortable && onSortChange
                   const sortKey = col.sortKey ?? col.key
                   const isActive = sortState?.key === sortKey
@@ -177,6 +182,7 @@ export function MonitoringInstancesListSection({
                       ) : (
                         col.label
                       )}
+                      <ColumnResizeHandle onDragStart={(clientX) => startResize(index, clientX)} />
                     </th>
                   )
                 })}
@@ -215,7 +221,6 @@ export function MonitoringInstancesListSection({
               ))}
             </tbody>
           </table>
-        </div>
       )}
 
     </>

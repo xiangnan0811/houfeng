@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+
 import { useState } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -20,7 +21,7 @@ const MONITORING: VPSMonitoringInstanceSummary = {
   city: 'Tokyo',
   provider: 'Example',
   lifecycle_status: 'active',
-  monitoring_status: 'active',
+  monitoring_status: '启用',
   binding_status: 'bound',
   current_health_status: '正常',
   last_heartbeat_at: '2026-08-24T00:00:00Z',
@@ -119,14 +120,24 @@ describe('VPSOverviewRelationPanels', () => {
     expect(api.listVPSDomains).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: '打开监控关系' }))
-    expect(await screen.findByText('东京监控')).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '已关联监控实例' })).toBeInTheDocument()
+    expect(screen.getByText('东京监控')).toBeInTheDocument()
+    expect(screen.getByText('mi_001')).toBeInTheDocument()
+    expect(screen.getByText('监控配置')).toBeInTheDocument()
+    expect(screen.getByText('启用')).toBeInTheDocument()
+    expect(screen.getByText('观测健康')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '监控观测' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看监控实例' })).toHaveAttribute('href', '/monitoring/mi_001?return_vps=vps_001')
     expect(api.listVPSMonitoringInstances).toHaveBeenCalledWith('vps_001')
     expect(screen.queryByRole('button', { name: /接入\/升级 agent/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '解除关联' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
 
     fireEvent.click(screen.getByRole('button', { name: '打开服务关系' }))
-    expect(await screen.findByText('Gateway')).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '已关联服务' })).toBeInTheDocument()
+    expect(screen.getByText('Gateway')).toBeInTheDocument()
+    expect(screen.getByText('入口探测')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '服务资产' })).not.toBeInTheDocument()
     expect(api.listVPSServices).toHaveBeenCalledWith('vps_001')
     expect(screen.queryByRole('button', { name: '新增服务' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
@@ -171,10 +182,10 @@ describe('VPSOverviewRelationPanels', () => {
     const trigger = screen.getByRole('button', { name: '打开服务关系' })
     trigger.focus()
     fireEvent.click(trigger)
-    expect(await screen.findByRole('dialog', { name: '关联服务' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '已关联服务' })).toBeInTheDocument()
     fireEvent.keyDown(document, { key: 'Escape' })
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '关联服务' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '已关联服务' })).not.toBeInTheDocument())
     await waitFor(() => expect(trigger).toHaveFocus())
   })
 
@@ -205,4 +216,66 @@ describe('VPSOverviewRelationPanels', () => {
     await act(async () => nextServices.resolve([]))
     expect(await screen.findByText('尚未记录服务')).toBeInTheDocument()
   })
+
+  it('keeps service association fields on shared tracks without repeating labels', async () => {
+    vi.spyOn(api, 'listVPSServices').mockResolvedValue([
+      {
+        ...SERVICE,
+        port: 443,
+        target_id: 'tg_001',
+        labels: ['edge'],
+        note: 'prod',
+      },
+      {
+        ...SERVICE,
+        service_id: 'svc_empty',
+        name: 'Empty Gateway',
+        url: '',
+        port: null,
+        labels: [],
+        note: '',
+      },
+      {
+        ...SERVICE,
+        service_id: 'svc_grpc',
+        name: 'Long Stream',
+        url: 'grpc://stream.example.invalid/very/long/path:50051',
+        port: 50051,
+        labels: [],
+        note: '',
+      },
+    ])
+    renderHarness()
+    fireEvent.click(screen.getByRole('button', { name: '打开服务关系' }))
+    const dialog = await screen.findByRole('dialog', { name: '已关联服务' })
+    const rows = dialog.querySelectorAll('.vps-relation-row--service')
+    expect(rows).toHaveLength(3)
+
+    const httpRow = within(rows[0] as HTMLElement)
+    expect(httpRow.getByText('端口').tagName).toBe('DT')
+    expect(httpRow.getByText('443')).toBeInTheDocument()
+    expect(httpRow.queryByText('端口 443')).not.toBeInTheDocument()
+    expect(httpRow.getByRole('link', { name: 'https://example.invalid' })).toHaveAttribute('href', 'https://example.invalid')
+    expect(httpRow.getByRole('button', { name: '复制入口' })).toBeInTheDocument()
+    expect(httpRow.getByRole('link', { name: 'tg_001' })).toHaveAttribute('href', '/targets/tg_001')
+
+    const emptyRow = within(rows[1] as HTMLElement)
+    const entry = emptyRow.getByText('入口')
+    expect(entry.tagName).toBe('DT')
+    expect(entry.nextElementSibling).toHaveTextContent('未记录')
+    expect(emptyRow.queryByText('入口未记录')).not.toBeInTheDocument()
+    const probe = emptyRow.getByText('入口探测')
+    expect(probe.tagName).toBe('DT')
+    expect(probe.nextElementSibling).toHaveTextContent('未关联')
+    expect(emptyRow.queryByText('未关联入口探测')).not.toBeInTheDocument()
+    expect(emptyRow.getByText('端口').nextElementSibling).toHaveTextContent('未记录')
+
+
+    const grpcRow = within(rows[2] as HTMLElement)
+    expect(grpcRow.getByText('grpc://stream.example.invalid/very/long/path:50051')).toBeInTheDocument()
+    expect(grpcRow.queryByRole('link', { name: /grpc:/ })).not.toBeInTheDocument()
+    expect(grpcRow.getByRole('button', { name: '复制入口' })).toBeInTheDocument()
+    expect(grpcRow.getByText('50051')).toBeInTheDocument()
+  })
+
 })

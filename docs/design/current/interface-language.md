@@ -19,7 +19,7 @@ Current UI defaults:
 
 - dark-first theme with an equally usable light theme;
 - CSS custom properties in `web/src/styles/tokens.css`;
-- the current accent direction is operational blue (`--accent`) with amber secondary emphasis (`--accent-2`), kept restrained rather than neon;
+- the shared shell and workspaces consume the same semantic theme tokens; layout choices must not introduce independent palettes or overwrite the global theme preference;
 - compact spacing based on the existing token scale;
 - high-density tables for list scanning;
 - cards for repeated items, modals, warnings, and contained tools, not for wrapping every page section;
@@ -27,6 +27,29 @@ Current UI defaults:
 - status shown by both color and shape where possible.
 
 These defaults are expected for ordinary UI work. They can change through a task that updates the tokens/components/tests/docs together.
+
+### VPS workspace views
+
+The VPS inventory offers two layouts within one visual system:
+
+- **目录视图 (ledger)** is the default: an asset directory on the left and a readable inspector on the right.
+- **表格视图 (workbench)** is a scanning table. Clicking an asset name toggles a compact accordion directly beneath that row; only one row is expanded at a time. Do not put the inspector at the bottom of the inventory.
+
+Both views share the shell and other pages' semantic surface, text, border, accent, state, spacing, and typography tokens. Use the same sans-serif heading hierarchy, technical monospace facts, shared Badge treatment, and focus language. Do not restore separate graphite/brown palettes or editorial serif headings. Layout and density may differ; the visual identity must not. Both follow global dark/light and system-resolved modes. The view switch changes neither global theme nor business semantics.
+
+Both layouts use the same inventory, subscription evidence, search, filters, selection, and management destinations, and open one independent VPS detail workspace. Keep return navigation and section hierarchy explicit. Inspectors are reading aids, not alternative detail routes or separate business forms.
+
+The detail workspace uses the shared shell palette in both capability modes: a unified identity header, one validated inventory return in the top-bar breadcrumb, and a primary management action only when writable. Light mode uses coordinated neutral, slightly green-tinted shell/canvas surfaces and white content surfaces; dark mode retains the same semantic hierarchy. Do not restore route-only canvas colors or beige controls beside neutral cards. Separate subscription/renewal, runtime observations, asset facts, resources, and a quieter activity timeline with spacing, fine borders, and headings rather than permanent drop shadows or nested field cards.
+
+Treat VPS detail as a personal infrastructure asset-and-facts workspace, not a realtime operations cockpit. Allocate space by content: flexible connection facts beside a compact billing summary in the first zone, followed by independent observation rows, resource lists and lightweight activity. Do not impose a permanent page-wide main/aside ratio. The route currently caps comfortable reading width at 1600 CSS px; collapse the first zone when its contents cannot fit. Use approximately 22px page titles, 15px module headings, 14px body/field values, 12–13px helper text and 20px amounts, with 1.45 body leading, 16px section padding and 14px gaps. Do not enlarge typography with viewport width or manufacture card height.
+
+Keep primary route navigation distinct from the closed in-page directory. Normal readiness is quiet; stale or unavailable evidence, applicable timestamps, and retry actions remain local to the affected source. Resource actions belong beside their actual group or record and must not imply a record-specific destination when only a collection action exists. Menus must remain readable and reachable when their trigger moves to the left on narrow screens.
+
+Keep the established density baseline while restoring moderate surface contrast: primary content uses the shared content surface against the shell canvas, without heavy shadows, enlarged radii, or disabled-looking page opacity. Observation rows share stable project/conclusion/explanation/data-time/action positions; put long failure explanations beneath their object. Use consistent state badges rather than colored words embedded in ordinary prose. Natural remaining whitespace is acceptable; do not stretch sections to equal heights.
+
+Keep detail body text comfortably readable at approximately 14px and helper text at 12–13px; density comes from removing repetition and shortening information distances, not indiscriminate shrinking. Use sans-serif for reading and technical monospace for useful identifiers/IP/SSH. Preserve hover/focus contrast, natural long-name/note wrapping, adjacent full-value copy feedback and touch-sized actions. Browser zoom must remain usable; never implement density with CSS zoom or page transforms.
+
+Use concise labels and factual loading/error/empty states. Do not add instructional lead-ins, self-descriptions of the inspector, or prose that restates the adjacent facts.
 
 ## State language
 

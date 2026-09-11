@@ -71,7 +71,6 @@ export function TargetsSupportSurface({
     <section className="page-panel observability-support observability-support--targets">
       <div className="observability-support__header">
         <div>
-          <p className="observability-support__eyebrow">ENTRY OBSERVABILITY</p>
           <h2 className="observability-support__title">服务入口支撑</h2>
           <p className="observability-support__description">
             用服务入口可达性和探测覆盖确认暴露面是否可信，异常入口再回到 VPS 与服务资产补证据。

@@ -1,9 +1,9 @@
 import { Fragment, type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Button, Input, Modal, Hostname, MonoDigits, StatusGlyph, Timestamp, StatCard, isInteractiveRowTarget } from '../components/atoms'
+import { Button, ColumnResizeHandle, Input, Modal, Hostname, MonoDigits, StatusGlyph, Timestamp, isInteractiveRowTarget } from '../components/atoms'
 import { PageState } from '../components/PageState'
-import { StatusBadge } from '../components/StatusBadge'
+import { useColumnWidths } from '../lib/useColumnWidths'
 import {
   ApiError,
   archiveTarget,
@@ -29,13 +29,11 @@ import {
 import { CreateTargetPanel } from './targets/CreateTargetPanel'
 import { TargetsBatchPanel } from './targets/TargetsBatchPanel'
 import { TargetsFilterPanel } from './targets/TargetsFilterPanel'
-import { TargetsSupportSurface } from './targets/TargetsSupportSurface'
 import { TargetsRuntimeOverlays } from './targets/TargetsRuntimeOverlays'
 import { TargetsActionsCell } from './targets/TargetsActionsCell'
 import { TargetsTrendCell } from './targets/TargetsTrendCell'
 import {
   actionButtonKey,
-  buildTargetEvidenceLead,
   buildCreateTargetInput,
   countAbnormalTargets,
   countArchivedTargets,
@@ -43,11 +41,9 @@ import {
   countPausedTargets,
   dedupeLabels,
   describeError,
-  describeTargetFilterContext,
   distinctSorted,
   focusRestoreActionAfterSuccess,
   initialCreateForm,
-  pickTopTargetEvidence,
   mergeMetadataTargetRecord,
   mergeRuntimeTargetRecord,
   parseLabels,
@@ -62,6 +58,8 @@ import type {
   TargetFilterState,
   TargetRuntimeAction,
 } from './targets/types'
+
+const TARGET_LIST_COLUMN_WIDTHS = [36, 180, 72, 168, 108, 120, 100, 120, 220]
 
 export function TargetsPage() {
   const navigate = useNavigate()
@@ -149,6 +147,11 @@ export function TargetsPage() {
       cancelled = true
     }
   }, [])
+
+  const { widths: targetColumnWidths, startResize: startTargetColumnResize } = useColumnWidths(
+    'targets-list',
+    TARGET_LIST_COLUMN_WIDTHS,
+  )
 
   function resetCreateFlow() {
     createRequestRef.current += 1
@@ -392,31 +395,6 @@ export function TargetsPage() {
   const pausedTargetCount = useMemo(() => countPausedTargets(targets), [targets])
   const archivedTargetCount = useMemo(() => countArchivedTargets(targets), [targets])
   const coverageGapTargetCount = useMemo(() => countCoverageGapTargets(targets), [targets])
-  const serviceTargetCount = useMemo(() => targets.filter((target) => target.target_type === 'service').length, [targets])
-  const executionLabelCount = useMemo(
-    () => distinctSorted(targets.flatMap((target) => target.execution_monitoring_instance_labels)).length,
-    [targets],
-  )
-  const hasActiveFilters =
-    filterState.group !== null ||
-    filterState.type !== null ||
-    filterState.runStatus !== null ||
-    filterState.health !== null ||
-    filterState.labels.length > 0 ||
-    filterState.executionLabels.length > 0 ||
-    filterState.abnormal ||
-    filterState.coverageGap
-  const targetFilterContext = describeTargetFilterContext(filterState)
-  const targetEvidenceLead = buildTargetEvidenceLead({
-    totalTargetCount: targets.length,
-    displayedTargetCount: filteredTargets.length,
-    abnormalTargetCount,
-    pausedTargetCount,
-    archivedTargetCount,
-    coverageGapTargetCount,
-    hasActiveFilters,
-  })
-  const topTargetEvidence = pickTopTargetEvidence(filteredTargets)
 
   async function executeBatchTargetAction(action: TargetRuntimeAction) {
     if (action === 'pause' || action === 'archive') {
@@ -519,7 +497,6 @@ export function TargetsPage() {
     return (
       <PageState
         kind="error"
-        eyebrow="目标"
         title="目标列表不可用"
         description={error}
         technicalSummary={error}
@@ -538,51 +515,51 @@ export function TargetsPage() {
     : null
 
   return (
-    <div className="page-stack animate-in">
-      <div className="page-header animate-in">
-        <div>
-          <div className="page-eyebrow">探测 · PROBES</div>
-          <h1 className="page-title">入口探测</h1>
-          <p className="page-sub">监控入口健康与延迟</p>
-        </div>
-        <div className="header-actions">
+    <div className="page targets-page">
+      <header className="page__head">
+        <h1 className="page__title">入口探测</h1>
+        <div className="page__actions">
           <button
             type="button"
-            className="btn md primary"
+            className="btn sm ghost"
+            onClick={() => setBooleanFilter('abnormal', true)}
+            disabled={abnormalTargetCount === 0}
+          >
+            异常 <MonoDigits>{abnormalTargetCount}</MonoDigits>
+          </button>
+          <button
+            type="button"
+            className="btn sm ghost"
+            onClick={() => setSingleFilter('run_status', '暂停')}
+            disabled={pausedTargetCount === 0}
+          >
+            暂停 <MonoDigits>{pausedTargetCount}</MonoDigits>
+          </button>
+          <button
+            type="button"
+            className="btn sm ghost"
+            onClick={() => setSingleFilter('run_status', '已归档')}
+            disabled={archivedTargetCount === 0}
+          >
+            归档 <MonoDigits>{archivedTargetCount}</MonoDigits>
+          </button>
+          <button
+            type="button"
+            className="btn sm ghost"
+            onClick={() => setBooleanFilter('coverage_gap', true)}
+            disabled={coverageGapTargetCount === 0}
+          >
+            覆盖缺口 <MonoDigits>{coverageGapTargetCount}</MonoDigits>
+          </button>
+          <button
+            type="button"
+            className="btn sm primary"
             onClick={createOpen ? closeCreateDrawer : openCreateDrawer}
           >
             新建目标
           </button>
         </div>
-      </div>
-
-      <div className="stat-grid">
-        <StatCard value={<MonoDigits>{targets.length}</MonoDigits>} label="全部目标" />
-        <StatCard value={<MonoDigits>{abnormalTargetCount}</MonoDigits>} label="异常" tone={abnormalTargetCount > 0 ? 'err' : 'normal'} />
-        <StatCard value={<MonoDigits>{targets.filter((t) => t.run_status === '启用').length}</MonoDigits>} label="启用" />
-        <StatCard value={<MonoDigits>{pausedTargetCount + archivedTargetCount}</MonoDigits>} label="暂停/归档" tone={(pausedTargetCount + archivedTargetCount) > 0 ? 'warn' : 'normal'} />
-      </div>
-
-      <TargetsSupportSurface
-        totalTargetCount={targets.length}
-        displayedTargetCount={filteredTargets.length}
-        abnormalTargetCount={abnormalTargetCount}
-        pausedTargetCount={pausedTargetCount}
-        archivedTargetCount={archivedTargetCount}
-        coverageGapTargetCount={coverageGapTargetCount}
-        executionLabelCount={executionLabelCount}
-        serviceTargetCount={serviceTargetCount}
-        evidenceLead={targetEvidenceLead}
-        topEvidence={topTargetEvidence}
-        filterContext={targetFilterContext}
-        hasActiveFilters={hasActiveFilters}
-        onAbnormalClick={() => setSingleFilter('health', abnormalTargetCount > 0 ? '严重' : null)}
-        onPausedClick={() => setSingleFilter('run_status', pausedTargetCount > 0 ? '暂停' : null)}
-        onArchivedClick={() => setSingleFilter('run_status', archivedTargetCount > 0 ? '已归档' : null)}
-        onCoverageClick={() => setBooleanFilter('coverage_gap', coverageGapTargetCount > 0)}
-        onClearFilters={clearAllFilters}
-        onCreateClick={() => openCreateDrawer()}
-      />
+      </header>
 
       <Modal
         open={createOpen}
@@ -653,28 +630,25 @@ export function TargetsPage() {
         ) : null}
       </Modal>
 
-      <div className="animate-in d2">
-        {targets.length === 0 ? (
-          <PageState
-            kind="empty"
-            surface="empty"
-            title="候风尚未配置任何观测目标"
-            description="创建第一个目标后，可以继续为它配置 ProbeItem。"
-            action={
-              <button type="button" className="btn md primary" onClick={() => openCreateDrawer()}>
-                新建第一个目标
-              </button>
-            }
+      {targets.length === 0 ? (
+        <PageState
+          kind="empty"
+          surface="empty"
+          title="候风尚未配置任何观测目标"
+          description="创建第一个目标后，可以继续为它配置 ProbeItem。"
+          action={
+            <button type="button" className="btn md primary" onClick={() => openCreateDrawer()}>
+              新建第一个目标
+            </button>
+          }
+        />
+      ) : (
+        <>
+          <TargetsFilterPanel
+            filterState={filterState}
+            groupOptions={groupOptions}
+            onSingleFilterChange={setSingleFilter}
           />
-        ) : (
-          <>
-            <div className="filter-panel animate-in d1">
-              <TargetsFilterPanel
-                filterState={filterState}
-                groupOptions={groupOptions}
-                onSingleFilterChange={setSingleFilter}
-              />
-            </div>
             <TargetsBatchPanel
               show={groupFilterActive && filteredTargets.length > 0}
               filteredTargetCount={filteredTargets.length}
@@ -705,18 +679,21 @@ export function TargetsPage() {
                 }
               />
             ) : (
-              <table className="table targets-table animate-in d2">
+              <div className="page__work" role="region" aria-label="入口清单" tabIndex={0}>
+              <table className="table table--resizable targets-table">
+                <colgroup>
+                  {targetColumnWidths.map((width, index) => (
+                    <col key={index} width={width} />
+                  ))}
+                </colgroup>
                 <thead>
                   <tr>
-                    <th></th>
-                    <th>目标</th>
-                    <th>类型</th>
-                    <th>Host</th>
-                    <th>状态</th>
-                    <th>资产上下文</th>
-                    <th>近 24h 延迟</th>
-                    <th>当前主问题</th>
-                    <th>操作</th>
+                    {['', '目标', '类型', 'Host', '状态', '资产上下文', '近 24h 延迟', '当前主问题', '操作'].map((label, index) => (
+                      <th key={`${label}-${index}`} scope="col">
+                        {label}
+                        <ColumnResizeHandle onDragStart={(clientX) => startTargetColumnResize(index, clientX)} />
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -767,8 +744,8 @@ export function TargetsPage() {
                           </td>
                           <td>
                             <span className="targets-table__status">
-                              <StatusBadge label={target.run_status} />
-                              <StatusBadge label={target.current_health_status} />
+                              <span>{target.run_status}</span>
+                              <span> · {target.current_health_status}</span>
                             </span>
                             {target.execution_monitoring_instance_labels.length > 0 && (
                               <div className="sub">执行: {target.execution_monitoring_instance_labels.join(', ')}</div>
@@ -818,6 +795,7 @@ export function TargetsPage() {
                   })}
                 </tbody>
               </table>
+              </div>
             )}
 
             <TargetsRuntimeOverlays
@@ -838,8 +816,7 @@ export function TargetsPage() {
               }}
             />
           </>
-        )}
-      </div>
+      )}
     </div>
   )
 }

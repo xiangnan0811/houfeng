@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, type RefObject } from 'react'
 
-import type { VPSManagementController } from './hooks/useVPSManagementController'
+import type { VPSManagementController, VPSManagementPanel } from './hooks/useVPSManagementController'
 
 type Props = {
   lifecycleStatus: string
@@ -10,23 +10,36 @@ type Props = {
   menuId?: string
 }
 
-type ManagementPanel = 'facts' | 'decision' | 'subscription' | 'cancellation' | 'archive'
+type MenuGroup = 'business' | 'runtime' | 'relations' | 'lifecycle'
+type MenuPanel = Exclude<VPSManagementPanel, null | 'menu' | 'monitoring-instance-create'>
+
+const GROUP_ORDER: MenuGroup[] = ['business', 'runtime', 'relations', 'lifecycle']
+const GROUP_LABELS: Record<MenuGroup, string> = {
+  business: '业务 / 账单',
+  runtime: '运行',
+  relations: '关联',
+  lifecycle: '生命周期',
+}
 
 const ITEMS: Array<{
-  panel: ManagementPanel
+  panel: MenuPanel
   label: string
+  group: MenuGroup
 }> = [
-  { panel: 'facts', label: '编辑事实' },
-  { panel: 'decision', label: '续费决策' },
-  { panel: 'subscription', label: '订阅事实' },
-  { panel: 'cancellation', label: '取消 / 退役' },
-  { panel: 'archive', label: '归档' },
+  { panel: 'facts', label: '编辑事实', group: 'business' },
+  { panel: 'decision', label: '续费决策', group: 'business' },
+  { panel: 'subscription', label: '订阅事实', group: 'business' },
+  { panel: 'monitoring-instance-evidence', label: '监控实例', group: 'runtime' },
+  { panel: 'services-detail', label: '服务', group: 'relations' },
+  { panel: 'domains-detail', label: '域名', group: 'relations' },
+  { panel: 'cancellation', label: '取消 / 退役', group: 'lifecycle' },
+  { panel: 'archive', label: '归档', group: 'lifecycle' },
 ]
 
 const WRITEABLE_LIFECYCLES = new Set(['active', 'idle', 'testing'])
 const CANCELLATION_RENEWALS = new Set(['cancel', 'auto_renew_cancelled', 'migrate'])
 
-function visibleManagementPanels(lifecycleStatus: string, renewalDecision = ''): ManagementPanel[] {
+function visibleManagementPanels(lifecycleStatus: string, renewalDecision = ''): MenuPanel[] {
   return ITEMS.filter((item) => {
     if (lifecycleStatus === 'archived' || lifecycleStatus === 'cancelled') {
       return false
@@ -62,7 +75,7 @@ export function VPSManagementMenu({ lifecycleStatus, renewalDecision, controller
       queueMicrotask(() => returnFocusRef?.current?.focus())
     }
     const onPointer = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
+      if (!rootRef.current?.contains(event.target as Node) && !returnFocusRef?.current?.contains(event.target as Node)) {
         closeAndRestoreFocus()
       }
     }
@@ -118,20 +131,28 @@ export function VPSManagementMenu({ lifecycleStatus, renewalDecision, controller
         aria-label="管理"
         aria-orientation="vertical"
       >
-        {items.map((item) => (
-          <li key={item.panel} role="none">
-            <button
-              type="button"
-              role="menuitem"
-              className="btn lg ghost vps-overview-management__item"
-              onClick={() => {
-                controller.openPanel(item.panel)
-              }}
-            >
-              {item.label}
-            </button>
-          </li>
-        ))}
+        {GROUP_ORDER.map((group) => {
+          const groupItems = items.filter((item) => item.group === group)
+          if (groupItems.length === 0) return null
+          return (
+            <li key={group} role="none" className="vps-overview-management__group">
+              <p className="vps-overview-management__group-label">{GROUP_LABELS[group]}</p>
+              {groupItems.map((item) => (
+                <button
+                  key={item.panel}
+                  type="button"
+                  role="menuitem"
+                  className="btn lg ghost vps-overview-management__item"
+                  onClick={() => {
+                    controller.openPanel(item.panel)
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </li>
+          )
+        })}
       </ul>
     </div>
   )

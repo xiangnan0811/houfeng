@@ -6,7 +6,11 @@ import { VPSPage } from './VPSPage'
 
 function LocationProbe() {
   const location = useLocation()
-  return <span data-testid="location">{location.pathname}{location.search}</span>
+  return (
+    <span data-testid="location" data-state={JSON.stringify(location.state)}>
+      {location.pathname}{location.search}
+    </span>
+  )
 }
 
 function mockJSONResponse(body: unknown, status = 200) {
@@ -122,410 +126,340 @@ const subscription = {
 describe('VPSPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    localStorage.clear()
   })
 
-  it('renders inventory quick views, applies drawer filters, and navigates to detail on row click', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse([vps, missingFactsVPS]))
-      .mockResolvedValueOnce(mockJSONResponse([provider]))
-      .mockResolvedValueOnce(mockJSONResponse([subscription]))
+  function mockInventory(rows: unknown[] = [vps, missingFactsVPS], subscriptions: unknown[] = [subscription]) {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/vps' && !init?.method) return mockJSONResponse(rows)
+      if (url === '/api/providers') return mockJSONResponse([provider])
+      if (url.startsWith('/api/subscriptions?')) return mockJSONResponse(subscriptions)
+      throw new Error('Unexpected request: ' + url)
+    })
     vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
 
-    render(
-      <MemoryRouter initialEntries={['/vps']}>
+  function mount(entry = '/vps') {
+    return render(
+      <MemoryRouter initialEntries={[entry]}>
+        <LocationProbe />
         <Routes>
           <Route path="/vps" element={<VPSPage />} />
-          <Route path="/vps/:vpsId" element={<><div>vps detail route</div><LocationProbe /></>} />
+          <Route path="/vps/:vpsId" element={<h1>VPS 管理详情</h1>} />
         </Routes>
       </MemoryRouter>,
     )
+  }
 
-    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-    expect(screen.getByRole('heading', { name: 'VPS 资产' })).toBeInTheDocument()
-    const tokyoLink = screen.getByRole('link', { name: 'Tokyo Edge' })
-    expect(tokyoLink).toHaveAttribute('href', '/vps/vps_001')
-    expect(screen.getByRole('link', { name: '进入组合决策' })).toHaveAttribute('href', '/asset-decisions?view=needs_decision&renew_within_days=30')
-    expect(screen.getByRole('link', { name: '查看归档' })).toHaveAttribute('href', '/archive')
-    const quickViews = screen.getByRole('group', { name: 'VPS 快速视图' })
-    expect(within(quickViews).queryByRole('button', { name: /已归档/ })).not.toBeInTheDocument()
-    expect(within(quickViews).queryByRole('tab')).not.toBeInTheDocument()
-    expect(screen.getAllByText('在用').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('保留').length).toBeGreaterThan(0)
-    expect(screen.getByText('IP 低风险 · JP')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/providers', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/subscriptions?sort=renew_at&order=asc', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
+  function currentQuery() {
+    const location = screen.getByTestId('location').textContent ?? ''
+    return new URLSearchParams(location.split('?')[1])
+  }
 
-    tokyoLink.addEventListener('click', (event) => event.preventDefault(), { once: true })
-    fireEvent.click(tokyoLink)
-    expect(screen.queryByText('vps detail route')).not.toBeInTheDocument()
+  it.each([
+    { name: 'missing subscription', body: [], status: 200, fact: '无订阅', missing: true },
+    { name: 'subscription without a renewal date', body: [{ ...subscription, renew_at: '' }], status: 200, fact: '无续费日', missing: false },
+    { name: 'subscription request failure', body: { error: 'subscription backend unavailable' }, status: 503, fact: '加载失败', missing: false },
+  ])('distinguishes pending renewal evidence from $name in the row and accordion', async ({ body, status, fact, missing }) => {
+    let resolveSubscriptions!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => { resolveSubscriptions = resolve })
+    const fetchMock = mockInventory([vps], [])
+    const original = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((input, init) => String(input).startsWith('/api/subscriptions?')
+      ? pending
+      : original(input, init))
+    mount('/vps?workspace=workbench')
+    fireEvent.click(await screen.findByRole('button', { name: '选择 Tokyo Edge' }))
+    const row = screen.getByRole('row', { name: /Tokyo Edge/ })
+    const accordion = screen.getByRole('region', { name: 'VPS 快速查看' })
+    expect(row).toHaveTextContent(/加载/)
+    expect(accordion).toHaveTextContent(/加载/)
+    expect(screen.getByRole('button', { name: '缺订阅' })).toBeInTheDocument()
 
-    fireEvent.click(within(quickViews).getByRole('button', { name: /未关联/ }))
-    expect(screen.getByText('Osaka Missing')).toBeInTheDocument()
-    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
-    expect(screen.getByText('视图: 未关联')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '进入组合决策' })).toHaveAttribute('href', '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup')
+    resolveSubscriptions(mockJSONResponse(body, status))
+    await waitFor(() => expect(row).toHaveTextContent(fact))
+    expect(accordion).toHaveTextContent(fact)
+    expect(screen.getByRole('button', { name: missing ? '缺订阅 1' : '缺订阅' })).toBeInTheDocument()
+  })
 
+  it('keeps the selected asset, search, filters and unrelated URL context when switching workspaces', async () => {
+    mockInventory()
+    mount('/vps?workspace=workbench&provider_id=pv_001&q=Tokyo&selected=vps_001&source=renewals')
+    await screen.findByRole('button', { name: '选择 Tokyo Edge' })
+    fireEvent.click(screen.getByRole('button', { name: '目录视图' }))
+    const inspector = screen.getByRole('region', { name: 'VPS 检查器' })
+    expect(within(inspector).getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: '搜索 VPS' })).toHaveValue('Tokyo')
+    expect(screen.queryByRole('button', { name: '选择 Osaka Missing' })).not.toBeInTheDocument()
+    expect(currentQuery().get('workspace')).toBe('ledger')
+    expect(currentQuery().get('selected')).toBe('vps_001')
+    expect(currentQuery().get('source')).toBe('renewals')
+    expect(currentQuery().get('provider_id')).toBe('pv_001')
     fireEvent.click(screen.getByRole('button', { name: '筛选' }))
     const drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
-    const lifecycleSelect = within(drawer).getByLabelText('生命周期')
-    expect(within(lifecycleSelect).queryByRole('option', { name: '已取消' })).not.toBeInTheDocument()
-    expect(within(lifecycleSelect).queryByRole('option', { name: '已归档' })).not.toBeInTheDocument()
-    fireEvent.change(within(drawer).getByLabelText('生命周期'), { target: { value: 'testing' } })
-    fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
-    expect(screen.getByText('生命周期: 测试中')).toBeInTheDocument()
-    expect(screen.queryByText('Osaka Missing')).not.toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-
-    fireEvent.click(screen.getByRole('button', { name: /移除筛选 生命周期/ }))
-    fireEvent.click(screen.getByRole('button', { name: /移除筛选 视图/ }))
-    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-    expect(screen.getByRole('link', { name: '进入组合决策' })).toHaveAttribute('href', '/asset-decisions?view=needs_decision&renew_within_days=30')
-    const tokyoRow = screen.getByRole('link', { name: 'Tokyo Edge' }).closest('tr')
-    if (!tokyoRow) throw new Error('expected Tokyo Edge link to belong to a VPS table row')
-    fireEvent.click(tokyoRow)
-    await waitFor(() => expect(screen.getByText('vps detail route')).toBeInTheDocument())
-    expect(screen.getByTestId('location')).toHaveTextContent('/vps/vps_001')
-  })
-
-  it('routes unlinked inventory name links and background row clicks into monitoring onboarding', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse([vps, missingFactsVPS]))
-      .mockResolvedValueOnce(mockJSONResponse([provider]))
-      .mockResolvedValueOnce(mockJSONResponse([subscription]))
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/vps?view=unlinked']}>
-        <Routes>
-          <Route path="/vps" element={<VPSPage />} />
-          <Route path="/vps/:vpsId" element={<LocationProbe />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    const nameLink = await screen.findByRole('link', { name: 'Osaka Missing' })
-    expect(nameLink).toHaveAttribute('href', '/vps/vps_missing?workbench=monitoring')
-    const row = nameLink.closest('tr')
-    if (!row) throw new Error('expected Osaka Missing link to belong to a VPS table row')
-
-    fireEvent.click(row)
-
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
-      '/vps/vps_missing?workbench=monitoring',
-    ))
-  })
-
-  it('keeps VPS rows visible and does not mark missing subscriptions when subscription evidence fails', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse([missingFactsVPS]))
-      .mockResolvedValueOnce(mockJSONResponse([provider]))
-      .mockResolvedValueOnce(mockJSONResponse({ error: 'subscription database unavailable' }, 500))
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/vps']}>
-        <Routes>
-          <Route path="/vps" element={<VPSPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
-    // Subscription error is shown as a status message
-    expect(screen.getByRole('status')).toHaveTextContent('订阅不可用，不判定。')
-
-    // Missing subscription tab should not show items when evidence is unavailable
-    fireEvent.click(screen.getByRole('button', { name: '缺订阅' }))
-    expect(screen.queryByText('Osaka Missing')).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: /移除筛选 视图/ }))
-    await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
-    expect(screen.queryByText('视图: 缺订阅')).not.toBeInTheDocument()
-  })
-
-  it('shows cancellation attention view for inactive subscription and active VPS split', async () => {
-    const expiredSubscription = {
-      ...subscription,
-      status: 'expired',
-      auto_renew: false,
-      auto_renew_cancelled: true,
-    }
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse([vps]))
-      .mockResolvedValueOnce(mockJSONResponse([provider]))
-      .mockResolvedValueOnce(mockJSONResponse([expiredSubscription]))
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/vps?view=cancellation_attention']}>
-        <Routes>
-          <Route path="/vps" element={<VPSPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-    expect(screen.getByText('订阅非活跃，VPS 尚未取消')).toBeInTheDocument()
-    expect(screen.getByText('视图: 取消待处理')).toBeInTheDocument()
-  })
-
-  it('hides final lifecycle rows and uses running linked assets for cancellation attention', async () => {
-    const toCancelWithRetiredLinks = {
-      ...vps,
-      lifecycle_status: 'to_cancel',
-      renewal_decision: 'cancel',
-      active_monitoring_instance_link_count: 2,
-      running_monitoring_instance_count: 0,
-      running_target_count: 0,
-    }
-    const toCancelWithRunningTarget = {
-      ...toCancelWithRetiredLinks,
-      vps_id: 'vps_running_target',
-      display_name: 'Frankfurt Legacy',
-      running_target_count: 1,
-    }
-    const cancelledWithRunningTarget = {
-      ...toCancelWithRunningTarget,
-      vps_id: 'vps_cancelled_running_target',
-      display_name: 'Cancelled Legacy',
-      lifecycle_status: 'cancelled',
-    }
-    const archivedWithRunningTarget = {
-      ...toCancelWithRunningTarget,
-      vps_id: 'vps_archived_running_target',
-      display_name: 'Archived Legacy',
-      lifecycle_status: 'archived',
-    }
-    const cancelledSubscription = {
-      ...subscription,
-      status: 'cancelled',
-      auto_renew: false,
-      auto_renew_cancelled: true,
-    }
-    const runningTargetSubscription = {
-      ...cancelledSubscription,
-      subscription_id: 'sub_running_target',
-      vps_id: 'vps_running_target',
-    }
-    const cancelledRunningTargetSubscription = {
-      ...cancelledSubscription,
-      subscription_id: 'sub_cancelled_running_target',
-      vps_id: 'vps_cancelled_running_target',
-    }
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse([
-        toCancelWithRetiredLinks,
-        toCancelWithRunningTarget,
-        cancelledWithRunningTarget,
-        archivedWithRunningTarget,
-      ]))
-      .mockResolvedValueOnce(mockJSONResponse([provider]))
-      .mockResolvedValueOnce(mockJSONResponse([
-        cancelledSubscription,
-        runningTargetSubscription,
-        cancelledRunningTargetSubscription,
-      ]))
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/vps?view=cancellation_attention']}>
-        <Routes>
-          <Route path="/vps" element={<VPSPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Frankfurt Legacy')).toBeInTheDocument())
-    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
-    expect(screen.queryByText('Cancelled Legacy')).not.toBeInTheDocument()
-    expect(screen.queryByText('Archived Legacy')).not.toBeInTheDocument()
-    expect(screen.getByText('VPS 待取消，仍有 1 个监控实例/入口探测运行')).toBeInTheDocument()
-  })
-
-  it('does not apply draft drawer filters when closed by button, Escape, or overlay', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse([vps, missingFactsVPS]))
-      .mockResolvedValueOnce(mockJSONResponse([provider]))
-      .mockResolvedValueOnce(mockJSONResponse([subscription]))
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/vps?view=unlinked']}>
-        <Routes>
-          <Route
-            path="/vps"
-            element={(
-              <>
-                <LocationProbe />
-                <VPSPage />
-              </>
-            )}
-          />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
-    expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
-    expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
-
-    fireEvent.click(screen.getByRole('button', { name: '筛选' }))
-    let drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
-    fireEvent.change(within(drawer).getByLabelText('生命周期'), { target: { value: 'testing' } })
-    fireEvent.click(within(drawer).getByRole('button', { name: '关闭' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'VPS 高级筛选' })).not.toBeInTheDocument())
-    expect(screen.getByText('Osaka Missing')).toBeInTheDocument()
-    expect(screen.queryByText('生命周期: 测试中')).not.toBeInTheDocument()
-    expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
-
-    fireEvent.click(screen.getByRole('button', { name: '筛选' }))
-    drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
     fireEvent.change(within(drawer).getByLabelText('用途状态'), { target: { value: 'in_use' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
+    expect(currentQuery().get('q')).toBe('Tokyo')
+    expect(currentQuery().get('workspace')).toBe('ledger')
+    expect(currentQuery().get('source')).toBe('renewals')
+    fireEvent.click(screen.getByRole('button', { name: '表格视图' }))
+    expect(screen.getByRole('button', { name: '选择 Tokyo Edge' })).toHaveAttribute('aria-pressed', 'true')
+    expect(currentQuery().get('selected')).toBe('vps_001')
+    expect(currentQuery().get('usage_status')).toBe('in_use')
+  })
+
+  it('remembers the workspace on a later visit while an explicit URL wins over the preference', async () => {
+    mockInventory()
+    const first = mount()
+    expect(await screen.findByRole('button', { name: '目录视图' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: '表格视图' }))
+    first.unmount()
+    const second = mount()
+    expect(await screen.findByRole('button', { name: '表格视图' })).toHaveAttribute('aria-pressed', 'true')
+    second.unmount()
+    mount('/vps?workspace=ledger')
+    expect(await screen.findByRole('button', { name: '目录视图' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('selects an asset without navigating and keeps canonical monitoring onboarding available in both workspaces', async () => {
+    mockInventory()
+    mount('/vps?workspace=ledger')
+    fireEvent.click(await screen.findByRole('button', { name: '选择 Tokyo Edge' }))
+    expect(currentQuery().get('selected')).toBe('vps_001')
+    fireEvent.click(screen.getByRole('button', { name: /未关联/ }))
+    expect(screen.queryByRole('button', { name: '选择 Tokyo Edge' })).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '选择 Osaka Missing' }))
+    expect(screen.getByRole('link', { name: '打开 VPS 详情' })).toHaveAttribute('href', '/vps/vps_missing?workbench=monitoring')
+    fireEvent.click(screen.getByRole('button', { name: '表格视图' }))
+    fireEvent.click(screen.getByRole('button', { name: '选择 Osaka Missing' }))
+    const workbenchDetail = screen.getByRole('link', { name: '打开 VPS 详情' })
+    expect(workbenchDetail).toHaveAttribute('href', '/vps/vps_missing?workbench=monitoring')
+    fireEvent.click(workbenchDetail)
+    expect(await screen.findByRole('heading', { name: 'VPS 管理详情' })).toBeInTheDocument()
+    expect(currentQuery().get('workbench')).toBe('monitoring')
+  })
+
+  it('does not show a stale selected asset when a search has no matches', async () => {
+    mockInventory()
+    mount('/vps?workspace=ledger&selected=vps_001')
+    await screen.findByRole('button', { name: '选择 Tokyo Edge' })
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索 VPS' }), { target: { value: 'no-matching-host' } })
+    expect(screen.queryByRole('link', { name: '打开 VPS 详情' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Tokyo Edge' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '表格视图' }))
+    expect(screen.queryByRole('button', { name: '选择 Tokyo Edge' })).not.toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: '搜索 VPS' })).toHaveValue('no-matching-host')
+  })
+
+  it('keeps inventory usable without treating unavailable subscription evidence as missing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/vps') return mockJSONResponse([missingFactsVPS])
+      if (String(input) === '/api/providers') return mockJSONResponse([provider])
+      return mockJSONResponse({ error: 'subscription database unavailable' }, 500)
+    }))
+    mount('/vps?workspace=ledger')
+    await screen.findByRole('button', { name: '选择 Osaka Missing' })
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('subscription database unavailable'))
+    fireEvent.click(screen.getByRole('button', { name: '缺订阅' }))
+    expect(screen.queryByRole('button', { name: '选择 Osaka Missing' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /移除筛选 视图/ }))
+    expect(await screen.findByRole('button', { name: '选择 Osaka Missing' })).toBeInTheDocument()
+  })
+
+  it('waits for subscription evidence before including assets in the missing-subscription view', async () => {
+    let resolveSubscriptions!: (value: Response) => void
+    const pending = new Promise<Response>((resolve) => { resolveSubscriptions = resolve })
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === '/api/vps') return Promise.resolve(mockJSONResponse([missingFactsVPS]))
+      if (String(input) === '/api/providers') return Promise.resolve(mockJSONResponse([provider]))
+      return pending
+    }))
+    mount('/vps?workspace=ledger&view=missing_subscription')
+    await screen.findByRole('heading', { name: 'VPS 资产' })
+    expect(screen.queryByRole('button', { name: '选择 Osaka Missing' })).not.toBeInTheDocument()
+    resolveSubscriptions(mockJSONResponse([]))
+    expect(await screen.findByRole('button', { name: '选择 Osaka Missing' })).toBeInTheDocument()
+  })
+
+  it('keeps cancellation attention based on running links and excludes final lifecycle assets', async () => {
+    const retiring = { ...vps, lifecycle_status: 'to_cancel', renewal_decision: 'cancel', active_monitoring_instance_link_count: 2 }
+    const running = { ...retiring, vps_id: 'running', display_name: 'Running Target', running_target_count: 1 }
+    const cancelled = { ...running, vps_id: 'cancelled', display_name: 'Cancelled Target', lifecycle_status: 'cancelled' }
+    const archived = { ...running, vps_id: 'archived', display_name: 'Archived Target', lifecycle_status: 'archived' }
+    mockInventory([retiring, running, cancelled, archived], [
+      { ...subscription, status: 'cancelled', auto_renew: false, auto_renew_cancelled: true },
+      { ...subscription, subscription_id: 'sub_running', vps_id: 'running', status: 'cancelled', auto_renew: false, auto_renew_cancelled: true },
+    ])
+    mount('/vps?workspace=ledger&view=cancellation_attention')
+    expect(await screen.findByRole('button', { name: '选择 Running Target' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选择 Tokyo Edge' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选择 Cancelled Target' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选择 Archived Target' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '表格视图' }))
+    expect(screen.getByRole('button', { name: '选择 Running Target' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选择 Cancelled Target' })).not.toBeInTheDocument()
+  })
+
+  it('does not apply draft filters when the dialog is dismissed', async () => {
+    mockInventory()
+    mount('/vps?workspace=ledger&view=unlinked&source=onboarding')
+    await screen.findByRole('button', { name: '选择 Osaka Missing' })
+    fireEvent.click(screen.getByRole('button', { name: '筛选' }))
+    const drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
+    fireEvent.change(within(drawer).getByLabelText('生命周期'), { target: { value: 'testing' } })
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'VPS 高级筛选' })).not.toBeInTheDocument())
-    expect(screen.queryByText('用途: 承载业务')).not.toBeInTheDocument()
-    expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
-
+    expect(screen.getByRole('button', { name: '选择 Osaka Missing' })).toBeInTheDocument()
+    expect(currentQuery().get('lifecycle_status')).toBeNull()
+    expect(currentQuery().get('source')).toBe('onboarding')
     fireEvent.click(screen.getByRole('button', { name: '筛选' }))
-    drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
-    fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'keep' } })
-    const overlay = document.body.querySelector('.modal-overlay')
-    expect(overlay).not.toBeNull()
-    fireEvent.click(overlay!)
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'VPS 高级筛选' })).not.toBeInTheDocument())
-    expect(screen.queryByText('续费: 保留')).not.toBeInTheDocument()
-    expect(screen.getByTestId('location')).toHaveTextContent('/vps?view=unlinked')
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const reopened = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
+    expect(within(reopened).getByLabelText('生命周期')).not.toHaveValue('testing')
   })
 
-  it('marks missing subscriptions only after subscription evidence is ready', async () => {
-    let resolveSubscriptions: (value: Response) => void = () => {}
-    const subscriptionsPromise = new Promise<Response>((resolve) => {
-      resolveSubscriptions = resolve
+  it('creates a VPS through the shared modal and opens its canonical detail with authored inputs', async () => {
+    const fetchMock = mockInventory([], [])
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/vps' && init?.method === 'POST') return mockJSONResponse({ ...vps, vps_id: 'vps_new' }, 201)
+      if (String(input) === '/api/providers') return mockJSONResponse([provider])
+      return mockJSONResponse([])
     })
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse([missingFactsVPS]))
-      .mockResolvedValueOnce(mockJSONResponse([provider]))
-      .mockReturnValueOnce(subscriptionsPromise)
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/vps?view=missing_subscription']}>
-        <Routes>
-          <Route path="/vps" element={<VPSPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    // While subscriptions are loading, missing_subscription view should not show items
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'VPS 资产' })).toBeInTheDocument())
-    expect(screen.queryByText('Osaka Missing')).not.toBeInTheDocument()
-
-    resolveSubscriptions(mockJSONResponse([]))
-
-    await waitFor(() => expect(screen.getByText('Osaka Missing')).toBeInTheDocument())
-  })
-
-  it('opens VPS creation modal, creates a VPS, and navigates to the detail route', async () => {
-    const created = { ...vps, vps_id: 'vps_new', display_name: 'Osaka Standby' }
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([provider]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse(created, 201))
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/vps']}>
-        <Routes>
-          <Route path="/vps" element={<VPSPage />} />
-          <Route path="/vps/:vpsId" element={<div>created vps detail</div>} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByRole('button', { name: '创建第一台 VPS' })).toBeInTheDocument())
-    expect(screen.queryByRole('dialog', { name: '添加 VPS' })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'VPS 资产' })).toBeInTheDocument()
-    expect(screen.getByText('还没有录入 VPS 资产')).toBeInTheDocument()
-    expect(screen.getByText('先录入 VPS。')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '创建第一台 VPS' }))
+    mount('/vps?workspace=ledger')
+    fireEvent.click(await screen.findByRole('button', { name: '创建第一台 VPS' }))
     const modal = await screen.findByRole('dialog', { name: '添加 VPS' })
-    expect(within(modal).getByText('核心信息')).toBeInTheDocument()
-    expect(within(modal).getByText('网络入口')).toBeInTheDocument()
-    expect(within(modal).getByText('创建后进入详情页。')).toBeInTheDocument()
-    expect(within(modal).queryByLabelText('生命周期')).not.toBeInTheDocument()
-    expect(within(modal).queryByLabelText('用途状态')).not.toBeInTheDocument()
-    fireEvent.click(within(modal).getByRole('button', { name: '取消' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '添加 VPS' })).not.toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '创建第一台 VPS' }))
-    const reopenedModal = await screen.findByRole('dialog', { name: '添加 VPS' })
-    expect(within(reopenedModal).getByLabelText('VPS 名称')).toHaveValue('')
-    fireEvent.change(within(reopenedModal).getByLabelText('VPS 名称'), { target: { value: 'Osaka Standby' } })
-    fireEvent.change(within(reopenedModal).getByLabelText('服务商'), { target: { value: 'pv_001' } })
-    fireEvent.change(within(reopenedModal).getByLabelText('国家 / 地区'), { target: { value: 'JP' } })
-    fireEvent.change(within(reopenedModal).getByLabelText('IPv4 / 主入口'), { target: { value: '203.0.113.8' } })
-    fireEvent.click(within(reopenedModal).getByRole('button', { name: /补充信息/ }))
-    fireEvent.change(within(reopenedModal).getByLabelText('区域'), { target: { value: 'Kansai' } })
-    fireEvent.change(within(reopenedModal).getByLabelText('城市'), { target: { value: 'Osaka' } })
-    fireEvent.change(within(reopenedModal).getByLabelText('标签'), { target: { value: 'standby, standby' } })
-    fireEvent.click(within(reopenedModal).getByRole('button', { name: '创建 VPS' }))
-
-    await waitFor(() => expect(screen.getByText('created vps detail')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({
-        display_name: 'Osaka Standby',
-        provider_id: 'pv_001',
-        provider_name: 'Hetzner',
-        product_name: '',
-        order_ref: '',
-        country: 'JP',
-        region: 'Kansai',
-        city: 'Osaka',
-        datacenter: '',
-        ipv4: '203.0.113.8',
-        ipv6: '',
-        ssh_host: '203.0.113.8',
-        ssh_port: 22,
-        ssh_user: 'root',
-        os_name: '',
-        virtualization: '',
-        lifecycle_status: 'active',
-        usage_status: 'unknown',
-        renewal_decision: 'unreviewed',
-        importance: 'normal',
-        labels: ['standby'],
-        note: '',
-      }),
+    fireEvent.change(within(modal).getByLabelText('VPS 名称'), { target: { value: 'Osaka Standby' } })
+    fireEvent.change(within(modal).getByLabelText('服务商'), { target: { value: 'pv_001' } })
+    fireEvent.change(within(modal).getByLabelText('国家 / 地区'), { target: { value: 'JP' } })
+    fireEvent.change(within(modal).getByLabelText('IPv4 / 主入口'), { target: { value: '203.0.113.8' } })
+    fireEvent.click(within(modal).getByRole('button', { name: '创建 VPS' }))
+    expect(await screen.findByRole('heading', { name: 'VPS 管理详情' })).toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/vps/vps_new')
+    expect(screen.getByTestId('location')).toHaveAttribute(
+      'data-state',
+      JSON.stringify({ vpsInventoryHref: '/vps?workspace=ledger' }),
+    )
+    const postCall = fetchMock.mock.calls.find(
+      ([input, init]) => String(input) === '/api/vps' && init?.method === 'POST',
+    )
+    expect(postCall).toBeDefined()
+    const payload = JSON.parse(String(postCall?.[1]?.body))
+    expect(payload).toMatchObject({
+      display_name: 'Osaka Standby',
+      provider_id: 'pv_001',
+      country: 'JP',
+      ipv4: '203.0.113.8',
     })
   })
+
+  it('does not infer healthy observations from stable business facts', async () => {
+    mockInventory([
+      { ...vps, ip_quality_summary: null },
+      { ...vps, vps_id: 'vps_risk', display_name: 'Risky Edge', ip_quality_summary: { ...vps.ip_quality_summary, risk_level: 'high' } },
+    ], [])
+    mount('/vps?workspace=workbench')
+    fireEvent.click(await screen.findByRole('button', { name: '选择 Tokyo Edge' }))
+    const first = screen.getByRole('region', { name: 'VPS 快速查看' })
+    const firstEvidence = within(first).getByText('观察证据').parentElement!
+    expect(firstEvidence).toHaveTextContent('未采集')
+    expect(firstEvidence).not.toHaveTextContent('正常')
+
+    fireEvent.click(screen.getByRole('button', { name: '选择 Risky Edge' }))
+    const second = screen.getByRole('region', { name: 'VPS 快速查看' })
+    const secondEvidence = within(second).getByText('观察证据').parentElement!
+    expect(secondEvidence).toHaveTextContent('高风险')
+    expect(secondEvidence).not.toHaveTextContent('正常')
+    expect(screen.getAllByRole('region', { name: 'VPS 快速查看' })).toHaveLength(1)
+  })
+
+  it('opens one inline accordion after the selected workbench row and keeps the selected URL when closed', async () => {
+    mockInventory()
+    mount('/vps?workspace=workbench&selected=vps_001&source=inventory-flow')
+    const pick = await screen.findByRole('button', { name: '选择 Tokyo Edge' })
+    expect(pick).toHaveAttribute('aria-pressed', 'true')
+    expect(pick).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('region', { name: 'VPS 快速查看' })).not.toBeInTheDocument()
+
+    fireEvent.click(pick)
+    const accordion = screen.getByRole('region', { name: 'VPS 快速查看' })
+    expect(pick).toHaveAttribute('aria-expanded', 'true')
+    expect(pick).toHaveAttribute('aria-controls', 'vps-accordion-vps_001')
+    expect(accordion).toHaveAttribute('id', 'vps-accordion-vps_001')
+    expect(accordion.compareDocumentPosition(pick.closest('tr')!)).toBe(Node.DOCUMENT_POSITION_PRECEDING)
+    expect(within(accordion).getByText('资产身份')).toBeInTheDocument()
+    expect(within(accordion).getByText('经营与续费')).toBeInTheDocument()
+    expect(within(accordion).getByText('监控关联')).toBeInTheDocument()
+    expect(within(accordion).getByText('观察证据')).toBeInTheDocument()
+
+    fireEvent.click(pick)
+    expect(screen.queryByRole('region', { name: 'VPS 快速查看' })).not.toBeInTheDocument()
+    expect(pick).toHaveAttribute('aria-pressed', 'true')
+    expect(pick).toHaveAttribute('aria-expanded', 'false')
+    expect(currentQuery().get('selected')).toBe('vps_001')
+    expect(currentQuery().get('source')).toBe('inventory-flow')
+
+    fireEvent.click(screen.getByRole('button', { name: '选择 Osaka Missing' }))
+    const moved = screen.getByRole('region', { name: 'VPS 快速查看' })
+    expect(screen.getAllByRole('region', { name: 'VPS 快速查看' })).toHaveLength(1)
+    expect(currentQuery().get('selected')).toBe('vps_missing')
+    const detailLink = within(moved).getByRole('link', { name: '打开 VPS 详情' })
+    expect(detailLink).toHaveAttribute('href', '/vps/vps_missing')
+    fireEvent.click(detailLink)
+    expect(await screen.findByRole('heading', { name: 'VPS 管理详情' })).toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveAttribute(
+      'data-state',
+      JSON.stringify({ vpsInventoryHref: '/vps?workspace=workbench&selected=vps_missing&source=inventory-flow' }),
+    )
+  })
+
+  it('lets the workbench row toggle the accordion without becoming a tab stop', async () => {
+    mockInventory()
+    mount('/vps?workspace=workbench')
+    const name = await screen.findByRole('button', { name: '选择 Tokyo Edge' })
+    expect(name).toHaveTextContent('Tokyo Edge')
+    expect(name.tagName).toBe('BUTTON')
+    const row = name.closest('tr')!
+    expect(row).not.toHaveAttribute('tabindex')
+    fireEvent.click(within(row).getAllByRole('cell')[1]!)
+    expect(screen.getByRole('region', { name: 'VPS 快速查看' })).toBeInTheDocument()
+    expect(currentQuery().get('selected')).toBe('vps_001')
+    fireEvent.click(within(row).getAllByRole('cell')[1]!)
+    expect(screen.queryByRole('region', { name: 'VPS 快速查看' })).not.toBeInTheDocument()
+    expect(currentQuery().get('selected')).toBe('vps_001')
+  })
+
+  it('keeps in-progress CJK search text and unknown query params', async () => {
+    mockInventory()
+    mount('/vps?workspace=workbench&selected=vps_001&source=review')
+    const search = await screen.findByRole('searchbox', { name: '搜索 VPS' })
+    fireEvent.change(search, { target: { value: '东' } })
+    expect(search).toHaveValue('东')
+    expect(currentQuery().get('q')).toBe('东')
+    expect(currentQuery().get('selected')).toBe('vps_001')
+    expect(currentQuery().get('source')).toBe('review')
+    fireEvent.change(search, { target: { value: '东京 Tokyo' } })
+    expect(search).toHaveValue('东京 Tokyo')
+    expect(currentQuery().get('q')).toBe('东京 Tokyo')
+    expect(currentQuery().get('source')).toBe('review')
+  })
+
+  it('respects hidden selection state in workbench without displaying stale facts', async () => {
+    mockInventory()
+    mount('/vps?workspace=workbench&selected=vps_001')
+    fireEvent.click(await screen.findByRole('button', { name: '选择 Tokyo Edge' }))
+    expect(screen.getByRole('region', { name: 'VPS 快速查看' })).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索 VPS' }), { target: { value: 'no-match' } })
+    expect(screen.queryByRole('region', { name: 'VPS 快速查看' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '打开 VPS 详情' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选择 Tokyo Edge' })).not.toBeInTheDocument()
+    expect(currentQuery().get('selected')).toBe('vps_001')
+  })
+  it('includes an active VPS with inactive billing in cancellation attention', async () => {
+    mockInventory([vps], [{ ...subscription, status: 'expired', auto_renew: false, auto_renew_cancelled: true }])
+    mount('/vps?workspace=ledger&view=cancellation_attention')
+    expect(await screen.findByRole('button', { name: '选择 Tokyo Edge' })).toBeInTheDocument()
+  })
+
 })

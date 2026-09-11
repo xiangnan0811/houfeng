@@ -140,13 +140,17 @@ describe('GlobalSearch', () => {
     searchRecordsForGlobalSearch.mockResolvedValue([])
   })
 
-  it('renders the search input', () => {
+  it('reveals search capabilities via UI when focused with empty query', () => {
     render(
       <MemoryRouter>
         <GlobalSearch />
       </MemoryRouter>,
     )
-    expect(screen.getByLabelText('全局搜索')).toBeInTheDocument()
+    const input = screen.getByLabelText('全局搜索')
+    fireEvent.focus(input)
+    expect(screen.getByText('支持检索范围')).toBeInTheDocument()
+    expect(screen.getByText(/VPS · 监控实例 · 入口探测 · 服务商 · 订阅 · 运维记录/)).toBeInTheDocument()
+    expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
   })
 
   it('matches records across assets and observation objects with grouped links', async () => {
@@ -163,7 +167,6 @@ describe('GlobalSearch', () => {
       expect(screen.getByText('Tokyo VPS')).toBeInTheDocument()
     })
 
-    expect(api.listSubscriptions).toHaveBeenCalledWith({ sort: 'renew_at', order: 'asc' })
     expect(screen.getAllByText('VPS').length).toBeGreaterThan(0)
     expect(screen.getAllByText('监控实例').length).toBeGreaterThan(0)
     const vpsLink = screen.getByRole('option', { name: /Tokyo VPS/ })
@@ -313,4 +316,114 @@ describe('GlobalSearch', () => {
       expect(screen.getByText('没有匹配项')).toBeInTheDocument()
     })
   })
+
+  it('exposes an accessible combobox contract and presents empty capabilities outside a listbox', () => {
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    expect(input).toHaveAttribute('aria-expanded', 'false')
+    expect(input).toHaveAttribute('aria-haspopup', 'listbox')
+    expect(input).toHaveAttribute('aria-autocomplete', 'list')
+    expect(input).not.toHaveAttribute('aria-controls')
+    expect(input).not.toHaveAttribute('aria-activedescendant')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+
+    fireEvent.focus(input)
+    expect(input).toHaveAttribute('aria-expanded', 'false')
+    expect(input).not.toHaveAttribute('aria-controls')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+
+    const describedById = input.getAttribute('aria-describedby')
+    expect(describedById).toBeTruthy()
+    const helpElem = document.getElementById(describedById!)
+    expect(helpElem).toHaveTextContent('支持检索范围')
+    expect(helpElem).toHaveTextContent(/VPS · 监控实例 · 入口探测 · 服务商 · 订阅 · 运维记录/)
+  })
+
+  it('keeps capabilities open with sensible guidance on empty submit instead of dismissing', () => {
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    fireEvent.focus(input)
+    expect(screen.getByText('支持检索范围')).toBeInTheDocument()
+
+    fireEvent.submit(input.closest('form')!)
+    expect(input).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText('支持检索范围')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('请输入搜索关键词')
+
+    fireEvent.change(input, { target: { value: 'tokyo' } })
+    expect(screen.queryByText(/请输入搜索关键词/)).not.toBeInTheDocument()
+  })
+
+  it('closes popup and clears painted help when focus leaves the search widget (focusleave)', () => {
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    fireEvent.focus(input)
+    expect(screen.getByText('支持检索范围')).toBeInTheDocument()
+
+    const container = input.closest('.global-search')!
+    const outsideElement = document.createElement('button')
+    document.body.appendChild(outsideElement)
+    try {
+      fireEvent.blur(container, { relatedTarget: outsideElement })
+      expect(input).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.queryByText('支持检索范围')).not.toBeInTheDocument()
+    } finally {
+      document.body.removeChild(outsideElement)
+    }
+  })
+
+  it('announces active keyboard option via aria-activedescendant and navigates with Arrow keys and Enter', async () => {
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    fireEvent.change(input, { target: { value: 'tokyo' } })
+    fireEvent.submit(input.closest('form')!)
+
+    await waitFor(() => {
+      expect(screen.getByText('Tokyo VPS')).toBeInTheDocument()
+    })
+
+    const listbox = screen.getByRole('listbox', { name: '搜索结果' })
+    expect(input).toHaveAttribute('aria-controls', listbox.id)
+
+    const firstOption = screen.getByRole('option', { name: /Tokyo VPS/ })
+    const secondOption = screen.getByRole('option', { name: /Tokyo Edge/ })
+
+    // Initially first item is selected and announced
+    expect(firstOption).toHaveAttribute('aria-selected', 'true')
+    expect(input).toHaveAttribute('aria-activedescendant', firstOption.id)
+
+    // Navigate down
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(firstOption).toHaveAttribute('aria-selected', 'false')
+    expect(secondOption).toHaveAttribute('aria-selected', 'true')
+    expect(input).toHaveAttribute('aria-activedescendant', secondOption.id)
+
+    // Navigate up returns to first
+    fireEvent.keyDown(input, { key: 'ArrowUp' })
+    expect(firstOption).toHaveAttribute('aria-selected', 'true')
+    expect(secondOption).toHaveAttribute('aria-selected', 'false')
+    expect(input).toHaveAttribute('aria-activedescendant', firstOption.id)
+
+    // Press Enter to activate
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(input).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
 })

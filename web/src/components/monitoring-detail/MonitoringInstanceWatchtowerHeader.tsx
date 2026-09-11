@@ -118,112 +118,87 @@ export function MonitoringInstanceWatchtowerHeader({
   }, [])
 
   return (
-    <header className="watchtower-header" role="banner" aria-label="监控实例身份与操作">
-      <div className="watchtower-header__row1">
-        <div className="watchtower-header__title-block">
-          <h1>{monitoringInstance.display_name}</h1>
-          <div className="badge-row">
-            <HeaderStatusBadge dimension="生命周期" value={monitoringInstance.lifecycle_status} />
-            <HeaderStatusBadge dimension="监控" value={monitoringInstance.monitoring_status} />
-            <HeaderStatusBadge dimension="绑定" value={monitoringInstance.binding_status} />
-            <HeaderStatusBadge dimension="健康" value={monitoringInstance.current_health_status} />
-          </div>
-        </div>
-        <div className="watchtower-header__actions-block">
-          <span className="watchtower-header__freshness" aria-label="数据新鲜度">
-            心跳 <Timestamp value={heartbeat} mode="relative" now={now} /> · 运行{' '}
-            <MonoDigits>{uptime}</MonoDigits>
-          </span>
-          <div className="watchtower-header__actions">
-            <Button variant="ghost" size="sm" onClick={onOpenHistory}>
-              查看历史
-            </Button>
-            <details className="watchtower-actions-menu">
-              <summary aria-label="运行控制操作">…</summary>
-              <div className="watchtower-actions-menu__panel">
-                {!managementOnly && runtimeActions.map(({ action, label }) => (
-                  <button
-                    key={action}
-                    ref={(element) => registerActionRef(action, element)}
-                    type="button"
-                    disabled={runtimeSubmitting}
-                    onClick={() => onRuntimeAction(action)}
-                  >
-                    {label}
-                  </button>
-                ))}
-                {!managementOnly ? (
-                  <>
-                    <button
-                      type="button"
-                      className="watchtower-actions-menu__item"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onOpenOnboarding()
-                      }}
-                    >
-                      {onboardingActionLabel}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onOpenCommands()
-                      }}
-                    >
-                      执行命令…
-                    </button>
-                  </>
-                ) : (
-                  <span className="watchtower-actions-menu__hint">归档实例只允许在管理实例中操作</span>
-                )}
-                <Link
-                  className="watchtower-actions-menu__item"
-                  to={`/command-audit?monitoring_instance=${encodeURIComponent(monitoringInstance.monitoring_instance_id)}`}
-                >
-                  查看命令审计
-                </Link>
-              </div>
-            </details>
-          </div>
+    <header className="page__head" role="banner" aria-label="监控实例身份与操作">
+      <div>
+        <h1 className="page__title">{monitoringInstance.display_name}</h1>
+        <p className="page-sub">
+          {monitoringInstance.group ? <>{monitoringInstance.group}{' · '}</> : null}
+          <Hostname>{monitoringInstance.monitoring_instance_id}</Hostname>
+          {' · '}
+          {locationLine(monitoringInstance)}
+          {' · '}
+          {linkedVPSSummary(linkedVPS, linkedVPSLoading, linkedVPSLoaded, linkedVPSError)}
+          {labels.length > 0 ? (
+            <>
+              {' · '}
+              <span className="watchtower-header__labels">{labelText}</span>
+            </>
+          ) : null}
+          {' · '}
+          agent <MonoDigits>{agentVersion}</MonoDigits>
+        </p>
+        <div className="badge-row">
+          <HeaderStatusBadge dimension="生命周期" value={monitoringInstance.lifecycle_status} />
+          <HeaderStatusBadge dimension="监控" value={monitoringInstance.monitoring_status} />
+          <HeaderStatusBadge dimension="绑定" value={monitoringInstance.binding_status} />
+          <HeaderStatusBadge dimension="健康" value={monitoringInstance.current_health_status} />
         </div>
       </div>
-      <div className="watchtower-header__row2">
-        {monitoringInstance.group ? (
-          <>
-            <span className="watchtower-header__meta-item">{monitoringInstance.group}</span>
-            <span className="watchtower-header__meta-sep" aria-hidden>
-              ·
-            </span>
-          </>
-        ) : null}
-        <span className="watchtower-header__meta-item">
-          <Hostname>{monitoringInstance.monitoring_instance_id}</Hostname>
+      <div className="page__actions">
+        <span className="watchtower-header__freshness" aria-label="数据新鲜度">
+          心跳 <Timestamp value={heartbeat} mode="relative" now={now} /> · 运行{' '}
+          <MonoDigits>{uptime}</MonoDigits>
         </span>
-        <span className="watchtower-header__meta-sep" aria-hidden>
-          ·
-        </span>
-        <span className="watchtower-header__meta-item">{locationLine(monitoringInstance)}</span>
-        <span className="watchtower-header__meta-sep" aria-hidden>
-          ·
-        </span>
-        {linkedVPSSummary(linkedVPS, linkedVPSLoading, linkedVPSLoaded, linkedVPSError)}
-        {labels.length > 0 ? (
-          <>
-            <span className="watchtower-header__meta-sep" aria-hidden>
-              ·
-            </span>
-            <span className="watchtower-header__meta-item watchtower-header__labels">
-              {labelText}
-            </span>
-          </>
-        ) : null}
-        <span className="watchtower-header__meta-sep" aria-hidden>
-          ·
-        </span>
-        <span className="watchtower-header__meta-item">
-          agent <MonoDigits>{agentVersion}</MonoDigits>
-        </span>
+        <Button variant="ghost" size="sm" onClick={onOpenHistory}>
+          查看历史
+        </Button>
+        <details className="watchtower-actions-menu">
+          <summary aria-label="运行控制操作">…</summary>
+          <div className="watchtower-actions-menu__panel">
+            {!managementOnly && runtimeActions.map(({ action, label }) => (
+              <button
+                key={action}
+                ref={(element) => registerActionRef(action, element)}
+                type="button"
+                disabled={runtimeSubmitting}
+                onClick={() => onRuntimeAction(action)}
+              >
+                {label}
+              </button>
+            ))}
+            {!managementOnly ? (
+              <>
+                <button
+                  type="button"
+                  className="watchtower-actions-menu__item"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onOpenOnboarding()
+                  }}
+                >
+                  {onboardingActionLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onOpenCommands()
+                  }}
+                >
+                  执行命令…
+                </button>
+              </>
+            ) : (
+              <span className="watchtower-actions-menu__hint">归档实例只允许在管理实例中操作</span>
+            )}
+            <Link
+              className="watchtower-actions-menu__item"
+              to={`/command-audit?monitoring_instance=${encodeURIComponent(monitoringInstance.monitoring_instance_id)}`}
+            >
+              查看命令审计
+            </Link>
+          </div>
+        </details>
       </div>
     </header>
   )

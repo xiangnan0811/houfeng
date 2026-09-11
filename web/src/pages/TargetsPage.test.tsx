@@ -105,9 +105,11 @@ describe('TargetsPage', () => {
     )
 
     expect(screen.getByRole('heading', { name: '入口探测' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '服务入口支撑' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '组合决策' })).toHaveAttribute('href', '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup')
-    expect(screen.getByText('监控入口健康与延迟')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建目标' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '服务入口支撑' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '组合决策' })).not.toBeInTheDocument()
+    expect(screen.queryByText('探测 · PROBES')).not.toBeInTheDocument()
+    expect(document.querySelector('.page-eyebrow')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
     const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
@@ -1140,7 +1142,7 @@ describe('TargetsPage', () => {
     expect(screen.queryByText('Healthy API')).not.toBeInTheDocument()
   })
 
-  it('focuses coverage-gap targets from the support lead instead of clearing filters', async () => {
+  it('focuses coverage-gap targets from the header count instead of clearing filters', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       mockJSONResponse([
         targetRecord({
@@ -1168,11 +1170,10 @@ describe('TargetsPage', () => {
     await waitFor(() => expect(screen.getByText('Coverage Gap API')).toBeInTheDocument())
     expect(screen.getByText('Covered API')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '核对监控实例覆盖' }))
+    fireEvent.click(screen.getByRole('button', { name: '覆盖缺口 1' }))
 
     await waitFor(() => expect(screen.queryByText('Covered API')).not.toBeInTheDocument())
     expect(screen.getByText('Coverage Gap API')).toBeInTheDocument()
-    expect(screen.getByText('执行覆盖缺口')).toBeInTheDocument()
   })
 
   it('uses run_status=暂停 from Dashboard deep links as the initial target filter', async () => {

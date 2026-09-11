@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { listMonitoringInstances, listProviders, listSubscriptions, listTargets, listVPSAssets } from '../../lib/api'
@@ -43,16 +43,29 @@ const SEARCH_GROUP_ORDER: SearchResult['kind'][] = ['vps', 'monitoring_instance'
 /** Global command search with ⌘K / Ctrl+K shortcut. */
 export function GlobalSearch() {
   const navigate = useNavigate()
+  const baseId = useId()
+  const listboxId = `${baseId}-listbox`
+  const helpId = `${baseId}-help`
+  const statusId = `${baseId}-status`
+
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [focusIndex, setFocusIndex] = useState(-1)
+  const [emptySubmitted, setEmptySubmitted] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const searchGeneration = useRef(0)
 
+  function handleContainerBlur(e: React.FocusEvent<HTMLDivElement>) {
+    const nextTarget = e.relatedTarget as Node | null
+    if (nextTarget && containerRef.current?.contains(nextTarget)) {
+      return
+    }
+    setOpen(false)
+  }
   useEffect(() => {
     if (!open) return
     const close = (e: MouseEvent) => {
@@ -88,12 +101,16 @@ export function GlobalSearch() {
     const typed = query.trim()
     if (!typed) {
       setResults([])
-      setOpen(false)
+      setFocusIndex(-1)
+      setEmptySubmitted(true)
+      setOpen(true)
       return
     }
     const generation = ++searchGeneration.current
+    setOpen(true)
     setLoading(true)
     setError(null)
+    setEmptySubmitted(false)
 
     const [assets, recordHits] = await Promise.all([
       searchAssets(typed.toLowerCase()),
@@ -112,7 +129,6 @@ export function GlobalSearch() {
     ]
     setResults(matches)
     setError(assets.error)
-    setOpen(true)
     setFocusIndex(matches.length > 0 ? 0 : -1)
     setLoading(false)
   }
@@ -121,6 +137,8 @@ export function GlobalSearch() {
     setOpen(false)
     setQuery('')
     setResults([])
+    setFocusIndex(-1)
+    setEmptySubmitted(false)
   }
 
   function activate(result: SearchResult) {
@@ -129,77 +147,178 @@ export function GlobalSearch() {
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (!open || results.length === 0) return
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setFocusIndex((i) => (i + 1) % results.length)
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setFocusIndex((i) => (i - 1 + results.length) % results.length)
-    } else if (e.key === 'Enter' && focusIndex >= 0) {
-      e.preventDefault()
-      const focusedResult = results[focusIndex]
-      if (focusedResult) activate(focusedResult)
-    } else if (e.key === 'Escape') {
-      setOpen(false)
+    if (e.key === 'Escape') {
+      if (open) {
+        e.preventDefault()
+        setOpen(false)
+      }
+      return
+    }
+
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        setOpen(true)
+      }
+      return
+    }
+
+    if (!loading && results.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setFocusIndex((i) => (i + 1) % results.length)
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setFocusIndex((i) => (i - 1 + results.length) % results.length)
+      } else if (e.key === 'Enter' && focusIndex >= 0) {
+        e.preventDefault()
+        const focusedResult = results[focusIndex]
+        if (focusedResult) activate(focusedResult)
+      }
     }
   }
 
   const groups = groupResults(results)
+  const hasOptions = open && !loading && results.length > 0
+  const activeOptionId = hasOptions && focusIndex >= 0 && results[focusIndex]
+    ? `${baseId}-option-${focusIndex}`
+    : undefined
+
+  let describedBy: string | undefined
+  if (open) {
+    if (loading || error) {
+      describedBy = statusId
+    } else if (results.length === 0) {
+      if (query.trim()) {
+        describedBy = statusId
+      } else {
+        describedBy = emptySubmitted ? `${helpId} ${statusId}` : helpId
+      }
+    }
+  }
 
   return (
-    <div className="global-search" ref={containerRef}>
+    <div className="global-search" ref={containerRef} onBlur={handleContainerBlur}>
       <form onSubmit={handleSearch} role="search">
         <input
           ref={inputRef}
+          id={`${baseId}-input`}
           type="search"
           className="global-search__input"
-          placeholder="搜索 VPS / 监控实例 / 运维记录… (⌘ K)"
+          placeholder="搜索"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setEmptySubmitted(false)
+          }}
           onKeyDown={handleKeyDown}
-          onFocus={() => results.length > 0 && setOpen(true)}
+          onFocus={() => setOpen(true)}
           aria-label="全局搜索"
+          role="combobox"
+          aria-expanded={hasOptions}
+          aria-haspopup="listbox"
+          aria-autocomplete="list"
+          aria-controls={hasOptions ? listboxId : undefined}
+          aria-activedescendant={activeOptionId}
+          aria-describedby={describedBy}
         />
       </form>
       {open && (
-        <div className="global-search__menu" role="listbox">
+        <div
+          className="global-search__menu"
+          role="region"
+          aria-label="搜索面板"
+          tabIndex={hasOptions ? 0 : undefined}
+          onMouseDown={(e) => {
+            // Prevent blurring search input when interacting with menu
+            e.preventDefault()
+          }}
+        >
           {loading ? (
-            <p className="global-search__hint">正在加载…</p>
+            <p id={statusId} className="global-search__hint" role="status" aria-live="polite">
+              正在加载…
+            </p>
           ) : (
             <>
               {/* A partial failure keeps whatever did answer instead of discarding it. */}
               {error ? (
-                <p className="global-search__hint global-search__hint--error">{error}</p>
+                <p id={statusId} className="global-search__hint global-search__hint--error" role="alert">
+                  {error}
+                </p>
               ) : null}
               {!error && results.length === 0 ? (
-                <p className="global-search__hint">没有匹配项</p>
+                query.trim() ? (
+                  <p id={statusId} className="global-search__hint" role="status">
+                    没有匹配项
+                  </p>
+                ) : (
+                  <div id={helpId} className="global-search__hint global-search__capabilities">
+                    <p className="global-search__capabilities-title">支持检索范围</p>
+                    <p className="global-search__capabilities-text">
+                      VPS · 监控实例 · 入口探测 · 服务商 · 订阅 · 运维记录
+                    </p>
+                    <p
+                      id={emptySubmitted ? statusId : undefined}
+                      className="global-search__capabilities-sub"
+                      role={emptySubmitted ? 'status' : undefined}
+                    >
+                      {emptySubmitted
+                        ? '请输入搜索关键词 · 支持 ⌘K / Ctrl+K'
+                        : '按 Enter 搜索 · 支持 ⌘K / Ctrl+K'}
+                    </p>
+                  </div>
+                )
               ) : null}
-              {groups.map((group) => (
-                <div className="global-search__group" key={group.kind}>
-                  <p className="global-search__group-title">{group.label}</p>
-                  {group.results.map((result) => {
-                    const index = results.indexOf(result)
+              {hasOptions ? (
+                <>
+                  <span className="visually-hidden" role="status" aria-live="polite">
+                    找到 {results.length} 个结果
+                  </span>
+                  <div id={listboxId} role="listbox" aria-label="搜索结果">
+                  {groups.map((group) => {
+                    const groupId = `${baseId}-group-${group.kind}`
                     return (
-                      <Link
-                        key={`${result.kind}-${result.id}`}
-                        to={result.to}
-                        role="option"
-                        aria-selected={index === focusIndex}
-                        className={`global-search__item ${index === focusIndex ? 'is-focused' : ''}`}
-                        onClick={clearSearch}
-                        onMouseEnter={() => setFocusIndex(index)}
+                      <div
+                        className="global-search__group"
+                        key={group.kind}
+                        role="group"
+                        aria-labelledby={groupId}
                       >
-                        <span className="global-search__item-kind">{SEARCH_GROUP_LABELS[result.kind]}</span>
-                        <span className="global-search__item-label">{result.label}</span>
-                        {result.hint ? (
-                          <span className="global-search__item-hint">{result.hint}</span>
-                        ) : null}
-                      </Link>
+                        <p id={groupId} className="global-search__group-title">
+                          {group.label}
+                         </p>
+                        {group.results.map((result) => {
+                          const index = results.indexOf(result)
+                          const optionId = `${baseId}-option-${index}`
+                          const isFocused = index === focusIndex
+                          return (
+                            <Link
+                              key={`${result.kind}-${result.id}`}
+                              id={optionId}
+                              to={result.to}
+                              role="option"
+                              aria-selected={isFocused}
+                              tabIndex={-1}
+                              className={`global-search__item ${isFocused ? 'is-focused' : ''}`}
+                              onClick={clearSearch}
+                              onMouseEnter={() => setFocusIndex(index)}
+                            >
+                              <span className="global-search__item-kind">
+                                {SEARCH_GROUP_LABELS[result.kind]}
+                              </span>
+                              <span className="global-search__item-label">{result.label}</span>
+                              {result.hint ? (
+                                <span className="global-search__item-hint">{result.hint}</span>
+                              ) : null}
+                            </Link>
+                          )
+                        })}
+                      </div>
                     )
                   })}
-                </div>
-              ))}
+                  </div>
+                </>
+              ) : null}
             </>
           )}
         </div>

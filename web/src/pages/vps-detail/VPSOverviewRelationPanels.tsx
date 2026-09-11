@@ -39,9 +39,9 @@ type Props = {
 }
 
 const PANEL_COPY: Record<RelationPanel, { title: string; subject: string }> = {
-  'monitoring-instance-evidence': { title: '关联监控实例', subject: '监控实例' },
-  'services-detail': { title: '关联服务', subject: '服务' },
-  'domains-detail': { title: '关联域名', subject: '域名' },
+  'monitoring-instance-evidence': { title: '已关联监控实例', subject: '监控实例' },
+  'services-detail': { title: '已关联服务', subject: '服务' },
+  'domains-detail': { title: '已关联域名', subject: '域名' },
 }
 
 const noop = () => undefined
@@ -145,6 +145,7 @@ function renderPanel(data: RelationData) {
     case 'monitoring-instance-evidence':
       return (
         <VPSMonitoringInstanceLinksSection
+          vpsId={data.vpsId}
           monitoring={data.records}
           readOnly
           unlinkingMonitoringInstanceId={null}

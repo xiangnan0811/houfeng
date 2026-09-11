@@ -37,7 +37,6 @@ export function RecordRevisionCollaborationControls({
     <section className="record-collaboration-panel record-collaboration-panel--revision card" aria-labelledby="record-revision-collaboration-title">
       <header className="record-collaboration-panel__header section-heading">
         <div>
-          <p className="record-collaboration-panel__eyebrow section-heading__eyebrow">REVISION CONTROL</p>
           <h2 className="section-heading__title" id="record-revision-collaboration-title">协作责任</h2>
         </div>
         <span className="record-collaboration-panel__signal badge badge--info">随完整修订保存</span>

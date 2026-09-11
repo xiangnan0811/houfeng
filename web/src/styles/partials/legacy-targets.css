@@ -72,6 +72,10 @@
 
 .target-create-drawer__form textarea{min-height:96px;resize:vertical}
 
+.targets-table .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:var(--text-primary)}
+.targets-table .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.targets-table td{overflow:hidden}
+.targets-table td.mono{white-space:nowrap;text-overflow:ellipsis}
 .targets-table .targets-table__identity{display:flex;flex-direction:column;gap:2px;min-width:0}
 
 .targets-table .data-table__row{background:var(--row-bg)}
@@ -88,7 +92,7 @@
 
 .targets-table .targets-table__labels-more{color:var(--text-muted)}
 
-.targets-table .targets-table__status{display:inline-flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}
+.targets-table .targets-table__status{color:var(--text-secondary);font-size:var(--type-small-size);white-space:nowrap}
 
 .targets-table .targets-table__exec-labels{font-family:var(--font-sans);font-size:var(--type-small-size);color:var(--text-muted)}
 

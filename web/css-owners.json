@@ -14,6 +14,8 @@
       "src/styles/partials/legacy-provider.css"
     ],
     "vps": [
+      "src/pages/VPSPage.css",
+      "src/pages/vps-detail/VPSDetailWorkspace.css",
       "src/styles/partials/legacy-vps.css",
       "src/styles/partials/vps-overview-freshness.css"
     ],

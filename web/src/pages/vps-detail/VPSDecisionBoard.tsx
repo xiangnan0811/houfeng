@@ -198,7 +198,6 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
     <section className="page-panel vps-decision-board" aria-labelledby="vps-decision-board-title">
       <div className="section-heading section-heading--inline">
         <div>
-          <p className="section-heading__eyebrow">ASSET DECISION</p>
           <h2 id="vps-decision-board-title">资产判断</h2>
           <p className="section-heading__description">先看下一步动作，再核对续费、监控实例、服务域名与历史证据。</p>
         </div>
@@ -259,7 +258,7 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
         <div className="vps-decision-board__coordination">
           <div className="vps-decision-board__coordination-head">
             <div>
-              <p className="asset-cancel-workbench__eyebrow">LIFECYCLE COORDINATION</p>
+              <p className="asset-cancel-workbench__eyebrow">生命周期协同</p>
               <h3>{lifecycleCoordinationTitle(detail, cancellationPreview, cancellationPreviewError)}</h3>
               <span>{lifecycleCoordinationSummary(detail, cancellationPreview, cancellationPreviewError)}</span>
             </div>

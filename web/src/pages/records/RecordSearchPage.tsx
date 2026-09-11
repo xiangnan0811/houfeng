@@ -230,23 +230,17 @@ export function RecordSearchPage() {
     ?? visibleRecords[0]
 
   return (
-    <div className="page-stack record-search-page">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">运维知识 · RECORDS</div>
-          <h1 className="page-title">运维记录</h1>
-          <p className="page-sub">
-            搜索命中标题与正文，结果始终按当前授权过滤，只显示你有权读取的记录。
-          </p>
-        </div>
-        <div className="header-actions">
+    <div className="page record-search-page">
+      <header className="page__head">
+        <h1 className="page__title">运维记录</h1>
+        <div className="page__actions">
           <Link className="btn sm secondary" to={comparisonEntryHref({
             subjects: comparisonSubjectsFromRecords(visibleRecords),
           })}>横向比较</Link>
           <Link className="btn sm secondary" to="/records/drafts">草稿</Link>
           <Link className="btn sm primary" to="/records/new">新建记录</Link>
         </div>
-      </div>
+      </header>
 
       <RecordSearchFilterPanel
         filters={draft}

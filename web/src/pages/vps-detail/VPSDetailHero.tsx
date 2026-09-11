@@ -4,6 +4,9 @@ import { Badge, Button } from '../../components/atoms'
 import { formatOptional } from '../../lib/format'
 import type { VPSAssetDetail } from '../../lib/types'
 import { LifecycleBadge, RenewalBadge, UsageBadge } from '../assetPageBadges'
+import { VPSAssetMark } from './VPSAssetMark'
+import { VPSIdentityMeta } from './VPSOverviewIdentityHeader'
+import { vpsIdentityMetaFields } from './vpsDetailResourcePresentation'
 
 type VPSDetailHeroProps = {
   detail: VPSAssetDetail
@@ -47,19 +50,35 @@ export function VPSDetailHero({
   const location =
     [detail.country, detail.region, detail.city].filter(Boolean).join(' · ') || '位置未确认'
   return (
-    <header className="watchtower-header" role="banner" aria-label="VPS 身份与操作">
-      <div className="watchtower-header__row1">
-        <div className="watchtower-header__title-block">
-          <h1>{detail.display_name}</h1>
-          <div className="badge-row">
-            <LifecycleBadge value={detail.lifecycle_status} />
-            <UsageBadge value={detail.usage_status} />
-            <RenewalBadge value={detail.renewal_decision} />
+    <header className="page__head vps-overview-identity" role="banner" aria-label="VPS 身份与操作">
+      <div className="vps-overview-identity__lead">
+        <VPSAssetMark />
+        <div className="vps-overview-identity__copy">
+          <h1 className="page__title">{detail.display_name}</h1>
+          <div className="vps-overview-identity__statuses" role="group" aria-label="VPS 当前状态">
+            <span className="vps-overview-identity__status vps-overview-identity__status--lifecycle">
+              <LifecycleBadge value={detail.lifecycle_status} />
+            </span>
+            <span className="vps-overview-identity__status vps-overview-identity__status--usage">
+              <UsageBadge value={detail.usage_status} />
+            </span>
+            <span className="vps-overview-identity__status vps-overview-identity__status--decision">
+              <RenewalBadge value={detail.renewal_decision} />
+            </span>
             <Badge variant="count" tone="neutral">{detail.active_monitoring_instance_link_count} 个监控实例</Badge>
           </div>
+          <VPSIdentityMeta
+            items={vpsIdentityMetaFields({
+              vpsId: detail.vps_id,
+              ...(detail.provider_name.trim() ? { providerName: formatOptional(detail.provider_name) } : {}),
+              ...(location ? { location } : {}),
+              ...(detail.ipv4.trim() ? { ipv4: detail.ipv4 } : {}),
+              ...(detail.updated_at ? { updatedAt: detail.updated_at } : {}),
+            })}
+          />
         </div>
-        <div className="watchtower-header__actions-block">
-          <div className="watchtower-header__actions">
+      </div>
+      <div className="page__actions">
             <Button variant="primary" size="sm" onClick={onDecisionEdit}>处理决策</Button>
             <Link className="btn sm secondary" to={`/asset-decisions?view=needs_decision&renew_within_days=30&vps_id=${encodeURIComponent(detail.vps_id)}`}>
               组合决策
@@ -97,14 +116,6 @@ export function VPSDetailHero({
                 )}
               </div>
             </details>
-            <Link className="btn sm ghost" to="/vps">VPS 列表</Link>
-          </div>
-        </div>
-      </div>
-      <div className="watchtower-header__row2">
-        <span className="watchtower-header__meta-item">{formatOptional(detail.provider_name)}</span>
-        <span className="watchtower-header__meta-sep" aria-hidden>·</span>
-        <span className="watchtower-header__meta-item">{location}</span>
       </div>
     </header>
   )

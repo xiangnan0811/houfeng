@@ -1,22 +1,6 @@
 /* partial: legacy-compare.css (extracted from legacy-misc.css by domain) */
 
-.compare-command{position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) minmax(calc(var(--space-12) * 6),0.82fr);gap:var(--space-5);align-items:stretch;padding:var(--space-5) var(--space-6);border:var(--border-w) solid color-mix(in srgb,var(--accent) 28%,var(--panel-border));border-top:var(--border-w-strong) solid var(--accent);border-radius:var(--radius-3);background:var(--panel-bg);box-shadow:var(--shadow-soft)}
-
-.compare-command::before{content:'';position:absolute;inset:var(--space-4) auto var(--space-4) 0;width:var(--border-w-strong);pointer-events:none;background:var(--accent);border-radius:var(--radius-pill);opacity:0.72}
-
-.compare-command__intro,.compare-command__aside{position:relative;min-width:0}
-
-.compare-command__intro{display:flex;flex-direction:column;justify-content:center;gap:var(--space-2)}
-
-.compare-command__eyebrow,.compare-summary-strip__eyebrow,.compare-command-peer__label,.compare-summary-card__header p,.compare-summary-row dt{color:var(--text-muted);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);line-height:1.2;text-transform:uppercase}
-
-.compare-command__intro h1{max-width:18ch;color:var(--text-primary);font-family:var(--font-serif);font-size:var(--type-display-size);font-weight:var(--type-h1-weight);line-height:var(--type-h1-leading);text-wrap:balance}
-
-.compare-command__intro p:not(.compare-command__eyebrow){max-width:76ch;color:var(--text-secondary);font-size:var(--type-body-size);line-height:1.45;text-wrap:pretty}
-
-.compare-command__aside{display:flex;flex-direction:column;gap:var(--space-3)}
-
-.compare-command__aside > .btn{justify-content:center}
+.compare-command-peer__label,.compare-summary-card__header p,.compare-summary-row dt{color:var(--text-muted);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);line-height:1.2;text-transform:uppercase}
 
 .compare-command__selection{display:grid;gap:var(--space-2)}
 
@@ -87,3 +71,8 @@
 .compare-metrics__col{min-width:0}
 
 .compare-metrics__col .watchtower-metrics{grid-template-columns:1fr}
+
+.page-state__actions .btn.lg {
+  min-height: var(--control-min-height-touch);
+  min-width: var(--control-min-height-touch);
+}

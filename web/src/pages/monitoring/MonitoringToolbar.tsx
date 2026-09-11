@@ -39,7 +39,7 @@ export function MonitoringToolbar({
   onOpenBatchPanel,
 }: MonitoringToolbarProps) {
   return (
-    <>
+    <div className="page-filters">
       <div className="monitoring-scope-switch" aria-label="监控实例范围">
         {MONITORING_INSTANCE_SCOPE_OPTIONS.map((option) => (
           <button
@@ -53,91 +53,87 @@ export function MonitoringToolbar({
           </button>
         ))}
       </div>
-      <div className="filter-panel animate-in d1">
-        <div className="filter-bar">
-          <span className="filter-bar__label">筛选</span>
-          <select
-            className="filter-select"
-            value={filterState.health ?? ''}
-            onChange={(e) => onFilterChange('health', e.target.value || null)}
-          >
-            <option value="">健康状态: 全部</option>
-            {healthOptions.map((v) => (
-              <option key={v} value={v}>{v}</option>
-            ))}
-          </select>
-          {lifecycleOptions.length > 0 ? (
-            <select
-              className="filter-select"
-              value={filterState.lifecycle ?? ''}
-              onChange={(e) => onFilterChange('lifecycle', e.target.value || null)}
-            >
-              <option value="">接入阶段: 全部</option>
-              {lifecycleOptions.map((v) => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
-          ) : null}
-          <select
-            className="filter-select"
-            value={filterState.runStatus ?? ''}
-            onChange={(e) => onFilterChange('run_status', e.target.value || null)}
-          >
-            <option value="">运行状态: 全部</option>
-            {runStatusOptions.map((v) => (
-              <option key={v} value={v}>{v}</option>
-            ))}
-          </select>
-          <select
-            className="filter-select"
-            value={filterState.region ?? ''}
-            onChange={(e) => onFilterChange('region', e.target.value || null)}
-          >
-            <option value="">地区: 全部</option>
-            {regionOptions.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          <select
-            className="filter-select"
-            value={filterState.provider ?? ''}
-            onChange={(e) => onFilterChange('provider', e.target.value || null)}
-          >
-            <option value="">供应商: 全部</option>
-            {providerOptions.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          <label>
-            <input
-              type="checkbox"
-              checked={filterState.abnormal}
-              onChange={(e) => onAbnormalChange(e.target.checked)}
-            />
-            仅看异常
-          </label>
-        </div>
-      </div>
-      <div className="monitoring-toolbar__secondary-row">
-        {compareSet.size === 2 ? (
-          <Link
-            className="btn sm secondary"
-            to={`/monitoring/compare?id=${[...compareSet].join('&id=')}`}
-          >
-            对比选中监控实例
-          </Link>
-        ) : (
-          <button type="button" className="btn sm secondary" disabled>
-            对比选中 ({compareSet.size}/2)
-          </button>
-        )}
-        <span className="text-sm text-muted">
-          勾选 2 个监控实例可进入对比视图
-        </span>
-        <button type="button" className="btn sm secondary" onClick={onOpenBatchPanel}>
-          批量操作
+      <select
+        aria-label="健康状态"
+        className="filter-select"
+        value={filterState.health ?? ''}
+        onChange={(e) => onFilterChange('health', e.target.value || null)}
+      >
+        <option value="">健康状态: 全部</option>
+        {healthOptions.map((v) => (
+          <option key={v} value={v}>{v}</option>
+        ))}
+      </select>
+      {lifecycleOptions.length > 0 ? (
+        <select
+          aria-label="接入阶段"
+          className="filter-select"
+          value={filterState.lifecycle ?? ''}
+          onChange={(e) => onFilterChange('lifecycle', e.target.value || null)}
+        >
+          <option value="">接入阶段: 全部</option>
+          {lifecycleOptions.map((v) => (
+            <option key={v} value={v}>{v}</option>
+          ))}
+        </select>
+      ) : null}
+      <select
+        aria-label="运行状态"
+        className="filter-select"
+        value={filterState.runStatus ?? ''}
+        onChange={(e) => onFilterChange('run_status', e.target.value || null)}
+      >
+        <option value="">运行状态: 全部</option>
+        {runStatusOptions.map((v) => (
+          <option key={v} value={v}>{v}</option>
+        ))}
+      </select>
+      <select
+        aria-label="地区"
+        className="filter-select"
+        value={filterState.region ?? ''}
+        onChange={(e) => onFilterChange('region', e.target.value || null)}
+      >
+        <option value="">地区: 全部</option>
+        {regionOptions.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+      <select
+        aria-label="供应商"
+        className="filter-select"
+        value={filterState.provider ?? ''}
+        onChange={(e) => onFilterChange('provider', e.target.value || null)}
+      >
+        <option value="">供应商: 全部</option>
+        {providerOptions.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+      <label>
+        <input
+          type="checkbox"
+          checked={filterState.abnormal}
+          onChange={(e) => onAbnormalChange(e.target.checked)}
+        />
+        仅看异常
+      </label>
+      <span className="page-filters__grow" />
+      {compareSet.size === 2 ? (
+        <Link
+          className="btn sm ghost"
+          to={`/monitoring/compare?id=${[...compareSet].join('&id=')}`}
+        >
+          对比选中监控实例
+        </Link>
+      ) : (
+        <button type="button" className="btn sm ghost" disabled>
+          对比选中 ({compareSet.size}/2)
         </button>
-      </div>
-    </>
+      )}
+      <button type="button" className="btn sm ghost" onClick={onOpenBatchPanel}>
+        批量操作
+      </button>
+    </div>
   )
 }

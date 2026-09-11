@@ -1,25 +1,23 @@
-import type { VPSOverviewFact } from '../../lib/types'
+import type { VPSOverviewFact, VPSOverviewIdentity } from '../../lib/types'
+import { VPSFactList } from './VPSFactList'
+import { modernOverviewFactRows } from './vpsFactPresentation'
 
 type Props = {
   facts: VPSOverviewFact[]
+  identity?: VPSOverviewIdentity
+  heading?: string
 }
 
-export function VPSOverviewFacts({ facts }: Props) {
+export function VPSOverviewFacts({ facts, identity, heading = '稳定事实' }: Props) {
+  const rows = modernOverviewFactRows(facts, identity)
   return (
-    <section className="vps-overview-facts" aria-labelledby="vps-overview-facts-title">
-      <h2 id="vps-overview-facts-title">稳定事实</h2>
-      {facts.length === 0 ? (
-        <p className="vps-overview-facts__empty">暂无稳定事实</p>
-      ) : (
-        <dl className="vps-overview-facts__list">
-          {facts.map((fact) => (
-            <div key={fact.key} className="vps-overview-facts__row">
-              <dt>{fact.label}</dt>
-              <dd>{fact.value || '—'}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
+    <section className="vps-overview-facts" aria-label={heading || '稳定事实'}>
+      {heading ? <h2 id="vps-overview-facts-title">{heading}</h2> : null}
+      <VPSFactList
+        facts={rows}
+        ariaLabel={heading || '稳定事实'}
+        emptyLabel="暂无稳定事实"
+      />
     </section>
   )
 }

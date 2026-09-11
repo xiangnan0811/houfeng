@@ -210,16 +210,13 @@ export function CommandAuditPage() {
   const initialLoading = state.loading || !resultMatchesFilters
 
   return (
-    <div className="page-stack command-audit-page">
-      <div className="command-audit-page__header">
+    <div className="page command-audit-page">
+      <header className="page__head">
         <div>
-          <div className="page-eyebrow">命令治理 · COMMAND AUDIT</div>
-          <h1 className="page-title">命令审计</h1>
-          <p className="page-sub">
-            只展示命令、身份、时间和结果元数据，不保存或展示命令输出。
-          </p>
+          <h1 className="page__title">命令审计</h1>
+          <p className="page-sub">只展示命令、身份、时间和结果元数据，不保存或展示命令输出。</p>
         </div>
-      </div>
+      </header>
 
       <CommandAuditFilterPanel
         filters={primaryDraft}

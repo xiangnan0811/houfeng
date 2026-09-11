@@ -14,7 +14,11 @@ const listeners = new Set<() => void>()
 let stack: RegisteredModal[] = []
 let bodyScrollLockCount = 0
 let previousBodyOverflow = ''
+let previousMainOverflow = ''
+let lockedMain: HTMLElement | null = null
 let nextRegistrationOrder = 0
+
+
 
 export function registerModal(entry: ModalStackEntry): () => void {
   const token = Symbol(entry.id)
@@ -59,6 +63,14 @@ export function acquireBodyScrollLock(): () => void {
   if (bodyScrollLockCount === 0) {
     previousBodyOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    const main = document.getElementById('main-content')
+    lockedMain = main instanceof HTMLElement ? main : null
+    if (lockedMain) {
+      previousMainOverflow = lockedMain.style.overflow
+      lockedMain.style.overflow = 'hidden'
+    } else {
+      previousMainOverflow = ''
+    }
   }
   bodyScrollLockCount += 1
 
@@ -70,9 +82,13 @@ export function acquireBodyScrollLock(): () => void {
     if (bodyScrollLockCount === 0) {
       document.body.style.overflow = previousBodyOverflow
       previousBodyOverflow = ''
+      if (lockedMain?.isConnected) lockedMain.style.overflow = previousMainOverflow
+      lockedMain = null
+      previousMainOverflow = ''
     }
   }
 }
+
 
 function notifyModalStack() {
   listeners.forEach((listener) => listener())

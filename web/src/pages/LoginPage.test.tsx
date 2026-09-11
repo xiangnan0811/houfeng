@@ -51,8 +51,10 @@ describe('LoginPage', () => {
 
     renderLogin()
 
-    expect(screen.getByText('候风控制面板')).toBeInTheDocument()
-    expect(screen.getByText('Fleet Control Plane')).toBeInTheDocument()
+    expect(screen.getByText('候风')).toBeInTheDocument()
+    expect(screen.getByText('舰队控制面')).toBeInTheDocument()
+    expect(screen.queryByText('Fleet Control Plane')).not.toBeInTheDocument()
+    expect(screen.queryByText('候风控制面板')).not.toBeInTheDocument()
 
     const submitButton = screen.getByRole('button', { name: '登录' })
     expect(submitButton).toHaveClass('lc-btn')

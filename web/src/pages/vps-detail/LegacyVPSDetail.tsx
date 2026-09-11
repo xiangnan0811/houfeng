@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { Button, Modal } from '../../components/atoms'
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
@@ -31,6 +31,8 @@ import {
   unlinkVPSMonitoringInstance,
   updateVPSAsset,
 } from '../../lib/api'
+import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
+
 import { useOptionalVPSWriteRegistry } from '../../lib/vpsWriteRegistry-context'
 import type {
   ArchiveReview,
@@ -57,13 +59,10 @@ import { VPSDomainsSection } from './VPSDomainsSection'
 import { VPSExperienceLogForm } from './VPSExperienceLogForm'
 import { VPSFactsEditForm } from './VPSFactsEditForm'
 import { VPSFactsSection } from './VPSFactsSection'
-import { VPSIPQualitySection } from './VPSIPQualitySection'
 import { VPSMonitoringInstanceCreateForm } from './VPSMonitoringInstanceCreateForm'
 import { VPSMonitoringInstanceLinkForm } from './VPSMonitoringInstanceLinkForm'
 import { VPSMonitoringInstanceLinksSection } from './VPSMonitoringInstanceLinksSection'
 import { VPSRenewalDecisionForm } from './VPSRenewalDecisionForm'
-import { VPSRelatedOverview } from './VPSRelatedOverview'
-import { VPSSingleMachineLedger } from './VPSSingleMachineLedger'
 import { VPSSubscriptionForm } from './VPSSubscriptionForm'
 import { VPSValidityExtensionForm } from './VPSValidityExtensionForm'
 import { VPSServicesForm } from './VPSServicesForm'
@@ -250,10 +249,12 @@ export function LegacyVPSDetail({
   onViewAuthorityInvalidatedWriteSettled,
 }: LegacyVPSDetailProps = {}) {
   const { vpsId } = useParams()
-  const navigate = useNavigate()
+  const navigate = useNavigate(), location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
-  const initialDrawerFromQuery = drawerModeFromWorkbenchQuery(searchParams.get('workbench'))
+  const requestedWorkbench = drawerModeFromWorkbenchQuery(searchParams.get('workbench'))
+  const initialDrawerFromQuery = READ_ONLY_PREVIEW ? null : requestedWorkbench
   const openCancellationFromQuery = initialDrawerFromQuery === 'cancellation'
+
   const skipNextQueryDrivenReload = useRef(false)
   const cancellationPreviewGenerationRef = useRef(0)
   const mutationGenerationRef = useRef(0)
@@ -325,7 +326,7 @@ export function LegacyVPSDetail({
     const next = new URLSearchParams(searchParams)
     next.delete('workbench')
     skipNextQueryDrivenReload.current = true
-    setSearchParams(next, { replace: true })
+    setSearchParams(next, { replace: true, state: location.state })
   }
 
   function replaceFactDraft(next: FactEditFormState | null) {
@@ -1730,9 +1731,9 @@ export function LegacyVPSDetail({
     if (activeDrawer === 'experience') return '记录经验'
     if (activeDrawer === 'service') return '新增服务'
     if (activeDrawer === 'domain') return '新增域名'
-    if (activeDrawer === 'monitoring-instance-evidence') return '监控观测'
-    if (activeDrawer === 'services-detail') return '服务详情'
-    if (activeDrawer === 'domains-detail') return '域名详情'
+    if (activeDrawer === 'monitoring-instance-evidence') return '已关联监控实例'
+    if (activeDrawer === 'services-detail') return '已关联服务'
+    if (activeDrawer === 'domains-detail') return '已关联域名'
     if (activeDrawer === 'timeline-detail') return '资产历史'
     if (activeDrawer === 'facts-detail') return '基础资料'
     return 'VPS 操作'
@@ -1940,8 +1941,10 @@ export function LegacyVPSDetail({
     if (activeDrawer === 'monitoring-instance-evidence') {
       return (
         <VPSMonitoringInstanceLinksSection
+          vpsId={detail.vps_id}
           monitoring={detail.monitoring_instance_links ?? []}
           writeBlocked={writeBlocked}
+          readOnly={READ_ONLY_PREVIEW}
           unlinkingMonitoringInstanceId={unlinkingMonitoringInstanceId}
           pendingUnlinkMonitoringInstance={pendingUnlinkMonitoringInstance}
           linkFeedback={linkFeedback}
@@ -1961,6 +1964,7 @@ export function LegacyVPSDetail({
           services={state.services}
           error={serviceError}
           notice={serviceNotice}
+          readOnly={READ_ONLY_PREVIEW}
           onCreate={() => openDrawer('service')}
         />
       )
@@ -1971,8 +1975,10 @@ export function LegacyVPSDetail({
           domains={state.domains}
           error={domainError}
           notice={domainNotice}
+          readOnly={READ_ONLY_PREVIEW}
           onCreate={() => openDrawer('domain')}
         />
+
       )
     }
     if (activeDrawer === 'timeline-detail') {
@@ -2015,7 +2021,7 @@ export function LegacyVPSDetail({
   const pageFeedbackItems = pageFeedbackCandidates.filter(isPageFeedbackItem)
 
   return (
-    <div className="page-stack asset-page vps-detail-page">
+    <div className="page asset-page vps-detail-page vps-detail-workspace">
       {currentWriteOwner && currentWriteOwner.viewToken !== viewToken ? (
         <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
           操作处理中，请等待当前写入完成。
@@ -2027,6 +2033,15 @@ export function LegacyVPSDetail({
         isArchived={isArchived}
         lifecycleSubmitting={lifecycleSubmitting}
         writeBlocked={writeBlocked}
+        subscriptions={state.subscriptions}
+        subscriptionsError={state.subscriptionsError}
+        services={state.services}
+        domains={state.domains}
+        recordsPending={!state.detail}
+        ipQuality={state.ipQuality}
+        ipQualityError={state.ipQualityError}
+        monitoringInstances={detail.monitoring_instance_links ?? []}
+
         onDecisionEdit={() => openDrawer('decision')}
         onTimelineOpen={() => openDrawer('timeline-detail')}
         onServicesOpen={() => openDrawer('services-detail')}
@@ -2069,16 +2084,6 @@ export function LegacyVPSDetail({
         </div>
       ) : null}
 
-      <VPSRelatedOverview
-        items={overviewModel.relatedItems}
-        onOpenModal={openDrawer}
-        onMonitoringAgent={openMonitoringAgentWorkbench}
-      />
-
-      <VPSSingleMachineLedger ledger={overviewModel.ledger} onOpenModal={openDrawer} />
-
-      <VPSIPQualitySection vpsId={detail.vps_id} report={state.ipQuality} error={state.ipQualityError} />
-
       {lifecycleConfirmingAction ? (
         <ActionConfirmationModal
           open
@@ -2108,7 +2113,7 @@ export function LegacyVPSDetail({
         >
           {lifecycleConfirmingAction === 'archive' ? (
             <div className="asset-lifecycle-confirm">
-              <p className="asset-lifecycle-confirm__eyebrow">ARCHIVE REVIEW</p>
+              <p className="asset-lifecycle-confirm__eyebrow">归档审查</p>
               {archiveReviewLoading ? (
                 <p className="asset-lifecycle-confirm__callouts">正在检查归档资格…</p>
               ) : archiveBlockers.length > 0 ? (

@@ -110,7 +110,8 @@ test('VPS 概览 partial freshness stays reachable without document overflow at 
   api.useProfile(vpsOverviewProfile({ overview: vpsOverviewPartialFixture() }))
   await page.goto('/vps/vps_001')
 
-  const retry = page.getByRole('button', { name: '重试 IP 质量' })
+  const retry = page.getByRole('button', { name: '刷新 概览 IP 质量' })
+
   await expect(retry).toBeVisible()
   await retry.scrollIntoViewIfNeeded()
   await expectLocatorNotClipped(retry)

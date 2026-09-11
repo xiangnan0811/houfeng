@@ -47,7 +47,6 @@ export function TargetDecisionBoard({
     <section className="target-decision-board page-panel" aria-label="目标判断摘要">
       <div className="section-heading section-heading--inline">
         <div>
-          <p className="section-heading__eyebrow">TARGET DECISION</p>
           <h2>目标判断</h2>
           <p className="section-heading__description">先看下一步动作，再核对健康状态、ProbeItem 覆盖与观测证据。</p>
         </div>

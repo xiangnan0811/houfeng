@@ -439,14 +439,10 @@ export function EventsPage() {
   }
 
   return (
-    <div className="animate-in">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">事件时间线 · TIMELINE</div>
-          <h1 id="events-page-title" className="page-title">事件流</h1>
-          <p className="page-sub">状态变更事件时间线</p>
-        </div>
-        <div className="header-actions">
+    <div className="page">
+      <header className="page__head">
+        <h1 id="events-page-title" className="page__title">事件流</h1>
+        <div className="page__actions">
           <button
             type="button"
             className="btn sm secondary"
@@ -459,7 +455,7 @@ export function EventsPage() {
             高级筛选
           </button>
         </div>
-      </div>
+      </header>
 
       {dashboard && (
         <div className="stat-grid">
@@ -476,13 +472,11 @@ export function EventsPage() {
         </div>
       )}
 
-      <div className="animate-in d1">
-        <EventsFilterPanel
-          filters={appliedFilters}
-          onFilterChange={commitInlineFilter}
-          onTimeRangeChange={commitInlineTimeRange}
-        />
-      </div>
+      <EventsFilterPanel
+        filters={appliedFilters}
+        onFilterChange={commitInlineFilter}
+        onTimeRangeChange={commitInlineTimeRange}
+      />
 
       <EventsFilterDrawer
         open={filtersDrawerOpen}
@@ -494,19 +488,17 @@ export function EventsPage() {
         onFilterChange={updateDraftFilter}
       />
 
-      <div className="animate-in d2">
-        <EventsStreamSection
-          events={filteredEvents}
-          exhausted={state.exhausted}
-          loadingMore={loadingMore}
-          hasActiveFilters={activeFilters}
-          page={currentPage}
-          nameMap={nameMap}
-          onPageChange={handlePageChange}
-          onLoadMore={handleLoadMore}
-          onClearFilters={() => commitFilters(DEFAULT_FILTERS)}
-        />
-      </div>
+      <EventsStreamSection
+        events={filteredEvents}
+        exhausted={state.exhausted}
+        loadingMore={loadingMore}
+        hasActiveFilters={activeFilters}
+        page={currentPage}
+        nameMap={nameMap}
+        onPageChange={handlePageChange}
+        onLoadMore={handleLoadMore}
+        onClearFilters={() => commitFilters(DEFAULT_FILTERS)}
+      />
     </div>
   )
 }

@@ -13,7 +13,10 @@ const cleanups: Array<() => void> = []
 afterEach(() => {
   while (cleanups.length > 0) cleanups.pop()?.()
   document.body.style.overflow = ''
+  const main = document.getElementById('main-content')
+  if (main instanceof HTMLElement) main.style.overflow = ''
 })
+
 
 function register(
   id: string,
@@ -94,4 +97,23 @@ describe('modalStack', () => {
     releaseParent()
     expect(document.body).toHaveStyle({ overflow: 'clip' })
   })
+
+  it('locks the page scroller until the final owner releases it', () => {
+    const main = document.createElement('main')
+    main.id = 'main-content'
+    main.style.overflow = 'auto'
+    document.body.append(main)
+    const releaseParent = acquireBodyScrollLock()
+    const releaseChild = acquireBodyScrollLock()
+    cleanups.push(releaseParent, releaseChild, () => main.remove())
+
+    expect(document.body).toHaveStyle({ overflow: 'hidden' })
+    expect(main).toHaveStyle({ overflow: 'hidden' })
+    releaseChild()
+    expect(main).toHaveStyle({ overflow: 'hidden' })
+    releaseParent()
+    expect(main).toHaveStyle({ overflow: 'auto' })
+    expect(document.body).not.toHaveStyle({ overflow: 'hidden' })
+  })
+
 })

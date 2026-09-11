@@ -8,6 +8,22 @@ export type VPSOverviewCommand =
   | 'open_services'
   | 'open_domains'
 
+const WRITE_COMMANDS: Record<VPSOverviewCommand, boolean> = {
+  open_subscription: true,
+  open_renewal_decision: true,
+  open_management: true,
+  retry_overview: false,
+  open_monitoring_onboarding: true,
+  open_monitoring_instances: false,
+  open_services: false,
+  open_domains: false,
+}
+
+export function isVPSOverviewWriteCommand(command: VPSOverviewCommand): boolean {
+  return WRITE_COMMANDS[command]
+}
+
+
 export type VPSOverviewDestination =
   | { kind: 'route'; to: string }
   | { kind: 'command'; command: VPSOverviewCommand }

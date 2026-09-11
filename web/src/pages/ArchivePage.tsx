@@ -74,17 +74,13 @@ export function ArchivePage() {
   }, [])
 
   return (
-    <div className="page-stack archive-page animate-in">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">历史 · ARCHIVE</div>
-          <h1 className="page-title">归档资产</h1>
-          <p className="page-subtitle">已取消、已归档 VPS 的只读资产历史。</p>
-        </div>
-        <div className="header-actions">
+    <div className="page archive-page">
+      <header className="page__head">
+        <h1 className="page__title">归档资产</h1>
+        <div className="page__actions">
           <Link className="btn sm secondary" to="/vps">返回 VPS</Link>
         </div>
-      </div>
+      </header>
 
       {state.loading ? (
         <PageStateView kind="loading" title="正在加载归档资产" />
@@ -101,7 +97,6 @@ export function ArchivePage() {
         <>
           <section className="hero-panel archive-page__summary">
             <div className="hero-panel__content">
-              <p className="hero-panel__eyebrow">ARCHIVE LEDGER</p>
               <h2 className="hero-panel__title">历史资产仍保留为判断依据</h2>
               <p className="hero-panel__description">
                 这些 VPS 不再进入运营、订阅和资产组合决策主流程；保留账单和时间线用于回看服务商质量、成本与取消依据。

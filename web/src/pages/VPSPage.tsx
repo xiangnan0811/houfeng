@@ -1,10 +1,9 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import {
   Button,
   Modal,
-  MonoDigits,
   SegmentedControl,
   isInteractiveRowTarget,
 } from '../components/atoms'
@@ -12,7 +11,9 @@ import { FilterChip, FilterSelect, type FilterSelectOption } from '../components
 import { PageState as PageStateView } from '../components/PageState'
 import { VPSCreateModal } from '../components/VPSCreateModal'
 import { ApiError, listProviders, listSubscriptions, listVPSAssets } from '../lib/api'
-import { formatDate, formatOptional } from '../lib/format'
+import { formatDate, formatMoney, formatOptional } from '../lib/format'
+import { periodLabel, renewalModeFromLegacy, renewalModeLabel } from '../lib/assetOptions'
+import { overviewImportanceLabel } from '../lib/vpsOverviewPresentation'
 import {
   VPS_LIFECYCLE_STATUS_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
@@ -25,7 +26,6 @@ import {
   type VPSUsageStatus,
 } from '../lib/types'
 import {
-  LifecycleBadge,
   IPQualityBadge,
   RenewalBadge,
 } from './assetPageBadges'
@@ -38,9 +38,16 @@ import {
   lifecycleLabel,
   renewalLabel,
   selectPrimarySubscription,
+  subscriptionStatusLabel,
   usageLabel,
+  vpsLocationLabel,
   type AssetQualityIssue,
 } from './assetPageUtils'
+import './VPSPage.css'
+
+const WORKSPACE_STORAGE_KEY = 'houfeng.vps.workspace'
+
+type VPSWorkspace = 'workbench' | 'ledger'
 
 type VPSQuickView =
   | 'all'
@@ -125,6 +132,10 @@ const QUICK_VIEW_VALUES: VPSQuickView[] = [
   'missing_subscription',
   'missing_facts',
 ]
+const WORKSPACE_ITEMS = [
+  { value: 'workbench' as const, label: '表格视图' },
+  { value: 'ledger' as const, label: '目录视图' },
+]
 
 function describeError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) return error.message
@@ -146,14 +157,37 @@ function parseFilters(searchParams: URLSearchParams): FilterState {
   }
 }
 
-function filterToQuery(filters: FilterState): URLSearchParams {
-  const params = new URLSearchParams()
+function writeFilters(params: URLSearchParams, filters: FilterState) {
   if (filters.view !== 'all') params.set('view', filters.view)
+  else params.delete('view')
   if (filters.provider_id) params.set('provider_id', filters.provider_id)
+  else params.delete('provider_id')
   if (filters.lifecycle_status) params.set('lifecycle_status', filters.lifecycle_status)
+  else params.delete('lifecycle_status')
   if (filters.usage_status) params.set('usage_status', filters.usage_status)
+  else params.delete('usage_status')
   if (filters.renewal_decision) params.set('renewal_decision', filters.renewal_decision)
-  return params
+  else params.delete('renewal_decision')
+}
+
+function parseWorkspace(value: string | null): VPSWorkspace | null {
+  return value === 'workbench' || value === 'ledger' ? value : null
+}
+
+function readStoredWorkspace(): VPSWorkspace {
+  try {
+    return parseWorkspace(window.localStorage.getItem(WORKSPACE_STORAGE_KEY)) ?? 'ledger'
+  } catch {
+    return 'ledger'
+  }
+}
+
+function writeStoredWorkspace(value: VPSWorkspace) {
+  try {
+    window.localStorage.setItem(WORKSPACE_STORAGE_KEY, value)
+  } catch {
+    // Preference is optional; switching still works from URL/state.
+  }
 }
 
 function assetDecisionHrefForFilters(filters: FilterState): string {
@@ -291,11 +325,13 @@ function quickViewLabel(value: VPSQuickView): string {
 }
 
 function renderRenewalDate(row: InventoryRow) {
-  if (row.subscriptionEvidence !== 'ready') return '—'
-  if (!row.subscription?.renew_at) return '—'
+  if (row.subscriptionEvidence === 'loading') return '订阅加载中'
+  if (row.subscriptionEvidence === 'error') return '订阅加载失败'
+  if (!row.subscription) return '无订阅'
+  if (!row.subscription.renew_at) return '无续费日'
   const days = daysUntilDate(row.subscription.renew_at)
   if (days != null && days <= 30) {
-    return <span className="text-warn">{formatDate(row.subscription.renew_at)}</span>
+    return <span className="vps-tone-warn">{formatDate(row.subscription.renew_at)}</span>
   }
   return formatDate(row.subscription.renew_at)
 }
@@ -305,14 +341,272 @@ function providerName(providerID: string | null, providers: ProviderRecord[]): s
   return providers.find((provider) => provider.provider_id === providerID)?.name ?? providerID
 }
 
+function matchesSearch(row: InventoryRow, query: string): boolean {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return true
+  const vps = row.vps
+  return [
+    vps.display_name,
+    vps.ipv4,
+    vps.ipv6,
+    vps.ssh_host,
+    vps.provider_name,
+    vps.country,
+    vps.region,
+    vps.city,
+    vps.datacenter,
+  ].some((part) => part.toLowerCase().includes(needle))
+}
+
+function compactLine(parts: Array<string | null | undefined>): string {
+  return parts.map((part) => (part ?? '').trim()).filter(Boolean).join(' · ')
+}
+
+function vpsSpecLabel(vps: VPSAssetRecord): string {
+  const parts = [vps.product_name, vps.os_name, vps.virtualization]
+    .map((part) => part.trim())
+    .filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : '规格未填写'
+}
+
+function vpsPlaceLabel(vps: VPSAssetRecord): string {
+  const location = vpsLocationLabel(vps)
+  const datacenter = vps.datacenter.trim()
+  if (!datacenter) return location
+  if (location === '位置缺失') return datacenter
+  return `${location} · ${datacenter}`
+}
+
+function vpsPrimaryAddress(vps: VPSAssetRecord): string {
+  return vps.ipv4.trim() || vps.ssh_host.trim() || vps.ipv6.trim() || '—'
+}
+
+
+function subscriptionFact(row: InventoryRow, subscriptionsError: string | null): string {
+  if (row.subscriptionEvidence === 'loading') return '加载中…'
+  if (row.subscriptionEvidence === 'error') {
+    return subscriptionsError
+      ? '加载失败：' + subscriptionsError
+      : '加载失败'
+  }
+  if (!row.subscription) return '无订阅'
+  const subscription = row.subscription
+  return compactLine([
+    formatMoney(subscription.price, subscription.currency),
+    periodLabel(subscription.billing_period_unit, subscription.billing_period_length, subscription.billing_months),
+    subscription.renew_at ? `续费日 ${formatDate(subscription.renew_at)}` : '无续费日',
+    subscriptionStatusLabel(subscription.status),
+    renewalModeLabel(renewalModeFromLegacy(subscription)),
+  ])
+}
+
+function inspectorEmptyMessage(selectedID: string | null, visibleCount: number): string {
+  if (visibleCount === 0) return '暂无匹配的 VPS'
+  if (selectedID) return '选中项不在当前筛选结果中'
+  return '选择 VPS'
+}
+
+function VPSInspector({
+  row,
+  detailHref,
+  currentInventoryHref,
+  subscriptionsError,
+  emptyMessage,
+}: {
+  row: InventoryRow | null
+  detailHref: string | null
+  currentInventoryHref: string
+  subscriptionsError: string | null
+  emptyMessage: string
+}) {
+  return (
+    <section className="vps-inspector" aria-label="VPS 检查器">
+      <div className="vps-inspector__inner">
+        {!row || !detailHref ? (
+          <p className="vps-inspector__empty">{emptyMessage}</p>
+        ) : (
+          <>
+            <h2 className="vps-inspector__title">{row.vps.display_name}</h2>
+            <dl className="vps-inspector__dl">
+              <dt>位置</dt>
+              <dd>{vpsPlaceLabel(row.vps)}</dd>
+              <dt>服务商</dt>
+              <dd>{formatOptional(row.vps.provider_name)}</dd>
+              <dt>IPv4</dt>
+              <dd className="vps-mono">{row.vps.ipv4.trim() || '—'}</dd>
+              {row.vps.ipv6.trim() ? (
+                <>
+                  <dt>IPv6</dt>
+                  <dd className="vps-mono">{row.vps.ipv6.trim()}</dd>
+                </>
+              ) : null}
+              {row.vps.ssh_host.trim() ? (
+                <>
+                  <dt>SSH</dt>
+                  <dd className="vps-mono">
+                    {compactLine([
+                      row.vps.ssh_user.trim() ? `${row.vps.ssh_user.trim()}@${row.vps.ssh_host.trim()}` : row.vps.ssh_host.trim(),
+                      String(row.vps.ssh_port || ''),
+                    ])}
+                  </dd>
+                </>
+              ) : null}
+              <dt>规格</dt>
+              <dd>{vpsSpecLabel(row.vps)}</dd>
+              <dt>生命周期</dt>
+              <dd>{lifecycleLabel(row.vps.lifecycle_status)}</dd>
+              <dt>用途</dt>
+              <dd>{usageLabel(row.vps.usage_status)}</dd>
+              <dt>续费</dt>
+              <dd>{compactLine([renewalLabel(row.vps.renewal_decision), row.subscriptionEvidence === 'ready' ? (row.subscription?.renew_at ? formatDate(row.subscription.renew_at) : '无续费日') : '续费日未知'])}</dd>
+              <dt>订阅</dt>
+              <dd>{subscriptionFact(row, subscriptionsError)}</dd>
+              <dt>关联</dt>
+              <dd>
+                {`监控实例 ${row.vps.active_monitoring_instance_link_count}`}
+                {typeof row.vps.running_monitoring_instance_count === 'number' ? ` · 运行中监控 ${row.vps.running_monitoring_instance_count}` : ''}
+                {typeof row.vps.running_target_count === 'number' ? ` · 运行中探测 ${row.vps.running_target_count}` : ''}
+              </dd>
+              <dt>IP 质量</dt>
+              <dd><IPQualityBadge {...(row.vps.ip_quality_summary === undefined ? {} : { summary: row.vps.ip_quality_summary })} /></dd>
+              {row.vps.importance.trim() ? (
+                <>
+                  <dt>重要性</dt>
+                  <dd>{overviewImportanceLabel(row.vps.importance)}</dd>
+                </>
+              ) : null}
+              {row.vps.labels.length > 0 ? (
+                <>
+                  <dt>标签</dt>
+                  <dd>{row.vps.labels.join('、')}</dd>
+                </>
+              ) : null}
+            </dl>
+            {row.vps.note.trim() ? (
+              <>
+                <hr className="vps-inspector__rule" />
+                <p className="vps-inspector__kicker">备注</p>
+                <p className="vps-inspector__note">{row.vps.note}</p>
+              </>
+            ) : null}
+            <Link
+              className="vps-inspector__action"
+              to={detailHref}
+              state={{ vpsInventoryHref: currentInventoryHref }}
+            >
+              打开 VPS 详情
+            </Link>
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function accordionPanelId(vpsID: string) {
+  return `vps-accordion-${vpsID}`
+}
+
+function VPSQuickFacts({ row }: { row: InventoryRow }) {
+  const attention = cancellationAttentionReason(row)
+  return (
+    <div className="vps-accordion__facts">
+      <div className="vps-accordion__fact">
+        <div className="vps-accordion__fact-label">资产身份</div>
+        <div className="vps-accordion__fact-value">
+          <span className="vps-mono">{vpsPrimaryAddress(row.vps)}</span>
+          {row.vps.provider_name.trim() ? ` · ${row.vps.provider_name}` : ''}
+          {` · ${vpsPlaceLabel(row.vps)}`}
+        </div>
+      </div>
+      <div className="vps-accordion__fact">
+        <div className="vps-accordion__fact-label">经营与续费</div>
+        <div className="vps-accordion__fact-value">
+          {lifecycleLabel(row.vps.lifecycle_status)} · {usageLabel(row.vps.usage_status)}
+          {' · '}
+          <RenewalBadge value={row.vps.renewal_decision} />
+          {' · '}
+          {renderRenewalDate(row)}
+          {attention ? <span className="vps-tone-warn"> · {attention}</span> : null}
+        </div>
+      </div>
+      <div className="vps-accordion__fact">
+        <div className="vps-accordion__fact-label">监控关联</div>
+        <div className="vps-accordion__fact-value">
+          {row.vps.active_monitoring_instance_link_count > 0
+            ? `已关联 ${row.vps.active_monitoring_instance_link_count} 个监控实例`
+            : '未关联监控实例'}
+          {typeof row.vps.running_monitoring_instance_count === 'number' && row.vps.running_monitoring_instance_count > 0
+            ? ` · 运行中 ${row.vps.running_monitoring_instance_count}`
+            : ''}
+        </div>
+      </div>
+      <div className="vps-accordion__fact">
+        <div className="vps-accordion__fact-label">观察证据</div>
+        <div className="vps-accordion__fact-value">
+          <IPQualityBadge
+            {...(row.vps.ip_quality_summary === undefined
+              ? {}
+              : { summary: row.vps.ip_quality_summary })}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function VPSWorkbenchAccordionRow({
+  row,
+  detailHref,
+  currentInventoryHref,
+}: {
+  row: InventoryRow
+  detailHref: string
+  currentInventoryHref: string
+}) {
+  return (
+    <tr className="vps-workbench__accordion">
+      <td colSpan={4}>
+        <div
+          className="vps-accordion"
+          id={accordionPanelId(row.vps.vps_id)}
+          role="region"
+          aria-label="VPS 快速查看"
+        >
+          <Link
+            className="vps-accordion__action"
+            to={detailHref}
+            state={{ vpsInventoryHref: currentInventoryHref }}
+          >
+            打开 VPS 详情
+          </Link>
+          <VPSQuickFacts row={row} />
+        </div>
+      </td>
+    </tr>
+  )
+}
+
+
+
 export function VPSPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = useMemo(() => parseFilters(searchParams), [searchParams])
+  const searchQuery = searchParams.get('q') ?? ''
+  const selectedID = searchParams.get('selected')
+  const urlWorkspace = parseWorkspace(searchParams.get('workspace'))
+  const workspace = urlWorkspace ?? readStoredWorkspace()
   const [draftFilters, setDraftFilters] = useState<FilterState>(filters)
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false)
   const [state, setState] = useState<PageState>(INITIAL_PAGE_STATE)
   const [createOpen, setCreateOpen] = useState(false)
+  const [accordionOpen, setAccordionOpen] = useState(false)
+  const currentInventoryHref = `/vps${location.search}`
+  useEffect(() => {
+    if (urlWorkspace) writeStoredWorkspace(urlWorkspace)
+  }, [urlWorkspace])
 
   useEffect(() => {
     let cancelled = false
@@ -389,6 +683,11 @@ export function VPSPage() {
     () => applyInventoryFilters(inventoryRows, filters),
     [inventoryRows, filters],
   )
+  const visibleRows = useMemo(
+    () => filteredRows.filter((row) => matchesSearch(row, searchQuery)),
+    [filteredRows, searchQuery],
+  )
+  const selectedRow = visibleRows.find((row) => row.vps.vps_id === selectedID) ?? null
   const providerSelectOptions = providerFilterOptions(state.providers)
   const active = hasActiveFilters(filters)
   const missingSubscriptionCount = subscriptionEvidence === 'ready'
@@ -409,13 +708,49 @@ export function VPSPage() {
     { value: 'missing_facts', label: '缺信息', count: missingFactsCount },
   ] satisfies Array<{ value: VPSQuickView; label: string; count: number }>
 
+  function patchSearchParams(patch: (params: URLSearchParams) => void, flushSync = false) {
+    const next = new URLSearchParams(searchParams)
+    patch(next)
+    setSearchParams(next, { replace: true, flushSync })
+  }
+
   function setFilter<K extends keyof FilterState>(key: K, value: FilterState[K]) {
-    const next = { ...filters, [key]: value }
-    setSearchParams(filterToQuery(next), { replace: true })
+    const nextFilters = { ...filters, [key]: value }
+    patchSearchParams((params) => writeFilters(params, nextFilters))
+  }
+
+  function setWorkspace(next: VPSWorkspace) {
+    writeStoredWorkspace(next)
+    patchSearchParams((params) => {
+      params.set('workspace', next)
+    })
+  }
+
+  function setSelected(vpsID: string) {
+    patchSearchParams((params) => {
+      params.set('selected', vpsID)
+    })
+  }
+
+  function selectOrToggle(vpsID: string) {
+    if (selectedID === vpsID) {
+      setAccordionOpen((open) => !open)
+      return
+    }
+    setSelected(vpsID)
+    setAccordionOpen(true)
+  }
+
+  function setSearchQuery(value: string) {
+    patchSearchParams((params) => {
+      const next = value.trim()
+      if (next) params.set('q', value)
+      else params.delete('q')
+    }, true)
   }
 
   function clearFilters() {
-    setSearchParams(new URLSearchParams(), { replace: true })
+    patchSearchParams((params) => writeFilters(params, INITIAL_FILTER_STATE))
   }
 
   function openFilterDrawer() {
@@ -424,18 +759,21 @@ export function VPSPage() {
   }
 
   function applyDrawerFilters() {
-    setSearchParams(filterToQuery(draftFilters), { replace: true })
+    patchSearchParams((params) => writeFilters(params, draftFilters))
     setFilterDrawerOpen(false)
   }
 
+  const listEmptyMessage = state.vps.length === 0
+    ? { title: '还没有录入 VPS 资产', detail: '先录入 VPS。' }
+    : { title: '当前筛选没有匹配 VPS', detail: searchQuery.trim() ? '改搜索或清空筛选。' : '清空筛选或新建 VPS。' }
+  const inspectorEmpty = inspectorEmptyMessage(selectedID, visibleRows.length)
+  const selectedDetailHref = selectedRow ? vpsDetailHref(selectedRow.vps.vps_id, filters.view) : null
+
   return (
-    <div className="animate-in">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">资产库存 · INVENTORY</div>
-          <h1 className="page-title">VPS 资产</h1>
-        </div>
-        <div className="header-actions">
+    <div className="page vps-page">
+      <header className="page__head">
+        <h1 className="page__title">VPS 资产</h1>
+        <div className="page__actions">
           <Link className="btn sm secondary" to={assetDecisionHrefForFilters(filters)}>进入组合决策</Link>
           <Link className="btn sm secondary" to="/archive">查看归档</Link>
           <button type="button" className="btn sm secondary" onClick={openFilterDrawer}>筛选</button>
@@ -443,9 +781,33 @@ export function VPSPage() {
             {state.vps.length === 0 ? '创建第一台 VPS' : '添加 VPS'}
           </button>
         </div>
+      </header>
+
+      <div className="vps-page__tools">
+        <SegmentedControl
+          label="VPS 工作视图"
+          items={WORKSPACE_ITEMS}
+          value={workspace}
+          onChange={setWorkspace}
+        />
+        <input
+          className="vps-page__search"
+          type="search"
+          aria-label="搜索 VPS"
+          placeholder="搜索名称、IP、服务商、位置"
+          value={searchQuery}
+          autoComplete="off"
+          onChange={(event) => setSearchQuery(event.target.value)}
+        />
+        <p className="vps-page__stats">
+          <span className="vps-mono">{inventoryRows.length}</span> 台
+          {visibleRows.length !== inventoryRows.length ? (
+            <> · 显示 <span className="vps-mono">{visibleRows.length}</span></>
+          ) : null}
+        </p>
       </div>
 
-      <div className="tabs animate-in">
+      <div className="page-filters">
         <SegmentedControl
           label="VPS 快速视图"
           items={quickViews}
@@ -455,7 +817,7 @@ export function VPSPage() {
       </div>
 
       {active && (
-        <div className="filter-bar animate-in d1">
+        <div className="filter-bar">
           {filters.view !== 'all' && <FilterChip label={`视图: ${quickViewLabel(filters.view)}`} onRemove={() => setFilter('view', 'all')} />}
           {filters.provider_id && <FilterChip label={`服务商: ${providerName(filters.provider_id, state.providers)}`} onRemove={() => setFilter('provider_id', null)} />}
           {filters.lifecycle_status && <FilterChip label={`生命周期: ${lifecycleLabel(filters.lifecycle_status)}`} onRemove={() => setFilter('lifecycle_status', null)} />}
@@ -466,81 +828,159 @@ export function VPSPage() {
       )}
 
       {subscriptionEvidence === 'error' && (
-        <p className="text-sm text-warn" role="status">
-          订阅不可用，不判定。{state.subscriptionsError}
+        <p className="vps-page__notice" role="status">
+          订阅加载失败。{state.subscriptionsError}
         </p>
       )}
 
-      <div className="animate-in d2">
+      <div className="vps-canvas" data-workspace={workspace}>
         {state.inventoryLoading ? (
           <PageStateView kind="loading" title="正在加载 VPS…" surface="empty" compact />
         ) : state.inventoryError ? (
           <PageStateView kind="error" title="VPS 库存不可用" description={state.inventoryError} technicalSummary={state.inventoryError} surface="empty" compact />
-        ) : filteredRows.length === 0 ? (
-          <div className="empty-state">
-            <strong>{active ? '当前筛选没有匹配 VPS' : '还没有录入 VPS 资产'}</strong>
-            <span>{active ? '清空筛选或新建 VPS。' : '先录入 VPS。'}</span>
+        ) : workspace === 'workbench' ? (
+          <div className="vps-workbench">
+            <div className="vps-workbench__list" role="region" aria-label="VPS 清单">
+              {visibleRows.length === 0 ? (
+                <div className="vps-canvas__empty">
+                  <strong>{listEmptyMessage.title}</strong>
+                  <div>{listEmptyMessage.detail}</div>
+                </div>
+              ) : (
+                <table className="vps-workbench__table">
+                  <thead>
+                    <tr>
+                      <th scope="col">机器</th>
+                      <th scope="col">位置与规格</th>
+                      <th scope="col">经营与续费</th>
+                      <th scope="col">证据</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleRows.map((row) => {
+                      const selected = row.vps.vps_id === selectedID
+                      const expanded = selected && accordionOpen
+                      const attention = cancellationAttentionReason(row)
+                      const detailHref = vpsDetailHref(row.vps.vps_id, filters.view)
+                      return (
+                        <Fragment key={row.vps.vps_id}>
+                          {/* a11y-allow-nonsemantic-click: primary-link-row-enhancement */}
+                          <tr
+                            className="vps-workbench__row row-clickable"
+                            aria-selected={selected}
+                            onClick={(event) => {
+                              if (isInteractiveRowTarget(event.target)) return
+                              selectOrToggle(row.vps.vps_id)
+                            }}
+                          >
+                            <td>
+                              <div className="vps-workbench__identity-head">
+                                <button
+                                  type="button"
+                                  className="vps-workbench__name"
+                                  aria-label={`选择 ${row.vps.display_name}`}
+                                  aria-pressed={selected}
+                                  aria-expanded={expanded}
+                                  aria-controls={expanded ? accordionPanelId(row.vps.vps_id) : undefined}
+                                  onClick={() => selectOrToggle(row.vps.vps_id)}
+                                >
+                                  {row.vps.display_name}
+                                </button>
+                              </div>
+                              <div className="vps-workbench__meta">
+                                <span className="vps-mono">{vpsPrimaryAddress(row.vps)}</span>
+                                {row.vps.provider_name.trim() ? ` · ${row.vps.provider_name}` : ''}
+                              </div>
+                            </td>
+                            <td>
+                              <div>{vpsPlaceLabel(row.vps)}</div>
+                              <div className="vps-workbench__meta">{vpsSpecLabel(row.vps)}</div>
+                            </td>
+                            <td>
+                              <div>{lifecycleLabel(row.vps.lifecycle_status)} · {usageLabel(row.vps.usage_status)}</div>
+                              <div className="vps-workbench__meta">
+                                <RenewalBadge value={row.vps.renewal_decision} />
+                                {' · '}
+                                {renderRenewalDate(row)}
+                              </div>
+                            </td>
+                            <td>
+                              <IPQualityBadge
+                                {...(row.vps.ip_quality_summary === undefined
+                                  ? {}
+                                  : { summary: row.vps.ip_quality_summary })}
+                              />
+                              <div className={attention ? 'vps-workbench__meta vps-tone-warn' : 'vps-workbench__meta'}>
+                                {row.vps.active_monitoring_instance_link_count > 0
+                                  ? `监控 ${row.vps.active_monitoring_instance_link_count}`
+                                  : '未关联监控'}
+                                {attention ? ` · ${attention}` : ''}
+                              </div>
+                            </td>
+                          </tr>
+                          {expanded ? (
+                            <VPSWorkbenchAccordionRow
+                              row={row}
+                              detailHref={detailHref}
+                              currentInventoryHref={currentInventoryHref}
+                            />
+                          ) : null}
+                        </Fragment>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>VPS</th>
-                <th>服务商</th>
-                <th>IP</th>
-                <th>IP 质量</th>
-                <th>生命周期</th>
-                <th>续费决策</th>
-                <th>到期</th>
-                <th>关联监控实例</th>
-                <th>资产联动</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRows.map((row) => {
-                const cancellationReason = cancellationAttentionReason(row)
-                const detailHref = vpsDetailHref(row.vps.vps_id, filters.view)
-                return (
-                  <Fragment key={row.vps.vps_id}>
-                    {/* a11y-allow-nonsemantic-click: primary-link-row-enhancement */}
-                    <tr
-                      onClick={(event) => {
-                        if (isInteractiveRowTarget(event.target)) return
-                        navigate(detailHref)
-                      }}
-                      className="row-clickable"
-                    >
-                      <td>
-                        <Link className="name" to={detailHref}>
-                          {row.vps.display_name}
-                        </Link>
-                      </td>
-                      <td>{formatOptional(row.vps.provider_name)}</td>
-                      <td className="mono">{row.vps.ipv4 || row.vps.ssh_host || '—'}</td>
-                      <td>
-                        <IPQualityBadge
-                          {...(row.vps.ip_quality_summary === undefined
-                            ? {}
-                            : { summary: row.vps.ip_quality_summary })}
-                        />
-                      </td>
-                      <td><LifecycleBadge value={row.vps.lifecycle_status} /></td>
-                      <td><RenewalBadge value={row.vps.renewal_decision} /></td>
-                      <td className="time">{renderRenewalDate(row)}</td>
-                      <td>{row.vps.active_monitoring_instance_link_count > 0 ? <MonoDigits>{row.vps.active_monitoring_instance_link_count}</MonoDigits> : '—'}</td>
-                      <td>
-                        {cancellationReason ? (
-                          <span className="asset-context-pill asset-context-pill--attention">{cancellationReason}</span>
-                        ) : (
-                          <span className="asset-context-pill">已同步</span>
-                        )}
-                      </td>
-                    </tr>
-                  </Fragment>
-                )
-              })}
-            </tbody>
-          </table>
+          <div className="vps-ledger">
+            <aside className="vps-ledger__dir">
+              <div className="vps-ledger__head">
+                <h2 className="vps-ledger__title">{visibleRows.length} 台机器</h2>
+              </div>
+              <div className="vps-ledger__items" role="region" aria-label="VPS 目录">
+                {visibleRows.length === 0 ? (
+                  <p className="vps-canvas__empty">{listEmptyMessage.title} {listEmptyMessage.detail}</p>
+                ) : (
+                  visibleRows.map((row) => {
+                    const selected = row.vps.vps_id === selectedID
+                    const attention = cancellationAttentionReason(row)
+                    return (
+                      <button
+                        key={row.vps.vps_id}
+                        type="button"
+                        className="vps-ledger__item"
+                        aria-label={`选择 ${row.vps.display_name}`}
+                        aria-pressed={selected}
+                        onClick={() => setSelected(row.vps.vps_id)}
+                      >
+                        <span className="vps-ledger__item-name">{row.vps.display_name}</span>
+                        <span className="vps-ledger__item-line">
+                          <span className="vps-mono">{vpsPrimaryAddress(row.vps)}</span>
+                          {compactLine(['', row.vps.provider_name, vpsPlaceLabel(row.vps)]) ? ` · ${compactLine([row.vps.provider_name, vpsPlaceLabel(row.vps)])}` : ''}
+                        </span>
+                        <span className={attention ? 'vps-ledger__item-st vps-tone-warn' : 'vps-ledger__item-st'}>
+                          {compactLine([
+                            lifecycleLabel(row.vps.lifecycle_status),
+                            renewalLabel(row.vps.renewal_decision),
+                            attention,
+                          ])}
+                        </span>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            </aside>
+            <VPSInspector
+              row={selectedRow}
+              detailHref={selectedDetailHref}
+              currentInventoryHref={currentInventoryHref}
+              subscriptionsError={state.subscriptionsError}
+              emptyMessage={inspectorEmpty}
+            />
+          </div>
         )}
       </div>
 
@@ -549,7 +989,7 @@ export function VPSPage() {
         onClose={() => setCreateOpen(false)}
         providers={state.providers}
         existingCountries={state.vps.map((vps) => vps.country)}
-        onCreated={(vps) => navigate(`/vps/${vps.vps_id}`)}
+        onCreated={(vps) => navigate(`/vps/${vps.vps_id}`, { state: { vpsInventoryHref: currentInventoryHref } })}
         onProviderCreated={(p) => setState((s) => ({ ...s, providers: [...s.providers, p] }))}
       />
 

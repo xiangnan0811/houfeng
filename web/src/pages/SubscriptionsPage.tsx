@@ -533,34 +533,32 @@ export function SubscriptionsPage() {
   }
 
   return (
-    <div className="page-stack">
-      <div className="watchtower-header" aria-label="订阅成本中枢">
-        <div className="watchtower-header__row1">
-          <div className="watchtower-header__title-block">
-            <h1>订阅成本中枢</h1>
-            <div className="badge-row">
-              <span className="badge badge--state tone--normal"><span className="badge__dot" />{baseCurrency} 基准</span>
-              <span className="badge badge--state tone--maintenance"><span className="badge__dot" />年度统计</span>
-            </div>
-          </div>
-          <div className="watchtower-header__actions">
-            <button className="btn md secondary" onClick={handleRefreshRates} disabled={refreshingRates}>
-              {refreshingRates ? '刷新中…' : '刷新汇率'}
-            </button>
-            <Link className="btn md secondary" to="/settings?tab=subscriptions">订阅配置</Link>
-            <button className="btn md primary" onClick={openCreate}>
-              <svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" /></svg>
-              新建订阅
-            </button>
+    <div className="page">
+      <header className="page__head" aria-label="订阅成本中枢">
+        <div>
+          <h1 className="page__title">订阅成本中枢</h1>
+          <p className="page-sub">
+            <span>工作台数据按列表、概览、年度统计分层加载</span>
+            {' · '}
+            <span>低频配置在设置页统一管理</span>
+            {rateNotice ? <>{' · '}<span>{rateNotice}</span></> : null}
+          </p>
+          <div className="badge-row">
+            <span className="badge badge--state tone--normal"><span className="badge__dot" />{baseCurrency} 基准</span>
+            <span className="badge badge--state tone--maintenance"><span className="badge__dot" />年度统计</span>
           </div>
         </div>
-        <div className="watchtower-header__row2">
-          <span className="watchtower-header__meta-item">工作台数据按列表、概览、年度统计分层加载</span>
-          <span className="watchtower-header__meta-sep">·</span>
-          <span className="watchtower-header__meta-item">低频配置在设置页统一管理</span>
-          {rateNotice ? <><span className="watchtower-header__meta-sep">·</span><span className="watchtower-header__meta-item">{rateNotice}</span></> : null}
+        <div className="page__actions">
+          <button className="btn md secondary" onClick={handleRefreshRates} disabled={refreshingRates}>
+            {refreshingRates ? '刷新中…' : '刷新汇率'}
+          </button>
+          <Link className="btn md secondary" to="/settings?tab=subscriptions">订阅配置</Link>
+          <button className="btn md primary" onClick={openCreate}>
+            <svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" /></svg>
+            新建订阅
+          </button>
         </div>
-      </div>
+      </header>
 
       {state.loading ? (
         <PageStateView kind="loading" title="正在加载…" surface="empty" compact />
@@ -572,7 +570,7 @@ export function SubscriptionsPage() {
         />
       ) : (
         <>
-          <div className="subscription-metric-grid animate-in">
+          <div className="subscription-metric-grid">
             <button className="subscription-metric-card subscription-metric-card--normal" onClick={() => clearFilters()}>
               <span><StatusGlyph state="normal" size="sm" />月均成本</span>
               <strong>{moneyBase(state.overview?.total_monthly_cost, baseCurrency)}</strong>
@@ -608,14 +606,11 @@ export function SubscriptionsPage() {
 
           <section className="page-panel page-panel--scroll-x">
             <div className="section-heading section-heading--inline">
-              <div>
-                <p className="section-heading__eyebrow">Subscriptions</p>
-                <h2 className="section-heading__title">订阅明细</h2>
-              </div>
+              <h2 className="section-heading__title">订阅明细</h2>
               <span className="section-heading__meta">{state.subscriptions.length} 条</span>
             </div>
             <div className="subscription-list-workspace">
-              <div className="filter-panel filter-panel--embedded animate-in">
+              <div className="filter-panel filter-panel--embedded">
                 <div className="filter-bar">
                   <div className="filter-bar__controls">
                     <div className="filter-bar__controls-row">
@@ -673,7 +668,7 @@ export function SubscriptionsPage() {
                 surface="empty" compact
               />
             ) : (
-              <table className="data-table data-table--compact asset-table animate-in">
+              <table className="data-table data-table--compact asset-table">
                 <thead className="data-table__head">
                   <tr>
                     <th>VPS</th>
