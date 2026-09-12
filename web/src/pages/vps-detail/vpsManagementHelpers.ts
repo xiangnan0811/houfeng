@@ -108,7 +108,7 @@ export function subscriptionLinkageAction(
     }
     return {
       to: `/vps/${encodeURIComponent(vpsId)}?workbench=subscription`,
-      label: '创建/更新订阅',
+      label: '新增订阅事实',
       panel: 'subscription',
     }
   }

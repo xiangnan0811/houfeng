@@ -2,12 +2,14 @@ import { Link } from 'react-router-dom'
 
 import { Badge, Button, MonoDigits } from '../../components/atoms'
 import { formatDate } from '../../lib/format'
-import type { AssetDomainRecord } from '../../lib/types'
+import type { AssetDomainRecord, AssetServiceRecord } from '../../lib/types'
 import { AssetLabels } from '../assetPageBadges'
-import { domainResourceName, domainResourceStatus } from './vpsDetailResourcePresentation'
+import { VPSObject } from './VPSDetailDialog'
+import { domainResourceName, domainResourceStatus, serviceResourceName } from './vpsDetailResourcePresentation'
 
 type VPSDomainsSectionProps = {
   domains: AssetDomainRecord[]
+  services: AssetServiceRecord[]
   error: string | null
   notice: string | null
   readOnly?: boolean
@@ -16,18 +18,19 @@ type VPSDomainsSectionProps = {
 
 export function VPSDomainsSection({
   domains,
+  services,
   error,
   notice,
   readOnly = false,
   onCreate,
 }: VPSDomainsSectionProps) {
   return (
-    <div className="vps-relation-modal">
-      <p className="vps-relation-modal__count">
-        <MonoDigits>{domains.length}</MonoDigits> 个已关联域名
+    <div className="vps-objects">
+      <p className="vps-context">
+        共<MonoDigits>{domains.length}</MonoDigits>项
       </p>
       {!readOnly ? (
-        <div className="vps-relation-modal__actions">
+        <div>
           <Button variant="secondary" size="sm" onClick={onCreate}>新增域名</Button>
         </div>
       ) : null}
@@ -39,7 +42,7 @@ export function VPSDomainsSection({
         <p className="asset-operation-feedback" role="status">{notice}</p>
       ) : null}
       {domains.length > 0 ? (
-        <ul className="vps-relation-list">
+        <ul className="vps-object-list">
           {domains.map((domain) => {
             const probe = domain.target_id?.trim() ?? ''
             const purpose = domain.purpose.trim()
@@ -47,20 +50,22 @@ export function VPSDomainsSection({
             const expires = domain.expires_at?.trim() ?? ''
             const note = domain.note.trim()
             const serviceId = domain.service_id?.trim() ?? ''
+            const linkedService = serviceId
+              ? services.find((service) => service.service_id === serviceId)
+              : undefined
+            const linkedServiceName = linkedService ? serviceResourceName(linkedService) : null
             return (
-              <li key={domain.domain_id} className="vps-relation-row vps-relation-row--resource vps-relation-row--domain">
-                <div className="vps-detail-resource__primary">
-                  <div className="vps-detail-resource__identity">
-                    <strong className="vps-detail-resource__name mono">{domainResourceName(domain)}</strong>
-                    <span className="vps-detail-resource__id mono">{domain.domain_id}</span>
-                  </div>
-                  <span className="vps-detail-resource__status badge-row badge-row--wrap">
-                    <Badge variant="state" tone={domain.status === 'active' ? 'normal' : 'offline'}>
-                      {domainResourceStatus(domain)}
-                    </Badge>
-                  </span>
-                </div>
-                <dl className="vps-relation-row__facts">
+              <VPSObject
+                key={domain.domain_id}
+                name={<span className="mono">{domainResourceName(domain)}</span>}
+                id={domain.domain_id}
+                status={
+                  <Badge variant="state" tone={domain.status === 'active' ? 'normal' : 'offline'}>
+                    {domainResourceStatus(domain)}
+                  </Badge>
+                }
+              >
+                <dl className="vps-object__facts">
                   <div>
                     <dt>HTTPS</dt>
                     <dd>{domain.https_enabled ? '已启用' : '未记录'}</dd>
@@ -83,9 +88,16 @@ export function VPSDomainsSection({
                   </div>
                   <div>
                     <dt>关联服务</dt>
-                    <dd>{serviceId ? <span className="mono">{serviceId}</span> : '未关联'}</dd>
+                    <dd>
+                      {serviceId ? (
+                        <>
+                          {linkedServiceName ? <>{linkedServiceName} </> : null}
+                          <span className="mono">{serviceId}</span>
+                        </>
+                      ) : '未关联'}
+                    </dd>
                   </div>
-                  <div className="vps-relation-row__wide">
+                  <div className="vps-wide">
                     <dt>入口探测</dt>
                     <dd>
                       {probe ? (
@@ -96,19 +108,19 @@ export function VPSDomainsSection({
                     </dd>
                   </div>
                   {domain.labels.length > 0 ? (
-                    <div className="vps-relation-row__wide">
+                    <div className="vps-wide">
                       <dt>标签</dt>
                       <dd><AssetLabels labels={domain.labels} /></dd>
                     </div>
                   ) : null}
                   {note ? (
-                    <div className="vps-relation-row__wide vps-relation-row__note">
+                    <div className="vps-wide">
                       <dt>备注</dt>
                       <dd>{note}</dd>
                     </div>
                   ) : null}
                 </dl>
-              </li>
+              </VPSObject>
             )
           })}
         </ul>

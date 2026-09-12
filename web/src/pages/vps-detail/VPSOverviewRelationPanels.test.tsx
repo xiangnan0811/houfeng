@@ -124,8 +124,10 @@ describe('VPSOverviewRelationPanels', () => {
     expect(screen.getByText('东京监控')).toBeInTheDocument()
     expect(screen.getByText('mi_001')).toBeInTheDocument()
     expect(screen.getByText('监控配置')).toBeInTheDocument()
+    expect(screen.getByText('监控配置').tagName).toBe('DT')
     expect(screen.getByText('启用')).toBeInTheDocument()
     expect(screen.getByText('观测健康')).toBeInTheDocument()
+    expect(screen.getByText('观测健康').tagName).not.toBe('DT')
     expect(screen.queryByRole('heading', { name: '监控观测' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '查看监控实例' })).toHaveAttribute('href', '/monitoring/mi_001?return_vps=vps_001')
     expect(api.listVPSMonitoringInstances).toHaveBeenCalledWith('vps_001')
@@ -145,6 +147,7 @@ describe('VPSOverviewRelationPanels', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开域名关系' }))
     expect(await screen.findByText('edge.example.com')).toBeInTheDocument()
     expect(api.listVPSDomains).toHaveBeenCalledWith('vps_001')
+    expect(api.listVPSServices).toHaveBeenCalledTimes(2)
     expect(screen.queryByRole('button', { name: '新增域名' })).not.toBeInTheDocument()
   })
 
@@ -217,7 +220,7 @@ describe('VPSOverviewRelationPanels', () => {
     expect(await screen.findByText('尚未记录服务')).toBeInTheDocument()
   })
 
-  it('keeps service association fields on shared tracks without repeating labels', async () => {
+  it('keeps complete service entries and valid actions for missing and non-HTTP endpoints', async () => {
     vi.spyOn(api, 'listVPSServices').mockResolvedValue([
       {
         ...SERVICE,
@@ -248,34 +251,103 @@ describe('VPSOverviewRelationPanels', () => {
     renderHarness()
     fireEvent.click(screen.getByRole('button', { name: '打开服务关系' }))
     const dialog = await screen.findByRole('dialog', { name: '已关联服务' })
-    const rows = dialog.querySelectorAll('.vps-relation-row--service')
+    const rows = within(dialog).getAllByRole('listitem')
     expect(rows).toHaveLength(3)
 
     const httpRow = within(rows[0] as HTMLElement)
-    expect(httpRow.getByText('端口').tagName).toBe('DT')
+    expect(httpRow.getByText('Web')).toBeInTheDocument()
     expect(httpRow.getByText('443')).toBeInTheDocument()
-    expect(httpRow.queryByText('端口 443')).not.toBeInTheDocument()
     expect(httpRow.getByRole('link', { name: 'https://example.invalid' })).toHaveAttribute('href', 'https://example.invalid')
     expect(httpRow.getByRole('button', { name: '复制入口' })).toBeInTheDocument()
     expect(httpRow.getByRole('link', { name: 'tg_001' })).toHaveAttribute('href', '/targets/tg_001')
 
     const emptyRow = within(rows[1] as HTMLElement)
-    const entry = emptyRow.getByText('入口')
-    expect(entry.tagName).toBe('DT')
-    expect(entry.nextElementSibling).toHaveTextContent('未记录')
-    expect(emptyRow.queryByText('入口未记录')).not.toBeInTheDocument()
-    const probe = emptyRow.getByText('入口探测')
-    expect(probe.tagName).toBe('DT')
-    expect(probe.nextElementSibling).toHaveTextContent('未关联')
-    expect(emptyRow.queryByText('未关联入口探测')).not.toBeInTheDocument()
-    expect(emptyRow.getByText('端口').nextElementSibling).toHaveTextContent('未记录')
-
+    expect(emptyRow.queryByRole('button', { name: '复制入口' })).not.toBeInTheDocument()
 
     const grpcRow = within(rows[2] as HTMLElement)
     expect(grpcRow.getByText('grpc://stream.example.invalid/very/long/path:50051')).toBeInTheDocument()
     expect(grpcRow.queryByRole('link', { name: /grpc:/ })).not.toBeInTheDocument()
     expect(grpcRow.getByRole('button', { name: '复制入口' })).toBeInTheDocument()
     expect(grpcRow.getByText('50051')).toBeInTheDocument()
+  })
+
+  it('shows domain records and IDs when optional service lookup fails', async () => {
+    vi.spyOn(api, 'listVPSDomains').mockResolvedValue([{ ...DOMAIN, service_id: 'svc_001' }])
+    vi.spyOn(api, 'listVPSServices').mockRejectedValue(new Error('service catalog offline'))
+    vi.spyOn(api, 'listVPSMonitoringInstances').mockResolvedValue([])
+    renderHarness()
+
+    fireEvent.click(screen.getByRole('button', { name: '打开域名关系' }))
+    const dialog = await screen.findByRole('dialog', { name: '已关联域名' })
+    expect(await screen.findByText('edge.example.com')).toBeInTheDocument()
+    expect(within(dialog).getByText('svc_001')).toBeInTheDocument()
+    expect(screen.queryByText('Gateway')).not.toBeInTheDocument()
+    expect(api.listVPSDomains).toHaveBeenCalledWith('vps_001')
+    expect(api.listVPSServices).toHaveBeenCalledWith('vps_001')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重试加载域名' })).not.toBeInTheDocument()
+  })
+
+  it('fills a readable service name beside the domain association ID when metadata arrives', async () => {
+    const pendingServices = deferred<AssetServiceRecord[]>()
+    vi.spyOn(api, 'listVPSDomains').mockResolvedValue([{ ...DOMAIN, service_id: 'svc_001' }])
+    vi.spyOn(api, 'listVPSServices').mockReturnValue(pendingServices.promise)
+    vi.spyOn(api, 'listVPSMonitoringInstances').mockResolvedValue([])
+    renderHarness()
+
+    fireEvent.click(screen.getByRole('button', { name: '打开域名关系' }))
+    expect(await screen.findByText('svc_001')).toBeInTheDocument()
+    expect(screen.queryByText('Gateway')).not.toBeInTheDocument()
+
+    await act(async () => pendingServices.resolve([SERVICE]))
+    expect(screen.getByText('Gateway')).toBeInTheDocument()
+    expect(screen.getByText('svc_001')).toBeInTheDocument()
+  })
+
+  it('keeps domain load errors and retry when service metadata would succeed', async () => {
+    vi.spyOn(api, 'listVPSDomains')
+      .mockRejectedValueOnce(new Error('domain catalog offline'))
+      .mockResolvedValueOnce([{ ...DOMAIN, service_id: 'svc_001' }])
+    vi.spyOn(api, 'listVPSServices').mockResolvedValue([SERVICE])
+    vi.spyOn(api, 'listVPSMonitoringInstances').mockResolvedValue([])
+    renderHarness()
+
+    fireEvent.click(screen.getByRole('button', { name: '打开域名关系' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('domain catalog offline')
+    expect(screen.queryByText('edge.example.com')).not.toBeInTheDocument()
+    expect(screen.queryByText('Gateway')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试加载域名' }))
+    expect(await screen.findByText('edge.example.com')).toBeInTheDocument()
+    expect(screen.getByText('Gateway')).toBeInTheDocument()
+    expect(screen.getByText('svc_001')).toBeInTheDocument()
+  })
+
+  it('does not apply stale service metadata after VPS identity changes', async () => {
+    const pendingServices = deferred<AssetServiceRecord[]>()
+    const nextDomains = deferred<AssetDomainRecord[]>()
+    vi.spyOn(api, 'listVPSDomains')
+      .mockResolvedValueOnce([{ ...DOMAIN, service_id: 'svc_001' }])
+      .mockReturnValueOnce(nextDomains.promise)
+    vi.spyOn(api, 'listVPSServices')
+      .mockReturnValueOnce(pendingServices.promise)
+      .mockResolvedValueOnce([])
+    vi.spyOn(api, 'listVPSMonitoringInstances').mockResolvedValue([])
+    renderHarness()
+
+    fireEvent.click(screen.getByRole('button', { name: '打开域名关系' }))
+    expect(await screen.findByText('edge.example.com')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '切换 VPS' }))
+    expect(screen.queryByText('edge.example.com')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载域名')
+    expect(api.listVPSDomains).toHaveBeenLastCalledWith('vps_002')
+
+    await act(async () => pendingServices.resolve([SERVICE]))
+    expect(screen.queryByText('Gateway')).not.toBeInTheDocument()
+    expect(screen.queryByText('edge.example.com')).not.toBeInTheDocument()
+
+    await act(async () => nextDomains.resolve([]))
+    expect(await screen.findByText('尚未记录域名')).toBeInTheDocument()
+    expect(screen.queryByText('Gateway')).not.toBeInTheDocument()
   })
 
 })

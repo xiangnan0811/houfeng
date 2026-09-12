@@ -39,14 +39,12 @@ function renderForm(
     <MemoryRouter>
       <VPSFactsEditForm
         key="2026-08-20T00:00:00Z"
+        formId="vps-facts-form"
         draft={draft}
         providers={[]}
         providersLoading={false}
         providersError={null}
         submitting={false}
-        error={null}
-        notice={null}
-        onCancel={vi.fn()}
         onDraftChange={onDraftChange}
         onSubmit={vi.fn()}
       />
@@ -72,14 +70,12 @@ describe('VPSFactsEditForm', () => {
       <MemoryRouter>
         <VPSFactsEditForm
           key="2026-08-21T00:00:00Z"
+          formId="vps-facts-form"
           draft={merged}
           providers={[]}
           providersLoading={false}
           providersError={null}
           submitting={false}
-          error={null}
-          notice={null}
-          onCancel={vi.fn()}
           onDraftChange={onDraftChange}
           onSubmit={vi.fn()}
         />

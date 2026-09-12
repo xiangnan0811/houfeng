@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type RefObject } from 'react'
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent, type RefObject } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
@@ -23,6 +23,7 @@ import type {
   VPSAssetDetail,
 } from '../../lib/types'
 import { useOptionalVPSWriteRegistry } from '../../lib/vpsWriteRegistry-context'
+import { VPSDetailDialog, VPSDialogActions } from './VPSDetailDialog'
 import { VPSFactsEditForm } from './VPSFactsEditForm'
 import type { VPSManagementController } from './hooks/useVPSManagementController'
 import { VPSRenewalDecisionForm } from './VPSRenewalDecisionForm'
@@ -88,6 +89,7 @@ export function VPSOverviewManagementActions({
   writeOwnerStore: providedWriteOwnerStore,
   viewToken: providedViewToken,
 }: Props) {
+  const formId = useId()
   const navigate = useNavigate()
   const [detail, setDetail] = useState<VPSAssetDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -706,13 +708,16 @@ export function VPSOverviewManagementActions({
         />
       ) : null}
 
-      <Modal
+      <VPSDetailDialog
         open={factsOpen}
         onClose={closePanel}
         title="编辑 VPS 事实"
         ariaLabel="编辑 VPS 事实"
-        size="xl"
+        template="form"
         persistent={submitting}
+        footer={detail && factDraft ? (
+          <VPSDialogActions formId={formId} onCancel={closePanel} submitting={submitting} error={mutationError} submitLabel="保存基础信息" cancelLabel="取消编辑" />
+        ) : undefined}
       >
         <div className="vps-detail-modal">
           {detailLoading ? <p role="status">正在加载 VPS 事实…</p> : null}
@@ -733,9 +738,7 @@ export function VPSOverviewManagementActions({
               providersLoading={providersLoading}
               providersError={providersError}
               submitting={submitting}
-              error={mutationError}
-              notice={null}
-              onCancel={closePanel}
+              formId={formId}
               onDraftChange={(nextDraft) => {
                 replaceFactDraft(nextDraft)
                 setMutationError(null)
@@ -744,15 +747,18 @@ export function VPSOverviewManagementActions({
             />
           ) : null}
         </div>
-      </Modal>
+      </VPSDetailDialog>
 
-      <Modal
+      <VPSDetailDialog
         open={decisionOpen}
         onClose={closePanel}
         title="续费决策"
         ariaLabel="续费决策"
-        size="lg"
+        template="decision"
         persistent={submitting}
+        footer={detail && decisionDraft ? (
+          <VPSDialogActions formId={formId} onCancel={closePanel} submitting={submitting} error={mutationError} disabled={decisionDraft.renewalDecision === detail.renewal_decision} submitLabel="保存续费决策" />
+        ) : undefined}
       >
         <div className="vps-detail-modal">
           {detailLoading ? <p role="status">正在加载续费决策…</p> : null}
@@ -770,25 +776,26 @@ export function VPSOverviewManagementActions({
               detail={detail}
               draft={decisionDraft}
               submitting={submitting}
-              error={mutationError}
-              notice={null}
-              decisionChanged={decisionDraft.renewalDecision !== detail.renewal_decision}
-              onCancel={closePanel}
+              formId={formId}
               onDraftChange={setDecisionDraft}
               onFeedbackClear={() => setMutationError(null)}
               onSubmit={(event) => void submitDecision(event)}
             />
           ) : null}
         </div>
-      </Modal>
+      </VPSDetailDialog>
 
-      <Modal
+      <VPSDetailDialog
         open={subscriptionOpen}
         onClose={closePanel}
-        title="订阅事实"
-        ariaLabel="订阅事实"
-        size="xl"
+        title="新增订阅事实"
+        ariaLabel="新增订阅事实"
+        template="form"
+        size="lg"
         persistent={submitting}
+        footer={detail ? (
+          <VPSDialogActions formId={formId} onCancel={closePanel} submitting={submitting} error={mutationError} submitLabel="新增订阅" />
+        ) : undefined}
       >
         <div className="vps-detail-modal">
           {detailLoading ? <p role="status">正在加载订阅事实…</p> : null}
@@ -799,16 +806,14 @@ export function VPSOverviewManagementActions({
               detail={detail}
               draft={subscriptionDraft}
               submitting={submitting}
-              error={mutationError}
-              notice={null}
-              onCancel={closePanel}
+              formId={formId}
               onDraftChange={setSubscriptionDraft}
               onFeedbackClear={() => setMutationError(null)}
               onSubmit={(event) => void submitSubscription(event)}
             />
           ) : null}
         </div>
-      </Modal>
+      </VPSDetailDialog>
 
       <Modal
         open={cancellationOpen}

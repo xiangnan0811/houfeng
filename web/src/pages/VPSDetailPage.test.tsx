@@ -515,13 +515,13 @@ describe('VPSDetailPage gate', () => {
       renewal_reason: '等待下月价格确认',
     }, { expectedUpdatedAt: '2026-08-20T00:00:00Z' })
     expect(screen.getByRole('status')).toHaveTextContent('续费决策已更新，概览已刷新。未找到 active 订阅。')
-    const linkageAction = screen.getByRole('link', { name: '创建/更新订阅' })
+    const linkageAction = screen.getByRole('link', { name: '新增订阅事实' })
     expect(linkageAction).toHaveAttribute(
       'href',
       '/vps/vps_001?workbench=subscription',
     )
     fireEvent.click(linkageAction)
-    expect(await screen.findByRole('dialog', { name: '订阅事实' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '新增订阅事实' })).toBeInTheDocument()
   })
 
   it('creates a subscription fact from the overview management menu', async () => {
@@ -534,11 +534,11 @@ describe('VPSDetailPage gate', () => {
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
 
-    const dialog = await screen.findByRole('dialog', { name: '订阅事实' })
+    const dialog = await screen.findByRole('dialog', { name: '新增订阅事实' })
     fireEvent.change(screen.getByRole('spinbutton', { name: '价格' }), {
       target: { value: '12.5' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(screen.getByRole('button', { name: '新增订阅' }))
 
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
     expect(create).toHaveBeenCalledWith(

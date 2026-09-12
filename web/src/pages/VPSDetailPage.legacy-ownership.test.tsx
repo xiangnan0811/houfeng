@@ -169,10 +169,10 @@ function DashboardNavigationHarness() {
 }
 
 function openSubscriptionDrawer() {
-  const command = screen.getAllByRole('button', { name: '创建/更新订阅' })[0]
+  const command = screen.getAllByRole('button', { name: '新增订阅事实' })[0]
   if (!command) throw new Error('subscription command must be present')
   fireEvent.click(command)
-  return screen.getByRole('dialog', { name: '创建/更新订阅' })
+  return screen.getByRole('dialog', { name: '新增订阅事实' })
 }
 
 function openLegacyActionDrawer(commandName: string, dialogName: string) {
@@ -305,11 +305,11 @@ describe('VPSDetailPage legacy write ownership', () => {
     await screen.findByRole('heading', { name: 'Tokyo Edge A' })
     const initialDrawer = openSubscriptionDrawer()
     fireEvent.change(within(initialDrawer).getByLabelText('价格'), { target: { value: '12' } })
-    fireEvent.click(within(initialDrawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(initialDrawer).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(harness.idempotencyKeys).toHaveLength(1))
 
     fireEvent.click(within(initialDrawer).getByRole('button', { name: '关闭' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '创建/更新订阅' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新增订阅事实' })).not.toBeInTheDocument())
     const reopenedDrawer = openSubscriptionDrawer()
     expect(within(reopenedDrawer).getByRole('button', { name: '保存中…' })).toBeDisabled()
     expect(screen.getAllByRole('heading', { name: 'Tokyo Edge A' }).length).toBeGreaterThan(0)
@@ -339,12 +339,12 @@ describe('VPSDetailPage legacy write ownership', () => {
     await screen.findByRole('heading', { name: 'Tokyo Edge A' })
     const initialDrawer = openSubscriptionDrawer()
     fireEvent.change(within(initialDrawer).getByLabelText('价格'), { target: { value: '12' } })
-    fireEvent.click(within(initialDrawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(initialDrawer).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(harness.idempotencyKeys).toHaveLength(1))
 
     fireEvent.click(screen.getByRole('button', { name: '同 VPS query reload' }))
     await waitFor(() => expect(harness.getDetailGets()).toBe(2))
-    const reloadedDrawer = screen.getByRole('dialog', { name: '创建/更新订阅' })
+    const reloadedDrawer = screen.getByRole('dialog', { name: '新增订阅事实' })
     expect(within(reloadedDrawer).getByRole('button', { name: '保存中…' })).toBeDisabled()
     expect(screen.getAllByRole('heading', { name: 'Tokyo Edge A' }).length).toBeGreaterThan(0)
     expect(screen.getByText('缺少当前订阅')).toBeInTheDocument()
@@ -372,7 +372,7 @@ describe('VPSDetailPage legacy write ownership', () => {
     await screen.findByRole('heading', { name: 'Tokyo Edge A' })
     const drawer = openSubscriptionDrawer()
     fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '12' } })
-    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(harness.idempotencyKeys).toHaveLength(1))
 
     await act(async () => harness.settle())
@@ -396,7 +396,7 @@ describe('VPSDetailPage legacy write ownership', () => {
     await screen.findByRole('heading', { name: 'Tokyo Edge A' })
     const initialDrawer = openSubscriptionDrawer()
     fireEvent.change(within(initialDrawer).getByLabelText('价格'), { target: { value: '12' } })
-    fireEvent.click(within(initialDrawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(initialDrawer).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(harness.idempotencyKeys).toHaveLength(1))
 
     fireEvent.click(screen.getByRole('button', { name: '前往工作台' }))
@@ -442,7 +442,7 @@ describe('VPSDetailPage legacy write ownership', () => {
     await screen.findByRole('heading', { name: 'Tokyo Edge A' })
     const legacyDrawer = openSubscriptionDrawer()
     fireEvent.change(within(legacyDrawer).getByLabelText('价格'), { target: { value: '12' } })
-    fireEvent.click(within(legacyDrawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(legacyDrawer).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(harness.idempotencyKeys).toHaveLength(1))
 
     fireEvent.click(screen.getByRole('button', { name: '前往工作台' }))
@@ -454,7 +454,7 @@ describe('VPSDetailPage legacy write ownership', () => {
     expect(screen.getByText('操作处理中，请等待当前写入完成。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '管理' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
-    const overviewDrawer = await screen.findByRole('dialog', { name: '订阅事实' })
+    const overviewDrawer = await screen.findByRole('dialog', { name: '新增订阅事实' })
     const blockedSave = within(overviewDrawer).getByRole('button', { name: '保存中…' })
     expect(blockedSave).toBeDisabled()
     fireEvent.click(blockedSave)
@@ -483,9 +483,9 @@ describe('VPSDetailPage legacy write ownership', () => {
     await screen.findByRole('button', { name: '管理' })
     fireEvent.click(screen.getByRole('button', { name: '管理' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
-    const initialDrawer = await screen.findByRole('dialog', { name: '订阅事实' })
+    const initialDrawer = await screen.findByRole('dialog', { name: '新增订阅事实' })
     fireEvent.change(within(initialDrawer).getByLabelText('价格'), { target: { value: '12' } })
-    fireEvent.click(within(initialDrawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(initialDrawer).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(harness.idempotencyKeys).toHaveLength(1))
 
     fireEvent.click(screen.getByRole('button', { name: '前往工作台' }))
@@ -496,7 +496,7 @@ describe('VPSDetailPage legacy write ownership', () => {
     expect(screen.getByText('操作处理中，请等待当前写入完成。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '管理' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
-    const returnedDrawer = await screen.findByRole('dialog', { name: '订阅事实' })
+    const returnedDrawer = await screen.findByRole('dialog', { name: '新增订阅事实' })
     const blockedSave = within(returnedDrawer).getByRole('button', { name: '保存中…' })
     expect(blockedSave).toBeDisabled()
     fireEvent.click(blockedSave)
@@ -596,14 +596,14 @@ describe('VPSDetailPage legacy write ownership', () => {
     await screen.findByRole('heading', { name: 'Tokyo Edge A' })
     const initialA = openSubscriptionDrawer()
     fireEvent.change(within(initialA).getByLabelText('价格'), { target: { value: '12' } })
-    fireEvent.click(within(initialA).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(initialA).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(subscriptionRequests.get('vps_a')).toHaveLength(1))
 
     fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
     await screen.findByRole('heading', { name: 'Osaka Edge B' })
     const initialB = openSubscriptionDrawer()
     fireEvent.change(within(initialB).getByLabelText('价格'), { target: { value: '18' } })
-    fireEvent.click(within(initialB).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(initialB).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(subscriptionRequests.get('vps_b')).toHaveLength(1))
 
     fireEvent.click(screen.getByRole('button', { name: '切回 A' }))
@@ -691,7 +691,7 @@ describe('VPSDetailPage legacy write ownership', () => {
     await screen.findByRole('heading', { name: 'Tokyo Edge A' })
     const drawer = openSubscriptionDrawer()
     fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '12' } })
-    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(subscriptionPosts).toBe(1))
 
     fireEvent.click(screen.getByRole('button', { name: '切到 B' }))

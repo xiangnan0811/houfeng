@@ -559,7 +559,7 @@ describe('LegacyVPSDetail', () => {
     expect(within(overviewActions as HTMLElement).getByRole('button', { name: '域名' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '编辑基础资料' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '记录经验' }).length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('button', { name: '创建/更新订阅' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: '新增订阅事实' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: '接入/升级 agent' }).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: '关联已有监控实例' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '新增服务' }).length).toBeGreaterThan(0)
@@ -817,9 +817,9 @@ describe('LegacyVPSDetail', () => {
     expect(within(screen.getByLabelText('运行观测')).getByRole('button', { name: '接入/升级 agent' })).toBeInTheDocument()
     expect(within(relations).queryByRole('button', { name: '接入/升级' })).not.toBeInTheDocument()
 
-    fireEvent.click(within(screen.getByLabelText('当前判断')).getByRole('button', { name: '创建/更新订阅' }))
-    expect(screen.getByRole('dialog', { name: '创建/更新订阅' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('dialog', { name: '创建/更新订阅' }).querySelector('.modal-close') as HTMLElement)
+    fireEvent.click(within(screen.getByLabelText('当前判断')).getByRole('button', { name: '新增订阅事实' }))
+    expect(screen.getByRole('dialog', { name: '新增订阅事实' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('dialog', { name: '新增订阅事实' }).querySelector('.modal-close') as HTMLElement)
 
     fireEvent.click(within(screen.getByLabelText('当前判断')).getByRole('button', { name: '延长' }))
     expect(screen.getByRole('dialog', { name: '延长有效期' })).toBeInTheDocument()
@@ -1049,7 +1049,7 @@ describe('LegacyVPSDetail', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
     expect(screen.getByText('缺少当前订阅')).toBeInTheDocument()
     expect(screen.getAllByText('缺订阅').length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('button', { name: '创建/更新订阅' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: '新增订阅事实' }).length).toBeGreaterThan(0)
     expect(screen.queryByText('订阅证据暂不可用')).not.toBeInTheDocument()
   })
 
@@ -1091,8 +1091,8 @@ describe('LegacyVPSDetail', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
-    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '创建/更新订阅' }), 'subscription command'))
-    const drawer = screen.getByRole('dialog', { name: '创建/更新订阅' })
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '新增订阅事实' }), 'subscription command'))
+    const drawer = screen.getByRole('dialog', { name: '新增订阅事实' })
     expect(within(drawer).queryByLabelText('订阅状态')).not.toBeInTheDocument()
     fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '18' } })
     fireEvent.change(within(drawer).getByLabelText('续费日期'), { target: { value: '2026-07-01' } })
@@ -1100,7 +1100,7 @@ describe('LegacyVPSDetail', () => {
     fireEvent.change(within(drawer).getByLabelText('支付方式'), { target: { value: '__custom' } })
     fireEvent.change(within(drawer).getByLabelText('自定义支付方式'), { target: { value: 'visa' } })
     fireEvent.change(within(drawer).getByLabelText('备注'), { target: { value: 'created from vps detail' } })
-    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '新增订阅' }))
 
     await waitFor(() => expect(screen.getByText('订阅账单事实已创建')).toBeInTheDocument())
     expect(screen.getAllByText('USD 18.00').length).toBeGreaterThan(0)
@@ -1158,12 +1158,12 @@ describe('LegacyVPSDetail', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
-    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '创建/更新订阅' }), 'subscription command'))
-    const drawer = screen.getByRole('dialog', { name: '创建/更新订阅' })
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '新增订阅事实' }), 'subscription command'))
+    const drawer = screen.getByRole('dialog', { name: '新增订阅事实' })
     fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '18' } })
-    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '新增订阅' }))
     expect(await within(drawer).findByRole('alert')).toHaveTextContent('同一幂等键已用于不同的订阅内容')
-    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7))
     const firstKey = (fetchMock.mock.calls[5]?.[1] as RequestInit | undefined)?.headers
     const secondKey = (fetchMock.mock.calls[6]?.[1] as RequestInit | undefined)?.headers
@@ -1207,12 +1207,12 @@ describe('LegacyVPSDetail', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Missing Subscription Edge' })).toBeInTheDocument())
-    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '创建/更新订阅' }), 'subscription command'))
-    const drawer = screen.getByRole('dialog', { name: '创建/更新订阅' })
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '新增订阅事实' }), 'subscription command'))
+    const drawer = screen.getByRole('dialog', { name: '新增订阅事实' })
     fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '18' } })
-    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '新增订阅' }))
     expect(await within(drawer).findByRole('alert')).toHaveTextContent('Failed to fetch')
-    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(screen.getByText('订阅账单事实已创建')).toBeInTheDocument())
     const firstKey = (fetchMock.mock.calls[5]?.[1] as RequestInit | undefined)?.headers
     const secondKey = (fetchMock.mock.calls[6]?.[1] as RequestInit | undefined)?.headers
@@ -1245,8 +1245,7 @@ describe('LegacyVPSDetail', () => {
       </MemoryRouter>,
     )
 
-    const drawer = await screen.findByRole('dialog', { name: '创建/更新订阅' })
-    expect(within(drawer).getByText('只补录账单事实；生命周期、用途和续费决策继续归 VPS 管理。')).toBeInTheDocument()
+    const drawer = await screen.findByRole('dialog', { name: '新增订阅事实' })
     expect(within(drawer).queryByLabelText('订阅状态')).not.toBeInTheDocument()
   })
 
@@ -1344,10 +1343,10 @@ describe('LegacyVPSDetail', () => {
     )
 
     expect(screen.getByTestId('location-search')).toHaveTextContent('workbench=subscription')
-    const drawer = await screen.findByRole('dialog', { name: '创建/更新订阅' })
+    const drawer = await screen.findByRole('dialog', { name: '新增订阅事实' })
     fireEvent.click(within(drawer).getByRole('button', { name: '取消' }))
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '创建/更新订阅' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新增订阅事实' })).not.toBeInTheDocument())
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('workbench=')
   })
 
@@ -1644,7 +1643,7 @@ describe('LegacyVPSDetail', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     openVPSActionsMenu()
     expect(screen.getByRole('button', { name: '调整决策' })).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: '创建/更新订阅' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: '新增订阅事实' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: '接入/升级 agent' }).length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: '打开取消/退役' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '处理取消/退役' })).not.toBeInTheDocument()
@@ -1831,7 +1830,7 @@ describe('LegacyVPSDetail', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
     clickVPSAction('调整决策')
-    const decisionDrawer = screen.getByRole('dialog', { name: '调整决策' })
+    const decisionDrawer = screen.getByRole('dialog', { name: '续费决策' })
     fireEvent.change(within(decisionDrawer).getByLabelText('续费决策'), { target: { value: 'cancel' } })
     fireEvent.change(within(decisionDrawer).getByLabelText('决策理由'), { target: { value: 'too expensive' } })
     fireEvent.click(within(decisionDrawer).getByRole('button', { name: '保存续费决策' }))
@@ -1930,26 +1929,26 @@ describe('LegacyVPSDetail', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
     clickVPSAction('调整决策')
-    let decisionDialog = screen.getByRole('dialog', { name: '调整决策' })
+    let decisionDialog = screen.getByRole('dialog', { name: '续费决策' })
     fireEvent.change(within(decisionDialog).getByLabelText('续费决策'), { target: { value: 'cancel' } })
     fireEvent.change(within(decisionDialog).getByLabelText('决策理由'), { target: { value: 'stale decision' } })
     fireEvent.click(within(decisionDialog).getByRole('button', { name: '取消' }))
-    expect(screen.queryByRole('dialog', { name: '调整决策' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '续费决策' })).not.toBeInTheDocument()
 
     clickVPSAction('调整决策')
-    decisionDialog = screen.getByRole('dialog', { name: '调整决策' })
+    decisionDialog = screen.getByRole('dialog', { name: '续费决策' })
     expect(within(decisionDialog).getByLabelText('续费决策')).toHaveValue('keep')
     expect(within(decisionDialog).getByLabelText('决策理由')).toHaveValue('')
     fireEvent.click(within(decisionDialog).getByRole('button', { name: '取消' }))
 
     clickVPSAction('编辑基础资料')
-    let factsDialog = screen.getByRole('dialog', { name: '编辑基础资料' })
+    let factsDialog = screen.getByRole('dialog', { name: '编辑 VPS 事实' })
     fireEvent.change(within(factsDialog).getByLabelText('VPS 名称'), { target: { value: 'Stale VPS' } })
     fireEvent.click(within(factsDialog).getByRole('button', { name: '取消编辑' }))
-    expect(screen.queryByRole('dialog', { name: '编辑基础资料' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '编辑 VPS 事实' })).not.toBeInTheDocument()
 
     clickVPSAction('编辑基础资料')
-    factsDialog = screen.getByRole('dialog', { name: '编辑基础资料' })
+    factsDialog = screen.getByRole('dialog', { name: '编辑 VPS 事实' })
     expect(within(factsDialog).getByLabelText('VPS 名称')).toHaveValue('Tokyo Edge')
     fireEvent.click(within(factsDialog).getByRole('button', { name: '取消编辑' }))
 
@@ -2111,11 +2110,11 @@ describe('LegacyVPSDetail', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
 
     clickVPSAction('编辑基础资料')
-    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    const factsDrawer = screen.getByRole('dialog', { name: '编辑 VPS 事实' })
     fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: 'Tokyo Edge 2' } })
     fireEvent.change(within(factsDrawer).getByLabelText('产品名'), { target: { value: 'cx32' } })
     fireEvent.change(within(factsDrawer).getByLabelText('IPv4 / 主入口'), { target: { value: '198.51.100.5' } })
-    fireEvent.click(within(factsDrawer).getByLabelText(/SSH Host 与 IP 不一致/))
+    fireEvent.click(within(factsDrawer).getByRole('checkbox', { name: '单独填写' }))
     fireEvent.change(within(factsDrawer).getByLabelText('SSH Host'), { target: { value: 'edge.example.com' } })
     fireEvent.change(within(factsDrawer).getByLabelText('SSH 端口'), { target: { value: '2222' } })
     fireEvent.change(within(factsDrawer).getByLabelText('SSH 用户'), { target: { value: 'deploy' } })
@@ -2961,7 +2960,7 @@ describe('LegacyVPSDetail', () => {
       await waitFor(() => {
         expect(screen.queryByRole('alertdialog', { name: '确认归档 VPS' })).not.toBeInTheDocument()
       })
-      expect(screen.getByRole('dialog', { name: '创建/更新订阅' })).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: '新增订阅事实' })).toBeInTheDocument()
 
       clickVPSAction('归档 VPS')
       const currentArchiveDialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
@@ -3053,7 +3052,7 @@ describe('LegacyVPSDetail', () => {
       await waitFor(() => {
         expect(screen.queryByRole('alertdialog', { name: '确认归档 VPS' })).not.toBeInTheDocument()
       })
-      expect(screen.getByRole('dialog', { name: '创建/更新订阅' })).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: '新增订阅事实' })).toBeInTheDocument()
 
       clickVPSAction('归档 VPS')
       const currentArchiveDialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
@@ -3219,7 +3218,7 @@ describe('LegacyVPSDetail', () => {
         </MemoryRouter>,
       )
 
-      const subscriptionDrawer = await screen.findByRole('dialog', { name: '创建/更新订阅' })
+      const subscriptionDrawer = await screen.findByRole('dialog', { name: '新增订阅事实' })
       fireEvent.click(within(subscriptionDrawer).getByRole('button', { name: '取消' }))
       await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(/^$/))
 
@@ -3587,7 +3586,7 @@ describe('LegacyVPSDetail', () => {
       expect(screen.getByRole('heading', { level: 1, name: 'Route A current after unlink' })).toBeInTheDocument()
       expect(screen.queryByRole('heading', { level: 1, name: 'Route A stale second-stage payload' })).not.toBeInTheDocument()
       expect(screen.getByRole('dialog', { name: '已关联监控实例' })).toBeInTheDocument()
-      expect(screen.queryByRole('dialog', { name: '创建/更新订阅' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: '新增订阅事实' })).not.toBeInTheDocument()
     })
 
     it('rejects a same-VPS payload whose functional state updater loses ownership before commit', async () => {
@@ -3819,7 +3818,7 @@ describe('LegacyVPSDetail', () => {
       await act(async () => {
         delayedRouteDetail.resolve(mockJSONResponse(detailA))
       })
-      await screen.findByRole('dialog', { name: '创建/更新订阅' })
+      await screen.findByRole('dialog', { name: '新增订阅事实' })
 
       await act(async () => {
         delayedOrdinaryPreview.resolve(mockJSONResponse(latePreview))
@@ -3827,7 +3826,7 @@ describe('LegacyVPSDetail', () => {
 
       expect(screen.queryByRole('button', { name: '处理取消/退役' })).not.toBeInTheDocument()
       expect(screen.queryByText('payload reset 后的迟到警告')).not.toBeInTheDocument()
-      expect(screen.getByRole('dialog', { name: '创建/更新订阅' })).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: '新增订阅事实' })).toBeInTheDocument()
     })
 
     it('clears a committed cancellation preview, feedback, and attention when a route payload switches drawers', async () => {
@@ -3956,7 +3955,7 @@ describe('LegacyVPSDetail', () => {
       await act(async () => {
         delayedRouteDetail.resolve(mockJSONResponse(detailA))
       })
-      await screen.findByRole('dialog', { name: '创建/更新订阅' })
+      await screen.findByRole('dialog', { name: '新增订阅事实' })
 
       expect(screen.queryByText('payload reset 已提交警告')).not.toBeInTheDocument()
       expect(screen.queryByText('payload reset 已提交阻止项')).not.toBeInTheDocument()
@@ -5480,7 +5479,7 @@ describe('LegacyVPSDetail', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     clickVPSAction('编辑基础资料')
-    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    const factsDrawer = screen.getByRole('dialog', { name: '编辑 VPS 事实' })
     fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: '我的草稿' } })
     fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
     expect(await screen.findByRole('status')).toHaveTextContent('请先加载最新版本')
@@ -5555,7 +5554,7 @@ describe('LegacyVPSDetail', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     clickVPSAction('调整决策')
-    const decisionDrawer = screen.getByRole('dialog', { name: '调整决策' })
+    const decisionDrawer = screen.getByRole('dialog', { name: '续费决策' })
     fireEvent.change(within(decisionDrawer).getByLabelText('续费决策'), { target: { value: 'cancel' } })
     fireEvent.change(within(decisionDrawer).getByLabelText('决策理由'), { target: { value: 'too expensive' } })
     fireEvent.click(within(decisionDrawer).getByRole('button', { name: '保存续费决策' }))
@@ -5618,7 +5617,7 @@ describe('LegacyVPSDetail', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     clickVPSAction('编辑基础资料')
-    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    const factsDrawer = screen.getByRole('dialog', { name: '编辑 VPS 事实' })
     fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: '我的草稿' } })
     fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
     await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/archive/vps_001'))
@@ -5683,7 +5682,7 @@ describe('LegacyVPSDetail', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
     clickVPSAction('编辑基础资料')
-    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    const factsDrawer = screen.getByRole('dialog', { name: '编辑 VPS 事实' })
     fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: '我的草稿' } })
     fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
     await waitFor(() => expect(aGets).toBe(2))
@@ -5759,7 +5758,7 @@ describe('LegacyVPSDetail', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
     clickVPSAction('编辑基础资料')
-    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    const factsDrawer = screen.getByRole('dialog', { name: '编辑 VPS 事实' })
     fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: 'A 草稿' } })
     fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
     expect(await screen.findByRole('status')).toHaveTextContent('请先加载最新版本')
@@ -5820,7 +5819,7 @@ describe('LegacyVPSDetail', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     clickVPSAction('编辑基础资料')
-    const factsDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    const factsDrawer = screen.getByRole('dialog', { name: '编辑 VPS 事实' })
     fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: '我的草稿' } })
     fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
     expect(await screen.findByRole('status')).toHaveTextContent('请先加载最新版本')
@@ -5830,7 +5829,7 @@ describe('LegacyVPSDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: '正在加载最新版本' }))
     expect(gets).toBe(2)
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑基础资料' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑 VPS 事实' })).not.toBeInTheDocument())
 
     await act(async () => {
       delayedLatest.resolve(mockJSONResponse({
@@ -5840,7 +5839,7 @@ describe('LegacyVPSDetail', () => {
       }))
     })
 
-    expect(screen.queryByRole('dialog', { name: '编辑基础资料' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '编辑 VPS 事实' })).not.toBeInTheDocument()
     expect(screen.queryByDisplayValue('迟到的最新版')).not.toBeInTheDocument()
     expect(gets).toBe(2)
   })
@@ -5884,16 +5883,16 @@ describe('LegacyVPSDetail', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     clickVPSAction('编辑基础资料')
-    fireEvent.change(within(screen.getByRole('dialog', { name: '编辑基础资料' })).getByLabelText('VPS 名称'), {
+    fireEvent.change(within(screen.getByRole('dialog', { name: '编辑 VPS 事实' })).getByLabelText('VPS 名称'), {
       target: { value: '我的草稿' },
     })
-    fireEvent.click(within(screen.getByRole('dialog', { name: '编辑基础资料' })).getByRole('button', { name: '保存基础信息' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: '编辑 VPS 事实' })).getByRole('button', { name: '保存基础信息' }))
     expect(await screen.findByRole('button', { name: '保存中…' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑基础资料' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑 VPS 事实' })).not.toBeInTheDocument())
 
     clickVPSAction('编辑基础资料')
-    const reopened = screen.getByRole('dialog', { name: '编辑基础资料' })
+    const reopened = screen.getByRole('dialog', { name: '编辑 VPS 事实' })
     expect(within(reopened).getByRole('button', { name: '保存中…' })).toBeDisabled()
     fireEvent.click(within(reopened).getByRole('button', { name: '保存中…' }))
     expect(patches).toBe(1)
@@ -5950,16 +5949,16 @@ describe('LegacyVPSDetail', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     clickVPSAction('调整决策')
-    const decisionDrawer = screen.getByRole('dialog', { name: '调整决策' })
+    const decisionDrawer = screen.getByRole('dialog', { name: '续费决策' })
     fireEvent.change(within(decisionDrawer).getByLabelText('续费决策'), { target: { value: 'cancel' } })
     fireEvent.change(within(decisionDrawer).getByLabelText('决策理由'), { target: { value: 'too expensive' } })
     fireEvent.click(within(decisionDrawer).getByRole('button', { name: '保存续费决策' }))
     expect(await screen.findByRole('button', { name: '保存中…' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '调整决策' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '续费决策' })).not.toBeInTheDocument())
 
     clickVPSAction('调整决策')
-    const reopened = screen.getByRole('dialog', { name: '调整决策' })
+    const reopened = screen.getByRole('dialog', { name: '续费决策' })
     expect(within(reopened).getByRole('button', { name: '保存中…' })).toBeDisabled()
     expect(within(reopened).getByLabelText('续费决策')).toBeDisabled()
     fireEvent.click(within(reopened).getByRole('button', { name: '保存中…' }))
@@ -6042,17 +6041,17 @@ describe('LegacyVPSDetail', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
     clickVPSAction('编辑基础资料')
-    fireEvent.change(within(screen.getByRole('dialog', { name: '编辑基础资料' })).getByLabelText('VPS 名称'), {
+    fireEvent.change(within(screen.getByRole('dialog', { name: '编辑 VPS 事实' })).getByLabelText('VPS 名称'), {
       target: { value: 'A 草稿' },
     })
-    fireEvent.click(within(screen.getByRole('dialog', { name: '编辑基础资料' })).getByRole('button', { name: '保存基础信息' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: '编辑 VPS 事实' })).getByRole('button', { name: '保存基础信息' }))
     expect(await screen.findByRole('button', { name: '保存中…' })).toBeDisabled()
     await waitFor(() => expect(aPatches).toBe(1))
 
     fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
     clickVPSAction('编辑基础资料')
-    const bDrawer = screen.getByRole('dialog', { name: '编辑基础资料' })
+    const bDrawer = screen.getByRole('dialog', { name: '编辑 VPS 事实' })
     expect(within(bDrawer).getByRole('button', { name: '保存基础信息' })).toBeEnabled()
     fireEvent.change(within(bDrawer).getByLabelText('VPS 名称'), { target: { value: 'B 草稿' } })
     fireEvent.click(within(bDrawer).getByRole('button', { name: '保存基础信息' }))
@@ -6062,7 +6061,7 @@ describe('LegacyVPSDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: '切回 A' }))
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
     clickVPSAction('编辑基础资料')
-    const aReopened = screen.getByRole('dialog', { name: '编辑基础资料' })
+    const aReopened = screen.getByRole('dialog', { name: '编辑 VPS 事实' })
     expect(within(aReopened).getByRole('button', { name: '保存中…' })).toBeDisabled()
     fireEvent.click(within(aReopened).getByRole('button', { name: '保存中…' }))
     expect(aPatches).toBe(1)
@@ -6070,7 +6069,7 @@ describe('LegacyVPSDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
     clickVPSAction('编辑基础资料')
-    const bReopened = screen.getByRole('dialog', { name: '编辑基础资料' })
+    const bReopened = screen.getByRole('dialog', { name: '编辑 VPS 事实' })
     expect(within(bReopened).getByRole('button', { name: '保存中…' })).toBeDisabled()
 
     await act(async () => {
@@ -6773,30 +6772,30 @@ describe('LegacyVPSDetail', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
-    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '创建/更新订阅' }), 'subscription command'))
-    const drawer = screen.getByRole('dialog', { name: '创建/更新订阅' })
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '新增订阅事实' }), 'subscription command'))
+    const drawer = screen.getByRole('dialog', { name: '新增订阅事实' })
     fireEvent.change(within(drawer).getByLabelText('价格'), { target: { value: '18' } })
     fireEvent.change(within(drawer).getByLabelText('续费日期'), { target: { value: '2026-07-01' } })
     fireEvent.click(within(drawer).getByLabelText('自动续费'))
     fireEvent.change(within(drawer).getByLabelText('支付方式'), { target: { value: '__custom' } })
     fireEvent.change(within(drawer).getByLabelText('自定义支付方式'), { target: { value: 'visa' } })
     fireEvent.change(within(drawer).getByLabelText('备注'), { target: { value: 'from A' } })
-    fireEvent.click(within(drawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(aCreates).toBe(1))
     expect(within(drawer).getByRole('button', { name: '保存中…' })).toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: '切到 B' }))
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Osaka Edge B' })).toBeInTheDocument())
-    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '创建/更新订阅' }), 'subscription command'))
-    const bDrawer = screen.getByRole('dialog', { name: '创建/更新订阅' })
-    expect(within(bDrawer).getByRole('button', { name: '创建/更新订阅' })).toBeEnabled()
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '新增订阅事实' }), 'subscription command'))
+    const bDrawer = screen.getByRole('dialog', { name: '新增订阅事实' })
+    expect(within(bDrawer).getByRole('button', { name: '新增订阅' })).toBeEnabled()
     fireEvent.change(within(bDrawer).getByLabelText('价格'), { target: { value: '24' } })
     fireEvent.change(within(bDrawer).getByLabelText('续费日期'), { target: { value: '2026-08-01' } })
     fireEvent.click(within(bDrawer).getByLabelText('自动续费'))
     fireEvent.change(within(bDrawer).getByLabelText('支付方式'), { target: { value: '__custom' } })
     fireEvent.change(within(bDrawer).getByLabelText('自定义支付方式'), { target: { value: 'mastercard' } })
     fireEvent.change(within(bDrawer).getByLabelText('备注'), { target: { value: 'from B' } })
-    fireEvent.click(within(bDrawer).getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(within(bDrawer).getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(bCreates).toBe(1))
     expect(within(bDrawer).getByRole('button', { name: '保存中…' })).toBeDisabled()
 
@@ -6811,7 +6810,7 @@ describe('LegacyVPSDetail', () => {
     })
 
     expect(screen.getAllByRole('heading', { name: 'Osaka Edge B' }).length).toBeGreaterThan(0)
-    expect(screen.getByRole('dialog', { name: '创建/更新订阅' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '新增订阅事实' })).toBeInTheDocument()
     expect(within(bDrawer).getByRole('button', { name: '保存中…' })).toBeDisabled()
     expect(within(bDrawer).getByLabelText('备注')).toHaveValue('from B')
     expect(bCreates).toBe(1)

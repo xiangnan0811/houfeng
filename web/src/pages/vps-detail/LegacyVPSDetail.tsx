@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
-import { Button, Modal } from '../../components/atoms'
+import { Button } from '../../components/atoms'
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import { VPSCancellationWorkbench } from '../../components/VPSCancellationWorkbench'
 import { VPSTimelinePanel } from '../../components/VPSTimelinePanel'
@@ -50,6 +50,7 @@ import type {
   VPSIPQualityReport,
   VPSMonitoringInstanceSummary,
 } from '../../lib/types'
+import { VPSDetailDialog, VPSDialogActions } from './VPSDetailDialog'
 import { VPSDetailErrorPanel } from './VPSDetailErrorPanel'
 import { VPSDetailLoading } from './VPSDetailLoading'
 import { VPSDetailMissingID } from './VPSDetailMissingID'
@@ -248,6 +249,7 @@ export function LegacyVPSDetail({
   viewToken: providedViewToken,
   onViewAuthorityInvalidatedWriteSettled,
 }: LegacyVPSDetailProps = {}) {
+  const formId = useId()
   const { vpsId } = useParams()
   const navigate = useNavigate(), location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -1720,11 +1722,23 @@ export function LegacyVPSDetail({
   const lifecycleConfirmDisabled = writeBlocked ||
     (lifecycleConfirmingAction === 'archive' ? !archiveCanConfirm : false)
 
+  const drawerTemplate = activeDrawer === 'decision' ? 'decision'
+    : activeDrawer === 'facts' || activeDrawer === 'subscription' ? 'form'
+      : activeDrawer === 'monitoring-instance-evidence' || activeDrawer === 'services-detail' || activeDrawer === 'domains-detail' ? 'objects'
+        : undefined
+  const drawerFooter = activeDrawer === 'facts' && factDraft ? (
+    <VPSDialogActions formId={formId} onCancel={closeDrawer} submitting={writeBlocked || latestLoading} error={factError} notice={factError ? null : factNotice} submitLabel="保存基础信息" cancelLabel="取消编辑" />
+  ) : activeDrawer === 'decision' ? (
+    <VPSDialogActions formId={formId} onCancel={closeDrawer} submitting={writeBlocked || latestLoading} error={decisionError} notice={decisionError ? null : decisionNotice} disabled={!decisionChanged} submitLabel="保存续费决策" />
+  ) : activeDrawer === 'subscription' ? (
+    <VPSDialogActions formId={formId} onCancel={closeDrawer} submitting={writeBlocked} error={subscriptionError} notice={subscriptionNotice} submitLabel="新增订阅" />
+  ) : undefined
+
   function drawerTitle(): string {
-    if (activeDrawer === 'decision') return '调整决策'
+    if (activeDrawer === 'decision') return '续费决策'
     if (activeDrawer === 'cancellation') return '取消/退役'
-    if (activeDrawer === 'facts') return '编辑基础资料'
-    if (activeDrawer === 'subscription') return '创建/更新订阅'
+    if (activeDrawer === 'facts') return '编辑 VPS 事实'
+    if (activeDrawer === 'subscription') return '新增订阅事实'
     if (activeDrawer === 'validity-extension') return '延长有效期'
     if (activeDrawer === 'monitoring-instance-create') return '接入/升级 agent'
     if (activeDrawer === 'monitoring-instance-link') return '关联已有监控实例'
@@ -1754,10 +1768,7 @@ export function LegacyVPSDetail({
             detail={detail}
             draft={decisionDraft}
             submitting={writeBlocked || latestLoading}
-            error={decisionError}
-            notice={decisionNotice}
-            decisionChanged={decisionChanged}
-            onCancel={closeDrawer}
+            formId={formId}
             onDraftChange={handleDecisionDraftChange}
             onFeedbackClear={clearDecisionFeedback}
             onSubmit={(event) => void handleDecisionSubmit(event)}
@@ -1814,9 +1825,7 @@ export function LegacyVPSDetail({
             providersLoading={selectors.providersLoading}
             providersError={selectors.providersError}
             submitting={writeBlocked || latestLoading}
-            error={factError}
-            notice={factNotice}
-            onCancel={closeDrawer}
+            formId={formId}
             onDraftChange={handleFactDraftChange}
             onSubmit={(event) => void handleFactSubmit(event)}
           />
@@ -1863,9 +1872,7 @@ export function LegacyVPSDetail({
           detail={detail}
           draft={subscriptionDraft}
           submitting={writeBlocked}
-          error={subscriptionError}
-          notice={subscriptionNotice}
-          onCancel={closeDrawer}
+          formId={formId}
           onDraftChange={handleSubscriptionDraftChange}
           onFeedbackClear={clearSubscriptionFeedback}
           onSubmit={(event) => void handleSubscriptionSubmit(event)}
@@ -1973,6 +1980,7 @@ export function LegacyVPSDetail({
       return (
         <VPSDomainsSection
           domains={state.domains}
+          services={state.services}
           error={domainError}
           notice={domainNotice}
           readOnly={READ_ONLY_PREVIEW}
@@ -2152,19 +2160,21 @@ export function LegacyVPSDetail({
         </ActionConfirmationModal>
       ) : null}
 
-      <Modal
+      <VPSDetailDialog
+        {...(drawerTemplate ? { template: drawerTemplate } : {})}
+        footer={drawerFooter}
         open={activeDrawer !== null}
         onClose={closeDrawer}
         title={drawerTitle()}
         ariaLabel={drawerTitle()}
         persistent={activeDrawer != null && !activeDrawer.endsWith('-detail') && activeDrawer !== 'monitoring-instance-evidence'}
-        {...(activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'monitoring-instance-evidence' || activeDrawer === 'facts' || activeDrawer === 'cancellation' || activeDrawer === 'subscription' || activeDrawer === 'validity-extension' || activeDrawer === 'monitoring-instance-create') ? { size: LARGE_MODAL_SIZE } : {})}
+        {...(activeDrawer === 'subscription' || (drawerTemplate === undefined && activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'cancellation' || activeDrawer === 'validity-extension' || activeDrawer === 'monitoring-instance-create')) ? { size: LARGE_MODAL_SIZE } : {})}
         {...(activeDrawer === 'cancellation' ? { contentClassName: 'modal-content--asset-cancel' } : {})}
       >
         <div className="vps-detail-modal">
           {renderDrawerContent()}
         </div>
-      </Modal>
+      </VPSDetailDialog>
     </div>
   )
 }

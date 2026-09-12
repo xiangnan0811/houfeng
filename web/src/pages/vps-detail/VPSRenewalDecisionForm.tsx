@@ -1,70 +1,64 @@
 import type { FormEvent } from 'react'
 
-import { Button } from '../../components/atoms'
-import type { VPSAssetDetail, VPSRenewalDecision } from '../../lib/types'
-import { RenewalBadge } from '../assetPageBadges'
+import { Select } from '../../components/atoms'
+import { VPS_RENEWAL_DECISION_LABELS, type VPSAssetDetail, type VPSRenewalDecision } from '../../lib/types'
 import type { DecisionDraftState } from './types'
 import { RENEWAL_DECISION_OPTIONS } from './vpsDetailOptions'
 
 type VPSRenewalDecisionFormProps = {
+  formId: string
   detail: VPSAssetDetail
   draft: DecisionDraftState
   submitting: boolean
-  error: string | null
-  notice: string | null
-  decisionChanged: boolean
-  onCancel: () => void
   onDraftChange: (draft: DecisionDraftState) => void
   onFeedbackClear: () => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }
 
 export function VPSRenewalDecisionForm({
+  formId,
   detail,
   draft,
   submitting,
-  error,
-  notice,
-  decisionChanged,
-  onCancel,
   onDraftChange,
   onFeedbackClear,
   onSubmit,
 }: VPSRenewalDecisionFormProps) {
+  const savedLabel = VPS_RENEWAL_DECISION_LABELS[detail.renewal_decision]
+  const pendingLabel = VPS_RENEWAL_DECISION_LABELS[draft.renewalDecision]
+  const decisionChanged = draft.renewalDecision !== detail.renewal_decision
+
   return (
-    <form className="asset-operation-form" onSubmit={onSubmit}>
-      <div className="asset-operation-form__header">
-        <div>
-          <h3>续费决策</h3>
-          <p>记录这台 VPS 下一次续费前的处理判断。</p>
-        </div>
-        <RenewalBadge value={detail.renewal_decision} />
-      </div>
-      <label className="asset-operation-field">
-        <span>续费决策</span>
-        <select
-          aria-label="续费决策"
-          value={draft.renewalDecision}
-          disabled={submitting}
-          onChange={(event) => {
-            onDraftChange({
-              ...draft,
-              renewalDecision: event.target.value as VPSRenewalDecision,
-            })
-            onFeedbackClear()
-          }}
-        >
-          {RENEWAL_DECISION_OPTIONS.map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
-      </label>
-      <label className="asset-operation-field asset-operation-field--wide">
-        <span>决策理由</span>
+    <form id={formId} className="vps-form" onSubmit={onSubmit}>
+      <p className="vps-context">{detail.display_name}</p>
+      {decisionChanged ? (
+        <p className="vps-context">当前「{savedLabel}」，将改为「{pendingLabel}」</p>
+      ) : null}
+      <Select
+        label="续费决策"
+        aria-label="续费决策"
+        value={draft.renewalDecision}
+        disabled={submitting}
+        onChange={(event) => {
+          onDraftChange({
+            ...draft,
+            renewalDecision: event.target.value as VPSRenewalDecision,
+          })
+          onFeedbackClear()
+        }}
+      >
+        {RENEWAL_DECISION_OPTIONS.map(([value, label]) => (
+          <option key={value} value={value}>{label}</option>
+        ))}
+      </Select>
+      <label className="input-field vps-wide">
+        <span className="input-field__label">决策理由</span>
         <textarea
+          className="input"
           aria-label="决策理由"
           value={draft.reason}
           disabled={submitting}
+          rows={3}
           onChange={(event) => {
             onDraftChange({ ...draft, reason: event.target.value })
             onFeedbackClear()
@@ -72,21 +66,6 @@ export function VPSRenewalDecisionForm({
           placeholder="例如：价格上涨，迁移到首尔监控实例"
         />
       </label>
-      {error ? (
-        <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
-          {error}
-        </p>
-      ) : notice ? (
-        <p className="asset-operation-feedback" role="status">{notice}</p>
-      ) : null}
-      <div className="asset-operation-actions">
-        <Button type="button" variant="secondary" disabled={submitting} onClick={onCancel}>
-          取消
-        </Button>
-        <Button type="submit" disabled={submitting || !decisionChanged}>
-          {submitting ? '保存中…' : '保存续费决策'}
-        </Button>
-      </div>
     </form>
   )
 }

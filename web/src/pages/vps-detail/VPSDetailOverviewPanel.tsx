@@ -431,7 +431,7 @@ export function VPSDetailOverviewPanel({
                 <button type="button" onClick={() => runMenuAction(onDecisionEdit)}>调整决策</button>
                 <button type="button" onClick={() => runMenuAction(onFactsOpen)}>基础资料</button>
                 <button type="button" onClick={() => runMenuAction(onFactEdit)}>编辑基础资料</button>
-                <button type="button" onClick={() => runMenuAction(onSubscriptionOpen)}>创建/更新订阅</button>
+                <button type="button" onClick={() => runMenuAction(onSubscriptionOpen)}>新增订阅事实</button>
                 <button type="button" onClick={() => runMenuAction(onValidityExtend)}>延长有效期</button>
                 <Link
                   className="watchtower-actions-menu__item"

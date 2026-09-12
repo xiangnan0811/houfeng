@@ -226,7 +226,7 @@ function buildNextAction(
       title: '补录续费成本',
       summary: '订阅接口已成功返回空结果，当前缺少真实续费日和月化成本。',
       tone: 'critical',
-      buttonLabel: '创建/更新订阅',
+      buttonLabel: '新增订阅事实',
       onAction: onSubscriptionCreate,
     }
   }

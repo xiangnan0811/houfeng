@@ -270,7 +270,7 @@ function buildRelatedItems(
       quickActions: input.subscriptionLoadFailed
         ? []
         : [
-            { kind: 'modal', label: '创建/更新订阅', mode: 'subscription' },
+            { kind: 'modal', label: '新增订阅事实', mode: 'subscription' },
             { kind: 'modal', label: '延长', mode: 'validity-extension' },
           ],
     },
@@ -357,7 +357,7 @@ function buildAttentionItems(
       reason: '需要补齐成本和续费日',
       tone: 'critical',
       domain: 'ops',
-      primaryAction: { kind: 'modal', label: '创建/更新订阅', mode: 'subscription' },
+      primaryAction: { kind: 'modal', label: '新增订阅事实', mode: 'subscription' },
       secondaryActions: [],
     })
   } else if (subscriptionSummary.tone === 'critical' || subscriptionSummary.tone === 'notice') {

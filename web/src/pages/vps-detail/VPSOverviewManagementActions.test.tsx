@@ -152,9 +152,7 @@ describe('VPSOverviewManagementActions', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开事实' }))
     const nameInput = await screen.findByRole('textbox', { name: 'VPS 名称' })
     fireEvent.change(nameInput, { target: { value: '东京边缘已更新' } })
-    const submit = screen.getByRole('button', { name: '保存基础信息' })
-    const form = submit.closest('form')
-    expect(form).not.toBeNull()
+    const form = (nameInput as HTMLInputElement).form
 
     fireEvent.submit(form!)
     fireEvent.submit(form!)
@@ -200,7 +198,7 @@ describe('VPSOverviewManagementActions', () => {
     act(() => {
       registry.finish(legacyOwner)
     })
-    const enabledSave = await screen.findByRole('button', { name: '创建/更新订阅' })
+    const enabledSave = await screen.findByRole('button', { name: '新增订阅' })
     expect(enabledSave).toBeEnabled()
   })
 
@@ -218,7 +216,7 @@ describe('VPSOverviewManagementActions', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '打开订阅' }))
     fireEvent.change(await screen.findByLabelText('价格'), { target: { value: '12' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(screen.getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
 
     firstView.unmount()
@@ -236,7 +234,7 @@ describe('VPSOverviewManagementActions', () => {
     await act(async () => {
       pendingCreate.resolve({} as Awaited<ReturnType<typeof api.createVPSSubscription>>)
     })
-    expect(await screen.findByRole('button', { name: '创建/更新订阅' })).toBeEnabled()
+    expect(await screen.findByRole('button', { name: '新增订阅' })).toBeEnabled()
     expect(create).toHaveBeenCalledTimes(1)
   })
 
@@ -551,9 +549,9 @@ describe('VPSOverviewManagementActions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '打开订阅' }))
     fireEvent.change(await screen.findByLabelText('价格'), { target: { value: '12' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(screen.getByRole('button', { name: '新增订阅' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('同一幂等键已用于不同的订阅内容')
-    fireEvent.click(screen.getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(screen.getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(keys).toHaveLength(2))
     expect(keys[0]).not.toBe(keys[1])
   })
@@ -599,9 +597,9 @@ describe('VPSOverviewManagementActions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '打开订阅' }))
     fireEvent.change(await screen.findByLabelText('价格'), { target: { value: '12' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(screen.getByRole('button', { name: '新增订阅' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Failed to fetch')
-    fireEvent.click(screen.getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(screen.getByRole('button', { name: '新增订阅' }))
     await waitFor(() => expect(refresh).toHaveBeenCalled())
     expect(keys).toHaveLength(2)
     expect(keys[0]).toBe(keys[1])

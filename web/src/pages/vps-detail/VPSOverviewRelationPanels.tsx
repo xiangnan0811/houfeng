@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { Button, Modal } from '../../components/atoms'
+import { Button } from '../../components/atoms'
 import {
   listVPSDomains,
   listVPSMonitoringInstances,
@@ -11,6 +11,7 @@ import type {
   AssetServiceRecord,
   VPSMonitoringInstanceSummary,
 } from '../../lib/types'
+import { VPSDetailDialog } from './VPSDetailDialog'
 import { VPSDomainsSection } from './VPSDomainsSection'
 import type { VPSManagementController, VPSManagementPanel } from './hooks/useVPSManagementController'
 import { VPSMonitoringInstanceLinksSection } from './VPSMonitoringInstanceLinksSection'
@@ -25,7 +26,7 @@ type RelationPanel = Extract<
 type RelationData =
   | { panel: 'monitoring-instance-evidence'; vpsId: string; records: VPSMonitoringInstanceSummary[] }
   | { panel: 'services-detail'; vpsId: string; records: AssetServiceRecord[] }
-  | { panel: 'domains-detail'; vpsId: string; records: AssetDomainRecord[] }
+  | { panel: 'domains-detail'; vpsId: string; records: AssetDomainRecord[]; services: AssetServiceRecord[] }
 
 type LoadState =
   | { status: 'idle' }
@@ -57,11 +58,18 @@ export function VPSOverviewRelationPanels({ vpsId, management }: Props) {
     const requestId = ++requestIdRef.current
     // eslint-disable-next-line react-hooks/set-state-in-effect -- opening a relation panel invalidates any prior panel data before its scoped request starts
     setLoadState({ status: 'loading', panel, vpsId })
+    const servicesTask = panel === 'domains-detail'
+      ? listVPSServices(vpsId).catch(() => [] as AssetServiceRecord[])
+      : null
 
     void loadPanel(panel, vpsId)
-      .then((data) => {
+      .then(async (data) => {
         if (requestId !== requestIdRef.current) return
         setLoadState({ status: 'ready', data })
+        if (data.panel !== 'domains-detail' || !servicesTask) return
+        const services = await servicesTask
+        if (requestId !== requestIdRef.current) return
+        setLoadState({ status: 'ready', data: { ...data, services } })
       })
       .catch((error: unknown) => {
         if (requestId !== requestIdRef.current) return
@@ -91,30 +99,28 @@ export function VPSOverviewRelationPanels({ vpsId, management }: Props) {
   )
 
   return (
-    <Modal
+    <VPSDetailDialog
       open
       onClose={management.closePanel}
       title={copy.title}
       ariaLabel={copy.title}
-      size="xl"
+      template="objects"
     >
-      <div className="vps-detail-modal">
-        {!stateIsCurrent || loadState.status === 'loading' ? (
-          <p role="status">正在加载{copy.subject}…</p>
-        ) : null}
-        {stateIsCurrent && loadState.status === 'error' ? (
-          <>
-            <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
-              {loadState.message}
-            </p>
-            <Button onClick={() => setLoadRevision((current) => current + 1)}>
-              重试加载{copy.subject}
-            </Button>
-          </>
-        ) : null}
-        {stateIsCurrent && loadState.status === 'ready' ? renderPanel(loadState.data) : null}
-      </div>
-    </Modal>
+      {!stateIsCurrent || loadState.status === 'loading' ? (
+        <p role="status">正在加载{copy.subject}…</p>
+      ) : null}
+      {stateIsCurrent && loadState.status === 'error' ? (
+        <>
+          <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+            {loadState.message}
+          </p>
+          <Button onClick={() => setLoadRevision((current) => current + 1)}>
+            重试加载{copy.subject}
+          </Button>
+        </>
+      ) : null}
+      {stateIsCurrent && loadState.status === 'ready' ? renderPanel(loadState.data) : null}
+    </VPSDetailDialog>
   )
 }
 
@@ -136,7 +142,7 @@ async function loadPanel(panel: RelationPanel, vpsId: string): Promise<RelationD
     case 'services-detail':
       return { panel, vpsId, records: await listVPSServices(vpsId) }
     case 'domains-detail':
-      return { panel, vpsId, records: await listVPSDomains(vpsId) }
+      return { panel, vpsId, records: await listVPSDomains(vpsId), services: [] }
   }
 }
 
@@ -174,6 +180,7 @@ function renderPanel(data: RelationData) {
       return (
         <VPSDomainsSection
           domains={data.records}
+          services={data.services}
           error={null}
           notice={null}
           readOnly

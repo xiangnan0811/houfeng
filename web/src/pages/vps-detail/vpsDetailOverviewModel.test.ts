@@ -357,7 +357,7 @@ describe('vpsDetailOverviewModel', () => {
     const subscriptionItem = model.relatedItems.find((item) => item.key === 'subscription')
     expect(subscriptionItem?.primary).toBe('订阅证据暂不可用')
     expect(subscriptionItem?.tone).toBe('notice')
-    expect(subscriptionItem?.quickActions.map((action) => action.label)).not.toContain('创建/更新订阅')
+    expect(subscriptionItem?.quickActions.map((action) => action.label)).not.toContain('新增订阅事实')
     expect(model.judgement.attentionItems.map((item) => item.title)).toContain('订阅证据暂不可用')
     expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({ kind: 'link', label: '核对订阅', to: '/subscriptions?vps_id=vps_001' })
   })
@@ -373,9 +373,9 @@ describe('vpsDetailOverviewModel', () => {
     const subscriptionItem = model.relatedItems.find((item) => item.key === 'subscription')
     expect(subscriptionItem?.primary).toBe('未记录当前订阅')
     expect(subscriptionItem?.tone).toBe('critical')
-    expect(subscriptionItem?.quickActions.map((action) => action.label)).toContain('创建/更新订阅')
+    expect(subscriptionItem?.quickActions.map((action) => action.label)).toContain('新增订阅事实')
     expect(model.judgement.attentionItems.map((item) => item.title)).toContain('缺少当前订阅')
-    expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({ kind: 'modal', label: '创建/更新订阅', mode: 'subscription' })
+    expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({ kind: 'modal', label: '新增订阅事实', mode: 'subscription' })
   })
 
   it('keeps monitoring attention in the monitoring section', () => {
