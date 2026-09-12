@@ -5,7 +5,7 @@
   "terminals": [
     {
       "name": "houfeng-center",
-      "command": "source \"$HOME/.config/houfeng/center.env\" && exec ./bin/houfeng-center"
+      "command": "bash .cursor/start.sh && source \"$HOME/.config/houfeng/center.env\" && exec ./bin/houfeng-center"
     }
   ]
 }
