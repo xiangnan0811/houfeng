@@ -1,0 +1,11 @@
+{
+  "name": "Houfeng dev (center + PostgreSQL + web)",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "houfeng-center",
+      "command": "source \"$HOME/.config/houfeng/center.env\" && exec ./bin/houfeng-center"
+    }
+  ]
+}
