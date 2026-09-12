@@ -16,6 +16,8 @@
     "vps": [
       "src/pages/VPSPage.css",
       "src/pages/vps-detail/VPSDetailWorkspace.css",
+      "src/pages/vps-detail/VPSFactsEditForm.css",
+      "src/pages/vps-detail/VPSRelationDossiers.css",
       "src/styles/partials/legacy-vps.css",
       "src/styles/partials/vps-overview-freshness.css"
     ],

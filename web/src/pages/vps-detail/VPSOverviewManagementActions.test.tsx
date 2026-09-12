@@ -484,9 +484,9 @@ describe('VPSOverviewManagementActions', () => {
     expect(screen.getByRole('textbox', { name: 'SSH Host' })).toHaveValue('ssh.example.test')
     expect(screen.getByRole('textbox', { name: 'SSH Host' })).toBeEnabled()
     expect(screen.getByRole('textbox', { name: 'IPv6 地址' })).toHaveValue('2001:db8::1')
-    expect(screen.getByRole('combobox', { name: '国家 / 地区' })).toHaveValue('US')
+    expect(screen.getByRole('combobox', { name: '国家 / 地区' })).toHaveValue('美国')
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'IPv4 / 主入口' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'IPv4' }), {
       target: { value: '198.51.100.9' },
     })
     expect(screen.getByRole('textbox', { name: 'SSH Host' })).toHaveValue('ssh.example.test')
@@ -499,6 +499,52 @@ describe('VPSOverviewManagementActions', () => {
       ipv6: '2001:db8::1',
       country: 'US',
     }), { expectedUpdatedAt: latest.updated_at })
+  })
+
+  it('saves a typed unique ISO country name without selecting a list option', async () => {
+    const detail = detailFixture('vps_a', '东京边缘')
+    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detail)
+    vi.spyOn(api, 'listProviders').mockResolvedValue([])
+    const update = vi.spyOn(api, 'updateVPSAsset').mockResolvedValue(detail)
+    const refresh = vi.fn().mockResolvedValue(true)
+
+    render(
+      <MemoryRouter>
+        <Harness onRefresh={refresh} />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开事实' }))
+    const combo = await screen.findByRole('combobox', { name: '国家 / 地区' })
+    fireEvent.change(combo, { target: { value: 'Andorra' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存基础信息' }))
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1))
+    expect(update).toHaveBeenCalledWith('vps_a', expect.objectContaining({ country: 'AD' }), {
+      expectedUpdatedAt: detail.updated_at,
+    })
+  })
+
+  it('saves a typed custom country without selecting a list option', async () => {
+    const detail = detailFixture('vps_a', '东京边缘')
+    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detail)
+    vi.spyOn(api, 'listProviders').mockResolvedValue([])
+    const update = vi.spyOn(api, 'updateVPSAsset').mockResolvedValue(detail)
+    const refresh = vi.fn().mockResolvedValue(true)
+
+    render(
+      <MemoryRouter>
+        <Harness onRefresh={refresh} />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开事实' }))
+    const combo = await screen.findByRole('combobox', { name: '国家 / 地区' })
+    fireEvent.change(combo, { target: { value: '北境观测' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存基础信息' }))
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1))
+    expect(update).toHaveBeenCalledWith('vps_a', expect.objectContaining({ country: '北境观测' }), {
+      expectedUpdatedAt: detail.updated_at,
+    })
   })
 
   it('keeps edits typed while the latest VPS GET is still in flight', async () => {

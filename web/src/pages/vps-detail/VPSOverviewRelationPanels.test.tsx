@@ -257,7 +257,8 @@ describe('VPSOverviewRelationPanels', () => {
     const httpRow = within(rows[0] as HTMLElement)
     expect(httpRow.getByText('Web')).toBeInTheDocument()
     expect(httpRow.getByText('443')).toBeInTheDocument()
-    expect(httpRow.getByRole('link', { name: 'https://example.invalid' })).toHaveAttribute('href', 'https://example.invalid')
+    expect(httpRow.getByText('https://example.invalid')).toBeInTheDocument()
+    expect(httpRow.getByRole('link', { name: '打开入口' })).toHaveAttribute('href', 'https://example.invalid')
     expect(httpRow.getByRole('button', { name: '复制入口' })).toBeInTheDocument()
     expect(httpRow.getByRole('link', { name: 'tg_001' })).toHaveAttribute('href', '/targets/tg_001')
 

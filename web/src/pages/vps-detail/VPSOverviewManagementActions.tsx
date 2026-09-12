@@ -714,6 +714,7 @@ export function VPSOverviewManagementActions({
         title="编辑 VPS 事实"
         ariaLabel="编辑 VPS 事实"
         template="form"
+        contentClassName="vps-dialog--facts"
         persistent={submitting}
         footer={detail && factDraft ? (
           <VPSDialogActions formId={formId} onCancel={closePanel} submitting={submitting} error={mutationError} submitLabel="保存基础信息" cancelLabel="取消编辑" />

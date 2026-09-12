@@ -2169,7 +2169,10 @@ export function LegacyVPSDetail({
         ariaLabel={drawerTitle()}
         persistent={activeDrawer != null && !activeDrawer.endsWith('-detail') && activeDrawer !== 'monitoring-instance-evidence'}
         {...(activeDrawer === 'subscription' || (drawerTemplate === undefined && activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'cancellation' || activeDrawer === 'validity-extension' || activeDrawer === 'monitoring-instance-create')) ? { size: LARGE_MODAL_SIZE } : {})}
-        {...(activeDrawer === 'cancellation' ? { contentClassName: 'modal-content--asset-cancel' } : {})}
+        contentClassName={activeDrawer === 'facts' ? 'vps-dialog--facts'
+          : activeDrawer === 'services-detail' ? 'vps-dialog--services'
+            : activeDrawer === 'domains-detail' ? 'vps-dialog--domains'
+              : activeDrawer === 'cancellation' ? 'modal-content--asset-cancel' : ''}
       >
         <div className="vps-detail-modal">
           {renderDrawerContent()}

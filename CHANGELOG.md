@@ -4,9 +4,8 @@
 
 ### Features
 
-* **web:** align service/domain detail modals with the VPS workspace using shared name/ID/status hierarchy, monospace domain identities, subtle noninteractive resource surfaces, compact two-column facts and subordinate notes while preserving collection, link, copy and create behavior.
-
-* **web:** group the shared VPS facts editor into identity/provider, location, connection/host, and usage/note sections with responsive columns, preserving existing fields, write ownership and conflict handling.
+* **web:** bring the accepted compact VPS dialog design into the real frontend: common facts plus one optional section, searchable grouped country input, retained hidden IPv6/SSH values, native usage-state/importance controls, and read-only service/domain dossiers with full URL copy/open actions. Preserve real facts saving, conflicts and existing create flows; service/domain editing APIs remain deferred.
+* **web:** isolate facts and dossier styles under the VPS owner. Rebase measured source/built-CSS ceilings for the two local surfaces and entry-JS gzip from 110738 to 111670 bytes (+932); retain existing color, duplicate-selector, importance, font and async-JS ceilings.
 
 * **web:** add shared-state VPS directory and table views with persistent presentation preference, URL-preserved search and selection, and an inline asset inspector. Existing VPS management and onboarding destinations remain shared.
 * **web:** separate compact, collapsible VPS quick inspection from a shared independent detail workspace, organize full detail by responsibility, and retain inventory context on return navigation.

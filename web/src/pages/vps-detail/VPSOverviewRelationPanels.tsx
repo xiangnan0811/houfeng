@@ -105,6 +105,7 @@ export function VPSOverviewRelationPanels({ vpsId, management }: Props) {
       title={copy.title}
       ariaLabel={copy.title}
       template="objects"
+      contentClassName={panel === 'services-detail' ? 'vps-dialog--services' : panel === 'domains-detail' ? 'vps-dialog--domains' : ''}
     >
       {!stateIsCurrent || loadState.status === 'loading' ? (
         <p role="status">正在加载{copy.subject}…</p>
