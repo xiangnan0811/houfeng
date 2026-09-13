@@ -265,6 +265,8 @@ describe('VPSPage', () => {
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('subscription database unavailable'))
     fireEvent.click(screen.getByRole('button', { name: '缺订阅' }))
     expect(screen.queryByRole('button', { name: '选择 Osaka Missing' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '订阅证据不可用' })).toBeInTheDocument()
+    expect(screen.queryByText('当前筛选没有匹配 VPS')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /移除筛选 视图/ }))
     expect(await screen.findByRole('button', { name: '选择 Osaka Missing' })).toBeInTheDocument()
   })
@@ -278,10 +280,14 @@ describe('VPSPage', () => {
       return pending
     }))
     mount('/vps?workspace=ledger&view=missing_subscription')
-    await screen.findByRole('heading', { name: 'VPS 资产' })
+    expect(await screen.findByRole('heading', { name: '正在加载订阅证据…' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '选择 Osaka Missing' })).not.toBeInTheDocument()
+    expect(screen.queryByText('当前筛选没有匹配 VPS')).not.toBeInTheDocument()
+    expect(screen.queryByText('还没有录入 VPS 资产')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '缺订阅' })).toBeInTheDocument()
     resolveSubscriptions(mockJSONResponse([]))
     expect(await screen.findByRole('button', { name: '选择 Osaka Missing' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '缺订阅 1' })).toBeInTheDocument()
   })
 
   it('keeps cancellation attention based on running links and excludes final lifecycle assets', async () => {
@@ -331,9 +337,9 @@ describe('VPSPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '创建第一台 VPS' }))
     const modal = await screen.findByRole('dialog', { name: '添加 VPS' })
     fireEvent.change(within(modal).getByLabelText('VPS 名称'), { target: { value: 'Osaka Standby' } })
-    fireEvent.change(within(modal).getByLabelText('服务商'), { target: { value: 'pv_001' } })
-    fireEvent.change(within(modal).getByLabelText('国家 / 地区'), { target: { value: 'JP' } })
-    fireEvent.change(within(modal).getByLabelText('IPv4 / 主入口'), { target: { value: '203.0.113.8' } })
+    fireEvent.change(within(modal).getByLabelText('资产服务商'), { target: { value: 'pv_001' } })
+    fireEvent.change(within(modal).getByRole('combobox', { name: '国家 / 地区' }), { target: { value: 'JP' } })
+    fireEvent.change(within(modal).getByLabelText('IPv4'), { target: { value: '203.0.113.8' } })
     fireEvent.click(within(modal).getByRole('button', { name: '创建 VPS' }))
     expect(await screen.findByRole('heading', { name: 'VPS 管理详情' })).toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent('/vps/vps_new')
@@ -352,6 +358,39 @@ describe('VPSPage', () => {
       country: 'JP',
       ipv4: '203.0.113.8',
     })
+  })
+
+  it('shows honest provider catalog unavailability in create without blocking unassociated', async () => {
+    const fetchMock = mockInventory()
+    const original = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input) === '/api/providers') return mockJSONResponse({ error: 'provider catalog down' }, 503)
+      return original(input, init)
+    })
+    mount('/vps?workspace=ledger')
+    fireEvent.click(await screen.findByRole('button', { name: '添加 VPS' }))
+    const modal = await screen.findByRole('dialog', { name: '添加 VPS' })
+    expect(within(modal).getByText(/服务商不可用：/)).toBeInTheDocument()
+    expect(within(modal).getByLabelText('资产服务商')).toHaveValue('')
+    expect(within(modal).getByRole('combobox', { name: '资产服务商' })).not.toBeDisabled()
+    expect(within(modal).getByRole('button', { name: '新建服务商' })).toBeInTheDocument()
+  })
+
+  it('disables the provider catalog in create while providers are still loading', async () => {
+    let resolveProviders!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => { resolveProviders = resolve })
+    const fetchMock = mockInventory()
+    const original = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((input, init) => (
+      String(input) === '/api/providers' ? pending : original(input, init)
+    ))
+    mount('/vps?workspace=ledger')
+    fireEvent.click(await screen.findByRole('button', { name: '添加 VPS' }))
+    const modal = await screen.findByRole('dialog', { name: '添加 VPS' })
+    expect(within(modal).getByRole('combobox', { name: '资产服务商' })).toBeDisabled()
+    expect(within(modal).getByText('正在读取服务商…')).toBeInTheDocument()
+    resolveProviders(mockJSONResponse([provider]))
+    await waitFor(() => expect(within(modal).getByRole('combobox', { name: '资产服务商' })).not.toBeDisabled())
   })
 
   it('does not infer healthy observations from stable business facts', async () => {
@@ -460,6 +499,119 @@ describe('VPSPage', () => {
     mockInventory([vps], [{ ...subscription, status: 'expired', auto_renew: false, auto_renew_cancelled: true }])
     mount('/vps?workspace=ledger&view=cancellation_attention')
     expect(await screen.findByRole('button', { name: '选择 Tokyo Edge' })).toBeInTheDocument()
+  })
+
+  it('keeps VPS inventory usable when providers fail and retries without inventing providers', async () => {
+    let providerCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/vps') return mockJSONResponse([vps])
+      if (url === '/api/providers') {
+        providerCalls += 1
+        if (providerCalls === 1) return mockJSONResponse({ error: 'provider catalog unavailable' }, 503)
+        return mockJSONResponse([provider])
+      }
+      if (url.startsWith('/api/subscriptions?')) return mockJSONResponse([subscription])
+      throw new Error('Unexpected request: ' + url)
+    }))
+    mount('/vps?workspace=ledger&q=Tokyo&selected=vps_001&source=providers')
+    expect(await screen.findByRole('button', { name: '选择 Tokyo Edge' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('provider catalog unavailable'))
+    fireEvent.click(screen.getByRole('button', { name: '筛选' }))
+    const drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
+    expect(within(drawer).queryByRole('option', { name: 'Hetzner' })).not.toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'VPS 高级筛选' })).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(screen.queryByText('provider catalog unavailable')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '选择 Tokyo Edge' })).toBeInTheDocument()
+    expect(currentQuery().get('q')).toBe('Tokyo')
+    expect(currentQuery().get('selected')).toBe('vps_001')
+    expect(currentQuery().get('source')).toBe('providers')
+    fireEvent.click(screen.getByRole('button', { name: '筛选' }))
+    const reopened = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
+    expect(within(reopened).getByRole('option', { name: 'Hetzner' })).toBeInTheDocument()
+  })
+
+  it('retries inventory errors without dropping query, view or selection', async () => {
+    let vpsCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/vps') {
+        vpsCalls += 1
+        if (vpsCalls === 1) return mockJSONResponse({ error: 'vps store unavailable' }, 500)
+        return mockJSONResponse([missingFactsVPS])
+      }
+      if (url === '/api/providers') return mockJSONResponse([provider])
+      if (url.startsWith('/api/subscriptions?')) return mockJSONResponse([])
+      throw new Error('Unexpected request: ' + url)
+    }))
+    mount('/vps?workspace=workbench&view=unlinked&q=Osaka&selected=vps_missing&source=review')
+    expect(await screen.findByRole('heading', { name: 'VPS 库存不可用' })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: '搜索 VPS' })).toHaveValue('Osaka')
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: '重试' }))
+    expect(await screen.findByRole('button', { name: '选择 Osaka Missing' })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: '搜索 VPS' })).toHaveValue('Osaka')
+    expect(currentQuery().get('workspace')).toBe('workbench')
+    expect(currentQuery().get('view')).toBe('unlinked')
+    expect(currentQuery().get('q')).toBe('Osaka')
+    expect(currentQuery().get('selected')).toBe('vps_missing')
+    expect(currentQuery().get('source')).toBe('review')
+  })
+
+  it('retries subscription errors without dropping query, view or selection', async () => {
+    let subscriptionCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/vps') return mockJSONResponse([vps])
+      if (url === '/api/providers') return mockJSONResponse([provider])
+      if (url.startsWith('/api/subscriptions?')) {
+        subscriptionCalls += 1
+        if (subscriptionCalls === 1) return mockJSONResponse({ error: 'subscription database unavailable' }, 500)
+        return mockJSONResponse([subscription])
+      }
+      throw new Error('Unexpected request: ' + url)
+    }))
+    mount('/vps?workspace=ledger&q=Tokyo&selected=vps_001&source=keep')
+    expect(await screen.findByRole('button', { name: '选择 Tokyo Edge' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('subscription database unavailable'))
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(screen.queryByText('subscription database unavailable')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '选择 Tokyo Edge' })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: '搜索 VPS' })).toHaveValue('Tokyo')
+    expect(currentQuery().get('q')).toBe('Tokyo')
+    expect(currentQuery().get('selected')).toBe('vps_001')
+    expect(currentQuery().get('source')).toBe('keep')
+    expect(currentQuery().get('workspace')).toBe('ledger')
+  })
+
+  it('does not treat renewal views as empty while subscription evidence is unavailable', async () => {
+    let resolveSubscriptions!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => { resolveSubscriptions = resolve })
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === '/api/vps') return Promise.resolve(mockJSONResponse([vps]))
+      if (String(input) === '/api/providers') return Promise.resolve(mockJSONResponse([provider]))
+      return pending
+    }))
+    mount('/vps?workspace=ledger&view=renewal')
+    expect(await screen.findByRole('heading', { name: '正在加载订阅证据…' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '30天续费' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '30天续费 0' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '缺订阅 0' })).not.toBeInTheDocument()
+    expect(document.querySelector('.vps-page__stats')).toHaveTextContent('1')
+    expect(document.querySelector('.vps-page__stats')).not.toHaveTextContent('显示')
+    expect(screen.queryByText('当前筛选没有匹配 VPS')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选择 Tokyo Edge' })).not.toBeInTheDocument()
+    resolveSubscriptions(mockJSONResponse({ error: 'subscription backend unavailable' }, 503))
+    expect(await screen.findByRole('heading', { name: '订阅证据不可用' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '30天续费' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '30天续费 0' })).not.toBeInTheDocument()
+    expect(document.querySelector('.vps-page__stats')).not.toHaveTextContent('显示')
+    expect(screen.queryByText('当前筛选没有匹配 VPS')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选择 Tokyo Edge' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '全部 1' }))
+    expect(await screen.findByRole('button', { name: '选择 Tokyo Edge' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('subscription backend unavailable')
   })
 
 })

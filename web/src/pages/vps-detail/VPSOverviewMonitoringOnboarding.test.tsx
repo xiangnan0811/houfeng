@@ -195,10 +195,7 @@ async function openZeroLinkForm() {
 }
 
 async function submitCreate() {
-  const submit = screen.getByRole('button', { name: '接入/升级 agent' })
-  const form = submit.closest('form')
-  expect(form).not.toBeNull()
-  fireEvent.submit(form!)
+  fireEvent.click(screen.getByRole('button', { name: '接入/升级 agent' }))
 }
 
 describe('VPSOverviewMonitoringOnboarding', () => {

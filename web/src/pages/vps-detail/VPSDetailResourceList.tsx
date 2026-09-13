@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { Button } from '../../components/atoms'
 import { VPSCopyValueButton } from './VPSCopyValueButton'
@@ -47,6 +47,7 @@ export function VPSDetailResourceList<T>({
   onRetry,
   onOpenDetails,
 }: Props<T>) {
+  const location = useLocation()
   const pendingEmpty = state.status === 'loading' && state.items.length === 0
   const failedEmpty = state.status === 'error' && state.items.length === 0
   const readyEmpty = state.status === 'ready' && state.items.length === 0
@@ -105,7 +106,7 @@ export function VPSDetailResourceList<T>({
                   </div>
                   {status ? <span className="vps-detail-resource__status">{status}</span> : null}
                   {detailsHref ? (
-                    <Link className="btn sm ghost" to={detailsHref}>{detailsLabel}</Link>
+                    <Link className="btn sm ghost" to={detailsHref} state={location.state}>{detailsLabel}</Link>
                   ) : onOpenDetails ? (
                     <Button
                       type="button"

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import { Button, Input, MonoDigits, Timestamp } from '../../components/atoms'
@@ -113,6 +113,7 @@ export function MonitoringInstanceManagementSection({
   onRestoreArchive,
   onPermanentCleanup,
 }: MonitoringInstanceManagementSectionProps) {
+  const location = useLocation()
   const [dialogAction, setDialogAction] = useState<ManagementDialogAction | null>(null)
   const [reason, setReason] = useState('')
   const [confirmationName, setConfirmationName] = useState('')
@@ -211,7 +212,7 @@ export function MonitoringInstanceManagementSection({
                     <ul>
                       {review.active_vps_links.map((link) => (
                         <li key={link.link_id}>
-                          <Link className="text-link" to={`/vps/${link.vps_id}`}>{link.display_name}</Link>
+                          <Link className="text-link" to={`/vps/${link.vps_id}`} state={location.state}>{link.display_name}</Link>
                           <span>{link.lifecycle_status} · {link.usage_status}</span>
                         </li>
                       ))}

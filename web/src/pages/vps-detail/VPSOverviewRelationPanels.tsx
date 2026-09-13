@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 import { Button } from '../../components/atoms'
 import {
@@ -37,6 +38,20 @@ type LoadState =
 type Props = {
   vpsId: string
   management: VPSManagementController
+  readOnly?: boolean
+  writeBlocked?: boolean
+  unlinkingMonitoringInstanceId?: string | null
+  pendingUnlinkMonitoringInstance?: VPSMonitoringInstanceSummary | null
+  linkFeedback?: string | null
+  linkFeedbackIsError?: boolean
+  onCreateMonitoringInstance?: () => void
+  onOpenLink?: () => void
+  onUpgradeMonitoringInstance?: (monitoringInstance: VPSMonitoringInstanceSummary) => void
+  onRequestUnlinkMonitoringInstance?: (monitoringInstance: VPSMonitoringInstanceSummary) => void
+  onCancelUnlinkMonitoringInstance?: () => void
+  onConfirmUnlinkMonitoringInstance?: (monitoringInstance: VPSMonitoringInstanceSummary) => void
+  onOpenServiceCreate?: () => void
+  onOpenDomainCreate?: () => void
 }
 
 const PANEL_COPY: Record<RelationPanel, { title: string; subject: string }> = {
@@ -45,9 +60,52 @@ const PANEL_COPY: Record<RelationPanel, { title: string; subject: string }> = {
   'domains-detail': { title: '已关联域名', subject: '域名' },
 }
 
-const noop = () => undefined
+export function VPSOverviewRelationPanels({
+  vpsId,
+  management,
+  readOnly = true,
+  writeBlocked = false,
+  unlinkingMonitoringInstanceId = null,
+  pendingUnlinkMonitoringInstance: externalPendingUnlink,
+  linkFeedback = null,
+  linkFeedbackIsError = false,
+  onCreateMonitoringInstance,
+  onOpenLink,
+  onUpgradeMonitoringInstance,
+  onRequestUnlinkMonitoringInstance,
+  onCancelUnlinkMonitoringInstance,
+  onConfirmUnlinkMonitoringInstance,
+  onOpenServiceCreate,
+  onOpenDomainCreate,
+}: Props) {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [localPendingUnlink, setLocalPendingUnlink] = useState<VPSMonitoringInstanceSummary | null>(null)
+  const pendingUnlink = externalPendingUnlink !== undefined ? externalPendingUnlink : localPendingUnlink
 
-export function VPSOverviewRelationPanels({ vpsId, management }: Props) {
+  const handleRequestUnlink = (mi: VPSMonitoringInstanceSummary) => {
+    if (onRequestUnlinkMonitoringInstance) onRequestUnlinkMonitoringInstance(mi)
+    else setLocalPendingUnlink(mi)
+  }
+
+  const handleCancelUnlink = () => {
+    if (onCancelUnlinkMonitoringInstance) onCancelUnlinkMonitoringInstance()
+    else setLocalPendingUnlink(null)
+  }
+
+  const handleConfirmUnlink = (mi: VPSMonitoringInstanceSummary) => {
+    if (onConfirmUnlinkMonitoringInstance) onConfirmUnlinkMonitoringInstance(mi)
+  }
+
+  const handleUpgrade = (mi: VPSMonitoringInstanceSummary) => {
+    if (onUpgradeMonitoringInstance) {
+      onUpgradeMonitoringInstance(mi)
+    } else {
+      navigate(`/monitoring/${encodeURIComponent(mi.monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(vpsId)}`, {
+        state: location.state,
+      })
+    }
+  }
   const panel = relationPanel(management.panel)
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' })
   const [loadRevision, setLoadRevision] = useState(0)
@@ -120,7 +178,22 @@ export function VPSOverviewRelationPanels({ vpsId, management }: Props) {
           </Button>
         </>
       ) : null}
-      {stateIsCurrent && loadState.status === 'ready' ? renderPanel(loadState.data) : null}
+      {stateIsCurrent && loadState.status === 'ready' ? renderPanel(loadState.data, {
+        readOnly,
+        writeBlocked,
+        unlinkingMonitoringInstanceId,
+        pendingUnlink,
+        linkFeedback,
+        linkFeedbackIsError,
+        onCreateMonitoringInstance: onCreateMonitoringInstance ?? (() => management.openPanel('monitoring-instance-create')),
+        onOpenLink: onOpenLink ?? (() => management.openPanel('monitoring-instance-link')),
+        onUpgrade: handleUpgrade,
+        onRequestUnlink: handleRequestUnlink,
+        onCancelUnlink: handleCancelUnlink,
+        onConfirmUnlink: handleConfirmUnlink,
+        onOpenServiceCreate: onOpenServiceCreate ?? (() => management.openPanel('service')),
+        onOpenDomainCreate: onOpenDomainCreate ?? (() => management.openPanel('domain')),
+      }) : null}
     </VPSDetailDialog>
   )
 }
@@ -147,24 +220,43 @@ async function loadPanel(panel: RelationPanel, vpsId: string): Promise<RelationD
   }
 }
 
-function renderPanel(data: RelationData) {
+function renderPanel(
+  data: RelationData,
+  options: {
+    readOnly: boolean
+    writeBlocked: boolean
+    unlinkingMonitoringInstanceId: string | null
+    pendingUnlink: VPSMonitoringInstanceSummary | null
+    linkFeedback: string | null
+    linkFeedbackIsError: boolean
+    onCreateMonitoringInstance: () => void
+    onOpenLink: () => void
+    onUpgrade: (mi: VPSMonitoringInstanceSummary) => void
+    onRequestUnlink: (mi: VPSMonitoringInstanceSummary) => void
+    onCancelUnlink: () => void
+    onConfirmUnlink: (mi: VPSMonitoringInstanceSummary) => void
+    onOpenServiceCreate: () => void
+    onOpenDomainCreate: () => void
+  },
+) {
   switch (data.panel) {
     case 'monitoring-instance-evidence':
       return (
         <VPSMonitoringInstanceLinksSection
           vpsId={data.vpsId}
           monitoring={data.records}
-          readOnly
-          unlinkingMonitoringInstanceId={null}
-          pendingUnlinkMonitoringInstance={null}
-          linkFeedback={null}
-          linkFeedbackIsError={false}
-          onCreateMonitoringInstance={noop}
-          onOpenLink={noop}
-          onUpgradeMonitoringInstance={noop}
-          onRequestUnlinkMonitoringInstance={noop}
-          onCancelUnlinkMonitoringInstance={noop}
-          onConfirmUnlinkMonitoringInstance={noop}
+          readOnly={options.readOnly}
+          writeBlocked={options.writeBlocked}
+          unlinkingMonitoringInstanceId={options.unlinkingMonitoringInstanceId}
+          pendingUnlinkMonitoringInstance={options.pendingUnlink}
+          linkFeedback={options.linkFeedback}
+          linkFeedbackIsError={options.linkFeedbackIsError}
+          onCreateMonitoringInstance={options.onCreateMonitoringInstance}
+          onOpenLink={options.onOpenLink}
+          onUpgradeMonitoringInstance={options.onUpgrade}
+          onRequestUnlinkMonitoringInstance={options.onRequestUnlink}
+          onCancelUnlinkMonitoringInstance={options.onCancelUnlink}
+          onConfirmUnlinkMonitoringInstance={options.onConfirmUnlink}
         />
       )
     case 'services-detail':
@@ -173,8 +265,8 @@ function renderPanel(data: RelationData) {
           services={data.records}
           error={null}
           notice={null}
-          readOnly
-          onCreate={noop}
+          readOnly={options.readOnly}
+          onCreate={options.onOpenServiceCreate}
         />
       )
     case 'domains-detail':
@@ -184,8 +276,8 @@ function renderPanel(data: RelationData) {
           services={data.services}
           error={null}
           notice={null}
-          readOnly
-          onCreate={noop}
+          readOnly={options.readOnly}
+          onCreate={options.onOpenDomainCreate}
         />
       )
   }

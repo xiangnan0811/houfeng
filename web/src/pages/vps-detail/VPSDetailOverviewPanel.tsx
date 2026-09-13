@@ -294,7 +294,7 @@ export function VPSDetailOverviewPanel({
           key={actionKey(action)}
           className={['btn', 'sm', primary ? 'primary' : 'secondary'].join(' ')}
           to={action.to}
-          {...(action.to.startsWith('/vps/') ? { state: location.state } : {})}
+          {...(action.to.startsWith('/vps/') || action.to.startsWith('/monitoring/') || action.to.startsWith('/targets/') ? { state: location.state } : {})}
         >
           {action.label}
         </Link>
@@ -320,7 +320,7 @@ export function VPSDetailOverviewPanel({
         <Link
           className="text-link"
           to={item.titleAction.to}
-          {...(item.titleAction.to.startsWith('/vps/') ? { state: location.state } : {})}
+          {...(item.titleAction.to.startsWith('/vps/') || item.titleAction.to.startsWith('/monitoring/') || item.titleAction.to.startsWith('/targets/') ? { state: location.state } : {})}
         >
           {item.title}
         </Link>
@@ -347,7 +347,7 @@ export function VPSDetailOverviewPanel({
   function relatedQuickActions(item: NonNullable<typeof subscriptionRelated>) {
     return item.quickActions.map((action) => {
       if (action.kind === 'link' && action.to) {
-        return <Link key={actionKey(action)} className="text-link" to={action.to}>{action.label}</Link>
+        return <Link key={actionKey(action)} className="text-link" to={action.to} {...(action.to.startsWith('/vps/') || action.to.startsWith('/monitoring/') || action.to.startsWith('/targets/') ? { state: location.state } : {})}>{action.label}</Link>
       }
       if (READ_ONLY_PREVIEW && action.mode && WRITE_MODES[action.mode]) return null
       return (
@@ -428,9 +428,9 @@ export function VPSDetailOverviewPanel({
               <summary className="btn sm primary" aria-label="VPS 详情操作：管理">管理</summary>
               <div className="watchtower-actions-menu__panel">
                 <p className="vps-detail-actions-menu__group">业务 / 账单</p>
-                <button type="button" onClick={() => runMenuAction(onDecisionEdit)}>调整决策</button>
+                <button type="button" onClick={() => runMenuAction(onDecisionEdit)}>续费决策</button>
                 <button type="button" onClick={() => runMenuAction(onFactsOpen)}>基础资料</button>
-                <button type="button" onClick={() => runMenuAction(onFactEdit)}>编辑基础资料</button>
+                <button type="button" onClick={() => runMenuAction(onFactEdit)}>编辑事实</button>
                 <button type="button" onClick={() => runMenuAction(onSubscriptionOpen)}>新增订阅事实</button>
                 <button type="button" onClick={() => runMenuAction(onValidityExtend)}>延长有效期</button>
                 <Link
@@ -441,7 +441,7 @@ export function VPSDetailOverviewPanel({
                   组合决策
                 </Link>
                 <p className="vps-detail-actions-menu__group">运行</p>
-                <button type="button" onClick={() => runMenuAction(onMonitoringEvidence)}>监控观测</button>
+                <button type="button" onClick={() => runMenuAction(onMonitoringEvidence)}>监控实例</button>
                 <button type="button" onClick={() => runMenuAction(onMonitoringAgent)}>接入/升级 agent</button>
                 <button type="button" onClick={() => runMenuAction(onMonitoringLink)}>关联已有监控实例</button>
                 <p className="vps-detail-actions-menu__group">关联</p>

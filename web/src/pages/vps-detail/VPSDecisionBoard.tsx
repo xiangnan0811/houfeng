@@ -150,7 +150,7 @@ function lifecycleCoordinationSummary(detail: VPSAssetDetail, preview: Cancellat
   if (blockers.length > 0) return blockers[0] ?? '取消动作存在阻塞'
   if (warnings.length > 0) return warnings[0] ?? '需要处理资产联动'
   const activeSubscriptions = subscriptions.filter((impact) => impact.record.status === 'active').length
-  return `订阅 ${activeSubscriptions}/${subscriptions.length} active · 监控实例 ${monitoringInstanceLinks.length} · Target ${targetLinks.length}，普通 CRUD 不会隐式联动。`
+  return `订阅 ${activeSubscriptions}/${subscriptions.length} 生效中 · 监控实例 ${monitoringInstanceLinks.length} · 入口探测 ${targetLinks.length}，普通 CRUD 不会隐式联动。`
 }
 
 export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
@@ -269,7 +269,7 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
           <div className="vps-decision-board__coordination-metrics" aria-label="生命周期影响范围">
             <span>订阅 <MonoDigits>{cancellationPreview?.subscriptions?.length ?? 0}</MonoDigits></span>
             <span>监控实例 <MonoDigits>{cancellationPreview?.monitoring_instance_links?.length ?? detail.active_monitoring_instance_link_count}</MonoDigits></span>
-            <span>Target <MonoDigits>{cancellationPreview?.target_links?.length ?? 0}</MonoDigits></span>
+            <span>入口探测 <MonoDigits>{cancellationPreview?.target_links?.length ?? 0}</MonoDigits></span>
           </div>
           <div className="vps-decision-board__coordination-actions">
             <Button variant={lifecycleAttention ? 'danger' : 'secondary'} size="sm" onClick={onCancellationOpen}>

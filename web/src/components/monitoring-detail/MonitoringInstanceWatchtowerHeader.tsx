@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { StatusBadge } from '../StatusBadge'
 import { Hostname, MonoDigits, Timestamp } from '../atoms'
@@ -59,7 +59,7 @@ function HeaderStatusBadge({ dimension, value }: HeaderStatusBadge) {
   )
 }
 
-function linkedVPSSummary(linkedVPS: VPSSummary[], loading: boolean, loaded: boolean, error: string | null) {
+function linkedVPSSummary(linkedVPS: VPSSummary[], loading: boolean, loaded: boolean, error: string | null, navigationState: unknown) {
   if (loading && !loaded) return <span className="watchtower-header__meta-item">VPS 关联加载中</span>
   if (error) return <span className="watchtower-header__meta-item">VPS 关联未同步</span>
   if (!loaded) return <span className="watchtower-header__meta-item">VPS 关联待同步</span>
@@ -75,7 +75,7 @@ function linkedVPSSummary(linkedVPS: VPSSummary[], loading: boolean, loaded: boo
     if (!vps?.vps_id || !vps.display_name) return <span className="watchtower-header__meta-item">VPS 关联未同步</span>
     return (
       <span className="watchtower-header__meta-item">
-        VPS <Link className="text-link" to={`/vps/${vps.vps_id}`}>{vps.display_name}</Link>
+        VPS <Link className="text-link" to={`/vps/${vps.vps_id}`} state={navigationState}>{vps.display_name}</Link>
       </span>
     )
   }
@@ -83,7 +83,7 @@ function linkedVPSSummary(linkedVPS: VPSSummary[], loading: boolean, loaded: boo
   if (!primary?.vps_id) return <span className="watchtower-header__meta-item">VPS {linkedVPS.length} 台</span>
   return (
     <span className="watchtower-header__meta-item">
-      VPS <Link className="text-link" to={`/vps/${primary.vps_id}`}>{linkedVPS.length} 台</Link>
+      VPS <Link className="text-link" to={`/vps/${primary.vps_id}`} state={navigationState}>{linkedVPS.length} 台</Link>
     </span>
   )
 }
@@ -105,6 +105,7 @@ export function MonitoringInstanceWatchtowerHeader({
   linkedVPSLoaded,
   linkedVPSError,
 }: Props) {
+  const location = useLocation()
   const [now, setNow] = useState(() => new Date())
   const labels = Array.isArray(monitoringInstance.labels) ? monitoringInstance.labels : []
   const labelText = formatLabelList(labels)
@@ -127,7 +128,7 @@ export function MonitoringInstanceWatchtowerHeader({
           {' · '}
           {locationLine(monitoringInstance)}
           {' · '}
-          {linkedVPSSummary(linkedVPS, linkedVPSLoading, linkedVPSLoaded, linkedVPSError)}
+          {linkedVPSSummary(linkedVPS, linkedVPSLoading, linkedVPSLoaded, linkedVPSError, location.state)}
           {labels.length > 0 ? (
             <>
               {' · '}

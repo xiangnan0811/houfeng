@@ -102,6 +102,64 @@ describe('VPSFactsEditForm', () => {
     }))
   })
 
+  it('keeps a SSH host typed after enable when the box is hidden and shown again', () => {
+    function Harness() {
+      const [draft, setDraft] = useState(draftFixture())
+      return (
+        <MemoryRouter>
+          <VPSFactsEditForm
+            formId="vps-facts-form"
+            draft={draft}
+            providers={[]}
+            providersLoading={false}
+            providersError={null}
+            submitting={false}
+            onDraftChange={setDraft}
+            onSubmit={vi.fn()}
+          />
+        </MemoryRouter>
+      )
+    }
+    render(<Harness />)
+    fireEvent.click(screen.getByRole('checkbox', { name: '单独填写 SSH' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'SSH Host' }), {
+      target: { value: 'ssh.example.test' },
+    })
+    fireEvent.click(screen.getByRole('checkbox', { name: '单独填写 SSH' }))
+    expect(screen.queryByRole('textbox', { name: 'SSH Host' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: '单独填写 SSH' }))
+    expect(screen.getByRole('textbox', { name: 'SSH Host' })).toHaveValue('ssh.example.test')
+  })
+
+  it('keeps an IPv6 address typed after enable when the box is hidden and shown again', () => {
+    function Harness() {
+      const [draft, setDraft] = useState(draftFixture())
+      return (
+        <MemoryRouter>
+          <VPSFactsEditForm
+            formId="vps-facts-form"
+            draft={draft}
+            providers={[]}
+            providersLoading={false}
+            providersError={null}
+            submitting={false}
+            onDraftChange={setDraft}
+            onSubmit={vi.fn()}
+          />
+        </MemoryRouter>
+      )
+    }
+    render(<Harness />)
+    fireEvent.click(screen.getByRole('checkbox', { name: '启用 IPv6' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'IPv6 地址' }), {
+      target: { value: '2001:db8::1' },
+    })
+    fireEvent.click(screen.getByRole('checkbox', { name: '启用 IPv6' }))
+    expect(screen.queryByRole('textbox', { name: 'IPv6 地址' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: '启用 IPv6' }))
+    expect(screen.getByRole('textbox', { name: 'IPv6 地址' })).toHaveValue('2001:db8::1')
+  })
+
   it('enables custom SSH when the host differs or the port is not 22', () => {
     const { unmount } = renderForm(draftFixture({ sshPort: '2222' }))
     expect(screen.getByRole('checkbox', { name: '单独填写 SSH' })).toBeChecked()

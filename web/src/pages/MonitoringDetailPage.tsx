@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import type { MonitoringInstanceRuntimeAction } from '../components/monitoring-detail'
 import {
@@ -114,6 +114,7 @@ export function MonitoringDetailPage() {
 
 function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInstanceId?: string }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const [onboardingReturnVPSId, setOnboardingReturnVPSId] = useState<string | null>(null)
   const [state, setState] = useState<MonitoringDetailPageState>(INITIAL_MONITORING_DETAIL_STATE)
@@ -206,8 +207,8 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     const next = new URLSearchParams(searchParams)
     next.delete('onboarding')
     next.delete('return_vps')
-    setSearchParams(next, { replace: true })
-  }, [searchParams, setSearchParams])
+    setSearchParams(next, { replace: true, state: location.state })
+  }, [searchParams, setSearchParams, location.state])
 
   useEffect(() => {
     currentRequestedMonitoringInstanceIdRef.current = state.requestedMonitoringInstanceId

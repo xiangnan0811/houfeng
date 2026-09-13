@@ -27,7 +27,9 @@ import {
 } from '../lib/types'
 import {
   IPQualityBadge,
+  LifecycleBadge,
   RenewalBadge,
+  UsageBadge,
 } from './assetPageBadges'
 import {
   buildVPSQualityIssues,
@@ -71,6 +73,8 @@ type InventoryRow = {
 type PageState = {
   inventoryLoading: boolean
   inventoryError: string | null
+  providersLoading: boolean
+  providersError: string | null
   subscriptionsLoading: boolean
   subscriptionsError: string | null
   vps: VPSAssetRecord[]
@@ -89,6 +93,8 @@ type FilterState = {
 const INITIAL_PAGE_STATE: PageState = {
   inventoryLoading: true,
   inventoryError: null,
+  providersLoading: true,
+  providersError: null,
   subscriptionsLoading: true,
   subscriptionsError: null,
   vps: [],
@@ -292,7 +298,7 @@ function cancellationAttentionReason(row: InventoryRow): string | null {
     row.subscription?.status === 'active'
 
   if (subscriptionInactive && !vpsToCancel) return '订阅非活跃，VPS 尚未取消'
-  if (vpsToCancel && subscriptionActive) return 'VPS 待取消，订阅仍 active'
+  if (vpsToCancel && subscriptionActive) return 'VPS 待取消，订阅仍生效中'
   if (vpsToCancel && runningLinkedAssetCount > 0) return `VPS 待取消，仍有 ${runningLinkedAssetCount} 个监控实例/入口探测运行`
   if (vpsCancelDecision && !vpsToCancel) return '已决定不续费，生命周期未同步'
   return null
@@ -454,11 +460,11 @@ function VPSInspector({
               <dt>规格</dt>
               <dd>{vpsSpecLabel(row.vps)}</dd>
               <dt>生命周期</dt>
-              <dd>{lifecycleLabel(row.vps.lifecycle_status)}</dd>
+              <dd><LifecycleBadge value={row.vps.lifecycle_status} /></dd>
               <dt>用途</dt>
-              <dd>{usageLabel(row.vps.usage_status)}</dd>
+              <dd><UsageBadge value={row.vps.usage_status} /></dd>
               <dt>续费</dt>
-              <dd>{compactLine([renewalLabel(row.vps.renewal_decision), row.subscriptionEvidence === 'ready' ? (row.subscription?.renew_at ? formatDate(row.subscription.renew_at) : '无续费日') : '续费日未知'])}</dd>
+              <dd><RenewalBadge value={row.vps.renewal_decision} /> · {row.subscriptionEvidence === 'ready' ? (row.subscription?.renew_at ? formatDate(row.subscription.renew_at) : '无续费日') : '续费日未知'}</dd>
               <dt>订阅</dt>
               <dd>{subscriptionFact(row, subscriptionsError)}</dd>
               <dt>关联</dt>
@@ -522,7 +528,9 @@ function VPSQuickFacts({ row }: { row: InventoryRow }) {
       <div className="vps-accordion__fact">
         <div className="vps-accordion__fact-label">经营与续费</div>
         <div className="vps-accordion__fact-value">
-          {lifecycleLabel(row.vps.lifecycle_status)} · {usageLabel(row.vps.usage_status)}
+          <LifecycleBadge value={row.vps.lifecycle_status} />
+          {' · '}
+          <UsageBadge value={row.vps.usage_status} />
           {' · '}
           <RenewalBadge value={row.vps.renewal_decision} />
           {' · '}
@@ -603,6 +611,9 @@ export function VPSPage() {
   const [state, setState] = useState<PageState>(INITIAL_PAGE_STATE)
   const [createOpen, setCreateOpen] = useState(false)
   const [accordionOpen, setAccordionOpen] = useState(false)
+  const [inventoryReloadKey, setInventoryReloadKey] = useState(0)
+  const [providersReloadKey, setProvidersReloadKey] = useState(0)
+  const [subscriptionsReloadKey, setSubscriptionsReloadKey] = useState(0)
   const currentInventoryHref = `/vps${location.search}`
   useEffect(() => {
     if (urlWorkspace) writeStoredWorkspace(urlWorkspace)
@@ -610,16 +621,14 @@ export function VPSPage() {
 
   useEffect(() => {
     let cancelled = false
-
-    Promise.all([listVPSAssets(), listProviders()])
-      .then(([vps, providers]) => {
+    listVPSAssets()
+      .then((vps) => {
         if (cancelled) return
         setState((current) => ({
           ...current,
           inventoryLoading: false,
           inventoryError: null,
           vps,
-          providers,
         }))
       })
       .catch((error: unknown) => {
@@ -629,18 +638,41 @@ export function VPSPage() {
           inventoryLoading: false,
           inventoryError: describeError(error, '加载 VPS 资产失败'),
           vps: [],
-          providers: [],
         }))
       })
-
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [inventoryReloadKey])
 
   useEffect(() => {
     let cancelled = false
+    listProviders()
+      .then((providers) => {
+        if (cancelled) return
+        setState((current) => ({
+          ...current,
+          providersLoading: false,
+          providersError: null,
+          providers,
+        }))
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setState((current) => ({
+          ...current,
+          providersLoading: false,
+          providersError: describeError(error, '加载服务商列表失败'),
+          providers: [],
+        }))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [providersReloadKey])
 
+  useEffect(() => {
+    let cancelled = false
     listSubscriptions({ sort: 'renew_at', order: 'asc' })
       .then((subscriptions) => {
         if (cancelled) return
@@ -660,11 +692,25 @@ export function VPSPage() {
           subscriptions: [],
         }))
       })
-
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [subscriptionsReloadKey])
+
+  function retryInventory() {
+    setState((current) => ({ ...current, inventoryLoading: true, inventoryError: null }))
+    setInventoryReloadKey((key) => key + 1)
+  }
+
+  function retryProviders() {
+    setState((current) => ({ ...current, providersLoading: true, providersError: null }))
+    setProvidersReloadKey((key) => key + 1)
+  }
+
+  function retrySubscriptions() {
+    setState((current) => ({ ...current, subscriptionsLoading: true, subscriptionsError: null }))
+    setSubscriptionsReloadKey((key) => key + 1)
+  }
 
   const subscriptionsByVPS = useMemo(
     () => groupSubscriptionsByVPS(state.subscriptions),
@@ -690,23 +736,27 @@ export function VPSPage() {
   const selectedRow = visibleRows.find((row) => row.vps.vps_id === selectedID) ?? null
   const providerSelectOptions = providerFilterOptions(state.providers)
   const active = hasActiveFilters(filters)
+  const subscriptionDependentView = filters.view === 'renewal' || filters.view === 'missing_subscription'
+  const subscriptionViewBlocked = subscriptionDependentView && subscriptionEvidence !== 'ready' && state.vps.length > 0
   const missingSubscriptionCount = subscriptionEvidence === 'ready'
     ? inventoryRows.filter((row) => !row.subscription).length
-    : 0
+    : null
   const unreviewedCount = inventoryRows.filter((row) => row.vps.renewal_decision === 'unreviewed').length
   const unlinkedCount = inventoryRows.filter((row) => row.vps.active_monitoring_instance_link_count <= 0).length
   const cancellationAttentionCount = inventoryRows.filter(hasCancellationAttention).length
   const missingFactsCount = inventoryRows.filter((row) => hasMissingVPSFacts(row.vps)).length
-  const renewalDueCount = inventoryRows.filter((row) => row.renewalDue).length
+  const renewalDueCount = subscriptionEvidence === 'ready'
+    ? inventoryRows.filter((row) => row.renewalDue).length
+    : null
   const quickViews = [
     { value: 'all', label: '全部', count: inventoryRows.length },
-    { value: 'renewal', label: '30天续费', count: renewalDueCount },
+    { value: 'renewal', label: '30天续费', ...(renewalDueCount == null ? {} : { count: renewalDueCount }) },
     { value: 'unreviewed', label: '未评估', count: unreviewedCount },
     { value: 'unlinked', label: '未关联', count: unlinkedCount },
     { value: 'cancellation_attention', label: '取消待处理', count: cancellationAttentionCount },
-    { value: 'missing_subscription', label: '缺订阅', count: missingSubscriptionCount },
+    { value: 'missing_subscription', label: '缺订阅', ...(missingSubscriptionCount == null ? {} : { count: missingSubscriptionCount }) },
     { value: 'missing_facts', label: '缺信息', count: missingFactsCount },
-  ] satisfies Array<{ value: VPSQuickView; label: string; count: number }>
+  ] satisfies Array<{ value: VPSQuickView; label: string; count?: number }>
 
   function patchSearchParams(patch: (params: URLSearchParams) => void, flushSync = false) {
     const next = new URLSearchParams(searchParams)
@@ -801,7 +851,7 @@ export function VPSPage() {
         />
         <p className="vps-page__stats">
           <span className="vps-mono">{inventoryRows.length}</span> 台
-          {visibleRows.length !== inventoryRows.length ? (
+          {!subscriptionViewBlocked && visibleRows.length !== inventoryRows.length ? (
             <> · 显示 <span className="vps-mono">{visibleRows.length}</span></>
           ) : null}
         </p>
@@ -827,17 +877,53 @@ export function VPSPage() {
         </div>
       )}
 
-      {subscriptionEvidence === 'error' && (
-        <p className="vps-page__notice" role="status">
-          订阅加载失败。{state.subscriptionsError}
-        </p>
-      )}
+      {state.providersError && !state.providersLoading ? (
+        <div className="vps-page__notice" role="status">
+          <span>服务商列表加载失败。{state.providersError}</span>
+          <button type="button" className="btn sm secondary" onClick={retryProviders}>重试</button>
+        </div>
+      ) : null}
+
+      {subscriptionEvidence === 'error' && !subscriptionViewBlocked ? (
+        <div className="vps-page__notice" role="status">
+          <span>订阅加载失败。{state.subscriptionsError}</span>
+          <button type="button" className="btn sm secondary" onClick={retrySubscriptions}>重试</button>
+        </div>
+      ) : null}
 
       <div className="vps-canvas" data-workspace={workspace}>
         {state.inventoryLoading ? (
-          <PageStateView kind="loading" title="正在加载 VPS…" surface="empty" compact />
+          <div className="vps-canvas__state">
+            <PageStateView kind="loading" title="正在加载 VPS…" surface="empty" compact />
+          </div>
         ) : state.inventoryError ? (
-          <PageStateView kind="error" title="VPS 库存不可用" description={state.inventoryError} technicalSummary={state.inventoryError} surface="empty" compact />
+          <div className="vps-canvas__state">
+            <PageStateView
+              kind="error"
+              title="VPS 库存不可用"
+              description={state.inventoryError}
+              technicalSummary={state.inventoryError}
+              action={<button type="button" className="btn sm secondary" onClick={retryInventory}>重试</button>}
+              surface="empty"
+              compact
+            />
+          </div>
+        ) : subscriptionViewBlocked && subscriptionEvidence === 'loading' ? (
+          <div className="vps-canvas__state">
+            <PageStateView kind="loading" title="正在加载订阅证据…" surface="empty" compact />
+          </div>
+        ) : subscriptionViewBlocked && subscriptionEvidence === 'error' ? (
+          <div className="vps-canvas__state">
+            <PageStateView
+              kind="error"
+              title="订阅证据不可用"
+              description={state.subscriptionsError ?? '加载订阅证据失败'}
+              technicalSummary={state.subscriptionsError}
+              action={<button type="button" className="btn sm secondary" onClick={retrySubscriptions}>重试</button>}
+              surface="empty"
+              compact
+            />
+          </div>
         ) : workspace === 'workbench' ? (
           <div className="vps-workbench">
             <div className="vps-workbench__list" role="region" aria-label="VPS 清单">
@@ -897,7 +983,10 @@ export function VPSPage() {
                               <div className="vps-workbench__meta">{vpsSpecLabel(row.vps)}</div>
                             </td>
                             <td>
-                              <div>{lifecycleLabel(row.vps.lifecycle_status)} · {usageLabel(row.vps.usage_status)}</div>
+                              <div className="badge-row">
+                                <LifecycleBadge value={row.vps.lifecycle_status} />
+                                <UsageBadge value={row.vps.usage_status} />
+                              </div>
                               <div className="vps-workbench__meta">
                                 <RenewalBadge value={row.vps.renewal_decision} />
                                 {' · '}
@@ -961,11 +1050,10 @@ export function VPSPage() {
                           {compactLine(['', row.vps.provider_name, vpsPlaceLabel(row.vps)]) ? ` · ${compactLine([row.vps.provider_name, vpsPlaceLabel(row.vps)])}` : ''}
                         </span>
                         <span className={attention ? 'vps-ledger__item-st vps-tone-warn' : 'vps-ledger__item-st'}>
-                          {compactLine([
-                            lifecycleLabel(row.vps.lifecycle_status),
-                            renewalLabel(row.vps.renewal_decision),
-                            attention,
-                          ])}
+                          <LifecycleBadge value={row.vps.lifecycle_status} />
+                          {' · '}
+                          <RenewalBadge value={row.vps.renewal_decision} />
+                          {attention ? ` · ${attention}` : ''}
                         </span>
                       </button>
                     )
@@ -988,7 +1076,8 @@ export function VPSPage() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         providers={state.providers}
-        existingCountries={state.vps.map((vps) => vps.country)}
+        providersLoading={state.providersLoading}
+        providersError={state.providersError}
         onCreated={(vps) => navigate(`/vps/${vps.vps_id}`, { state: { vpsInventoryHref: currentInventoryHref } })}
         onProviderCreated={(p) => setState((s) => ({ ...s, providers: [...s.providers, p] }))}
       />

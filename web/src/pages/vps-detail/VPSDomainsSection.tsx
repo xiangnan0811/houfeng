@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { Button, MonoDigits } from '../../components/atoms'
 import { formatDate } from '../../lib/format'
@@ -64,6 +64,7 @@ function DomainDossier({
   domain: AssetDomainRecord
   services: AssetServiceRecord[]
 }) {
+  const location = useLocation()
   const purpose = domain.purpose.trim()
   const registrar = domain.registrar.trim()
   const expires = domain.expires_at?.trim() ?? ''
@@ -108,11 +109,11 @@ function DomainDossier({
           </div>
           <div className="vps-relation-dossier__target">
             <p className="vps-relation-dossier__index">
-              <span>关联 Target</span>
+              <span>关联入口探测</span>
             </p>
             {probe ? (
               <p className="vps-relation-id">
-                <Link to={`/targets/${encodeURIComponent(probe)}`}>{probe}</Link>
+                <Link to={`/targets/${encodeURIComponent(probe)}`} state={location.state}>{probe}</Link>
               </p>
             ) : (
               <p className="vps-relation-id">未关联</p>

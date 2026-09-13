@@ -116,7 +116,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
     <div className="page vps-ip-quality-dashboard">
       <header className="page__head">
         <div>
-          <h1 className="page__title">IP 质量驾驶舱</h1>
+          <h1 className="page__title">IP 质量报告</h1>
           <p className="page-sub">
             最近采集 {formatDateTime(summary.observed_at)} · Agent {report.latest_report?.agent_version || '—'} · {report.provider_results.length} 个 provider · {report.service_unlocks.length} 个服务
           </p>

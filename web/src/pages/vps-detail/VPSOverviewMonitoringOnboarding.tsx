@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -8,9 +9,9 @@ import {
   type FormEvent,
   type RefObject,
 } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 
-import { Button, Modal } from '../../components/atoms'
+import { Button } from '../../components/atoms'
 import { createVPSMonitoringInstance, getVPSAsset } from '../../lib/api'
 import { ApiError } from '../../lib/apiRequest'
 import type { VPSAssetDetail, VPSMonitoringInstanceSummary } from '../../lib/types'
@@ -21,6 +22,7 @@ import {
   monitoringInstanceCreateDraftFromDetail,
 } from './vpsDetailHelpers'
 import { VPSMonitoringInstanceCreateForm } from './VPSMonitoringInstanceCreateForm'
+import { VPSDetailDialog, VPSDialogActions } from './VPSDetailDialog'
 import { describeManagementError, isIdempotencyKeyReused } from './vpsManagementHelpers'
 import { isStableMonitoringInstanceID } from './vpsOverviewDestination'
 import type {
@@ -124,7 +126,9 @@ export function VPSOverviewMonitoringOnboarding({
   writeOwnerStore,
   viewToken,
 }: VPSOverviewMonitoringOnboardingProps) {
+  const formId = useId()
   const navigate = useNavigate()
+  const location = useLocation()
   const panelOpen = management.panel === 'monitoring-instance-create'
   const closeManagementPanel = management.closePanel
   const openManagementPanel = management.openPanel
@@ -382,7 +386,7 @@ export function VPSOverviewMonitoringOnboarding({
         }
         resetLocalForm(loadAuthority)
         closeManagementPanel()
-        navigate(to)
+        navigate(to, { state: location.state })
         return
       }
       if (linkCount > 1) {
@@ -419,6 +423,7 @@ export function VPSOverviewMonitoringOnboarding({
     loadRevision,
     generationIsCurrent,
     closeManagementPanel,
+    location.state,
     navigate,
     panelAuthority,
     panelOpen,
@@ -510,7 +515,7 @@ export function VPSOverviewMonitoringOnboarding({
       resetLocalForm(panelAuthority)
       closeManagementPanel()
       if (to && refreshed) {
-        navigate(to)
+        navigate(to, { state: location.state })
         return
       }
       if (!to) {
@@ -552,7 +557,7 @@ export function VPSOverviewMonitoringOnboarding({
             if (to) {
               resetLocalForm(panelAuthority)
               closeManagementPanel()
-              navigate(to)
+              navigate(to, { state: location.state })
               return
             }
           }
@@ -593,7 +598,11 @@ export function VPSOverviewMonitoringOnboarding({
           {visibleFeedback.to ? (
             <>
               {' '}
-              <Link className="text-link" to={visibleFeedback.to}>
+              <Link
+                className="text-link"
+                to={visibleFeedback.to}
+                {...(visibleFeedback.to.startsWith('/monitoring/') ? { state: location.state } : {})}
+              >
                 {visibleFeedback.actionLabel ?? '继续接入 agent'}
               </Link>
             </>
@@ -601,13 +610,24 @@ export function VPSOverviewMonitoringOnboarding({
         </p>
       ) : null}
 
-      <Modal
+      <VPSDetailDialog
         open={panelOpen}
         onClose={closePanel}
         title="接入/升级 agent"
         ariaLabel="接入/升级 agent"
-        size="xl"
+        template="form"
         persistent={ownCreateSubmitting}
+        footer={currentLoad?.detail && currentLoad.draft ? (
+          <VPSDialogActions
+            formId={formId}
+            onCancel={closePanel}
+            submitting={ownCreateSubmitting}
+            disabled={writeBlocked}
+            error={mutationError}
+            submitLabel="接入/升级 agent"
+            submittingLabel="创建中…"
+          />
+        ) : undefined}
       >
         <div className="vps-detail-modal">
           {currentLoad?.loading ? <p role="status">正在检查监控关联…</p> : null}
@@ -621,13 +641,10 @@ export function VPSOverviewMonitoringOnboarding({
           ) : null}
           {currentLoad?.detail && currentLoad.draft ? (
             <VPSMonitoringInstanceCreateForm
+              formId={formId}
               detail={currentLoad.detail}
               draft={currentLoad.draft}
               submitting={ownCreateSubmitting}
-              submitDisabled={writeBlocked}
-              error={mutationError}
-              notice={null}
-              onCancel={closePanel}
               onDraftChange={(draft) => {
                 setLoadState((current) => (
                   current.vpsId === panelAuthority.vpsId
@@ -642,7 +659,7 @@ export function VPSOverviewMonitoringOnboarding({
             />
           ) : null}
         </div>
-      </Modal>
+      </VPSDetailDialog>
     </>
   )
 }

@@ -7,7 +7,6 @@ import type {
   CreateVPSExperienceLogInput,
   ExtendVPSValidityInput,
   RenewalMode,
-  UpdateVPSAssetInput,
   VPSAssetDetail,
 } from '../../lib/types'
 import {
@@ -360,7 +359,7 @@ export function decisionDraftAlreadySatisfied(
   return draft.renewalDecision === latest.renewal_decision
 }
 
-export function buildFactEditInput(form: FactEditFormState): UpdateVPSAssetInput {
+export function buildFactEditInput(form: FactEditFormState) {
   if (form.displayName.trim() === '') {
     throw new Error('VPS 名称不能为空。')
   }

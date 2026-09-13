@@ -1,30 +1,24 @@
 import { type FormEvent } from 'react'
 
-import { Button, Input } from '../../components/atoms'
+import { Input } from '../../components/atoms'
 import type { VPSAssetDetail } from '../../lib/types'
 import type { MonitoringInstanceCreateDraftState } from './types'
 
 type VPSMonitoringInstanceCreateFormProps = {
+  formId: string
   detail: VPSAssetDetail
   draft: MonitoringInstanceCreateDraftState
   submitting: boolean
-  submitDisabled?: boolean
-  error: string | null
-  notice: string | null
-  onCancel: () => void
   onDraftChange: (draft: MonitoringInstanceCreateDraftState) => void
   onFeedbackClear: () => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }
 
 export function VPSMonitoringInstanceCreateForm({
+  formId,
   detail,
   draft,
   submitting,
-  submitDisabled = false,
-  error,
-  notice,
-  onCancel,
   onDraftChange,
   onFeedbackClear,
   onSubmit,
@@ -35,12 +29,9 @@ export function VPSMonitoringInstanceCreateForm({
   }
 
   return (
-    <form className="asset-operation-form" onSubmit={onSubmit}>
-      <div className="asset-operation-form__header">
-        <h3>为 {detail.display_name} 创建监控实例</h3>
-        <p>已按 VPS 资料预填，必要时微调后直接创建并进入 agent 接入。</p>
-      </div>
-      <div className="asset-operation-form__grid">
+    <form id={formId} className="vps-form" onSubmit={onSubmit} aria-busy={submitting}>
+      <p className="vps-context">{detail.display_name}</p>
+      <div className="vps-form-grid">
         <Input
           label="监控实例名称"
           value={draft.displayName}
@@ -85,14 +76,6 @@ export function VPSMonitoringInstanceCreateForm({
         value={draft.note}
         onChange={(event) => update('note', event.target.value)}
       />
-      {error ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{error}</p> : null}
-      {notice ? <p className="asset-operation-feedback" role="status">{notice}</p> : null}
-      <div className="page-form-actions">
-        <Button variant="secondary" disabled={submitting} onClick={onCancel}>取消</Button>
-        <Button type="submit" disabled={submitting || submitDisabled}>
-          {submitting ? '创建中…' : '接入/升级 agent'}
-        </Button>
-      </div>
     </form>
   )
 }

@@ -29,9 +29,13 @@ const ITEMS: Array<{
   { panel: 'facts', label: '编辑事实', group: 'business' },
   { panel: 'decision', label: '续费决策', group: 'business' },
   { panel: 'subscription', label: '订阅事实', group: 'business' },
+  { panel: 'validity-extension', label: '延长有效期', group: 'business' },
   { panel: 'monitoring-instance-evidence', label: '监控实例', group: 'runtime' },
+  { panel: 'monitoring-instance-link', label: '关联监控', group: 'runtime' },
   { panel: 'services-detail', label: '服务', group: 'relations' },
+  { panel: 'service', label: '新增服务', group: 'relations' },
   { panel: 'domains-detail', label: '域名', group: 'relations' },
+  { panel: 'domain', label: '新增域名', group: 'relations' },
   { panel: 'cancellation', label: '取消 / 退役', group: 'lifecycle' },
   { panel: 'archive', label: '归档', group: 'lifecycle' },
 ]

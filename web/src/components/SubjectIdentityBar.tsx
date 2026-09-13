@@ -46,7 +46,7 @@ export function SubjectIdentityBar({
           {tombstoned ? (
             <Badge variant="state" tone="critical">已删除主体</Badge>
           ) : (
-            <Badge variant="state" tone="normal">在册</Badge>
+            <Badge variant="info" tone="neutral">在册</Badge>
           )}
         </p>
         {returnHref ? (

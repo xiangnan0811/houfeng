@@ -51,6 +51,9 @@ Keep detail body text comfortably readable at approximately 14px and helper text
 
 Use concise labels and factual loading/error/empty states. Do not add instructional lead-ins, self-descriptions of the inspector, or prose that restates the adjacent facts.
 
+User-facing copy uses Chinese product words, not stored enums: subscription `active` is 生效中; Target is 入口探测 while IDs stay `target_id`. Source presence 在册 is a neutral identity badge, not a green health state. IP quality is a report page titled IP 质量报告, not a 驾驶舱, and does not add local tabs or a second risk algorithm. VPS, monitoring, and 入口探测 activity/records/evidence share `SubjectActivityWorkspace` and `SubjectLocalNavigation`; only VPS exposes an overview hop because only that source has a detail workspace. Do not duplicate those surfaces or invent missing source fields.
+
+
 ## State language
 
 State UI should help the operator answer "what happened, where, how fresh is it, and what can I safely do next?"

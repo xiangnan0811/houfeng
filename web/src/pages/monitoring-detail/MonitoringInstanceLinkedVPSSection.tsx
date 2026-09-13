@@ -1,5 +1,5 @@
 import type { RefObject } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { DetailSection } from '../../components/DetailSection'
 import { Badge, DataTable, Timestamp, type DataTableColumn } from '../../components/atoms'
@@ -23,6 +23,7 @@ export function MonitoringInstanceLinkedVPSSection({
   loaded,
   error,
 }: MonitoringInstanceLinkedVPSSectionProps) {
+  const location = useLocation()
   const lifecycleContext = records.find((vps) =>
     vps.lifecycle_status === 'to_cancel' ||
     vps.lifecycle_status === 'cancelled' ||
@@ -36,7 +37,7 @@ export function MonitoringInstanceLinkedVPSSection({
       render: (vps) => (
         <div className="asset-table__identity">
           <strong>
-            <Link className="text-link" to={`/vps/${vps.vps_id}`}>{vps.display_name}</Link>
+            <Link className="text-link" to={`/vps/${vps.vps_id}`} state={location.state}>{vps.display_name}</Link>
           </strong>
           <span>{vps.vps_id}</span>
         </div>
@@ -112,7 +113,7 @@ export function MonitoringInstanceLinkedVPSSection({
             <Link className="btn sm secondary" to={`/asset-decisions?view=needs_decision&renew_within_days=30&scenario=migration_retirement&vps_id=${encodeURIComponent(lifecycleContext.vps_id)}`}>
               组合决策
             </Link>
-            <Link className="btn sm secondary" to={`/vps/${lifecycleContext.vps_id}?workbench=cancellation`}>
+            <Link className="btn sm secondary" to={`/vps/${lifecycleContext.vps_id}?workbench=cancellation`} state={location.state}>
               打开工作台
             </Link>
           </div>

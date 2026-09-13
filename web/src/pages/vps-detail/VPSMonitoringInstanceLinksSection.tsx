@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { Button, MonoDigits, Timestamp } from '../../components/atoms'
 import type { VPSMonitoringInstanceSummary } from '../../lib/types'
@@ -46,6 +46,7 @@ export function VPSMonitoringInstanceLinksSection({
   onCancelUnlinkMonitoringInstance,
   onConfirmUnlinkMonitoringInstance,
 }: VPSMonitoringInstanceLinksSectionProps) {
+  const location = useLocation()
   const pendingUnlinkName = pendingUnlinkMonitoringInstance?.display_name ?? pendingUnlinkMonitoringInstance?.monitoring_instance_id ?? ''
   const hasNoActiveLinks = monitoring.length === 0
   const hasDuplicateActiveLinks = monitoring.length > 1
@@ -131,6 +132,7 @@ export function VPSMonitoringInstanceLinksSection({
                     <Link
                       className="btn sm ghost"
                       to={monitoringInstanceDetailHref(vpsId, monitoringInstance.monitoring_instance_id)}
+                      state={location.state}
                     >
                       查看监控实例
                     </Link>

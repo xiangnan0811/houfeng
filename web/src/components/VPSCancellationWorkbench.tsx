@@ -124,7 +124,7 @@ export function VPSCancellationWorkbench({
       throw new Error('需要填写取消/退役原因。')
     }
     if (activeSubscriptions.length > 0 && subscriptionIDs.length === 0) {
-      throw new Error('请显式选择要取消自动续费的 active 订阅。')
+      throw new Error('请显式选择要取消自动续费的生效中订阅。')
     }
     const monitoringInstanceActions: ApplyCancellationInput['monitoring_instance_actions'] = []
     for (const monitoringInstance of preview.monitoring_instance_links) {

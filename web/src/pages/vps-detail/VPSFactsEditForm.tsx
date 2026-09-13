@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import type { ProviderRecord, VPSUsageStatus } from '../../lib/types'
@@ -24,6 +24,7 @@ type VPSFactsEditFormProps = {
   submitting: boolean
   onDraftChange: (draft: FactEditFormState) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  providerExtras?: ReactNode
 }
 
 function hasCustomSSH(draft: FactEditFormState) {
@@ -59,6 +60,7 @@ export function VPSFactsEditForm({
   submitting,
   onDraftChange,
   onSubmit,
+  providerExtras,
 }: VPSFactsEditFormProps) {
   const providerSelectId = useId()
   const countryId = useId()
@@ -170,6 +172,8 @@ export function VPSFactsEditForm({
             <Link className="text-link" to="/providers">服务商列表</Link>
           </span>
         </label>
+
+        {providerExtras}
 
         <div className="access">
           <CountryCombo

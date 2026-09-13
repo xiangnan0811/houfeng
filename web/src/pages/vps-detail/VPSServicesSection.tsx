@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { Button, MonoDigits } from '../../components/atoms'
 import type { AssetServiceRecord } from '../../lib/types'
@@ -57,6 +57,7 @@ export function VPSServicesSection({
 }
 
 function ServiceDossier({ service }: { service: AssetServiceRecord }) {
+  const location = useLocation()
   const url = service.url.trim()
   const href = httpHref(url)
   const probe = service.target_id?.trim() ?? ''
@@ -108,7 +109,7 @@ function ServiceDossier({ service }: { service: AssetServiceRecord }) {
           </p>
           {probe ? (
             <p className="vps-relation-id">
-              <Link to={`/targets/${encodeURIComponent(probe)}`}>{probe}</Link>
+              <Link to={`/targets/${encodeURIComponent(probe)}`} state={location.state}>{probe}</Link>
             </p>
           ) : (
             <p className="vps-relation-id">未关联</p>

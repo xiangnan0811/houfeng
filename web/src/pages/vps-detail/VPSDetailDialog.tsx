@@ -29,6 +29,7 @@ export function VPSDialogActions({
   submitting,
   disabled = false,
   submitLabel,
+  submittingLabel,
   cancelLabel = '取消',
   error,
   notice,
@@ -38,17 +39,23 @@ export function VPSDialogActions({
   submitting: boolean
   disabled?: boolean
   submitLabel: string
+  submittingLabel?: string
   cancelLabel?: string
   error?: string | null
   notice?: string | null
 }) {
+  const resolvedSubmittingLabel = submittingLabel ?? (
+    submitLabel.includes('创建') ? '创建中…' :
+    submitLabel.includes('关联') ? '关联中…' :
+    '保存中…'
+  )
   const actions = (
     <>
       <Button type="button" variant="secondary" disabled={submitting} onClick={onCancel}>
         {cancelLabel}
       </Button>
       <Button type="submit" form={formId} disabled={submitting || disabled}>
-        {submitting ? '保存中…' : submitLabel}
+        {submitting ? resolvedSubmittingLabel : submitLabel}
       </Button>
     </>
   )

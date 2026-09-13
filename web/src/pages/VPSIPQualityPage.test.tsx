@@ -193,7 +193,7 @@ describe('VPSIPQualityPage', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量驾驶舱' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告' })).toBeInTheDocument())
     expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/ip-quality', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -264,7 +264,7 @@ describe('VPSIPQualityPage', () => {
 
     renderPage('/vps/vps_001/ip-quality?report_id=ipq_000')
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量驾驶舱' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告' })).toBeInTheDocument())
     expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/ip-quality/reports/ipq_000', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -290,7 +290,7 @@ describe('VPSIPQualityPage', () => {
 
     const { container } = renderPage()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量驾驶舱' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告' })).toBeInTheDocument())
     expect(container.querySelector('img')).toBeNull()
     expect(screen.getByText(/<img src=x onerror=alert\(1\)>/)).toBeInTheDocument()
     expect(screen.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument()
@@ -336,7 +336,7 @@ describe('VPSIPQualityPage', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量驾驶舱' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告' })).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: '风险信号矩阵' })).toBeInTheDocument()
     expect(screen.getByText('暂无 provider 结果。')).toBeInTheDocument()
     expect(screen.getByText('暂无服务解锁结果。')).toBeInTheDocument()

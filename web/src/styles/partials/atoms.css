@@ -144,19 +144,7 @@ select.input::-ms-expand{display:none}
 .modal-body .asset-detail-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 .vps-create-form{display:flex;flex-direction:column;gap:var(--space-4)}
 .vps-create-form__section{display:flex;flex-direction:column;gap:var(--space-3)}
-.vps-create-form__section-title{font-size:var(--type-eyebrow-size);font-weight:500;letter-spacing:var(--type-eyebrow-tracking);text-transform:uppercase;color:var(--text-muted);padding-bottom:var(--space-2);border-bottom:1px solid var(--border-muted)}
-
 .vps-create-form__row{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}
-.vps-create-form__row--3col{display:grid;grid-template-columns:2fr 1fr 1fr;gap:var(--space-3)}
-.vps-create-form__toggle-row{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);padding:var(--space-3);border:var(--border-w) solid var(--border-muted);border-radius:var(--radius-2);background:var(--surface-1)}
-.vps-create-form__toggle-row .tg{flex-shrink:0}
-.vps-create-form__provider-row{display:flex;align-items:flex-end;gap:var(--space-3)}
-.vps-create-form__provider-row>.input-field{flex:1}
-.vps-create-form__provider-link{background:none;border:none;color:var(--accent);font-size:var(--type-small-size);cursor:pointer;padding:0 0 6px;white-space:nowrap}
-.vps-create-form__provider-link:hover{text-decoration:underline}
-.vps-create-form__inline-provider{padding:var(--space-3);background:var(--surface-1);border:1px solid var(--border-muted);border-radius:var(--radius-2);display:flex;flex-direction:column;gap:var(--space-3)}
-.vps-create-form__inline-provider-row{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}
-.vps-create-form__inline-provider-actions{display:flex;gap:var(--space-2);justify-content:flex-end}
 .input-field__label--required::after{content:' *';color:var(--color-state-critical)}
 
 /* ===== ATOM COMPAT: Sparkline ===== */

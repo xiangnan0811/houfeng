@@ -1,9 +1,10 @@
 import { StrictMode } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MonitoringDetailPage } from './MonitoringDetailPage'
+import { VPSServicesSection } from './vps-detail/VPSServicesSection'
 import { formatDateTime } from '../lib/format'
 
 vi.mock('../lib/api', async (importOriginal) => {
@@ -225,6 +226,17 @@ function MonitoringDetailTestHarness() {
     </>
   )
 }
+
+
+function LocationStateProbe() {
+  const location = useLocation()
+  return (
+    <output data-testid="location-probe" data-state={JSON.stringify(location.state)}>
+      {location.pathname}{location.search}
+    </output>
+  )
+}
+
 
 describe('MonitoringDetailPage', () => {
   afterEach(() => {
@@ -3795,5 +3807,118 @@ describe('MonitoringDetailPage', () => {
     expect(within(drawer).queryByText('stdout')).not.toBeInTheDocument()
     expect(within(drawer).queryByText('stderr')).not.toBeInTheDocument()
   })
+
+  it('preserves inventory return state through onboarding cleanup, complete, and a scoped target hop', async () => {
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=workbench&view=unlinked&q=Tokyo&selected=vps_001',
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === '/api/monitoring-instances/mi_001') {
+          return mockJSONResponse(
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_001',
+              binding_status: '未绑定',
+              lifecycle_status: '待接入',
+              monitoring_status: '未启用',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+              last_heartbeat_at: null,
+              last_sync_at: null,
+            }),
+          )
+        }
+        if (url.startsWith('/api/monitoring-instances/mi_001/runtime-facts')) {
+          return mockJSONResponse(emptyRuntimeFacts('mi_001'))
+        }
+        if (url === '/api/monitoring-instances/mi_001/install-command') {
+          return mockJSONResponse({
+            command: 'curl -fsSL https://center.example.invalid/api/agent/install.sh | sudo bash',
+            issued_at: '2026-04-24T09:00:00Z',
+            expires_at: '2026-04-24T09:30:00Z',
+            installer_url: 'https://center.example.invalid/api/agent/install.sh',
+            public_base_url: 'https://center.example.invalid',
+            agent_version: 'v1.0.0',
+            release_repo: 'houfeng/houfeng',
+          })
+        }
+        return mockJSONResponse([])
+      }),
+    )
+
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/monitoring/mi_001',
+          search: '?onboarding=1&return_vps=vps_001',
+          state: inventoryState,
+        }]}
+      >
+        <Routes>
+          <Route
+            path="/monitoring/:monitoringInstanceId"
+            element={(
+              <>
+                <LocationStateProbe />
+                <MonitoringDetailPage />
+              </>
+            )}
+          />
+          <Route
+            path="/vps/:vpsId"
+            element={(
+              <>
+                <LocationStateProbe />
+                <VPSServicesSection
+                  services={[{
+                    service_id: 'svc_001',
+                    vps_id: 'vps_001',
+                    name: 'Gateway',
+                    service_type: 'web',
+                    status: 'active',
+                    url: 'https://example.invalid',
+                    target_id: 'tg_001',
+                    labels: [],
+                    note: '',
+                    created_at: '2026-08-01T00:00:00Z',
+                    updated_at: '2026-08-01T00:00:00Z',
+                  }]}
+                  error={null}
+                  notice={null}
+                  onCreate={vi.fn()}
+                />
+              </>
+            )}
+          />
+          <Route path="/targets/:targetId" element={<LocationStateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const drawer = await screen.findByRole('dialog', { name: '监控实例接入抽屉' })
+    await waitFor(() => {
+      expect(screen.getByTestId('location-probe')).toHaveTextContent('/monitoring/mi_001')
+      expect(screen.getByTestId('location-probe')).not.toHaveTextContent('onboarding=')
+      expect(screen.getByTestId('location-probe')).not.toHaveTextContent('return_vps=')
+    })
+    expect(screen.getByTestId('location-probe')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
+
+    fireEvent.click(within(drawer).getByRole('button', { name: '生成一键安装命令' }))
+    const completeButton = await within(drawer).findByRole('button', { name: '完成并返回 VPS' })
+    fireEvent.click(completeButton)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-probe')).toHaveTextContent('/vps/vps_001')
+    })
+    expect(screen.getByTestId('location-probe')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
+
+    fireEvent.click(screen.getByRole('link', { name: 'tg_001' }))
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/targets/tg_001')
+    expect(screen.getByTestId('location-probe')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
+  })
+
 
 })

@@ -284,11 +284,15 @@ function openVPSActionsMenu() {
 }
 
 function clickVPSAction(name: string) {
+  const menuName = name === '调整决策' ? '续费决策'
+    : name === '编辑基础资料' ? '编辑事实'
+    : name === '监控观测' ? '监控实例'
+    : name
   openVPSActionsMenu()
   const summary = screen.getByLabelText(/^VPS 详情操作/)
   const menu = summary.closest('details')
   if (!menu) throw new Error('VPS actions menu not found')
-  fireEvent.click(within(menu).getByRole('button', { name }))
+  fireEvent.click(within(menu).getByRole('button', { name: menuName }))
 }
 
 function openActivityHistory() {
@@ -552,12 +556,12 @@ describe('LegacyVPSDetail', () => {
     expect(overviewActions).toBeInstanceOf(HTMLElement)
     expect(screen.getByLabelText(/^VPS 详情操作/)).toBeInTheDocument()
     openVPSActionsMenu()
-    expect(within(overviewActions as HTMLElement).getByRole('button', { name: '调整决策' })).toBeInTheDocument()
+    expect(within(overviewActions as HTMLElement).getByRole('button', { name: '续费决策' })).toBeInTheDocument()
     expect(within(overviewActions as HTMLElement).getByRole('button', { name: '基础资料' })).toBeInTheDocument()
     expect(within(overviewActions as HTMLElement).getByRole('button', { name: '资产历史' })).toBeInTheDocument()
     expect(within(overviewActions as HTMLElement).getByRole('button', { name: '服务' })).toBeInTheDocument()
     expect(within(overviewActions as HTMLElement).getByRole('button', { name: '域名' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '编辑基础资料' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑事实' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '记录经验' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: '新增订阅事实' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: '接入/升级 agent' }).length).toBeGreaterThan(0)
@@ -1278,7 +1282,6 @@ describe('LegacyVPSDetail', () => {
     expect(within(drawer).getByLabelText('服务商')).toHaveValue('Hetzner')
     expect(within(drawer).getByLabelText('区域')).toHaveValue('Kanto')
     expect(within(drawer).getByLabelText('城市')).toHaveValue('Tokyo')
-    expect(within(drawer).getByText('已按 VPS 资料预填，必要时微调后直接创建并进入 agent 接入。')).toBeInTheDocument()
     expect(within(drawer).queryByLabelText('继承字段')).not.toBeInTheDocument()
   })
 
@@ -1375,9 +1378,44 @@ describe('LegacyVPSDetail', () => {
     fireEvent.change(within(drawer).getByLabelText('延长原因'), { target: { value: '故障补偿' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '保存延长记录' }))
 
-    expect(await within(drawer).findByRole('alert')).toHaveTextContent('延长至日期不能早于当前 active 订阅续费日。')
+    expect(await within(drawer).findByRole('alert')).toHaveTextContent('延长至日期不能早于当前生效中订阅续费日。')
     expect(fetchMock).toHaveBeenCalledTimes(5)
   })
+
+  it('does not POST validity extension when more than one active subscription exists', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(vpsDetailBody))
+      .mockResolvedValueOnce(mockJSONResponse(timelineEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(servicesEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse(domainsEmptyBody))
+      .mockResolvedValueOnce(mockJSONResponse([
+        subscriptionBody,
+        { ...subscriptionBody, subscription_id: 'sub_002', renew_at: '2026-07-01' },
+      ]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const validityButtons = await screen.findAllByRole('button', { name: '延长有效期' })
+    fireEvent.click(firstResult(validityButtons, 'validity command'))
+    const drawer = await screen.findByRole('dialog', { name: '延长有效期' })
+    expect(within(drawer).getByText('当前 VPS 存在多个生效中订阅，无法直接延长有效期。')).toBeInTheDocument()
+    fireEvent.change(within(drawer).getByLabelText('延长至日期'), { target: { value: '2026-08-01' } })
+    fireEvent.change(within(drawer).getByLabelText('延长原因'), { target: { value: '补偿' } })
+    fireEvent.click(within(drawer).getByRole('button', { name: '保存延长记录' }))
+
+    expect(within(drawer).getByRole('button', { name: '保存延长记录' })).toBeDisabled()
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('extend-validity') || call[1]?.method === 'POST')).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+  })
+
 
   it('creates a monitoring instance from VPS identity and navigates to onboarding', async () => {
     const detailBody = {
@@ -1605,7 +1643,7 @@ describe('LegacyVPSDetail', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '监控观测' }), 'monitoring evidence command'))
+    fireEvent.click(firstResult(screen.getAllByRole('button', { name: '监控实例' }), 'monitoring evidence command'))
     const evidenceDrawer = await screen.findByRole('dialog', { name: '已关联监控实例' })
 
     expect(within(evidenceDrawer).queryByRole('button', { name: '关联已有监控实例' })).not.toBeInTheDocument()
@@ -1642,7 +1680,7 @@ describe('LegacyVPSDetail', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     openVPSActionsMenu()
-    expect(screen.getByRole('button', { name: '调整决策' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '续费决策' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '新增订阅事实' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: '接入/升级 agent' }).length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: '打开取消/退役' })).not.toBeInTheDocument()
@@ -4034,7 +4072,7 @@ describe('LegacyVPSDetail', () => {
     fireEvent.change(within(serviceDrawer).getByLabelText('服务类型'), { target: { value: 'api' } })
     fireEvent.change(within(serviceDrawer).getByLabelText('入口 URL'), { target: { value: 'https://blog.example.com' } })
     fireEvent.change(within(serviceDrawer).getByLabelText('端口'), { target: { value: '443' } })
-    fireEvent.change(within(serviceDrawer).getByLabelText('关联 Target'), { target: { value: 'tg_001' } })
+    fireEvent.change(within(serviceDrawer).getByLabelText('关联入口探测'), { target: { value: 'tg_001' } })
     fireEvent.change(within(serviceDrawer).getByLabelText('服务标签'), { target: { value: 'prod, public' } })
     fireEvent.change(within(serviceDrawer).getByLabelText('服务备注'), { target: { value: 'primary service' } })
     fireEvent.click(within(serviceDrawer).getByRole('button', { name: '创建服务记录' }))
@@ -4246,7 +4284,7 @@ describe('LegacyVPSDetail', () => {
     fireEvent.change(within(domainDrawer).getByLabelText('域名状态'), { target: { value: 'active' } })
     fireEvent.change(within(domainDrawer).getByLabelText('用途'), { target: { value: 'api' } })
     fireEvent.change(within(domainDrawer).getByLabelText('关联服务'), { target: { value: 'svc_001' } })
-    fireEvent.change(within(domainDrawer).getByLabelText('关联 Target'), { target: { value: 'tg_001' } })
+    fireEvent.change(within(domainDrawer).getByLabelText('关联入口探测'), { target: { value: 'tg_001' } })
     fireEvent.change(within(domainDrawer).getByLabelText('注册商'), { target: { value: 'NameSilo' } })
     fireEvent.change(within(domainDrawer).getByLabelText('过期日期'), { target: { value: '2026-07-01' } })
     fireEvent.click(within(domainDrawer).getByLabelText('自动续费'))

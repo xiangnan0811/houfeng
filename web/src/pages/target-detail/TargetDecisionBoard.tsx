@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { Badge, Button, StatusGlyph, Timestamp } from '../../components/atoms'
 import type { AssetContextForTarget, ProbeItemRecord, ProbeObservation, TargetRecord } from '../../lib/types'
@@ -33,6 +33,7 @@ export function TargetDecisionBoard({
   assetContextError,
   onOpenHistory,
 }: TargetDecisionBoardProps) {
+  const location = useLocation()
   const { nextAction, evidenceItems } = buildTargetDecisionModel({
     target,
     probeItems,
@@ -119,7 +120,7 @@ export function TargetDecisionBoard({
             <Link className="btn sm secondary" to={`/asset-decisions?view=needs_decision&renew_within_days=30&scenario=migration_retirement&vps_id=${encodeURIComponent(primaryContext.vps_id)}`}>
               组合决策
             </Link>
-            <Link className="btn sm secondary" to={`/vps/${primaryContext.vps_id}?workbench=cancellation`}>
+            <Link className="btn sm secondary" to={`/vps/${primaryContext.vps_id}?workbench=cancellation`} state={location.state}>
               打开工作台
             </Link>
           </>

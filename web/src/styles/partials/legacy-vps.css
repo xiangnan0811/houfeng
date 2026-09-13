@@ -356,8 +356,7 @@
 
 @media (max-width:640px){.vps-detail-overview,.vps-ip-quality-summary{padding:var(--space-3)}.vps-detail-overview__facts,.vps-ip-quality-summary__facts{grid-template-columns:1fr}.vps-detail-overview__actions{align-items:center;justify-content:flex-start;width:100%}.vps-detail-overview__actions .btn,.vps-detail-overview__actions a.btn{width:auto;max-width:100%;justify-content:center}.vps-detail-overview__actions .watchtower-actions-menu{width:auto}.vps-detail-overview__actions .watchtower-actions-menu>summary{display:flex;align-items:center;justify-content:center;min-width:36px}}
 
-@media (max-width:760px){.vps-create-form__row,
-.vps-create-form__row--3col{grid-template-columns:1fr}.vps-create-form__provider-row{align-items:stretch;flex-direction:column}.vps-create-form__provider-link{align-self:flex-start;padding-bottom:0}.vps-create-form__toggle-row{align-items:flex-start;flex-direction:column}}
+@media (max-width:760px){.vps-create-form__row{grid-template-columns:1fr}}
 
 /* Overview layout/type live in VPSDetailWorkspace.css. Keep only menu fallback. */
 .vps-overview-management{position:absolute;right:0;top:calc(100% + var(--space-2));z-index:4;min-width:180px;background:var(--surface-elevated);border:var(--border-w) solid var(--border);border-radius:var(--radius-3);box-shadow:var(--shadow-overlay)}

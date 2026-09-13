@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 import { Card, Modal, Hostname, MonoDigits, Timestamp } from '../../components/atoms'
 import { CollapsibleSection } from '../../components/CollapsibleSection'
@@ -68,6 +68,7 @@ type IssueState = {
 
 export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, onClose, returnVPSId, mode = 'connect' }: Props) {
   const navigate = useNavigate()
+  const location = useLocation()
   const { copy } = useCopyToClipboard()
   const [state, setState] = useState<IssueState>({
     issue: null,
@@ -100,7 +101,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
 
   function handleComplete() {
     if (returnVPSId) {
-      navigate(`/vps/${encodeURIComponent(returnVPSId)}`)
+      navigate(`/vps/${encodeURIComponent(returnVPSId)}`, { state: location.state })
       return
     }
     onClose()
