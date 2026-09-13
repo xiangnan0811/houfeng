@@ -9,6 +9,7 @@ import {
   recordSearchFiltersFromSearchParams,
   recordSearchParamsFromFilters,
   recordSearchToAPIQuery,
+  recordSubjectPrefillFromSearchParams,
 } from './searchFilterModel'
 
 function parse(search: string) {
@@ -44,6 +45,18 @@ describe('record search filter model', () => {
       sort: 'updated_at_asc',
       limit: 25,
     })
+  })
+
+  it('reads a complete subject prefill from the new-record codec', () => {
+    expect(recordSubjectPrefillFromSearchParams(new URLSearchParams(
+      'subject=vps%3Avps_001%3Aaffected%3Aprimary',
+    ))).toEqual({
+      kind: 'vps',
+      source_id: 'vps_001',
+      role: 'affected',
+      primary: true,
+    })
+    expect(recordSubjectPrefillFromSearchParams(new URLSearchParams('subject=vps%3A%3Aaffected%3Aprimary'))).toBeNull()
   })
 
   it('drops values outside the closed vocabularies rather than forwarding them', () => {

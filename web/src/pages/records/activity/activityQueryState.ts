@@ -75,7 +75,6 @@ const VIEW_LABELS: Record<SubjectActivityView, string> = {
   records: '记录',
   evidence: '证据',
 }
-
 function vocabulary<Value extends string>(
   allowed: ReadonlySet<Value>,
   raw: readonly string[],

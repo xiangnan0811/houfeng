@@ -10,7 +10,12 @@ import {
   type MonitoringEvidenceReadModel,
   type SubscriptionCostEvidenceReadModel,
 } from './evidenceReadModels'
-import { createEvidenceRendererRegistry } from './evidenceRendererRegistryCore'
+import {
+  createEvidenceRendererRegistry,
+  inspectEvidenceRenderability,
+  type EvidenceRenderDecision,
+  type EvidenceRendererRegistration,
+} from './evidenceRendererRegistryCore'
 import { CommandAuditEvidenceRenderer } from './renderers/CommandAuditEvidenceRenderer'
 import { IPQualityEvidenceRenderer } from './renderers/IPQualityEvidenceRenderer'
 import { MonitoringEventEvidenceRenderer } from './renderers/MonitoringEventEvidenceRenderer'
@@ -18,7 +23,7 @@ import { MonitoringHostEvidenceRenderer } from './renderers/MonitoringHostEviden
 import { MonitoringProbeEvidenceRenderer } from './renderers/MonitoringProbeEvidenceRenderer'
 import { SubscriptionCostEvidenceRenderer } from './renderers/SubscriptionCostEvidenceRenderer'
 
-export const EvidenceRendererRegistry = createEvidenceRendererRegistry([
+const EVIDENCE_RENDERER_REGISTRATIONS: readonly EvidenceRendererRegistration[] = [
   {
     kind: 'ip_quality.report',
     schema_version: 1,
@@ -67,4 +72,10 @@ export const EvidenceRendererRegistry = createEvidenceRendererRegistry([
     decode: decodeCommandAuditEvidenceReadModel,
     render: (model) => <CommandAuditEvidenceRenderer model={model as CommandAuditEvidenceReadModel} />,
   },
-])
+]
+
+export const EvidenceRendererRegistry = createEvidenceRendererRegistry(EVIDENCE_RENDERER_REGISTRATIONS)
+
+export function decideRegisteredEvidenceRender(evidence: unknown): EvidenceRenderDecision {
+  return inspectEvidenceRenderability(EVIDENCE_RENDERER_REGISTRATIONS, evidence)
+}

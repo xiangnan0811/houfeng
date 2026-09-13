@@ -150,11 +150,11 @@ describe('TargetProbeList', () => {
       />,
     )
 
-    // DataTable rendered as a real <table>
     const table = screen.getByRole('table')
     expect(table).toBeInTheDocument()
     expect(table).toHaveClass('probe-observations')
-
+    const scroller = screen.getByRole('region', { name: 'HTTP pb_001 观测' })
+    expect(scroller).toHaveAttribute('tabindex', '0')
     // Column headers
     expect(screen.getByRole('columnheader', { name: '执行监控实例' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: '观测时间' })).toBeInTheDocument()
@@ -189,7 +189,7 @@ describe('TargetProbeList', () => {
     // No DataTable rendered
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
     // Inline empty placeholder
-    expect(screen.getByText('尚未收到观测')).toBeInTheDocument()
+    expect(screen.getByText('尚无观测')).toBeInTheDocument()
     // dl meta also reflects "尚无观测结果"
     expect(screen.getByText('尚无观测结果')).toBeInTheDocument()
   })

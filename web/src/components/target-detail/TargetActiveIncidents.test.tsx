@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import { TargetActiveIncidents } from './TargetActiveIncidents'
 import type { ActiveIncidentRecord } from '../../lib/types'
@@ -26,12 +26,15 @@ describe('TargetActiveIncidents', () => {
   })
 
   it('renders the error fallback when loaded with an error', () => {
+    const onRetry = vi.fn()
     render(
-      <TargetActiveIncidents loaded={true} incidents={[]} error="活跃异常读模型失败" />,
+      <TargetActiveIncidents loaded={true} incidents={[]} error="活跃异常读模型失败" onRetry={onRetry} />,
     )
 
     expect(screen.getByRole('heading', { name: '活跃异常暂不可用' })).toBeInTheDocument()
     expect(screen.getByText('活跃异常读模型失败')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试加载活跃异常' }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
   })
 
   it('renders incident summaries when loaded', () => {

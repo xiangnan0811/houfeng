@@ -1675,12 +1675,92 @@ describe('MonitoringDetailPage', () => {
         screen.getByRole('heading', { name: 'Singapore Edge' }),
       ).toBeInTheDocument(),
     )
-
     // Watchtower main view still renders metric cards even when incidents/events fail
     expect(screen.getAllByText('18.0%').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByRole('heading', { name: '活跃异常暂不可用' })).toBeInTheDocument()
+    expect(screen.getByText('incidents unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '相关事件暂不可用' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试加载活跃异常' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '重试加载相关事件' })).toBeEnabled()
     expect(
       screen.queryByRole('heading', { name: '监控实例详情不可用' }),
     ).not.toBeInTheDocument()
+  })
+
+  it('retries failed incident and event loads without hiding monitoring details', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_003') {
+        return Promise.resolve(mockJSONResponse({
+          monitoring_instance_id: 'mi_003',
+          display_name: 'Singapore Edge',
+          region: 'ap-southeast-1',
+          city: 'Singapore',
+          provider: 'AWS',
+          lifecycle_status: '在用',
+          monitoring_status: '启用',
+          binding_status: '已绑定',
+          labels: ['sea'],
+          note: '',
+          current_health_status: '关注',
+          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_sync_at: '2026-04-24T09:05:00Z',
+          current_active_incident_count: 1,
+          current_primary_issue_summary: '磁盘使用率偏高',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        }))
+      }
+      if (path === '/api/monitoring-instances/mi_003/runtime-facts?window=realtime') {
+        return Promise.resolve(mockJSONResponse({
+          monitoring_instance_id: 'mi_003',
+          latest_host_sample: hostSampleRecord('mi_003', {
+            cpu_usage_pct: 18,
+            disk_used_pct: 88,
+          }),
+        }))
+      }
+      if (path.startsWith('/api/incidents?')) {
+        if (fetchMock.mock.calls.filter((call) => String(call[0]).startsWith('/api/incidents?')).length > 1) {
+          return Promise.resolve(mockJSONResponse([{
+            incident_id: 'inc_retry',
+            incident_class: 'monitoring_instance_disk_pressure',
+            object_type: 'monitoring_instance',
+            object_id: 'mi_003',
+            severity: '告警',
+            started_at: '2026-04-24T08:50:00Z',
+            last_evaluated_at: '2026-04-24T09:05:00Z',
+            source_summary: '磁盘使用率持续超过阈值',
+          }]))
+        }
+        return Promise.resolve(mockJSONResponse({ error: 'incidents unavailable' }, 503))
+      }
+      if (path.startsWith('/api/events?')) {
+        return Promise.resolve(mockJSONResponse({ error: 'events unavailable' }, 503))
+      }
+      if (path === '/api/monitoring-instances/mi_003/vps') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      return Promise.reject(new Error(`unexpected fetch ${path}`))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_003']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '重试加载活跃异常' })).toBeEnabled(),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '重试加载活跃异常' }))
+    await waitFor(() =>
+      expect(screen.getByText('磁盘使用率持续超过阈值')).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('heading', { name: 'Singapore Edge' })).toBeInTheDocument()
   })
 
   it('renders a high-priority binding conflict card on monitoring instance detail', async () => {
@@ -3530,7 +3610,8 @@ describe('MonitoringDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '升级/重新接入 agent…' }))
 
     const drawer = await screen.findByRole('dialog', { name: '监控实例接入抽屉' })
-    expect(within(drawer).getByRole('heading', { name: '升级/重新接入 agent' })).toBeInTheDocument()
+    expect(within(drawer).getByRole('heading', { name: 'Tokyo Edge · 升级/重新接入 agent' })).toBeInTheDocument()
+    expect(within(drawer).getByText('mi_upgrade')).toBeInTheDocument()
     expect(within(drawer).getByRole('button', { name: '生成升级/重新接入命令' })).toBeInTheDocument()
   })
 

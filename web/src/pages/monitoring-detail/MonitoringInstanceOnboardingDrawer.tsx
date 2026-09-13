@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { Card, Modal, Hostname, MonoDigits, Timestamp } from '../../components/atoms'
@@ -66,30 +66,86 @@ type IssueState = {
   copyStatus: 'idle' | 'copied' | 'failed'
 }
 
+const EMPTY_ISSUE_STATE: IssueState = {
+  issue: null,
+  busy: false,
+  error: null,
+  hidden: false,
+  copyStatus: 'idle',
+}
+
 export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, onClose, returnVPSId, mode = 'connect' }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
   const { copy } = useCopyToClipboard()
-  const [state, setState] = useState<IssueState>({
-    issue: null,
-    busy: false,
-    error: null,
-    hidden: false,
-    copyStatus: 'idle',
-  })
+  const [state, setState] = useState<IssueState>(EMPTY_ISSUE_STATE)
+  const issueRequestRef = useRef(0)
+  const busyRef = useRef(false)
+  const mountedRef = useRef(true)
+  const openRef = useRef(open)
+  const subjectRef = useRef(monitoringInstance.monitoring_instance_id)
+  const subjectId = monitoringInstance.monitoring_instance_id
+  const [seenIdentity, setSeenIdentity] = useState({ open, subjectId })
 
-  useEffect(() => {
-    if (open) return
-    setState({ issue: null, busy: false, error: null, hidden: false, copyStatus: 'idle' })
-  }, [open])
+  if (openRef.current !== open) {
+    openRef.current = open
+    if (!open) {
+      issueRequestRef.current += 1
+      busyRef.current = false
+    }
+  }
+  if (subjectRef.current !== subjectId) {
+    subjectRef.current = subjectId
+    issueRequestRef.current += 1
+    busyRef.current = false
+  }
+  if (seenIdentity.open !== open || seenIdentity.subjectId !== subjectId) {
+    setSeenIdentity({ open, subjectId })
+    if (!open || seenIdentity.subjectId !== subjectId) {
+      setState(EMPTY_ISSUE_STATE)
+    }
+  }
+
+  useLayoutEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      issueRequestRef.current += 1
+      busyRef.current = false
+    }
+  }, [])
+
+  function isLiveIssue(requestId: number, subjectId: string) {
+    return (
+      mountedRef.current &&
+      openRef.current &&
+      issueRequestRef.current === requestId &&
+      subjectRef.current === subjectId
+    )
+  }
+
+  function handleRequestClose() {
+    if (busyRef.current) return
+    onClose()
+  }
 
   async function handleIssue() {
+    if (busyRef.current) return
+    const subjectId = monitoringInstance.monitoring_instance_id
+    const requestId = issueRequestRef.current + 1
+    issueRequestRef.current = requestId
+    busyRef.current = true
     setState((current) => ({ ...current, busy: true, error: null }))
     try {
-      const issue = await issueMonitoringInstanceInstallCommand(monitoringInstance.monitoring_instance_id)
+      const issue = await issueMonitoringInstanceInstallCommand(subjectId)
+      if (!isLiveIssue(requestId, subjectId)) return
       const copied = await copy(issue.command)
+      if (!isLiveIssue(requestId, subjectId)) return
+      busyRef.current = false
       setState({ issue, busy: false, error: null, hidden: false, copyStatus: copied ? 'copied' : 'failed' })
     } catch (error: unknown) {
+      if (!isLiveIssue(requestId, subjectId)) return
+      busyRef.current = false
       setState((current) => ({
         ...current,
         busy: false,
@@ -100,6 +156,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
   }
 
   function handleComplete() {
+    if (busyRef.current) return
     if (returnVPSId) {
       navigate(`/vps/${encodeURIComponent(returnVPSId)}`, { state: location.state })
       return
@@ -109,7 +166,9 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
 
   const { issue, busy, error, hidden, copyStatus } = state
   const isUpgrade = mode === 'upgrade'
-  const title = isUpgrade ? '升级/重新接入 agent' : '接入 agent'
+  const taskTitle = isUpgrade ? '升级/重新接入 agent' : '接入 agent'
+  const subjectName = monitoringInstance.display_name.trim() || monitoringInstance.monitoring_instance_id
+  const title = `${subjectName} · ${taskTitle}`
   const primaryLabel = issue
     ? isUpgrade ? '重新生成升级/重新接入命令' : '重新生成安装命令'
     : isUpgrade ? '生成升级/重新接入命令' : '生成一键安装命令'
@@ -117,8 +176,42 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
   const completeLabel = returnVPSId ? '完成并返回 VPS' : '完成并查看监控实例'
 
   return (
-    <Modal open={open} onClose={onClose} title={title} ariaLabel="监控实例接入抽屉" size="xl">
+    <Modal
+      open={open}
+      onClose={handleRequestClose}
+      persistent={busy}
+      title={title}
+      ariaLabel="监控实例接入抽屉"
+      size="xl"
+      contentClassName="watchtower-form-modal"
+      footer={
+        <div className="watchtower-form-footer">
+          {error ? (
+            <p role="alert" className="onboarding-token__error-summary">
+              <MonoDigits>{error}</MonoDigits>
+            </p>
+          ) : null}
+          <button type="button" className="btn md primary" disabled={busy} onClick={() => void handleIssue()}>
+            {busy ? '正在生成…' : primaryLabel}
+          </button>
+          {issue ? (
+            <button type="button" className="btn md secondary" disabled={busy} onClick={handleComplete}>
+              {completeLabel}
+            </button>
+          ) : null}
+        </div>
+      }
+    >
       <div className="onboarding-drawer">
+        <p className="onboarding-drawer__subject">
+          <Hostname>{monitoringInstance.monitoring_instance_id}</Hostname>
+          {returnVPSId ? (
+            <>
+              {' · 返回 VPS '}
+              <Hostname>{returnVPSId}</Hostname>
+            </>
+          ) : null}
+        </p>
         <Card cardRole="warning" className="onboarding-drawer__brief">
           <p className="onboarding-token__hint onboarding-token__hint--critical">
             安装命令包含 30 分钟有效的一次性 enrollment token。请把它当作敏感信息处理，不要粘贴到工单、聊天、日志或截图里。
@@ -130,11 +223,8 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
                 ? '命令由 center 后端生成，用于在已接入或已观测的服务器上升级/重新接入 agent，不会新建监控实例。'
                 : '命令由 center 后端生成，使用 HOUFENG_PUBLIC_BASE_URL，不会从浏览器地址猜测生产 URL。'}
           </p>
-          <div className="onboarding-token__actions">
-            <button type="button" className="btn md primary" disabled={busy} onClick={() => void handleIssue()}>
-              {busy ? '正在生成…' : primaryLabel}
-            </button>
-            {issue && hidden ? (
+          {issue && hidden ? (
+            <div className="onboarding-token__actions">
               <button
                 type="button"
                 className="btn md ghost"
@@ -142,12 +232,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
               >
                 重新展开命令
               </button>
-            ) : null}
-          </div>
-          {error ? (
-            <p role="alert" className="onboarding-token__error-summary">
-              <MonoDigits>{error}</MonoDigits>
-            </p>
+            </div>
           ) : null}
         </Card>
 
@@ -189,9 +274,6 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
               </div>
             </dl>
             <div className="onboarding-token__actions">
-              <button type="button" className="btn sm primary" onClick={handleComplete}>
-                {completeLabel}
-              </button>
               <button
                 type="button"
                 className="btn sm secondary"

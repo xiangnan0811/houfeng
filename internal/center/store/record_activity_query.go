@@ -314,6 +314,7 @@ func (repository *ActivityProjectionRepository) loadActivityEvents(
 	rows, err := repository.pool.Query(ctx, `
 		select p.activity_id, p.ingest_sequence, p.event_kind, p.event_at, p.recorded_at,
 		       p.source_kind, p.source_event_id, p.source_version,
+		       p.record_id, p.revision_id, p.evidence_snapshot_id,
 		       p.backfilled, p.actor_id, p.presentation_json, p.corrects_activity_id
 		from public.record_activity_projection p
 		join unnest($1::text[]) with ordinality as requested(activity_id, ordinal)
@@ -336,6 +337,9 @@ func (repository *ActivityProjectionRepository) loadActivityEvents(
 			sourceKind     string
 			sourceEventID  string
 			sourceVersion  int64
+			recordID       *string
+			revisionID     *string
+			evidenceID     *string
 			actorID        *string
 			presentation   []byte
 			corrects       *string
@@ -343,6 +347,7 @@ func (repository *ActivityProjectionRepository) loadActivityEvents(
 		if err := rows.Scan(
 			&event.ActivityID, &ingestSequence, &eventKind, &event.EventAt, &event.RecordedAt,
 			&sourceKind, &sourceEventID, &sourceVersion,
+			&recordID, &revisionID, &evidenceID,
 			&event.Backfilled, &actorID, &presentation, &corrects,
 		); err != nil {
 			return nil, fmt.Errorf("scan activity event: %w", err)
@@ -360,6 +365,15 @@ func (repository *ActivityProjectionRepository) loadActivityEvents(
 		event.IngestSequence = uint64(ingestSequence)
 		event.EventAt = event.EventAt.UTC()
 		event.RecordedAt = event.RecordedAt.UTC()
+		if recordID != nil {
+			event.RecordID = *recordID
+		}
+		if revisionID != nil {
+			event.RevisionID = *revisionID
+		}
+		if evidenceID != nil {
+			event.EvidenceID = *evidenceID
+		}
 		if actorID != nil {
 			event.Actor = &activity.ActorSnapshot{ActorID: *actorID}
 		}

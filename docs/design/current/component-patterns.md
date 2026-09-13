@@ -91,6 +91,14 @@ This replaces prior patch-style rules about specific markers, density caps, and 
 
 Do not use these responsibilities to block future product exploration. Use them to avoid accidental duplication and to keep each page's current job legible.
 
+## Associated operator workspaces
+
+Monitoring and entrypoint detail pages lead with compact identity and current observations. Keep management and history subordinate, incident/event failures independently retryable, and missing or disabled probes distinct from failed observations. An empty incident list is not evidence that every runtime source is healthy. Onboarding names its monitoring instance, obtains installation commands only after an explicit request to the center, and keeps sensitive copy/reveal controls inside the authenticated dialog. Pending issuance or copying prevents dismissal; a closed, replaced, or unmounted dialog must not start copying a late response or restore its command. An already-started clipboard write cannot be cancelled. Probe and onboarding dialogs keep their action footer outside the scrolling body.
+
+Activity, records, and evidence for VPS, monitoring instances, and entrypoints remain views of the shared subject workspace. Preserve the existing URL filter codec and location.state return context through record publication, restoration, and evidence links. Interactive filters match each view's server predicate; retained incompatible URL filters stay visible and removable. A scoped new record consumes the same canonical subject reference emitted by its entry link and isolates its unsynced buffer from other subjects and unscoped creation. Reopening the same entry restores its buffer without overwriting newer edits; unscoped draft recovery remains available from /records/new. A valid canonical return_to provides an explicit subject-return link, without changing the post-publication record destination. Record search prioritizes results; import/export remain secondary tools. Evidence links open the protected /evidence/:evidenceId reader using the existing exact renderer tuple and validated read model. Unsupported or invalid evidence fails closed without exposing raw payloads; source deletion does not erase an authorized retained snapshot.
+
+IP quality remains a read-only report, not another asset overview. Keep report identity/time, provider and service results, and every returned historical report reachable; put collection diagnostics behind an explicit disclosure. Reuse existing risk calculations without introducing another score or treating unknown results as failures. Wide observation/provider tables have named, keyboard-focusable local scroll regions. These related workspaces use the VPS title/body density and stack title/actions and fact groups when narrow.
+
 ## Contracts and tests
 
 Component and page changes should update the closest useful tests:

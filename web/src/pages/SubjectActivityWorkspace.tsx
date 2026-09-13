@@ -4,6 +4,7 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { Button } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import { SubjectIdentityBar } from '../components/SubjectIdentityBar'
+import { SUBJECT_KIND_LABELS } from '../components/timelineChannel'
 import { UnifiedTimeline } from '../components/UnifiedTimeline'
 import type { SubjectActivityView } from '../lib/types'
 import { SubjectActivityFilters } from './records/activity/SubjectActivityFilters'
@@ -21,6 +22,43 @@ import { useSubjectActivity } from './records/activity/useSubjectActivity'
 
 type Props = {
   view: SubjectActivityView
+}
+
+function workspaceCopy(view: SubjectActivityView, filtered: boolean) {
+  if (view === 'records') {
+    return {
+      loading: '正在加载记录',
+      unavailable: '记录投影不可用',
+      error: '无法加载记录',
+      emptyTitle: filtered ? '没有匹配的记录' : '主体尚无记录',
+      emptyDescription: filtered
+        ? '当前筛选条件下没有可见记录，可放宽来源或类型。'
+        : '投影中还没有与该主体相关的可见记录。',
+      refresh: '有新记录，刷新',
+    }
+  }
+  if (view === 'evidence') {
+    return {
+      loading: '正在加载证据',
+      unavailable: '证据投影不可用',
+      error: '无法加载证据',
+      emptyTitle: filtered ? '没有匹配的证据' : '主体尚无证据',
+      emptyDescription: filtered
+        ? '当前筛选条件下没有可见证据，可放宽来源或版本范围。'
+        : '投影中还没有与该主体相关的可见证据。',
+      refresh: '有新证据，刷新',
+    }
+  }
+  return {
+    loading: '正在加载活动',
+    unavailable: '活动投影不可用',
+    error: '无法加载活动',
+    emptyTitle: filtered ? '没有匹配的活动' : '主体尚无活动',
+    emptyDescription: filtered
+      ? '当前筛选条件下没有可见活动，可放宽来源或时间范围。'
+      : '投影中还没有与该主体相关的可见事件。',
+    refresh: '有新活动，刷新',
+  }
 }
 
 export function SubjectActivityWorkspace({ view }: Props) {
@@ -67,22 +105,17 @@ export function SubjectActivityWorkspace({ view }: Props) {
     )
   }
 
+  const navigationState = route.kind === 'vps' ? location.state : undefined
   const writeFilters = (next: ActivityFilters) => {
     // Filter changes clear the cursor so a watermark from another query is never reused.
-    setSearchParams(subjectActivityParamsFromState(next), { replace: true, state: route.kind === 'vps' ? location.state : undefined })
+    setSearchParams(subjectActivityParamsFromState(next), { replace: true, state: navigationState })
   }
 
   const overviewHref = route.kind === 'vps' ? route.basePath : undefined
   const newRecordHref = subjectNewRecordHref(route)
   const filterSearch = subjectActivityParamsFromState(filters).toString()
   const navSearch = filterSearch ? `?${filterSearch}` : ''
-
-  const emptyTitle = state.status === 'empty' && Object.keys(filters).length > 0
-    ? '没有匹配的活动'
-    : '主体尚无活动'
-  const emptyDescription = state.status === 'empty' && Object.keys(filters).length > 0
-    ? '当前筛选条件下没有可见活动，可放宽来源或时间范围。'
-    : '投影中还没有与该主体相关的可见事件。'
+  const copy = workspaceCopy(view, Object.keys(filters).length > 0)
 
   return (
     <div className="page subject-activity-page">
@@ -94,9 +127,9 @@ export function SubjectActivityWorkspace({ view }: Props) {
           actions={(
             <>
               {view === 'evidence' ? (
-                <Link className="btn sm secondary" to="/records/compare">横向比较</Link>
+                <Link className="btn sm secondary" to="/records/compare" state={navigationState}>横向比较</Link>
               ) : null}
-              <Link className="btn sm primary" to={newRecordHref}>新建记录</Link>
+              <Link className="btn sm primary" to={newRecordHref} state={navigationState}>新建记录</Link>
               {state.freshness?.new_items_available ? (
                 <Button
                   type="button"
@@ -104,15 +137,18 @@ export function SubjectActivityWorkspace({ view }: Props) {
                   variant="secondary"
                   onClick={() => commands.refresh()}
                 >
-                  有新活动，刷新
+                  {copy.refresh}
                 </Button>
               ) : null}
             </>
           )}
         />
       ) : (
-        <header className="page__head">
-          <h1 className="page__title">{route.sourceId}</h1>
+        <header className="page__head subject-identity-bar">
+          <div className="subject-identity-bar__main">
+            <p className="subject-identity-bar__kind">{SUBJECT_KIND_LABELS[route.kind]}</p>
+            <h1 className="page__title">{route.sourceId}</h1>
+          </div>
         </header>
       )}
 
@@ -123,97 +159,101 @@ export function SubjectActivityWorkspace({ view }: Props) {
         search={navSearch}
       />
 
-      <SubjectActivityFilters
-        value={filters}
-        onChange={writeFilters}
-        disabled={state.status === 'loading'}
-      />
-
-      {state.sourceStatuses.some((status) => status.state !== 'ready') ? (
-        <p className="subject-activity-page__source-note" role="status">
-          部分来源暂不可用；时间线只包含已知条目，不代表完整投影。
-        </p>
-      ) : null}
-
-      {state.status === 'loading' && state.items.length === 0 ? (
-        <PageState kind="loading" title="正在加载活动" />
-      ) : null}
-
-      {state.status === 'unavailable' ? (
-        <PageState
-          kind="error"
-          title="活动投影不可用"
-          description={state.errorMessage ?? undefined}
-          action={(
-            <Button type="button" size="sm" onClick={() => commands.refresh()}>
-              重试
-            </Button>
-          )}
+      <div className="subject-activity-page__work">
+        <SubjectActivityFilters
+          value={filters}
+          onChange={writeFilters}
+          disabled={state.status === 'loading'}
+          view={view}
         />
-      ) : null}
 
-      {state.status === 'error' ? (
-        <PageState
-          kind="error"
-          title="无法加载活动"
-          description={state.errorMessage ?? undefined}
-          technicalSummary={state.errorCode}
-          action={(
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => {
-                setSearchParams(subjectActivityParamsFromState(filters), { replace: true, state: route.kind === 'vps' ? location.state : undefined })
-                commands.refresh()
-              }}
-            >
-              重置分页并重试
-            </Button>
-          )}
-        />
-      ) : null}
+        {state.sourceStatuses.some((status) => status.state !== 'ready') ? (
+          <p className="subject-activity-page__source-note" role="status">
+            部分来源暂不可用；时间线只包含已知条目，不代表完整投影。
+          </p>
+        ) : null}
 
-      {state.status === 'empty' ? (
-        <PageState
-          kind="empty"
-          title={emptyTitle}
-          description={emptyDescription}
-        />
-      ) : null}
+        {state.status === 'loading' && state.items.length === 0 ? (
+          <PageState kind="loading" title={copy.loading} />
+        ) : null}
 
-      {state.status === 'ready' || (state.status === 'error' && state.items.length > 0) ? (
-        <>
-          <UnifiedTimeline
-            items={state.items}
-            sourceStatuses={state.sourceStatuses}
-            emptyTitle={emptyTitle}
-            emptyDescription={emptyDescription}
-            {...(view === 'evidence' ? {
-              itemActions: (item) => item.evidence_snapshot_id ? (
-                <Link
-                  className="text-link"
-                  to={comparisonEntryHref({ items: [{ snapshot_id: item.evidence_snapshot_id }] })}
-                >
-                  加入横向比较
-                </Link>
-              ) : null,
-            } : {})}
+        {state.status === 'unavailable' ? (
+          <PageState
+            kind="error"
+            title={copy.unavailable}
+            description={state.errorMessage ?? undefined}
+            action={(
+              <Button type="button" size="sm" onClick={() => commands.refresh()}>
+                重试
+              </Button>
+            )}
           />
-          {state.nextCursor ? (
-            <div className="subject-activity-page__more">
+        ) : null}
+
+        {state.status === 'error' ? (
+          <PageState
+            kind="error"
+            title={copy.error}
+            description={state.errorMessage ?? undefined}
+            technicalSummary={state.errorCode}
+            action={(
               <Button
                 type="button"
                 size="sm"
-                variant="secondary"
-                disabled={state.loadingMore}
-                onClick={() => commands.append()}
+                onClick={() => {
+                  setSearchParams(subjectActivityParamsFromState(filters), { replace: true, state: navigationState })
+                  commands.refresh()
+                }}
               >
-                {state.loadingMore ? '加载中…' : '加载更多'}
+                重置分页并重试
               </Button>
-            </div>
-          ) : null}
-        </>
-      ) : null}
+            )}
+          />
+        ) : null}
+
+        {state.status === 'empty' ? (
+          <PageState
+            kind="empty"
+            title={copy.emptyTitle}
+            description={copy.emptyDescription}
+          />
+        ) : null}
+
+        {state.status === 'ready' || (state.status === 'error' && state.items.length > 0) ? (
+          <>
+            <UnifiedTimeline
+              items={state.items}
+              sourceStatuses={state.sourceStatuses}
+              emptyTitle={copy.emptyTitle}
+              emptyDescription={copy.emptyDescription}
+              {...(view === 'evidence' ? {
+                itemActions: (item) => item.evidence_snapshot_id ? (
+                  <Link
+                    className="text-link"
+                    to={comparisonEntryHref({ items: [{ snapshot_id: item.evidence_snapshot_id }] })}
+                    state={navigationState}
+                  >
+                    加入横向比较
+                  </Link>
+                ) : null,
+              } : {})}
+            />
+            {state.nextCursor ? (
+              <div className="subject-activity-page__more">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={state.loadingMore}
+                  onClick={() => commands.append()}
+                >
+                  {state.loadingMore ? '加载中…' : '加载更多'}
+                </Button>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
     </div>
   )
 }

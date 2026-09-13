@@ -4,6 +4,7 @@ import type { RecordDraftPayload } from '../../lib/types'
 import {
   DRAFT_BUFFER_TTL_MS,
   draftBufferKey,
+  draftBufferRecordId,
   memoryDraftBufferStore,
   readUnsyncedDraft,
   discardUserDrafts,
@@ -41,6 +42,22 @@ describe('draftBuffer', () => {
     })
     await expect(readUnsyncedDraft(store, key, 2)).resolves.toMatchObject({ payload: { title: 'local' } })
     await expect(readUnsyncedDraft(store, key, 1 + DRAFT_BUFFER_TTL_MS + 1)).resolves.toBeUndefined()
+  })
+
+  it('scopes a new-record buffer by primary subject without changing unscoped keys', () => {
+    expect(draftBufferRecordId()).toBe('new')
+    expect(draftBufferRecordId('rec_001')).toBe('rec_001')
+    expect(draftBufferRecordId(undefined, [{
+      kind: 'vps',
+      source_id: 'vps_001',
+      primary: true,
+    }])).toBe('new:vps:vps_001')
+    expect(draftBufferKey('usr_1')).toBe('usr_1:new')
+    expect(draftBufferKey('usr_1', draftBufferRecordId(undefined, [{
+      kind: 'vps',
+      source_id: 'vps_001',
+      primary: true,
+    }]))).toBe('usr_1:new:vps:vps_001')
   })
 
   it('clears only the current user on logout', async () => {

@@ -147,6 +147,10 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const [historyIncidents, setHistoryIncidents] = useState<ActiveIncidentRecord[] | null>(null)
   const [historyIncidentsLoading, setHistoryIncidentsLoading] = useState(false)
   const [historyIncidentsError, setHistoryIncidentsError] = useState<string | null>(null)
+  const [incidentsRetrying, setIncidentsRetrying] = useState(false)
+  const [eventsRetrying, setEventsRetrying] = useState(false)
+  const incidentsRetryRef = useRef(0)
+  const eventsRetryRef = useRef(0)
   const [commandOpen, setCommandOpen] = useState(false)
   const [commandSubmitting, setCommandSubmitting] = useState(false)
   const [commandError, setCommandError] = useState<string | null>(null)
@@ -816,6 +820,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const monitoringInstance = isCurrentMonitoringInstance ? state.monitoringInstance : null
   const runtimeFacts = isCurrentMonitoringInstance ? state.runtimeFacts : null
   const incidents = hasCurrentMonitoringActivity ? state.incidents : []
+  const incidentsError = hasCurrentMonitoringActivity ? state.incidentsError : null
   const events = hasCurrentMonitoringActivity ? state.events : []
   const eventsError = hasCurrentMonitoringActivity ? state.eventsError : null
   const linkedVPS =
@@ -1086,6 +1091,96 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     historyFetchRef.current = { monitoringInstanceId: monitoringInstanceId ?? null, inFlight: false, fetched: false }
     setHistoryIncidents(null)
     setHistoryIncidentsError(null)
+  }
+
+  function retryIncidents() {
+    if (!monitoringInstanceId) return
+    const actionId = monitoringInstanceId
+    const requestId = ++incidentsRetryRef.current
+    setIncidentsRetrying(true)
+    listIncidents({ object_type: 'monitoring_instance', object_id: actionId })
+      .then((records) => {
+        if (
+          !isMountedRef.current ||
+          currentRouteMonitoringInstanceIdRef.current !== actionId ||
+          incidentsRetryRef.current !== requestId
+        ) {
+          return
+        }
+        setState((current) => ({
+          ...current,
+          incidents: records,
+          incidentsError: null,
+        }))
+      })
+      .catch((error: unknown) => {
+        if (
+          !isMountedRef.current ||
+          currentRouteMonitoringInstanceIdRef.current !== actionId ||
+          incidentsRetryRef.current !== requestId
+        ) {
+          return
+        }
+        setState((current) => ({
+          ...current,
+          incidents: [],
+          incidentsError: describeError(error, '加载活跃异常失败'),
+        }))
+      })
+      .finally(() => {
+        if (
+          isMountedRef.current &&
+          currentRouteMonitoringInstanceIdRef.current === actionId &&
+          incidentsRetryRef.current === requestId
+        ) {
+          setIncidentsRetrying(false)
+        }
+      })
+  }
+
+  function retryEvents() {
+    if (!monitoringInstanceId) return
+    const actionId = monitoringInstanceId
+    const requestId = ++eventsRetryRef.current
+    setEventsRetrying(true)
+    listEvents({ object_type: 'monitoring_instance', object_id: actionId })
+      .then((records) => {
+        if (
+          !isMountedRef.current ||
+          currentRouteMonitoringInstanceIdRef.current !== actionId ||
+          eventsRetryRef.current !== requestId
+        ) {
+          return
+        }
+        setState((current) => ({
+          ...current,
+          events: records,
+          eventsError: null,
+        }))
+      })
+      .catch((error: unknown) => {
+        if (
+          !isMountedRef.current ||
+          currentRouteMonitoringInstanceIdRef.current !== actionId ||
+          eventsRetryRef.current !== requestId
+        ) {
+          return
+        }
+        setState((current) => ({
+          ...current,
+          events: [],
+          eventsError: describeError(error, '加载相关事件失败'),
+        }))
+      })
+      .finally(() => {
+        if (
+          isMountedRef.current &&
+          currentRouteMonitoringInstanceIdRef.current === actionId &&
+          eventsRetryRef.current === requestId
+        ) {
+          setEventsRetrying(false)
+        }
+      })
   }
 
   function openHistory(tab: 'events' | 'incidents' = 'events') {
@@ -1378,8 +1473,14 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       onManagementRestoreArchive={handleManagementRestoreArchive}
       onManagementPermanentCleanup={(reason, confirmationName) => void handleManagementPermanentCleanup(reason, confirmationName)}
       incidents={incidents}
+      incidentsError={incidentsError}
       events={events}
       eventsError={eventsError}
+      activityLoaded={hasCurrentMonitoringActivity}
+      incidentsRetrying={incidentsRetrying}
+      eventsRetrying={eventsRetrying}
+      onRetryIncidents={retryIncidents}
+      onRetryEvents={retryEvents}
       linkedVPS={linkedVPS}
       linkedVPSLoading={linkedVPSLoading}
       linkedVPSLoaded={linkedVPSLoaded}

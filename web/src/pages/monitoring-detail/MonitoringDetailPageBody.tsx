@@ -5,9 +5,14 @@ import {
   MonitoringInstanceWatchtowerMetrics,
   type MonitoringInstanceRuntimeAction,
 } from '../../components/monitoring-detail'
+import {
+  TargetActiveIncidents,
+  TargetRecentEvents,
+} from '../../components/target-detail'
 import { COMMAND_LABELS, COMMAND_LIST } from '../../config/commands'
 import type { MetricThresholds } from '../../config/thresholds'
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
+import { MonoDigits } from '../../components/atoms/Mono'
 import type {
   ActiveIncidentRecord,
   HostSample,
@@ -118,8 +123,14 @@ type MonitoringDetailPageBodyProps = {
   onManagementRestoreArchive: () => void
   onManagementPermanentCleanup: (reason: string, confirmationName: string) => void
   incidents: ActiveIncidentRecord[]
+  incidentsError: string | null
   events: StateChangeEventRecord[]
   eventsError: string | null
+  activityLoaded: boolean
+  incidentsRetrying: boolean
+  eventsRetrying: boolean
+  onRetryIncidents: () => void
+  onRetryEvents: () => void
   linkedVPS: VPSSummary[]
   linkedVPSLoading: boolean
   linkedVPSLoaded: boolean
@@ -194,8 +205,14 @@ export function MonitoringDetailPageBody({
   onManagementRestoreArchive,
   onManagementPermanentCleanup,
   incidents,
+  incidentsError,
   events,
   eventsError,
+  activityLoaded,
+  incidentsRetrying,
+  eventsRetrying,
+  onRetryIncidents,
+  onRetryEvents,
   linkedVPS,
   linkedVPSLoading,
   linkedVPSLoaded,
@@ -290,46 +307,6 @@ export function MonitoringDetailPageBody({
       ) : null}
       {runtimeError ? <p className="watchtower-runtime-error" role="alert">{runtimeError}</p> : null}
 
-      <MonitoringInstanceMetadataSection
-        monitoringInstance={monitoringInstance}
-        editing={metadataEditing}
-        groupDraft={metadataGroupDraft}
-        labelDraft={metadataLabelDraft}
-        noteDraft={metadataNoteDraft}
-        submitting={metadataSubmitting}
-        error={metadataError}
-        readOnlyReason={archived ? '已归档实例资料只读' : null}
-        onGroupDraftChange={onMetadataGroupDraftChange}
-        onLabelDraftChange={onMetadataLabelDraftChange}
-        onNoteDraftChange={onMetadataNoteDraftChange}
-        onStartEdit={onMetadataStartEdit}
-        onCancelEdit={onMetadataCancelEdit}
-        onSubmit={onMetadataSubmit}
-      />
-
-      <MonitoringInstanceManagementSection
-        monitoringInstance={monitoringInstance}
-        review={managementReview}
-        loading={managementLoading}
-        error={managementError}
-        submittingAction={managementSubmittingAction}
-        actionError={managementActionError}
-        onLoadReview={onManagementLoadReview}
-        onRetire={onManagementRetire}
-        onRestoreLifecycle={onManagementRestoreLifecycle}
-        onArchive={onManagementArchive}
-        onRestoreArchive={onManagementRestoreArchive}
-        onPermanentCleanup={onManagementPermanentCleanup}
-      />
-
-      {showDangerZone ? (
-        <MonitoringInstanceDangerCard
-          monitoringInstance={monitoringInstance}
-          firstIncident={firstIncident}
-          onOpenEvents={() => onOpenHistory('events')}
-        />
-      ) : null}
-
       {showBindingConflict ? (
         <MonitoringInstanceBindingConflictSection
           bindingConflict={bindingConflict}
@@ -371,23 +348,94 @@ export function MonitoringDetailPageBody({
         />
       ) : null}
 
-      <MonitoringInstanceTimeWindowTabs
-        value={timeWindow}
-        onChange={onTimeWindowChange}
-        streamStatus={runtimeStreamStatus}
-        streamError={runtimeStreamError}
-      />
+      {showDangerZone ? (
+        <MonitoringInstanceDangerCard
+          monitoringInstance={monitoringInstance}
+          firstIncident={firstIncident}
+          onOpenEvents={() => onOpenHistory('events')}
+        />
+      ) : null}
 
-      <MonitoringInstanceWatchtowerMetrics
-        sample={sample}
-        metricPoints={metricPoints}
-        timeWindow={timeWindow}
-        {...(runtimeFacts?.window === undefined ? {} : { window: runtimeFacts.window })}
-        isMaintenance={isMaintenance}
-        thresholds={thresholds}
-      />
+      <div className="watchtower-observation">
+        <MonitoringInstanceTimeWindowTabs
+          value={timeWindow}
+          onChange={onTimeWindowChange}
+          streamStatus={runtimeStreamStatus}
+          streamError={runtimeStreamError}
+        />
+
+        <MonitoringInstanceWatchtowerMetrics
+          sample={sample}
+          metricPoints={metricPoints}
+          timeWindow={timeWindow}
+          {...(runtimeFacts?.window === undefined ? {} : { window: runtimeFacts.window })}
+          isMaintenance={isMaintenance}
+          thresholds={thresholds}
+        />
+      </div>
+
+      <div className="watchtower-activity-grid" aria-label="当前异常与事件证据">
+        <TargetActiveIncidents
+          loaded={activityLoaded}
+          incidents={incidents}
+          error={incidentsError}
+          retrying={incidentsRetrying}
+          onRetry={onRetryIncidents}
+          aside={
+            <span className="detail-section__aside-meta">
+              活跃 <MonoDigits>{incidents.length}</MonoDigits>
+            </span>
+          }
+        />
+        <TargetRecentEvents
+          loaded={activityLoaded}
+          events={events}
+          error={eventsError}
+          retrying={eventsRetrying}
+          onRetry={onRetryEvents}
+          aside={
+            <span className="detail-section__aside-meta">
+              事件 <MonoDigits>{events.length}</MonoDigits>
+            </span>
+          }
+        />
+      </div>
 
       <MonitoringInstanceSnapshotMeta sample={sample} />
+
+      <div className="watchtower-management" aria-label="资料与生命周期">
+        <MonitoringInstanceMetadataSection
+          monitoringInstance={monitoringInstance}
+          editing={metadataEditing}
+          groupDraft={metadataGroupDraft}
+          labelDraft={metadataLabelDraft}
+          noteDraft={metadataNoteDraft}
+          submitting={metadataSubmitting}
+          error={metadataError}
+          readOnlyReason={archived ? '已归档实例资料只读' : null}
+          onGroupDraftChange={onMetadataGroupDraftChange}
+          onLabelDraftChange={onMetadataLabelDraftChange}
+          onNoteDraftChange={onMetadataNoteDraftChange}
+          onStartEdit={onMetadataStartEdit}
+          onCancelEdit={onMetadataCancelEdit}
+          onSubmit={onMetadataSubmit}
+        />
+
+        <MonitoringInstanceManagementSection
+          monitoringInstance={monitoringInstance}
+          review={managementReview}
+          loading={managementLoading}
+          error={managementError}
+          submittingAction={managementSubmittingAction}
+          actionError={managementActionError}
+          onLoadReview={onManagementLoadReview}
+          onRetire={onManagementRetire}
+          onRestoreLifecycle={onManagementRestoreLifecycle}
+          onArchive={onManagementArchive}
+          onRestoreArchive={onManagementRestoreArchive}
+          onPermanentCleanup={onManagementPermanentCleanup}
+        />
+      </div>
 
       <MonitoringInstanceHistoryDrawer
         monitoringInstance={monitoringInstance}

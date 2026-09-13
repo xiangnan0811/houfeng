@@ -268,7 +268,8 @@ func buildEvidenceCandidate(
 			// content, so it names what was measured without copying any of it.
 			Summary: row.kind,
 		},
-		Severity: "info",
+		Severity:   "info",
+		EvidenceID: row.snapshotID,
 	}
 	authScope, err := activity.ProjectAuthScope(recordauth.ProjectIDDefault)
 	if err != nil {

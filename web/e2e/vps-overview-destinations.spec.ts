@@ -278,17 +278,6 @@ test('VPS overview creates the first monitoring instance and reaches its onboard
   api,
   page,
 }) => {
-  expect(CREATED_MONITORING_INSTANCE).toMatchObject({
-    lifecycle_status: '待接入',
-    monitoring_status: '启用',
-    binding_status: '未绑定',
-  })
-  const overviewFixture = unlinkedVPSOverview()
-  expect(overviewFixture.summary.monitoring.status).toBe('unlinked')
-  expect(overviewFixture.relations.find((relation) => (
-    relation.kind === 'monitoring_instances'
-  ))?.status).toBe('unlinked')
-
   api.useProfile(firstMonitoringCreateProfile())
   await api.allowRuntimeStream('mi_created')
   await page.goto('/vps/vps_001')
@@ -314,7 +303,7 @@ test('VPS overview creates the first monitoring instance and reaches its onboard
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
   )
   await onboardingNavigation
-  await expect(page.getByRole('heading', { name: 'Tokyo Monitor' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Tokyo Monitor', exact: true, level: 1 })).toBeVisible()
   await expect(page.getByRole('dialog', { name: '监控实例接入抽屉' })).toBeVisible()
   await api.assertRuntimeStreamConnected('mi_created')
   expect(api.requestCount('GET', '/api/vps/vps_001/overview')).toBe(2)
@@ -452,36 +441,76 @@ test('VPS overview subscription relation reaches the exact filtered subscription
 const RELATION_PANELS = [
   {
     label: '监控实例',
+    trigger: '查看实例',
     dialog: '已关联监控实例',
     content: 'Tokyo Monitor',
     apiPath: '/api/vps/vps_001/monitoring-instances',
+    offered: ['接入/升级 agent', '解除关联'] as const,
+    entry: {
+      action: '解除关联',
+      dialog: '确认解除监控实例关联',
+      role: 'alertdialog' as const,
+      writePath: '/api/vps/vps_001/unlink-monitoring-instance',
+    },
   },
   {
     label: '服务',
+    trigger: '查看服务',
     dialog: '已关联服务',
     content: 'Overview Gateway',
     apiPath: '/api/vps/vps_001/services',
+    offered: ['新增服务'] as const,
+    entry: {
+      action: '新增服务',
+      dialog: '新增服务',
+      role: 'dialog' as const,
+      field: '服务名称',
+      writePath: '/api/vps/vps_001/services',
+    },
   },
   {
     label: '域名',
+    trigger: '查看域名',
     dialog: '已关联域名',
     content: 'edge.example.com',
     apiPath: '/api/vps/vps_001/domains',
+    offered: ['新增域名'] as const,
+    entry: {
+      action: '新增域名',
+      dialog: '新增域名',
+      role: 'dialog' as const,
+      field: '域名',
+      writePath: '/api/vps/vps_001/domains',
+    },
   },
 ] as const
 
 for (const contract of RELATION_PANELS) {
-  test(`VPS overview ${contract.label} relation opens its scoped read-only panel`, async ({ api, page }) => {
-    api.useProfile(vpsOverviewProfile())
+  test(`VPS overview ${contract.label} relation opens scoped management entry`, async ({ api, page }) => {
+    api.useProfile({
+      ...vpsOverviewProfile(),
+      [apiRouteKey('GET', '/api/targets')]: { status: 200, body: [] },
+    })
     await page.goto('/vps/vps_001')
 
-    await page.getByRole('button', { name: contract.label === '监控实例' ? '查看实例' : `查看${contract.label}`, exact: true }).click()
-    const dialog = page.getByRole('dialog', { name: contract.dialog })
+    await page.getByRole('button', { name: contract.trigger, exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: contract.dialog, exact: true })
     await expect(dialog).toBeVisible()
     await expect(dialog.getByText(contract.content, { exact: true })).toBeVisible()
-    await expect(page.getByRole('dialog', { name: contract.dialog }).getByRole('button', {
-      name: /新增|解除关联|接入\/升级/,
-    })).toHaveCount(0)
+    expect(api.requestCount('GET', contract.apiPath)).toBeGreaterThan(0)
+
+    for (const action of contract.offered) {
+      await expect(dialog.getByRole('button', { name: action, exact: true })).toBeVisible()
+    }
+
+    await dialog.getByRole('button', { name: contract.entry.action, exact: true }).click()
+    const entry = page.getByRole(contract.entry.role, { name: contract.entry.dialog, exact: true })
+    await expect(entry).toBeVisible()
+    if ('field' in contract.entry) {
+      await expect(entry.getByRole('textbox', { name: contract.entry.field, exact: true })).toBeVisible()
+    }
+    await expectLocation(page, '/vps/vps_001')
+    expect(api.requestCount('POST', contract.entry.writePath)).toBe(0)
   })
 }
 
@@ -494,7 +523,7 @@ test('VPS overview resource row view affordance opens details and restores keybo
   const dialog = page.getByRole('dialog', { name: '已关联服务', exact: true })
   await expect(dialog).toBeVisible()
   await expect(dialog.getByText('Overview Gateway', { exact: true })).toBeVisible()
-  await expect(dialog.getByRole('button', { name: /新增|编辑|删除/ })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '新增服务', exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
   await expect(trigger).toBeFocused()

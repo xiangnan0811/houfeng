@@ -11,6 +11,7 @@ import {
 } from '../atoms'
 import { formatConfigSummary, formatLatency } from '../../lib/format'
 import type { ProbeItemRecord, ProbeObservation } from '../../lib/types'
+import { probeItemObservationEmptyCopy } from './probeObservationGap'
 
 export type PendingProbeConfirmation = {
   probeItemId: string
@@ -140,6 +141,7 @@ export function TargetProbeList({
       {probeItems.map((probeItem) => {
         const observations = observationsByProbe.get(probeItem.probe_item_id) ?? []
         const latestObservedAt = observations[0]?.observed_at ?? null
+        const emptyCopy = probeItemObservationEmptyCopy(probeItem.enabled)
         return (
           <article key={probeItem.probe_item_id} className="probe-card">
             <header className="probe-card__header">
@@ -218,22 +220,29 @@ export function TargetProbeList({
                   {latestObservedAt ? (
                     <Timestamp value={latestObservedAt} mode="both" />
                   ) : (
-                    <span className="probe-observations__muted">尚无观测结果</span>
+                    <span className="probe-observations__muted">{emptyCopy.meta}</span>
                   )}
                 </dd>
               </div>
             </dl>
 
             {observations.length > 0 ? (
-              <DataTable<ProbeObservation>
-                className="probe-observations"
-                density="compact"
-                columns={observationColumns}
-                rows={observations}
-                rowKey={(obs) => `${obs.probe_item_id}-${obs.monitoring_instance_id}-${obs.observed_at}`}
-              />
+              <div
+                className="probe-observations-scroller"
+                role="region"
+                aria-label={`${probeItem.probe_kind.toUpperCase()} ${probeItem.probe_item_id} 观测`}
+                tabIndex={0}
+              >
+                <DataTable<ProbeObservation>
+                  className="probe-observations"
+                  density="compact"
+                  columns={observationColumns}
+                  rows={observations}
+                  rowKey={(obs) => `${obs.probe_item_id}-${obs.monitoring_instance_id}-${obs.observed_at}`}
+                />
+              </div>
             ) : (
-              <div className="probe-card__observations-empty">尚未收到观测</div>
+              <div className="probe-card__observations-empty">{emptyCopy.body}</div>
             )}
           </article>
         )

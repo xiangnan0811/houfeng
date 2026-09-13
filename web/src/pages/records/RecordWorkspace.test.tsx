@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { RecordWorkspace } from './RecordWorkspace'
@@ -144,5 +144,33 @@ describe('RecordWorkspace', () => {
     expect(await screen.findByRole('button', { name: '恢复为新修订' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '恢复为新修订' }))
     expect(await screen.findByText('record home')).toBeInTheDocument()
+  })
+
+  it('keeps non-default inventory state after restoring a revision', async () => {
+    api.getRecord.mockResolvedValue(recordDetailFixture({
+      current_revision_id: 'rrv_002',
+      current: recordRevisionFixture({ revision_id: 'rrv_002', title: 'current' }),
+    }))
+    api.getRecordRevision.mockResolvedValue(recordRevisionFixture())
+    api.restoreRecordRevision.mockResolvedValue(recordDetailFixture())
+    function Probe() {
+      const { state } = useLocation()
+      return <pre>{JSON.stringify(state)}</pre>
+    }
+    render(
+      <MemoryRouter initialEntries={[{
+        pathname: '/records/rec_001/revisions/rrv_001',
+        state: { vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001' },
+      }]}>
+        <Routes>
+          <Route path="/records/:recordId/revisions/:revisionId" element={<RecordWorkspace mode="revision" recordId="rec_001" revisionId="rrv_001" />} />
+          <Route path="/records/:recordId" element={<Probe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '恢复为新修订' }))
+    expect(await screen.findByText(/vpsInventoryHref/)).toHaveTextContent(
+      '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+    )
   })
 })

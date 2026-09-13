@@ -119,31 +119,45 @@ export function MonitoringInstanceWatchtowerHeader({
   }, [])
 
   return (
-    <header className="page__head" role="banner" aria-label="监控实例身份与操作">
-      <div>
+    <header className="page__head watchtower-identity" role="banner" aria-label="监控实例身份与操作">
+      <div className="watchtower-identity__copy">
         <h1 className="page__title">{monitoringInstance.display_name}</h1>
-        <p className="page-sub">
-          {monitoringInstance.group ? <>{monitoringInstance.group}{' · '}</> : null}
-          <Hostname>{monitoringInstance.monitoring_instance_id}</Hostname>
-          {' · '}
-          {locationLine(monitoringInstance)}
-          {' · '}
-          {linkedVPSSummary(linkedVPS, linkedVPSLoading, linkedVPSLoaded, linkedVPSError, location.state)}
-          {labels.length > 0 ? (
-            <>
-              {' · '}
-              <span className="watchtower-header__labels">{labelText}</span>
-            </>
-          ) : null}
-          {' · '}
-          agent <MonoDigits>{agentVersion}</MonoDigits>
-        </p>
-        <div className="badge-row">
+        <div className="watchtower-identity__statuses" role="group" aria-label="监控实例当前状态">
           <HeaderStatusBadge dimension="生命周期" value={monitoringInstance.lifecycle_status} />
           <HeaderStatusBadge dimension="监控" value={monitoringInstance.monitoring_status} />
           <HeaderStatusBadge dimension="绑定" value={monitoringInstance.binding_status} />
           <HeaderStatusBadge dimension="健康" value={monitoringInstance.current_health_status} />
         </div>
+        <dl className="watchtower-identity__meta">
+          {monitoringInstance.group ? (
+            <div className="watchtower-identity__meta-item">
+              <dt>分组</dt>
+              <dd>{monitoringInstance.group}</dd>
+            </div>
+          ) : null}
+          <div className="watchtower-identity__meta-item">
+            <dt>实例</dt>
+            <dd><Hostname>{monitoringInstance.monitoring_instance_id}</Hostname></dd>
+          </div>
+          <div className="watchtower-identity__meta-item">
+            <dt>位置</dt>
+            <dd>{locationLine(monitoringInstance)}</dd>
+          </div>
+          <div className="watchtower-identity__meta-item">
+            <dt>关联</dt>
+            <dd>{linkedVPSSummary(linkedVPS, linkedVPSLoading, linkedVPSLoaded, linkedVPSError, location.state)}</dd>
+          </div>
+          {labels.length > 0 ? (
+            <div className="watchtower-identity__meta-item">
+              <dt>标签</dt>
+              <dd className="watchtower-header__labels">{labelText}</dd>
+            </div>
+          ) : null}
+          <div className="watchtower-identity__meta-item">
+            <dt>agent</dt>
+            <dd><MonoDigits>{agentVersion}</MonoDigits></dd>
+          </div>
+        </dl>
       </div>
       <div className="page__actions">
         <span className="watchtower-header__freshness" aria-label="数据新鲜度">

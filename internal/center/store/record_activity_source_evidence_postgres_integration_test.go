@@ -118,6 +118,13 @@ func TestPostgresIntegrationEvidenceSourceProjectsSubjectScopedCaptures(t *testi
 	}
 
 	vpsCapture := bySnapshotID["evs_vpswindow01"]
+	if vpsCapture.EvidenceID != "evs_vpswindow01" {
+		t.Fatalf("evidence route ref = %q, want evs_vpswindow01", vpsCapture.EvidenceID)
+	}
+	if vpsCapture.RecordID != "" || vpsCapture.RevisionID != "" {
+		t.Fatalf("evidence candidate unexpectedly carries record refs: record=%q revision=%q",
+			vpsCapture.RecordID, vpsCapture.RevisionID)
+	}
 	// The observed window end is the event time, and the row's write time is
 	// separately the recorded time.
 	if !vpsCapture.EventAt.Equal(base) {

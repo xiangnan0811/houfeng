@@ -57,32 +57,42 @@ export function TargetWatchtowerHeader({
   const runtimeActions = targetRuntimeActions(target)
 
   return (
-    <header className="page__head" role="banner" aria-label="目标身份与操作">
-      <div>
+    <header className="page__head watchtower-identity" role="banner" aria-label="目标身份与操作">
+      <div className="watchtower-identity__copy">
         <h1 className="page__title">{target.name}</h1>
-        <p className="page-sub">
-          {target.group ? <>{target.group}{' · '}</> : null}
-          <Hostname truncate maxChars={14}>{target.target_id}</Hostname>
-          {' · '}
-          <Hostname>{hostDisplay}</Hostname>
-          {target.labels.length > 0 ? (
-            <>
-              {' · '}
-              <span className="watchtower-header__labels">{labelText}</span>
-            </>
-          ) : null}
-          {target.execution_monitoring_instance_labels.length > 0 ? (
-            <>
-              {' · '}
-              <span className="watchtower-header__labels">{execLabelText}</span>
-            </>
-          ) : null}
-        </p>
-        <div className="badge-row">
+        <div className="watchtower-identity__statuses" role="group" aria-label="入口探测当前状态">
           <StatusBadge label={target.run_status} />
           <StatusBadge label={target.current_health_status} />
           <StatusBadge label={target.target_type} />
         </div>
+        <dl className="watchtower-identity__meta">
+          {target.group ? (
+            <div className="watchtower-identity__meta-item">
+              <dt>分组</dt>
+              <dd>{target.group}</dd>
+            </div>
+          ) : null}
+          <div className="watchtower-identity__meta-item">
+            <dt>入口</dt>
+            <dd><Hostname truncate maxChars={14}>{target.target_id}</Hostname></dd>
+          </div>
+          <div className="watchtower-identity__meta-item">
+            <dt>主机</dt>
+            <dd><Hostname>{hostDisplay}</Hostname></dd>
+          </div>
+          {target.labels.length > 0 ? (
+            <div className="watchtower-identity__meta-item">
+              <dt>标签</dt>
+              <dd className="watchtower-header__labels">{labelText}</dd>
+            </div>
+          ) : null}
+          {target.execution_monitoring_instance_labels.length > 0 ? (
+            <div className="watchtower-identity__meta-item">
+              <dt>执行</dt>
+              <dd className="watchtower-header__labels">{execLabelText}</dd>
+            </div>
+          ) : null}
+        </dl>
       </div>
       <div className="page__actions">
         <span className="watchtower-header__freshness" aria-label="数据新鲜度">

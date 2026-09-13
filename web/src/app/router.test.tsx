@@ -71,21 +71,42 @@ describe('record workspace routes', () => {
 })
 
 describe('subject activity routes', () => {
-  it('registers static activity/records/evidence ahead of detail catch-alls', () => {
-    const vpsActivity = matchRoutes(appRoutes, '/vps/vps_001/activity')
-    const vpsDetail = matchRoutes(appRoutes, '/vps/vps_001')
-    const monitoringRecords = matchRoutes(appRoutes, '/monitoring/mi_001/records')
-    const targetEvidence = matchRoutes(appRoutes, '/targets/tg_001/evidence')
+  it('registers all nine subject variants ahead of detail catch-alls', () => {
+    const cases: Array<[string, string, string]> = [
+      ['/vps/vps_001/activity', 'vps/:vpsId/activity', 'vps/:vpsId'],
+      ['/vps/vps_001/records', 'vps/:vpsId/records', 'vps/:vpsId'],
+      ['/vps/vps_001/evidence', 'vps/:vpsId/evidence', 'vps/:vpsId'],
+      ['/monitoring/mi_001/activity', 'monitoring/:monitoringInstanceId/activity', 'monitoring/:monitoringInstanceId'],
+      ['/monitoring/mi_001/records', 'monitoring/:monitoringInstanceId/records', 'monitoring/:monitoringInstanceId'],
+      ['/monitoring/mi_001/evidence', 'monitoring/:monitoringInstanceId/evidence', 'monitoring/:monitoringInstanceId'],
+      ['/targets/tg_001/activity', 'targets/:targetId/activity', 'targets/:targetId'],
+      ['/targets/tg_001/records', 'targets/:targetId/records', 'targets/:targetId'],
+      ['/targets/tg_001/evidence', 'targets/:targetId/evidence', 'targets/:targetId'],
+    ]
 
-    expect(vpsActivity?.some(({ route }) => route.path === 'vps/:vpsId/activity')).toBe(true)
-    expect(vpsActivity?.some(({ route }) => route.path === 'vps/:vpsId')).toBe(false)
-    expect(vpsDetail?.some(({ route }) => route.path === 'vps/:vpsId')).toBe(true)
-    expect(monitoringRecords?.some(({ route }) => route.path === 'monitoring/:monitoringInstanceId/records')).toBe(true)
-    expect(targetEvidence?.some(({ route }) => route.path === 'targets/:targetId/evidence')).toBe(true)
+    for (const [path, expected, catchAll] of cases) {
+      const matches = matchRoutes(appRoutes, path)
+      expect(matches?.some(({ route }) => route.path === expected), path).toBe(true)
+      expect(matches?.some(({ route }) => route.path === catchAll), path).toBe(false)
+      expect(matches?.some(({ route }) => {
+        const element = route.element as { type?: unknown } | undefined
+        return element?.type === RequireAuth
+      }), path).toBe(true)
+    }
   })
 
-  it('stays below the private route boundary', () => {
-    const matches = matchRoutes(appRoutes, '/vps/vps_001/activity')
+  it('keeps VPS detail as the catch-all after activity views', () => {
+    const vpsDetail = matchRoutes(appRoutes, '/vps/vps_001')
+    expect(vpsDetail?.some(({ route }) => route.path === 'vps/:vpsId')).toBe(true)
+  })
+})
+
+describe('evidence snapshot route', () => {
+  it('is protected and not swallowed by record or wildcard routes', () => {
+    const matches = matchRoutes(appRoutes, '/evidence/evs_9')
+    expect(matches?.some(({ route }) => route.path === 'evidence/:evidenceId')).toBe(true)
+    expect(matches?.some(({ route }) => route.path === 'records/:recordId')).toBe(false)
+    expect(matches?.some(({ route }) => route.path === '*')).toBe(false)
     expect(matches?.some(({ route }) => {
       const element = route.element as { type?: unknown } | undefined
       return element?.type === RequireAuth

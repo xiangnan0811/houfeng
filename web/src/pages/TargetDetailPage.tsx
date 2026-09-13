@@ -85,6 +85,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   )
   const [historyIncidentsLoading, setHistoryIncidentsLoading] = useState(false)
   const [historyIncidentsError, setHistoryIncidentsError] = useState<string | null>(null)
+  const [incidentsRetrying, setIncidentsRetrying] = useState(false)
+  const [eventsRetrying, setEventsRetrying] = useState(false)
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('24h')
   const [probeCreateOpen, setProbeCreateOpen] = useState(false)
   const [probeFormMode, setProbeFormMode] = useState<ProbeFormMode>({ kind: 'create' })
@@ -105,6 +107,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const currentRequestedTargetIdRef = useRef<string | null>(null)
   const isMountedRef = useRef(true)
   const probeFormRequestRef = useRef(0)
+  const probeFormSubmittingRef = useRef(false)
   const probeRowMutationRequestRef = useRef(0)
   const probeRowMutationInFlightRef = useRef(false)
   const runtimeActionButtonRefs = useRef<Record<TargetRuntimeAction, HTMLButtonElement | null>>({
@@ -120,6 +123,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const addProbeButtonRef = useRef<HTMLButtonElement | null>(null)
   const pendingProbeFocusRestoreRef = useRef<ProbeFocusRestoreRequest | null>(null)
   const metadataRequestRef = useRef(0)
+  const incidentsRetryRef = useRef(0)
+  const eventsRetryRef = useRef(0)
   const [assetContextState, setAssetContextState] = useState<{
     requestedTargetId: string | null
     context: AssetContextForTarget | null
@@ -136,12 +141,12 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     currentRequestedTargetIdRef.current = state.requestedTargetId
   }, [state.requestedTargetId])
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
       isMountedRef.current = false
-    },
-    [],
-  )
+    }
+  }, [])
 
   // Refetch runtime facts when time window changes (keep old data visible).
   // The mounted ref skips the initial invocation so the main load effect handles
@@ -431,6 +436,96 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     setHistoryIncidentsError(null)
   }
 
+  function retryIncidents() {
+    if (!targetId) return
+    const actionId = targetId
+    const requestId = ++incidentsRetryRef.current
+    setIncidentsRetrying(true)
+    listIncidents({ object_type: 'target', object_id: actionId })
+      .then((records) => {
+        if (
+          !isMountedRef.current ||
+          currentRouteTargetIdRef.current !== actionId ||
+          incidentsRetryRef.current !== requestId
+        ) {
+          return
+        }
+        setState((current) => ({
+          ...current,
+          incidents: records,
+          incidentsError: null,
+        }))
+      })
+      .catch((error: unknown) => {
+        if (
+          !isMountedRef.current ||
+          currentRouteTargetIdRef.current !== actionId ||
+          incidentsRetryRef.current !== requestId
+        ) {
+          return
+        }
+        setState((current) => ({
+          ...current,
+          incidents: [],
+          incidentsError: describeError(error, '加载活跃异常失败'),
+        }))
+      })
+      .finally(() => {
+        if (
+          isMountedRef.current &&
+          currentRouteTargetIdRef.current === actionId &&
+          incidentsRetryRef.current === requestId
+        ) {
+          setIncidentsRetrying(false)
+        }
+      })
+  }
+
+  function retryEvents() {
+    if (!targetId) return
+    const actionId = targetId
+    const requestId = ++eventsRetryRef.current
+    setEventsRetrying(true)
+    listEvents({ object_type: 'target', object_id: actionId })
+      .then((records) => {
+        if (
+          !isMountedRef.current ||
+          currentRouteTargetIdRef.current !== actionId ||
+          eventsRetryRef.current !== requestId
+        ) {
+          return
+        }
+        setState((current) => ({
+          ...current,
+          events: records,
+          eventsError: null,
+        }))
+      })
+      .catch((error: unknown) => {
+        if (
+          !isMountedRef.current ||
+          currentRouteTargetIdRef.current !== actionId ||
+          eventsRetryRef.current !== requestId
+        ) {
+          return
+        }
+        setState((current) => ({
+          ...current,
+          events: [],
+          eventsError: describeError(error, '加载相关事件失败'),
+        }))
+      })
+      .finally(() => {
+        if (
+          isMountedRef.current &&
+          currentRouteTargetIdRef.current === actionId &&
+          eventsRetryRef.current === requestId
+        ) {
+          setEventsRetrying(false)
+        }
+      })
+  }
+
   function registerActionRef(
     action: TargetRuntimeAction,
     element: HTMLButtonElement | null,
@@ -640,14 +735,9 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
 
   async function handleProbeCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!target) return
+    if (!target || probeFormSubmittingRef.current) return
 
     const actionTargetId = target.target_id
-    const requestId = probeFormRequestRef.current + 1
-    probeFormRequestRef.current = requestId
-    setProbeCreateError(null)
-    setProbeMutationError(null)
-
     let payload: CreateProbeItemInput | UpdateProbeItemInput
     try {
       payload =
@@ -664,6 +754,11 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       return
     }
 
+    const requestId = probeFormRequestRef.current + 1
+    probeFormRequestRef.current = requestId
+    probeFormSubmittingRef.current = true
+    setProbeCreateError(null)
+    setProbeMutationError(null)
     setProbeCreateSubmitting(true)
     try {
       const createdOrUpdated =
@@ -671,7 +766,6 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           ? await updateProbeItem(actionTargetId, probeFormMode.probeItemId, payload)
           : await createProbeItem(actionTargetId, payload)
       if (
-        !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
         currentRequestedTargetIdRef.current !== actionTargetId ||
         probeFormRequestRef.current !== requestId
@@ -691,7 +785,6 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       setProbeCreateForm(initialProbeCreateFormForTarget(target))
     } catch (submitError) {
       if (
-        !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
         currentRequestedTargetIdRef.current !== actionTargetId ||
         probeFormRequestRef.current !== requestId
@@ -705,12 +798,8 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         ),
       )
     } finally {
-      if (
-        isMountedRef.current &&
-        currentRouteTargetIdRef.current === actionTargetId &&
-        currentRequestedTargetIdRef.current === actionTargetId &&
-        probeFormRequestRef.current === requestId
-      ) {
+      if (probeFormRequestRef.current === requestId) {
+        probeFormSubmittingRef.current = false
         setProbeCreateSubmitting(false)
       }
     }
@@ -861,6 +950,10 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       incidentsError={incidentsError}
       events={events}
       eventsError={eventsError}
+      incidentsRetrying={incidentsRetrying}
+      eventsRetrying={eventsRetrying}
+      onRetryIncidents={retryIncidents}
+      onRetryEvents={retryEvents}
       recentObservations={recentObservations}
       observationsByProbe={observationsByProbe}
       runtimeSubmitting={runtimeSubmitting}

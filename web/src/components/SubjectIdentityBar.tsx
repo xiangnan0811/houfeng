@@ -3,18 +3,13 @@ import { Link, useLocation } from 'react-router-dom'
 
 import { Badge } from './atoms'
 import type { SubjectActivityHeader } from '../lib/types'
+import { SUBJECT_KIND_LABELS } from './timelineChannel'
 
 type Props = {
   subject: SubjectActivityHeader
   actions?: ReactNode
   returnHref?: string
   returnLabel?: string
-}
-
-const KIND_LABELS: Record<SubjectActivityHeader['kind'], string> = {
-  vps: 'VPS',
-  monitoring_instance: '监控实例',
-  target: '入口探测',
 }
 
 function displayName(subject: SubjectActivityHeader): string {
@@ -36,11 +31,10 @@ export function SubjectIdentityBar({
 
   return (
     <header className="page__head subject-identity-bar">
-      <div>
+      <div className="subject-identity-bar__main">
+        <p className="subject-identity-bar__kind">{SUBJECT_KIND_LABELS[subject.kind]}</p>
         <h1 className="page__title">{title}</h1>
         <p className="page-sub subject-identity-bar__meta">
-          <span>{KIND_LABELS[subject.kind]}</span>
-          {' · '}
           <span className="mono">{subject.source_id}</span>
           {' · '}
           {tombstoned ? (
@@ -55,7 +49,7 @@ export function SubjectIdentityBar({
           </p>
         ) : null}
       </div>
-      {actions ? <div className="page__actions">{actions}</div> : null}
+      {actions ? <div className="page__actions subject-identity-bar__actions">{actions}</div> : null}
     </header>
   )
 }

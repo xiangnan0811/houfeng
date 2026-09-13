@@ -15,6 +15,10 @@ type RegistryProps = {
 
 type UnknownRecord = Record<string, unknown>
 
+export type EvidenceRenderDecision =
+  | { status: 'rendered'; node: ReactNode }
+  | { status: 'unsupported' }
+
 function record(value: unknown): UnknownRecord | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   return value as UnknownRecord
@@ -24,9 +28,7 @@ function tupleKey(kind: string, schemaVersion: number, rendererVersion: string, 
   return `${kind}\u0000${schemaVersion}\u0000${rendererVersion}\u0000${readModelVersion}`
 }
 
-export function createEvidenceRendererRegistry(
-  registrations: readonly EvidenceRendererRegistration[],
-): ComponentType<RegistryProps> {
+function buildRegistryIndex(registrations: readonly EvidenceRendererRegistration[]) {
   const byTuple = new Map<string, EvidenceRendererRegistration>()
   let hasDuplicate = false
   for (const registration of registrations) {
@@ -39,22 +41,46 @@ export function createEvidenceRendererRegistry(
     if (byTuple.has(key)) hasDuplicate = true
     byTuple.set(key, registration)
   }
+  return { byTuple, hasDuplicate }
+}
 
+function decideEvidenceRender(
+  byTuple: ReadonlyMap<string, EvidenceRendererRegistration>,
+  hasDuplicate: boolean,
+  evidence: unknown,
+): EvidenceRenderDecision {
+  if (hasDuplicate) return { status: 'unsupported' }
+  const envelope = record(evidence)
+  if (!envelope) return { status: 'unsupported' }
+  const kind = envelope.kind
+  const schemaVersion = envelope.schema_version
+  const rendererVersion = envelope.renderer_version
+  const readModel = record(envelope.read_model)
+  const readModelVersion = readModel?.version
+  if (typeof kind !== 'string' || typeof schemaVersion !== 'number' ||
+    !Number.isInteger(schemaVersion) || typeof rendererVersion !== 'string' ||
+    typeof readModelVersion !== 'string') return { status: 'unsupported' }
+  const registration = byTuple.get(tupleKey(kind, schemaVersion, rendererVersion, readModelVersion))
+  if (!registration) return { status: 'unsupported' }
+  const decoded = registration.decode(readModel)
+  if (decoded === null) return { status: 'unsupported' }
+  return { status: 'rendered', node: registration.render(decoded) }
+}
+
+export function inspectEvidenceRenderability(
+  registrations: readonly EvidenceRendererRegistration[],
+  evidence: unknown,
+): EvidenceRenderDecision {
+  const { byTuple, hasDuplicate } = buildRegistryIndex(registrations)
+  return decideEvidenceRender(byTuple, hasDuplicate, evidence)
+}
+
+export function createEvidenceRendererRegistry(
+  registrations: readonly EvidenceRendererRegistration[],
+): ComponentType<RegistryProps> {
+  const { byTuple, hasDuplicate } = buildRegistryIndex(registrations)
   return function RegisteredEvidenceRenderer({ evidence }: RegistryProps): ReactNode {
-    if (hasDuplicate) return null
-    const envelope = record(evidence)
-    if (!envelope) return null
-    const kind = envelope.kind
-    const schemaVersion = envelope.schema_version
-    const rendererVersion = envelope.renderer_version
-    const readModel = record(envelope.read_model)
-    const readModelVersion = readModel?.version
-    if (typeof kind !== 'string' || typeof schemaVersion !== 'number' ||
-      !Number.isInteger(schemaVersion) || typeof rendererVersion !== 'string' ||
-      typeof readModelVersion !== 'string') return null
-    const registration = byTuple.get(tupleKey(kind, schemaVersion, rendererVersion, readModelVersion))
-    if (!registration) return null
-    const decoded = registration.decode(readModel)
-    return decoded === null ? null : registration.render(decoded)
+    const decision = decideEvidenceRender(byTuple, hasDuplicate, evidence)
+    return decision.status === 'rendered' ? decision.node : null
   }
 }

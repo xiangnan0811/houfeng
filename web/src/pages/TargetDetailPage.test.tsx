@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -155,7 +156,7 @@ describe('TargetDetailPage', () => {
     )
     expect(screen.getByRole('region', { name: '目标判断摘要' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '保持观察' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '运行控制与近期延迟' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '近期延迟' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '资料维护' })).toBeInTheDocument()
     expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '当前异常' })).toBeInTheDocument()
@@ -379,12 +380,10 @@ describe('TargetDetailPage', () => {
     )
 
     expect(
-      screen.getByRole('heading', { name: '近 24h 暂无可用延迟样本' }),
+      screen.getByRole('heading', { name: '近 24h 尚未配置探测' }),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(
-        '该目标尚未收到带有 latency_ms 的成功观测，或所有 ProbeItem 当前均处于停用状态。',
-      ),
+      screen.getByText('添加至少一种 ProbeItem 后才会产生延迟样本。'),
     ).toBeInTheDocument()
   })
 
@@ -434,9 +433,9 @@ describe('TargetDetailPage', () => {
     )
     expect(screen.getByText('请为该入口添加至少一种观测方式。')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '当前异常' })).toBeInTheDocument()
-    expect(screen.getByText('一切正常，暂未发现需要处理的活跃异常。')).toBeInTheDocument()
+    expect(screen.getByText('未发现活跃异常')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument()
-    expect(screen.getByText('系统暂时没有新的状态变更事件。')).toBeInTheDocument()
+    expect(screen.getByText('未发现新的状态变更事件')).toBeInTheDocument()
   })
 
   it('creates an HTTP ProbeItem from the empty state and appends it to the list', async () => {
@@ -503,7 +502,7 @@ describe('TargetDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
     expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
-    expect(screen.getByText('ProbeItem 工作面')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建 ProbeItem' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Probe 类型'), {
       target: { value: 'http' },
     })
@@ -906,7 +905,7 @@ describe('TargetDetailPage', () => {
     const drawer = screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })
     expect(drawer).toBeInTheDocument()
     expect(within(drawer).getByText('ProbeItem 编辑')).toBeInTheDocument()
-    expect(within(drawer).getByRole('heading', { name: '编辑 ProbeItem' })).toBeInTheDocument()
+    expect(within(drawer).getByRole('heading', { name: /编辑 ProbeItem/ })).toBeInTheDocument()
     expect(screen.getByLabelText('HTTP 路径')).toHaveValue('/healthz')
 
     fireEvent.change(screen.getByLabelText('HTTP 路径'), { target: { value: '/ready' } })
@@ -917,7 +916,7 @@ describe('TargetDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存 ProbeItem' }))
 
     await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: '编辑 ProbeItem' })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('heading', { name: /编辑 ProbeItem/ })).not.toBeInTheDocument(),
     )
     expect(screen.getAllByText(/path: \/ready/).length).toBeGreaterThan(0)
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/probe-items/pb_001', {
@@ -941,6 +940,95 @@ describe('TargetDetailPage', () => {
         },
       }),
     })
+  })
+
+  it('surfaces a 409 ProbeItem save error under StrictMode instead of staying on 正在保存', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const path = raw.replace(/^https?:\/\/[^/]+/, '').split('?')[0]
+      const method = (init?.method ?? (typeof input === 'object' && 'method' in input ? input.method : 'GET')).toUpperCase()
+      if (method === 'PUT' && path === '/api/targets/tg_001/probe-items/pb_001') {
+        return mockJSONResponse({ error: '合成写入拒绝' }, 409)
+      }
+      if (method === 'GET' && path === '/api/targets/tg_001') {
+        return mockJSONResponse({
+          target_id: 'tg_001',
+          name: 'Blog',
+          target_type: 'service',
+          host: 'blog.example.com',
+          base_port: 443,
+          execution_monitoring_instance_labels: ['edge'],
+          run_status: '启用',
+          labels: [],
+          note: '',
+          current_health_status: '正常',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:05:00Z',
+        })
+      }
+      if (method === 'GET' && path === '/api/targets/tg_001/probe-items') {
+        return mockJSONResponse([
+          {
+            probe_item_id: 'pb_001',
+            target_id: 'tg_001',
+            probe_kind: 'http',
+            enabled: true,
+            frequency_tier: '1m',
+            timeout_seconds: 5,
+            config: {
+              scheme: 'https',
+              path: '/healthz',
+              method: 'GET',
+              expected_status_range: [200, 299],
+            },
+            created_at: '2026-04-21T00:00:00Z',
+            updated_at: '2026-04-21T00:00:00Z',
+          },
+        ])
+      }
+      if (method === 'GET' && path === '/api/targets/tg_001/runtime-facts') {
+        return mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] })
+      }
+      if (method === 'GET') {
+        return mockJSONResponse([])
+      }
+      return mockJSONResponse({ error: `unexpected ${method} ${path}` }, 500)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/targets/tg_001']}>
+          <Routes>
+            <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </StrictMode>,
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByText('目标详情不可用')).not.toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
+      expect(screen.getByText('HTTP')).toBeInTheDocument()
+    })
+
+    fireEvent.click(probeActionButton('编辑'))
+    const drawer = await screen.findByRole('dialog', { name: 'ProbeItem 表单抽屉' })
+    expect(within(drawer).getByRole('button', { name: '保存 ProbeItem' })).toBeEnabled()
+    fireEvent.change(screen.getByLabelText('HTTP 路径'), { target: { value: '/stale' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存 ProbeItem' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/targets/tg_001/probe-items/pb_001',
+        expect.objectContaining({ method: 'PUT' }),
+      ),
+    )
+    await waitFor(() => expect(within(drawer).getByRole('alert')).toHaveTextContent('合成写入拒绝'))
+    expect(screen.getByRole('button', { name: '保存 ProbeItem' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: '正在保存...' })).not.toBeInTheDocument()
   })
 
   it('preserves the stored frequency tier in edit mode when the probe kind changes', async () => {
@@ -1004,7 +1092,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
 
     fireEvent.click(probeActionButton('编辑'))
-    expect(screen.getByRole('heading', { name: '编辑 ProbeItem' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /编辑 ProbeItem/ })).toBeInTheDocument()
     expect(screen.getByLabelText('频率档位')).toHaveValue('15m')
 
     fireEvent.change(screen.getByLabelText('Probe 类型'), {
@@ -1082,7 +1170,7 @@ describe('TargetDetailPage', () => {
     expect(
       screen.getByText('ProbeItem 包含当前 V1 表单不支持的配置字段，不能安全编辑。'),
     ).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '编辑 ProbeItem' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /编辑 ProbeItem/ })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
@@ -1188,7 +1276,7 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: '编辑 ProbeItem' })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('heading', { name: /编辑 ProbeItem/ })).not.toBeInTheDocument(),
     )
     expect(screen.queryByRole('dialog', { name: 'ProbeItem 表单抽屉' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加 ProbeItem' })).not.toBeDisabled()
@@ -1849,7 +1937,7 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: '编辑 ProbeItem' })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('heading', { name: /编辑 ProbeItem/ })).not.toBeInTheDocument(),
     )
     expect(screen.getByText('Cache')).toBeInTheDocument()
     expect(screen.getByText('TCP')).toBeInTheDocument()
@@ -1946,6 +2034,8 @@ describe('TargetDetailPage', () => {
     expect(screen.getByText('incidents unavailable')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '相关事件暂不可用' })).toBeInTheDocument()
     expect(screen.getAllByText('events unavailable')[0]).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试加载活跃异常' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '重试加载相关事件' })).toBeEnabled()
     // Danger zone is rendered because current_active_incident_count > 0
     expect(screen.getAllByText('HTTP 探测失败')[0]).toBeInTheDocument()
     expect(
@@ -3530,7 +3620,7 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'No Issues' })).toBeInTheDocument(),
     )
 
-    expect(screen.getAllByRole('heading', { name: '当前没有活跃异常' }).length).toBeGreaterThan(0)
+    expect(screen.getByText('未发现活跃异常')).toBeInTheDocument()
     expect(document.querySelector('.watchtower-danger')).not.toBeInTheDocument()
   })
 

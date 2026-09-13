@@ -56,8 +56,8 @@ export function TargetProbeListSection({
     0,
   )
   const defaultAside = (
-    <div className="detail-section__aside-actions">
-      <span className="detail-section__aside-meta">
+    <div className="target-probe-section__tools">
+      <span className="target-probe-section__meta">
         启用 <MonoDigits>{enabledProbeCount}</MonoDigits> / <MonoDigits>{probeItems.length}</MonoDigits> · 最新观测{' '}
         <MonoDigits>{latestObservationCount}</MonoDigits>
       </span>
@@ -74,31 +74,32 @@ export function TargetProbeListSection({
   )
 
   return (
-    <DetailSection
-      eyebrow="ProbeItem 工作区"
-      title="ProbeItem 列表"
-      ribbon="accent"
-      aside={aside ?? defaultAside}
-    >
-      {probeMutationError ? (
-        <p className="watchtower-runtime-error" role="alert">
-          {probeMutationError}
-        </p>
-      ) : null}
-      <TargetProbeList
-        probeItems={probeItems}
-        observationsByProbe={observationsByProbe}
-        actionsDisabled={actionsDisabled}
-        pendingProbeConfirmation={pendingProbeConfirmation}
-        confirmationCardDisabled={confirmationCardDisabled}
-        registerDeleteButtonRef={registerDeleteButtonRef}
-        onAddProbe={onAddProbe}
-        onEdit={onEdit}
-        onToggle={onToggle}
-        onDelete={onDelete}
-        onConfirmDelete={onConfirmDelete}
-        onCancelDeleteConfirmation={onCancelDeleteConfirmation}
-      />
-    </DetailSection>
+    <div className="target-probe-section">
+      <DetailSection
+        title="ProbeItem 列表"
+        ribbon="accent"
+        aside={aside ?? defaultAside}
+      >
+        {probeMutationError ? (
+          <p className="watchtower-runtime-error" role="alert">
+            {probeMutationError}
+          </p>
+        ) : null}
+        <TargetProbeList
+          probeItems={probeItems}
+          observationsByProbe={observationsByProbe}
+          actionsDisabled={actionsDisabled}
+          pendingProbeConfirmation={pendingProbeConfirmation}
+          confirmationCardDisabled={confirmationCardDisabled}
+          registerDeleteButtonRef={registerDeleteButtonRef}
+          onAddProbe={onAddProbe}
+          onEdit={onEdit}
+          onToggle={onToggle}
+          onDelete={onDelete}
+          onConfirmDelete={onConfirmDelete}
+          onCancelDeleteConfirmation={onCancelDeleteConfirmation}
+        />
+      </DetailSection>
+    </div>
   )
 }

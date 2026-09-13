@@ -93,6 +93,10 @@ const subjectRecordsPage = lazy(() =>
 const subjectEvidencePage = lazy(() =>
   import('../pages/SubjectEvidencePage').then((module) => ({ default: module.SubjectEvidencePage })),
 )
+const evidenceSnapshotPage = lazy(() =>
+  import('../pages/records/evidence/EvidenceSnapshotPage').then((module) => ({ default: module.EvidenceSnapshotPage })),
+)
+
 
 function routeElement(Component: ComponentType, loadingLabel: string) {
   return (
@@ -134,6 +138,7 @@ export const appRoutes: RouteObject[] = [
           { path: 'records/:recordId/edit', element: routeElement(recordEditPage, '正在加载记录编辑') },
           { path: 'records/:recordId/revisions/:revisionId', element: routeElement(recordRevisionPage, '正在加载历史修订') },
           { path: 'records/:recordId', element: routeElement(recordDetailPage, '正在加载运维记录') },
+          { path: 'evidence/:evidenceId', element: routeElement(evidenceSnapshotPage, '正在加载证据快照') },
           { path: 'subscriptions', element: routeElement(subscriptionsPage, '正在加载订阅') },
           {
             path: 'asset-decisions',

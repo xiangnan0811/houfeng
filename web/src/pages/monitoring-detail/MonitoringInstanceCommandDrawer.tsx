@@ -52,6 +52,8 @@ export function MonitoringInstanceCommandDrawer({
         onClose={onClose}
         title="执行命令"
         ariaLabel="执行命令抽屉"
+        size="md"
+        contentClassName="watchtower-form-modal"
       >
         <div className="command-picker">
           {commands.map((command) => (

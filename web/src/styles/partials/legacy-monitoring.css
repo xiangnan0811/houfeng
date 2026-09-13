@@ -1,10 +1,10 @@
 /* partial: legacy-monitoring.css (semantic split of the legacy index.css block) */
 
-.probe-list{display:flex;flex-direction:column;gap:var(--space-3)}
+.probe-list{display:flex;flex-direction:column;gap:var(--space-3);min-width:0;max-width:100%}
 
-.probe-card{background:var(--row-bg);border:var(--border-w) solid var(--panel-border);border-radius:var(--radius-2);padding:var(--space-4) var(--space-5);display:flex;flex-direction:column;gap:var(--space-3)}
+.probe-card{background:var(--row-bg);border:var(--border-w) solid var(--panel-border);border-radius:var(--radius-2);padding:var(--space-4) var(--space-5);display:flex;flex-direction:column;gap:var(--space-3);min-width:0;max-width:100%}
 
-.probe-card__header{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)}
+.probe-card__header{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3);flex-wrap:wrap}
 
 .probe-card__meta{display:flex;flex-wrap:wrap;gap:var(--space-3);font-size:var(--type-small-size);color:var(--text-secondary)}
 
@@ -55,3 +55,10 @@
 .probe-observations__error{font-family:var(--font-mono);font-size:11px;color:color-mix(in srgb,var(--color-state-critical) 78%,var(--text-primary));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;max-width:200px;vertical-align:bottom}
 
 .probe-card__observations-empty{margin-top:var(--space-3);padding:var(--space-4);text-align:center;color:var(--text-muted);font-family:var(--font-mono);font-size:11px;border:1px dashed var(--border-dashed);border-radius:var(--radius-2)}
+
+.probe-card .badge{white-space:nowrap}
+.probe-card .badge-row{flex:none;flex-wrap:wrap}
+.probe-observations-scroller{min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+.probe-observations-scroller:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.probe-observations-scroller .data-table{width:max-content;min-width:100%}
+.probe-observations-scroller .data-table__head th,.probe-observations-scroller .data-table__cell{white-space:nowrap}

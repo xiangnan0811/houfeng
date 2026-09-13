@@ -11,6 +11,7 @@ import type {
   ProbeKind,
   ProbeObservation,
 } from '../../lib/types'
+import { describeProbeLatencyGap } from './probeObservationGap'
 
 const MAINTENANCE_RIBBON = 'maintenance'
 
@@ -92,6 +93,24 @@ function formatTimeWindowLabel(timeWindow: string): string {
   return `近 ${timeWindow}`
 }
 
+function LatencyGapState({
+  probeItems,
+  observations,
+  timeWindow,
+}: {
+  probeItems: ProbeItemRecord[]
+  observations: ProbeObservation[]
+  timeWindow: string
+}) {
+  const gap = describeProbeLatencyGap(probeItems, observations, timeWindow)
+  return (
+    <div className="empty-state">
+      <h3>{gap.title}</h3>
+      <p>{gap.description}</p>
+    </div>
+  )
+}
+
 function describeMeta(observations: ProbeObservation[], timeWindow: string): string {
   const timeWindowLabel = formatTimeWindowLabel(timeWindow)
   if (observations.length === 0) return `${timeWindowLabel} 暂无观测`
@@ -119,20 +138,24 @@ export function TargetLatencyTrends({
   isMaintenance = false,
   watchtower = false,
 }: TargetLatencyTrendsProps) {
-  const trends = deriveLatencyTrends(probeItems, recentObservations)
+  const trends = deriveLatencyTrends(probeItems, recentObservations).filter(
+    (trend) => trend.sampleCount > 0,
+  )
   const meta = describeMeta(recentObservations, timeWindow)
   const tone = isMaintenance ? 'maintenance' : 'accent'
+  const gapState = (
+    <LatencyGapState
+      probeItems={probeItems}
+      observations={recentObservations}
+      timeWindow={timeWindow}
+    />
+  )
 
   if (watchtower) {
     return (
       <section aria-label="近期延迟趋势">
         {trends.length === 0 ? (
-          <div className="empty-state">
-            <h3>{formatTimeWindowLabel(timeWindow)} 暂无可用延迟样本</h3>
-            <p>
-              该目标尚未收到带有 latency_ms 的成功观测，或所有 ProbeItem 当前均处于停用状态。
-            </p>
-          </div>
+          gapState
         ) : (
           <>
             <p className="watchtower-metrics-meta">{meta}</p>
@@ -211,12 +234,7 @@ export function TargetLatencyTrends({
       aside={<span className="detail-section__aside-meta">{meta}</span>}
     >
       {trends.length === 0 ? (
-        <div className="empty-state">
-          <h3>{formatTimeWindowLabel(timeWindow)} 暂无可用延迟样本</h3>
-          <p>
-            该目标尚未收到带有 latency_ms 的成功观测，或所有 ProbeItem 当前均处于停用状态。
-          </p>
-        </div>
+        gapState
       ) : (
         <div className="metric-grid">
           {trends.map((trend) => (

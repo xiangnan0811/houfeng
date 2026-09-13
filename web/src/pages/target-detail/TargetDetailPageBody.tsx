@@ -65,6 +65,10 @@ type TargetDetailPageBodyProps = {
   incidentsError: string | null
   events: StateChangeEventRecord[]
   eventsError: string | null
+  incidentsRetrying: boolean
+  eventsRetrying: boolean
+  onRetryIncidents: () => void
+  onRetryEvents: () => void
   recentObservations: ProbeObservation[]
   observationsByProbe: Map<string, ProbeObservation[]>
   runtimeSubmitting: boolean
@@ -139,6 +143,10 @@ export function TargetDetailPageBody({
   incidentsError,
   events,
   eventsError,
+  incidentsRetrying,
+  eventsRetrying,
+  onRetryIncidents,
+  onRetryEvents,
   recentObservations,
   observationsByProbe,
   runtimeSubmitting,
@@ -219,10 +227,13 @@ export function TargetDetailPageBody({
     ...Array.from(observationsByProbe.values()).flat(),
   ])
   const observationWorkspaceAside = (
-    <span className="detail-section__aside-meta">
-      {timeWindow} · latency 样本 <MonoDigits>{latencySampleCount}</MonoDigits> · ProbeItem{' '}
-      <MonoDigits>{enabledProbeCount}</MonoDigits>/<MonoDigits>{probeItems.length}</MonoDigits>
-    </span>
+    <div className="target-activity-actions">
+      <span className="detail-section__aside-meta">
+        {timeWindow} · latency 样本 <MonoDigits>{latencySampleCount}</MonoDigits> · ProbeItem{' '}
+        <MonoDigits>{enabledProbeCount}</MonoDigits>/<MonoDigits>{probeItems.length}</MonoDigits>
+      </span>
+      <TargetTimeWindowTabs value={timeWindow} onChange={onTimeWindowChange} />
+    </div>
   )
   const eventAside = (
     <div className="target-activity-actions">
@@ -280,34 +291,6 @@ export function TargetDetailPageBody({
         />
       ) : null}
 
-      <DetailSection
-        eyebrow="观测工作区"
-        title="运行控制与近期延迟"
-        ribbon={target.run_status === '维护中' ? 'maintenance' : 'accent'}
-        aside={observationWorkspaceAside}
-      >
-        <div className="target-observation-workbench">
-          <div className="target-observation-workbench__intro">
-            <div>
-              <p className="target-observation-workbench__eyebrow">运行控制</p>
-              <h3>运行控制状态：{target.run_status}</h3>
-              <p>
-                运行控制在右上角操作菜单中执行；时间窗口切换只刷新 runtime facts，不重载目标身份、ProbeItem 或事件证据。
-              </p>
-            </div>
-            <TargetTimeWindowTabs value={timeWindow} onChange={onTimeWindowChange} />
-          </div>
-
-          <TargetLatencyTrends
-            probeItems={probeItems}
-            recentObservations={recentObservations}
-            timeWindow={timeWindow}
-            isMaintenance={target.run_status === '维护中'}
-            watchtower
-          />
-        </div>
-      </DetailSection>
-
       <TargetProbeListSection
         probeItems={probeItems}
         observationsByProbe={observationsByProbe}
@@ -328,11 +311,49 @@ export function TargetDetailPageBody({
         onOpenCreate={onOpenProbeCreate}
       />
 
+      <DetailSection
+        eyebrow="近期延迟"
+        title="近期延迟"
+        ribbon={target.run_status === '维护中' ? 'maintenance' : 'accent'}
+        aside={observationWorkspaceAside}
+      >
+        <TargetLatencyTrends
+          probeItems={probeItems}
+          recentObservations={recentObservations}
+          timeWindow={timeWindow}
+          isMaintenance={target.run_status === '维护中'}
+          watchtower
+        />
+      </DetailSection>
+
+      <div className="watchtower-activity-grid" aria-label="当前异常与事件证据">
+        <TargetActiveIncidents
+          loaded={activityLoaded}
+          incidents={incidents}
+          error={incidentsError}
+          retrying={incidentsRetrying}
+          onRetry={onRetryIncidents}
+          aside={activityAside('活跃', incidents.length)}
+        />
+        <TargetRecentEvents
+          loaded={activityLoaded}
+          events={events}
+          error={eventsError}
+          retrying={eventsRetrying}
+          onRetry={onRetryEvents}
+          aside={eventAside}
+        />
+      </div>
+
+      <TargetSnapshotMeta />
+
       <Modal
         open={maintenanceOpen}
         onClose={onCloseMaintenance}
         title="标签、备注与生命周期"
         ariaLabel="标签、备注与生命周期"
+        size="md"
+        contentClassName="watchtower-form-modal"
       >
         <div className="watchtower-property-list target-maintenance-list">
           <TargetMetadataSection
@@ -365,23 +386,6 @@ export function TargetDetailPageBody({
           />
         </div>
       </Modal>
-
-      <div className="target-activity-grid" aria-label="当前异常与事件证据">
-        <TargetActiveIncidents
-          loaded={activityLoaded}
-          incidents={incidents}
-          error={incidentsError}
-          aside={activityAside('活跃', incidents.length)}
-        />
-        <TargetRecentEvents
-          loaded={activityLoaded}
-          events={events}
-          error={eventsError}
-          aside={eventAside}
-        />
-      </div>
-
-      <TargetSnapshotMeta />
 
       <TargetProbeFormDrawer
         target={target}
