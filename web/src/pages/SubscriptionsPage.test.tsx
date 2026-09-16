@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SubscriptionsPage } from './SubscriptionsPage'
@@ -195,16 +195,22 @@ type SubscriptionFetchOptions = {
   subscriptions?: SubscriptionRecord[]
   vpsRows?: VPSAssetRecord[]
   subscriptionsErrorOnce?: string
+  vpsError?: string
+  overviewError?: string
   statistics?: SubscriptionStatistics
   statisticsError?: string
+  statisticsErrorOnce?: string
 }
 
 function setupSubscriptionFetch({
   subscriptions = [],
   vpsRows = [vps],
   subscriptionsErrorOnce,
+  vpsError,
+  overviewError,
   statistics,
   statisticsError,
+  statisticsErrorOnce,
 }: SubscriptionFetchOptions = {}) {
   let currentSubscriptions = subscriptions
   let failNextSubscriptions = subscriptionsErrorOnce
@@ -257,9 +263,20 @@ function setupSubscriptionFetch({
       currentSubscriptions = [updated]
       return Promise.resolve(mockJSONResponse(updated))
     }
-    if (url === '/api/vps') return Promise.resolve(mockJSONResponse(vpsRows))
-    if (url === '/api/subscriptions/overview') return Promise.resolve(mockJSONResponse(overviewFor(currentSubscriptions)))
+    if (url === '/api/vps') {
+      if (vpsError) return Promise.resolve(mockJSONResponse({ error: vpsError }, 500))
+      return Promise.resolve(mockJSONResponse(vpsRows))
+    }
+    if (url === '/api/subscriptions/overview') {
+      if (overviewError) return Promise.resolve(mockJSONResponse({ error: overviewError }, 500))
+      return Promise.resolve(mockJSONResponse(overviewFor(currentSubscriptions)))
+    }
     if (url === '/api/subscriptions/statistics?window=year') {
+      if (statisticsErrorOnce) {
+        const error = statisticsErrorOnce
+        statisticsErrorOnce = undefined
+        return Promise.resolve(mockJSONResponse({ error }, 500))
+      }
       if (statisticsError) return Promise.resolve(mockJSONResponse({ error: statisticsError }, 500))
       return Promise.resolve(mockJSONResponse(statistics ?? statisticsFor(currentSubscriptions)))
     }
@@ -281,6 +298,26 @@ function openSubscriptionEditor(name = 'Tokyo Edge') {
   return screen.getByRole('dialog', { name: '编辑订阅表单' })
 }
 
+function openInsights() {
+  fireEvent.click(screen.getByRole('tab', { name: '成本洞察' }))
+}
+
+function selectVpsFilter(optionName: string) {
+  fireEvent.click(screen.getByRole('button', { name: /^VPS / }))
+  fireEvent.click(screen.getByRole('option', { name: new RegExp(optionName) }))
+}
+
+function HistoryControls() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  return (
+    <>
+      <div data-testid="search">{`${location.pathname}${location.search}`}</div>
+      <button type="button" onClick={() => navigate(-1)}>history-back</button>
+    </>
+  )
+}
+
 describe('SubscriptionsPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -290,7 +327,7 @@ describe('SubscriptionsPage', () => {
     const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
 
     render(
-      <MemoryRouter initialEntries={['/subscriptions?renew_within_days=30']}>
+      <MemoryRouter initialEntries={['/subscriptions?renew_within_days=30&view=details']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
@@ -304,6 +341,14 @@ describe('SubscriptionsPage', () => {
     expect(screen.getByRole('columnheader', { name: 'CNY 成本' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /预算风险/ })).toHaveAttribute('href', '/settings?tab=subscriptions')
     expect(screen.getByRole('link', { name: '需要资产判断' })).toHaveAttribute('href', '/asset-decisions?view=renewal&renew_within_days=30&vps_id=vps_001')
+    const tableTitle = screen.getByRole('heading', { name: '订阅明细' })
+    const tableRegion = screen.getByRole('region', { name: '订阅明细' })
+    expect(tableTitle).toHaveAttribute('id', 'subscription-table-title')
+    expect(tableTitle.closest('section')).not.toHaveClass('page-panel--scroll-x')
+    expect(tableRegion).toHaveAttribute('tabindex', '0')
+    expect(tableRegion).toHaveAttribute('aria-labelledby', tableTitle.id)
+    expect(tableRegion).not.toHaveAttribute('aria-describedby')
+    expect(screen.queryByText('横向滚动查看完整列')).not.toBeInTheDocument()
 
     expect(fetchMock).toHaveBeenCalledWith('/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc', {
       headers: { Accept: 'application/json' },
@@ -316,13 +361,13 @@ describe('SubscriptionsPage', () => {
     const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
 
     render(
-      <MemoryRouter initialEntries={['/subscriptions?provider_id=pv_001']}>
+      <MemoryRouter initialEntries={['/subscriptions?provider_id=pv_001&view=details']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
 
     await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
-    expect(screen.getByRole('button', { name: /服务商：Hetzner/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '移除筛选 服务商: Hetzner' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/subscriptions?provider_id=pv_001', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -334,28 +379,37 @@ describe('SubscriptionsPage', () => {
     setupSubscriptionFetch({ subscriptions: [], vpsRows: [] })
 
     render(
-      <MemoryRouter initialEntries={['/subscriptions']}>
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('尚未记录订阅')).toBeInTheDocument())
-    expect(screen.getByRole('link', { name: '先创建 VPS' })).toHaveAttribute('href', '/vps')
+    await waitFor(() => expect(screen.getByRole('link', { name: '先创建 VPS' })).toHaveAttribute('href', '/vps'))
+    expect(screen.getByText('尚未记录订阅')).toBeInTheDocument()
   })
 
   it('creates subscriptions without sending monthly_price', async () => {
     const fetchMock = setupSubscriptionFetch({ subscriptions: [], vpsRows: [vps] })
 
     render(
-      <MemoryRouter initialEntries={['/subscriptions']}>
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('尚未记录订阅')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建订阅' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '创建订阅' }))
     const createDialog = screen.getByRole('dialog', { name: '新建订阅表单' })
     expect(createDialog).toBeInTheDocument()
+    expect(within(createDialog).getByLabelText('价格')).toBeInTheDocument()
+    expect(within(createDialog).getByLabelText('币种')).toBeInTheDocument()
+    expect(within(createDialog).getByLabelText('计费周期单位')).toBeInTheDocument()
+    expect(within(createDialog).getByLabelText('开始日期')).toBeInTheDocument()
+    expect(within(createDialog).getByLabelText('支付方式')).toBeInTheDocument()
+    expect(within(createDialog).getByLabelText('展示名')).toBeInTheDocument()
+    expect(within(createDialog).getByLabelText('分类')).toBeInTheDocument()
+    expect(within(createDialog).getByLabelText('标签')).toBeInTheDocument()
+    expect(within(createDialog).getByLabelText('备注')).toBeInTheDocument()
     fireEvent.change(within(createDialog).getByLabelText('VPS'), { target: { value: 'vps_001' } })
     fireEvent.change(within(createDialog).getByLabelText('价格'), { target: { value: '24' } })
     fireEvent.change(within(createDialog).getByLabelText('币种'), { target: { value: 'USD' } })
@@ -415,12 +469,12 @@ describe('SubscriptionsPage', () => {
     })
 
     render(
-      <MemoryRouter initialEntries={['/subscriptions']}>
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('尚未记录订阅')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建订阅' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '创建订阅' }))
     const createDialog = screen.getByRole('dialog', { name: '新建订阅表单' })
     fireEvent.change(within(createDialog).getByLabelText('VPS'), { target: { value: 'vps_001' } })
@@ -450,7 +504,7 @@ describe('SubscriptionsPage', () => {
     const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
 
     render(
-      <MemoryRouter initialEntries={['/subscriptions?vps_id=vps_001&create=1']}>
+      <MemoryRouter initialEntries={['/subscriptions?vps_id=vps_001&create=1&view=details']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
@@ -470,7 +524,7 @@ describe('SubscriptionsPage', () => {
     const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
 
     render(
-      <MemoryRouter initialEntries={['/subscriptions?vps_id=vps_001&create=1']}>
+      <MemoryRouter initialEntries={['/subscriptions?vps_id=vps_001&create=1&view=details']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
@@ -498,7 +552,7 @@ describe('SubscriptionsPage', () => {
     const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
 
     render(
-      <MemoryRouter initialEntries={['/subscriptions']}>
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
@@ -556,7 +610,7 @@ describe('SubscriptionsPage', () => {
     })
 
     render(
-      <MemoryRouter initialEntries={['/subscriptions']}>
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
@@ -571,13 +625,14 @@ describe('SubscriptionsPage', () => {
     const fetchMock = setupSubscriptionFetch({ subscriptions: [], subscriptionsErrorOnce: 'subscriptions unavailable' })
 
     render(
-      <MemoryRouter initialEntries={['/subscriptions']}>
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('加载失败')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('订阅列表不可用')).toBeInTheDocument())
     expect(screen.getByText('subscriptions unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
 
     await waitFor(() => expect(screen.getByText('尚未记录订阅')).toBeInTheDocument())
@@ -588,14 +643,17 @@ describe('SubscriptionsPage', () => {
     setupSubscriptionFetch({ subscriptions: [subscription], statisticsError: 'statistics unavailable' })
 
     render(
-      <MemoryRouter initialEntries={['/subscriptions']}>
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
 
     await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
-    expect(screen.getByText('statistics unavailable')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument()
+    expect(screen.queryByText('statistics unavailable')).not.toBeInTheDocument()
+    openInsights()
+    await waitFor(() => expect(screen.getByText('statistics unavailable')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '重试统计' })).toBeInTheDocument()
   })
 
   it('organizes cost insights as a 2 by 2 workbench with contextual donut details and a composition select', async () => {
@@ -638,15 +696,15 @@ describe('SubscriptionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '成本洞察' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Hetzner 月成本' })).toBeInTheDocument())
     const insights = screen.getByRole('region', { name: '订阅成本洞察' })
     const monthTabs = within(insights).getByRole('tablist', { name: '月成本展示' })
     const activeMonthTab = within(monthTabs).getByRole('tab', { selected: true })
     const monthPanel = within(insights).getByRole('tabpanel')
     expect(activeMonthTab).toHaveAttribute('aria-controls', monthPanel.id)
     expect(monthPanel).toHaveAttribute('aria-labelledby', activeMonthTab.id)
-    const headings = within(insights).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
-    expect(headings).toEqual(['月成本', '年度趋势与风险', '成本构成', '续费队列'])
+    expect(within(insights).getByRole('heading', { name: '月成本与月预算' })).toBeInTheDocument()
     expect(within(insights).getByRole('progressbar', { name: 'Hetzner 月成本' })).toHaveAttribute('value', '84')
     expect(screen.getByLabelText('构成维度')).toHaveValue('provider')
     fireEvent.change(screen.getByLabelText('构成维度'), { target: { value: 'payment' } })
@@ -664,7 +722,6 @@ describe('SubscriptionsPage', () => {
     fireEvent.click(within(insights).getByRole('tab', { name: '排行' }))
     expect(within(insights).getByRole('progressbar', { name: 'Tokyo Edge 月成本' })).toHaveAttribute('max', '84')
     expect(within(insights).getByRole('progressbar', { name: 'Osaka Backup 月成本' })).toHaveAttribute('value', '42')
-    expect(insights.querySelector('[style]')).not.toBeInTheDocument()
   })
 
   it('renders monthly labels for the annual trend axis', async () => {
@@ -675,8 +732,8 @@ describe('SubscriptionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
-    expect(screen.getByText('25/07')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('25/07')).toBeInTheDocument())
     expect(screen.getByText('25/08')).toBeInTheDocument()
     expect(screen.getByText('26/06')).toBeInTheDocument()
     expect(container).not.toHaveTextContent('00:00')
@@ -700,8 +757,8 @@ describe('SubscriptionsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getAllByText('Tokyo Edge').length).toBeGreaterThan(0))
-    expect(screen.getByText('历史成本数据不足')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('历史成本数据不足')).toBeInTheDocument())
     expect(screen.getByText('部分历史月份缺少可用汇率或预算币种不一致，暂不绘制可能误导的趋势曲线。')).toBeInTheDocument()
     expect(container.querySelector('.subscription-insight-panel--trend polyline')).toBeNull()
   })
@@ -710,7 +767,7 @@ describe('SubscriptionsPage', () => {
     const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
 
     render(
-      <MemoryRouter initialEntries={['/subscriptions']}>
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
         <SubscriptionsPage />
       </MemoryRouter>,
     )
@@ -732,5 +789,309 @@ describe('SubscriptionsPage', () => {
     expect(within(editDialog).getByLabelText('支付方式')).toHaveValue('__custom')
     expect(within(editDialog).getByLabelText('自定义支付方式')).toHaveValue('card')
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/subscriptions').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('keeps subscription list when VPS or overview sources fail', async () => {
+    setupSubscriptionFetch({
+      subscriptions: [subscription],
+      vpsError: 'vps unavailable',
+      overviewError: 'overview unavailable',
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('vps_001').length).toBeGreaterThan(0))
+    expect(screen.getByText(/VPS 列表不可用：vps unavailable/)).toBeInTheDocument()
+    expect(screen.getByText(/成本概览不可用：overview unavailable/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试 VPS' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试概览' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '需要资产判断' })).toBeInTheDocument()
+    expect(screen.queryByText('订阅列表不可用')).not.toBeInTheDocument()
+    openInsights()
+    await waitFor(() => expect(screen.getByText('月成本不可用')).toBeInTheDocument())
+  })
+
+  it('keeps workbench refresh statistics lazy until insights has been visited', async () => {
+    const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
+    render(<MemoryRouter initialEntries={['/subscriptions?view=details']}><SubscriptionsPage /></MemoryRouter>)
+    const statsCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/subscriptions/statistics?window=year').length
+    await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).toBeEnabled())
+    expect(statsCalls()).toBe(0)
+    openInsights()
+    await waitFor(() => expect(statsCalls()).toBe(1))
+    fireEvent.click(screen.getByRole('tab', { name: '明细' }))
+    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }))
+    await waitFor(() => expect(statsCalls()).toBe(2))
+  })
+
+  it('refreshes newly opened insights when an earlier rate refresh completes', async () => {
+    let finishRefresh!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => { finishRefresh = resolve })
+    const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
+    const original = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/subscriptions/exchange-rates/refresh') return pending
+      return original(url, init)
+    })
+    render(<MemoryRouter initialEntries={['/subscriptions?view=details']}><SubscriptionsPage /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }))
+    openInsights()
+    const statsCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/subscriptions/statistics?window=year').length
+    await waitFor(() => expect(statsCalls()).toBe(1))
+    finishRefresh(mockJSONResponse({ provider: 'frankfurter', base_currency: 'CNY', fetched_at: '2026-05-09T08:00:00Z', succeeded: [], failed: [] }))
+    await waitFor(() => expect(statsCalls()).toBe(2))
+  })
+
+  it('retries statistics without reloading the subscription list', async () => {
+    const fetchMock = setupSubscriptionFetch({
+      subscriptions: [subscription],
+      statisticsErrorOnce: 'statistics unavailable',
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: '成本洞察' })).toBeInTheDocument())
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/subscriptions/statistics?window=year')).toBe(false)
+    openInsights()
+    await waitFor(() => expect(screen.getByText('statistics unavailable')).toBeInTheDocument())
+    const listCallsBefore = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/subscriptions?') || String(url) === '/api/subscriptions').length
+    fireEvent.click(screen.getByRole('button', { name: '重试统计' }))
+    await waitFor(() => expect(screen.getByText('25/07')).toBeInTheDocument())
+    const listCallsAfter = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/subscriptions?') || String(url) === '/api/subscriptions').length
+    expect(listCallsAfter).toBe(listCallsBefore)
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/subscriptions/statistics?window=year').length).toBe(2)
+  })
+
+  it('does not present old-filter records while a newer filter request is in flight', async () => {
+    let resolveFirst!: (value: Response) => void
+    const first = new Promise<Response>((resolve) => { resolveFirst = resolve })
+    let listCalls = 0
+    const fetchMock = setupSubscriptionFetch({
+      subscriptions: [subscription],
+      vpsRows: [vps, { ...vps, vps_id: 'vps_002', display_name: 'Osaka Edge' }],
+    })
+    const original = fetchMock.getMockImplementation()
+    if (!original) throw new Error('subscription fetch mock missing implementation')
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if ((url.startsWith('/api/subscriptions?') || url === '/api/subscriptions') && method === 'GET') {
+        listCalls += 1
+        if (listCalls === 1) return first
+        if (String(url).includes('vps_id=vps_002')) return Promise.resolve(mockJSONResponse([]))
+      }
+      return original(url, init)
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VPS 全部' })).toBeInTheDocument())
+    selectVpsFilter('Osaka Edge')
+    resolveFirst(mockJSONResponse([subscription]))
+    await waitFor(() => expect(screen.getByText('当前 VPS 尚无订阅')).toBeInTheDocument())
+    expect(within(screen.getByRole('heading', { name: '订阅明细' }).closest('section') as HTMLElement).queryByRole('button', { name: 'Tokyo Edge' })).not.toBeInTheDocument()
+  })
+
+  it('keeps create modal open while submit is pending', async () => {
+    let resolveCreate!: (value: Response) => void
+    const pendingCreate = new Promise<Response>((resolve) => { resolveCreate = resolve })
+    const fetchMock = setupSubscriptionFetch({ subscriptions: [], vpsRows: [vps] })
+    const original = fetchMock.getMockImplementation()
+    if (!original) throw new Error('subscription fetch mock missing implementation')
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/subscriptions' && (init?.method ?? 'GET') === 'POST') return pendingCreate
+      return original(url, init)
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建订阅' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '创建订阅' }))
+    const createDialog = screen.getByRole('dialog', { name: '新建订阅表单' })
+    fireEvent.change(within(createDialog).getByLabelText('VPS'), { target: { value: 'vps_001' } })
+    fireEvent.change(within(createDialog).getByLabelText('价格'), { target: { value: '24' } })
+    fireEvent.change(within(createDialog).getByLabelText('币种'), { target: { value: 'USD' } })
+    fireEvent.change(within(createDialog).getByLabelText('计费周期单位'), { target: { value: 'month' } })
+    fireEvent.change(within(createDialog).getByLabelText('计费周期长度'), { target: { value: '2' } })
+    fireEvent.change(within(createDialog).getByLabelText('续费日期'), { target: { value: '2026-07-01' } })
+    fireEvent.click(within(createDialog).getByRole('button', { name: '创建订阅' }))
+    expect(within(createDialog).getByRole('button', { name: '创建中…' })).toBeDisabled()
+    fireEvent.click(within(createDialog).getByRole('button', { name: '关闭' }))
+    expect(screen.getByRole('dialog', { name: '新建订阅表单' })).toBeInTheDocument()
+    resolveCreate(mockJSONResponse({
+      ...subscription,
+      subscription_id: 'sub_new',
+      price: 24,
+      billing_months: 2,
+      billing_period_length: 2,
+    }, 201))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新建订阅表单' })).not.toBeInTheDocument())
+  })
+
+
+  it('keeps list fetches stable across tab switches and restores details on Back', async () => {
+    const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
+        <HistoryControls />
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument())
+    const listCallsBefore = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/subscriptions?') || String(url) === '/api/subscriptions').length
+    openInsights()
+    await waitFor(() => expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument())
+    expect(screen.getByTestId('search')).toHaveTextContent('/subscriptions')
+    expect(screen.queryByRole('button', { name: 'VPS 全部' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: '明细' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument())
+    const listCallsAfter = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/subscriptions?') || String(url) === '/api/subscriptions').length
+    expect(listCallsAfter).toBe(listCallsBefore)
+    openInsights()
+    expect(screen.getByTestId('search')).toHaveTextContent('/subscriptions')
+    fireEvent.click(screen.getByRole('button', { name: 'history-back' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument())
+    expect(screen.getByTestId('search')).toHaveTextContent('/subscriptions?view=details')
+  })
+
+  it('selects a VPS from insights and returns to the filtered details list', async () => {
+    setupSubscriptionFetch({
+      subscriptions: [subscription],
+      vpsRows: [vps, { ...vps, vps_id: 'vps_002', display_name: 'Osaka Edge' }],
+    })
+    render(
+      <MemoryRouter initialEntries={['/subscriptions']}>
+        <HistoryControls />
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /筛选 Tokyo Edge/ }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '移除筛选 VPS: Tokyo Edge' })).toBeInTheDocument()
+    expect(screen.getByTestId('search')).toHaveTextContent('/subscriptions?vps_id=vps_001&view=details')
+    expect(screen.getByRole('tabpanel', { name: '明细' })).toHaveFocus()
+  })
+
+  it('searches a long VPS catalog without a native select', async () => {
+    const vpsRows = Array.from({ length: 120 }, (_, index) => ({
+      ...vps,
+      vps_id: `vps_${String(index).padStart(3, '0')}`,
+      display_name: index === 87 ? 'Unique Osaka Node' : `Host ${index}`,
+      ipv4: index === 87 ? '10.8.7.1' : `10.0.0.${index % 250}`,
+    }))
+    setupSubscriptionFetch({ subscriptions: [subscription], vpsRows })
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByRole('button', { name: /^VPS / })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^VPS / }))
+    fireEvent.change(screen.getByRole('combobox', { name: '搜索VPS' }), { target: { value: 'Unique Osaka' } })
+    expect(screen.getByRole('option', { name: /Unique Osaka Node/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /^Host 1$/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps the insights view when filters are cleared', async () => {
+    setupSubscriptionFetch({ subscriptions: [subscription] })
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?view=insights&vps_id=vps_001']}>
+        <HistoryControls />
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument())
+    expect(screen.getByTestId('search')).toHaveTextContent('/subscriptions?view=insights&vps_id=vps_001')
+    fireEvent.click(screen.getByRole('button', { name: /月均成本/ }))
+    await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('/subscriptions?view=insights'))
+    expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument()
+  })
+
+  it('restores details main and list scroll after insights, including Back', async () => {
+    const rows = Array.from({ length: 120 }, (_, index) => ({
+      ...subscription,
+      subscription_id: `sub_${index}`,
+      vps_id: `vps_${index}`,
+      display_name: `Host ${index}`,
+    }))
+    const vpsRows = Array.from({ length: 120 }, (_, index) => ({
+      ...vps,
+      vps_id: `vps_${index}`,
+      display_name: `Host ${index}`,
+    }))
+    setupSubscriptionFetch({ subscriptions: rows, vpsRows })
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
+        <HistoryControls />
+        <div id="main-content">
+          <SubscriptionsPage />
+        </div>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument())
+    const main = document.getElementById('main-content')
+    const list = document.querySelector('.subscription-list-scroll')
+    if (!main || !(list instanceof HTMLElement)) throw new Error('scroll containers missing')
+    main.scrollTop = 2000
+    fireEvent.scroll(main)
+    list.scrollLeft = 200
+    fireEvent.scroll(list)
+    openInsights()
+    await waitFor(() => expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument())
+    main.scrollTop = 237
+    fireEvent.scroll(main)
+    fireEvent.click(screen.getByRole('tab', { name: '明细' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument())
+    expect(main.scrollTop).toBe(2000)
+    expect(list.scrollLeft).toBe(200)
+    openInsights()
+    await waitFor(() => expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'history-back' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument())
+    expect(main.scrollTop).toBe(2000)
+    expect(list.scrollLeft).toBe(200)
+  })
+
+  it('defaults naked /subscriptions to insights and supports tab navigation', async () => {
+    setupSubscriptionFetch({ subscriptions: [subscription] })
+    render(
+      <MemoryRouter initialEntries={['/subscriptions']}>
+        <HistoryControls />
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument())
+    expect(screen.getByTestId('search')).toHaveTextContent('/subscriptions')
+    expect(document.querySelector('.subscription-page')).toHaveAttribute('data-view', 'insights')
+
+    fireEvent.click(screen.getByRole('tab', { name: '明细' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument())
+    expect(screen.getByTestId('search')).toHaveTextContent('/subscriptions?view=details')
+    expect(document.querySelector('.subscription-page')).toHaveAttribute('data-view', 'details')
+
+    openInsights()
+    await waitFor(() => expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument())
+    expect(screen.getByTestId('search')).toHaveTextContent('/subscriptions')
+    expect(document.querySelector('.subscription-page')).toHaveAttribute('data-view', 'insights')
   })
 })

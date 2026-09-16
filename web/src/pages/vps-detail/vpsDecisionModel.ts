@@ -218,7 +218,7 @@ function buildNextAction(
       summary: '续费和成本证据不可用。页面不会把读取失败误判为真实缺订阅。',
       tone: 'notice',
       linkLabel: '核对订阅',
-      to: `/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}`,
+      to: `/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}&view=details`,
     }
   }
   if (!primarySubscription) {

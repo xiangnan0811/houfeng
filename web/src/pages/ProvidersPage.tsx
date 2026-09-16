@@ -569,7 +569,7 @@ export function ProvidersPage() {
               </Link>
             ) : null}
             {!state.contextError && row.subscriptionCount > 0 ? (
-              <Link className="provider-directory-entry-link" to={`/subscriptions?provider_id=${providerID}`} aria-label={`查看 ${row.provider.name} 订阅`}>
+              <Link className="provider-directory-entry-link" to={`/subscriptions?provider_id=${providerID}&view=details`} aria-label={`查看 ${row.provider.name} 订阅`}>
                 订阅
               </Link>
             ) : null}

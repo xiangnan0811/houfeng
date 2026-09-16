@@ -27,8 +27,18 @@ type RelationPanel = Extract<
 type RelationData =
   | { panel: 'monitoring-instance-evidence'; vpsId: string; records: VPSMonitoringInstanceSummary[] }
   | { panel: 'services-detail'; vpsId: string; records: AssetServiceRecord[] }
-  | { panel: 'domains-detail'; vpsId: string; records: AssetDomainRecord[]; services: AssetServiceRecord[] }
+  | {
+      panel: 'domains-detail'
+      vpsId: string
+      records: AssetDomainRecord[]
+      services: AssetServiceRecord[]
+      servicesLoading?: boolean
+      servicesError?: string | null
+    }
 
+type AuxiliaryServicesResult =
+  | { status: 'ok'; services: AssetServiceRecord[] }
+  | { status: 'error'; message: string }
 type LoadState =
   | { status: 'idle' }
   | { status: 'loading'; panel: RelationPanel; vpsId: string }
@@ -110,24 +120,143 @@ export function VPSOverviewRelationPanels({
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' })
   const [loadRevision, setLoadRevision] = useState(0)
   const requestIdRef = useRef(0)
+  const serviceRequestIdRef = useRef(0)
+
+  const handleRetryServices = () => {
+    if (panel !== 'domains-detail') return
+    const currentVpsId = vpsId
+    const currentRequestId = requestIdRef.current
+    const serviceRequestId = ++serviceRequestIdRef.current
+
+    setLoadState((prev) => {
+      if (prev.status !== 'ready' || prev.data.panel !== 'domains-detail' || prev.data.vpsId !== currentVpsId) {
+        return prev
+      }
+      return {
+        status: 'ready',
+        data: {
+          ...prev.data,
+          servicesLoading: true,
+          servicesError: null,
+        },
+      }
+    })
+
+    void listVPSServices(currentVpsId)
+      .then((services) => {
+        if (requestIdRef.current !== currentRequestId || serviceRequestIdRef.current !== serviceRequestId) return
+        setLoadState((prev) => {
+          if (prev.status !== 'ready' || prev.data.panel !== 'domains-detail' || prev.data.vpsId !== currentVpsId) {
+            return prev
+          }
+          return {
+            status: 'ready',
+            data: {
+              ...prev.data,
+              services,
+              servicesLoading: false,
+              servicesError: null,
+            },
+          }
+        })
+      })
+      .catch((err: unknown) => {
+        if (requestIdRef.current !== currentRequestId || serviceRequestIdRef.current !== serviceRequestId) return
+        setLoadState((prev) => {
+          if (prev.status !== 'ready' || prev.data.panel !== 'domains-detail' || prev.data.vpsId !== currentVpsId) {
+            return prev
+          }
+          return {
+            status: 'ready',
+            data: {
+              ...prev.data,
+              services: [],
+              servicesLoading: false,
+              servicesError: describeManagementError(err, '加载关联服务失败'),
+            },
+          }
+        })
+      })
+  }
 
   useEffect(() => {
     if (!panel) return
     const requestId = ++requestIdRef.current
     // eslint-disable-next-line react-hooks/set-state-in-effect -- opening a relation panel invalidates any prior panel data before its scoped request starts
     setLoadState({ status: 'loading', panel, vpsId })
-    const servicesTask = panel === 'domains-detail'
-      ? listVPSServices(vpsId).catch(() => [] as AssetServiceRecord[])
-      : null
+    if (panel !== 'domains-detail') {
+      void loadPanel(panel, vpsId)
+        .then((data) => {
+          if (requestId !== requestIdRef.current) return
+          setLoadState({ status: 'ready', data })
+        })
+        .catch((error: unknown) => {
+          if (requestId !== requestIdRef.current) return
+          setLoadState({
+            status: 'error',
+            panel,
+            vpsId,
+            message: describeManagementError(error, `加载${PANEL_COPY[panel].subject}失败`),
+          })
+        })
+
+      return () => {
+        requestIdRef.current += 1
+      }
+    }
+
+    const serviceRequestId = ++serviceRequestIdRef.current
+    const servicesTask: Promise<AuxiliaryServicesResult> = listVPSServices(vpsId)
+      .then((services): AuxiliaryServicesResult => ({ status: 'ok', services }))
+      .catch((err: unknown): AuxiliaryServicesResult => ({
+        status: 'error',
+        message: describeManagementError(err, '加载关联服务失败'),
+      }))
 
     void loadPanel(panel, vpsId)
       .then(async (data) => {
         if (requestId !== requestIdRef.current) return
-        setLoadState({ status: 'ready', data })
-        if (data.panel !== 'domains-detail' || !servicesTask) return
-        const services = await servicesTask
-        if (requestId !== requestIdRef.current) return
-        setLoadState({ status: 'ready', data: { ...data, services } })
+        if (data.panel !== 'domains-detail') {
+          setLoadState({ status: 'ready', data })
+          return
+        }
+        setLoadState({
+          status: 'ready',
+          data: {
+            ...data,
+            services: [],
+            servicesLoading: true,
+            servicesError: null,
+          },
+        })
+
+        const result = await servicesTask
+        if (requestId !== requestIdRef.current || serviceRequestId !== serviceRequestIdRef.current) return
+        setLoadState((prev) => {
+          if (prev.status !== 'ready' || prev.data.panel !== 'domains-detail' || prev.data.vpsId !== vpsId) {
+            return prev
+          }
+          if (result.status === 'ok') {
+            return {
+              status: 'ready',
+              data: {
+                ...prev.data,
+                services: result.services,
+                servicesLoading: false,
+                servicesError: null,
+              },
+            }
+          }
+          return {
+            status: 'ready',
+            data: {
+              ...prev.data,
+              services: [],
+              servicesLoading: false,
+              servicesError: result.message,
+            },
+          }
+        })
       })
       .catch((error: unknown) => {
         if (requestId !== requestIdRef.current) return
@@ -141,6 +270,7 @@ export function VPSOverviewRelationPanels({
 
     return () => {
       requestIdRef.current += 1
+      serviceRequestIdRef.current += 1
     }
   }, [loadRevision, panel, vpsId])
 
@@ -178,22 +308,28 @@ export function VPSOverviewRelationPanels({
           </Button>
         </>
       ) : null}
-      {stateIsCurrent && loadState.status === 'ready' ? renderPanel(loadState.data, {
-        readOnly,
-        writeBlocked,
-        unlinkingMonitoringInstanceId,
-        pendingUnlink,
-        linkFeedback,
-        linkFeedbackIsError,
-        onCreateMonitoringInstance: onCreateMonitoringInstance ?? (() => management.openPanel('monitoring-instance-create')),
-        onOpenLink: onOpenLink ?? (() => management.openPanel('monitoring-instance-link')),
-        onUpgrade: handleUpgrade,
-        onRequestUnlink: handleRequestUnlink,
-        onCancelUnlink: handleCancelUnlink,
-        onConfirmUnlink: handleConfirmUnlink,
-        onOpenServiceCreate: onOpenServiceCreate ?? (() => management.openPanel('service')),
-        onOpenDomainCreate: onOpenDomainCreate ?? (() => management.openPanel('domain')),
-      }) : null}
+      {stateIsCurrent && loadState.status === 'ready' ? (
+        <RenderPanel
+          data={loadState.data}
+          options={{
+            readOnly,
+            writeBlocked,
+            unlinkingMonitoringInstanceId,
+            pendingUnlink,
+            linkFeedback,
+            linkFeedbackIsError,
+            onCreateMonitoringInstance: onCreateMonitoringInstance ?? (() => management.openPanel('monitoring-instance-create')),
+            onOpenLink: onOpenLink ?? (() => management.openPanel('monitoring-instance-link')),
+            onUpgrade: handleUpgrade,
+            onRequestUnlink: handleRequestUnlink,
+            onCancelUnlink: handleCancelUnlink,
+            onConfirmUnlink: handleConfirmUnlink,
+            onOpenServiceCreate: onOpenServiceCreate ?? (() => management.openPanel('service')),
+            onOpenDomainCreate: onOpenDomainCreate ?? (() => management.openPanel('domain')),
+            onRetryServices: handleRetryServices,
+          }}
+        />
+      ) : null}
     </VPSDetailDialog>
   )
 }
@@ -219,26 +355,31 @@ async function loadPanel(panel: RelationPanel, vpsId: string): Promise<RelationD
       return { panel, vpsId, records: await listVPSDomains(vpsId), services: [] }
   }
 }
+type RenderPanelOptions = {
+  readOnly: boolean
+  writeBlocked: boolean
+  unlinkingMonitoringInstanceId: string | null
+  pendingUnlink: VPSMonitoringInstanceSummary | null
+  linkFeedback: string | null
+  linkFeedbackIsError: boolean
+  onCreateMonitoringInstance: () => void
+  onOpenLink: () => void
+  onUpgrade: (mi: VPSMonitoringInstanceSummary) => void
+  onRequestUnlink: (mi: VPSMonitoringInstanceSummary) => void
+  onCancelUnlink: () => void
+  onConfirmUnlink: (mi: VPSMonitoringInstanceSummary) => void
+  onOpenServiceCreate: () => void
+  onOpenDomainCreate: () => void
+  onRetryServices?: (() => void) | undefined
+}
 
-function renderPanel(
-  data: RelationData,
-  options: {
-    readOnly: boolean
-    writeBlocked: boolean
-    unlinkingMonitoringInstanceId: string | null
-    pendingUnlink: VPSMonitoringInstanceSummary | null
-    linkFeedback: string | null
-    linkFeedbackIsError: boolean
-    onCreateMonitoringInstance: () => void
-    onOpenLink: () => void
-    onUpgrade: (mi: VPSMonitoringInstanceSummary) => void
-    onRequestUnlink: (mi: VPSMonitoringInstanceSummary) => void
-    onCancelUnlink: () => void
-    onConfirmUnlink: (mi: VPSMonitoringInstanceSummary) => void
-    onOpenServiceCreate: () => void
-    onOpenDomainCreate: () => void
-  },
-) {
+function RenderPanel({
+  data,
+  options,
+}: {
+  data: RelationData
+  options: RenderPanelOptions
+}) {
   switch (data.panel) {
     case 'monitoring-instance-evidence':
       return (
@@ -274,10 +415,11 @@ function renderPanel(
         <VPSDomainsSection
           domains={data.records}
           services={data.services}
-          error={null}
-          notice={null}
+          error={data.servicesError ?? null}
+          notice={data.servicesLoading ? '正在加载关联服务…' : null}
           readOnly={options.readOnly}
           onCreate={options.onOpenDomainCreate}
+          {...(options.onRetryServices ? { onRetryServices: options.onRetryServices } : {})}
         />
       )
   }

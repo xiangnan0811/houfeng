@@ -719,7 +719,7 @@ export function vpsOverviewFixture(overrides: Partial<VPSOverview> = {}): VPSOve
         label: '监控实例', section: { ...EMPTY_SECTION },
       },
       {
-        kind: 'subscriptions', count: 1, status: 'keep', route: '/subscriptions?vps_id=vps_001',
+        kind: 'subscriptions', count: 1, status: 'keep', route: '/subscriptions?vps_id=vps_001&view=details',
         label: '订阅', section: { ...EMPTY_SECTION },
       },
       {
@@ -788,7 +788,7 @@ export function vpsOverviewPartialFixture(): VPSOverview {
         label: '监控实例', section: { ...EMPTY_SECTION },
       },
       {
-        kind: 'subscriptions', count: 0, status: 'unavailable', route: '/subscriptions?vps_id=vps_001',
+        kind: 'subscriptions', count: 0, status: 'unavailable', route: '/subscriptions?vps_id=vps_001&view=details',
         label: '订阅', section: unavailable('subscription_timeout'),
       },
       {

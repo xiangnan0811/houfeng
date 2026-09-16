@@ -497,7 +497,7 @@ export function VPSDetailOverviewPanel({
             <h2>订阅与续费</h2>
             <div className="vps-detail-workspace__section-actions">
               {subscriptionRelated ? relatedTitle(subscriptionRelated) : (
-                <Link className="text-link" to={`/subscriptions?vps_id=${encodeURIComponent(vpsId)}`}>查看订阅列表</Link>
+                <Link className="text-link" to={`/subscriptions?vps_id=${encodeURIComponent(vpsId)}&view=details`}>查看订阅列表</Link>
               )}
               {subscriptionRelated ? relatedQuickActions(subscriptionRelated) : null}
             </div>

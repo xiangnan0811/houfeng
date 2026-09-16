@@ -13,6 +13,7 @@ type VPSDomainsSectionProps = {
   notice: string | null
   readOnly?: boolean
   onCreate: () => void
+  onRetryServices?: (() => void) | undefined
 }
 
 export function VPSDomainsSection({
@@ -22,6 +23,7 @@ export function VPSDomainsSection({
   notice,
   readOnly = false,
   onCreate,
+  onRetryServices,
 }: VPSDomainsSectionProps) {
   return (
     <div className="vps-objects">
@@ -34,9 +36,16 @@ export function VPSDomainsSection({
         </div>
       ) : null}
       {error ? (
-        <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
-          {error}
-        </p>
+        <>
+          <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+            {error}
+          </p>
+          {onRetryServices ? (
+            <div>
+              <Button size="sm" onClick={onRetryServices}>重试加载服务</Button>
+            </div>
+          ) : null}
+        </>
       ) : notice ? (
         <p className="asset-operation-feedback" role="status">{notice}</p>
       ) : null}

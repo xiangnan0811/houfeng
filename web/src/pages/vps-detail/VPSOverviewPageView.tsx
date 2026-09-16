@@ -80,7 +80,7 @@ export function VPSOverviewPageView({
   }
   const monitoringRelations = overview.relations.filter((relation) => relation.kind === 'monitoring_instances')
   const monitoringCount = monitoringRelations[0]?.count ?? 0
-  const subscriptionsHref = `/subscriptions?${new URLSearchParams({ vps_id: vpsId }).toString()}`
+  const subscriptionsHref = `/subscriptions?${new URLSearchParams({ vps_id: vpsId, view: 'details' }).toString()}`
   const primarySubscription = resources.subscriptions.items[0]
   const plannedCancellation = overview.identity.lifecycle_status === 'to_cancel'
 

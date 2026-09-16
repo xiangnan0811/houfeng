@@ -61,10 +61,12 @@ const DOMAIN: AssetDomainRecord = {
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise
+    reject = rejectPromise
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 function Harness() {
@@ -272,9 +274,11 @@ describe('VPSOverviewRelationPanels', () => {
     expect(grpcRow.getByText('50051')).toBeInTheDocument()
   })
 
-  it('shows domain records and IDs when optional service lookup fails', async () => {
+  it('shows domain records and IDs when optional service lookup fails, and service-only retry reloads services while retaining domains', async () => {
     vi.spyOn(api, 'listVPSDomains').mockResolvedValue([{ ...DOMAIN, service_id: 'svc_001' }])
-    vi.spyOn(api, 'listVPSServices').mockRejectedValue(new Error('service catalog offline'))
+    const servicesSpy = vi.spyOn(api, 'listVPSServices')
+      .mockRejectedValueOnce(new Error('service catalog offline'))
+      .mockResolvedValueOnce([SERVICE])
     vi.spyOn(api, 'listVPSMonitoringInstances').mockResolvedValue([])
     renderHarness()
 
@@ -284,9 +288,21 @@ describe('VPSOverviewRelationPanels', () => {
     expect(within(dialog).getByText('svc_001')).toBeInTheDocument()
     expect(screen.queryByText('Gateway')).not.toBeInTheDocument()
     expect(api.listVPSDomains).toHaveBeenCalledWith('vps_001')
-    expect(api.listVPSServices).toHaveBeenCalledWith('vps_001')
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(servicesSpy).toHaveBeenCalledWith('vps_001')
+    expect(await screen.findByRole('alert')).toHaveTextContent('service catalog offline')
+    expect(screen.getByRole('button', { name: '重试加载服务' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重试加载域名' })).not.toBeInTheDocument()
+    expect(api.listVPSDomains).toHaveBeenCalledTimes(1)
+    expect(servicesSpy).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '重试加载服务' }))
+    expect(await screen.findByText('Gateway')).toBeInTheDocument()
+    expect(within(dialog).getByText('svc_001')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重试加载服务' })).not.toBeInTheDocument()
+    expect(servicesSpy).toHaveBeenCalledTimes(2)
+    expect(api.listVPSDomains).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('edge.example.com')).toBeInTheDocument()
   })
 
   it('fills a readable service name beside the domain association ID when metadata arrives', async () => {
@@ -349,6 +365,47 @@ describe('VPSOverviewRelationPanels', () => {
     await act(async () => nextDomains.resolve([]))
     expect(await screen.findByText('尚未记录域名')).toBeInTheDocument()
     expect(screen.queryByText('Gateway')).not.toBeInTheDocument()
+  })
+
+  it('handles auxiliary services rejecting fast before delayed domains resolve', async () => {
+    const delayedDomains = deferred<AssetDomainRecord[]>()
+    vi.spyOn(api, 'listVPSDomains').mockReturnValue(delayedDomains.promise)
+    vi.spyOn(api, 'listVPSServices').mockRejectedValue(new Error('service catalog fast failure'))
+    vi.spyOn(api, 'listVPSMonitoringInstances').mockResolvedValue([])
+    renderHarness()
+
+    fireEvent.click(screen.getByRole('button', { name: '打开域名关系' }))
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载域名')
+
+    await act(async () => {
+      delayedDomains.resolve([{ ...DOMAIN, service_id: 'svc_001' }])
+    })
+
+    const dialog = await screen.findByRole('dialog', { name: '已关联域名' })
+    expect(await screen.findByText('edge.example.com')).toBeInTheDocument()
+    expect(within(dialog).getByText('svc_001')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('service catalog fast failure')
+    expect(screen.getByRole('button', { name: '重试加载服务' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重试加载域名' })).not.toBeInTheDocument()
+  })
+
+  it('handles auxiliary services rejecting fast when domain loading also fails', async () => {
+    const delayedDomains = deferred<AssetDomainRecord[]>()
+    vi.spyOn(api, 'listVPSDomains').mockReturnValue(delayedDomains.promise)
+    vi.spyOn(api, 'listVPSServices').mockRejectedValue(new Error('service catalog fast failure'))
+    vi.spyOn(api, 'listVPSMonitoringInstances').mockResolvedValue([])
+    renderHarness()
+
+    fireEvent.click(screen.getByRole('button', { name: '打开域名关系' }))
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载域名')
+
+    await act(async () => {
+      delayedDomains.reject(new Error('domain catalog fast failure'))
+    })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('domain catalog fast failure')
+    expect(screen.getByRole('button', { name: '重试加载域名' })).toBeInTheDocument()
+    expect(screen.queryByText('edge.example.com')).not.toBeInTheDocument()
   })
 
 })

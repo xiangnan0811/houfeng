@@ -48,7 +48,7 @@ func goldenMachineEnumOverview() Overview {
 		Facts:          []Fact{{Key: "ipv4", Label: "IPv4", Value: "192.0.2.10"}},
 		Relations: []RelationSummary{
 			{Kind: "monitoring_instances", Count: 0, Status: "unlinked", Label: "监控实例", Section: ready},
-			{Kind: "subscriptions", Count: 1, Route: "/subscriptions?vps_id=vps_001", Label: "订阅", Section: ready},
+			{Kind: "subscriptions", Count: 1, Route: "/subscriptions?vps_id=vps_001&view=details", Label: "订阅", Section: ready},
 			{Kind: "services", Count: 0, Label: "服务", Section: ready},
 			{Kind: "domains", Count: 0, Label: "域名", Section: ready},
 		},

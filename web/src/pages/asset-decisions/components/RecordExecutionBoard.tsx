@@ -34,7 +34,7 @@ function actionHrefForMember(member: AssetDecisionRecordMember): string {
     return vpsWorkbenchPath(member.vps_id, 'cancellation')
   }
   if (member.execution_plan?.step_kind === 'open_subscription_context') {
-    return `/subscriptions?vps_id=${encodeURIComponent(member.vps_id)}`
+    return `/subscriptions?vps_id=${encodeURIComponent(member.vps_id)}&view=details`
   }
   return vpsDetailPath(member.vps_id)
 }

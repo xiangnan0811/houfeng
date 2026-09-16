@@ -173,7 +173,7 @@ describe('GlobalSearch', () => {
     expect(vpsLink).toHaveAttribute('href', '/vps/vps_001')
     expect(vpsLink.tagName).toBe('A')
     expect(screen.getByRole('option', { name: /Tokyo Edge/ })).toHaveAttribute('href', '/monitoring/mi_001')
-    expect(screen.getByRole('option', { name: /sub_001/ })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001')
+    expect(screen.getByRole('option', { name: /sub_001/ })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001&view=details')
   })
 
   it('matches a target by host', async () => {

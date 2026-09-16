@@ -415,7 +415,7 @@ function combine(
           formatMoney(subscription.monthly_price, subscription.currency),
           subscription.renew_at ? `续费 ${formatDate(subscription.renew_at)}` : null,
         ]),
-        to: `/subscriptions?vps_id=${encodeURIComponent(subscription.vps_id)}`,
+        to: `/subscriptions?vps_id=${encodeURIComponent(subscription.vps_id)}&view=details`,
       })
     }
   }

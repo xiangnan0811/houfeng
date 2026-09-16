@@ -35,7 +35,7 @@ function cancelOverview(): VPSOverview {
         kind: 'monitoring_instances', count: 0, label: '监控实例', section: READY,
       },
       {
-        kind: 'subscriptions', count: 1, status: 'cancel', route: '/subscriptions?vps_id=vps_001',
+        kind: 'subscriptions', count: 1, status: 'cancel', route: '/subscriptions?vps_id=vps_001&view=details',
         label: '订阅', section: READY,
       },
       {

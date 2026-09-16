@@ -266,7 +266,7 @@ function buildRelatedItems(
       tone: subscriptionSummary.tone,
       primary: subscriptionSummary.relatedPrimary,
       secondary: subscriptionSummary.relatedSecondary,
-      titleAction: { kind: 'link', to: `/subscriptions?vps_id=${encodeURIComponent(input.detail.vps_id)}` },
+      titleAction: { kind: 'link', to: `/subscriptions?vps_id=${encodeURIComponent(input.detail.vps_id)}&view=details` },
       quickActions: input.subscriptionLoadFailed
         ? []
         : [
@@ -348,7 +348,7 @@ function buildAttentionItems(
       reason: input.subscriptionError ?? '读取失败，暂不判断缺订阅',
       tone: 'notice',
       domain: 'ops',
-      primaryAction: { kind: 'link', label: '核对订阅', to: `/subscriptions?vps_id=${encodeURIComponent(input.detail.vps_id)}` },
+      primaryAction: { kind: 'link', label: '核对订阅', to: `/subscriptions?vps_id=${encodeURIComponent(input.detail.vps_id)}&view=details` },
       secondaryActions: [],
     })
   } else if (!input.primarySubscription) {

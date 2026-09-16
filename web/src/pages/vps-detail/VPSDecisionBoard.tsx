@@ -304,7 +304,7 @@ export function VPSDecisionBoard(props: VPSDecisionBoardProps) {
                 : '订阅接口已成功返回空结果，需要补录成本与续费日。'}
           </p>
           <div className="vps-decision-card__footer">
-            <Link className="text-link" to={`/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}`}>订阅列表</Link>
+            <Link className="text-link" to={`/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}&view=details`}>订阅列表</Link>
             {!primarySubscription && !subscriptionLoadFailed ? (
               <button type="button" className="text-link" onClick={onSubscriptionCreate}>快速创建订阅</button>
             ) : null}

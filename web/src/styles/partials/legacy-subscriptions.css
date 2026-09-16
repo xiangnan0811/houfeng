@@ -1,34 +1,27 @@
 /* partial: legacy-subscriptions.css (semantic split of the legacy index.css block) */
 
-.subscription-metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-2);min-width:0}
-
-.subscription-metric-card{position:relative;display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0;min-height:72px;padding:var(--space-2) var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 12%,var(--surface));color:inherit;text-align:left}
-
-.subscription-metric-card:is(button,a){appearance:none;cursor:pointer;text-decoration:none}
-
-.subscription-metric-card:is(button,a):hover{border-color:color-mix(in srgb,var(--accent) 28%,var(--border))}
-
-.subscription-metric-card:is(button,a):focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:var(--space-1)}
-
-.subscription-metric-card::before{content:'';position:absolute;inset:var(--space-2) auto var(--space-2) 0;width:var(--border-w);border-radius:var(--radius-pill);background:color-mix(in srgb,var(--border-strong) 72%,transparent)}
-
-.subscription-metric-card--normal::before{background:color-mix(in srgb,var(--color-state-normal) 62%,transparent)}
-
-.subscription-metric-card--notice::before{background:color-mix(in srgb,var(--color-state-notice) 62%,transparent)}
-
-.subscription-metric-card--alert::before{background:color-mix(in srgb,var(--color-state-alert) 62%,transparent)}
-
-.subscription-metric-card--critical::before{background:color-mix(in srgb,var(--color-state-critical) 62%,transparent)}
-
-.subscription-metric-card span{display:inline-flex;align-items:center;gap:var(--space-2);min-width:0;color:var(--text-muted);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);line-height:1.25;text-transform:uppercase;white-space:nowrap}
-
-.subscription-metric-card strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-h2-size);line-height:1.08;overflow-wrap:anywhere}
-
-.subscription-metric-card small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}
-
+.subscription-page{gap:var(--space-3)}
+.subscription-page[data-view="insights"]{--subscription-insights-trend-min:280px;--subscription-insights-middle-min:264px;--subscription-insights-renewal-min:160px;--subscription-insights-plot-min:160px;--subscription-insights-month-mobile:400px;height:100%;min-height:100%}
+.subscription-page[data-view="insights"]>.subscription-page__view:not([hidden]){display:flex;flex:1 1 0%;flex-direction:column;min-width:0;min-height:0}
+.subscription-page[data-view="insights"] .subscription-view-panel{flex:1 1 0%;min-width:0;min-height:0}
+.subscription-page .page__title{font-size:22px;line-height:1.25}
+.subscription-page__head{align-items:flex-start}
+.subscription-page__identity{display:flex;flex-direction:column;gap:6px;min-width:0}
+.subscription-page__views{position:sticky;top:0;z-index:6;margin:0 calc(-1 * var(--shell-main-inline-padding));padding:0 var(--shell-main-inline-padding);background:var(--bg)}
+.subscription-page__views .tabs{background:var(--bg)}
+.subscription-view-panel{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
+.subscription-view-panel:focus{outline:none}
+.subscription-view-panel:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px}
+.subscription-summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 18px;min-width:0}
+.subscription-summary>:is(span,button,a){appearance:none;display:inline-flex;align-items:baseline;gap:6px;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-decoration:none;text-align:left;cursor:default}
+.subscription-summary>:is(button,a){cursor:pointer}
+.subscription-summary>:is(button,a):hover .subscription-summary__value{color:var(--accent)}
+.subscription-summary>:is(button,a):focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px;border-radius:2px}
+.subscription-summary__label{color:var(--text-muted);font-size:var(--type-small-size);line-height:1.3}
+.subscription-summary__value{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-small-size);font-weight:650;line-height:1.3}
 .subscription-renewal-queue,.subscription-breakdown-list,.subscription-budget-list{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
 
-.subscription-renewal-row{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--space-1);align-items:start;min-width:0;width:100%;padding:var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 70%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 18%,transparent);color:inherit;text-align:left;text-decoration:none}
+.subscription-renewal-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:var(--space-2);align-items:center;min-width:0;width:100%;padding:6px 0;border:0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 50%,transparent);border-radius:0;background:transparent;color:inherit;text-align:left;text-decoration:none}
 
 .subscription-renewal-row:is(button){appearance:none;cursor:pointer}
 
@@ -88,111 +81,113 @@
 
 .subscription-budget-coverage small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35}
 
-.subscription-insights{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
-
-.subscription-insights__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3);align-items:stretch}
-
-.subscription-insight-panel{display:flex;flex-direction:column;gap:var(--space-3);min-width:0;min-height:330px}
-
-.subscription-panel-header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-2);align-items:start;min-width:0}
-
-.subscription-panel-header .tabs{max-width:100%;justify-self:end}
-
-.subscription-panel-select{display:flex;align-items:center;gap:var(--space-2);min-width:150px;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.2;white-space:nowrap}
-
-.subscription-panel-select select{min-width:108px;height:34px;padding:0 30px 0 var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 86%,transparent);border-radius:var(--radius-2);background-color:var(--surface);background-image:var(--select-caret);background-position:right 12px center;background-size:12px 12px;background-repeat:no-repeat;color:var(--text-primary);font:inherit;appearance:none;cursor:pointer}
-
+.subscription-insights{display:flex;flex:1 1 0%;flex-direction:column;gap:8px;min-width:0;min-height:0}
+.subscription-panel-title{margin:0;font-family:var(--font-sans);font-size:14px;font-weight:600;line-height:1.3;color:var(--text-primary)}
+.subscription-insights__grid{display:grid;flex:1 1 0%;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:minmax(var(--subscription-insights-trend-min),1.15fr) minmax(var(--subscription-insights-middle-min),1fr) minmax(var(--subscription-insights-renewal-min),1fr);gap:12px;align-items:stretch;min-width:0;min-height:0}
+.subscription-insight-panel{display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;padding:12px;border:var(--border-w) solid var(--panel-border);border-radius:var(--radius-2);background:var(--panel-bg)}
+.subscription-insight-panel--trend{grid-column:1/-1;grid-row:1;order:1}
+.subscription-insight-panel--month{grid-row:2;order:2}
+.subscription-insight-panel--composition{grid-row:2;order:3}
+.subscription-insight-panel--renewal{grid-column:1/-1;grid-row:3;order:4}
+.subscription-panel-header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.subscription-panel-header .tabs{margin-bottom:0}
+.subscription-panel-header .tabs--pill .tab{padding:5px 14px;margin-bottom:0}
+.subscription-panel-meta{color:var(--text-muted);font-size:var(--type-small-size);line-height:1.3}
+.subscription-panel-select{display:flex;align-items:center;gap:8px;min-width:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.2;white-space:nowrap}
+.subscription-panel-select select{min-width:108px;height:28px;padding:0 26px 0 8px;border:var(--border-w) solid color-mix(in srgb,var(--border) 86%,transparent);border-radius:var(--radius-2);background-color:var(--surface);background-image:var(--select-caret);background-position:right 8px center;background-size:12px 12px;background-repeat:no-repeat;color:var(--text-primary);font:inherit;appearance:none;cursor:pointer}
 .subscription-panel-select select:hover{border-color:color-mix(in srgb,var(--accent) 42%,var(--border))}
-
 .subscription-panel-select select:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 42%,transparent);outline-offset:2px}
-
 .subscription-panel-total{color:var(--text-muted);font-family:var(--font-mono);font-size:var(--type-small-size)}
-
-.subscription-insight-panel__tab-panel{display:flex;flex:1;flex-direction:column;gap:var(--space-3);min-width:0}
-
-.subscription-panel-scroll{max-height:250px;overflow-y:auto;overflow-x:hidden;padding-right:var(--space-1)}
-
-.subscription-donut-layout{position:relative;display:flex;flex-direction:column;gap:var(--space-3);align-items:center;min-width:0}
-
-.subscription-donut-layout--compact{justify-content:center}
-
-.subscription-donut{width:min(100%,220px);max-width:220px;aspect-ratio:1;overflow:visible}
-
-.subscription-donut__track{fill:none;stroke:color-mix(in srgb,var(--border) 64%,transparent);stroke-width:18}
-
-.subscription-donut__segment{fill:none;stroke-width:18;stroke-linecap:butt;transform:rotate(-90deg);transform-origin:70px 70px;cursor:pointer;transition:opacity .16s ease,stroke-width .16s ease}
-
-.subscription-donut__segment:hover,.subscription-donut__segment:focus-visible{opacity:.82;stroke-width:20;outline:none}
-
+.subscription-insight-panel__tab-panel{display:flex;flex:1 1 0%;flex-direction:column;gap:8px;min-width:0;min-height:0}
+.subscription-panel-scroll{flex:1 1 0%;min-height:0;overflow-x:hidden;overflow-y:auto;padding-right:var(--space-1)}
+.subscription-panel-scroll:focus{outline:none}
+.subscription-panel-scroll:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:-2px}
+.subscription-donut-layout{position:relative;display:grid;flex:1 1 0%;grid-template-columns:minmax(120px,148px) minmax(0,1fr);gap:12px;align-items:center;min-width:0;min-height:0}
+.subscription-donut{width:min(100%,148px);max-width:148px;aspect-ratio:1;overflow:visible}
+.subscription-donut__track{fill:none;stroke:color-mix(in srgb,var(--border) 64%,transparent);stroke-width:16}
+.subscription-donut__segment{fill:none;stroke-width:16;stroke-linecap:butt;transform:rotate(-90deg);transform-origin:70px 70px;cursor:pointer;transition:opacity .16s ease,stroke-width .16s ease}
+.subscription-donut__segment:hover,.subscription-donut__segment:focus-visible{opacity:.82;stroke-width:18;outline:none}
 .subscription-donut__center-label{fill:var(--text-muted);font-size:10px;text-anchor:middle;pointer-events:none}
-
 .subscription-donut__center-value{fill:var(--text-primary);font-family:var(--font-mono);font-size:11px;font-weight:700;text-anchor:middle;pointer-events:none}
-
-.subscription-donut-popover{position:absolute;z-index:3;right:max(8px,calc(50% - 190px));top:50%;display:flex;min-width:190px;max-width:min(240px,calc(100% - 16px));transform:translateY(-50%);flex-direction:column;gap:2px;padding:var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:var(--radius-2);box-shadow:var(--shadow-md);background:color-mix(in srgb,var(--surface) 96%,var(--surface-elevated));pointer-events:none}
-
+.subscription-donut-legend{display:flex;flex-direction:column;gap:4px;min-width:0;margin:0;padding:0;list-style:none}
+.subscription-donut-legend li{display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:8px;align-items:center;min-width:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.3}
+.subscription-donut-legend i{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.subscription-donut-legend li[data-tone="1"] i{background:var(--color-state-normal)}
+.subscription-donut-legend li[data-tone="2"] i{background:var(--color-state-notice)}
+.subscription-donut-legend li[data-tone="3"] i{background:var(--accent-2)}
+.subscription-donut-legend li[data-tone="4"] i{background:var(--color-state-maintenance)}
+.subscription-donut-legend li[data-tone="5"] i{background:var(--text-muted)}
+.subscription-donut-legend span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary)}
+.subscription-donut-legend small{color:var(--text-muted);font-family:var(--font-mono)}
+.subscription-donut-popover{position:absolute;z-index:3;right:8px;bottom:8px;display:flex;min-width:168px;max-width:min(240px,calc(100% - 16px));flex-direction:column;gap:2px;padding:var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:var(--radius-2);box-shadow:var(--shadow-md);background:color-mix(in srgb,var(--surface) 96%,var(--surface-elevated));pointer-events:none}
 .subscription-donut-popover strong{color:var(--text-primary);font-size:var(--type-small-size);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
 .subscription-donut-popover span,.subscription-donut-popover small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35}
-
-.subscription-ranking-list{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
-
-.subscription-ranking-row{display:grid;grid-template-columns:minmax(0,0.5fr) minmax(70px,1fr) minmax(84px,auto);gap:var(--space-2);align-items:center;width:100%;padding:var(--space-2) 0;border:0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 50%,transparent);background:transparent;color:inherit;text-align:left;cursor:pointer}
-
+.subscription-ranking-list{display:flex;flex-direction:column;gap:2px;min-width:0}
+.subscription-ranking-row{display:grid;grid-template-columns:minmax(0,0.5fr) minmax(70px,1fr) minmax(84px,auto);gap:var(--space-2);align-items:center;width:100%;padding:6px 0;border:0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 50%,transparent);background:transparent;color:inherit;text-align:left;cursor:pointer}
 .subscription-ranking-row:hover strong{color:var(--accent)}
-
 .subscription-ranking-row div:first-child{display:flex;flex-direction:column;gap:2px;min-width:0}
-
 .subscription-ranking-row strong{color:var(--text-primary);font-size:var(--type-small-size);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
 .subscription-ranking-row small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-.subscription-trend-chart{width:100%;height:auto;min-height:220px;overflow:visible}
-
+.subscription-trend-chart-container{display:flex;flex:1 1 0%;flex-direction:column;gap:8px;min-width:0;min-height:0}
+.subscription-trend-readout,.subscription-trend-legend{flex-shrink:0}
+.subscription-trend-chart-plot{position:relative;flex:1 1 0%;min-width:0;min-height:var(--subscription-insights-plot-min);height:0}
+.subscription-trend-chart{position:absolute;inset:0;display:block;width:100%;height:100%;overflow:visible}
+.subscription-trend-chart:focus{outline:none}
+.subscription-trend-chart:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px}
 .subscription-trend-chart__grid{stroke:color-mix(in srgb,var(--border) 58%,transparent);stroke-dasharray:3 4}
-
 .subscription-trend-chart__axis{fill:var(--text-muted);font-size:10px}
-
 .subscription-trend-chart__area--over{fill:color-mix(in srgb,var(--color-state-critical) 26%,transparent)}
-
 .subscription-trend-chart__area--under{fill:color-mix(in srgb,var(--color-state-normal) 22%,transparent)}
-
-.subscription-trend-chart__line{fill:none;stroke-width:2.6;stroke-linejoin:round;stroke-linecap:round}
-
+.subscription-trend-chart__line{fill:none;stroke-width:2.2;stroke-linejoin:miter;stroke-linecap:butt}
 .subscription-trend-chart__line--cost{stroke:var(--accent)}
-
-.subscription-trend-chart__line--budget{stroke:var(--text-secondary);stroke-dasharray:6 5}
-
+.subscription-trend-chart__line--budget{stroke:var(--text-secondary);stroke-width:1.5;stroke-dasharray:6 5}
+.subscription-trend-chart__hairline{stroke:var(--text-muted);stroke-width:1;stroke-dasharray:3 3}
 .subscription-trend-chart__point--cost{fill:var(--accent);stroke:var(--surface);stroke-width:2}
-
 .subscription-trend-chart__point--budget{fill:var(--text-secondary);stroke:var(--surface);stroke-width:2}
-
+.subscription-trend-chart__hit-column{fill:transparent;cursor:pointer}
+.subscription-trend-readout{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px;min-width:0;padding:8px 0 0;border-top:var(--border-w) dashed var(--border-dashed);color:var(--text-secondary);font-size:var(--type-small-size)}
+.subscription-trend-readout__month{color:var(--text-primary);font-size:var(--type-small-size)}
+.subscription-trend-readout__item{display:inline-flex;align-items:baseline;gap:6px;min-width:0}
+.subscription-trend-readout__label{color:var(--text-muted)}
+.subscription-trend-readout__value{color:var(--text-primary);font-family:var(--font-mono)}
+.subscription-trend-readout__delta--over{color:var(--color-state-critical)}
+.subscription-trend-readout__delta--under{color:var(--color-state-normal)}
+.subscription-trend-readout__delta--equal{color:var(--text-muted)}
+.subscription-trend-readout__status{margin-left:6px;color:var(--text-muted);font-family:var(--font-sans);font-size:12px}
+.subscription-trend-readout__hint{margin-left:auto;color:var(--text-muted);font-size:12px}
 .subscription-trend-legend{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;color:var(--text-secondary);font-size:var(--type-small-size)}
-
 .subscription-trend-legend span{display:inline-flex;align-items:center;gap:var(--space-1)}
-
 .subscription-trend-legend__line{width:18px;height:0;border-top:2px solid var(--accent)}
-
 .subscription-trend-legend__line--budget{border-top-style:dashed;border-top-color:var(--text-secondary)}
-
 .subscription-trend-legend__area{width:14px;height:8px;border-radius:var(--radius-1);background:color-mix(in srgb,var(--color-state-critical) 28%,transparent)}
-
 .subscription-trend-legend__area--under{background:color-mix(in srgb,var(--color-state-normal) 28%,transparent)}
-
-.subscription-list-workspace{display:flex;flex-direction:column;gap:var(--space-3);margin-bottom:var(--space-3)}
-
-.subscription-filter-chips{display:flex;flex-wrap:wrap;gap:var(--space-2)}
-
-.subscription-filter-chip{display:inline-flex;align-items:center;gap:var(--space-2);min-height:28px;max-width:100%;padding:0 var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--accent) 22%,var(--border));border-radius:var(--radius-pill);background:color-mix(in srgb,var(--accent) 7%,transparent);color:var(--text-secondary);font-size:var(--type-small-size);cursor:pointer}
-
-.subscription-filter-chip span{color:var(--text-muted)}
-
+.subscription-list{display:flex;flex-direction:column;gap:8px;min-width:0}
+.subscription-list-toolbar{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;min-width:0}
+.subscription-list-toolbar__title{margin:0;font-family:var(--font-sans);font-size:14px;font-weight:600;line-height:1.3;color:var(--text-primary)}
+.subscription-list-toolbar__count{color:var(--text-muted);font-size:var(--type-small-size);line-height:1.3}
+.subscription-list-scroll{max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-gutter:stable}
+.subscription-list-scroll:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:-2px}
 .subscription-table-signal{display:inline-flex;align-items:center;gap:var(--space-2);white-space:nowrap}
-
 .subscription-name-button{appearance:none;border:0;background:transparent;color:var(--text-primary);font:inherit;font-weight:700;text-align:left;cursor:pointer;padding:0}
-
-.subscription-name-button:hover,.subscription-name-button:focus-visible{color:var(--accent);text-decoration:underline;text-underline-offset:3px;outline:none}
-
 .subscription-tag-list{display:flex;flex-wrap:wrap;gap:var(--space-1);min-width:0}
+.subscription-list-scroll .data-table{min-width:68rem}
+.subscription-list .data-table :is(th,td){white-space:nowrap}
+.subscription-list .asset-table__identity,.subscription-list .subscription-tag-list{white-space:normal}
+.subscription-dialog .modal-header{padding:10px 16px}
+.subscription-dialog .modal-body{padding:12px 16px}
+.subscription-dialog .modal-footer{padding:8px 16px}
+.subscription-form{display:flex;flex-direction:column;gap:10px;min-width:0}
+.subscription-form__owner{margin:0;font-size:var(--type-small-size);line-height:1.35}
+.subscription-form__grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 12px;align-items:start;min-width:0}
+.subscription-form__span-2{grid-column:span 2;min-width:0}
+.subscription-form__labels-wide{grid-column:2 / -1;min-width:0}
+.subscription-form__note,.subscription-form__renewal,.subscription-form .create-form__error{grid-column:1 / -1;min-width:0}
+.subscription-form .input-field{gap:4px}
+.subscription-form .input-field__label{font-size:13px;letter-spacing:0;text-transform:none;font-weight:500}
+.subscription-form__renewal{margin:0;padding:0;border:0;min-width:0}
+.subscription-form__renewal legend{padding:0;margin:0 0 6px;color:var(--text-secondary);font-size:13px;font-weight:500}
+.subscription-form__renewal-options{display:flex;flex-wrap:wrap;gap:8px}
+.subscription-form__renewal-options label{display:inline-flex;align-items:center;gap:6px;min-height:28px;color:var(--text-primary);font-size:13px;line-height:1.35;cursor:pointer}
 
 .subscription-budget-list--managed .subscription-budget-row small{white-space:normal}
 
@@ -226,16 +221,9 @@
 @media(max-width:1080px){.subscription-inline-form,
 .subscription-inline-form--settings{grid-template-columns:repeat(2,minmax(0,1fr))}.subscription-budget-edit{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
-@media(max-width:860px){.subscription-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.subscription-insights__grid{grid-template-columns:1fr}.subscription-panel-header{grid-template-columns:1fr}.subscription-panel-header .tabs,
-.subscription-panel-select{justify-self:start}.subscription-donut-layout{grid-template-columns:1fr}.subscription-donut-popover{right:50%;top:auto;bottom:8px;transform:translateX(50%)}}
+@media(max-width:860px){.subscription-page[data-view="insights"]{height:auto;min-height:0}.subscription-page[data-view="insights"]>.subscription-page__view:not([hidden]),.subscription-page[data-view="insights"] .subscription-view-panel,.subscription-insights,.subscription-insights__grid{flex:none;min-height:0;height:auto}.subscription-trend-chart-container,.subscription-trend-chart-plot{flex:none;height:auto}.subscription-insights__grid{grid-template-columns:1fr;grid-template-rows:none}.subscription-insight-panel--trend,.subscription-insight-panel--month,.subscription-insight-panel--composition,.subscription-insight-panel--renewal{grid-column:1;grid-row:auto;order:unset}.subscription-insight-panel--month{height:var(--subscription-insights-month-mobile)}.subscription-panel-header{grid-template-columns:1fr}.subscription-panel-header .tabs,.subscription-panel-select{justify-self:start}.subscription-donut-layout{grid-template-columns:1fr}.subscription-donut-popover{right:8px;left:8px;top:auto;bottom:8px;transform:none}.subscription-form__grid{grid-template-columns:repeat(2,minmax(0,1fr))}.subscription-trend-readout__hint{margin-left:0;width:100%}}
 
-@media(max-width:700px){.subscription-metric-grid,
-.subscription-inline-form,
-.subscription-inline-form--settings,
-.subscription-budget-edit{grid-template-columns:1fr}.subscription-budget-coverage{grid-column:1}.subscription-renewal-row,
-.subscription-breakdown-row,
-.subscription-ranking-row,
-.subscription-budget-row{grid-template-columns:1fr;align-items:start}.subscription-breakdown-bar{width:100%}}
+@media(max-width:700px){.subscription-page__head{flex-direction:column;align-items:flex-start}.subscription-page .filter-bar__controls-row>.filter-select,.subscription-page .filter-bar__controls-row>.filter-searchselect{flex:1 1 100%;min-width:0;max-width:100%}.subscription-page .filter-select__control,.subscription-page .filter-searchselect__trigger{width:100%}.subscription-inline-form,.subscription-inline-form--settings,.subscription-budget-edit{grid-template-columns:1fr}.subscription-budget-coverage{grid-column:1}.subscription-renewal-row,.subscription-breakdown-row,.subscription-ranking-row,.subscription-budget-row{grid-template-columns:1fr;align-items:start}.subscription-breakdown-bar{width:100%}.subscription-form__grid{grid-template-columns:1fr}.subscription-form__span-2,.subscription-form__labels-wide,.subscription-form__note,.subscription-form__renewal{grid-column:1 / -1}}
 
 /* settings-subscriptions owner migration from misc.css */
 

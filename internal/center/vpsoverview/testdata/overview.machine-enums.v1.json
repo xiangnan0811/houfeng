@@ -116,7 +116,7 @@
     {
       "kind": "subscriptions",
       "count": 1,
-      "route": "/subscriptions?vps_id=vps_001",
+      "route": "/subscriptions?vps_id=vps_001\u0026view=details",
       "label": "订阅",
       "section": {
         "state": "ready",

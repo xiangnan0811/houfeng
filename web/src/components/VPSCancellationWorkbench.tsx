@@ -185,7 +185,7 @@ export function VPSCancellationWorkbench({
         <div className="asset-cancel-workbench__summary-item">
           <span className="summary-card__label">订阅</span>
           <strong className="summary-card__value"><MonoDigits>{preview.subscriptions.length}</MonoDigits></strong>
-          <small>active {activeSubscriptions.length} · 非活跃 {inactiveSubscriptions.length}</small>
+          <small>生效中 {activeSubscriptions.length} · 非活跃 {inactiveSubscriptions.length}</small>
         </div>
         <div className="asset-cancel-workbench__summary-item">
           <span className="summary-card__label">监控实例</span>
@@ -254,11 +254,10 @@ export function VPSCancellationWorkbench({
           <section className="asset-cancel-workbench__section asset-cancel-workbench__section--audit">
             <div className="asset-cancel-workbench__section-head">
               <div>
-                <p className="asset-cancel-workbench__eyebrow">确认执行</p>
                 <h3>确认执行</h3>
               </div>
               <span className="asset-cancel-workbench__step-count">
-                <MonoDigits>{selectedStepCount}</MonoDigits> steps
+                <MonoDigits>{selectedStepCount}</MonoDigits> 步
               </span>
             </div>
             <Input
@@ -294,7 +293,7 @@ export function VPSCancellationWorkbench({
                 <h3>订阅处理</h3>
               </div>
               <span className="asset-cancel-workbench__step-count">
-                <MonoDigits>{subscriptionIDs.length}</MonoDigits> selected
+                <MonoDigits>{subscriptionIDs.length}</MonoDigits> 项已选
               </span>
             </div>
             {preview.subscriptions.length === 0 ? (
@@ -343,7 +342,7 @@ export function VPSCancellationWorkbench({
                 <h3>监控实例确认</h3>
               </div>
               <span className="asset-cancel-workbench__step-count">
-                <MonoDigits>{selectedMonitoringInstanceCount}</MonoDigits> selected
+                <MonoDigits>{selectedMonitoringInstanceCount}</MonoDigits> 项已选
               </span>
             </div>
             {preview.monitoring_instance_links.length === 0 ? (
@@ -413,7 +412,7 @@ export function VPSCancellationWorkbench({
                 <h3>Target/实例确认</h3>
               </div>
               <span className="asset-cancel-workbench__step-count">
-                <MonoDigits>{selectedTargetCount}</MonoDigits> selected
+                <MonoDigits>{selectedTargetCount}</MonoDigits> 项已选
               </span>
             </div>
             {preview.target_links.length === 0 ? (

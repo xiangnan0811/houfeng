@@ -433,8 +433,8 @@ test('VPS overview subscription relation reaches the exact filtered subscription
 
   await page.getByRole('region', { name: '订阅与续费', exact: true }).getByRole('link', { name: '查看订阅列表', exact: true }).click()
 
-  await expectLocation(page, '/subscriptions?vps_id=vps_001')
-  await expect(page.getByRole('heading', { name: /订阅成本中枢/ })).toBeVisible()
+  await expectLocation(page, '/subscriptions?vps_id=vps_001&view=details')
+  await expect(page.getByRole('button', { name: '新建订阅', exact: true })).toBeVisible()
   await expect.poll(() => api.requestCount('GET', '/api/subscriptions?vps_id=vps_001')).toBe(1)
 })
 
@@ -546,7 +546,7 @@ test('VPS overview fails closed for malicious and mismatched destinations', asyn
       id: 'open_ip_quality', label: 'backslash route', route: '\\evil.invalid\\path',
     }),
     anomaly('renewal.subscription.missing.v1', {
-      id: 'open_subscription', label: 'command with route', route: '/subscriptions?vps_id=vps_001',
+      id: 'open_subscription', label: 'command with route', route: '/subscriptions?vps_id=vps_001&view=details',
     }),
   ]
   const relations = [
@@ -578,7 +578,7 @@ test('VPS overview fails closed for malicious and mismatched destinations', asyn
     await expect(text).toBeVisible()
     expect(await text.evaluate((element) => element.closest('a,button') === null)).toBe(true)
   }
-  await expect(page.getByRole('region', { name: '订阅与续费', exact: true }).getByRole('link', { name: '查看订阅列表', exact: true })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001')
+  await expect(page.getByRole('region', { name: '订阅与续费', exact: true }).getByRole('link', { name: '查看订阅列表', exact: true })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001&view=details')
 
   await expectLocation(page, '/vps/vps_001')
 })

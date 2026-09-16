@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, useLayoutEffect, useRef } from 'react'
+import { type FocusEvent, type KeyboardEvent, type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 import { Badge } from './Badge'
 import { tabId, tabPanelId } from './tabIds'
 
@@ -15,6 +15,8 @@ export interface TabsProps<V extends string = string> {
   value: V
   onChange: (next: V) => void
   variant?: 'underline' | 'pill'
+  /** Automatic (default) activates on arrow keys. Manual only moves focus; click/Enter/Space activate. */
+  activation?: 'automatic' | 'manual'
 }
 
 export interface TabPanelProps<V extends string = string> {
@@ -31,11 +33,17 @@ export function Tabs<V extends string = string>({
   value,
   onChange,
   variant = 'underline',
+  activation = 'automatic',
 }: TabsProps<V>) {
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([])
   const pendingScrollTargetRef = useRef<{ button: HTMLButtonElement | null; value: V } | null>(null)
   const selectedIndex = items.findIndex((item) => item.value === value)
   const tabStopIndex = selectedIndex >= 0 ? selectedIndex : items.length > 0 ? 0 : -1
+  const [manualRover, setManualRover] = useState({ value, index: -1 })
+  if (manualRover.value !== value) {
+    setManualRover({ value, index: -1 })
+  }
+  const roverIndex = activation === 'manual' && manualRover.index >= 0 ? manualRover.index : tabStopIndex
   const cls = ['tabs', `tabs--${variant}`].join(' ')
 
   useLayoutEffect(() => {
@@ -72,11 +80,26 @@ export function Tabs<V extends string = string>({
     const nextButton = buttonRefs.current[nextIndex] ?? null
     pendingScrollTargetRef.current = { button: nextButton, value: nextItem.value }
     nextButton?.focus()
+    if (activation === 'manual') {
+      nextButton?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+      setManualRover({ value, index: nextIndex })
+      return
+    }
     onChange(nextItem.value)
   }
 
   return (
-    <div className={cls} role="tablist" aria-label={label}>
+    <div
+      className={cls}
+      role="tablist"
+      aria-label={label}
+      onBlur={(event: FocusEvent<HTMLDivElement>) => {
+        if (activation !== 'manual') return
+        const next = event.relatedTarget
+        if (next instanceof Node && event.currentTarget.contains(next)) return
+        setManualRover({ value, index: -1 })
+      }}
+    >
       {items.map((item, index) => {
         const selected = item.value === value
         const hasCount = typeof item.count === 'number' && item.count > 0
@@ -92,7 +115,7 @@ export function Tabs<V extends string = string>({
             aria-controls={tabPanelId(idBase, item.value)}
             aria-label={hasCount ? `${item.label} ${item.count}` : item.label}
             aria-selected={selected}
-            tabIndex={index === tabStopIndex ? 0 : -1}
+            tabIndex={index === roverIndex ? 0 : -1}
             className={['tab', selected && 'is-active'].filter(Boolean).join(' ')}
             onClick={() => onChange(item.value)}
             onKeyDown={(event) => handleKeyDown(event, index)}

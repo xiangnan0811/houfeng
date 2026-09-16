@@ -124,7 +124,7 @@ const anomalyDestinations: Readonly<Record<string, ExpectedDestination>> = {
 const relationDestinations: Readonly<Record<string, ExpectedDestination>> = {
   subscriptions: {
     kind: 'route',
-    to: (vpsId) => `/subscriptions?${new URLSearchParams({ vps_id: vpsId }).toString()}`,
+    to: (vpsId) => `/subscriptions?${new URLSearchParams({ vps_id: vpsId, view: 'details' }).toString()}`,
   },
   monitoring_instances: {
     kind: 'command',

@@ -215,7 +215,7 @@ describe('ProvidersPage', () => {
     expect(screen.getByRole('link', { name: '在 Trustpilot 搜索 Hetzner 外部口碑' })).toHaveAttribute('href', 'https://www.trustpilot.com/search?query=Hetzner')
     expect(screen.getByRole('link', { name: '在 VPSBenchmarks 搜索 Hetzner 外部口碑' })).toHaveAttribute('href', 'https://www.vpsbenchmarks.com/search?search=Hetzner')
     expect(screen.getByRole('link', { name: '查看 Hetzner VPS' })).toHaveAttribute('href', '/vps?provider_id=pv_001')
-    expect(screen.getByRole('link', { name: '查看 Hetzner 订阅' })).toHaveAttribute('href', '/subscriptions?provider_id=pv_001')
+    expect(screen.getByRole('link', { name: '查看 Hetzner 订阅' })).toHaveAttribute('href', '/subscriptions?provider_id=pv_001&view=details')
     const decisionLink = screen.getByRole('link', { name: '查看 Hetzner 服务商组合决策' })
     expect(decisionLink).toHaveClass('provider-directory-entry-link--decision')
     expect(decisionLink).toHaveAttribute('href', '/asset-decisions?view=provider&renew_within_days=30&provider_id=pv_001')

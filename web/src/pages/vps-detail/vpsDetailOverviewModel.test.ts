@@ -359,7 +359,7 @@ describe('vpsDetailOverviewModel', () => {
     expect(subscriptionItem?.tone).toBe('notice')
     expect(subscriptionItem?.quickActions.map((action) => action.label)).not.toContain('新增订阅事实')
     expect(model.judgement.attentionItems.map((item) => item.title)).toContain('订阅证据暂不可用')
-    expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({ kind: 'link', label: '核对订阅', to: '/subscriptions?vps_id=vps_001' })
+    expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({ kind: 'link', label: '核对订阅', to: '/subscriptions?vps_id=vps_001&view=details' })
   })
 
   it('promotes true missing subscription only after a successful empty subscription response', () => {

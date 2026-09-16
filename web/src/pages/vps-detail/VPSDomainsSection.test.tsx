@@ -92,4 +92,41 @@ describe('VPSDomainsSection', () => {
     expect(within(unused).queryByText('Gateway')).not.toBeInTheDocument()
     expect(within(unused).queryByText('svc_001')).not.toBeInTheDocument()
   })
+
+  it('renders error message and service retry button when error and onRetryServices are provided', () => {
+    const onRetry = vi.fn()
+    render(
+      <MemoryRouter>
+        <VPSDomainsSection
+          domains={[domain({ service_id: 'svc_001' })]}
+          services={[]}
+          error="加载关联服务失败"
+          notice={null}
+          onCreate={vi.fn()}
+          onRetryServices={onRetry}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('加载关联服务失败')
+    const retryBtn = screen.getByRole('button', { name: '重试加载服务' })
+    expect(retryBtn).toBeInTheDocument()
+    retryBtn.click()
+    expect(onRetry).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('svc_001')).toBeInTheDocument()
+  })
+
+  it('renders notice status when notice is provided', () => {
+    render(
+      <MemoryRouter>
+        <VPSDomainsSection
+          domains={[domain()]}
+          services={[]}
+          error={null}
+          notice="正在加载关联服务…"
+          onCreate={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载关联服务…')
+  })
 })

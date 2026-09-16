@@ -45,7 +45,7 @@ const CORE_ROUTES = [
   { name: 'events', path: '/events', heading: /^事件流$/ },
   { name: 'command-audit', path: '/command-audit', heading: /^命令审计$/ },
   { name: 'providers', path: '/providers', heading: /服务商目录$/ },
-  { name: 'subscriptions', path: '/subscriptions', heading: /订阅成本中枢$/ },
+  { name: 'subscriptions', path: '/subscriptions', primaryAction: '新建订阅' },
   { name: 'settings', path: '/settings', heading: /^系统设置$/ },
 ] as const
 
@@ -240,7 +240,7 @@ async function captureDocumentResponse(
 async function gotoAuditedRoute(
   page: Page,
   audit: StagingAudit,
-  route: { path: string; heading: string | RegExp },
+  route: { path: string } & ({ heading: string | RegExp } | { primaryAction: string }),
 ): Promise<void> {
   if (page.url() !== 'about:blank') {
     await audit.waitForRequestsToSettle()
@@ -257,7 +257,13 @@ async function gotoAuditedRoute(
   const main = page.locator('main#main-content')
   await expect(main).toBeVisible()
   await expect(main).not.toBeEmpty()
-  await expect(page.getByRole('heading', { name: route.heading }).first()).toBeVisible()
+  await expect(page).toHaveURL((url) => `${url.pathname}${url.search}` === route.path)
+  if ('primaryAction' in route) {
+    await expect(main.getByRole('heading', { level: 1 })).toBeVisible()
+    await expect(main.getByRole('button', { name: route.primaryAction, exact: true })).toBeVisible()
+  } else {
+    await expect(main.getByRole('heading', { name: route.heading }).first()).toBeVisible()
+  }
   await audit.waitForRequestsToSettle()
   await page.evaluate(() => document.fonts.ready)
   await expect(main.locator('.page-state--loading')).toHaveCount(0)

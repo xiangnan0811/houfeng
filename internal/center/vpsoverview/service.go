@@ -423,7 +423,7 @@ func (service *Service) buildOverview(identitySource IdentitySource, collected s
 			Section: monitoring.Section,
 		},
 		{
-			Kind: "subscriptions", Label: "订阅", Route: "/subscriptions?vps_id=" + url.QueryEscape(identity.VPSID),
+			Kind: "subscriptions", Label: "订阅", Route: "/subscriptions?vps_id=" + url.QueryEscape(identity.VPSID) + "&view=details",
 			Count: renewal.ActiveSubscriptions, Status: relationStatus(collected.renewalErr, renewal.Status),
 			Section: renewal.Section,
 		},

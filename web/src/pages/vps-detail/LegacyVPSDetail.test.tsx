@@ -815,7 +815,7 @@ describe('LegacyVPSDetail', () => {
     const relations = screen.getByRole('region', { name: '服务与域名' })
     const activity = screen.getByRole('region', { name: '最近活动' })
 
-    expect(within(screen.getByLabelText('当前判断')).getByRole('link', { name: '订阅' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001')
+    expect(within(screen.getByLabelText('当前判断')).getByRole('link', { name: '订阅' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001&view=details')
     expect(within(screen.getByLabelText('运行观测')).getByRole('button', { name: '查看实例' })).toBeInTheDocument()
     expect(within(screen.getByLabelText('运行观测')).getByRole('link', { name: '查看监控实例' })).toHaveAttribute('href', '/monitoring/mi_001?return_vps=vps_001')
     expect(within(screen.getByLabelText('运行观测')).getByRole('button', { name: '接入/升级 agent' })).toBeInTheDocument()
@@ -972,7 +972,7 @@ describe('LegacyVPSDetail', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     const currentJudgement = screen.getByLabelText('当前判断')
     expect(within(currentJudgement).getAllByText('订阅证据暂不可用')[0]).toBeInTheDocument()
-    expect(within(currentJudgement).getByRole('link', { name: '核对订阅' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001')
+    expect(within(currentJudgement).getByRole('link', { name: '核对订阅' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001&view=details')
     expect(within(currentJudgement).getAllByText('subscription backend down')[0]).toBeInTheDocument()
     const operationFeedback = screen.queryByLabelText('VPS 操作反馈')
     if (operationFeedback) {

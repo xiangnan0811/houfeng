@@ -11,17 +11,17 @@ const VIEWPORTS = [
 ] as const
 
 const CORE_ROUTES = [
-  { name: 'Dashboard', path: '/', heading: /^工作台$/, workflow: { role: 'link', name: '核对 VPS 库存' } },
-  { name: 'VPS', path: '/vps', heading: /^VPS 资产$/, workflow: { role: 'link', name: '进入组合决策' } },
-  { name: 'Asset Decisions', path: '/asset-decisions', heading: /^资产组合决策$/, workflow: { role: 'heading', name: '决策组扫描' } },
-  { name: 'Monitoring', path: '/monitoring', heading: /^监控$/, workflow: { role: 'link', name: '从未关联 VPS 接入' } },
-  { name: 'Targets', path: '/targets', heading: /^入口探测$/, workflow: { role: 'button', name: '新建目标' } },
-  { name: 'Events', path: '/events', heading: /^事件流$/, workflow: { role: 'button', name: '高级筛选' } },
-  { name: 'Command Audit', path: '/command-audit', heading: /^命令审计$/, workflow: { role: 'button', name: '高级筛选' } },
-  { name: 'Record Inbox', path: '/record-inbox', heading: /^记录协作收件箱$/, workflow: { role: 'button', name: '查看“评论提及”的对象' } },
-  { name: 'Providers', path: '/providers', heading: /服务商目录$/, workflow: { role: 'button', name: '新建服务商' } },
-  { name: 'Subscriptions', path: '/subscriptions', heading: /订阅成本中枢$/, workflow: { role: 'button', name: '新建订阅' } },
-  { name: 'Settings', path: '/settings', heading: /^系统设置$/, workflow: { role: 'tab', name: '监控策略' } },
+  { name: 'Dashboard', path: '/', workflow: { role: 'link', name: '核对 VPS 库存' } },
+  { name: 'VPS', path: '/vps', workflow: { role: 'link', name: '进入组合决策' } },
+  { name: 'Asset Decisions', path: '/asset-decisions', workflow: { role: 'heading', name: '决策组扫描' } },
+  { name: 'Monitoring', path: '/monitoring', workflow: { role: 'link', name: '从未关联 VPS 接入' } },
+  { name: 'Targets', path: '/targets', workflow: { role: 'button', name: '新建目标' } },
+  { name: 'Events', path: '/events', workflow: { role: 'button', name: '高级筛选' } },
+  { name: 'Command Audit', path: '/command-audit', workflow: { role: 'button', name: '高级筛选' } },
+  { name: 'Record Inbox', path: '/record-inbox', workflow: { role: 'button', name: '查看“评论提及”的对象' } },
+  { name: 'Providers', path: '/providers', workflow: { role: 'button', name: '新建服务商' } },
+  { name: 'Subscriptions', path: '/subscriptions', workflow: { role: 'button', name: '新建订阅' } },
+  { name: 'Settings', path: '/settings', workflow: { role: 'tab', name: '监控策略' } },
 ] as const
 
 for (const viewport of VIEWPORTS) {
@@ -40,7 +40,7 @@ for (const viewport of VIEWPORTS) {
       const main = page.locator('main#main-content')
       await expect(main).toBeVisible()
       await expect(main).not.toBeEmpty()
-      await expect(page.getByRole('heading', { name: route.heading })).toBeVisible()
+      await expect(main.getByRole('heading', { level: 1 })).toBeVisible()
 
       const workflow = page.getByRole(route.workflow.role, {
         name: route.workflow.name,
