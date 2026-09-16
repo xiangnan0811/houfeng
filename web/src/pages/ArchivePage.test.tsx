@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -98,7 +98,6 @@ describe('ArchivePage', () => {
 
     await waitFor(() => expect(screen.getAllByText('Tokyo Retired').length).toBeGreaterThan(0))
     expect(screen.getByRole('heading', { name: '归档资产' })).toBeInTheDocument()
-    expect(screen.getByText('只保留已取消、已归档 VPS 的清单入口；单台历史在详情页只读查看。')).toBeInTheDocument()
     expect(screen.getByText('USD 24.00/月 + EUR 9.00/月')).toBeInTheDocument()
     const row = screen.getByText('Tokyo Retired').closest('tr')
     expect(row).not.toBeNull()
@@ -119,5 +118,58 @@ describe('ArchivePage', () => {
       credentials: 'include',
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves VPS inventory and allows retry when subscriptions request fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse([archivedVPS]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'subscription backend unavailable' }, 500))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <ArchivePage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('Tokyo Retired').length).toBeGreaterThan(0))
+    expect(screen.getByText(/历史订阅数据加载失败/)).toBeInTheDocument()
+    expect(screen.queryByText('暂无月成本')).not.toBeInTheDocument()
+
+    fetchMock.mockResolvedValueOnce(mockJSONResponse([subscription]))
+    const retryButton = screen.getByRole('button', { name: '重试加载订阅' })
+    fireEvent.click(retryButton)
+
+    await waitFor(() => expect(screen.getByText('USD 24.00/月')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/subscriptions?sort=renew_at&order=asc&asset_scope=historical', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('handles VPS load failure with retry button without clearing page error until recovered', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'database failure' }, 500))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <ArchivePage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '归档资产加载失败' })).toBeInTheDocument())
+    const retryBtn = screen.getByRole('button', { name: '重试加载资产' })
+    expect(retryBtn).toBeInTheDocument()
+
+    fetchMock.mockResolvedValueOnce(mockJSONResponse([archivedVPS]))
+    fireEvent.click(retryBtn)
+
+    await waitFor(() => expect(screen.getByText('Tokyo Retired')).toBeInTheDocument())
   })
 })

@@ -1,24 +1,15 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-import { MonoDigits } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, listSubscriptions, listVPSAssets } from '../lib/api'
 import type { SubscriptionRecord, VPSAssetRecord } from '../lib/types'
 import { ArchiveVPSWorkspace } from './archive/ArchiveVPSWorkspace'
 
-type PageState = {
+type AsyncState<T> = {
   loading: boolean
   error: string | null
-  vps: VPSAssetRecord[]
-  subscriptions: SubscriptionRecord[]
-}
-
-const INITIAL_STATE: PageState = {
-  loading: true,
-  error: null,
-  vps: [],
-  subscriptions: [],
+  data: T
 }
 
 function describeError(error: unknown, fallback: string): string {
@@ -40,89 +31,116 @@ function renderEmptyArchive(action?: ReactNode) {
 }
 
 export function ArchivePage() {
-  const [state, setState] = useState<PageState>(INITIAL_STATE)
+  const [vpsState, setVpsState] = useState<AsyncState<VPSAssetRecord[]>>({
+    loading: true,
+    error: null,
+    data: [],
+  })
+  const [subscriptionsState, setSubscriptionsState] = useState<AsyncState<SubscriptionRecord[]>>({
+    loading: true,
+    error: null,
+    data: [],
+  })
 
-  useEffect(() => {
-    let cancelled = false
+  const vpsGenRef = useRef(0)
+  const subsGenRef = useRef(0)
 
-    Promise.all([
-      listVPSAssets({ asset_scope: 'historical' }),
-      listSubscriptions({ asset_scope: 'historical', sort: 'renew_at', order: 'asc' }),
-    ])
-      .then(([vps, subscriptions]) => {
-        if (cancelled) return
-        setState({
-          loading: false,
-          error: null,
-          vps,
-          subscriptions,
-        })
+  const fetchVPS = useCallback((gen: number) => {
+    listVPSAssets({ asset_scope: 'historical' })
+      .then((data) => {
+        if (gen === vpsGenRef.current) {
+          setVpsState({ loading: false, error: null, data })
+        }
       })
       .catch((error: unknown) => {
-        if (cancelled) return
-        setState({
-          loading: false,
-          error: describeError(error, '加载归档资产失败'),
-          vps: [],
-          subscriptions: [],
-        })
+        if (gen === vpsGenRef.current) {
+          setVpsState((prev) => ({
+            loading: false,
+            error: describeError(error, '加载归档资产失败'),
+            data: prev.data,
+          }))
+        }
       })
-
-    return () => {
-      cancelled = true
-    }
   }, [])
+
+  const fetchSubscriptions = useCallback((gen: number) => {
+    listSubscriptions({ asset_scope: 'historical', sort: 'renew_at', order: 'asc' })
+      .then((data) => {
+        if (gen === subsGenRef.current) {
+          setSubscriptionsState({ loading: false, error: null, data })
+        }
+      })
+      .catch((error: unknown) => {
+        if (gen === subsGenRef.current) {
+          setSubscriptionsState((prev) => ({
+            loading: false,
+            error: describeError(error, '加载历史订阅失败'),
+            data: prev.data,
+          }))
+        }
+      })
+  }, [])
+
+  useEffect(() => {
+    vpsGenRef.current += 1
+    subsGenRef.current += 1
+    fetchVPS(vpsGenRef.current)
+    fetchSubscriptions(subsGenRef.current)
+    return () => {
+      ++vpsGenRef.current
+      ++subsGenRef.current
+    }
+  }, [fetchVPS, fetchSubscriptions])
+
+  const handleRetryVPS = useCallback(() => {
+    const nextGen = ++vpsGenRef.current
+    setVpsState((prev) => ({ ...prev, loading: true, error: null }))
+    fetchVPS(nextGen)
+  }, [fetchVPS])
+
+  const handleRetrySubscriptions = useCallback(() => {
+    const nextGen = ++subsGenRef.current
+    setSubscriptionsState((prev) => ({ ...prev, loading: true, error: null }))
+    fetchSubscriptions(nextGen)
+  }, [fetchSubscriptions])
 
   return (
     <div className="page archive-page">
       <header className="page__head">
-        <h1 className="page__title">归档资产</h1>
+        <div>
+          <h1 className="page__title">归档资产</h1>
+          <p className="page-sub">只读历史台账，保留已退役与取消资产的账单、时间线及取消依据。</p>
+        </div>
         <div className="page__actions">
           <Link className="btn sm secondary" to="/vps">返回 VPS</Link>
         </div>
       </header>
 
-      {state.loading ? (
+      {vpsState.loading ? (
         <PageStateView kind="loading" title="正在加载归档资产" />
-      ) : state.error ? (
+      ) : vpsState.error ? (
         <PageStateView
           kind="error"
           title="归档资产加载失败"
           description="归档入口暂时不可用。"
-          technicalSummary={state.error}
+          technicalSummary={vpsState.error}
+          action={
+            <div className="page-state__actions">
+              <button className="btn sm primary" type="button" onClick={handleRetryVPS}>
+                重试加载资产
+              </button>
+              <Link className="btn sm secondary" to="/vps">返回 VPS</Link>
+            </div>
+          }
         />
-      ) : state.vps.length === 0 ? (
+      ) : vpsState.data.length === 0 ? (
         renderEmptyArchive(<Link className="btn sm secondary" to="/vps">返回 VPS</Link>)
       ) : (
-        <>
-          <section className="hero-panel archive-page__summary">
-            <div className="hero-panel__content">
-              <h2 className="hero-panel__title">历史资产仍保留为判断依据</h2>
-              <p className="hero-panel__description">
-                这些 VPS 不再进入运营、订阅和资产组合决策主流程；保留账单和时间线用于回看服务商质量、成本与取消依据。
-              </p>
-            </div>
-            <div className="hero-panel__meta">
-              <div className="hero-meta-card">
-                <span>归档 VPS</span>
-                <strong><MonoDigits>{state.vps.length}</MonoDigits></strong>
-              </div>
-              <div className="hero-meta-card">
-                <span>历史订阅</span>
-                <strong><MonoDigits>{state.subscriptions.length}</MonoDigits></strong>
-              </div>
-              <div className="hero-meta-card">
-                <span>查看方式</span>
-                <strong>列表进入详情</strong>
-              </div>
-            </div>
-          </section>
-
-          <ArchiveVPSWorkspace
-            vpsRows={state.vps}
-            subscriptions={state.subscriptions}
-          />
-        </>
+        <ArchiveVPSWorkspace
+          vpsRows={vpsState.data}
+          subscriptionsState={subscriptionsState}
+          onRetrySubscriptions={handleRetrySubscriptions}
+        />
       )}
     </div>
   )
