@@ -117,6 +117,33 @@ func (r *PostgresSettingsRepository) IPQualityEnabled(ctx context.Context) (bool
 	}
 	return enabled, nil
 }
+func (r *PostgresSettingsRepository) GetPersistedIncidentDefaults(ctx context.Context) (centersettings.IncidentDefaults, bool, error) {
+	if ctx == nil || r == nil || r.db == nil {
+		return centersettings.IncidentDefaults{}, false, fmt.Errorf("query persisted incident defaults: invalid repository")
+	}
+	var raw []byte
+	err := r.db.QueryRow(ctx, `
+		select incident_defaults
+		from center_settings
+		where settings_id = $1`, centersettings.SingletonID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return centersettings.IncidentDefaults{}, false, nil
+	}
+	if err != nil {
+		return centersettings.IncidentDefaults{}, false, fmt.Errorf("query persisted incident defaults: %w", err)
+	}
+	if len(raw) == 0 {
+		return centersettings.IncidentDefaults{}, false, nil
+	}
+	var defaults centersettings.IncidentDefaults
+	if err := decodeSettingsJSON(raw, &defaults); err != nil {
+		return centersettings.IncidentDefaults{}, true, fmt.Errorf("decode persisted incident defaults: %w", err)
+	}
+	if _, err := centersettings.ValidateIncidentDefaults(defaults); err != nil {
+		return centersettings.IncidentDefaults{}, true, fmt.Errorf("validate persisted incident defaults: %w", err)
+	}
+	return defaults, true, nil
+}
 
 func (r *PostgresSettingsRepository) GetSettings(ctx context.Context) (centersettings.CenterSettings, error) {
 	record, err := r.scanSettingsRow(ctx, getCenterSettingsSQL, centersettings.SingletonID)

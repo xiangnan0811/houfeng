@@ -334,6 +334,7 @@ func TestMonitoringInstanceInstallCommandHandlerRequiresConfiguredPublicBaseURL(
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
 	}
 	assertAdminError(t, recorder, "public base URL is not configured")
+	assertAdminErrorCode(t, recorder, "install_command_unconfigured")
 	if repo.issueEnrollmentTokenMonitoringInstanceID != "" {
 		t.Fatalf("IssueMonitoringInstanceEnrollmentToken called for %q, want not called", repo.issueEnrollmentTokenMonitoringInstanceID)
 	}
@@ -365,6 +366,7 @@ func TestMonitoringInstanceInstallCommandHandlerRequiresReleaseVersion(t *testin
 				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
 			}
 			assertAdminError(t, recorder, "agent release version is not configured")
+			assertAdminErrorCode(t, recorder, "install_command_unconfigured")
 			if repo.issueEnrollmentTokenMonitoringInstanceID != "" {
 				t.Fatalf("IssueMonitoringInstanceEnrollmentToken called for %q, want not called", repo.issueEnrollmentTokenMonitoringInstanceID)
 			}
@@ -380,9 +382,10 @@ func TestMonitoringInstanceInstallCommandHandlerMapsRepositoryErrors(t *testing.
 		repoErr    error
 		wantStatus int
 		wantError  string
+		wantCode   string
 	}{
 		{name: "missing monitoring instance", repoErr: monitoringinstances.ErrMonitoringInstanceNotFound, wantStatus: http.StatusNotFound, wantError: "monitoring instance not found"},
-		{name: "archived monitoring instance", repoErr: monitoringinstances.ErrArchivedMonitoringInstance, wantStatus: http.StatusConflict, wantError: "archived monitoring instance"},
+		{name: "archived monitoring instance", repoErr: monitoringinstances.ErrArchivedMonitoringInstance, wantStatus: http.StatusConflict, wantError: "archived monitoring instance", wantCode: "monitoring_instance_archived"},
 		{name: "repository failure", repoErr: errors.New("db boom"), wantStatus: http.StatusInternalServerError, wantError: "internal server error"},
 	}
 
@@ -404,6 +407,9 @@ func TestMonitoringInstanceInstallCommandHandlerMapsRepositoryErrors(t *testing.
 				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
 			}
 			assertAdminError(t, recorder, tt.wantError)
+			if tt.wantCode != "" {
+				assertAdminErrorCode(t, recorder, tt.wantCode)
+			}
 		})
 	}
 }
@@ -631,5 +637,16 @@ func assertAdminError(t *testing.T, recorder *httptest.ResponseRecorder, wantMes
 
 	if body["error"] != wantMessage {
 		t.Fatalf("error = %q, want %q", body["error"], wantMessage)
+	}
+}
+func assertAdminErrorCode(t *testing.T, recorder *httptest.ResponseRecorder, wantCode string) {
+	t.Helper()
+
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if body["code"] != wantCode {
+		t.Fatalf("code = %q, want %q", body["code"], wantCode)
 	}
 }

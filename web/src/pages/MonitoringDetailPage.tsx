@@ -50,6 +50,7 @@ import {
   describeError,
   mergeNonMetadataMonitoringInstanceRecord,
   parseLabels,
+  validateReturnVPSId,
 } from './monitoring-detail/monitoringDetailHelpers'
 import type {
   BindingConflictAction,
@@ -116,7 +117,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [onboardingReturnVPSId, setOnboardingReturnVPSId] = useState<string | null>(null)
+  const returnVPSId = validateReturnVPSId(searchParams.get('return_vps'))
   const [state, setState] = useState<MonitoringDetailPageState>(INITIAL_MONITORING_DETAIL_STATE)
   const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
@@ -203,14 +204,13 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   }, [monitoringInstanceId])
 
   // Deep-link: create/list redirects land here with ?onboarding=1 to open the
-  // onboarding drawer directly. Consume the param so a refresh/back doesn't reopen it.
+  // onboarding drawer directly. Consume only the onboarding param so a refresh/back
+  // doesn't reopen it, while retaining navigation origin and state.
   useEffect(() => {
     if (searchParams.get('onboarding') !== '1') return
     setOnboardingOpen(true)
-    setOnboardingReturnVPSId(searchParams.get('return_vps'))
     const next = new URLSearchParams(searchParams)
     next.delete('onboarding')
-    next.delete('return_vps')
     setSearchParams(next, { replace: true, state: location.state })
   }, [searchParams, setSearchParams, location.state])
 
@@ -1074,7 +1074,12 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   }
 
   if (missingMonitoringInstanceId || error || !monitoringInstance) {
-    return <MonitoringDetailUnavailable message={error ?? '未找到监控实例'} />
+    return (
+      <MonitoringDetailUnavailable
+        message={error ?? '未找到监控实例'}
+        returnVPSId={returnVPSId}
+      />
+    )
   }
 
   const hasCurrentBindingConflictState = bindingConflictState.requestedMonitoringInstanceId === monitoringInstanceId
@@ -1210,13 +1215,11 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   }
 
   function openOnboardingDrawer() {
-    setOnboardingReturnVPSId(null)
     setOnboardingOpen(true)
   }
 
   function closeOnboardingDrawer() {
     setOnboardingOpen(false)
-    setOnboardingReturnVPSId(null)
   }
 
   function closeHistoryDrawer() {
@@ -1517,7 +1520,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       onCloseCommand={closeCommandDrawer}
       onExecuteCommand={(commandId, options) => void handleCommandExecute(commandId, options)}
       onboardingOpen={onboardingOpen}
-      onboardingReturnVPSId={onboardingReturnVPSId}
+      onboardingReturnVPSId={returnVPSId}
       onOpenOnboarding={openOnboardingDrawer}
       onCloseOnboarding={closeOnboardingDrawer}
     />

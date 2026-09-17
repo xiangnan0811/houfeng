@@ -12,20 +12,35 @@ import (
 	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/recordauth"
+	recordsettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
 	"houfeng/internal/center/vpsoverview"
 )
 
 type fakeIPQualityAvailability struct {
-	enabled bool
-	err     error
-	calls   int
+	enabled       bool
+	err           error
+	calls         int
+	settings      recordsettings.CenterSettings
+	settingsErr   error
+	settingsCalls int
 }
 
 func (fake *fakeIPQualityAvailability) IPQualityEnabled(context.Context) (bool, error) {
 	fake.calls++
 	return fake.enabled, fake.err
+}
+
+func (fake *fakeIPQualityAvailability) GetPersistedIncidentDefaults(context.Context) (recordsettings.IncidentDefaults, bool, error) {
+	fake.settingsCalls++
+	if fake.settingsErr != nil {
+		return recordsettings.IncidentDefaults{}, false, fake.settingsErr
+	}
+	if fake.settings.IncidentDefaults.HeartbeatIntervalSeconds == 0 {
+		return recordsettings.Default().IncidentDefaults, false, nil
+	}
+	return fake.settings.IncidentDefaults, true, nil
 }
 
 func testOverviewRepository(

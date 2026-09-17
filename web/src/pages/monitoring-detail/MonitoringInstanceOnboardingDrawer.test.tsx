@@ -252,3 +252,74 @@ describe('MonitoringInstanceOnboardingDrawer issue lifecycle', () => {
     expect(screen.queryByText(INSTALL_COMMAND)).not.toBeInTheDocument()
   })
 })
+
+describe('MonitoringInstanceOnboardingDrawer install command error diagnosis', () => {
+  afterEach(() => {
+    copyMock.mockReset()
+    copyMock.mockResolvedValue(true)
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('surfaces configuration guidance when install command is unconfigured', async () => {
+    stubInstallCommand(() =>
+      mockJSONResponse(
+        {
+          error: 'public base URL is not configured',
+          code: 'install_command_unconfigured',
+        },
+        409,
+      ),
+    )
+
+    render(<DrawerHarness monitoringInstance={instance()} open onClose={vi.fn()} />)
+    const drawer = screen.getByRole('dialog', { name: '监控实例接入抽屉' })
+    fireEvent.click(within(drawer).getByRole('button', { name: '生成一键安装命令' }))
+
+    const errorAlert = await within(drawer).findByRole('alert')
+    expect(errorAlert).toHaveTextContent('HOUFENG_PUBLIC_BASE_URL')
+    expect(errorAlert).toHaveTextContent('public base URL is not configured')
+  })
+
+  it('explains archived instance cannot be installed and avoids configuration guidance', async () => {
+    stubInstallCommand(() =>
+      mockJSONResponse(
+        {
+          error: 'archived monitoring instance',
+          code: 'monitoring_instance_archived',
+        },
+        409,
+      ),
+    )
+
+    render(<DrawerHarness monitoringInstance={instance()} open onClose={vi.fn()} />)
+    const drawer = screen.getByRole('dialog', { name: '监控实例接入抽屉' })
+    fireEvent.click(within(drawer).getByRole('button', { name: '生成一键安装命令' }))
+
+    const errorAlert = await within(drawer).findByRole('alert')
+    expect(errorAlert).toHaveTextContent('已归档')
+    expect(errorAlert).toHaveTextContent('无法生成安装命令')
+    expect(errorAlert).not.toHaveTextContent('HOUFENG_PUBLIC_BASE_URL')
+    expect(errorAlert).not.toHaveTextContent('中心一键安装配置不完整')
+  })
+
+  it('surfaces actual error for unknown 409 conflict and avoids configuration guidance', async () => {
+    stubInstallCommand(() =>
+      mockJSONResponse(
+        {
+          error: 'resource conflict occurred',
+        },
+        409,
+      ),
+    )
+
+    render(<DrawerHarness monitoringInstance={instance()} open onClose={vi.fn()} />)
+    const drawer = screen.getByRole('dialog', { name: '监控实例接入抽屉' })
+    fireEvent.click(within(drawer).getByRole('button', { name: '生成一键安装命令' }))
+
+    const errorAlert = await within(drawer).findByRole('alert')
+    expect(errorAlert).toHaveTextContent('resource conflict occurred')
+    expect(errorAlert).not.toHaveTextContent('HOUFENG_PUBLIC_BASE_URL')
+    expect(errorAlert).not.toHaveTextContent('中心一键安装配置不完整')
+  })
+})

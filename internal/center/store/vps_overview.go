@@ -10,7 +10,10 @@ import (
 	"houfeng/internal/center/assetdomains"
 	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/assetservices"
+	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/ipquality"
+	"houfeng/internal/center/monitoringinstances"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
 	"houfeng/internal/center/vpsoverview"
@@ -30,6 +33,7 @@ type vpsOverviewIPQualitySource interface {
 
 type vpsOverviewIPQualityAvailability interface {
 	IPQualityEnabled(context.Context) (bool, error)
+	GetPersistedIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error)
 }
 
 type vpsOverviewSubscriptionSource interface {
@@ -55,6 +59,7 @@ type VPSOverviewRepository struct {
 	subscriptions vpsOverviewSubscriptionSource
 	services      vpsOverviewServiceSource
 	domains       vpsOverviewDomainSource
+	now           func() time.Time
 }
 
 // NewVPSOverviewRepository wires the overview source reader.
@@ -74,7 +79,14 @@ func NewVPSOverviewRepository(
 	return &VPSOverviewRepository{
 		vps: vps, monitoring: monitoring, ipQuality: ipQuality, availability: availability,
 		subscriptions: subs, services: services, domains: domains,
+		now: func() time.Time { return time.Now().UTC() },
 	}, nil
+}
+func (repository *VPSOverviewRepository) nowUTC() time.Time {
+	if repository.now != nil {
+		return repository.now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 var _ vpsoverview.SourceReader = (*VPSOverviewRepository)(nil)
@@ -101,7 +113,8 @@ func (repository *VPSOverviewRepository) LoadIdentity(
 	}, nil
 }
 
-// LoadMonitoring performs exactly one monitoring authority query.
+// LoadMonitoring performs exactly one monitoring authority query and applies
+// the same persisted heartbeat policy used by incident evaluation.
 func (repository *VPSOverviewRepository) LoadMonitoring(
 	ctx context.Context,
 	vpsID string,
@@ -113,7 +126,17 @@ func (repository *VPSOverviewRepository) LoadMonitoring(
 	if err != nil {
 		return vpsoverview.MonitoringSource{}, err
 	}
-	return monitoringFromLinks(links), nil
+	if len(links) == 0 {
+		return monitoringSourceFromLinks(links), nil
+	}
+	defaults, exists, err := repository.availability.GetPersistedIncidentDefaults(ctx)
+	if err != nil {
+		return vpsoverview.MonitoringSource{}, err
+	}
+	if !exists {
+		defaults = centersettings.Default().IncidentDefaults
+	}
+	return monitoringFromLinksAt(links, repository.nowUTC(), centersettings.CenterSettings{IncidentDefaults: defaults})
 }
 
 // LoadIPQuality performs one availability check. When enabled it also does one
@@ -299,7 +322,36 @@ func factsFromVPS(record vpsassets.Record) []vpsoverview.Fact {
 	return facts
 }
 
-func monitoringFromLinks(links []assetlinks.MonitoringInstanceSummary) vpsoverview.MonitoringSource {
+func monitoringFromLinksAt(
+	links []assetlinks.MonitoringInstanceSummary,
+	now time.Time,
+	settings centersettings.CenterSettings,
+) (vpsoverview.MonitoringSource, error) {
+	result := monitoringSourceFromLinks(links)
+	if len(links) == 0 {
+		return result, nil
+	}
+	primary := primaryMonitoringLink(links)
+	if primary.LastHeartbeatAt == nil || primary.LastHeartbeatAt.IsZero() {
+		result.Health = "unknown"
+		result.Detail = "等待首次心跳"
+		result.Section.State = vpsoverview.SectionReady
+		result.Section.ReasonCode = "monitoring_first_heartbeat_missing"
+		return result, nil
+	}
+
+	policy, err := incidents.HeartbeatIncidentPolicyFromSettings(settings)
+	if err != nil {
+		return vpsoverview.MonitoringSource{}, err
+	}
+	if incidents.HeartbeatIsStale(now, *primary.LastHeartbeatAt, policy) {
+		result.Section.State = vpsoverview.SectionStale
+		result.Section.ReasonCode = "monitoring_heartbeat_stale"
+	}
+	return result, nil
+}
+
+func monitoringSourceFromLinks(links []assetlinks.MonitoringInstanceSummary) vpsoverview.MonitoringSource {
 	result := vpsoverview.MonitoringSource{
 		Section: vpsoverview.SectionState{State: vpsoverview.SectionReady},
 		Count:   len(links),
@@ -309,12 +361,7 @@ func monitoringFromLinks(links []assetlinks.MonitoringInstanceSummary) vpsovervi
 		result.Detail = "未关联监控实例"
 		return result
 	}
-	primary := links[0]
-	for _, link := range links[1:] {
-		if link.LifecycleStatus == "在用" && primary.LifecycleStatus != "在用" {
-			primary = link
-		}
-	}
+	primary := primaryMonitoringLink(links)
 	result.MonitoringInstanceID = primary.MonitoringInstanceID
 	result.Health = primary.CurrentHealthStatus
 	result.Status = primary.MonitoringStatus
@@ -326,6 +373,16 @@ func monitoringFromLinks(links []assetlinks.MonitoringInstanceSummary) vpsovervi
 		result.Section.LastSuccessAt = &observed
 	}
 	return result
+}
+
+func primaryMonitoringLink(links []assetlinks.MonitoringInstanceSummary) assetlinks.MonitoringInstanceSummary {
+	primary := links[0]
+	for _, link := range links[1:] {
+		if link.LifecycleStatus == monitoringinstances.LifecycleInUse && primary.LifecycleStatus != monitoringinstances.LifecycleInUse {
+			primary = link
+		}
+	}
+	return primary
 }
 
 func newestNonZero(current *time.Time, candidate time.Time) *time.Time {

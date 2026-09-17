@@ -28,10 +28,19 @@ const installChecklist = [
 ]
 
 function describeInstallCommandError(error: unknown) {
-  if (error instanceof ApiError && error.status === 409) {
-    return `中心一键安装配置不完整：${error.message}。请检查 HOUFENG_PUBLIC_BASE_URL 与发布版本配置后重新生成。`
+  if (error instanceof ApiError) {
+    if (error.code === 'install_command_unconfigured') {
+      const detail = error.message.trim()
+      return detail
+        ? `中心一键安装配置不完整：${detail}。请检查 HOUFENG_PUBLIC_BASE_URL 与发布版本配置后重新生成。`
+        : '中心一键安装配置不完整。请检查 HOUFENG_PUBLIC_BASE_URL 与发布版本配置后重新生成。'
+    }
+    if (error.code === 'monitoring_instance_archived') {
+      return '监控实例已归档，无法生成安装命令。'
+    }
+    return error.message
   }
-  if (error instanceof ApiError || error instanceof Error) return error.message
+  if (error instanceof Error) return error.message
   return '生成一键安装命令失败'
 }
 

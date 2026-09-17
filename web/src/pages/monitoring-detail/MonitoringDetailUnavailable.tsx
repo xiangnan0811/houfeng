@@ -1,12 +1,15 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { PageState } from '../../components/PageState'
 
 type MonitoringDetailUnavailableProps = {
   message: string
+  returnVPSId?: string | null
 }
 
-export function MonitoringDetailUnavailable({ message }: MonitoringDetailUnavailableProps) {
+export function MonitoringDetailUnavailable({ message, returnVPSId = null }: MonitoringDetailUnavailableProps) {
+  const location = useLocation()
+
   return (
     <PageState
       kind="error"
@@ -15,9 +18,24 @@ export function MonitoringDetailUnavailable({ message }: MonitoringDetailUnavail
       description={message}
       technicalSummary={message}
       action={
-        <Link className="text-link" to="/monitoring">
-          返回监控实例列表
-        </Link>
+        returnVPSId ? (
+          <>
+            <Link
+              className="text-link"
+              to={`/vps/${encodeURIComponent(returnVPSId)}`}
+              state={location.state}
+            >
+              返回来源 VPS
+            </Link>
+            <Link className="text-link" to="/monitoring">
+              返回监控实例列表
+            </Link>
+          </>
+        ) : (
+          <Link className="text-link" to="/monitoring">
+            返回监控实例列表
+          </Link>
+        )
       }
     />
   )

@@ -124,3 +124,11 @@ export function formatAssetLocation(vps: VPSSummary): string {
 export function isBindingConflictStatus(status: MonitoringInstanceRecord['binding_status']) {
   return status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
 }
+
+export function validateReturnVPSId(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (!/^[a-zA-Z0-9._-]+$/.test(trimmed)) return null
+  return trimmed
+}

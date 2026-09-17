@@ -3983,7 +3983,7 @@ describe('MonitoringDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('location-probe')).toHaveTextContent('/monitoring/mi_001')
       expect(screen.getByTestId('location-probe')).not.toHaveTextContent('onboarding=')
-      expect(screen.getByTestId('location-probe')).not.toHaveTextContent('return_vps=')
+      expect(screen.getByTestId('location-probe')).toHaveTextContent('return_vps=vps_001')
     })
     expect(screen.getByTestId('location-probe')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
 
@@ -3999,6 +3999,288 @@ describe('MonitoringDetailPage', () => {
     fireEvent.click(screen.getByRole('link', { name: 'tg_001' }))
     expect(screen.getByTestId('location-probe')).toHaveTextContent('/targets/tg_001')
     expect(screen.getByTestId('location-probe')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
+  })
+
+  describe('handoff gap H-01: VPS origin retention and return provenance', () => {
+    const sampleDetail = {
+      monitoring_instance_id: 'mi_001',
+      display_name: 'Tokyo Edge',
+      region: 'ap-northeast-1',
+      city: 'Tokyo',
+      provider: 'Vultr',
+      lifecycle_status: '在用',
+      monitoring_status: '启用',
+      binding_status: '已绑定',
+      labels: ['edge'],
+      note: '',
+      current_health_status: '正常',
+      last_heartbeat_at: '2026-04-24T09:00:00Z',
+      last_sync_at: '2026-04-24T09:05:00Z',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-24T09:05:00Z',
+    }
+
+    it('retains validated origin independent of onboarding and displays "返回来源 VPS" when unlinked', async () => {
+      const navState = { from: 'vps-workbench' }
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input)
+        if (path === '/api/monitoring-instances/mi_001') return mockJSONResponse(sampleDetail)
+        if (path === '/api/monitoring-instances/mi_001/runtime-facts') return mockJSONResponse({ monitoring_instance_id: 'mi_001', latest_host_sample: null, recent_host_samples: [] })
+        if (path === '/api/monitoring-instances/mi_001/incidents') return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/events') return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/vps') return mockJSONResponse([])
+        return mockJSONResponse([])
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      render(
+        <MemoryRouter
+          initialEntries={[{
+            pathname: '/monitoring/mi_001',
+            search: '?return_vps=vps_tokyo_origin',
+            state: navState,
+          }]}
+        >
+          <Routes>
+            <Route
+              path="/monitoring/:monitoringInstanceId"
+              element={(
+                <>
+                  <LocationStateProbe />
+                  <MonitoringDetailPage />
+                </>
+              )}
+            />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(screen.getByRole('link', { name: '未关联' })).toBeInTheDocument())
+      expect(screen.queryByRole('dialog', { name: '监控实例接入抽屉' })).not.toBeInTheDocument()
+      expect(screen.getByRole('link', { name: '未关联' })).toHaveAttribute('href', '/vps?view=unlinked')
+      const returnLink = screen.getByRole('link', { name: '返回来源 VPS' })
+      expect(returnLink).toHaveAttribute('href', '/vps/vps_tokyo_origin')
+      expect(screen.getByTestId('location-probe')).toHaveAttribute('data-state', JSON.stringify(navState))
+    })
+
+    it('displays "返回来源 VPS" when relation fetch fails', async () => {
+      const navState = { from: 'vps-workbench' }
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input)
+        if (path === '/api/monitoring-instances/mi_001') return mockJSONResponse(sampleDetail)
+        if (path === '/api/monitoring-instances/mi_001/runtime-facts') return mockJSONResponse({ monitoring_instance_id: 'mi_001', latest_host_sample: null, recent_host_samples: [] })
+        if (path === '/api/monitoring-instances/mi_001/incidents') return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/events') return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/vps') return mockJSONResponse({ error: 'failed' }, 500)
+        return mockJSONResponse([])
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      render(
+        <MemoryRouter
+          initialEntries={[{
+            pathname: '/monitoring/mi_001',
+            search: '?return_vps=vps_tokyo_origin',
+            state: navState,
+          }]}
+        >
+          <Routes>
+            <Route
+              path="/monitoring/:monitoringInstanceId"
+              element={(
+                <>
+                  <LocationStateProbe />
+                  <MonitoringDetailPage />
+                </>
+              )}
+            />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(screen.getByText('VPS 关联未同步')).toBeInTheDocument())
+      const returnLink = screen.getByRole('link', { name: '返回来源 VPS' })
+      expect(returnLink).toHaveAttribute('href', '/vps/vps_tokyo_origin')
+    })
+
+    it('displays "返回来源 VPS" when linked to a different VPS while truthfully showing actual link', async () => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input)
+        if (path === '/api/monitoring-instances/mi_001') return mockJSONResponse(sampleDetail)
+        if (path === '/api/monitoring-instances/mi_001/runtime-facts') return mockJSONResponse({ monitoring_instance_id: 'mi_001', latest_host_sample: null, recent_host_samples: [] })
+        if (path === '/api/monitoring-instances/mi_001/incidents') return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/events') return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/vps') {
+          return mockJSONResponse([{
+            vps_id: 'vps_other_002',
+            display_name: 'Other Edge VPS',
+            provider_id: 'pv_001',
+            provider_name: 'Hetzner',
+            country: 'JP',
+            region: 'Kanto',
+            city: 'Tokyo',
+            lifecycle_status: 'active',
+            usage_status: 'in_use',
+            renewal_decision: 'keep',
+            importance: 'normal',
+            labels: [],
+            archived_at: null,
+            linked_at: '2026-04-24T09:06:00Z',
+            note: '',
+          }])
+        }
+        return mockJSONResponse([])
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      render(
+        <MemoryRouter
+          initialEntries={[{
+            pathname: '/monitoring/mi_001',
+            search: '?return_vps=vps_tokyo_origin',
+          }]}
+        >
+          <Routes>
+            <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(screen.getByText('Other Edge VPS')).toBeInTheDocument())
+      expect(screen.getByRole('link', { name: 'Other Edge VPS' })).toHaveAttribute('href', '/vps/vps_other_002')
+      const returnLink = screen.getByRole('link', { name: '返回来源 VPS' })
+      expect(returnLink).toHaveAttribute('href', '/vps/vps_tokyo_origin')
+    })
+
+    it('does not display redundant "返回来源 VPS" when actual linked VPS is the origin VPS', async () => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input)
+        if (path === '/api/monitoring-instances/mi_001') return mockJSONResponse(sampleDetail)
+        if (path === '/api/monitoring-instances/mi_001/runtime-facts') return mockJSONResponse({ monitoring_instance_id: 'mi_001', latest_host_sample: null, recent_host_samples: [] })
+        if (path === '/api/monitoring-instances/mi_001/incidents') return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/events') return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/vps') {
+          return mockJSONResponse([{
+            vps_id: 'vps_tokyo_origin',
+            display_name: 'Tokyo Origin VPS',
+            provider_id: 'pv_001',
+            provider_name: 'Hetzner',
+            country: 'JP',
+            region: 'Kanto',
+            city: 'Tokyo',
+            lifecycle_status: 'active',
+            usage_status: 'in_use',
+            renewal_decision: 'keep',
+            importance: 'normal',
+            labels: [],
+            archived_at: null,
+            linked_at: '2026-04-24T09:06:00Z',
+            note: '',
+          }])
+        }
+        return mockJSONResponse([])
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      render(
+        <MemoryRouter
+          initialEntries={[{
+            pathname: '/monitoring/mi_001',
+            search: '?return_vps=vps_tokyo_origin',
+          }]}
+        >
+          <Routes>
+            <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(screen.getByText('Tokyo Origin VPS')).toBeInTheDocument())
+      expect(screen.getByRole('link', { name: 'Tokyo Origin VPS' })).toHaveAttribute('href', '/vps/vps_tokyo_origin')
+      expect(screen.queryByRole('link', { name: '返回来源 VPS' })).not.toBeInTheDocument()
+    })
+
+    it('offers "返回来源 VPS" on unavailable page when monitoring instance is not found', async () => {
+      const navState = { from: 'vps-workbench' }
+      const fetchMock = vi.fn(async () => mockJSONResponse({ error: '监控实例不存在' }, 404))
+      vi.stubGlobal('fetch', fetchMock)
+
+      render(
+        <MemoryRouter
+          initialEntries={[{
+            pathname: '/monitoring/mi_missing',
+            search: '?return_vps=vps_tokyo_origin',
+            state: navState,
+          }]}
+        >
+          <Routes>
+            <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(screen.getByRole('heading', { name: '监控实例详情不可用' })).toBeInTheDocument())
+      const returnLink = screen.getByRole('link', { name: '返回来源 VPS' })
+      expect(returnLink).toHaveAttribute('href', '/vps/vps_tokyo_origin')
+      expect(screen.getByRole('link', { name: '返回监控实例列表' })).toHaveAttribute('href', '/monitoring')
+    })
+
+    it('rejects unsafe or invalid return_vps and never renders malicious links', async () => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input)
+        if (path === '/api/monitoring-instances/mi_001') return mockJSONResponse(sampleDetail)
+        if (path === '/api/monitoring-instances/mi_001/runtime-facts') return mockJSONResponse({ monitoring_instance_id: 'mi_001', latest_host_sample: null, recent_host_samples: [] })
+        if (path === '/api/monitoring-instances/mi_001/incidents') return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/events') return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/vps') return mockJSONResponse([])
+        return mockJSONResponse([])
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      render(
+        <MemoryRouter
+          initialEntries={[{
+            pathname: '/monitoring/mi_001',
+            search: '?return_vps=javascript:alert(1)',
+          }]}
+        >
+          <Routes>
+            <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(screen.getByRole('link', { name: '未关联' })).toBeInTheDocument())
+      expect(screen.queryByRole('link', { name: '返回来源 VPS' })).not.toBeInTheDocument()
+      expect(screen.getByRole('link', { name: '未关联' })).toBeInTheDocument()
+    })
+
+    it('preserves normal no-origin behavior without "返回来源 VPS"', async () => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input)
+        if (path === '/api/monitoring-instances/mi_001') return mockJSONResponse(sampleDetail)
+        if (path === '/api/monitoring-instances/mi_001/runtime-facts') return mockJSONResponse({ monitoring_instance_id: 'mi_001', latest_host_sample: null, recent_host_samples: [] })
+        if (path === '/api/monitoring-instances/mi_001/incidents') return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/events') return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/vps') return mockJSONResponse([])
+        return mockJSONResponse([])
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      render(
+        <MemoryRouter initialEntries={['/monitoring/mi_001']}>
+          <Routes>
+            <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(screen.getByRole('link', { name: '未关联' })).toBeInTheDocument())
+      expect(screen.queryByRole('link', { name: '返回来源 VPS' })).not.toBeInTheDocument()
+      expect(screen.getByRole('link', { name: '未关联' })).toBeInTheDocument()
+    })
   })
 
 

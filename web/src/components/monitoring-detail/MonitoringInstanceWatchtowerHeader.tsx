@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 
 import { StatusBadge } from '../StatusBadge'
 import { Hostname, MonoDigits, Timestamp } from '../atoms'
 import { Button } from '../atoms/Button'
 import { formatLabelList, formatUptime } from '../../lib/format'
 import type { HostSample, MonitoringInstanceRecord, VPSSummary } from '../../lib/types'
+import { validateReturnVPSId } from '../../pages/monitoring-detail/monitoringDetailHelpers'
 
 export type MonitoringInstanceRuntimeAction = 'enter-maintenance' | 'exit-maintenance' | 'pause' | 'resume'
 
@@ -25,6 +26,7 @@ type Props = {
   linkedVPSLoading: boolean
   linkedVPSLoaded: boolean
   linkedVPSError: string | null
+  returnVPSId?: string | null
 }
 
 type HeaderStatusBadge = {
@@ -59,31 +61,99 @@ function HeaderStatusBadge({ dimension, value }: HeaderStatusBadge) {
   )
 }
 
-function linkedVPSSummary(linkedVPS: VPSSummary[], loading: boolean, loaded: boolean, error: string | null, navigationState: unknown) {
-  if (loading && !loaded) return <span className="watchtower-header__meta-item">VPS 关联加载中</span>
-  if (error) return <span className="watchtower-header__meta-item">VPS 关联未同步</span>
-  if (!loaded) return <span className="watchtower-header__meta-item">VPS 关联待同步</span>
+function linkedVPSSummary(
+  linkedVPS: VPSSummary[],
+  loading: boolean,
+  loaded: boolean,
+  error: string | null,
+  navigationState: unknown,
+  returnVPSId: string | null,
+) {
+  const canReachSourceThroughLinked =
+    !loading &&
+    !error &&
+    loaded &&
+    linkedVPS.length === 1 &&
+    Boolean(linkedVPS[0]?.vps_id) &&
+    Boolean(linkedVPS[0]?.display_name) &&
+    linkedVPS[0]?.vps_id === returnVPSId
+
+  const returnAction =
+    returnVPSId && !canReachSourceThroughLinked ? (
+      <>
+        <span aria-hidden="true"> · </span>
+        <Link
+          className="text-link"
+          to={`/vps/${encodeURIComponent(returnVPSId)}`}
+          state={navigationState}
+        >
+          返回来源 VPS
+        </Link>
+      </>
+    ) : null
+
+  if (loading && !loaded) {
+    return (
+      <span className="watchtower-header__meta-item">
+        VPS 关联加载中
+        {returnAction}
+      </span>
+    )
+  }
+  if (error) {
+    return (
+      <span className="watchtower-header__meta-item">
+        VPS 关联未同步
+        {returnAction}
+      </span>
+    )
+  }
+  if (!loaded) {
+    return (
+      <span className="watchtower-header__meta-item">
+        VPS 关联待同步
+        {returnAction}
+      </span>
+    )
+  }
   if (linkedVPS.length === 0) {
     return (
       <span className="watchtower-header__meta-item">
         VPS <Link className="text-link" to="/vps?view=unlinked">未关联</Link>
+        {returnAction}
       </span>
     )
   }
   if (linkedVPS.length === 1) {
     const vps = linkedVPS[0]
-    if (!vps?.vps_id || !vps.display_name) return <span className="watchtower-header__meta-item">VPS 关联未同步</span>
+    if (!vps?.vps_id || !vps.display_name) {
+      return (
+        <span className="watchtower-header__meta-item">
+          VPS 关联未同步
+          {returnAction}
+        </span>
+      )
+    }
     return (
       <span className="watchtower-header__meta-item">
-        VPS <Link className="text-link" to={`/vps/${vps.vps_id}`} state={navigationState}>{vps.display_name}</Link>
+        VPS <Link className="text-link" to={`/vps/${encodeURIComponent(vps.vps_id)}`} state={navigationState}>{vps.display_name}</Link>
+        {returnAction}
       </span>
     )
   }
   const primary = linkedVPS[0]
-  if (!primary?.vps_id) return <span className="watchtower-header__meta-item">VPS {linkedVPS.length} 台</span>
+  if (!primary?.vps_id) {
+    return (
+      <span className="watchtower-header__meta-item">
+        VPS {linkedVPS.length} 台
+        {returnAction}
+      </span>
+    )
+  }
   return (
     <span className="watchtower-header__meta-item">
-      VPS <Link className="text-link" to={`/vps/${primary.vps_id}`} state={navigationState}>{linkedVPS.length} 台</Link>
+      VPS <Link className="text-link" to={`/vps/${encodeURIComponent(primary.vps_id)}`} state={navigationState}>{linkedVPS.length} 台</Link>
+      {returnAction}
     </span>
   )
 }
@@ -104,8 +174,13 @@ export function MonitoringInstanceWatchtowerHeader({
   linkedVPSLoading,
   linkedVPSLoaded,
   linkedVPSError,
+  returnVPSId,
 }: Props) {
   const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const effectiveReturnVPSId = returnVPSId !== undefined
+    ? returnVPSId
+    : validateReturnVPSId(searchParams.get('return_vps'))
   const [now, setNow] = useState(() => new Date())
   const labels = Array.isArray(monitoringInstance.labels) ? monitoringInstance.labels : []
   const labelText = formatLabelList(labels)
@@ -145,7 +220,7 @@ export function MonitoringInstanceWatchtowerHeader({
           </div>
           <div className="watchtower-identity__meta-item">
             <dt>关联</dt>
-            <dd>{linkedVPSSummary(linkedVPS, linkedVPSLoading, linkedVPSLoaded, linkedVPSError, location.state)}</dd>
+            <dd>{linkedVPSSummary(linkedVPS, linkedVPSLoading, linkedVPSLoaded, linkedVPSError, location.state, effectiveReturnVPSId)}</dd>
           </div>
           {labels.length > 0 ? (
             <div className="watchtower-identity__meta-item">
