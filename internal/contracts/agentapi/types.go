@@ -108,6 +108,7 @@ type HostSamplePayload struct {
 	InodeUsedPct         float64         `json:"inode_used_pct"`
 	NetInBytesPerSec     int64           `json:"net_in_bytes_per_sec"`
 	NetOutBytesPerSec    int64           `json:"net_out_bytes_per_sec"`
+	NetworkRatesValid    *bool           `json:"network_rates_valid,omitempty"`
 	CPUIOWaitPct         float64         `json:"cpu_iowait_pct"`
 	CPUStealPct          float64         `json:"cpu_steal_pct"`
 	DiskReadBytesPerSec  int64           `json:"disk_read_bytes_per_sec"`

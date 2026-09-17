@@ -201,3 +201,45 @@ describe('TopBar VPS breadcrumb', () => {
     },
   )
 })
+
+describe('TopBar monitoring breadcrumb', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ unread_count: 0 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    localStorage.clear()
+    document.documentElement.className = ''
+  })
+
+  it('keeps the list title without a return link', () => {
+    renderTopBar('/monitoring')
+    expect(screen.getByText('监控')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '返回监控实例列表' })).not.toBeInTheDocument()
+  })
+
+  it('returns to the validated list href from detail and compare', () => {
+    renderTopBar({
+      pathname: '/monitoring/mi_001',
+      state: { monitoringListHref: '/monitoring?view=abnormal&q=Tokyo', vpsInventoryHref: '/vps?q=keep' },
+    })
+    expect(screen.getByRole('link', { name: '返回监控实例列表' })).toHaveAttribute(
+      'href',
+      '/monitoring?view=abnormal&q=Tokyo',
+    )
+    expect(screen.getByText('监控实例详情')).toBeInTheDocument()
+  })
+
+  it.each(['/monitoring/mi_001', '/settings', '/monitoring#frag'])(
+    'falls back to /monitoring when location state is not a list href: %s',
+    (monitoringListHref) => {
+      renderTopBar({ pathname: '/monitoring/mi_001', state: { monitoringListHref } })
+      expect(screen.getByRole('link', { name: '返回监控实例列表' })).toHaveAttribute('href', '/monitoring')
+    },
+  )
+
+})

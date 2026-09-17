@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { MetricThresholds } from '../../config/thresholds'
@@ -59,4 +59,65 @@ describe('MonitoringInstancesTrendCell', () => {
     expect(sparklinesNodes[2]).toHaveClass('sparkline--alert')
     expect(sparklinesNodes[2]).not.toHaveClass('sparkline--critical')
   })
+
+  it('keeps null buckets as visual gaps instead of joining values', () => {
+    const sparklines: MonitoringInstanceSparklinesResponse = {
+      monitoring_instances: {
+        mi_001: {
+          cpu_usage_pct: [10, null, 20],
+          mem_used_pct: [null, null],
+          disk_used_pct: [40],
+        },
+      },
+    }
+    const { container } = render(
+      <MonitoringInstancesTrendCell
+        monitoringInstance={monitoringInstanceRecord()}
+        sparklines={sparklines}
+        thresholds={null}
+      />,
+    )
+    expect(container.querySelectorAll('.monitoring-table__trend-segment')).toHaveLength(3)
+    expect(container.querySelectorAll('svg.sparkline--alert')).toHaveLength(0)
+  })
+
+  it('projects gapped segments onto one full-series domain and keeps bucket placement', () => {
+    const sparklines: MonitoringInstanceSparklinesResponse = {
+      monitoring_instances: {
+        mi_001: {
+          cpu_usage_pct: [10, null, 90],
+          mem_used_pct: [0, null, 80],
+          disk_used_pct: [12, 48, null],
+        },
+      },
+    }
+    const { container } = render(
+      <MonitoringInstancesTrendCell
+        monitoringInstance={monitoringInstanceRecord()}
+        sparklines={sparklines}
+        thresholds={null}
+      />,
+    )
+    const tracks = [...container.querySelectorAll('.monitoring-table__trend-item')]
+    expect(tracks.length).toBeGreaterThanOrEqual(2)
+    const cpuTrack = tracks[0] as HTMLElement
+    const cpuSegments = [...cpuTrack.querySelectorAll('.monitoring-table__trend-segment')]
+    expect(cpuSegments).toHaveLength(2)
+    expect(cpuSegments[0]?.getAttribute('style')).toContain('left: 0%')
+    expect(cpuSegments[1]?.getAttribute('style')).toMatch(/left: 66\.6/)
+    const yLow = Number(cpuSegments[0]?.querySelector('circle')?.getAttribute('cy'))
+    const yHigh = Number(cpuSegments[1]?.querySelector('circle')?.getAttribute('cy'))
+    expect(yHigh).toBeLessThan(yLow - 4)
+
+    const memTrack = tracks[1] as HTMLElement
+    const memSegments = [...memTrack.querySelectorAll('.monitoring-table__trend-segment')]
+    expect(memSegments).toHaveLength(2)
+    const yZero = Number(memSegments[0]?.querySelector('circle')?.getAttribute('cy'))
+    const yPeak = Number(memSegments[1]?.querySelector('circle')?.getAttribute('cy'))
+    expect(yPeak).toBeLessThan(yZero - 4)
+
+    expect(screen.getByLabelText('磁盘 24小时历史 48.0%')).toBeInTheDocument()
+  })
 })
+
+

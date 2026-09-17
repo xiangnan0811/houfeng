@@ -449,7 +449,7 @@ func TestAgentSyncHandlerWritesObservationBatch(t *testing.T) {
 		"monitoring_instance_id":"mi_001",
 		"sync_token":"sync-token-001",
 		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
-		"host_samples":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","cpu_usage_pct":12.5,"load_1":0.2,"load_5":0.3,"load_15":0.4,"mem_used_pct":55.5,"mem_available_bytes":1024,"mem_total_bytes":2048,"swap_used_pct":1.5,"disk_used_pct":45.5,"disk_total_bytes":4096,"inode_used_pct":5.5,"net_in_bytes_per_sec":120,"net_out_bytes_per_sec":220,"cpu_iowait_pct":0.5,"cpu_steal_pct":0.1,"disk_read_bytes_per_sec":320,"disk_write_bytes_per_sec":420,"disk_busy_pct":3.5,"uptime_seconds":3600}],
+		"host_samples":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","cpu_usage_pct":12.5,"load_1":0.2,"load_5":0.3,"load_15":0.4,"mem_used_pct":55.5,"mem_available_bytes":1024,"mem_total_bytes":2048,"swap_used_pct":1.5,"disk_used_pct":45.5,"disk_total_bytes":4096,"inode_used_pct":5.5,"net_in_bytes_per_sec":120,"net_out_bytes_per_sec":220,"network_rates_valid":true,"cpu_iowait_pct":0.5,"cpu_steal_pct":0.1,"disk_read_bytes_per_sec":320,"disk_write_bytes_per_sec":420,"disk_busy_pct":3.5,"uptime_seconds":3600}],
 		"probe_observations":[{"target_id":"tg_001","probe_item_id":"pb_001","probe_kind":"http","observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","result_kind":"success","latency_ms":83,"http_status":200}]
 	}`))
 	setSyncAuth(req)
@@ -490,6 +490,9 @@ func TestAgentSyncHandlerWritesObservationBatch(t *testing.T) {
 	}
 	if svc.syncBatch.Observations.HostSamples[0].DiskTotalBytes != 4096 {
 		t.Fatalf("HostSamples[0].DiskTotalBytes = %d, want 4096", svc.syncBatch.Observations.HostSamples[0].DiskTotalBytes)
+	}
+	if svc.syncBatch.Observations.HostSamples[0].NetworkRatesValid == nil || !*svc.syncBatch.Observations.HostSamples[0].NetworkRatesValid {
+		t.Fatalf("HostSamples[0].NetworkRatesValid = %v, want true", svc.syncBatch.Observations.HostSamples[0].NetworkRatesValid)
 	}
 	if svc.syncBatch.Observations.ProbeObservations[0].TargetID != "tg_001" {
 		t.Fatalf("ProbeObservations[0].TargetID = %q, want %q", svc.syncBatch.Observations.ProbeObservations[0].TargetID, "tg_001")

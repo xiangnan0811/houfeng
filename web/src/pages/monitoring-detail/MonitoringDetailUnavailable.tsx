@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 
 import { PageState } from '../../components/PageState'
+import { resolveMonitoringListHref } from '../monitoring/monitoringListUrl'
 
 type MonitoringDetailUnavailableProps = {
   message: string
@@ -9,6 +10,7 @@ type MonitoringDetailUnavailableProps = {
 
 export function MonitoringDetailUnavailable({ message, returnVPSId = null }: MonitoringDetailUnavailableProps) {
   const location = useLocation()
+  const listHref = resolveMonitoringListHref(location.state)
 
   return (
     <PageState
@@ -27,12 +29,12 @@ export function MonitoringDetailUnavailable({ message, returnVPSId = null }: Mon
             >
               返回来源 VPS
             </Link>
-            <Link className="text-link" to="/monitoring">
+            <Link className="text-link" to={listHref} state={location.state}>
               返回监控实例列表
             </Link>
           </>
         ) : (
-          <Link className="text-link" to="/monitoring">
+          <Link className="text-link" to={listHref} state={location.state}>
             返回监控实例列表
           </Link>
         )

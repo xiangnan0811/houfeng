@@ -49,4 +49,24 @@ describe('MonitoringDetailUnavailable', () => {
     expect(screen.queryByRole('link', { name: '返回来源 VPS' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '返回监控实例列表' })).toHaveAttribute('href', '/monitoring')
   })
+
+  it('uses a validated monitoring list href without dropping other location state', () => {
+    render(
+      <MemoryRouter initialEntries={[{
+        pathname: '/monitoring/mi_missing',
+        state: {
+          monitoringListHref: '/monitoring?view=abnormal&q=Tokyo',
+          vpsInventoryHref: '/vps?q=keep',
+        },
+      }]}>
+        <Routes>
+          <Route path="/monitoring/:id" element={<MonitoringDetailUnavailable message="未找到监控实例" returnVPSId="vps_origin_001" />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: '返回来源 VPS' })).toHaveAttribute('href', '/vps/vps_origin_001')
+    expect(screen.getByRole('link', { name: '返回监控实例列表' })).toHaveAttribute('href', '/monitoring?view=abnormal&q=Tokyo')
+  })
 })
+
+

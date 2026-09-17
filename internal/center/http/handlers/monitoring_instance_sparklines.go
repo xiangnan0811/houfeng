@@ -52,7 +52,7 @@ func MonitoringInstanceSparklines(repo store.MonitoringInstanceSparklinesReposit
 
 		// Ensure non-nil map for JSON "monitoring_instances": {}
 		if result == nil {
-			result = map[string]map[string][]float64{}
+			result = map[string]map[string][]*float64{}
 		}
 
 		writeJSON(w, http.StatusOK, sparklinesResponse{MonitoringInstances: result})
@@ -60,7 +60,7 @@ func MonitoringInstanceSparklines(repo store.MonitoringInstanceSparklinesReposit
 }
 
 type sparklinesResponse struct {
-	MonitoringInstances map[string]map[string][]float64 `json:"monitoring_instances"`
+	MonitoringInstances map[string]map[string][]*float64 `json:"monitoring_instances"`
 }
 
 // parseMetricList splits a comma-separated metrics string and validates each

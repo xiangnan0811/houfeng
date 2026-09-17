@@ -54,6 +54,7 @@ import type {
   MonitoringInstanceRecord,
   MonitoringInstanceRuntimeFacts,
   MonitoringInstanceSparklinesResponse,
+  MonitoringInstanceRuntimeSummariesResponse,
   ProbeItemRecord,
   ProviderRecord,
   SettingsRecord,
@@ -170,6 +171,14 @@ export function listMonitoringInstanceSparklines(metrics: string[]) {
   })
   return requestJSON<MonitoringInstanceSparklinesResponse>(`/api/monitoring-instances/sparklines?${qs}`)
 }
+
+export function listMonitoringInstanceRuntimeSummaries() {
+  return requestJSON<MonitoringInstanceRuntimeSummariesResponse>(
+    '/api/monitoring-instances/runtime-summaries',
+  )
+}
+
+export const getMonitoringInstanceRuntimeSummaries = listMonitoringInstanceRuntimeSummaries
 
 export function enterMonitoringInstanceMaintenance(monitoringInstanceId: string) {
   return postJSON<MonitoringInstanceRecord>(

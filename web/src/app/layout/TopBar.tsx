@@ -8,6 +8,7 @@ import {
   getRecordNotificationUnreadCount,
   RECORD_INBOX_UNREAD_INVALIDATED_EVENT,
 } from '../../lib/recordInboxUnreadApi'
+import { resolveMonitoringListHref } from '../../pages/monitoring/monitoringListUrl'
 
 const PAGE_TITLES: Record<string, string> = {
   '/': '工作台',
@@ -37,6 +38,7 @@ export function TopBar({ sync, user }: TopBarProps) {
   const location = useLocation()
   const pageTitle = derivePageTitle(location.pathname)
   const showVpsCrumb = location.pathname.startsWith('/vps/')
+  const showMonitoringCrumb = location.pathname.startsWith('/monitoring/')
   return (
     <header className="topbar">
       {showVpsCrumb ? (
@@ -47,6 +49,18 @@ export function TopBar({ sync, user }: TopBarProps) {
             aria-label="返回 VPS 列表"
           >
             VPS 资产
+          </Link>
+          <span className="tp-vps-crumb__sep" aria-hidden="true">/</span>
+          <span className="tp-page">{pageTitle}</span>
+        </nav>
+      ) : showMonitoringCrumb ? (
+        <nav className="tp-vps-crumb" aria-label="监控">
+          <Link
+            className="tp-vps-crumb__link"
+            to={resolveMonitoringListHref(location.state)}
+            aria-label="返回监控实例列表"
+          >
+            监控
           </Link>
           <span className="tp-vps-crumb__sep" aria-hidden="true">/</span>
           <span className="tp-page">{pageTitle}</span>

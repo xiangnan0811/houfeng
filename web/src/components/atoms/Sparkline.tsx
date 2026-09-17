@@ -16,6 +16,12 @@ export type SparklineSample = {
   observedAt: string
 }
 
+export type SparklineDomain = {
+  min: number
+  max: number
+}
+
+
 export interface SparklineProps {
   /** Plain values. Ignored when `samples` is provided. */
   values?: number[]
@@ -32,6 +38,8 @@ export interface SparklineProps {
   expand?: boolean
   /** Custom value formatter for the tooltip body. Defaults to `value.toFixed(2)`. */
   formatValue?: (value: number) => string
+  /** Shared Y domain. When omitted, domain is this series min/max. */
+  domain?: SparklineDomain
 }
 
 const TONE_VAR: Record<SparklineTone, string> = {
@@ -67,6 +75,7 @@ export function Sparkline({
   interactive = false,
   expand = false,
   formatValue = (v) => v.toFixed(2),
+  domain,
 }: SparklineProps) {
   const series: number[] = samples ? samples.map((s) => s.value) : (values ?? [])
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
@@ -119,9 +128,9 @@ export function Sparkline({
     )
   }
 
-  const min = Math.min(...series)
-  const max = Math.max(...series)
-  const range = max - min || 1
+  const min = domain?.min ?? Math.min(...series)
+  const max = domain?.max ?? Math.max(...series)
+  const range = max > min ? max - min : 1
   const isSingle = series.length === 1
   const stepX = isSingle ? 0 : chartWidth / (series.length - 1)
 

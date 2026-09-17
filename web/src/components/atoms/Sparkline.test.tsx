@@ -106,4 +106,15 @@ describe('Sparkline', () => {
     fireEvent.mouseMove(svg, { clientX: 200 })
     expect(container.querySelector('.sparkline__tooltip-value')?.textContent).toBe('75.0%')
   })
+
+  it('projects values onto an explicit shared domain instead of the local series', () => {
+    const { container: low } = render(<Sparkline values={[10]} domain={{ min: 0, max: 100 }} height={16} />)
+    const { container: high } = render(<Sparkline values={[90]} domain={{ min: 0, max: 100 }} height={16} />)
+    const { container: local } = render(<Sparkline values={[10]} height={16} />)
+    const yLow = Number(low.querySelector('circle')!.getAttribute('cy'))
+    const yHigh = Number(high.querySelector('circle')!.getAttribute('cy'))
+    const yLocal = Number(local.querySelector('circle')!.getAttribute('cy'))
+    expect(yHigh).toBeLessThan(yLow - 4)
+    expect(yLocal).toBeGreaterThan(yLow)
+  })
 })

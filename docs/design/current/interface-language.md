@@ -58,7 +58,7 @@ User-facing copy uses Chinese product words, not stored enums: subscription `act
 
 State UI should help the operator answer "what happened, where, how fresh is it, and what can I safely do next?"
 
-Current health states include normal, notice, alert, critical, maintenance, and offline/paused. Severity or health color changes should be immediate, not animated as if the state were still settling.
+Health results are normal, notice, alert, and critical; unknown means evidence is insufficient. Binding, heartbeat freshness, maintenance, and pause are separate runtime dimensions, not alternative health results. Keep known historical health beside its freshness qualifier rather than letting a maintenance/pause glyph hide it. Severity or health color changes should be immediate, not animated as if the state were still settling.
 
 Loading, error, and empty states should be local to the affected surface:
 

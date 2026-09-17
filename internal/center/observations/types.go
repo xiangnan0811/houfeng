@@ -25,6 +25,7 @@ type HostSampleWrite struct {
 	InodeUsedPct         float64
 	NetInBytesPerSec     int64
 	NetOutBytesPerSec    int64
+	NetworkRatesValid    *bool
 	CPUIOWaitPct         float64
 	CPUStealPct          float64
 	DiskReadBytesPerSec  int64

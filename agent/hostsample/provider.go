@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -22,16 +23,21 @@ type FilesystemStats struct {
 }
 
 type snapshot struct {
-	observedAt time.Time
-	cpuTotal   uint64
-	cpuIdle    uint64
-	cpuIowait  uint64
-	cpuSteal   uint64
-	netIn      uint64
-	netOut     uint64
-	diskRead   uint64
-	diskWrite  uint64
-	diskBusyMS uint64
+	observedAt    time.Time
+	cpuTotal      uint64
+	cpuIdle       uint64
+	cpuIowait     uint64
+	cpuSteal      uint64
+	netInterfaces []networkInterfaceCounters
+	diskRead      uint64
+	diskWrite     uint64
+	diskBusyMS    uint64
+}
+
+type networkInterfaceCounters struct {
+	name   string
+	netIn  uint64
+	netOut uint64
 }
 
 type Provider struct {
@@ -120,7 +126,7 @@ func (p *Provider) collectProcFS(observedAt time.Time) (agentapi.HostSamplePaylo
 	if err != nil {
 		return agentapi.HostSamplePayload{}, fmt.Errorf("read /proc/net/dev: %w", err)
 	}
-	netIn, netOut, err := parseNetDev(netRaw)
+	netInterfaces, err := parseNetDev(netRaw)
 	if err != nil {
 		return agentapi.HostSamplePayload{}, err
 	}
@@ -154,18 +160,18 @@ func (p *Provider) collectProcFS(observedAt time.Time) (agentapi.HostSamplePaylo
 		InodeUsedPct:      inodeUsedPct,
 		UptimeSeconds:     uptimeSeconds,
 	}
+	networkRatesValid := false
 
 	current := &snapshot{
-		observedAt: observedAt,
-		cpuTotal:   cpuTotal,
-		cpuIdle:    cpuIdle,
-		cpuIowait:  cpuIowait,
-		cpuSteal:   cpuSteal,
-		netIn:      netIn,
-		netOut:     netOut,
-		diskRead:   diskRead,
-		diskWrite:  diskWrite,
-		diskBusyMS: diskBusyMS,
+		observedAt:    observedAt,
+		cpuTotal:      cpuTotal,
+		cpuIdle:       cpuIdle,
+		cpuIowait:     cpuIowait,
+		cpuSteal:      cpuSteal,
+		netInterfaces: netInterfaces,
+		diskRead:      diskRead,
+		diskWrite:     diskWrite,
+		diskBusyMS:    diskBusyMS,
 	}
 	if p.previous != nil {
 		elapsedSeconds := observedAt.Sub(p.previous.observedAt).Seconds()
@@ -173,13 +179,17 @@ func (p *Provider) collectProcFS(observedAt time.Time) (agentapi.HostSamplePaylo
 			sample.CPUUsagePct = cpuUsagePct(*p.previous, *current)
 			sample.CPUIOWaitPct = cpuIowaitPct(*p.previous, *current)
 			sample.CPUStealPct = cpuStealPct(*p.previous, *current)
-			sample.NetInBytesPerSec = rateBytesPerSecond(p.previous.netIn, current.netIn, elapsedSeconds)
-			sample.NetOutBytesPerSec = rateBytesPerSecond(p.previous.netOut, current.netOut, elapsedSeconds)
 			sample.DiskReadBytesPerSec = rateBytesPerSecond(p.previous.diskRead, current.diskRead, elapsedSeconds)
 			sample.DiskWriteBytesPerSec = rateBytesPerSecond(p.previous.diskWrite, current.diskWrite, elapsedSeconds)
 			sample.DiskBusyPct = diskBusyPct(*p.previous, *current)
+			if netInBytesPerSec, netOutBytesPerSec, valid := networkRatesForSnapshot(*p.previous, *current, elapsedSeconds); valid {
+				networkRatesValid = true
+				sample.NetInBytesPerSec = netInBytesPerSec
+				sample.NetOutBytesPerSec = netOutBytesPerSec
+			}
 		}
 	}
+	sample.NetworkRatesValid = new(networkRatesValid)
 
 	p.previous = current
 	return sample, nil
@@ -249,6 +259,7 @@ func (p *Provider) collectDarwin(observedAt time.Time) (agentapi.HostSamplePaylo
 		DiskUsedPct:       diskUsedPct,
 		DiskTotalBytes:    diskTotalBytes(fsStats),
 		InodeUsedPct:      inodeUsedPct,
+		NetworkRatesValid: new(false),
 		UptimeSeconds:     uptimeSeconds,
 	}, nil
 }
@@ -492,8 +503,8 @@ func parseCPUStat(raw []byte) (total, idle, iowait, steal uint64, err error) {
 	return 0, 0, 0, 0, fmt.Errorf("parse /proc/stat: cpu line missing")
 }
 
-func parseNetDev(raw []byte) (uint64, uint64, error) {
-	var totalIn, totalOut uint64
+func parseNetDev(raw []byte) ([]networkInterfaceCounters, error) {
+	var interfaces []networkInterfaceCounters
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || !strings.Contains(line, ":") {
@@ -510,16 +521,22 @@ func parseNetDev(raw []byte) (uint64, uint64, error) {
 		}
 		recv, err := strconv.ParseUint(fields[0], 10, 64)
 		if err != nil {
-			return 0, 0, fmt.Errorf("parse net recv for %s: %w", iface, err)
+			return nil, fmt.Errorf("parse net recv for %s: %w", iface, err)
 		}
 		transmit, err := strconv.ParseUint(fields[8], 10, 64)
 		if err != nil {
-			return 0, 0, fmt.Errorf("parse net transmit for %s: %w", iface, err)
+			return nil, fmt.Errorf("parse net transmit for %s: %w", iface, err)
 		}
-		totalIn += recv
-		totalOut += transmit
+		interfaces = append(interfaces, networkInterfaceCounters{
+			name:   iface,
+			netIn:  recv,
+			netOut: transmit,
+		})
 	}
-	return totalIn, totalOut, nil
+	sort.Slice(interfaces, func(i, j int) bool {
+		return interfaces[i].name < interfaces[j].name
+	})
+	return interfaces, nil
 }
 
 func parseDiskStats(raw []byte) (uint64, uint64, uint64, error) {
@@ -652,6 +669,31 @@ func rateBytesPerSecond(previous, current uint64, elapsedSeconds float64) int64 
 		return 0
 	}
 	return int64(float64(current-previous) / elapsedSeconds)
+}
+
+func networkRatesForSnapshot(previous, current snapshot, elapsedSeconds float64) (int64, int64, bool) {
+	if elapsedSeconds <= 0 ||
+		previous.observedAt.IsZero() ||
+		current.observedAt.IsZero() ||
+		!current.observedAt.After(previous.observedAt) ||
+		len(previous.netInterfaces) != len(current.netInterfaces) {
+		return 0, 0, false
+	}
+
+	var netInDelta, netOutDelta uint64
+	for index, previousInterface := range previous.netInterfaces {
+		currentInterface := current.netInterfaces[index]
+		if currentInterface.name != previousInterface.name ||
+			currentInterface.netIn < previousInterface.netIn ||
+			currentInterface.netOut < previousInterface.netOut {
+			return 0, 0, false
+		}
+		netInDelta += currentInterface.netIn - previousInterface.netIn
+		netOutDelta += currentInterface.netOut - previousInterface.netOut
+	}
+	return rateBytesPerSecond(0, netInDelta, elapsedSeconds),
+		rateBytesPerSecond(0, netOutDelta, elapsedSeconds),
+		true
 }
 
 func diskBusyPct(previous, current snapshot) float64 {

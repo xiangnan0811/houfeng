@@ -1,55 +1,34 @@
 import { Link } from 'react-router-dom'
 
-import { MonoDigits } from '../../components/atoms'
+import { Timestamp } from '../../components/atoms'
 
 type MonitoringHeroProps = {
-  abnormalMonitoringInstanceCount: number
-  pendingOnboardingMonitoringInstanceCount: number
-  maintenanceOrPausedMonitoringInstanceCount: number
-  onAbnormalClick: () => void
-  onOnboardingClick: () => void
-  onRuntimeAttentionClick: () => void
+  snapshotReadAt: Date | null
+  refreshing: boolean
+  refreshLocked?: boolean
+  onRefresh: () => void
 }
 
-export function MonitoringHero({
-  abnormalMonitoringInstanceCount,
-  pendingOnboardingMonitoringInstanceCount,
-  maintenanceOrPausedMonitoringInstanceCount,
-  onAbnormalClick,
-  onOnboardingClick,
-  onRuntimeAttentionClick,
-}: MonitoringHeroProps) {
+export function MonitoringHero({ snapshotReadAt, refreshing, refreshLocked = false, onRefresh }: MonitoringHeroProps) {
   return (
-    <header className="page__head">
+    <header className="page__head monitoring-page__head">
       <h1 className="page__title">监控</h1>
-      <div className="page__actions">
-        <button
-          type="button"
-          className="btn sm ghost"
-          onClick={onAbnormalClick}
-          disabled={abnormalMonitoringInstanceCount === 0}
-        >
-          异常 <MonoDigits>{abnormalMonitoringInstanceCount}</MonoDigits>
-        </button>
-        <button
-          type="button"
-          className="btn sm ghost"
-          onClick={onOnboardingClick}
-          disabled={pendingOnboardingMonitoringInstanceCount === 0}
-        >
-          待接入 <MonoDigits>{pendingOnboardingMonitoringInstanceCount}</MonoDigits>
-        </button>
-        <button
-          type="button"
-          className="btn sm ghost"
-          onClick={onRuntimeAttentionClick}
-          disabled={maintenanceOrPausedMonitoringInstanceCount === 0}
-        >
-          维护/暂停 <MonoDigits>{maintenanceOrPausedMonitoringInstanceCount}</MonoDigits>
-        </button>
+      <div className="page__actions monitoring-page__head-actions">
         <Link className="btn sm primary" to="/vps?view=unlinked">
           从未关联 VPS 接入
         </Link>
+        <p className="monitoring-page__snapshot">
+          {snapshotReadAt ? (
+            <>
+              列表读取 <Timestamp value={snapshotReadAt} mode="absolute" />
+            </>
+          ) : (
+            '尚未完成列表读取'
+          )}
+        </p>
+        <button type="button" className="btn sm ghost" onClick={onRefresh} disabled={refreshing || refreshLocked}>
+          {refreshing ? '正在刷新…' : '刷新'}
+        </button>
       </div>
     </header>
   )

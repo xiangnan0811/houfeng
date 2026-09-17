@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 
 import { DetailSection } from '../components/DetailSection'
 import { MonitoringInstanceWatchtowerMetrics } from '../components/monitoring-detail'
@@ -8,6 +8,7 @@ import { PageState } from '../components/PageState'
 import { StatusBadge } from '../components/StatusBadge'
 import { ApiError, getMonitoringInstance, getMonitoringInstanceRuntimeFacts } from '../lib/api'
 import type { MonitoringInstanceRecord, MonitoringInstanceRuntimeFacts } from '../lib/types'
+import { resolveMonitoringListHref } from './monitoring/monitoringListUrl'
 
 type MonitoringInstanceState = {
   loading: boolean
@@ -65,10 +66,12 @@ function useMonitoringInstanceData(monitoringInstanceId: string | null): Monitor
 }
 
 export function MonitoringComparePage() {
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const ids = searchParams.getAll('id')
   const idA = ids[0] ?? null
   const idB = ids[1] ?? null
+  const listHref = resolveMonitoringListHref(location.state)
 
   const monitoringInstanceA = useMonitoringInstanceData(idA)
   const monitoringInstanceB = useMonitoringInstanceData(idB)
@@ -80,7 +83,7 @@ export function MonitoringComparePage() {
         eyebrow="监控实例对比"
         title="需要选择 2 个监控实例"
         description="请先在监控实例列表勾选两个监控实例，再进入 A / B 指标对比。"
-        action={<Link className="btn md secondary" to="/monitoring">返回监控实例列表</Link>}
+        action={<Link className="btn md secondary" to={listHref} state={location.state}>返回监控实例列表</Link>}
       />
     )
   }
@@ -155,6 +158,8 @@ function monitoringInstanceContext(monitoringInstance: MonitoringInstanceRecord)
 }
 
 function CompareCommandPanel({ stateA, stateB }: { stateA: MonitoringInstanceState; stateB: MonitoringInstanceState }) {
+  const location = useLocation()
+  const listHref = resolveMonitoringListHref(location.state)
   return (
     <>
       <header className="page__head" aria-labelledby="monitoringInstance-compare-title">
@@ -166,7 +171,7 @@ function CompareCommandPanel({ stateA, stateB }: { stateA: MonitoringInstanceSta
           </p>
         </div>
         <div className="page__actions">
-          <Link className="btn md ghost" to="/monitoring">返回监控实例列表</Link>
+          <Link className="btn md ghost" to={listHref} state={location.state}>返回监控实例列表</Link>
         </div>
       </header>
       <div className="compare-command__selection" aria-label="当前对比对象">
@@ -386,6 +391,8 @@ function CompareMonitoringInstanceIdentity({ state, side }: { state: MonitoringI
 }
 
 function CompareColumnPlaceholder({ state }: { state: MonitoringInstanceState }) {
+  const location = useLocation()
+  const listHref = resolveMonitoringListHref(location.state)
   if (state.loading) {
     return (
       <PageState
@@ -405,7 +412,7 @@ function CompareColumnPlaceholder({ state }: { state: MonitoringInstanceState })
       technicalSummary={state.error ?? '指标不可用'}
       surface="empty"
       compact
-      action={<Link className="btn sm ghost" to="/monitoring">返回监控实例列表重新选择</Link>}
+      action={<Link className="btn sm ghost" to={listHref} state={location.state}>返回监控实例列表重新选择</Link>}
     />
   )
 }

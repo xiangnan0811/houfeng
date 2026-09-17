@@ -7,15 +7,36 @@ export type MonitoringInstanceFilterState = {
   runStatus: string | null
   health: string | null
   labels: string[]
-  abnormal: boolean
-  onboardingPending: boolean
 }
 
-export type MonitoringInstanceListView = 'all' | 'runtime-attention' | 'binding-conflict'
+export type MonitoringInstanceQuickView =
+  | 'all'
+  | 'abnormal'
+  | 'onboarding'
+  | 'runtime-attention'
+  | 'binding-conflict'
 
-export type MonitoringInstanceQuickView = 'all' | 'abnormal' | 'onboarding' | 'runtime-attention' | 'binding-conflict'
+export type MonitoringInstanceSortKey = 'identity' | 'issue' | 'location' | 'health' | 'heartbeat'
+
+export type MonitoringInstanceSortState = {
+  key: MonitoringInstanceSortKey
+  direction: 'asc' | 'desc'
+}
 
 export type MonitoringInstanceFilterOption = {
   value: string
   label: string
 }
+
+export type HeartbeatFreshnessPolicy = {
+  heartbeatIntervalMs: number
+  missingThreshold: number
+}
+
+export type HeartbeatFreshness =
+  | { kind: 'missing' }
+  | { kind: 'invalid'; raw: string }
+  | { kind: 'pending'; at: string }
+  | { kind: 'policy-unavailable'; at: string }
+  | { kind: 'fresh'; at: string }
+  | { kind: 'stale'; at: string }

@@ -53,11 +53,19 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	subscriptionCreateIdempotencyAppACLCurrentMigrationFragment(),
 	vpsCreateIdempotencyAppACLCurrentMigrationFragment(),
 	heartbeatIncidentPolicyAppACLCurrentMigrationFragment(),
+	networkRatesValidAppACLCurrentMigrationFragment(),
 }
 
 func heartbeatIncidentPolicyAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
 	return AppACLCurrentMigrationFragment{
 		Migration:  "0063_tune_heartbeat_incident_policy.sql",
+		Privileges: func(string) []AppACLPrivilege { return nil },
+	}
+}
+
+func networkRatesValidAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0064_add_network_rates_valid.sql",
 		Privileges: func(string) []AppACLPrivilege { return nil },
 	}
 }

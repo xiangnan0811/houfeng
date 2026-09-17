@@ -50,7 +50,7 @@ func TestHeartbeatIncidentPolicyMigrationRegistersExplicitEmptyAppACLFragment(t 
 	if err != nil {
 		t.Fatalf("compile production current APP ACL source contract: %v", err)
 	}
-	if got, want := len(source.fragments), 12; got != want {
+	if got, want := len(source.fragments), 13; got != want {
 		t.Fatalf("current APP ACL fragment count = %d, want %d", got, want)
 	}
 	fragment := source.fragments[11]
@@ -66,6 +66,14 @@ func TestHeartbeatIncidentPolicyMigrationRegistersExplicitEmptyAppACLFragment(t 
 	if got := appACLCurrentMigrationFragments[11].Privileges("houfeng"); got != nil {
 		t.Fatalf("0063 Privileges() = %#v, want nil", got)
 	}
+	networkFragment := source.fragments[12]
+	if networkFragment.Migration != "0064_add_network_rates_valid.sql" || len(networkFragment.Objects) != 0 || len(networkFragment.Privileges) != 0 || len(networkFragment.AuxiliaryPrivileges) != 0 || len(networkFragment.Functions) != 0 {
+		t.Fatalf("0064 fragment = %#v, want explicit empty APP ACL delta", networkFragment)
+	}
+	if appACLCurrentMigrationFragments[12].Privileges == nil || appACLCurrentMigrationFragments[12].Privileges("houfeng") != nil {
+		t.Fatal("0064 Privileges callback must be non-nil and empty")
+	}
+
 }
 
 func TestPostgresIntegrationHeartbeatIncidentPolicyMigration(t *testing.T) {

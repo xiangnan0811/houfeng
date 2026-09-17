@@ -751,6 +751,19 @@ export type MonitoringInstanceSparklinesResponse = {
   monitoring_instances: Record<string, Record<string, (number | null)[]>>
 }
 
+export type MonitoringInstanceRuntimeSummary = {
+  observed_at: string
+  received_at: string
+  uptime_seconds: number
+  net_in_bytes_per_sec: number | null
+  net_out_bytes_per_sec: number | null
+}
+
+export type MonitoringInstanceRuntimeSummariesResponse = {
+  read_at: string
+  monitoring_instances: Record<string, MonitoringInstanceRuntimeSummary | null>
+}
+
 export type TargetSparklinesResponse = {
   targets: Record<string, { latency: (number | null)[] }>
 }

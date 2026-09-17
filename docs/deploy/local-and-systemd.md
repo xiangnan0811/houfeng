@@ -48,6 +48,8 @@ Expected release outputs under `dist/`:
 
 `build-agent-release` stamps the agent heartbeat version with the same `VERSION` value used in the artifact names. The center-served installer script is fetched from the deployed center; GitHub Release is only used for these binary and signed-checksum assets. Maintainers must configure `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY` in GitHub Secrets with the secret key matching the installer-pinned public key before publishing installable agent assets. If the key is encrypted, also set `HOUFENG_RELEASE_MINISIGN_PASSWORD`. Target hosts need `minisign` to verify the signed checksum manifest. The generated command includes `--install-missing-deps`, so if `minisign` is absent the installer downloads the pinned upstream static verifier, checks its SHA256, installs it to `/usr/local/bin/minisign`, and only then verifies Houfeng release assets.
 
+The monitoring list’s upload/download rates require an agent that reports the optional `network_rates_valid` marker. Upgrade the center first, then agents through the existing manual deployment process. Older agents can still sync; their samples and pre-upgrade rows have unknown rate validity and show an em dash in the list rather than a guessed zero. After an upgraded agent starts, its first sample establishes a counter baseline; rates become available after a subsequent valid sample. System uptime remains the sampled host uptime, not agent process age.
+
 ## PostgreSQL pre-R1 provisioning
 
 Every target PostgreSQL database must be provisioned immediately after it is

@@ -182,6 +182,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	retentionRepo := store.NewPostgresRetentionRepository(db.Pool())
 	retentionWorker := retention.NewWorker(retentionRepo, settingsRepo, slog.Default(), retention.DefaultWorkerInterval)
 	sparklinesRepo := store.NewPostgresMonitoringInstanceSparklinesRepository(db.Pool())
+	runtimeSummariesRepo := store.NewPostgresMonitoringInstanceRuntimeSummariesRepository(db.Pool())
 	targetSparklinesRepo := store.NewPostgresTargetSparklinesRepository(db.Pool())
 	notifierSettingsRepo := notifierSettingsRepository{repo: settingsRepo, db: db.Pool()}
 	settingsHandlerRepo := settingsPresentationRepository{
@@ -409,6 +410,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		MonitoringInstanceBindingRejectPendingHandler: handlers.MonitoringInstanceBindingRejectPending(monitoringInstanceRepo),
 		MonitoringInstanceBindingResetHandler:         handlers.MonitoringInstanceBindingReset(monitoringInstanceRepo),
 		MonitoringInstanceSparklinesHandler:           handlers.MonitoringInstanceSparklines(sparklinesRepo),
+		MonitoringInstanceRuntimeSummariesHandler:     handlers.MonitoringInstanceRuntimeSummaries(runtimeSummariesRepo),
 		MonitoringInstanceActionsHandler:              handlers.MonitoringInstanceActions(monitoringInstanceRepo),
 		MonitoringInstanceBatchHandler:                handlers.MonitoringInstanceBatch(monitoringInstanceRepo),
 		TargetsCollectionHandler:                      handlers.TargetsCollection(targetRepo),
