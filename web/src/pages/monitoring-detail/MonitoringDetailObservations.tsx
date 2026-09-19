@@ -37,6 +37,8 @@ const NARROW_CONTAINER_PX = 640 // 40rem
 const WIDE_CONTAINER_PX = 1100
 const NARROW_VIEWPORT_QUERY = '(max-width: 760px)'
 const CHART_HEIGHT = observationChartHeight()
+/** Same left gutter on every tile so plot origins line up in the 4×2. */
+const PLOT_GUTTER = 64
 
 type ObservationsProps = {
   /** Page-level window control, rendered in this section's head so it never owns an empty row. */
@@ -84,10 +86,12 @@ function Plot({
           {title}
         </h3>
         <span className="monitoring-detail-chart__current">{current}</span>
-        <span className="monitoring-detail-chart__legend">{legend}</span>
+        <span className="monitoring-detail-chart__legend">
+          {legend ? <span className="monitoring-detail-chart__legend-series">{legend}</span> : null}
+          {notes ? <span className="monitoring-detail-chart__notes" title={notesTitle}>{notes}</span> : null}
+        </span>
       </header>
       {children}
-      <dl className="monitoring-detail-chart__notes" title={notesTitle}>{notes}</dl>
     </section>
   )
 }
@@ -319,7 +323,6 @@ export function MonitoringDetailObservations({
 
   const percentChart = (
     samples: typeof cpuSeries,
-    yPadding: number,
     alertFrom: number | undefined,
     ariaLabel: string,
   ) =>
@@ -329,7 +332,7 @@ export function MonitoringDetailObservations({
         {...shared}
         tone={primaryTone}
         height={CHART_HEIGHT}
-        paddingLeft={yPadding}
+        paddingLeft={PLOT_GUTTER}
         yMin={0}
         yMax={100}
         {...(alertFrom !== undefined ? { alertBandFrom: alertFrom } : {})}
@@ -381,7 +384,7 @@ export function MonitoringDetailObservations({
           }
           notes={<Note label="被窃取">{formatPercent(sample?.cpu_steal_pct)}</Note>}
         >
-          {percentChart(cpuSeries, 32, thresholds?.cpu.warning, `CPU 使用率${availabilityLine(timeWindow, runtimeWindow)}趋势`)}
+          {percentChart(cpuSeries, thresholds?.cpu.warning, `CPU 使用率${availabilityLine(timeWindow, runtimeWindow)}趋势`)}
         </Plot>
 
         <Plot
@@ -413,7 +416,7 @@ export function MonitoringDetailObservations({
               {...shared}
               tone={primaryTone}
               height={CHART_HEIGHT}
-              paddingLeft={32}
+              paddingLeft={PLOT_GUTTER}
               yMin={0}
               yMax={100}
               {...(thresholds ? { alertBandFrom: thresholds.mem.warning } : {})}
@@ -436,7 +439,7 @@ export function MonitoringDetailObservations({
           }
           notes={<Note label="容量">{formatCapacityBytes(sample?.disk_total_bytes)}</Note>}
         >
-          {percentChart(diskSeries, 32, thresholds?.disk.warning, `磁盘使用率${availabilityLine(timeWindow, runtimeWindow)}趋势`)}
+          {percentChart(diskSeries, thresholds?.disk.warning, `磁盘使用率${availabilityLine(timeWindow, runtimeWindow)}趋势`)}
         </Plot>
 
         <Plot
@@ -450,7 +453,7 @@ export function MonitoringDetailObservations({
             </span>
           }
         >
-          {percentChart(inodeSeries, 32, thresholds?.inode.warning, `Inode 使用率${availabilityLine(timeWindow, runtimeWindow)}趋势`)}
+          {percentChart(inodeSeries, thresholds?.inode.warning, `Inode 使用率${availabilityLine(timeWindow, runtimeWindow)}趋势`)}
         </Plot>
 
         <Plot
@@ -479,7 +482,7 @@ export function MonitoringDetailObservations({
               {...shared}
               tone={primaryTone}
               height={CHART_HEIGHT}
-              paddingLeft={36}
+              paddingLeft={PLOT_GUTTER}
               yMin={0}
               {...(loadYMax === undefined ? {} : { yMax: loadYMax })}
               {...(thresholds && loadYMax !== undefined
@@ -515,7 +518,7 @@ export function MonitoringDetailObservations({
               {...shared}
               tone={primaryTone}
               height={CHART_HEIGHT}
-              paddingLeft={36}
+              paddingLeft={PLOT_GUTTER}
               yMin={0}
               {...(iowaitYMax === undefined ? {} : { yMax: iowaitYMax })}
               {...(thresholds && iowaitYMax !== undefined
@@ -550,7 +553,7 @@ export function MonitoringDetailObservations({
               {...shared}
               tone={primaryTone}
               height={CHART_HEIGHT}
-              paddingLeft={64}
+              paddingLeft={PLOT_GUTTER}
               yMin={0}
               yMax={netYMax}
               formatValue={(v) => formatBytesPerSecond(v)}
@@ -582,7 +585,7 @@ export function MonitoringDetailObservations({
               {...shared}
               tone={primaryTone}
               height={CHART_HEIGHT}
-              paddingLeft={64}
+              paddingLeft={PLOT_GUTTER}
               yMin={0}
               yMax={diskIOYMax}
               formatValue={(v) => formatBytesPerSecond(v)}

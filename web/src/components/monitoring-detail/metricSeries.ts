@@ -89,6 +89,8 @@ export function seriesValueAt(series: MetricChartSample[], observedAt: string | 
 export function formatNetworkAxis(value: number): string {
   const abs = Math.abs(value)
   if (abs >= 1073741824) return `${(value / 1073741824).toFixed(1)} GB/s`
+  // Use MB before 4-digit KB labels ("1010 KB/s") that shove the plot gutter.
+  if (abs >= 1024 * 1000) return `${(value / 1048576).toFixed(1)} MB/s`
   if (abs >= 1048576) return `${(value / 1048576).toFixed(1)} MB/s`
   if (abs >= 1024) return `${(value / 1024).toFixed(0)} KB/s`
   return `${Math.round(value)} B/s`
