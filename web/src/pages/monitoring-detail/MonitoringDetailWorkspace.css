@@ -299,6 +299,10 @@
   line-height: 1.45;
 }
 
+.monitoring-detail-observations__footer {
+  padding-bottom: 2px;
+}
+
 .monitoring-detail-route .metric-chart__axis-text {
   font-size: 11px;
   fill: var(--text-secondary);
@@ -386,6 +390,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 10px;
+  min-height: 14px;
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.2;
@@ -497,6 +502,8 @@
   justify-content: space-between;
   gap: 8px 14px;
   min-width: 0;
+  padding-top: 8px;
+  border-top: var(--border-w) solid var(--border);
 }
 
 .monitoring-detail-recent__quiet {

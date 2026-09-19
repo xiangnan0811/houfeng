@@ -584,6 +584,23 @@ describe('MetricChart', () => {
     expect(container.querySelector('.metric-chart--empty')).toBeTruthy()
   })
 
+  it('drops an overlay threshold label below the line when it would clip the top', () => {
+    const samples = makeSamples(4).map((sample) => ({ ...sample, value: 8 }))
+    const { container } = render(
+      <MetricChart
+        samples={samples}
+        yMin={0}
+        yMax={10}
+        thresholds={[{ value: 10, tone: 'alert', label: '告警 10' }]}
+      />,
+    )
+
+    const label = container.querySelector('.metric-chart__threshold-label')
+    const line = container.querySelector('.metric-chart__threshold line')
+    expect(label).toHaveTextContent('告警 10')
+    expect(Number(label?.getAttribute('y'))).toBeGreaterThan(Number(line?.getAttribute('y1')))
+  })
+
   it('draws an empty-label threshold line without any label text', () => {
     const samples = makeSamples(5)
     const { container } = render(

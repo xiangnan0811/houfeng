@@ -528,7 +528,19 @@ export function MetricChart({
     showLabel: threshold.label !== '',
     labelText: threshold.label ?? formatValue(threshold.value),
     labelY: projectY(threshold.value) - 2,
+    labelBelow: false,
   }))
+  if (thresholdLabelPlacement !== 'gutter') {
+    for (const mark of thresholdMarks) {
+      if (!mark.showLabel) continue
+      // Overlay labels sit 2px above the line. At the axis cap that clips into
+      // the top padding and reads as a second header on the plot.
+      if (mark.labelY < PADDING.top + 8) {
+        mark.labelY = mark.lineY + 11
+        mark.labelBelow = true
+      }
+    }
+  }
   if (thresholdLabelPlacement === 'gutter') {
     const minGap = 14
     const ordered = thresholdMarks.filter((mark) => mark.showLabel).sort((a, b) => a.lineY - b.lineY)
@@ -690,7 +702,7 @@ export function MetricChart({
                 x={labelX}
                 y={mark.labelY}
                 textAnchor="end"
-                dominantBaseline={gutter ? 'middle' : undefined}
+                dominantBaseline={gutter ? 'middle' : mark.labelBelow ? 'hanging' : undefined}
                 fill={mark.color}
               >
                 {mark.labelText}

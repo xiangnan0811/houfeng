@@ -84,7 +84,7 @@ function Plot({
           {title}
         </h3>
         <span className="monitoring-detail-chart__current">{current}</span>
-        {legend}
+        <span className="monitoring-detail-chart__legend">{legend}</span>
       </header>
       {children}
       {notes ? <dl className="monitoring-detail-chart__notes" title={notesTitle}>{notes}</dl> : null}
@@ -114,10 +114,11 @@ function scaledThresholdLines(thresholds: MetricThreshold, yMax: number): Metric
     { value: thresholds.warning, tone: 'notice' as const },
     { value: thresholds.alert, tone: 'alert' as const },
     { value: thresholds.critical, tone: 'critical' as const },
-  ]).filter((candidate) => candidate.value <= yMax)
+  ]).filter((candidate) => candidate.value < yMax * 0.98)
   return candidates.map((candidate, index) => ({
     ...candidate,
     // Only the highest visible line carries text; the rest are bare 1px lines.
+    // A line on the axis cap is already the top tick — don't also stamp 告警.
     label: index === candidates.length - 1 ? `告警 ${candidate.value}` : '',
   }))
 }
@@ -292,7 +293,7 @@ export function MonitoringDetailObservations({
   ) : null
 
   const seriesLegend = (...items: Array<{ label: string; swatch: 'down' | 'up' | 'tertiary' }>) => (
-    <span className="monitoring-detail-chart__legend">
+    <>
       {items.map((item) => (
         <span key={item.label} className="monitoring-detail-chart__legend-item">
           <i
@@ -306,7 +307,7 @@ export function MonitoringDetailObservations({
           {item.label}
         </span>
       ))}
-    </span>
+    </>
   )
 
   const percentChart = (
