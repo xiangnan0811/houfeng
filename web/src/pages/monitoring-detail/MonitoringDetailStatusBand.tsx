@@ -2,21 +2,15 @@ import type { ReactNode } from 'react'
 
 import { StatusBadge } from '../../components/StatusBadge'
 import { Timestamp } from '../../components/atoms'
-import type { MonitoringInstanceRecord } from '../../lib/types'
-import { monitoringInstanceEffectiveHealth } from '../monitoring/monitoringHelpers'
+import type { HostSample, MonitoringInstanceRecord } from '../../lib/types'
+import { formatSampledUptime } from '../monitoring/monitoringHelpers'
 import type { HeartbeatFreshness } from '../monitoring/types'
 
 type Props = {
   monitoringInstance: MonitoringInstanceRecord
   heartbeatFreshness?: HeartbeatFreshness
   snapshotReadAt: Date | null
-}
-
-const HEALTH_TONE: Record<string, string> = {
-  正常: 'normal',
-  关注: 'notice',
-  告警: 'alert',
-  严重: 'critical',
+  sample: HostSample | null
 }
 
 function heartbeatEvidence(
@@ -45,9 +39,8 @@ export function MonitoringDetailStatusBand({
   monitoringInstance,
   heartbeatFreshness,
   snapshotReadAt,
+  sample,
 }: Props) {
-  const healthLabel = monitoringInstanceEffectiveHealth(monitoringInstance)
-  const healthTone = HEALTH_TONE[healthLabel] ?? 'unknown'
   const archived = Boolean(monitoringInstance.archived_at)
   const showMonitoringBadge =
     monitoringInstance.monitoring_status === '维护中' || monitoringInstance.monitoring_status === '暂停'
@@ -56,15 +49,24 @@ export function MonitoringDetailStatusBand({
     monitoringInstance.binding_status === '指纹变更待确认'
 
   return (
-    <div className="monitoring-detail-status" aria-label="监控实例当前状态">
-      <span
-        className={`monitoring-detail-status__health monitoring-detail-status__health--${healthTone}`}
-      >
-        {healthLabel}
-      </span>
+    <div className="monitoring-detail-status" aria-label="心跳与采样">
       <span className="monitoring-detail-status__heartbeat">
         心跳 {heartbeatEvidence(heartbeatFreshness, snapshotReadAt, monitoringInstance.last_heartbeat_at)}
       </span>
+      {sample ? (
+        <span className="monitoring-detail-status__sample">
+          采样{' '}
+          {snapshotReadAt ? (
+            <Timestamp value={sample.observed_at} mode="relative" now={snapshotReadAt} />
+          ) : (
+            <Timestamp value={sample.observed_at} mode="absolute" />
+          )}
+          {' · 已运行 '}
+          {formatSampledUptime(sample.uptime_seconds)}
+        </span>
+      ) : (
+        <span className="monitoring-detail-status__sample">当前样本 尚无</span>
+      )}
       {showMonitoringBadge ? <StatusBadge label={monitoringInstance.monitoring_status} /> : null}
       {showBindingBadge ? <StatusBadge label={monitoringInstance.binding_status} /> : null}
       {archived ? <StatusBadge label="已归档" /> : null}

@@ -353,12 +353,14 @@ export function MonitoringDetailPageBody({
             ) : null}
           </>
         }
-      />
-
-      <MonitoringDetailStatusBand
-        monitoringInstance={monitoringInstance}
-        heartbeatFreshness={heartbeatFreshness}
-        snapshotReadAt={snapshotReadAt}
+        aside={
+          <MonitoringDetailStatusBand
+            monitoringInstance={monitoringInstance}
+            heartbeatFreshness={heartbeatFreshness}
+            snapshotReadAt={snapshotReadAt}
+            sample={sample}
+          />
+        }
       />
 
       <MonitoringDetailNotices
@@ -397,7 +399,6 @@ export function MonitoringDetailPageBody({
         thresholds={thresholds}
         loading={runtimeFactsLoading}
         error={runtimeFactsError}
-        snapshotReadAt={snapshotReadAt}
         onRetryThresholds={onRetrySettings}
       />
 

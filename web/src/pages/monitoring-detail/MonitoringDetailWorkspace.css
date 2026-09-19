@@ -83,6 +83,15 @@
   line-height: 1.35;
 }
 
+.monitoring-detail-header__end {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(32rem, 100%);
+}
+
 .monitoring-detail-header__actions {
   display: flex;
   flex-wrap: wrap;
@@ -147,32 +156,23 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px 12px;
   min-width: 0;
-  min-height: 28px;
   margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
   box-shadow: none;
+  text-align: right;
 }
 
-.monitoring-detail-status__health {
-  font-size: var(--monitoring-detail-body-size);
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.monitoring-detail-status__health--normal { color: var(--color-state-normal); }
-.monitoring-detail-status__health--notice { color: var(--color-state-notice); }
-.monitoring-detail-status__health--alert { color: var(--color-state-alert); }
-.monitoring-detail-status__health--critical { color: var(--color-state-critical); }
-.monitoring-detail-status__health--unknown { color: var(--text-muted); }
-
-.monitoring-detail-status__heartbeat {
+.monitoring-detail-status__heartbeat,
+.monitoring-detail-status__sample {
   color: var(--text-secondary);
   font-size: var(--monitoring-detail-helper-size);
   line-height: 1.4;
+  white-space: nowrap;
 }
 
 /* ===== Notification rows ===== */
@@ -737,7 +737,11 @@
     flex-direction: column;
   }
 
-  .monitoring-detail-header__actions {
+  .monitoring-detail-header__end,
+  .monitoring-detail-header__actions,
+  .monitoring-detail-status {
+    align-items: flex-start;
     justify-content: flex-start;
+    text-align: left;
   }
 }

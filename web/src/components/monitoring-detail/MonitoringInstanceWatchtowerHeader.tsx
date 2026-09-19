@@ -27,6 +27,8 @@ type Props = {
   returnVPSId?: string | null
   /** Refresh / management / onboarding entry points, rendered on the right. */
   actions?: ReactNode
+  /** Runtime facts (health, heartbeat, sample) sit under the actions. */
+  aside?: ReactNode
 }
 
 const IDENTITY_LABEL_LIMIT = 3
@@ -160,6 +162,7 @@ export function MonitoringInstanceWatchtowerHeader({
   onRetryLinkedVPS,
   returnVPSId,
   actions,
+  aside,
 }: Props) {
   const location = useLocation()
   const [searchParams] = useSearchParams()
@@ -239,7 +242,12 @@ export function MonitoringInstanceWatchtowerHeader({
           </div>
         </dl>
       </div>
-      {actions ? <div className="monitoring-detail-header__actions">{actions}</div> : null}
+      {actions || aside ? (
+        <div className="monitoring-detail-header__end">
+          {actions ? <div className="monitoring-detail-header__actions">{actions}</div> : null}
+          {aside}
+        </div>
+      ) : null}
     </header>
   )
 }

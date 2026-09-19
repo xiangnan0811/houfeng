@@ -275,7 +275,7 @@ describe('MonitoringDetailPage source semantics', () => {
     await waitFor(() => expect(screen.getByText('运行指标不可用。')).toBeInTheDocument())
     // The sample itself is independent of the failed window and stays readable.
     expect(screen.getByText(/已运行 1小时 0分钟/)).toBeInTheDocument()
-    expect(screen.getByText(/当前样本/)).toBeInTheDocument()
+    expect(screen.getByText(/采样/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重试运行指标' })).toBeInTheDocument()
   })
 
@@ -379,7 +379,7 @@ describe('MonitoringDetailPage source semantics', () => {
     expect(heartbeat).not.toContain('数据陈旧')
   })
 
-  it('treats missing heartbeat as unknown health and does not copy sample time onto heartbeat', async () => {
+  it('does not copy sample time onto heartbeat when heartbeat is missing', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
       if (path === '/api/monitoring-instances/mi_001') {
@@ -389,9 +389,7 @@ describe('MonitoringDetailPage source semantics', () => {
       return mockJSONResponse([])
     }))
     const { container } = renderPage()
-    await waitFor(() => expect(container.querySelector('.monitoring-detail-status__health--unknown')).not.toBeNull())
-    expect(container.querySelector('.monitoring-detail-status__health--unknown')).toHaveTextContent('未知')
-    expect(screen.getByText(/未收到心跳/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/未收到心跳/)).toBeInTheDocument())
     // The sample time is not copied onto the heartbeat.
     const heartbeat = container.querySelector('.monitoring-detail-status__heartbeat')?.textContent ?? ''
     expect(heartbeat).toContain('未收到心跳')
@@ -409,7 +407,7 @@ describe('MonitoringDetailPage source semantics', () => {
       if (path.includes('/runtime-facts')) return mockJSONResponse(facts('realtime'))
       return mockJSONResponse([])
     }))
-    const { container } = renderPage('/monitoring/mi_001?window=realtime')
+    renderPage('/monitoring/mi_001?window=realtime')
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     await waitFor(() => expect(MockRuntimeWebSocket.instances.length).toBe(1))
     const socket = MockRuntimeWebSocket.instances[0]
@@ -431,8 +429,6 @@ describe('MonitoringDetailPage source semantics', () => {
     })
     await waitFor(() => expect(screen.getAllByText('41.0%').length).toBeGreaterThan(0))
     expect(screen.queryByText('9.0%')).not.toBeInTheDocument()
-    expect(container.querySelector('.monitoring-detail-status__health--unknown')).toBeNull()
-    expect(container.querySelector('.monitoring-detail-status__health--normal')).toHaveTextContent('正常')
     expect(screen.queryByText(/未收到心跳/)).not.toBeInTheDocument()
   })
 })

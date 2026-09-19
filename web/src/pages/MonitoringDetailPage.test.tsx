@@ -1681,7 +1681,7 @@ describe('MonitoringDetailPage', () => {
       expect(container.querySelectorAll('.monitoring-detail-charts .metric-chart__cursor').length).toBe(8),
     )
     expect(container.querySelectorAll('.monitoring-detail-charts .metric-chart__tooltip').length).toBe(8)
-    expect(container.querySelector('.monitoring-detail-observations__readout')).toHaveTextContent('选中')
+    expect(container.querySelector('.monitoring-detail-observations__footer')).toHaveTextContent('选中')
 
     const readoutFor = (name: string) => within(screen.getByRole('region', { name }))
     expect(readoutFor('CPU 使用率').getAllByText('42.0%').length).toBeGreaterThan(0)
@@ -3269,7 +3269,8 @@ describe('MonitoringDetailPage', () => {
     const head = container.querySelector('.monitoring-detail-observations__head')!
     expect(head.querySelector('.monitoring-detail-observations__toolbar')).not.toBeNull()
     expect(within(head as HTMLElement).getByRole('group', { name: '观测时间窗口' })).toBeInTheDocument()
-    expect(within(head as HTMLElement).getByText(/窗口末值/)).toBeInTheDocument()
+    expect(within(head as HTMLElement).queryByText(/窗口末值/)).toBeNull()
+    expect(container.querySelector('.monitoring-detail-observations__footer')?.textContent).toMatch(/近 24h/)
   })
 
   it('removes the old folded property sections while keeping standalone data sections', async () => {

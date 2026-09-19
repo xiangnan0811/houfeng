@@ -11,7 +11,6 @@ import {
   formatPercent,
 } from '../../lib/format'
 import type { HostSample, MonitoringRuntimeWindow } from '../../lib/types'
-import { formatSampledUptime } from '../monitoring/monitoringHelpers'
 import {
   formatCapacityBytes,
   formatCompactRateAxis,
@@ -52,7 +51,6 @@ type ObservationsProps = {
   thresholds: MetricThresholds | null
   loading: boolean
   error: string | null
-  snapshotReadAt: Date | null
   onRetryThresholds: () => void
 }
 
@@ -133,6 +131,23 @@ function availabilityLine(timeWindow: TimeWindow, window?: MonitoringRuntimeWind
   return `${prefix} · ${window.sample_count} 个原始样本`
 }
 
+function windowRange(runtimeWindow: MonitoringRuntimeWindow | undefined, points: HostMetricSeriesPoint[]): {
+  start: string | null
+  end: string | null
+} {
+  return {
+    start: runtimeWindow?.available_started_at ?? runtimeWindow?.started_at ?? points.at(0)?.observed_at ?? null,
+    end: runtimeWindow?.available_ended_at ?? runtimeWindow?.ended_at ?? points.at(-1)?.observed_at ?? null,
+  }
+}
+
+function windowKindLabel(timeWindow: TimeWindow): string {
+  if (timeWindow === 'realtime') return '实时'
+  if (timeWindow === '24h') return '近 24h'
+  if (timeWindow === '7d') return '近 7d'
+  return '近 30d'
+}
+
 export function MonitoringDetailObservations({
   timeRangeControl,
   sample,
@@ -143,7 +158,6 @@ export function MonitoringDetailObservations({
   thresholds,
   loading,
   error,
-  snapshotReadAt,
   onRetryThresholds,
 }: ObservationsProps) {
   const gridRef = useRef<HTMLDivElement>(null)
@@ -219,8 +233,9 @@ export function MonitoringDetailObservations({
       point.disk_write_bytes_per_sec,
     ].some((value) => value != null && Number.isFinite(value)),
   ) ?? null
-  const readoutAt = hoveredAt ?? (timeWindow === 'realtime' ? lastPoint?.observed_at : lastFinitePoint?.observed_at) ?? null
-  const readoutKind = hoveredAt ? '选中' : timeWindow === 'realtime' ? '实时点' : '窗口末值'
+  const range = windowRange(runtimeWindow, ascending)
+  const hoverAt = hoveredAt
+  const liveAt = timeWindow === 'realtime' ? lastPoint?.observed_at ?? lastFinitePoint?.observed_at ?? null : null
 
   const netYMaxRaw = seriesMax([...netInSeries, ...netOutSeries])
   const netYMax = netYMaxRaw === undefined ? 1 : Math.max(netYMaxRaw * 1.1, 1)
@@ -338,16 +353,12 @@ export function MonitoringDetailObservations({
       <header className="monitoring-detail-section__head monitoring-detail-observations__head">
         <h2>资源趋势</h2>
         <div className="monitoring-detail-observations__toolbar">
-          <span className="monitoring-detail-observations__readout">
-            {readoutKind}{' '}
-            {readoutAt ? <Timestamp value={readoutAt} mode="absolute" /> : '—'}
-            {thresholds ? null : (
-              <>
-                {' · 阈值策略不可用 '}
-                <Button variant="ghost" size="sm" onClick={onRetryThresholds}>重试策略</Button>
-              </>
-            )}
-          </span>
+          {thresholds ? null : (
+            <span className="monitoring-detail-observations__readout">
+              阈值策略不可用{' '}
+              <Button variant="ghost" size="sm" onClick={onRetryThresholds}>重试策略</Button>
+            </span>
+          )}
           {timeRangeControl}
         </div>
       </header>
@@ -575,22 +586,28 @@ export function MonitoringDetailObservations({
         </Plot>
       </div>
       <p className="monitoring-detail-observations__footer">
-        {sample ? (
+        {windowKindLabel(timeWindow)}
+        {timeWindow !== 'realtime' && range.start && range.end ? (
           <>
-            当前样本 · 采样于{' '}
-            {snapshotReadAt ? (
-              <Timestamp value={sample.observed_at} mode="relative" now={snapshotReadAt} />
-            ) : (
-              <Timestamp value={sample.observed_at} mode="absolute" />
-            )}
-            {' · 已运行 '}
-            {formatSampledUptime(sample.uptime_seconds)}
-            {' · agent '}
-            <MonoDigits>{sample.agent_version || '—'}</MonoDigits>
+            {' · '}
+            <Timestamp value={range.start} mode="absolute" />
+            {' – '}
+            <Timestamp value={range.end} mode="absolute" />
           </>
-        ) : (
-          '当前样本 尚无'
-        )}
+        ) : timeWindow !== 'realtime' ? (
+          ' · 窗口区间未知'
+        ) : null}
+        {hoverAt ? (
+          <>
+            {' · 选中 '}
+            <Timestamp value={hoverAt} mode="absolute" />
+          </>
+        ) : liveAt ? (
+          <>
+            {' · 实时点 '}
+            <Timestamp value={liveAt} mode="absolute" />
+          </>
+        ) : null}
       </p>
     </section>
   )
