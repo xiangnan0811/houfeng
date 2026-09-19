@@ -146,6 +146,8 @@ describe('semantic interaction AST audit', () => {
     const result = repositoryAudit()
 
     expect(result.violations.map(formatEntry)).toEqual([])
-    expect(result.allowed.map(formatEntry)).toHaveLength(7)
+    // The allowlist stays finite and explicitly enumerated; the filter-select option
+    // row joined it as a keyboard-complete row.
+    expect(result.allowed.map(formatEntry)).toHaveLength(8)
   })
 })

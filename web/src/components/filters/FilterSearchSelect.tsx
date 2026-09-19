@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
 export type FilterSearchSelectOption = {
   value: string
@@ -231,28 +231,30 @@ export function FilterSearchSelect({
             {rows.map((row, index) => {
               const selectedRow = row.value == null ? value == null : row.value === value
               return (
-                <div
-                  key={row.value ?? 'all'}
-                  id={`${listId}-opt-${row.value ?? 'all'}`}
-                  role="option"
-                  className={[
-                    'filter-searchselect__option',
-                    selectedRow && 'is-selected',
-                    index === safeHighlight && 'is-active',
-                  ].filter(Boolean).join(' ')}
-                  aria-selected={selectedRow}
-                  onMouseEnter={() => setHighlight(index)}
-                  onClick={() => {
-                    onChange(row.value)
-                    setOpen(false)
-                    setQuery('')
-                    setHighlight(0)
-                    triggerRef.current?.focus()
-                  }}
-                >
-                  <span className="filter-searchselect__option-label">{row.label}</span>
-                  {row.hint ? <span className="filter-searchselect__option-hint">{row.hint}</span> : null}
-                </div>
+                <Fragment key={row.value ?? 'all'}>
+                  {/* a11y-allow-nonsemantic-click: keyboard-complete-row */}
+                  <div
+                    id={`${listId}-opt-${row.value ?? 'all'}`}
+                    role="option"
+                    className={[
+                      'filter-searchselect__option',
+                      selectedRow && 'is-selected',
+                      index === safeHighlight && 'is-active',
+                    ].filter(Boolean).join(' ')}
+                    aria-selected={selectedRow}
+                    onMouseEnter={() => setHighlight(index)}
+                    onClick={() => {
+                      onChange(row.value)
+                      setOpen(false)
+                      setQuery('')
+                      setHighlight(0)
+                      triggerRef.current?.focus()
+                    }}
+                  >
+                    <span className="filter-searchselect__option-label">{row.label}</span>
+                    {row.hint ? <span className="filter-searchselect__option-hint">{row.hint}</span> : null}
+                  </div>
+                </Fragment>
               )
             })}
             {options.length === 0 && !query.trim() ? (
