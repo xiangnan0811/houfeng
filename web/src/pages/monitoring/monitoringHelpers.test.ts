@@ -102,7 +102,7 @@ describe('monitoring list runtime summary helpers', () => {
   })
 
   it('formats sampled uptime without client clock increments and invalid/missing as em-dash', () => {
-    expect(formatSampledUptime(0)).toBe('0分钟')
+    expect(formatSampledUptime(0)).toBe('不足 1 分钟')
     expect(formatSampledUptime(3600)).toBe('1小时 0分钟')
     expect(formatSampledUptime(86400 * 3 + 7200)).toBe('3天 2小时')
     expect(formatSampledUptime(null)).toBe('—')

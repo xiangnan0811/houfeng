@@ -1731,6 +1731,10 @@ describe('MonitoringDetailPage', () => {
     expect(container.querySelectorAll('.monitoring-detail-chart').length).toBe(8)
     expect(container.querySelectorAll('.monitoring-detail-chart .metric-chart--empty').length).toBe(8)
     expect(screen.getByText('当前样本 尚无')).toBeInTheDocument()
+    const emptyFooter = container.querySelector('.monitoring-detail-observations__footer')?.textContent ?? ''
+    expect(emptyFooter).toMatch(/近 24h/)
+    expect(emptyFooter).not.toMatch(/\d{4}\//)
+    expect(emptyFooter).not.toContain('窗口区间未知')
   })
 
   it('says the window has no samples when every bucket is a gap', async () => {
@@ -1848,6 +1852,10 @@ describe('MonitoringDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByText('该窗口没有样本')).toBeInTheDocument(),
     )
+    expect(screen.getByRole('button', { name: '接入 agent…' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '升级/重新接入 agent…' })).not.toBeInTheDocument()
+    expect(screen.queryByText('心跳与采样已落后')).not.toBeInTheDocument()
+    expect(screen.queryByText('还没有来自这台主机的心跳')).not.toBeInTheDocument()
     // No incidents and no events: one quiet line, and 历史 stays reachable.
     expect(screen.getByText('暂无新的状态变更')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '历史' })).toBeInTheDocument()
@@ -2019,6 +2027,8 @@ describe('MonitoringDetailPage', () => {
     await waitFor(() => {
       expect(document.querySelector('.monitoring-detail-notice')?.textContent).toContain('活跃 1')
     })
+    expect(document.querySelector('.monitoring-detail-notice')?.textContent).toMatch(/已持续 \d+ 天/)
+    expect(document.querySelector('.monitoring-detail-notice')?.textContent).not.toMatch(/持续 .+\s前/)
     // The explicit primary issue summary wins over the incident summary.
     expect(screen.getByText('磁盘使用率偏高')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Singapore Edge' })).toBeInTheDocument()
@@ -2043,7 +2053,10 @@ describe('MonitoringDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('绑定冲突待确认')).toBeInTheDocument())
-    // The notice row is a plain line, not a card, and no longer duplicates the dialog.
+    const conflictNotice = document.querySelector('.monitoring-detail-notice')
+    expect(conflictNotice?.querySelector('.monitoring-detail-notice__actions')).toContainElement(
+      screen.getByRole('button', { name: '处置绑定冲突' }),
+    )
     expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument()
     expect(document.querySelectorAll('.metric-card').length).toBe(0)
     // The conflict is still controllable from the management menu.
@@ -3171,7 +3184,11 @@ describe('MonitoringDetailPage', () => {
     const notice = container.querySelector('.monitoring-detail-notice')!
     expect(notice.textContent).toContain('磁盘使用率持续超过阈值')
     expect(notice.textContent).toContain('活跃 3')
-    fireEvent.click(within(notice as HTMLElement).getByRole('button', { name: '事件' }))
+    expect(notice.className).toContain('monitoring-detail-notice--critical')
+    expect(notice.querySelector('.monitoring-detail-notice__actions')).toContainElement(
+      within(notice as HTMLElement).getByRole('button', { name: '查看事件' }),
+    )
+    fireEvent.click(within(notice as HTMLElement).getByRole('button', { name: '查看事件' }))
     expect(await screen.findByRole('dialog', { name: '监控实例历史抽屉' })).toBeInTheDocument()
   })
 

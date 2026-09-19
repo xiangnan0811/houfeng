@@ -67,8 +67,11 @@ export function seriesMax(series: MetricChartSample[]): number | undefined {
 
 export function seriesValueAt(series: MetricChartSample[], observedAt: string | null): number | null {
   if (!observedAt) {
-    const last = series.at(-1)
-    return last && isPresentValue(last.value) ? last.value : null
+    for (let index = series.length - 1; index >= 0; index -= 1) {
+      const point = series[index]
+      if (point && isPresentValue(point.value)) return point.value
+    }
+    return null
   }
   const target = new Date(observedAt).getTime()
   if (Number.isNaN(target) || series.length === 0) return null

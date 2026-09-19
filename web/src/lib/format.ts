@@ -66,7 +66,24 @@ export function formatUptime(seconds?: number | null) {
   const minutes = Math.floor((seconds % 3600) / 60)
   if (days > 0) return `${days}天 ${hours}小时`
   if (hours > 0) return `${hours}小时 ${minutes}分钟`
-  return `${minutes}分钟`
+  if (minutes > 0) return `${minutes}分钟`
+  return '不足 1 分钟'
+}
+
+/** Elapsed time from `value` to `now`, without a trailing 前. Invalid input is —. */
+export function formatElapsedSince(value?: string | Date | null, now: Date | number = Date.now()): string {
+  if (!value) return '—'
+  const start = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(start.getTime())) return '—'
+  const ref = now instanceof Date ? now : new Date(now)
+  const sec = Math.max(0, Math.round((ref.getTime() - start.getTime()) / 1000))
+  if (sec < 60) return '不足 1 分钟'
+  const min = Math.round(sec / 60)
+  if (min < 60) return `${min} 分钟`
+  const hr = Math.round(min / 60)
+  if (hr < 24) return `${hr} 小时`
+  const day = Math.round(hr / 24)
+  return `${day} 天`
 }
 
 export function formatLabelList(values?: string[] | null) {

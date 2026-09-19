@@ -131,13 +131,36 @@ function availabilityLine(timeWindow: TimeWindow, window?: MonitoringRuntimeWind
   return `${prefix} · ${window.sample_count} 个原始样本`
 }
 
+function pointHasFiniteMetric(point: HostMetricSeriesPoint): boolean {
+  return [
+    point.cpu_usage_pct,
+    point.mem_used_pct,
+    point.disk_used_pct,
+    point.inode_used_pct,
+    point.load_5,
+    point.load_1,
+    point.load_15,
+    point.swap_used_pct,
+    point.cpu_iowait_pct,
+    point.disk_busy_pct,
+    point.net_in_bytes_per_sec,
+    point.net_out_bytes_per_sec,
+    point.disk_read_bytes_per_sec,
+    point.disk_write_bytes_per_sec,
+  ].some((value) => value != null && Number.isFinite(value))
+}
+
 function windowRange(runtimeWindow: MonitoringRuntimeWindow | undefined, points: HostMetricSeriesPoint[]): {
   start: string | null
   end: string | null
 } {
+  const availableStart = runtimeWindow?.available_started_at ?? null
+  const availableEnd = runtimeWindow?.available_ended_at ?? null
+  if (availableStart && availableEnd) return { start: availableStart, end: availableEnd }
+  const present = points.filter(pointHasFiniteMetric)
   return {
-    start: runtimeWindow?.available_started_at ?? runtimeWindow?.started_at ?? points.at(0)?.observed_at ?? null,
-    end: runtimeWindow?.available_ended_at ?? runtimeWindow?.ended_at ?? points.at(-1)?.observed_at ?? null,
+    start: present.at(0)?.observed_at ?? null,
+    end: present.at(-1)?.observed_at ?? null,
   }
 }
 
@@ -215,24 +238,7 @@ export function MonitoringDetailObservations({
 
   const pointCount = ascending.length
   const lastPoint = ascending.at(-1) ?? null
-  const lastFinitePoint = [...ascending].reverse().find((point) =>
-    [
-      point.cpu_usage_pct,
-      point.mem_used_pct,
-      point.disk_used_pct,
-      point.inode_used_pct,
-      point.load_5,
-      point.load_1,
-      point.load_15,
-      point.swap_used_pct,
-      point.cpu_iowait_pct,
-      point.disk_busy_pct,
-      point.net_in_bytes_per_sec,
-      point.net_out_bytes_per_sec,
-      point.disk_read_bytes_per_sec,
-      point.disk_write_bytes_per_sec,
-    ].some((value) => value != null && Number.isFinite(value)),
-  ) ?? null
+  const lastFinitePoint = [...ascending].reverse().find(pointHasFiniteMetric) ?? null
   const range = windowRange(runtimeWindow, ascending)
   const hoverAt = hoveredAt
   const liveAt = timeWindow === 'realtime' ? lastPoint?.observed_at ?? lastFinitePoint?.observed_at ?? null : null
@@ -594,7 +600,7 @@ export function MonitoringDetailObservations({
             {' – '}
             <Timestamp value={range.end} mode="absolute" />
           </>
-        ) : timeWindow !== 'realtime' ? (
+        ) : timeWindow !== 'realtime' && !showEmptyLine ? (
           ' · 窗口区间未知'
         ) : null}
         {hoverAt ? (

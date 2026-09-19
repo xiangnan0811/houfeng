@@ -275,7 +275,7 @@ describe('MonitoringDetailPage source semantics', () => {
     await waitFor(() => expect(screen.getByText('运行指标不可用。')).toBeInTheDocument())
     // The sample itself is independent of the failed window and stays readable.
     expect(screen.getByText(/已运行 1小时 0分钟/)).toBeInTheDocument()
-    expect(screen.getByText(/采样/)).toBeInTheDocument()
+    expect(document.querySelector('.monitoring-detail-status__sample')).toHaveTextContent(/采样/)
     expect(screen.getByRole('button', { name: '重试运行指标' })).toBeInTheDocument()
   })
 
@@ -379,6 +379,21 @@ describe('MonitoringDetailPage source semantics', () => {
     expect(heartbeat).not.toContain('数据陈旧')
   })
 
+  it('marks stale heartbeat copy in the status band', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_001') {
+        return mockJSONResponse(record({ last_heartbeat_at: '2026-04-24T09:00:00Z' }))
+      }
+      if (path.includes('/runtime-facts')) return mockJSONResponse(facts('24h'))
+      return mockJSONResponse([])
+    }))
+    const { container } = renderPage()
+    await waitFor(() => expect(screen.getAllByText(/数据陈旧/).length).toBeGreaterThan(0))
+    expect(container.querySelector('.monitoring-detail-status__stale')).toHaveTextContent('数据陈旧')
+    expect(container.querySelector('.monitoring-detail-notice--notice')).toHaveTextContent('心跳与采样已落后')
+  })
+
   it('does not copy sample time onto heartbeat when heartbeat is missing', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
@@ -389,7 +404,7 @@ describe('MonitoringDetailPage source semantics', () => {
       return mockJSONResponse([])
     }))
     const { container } = renderPage()
-    await waitFor(() => expect(screen.getByText(/未收到心跳/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText(/未收到心跳/).length).toBeGreaterThan(0))
     // The sample time is not copied onto the heartbeat.
     const heartbeat = container.querySelector('.monitoring-detail-status__heartbeat')?.textContent ?? ''
     expect(heartbeat).toContain('未收到心跳')

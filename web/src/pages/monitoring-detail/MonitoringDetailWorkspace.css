@@ -175,39 +175,94 @@
   white-space: nowrap;
 }
 
+.monitoring-detail-status__stale {
+  color: var(--color-state-notice);
+}
+
 /* ===== Notification rows ===== */
 
 .monitoring-detail-notices {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
 .monitoring-detail-notice {
+  --monitoring-detail-notice-accent: var(--color-state-alert);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
+  gap: 8px 12px;
+  width: 100%;
   min-width: 0;
-  padding-left: 12px;
-  border-left: 2px solid var(--err);
+  padding: 10px 14px;
+  border: var(--border-w) solid color-mix(in srgb, var(--monitoring-detail-notice-accent) 38%, var(--border));
+  border-left-width: 4px;
+  border-left-color: var(--monitoring-detail-notice-accent);
+  border-radius: var(--radius-2);
+  background: color-mix(in srgb, var(--monitoring-detail-notice-accent) 16%, var(--surface));
 }
 
-.monitoring-detail-notice > .btn,
-.monitoring-detail-notice > .text-link {
-  margin-left: auto;
+.monitoring-detail-notice--critical {
+  --monitoring-detail-notice-accent: var(--color-state-critical);
+}
+
+.monitoring-detail-notice--alert {
+  --monitoring-detail-notice-accent: var(--color-state-alert);
+}
+
+.monitoring-detail-notice--notice {
+  --monitoring-detail-notice-accent: var(--color-state-notice);
+}
+
+.monitoring-detail-notice--maintenance {
+  --monitoring-detail-notice-accent: var(--color-state-maintenance);
+}
+
+.monitoring-detail-notice--offline {
+  --monitoring-detail-notice-accent: var(--color-state-offline);
+}
+
+.monitoring-detail-notice__copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(100% - 9rem);
+}
+
+.monitoring-detail-notice__mark {
+  flex: 0 0 auto;
+  color: var(--monitoring-detail-notice-accent);
+  font-size: var(--monitoring-detail-helper-size);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
 }
 
 .monitoring-detail-notice__text {
   min-width: 0;
   color: var(--text-primary);
-  font-size: var(--monitoring-detail-body-size);
+  font-size: var(--monitoring-detail-module-size);
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .monitoring-detail-notice__detail {
   color: var(--text-secondary);
   font-size: var(--monitoring-detail-helper-size);
+  line-height: 1.4;
+}
+
+.monitoring-detail-notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
 /* ===== Section head toolbar (time readout + the page's window control) ===== */

@@ -380,6 +380,9 @@ export function MonitoringDetailPageBody({
         onRetryBindingConflict={onRetryBindingConflict}
         onOpenBindingConflict={() => setBindingDialogOpen(true)}
         onOpenIncidentHistory={() => onOpenHistory('incidents')}
+        heartbeatFreshness={heartbeatFreshness}
+        snapshotReadAt={snapshotReadAt}
+        sample={sample}
       />
 
       <MonitoringDetailObservations

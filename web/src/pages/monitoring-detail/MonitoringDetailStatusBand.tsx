@@ -29,7 +29,7 @@ function heartbeatEvidence(
       ) : (
         <Timestamp value={at} mode="absolute" />
       )}
-      {freshness?.kind === 'stale' ? ' · 数据陈旧' : null}
+      {freshness?.kind === 'stale' ? <span className="monitoring-detail-status__stale"> · 数据陈旧</span> : null}
       {freshness?.kind === 'policy-unavailable' ? ' · 新鲜度策略不可用' : null}
     </>
   )
