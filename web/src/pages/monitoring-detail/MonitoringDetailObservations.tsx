@@ -83,8 +83,8 @@ function Plot({
         <h3 className="monitoring-detail-chart__title" title={hint} aria-label={`${title}。${hint}`}>
           {title}
         </h3>
-        {legend}
         <span className="monitoring-detail-chart__current">{current}</span>
+        {legend}
       </header>
       {children}
       {notes ? <dl className="monitoring-detail-chart__notes" title={notesTitle}>{notes}</dl> : null}
@@ -272,9 +272,7 @@ export function MonitoringDetailObservations({
   const swapReadout = seriesValueAt(swapSeries, hoveredAt)
   const diskReadout = seriesValueAt(diskSeries, hoveredAt)
   const inodeReadout = seriesValueAt(inodeSeries, hoveredAt)
-  const load1Readout = seriesValueAt(load1Series, hoveredAt)
   const loadReadout = seriesValueAt(loadSeries, hoveredAt)
-  const load15Readout = seriesValueAt(load15Series, hoveredAt)
   const iowaitReadout = seriesValueAt(iowaitSeries, hoveredAt)
   const diskBusyReadout = seriesValueAt(diskBusySeries, hoveredAt)
   const netInReadout = seriesValueAt(netInSeries, hoveredAt)
@@ -456,9 +454,7 @@ export function MonitoringDetailObservations({
           )}
           current={
             <span className={`monitoring-detail-chart__value monitoring-detail-chart__value--${toneFor(loadReadout, thresholds?.load5)}`}>
-              <MonoDigits>
-                {formatNumber(loadReadout)} · 1′ {formatNumber(load1Readout)} · 15′ {formatNumber(load15Readout)}
-              </MonoDigits>
+              <MonoDigits>{formatNumber(loadReadout)}</MonoDigits>
             </span>
           }
         >

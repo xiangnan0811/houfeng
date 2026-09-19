@@ -250,6 +250,16 @@
   scroll-margin-top: var(--monitoring-detail-topbar-offset);
 }
 
+/* Charts sit on the page ground. A second filled box around the wells
+ * washes out in light theme (muted well = page --bg). */
+.monitoring-detail-observations.monitoring-detail-section {
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 .monitoring-detail-section > h2,
 .monitoring-detail-section__head h2 {
   margin: 0;
@@ -290,13 +300,14 @@
 }
 
 .monitoring-detail-route .metric-chart__axis-text {
-  font-size: var(--monitoring-detail-helper-size);
+  font-size: 11px;
+  fill: var(--text-secondary);
 }
 
 .monitoring-detail-charts {
   --monitoring-detail-chart-h: 168px;
   display: grid;
-  gap: 10px;
+  gap: 8px;
   align-items: stretch;
   container-type: inline-size;
   min-width: 0;
@@ -316,21 +327,22 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
-/* Recessed instrument well: inset from the section surface, not a floating
- * SaaS card and not an unframed plot. The 2px top edge carries state. */
+/* Instrument plate on the page ground. Light: white on #F3F5F4 with a
+ * real --border, not a gray well that matches the canvas. Dark: lifted
+ * --surface on --bg. The 2px top edge is the only state chrome. */
 .monitoring-detail-chart {
   --monitoring-detail-plot-h: var(--monitoring-detail-chart-h);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   min-height: 0;
-  padding: 10px 12px 8px;
-  border: var(--border-w) solid var(--border-muted);
+  padding: 8px 10px 6px;
+  border: var(--border-w) solid var(--border);
   border-top-width: 2px;
-  border-top-color: var(--border-muted);
-  border-radius: 8px;
-  background: var(--panel-bg-muted);
+  border-top-color: var(--border);
+  border-radius: var(--radius-2);
+  background: var(--surface);
 }
 
 .monitoring-detail-chart--notice { border-top-color: var(--color-state-notice); }
@@ -343,41 +355,52 @@
 }
 
 .monitoring-detail-chart__head {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 2px;
   min-width: 0;
 }
 
 .monitoring-detail-chart__title {
+  grid-column: 1;
   margin: 0;
-  flex: 0 0 auto;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: var(--monitoring-detail-helper-size);
   font-weight: 600;
   line-height: 1.3;
   white-space: nowrap;
 }
 
+.monitoring-detail-chart__current {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  text-align: right;
+}
+
 .monitoring-detail-chart__legend {
+  grid-column: 1 / -1;
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 10px;
   color: var(--text-secondary);
   font-size: 11px;
+  line-height: 1.2;
 }
 
 .monitoring-detail-chart__legend-item {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
 
 .monitoring-detail-chart__legend-swatch {
   display: inline-block;
-  width: 10px;
-  height: 2px;
+  width: 12px;
+  height: 3px;
   border-radius: 1px;
 }
 
@@ -390,26 +413,19 @@
 }
 
 .monitoring-detail-chart__legend-swatch--tertiary {
-  background: repeating-linear-gradient(
-    90deg,
-    var(--text-secondary) 0 4px,
-    transparent 4px 7px
-  );
+  height: 0;
+  border-top: 2px dashed var(--text-secondary);
+  background: none;
+  border-radius: 0;
 }
 
 .monitoring-detail-chart__legend-swatch--maintenance {
   background: var(--color-state-maintenance);
 }
 
-.monitoring-detail-chart__current {
-  margin-left: auto;
-  min-width: 0;
-  text-align: right;
-}
-
 .monitoring-detail-chart__value {
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
@@ -453,14 +469,14 @@
 }
 
 .monitoring-detail-chart__note dt {
-  color: var(--text-muted);
-  font-size: var(--monitoring-detail-helper-size);
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 .monitoring-detail-chart__note dd {
   margin: 0;
-  color: var(--text-secondary);
-  font-size: var(--monitoring-detail-helper-size-strong);
+  color: var(--text-primary);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
